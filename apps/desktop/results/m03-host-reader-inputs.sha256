@@ -1,0 +1,11 @@
+b1f38a000c312ada0d9c91141afe45aab7c28c1a75694be9afc1772ce3fb3bb2  apps/desktop/src-tauri/src/lib.rs
+448090a836637c4c475330c766923961eaff4f671141dda9f069f6cfc5eebf92  apps/desktop/src-tauri/src/job_sidecar.rs
+2eb6b7255186cd262e8b1b6780d119c1c33e52bf54a7c60854cf8089121ac196  apps/desktop/src-tauri/Cargo.toml
+fcdf448e2f70a0fefbcb7bf58784930ebedc82e89a72fd14c67368868f57d895  apps/desktop/src-tauri/Cargo.lock
+8a83ac96581161b82a35f8ea7d1d6811c161750f730d738bde16b10be6ae51ca  apps/desktop/src-tauri/tauri.conf.json
+8b4f7ed514dbe997ec03b093b6e314e3f433c61eedfd9743bc8fa02b50c47f0e  apps/desktop/scripts/build-release.ps1
+e11acfe06436898bf536ee77e472516275496afb50d78df32eff921d7de66748  apps/desktop/scripts/test-job-in-outer-job.ps1
+571205b24af0e2dbb4886276115588efecdbd612e4c789a3de18012d433ef000  apps/desktop/scripts/test-host-crash-job.ps1
+3ccc21927aed44c64c592a80e38b609a5ca6983f4e0b6ee0004d92995c8882f1  docs/deployment/local-deployment.md
+ba4e6d110e8c1592a1ecd390f6b05f3da124b13871a5be62b341a07a853c6c32  .research/runtime-cache/node-v24.21.0-win-x64/node.exe
+9350ec7d6cf61cde6fd940026d303c7221c54002ee702e210b19faa819bb7372  apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/debug/deps/relay_desktop-707720d95ada5241.exe

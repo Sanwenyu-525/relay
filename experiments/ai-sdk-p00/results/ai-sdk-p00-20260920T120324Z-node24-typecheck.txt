@@ -1,0 +1,4 @@
+Command: node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json
+Runtime: Node.js v24.21.0 (D:/Develop/Relay-Agent/.research/runtime-cache/node-v24.21.0-win-x64/node.exe)
+Exit code: 0
+

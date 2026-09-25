@@ -1,0 +1,9 @@
+{
+    "session_id":  "38ea6b1e2fa54c29824bf2401cc645d7",
+    "mode":  "KillHostAndAssertJob",
+    "original_host_pid":  29836,
+    "original_node_pid":  13120,
+    "host_alive_after_wait":  false,
+    "node_alive_after_wait":  false,
+    "passed":  true
+}

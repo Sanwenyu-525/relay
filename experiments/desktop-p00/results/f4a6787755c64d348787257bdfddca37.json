@@ -1,0 +1,73 @@
+{
+  "artifact": "src-tauri/target/release/relay-desktop-p00.exe",
+  "artifact_sha256": "2ea1b41b55e8094b84c385ff6296b7451b3ba3667d8c582f8b5f004187db1fcc",
+  "artifact_kind": "release executable directory package (tauri build --no-bundle); not MSI or NSIS",
+  "bundled_node": {
+    "path": "src-tauri/target/release/node.exe",
+    "version": "v24.21.0"
+  },
+  "bundled_resource_sha256": {
+    "fake-worker.mjs": "5a56d95e6afce43b310ea08230c3ce4100428c2b3470874e53d929a87ffee55a",
+    "node.exe": "ba4e6d110e8c1592a1ecd390f6b05f3da124b13871a5be62b341a07a853c6c32",
+    "sidecar.mjs": "2a4131554bcdb34921b0317039796849fd12f468072120ff316a637a5d35decf"
+  },
+  "environment": {
+    "architecture": "64 位",
+    "webview2_version": "153.0.4234.48",
+    "windows_build": "22631",
+    "windows_caption": "Microsoft Windows 11 家庭中文版",
+    "windows_version": "10.0.22631"
+  },
+  "native_process_id": 17968,
+  "native_window": {
+    "handle": 5838524,
+    "title": "Relay P00 Desktop — Tauri WebView"
+  },
+  "process_exit_code": 0,
+  "residual_bundled_node_count": 0,
+  "sidecar": {
+    "dynamic_loopback_port": true,
+    "fake_worker_ready": true,
+    "node_resource_resolved": true,
+    "run_id": "f4a6787755c64d348787257bdfddca37",
+    "sidecar_node_version": "v24.21.0",
+    "sidecar_graceful_exit": true,
+    "sidecar_reaped": true,
+    "status": "AWAITING_PARENT_EXIT",
+    "verification": {
+      "bad_host_status": 421,
+      "bad_origin_status": 403,
+      "no_token_status": 401
+    },
+    "webview_reloaded_handshake": true
+  },
+  "status": "PASSED",
+  "run_id": "f4a6787755c64d348787257bdfddca37",
+  "input_sha256": {
+    ".gitignore": "e3f57aa9581f7d40b82f59305c583c3330577b3ecfd248a2befec67f5a721727",
+    "README.md": "b6fd7eee4d1590b794bcc66cddf18802d9ef0c3ef68361c0a0c8b657cf81ac87",
+    "package.json": "9c7b3f6916affa02d72f2c5a43a4a2d2ae2cbc89ee610323fa71e28aa2cda14f",
+    "pnpm-lock.yaml": "fe8a1925c9cbb35cd5ff1ae01c0b8b3128a50708b10380a3245a9e9bf5c3af10",
+    "tsconfig.json": "f938c5db9a857411a89335dcfb61fef17654eafdca80dc8f8bf96ef975b97990",
+    "vite.config.ts": "ec1f19963c9c0c054b31a14171f3790a65f42f937db047a182e1b0f31188e932",
+    "index.html": "c702765c7bbffd528f5284c7455d04d6fef8d48b9c81973c390781a98cd411df",
+    "src/main.ts": "0394f20ab9316f18d81fa08c751815db63175728a67be73b3a0a5e786127f821",
+    "src/App.vue": "2cb1f08033a56d12093aa6ed465ac01b72a28658dea9edfe24b6d87a5ea488c4",
+    "src/style.css": "4483ba1a360b4d726b6ed99eca1ca857b903fef868260771e47fee5348234552",
+    "scripts/prepare-resources.ps1": "94d4e11a062bb623904f2e42546058038ffdf8fab0c58addb722687cdb145c73",
+    "scripts/build-release.ps1": "fe15c09875d97359ec8428e2b463add24a04c25ad81e631089abb2ccd443db7d",
+    "scripts/run-release.ps1": "bf97eadee89b6488bb689a652df3c3173521c0a806e1aa4a21dce651b17a201d",
+    "src-tauri/Cargo.toml": "9d9c0554b1826d95971b3ed0936f235b7562aceed6d39238d5c54fa7375f8e03",
+    "src-tauri/Cargo.lock": "7ab244d166b9b4ab3f4997fd4bdc163458519fc9953b4c402c80129821e1bfd0",
+    "src-tauri/build.rs": "b01bb80b64916f502a3033afdb4567227ef2abcc3b938889f02283aefa780fbe",
+    "src-tauri/tauri.conf.json": "fa58515d7eabccf406bc36dc598dd89e61a74b33381865c205ac80db0e92fbcd",
+    "src-tauri/capabilities/default.json": "d712af6070e6875cf00db4a1fbe8b89d4985dfba8cdd6bb091789dc52006b847",
+    "src-tauri/src/main.rs": "9de27a02bfcfcba6e28eb164093ba07226847c4e947db964904c76dc42917f0f",
+    "src-tauri/src/lib.rs": "ca6a690f757b621635204820523c545ce67ce3ffc0098b1306e970adf43a00ee",
+    "src-tauri/resources/sidecar.mjs": "2a4131554bcdb34921b0317039796849fd12f468072120ff316a637a5d35decf",
+    "src-tauri/resources/fake-worker.mjs": "5a56d95e6afce43b310ea08230c3ce4100428c2b3470874e53d929a87ffee55a",
+    "src-tauri/resources/node.exe": "ba4e6d110e8c1592a1ecd390f6b05f3da124b13871a5be62b341a07a853c6c32",
+    "src-tauri/icons/icon.ico": "fa2519ba00f708d4e17832ff95815af85e364930901403b938255bd2378accbf"
+  },
+  "source_revision": "unavailable: repository has no Git HEAD at run time"
+}

@@ -1,0 +1,22 @@
+[
+  {
+    "Path": "D:\\Develop\\Relay-Agent\\apps\\api\\migrations\\0001_v001_human_core.sql",
+    "Hash": "C32CBA117D2D2C604E4B6BFB3B88735A51067022D96DE7C464617B65187B6F1D"
+  },
+  {
+    "Path": "D:\\Develop\\Relay-Agent\\apps\\api\\migrations\\0002_p02_task_goal_alignment.sql",
+    "Hash": "BF615D2272EF03275C01E42246FDB9B9CEB1D99E3E9C0166E9100963A0C17E00"
+  },
+  {
+    "Path": "D:\\Develop\\Relay-Agent\\apps\\api\\migrations\\0003_schema_readiness.sql",
+    "Hash": "926B6C78DFB7537C6295DDBC8B021121E62647C710F259C8655C0046FE167E87"
+  },
+  {
+    "Path": "D:\\Develop\\Relay-Agent\\apps\\api\\migrations\\0004_v002_runs.sql",
+    "Hash": "06ECF305C24D36FBE25E7CCD71F9BE2244C6B177411F561992236B8BD1C7A6FA"
+  },
+  {
+    "Path": "D:\\Develop\\Relay-Agent\\apps\\api\\migrations\\0005_v002_verification.sql",
+    "Hash": "BE419A32B63754E609B646FDA5EF819C81E800DF80EE34515F617A170A5D16DA"
+  }
+]

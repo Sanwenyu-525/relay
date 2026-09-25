@@ -1,0 +1,111 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-e4699b7fb1
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-e4699b7fb1/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-e4699b7fb1^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 30336)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-e4699b7fb1/cluster" "-h" "127.0.0.1" "-p" "7214"
+DO
+CREATE DATABASE
+Test database: relay_api_test_dddf9527928e on 127.0.0.1:7214 (roles relay_migrator / relay_app)
+{
+  "applied": [
+    "0001_v001_human_core",
+    "0002_p02_task_goal_alignment",
+    "0003_schema_readiness",
+    "0004_v002_runs",
+    "0005_v002_verification",
+    "0006_v002_reviews",
+    "0007_v003_recovery_control",
+    "0008_v003_gateway",
+    "0009_v004_information_rules",
+    "0010_v005_context_revision",
+    "0011_m03_run_dispatch",
+    "0012_m03_run_events",
+    "0013_m03_run_command_order"
+  ],
+  "already_applied": [],
+  "ledger_rows": 13
+}
+{"schema":"relay_graph_v1","ready":true}
+✖ lists only the visible Task artifact history and its current accepted versions (1216.4965ms)
+✔ creates a managed markdown version that is complete on disk and readable through the API (46.1973ms)
+✔ rejects an unsupported media type with 415 and oversized content with 413 (59.6472ms)
+✔ rejects user-supplied paths, non-uuid ids and cross-scope artifact reads (55.1662ms)
+✔ appends a new immutable version without overwriting the previous one (52.6042ms)
+✔ completes a task against a fixed version and never marks the newer version as accepted (73.0242ms)
+✔ completes a task that requires no artifacts with an empty version set (20.7118ms)
+✔ requires declared outputs to be covered and required human criteria to be confirmed (79.4458ms)
+✔ reopens with a new acceptance revision, keeps history and blocks new uploads until started again (73.3413ms)
+✔ replaying an old completion command after reopen returns the historical receipt only (48.0738ms)
+✔ keeps reopened completion history but removes only that cycle from the current State projection (84.8149ms)
+✔ lets only one of two concurrent completion commands win the cycle (100.0424ms)
+✔ serializes SET_NEXT_ACTION and reopen in Task → ProjectState order without a deadlock (1740.6006ms)
+✔ rolls the whole completion transaction back when the state delta fails and converges on retry (199.9161ms)
+✔ rolls the whole reopen transaction back when the State revision update fails and converges on replay (179.501ms)
+✔ leaves a reconcilable orphan content file when the version row cannot be registered (172.677ms)
+✔ refuses completion when the accepted evidence file is missing or tampered (86.0173ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 16
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 14917.9312
+
+✖ failing tests:
+
+test at dist\test\integration\api-artifacts.integration.test.js:325:1
+✖ lists only the visible Task artifact history and its current accepted versions (1216.4965ms)
+  AssertionError [ERR_ASSERTION]: unexpected code: {"type":"/problems/auth-required","title":"需要本机凭据","status":401,"detail":"该端点需要当前服务实例的 Bearer 凭据。","instance":"/requests/req-832df7a5-8189-475c-8f6c-a754c0a1b4f1","code":"AUTH_REQUIRED","request_id":"req-832df7a5-8189-475c-8f6c-a754c0a1b4f1","retryable":false,"retry_action":"NONE"}
+  + actual - expected
+  
+  + 'AUTH_REQUIRED'
+  - 'UNAUTHORIZED'
+  
+      at expectProblem (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/api-harness.js:184:12)
+      at TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/api-artifacts.integration.test.js:374:5)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'AUTH_REQUIRED',
+    expected: 'UNAUTHORIZED',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+waiting for server to shut down..... done
+server stopped
+--- integration summary ---
+tests exit code: 1
+build exit code: 0
+business migration exit code: 0
+graph install exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: FAILED

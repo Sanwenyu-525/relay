@@ -1,0 +1,56 @@
+// Appended to the helper-only prefix of the compiled run-graph integration test.
+// Expected invariant: a changed Manifest payload with the old manifest_hash
+// cannot authorize the frozen Fake action after an ASK review is approved.
+test('PROBE: changed CONTRACT source content with old Manifest hash denies Fake write', async () => {
+  const f = await fixture(true);
+  let migration;
+  try {
+    const action = await delegatedGatewayRun(f);
+    const prepared = await runOneCommand(f.app.db, {
+      workerId: `worker:${randomUUID()}`, dataRoot: f.api.dataRoot,
+      checkpointUrl: f.database.appUrl,
+    });
+    assert.equal(prepared?.outcome, 'DONE', 'ASK wait must be durable');
+    migration = openDatabase(f.database.migrationUrl, 'relay-m03-independent-hash-probe');
+    const initial = await sql`select payload, encode(manifest_hash, 'hex') as manifest_hash
+      from context_manifests where run_id = ${action.runId}`.execute(f.app.db);
+    assert.equal(initial.rows.length, 1);
+    const payload = JSON.parse(JSON.stringify(initial.rows[0].payload));
+    const source = payload.sources.find((item) => item.kind === 'CONTRACT');
+    assert.ok(source, 'mandatory CONTRACT source exists');
+    source.content += '\nINDEPENDENT_INTEGRITY_PROBE_TAMPER';
+    await sql`update context_manifests set payload = ${JSON.stringify(payload)}::jsonb
+      where run_id = ${action.runId}`.execute(migration.db);
+    const changed = await sql`select payload, encode(manifest_hash, 'hex') as manifest_hash
+      from context_manifests where run_id = ${action.runId}`.execute(f.app.db);
+    const recomputed = createHash('sha256').update(canonicalizeJson(changed.rows[0].payload)).digest('hex');
+    assert.equal(changed.rows[0].manifest_hash, initial.rows[0].manifest_hash,
+      'database Manifest hash remains the original');
+    assert.notEqual(recomputed, initial.rows[0].manifest_hash,
+      'persisted payload no longer matches the frozen hash');
+    await decideAction(f, action.operationId, 'APPROVE');
+    const delivered = await runOneCommand(f.app.db, {
+      workerId: `worker:${randomUUID()}`, dataRoot: f.api.dataRoot,
+      checkpointUrl: f.database.appUrl,
+    });
+    const markerExists = await readFile(action.target, 'utf8').then(() => true,
+      (error) => { if (error.code === 'ENOENT') return false; throw error; });
+    const operation = await sql`select o.status, count(i.id)::bigint as invocation_count
+      from logical_operations o left join invocation_attempts i on i.operation_id = o.id
+      where o.id = ${action.operationId} group by o.id`.execute(f.app.db);
+    const run = await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`));
+    console.log('PROBE_OBSERVED', JSON.stringify({
+      stored_hash: changed.rows[0].manifest_hash, recomputed_hash: recomputed,
+      delivered_outcome: delivered?.outcome ?? null,
+      marker_exists: markerExists,
+      operation_status: operation.rows[0]?.status,
+      invocation_count: Number(operation.rows[0]?.invocation_count ?? -1),
+      run_status: run.body.status,
+    }));
+    assert.equal(markerExists, false, 'changed Manifest payload must prevent Fake write');
+    assert.deepEqual(operation.rows[0], { status: 'DENIED', invocation_count: 0n });
+  } finally {
+    await migration?.close();
+    await f.close();
+  }
+});

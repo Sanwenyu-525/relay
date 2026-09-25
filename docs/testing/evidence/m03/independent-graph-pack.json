@@ -1,0 +1,656 @@
+[
+  {
+    "id": "@relay-agent/api@0.0.0",
+    "name": "@relay-agent/api",
+    "version": "0.0.0",
+    "size": 197122,
+    "unpackedSize": 882627,
+    "shasum": "406f27a35527027c4470c92055e423a46b415603",
+    "integrity": "sha512-0AIw5csuMqs/yhqSrGOBc72wkb3aTTwDXTeHf6lJb+EAIknHOf8Id6JMQbzPlGGcrC3wtLnv5PHTgPViGxv3zQ==",
+    "filename": "relay-agent-api-0.0.0.tgz",
+    "files": [
+      {
+        "path": "dist/src/api/artifact-api.js",
+        "size": 4531,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/boundary.js",
+        "size": 2330,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/command-api.js",
+        "size": 2252,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/completion-api.js",
+        "size": 2725,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/context-api.js",
+        "size": 1378,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/cursor.js",
+        "size": 2971,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/domain-schemas.js",
+        "size": 26248,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/envelope.js",
+        "size": 7973,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/gateway-api.js",
+        "size": 13370,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/information-api.js",
+        "size": 14590,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/problem.js",
+        "size": 5817,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/project-api.js",
+        "size": 6325,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/review-api.js",
+        "size": 2839,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/routes.js",
+        "size": 3913,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/run-api.js",
+        "size": 5320,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/run-events-api.js",
+        "size": 5498,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/schemas.js",
+        "size": 1878,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/server.js",
+        "size": 4527,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/state-api.js",
+        "size": 2265,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/api/task-api.js",
+        "size": 13248,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/actor.js",
+        "size": 716,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/artifact-commands.js",
+        "size": 12505,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/artifact-queries.js",
+        "size": 3359,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/command.js",
+        "size": 3136,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/complete-run.js",
+        "size": 9205,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/completion-commands.js",
+        "size": 17235,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/context-builder.js",
+        "size": 11310,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/context-queries.js",
+        "size": 6958,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/control-requests.js",
+        "size": 14238,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/create-goal.js",
+        "size": 2474,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/create-project.js",
+        "size": 2662,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/create-task.js",
+        "size": 8607,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/declared-output-requirements.js",
+        "size": 3285,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/delegate-task.js",
+        "size": 14051,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/domain-error.js",
+        "size": 9940,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/gateway-actions.js",
+        "size": 44087,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/gateway-commands.js",
+        "size": 13680,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/gateway-configuration.js",
+        "size": 9578,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/gateway-queries.js",
+        "size": 6364,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/guards.js",
+        "size": 3449,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/information-commands.js",
+        "size": 20525,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/information-queries.js",
+        "size": 9934,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/initialize-workspace.js",
+        "size": 1915,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/lock-task-run.js",
+        "size": 868,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/project-goal-links.js",
+        "size": 8064,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/project-queries.js",
+        "size": 2407,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/recover-run.js",
+        "size": 7687,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/request-review.js",
+        "size": 6255,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/review-decisions.js",
+        "size": 23082,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/review-queries.js",
+        "size": 4065,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/review-requests.js",
+        "size": 4573,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/revisions.js",
+        "size": 1360,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/rule-fence.js",
+        "size": 876,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/run-dispatch.js",
+        "size": 4271,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/run-queries.js",
+        "size": 4011,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/run-steps.js",
+        "size": 55824,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/state-action.js",
+        "size": 4661,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/state-commands.js",
+        "size": 8107,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/state-queries.js",
+        "size": 4474,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/task-commands.js",
+        "size": 23782,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/task-queries.js",
+        "size": 5819,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/task-readiness.js",
+        "size": 3523,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/unit-of-work.js",
+        "size": 2227,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/application/verify-run.js",
+        "size": 10319,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/artifact/artifact-repository.js",
+        "size": 4985,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/audit/activity-record-repository.js",
+        "size": 1380,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/cli/cli-support.js",
+        "size": 1528,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/cli/init-workspace.js",
+        "size": 2746,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/cli/install-graph.js",
+        "size": 538,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/cli/migrate.js",
+        "size": 1278,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/completion/completion-repository.js",
+        "size": 2930,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/config/config.js",
+        "size": 8270,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/desktop/child.js",
+        "size": 4425,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/gateway/gateway-repository.js",
+        "size": 15934,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/information/information-repository.js",
+        "size": 8203,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/infrastructure/database-schema.js",
+        "size": 11,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/infrastructure/database.js",
+        "size": 1723,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/infrastructure/graph-checkpoints.js",
+        "size": 3982,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/infrastructure/json.js",
+        "size": 11,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/infrastructure/migration-runner.js",
+        "size": 6278,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/infrastructure/pg-types.js",
+        "size": 425,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/infrastructure/postgres-error.js",
+        "size": 622,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/infrastructure/schema-readiness.js",
+        "size": 1683,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/main.js",
+        "size": 6463,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/project/project-phase.js",
+        "size": 807,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/project/project-repository.js",
+        "size": 13275,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/receipt/command-receipt-repository.js",
+        "size": 1534,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/receipt/payload-hash.js",
+        "size": 3290,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/review/review-repository.js",
+        "size": 5074,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/run/recovery-repository.js",
+        "size": 6603,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/run/run-dispatch-repository.js",
+        "size": 12732,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/run/run-event-repository.js",
+        "size": 877,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/run/run-repository.js",
+        "size": 15260,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/shared/decimal.js",
+        "size": 334,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/shared/field-error.js",
+        "size": 11,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/shared/sql-rows.js",
+        "size": 308,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/shared/text.js",
+        "size": 2026,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/storage/managed-content-store.js",
+        "size": 7842,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/task/task-repository.js",
+        "size": 17266,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/verification/verification-repository.js",
+        "size": 8245,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/worker/desktop-supervisor-protocol.js",
+        "size": 1945,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/worker/main.js",
+        "size": 5652,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/worker/run-command.js",
+        "size": 3290,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/worker/run-graph.js",
+        "size": 7236,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/worker/supervisor-main.js",
+        "size": 11542,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/worker/supervisor.js",
+        "size": 6894,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/workflow/check-plan.js",
+        "size": 5535,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/workflow/checkers.js",
+        "size": 7010,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/workflow/context-fixture.js",
+        "size": 2594,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/workflow/execution-contract.js",
+        "size": 2576,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/workflow/fake-model-port.js",
+        "size": 5725,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/workflow/markdown-deliverable.js",
+        "size": 4802,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/workflow/verdict.js",
+        "size": 4635,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/workspace/workspace-repository.js",
+        "size": 3317,
+        "mode": 420
+      },
+      {
+        "path": "migrations/0001_v001_human_core.sql",
+        "size": 24065,
+        "mode": 420
+      },
+      {
+        "path": "migrations/0002_p02_task_goal_alignment.sql",
+        "size": 3284,
+        "mode": 420
+      },
+      {
+        "path": "migrations/0003_schema_readiness.sql",
+        "size": 598,
+        "mode": 420
+      },
+      {
+        "path": "migrations/0004_v002_runs.sql",
+        "size": 13315,
+        "mode": 420
+      },
+      {
+        "path": "migrations/0005_v002_verification.sql",
+        "size": 10188,
+        "mode": 420
+      },
+      {
+        "path": "migrations/0006_v002_reviews.sql",
+        "size": 4062,
+        "mode": 420
+      },
+      {
+        "path": "migrations/0007_v003_recovery_control.sql",
+        "size": 3989,
+        "mode": 420
+      },
+      {
+        "path": "migrations/0008_v003_gateway.sql",
+        "size": 15106,
+        "mode": 420
+      },
+      {
+        "path": "migrations/0009_v004_information_rules.sql",
+        "size": 10213,
+        "mode": 420
+      },
+      {
+        "path": "migrations/0010_v005_context_revision.sql",
+        "size": 296,
+        "mode": 420
+      },
+      {
+        "path": "migrations/0011_m03_run_dispatch.sql",
+        "size": 3251,
+        "mode": 420
+      },
+      {
+        "path": "migrations/0012_m03_run_events.sql",
+        "size": 4611,
+        "mode": 420
+      },
+      {
+        "path": "migrations/0013_m03_run_command_order.sql",
+        "size": 1177,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 1354,
+        "mode": 420
+      }
+    ],
+    "entryCount": 128,
+    "bundled": []
+  }
+]

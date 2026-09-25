@@ -1,0 +1,35 @@
+{
+  "run_id": "recovery-p00-5bce8062-81fb-4d91-853f-8254e9bd87c6",
+  "status": "FAILED",
+  "started_at": "2026-09-20T15:31:15.376Z",
+  "finished_at": "2026-09-20T15:31:15.380Z",
+  "environment": {
+    "node": "24.21.0",
+    "postgres": "unavailable"
+  },
+  "input_sha256": {
+    "package.json": "b4989c11b29cd351197f6f1d88f69865c3925371a2a1d4f143426597f4565ce3",
+    "pnpm-lock.yaml": "5e1c73b2038efc2af982ed29b11d26828678f5e503231a1632b0b401a0658bb3",
+    "tsconfig.json": "3bca16d962112c9c30a66d2b8cbcc925cf571f44ca7585ef8ca6ccf9504b2e3c",
+    "src/worker.ts": "82b7f753ba6e071d431641a56e5114254a796fa62cac081ccbe32f08f9ab2655",
+    "src/control-worker.ts": "c20cf9017d51fac69c8de079f9cbb575df8282a94a5222d52f0208b31b6f3f71",
+    "src/run-recovery.ts": "f6e05bf0b29f0107ed16383ffa43e93d07998fde858e6389ad33fda8fe51e921"
+  },
+  "process_evidence": [],
+  "scenarios": [],
+  "failure": {
+    "message": "[reporting-self-check] forced failure to verify the persisted failure field; not an experiment scenario",
+    "scenarios_completed": 0
+  },
+  "assertions": [],
+  "limitations": [
+    "这是 P00 最小恢复实验，不是生产 Workflow、Gateway、权限系统或文件适配器。",
+    "官方 MockLanguageModelV4 仅验证 AI SDK 协议边界；没有真实 Provider 网络调用或 Provider 可替换性证明。",
+    "主恢复 Worker 已覆盖调用前崩溃、绑定当前 invocation/effect/PID/exit 74 收据后的受控安全重试、旧收据重放拒绝、存活旧 PID 的负向拒绝、部分写入转 UNKNOWN、实验用两步位置推进、联合准入/结果短事务、业务完成短事务与命令回执。它仍然只使用实验专用表和一个受控单文件 Adapter，没有接入生产 Gateway、权限判定或多产物版本存储。",
+    "业务完成事务覆盖单动作两步固定计划：PASS 记录由确定性检查器写入，没有 Hard/Rule/Semantic 分类验证器、真实人工 Review 审批链、多产物集合或部分失败重试验证。",
+    "控制请求与完成的两种顺序在主动作 Worker 的实验表上验证，Pause/Cancel 语义是实验简化版；control-worker 的场景仍是独立状态替身，其 UNKNOWN 结果核对是显式注入，不代表完整 B05 或 Spike 2 通过。",
+    "仍未实现生产资源-动作联合协议、Gateway/权限系统或真实外部文件 Adapter。单一受控外部效果后的 PostgreSQL 重启恢复已单列验证，不能推广为完整业务恢复。",
+    "未覆盖四份契约的 37 个验收场景；结果只映射到本实验的局部恢复裂缝。",
+    "效果证据是实验专用 JSONL 和单文件 fixture，未验证生产文件系统、审计存储或人工核对流程。"
+  ]
+}

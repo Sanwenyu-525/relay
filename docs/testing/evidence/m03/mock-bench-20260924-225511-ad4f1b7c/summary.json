@@ -1,0 +1,292 @@
+{
+  "status": "MEASURED",
+  "failure": null,
+  "fixed_workload": {
+    "success_count": 8,
+    "cancel_count": 2,
+    "delegate_concurrency": 4,
+    "mock_model_delay_ms": 250,
+    "poll_interval_ms": 500,
+    "checkpoint": "PostgresSaver",
+    "model": "FakeModelPort",
+    "criterion": "MARKDOWN_STRUCTURE",
+    "gateway_action": "none",
+    "approval": "none"
+  },
+  "runtime": {
+    "node": "v24.21.0",
+    "supervisor_exit": 0,
+    "api_exit": 0
+  },
+  "latency_ms": {
+    "delegate_202": {
+      "n": 10,
+      "p50": 21.98,
+      "p95": 130.91,
+      "p99": 132.78,
+      "min": 12.563600000000406,
+      "max": 133.24680000000035,
+      "tailInference": "insufficient_samples"
+    },
+    "command_queue_to_claim": {
+      "n": 8,
+      "p50": 8795.5,
+      "p95": 15277.1,
+      "p99": 15852.22,
+      "min": 1365,
+      "max": 15996,
+      "tailInference": "insufficient_samples"
+    },
+    "first_persisted_draft": {
+      "n": 8,
+      "p50": 9309,
+      "p95": 15867.75,
+      "p99": 16482.35,
+      "min": 1887,
+      "max": 16636,
+      "tailInference": "insufficient_samples"
+    },
+    "first_published_candidate": {
+      "n": 8,
+      "p50": 9405.5,
+      "p95": 15959.85,
+      "p99": 16572.77,
+      "min": 1985,
+      "max": 16726,
+      "tailInference": "insufficient_samples"
+    },
+    "run_completion": {
+      "n": 8,
+      "p50": 9473,
+      "p95": 16034.05,
+      "p99": 16649.21,
+      "min": 2051,
+      "max": 16803,
+      "tailInference": "insufficient_samples"
+    },
+    "cancel_202": {
+      "n": 2,
+      "p50": 14.86,
+      "p95": 15.64,
+      "p99": 15.71,
+      "min": 13.988200000000234,
+      "max": 15.72360000000026,
+      "tailInference": "insufficient_samples"
+    },
+    "cancel_convergence": {
+      "n": 2,
+      "p50": 55,
+      "p95": 60.4,
+      "p99": 60.88,
+      "min": 49,
+      "max": 61,
+      "tailInference": "insufficient_samples"
+    },
+    "database_probe_roundtrip": {
+      "n": 33,
+      "p50": 1.49,
+      "p95": 2.06,
+      "p99": 2.33,
+      "min": 1.1066000000000713,
+      "max": 2.4364000000000487,
+      "tailInference": "insufficient_samples"
+    }
+  },
+  "throughput_success_per_second": 0.47,
+  "database": {
+    "probe_samples": 33,
+    "failed_probe_samples": 0,
+    "samples_with_lock_waiters": 0,
+    "max_lock_waiters_observed": 0
+  },
+  "retries_observed": 0,
+  "resources": {
+    "processes": [
+      {
+        "pid": 22140,
+        "role": "worker",
+        "samples": 6,
+        "cpu_ms": 280,
+        "peak_rss_bytes": 175730688,
+        "event_loop_sample_p95_ms": {
+          "n": 6,
+          "p50": 14,
+          "p95": 19.93,
+          "p99": 20.04,
+          "min": 0.000511,
+          "max": 20.070399,
+          "tailInference": "insufficient_samples"
+        },
+        "event_loop_max_ms": 21.495807
+      },
+      {
+        "pid": 27864,
+        "role": "worker",
+        "samples": 6,
+        "cpu_ms": 124,
+        "peak_rss_bytes": 176308224,
+        "event_loop_sample_p95_ms": {
+          "n": 6,
+          "p50": 14.64,
+          "p95": 18.45,
+          "p99": 18.99,
+          "min": 0.000511,
+          "max": 19.120127,
+          "tailInference": "insufficient_samples"
+        },
+        "event_loop_max_ms": 24.051711
+      },
+      {
+        "pid": 32544,
+        "role": "supervisor",
+        "samples": 69,
+        "cpu_ms": 187,
+        "peak_rss_bytes": 172109824,
+        "event_loop_sample_p95_ms": {
+          "n": 69,
+          "p50": 16.1,
+          "p95": 17.76,
+          "p99": 21.22,
+          "min": 0.000511,
+          "max": 21.889023,
+          "tailInference": "insufficient_samples"
+        },
+        "event_loop_max_ms": 25.542655
+      },
+      {
+        "pid": 34416,
+        "role": "worker",
+        "samples": 6,
+        "cpu_ms": 171,
+        "peak_rss_bytes": 176066560,
+        "event_loop_sample_p95_ms": {
+          "n": 6,
+          "p50": 14.14,
+          "p95": 20.19,
+          "p99": 20.89,
+          "min": 0.000511,
+          "max": 21.069823,
+          "tailInference": "insufficient_samples"
+        },
+        "event_loop_max_ms": 24.674303
+      },
+      {
+        "pid": 38028,
+        "role": "worker",
+        "samples": 6,
+        "cpu_ms": 171,
+        "peak_rss_bytes": 176091136,
+        "event_loop_sample_p95_ms": {
+          "n": 6,
+          "p50": 13.94,
+          "p95": 19.28,
+          "p99": 19.94,
+          "min": 0.000511,
+          "max": 20.103167,
+          "tailInference": "insufficient_samples"
+        },
+        "event_loop_max_ms": 24.821759
+      },
+      {
+        "pid": 40492,
+        "role": "worker",
+        "samples": 6,
+        "cpu_ms": 124,
+        "peak_rss_bytes": 176050176,
+        "event_loop_sample_p95_ms": {
+          "n": 6,
+          "p50": 13.73,
+          "p95": 18.92,
+          "p99": 19.63,
+          "min": 0.000511,
+          "max": 19.808255,
+          "tailInference": "insufficient_samples"
+        },
+        "event_loop_max_ms": 21.299199
+      },
+      {
+        "pid": 42132,
+        "role": "worker",
+        "samples": 6,
+        "cpu_ms": 187,
+        "peak_rss_bytes": 175083520,
+        "event_loop_sample_p95_ms": {
+          "n": 6,
+          "p50": 13.59,
+          "p95": 20.54,
+          "p99": 21.21,
+          "min": 0.000511,
+          "max": 21.381119,
+          "tailInference": "insufficient_samples"
+        },
+        "event_loop_max_ms": 21.528575
+      },
+      {
+        "pid": 42904,
+        "role": "worker",
+        "samples": 6,
+        "cpu_ms": 139,
+        "peak_rss_bytes": 175792128,
+        "event_loop_sample_p95_ms": {
+          "n": 6,
+          "p50": 13.62,
+          "p95": 20.98,
+          "p99": 21.64,
+          "min": 0.000511,
+          "max": 21.807103,
+          "tailInference": "insufficient_samples"
+        },
+        "event_loop_max_ms": 26.017791
+      },
+      {
+        "pid": 43420,
+        "role": "worker",
+        "samples": 7,
+        "cpu_ms": 93,
+        "peak_rss_bytes": 175321088,
+        "event_loop_sample_p95_ms": {
+          "n": 7,
+          "p50": 16.01,
+          "p95": 20.66,
+          "p99": 21.24,
+          "min": 0.000511,
+          "max": 21.381119,
+          "tailInference": "insufficient_samples"
+        },
+        "event_loop_max_ms": 23.298047
+      },
+      {
+        "pid": 43968,
+        "role": "api",
+        "samples": 74,
+        "cpu_ms": 374,
+        "peak_rss_bytes": 129789952,
+        "event_loop_sample_p95_ms": {
+          "n": 74,
+          "p50": 16.07,
+          "p95": 16.53,
+          "p99": 21.54,
+          "min": 0.000511,
+          "max": 22.970367,
+          "tailInference": "insufficient_samples"
+        },
+        "event_loop_max_ms": 29.278207
+      }
+    ],
+    "sampled_node_tree_peak_rss_bytes": 465940480,
+    "total_node_cpu_ms": 1850
+  },
+  "measurement_notes": [
+    "P95/P99 are descriptive order statistics only when fewer than 100 samples are present.",
+    "First output is DRAFT persisted, not a streamed first token; candidate is PERSIST_CANDIDATE finished.",
+    "Run completion uses database timestamps; cancellation convergence ends at a 500 ms HTTP poll observation.",
+    "Node tree RSS is sampled from instrumented child processes and omits PostgreSQL server memory.",
+    "The 250 ms Mock model delay is test-only and part of this fixed workload."
+  ],
+  "not_measured": [
+    "first streamed token (FakeModelPort is not streamed)",
+    "actual Provider token cost",
+    "PostgreSQL server process CPU/RSS",
+    "production desktop process tree"
+  ]
+}

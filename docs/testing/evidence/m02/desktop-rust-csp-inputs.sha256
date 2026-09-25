@@ -1,0 +1,8 @@
+18482cbdbb3f97a71e6f57d4d7b9c5abc48b5b0d51cfc6ce04c2faf36ec21e02  apps/desktop/src-tauri/src/lib.rs
+aba606d4d39ac8b7ec188910159a6604466700a171a4584cd11a0e4d15676a64  apps/desktop/src-tauri/src/main.rs
+43b194396c79e95eea87b04f991607105373c83e9e7def35b8b6502921198a5e  apps/desktop/src-tauri/Cargo.toml
+fcdf448e2f70a0fefbcb7bf58784930ebedc82e89a72fd14c67368868f57d895  apps/desktop/src-tauri/Cargo.lock
+487059eaf8a947b80f20a9aacac038a5047b2ad69d2401b827376c67d6fe847f  apps/desktop/src-tauri/build.rs
+8a83ac96581161b82a35f8ea7d1d6811c161750f730d738bde16b10be6ae51ca  apps/desktop/src-tauri/tauri.conf.json
+f0ee4641e97f95834ae30357714bbc28f2292bd5be0f38e5a7ab29a3c80d5a34  apps/desktop/src-tauri/capabilities/default.json
+fa2519ba00f708d4e17832ff95815af85e364930901403b938255bd2378accbf  apps/desktop/src-tauri/icons/icon.ico

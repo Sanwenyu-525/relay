@@ -1,0 +1,6 @@
+06694d22721a7233f8bb08b2098ec7d15d7f238d50958867e02e36dd15474e0e  docs/testing/evidence/m03/gateway-action-inputs.sha256
+b693274f139a920386782bbd85f01a713d814545bc05d804a8cafff244054246  apps/desktop/scripts/build-release.ps1
+b0f33e7012b135c0f743848b0ff5e92f3a7f456e2fc6b94eecc02485d6c48bc8  apps/desktop/tests/m03-action-approval-webview.mjs
+764b77efbef3ea1f8e219cf7e0c76655e28b2501934b7e54e5ee9832ccf90792  apps/desktop/release/relay-desktop.exe
+1936b4c9369cf9501f1d66c8fcadec24920714be96c8b7db6f609ee4353e26a7  apps/desktop/release/desktop-build-manifest.json
+5c1fcc64211a0441f975f864169b3d683d889a3723cb9aa0e7bc2517ceee8ebb  apps/desktop/release/api/migrations/0013_m03_run_command_order.sql

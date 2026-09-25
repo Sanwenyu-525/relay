@@ -1,0 +1,54 @@
+M03 desktop supervisor stdout reader preparation — 2026-09-24
+Status: READY_FOR_SLICE_ACCEPTANCE. This is not G04/G05 or release acceptance.
+
+Baseline: parent independently accepted HOST_SAFETY_SLICE at the SHA values in
+m03-host-slice-inputs.sha256. The only changed frozen inputs for this slice are
+apps/desktop/src-tauri/src/lib.rs and docs/deployment/local-deployment.md;
+the Rust test executable was rebuilt. Current 11-input SHA list is
+m03-host-reader-inputs.sha256. No apps/api or apps/workbench file was edited.
+
+Environment: Windows 11 x64 10.0.22631; Rust 1.95.0 MSVC target, explicit
+RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-msvc; portable Node 24.21.0 at
+D:\Develop\Relay-Agent\.research\runtime-cache\node-v24.21.0-win-x64\node.exe.
+
+Commands and raw output (cwd D:\Develop\Relay-Agent\apps\desktop\src-tauri unless noted):
+1. $env:RUSTUP_TOOLCHAIN='stable-x86_64-pc-windows-msvc';
+   $env:RELAY_TEST_NODE='D:\Develop\Relay-Agent\.research\runtime-cache\node-v24.21.0-win-x64\node.exe';
+   $env:RELAY_TEST_OLD_SUPERVISOR_ENTRY='D:\Develop\Relay-Agent\apps\api\dist\src\worker\supervisor-main.js';
+   cargo test --locked --target x86_64-pc-windows-msvc
+   Exit 0, 14/14 Rust tests; m03-host-reader-rust-tests.log.
+   The old compiled supervisor entry had no v1 marker at test time; SHA-256
+   820aa851b9026b0ed1c51018778ef18e17a57302d639cca12eee91b02e85197c.
+   The two host-crash probe tests return without action except in the dedicated
+   process script from the accepted HOST_SAFETY_SLICE.
+2. $env:RUSTUP_TOOLCHAIN='stable-x86_64-pc-windows-msvc';
+   cargo check --locked --target x86_64-pc-windows-msvc
+   Exit 0; m03-host-reader-cargo-check.log.
+3. cwd D:\Develop\Relay-Agent;
+   & 'D:\Develop\Relay-Agent\.research\runtime-cache\node-v24.21.0-win-x64\node.exe'
+     scripts/check-docs.mjs
+   Exit 0, 77 Markdown / 1069 links / 923 anchors / 126 tokens / 29 contrast checks;
+   m03-host-reader-docs-check.log. Counts include concurrent repository docs.
+
+Specific counterexample: a staged Read stream supplied supervisor_ready and
+dispatch_ready, then only after the startup function returned supplied
+worker_started and worker_exit. The reader consumed both later chunks while
+keeping the stdout stream open, and reported EOF only when the stream was
+explicitly closed. A separate test sent an unknown runtime event while the
+stream remained open and observed host failure without waiting for EOF.
+Wrong nonce, launchId, Node version, event order, absent dispatch_ready and
+a line above the 64 KiB output limit are rejected in the Rust suite.
+
+Boundary: the compiled current backend still lacks relay-desktop-supervisor-v1,
+so the static pre-Node protocol gate remains active. No new release was built;
+no PostgreSQL, Worker claim, UNKNOWN recovery or visible Tauri session was run
+in this preparation slice. Backend's planned private first frame allows up to
+1 MiB and 4096 stoppedLaunches; long-term ARMED record growth and safe cleanup
+must be measured in the later integration slice. The runtime stdout limit is
+64 KiB per event, independently of the host-to-supervisor first-frame limit.
+
+Cleanup: no PG instance or release staging was created. The staged stream and
+temporary protocol fixture are closed/removed by the tests; no credential or
+Provider was read. Existing accepted strong-kill and outer-Job logs remain in
+m03-host-crash-recovery.log and m03-host-outer-job.log, bound to the earlier
+HOST_SAFETY_SLICE binary, not this rebuilt binary.

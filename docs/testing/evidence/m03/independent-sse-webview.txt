@@ -1,0 +1,22 @@
+session_id=2dd1e0a6ecc14ae198e106f8082090a1 pg_port=5571 release_sha256=b49af3bacd622587a68337ac7448a2d60201a5102502fb8a47593718ef4ffbba
+packaged_sse_sha256=df970326c34284cc79874877dd4b0e997afad118adf07e6fc070ce67374e921b packaged_migration_sha256=3a26be8ad9fe420d597afd414abd7df1aa6edc110c12fcafd6c13ef0be527baf
+seed_api_exit=0 run_ids=a04fd001-5cb3-4b4a-bcdf-a0fb21691689,7c7e3445-aa07-4c00-bb8e-50827bc3b27e,cd32708f-5c5d-4e14-8ca5-caf364e1623a
+step_row_hold_1_backend_pid=29684
+step_row_hold_2_backend_pid=29480
+step_row_hold_3_backend_pid=39540
+initial_host_pid=32828 cdp_port=5595 bootstrap=ready
+sse_boundary no_bearer=401 wrong_origin=403 wrong_host=400 other_workspace=404
+sse_protocol first_id=1 event=run_hint data_kind=valid
+webview_initial_and_live run_id=a04fd001-5cb3-4b4a-bcdf-a0fb21691689 historical_seq=1 after_worker_seq=31 snapshot_gets=3
+webview_controlled_stream_abort_resume first=1 resumed=2 latest=31 left_page_without_cancel=true
+webview_snapshot_correction run_id=7c7e3445-aa07-4c00-bb8e-50827bc3b27e from_seq=1 to_seq=31 blocked_requests=2
+pre_kill_run=cd32708f-5c5d-4e14-8ca5-caf364e1623a event_seq=1 invocation=ACTIVE|1 worker_blocked=true
+processes_before_kill host=32828 api=6280 supervisor=33808 worker=33264
+after_host_kill host_api_supervisor_worker_alive=0
+after_kill_persisted invocation=ACTIVE|1 event_seq=1
+restart_host_pid=17260 cdp_port=14456 bootstrap=ready
+processes_before_kill host=17260 api=27708 supervisor=31216 worker=0
+after_restart run_id=cd32708f-5c5d-4e14-8ca5-caf364e1623a seq=31 revision=6 invocation=IDLE|2 original_commands=1 control_requests=0
+bearer_in_url_storage_host_logs=false
+postgres_stop_exit=0 temporary_root_removed=True
+M03_SSE_WEBVIEW_REAL_PG=PASS

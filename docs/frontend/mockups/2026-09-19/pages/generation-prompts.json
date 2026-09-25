@@ -1,0 +1,159 @@
+{
+  "date": "2026-09-19",
+  "status": "静态设计概念，示例数据",
+  "tool": "built-in Image Gen",
+  "reference": "../../../../../exec-e4781944-a9b1-4906-8cd8-994841a0c21f.png",
+  "basePrompt": "Use case: ui-mockup. Create a realistic production-quality desktop web application UI effect image for Personal Workflow OS, displayed brand \"Workflow OS\". The attached user image is the authoritative STYLE REFERENCE, not an edit target: preserve its warm ivory/off-white base, subtly warmer left sidebar, ink-black text, forest green accents, Chinese Song/Ming serif display headings with clear sans-serif control labels, calm editorial typography, fine pale dividers, understated near-square corners and extraordinary whitespace. No gradients, decorative illustrations, glass, big shadows, rainbow dashboard metrics, devices, browser chrome, or poster surround. Target dimensions 1487 x 1058 pixels, matching reference aspect ratio. One full screen per image, never montage. Maintain reference shell: 203px left sidebar, 65px top header, brand upper left; navigation 今日 / 项目 / 任务 / 知识 / 动态 / 待审 with small elegant outline icons and green active indicator, 连接 / 设置 at bottom. Top right date \"2026-09-19 星期六\"; current date anchor 2026-09-19 Asia/Shanghai. Chinese labels must be clear and carefully typeset. Footer tiny \"设计概念 · 示例数据\". Product is a single-user human-AI long-term project workflow system. It has immutable artifact versions, distinct task status/execution mode/current executor, evidence-driven reviews; never imply AI returning text equals completion or that passing tests automatically completes a task. Focus a hero use case, one clear primary action, only 1-2 supporting areas. Use grouping, alignment and whitespace first, dividers second, tint third, borders sparingly and shadows last. Avoid cards inside cards, cramped text or clipped controls. Match the attached image's 14-16px UI body scale, large editorial heading and reference density. No more than two type families. Use only features in page brief.\nAll text simplified Chinese. This is one sibling page of an established app, not a new design direction. Use precise reference visual language. Display a single polished full screen. Keep right detail rail only when needed. No marketing illustrations. Ensure comfortable sizes and visual hierarchy. Existing left nav must remain identical. Render every interactive control fully inside frame. Footer concept label required.",
+  "pages": [
+    {
+      "slug": "projects",
+      "title": "项目列表",
+      "route": "/projects",
+      "brief": "Active 项目. Heading 项目, subtitle 每一个长期目标，都有可继续的下一步. Primary 新建项目. Text filters 进行中 / 已归档 and search field 搜索项目. Three spacious editorial list rows, columns 项目 / 类型 / 当前阶段 / 下一步: 人机协作工作流研究 / 论文 / 文献研究 / 确定实验评价指标; Workflow OS / 开发 / 设计 / 验证人工闭环; 个人知识整理 / 通用 / 执行 / 整理研究笔记. Selected research row. Right rail 项目摘要, explicit goal, 待审 1, last confirmed 状态 v4, link 打开项目. No percentage charts."
+    },
+    {
+      "slug": "create-project",
+      "title": "创建项目",
+      "route": "/projects 新建流程",
+      "brief": "Active 项目. Breadcrumb 项目 › 新建项目. Large heading 开始一个长期项目. Calm wide form fields 项目名称=人机协作工作流研究; 项目目标=研究可追溯、可恢复的人与 AI 协作方法; 项目类型 segmented 通用 / 论文 selected / 开发; optional 导入初始资料 with supported .md / .txt notes. Main button 创建项目. Right rail 从最少的信息开始 with 创建后可人工维护项目状态; 未连接模型也能开始; AI 建议需你确认后应用. No required model setup, billing or team invites."
+    },
+    {
+      "slug": "tasks",
+      "title": "全部任务",
+      "route": "/tasks",
+      "brief": "Active 任务. Heading 任务. Primary 新建任务. Tabs 全部 / 收件箱; filters 项目：全部 状态：全部 执行模式：全部. Wide readable 5-row table columns 任务 / 项目 / 工作状态 / 执行模式 / 当前执行者: 确定实验评价指标|人机协作工作流研究|进行中|人工执行|我; 完善文献综述|same|待人工验收|AI 委托|AI; 整理实验资料|same|可开始|AI 辅助|我; 修复任务恢复逻辑|Workflow OS|进行中|AI 委托|AI; 整理阅读笔记|未归属项目|待整理|人工执行|我. Bottom quiet guidance 完成依据来自产物、验收与提交. Do not conflate AI mode and task status, avoid kanban cards."
+    },
+    {
+      "slug": "inbox",
+      "title": "任务收件箱",
+      "route": "/inbox",
+      "brief": "Active 任务, local tabs 全部任务 / 收件箱 selected. Heading 先记下来，再安排归属. Input 记下一件要做的事… with primary 添加任务. Flat rows 整理阅读笔记 / 待整理; 核对下周讨论提纲 / 待整理; selected 联系导师确认评价范围 / 待整理. Right details task selected, 项目：未归属项目, 执行模式：人工执行, 内容 textbox and link 关联已有项目, button 保存整理. Note 未归属项目的任务也可以人工执行；不会自动创建项目. No auto Delegate for unassigned task."
+    },
+    {
+      "slug": "project-tasks",
+      "title": "项目任务",
+      "route": "/projects/:id/tasks",
+      "brief": "Active 项目, breadcrumb 项目 › 人机协作工作流研究 › 任务, upper tabs 通用 论文 selected 开发. Heading 项目任务, local tabs 总览 / 任务 selected / 资料. Primary 新建任务. Spacious list with columns 任务 / 状态 / 执行模式 / 依赖: 确定实验评价指标|进行中|人工执行|无; 完善文献综述|待人工验收|AI 委托|无; 开始对照实验|阻塞|人工执行|评价指标尚未确认. Selected blocked row opens right rail 开始对照实验, 为什么暂不能开始, dependency linked 确定实验评价指标, muted disabled 开始任务 and link 查看前置任务. No pin bypass dependency."
+    },
+    {
+      "slug": "task-detail",
+      "title": "任务详情与验收标准",
+      "route": "/tasks/:id",
+      "brief": "Active 任务. Breadcrumb 任务 › 确定实验评价指标. Huge title 确定实验评价指标. Metadata 进行中 / 人工执行 / 当前执行者：我. Main description 明确研究基线、指标定义与复核方法. Local tabs 概览 selected / 产物 / 执行记录. Section 验收标准 v2 with numbered items 指标有明确计算方式; 基线具有可复现实验步骤; 结果可追溯到原始记录, each 必需 and test method. Section 当前产物 评价方案.md v2 当前选用 · 最新, text 待核对. Right rail 继续工作 primary 编辑产物, separate subtle AI 辅助 and 委托 AI links. Show project and dependency 无. Do not mark task complete just by checkboxes."
+    },
+    {
+      "slug": "artifact-editor",
+      "title": "人工编辑与保存版本",
+      "route": "/tasks/:id 产物编辑",
+      "brief": "Active 任务. Breadcrumb 任务 › 确定实验评价指标 › 编辑产物. Heading 评价方案. Metadata 人工执行 / 当前执行者：我. Version v2 · 当前选用, muted 草稿未保存. Main large paper editor with formatting toolbar 正文 B I 列表 链接 and tabs 编辑 selected 预览. Chinese content heading 一、评价指标, prose 以完成依据的可复核性作为评价目标。, numbered items 任务成功率, 恢复正确率, 平均执行耗时. Right rail 保存为新版本, label 基于 v2 编辑, explanation 保存后生成 v3，已有版本保持不变。 primary 保存新版本; secondary 保留草稿. Section 验收标准 references v2. No completion button and no fake autosaved status."
+    },
+    {
+      "slug": "general-workbench",
+      "title": "通用工作台与 AI 辅助",
+      "route": "/projects/:id/workbench/general",
+      "brief": "Active 项目. Breadcrumb 项目 › 个人知识整理; upper tabs 通用 selected / 论文 / 开发. Heading 整理研究笔记. Metadata 进行中 / AI 辅助 / 当前执行者：我. Main paper existing artifact 笔记整理计划.md v1 and 3-stage content 整理来源 / 提取问题 / 确认下一步 with restrained numbered sections. Main action 保存结果. Right AI panel heading AI 辅助, labels 项目：个人知识整理 任务：整理研究笔记 只读建议. Sources 研究笔记 v2 and 整理规则 v1. Suggestion 我建议先按研究问题归类，再保留每条笔记的原文链接。, tagged 尚未应用, link 查看提案差异. Bottom input 请帮我检查是否遗漏来源 with send icon. Assist does not take executor ownership or modify facts automatically."
+    },
+    {
+      "slug": "thesis-workbench",
+      "title": "论文资料与草稿工作台",
+      "route": "/projects/:id/workbench/thesis",
+      "brief": "Active 项目. Breadcrumb 项目 › 人机协作工作流研究; upper tabs 通用 论文 selected 开发. Heading 从资料到论证. Subtitle 为下一版文献综述选择可追溯的依据. Main local tabs 资料与草稿 selected / 引用核对. Two-part main: narrow selected source list checkboxes 项目研究笔记 v2, 协作边界摘录 v1, 验收标准 v2; larger paper 草稿结构 with 2.1 人与 AI 的协作边界, 2.2 验证与质量保障, 2.3 研究空白 and concise editorial text. Right rail AI 辅助 · 只读 with 已选 3 份资料, 来源版本已固定; primary 请求候选草稿. Note 候选草稿需人工保存为产物版本；引用存在不代表论断已获支持. No automatic published artifact."
+    },
+    {
+      "slug": "knowledge",
+      "title": "全局知识库",
+      "route": "/knowledge",
+      "brief": "Active 知识. Heading 知识, subtitle 留下来源，也留下当时的版本. Primary 导入资料. Search 搜索标题或正文; compact filters 项目：全部 来源：全部 最近更新. Editorial list columns 资料 / 来源 / 所属项目 / 当前版本: 项目研究笔记|笔记|人机协作工作流研究|v2; 协作边界摘录|Markdown 文件|same|v1; 已接受的评价方案|产物引用|same|v2; 工作流恢复笔记|文本文件|Workflow OS|v1. Right rail 导入资料, choices Markdown / 纯文本 / 手工笔记 / 公开网页; note PDF 与 Office 全文提取暂不支持. No claim vector semantic search or file truthfulness."
+    },
+    {
+      "slug": "knowledge-detail",
+      "title": "资料详情与来源版本",
+      "route": "/knowledge 资料详情",
+      "brief": "Active 知识. Breadcrumb 知识 › 项目研究笔记. Heading 项目研究笔记; tabs v2 当前版本 最新, v1. Main paper with two readable Chinese sections 协作边界 and 待验证的问题, statement AI 可生成候选方案，最终判断需要可追溯证据。 and note 记录研究假设，不等于已确认结论. Right rail 来源与版本, 来源类型 手工笔记, 所属项目 人机协作工作流研究, 记录时间 2026-09-18 16:20, 当前版本 v2; 被引用于 文献综述 v3 and 评价方案 v2; primary 编辑为新版本. Subtle 历史引用始终指向原版本. No auto promotion to rules."
+    },
+    {
+      "slug": "project-information",
+      "title": "项目资料、记忆、决定与规则",
+      "route": "/projects/:id/knowledge",
+      "brief": "Active 项目. Breadcrumb 项目 › 人机协作工作流研究 › 资料. Heading 项目资料. Local types tabs 资料 / 记忆 / 决定 selected / 规则. Main list selected 先验证人工闭环 · 当前有效; 定义可复核的验收依据 · 当前有效; 按完成数量推进研究阶段 · 已替代. Large central reading area heading 先验证人工闭环, sections 选择 优先打通人工产物保存与接受流程; 理由 先验证完成依据，再引入真实模型; 代价 AI 自动执行能力后置. Right rail 人工确认, 2026-09-17, 适用范围 本项目, related 研究问题 v2, action 记录替代决定. Note 替代保留原决定与历史引用. Tabs labels enough, don't invent graph editor."
+    },
+    {
+      "slug": "activities",
+      "title": "全局动态与追溯",
+      "route": "/activities",
+      "brief": "Active 动态. Heading 动态, subtitle 每一次改变，都能找到依据. Filters 项目：全部 and 全部 / 我 / AI / 系统. Spacious vertical chronological timeline 今天 9月19日: 10:42 我 接受 研究问题 v2 link 查看接受依据; 10:36 系统 文献综述 v3 检查通过，等待人工验收; 10:31 AI 保存候选产物 文献综述 v3; 10:15 我 委托任务 完善文献综述. Right selected event detail 检查通过 ≠ 任务完成, version 文献综述 v3, 验收标准 v2, Run R-018, links 检查证据 / 产物来源 / 执行记录. No raw private reasoning."
+    },
+    {
+      "slug": "run-control",
+      "title": "执行详情与暂停请求",
+      "route": "/runs/:id control=PENDING",
+      "brief": "Active 任务. Heading 任务正在安全暂停. Task 修复任务恢复逻辑, separate metadata 任务状态：进行中 执行模式：AI 委托 当前执行者：AI. Thin warm amber notice 已请求暂停，等待在途动作安全结束. Main fixed workflow vertical steps 读取上下文 completed; 生成候选变更 completed; 运行受控测试 正在结束; 保存结果 待执行; 验证与人工判断 待执行. Lower current action 受控测试 / action A-027 / 已发出停止请求，尚未确认退出, no success icon. Right rail Run R-021, control request 暂停请求已持久化, 当前资源 隔离工作目录：仍占用. Primary 查看在途动作, disabled 恢复 and 接手编辑, note 暂停请求不等于已暂停. Only trace results, no private chain of thought."
+    },
+    {
+      "slug": "run-paused",
+      "title": "已暂停与安全接手",
+      "route": "/runs/:id PAUSED",
+      "brief": "Active 任务. Heading 执行已暂停. Task 修复任务恢复逻辑, 任务状态：进行中 执行模式：AI 委托 当前执行者：AI. Muted green outlined label 已到安全边界. Main recovery summary 已完成：读取上下文、生成候选变更; 已保存：变化集 v2; 待处理：验证并提交人工判断. Rows 在途动作 已安全结束; 工作目录 无旧进程占用; 运行位置 验证之前. Right panel 接下来由谁继续, primary 恢复 AI 执行; secondary 请求人工接手; explanation 接手完成后才可编辑，当前执行者仍为 AI. links 查看产物 v2 / 查看原执行记录. Do not prematurely say handoff applied."
+    },
+    {
+      "slug": "run-unknown",
+      "title": "执行结果未确认与恢复核对",
+      "route": "/runs/:id UNKNOWN",
+      "brief": "Active 任务. Heading 执行结果尚未确认. Task 提交已审查变更, 任务状态：进行中 执行模式：AI 委托 当前执行者：AI. Calm restrained amber message 本地 Git 动作已发出，但结果回执未保存。 Main divided evidence 已知: 动作 A-031 已发送; 目标仓库 Workflow OS; 目标分支 codex/recovery-fix. 尚未知: 是否已创建预期提交. Timeline 发出动作 → 连接中断 → 等待核对. Right 核对后再继续, primary 核对执行结果, secondary 查看动作证据. Note 核对完成前不重新执行、不更换动作身份。 Resource 工作目录仍受保护. No Retry, force success or fake new action."
+    },
+    {
+      "slug": "reviews",
+      "title": "待审中心",
+      "route": "/reviews",
+      "brief": "Active 待审 badge 2. Heading 等待你的判断, subtitle 每个请求，对应一个明确的决定. Two spacious rows: 文献综述 v3 / 产物验收 / 人机协作工作流研究 / 10:36 / 检查已通过; 本地 Git 提交 / 动作批准 / Workflow OS / 10:20 / 尚未执行. Selected first. Right panel 为何需要你 核对论断与来源后，决定是否接受当前版本。, exact binding 文献综述 v3 · 验收标准 v2, impact 接受后提交完成依据, primary 查看并判断, secondary 查看证据. No bulk approve checkbox, no automatic acceptance, distinguish artifact acceptance and action approval."
+    },
+    {
+      "slug": "action-approval",
+      "title": "特定 Git 动作批准",
+      "route": "/reviews/:id 动作批准",
+      "brief": "Active 待审. Heading 批准本次本地提交. Breadcrumb 待审 › Workflow OS › Git 提交. Main clear target summary 动作：git commit, 目标仓库：Workflow OS, 分支：codex/recovery-fix, 变化集：v2, 文件：recovery.rs / recovery_test.rs, 提交说明：Fix workflow recovery checks. Section 已检查 变化集 v2 的验证记录 with two short evidence links, action identity A-031, binding 内容与目标已固定. Right panel 这次批准允许什么 with 本次本地提交 only, 不包含推送远端或后续动作。, primary 批准本次提交, secondary 拒绝. Footer note 批准后仍需执行，批准不代表提交已成功。 Scope exact; no credential or arbitrary terminal."
+    },
+    {
+      "slug": "connections",
+      "title": "连接与执行权限",
+      "route": "/settings/connections",
+      "brief": "Active bottom 连接. Heading 连接, subtitle 连接状态、能力与授权分别管理. Main quiet rows 模型服务 / 已连接 / 只读辅助可用; 受管资料目录 / 已连接 / 读取; Git 仓库 / 已连接 / 等待动作级批准; 受控测试 / 未启用 / 尚未选择受信配置. Select Git row, right detail 工作范围 Workflow OS 隔离副本; capabilities 读取状态 已允许, 本地提交 每次批准, 推送远端 未授权; primary 编辑授权范围. Note 连接成功不代表拥有写入权限. No raw API keys, no fake unenabled tests, no multi-connector marketplace."
+    },
+    {
+      "slug": "settings",
+      "title": "设置与工作偏好",
+      "route": "/settings",
+      "brief": "Active bottom 设置. Heading 设置. Local side text menu 基本设置 selected / AI 设置 / 执行策略 / 工作台. Main restrained form interface language 简体中文; timezone Asia/Shanghai; appearance 浅色 selected; default workbench 通用. Primary 保存设置. Right explanation 显示与执行分开: 切换工作台仅改变展示，不改变活动任务的执行契约。 更改界面时区不会改写已保存的稍后处理日期。 AI 与执行权限在对应设置中单独管理. No billing, teams, subscription, avatars needed. Blank whitespace and elegant serif heading."
+    },
+    {
+      "slug": "search",
+      "title": "全局搜索与快捷操作",
+      "route": "Ctrl+K 弹层",
+      "brief": "Show full reference-style 今日 workspace gently dimmed behind a single elegant centered command palette ~820px wide. Palette input with search icon text 验收 and keyboard Esc. Tabs 搜索 selected / 操作. Results grouped 任务: 完善文献综述 · 人机协作工作流研究; 资料: 验收标准 · v2, matched snippet 每项论断需要明确来源支持; 决定: 采用人工最终验收 · 当前有效. Each row shows type and project, selected source result forest-green subtle tint. Footer Enter 打开 ↑↓ 选择, no semantic confidence number. Scope 当前工作空间 with compact project filter. Search uses literal title/text matching not invented semantic engine. No AI chat in search."
+    },
+    {
+      "slug": "version-conflict",
+      "title": "版本冲突与草稿保留",
+      "route": "/tasks/:id 保存冲突",
+      "brief": "Active 任务. Heading 有更新的版本，先核对差异. Task 确定实验评价指标. Calm amber banner 你的草稿基于 v2，服务器已有 v3。草稿已保留。 Main two readable adjacent paper columns 我的草稿 · 基于 v2 and 当前版本 · v3, each section 评价指标 with short lines, highlight new server line 新增：失败恢复耗时 and own line 新增：人工复核时间. Right rail 选择如何继续, explanation 先查看当前版本，再将需要的修改整理为新草稿。, primary 基于 v3 整理新草稿, secondary 保留草稿稍后处理, link 查看版本历史. No force overwrite or silent merge; no save-success label."
+    },
+    {
+      "slug": "task-completed",
+      "title": "完成凭据与产物来源",
+      "route": "/tasks/:id DONE",
+      "brief": "Active 任务. Heading 这项工作已完成. Task 确定实验评价指标. Metadata 已完成 / 人工执行 / 完成者：我 / 2026-09-19 10:42. Main paper 完成依据, clear rows 本轮接受 评价方案.md v3; 当前选用 v3; 验收标准 v2; 检查记录 V-014; 人工接受 2026-09-19 10:42. Below simple vertical provenance list 来源：项目研究笔记 v2 → 修订：评价方案 v2 → 本轮产物：评价方案 v3 → 验证与人工接受, no complex network graph. Right 结果已保存 main 查看已接受版本, secondary 重开任务, explanation 新修改需要重开并保存新版本，历史完成依据保留。 No directly-edit accepted artifact button."
+    },
+    {
+      "slug": "delegate",
+      "title": "AI 委托前确认",
+      "route": "/tasks/:id 委托流程",
+      "brief": "Active 任务. Heading 将这项任务委托给 AI. Task 完善文献综述, current executor 我 until submitted. Main scoped summary 项目 人机协作工作流研究; 验收标准 v2; 固定流程 读取资料 → 生成草稿 → 验证 → 人工判断; 工作配置 论文草稿配置 v1; 资料范围 项目研究笔记 v2、协作边界摘录 v1; 允许能力 只读资料、生成候选 Markdown; 不包含 外部发布与任意命令. Right rail 确认执行边界, note AI 生成结果后仍需按验收标准判断。, primary 确认委托, secondary 返回任务. Small 失败时保留产物，可从执行记录核对. No unlimited permissions, model vendor or invented exact limits."
+    },
+    {
+      "slug": "task-create",
+      "title": "新建任务与执行准备",
+      "route": "/tasks 新建流程",
+      "brief": "Active 任务. Heading 把想做的事，变成可完成的任务. Form 任务名称=确定实验评价指标; 所属项目=人机协作工作流研究 with optional 未归属项目; 预期结果=一份可复核的评价方案; 验收标准 multiline = 指标计算方式明确 / 基线步骤可复现 / 结果可追溯到原始记录; 开始方式 人工执行 selected / AI 辅助 / AI 委托; note 委托将在任务就绪后单独确认范围. Primary 保存任务, secondary 暂存待整理. Right rail 完成标准要可判断 with concise helper 三条明确的验收标准，比一句“写得更好”更有用。 Dependencies 可选 none, no unrequested scheduling engine."
+    }
+  ]
+}

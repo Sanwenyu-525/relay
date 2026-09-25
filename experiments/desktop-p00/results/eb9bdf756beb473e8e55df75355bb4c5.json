@@ -1,0 +1,167 @@
+{
+  "artifact": "src-tauri/target/release/relay-desktop-p00.exe",
+  "artifact_sha256": "daf058330540eafc4a00d8541a8841601e6f73c8eb3a6d4ef109522509d1b0cb",
+  "artifact_kind": "release executable directory package (tauri build --no-bundle); not MSI or NSIS",
+  "bundled_node": {
+    "path": "src-tauri/target/release/node.exe",
+    "version": "v24.21.0"
+  },
+  "bundled_resource_sha256": {
+    "fake-worker.mjs": "d661f7cd834ba4cad937734004b9575c7643899d6c8aa56c6d8d2686fb6d7a82",
+    "node.exe": "ba4e6d110e8c1592a1ecd390f6b05f3da124b13871a5be62b341a07a853c6c32",
+    "sidecar.mjs": "2e3f121b3b35b1fd300e7e7d14501def34bc86965b483c440d58ddc316ef1aac"
+  },
+  "environment": {
+    "architecture": "64 位",
+    "webview2_version": "153.0.4234.48",
+    "windows_build": "22631",
+    "windows_caption": "Microsoft Windows 11 家庭中文版",
+    "windows_version": "10.0.22631"
+  },
+  "native_process_id": 111700,
+  "native_window": {
+    "handle": 7342276,
+    "title": "Relay P00 Desktop — Tauri WebView"
+  },
+  "process_exit_code": 0,
+  "residual_bundled_node_count": 0,
+  "host_checks": {
+    "frame_probe_csp_control": {
+      "result": "results/c529f5c43e4d4760b06d404494fe47d9.json",
+      "same_origin_frame_probe_executed": true,
+      "same_origin_frame_probe_bridge_available": true,
+      "same_origin_frame_probe_bootstrap_succeeded": false,
+      "same_origin_frame_probe_completion_reported": false,
+      "status": "PASSED"
+    },
+    "readiness_wrong_nonce": {
+      "expected": "release host rejects the controlled FakeWorker readiness failure before a usable instance exists",
+      "mode": "wrong-nonce",
+      "owned_node_process_ids_before_cleanup": [],
+      "process_exit_code": 101,
+      "status": "PASSED"
+    },
+    "readiness_exit_before_ready": {
+      "expected": "release host rejects the controlled FakeWorker readiness failure before a usable instance exists",
+      "mode": "exit-before-ready",
+      "owned_node_process_ids_before_cleanup": [],
+      "process_exit_code": 101,
+      "status": "PASSED"
+    },
+    "single_instance": {
+      "expected": "a duplicate release launch exits before starting a second sidecar; the existing host receives a focus attempt",
+      "contender_exit_code": 23,
+      "existing_node_process_ids": [
+        58744,
+        112336
+      ],
+      "existing_node_process_ids_after_contender": [
+        58744,
+        112336
+      ],
+      "focus_observation": "not asserted because this test launches the window hidden; the host calls SetForegroundWindow on duplicate detection",
+      "status": "PASSED"
+    },
+    "forced_host_termination": {
+      "expected": "forcing only the release host to exit causes the Job Object to terminate its sidecar and FakeWorker without harness tree cleanup",
+      "host_killed_without_tree_flag": true,
+      "owned_node_process_ids_before_host_kill": [
+        107272,
+        112816
+      ],
+      "owned_node_process_ids_after_job_wait": [],
+      "process_exit_code": -1,
+      "status": "PASSED"
+    }
+  },
+  "build_verification": {
+    "artifact_sha256": "daf058330540eafc4a00d8541a8841601e6f73c8eb3a6d4ef109522509d1b0cb",
+    "build_input_sha256": {
+      "package.json": "9c7b3f6916affa02d72f2c5a43a4a2d2ae2cbc89ee610323fa71e28aa2cda14f",
+      "pnpm-lock.yaml": "fe8a1925c9cbb35cd5ff1ae01c0b8b3128a50708b10380a3245a9e9bf5c3af10",
+      "tsconfig.json": "f938c5db9a857411a89335dcfb61fef17654eafdca80dc8f8bf96ef975b97990",
+      "vite.config.ts": "ec1f19963c9c0c054b31a14171f3790a65f42f937db047a182e1b0f31188e932",
+      "index.html": "c702765c7bbffd528f5284c7455d04d6fef8d48b9c81973c390781a98cd411df",
+      "public/frame-probe.html": "1dbb82368b9a0b337a3459e03370246d37e027485b736ccea9f60bdc1feae638",
+      "public/frame-probe.js": "bfc4e50646bff0e7659994f9dc78b66194075b2224bdefc8b5a639814f887442",
+      "src/main.ts": "0394f20ab9316f18d81fa08c751815db63175728a67be73b3a0a5e786127f821",
+      "src/App.vue": "fcf544dfe2c67c9775b5ea9c2f7a14930552cc9f45f51f2f456bb4b322685d08",
+      "src/style.css": "4483ba1a360b4d726b6ed99eca1ca857b903fef868260771e47fee5348234552",
+      "scripts/prepare-resources.ps1": "94d4e11a062bb623904f2e42546058038ffdf8fab0c58addb722687cdb145c73",
+      "src-tauri/Cargo.toml": "05718ed77527331245e0bc53661a002e1652021401d8a822f6bfeaafacc8452d",
+      "src-tauri/Cargo.lock": "a29eb7aefdc8a4639f81a93398c308b5c805bb575e0d0d40adff16acae256033",
+      "src-tauri/build.rs": "487059eaf8a947b80f20a9aacac038a5047b2ad69d2401b827376c67d6fe847f",
+      "src-tauri/tauri.conf.json": "0f13c868ef78731a6cbb5e4de0be060f153fa33cc4d0d42c73f14efcff581bc5",
+      "src-tauri/capabilities/default.json": "d712af6070e6875cf00db4a1fbe8b89d4985dfba8cdd6bb091789dc52006b847",
+      "src-tauri/src/main.rs": "686e8db6ec59d3faa3401864b94a41a6a3f3bed62ae04d5d1e6f3f098f13bbda",
+      "src-tauri/src/lib.rs": "2f0ecf9618f2d59811eff561c2d4588061aa0a39c32e2581b2e820163f965bd4",
+      "src-tauri/resources/sidecar.mjs": "2e3f121b3b35b1fd300e7e7d14501def34bc86965b483c440d58ddc316ef1aac",
+      "src-tauri/resources/fake-worker.mjs": "d661f7cd834ba4cad937734004b9575c7643899d6c8aa56c6d8d2686fb6d7a82",
+      "src-tauri/resources/node.exe": "ba4e6d110e8c1592a1ecd390f6b05f3da124b13871a5be62b341a07a853c6c32",
+      "src-tauri/icons/icon.ico": "fa2519ba00f708d4e17832ff95815af85e364930901403b938255bd2378accbf"
+    },
+    "bundled_resource_sha256": {
+      "fake-worker.mjs": "d661f7cd834ba4cad937734004b9575c7643899d6c8aa56c6d8d2686fb6d7a82",
+      "node.exe": "ba4e6d110e8c1592a1ecd390f6b05f3da124b13871a5be62b341a07a853c6c32",
+      "sidecar.mjs": "2e3f121b3b35b1fd300e7e7d14501def34bc86965b483c440d58ddc316ef1aac"
+    },
+    "manifest": "src-tauri/target/release/p00-build-manifest.json"
+  },
+  "sidecar": {
+    "dynamic_loopback_port": true,
+    "fake_worker_ready": true,
+    "node_resource_resolved": true,
+    "run_id": "eb9bdf756beb473e8e55df75355bb4c5",
+    "sidecar_node_version": "v24.21.0",
+    "sidecar_graceful_exit": true,
+    "sidecar_reaped": true,
+    "status": "AWAITING_PARENT_EXIT",
+    "same_origin_frame_probe_executed": false,
+    "same_origin_frame_probe_bootstrap_succeeded": false,
+    "same_origin_frame_probe_bridge_available": false,
+    "same_origin_frame_probe_bridge_reported": false,
+    "same_origin_frame_probe_completion_reported": false,
+    "same_origin_frame_probe_bootstrap_invocation_attempted": false,
+    "same_origin_frame_probe_navigation_blocked": true,
+    "same_origin_frame_navigation_blocked": true,
+    "verification": {
+      "bad_host_status": 421,
+      "bad_origin_status": 403,
+      "no_token_status": 401
+    },
+    "webview_reloaded_handshake": true,
+    "worker_instance_valid": true
+  },
+  "status": "PASSED",
+  "run_id": "eb9bdf756beb473e8e55df75355bb4c5",
+  "input_sha256": {
+    ".gitignore": "e3f57aa9581f7d40b82f59305c583c3330577b3ecfd248a2befec67f5a721727",
+    "README.md": "df5a47c4473ebadeda0ad7edeea2111fe93899d96c8b4e024059e97f96066377",
+    "package.json": "9c7b3f6916affa02d72f2c5a43a4a2d2ae2cbc89ee610323fa71e28aa2cda14f",
+    "pnpm-lock.yaml": "fe8a1925c9cbb35cd5ff1ae01c0b8b3128a50708b10380a3245a9e9bf5c3af10",
+    "tsconfig.json": "f938c5db9a857411a89335dcfb61fef17654eafdca80dc8f8bf96ef975b97990",
+    "vite.config.ts": "ec1f19963c9c0c054b31a14171f3790a65f42f937db047a182e1b0f31188e932",
+    "index.html": "c702765c7bbffd528f5284c7455d04d6fef8d48b9c81973c390781a98cd411df",
+    "public/frame-probe.html": "1dbb82368b9a0b337a3459e03370246d37e027485b736ccea9f60bdc1feae638",
+    "public/frame-probe.js": "bfc4e50646bff0e7659994f9dc78b66194075b2224bdefc8b5a639814f887442",
+    "src/main.ts": "0394f20ab9316f18d81fa08c751815db63175728a67be73b3a0a5e786127f821",
+    "src/App.vue": "fcf544dfe2c67c9775b5ea9c2f7a14930552cc9f45f51f2f456bb4b322685d08",
+    "src/style.css": "4483ba1a360b4d726b6ed99eca1ca857b903fef868260771e47fee5348234552",
+    "scripts/prepare-resources.ps1": "94d4e11a062bb623904f2e42546058038ffdf8fab0c58addb722687cdb145c73",
+    "scripts/build-release.ps1": "b110e229b7a37b7af9481aad787d60c1100a012092c67ef1e29cf2a08624989a",
+    "scripts/run-release.ps1": "db9bb463cbbdb4da687d2da6f859f5266ef96d16c2e4944ffc49a0e6c4e753d8",
+    "src-tauri/Cargo.toml": "05718ed77527331245e0bc53661a002e1652021401d8a822f6bfeaafacc8452d",
+    "src-tauri/Cargo.lock": "a29eb7aefdc8a4639f81a93398c308b5c805bb575e0d0d40adff16acae256033",
+    "src-tauri/build.rs": "487059eaf8a947b80f20a9aacac038a5047b2ad69d2401b827376c67d6fe847f",
+    "src-tauri/tauri.conf.json": "0f13c868ef78731a6cbb5e4de0be060f153fa33cc4d0d42c73f14efcff581bc5",
+    "src-tauri/capabilities/default.json": "d712af6070e6875cf00db4a1fbe8b89d4985dfba8cdd6bb091789dc52006b847",
+    "src-tauri/src/main.rs": "686e8db6ec59d3faa3401864b94a41a6a3f3bed62ae04d5d1e6f3f098f13bbda",
+    "src-tauri/src/lib.rs": "2f0ecf9618f2d59811eff561c2d4588061aa0a39c32e2581b2e820163f965bd4",
+    "src-tauri/resources/sidecar.mjs": "2e3f121b3b35b1fd300e7e7d14501def34bc86965b483c440d58ddc316ef1aac",
+    "src-tauri/resources/fake-worker.mjs": "d661f7cd834ba4cad937734004b9575c7643899d6c8aa56c6d8d2686fb6d7a82",
+    "src-tauri/resources/node.exe": "ba4e6d110e8c1592a1ecd390f6b05f3da124b13871a5be62b341a07a853c6c32",
+    "src-tauri/icons/icon.ico": "fa2519ba00f708d4e17832ff95815af85e364930901403b938255bd2378accbf",
+    "src-tauri/target/release/p00-build-manifest.json": "f36418bb2cb88d78b7a3e21363d69f0c4186adcf17db84df0a7b21d053933acf"
+  },
+  "source_revision": "unavailable: repository has no Git HEAD at run time"
+}

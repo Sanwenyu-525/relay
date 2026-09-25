@@ -1,0 +1,12 @@
+﻿scenario=Clean backlog=1
+session_id=7327da46998444f7b692083e41d4108b pg_port=8595 release_sha256=769a50a7051eadecc1cd472515f73ffd707a356b177ed30b0eb15ff751a8174b
+seeded_run_ids=cd1107fb-5177-450b-a24e-09b52d16000e seed_api_exit=0
+run_steps_exclusive_lock=1 lock_psql_pid=24232
+run_steps_ungranted_worker_lock_count=1
+before_kill run_id=cd1107fb-5177-450b-a24e-09b52d16000e command_id=cde51bb4-6e4a-466e-a76d-bc8892780088 launch_id=d8e7bc2a-cee6-456d-ad92-4eee037e7184 facts={"invocation_status":"ACTIVE","epoch":1,"worker_id":"worker:desktop:d8e7bc2a-cee6-456d-ad92-4eee037e7184:ec70299a-e354-435d-b538-bfc714f6772f","outbox_status":"CLAIMED","receipt_count":1,"command_count":1,"first_step_attempts":null}
+processes_before_kill=[{"pid":39944,"parent_pid":3060,"created_utc":"2026-09-24T03:27:48.4613270Z","executable":"D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\relay-desktop.exe"},{"pid":35884,"parent_pid":39944,"created_utc":"2026-09-24T03:27:48.4903780Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"},{"pid":37636,"parent_pid":39944,"created_utc":"2026-09-24T03:27:49.5360890Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"},{"pid":39552,"parent_pid":37636,"created_utc":"2026-09-24T03:27:49.9571950Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"}]
+after_kill host_api_supervisor_worker_alive=0 old_record_retained=True facts={"invocation_status":"ACTIVE","epoch":1,"worker_id":"worker:desktop:d8e7bc2a-cee6-456d-ad92-4eee037e7184:ec70299a-e354-435d-b538-bfc714f6772f","outbox_status":"CLAIMED","receipt_count":1,"command_count":1,"first_step_attempts":null}
+run_steps_exclusive_lock_after_release=0
+restart_bootstrap_elapsed_ms=2022 controlled_old_launch_claims=1
+after_restart new_host_pid=30944 old_record_retained=True facts={"invocation_status":"IDLE","epoch":2,"worker_id":"","outbox_status":"DONE","receipt_count":1,"command_count":1,"first_step_attempts":1}
+M03_REAL_HOST_RECOVERY=PASS scenario=Clean backlog=1 pg_stop=0 temporary_root_removed=True

@@ -1,0 +1,8 @@
+BEGIN
+projects|[{"id" : "6645c5cc-b031-40fc-923b-0588d9ee3e6a", "revision" : 0, "archived" : false}, {"id" : "070e3565-7753-4e1f-9a9e-9414399f72ad", "revision" : 0, "archived" : false}]
+tasks|[{"id" : "a97a9308-7210-4bb2-b6a1-f4a54e50e34d", "project_id" : "6645c5cc-b031-40fc-923b-0588d9ee3e6a", "status" : "READY", "revision" : 1, "acceptance_revision" : 1, "current_completion_id" : null}, {"id" : "ab53488c-eab6-4127-bf22-ff8d15a5037e", "project_id" : "070e3565-7753-4e1f-9a9e-9414399f72ad", "status" : "READY", "revision" : 5, "acceptance_revision" : 2, "current_completion_id" : null}]
+task_acceptances|[{"task_id" : "a97a9308-7210-4bb2-b6a1-f4a54e50e34d", "acceptance_revision" : 1}, {"task_id" : "ab53488c-eab6-4127-bf22-ff8d15a5037e", "acceptance_revision" : 1}, {"task_id" : "ab53488c-eab6-4127-bf22-ff8d15a5037e", "acceptance_revision" : 2}]
+artifact_versions|[{"id" : "24dbf199-b4d3-4c5a-8389-bef6ef7252cf", "artifact_id" : "de891a9d-f859-40fd-82d8-a512741fd7be", "task_id" : "ab53488c-eab6-4127-bf22-ff8d15a5037e", "version_number" : 1, "size" : 43, "content_sha256" : "ee28bbe497e8e3db238bca99ddc9a7f9fcb6be4ae8d0216097ded5dc9fe278a4"}]
+human_acceptances|[{"id" : "25b5abad-143c-49d9-b392-bf78d26e4a26", "task_id" : "ab53488c-eab6-4127-bf22-ff8d15a5037e", "acceptance_revision" : 1, "accepted_version_refs" : ["24dbf199-b4d3-4c5a-8389-bef6ef7252cf"]}]
+completion_records|[{"id" : "bfcd88b8-f80b-4403-9382-233de51ce4f4", "task_id" : "ab53488c-eab6-4127-bf22-ff8d15a5037e", "acceptance_revision" : 1, "human_acceptance_id" : "25b5abad-143c-49d9-b392-bf78d26e4a26"}]
+COMMIT

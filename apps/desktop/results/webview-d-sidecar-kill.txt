@@ -1,0 +1,1 @@
+session_id=882b40d69f094932a4903126e1c200e7 stopped_node_pid=29760 host_alive=True node_gone=True passed=True

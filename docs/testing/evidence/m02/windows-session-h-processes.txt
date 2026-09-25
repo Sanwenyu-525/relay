@@ -1,0 +1,18 @@
+{
+    "session_id":  "11b8a552500d483db755ce5c38d5ca8d",
+    "release_sha256":  "ffa3cf49c7e7588f7a88e3e2411b132db7b285f01a9b2805f05da59448e2c2bf",
+    "host":  {
+                 "process_id":  36912,
+                 "parent_process_id":  29584,
+                 "creation_utc":  "2026-09-23T18:15:36.6573770Z",
+                 "executable_path":  "D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\relay-desktop.exe"
+             },
+    "nodes":  [
+                  {
+                      "process_id":  27792,
+                      "parent_process_id":  36912,
+                      "creation_utc":  "2026-09-23T18:15:36.6739320Z",
+                      "executable_path":  "D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"
+                  }
+              ]
+}

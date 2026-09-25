@@ -1,0 +1,17 @@
+{
+  "release_sha256": "2cd9d885703dd37997c3eafb71650e846446d411860f241f424cdf512480dd67",
+  "session_id": "7ad7b41e88944806929d4224cc4bc7c6",
+  "window": {
+    "app": "process:D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\relay-desktop.exe",
+    "id": 2624404,
+    "title": "Relay Agent"
+  },
+  "document_text": "跳到主要内容\nWorkflow OS\n今日\n项目\n当前页\n任务\n知识\n动态\n待审\n1\n连接\n设置\n工作空间\n项目\n2026-09-24　星期四\n示例数据\n桌面本机服务未就绪。当前仍为示例数据；请检查连接与服务状态。\n项目\n每一个长期目标，都有可继续的下一步。\n新建项目\n进行中 (3)\n已归档 (1)\n按项目名称搜索\n￼\n人机协作工作流研究\n研究可追溯、可恢复的人与 AI 协作方法\n论文\n文献研究\n尚未明确\nWorkflow OS\n构建面向个人的长期项目工作流系统\n开发\n设计\n验证人工闭环\n个人知识整理\n建立可持续的个人知识体系\n通用\n执行\n整理研究笔记\n项目阶段由你显式设置，系统不按任务完成数量自动跳阶段；列表中的下一步来自项目状态。\n查看项目摘要\n交互预览 · 示例数据，刷新后重置",
+  "focused_element": "14 文档 Workflow OS · 交互预览 Value: http://tauri.localhost/projects ID: RootWebArea",
+  "screenshot_observation": "black screenshot with pointer; no visual acceptance",
+  "activation_attempts": [
+    "failed to activate captured window",
+    "failed to activate captured window"
+  ],
+  "inputs_performed": false
+}

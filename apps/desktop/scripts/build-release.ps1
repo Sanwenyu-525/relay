@@ -1,0 +1,277 @@
+# Build a release-directory package from the pinned Node, pnpm and MSVC toolchain.
+# Keep this script ASCII-only for Windows PowerShell 5.1.
+[CmdletBinding()]
+param([switch]$SkipInstall)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$desktopRoot = Split-Path -Parent $PSScriptRoot
+$appsRoot = Split-Path -Parent $desktopRoot
+$workspaceRoot = Split-Path -Parent $appsRoot
+$tauriRoot = Join-Path $desktopRoot 'src-tauri'
+$resourceRoot = Join-Path $tauriRoot 'resources'
+$apiStage = Join-Path $resourceRoot 'api'
+$lockedStage = Join-Path $resourceRoot 'api-lock-verify'
+$node = Join-Path $workspaceRoot '.research\runtime-cache\node-v24.21.0-win-x64\node.exe'
+$corepack = Join-Path (Split-Path -Parent $node) 'node_modules\corepack\dist\corepack.js'
+$vsDevCmd = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat'
+$workbenchRoot = Join-Path $appsRoot 'workbench'
+$cargoReleaseRoot = Join-Path $tauriRoot 'target\release'
+$releaseRoot = Join-Path $desktopRoot 'release'
+$exe = Join-Path $releaseRoot 'relay-desktop.exe'
+
+foreach ($path in @($node, $corepack, $vsDevCmd, (Join-Path $workbenchRoot 'package.json'))) {
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required build input is missing: $path" }
+}
+if ((& $node --version) -ne 'v24.21.0') { throw 'The bundled Node must be v24.21.0' }
+$env:PATH = "$(Split-Path -Parent $node);$env:PATH"
+
+function Invoke-Pnpm {
+  param([string]$Directory, [string[]]$Arguments)
+  Push-Location $Directory
+  try {
+    & $node $corepack 'pnpm@9.15.9' @Arguments
+    if ($LASTEXITCODE -ne 0) { throw "pnpm $($Arguments -join ' ') exited $LASTEXITCODE" }
+  } finally { Pop-Location }
+}
+
+function Get-BuildInputFingerprint {
+  $inputs = @()
+  foreach ($directory in @('apps\api\src', 'apps\api\migrations', 'apps\workbench\src', 'apps\desktop\src-tauri\src', 'apps\desktop\scripts')) {
+    $inputs += @(Get-ChildItem -LiteralPath (Join-Path $workspaceRoot $directory) -Recurse -File)
+  }
+  foreach ($relative in @(
+    'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'apps\api\package.json', 'apps\api\tsconfig.json',
+    'apps\workbench\package.json', 'apps\workbench\pnpm-lock.yaml', 'apps\workbench\tsconfig.json',
+    'apps\workbench\vite.config.ts', 'apps\workbench\index.html', 'apps\desktop\package.json',
+    'apps\desktop\pnpm-lock.yaml', 'apps\desktop\pnpm-workspace.yaml',
+    'apps\desktop\src-tauri\Cargo.toml', 'apps\desktop\src-tauri\Cargo.lock',
+    'apps\desktop\src-tauri\tauri.conf.json', 'apps\desktop\src-tauri\build.rs',
+    'apps\desktop\src-tauri\capabilities\default.json', 'apps\desktop\src-tauri\icons\icon.ico'
+  )) { $inputs += Get-Item -LiteralPath (Join-Path $workspaceRoot $relative) }
+  $lines = foreach ($file in @($inputs | Sort-Object FullName)) {
+    "$($file.FullName)|$((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash)"
+  }
+  $body = [Text.Encoding]::UTF8.GetBytes(($lines -join "`n"))
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { return (($sha.ComputeHash($body) | ForEach-Object { $_.ToString('x2') }) -join '') }
+  finally { $sha.Dispose() }
+}
+
+$buildInputFingerprint = Get-BuildInputFingerprint
+
+if (-not $SkipInstall) {
+  Invoke-Pnpm $workspaceRoot @('install', '--frozen-lockfile')
+  Invoke-Pnpm $workbenchRoot @('install', '--frozen-lockfile', '--ignore-workspace')
+  Invoke-Pnpm $desktopRoot @('install', '--frozen-lockfile', '--ignore-workspace')
+}
+Invoke-Pnpm $workspaceRoot @('--filter', '@relay-agent/api', 'build')
+Invoke-Pnpm $workbenchRoot @('build')
+
+function Remove-GeneratedStage {
+  param([string]$Stage)
+  if (-not (Test-Path -LiteralPath $Stage)) { return }
+  $resolvedRoot = [IO.Path]::GetFullPath($resourceRoot).TrimEnd('\')
+  $resolvedStage = [IO.Path]::GetFullPath($Stage)
+  if ($resolvedStage -ne (Join-Path $resolvedRoot 'api') -and
+      $resolvedStage -ne (Join-Path $resolvedRoot 'api-lock-verify')) {
+    throw 'Refusing to remove an unexpected API staging path'
+  }
+  if ((Get-Item -LiteralPath $resolvedStage -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+    throw 'Refusing to remove an API staging link'
+  }
+  # Enumerate without following junctions. Use the extended path so deep pnpm
+  # store entries remain visible on Windows PowerShell 5.1.
+  $extendedStage = '\\?\' + $resolvedStage
+  $pending = New-Object 'System.Collections.Generic.Stack[string]'
+  $pending.Push($extendedStage)
+  $links = @()
+  while ($pending.Count -gt 0) {
+    foreach ($entry in [IO.Directory]::EnumerateFileSystemEntries($pending.Pop())) {
+      $attributes = [IO.File]::GetAttributes($entry)
+      if ($attributes -band [IO.FileAttributes]::ReparsePoint) {
+        $links += Get-Item -LiteralPath $entry -Force
+      } elseif ($attributes -band [IO.FileAttributes]::Directory) {
+        $pending.Push($entry)
+      }
+    }
+  }
+  foreach ($link in $links) {
+    $target = [string]$link.Target
+    if (-not [IO.Path]::IsPathRooted($target)) { $target = Join-Path $link.DirectoryName $target }
+    $resolvedTarget = [IO.Path]::GetFullPath($target)
+    if (-not $resolvedTarget.StartsWith($resolvedStage.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+      $selfLink = Join-Path $resolvedStage 'node_modules\.pnpm\node_modules\@relay-agent\api'
+      $sourceApi = [IO.Path]::GetFullPath((Join-Path $appsRoot 'api'))
+      if ($link.FullName.Substring(4) -ne $selfLink -or $resolvedTarget -ne $sourceApi) {
+        throw 'Refusing to remove an API staging directory with unexpected external links'
+      }
+    }
+  }
+  # Delete verified links themselves first, then only the verified stage tree.
+  foreach ($link in $links) {
+    if ($link.Attributes -band [IO.FileAttributes]::Directory) {
+      [IO.Directory]::Delete($link.FullName)
+    } else { [IO.File]::Delete($link.FullName) }
+  }
+  [IO.Directory]::Delete($extendedStage, $true)
+}
+New-Item -ItemType Directory -Path $resourceRoot -Force | Out-Null
+Remove-GeneratedStage $apiStage
+Remove-GeneratedStage $lockedStage
+Invoke-Pnpm $workspaceRoot @('--filter', '@relay-agent/api', 'deploy', '--prod', $lockedStage)
+Invoke-Pnpm $workspaceRoot @('--config.node-linker=hoisted', '--filter', '@relay-agent/api', 'deploy', '--prod', $apiStage)
+
+function Inspect-InstalledPackages {
+  param([string]$Stage)
+  # The pnpm virtual store can exceed Windows PowerShell 5.1's path limit.
+  $inspect = @'
+const fs = require('node:fs');
+const path = require('node:path');
+const root = process.argv[1];
+const pending = [path.join(root, 'node_modules')];
+const versions = new Set();
+const links = [];
+while (pending.length) {
+  const directory = pending.pop();
+  for (const entry of fs.readdirSync(path.toNamespacedPath(directory), { withFileTypes: true })) {
+    const file = path.join(directory, entry.name);
+    if (entry.isSymbolicLink()) { links.push(file); continue; }
+    if (entry.isDirectory()) { pending.push(file); continue; }
+    if (entry.name !== 'package.json') continue;
+    const pkg = JSON.parse(fs.readFileSync(path.toNamespacedPath(file), 'utf8'));
+    if (pkg.name && pkg.version) versions.add(`${pkg.name}@${pkg.version}`);
+  }
+}
+process.stdout.write(JSON.stringify({ versions: [...versions].sort(), links }));
+'@
+  $output = & $node '-e' $inspect $Stage
+  if ($LASTEXITCODE -ne 0) { throw "Installed package inspection failed: $Stage" }
+  return ($output | ConvertFrom-Json)
+}
+$lockedInfo = Inspect-InstalledPackages $lockedStage
+$deployInfo = Inspect-InstalledPackages $apiStage
+$lockedVersions = @($lockedInfo.versions)
+$deployVersions = @($deployInfo.versions)
+if ($lockedVersions.Count -eq 0 -or ($lockedVersions -join '|') -ne ($deployVersions -join '|')) {
+  throw 'The hoisted API dependency versions differ from the frozen-lock deployment'
+}
+$stageLinks = @($deployInfo.links)
+if ($stageLinks.Count -ne 0) { throw 'The bundled API node_modules still contains links' }
+Remove-GeneratedStage $lockedStage
+Copy-Item -LiteralPath $node -Destination (Join-Path $resourceRoot 'node.exe') -Force
+
+$stageEntries = @(Get-ChildItem -LiteralPath $apiStage -Force | Select-Object -ExpandProperty Name | Sort-Object)
+$expectedEntries = @('dist', 'migrations', 'node_modules', 'package.json')
+if (($stageEntries -join '|') -ne ($expectedEntries -join '|')) {
+  throw "API resource inventory is not the expected deploy set: $($stageEntries -join ', ')"
+}
+foreach ($required in @('dist\src\main.js', 'dist\src\worker\supervisor-main.js', 'dist\src\worker\main.js', 'migrations\0001_v001_human_core.sql', 'node_modules\fastify\package.json', 'node_modules\pg\package.json', 'node_modules\kysely\package.json', 'node_modules\@sinclair\typebox\package.json', 'package.json')) {
+  if (-not (Test-Path -LiteralPath (Join-Path $apiStage $required))) { throw "Incomplete API resource: $required" }
+}
+$supervisorProtocolSource = Get-Content -LiteralPath (Join-Path $apiStage 'dist\src\worker\supervisor-main.js') -Raw
+if (-not $supervisorProtocolSource.Contains('relay-desktop-supervisor-v1')) {
+  throw 'The bundled supervisor lacks the required desktop recovery protocol'
+}
+$forbidden = @(Get-ChildItem -LiteralPath $resourceRoot -Recurse -Force -File | Where-Object {
+  $_.Name -eq '.env' -or $_.Name -like '.env.*' -or $_.Name -like '*.pem' -or $_.Name -like '*.key'
+})
+if ($forbidden.Count -ne 0) { throw 'The desktop resources contain configuration or credential-like files' }
+
+$env:RUSTUP_TOOLCHAIN = 'stable-x86_64-pc-windows-msvc'
+cmd.exe /d /s /c "call `"$vsDevCmd`" -arch=x64 >nul && set" | ForEach-Object {
+  $name, $value = $_ -split '=', 2
+  if ($name -and $null -ne $value) { Set-Item -Path "Env:$name" -Value $value }
+}
+Invoke-Pnpm $desktopRoot @('exec', 'tauri', 'build', '--no-bundle')
+if ((Get-BuildInputFingerprint) -ne $buildInputFingerprint) {
+  throw 'Build input changed during release compilation; artifact manifest was not published'
+}
+
+$compiledExe = Join-Path $cargoReleaseRoot 'relay-desktop.exe'
+foreach ($required in @($compiledExe, (Join-Path $cargoReleaseRoot 'node.exe'), (Join-Path $cargoReleaseRoot 'api\dist\src\main.js'), (Join-Path $cargoReleaseRoot 'api\dist\src\worker\supervisor-main.js'), (Join-Path $cargoReleaseRoot 'api\dist\src\worker\main.js'))) {
+  if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Tauri build output is incomplete: $required" }
+}
+if (Test-Path -LiteralPath $releaseRoot) {
+  $resolvedDesktop = [IO.Path]::GetFullPath($desktopRoot).TrimEnd('\')
+  $resolvedRelease = [IO.Path]::GetFullPath($releaseRoot)
+  $releaseItem = Get-Item -LiteralPath $releaseRoot -Force
+  if ($resolvedRelease -ne (Join-Path $resolvedDesktop 'release') -or
+      ($releaseItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    throw 'Refusing to replace an unexpected release directory'
+  }
+  Remove-Item -LiteralPath $resolvedRelease -Recurse -Force
+}
+New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
+Copy-Item -LiteralPath $compiledExe -Destination $exe
+Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'node.exe') -Destination (Join-Path $releaseRoot 'node.exe')
+Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'api') -Destination $releaseRoot -Recurse
+
+$releaseEntries = @(Get-ChildItem -LiteralPath $releaseRoot -Force | Select-Object -ExpandProperty Name | Sort-Object)
+if (($releaseEntries -join '|') -ne (@('api', 'node.exe', 'relay-desktop.exe') -join '|')) {
+  throw "Final release contains unexpected top-level entries: $($releaseEntries -join ', ')"
+}
+
+foreach ($required in @($exe, (Join-Path $releaseRoot 'node.exe'), (Join-Path $releaseRoot 'api\dist\src\main.js'), (Join-Path $releaseRoot 'api\dist\src\worker\supervisor-main.js'), (Join-Path $releaseRoot 'api\dist\src\worker\main.js'), (Join-Path $releaseRoot 'api\migrations\0001_v001_human_core.sql'))) {
+  if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Release package is incomplete: $required" }
+}
+if (Test-Path -LiteralPath (Join-Path $releaseRoot 'api\.env')) { throw 'Release package includes a dotenv file' }
+
+$releaseApiEntries = @(Get-ChildItem -LiteralPath (Join-Path $releaseRoot 'api') -Force | Select-Object -ExpandProperty Name | Sort-Object)
+if (($releaseApiEntries -join '|') -ne ($expectedEntries -join '|')) { throw 'Final API release inventory differs from the reviewed staging inventory' }
+$releaseForbidden = @(Get-ChildItem -LiteralPath (Join-Path $releaseRoot 'api') -Recurse -Force -File | Where-Object {
+  $_.Name -eq '.env' -or $_.Name -like '.env.*' -or $_.Name -like '*.pem' -or $_.Name -like '*.key'
+})
+if ($releaseForbidden.Count -ne 0) { throw 'Final API release includes configuration or credential-like files' }
+
+function Get-FileHashes {
+  param([string]$Root, [string[]]$Subdirectories, [string[]]$Files)
+  $hashes = [ordered]@{}
+  $rootPrefix = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+  foreach ($subdirectory in $Subdirectories) {
+    $directory = [IO.Path]::GetFullPath((Join-Path $Root $subdirectory))
+    if (-not $directory.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Hash directory escaped its root' }
+    foreach ($file in @([IO.Directory]::EnumerateFiles(('\\?\' + $directory), '*', [IO.SearchOption]::AllDirectories) | Sort-Object)) {
+      $normal = $file.Substring(4)
+      if (-not $normal.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Hash input escaped its root' }
+      $relative = $normal.Substring($rootPrefix.Length).Replace('\', '/')
+      $hashes[$relative] = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+  }
+  foreach ($file in $Files) {
+    $absolute = Join-Path $Root $file
+    if (-not (Test-Path -LiteralPath $absolute -PathType Leaf)) { throw "Missing hash input: $absolute" }
+    $hashes[$file.Replace('\', '/')] = (Get-FileHash -LiteralPath $absolute -Algorithm SHA256).Hash.ToLowerInvariant()
+  }
+  return $hashes
+}
+
+$sourceHashes = [ordered]@{}
+$sourceHashes['desktop'] = Get-FileHashes $desktopRoot @('src-tauri\src', 'scripts') @(
+  'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'src-tauri\Cargo.toml', 'src-tauri\Cargo.lock',
+  'src-tauri\build.rs', 'src-tauri\tauri.conf.json', 'src-tauri\capabilities\default.json',
+  'src-tauri\icons\icon.ico'
+)
+$sourceHashes['api'] = Get-FileHashes (Join-Path $appsRoot 'api') @('src', 'migrations') @('package.json', 'tsconfig.json')
+$sourceHashes['workbench'] = Get-FileHashes $workbenchRoot @('src') @('package.json', 'pnpm-lock.yaml', 'vite.config.ts', 'tsconfig.json', 'index.html')
+$sourceHashes['workspace_lock'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'pnpm-lock.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
+$sourceHashes['workspace_manifest'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'pnpm-workspace.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
+$resourceHashes = Get-FileHashes $releaseRoot @('api') @('node.exe')
+
+$manifest = [ordered]@{
+  schema_version = 1
+  node_version = (& $node --version)
+  tauri_crate = '2.11.6'
+  tauri_cli = '2.11.5'
+  build_input_fingerprint_sha256 = $buildInputFingerprint
+  artifact_sha256 = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+  source_sha256 = $sourceHashes
+  resource_file_sha256 = $resourceHashes
+  resource_inventory = $releaseApiEntries
+  forbidden_config_files = $releaseForbidden.Count
+}
+$manifestPath = Join-Path $releaseRoot 'desktop-build-manifest.json'
+$manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+Write-Host "Release directory: $releaseRoot"
+Write-Host "Executable SHA256: $($manifest.artifact_sha256)"
+Write-Host "Resource files hashed: $($resourceHashes.Count); forbidden config files: $($releaseForbidden.Count)"

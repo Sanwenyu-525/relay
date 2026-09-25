@@ -1,0 +1,17 @@
+Relay Agent: Relay Agent is already open
+{
+    "session_id":  "56b76f571ab143db90a2b1894b54db1a",
+    "mode":  "SecondInstance",
+    "contender_pid":  29016,
+    "contender_exit_code":  23,
+    "original_node_ids":  [
+                              30876
+                          ],
+    "node_ids_after":  [
+                           30876
+                       ],
+    "contender_node_ids_after_exit":  [
+
+                                      ],
+    "passed":  true
+}

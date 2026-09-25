@@ -1,0 +1,8 @@
+manifest_sha256=65189178e5d040a2570fbe6c682a0d38f83414e5469ffcfdf8bf3582724a1ea7
+exe_sha256=090be139084062914b4b85974bfed1d1e779658adfe16d1ac25361091f0a2bed
+exe_matches_manifest=True
+resource_entries=13203
+resource_files_checked=13203
+resource_mismatches=0
+forbidden_config_names=0
+bad_files=

@@ -1,0 +1,28 @@
+session_id=7e12ce13d05e4370bff745620ea8379d pg_port=4461
+graph_install_exit=0 runtime_migrator_url_cleared=true graph_schema=relay_graph_v1
+exe_sha256=ad4a40cd08502c3a5013f081acc08bce0bed4bfb671991f91609979f52086a25 packaged_0013_sha256=5c1fcc64211a0441f975f864169b3d683d889a3723cb9aa0e7bc2517ceee8ebb
+manifest_sha256=867c2cdfa9ff9a0752073bede4088e36131b43e9fc10c83537564f7c071a8538
+packaged_worker_sha256=f68196c5666cf317e90af1ad5cfa9e95dbb9d0967882ad7b924eb4fe09625186
+packaged_graph_installer_sha256=5127bbd5c7c677010d481ade658ac33768ca7e15fd52b3a4388136c51dbe2081
+packaged_mock_gateway_sha256=57a337da289f6d2e74243e7049682c41a6456f65f751cb429ef59736ee5dc753
+initial_host_pid=31596 cdp_port=4531 bootstrap=ready
+authorized_gateway_config project_id=0effe955-6956-488e-89c1-daec1ae4e07f connection_id=b718b167-c85f-414e-a158-02a28135012d policy_id=7cc6ea5c-60f4-4b7e-a2e6-92bdd28492d6 resource_id=0ca94b9f-cc74-4929-9348-cea31da24e15 policy=ASK
+isolated_pg_latch_backend_pid=24864 cluster_port=4461
+processes host=31596 api=28792 supervisor=42628 worker=9996
+processes host=31596 api=28792 supervisor=42628 worker=9996
+independent_worker_active pid=9996 parent_supervisor_pid=42628 worker_id=worker:desktop:f3a61a6e-4dd9-469a-806f-790d5e157a97:0ad330a8-ecce-4610-85c9-b247bd8d0a34 epoch=1
+webview_created project_id=0effe955-6956-488e-89c1-daec1ae4e07f task_id=9db5f3d9-8f56-41be-9070-442be0df0d41 api_delegate_run_id=83ee09a2-55e3-439b-a4b9-d5b27521d3f8 frozen_operation_id=d41691b7-3793-4907-bc50-db1c8321a34f
+before_action_context={"task_status":"WAITING","task_revision":"3","run_status":"WAITING_APPROVAL","manifests":[{"hash":"6bc105b2c6f2fdb829ec47f8534c70d9e8a443aad609beb38ed9507c07c6bacd","task_revision":"2","project_revision":"0","context_revision":"0","authority_revision":"3"}]}
+processes host=31596 api=28792 supervisor=42628 worker=already_exited
+host_api_supervisor_stopped=true active_worker_if_any_stopped=true
+reopened_host_pid=42220 cdp_port=4923 bootstrap=ready
+after_action_decision_context={"task_status":"WAITING","task_revision":"3","run_status":"WAITING_APPROVAL","manifests":[{"hash":"6bc105b2c6f2fdb829ec47f8534c70d9e8a443aad609beb38ed9507c07c6bacd","task_revision":"2","project_revision":"0","context_revision":"0","authority_revision":"3"}]}
+mid_action_context={"task_status":"WAITING","task_revision":"5","run_status":"WAITING_APPROVAL","manifests":[{"hash":"6bc105b2c6f2fdb829ec47f8534c70d9e8a443aad609beb38ed9507c07c6bacd","task_revision":"2","project_revision":"0","context_revision":"0","authority_revision":"3"}]}
+mid_attempt_diagnostics=[{"id":"edc4c26c-b022-424f-b2da-502d5ba45068","step_kind":"BUILD_CONTEXT","attempt_number":"1","attempt_key":"BUILD_CONTEXT#1","status":"SUCCEEDED","claim_epoch":"1","worker_id":null,"started_at":"2026-09-25T08:22:43.215529+08:00","finished_at":"2026-09-25T08:22:44.001637+08:00","step_status":"SUCCEEDED","step_revision":"2","result_sha256":"e1d2cf9765308736f402e7464f74ef011b14aa11cc36db575853f65b9d41752f","step_result_sha256":"e1d2cf9765308736f402e7464f74ef011b14aa11cc36db575853f65b9d41752f"},{"id":"1c48e3b5-ddf8-4e66-a36a-bdb5a759e75a","step_kind":"DRAFT","attempt_number":"1","attempt_key":"DRAFT#1","status":"SUCCEEDED","claim_epoch":"1","worker_id":null,"started_at":"2026-09-25T08:22:44.024491+08:00","finished_at":"2026-09-25T08:22:44.034967+08:00","step_status":"SUCCEEDED","step_revision":"2","result_sha256":"3549489ec7eac7fc60d29bfdcd3ea69a7dc99da30932dde0dc1b1ce712097ea0","step_result_sha256":"3549489ec7eac7fc60d29bfdcd3ea69a7dc99da30932dde0dc1b1ce712097ea0"},{"id":"4eba6b7f-3120-445e-b0a8-eefdf66d49bd","step_kind":"PERSIST_CANDIDATE","attempt_number":"1","attempt_key":"PERSIST_CANDIDATE#1","status":"SUCCEEDED","claim_epoch":"1","worker_id":null,"started_at":"2026-09-25T08:22:53.055883+08:00","finished_at":"2026-09-25T08:22:53.098443+08:00","step_status":"SUCCEEDED","step_revision":"2","result_sha256":"879bc0682d96686fdacd5bd4014bd6feb5f7bb1a737160b0d60c0b588628f33a","step_result_sha256":"879bc0682d96686fdacd5bd4014bd6feb5f7bb1a737160b0d60c0b588628f33a"},{"id":"72c80725-3afd-4221-bd0a-56cf95719309","step_kind":"VERIFY","attempt_number":"1","attempt_key":"VERIFY#1","status":"SUCCEEDED","claim_epoch":"1","worker_id":null,"started_at":"2026-09-25T08:22:53.118248+08:00","finished_at":"2026-09-25T08:22:53.125496+08:00","step_status":"SUCCEEDED","step_revision":"2","result_sha256":"6b7ddc6d41a6766d27ad83be308d2363c8895858bfe836265089beb1966c8f42","step_result_sha256":"6b7ddc6d41a6766d27ad83be308d2363c8895858bfe836265089beb1966c8f42"}]
+action_approved review_id=63dc1cdf-580d-4475-9c43-23a2fd2daf1a decision_id=c53b56a5-441e-4b5f-b57a-c3f0224ab0bb operation_id=d41691b7-3793-4907-bc50-db1c8321a34f invocation_count=1 fake_marker_sha256=9989badcf8ef6e116522525a251a085d844e2d7bbd37f20033a3a980785a95b0 criterion_review_id=62d1b19e-9ff3-4cb2-b782-88a8e6e14e45
+action_review_resume commands=START:1:DONE,RESUME:2:DONE,RESUME:3:DONE before_seq=17 mid_seq=35 final_seq=43 completion_records=1 artifact_versions=1 gateway_invocations=1
+graph_thread=83ee09a2-55e3-439b-a4b9-d5b27521d3f8 checkpoints=6->10->12 interrupts=1->2->2 independent_worker_id=worker:desktop:f3a61a6e-4dd9-469a-806f-790d5e157a97:0ad330a8-ecce-4610-85c9-b247bd8d0a34
+webview_created_project_task=true api_config_and_delegate=true webview_approved_and_accepted=true bearer_isolated=true runtime_migrator_sessions=0
+postgres_stop_exit=0 temporary_root_removed=True
+M03_ACTION_APPROVAL_WEBVIEW_REAL_PG=PASS
+exit_code=0

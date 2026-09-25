@@ -1,0 +1,90 @@
+M03 SSE / real WebView2 same-page reconnect / disposable PostgreSQL — 2026-09-24
+Status: READY_FOR_ACCEPTANCE of this bounded development test, not independent
+M03 or G01–G08 acceptance. No real Provider or installer was used.
+
+Frozen release binding: EXE SHA-256
+b49af3bacd622587a68337ac7448a2d60201a5102502fb8a47593718ef4ffbba
+Packaged SSE API SHA-256
+df970326c34284cc79874877dd4b0e997afad118adf07e6fc070ce67374e921b
+Packaged 0012 migration SHA-256
+3a26be8ad9fe420d597afd414abd7df1aa6edc110c12fcafd6c13ef0be527baf
+This is the previously accepted SSE combination package. The backend has
+since advanced to 0013; do not rebuild this release from the current tree.
+
+Reproduce from D:\Develop\Relay-Agent with portable Node 24.21.0:
+  & '.research\runtime-cache\node-v24.21.0-win-x64\node.exe' apps/desktop/tests/m03-sse-same-page-reconnect.mjs b49af3bacd622587a68337ac7448a2d60201a5102502fb8a47593718ef4ffbba df970326c34284cc79874877dd4b0e997afad118adf07e6fc070ce67374e921b 3a26be8ad9fe420d597afd414abd7df1aa6edc110c12fcafd6c13ef0be527baf
+The test exits 0 only after verified PG stop and disposable-root deletion.
+The final raw run is m03-sse-same-page-final-v2.console.log, exit 0.
+
+Test method: start a disposable PostgreSQL 18.6 cluster using the existing
+desktop acceptance helper; seed one real Task/Run/Delegate through the
+packaged API; hold BUILD_CONTEXT's run_steps row to keep the real Mock Worker
+active at event seq 1. Launch the visible packaged Tauri/WebView2 host and
+leave the Run page open. Wait for its original SSE HTTP response 200 and two
+authoritative Run GETs, showing the first durable hint was consumed.
+
+An admin test session then holds ACCESS EXCLUSIVE on run_events. The frozen
+API's next listAfter poll blocks. The test selects exactly one PG backend by
+database relay_m02_acceptance, relay_app role, loopback client address,
+active Lock wait, SQL shape "select run_id, seq, kind, created_at from
+run_events", and pg_blocking_pids containing that one test lock backend.
+It captures backend_start and rechecks all predicates in the same SQL call
+that issues pg_terminate_backend. No wildcard termination is attempted.
+This SQL only locks and ends a disposable connection; it never writes a
+domain fact. The failed query makes the existing SSE API destroy its response.
+
+Observed final run, session 4fbfa76ea704485b8426c1ace969b368:
+- PG port 7343; row-lock backend PID 6704; run_events table-lock backend
+  PID 34584. Exact blocked SSE API backend PID 27052, start time in epoch
+  microseconds 1790227449895927. Its role/database/query/blocker predicates
+  matched uniquely immediately before termination.
+- Original WebView SSE request after=0 returned 200 then closed after the
+  target PG backend ended. The page URL stayed on the same Run, the Run view
+  stayed visible, and its own client issued exactly one new after=1 request.
+  The test never submits a replacement SSE request on behalf of RunView.
+- Host 20316, API 11240 and supervisor 26656 stayed at their original PID
+  and process creation time. The API continued serving the Run GET.
+- A Playwright route delayed only RunView's already-issued after=1 request.
+  This made the replay window deterministic; it did not synthesize an SSE
+  frame or business result. After the table lock and Worker row lock were
+  released, the real Mock Worker committed event seq 2..31 through the
+  existing domain path while that HTTP request was pending. The route then
+  forwarded the original request. The API returned SSE 200 from after=1;
+  a further authoritative Run GET occurred and WebView showed Run revision 6.
+  The original command stayed in place, and control request count stayed 0.
+- The bearer was absent from WebView request URLs and host log. Cleanup
+  reported postgres_stop_exit=0 and temporary_root_removed=True.
+
+Red/green history, without hiding test-harness errors:
+- attempt1 exit 1: PostgreSQL inet::text displayed 127.0.0.1/32 while the
+  harness expected 127.0.0.1; the exact target was otherwise located. PG
+  stopped and its disposable root was removed.
+- attempt2 exit 1: the exact PG termination, original socket close and
+  same-page after=1 were observed, but the harness incorrectly parsed the
+  Run GET as envelope.result. PG stopped and its disposable root was removed.
+- attempt3 exit 0: full server-side disconnect, original-cursor replay,
+  authoritative snapshot and cleanup passed.
+- final exit 0: same path plus one-original-SSE-subscription and exactly
+  one original Run command assertions passed.
+- final-v2 exit 0: additionally ties each test-held row/table lock release
+  to its original backend start time, application_name, role, database and
+  granted relation/mode; any changed identity keeps the disposable cluster
+  for manual inspection instead of terminating a reused PID.
+
+Node 24 --check on the final test script exited 0. The repository docs check
+also exited 0 (77 Markdown, 1171 links, 940 anchors, 126 design tokens and
+29 contrast checks); raw output is m03-sse-same-page-docs-check.log. The
+documentation impact of this test-only addition is recorded here. The
+existing workbench and deployment paragraphs explicitly describe what the
+older three-Run combination test did not establish; this new bounded result
+does not retroactively change that earlier test.
+
+Scope limit: this proves one already-established SSE loopback connection can
+be severed by terminating its blocked PostgreSQL poll while the host/API/page
+stay up; RunView then reconnects on the same page from its consumed cursor.
+The browser route intentionally delays the reconnection request so Worker
+commits become durable history before it reaches the API. This does not prove
+all network failures, authorization changes, large output, install-time
+behavior, or complete M03 recovery. Inputs and raw logs are SHA-listed in
+m03-sse-same-page-inputs.sha256 (21 inputs) and
+m03-sse-same-page-logs.sha256 (6 raw logs).

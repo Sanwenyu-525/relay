@@ -1,0 +1,41 @@
+{
+  "name": "@relay-agent/api",
+  "private": true,
+  "files": [
+    "dist/src",
+    "migrations"
+  ],
+  "version": "0.0.0",
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc -p tsconfig.json",
+    "start": "node --env-file=.env dist/src/main.js",
+    "worker": "node --env-file=.env dist/src/worker/main.js",
+    "worker:supervised": "node --env-file=.env dist/src/worker/supervisor-main.js",
+    "migrate": "node --env-file=.env dist/src/cli/migrate.js",
+    "migrate:graph": "node --env-file=.env dist/src/cli/install-graph.js",
+    "init:workspace": "node --env-file=.env dist/src/cli/init-workspace.js",
+    "test": "tsc -p tsconfig.json && node --test \"dist/test/unit/**/*.test.js\"",
+    "test:integration": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-integration.ps1"
+  },
+  "dependencies": {
+    "@langchain/core": "1.2.12",
+    "@langchain/langgraph": "1.4.17",
+    "@langchain/langgraph-checkpoint": "1.1.5",
+    "@langchain/langgraph-checkpoint-postgres": "1.0.5",
+    "@sinclair/typebox": "0.34.52",
+    "fastify": "5.12.5",
+    "kysely": "0.29.6",
+    "pg": "8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/pg": "8.15.6",
+    "typescript": "5.9.3"
+  }
+}

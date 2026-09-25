@@ -1,0 +1,5 @@
+090be139084062914b4b85974bfed1d1e779658adfe16d1ac25361091f0a2bed  apps/desktop/release/relay-desktop.exe
+65189178e5d040a2570fbe6c682a0d38f83414e5469ffcfdf8bf3582724a1ea7  apps/desktop/release/desktop-build-manifest.json
+5c1fcc64211a0441f975f864169b3d683d889a3723cb9aa0e7bc2517ceee8ebb  apps/desktop/release/api/migrations/0013_m03_run_command_order.sql
+43177ac5feea773b2ed381e0fbd046e18e7c9edb52cfa3bf96e4570568ccc008  apps/desktop/tests/m03-action-approval-webview.mjs
+b693274f139a920386782bbd85f01a713d814545bc05d804a8cafff244054246  apps/desktop/scripts/build-release.ps1

@@ -1,0 +1,82 @@
+M03 packaged Windows/WebView2 Review -> RESUME developer self-check
+Status: READY_FOR_INDEPENDENT_ACCEPTANCE; not an independent M03 or G01-G08 acceptance.
+Date: 2026-09-24. Platform: real Windows desktop WebView2, pinned Node v24.21.0,
+portable isolated PostgreSQL 18.6-2, independent supervisor-launched Mock Worker.
+No real Provider or ACTION_APPROVAL tool effect was exercised.
+
+Frozen build input fingerprint SHA-256:
+cf9f6d410f5874bc3244400b4d40e03988b66219a591eea03c47fb0b661cb014
+Workspace pnpm-lock.yaml SHA-256:
+d3a12b30883aacbc2ccc0b6d2b42b249b79a571bf6e745086da10b52a9516b37
+Representative frozen backend inputs SHA-256:
+6746e87d555006f4bfe8edf41248ba5e7821ab2591fbab57b977dc34c8c1b4e1  apps/api/package.json
+394f7ff0afff5fb6cbbdc97fe9c9e6d713ca0e87cd489a719bdd1802678e48af  apps/api/src/worker/run-graph.ts
+27785e434bf6dd23b77bf61498135cd110ee95f87b61c75a007238f24627a631  apps/api/src/infrastructure/graph-checkpoints.ts
+91cfe867c2399426096b63a89a9021cf7071079b1554c6baea71cf2a6c775c3f  apps/api/src/cli/install-graph.ts
+5c1fcc64211a0441f975f864169b3d683d889a3723cb9aa0e7bc2517ceee8ebb  apps/api/migrations/0013_m03_run_command_order.sql
+
+Frozen release SHA-256:
+090be139084062914b4b85974bfed1d1e779658adfe16d1ac25361091f0a2bed  apps/desktop/release/relay-desktop.exe
+65189178e5d040a2570fbe6c682a0d38f83414e5469ffcfdf8bf3582724a1ea7  apps/desktop/release/desktop-build-manifest.json
+5c1fcc64211a0441f975f864169b3d683d889a3723cb9aa0e7bc2517ceee8ebb  apps/desktop/release/api/migrations/0013_m03_run_command_order.sql
+5127bbd5c7c677010d481ade658ac33768ca7e15fd52b3a4388136c51dbe2081  apps/desktop/release/api/dist/src/cli/install-graph.js
+56c9a82c180c0169674386ffc6a4dbcc972b4b2f78b33ae67ce2d508c354893a  apps/desktop/release/api/dist/src/main.js
+09909524e19e3c0922461950e93007e2598b6e3a4bdb8aee21eb5aa93eb5865a  apps/desktop/release/api/dist/src/worker/supervisor-main.js
+75cdda02df16ffb96bf3bc2dd0720e72bc774091639bf04b2b5bdb5f42e30a5b  apps/desktop/release/api/dist/src/worker/main.js
+4da99e5988c3186195c879abbed9fa1bce172507492c53fda257fb05426c32a0  apps/desktop/release/api/dist/src/worker/run-graph.js
+PostgresSaver installed in package: @langchain/langgraph-checkpoint-postgres 1.0.5.
+The build manifest inventories and hashes 13,203 resource files; forbidden config files: 0.
+
+Owned reproducible test/script inputs SHA-256:
+b693274f139a920386782bbd85f01a713d814545bc05d804a8cafff244054246  apps/desktop/scripts/build-release.ps1
+91089610c044ae60de39d844d9670334529ba56f919e2f67f1be7e64f4b1005c  apps/desktop/scripts/start-acceptance-session.ps1
+da83775a6498aa573e2a5ec14d45b079617dd637683626e79c9b5058cde749c4  apps/desktop/tests/m03-review-resume-webview.mjs
+
+Reproduce from D:\Develop\Relay-Agent:
+& .research/runtime-cache/node-v24.21.0-win-x64/node.exe apps/desktop/tests/m03-review-resume-webview.mjs 090be139084062914b4b85974bfed1d1e779658adfe16d1ac25361091f0a2bed 5c1fcc64211a0441f975f864169b3d683d889a3723cb9aa0e7bc2517ceee8ebb
+The test starts and stops only its own temp cluster/host; it verifies package hashes
+again after cleanup. Do not run another release build while reproducing this package.
+
+Developer result (raw r5 log below): M03_REVIEW_RESUME_WEBVIEW_REAL_PG=PASS.
+Session d528187bb51a49f690155428804d7b01 used isolated PG port 11108.
+Business migration -> trusted install-graph CLI -> relay_app Workspace/runtime;
+runtime_migrator_url_cleared=true and no remaining relay_migrator PG session.
+Real WebView2 created project d1077746-c9fb-40a8-8ca4-7268b88f7c52 and task
+fb075759-e529-438d-9a21-3506131dec5b; delegated Run
+fa37f284-6f61-44bf-8df0-7de49cab9cca. A scoped PostgreSQL latch captured
+Worker PID 4384, parent supervisor PID 39760, exact bundled node.exe executable,
+ACTIVE claim epoch 1 and original worker:desktop identity. Its backend PID 9564
+was terminated by exact PID/application/role/database on the isolated cluster
+before continuing. The completed START left a durable root-namespace Review
+interrupt; after host/API/supervisor stop and restart, WebView2 replayed SSE
+history and ACCEPTed CRITERION Review 25c1a15b-6382-416b-b68d-77030bcfb425.
+Original decision 2c25b6fd-bed9-4f6e-9ccd-e815e2bb2ca7 produced the sole
+RESUME command in order START:1:DONE, RESUME:2:DONE and Task/Run COMPLETED.
+Same command_id replay returned the prior receipt; changed payload returned
+COMMAND_ID_REUSED. No bearer or wrong-Workspace read was admitted. Old bearer
+failed after restart. WebView URLs/storage/host logs retained no bearer.
+Run events were contiguous, seq 31 before restart and 39 after RESUME. The
+same run_id graph checkpoint count advanced 6 -> 8 with one persisted
+__interrupt__ write; operation_id 41c64360-3195-4272-8534-c6b4317809bf
+and dispatch_count=1 did not change. Five unique succeeded step attempts,
+one unchanged candidate artifact version and one completion_records row
+bound to the original Run were observed. ACTION_APPROVAL count was zero;
+this exercised CRITERION human verification, not deferred tool approval.
+The host, API, supervisor and observed Worker identities ended; PG stop exited
+zero and the temporary root was removed.
+
+Raw development streams SHA-256:
+cd3a660ae0759c5737dac0ca36064c9a03c31772f5ee7fc16d71e92a89f87108  apps/desktop/results/m03-review-resume-build-release.log  (red: PowerShell long pnpm path enumeration)
+59fddbc17522b2c8ece9221e999edf20715f0c7bc265b2211bbf102e18629264  apps/desktop/results/m03-review-resume-build-release-r2.log  (red: stage cleanup long path)
+f5324d29f14f3a3f979b979c1f3578d81572961e396c1b2239bc4da3a49c6324  apps/desktop/results/m03-review-resume-build-release-r3.log  (green)
+186e1d6049fe5c568c4dd5c7253ad50c7e2bff279b786e1811c5131702463b90  apps/desktop/results/m03-review-resume-webview-r1.log  (red: assumed idle Worker stays resident)
+93349838f333480fd63f16f7b51133aa0d7621720d32dc5fcb5b695b2686dd18  apps/desktop/results/m03-review-resume-webview-r2.log  (red: successful attempts clear worker_id)
+0d97bb2191855e680c80055e8d37b2cccb68a2be2daf258a34cfc2398af31430  apps/desktop/results/m03-review-resume-webview-r3.log  (red: psql client exit did not release sleeping backend)
+ddda773a1c782292eb9442e16e842f4369268545d36ab49a314feedd55fbeec2  apps/desktop/results/m03-review-resume-webview-r4.log  (red: Win32 extended vs ordinary path string)
+34515f8636c279129b51a8180a30157cf1049424145578ec5ad8d9d0ded3d3aa  apps/desktop/results/m03-review-resume-webview-r5.log  (green)
+e593721bc215249deb1628cdf3e45b24b10987121f790d1e546a5dce9afc0994  apps/desktop/results/m03-review-resume-r3-cleanup.log  (r3 scoped manual cleanup supplement)
+2f10522a5603a20249fba919bd5dec780830a92e1bbac38aa094240c3efcf660  apps/desktop/results/m03-review-resume-ui-selfcheck.log  (14/14 targeted frontend tests)
+
+Scope limit: one fixed Mock path through a CRITERION Review. It does not prove
+all G01-G08 recovery/approval cases, real Provider, real external tool effect,
+ACTION_APPROVAL execution, installer delivery, or system-wide M03 completion.

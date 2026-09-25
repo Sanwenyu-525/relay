@@ -1,0 +1,66 @@
+{
+  "runId": "ai-sdk-p00-20260920T085425Z",
+  "status": "passed",
+  "offline": true,
+  "credentialsUsed": false,
+  "inputs": [
+    {
+      "path": "package.json",
+      "sha256": "264474e3d1a003c3069a11decc67bbf1097c24d385287ce258fd790abdff80cc"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "sha256": "36c21ae9156b66eca04136d3973acee18f4ed61db74f72d7430396c95699199c"
+    },
+    {
+      "path": "src/boundary.ts",
+      "sha256": "efa95ff0c9a1b21d0bd13e032022346c64cf4141470be348d2ad1dc098ff8f1b"
+    },
+    {
+      "path": "src/boundary.test.ts",
+      "sha256": "d14e98f0731de02b80f56aa1fa66ec67c19b24b32e038eecfabffe4e677e891f"
+    }
+  ],
+  "runs": [
+    {
+      "runtime": "Node.js v22.22.3",
+      "commands": ["pnpm run typecheck", "pnpm test"],
+      "exitCode": 0,
+      "rawOutput": [
+        "ai-sdk-p00-20260920T085425Z-node22-typecheck.txt",
+        "ai-sdk-p00-20260920T085425Z-node22-test.txt"
+      ]
+    },
+    {
+      "runtime": "Node.js v24.21.0 (D:/Develop/Relay-Agent/.research/runtime-cache/node-v24.21.0-win-x64/node.exe)",
+      "commands": [
+        "node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
+        "node node_modules/typescript/bin/tsc -p tsconfig.json",
+        "node --test dist/src/boundary.test.js"
+      ],
+      "exitCode": 0,
+      "rawOutput": [
+        "ai-sdk-p00-20260920T085425Z-node24-typecheck.txt",
+        "ai-sdk-p00-20260920T085425Z-node24-test.txt"
+      ]
+    }
+  ],
+  "tests": {
+    "passed": 7,
+    "failed": 0,
+    "cases": [
+      "流式文本、完整工具参数和可 JSON 往返候选；工具没有 execute",
+      "非法 JSON 参数不产生候选",
+      "合法 JSON 但缺字段/多字段不产生候选",
+      "多个完整调用明确拒绝",
+      "截断工具参数不产生候选",
+      "Provider 错误映射为有界失败",
+      "在途 AbortSignal 终止流并映射为取消失败"
+    ]
+  },
+  "notCovered": [
+    "两个真实 Provider 或任意真实模型端点",
+    "PostgreSQL 持久化、重启恢复、审批、Gateway 和 UNKNOWN 核对",
+    "37 个产品验收场景和任何外部副作用"
+  ]
+}

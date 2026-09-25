@@ -1,0 +1,3 @@
+run_id=ai-sdk-p00-20260920T085425Z
+runtime=v24.21.0
+command=node typescript/bin/tsc --noEmit -p tsconfig.json

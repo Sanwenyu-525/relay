@@ -1,0 +1,4 @@
+
+> relay-workbench-fixture@0.1.0 typecheck D:\Develop\Relay-Agent\apps\workbench
+> tsc --noEmit
+

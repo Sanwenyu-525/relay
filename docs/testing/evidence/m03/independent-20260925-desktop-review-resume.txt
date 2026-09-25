@@ -1,0 +1,22 @@
+session_id=b5ad3c83854442d8967ca094dcd81a2a pg_port=12278
+graph_install_exit=0 runtime_migrator_url_cleared=true graph_schema=relay_graph_v1
+exe_sha256=ad4a40cd08502c3a5013f081acc08bce0bed4bfb671991f91609979f52086a25 packaged_0013_sha256=5c1fcc64211a0441f975f864169b3d683d889a3723cb9aa0e7bc2517ceee8ebb
+packaged_worker_sha256=f68196c5666cf317e90af1ad5cfa9e95dbb9d0967882ad7b924eb4fe09625186
+packaged_graph_installer_sha256=5127bbd5c7c677010d481ade658ac33768ca7e15fd52b3a4388136c51dbe2081
+initial_host_pid=27888 cdp_port=12320 bootstrap=ready
+isolated_pg_latch_backend_pid=23584 cluster_port=12278
+processes host=27888 api=30304 supervisor=30648 worker=28708
+processes host=27888 api=30304 supervisor=30648 worker=28708
+independent_worker_active pid=28708 parent_supervisor_pid=30648 started=2026-09-25T00:23:38.2426120Z worker_id=worker:desktop:96f02c99-500c-4af4-843f-b9fb99734734:bad52f7c-a068-44b4-807c-18b74b3b76ea claim_epoch=1
+webview_create_delegate project_id=8bb1c8f5-1c77-4a27-b340-cf1713f90501 task_id=586059fb-e46b-43f3-99b5-0d508ccc610a run_id=2dd8ef66-ef96-45c0-b220-700fb6fb140c same_command_replay=true changed_payload_conflict=true
+processes host=27888 api=30304 supervisor=30648 worker=already_exited
+host_api_supervisor_stopped=true active_worker_if_any_stopped=true
+before_restart review_id=aacf1185-f93e-4a1f-b368-360fbb505b1c run_status=WAITING_APPROVAL seq=31 old_api_pid=30304
+reopened_host_pid=30984 cdp_port=12026 bootstrap=ready
+processes host=30984 api=12944 supervisor=43204 worker=already_exited
+review_resume decision_id=23c8d5d7-c8b7-48a6-a040-5a3bce714abb commands=START:1:DONE,RESUME:2:DONE before_seq=31 after_seq=39 task=DONE
+graph_thread=2dd8ef66-ef96-45c0-b220-700fb6fb140c checkpoint_before=6 checkpoint_after=8 interrupt_writes=1 operation_id=4c41f4c2-5b84-4b93-ba5f-106217b71cd3 dispatch_count=1 attempts=5 artifact_versions=1 completion_records=1 independent_worker_id=worker:desktop:96f02c99-500c-4af4-843f-b9fb99734734:bad52f7c-a068-44b4-807c-18b74b3b76ea
+webview_history_replayed=true authoritative_run_reads=true bearer_in_url_storage_logs=false runtime_migrator_sessions=0
+postgres_stop_exit=0 temporary_root_removed=True
+M03_REVIEW_RESUME_WEBVIEW_REAL_PG=PASS
+exit_code=0

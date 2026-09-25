@@ -1,0 +1,87 @@
+{
+  "lockVersion": 1,
+  "capturedAt": "2026-09-20",
+  "package": {
+    "name": "ai",
+    "version": "7.0.107",
+    "license": "Apache-2.0",
+    "node": ">=22",
+    "npmIntegrity": "sha512-PVYQ3W9kR8oYiGQxbg4aFIlhQzKskZm8UV+4E0zB2uKOzFr8ju3bXQncOOZtLsOgJY8vdpgyu3cXtomsfcdQYg==",
+    "npmTarball": "https://registry.npmjs.org/ai/-/ai-7.0.107.tgz"
+  },
+  "source": {
+    "remote": "https://github.com/vercel/ai.git",
+    "tag": "ai@7.0.107",
+    "commit": "08ae5ad05bc12496dd1ffcf64e34419e0831300d",
+    "commitSubject": "Version Packages (#21089)",
+    "packageDirectory": "packages/ai",
+    "licenseFile": {
+      "path": "LICENSE",
+      "sha256": "545cad3594798236002d64e9394d53fe826edbe110d307bb3343e6216dbcaffa"
+    },
+    "inspectedFiles": [
+      {
+        "path": "packages/ai/package.json",
+        "sha256": "766b0435510f81250140576b6847650d4c3cf6089e535cd7a349db4e2b4f305e",
+        "purpose": "包版本、导出和 Node 引擎声明"
+      },
+      {
+        "path": "packages/ai/test/index.ts",
+        "sha256": "523396ce9c30248a333a288febda94237c8d13cb069abf93ab5790ab8bad35ad",
+        "purpose": "确认 ai/test 导出 MockLanguageModelV4"
+      },
+      {
+        "path": "packages/ai/src/test/mock-language-model-v4.ts",
+        "sha256": "a93cb64630879c65b5859cb0b79b3140cca600d29ecb281422dfb02f44b51b6b",
+        "purpose": "官方确定性 mock provider 的实现"
+      },
+      {
+        "path": "packages/ai/src/generate-text/parse-tool-call.ts",
+        "sha256": "3f1fd883caafe4251bd3f6225b7b7f156507e7d67a78cc0d5bfbca054739551f",
+        "purpose": "完整 tool-call 的 JSON 解析与 schema 校验"
+      },
+      {
+        "path": "packages/ai/src/generate-text/execute-tool-call.ts",
+        "sha256": "9c0c316e520290693b566a0b7b0d6adaf1e9ff377b4a28c626b4a2cde6eb09fa",
+        "purpose": "只有可执行工具才会进入 execute 的实现依据"
+      },
+      {
+        "path": "packages/ai/src/generate-text/stream-text.ts",
+        "sha256": "1a8dc7063ed56a0c6ccd31b6981b136a8124892f05c194b66d335195446d552f",
+        "purpose": "流式结果、responseMessages 和 abort 边界"
+      },
+      {
+        "path": "packages/ai/src/generate-text/stream-text.test.ts",
+        "sha256": "462d7a1f0aad810bc0fb060eb285759ead05a35818c93e35b7a8a70e1768abda",
+        "purpose": "官方流式工具参数和错误路径测试出处"
+      },
+      {
+        "path": "packages/provider-utils/src/schema.ts",
+        "sha256": "6e26a2fac3a51dba77515e1d3756e5fe6617ece9303a1ed3aacb91e1c58f422f",
+        "purpose": "jsonSchema 的 validate 回调和 SDK schema 边界"
+      }
+    ]
+  },
+  "experimentDependencies": {
+    "@sinclair/typebox": {
+      "version": "0.34.52",
+      "license": "MIT",
+      "integrity": "sha512-XiMQh7qqVlxZzcVD+kkGMNGMzcTrDMLWI7S4x7z1MkCkbDPrekpZXEUK0eZqZFMuHQg2a2DZOcDIh9o5v3Gonw=="
+    },
+    "fastify": {
+      "version": "5.12.5",
+      "license": "MIT",
+      "integrity": "sha512-OB2k1dlxs5/NAABqeKV2FUHkSD2BbENsCak8yULVcymn3fHIPDVa9TI3SDnJSWYSllZmSYuZXy2gTnsT+Sut1A==",
+      "source": {
+        "remote": "https://github.com/fastify/fastify.git",
+        "commit": "ba235fdcd9a83a4c7ccf793f7b2596a8f65389b6",
+        "purpose": "Fastify 5 app.inject() 实际 HTTP validator 与 TypeBox/AI SDK 联合 schema 边界"
+      }
+    },
+    "typescript": {
+      "version": "5.9.3",
+      "integrity": "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="
+    }
+  },
+  "lockfile": "pnpm-lock.yaml"
+}

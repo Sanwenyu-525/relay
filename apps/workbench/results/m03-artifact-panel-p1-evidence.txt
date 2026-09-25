@@ -1,0 +1,15 @@
+M03 ArtifactPanel P1 开发自检（2026-09-24 10:51 UTC）
+
+范围：仅 ArtifactPanel、taskDetail 组件测试和 Workbench 交互文档；未修改 apps/api、冻结 Windows release 或独立验收记录。
+输入：m03-artifact-panel-p1-owned-inputs.sha256 逐文件 SHA-256。
+原始检查日志与 SHA-256：m03-artifact-panel-p1-logs.sha256。
+
+检查结果：
+- 定向组件测试：14/14 PASS。覆盖同页直接重开、原命令回执确认重开、历史版本手动重选；A 保存后网络响应丢失或 HTTP 503、编辑 B、错误目标回执、正确原回执、新 ID 与新 revision 续写 B；在途编辑 B、A 迟到成功不把 B 标为已保存。
+- Workbench 全部组件测试：133/133 PASS（23 文件）。
+- Workbench typecheck：PASS。
+- Workbench build：PASS。Vite 仅有既有大 chunk 提示。
+- 文档检查：PASS（77 Markdown、1269 链接、950 标题锚点、126 token、29 对比度检查）。
+
+边界：本片是 React 组件和构建自检，未重新构建 Windows release，未运行真实 PG/WebView2；M03 总验收由协调 Agent 独立复跑。保存命令的原 ID 和载荷快照保存在当前组件实例内；本片验证同页编辑和响应不明，不声明浏览器全刷新后的未决命令恢复。回执 API 不回显请求正文或载荷哈希；组件核对原 command_id、命令类型及 Task/Artifact 目标，正文关联依赖服务端对同一 command_id 的幂等载荷约束。
+Breaking Change: No。未修改 API 或数据库契约。

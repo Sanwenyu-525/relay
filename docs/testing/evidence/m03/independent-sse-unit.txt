@@ -1,0 +1,12 @@
+✔ Run cursor accepts canonical signed-int64 values and query takes precedence (2.4451ms)
+✔ Run event writer waits for drain after an explicit false write (1.0348ms)
+✔ Run event writer stops waiting when a slow client aborts (0.2187ms)
+✔ Run event writer closes a permanently backpressured frame after its bound (5008.7504ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5341.5533

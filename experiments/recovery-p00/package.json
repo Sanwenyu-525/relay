@@ -1,0 +1,25 @@
+{
+  "name": "@relay/recovery-p00",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc -p tsconfig.json",
+    "test:recovery": "pnpm run build && node dist/src/run-recovery.js"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "0.34.52",
+    "ai": "7.0.107",
+    "pg": "8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.6",
+    "@types/pg": "8.15.6",
+    "typescript": "5.9.3"
+  }
+}

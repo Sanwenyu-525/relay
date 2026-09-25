@@ -1,0 +1,50 @@
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-m02-acceptance-38ea6b1e2fa54c29824bf2401cc645d7/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-m02^-acceptance^-38ea6b1e2fa54c29824bf2401cc645d7^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+DO
+CREATE DATABASE
+{
+  "applied": [
+    "0001_v001_human_core",
+    "0002_p02_task_goal_alignment",
+    "0003_schema_readiness",
+    "0004_v002_runs",
+    "0005_v002_verification",
+    "0006_v002_reviews",
+    "0007_v003_recovery_control",
+    "0008_v003_gateway",
+    "0009_v004_information_rules",
+    "0010_v005_context_revision"
+  ],
+  "already_applied": [],
+  "ledger_rows": 10
+}
+session_id=38ea6b1e2fa54c29824bf2401cc645d7
+session_root=C:\Users\ASUS\AppData\Local\Temp\relay-m02-acceptance-38ea6b1e2fa54c29824bf2401cc645d7
+postgres_port=6767
+desktop_pid=29836
+release_sha256=ffa3cf49c7e7588f7a88e3e2411b132db7b285f01a9b2805f05da59448e2c2bf
+cleanup: powershell -NoProfile -ExecutionPolicy Bypass -File apps/desktop/scripts/stop-acceptance-session.ps1 -SessionRoot "C:\Users\ASUS\AppData\Local\Temp\relay-m02-acceptance-38ea6b1e2fa54c29824bf2401cc645d7"

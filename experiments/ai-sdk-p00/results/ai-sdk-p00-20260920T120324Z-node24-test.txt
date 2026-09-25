@@ -1,0 +1,19 @@
+Command: node --test dist/src/boundary.test.js
+Runtime: Node.js v24.21.0 (D:/Develop/Relay-Agent/.research/runtime-cache/node-v24.21.0-win-x64/node.exe)
+Exit code: 0
+
+PASS 同一 TypeBox schema 经 Fastify 和 AI SDK 实际校验时对未知字段与类型强制转换一致拒绝
+PASS 真实 AI SDK 流同时给出文本、完整参数和可 JSON 往返的候选，且没有自动 execute
+PASS 非法 JSON 参数被 AI SDK 标为无效，边界不产生候选
+PASS JSON 合法但缺字段且含额外字段时，AI SDK 的 TypeBox 校验不产生候选
+PASS 本实验只接受一个完整候选，多个合法调用明确拒绝
+PASS 截断的工具参数只有增量、没有完整 tool-call，边界不产生候选
+PASS Provider 错误映射为有界失败且没有候选
+PASS 取消信号到达 SDK 模型边界并映射为有界失败
+
+tests 8
+pass 8
+fail 0
+cancelled 0
+skipped 0
+duration_ms 3184.5399

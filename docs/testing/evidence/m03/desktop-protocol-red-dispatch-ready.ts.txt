@@ -1,0 +1,12 @@
+export interface DesktopDispatchReady {
+  readonly nonce: string;
+  readonly launchId: string;
+  readonly requeuedRunIds: readonly string[];
+  readonly blockedRunIds: readonly string[];
+}
+
+export function desktopDispatchReadyLine(input: DesktopDispatchReady): string {
+  return `${JSON.stringify({ type: 'dispatch_ready',
+    nonce: input.nonce, launchId: input.launchId,
+    requeuedRunIds: input.requeuedRunIds, blockedRunIds: input.blockedRunIds })}\n`;
+}

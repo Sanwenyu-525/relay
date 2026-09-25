@@ -1,0 +1,33 @@
+{
+  "name": "relay-m01-stack-adapter",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "scripts": {
+    "test:pg": "node --test src/stack-pg.test.mjs",
+    "build:react": "tsc --noEmit -p frontend/tsconfig.json && vite build --config frontend/vite.config.ts",
+    "check:tauri": "tauri --version"
+  },
+  "dependencies": {
+    "@langchain/core": "1.2.12",
+    "@langchain/langgraph": "1.4.17",
+    "@langchain/langgraph-checkpoint": "1.1.5",
+    "@langchain/langgraph-checkpoint-postgres": "1.0.5",
+    "pg": "8.16.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/api": "2.11.1",
+    "@tauri-apps/cli": "2.11.5",
+    "@types/node": "24.10.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "typescript": "5.9.3",
+    "vite": "8.3.0"
+  }
+}

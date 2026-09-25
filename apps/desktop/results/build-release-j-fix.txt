@@ -1,0 +1,75 @@
+Scope: all 2 workspace projects
+(node:8632) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Lockfile is up to date, resolution step is skipped
+Already up to date
+
+Done in 645ms using pnpm v9.15.9
+(node:7656) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Lockfile is up to date, resolution step is skipped
+Already up to date
+
+Done in 591ms using pnpm v9.15.9
+(node:19924) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Lockfile is up to date, resolution step is skipped
+Already up to date
+
+Done in 403ms using pnpm v9.15.9
+
+> @relay-agent/api@0.0.0 build D:\Develop\Relay-Agent\apps\api
+> tsc -p tsconfig.json
+
+
+> relay-workbench-fixture@0.1.0 build D:\Develop\Relay-Agent\apps\workbench
+> tsc --noEmit && vite build
+
+vite v8.3.0 building client environment for production...
+transforming...
+✓ 1937 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.46 kB │ gzip:   0.32 kB
+dist/assets/index-DD1eRYuu.css   45.67 kB │ gzip:   6.25 kB
+dist/assets/window-BcBQAGSI.js   14.13 kB │ gzip:   3.46 kB
+dist/assets/index-C7t51Zjd.js   603.05 kB │ gzip: 174.97 kB
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 5.78s
+[PLUGIN_TIMINGS] JavaScript callbacks ran for 611ms of this 5.8s build (11%).
+1 callback is listed without a time. Its calls overlapped, so the time inside one call includes work from other calls. To find its cost, profile the build with `node --cpu-prof`:
+  - plugin vite:css transform (3 calls)
+See https://rolldown.rs/reference/InputOptions.checks#bundlertimings for more details.
+
+(node:12384) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Packages are copied from the content-addressable store to the virtual store.
+  Content-addressable store is at: D:\.pnpm-store\v3
+  Virtual store is at:             apps/desktop/src-tauri/resources/api-lock-verify/node_modules/.pnpm
+Progress: resolved 0, reused 1, downloaded 0, added 0
+.                                        |  +64 ++++++
+Progress: resolved 68, reused 68, downloaded 0, added 59
+Progress: resolved 68, reused 68, downloaded 0, added 64, done
+(node:29024) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+.                                        |  WARN  A pnpm-lock.yaml file exists. The current configuration prohibits to read or write a lockfile
+Packages are copied from the content-addressable store to the virtual store.
+  Content-addressable store is at: D:\.pnpm-store\v3
+  Virtual store is at:             apps/desktop/src-tauri/resources/api/node_modules/.pnpm
+Progress: resolved 1, reused 0, downloaded 0, added 0
+.                                        |  +64 ++++++
+Progress: resolved 68, reused 64, downloaded 0, added 48
+Progress: resolved 68, reused 64, downloaded 0, added 63
+Progress: resolved 68, reused 64, downloaded 0, added 64, done
+        Info Looking up installed tauri packages to check mismatched versions...
+   Compiling relay-desktop v0.1.0 (D:\Develop\Relay-Agent\apps\desktop\src-tauri)
+    Finished `release` profile [optimized] target(s) in 52.09s
+       Built application at: D:\Develop\Relay-Agent\apps\desktop\src-tauri\target\release\relay-desktop.exe
+Release directory: D:\Develop\Relay-Agent\apps\desktop\release
+Executable SHA256: 3e56ff5efd4fd321593f10fe8e016796db9c288dd5c2b1077b7f926c30187ebb
+Resource files hashed: 7862; forbidden config files: 0

@@ -1,0 +1,3 @@
+waiting for server to shut down..... done
+server stopped
+session_id=882b40d69f094932a4903126e1c200e7 postgres_stop_exit=0 temporary_root_removed=True

@@ -1,0 +1,40 @@
+   Compiling relay-desktop v0.1.0 (D:\Develop\Relay-Agent\apps\desktop\src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.58s
+     Running unittests src\lib.rs (target\x86_64-pc-windows-msvc\debug\deps\relay_desktop-707720d95ada5241.exe)
+
+running 20 tests
+test job_sidecar::tests::host_crash_probe ... ok
+test job_sidecar::tests::node_child_inherits_the_job_and_stops_with_its_parent ... ok
+test tests::csp_hook_accepts_only_tauri_internal_asset_origin ... ok
+test job_sidecar::tests::windows_command_line_quotes_spaces_and_trailing_slashes ... ok
+test tests::csp_keeps_tauri_script_sources_and_limits_api_port ... ok
+test job_sidecar::tests::host_crash_recovery_probe ... ok
+test job_sidecar::tests::armed_record_recovery_stops_a_live_old_job ... ok
+test tests::private_readiness_rejects_wrong_nonce_and_early_exit ... ok
+test tests::supervisor_requires_matching_two_stage_private_handshake ... ok
+test tests::supervisor_recovery_ack_is_ordered_complete_and_safe_integer_bounded ... ok
+test tests::private_readiness_times_out_without_an_event ... ok
+test tests::supervisor_rejects_unknown_runtime_event_without_waiting_for_eof ... ok
+test job_sidecar::tests::incomplete_armed_record_blocks_recovery ... ok
+test tests::supervisor_continues_draining_multiple_runtime_events_after_dispatch_ready ... ok
+test tests::missing_final_dispatch_does_not_remove_an_acked_armed_record ... ok
+test tests::old_supervisor_entry_is_rejected_before_node_launch ... ok
+test job_sidecar::tests::reconciled_record_removal_rechecks_identity_and_preserves_uncleared_launches ... ok
+test tests::supervisor_consumes_4096_ack_frames_without_blocking_private_stdout ... ok
+test tests::supervisor_frame_rejects_record_count_and_byte_overflow_before_node_start ... ok
+test tests::supervisor_recovery_idle_and_absolute_deadlines_are_independent ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running unittests src\main.rs (target\x86_64-pc-windows-msvc\debug\deps\relay_desktop-b286a17ec77ebbf4.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests relay_desktop
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

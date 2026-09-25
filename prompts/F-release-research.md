@@ -1,0 +1,30 @@
+# F：部署、完整验收与可选研究
+
+> 当前执行入口为 [M01–M07](stack-migration.md)。本文件保留原 P 阶段业务范围；模型统一 gpt-6-sol / ultra，UI 使用完整 React 迁移路线，技术选择按 ADR-010。不得按旧编号重建已存在工程或跳过当前模块验收。
+
+## P20：本机发布与备份恢复
+
+```text
+执行 P20，前置 P15–P19。读 AGENTS.md、prompts/README.md、docs/deployment/local-deployment.md、docs/testing/verification-plan.md。
+范围：按 ADR-007 交付 Windows 安装包与启动入口、随包 UI/Node、WebView2 前提、启动/配置/鉴权收口、DB 角色、日志/健康、维护态、备份/恢复。保持 loopback、显式 Host/Origin、所有业务鉴权；前端短期 token 经受限 IPC 引导且仅内存，不写日志或 URL。验证包内运行时版本；PG 是独立前提，不静默安装或管理。schema 不兼容拒写；模型离线不阻止人工任务。
+备份冻结业务写入/内容清理并记录未决动作，以 pg_dump 加不可变内容/hash manifest 形成一套。恢复到新 DB/data_root、禁真实执行先核验，再切换配置。不要自动删除原库/目录，不在用户数据上测试破坏。
+在干净 Windows 测试环境演练从安装入口启动、单实例、运行中关闭/强杀重启、升级前安全停机与备份、恢复与 UNKNOWN 保留、卸载默认保留用户数据。完成测试计划第 7 节，实际记录签名/系统提示、支持版本与限制，不将开发窗口视为安装验收。报告实际命令、版本、RPO/RTO 测量和失败；源码/README/配置示例无密钥。完成后交 P21，而非只交启动脚本。
+```
+
+## P21：OpenAPI 与 V1 总验收
+
+```text
+执行 P21，前置 P20。读 AGENTS.md、prompts/README.md、docs/requirements/v1-scope.md、docs/api/http-command-contract.md、docs/api/module-api.md、docs/testing/verification-plan.md。
+范围：最终接口 schema/示例与实现差异修复、完整 UI/API/DB/恢复回归、发布说明和覆盖报告。生成/维护实际 OpenAPI，展开全部路径，禁止无类型万能 body；验证示例、operationId、鉴权、错误码、幂等/异步回执。
+逐一核验 F01–F22、F24 和 A01–D11，记录对应测试/代码/运行证据；F23 仍为选做研究。三套工作台与 Files/Web/Git/CLI 最终能力都要真实连通，缺失/禁用算未完成。覆盖真实 PG 两连接竞争、进程恢复、跨版本证据、前端冲突和备份恢复。按测试计划第 9 节核对实际交付 Skill/Pack 的固定依赖、基础 Eval、Profile 权限边界、配置升级冲突和来源鉴权；工程 Eval 不等待 P22，未运行模型回归不能称为没有退化。
+修复发现的范围内问题，补相应回归；不可验证项明确阻塞，不以测试数量或某个 demo 成功代替。给出可复现运行说明、已知限制、兼容策略和最终验收矩阵。不自动发布公网或推送远端，交付用户可检查的本地版本。
+```
+
+## P22：可选毕业论文实验
+
+```text
+执行 P22，仅在研究方向与任务集获得用户/导师确认后。读 AGENTS.md、prompts/README.md、docs/research/evaluation-protocol.md、docs/architecture/runtime-context.md、docs/testing/verification-plan.md。
+范围：实验配置/固定任务集、四组策略开关、运行记录、独立标注流程、统计脚本和可复现说明。实验开关不改变产品安全底线；仅比较验证策略，不授权非法工具。冻结 rubric/输入/生成模型/预算，保存失败、超时、人工介入和未知用量。
+最终评价独立于系统内 Judge；记录标注分歧、分母和不确定性。示例数据只能标 synthetic，不能编造实测结果/显著性/创新点。真实模型费用与外发资料遵守用户授权，缺授权时完成离线脚本与 synthetic 验证，并明确真实实验未跑。
+交付数据 schema、可运行脚本、实际数据来源和证据、研究限制；该可选任务不替代 P21 产品验收，也不冒充论文已通过导师审定。
+```

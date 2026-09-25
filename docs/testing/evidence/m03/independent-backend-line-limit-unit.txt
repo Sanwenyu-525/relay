@@ -1,0 +1,12 @@
+✔ small desktop dispatch readiness preserves Rust Vec fields and complete counts (1.5366ms)
+✔ 1677 blocked Run IDs cannot exceed the Rust stdout line limit (1.4711ms)
+✔ 4096 recovered launches can report both outcomes without losing total counts (1.9395ms)
+✔ line bound is checked in UTF-8 bytes after JSON encoding (1.4747ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 95.627

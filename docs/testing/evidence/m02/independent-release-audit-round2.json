@@ -1,0 +1,16 @@
+{
+  "release_exe_sha256": "2cd9d885703dd37997c3eafb71650e846446d411860f241f424cdf512480dd67",
+  "source_files_checked": 186,
+  "resource_files_checked": 7862,
+  "actual_resource_files": 7862,
+  "root_entries": [
+    "api",
+    "desktop-build-manifest.json",
+    "node.exe",
+    "relay-desktop.exe"
+  ],
+  "reparse_points": 0,
+  "forbidden_config_files": 0,
+  "mismatches": [],
+  "audit_correction": "workspace_manifest maps to pnpm-workspace.yaml; initial package.json comparison was auditor mapping error"
+}

@@ -1,0 +1,51 @@
+{
+  "date": "2026-09-20",
+  "tool": "built-in Image Gen",
+  "status": "静态概念修正；旧图保留，目录指向修正版",
+  "previousRevisions": [
+    {
+      "slug": "activities",
+      "input": "activities.png",
+      "output": "activities-v2.png",
+      "correction": "选中事件改为 10:36 检查通过，与右侧详情一致。",
+      "provenance": "由前会话接续摘要恢复修正意图与文件事实；未恢复完整工具回执和精确提示词，不作为逐字调用记录。"
+    },
+    {
+      "slug": "run-control",
+      "input": "run-control.png",
+      "output": "run-control-v2.png",
+      "correction": "区分 Run 已暂停与 Task 仍进行中；将隔离环境改为隔离副本中运行受控测试。",
+      "provenance": "由前会话接续摘要恢复修正意图与文件事实；未恢复完整工具回执和精确提示词，不作为逐字调用记录。"
+    },
+    {
+      "slug": "delegate",
+      "input": "delegate.png",
+      "output": "delegate-v2.png",
+      "correction": "任务状态改为可开始；委托前保持当前执行者为我；右侧说明移除假确认绿勾。",
+      "provenance": "由前会话接续摘要恢复修正意图与文件事实；未恢复完整工具回执和精确提示词，不作为逐字调用记录。"
+    },
+    {
+      "slug": "task-create",
+      "input": "task-create.png",
+      "output": "task-create-v2.png",
+      "correction": "所属项目改为可选；不要求至少三条验收条件。",
+      "provenance": "由前会话接续摘要恢复修正意图与文件事实；未恢复完整工具回执和精确提示词，不作为逐字调用记录。"
+    }
+  ],
+  "currentRevision": {
+    "slug": "run-unknown",
+    "output": "run-unknown-v2.png",
+    "calls": [
+      {
+        "input": "run-unknown.png",
+        "prompt": "Precisely edit the attached UI image (edit target). Preserve all styling, geometry, colors and content except this targeted correction. Keep reference composition, no redesign. This action is a LOCAL git commit, not remote push. Replace every 远端仓库 with 本地仓库, every 远端连接/与远端连接中断 with 本机服务连接/与本机服务连接中断. In warning narrative use 本地 Git 动作发出后，服务连接中断，结果回执未保存. In unknown panel use 由于本机服务连接中断，结果回执未保存，暂无法确认是否已成功创建提交. Keep the unresolved UNKNOWN semantics (等待核对), protected resource and only reconciliation action plus view evidence; never imply remote operation was sent. All Chinese text must remain legible.",
+        "generatedSource": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0bcd5-db91-7d00-b980-49de9a25fa73\\exec-ea70ce20-8acd-40d7-90e6-8bca4285c488.png"
+      },
+      {
+        "input": "run-unknown-v2.png（第一次编辑结果）",
+        "prompt": "Edit this attached UI screenshot with EXACT Chinese text replacements only. Preserve layout and every other visual. 1. Right rail paragraph below 核对后再继续 must read: 请先核对本地仓库的实际状态，确认是否已创建预期提交。在核对完成前，不重新执行、不更换动作身份。 2. Amber warning bold heading must read exactly: 本地 Git 动作已发出，结果回执未保存。 3. Amber warning body must read exactly: 本地 Git 动作发出后，本机服务连接中断，当前无法确认是否已在目标仓库创建预期提交。请先核对执行结果，再决定后续操作。 No 远端 anywhere; this is a local git commit. Do not change other sections. Correct clear simplified Chinese typography.",
+        "generatedSource": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0bcd5-db91-7d00-b980-49de9a25fa73\\exec-5d06f49f-0473-45d4-b25a-1056fa8320d2.png"
+      }
+    ]
+  }
+}

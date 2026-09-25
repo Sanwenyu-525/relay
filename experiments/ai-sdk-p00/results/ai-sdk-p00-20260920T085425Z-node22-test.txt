@@ -1,0 +1,63 @@
+run_id=ai-sdk-p00-20260920T085425Z
+runtime=v22.22.3
+command=pnpm test
+
+> @relay/ai-sdk-p00@0.0.0 test D:\Develop\Relay-Agent\experiments\ai-sdk-p00
+> pnpm run build && node --test dist/src/boundary.test.js
+
+
+> @relay/ai-sdk-p00@0.0.0 build D:\Develop\Relay-Agent\experiments\ai-sdk-p00
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: 真实 AI SDK 流同时给出文本、完整参数和可 JSON 往返的候选，且没有自动 execute
+ok 1 - 真实 AI SDK 流同时给出文本、完整参数和可 JSON 往返的候选，且没有自动 execute
+  ---
+  duration_ms: 38.8364
+  type: 'test'
+  ...
+# Subtest: 非法 JSON 参数被 AI SDK 标为无效，边界不产生候选
+ok 2 - 非法 JSON 参数被 AI SDK 标为无效，边界不产生候选
+  ---
+  duration_ms: 11.5582
+  type: 'test'
+  ...
+# Subtest: JSON 合法但缺字段且含额外字段时，AI SDK 的 TypeBox 校验不产生候选
+ok 3 - JSON 合法但缺字段且含额外字段时，AI SDK 的 TypeBox 校验不产生候选
+  ---
+  duration_ms: 8.8105
+  type: 'test'
+  ...
+# Subtest: 本实验只接受一个完整候选，多个合法调用明确拒绝
+ok 4 - 本实验只接受一个完整候选，多个合法调用明确拒绝
+  ---
+  duration_ms: 3.8231
+  type: 'test'
+  ...
+# Subtest: 截断的工具参数只有增量、没有完整 tool-call，边界不产生候选
+ok 5 - 截断的工具参数只有增量、没有完整 tool-call，边界不产生候选
+  ---
+  duration_ms: 5.2375
+  type: 'test'
+  ...
+# Subtest: Provider 错误映射为有界失败且没有候选
+ok 6 - Provider 错误映射为有界失败且没有候选
+  ---
+  duration_ms: 3.044
+  type: 'test'
+  ...
+# Subtest: 取消信号到达 SDK 模型边界并映射为有界失败
+ok 7 - 取消信号到达 SDK 模型边界并映射为有界失败
+  ---
+  duration_ms: 3.7129
+  type: 'test'
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 520.583

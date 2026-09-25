@@ -1,0 +1,24 @@
+{
+  "lockVersion": 1,
+  "capturedAt": "2026-09-20",
+  "aiSdkCore": {
+    "package": "ai",
+    "version": "7.0.107",
+    "license": "Apache-2.0",
+    "npmIntegrity": "sha512-PVYQ3W9kR8oYiGQxbg4aFIlhQzKskZm8UV+4E0zB2uKOzFr8ju3bXQncOOZtLsOgJY8vdpgyu3cXtomsfcdQYg==",
+    "source": {
+      "repository": "https://github.com/vercel/ai.git",
+      "tag": "ai@7.0.107",
+      "commit": "08ae5ad05bc12496dd1ffcf64e34419e0831300d",
+      "packageDirectory": "packages/ai",
+      "mockProviderExport": "packages/ai/test/index.ts -> MockLanguageModelV4",
+      "mockProviderImplementation": "packages/ai/src/test/mock-language-model-v4.ts"
+    }
+  },
+  "experimentDependencies": {
+    "@sinclair/typebox": "0.34.52",
+    "pg": "8.16.3",
+    "typescript": "5.9.3"
+  },
+  "lockfile": "pnpm-lock.yaml"
+}

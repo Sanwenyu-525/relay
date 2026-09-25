@@ -1,0 +1,436 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-ac128279cf
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-ac128279cf/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-ac128279cf^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 41976)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-ac128279cf/cluster" "-h" "127.0.0.1" "-p" "14480"
+DO
+CREATE DATABASE
+Test database: relay_api_test_3a03068c0ad0 on 127.0.0.1:14480 (roles relay_migrator / relay_app)
+{
+  "applied": [
+    "0001_v001_human_core",
+    "0002_p02_task_goal_alignment",
+    "0003_schema_readiness",
+    "0004_v002_runs",
+    "0005_v002_verification",
+    "0006_v002_reviews",
+    "0007_v003_recovery_control",
+    "0008_v003_gateway",
+    "0009_v004_information_rules",
+    "0010_v005_context_revision",
+    "0011_m03_run_dispatch",
+    "0012_m03_run_events",
+    "0013_m03_run_command_order"
+  ],
+  "already_applied": [],
+  "ledger_rows": 13
+}
+{"schema":"relay_graph_v1","ready":true}
+✖ P09 AUTO keeps Connection, Capability and Permission separate and records one invocation (513.1659ms)
+✖ P09 ASK releases old Worker; Review decision and new epoch admit only the original target (178.8172ms)
+✔ M03 denied or expired ACTION_APPROVAL cannot queue a Run RESUME (220.6135ms)
+✔ M03 PAUSE denies a directly approved action without blocking a later manual RESUME (134.5104ms)
+✔ M03 rejected approved claim leaves no Worker owner after expiry, Connection or Permission change (386.843ms)
+✖ M03 revocation between approved claim and Admit releases a no-effect Worker for safe control (129.7284ms)
+✔ M03 direct approval withdrawal rolls back operation, Run and control on operation failure (284.156ms)
+✔ P09 USER_IMPORT has a real job source, ASK Review and no Run/claim identity (157.3318ms)
+✖ P09 revocation before Admit rejects, while Admit before revocation completes the already admitted effect (114.081ms)
+✖ P09 overlapping roots across Projects occupy one physical directory until the first effect settles (419.0831ms)
+✖ P09 crashed Fake dispatch reconciles the same ID; tampering remains UNKNOWN and blocks new IDs (208.8462ms)
+✖ P09 expired inner Worker lease after Admit cannot start the Fake effect (99.0177ms)
+✖ P09 expired inner Worker lease after Fake effect preserves original identity as UNKNOWN (104.5714ms)
+✖ P09 database rejects crossed operation scope, Review pair, Invocation origin and claim token (139.0203ms)
+✖ P09 PREPARED Worker exit proves no dispatch; the same logical ID gets a new Invocation and epoch (98.8999ms)
+✖ P09 DISPATCHING with a missing target stays UNKNOWN; a different intent cannot bypass it (87.5259ms)
+✔ P09 pending control before Admit abandons PREPARED without a Fake effect (101.5282ms)
+✔ P09 USER_IMPORT unresolved invocation blocks a new intent for the same job (73.3783ms)
+✖ P09 URL Permission matches path segments and concurrent Review decisions consume once (98.7946ms)
+✖ P09 HTTP config commands replay, isolate scope, and expose full Invocation history (1677.244ms)
+✖ P10 Rule update after Gateway Admit preserves the old Invocation outcome and blocks new work (87.8167ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 7
+ℹ fail 14
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 15786.2638
+
+✖ failing tests:
+
+test at dist\test\integration\gateway.integration.test.js:93:1
+✖ P09 AUTO keeps Connection, Capability and Permission separate and records one invocation (513.1659ms)
+  Error [DomainError]: GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+      at gatewayDenied (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:17:12)
+      at file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:433:23
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/kysely.js:680:32
+      at async DefaultConnectionProvider.provideConnection (file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/driver/default-connection-provider.js:10:20)
+      at async dispatchGatewayAction (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:610:20)
+      at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:99:20)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    code: 'GATEWAY_CONTEXT_STALE',
+    status: 409,
+    type: '/problems/gateway-context-stale',
+    title: 'Gateway 拒绝执行',
+    detail: 'Run 的 Context 来源已变化，原动作不得准入。',
+    retryable: false,
+    retryAction: 'REFRESH_AND_REDECIDE',
+    fieldErrors: [],
+    conflict: undefined
+  }
+
+test at dist\test\integration\gateway.integration.test.js:111:1
+✖ P09 ASK releases old Worker; Review decision and new epoch admit only the original target (178.8172ms)
+  Error [DomainError]: GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+      at gatewayDenied (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:17:12)
+      at file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:433:23
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/kysely.js:680:32
+      at async DefaultConnectionProvider.provideConnection (file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/driver/default-connection-provider.js:10:20)
+      at async dispatchGatewayAction (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:610:20)
+      at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:133:20)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    code: 'GATEWAY_CONTEXT_STALE',
+    status: 409,
+    type: '/problems/gateway-context-stale',
+    title: 'Gateway 拒绝执行',
+    detail: 'Run 的 Context 来源已变化，原动作不得准入。',
+    retryable: false,
+    retryAction: 'REFRESH_AND_REDECIDE',
+    fieldErrors: [],
+    conflict: undefined
+  }
+
+test at dist\test\integration\gateway.integration.test.js:278:1
+✖ M03 revocation between approved claim and Admit releases a no-effect Worker for safe control (129.7284ms)
+  AssertionError [ERR_ASSERTION]: The validation function is expected to return "true". Received false
+  
+  Caught error:
+  
+  DomainError: GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:289:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: DomainError: GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+        at gatewayDenied (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:17:12)
+        at file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:433:23
+        at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        at async file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/kysely.js:680:32
+        at async DefaultConnectionProvider.provideConnection (file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/driver/default-connection-provider.js:10:20)
+        at async dispatchGatewayAction (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:610:20)
+        at async waitForActual (node:assert:646:5)
+        at async strict.rejects (node:assert:769:25)
+        at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:289:5)
+        at async Test.run (node:internal/test_runner/test:1409:7),
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at dist\test\integration\gateway.integration.test.js:402:1
+✖ P09 revocation before Admit rejects, while Admit before revocation completes the already admitted effect (114.081ms)
+  AssertionError [ERR_ASSERTION]: The validation function is expected to return "true". Received false
+  
+  Caught error:
+  
+  DomainError: GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:407:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: DomainError: GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+        at gatewayDenied (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:17:12)
+        at file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:433:23
+        at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        at async file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/kysely.js:680:32
+        at async DefaultConnectionProvider.provideConnection (file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/driver/default-connection-provider.js:10:20)
+        at async dispatchGatewayAction (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:610:20)
+        at async waitForActual (node:assert:646:5)
+        at async strict.rejects (node:assert:769:25)
+        at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:407:5)
+        at async Test.run (node:internal/test_runner/test:1409:7),
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at dist\test\integration\gateway.integration.test.js:422:1
+✖ P09 overlapping roots across Projects occupy one physical directory until the first effect settles (419.0831ms)
+  Error [DomainError]: GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+      at gatewayDenied (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:17:12)
+      at file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:433:23
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/kysely.js:680:32
+      at async DefaultConnectionProvider.provideConnection (file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/driver/default-connection-provider.js:10:20)
+      at async dispatchGatewayAction (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:610:20)
+      at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:436:19)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    code: 'GATEWAY_CONTEXT_STALE',
+    status: 409,
+    type: '/problems/gateway-context-stale',
+    title: 'Gateway 拒绝执行',
+    detail: 'Run 的 Context 来源已变化，原动作不得准入。',
+    retryable: false,
+    retryAction: 'REFRESH_AND_REDECIDE',
+    fieldErrors: [],
+    conflict: undefined
+  }
+
+test at dist\test\integration\gateway.integration.test.js:443:1
+✖ P09 crashed Fake dispatch reconciles the same ID; tampering remains UNKNOWN and blocks new IDs (208.8462ms)
+  AssertionError [ERR_ASSERTION]: The error is expected to be an instance of "SimulatedGatewayCrash". Received "DomainError"
+  
+  Error message:
+  
+  GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:447:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: DomainError: GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+        at gatewayDenied (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:17:12)
+        at file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:433:23
+        at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        at async file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/kysely.js:680:32
+        at async DefaultConnectionProvider.provideConnection (file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/driver/default-connection-provider.js:10:20)
+        at async dispatchGatewayAction (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:610:20)
+        at async waitForActual (node:assert:646:5)
+        at async strict.rejects (node:assert:769:25)
+        at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:447:5)
+        at async Test.run (node:internal/test_runner/test:1409:7),
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at dist\test\integration\gateway.integration.test.js:474:1
+✖ P09 expired inner Worker lease after Admit cannot start the Fake effect (99.0177ms)
+  Error [DomainError]: GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+      at gatewayDenied (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:17:12)
+      at file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:433:23
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/kysely.js:680:32
+      at async DefaultConnectionProvider.provideConnection (file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/driver/default-connection-provider.js:10:20)
+      at async dispatchGatewayAction (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:610:20)
+      at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:482:20)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    code: 'GATEWAY_CONTEXT_STALE',
+    status: 409,
+    type: '/problems/gateway-context-stale',
+    title: 'Gateway 拒绝执行',
+    detail: 'Run 的 Context 来源已变化，原动作不得准入。',
+    retryable: false,
+    retryAction: 'REFRESH_AND_REDECIDE',
+    fieldErrors: [],
+    conflict: undefined
+  }
+
+test at dist\test\integration\gateway.integration.test.js:498:1
+✖ P09 expired inner Worker lease after Fake effect preserves original identity as UNKNOWN (104.5714ms)
+  Error [DomainError]: GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+      at gatewayDenied (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:17:12)
+      at file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:433:23
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/kysely.js:680:32
+      at async DefaultConnectionProvider.provideConnection (file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/driver/default-connection-provider.js:10:20)
+      at async dispatchGatewayAction (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:610:20)
+      at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:506:20)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    code: 'GATEWAY_CONTEXT_STALE',
+    status: 409,
+    type: '/problems/gateway-context-stale',
+    title: 'Gateway 拒绝执行',
+    detail: 'Run 的 Context 来源已变化，原动作不得准入。',
+    retryable: false,
+    retryAction: 'REFRESH_AND_REDECIDE',
+    fieldErrors: [],
+    conflict: undefined
+  }
+
+test at dist\test\integration\gateway.integration.test.js:522:1
+✖ P09 database rejects crossed operation scope, Review pair, Invocation origin and claim token (139.0203ms)
+  Error [DomainError]: GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+      at gatewayDenied (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:17:12)
+      at file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:433:23
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/kysely.js:680:32
+      at async DefaultConnectionProvider.provideConnection (file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/driver/default-connection-provider.js:10:20)
+      at async dispatchGatewayAction (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:610:20)
+      at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:533:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    code: 'GATEWAY_CONTEXT_STALE',
+    status: 409,
+    type: '/problems/gateway-context-stale',
+    title: 'Gateway 拒绝执行',
+    detail: 'Run 的 Context 来源已变化，原动作不得准入。',
+    retryable: false,
+    retryAction: 'REFRESH_AND_REDECIDE',
+    fieldErrors: [],
+    conflict: undefined
+  }
+
+test at dist\test\integration\gateway.integration.test.js:561:1
+✖ P09 PREPARED Worker exit proves no dispatch; the same logical ID gets a new Invocation and epoch (98.8999ms)
+  Error [DomainError]: GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+      at gatewayDenied (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:17:12)
+      at file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:433:23
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/kysely.js:680:32
+      at async DefaultConnectionProvider.provideConnection (file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/driver/default-connection-provider.js:10:20)
+      at async dispatchGatewayAction (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:610:20)
+      at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:576:19)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    code: 'GATEWAY_CONTEXT_STALE',
+    status: 409,
+    type: '/problems/gateway-context-stale',
+    title: 'Gateway 拒绝执行',
+    detail: 'Run 的 Context 来源已变化，原动作不得准入。',
+    retryable: false,
+    retryAction: 'REFRESH_AND_REDECIDE',
+    fieldErrors: [],
+    conflict: undefined
+  }
+
+test at dist\test\integration\gateway.integration.test.js:584:1
+✖ P09 DISPATCHING with a missing target stays UNKNOWN; a different intent cannot bypass it (87.5259ms)
+  AssertionError [ERR_ASSERTION]: The error is expected to be an instance of "SimulatedGatewayCrash". Received "DomainError"
+  
+  Error message:
+  
+  GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:588:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: DomainError: GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+        at gatewayDenied (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:17:12)
+        at file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:433:23
+        at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        at async file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/kysely.js:680:32
+        at async DefaultConnectionProvider.provideConnection (file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/driver/default-connection-provider.js:10:20)
+        at async dispatchGatewayAction (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:610:20)
+        at async waitForActual (node:assert:646:5)
+        at async strict.rejects (node:assert:769:25)
+        at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:588:5)
+        at async Test.run (node:internal/test_runner/test:1409:7),
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at dist\test\integration\gateway.integration.test.js:653:1
+✖ P09 URL Permission matches path segments and concurrent Review decisions consume once (98.7946ms)
+  Error [DomainError]: GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+      at gatewayDenied (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:17:12)
+      at file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:433:23
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/kysely.js:680:32
+      at async DefaultConnectionProvider.provideConnection (file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/driver/default-connection-provider.js:10:20)
+      at async dispatchGatewayAction (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:610:20)
+      at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:670:19)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    code: 'GATEWAY_CONTEXT_STALE',
+    status: 409,
+    type: '/problems/gateway-context-stale',
+    title: 'Gateway 拒绝执行',
+    detail: 'Run 的 Context 来源已变化，原动作不得准入。',
+    retryable: false,
+    retryAction: 'REFRESH_AND_REDECIDE',
+    fieldErrors: [],
+    conflict: undefined
+  }
+
+test at dist\test\integration\gateway.integration.test.js:689:1
+✖ P09 HTTP config commands replay, isolate scope, and expose full Invocation history (1677.244ms)
+  Error [DomainError]: GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+      at gatewayDenied (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:17:12)
+      at file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:433:23
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/kysely.js:680:32
+      at async DefaultConnectionProvider.provideConnection (file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/driver/default-connection-provider.js:10:20)
+      at async dispatchGatewayAction (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:610:20)
+      at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:770:23)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    code: 'GATEWAY_CONTEXT_STALE',
+    status: 409,
+    type: '/problems/gateway-context-stale',
+    title: 'Gateway 拒绝执行',
+    detail: 'Run 的 Context 来源已变化，原动作不得准入。',
+    retryable: false,
+    retryAction: 'REFRESH_AND_REDECIDE',
+    fieldErrors: [],
+    conflict: undefined
+  }
+
+test at dist\test\integration\gateway.integration.test.js:784:1
+✖ P10 Rule update after Gateway Admit preserves the old Invocation outcome and blocks new work (87.8167ms)
+  Error [DomainError]: GATEWAY_CONTEXT_STALE: Run 的 Context 来源已变化，原动作不得准入。
+      at gatewayDenied (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:17:12)
+      at file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:433:23
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/kysely.js:680:32
+      at async DefaultConnectionProvider.provideConnection (file:///D:/Develop/Relay-Agent/node_modules/.pnpm/kysely@0.29.6/node_modules/kysely/dist/driver/default-connection-provider.js:10:20)
+      at async dispatchGatewayAction (file:///D:/Develop/Relay-Agent/apps/api/dist/src/application/gateway-actions.js:610:20)
+      at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:788:20)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    code: 'GATEWAY_CONTEXT_STALE',
+    status: 409,
+    type: '/problems/gateway-context-stale',
+    title: 'Gateway 拒绝执行',
+    detail: 'Run 的 Context 来源已变化，原动作不得准入。',
+    retryable: false,
+    retryAction: 'REFRESH_AND_REDECIDE',
+    fieldErrors: [],
+    conflict: undefined
+  }
+waiting for server to shut down..... done
+server stopped
+--- integration summary ---
+tests exit code: 1
+build exit code: skipped
+business migration exit code: 0
+graph install exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: FAILED

@@ -1,0 +1,59 @@
+M03 React SSE client preparation — 2026-09-24
+Status: READY_FOR_SLICE_ACCEPTANCE; not M03, G01/G07/G08 or desktop acceptance.
+
+Scope: apps/workbench/src/api/runEvents.ts, src/api/relayClient.ts, src/views/RunView.tsx,
+tests/run-events.spec.ts, tests/browser/run-events.spec.ts, and
+docs/frontend/workbench-design.md. Existing connection state, Run/control/source tests,
+package and lock were not edited. The 20-input source/config/test/build hash list is
+m03-sse-inputs.sha256; all 20 entries verified against the files after final checks.
+
+Environment: Windows 11 x64; explicit portable Node 24.21.0 at
+D:\Develop\Relay-Agent\.research\runtime-cache\node-v24.21.0-win-x64\node.exe.
+For Playwright and npm, this directory was prepended to PATH so their child
+processes also used Node 24. No real token or Provider was used.
+
+Commands and raw output:
+1. cwd apps/workbench;
+   & 'D:\Develop\Relay-Agent\.research\runtime-cache\node-v24.21.0-win-x64\node.exe'
+     node_modules/typescript/bin/tsc --noEmit
+   Exit 0; m03-sse-typecheck.log. An earlier test-only setInterval return type
+   mismatch failed typecheck; corrected before this final run.
+2. cwd apps/workbench;
+   & 'D:\Develop\Relay-Agent\.research\runtime-cache\node-v24.21.0-win-x64\node.exe'
+     node_modules/vitest/vitest.mjs run
+   Exit 0, 23 files / 127 tests; m03-sse-vitest.log.
+3. cwd apps/workbench; prepend portable Node directory to PATH;
+   & 'D:\Develop\Relay-Agent\.research\runtime-cache\node-v24.21.0-win-x64\node.exe'
+     node_modules/@playwright/test/cli.js test --reporter=line
+   Exit 0, Chromium 21/21; m03-sse-browser.log. Playwright test server at
+   127.0.0.1:4173 was no longer listening after the suite.
+4. cwd apps/workbench; prepend portable Node directory to PATH;
+   & 'D:\Develop\Relay-Agent\.research\runtime-cache\node-v24.21.0-win-x64\npm.cmd'
+     run build
+   Exit 0, TypeScript and Vite 8.3 production bundle; m03-sse-build.log.
+   Four dist files and their SHA values are in m03-sse-inputs.sha256. Vite's
+   existing >500 kB chunk size notice is non-failing; no unrelated split made.
+5. cwd repository root;
+   & 'D:\Develop\Relay-Agent\.research\runtime-cache\node-v24.21.0-win-x64\node.exe'
+     scripts/check-docs.mjs
+   Exit 0, 77 Markdown / 1079 links / 926 anchors / 126 tokens / 29 contrast;
+   m03-sse-docs.log. Counts include concurrent repository documentation work.
+
+Controlled-stream checks: fetch sends Bearer in a header, never a URL; after=0
+starts subscription and an exact signed-PG-bigint decimal cursor survives
+reconnect. UTF-8 split across chunks, CRLF, duplicate IDs, a sequence gap,
+an incomplete final frame, a >64 KiB ID line, out-of-range bigint and a
+300 KiB data line were exercised. Large data text is discarded, but its valid
+event ID remains a refresh hint: the view was corrected by GET Run/Task/Reviews.
+An incomplete event after seq 1 reconnected with after=1; it did not skip to
+seq 2. Ten rapid events caused at most two Run GETs and no Sources reload.
+The quiet-stream interval also refreshed authoritative Run/Task/Reviews, and
+401 stopped reconnecting with the old Bearer. Component unmount aborted the
+stream without any POST control/cancel; Chromium checked the live connection
+UI, authenticated SSE request, snapshot correction and route leave.
+
+Boundary: SSE endpoint was mocked in component/browser tests. No real PG/API,
+independent Worker, SSE history transaction/order, cross-workspace denial or
+Windows WebView was tested here. The backend must confirm first seq starts at 1,
+text/event-stream response, and GET after semantics before integration. Stream
+events do not write business state; periodic/manual GET remains authoritative.

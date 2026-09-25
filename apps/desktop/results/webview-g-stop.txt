@@ -1,0 +1,9 @@
+{
+    "session_id":  "3c7638d2086c44ea8c7debbe16828876",
+    "mode":  "AssertStopped",
+    "original_host_pid":  33460,
+    "original_node_pid":  33780,
+    "host_alive_after_wait":  false,
+    "node_alive_after_wait":  false,
+    "passed":  true
+}

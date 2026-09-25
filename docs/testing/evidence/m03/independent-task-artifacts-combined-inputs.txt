@@ -1,0 +1,2 @@
+task_artifacts_unchanged_entries=8 mismatches=0
+artifact_panel_p1_entries=3 total_mismatches=0

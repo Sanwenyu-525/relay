@@ -1,0 +1,3 @@
+b8e602b788375af54f10d30ca25fdad7b94ef6419f6122dcd54e6d287483b4d0  apps/workbench/src/components/ArtifactPanel.tsx
+61d23f1d06c977ea80805f7941a2d02c778e6131c10643e20733d7dbc3827261  apps/workbench/tests/taskDetail.spec.ts
+4d1b8189a11bcf6faf2edb102a3252cbee817a4f098957ab220bfafaced91a99  docs/frontend/workbench-design.md

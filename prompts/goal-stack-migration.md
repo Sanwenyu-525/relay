@@ -1,0 +1,30 @@
+# Goal：技术栈改造与后续 V1 开发
+
+使用方式：在目标任务中启用 goal，将下列内容作为目标提示词；不假定某个客户端的斜杠命令参数语法。本轮仅提供提示词，没有创建 goal 或设定 token 预算。
+
+~~~text
+在 D:/Develop/Relay-Agent 持续完成现有技术栈改造与后续 V1 开发，交付保留既有功能和视觉的 React Windows 桌面应用。每完成一个大模块即独立验收，修复并复验通过后继续下一模块，直到所有必需出口有证据通过。
+
+先读 AGENTS.md、CODEX_NEXT_STEP.md、docs/README.md、docs/decisions/ADR-010-agent-stack-react-desktop.md、docs/architecture/technology-selection.md、prompts/README.md、prompts/stack-migration.md 和 docs/testing/verification-plan.md 第 10 节。附件 Agent_Stack_Integration.md 是原始参考；采用适配本项目的决策，不机械照搬全部组件。
+
+你负责协调和独立验收；具体实现、测试、构建和修复必须分派给 gpt-6-sol / ultra。调用时显式设置模型和 reasoning effort，明确文件/模块所有权，要求保留他人的修改。不能选择该模型时如实说明阻塞，不默换模型或虚报使用。执行者自检不等于验收通过。
+
+使用 goal 工具维护这个长期目标。先查看当前 goal，没有活动目标才创建；已有同一目标则继续，不重复创建，不自行设 token 预算或改用户预算。遵守工具的暂停/阻塞/完成规则；用户要求暂停时记录进度并停止。上下文压缩或自动接续后从文档和实际文件恢复，不重复重建或把一轮回复结束当作目标完成。
+
+按 prompts/stack-migration.md 的 M01–M07 执行：
+M01 现状基线、稳定依赖及技术适配；M02 全部既有界面迁移 React 与 Windows 桌面基础；M03 Mock Agent Runtime 和可靠性闭环；M04 真实模型、Context、Assist、低风险工具；M05 完整工作体验和追溯；M06 真实工具/Coding Worker；M07 Windows 安装交付和 V1 总验收。
+
+技术选择：React + TypeScript + Vite；Tauri 2 + Node sidecar 优先实施；保留 Node 24 LTS、Fastify 5、Kysely/pg/PostgreSQL 和既有迁移。LangGraph.js 1.x/官方 PostgresSaver 先通过兼容出口再接入。API 与 Worker 分进程，分发优先 PostgreSQL 持久 command/outbox；不无依据新增 Drizzle、Redis/BullMQ 或多套 Runtime。正式稳定版本核验兼容后精确锁定，不用 beta/RC 或浮动 latest。
+
+React 是完整迁移，逐路由、页面、组件和交互核对，不只替换页壳。保持现有 UI/token、业务数据、鉴权、回执、revision 和唯一领域写入口；旧迁移只追加，不重写历史。保留当前可用功能，未接通能力准确标识。开发 Compose 和浏览器自测不能替代桌面安装交付。
+
+先完整通过 Mock 的 Task/Run 创建、SSE、审批、取消、幂等、失租、双 Worker、崩溃恢复和 UNKNOWN 测试，再启用真实模型。LangGraph 是唯一通用图，领域入口仍控制业务完成和权限；PG 分发只派 command。checkpoint 不保证副作用 exactly-once；UNKNOWN 按原 operation_id 核对，审批等待释放槽位，取消送到实际客户端/子进程，SSE 从 PG 重放，断页不取消。
+
+每模块由执行者实现和自检，交 READY_FOR_ACCEPTANCE。你在当前文件基准上独立复跑必要测试和反例，检查真实 PG/进程/桌面证据，给出 ACCEPTED、CHANGES_REQUESTED 或 BLOCKED 及依据。未通过则交回修复并复验，不进入依赖它的下一模块。普通模块通过后自动继续已授权工作，无需重复问用户是否继续。
+
+只在 CODEX_NEXT_STEP.md 维护当前模块、状态、下一步和阻塞；具体证据写入对应测试/开发记录并链接。每模块报告实际修改文件、实际命令/退出码、已执行测试、未验证项、风险和文档同步，运行 node scripts/check-docs.mjs。原 P00–P22 保留业务覆盖和历史；不重做已通过功能，P22 论文实验和 V1.5 不属于此目标。
+
+真实 Provider 配置或 Windows 条件缺失时明确记录，继续不依赖它的已授权工作，不伪造通过或降低门槛。只用用户为本项目提供的凭据，不扫描宿主会话密钥。保持简洁进度汇报；不自动推送、公开发布或向外部协作平台发送项目材料。
+
+只有 M01–M07 的必要出口、既有业务回归和 Windows 安装验收全部通过且无阻塞，才能标记 goal complete。最终交付实际文件清单、运行/安装说明、各模块证据、实测结果、已知限制和未验证可选项。未完成时如实保持状态，不能因上下文、时间或预算将尽冒充完成。
+~~~

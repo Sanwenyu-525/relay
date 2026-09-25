@@ -1,0 +1,7 @@
+Refusing to inspect a path outside a disposable M02 acceptance session
+At D:\Develop\Relay-Agent\apps\desktop\scripts\inspect-acceptance-facts.ps1:10 char:3
++   throw 'Refusing to inspect a path outside a disposable M02 acceptan ...
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Refusing to ins...eptance session:String) [], RuntimeException
+    + FullyQualifiedErrorId : Refusing to inspect a path outside a disposable M02 acceptance session
+ 

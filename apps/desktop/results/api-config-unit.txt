@@ -1,0 +1,15 @@
+✔ accepts a complete environment and normalizes the data root (4.3983ms)
+✔ reports every missing key at once instead of silently defaulting (1.1687ms)
+✔ rejects a non-loopback bind host, a privileged port and illegal values (2.1168ms)
+✔ rejects wildcard, null and non-loopback origins (1.2435ms)
+✔ rejects placeholder and short bearer credentials (2.2174ms)
+✔ rejects a data root inside the repository or missing on disk (3.1669ms)
+✔ origin, database URL and data root validators stay explicit (0.2168ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 77.9683

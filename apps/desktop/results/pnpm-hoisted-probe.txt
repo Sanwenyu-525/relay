@@ -1,0 +1,10 @@
+(node:2560) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+.                                        |  WARN  A pnpm-lock.yaml file exists. The current configuration prohibits to read or write a lockfile
+Packages are copied from the content-addressable store to the virtual store.
+  Content-addressable store is at: D:\.pnpm-store\v3
+  Virtual store is at:             apps/desktop/src-tauri/resources/api-hoisted-probe/node_modules/.pnpm
+Progress: resolved 1, reused 0, downloaded 0, added 0
+.                                        |  +64 ++++++
+Progress: resolved 68, reused 64, downloaded 0, added 29
+Progress: resolved 68, reused 64, downloaded 0, added 64, done

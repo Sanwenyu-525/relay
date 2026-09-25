@@ -1,0 +1,72 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-49859a193b
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-49859a193b/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-49859a193b^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 5224)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-49859a193b/cluster" "-h" "127.0.0.1" "-p" "9269"
+DO
+CREATE DATABASE
+Test database: relay_api_test_0e450ea696bb on 127.0.0.1:9269 (roles relay_migrator / relay_app)
+✔ G01/G04: 202 contains the committed Run, immutable command, outbox and receipt; restart replays it (4169.1874ms)
+✔ an already aborted shutdown cannot claim or execute a pending command (640.6714ms)
+✔ shutdown signalled from onClaim does not execute a step after the claim (39.3903ms)
+✔ a replaced invocation cannot insert PREPARED after a delayed PERSIST claim (132.0625ms)
+✔ a stale publisher cannot resolve DISPATCHING; recovery reconciles the same operation or leaves UNKNOWN (201.051ms)
+✔ a stale retry cannot reconcile an existing DISPATCHING effect before recovery (122.5792ms)
+✔ G05: expired live Worker cannot create a second invocation or write; observed exit requeues the same command (1396.6471ms)
+✔ G04/G05: two independent supervisor entries race for one durable command (1058.5089ms)
+✔ G04: supervisor crash does not forge stop evidence or reclaim its former child (1519.823ms)
+✔ supervisor sidecar echoes readiness nonce and Node version, then exits on stdin EOF (383.2217ms)
+✔ a bounded delivery never marks an unfinished Run command DONE (47.5339ms)
+✔ Delegate rollback removes Run, command, outbox, invocation and receipt together (26.3511ms)
+✔ desktop malformed or oversized private frames fail before any PostgreSQL connection or Worker spawn (2217.7974ms)
+✔ desktop startup emits private readiness before any claim and tags its Worker with launch ID (1009.9417ms)
+✔ desktop acknowledges empty old launches in input order before dispatch readiness (543.4067ms)
+✔ two desktop supervisors use one stopped launch claim once; old Worker cannot write after requeue (1291.836ms)
+✔ a delayed old desktop Worker process cannot write after a new launch takes its command (3469.527ms)
+✔ desktop stopped-launch recovery reconciles the same operation and blocks UNKNOWN (1648.7528ms)
+controlled old-launch backlog held 1202 ms without ack
+✔ a slow multi-claim launch has no early ack; a killed supervisor retries the same claims (2873.8768ms)
+✔ EOF during recovery emits no unfinished launch ack or final dispatch readiness (713.6597ms)
+✔ a recovery exception emits only prior launch progress and no final readiness (480.6095ms)
+✔ desktop stdin EOF stops new claims and waits for the active child close (1280.4411ms)
+ℹ tests 22
+ℹ suites 0
+ℹ pass 22
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 42029.704
+waiting for server to shut down.... done
+server stopped
+--- integration summary ---
+tests exit code: 0
+build exit code: skipped
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: PASSED

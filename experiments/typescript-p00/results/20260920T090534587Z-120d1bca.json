@@ -1,0 +1,40 @@
+{
+  "run_id": "20260920T090534587Z-120d1bca",
+  "started_at": "2026-09-20T09:05:44.328Z",
+  "finished_at": "2026-09-20T09:05:50.1752981Z",
+  "status": "FAILED",
+  "assertions": [
+    "Kysely 内置迁移器对相同名称的已应用文件不校验内容摘要。",
+    "Kysely 内置迁移器拒绝已应用迁移文件缺失。",
+    "重复迁移不重复执行已应用迁移。",
+    "补充的单一迁移入口拒绝已应用迁移内容改变。",
+    "补充的单一迁移入口拒绝已应用迁移文件缺失。",
+    "迁移 DDL、Kysely 迁移记录和摘要清单在同一事务内遇故障时一起回滚。"
+  ],
+  "environment": {
+    "node": "24.21.0",
+    "postgres": "18.6"
+  },
+  "input_sha256": {
+    "migrations/001_create_probe.ts": "50d9729bd981c026dd5a3cb1516e62b0b9dfc7412b0f5d6de613290d38ec5dbd",
+    "package.json": "a613a30b719ebe235c655b77b42f9c87c984065886847fc7cff2f6f125d9783e",
+    "pnpm-lock.yaml": "1f7a24186db5d5781bd258d502083ad3a49e5da7c11a931957c59b496edea28a",
+    "scripts/run-real-pg.ps1": "6b260a6603287a8697887a9cffcd12ff30b4bf1e384b3bff31e7d1010f436b69",
+    "src/config.ts": "4262b53661f9c13b9579271484fb18e466f29ba6dae7b3a6c1581e512e438bc1",
+    "src/database.ts": "a950e74f1ca0cfb030c028ab155e00acf4481290d09471b422c1b9923dc6efb3",
+    "src/migrate-child.ts": "31049fcd816622028d315bf54faf49c61ee3709a1810eabb36f842bd2612429b",
+    "src/migrations.ts": "689e96fb8df91281528a771f188049a5471c022f9563d07e138aeca10ef568b0",
+    "src/run-real-pg.ts": "ef35f96198a6f238312d4b10801ff3cc466f140b2e44ecd2d84f0e1977cfe586",
+    "tsconfig.json": "7e22888835c727505c1492291457602012ba98c5cac28bffcd675419bfb1537e"
+  },
+  "cleanup": {
+    "test_database": "test runner terminated its sessions and dropped only its generated database",
+    "dedicated_postgresql": "pg_ctl stop completed by run-real-pg.ps1"
+  },
+  "process": {
+    "node_exit_code": 1,
+    "postgres_start_exit_code": 0,
+    "postgres_stop_exit_code": 0,
+    "failure_phase": "node_runner"
+  }
+}

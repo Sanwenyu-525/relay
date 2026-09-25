@@ -1,0 +1,125 @@
+import { randomUUID } from 'node:crypto';
+import { stat } from 'node:fs/promises';
+import { isAbsolute, resolve } from 'node:path';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { validateDatabaseUrl } from '../config/config.js';
+import { RelayDatabase } from '../infrastructure/database.js';
+import { graphCheckpointsReady } from '../infrastructure/graph-checkpoints.js';
+import { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
+import { runOneCommand } from './run-command.js';
+
+const MIGRATIONS_DIRECTORY = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'migrations');
+const once = process.argv.includes('--once');
+const controller = new AbortController();
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK'] as const) {
+  process.on(signal, () => controller.abort());
+}
+
+function readInteger(name: string, fallback: number, minimum: number, maximum: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < minimum || value > maximum) throw new Error(`${name} invalid`);
+  return value;
+}
+
+async function main(): Promise<void> {
+  const databaseUrl = process.env.RELAY_DB_URL?.trim();
+  const dataRoot = process.env.RELAY_DATA_ROOT?.trim();
+  const validDataRoot = dataRoot !== undefined && isAbsolute(dataRoot) &&
+    await stat(dataRoot).then((item) => item.isDirectory(), () => false);
+  if (databaseUrl === undefined || validateDatabaseUrl(databaseUrl) !== undefined ||
+      dataRoot === undefined || !validDataRoot) {
+    throw new Error('worker configuration invalid');
+  }
+  const workerId = process.env.RELAY_WORKER_ID?.trim() || `worker:${randomUUID()}`;
+  const pollMs = readInteger('RELAY_WORKER_POLL_MS', 250, 20, 60_000);
+  const leaseMs = readInteger('RELAY_WORKER_LEASE_MS', 30_000, 100, 600_000);
+  const fakeModelDelayMs = process.env.NODE_ENV === 'test'
+    ? readInteger('RELAY_WORKER_TEST_MODEL_DELAY_MS', 0, 0, 60_000) : 0;
+  const database = new RelayDatabase({
+    databaseUrl, databasePoolMax: 4, databaseConnectTimeoutMs: 5_000,
+  }, () => controller.abort());
+  try {
+    const readiness = await database.checkReadiness(new SchemaReadinessChecker(MIGRATIONS_DIRECTORY));
+    if (readiness.database !== 'up' || readiness.schema !== 'up') {
+      throw new Error('worker database schema unavailable');
+    }
+    if (!(await graphCheckpointsReady(database.executor, databaseUrl))) {
+      throw new Error('worker graph checkpoint schema unavailable');
+    }
+    process.stdout.write(`${JSON.stringify({ type: 'worker_ready', worker_id: workerId })}\n`);
+    while (!controller.signal.aborted) {
+      const result = await runOneCommand(database.executor, {
+        workerId, dataRoot, checkpointUrl: databaseUrl, leaseMs, signal: controller.signal,
+        ...(fakeModelDelayMs === 0 ? {} : { fakeModelDelayMs }),
+        onClaim: async (claim) => {
+          process.stdout.write(`${JSON.stringify({ type: 'worker_claimed', command_id: claim.commandId,
+            run_id: claim.runId, epoch: claim.epoch.toString() })}\n`);
+          if (process.env.NODE_ENV === 'test' &&
+              process.env.RELAY_WORKER_TEST_EXIT_AFTER_RESUME_CLAIM === 'true' &&
+              claim.kind === 'RESUME') process.exit(95);
+          // Deterministic integration fault point; never enabled by production configuration.
+          if (process.env.NODE_ENV === 'test' && process.env.RELAY_WORKER_TEST_HOLD_MS !== undefined) {
+            await new Promise((done) => setTimeout(done,
+              readInteger('RELAY_WORKER_TEST_HOLD_MS', 0, 0, 60_000)));
+          }
+        },
+        afterStep: async (step) => {
+          if (process.env.NODE_ENV === 'test' &&
+              process.env.RELAY_WORKER_TEST_EXIT_AFTER_STEP_KIND ===
+                (step.status === 'STEP_SUCCEEDED' ? step.step_kind : '')) {
+            process.exit(93);
+          }
+          if (process.env.NODE_ENV === 'test' &&
+              process.env.RELAY_WORKER_TEST_EXIT_AFTER_APPROVAL_WAIT === 'true' &&
+              step.status === 'STEP_SUCCEEDED' && step.run_status === 'WAITING_APPROVAL') {
+            process.exit(92);
+          }
+        },
+        afterGraph: async () => {
+          if (process.env.NODE_ENV === 'test' &&
+              process.env.RELAY_WORKER_TEST_EXIT_AFTER_GRAPH === 'true') process.exit(94);
+        },
+        afterGatewayPrepared: async (prepared) => {
+          if (process.env.NODE_ENV === 'test' &&
+              process.env.RELAY_WORKER_TEST_EXIT_AFTER_GATEWAY_PREPARE === 'true' &&
+              (prepared.status === 'WAITING' || prepared.status === 'PREPARED')) process.exit(96);
+        },
+        afterGatewayFakeEffect: async () => {
+          if (process.env.NODE_ENV === 'test' &&
+              process.env.RELAY_WORKER_TEST_EXIT_AFTER_GATEWAY_EFFECT === 'true') process.exit(97);
+        },
+        afterGatewayAdmit: async () => {
+          if (process.env.NODE_ENV === 'test' &&
+              process.env.RELAY_WORKER_TEST_EXIT_AFTER_GATEWAY_ADMIT === 'true') process.exit(98);
+        },
+      });
+      if (result !== undefined) {
+        process.stdout.write(`${JSON.stringify({ type: 'worker_settled', command_id: result.commandId,
+          run_id: result.runId, outcome: result.outcome })}\n`);
+      }
+      if (once) break;
+      if (result === undefined) {
+        await new Promise<void>((done) => {
+          const timer = setTimeout(done, pollMs);
+          controller.signal.addEventListener('abort', () => { clearTimeout(timer); done(); }, { once: true });
+        });
+      }
+    }
+  } finally {
+    await database.close();
+  }
+}
+
+try {
+  await main();
+} catch (error) {
+  const configFailure = error instanceof Error &&
+    (error.message.includes('configuration') || error.message.includes('schema unavailable') ||
+      error.message.endsWith(' invalid'));
+  process.stderr.write(`${configFailure ? 'worker_configuration_failed' : 'worker_failed'}\n`);
+  process.exitCode = configFailure ? 2 : 1;
+}

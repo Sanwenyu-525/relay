@@ -1,0 +1,11 @@
+[package]
+name = "relay-m01-tauri-smoke"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", features = [] }
+
+[dependencies]
+tauri = { version = "=2.11.6", features = [] }

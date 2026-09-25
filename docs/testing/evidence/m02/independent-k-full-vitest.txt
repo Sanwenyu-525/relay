@@ -1,0 +1,16 @@
+
+> relay-workbench-fixture@0.1.0 test D:\Develop\Relay-Agent\apps\workbench
+> vitest run
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./vite.config" without a file extension (vitest.config.ts:2:24). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.1 D:/Develop/Relay-Agent/apps/workbench
+
+
+ Test Files  21 passed (21)
+      Tests  116 passed (116)
+   Start at  08:06:55
+   Duration  10.56s (environment 50%, tests 26%, import 14%, transform 9%, setup 1%)
+

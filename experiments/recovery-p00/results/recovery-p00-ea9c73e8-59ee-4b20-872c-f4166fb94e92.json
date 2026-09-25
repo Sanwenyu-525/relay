@@ -1,0 +1,3842 @@
+{
+  "run_id": "recovery-p00-ea9c73e8-59ee-4b20-872c-f4166fb94e92",
+  "status": "PASSED",
+  "started_at": "2026-09-20T14:49:15.776Z",
+  "finished_at": "2026-09-20T14:51:12.455Z",
+  "environment": {
+    "node": "24.21.0",
+    "postgres": "18.6"
+  },
+  "input_sha256": {
+    "package.json": "b4989c11b29cd351197f6f1d88f69865c3925371a2a1d4f143426597f4565ce3",
+    "pnpm-lock.yaml": "5e1c73b2038efc2af982ed29b11d26828678f5e503231a1632b0b401a0658bb3",
+    "tsconfig.json": "3bca16d962112c9c30a66d2b8cbcc925cf571f44ca7585ef8ca6ccf9504b2e3c",
+    "src/worker.ts": "83a47c786b9b89d40a2fd18c64d22362f68e0fcb409dcd833fc598e123076768",
+    "src/control-worker.ts": "c20cf9017d51fac69c8de079f9cbb575df8282a94a5222d52f0208b31b6f3f71",
+    "src/run-recovery.ts": "115bbd6ab5ded7db26afebc51c8e1a50f1b69473f46806775a97255fd34cb150"
+  },
+  "process_evidence": [
+    {
+      "name": "initdb",
+      "args": [
+        "-D",
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\.local\\recovery-p00-ea9c73e8-59ee-4b20-872c-f4166fb94e92\\pgdata",
+        "-A",
+        "trust",
+        "-U",
+        "postgres",
+        "--no-locale"
+      ],
+      "pid": 98508,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 6198,
+      "stdout": "",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "pg_ctl_start",
+      "args": [
+        "start",
+        "-D",
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\.local\\recovery-p00-ea9c73e8-59ee-4b20-872c-f4166fb94e92\\pgdata",
+        "-l",
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\.local\\recovery-p00-ea9c73e8-59ee-4b20-872c-f4166fb94e92\\postgres.log",
+        "-o",
+        "-p 3707 -h 127.0.0.1",
+        "-w",
+        "-t",
+        "30"
+      ],
+      "pid": 86648,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 325,
+      "stdout": "",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "setup",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "setup"
+      ],
+      "pid": 91788,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 905,
+      "stdout": "{\"event\":\"setup_complete\",\"pid\":91788,\"database_schema\":\"recovery_p00_v3\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "control_setup",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "setup"
+      ],
+      "pid": 20724,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 259,
+      "stdout": "{\"event\":\"control_setup_complete\",\"pid\":20724}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "continue_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-d4eb7801-9339-47f3-82e8-53f6b93d6175"
+      ],
+      "pid": 97664,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 701,
+      "stdout": "{\"event\":\"prepared\",\"pid\":97664,\"operation_id\":\"operation-d4eb7801-9339-47f3-82e8-53f6b93d6175\",\"tool_call_id\":\"call-operation-d4eb7801-9339-47f3-82e8-53f6b93d6175\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "continue_approve_lock_holder",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-d4eb7801-9339-47f3-82e8-53f6b93d6175"
+      ],
+      "pid": 39112,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 1244,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":39112,\"operation_id\":\"operation-d4eb7801-9339-47f3-82e8-53f6b93d6175\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "continue_approve_lock_waiter",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-d4eb7801-9339-47f3-82e8-53f6b93d6175"
+      ],
+      "pid": 103300,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 643,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":103300,\"operation_id\":\"operation-d4eb7801-9339-47f3-82e8-53f6b93d6175\",\"transitioned\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "continue_execute_lock_waiter",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-d4eb7801-9339-47f3-82e8-53f6b93d6175"
+      ],
+      "pid": 64496,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 659,
+      "stdout": "{\"event\":\"execute_skipped\",\"pid\":64496,\"operation_id\":\"operation-d4eb7801-9339-47f3-82e8-53f6b93d6175\",\"reason\":\"lost_prepared_dispatch_race\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "continue_execute_lock_holder",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-d4eb7801-9339-47f3-82e8-53f6b93d6175"
+      ],
+      "pid": 27392,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 1335,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":27392,\"operation_id\":\"operation-d4eb7801-9339-47f3-82e8-53f6b93d6175\",\"run_id\":\"run-operation-d4eb7801-9339-47f3-82e8-53f6b93d6175\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":27392,\"operation_id\":\"operation-d4eb7801-9339-47f3-82e8-53f6b93d6175\",\"invocation_id\":\"invocation-c08fb2d0-985f-4cbe-8c95-045cd4dfd1ad\",\"effect_id\":\"effect-dce5f731-e7d1-4bbb-971f-dfa165110aa5\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"execute_result\",\"pid\":27392,\"operation_id\":\"operation-d4eb7801-9339-47f3-82e8-53f6b93d6175\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "prepared_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-1c0900e1-fc37-4a2c-974d-2956126e9119"
+      ],
+      "pid": 113064,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 660,
+      "stdout": "{\"event\":\"prepared\",\"pid\":113064,\"operation_id\":\"operation-1c0900e1-fc37-4a2c-974d-2956126e9119\",\"tool_call_id\":\"call-operation-1c0900e1-fc37-4a2c-974d-2956126e9119\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "prepared_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-1c0900e1-fc37-4a2c-974d-2956126e9119"
+      ],
+      "pid": 103300,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 733,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":103300,\"operation_id\":\"operation-1c0900e1-fc37-4a2c-974d-2956126e9119\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "prepared_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-1c0900e1-fc37-4a2c-974d-2956126e9119",
+        "after-prepared"
+      ],
+      "pid": 35932,
+      "exit_code": 72,
+      "signal": null,
+      "duration_ms": 606,
+      "stdout": "{\"event\":\"hard_exit_after_prepared\",\"pid\":35932,\"operation_id\":\"operation-1c0900e1-fc37-4a2c-974d-2956126e9119\",\"exit_code\":72}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "prepared_resume",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-1c0900e1-fc37-4a2c-974d-2956126e9119"
+      ],
+      "pid": 79880,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 629,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":79880,\"operation_id\":\"operation-1c0900e1-fc37-4a2c-974d-2956126e9119\",\"run_id\":\"run-operation-1c0900e1-fc37-4a2c-974d-2956126e9119\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":79880,\"operation_id\":\"operation-1c0900e1-fc37-4a2c-974d-2956126e9119\",\"invocation_id\":\"invocation-8511a70a-c89b-45f1-9270-b607eff6e3a3\",\"effect_id\":\"effect-2c38a1d2-ff12-4f12-93e9-a9a8893b4598\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"execute_result\",\"pid\":79880,\"operation_id\":\"operation-1c0900e1-fc37-4a2c-974d-2956126e9119\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "before_adapter_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8"
+      ],
+      "pid": 111056,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 644,
+      "stdout": "{\"event\":\"prepared\",\"pid\":111056,\"operation_id\":\"operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8\",\"tool_call_id\":\"call-operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "before_adapter_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8"
+      ],
+      "pid": 111504,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 568,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":111504,\"operation_id\":\"operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "before_adapter_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8",
+        "after-dispatch"
+      ],
+      "pid": 108788,
+      "exit_code": 74,
+      "signal": null,
+      "duration_ms": 620,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":108788,\"operation_id\":\"operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8\",\"run_id\":\"run-operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"hard_exit_after_dispatch_before_adapter\",\"pid\":108788,\"operation_id\":\"operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8\",\"invocation_id\":\"invocation-6cbe9326-12df-4df8-b540-abe4e0028462\",\"exit_code\":74}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "before_adapter_confirm_not_started",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "confirm-not-started",
+        "operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8"
+      ],
+      "pid": 35932,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 615,
+      "stdout": "{\"event\":\"confirm_not_started\",\"pid\":35932,\"operation_id\":\"operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8\",\"confirmed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "before_adapter_retry_external_effect_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8",
+        "after-external-effect"
+      ],
+      "pid": 90992,
+      "exit_code": 73,
+      "signal": null,
+      "duration_ms": 625,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":90992,\"operation_id\":\"operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8\",\"run_id\":\"run-operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":90992,\"operation_id\":\"operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8\",\"invocation_id\":\"invocation-2b318939-c8b4-4234-bcf7-244c8bea9219\",\"effect_id\":\"effect-80f7d2f0-3d03-4cb1-bf54-fb81740d6c84\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"hard_exit_after_external_effect\",\"pid\":90992,\"operation_id\":\"operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8\",\"exit_code\":73}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "before_adapter_retry_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8"
+      ],
+      "pid": 79160,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 589,
+      "stdout": "{\"event\":\"reconcile_result\",\"pid\":79160,\"operation_id\":\"operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "replay_receipt_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-d3d86972-f540-4d10-baad-6b8d2483c925"
+      ],
+      "pid": 113628,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 656,
+      "stdout": "{\"event\":\"prepared\",\"pid\":113628,\"operation_id\":\"operation-d3d86972-f540-4d10-baad-6b8d2483c925\",\"tool_call_id\":\"call-operation-d3d86972-f540-4d10-baad-6b8d2483c925\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "replay_receipt_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-d3d86972-f540-4d10-baad-6b8d2483c925"
+      ],
+      "pid": 106756,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 646,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":106756,\"operation_id\":\"operation-d3d86972-f540-4d10-baad-6b8d2483c925\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "replay_receipt_first_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-d3d86972-f540-4d10-baad-6b8d2483c925",
+        "after-dispatch"
+      ],
+      "pid": 96944,
+      "exit_code": 74,
+      "signal": null,
+      "duration_ms": 629,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":96944,\"operation_id\":\"operation-d3d86972-f540-4d10-baad-6b8d2483c925\",\"run_id\":\"run-operation-d3d86972-f540-4d10-baad-6b8d2483c925\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"hard_exit_after_dispatch_before_adapter\",\"pid\":96944,\"operation_id\":\"operation-d3d86972-f540-4d10-baad-6b8d2483c925\",\"invocation_id\":\"invocation-e0ebe6af-c695-4d2a-b71a-f0792a4b18f4\",\"exit_code\":74}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "replay_receipt_first_confirmed",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "confirm-not-started",
+        "operation-d3d86972-f540-4d10-baad-6b8d2483c925"
+      ],
+      "pid": 112016,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 601,
+      "stdout": "{\"event\":\"confirm_not_started\",\"pid\":112016,\"operation_id\":\"operation-d3d86972-f540-4d10-baad-6b8d2483c925\",\"confirmed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "replay_receipt_second_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-d3d86972-f540-4d10-baad-6b8d2483c925",
+        "after-dispatch"
+      ],
+      "pid": 111696,
+      "exit_code": 74,
+      "signal": null,
+      "duration_ms": 716,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":111696,\"operation_id\":\"operation-d3d86972-f540-4d10-baad-6b8d2483c925\",\"run_id\":\"run-operation-d3d86972-f540-4d10-baad-6b8d2483c925\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"hard_exit_after_dispatch_before_adapter\",\"pid\":111696,\"operation_id\":\"operation-d3d86972-f540-4d10-baad-6b8d2483c925\",\"invocation_id\":\"invocation-27ef0a98-4b4b-462d-83f5-8bedb997f402\",\"exit_code\":74}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "replay_receipt_rejected",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "confirm-not-started",
+        "operation-d3d86972-f540-4d10-baad-6b8d2483c925"
+      ],
+      "pid": 114016,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 593,
+      "stdout": "{\"event\":\"confirm_not_started\",\"pid\":114016,\"operation_id\":\"operation-d3d86972-f540-4d10-baad-6b8d2483c925\",\"confirmed\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "replay_receipt_reconcile_unknown",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-d3d86972-f540-4d10-baad-6b8d2483c925"
+      ],
+      "pid": 101388,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 608,
+      "stdout": "{\"event\":\"reconcile_unknown\",\"pid\":101388,\"operation_id\":\"operation-d3d86972-f540-4d10-baad-6b8d2483c925\",\"human_required\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "old_alive_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-e5f3636e-56ee-4b66-bdcc-44e297890027"
+      ],
+      "pid": 91292,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 622,
+      "stdout": "{\"event\":\"prepared\",\"pid\":91292,\"operation_id\":\"operation-e5f3636e-56ee-4b66-bdcc-44e297890027\",\"tool_call_id\":\"call-operation-e5f3636e-56ee-4b66-bdcc-44e297890027\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "old_alive_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-e5f3636e-56ee-4b66-bdcc-44e297890027"
+      ],
+      "pid": 111504,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 591,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":111504,\"operation_id\":\"operation-e5f3636e-56ee-4b66-bdcc-44e297890027\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "old_alive_confirmation_rejected",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "confirm-not-started",
+        "operation-e5f3636e-56ee-4b66-bdcc-44e297890027"
+      ],
+      "pid": 114016,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 616,
+      "stdout": "{\"event\":\"confirm_not_started\",\"pid\":114016,\"operation_id\":\"operation-e5f3636e-56ee-4b66-bdcc-44e297890027\",\"confirmed\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "old_alive_holds_before_adapter",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-e5f3636e-56ee-4b66-bdcc-44e297890027",
+        "hold-after-dispatch"
+      ],
+      "pid": 111696,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 1285,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":111696,\"operation_id\":\"operation-e5f3636e-56ee-4b66-bdcc-44e297890027\",\"run_id\":\"run-operation-e5f3636e-56ee-4b66-bdcc-44e297890027\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":111696,\"operation_id\":\"operation-e5f3636e-56ee-4b66-bdcc-44e297890027\",\"invocation_id\":\"invocation-630a1d86-545d-41c3-8b86-4ece79dc40fc\",\"effect_id\":\"effect-0c495114-b4a0-44e7-b4e9-c149e1840ec6\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"execute_result\",\"pid\":111696,\"operation_id\":\"operation-e5f3636e-56ee-4b66-bdcc-44e297890027\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "partial_write_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-8669f4d9-876b-4c8d-b521-948bcea81865"
+      ],
+      "pid": 67452,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 612,
+      "stdout": "{\"event\":\"prepared\",\"pid\":67452,\"operation_id\":\"operation-8669f4d9-876b-4c8d-b521-948bcea81865\",\"tool_call_id\":\"call-operation-8669f4d9-876b-4c8d-b521-948bcea81865\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "partial_write_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-8669f4d9-876b-4c8d-b521-948bcea81865"
+      ],
+      "pid": 20724,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 580,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":20724,\"operation_id\":\"operation-8669f4d9-876b-4c8d-b521-948bcea81865\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "partial_write_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-8669f4d9-876b-4c8d-b521-948bcea81865",
+        "after-partial-write"
+      ],
+      "pid": 108292,
+      "exit_code": 75,
+      "signal": null,
+      "duration_ms": 601,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":108292,\"operation_id\":\"operation-8669f4d9-876b-4c8d-b521-948bcea81865\",\"run_id\":\"run-operation-8669f4d9-876b-4c8d-b521-948bcea81865\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"hard_exit_after_partial_write\",\"pid\":108292,\"operation_id\":\"operation-8669f4d9-876b-4c8d-b521-948bcea81865\",\"exit_code\":75}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "partial_write_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-8669f4d9-876b-4c8d-b521-948bcea81865"
+      ],
+      "pid": 113160,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 582,
+      "stdout": "{\"event\":\"reconcile_unknown\",\"pid\":113160,\"operation_id\":\"operation-8669f4d9-876b-4c8d-b521-948bcea81865\",\"human_required\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "resource_held_first_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-fda6f1e9-e421-45af-b862-a2049b761c9c"
+      ],
+      "pid": 114016,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 601,
+      "stdout": "{\"event\":\"prepared\",\"pid\":114016,\"operation_id\":\"operation-fda6f1e9-e421-45af-b862-a2049b761c9c\",\"tool_call_id\":\"call-operation-fda6f1e9-e421-45af-b862-a2049b761c9c\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "resource_held_first_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-fda6f1e9-e421-45af-b862-a2049b761c9c"
+      ],
+      "pid": 110956,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 584,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":110956,\"operation_id\":\"operation-fda6f1e9-e421-45af-b862-a2049b761c9c\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "resource_held_second_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-ac5a78f1-5c76-4066-8a79-7da7c138959f"
+      ],
+      "pid": 114176,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 600,
+      "stdout": "{\"event\":\"prepared\",\"pid\":114176,\"operation_id\":\"operation-ac5a78f1-5c76-4066-8a79-7da7c138959f\",\"tool_call_id\":\"call-operation-ac5a78f1-5c76-4066-8a79-7da7c138959f\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "resource_held_second_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-ac5a78f1-5c76-4066-8a79-7da7c138959f"
+      ],
+      "pid": 59596,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 549,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":59596,\"operation_id\":\"operation-ac5a78f1-5c76-4066-8a79-7da7c138959f\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "resource_held_second_execute_refused",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-ac5a78f1-5c76-4066-8a79-7da7c138959f"
+      ],
+      "pid": 110956,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 569,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":110956,\"operation_id\":\"operation-ac5a78f1-5c76-4066-8a79-7da7c138959f\",\"run_id\":\"run-operation-ac5a78f1-5c76-4066-8a79-7da7c138959f\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"execute_skipped\",\"pid\":110956,\"operation_id\":\"operation-ac5a78f1-5c76-4066-8a79-7da7c138959f\",\"reason\":\"lost_prepared_dispatch_race\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "resource_held_first_dispatch",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-fda6f1e9-e421-45af-b862-a2049b761c9c",
+        "hold-after-dispatch"
+      ],
+      "pid": 79880,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 2447,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":79880,\"operation_id\":\"operation-fda6f1e9-e421-45af-b862-a2049b761c9c\",\"run_id\":\"run-operation-fda6f1e9-e421-45af-b862-a2049b761c9c\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":79880,\"operation_id\":\"operation-fda6f1e9-e421-45af-b862-a2049b761c9c\",\"invocation_id\":\"invocation-49fda93e-3ae0-4ab0-9585-0743d56fbaf2\",\"effect_id\":\"effect-32b27b48-e90c-4b10-a5d1-0558fa3e4503\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"execute_result\",\"pid\":79880,\"operation_id\":\"operation-fda6f1e9-e421-45af-b862-a2049b761c9c\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "resource_quarantine_first_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-5a431488-c6a2-4eb7-ae86-b4203e483d5e"
+      ],
+      "pid": 105908,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 644,
+      "stdout": "{\"event\":\"prepared\",\"pid\":105908,\"operation_id\":\"operation-5a431488-c6a2-4eb7-ae86-b4203e483d5e\",\"tool_call_id\":\"call-operation-5a431488-c6a2-4eb7-ae86-b4203e483d5e\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "resource_quarantine_first_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-5a431488-c6a2-4eb7-ae86-b4203e483d5e"
+      ],
+      "pid": 107376,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 619,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":107376,\"operation_id\":\"operation-5a431488-c6a2-4eb7-ae86-b4203e483d5e\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "resource_quarantine_first_partial_write",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-5a431488-c6a2-4eb7-ae86-b4203e483d5e",
+        "after-partial-write"
+      ],
+      "pid": 103632,
+      "exit_code": 75,
+      "signal": null,
+      "duration_ms": 618,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":103632,\"operation_id\":\"operation-5a431488-c6a2-4eb7-ae86-b4203e483d5e\",\"run_id\":\"run-operation-5a431488-c6a2-4eb7-ae86-b4203e483d5e\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"hard_exit_after_partial_write\",\"pid\":103632,\"operation_id\":\"operation-5a431488-c6a2-4eb7-ae86-b4203e483d5e\",\"exit_code\":75}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "resource_quarantine_first_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-5a431488-c6a2-4eb7-ae86-b4203e483d5e"
+      ],
+      "pid": 111472,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 680,
+      "stdout": "{\"event\":\"reconcile_unknown\",\"pid\":111472,\"operation_id\":\"operation-5a431488-c6a2-4eb7-ae86-b4203e483d5e\",\"human_required\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "resource_quarantine_second_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-4338dfc9-c582-4513-bd16-cbaa6cc0a4cf"
+      ],
+      "pid": 109576,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 632,
+      "stdout": "{\"event\":\"prepared\",\"pid\":109576,\"operation_id\":\"operation-4338dfc9-c582-4513-bd16-cbaa6cc0a4cf\",\"tool_call_id\":\"call-operation-4338dfc9-c582-4513-bd16-cbaa6cc0a4cf\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "resource_quarantine_second_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-4338dfc9-c582-4513-bd16-cbaa6cc0a4cf"
+      ],
+      "pid": 98664,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 555,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":98664,\"operation_id\":\"operation-4338dfc9-c582-4513-bd16-cbaa6cc0a4cf\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "resource_quarantine_second_execute_refused",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-4338dfc9-c582-4513-bd16-cbaa6cc0a4cf"
+      ],
+      "pid": 111256,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 688,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":111256,\"operation_id\":\"operation-4338dfc9-c582-4513-bd16-cbaa6cc0a4cf\",\"run_id\":\"run-operation-4338dfc9-c582-4513-bd16-cbaa6cc0a4cf\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"execute_skipped\",\"pid\":111256,\"operation_id\":\"operation-4338dfc9-c582-4513-bd16-cbaa6cc0a4cf\",\"reason\":\"lost_prepared_dispatch_race\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "crash_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-68975a25-6484-4fa6-9e03-348aff4a84d0"
+      ],
+      "pid": 108232,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 559,
+      "stdout": "{\"event\":\"prepared\",\"pid\":108232,\"operation_id\":\"operation-68975a25-6484-4fa6-9e03-348aff4a84d0\",\"tool_call_id\":\"call-operation-68975a25-6484-4fa6-9e03-348aff4a84d0\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "crash_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-68975a25-6484-4fa6-9e03-348aff4a84d0"
+      ],
+      "pid": 67452,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 548,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":67452,\"operation_id\":\"operation-68975a25-6484-4fa6-9e03-348aff4a84d0\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "crash_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-68975a25-6484-4fa6-9e03-348aff4a84d0",
+        "after-external-effect"
+      ],
+      "pid": 25032,
+      "exit_code": 73,
+      "signal": null,
+      "duration_ms": 560,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":25032,\"operation_id\":\"operation-68975a25-6484-4fa6-9e03-348aff4a84d0\",\"run_id\":\"run-operation-68975a25-6484-4fa6-9e03-348aff4a84d0\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":25032,\"operation_id\":\"operation-68975a25-6484-4fa6-9e03-348aff4a84d0\",\"invocation_id\":\"invocation-7cc8d39b-76c3-443e-bb3c-872177d794e9\",\"effect_id\":\"effect-2cf441e2-d7c4-42ae-b6e4-b6f87af4a5bc\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"hard_exit_after_external_effect\",\"pid\":25032,\"operation_id\":\"operation-68975a25-6484-4fa6-9e03-348aff4a84d0\",\"exit_code\":73}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "crash_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-68975a25-6484-4fa6-9e03-348aff4a84d0"
+      ],
+      "pid": 114760,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 564,
+      "stdout": "{\"event\":\"reconcile_result\",\"pid\":114760,\"operation_id\":\"operation-68975a25-6484-4fa6-9e03-348aff4a84d0\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "restart_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-49d5de94-bc68-4a1a-a7c3-e4d334575e4f"
+      ],
+      "pid": 112672,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 566,
+      "stdout": "{\"event\":\"prepared\",\"pid\":112672,\"operation_id\":\"operation-49d5de94-bc68-4a1a-a7c3-e4d334575e4f\",\"tool_call_id\":\"call-operation-49d5de94-bc68-4a1a-a7c3-e4d334575e4f\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "restart_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-49d5de94-bc68-4a1a-a7c3-e4d334575e4f"
+      ],
+      "pid": 105488,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 529,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":105488,\"operation_id\":\"operation-49d5de94-bc68-4a1a-a7c3-e4d334575e4f\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "restart_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-49d5de94-bc68-4a1a-a7c3-e4d334575e4f",
+        "after-external-effect"
+      ],
+      "pid": 112564,
+      "exit_code": 73,
+      "signal": null,
+      "duration_ms": 584,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":112564,\"operation_id\":\"operation-49d5de94-bc68-4a1a-a7c3-e4d334575e4f\",\"run_id\":\"run-operation-49d5de94-bc68-4a1a-a7c3-e4d334575e4f\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":112564,\"operation_id\":\"operation-49d5de94-bc68-4a1a-a7c3-e4d334575e4f\",\"invocation_id\":\"invocation-5fc632f1-5435-4379-a704-5c06b470e810\",\"effect_id\":\"effect-4a367d04-cf50-4b02-889a-e452437d0703\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"hard_exit_after_external_effect\",\"pid\":112564,\"operation_id\":\"operation-49d5de94-bc68-4a1a-a7c3-e4d334575e4f\",\"exit_code\":73}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "pg_ctl_restart_stop",
+      "args": [
+        "stop",
+        "-D",
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\.local\\recovery-p00-ea9c73e8-59ee-4b20-872c-f4166fb94e92\\pgdata",
+        "-m",
+        "immediate",
+        "-w",
+        "-t",
+        "30"
+      ],
+      "pid": 101372,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 153,
+      "stdout": "",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "pg_ctl_restart_start",
+      "args": [
+        "start",
+        "-D",
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\.local\\recovery-p00-ea9c73e8-59ee-4b20-872c-f4166fb94e92\\pgdata",
+        "-l",
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\.local\\recovery-p00-ea9c73e8-59ee-4b20-872c-f4166fb94e92\\postgres.log",
+        "-o",
+        "-p 3707 -h 127.0.0.1",
+        "-w",
+        "-t",
+        "30"
+      ],
+      "pid": 115680,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 731,
+      "stdout": "",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "restart_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-49d5de94-bc68-4a1a-a7c3-e4d334575e4f"
+      ],
+      "pid": 107388,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 595,
+      "stdout": "{\"event\":\"reconcile_result\",\"pid\":107388,\"operation_id\":\"operation-49d5de94-bc68-4a1a-a7c3-e4d334575e4f\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "missing_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-deeaaea9-3af1-4ffb-9a0f-2724ec54f81a"
+      ],
+      "pid": 97924,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 660,
+      "stdout": "{\"event\":\"prepared\",\"pid\":97924,\"operation_id\":\"operation-deeaaea9-3af1-4ffb-9a0f-2724ec54f81a\",\"tool_call_id\":\"call-operation-deeaaea9-3af1-4ffb-9a0f-2724ec54f81a\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "missing_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-deeaaea9-3af1-4ffb-9a0f-2724ec54f81a"
+      ],
+      "pid": 108232,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 609,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":108232,\"operation_id\":\"operation-deeaaea9-3af1-4ffb-9a0f-2724ec54f81a\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "missing_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-deeaaea9-3af1-4ffb-9a0f-2724ec54f81a",
+        "after-external-effect"
+      ],
+      "pid": 37232,
+      "exit_code": 73,
+      "signal": null,
+      "duration_ms": 665,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":37232,\"operation_id\":\"operation-deeaaea9-3af1-4ffb-9a0f-2724ec54f81a\",\"run_id\":\"run-operation-deeaaea9-3af1-4ffb-9a0f-2724ec54f81a\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":37232,\"operation_id\":\"operation-deeaaea9-3af1-4ffb-9a0f-2724ec54f81a\",\"invocation_id\":\"invocation-80e6ce5d-8470-4651-b9dc-9a7084071b8f\",\"effect_id\":\"effect-125b11c9-f885-447e-b24b-bcef3b6ccfe3\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"hard_exit_after_external_effect\",\"pid\":37232,\"operation_id\":\"operation-deeaaea9-3af1-4ffb-9a0f-2724ec54f81a\",\"exit_code\":73}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "missing_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-deeaaea9-3af1-4ffb-9a0f-2724ec54f81a"
+      ],
+      "pid": 107340,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 731,
+      "stdout": "{\"event\":\"reconcile_unknown\",\"pid\":107340,\"operation_id\":\"operation-deeaaea9-3af1-4ffb-9a0f-2724ec54f81a\",\"human_required\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "edited_after_effect_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-178e8374-7062-480c-8052-d4f04247979c"
+      ],
+      "pid": 112876,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 630,
+      "stdout": "{\"event\":\"prepared\",\"pid\":112876,\"operation_id\":\"operation-178e8374-7062-480c-8052-d4f04247979c\",\"tool_call_id\":\"call-operation-178e8374-7062-480c-8052-d4f04247979c\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "edited_after_effect_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-178e8374-7062-480c-8052-d4f04247979c"
+      ],
+      "pid": 112792,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 647,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":112792,\"operation_id\":\"operation-178e8374-7062-480c-8052-d4f04247979c\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "edited_after_effect_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-178e8374-7062-480c-8052-d4f04247979c",
+        "after-external-effect"
+      ],
+      "pid": 59596,
+      "exit_code": 73,
+      "signal": null,
+      "duration_ms": 601,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":59596,\"operation_id\":\"operation-178e8374-7062-480c-8052-d4f04247979c\",\"run_id\":\"run-operation-178e8374-7062-480c-8052-d4f04247979c\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":59596,\"operation_id\":\"operation-178e8374-7062-480c-8052-d4f04247979c\",\"invocation_id\":\"invocation-8cf89f42-bad3-45a8-8b52-21aacceb2b1f\",\"effect_id\":\"effect-dcf8a081-4946-4832-a832-b245f0283aea\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"hard_exit_after_external_effect\",\"pid\":59596,\"operation_id\":\"operation-178e8374-7062-480c-8052-d4f04247979c\",\"exit_code\":73}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "edited_after_effect_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-178e8374-7062-480c-8052-d4f04247979c"
+      ],
+      "pid": 90576,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 664,
+      "stdout": "{\"event\":\"reconcile_unknown\",\"pid\":90576,\"operation_id\":\"operation-178e8374-7062-480c-8052-d4f04247979c\",\"human_required\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "truncated_evidence_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-c45001a0-7ef5-4dea-b5f1-a28161128c2e"
+      ],
+      "pid": 107752,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 617,
+      "stdout": "{\"event\":\"prepared\",\"pid\":107752,\"operation_id\":\"operation-c45001a0-7ef5-4dea-b5f1-a28161128c2e\",\"tool_call_id\":\"call-operation-c45001a0-7ef5-4dea-b5f1-a28161128c2e\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "truncated_evidence_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-c45001a0-7ef5-4dea-b5f1-a28161128c2e"
+      ],
+      "pid": 51560,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 675,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":51560,\"operation_id\":\"operation-c45001a0-7ef5-4dea-b5f1-a28161128c2e\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "truncated_evidence_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-c45001a0-7ef5-4dea-b5f1-a28161128c2e",
+        "after-external-effect"
+      ],
+      "pid": 103300,
+      "exit_code": 73,
+      "signal": null,
+      "duration_ms": 704,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":103300,\"operation_id\":\"operation-c45001a0-7ef5-4dea-b5f1-a28161128c2e\",\"run_id\":\"run-operation-c45001a0-7ef5-4dea-b5f1-a28161128c2e\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":103300,\"operation_id\":\"operation-c45001a0-7ef5-4dea-b5f1-a28161128c2e\",\"invocation_id\":\"invocation-98dd15fa-cd0a-4b71-8593-e084f5930ec6\",\"effect_id\":\"effect-6d7ea51b-da73-4a19-90e0-cbef72f3f85a\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"hard_exit_after_external_effect\",\"pid\":103300,\"operation_id\":\"operation-c45001a0-7ef5-4dea-b5f1-a28161128c2e\",\"exit_code\":73}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "truncated_evidence_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-c45001a0-7ef5-4dea-b5f1-a28161128c2e"
+      ],
+      "pid": 89948,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 665,
+      "stdout": "{\"event\":\"reconcile_unknown\",\"pid\":89948,\"operation_id\":\"operation-c45001a0-7ef5-4dea-b5f1-a28161128c2e\",\"human_required\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "null_evidence_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-5022f417-9647-4a94-9cba-7b9d9cdd9e77"
+      ],
+      "pid": 64496,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 711,
+      "stdout": "{\"event\":\"prepared\",\"pid\":64496,\"operation_id\":\"operation-5022f417-9647-4a94-9cba-7b9d9cdd9e77\",\"tool_call_id\":\"call-operation-5022f417-9647-4a94-9cba-7b9d9cdd9e77\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "null_evidence_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-5022f417-9647-4a94-9cba-7b9d9cdd9e77"
+      ],
+      "pid": 115484,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 601,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":115484,\"operation_id\":\"operation-5022f417-9647-4a94-9cba-7b9d9cdd9e77\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "null_evidence_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-5022f417-9647-4a94-9cba-7b9d9cdd9e77",
+        "after-external-effect"
+      ],
+      "pid": 115116,
+      "exit_code": 73,
+      "signal": null,
+      "duration_ms": 580,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":115116,\"operation_id\":\"operation-5022f417-9647-4a94-9cba-7b9d9cdd9e77\",\"run_id\":\"run-operation-5022f417-9647-4a94-9cba-7b9d9cdd9e77\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":115116,\"operation_id\":\"operation-5022f417-9647-4a94-9cba-7b9d9cdd9e77\",\"invocation_id\":\"invocation-609dd387-6b0d-4a07-bfcd-af5bd66b2ed7\",\"effect_id\":\"effect-b58e1a56-6422-4e29-abcd-789fa0401dc0\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"hard_exit_after_external_effect\",\"pid\":115116,\"operation_id\":\"operation-5022f417-9647-4a94-9cba-7b9d9cdd9e77\",\"exit_code\":73}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "null_evidence_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-5022f417-9647-4a94-9cba-7b9d9cdd9e77"
+      ],
+      "pid": 17968,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 578,
+      "stdout": "{\"event\":\"reconcile_unknown\",\"pid\":17968,\"operation_id\":\"operation-5022f417-9647-4a94-9cba-7b9d9cdd9e77\",\"human_required\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "external_baseline_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-36cd2ea8-2547-4c2f-811a-45b5c0202554"
+      ],
+      "pid": 114224,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 571,
+      "stdout": "{\"event\":\"prepared\",\"pid\":114224,\"operation_id\":\"operation-36cd2ea8-2547-4c2f-811a-45b5c0202554\",\"tool_call_id\":\"call-operation-36cd2ea8-2547-4c2f-811a-45b5c0202554\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "external_baseline_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-36cd2ea8-2547-4c2f-811a-45b5c0202554"
+      ],
+      "pid": 113832,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 546,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":113832,\"operation_id\":\"operation-36cd2ea8-2547-4c2f-811a-45b5c0202554\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "external_baseline_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-36cd2ea8-2547-4c2f-811a-45b5c0202554"
+      ],
+      "pid": 97028,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 543,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":97028,\"operation_id\":\"operation-36cd2ea8-2547-4c2f-811a-45b5c0202554\",\"run_id\":\"run-operation-36cd2ea8-2547-4c2f-811a-45b5c0202554\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"execute_skipped\",\"pid\":97028,\"operation_id\":\"operation-36cd2ea8-2547-4c2f-811a-45b5c0202554\",\"reason\":\"lost_prepared_dispatch_race\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_parameter_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-974cffe1-ec8f-47f4-9e50-afe4e197cf59"
+      ],
+      "pid": 111992,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 567,
+      "stdout": "{\"event\":\"prepared\",\"pid\":111992,\"operation_id\":\"operation-974cffe1-ec8f-47f4-9e50-afe4e197cf59\",\"tool_call_id\":\"call-operation-974cffe1-ec8f-47f4-9e50-afe4e197cf59\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_parameter_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-974cffe1-ec8f-47f4-9e50-afe4e197cf59"
+      ],
+      "pid": 43600,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 554,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":43600,\"operation_id\":\"operation-974cffe1-ec8f-47f4-9e50-afe4e197cf59\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_parameter_mutate",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "mutate",
+        "operation-974cffe1-ec8f-47f4-9e50-afe4e197cf59",
+        "parameter"
+      ],
+      "pid": 108460,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 538,
+      "stdout": "{\"event\":\"fact_mutated\",\"pid\":108460,\"operation_id\":\"operation-974cffe1-ec8f-47f4-9e50-afe4e197cf59\",\"field\":\"parameter\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_parameter_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-974cffe1-ec8f-47f4-9e50-afe4e197cf59"
+      ],
+      "pid": 94436,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 568,
+      "stdout": "{\"event\":\"execute_skipped\",\"pid\":94436,\"operation_id\":\"operation-974cffe1-ec8f-47f4-9e50-afe4e197cf59\",\"reason\":\"not_candidate_or_not_approved\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_baseline_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-c8da47c4-7697-4faa-8c93-05330bb5584b"
+      ],
+      "pid": 110820,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 608,
+      "stdout": "{\"event\":\"prepared\",\"pid\":110820,\"operation_id\":\"operation-c8da47c4-7697-4faa-8c93-05330bb5584b\",\"tool_call_id\":\"call-operation-c8da47c4-7697-4faa-8c93-05330bb5584b\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_baseline_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-c8da47c4-7697-4faa-8c93-05330bb5584b"
+      ],
+      "pid": 114256,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 582,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":114256,\"operation_id\":\"operation-c8da47c4-7697-4faa-8c93-05330bb5584b\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_baseline_mutate",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "mutate",
+        "operation-c8da47c4-7697-4faa-8c93-05330bb5584b",
+        "baseline"
+      ],
+      "pid": 114596,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 532,
+      "stdout": "{\"event\":\"fact_mutated\",\"pid\":114596,\"operation_id\":\"operation-c8da47c4-7697-4faa-8c93-05330bb5584b\",\"field\":\"baseline\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_baseline_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-c8da47c4-7697-4faa-8c93-05330bb5584b"
+      ],
+      "pid": 34304,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 563,
+      "stdout": "{\"event\":\"execute_skipped\",\"pid\":34304,\"operation_id\":\"operation-c8da47c4-7697-4faa-8c93-05330bb5584b\",\"reason\":\"not_candidate_or_not_approved\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_permission_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-27c580c7-1e8a-4cdc-b3d4-adb62a38e060"
+      ],
+      "pid": 86600,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 558,
+      "stdout": "{\"event\":\"prepared\",\"pid\":86600,\"operation_id\":\"operation-27c580c7-1e8a-4cdc-b3d4-adb62a38e060\",\"tool_call_id\":\"call-operation-27c580c7-1e8a-4cdc-b3d4-adb62a38e060\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_permission_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-27c580c7-1e8a-4cdc-b3d4-adb62a38e060"
+      ],
+      "pid": 107176,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 547,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":107176,\"operation_id\":\"operation-27c580c7-1e8a-4cdc-b3d4-adb62a38e060\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_permission_mutate",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "mutate",
+        "operation-27c580c7-1e8a-4cdc-b3d4-adb62a38e060",
+        "permission"
+      ],
+      "pid": 106500,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 542,
+      "stdout": "{\"event\":\"fact_mutated\",\"pid\":106500,\"operation_id\":\"operation-27c580c7-1e8a-4cdc-b3d4-adb62a38e060\",\"field\":\"permission\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_permission_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-27c580c7-1e8a-4cdc-b3d4-adb62a38e060"
+      ],
+      "pid": 106352,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 539,
+      "stdout": "{\"event\":\"execute_skipped\",\"pid\":106352,\"operation_id\":\"operation-27c580c7-1e8a-4cdc-b3d4-adb62a38e060\",\"reason\":\"not_candidate_or_not_approved\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_acceptance_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-64ffdb2e-9eee-4a13-b82c-1cc48376b76f"
+      ],
+      "pid": 115316,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 665,
+      "stdout": "{\"event\":\"prepared\",\"pid\":115316,\"operation_id\":\"operation-64ffdb2e-9eee-4a13-b82c-1cc48376b76f\",\"tool_call_id\":\"call-operation-64ffdb2e-9eee-4a13-b82c-1cc48376b76f\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_acceptance_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-64ffdb2e-9eee-4a13-b82c-1cc48376b76f"
+      ],
+      "pid": 112676,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 569,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":112676,\"operation_id\":\"operation-64ffdb2e-9eee-4a13-b82c-1cc48376b76f\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_acceptance_mutate",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "mutate",
+        "operation-64ffdb2e-9eee-4a13-b82c-1cc48376b76f",
+        "acceptance"
+      ],
+      "pid": 112784,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 613,
+      "stdout": "{\"event\":\"fact_mutated\",\"pid\":112784,\"operation_id\":\"operation-64ffdb2e-9eee-4a13-b82c-1cc48376b76f\",\"field\":\"acceptance\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_acceptance_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-64ffdb2e-9eee-4a13-b82c-1cc48376b76f"
+      ],
+      "pid": 108764,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 582,
+      "stdout": "{\"event\":\"execute_skipped\",\"pid\":108764,\"operation_id\":\"operation-64ffdb2e-9eee-4a13-b82c-1cc48376b76f\",\"reason\":\"not_candidate_or_not_approved\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_ownership_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-7b343848-395b-40c6-9c39-373760d22e5e"
+      ],
+      "pid": 50588,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 704,
+      "stdout": "{\"event\":\"prepared\",\"pid\":50588,\"operation_id\":\"operation-7b343848-395b-40c6-9c39-373760d22e5e\",\"tool_call_id\":\"call-operation-7b343848-395b-40c6-9c39-373760d22e5e\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_ownership_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-7b343848-395b-40c6-9c39-373760d22e5e"
+      ],
+      "pid": 109576,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 611,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":109576,\"operation_id\":\"operation-7b343848-395b-40c6-9c39-373760d22e5e\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_ownership_mutate",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "mutate",
+        "operation-7b343848-395b-40c6-9c39-373760d22e5e",
+        "ownership"
+      ],
+      "pid": 94436,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 675,
+      "stdout": "{\"event\":\"fact_mutated\",\"pid\":94436,\"operation_id\":\"operation-7b343848-395b-40c6-9c39-373760d22e5e\",\"field\":\"ownership\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_ownership_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-7b343848-395b-40c6-9c39-373760d22e5e"
+      ],
+      "pid": 114632,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 591,
+      "stdout": "{\"event\":\"execute_skipped\",\"pid\":114632,\"operation_id\":\"operation-7b343848-395b-40c6-9c39-373760d22e5e\",\"reason\":\"not_candidate_or_not_approved\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "old_epoch_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-541ace33-240a-4de0-a27c-5e6e192c362e"
+      ],
+      "pid": 64400,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 609,
+      "stdout": "{\"event\":\"prepared\",\"pid\":64400,\"operation_id\":\"operation-541ace33-240a-4de0-a27c-5e6e192c362e\",\"tool_call_id\":\"call-operation-541ace33-240a-4de0-a27c-5e6e192c362e\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "old_epoch_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-541ace33-240a-4de0-a27c-5e6e192c362e"
+      ],
+      "pid": 113084,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 571,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":113084,\"operation_id\":\"operation-541ace33-240a-4de0-a27c-5e6e192c362e\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "old_epoch_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-541ace33-240a-4de0-a27c-5e6e192c362e",
+        "after-external-effect"
+      ],
+      "pid": 102188,
+      "exit_code": 73,
+      "signal": null,
+      "duration_ms": 613,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":102188,\"operation_id\":\"operation-541ace33-240a-4de0-a27c-5e6e192c362e\",\"run_id\":\"run-operation-541ace33-240a-4de0-a27c-5e6e192c362e\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":102188,\"operation_id\":\"operation-541ace33-240a-4de0-a27c-5e6e192c362e\",\"invocation_id\":\"invocation-33ec3142-23c6-4aa2-b921-7374d149a998\",\"effect_id\":\"effect-fa40ba59-273a-4dfa-a996-9d3e02bbfd46\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"hard_exit_after_external_effect\",\"pid\":102188,\"operation_id\":\"operation-541ace33-240a-4de0-a27c-5e6e192c362e\",\"exit_code\":73}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "old_epoch_mutate",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "mutate",
+        "operation-541ace33-240a-4de0-a27c-5e6e192c362e",
+        "ownership"
+      ],
+      "pid": 109628,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 566,
+      "stdout": "{\"event\":\"fact_mutated\",\"pid\":109628,\"operation_id\":\"operation-541ace33-240a-4de0-a27c-5e6e192c362e\",\"field\":\"ownership\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "old_epoch_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-541ace33-240a-4de0-a27c-5e6e192c362e"
+      ],
+      "pid": 109344,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 579,
+      "stdout": "{\"event\":\"reconcile_result\",\"pid\":109344,\"operation_id\":\"operation-541ace33-240a-4de0-a27c-5e6e192c362e\",\"result_committed\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "joint_admission_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-ccb02038-d2f9-49d7-a225-09fbedb68908"
+      ],
+      "pid": 100544,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 619,
+      "stdout": "{\"event\":\"prepared\",\"pid\":100544,\"operation_id\":\"operation-ccb02038-d2f9-49d7-a225-09fbedb68908\",\"tool_call_id\":\"call-operation-ccb02038-d2f9-49d7-a225-09fbedb68908\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "joint_admission_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-ccb02038-d2f9-49d7-a225-09fbedb68908"
+      ],
+      "pid": 11528,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 553,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":11528,\"operation_id\":\"operation-ccb02038-d2f9-49d7-a225-09fbedb68908\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "joint_admission_rollback",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-ccb02038-d2f9-49d7-a225-09fbedb68908"
+      ],
+      "pid": 107660,
+      "exit_code": 76,
+      "signal": null,
+      "duration_ms": 581,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":107660,\"operation_id\":\"operation-ccb02038-d2f9-49d7-a225-09fbedb68908\",\"run_id\":\"run-operation-ccb02038-d2f9-49d7-a225-09fbedb68908\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"injected_fault_after_rollback\",\"pid\":107660,\"point\":\"admission-rollback\",\"exit_code\":76}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "joint_admission_abrupt_exit",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-ccb02038-d2f9-49d7-a225-09fbedb68908"
+      ],
+      "pid": 41820,
+      "exit_code": 77,
+      "signal": null,
+      "duration_ms": 593,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":41820,\"operation_id\":\"operation-ccb02038-d2f9-49d7-a225-09fbedb68908\",\"run_id\":\"run-operation-ccb02038-d2f9-49d7-a225-09fbedb68908\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"injected_abrupt_exit_inside_admission_transaction\",\"pid\":41820,\"operation_id\":\"operation-ccb02038-d2f9-49d7-a225-09fbedb68908\",\"exit_code\":77}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "joint_admission_clean",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-ccb02038-d2f9-49d7-a225-09fbedb68908"
+      ],
+      "pid": 112228,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 632,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":112228,\"operation_id\":\"operation-ccb02038-d2f9-49d7-a225-09fbedb68908\",\"run_id\":\"run-operation-ccb02038-d2f9-49d7-a225-09fbedb68908\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":112228,\"operation_id\":\"operation-ccb02038-d2f9-49d7-a225-09fbedb68908\",\"invocation_id\":\"invocation-3dbdd6d4-c310-4e7c-8eca-03aeccc9e134\",\"effect_id\":\"effect-009b6dcc-71c5-4c6c-9ec3-3b5a90205e14\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"execute_result\",\"pid\":112228,\"operation_id\":\"operation-ccb02038-d2f9-49d7-a225-09fbedb68908\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "joint_result_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-aa233edd-4fa3-4549-a04f-492a5d8c9df9"
+      ],
+      "pid": 91588,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 582,
+      "stdout": "{\"event\":\"prepared\",\"pid\":91588,\"operation_id\":\"operation-aa233edd-4fa3-4549-a04f-492a5d8c9df9\",\"tool_call_id\":\"call-operation-aa233edd-4fa3-4549-a04f-492a5d8c9df9\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "joint_result_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-aa233edd-4fa3-4549-a04f-492a5d8c9df9"
+      ],
+      "pid": 109592,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 543,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":109592,\"operation_id\":\"operation-aa233edd-4fa3-4549-a04f-492a5d8c9df9\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "joint_result_rollback",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-aa233edd-4fa3-4549-a04f-492a5d8c9df9"
+      ],
+      "pid": 18744,
+      "exit_code": 76,
+      "signal": null,
+      "duration_ms": 632,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":18744,\"operation_id\":\"operation-aa233edd-4fa3-4549-a04f-492a5d8c9df9\",\"run_id\":\"run-operation-aa233edd-4fa3-4549-a04f-492a5d8c9df9\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":18744,\"operation_id\":\"operation-aa233edd-4fa3-4549-a04f-492a5d8c9df9\",\"invocation_id\":\"invocation-6ab9c49d-59f5-478d-a122-6dd8cfb0c82e\",\"effect_id\":\"effect-e658883d-b63b-4516-acdc-6bd7933fb08a\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"injected_fault_after_rollback\",\"pid\":18744,\"point\":\"result-rollback\",\"exit_code\":76}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "joint_result_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-aa233edd-4fa3-4549-a04f-492a5d8c9df9"
+      ],
+      "pid": 12492,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 591,
+      "stdout": "{\"event\":\"reconcile_result\",\"pid\":12492,\"operation_id\":\"operation-aa233edd-4fa3-4549-a04f-492a5d8c9df9\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "joint_result_duplicate_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-aa233edd-4fa3-4549-a04f-492a5d8c9df9"
+      ],
+      "pid": 107140,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 596,
+      "stdout": "{\"event\":\"reconcile_skipped\",\"pid\":107140,\"operation_id\":\"operation-aa233edd-4fa3-4549-a04f-492a5d8c9df9\",\"status\":\"SUCCEEDED\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "stale_claim_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-502641f0-1869-45ea-b038-c256f0a751fc"
+      ],
+      "pid": 114320,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 582,
+      "stdout": "{\"event\":\"prepared\",\"pid\":114320,\"operation_id\":\"operation-502641f0-1869-45ea-b038-c256f0a751fc\",\"tool_call_id\":\"call-operation-502641f0-1869-45ea-b038-c256f0a751fc\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "stale_claim_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-502641f0-1869-45ea-b038-c256f0a751fc"
+      ],
+      "pid": 97636,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 594,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":97636,\"operation_id\":\"operation-502641f0-1869-45ea-b038-c256f0a751fc\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "stale_claim_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-502641f0-1869-45ea-b038-c256f0a751fc",
+        "after-external-effect"
+      ],
+      "pid": 107488,
+      "exit_code": 73,
+      "signal": null,
+      "duration_ms": 750,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":107488,\"operation_id\":\"operation-502641f0-1869-45ea-b038-c256f0a751fc\",\"run_id\":\"run-operation-502641f0-1869-45ea-b038-c256f0a751fc\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":107488,\"operation_id\":\"operation-502641f0-1869-45ea-b038-c256f0a751fc\",\"invocation_id\":\"invocation-eb78d96a-6c8a-4505-9fc0-d9f89c23d88b\",\"effect_id\":\"effect-26c88f67-c54e-47ca-94c0-27c717ede82d\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"hard_exit_after_external_effect\",\"pid\":107488,\"operation_id\":\"operation-502641f0-1869-45ea-b038-c256f0a751fc\",\"exit_code\":73}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "stale_claim_mutate",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "mutate",
+        "operation-502641f0-1869-45ea-b038-c256f0a751fc",
+        "claim"
+      ],
+      "pid": 29764,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 623,
+      "stdout": "{\"event\":\"fact_mutated\",\"pid\":29764,\"operation_id\":\"operation-502641f0-1869-45ea-b038-c256f0a751fc\",\"field\":\"claim\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "stale_claim_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-502641f0-1869-45ea-b038-c256f0a751fc"
+      ],
+      "pid": 112676,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 648,
+      "stdout": "{\"event\":\"reconcile_result\",\"pid\":112676,\"operation_id\":\"operation-502641f0-1869-45ea-b038-c256f0a751fc\",\"result_committed\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "step_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-39afc736-d5a3-47fe-887a-11c76752073b"
+      ],
+      "pid": 105908,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 684,
+      "stdout": "{\"event\":\"prepared\",\"pid\":105908,\"operation_id\":\"operation-39afc736-d5a3-47fe-887a-11c76752073b\",\"tool_call_id\":\"call-operation-39afc736-d5a3-47fe-887a-11c76752073b\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "step_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-39afc736-d5a3-47fe-887a-11c76752073b"
+      ],
+      "pid": 109192,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 582,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":109192,\"operation_id\":\"operation-39afc736-d5a3-47fe-887a-11c76752073b\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "step_between_steps_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-39afc736-d5a3-47fe-887a-11c76752073b",
+        "after-prepared"
+      ],
+      "pid": 96856,
+      "exit_code": 72,
+      "signal": null,
+      "duration_ms": 577,
+      "stdout": "{\"event\":\"hard_exit_after_prepared\",\"pid\":96856,\"operation_id\":\"operation-39afc736-d5a3-47fe-887a-11c76752073b\",\"exit_code\":72}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "step_resume",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-39afc736-d5a3-47fe-887a-11c76752073b"
+      ],
+      "pid": 115332,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 594,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":115332,\"operation_id\":\"operation-39afc736-d5a3-47fe-887a-11c76752073b\",\"run_id\":\"run-operation-39afc736-d5a3-47fe-887a-11c76752073b\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":115332,\"operation_id\":\"operation-39afc736-d5a3-47fe-887a-11c76752073b\",\"invocation_id\":\"invocation-4f8e7874-eb8b-49a0-8631-c1af50afa248\",\"effect_id\":\"effect-90e24146-ff88-4178-bfe8-1525e195f89e\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"execute_result\",\"pid\":115332,\"operation_id\":\"operation-39afc736-d5a3-47fe-887a-11c76752073b\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "step_repeat_after_completion",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-39afc736-d5a3-47fe-887a-11c76752073b"
+      ],
+      "pid": 56172,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 622,
+      "stdout": "{\"event\":\"execute_skipped\",\"pid\":56172,\"operation_id\":\"operation-39afc736-d5a3-47fe-887a-11c76752073b\",\"reason\":\"not_candidate_or_not_approved\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "completion_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-fec29e4a-8e32-47bb-befa-2514e0d95f23"
+      ],
+      "pid": 19516,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 602,
+      "stdout": "{\"event\":\"prepared\",\"pid\":19516,\"operation_id\":\"operation-fec29e4a-8e32-47bb-befa-2514e0d95f23\",\"tool_call_id\":\"call-operation-fec29e4a-8e32-47bb-befa-2514e0d95f23\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "completion_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-fec29e4a-8e32-47bb-befa-2514e0d95f23"
+      ],
+      "pid": 108172,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 618,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":108172,\"operation_id\":\"operation-fec29e4a-8e32-47bb-befa-2514e0d95f23\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "completion_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-fec29e4a-8e32-47bb-befa-2514e0d95f23"
+      ],
+      "pid": 75696,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 715,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":75696,\"operation_id\":\"operation-fec29e4a-8e32-47bb-befa-2514e0d95f23\",\"run_id\":\"run-operation-fec29e4a-8e32-47bb-befa-2514e0d95f23\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":75696,\"operation_id\":\"operation-fec29e4a-8e32-47bb-befa-2514e0d95f23\",\"invocation_id\":\"invocation-81952ed7-12e2-4242-8d57-8de44bef0e08\",\"effect_id\":\"effect-cb8c82a2-4ca5-4877-95d8-7821759ebc25\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"execute_result\",\"pid\":75696,\"operation_id\":\"operation-fec29e4a-8e32-47bb-befa-2514e0d95f23\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "completion_rollback",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "complete",
+        "operation-fec29e4a-8e32-47bb-befa-2514e0d95f23",
+        "command-complete-da12b5d3-f09b-45ec-a4ed-55567085d1d2"
+      ],
+      "pid": 111668,
+      "exit_code": 76,
+      "signal": null,
+      "duration_ms": 595,
+      "stdout": "{\"event\":\"injected_fault_after_rollback\",\"pid\":111668,\"point\":\"completion-rollback\",\"exit_code\":76}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "completion_clean",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "complete",
+        "operation-fec29e4a-8e32-47bb-befa-2514e0d95f23",
+        "command-complete-da12b5d3-f09b-45ec-a4ed-55567085d1d2"
+      ],
+      "pid": 113640,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 561,
+      "stdout": "{\"event\":\"completion_result\",\"pid\":113640,\"operation_id\":\"operation-fec29e4a-8e32-47bb-befa-2514e0d95f23\",\"command_id\":\"command-complete-da12b5d3-f09b-45ec-a4ed-55567085d1d2\",\"committed\":true,\"completion_record_id\":\"completion-run-operation-fec29e4a-8e32-47bb-befa-2514e0d95f23\",\"verification_id\":\"verification-run-operation-fec29e4a-8e32-47bb-befa-2514e0d95f23\",\"state_revision\":\"1\",\"state_delta_id\":\"2\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "completion_crash_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-9e233323-817c-412e-be27-1e9530ea8c3f"
+      ],
+      "pid": 105048,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 697,
+      "stdout": "{\"event\":\"prepared\",\"pid\":105048,\"operation_id\":\"operation-9e233323-817c-412e-be27-1e9530ea8c3f\",\"tool_call_id\":\"call-operation-9e233323-817c-412e-be27-1e9530ea8c3f\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "completion_crash_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-9e233323-817c-412e-be27-1e9530ea8c3f"
+      ],
+      "pid": 114584,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 554,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":114584,\"operation_id\":\"operation-9e233323-817c-412e-be27-1e9530ea8c3f\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "completion_crash_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-9e233323-817c-412e-be27-1e9530ea8c3f"
+      ],
+      "pid": 114728,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 615,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":114728,\"operation_id\":\"operation-9e233323-817c-412e-be27-1e9530ea8c3f\",\"run_id\":\"run-operation-9e233323-817c-412e-be27-1e9530ea8c3f\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":114728,\"operation_id\":\"operation-9e233323-817c-412e-be27-1e9530ea8c3f\",\"invocation_id\":\"invocation-a974bca8-7296-491e-93ed-96eddfa0b23c\",\"effect_id\":\"effect-6e9141cc-f7f5-4b72-b35e-f100a3dcf7e2\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"execute_result\",\"pid\":114728,\"operation_id\":\"operation-9e233323-817c-412e-be27-1e9530ea8c3f\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "completion_commit_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "complete",
+        "operation-9e233323-817c-412e-be27-1e9530ea8c3f",
+        "command-complete-13f73187-ab10-4375-90f9-19d22b03e7b6",
+        "after-completion-commit"
+      ],
+      "pid": 101072,
+      "exit_code": 79,
+      "signal": null,
+      "duration_ms": 574,
+      "stdout": "{\"event\":\"hard_exit_after_completion_commit\",\"pid\":101072,\"operation_id\":\"operation-9e233323-817c-412e-be27-1e9530ea8c3f\",\"exit_code\":79}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "completion_replay",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "complete",
+        "operation-9e233323-817c-412e-be27-1e9530ea8c3f",
+        "command-complete-13f73187-ab10-4375-90f9-19d22b03e7b6"
+      ],
+      "pid": 112252,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 562,
+      "stdout": "{\"event\":\"command_receipt_replay\",\"pid\":112252,\"operation_id\":\"operation-9e233323-817c-412e-be27-1e9530ea8c3f\",\"command_id\":\"command-complete-13f73187-ab10-4375-90f9-19d22b03e7b6\",\"same_payload\":true,\"completion_record_id\":\"completion-run-operation-9e233323-817c-412e-be27-1e9530ea8c3f\",\"state_revision\":\"1\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "completion_second_command_refused",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "complete",
+        "operation-9e233323-817c-412e-be27-1e9530ea8c3f",
+        "command-complete-ff618696-3bf5-4fee-a8ba-07255af14a47"
+      ],
+      "pid": 94412,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 582,
+      "stdout": "{\"event\":\"completion_result\",\"pid\":94412,\"operation_id\":\"operation-9e233323-817c-412e-be27-1e9530ea8c3f\",\"command_id\":\"command-complete-ff618696-3bf5-4fee-a8ba-07255af14a47\",\"committed\":false,\"reason\":\"COMPLETION_REFUSED_TASK_ALREADY_DONE\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "completion_late_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-9e233323-817c-412e-be27-1e9530ea8c3f"
+      ],
+      "pid": 114952,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 592,
+      "stdout": "{\"event\":\"reconcile_skipped\",\"pid\":114952,\"operation_id\":\"operation-9e233323-817c-412e-be27-1e9530ea8c3f\",\"status\":\"SUCCEEDED\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "conflicting_command_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-3caf0489-0f62-4e6b-9bb9-8cf6214288d6"
+      ],
+      "pid": 35628,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 616,
+      "stdout": "{\"event\":\"prepared\",\"pid\":35628,\"operation_id\":\"operation-3caf0489-0f62-4e6b-9bb9-8cf6214288d6\",\"tool_call_id\":\"call-operation-3caf0489-0f62-4e6b-9bb9-8cf6214288d6\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "conflicting_command_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-3caf0489-0f62-4e6b-9bb9-8cf6214288d6"
+      ],
+      "pid": 115332,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 597,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":115332,\"operation_id\":\"operation-3caf0489-0f62-4e6b-9bb9-8cf6214288d6\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "conflicting_command_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-3caf0489-0f62-4e6b-9bb9-8cf6214288d6"
+      ],
+      "pid": 114868,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 630,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":114868,\"operation_id\":\"operation-3caf0489-0f62-4e6b-9bb9-8cf6214288d6\",\"run_id\":\"run-operation-3caf0489-0f62-4e6b-9bb9-8cf6214288d6\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":114868,\"operation_id\":\"operation-3caf0489-0f62-4e6b-9bb9-8cf6214288d6\",\"invocation_id\":\"invocation-ac723840-692b-4647-9d19-59ac93873ba1\",\"effect_id\":\"effect-c3cdd7ba-8122-4997-9b7b-c9ad38aea9cc\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"execute_result\",\"pid\":114868,\"operation_id\":\"operation-3caf0489-0f62-4e6b-9bb9-8cf6214288d6\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "conflicting_command_reused_id",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "complete",
+        "operation-3caf0489-0f62-4e6b-9bb9-8cf6214288d6",
+        "command-complete-13f73187-ab10-4375-90f9-19d22b03e7b6"
+      ],
+      "pid": 108528,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 731,
+      "stdout": "{\"event\":\"command_receipt_replay\",\"pid\":108528,\"operation_id\":\"operation-3caf0489-0f62-4e6b-9bb9-8cf6214288d6\",\"command_id\":\"command-complete-13f73187-ab10-4375-90f9-19d22b03e7b6\",\"same_payload\":false,\"completion_record_id\":\"completion-run-operation-9e233323-817c-412e-be27-1e9530ea8c3f\",\"state_revision\":\"1\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "conflicting_command_own_id",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "complete",
+        "operation-3caf0489-0f62-4e6b-9bb9-8cf6214288d6",
+        "command-complete-8cf935e2-3634-411f-a8f9-ae42d117fc25"
+      ],
+      "pid": 107572,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 716,
+      "stdout": "{\"event\":\"completion_result\",\"pid\":107572,\"operation_id\":\"operation-3caf0489-0f62-4e6b-9bb9-8cf6214288d6\",\"command_id\":\"command-complete-8cf935e2-3634-411f-a8f9-ae42d117fc25\",\"committed\":true,\"completion_record_id\":\"completion-run-operation-3caf0489-0f62-4e6b-9bb9-8cf6214288d6\",\"verification_id\":\"verification-run-operation-3caf0489-0f62-4e6b-9bb9-8cf6214288d6\",\"state_revision\":\"1\",\"state_delta_id\":\"4\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "unknown_completion_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-a7db2c52-f038-48d7-a5b7-511b15176351"
+      ],
+      "pid": 106564,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 685,
+      "stdout": "{\"event\":\"prepared\",\"pid\":106564,\"operation_id\":\"operation-a7db2c52-f038-48d7-a5b7-511b15176351\",\"tool_call_id\":\"call-operation-a7db2c52-f038-48d7-a5b7-511b15176351\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "unknown_completion_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-a7db2c52-f038-48d7-a5b7-511b15176351"
+      ],
+      "pid": 18744,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 705,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":18744,\"operation_id\":\"operation-a7db2c52-f038-48d7-a5b7-511b15176351\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "unknown_completion_partial_write",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-a7db2c52-f038-48d7-a5b7-511b15176351",
+        "after-partial-write"
+      ],
+      "pid": 107468,
+      "exit_code": 75,
+      "signal": null,
+      "duration_ms": 694,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":107468,\"operation_id\":\"operation-a7db2c52-f038-48d7-a5b7-511b15176351\",\"run_id\":\"run-operation-a7db2c52-f038-48d7-a5b7-511b15176351\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"hard_exit_after_partial_write\",\"pid\":107468,\"operation_id\":\"operation-a7db2c52-f038-48d7-a5b7-511b15176351\",\"exit_code\":75}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "unknown_completion_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-a7db2c52-f038-48d7-a5b7-511b15176351"
+      ],
+      "pid": 114276,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 673,
+      "stdout": "{\"event\":\"reconcile_unknown\",\"pid\":114276,\"operation_id\":\"operation-a7db2c52-f038-48d7-a5b7-511b15176351\",\"human_required\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "unknown_completion_refused",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "complete",
+        "operation-a7db2c52-f038-48d7-a5b7-511b15176351",
+        "command-complete-11ed2efc-e96e-4fbe-b615-229736fa30f5"
+      ],
+      "pid": 105484,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 607,
+      "stdout": "{\"event\":\"completion_result\",\"pid\":105484,\"operation_id\":\"operation-a7db2c52-f038-48d7-a5b7-511b15176351\",\"command_id\":\"command-complete-11ed2efc-e96e-4fbe-b615-229736fa30f5\",\"committed\":false,\"reason\":\"COMPLETION_REFUSED_UNRESOLVED_ACTION\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "control_pause_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-3abcb17a-b6df-4049-8269-3a4b3955c49c"
+      ],
+      "pid": 111472,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 741,
+      "stdout": "{\"event\":\"prepared\",\"pid\":111472,\"operation_id\":\"operation-3abcb17a-b6df-4049-8269-3a4b3955c49c\",\"tool_call_id\":\"call-operation-3abcb17a-b6df-4049-8269-3a4b3955c49c\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "control_pause_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-3abcb17a-b6df-4049-8269-3a4b3955c49c"
+      ],
+      "pid": 64400,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 634,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":64400,\"operation_id\":\"operation-3abcb17a-b6df-4049-8269-3a4b3955c49c\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "control_pause_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-3abcb17a-b6df-4049-8269-3a4b3955c49c"
+      ],
+      "pid": 11052,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 661,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":11052,\"operation_id\":\"operation-3abcb17a-b6df-4049-8269-3a4b3955c49c\",\"run_id\":\"run-operation-3abcb17a-b6df-4049-8269-3a4b3955c49c\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":11052,\"operation_id\":\"operation-3abcb17a-b6df-4049-8269-3a4b3955c49c\",\"invocation_id\":\"invocation-f745b311-ca9a-4260-9e19-e0ae9f85d46b\",\"effect_id\":\"effect-ae22c34f-d84a-4898-a981-7cbad349e0ab\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"execute_result\",\"pid\":11052,\"operation_id\":\"operation-3abcb17a-b6df-4049-8269-3a4b3955c49c\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "control_pause_lock_holder",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "control-apply",
+        "operation-3abcb17a-b6df-4049-8269-3a4b3955c49c",
+        "PAUSE"
+      ],
+      "pid": 57916,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 1252,
+      "stdout": "{\"event\":\"control_apply_result\",\"pid\":57916,\"operation_id\":\"operation-3abcb17a-b6df-4049-8269-3a4b3955c49c\",\"control_type\":\"PAUSE\",\"applied\":true,\"reason\":\"applied_at_safe_point\",\"run_phase\":\"PAUSED\",\"task_status\":\"WAITING\",\"result_ref\":\"run-operation-3abcb17a-b6df-4049-8269-3a4b3955c49c\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "control_pause_completion_waiter",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "complete",
+        "operation-3abcb17a-b6df-4049-8269-3a4b3955c49c",
+        "command-complete-fc963095-3086-4719-a620-6ec5327ba055"
+      ],
+      "pid": 113192,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 676,
+      "stdout": "{\"event\":\"completion_result\",\"pid\":113192,\"operation_id\":\"operation-3abcb17a-b6df-4049-8269-3a4b3955c49c\",\"command_id\":\"command-complete-fc963095-3086-4719-a620-6ec5327ba055\",\"committed\":false,\"reason\":\"COMPLETION_REFUSED_RUN_NOT_RUNNING\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "control_cancel_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-f6fbaaa8-502d-4b7a-9b49-b181e0c45d69"
+      ],
+      "pid": 86600,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 781,
+      "stdout": "{\"event\":\"prepared\",\"pid\":86600,\"operation_id\":\"operation-f6fbaaa8-502d-4b7a-9b49-b181e0c45d69\",\"tool_call_id\":\"call-operation-f6fbaaa8-502d-4b7a-9b49-b181e0c45d69\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "control_cancel_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-f6fbaaa8-502d-4b7a-9b49-b181e0c45d69"
+      ],
+      "pid": 78164,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 600,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":78164,\"operation_id\":\"operation-f6fbaaa8-502d-4b7a-9b49-b181e0c45d69\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "control_cancel_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-f6fbaaa8-502d-4b7a-9b49-b181e0c45d69"
+      ],
+      "pid": 38268,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 615,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":38268,\"operation_id\":\"operation-f6fbaaa8-502d-4b7a-9b49-b181e0c45d69\",\"run_id\":\"run-operation-f6fbaaa8-502d-4b7a-9b49-b181e0c45d69\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":38268,\"operation_id\":\"operation-f6fbaaa8-502d-4b7a-9b49-b181e0c45d69\",\"invocation_id\":\"invocation-92daff8b-5187-44c4-bce3-95af3906c123\",\"effect_id\":\"effect-7c4c0e8d-ab64-4393-a8d8-f071f6af2b1e\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"execute_result\",\"pid\":38268,\"operation_id\":\"operation-f6fbaaa8-502d-4b7a-9b49-b181e0c45d69\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "control_cancel_applied",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "control-apply",
+        "operation-f6fbaaa8-502d-4b7a-9b49-b181e0c45d69",
+        "CANCEL"
+      ],
+      "pid": 97364,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 595,
+      "stdout": "{\"event\":\"control_apply_result\",\"pid\":97364,\"operation_id\":\"operation-f6fbaaa8-502d-4b7a-9b49-b181e0c45d69\",\"control_type\":\"CANCEL\",\"applied\":true,\"reason\":\"applied_at_safe_point\",\"run_phase\":\"CANCELLED\",\"task_status\":\"READY\",\"result_ref\":\"run-operation-f6fbaaa8-502d-4b7a-9b49-b181e0c45d69\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "control_cancel_completion_refused",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "complete",
+        "operation-f6fbaaa8-502d-4b7a-9b49-b181e0c45d69",
+        "command-complete-94b78bc4-cde0-4e46-841d-d7af20d7388a"
+      ],
+      "pid": 112252,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 568,
+      "stdout": "{\"event\":\"completion_result\",\"pid\":112252,\"operation_id\":\"operation-f6fbaaa8-502d-4b7a-9b49-b181e0c45d69\",\"command_id\":\"command-complete-94b78bc4-cde0-4e46-841d-d7af20d7388a\",\"committed\":false,\"reason\":\"COMPLETION_REFUSED_CANCELLED_STATE\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "completion_first_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0"
+      ],
+      "pid": 114088,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 599,
+      "stdout": "{\"event\":\"prepared\",\"pid\":114088,\"operation_id\":\"operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0\",\"tool_call_id\":\"call-operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "completion_first_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0"
+      ],
+      "pid": 110716,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 563,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":110716,\"operation_id\":\"operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "completion_first_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0"
+      ],
+      "pid": 114624,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 697,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":114624,\"operation_id\":\"operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0\",\"run_id\":\"run-operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":114624,\"operation_id\":\"operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0\",\"invocation_id\":\"invocation-421e0c6a-f9ea-4d92-b8d7-48d016ed7ab5\",\"effect_id\":\"effect-77702fe9-bfa2-4260-a753-419fdaf4c970\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"execute_result\",\"pid\":114624,\"operation_id\":\"operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "completion_first_lock_holder",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "complete",
+        "operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0",
+        "command-complete-1854d583-64d1-4327-8647-8c330c20be70"
+      ],
+      "pid": 101072,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 1189,
+      "stdout": "{\"event\":\"completion_result\",\"pid\":101072,\"operation_id\":\"operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0\",\"command_id\":\"command-complete-1854d583-64d1-4327-8647-8c330c20be70\",\"committed\":true,\"completion_record_id\":\"completion-run-operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0\",\"verification_id\":\"verification-run-operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0\",\"state_revision\":\"1\",\"state_delta_id\":\"5\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "completion_first_control_waiter",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "control-apply",
+        "operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0",
+        "CANCEL"
+      ],
+      "pid": 115044,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 640,
+      "stdout": "{\"event\":\"control_apply_result\",\"pid\":115044,\"operation_id\":\"operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0\",\"control_type\":\"CANCEL\",\"applied\":false,\"reason\":\"already_terminal\",\"run_phase\":\"COMPLETED\",\"task_status\":\"DONE\",\"result_ref\":\"completion-run-operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "pending_gate_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-b52b2d34-bb64-489e-94c7-6d16808c5334"
+      ],
+      "pid": 111252,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 583,
+      "stdout": "{\"event\":\"prepared\",\"pid\":111252,\"operation_id\":\"operation-b52b2d34-bb64-489e-94c7-6d16808c5334\",\"tool_call_id\":\"call-operation-b52b2d34-bb64-489e-94c7-6d16808c5334\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "pending_gate_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-b52b2d34-bb64-489e-94c7-6d16808c5334"
+      ],
+      "pid": 106808,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 566,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":106808,\"operation_id\":\"operation-b52b2d34-bb64-489e-94c7-6d16808c5334\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "pending_gate_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-b52b2d34-bb64-489e-94c7-6d16808c5334"
+      ],
+      "pid": 47724,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 625,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":47724,\"operation_id\":\"operation-b52b2d34-bb64-489e-94c7-6d16808c5334\",\"run_id\":\"run-operation-b52b2d34-bb64-489e-94c7-6d16808c5334\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":47724,\"operation_id\":\"operation-b52b2d34-bb64-489e-94c7-6d16808c5334\",\"invocation_id\":\"invocation-d06e773a-bbbb-41f9-a919-b5151f1b2c5a\",\"effect_id\":\"effect-08d1fda2-4eec-4335-a31b-5102c60453d5\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"execute_result\",\"pid\":47724,\"operation_id\":\"operation-b52b2d34-bb64-489e-94c7-6d16808c5334\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "pending_gate_request",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "control-request",
+        "operation-b52b2d34-bb64-489e-94c7-6d16808c5334",
+        "PAUSE"
+      ],
+      "pid": 115252,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 582,
+      "stdout": "{\"event\":\"control_request_result\",\"pid\":115252,\"operation_id\":\"operation-b52b2d34-bb64-489e-94c7-6d16808c5334\",\"control_type\":\"PAUSE\",\"request_id\":\"pause-request-operation-b52b2d34-bb64-489e-94c7-6d16808c5334\",\"persisted\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "pending_gate_completion_refused",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "complete",
+        "operation-b52b2d34-bb64-489e-94c7-6d16808c5334",
+        "command-complete-77bd3db4-643f-4c47-a567-be85756d96ee"
+      ],
+      "pid": 105048,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 690,
+      "stdout": "{\"event\":\"completion_result\",\"pid\":105048,\"operation_id\":\"operation-b52b2d34-bb64-489e-94c7-6d16808c5334\",\"command_id\":\"command-complete-77bd3db4-643f-4c47-a567-be85756d96ee\",\"committed\":false,\"reason\":\"COMPLETION_REFUSED_CONTROL_REQUEST_PENDING\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "lease_old_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-657357c5-05ed-489a-83b4-e52575ed1761"
+      ],
+      "pid": 102028,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 722,
+      "stdout": "{\"event\":\"prepared\",\"pid\":102028,\"operation_id\":\"operation-657357c5-05ed-489a-83b4-e52575ed1761\",\"tool_call_id\":\"call-operation-657357c5-05ed-489a-83b4-e52575ed1761\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "lease_old_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-657357c5-05ed-489a-83b4-e52575ed1761"
+      ],
+      "pid": 115344,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 694,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":115344,\"operation_id\":\"operation-657357c5-05ed-489a-83b4-e52575ed1761\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "lease_expired",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "expire-lease",
+        "operation-657357c5-05ed-489a-83b4-e52575ed1761"
+      ],
+      "pid": 98508,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 594,
+      "stdout": "{\"event\":\"lease_expired\",\"pid\":98508,\"operation_id\":\"operation-657357c5-05ed-489a-83b4-e52575ed1761\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "lease_new_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-51039102-acbb-46ac-a5e2-b9d5eb6fbe39"
+      ],
+      "pid": 55308,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 594,
+      "stdout": "{\"event\":\"prepared\",\"pid\":55308,\"operation_id\":\"operation-51039102-acbb-46ac-a5e2-b9d5eb6fbe39\",\"tool_call_id\":\"call-operation-51039102-acbb-46ac-a5e2-b9d5eb6fbe39\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "lease_new_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-51039102-acbb-46ac-a5e2-b9d5eb6fbe39"
+      ],
+      "pid": 34304,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 668,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":34304,\"operation_id\":\"operation-51039102-acbb-46ac-a5e2-b9d5eb6fbe39\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "lease_new_execute_refused",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-51039102-acbb-46ac-a5e2-b9d5eb6fbe39"
+      ],
+      "pid": 98236,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 568,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":98236,\"operation_id\":\"operation-51039102-acbb-46ac-a5e2-b9d5eb6fbe39\",\"run_id\":\"run-operation-51039102-acbb-46ac-a5e2-b9d5eb6fbe39\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"execute_skipped\",\"pid\":98236,\"operation_id\":\"operation-51039102-acbb-46ac-a5e2-b9d5eb6fbe39\",\"reason\":\"lost_prepared_dispatch_race\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "lease_old_live_writer",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-657357c5-05ed-489a-83b4-e52575ed1761",
+        "hold-after-dispatch"
+      ],
+      "pid": 109384,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 3068,
+      "stdout": "{\"event\":\"resume_from_step\",\"pid\":109384,\"operation_id\":\"operation-657357c5-05ed-489a-83b4-e52575ed1761\",\"run_id\":\"run-operation-657357c5-05ed-489a-83b4-e52575ed1761\",\"step_index\":1,\"completed_steps\":1,\"step_count\":2,\"model_rounds_this_process\":0}\n{\"event\":\"external_effect_written\",\"pid\":109384,\"operation_id\":\"operation-657357c5-05ed-489a-83b4-e52575ed1761\",\"invocation_id\":\"invocation-650b66ec-dc57-4987-ac8c-dca884b6d64f\",\"effect_id\":\"effect-1b3c7792-c6ab-4c97-8561-5e48c6068726\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"execute_result\",\"pid\":109384,\"operation_id\":\"operation-657357c5-05ed-489a-83b4-e52575ed1761\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b01_create_task",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "create-task",
+        "task-b01-f01296e5-dbd6-49ed-a4d4-f041c8e4c61a"
+      ],
+      "pid": 97660,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 174,
+      "stdout": "{\"event\":\"control_task_created\",\"pid\":97660,\"task_id\":\"task-b01-f01296e5-dbd6-49ed-a4d4-f041c8e4c61a\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b01_delegate_first",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "delegate",
+        "task-b01-f01296e5-dbd6-49ed-a4d4-f041c8e4c61a",
+        "run-b01-a-1b94c6ef-82b1-43e8-bafc-64e16e6043d0"
+      ],
+      "pid": 29028,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 397,
+      "stdout": "{\"event\":\"delegate_result\",\"pid\":29028,\"task_id\":\"task-b01-f01296e5-dbd6-49ed-a4d4-f041c8e4c61a\",\"run_id\":\"run-b01-a-1b94c6ef-82b1-43e8-bafc-64e16e6043d0\",\"accepted\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b01_delegate_second",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "delegate",
+        "task-b01-f01296e5-dbd6-49ed-a4d4-f041c8e4c61a",
+        "run-b01-b-d265eecf-21fe-438e-a301-746c6fe560df"
+      ],
+      "pid": 69944,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 210,
+      "stdout": "{\"event\":\"delegate_result\",\"pid\":69944,\"task_id\":\"task-b01-f01296e5-dbd6-49ed-a4d4-f041c8e4c61a\",\"run_id\":\"run-b01-b-d265eecf-21fe-438e-a301-746c6fe560df\",\"accepted\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b03_create_active",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "create-active",
+        "task-b03-7b53e83b-24cc-4159-9b8e-5bc800a78e07",
+        "run-b03-fde4ecd2-790d-4593-841a-17e7d97c8929",
+        "scope-b03-e7dbe631-8cf7-4149-aab4-2165ec7ff4b8"
+      ],
+      "pid": 108172,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 236,
+      "stdout": "{\"event\":\"active_run_created\",\"pid\":108172,\"task_id\":\"task-b03-7b53e83b-24cc-4159-9b8e-5bc800a78e07\",\"run_id\":\"run-b03-fde4ecd2-790d-4593-841a-17e7d97c8929\",\"scope\":\"scope-b03-e7dbe631-8cf7-4149-aab4-2165ec7ff4b8\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b03_pause",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "pause",
+        "task-b03-7b53e83b-24cc-4159-9b8e-5bc800a78e07",
+        "run-b03-fde4ecd2-790d-4593-841a-17e7d97c8929"
+      ],
+      "pid": 17968,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 180,
+      "stdout": "{\"event\":\"pause_result\",\"pid\":17968,\"task_id\":\"task-b03-7b53e83b-24cc-4159-9b8e-5bc800a78e07\",\"run_id\":\"run-b03-fde4ecd2-790d-4593-841a-17e7d97c8929\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b03_restart_claim",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "claim-next",
+        "task-b03-7b53e83b-24cc-4159-9b8e-5bc800a78e07",
+        "run-b03-fde4ecd2-790d-4593-841a-17e7d97c8929"
+      ],
+      "pid": 99212,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 170,
+      "stdout": "{\"event\":\"claim_next_result\",\"pid\":99212,\"task_id\":\"task-b03-7b53e83b-24cc-4159-9b8e-5bc800a78e07\",\"run_id\":\"run-b03-fde4ecd2-790d-4593-841a-17e7d97c8929\",\"claimed\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b04_complete_create",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "create-active",
+        "task-b04-complete-d2fcb3dc-dbb4-4c21-a96a-139bae32d9a0",
+        "run-b04-complete-962e744f-f06d-457a-9973-5a2fa27c8f84",
+        "scope-b04-complete-8ec563fa-823b-4196-90ab-d36d50d329a1"
+      ],
+      "pid": 55072,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 203,
+      "stdout": "{\"event\":\"active_run_created\",\"pid\":55072,\"task_id\":\"task-b04-complete-d2fcb3dc-dbb4-4c21-a96a-139bae32d9a0\",\"run_id\":\"run-b04-complete-962e744f-f06d-457a-9973-5a2fa27c8f84\",\"scope\":\"scope-b04-complete-8ec563fa-823b-4196-90ab-d36d50d329a1\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b04_finish_first",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "finish",
+        "task-b04-complete-d2fcb3dc-dbb4-4c21-a96a-139bae32d9a0",
+        "run-b04-complete-962e744f-f06d-457a-9973-5a2fa27c8f84"
+      ],
+      "pid": 70376,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 458,
+      "stdout": "{\"event\":\"finish_result\",\"pid\":70376,\"task_id\":\"task-b04-complete-d2fcb3dc-dbb4-4c21-a96a-139bae32d9a0\",\"run_id\":\"run-b04-complete-962e744f-f06d-457a-9973-5a2fa27c8f84\",\"completed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b04_cancel_second",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "cancel",
+        "task-b04-complete-d2fcb3dc-dbb4-4c21-a96a-139bae32d9a0",
+        "run-b04-complete-962e744f-f06d-457a-9973-5a2fa27c8f84"
+      ],
+      "pid": 6632,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 240,
+      "stdout": "{\"event\":\"cancel_result\",\"pid\":6632,\"task_id\":\"task-b04-complete-d2fcb3dc-dbb4-4c21-a96a-139bae32d9a0\",\"run_id\":\"run-b04-complete-962e744f-f06d-457a-9973-5a2fa27c8f84\",\"cancelled\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b04_cancel_create",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "create-active",
+        "task-b04-cancel-cb556da8-a773-4469-b602-2888209567b1",
+        "run-b04-cancel-64940638-51c9-452d-ba22-5777d8f2e4e9",
+        "scope-b04-cancel-1ae72c4e-504f-4a84-a90e-2c75c7ee67ac"
+      ],
+      "pid": 107640,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 188,
+      "stdout": "{\"event\":\"active_run_created\",\"pid\":107640,\"task_id\":\"task-b04-cancel-cb556da8-a773-4469-b602-2888209567b1\",\"run_id\":\"run-b04-cancel-64940638-51c9-452d-ba22-5777d8f2e4e9\",\"scope\":\"scope-b04-cancel-1ae72c4e-504f-4a84-a90e-2c75c7ee67ac\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b04_cancel_first",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "cancel",
+        "task-b04-cancel-cb556da8-a773-4469-b602-2888209567b1",
+        "run-b04-cancel-64940638-51c9-452d-ba22-5777d8f2e4e9"
+      ],
+      "pid": 111472,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 476,
+      "stdout": "{\"event\":\"cancel_result\",\"pid\":111472,\"task_id\":\"task-b04-cancel-cb556da8-a773-4469-b602-2888209567b1\",\"run_id\":\"run-b04-cancel-64940638-51c9-452d-ba22-5777d8f2e4e9\",\"cancelled\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b04_finish_second",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "finish",
+        "task-b04-cancel-cb556da8-a773-4469-b602-2888209567b1",
+        "run-b04-cancel-64940638-51c9-452d-ba22-5777d8f2e4e9"
+      ],
+      "pid": 52196,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 208,
+      "stdout": "{\"event\":\"finish_result\",\"pid\":52196,\"task_id\":\"task-b04-cancel-cb556da8-a773-4469-b602-2888209567b1\",\"run_id\":\"run-b04-cancel-64940638-51c9-452d-ba22-5777d8f2e4e9\",\"completed\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b05_create_active",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "create-active",
+        "task-b05-5015d9ab-7187-4eea-bf69-adf851a35adb",
+        "run-b05-e63bb9f7-0ed1-4d18-a653-328c5874c5a9",
+        "scope-b05-83e87d18-6584-44be-9325-8264ea7741fd"
+      ],
+      "pid": 114044,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 199,
+      "stdout": "{\"event\":\"active_run_created\",\"pid\":114044,\"task_id\":\"task-b05-5015d9ab-7187-4eea-bf69-adf851a35adb\",\"run_id\":\"run-b05-e63bb9f7-0ed1-4d18-a653-328c5874c5a9\",\"scope\":\"scope-b05-83e87d18-6584-44be-9325-8264ea7741fd\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b05_handoff_request",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "handoff-request",
+        "task-b05-5015d9ab-7187-4eea-bf69-adf851a35adb",
+        "run-b05-e63bb9f7-0ed1-4d18-a653-328c5874c5a9",
+        "scope-b05-83e87d18-6584-44be-9325-8264ea7741fd"
+      ],
+      "pid": 95568,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 193,
+      "stdout": "{\"event\":\"handoff_request_result\",\"pid\":95568,\"task_id\":\"task-b05-5015d9ab-7187-4eea-bf69-adf851a35adb\",\"run_id\":\"run-b05-e63bb9f7-0ed1-4d18-a653-328c5874c5a9\",\"waiting\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b05_handoff_dispatching_refused",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "handoff-finalize",
+        "task-b05-5015d9ab-7187-4eea-bf69-adf851a35adb",
+        "run-b05-e63bb9f7-0ed1-4d18-a653-328c5874c5a9",
+        "scope-b05-83e87d18-6584-44be-9325-8264ea7741fd"
+      ],
+      "pid": 110492,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 204,
+      "stdout": "{\"event\":\"handoff_finalize_result\",\"pid\":110492,\"task_id\":\"task-b05-5015d9ab-7187-4eea-bf69-adf851a35adb\",\"run_id\":\"run-b05-e63bb9f7-0ed1-4d18-a653-328c5874c5a9\",\"finalized\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b05_mark_unknown_stopped",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "mark-unknown-stopped",
+        "run-b05-e63bb9f7-0ed1-4d18-a653-328c5874c5a9"
+      ],
+      "pid": 67452,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 200,
+      "stdout": "{\"event\":\"old_writer_marked_unknown_stopped\",\"pid\":67452,\"run_id\":\"run-b05-e63bb9f7-0ed1-4d18-a653-328c5874c5a9\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b05_handoff_unknown_refused",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "handoff-finalize",
+        "task-b05-5015d9ab-7187-4eea-bf69-adf851a35adb",
+        "run-b05-e63bb9f7-0ed1-4d18-a653-328c5874c5a9",
+        "scope-b05-83e87d18-6584-44be-9325-8264ea7741fd"
+      ],
+      "pid": 114236,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 205,
+      "stdout": "{\"event\":\"handoff_finalize_result\",\"pid\":114236,\"task_id\":\"task-b05-5015d9ab-7187-4eea-bf69-adf851a35adb\",\"run_id\":\"run-b05-e63bb9f7-0ed1-4d18-a653-328c5874c5a9\",\"finalized\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b05_conflicting_claim_refused",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "resource-claim",
+        "scope-b05-83e87d18-6584-44be-9325-8264ea7741fd",
+        "task-b05-conflict-ec3690ee-bed6-4382-bd48-29d242acd348",
+        "run-b05-conflict-6117a9ab-5fa6-4d64-b1b5-d60d87d9f208"
+      ],
+      "pid": 112680,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 194,
+      "stdout": "{\"event\":\"resource_claim_result\",\"pid\":112680,\"scope\":\"scope-b05-83e87d18-6584-44be-9325-8264ea7741fd\",\"task_id\":\"task-b05-conflict-ec3690ee-bed6-4382-bd48-29d242acd348\",\"run_id\":\"run-b05-conflict-6117a9ab-5fa6-4d64-b1b5-d60d87d9f208\",\"granted\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b05_independent_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "resolve-unknown",
+        "run-b05-e63bb9f7-0ed1-4d18-a653-328c5874c5a9"
+      ],
+      "pid": 34304,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 184,
+      "stdout": "{\"event\":\"unknown_reconciliation_result\",\"pid\":34304,\"run_id\":\"run-b05-e63bb9f7-0ed1-4d18-a653-328c5874c5a9\",\"resolved\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "b05_handoff_after_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "handoff-finalize",
+        "task-b05-5015d9ab-7187-4eea-bf69-adf851a35adb",
+        "run-b05-e63bb9f7-0ed1-4d18-a653-328c5874c5a9",
+        "scope-b05-83e87d18-6584-44be-9325-8264ea7741fd"
+      ],
+      "pid": 112048,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 183,
+      "stdout": "{\"event\":\"handoff_finalize_result\",\"pid\":112048,\"task_id\":\"task-b05-5015d9ab-7187-4eea-bf69-adf851a35adb\",\"run_id\":\"run-b05-e63bb9f7-0ed1-4d18-a653-328c5874c5a9\",\"finalized\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "d07_create_active",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "create-active",
+        "task-d07-bf0e9034-4d5b-46ee-ab80-8173bd179c8f",
+        "run-d07-107c8d4b-90ce-4870-a9b7-b3105e884685",
+        "scope-d07-276ec1a6-3e17-46da-a57b-70d8ecebbfa2"
+      ],
+      "pid": 38816,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 192,
+      "stdout": "{\"event\":\"active_run_created\",\"pid\":38816,\"task_id\":\"task-d07-bf0e9034-4d5b-46ee-ab80-8173bd179c8f\",\"run_id\":\"run-d07-107c8d4b-90ce-4870-a9b7-b3105e884685\",\"scope\":\"scope-d07-276ec1a6-3e17-46da-a57b-70d8ecebbfa2\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "d07_expire_lease",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "expire-lease",
+        "run-d07-107c8d4b-90ce-4870-a9b7-b3105e884685"
+      ],
+      "pid": 89388,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 183,
+      "stdout": "{\"event\":\"lease_expired\",\"pid\":89388,\"run_id\":\"run-d07-107c8d4b-90ce-4870-a9b7-b3105e884685\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "d07_conflicting_claim",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "resource-claim",
+        "scope-d07-276ec1a6-3e17-46da-a57b-70d8ecebbfa2",
+        "task-d07-conflict-6760911c-6e49-4c5a-ab4f-2d192abdddbd",
+        "run-d07-conflict-bbf81b0d-d0fc-4f0d-8b45-a7c63899ceaf"
+      ],
+      "pid": 8800,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 180,
+      "stdout": "{\"event\":\"resource_claim_result\",\"pid\":8800,\"scope\":\"scope-d07-276ec1a6-3e17-46da-a57b-70d8ecebbfa2\",\"task_id\":\"task-d07-conflict-6760911c-6e49-4c5a-ab4f-2d192abdddbd\",\"run_id\":\"run-d07-conflict-bbf81b0d-d0fc-4f0d-8b45-a7c63899ceaf\",\"granted\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "d07_old_writer_live",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "hold-old-writer",
+        "run-d07-107c8d4b-90ce-4870-a9b7-b3105e884685"
+      ],
+      "pid": 96452,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 329,
+      "stdout": "{\"event\":\"old_writer_exited\",\"pid\":96452,\"run_id\":\"run-d07-107c8d4b-90ce-4870-a9b7-b3105e884685\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "epoch_create_active",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "create-active",
+        "task-epoch-ed7fd70e-4933-41aa-85a4-03fa17146579",
+        "run-epoch-e50cf78f-20fd-48c9-adf3-d1d91dc24a69",
+        "scope-epoch-fc852cf8-c67f-4229-a740-0b82da661709"
+      ],
+      "pid": 21124,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 179,
+      "stdout": "{\"event\":\"active_run_created\",\"pid\":21124,\"task_id\":\"task-epoch-ed7fd70e-4933-41aa-85a4-03fa17146579\",\"run_id\":\"run-epoch-e50cf78f-20fd-48c9-adf3-d1d91dc24a69\",\"scope\":\"scope-epoch-fc852cf8-c67f-4229-a740-0b82da661709\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "epoch_reclaim",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "reclaim",
+        "run-epoch-e50cf78f-20fd-48c9-adf3-d1d91dc24a69"
+      ],
+      "pid": 115132,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 182,
+      "stdout": "{\"event\":\"claim_reclaimed\",\"pid\":115132,\"run_id\":\"run-epoch-e50cf78f-20fd-48c9-adf3-d1d91dc24a69\",\"claim_epoch\":\"2\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "epoch_old_result",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "record-result",
+        "task-epoch-ed7fd70e-4933-41aa-85a4-03fa17146579",
+        "run-epoch-e50cf78f-20fd-48c9-adf3-d1d91dc24a69",
+        "1",
+        "1"
+      ],
+      "pid": 108780,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 196,
+      "stdout": "{\"event\":\"record_result\",\"pid\":108780,\"task_id\":\"task-epoch-ed7fd70e-4933-41aa-85a4-03fa17146579\",\"run_id\":\"run-epoch-e50cf78f-20fd-48c9-adf3-d1d91dc24a69\",\"accepted\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "epoch_current_result",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "record-result",
+        "task-epoch-ed7fd70e-4933-41aa-85a4-03fa17146579",
+        "run-epoch-e50cf78f-20fd-48c9-adf3-d1d91dc24a69",
+        "1",
+        "2"
+      ],
+      "pid": 37480,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 196,
+      "stdout": "{\"event\":\"record_result\",\"pid\":37480,\"task_id\":\"task-epoch-ed7fd70e-4933-41aa-85a4-03fa17146579\",\"run_id\":\"run-epoch-e50cf78f-20fd-48c9-adf3-d1d91dc24a69\",\"accepted\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "epoch_repeated_result_rejected",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "record-result",
+        "task-epoch-ed7fd70e-4933-41aa-85a4-03fa17146579",
+        "run-epoch-e50cf78f-20fd-48c9-adf3-d1d91dc24a69",
+        "1",
+        "2"
+      ],
+      "pid": 111668,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 197,
+      "stdout": "{\"event\":\"record_result\",\"pid\":111668,\"task_id\":\"task-epoch-ed7fd70e-4933-41aa-85a4-03fa17146579\",\"run_id\":\"run-epoch-e50cf78f-20fd-48c9-adf3-d1d91dc24a69\",\"accepted\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "unknown_result_create_active",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "create-active",
+        "task-unknown-result-35c86bd9-389f-46bc-a26b-c31a68ace7cf",
+        "run-unknown-result-a74c6eb4-0217-4e30-8182-b02ecb43246f",
+        "scope-unknown-result-09d9df49-0ba1-487b-bbfb-678b4e15535a"
+      ],
+      "pid": 114324,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 173,
+      "stdout": "{\"event\":\"active_run_created\",\"pid\":114324,\"task_id\":\"task-unknown-result-35c86bd9-389f-46bc-a26b-c31a68ace7cf\",\"run_id\":\"run-unknown-result-a74c6eb4-0217-4e30-8182-b02ecb43246f\",\"scope\":\"scope-unknown-result-09d9df49-0ba1-487b-bbfb-678b4e15535a\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "unknown_result_mark_unknown",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "mark-unknown-stopped",
+        "run-unknown-result-a74c6eb4-0217-4e30-8182-b02ecb43246f"
+      ],
+      "pid": 103624,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 190,
+      "stdout": "{\"event\":\"old_writer_marked_unknown_stopped\",\"pid\":103624,\"run_id\":\"run-unknown-result-a74c6eb4-0217-4e30-8182-b02ecb43246f\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "unknown_result_rejected",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\control-worker.js",
+        "record-result",
+        "task-unknown-result-35c86bd9-389f-46bc-a26b-c31a68ace7cf",
+        "run-unknown-result-a74c6eb4-0217-4e30-8182-b02ecb43246f",
+        "1",
+        "1"
+      ],
+      "pid": 93516,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 188,
+      "stdout": "{\"event\":\"record_result\",\"pid\":93516,\"task_id\":\"task-unknown-result-35c86bd9-389f-46bc-a26b-c31a68ace7cf\",\"run_id\":\"run-unknown-result-a74c6eb4-0217-4e30-8182-b02ecb43246f\",\"accepted\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "pg_ctl_stop",
+      "args": [
+        "stop",
+        "-D",
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\.local\\recovery-p00-ea9c73e8-59ee-4b20-872c-f4166fb94e92\\pgdata",
+        "-m",
+        "immediate",
+        "-w",
+        "-t",
+        "30"
+      ],
+      "pid": 50196,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 154,
+      "stdout": "",
+      "stderr": "",
+      "timed_out": false
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "approval_then_two_process_starts_one_effect",
+      "operation_id": "operation-d4eb7801-9339-47f3-82e8-53f6b93d6175",
+      "harness": "main-worker",
+      "assertions": [
+        "一个子进程使用实际 AI SDK Mock 生成并持久化候选；后续批准和执行子进程未再生成候选。",
+        "第一个批准子进程在锁定 Review 后进入 barrier，第二个独立连接被 pg_stat_activity 观测为 Lock 等待；释放后批准最多消费一次。",
+        "第一个执行子进程在锁定 Operation/Run/Review 后进入 barrier，第二个独立连接被观测为 Lock 等待；释放后模型调用、工具调用和效果日志各为一次。",
+        "动作和调用记录成功，但 probe Run 保持 RUNNING；本实验没有 PASS、CompletionRecord 或业务完成提交。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 6,
+      "business_completion_count": 0
+    },
+    {
+      "name": "after_prepared_hard_exit_reuses_original_candidate",
+      "operation_id": "operation-1c0900e1-fc37-4a2c-974d-2956126e9119",
+      "harness": "main-worker",
+      "assertions": [
+        "批准后的 PREPARED 短事务提交后，Worker 以 exit 72 退出且未调用外部工具。",
+        "新的执行进程从同一 PREPARED 动作继续，未重新调用模型生成参数。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 6,
+      "business_completion_count": 0
+    },
+    {
+      "name": "safe_retry_current_invocation_reconciles_its_own_external_effect",
+      "operation_id": "operation-6c128e4a-84bc-4e07-84c9-5f47c0f46bf8",
+      "harness": "main-worker",
+      "assertions": [
+        "第一子进程在 DISPATCHING 后、受控文件 Adapter 入口前以 exit 74 退出；父进程把退出收据绑定到该 Invocation、effect ID 和 PID。",
+        "确认未启动后，安全重试创建新的 DISPATCHING Invocation，并在外部效果后以 exit 73 退出；恢复只核对这个当前 Invocation 的 effect ID。",
+        "旧 CONFIRMED_NOT_STARTED Invocation 仍保留，新的 Invocation 被记录为 SUCCEEDED；模型、工具和效果各为一次。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 8,
+      "business_completion_count": 0
+    },
+    {
+      "name": "old_or_replayed_exit_receipt_cannot_approve_new_invocation",
+      "operation_id": "operation-d3d86972-f540-4d10-baad-6b8d2483c925",
+      "harness": "main-worker",
+      "assertions": [
+        "第一 Invocation 的真实 exit 74 收据仍按其 ID 保存；安全重试后创建第二个 DISPATCHING Invocation。",
+        "第二次确认注入 PID 等于新 Worker 的旧 Invocation 收据，模拟 PID 复用或收据重放；Invocation ID 和 effect ID 不匹配，因此拒绝确认。",
+        "没有 Adapter 入口或效果证据时，后续恢复保持 UNKNOWN，而不是把旧收据泛化为新 attempt 的安全重试授权。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 7,
+      "business_completion_count": 0
+    },
+    {
+      "name": "live_worker_before_adapter_rejects_safe_retry_confirmation",
+      "operation_id": "operation-e5f3636e-56ee-4b66-bdcc-44e297890027",
+      "harness": "main-worker",
+      "assertions": [
+        "一个实际子进程在 DISPATCHING 与适配器入口之间由 barrier 保持存活；此时目标、效果日志和 TOOL_CALL 都尚不存在。",
+        "第二个恢复进程因原 Invocation PID 仍存活且没有绑定 exit 74 收据而拒绝 CONFIRMED_NOT_STARTED；释放 barrier 后仅旧进程调用工具。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 6,
+      "business_completion_count": 0
+    },
+    {
+      "name": "partial_write_without_identity_evidence_stays_unknown",
+      "operation_id": "operation-8669f4d9-876b-4c8d-b521-948bcea81865",
+      "harness": "main-worker",
+      "assertions": [
+        "受控 Adapter 已进入并只写入部分文件后以 exit 75 退出，没有动作身份效果证据。",
+        "恢复不把部分内容当成功或未发生；保持 UNKNOWN、PAUSED 且不重调工具，并在同一主 Worker 短事务把该动作的资源 claim 转为 QUARANTINED。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 5,
+      "business_completion_count": 0
+    },
+    {
+      "name": "held_resource_blocks_second_task_before_adapter",
+      "operation_id": "operation-ac5a78f1-5c76-4066-8a79-7da7c138959f",
+      "harness": "main-worker",
+      "assertions": [
+        "两个独立 Task/Run 在 prepare 时由测试运行器显式绑定同一个隔离临时资源；第一 Task 已 DISPATCHING 并持有 HELD claim，但尚未进入 Adapter。",
+        "第二 Task 的准入事务锁定自身 Task/Run、同一资源与动作后，看到 HELD claim 即停止；没有 Invocation、TOOL_CALL、效果日志或文件写入。",
+        "释放第一 Worker 后其调用成功并在结果短事务中释放 claim；本场景不把该局部机制扩展为生产资源协议。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 3,
+      "business_completion_count": 0
+    },
+    {
+      "name": "unknown_resource_claim_stays_quarantined_before_second_adapter",
+      "operation_id": "operation-4338dfc9-c582-4513-bd16-cbaa6cc0a4cf",
+      "harness": "main-worker",
+      "assertions": [
+        "第一 Task 在共享资源只写部分内容后以 exit 75 退出；主 Worker 的同一 UNKNOWN 短事务把原 HELD claim 转为 QUARANTINED。",
+        "第二 Task 在部分文件已经存在后才 prepare，其持久化基线与该部分文件哈希相同；准入仍先看到 QUARANTINED claim，而非把文件存在当作绕过资源隔离的理由。",
+        "第二 Task 没有 Invocation、TOOL_CALL、效果日志或文件写入；UNKNOWN 的 claim 不因进程退出或任何租约推定而自动释放。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 3,
+      "business_completion_count": 0
+    },
+    {
+      "name": "after_external_effect_hard_exit_reconciles_original_evidence",
+      "operation_id": "operation-68975a25-6484-4fa6-9e03-348aff4a84d0",
+      "harness": "main-worker",
+      "assertions": [
+        "执行子进程在受管文件和独立效果日志 fsync 后以 exit 73 退出。",
+        "新进程凭原逻辑动作 ID、effect ID、参数哈希、基线哈希、内容哈希和目标哈希补记同一调用结果。",
+        "恢复期间模型调用和工具调用均没有增加。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 6,
+      "business_completion_count": 0
+    },
+    {
+      "name": "after_external_effect_hard_exit_reconciles_after_real_postgres_restart",
+      "operation_id": "operation-49d5de94-bc68-4a1a-a7c3-e4d334575e4f",
+      "harness": "main-worker",
+      "assertions": [
+        "受控外部效果写入后，Worker 以 exit 73 退出，数据库中的 Invocation 仍为 DISPATCHING。",
+        "父运行器关闭连接并以 pg_ctl immediate 停止、再以同一 data directory 和端口启动真实 PostgreSQL。",
+        "新 Worker 从重启后的数据库按原动作身份核对证据并补记结果，模型调用和工具调用均没有增加。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 6,
+      "business_completion_count": 0
+    },
+    {
+      "name": "missing_action_identity_evidence_stays_unknown",
+      "operation_id": "operation-deeaaea9-3af1-4ffb-9a0f-2724ec54f81a",
+      "harness": "main-worker",
+      "assertions": [
+        "即使固定受管文件内容仍在，原动作身份效果日志缺失时也不把内容相同当作本次成功证据。",
+        "恢复不重调工具，动作进入 UNKNOWN，probe Run 进入 PAUSED 并写入 INSUFFICIENT_EVIDENCE 原因。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 0,
+      "protocol_commit_count": 5,
+      "business_completion_count": 0
+    },
+    {
+      "name": "external_edit_after_effect_does_not_match_old_evidence",
+      "operation_id": "operation-178e8374-7062-480c-8052-d4f04247979c",
+      "harness": "main-worker",
+      "assertions": [
+        "外部效果后的受管文件被实验外部内容改写，而原效果日志仍保留。",
+        "恢复要求日志 afterHash 与当前目标和预期内容哈希同时匹配，因此不重调工具并转 UNKNOWN。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 5,
+      "business_completion_count": 0
+    },
+    {
+      "name": "truncated_effect_evidence_stays_unknown",
+      "operation_id": "operation-c45001a0-7ef5-4dea-b5f1-a28161128c2e",
+      "harness": "main-worker",
+      "assertions": [
+        "外部效果后将独立效果日志截断为不可解析 JSON。",
+        "恢复将损坏日志视为证据不足，不抛出为成功，也不重调工具。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 5,
+      "business_completion_count": 0
+    },
+    {
+      "name": "non_object_effect_evidence_stays_unknown",
+      "operation_id": "operation-5022f417-9647-4a94-9cba-7b9d9cdd9e77",
+      "harness": "main-worker",
+      "assertions": [
+        "外部效果后将效果日志替换为合法 JSON 的 null。",
+        "恢复拒绝非对象证据，不重调工具并转 UNKNOWN。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 5,
+      "business_completion_count": 0
+    },
+    {
+      "name": "external_file_edit_after_approval_is_not_overwritten",
+      "operation_id": "operation-36cd2ea8-2547-4c2f-811a-45b5c0202554",
+      "harness": "main-worker",
+      "assertions": [
+        "批准后由实验外部写入操作专属固定受管目标。",
+        "执行前重新读取真实基线并拒绝；exclusive create 没有覆盖该文件，也没有工具调用。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 4,
+      "business_completion_count": 0
+    },
+    {
+      "name": "approval_invalidated_by_parameter_change",
+      "operation_id": "operation-974cffe1-ec8f-47f4-9e50-afe4e197cf59",
+      "harness": "main-worker",
+      "assertions": [
+        "批准后的当前 parameter 绑定发生变化。",
+        "执行进程在外部效果前失效批准，不产生调用或效果。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 4,
+      "business_completion_count": 0
+    },
+    {
+      "name": "approval_invalidated_by_baseline_change",
+      "operation_id": "operation-c8da47c4-7697-4faa-8c93-05330bb5584b",
+      "harness": "main-worker",
+      "assertions": [
+        "批准后的当前 baseline 绑定发生变化。",
+        "执行进程在外部效果前失效批准，不产生调用或效果。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 4,
+      "business_completion_count": 0
+    },
+    {
+      "name": "approval_invalidated_by_permission_change",
+      "operation_id": "operation-27c580c7-1e8a-4cdc-b3d4-adb62a38e060",
+      "harness": "main-worker",
+      "assertions": [
+        "批准后的当前 permission 绑定发生变化。",
+        "执行进程在外部效果前失效批准，不产生调用或效果。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 4,
+      "business_completion_count": 0
+    },
+    {
+      "name": "approval_invalidated_by_acceptance_change",
+      "operation_id": "operation-64ffdb2e-9eee-4a13-b82c-1cc48376b76f",
+      "harness": "main-worker",
+      "assertions": [
+        "批准后的当前 acceptance 绑定发生变化。",
+        "执行进程在外部效果前失效批准，不产生调用或效果。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 4,
+      "business_completion_count": 0
+    },
+    {
+      "name": "approval_invalidated_by_ownership_change",
+      "operation_id": "operation-7b343848-395b-40c6-9c39-373760d22e5e",
+      "harness": "main-worker",
+      "assertions": [
+        "批准后的当前 ownership 绑定发生变化。",
+        "执行进程在外部效果前失效批准，不产生调用或效果。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 4,
+      "business_completion_count": 0
+    },
+    {
+      "name": "old_ownership_epoch_cannot_commit_result",
+      "operation_id": "operation-541ace33-240a-4de0-a27c-5e6e192c362e",
+      "harness": "main-worker",
+      "assertions": [
+        "外部效果后转移 ownership_epoch；旧 epoch 的恢复进程不能把动作或调用更新为 SUCCEEDED。",
+        "原证据被单独保留，等待当前执行权持有者处理；没有二次工具调用。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 5,
+      "business_completion_count": 0
+    },
+    {
+      "name": "dispatching_admission_and_resource_claim_commit_or_roll_back_together",
+      "operation_id": "operation-ccb02038-d2f9-49d7-a225-09fbedb68908",
+      "harness": "main-worker",
+      "assertions": [
+        "DISPATCHING 准入、Invocation 记录与资源 claim 取得在同一短事务；事务内注入失败（exit 76，连接执行真实 ROLLBACK）后动作回到 PREPARED，claim 行数和 RESOURCE_CLAIM_HELD 事件都为零。",
+        "同一事务内以 exit 77 直接退出进程时连接被断开，PostgreSQL 回滚未提交事务；该操作没有 Invocation、claim 或事件，也没有\"有 claim 无准入\"的中间态。",
+        "第三次无注入执行完成同一动作：只有提交成功的那一次留下 claim 与结果，事件计数证明注入事务的写入没有残留。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 6,
+      "business_completion_count": 0
+    },
+    {
+      "name": "call_result_and_resource_state_commit_in_one_transaction",
+      "operation_id": "operation-aa233edd-4fa3-4549-a04f-492a5d8c9df9",
+      "harness": "main-worker",
+      "assertions": [
+        "外部效果已经写入后，结果与 claim 释放所在短事务注入失败（exit 76）：动作保持 DISPATCHING，claim 保持 HELD，没有 RESULT_RECORDED 或 RESOURCE_CLAIM_RELEASED 事件，Step 也没有推进。",
+        "恢复进程用原 Invocation 与 effect 身份核对同一证据后提交结果；这次已提交的短事务同时释放 claim 并把 Step 推进到 2/2。",
+        "提交后再次运行恢复路径只读到终态 SUCCEEDED，不改变动作、claim 或调用计数。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 6,
+      "business_completion_count": 0
+    },
+    {
+      "name": "stale_worker_claim_epoch_result_rejected_without_changing_claim",
+      "operation_id": "operation-502641f0-1869-45ea-b038-c256f0a751fc",
+      "harness": "main-worker",
+      "assertions": [
+        "外部效果后 Worker claim epoch 被推进；旧 epoch 的 Invocation 结果在真实长事务比对下被拒绝，事件保留核对证据。",
+        "同一拒绝路径不释放、不隔离也不改变 claim 状态，Step 位置停留在 1/2；没有第二次工具调用。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 5,
+      "business_completion_count": 0
+    },
+    {
+      "name": "two_step_position_is_persisted_and_resumed_without_repeating_model_rounds",
+      "operation_id": "operation-39afc736-d5a3-47fe-887a-11c76752073b",
+      "harness": "main-worker",
+      "assertions": [
+        "prepare 在同一短事务持久化两步计划：Step 0 CAPTURE_CANDIDATE 成功、Step 1 APPLY_MANAGED_WRITE 待执行，Run 位置为 1/2。",
+        "两步之间以 exit 72 崩溃后，新进程从数据库读到的位置就是 Step 1，并在 stdout 事件里记录 step_index=1、model_rounds_this_process=0。",
+        "结果提交与 Step 推进在同一短事务，最终两步均为 SUCCEEDED、位置 2/2；模型轮次仍为一次，重复执行只跳过而不重跑。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 6,
+      "business_completion_count": 0
+    },
+    {
+      "name": "business_completion_transaction_writes_pass_record_task_done_delta_and_receipt_atomically",
+      "operation_id": "operation-fec29e4a-8e32-47bb-befa-2514e0d95f23",
+      "harness": "main-worker",
+      "assertions": [
+        "完成事务内注入失败（exit 76）后整个短事务回滚：没有 PASS 记录、完成记录、State delta、命令回执，Task 仍为 IN_PROGRESS、state_revision 仍为 0，Run 仍为 RUNNING。",
+        "重试只重做短事务：PASS 记录、CompletionRecord、Task DONE + completion_basis、state delta、命令回执与 Run COMPLETED 全部落在同一事务并一起可见。",
+        "Project State 的 revision 与完成任务计数各增加一次，因此完成计数与协议提交计数可以分别核对。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 7,
+      "business_completion_count": 1
+    },
+    {
+      "name": "completion_commit_crash_replays_receipt_without_second_completion",
+      "operation_id": "operation-9e233323-817c-412e-be27-1e9530ea8c3f",
+      "harness": "main-worker",
+      "assertions": [
+        "完成短事务提交后进程以 exit 79 退出；新进程读到的是已提交的完成记录、命令回执、Task DONE 和 Project State delta。",
+        "相同 command_id 重放返回原回执（payload 相同、完成记录 ID 一致），完成记录、状态 delta 与 Project State revision 都不再增加。",
+        "同一已完成 Task 上使用另一个 command_id 被拒绝且不写回执；迟到的恢复路径只观察到终态 SUCCEEDED，不重新调用工具。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 8,
+      "business_completion_count": 1
+    },
+    {
+      "name": "completion_refuses_conflicting_command_ids_and_unresolved_unknown_actions",
+      "operation_id": "operation-a7db2c52-f038-48d7-a5b7-511b15176351",
+      "harness": "main-worker",
+      "assertions": [
+        "同一个 command_id 用在不同操作上时 payload 不一致；该请求只保留冲突审计，既不改动原完成记录，也不完成新 Task、不写回执。",
+        "使用自己的 command_id 完成第二个 Task 后，两个 Task 各有一次业务完成，命令回执与完成记录一一对应。",
+        "存在 UNKNOWN 在途动作时完成用例拒绝提交：没有 PASS 记录、没有完成记录，Task 保持 IN_PROGRESS，资源 claim 保持 QUARANTINED。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 6,
+      "business_completion_count": 0
+    },
+    {
+      "name": "pause_applied_first_refuses_completion_and_keeps_execution_right",
+      "operation_id": "operation-3abcb17a-b6df-4049-8269-3a4b3955c49c",
+      "harness": "main-worker",
+      "assertions": [
+        "第二子进程在完成提交前真实等待控制事务持有的 Task/Run 行锁（pg_stat_activity 观测到 Lock），控制先提交。",
+        "完成用例随后读到 PAUSED 与已应用的 Pause 请求，拒绝提交：没有完成记录，Task 为 WAITING，ownership epoch 不变。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 8,
+      "business_completion_count": 0
+    },
+    {
+      "name": "cancel_applied_first_refuses_completion_and_releases_execution_right",
+      "operation_id": "operation-f6fbaaa8-502d-4b7a-9b49-b181e0c45d69",
+      "harness": "main-worker",
+      "assertions": [
+        "Cancel 在安全点入库：Run 为 CANCELLED、Task 回到 READY 且 ownership epoch 增加一次，资源与 Step 位置不被\"完成\"覆盖。",
+        "之后到达的完成命令被拒绝且没有完成记录，Task 不会在取消后变为 DONE。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 8,
+      "business_completion_count": 0
+    },
+    {
+      "name": "completion_committed_first_makes_late_control_act_on_the_new_state",
+      "operation_id": "operation-6b1f1863-717e-4442-8a62-fd5a98b12bc0",
+      "harness": "main-worker",
+      "assertions": [
+        "完成事务先提交；后到的控制子进程等待同一 Task/Run 行锁（pg_stat_activity 观测到 Lock）后读到 COMPLETED/DONE。",
+        "控制请求被记录为 REJECTED 并引用原完成记录，不把已完成的 Task 退回 READY，也不产生第二次完成。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 8,
+      "business_completion_count": 1
+    },
+    {
+      "name": "persisted_pending_control_request_blocks_completion_before_it_is_applied",
+      "operation_id": "operation-b52b2d34-bb64-489e-94c7-6d16808c5334",
+      "harness": "main-worker",
+      "assertions": [
+        "控制意图先持久化为 PENDING；完成用例在执行前检查到未决请求即拒绝提交，不产生完成记录或状态 delta。",
+        "请求尚未应用时 Run 保持 RUNNING、Task 保持 IN_PROGRESS，因此\"已请求\"与\"已停止\"在数据里可以区分。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 8,
+      "business_completion_count": 0
+    },
+    {
+      "name": "expired_claim_lease_with_live_old_writer_refuses_conflicting_resource_claim",
+      "operation_id": "operation-51039102-acbb-46ac-a5e2-b9d5eb6fbe39",
+      "harness": "main-worker",
+      "assertions": [
+        "旧 Worker 子进程由 barrier 保持真实存活（父进程用 dispatch_worker_pid 验证），随后把持久化 lease 强制改为过期。",
+        "lease 过期只改变可核对字段：claim 仍为 HELD，另一 Task 在同一隔离资源上的准入仍被拒绝，没有 Invocation、TOOL_CALL 或文件写入。",
+        "释放 barrier 后旧 Worker 正常提交自己的结果并释放 claim，说明拒绝冲突领取不是以时间假设而是以真实存活进程为证据。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 3,
+      "business_completion_count": 0
+    },
+    {
+      "name": "b01_concurrent_delegate_has_one_owner_with_observed_lock_wait",
+      "operation_id": "task-b01-f01296e5-dbd6-49ed-a4d4-f041c8e4c61a",
+      "harness": "control-worker",
+      "assertions": [
+        "两个独立 Node 子进程通过 barrier 竞争同一真实 PostgreSQL Task 行；第二个进程在 pg_stat_activity 中观察到 Lock 等待。",
+        "提交后只有第一个 Run 获得 AI 执行权并入库，Task 只有一个 owner。"
+      ],
+      "model_calls": 0,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 0,
+      "business_completion_count": 0
+    },
+    {
+      "name": "b03_persisted_pause_blocks_fresh_process_claim",
+      "operation_id": "run-b03-fde4ecd2-790d-4593-841a-17e7d97c8929",
+      "harness": "control-worker",
+      "assertions": [
+        "Pause 先在短事务持久化；随后独立子进程重新尝试领取。",
+        "Run 保持 PAUSED，claim epoch 未增加，说明刷新/重启后不会继续领取下一步。"
+      ],
+      "model_calls": 0,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 0,
+      "business_completion_count": 0
+    },
+    {
+      "name": "b04_completion_and_cancel_have_two_deterministic_transaction_orders",
+      "operation_id": "run-b04-complete-962e744f-f06d-457a-9973-5a2fa27c8f84",
+      "harness": "control-worker",
+      "assertions": [
+        "finish-first：Cancel 在真实行锁后读取 COMPLETED，最终只有 DONE/COMPLETED。",
+        "cancel-first：完成用例在真实行锁后读取 CANCELLED，最终只有 READY/CANCELLED。两种顺序均由 barrier 和 pg_stat_activity Lock 等待确定。"
+      ],
+      "model_calls": 0,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 0,
+      "business_completion_count": 0
+    },
+    {
+      "name": "b05_handoff_quarantines_unknown_resource_until_independent_reconciliation",
+      "operation_id": "run-b05-e63bb9f7-0ed1-4d18-a653-328c5874c5a9",
+      "harness": "control-worker",
+      "assertions": [
+        "在途写动作时 Handoff 只持久化请求并将资源置为 QUARANTINED；DISPATCHING 和 UNKNOWN+旧进程已停两种状态都拒绝转交。",
+        "冲突 Task 不能领取隔离资源；只有实验内显式的独立核对事件确认未发生后才释放资源并把接手编辑 Task 保持为 IN_PROGRESS。",
+        "该控制 harness 不含真实 Adapter，独立核对事件不是生产 UNKNOWN 处置证明。"
+      ],
+      "model_calls": 0,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 0,
+      "business_completion_count": 0
+    },
+    {
+      "name": "d07_expired_lease_with_live_old_process_keeps_conflicting_resource_isolated",
+      "operation_id": "run-d07-107c8d4b-90ce-4870-a9b7-b3105e884685",
+      "harness": "control-worker",
+      "assertions": [
+        "租约被明确设为过期后，旧 Worker 子进程仍由 barrier 保持存活。",
+        "另一 Task 的资源领取被拒绝，资源维持 HELD；租约过期不被当作旧进程已经停止或可并发写的证据。"
+      ],
+      "model_calls": 0,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 0,
+      "business_completion_count": 0
+    },
+    {
+      "name": "claim_epoch_is_distinct_from_task_ownership_epoch_and_result_requires_dispatching_action",
+      "operation_id": "run-epoch-e50cf78f-20fd-48c9-adf3-d1d91dc24a69",
+      "harness": "control-worker",
+      "assertions": [
+        "Task ownership epoch 保持 1，Worker 重新领取后 claim epoch 从 1 增至 2。",
+        "旧 claim 的结果被保留为核对证据但不提交；当前 claim 的同一 ownership epoch 结果只在 action 仍为 DISPATCHING 时被接受。",
+        "同一结果重复提交和 action 已为 UNKNOWN 的当前 claim 都返回未接受，并保留 action 状态和拒绝事件。"
+      ],
+      "model_calls": 0,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 0,
+      "business_completion_count": 0
+    }
+  ],
+  "assertions": [
+    "实验使用独立 initdb 数据目录、动态 127.0.0.1 端口和实际 PostgreSQL 18 子进程。",
+    "所有模型候选由实际 ai@7.0.107 的官方 MockLanguageModelV4 和无 execute 的工具定义产生。",
+    "本次报告包含 33 个主恢复 Worker 场景和 6 个独立 control-worker 场景；两者共享临时 PostgreSQL，但不是一个生产协议实现。",
+    "模型调用、工具调用、外部效果写入观测、协议提交和业务完成分别计数；业务完成只按 completion_records 统计，协议提交数不冒充业务完成数。",
+    "并发场景用子进程 barrier 加 pg_stat_activity Lock 等待证明；崩溃场景使用真实子进程退出码 72/73/74/75/76/77/79，不以抛异常代替。",
+    "每次运行先写 RUNNING 结果；失败时 latest.json 写 FAILED，不继承旧 PASS。"
+  ],
+  "limitations": [
+    "这是 P00 最小恢复实验，不是生产 Workflow、Gateway、权限系统或文件适配器。",
+    "官方 MockLanguageModelV4 仅验证 AI SDK 协议边界；没有真实 Provider 网络调用或 Provider 可替换性证明。",
+    "主恢复 Worker 已覆盖调用前崩溃、绑定当前 invocation/effect/PID/exit 74 收据后的受控安全重试、旧收据重放拒绝、存活旧 PID 的负向拒绝、部分写入转 UNKNOWN、实验用两步位置推进、联合准入/结果短事务、业务完成短事务与命令回执。它仍然只使用实验专用表和一个受控单文件 Adapter，没有接入生产 Gateway、权限判定或多产物版本存储。",
+    "业务完成事务覆盖单动作两步固定计划：PASS 记录由确定性检查器写入，没有 Hard/Rule/Semantic 分类验证器、真实人工 Review 审批链、多产物集合或部分失败重试验证。",
+    "控制请求与完成的两种顺序在主动作 Worker 的实验表上验证，Pause/Cancel 语义是实验简化版；control-worker 的场景仍是独立状态替身，其 UNKNOWN 结果核对是显式注入，不代表完整 B05 或 Spike 2 通过。",
+    "仍未实现生产资源-动作联合协议、Gateway/权限系统或真实外部文件 Adapter。单一受控外部效果后的 PostgreSQL 重启恢复已单列验证，不能推广为完整业务恢复。",
+    "未覆盖四份契约的 37 个验收场景；结果只映射到本实验的局部恢复裂缝。",
+    "效果证据是实验专用 JSONL 和单文件 fixture，未验证生产文件系统、审计存储或人工核对流程。"
+  ]
+}

@@ -1,0 +1,25 @@
+package_kind=Windows development directory release; not installer
+build_exit=0
+build_input_fingerprint_sha256=f9d0bd0453a0220b53ef359ed8700be3269c3ee9a250c974a0c060e4d3e883ec
+frozen_backend_entries=177
+frozen_backend_mismatches=0
+resource_entries=13204
+resource_rehash_mismatches=0
+api_source_entries=130
+api_source_rehash_mismatches=0
+forbidden_config_files=0
+764b77efbef3ea1f8e219cf7e0c76655e28b2501934b7e54e5ee9832ccf90792  apps/desktop/release/relay-desktop.exe
+ba4e6d110e8c1592a1ecd390f6b05f3da124b13871a5be62b341a07a853c6c32  apps/desktop/release/node.exe
+1936b4c9369cf9501f1d66c8fcadec24920714be96c8b7db6f609ee4353e26a7  apps/desktop/release/desktop-build-manifest.json
+5c1fcc64211a0441f975f864169b3d683d889a3723cb9aa0e7bc2517ceee8ebb  apps/desktop/release/api/migrations/0013_m03_run_command_order.sql
+56c9a82c180c0169674386ffc6a4dbcc972b4b2f78b33ae67ce2d508c354893a  apps/desktop/release/api/dist/src/main.js
+9c8e48e5bffca269a4537d78a06d9978e72d8c2a866ca20c00e8a0face271ff1  apps/desktop/release/api/dist/src/worker/supervisor-main.js
+eb745dc038fe5f5b055041f0a7ef68730daccb5ab17d1c15b98015842d9d41a8  apps/desktop/release/api/dist/src/worker/main.js
+53ede96d9e08595499a3a3ad29bd3f5b9b814ee863bbaa58055251fba27a52c8  apps/desktop/release/api/dist/src/worker/run-graph.js
+b3a2af0b52748341e0745e1bfbfbac8fa055a4b5068af85e642200e96f0b60cf  apps/desktop/release/api/dist/src/worker/mock-gateway-action.js
+5127bbd5c7c677010d481ade658ac33768ca7e15fd52b3a4388136c51dbe2081  apps/desktop/release/api/dist/src/cli/install-graph.js
+a9da1cffa3af2cbff4a695331d1328e4e3dc3d578ace2b5e8cad5e286197c09e  apps/desktop/release/api/dist/src/application/gateway-actions.js
+7cbde064fa99dc781b41b530d1a7fb1a68f5c1117accf3d53ad2f05982e82ec9  apps/desktop/release/api/dist/src/api/gateway-api.js
+43177ac5feea773b2ed381e0fbd046e18e7c9edb52cfa3bf96e4570568ccc008  apps/desktop/tests/m03-action-approval-webview.mjs
+b693274f139a920386782bbd85f01a713d814545bc05d804a8cafff244054246  apps/desktop/scripts/build-release.ps1
+06694d22721a7233f8bb08b2098ec7d15d7f238d50958867e02e36dd15474e0e  docs/testing/evidence/m03/gateway-action-inputs.sha256

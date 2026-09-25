@@ -1,0 +1,1188 @@
+{
+  "run_id": "recovery-p00-55a25156-c594-442e-b04f-cba72006d2be",
+  "status": "PASSED",
+  "started_at": "2026-09-20T09:58:41.589Z",
+  "finished_at": "2026-09-20T09:59:16.815Z",
+  "environment": {
+    "node": "24.21.0",
+    "postgres": "18.6"
+  },
+  "input_sha256": {
+    "package.json": "b4989c11b29cd351197f6f1d88f69865c3925371a2a1d4f143426597f4565ce3",
+    "pnpm-lock.yaml": "5e1c73b2038efc2af982ed29b11d26828678f5e503231a1632b0b401a0658bb3",
+    "tsconfig.json": "3bca16d962112c9c30a66d2b8cbcc925cf571f44ca7585ef8ca6ccf9504b2e3c",
+    "src/worker.ts": "769460220971877b86963966091911c1d0073418c737d24f4dbb0812327707cf",
+    "src/run-recovery.ts": "42ffbc53e8ec9f396023bddba3530f230ed76f3f13426cd19eee849d6cfa7a41"
+  },
+  "process_evidence": [
+    {
+      "name": "initdb",
+      "args": [
+        "-D",
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\.local\\recovery-p00-55a25156-c594-442e-b04f-cba72006d2be\\pgdata",
+        "-A",
+        "trust",
+        "-U",
+        "postgres",
+        "--no-locale"
+      ],
+      "pid": 68412,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 4937,
+      "stdout": "",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "pg_ctl_start",
+      "args": [
+        "start",
+        "-D",
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\.local\\recovery-p00-55a25156-c594-442e-b04f-cba72006d2be\\pgdata",
+        "-l",
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\.local\\recovery-p00-55a25156-c594-442e-b04f-cba72006d2be\\postgres.log",
+        "-o",
+        "-p 3811 -h 127.0.0.1",
+        "-w",
+        "-t",
+        "30"
+      ],
+      "pid": 9076,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 297,
+      "stdout": "",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "setup",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "setup"
+      ],
+      "pid": 49664,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 589,
+      "stdout": "{\"event\":\"setup_complete\",\"pid\":49664,\"database_schema\":\"recovery_p00_v1\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "continue_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-f1bc9ab8-c9d5-4374-a831-61497cf202e0"
+      ],
+      "pid": 59120,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 547,
+      "stdout": "{\"event\":\"prepared\",\"pid\":59120,\"operation_id\":\"operation-f1bc9ab8-c9d5-4374-a831-61497cf202e0\",\"tool_call_id\":\"call-operation-f1bc9ab8-c9d5-4374-a831-61497cf202e0\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "continue_approve_b",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-f1bc9ab8-c9d5-4374-a831-61497cf202e0"
+      ],
+      "pid": 99688,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 555,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":99688,\"operation_id\":\"operation-f1bc9ab8-c9d5-4374-a831-61497cf202e0\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "continue_approve_a",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-f1bc9ab8-c9d5-4374-a831-61497cf202e0"
+      ],
+      "pid": 97420,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 562,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":97420,\"operation_id\":\"operation-f1bc9ab8-c9d5-4374-a831-61497cf202e0\",\"transitioned\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "continue_execute_b",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-f1bc9ab8-c9d5-4374-a831-61497cf202e0"
+      ],
+      "pid": 75168,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 569,
+      "stdout": "{\"event\":\"execute_skipped\",\"pid\":75168,\"operation_id\":\"operation-f1bc9ab8-c9d5-4374-a831-61497cf202e0\",\"reason\":\"not_candidate_or_not_approved\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "continue_execute_a",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-f1bc9ab8-c9d5-4374-a831-61497cf202e0"
+      ],
+      "pid": 107176,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 582,
+      "stdout": "{\"event\":\"external_effect_written\",\"pid\":107176,\"operation_id\":\"operation-f1bc9ab8-c9d5-4374-a831-61497cf202e0\",\"effect_id\":\"effect-5ee8e7a4-6129-4641-88d4-302d251ea9d3\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"execute_result\",\"pid\":107176,\"operation_id\":\"operation-f1bc9ab8-c9d5-4374-a831-61497cf202e0\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "prepared_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-a36f9b1f-36f0-4f76-b569-c96d27afc1d1"
+      ],
+      "pid": 59484,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 536,
+      "stdout": "{\"event\":\"prepared\",\"pid\":59484,\"operation_id\":\"operation-a36f9b1f-36f0-4f76-b569-c96d27afc1d1\",\"tool_call_id\":\"call-operation-a36f9b1f-36f0-4f76-b569-c96d27afc1d1\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "prepared_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-a36f9b1f-36f0-4f76-b569-c96d27afc1d1"
+      ],
+      "pid": 108756,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 512,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":108756,\"operation_id\":\"operation-a36f9b1f-36f0-4f76-b569-c96d27afc1d1\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "prepared_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-a36f9b1f-36f0-4f76-b569-c96d27afc1d1",
+        "after-prepared"
+      ],
+      "pid": 15516,
+      "exit_code": 72,
+      "signal": null,
+      "duration_ms": 507,
+      "stdout": "{\"event\":\"hard_exit_after_prepared\",\"pid\":15516,\"operation_id\":\"operation-a36f9b1f-36f0-4f76-b569-c96d27afc1d1\",\"exit_code\":72}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "prepared_resume",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-a36f9b1f-36f0-4f76-b569-c96d27afc1d1"
+      ],
+      "pid": 110140,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 528,
+      "stdout": "{\"event\":\"external_effect_written\",\"pid\":110140,\"operation_id\":\"operation-a36f9b1f-36f0-4f76-b569-c96d27afc1d1\",\"effect_id\":\"effect-1a2cf395-c980-4591-89ee-006e87152304\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"execute_result\",\"pid\":110140,\"operation_id\":\"operation-a36f9b1f-36f0-4f76-b569-c96d27afc1d1\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "crash_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-ad3e2db0-74cd-4835-bc6c-be9d82bcf38d"
+      ],
+      "pid": 87256,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 528,
+      "stdout": "{\"event\":\"prepared\",\"pid\":87256,\"operation_id\":\"operation-ad3e2db0-74cd-4835-bc6c-be9d82bcf38d\",\"tool_call_id\":\"call-operation-ad3e2db0-74cd-4835-bc6c-be9d82bcf38d\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "crash_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-ad3e2db0-74cd-4835-bc6c-be9d82bcf38d"
+      ],
+      "pid": 96672,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 504,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":96672,\"operation_id\":\"operation-ad3e2db0-74cd-4835-bc6c-be9d82bcf38d\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "crash_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-ad3e2db0-74cd-4835-bc6c-be9d82bcf38d",
+        "after-external-effect"
+      ],
+      "pid": 105452,
+      "exit_code": 73,
+      "signal": null,
+      "duration_ms": 530,
+      "stdout": "{\"event\":\"external_effect_written\",\"pid\":105452,\"operation_id\":\"operation-ad3e2db0-74cd-4835-bc6c-be9d82bcf38d\",\"effect_id\":\"effect-2719553b-9c71-45f5-a86f-7d7688c4eca2\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"hard_exit_after_external_effect\",\"pid\":105452,\"operation_id\":\"operation-ad3e2db0-74cd-4835-bc6c-be9d82bcf38d\",\"exit_code\":73}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "crash_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-ad3e2db0-74cd-4835-bc6c-be9d82bcf38d"
+      ],
+      "pid": 2236,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 500,
+      "stdout": "{\"event\":\"reconcile_result\",\"pid\":2236,\"operation_id\":\"operation-ad3e2db0-74cd-4835-bc6c-be9d82bcf38d\",\"result_committed\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "missing_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-37a62be0-463f-4f95-8f47-ca27570d5c91"
+      ],
+      "pid": 94724,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 533,
+      "stdout": "{\"event\":\"prepared\",\"pid\":94724,\"operation_id\":\"operation-37a62be0-463f-4f95-8f47-ca27570d5c91\",\"tool_call_id\":\"call-operation-37a62be0-463f-4f95-8f47-ca27570d5c91\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "missing_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-37a62be0-463f-4f95-8f47-ca27570d5c91"
+      ],
+      "pid": 87248,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 524,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":87248,\"operation_id\":\"operation-37a62be0-463f-4f95-8f47-ca27570d5c91\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "missing_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-37a62be0-463f-4f95-8f47-ca27570d5c91",
+        "after-external-effect"
+      ],
+      "pid": 12152,
+      "exit_code": 73,
+      "signal": null,
+      "duration_ms": 519,
+      "stdout": "{\"event\":\"external_effect_written\",\"pid\":12152,\"operation_id\":\"operation-37a62be0-463f-4f95-8f47-ca27570d5c91\",\"effect_id\":\"effect-077c0013-5f27-4824-84ec-d8890c33bdd4\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"hard_exit_after_external_effect\",\"pid\":12152,\"operation_id\":\"operation-37a62be0-463f-4f95-8f47-ca27570d5c91\",\"exit_code\":73}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "missing_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-37a62be0-463f-4f95-8f47-ca27570d5c91"
+      ],
+      "pid": 44432,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 526,
+      "stdout": "{\"event\":\"reconcile_unknown\",\"pid\":44432,\"operation_id\":\"operation-37a62be0-463f-4f95-8f47-ca27570d5c91\",\"human_required\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "edited_after_effect_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-da8a86ab-1d83-4bf6-938d-40289c2ad44e"
+      ],
+      "pid": 58224,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 543,
+      "stdout": "{\"event\":\"prepared\",\"pid\":58224,\"operation_id\":\"operation-da8a86ab-1d83-4bf6-938d-40289c2ad44e\",\"tool_call_id\":\"call-operation-da8a86ab-1d83-4bf6-938d-40289c2ad44e\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "edited_after_effect_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-da8a86ab-1d83-4bf6-938d-40289c2ad44e"
+      ],
+      "pid": 106500,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 501,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":106500,\"operation_id\":\"operation-da8a86ab-1d83-4bf6-938d-40289c2ad44e\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "edited_after_effect_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-da8a86ab-1d83-4bf6-938d-40289c2ad44e",
+        "after-external-effect"
+      ],
+      "pid": 43136,
+      "exit_code": 73,
+      "signal": null,
+      "duration_ms": 528,
+      "stdout": "{\"event\":\"external_effect_written\",\"pid\":43136,\"operation_id\":\"operation-da8a86ab-1d83-4bf6-938d-40289c2ad44e\",\"effect_id\":\"effect-98e652ca-2162-4daa-89f0-46d146461f9d\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"hard_exit_after_external_effect\",\"pid\":43136,\"operation_id\":\"operation-da8a86ab-1d83-4bf6-938d-40289c2ad44e\",\"exit_code\":73}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "edited_after_effect_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-da8a86ab-1d83-4bf6-938d-40289c2ad44e"
+      ],
+      "pid": 104116,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 521,
+      "stdout": "{\"event\":\"reconcile_unknown\",\"pid\":104116,\"operation_id\":\"operation-da8a86ab-1d83-4bf6-938d-40289c2ad44e\",\"human_required\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "truncated_evidence_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-dbc168aa-e30b-45e1-acc2-ae7f5e7a8d75"
+      ],
+      "pid": 94744,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 531,
+      "stdout": "{\"event\":\"prepared\",\"pid\":94744,\"operation_id\":\"operation-dbc168aa-e30b-45e1-acc2-ae7f5e7a8d75\",\"tool_call_id\":\"call-operation-dbc168aa-e30b-45e1-acc2-ae7f5e7a8d75\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "truncated_evidence_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-dbc168aa-e30b-45e1-acc2-ae7f5e7a8d75"
+      ],
+      "pid": 50196,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 503,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":50196,\"operation_id\":\"operation-dbc168aa-e30b-45e1-acc2-ae7f5e7a8d75\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "truncated_evidence_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-dbc168aa-e30b-45e1-acc2-ae7f5e7a8d75",
+        "after-external-effect"
+      ],
+      "pid": 105268,
+      "exit_code": 73,
+      "signal": null,
+      "duration_ms": 526,
+      "stdout": "{\"event\":\"external_effect_written\",\"pid\":105268,\"operation_id\":\"operation-dbc168aa-e30b-45e1-acc2-ae7f5e7a8d75\",\"effect_id\":\"effect-99bcbca4-acf0-47e4-8e33-0f91c45c1c47\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"hard_exit_after_external_effect\",\"pid\":105268,\"operation_id\":\"operation-dbc168aa-e30b-45e1-acc2-ae7f5e7a8d75\",\"exit_code\":73}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "truncated_evidence_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-dbc168aa-e30b-45e1-acc2-ae7f5e7a8d75"
+      ],
+      "pid": 96248,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 611,
+      "stdout": "{\"event\":\"reconcile_unknown\",\"pid\":96248,\"operation_id\":\"operation-dbc168aa-e30b-45e1-acc2-ae7f5e7a8d75\",\"human_required\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "null_evidence_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-66426e50-72c5-4ccd-b31e-3a3bbc1bd49f"
+      ],
+      "pid": 69380,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 530,
+      "stdout": "{\"event\":\"prepared\",\"pid\":69380,\"operation_id\":\"operation-66426e50-72c5-4ccd-b31e-3a3bbc1bd49f\",\"tool_call_id\":\"call-operation-66426e50-72c5-4ccd-b31e-3a3bbc1bd49f\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "null_evidence_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-66426e50-72c5-4ccd-b31e-3a3bbc1bd49f"
+      ],
+      "pid": 109104,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 501,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":109104,\"operation_id\":\"operation-66426e50-72c5-4ccd-b31e-3a3bbc1bd49f\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "null_evidence_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-66426e50-72c5-4ccd-b31e-3a3bbc1bd49f",
+        "after-external-effect"
+      ],
+      "pid": 63632,
+      "exit_code": 73,
+      "signal": null,
+      "duration_ms": 530,
+      "stdout": "{\"event\":\"external_effect_written\",\"pid\":63632,\"operation_id\":\"operation-66426e50-72c5-4ccd-b31e-3a3bbc1bd49f\",\"effect_id\":\"effect-3f739e3a-3ccc-4bcb-a474-87b35720058a\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"hard_exit_after_external_effect\",\"pid\":63632,\"operation_id\":\"operation-66426e50-72c5-4ccd-b31e-3a3bbc1bd49f\",\"exit_code\":73}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "null_evidence_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-66426e50-72c5-4ccd-b31e-3a3bbc1bd49f"
+      ],
+      "pid": 100260,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 544,
+      "stdout": "{\"event\":\"reconcile_unknown\",\"pid\":100260,\"operation_id\":\"operation-66426e50-72c5-4ccd-b31e-3a3bbc1bd49f\",\"human_required\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "external_baseline_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-da6cbf1c-c1ef-4b37-8795-2c18868426f2"
+      ],
+      "pid": 106560,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 539,
+      "stdout": "{\"event\":\"prepared\",\"pid\":106560,\"operation_id\":\"operation-da6cbf1c-c1ef-4b37-8795-2c18868426f2\",\"tool_call_id\":\"call-operation-da6cbf1c-c1ef-4b37-8795-2c18868426f2\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "external_baseline_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-da6cbf1c-c1ef-4b37-8795-2c18868426f2"
+      ],
+      "pid": 105780,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 511,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":105780,\"operation_id\":\"operation-da6cbf1c-c1ef-4b37-8795-2c18868426f2\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "external_baseline_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-da6cbf1c-c1ef-4b37-8795-2c18868426f2"
+      ],
+      "pid": 103444,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 511,
+      "stdout": "{\"event\":\"execute_skipped\",\"pid\":103444,\"operation_id\":\"operation-da6cbf1c-c1ef-4b37-8795-2c18868426f2\",\"reason\":\"baseline_changed_or_preexisting_target\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_parameter_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-8e13e691-2cde-4b25-a26a-1d741de6c85d"
+      ],
+      "pid": 101132,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 645,
+      "stdout": "{\"event\":\"prepared\",\"pid\":101132,\"operation_id\":\"operation-8e13e691-2cde-4b25-a26a-1d741de6c85d\",\"tool_call_id\":\"call-operation-8e13e691-2cde-4b25-a26a-1d741de6c85d\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_parameter_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-8e13e691-2cde-4b25-a26a-1d741de6c85d"
+      ],
+      "pid": 104512,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 513,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":104512,\"operation_id\":\"operation-8e13e691-2cde-4b25-a26a-1d741de6c85d\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_parameter_mutate",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "mutate",
+        "operation-8e13e691-2cde-4b25-a26a-1d741de6c85d",
+        "parameter"
+      ],
+      "pid": 108284,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 608,
+      "stdout": "{\"event\":\"fact_mutated\",\"pid\":108284,\"operation_id\":\"operation-8e13e691-2cde-4b25-a26a-1d741de6c85d\",\"field\":\"parameter\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_parameter_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-8e13e691-2cde-4b25-a26a-1d741de6c85d"
+      ],
+      "pid": 92812,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 508,
+      "stdout": "{\"event\":\"execute_skipped\",\"pid\":92812,\"operation_id\":\"operation-8e13e691-2cde-4b25-a26a-1d741de6c85d\",\"reason\":\"not_candidate_or_not_approved\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_baseline_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-2d3a20db-a2f2-44da-b542-ea8c6b4ea59c"
+      ],
+      "pid": 3328,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 643,
+      "stdout": "{\"event\":\"prepared\",\"pid\":3328,\"operation_id\":\"operation-2d3a20db-a2f2-44da-b542-ea8c6b4ea59c\",\"tool_call_id\":\"call-operation-2d3a20db-a2f2-44da-b542-ea8c6b4ea59c\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_baseline_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-2d3a20db-a2f2-44da-b542-ea8c6b4ea59c"
+      ],
+      "pid": 43700,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 510,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":43700,\"operation_id\":\"operation-2d3a20db-a2f2-44da-b542-ea8c6b4ea59c\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_baseline_mutate",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "mutate",
+        "operation-2d3a20db-a2f2-44da-b542-ea8c6b4ea59c",
+        "baseline"
+      ],
+      "pid": 59592,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 506,
+      "stdout": "{\"event\":\"fact_mutated\",\"pid\":59592,\"operation_id\":\"operation-2d3a20db-a2f2-44da-b542-ea8c6b4ea59c\",\"field\":\"baseline\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_baseline_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-2d3a20db-a2f2-44da-b542-ea8c6b4ea59c"
+      ],
+      "pid": 91568,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 511,
+      "stdout": "{\"event\":\"execute_skipped\",\"pid\":91568,\"operation_id\":\"operation-2d3a20db-a2f2-44da-b542-ea8c6b4ea59c\",\"reason\":\"not_candidate_or_not_approved\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_permission_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-f50ef145-9aed-4630-a9a1-64c07a9c8a7e"
+      ],
+      "pid": 107276,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 545,
+      "stdout": "{\"event\":\"prepared\",\"pid\":107276,\"operation_id\":\"operation-f50ef145-9aed-4630-a9a1-64c07a9c8a7e\",\"tool_call_id\":\"call-operation-f50ef145-9aed-4630-a9a1-64c07a9c8a7e\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_permission_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-f50ef145-9aed-4630-a9a1-64c07a9c8a7e"
+      ],
+      "pid": 92580,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 536,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":92580,\"operation_id\":\"operation-f50ef145-9aed-4630-a9a1-64c07a9c8a7e\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_permission_mutate",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "mutate",
+        "operation-f50ef145-9aed-4630-a9a1-64c07a9c8a7e",
+        "permission"
+      ],
+      "pid": 101756,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 504,
+      "stdout": "{\"event\":\"fact_mutated\",\"pid\":101756,\"operation_id\":\"operation-f50ef145-9aed-4630-a9a1-64c07a9c8a7e\",\"field\":\"permission\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_permission_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-f50ef145-9aed-4630-a9a1-64c07a9c8a7e"
+      ],
+      "pid": 97784,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 518,
+      "stdout": "{\"event\":\"execute_skipped\",\"pid\":97784,\"operation_id\":\"operation-f50ef145-9aed-4630-a9a1-64c07a9c8a7e\",\"reason\":\"not_candidate_or_not_approved\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_acceptance_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-23e74ebf-8c55-4d87-b2d7-f0b44d2e6886"
+      ],
+      "pid": 104012,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 549,
+      "stdout": "{\"event\":\"prepared\",\"pid\":104012,\"operation_id\":\"operation-23e74ebf-8c55-4d87-b2d7-f0b44d2e6886\",\"tool_call_id\":\"call-operation-23e74ebf-8c55-4d87-b2d7-f0b44d2e6886\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_acceptance_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-23e74ebf-8c55-4d87-b2d7-f0b44d2e6886"
+      ],
+      "pid": 110356,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 520,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":110356,\"operation_id\":\"operation-23e74ebf-8c55-4d87-b2d7-f0b44d2e6886\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_acceptance_mutate",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "mutate",
+        "operation-23e74ebf-8c55-4d87-b2d7-f0b44d2e6886",
+        "acceptance"
+      ],
+      "pid": 108636,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 513,
+      "stdout": "{\"event\":\"fact_mutated\",\"pid\":108636,\"operation_id\":\"operation-23e74ebf-8c55-4d87-b2d7-f0b44d2e6886\",\"field\":\"acceptance\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_acceptance_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-23e74ebf-8c55-4d87-b2d7-f0b44d2e6886"
+      ],
+      "pid": 104460,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 516,
+      "stdout": "{\"event\":\"execute_skipped\",\"pid\":104460,\"operation_id\":\"operation-23e74ebf-8c55-4d87-b2d7-f0b44d2e6886\",\"reason\":\"not_candidate_or_not_approved\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_ownership_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-85131813-1f31-4640-8b95-374ee5baf853"
+      ],
+      "pid": 54432,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 548,
+      "stdout": "{\"event\":\"prepared\",\"pid\":54432,\"operation_id\":\"operation-85131813-1f31-4640-8b95-374ee5baf853\",\"tool_call_id\":\"call-operation-85131813-1f31-4640-8b95-374ee5baf853\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_ownership_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-85131813-1f31-4640-8b95-374ee5baf853"
+      ],
+      "pid": 105440,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 502,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":105440,\"operation_id\":\"operation-85131813-1f31-4640-8b95-374ee5baf853\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_ownership_mutate",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "mutate",
+        "operation-85131813-1f31-4640-8b95-374ee5baf853",
+        "ownership"
+      ],
+      "pid": 65984,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 500,
+      "stdout": "{\"event\":\"fact_mutated\",\"pid\":65984,\"operation_id\":\"operation-85131813-1f31-4640-8b95-374ee5baf853\",\"field\":\"ownership\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "invalidate_ownership_execute",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-85131813-1f31-4640-8b95-374ee5baf853"
+      ],
+      "pid": 70412,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 501,
+      "stdout": "{\"event\":\"execute_skipped\",\"pid\":70412,\"operation_id\":\"operation-85131813-1f31-4640-8b95-374ee5baf853\",\"reason\":\"not_candidate_or_not_approved\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "old_epoch_prepare",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "prepare",
+        "operation-9e2d1055-20b9-4839-b6f6-4f82b519a4ac"
+      ],
+      "pid": 58704,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 531,
+      "stdout": "{\"event\":\"prepared\",\"pid\":58704,\"operation_id\":\"operation-9e2d1055-20b9-4839-b6f6-4f82b519a4ac\",\"tool_call_id\":\"call-operation-9e2d1055-20b9-4839-b6f6-4f82b519a4ac\",\"no_execute_registered\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "old_epoch_approve",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "approve",
+        "operation-9e2d1055-20b9-4839-b6f6-4f82b519a4ac"
+      ],
+      "pid": 83228,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 495,
+      "stdout": "{\"event\":\"approval_result\",\"pid\":83228,\"operation_id\":\"operation-9e2d1055-20b9-4839-b6f6-4f82b519a4ac\",\"transitioned\":true}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "old_epoch_crash",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "execute",
+        "operation-9e2d1055-20b9-4839-b6f6-4f82b519a4ac",
+        "after-external-effect"
+      ],
+      "pid": 75604,
+      "exit_code": 73,
+      "signal": null,
+      "duration_ms": 513,
+      "stdout": "{\"event\":\"external_effect_written\",\"pid\":75604,\"operation_id\":\"operation-9e2d1055-20b9-4839-b6f6-4f82b519a4ac\",\"effect_id\":\"effect-3927e120-0349-44d1-a2c2-7e7646da63e1\",\"after_hash\":\"9d1cca9d0eaac14009cf2c45a4400c9d4b1622e2ec533a65ee71e6cc3c334149\"}\n{\"event\":\"hard_exit_after_external_effect\",\"pid\":75604,\"operation_id\":\"operation-9e2d1055-20b9-4839-b6f6-4f82b519a4ac\",\"exit_code\":73}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "old_epoch_mutate",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "mutate",
+        "operation-9e2d1055-20b9-4839-b6f6-4f82b519a4ac",
+        "ownership"
+      ],
+      "pid": 83184,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 505,
+      "stdout": "{\"event\":\"fact_mutated\",\"pid\":83184,\"operation_id\":\"operation-9e2d1055-20b9-4839-b6f6-4f82b519a4ac\",\"field\":\"ownership\"}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "old_epoch_reconcile",
+      "args": [
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\dist\\src\\worker.js",
+        "reconcile",
+        "operation-9e2d1055-20b9-4839-b6f6-4f82b519a4ac"
+      ],
+      "pid": 110092,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 519,
+      "stdout": "{\"event\":\"reconcile_result\",\"pid\":110092,\"operation_id\":\"operation-9e2d1055-20b9-4839-b6f6-4f82b519a4ac\",\"result_committed\":false}",
+      "stderr": "",
+      "timed_out": false
+    },
+    {
+      "name": "pg_ctl_stop",
+      "args": [
+        "stop",
+        "-D",
+        "D:\\Develop\\Relay-Agent\\experiments\\recovery-p00\\.local\\recovery-p00-55a25156-c594-442e-b04f-cba72006d2be\\pgdata",
+        "-m",
+        "immediate",
+        "-w",
+        "-t",
+        "30"
+      ],
+      "pid": 103356,
+      "exit_code": 0,
+      "signal": null,
+      "duration_ms": 153,
+      "stdout": "",
+      "stderr": "",
+      "timed_out": false
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "approval_then_two_process_starts_one_effect",
+      "operation_id": "operation-f1bc9ab8-c9d5-4374-a831-61497cf202e0",
+      "assertions": [
+        "一个子进程使用实际 AI SDK Mock 生成并持久化候选；后续批准和执行子进程未再生成候选。",
+        "两个批准子进程与两个执行子进程由 Promise.all 同时启动后，模型调用、工具调用和效果日志各为一次；本实验未采集 pg_stat_activity 锁等待证据。",
+        "动作和调用记录成功，但 probe Run 保持 RUNNING；本实验没有 PASS、CompletionRecord 或业务完成提交。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 5,
+      "business_completion_count": 0
+    },
+    {
+      "name": "after_prepared_hard_exit_reuses_original_candidate",
+      "operation_id": "operation-a36f9b1f-36f0-4f76-b569-c96d27afc1d1",
+      "assertions": [
+        "批准后的 PREPARED 短事务提交后，Worker 以 exit 72 退出且未调用外部工具。",
+        "新的执行进程从同一 PREPARED 动作继续，未重新调用模型生成参数。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 5,
+      "business_completion_count": 0
+    },
+    {
+      "name": "after_external_effect_hard_exit_reconciles_original_evidence",
+      "operation_id": "operation-ad3e2db0-74cd-4835-bc6c-be9d82bcf38d",
+      "assertions": [
+        "执行子进程在受管文件和独立效果日志 fsync 后以 exit 73 退出。",
+        "新进程凭原逻辑动作 ID、effect ID、参数哈希、基线哈希、内容哈希和目标哈希补记同一调用结果。",
+        "恢复期间模型调用和工具调用均没有增加。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 5,
+      "business_completion_count": 0
+    },
+    {
+      "name": "missing_action_identity_evidence_stays_unknown",
+      "operation_id": "operation-37a62be0-463f-4f95-8f47-ca27570d5c91",
+      "assertions": [
+        "即使固定受管文件内容仍在，原动作身份效果日志缺失时也不把内容相同当作本次成功证据。",
+        "恢复不重调工具，动作进入 UNKNOWN，probe Run 进入 PAUSED 并写入 INSUFFICIENT_EVIDENCE 原因。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 0,
+      "protocol_commit_count": 5,
+      "business_completion_count": 0
+    },
+    {
+      "name": "external_edit_after_effect_does_not_match_old_evidence",
+      "operation_id": "operation-da8a86ab-1d83-4bf6-938d-40289c2ad44e",
+      "assertions": [
+        "外部效果后的受管文件被实验外部内容改写，而原效果日志仍保留。",
+        "恢复要求日志 afterHash 与当前目标和预期内容哈希同时匹配，因此不重调工具并转 UNKNOWN。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 5,
+      "business_completion_count": 0
+    },
+    {
+      "name": "truncated_effect_evidence_stays_unknown",
+      "operation_id": "operation-dbc168aa-e30b-45e1-acc2-ae7f5e7a8d75",
+      "assertions": [
+        "外部效果后将独立效果日志截断为不可解析 JSON。",
+        "恢复将损坏日志视为证据不足，不抛出为成功，也不重调工具。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 5,
+      "business_completion_count": 0
+    },
+    {
+      "name": "non_object_effect_evidence_stays_unknown",
+      "operation_id": "operation-66426e50-72c5-4ccd-b31e-3a3bbc1bd49f",
+      "assertions": [
+        "外部效果后将效果日志替换为合法 JSON 的 null。",
+        "恢复拒绝非对象证据，不重调工具并转 UNKNOWN。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 5,
+      "business_completion_count": 0
+    },
+    {
+      "name": "external_file_edit_after_approval_is_not_overwritten",
+      "operation_id": "operation-da6cbf1c-c1ef-4b37-8795-2c18868426f2",
+      "assertions": [
+        "批准后由实验外部写入操作专属固定受管目标。",
+        "执行前重新读取真实基线并拒绝；exclusive create 没有覆盖该文件，也没有工具调用。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 4,
+      "business_completion_count": 0
+    },
+    {
+      "name": "approval_invalidated_by_parameter_change",
+      "operation_id": "operation-8e13e691-2cde-4b25-a26a-1d741de6c85d",
+      "assertions": [
+        "批准后的当前 parameter 绑定发生变化。",
+        "执行进程在外部效果前失效批准，不产生调用或效果。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 4,
+      "business_completion_count": 0
+    },
+    {
+      "name": "approval_invalidated_by_baseline_change",
+      "operation_id": "operation-2d3a20db-a2f2-44da-b542-ea8c6b4ea59c",
+      "assertions": [
+        "批准后的当前 baseline 绑定发生变化。",
+        "执行进程在外部效果前失效批准，不产生调用或效果。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 4,
+      "business_completion_count": 0
+    },
+    {
+      "name": "approval_invalidated_by_permission_change",
+      "operation_id": "operation-f50ef145-9aed-4630-a9a1-64c07a9c8a7e",
+      "assertions": [
+        "批准后的当前 permission 绑定发生变化。",
+        "执行进程在外部效果前失效批准，不产生调用或效果。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 4,
+      "business_completion_count": 0
+    },
+    {
+      "name": "approval_invalidated_by_acceptance_change",
+      "operation_id": "operation-23e74ebf-8c55-4d87-b2d7-f0b44d2e6886",
+      "assertions": [
+        "批准后的当前 acceptance 绑定发生变化。",
+        "执行进程在外部效果前失效批准，不产生调用或效果。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 4,
+      "business_completion_count": 0
+    },
+    {
+      "name": "approval_invalidated_by_ownership_change",
+      "operation_id": "operation-85131813-1f31-4640-8b95-374ee5baf853",
+      "assertions": [
+        "批准后的当前 ownership 绑定发生变化。",
+        "执行进程在外部效果前失效批准，不产生调用或效果。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 0,
+      "artifact_matches_expected_now": false,
+      "external_effect_writes_observed": 0,
+      "evidence_records": 0,
+      "protocol_commit_count": 4,
+      "business_completion_count": 0
+    },
+    {
+      "name": "old_ownership_epoch_cannot_commit_result",
+      "operation_id": "operation-9e2d1055-20b9-4839-b6f6-4f82b519a4ac",
+      "assertions": [
+        "外部效果后转移 ownership_epoch；旧 epoch 的恢复进程不能把动作或调用更新为 SUCCEEDED。",
+        "原证据被单独保留，等待当前执行权持有者处理；没有二次工具调用。"
+      ],
+      "model_calls": 1,
+      "tool_calls": 1,
+      "artifact_matches_expected_now": true,
+      "external_effect_writes_observed": 1,
+      "evidence_records": 1,
+      "protocol_commit_count": 5,
+      "business_completion_count": 0
+    }
+  ],
+  "assertions": [
+    "实验使用独立 initdb 数据目录、动态 127.0.0.1 端口和实际 PostgreSQL 18 子进程。",
+    "所有模型候选由实际 ai@7.0.107 的官方 MockLanguageModelV4 和无 execute 的工具定义产生。",
+    "每次运行先写 RUNNING 结果；失败时 latest.json 写 FAILED，不继承旧 PASS。"
+  ],
+  "limitations": [
+    "这是 P00 最小恢复实验，不是生产 Workflow、Gateway、权限系统或文件适配器。",
+    "官方 MockLanguageModelV4 仅验证 AI SDK 协议边界；没有真实 Provider 网络调用或 Provider 可替换性证明。",
+    "未覆盖验证计划第 6 节的调用前崩溃、确认未发生后的安全重试、部分写入、资源租约、停止控制和完整步骤推进；本轮只覆盖了文件的批准后编辑和效果后编辑。",
+    "未覆盖四份契约的 37 个验收场景；结果只映射到本实验的局部恢复裂缝。",
+    "效果证据是实验专用 JSONL 和单文件 fixture，未验证生产文件系统、审计存储或人工核对流程。"
+  ]
+}

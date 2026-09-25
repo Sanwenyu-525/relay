@@ -1,0 +1,8 @@
+pnpm --filter @relay-agent/api typecheck
+.                                        |  WARN  Unsupported engine: wanted: {"node":">=24.0.0 <25"} (current: {"node":"v22.22.3","pnpm":"9.15.9"})
+apps/api                                 |  WARN  Unsupported engine: wanted: {"node":">=24.0.0 <25"} (current: {"node":"v22.22.3","pnpm":"9.15.9"})
+
+> @relay-agent/api@0.0.0 typecheck D:\Develop\Relay-Agent\apps\api
+> tsc --noEmit -p tsconfig.json
+
+TYPECHECK_EXIT=0

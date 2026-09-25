@@ -1,0 +1,8 @@
+BEGIN
+projects|[{"id" : "a4266efb-c698-4da7-ba88-38ee177d7ef7", "revision" : 0, "archived" : false}]
+tasks|[{"id" : "a762d56d-87db-4275-b073-4138a7ceb3e4", "project_id" : "a4266efb-c698-4da7-ba88-38ee177d7ef7", "status" : "READY", "revision" : 5, "acceptance_revision" : 2, "current_completion_id" : null}]
+task_acceptances|[{"task_id" : "a762d56d-87db-4275-b073-4138a7ceb3e4", "acceptance_revision" : 1}, {"task_id" : "a762d56d-87db-4275-b073-4138a7ceb3e4", "acceptance_revision" : 2}]
+artifact_versions|[{"id" : "de7b75a8-f82b-48fe-91a0-008403b25325", "artifact_id" : "aeb01796-f154-476e-838e-ceee2534d701", "task_id" : "a762d56d-87db-4275-b073-4138a7ceb3e4", "version_number" : 1, "size" : 43, "content_sha256" : "ee28bbe497e8e3db238bca99ddc9a7f9fcb6be4ae8d0216097ded5dc9fe278a4"}]
+human_acceptances|[{"id" : "77d6bfa0-cc10-4826-a473-b8e7a556520c", "task_id" : "a762d56d-87db-4275-b073-4138a7ceb3e4", "acceptance_revision" : 1, "accepted_version_refs" : ["de7b75a8-f82b-48fe-91a0-008403b25325"]}]
+completion_records|[{"id" : "2dd59826-c693-49fe-9cf1-0dcafaa95eb7", "task_id" : "a762d56d-87db-4275-b073-4138a7ceb3e4", "acceptance_revision" : 1, "human_acceptance_id" : "77d6bfa0-cc10-4826-a473-b8e7a556520c"}]
+COMMIT

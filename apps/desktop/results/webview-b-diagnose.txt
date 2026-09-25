@@ -1,0 +1,3 @@
+release_sha256=2cd9d885703dd37997c3eafb71650e846446d411860f241f424cdf512480dd67
+page_origin=http://tauri.localhost bootstrap=pass health=transport_rejected ready_body=n/a
+html_csp_present=true connect_sources='self',http://ipc.localhost frame_none=true

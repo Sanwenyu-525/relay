@@ -1,0 +1,77 @@
+[
+  {
+    "path": "apps/workbench/src/views/TasksView.tsx",
+    "expected": "461ecc795ef44af203d94d77568fb10480f6a4720acd56055af50f062b958b29",
+    "actual": "461ecc795ef44af203d94d77568fb10480f6a4720acd56055af50f062b958b29"
+  },
+  {
+    "path": "apps/workbench/src/views/CreateTaskView.tsx",
+    "expected": "b28f979049778ee5c8abbe359096e3011090f8bdda704c70871d0e8832b3cac6",
+    "actual": "b28f979049778ee5c8abbe359096e3011090f8bdda704c70871d0e8832b3cac6"
+  },
+  {
+    "path": "apps/workbench/src/api/relayClient.ts",
+    "expected": "336b0565add68ed57e43242517d61e8b6df94445cfd446e191b079a0cdebe183",
+    "actual": "336b0565add68ed57e43242517d61e8b6df94445cfd446e191b079a0cdebe183"
+  },
+  {
+    "path": "apps/workbench/src/lib/relayConnection.ts",
+    "expected": "e4be2687f8a1acf01ceb1d1ed0471d4420d5ab2b47e301b26b47ad95df1b0b38",
+    "actual": "e4be2687f8a1acf01ceb1d1ed0471d4420d5ab2b47e301b26b47ad95df1b0b38"
+  },
+  {
+    "path": "apps/workbench/tests/liveTasks.spec.ts",
+    "expected": "e4d53f2f3311bf903a1299a1adf52fdba2b4323ed44b08cad12bd36b68b2a52d",
+    "actual": "e4d53f2f3311bf903a1299a1adf52fdba2b4323ed44b08cad12bd36b68b2a52d"
+  },
+  {
+    "path": "apps/workbench/tests/tasks.spec.ts",
+    "expected": "8480b5c682d2795b11a8de149b52597312ca17f1ec78bbb10ab121551b0f2f2c",
+    "actual": "8480b5c682d2795b11a8de149b52597312ca17f1ec78bbb10ab121551b0f2f2c"
+  },
+  {
+    "path": "apps/workbench/tests/mountApp.tsx",
+    "expected": "21aef326e2526b95cca481be07026c756ddd2272c1226943f0e9d423711f1dd4",
+    "actual": "21aef326e2526b95cca481be07026c756ddd2272c1226943f0e9d423711f1dd4"
+  },
+  {
+    "path": "apps/workbench/tests/setup.ts",
+    "expected": "72afb6de150a4d5e3d1d1d8951bb5efa68f0939252cdcec92da5f183474e088b",
+    "actual": "72afb6de150a4d5e3d1d1d8951bb5efa68f0939252cdcec92da5f183474e088b"
+  },
+  {
+    "path": "apps/desktop/src-tauri/src/lib.rs",
+    "expected": "54a3b7a34fb26dc1b1464e47b8c0596a0b96adbc2aa2291b9b628d9fa455a133",
+    "actual": "54a3b7a34fb26dc1b1464e47b8c0596a0b96adbc2aa2291b9b628d9fa455a133"
+  },
+  {
+    "path": "apps/desktop/src-tauri/Cargo.toml",
+    "expected": "43b194396c79e95eea87b04f991607105373c83e9e7def35b8b6502921198a5e",
+    "actual": "43b194396c79e95eea87b04f991607105373c83e9e7def35b8b6502921198a5e"
+  },
+  {
+    "path": "apps/desktop/src-tauri/Cargo.lock",
+    "expected": "fcdf448e2f70a0fefbcb7bf58784930ebedc82e89a72fd14c67368868f57d895",
+    "actual": "fcdf448e2f70a0fefbcb7bf58784930ebedc82e89a72fd14c67368868f57d895"
+  },
+  {
+    "path": "apps/desktop/src-tauri/tauri.conf.json",
+    "expected": "8a83ac96581161b82a35f8ea7d1d6811c161750f730d738bde16b10be6ae51ca",
+    "actual": "8a83ac96581161b82a35f8ea7d1d6811c161750f730d738bde16b10be6ae51ca"
+  },
+  {
+    "path": "apps/desktop/scripts/build-release.ps1",
+    "expected": "0b0bdfceb76177f79813f802b33c415eb9203e7080faf6fa27fc50dc097af850",
+    "actual": "0b0bdfceb76177f79813f802b33c415eb9203e7080faf6fa27fc50dc097af850"
+  },
+  {
+    "path": "docs/development/m02-desktop-foundation.md",
+    "expected": "749aa6d0e3178e2e0dd1774fb2ed461ebe152f682f9894f167fe2a93a72276dc",
+    "actual": "749aa6d0e3178e2e0dd1774fb2ed461ebe152f682f9894f167fe2a93a72276dc"
+  },
+  {
+    "path": "docs/deployment/local-deployment.md",
+    "expected": "230a25ec6f6b28d88f963f313dc195fb8bc3a034d4823922e55e7e98d50615b1",
+    "actual": "230a25ec6f6b28d88f963f313dc195fb8bc3a034d4823922e55e7e98d50615b1"
+  }
+]

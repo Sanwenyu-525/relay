@@ -1,0 +1,13 @@
+session_id=a08ec8be28b8426599d51c7afdcda410 pg_port=3100 release_sha256=b49af3bacd622587a68337ac7448a2d60201a5102502fb8a47593718ef4ffbba
+seed_api_exit=0 run_id=99da12fe-8b07-4950-acad-3227f53dded6
+relay_m03_sse_reconnect_step_backend_pid=27012 RowShareLock=granted
+host_pid=38004 cdp_port=14347 bootstrap=ready
+processes host=38004 api=31540 supervisor=28148
+webview_initial request_after=0 response=200 seq=1 run_gets=2 invocation=ACTIVE|1
+relay_m03_sse_reconnect_table_backend_pid=9064 AccessExclusiveLock=granted
+sse_pg_terminated pid=32032 backend_start_us=1790227664616241 database=relay_m02_acceptance role=relay_app query=listAfter blocked_by=9064
+webview_same_page_reconnect original_socket_closed=true new_after=1 host_api_supervisor_alive=true
+webview_history_catchup request_after=1 from_seq=1 to_seq=31 authoritative_revision=6 run_gets_after_replay=1 same_host_api=true control_requests=0
+bearer_in_url_host_log=false
+postgres_stop_exit=0 temporary_root_removed=True
+M03_SSE_SAME_PAGE_RECONNECT_REAL_PG=PASS

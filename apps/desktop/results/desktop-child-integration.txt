@@ -1,0 +1,25 @@
+**********************
+PowerShell transcript start
+Start time: 20260924004118
+Username: LAPTOP-RTUVXZ-G\ASUS
+RunAs User: LAPTOP-RTUVXZ-G\ASUS
+Configuration Name: 
+Machine: LAPTOP-RTUVXZ-G (Microsoft Windows NT 10.0.22631.0)
+Host Application: C:\Users\ASUS\.cache\codex-runtimes\codex-primary-runtime\dependencies\native\powershell\pwsh.dll -Command try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}
+Start-Transcript -LiteralPath 'apps\desktop\results\desktop-child-integration.txt' -Force | Out-Null; try { powershell -NoProfile -ExecutionPolicy Bypass -File apps/api/scripts/run-integration.ps1 -SkipBuild -TestFile desktop-child; $code=$LASTEXITCODE } finally { Stop-Transcript | Out-Null }; Write-Host "exit_code=$code"; exit $code
+Process ID: 3712
+PSVersion: 7.6.5
+PSEdition: Core
+GitCommitId: 7.6.5
+OS: Microsoft Windows 10.0.22631
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.4
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+
+**********************
+PowerShell transcript end
+End time: 20260924004148
+**********************

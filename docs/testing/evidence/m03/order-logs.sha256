@@ -1,0 +1,16 @@
+fd396c51109f21b884774ff3bfd79f19d459ac30845d73d53bac9dad4a68426f  docs/testing/evidence/m03/order-fast-approval-red.log
+350010fe3e6a266204989e1c234d1d9dbe477482442c4ca840561ce3b9fce557  docs/testing/evidence/m03/order-fast-approval-green-initial.log
+5d6e80693f95ad3f72bf284cd0a2c9f5b8c9741a533da267a1b44c76273f0d29  docs/testing/evidence/m03/order-restarted-start-red.log
+44441511c160410cc683c5d99f7c557d6342b595db883bd889b10b03e9f137cf  docs/testing/evidence/m03/order-restarted-start-green-initial.log
+573b17e0a6a9cdfb1a5af33dbfa18a6131ec990ece610e22180b068e7a5ac5c3  docs/testing/evidence/m03/order-targeted-final.log
+aad7d8862236e1bc782253fa0b963511e4c1ce0327342f96d3693a8bda6d7e67  docs/testing/evidence/m03/order-gateway-expanded.log
+3a1e0b91e4da576c8469b4419c5faf05c03317ab480fd637d6f13bb0146c7cc9  docs/testing/evidence/m03/order-recovery-targeted.log
+d8673386f04c5d1ff8afe0d26dd2164e7eb0be6fe5aa368aea1a5c53761cf271  docs/testing/evidence/m03/order-run-dispatch-regression.log
+8cd285d16bccdcdd672082f072043ed38f679ebe75e6dee2c1b786e1d36a7d1e  docs/testing/evidence/m03/order-full-integration-initial.log
+9407a056f1992a3630d3536cd5d7c406533bc4178f8edebad8331d3ba71eba26  docs/testing/evidence/m03/order-full-integration-final.log
+c058afcfe761320efca84e094de207e6758fd33fc8c81d9a8c55f8ba00a7e781  docs/testing/evidence/m03/order-unit-final.log
+057065b9cb795b0a30937b880c7af9374d687550d6ad1837d1a4135aad155a05  docs/testing/evidence/m03/order-typecheck-final.log
+0e6cac61d14eb7131b9621ffc1eb47c4f8256c190e4ebcac9820856ccfdd58b9  docs/testing/evidence/m03/order-doccheck-final.log
+ac168fee8b6549f1c04b0f854f1b8767372869e7712a12690e41623bf5670e98  docs/testing/evidence/m03/order-pack-initial.json
+fae92ac11788774b8da8f8351ac2cb63cd2fffe2d2c4dd79d0c73134b183d6ca  docs/testing/evidence/m03/order-pack.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/testing/evidence/m03/order-pack-stderr.log

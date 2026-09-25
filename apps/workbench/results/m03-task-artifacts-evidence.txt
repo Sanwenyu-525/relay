@@ -1,0 +1,22 @@
+M03 Task 产物历史查询与 React 刷新恢复——开发自检
+日期：2026-09-24（Asia/Shanghai）；执行者：gpt-6-sol / ultra 子 Agent。
+状态：READY_FOR_INDEPENDENT_ACCEPTANCE（仅此增量；非 M03/G01–G08 或 Windows 发行包验收）。
+
+范围与行为
+- 新增受 Bearer、Host/Origin、Workspace 边界保护的 GET /api/v1/workspaces/{workspace_id}/tasks/{task_id}/artifacts；同一 repeatable-read 快照返回全部 Artifact 的不可变版本摘要和 Task 当前 CompletionRecord 接受的版本 ID。跨 Workspace Task 按 404 隐藏；重开仅清空当前接受指针，历史仍可查。
+- React Task 产物页刷新后从服务端重建版本；只有列表读取成功才允许创建/续写或完成。已有人工 Artifact 按原 ID 与确切 revision 续写，读取失败保留未保存草稿。多个 Artifact 各有 v1 时按 version ID 区分。刷新不会把最新版本或项目“当前选用”自动勾为本轮待接受版本；用户本次保存成功或显式选择后才有待提交版本。
+- 浏览器隔离会话脚本按业务 migrate → 受信 graph install → 清除 RELAY_MIGRATION_DB_URL → 应用身份初始化 Workspace → API/Chromium 顺序执行。未修改已冻结的 Windows release 或先前 WebView 证据。
+
+验证与原始日志
+- 最终真实隔离 PostgreSQL 18.6 / 实际 HTTP API：powershell -NoProfile -ExecutionPolicy Bypass -File apps/api/scripts/run-integration.ps1 -TestFile api-artifacts；apps/workbench/results/m03-task-artifacts-pg-r5.txt；17/17，API tsc build=0、业务迁移=0、图安装=0、PG stop=0、临时目录清理=True。新用例覆盖空列表、本 Workspace、同 Workspace 跨 Task、跨 Workspace 404、无 Bearer 401、同 Task 两个 Artifact 各自 v1、旧版接受/新版最新与重开。r5 是 application 层查询重排后的最终 PG 自检。
+- 最终真实 API + Chromium 全刷新：powershell -NoProfile -ExecutionPolicy Bypass -File apps/workbench/scripts/run-real-api-browser.ps1；apps/workbench/results/m03-task-artifacts-browser-r3.txt；1/1，PG stop=0、临时目录清理=True。浏览器在保存 v1 后完整刷新并重新建立内存 Bearer 连接，向原 Artifact 保存 v2；再次刷新后无默认勾选，显式选择项目 v2、完成接受 v1；完成与重开后刷新核对两种标记。r3 使用 r5 已构建的 API dist，协调期间后端 worker 未写该共享 dist；此后共享 dist 已释放给并行 worker。
+- 工作台定向：apps/workbench/results/m03-task-artifacts-workbench-r2.txt；tsc=0、taskDetail 10/10、Vite production build=0。测试包含列表失败保留草稿/禁止 create 和 complete、两个 Artifact 同号版本的独立选择与标记。
+- 文档：node scripts/check-docs.mjs；apps/workbench/results/m03-task-artifacts-docs-r2.txt；77 个 Markdown、1269 个链接、950 个标题锚点，检查通过。
+- 红灯保留：m03-task-artifacts-pg-r1.txt 的唯一失败是新增测试把实际 AUTH_REQUIRED 写成 UNAUTHORIZED，产品返回 401 正确且 PG stop/清理完成；修正测试期待后 r2 17/17。r3/r4 PG、r1/r2 浏览器及 r1 工作台/文档日志均保留供检查，最终判定以上列的 r5/r3/r2/r2。
+
+冻结与并行边界
+- apps/workbench/results/m03-task-artifacts-inputs.sha256：242 个 API/Workbench/文档源文件的 r5 构建时点快照，清单 SHA-256 04e5076c423b64ab9b43cbe634104504b185a57e660f24c324e6c1802a535755，生成于 2026-09-24 10:14:56 UTC。其后并行 ACTION_APPROVAL worker 可修改其他 apps/api 源；该清单仅证明 r5 当时输入，不代表当前完整 API 源永久不变，也不应以整单漂移判断本增量被改写。
+- apps/workbench/results/m03-task-artifacts-owned-inputs.sha256：本增量 13 个 API/React/测试/部署测试脚本/文档文件的最终 SHA-256，清单 SHA-256 aab7ffb3a6be1259043c546f00a26ca60ec38a14eb91da4c2ed6e843dfb375e4。
+- apps/workbench/results/m03-task-artifacts-logs.sha256：上述原始 PG、浏览器、工作台、文档日志与输入清单的 SHA-256，清单 SHA-256 69e3430ea2b7ec1a468147c56489fae85135370621aa55134c4d2ef516ebb725。
+
+边界：这次浏览器测试使用独立临时 PG、真实 HTTP API 和 Chromium，没有重建或运行新 Windows WebView2 发行包；并行后端源码后续变更需协调 Agent 从当前完整输入重建并独立复跑。本切片未启动真实 Provider，也不将 ACTION_APPROVAL 待发当成外部效果。

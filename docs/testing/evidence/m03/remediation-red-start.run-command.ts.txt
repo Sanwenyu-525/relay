@@ -1,0 +1,83 @@
+import type { DbExecutor } from '../infrastructure/database.js';
+import { ManagedContentStore } from '../storage/managed-content-store.js';
+import { advanceRunStep } from '../application/run-steps.js';
+import {
+  claimNextRunCommand, renewRunInvocation, settleRunCommand,
+  type ClaimedRunCommand,
+} from '../application/run-dispatch.js';
+
+const MAX_STEPS_PER_DELIVERY = 32;
+
+export interface WorkerDeliveryResult {
+  readonly commandId: string;
+  readonly runId: string;
+  readonly outcome: 'DONE' | 'BLOCKED' | 'LOST';
+}
+
+/** A single durable delivery may advance several existing fixed Workflow steps. */
+export async function runOneCommand(db: DbExecutor, input: {
+  workerId: string; dataRoot: string; leaseMs?: number; signal?: AbortSignal;
+  maxSteps?: number;
+  onClaim?: (claim: ClaimedRunCommand) => Promise<void>;
+}): Promise<WorkerDeliveryResult | undefined> {
+  const leaseMs = input.leaseMs ?? 30_000;
+  const claim = await claimNextRunCommand(db, input.workerId, leaseMs);
+  if (claim === undefined) return undefined;
+  await input.onClaim?.(claim);
+  const controller = new AbortController();
+  const onAbort = (): void => controller.abort();
+  input.signal?.addEventListener('abort', onAbort, { once: true });
+  let heartbeat: NodeJS.Timeout | undefined;
+  try {
+    let lost = false;
+    let renewing = false;
+    heartbeat = setInterval(() => {
+      if (renewing || lost) return;
+      renewing = true;
+      void renewRunInvocation(db, claim, leaseMs).then((ok) => {
+        if (!ok) { lost = true; controller.abort(); }
+      }).catch(() => {
+        lost = true;
+        controller.abort();
+      }).finally(() => { renewing = false; });
+    }, Math.max(100, Math.floor(leaseMs / 3)));
+
+    let settlement: 'DONE' | 'BLOCKED' = 'DONE';
+    let holdForRecovery = false;
+    let exhausted = true;
+    for (let index = 0; index < (input.maxSteps ?? MAX_STEPS_PER_DELIVERY); index += 1) {
+      if (lost || controller.signal.aborted) return { commandId: claim.commandId, runId: claim.runId, outcome: 'LOST' };
+      const step = await advanceRunStep(db, {
+        runId: claim.runId, workerId: claim.workerId, invocationEpoch: claim.epoch,
+        storage: new ManagedContentStore(input.dataRoot), leaseMs,
+        signal: controller.signal,
+      });
+      if (step.status === 'STEP_SUCCEEDED' &&
+          ['COMPLETED', 'FAILED', 'CANCELLED'].includes(step.run_status)) {
+        exhausted = false;
+        break;
+      }
+      if (step.status === 'STEP_SUCCEEDED' || step.status === 'CORRECTION_SCHEDULED' ||
+          step.status === 'RETRYABLE' || step.status === 'REPLAYED') continue;
+      if (step.status === 'INVOCATION_LOST' || step.status === 'STALE_RESULT') {
+        return { commandId: claim.commandId, runId: claim.runId, outcome: 'LOST' };
+      }
+      if (step.status === 'ACTION_UNKNOWN' || step.status === 'CLAIM_CONFLICT' ||
+          step.status === 'STALE_OWNERSHIP' || step.status === 'STEP_NOT_IMPLEMENTED') {
+        settlement = 'BLOCKED';
+        holdForRecovery = step.status === 'ACTION_UNKNOWN' || step.status === 'CLAIM_CONFLICT';
+      }
+      exhausted = false;
+      break;
+    }
+    if (exhausted) settlement = 'BLOCKED';
+    if (lost || controller.signal.aborted) return { commandId: claim.commandId, runId: claim.runId, outcome: 'LOST' };
+    if (!(await settleRunCommand(db, claim, settlement, holdForRecovery))) {
+      return { commandId: claim.commandId, runId: claim.runId, outcome: 'LOST' };
+    }
+    return { commandId: claim.commandId, runId: claim.runId, outcome: settlement };
+  } finally {
+    if (heartbeat !== undefined) clearInterval(heartbeat);
+    input.signal?.removeEventListener('abort', onAbort);
+  }
+}

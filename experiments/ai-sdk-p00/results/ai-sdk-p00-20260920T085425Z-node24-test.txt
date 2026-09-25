@@ -1,0 +1,18 @@
+run_id=ai-sdk-p00-20260920T085425Z
+runtime=v24.21.0
+command=node typescript/bin/tsc -p tsconfig.json && node --test dist/src/boundary.test.js
+✔ 真实 AI SDK 流同时给出文本、完整参数和可 JSON 往返的候选，且没有自动 execute (35.2794ms)
+✔ 非法 JSON 参数被 AI SDK 标为无效，边界不产生候选 (7.4286ms)
+✔ JSON 合法但缺字段且含额外字段时，AI SDK 的 TypeBox 校验不产生候选 (3.9908ms)
+✔ 本实验只接受一个完整候选，多个合法调用明确拒绝 (2.8817ms)
+✔ 截断的工具参数只有增量、没有完整 tool-call，边界不产生候选 (3.3062ms)
+✔ Provider 错误映射为有界失败且没有候选 (2.7915ms)
+✔ 取消信号到达 SDK 模型边界并映射为有界失败 (2.9519ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 516.2628

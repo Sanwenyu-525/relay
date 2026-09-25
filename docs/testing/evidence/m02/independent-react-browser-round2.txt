@@ -1,0 +1,29 @@
+[WebServer] (node:30472) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 20 tests using 1 worker
+
+(node:31996) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 tests\browser\workbench.spec.ts:11:3 › 桌面视口 › 四个状态都渲染真实中文 DOM 且无整页横向滚动 (624ms)
+  ok  2 tests\browser\workbench.spec.ts:22:3 › 桌面视口 › 右判断区在宽视口常驻，来源详情标题与对象一致 (584ms)
+  ok  3 tests\browser\workbench.spec.ts:34:3 › 桌面视口 › 切换局部页签与浏览器返回都可用 (785ms)
+  ok  4 tests\browser\workbench.spec.ts:45:3 › 桌面视口 › 路由与 query 子页切换后恢复页面顶部 (382ms)
+  ok  5 tests\browser\workbench.spec.ts:63:3 › 桌面视口 › 禁用状态的原因对用户可见 (502ms)
+  ok  6 tests\browser\workbench.spec.ts:73:3 › 窄视口 › 右区改为按钮打开，来源详情不叠加浮层 (564ms)
+  ok  7 tests\browser\workbench.spec.ts:88:3 › 窄视口 › 主操作与导航不被裁切 (562ms)
+  ok  8 tests\browser\workbench.spec.ts:106:3 › 小窗口 › 左导航转为抽屉，主要内容单列可达 (317ms)
+  ok  9 tests\browser\workbench.spec.ts:122:1 › 未保存草稿切换页签会先询问，保留后仍可继续编辑 (618ms)
+  ok 10 tests\browser\workbench.spec.ts:134:1 › R02：创建页草稿会拦截侧栏和浏览器返回，明确放弃后才能离开 (732ms)
+  ok 11 tests\browser\workbench.spec.ts:151:1 › 键盘可达：跳转主内容链接先获得焦点 (308ms)
+  ok 12 tests\browser\workbench.spec.ts:166:3 › 项目与任务列表 › 全局页使用工作空间面包屑，列表无整页横向滚动 (803ms)
+  ok 13 tests\browser\workbench.spec.ts:181:3 › 项目与任务列表 › 项目列表选择、归档与打开入口可用 (632ms)
+  ok 14 tests\browser\workbench.spec.ts:194:3 › 项目与任务列表 › 项目摘要突出当前对象与状态，且不凭任务数量宣称完成 (587ms)
+  ok 15 tests\browser\workbench.spec.ts:205:3 › 项目与任务列表 › 创建项目：必填校验后就地报错，填写后进入列表 (927ms)
+  ok 16 tests\browser\workbench.spec.ts:221:3 › 项目与任务列表 › 新建任务：ready 通过后不自动执行，依赖未完成时给出原因 (1.3s)
+  ok 17 tests\browser\workbench.spec.ts:240:3 › 项目与任务列表 › 项目任务：项目内导航与依赖判断可用 (1.4s)
+  ok 18 tests\browser\workbench.spec.ts:256:3 › 列表窄视口 › 宽表在局部滚动，右区改为按钮打开且主操作可达 (1.0s)
+  ok 19 tests\browser\workbench.spec.ts:278:3 › 200% 内容缩放 › Chromium 内容缩放为 200% 时当前对象与主操作仍可达 (636ms)
+  ok 20 tests\browser\workbench.spec.ts:306:3 › 200% 内容缩放等效视口 › 项目摘要和主操作在窄宽度下可打开、滚动到达并关闭 (654ms)
+
+  20 passed (16.1s)

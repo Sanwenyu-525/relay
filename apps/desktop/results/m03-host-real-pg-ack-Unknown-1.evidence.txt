@@ -1,0 +1,14 @@
+﻿scenario=Unknown backlog=1 expect_launch_ack=True
+session_id=3f5715600d4a417ea3d5c7fd321e8446 pg_port=3558 release_sha256=0769b1dd762fce84690bdc9955bd18a4562c253f2854a49c6630015b0082523e
+seeded_run_ids=4b60181c-b0cc-45b8-aefa-bbe00ad84a3c seed_api_exit=0
+run_steps_exclusive_lock=1 lock_psql_pid=36392
+run_steps_ungranted_worker_lock_count=1
+before_kill run_id=4b60181c-b0cc-45b8-aefa-bbe00ad84a3c command_id=6302e98d-f787-4e6e-8f0c-c4927e39b158 launch_id=7139b2cb-d932-45c2-b05c-7c9d1e714cde facts={"invocation_status":"ACTIVE","epoch":1,"worker_id":"worker:desktop:7139b2cb-d932-45c2-b05c-7c9d1e714cde:6c7a1951-d0d1-46dc-8929-3b4eafc1ba46","outbox_status":"CLAIMED","receipt_count":1,"command_count":1,"first_step_attempts":null}
+processes_before_kill=[{"pid":9220,"parent_pid":29640,"created_utc":"2026-09-24T04:02:02.3224850Z","executable":"D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\relay-desktop.exe"},{"pid":3364,"parent_pid":9220,"created_utc":"2026-09-24T04:02:02.3476210Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"},{"pid":37724,"parent_pid":9220,"created_utc":"2026-09-24T04:02:03.2534810Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"},{"pid":30472,"parent_pid":37724,"created_utc":"2026-09-24T04:02:03.6599110Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"}]
+after_kill host_api_supervisor_worker_alive=0 old_record_retained=True facts={"invocation_status":"ACTIVE","epoch":1,"worker_id":"worker:desktop:7139b2cb-d932-45c2-b05c-7c9d1e714cde:6c7a1951-d0d1-46dc-8929-3b4eafc1ba46","outbox_status":"CLAIMED","receipt_count":1,"command_count":1,"first_step_attempts":null}
+run_steps_exclusive_lock_after_release=0
+before_unknown_recovery effect={"operation_id":"7e4fa498-155a-456d-9033-77feb7a209cd","status":"DISPATCHING","dispatch_count":1}
+restart_bootstrap_elapsed_ms=1680 controlled_old_launch_claims=1
+after_unknown_recovery effect={"operation_id":"7e4fa498-155a-456d-9033-77feb7a209cd","status":"UNKNOWN","dispatch_count":1} worker_count=0
+after_restart new_host_pid=26972 old_record_retained=True facts={"invocation_status":"ACTIVE","epoch":1,"worker_id":"worker:desktop:7139b2cb-d932-45c2-b05c-7c9d1e714cde:6c7a1951-d0d1-46dc-8929-3b4eafc1ba46","outbox_status":"CLAIMED","receipt_count":1,"command_count":1,"first_step_attempts":null}
+M03_REAL_HOST_RECOVERY=PASS scenario=Unknown backlog=1 pg_stop=0 temporary_root_removed=True

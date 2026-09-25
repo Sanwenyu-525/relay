@@ -1,0 +1,16 @@
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./vite.config" without a file extension (vitest.config.ts:2:24). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.1 D:/Develop/Relay-Agent/apps/workbench
+
+
+ Test Files  23 passed (23)
+      Tests  133 passed (133)
+   Start at  18:54:55
+   Duration  10.76s (environment 48%, tests 31%, import 12%, transform 8%, setup 1%)
+
+Environment  jsdom was created 23 times · 65.64s total, 48% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+

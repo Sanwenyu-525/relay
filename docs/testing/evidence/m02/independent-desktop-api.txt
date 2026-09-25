@@ -1,0 +1,65 @@
+**********************
+PowerShell transcript start
+Start time: 20260924003702
+Username: LAPTOP-RTUVXZ-G\ASUS
+RunAs User: LAPTOP-RTUVXZ-G\ASUS
+Configuration Name: 
+Machine: LAPTOP-RTUVXZ-G (Microsoft Windows NT 10.0.22631.0)
+Host Application: C:\Users\ASUS\.cache\codex-runtimes\codex-primary-runtime\dependencies\native\powershell\pwsh.dll -Command try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}
+$evidenceRoot = Join-Path (Get-Location) 'docs\testing\evidence\m02'
+New-Item -ItemType Directory -Force -Path $evidenceRoot | Out-Null
+$inputFiles = @(Get-ChildItem apps/api/src,apps/api/test,apps/api/migrations -Recurse -File) + @(Get-Item apps/api/package.json,apps/api/tsconfig.json,apps/api/scripts/run-integration.ps1,pnpm-lock.yaml)
+$inputLines = $inputFiles | Sort-Object FullName | ForEach-Object { '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.FullName.Substring((Get-Location).Path.Length + 1).Replace('\','/') }
+$inputLines | Set-Content -LiteralPath (Join-Path $evidenceRoot 'desktop-api-inputs.sha256') -Encoding utf8
+Start-Transcript -LiteralPath (Join-Path $evidenceRoot 'independent-desktop-api.txt') -Force | Out-Null
+try {
+  & powershell -NoProfile -ExecutionPolicy Bypass -File apps/api/scripts/run-integration.ps1 -TestFile desktop-child
+  $testResult = $LASTEXITCODE
+} finally { Stop-Transcript | Out-Null }
+exit $testResult
+Process ID: 33364
+PSVersion: 7.6.5
+PSEdition: Core
+GitCommitId: 7.6.5
+OS: Microsoft Windows 10.0.22631
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.4
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+
+**********************
+PowerShell transcript end
+End time: 20260924003733
+**********************
+
+Evidence capture correction (2026-09-24): the transcript above did not capture
+the child PowerShell native output. The following is an extract copied from
+the actual exec_command/write_stdin tool results for session_id 73937;
+it is not output captured by Start-Transcript. No test was rerun for this extract.
+
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-4c75d719d3
+Test database: relay_api_test_c4f43187cf5d on 127.0.0.1:5788 (roles relay_migrator / relay_app)
+✔ desktop child uses dynamic strict boundary, private readiness, EOF stop and rotating token (2091.5727ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21641.7897
+waiting for server to shut down..... done
+server stopped
+--- integration summary ---
+tests exit code: 0
+build exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: PASSED
+
+Tool process completion: session_id 73937, exit_code 0.
+Post-run file verification: 145 inputs checked, changed [], manifest SHA-256
+52811affe9d1280db084240e23785b897c124f6690c50a1851f9723f5f086168

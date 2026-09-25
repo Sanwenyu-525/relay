@@ -1,0 +1,38 @@
+[
+  {
+    "name": "codex",
+    "commit": "78245b47af2a7aafcabe025828ceecca69db4df1",
+    "commit_date": "2026-09-19T03:03:41Z",
+    "origin": "https://github.com/openai/codex.git"
+  },
+  {
+    "name": "deepseek-harness",
+    "commit": "ddefc45fbc7f8e46dd73185e68295696d1297887",
+    "commit_date": "2026-09-17T21:19:19+08:00",
+    "origin": "https://github.com/deepseek-ai/deepseek-harness.git"
+  },
+  {
+    "name": "pi",
+    "commit": "36b60d2e8985899743c4cf5bd5f8929832a3f05d",
+    "commit_date": "2026-09-19T06:26:08+08:00",
+    "origin": "https://github.com/earendil-works/pi.git"
+  },
+  {
+    "name": "langchain",
+    "commit": "eba445b7563d1709427bd8072892975a6ea59fdc",
+    "commit_date": "2026-09-19T03:10:36+08:00",
+    "origin": "https://github.com/langchain-ai/langchain.git"
+  },
+  {
+    "name": "langgraph",
+    "commit": "aa742fb31e2827d569b843e3600aeda2e0528e4b",
+    "commit_date": "2026-09-18T23:31:43Z",
+    "origin": "https://github.com/langchain-ai/langgraph.git"
+  },
+  {
+    "name": "rig",
+    "commit": "2d16c1b25f6749b3a2cd841beddf767106495069",
+    "commit_date": "2026-09-18T07:55:10Z",
+    "origin": "https://github.com/0xPlaygrounds/rig.git"
+  }
+]

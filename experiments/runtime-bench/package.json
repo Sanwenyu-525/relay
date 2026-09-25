@@ -1,0 +1,10 @@
+{
+  "name": "workflow-os-runtime-bench",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test pi.test.mjs", "bench": "node pi.mjs" },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.85.1",
+    "@earendil-works/pi-ai": "0.85.1"
+  }
+}

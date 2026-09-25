@@ -1,0 +1,14 @@
+{
+  "exe_sha256": "3e56ff5efd4fd321593f10fe8e016796db9c288dd5c2b1077b7f926c30187ebb",
+  "manifest_sha256": "91527a667ecdc5e0d0de839f23f367afadeb48a44a741b063fcd6db1cf1d85a9",
+  "source_files_checked": 186,
+  "resource_files_checked": 7862,
+  "actual_resource_files": 7862,
+  "reparse_points": 0,
+  "forbidden_config_files": 0,
+  "source_changes": [
+    "desktop/src-tauri/src/lib.rs",
+    "workbench/src/views/TasksView.tsx"
+  ],
+  "mismatches": []
+}

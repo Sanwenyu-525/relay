@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Relay P00 Desktop",
+  "version": "0.0.0",
+  "identifier": "dev.relay.p00.desktop",
+  "build": {
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:*; frame-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "Relay P00 Desktop — Tauri WebView",
+        "width": 820,
+        "height": 560,
+        "resizable": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "resources": {
+      "resources/node.exe": "node.exe",
+      "resources/sidecar.mjs": "sidecar.mjs",
+      "resources/fake-worker.mjs": "fake-worker.mjs"
+    }
+  }
+}

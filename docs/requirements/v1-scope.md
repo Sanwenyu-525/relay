@@ -1,0 +1,76 @@
+# V1 范围与设计覆盖
+
+> 2026-09-23 用户补充：全量迁移现有界面至 React，交付 Windows 安装桌面端，保留既有功能和视觉；按适配项目的技术方案执行，见 [ADR-010](../decisions/ADR-010-agent-stack-react-desktop.md)。原业务范围编号不变，技术改造先于后续 V1 开发，按 [大模块工作包](../../prompts/stack-migration.md)逐模块验收。P22 与 V1.5 不纳入默认 goal。
+
+日期：2026-09-19。状态：Proposed 编码基线。来源：[完整聊天正文评审](../../architecture-review.md)及四份契约；并对照当前目录的 Master Spec，差异见 [设计审计](../development/design-audit.md)。
+
+目标是长期项目中可追溯、可恢复的人与 AI 协作。最终 V1 覆盖三种工作台与受控工具；阶段 A 的人工闭环只是一段实现路径。阶段 0 为工程准备，A–E 沿用契约包，F 为发布与研究证据整理。
+
+2026-09-19 用户调整实施方式：先参考和复用成熟项目，再补必要业务与适配，见[复用策略](../architecture/reuse-strategy.md)。不新增产品功能；P00 增加源码研究与最小验证，功能完成仍按本表验收。
+
+同日用户明确交付形态：**Windows 可安装应用，有独立窗口和启动入口**。此项为已确认需求；桌面框架、窗口生命周期和安装细节仍按 [ADR-007](../decisions/ADR-007-windows-desktop.md)验证。首条人工切片在桌面窗口交付，浏览器仅作开发辅助；不由此新增手机端、托盘、自启或多窗口承诺。
+
+| ID | 能力与最终最小范围 | 阶段 | 主设计 | 编码任务 |
+|---|---|---|---|---|
+| F01 | Workspace、Project、类型与阶段词汇、显式 State | A | 领域模型 / 事实契约 | P01、P02 |
+| F02 | Goal 关联及 Task 默认/显式继承 | A | 事实契约 / 信息与计划 | P02 |
+| F03 | Task、Me、AI Assist、Delegate 与依赖 | A/B/D | 生命周期 / 运行设计 | P02、P05、P12 |
+| F04 | 不可变 Artifact、人工完成、重开 | A | API / 物理设计 | P03 |
+| F05 | 固定 Workflow、Run、Step、Attempt、预算 | B | 运行与 Context | P05 |
+| F06 | Hard/Rule/Semantic/Human 验证及证据 | B/D | 验证契约 / 运行设计 | P06 |
+| F07 | Review Inbox、接受/拒绝、修改与预算 | B | 验证契约 / API | P07 |
+| F08 | Pause/Resume/Cancel/Handoff、崩溃恢复 | C | 恢复契约 / 物理设计 | P08 |
+| F09 | Gateway、Permission、动作身份、资源保护 | C | 工具适配器 / 恢复契约 | P09 |
+| F10 | Knowledge、Memory、Decision、Rule | D | 信息与计划 | P10 |
+| F11 | Mandatory/Retrieved/Step-aware Context | D | 运行与 Context | P11 |
+| F12 | Today、Pin、Later、Focus 与确定性建议 | D | 信息与计划 / 工作台 | P13 |
+| F13 | General / Thesis / Development 工作台 | A/D/E | 工作台交互 | P04、P14 |
+| F14 | Context-aware AI Panel、可接受提案 | D | 运行 / 工作台 | P12 |
+| F15 | 基础搜索、中文资料、来源快照 | D/E | 信息与计划 / 工具 | P10、P17 |
+| F16 | Activity、执行 Trace、产物 Lineage | A/D | 信息与计划 / 模块 API | P15 |
+| F17 | Files 读取、隔离变化集与显式应用 | E | 工具适配器 | P16 |
+| F18 | 公共 Web 获取、正文与来源记录 | E | 工具适配器 | P17 |
+| F19 | Git 查询、分支、暂存、commit/push 审批 | E | 工具适配器 | P18 |
+| F20 | 受信配置的构建/测试 CLI，取消与核对 | E | 工具适配器 | P19 |
+| F21 | Windows 安装包、独立窗口/启动入口、本机身份、备份恢复、可观测性 | 0/A/F | ADR-007 / 部署 / 测试 | P00、P04、P20 |
+| F22 | 完整 API、错误、前后端兼容与发布 | 全程/F | API / 测试 | P21 |
+| F23 | 毕业论文可复核实验协议（可选研究交付） | F | 研究协议 | P22 |
+| F24 | 第一方声明式扩展组合；四项首批 Skill、最小 Thesis/Development Pack、版本绑定与基础 Eval，复用现有闭环 | D | [扩展专题](../architecture/relay-skills.md) | P11、P12、P14、P15；依赖 P05–P08，P21 回归 |
+
+编码任务编号为本包实施分解，不是完成标记。F23 是原聊天研究方向的可选落地，不要求把未经导师确认的题目当作产品上线条件。
+
+### Relay Skill 范围补充（2026-09-20，Proposed）
+
+用户提供 Skill Layer 建议，本轮纳入设计提案，不代表实现或批准全部远期范围。相较既有 F13/F14 的工作台与 Assist，F24 增加可追溯的能力定义、输入输出契约、版本绑定和组合蓝图应用；不新增 Agent Runtime。蓝图 Skill 的用户名称更新为“从目标创建项目蓝图”，工作台是其输出的一部分。具体取舍见 [ADR-008](../decisions/ADR-008-declarative-skills.md)。
+
+同日后续确认：用户要求将评审后的闭环 Skill 方案“加进去”。F24 首批目标由仅蓝图扩展为任务定义、项目恢复、验收方案和蓝图；蓝图为展示旗舰，工程上先完善前三项。修复、交接、确定性状态提交分别属于 F05/F06、F08、F04/F01 的既有核心要求，按需包装 Skill，不重复计作八套新模块。Decision Capture 后续补充，其余候选与领域 Pack 见[首批目录](../architecture/relay-skills.md#7-首批闭环能力与后续目录)。该方向已确认，具体 schema/API/迁移仍 Proposed、未实现。
+
+| 阶段 | 设计范围 | 与原总纲的关系 |
+|---|---|---|
+| V1 | 四项首批 Skill；第一方最小 Pack、内置 Recipe/Profile、Proposal 审查体验、基础 Eval；Run/Assist 轻量来源视图 | 复用 F05/F06/F09/F11/F14/F16；没有插件运行平台、联网安装器或整包原子升级 |
+| V1.5 | 声明式 Skill/Pack 编辑、Page Schema、Importer、完整 Inspector、Trigger/Automation、Project Checkpoint | 与原后续路线衔接，具体实现另设计；AI 生成 Schema 从 V2 前移仍待确认，Checkpoint 不承诺外部效果回滚 |
+| V2+ / 长期 | 第三方 Pack、Plugin SDK、代码组件、推荐/兼容检查及 Marketplace 候选 | 保留原长期代码扩展边界；可检查更新，不自动应用或扩大权限；市场不作当前交付承诺 |
+
+蓝图的 Rule/Workflow/Verification 建议另行确认，不随显示配置生效；无模型时人工创建项目仍可用。首批之外的候选 Skill 不自动变成 V1 交付项；Artifact 显式提升为 Knowledge、Memory 确认等已有 V1 基础能力不因智能包装后置而推迟。F24 进入 D 阶段前须按专题出口冻结 API/schema/迁移与并发协议，不改变 P00/A–C 的先后约束。
+
+既有细化缺口：Milestone 在总纲/Onboarding 中有建议需求，但当前正式字段与写命令未闭合；蓝图暂只输出建议，不能当作 completed highlight 保存。已有项目类型变更也没有当前 API，不能借蓝图静默改类型。相关写能力须先补契约再落地，不把它们报告为已实现。
+
+同日扩展模型补充：用户要求按评审修改文档并补充必要约束。Pack、Recipe、Profile 是既有能力的组合/配置，不各建新运行系统。V1 两个领域 Pack 仅引用已交付成员，不把候选领域 Skill 全部纳入必交；基础 Eval 属于工程验收，不因 P22 可选而省略。完整分工和升级/恢复限制统一见[扩展模型](../architecture/relay-skills.md#8-可组合扩展模型)。
+
+## 核心用户路径
+
+1. Me：Inbox/项目任务 → 明确验收 → 人工工作 → 固定产物版本 → 人工接受 → 完成 → 可重开。
+2. AI Assist：选择项目资料 → 只读上下文辅助 → 提案/候选文本 → 用户明确接受后调用业务命令；不自动取得执行权。
+3. Delegate：绑定项目与配置 → 固定 Workflow → 产物 → 验证/修正/Review → 完成事务；中途可请求安全接手。
+4. Development：连接受信仓库 → 看清范围/策略 → 隔离副本变化集 → 受控测试 → 审批本地/远程动作 → 证据与结果归档。
+5. Thesis：资料/决定/约束 → Markdown 草稿 → 区分引用存在与论断支持 → 人工核验 → 版本化交付；不声称 DOI 可解析即可保证学术正确。
+
+## 保留与后置
+
+V1 不做多用户协作、远程设备配对、多 Agent Router、通用流程 DSL/可视化 Builder、任意 Shell、自动画像、低代码 UI、通用知识图谱或大批外部 Connector。MCP/REST 扩展只保留实际需要的 Adapter 边界，不创建无调用方占位工程。
+
+三种 Workbench 是内置页面组合，共用 Task/State/Run 事实。Thesis 不扩展为文献管理器，Development 不扩展为 IDE，General 不扩展为 Notion。受控工具必须通过安全出口，未完成时显示不可用，不用 Fake 成功冒充最终交付。
+
+## 完成口径
+
+设计完成要求每个 F 条目有唯一主设计、可执行任务和验收依据。软件完成需要真实源码和测试，二者分开报告。尚未确认的产品细化、导师研究认可及依赖精确补丁属于后续核验项；设计包提供默认方案和替换条件，不伪造其已确认。

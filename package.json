@@ -1,0 +1,17 @@
+{
+  "name": "relay-agent",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "scripts": {
+    "typecheck": "pnpm --filter @relay-agent/api run typecheck",
+    "build": "pnpm --filter @relay-agent/api run build",
+    "start": "pnpm --filter @relay-agent/api run start",
+    "test": "pnpm --filter @relay-agent/api run test",
+    "test:integration": "pnpm --filter @relay-agent/api run test:integration",
+    "check:docs": "node scripts/check-docs.mjs"
+  }
+}

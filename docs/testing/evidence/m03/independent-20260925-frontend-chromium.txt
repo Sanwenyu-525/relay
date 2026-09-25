@@ -1,0 +1,37 @@
+
+[WebServer] (node:39208) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 21 tests using 2 workers
+
+
+(node:18428) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+(node:31076) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/21] tests\browser\run-events.spec.ts:9:1 › 真实 Run 的 Bearer SSE 提示触发权威快照，离页不发取消命令
+[2/21] tests\browser\workbench.spec.ts:11:3 › 桌面视口 › 四个状态都渲染真实中文 DOM 且无整页横向滚动
+[3/21] tests\browser\workbench.spec.ts:22:3 › 桌面视口 › 右判断区在宽视口常驻，来源详情标题与对象一致
+[4/21] tests\browser\workbench.spec.ts:34:3 › 桌面视口 › 切换局部页签与浏览器返回都可用
+[5/21] tests\browser\workbench.spec.ts:45:3 › 桌面视口 › 路由与 query 子页切换后恢复页面顶部
+[6/21] tests\browser\workbench.spec.ts:63:3 › 桌面视口 › 禁用状态的原因对用户可见
+[7/21] tests\browser\workbench.spec.ts:73:3 › 窄视口 › 右区改为按钮打开，来源详情不叠加浮层
+[8/21] tests\browser\workbench.spec.ts:88:3 › 窄视口 › 主操作与导航不被裁切
+[9/21] tests\browser\workbench.spec.ts:106:3 › 小窗口 › 左导航转为抽屉，主要内容单列可达
+[10/21] tests\browser\workbench.spec.ts:122:1 › 未保存草稿切换页签会先询问，保留后仍可继续编辑
+[11/21] tests\browser\workbench.spec.ts:134:1 › R02：创建页草稿会拦截侧栏和浏览器返回，明确放弃后才能离开
+[12/21] tests\browser\workbench.spec.ts:151:1 › 键盘可达：跳转主内容链接先获得焦点
+[13/21] tests\browser\workbench.spec.ts:166:3 › 项目与任务列表 › 全局页使用工作空间面包屑，列表无整页横向滚动
+[14/21] tests\browser\workbench.spec.ts:181:3 › 项目与任务列表 › 项目列表选择、归档与打开入口可用
+[15/21] tests\browser\workbench.spec.ts:194:3 › 项目与任务列表 › 项目摘要突出当前对象与状态，且不凭任务数量宣称完成
+[16/21] tests\browser\workbench.spec.ts:205:3 › 项目与任务列表 › 创建项目：必填校验后就地报错，填写后进入列表
+[17/21] tests\browser\workbench.spec.ts:221:3 › 项目与任务列表 › 新建任务：ready 通过后不自动执行，依赖未完成时给出原因
+[18/21] tests\browser\workbench.spec.ts:240:3 › 项目与任务列表 › 项目任务：项目内导航与依赖判断可用
+[19/21] tests\browser\workbench.spec.ts:256:3 › 列表窄视口 › 宽表在局部滚动，右区改为按钮打开且主操作可达
+[20/21] tests\browser\workbench.spec.ts:278:3 › 200% 内容缩放 › Chromium 内容缩放为 200% 时当前对象与主操作仍可达
+[21/21] tests\browser\workbench.spec.ts:306:3 › 200% 内容缩放等效视口 › 项目摘要和主操作在窄宽度下可打开、滚动到达并关闭
+  21 passed (23.0s)
+exit_code=0

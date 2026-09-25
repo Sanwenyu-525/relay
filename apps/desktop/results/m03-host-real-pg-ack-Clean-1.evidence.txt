@@ -1,0 +1,12 @@
+﻿scenario=Clean backlog=1 expect_launch_ack=True
+session_id=69f4b6f996b14248947dadf28ce9f98f pg_port=10149 release_sha256=0769b1dd762fce84690bdc9955bd18a4562c253f2854a49c6630015b0082523e
+seeded_run_ids=a8e3e981-e071-456e-aa0a-99e2b117d2df seed_api_exit=0
+run_steps_exclusive_lock=1 lock_psql_pid=9828
+run_steps_ungranted_worker_lock_count=1
+before_kill run_id=a8e3e981-e071-456e-aa0a-99e2b117d2df command_id=adbd541d-c578-4dba-b4ef-214126480d54 launch_id=a96e8956-216e-4c69-b628-4ad65d967659 facts={"invocation_status":"ACTIVE","epoch":1,"worker_id":"worker:desktop:a96e8956-216e-4c69-b628-4ad65d967659:99872ff0-d6e1-4cf4-940e-9c54ffbf94b1","outbox_status":"CLAIMED","receipt_count":1,"command_count":1,"first_step_attempts":null}
+processes_before_kill=[{"pid":6192,"parent_pid":29364,"created_utc":"2026-09-24T04:00:55.6252800Z","executable":"D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\relay-desktop.exe"},{"pid":35496,"parent_pid":6192,"created_utc":"2026-09-24T04:00:55.6467310Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"},{"pid":26040,"parent_pid":6192,"created_utc":"2026-09-24T04:00:56.5499110Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"},{"pid":3768,"parent_pid":26040,"created_utc":"2026-09-24T04:00:56.9498750Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"}]
+after_kill host_api_supervisor_worker_alive=0 old_record_retained=True facts={"invocation_status":"ACTIVE","epoch":1,"worker_id":"worker:desktop:a96e8956-216e-4c69-b628-4ad65d967659:99872ff0-d6e1-4cf4-940e-9c54ffbf94b1","outbox_status":"CLAIMED","receipt_count":1,"command_count":1,"first_step_attempts":null}
+run_steps_exclusive_lock_after_release=0
+restart_bootstrap_elapsed_ms=1937 controlled_old_launch_claims=1
+after_restart new_host_pid=11704 old_record_retained=False facts={"invocation_status":"IDLE","epoch":2,"worker_id":"","outbox_status":"DONE","receipt_count":1,"command_count":1,"first_step_attempts":1}
+M03_REAL_HOST_RECOVERY=PASS scenario=Clean backlog=1 pg_stop=0 temporary_root_removed=True

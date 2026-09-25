@@ -1,0 +1,10 @@
+session_root=C:\Users\ASUS\AppData\Local\Temp\relay-m02-acceptance-d3893fb536a34da2973c190cbd6e83a4
+session_root_exists=False
+postgres_stop_exit=0 temporary_root_removed=True (from r1 raw log)
+pid_11104=absent
+pid_40624=absent
+pid_18972=absent
+pid_39636=absent
+pid_32892=absent
+pid_40252=absent
+isolated_pg_port_5633=closed

@@ -1,0 +1,14 @@
+M03 ACTION_APPROVAL Windows/WebView2 脚本准备（2026-09-24 UTC）
+
+新入口：apps/desktop/tests/m03-action-approval-webview.mjs
+输入 SHA-256：m03-action-approval-script-input.sha256
+原始静态检查：m03-action-approval-script-static.log（Node v22.22.3 与现有随包 Node v24.21.0 均 --check 成功）
+
+预定真实路径：WebView2 创建 Project/Task；以该宿主 bootstrap 的同 Workspace Bearer 通过 HTTP 注册本次隔离 data_root 下的 Managed Resource、FAKE_WRITE Connection、ASK Policy，并通过 HTTP Delegate 提交 mock_gateway_action。Workbench 当前没有该动作配置表单，脚本不把受权 HTTP Delegate 冒称 UI Delegate。独立 Worker 经受控临时 PG step_attempts 锁观察，所有业务写入仍走受权 API/UI。
+
+ACTION_APPROVAL 前要求旧 START/outbox DONE、Run/Task 等待、原 operation_id 与根图 interrupt 持久；无 Invocation、Fake marker、候选 Artifact 或 Completion。宿主重启后 WebView2 可见绑定原 operation_id 的动作 Review；APPROVE 回执仍声明 external_effect_executed=false。仅原决定的 RESUME 执行一次 Fake marker，同一 operation_id、一个 Invocation 和一个审批保留记录；随后出现不同 ID 的 CRITERION Review，ACTION RESUME 已结清。WebView2 ACCEPT 后第二条 RESUME 完成同一 Run/Task，Artifact 与 Completion 各唯一，原 marker 未改写。另核对 SSE seq、检查点/attempt、Bearer 轮换与存储/日志边界、跨 Workspace 404、运行期 migrator 无会话和隔离 PG/宿主进程的精确清理。
+
+后端与新 Windows release 尚未冻结，本片没有运行真实 WebView2/PG 联测、没有重建 apps/api/dist，也没有 M03 ACTION_APPROVAL 的运行通过结论。新包冻结后需先取得 EXE、随包 0013 与 manifest 的 SHA-256，再以随包 Node v24.21.0 运行：
+apps/desktop/release/node.exe apps/desktop/tests/m03-action-approval-webview.mjs <EXE-SHA256> <0013-SHA256> <MANIFEST-SHA256>
+
+本片只新增测试入口及准备证据，未修改 API、Workbench、冻结的 m03-review-resume-webview.mjs、release 或项目状态文档；测试脚本不构成 API/数据库/产品 Breaking Change。

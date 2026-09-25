@@ -1,0 +1,96 @@
+M03 SSE / real Windows WebView2 / PostgreSQL development self-check — 2026-09-24
+Status: READY_FOR_ACCEPTANCE of this frontend/desktop integration slice only.
+This is not independent M03 or G01–G08 acceptance, nor Windows installer/IME/DPI proof.
+
+Environment: Windows 11 x64 10.0.22631; portable Node v24.21.0,
+PostgreSQL 18.6; packaged Tauri/WebView2; real packaged Fastify API and
+independent supervisor/Mock Worker. No Provider or user PostgreSQL service used.
+
+Package binding: build-release.ps1 -SkipInstall exited 0; raw output is
+m03-sse-build-release.log. EXE SHA-256:
+b49af3bacd622587a68337ac7448a2d60201a5102502fb8a47593718ef4ffbba
+desktop-build-manifest.json SHA-256:
+b782780435fd9129f168ccc29d2adaa84f7611d31997734df6917967c1fb1514
+Build input fingerprint:
+fd3d22b88695fff2dc08d1a9e81fb8d0cb8968cf3a90e66636eff274f139f31d
+The build reported 7873 hashed resources, 0 forbidden configuration files.
+Bundled API SSE entry SHA-256:
+df970326c34284cc79874877dd4b0e997afad118adf07e6fc070ce67374e921b
+Bundled 0012_m03_run_events.sql SHA-256:
+3a26be8ad9fe420d597afd414abd7df1aa6edc110c12fcafd6c13ef0be527baf
+Both bundled hashes matched the accepted backend dist/migration at package time.
+The backend has since continued with 0013; do not rebuild this exact package
+from the current worktree. The stop-acceptance-session.ps1 test helper was
+repaired after this build, so its current SHA differs from the manifest's
+build-time source SHA. The EXE, packaged API and manifest were not changed.
+
+Reproduce the frozen package test from D:\Develop\Relay-Agent, using PowerShell:
+  & '.research\runtime-cache\node-v24.21.0-win-x64\node.exe' apps/desktop/tests/m03-sse-webview.mjs df970326c34284cc79874877dd4b0e997afad118adf07e6fc070ce67374e921b 3a26be8ad9fe420d597afd414abd7df1aa6edc110c12fcafd6c13ef0be527baf
+The command exits 0 only
+after verifying PG stop and disposable-root removal. Final raw output:
+m03-sse-webview-final.console.log, exit 0.
+
+The test uses start-acceptance-session.ps1 -SkipDesktop, the existing release
+API m03-seed-run.mjs, three per-Run row locks on BUILD_CONTEXT, and real
+visible desktop launches. The locks block Worker step writes while ordinary
+Run snapshot reads remain available. Test SQL only establishes/releases the
+lock and observes facts; it never substitutes for a domain business write.
+
+Observed final run:
+- Disposable session c6e170a76c3043939eaafb7c9a07dcc0 used PG port 13143.
+  API seed produced three real Task/Run/Delegate commands; seed API exited 0.
+- Run 7c63f171-e3a4-4758-ba63-0c3a2f6f70a5: first persistent SSE id 1,
+  historical WebView stream opened with after=0, the Run page made at least two
+  authoritative GETs. After releasing its row lock, Mock Worker committed
+  contiguous seq 1..31; Run page made three GETs and showed the server revision.
+- A separate Bearer fetch inside the actual WebView read seq 1, aborted its
+  stream, then requested after=1 and received seq 2. Leaving the product Run
+  page made zero control POSTs; no Cancel command was created by navigation.
+- Run fd5cd5f5-6180-44ef-9579-9c0f81879639: a controlled browser route
+  refused two SSE requests while Mock Worker committed seq 1..31. The Run page
+  then corrected itself from authoritative GET, and after unblocking SSE it
+  opened historical after=0 again. This is a network-failure test shim on the
+  SSE request only; the PG/API facts and snapshot responses are real.
+- Run b7bd6e81-3df5-4c80-ad97-80f20d82fcfb: before host kill one real
+  Worker held ACTIVE epoch 1 and the row lock; event seq was 1. Only the Tauri
+  host PID 33084 was killed. API 7416, supervisor 30120 and Worker 38948 all
+  stopped with it. Before restart the old claim remained ACTIVE epoch 1 and
+  seq stayed 1. The reopened packaged host PID 37068 showed seq 1..31 from
+  durable history and the current server Run revision 6. Invocation settled
+  IDLE epoch 2, original command count 1, control request count 0.
+- Real SSE boundary requests returned 401 without Bearer, 403 for wrong Origin,
+  400 for wrong Host and 404 for another Workspace. A raw HTTP request was
+  required for Host because Node fetch rewrites Host to the URL authority.
+  The test checked WebView request URLs, local/session storage and both host
+  logs for the in-memory bearer; none contained it. No token was printed.
+- Final test cleanup reported postgres_stop_exit=0 and
+  temporary_root_removed=True. Both host generations' process identities were
+  captured before cleanup, and the test refused directory removal if a known
+  process or a controlled PG row lock remained.
+
+Red/green history retained, without weakening product checks:
+- m03-sse-webview.console.log: test parser rejected the PowerShell BOM in the
+  package manifest before starting a PG session; fixed BOM handling.
+- Attempt 2 produced no durable console log before its launcher blocked on
+  pipe EOF held by disposable PG. The exact test Node was stopped and PG stop
+  exited 0; that cleanup was observed in the command output, not retained as
+  a raw log. The old helper then treated desktop_pid=0 as a reused process.
+  After the scoped helper fix, the verified temporary root was removed.
+- m03-sse-webview-attempt3.console.log: incorrect Node fetch Host probe got
+  200 because undici rewrote Host; replaced with raw node:http, PG cleaned.
+- m03-sse-webview-attempt4.console.log: CDP setOffline did not sever an already
+  open loopback SSE stream, so transient reconnect text could not be observed;
+  PG cleaned. It is not a product failure or proof of product auto-reconnect.
+- m03-sse-webview-attempt5.console.log: all integration assertions passed,
+  PG cleaned. The final run added explicit stranded-claim/unchanged-seq and
+  fenced epoch-2 assertions and also passed.
+
+Limit: actual RunView automatic reconnection after an already-established
+WebView SSE socket is forcibly severed on the same page remains unverified in
+this real package. CDP offline emulation did not cut the existing loopback
+stream. The WebView transport's controlled abort/resume and product client
+reconnection in controlled component/browser streams are separate evidence.
+This run does not prove large-output behavior, all G01/G07/G08 cases, desktop
+IME/DPI, clean-machine installation or full M03 recovery. No real Provider was
+connected. Input and raw-log SHA-256 lists are in m03-sse-webview-inputs.sha256
+and m03-sse-webview-logs.sha256.

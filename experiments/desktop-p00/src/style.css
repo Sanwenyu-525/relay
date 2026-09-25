@@ -1,0 +1,50 @@
+:root {
+  color: #1a2534;
+  background: #f3f6fb;
+  font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  box-sizing: border-box;
+  display: grid;
+  gap: 18px;
+  min-height: 100vh;
+  padding: 52px;
+  place-content: center start;
+}
+
+.eyebrow {
+  color: #4c6080;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+h1 {
+  font-size: 30px;
+  margin: 0;
+}
+
+pre {
+  background: #ffffff;
+  border: 1px solid #d9e1ee;
+  border-radius: 12px;
+  box-sizing: border-box;
+  font: 15px/1.7 "Cascadia Mono", Consolas, monospace;
+  margin: 0;
+  max-width: 720px;
+  padding: 20px;
+  white-space: pre-wrap;
+}
+
+.boundary {
+  color: #4c6080;
+  line-height: 1.6;
+  margin: 0;
+  max-width: 720px;
+}

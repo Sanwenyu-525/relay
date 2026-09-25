@@ -1,0 +1,13 @@
+1b78fba546ad66a24aa57a0397f8546ed3ae0e14ff551c21b82b010726fc5a32  apps/desktop/results/m03-host-ack-build-release.log
+5752133c49fb8faf00eb50bf980bccb5d63bd9966587474e14f1eecf2de8bc05  apps/desktop/results/m03-host-ack-cargo-check.log
+9cdf25f07a13016180b81028758d2c5df999c9d0ce936f5b21dabfa98919fbb2  apps/desktop/results/m03-host-ack-docs-check.log
+c9f51564203501543ed014c35c6625188bf83a9a580d9fa59ec38b9b35c2e288  apps/desktop/results/m03-host-ack-rust-tests.log
+de29c1b05c93be0311a401501c5d5b68f257e5791eb22605461c22aebc9df31f  apps/desktop/results/m03-host-real-pg-ack-Clean-1.console.log
+0d9bfc58794526ed46395f90bb13fbcc928a15013d9ca00a0a072c0fafd311e6  apps/desktop/results/m03-host-real-pg-ack-Clean-1.evidence.txt
+b1475e9c8e2f3ce9fed23b79d5a1c4cb9709273f3cdba36c4a6d86542bf5f866  apps/desktop/results/m03-host-real-pg-ack-Clean-1.log
+c2346505f58402055c6262a94d0d50e1ebcb343c69cc5def13f4d0456c780e53  apps/desktop/results/m03-host-real-pg-ack-Clean-32.console.log
+f3cd4971118200df2dd6b7d6f2ee2cd3ba47de6c59cccfca3b07fc8962a50989  apps/desktop/results/m03-host-real-pg-ack-Clean-32.evidence.txt
+2bb9b674da05fa16c1343536926040c5ece9f91c907a1c93bc012c290024c200  apps/desktop/results/m03-host-real-pg-ack-Clean-32.log
+b56f6f8cf491662d3d604c5a130665608fdc7eb44cd3ea352af7e5d27345714c  apps/desktop/results/m03-host-real-pg-ack-Unknown-1.console.log
+c6eba5ef9c0ed6bc69f93229b7ff21729f63f2ff0fab4a0d45bba5ae20f47885  apps/desktop/results/m03-host-real-pg-ack-Unknown-1.evidence.txt
+42f84a2603af92e2d1b9f759d0c2e3929b9791f76e948e56fb476a809228bdd6  apps/desktop/results/m03-host-real-pg-ack-Unknown-1.log

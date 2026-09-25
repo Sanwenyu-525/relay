@@ -1,0 +1,71 @@
+M03 Windows desktop launch-ack integration self-check — 2026-09-24
+Status: READY_FOR_SLICE_ACCEPTANCE. This is not independent M03/G04/G05 acceptance.
+
+Environment: Windows 11 x64 10.0.22631; portable Node v24.21.0 and PostgreSQL
+18.6 under .research/runtime-cache; Rust stable-x86_64-pc-windows-msvc 1.95.0;
+Tauri core 2.11.6 / CLI 2.11.5. No real Provider was connected.
+
+Frozen package: apps/desktop/release/relay-desktop.exe SHA-256
+0769b1dd762fce84690bdc9955bd18a4562c253f2854a49c6630015b0082523e.
+Build input fingerprint c732e704046321639f3fc6346881d280ab6528ef1e954ede73e34503744fcf72.
+apps/desktop/release/desktop-build-manifest.json SHA-256
+067e2068aae09eb37466de6af711129e55f5684abf2961a8003ab8c126803409;
+it records 20 desktop, 122 API, 55 workbench source entries and 7870 resource
+file hashes, including all 11 Relay migrations. Bundled supervisor entry SHA-256
+9fb50ab6f0de7cc3bf6d6efed74ed662061bdd0c7682e2bcae8d02e2e04b26b5.
+The full exact input list is m03-host-ack-inputs.sha256. The separate
+m03-host-ack-logs.sha256 binds all 13 raw build/check/test logs and fact files.
+
+Commands (from D:\Develop\Relay-Agent unless a different cwd is stated):
+1. powershell -NoProfile -ExecutionPolicy Bypass -File
+   apps/desktop/scripts/build-release.ps1 -SkipInstall
+   Exit 0; m03-host-ack-build-release.log. Locked hoisted API deploy, production
+   React build, Tauri release compile, 7870 resource hashes, forbidden config 0.
+2. cd apps/desktop/src-tauri; set RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-msvc;
+   cargo test --locked --target x86_64-pc-windows-msvc
+   Exit 0, Rust 20/20; m03-host-ack-rust-tests.log. Includes malformed/missing,
+   duplicate/unknown/out-of-order ack, JS unsafe integer, 4096-ack pipe drain,
+   injected idle/absolute timeout and ARMED identity/retention tests.
+3. Same cwd/toolchain: cargo check --locked --target x86_64-pc-windows-msvc
+   Exit 0; m03-host-ack-cargo-check.log.
+4. .research/runtime-cache/node-v24.21.0-win-x64/node.exe scripts/check-docs.mjs
+   Exit 0; m03-host-ack-docs-check.log. PowerShell parser check of
+   test-m03-host-real-pg.ps1 also exited 0.
+5. powershell -NoProfile -ExecutionPolicy Bypass -File
+   apps/desktop/scripts/test-m03-host-real-pg.ps1 -Scenario Clean
+   -BacklogCount 1 -ExpectLaunchAck
+   Exit 0; m03-host-real-pg-ack-Clean-1.{console.log,log,evidence.txt}.
+6. Same command with -BacklogCount 32
+   Exit 0; m03-host-real-pg-ack-Clean-32.{console.log,log,evidence.txt}.
+7. Same command with -Scenario Unknown -BacklogCount 1
+   Exit 0; m03-host-real-pg-ack-Unknown-1.{console.log,log,evidence.txt}.
+
+Actual Windows/PG/Mock Worker outcomes:
+- Clean 1: host/API/supervisor/Worker PIDs 6192/35496/26040/3768 stopped
+  after only the host was killed; old ACTIVE/CLAIMED epoch 1 remained until
+  restart. Reopened packaged window bootstrap took 1937 ms. The original
+  command and receipt remained one each; new epoch 2, first step attempt one,
+  and the zero-claim old ARMED record was removed after dispatch readiness.
+- Clean 32: the same prior launch carried 32 controlled ACTIVE claims; four
+  PIDs 6008/37760/38964/39328 stopped. Bootstrap took 2292 ms; all 32 old
+  claims were reconciled, the zero-claim old ARMED record was removed, and the
+  first Run kept one command/receipt and one step attempt at epoch 2.
+- Unknown 1: four PIDs 9220/3364/37724/30472 stopped. A controlled
+  application-port fault fixture then made the original operation result
+  ambiguous, without a Provider. Bootstrap took 1680 ms; original operation_id
+  7e4fa498-155a-456d-9033-77feb7a209cd became UNKNOWN with dispatch_count=1.
+  Original ACTIVE/CLAIMED epoch 1 claim and ARMED proof remained; zero new Worker.
+- All three disposable PG sessions stopped with pg_stop=0 and removed their
+  temporary roots. The evidence.txt files retain run/command/launch/PID/PG
+  facts; the .log files retain test PowerShell transcripts and .console.log
+  retains the outer raw stream including PG initialization and migrations.
+  No bearer token or DB URL was copied into this evidence.
+
+Limits: 4096 acknowledgements are a controlled Rust stream test, not 4096
+real PG claims. The real backlog is one launch with 32 claims; a much slower
+single-launch recovery may hit the safe 120-second idle deadline and preserve
+ARMED rather than open the Workbench. UNKNOWN is fault-injected after actual
+process stop, not a claim that a Provider operation was forcibly interrupted.
+An installable package, clean-machine setup, and M03 overall acceptance remain
+outside this slice. cargo fmt --check returned 1 on pre-existing whole-file
+formatting differences in lib.rs/job_sidecar.rs; no broad reformat was applied.

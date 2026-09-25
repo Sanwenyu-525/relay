@@ -1,0 +1,14 @@
+{
+  "release_exe_sha256": "e3efc520e7c641ae9c7d1a146c9bc0ae3e4160a59d8bf893b4a81ff16bd268c6",
+  "source_files_checked": 184,
+  "resource_files_checked": 3998,
+  "actual_resource_files": 3998,
+  "root_entries": [
+    "api",
+    "desktop-build-manifest.json",
+    "node.exe",
+    "relay-desktop.exe"
+  ],
+  "forbidden_config_files": 0,
+  "mismatches": []
+}

@@ -1,0 +1,3 @@
+windows-session-l-zoom-100.png: screenshot=1162x811, sample_rgb=(43, 85, 73), new-task-button-background=982,266,1102,295, interior_width=121
+windows-session-l-zoom-200.png: screenshot=1162x811, sample_rgb=(40, 87, 71), new-task-button-background=864,400,1109,489, interior_width=246
+Native input: five Ctrl++ presses from a fresh window at 100%; scroll reached both ID fields; Ctrl+0 restored the original layout.

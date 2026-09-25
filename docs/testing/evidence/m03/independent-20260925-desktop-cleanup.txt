@@ -1,0 +1,11 @@
+session_root=C:\Users\ASUS\AppData\Local\Temp\relay-m02-acceptance-7e12ce13d05e4370bff745620ea8379d exists=False
+session_root=C:\Users\ASUS\AppData\Local\Temp\relay-m02-acceptance-b5ad3c83854442d8967ca094dcd81a2a exists=False
+session_root=C:\Users\ASUS\AppData\Local\Temp\relay-m02-acceptance-adb8bcb318da491bb11407d73dbf011b exists=False
+owned_host_pid=31596 absent=True
+owned_host_pid=42220 absent=True
+owned_host_pid=27888 absent=True
+owned_host_pid=30984 absent=True
+owned_host_pid=33912 absent=True
+test_pg_port=4461 listener_count=0
+test_pg_port=12278 listener_count=0
+test_pg_port=6179 listener_count=0

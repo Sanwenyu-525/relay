@@ -1,0 +1,28 @@
+[WebServer] (node:30132) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 19 tests using 1 worker
+
+(node:37432) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 tests\browser\workbench.spec.ts:11:3 › 桌面视口 › 四个状态都渲染真实中文 DOM 且无整页横向滚动 (1.5s)
+  ok  2 tests\browser\workbench.spec.ts:22:3 › 桌面视口 › 右判断区在宽视口常驻，来源详情标题与对象一致 (939ms)
+  ok  3 tests\browser\workbench.spec.ts:34:3 › 桌面视口 › 切换局部页签与浏览器返回都可用 (1.0s)
+  ok  4 tests\browser\workbench.spec.ts:45:3 › 桌面视口 › 禁用状态的原因对用户可见 (594ms)
+  ok  5 tests\browser\workbench.spec.ts:55:3 › 窄视口 › 右区改为按钮打开，来源详情不叠加浮层 (671ms)
+  ok  6 tests\browser\workbench.spec.ts:70:3 › 窄视口 › 主操作与导航不被裁切 (623ms)
+  ok  7 tests\browser\workbench.spec.ts:88:3 › 小窗口 › 左导航转为抽屉，主要内容单列可达 (428ms)
+  ok  8 tests\browser\workbench.spec.ts:104:1 › 未保存草稿切换页签会先询问，保留后仍可继续编辑 (757ms)
+  ok  9 tests\browser\workbench.spec.ts:116:1 › R02：创建页草稿会拦截侧栏和浏览器返回，明确放弃后才能离开 (823ms)
+  ok 10 tests\browser\workbench.spec.ts:133:1 › 键盘可达：跳转主内容链接先获得焦点 (362ms)
+  ok 11 tests\browser\workbench.spec.ts:148:3 › 项目与任务列表 › 全局页使用工作空间面包屑，列表无整页横向滚动 (902ms)
+  ok 12 tests\browser\workbench.spec.ts:163:3 › 项目与任务列表 › 项目列表选择、归档与打开入口可用 (710ms)
+  ok 13 tests\browser\workbench.spec.ts:176:3 › 项目与任务列表 › 项目摘要突出当前对象与状态，且不凭任务数量宣称完成 (639ms)
+  ok 14 tests\browser\workbench.spec.ts:187:3 › 项目与任务列表 › 创建项目：必填校验后就地报错，填写后进入列表 (953ms)
+  ok 15 tests\browser\workbench.spec.ts:203:3 › 项目与任务列表 › 新建任务：ready 通过后不自动执行，依赖未完成时给出原因 (1.3s)
+  ok 16 tests\browser\workbench.spec.ts:222:3 › 项目与任务列表 › 项目任务：项目内导航与依赖判断可用 (1.6s)
+  ok 17 tests\browser\workbench.spec.ts:238:3 › 列表窄视口 › 宽表在局部滚动，右区改为按钮打开且主操作可达 (995ms)
+  ok 18 tests\browser\workbench.spec.ts:260:3 › 200% 内容缩放 › Chromium 内容缩放为 200% 时当前对象与主操作仍可达 (681ms)
+  ok 19 tests\browser\workbench.spec.ts:288:3 › 200% 内容缩放等效视口 › 项目摘要和主操作在窄宽度下可打开、滚动到达并关闭 (671ms)
+
+  19 passed (26.8s)

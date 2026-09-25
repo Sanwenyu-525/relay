@@ -1,0 +1,15 @@
+{
+  "release_sha256": "ffa3cf49c7e7588f7a88e3e2411b132db7b285f01a9b2805f05da59448e2c2bf",
+  "session_id": "38ea6b1e2fa54c29824bf2401cc645d7",
+  "cdp_enabled": false,
+  "window": {
+    "app": "process:D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\relay-desktop.exe",
+    "id": 1114660,
+    "title": "Relay Agent"
+  },
+  "accessibility": {
+    "tree": "Window: \"Relay Agent\", App: relay-desktop.exe.\n\t0 窗口 Relay Agent Secondary Actions: Raise\n\t\t1 窗格\n\t\t\t2 窗格 Workflow OS · 交互预览\n\t\t\t\t3 窗格 (disabled)\n\t\t\t\t4 区域 Workflow OS · 交互预览 - Web 内容\n\t\t\t\t\t5 区域\n\t\t\t\t\t\t6 区域\n\t\t\t\t\t\t\t7 区域\n\t\t\t\t\t\t\t\t8 区域\n\t\t\t\t\t\t\t\t9 区域\n\t\t\t\t\t\t\t\t\t10 区域\n\t\t\t\t\t\t\t\t\t\t11 区域\n\t\t\t\t\t\t\t\t\t\t\t12 区域\n\t\t\t\t\t\t\t\t\t\t\t\t13 区域\n\t\t\t\t\t\t\t\t14 区域\n\t\t\t\t\t\t15 区域\n\t\t\t\t\t\t16 区域\n\t\t17 标题栏 (settable, string) Value: Relay Agent\n\t\t\t18 菜单栏 系统 ID: MenuBar\n\t\t\t\t19 菜单项目 系统\n\t\t\t20 按钮 最小化\n\t\t\t21 按钮 最大化\n\t\t\t22 按钮 关闭"
+  },
+  "screenshot_observation": "black screenshot with pointer; window framework only in accessibility; packaged page not verified",
+  "inputs_performed": false
+}

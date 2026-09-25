@@ -1,0 +1,77 @@
+[
+  {
+    "name": "knowledge-fixture.png",
+    "vue_sha256": "04c1b8bbd7942ceb78fe9e0560b08a2fd80db078d0decd3d9a76ccb03ecbcb58",
+    "react_sha256": "7968cfd220e78247f5fb5ec7e1c3c748a7e15f7792f906ce455fbae236b90da1"
+  },
+  {
+    "name": "project-knowledge-fixture.png",
+    "vue_sha256": "72c7ffa11226660f40cda75de4844de3740e3486d04dd34189958b76f734cfb6",
+    "react_sha256": "c5c4df2e8c7ea5a38f3c80ff2becf0ffc1cb764717ff2833ccc3af15dc05e039"
+  },
+  {
+    "name": "reviews-fixture.png",
+    "vue_sha256": "d631c1ea0e34ca6021b49e144f3b1c5947a904beedd31a6dfc16b3a7da885a85",
+    "react_sha256": "a3aadcc7435f8fd5b25e56e957d34f92ed17c7929107eaf9f72b5a27b6e48661"
+  },
+  {
+    "name": "ui-05-projects.png",
+    "vue_sha256": "4028874139ace06475c72d165e7b5e2ad43051d19559c3579435265ba2bb6cc2",
+    "react_sha256": "b235e11c9f7a946e1751c26d1cbef2267fbeb2ba30882757c0f6d4ecdfc162c0"
+  },
+  {
+    "name": "ui-06-create-project.png",
+    "vue_sha256": "d4f9f1f954ab413195631225bcf0461a13aa3dffea40f56880f363ff9fd08717",
+    "react_sha256": "f169de9edaa59a19ff0ac3074667cbecb4b4b984cf6c982916ab200cc3b46a42"
+  },
+  {
+    "name": "ui-07-tasks.png",
+    "vue_sha256": "48709394245417ec7f341b2904748d18cba0ad3bb14345062c6a484d610d7ed5",
+    "react_sha256": "4651a0869c5a044f7fa1ca0a0bb1e7ad95e37639f9249754aab3b33c592638ec"
+  },
+  {
+    "name": "ui-09-project-tasks.png",
+    "vue_sha256": "bd16a629c31565ece8b6368ad840bbde33bba84670bf3258401787fe2427104f",
+    "react_sha256": "9eef45945b04e360908e1820ba2b8c19fb81505214da81b51e5500bb173575fe"
+  },
+  {
+    "name": "ui-10-task-overview.png",
+    "vue_sha256": "092877463362edf20b9f60182c709a4bf7b5d558a0e9508675770171803a1982",
+    "react_sha256": "2f6751da5389a680e011b24a6210505f2e07e2f793462cb88e4e8155dad53cd3"
+  },
+  {
+    "name": "ui-10-task-runs.png",
+    "vue_sha256": "ece58792b59788b6c4a9a8471ec3dd6ba19c4f050fdc0b71416996b6e56bc366",
+    "react_sha256": "2cd33058f7390dca3aef24abfa7cf6c4743465366d4bd778495697fc41f54621"
+  },
+  {
+    "name": "ui-11-task-artifacts.png",
+    "vue_sha256": "600fd52016a2d8b84df605de72de2649fe6bf37493cf04c382ef804fe68c173a",
+    "react_sha256": "34d5aa6908af4ce0197ed11673ab86e0ca79c6ea80140977d5d3eebf1a622e68"
+  },
+  {
+    "name": "ui-29-create-task.png",
+    "vue_sha256": "474aed5dfd5dfdbfe7b3ba152f5a068bbe0d7d5f7fa52ed4ec6c86ad439d0cab",
+    "react_sha256": "fb0f3245d68335d7f70f49a3bfb0324284d8f5a1639ceaa912c85042fc2b5be5"
+  },
+  {
+    "name": "ui-30-project-blueprint.png",
+    "vue_sha256": "14837f822b34b47e1b77891316bfbea635db39b46f89e983137428f7bc64a1ff",
+    "react_sha256": "0dfb8cd1526fc33db8d168ee41bbd3664f9b20e1a9977c2d44ee99a75bcc90c3"
+  },
+  {
+    "name": "ui-31-task-definition.png",
+    "vue_sha256": "69a654ca6d907339ef45627cbeefb53da7a91515164552fa781b01be97085cca",
+    "react_sha256": "e056e0479c87a9a061690baa203ded25d8a01ca4886a0f7606617b2aa91e9fd9"
+  },
+  {
+    "name": "ui-32-verification-plan.png",
+    "vue_sha256": "ed31ed2e73c7cc2b434a038bf3f5303fbd1a06f90704b4c9182934a8b05dcbb2",
+    "react_sha256": "628e488499e7ba781ed5ddf73e9a7424f337a136a4c4d10c54e09b46997d5454"
+  },
+  {
+    "name": "ui-33-project-resume.png",
+    "vue_sha256": "02e22d4d379a4f9a46f552350cb50a2876cb4760c6c9bfc97a62c03b69e4afab",
+    "react_sha256": "ccd1df02f3d6089b3684cb409d2c31cbb3dd677a41a6e090ab7915293066954e"
+  }
+]

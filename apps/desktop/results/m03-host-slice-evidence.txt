@@ -1,0 +1,67 @@
+M03 Windows desktop host safety slice — 2026-09-24
+Status: READY_FOR_SLICE_ACCEPTANCE; M03 G04/G05 and release integration not accepted.
+
+Environment: Windows 11 x64 10.0.22631; Rust stable-x86_64-pc-windows-msvc 1.95.0;
+portable Node D:\Develop\Relay-Agent\.research\runtime-cache\node-v24.21.0-win-x64\node.exe
+(v24.21.0). Worktree files were not committed or cleaned.
+
+Frozen inputs and SHA-256: m03-host-slice-inputs.sha256. Original pre-edit SHA-256:
+  lib.rs 54a3b7a34fb26dc1b1464e47b8c0596a0b96adbc2aa2291b9b628d9fa455a133
+  Cargo.toml 43b194396c79e95eea87b04f991607105373c83e9e7def35b8b6502921198a5e
+  build-release.ps1 0b0bdfceb76177f79813f802b33c415eb9203e7080faf6fa27fc50dc097af850
+  local-deployment.md 623502f3babfc0c3939e0d99ce9cc9ad3445297237f7c76ac5ddce212239799b
+  job_sidecar.rs and the two scripts are new; Cargo.lock and tauri.conf.json were unchanged.
+
+Commands (run from D:\Develop\Relay-Agent unless a different cwd is shown):
+1. cwd apps/desktop/src-tauri;
+   $env:RUSTUP_TOOLCHAIN='stable-x86_64-pc-windows-msvc';
+   cargo check --locked --target x86_64-pc-windows-msvc
+   exit 0, m03-host-cargo-check.log.
+2. cwd apps/desktop/src-tauri;
+   $env:RUSTUP_TOOLCHAIN='stable-x86_64-pc-windows-msvc';
+   $env:RELAY_TEST_NODE='D:\Develop\Relay-Agent\.research\runtime-cache\node-v24.21.0-win-x64\node.exe';
+   $env:RELAY_TEST_OLD_SUPERVISOR_ENTRY='D:\Develop\Relay-Agent\apps\api\dist\src\worker\supervisor-main.js';
+   cargo test --locked --target x86_64-pc-windows-msvc
+   exit 0, 12/12, m03-host-rust-tests.log. The optional old compiled entry had SHA-256
+   820aa851b9026b0ed1c51018778ef18e17a57302d639cca12eee91b02e85197c and no v1 marker
+   at test time. The two crash-probe functions return without action unless explicitly enabled.
+3. & apps/desktop/scripts/test-host-crash-job.ps1
+     -TestExe 'D:\Develop\Relay-Agent\apps\desktop\src-tauri\target\x86_64-pc-windows-msvc\debug\deps\relay_desktop-707720d95ada5241.exe'
+     -NodeExe 'D:\Develop\Relay-Agent\.research\runtime-cache\node-v24.21.0-win-x64\node.exe'
+   exit 0, m03-host-crash-recovery.log. A fresh process observed the ARMED Job absent after
+   forced Rust host termination; the direct Node and its child PID both stopped. The isolated
+   temp test root was removed only after those PID checks passed.
+4. & apps/desktop/scripts/test-job-in-outer-job.ps1
+     -TestExe 'D:\Develop\Relay-Agent\apps\desktop\src-tauri\target\x86_64-pc-windows-msvc\debug\deps\relay_desktop-707720d95ada5241.exe'
+     -NodeExe 'D:\Develop\Relay-Agent\.research\runtime-cache\node-v24.21.0-win-x64\node.exe'
+   exit 0, m03-host-outer-job.log. The test executable was started suspended, assigned to an
+   outer Job, then resumed; it verified outer membership and created its own inner Node Job.
+5. PowerShell parser checked build-release.ps1 and both new test scripts: exit 0,
+   m03-host-powershell-syntax.log.
+6. & 'D:\Develop\Relay-Agent\.research\runtime-cache\node-v24.21.0-win-x64\node.exe'
+     scripts/check-docs.mjs
+   exit 0, 77 Markdown / 1053 links / 921 anchors / 126 tokens / 29 contrast checks,
+   m03-host-docs-check.log. Counts include concurrent repository documentation.
+
+Cleanup: crash probe isolated temp directory removed after host, parent Node, child Node and
+fresh recovery assertions; outer-Job wrapper terminates its Job in finally. No PG was started.
+No credential was read or logged. No real Provider was contacted.
+
+Remaining boundary: current backend supervisor-main.js lacks relay-desktop-supervisor-v1, so
+the host and release builder reject it before supervisor execution; no new M03 release has been
+published. Cargo/probe tests do not prove real PG command/outbox reconciliation or that a
+packaged Tauri window starts with the future supervisor protocol. After backend implements the
+private frame and dispatch_ready, rebuild and test the real release, active claim/UNKNOWN,
+supervisor crash, normal EOF and cross-host recovery without changing action identity.
+
+`cargo fmt --check` exits 1 because the existing compact lib.rs baseline is unformatted; this
+slice does not bulk-reformat preexisting code. The new job_sidecar.rs was formatted directly.
+
+OS API references checked: Microsoft Learn Job Objects,
+https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects ;
+UpdateProcThreadAttribute (JOB_LIST and HANDLE_LIST),
+https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute ;
+QueryInformationJobObject,
+https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-queryinformationjobobject ;
+MoveFileExW,
+https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw .

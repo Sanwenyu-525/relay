@@ -1,0 +1,696 @@
+{
+  "metadata": {
+    "version": "0.2.0",
+    "status": "Proposed",
+    "theme": "light",
+    "updated": "2026-09-19",
+    "format": "Relay 文档用扁平 token 数据；不是 DTCG 兼容声明或已集成的主题包。",
+    "basis": "原始论文验收页参考图与三张页面概念图；色值经采样归一，尺寸/状态/响应式为实现推荐。",
+    "unit": "rem 按桌面 WebView 默认 16 CSS px 解释，保留字号缩放；window.content.* 的 number 单位为逻辑 DIP，不能当成物理像素或 rem。",
+    "sourceDocument": "design-system.md",
+    "sources": [
+      "../../exec-e4781944-a9b1-4906-8cd8-994841a0c21f.png",
+      "mockups/2026-09-19/today.png",
+      "mockups/2026-09-19/project-overview.png",
+      "mockups/2026-09-19/development-workbench.png"
+    ]
+  },
+  "tokens": {
+    "window.content.initialWidth": {
+      "$type": "number",
+      "$value": 1280,
+      "$description": "首次窗口客户区宽度，逻辑 DIP 推荐值；按显示器可用工作区限制，待桌面实测。"
+    },
+    "window.content.initialHeight": {
+      "$type": "number",
+      "$value": 800,
+      "$description": "首次窗口客户区高度，逻辑 DIP 推荐值；不含原生标题栏，待桌面实测。"
+    },
+    "window.content.minWidth": {
+      "$type": "number",
+      "$value": 960,
+      "$description": "常规工作区的推荐最小客户区宽度，逻辑 DIP；小工作区允许继续收缩，不强制屏外窗口。"
+    },
+    "window.content.minHeight": {
+      "$type": "number",
+      "$value": 640,
+      "$description": "常规工作区的推荐最小客户区高度，逻辑 DIP；结合实际工作区与系统边框限制。"
+    },
+    "color.palette.paper": {
+      "$type": "color",
+      "$value": "#FAF8F3",
+      "$description": "依据四张参考图归一的推荐色，并非原始设计源文件精确值。"
+    },
+    "color.palette.sidebar": {
+      "$type": "color",
+      "$value": "#F2EEE7",
+      "$description": "依据四张参考图归一的推荐色，并非原始设计源文件精确值。"
+    },
+    "color.palette.surface": {
+      "$type": "color",
+      "$value": "#FFFFFF",
+      "$description": "依据四张参考图归一的推荐色，并非原始设计源文件精确值。"
+    },
+    "color.palette.ink": {
+      "$type": "color",
+      "$value": "#18211F",
+      "$description": "依据四张参考图归一的推荐色，并非原始设计源文件精确值。"
+    },
+    "color.palette.secondary": {
+      "$type": "color",
+      "$value": "#4F5B55",
+      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+    },
+    "color.palette.muted": {
+      "$type": "color",
+      "$value": "#5D6861",
+      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+    },
+    "color.palette.line": {
+      "$type": "color",
+      "$value": "#DDDCD4",
+      "$description": "依据四张参考图归一的推荐色，并非原始设计源文件精确值。"
+    },
+    "color.palette.control": {
+      "$type": "color",
+      "$value": "#858A80",
+      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+    },
+    "color.palette.forest": {
+      "$type": "color",
+      "$value": "#285747",
+      "$description": "依据四张参考图归一的推荐色，并非原始设计源文件精确值。"
+    },
+    "color.palette.forestHover": {
+      "$type": "color",
+      "$value": "#204B3C",
+      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+    },
+    "color.palette.forestPressed": {
+      "$type": "color",
+      "$value": "#193D31",
+      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+    },
+    "color.palette.sage": {
+      "$type": "color",
+      "$value": "#E7EEE6",
+      "$description": "依据四张参考图归一的推荐色，并非原始设计源文件精确值。"
+    },
+    "color.palette.sageHover": {
+      "$type": "color",
+      "$value": "#DCE7DC",
+      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+    },
+    "color.palette.amber": {
+      "$type": "color",
+      "$value": "#795519",
+      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+    },
+    "color.palette.amberSoft": {
+      "$type": "color",
+      "$value": "#F5EBD7",
+      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+    },
+    "color.palette.red": {
+      "$type": "color",
+      "$value": "#9B3535",
+      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+    },
+    "color.palette.redSoft": {
+      "$type": "color",
+      "$value": "#F8EAE7",
+      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+    },
+    "color.palette.disabled": {
+      "$type": "color",
+      "$value": "#E8E5DD",
+      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+    },
+    "color.bg.canvas": {
+      "$type": "color",
+      "$value": "{color.palette.paper}"
+    },
+    "color.bg.navigation": {
+      "$type": "color",
+      "$value": "{color.palette.sidebar}"
+    },
+    "color.bg.surface": {
+      "$type": "color",
+      "$value": "{color.palette.surface}"
+    },
+    "color.bg.subtle": {
+      "$type": "color",
+      "$value": "{color.palette.sidebar}"
+    },
+    "color.text.primary": {
+      "$type": "color",
+      "$value": "{color.palette.ink}"
+    },
+    "color.text.secondary": {
+      "$type": "color",
+      "$value": "{color.palette.secondary}"
+    },
+    "color.text.muted": {
+      "$type": "color",
+      "$value": "{color.palette.muted}"
+    },
+    "color.text.onAction": {
+      "$type": "color",
+      "$value": "{color.palette.surface}"
+    },
+    "color.action.primary": {
+      "$type": "color",
+      "$value": "{color.palette.forest}"
+    },
+    "color.action.hover": {
+      "$type": "color",
+      "$value": "{color.palette.forestHover}"
+    },
+    "color.action.pressed": {
+      "$type": "color",
+      "$value": "{color.palette.forestPressed}"
+    },
+    "color.action.text": {
+      "$type": "color",
+      "$value": "{color.palette.forest}"
+    },
+    "color.selection.bg": {
+      "$type": "color",
+      "$value": "{color.palette.sage}"
+    },
+    "color.selection.hover": {
+      "$type": "color",
+      "$value": "{color.palette.sageHover}"
+    },
+    "color.selection.text": {
+      "$type": "color",
+      "$value": "{color.palette.forest}"
+    },
+    "color.border.separator": {
+      "$type": "color",
+      "$value": "{color.palette.line}"
+    },
+    "color.border.control": {
+      "$type": "color",
+      "$value": "{color.palette.control}"
+    },
+    "color.focus.ring": {
+      "$type": "color",
+      "$value": "{color.palette.forest}"
+    },
+    "color.status.success.text": {
+      "$type": "color",
+      "$value": "{color.palette.forest}"
+    },
+    "color.status.success.bg": {
+      "$type": "color",
+      "$value": "{color.palette.sage}"
+    },
+    "color.status.warning.text": {
+      "$type": "color",
+      "$value": "{color.palette.amber}"
+    },
+    "color.status.warning.bg": {
+      "$type": "color",
+      "$value": "{color.palette.amberSoft}"
+    },
+    "color.status.danger.text": {
+      "$type": "color",
+      "$value": "{color.palette.red}"
+    },
+    "color.status.danger.bg": {
+      "$type": "color",
+      "$value": "{color.palette.redSoft}"
+    },
+    "color.status.neutral.text": {
+      "$type": "color",
+      "$value": "{color.palette.secondary}"
+    },
+    "color.status.neutral.bg": {
+      "$type": "color",
+      "$value": "{color.palette.sidebar}"
+    },
+    "color.disabled.bg": {
+      "$type": "color",
+      "$value": "{color.palette.disabled}"
+    },
+    "color.disabled.text": {
+      "$type": "color",
+      "$value": "{color.palette.muted}"
+    },
+    "color.diff.add.bg": {
+      "$type": "color",
+      "$value": "{color.palette.sage}"
+    },
+    "color.diff.add.marker": {
+      "$type": "color",
+      "$value": "{color.palette.forest}"
+    },
+    "color.diff.remove.bg": {
+      "$type": "color",
+      "$value": "{color.palette.redSoft}"
+    },
+    "color.diff.remove.marker": {
+      "$type": "color",
+      "$value": "{color.palette.red}"
+    },
+    "space.0": {
+      "$type": "dimension",
+      "$value": "0rem"
+    },
+    "space.1": {
+      "$type": "dimension",
+      "$value": "0.25rem"
+    },
+    "space.2": {
+      "$type": "dimension",
+      "$value": "0.5rem"
+    },
+    "space.3": {
+      "$type": "dimension",
+      "$value": "0.75rem"
+    },
+    "space.4": {
+      "$type": "dimension",
+      "$value": "1rem"
+    },
+    "space.6": {
+      "$type": "dimension",
+      "$value": "1.5rem"
+    },
+    "space.8": {
+      "$type": "dimension",
+      "$value": "2rem"
+    },
+    "space.10": {
+      "$type": "dimension",
+      "$value": "2.5rem"
+    },
+    "space.12": {
+      "$type": "dimension",
+      "$value": "3rem"
+    },
+    "space.16": {
+      "$type": "dimension",
+      "$value": "4rem"
+    },
+    "font.family.ui": {
+      "$type": "fontFamily",
+      "$value": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+      "$description": "图中无可确认字体名；这是本机优先候选，需桌面 WebView 排版验证。"
+    },
+    "font.family.editorial": {
+      "$type": "fontFamily",
+      "$value": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", \"SimSun\", serif",
+      "$description": "延续宋体/明朝体方向；不自动下载网络字体，不宣称已获字体分发许可。"
+    },
+    "font.family.code": {
+      "$type": "fontFamily",
+      "$value": "\"Cascadia Mono\", \"Consolas\", \"SFMono-Regular\", monospace"
+    },
+    "font.size.meta": {
+      "$type": "dimension",
+      "$value": "0.875rem"
+    },
+    "font.size.body": {
+      "$type": "dimension",
+      "$value": "1rem"
+    },
+    "font.size.reading": {
+      "$type": "dimension",
+      "$value": "1.125rem"
+    },
+    "font.size.rowTitle": {
+      "$type": "dimension",
+      "$value": "1.25rem"
+    },
+    "font.size.section": {
+      "$type": "dimension",
+      "$value": "1.5rem"
+    },
+    "font.size.page": {
+      "$type": "dimension",
+      "$value": "3rem"
+    },
+    "font.size.display": {
+      "$type": "dimension",
+      "$value": "3.5rem"
+    },
+    "font.size.compactPage": {
+      "$type": "dimension",
+      "$value": "2rem"
+    },
+    "font.weight.regular": {
+      "$type": "fontWeight",
+      "$value": 400
+    },
+    "font.weight.medium": {
+      "$type": "fontWeight",
+      "$value": 500
+    },
+    "font.weight.semibold": {
+      "$type": "fontWeight",
+      "$value": 600
+    },
+    "font.lineHeight.heading": {
+      "$type": "number",
+      "$value": 1.25
+    },
+    "font.lineHeight.ui": {
+      "$type": "number",
+      "$value": 1.5
+    },
+    "font.lineHeight.reading": {
+      "$type": "number",
+      "$value": 1.8
+    },
+    "font.lineHeight.code": {
+      "$type": "number",
+      "$value": 1.6
+    },
+    "layout.sidebar.width": {
+      "$type": "dimension",
+      "$value": "13rem"
+    },
+    "layout.sidebar.compactWidth": {
+      "$type": "dimension",
+      "$value": "4rem"
+    },
+    "layout.header.height": {
+      "$type": "dimension",
+      "$value": "4rem"
+    },
+    "layout.rail.width": {
+      "$type": "dimension",
+      "$value": "25.5rem"
+    },
+    "layout.rail.narrowWidth": {
+      "$type": "dimension",
+      "$value": "20rem"
+    },
+    "layout.main.padding": {
+      "$type": "dimension",
+      "$value": "{space.10}"
+    },
+    "layout.main.compactPadding": {
+      "$type": "dimension",
+      "$value": "{space.6}"
+    },
+    "layout.main.smallPadding": {
+      "$type": "dimension",
+      "$value": "{space.4}"
+    },
+    "layout.section.gap": {
+      "$type": "dimension",
+      "$value": "{space.12}"
+    },
+    "layout.reading.maxWidth": {
+      "$type": "dimension",
+      "$value": "50rem"
+    },
+    "layout.content.maxWidth": {
+      "$type": "dimension",
+      "$value": "80rem"
+    },
+    "layout.drawer.maxWidth": {
+      "$type": "dimension",
+      "$value": "25.5rem"
+    },
+    "layout.dialog.maxWidth": {
+      "$type": "dimension",
+      "$value": "35rem"
+    },
+    "breakpoint.medium": {
+      "$type": "dimension",
+      "$value": "48rem"
+    },
+    "breakpoint.large": {
+      "$type": "dimension",
+      "$value": "64rem"
+    },
+    "breakpoint.rail": {
+      "$type": "dimension",
+      "$value": "80rem"
+    },
+    "breakpoint.wide": {
+      "$type": "dimension",
+      "$value": "90rem"
+    },
+    "control.height": {
+      "$type": "dimension",
+      "$value": "2.5rem"
+    },
+    "control.height.prominent": {
+      "$type": "dimension",
+      "$value": "3rem"
+    },
+    "control.height.comfort": {
+      "$type": "dimension",
+      "$value": "2.75rem"
+    },
+    "control.icon.size": {
+      "$type": "dimension",
+      "$value": "1.25rem"
+    },
+    "control.icon.stroke": {
+      "$type": "dimension",
+      "$value": "0.09375rem"
+    },
+    "control.nav.height": {
+      "$type": "dimension",
+      "$value": "3rem"
+    },
+    "control.row.minHeight": {
+      "$type": "dimension",
+      "$value": "3.5rem"
+    },
+    "control.target.minimum": {
+      "$type": "dimension",
+      "$value": "1.5rem"
+    },
+    "border.width": {
+      "$type": "dimension",
+      "$value": "0.0625rem"
+    },
+    "focus.width": {
+      "$type": "dimension",
+      "$value": "0.125rem"
+    },
+    "focus.offset": {
+      "$type": "dimension",
+      "$value": "0.125rem"
+    },
+    "radius.control": {
+      "$type": "dimension",
+      "$value": "0.25rem"
+    },
+    "radius.panel": {
+      "$type": "dimension",
+      "$value": "0.25rem"
+    },
+    "radius.badge": {
+      "$type": "dimension",
+      "$value": "0.1875rem"
+    },
+    "radius.round": {
+      "$type": "dimension",
+      "$value": "9999px"
+    },
+    "zIndex.base": {
+      "$type": "number",
+      "$value": 0
+    },
+    "zIndex.sticky": {
+      "$type": "number",
+      "$value": 10
+    },
+    "zIndex.popover": {
+      "$type": "number",
+      "$value": 20
+    },
+    "zIndex.overlay": {
+      "$type": "number",
+      "$value": 40
+    },
+    "zIndex.dialog": {
+      "$type": "number",
+      "$value": 50
+    },
+    "zIndex.toast": {
+      "$type": "number",
+      "$value": 60
+    },
+    "motion.duration.fast": {
+      "$type": "duration",
+      "$value": "120ms"
+    },
+    "motion.duration.panel": {
+      "$type": "duration",
+      "$value": "180ms"
+    },
+    "motion.duration.reduced": {
+      "$type": "duration",
+      "$value": "0ms"
+    },
+    "motion.easing.standard": {
+      "$type": "cubicBezier",
+      "$value": "cubic-bezier(0.2, 0, 0, 1)"
+    },
+    "shadow.surface": {
+      "$type": "shadow",
+      "$value": "none"
+    },
+    "shadow.floating": {
+      "$type": "shadow",
+      "$value": "0 8px 24px rgb(24 33 31 / 0.12)",
+      "$description": "仅浮层/菜单；普通列表、侧栏和文档区域无阴影。"
+    }
+  },
+  "contrastChecks": [
+    {
+      "foreground": "color.text.primary",
+      "background": "color.bg.canvas",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.text.primary",
+      "background": "color.bg.navigation",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.text.primary",
+      "background": "color.bg.surface",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.text.secondary",
+      "background": "color.bg.canvas",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.text.secondary",
+      "background": "color.bg.navigation",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.text.secondary",
+      "background": "color.bg.surface",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.text.muted",
+      "background": "color.bg.canvas",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.text.muted",
+      "background": "color.bg.navigation",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.text.muted",
+      "background": "color.bg.surface",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.action.text",
+      "background": "color.bg.canvas",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.action.text",
+      "background": "color.bg.navigation",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.action.text",
+      "background": "color.bg.surface",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.text.onAction",
+      "background": "color.action.primary",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.text.onAction",
+      "background": "color.action.hover",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.text.onAction",
+      "background": "color.action.pressed",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.status.success.text",
+      "background": "color.status.success.bg",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.status.warning.text",
+      "background": "color.status.warning.bg",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.status.danger.text",
+      "background": "color.status.danger.bg",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.status.neutral.text",
+      "background": "color.status.neutral.bg",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.selection.text",
+      "background": "color.selection.bg",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.selection.text",
+      "background": "color.selection.hover",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.disabled.text",
+      "background": "color.disabled.bg",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.text.primary",
+      "background": "color.diff.add.bg",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.text.primary",
+      "background": "color.diff.remove.bg",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.focus.ring",
+      "background": "color.bg.canvas",
+      "minimum": 3
+    },
+    {
+      "foreground": "color.focus.ring",
+      "background": "color.bg.surface",
+      "minimum": 3
+    },
+    {
+      "foreground": "color.focus.ring",
+      "background": "color.bg.navigation",
+      "minimum": 3
+    },
+    {
+      "foreground": "color.border.control",
+      "background": "color.bg.canvas",
+      "minimum": 3
+    },
+    {
+      "foreground": "color.border.control",
+      "background": "color.bg.surface",
+      "minimum": 3
+    }
+  ]
+}
