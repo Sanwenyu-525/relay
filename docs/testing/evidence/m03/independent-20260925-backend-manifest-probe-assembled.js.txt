@@ -1,0 +1,239 @@
+import { createHash } from 'node:crypto';
+import { canonicalizeJson } from '../../src/receipt/payload-hash.js';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { sql } from 'kysely';
+import { Client } from 'pg';
+import { claimNextRunCommand, settleRunCommand } from '../../src/application/run-dispatch.js';
+import { denyGraphActionBeforeInvocation } from '../../src/application/gateway-actions.js';
+import { createFakeConnection, createGatewayPolicy, registerManagedResource, revokeGatewayPolicy } from '../../src/application/gateway-configuration.js';
+import { applySafeControl, requestRunControl, resumeRun } from '../../src/application/control-requests.js';
+import { recoverStoppedWorker } from '../../src/application/recover-run.js';
+import { reviewTargetHash } from '../../src/application/review-requests.js';
+import { withTransaction } from '../../src/application/unit-of-work.js';
+import { graphCheckpointsReady, installGraphCheckpoints } from '../../src/infrastructure/graph-checkpoints.js';
+import { runMigrations } from '../../src/infrastructure/migration-runner.js';
+import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
+import { runOneCommand } from '../../src/worker/run-command.js';
+import { runSupervisedWorkerOnce } from '../../src/worker/supervisor.js';
+import { createTemporaryDatabase, expectSqlState, MIGRATIONS_DIRECTORY, openDatabase, } from './integration-support.js';
+import { createWorkspace, expectCommandAccepted, startTestApi, withTimeout, workspacePath, } from './api-harness.js';
+const WORKER_ENTRY = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'worker', 'main.js');
+async function fixture(install) {
+    const database = await createTemporaryDatabase('m03_graph');
+    try {
+        await runMigrations({ connectionString: database.migrationUrl, directory: MIGRATIONS_DIRECTORY });
+        if (install)
+            await installGraphCheckpoints(database.migrationUrl);
+        const app = openDatabase(database.appUrl, 'relay-m03-graph-test');
+        try {
+            const api = await startTestApi({ databaseUrl: database.appUrl });
+            const workspaceId = await createWorkspace(app.db);
+            return { database, app, api, workspaceId, close: async () => {
+                    await api.stop();
+                    await app.close();
+                    await database.drop();
+                } };
+        }
+        catch (error) {
+            await app.close();
+            throw error;
+        }
+    }
+    catch (error) {
+        await database.drop();
+        throw error;
+    }
+}
+async function delegatedRun(f) {
+    const projectCommand = randomUUID();
+    const project = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, '/projects'), {
+        command_id: projectCommand, title: `graph-${projectCommand.slice(0, 8)}`,
+        project_type: 'GENERAL',
+    }), 201, projectCommand);
+    const taskCommand = randomUUID();
+    const task = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, '/tasks'), {
+        command_id: taskCommand, project_id: project.project_id,
+        title: 'Graph checkpoint replay', objective: 'Verify one managed Mock candidate',
+        criteria: [{ criterion_id: 'human', statement: 'Review the candidate', method: 'HUMAN' }],
+    }), 201, taskCommand);
+    const readyCommand = randomUUID();
+    const ready = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, `/tasks/${task.task_id}/ready`), {
+        command_id: readyCommand, expected_revision: task.revision,
+    }), 200, readyCommand);
+    const delegateCommand = randomUUID();
+    const delegated = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, `/tasks/${task.task_id}/delegations`), {
+        command_id: delegateCommand, expected_task_revision: ready.revision,
+    }), 202, delegateCommand);
+    return delegated.run_id;
+}
+async function approveValidationReview(f, runId) {
+    const listed = await f.api.get(workspacePath(f.workspaceId, '/reviews?status=OPEN'));
+    const review = listed.body.items.find((item) => item.run_id === runId);
+    assert.ok(review);
+    const commandId = randomUUID();
+    const body = { command_id: commandId, expected_revision: review.revision,
+        target_hash: review.target_hash, decision: 'ACCEPT' };
+    const decided = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, `/reviews/${review.id}/decisions`), body), 200, commandId);
+    const replay = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, `/reviews/${review.id}/decisions`), body), 200, commandId);
+    assert.equal(replay.decision_id, decided.decision_id);
+    return decided.decision_id;
+}
+async function workerOnce(f) {
+    const child = spawn(process.execPath, [WORKER_ENTRY, '--once'], {
+        env: { ...process.env, RELAY_DB_URL: f.database.appUrl,
+            RELAY_DATA_ROOT: f.api.dataRoot, RELAY_WORKER_ID: `worker:${randomUUID()}` },
+        stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let output = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => { output += chunk; });
+    child.stderr.on('data', (chunk) => { output += chunk; });
+    const closed = new Promise((done, fail) => {
+        child.once('error', fail);
+        child.once('close', done);
+    });
+    let code;
+    try {
+        code = await withTimeout(closed, 20_000, 'graph Worker');
+    }
+    catch (error) {
+        process.stderr.write(`graph_worker_timeout ${JSON.stringify({ pid: child.pid ?? null,
+            output })}\n`);
+        child.kill('SIGTERM');
+        try {
+            await withTimeout(closed, 5_000, 'graph Worker stop after timeout');
+        }
+        catch {
+            child.kill('SIGKILL');
+            await withTimeout(closed, 5_000, 'graph Worker force stop after timeout');
+        }
+        throw error;
+    }
+    return { code, output };
+}
+async function delegatedGatewayRun(f, decision = 'ASK') {
+    const projectCommand = randomUUID();
+    const project = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, '/projects'), {
+        command_id: projectCommand, title: 'Graph Gateway', project_type: 'GENERAL',
+    }), 201, projectCommand);
+    const projectId = project.project_id;
+    const root = join(f.api.dataRoot, `graph-gateway-${randomUUID()}`);
+    await mkdir(root, { recursive: true });
+    const resource = await registerManagedResource(f.app.db, {
+        workspaceId: f.workspaceId, projectId, rootPath: root,
+    });
+    const connection = await createFakeConnection(f.app.db, {
+        workspaceId: f.workspaceId, projectId, capabilities: ['FAKE_WRITE'],
+    });
+    const policy = await createGatewayPolicy(f.app.db, {
+        workspaceId: f.workspaceId, projectId, capability: 'FAKE_WRITE',
+        actionType: 'WRITE_MARKER', targetPrefix: resource.canonicalRoot,
+        decision, maxPayloadBytes: 1024,
+    });
+    const taskCommand = randomUUID();
+    const task = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, '/tasks'), {
+        command_id: taskCommand, project_id: projectId, title: 'Graph approved marker',
+        objective: 'Produce a managed Mock candidate and marker',
+        criteria: [{ criterion_id: 'human', statement: 'Review the candidate', method: 'HUMAN' }],
+    }), 201, taskCommand);
+    const readyCommand = randomUUID();
+    const ready = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, `/tasks/${task.task_id}/ready`), {
+        command_id: readyCommand, expected_revision: task.revision,
+    }), 200, readyCommand);
+    const target = join(resource.canonicalRoot, 'approved-marker.json');
+    const delegateCommand = randomUUID();
+    const delegated = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, `/tasks/${task.task_id}/delegations`), {
+        command_id: delegateCommand, expected_task_revision: ready.revision,
+        mock_gateway_action: { connection_id: connection.connectionId,
+            resource_id: resource.resourceId, target, content: 'approved Graph marker' },
+    }), 202, delegateCommand);
+    const runId = delegated.run_id;
+    const contract = await sql `
+    select frozen_snapshot from execution_contracts where run_id = ${runId}
+  `.execute(f.app.db);
+    return { runId, taskId: task.task_id, target,
+        operationId: contract.rows[0].frozen_snapshot.mock_gateway_action.operation_id,
+        connectionId: connection.connectionId, policyId: policy.policyId,
+        resourceId: resource.resourceId };
+}
+async function actionReview(f, operationId) {
+    const result = await sql `
+    select id, revision, target_hash from review_requests where operation_id = ${operationId}
+  `.execute(f.app.db);
+    assert.equal(result.rows.length, 1);
+    return result.rows[0];
+}
+async function decideAction(f, operationId, decision) {
+    const review = await actionReview(f, operationId);
+    const commandId = randomUUID();
+    const body = { command_id: commandId, expected_revision: review.revision.toString(),
+        target_hash: review.target_hash.toString('hex'), decision };
+    const decided = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, `/reviews/${review.id}/decisions`), body), 200, commandId);
+    const replay = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, `/reviews/${review.id}/decisions`), body), 200, commandId);
+    assert.equal(replay.decision_id, decided.decision_id);
+    return { decisionId: decided.decision_id, commandId };
+}
+// Appended to the helper-only prefix of the compiled run-graph integration test.
+// Expected invariant: a changed Manifest payload with the old manifest_hash
+// cannot authorize the frozen Fake action after an ASK review is approved.
+test('PROBE: changed CONTRACT source content with old Manifest hash denies Fake write', async () => {
+  const f = await fixture(true);
+  let migration;
+  try {
+    const action = await delegatedGatewayRun(f);
+    const prepared = await runOneCommand(f.app.db, {
+      workerId: `worker:${randomUUID()}`, dataRoot: f.api.dataRoot,
+      checkpointUrl: f.database.appUrl,
+    });
+    assert.equal(prepared?.outcome, 'DONE', 'ASK wait must be durable');
+    migration = openDatabase(f.database.migrationUrl, 'relay-m03-independent-hash-probe');
+    const initial = await sql`select payload, encode(manifest_hash, 'hex') as manifest_hash
+      from context_manifests where run_id = ${action.runId}`.execute(f.app.db);
+    assert.equal(initial.rows.length, 1);
+    const payload = JSON.parse(JSON.stringify(initial.rows[0].payload));
+    const source = payload.sources.find((item) => item.kind === 'CONTRACT');
+    assert.ok(source, 'mandatory CONTRACT source exists');
+    source.content += '\nINDEPENDENT_INTEGRITY_PROBE_TAMPER';
+    await sql`update context_manifests set payload = ${JSON.stringify(payload)}::jsonb
+      where run_id = ${action.runId}`.execute(migration.db);
+    const changed = await sql`select payload, encode(manifest_hash, 'hex') as manifest_hash
+      from context_manifests where run_id = ${action.runId}`.execute(f.app.db);
+    const recomputed = createHash('sha256').update(canonicalizeJson(changed.rows[0].payload)).digest('hex');
+    assert.equal(changed.rows[0].manifest_hash, initial.rows[0].manifest_hash,
+      'database Manifest hash remains the original');
+    assert.notEqual(recomputed, initial.rows[0].manifest_hash,
+      'persisted payload no longer matches the frozen hash');
+    await decideAction(f, action.operationId, 'APPROVE');
+    const delivered = await runOneCommand(f.app.db, {
+      workerId: `worker:${randomUUID()}`, dataRoot: f.api.dataRoot,
+      checkpointUrl: f.database.appUrl,
+    });
+    const markerExists = await readFile(action.target, 'utf8').then(() => true,
+      (error) => { if (error.code === 'ENOENT') return false; throw error; });
+    const operation = await sql`select o.status, count(i.id)::bigint as invocation_count
+      from logical_operations o left join invocation_attempts i on i.operation_id = o.id
+      where o.id = ${action.operationId} group by o.id`.execute(f.app.db);
+    const run = await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`));
+    console.log('PROBE_OBSERVED', JSON.stringify({
+      stored_hash: changed.rows[0].manifest_hash, recomputed_hash: recomputed,
+      delivered_outcome: delivered?.outcome ?? null,
+      marker_exists: markerExists,
+      operation_status: operation.rows[0]?.status,
+      invocation_count: Number(operation.rows[0]?.invocation_count ?? -1),
+      run_status: run.body.status,
+    }));
+    assert.equal(markerExists, false, 'changed Manifest payload must prevent Fake write');
+    assert.deepEqual(operation.rows[0], { status: 'DENIED', invocation_count: 0n });
+  } finally {
+    await migration?.close();
+    await f.close();
+  }
+});
+

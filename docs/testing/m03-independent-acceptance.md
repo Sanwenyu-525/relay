@@ -1,6 +1,6 @@
 # M03 独立验收记录
 
-日期：2026-09-24。范围：Mock Agent Runtime 与可靠性闭环。当前结论：**IN_PROGRESS，未验收**。模块状态与下一步以 [CODEX_NEXT_STEP](../../CODEX_NEXT_STEP.md)为准，出口以 [M03 工作包](../../prompts/stack-migration.md#m03mock-agent-runtime-与可靠性闭环)和[测试计划 G01–G08](verification-plan.md#102-m03-必需可靠性场景)为准。
+日期：2026-09-25。范围：Mock Agent Runtime 与可靠性闭环。当前结论：**按用户最新范围，当前冻结试用包基础 Mock 闭环通过**；M03 完整可靠性保持未验收，详见末节的范围调整。Manifest 正文与摘要失配、UNKNOWN 桌面故障脚本不兼容等发现保留为后续可靠性事项，不阻塞本轮基础功能结论。模块状态与下一步以 [CODEX_NEXT_STEP](../../CODEX_NEXT_STEP.md)为准，出口以 [M03 工作包](../../prompts/stack-migration.md#m03mock-agent-runtime-与可靠性闭环)和[测试计划 G01–G08](verification-plan.md#102-m03-必需可靠性场景)为准。
 
 ## 前置与分工
 
@@ -31,7 +31,7 @@ G01–G08 必须以真实 PostgreSQL、独立 API/Worker 和可控 Mock Model/�
 | G07 | SSE/部分 Run 与受管内容边界 | Run、审批、产物、文件的完整跨 Workspace/Project 与桌面泄密反例 |
 | G08 | PG SSE 连续补读、同页重连和受控背压 | 跨提交排序、尾部校正、大输出、失败/预算耗尽及固定负载测量的总出口 |
 
-表中“已有”均指下文限定的分片结论；任何一行都不是 G 项整体通过。
+上表保留早期分片的出口缺口，后续增量与本次覆盖以各节、尤其末节为准；表中“已有”均指限定的分片结论，任何一行都不是 G 项整体通过。
 
 ## React 首片独立检查
 
@@ -297,3 +297,55 @@ G01–G08 必须以真实 PostgreSQL、独立 API/Worker 和可控 Mock Model/�
 | `m03-review-resume-webview.mjs <EXE> <0013>` | 退出 0，`M03_REVIEW_RESUME_WEBVIEW_REAL_PG=PASS`；WebView 创建/Delegate、宿主重启、原 Review 决定 RESUME、Task DONE，1 ArtifactVersion/CompletionRecord | [CRITERION 组合](evidence/m03/independent-review-resume-webview-final.txt) |
 
 两条 WebView 用例都用独立临时 PG 与受信桌面宿主，观察实际 API/supervisor/Worker；旧 bearer 不复用，迁移角色未进入 runtime。两轮均报告 `postgres_stop_exit=0 temporary_root_removed=True`。本次修复没有业务 migration 或公开 HTTP breaking change，内部 `GATEWAY_CONTEXT_STALE` 只作用于匹配原冻结 operation 的 Mock 图动作。Admit 提交与 Fake 文件写入仍不是原子事务；中途不明效果继续按同一 operation 核对。Manifest 异形字段的逐项完整性反例、Gateway UNKNOWN 的 Run 查询/UI、G06 在途取消、旧 checkpoint 升级和 G01–G08 完整出口仍未覆盖。真实 Provider 保持关闭。
+
+## 2026-09-25 当前 M03 增量与模块出口复验
+
+范围调整前的完整可靠性结论：**CHANGES_REQUESTED，未达到完整 M03 出口**；随后用户将本轮验收收敛为基础功能，当前结论见末节。本轮最初授权验收，覆盖 2026-09-24 后继的 Gateway UNKNOWN 投影、Mock 在途取消、React Mock 动作入口、Manifest 字段反例和结算竞争测试，以及当前 Windows 试用包。测试执行由实际调用的两个 `gpt-6-sol / ultra` 执行者完成；协调 Agent 读取源码、原始日志、探针与包清单后作出以下结论。本轮未修改生产代码、原有测试或重建发行包。
+
+### 本次通过的范围
+
+| 检查 | 本次结果 | 原始证据 |
+|---|---|---|
+| API 类型、编译、单测 | 类型/编译退出 0；66/66，零跳过 | [类型与单测](evidence/m03/independent-20260925-backend-type-unit.log) |
+| 全量真实 PG 集成 | 254/254，零失败/跳过；业务迁移、Graph 安装、PG 启停均 0，临时集群删除 | [全量 PG](evidence/m03/independent-20260925-backend-full-pg.log) |
+| React 类型、组件、Chromium | 类型退出 0；136/136 组件、21/21 Chromium | [类型](evidence/m03/independent-20260925-frontend-typecheck.txt)、[组件](evidence/m03/independent-20260925-frontend-vitest.txt)、[Chromium](evidence/m03/independent-20260925-frontend-chromium.txt) |
+| 当前 Windows 包一致性 | 208 个源码文件、13,205 个资源，前后零不匹配 | [前验](evidence/m03/independent-20260925-desktop-hashes.txt)、[后验](evidence/m03/independent-20260925-desktop-hashes-post.txt) |
+| Windows ACTION_APPROVAL 正常链 | 真实 WebView2/隔离 PG：重启、原审批、单次 Fake 效果、后继 CRITERION Review 和 DONE；1 Invocation、1 ArtifactVersion、1 CompletionRecord，退出 0 | [ACTION](evidence/m03/independent-20260925-desktop-action-webview.txt) |
+| Windows CRITERION Review/RESUME | 原 START/RESUME 按序结清，事件 31→39；单次效果、Task DONE，退出 0 | [Review/RESUME](evidence/m03/independent-20260925-desktop-review-resume.txt) |
+
+环境：项目便携 Node 24.21.0、PostgreSQL 18.6、当前 Windows WebView2。EXE SHA-256 `ad4a40cd08502c3a5013f081acc08bce0bed4bfb671991f91609979f52086a25`，manifest SHA-256 `867c2cdfa9ff9a0752073bede4088e36131b43e9fc10c83537564f7c071a8538`，0013 SHA-256 `5c1fcc64211a0441f975f864169b3d683d889a3723cb9aa0e7bc2517ceee8ebb`。三次 Windows 会话（含下述失败分支）均报告 PG stop 0、临时根删除；[后验清理](evidence/m03/independent-20260925-desktop-cleanup.txt)核对相应宿主 PID、PG 端口和会话目录已消失。
+
+确切复跑入口：便携 Node 执行 API `typescript/bin/tsc --noEmit -p tsconfig.json`、`tsc -p tsconfig.json`、`--test dist/test/unit/**/*.test.js`；根目录执行 `powershell -NoProfile -ExecutionPolicy Bypass -File apps/api/scripts/run-integration.ps1`；Workbench 执行 `tsc --noEmit`、`vitest run`、`playwright test`（4173 启动前无既有监听）。Windows 执行 `m03-action-approval-webview.mjs <上述 EXE> <上述 0013> <上述 manifest>` 与 `m03-review-resume-webview.mjs <上述 EXE> <上述 0013>`。
+
+### 退回项
+
+1. **P2：Manifest 正文与摘要失配仍可准入。** `apps/api/src/application/context-fence.ts:34–41` 按保存的 `manifest_hash` 查行，再比较部分身份/版本字段，未重算实际 payload 摘要。沿用现有 15 种完整性用例的异常注入边界，在 ASK 等待期间用迁移角色仅改变 `sources[kind=CONTRACT].content`，保留原 `manifest_hash`；重算摘要明确不同。批准原操作后实际 `marker_exists=true`、operation=`SUCCEEDED`、Invocation=1、Run=`WAITING_APPROVAL`，预期应在效果前拒绝，因此补充探针 **0/1，退出 1**。[红灯日志](evidence/m03/independent-20260925-backend-manifest-probe.log)、[探针片段](evidence/m03/independent-20260925-backend-manifest-probe.js.txt)、[可复跑拼装输入](evidence/m03/independent-20260925-backend-manifest-probe-assembled.js.txt)保留。探针使用 `run-integration.ps1 -SkipBuild -TestFile independent-manifest-probe`；迁移/Graph/PG 启停均 0，临时库删除。此结果是迁移或存储异常的完整性反例，**不是普通 HTTP 客户端可修改 Manifest 或越权的证据**。修复应核对实际规范 payload 的摘要与冻结引用，再执行 freshness 门禁，并补非 TASK 来源正文/契约正文及未篡改对照，不能仅补另一个字段白名单。
+2. **P2：UNKNOWN 桌面故障用例无法到达目标场景。** 正常 ACTION 脚本加 `--gateway-unknown` 后退出 1，宿主重启退出 101。[原始失败](evidence/m03/independent-20260925-desktop-gateway-unknown.txt)保留。源码核对：`apps/desktop/tests/m03-action-approval-webview.mjs:170–181` 把 `NODE_ENV` 和 `RELAY_WORKER_TEST_EXIT_AFTER_GATEWAY_ADMIT` 写进临时配置，但 `apps/desktop/src-tauri/src/lib.rs:263–265` 的配置白名单拒绝这两个键。故该路径未到达 UNKNOWN 效果核对/页面断言，不能标为 G03 桌面通过，也不能据此断言 UNKNOWN UI 本身有缺陷。应修复隔离测试的故障注入方式，保留生产宿主配置白名单与子进程环境清理，再复跑原 operation、UNKNOWN、资源隔离和刷新告警。
+
+### G01–G08 覆盖判定与剩余边界
+
+- G01：当前包的创建/委托、同/异载荷命令、宿主/API 重启和事件恢复链通过；后端持久受理与 SSE 回归通过。
+- G02：原决定 RESUME、单次工具效果、失效批准及来源版本变化的既有图/PG反例通过；但正文/hash 异常仍有上述漏验，不给完整门禁结论。
+- G03：后端原动作恢复、UNKNOWN 查询投影与隔离反例通过；真实 Windows UNKNOWN 分支因脚本失败未验证。
+- G04/G05：当前独立 Worker、PG outbox、重复领取、失租、旧 Worker 栅栏及固定图恢复反例随全量回归通过；仅限现有 Mock 与已列组合，不推断任意真实工具或安装升级。
+- G06：独立 Worker 的在途 Mock CANCEL/CANCEL_TASK、退出证据与终态不复活通过。结算竞争用例允许 `LOST` 或 `DONE` 两支，本次日志未标明命中支，不能称两种时序均被独立固定验证；已完成后遗留 PENDING 控制用例直接构造仓储状态，不能替代真实完成/取消竞跑。新增 UI 的在途取消尚无本轮 WebView 用例。
+- G07：当前 API/SSE/作用域与既有桌面 bearer、URL/storage/日志边界检查通过；结论绑定本次输入和脚本实际覆盖，不宣称新增的全部入口组合均已穷尽。
+- G08：连续 seq、跨事务提交顺序、断流补历史、慢消费者/大事件积压和组件快照校正的既有回归通过。不得把 21 个 Chromium 用例视为真实 API/桌面总出口，普通浏览器配置排除了 `real-api.spec.ts`。
+
+当前正常 ACTION WebView 脚本通过受权 **HTTP Delegate** 冻结 Mock 动作（608–617 行），并未点击这次新增的 Task Mock 配置入口；该入口目前只有组件层证据。本次没有新增其真实桌面交互验收，也未执行真实 Provider、任意外部工具、旧 checkpoint 升级或安装交付。修复上述两项、补确定性竞争与缺少的桌面交互后再复验，不能凭 254 个既有绿灯覆盖本轮红灯。
+
+### 固定小样本与输入一致性收尾
+
+另独立执行 `powershell -NoProfile -ExecutionPolicy Bypass -File apps/api/scripts/run-m03-mock-benchmark.ps1`，固定 8 个完成、2 个取消、Delegate 并发 4、Mock 延迟 250 ms，保留 PostgresSaver；没有 Gateway 动作或人工审批。API/supervisor、测试与 PG 启停退出 0、临时集群删除，[测量日志](evidence/m03/independent-20260925-backend-benchmark.log)与[原始结果](evidence/m03/mock-bench-20260925-083623-6b090a0a/summary.json)保留。成功吞吐 0.42/s；受理 P50 15 ms、完成 P50 11,163 ms、取消收敛 P50 79 ms（仅 2 样本）；尾部分位均标记样本不足。这只是固定 Mock 基线，不证明真实模型性能或审批/工具负载能力。
+
+**源码在验收收尾发生漂移，不能把以上成绩转授当前全部工作区。** [测试前 171 项清单](evidence/m03/independent-20260925-backend-source-pre.sha256)与[后验清单](evidence/m03/independent-20260925-backend-source-post.sha256)有 1 项不同：`apps/api/src/worker/run-graph.ts` 从 `2ae05f1da6a0bd95a7274ae694b1abffe310217f0213f9aa218559e9ffca5fea` 变成 `eaeec36fa10cc59df196fb3f670b7f41a912bcc91c0f9daf6edb8147d67ad413`。协调 Agent 于 08:38 后读取到源码新增 `layoutVersion` / `rebuildLayout` 和旧 checkpoint 重建，文件修改时间 08:38:16；当时 `dist/src/worker/run-graph.js` 修改时间 08:36:30，仍是本次测试的旧图实现。该并发新改动保留，不回退、不修复，也不在当前验收通过项内。Windows 包的前后哈希一致性结论绑定其核对时点与冻结 EXE，不能推断后来的源码仍匹配。Manifest 漏验与桌面脚本失败均有原始复现证据；它们不因另一个文件发生改动而自动解决。
+
+文档影响检查：本轮只更新本验收记录与 `CODEX_NEXT_STEP.md`，没有需求、API、数据库、架构或生产行为变更。`node scripts/check-docs.mjs` 的[原始结果](evidence/m03/independent-20260925-docs.txt)保留；其通过只说明文档静态检查，不改变上述退回结论。
+
+### 用户收敛范围后的当前结论
+
+2026-09-25，用户明确“现在只需要保证基础的功能能打通即可”。本轮验收因此只要求基础功能闭环，不继续以完整 G01–G08 或故障注入反例作为本轮放行条件。
+
+**基础功能验收通过，范围绑定上文冻结的 Windows 试用 EXE：**真实 WebView2 创建 Project/Task、委托固定 Mock、等待 CRITERION Review、人工确认、保存产物并使 Task 到达 DONE 已有本轮实跑证据。正常 ACTION_APPROVAL 链也通过，但附加动作经受权 HTTP 配置和委托，新增 Task 动作配置 UI 未另作桌面验收。真实 Provider 不在此次基础 Mock 结论内。
+
+上文两项 P2、UNKNOWN 故障分支、时序分支覆盖与新增附加 UI 用例作为后续可靠性事项保留，不要求现在修复、不阻塞基础闭环。M03 整体仍为 IN_PROGRESS，不能把本轮基础通过写成 G01–G08 或整个产品全部验收通过。验收收尾出现的并发图源码改动仍未验证；本轮结论不自动覆盖它。本轮到此收束，不追加测试或生产修改。

@@ -27,7 +27,7 @@
 
 图片里的“Workflow OS”、Rust 片段、日期、用户项目和通过结果均为示例。仓库名称 Relay 不意味着本轮已决定改图中品牌标识；最终产品显示名待确认，不影响本规范的样式定义。
 
-Windows 桌面宿主图标的原始母版是用户提供的 [智能体图标原图](../../2f831075-1288-4657-9a9c-447e1f439d78.png)。任务栏小尺寸反馈显示全幅缩放后机器人过小，因此从母版统一裁出中央 850×850 区域作为 [RGBA 派生图](../../apps/desktop/src-tauri/icons/icon.png)，再生成 [多尺寸 ICO](../../apps/desktop/src-tauri/icons/icon.ico)。派生图只在外角应用抗锯齿透明圆角，保留内部机器人与深蓝背景；各 ICO 图层继承同一透明轮廓。ICO 由 Tauri bundle 配置引用，图形只作为品牌视觉，不额外定义业务状态或交互语义。
+Windows 桌面宿主当前图标来自用户提供的 [B 任务卡片素材包](../../tauri_icons_B_taskcards/src-tauri/icons/icon.png)。产品 [PNG](../../apps/desktop/src-tauri/icons/icon.png)与素材包原文件一致；[ICO](../../apps/desktop/src-tauri/icons/icon.ico)保留素材包十层各自的原始图像，只将 256px 层移到首层，以供锁定的 Tauri Windows 默认窗口图标解码。ICO 仍由 Tauri bundle 配置引用，图形只作为品牌视觉，不额外定义业务状态或交互语义。此前机器人母版、中央裁切和透明圆角的处理属于 [2026-09-24 图标历史](../development/m02-desktop-foundation.md#2026-09-24-windows-图标小尺寸修复)，不再描述当前图标来源。
 
 ## 2. Token 规则
 

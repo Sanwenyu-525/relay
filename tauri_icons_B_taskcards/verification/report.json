@@ -1,0 +1,428 @@
+{
+  "file_validation": "PASS",
+  "source_processing": {
+    "source_size": [
+      1254,
+      1254
+    ],
+    "source_mode": "RGBA",
+    "source_sha256": "1ed5c2788aae5d64ed9ac8f3cfeb5cbd1ba325f423010629e4b94cfbba2e33f3",
+    "source_alpha_range": [
+      0,
+      254
+    ],
+    "removed_alpha_values": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "visible_crop_box": [
+      55,
+      159,
+      1208,
+      1107
+    ],
+    "normalized_native_canvas_size": 1254,
+    "master_size": [
+      1024,
+      1024
+    ],
+    "long_axis_safety_margin_fraction": 0.04,
+    "resampling": "Lanczos on premultiplied RGBA, direct from master for each size",
+    "redesigned": false,
+    "sharpened": false,
+    "background_added": false
+  },
+  "png_files": [
+    {
+      "file": "src-tauri/icons/1024x1024.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "bit_depth_per_channel": 8,
+      "alpha_range": [
+        0,
+        254
+      ]
+    },
+    {
+      "file": "src-tauri/icons/128x128.png",
+      "size": [
+        128,
+        128
+      ],
+      "mode": "RGBA",
+      "bit_depth_per_channel": 8,
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "src-tauri/icons/128x128@2x.png",
+      "size": [
+        256,
+        256
+      ],
+      "mode": "RGBA",
+      "bit_depth_per_channel": 8,
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "src-tauri/icons/16x16.png",
+      "size": [
+        16,
+        16
+      ],
+      "mode": "RGBA",
+      "bit_depth_per_channel": 8,
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "src-tauri/icons/20x20.png",
+      "size": [
+        20,
+        20
+      ],
+      "mode": "RGBA",
+      "bit_depth_per_channel": 8,
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "src-tauri/icons/24x24.png",
+      "size": [
+        24,
+        24
+      ],
+      "mode": "RGBA",
+      "bit_depth_per_channel": 8,
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "src-tauri/icons/256x256.png",
+      "size": [
+        256,
+        256
+      ],
+      "mode": "RGBA",
+      "bit_depth_per_channel": 8,
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "src-tauri/icons/32x32.png",
+      "size": [
+        32,
+        32
+      ],
+      "mode": "RGBA",
+      "bit_depth_per_channel": 8,
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "src-tauri/icons/40x40.png",
+      "size": [
+        40,
+        40
+      ],
+      "mode": "RGBA",
+      "bit_depth_per_channel": 8,
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "src-tauri/icons/48x48.png",
+      "size": [
+        48,
+        48
+      ],
+      "mode": "RGBA",
+      "bit_depth_per_channel": 8,
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "src-tauri/icons/512x512.png",
+      "size": [
+        512,
+        512
+      ],
+      "mode": "RGBA",
+      "bit_depth_per_channel": 8,
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "src-tauri/icons/64x64.png",
+      "size": [
+        64,
+        64
+      ],
+      "mode": "RGBA",
+      "bit_depth_per_channel": 8,
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "src-tauri/icons/96x96.png",
+      "size": [
+        96,
+        96
+      ],
+      "mode": "RGBA",
+      "bit_depth_per_channel": 8,
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "src-tauri/icons/icon.png",
+      "size": [
+        512,
+        512
+      ],
+      "mode": "RGBA",
+      "bit_depth_per_channel": 8,
+      "alpha_range": [
+        0,
+        255
+      ]
+    }
+  ],
+  "ico_layers_in_file_order": [
+    {
+      "index": 0,
+      "size": [
+        32,
+        32
+      ],
+      "bits": 32,
+      "decoded_pixels_match_png": true,
+      "encoding": "DIB"
+    },
+    {
+      "index": 1,
+      "size": [
+        16,
+        16
+      ],
+      "bits": 32,
+      "decoded_pixels_match_png": true,
+      "encoding": "DIB"
+    },
+    {
+      "index": 2,
+      "size": [
+        20,
+        20
+      ],
+      "bits": 32,
+      "decoded_pixels_match_png": true,
+      "encoding": "DIB"
+    },
+    {
+      "index": 3,
+      "size": [
+        24,
+        24
+      ],
+      "bits": 32,
+      "decoded_pixels_match_png": true,
+      "encoding": "DIB"
+    },
+    {
+      "index": 4,
+      "size": [
+        40,
+        40
+      ],
+      "bits": 32,
+      "decoded_pixels_match_png": true,
+      "encoding": "DIB"
+    },
+    {
+      "index": 5,
+      "size": [
+        48,
+        48
+      ],
+      "bits": 32,
+      "decoded_pixels_match_png": true,
+      "encoding": "DIB"
+    },
+    {
+      "index": 6,
+      "size": [
+        64,
+        64
+      ],
+      "bits": 32,
+      "decoded_pixels_match_png": true,
+      "encoding": "DIB"
+    },
+    {
+      "index": 7,
+      "size": [
+        96,
+        96
+      ],
+      "bits": 32,
+      "decoded_pixels_match_png": true,
+      "encoding": "DIB"
+    },
+    {
+      "index": 8,
+      "size": [
+        128,
+        128
+      ],
+      "bits": 32,
+      "decoded_pixels_match_png": true,
+      "encoding": "DIB"
+    },
+    {
+      "index": 9,
+      "size": [
+        256,
+        256
+      ],
+      "bits": 32,
+      "decoded_pixels_match_png": true,
+      "encoding": "PNG"
+    }
+  ],
+  "icns_layers": [
+    {
+      "logical_size": [
+        16,
+        16
+      ],
+      "scale": 1,
+      "pixel_size": 16,
+      "decoded_pixels_match_png": true
+    },
+    {
+      "logical_size": [
+        16,
+        16
+      ],
+      "scale": 2,
+      "pixel_size": 32,
+      "decoded_pixels_match_png": true
+    },
+    {
+      "logical_size": [
+        32,
+        32
+      ],
+      "scale": 1,
+      "pixel_size": 32,
+      "decoded_pixels_match_png": true
+    },
+    {
+      "logical_size": [
+        32,
+        32
+      ],
+      "scale": 2,
+      "pixel_size": 64,
+      "decoded_pixels_match_png": true
+    },
+    {
+      "logical_size": [
+        128,
+        128
+      ],
+      "scale": 1,
+      "pixel_size": 128,
+      "decoded_pixels_match_png": true
+    },
+    {
+      "logical_size": [
+        128,
+        128
+      ],
+      "scale": 2,
+      "pixel_size": 256,
+      "decoded_pixels_match_png": true
+    },
+    {
+      "logical_size": [
+        256,
+        256
+      ],
+      "scale": 1,
+      "pixel_size": 256,
+      "decoded_pixels_match_png": true
+    },
+    {
+      "logical_size": [
+        256,
+        256
+      ],
+      "scale": 2,
+      "pixel_size": 512,
+      "decoded_pixels_match_png": true
+    },
+    {
+      "logical_size": [
+        512,
+        512
+      ],
+      "scale": 1,
+      "pixel_size": 512,
+      "decoded_pixels_match_png": true
+    },
+    {
+      "logical_size": [
+        512,
+        512
+      ],
+      "scale": 2,
+      "pixel_size": 1024,
+      "decoded_pixels_match_png": true
+    }
+  ],
+  "platform_validation": {
+    "user_project_build": "NOT_RUN: user repository is not present",
+    "windows_desktop_and_taskbar": "NOT_RUN: not a Windows desktop session",
+    "macos_dock": "NOT_RUN: not a macOS desktop session"
+  },
+  "configuration_paths_exist": true,
+  "ico_first_layer_is_32x32": true,
+  "independent_ico_identification": {
+    "tool": "ImageMagick identify",
+    "exit_code": 0,
+    "frames": 10,
+    "status": "PASS"
+  }
+}

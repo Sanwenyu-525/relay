@@ -1636,3 +1636,114 @@ test('G06 completion-race leftover control is rejected and cannot rewrite a DONE
       dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl }), undefined);
   } finally { await f.close(); }
 });
+
+/** An older build never wrote the layout channels; blob type 'empty' is how the
+ * Saver represents a channel that is absent from a checkpoint. */
+async function stripGraphLayoutChannels(db: DbExecutor, runId: string): Promise<void> {
+  await sql`update relay_graph_v1.checkpoint_blobs set type = 'empty', blob = null
+    where thread_id = ${runId} and channel in ('layoutVersion', 'rebuildLayout')`.execute(db);
+}
+
+async function readRunAttempts(db: DbExecutor, runId: string) {
+  const rows = await sql<{ step_kind: string; attempt_number: number; attempt_key: string; status: string }>`
+    select s.step_kind, a.attempt_number, a.attempt_key, a.status from step_attempts a
+    join run_steps s on s.id = a.step_id
+    where s.run_id = ${runId} order by s.step_index, a.attempt_number
+  `.execute(db);
+  return rows.rows;
+}
+
+async function readRebuildRecords(db: DbExecutor, taskId: string): Promise<bigint> {
+  const rows = await sql<{ count: bigint }>`
+    select count(*)::bigint as count from activity_records
+    where task_id = ${taskId} and event_type = 'RUN_GRAPH_LAYOUT_REBUILT'
+  `.execute(db);
+  return rows.rows[0]!.count;
+}
+
+test('a Review wait checkpointed by an older graph layout rebuilds and completes the original RESUME', async () => {
+  const f = await fixture(true);
+  try {
+    const runId = await delegatedRun(f);
+    assert.equal((await workerOnce(f)).code, 0);
+    const runBefore = await f.api.get(workspacePath(f.workspaceId, `/runs/${runId}`));
+    assert.equal((runBefore.body as { status: string }).status, 'WAITING_APPROVAL');
+    const attemptsBefore = await readRunAttempts(f.app.db, runId);
+    assert.equal(attemptsBefore.filter((row) => row.step_kind === 'COMPLETE').length, 0);
+    await stripGraphLayoutChannels(f.app.db, runId);
+
+    await approveValidationReview(f, runId);
+    const delivered = await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl });
+    assert.equal(delivered?.outcome, 'DONE');
+
+    const attemptsAfter = await readRunAttempts(f.app.db, runId);
+    assert.deepEqual(attemptsAfter.filter((row) => row.step_kind !== 'COMPLETE'), attemptsBefore);
+    const completeAttempts = attemptsAfter.filter((row) => row.step_kind === 'COMPLETE');
+    assert.equal(completeAttempts.length, 1);
+    assert.equal(completeAttempts[0]?.status, 'SUCCEEDED');
+    const taskRow = await sql<{ task_id: string }>`
+      select task_id from runs where id = ${runId}`.execute(f.app.db);
+    assert.equal(await readRebuildRecords(f.app.db, taskRow.rows[0]!.task_id), 1n);
+    const run = await f.api.get(workspacePath(f.workspaceId, `/runs/${runId}`));
+    assert.equal((run.body as { status: string }).status, 'COMPLETED');
+    const task = await f.api.get(workspacePath(f.workspaceId, `/tasks/${taskRow.rows[0]!.task_id}`));
+    assert.equal((task.body as { status: string }).status, 'DONE');
+    const completions = await sql<{ count: bigint }>`
+      select count(*)::bigint as count from completion_records where task_id = ${taskRow.rows[0]!.task_id}
+    `.execute(f.app.db);
+    assert.equal(completions.rows[0]?.count, 1n);
+    const versions = await sql<{ count: bigint }>`
+      select count(*)::bigint as count from artifact_versions where source_ref like ${`run:${runId}/%`}
+    `.execute(f.app.db);
+    assert.equal(versions.rows[0]?.count, 1n);
+    assert.equal(await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl }), undefined);
+  } finally { await f.close(); }
+});
+
+test('an approved Mock action checkpointed by an older graph layout replays its effect exactly once', async () => {
+  const f = await fixture(true);
+  try {
+    const action = await delegatedGatewayRun(f);
+    assert.equal((await workerOnce(f)).code, 0);
+    await stripGraphLayoutChannels(f.app.db, action.runId);
+    await decideAction(f, action.operationId, 'APPROVE');
+
+    const delivered = await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl });
+    assert.equal(delivered?.outcome, 'DONE');
+
+    const facts = await sql<{ status: string; invocation_count: bigint }>`
+      select o.status, count(i.id)::bigint as invocation_count from logical_operations o
+      left join invocation_attempts i on i.operation_id = o.id
+      where o.id = ${action.operationId} group by o.id
+    `.execute(f.app.db);
+    assert.deepEqual(facts.rows[0], { status: 'SUCCEEDED', invocation_count: 1n });
+    assert.match(await readFile(action.target, 'utf8'), new RegExp(action.operationId, 'u'));
+    const attempts = await readRunAttempts(f.app.db, action.runId);
+    assert.deepEqual(attempts.filter((row) => row.step_kind !== 'COMPLETE').map((row) =>
+      [row.step_kind, row.attempt_number, row.status]), [
+      ['BUILD_CONTEXT', 1n, 'SUCCEEDED'], ['DRAFT', 1n, 'SUCCEEDED'],
+      ['PERSIST_CANDIDATE', 1n, 'SUCCEEDED'], ['VERIFY', 1n, 'SUCCEEDED'],
+    ]);
+    assert.equal(await readRebuildRecords(f.app.db, action.taskId), 1n);
+    const run = await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`));
+    assert.equal((run.body as { status: string }).status, 'WAITING_APPROVAL');
+    const task = await f.api.get(workspacePath(f.workspaceId, `/tasks/${action.taskId}`));
+    assert.equal((task.body as { status: string }).status, 'WAITING');
+
+    await approveValidationReview(f, action.runId);
+    const final = await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl });
+    assert.equal(final?.outcome, 'DONE');
+    const doneRun = await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`));
+    assert.equal((doneRun.body as { status: string }).status, 'COMPLETED');
+    const doneTask = await f.api.get(workspacePath(f.workspaceId, `/tasks/${action.taskId}`));
+    assert.equal((doneTask.body as { status: string }).status, 'DONE');
+    const completions = await sql<{ count: bigint }>`
+      select count(*)::bigint as count from completion_records where task_id = ${action.taskId}
+    `.execute(f.app.db);
+    assert.equal(completions.rows[0]?.count, 1n);
+  } finally { await f.close(); }
+});

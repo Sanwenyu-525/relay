@@ -1,0 +1,10 @@
+src-tauri/icons/icon.ico[0] ICO 32x32 32x32+0+0 8-bit sRGB 0.000u 0:00.001
+src-tauri/icons/icon.ico[1] ICO 16x16 16x16+0+0 8-bit sRGB 0.000u 0:00.001
+src-tauri/icons/icon.ico[2] ICO 20x20 20x20+0+0 8-bit sRGB 0.000u 0:00.001
+src-tauri/icons/icon.ico[3] ICO 24x24 24x24+0+0 8-bit sRGB 0.000u 0:00.001
+src-tauri/icons/icon.ico[4] ICO 40x40 40x40+0+0 8-bit sRGB 0.000u 0:00.001
+src-tauri/icons/icon.ico[5] ICO 48x48 48x48+0+0 8-bit sRGB 0.000u 0:00.001
+src-tauri/icons/icon.ico[6] ICO 64x64 64x64+0+0 8-bit sRGB 0.000u 0:00.001
+src-tauri/icons/icon.ico[7] ICO 96x96 96x96+0+0 8-bit sRGB 0.000u 0:00.001
+src-tauri/icons/icon.ico[8] ICO 128x128 128x128+0+0 8-bit sRGB 0.000u 0:00.000
+src-tauri/icons/icon.ico[9] PNG 256x256 256x256+0+0 8-bit sRGB 224238B 0.000u 0:00.000

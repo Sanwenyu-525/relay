@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { Annotation, Command, END, START, StateGraph, interrupt } from '@langchain/langgraph';
 import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres';
 import { sql } from 'kysely';
@@ -8,7 +10,7 @@ import type { ClaimedRunCommand } from '../application/run-dispatch.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import { GRAPH_CHECKPOINT_SCHEMA } from '../infrastructure/graph-checkpoints.js';
 import { ManagedContentStore } from '../storage/managed-content-store.js';
-import { createRepositories } from '../application/unit-of-work.js';
+import { createRepositories, withTransaction } from '../application/unit-of-work.js';
 import { readMockGatewayAction } from '../workflow/execution-contract.js';
 import { executeMockGatewayStep, type MockGatewayStepResult } from './mock-gateway-action.js';
 
@@ -19,13 +21,38 @@ const RunGraphState = Annotation.Root({
   operationId: Annotation<string>(),
   reviewId: Annotation<string>(),
   reviewKind: Annotation<string>(),
+  // Bumped on every graph layout change. A head without the current version is
+  // a checkpoint from an older build; it is rebuilt from business facts before
+  // any resume is interpreted against it.
+  layoutVersion: Annotation<number>(),
+  // Only true while a deterministic rebuild replays business facts; it lets
+  // the advance node re-establish a durable Review wait that the skipped
+  // SUCCEEDED steps would otherwise bypass, and is cleared on first resume.
+  rebuildLayout: Annotation<boolean>(),
 });
 
 const REPEAT = new Set(['RETRYABLE', 'REPLAYED', 'CORRECTION_SCHEDULED']);
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 
+export const GRAPH_LAYOUT_VERSION = 1;
+
 export class RunGraphInvocationLost extends Error {
   override readonly name = 'RunGraphInvocationLost';
+}
+
+async function recordGraphLayoutRebuild(db: DbExecutor, runId: string,
+  fromLayout: number | undefined): Promise<void> {
+  await withTransaction(db, async (repositories) => {
+    const run = await repositories.runs.readRun(runId);
+    if (run === undefined) throw new Error('Run graph rebuild has no Run row');
+    const task = await repositories.tasks.readTask(run.task_id);
+    await repositories.activities.insertActivityRecord({ id: randomUUID(), actorKind: 'SYSTEM',
+      actorRef: `run:${runId}`, commandId: null, projectId: task?.project_id ?? null,
+      taskId: run.task_id, eventType: 'RUN_GRAPH_LAYOUT_REBUILT',
+      factRefs: { run_id: runId,
+        from_layout: fromLayout === undefined ? 'unknown' : fromLayout,
+        to_layout: GRAPH_LAYOUT_VERSION } });
+  });
 }
 
 export interface GraphDeliveryOutcome {
@@ -68,7 +95,14 @@ export async function executeClaimedRunGraph(db: DbExecutor, input: {
               input.claim.workerId, input.claim.epoch))) throw new RunGraphInvocationLost();
         const waiting = result.status === 'WAITING_REVIEW' ||
           (result.status === 'STEP_SUCCEEDED' && result.run_status === 'WAITING_APPROVAL');
-        const openReview = waiting ? await openValidationReview(db, state.runId) : undefined;
+        // A rebuild replay skips SUCCEEDED steps, so the COMPLETE gate reports
+        // COMPLETION_BLOCKED where the original build had already parked at the
+        // Review interrupt. With an open validation Review that wait is the
+        // durable barrier the rebuild must re-establish.
+        const rebuildWaiting = state.rebuildLayout === true &&
+          result.status === 'COMPLETION_BLOCKED';
+        const openReview = waiting || rebuildWaiting
+          ? await openValidationReview(db, state.runId) : undefined;
         return {
           lastStatus: openReview ? 'WAITING_REVIEW' :
             waiting ? 'WAITING_WITHOUT_VALIDATION_REVIEW' : result.status,
@@ -116,7 +150,7 @@ export async function executeClaimedRunGraph(db: DbExecutor, input: {
             !('review_id' in resumed) || resumed.review_id !== state.reviewId) {
           throw new Error('Run graph Review resume identity mismatch');
         }
-        return { lastStatus: 'RESUMED' };
+        return { lastStatus: 'RESUMED', rebuildLayout: false };
       })
       .addNode('awaitAction', (state) => {
         const resumed: unknown = interrupt({ run_id: state.runId,
@@ -152,8 +186,24 @@ export async function executeClaimedRunGraph(db: DbExecutor, input: {
       .compile({ checkpointer: saver });
     const config = { configurable: { thread_id: input.claim.runId }, durability: 'sync' as const,
       recursionLimit: Math.max(10, input.maxSteps * 2 + 8), signal: input.signal };
-    const snapshot = await graph.getState(config);
+    let snapshot = await graph.getState(config);
     if (input.signal.aborted) throw new RunGraphInvocationLost();
+    // A checkpoint written by an older graph layout lacks the current
+    // layoutVersion channel. Upstream pregel only treats a plain full input as
+    // a fresh run (is_resuming requires None/Command/same-run_id input), so one
+    // full invoke replays business facts from START: succeeded steps are
+    // skipped by step selection, waits are re-established, and the old head is
+    // superseded without deleting any checkpoint history.
+    if (Object.keys(snapshot.values).length > 0 &&
+        snapshot.values.layoutVersion !== GRAPH_LAYOUT_VERSION) {
+      await recordGraphLayoutRebuild(db, input.claim.runId, snapshot.values.layoutVersion);
+      await graph.invoke({ runId: input.claim.runId, lastStatus: '', runStatus: '',
+        operationId: '', reviewId: '', reviewKind: '',
+        layoutVersion: GRAPH_LAYOUT_VERSION, rebuildLayout: true }, config);
+      if (input.signal.aborted) throw new RunGraphInvocationLost();
+      snapshot = await graph.getState(config);
+      if (input.signal.aborted) throw new RunGraphInvocationLost();
+    }
     const interrupted = snapshot.tasks.some((task) => task.interrupts.length > 0);
     if (interrupted && input.claim.kind !== 'RESUME') {
       // A START that crashed after saving its wait has already reached its
@@ -180,7 +230,8 @@ export async function executeClaimedRunGraph(db: DbExecutor, input: {
       await graph.invoke(null, config);
     } else {
       await graph.invoke({ runId: input.claim.runId, lastStatus: '', runStatus: '',
-        operationId: '', reviewId: '', reviewKind: '' }, config);
+        operationId: '', reviewId: '', reviewKind: '',
+        layoutVersion: GRAPH_LAYOUT_VERSION, rebuildLayout: false }, config);
     }
     if (input.signal.aborted) throw new RunGraphInvocationLost();
     const final = await graph.getState(config);
