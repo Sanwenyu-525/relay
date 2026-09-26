@@ -12,7 +12,8 @@
 [CmdletBinding()]
 param(
   [switch]$SkipBuild,
-  [string]$TestFile = ''
+  [string]$TestFile = '',
+  [string]$TestNamePattern = ''
 )
 
 Set-StrictMode -Version Latest
@@ -145,7 +146,11 @@ try {
   # Keep files serial so that policy cannot hide rows from an unrelated file.
   Push-Location $apiRoot
   try {
-    & $nodeExe '--test' '--test-concurrency=1' $testPattern
+    if ($TestNamePattern -eq '') {
+      & $nodeExe '--test' '--test-concurrency=1' $testPattern
+    } else {
+      & $nodeExe '--test' '--test-concurrency=1' "--test-name-pattern=$TestNamePattern" $testPattern
+    }
     $testExitCode = $LASTEXITCODE
   } finally {
     Pop-Location

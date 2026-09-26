@@ -12,16 +12,19 @@ importers:
     dependencies:
       '@langchain/core':
         specifier: 1.2.12
-        version: 1.2.12
+        version: 1.2.12(openai@7.23.0(zod@4.6.5))
       '@langchain/langgraph':
         specifier: 1.4.17
-        version: 1.4.17(@langchain/core@1.2.12)(zod@4.6.5)
+        version: 1.4.17(@langchain/core@1.2.12(openai@7.23.0(zod@4.6.5)))(zod@4.6.5)
       '@langchain/langgraph-checkpoint':
         specifier: 1.1.5
-        version: 1.1.5(@langchain/core@1.2.12)
+        version: 1.1.5(@langchain/core@1.2.12(openai@7.23.0(zod@4.6.5)))
       '@langchain/langgraph-checkpoint-postgres':
         specifier: 1.0.5
-        version: 1.0.5(@langchain/core@1.2.12)(@langchain/langgraph-checkpoint@1.1.5(@langchain/core@1.2.12))
+        version: 1.0.5(@langchain/core@1.2.12(openai@7.23.0(zod@4.6.5)))(@langchain/langgraph-checkpoint@1.1.5(@langchain/core@1.2.12(openai@7.23.0(zod@4.6.5))))
+      '@langchain/openai':
+        specifier: 1.5.13
+        version: 1.5.13(@langchain/core@1.2.12(openai@7.23.0(zod@4.6.5)))
       '@sinclair/typebox':
         specifier: 0.34.52
         version: 0.34.52
@@ -103,6 +106,12 @@ packages:
     peerDependencies:
       '@langchain/core': ^1.1.48
       zod: ^3.25.32 || ^4.2.0
+
+  '@langchain/openai@1.5.13':
+    resolution: {integrity: sha512-SA1QWNgM/p8xhdwU82CJ7OofhHEExpAaIwJ7j9ELIyVW795Mn0jDRQO/5yChawLcPhuLkeL+jMesi0FnXbImSg==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@langchain/core': ^1.2.11
 
   '@langchain/protocol@0.0.19':
     resolution: {integrity: sha512-9hKcRrH7cBX6gfutdfXPoft1OCchHe4FEpALoDJMl5Qu+n/YG5ynZmyu8+8cxORlPwHBoKTxggvXz+76M1yX1Q==}
@@ -242,6 +251,30 @@ packages:
   on-exit-leak-free@2.1.2:
     resolution: {integrity: sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA==}
     engines: {node: '>=14.0.0'}
+
+  openai@7.23.0:
+    resolution: {integrity: sha512-0ecOXnFSMNWZq6cUBcTV6Lf93y+fm8BH/+QzFvpoP1UGNOE5pnytRa6HAPGCw+3IS9SIAW7rc1M8yyzN1PiBAQ==}
+    engines: {node: '>=22.0.0'}
+    peerDependencies:
+      '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
+      '@smithy/hash-node': '>=4.3.0 <5'
+      '@smithy/signature-v4': '>=5.4.0 <6'
+      undici: '>=5 <9'
+      ws: ^8.21.0
+      zod: ^3.25 || ^4.0
+    peerDependenciesMeta:
+      '@aws-sdk/credential-provider-node':
+        optional: true
+      '@smithy/hash-node':
+        optional: true
+      '@smithy/signature-v4':
+        optional: true
+      undici:
+        optional: true
+      ws:
+        optional: true
+      zod:
+        optional: true
 
   p-finally@1.0.0:
     resolution: {integrity: sha512-LICb2p9CB7FS+0eR1oqWnHhp0FljGLZCWBE9aix0Uye9W8LTQPwMTYVGWQWIw9RdQiDg4+epXQODwIYJtSJaow==}
@@ -434,12 +467,12 @@ snapshots:
       '@fastify/forwarded': 3.0.2
       ipaddr.js: 2.5.0
 
-  '@langchain/core@1.2.12':
+  '@langchain/core@1.2.12(openai@7.23.0(zod@4.6.5))':
     dependencies:
       '@cfworker/json-schema': 4.1.1
       '@standard-schema/spec': 1.1.0
       js-tiktoken: 1.0.21
-      langsmith: 0.10.5
+      langsmith: 0.10.5(openai@7.23.0(zod@4.6.5))
       mustache: 4.2.0
       p-queue: 6.6.2
       zod: 4.6.5
@@ -450,37 +483,50 @@ snapshots:
       - openai
       - ws
 
-  '@langchain/langgraph-checkpoint-postgres@1.0.5(@langchain/core@1.2.12)(@langchain/langgraph-checkpoint@1.1.5(@langchain/core@1.2.12))':
+  '@langchain/langgraph-checkpoint-postgres@1.0.5(@langchain/core@1.2.12(openai@7.23.0(zod@4.6.5)))(@langchain/langgraph-checkpoint@1.1.5(@langchain/core@1.2.12(openai@7.23.0(zod@4.6.5))))':
     dependencies:
-      '@langchain/core': 1.2.12
-      '@langchain/langgraph-checkpoint': 1.1.5(@langchain/core@1.2.12)
+      '@langchain/core': 1.2.12(openai@7.23.0(zod@4.6.5))
+      '@langchain/langgraph-checkpoint': 1.1.5(@langchain/core@1.2.12(openai@7.23.0(zod@4.6.5)))
       pg: 8.16.3
     transitivePeerDependencies:
       - pg-native
 
-  '@langchain/langgraph-checkpoint@1.1.5(@langchain/core@1.2.12)':
+  '@langchain/langgraph-checkpoint@1.1.5(@langchain/core@1.2.12(openai@7.23.0(zod@4.6.5)))':
     dependencies:
-      '@langchain/core': 1.2.12
+      '@langchain/core': 1.2.12(openai@7.23.0(zod@4.6.5))
 
-  '@langchain/langgraph-sdk@1.11.2(@langchain/core@1.2.12)':
+  '@langchain/langgraph-sdk@1.11.2(@langchain/core@1.2.12(openai@7.23.0(zod@4.6.5)))':
     dependencies:
-      '@langchain/core': 1.2.12
+      '@langchain/core': 1.2.12(openai@7.23.0(zod@4.6.5))
       '@langchain/protocol': 0.0.19
       '@types/json-schema': 7.0.15
       p-queue: 9.3.3
       p-retry: 7.1.1
 
-  '@langchain/langgraph@1.4.17(@langchain/core@1.2.12)(zod@4.6.5)':
+  '@langchain/langgraph@1.4.17(@langchain/core@1.2.12(openai@7.23.0(zod@4.6.5)))(zod@4.6.5)':
     dependencies:
-      '@langchain/core': 1.2.12
-      '@langchain/langgraph-checkpoint': 1.1.5(@langchain/core@1.2.12)
-      '@langchain/langgraph-sdk': 1.11.2(@langchain/core@1.2.12)
+      '@langchain/core': 1.2.12(openai@7.23.0(zod@4.6.5))
+      '@langchain/langgraph-checkpoint': 1.1.5(@langchain/core@1.2.12(openai@7.23.0(zod@4.6.5)))
+      '@langchain/langgraph-sdk': 1.11.2(@langchain/core@1.2.12(openai@7.23.0(zod@4.6.5)))
       '@langchain/protocol': 0.0.19
       '@standard-schema/spec': 1.1.0
       zod: 4.6.5
     transitivePeerDependencies:
       - react
       - react-dom
+
+  '@langchain/openai@1.5.13(@langchain/core@1.2.12(openai@7.23.0(zod@4.6.5)))':
+    dependencies:
+      '@langchain/core': 1.2.12(openai@7.23.0(zod@4.6.5))
+      js-tiktoken: 1.0.21
+      openai: 7.23.0(zod@4.6.5)
+      zod: 4.6.5
+    transitivePeerDependencies:
+      - '@aws-sdk/credential-provider-node'
+      - '@smithy/hash-node'
+      - '@smithy/signature-v4'
+      - undici
+      - ws
 
   '@langchain/protocol@0.0.19': {}
 
@@ -597,9 +643,11 @@ snapshots:
 
   kysely@0.29.6: {}
 
-  langsmith@0.10.5:
+  langsmith@0.10.5(openai@7.23.0(zod@4.6.5)):
     dependencies:
       p-queue: 6.6.2
+    optionalDependencies:
+      openai: 7.23.0(zod@4.6.5)
 
   light-my-request@6.6.0:
     dependencies:
@@ -610,6 +658,10 @@ snapshots:
   mustache@4.2.0: {}
 
   on-exit-leak-free@2.1.2: {}
+
+  openai@7.23.0(zod@4.6.5):
+    optionalDependencies:
+      zod: 4.6.5
 
   p-finally@1.0.0: {}
 

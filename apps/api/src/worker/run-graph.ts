@@ -11,7 +11,7 @@ import type { DbExecutor } from '../infrastructure/database.js';
 import { GRAPH_CHECKPOINT_SCHEMA } from '../infrastructure/graph-checkpoints.js';
 import { ManagedContentStore } from '../storage/managed-content-store.js';
 import { createRepositories, withTransaction } from '../application/unit-of-work.js';
-import { readMockGatewayAction } from '../workflow/execution-contract.js';
+import { readMockActionOperationId } from '../workflow/execution-contract.js';
 import { executeMockGatewayStep, type MockGatewayStepResult } from './mock-gateway-action.js';
 
 const RunGraphState = Annotation.Root({
@@ -47,6 +47,7 @@ async function recordGraphLayoutRebuild(db: DbExecutor, runId: string,
     if (run === undefined) throw new Error('Run graph rebuild has no Run row');
     const task = await repositories.tasks.readTask(run.task_id);
     await repositories.activities.insertActivityRecord({ id: randomUUID(), actorKind: 'SYSTEM',
+      workspaceId: run.workspace_id, runId: run.id,
       actorRef: `run:${runId}`, commandId: null, projectId: task?.project_id ?? null,
       taskId: run.task_id, eventType: 'RUN_GRAPH_LAYOUT_REBUILT',
       factRefs: { run_id: runId,
@@ -273,8 +274,9 @@ async function validReviewResume(db: DbExecutor, claim: ClaimedRunCommand,
   if ((reviewKind === 'ACTION_APPROVAL') !== (interruptedOperationId !== '')) return false;
   if (interruptedOperationId !== '') {
     const contract = await createRepositories(db).runs.readContract(claim.runId);
-    const frozen = contract === undefined ? undefined : readMockGatewayAction(contract.frozen_snapshot);
-    if (frozen?.operation_id !== interruptedOperationId) return false;
+    const frozenOperationId = contract === undefined ? undefined :
+      readMockActionOperationId(contract.frozen_snapshot);
+    if (frozenOperationId !== interruptedOperationId) return false;
   }
   const rows = await sql<{ exists: boolean }>`
     select exists(select 1 from run_commands c

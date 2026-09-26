@@ -30,7 +30,9 @@ before(async () => {
 });
 after(async () => { await app.close(); await rm(dataRoot, { recursive: true, force: true }); });
 
-async function fixture(title = '中文') {
+async function fixtureReady(title = '中文'): Promise<{
+  workspaceId: string; projectId: string; taskId: string;
+}> {
   const workspaceId = randomUUID();
   const projectId = randomUUID();
   const taskId = randomUUID();
@@ -47,9 +49,14 @@ async function fixture(title = '中文') {
     await r.tasks.insertCriterion({ taskId, acceptanceRevision: 1n, criterionId: 'human',
       statement: '人工验收', required: true, method: 'HUMAN', targetSpec: {} });
   });
-  const delegated = await delegateTask(app.db, { workspaceId, taskId,
-    commandId: randomUUID(), expectedTaskRevision: '0' });
-  return { workspaceId, projectId, taskId, runId: delegated.result.run_id };
+  return { workspaceId, projectId, taskId };
+}
+
+async function fixture(title = '中文') {
+  const ready = await fixtureReady(title);
+  const delegated = await delegateTask(app.db, { workspaceId: ready.workspaceId,
+    taskId: ready.taskId, commandId: randomUUID(), expectedTaskRevision: '0' });
+  return { ...ready, runId: delegated.result.run_id };
 }
 
 function sourceItems(detail: Awaited<ReturnType<typeof readRunContextManifest>>) {
@@ -228,6 +235,28 @@ test('P11 optional input trims with an attributable reason and stays within esti
   assert.ok(budget.selected_tokens + budget.reserved_tokens <= budget.limit_tokens);
 });
 
+test('real model Context excludes recent fallback while Mock keeps its existing selection', async () => {
+  const f = await fixture('无匹配任务');
+  await createKnowledge(app.db, { workspaceId: f.workspaceId,
+    projectId: f.projectId, commandId: randomUUID(), title: '独立资料',
+    source: { sourceKind: 'NOTE', text: '不应凭近期排序外发' } });
+  const r = createRepositories(app.db);
+  const run = await r.runs.readRun(f.runId);
+  const task = await r.tasks.readTask(f.taskId);
+  assert.ok(run && task);
+  const mock = await buildRunContext(app.db, { run, task, storage });
+  const real = await buildRunContext(app.db, { run, task, storage,
+    externalModel: true });
+  assert.equal(mock.kind, 'READY');
+  assert.equal(real.kind, 'READY');
+  if (mock.kind !== 'READY' || real.kind !== 'READY') return;
+  const mockSources = mock.payload.sources as { selection_reason?: string }[];
+  const realSources = real.payload.sources as { selection_reason?: string }[];
+  assert.ok(mockSources.some((source) => source.selection_reason === 'RECENT_SCOPE_FALLBACK'));
+  assert.ok(realSources.every((source) => source.selection_reason !== 'RECENT_SCOPE_FALLBACK'));
+  assert.notEqual(mock.manifestHash.toString('hex'), real.manifestHash.toString('hex'));
+});
+
 test('P11 expired Memory is excluded on historical Manifest read', async () => {
   const f = await fixture('中文');
   const memory = await createMemory(app.db, { workspaceId: f.workspaceId, projectId: f.projectId,
@@ -312,3 +341,124 @@ test('P11 ArtifactVersion Knowledge uses checked managed content and hides damag
   const unavailable = await readRunContextManifest(app.db, storage, f.workspaceId, f.runId, id);
   assert.ok(!JSON.stringify(unavailable).includes(promoted.result.knowledge_id!));
 });
+
+test('P12 explicit context sources freeze with the Run, pin immutable versions and drop the recent fallback', async () => {
+  const ready = await fixtureReady('显式来源任务标题');
+  const created = await createKnowledge(app.db, { workspaceId: ready.workspaceId,
+    projectId: ready.projectId, commandId: randomUUID(), title: '旧版资料',
+    source: { sourceKind: 'NOTE', text: '显式钉住的第一版正文' } });
+  const knowledgeId = created.result.knowledge_id!;
+  const updated = await addKnowledgeVersion(app.db, { workspaceId: ready.workspaceId,
+    knowledgeId, commandId: randomUUID(), expectedRevision: created.result.revision,
+    source: { sourceKind: 'NOTE', text: '更新后的第二版正文' } });
+  assert.equal(updated.result.version, '2');
+  // 标题与任务无关：没有显式选择时它会是 RECENT_SCOPE_FALLBACK 的补位候选。
+  await createMemory(app.db, { workspaceId: ready.workspaceId, projectId: ready.projectId,
+    commandId: randomUUID(), title: '完全无关的近期记忆', text: '最近补位资料', confirmed: true });
+  // 标题命中：显式选择存在时同作用域检索仍按设计保留。
+  await createKnowledge(app.db, { workspaceId: ready.workspaceId, projectId: ready.projectId,
+    commandId: randomUUID(), title: '显式来源任务标题相关资料',
+    source: { sourceKind: 'NOTE', text: '标题命中的同作用域资料' } });
+
+  const delegated = await delegateTask(app.db, { workspaceId: ready.workspaceId,
+    taskId: ready.taskId, commandId: randomUUID(), expectedTaskRevision: '0',
+    contextSources: [{ kind: 'KNOWLEDGE', root_id: knowledgeId, version: '1' }] });
+  const frozen = await sql<{ sources: readonly unknown[] }>`
+    select frozen_snapshot->'context_sources' as sources from execution_contracts
+    where run_id = ${delegated.result.run_id}`.execute(app.db);
+  assert.deepEqual(frozen.rows[0]?.sources, [
+    { kind: 'KNOWLEDGE', root_id: knowledgeId, version: '1' }]);
+
+  const built = await buildRunContext(app.db, { run: await getRun(delegated.result.run_id),
+    task: await getTask(ready.taskId), storage });
+  assert.equal(built.kind, 'READY');
+  if (built.kind !== 'READY') return;
+  const sources = built.payload.sources as readonly { kind: string; source_ref: string;
+    content: string; selection_reason?: string }[];
+  const pinned = sources.find((source) => source.selection_reason === 'EXPLICIT_SELECTION');
+  assert.ok(pinned);
+  assert.equal(pinned.source_ref, `knowledge:${knowledgeId}:v1`);
+  assert.equal(pinned.content, '显式钉住的第一版正文');
+  assert.ok(sources.some((source) => source.selection_reason === 'TITLE_MATCH'),
+    'scoped retrieval stays available alongside explicit selections');
+  assert.equal(sources.some((source) => source.selection_reason === 'RECENT_SCOPE_FALLBACK'), false,
+    'explicit selections replace the recent fallback per minimal necessary input');
+  assert.ok(!JSON.stringify(built.payload).includes('最近补位资料'));
+});
+
+test('Delegate rejects unknown, retired or missing explicit context source versions before any Run', async () => {
+  const ready = await fixtureReady('校验显式来源');
+  const created = await createKnowledge(app.db, { workspaceId: ready.workspaceId,
+    projectId: ready.projectId, commandId: randomUUID(), title: '被归档的资料',
+    source: { sourceKind: 'NOTE', text: '正文' } });
+  const knowledgeId = created.result.knowledge_id!;
+  const other = await fixtureReady('其他工作区');
+  const foreign = await createKnowledge(app.db, { workspaceId: other.workspaceId,
+    projectId: other.projectId, commandId: randomUUID(), title: '跨工作区资料',
+    source: { sourceKind: 'NOTE', text: '不可见' } });
+
+  for (const sources of [
+    [{ kind: 'KNOWLEDGE' as const, root_id: knowledgeId, version: '99' }],
+    [{ kind: 'KNOWLEDGE' as const, root_id: randomUUID(), version: '1' }],
+    [{ kind: 'KNOWLEDGE' as const, root_id: foreign.result.knowledge_id!, version: '1' }],
+  ]) {
+    await assert.rejects(
+      delegateTask(app.db, { workspaceId: ready.workspaceId, taskId: ready.taskId,
+        commandId: randomUUID(), expectedTaskRevision: '0', contextSources: sources }),
+      (error: unknown) => typeof error === 'object' && error !== null && 'code' in error &&
+        ((error as { code: string }).code === 'RESOURCE_NOT_FOUND' ||
+          (error as { code: string }).code === 'INVALID_TRANSITION'),
+    );
+  }
+
+  await retireInformation(app.db, { workspaceId: ready.workspaceId, kind: 'knowledge',
+    id: knowledgeId, commandId: randomUUID(), expectedRevision: created.result.revision });
+  await assert.rejects(
+    delegateTask(app.db, { workspaceId: ready.workspaceId, taskId: ready.taskId,
+      commandId: randomUUID(), expectedTaskRevision: '0',
+      contextSources: [{ kind: 'KNOWLEDGE', root_id: knowledgeId, version: '1' }] }),
+    (error: unknown) => typeof error === 'object' && error !== null && 'code' in error &&
+      (error as { code: string }).code === 'INVALID_TRANSITION',
+  );
+  const runs = await sql<{ count: string | bigint }>`
+    select count(*) as count from runs where task_id = ${ready.taskId}`.execute(app.db);
+  assert.equal(String(runs.rows[0]?.count), '0');
+  const task = await sql<{ status: string; executor_kind: string }>`
+    select status, executor_kind from tasks where id = ${ready.taskId}`.execute(app.db);
+  assert.deepEqual(task.rows[0], { status: 'READY', executor_kind: 'HUMAN' });
+});
+
+test('a source retired after freeze is excluded as unavailable while the frozen pin stays', async () => {
+  const ready = await fixtureReady('冻结后归档来源');
+  const created = await createKnowledge(app.db, { workspaceId: ready.workspaceId,
+    projectId: ready.projectId, commandId: randomUUID(), title: '稍后归档',
+    source: { sourceKind: 'NOTE', text: '显式选中后归档的正文' } });
+  const knowledgeId = created.result.knowledge_id!;
+  const delegated = await delegateTask(app.db, { workspaceId: ready.workspaceId,
+    taskId: ready.taskId, commandId: randomUUID(), expectedTaskRevision: '0',
+    contextSources: [{ kind: 'KNOWLEDGE', root_id: knowledgeId, version: '1' }] });
+  await retireInformation(app.db, { workspaceId: ready.workspaceId, kind: 'knowledge',
+    id: knowledgeId, commandId: randomUUID(), expectedRevision: created.result.revision });
+
+  const built = await buildRunContext(app.db, { run: await getRun(delegated.result.run_id),
+    task: await getTask(ready.taskId), storage });
+  assert.equal(built.kind, 'READY');
+  if (built.kind !== 'READY') return;
+  const sources = built.payload.sources as readonly { selection_reason?: string }[];
+  assert.equal(sources.some((source) => source.selection_reason === 'EXPLICIT_SELECTION'), false);
+  const exclusions = built.payload.exclusions as readonly { source_ref: string; reason: string }[];
+  assert.deepEqual(exclusions.find((entry) => entry.source_ref === `knowledge:${knowledgeId}:v1`),
+    { source_ref: `knowledge:${knowledgeId}:v1`, reason: 'SOURCE_UNAVAILABLE' });
+});
+
+async function getRun(runId: string) {
+  const run = await createRepositories(app.db).runs.readRun(runId);
+  assert.ok(run);
+  return run;
+}
+
+async function getTask(taskId: string) {
+  const task = await createRepositories(app.db).tasks.readTask(taskId);
+  assert.ok(task);
+  return task;
+}

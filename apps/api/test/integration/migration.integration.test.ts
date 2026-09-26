@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import test from 'node:test';
 
@@ -68,6 +69,23 @@ const ALL_MIGRATIONS = [
   '0011_m03_run_dispatch',
   '0012_m03_run_events',
   '0013_m03_run_command_order',
+  '0014_m04_file_read',
+  '0015_m04_assist',
+  '0016_m04_web_fetch',
+  '0017_m04_web_import',
+  '0018_m04_model_calls',
+  '0019_m04_draft_read_input',
+  '0020_m05_today_selections',
+  '0021_m05_activity_lineage',
+  '0022_m04_first_party_skills',
+  '0023_m04_task_skill_proposals',
+  '0024_m05_view_configuration',
+  '0025_m05_project_blueprints',
+  '0026_m04_model_call_budgets',
+  '0027_m05_workspace_lists',
+  '0028_m04_assist_live_preview',
+  '0029_m04_run_draft_live_preview',
+  '0030_m06_real_tools',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {
@@ -115,6 +133,13 @@ test('applies V001 on an empty database and does not repeat it on a second run',
     try {
       const probe = await sql`select 1 as ok from workspaces limit 1`.execute(app.db);
       assert.equal(probe.rows.length, 0);
+      const modelCallPrivileges = (await sql<{ can_change_origin: boolean;
+        can_settle: boolean }>`select
+          has_column_privilege(current_user, 'model_calls', 'step_attempt_id', 'UPDATE')
+            as can_change_origin,
+          has_column_privilege(current_user, 'model_calls', 'status', 'UPDATE')
+            as can_settle`.execute(app.db)).rows[0]!;
+      assert.deepEqual(modelCallPrivileges, { can_change_origin: false, can_settle: true });
 
       await expectSqlState(
         '42501',
@@ -145,6 +170,57 @@ test('applies V001 on an empty database and does not repeat it on a second run',
     assert.deepEqual(repeated.alreadyApplied, ALL_MIGRATIONS);
     assert.equal(repeated.ledgerRows, ALL_MIGRATIONS.length);
   } finally {
+    await database.drop();
+  }
+});
+
+test('0021 attributes historical unscoped Activity or aborts on an orphan', async () => {
+  const database = await createTemporaryDatabase('activity_backfill');
+  const beforeDirectory = await createMigrationDirectoryFixture((files) => {
+    files.delete('0021_m05_activity_lineage.sql');
+  });
+  const migration = openDatabase(database.migrationUrl, 'relay-api-test-activity-backfill');
+  try {
+    await runMigrations({ connectionString: database.migrationUrl, directory: beforeDirectory });
+    const workspaceId = randomUUID();
+    const goalId = randomUUID();
+    const focusCommand = randomUUID();
+    const orphanId = randomUUID();
+    await sql`insert into workspaces (id, name) values (${workspaceId}, 'Backfill')`
+      .execute(migration.db);
+    await sql`insert into goals (id, workspace_id, title, status)
+      values (${goalId}, ${workspaceId}, 'Goal', 'ACTIVE')`.execute(migration.db);
+    await sql`insert into command_receipts (scope_key, command_id, command_type,
+      payload_hash, payload_hash_algorithm, canonicalization_version, result_ref)
+      values (${'workspace:' + workspaceId + ':user:local'}, ${focusCommand},
+        'SetFocusSelection', ${Buffer.alloc(32)}, 'sha256', '1', '{}'::jsonb)`
+      .execute(migration.db);
+    await sql`insert into activity_records (id, actor_kind, actor_ref, command_id,
+      project_id, task_id, event_type, fact_refs) values
+      (${randomUUID()}, 'HUMAN', 'cli', null, null, null,
+        'WORKSPACE_INITIALIZED', ${JSON.stringify({ workspace_id: workspaceId })}::jsonb),
+      (${randomUUID()}, 'HUMAN', 'user:local', null, null, null,
+        'GOAL_CREATED', ${JSON.stringify({ goal_id: goalId })}::jsonb),
+      (${randomUUID()}, 'HUMAN', 'user:local', ${focusCommand}, null, null,
+        'TODAY_FOCUS_CHANGED', ${JSON.stringify({ target_kind: null })}::jsonb),
+      (${orphanId}, 'SYSTEM', 'old', null, null, null,
+        'UNATTRIBUTED', '{}'::jsonb)`.execute(migration.db);
+    await assert.rejects(() => runMigrations({ connectionString: database.migrationUrl,
+      directory: MIGRATIONS_DIRECTORY }), /without an authoritative Workspace/u);
+    const ledger = await sql<{ count: bigint }>`select count(*)::bigint as count
+      from relay_schema_migrations where name = '0021_m05_activity_lineage'`
+      .execute(migration.db);
+    assert.equal(ledger.rows[0]?.count, 0n);
+    await sql`delete from activity_records where id = ${orphanId}`.execute(migration.db);
+    await runMigrations({ connectionString: database.migrationUrl,
+      directory: MIGRATIONS_DIRECTORY });
+    const attributed = await sql<{ workspace_id: string }>`select workspace_id
+      from activity_records order by created_at, id`.execute(migration.db);
+    assert.equal(attributed.rows.length, 3);
+    assert.ok(attributed.rows.every((row) => row.workspace_id === workspaceId));
+  } finally {
+    await migration.close();
+    await rm(beforeDirectory, { recursive: true, force: true });
     await database.drop();
   }
 });

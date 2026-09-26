@@ -15,4 +15,8 @@
 .knowledge-history li { padding: var(--relay-space-3) 0; overflow-wrap: anywhere; }
 .knowledge-search-list { list-style: none; margin: var(--relay-space-4) 0; padding: 0; }
 .knowledge-check { display: flex; align-items: center; gap: var(--relay-space-3); margin-top: var(--relay-space-5); }
+.knowledge-import { margin-top: var(--relay-space-6); overflow-wrap: anywhere; }
+.knowledge-import-receipt, .knowledge-import-status { margin-top: var(--relay-space-5); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.knowledge-import-restore { display: flex; flex-wrap: wrap; align-items: end; gap: var(--relay-space-3); margin-top: var(--relay-space-5); }
+.knowledge-import-restore .field { flex: 1 1 16rem; }
 @media (max-width: 60rem) { .knowledge-columns { grid-template-columns: 1fr; } }

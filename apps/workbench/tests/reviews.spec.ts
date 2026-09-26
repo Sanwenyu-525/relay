@@ -5,6 +5,7 @@ import { flush, mountWorkbench } from "./mountApp";
 const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const reviewId = "22222222-2222-4222-8222-222222222222";
+const projectId = "99999999-9999-4999-8999-999999999999";
 const reviewUrl = `${baseUrl}/api/v1/workspaces/${workspaceId}/reviews`;
 let unmount: (() => void) | null = null;
 
@@ -15,13 +16,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function review(status = "OPEN") {
+function review(status = "OPEN", project: string | null = null) {
   return {
     id: reviewId,
     kind: "CRITERION",
     status,
     revision: status === "OPEN" ? "1" : "2",
-    project_id: null,
+    project_id: project,
     task_id: "33333333-3333-4333-8333-333333333333",
     run_id: "44444444-4444-4444-8444-444444444444",
     reason: "请核对产物中的结论",
@@ -183,5 +184,67 @@ describe("P07 Review Inbox", () => {
     }
     expect(posts).toBe(1);
     expect(receiptReads).toBe(3);
+  });
+
+  it("归档 Project 的 Review 历史仍可读，但不发送新决定", async () => {
+    activate();
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST") throw new Error("archived Review must not write");
+      if (url === `${reviewUrl}?status=OPEN`) return response(200, { items: [review("OPEN", projectId)] });
+      if (url === `${reviewUrl}/${reviewId}`) return response(200, review("OPEN", projectId));
+      if (url === `${baseUrl}/api/v1/workspaces/${workspaceId}/tasks/33333333-3333-4333-8333-333333333333`)
+        return response(200, { id: "33333333-3333-4333-8333-333333333333", project_id: projectId,
+          title: "历史任务", status: "WAITING", mode: "ME", revision: "1",
+          executor: { kind: "HUMAN", run_id: null, ownership_epoch: "0" }, current_completion_id: null,
+          waiting_reason: null, blocking_task_ids: [], unresolved_blocker_ids: [], allowed_actions: [],
+          acceptance: { acceptance_revision: "1", objective: "核对", source: "CREATE", criteria: [] }, dependencies: [] });
+      if (url === `${baseUrl}/api/v1/workspaces/${workspaceId}/projects/${projectId}`)
+        return response(200, { id: projectId, title: "历史项目", project_type: "GENERAL", revision: "2",
+          state_revision: "1", archived_at: "2026-09-26T00:00:00Z" });
+      throw new Error(`unexpected request: ${url}`);
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/reviews?id=${reviewId}`); unmount = mounted.unmount;
+    await flush();
+    expect(mounted.wrapper.get('[data-testid="review-project-archive-reason"]').text()).toContain("已归档");
+    expect(mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').attributes("disabled")).toBeDefined();
+    await mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').trigger("click");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  });
+
+  it("原 Review 决定响应不明后即使目标变为归档历史，仍能查询原回执", async () => {
+    activate();
+    let archived = false; let commandId = ""; let posts = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `${reviewUrl}?status=OPEN`) return response(200, { items: archived ? [] : [review("OPEN", projectId)] });
+      if (url === `${reviewUrl}/${reviewId}`) return response(200, review(archived ? "DECIDED" : "OPEN", projectId));
+      if (url === `${baseUrl}/api/v1/workspaces/${workspaceId}/tasks/33333333-3333-4333-8333-333333333333`)
+        return response(200, { id: "33333333-3333-4333-8333-333333333333", project_id: projectId,
+          title: "任务", status: "WAITING", mode: "ME", revision: "1",
+          executor: { kind: "HUMAN", run_id: null, ownership_epoch: "0" }, current_completion_id: null,
+          waiting_reason: null, blocking_task_ids: [], unresolved_blocker_ids: [], allowed_actions: [],
+          acceptance: { acceptance_revision: "1", objective: "核对", source: "CREATE", criteria: [] }, dependencies: [] });
+      if (url === `${baseUrl}/api/v1/workspaces/${workspaceId}/projects/${projectId}`)
+        return response(200, { id: projectId, title: "项目", project_type: "GENERAL", revision: archived ? "2" : "1",
+          state_revision: "1", archived_at: archived ? "2026-09-26T00:00:00Z" : null });
+      if (url === `${reviewUrl}/${reviewId}/decisions` && init?.method === "POST") {
+        commandId = String((JSON.parse(String(init.body)) as Record<string, unknown>).command_id);
+        posts++; throw new TypeError("response lost");
+      }
+      if (url === `${baseUrl}/api/v1/workspaces/${workspaceId}/commands/${commandId}`)
+        return response(200, { command_id: commandId, command_type: "ResolveReview", committed_at: "2026-09-26T00:00:00Z",
+          result: { review_id: reviewId, decision_id: "decision-1", decision: "ACCEPT", revision: "2" } });
+      throw new Error(`unexpected request: ${url}`);
+    }));
+    const mounted = await mountWorkbench(`/reviews?id=${reviewId}`); unmount = mounted.unmount;
+    await flush(); await mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="review-check-receipt"]').exists()).toBe(true);
+    archived = true;
+    await mounted.wrapper.get('.review-heading button').trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="review-check-receipt"]').attributes("disabled")).toBeUndefined();
+    await mounted.wrapper.get('[data-testid="review-check-receipt"]').trigger("click"); await flush();
+    expect(posts).toBe(1);
+    expect(mounted.wrapper.text()).toContain("已核对原命令回执");
   });
 });

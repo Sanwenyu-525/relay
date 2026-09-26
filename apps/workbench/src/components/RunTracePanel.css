@@ -1,0 +1,8 @@
+.run-trace-heading { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--relay-space-4); }
+.run-trace-groups { margin-top: var(--relay-space-6); }
+.run-trace-groups > section { padding: var(--relay-space-6) 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.run-trace-groups h3 { margin-bottom: var(--relay-space-3); }
+.run-trace-groups ul, .run-trace-groups ol { margin-top: var(--relay-space-3); }
+.run-trace-groups li { margin-top: var(--relay-space-3); overflow-wrap: anywhere; }
+.run-trace-groups li small { display: block; color: var(--relay-color-text-secondary); overflow-wrap: anywhere; }
+.run-trace-groups li p { margin-top: var(--relay-space-2); }

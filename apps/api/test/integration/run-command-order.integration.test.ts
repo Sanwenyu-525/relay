@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { sql } from 'kysely';
 
 import { applySafeControl, requestRunControl, resumeRun } from '../../src/application/control-requests.js';
+import { recoverStoppedWorker } from '../../src/application/recover-run.js';
 import { claimNextRunCommand, settleRunCommand } from '../../src/application/run-dispatch.js';
 import { advanceRunStep } from '../../src/application/run-steps.js';
 import { withTransaction } from '../../src/application/unit-of-work.js';
@@ -188,13 +189,13 @@ test('M03 pending PAUSE, CANCEL and HANDOFF outrank an approved successor at the
     let entered!: () => void;
     const held = new Promise<void>((done) => { release = done; });
     const waiting = new Promise<void>((done) => { entered = done; });
-    let oldClaim: { workerId: string; epoch: bigint } | undefined;
+    let oldClaim: { workerId: string; epoch: bigint; commandId: string } | undefined;
     const old = runOneCommand(app.db, {
       workerId: `worker:${randomUUID()}`, dataRoot: api.dataRoot,
       checkpointUrl: temporaryDatabase.appUrl,
       afterStep: async (step, claim) => {
         if (step.status === 'STEP_SUCCEEDED' && step.run_status === 'WAITING_APPROVAL') {
-          oldClaim = { workerId: claim.workerId, epoch: claim.epoch };
+          oldClaim = { workerId: claim.workerId, epoch: claim.epoch, commandId: claim.commandId };
           entered();
           await held;
         }
@@ -223,14 +224,49 @@ test('M03 pending PAUSE, CANCEL and HANDOFF outrank an approved successor at the
     } finally {
       release();
       const settled = await withTimeout(old, 15_000, `${type} old START release`);
-      assert.equal(settled?.outcome, 'DONE');
+      if (settled?.outcome === 'LOST') {
+        // The 100 ms control poll observed the pending control while the old
+        // START was parked, so the delivery stopped without settling. The
+        // supervisor fences that claim and redelivers; a redelivered claim runs
+        // the same poll, so under load it may be fenced again before reaching
+        // its settle safe point. Production keeps requeueing until one delivery
+        // survives to settle, which applies the control; mirror that loop with
+        // a bounded attempt budget instead of asserting one lucky delivery.
+        assert.ok(oldClaim);
+        let applied = false;
+        for (let attempt = 0; attempt < 25 && !applied; attempt++) {
+          const redelivered = await runOneCommand(app.db, { workerId: `worker:${randomUUID()}`,
+            dataRoot: api.dataRoot, checkpointUrl: temporaryDatabase.appUrl });
+          assert.ok(redelivered !== undefined, `${type}: requeued delivery must claim the CONTROL_PENDING command`);
+          if (redelivered.outcome !== 'LOST') {
+            assert.equal(redelivered.outcome, 'DONE',
+              `${type}: replayed delivery settles at the approval wait`);
+            applied = true;
+            break;
+          }
+          await recoverStoppedWorker(app.db, { runId: run.runId,
+            stoppedWorkerId: oldClaim.workerId,
+            stoppedEvidence: 'test: control poll aborted the parked START',
+            storage: new ManagedContentStore(api.dataRoot) });
+          await withTransaction(app.db, async (repositories) => {
+            await repositories.runs.lockRun(run.runId);
+            await repositories.dispatch.lockInvocation(run.runId);
+            await repositories.dispatch.lockOutbox(oldClaim!.commandId);
+            await repositories.dispatch.requeueStoppedClaim(run.runId, oldClaim!.workerId,
+              oldClaim!.epoch, oldClaim!.commandId, 'test: control poll aborted the parked START');
+          });
+        }
+        assert.ok(applied, `${type}: supervised redelivery must eventually apply the control`);
+      } else {
+        assert.equal(settled?.outcome, 'DONE');
+      }
     }
     const controls = await sql<{ status: string }>`select status from run_control_requests
       where run_id = ${run.runId} order by requested_at desc limit 1`.execute(app.db);
     assert.equal(controls.rows[0]?.status, 'APPLIED',
-      'command settlement must apply the control after releasing the old invocation');
+      `${type}: command settlement must apply the control after releasing the old invocation`);
     const state = await sql<{ status: string }>`select status from runs where id = ${run.runId}`.execute(app.db);
-    assert.equal(state.rows[0]?.status, type === 'PAUSE' ? 'PAUSED' : 'CANCELLED');
+    assert.equal(state.rows[0]?.status, type === 'PAUSE' ? 'PAUSED' : 'CANCELLED', `${type}: terminal convergence`);
   }
 });
 

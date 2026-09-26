@@ -68,6 +68,25 @@ export interface StateArtifactRefViewRow {
   readonly version_number: bigint;
 }
 
+export interface ProjectListRow extends ProjectRow {
+  readonly phase_key: string;
+  readonly next_action_task_id: string | null;
+  readonly state_revision: bigint;
+  readonly cursor_created_at: string;
+}
+
+/** Stable, non-sensitive reasons returned when Project archival is unsafe. */
+export type ProjectArchiveBlockerReason =
+  | 'TASK_ACTIVE'
+  | 'RUN_UNSETTLED'
+  | 'GATEWAY_UNSETTLED'
+  | 'UNKNOWN_EFFECT'
+  | 'RESOURCE_CLAIM_UNSETTLED'
+  | 'IMPORT_IN_FLIGHT'
+  | 'ASSIST_IN_FLIGHT'
+  | 'MODEL_CALL_STARTED'
+  | 'REVIEW_OPEN';
+
 /**
  * Project Owner 的写入面：Project 自身、Project–Goal 关联、Project State 与类型化 State 引用、
  * blocker/risk。Task、Artifact、完成凭据的写入不在这里。
@@ -97,6 +116,44 @@ export class ProjectRepository {
     `.execute(this.db);
 
     return result.rows[0];
+  }
+
+  /** 归档写入栅栏：KEY SHARE 与 ArchiveProject 的 FOR UPDATE 冲突，不阻塞普通非键更新。 */
+  async lockProjectArchiveGate(projectId: string): Promise<ProjectRow | undefined> {
+    const result = await sql<ProjectRow>`
+      select id, workspace_id, title, project_type, archived_at, revision, created_at, updated_at
+      from projects where id = ${projectId} for key share
+    `.execute(this.db);
+    return result.rows[0];
+  }
+
+  /** Workspace 范围的确定性键集分页；ProjectState 是 CreateProject 同事务建立的事实。 */
+  async listProjectsPage(input: {
+    readonly workspaceId: string;
+    readonly status: 'active' | 'archived' | 'all';
+    readonly limit: number;
+    readonly before: { readonly createdAt: string; readonly id: string } | null;
+  }): Promise<readonly ProjectListRow[]> {
+    const archiveFilter = input.status === 'all' ? sql``
+      : input.status === 'active' ? sql`and p.archived_at is null`
+        : sql`and p.archived_at is not null`;
+    const cursor = input.before === null ? sql``
+      : sql`and (p.created_at, p.id) < (${input.before.createdAt}::timestamptz, ${input.before.id}::uuid)`;
+    const result = await sql<ProjectListRow>`
+      select p.id, p.workspace_id, p.title, p.project_type, p.archived_at,
+             p.revision, p.created_at, p.updated_at,
+             s.phase_key, s.next_action_task_id, s.revision as state_revision,
+             to_char(p.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+               as cursor_created_at
+      from projects p
+      join project_states s on s.project_id = p.id
+      where p.workspace_id = ${input.workspaceId}
+        ${archiveFilter}
+        ${cursor}
+      order by p.created_at desc, p.id desc
+      limit ${input.limit + 1}
+    `.execute(this.db);
+    return result.rows;
   }
 
   async insertProjectState(projectId: string, phaseKey: string): Promise<ProjectStateRow> {
@@ -212,6 +269,128 @@ export class ProjectRepository {
     return result.rows[0];
   }
 
+  /** Blueprint Skill snapshot must exclude concurrent Task inserts through the Project FK. */
+  async lockProjectExclusive(projectId: string): Promise<ProjectRow | undefined> {
+    return (await sql<ProjectRow>`select id, workspace_id, title, project_type,
+      archived_at, revision, created_at, updated_at from projects
+      where id = ${projectId} for update`.execute(this.db)).rows[0];
+  }
+
+  /** Archive holds FOR UPDATE; all ordinary Project writes hold its conflicting KEY SHARE gate. */
+  async listArchiveBlockers(projectId: string): Promise<readonly ProjectArchiveBlockerReason[]> {
+    const result = await sql<{ reason: ProjectArchiveBlockerReason }>`
+      select reason from (
+      select 1 as ordinal, 'TASK_ACTIVE' as reason where exists (
+        select 1 from tasks t where t.project_id = ${projectId}
+          and (t.status in ('IN_PROGRESS', 'WAITING', 'BLOCKED')
+            or t.executor_kind <> 'HUMAN' or t.executor_run_id is not null)
+      )
+      union all select 2, 'RUN_UNSETTLED' where exists (
+        select 1 from runs r join tasks t on t.id = r.task_id
+        where t.project_id = ${projectId}
+          and r.status not in ('COMPLETED', 'FAILED', 'CANCELLED')
+      ) or exists (
+        select 1 from run_command_outbox o
+        join run_commands c on c.id = o.command_id
+        join runs r on r.id = c.run_id join tasks t on t.id = r.task_id
+        where t.project_id = ${projectId} and o.status in ('PENDING', 'CLAIMED')
+      ) or exists (
+        select 1 from run_invocations i
+        join runs r on r.id = i.run_id join tasks t on t.id = r.task_id
+        where t.project_id = ${projectId} and i.status <> 'IDLE'
+      ) or exists (
+        select 1 from run_control_requests c
+        join runs r on r.id = c.run_id join tasks t on t.id = r.task_id
+        where t.project_id = ${projectId} and c.status = 'PENDING'
+      ) or exists (
+        select 1 from run_steps s
+        join runs r on r.id = s.run_id join tasks t on t.id = r.task_id
+        where t.project_id = ${projectId} and s.status = 'RUNNING'
+      ) or exists (
+        select 1 from step_attempts a
+        join run_steps s on s.id = a.step_id
+        join runs r on r.id = s.run_id join tasks t on t.id = r.task_id
+        where t.project_id = ${projectId} and a.status in ('PREPARED', 'RUNNING')
+      ) or exists (
+        select 1 from verification_sessions v join tasks t on t.id = v.task_id
+        where t.project_id = ${projectId} and v.status = 'OPEN'
+      )
+      union all select 3, 'GATEWAY_UNSETTLED' where exists (
+        select 1 from logical_operations o where o.project_id = ${projectId}
+          and o.status in ('WAITING_APPROVAL', 'PREPARED', 'DISPATCHING')
+      ) or exists (
+        select 1 from invocation_attempts i
+        join logical_operations o on o.id = i.operation_id
+        where o.project_id = ${projectId} and i.status in ('PREPARED', 'DISPATCHING')
+      ) or exists (
+        select 1 from run_effect_actions e
+        join runs r on r.id = e.run_id join tasks t on t.id = r.task_id
+        where t.project_id = ${projectId} and e.status in ('PREPARED', 'DISPATCHING')
+      )
+      union all select 4, 'UNKNOWN_EFFECT' where exists (
+        select 1 from logical_operations o where o.project_id = ${projectId}
+          and o.status = 'UNKNOWN'
+      ) or exists (
+        select 1 from invocation_attempts i
+        join logical_operations o on o.id = i.operation_id
+        where o.project_id = ${projectId} and i.status = 'UNKNOWN'
+      ) or exists (
+        select 1 from run_effect_actions e
+        join runs r on r.id = e.run_id join tasks t on t.id = r.task_id
+        where t.project_id = ${projectId} and e.status = 'UNKNOWN'
+      )
+      union all select 5, 'RESOURCE_CLAIM_UNSETTLED' where exists (
+        select 1 from resource_claims c where c.project_id = ${projectId}
+          and c.status in ('HELD', 'QUARANTINED')
+      )
+      union all select 6, 'IMPORT_IN_FLIGHT' where exists (
+        select 1 from import_jobs j where j.project_id = ${projectId}
+          and j.status in ('QUEUED', 'RUNNING')
+      )
+      union all select 7, 'ASSIST_IN_FLIGHT' where exists (
+        select 1 from assist_messages m
+        join assist_sessions s on s.id = m.session_id
+        left join tasks t on t.id = s.task_id
+        where (s.project_id = ${projectId} or t.project_id = ${projectId})
+          and m.status in ('PENDING', 'RUNNING')
+      )
+      union all select 8, 'MODEL_CALL_STARTED' where exists (
+        select 1 from model_calls m
+        left join step_attempts a on a.id = m.step_attempt_id
+        left join run_steps rs on rs.id = a.step_id
+        left join runs r on r.id = rs.run_id
+        left join tasks rt on rt.id = r.task_id
+        left join assist_messages am on am.id = m.assist_message_id
+        left join assist_sessions ass on ass.id = am.session_id
+        left join tasks at on at.id = ass.task_id
+        where m.status = 'STARTED' and
+          (rt.project_id = ${projectId} or ass.project_id = ${projectId}
+            or at.project_id = ${projectId})
+      )
+      union all select 9, 'REVIEW_OPEN' where exists (
+        select 1 from review_requests v
+        left join tasks t on t.id = v.task_id
+        left join runs r on r.id = v.run_id
+        left join tasks rt on rt.id = r.task_id
+        where v.status = 'OPEN' and
+          (v.project_id = ${projectId} or t.project_id = ${projectId}
+            or rt.project_id = ${projectId})
+      )
+      ) blockers order by ordinal
+    `.execute(this.db);
+    return result.rows.map((row) => row.reason);
+  }
+
+  async archiveProject(projectId: string, expectedRevision: bigint): Promise<ProjectRow | undefined> {
+    const result = await sql<ProjectRow>`
+      update projects set archived_at = clock_timestamp(), revision = revision + 1,
+        updated_at = clock_timestamp()
+      where id = ${projectId} and revision = ${expectedRevision} and archived_at is null
+      returning id, workspace_id, title, project_type, archived_at, revision, created_at, updated_at
+    `.execute(this.db);
+    return result.rows[0];
+  }
+
   /** 关联 Goal 集合是 Project 的事实：变更时按 Project revision 做 CAS。 */
   async bumpProjectRevision(
     projectId: string,
@@ -235,6 +414,12 @@ export class ProjectRepository {
     `.execute(this.db);
 
     return result.rows[0];
+  }
+
+  async lockGoal(goalId: string): Promise<GoalRow | undefined> {
+    return (await sql<GoalRow>`select id, workspace_id, title, description,
+      status, revision, created_at, updated_at from goals where id = ${goalId}
+      for share`.execute(this.db)).rows[0];
   }
 
   async listProjectGoalLinks(projectId: string): Promise<readonly ProjectGoalLinkRow[]> {
@@ -444,6 +629,23 @@ export class ProjectRepository {
       order by created_at, id
     `.execute(this.db);
 
+    return result.rows;
+  }
+
+  /** 跨项目 Task 页的 blocker：仅取页面所属项目和 Task，避免逐项目 N+1 读取。 */
+  async listUnresolvedBlockersForWorkspaceTasks(
+    projectIds: readonly string[], taskIds: readonly string[],
+  ): Promise<readonly ProjectBlockerRow[]> {
+    if (projectIds.length === 0 || taskIds.length === 0) return [];
+    const result = await sql<ProjectBlockerRow>`
+      select id, project_id, target_kind, target_id, reason, source_ref, resolved_at, created_at
+      from project_blockers
+      where project_id = any(${projectIds}::uuid[])
+        and resolved_at is null
+        and ((target_kind = 'TASK' and target_id = any(${taskIds}::uuid[]))
+             or (target_kind = 'PROJECT' and target_id = project_id))
+      order by created_at, id
+    `.execute(this.db);
     return result.rows;
   }
 

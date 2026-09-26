@@ -234,6 +234,11 @@ export async function completeHumanTask(
         humanAcceptanceId: humanAcceptance.id,
         stateDelta,
       });
+      for (const versionId of artifactVersionIds) {
+        await repositories.lineage.insertExactEdge({ workspaceId: input.workspaceId,
+          childVersionId: versionId, relation: 'ACCEPTED_BY',
+          parentKind: 'COMPLETION_RECORD', parentId: completion.id });
+      }
 
       const updated = await repositories.tasks.applyCompletionPointer({
         taskId: task.id,
@@ -280,6 +285,7 @@ export async function completeHumanTask(
 
       await repositories.activities.insertActivityRecord({
         id: randomUUID(),
+        workspaceId: task.workspace_id,
         actorKind: 'HUMAN',
         actorRef: LOCAL_ACTOR_REF,
         commandId: input.commandId,
@@ -425,7 +431,8 @@ export async function reopenTask(
        }
 
        await repositories.activities.insertActivityRecord({
-        id: randomUUID(),
+         id: randomUUID(),
+         workspaceId: task.workspace_id,
         actorKind: 'HUMAN',
         actorRef: LOCAL_ACTOR_REF,
         commandId: input.commandId,

@@ -117,11 +117,27 @@ describe("局部导航与浮层行为", () => {
     expect(dialogText()).toContain("当前项目为人工可继续整理的研究工作");
   });
 
-  it("范围外入口诚实提示未接入", async () => {
+  it("Today 示例入口明确标注非真实投影", async () => {
     const mounted = await mountWorkbench("/today");
     unmount = mounted.unmount;
 
-    expect(mounted.wrapper.text()).toContain("此入口尚未接入交互预览");
-    expect(mounted.wrapper.text()).toContain("不会伪造空白页面");
+    expect(mounted.wrapper.text()).toContain("当前为示例数据预览，没有真实 Today 投影");
+    expect(mounted.wrapper.text()).toContain("Pin、Later、Focus 是用户选择");
+  });
+
+  it("/inbox 别名与顶栏快捷入口都进入原收件箱，主导航不增项", async () => {
+    const mounted = await mountWorkbench("/inbox");
+    unmount = mounted.unmount;
+    await flush();
+    expect(mounted.router.currentRoute.value.path).toBe("/tasks");
+    expect(mounted.router.currentRoute.value.query.tab).toBe("inbox");
+    expect(mounted.wrapper.get(".breadcrumbs").text()).toContain("收件箱");
+    expect(mounted.wrapper.find('[data-testid="task-row-task-reading-notes"]').exists()).toBe(true);
+    expect(mounted.wrapper.get('nav[aria-label="主导航"]').text()).not.toContain("收件箱");
+    await mounted.router.push("/today");
+    await mounted.wrapper.get('[data-testid="inbox-open"]').trigger("click");
+    await flush();
+    expect(mounted.router.currentRoute.value.path).toBe("/tasks");
+    expect(mounted.router.currentRoute.value.query.tab).toBe("inbox");
   });
 });

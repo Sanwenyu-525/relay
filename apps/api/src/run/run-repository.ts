@@ -5,6 +5,7 @@ import type {
   ContextManifestRow,
   ExecutionContractRow,
   RunRow,
+  RunDraftPreviewRow,
   RunStatus,
   RunStepKind,
   RunStepRow,
@@ -207,6 +208,7 @@ export class RunRepository {
       where id = ${runId} and worker_id is null
       returning ${RUN_COLUMNS}
     `.execute(this.db);
+    if (result.rows[0] !== undefined) await this.deleteDraftPreview(runId);
     return result.rows[0];
   }
 
@@ -216,6 +218,7 @@ export class RunRepository {
       where id = ${runId} and worker_id = ${workerId} and worker_epoch = ${workerEpoch}
       returning ${RUN_COLUMNS}
     `.execute(this.db);
+    if (result.rows[0] !== undefined) await this.deleteDraftPreview(runId);
     return result.rows[0];
   }
 
@@ -226,7 +229,51 @@ export class RunRepository {
         worker_lease_until = null, updated_at = now()
       where id = ${runId} returning ${RUN_COLUMNS}
     `.execute(this.db);
+    if (result.rows[0] !== undefined) await this.deleteDraftPreview(runId);
     return result.rows[0];
+  }
+
+  async readDraftPreview(runId: string): Promise<RunDraftPreviewRow | undefined> {
+    return (await sql<RunDraftPreviewRow>`select * from run_draft_previews
+      where run_id = ${runId}`.execute(this.db)).rows[0];
+  }
+
+  async readRunForShare(runId: string): Promise<RunRow | undefined> {
+    return (await sql<RunRow>`select ${RUN_COLUMNS} from runs
+      where id = ${runId} for share`.execute(this.db)).rows[0];
+  }
+
+  async readAttemptForShare(attemptId: string): Promise<StepAttemptRow | undefined> {
+    return (await sql<StepAttemptRow>`select ${ATTEMPT_COLUMNS} from step_attempts
+      where id = ${attemptId} for share`.execute(this.db)).rows[0];
+  }
+
+  /** Caller holds the current Task/Run claim locks and has checked the exact call. */
+  async writeDraftPreview(input: { runId: string; attemptId: string;
+    attemptClaimEpoch: bigint; runWorkerEpoch: bigint; workerId: string;
+    invocationEpoch: bigint | null; modelCallId: string;
+    text: string; truncated: boolean }): Promise<void> {
+    await sql`insert into run_draft_previews (run_id, step_attempt_id,
+      attempt_claim_epoch, run_worker_epoch, worker_id, invocation_epoch,
+      model_call_id, preview_text, truncated)
+      values (${input.runId}, ${input.attemptId}, ${input.attemptClaimEpoch},
+        ${input.runWorkerEpoch}, ${input.workerId}, ${input.invocationEpoch},
+        ${input.modelCallId}, ${input.text}, ${input.truncated})
+      on conflict (run_id) do update set
+        step_attempt_id = excluded.step_attempt_id,
+        attempt_claim_epoch = excluded.attempt_claim_epoch,
+        run_worker_epoch = excluded.run_worker_epoch,
+        worker_id = excluded.worker_id,
+        invocation_epoch = excluded.invocation_epoch,
+        model_call_id = excluded.model_call_id,
+        revision = case when run_draft_previews.model_call_id = excluded.model_call_id
+          then run_draft_previews.revision + 1 else 1 end,
+        preview_text = excluded.preview_text, truncated = excluded.truncated,
+        updated_at = now()`.execute(this.db);
+  }
+
+  async deleteDraftPreview(runId: string): Promise<void> {
+    await sql`delete from run_draft_previews where run_id = ${runId}`.execute(this.db);
   }
 
   async insertRunSteps(steps: readonly NewRunStep[]): Promise<readonly RunStepRow[]> {
@@ -430,6 +477,10 @@ export class RunRepository {
       returning ${ATTEMPT_COLUMNS}
     `.execute(this.db);
 
+    if (result.rows[0] !== undefined) {
+      await sql`delete from run_draft_previews where step_attempt_id = ${input.attemptId}`
+        .execute(this.db);
+    }
     return result.rows[0];
   }
 

@@ -10,7 +10,7 @@ import { DomainError, invalidTransition, resourceNotFound, revisionConflict } fr
 import { lockTaskAndRun } from './lock-task-run.js';
 import { requireRevision } from './revisions.js';
 import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
-import { readMockGatewayAction } from '../workflow/execution-contract.js';
+import { readMockActionOperationId } from '../workflow/execution-contract.js';
 
 export interface ControlRequestDto {
   readonly id: string;
@@ -77,7 +77,8 @@ export async function requestRunControl(db: DbExecutor, input: {
       }
       requireRevisionMatch(task, run, taskRevision, runRevision);
       const row = await enqueueControlLocked(repositories, { task, run, type: input.type,
-        supersedesRequestId: input.supersedesRequestId ?? null });
+        supersedesRequestId: input.supersedesRequestId ?? null,
+        commandId: input.commandId });
       const touched = await repositories.runs.touchRun(run.id, run.revision);
       if (touched === undefined) throw new Error('control request Run revision CAS failed');
       return { control_request_id: row.id, run_id: run.id, task_id: task.id, type: row.type,
@@ -90,6 +91,7 @@ export async function requestRunControl(db: DbExecutor, input: {
 export async function enqueueControlLocked(repositories: Repositories, input: {
   readonly task: TaskRow; readonly run: RunRow; readonly type: RunControlType;
   readonly supersedesRequestId?: string | null;
+  readonly commandId?: string;
 }): Promise<RunControlRequestRow> {
   if (input.type === 'PAUSE' && input.run.status === 'PAUSED') {
     throw invalidTransition('该 Run 已暂停，不能再次请求暂停。');
@@ -103,9 +105,16 @@ export async function enqueueControlLocked(repositories: Repositories, input: {
   } else if (input.supersedesRequestId !== null && input.supersedesRequestId !== undefined) {
     throw controlConflict();
   }
-  return repositories.recovery.insertControl({ id: randomUUID(), workspaceId: input.run.workspace_id,
+  const row = await repositories.recovery.insertControl({ id: randomUUID(), workspaceId: input.run.workspace_id,
     taskId: input.task.id, runId: input.run.id, type: input.type, requestedBy: LOCAL_ACTOR_REF,
     supersedesRequestId: input.supersedesRequestId ?? null });
+  await repositories.activities.insertActivityRecord({ id: randomUUID(),
+    workspaceId: input.run.workspace_id, runId: input.run.id,
+    actorKind: 'HUMAN', actorRef: LOCAL_ACTOR_REF, commandId: input.commandId ?? null,
+    projectId: input.task.project_id, taskId: input.task.id,
+    eventType: 'RUN_CONTROL_REQUESTED',
+    factRefs: { run_id: input.run.id, control_request_id: row.id, type: input.type } });
+  return row;
 }
 
 /** 安全点：同一 Task→Run 锁下核对 worker、UNKNOWN 与控制，才把 PENDING 变为 APPLIED。 */
@@ -174,6 +183,7 @@ export async function applySafeControl(db: DbExecutor, runId: string): Promise<C
     const decided = await repositories.recovery.decideControl(pending.id, 'APPLIED', resultRef);
     if (decided === undefined) throw new Error('control apply CAS failed');
     await repositories.activities.insertActivityRecord({ id: randomUUID(), actorKind: 'SYSTEM',
+      workspaceId: run.workspace_id, runId: run.id,
       actorRef: `run:${run.id}`, commandId: null, projectId: task.project_id, taskId: task.id,
       eventType: 'RUN_CONTROL_APPLIED', factRefs: { control_request_id: pending.id, type: pending.type } });
     return controlDto(decided);
@@ -225,9 +235,10 @@ export async function resumeRun(db: DbExecutor, input: {
         throw invalidTransition('旧 Worker 执行槽尚未释放，暂不能恢复。');
       }
       const contract = await repositories.runs.readContract(run.id);
-      const action = contract === undefined ? undefined : readMockGatewayAction(contract.frozen_snapshot);
-      const operation = action === undefined ? undefined :
-        await repositories.gateway.readOperation(action.operation_id);
+      const frozenActionOperationId = contract === undefined ? undefined :
+        readMockActionOperationId(contract.frozen_snapshot);
+      const operation = frozenActionOperationId === undefined ? undefined :
+        await repositories.gateway.readOperation(frozenActionOperationId);
       if (operation !== undefined && ['DENIED', 'FAILED', 'UNKNOWN', 'DISPATCHING'].includes(operation.status)) {
         throw invalidTransition('原 Run 的必需动作已被拒绝或尚未核对；请取消旧 Run 后重新委派。');
       }

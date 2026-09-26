@@ -7,11 +7,18 @@ import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { compareDecimalRevisions } from "../lib/decimalRevision";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { fixtureModeFromQuery } from "../lib/fixtureMode";
+import { useRelayConnection } from "../lib/relayConnection";
 import type { ProjectSnapshot, SourceReference, VerificationCheck } from "../types";
+import LiveTaskSkillFactsView from "./LiveTaskSkillFactsView";
 
 function statusText(check: VerificationCheck) { return check.status === "MISSING_CAPABILITY" ? "缺少可用检查器" : check.status === "HUMAN_PENDING" ? "待人工检查" : "未运行"; }
 
 export default function VerificationPlanView() {
+  const connection = useRelayConnection();
+  return connection.client ? <LiveTaskSkillFactsView client={connection.client} kind="verification" /> : <FixtureVerificationPlanView />;
+}
+
+function FixtureVerificationPlanView() {
   const { id = "" } = useParams();
   const [query] = useSearchParams();
   const mode = fixtureModeFromQuery(query);

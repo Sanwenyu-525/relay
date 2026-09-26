@@ -21,7 +21,7 @@ import { requireRow } from '../shared/sql-rows.js';
 
 /** tasks 的读取列必须与 TaskRow 一致；用同一片段避免各方法漏列新增字段（例如 0002 的 goal_alignment_mode、0004 的 executor_run_id）。 */
 const TASK_COLUMNS = sql.raw(
-  'id, workspace_id, project_id, title, status, mode, acceptance_revision, executor_kind, ownership_epoch, executor_run_id, current_completion_id, goal_alignment_mode, revision, created_at, updated_at',
+  'id, workspace_id, project_id, title, status, mode, acceptance_revision, executor_kind, ownership_epoch, executor_run_id, current_completion_id, goal_alignment_mode, priority, due_local_date::text as due_local_date, due_timezone, revision, created_at, updated_at',
 );
 
 export interface NewTask {
@@ -103,6 +103,11 @@ export class TaskRepository {
     return result.rows[0];
   }
 
+  async readTaskForShare(taskId: string): Promise<TaskRow | undefined> {
+    return (await sql<TaskRow>`select ${TASK_COLUMNS} from tasks
+      where id = ${taskId} for share`.execute(this.db)).rows[0];
+  }
+
   /** Task 行锁：状态迁移、展示字段、显式 Goal 对齐与依赖都在同一行上串行化。 */
   async lockTask(taskId: string): Promise<TaskRow | undefined> {
     const result = await sql<TaskRow>`
@@ -128,6 +133,22 @@ export class TaskRepository {
       returning ${TASK_COLUMNS}
     `.execute(this.db);
 
+    return result.rows[0];
+  }
+
+  async updatePlanningMetadata(input: {
+    readonly taskId: string; readonly expectedRevision: bigint;
+    readonly priority: TaskRow['priority'];
+    readonly dueLocalDate: string | null; readonly dueTimezone: string | null;
+  }): Promise<TaskRow | undefined> {
+    const result = await sql<TaskRow>`
+      update tasks set priority = ${input.priority},
+        due_local_date = ${input.dueLocalDate}::date,
+        due_timezone = ${input.dueTimezone},
+        revision = revision + 1, updated_at = now()
+      where id = ${input.taskId} and revision = ${input.expectedRevision}
+      returning ${TASK_COLUMNS}
+    `.execute(this.db);
     return result.rows[0];
   }
 
@@ -212,20 +233,25 @@ export class TaskRepository {
    */
   async listTasksPage(input: {
     readonly workspaceId: string;
-    readonly projectId: string | null;
+    /** undefined is the explicit scope=all query; null remains Inbox. */
+    readonly projectId: string | null | undefined;
     readonly limit: number;
-    readonly before: { readonly createdAt: Date; readonly id: string } | null;
-  }): Promise<readonly TaskRow[]> {
+    readonly before: { readonly createdAt: Date | string; readonly id: string } | null;
+  }): Promise<readonly (TaskRow & { readonly cursor_created_at: string })[]> {
     const cursor =
       input.before === null
         ? sql``
         : sql`and (created_at, id) < (${input.before.createdAt}::timestamptz, ${input.before.id}::uuid)`;
     const projectFilter =
-      input.projectId === null
+      input.projectId === undefined
+        ? sql``
+        : input.projectId === null
         ? sql`and project_id is null`
         : sql`and project_id = ${input.projectId}`;
-    const result = await sql<TaskRow>`
-      select ${TASK_COLUMNS}
+    const result = await sql<TaskRow & { cursor_created_at: string }>`
+      select ${TASK_COLUMNS},
+        to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+          as cursor_created_at
       from tasks
       where workspace_id = ${input.workspaceId}
         ${projectFilter}
@@ -234,6 +260,19 @@ export class TaskRepository {
       limit ${input.limit + 1}
     `.execute(this.db);
 
+    return result.rows;
+  }
+
+  /** Today reads all current Workspace tasks before applying eligibility and ranking. */
+  async listTodayTasks(workspaceId: string): Promise<readonly TaskRow[]> {
+    const result = await sql<TaskRow>`
+      select ${TASK_COLUMNS} from tasks
+      where workspace_id = ${workspaceId}
+        and status in ('INBOX', 'READY', 'IN_PROGRESS', 'WAITING', 'BLOCKED')
+        and (project_id is null or exists (
+          select 1 from projects p where p.id = project_id and p.archived_at is null))
+      order by created_at, id
+    `.execute(this.db);
     return result.rows;
   }
 
@@ -605,6 +644,21 @@ export class TaskRepository {
       returning ${TASK_COLUMNS}
     `.execute(this.db);
 
+    return result.rows[0];
+  }
+
+  /** Human-owned contract edit: status/owner/mode remain unchanged. */
+  async applyContractChangeRevision(input: { taskId: string;
+    expectedRevision: bigint; expectedAcceptanceRevision: bigint;
+    nextAcceptanceRevision: bigint }): Promise<TaskRow | undefined> {
+    const result = await sql<TaskRow>`update tasks set
+      acceptance_revision = ${input.nextAcceptanceRevision},
+      revision = revision + 1, updated_at = now()
+      where id = ${input.taskId} and revision = ${input.expectedRevision}
+        and acceptance_revision = ${input.expectedAcceptanceRevision}
+        and executor_kind = 'HUMAN' and executor_run_id is null
+        and status in ('INBOX', 'READY', 'IN_PROGRESS')
+      returning ${TASK_COLUMNS}`.execute(this.db);
     return result.rows[0];
   }
 }

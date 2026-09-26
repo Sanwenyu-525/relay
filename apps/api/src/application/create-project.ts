@@ -5,6 +5,7 @@ import type { DbExecutor } from '../infrastructure/database.js';
 import { INITIAL_PHASE_BY_PROJECT_TYPE } from '../project/project-phase.js';
 import { toDecimalString } from '../shared/decimal.js';
 import { checkRequiredText } from '../shared/text.js';
+import { defaultViewKind } from '../view/builtin-view.js';
 import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
 import { runIdempotentCommand, type CommandOutcome } from './command.js';
 import { validationFailed } from './domain-error.js';
@@ -65,9 +66,12 @@ export async function createProject(
         project.id,
         INITIAL_PHASE_BY_PROJECT_TYPE[input.projectType],
       );
+      await repositories.views.insertDefault(project.id, input.workspaceId,
+        defaultViewKind(input.projectType));
 
       await repositories.activities.insertActivityRecord({
         id: randomUUID(),
+        workspaceId: input.workspaceId,
         actorKind: 'HUMAN',
         actorRef: LOCAL_ACTOR_REF,
         commandId: input.commandId,

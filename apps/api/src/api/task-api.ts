@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 
 import { createTask } from '../application/create-task.js';
 import { applySafeControl } from '../application/control-requests.js';
@@ -14,11 +15,14 @@ import {
   editTaskPresentation,
   markTaskReady,
   removeTaskDependency,
+  setTaskPlanningMetadata,
   setTaskGoalAlignment,
   startHumanTask,
 } from '../application/task-commands.js';
 import { listTasks, readTaskById } from '../application/task-queries.js';
-import { decodeTaskListCursor, encodeTaskListCursor } from './cursor.js';
+import { readTaskCheckPlanPreview } from '../application/check-plan-preview.js';
+import { decodeTaskListCursor, decodeWorkspaceTaskListCursor,
+  encodeTaskListCursor, encodeWorkspaceTaskListCursor } from './cursor.js';
 import {
   AddTaskDependencyBodySchema,
   CancelTaskBodySchema,
@@ -31,6 +35,7 @@ import {
   TaskGoalAlignmentBodySchema,
   TaskGoalAlignmentResultSchema,
   TaskListSchema,
+  TaskPlanningMetadataBodySchema,
   TaskRevisionBodySchema,
   TaskSchema,
   TasksListQuerySchema,
@@ -105,7 +110,7 @@ export function registerTaskRoutes(app: FastifyInstance, dependencies: RouteDepe
 
         await requireWorkspaceVisible(dependencies.database.executor, params.workspace_id);
 
-        if (filter.projectId !== null) {
+        if (filter.projectId !== null && filter.projectId !== undefined) {
           // 过滤条件里的 Project 也必须在本作用域可见：不可见返回 404，而不是静默空列表。
           await readProjectInWorkspace(
             createRepositories(dependencies.database.executor),
@@ -114,8 +119,10 @@ export function registerTaskRoutes(app: FastifyInstance, dependencies: RouteDepe
           );
         }
 
-        const before =
-          query.cursor === undefined ? null : decodeTaskListCursor(query.cursor, filter);
+        const before = query.cursor === undefined ? null
+          : filter.projectId === undefined
+            ? decodeWorkspaceTaskListCursor(query.cursor, params.workspace_id)
+            : decodeTaskListCursor(query.cursor, { projectId: filter.projectId });
         const result = await listTasks(dependencies.database.executor, {
           workspaceId: params.workspace_id,
           projectId: filter.projectId,
@@ -128,11 +135,16 @@ export function registerTaskRoutes(app: FastifyInstance, dependencies: RouteDepe
           next_cursor:
             result.next_cursor === null
               ? null
-              : encodeTaskListCursor({
-                  filter,
-                  createdAt: result.next_cursor.createdAt,
-                  id: result.next_cursor.id,
-                }),
+              : filter.projectId === undefined
+                ? encodeWorkspaceTaskListCursor(params.workspace_id, {
+                    createdAt: result.next_cursor.exactCreatedAt,
+                    id: result.next_cursor.id,
+                  })
+                : encodeTaskListCursor({
+                    filter: { projectId: filter.projectId },
+                    createdAt: result.next_cursor.createdAt,
+                    id: result.next_cursor.id,
+                  }),
         });
       } catch (error) {
         return sendReadError(reply, error, request.id);
@@ -156,6 +168,17 @@ export function registerTaskRoutes(app: FastifyInstance, dependencies: RouteDepe
       }
     },
   );
+
+  app.get('/tasks/:task_id/check-plan-preview', {
+    schema: { params: WorkspaceTaskParamsSchema,
+      response: { 200: Type.Object({}, { additionalProperties: true }) } },
+  }, async (request, reply) => {
+    try {
+      const params = request.params as { workspace_id: string; task_id: string };
+      return await readTaskCheckPlanPreview(dependencies.database.executor, {
+        workspaceId: params.workspace_id, taskId: params.task_id });
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
 
   app.patch(
     '/tasks/:task_id',
@@ -182,6 +205,22 @@ export function registerTaskRoutes(app: FastifyInstance, dependencies: RouteDepe
       },
     }),
   );
+
+  app.post('/tasks/:task_id/planning-metadata', {
+    schema: { params: WorkspaceTaskParamsSchema,
+      body: TaskPlanningMetadataBodySchema,
+      response: { 200: commandEnvelopeSchema(TaskCommandResultSchema) } },
+  }, createCommandHandler(dependencies, {
+    commandType: 'SetTaskPlanningMetadata', bodySchema: TaskPlanningMetadataBodySchema,
+    execute: async ({ executor, body, params }) => {
+      const outcome = await setTaskPlanningMetadata(executor, {
+        workspaceId: params.workspace_id ?? '', taskId: params.task_id ?? '',
+        commandId: body.command_id, expectedRevision: body.expected_revision,
+        priority: body.priority, dueLocalDate: body.due_local_date, timezone: body.timezone,
+      });
+      return { outcome, result: outcome.result };
+    },
+  }));
 
   app.post(
     '/tasks/:task_id/ready',
@@ -362,10 +401,17 @@ async function readTaskResponse(
  * 列表过滤条件必须显式给出 project_id 或 inbox=true，禁止含糊的空字符串
  * （docs/api/http-command-contract.md 第 3 节 ListTasks）。
  */
-function resolveListFilter(query: TasksListQuery): { readonly projectId: string | null } {
+function resolveListFilter(query: TasksListQuery): { readonly projectId: string | null | undefined } {
   const rawProjectId = query.project_id;
   const hasProject = rawProjectId !== undefined;
   const inbox = query.inbox === 'true';
+
+  if (query.scope === 'all') {
+    if (hasProject || query.inbox !== undefined) {
+      throw validationFailed([{ field: 'scope', message: 'must not be combined with project_id or inbox' }]);
+    }
+    return { projectId: undefined };
+  }
 
   if (hasProject && (rawProjectId ?? '').trim() === '') {
     throw validationFailed([

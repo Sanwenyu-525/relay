@@ -1,0 +1,18 @@
+.live-blueprint .live-blueprint-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-4); margin: var(--relay-space-4) 0; }
+.live-blueprint .live-blueprint-form, .live-blueprint .live-blueprint-generator, .live-blueprint .live-blueprint-preview, .live-blueprint .live-blueprint-followups { margin-top: var(--relay-space-5); }
+.live-blueprint .live-blueprint-form fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.live-blueprint .live-blueprint-form .field { margin-top: var(--relay-space-4); }
+.live-blueprint .live-blueprint-form textarea { min-height: 5rem; }
+.live-blueprint .live-blueprint-generator fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.live-blueprint .live-blueprint-generator .field { margin-top: var(--relay-space-4); }
+.live-blueprint .live-blueprint-generator textarea { min-height: 5rem; }
+.live-blueprint .live-blueprint-generator button { margin-top: var(--relay-space-3); }
+.live-blueprint .live-blueprint-task { margin: var(--relay-space-4) 0; padding: var(--relay-space-4); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-panel); }
+.live-blueprint .live-blueprint-task .field { margin-top: var(--relay-space-3); }
+.live-blueprint .live-blueprint-list { list-style: none; margin: 0; padding: 0; }
+.live-blueprint .live-blueprint-list li { padding: var(--relay-space-3) 0; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); overflow-wrap: anywhere; }
+.live-blueprint .live-blueprint-list small { display: block; color: var(--relay-color-text-secondary); }
+.live-blueprint code { overflow-wrap: anywhere; }
+.live-blueprint .live-blueprint-history { list-style: none; margin: 0; padding: 0; }
+.live-blueprint .live-blueprint-history li { margin: var(--relay-space-2) 0; overflow-wrap: anywhere; }
+.live-blueprint .rail-content > .secondary-button, .live-blueprint .rail-content > .primary-button { margin-top: var(--relay-space-3); }

@@ -1,15 +1,116 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { CheckCircle2, ChevronRight, Circle, CircleEllipsis, FileText, Info, RotateCcw, TriangleAlert } from "lucide-react";
 import ResponsiveRail from "../components/ResponsiveRail";
 import SourceDetailDialog from "../components/SourceDetailDialog";
+import type { RelayApiClient, RelayDecision, RelayProject, RelayProjectState, RelayReview, RelayTaskSummary } from "../api/relayClient";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { fixtureModeFromQuery } from "../lib/fixtureMode";
+import { phaseLabel, projectTypeLabels, taskStatusLabels } from "../lib/labels";
+import { describeLiveError } from "../lib/liveErrors";
+import { useRelayConnection } from "../lib/relayConnection";
+import type { ProjectType } from "../types";
 import type { ProjectSnapshot, ResumeProgressItem, ResumeSuggestion, SourceReference } from "../types";
 
 const resumeSourceIds = ["project-state-v4", "task-list-v1", "literature-review-v3", "acceptance-v2", "review-record-v1"];
 
 export default function ProjectResumeView() {
+  const { id = "" } = useParams();
+  const connection = useRelayConnection();
+  return connection.client ? <LiveProjectResumeView key={`${connection.epoch}:${id}`} id={id} client={connection.client} />
+    : <FixtureProjectResumeView />;
+}
+
+interface LiveSnapshot {
+  readonly project: RelayProject;
+  readonly state: RelayProjectState;
+  readonly tasks: readonly RelayTaskSummary[];
+  readonly nextCursor: string | null;
+  readonly nextAction: RelayTaskSummary | null;
+  readonly reviews: readonly RelayReview[];
+  readonly decisions: readonly RelayDecision[];
+  readonly selectedArtifacts: readonly { readonly versionId: string; readonly version: string;
+    readonly title: string | null; readonly taskId: string | null; readonly sourceRef: string }[];
+}
+
+async function readLiveSnapshot(client: RelayApiClient, id: string): Promise<LiveSnapshot> {
+  const [project, state, page, reviews, decisions] = await Promise.all([
+    client.getProject(id), client.getProjectState(id), client.getProjectTasksPage(id),
+    client.getReviews(), client.getDecisions(id)
+  ]);
+  if (project.id !== id || state.projectId !== id || page.items.some((task) => task.projectId !== id)) {
+    throw new Error("恢复速览查询返回了其他项目的事实。");
+  }
+  const listed = page.items.find((task) => task.id === state.nextActionTaskId) ?? null;
+  const detail = state.nextActionTaskId && !listed ? await client.getTask(state.nextActionTaskId).catch(() => null) : null;
+  const nextAction = listed ?? (detail?.projectId === id ? detail : null);
+  const selectedArtifacts = await Promise.all(state.selectedArtifactVersionRefs.map(async (ref) => {
+    const artifact = await client.getArtifact(ref.artifactId).catch(() => null);
+    const matching = artifact?.versions.some((version) => version.artifactVersionId === ref.artifactVersionId) ? artifact : null;
+    return { versionId: ref.artifactVersionId, version: ref.versionNumber, title: matching?.title ?? null,
+      taskId: matching?.taskId ?? null, sourceRef: ref.sourceRef };
+  }));
+  return { project, state, tasks: page.items, nextCursor: page.nextCursor, nextAction,
+    reviews: reviews.filter((review) => review.projectId === id),
+    decisions: decisions.filter((decision) => decision.projectId === id), selectedArtifacts };
+}
+
+function LiveProjectResumeView({ id, client }: { id: string; client: RelayApiClient }) {
+  const [snapshot, setSnapshot] = useState<LiveSnapshot | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+  const requestVersion = useRef(0);
+  useEffect(() => {
+    const request = ++requestVersion.current;
+    setSnapshot(null); setLoading(true); setError(null);
+    void readLiveSnapshot(client, id).then((next) => {
+      if (request === requestVersion.current) setSnapshot(next);
+    }).catch((caught: unknown) => {
+      if (request === requestVersion.current) setError(describeLiveError(caught).message);
+    }).finally(() => { if (request === requestVersion.current) setLoading(false); });
+    return () => { requestVersion.current++; };
+  }, [client, id, reload]);
+
+  if (loading) return <section className="page-state" role="status"><p className="eyebrow">继续这个项目</p><h1>正在读取当前项目事实</h1><p>只读查询不会开始或恢复执行。</p></section>;
+  if (error || !snapshot) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">继续这个项目</p><h1>暂时无法读取当前事实</h1><p>{error ?? "项目事实不可用。"}</p><button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>重新读取</button></section>;
+  const { project, state, tasks, nextAction, reviews, decisions, selectedArtifacts } = snapshot;
+  const type = project.projectType in projectTypeLabels
+    ? projectTypeLabels[project.projectType as ProjectType] : project.projectType;
+  return <section className="skill-page" data-testid="project-resume-live"><div className="page-layout"><div className="page-primary">
+    <p className="eyebrow">真实项目 · {project.id}</p><h1>当前事实速览</h1>
+    <p className="page-lede">{project.title} · {type} · {phaseLabel(state.phaseKey)} · State revision v{state.revision}</p>
+    <p className="helper-text">这是现时只读查询；没有上次查看基线，不显示变化对比、进度判断或模型建议，也不会启动 Task 或 Run。</p>
+    <button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}><RotateCcw aria-hidden="true" />刷新当前事实</button>
+    <section className="resume-section"><h2>State 指定的下一步</h2>{state.nextActionTaskId === null
+      ? <p className="helper-text">Project State 尚未指定下一步 Task。</p>
+      : nextAction ? <p><Link className="inline-link" to={`/tasks/${nextAction.id}`}>{nextAction.title}</Link> · {taskStatusLabels[nextAction.status]} · Task revision v{nextAction.revision}</p>
+        : <p className="helper-text">State 引用 Task {state.nextActionTaskId}，当前单读未能确认其详情；不以列表中其他任务替代。</p>}</section>
+    <section className="resume-section"><h2>当前任务</h2><p className="helper-text">已读取本项目任务首分页 {tasks.length} 项{snapshot.nextCursor ? "；还有后续页" : "；本次查询未返回后续游标"}。以下最多展示前 8 项，不能当作全部项目任务。</p>
+      {tasks.length ? <ul className="run-list">{tasks.slice(0, 8).map((task) => <li key={task.id}><Link className="inline-link" to={`/tasks/${task.id}`}>{task.title}</Link> · {taskStatusLabels[task.status]} · v{task.revision}</li>)}</ul>
+        : <p className="helper-text">已读首分页没有任务。</p>}<Link className="inline-link" to={`/projects/${id}/tasks`}>打开项目任务并继续加载</Link></section>
+    <section className="resume-section"><h2>State 当前完成引用</h2><p className="helper-text">只列 Project State 的 completed_highlight_refs；重开后的旧凭据可从该任务 Activity 历史进入。</p>
+      {state.completedHighlightRefs.length ? <ul className="run-list">{state.completedHighlightRefs.map((ref) => <li key={ref.completionId}>
+        <Link className="inline-link" to={`/completion-records/${ref.completionId}`}>查看完成凭据 {ref.completionId}</Link> · Task {ref.taskId} · 当时验收 v{ref.acceptanceRevision}
+      </li>)}</ul> : <p className="helper-text">State 当前没有完成引用。</p>}</section>
+    <section className="resume-section"><h2>待判断</h2><p className="helper-text">仅从当前 OPEN Review 查询返回的集合中过滤本项目；当前显示 {reviews.length} 项，接口无游标，不推断历史判断已全部列出。</p>
+      {reviews.length ? <ul className="run-list">{reviews.slice(0, 5).map((review) => <li key={review.id}><Link className="inline-link" to={`/reviews?id=${review.id}`}>{review.kind} · {review.reason}</Link> · Review v{review.revision}</li>)}</ul>
+        : <p className="helper-text">本次 OPEN Review 查询未返回本项目待判断项。</p>}{reviews.length > 5 && <p className="helper-text">只显示前 5 项；其余请到待审页面查看。</p>}</section>
+    <section className="resume-section"><h2>当前选用产物版本</h2><p className="helper-text">只来自 Project State selected_artifact_version_refs；不代表最新版本或本轮接受。</p>
+      {selectedArtifacts.length ? <ul className="run-list">{selectedArtifacts.map((artifact) => <li key={artifact.versionId}>{artifact.taskId
+        ? <><span>{artifact.title} · v{artifact.version}</span> · <Link className="inline-link" to={`/tasks/${artifact.taskId}?tab=artifacts`}>打开任务产物列表</Link></>
+        : <span>版本 {artifact.versionId} · v{artifact.version}（产物详情当前不可读取）</span>}
+        <small>来源 {artifact.sourceRef} · Version ID {artifact.versionId}</small></li>)}</ul>
+        : <p className="helper-text">State 没有当前选用的产物版本。</p>}</section>
+  </div><ResponsiveRail label="查看项目上下文" title="项目上下文"><div className="rail-content"><h2>项目 Decision</h2>
+    <p className="helper-text">项目 Decision 当前查询 {decisions.length} 项；仅显示前 5 项，不作完整历史声明。</p>
+    {decisions.length ? <ul className="run-list">{decisions.slice(0, 5).map((decision) => <li key={decision.id}><Link className="inline-link" to={`/projects/${id}/knowledge?kind=DECISION&item=${decision.id}`}>{decision.title}</Link> · {decision.status} · v{decision.currentVersion}</li>)}</ul>
+      : <p className="helper-text">本次查询未返回项目 Decision。</p>}
+    <p className="helper-text">来源是 Project、State、Task、OPEN Review、Artifact 与 Decision 的现时查询。没有可用的上次查看基线。</p>
+  </div></ResponsiveRail></div></section>;
+}
+
+function FixtureProjectResumeView() {
   const navigate = useNavigate();
   const { id = "" } = useParams();
   const [query] = useSearchParams();

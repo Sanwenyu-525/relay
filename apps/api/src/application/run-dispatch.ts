@@ -1,5 +1,6 @@
 import type { DbExecutor } from '../infrastructure/database.js';
 import { applySafeControl } from './control-requests.js';
+import { lockWritableProjectInWorkspace } from './guards.js';
 import { createRepositories, withTransaction } from './unit-of-work.js';
 
 export interface ClaimedRunCommand {
@@ -21,8 +22,15 @@ export async function claimNextRunCommand(db: DbExecutor, workerId: string,
   const candidates = await createRepositories(db).dispatch.listPending(32);
   for (const candidate of candidates) {
     const claimed = await withTransaction(db, async (repositories) => {
-      // Run first, then outbox and invocation. A competing Worker skips a locked
-      // Run instead of waiting and accidentally starting a second invocation.
+      const located = await repositories.runs.readRun(candidate.run_id);
+      if (located !== undefined && !['COMPLETED', 'FAILED', 'CANCELLED'].includes(located.status)) {
+        const task = await repositories.tasks.readTask(located.task_id);
+        if (task?.project_id !== null && task?.project_id !== undefined) {
+          await lockWritableProjectInWorkspace(repositories, located.workspace_id, task.project_id);
+        }
+      }
+      // Project archive gate precedes the active Run claim. Then Run, outbox
+      // and invocation follow their existing transport lock order.
       if (!(await repositories.dispatch.tryLockRun(candidate.run_id))) return undefined;
       const run = await repositories.runs.readRun(candidate.run_id);
       const command = await repositories.dispatch.readCommand(candidate.command_id);

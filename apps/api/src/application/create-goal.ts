@@ -68,6 +68,7 @@ export async function createGoal(
 
       await repositories.activities.insertActivityRecord({
         id: randomUUID(),
+        workspaceId: input.workspaceId,
         actorKind: 'HUMAN',
         actorRef: LOCAL_ACTOR_REF,
         commandId: input.commandId,

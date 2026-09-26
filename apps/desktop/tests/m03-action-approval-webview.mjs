@@ -9,7 +9,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
 const execFileAsync = promisify(execFile);
 const desktopRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -165,20 +165,38 @@ async function startSession() {
   console.log(`packaged_mock_gateway_sha256=${frozenPackage.get(join(releaseRoot, 'api', 'dist', 'src', 'worker', 'mock-gateway-action.js'))}`);
 }
 
-function gatewayUnknownFaultConfig() {
+function startGatewayUnknownFaultWorker() {
   assert.ok(gatewayUnknownScenario && state.root && state.marker,
     'the Gateway fault requires a disposable acceptance session');
-  assert.equal(resolve(state.marker.config_path), resolve(state.root, 'desktop.env'));
-  const config = readFileSync(state.marker.config_path, 'utf8');
-  assert.ok(!config.includes('NODE_ENV=') &&
-    !config.includes('RELAY_WORKER_TEST_EXIT_AFTER_GATEWAY_ADMIT='));
-  const faultPath = join(state.root, 'desktop-gateway-unknown.env');
-  assert.equal(existsSync(faultPath), false);
-  // The Windows host strips NODE_/RELAY_ from child environments. Only this
-  // isolated Node --env-file carries the test-only fault into its Worker.
-  writeFileSync(faultPath,
-    `${config}NODE_ENV=test\nRELAY_WORKER_TEST_EXIT_AFTER_GATEWAY_ADMIT=true\n`, 'utf8');
-  return faultPath;
+  const workerId = `worker:harness-gateway-unknown:${randomUUID()}`;
+  const env = {};
+  for (const key of Object.keys(process.env)) {
+    if (key.toUpperCase().startsWith('NODE_') ||
+        key.toUpperCase().startsWith('RELAY_')) continue;
+    env[key] = process.env[key];
+  }
+  // The production host strips NODE_/RELAY_ from children and validates
+  // desktop.env against a fixed whitelist, so the test-only fault rides on an
+  // isolated Worker process the harness starts itself: same packaged entry,
+  // same claim path, same post-admit exit hook, real process exit as evidence.
+  env.NODE_ENV = 'test';
+  env.RELAY_DB_URL = `postgresql://relay_app@127.0.0.1:${state.marker.postgres_port}/relay_m02_acceptance`;
+  env.RELAY_DATA_ROOT = state.marker.data_root;
+  env.RELAY_WORKER_ID = workerId;
+  env.RELAY_WORKER_POLL_MS = '20';
+  env.RELAY_WORKER_TEST_EXIT_AFTER_GATEWAY_ADMIT = 'true';
+  const child = spawn(node, [join(releaseRoot, 'api', 'dist', 'src', 'worker', 'main.js')],
+    { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '';
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { output += chunk; });
+  child.stderr.on('data', (chunk) => { output += chunk; });
+  const closed = new Promise((done) => {
+    child.once('close', (code, signal) => done({ code, signal }));
+  });
+  state.faultWorker = { child, workerId, output: () => output, closed };
+  return state.faultWorker;
 }
 
 function hostEnvironment(cdpPort, configPath) {
@@ -500,6 +518,9 @@ async function stopHost(snapshot = null) {
 
 async function cleanup() {
   await stopWorkerLatch();
+  if (state.faultWorker?.child.exitCode === null) {
+    state.faultWorker.child.kill('SIGTERM');
+  }
   await state.browser?.close().catch(() => undefined);
   state.browser = null;
   if (state.host?.pid && state.host.exitCode === null) {
@@ -705,8 +726,7 @@ async function runChain() {
   assert.equal(existsSync(gateway.target), false, 'host stop executed an unapproved effect');
   assert.deepEqual(await graphState(runId), beforeGraph);
   assert.equal(await eventSeq(runId), beforeSeq);
-  const reopened = await startHost('reopened', gatewayUnknownScenario
-    ? gatewayUnknownFaultConfig() : state.marker.config_path);
+  const reopened = await startHost('reopened', state.marker.config_path);
   await assertRuntimeRoleSeparation();
   assert.notEqual(reopened.bootstrap.bearerToken, first.bootstrap.bearerToken);
   assert.equal((await fetch(`${reopened.bootstrap.baseUrl}${runPath}`, {
@@ -727,6 +747,7 @@ async function runChain() {
   await expect(reopened.page.getByTestId('review-inbox')).toContainText('动作批准');
   await expect(reopened.page.getByTestId('review-inbox')).toContainText(operationId);
   await expect(reopened.page.getByTestId('review-decision-APPROVE')).toBeEnabled();
+  const faultWorker = gatewayUnknownScenario ? startGatewayUnknownFaultWorker() : null;
   await reopened.page.getByTestId('review-decision-APPROVE').click();
   await waitFor(() => reopenedLedger.decision !== null, 10_000, 'WebView ACTION_APPROVAL decision POST');
   const approval = reopenedLedger.decision;
@@ -750,10 +771,42 @@ async function runChain() {
   assert.match(approvalDecisionId, uuid);
   console.log(`after_action_decision_context=${JSON.stringify(await contextDiagnostics(runId))}`);
   if (gatewayUnknownScenario) {
-    const unknown = await waitFor(async () => {
-      const facts = await gatewayState(runId);
-      return facts?.status === 'UNKNOWN' ? facts : null;
-    }, 30_000, 'stopped Gateway Worker to reconcile the original operation as UNKNOWN');
+    assert.ok(faultWorker);
+    const closed = await Promise.race([faultWorker.closed,
+      sleep(30_000).then(() => ({ code: null, signal: null, timedOut: true }))]);
+    assert.equal(closed.code, 98, `fault Worker did not exit 98 after admit: ${
+      JSON.stringify({ closed, output: faultWorker.output() }) }`);
+    // The desktop supervisor reconciles only its own children; the isolated
+    // fault Worker is a harness process, so the harness repeats the supervisor's
+    // stopped-claim sequence with the packaged application entries.
+    const stoppedWorkerId = await sql(`select worker_id from run_invocations where run_id='${runId}'`);
+    const stoppedEpoch = await sql(`select epoch from run_invocations where run_id='${runId}'`);
+    const invocationId = await sql(`select id from run_invocations where run_id='${runId}'`);
+    assert.equal(stoppedWorkerId, faultWorker.workerId, `fault Worker lost the claim race: ${faultWorker.output()}`);
+    const requireApi = createRequire(join(releaseRoot, 'api', 'package.json'));
+    const loadPackaged = (relative) =>
+      import(pathToFileURL(join(releaseRoot, 'api', 'dist', 'src', relative)).href);
+    const [{ RelayDatabase }, { recoverStoppedWorker }, { reconcileGatewayInvocation },
+      { ManagedContentStore }] = await Promise.all([
+      loadPackaged('infrastructure/database.js'), loadPackaged('application/recover-run.js'),
+      loadPackaged('application/gateway-actions.js'), loadPackaged('storage/managed-content-store.js'),
+    ]);
+    const database = new RelayDatabase({
+      databaseUrl: `postgresql://relay_app@127.0.0.1:${state.marker.postgres_port}/relay_m02_acceptance`,
+      databasePoolMax: 4, databaseConnectTimeoutMs: 3000,
+    }, (error) => { throw error; });
+    try {
+      await recoverStoppedWorker(database.executor, { runId, stoppedWorkerId,
+        stoppedEvidence: 'harness: gateway fault worker closed after admit',
+        storage: new ManagedContentStore(state.marker.data_root) });
+      const reconciled = await reconcileGatewayInvocation(database.executor, {
+        workspaceId: reopened.bootstrap.workspaceId, operationId, invocationId,
+        stoppedWorkerId, stoppedWorkerEpoch: BigInt(stoppedEpoch), oldProcessStopped: true });
+      assert.equal(reconciled.status, 'UNKNOWN');
+    } finally {
+      await database.close();
+    }
+    const unknown = await gatewayState(runId);
     assert.deepEqual(unknown, { operation_id: operationId, status: 'UNKNOWN',
       invocation_count: 1, invocation_status: 'UNKNOWN' });
     assert.equal(existsSync(gateway.target), false, 'Admit-only crash wrote the Fake target');

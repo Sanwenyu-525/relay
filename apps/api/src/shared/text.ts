@@ -17,6 +17,8 @@ export const TEXT_LIMITS = {
   reason: 500,
   /** P03：人工接受陈述（完成命令里的 acceptance.statement）。 */
   acceptanceStatement: 500,
+  /** M04：Assist 消息正文（允许多行，控制字符检查在 checkAssistContent 中单独放宽）。 */
+  content: 32_768,
 } as const;
 
 /** 期望输出等受约束参数快照的最大序列化长度（字符），避免把大对象塞进命令体。 */
@@ -69,6 +71,28 @@ export function checkOptionalText(
 /** 规范化：入库与命令摘要都使用同一个已去空白的结果，保证重放摘要稳定。 */
 export function normalizeText(value: string): string {
   return value.trim();
+}
+
+/**
+ * Assist 消息正文校验：对话内容必须允许多行，因此除空白外的控制字符
+ * （NUL、转义、DEL 等）仍然拒绝，但不再套用 checkRequiredText 的全部拒绝规则。
+ */
+export function checkAssistContent(value: string, field: string): TextProblem | undefined {
+  const trimmed = value.trim();
+
+  if (trimmed === '') {
+    return { field, message: 'must not be empty' };
+  }
+
+  if (trimmed.length > TEXT_LIMITS.content) {
+    return { field, message: `must be at most ${TEXT_LIMITS.content} characters` };
+  }
+
+  if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u.test(trimmed)) {
+    return { field, message: 'must not contain control characters other than whitespace' };
+  }
+
+  return undefined;
 }
 
 function containsControlCharacters(value: string): boolean {

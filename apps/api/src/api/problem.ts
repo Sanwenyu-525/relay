@@ -27,6 +27,7 @@ export interface ConflictDetails {
   readonly criterionIds?: readonly string[];
   readonly artifactVersionIds?: readonly string[];
   readonly artifactKinds?: readonly string[];
+  readonly blockingReasons?: readonly string[];
 }
 
 export interface ProblemDetails {
@@ -148,6 +149,10 @@ function conflictBody(conflict: ConflictDetails): Record<string, unknown> {
 
   if (conflict.artifactVersionIds !== undefined) {
     body.artifact_version_ids = conflict.artifactVersionIds;
+  }
+
+  if (conflict.blockingReasons !== undefined) {
+    body.blocking_reasons = conflict.blockingReasons;
   }
 
   if (conflict.artifactKinds !== undefined) {

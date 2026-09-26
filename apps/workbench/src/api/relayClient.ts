@@ -1,5 +1,8 @@
 import type { DecimalRevision, ExecutorKind, InteractionMode, TaskStatus } from "../types";
 import { isRunEventCursor, readRunEventHints } from "./runEvents";
+import { blueprintProposalFrom, goalFrom, projectGoalListFrom,
+  type RelayBlueprintDraft, type RelayBlueprintProposal, type RelayGoal,
+  type RelayProjectGoal } from "./blueprintDtos";
 
 export interface RelayApiConnection {
   readonly baseUrl: string;
@@ -24,6 +27,7 @@ export interface RelayProblem {
   /** 409 REVISION_CONFLICT 的版本差异；界面保留差异而不是直接覆盖。 */
   readonly expectedRevision: string | null;
   readonly actualRevision: string | null;
+  readonly blockingReasons?: readonly string[];
 }
 
 export class RelayApiError extends Error {
@@ -57,6 +61,36 @@ export interface RelayProject {
   readonly archivedAt: string | null;
 }
 
+export interface RelayProjectListItem extends RelayProject {
+  readonly archiveStatus: "ACTIVE" | "ARCHIVED";
+  readonly phaseKey: string;
+  readonly nextActionTaskId: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface RelayProjectPage {
+  readonly items: readonly RelayProjectListItem[];
+  readonly nextCursor: string | null;
+}
+export interface RelayProjectArchiveResult {
+  readonly projectId: string;
+  readonly revision: DecimalRevision;
+  readonly archivedAt: string;
+  readonly archiveStatus: "ARCHIVED";
+}
+
+export type RelayViewKind = "general" | "thesis" | "development";
+export interface RelayViewConfiguration {
+  readonly projectId: string;
+  readonly revision: DecimalRevision;
+  readonly kind: RelayViewKind;
+  readonly templateVersion: string;
+  readonly templateSha256: string;
+  readonly pages: readonly { readonly pageId: string; readonly visible: boolean; readonly position: number }[];
+  readonly updatedAt: string;
+}
+
 export interface RelayTaskDependency {
   readonly taskId: string;
   readonly dependencyKind: string;
@@ -82,15 +116,106 @@ export interface RelayTaskSummary {
   readonly allowedActions: readonly string[];
 }
 
+export interface RelayTaskPage {
+  readonly items: readonly RelayTaskSummary[];
+  readonly nextCursor: string | null;
+}
+
+export type RelayTodayPriority = "LOW" | "NORMAL" | "HIGH";
+export interface RelayTodayItem {
+  readonly taskId: string;
+  readonly taskRevision: DecimalRevision;
+  readonly projectId: string | null;
+  readonly title: string;
+  readonly status: TaskStatus;
+  readonly priority: RelayTodayPriority | null;
+  readonly dueLocalDate: string | null;
+  readonly timezone: string | null;
+  readonly pin: boolean;
+  readonly laterLocalDate: string | null;
+  readonly laterTimezone: string | null;
+  readonly reasonCodes: readonly string[];
+  readonly evidenceRefs: readonly string[];
+  readonly allowedActions: readonly string[];
+}
+
+export interface RelayToday {
+  readonly date: string;
+  readonly timezone: string;
+  readonly selectionRevision: DecimalRevision;
+  readonly focus: {
+    readonly date: string;
+    readonly timezone: string;
+    readonly targetKind: "GOAL" | "PROJECT" | "TASK";
+    readonly targetId: string;
+    readonly selectionRevision: DecimalRevision;
+    readonly activeInQuery: boolean;
+  } | null;
+  readonly focusHasEligibleCandidate: boolean;
+  readonly eligibleItems: readonly RelayTodayItem[];
+  readonly waitingItems: readonly RelayTodayItem[];
+  /** 服务端定义为 waitingItems 的子集。 */
+  readonly blockedPinnedItems: readonly RelayTodayItem[];
+}
+
+export type RelayActivityRefKind = "PROJECT" | "TASK" | "RUN" | "GOAL" | "ARTIFACT_VERSION" |
+  "REVIEW" | "COMPLETION" | "VERIFICATION_SESSION";
+export interface RelayActivityItem {
+  readonly id: string;
+  readonly createdAt: string;
+  readonly actorKind: "HUMAN" | "AI" | "SYSTEM";
+  readonly commandId: string | null;
+  readonly eventType: string;
+  readonly summary: string;
+  readonly projectId: string | null;
+  readonly taskId: string | null;
+  readonly runId: string | null;
+  readonly entityRefs: readonly { readonly kind: RelayActivityRefKind; readonly id: string }[];
+}
+export interface RelayActivityPage {
+  readonly items: readonly RelayActivityItem[];
+  readonly nextCursor: string | null;
+}
+export interface RelayActivityFilter {
+  readonly projectId?: string;
+  readonly taskId?: string;
+  readonly runId?: string;
+  readonly from?: string;
+  readonly to?: string;
+  readonly cursor?: string;
+  readonly limit?: number;
+}
+
 export interface RelayTaskDetail extends RelayTaskSummary {
   readonly acceptance: RelayTaskAcceptance;
   readonly dependencies: readonly RelayTaskDependency[];
+}
+
+/** 当前 Task/规则的准入预览，不是 Run 冻结计划或已执行结果。 */
+export interface RelayTaskCheckPlanPreview {
+  readonly taskId: string;
+  readonly status: "AVAILABLE" | "UNAVAILABLE";
+  readonly admissionAvailable: boolean;
+  readonly reasonCodes: readonly string[];
+  readonly sources: { readonly taskRevision: DecimalRevision;
+    readonly acceptanceRevision: DecimalRevision; readonly ruleRevision: DecimalRevision | null;
+    readonly workflowKey: string; readonly workflowVersion: string;
+    readonly ruleRefs: readonly { readonly ruleId: string; readonly version: DecimalRevision }[] };
+  readonly checkPlan: { readonly policyVersion: string; readonly workflowKey: string;
+    readonly workflowVersion: string; readonly entries: readonly { readonly criterionId: string;
+      readonly statement: string; readonly required: boolean; readonly method: string;
+      readonly severity: string; readonly checkerId: string; readonly checkerVersion: string }[] } | null;
+  readonly checkPlanSha256: string | null;
+  readonly frozenRunPlan: false;
+  readonly executed: false;
 }
 
 /** GET /tasks/{id} 的验收投影：完成命令要按这份 criteria 的 id 提交接受集合。 */
 export interface RelayTaskAcceptance {
   readonly acceptanceRevision: DecimalRevision;
   readonly objective: string;
+  /** 当前验收配置的 expected_outputs；旧版响应缺字段时为 null。 */
+  readonly expectedOutputs: Readonly<Record<string, unknown>> | null;
   readonly source: string;
   readonly criteria: readonly RelayAcceptanceCriterion[];
 }
@@ -110,6 +235,20 @@ export interface RelayArtifactVersionSummary {
   readonly size: DecimalRevision;
   readonly sourceKind: string;
   readonly createdAt: string;
+}
+
+export type RelayLineageRelation = "DERIVED_FROM" | "REVISED_FROM" | "GENERATED_BY" | "VERIFIED_BY" | "ACCEPTED_BY";
+export type RelayLineageParentKind = "ARTIFACT_VERSION" | "KNOWLEDGE_VERSION" | "RUN_STEP" | "VERIFICATION_SESSION" | "COMPLETION_RECORD";
+export interface RelayArtifactLineage {
+  readonly artifactVersionId: string;
+  readonly artifactId: string;
+  readonly versionNumber: DecimalRevision;
+  readonly sha256: string;
+  readonly sourceKind: string;
+  readonly contentAvailability: "AVAILABLE" | "UNAVAILABLE";
+  readonly directParents: readonly { readonly id: string; readonly relation: RelayLineageRelation;
+    readonly parentKind: RelayLineageParentKind; readonly parentId: string | null;
+    readonly availability: "AVAILABLE" | "UNAVAILABLE"; readonly createdAt: string }[];
 }
 
 export interface RelayArtifact {
@@ -152,6 +291,32 @@ export interface RelayCompletion {
   readonly stateRevision: DecimalRevision | null;
 }
 
+export interface RelayCompletionEvidence {
+  readonly completionId: string;
+  readonly taskId: string;
+  readonly basisKind: "HUMAN" | "AUTO";
+  readonly acceptanceRevision: DecimalRevision;
+  readonly isCurrent: boolean;
+  readonly committedAt: string;
+  readonly acceptance: { readonly availability: "AVAILABLE" | "UNAVAILABLE";
+    readonly objective: string | null; readonly expectedOutputs: Readonly<Record<string, unknown>> | null;
+    readonly source: string | null; readonly createdAt: string | null;
+    readonly criteria: readonly { readonly criterionId: string; readonly statement: string;
+      readonly required: boolean; readonly method: string;
+      readonly targetSpec: Readonly<Record<string, unknown>> }[] };
+  readonly humanAcceptance: null | { readonly availability: "AVAILABLE" | "UNAVAILABLE";
+    readonly id: string | null; readonly actorKind: string | null; readonly statement: string | null;
+    readonly acceptedCriterionIds: readonly string[]; readonly reason: string | null;
+    readonly createdAt: string | null };
+  readonly verificationSession: null | { readonly availability: "AVAILABLE" | "UNAVAILABLE";
+    readonly id: string | null; readonly runId: string | null; readonly status: string | null;
+    readonly verdict: string | null; readonly checkPlanHash: string | null;
+    readonly applicable: boolean | null };
+  readonly artifactVersions: readonly { readonly availability: "AVAILABLE" | "UNAVAILABLE";
+    readonly artifactVersionId: string | null; readonly artifactId: string | null;
+    readonly versionNumber: DecimalRevision | null; readonly sha256: string | null }[];
+}
+
 export interface RelayReopen {
   readonly taskId: string;
   readonly status: TaskStatus;
@@ -166,6 +331,7 @@ export interface RelayProjectState {
   readonly projectId: string;
   readonly revision: DecimalRevision;
   readonly phaseKey: string;
+  readonly nextActionTaskId: string | null;
   readonly selectedArtifactVersionRefs: readonly RelayStateArtifactRef[];
   readonly completedHighlightRefs: readonly {
     readonly completionId: string;
@@ -198,7 +364,7 @@ export interface RelayCommandReceipt extends RelayCommandEnvelope {
 }
 
 export type RelayInformationKind = "KNOWLEDGE" | "MEMORY" | "DECISION" | "RULE";
-export type RelayKnowledgeSource = "NOTE" | "MANAGED_TEXT" | "ARTIFACT_VERSION";
+export type RelayKnowledgeSource = "NOTE" | "MANAGED_TEXT" | "ARTIFACT_VERSION" | "WEB_PAGE";
 export type RelayRuleStrength = "HARD" | "PREFERENCE";
 export type RelayRuleEnforcement = "PRE_ACTION" | "POST_CHECK" | "SEMANTIC" | "HUMAN";
 
@@ -319,6 +485,134 @@ export interface RelaySearchPage {
   readonly nextCursor: string | null;
 }
 
+export interface RelayAssistSourceRef {
+  readonly kind: "KNOWLEDGE" | "MEMORY" | "DECISION";
+  readonly rootId: string;
+  readonly version: DecimalRevision;
+}
+
+export interface RelayAssistSession {
+  readonly id: string;
+  readonly projectId: string | null;
+  readonly taskId: string | null;
+  readonly title: string;
+  readonly status: string;
+  readonly revision: DecimalRevision;
+  readonly updatedAt: string;
+}
+
+export interface RelaySkillDefinition {
+  readonly id: string;
+  readonly version: string;
+  readonly sha256: string;
+  readonly title: string;
+  readonly target: "PROJECT" | "TASK";
+  readonly outputKind: "TASK_DEFINITION_SUGGESTION" | "PROJECT_RESUME" | "VERIFICATION_PLAN_SUGGESTION" |
+    "PROJECT_BLUEPRINT_SUGGESTION";
+  readonly availability: "CALLABLE_SUGGESTION_ONLY" | "CALLABLE_READ_ONLY" | "HISTORICAL_ONLY";
+  readonly callSupported: boolean;
+  readonly requiredCapabilities: readonly string[];
+  readonly missingCapabilities: readonly string[];
+  readonly acceptSupported: boolean;
+  readonly dependencies: readonly { readonly kind: string; readonly id: string;
+    readonly version: string; readonly sha256: string }[];
+}
+
+export interface RelayPackDefinition {
+  readonly id: string;
+  readonly version: string;
+  readonly sha256: string;
+  readonly title: string;
+  readonly hostContract: string;
+  readonly availability: string;
+  readonly members: readonly { readonly kind: "SKILL"; readonly id: string;
+    readonly version: string; readonly sha256: string; readonly target: "PROJECT" | "TASK";
+    readonly availability: string; readonly requiredCapabilities: readonly string[];
+    readonly missingCapabilities: readonly string[]; readonly acceptSupported: boolean }[];
+}
+
+export type RelaySkillInput = { readonly desired_result?: string } |
+  { readonly focus?: string } | { readonly risk_focus?: string } |
+  { readonly desired_outcome?: string; readonly goal_id?: string | null;
+    readonly pack_ref?: { readonly id: string; readonly version: string } | null };
+
+export interface RelayAssistSkillOutput {
+  readonly kind: RelaySkillDefinition["outputKind"];
+  readonly status: "SUGGESTED" | "READ_ONLY";
+  readonly targetKind: "PROJECT" | "TASK";
+  readonly targetId: string;
+  readonly asOf: string;
+  readonly baseline: Readonly<Record<string, unknown>>;
+  readonly basisSha256: string;
+  readonly payloadSha256: string;
+  readonly payload: Readonly<Record<string, unknown>>;
+}
+
+export interface RelayAssistMessage {
+  readonly id: string;
+  readonly sessionId: string;
+  readonly seq: DecimalRevision;
+  readonly role: "USER" | "ASSISTANT";
+  readonly status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
+  readonly intent: string;
+  readonly content: string | null;
+  readonly errorCode: string | null;
+  readonly sources: readonly { readonly sourceRef: string | null; readonly kind: string | null;
+    readonly rootId: string | null; readonly version: string | null;
+    readonly status: string; readonly reason: string | null }[];
+  readonly skill: ({ readonly id: string; readonly version: string; readonly sha256: string | null;
+    readonly definitionAvailability: "AVAILABLE" | "HISTORICAL_ONLY" | "UNAVAILABLE";
+    readonly outputAvailability: "PENDING" | "HISTORICAL_SNAPSHOT" | "NO_OUTPUT" | "UNAVAILABLE";
+    readonly target: "PROJECT" | "TASK" | null; readonly availability: string | null;
+    readonly missingCapabilities: readonly string[] }) | null;
+  readonly skillInput: Readonly<Record<string, unknown>> | null;
+  readonly skillOutput: RelayAssistSkillOutput | null;
+  readonly usage: { readonly inputTokens: number | null; readonly outputTokens: number | null };
+  readonly cancelRequested: boolean;
+}
+
+export interface RelayAssistLivePreview {
+  readonly sessionId: string;
+  readonly messageId: string;
+  readonly status: RelayAssistMessage["status"];
+  readonly previewRevision: DecimalRevision;
+  readonly previewText: string | null;
+  readonly previewTruncated: boolean;
+  readonly previewAvailable: boolean;
+}
+
+interface RelayAssistProposalBase {
+  readonly id: string;
+  readonly sessionId: string;
+  readonly messageId: string;
+  readonly targetId: string;
+  readonly baseRevision: DecimalRevision;
+  readonly payloadHash: string;
+  readonly payloadAvailable: boolean;
+  readonly status: "PENDING" | "ACCEPTED" | "REJECTED" | "EXPIRED";
+}
+export type RelayTaskSkillProposal = RelayAssistProposalBase &
+  { readonly kind: "TASK_CONTRACT_CHANGE" | "VERIFICATION_PLAN_CHANGE";
+    readonly targetType: "TASK"; readonly baseAcceptanceRevision: DecimalRevision;
+    readonly skillSha256: string; readonly skillOutputSha256: string;
+    readonly payload: { readonly objective: string;
+      readonly requiredOutputSpec: Readonly<Record<string, unknown>>;
+      readonly criteria: readonly { readonly criterionId: string; readonly statement: string;
+        readonly required: boolean; readonly method: string;
+        readonly targetSpec: Readonly<Record<string, unknown>>;
+        readonly source: "PRESERVED" | "SUGGESTED" }[];
+      readonly addedCriterionIds: readonly string[];
+      readonly preservedCriterionIds: readonly string[];
+      readonly suggestedMode: string | null } | null };
+export type RelayAssistProposal = RelayAssistProposalBase & (
+  { readonly kind: "CANDIDATE_MARKDOWN"; readonly targetType: "TASK";
+    readonly payload: { readonly title: string; readonly mediaType: string; readonly markdown: string } } |
+  { readonly kind: "TASK_DEFINITION"; readonly targetType: "PROJECT";
+    readonly payload: { readonly title: string; readonly objective: string;
+      readonly criteria: readonly { readonly statement: string; readonly required: boolean;
+        readonly method: string }[]; readonly expectedOutputs: Readonly<Record<string, unknown>> } }
+) | RelayTaskSkillProposal;
+
 export interface RelayReadiness {
   readonly status: "ready";
 }
@@ -383,6 +677,60 @@ export interface RelayRun {
   readonly blockingReviewIds: readonly string[];
   readonly pendingControlRequest: { readonly id: string; readonly type: RelayControlType; readonly status: string; readonly requestedAt: string } | null;
   readonly unresolvedOperationIds: readonly string[];
+}
+
+export interface RelayRunDraftPreview {
+  readonly runId: string;
+  readonly runStatus: string;
+  readonly stepAttemptId: string | null;
+  readonly attemptClaimEpoch: DecimalRevision | null;
+  readonly modelCallId: string | null;
+  readonly previewRevision: DecimalRevision;
+  readonly previewText: string | null;
+  readonly previewTruncated: boolean;
+  readonly previewAvailable: boolean;
+}
+
+export interface RelayRunTrace {
+  readonly runId: string;
+  readonly taskId: string;
+  readonly projectId: string | null;
+  readonly status: string;
+  readonly steps: readonly { readonly id: string; readonly index: number; readonly kind: string;
+    readonly status: string; readonly revision: DecimalRevision; readonly resultAvailable: boolean;
+    readonly startedAt: string | null; readonly finishedAt: string | null }[];
+  readonly attempts: readonly { readonly id: string; readonly stepId: string; readonly number: DecimalRevision;
+    readonly status: string; readonly claimEpoch: DecimalRevision; readonly resultAvailable: boolean;
+    readonly startedAt: string | null; readonly finishedAt: string | null }[];
+  readonly modelCalls: readonly { readonly id: string; readonly stepAttemptId: string | null;
+    readonly manifestId: string | null; readonly status: string; readonly provider: string; readonly model: string;
+    readonly inputSha256: string | null; readonly readOperationId: string | null;
+    readonly readInvocationId: string | null; readonly inputTokens: number | null; readonly outputTokens: number | null;
+    readonly startedAt: string; readonly settledAt: string | null }[];
+  readonly manifests: readonly { readonly id: string; readonly stepId: string | null;
+    readonly builderVersion: string; readonly sha256: string; readonly createdAt: string;
+    readonly sources: readonly { readonly kind: string; readonly sourceRef: string | null;
+      readonly version: string | null; readonly sha256: string | null; readonly sourceSha256: string | null;
+      readonly role: string; readonly trust: string; readonly availability: "AVAILABLE" | "UNAVAILABLE" }[] }[];
+  readonly verifications: readonly { readonly id: string; readonly status: string; readonly verdict: string | null;
+    readonly acceptanceRevision: DecimalRevision; readonly checkPlanHash: string; readonly parentSessionId: string | null;
+    readonly targets: readonly { readonly artifactVersionId: string; readonly contentSha256: string }[];
+    readonly checks: readonly { readonly id: string; readonly criterionId: string; readonly result: string;
+      readonly severity: string; readonly required: boolean; readonly createdAt: string }[];
+    readonly createdAt: string; readonly finalizedAt: string | null }[];
+  readonly reviews: readonly { readonly id: string; readonly kind: string; readonly status: string;
+    readonly operationId: string | null; readonly verificationSessionId: string | null;
+    readonly targetHash: string; readonly decision: { readonly id: string; readonly value: string;
+      readonly decidedAt: string } | null; readonly createdAt: string; readonly decidedAt: string | null }[];
+  readonly operations: readonly { readonly id: string; readonly stepId: string | null;
+    readonly capability: string; readonly actionType: string; readonly status: string;
+    readonly paramsSha256: string; readonly resultAvailable: boolean;
+    readonly invocations: readonly { readonly id: string; readonly number: DecimalRevision;
+      readonly status: string; readonly resultAvailable: boolean; readonly createdAt: string;
+      readonly resolvedAt: string | null }[]; readonly createdAt: string; readonly updatedAt: string }[];
+  readonly effects: readonly { readonly id: string; readonly stepId: string; readonly status: string;
+    readonly paramsSha256: string; readonly resultAvailable: boolean; readonly createdAt: string;
+    readonly resolvedAt: string | null }[];
 }
 
 export interface RelayContextManifestSummary {
@@ -467,10 +815,93 @@ export interface RelayMockGatewayAction {
   readonly content: string;
 }
 
-export interface RelayMockGatewayConnection {
+export interface RelayGatewayConnection {
   readonly id: string;
   readonly status: string;
   readonly capabilities: readonly string[];
+  readonly allowedHost: string | null;
+}
+
+export type RelayGatewayCapability = "FAKE_WRITE" | "FAKE_PUBLIC_READ" | "FILE_READ" | "WEB_FETCH";
+export type RelayGatewayDecision = "DENY" | "ASK" | "AUTO";
+export interface RelayGatewayConnectionSettings extends RelayGatewayConnection {
+  readonly projectId: string;
+  readonly version: DecimalRevision;
+  readonly createdAt: string;
+}
+function gatewayConnectionSettingsFrom(value: unknown): RelayGatewayConnectionSettings {
+  const row = object(value, "connection settings");
+  return { id: string(row, "id", "connection settings"),
+    projectId: string(row, "project_id", "connection settings"),
+    status: string(row, "status", "connection settings"),
+    version: decimal(row, "version", "connection settings"),
+    capabilities: stringArray(row, "capabilities", "connection settings"),
+    allowedHost: nullableString(row, "allowed_host", "connection settings"),
+    createdAt: string(row, "created_at", "connection settings") };
+}
+export interface RelayGatewayPolicy {
+  readonly id: string;
+  readonly projectId: string;
+  readonly status: string;
+  readonly activeVersion: DecimalRevision | null;
+  readonly revision: DecimalRevision;
+  readonly createdAt: string;
+}
+export interface RelayGatewayPolicyVersion {
+  readonly version: DecimalRevision;
+  readonly capability: string;
+  readonly actionType: string;
+  readonly targetPrefix: string;
+  readonly decision: string;
+  readonly maxPayloadBytes: number;
+  readonly createdAt: string;
+}
+export interface RelayManagedResource {
+  readonly id: string;
+  readonly projectId: string;
+  readonly canonicalRoot: string;
+  readonly status: string;
+  readonly revision: DecimalRevision;
+  readonly resourceEpoch: DecimalRevision;
+}
+function managedResourceFrom(value: unknown): RelayManagedResource {
+  const row = object(value, "managed resource");
+  return { id: string(row, "id", "managed resource"),
+    projectId: string(row, "project_id", "managed resource"),
+    canonicalRoot: string(row, "canonical_root", "managed resource"),
+    status: string(row, "status", "managed resource"),
+    revision: decimal(row, "revision", "managed resource"),
+    resourceEpoch: decimal(row, "resource_epoch", "managed resource") };
+}
+
+export type RelayMockGatewayConnection = RelayGatewayConnection;
+
+export interface RelayWebImportSubmission {
+  readonly importJobId: string;
+  readonly projectId: string;
+  readonly connectionId: string;
+  readonly status: "QUEUED";
+}
+
+export interface RelayWebImportJob {
+  readonly id: string;
+  readonly projectId: string;
+  readonly sourceUri: string;
+  readonly status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED";
+  readonly revision: DecimalRevision;
+  readonly error: string | null;
+  readonly knowledgeVersionId: string | null;
+  readonly requestCommandId: string;
+  readonly createdAt: string;
+}
+
+export interface RelayWebImportOperation {
+  readonly id: string;
+  readonly importJobId: string;
+  readonly status: string;
+  readonly actionType: string;
+  readonly normalizedTarget: string;
+  readonly invocationStatuses: readonly string[];
 }
 
 export interface RelayMockManagedResource {
@@ -513,7 +944,7 @@ export interface RelayTaskMutation {
 }
 
 /**
- * P04 的窄客户端：只覆盖工作台已经有服务端契约的读取、创建、状态迁移与回执查询。
+ * 工作台客户端只覆盖已经有服务端契约的读取、命令与回执查询。
  * 不与 fixtureAdapter 混用，也不缓存任何业务事实或凭据。
  * 未实现的端点不在这里建占位方法，调用方必须继续显示“未接入”。
  */
@@ -532,6 +963,10 @@ export class RelayApiClient {
     return this.#workspaceId;
   }
 
+  get baseUrl(): string {
+    return this.#baseUrl;
+  }
+
   async getHealthReady(): Promise<RelayReadiness> {
     const body = await this.request("/health/ready");
     const record = object(body, "readiness");
@@ -545,12 +980,126 @@ export class RelayApiClient {
     return projectFrom(await this.request(this.workspacePath(`/projects/${encodeURIComponent(projectId)}`)));
   }
 
+  async getProjectsPage(status: "active" | "archived" | "all", cursor: string | null = null): Promise<RelayProjectPage> {
+    const query = new URLSearchParams({ status });
+    if (cursor !== null) query.set("cursor", cursor);
+    const record = object(await this.request(`${this.workspacePath("/projects")}?${query.toString()}`), "project list");
+    return { items: array(record, "items", "project list").map(projectListItemFrom),
+      nextCursor: nullableString(record, "next_cursor", "project list") };
+  }
+
+  async archiveProject(input: { readonly projectId: string; readonly commandId: string;
+    readonly expectedRevision: DecimalRevision }): Promise<RelayCommandEnvelope> {
+    const body = await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(input.projectId)}/archive`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId,
+        expected_revision: input.expectedRevision })
+    }, 200);
+    try { return commandEnvelopeFrom(body); }
+    catch { throw new RelayTransportError("归档命令响应内容无法核对，请查询原 command ID 回执。"); }
+  }
+
+  async getViewConfiguration(projectId: string): Promise<RelayViewConfiguration> {
+    return viewConfigurationFrom(await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(projectId)}/view-configuration`)));
+  }
+
+  async setViewConfiguration(input: { readonly projectId: string; readonly commandId: string;
+    readonly expectedRevision: DecimalRevision; readonly kind: RelayViewKind }): Promise<RelayCommandEnvelope> {
+    return commandEnvelopeFrom(await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(input.projectId)}/view-configuration`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId,
+        expected_revision: input.expectedRevision, kind: input.kind })
+    }, 200));
+  }
+
+  async getProjectGoals(projectId: string): Promise<readonly RelayProjectGoal[]> {
+    return projectGoalListFrom(await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(projectId)}/goals`)));
+  }
+
+  async getGoal(goalId: string): Promise<RelayGoal> {
+    return goalFrom(await this.request(this.workspacePath(`/goals/${encodeURIComponent(goalId)}`)));
+  }
+
+  async getBlueprintProposals(projectId: string): Promise<readonly RelayBlueprintProposal[]> {
+    const body = object(await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(projectId)}/blueprint-proposals`)), "blueprint proposals");
+    return array(body, "items", "blueprint proposals").map(blueprintProposalFrom);
+  }
+
+  async getBlueprintProposal(projectId: string, proposalId: string): Promise<RelayBlueprintProposal> {
+    return blueprintProposalFrom(await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(projectId)}/blueprint-proposals/${encodeURIComponent(proposalId)}`)));
+  }
+
+  async createBlueprintProposal(input: { readonly projectId: string; readonly commandId: string;
+    readonly expectedProjectRevision: DecimalRevision; readonly expectedStateRevision: DecimalRevision;
+    readonly expectedViewRevision: DecimalRevision; readonly draft: RelayBlueprintDraft;
+    readonly supersedesProposalId: string | null }): Promise<RelayCommandEnvelope> {
+    return commandEnvelopeFrom(await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(input.projectId)}/blueprint-proposals`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId,
+        expected_project_revision: input.expectedProjectRevision,
+        expected_state_revision: input.expectedStateRevision,
+        expected_view_revision: input.expectedViewRevision, draft: input.draft,
+        ...(input.supersedesProposalId ? { supersedes_proposal_id: input.supersedesProposalId } : {}) })
+    }, 201));
+  }
+
+  async applyBlueprintProposal(input: { readonly projectId: string; readonly proposalId: string;
+    readonly commandId: string; readonly candidateSha256: string;
+    readonly expectedProjectRevision: DecimalRevision; readonly expectedStateRevision: DecimalRevision;
+    readonly expectedViewRevision: DecimalRevision }): Promise<RelayCommandEnvelope> {
+    return commandEnvelopeFrom(await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(input.projectId)}/blueprint-proposals/${encodeURIComponent(input.proposalId)}/apply`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId,
+        candidate_sha256: input.candidateSha256,
+        expected_project_revision: input.expectedProjectRevision,
+        expected_state_revision: input.expectedStateRevision,
+        expected_view_revision: input.expectedViewRevision })
+    }, 200));
+  }
+
+  async rejectBlueprintProposal(input: { readonly projectId: string; readonly proposalId: string;
+    readonly commandId: string; readonly candidateSha256: string }): Promise<RelayCommandEnvelope> {
+    return commandEnvelopeFrom(await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(input.projectId)}/blueprint-proposals/${encodeURIComponent(input.proposalId)}/reject`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId,
+        candidate_sha256: input.candidateSha256 })
+    }, 200));
+  }
+
   /** 逻辑上的“项目任务读取”映射为当前契约的 GET /tasks?project_id=。 */
   async getProjectTasks(projectId: string): Promise<readonly RelayTaskSummary[]> {
+    return (await this.getProjectTasksPage(projectId)).items;
+  }
+
+  async getProjectTasksPage(projectId: string, cursor: string | null = null): Promise<RelayTaskPage> {
     const query = new URLSearchParams({ project_id: projectId });
+    if (cursor !== null) query.set("cursor", cursor);
     const body = await this.request(`${this.workspacePath("/tasks")}?${query.toString()}`);
     const record = object(body, "task list");
-    return array(record, "items", "task list").map((item) => taskFrom(item));
+    return {
+      items: array(record, "items", "task list").map((item) => taskFrom(item)),
+      nextCursor: nullableString(record, "next_cursor", "task list")
+    };
+  }
+
+  async getInboxTasksPage(cursor: string | null = null): Promise<RelayTaskPage> {
+    const query = new URLSearchParams({ inbox: "true" });
+    if (cursor !== null) query.set("cursor", cursor);
+    const record = object(await this.request(`${this.workspacePath("/tasks")}?${query.toString()}`), "inbox task list");
+    return { items: array(record, "items", "inbox task list").map((item) => taskFrom(item)),
+      nextCursor: nullableString(record, "next_cursor", "inbox task list") };
+  }
+
+  async getWorkspaceTasksPage(cursor: string | null = null): Promise<RelayTaskPage> {
+    const query = new URLSearchParams({ scope: "all" });
+    if (cursor !== null) query.set("cursor", cursor);
+    const record = object(await this.request(`${this.workspacePath("/tasks")}?${query.toString()}`), "workspace task list");
+    return { items: array(record, "items", "workspace task list").map(taskFrom),
+      nextCursor: nullableString(record, "next_cursor", "workspace task list") };
   }
 
   async getTask(taskId: string): Promise<RelayTaskDetail> {
@@ -562,6 +1111,58 @@ export class RelayApiClient {
       acceptance: acceptanceFrom(object(record.acceptance, "task.acceptance")),
       dependencies: array(record, "dependencies", "task").map((item) => dependencyFrom(item))
     };
+  }
+
+  async getCompletionEvidence(completionId: string): Promise<RelayCompletionEvidence> {
+    return completionEvidenceFrom(await this.request(this.workspacePath(
+      `/completion-records/${encodeURIComponent(completionId)}`)));
+  }
+
+  async getTaskCheckPlanPreview(taskId: string): Promise<RelayTaskCheckPlanPreview> {
+    return taskCheckPlanPreviewFrom(await this.request(this.workspacePath(
+      `/tasks/${encodeURIComponent(taskId)}/check-plan-preview`)), taskId);
+  }
+
+  async getToday(date: string, timezone: string): Promise<RelayToday> {
+    const query = new URLSearchParams({ date, timezone });
+    return todayFrom(await this.request(`${this.workspacePath("/today")}?${query.toString()}`));
+  }
+
+  async getActivities(filter: RelayActivityFilter = {}): Promise<RelayActivityPage> {
+    const query = new URLSearchParams();
+    if (filter.projectId) query.set("project_id", filter.projectId);
+    if (filter.taskId) query.set("task_id", filter.taskId);
+    if (filter.runId) query.set("run_id", filter.runId);
+    if (filter.from) query.set("from", filter.from);
+    if (filter.to) query.set("to", filter.to);
+    if (filter.cursor) query.set("cursor", filter.cursor);
+    if (filter.limit) query.set("limit", String(filter.limit));
+    const suffix = query.size ? `?${query.toString()}` : "";
+    return activityPageFrom(await this.request(`${this.workspacePath("/activities")}${suffix}`));
+  }
+
+  async setTaskSelection(input: { taskId: string; commandId: string; expectedRevision: DecimalRevision;
+    pin: boolean; laterLocalDate: string | null; timezone: string | null }): Promise<RelayCommandEnvelope> {
+    return commandEnvelopeFrom(await this.request(this.workspacePath(`/task-selections/${encodeURIComponent(input.taskId)}`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId, expected_revision: input.expectedRevision,
+        pin: input.pin, later_local_date: input.laterLocalDate, timezone: input.timezone })
+    }, 200));
+  }
+
+  async setFocusSelection(input: { commandId: string; expectedRevision: DecimalRevision; date: string;
+    timezone: string; targetKind: "GOAL" | "PROJECT" | "TASK" | null; targetId: string | null }): Promise<RelayCommandEnvelope> {
+    return commandEnvelopeFrom(await this.request(this.workspacePath("/focus-selections"), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId, expected_revision: input.expectedRevision,
+        date: input.date, timezone: input.timezone, target_kind: input.targetKind, target_id: input.targetId })
+    }, 200));
+  }
+
+  async setTaskPlanningMetadata(input: { taskId: string; commandId: string; expectedRevision: DecimalRevision;
+    priority: RelayTodayPriority | null; dueLocalDate: string | null; timezone: string | null }): Promise<RelayCommandEnvelope> {
+    return commandEnvelopeFrom(await this.request(this.workspacePath(`/tasks/${encodeURIComponent(input.taskId)}/planning-metadata`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId, expected_revision: input.expectedRevision,
+        priority: input.priority, due_local_date: input.dueLocalDate, timezone: input.timezone })
+    }, 200));
   }
 
   async createProject(input: {
@@ -674,7 +1275,7 @@ export class RelayApiClient {
   }
 
   async createKnowledge(input: { commandId: string; projectId: string | null; title: string;
-    sourceKind: RelayKnowledgeSource; text?: string; mediaType?: string; artifactVersionId?: string }): Promise<RelayCommandEnvelope> {
+    sourceKind: Exclude<RelayKnowledgeSource, "WEB_PAGE">; text?: string; mediaType?: string; artifactVersionId?: string }): Promise<RelayCommandEnvelope> {
     return this.informationCommand("/knowledge", {
       command_id: input.commandId, project_id: input.projectId, title: input.title,
       source_kind: input.sourceKind,
@@ -685,7 +1286,7 @@ export class RelayApiClient {
   }
 
   async addKnowledgeVersion(input: { id: string; commandId: string; expectedRevision: DecimalRevision;
-    sourceKind: RelayKnowledgeSource; text?: string; mediaType?: string; artifactVersionId?: string }): Promise<RelayCommandEnvelope> {
+    sourceKind: Exclude<RelayKnowledgeSource, "WEB_PAGE">; text?: string; mediaType?: string; artifactVersionId?: string }): Promise<RelayCommandEnvelope> {
     return this.informationCommand(`/knowledge/${encodeURIComponent(input.id)}/versions`, {
       command_id: input.commandId, expected_revision: input.expectedRevision, source_kind: input.sourceKind,
       ...(input.text === undefined ? {} : { text: input.text }),
@@ -814,6 +1415,111 @@ export class RelayApiClient {
     };
   }
 
+  async getAssistSessions(target: { projectId?: string; taskId?: string }): Promise<readonly RelayAssistSession[]> {
+    const query = new URLSearchParams();
+    if (target.projectId) query.set("project_id", target.projectId);
+    if (target.taskId) query.set("task_id", target.taskId);
+    const body = object(await this.request(`${this.workspacePath("/assist-sessions")}?${query}`), "assist sessions");
+    return array(body, "items", "assist sessions").map(assistSessionFrom);
+  }
+
+  async getAssistSession(sessionId: string): Promise<RelayAssistSession> {
+    return assistSessionFrom(await this.request(this.workspacePath(
+      `/assist-sessions/${encodeURIComponent(sessionId)}`)));
+  }
+
+  async getFirstPartySkills(): Promise<readonly RelaySkillDefinition[]> {
+    const body = object(await this.request(this.workspacePath("/skill-definitions")), "skill definitions");
+    return array(body, "items", "skill definitions").map(skillDefinitionFrom);
+  }
+
+  async getFirstPartyPacks(): Promise<readonly RelayPackDefinition[]> {
+    const body = object(await this.request(this.workspacePath("/packs")), "packs");
+    return array(body, "items", "packs").map(packDefinitionFrom);
+  }
+
+  async createAssistSession(input: { commandId: string; projectId: string | null; taskId: string | null;
+    title: string }): Promise<RelayAssistSession> {
+    const body = await this.request(this.workspacePath("/assist-sessions"), { method: "POST",
+      body: JSON.stringify({ command_id: input.commandId, project_id: input.projectId,
+        task_id: input.taskId, title: input.title }) }, 201);
+    try {
+      const envelope = commandEnvelopeFrom(body);
+      if (envelope.commandId !== input.commandId) throw new Error("command mismatch");
+      return assistSessionFrom({ ...envelope.result, id: envelope.result.session_id });
+    } catch { throw new RelayTransportError("Assist 会话回执无法核对，请查询原 command_id。"); }
+  }
+
+  async getAssistMessages(sessionId: string): Promise<readonly RelayAssistMessage[]> {
+    const body = object(await this.request(this.workspacePath(`/assist-sessions/${encodeURIComponent(sessionId)}/messages?limit=200`)), "assist messages");
+    return array(body, "items", "assist messages").map(assistMessageFrom);
+  }
+
+  async getAssistLivePreview(sessionId: string, messageId: string): Promise<RelayAssistLivePreview> {
+    const row = object(await this.request(this.workspacePath(
+      `/assist-sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/live-preview`)),
+    "assist live preview");
+    const status = string(row, "status", "assist live preview");
+    if (!["PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"].includes(status) ||
+      string(row, "session_id", "assist live preview") !== sessionId ||
+      string(row, "message_id", "assist live preview") !== messageId) {
+      throw new RelayTransportError("Assist 草稿预览与当前消息不匹配。");
+    }
+    return { sessionId, messageId, status: status as RelayAssistMessage["status"],
+      previewRevision: decimal(row, "preview_revision", "assist live preview"),
+      previewText: nullableString(row, "preview_text", "assist live preview"),
+      previewTruncated: boolean(row, "preview_truncated", "assist live preview"),
+      previewAvailable: boolean(row, "preview_available", "assist live preview") };
+  }
+
+  async requestAssistMessage(input: { sessionId: string; commandId: string; content: string;
+    sourceRefs: readonly RelayAssistSourceRef[] } & (
+      { intent: "DISCUSS" | "PROPOSE_CANDIDATE" | "PROPOSE_TASK"; skillRef?: never; skillInput?: never } |
+      { intent?: never; skillRef: { id: string; version: string }; skillInput: RelaySkillInput }
+    )): Promise<{ userMessageId: string; assistantMessageId: string }> {
+    const body = await this.request(this.workspacePath(`/assist-sessions/${encodeURIComponent(input.sessionId)}/messages`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId, content: input.content,
+        source_refs: input.sourceRefs.map(assistSourceBody),
+        ...(input.skillRef ? { skill_ref: input.skillRef, skill_input: input.skillInput } : { intent: input.intent }) }) }, 202);
+    try {
+      const envelope = commandEnvelopeFrom(body);
+      if (envelope.commandId !== input.commandId || envelope.result.session_id !== input.sessionId) throw new Error("command mismatch");
+      return { userMessageId: string(envelope.result, "user_message_id", "assist result"),
+        assistantMessageId: string(envelope.result, "assistant_message_id", "assist result") };
+    } catch { throw new RelayTransportError("Assist 消息回执无法核对，请查询原 command_id。"); }
+  }
+
+  async cancelAssistMessage(messageId: string, commandId: string): Promise<string> {
+    const body = await this.request(this.workspacePath(`/assist-messages/${encodeURIComponent(messageId)}/cancel`), {
+      method: "POST", body: JSON.stringify({ command_id: commandId }) }, 200);
+    try {
+      const envelope = commandEnvelopeFrom(body);
+      if (envelope.commandId !== commandId || envelope.result.message_id !== messageId) throw new Error("command mismatch");
+      return string(envelope.result, "status", "assist cancel result");
+    } catch { throw new RelayTransportError("Assist 取消回执无法核对，请查询原 command_id。"); }
+  }
+
+  async getAssistProposals(sessionId: string): Promise<readonly RelayAssistProposal[]> {
+    const query = new URLSearchParams({ session_id: sessionId });
+    const body = object(await this.request(`${this.workspacePath("/assist-proposals")}?${query}`), "assist proposals");
+    return array(body, "items", "assist proposals").map(assistProposalFrom);
+  }
+
+  async acceptAssistProposal(proposalId: string, commandId: string, taskContract?: {
+    expectedTaskRevision: DecimalRevision; expectedAcceptanceRevision: DecimalRevision;
+    payloadHash: string }): Promise<RelayCommandEnvelope> {
+    const body = await this.request(this.workspacePath(`/assist-proposals/${encodeURIComponent(proposalId)}/accept`), {
+      method: "POST", body: JSON.stringify({ command_id: commandId,
+        ...(taskContract ? { expected_task_revision: taskContract.expectedTaskRevision,
+          expected_acceptance_revision: taskContract.expectedAcceptanceRevision,
+          payload_hash: taskContract.payloadHash } : {}) }) }, 200);
+    try {
+      const envelope = commandEnvelopeFrom(body);
+      if (envelope.commandId !== commandId) throw new Error("command mismatch");
+      return envelope;
+    } catch { throw new RelayTransportError("提案接受回执无法核对，请查询原 command_id。"); }
+  }
+
   private informationListPath(resource: string, projectId: string | null): string {
     const path = this.workspacePath(`/${resource}`);
     return projectId === null ? path : `${path}?${new URLSearchParams({ project_id: projectId })}`;
@@ -845,10 +1551,12 @@ export class RelayApiClient {
     readonly commandId: string;
     readonly expectedTaskRevision: DecimalRevision;
     readonly mockGatewayAction?: RelayMockGatewayAction;
+    readonly contextSources?: readonly RelayAssistSourceRef[];
   }): Promise<RelayDelegateSubmission> {
     const body = await this.request(this.workspacePath(`/tasks/${encodeURIComponent(input.taskId)}/delegations`), {
       method: "POST",
       body: JSON.stringify({ command_id: input.commandId, expected_task_revision: input.expectedTaskRevision,
+        ...(input.contextSources?.length ? { context_sources: input.contextSources.map(assistSourceBody) } : {}),
         ...(input.mockGatewayAction === undefined ? {} : { mock_gateway_action: {
           connection_id: input.mockGatewayAction.connectionId,
           resource_id: input.mockGatewayAction.resourceId,
@@ -866,13 +1574,144 @@ export class RelayApiClient {
     }
   }
 
-  async getMockGatewayConnections(projectId: string): Promise<readonly RelayMockGatewayConnection[]> {
+  async getGatewayConnections(projectId: string): Promise<readonly RelayGatewayConnection[]> {
     const body = await this.request(this.workspacePath(`/projects/${encodeURIComponent(projectId)}/connections`));
-    return directList(body, "Mock connection list", (item) => {
-      const row = object(item, "Mock connection");
-      return { id: string(row, "id", "Mock connection"), status: string(row, "status", "Mock connection"),
-        capabilities: stringArray(row, "capabilities", "Mock connection") };
+    return directList(body, "connection list", (item) => {
+      const row = object(item, "connection");
+      return { id: string(row, "id", "connection"), status: string(row, "status", "connection"),
+        capabilities: stringArray(row, "capabilities", "connection"),
+        allowedHost: nullableString(row, "allowed_host", "connection") };
     });
+  }
+
+  async getGatewayConnectionSettings(projectId: string): Promise<readonly RelayGatewayConnectionSettings[]> {
+    const body = await this.request(this.workspacePath(`/projects/${encodeURIComponent(projectId)}/connections`));
+    return directList(body, "connection settings", gatewayConnectionSettingsFrom);
+  }
+
+  async getGatewayConnectionSetting(projectId: string, connectionId: string): Promise<RelayGatewayConnectionSettings> {
+    return gatewayConnectionSettingsFrom(await this.request(this.workspacePath(`/projects/${encodeURIComponent(projectId)}/connections/${encodeURIComponent(connectionId)}`)));
+  }
+
+  async createGatewayConnection(input: { projectId: string; commandId: string;
+    capability: RelayGatewayCapability; rootPath?: string; allowedHost?: string }): Promise<RelayCommandEnvelope> {
+    return commandEnvelopeFrom(await this.request(this.workspacePath(`/projects/${encodeURIComponent(input.projectId)}/connections`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId, capabilities: [input.capability],
+        ...(input.rootPath === undefined ? {} : { root_path: input.rootPath }),
+        ...(input.allowedHost === undefined ? {} : { allowed_host: input.allowedHost }) })
+    }, 201));
+  }
+
+  async disableGatewayConnection(input: { projectId: string; connectionId: string;
+    commandId: string; expectedVersion: DecimalRevision }): Promise<RelayCommandEnvelope> {
+    return commandEnvelopeFrom(await this.request(this.workspacePath(`/projects/${encodeURIComponent(input.projectId)}/connections/${encodeURIComponent(input.connectionId)}/disable`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId, expected_version: input.expectedVersion })
+    }, 200));
+  }
+
+  async getGatewayPolicies(projectId: string): Promise<readonly RelayGatewayPolicy[]> {
+    const body = await this.request(this.workspacePath(`/projects/${encodeURIComponent(projectId)}/permission-policies`));
+    return directList(body, "permission policies", (item) => {
+      const row = object(item, "permission policy");
+      return { id: string(row, "id", "permission policy"),
+        projectId: string(row, "project_id", "permission policy"),
+        status: string(row, "status", "permission policy"),
+        activeVersion: nullableString(row, "active_version", "permission policy"),
+        revision: decimal(row, "revision", "permission policy"),
+        createdAt: string(row, "created_at", "permission policy") };
+    });
+  }
+
+  async getGatewayPolicyVersions(projectId: string, policyId: string): Promise<readonly RelayGatewayPolicyVersion[]> {
+    const body = await this.request(this.workspacePath(`/projects/${encodeURIComponent(projectId)}/permission-policies/${encodeURIComponent(policyId)}/versions`));
+    return directList(body, "permission policy versions", (item) => {
+      const row = object(item, "permission policy version");
+      return { version: decimal(row, "version", "permission policy version"),
+        capability: string(row, "capability", "permission policy version"),
+        actionType: string(row, "action_type", "permission policy version"),
+        targetPrefix: string(row, "target_prefix", "permission policy version"),
+        decision: string(row, "decision", "permission policy version"),
+        maxPayloadBytes: integer(row, "max_payload_bytes", "permission policy version"),
+        createdAt: string(row, "created_at", "permission policy version") };
+    });
+  }
+
+  async createGatewayPolicy(input: { projectId: string; commandId: string;
+    capability: RelayGatewayCapability; resourceId: string | null; decision: RelayGatewayDecision;
+    maxPayloadBytes: number; host?: string }): Promise<RelayCommandEnvelope> {
+    return commandEnvelopeFrom(await this.request(this.workspacePath(`/projects/${encodeURIComponent(input.projectId)}/permission-policies`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId, capability: input.capability,
+        resource_id: input.resourceId, decision: input.decision, max_payload_bytes: input.maxPayloadBytes,
+        ...(input.host === undefined ? {} : { host: input.host }) })
+    }, 201));
+  }
+
+  async addGatewayPolicyVersion(input: { projectId: string; policyId: string; commandId: string;
+    expectedRevision: DecimalRevision; capability: RelayGatewayCapability; resourceId: string | null;
+    decision: RelayGatewayDecision; maxPayloadBytes: number; host?: string }): Promise<RelayCommandEnvelope> {
+    return commandEnvelopeFrom(await this.request(this.workspacePath(`/projects/${encodeURIComponent(input.projectId)}/permission-policies/${encodeURIComponent(input.policyId)}/versions`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId, expected_revision: input.expectedRevision,
+        capability: input.capability, resource_id: input.resourceId, decision: input.decision,
+        max_payload_bytes: input.maxPayloadBytes, ...(input.host === undefined ? {} : { host: input.host }) })
+    }, 200));
+  }
+
+  async revokeGatewayPolicy(input: { projectId: string; policyId: string; commandId: string;
+    expectedRevision: DecimalRevision }): Promise<RelayCommandEnvelope> {
+    return commandEnvelopeFrom(await this.request(this.workspacePath(`/projects/${encodeURIComponent(input.projectId)}/permission-policies/${encodeURIComponent(input.policyId)}/revoke`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId, expected_revision: input.expectedRevision })
+    }, 200));
+  }
+
+  async getManagedResources(projectId: string): Promise<readonly RelayManagedResource[]> {
+    const body = await this.request(this.workspacePath(`/projects/${encodeURIComponent(projectId)}/managed-resources`));
+    return directList(body, "managed resources", managedResourceFrom);
+  }
+
+  async getManagedResource(projectId: string, resourceId: string): Promise<RelayManagedResource> {
+    return managedResourceFrom(await this.request(this.workspacePath(`/projects/${encodeURIComponent(projectId)}/managed-resources/${encodeURIComponent(resourceId)}`)));
+  }
+
+  async createManagedResource(input: { projectId: string; commandId: string;
+    rootPath: string }): Promise<RelayCommandEnvelope> {
+    return commandEnvelopeFrom(await this.request(this.workspacePath(`/projects/${encodeURIComponent(input.projectId)}/managed-resources`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId, root_path: input.rootPath })
+    }, 201));
+  }
+
+  async disableManagedResource(input: { projectId: string; resourceId: string; commandId: string;
+    expectedRevision: DecimalRevision }): Promise<RelayCommandEnvelope> {
+    return commandEnvelopeFrom(await this.request(this.workspacePath(`/projects/${encodeURIComponent(input.projectId)}/managed-resources/${encodeURIComponent(input.resourceId)}/disable`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId, expected_revision: input.expectedRevision })
+    }, 200));
+  }
+
+  async getMockGatewayConnections(projectId: string): Promise<readonly RelayMockGatewayConnection[]> {
+    return this.getGatewayConnections(projectId);
+  }
+
+  async createWebImportJob(input: { readonly projectId: string; readonly commandId: string;
+    readonly url: string; readonly connectionId: string }): Promise<RelayWebImportSubmission> {
+    const body = await this.request(this.workspacePath(`/projects/${encodeURIComponent(input.projectId)}/import-jobs`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId,
+        url: input.url, connection_id: input.connectionId })
+    }, 201);
+    try {
+      const envelope = commandEnvelopeFrom(body);
+      if (envelope.commandId !== input.commandId) throw new Error("command ID mismatch");
+      return webImportSubmissionFrom(envelope.result, input.projectId, input.connectionId);
+    } catch {
+      throw new RelayTransportError("网页导入回执无法核对，请查询原 command_id。");
+    }
+  }
+
+  async getWebImportJob(importJobId: string): Promise<RelayWebImportJob> {
+    return webImportJobFrom(await this.request(this.workspacePath(`/import-jobs/${encodeURIComponent(importJobId)}`)));
+  }
+
+  async getWebImportOperations(importJobId: string): Promise<readonly RelayWebImportOperation[]> {
+    const body = await this.request(this.workspacePath(`/import-jobs/${encodeURIComponent(importJobId)}/operations`));
+    return directList(body, "import operation list", (item) => webImportOperationFrom(item, importJobId));
   }
 
   async getMockManagedResources(projectId: string): Promise<readonly RelayMockManagedResource[]> {
@@ -887,6 +1726,32 @@ export class RelayApiClient {
 
   async getRun(runId: string): Promise<RelayRun> {
     return runFrom(await this.request(this.workspacePath(`/runs/${encodeURIComponent(runId)}`)));
+  }
+
+  async getRunDraftPreview(runId: string): Promise<RelayRunDraftPreview> {
+    const row = object(await this.request(this.workspacePath(`/runs/${encodeURIComponent(runId)}/draft-preview`)),
+      "Run DRAFT preview");
+    if (string(row, "run_id", "Run DRAFT preview") !== runId) {
+      throw new RelayTransportError("Run 草稿预览与当前执行记录不匹配。");
+    }
+    const epoch = nullableString(row, "attempt_claim_epoch", "Run DRAFT preview");
+    if (epoch !== null && !/^\d+$/u.test(epoch)) throw new RelayTransportError("Run 草稿轮次序号无效。");
+    const available = boolean(row, "preview_available", "Run DRAFT preview");
+    const stepAttemptId = nullableString(row, "step_attempt_id", "Run DRAFT preview");
+    const modelCallId = nullableString(row, "model_call_id", "Run DRAFT preview");
+    const previewText = nullableString(row, "preview_text", "Run DRAFT preview");
+    if (available && (stepAttemptId === null || epoch === null) || previewText !== null && modelCallId === null) {
+      throw new RelayTransportError("Run 草稿预览缺少当前轮次身份。");
+    }
+    return { runId, runStatus: string(row, "run_status", "Run DRAFT preview"),
+      stepAttemptId, attemptClaimEpoch: epoch, modelCallId,
+      previewRevision: decimal(row, "preview_revision", "Run DRAFT preview"),
+      previewText, previewTruncated: boolean(row, "preview_truncated", "Run DRAFT preview"),
+      previewAvailable: available };
+  }
+
+  async getRunTrace(runId: string): Promise<RelayRunTrace> {
+    return runTraceFrom(await this.request(this.workspacePath(`/runs/${encodeURIComponent(runId)}/trace`)));
   }
 
   async getRunGatewayOperations(runId: string): Promise<readonly RelayRunGatewayOperation[]> {
@@ -1104,6 +1969,10 @@ export class RelayApiClient {
     );
   }
 
+  async getArtifactLineage(artifactVersionId: string): Promise<RelayArtifactLineage> {
+    return artifactLineageFrom(await this.request(this.workspacePath(`/artifact-versions/${encodeURIComponent(artifactVersionId)}/lineage`)));
+  }
+
   async completeHumanTask(input: {
     readonly taskId: string;
     readonly commandId: string;
@@ -1221,7 +2090,9 @@ export class RelayApiClient {
         retryAction: optionalString(record, "retry_action"),
         fieldErrors: fieldErrorsFrom(record),
         expectedRevision: optionalString(conflict, "expected_revision"),
-        actualRevision: optionalString(conflict, "actual_revision")
+        actualRevision: optionalString(conflict, "actual_revision"),
+        blockingReasons: Array.isArray(conflict.blocking_reasons)
+          ? conflict.blocking_reasons.filter((reason): reason is string => typeof reason === "string") : []
       });
     }
     if (expectedStatus !== undefined && response.status !== expectedStatus) {
@@ -1435,6 +2306,86 @@ function runFrom(value: unknown): RelayRun {
   };
 }
 
+function availability(record: Record<string, unknown>, key: string, name: string): "AVAILABLE" | "UNAVAILABLE" {
+  const value = string(record, key, name);
+  if (value !== "AVAILABLE" && value !== "UNAVAILABLE") throw new Error(`${name}.${key} 响应格式无效。`);
+  return value;
+}
+
+function runTraceFrom(value: unknown): RelayRunTrace {
+  const row = object(value, "run trace");
+  return { runId: string(row, "run_id", "run trace"), taskId: string(row, "task_id", "run trace"),
+    projectId: nullableString(row, "project_id", "run trace"), status: string(row, "status", "run trace"),
+    steps: array(row, "steps", "run trace").map((value) => { const step = object(value, "trace step");
+      return { id: string(step, "id", "trace step"), index: integer(step, "step_index", "trace step"),
+        kind: string(step, "kind", "trace step"), status: string(step, "status", "trace step"),
+        revision: decimal(step, "revision", "trace step"), resultAvailable: boolean(step, "result_available", "trace step"),
+        startedAt: nullableString(step, "started_at", "trace step"), finishedAt: nullableString(step, "finished_at", "trace step") }; }),
+    attempts: array(row, "attempts", "run trace").map((value) => { const attempt = object(value, "trace attempt");
+      return { id: string(attempt, "id", "trace attempt"), stepId: string(attempt, "step_id", "trace attempt"),
+        number: decimal(attempt, "attempt_number", "trace attempt"), status: string(attempt, "status", "trace attempt"),
+        claimEpoch: decimal(attempt, "claim_epoch", "trace attempt"), resultAvailable: boolean(attempt, "result_available", "trace attempt"),
+        startedAt: nullableString(attempt, "started_at", "trace attempt"), finishedAt: nullableString(attempt, "finished_at", "trace attempt") }; }),
+    modelCalls: array(row, "model_calls", "run trace").map((value) => { const call = object(value, "trace model call");
+      return { id: string(call, "id", "trace model call"), stepAttemptId: nullableString(call, "step_attempt_id", "trace model call"),
+        manifestId: nullableString(call, "manifest_id", "trace model call"), status: string(call, "status", "trace model call"),
+        provider: string(call, "provider", "trace model call"), model: string(call, "model", "trace model call"),
+        inputSha256: nullableString(call, "input_sha256", "trace model call"),
+        readOperationId: nullableString(call, "read_operation_id", "trace model call"),
+        readInvocationId: nullableString(call, "read_invocation_id", "trace model call"),
+        inputTokens: nullableInteger(call, "usage_input_tokens", "trace model call"),
+        outputTokens: nullableInteger(call, "usage_output_tokens", "trace model call"),
+        startedAt: string(call, "started_at", "trace model call"), settledAt: nullableString(call, "settled_at", "trace model call") }; }),
+    manifests: array(row, "manifests", "run trace").map((value) => { const manifest = object(value, "trace manifest");
+      return { id: string(manifest, "id", "trace manifest"), stepId: nullableString(manifest, "step_id", "trace manifest"),
+        builderVersion: string(manifest, "builder_version", "trace manifest"), sha256: string(manifest, "sha256", "trace manifest"),
+        createdAt: string(manifest, "created_at", "trace manifest"),
+        sources: array(manifest, "sources", "trace manifest").map((value) => { const source = object(value, "trace source");
+          return { kind: string(source, "kind", "trace source"), sourceRef: nullableString(source, "source_ref", "trace source"),
+            version: nullableString(source, "version", "trace source"), sha256: nullableString(source, "sha256", "trace source"),
+            sourceSha256: nullableString(source, "source_sha256", "trace source"), role: string(source, "role", "trace source"),
+            trust: string(source, "trust", "trace source"), availability: availability(source, "availability", "trace source") }; }) }; }),
+    verifications: array(row, "verifications", "run trace").map((value) => { const session = object(value, "trace verification");
+      return { id: string(session, "id", "trace verification"), status: string(session, "status", "trace verification"),
+        verdict: nullableString(session, "verdict", "trace verification"),
+        acceptanceRevision: decimal(session, "acceptance_revision", "trace verification"),
+        checkPlanHash: string(session, "check_plan_hash", "trace verification"),
+        parentSessionId: nullableString(session, "parent_session_id", "trace verification"),
+        targets: array(session, "targets", "trace verification").map((value) => { const target = object(value, "trace verification target");
+          return { artifactVersionId: string(target, "artifact_version_id", "trace verification target"),
+            contentSha256: string(target, "content_sha256", "trace verification target") }; }),
+        checks: array(session, "checks", "trace verification").map((value) => { const check = object(value, "trace check");
+          return { id: string(check, "id", "trace check"), criterionId: string(check, "criterion_id", "trace check"),
+            result: string(check, "result", "trace check"), severity: string(check, "severity", "trace check"),
+            required: boolean(check, "required", "trace check"), createdAt: string(check, "created_at", "trace check") }; }),
+        createdAt: string(session, "created_at", "trace verification"),
+        finalizedAt: nullableString(session, "finalized_at", "trace verification") }; }),
+    reviews: array(row, "reviews", "run trace").map((value) => { const review = object(value, "trace review");
+      const decision = review.decision === null ? null : object(review.decision, "trace review decision");
+      return { id: string(review, "id", "trace review"), kind: string(review, "kind", "trace review"),
+        status: string(review, "status", "trace review"), operationId: nullableString(review, "operation_id", "trace review"),
+        verificationSessionId: nullableString(review, "verification_session_id", "trace review"),
+        targetHash: string(review, "target_hash", "trace review"), createdAt: string(review, "created_at", "trace review"),
+        decidedAt: nullableString(review, "decided_at", "trace review"),
+        decision: decision === null ? null : { id: string(decision, "id", "trace review decision"),
+          value: string(decision, "value", "trace review decision"), decidedAt: string(decision, "decided_at", "trace review decision") } }; }),
+    operations: array(row, "operations", "run trace").map((value) => { const operation = object(value, "trace operation");
+      return { id: string(operation, "id", "trace operation"), stepId: nullableString(operation, "step_id", "trace operation"),
+        capability: string(operation, "capability", "trace operation"), actionType: string(operation, "action_type", "trace operation"),
+        status: string(operation, "status", "trace operation"), paramsSha256: string(operation, "params_sha256", "trace operation"),
+        resultAvailable: boolean(operation, "result_available", "trace operation"),
+        createdAt: string(operation, "created_at", "trace operation"), updatedAt: string(operation, "updated_at", "trace operation"),
+        invocations: array(operation, "invocations", "trace operation").map((value) => { const invocation = object(value, "trace invocation");
+          return { id: string(invocation, "id", "trace invocation"), number: decimal(invocation, "attempt_number", "trace invocation"),
+            status: string(invocation, "status", "trace invocation"), resultAvailable: boolean(invocation, "result_available", "trace invocation"),
+            createdAt: string(invocation, "created_at", "trace invocation"), resolvedAt: nullableString(invocation, "resolved_at", "trace invocation") }; }) }; }),
+    effects: array(row, "effects", "run trace").map((value) => { const effect = object(value, "trace effect");
+      return { id: string(effect, "id", "trace effect"), stepId: string(effect, "step_id", "trace effect"),
+        status: string(effect, "status", "trace effect"), paramsSha256: string(effect, "params_sha256", "trace effect"),
+        resultAvailable: boolean(effect, "result_available", "trace effect"),
+        createdAt: string(effect, "created_at", "trace effect"), resolvedAt: nullableString(effect, "resolved_at", "trace effect") }; }) };
+}
+
 function contextManifestSummaryFrom(value: unknown, runId: string): RelayContextManifestSummary {
   const row = object(value, "context manifest");
   const actualRunId = string(row, "run_id", "context manifest");
@@ -1538,6 +2489,54 @@ function projectFrom(value: unknown): RelayProject {
   };
 }
 
+function projectListItemFrom(value: unknown): RelayProjectListItem {
+  const record = object(value, "project list item");
+  const archiveStatus = string(record, "archive_status", "project list item");
+  const archivedAt = nullableString(record, "archived_at", "project list item");
+  if (archiveStatus !== "ACTIVE" && archiveStatus !== "ARCHIVED" ||
+    (archiveStatus === "ACTIVE") !== (archivedAt === null)) {
+    throw new Error("项目归档状态响应格式无效。");
+  }
+  return { ...projectFrom(record), archiveStatus, archivedAt,
+    phaseKey: string(record, "phase_key", "project list item"),
+    nextActionTaskId: nullableString(record, "next_action_task_id", "project list item"),
+    createdAt: string(record, "created_at", "project list item"),
+    updatedAt: string(record, "updated_at", "project list item") };
+}
+
+export function projectArchiveResultFrom(value: unknown): RelayProjectArchiveResult {
+  const record = object(value, "archive project result");
+  if (string(record, "archive_status", "archive project result") !== "ARCHIVED") {
+    throw new Error("项目归档回执状态无效。");
+  }
+  return { projectId: string(record, "project_id", "archive project result"),
+    revision: decimal(record, "revision", "archive project result"),
+    archivedAt: string(record, "archived_at", "archive project result"),
+    archiveStatus: "ARCHIVED" };
+}
+
+export function viewConfigurationFrom(value: unknown): RelayViewConfiguration {
+  const record = object(value, "view configuration");
+  const kind = string(record, "kind", "view configuration");
+  if (kind !== "general" && kind !== "thesis" && kind !== "development") {
+    throw new Error("view configuration.kind 响应格式无效。");
+  }
+  return {
+    projectId: string(record, "project_id", "view configuration"),
+    revision: decimal(record, "revision", "view configuration"), kind,
+    templateVersion: string(record, "template_version", "view configuration"),
+    templateSha256: string(record, "template_sha256", "view configuration"),
+    pages: array(record, "pages", "view configuration").map((value) => {
+      const page = object(value, "view configuration.page");
+      const position = integer(page, "position", "view configuration.page");
+      if (position < 0) throw new Error("view configuration.page.position 响应格式无效。");
+      return { pageId: string(page, "page_id", "view configuration.page"),
+        visible: boolean(page, "visible", "view configuration.page"), position };
+    }),
+    updatedAt: string(record, "updated_at", "view configuration")
+  };
+}
+
 function taskFrom(value: unknown): RelayTaskSummary {
   const record = object(value, "task");
   const executor = object(record.executor, "task.executor");
@@ -1559,9 +2558,12 @@ function taskFrom(value: unknown): RelayTaskSummary {
 }
 
 function acceptanceFrom(record: Record<string, unknown>): RelayTaskAcceptance {
+  const expectedOutputs = record.expected_outputs === undefined ? null :
+    object(record.expected_outputs, "task.acceptance.expected_outputs");
   return {
     acceptanceRevision: decimal(record, "acceptance_revision", "task.acceptance"),
     objective: string(record, "objective", "task.acceptance"),
+    expectedOutputs,
     source: string(record, "source", "task.acceptance"),
     criteria: array(record, "criteria", "task.acceptance").map((item) => {
       const criterion = object(item, "task.acceptance.criteria");
@@ -1575,6 +2577,49 @@ function acceptanceFrom(record: Record<string, unknown>): RelayTaskAcceptance {
   };
 }
 
+function taskCheckPlanPreviewFrom(value: unknown, taskId: string): RelayTaskCheckPlanPreview {
+  const row = object(value, "check plan preview");
+  const status = string(row, "status", "check plan preview");
+  if (string(row, "task_id", "check plan preview") !== taskId ||
+    (status !== "AVAILABLE" && status !== "UNAVAILABLE") ||
+    typeof row.admission_available !== "boolean" || row.frozen_run_plan !== false ||
+    row.executed !== false) throw new Error("CheckPlan 当前预览响应格式无效。");
+  const sources = object(row.sources, "check plan sources");
+  const rawPlan = row.check_plan === null ? null : object(row.check_plan, "check plan");
+  const checkPlan = rawPlan === null ? null : {
+    policyVersion: string(rawPlan, "policy_version", "check plan"),
+    workflowKey: string(rawPlan, "workflow_key", "check plan"),
+    workflowVersion: string(rawPlan, "workflow_version", "check plan"),
+    entries: array(rawPlan, "entries", "check plan").map((value) => {
+      const entry = object(value, "check plan entry");
+      object(entry.target_spec, "check plan target spec");
+      if (typeof entry.required !== "boolean") throw new Error("CheckPlan 条件格式无效。");
+      return { criterionId: string(entry, "criterion_id", "check plan entry"),
+        statement: string(entry, "statement", "check plan entry"), required: entry.required,
+        method: string(entry, "method", "check plan entry"),
+        severity: string(entry, "severity", "check plan entry"),
+        checkerId: string(entry, "checker_id", "check plan entry"),
+        checkerVersion: string(entry, "checker_version", "check plan entry") };
+    }) };
+  if ((status === "UNAVAILABLE" && (checkPlan !== null || row.check_plan_sha256 !== null)) ||
+    (status === "AVAILABLE" && (checkPlan === null || typeof row.check_plan_sha256 !== "string"))) {
+    throw new Error("CheckPlan 当前预览状态与内容不一致。");
+  }
+  return { taskId, status, admissionAvailable: row.admission_available,
+    reasonCodes: stringList(row, "reason_codes", "check plan preview"),
+    sources: { taskRevision: decimal(sources, "task_revision", "check plan sources"),
+      acceptanceRevision: decimal(sources, "acceptance_revision", "check plan sources"),
+      ruleRevision: sources.rule_revision === null ? null : decimal(sources, "rule_revision", "check plan sources"),
+      workflowKey: string(sources, "workflow_key", "check plan sources"),
+      workflowVersion: string(sources, "workflow_version", "check plan sources"),
+      ruleRefs: array(sources, "rule_refs", "check plan sources").map((value) => {
+        const ref = object(value, "check plan rule ref");
+        return { ruleId: string(ref, "rule_id", "check plan rule ref"),
+          version: decimal(ref, "version", "check plan rule ref") };
+      }) }, checkPlan, checkPlanSha256: row.check_plan_sha256 === null ? null :
+      string(row, "check_plan_sha256", "check plan preview"), frozenRunPlan: false, executed: false };
+}
+
 function dependencyFrom(value: unknown): RelayTaskDependency {
   const record = object(value, "task dependency");
   return {
@@ -1583,6 +2628,70 @@ function dependencyFrom(value: unknown): RelayTaskDependency {
     status: taskStatus(record, "status", "task dependency"),
     title: string(record, "title", "task dependency")
   };
+}
+
+function todayPriority(record: Record<string, unknown>, key: string, name: string): RelayTodayPriority | null {
+  if (record[key] === null) return null;
+  const value = string(record, key, name);
+  if (value !== "LOW" && value !== "NORMAL" && value !== "HIGH") throw new Error(`${name}.${key} 响应格式无效。`);
+  return value;
+}
+
+function todayItemFrom(value: unknown): RelayTodayItem {
+  const row = object(value, "today item");
+  return { taskId: string(row, "task_id", "today item"), taskRevision: decimal(row, "task_revision", "today item"),
+    projectId: nullableString(row, "project_id", "today item"), title: string(row, "title", "today item"),
+    status: taskStatus(row, "status", "today item"), priority: todayPriority(row, "priority", "today item"),
+    dueLocalDate: nullableString(row, "due_local_date", "today item"), timezone: nullableString(row, "timezone", "today item"),
+    pin: boolean(row, "pin", "today item"), laterLocalDate: nullableString(row, "later_local_date", "today item"),
+    laterTimezone: nullableString(row, "later_timezone", "today item"),
+    reasonCodes: stringArray(row, "reason_codes", "today item"), evidenceRefs: stringArray(row, "evidence_refs", "today item"),
+    allowedActions: stringArray(row, "allowed_actions", "today item") };
+}
+
+function todayFrom(value: unknown): RelayToday {
+  const row = object(value, "today");
+  const focus = row.focus === null ? null : object(row.focus, "today.focus");
+  const targetKind = focus === null ? null : string(focus, "target_kind", "today.focus");
+  if (targetKind !== null && targetKind !== "GOAL" && targetKind !== "PROJECT" && targetKind !== "TASK") {
+    throw new Error("today.focus.target_kind 响应格式无效。");
+  }
+  return { date: string(row, "date", "today"), timezone: string(row, "timezone", "today"),
+    selectionRevision: decimal(row, "selection_revision", "today"),
+    focus: focus === null ? null : { date: string(focus, "date", "today.focus"),
+      timezone: string(focus, "timezone", "today.focus"), targetKind: targetKind!,
+      targetId: string(focus, "target_id", "today.focus"),
+      selectionRevision: decimal(focus, "selection_revision", "today.focus"),
+      activeInQuery: boolean(focus, "active_in_query", "today.focus") },
+    focusHasEligibleCandidate: boolean(row, "focus_has_eligible_candidate", "today"),
+    eligibleItems: array(row, "eligible_items", "today").map(todayItemFrom),
+    waitingItems: array(row, "waiting_items", "today").map(todayItemFrom),
+    blockedPinnedItems: array(row, "blocked_pinned_items", "today").map(todayItemFrom) };
+}
+
+function activityPageFrom(value: unknown): RelayActivityPage {
+  const row = object(value, "activity page");
+  const kinds: readonly RelayActivityRefKind[] = ["PROJECT", "TASK", "RUN", "GOAL", "ARTIFACT_VERSION", "REVIEW", "COMPLETION", "VERIFICATION_SESSION"];
+  return { items: array(row, "items", "activity page").map((value): RelayActivityItem => {
+    const item = object(value, "activity item");
+    const actorKind = string(item, "actor_kind", "activity item");
+    if (actorKind !== "HUMAN" && actorKind !== "AI" && actorKind !== "SYSTEM") throw new Error("activity item.actor_kind 响应格式无效。");
+    return { id: string(item, "id", "activity item"), createdAt: string(item, "created_at", "activity item"),
+      actorKind, commandId: nullableString(item, "command_id", "activity item"),
+      eventType: string(item, "event_type", "activity item"), summary: string(item, "summary", "activity item"),
+      projectId: nullableString(item, "project_id", "activity item"), taskId: nullableString(item, "task_id", "activity item"),
+      runId: nullableString(item, "run_id", "activity item"),
+      entityRefs: array(item, "entity_refs", "activity item").map((value) => {
+        const ref = object(value, "activity ref");
+        const kind = string(ref, "kind", "activity ref");
+        if (!kinds.includes(kind as RelayActivityRefKind)) throw new Error("activity ref.kind 响应格式无效。");
+        return { kind: kind as RelayActivityRefKind, id: string(ref, "id", "activity ref") };
+      }) };
+  }), nextCursor: nullableString(row, "next_cursor", "activity page") };
+}
+
+export function selectionRevisionFrom(result: Readonly<Record<string, unknown>>): DecimalRevision {
+  return decimal(result, "selection_revision", "command result");
 }
 
 function commandEnvelopeFrom(value: unknown): RelayCommandEnvelope {
@@ -1655,6 +2764,75 @@ export function completionFrom(result: Readonly<Record<string, unknown>>): Relay
   };
 }
 
+function completionEvidenceFrom(value: unknown): RelayCompletionEvidence {
+  const row = object(value, "completion evidence");
+  const kind = string(row, "basis_kind", "completion evidence");
+  if (kind !== "HUMAN" && kind !== "AUTO") throw new Error("completion evidence.basis_kind 响应格式无效。");
+  const acceptance = object(row.acceptance, "completion acceptance");
+  const acceptanceAvailability = availability(acceptance, "availability", "completion acceptance");
+  const human = row.human_acceptance === null ? null : object(row.human_acceptance, "human acceptance");
+  const humanAvailability = human === null ? null : availability(human, "availability", "human acceptance");
+  const verification = row.verification_session === null ? null : object(row.verification_session, "verification session");
+  const verificationAvailability = verification === null ? null : availability(verification, "availability", "verification session");
+  return {
+    completionId: string(row, "completion_id", "completion evidence"),
+    taskId: string(row, "task_id", "completion evidence"), basisKind: kind,
+    acceptanceRevision: decimal(row, "acceptance_revision", "completion evidence"),
+    isCurrent: boolean(row, "is_current", "completion evidence"),
+    committedAt: string(row, "committed_at", "completion evidence"),
+    acceptance: acceptanceAvailability === "UNAVAILABLE" ? {
+      availability: "UNAVAILABLE", objective: null, expectedOutputs: null, source: null,
+      createdAt: null, criteria: []
+    } : {
+      availability: "AVAILABLE", objective: nullableString(acceptance, "objective", "completion acceptance"),
+      expectedOutputs: acceptance.expected_outputs === null ? null : object(acceptance.expected_outputs, "completion acceptance.expected_outputs"),
+      source: nullableString(acceptance, "source", "completion acceptance"),
+      createdAt: nullableString(acceptance, "created_at", "completion acceptance"),
+      criteria: array(acceptance, "criteria", "completion acceptance").map((item) => {
+        const criterion = object(item, "completion criterion");
+        return { criterionId: string(criterion, "criterion_id", "completion criterion"),
+          statement: string(criterion, "statement", "completion criterion"),
+          required: boolean(criterion, "required", "completion criterion"),
+          method: string(criterion, "method", "completion criterion"),
+          targetSpec: object(criterion.target_spec, "completion criterion.target_spec") };
+      })
+    },
+    humanAcceptance: human === null ? null : humanAvailability === "UNAVAILABLE" ? {
+      availability: "UNAVAILABLE", id: null, actorKind: null, statement: null,
+      acceptedCriterionIds: [], reason: null, createdAt: null
+    } : {
+      availability: "AVAILABLE", id: nullableString(human, "id", "human acceptance"),
+      actorKind: nullableString(human, "actor_kind", "human acceptance"),
+      statement: nullableString(human, "statement", "human acceptance"),
+      acceptedCriterionIds: stringArray(human, "accepted_criterion_ids", "human acceptance"),
+      reason: nullableString(human, "reason", "human acceptance"),
+      createdAt: nullableString(human, "created_at", "human acceptance")
+    },
+    verificationSession: verification === null ? null : verificationAvailability === "UNAVAILABLE" ? {
+      availability: "UNAVAILABLE", id: null, runId: null, status: null, verdict: null,
+      checkPlanHash: null, applicable: null
+    } : {
+      availability: "AVAILABLE", id: nullableString(verification, "id", "verification session"),
+      runId: nullableString(verification, "run_id", "verification session"),
+      status: nullableString(verification, "status", "verification session"),
+      verdict: nullableString(verification, "verdict", "verification session"),
+      checkPlanHash: nullableString(verification, "check_plan_hash", "verification session"),
+      applicable: verification.applicable === null ? null : boolean(verification, "applicable", "verification session")
+    },
+    artifactVersions: array(row, "artifact_versions", "completion evidence").map((item) => {
+      const version = object(item, "completion artifact version");
+      return availability(version, "availability", "completion artifact version") === "UNAVAILABLE"
+        ? { availability: "UNAVAILABLE" as const, artifactVersionId: null, artifactId: null,
+          versionNumber: null, sha256: null }
+        : { availability: "AVAILABLE" as const,
+          artifactVersionId: nullableString(version, "artifact_version_id", "completion artifact version"),
+          artifactId: nullableString(version, "artifact_id", "completion artifact version"),
+          versionNumber: version.version_number === null ? null : decimal(version, "version_number", "completion artifact version"),
+          sha256: nullableString(version, "sha256", "completion artifact version") };
+    })
+  };
+}
+
 export function reopenFrom(result: Readonly<Record<string, unknown>>): RelayReopen {
   return {
     taskId: string(result, "task_id", "command result"),
@@ -1698,12 +2876,34 @@ function artifactFrom(value: unknown): RelayArtifact {
   };
 }
 
+function artifactLineageFrom(value: unknown): RelayArtifactLineage {
+  const row = object(value, "artifact lineage");
+  const relations: readonly RelayLineageRelation[] = ["DERIVED_FROM", "REVISED_FROM", "GENERATED_BY", "VERIFIED_BY", "ACCEPTED_BY"];
+  const parentKinds: readonly RelayLineageParentKind[] = ["ARTIFACT_VERSION", "KNOWLEDGE_VERSION", "RUN_STEP", "VERIFICATION_SESSION", "COMPLETION_RECORD"];
+  return { artifactVersionId: string(row, "artifact_version_id", "artifact lineage"),
+    artifactId: string(row, "artifact_id", "artifact lineage"), versionNumber: decimal(row, "version_number", "artifact lineage"),
+    sha256: string(row, "sha256", "artifact lineage"), sourceKind: string(row, "source_kind", "artifact lineage"),
+    contentAvailability: availability(row, "content_availability", "artifact lineage"),
+    directParents: array(row, "direct_parents", "artifact lineage").map((value) => {
+      const edge = object(value, "lineage edge");
+      const relation = string(edge, "relation", "lineage edge");
+      const parentKind = string(edge, "parent_kind", "lineage edge");
+      if (!relations.includes(relation as RelayLineageRelation) || !parentKinds.includes(parentKind as RelayLineageParentKind)) {
+        throw new Error("lineage edge 的关系或父来源类型无效。");
+      }
+      return { id: string(edge, "id", "lineage edge"), relation: relation as RelayLineageRelation,
+        parentKind: parentKind as RelayLineageParentKind, parentId: nullableString(edge, "parent_id", "lineage edge"),
+        availability: availability(edge, "availability", "lineage edge"), createdAt: string(edge, "created_at", "lineage edge") };
+    }) };
+}
+
 function projectStateFrom(value: unknown): RelayProjectState {
   const record = object(value, "project state");
   return {
     projectId: string(record, "project_id", "project state"),
     revision: decimal(record, "revision", "project state"),
     phaseKey: string(record, "phase_key", "project state"),
+    nextActionTaskId: nullableString(record, "next_action_task_id", "project state"),
     selectedArtifactVersionRefs: array(record, "selected_artifact_version_refs", "project state").map(
       (item) => {
         const ref = object(item, "project state.selected_artifact_version_refs");
@@ -1731,6 +2931,230 @@ function directList<T>(value: unknown, name: string, parse: (item: unknown) => T
   return value.map(parse);
 }
 
+function assistSourceBody(source: RelayAssistSourceRef) {
+  return { kind: source.kind, root_id: source.rootId, version: source.version };
+}
+
+function stringList(row: Record<string, unknown>, key: string, name: string): readonly string[] {
+  return array(row, key, name).map((value) => {
+    if (typeof value !== "string") throw new Error(`${name}.${key} 响应格式无效。`);
+    return value;
+  });
+}
+
+function skillDefinitionFrom(value: unknown): RelaySkillDefinition {
+  const row = object(value, "skill definition");
+  const target = string(row, "target", "skill definition");
+  const outputKind = string(row, "output_kind", "skill definition");
+  const availability = string(row, "availability", "skill definition");
+  if ((target !== "PROJECT" && target !== "TASK") ||
+    !["TASK_DEFINITION_SUGGESTION", "PROJECT_RESUME", "VERIFICATION_PLAN_SUGGESTION",
+      "PROJECT_BLUEPRINT_SUGGESTION"].includes(outputKind) ||
+    !["CALLABLE_SUGGESTION_ONLY", "CALLABLE_READ_ONLY", "HISTORICAL_ONLY"].includes(availability) ||
+    typeof row.call_supported !== "boolean" || typeof row.accept_supported !== "boolean") {
+    throw new Error("Skill 定义响应格式无效。");
+  }
+  return { id: string(row, "id", "skill definition"), version: string(row, "version", "skill definition"),
+    sha256: string(row, "sha256", "skill definition"), title: string(row, "title", "skill definition"),
+    target, outputKind: outputKind as RelaySkillDefinition["outputKind"],
+    availability: availability as RelaySkillDefinition["availability"],
+    callSupported: row.call_supported,
+    requiredCapabilities: stringList(row, "required_capabilities", "skill definition"),
+    missingCapabilities: stringList(row, "missing_capabilities", "skill definition"),
+    acceptSupported: row.accept_supported,
+    dependencies: array(row, "dependencies", "skill definition").map((value) => {
+      const dep = object(value, "skill dependency");
+      return { kind: string(dep, "kind", "skill dependency"), id: string(dep, "id", "skill dependency"),
+        version: string(dep, "version", "skill dependency"), sha256: string(dep, "sha256", "skill dependency") };
+    }) };
+}
+
+function packDefinitionFrom(value: unknown): RelayPackDefinition {
+  const row = object(value, "pack");
+  return { id: string(row, "id", "pack"), version: string(row, "version", "pack"),
+    sha256: string(row, "sha256", "pack"), title: string(row, "title", "pack"),
+    hostContract: string(row, "host_contract", "pack"), availability: string(row, "availability", "pack"),
+    members: array(row, "members", "pack").map((value) => {
+      const member = object(value, "pack member");
+      const target = string(member, "target", "pack member");
+      if (member.kind !== "SKILL" || (target !== "PROJECT" && target !== "TASK") ||
+        typeof member.accept_supported !== "boolean") throw new Error("Pack 成员响应格式无效。");
+      return { kind: "SKILL" as const, id: string(member, "id", "pack member"),
+        version: string(member, "version", "pack member"),
+        sha256: string(member, "sha256", "pack member"), target,
+        availability: string(member, "availability", "pack member"),
+        requiredCapabilities: stringList(member, "required_capabilities", "pack member"),
+        missingCapabilities: stringList(member, "missing_capabilities", "pack member"),
+        acceptSupported: member.accept_supported };
+    }) };
+}
+
+function assistSkillOutputFrom(value: unknown): RelayAssistSkillOutput {
+  const row = object(value, "assist skill output");
+  const kind = string(row, "kind", "assist skill output");
+  const status = string(row, "status", "assist skill output");
+  const targetKind = string(row, "target_kind", "assist skill output");
+  if (!["TASK_DEFINITION_SUGGESTION", "PROJECT_RESUME", "VERIFICATION_PLAN_SUGGESTION",
+    "PROJECT_BLUEPRINT_SUGGESTION"].includes(kind) ||
+    (status !== "SUGGESTED" && status !== "READ_ONLY") ||
+    (targetKind !== "PROJECT" && targetKind !== "TASK") ||
+    (kind === "PROJECT_RESUME") !== (status === "READ_ONLY" && targetKind === "PROJECT") ||
+    (kind === "PROJECT_BLUEPRINT_SUGGESTION" ?
+      (status !== "SUGGESTED" || targetKind !== "PROJECT") :
+      (kind !== "PROJECT_RESUME" && targetKind !== "TASK"))) {
+    throw new Error("Assist Skill 输出类型无效。");
+  }
+  const payload = object(row.payload, "assist skill payload");
+  if (typeof payload.summary !== "string" ||
+    (kind === "PROJECT_RESUME" && (!Array.isArray(payload.highlights) ||
+      !Array.isArray(payload.next_steps) || payload.comparison_baseline !== null || payload.read_only !== true)) ||
+    (kind === "TASK_DEFINITION_SUGGESTION" && (typeof payload.objective !== "string" ||
+      !Array.isArray(payload.criteria) || !isRecord(payload.expected_outputs))) ||
+    (kind === "VERIFICATION_PLAN_SUGGESTION" &&
+      (!Array.isArray(payload.checks) && !Array.isArray(payload.additional_checks) ||
+      payload.effective_check_plan !== false)) ||
+    (kind === "PROJECT_BLUEPRINT_SUGGESTION" &&
+      (!isRecord(payload.draft) || payload.effective_blueprint !== false))) {
+    throw new Error("Assist Skill 输出内容无效。");
+  }
+  return { kind: kind as RelayAssistSkillOutput["kind"], status, targetKind,
+    targetId: string(row, "target_id", "assist skill output"),
+    asOf: string(row, "as_of", "assist skill output"),
+    baseline: object(row.baseline, "assist skill baseline"),
+    basisSha256: string(row, "basis_sha256", "assist skill output"),
+    payloadSha256: string(row, "payload_sha256", "assist skill output"),
+    payload };
+}
+
+function assistSessionFrom(value: unknown): RelayAssistSession {
+  const row = object(value, "assist session");
+  return { id: string(row, "id", "assist session"),
+    projectId: nullableString(row, "project_id", "assist session"),
+    taskId: nullableString(row, "task_id", "assist session"),
+    title: string(row, "title", "assist session"), status: string(row, "status", "assist session"),
+    revision: decimal(row, "revision", "assist session"),
+    updatedAt: string(row, "updated_at", "assist session") };
+}
+
+function assistMessageFrom(value: unknown): RelayAssistMessage {
+  const row = object(value, "assist message");
+  const role = string(row, "role", "assist message");
+  const status = string(row, "status", "assist message");
+  if (role !== "USER" && role !== "ASSISTANT") throw new Error("Assist 消息角色无法识别。");
+  if (status !== "PENDING" && status !== "RUNNING" && status !== "COMPLETED" && status !== "FAILED" && status !== "CANCELLED") {
+    throw new Error("Assist 消息状态无法识别。");
+  }
+  const usage = object(row.usage, "assist message.usage");
+  const skillRow = row.skill === null || row.skill === undefined ? null : object(row.skill, "assist skill");
+  const skillTarget = skillRow?.target;
+  const target: "PROJECT" | "TASK" | null = skillTarget === "PROJECT" || skillTarget === "TASK"
+    ? skillTarget : null;
+  const definitionAvailability = skillRow === null ? null : string(skillRow, "definition_availability", "assist skill");
+  const outputAvailability = skillRow === null ? null : string(skillRow, "output_availability", "assist skill");
+  if (definitionAvailability !== null && !["AVAILABLE", "HISTORICAL_ONLY", "UNAVAILABLE"].includes(definitionAvailability) ||
+    outputAvailability !== null && !["PENDING", "HISTORICAL_SNAPSHOT", "NO_OUTPUT", "UNAVAILABLE"].includes(outputAvailability)) {
+    throw new Error("Assist Skill 历史可用性无效。");
+  }
+  const skill = skillRow === null ? null : {
+    id: string(skillRow, "id", "assist skill"), version: string(skillRow, "version", "assist skill"),
+    sha256: optionalString(skillRow, "sha256"),
+    definitionAvailability: definitionAvailability as NonNullable<RelayAssistMessage["skill"]>["definitionAvailability"],
+    outputAvailability: outputAvailability as NonNullable<RelayAssistMessage["skill"]>["outputAvailability"],
+    target,
+    availability: optionalString(skillRow, "availability"),
+    missingCapabilities: Array.isArray(skillRow.missing_capabilities)
+      ? stringList(skillRow, "missing_capabilities", "assist skill") : []
+  };
+  return { id: string(row, "id", "assist message"),
+    sessionId: string(row, "session_id", "assist message"),
+    seq: decimal(row, "seq", "assist message"), role, status,
+    intent: string(row, "intent", "assist message"),
+    content: nullableString(row, "content", "assist message"),
+    errorCode: nullableString(row, "error_code", "assist message"),
+    sources: array(row, "sources", "assist message").map((value) => {
+      const source = object(value, "assist source");
+      return { sourceRef: optionalString(source, "source_ref"),
+        kind: optionalString(source, "kind"), rootId: optionalString(source, "root_id"),
+        version: optionalString(source, "version"),
+        status: string(source, "status", "assist source"),
+        reason: optionalString(source, "reason") };
+    }),
+    skill, skillInput: row.skill_input === null || row.skill_input === undefined
+      ? null : object(row.skill_input, "assist skill input"),
+    skillOutput: row.skill_output === null || row.skill_output === undefined
+      ? null : assistSkillOutputFrom(row.skill_output),
+    usage: { inputTokens: nullableInteger(usage, "input_tokens", "assist usage"),
+      outputTokens: nullableInteger(usage, "output_tokens", "assist usage") },
+    cancelRequested: row.cancel_requested === true };
+}
+
+function assistProposalFrom(value: unknown): RelayAssistProposal {
+  const row = object(value, "assist proposal");
+  const kind = string(row, "kind", "assist proposal");
+  const targetType = string(row, "target_type", "assist proposal");
+  const status = string(row, "status", "assist proposal");
+  if (status !== "PENDING" && status !== "ACCEPTED" && status !== "REJECTED" && status !== "EXPIRED") {
+    throw new Error("Assist 提案类型或状态无法识别。");
+  }
+  const common: RelayAssistProposalBase = { id: string(row, "id", "assist proposal"),
+    sessionId: string(row, "session_id", "assist proposal"),
+    messageId: string(row, "message_id", "assist proposal"),
+    targetId: string(row, "target_id", "assist proposal"),
+    baseRevision: decimal(row, "base_revision", "assist proposal"),
+    payloadHash: string(row, "payload_hash", "assist proposal"),
+    payloadAvailable: row.payload_available === undefined ? true : row.payload_available === true,
+    status };
+  const payload = object(row.payload, "assist proposal.payload");
+  if ((kind === "TASK_CONTRACT_CHANGE" || kind === "VERIFICATION_PLAN_CHANGE") && targetType === "TASK") {
+    const acceptanceRevision = decimal(row, "base_acceptance_revision", "task skill proposal");
+    const skillSha256 = string(row, "skill_sha256", "task skill proposal");
+    const skillOutputSha256 = string(row, "skill_output_sha256", "task skill proposal");
+    if (!/^[0-9a-f]{64}$/.test(common.payloadHash) ||
+      !/^[0-9a-f]{64}$/.test(skillSha256) || !/^[0-9a-f]{64}$/.test(skillOutputSha256) ||
+      typeof row.payload_available !== "boolean") throw new Error("Task Skill 提案来源格式无效。");
+    if (!common.payloadAvailable) return { ...common, kind, targetType,
+      baseAcceptanceRevision: acceptanceRevision, skillSha256, skillOutputSha256, payload: null };
+    const rawMode = payload.suggested_mode;
+    if (rawMode !== null && typeof rawMode !== "string") throw new Error("建议模式格式无效。");
+    return { ...common, kind, targetType, baseAcceptanceRevision: acceptanceRevision,
+      skillSha256, skillOutputSha256,
+      payload: { objective: string(payload, "objective", "task skill proposal"),
+        requiredOutputSpec: object(payload.required_output_spec, "task skill outputs"),
+        criteria: array(payload, "criteria", "task skill proposal").map((value) => {
+          const criterion = object(value, "task skill criterion");
+          const source = string(criterion, "source", "task skill criterion");
+          if (typeof criterion.required !== "boolean" ||
+            (source !== "PRESERVED" && source !== "SUGGESTED")) {
+            throw new Error("Task Skill 合并条件格式无效。");
+          }
+          return { criterionId: string(criterion, "criterion_id", "task skill criterion"),
+            statement: string(criterion, "statement", "task skill criterion"),
+            required: criterion.required, method: string(criterion, "method", "task skill criterion"),
+            targetSpec: object(criterion.target_spec, "task skill target spec"), source };
+        }), addedCriterionIds: stringList(payload, "added_criterion_ids", "task skill proposal"),
+        preservedCriterionIds: stringList(payload, "preserved_criterion_ids", "task skill proposal"),
+        suggestedMode: rawMode } };
+  }
+  if (kind === "CANDIDATE_MARKDOWN" && targetType === "TASK") {
+    return { ...common, kind, targetType, payload: {
+      title: string(payload, "title", "candidate payload"),
+      mediaType: string(payload, "media_type", "candidate payload"),
+      markdown: string(payload, "markdown", "candidate payload") } };
+  }
+  if (kind === "TASK_DEFINITION" && targetType === "PROJECT") {
+    return { ...common, kind, targetType, payload: {
+      title: string(payload, "title", "task proposal payload"),
+      objective: string(payload, "objective", "task proposal payload"),
+      criteria: array(payload, "criteria", "task proposal payload").map((value) => {
+        const criterion = object(value, "task proposal criterion");
+        if (typeof criterion.required !== "boolean") throw new Error("提案验收条件格式无效。");
+        return { statement: string(criterion, "statement", "task proposal criterion"),
+          required: criterion.required, method: string(criterion, "method", "task proposal criterion") };
+      }), expectedOutputs: object(payload.expected_outputs, "task proposal expected_outputs") } };
+  }
+  throw new Error("Assist 提案类型或目标无法识别。");
+}
+
 function knowledgeFrom(value: unknown): RelayKnowledge {
   const row = object(value, "knowledge");
   return {
@@ -1741,10 +3165,50 @@ function knowledgeFrom(value: unknown): RelayKnowledge {
   };
 }
 
+function webImportSubmissionFrom(value: unknown, projectId: string, connectionId: string): RelayWebImportSubmission {
+  const row = object(value, "web import submission");
+  if (string(row, "project_id", "web import submission") !== projectId ||
+      string(row, "connection_id", "web import submission") !== connectionId ||
+      string(row, "status", "web import submission") !== "QUEUED") {
+    throw new Error("web import submission 与目标不匹配。");
+  }
+  return { importJobId: string(row, "import_job_id", "web import submission"),
+    projectId, connectionId, status: "QUEUED" };
+}
+
+function webImportJobFrom(value: unknown): RelayWebImportJob {
+  const row = object(value, "web import job");
+  const status = string(row, "status", "web import job");
+  if (status !== "QUEUED" && status !== "RUNNING" && status !== "SUCCEEDED" && status !== "FAILED") {
+    throw new Error("web import job.status 响应格式无效。");
+  }
+  return { id: string(row, "id", "web import job"), projectId: string(row, "project_id", "web import job"),
+    sourceUri: string(row, "source_uri", "web import job"), status,
+    revision: decimal(row, "revision", "web import job"),
+    error: nullableString(row, "error", "web import job"),
+    knowledgeVersionId: nullableString(row, "knowledge_version_id", "web import job"),
+    requestCommandId: string(row, "request_command_id", "web import job"),
+    createdAt: string(row, "created_at", "web import job") };
+}
+
+function webImportOperationFrom(value: unknown, importJobId: string): RelayWebImportOperation {
+  const row = object(value, "web import operation");
+  if (string(row, "origin", "web import operation") !== "USER_IMPORT" ||
+      string(row, "import_job_id", "web import operation") !== importJobId) {
+    throw new Error("web import operation 与 Job 不匹配。");
+  }
+  return { id: string(row, "id", "web import operation"), importJobId,
+    status: string(row, "status", "web import operation"),
+    actionType: string(row, "action_type", "web import operation"),
+    normalizedTarget: string(row, "normalized_target", "web import operation"),
+    invocationStatuses: array(row, "invocations", "web import operation").map((invocation) =>
+      string(object(invocation, "web import invocation"), "status", "web import invocation")) };
+}
+
 function knowledgeVersionFrom(value: unknown): RelayKnowledgeVersion {
   const row = object(value, "knowledge version");
   const sourceKind = string(row, "source_kind", "knowledge version");
-  if (sourceKind !== "NOTE" && sourceKind !== "MANAGED_TEXT" && sourceKind !== "ARTIFACT_VERSION") {
+  if (sourceKind !== "NOTE" && sourceKind !== "MANAGED_TEXT" && sourceKind !== "ARTIFACT_VERSION" && sourceKind !== "WEB_PAGE") {
     throw new Error("knowledge version.source_kind 响应格式无效。");
   }
   return {
@@ -1868,6 +3332,12 @@ function string(record: Record<string, unknown>, key: string, name: string): str
   if (typeof value !== "string") {
     throw new Error(`${name}.${key} 响应格式无效。`);
   }
+  return value;
+}
+
+function boolean(record: Record<string, unknown>, key: string, name: string): boolean {
+  const value = record[key];
+  if (typeof value !== "boolean") throw new Error(`${name}.${key} 响应格式无效。`);
   return value;
 }
 

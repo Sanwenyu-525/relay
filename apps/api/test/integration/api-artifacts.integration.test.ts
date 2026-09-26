@@ -1663,3 +1663,77 @@ test('refuses completion when the accepted evidence file is missing or tampered'
   assert.equal(afterMissing.status, 'IN_PROGRESS');
   assert.equal(await countCompletionRecords(missingTask.task_id), 0);
 });
+
+test('reads the exact historical human completion evidence after reopen and hides lost content', async () => {
+  const task = await startedTask();
+  const first = await saveFirstVersion(task, '# First accepted version\n');
+  const second = await saveNextVersion({ task, artifact: first,
+    content: '# Later unaccepted version\n' });
+  const commandId = randomUUID();
+  const completed = expectCommandAccepted(await api.post(workspacePath(workspaceId,
+    `/tasks/${task.task_id}/complete`), {
+    command_id: commandId, expected_revision: second.task_revision,
+    acceptance_revision: task.acceptance_revision,
+    artifact_version_ids: [first.version_id],
+    acceptance: { statement: 'I checked this exact version',
+      accepted_criterion_ids: ['c1'], reason: 'Verified against the original' },
+  }), 200, commandId);
+  const completionId = completed.completion_id as string;
+  const path = workspacePath(workspaceId, `/completion-records/${completionId}`);
+  const firstRead = await api.get(path);
+  assert.equal(firstRead.status, 200, firstRead.text);
+  assert.equal(firstRead.headers['cache-control'], 'no-store');
+  const evidence = firstRead.body as { completion_id: string; task_id: string;
+    basis_kind: string; acceptance_revision: string; is_current: boolean;
+    acceptance: { availability: string; objective: string; criteria: { criterion_id: string }[] };
+    human_acceptance: { availability: string; id: string; actor_kind: string;
+      statement: string; accepted_criterion_ids: string[]; reason: string };
+    verification_session: null;
+    artifact_versions: { availability: string; artifact_version_id: string | null;
+      sha256: string | null }[] };
+  assert.equal(evidence.completion_id, completionId);
+  assert.equal(evidence.task_id, task.task_id);
+  assert.equal(evidence.basis_kind, 'HUMAN');
+  assert.equal(evidence.acceptance_revision, '1');
+  assert.equal(evidence.is_current, true);
+  assert.equal(evidence.acceptance.availability, 'AVAILABLE');
+  assert.deepEqual(evidence.acceptance.criteria.map((item) => item.criterion_id), ['c1']);
+  assert.equal(evidence.human_acceptance.availability, 'AVAILABLE');
+  assert.equal(evidence.human_acceptance.actor_kind, 'HUMAN');
+  assert.equal(evidence.human_acceptance.statement, 'I checked this exact version');
+  assert.deepEqual(evidence.human_acceptance.accepted_criterion_ids, ['c1']);
+  assert.equal(evidence.human_acceptance.reason, 'Verified against the original');
+  assert.equal(evidence.verification_session, null);
+  assert.deepEqual(evidence.artifact_versions.map((item) => item.artifact_version_id),
+    [first.version_id]);
+  assert.equal(evidence.artifact_versions[0]?.sha256, first.sha256);
+  assert.notEqual(evidence.artifact_versions[0]?.artifact_version_id, second.version_id);
+
+  const foreign = await createWorkspace(appDatabase.db);
+  assert.equal((await api.get(path, { headers: {
+    authorization: 'Bearer wrong' } })).status, 401);
+  expectProblem(await api.get(workspacePath(foreign,
+    `/completion-records/${completionId}`)), 404, 'RESOURCE_NOT_FOUND');
+  expectProblem(await api.get(workspacePath(workspaceId,
+    `/completion-records/${randomUUID()}`)), 404, 'RESOURCE_NOT_FOUND');
+
+  const reopenedId = randomUUID();
+  expectCommandAccepted(await api.post(workspacePath(workspaceId,
+    `/tasks/${task.task_id}/reopen`), { command_id: reopenedId,
+    expected_revision: completed.revision, reason: 'A new acceptance cycle' }),
+  200, reopenedId);
+  const historical = await api.get(path);
+  assert.equal(historical.status, 200, historical.text);
+  assert.equal((historical.body as { is_current: boolean; acceptance_revision: string })
+    .is_current, false);
+  assert.equal((historical.body as { acceptance_revision: string }).acceptance_revision, '1');
+
+  await rm(storedContentPath(first.artifact_id, first.version_id));
+  const lost = await api.get(path);
+  assert.equal(lost.status, 200, lost.text);
+  const hidden = (lost.body as { artifact_versions: { availability: string;
+    artifact_version_id: string | null; sha256: string | null }[] }).artifact_versions[0];
+  assert.deepEqual(hidden, { availability: 'UNAVAILABLE', artifact_version_id: null,
+    artifact_id: null, version_number: null, sha256: null });
+  assert.equal(lost.text.includes(first.version_id), false);
+});

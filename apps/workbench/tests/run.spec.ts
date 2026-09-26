@@ -5,6 +5,7 @@ import { flush, mountWorkbench } from "./mountApp";
 const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const taskId = "22222222-2222-4222-8222-222222222222";
+const projectId = "99999999-9999-4999-8999-999999999999";
 const runId = "33333333-3333-4333-8333-333333333333";
 const requestId = "44444444-4444-4444-8444-444444444444";
 const prefix = `${baseUrl}/api/v1/workspaces/${workspaceId}`;
@@ -22,9 +23,9 @@ function response(status: number, body: unknown): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
 }
 
-function task(status = "IN_PROGRESS") {
+function task(status = "IN_PROGRESS", project: string | null = null) {
   return {
-    id: taskId, project_id: null, title: "真实 AI 任务", status, mode: "DELEGATE_AI",
+    id: taskId, project_id: project, title: "真实 AI 任务", status, mode: "DELEGATE_AI",
     revision: "4", executor: { kind: "AI", run_id: runId, ownership_epoch: "1" },
     current_completion_id: null, waiting_reason: null, blocking_task_ids: [], unresolved_blocker_ids: [], allowed_actions: [],
     acceptance: { acceptance_revision: "1", objective: "交付可核对结果", source: "CREATE", criteria: [] }, dependencies: []
@@ -339,5 +340,28 @@ describe("P08 Run 工作台", () => {
     expect(postBody).toMatchObject({ expected_task_revision: "4", expected_run_revision: "3" });
     expect(mounted.wrapper.text()).toContain("恢复命令已受理（202）");
     expect(mounted.wrapper.text()).toContain("构建上下文");
+  });
+
+  it("历史 Run 指向归档项目时仍可读，新的控制请求全部关闭", async () => {
+    activate();
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const address = String(input);
+      if (init?.method === "POST") throw new Error("archived Run must not write");
+      if (address === runUrl) return response(200, run());
+      if (address === `${prefix}/tasks/${taskId}`) return response(200, task("IN_PROGRESS", projectId));
+      if (address === `${prefix}/projects/${projectId}`) return response(200, { id: projectId, title: "历史项目",
+        project_type: "GENERAL", revision: "2", state_revision: "1", archived_at: "2026-09-26T00:00:00Z" });
+      if (address === `${runUrl}/reviews`) return response(200, { items: [] });
+      if (address === `${runUrl}/context-manifests`) return response(200, { items: [], build: { status: "NOT_STARTED", reason_code: null, message: null } });
+      throw new Error(`unexpected request: ${address}`);
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/runs/${runId}`); unmount = mounted.unmount;
+    await flush(30);
+    expect(mounted.wrapper.get('[data-testid="run-detail"]').text()).toContain("真实 AI 任务");
+    expect(mounted.wrapper.get('[data-testid="run-project-archive-reason"]').text()).toContain("已归档");
+    for (const kind of ["PAUSE", "CANCEL", "HANDOFF", "CANCEL_TASK"])
+      expect(mounted.wrapper.get(`[data-testid="run-control-${kind}"]`).attributes("disabled")).toBeDefined();
+    await mounted.wrapper.get('[data-testid="run-control-CANCEL"]').trigger("click");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
   });
 });

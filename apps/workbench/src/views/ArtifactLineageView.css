@@ -1,0 +1,14 @@
+.lineage-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; padding: var(--relay-layout-main-padding); }
+.lineage-page > h1 { margin-bottom: var(--relay-space-3); }
+.lineage-page .page-lede { margin-bottom: var(--relay-space-6); }
+.lineage-page > button { margin-bottom: var(--relay-space-4); }
+.lineage-summary, .lineage-parents { margin-top: var(--relay-space-6); }
+.lineage-summary dl { display: grid; gap: var(--relay-space-3); margin-bottom: 0; }
+.lineage-summary dl div { display: grid; grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr); gap: var(--relay-space-3); overflow-wrap: anywhere; }
+.lineage-summary dt, .lineage-parents small { color: var(--relay-color-text-secondary); }
+.lineage-summary dd { margin: 0; }
+.lineage-parents ul { padding: 0; margin: var(--relay-space-4) 0 0; list-style: none; }
+.lineage-parents li { padding: var(--relay-space-4) 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); overflow-wrap: anywhere; }
+.lineage-parents small { display: block; margin-top: var(--relay-space-2); }
+.lineage-parents li p { margin-top: var(--relay-space-2); }
+@media (max-width: 700px) { .lineage-page { padding: var(--relay-layout-main-smallPadding); } .lineage-summary dl div { grid-template-columns: 1fr; } }

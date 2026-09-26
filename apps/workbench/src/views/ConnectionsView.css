@@ -1,0 +1,15 @@
+.connections-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; padding: var(--relay-layout-main-padding); }
+.connections-page .connections-title { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--relay-space-4); margin-top: var(--relay-space-6); }
+.connections-page .connections-title h2 { margin: 0; }
+.connections-page .connections-list { list-style: none; margin: var(--relay-space-4) 0 0; padding: 0; }
+.connections-page .connections-list > li { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: var(--relay-space-4); padding: var(--relay-space-4) 0; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.connections-page .connections-list > li > div:first-child { flex: 1 1 18rem; min-width: 0; overflow-wrap: anywhere; }
+.connections-page .connections-list small { display: block; color: var(--relay-color-text-secondary); overflow-wrap: anywhere; }
+.connections-page .connections-list details { margin-top: var(--relay-space-3); }
+.connections-page .connections-list details li { margin-top: var(--relay-space-2); overflow-wrap: anywhere; }
+.connections-page .connections-form { margin-top: var(--relay-space-6); padding-top: var(--relay-space-4); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.connections-page .connections-form h3 { margin: 0; }
+.connections-page .connections-form > button, .connections-page .connections-entry > button { margin-top: var(--relay-space-6); }
+.connections-page .connections-actions { display: flex; align-items: flex-start; flex-wrap: wrap; gap: var(--relay-space-3); }
+.connections-page .success-callout { color: var(--relay-color-status-success-text); background: var(--relay-color-status-success-bg); padding: var(--relay-space-4); }
+.connections-page .warning-callout button { margin: var(--relay-space-3) var(--relay-space-3) 0 0; }

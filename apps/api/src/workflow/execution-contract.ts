@@ -29,6 +29,8 @@ export interface FrozenContractCriterion {
   readonly required: boolean;
   readonly method: string;
   readonly targetSpec: JsonObject;
+  /** 显式检查器覆盖（HARD SEMANTIC 规则的真实语义检查器）。 */
+  readonly checkerId?: string | undefined;
 }
 
 export interface FreezeExecutionContractInput {
@@ -43,6 +45,9 @@ export interface FreezeExecutionContractInput {
   readonly workflowVersion?: string | undefined;
   readonly executionConfigVersion?: string | undefined;
   readonly mockGatewayAction?: MockGatewayActionIntent | undefined;
+  readonly fileReadAction?: FileReadActionIntent | undefined;
+  readonly webFetchAction?: WebFetchActionIntent | undefined;
+  readonly contextSources?: readonly ContextSourceRef[] | undefined;
 }
 
 /** The optional fixed Mock tool intent is frozen before a Worker can prepare it. */
@@ -53,6 +58,89 @@ export interface MockGatewayActionIntent {
   readonly resource_id: string;
   readonly target: string;
   readonly content: string;
+}
+
+/** The optional fixed Mock file-read intent is frozen before a Worker can prepare it. */
+export interface FileReadActionIntent {
+  readonly operation_id: string;
+  readonly intent_key: 'mock-file-read-v1';
+  readonly connection_id: string;
+  readonly resource_id: string;
+  readonly relative_target: string;
+}
+
+export function readFileReadAction(snapshot: JsonObject): FileReadActionIntent | undefined {
+  const value = snapshot.file_read_action;
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('frozen Mock file read action is invalid');
+  }
+  const action = value as JsonObject;
+  if (typeof action.operation_id !== 'string' || action.intent_key !== 'mock-file-read-v1' ||
+      typeof action.connection_id !== 'string' || typeof action.resource_id !== 'string' ||
+      typeof action.relative_target !== 'string' || action.relative_target === '' ||
+      action.relative_target.includes('\u0000')) {
+    throw new Error('frozen Mock file read action is invalid');
+  }
+  return action as unknown as FileReadActionIntent;
+}
+
+/** The optional fixed Mock web-read intent is frozen before a Worker can prepare it.
+ * The URL is syntactic only; host binding and SSRF checks happen at Gateway prepare. */
+export interface WebFetchActionIntent {
+  readonly operation_id: string;
+  readonly intent_key: 'mock-web-fetch-v1';
+  readonly connection_id: string;
+  readonly url: string;
+}
+
+export function readWebFetchAction(snapshot: JsonObject): WebFetchActionIntent | undefined {
+  const value = snapshot.web_fetch_action;
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('frozen Mock web fetch action is invalid');
+  }
+  const action = value as JsonObject;
+  if (typeof action.operation_id !== 'string' || action.intent_key !== 'mock-web-fetch-v1' ||
+      typeof action.connection_id !== 'string' || typeof action.url !== 'string' ||
+      action.url === '') {
+    throw new Error('frozen Mock web fetch action is invalid');
+  }
+  return action as unknown as WebFetchActionIntent;
+}
+
+/** 统一读取冻结 Mock 意图的操作身份（写标记、文件读或网页读之一）。 */
+export function readMockActionOperationId(snapshot: JsonObject): string | undefined {
+  return readMockGatewayAction(snapshot)?.operation_id ??
+    readFileReadAction(snapshot)?.operation_id ?? readWebFetchAction(snapshot)?.operation_id;
+}
+
+/** 用户在 Delegate 时显式选中的长期信息来源；版本随 Run 冻结，不可变。 */
+export interface ContextSourceRef {
+  readonly kind: 'KNOWLEDGE' | 'MEMORY' | 'DECISION';
+  readonly root_id: string;
+  readonly version: string;
+}
+
+const CONTEXT_SOURCE_KINDS: readonly string[] = ['KNOWLEDGE', 'MEMORY', 'DECISION'];
+
+export function readContextSources(snapshot: JsonObject): readonly ContextSourceRef[] {
+  const value = snapshot.context_sources;
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error('frozen context sources are invalid');
+  return value.map((entry) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      throw new Error('frozen context sources are invalid');
+    }
+    const source = entry as JsonObject;
+    if (typeof source.kind !== 'string' || !CONTEXT_SOURCE_KINDS.includes(source.kind) ||
+        typeof source.root_id !== 'string' || typeof source.version !== 'string' ||
+        !/^[1-9][0-9]*$/u.test(source.version)) {
+      throw new Error('frozen context sources are invalid');
+    }
+    return { kind: source.kind as ContextSourceRef['kind'],
+      root_id: source.root_id, version: source.version };
+  });
 }
 
 export function readMockGatewayAction(snapshot: JsonObject): MockGatewayActionIntent | undefined {
@@ -99,6 +187,7 @@ export function freezeExecutionContract(
     required: criterion.required,
     method: criterion.method,
     target_spec: criterion.targetSpec,
+    ...(criterion.checkerId === undefined ? {} : { checker_id: criterion.checkerId }),
   }));
 
   const snapshot: JsonObject = {
@@ -116,6 +205,10 @@ export function freezeExecutionContract(
     },
     execution_config_version: executionConfigVersion,
     ...(input.mockGatewayAction === undefined ? {} : { mock_gateway_action: { ...input.mockGatewayAction } }),
+    ...(input.fileReadAction === undefined ? {} : { file_read_action: { ...input.fileReadAction } }),
+    ...(input.webFetchAction === undefined ? {} : { web_fetch_action: { ...input.webFetchAction } }),
+    ...(input.contextSources === undefined || input.contextSources.length === 0 ? {} :
+      { context_sources: input.contextSources.map((source) => ({ ...source })) }),
   };
 
   const contractHash = createHash(CONTRACT_HASH_ALGORITHM)

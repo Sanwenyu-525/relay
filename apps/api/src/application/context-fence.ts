@@ -1,4 +1,7 @@
+import { createHash } from 'node:crypto';
+
 import type { JsonObject, JsonValue } from '../infrastructure/json.js';
+import { canonicalizeJson } from '../receipt/payload-hash.js';
 import type { RunRow, TaskRow, WorkspaceExecutionAuthorityRow } from '../infrastructure/database-schema.js';
 import { toDecimalString } from '../shared/decimal.js';
 import type { Repositories } from './unit-of-work.js';
@@ -36,9 +39,16 @@ export async function hasCurrentRunContext(repositories: Repositories,
   const built = await repositories.runs.readStepByKind(run.id, 'BUILD_CONTEXT');
   const hash = readString(built?.result_ref, 'manifest_hash');
   if (built?.status !== 'SUCCEEDED' || hash === undefined) return false;
-  const manifest = await repositories.runs.readContextManifestByHash(run.id, Buffer.from(hash, 'hex'));
-  return manifest !== undefined &&
-    contextManifestMatchesCurrent(repositories, manifest.payload, run, task, authority);
+  const expected = Buffer.from(hash, 'hex');
+  const manifest = await repositories.runs.readContextManifestByHash(run.id, expected);
+  if (manifest === undefined) return false;
+  // The frozen reference must still match the actual stored payload. A payload
+  // edited in place (corruption or upgrade anomaly) keeps the identity fields
+  // the freshness comparison checks, so only the recomputed digest detects it.
+  if (!createHash('sha256').update(canonicalizeJson(manifest.payload)).digest().equals(expected)) {
+    return false;
+  }
+  return contextManifestMatchesCurrent(repositories, manifest.payload, run, task, authority);
 }
 
 function readString(value: JsonValue | null | undefined, key: string): string | undefined {

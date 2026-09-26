@@ -6,7 +6,7 @@ import type {
   TaskRow,
   WorkspaceRow,
 } from '../infrastructure/database-schema.js';
-import { resourceNotFound } from './domain-error.js';
+import { projectArchived, resourceNotFound } from './domain-error.js';
 import { createRepositories, type Repositories } from './unit-of-work.js';
 
 /**
@@ -49,6 +49,20 @@ export async function readProjectInWorkspace(
   return project;
 }
 
+/** 写事务持有至提交的 Project 归档栅栏；历史读取继续使用 readProjectInWorkspace。 */
+export async function lockWritableProjectInWorkspace(
+  repositories: Repositories,
+  workspaceId: string,
+  projectId: string,
+): Promise<ProjectRow> {
+  const project = await repositories.projects.lockProjectArchiveGate(projectId);
+  if (project === undefined || project.workspace_id !== workspaceId) {
+    throw resourceNotFound('Project');
+  }
+  if (project.archived_at !== null) throw projectArchived();
+  return project;
+}
+
 /** 同时取的 Project 行锁（FOR NO KEY UPDATE）：Goal 关联与 Task 显式对齐共用同一串行化点。 */
 export async function lockProjectInWorkspace(
   repositories: Repositories,
@@ -60,6 +74,8 @@ export async function lockProjectInWorkspace(
   if (project === undefined || project.workspace_id !== workspaceId) {
     throw resourceNotFound('Project');
   }
+
+  if (project.archived_at !== null) throw projectArchived();
 
   return project;
 }
@@ -88,6 +104,10 @@ export async function lockTaskInWorkspace(
 
   if (task === undefined || task.workspace_id !== workspaceId) {
     throw resourceNotFound('Task');
+  }
+
+  if (task.project_id !== null) {
+    await lockWritableProjectInWorkspace(repositories, workspaceId, task.project_id);
   }
 
   return task;

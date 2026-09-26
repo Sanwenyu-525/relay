@@ -51,6 +51,7 @@ function activate(): void {
 }
 
 function downstream(url: string, delegated: boolean): Response | null {
+  if (url === `${prefix}/projects/${projectId}`) return response(200, { id: projectId, title: "待委托项目", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
   if (url === taskUrl) return response(200, task(delegated));
   if (url === runUrl) return response(200, run());
   if (url === `${runUrl}/reviews`) return response(200, { items: [] });
@@ -84,6 +85,34 @@ describe("M03 首片 Task Delegate", () => {
     expect(mounted.wrapper.get('[data-testid="run-detail"]').text()).toContain("待委托任务");
   });
 
+  it("Delegate 将当前选中的不可变来源版本冻结为 context_sources", async () => {
+    activate();
+    const sourceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let posted: Record<string, unknown> | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith(`${prefix}/search?`)) return response(200, { items: [{
+        type: "KNOWLEDGE", id: sourceId, version: "4", title: "明确资料", snippet: "摘要",
+        matched_fields: ["title"], source_ref: `knowledge:${sourceId}:v4`,
+        status: "ACTIVE", project_id: projectId }], next_cursor: null });
+      if (url === `${taskUrl}/delegations` && init?.method === "POST") {
+        posted = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return response(202, { command_id: posted.command_id,
+          committed_at: "2026-09-26T00:00:00Z", result: result() });
+      }
+      return downstream(url, false) ?? Promise.reject(new Error(`unexpected request: ${url}`));
+    }));
+    const mounted = await mountWorkbench(`/tasks/${taskId}`); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="task-detail-tab-runs"]').trigger("click");
+    await mounted.wrapper.get("#assist-source-query").setValue("资料");
+    await mounted.wrapper.get('[data-testid="assist-source-picker"] form').trigger("submit");
+    await flush();
+    await mounted.wrapper.get('[data-testid="assist-source-picker"] input[type="checkbox"]').setValue(true);
+    await mounted.wrapper.get('[data-testid="task-delegate"]').trigger("click");
+    expect(posted).toMatchObject({ context_sources: [{ kind: "KNOWLEDGE", root_id: sourceId,
+      version: "4" }] });
+  });
+
   it("可选 Mock 文件动作从本项目配置选择，并随原 Delegate 命令冻结", async () => {
     activate();
     const connectionId = "55555555-5555-4555-8555-555555555555";
@@ -94,8 +123,8 @@ describe("M03 首片 Task Delegate", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
       if (url === `${prefix}/projects/${projectId}/connections`) return response(200, [
-        { id: connectionId, status: "ACTIVE", capabilities: ["FAKE_WRITE"] },
-        { id: "77777777-7777-4777-8777-777777777777", status: "DISABLED", capabilities: ["FAKE_WRITE"] }
+        { id: connectionId, status: "ACTIVE", capabilities: ["FAKE_WRITE"], allowed_host: null },
+        { id: "77777777-7777-4777-8777-777777777777", status: "DISABLED", capabilities: ["FAKE_WRITE"], allowed_host: null }
       ]);
       if (url === `${prefix}/projects/${projectId}/managed-resources`) return response(200, [
         { id: resourceId, status: "ACTIVE", canonical_root: "C:\\relay-mock" }
@@ -201,5 +230,22 @@ describe("M03 首片 Task Delegate", () => {
     await mounted.wrapper.get('[data-testid="task-detail-tab-runs"]').trigger("click");
     expect(mounted.wrapper.get('[data-testid="task-delegate"]').attributes("disabled")).toBeDefined();
     expect(mounted.wrapper.get('[data-testid="task-delegate-panel"]').text()).toContain("缺少 AI 执行作用域");
+  });
+
+  it("已归档 Project 的 READY Task 深链保留事实但不发新 Delegate", async () => {
+    activate();
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `${prefix}/projects/${projectId}`) return response(200, { id: projectId, title: "历史项目",
+        project_type: "GENERAL", revision: "2", state_revision: "1", archived_at: "2026-09-26T00:00:00Z" });
+      if (init?.method === "POST") throw new Error("archived Task must not write");
+      return downstream(url, false) ?? Promise.reject(new Error(`unexpected request: ${url}`));
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/tasks/${taskId}`); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="task-detail-tab-runs"]').trigger("click");
+    expect(mounted.wrapper.get('[data-testid="task-project-archive-reason"]').text()).toContain("已归档");
+    expect(mounted.wrapper.get('[data-testid="task-delegate"]').attributes("disabled")).toBeDefined();
+    await mounted.wrapper.get('[data-testid="task-delegate"]').trigger("click");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
   });
 });

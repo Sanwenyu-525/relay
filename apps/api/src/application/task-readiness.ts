@@ -91,20 +91,19 @@ export async function loadTaskReadiness(
 export async function loadReadinessForTasks(
   repositories: Repositories,
   tasks: readonly TaskRow[],
-  projectId: string | null,
+  projectId: string | null | undefined,
 ): Promise<ReadonlyMap<string, TaskReadinessFacts>> {
   const taskIds = tasks.map((task) => task.id);
   const criteriaCounts = await repositories.tasks.countRequiredCriteriaForTasks(taskIds);
   const blocking = await repositories.tasks.listUnfinishedBlockingDependencies(taskIds);
-  const blockers =
-    projectId === null
-      ? []
+  const blockers = projectId === null ? []
+    : projectId === undefined
+      ? await repositories.projects.listUnresolvedBlockersForWorkspaceTasks(
+          [...new Set(tasks.map((task) => task.project_id).filter((id): id is string => id !== null))],
+          taskIds,
+        )
       : await repositories.projects.listUnresolvedBlockersForTasks(projectId, taskIds);
   const readiness = new Map<string, TaskReadinessFacts>();
-  // 作用在 Project 上的未解除 blocker 阻止该项目内所有 Task 开始。
-  const projectBlockerIds = blockers
-    .filter((blocker) => blocker.target_kind === 'PROJECT' && blocker.target_id === projectId)
-    .map((blocker) => blocker.id);
 
   for (const task of tasks) {
     readiness.set(task.id, {
@@ -114,9 +113,13 @@ export async function loadReadinessForTasks(
         .map((row) => row.depends_on_task_id),
       unresolvedBlockerIds: [
         ...blockers
-          .filter((blocker) => blocker.target_kind === 'TASK' && blocker.target_id === task.id)
+          .filter((blocker) => blocker.project_id === task.project_id
+            && blocker.target_kind === 'TASK' && blocker.target_id === task.id)
           .map((blocker) => blocker.id),
-        ...projectBlockerIds,
+        ...blockers
+          .filter((blocker) => blocker.project_id === task.project_id
+            && blocker.target_kind === 'PROJECT' && blocker.target_id === task.project_id)
+          .map((blocker) => blocker.id),
       ],
     });
   }

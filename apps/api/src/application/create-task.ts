@@ -17,7 +17,8 @@ import {
 import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
 import { runIdempotentCommand, type CommandOutcome } from './command.js';
 import { capabilityDisabled, validationFailed } from './domain-error.js';
-import { readProjectInWorkspace, requireWorkspace } from './guards.js';
+import { lockWritableProjectInWorkspace, requireWorkspace } from './guards.js';
+import type { Repositories } from './unit-of-work.js';
 
 const CRITERION_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 const MAX_CRITERIA = 20;
@@ -67,10 +68,20 @@ interface NormalizedCriterion {
  *     由 ready 命令负责校验，创建阶段不自动从 INBOX 跳到执行。
  *   * 初始切片只开放 HUMAN 检查方式；DELEGATE_AI 属于未开放的 Delegate 能力。
  */
-export async function createTask(
-  db: DbExecutor,
-  input: CreateTaskInput,
-): Promise<CommandOutcome<CreateTaskResult>> {
+export interface PreparedTaskCreation {
+  readonly workspaceId: string;
+  readonly commandId: string;
+  readonly projectId: string | null;
+  readonly title: string;
+  readonly objective: string;
+  readonly criteria: readonly NormalizedCriterion[];
+  readonly expectedOutputs: JsonObject;
+  readonly mode: TaskMode;
+  readonly acceptanceRevision: bigint;
+}
+
+/** 命令入口校验与规范化；与回执摘要使用同一结果。 */
+export function prepareTaskCreation(input: CreateTaskInput): PreparedTaskCreation {
   const problems: FieldError[] = [];
   const titleProblem = checkRequiredText(input.title, 'title', 'title');
   const objectiveProblem = checkRequiredText(input.objective, 'objective', 'objective');
@@ -97,9 +108,98 @@ export async function createTask(
     throw validationFailed(problems);
   }
 
-  const title = normalizeText(input.title);
-  const objective = normalizeText(input.objective);
-  const acceptanceRevision = 1n;
+  return {
+    workspaceId: input.workspaceId,
+    commandId: input.commandId,
+    projectId: input.projectId,
+    title: normalizeText(input.title),
+    objective: normalizeText(input.objective),
+    criteria,
+    expectedOutputs: input.expectedOutputs,
+    mode,
+    acceptanceRevision: 1n,
+  };
+}
+
+/** 事务内的业务效果；提案接受等协调方在已持有锁的事务里直接复用。 */
+export async function applyTaskCreation(repositories: Repositories,
+  prepared: PreparedTaskCreation): Promise<CreateTaskResult> {
+  await requireWorkspace(repositories, prepared.workspaceId);
+
+  if (prepared.projectId !== null) {
+    await lockWritableProjectInWorkspace(repositories, prepared.workspaceId, prepared.projectId);
+  }
+
+  const taskId = randomUUID();
+  const goalAlignmentMode: TaskGoalAlignmentMode = 'INHERIT';
+
+  // 插入顺序：先 Task（当前验收指针由延迟外键在提交时校验），再验收版本与 criteria。
+  const task = await repositories.tasks.insertTask({
+    id: taskId,
+    workspaceId: prepared.workspaceId,
+    projectId: prepared.projectId,
+    title: prepared.title,
+    status: 'INBOX',
+    mode: prepared.mode,
+    acceptanceRevision: prepared.acceptanceRevision,
+    executorKind: 'HUMAN',
+    ownershipEpoch: 0n,
+    currentCompletionId: null,
+  });
+
+  await repositories.tasks.insertAcceptanceVersion({
+    taskId: task.id,
+    acceptanceRevision: prepared.acceptanceRevision,
+    objective: prepared.objective,
+    requiredOutputSpec: prepared.expectedOutputs,
+    source: 'CREATE',
+  });
+
+  for (const criterion of prepared.criteria) {
+    await repositories.tasks.insertCriterion({
+      taskId: task.id,
+      acceptanceRevision: prepared.acceptanceRevision,
+      criterionId: criterion.criterionId,
+      statement: criterion.statement,
+      required: criterion.required,
+      method: criterion.method,
+      targetSpec: criterion.targetSpec,
+    });
+  }
+
+  await repositories.activities.insertActivityRecord({
+    id: randomUUID(),
+    workspaceId: task.workspace_id,
+    actorKind: 'HUMAN',
+    actorRef: LOCAL_ACTOR_REF,
+    commandId: prepared.commandId,
+    projectId: prepared.projectId,
+    taskId: task.id,
+    eventType: 'TASK_CREATED',
+    factRefs: {
+      task_id: task.id,
+      status: task.status,
+      mode: task.mode,
+      acceptance_revision: toDecimalString(prepared.acceptanceRevision),
+      goal_alignment_mode: goalAlignmentMode,
+    },
+  });
+
+  return {
+    task_id: task.id,
+    project_id: task.project_id,
+    status: task.status,
+    mode: task.mode,
+    revision: toDecimalString(task.revision),
+    acceptance_revision: toDecimalString(task.acceptance_revision),
+  };
+}
+
+export async function createTask(
+  db: DbExecutor,
+  input: CreateTaskInput,
+): Promise<CommandOutcome<CreateTaskResult>> {
+  const prepared = prepareTaskCreation(input);
   const goalAlignmentMode: TaskGoalAlignmentMode = 'INHERIT';
 
   return runIdempotentCommand<CreateTaskResult>(db, {
@@ -109,11 +209,11 @@ export async function createTask(
     target: { workspace_id: input.workspaceId },
     body: {
       project_id: input.projectId,
-      title,
-      objective,
-      mode,
+      title: prepared.title,
+      objective: prepared.objective,
+      mode: prepared.mode,
       expected_outputs: input.expectedOutputs,
-      criteria: criteria.map((criterion) => ({
+      criteria: prepared.criteria.map((criterion) => ({
         criterion_id: criterion.criterionId,
         statement: criterion.statement,
         required: criterion.required,
@@ -121,75 +221,7 @@ export async function createTask(
         target_spec: criterion.targetSpec,
       })),
     },
-    execute: async (repositories) => {
-      await requireWorkspace(repositories, input.workspaceId);
-
-      if (input.projectId !== null) {
-        await readProjectInWorkspace(repositories, input.workspaceId, input.projectId);
-      }
-
-      const taskId = randomUUID();
-
-      // 插入顺序：先 Task（当前验收指针由延迟外键在提交时校验），再验收版本与 criteria。
-      const task = await repositories.tasks.insertTask({
-        id: taskId,
-        workspaceId: input.workspaceId,
-        projectId: input.projectId,
-        title,
-        status: 'INBOX',
-        mode,
-        acceptanceRevision,
-        executorKind: 'HUMAN',
-        ownershipEpoch: 0n,
-        currentCompletionId: null,
-      });
-
-      await repositories.tasks.insertAcceptanceVersion({
-        taskId: task.id,
-        acceptanceRevision,
-        objective,
-        requiredOutputSpec: input.expectedOutputs,
-        source: 'CREATE',
-      });
-
-      for (const criterion of criteria) {
-        await repositories.tasks.insertCriterion({
-          taskId: task.id,
-          acceptanceRevision,
-          criterionId: criterion.criterionId,
-          statement: criterion.statement,
-          required: criterion.required,
-          method: criterion.method,
-          targetSpec: criterion.targetSpec,
-        });
-      }
-
-      await repositories.activities.insertActivityRecord({
-        id: randomUUID(),
-        actorKind: 'HUMAN',
-        actorRef: LOCAL_ACTOR_REF,
-        commandId: input.commandId,
-        projectId: input.projectId,
-        taskId: task.id,
-        eventType: 'TASK_CREATED',
-        factRefs: {
-          task_id: task.id,
-          status: task.status,
-          mode: task.mode,
-          acceptance_revision: toDecimalString(acceptanceRevision),
-          goal_alignment_mode: goalAlignmentMode,
-        },
-      });
-
-      return {
-        task_id: task.id,
-        project_id: task.project_id,
-        status: task.status,
-        mode: task.mode,
-        revision: toDecimalString(task.revision),
-        acceptance_revision: toDecimalString(task.acceptance_revision),
-      };
-    },
+    execute: async (repositories) => applyTaskCreation(repositories, prepared),
   });
 }
 

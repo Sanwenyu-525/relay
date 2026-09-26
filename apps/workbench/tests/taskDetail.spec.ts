@@ -35,7 +35,9 @@ interface RecordedCall {
 
 type StubHandler = (url: string, method: string, body: Record<string, unknown>) => Promise<Response>;
 
-function stubFetch(handler: StubHandler): { calls: RecordedCall[] } {
+function stubFetch(handler: StubHandler, projectRead: () => Response = () => jsonResponse(200, {
+  id: PROJECT_ID, title: "真实项目", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null
+})): { calls: RecordedCall[] } {
   const calls: RecordedCall[] = [];
   vi.stubGlobal(
     "fetch",
@@ -47,6 +49,8 @@ function stubFetch(handler: StubHandler): { calls: RecordedCall[] } {
           ? {}
           : (JSON.parse(init.body) as Record<string, unknown>);
       calls.push({ url, method, body });
+      if (url === `${BASE_URL}/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}` && method === "GET")
+        return projectRead();
       return handler(url, method, body);
     })
   );
@@ -587,6 +591,7 @@ describe("产物与完成闭环（UI-11，live）", () => {
     const mounted = await mountWorkbench(`/tasks/${TASK_ID}`);
     unmount = mounted.unmount;
     await flush(60);
+    expect(mounted.wrapper.find(`a[href="/completion-records/${COMPLETION_ID}"]`).exists()).toBe(true);
     await mounted.wrapper.get('[data-testid="task-detail-tab-artifacts"]').trigger("click");
     await flush();
 
@@ -707,6 +712,28 @@ describe("产物与完成闭环（UI-11，live）", () => {
 
     expect(mounted.wrapper.text()).toContain("数据库不可达");
     expect(mounted.wrapper.find('[data-testid="task-detail"]').exists()).toBe(false);
+  });
+
+  it.each(["已归档", "失权"])("Project %s 时保留 Task 与 Artifact 阅读，禁止创建或续写产物", async (state) => {
+    activate();
+    const { calls } = stubFetch(async (url, method) => {
+      if (method === "GET" && url === taskUrl) return jsonResponse(200, taskDetailBody({}));
+      if (method === "GET" && url === `${taskUrl}/artifacts`) return jsonResponse(200, taskArtifactsBody());
+      if (method === "GET" && url === stateUrl) return jsonResponse(200, projectStateBody());
+      throw new Error(`unexpected request: ${method} ${url}`);
+    }, () => state === "已归档"
+      ? jsonResponse(200, { id: PROJECT_ID, title: "历史项目", project_type: "GENERAL", revision: "2", state_revision: "1", archived_at: "2026-09-26T00:00:00Z" })
+      : jsonResponse(403, { code: "FORBIDDEN", detail: "Project 不可读" }));
+    const mounted = await mountWorkbench(`/tasks/${TASK_ID}`); unmount = mounted.unmount;
+    expect(mounted.wrapper.get('[data-testid="task-detail"]').text()).toContain("真实任务");
+    expect(mounted.wrapper.get('[data-testid="task-project-archive-reason"]').text())
+      .toContain(state === "已归档" ? "已归档" : "读取失败");
+    await mounted.wrapper.get('[data-testid="task-detail-tab-artifacts"]').trigger("click"); await flush();
+    await mounted.wrapper.get('textarea[name="artifact-content"]').setValue("保留草稿");
+    expect(mounted.wrapper.get('[data-testid="artifact-save"]').attributes("disabled")).toBeDefined();
+    expect(mounted.wrapper.get('[data-testid="artifact-select-version"]').attributes("disabled")).toBeDefined();
+    await mounted.wrapper.get('[data-testid="artifact-save"]').trigger("click");
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(0);
   });
 });
 

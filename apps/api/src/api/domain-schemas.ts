@@ -62,6 +62,13 @@ export const CreateProjectResultSchema = Type.Object(
   strict,
 );
 
+export const ArchiveProjectResultSchema = Type.Object({
+  project_id: UuidSchema,
+  revision: DecimalSchema,
+  archived_at: TimestampSchema,
+  archive_status: Type.Literal('ARCHIVED'),
+}, strict);
+
 export const CreateGoalResultSchema = Type.Object(
   { goal_id: UuidSchema, status: Type.String(), revision: DecimalSchema },
   strict,
@@ -215,6 +222,11 @@ export const CreateProjectBodySchema = Type.Object(
   strict,
 );
 
+export const ArchiveProjectBodySchema = Type.Object({
+  command_id: CommandIdField,
+  expected_revision: DecimalSchema,
+}, strict);
+
 export const CreateGoalBodySchema = Type.Object(
   {
     command_id: CommandIdField,
@@ -271,6 +283,15 @@ export const TaskRevisionBodySchema = Type.Object(
   { command_id: CommandIdField, expected_revision: DecimalSchema },
   strict,
 );
+
+export const TaskPlanningMetadataBodySchema = Type.Object({
+  command_id: CommandIdField,
+  expected_revision: DecimalSchema,
+  priority: Type.Union([Type.Literal('LOW'), Type.Literal('NORMAL'),
+    Type.Literal('HIGH'), Type.Null()]),
+  due_local_date: Type.Union([Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }), Type.Null()]),
+  timezone: Type.Union([Type.String({ minLength: 1, maxLength: 100 }), Type.Null()]),
+}, strict);
 
 export const CancelTaskBodySchema = Type.Object(
   { command_id: CommandIdField, expected_task_revision: DecimalSchema,
@@ -438,6 +459,20 @@ export const DelegateTaskBodySchema = Type.Object(
       target: Type.String({ minLength: 1, maxLength: 4096 }),
       content: Type.String({ minLength: 1, maxLength: 1024 }),
     }, strict)),
+    file_read_action: Type.Optional(Type.Object({
+      connection_id: UuidSchema,
+      resource_id: UuidSchema,
+      relative_target: Type.String({ minLength: 1, maxLength: 1024 }),
+    }, strict)),
+    web_fetch_action: Type.Optional(Type.Object({
+      connection_id: UuidSchema,
+      url: Type.String({ minLength: 1, maxLength: 2048 }),
+    }, strict)),
+    context_sources: Type.Optional(Type.Array(Type.Object({
+      kind: Type.Union([Type.Literal('KNOWLEDGE'), Type.Literal('MEMORY'), Type.Literal('DECISION')]),
+      root_id: UuidSchema,
+      version: DecimalSchema,
+    }, strict), { maxItems: 10 })),
   },
   strict,
 );
@@ -584,6 +619,18 @@ export const TasksListQuerySchema = Type.Object(
   {
     project_id: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
     inbox: Type.Optional(Type.Union([Type.Literal('true'), Type.Literal('false')])),
+    scope: Type.Optional(Type.Literal('all')),
+    limit: Type.Optional(Type.String({ pattern: '^[0-9]{1,3}$' })),
+    cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+  },
+  strict,
+);
+
+export const ProjectsListQuerySchema = Type.Object(
+  {
+    status: Type.Optional(Type.Union([
+      Type.Literal('active'), Type.Literal('archived'), Type.Literal('all'),
+    ])),
     limit: Type.Optional(Type.String({ pattern: '^[0-9]{1,3}$' })),
     cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   },
@@ -763,6 +810,10 @@ const taskSummaryFields = {
   mode: Type.String(),
   revision: DecimalSchema,
   acceptance_revision: DecimalSchema,
+  priority: Type.Union([Type.Literal('LOW'), Type.Literal('NORMAL'),
+    Type.Literal('HIGH'), Type.Null()]),
+  due_local_date: Type.Union([Type.String(), Type.Null()]),
+  timezone: Type.Union([Type.String(), Type.Null()]),
   executor: TaskExecutorSchema,
   current_completion_id: Type.Union([UuidSchema, Type.Null()]),
   waiting_reason: Type.Union([Type.String(), Type.Null()]),
@@ -806,6 +857,28 @@ export const ProjectSchema = Type.Object(
   },
   strict,
 );
+
+export const ProjectSummarySchema = Type.Object(
+  {
+    id: UuidSchema,
+    title: Type.String(),
+    project_type: Type.String(),
+    archived_at: Type.Union([TimestampSchema, Type.Null()]),
+    archive_status: Type.Union([Type.Literal('ACTIVE'), Type.Literal('ARCHIVED')]),
+    revision: DecimalSchema,
+    state_revision: DecimalSchema,
+    phase_key: Type.String(),
+    next_action_task_id: Type.Union([UuidSchema, Type.Null()]),
+    created_at: TimestampSchema,
+    updated_at: TimestampSchema,
+  },
+  strict,
+);
+
+export const ProjectListSchema = Type.Object({
+  items: Type.Array(ProjectSummarySchema),
+  next_cursor: Type.Union([Type.String(), Type.Null()]),
+}, strict);
 
 export const GoalSchema = Type.Object(
   {

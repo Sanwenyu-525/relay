@@ -96,7 +96,7 @@ export async function createVerificationReviews(
   }
 
   for (const spec of specs) {
-    await repositories.reviews.insertRequest({
+    const review = await repositories.reviews.insertRequest({
       id: randomUUID(),
       workspaceId: input.run.workspace_id,
       projectId: input.task.project_id,
@@ -105,6 +105,7 @@ export async function createVerificationReviews(
       verificationSessionId: input.session.id,
       criterionId: spec.criterionId ?? null,
       operationId: null,
+      importJobId: null,
       kind: spec.kind,
       reason: spec.reason,
       targetHash: reviewTargetHash(spec.target),
@@ -114,6 +115,12 @@ export async function createVerificationReviews(
       allowedDecisions: spec.allowedDecisions,
       expiresAt: null,
     });
+    await repositories.activities.insertActivityRecord({ id: randomUUID(),
+      workspaceId: input.run.workspace_id, runId: input.run.id,
+      actorKind: 'AI', actorRef: `run:${input.run.id}`, commandId: null,
+      projectId: input.task.project_id, taskId: input.task.id,
+      eventType: 'REVIEW_REQUESTED', factRefs: { review_id: review.id,
+        run_id: input.run.id, verification_session_id: input.session.id, kind: review.kind } });
   }
 }
 

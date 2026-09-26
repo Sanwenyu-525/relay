@@ -1,6 +1,8 @@
 # Relay 扩展模型：Skill、Blueprint 与 Pack
 
-角色：扩展组合、Skill 定义及蓝图应用的专题设计，沿用原路径避免重复事实源。日期：2026-09-21。状态：用户已确认纳入评审后的首批方向及扩展模型；具体实现设计仍 Proposed，未实现。来源：用户三份扩展建议及后续文档修改指令；与现有总纲、Assist、领域 Owner 和四份契约对照后形成。取舍见 [ADR-008](../decisions/ADR-008-declarative-skills.md)，分期与差异见[范围矩阵](../requirements/v1-scope.md)。
+角色：扩展组合、Skill 定义及蓝图应用的专题设计，沿用原路径避免重复事实源。日期：2026-09-21；2026-09-26 补充实现状态。首批只读第一方注册、最小 Thesis/Development Pack 清单、Assist 生成、当前 Task Skill 建议显式接受、内置 ViewConfiguration Owner 与 Project Blueprint 候选/Preview/Diff/原子 Apply 已进入后端开发自检；Pack 选择仅固定候选来源，不等于批量配置应用。通用 Pack 安装、任意页面编辑、Rule/Workflow/Permission 随蓝图应用仍为 Proposed。来源：用户三份扩展建议及后续文档修改指令；与现有总纲、Assist、领域 Owner 和四份契约对照后形成。取舍见 [ADR-008](../decisions/ADR-008-declarative-skills.md)，分期与差异见[范围矩阵](../requirements/v1-scope.md)。
+
+本次后端事实：`goal-to-project-blueprint@1.0.0` 通过 Project Assist 生成严格 JSON 建议，生成时重读当前 Project/State/Task、显式选择的同 Workspace ACTIVE Goal、内置 View；`thesis-minimal`/`development-minimal@1.3.0` 固定引用该 Skill 与已交付的三项第一方 Skill。旧 Skill/Pack 版本定义与摘要保留。蓝图 `USER_DRAFT` 和 `SKILL` 走同一不可变候选、服务端 Diff、摘要确认和单事务 Apply：Goal 只关联已有目标，新 Task 仅 HUMAN/ME/INBOX，State 使用类型化阶段与 Next Action，View 只切固定 kind；后续 Rule/Workflow/Permission 建议不在本次事务中生效。当前实现没有项目级 Pack 绑定或自动授权。详见 [HTTP 契约 §10.33–10.34](../api/http-command-contract.md)。
 
 ## 1. 定义与最小范围
 
@@ -104,7 +106,7 @@ V1 第一方注册定义与首批 Skill 在 P11/P12/P14/P15 对应职责中接�
 
 V1.5 声明式自定义 Skill、Page Schema/Block Registry 是后续候选；AI 生成 Schema 从原 V2 前移至 V1.5 尚待确认。注册 Page Schema 仅引用允许的 Block/Query/Action，Preview/Diff/Apply 原则保留；具体 schema、存储与迁移另设计，不能将本节理解为 V1 通用页面引擎。V2+ 再评估第三方 Pack、代码组件和 Plugin SDK 的来源信任、隔离与兼容，不提前建设市场。
 
-验收场景维护于[测试计划](../testing/verification-plan.md#8-relay-skill-与蓝图应用验收)，存储落点维护于[逻辑模型](../database/logical-model.md#10-skill-与蓝图的持久化补充)，API 扩展维护于[模块接口](../api/module-api.md#5-skill-与蓝图提案)。尚需实施冻结：输出大小预算、正式 schema、注册 ID 集合、定义保留方式、锁协议和 migration；它们是实现前置项，不是已运行能力。
+验收场景维护于[测试计划](../testing/verification-plan.md#8-relay-skill-与蓝图应用验收)，存储落点维护于[逻辑模型](../database/logical-model.md#10-skill-与蓝图的持久化补充)，API 扩展维护于[模块接口](../api/module-api.md#5-skill-与蓝图提案)。首批 Skill 输出预算、schema、注册 ID、定义保留、Task 接受锁协议与 migration 已按当前实现冻结；`0025` 的 Project Blueprint 候选/预览/原子 Apply 已有开发自检，Pack 批量应用或配置授权仍未实现，不能将开发自检当成完整能力验收。
 
 ## 7. 首批闭环能力与后续目录
 
@@ -137,7 +139,7 @@ Repair Contract 至少绑定 ArtifactVersion/hash、失败 criterion 与 Evidenc
 
 自动执行的确定性 State delta 仅在合法完成事务中，由程序根据当前有效验证、执行权、完成周期和事实映射计算，必要时为空。PASS 后崩溃只恢复完成提交；重复命令不重复追加 delta。阶段推进、风险解除等推断进入独立 State 提案，接受时重查 revision 和来源；模型建议失败不撤销合法完成，也不能重写整份 State。
 
-Project Resume 读取当前权威事实与明确版本引用；旧摘要只能作带日期的历史输入。重开任务、已替代 Decision、撤销验证不再被描述为当前完成或有效。没有上次访问/比较基线时只展示当前状态，不编造“自上次以来”的变化；来源不可用明确标注，未知耗时/进度不估成确定数字。建议下一步复用 Today 的合格候选与 reason_codes，不越过依赖、Later、阻塞或执行权。
+Project Resume 读取当前权威事实与明确版本引用；旧摘要只能作带日期的历史输入。重开任务、已替代 Decision、撤销验证不再被描述为当前完成或有效。没有上次访问/比较基线时只展示当前状态，不编造“自上次以来”的变化；来源不可用明确标注，未知耗时/进度不估成确定数字。未来可将建议下一步绑定 Today 的合格候选与 reason_codes；当前 `next_steps` 仅是模型文字建议，不带 Task ID 或启动动作，不能表示为“可立即开始”的 Task。
 
 ### 7.4 后续候选与领域组合
 

@@ -755,6 +755,7 @@ test('rolls back every module write in one transaction', async () => {
       });
       await repositories.activities.insertActivityRecord({
         id: randomUUID(),
+        workspaceId,
         actorKind: 'HUMAN',
         actorRef: 'test',
         commandId,

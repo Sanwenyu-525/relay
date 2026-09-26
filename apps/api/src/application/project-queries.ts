@@ -18,6 +18,38 @@ export interface ProjectDto {
   readonly updated_at: string;
 }
 
+export interface ProjectSummaryDto extends ProjectDto {
+  readonly archive_status: 'ACTIVE' | 'ARCHIVED';
+  readonly phase_key: string;
+  readonly next_action_task_id: string | null;
+}
+
+export async function listProjects(
+  db: DbExecutor,
+  input: { readonly workspaceId: string; readonly status: 'active' | 'archived' | 'all';
+    readonly limit: number; readonly before: { readonly createdAt: string; readonly id: string } | null },
+): Promise<{ readonly items: readonly ProjectSummaryDto[];
+  readonly next_cursor: { readonly createdAt: string; readonly id: string } | null }> {
+  const rows = await createRepositories(db).projects.listProjectsPage(input);
+  const hasMore = rows.length > input.limit;
+  const page = hasMore ? rows.slice(0, input.limit) : rows;
+  const last = page.at(-1);
+  return {
+    items: page.map((row) => ({
+      id: row.id, title: row.title, project_type: row.project_type,
+      archived_at: row.archived_at?.toISOString() ?? null,
+      archive_status: row.archived_at === null ? 'ACTIVE' : 'ARCHIVED',
+      revision: toDecimalString(row.revision),
+      state_revision: toDecimalString(row.state_revision),
+      phase_key: row.phase_key,
+      next_action_task_id: row.next_action_task_id,
+      created_at: row.created_at.toISOString(), updated_at: row.updated_at.toISOString(),
+    })),
+    next_cursor: hasMore && last !== undefined
+      ? { createdAt: last.cursor_created_at, id: last.id } : null,
+  };
+}
+
 export interface GoalDto {
   readonly id: string;
   readonly title: string;

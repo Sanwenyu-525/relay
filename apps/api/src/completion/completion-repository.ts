@@ -96,6 +96,17 @@ export class CompletionRepository {
     return result.rows[0];
   }
 
+  async readHumanAcceptance(acceptanceId: string): Promise<HumanAcceptanceRow | undefined> {
+    const result = await sql<HumanAcceptanceRow>`
+      select id, task_id, acceptance_revision, actor_kind, actor_ref, statement,
+             accepted_criterion_ids, accepted_version_refs, reason, created_at
+      from human_acceptances
+      where id = ${acceptanceId}
+    `.execute(this.db);
+
+    return result.rows[0];
+  }
+
   async listCompletionRecordsByCycle(
     taskId: string,
     acceptanceRevision: bigint,

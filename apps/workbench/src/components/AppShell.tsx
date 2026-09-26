@@ -1,8 +1,10 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { NavLink, useLocation } from "react-router-dom";
-import { Bell, BookOpen, FolderKanban, House, Link2, ListChecks, ListTree, Menu, Settings } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link, NavLink, useLocation } from "react-router-dom";
+import { Bell, BookOpen, FolderKanban, House, Inbox, Link2, ListChecks, ListTree, Menu, Search, Settings } from "lucide-react";
 import AppDialog from "./AppDialog";
+import CommandPalette from "./CommandPalette";
 import RelayConnectionDialog from "./RelayConnectionDialog";
+import { dialogCount } from "../lib/dialogStack";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { useRelayConnection } from "../lib/relayConnection";
 
@@ -22,8 +24,19 @@ export default function AppShell({ children, desktopStatus }: {
   const connection = useRelayConnection();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
   const chrome = useMemo(() => fixtureAdapter.getNavigationLabels(), [location.key]);
   const dataSourceLabel = connection.mode === "live" ? "已连接本机 API" : "示例数据";
+  useEffect(() => {
+    const openCommand = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.isComposing || event.key.toLowerCase() !== "k") return;
+      if (commandOpen || dialogCount() > 0) { event.preventDefault(); return; }
+      event.preventDefault(); setCommandOpen(true);
+    };
+    document.addEventListener("keydown", openCommand);
+    return () => document.removeEventListener("keydown", openCommand);
+  }, [commandOpen]);
+  useEffect(() => { setCommandOpen(false); }, [location.pathname, location.search]);
   const primaryNavigation = [
     { label: "今日", to: "/today", icon: House, count: "" },
     { label: "项目", to: "/projects", icon: FolderKanban, count: "" },
@@ -35,14 +48,26 @@ export default function AppShell({ children, desktopStatus }: {
   const query = new URLSearchParams(location.search);
   const path = location.pathname;
   const breadcrumb = (() => {
+    if (path === "/today") return ["工作空间", "今日"];
+    if (path === "/activity" || path === "/activities") return ["工作空间", "动态"];
+    if (/^\/artifact-versions\/[^/]+\/lineage$/u.test(path)) return ["产物版本", "来源"];
     if (path === "/projects") return ["工作空间", query.get("view") === "create" ? "新建项目" : "项目"];
-    if (path === "/tasks") return ["工作空间", query.get("view") === "create" ? "新建任务与执行准备" : "任务"];
+    if (path === "/tasks") return query.get("view") === "create"
+      ? ["工作空间", "新建任务与执行准备"]
+      : query.get("tab") === "inbox" ? ["工作空间", "任务", "收件箱"] : ["工作空间", "任务"];
     if (path === "/reviews") return ["工作空间", "待审"];
     if (path === "/knowledge") return ["工作空间", "知识"];
-    const project = /^\/projects\/([^/]+)(?:\/(tasks|knowledge))?$/u.exec(path);
+    if (path === "/connections" || path === "/settings/connections") return ["工作空间", "连接"];
+    const workbench = /^\/projects\/([^/]+)\/workbench\/(general|thesis|development)$/u.exec(path);
+    if (workbench) {
+      const title = connection.mode === "live" ? null : fixtureAdapter.getProjectTitle(workbench[1] ?? "");
+      const kind = workbench[2] === "thesis" ? "论文工作台" : workbench[2] === "development" ? "开发工作台" : "通用工作台";
+      return ["项目", title ?? "当前项目", kind];
+    }
+    const project = /^\/projects\/([^/]+)(?:\/(tasks|knowledge|connections))?$/u.exec(path);
     if (project) {
       const title = connection.mode === "live" ? null : fixtureAdapter.getProjectTitle(project[1] ?? "");
-      const suffix = project[2] === "tasks" ? "任务" : project[2] === "knowledge" ? "资料" : skillPageNames[query.get("skill") ?? ""] ?? skillPageNames.blueprint;
+      const suffix = project[2] === "tasks" ? "任务" : project[2] === "knowledge" ? "资料" : project[2] === "connections" ? "连接" : skillPageNames[query.get("skill") ?? ""] ?? skillPageNames.blueprint;
       return ["项目", title ?? "当前项目", suffix];
     }
     const task = /^\/tasks\/([^/]+)$/u.exec(path);
@@ -83,6 +108,9 @@ export default function AppShell({ children, desktopStatus }: {
             {index > 0 && <span className="breadcrumb-separator" aria-hidden="true">›</span>}<span>{item}</span>
           </span>)}</nav>
           <time className="topbar-date">{date}　{weekday}</time>
+          <Link className="icon-button" to="/inbox" aria-label="打开任务收件箱" title="任务收件箱"
+            data-testid="inbox-open"><Inbox aria-hidden="true" /></Link>
+          <button className="icon-button" type="button" aria-label="打开命令面板，快捷键 Ctrl+K" data-testid="command-open" onClick={() => setCommandOpen(true)}><Search aria-hidden="true" /></button>
           <button className="data-source-button" type="button" data-testid="relay-connection-open" aria-label={`数据来源：${dataSourceLabel}，打开连接设置`} onClick={() => setConnectionOpen(true)}>
             <Link2 aria-hidden="true" /><span>{dataSourceLabel}</span>
           </button>
@@ -94,6 +122,7 @@ export default function AppShell({ children, desktopStatus }: {
     </div>
     <p className="demo-notice">{connection.mode === "live" ? "已连接本机 API · 写入真实 PostgreSQL" : "交互预览 · 示例数据，刷新后重置"}</p>
     <RelayConnectionDialog open={connectionOpen} onClose={() => setConnectionOpen(false)} />
+    <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} />
     <AppDialog open={navigationOpen} title="导航" variant="drawer" onClose={() => setNavigationOpen(false)}>
       <nav className="mobile-navigation-list" aria-label="完整导航">
         {[...primaryNavigation, ...secondaryNavigation].map((item) => <NavLink key={item.label} to={item.to} className="mobile-navigation-item" onClick={() => setNavigationOpen(false)}>

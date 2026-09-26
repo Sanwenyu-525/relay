@@ -99,9 +99,10 @@ export default function App() {
     </main>;
   }
 
+  const preserveCreateTask = location.pathname === "/tasks" && new URLSearchParams(location.search).get("view") === "create";
   return <>
     <AppShell desktopStatus={desktopStatus}>
-      <div key={`${connection.epoch}:${location.pathname}${location.search}`}><Outlet /></div>
+      <div key={`${preserveCreateTask ? "create-task" : connection.epoch}:${location.pathname}${location.search}`}><Outlet /></div>
     </AppShell>
     <AppDialog open={blocker.state === "blocked"} title="保留未保存的修改" onClose={() => blocker.reset?.()}>
       <p>即将离开的页面还有未保存的修改。你可以继续编辑，或丢弃草稿后离开。</p>

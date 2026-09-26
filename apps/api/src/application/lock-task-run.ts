@@ -1,5 +1,6 @@
 import type { RunRow, TaskRow } from '../infrastructure/database-schema.js';
 import { resourceNotFound } from './domain-error.js';
+import { lockWritableProjectInWorkspace } from './guards.js';
 import type { Repositories } from './unit-of-work.js';
 
 /** 先无锁读取稳定的 run.task_id 定位，再统一按 Task → Run 加行锁。 */
@@ -15,6 +16,9 @@ export async function lockTaskAndRun(
   const task = await repositories.tasks.lockTask(located.task_id);
   if (task === undefined || (workspaceId !== undefined && task.workspace_id !== workspaceId)) {
     throw resourceNotFound('Task');
+  }
+  if (task.project_id !== null) {
+    await lockWritableProjectInWorkspace(repositories, task.workspace_id, task.project_id);
   }
   const run = await repositories.runs.lockRun(runId);
   if (run === undefined || run.task_id !== task.id || run.workspace_id !== task.workspace_id) {

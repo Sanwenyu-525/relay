@@ -227,9 +227,9 @@ FK 引用侧按实际删除/查询需求补索引；不为每个字段建索引�
 
 ## 9. 完整模块设计的增量落点
 
-Information/Today/Assist 在后续 migration 落地，字段与唯一性见对应主设计：Knowledge/Memory/Decision/Rule 根与版本；task.goal_alignment_mode 区分继承和显式空；planning metadata 与 selection revision 独立；model_calls/assist_sessions/lineage_edges 保存实际需要的证据。提案由领域 Owner 持有，State 复用 state_proposals，统一 ProposalDTO 不再建第二份状态表。不要回头修改已应用 V001。
+Information/Today/Assist 按调用方分期落地：Knowledge/Memory/Decision/Rule 根与版本及 task.goal_alignment_mode 已在 0002/0009，Assist/model_calls 在 0015/0018，Today planning metadata 与独立 selection revision 在 0020；lineage_edges 仍待后续实际入口。字段与唯一性见下文对应迁移小节。提案由领域 Owner 持有，State 复用 state_proposals，统一 ProposalDTO 不再建第二份状态表。不要回头修改已应用 V001。
 
-2026-09-20 新增待落实项：[Skill/Blueprint 逻辑扩展](logical-model.md#10-skill-与蓝图的持久化补充)不在现有 SQL 片段覆盖范围。D 阶段需补 ProjectBlueprintProposal 与应用来源关系、同提案应用唯一约束、多对象基线校验，以及 Project/Goal/View/Proposal 在统一锁序中的位置；所有相关人工/Assist 写入口必须一致。真实 PG 并发接受、人工编辑/归档竞争、事务失败和响应丢失通过前，不得宣称 ApplyProjectBlueprint 可安全交付。此处不提前分配 migration 号或假定已有 DDL。
+2026-09-20 的 Skill/Blueprint 待落实项已由 0022–0025 逐段实现；当前 Project Blueprint 持久化、基线和锁序见第 37 节。真实 PG 开发自检覆盖了重放、View stale、来源归档和事务回滚；独立模块与桌面验收仍后置。
 
 同一扩展还需落实可选 Pack 来源、解析成员清单与实际 Profile/Recipe 版本引用的存储/完整性检查；旧记录兼容与定义快照保留见逻辑模型。采用包不能生成另一套事实表，兼容校验失败不得留下部分 current 绑定。此项仍为 D 阶段迁移前核验要求，无新增已执行 SQL。
 
@@ -518,3 +518,101 @@ API 不需要 Saver；Worker 与 supervisor 在领取前只读核对业务 schem
 此片不追加业务 migration，也不改写 0011–0013 或 PostgresSaver 官方表。可选 Delegate 意图在既有不可变 `execution_contracts.frozen_snapshot` 保存唯一 `operation_id`、连接/资源 ID、目标与内容；Review、`logical_operations`、`gateway_invocations`、资源 claim、Run 命令和 outbox 继续使用原表。DRAFT 提交后图在 PERSIST 前以原意图调用 Gateway；ASK 的 Review、operation、旧 START 与批准后 RESUME 保留各自身份。批准本身不执行效果；仅确有同 `operation_id` 冻结 Mock 意图的 Review 才自动插入图 RESUME，旧 P07 预留审批与 P09 直接 Gateway 不形成无法领取的命令。RESUME 必须绑定原 Review 决定，且此前命令为 DONE、外层 invocation 为 IDLE；准入时仍核对批准有效期和当前 Connection/Permission/目标。DENY 或确定的准入前撤权将冻结 Mock 的原 operation 记 DENIED，必需动作的 Run 变 FAILED、Task 返 READY；DISPATCHING/UNKNOWN 不走这条无效果路径。
 
 外层 command/epoch 与 Gateway 内层 worker/epoch 在 Task→Run 业务写点同时受栅栏保护；Admit 后至 Fake WRITE_MARKER 前还在短 Task→Run 事务重核内层 `worker_lease_until`、原资源 claim 与外层 invocation。租约已过期时不进入 adapter；效果已发出但结算时内层租约过期则只写原 Invocation/operation UNKNOWN，并将原 claim 置 QUARANTINED。外层续租不代替内层租约，过期本身也不授权新的 Worker 抢占。崩溃后的 PREPARED/DISPATCHING 只能在可信旧进程停止后按原 Invocation 和原 `operation_id` 核对；NOT_EXECUTED 才可在授权仍有效且无 PENDING control 时用原 ID 重试，SUCCEEDED 不重发，UNKNOWN 隔离。Graph checkpoint 与业务/效果事务不原子；旧 ACTION RESUME 在后继验证 Review 处退出重投时，只能结清旧投递，不能唤醒新 Review。控制在外层 invocation ACTIVE/STOP_REQUIRED 时保持 PENDING；命令结清释放后尝试应用，supervisor 对 PG 中空闲的 PENDING 控制分页补查，覆盖两次提交之间的进程退出。应用仍以 Task→Run 锁复核真实状态，不以扫描结果直接改事实。
+
+## 27. 0015 Assist 会话、消息与类型化提案（2026-09-25 M04 开发自检）
+
+`0015_m04_assist` 新增三张 Assist 专属表，全部授予 `relay_app` `SELECT/INSERT/UPDATE`（无 DELETE；Assist 行不删除，归档/决断用状态表达）。`assist_sessions`（Workspace/Project/Task 可空外键、ACTIVE/ARCHIVED 状态、revision）按 Workspace 作用域过滤；绑定 Task 时作用域由应用用例跟随 Task 归属，SQL 层不强制 project/task 一致（跨作用域一致性是用例校验，不是行约束）。`assist_messages` 以 `(session_id, seq)` 唯一递增，`role` 分 USER/ASSISTANT；USER 行恒为 COMPLETED 且必须带正文，ASSISTANT 行按 PENDING/RUNNING/COMPLETED/FAILED/CANCELLED 生命周期受 CHECK 约束（未结算状态无正文、COMPLETED 必有正文）。`intent` 记录生成意图（DISCUSS/PROPOSE_CANDIDATE/PROPOSE_TASK），`sources` jsonb 保存冻结的显式来源引用及生成后写回的实际发送状态（SENT/UNAVAILABLE + 截断与 hash）；0015 当时用量列以 0 为缺省，后续 `0018` 已改为可空并新增统一调用事实（第 30 节）。领取用部分索引 `ix_assist_messages_claim`（仅 PENDING）+ `for update skip locked` 单语句原子领取；RUNNING 行靠生成心跳续 `updated_at`，租约清扫只收敛超时行（LEASE_LOST）。
+
+`assist_proposals` 由 CHECK 固定两类形态：`CANDIDATE_MARKDOWN` 必须指向 TASK（`target_id=task_id`），`TASK_DEFINITION` 必须指向 PROJECT（`target_id=project_id` 且无 task）；`base_revision` 保存提案冻结时的目标 revision，`payload_hash` 为规范 JSON 摘要，`status` PENDING/ACCEPTED/REJECTED/EXPIRED 由 CAS 结算（`decided_at` 只在首次决断写入）。接受提案不另设第二套写入路径：`AcceptAssistProposal` 在单事务内以 FOR UPDATE 持锁贯穿，复用 `CreateArtifactWithVersion`/`CreateTask` 抽出的 `prepare*`/`apply*` 事务内效果（与人工 HTTP 命令同一校验路径），回执（`(scope_key, command_id)` 主键，命令类型 `AcceptAssistProposal`）与提案状态同事务提交；base_revision 落后时业务校验的 REVISION_CONFLICT 在同事务先收敛 EXPIRED、提交后再抛出，避免「结算被回滚」的中间态。提案接受不产生底层命令自己的回执（效果证据在 accept 回执 `result` 与 `decision` 中）；State 提案仍复用既有 Review/State 机制，未在本 migration 引入。
+
+## 28. 0016 WEB_FETCH 公共网页只读适配器（2026-09-25 M04 开发自检）
+
+`0016_m04_web_fetch` 只放宽受守卫形态：`gateway_capabilities` 新增 `('WEB_FETCH','REAL','READ')`；`gateway_connections` 的 REAL 形态放宽为 `root_path` 与 `allowed_host` 两种互斥配置（WEB_FETCH 可附 `allow_private: true` 显式登记允许保留地址，`false` 不落库——缺省即拒绝，SQL 形态拒绝显式 false）；`logical_operations`/`invocation_attempts` 的 connection_config 形态同步放宽。WEB_FETCH 逻辑动作目标为 URL 而非文件系统工作区，`ck_logical_operation_resource` 新增 `resource_id IS NULL` 形态，`ck_invocation_run_identity` 新增「RUN + 无资源 + 无 claim」形态（ownership/worker 身份仍必填）；资源 claim、`rootsOverlap` 排他与文件读写路径完全不受影响。
+
+执行边界在 `src/web/web-fetch.ts`：逐跳 scheme/主机校验 + DNS 全地址保留段检查 + 直连已校验地址（防重绑定）；连接不活跃 10 秒、总请求 30 秒、响应体 5 MiB、正文提取截断 128 KiB 字符；结果（原/最终 URL、状态码、hash、提取正文）进 Invocation `result_ref`。读取语义与 FILE_READ 同构：类型化失败结算 FAILED 并释放（无 claim 可释放即无副作用）、reconcile 安全重读；UNKNOWN 只属于进程不确定，不属于网络失败。
+
+## 29. 0017 URL 导入与 Knowledge 结算（2026-09-26 M04/P17 开发自检）
+
+追加迁移 [0017_m04_web_import.sql](../../apps/api/migrations/0017_m04_web_import.sql) 放宽 `logical_operations.ck_logical_operation_resource`，允许 `USER_IMPORT + WEB_FETCH + resource_id IS NULL`；`knowledge_versions` 增加受约束的 `WEB_PAGE` 形态：不可变正文、`source_uri` 非空、媒体类型为 `text/plain` 或 `text/markdown`、UTF-8 正文不超过 256 KiB。`import_jobs.connection_id` 以 Workspace 复合外键绑定 Gateway Connection，`knowledge_version_id` 指向成功版本；`review_requests.import_job_id` 指向等待批准的 Job，并建立查询索引。既有迁移文件不改写，无 down migration；回退依赖备份和兼容应用版本。
+
+创建命令的 `command_id` 回执与 Job 插入同事务。Worker 扫描 QUEUED，以及状态已改 RUNNING 但尚无 operation 的崩溃遗留 Job；同一 Job/intent 使用稳定 `operation_id`，Gateway 的唯一 intent 约束阻止并发重建动作。已成功的 WEB_FETCH Operation 与 Knowledge 根/版本、Workspace Context revision、Job SUCCEEDED/`knowledge_version_id` 在一个短事务结算；若此事务失败，下一 tick 只按原 Operation 证据重试结算。已失败的 Operation 同样按原结果补结算 Job FAILED。`DISPATCHING` 未结算 Invocation 不在自动重扫范围，仍要求可信旧进程停机后以原 Invocation 核对；扫描不能把租约到期当停机证明，也不能重发新动作身份。真实 PostgreSQL 定向集成覆盖这两个 RUNNING 崩溃窗口、单版本结算和 Workspace 隔离查询；属于开发自检，不替代 M04 独立验收。
+
+## 30. 0018 统一模型调用事实（2026-09-26 M04 开发自检）
+
+追加迁移 [0018_m04_model_calls.sql](../../apps/api/migrations/0018_m04_model_calls.sql) 新增 `model_calls`，每次 DRAFT、SEMANTIC_CHECK、ASSIST 的 Fake/真实端口调用各用独立 UUID 主键。DRAFT 绑定 `step_attempt_id` 与 `manifest_id`；语义检查绑定 `step_attempt_id`、`criterion_id`、`check_attempt`，其 CheckResult 证据另存 `model_call_id`；Assist 绑定 `assist_message_id`。关联列为外键并以形态 CHECK 限制互斥；Workspace ID 来自原 Run 或 AssistSession。`provider`、`model` 只保存非敏感标识，`config_fingerprint` 是不含密钥与 endpoint 的模型参数 SHA-256；不保存提示词、响应正文、endpoint 或凭据。按 StepAttempt/AssistMessage 和 Workspace 时间建立查询索引，应用角色可 SELECT/INSERT，UPDATE 仅限结算字段，无 DELETE；原调用身份与关联不能由应用角色改写。
+
+调用前以独立数据库写入提交 `STARTED`，得到响应后只允许从 STARTED 一次结算为 COMPLETED/FAILED/CANCELLED；已知的 Provider request id、输入/输出 token 数分别记录，未知列为 `NULL`，不能以 0 冒充。Provider 已返回但提案 JSON 未通过业务 schema 时，调用可为 COMPLETED 而 AssistMessage 为 FAILED；VERIFY 外层业务事务回滚时，已经发生的调用仍留痕，不伪造 CheckResult。崩溃遗留 STARTED 不自动变为成功、失败或零用量；重入再次实际调用新增行，旧行不覆盖，不能据此推断供应商只计费一次。AssistMessage 的用量只是当前消息投影，汇总应以 `model_calls` 为唯一来源，不能和消息列相加。此表是计量证据，不控制 Run/验证/Assist 生命周期，也不进行金额结算。
+
+## 31. 0019 DRAFT 读取输入追溯（2026-09-26 M04 开发自检）
+
+追加迁移 [0019_m04_draft_read_input.sql](../../apps/api/migrations/0019_m04_draft_read_input.sql) 为 `model_calls` 增加可空 `input_sha256`、`read_operation_id`、`read_invocation_id`。后两者必须同空或同有，且只允许 DRAFT；分别以 FK 指向原 Gateway 操作与实际调用，另建按 operation 查询索引。新增列在模型请求前的 STARTED 插入中写定，不在结算时修改；应用角色既有表级 SELECT/INSERT 权限适用，UPDATE 仍只限原结算列。旧行保持 NULL，不能倒推其历史输入摘要。摘要使用 `draft-input-v1` 的规范 JSON（实际 Manifest、输出 schema 与结构版本）；读正文仍只存在 Gateway Invocation，计量表不复制内容或凭据。该摘要追溯结构化模型输入，不能据此断言 Provider 的私有提示词处理或确定性输出。
+
+0018 同时移除 `assist_messages.usage_input_tokens`/`usage_output_tokens` 的 0 缺省和 NOT NULL；历史 USER 行及双 0 行因无法分辨“已知精确零”和“未知”，保守回填为 `NULL`，已有正数保留。Assist API 同名 `usage` 字段的子值因此可为 `null`，客户端应按未知展示；迁移不改写已应用的 0015 文件或 SHA。无自动 down migration，回退依赖备份与理解 nullable 用量的新应用版本。真实 PostgreSQL 开发回归覆盖三条调用路径及失败、取消、崩溃遗留状态；未进行 M04 独立验收或真实 Provider 外呼。
+
+## 32. 0020 Today 用户选择与 Task 调度元数据（2026-09-26 M05 开发自检）
+
+追加迁移 [0020_m05_today_selections.sql](../../apps/api/migrations/0020_m05_today_selections.sql) 给 `tasks` 加可空 `priority`、成对 `due_local_date date`/`due_timezone`；旧 Task 行保持 NULL，更新只递增 Task revision，不触及 acceptance_revision。`today_selection_states` 每 Workspace 一行保存全局选择 revision，首次命令惰性建立并锁行；`task_selections` 以 Task 为主键，存 Pin、成对 Later 日期/时区及最后写入的选择 revision，双清除删除行；`focus_selections` 以 Workspace + 本地日期为主键，保存时区与三选一的 Goal/Project/Task 目标，复合外键阻止跨 Workspace ID。Focus 清除删除该日行；同日换时区须通过原全局选择 revision 显式写入。
+
+写命令先核对并锁目标 Task/Project（Goal 读取验证范围），再锁 `today_selection_states`，用全局 revision CAS 串行化变更；命令回执与选择事实同事务提交。Task 元数据命令沿 Task 行锁与 Task revision CAS，不把 Today 用户选择混进 Task 验收版本。Today 查询以 PostgreSQL 可重复读快照装配，只读当前事实；Later 截止和查询观察点分别用日期 `AT TIME ZONE` 将 IANA 时区当地 00:00 转为绝对时刻，不以 UTC 日期覆盖用户选择。应用入口校验真实日历日期与 IANA 时区；表的成对 CHECK/复合外键提供持久形态及范围兜底。无自动 down migration；回退须先备份新增用户选择，不改写既有迁移或 SHA。
+
+## 33. 0021 Activity 范围与精确 Artifact Lineage（2026-09-26 M05/P15 开发自检）
+
+追加迁移 [0021_m05_activity_lineage.sql](../../apps/api/migrations/0021_m05_activity_lineage.sql) 给 `activity_records` 增加非空 `workspace_id` 与可空 `run_id`。历史 Workspace 初始化由 `fact_refs.workspace_id`、Goal 创建由 `fact_refs.goal_id → goals.workspace_id` 回填；其余 Workspace 由 Project/Task 归属或原命令回执作用域定位，Run ID 另由原 Run/Review/Operation/Control 引用定位。无法归属或 Task/Run 归属冲突时迁移整体失败，不让旧事件在 Workspace 分页里静默消失。Workspace/Project/Task/Run 复合外键限制新写入，`(workspace_id,created_at DESC,id DESC)` 及 Run 过滤索引支撑稳定游标。审计写入仍与对应业务事实共用短事务，查询只发布脱敏白名单；旧 `fact_refs` JSON 保持历史证据而不直接对外。
+
+新增 `artifact_lineage_edges`：`child_version_id` 指向不可变 ArtifactVersion，`relation` 与 `parent_kind,parent_id` 是受 CHECK 限定的 typed relation，`workspace_id` 显式绑定，唯一键 `(child_version_id,relation,parent_kind,parent_id)` 使同一确切关系幂等。插入触发器在 Workspace 事务级 advisory 锁下核对 child/parent 真实归属，`REVISED_FROM` 必须指向同 Artifact 更早版本，`GENERATED_BY` 必须是该 Task 的 `PERSIST_CANDIDATE` Step，`VERIFIED_BY` 必须有该 session 的 VerificationTarget，`ACCEPTED_BY` 必须在该 CompletionRecord 的接受版本集合中；ArtifactVersion 父关系拒绝自环和递归环。锁只串行 Lineage 边插入，不包外部模型/文件调用；应用角色只有 SELECT/INSERT，没有 UPDATE/DELETE。现有产物保存、验证结算和完成提交在各自业务事务插入确切边；没有来源事实时不生成推断边。
+
+0021 不改写旧迁移或内容摘要；无自动 down migration。回退须备份审计归属与 Lineage 边，并使用理解新非空审计字段的应用版本。真实隔离 PostgreSQL 迁移回归覆盖历史回填、无法定位行整体回滚；业务回归覆盖 Workspace 过滤、回放去重、版本自环/跨域/循环与来源不可用，属于开发自检，不是独立或桌面验收。
+
+## 34. 0022 Assist 第一方 Skill 冻结快照（2026-09-26 M04/P12 开发自检）
+
+追加迁移 [0022_m04_first_party_skills.sql](../../apps/api/migrations/0022_m04_first_party_skills.sql) 只在 `assist_messages` 加可空 `skill_snapshot jsonb`、`skill_input jsonb`、`skill_output jsonb`。旧行三列保持 NULL；Skill 只允许 ASSISTANT 行同时保存对象形态的冻结定义与输入，已完成消息才可持有输出对象。更新触发器拒绝修改冻结定义/输入、已结算输出，以及非 RUNNING→COMPLETED 的首次输出写入；原 Assist 领取身份与状态 CAS 仍在 Repository 控制，不建立 SkillRun 或安装表。首批 Skill/Pack 定义随应用只读发布；调用行保存实际定义、依赖内容及精确版本/摘要，输出保存结构化建议和生成时事实基线，不把整包选择写入 Project。
+
+0022 不回填旧消息、不改写已执行迁移或其 SHA。回退须备份三列历史快照与输出，使用理解 nullable 新列的应用版本；无自动 down migration。真实隔离 PostgreSQL 开发回归覆盖新旧消息、命令重放、冻结触发器、首次结算、撤权后读取与 Project Resume 当前事实；独立模块和 Windows 桌面验收未执行。
+
+## 35. 0023 当前 Task Skill 提案与验收版本（2026-09-26 M04/P12 开发自检）
+
+追加迁移 [0023_m04_task_skill_proposals.sql](../../apps/api/migrations/0023_m04_task_skill_proposals.sql) 扩展原 `assist_proposals` 的 `kind` 约束为 `TASK_CONTRACT_CHANGE`、`VERIFICATION_PLAN_CHANGE`，加入可空 `base_acceptance_revision`、`skill_sha256`、`skill_output_sha256`；旧提案行均保持 NULL，原 `TASK_DEFINITION` 仍以 Project 为目标创建新 Task。新 Task 提案强制 Task 目标、双版本与 64 位来源摘要。冻结触发器拒绝改写目标、基线、候选内容/摘要及 Skill 来源，允许原提案状态/决定按既有事务结算。新接受效果写原 `task_acceptances` 下一版本、`task_criteria`、Task acceptance 指针，撤销旧 Verification 适用性并过期 Task 的 OPEN Review；审计、提案决定和命令回执与之同事务。没有第二份有效 CheckPlan 表；GET 准入预览由当前验收、Rule 与注册检查器重建，活动 Run 仍持有原冻结契约。
+
+锁序为先锁不可变 AssistProposal，随后取 Workspace authority SHARE 并复核当前来源，再锁 Task，最后写验收/旧证据失效/审计/回执。只接受 HUMAN 拥有且无活动 Run、未结算或 UNKNOWN Gateway 动作的 Task；并发不同接受只能有一个提交，重复同命令只读原回执。`task-to-execution-contract@1.1.0` 可变更 Expected Result 描述，但旧 `required_output_spec` 的产物种类与其他键原样保留；已确认 criterion 全部复制，不因模型建议删除或弱化。定义新版本与 Pack 1.2.0 随应用发布，旧定义及消息冻结快照不回填、不改摘要。迁移无自动 down；回退须备份新验收版本/提案证据并使用理解新 kind 的应用，不能只删列回退业务效果。真实隔离 PostgreSQL 的定向开发回归涵盖冲突、回放、旧证据失效、跨范围、UNKNOWN 与审计故障回滚；独立/桌面验收后置。
+
+## 36. 0024 内置 ViewConfiguration（2026-09-26 M05/P14 开发自检）
+
+追加迁移 [0024_m05_view_configuration.sql](../../apps/api/migrations/0024_m05_view_configuration.sql) 新建每 Project 唯一的 `project_view_configurations`：`workspace_id/project_id` 复合外键防跨域，独立非负 revision、受 CHECK 限制的内置 kind、固定模板版本及时间。旧 Project 按自身类型回填 General/Thesis/Development；新 CreateProject 与 Project/State 在同一事务建 View 行。实际页面显隐/顺序由随应用发布的 `kind@template_version` 固定注册解析并返回摘要；表不存任意页面代码、脚本、URL 或第二份 Project State。View Owner 命令锁本行按 revision CAS，审计/回执同事务，既有 Run 冻结执行契约不受展示选择影响。无自动 down；回退须备份用户已选择的 kind/revision，旧应用若不能建 View 行不得继续写入。真实 PG 定向核对新建初始形态、切换、重放、版本冲突和跨范围；历史回填由迁移 SQL 保证，尚未单独构造升级前 Project 的反例。独立/桌面验收后置。
+
+## 37. 0025 Project Blueprint 候选与来源（2026-09-26）
+
+追加 [0025_m05_project_blueprints.sql](../../apps/api/migrations/0025_m05_project_blueprints.sql)：`project_blueprint_proposals` 以复合外键绑定 Workspace/Project，保存 `USER_DRAFT` 或 `SKILL` 来源、不可变 candidate/baseline/source JSON、SHA-256、可空 Assist 消息和被替代候选引用、决策终态/时间。候选 JSON 限 64 KiB；触发器拒绝修改来源、候选、基线或摘要，应用仓储以条件更新限定 PENDING→ACCEPTED/REJECTED/EXPIRED/SUPERSEDED 决策。旧 Project/Assist/Run 不回填伪蓝图；无 down migration，回退需备份已接受来源与映射，旧应用不能继续写入这些候选。
+
+候选不是第二份 Project/State/View/Task 当前事实。Preview 读当前 Owner 版本，Apply 按候选→WorkspaceAuthority（Skill 来源时 SHARE）→Project→Goal→现有 Task→新 Task→ProjectState→View 锁序，成功在同一事务调用各 Owner、写审计/决策/命令回执；State/View 在新 Task 插入后发现冲突必须抛错回滚，不得结算过期并提交部分效果。Skill 来源候选在模型外事务冻结定义/Pack/事实 SHA、已选来源和消息身份；当前来源撤销时 GET 隐藏候选正文并标 stale，Apply 在 authority SHARE 栅栏下重读显式来源/hash 后拒绝。Project Skill 复核时使用排他 Project 行锁阻止并发 Task 外键插入，锁定现有 Task 后比对生成时事实基线；内容/状态变化拒绝生成候选。迁移不会修改 0001–0024 的内容或 SHA。
+
+## 38. 0026 真实模型调用预算预留（2026-09-26）
+
+追加 [0026_m04_model_call_budgets.sql](../../apps/api/migrations/0026_m04_model_call_budgets.sql)：`model_calls.budget_reserved_tokens` 可空且为正。新真实 Provider STARTED 行保存发起时的单次上界；历史行保持 NULL，未回填估算用量。没有 down migration；回退前需保留原调用计量，旧应用不能解释新调用的预算预留。
+
+模型开始用例在单独短事务内先确定所属 Project 并取 `FOR KEY SHARE` 可写栅栏，再锁 `runs`（DRAFT 与 SEMANTIC_CHECK）或 `assist_sessions`（同一会话的全部 Assist 消息），核对 Workspace 与原 StepAttempt/AssistMessage 身份，统计同范围的调用数与 token。没有预算配置的 Mock 调用也在同一栅栏下插入 STARTED；无 Project 的会话不受单 Project 归档约束。两项 usage 都已知时计原值；STARTED、失败或缺失用量计冻结预留；历史无预留且缺用量按整个范围上限计并阻止新增。检查通过才插入 STARTED 和预留，事务提交后才调用网络，结算只更新原 call_id；实际 Provider 用量即使大于预留仍存原值，后续调用因此被阻止。范围限额随受控进程配置，不替代 Run/Assist 原业务 Owner，也不把未知费用记零。
+
+## 39. 0027 Workspace 列表键集索引（2026-09-26 M05/P14）
+
+追加 [0027_m05_workspace_lists.sql](../../apps/api/migrations/0027_m05_workspace_lists.sql)：`projects(workspace_id,created_at DESC,id DESC)` 与 `tasks(workspace_id,created_at DESC,id DESC)` 支持 Workspace 内 Project/全 Task 只读分页。原 Project/Inbox Task 索引和游标语义保留；无表字段、Owner 或写事务改变。列表按 `(created_at,id)` 键集查询，游标保存 PostgreSQL 微秒时间文本；状态/归档在两页之间发生变化时不提供快照隔离。索引随应用迁移追加，无 down migration；回退仅影响查询计划，不改现有业务行。真实 PostgreSQL/HTTP 定向回归检查微秒键、过滤与 Workspace 边界，独立/桌面验收后置。
+
+## 40. Project 归档串行化与提交（2026-09-26，无迁移）
+
+既有 `projects.archived_at` 与 `revision` 已足以表达归档状态；A/B 两段均不改表和既有 migration。关联业务写事务在首次不可逆写入前对所属 Project 行取 `FOR KEY SHARE`，确认 `archived_at IS NULL`，锁持有至事务提交；模型调用 STARTED 预约也遵循此顺序。`ArchiveProject` 先对该行取 `FOR UPDATE`，不反向锁全部 Task；在锁内用只读查询检查 Task/Run/投递/运行中的 Step/尝试/验证、Gateway Operation/Invocation/legacy effect/资源 claim、Import、Assist/STARTED model call 和 OPEN Review。非终态、PREPARED、DISPATCHING、UNKNOWN、待审或租约过期而无停止证据都不得放行。先到的业务写事务完成后归档检查才读取其事实；归档先提交后，后来写事务取栅栏会发现归档并被拒绝。Project revision CAS、`archived_at`、关键 Activity 与命令回执在同一短事务提交；外部模型、网页和 Gateway 效果不持数据库锁等待。历史行不清理，未决事实须沿原身份收敛后由新命令重新检查。跨模块负面准入与死锁取舍见 [ADR-011](../decisions/ADR-011-project-archive-serialization.md)。
+
+## 41. 0028 Assist 生成中临时草稿（2026-09-26 M04 开发自检）
+
+追加 [0028_m04_assist_live_preview.sql](../../apps/api/migrations/0028_m04_assist_live_preview.sql)：`assist_message_previews` 以 `message_id` 为主键及原 AssistMessage 外键，一条消息最多一条暂存行；`revision` 从 1 开始递增，`preview_text` 有 `octet_length <= 16384` 的数据库约束，另存截取标志与更新时间。不回填旧消息，不修改既有消息、Proposal 或模型调用事实；无自动 down migration，回退前须让旧应用忽略新表，删除表会丢失在途临时显示文本，但不影响已结算消息。
+
+普通无 Skill 的 `DISCUSS` 每次流式片段按 UTF-8 完整字符形成有界累计前缀，首片段立即写入，生成期间后续写入至少间隔 100 ms，完整输出返回前可再刷新一次。写入短事务先锁原消息并要求当前 Worker 身份、`RUNNING`、未取消，CAS 不再成立时不能继续发布。模型网络调用不占用这段事务；最终完整输出通过原校验和 Assist Owner 结算，结算同事务删除暂存行。取消请求立刻在读端遮蔽，终态和租约过期清理行；读取短事务以 WorkspaceAuthority SHARE 及消息 SHARE 锁建立与来源撤销、取消、结算的先后关系，并重查目标和有界历史来源。跨进程 API 只读该暂存，不将其当历史全文、审计、凭据或接受证据；重新连接用 revision 识别累计前缀。原消息正文在来源失权时也按当前权限遮蔽，不能借完成行绕过临时草稿的读时规则。
+
+## 42. 0029 Run DRAFT 生成中临时草稿（2026-09-26 M04 开发自检）
+
+追加 [0029_m04_run_draft_live_preview.sql](../../apps/api/migrations/0029_m04_run_draft_live_preview.sql)：`run_draft_previews` 每个 Run 最多一行，主键绑定原 `runs`，外键绑定 `step_attempts` 与唯一 `model_calls.call_id`；保存确切 Attempt claim、Run Worker epoch/ID、可选 dispatch invocation epoch、递增 revision、截断标志和最多 16 KiB UTF-8 的前缀。旧 Run 不回填，新表不改 Run/Artifact/Verification 事实。无自动 down migration；删除新表会丢失在途显示文本，不能影响已结算候选或后续恢复。
+
+模型端口收到 DRAFT Markdown 片段后，首片段立即提交，生成期间后续写入至少间隔 100 ms，完整返回前再刷新一次。每次写入在单独短事务核对 Task→Run→当前 DRAFT Step/Attempt、Worker/租约、dispatch invocation、原 STARTED model call 与无待处理控制；网络等待不占数据库事务。Run claim/release/fence 或 Attempt 结算在原事务删除旧草稿。读取以 WorkspaceAuthority SHARE、Task/Run SHARE 和原模型调用身份核对当前 Manifest、输入摘要及 FILE_READ/WEB_FETCH 原读证据，按当前权限重查来源、Connection、Policy 与 Resource；不可见只返回空草稿，不复制受限来源 ID。旧 Worker、旧 Attempt、失败/取消或租约到期不能将该行当作成功结果，恢复仍依原 Step/Attempt/operation 身份。真实 PG/HTTP 开发自检验证跨进程首片段、旧 Worker 与控制/来源栅栏；独立、真实 Provider 和桌面验收后置。
+
+## 43. 0030 M06 真实工具能力登记（2026-09-26，开发自检）
+
+追加 [0030_m06_real_tools.sql](../../apps/api/migrations/0030_m06_real_tools.sql)，只放宽受守卫形态并登记四类新能力，不新建表、不改 0001–0029 的内容或 SHA，无自动 down migration。（1）`ck_gateway_capability_kind` 由原「FAKE→READ/WRITE」放宽为 FAKE 与 REAL 各自可取 READ/WRITE，使 FILE_WRITE/GIT_WRITE/CLI_RUN 这类 `REAL`+`WRITE` 组合合法；（2）登记 `FILE_WRITE(REAL,WRITE)`、`GIT_READ(REAL,READ)`、`GIT_WRITE(REAL,WRITE)`、`CLI_RUN(REAL,WRITE)` 四行；（3）`ck_logical_operation_resource` 增补四类能力均为 `origin=RUN` 且 `resource_id IS NOT NULL` 的绑定形态（写/Git/CLI 都作用于受管资源根下的实际工作目录，需资源排他，与 WEB_FETCH 的无资源形态不同）。`ck_invocation_run_identity` 与连接/参数守卫沿用 0014/0016 的 `root_path` 形态，未再放宽——四类新动作都绑定受管资源并走带资源 claim 的 RUN 身份分支。
+
+本轮仅以完整迁移应用链核对约束形态一致（临时隔离 PG 应用 0028/0029/0030 后 `ledger_rows` 为 30、图安装就绪、全量既有回归不退化）；FILE_WRITE/APPLY_CHANGESET、GIT_READ/GIT_WRITE、CLI_RUN 在 Gateway 准入/执行/核对层的真实 PG 集成反例尚未编写，适配器目前只有单元测试覆盖其纯逻辑（路径保护、安全环境净化、进程树封装语义），不构成「真实工具与故障/冲突测试通过」的 M06 出口。执行边界与缺口见[工具适配器](../architecture/tool-adapters.md) §2/§4/§5 与 [CODEX_NEXT_STEP](../../CODEX_NEXT_STEP.md)。

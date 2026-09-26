@@ -209,6 +209,11 @@ export async function completeRun(
     runId: input.run.id,
     stateDelta,
   });
+  for (const versionId of artifactVersionIds) {
+    await repositories.lineage.insertExactEdge({ workspaceId: input.run.workspace_id,
+      childVersionId: versionId, relation: 'ACCEPTED_BY',
+      parentKind: 'COMPLETION_RECORD', parentId: completion.id });
+  }
 
   const completed = await repositories.tasks.completeFromRun({
     taskId: input.task.id,
@@ -244,6 +249,8 @@ export async function completeRun(
 
   await repositories.activities.insertActivityRecord({
     id: randomUUID(),
+    workspaceId: input.run.workspace_id,
+    runId: input.run.id,
     actorKind: 'AI',
     actorRef: `run:${input.run.id}`,
     commandId: null,

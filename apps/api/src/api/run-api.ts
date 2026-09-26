@@ -1,7 +1,9 @@
+import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 
 import { delegateTask } from '../application/delegate-task.js';
 import { readRunById } from '../application/run-queries.js';
+import { readRunDraftPreview } from '../application/run-draft-preview.js';
 import { applySafeControl, readControlRequest, requestRunControl, resumeRun } from '../application/control-requests.js';
 import {
   DelegateTaskBodySchema,
@@ -19,6 +21,16 @@ import {
 } from './domain-schemas.js';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
 import { sendRunEventStream } from './run-events-api.js';
+
+const draftPreviewDto = Type.Object({
+  run_id: Type.String({ format: 'uuid' }), run_status: Type.String(),
+  step_attempt_id: Type.Union([Type.String({ format: 'uuid' }), Type.Null()]),
+  attempt_claim_epoch: Type.Union([Type.String({ pattern: '^(0|[1-9][0-9]*)$' }), Type.Null()]),
+  model_call_id: Type.Union([Type.String({ format: 'uuid' }), Type.Null()]),
+  preview_revision: Type.String({ pattern: '^(0|[1-9][0-9]*)$' }),
+  preview_text: Type.Union([Type.String(), Type.Null()]),
+  preview_truncated: Type.Boolean(), preview_available: Type.Boolean(),
+}, { additionalProperties: false });
 
 /**
  * Run 与 Delegate 端点（docs/api/http-command-contract.md 第 4、6 节）。
@@ -49,6 +61,9 @@ export function registerRunRoutes(app: FastifyInstance, dependencies: RouteDepen
           workflowVersionId: body.workflow_version_id ?? null,
           executionConfigVersionId: body.execution_config_version_id ?? null,
           mockGatewayAction: body.mock_gateway_action,
+          fileReadAction: body.file_read_action,
+          webFetchAction: body.web_fetch_action,
+          contextSources: body.context_sources,
         });
 
         return { outcome, result: outcome.result };
@@ -74,6 +89,17 @@ export function registerRunRoutes(app: FastifyInstance, dependencies: RouteDepen
       }
     },
   );
+
+  app.get('/runs/:run_id/draft-preview', {
+    schema: { params: WorkspaceRunParamsSchema, response: { 200: draftPreviewDto } },
+  }, async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    try {
+      const params = request.params as { workspace_id: string; run_id: string };
+      return await readRunDraftPreview(dependencies.database.executor,
+        dependencies.storage, params.workspace_id, params.run_id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
 
   app.get('/runs/:run_id/events', {
     schema: { params: WorkspaceRunParamsSchema },

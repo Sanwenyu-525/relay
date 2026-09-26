@@ -98,11 +98,19 @@ export function normalizeArtifactContent(mediaType: string, content: string): No
  * CreateArtifactWithVersion：在必须处于 IN_PROGRESS 的人工 Task 下建立 Artifact 与它的 v1。
  * 同一次命令只产生一个 Artifact 与一个版本；重放返回原回执，不重复发布内容。
  */
-export async function createArtifactWithVersion(
-  db: DbExecutor,
-  storage: ManagedContentStore,
-  input: CreateArtifactInput,
-): Promise<CommandOutcome<ArtifactVersionResult>> {
+export interface PreparedArtifactCreation {
+  readonly workspaceId: string;
+  readonly taskId: string;
+  readonly commandId: string;
+  readonly expectedTaskRevision: bigint;
+  readonly title: string;
+  readonly mediaType: string;
+  readonly content: string;
+  readonly contentBytes: Buffer;
+}
+
+/** 命令入口校验与规范化；与回执摘要使用同一结果。 */
+export function prepareArtifactCreation(input: CreateArtifactInput): PreparedArtifactCreation {
   const expectedTaskRevision = requireRevision(
     input.expectedTaskRevision,
     'expected_task_revision',
@@ -116,82 +124,107 @@ export async function createArtifactWithVersion(
   const normalized = normalizeArtifactContent(input.mediaType, input.content);
   const title = normalizeText(input.title);
 
+  return {
+    workspaceId: input.workspaceId,
+    taskId: input.taskId,
+    commandId: input.commandId,
+    expectedTaskRevision,
+    title,
+    mediaType: input.mediaType,
+    content: input.content,
+    contentBytes: normalized.content,
+  };
+}
+
+/** 事务内的业务效果；提案接受等协调方在已持有锁的事务里直接复用。 */
+export async function applyArtifactCreation(repositories: Repositories,
+  storage: ManagedContentStore, prepared: PreparedArtifactCreation,
+): Promise<ArtifactVersionResult> {
+  const task = await lockTaskInWorkspace(repositories, prepared.workspaceId, prepared.taskId);
+
+  requireRevisionMatch(task, prepared.expectedTaskRevision);
+  requireHumanInProgress(task, '保存产物版本');
+
+  const artifactId = randomUUID();
+  const versionId = randomUUID();
+  const published = await publishContent(storage, {
+    artifactId,
+    versionId,
+    content: prepared.contentBytes,
+  });
+
+  const artifact = await repositories.artifacts.insertArtifact({
+    id: artifactId,
+    workspaceId: prepared.workspaceId,
+    projectId: task.project_id,
+    taskId: task.id,
+    artifactKind: ARTIFACT_KIND,
+    title: prepared.title,
+  });
+
+  const version = await repositories.artifacts.insertArtifactVersion({
+    id: versionId,
+    artifactId: artifact.id,
+    versionNumber: 1n,
+    storageRef: published.storageRef,
+    contentHash: published.contentHash,
+    size: published.size,
+    mediaType: prepared.mediaType,
+    sourceKind: 'HUMAN',
+    sourceRef: null,
+  });
+
+  const updatedTask = await repositories.tasks.bumpTaskRevision(task.id);
+
+  if (updatedTask === undefined) {
+    throw invalidTransition('Task 在保存产物版本期间消失。', { taskId: task.id });
+  }
+
+  await recordArtifactActivity(repositories, {
+    commandId: prepared.commandId,
+    task: updatedTask,
+    eventType: 'ARTIFACT_VERSION_SAVED',
+    artifact,
+    versionId: version.id,
+    versionNumber: version.version_number,
+    contentHash: published.contentHash,
+    size: published.size,
+    mediaType: prepared.mediaType,
+  });
+
+  return {
+    task_id: updatedTask.id,
+    artifact_id: artifact.id,
+    artifact_revision: toDecimalString(artifact.revision),
+    version_id: version.id,
+    version_number: toDecimalString(version.version_number),
+    media_type: version.media_type,
+    sha256: published.contentHash.toString('hex'),
+    size: toDecimalString(published.size),
+    task_revision: toDecimalString(updatedTask.revision),
+  };
+}
+
+export async function createArtifactWithVersion(
+  db: DbExecutor,
+  storage: ManagedContentStore,
+  input: CreateArtifactInput,
+): Promise<CommandOutcome<ArtifactVersionResult>> {
+  const prepared = prepareArtifactCreation(input);
+
   return runIdempotentCommand<ArtifactVersionResult>(db, {
     scopeKey: httpCommandScopeKey(input.workspaceId),
     commandId: input.commandId,
     commandType: 'CreateArtifactWithVersion',
     target: { task_id: input.taskId },
     body: {
-      expected_task_revision: toDecimalString(expectedTaskRevision),
-      title,
-      media_type: input.mediaType,
-      content: input.content,
+      expected_task_revision: toDecimalString(prepared.expectedTaskRevision),
+      title: prepared.title,
+      media_type: prepared.mediaType,
+      content: prepared.content,
     },
-    execute: async (repositories) => {
-      const task = await lockTaskInWorkspace(repositories, input.workspaceId, input.taskId);
-
-      requireRevisionMatch(task, expectedTaskRevision);
-      requireHumanInProgress(task, '保存产物版本');
-
-      const artifactId = randomUUID();
-      const versionId = randomUUID();
-      const published = await publishContent(storage, {
-        artifactId,
-        versionId,
-        content: normalized.content,
-      });
-
-      const artifact = await repositories.artifacts.insertArtifact({
-        id: artifactId,
-        workspaceId: input.workspaceId,
-        projectId: task.project_id,
-        taskId: task.id,
-        artifactKind: ARTIFACT_KIND,
-        title,
-      });
-
-      const version = await repositories.artifacts.insertArtifactVersion({
-        id: versionId,
-        artifactId: artifact.id,
-        versionNumber: 1n,
-        storageRef: published.storageRef,
-        contentHash: published.contentHash,
-        size: published.size,
-        mediaType: input.mediaType,
-        sourceKind: 'HUMAN',
-        sourceRef: null,
-      });
-
-      const updatedTask = await repositories.tasks.bumpTaskRevision(task.id);
-
-      if (updatedTask === undefined) {
-        throw invalidTransition('Task 在保存产物版本期间消失。', { taskId: task.id });
-      }
-
-      await recordArtifactActivity(repositories, {
-        commandId: input.commandId,
-        task: updatedTask,
-        eventType: 'ARTIFACT_VERSION_SAVED',
-        artifact,
-        versionId: version.id,
-        versionNumber: version.version_number,
-        contentHash: published.contentHash,
-        size: published.size,
-        mediaType: input.mediaType,
-      });
-
-      return {
-        task_id: updatedTask.id,
-        artifact_id: artifact.id,
-        artifact_revision: toDecimalString(artifact.revision),
-        version_id: version.id,
-        version_number: toDecimalString(version.version_number),
-        media_type: version.media_type,
-        sha256: published.contentHash.toString('hex'),
-        size: toDecimalString(published.size),
-        task_revision: toDecimalString(updatedTask.revision),
-      };
-    },
+    execute: async (repositories) =>
+      applyArtifactCreation(repositories, storage, prepared),
   });
 }
 
@@ -253,6 +286,7 @@ export async function submitHumanArtifactVersion(
         });
       }
 
+      const previousVersion = (await repositories.artifacts.listArtifactVersions(artifact.id)).at(-1);
       const versionNumber = await repositories.artifacts.nextVersionNumber(artifact.id);
       const versionId = randomUUID();
       const published = await publishContent(storage, {
@@ -272,6 +306,11 @@ export async function submitHumanArtifactVersion(
         sourceKind: 'HUMAN',
         sourceRef: null,
       });
+      if (previousVersion !== undefined) {
+        await repositories.lineage.insertExactEdge({ workspaceId: input.workspaceId,
+          childVersionId: version.id, relation: 'REVISED_FROM',
+          parentKind: 'ARTIFACT_VERSION', parentId: previousVersion.id });
+      }
 
       const bumpedArtifact = await repositories.artifacts.bumpArtifactRevision(
         artifact.id,
@@ -396,6 +435,7 @@ async function recordArtifactActivity(
 
   await repositories.activities.insertActivityRecord({
     id: randomUUID(),
+    workspaceId: input.task.workspace_id,
     actorKind: 'HUMAN',
     actorRef: LOCAL_ACTOR_REF,
     commandId: input.commandId,

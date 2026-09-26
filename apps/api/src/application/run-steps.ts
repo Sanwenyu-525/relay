@@ -33,10 +33,20 @@ import { requireCurrentRuleSnapshot } from './rule-fence.js';
 import { applySafeControl } from './control-requests.js';
 import type { RunAdvance } from '../run/run-repository.js';
 import { type FakeScenario } from '../workflow/context-fixture.js';
-import { readMockGatewayAction } from '../workflow/execution-contract.js';
+import { readFileReadAction, readMockActionOperationId,
+  readWebFetchAction } from '../workflow/execution-contract.js';
+import { attachReadEvidenceWithinBudget, draftInputHash, loadRunReadEvidence,
+  ReadInputBudgetError } from './run-read-evidence.js';
 import { buildRunContext, type BuiltContext } from './context-builder.js';
 import { contextManifestMatchesCurrent, matchesTaskContext } from './context-fence.js';
 import { FakeModelPort, type ModelPort } from '../workflow/fake-model-port.js';
+import { readModelPortConfig } from '../workflow/model-port-config.js';
+import { OpenAiCompatibleModelPort, ModelCallBudgetError, ModelSourcePolicyError }
+  from '../workflow/openai-compatible-model-port.js';
+import { recordModelInvocation } from './model-call-recorder.js';
+import { AssistLivePreviewPublisher, AssistPreviewOwnershipLostError } from '../assist/live-preview.js';
+import { publishRunDraftPreview } from './run-draft-preview.js';
+import { ModelScopeBudgetError } from '../model/model-call-repository.js';
 import {
   ALL_EXECUTED_STEP_KINDS,
   CANDIDATE_OUTPUT_SCHEMA,
@@ -260,25 +270,41 @@ export async function advanceRunStep(
     // A committed ASK is authoritative even if its graph interrupt checkpoint
     // was not written. Do not reset DRAFT on a Task status-only Review change.
     const draft = steps.find((candidate) => candidate.step_kind === 'DRAFT');
+    const contract = await repositories.runs.readContract(run.id);
+    const frozen = contract?.frozen_snapshot;
+    const readAction = frozen === undefined ? undefined :
+      readFileReadAction(frozen) ?? readWebFetchAction(frozen);
+    const actionOperationId = frozen === undefined ? undefined :
+      readMockActionOperationId(frozen);
     let gatewayActionSucceeded = false;
-    if (draft?.status === 'SUCCEEDED' && published?.status !== 'SUCCEEDED') {
-      const contract = await repositories.runs.readContract(run.id);
-      const action = contract === undefined ? undefined : readMockGatewayAction(contract.frozen_snapshot);
-      if (action !== undefined) {
-        const operation = await repositories.gateway.readOperation(action.operation_id);
-        if (operation !== undefined && (operation.run_id !== run.id || operation.step_id !== draft.id)) {
-          throw invalidTransition('Mock Gateway 操作身份与冻结 Run 不匹配。');
-        }
-        if (operation?.status === 'UNKNOWN' || operation?.status === 'DISPATCHING') {
-          return { status: 'ACTION_UNKNOWN', run_id: run.id, operation_id: action.operation_id };
-        }
-        if (operation?.status === 'DENIED' || operation?.status === 'FAILED') {
-          return { status: 'GATEWAY_ACTION_DENIED', run_id: run.id, operation_id: action.operation_id };
-        }
-        if (operation?.status !== 'SUCCEEDED') {
-          return { status: 'GATEWAY_ACTION_REQUIRED', run_id: run.id, operation_id: action.operation_id };
-        }
-        gatewayActionSucceeded = true;
+    const needsGatewayAction = actionOperationId !== undefined && published?.status !== 'SUCCEEDED' &&
+      // Existing Runs prepared their read after DRAFT. Preserve their completed
+      // draft and Review identity; only pending drafts take the new read-first path.
+      (draft?.status === 'SUCCEEDED' || (readAction !== undefined && built?.status === 'SUCCEEDED'));
+    let pendingReadAction = false;
+    if (needsGatewayAction) {
+      const operation = await repositories.gateway.readOperation(actionOperationId);
+      const matchingStep = readAction === undefined
+        ? operation?.step_id === draft?.id
+        : operation?.step_id === built?.id ||
+          // Legacy reads were bound to DRAFT. A correction may reset that
+          // step, but the successful read must keep its old action identity.
+          (operation?.step_id === draft?.id &&
+            (draft?.status === 'SUCCEEDED' || operation?.status === 'SUCCEEDED'));
+      if (operation !== undefined && (operation.run_id !== run.id || !matchingStep)) {
+        throw invalidTransition('Mock Gateway 操作身份与冻结 Run 不匹配。');
+      }
+      if (operation?.status === 'UNKNOWN' || operation?.status === 'DISPATCHING') {
+        return { status: 'ACTION_UNKNOWN', run_id: run.id, operation_id: actionOperationId };
+      }
+      if (operation?.status === 'DENIED' || operation?.status === 'FAILED') {
+        return { status: 'GATEWAY_ACTION_DENIED', run_id: run.id, operation_id: actionOperationId };
+      }
+      gatewayActionSucceeded = operation?.status === 'SUCCEEDED';
+      pendingReadAction = readAction !== undefined && draft?.status !== 'SUCCEEDED' &&
+        !gatewayActionSucceeded;
+      if (!gatewayActionSucceeded && !pendingReadAction) {
+        return { status: 'GATEWAY_ACTION_REQUIRED', run_id: run.id, operation_id: actionOperationId };
       }
     }
     if (built?.status === 'SUCCEEDED') {
@@ -305,6 +331,16 @@ export async function advanceRunStep(
       }
       // Published evidence belongs to the frozen contract. VERIFY and COMPLETE
       // use their own current gates; a later Context change must not erase it.
+    }
+    if (pendingReadAction && steps.find((candidate) => candidate.step_kind === 'BUILD_CONTEXT')?.status === 'SUCCEEDED') {
+      // Gateway's existing RUN protocol admits actions only in RUNNING. No
+      // DRAFT Attempt or model call exists yet, so an ASK waits before input use.
+      if (run.status === 'PLANNING') {
+        await advanceOrThrow(repositories, { runId: run.id, expectedRevision: run.revision,
+          status: 'RUNNING', currentStepId: built!.id });
+      }
+      return { status: 'GATEWAY_ACTION_REQUIRED', run_id: run.id,
+        operation_id: actionOperationId! };
     }
     const step = steps.find((candidate) => candidate.status !== 'SUCCEEDED');
 
@@ -468,8 +504,9 @@ export async function advanceRunStep(
     }
     if (input.signal?.aborted) throw new StaleInvocationError('worker stopped before step result');
     let runRow = run;
-    const execution = await executeStep(repositories, {
+    const execution = prepared.preflightFailure ?? await executeStep(repositories, {
       stepKind: step.step_kind, run, task, step, attemptNumber: attempt.attempt_number,
+      stepAttemptId: attempt.id, modelCallDb: db,
       storage: prepared.storage, modelPort: prepared.modelPort,
       ...(prepared.persist === undefined ? {} : { persist: prepared.persist }),
       ...(prepared.context === undefined ? {} : { context: prepared.context }),
@@ -616,7 +653,8 @@ type PreparedExternalWork =
   | { readonly kind: 'UNKNOWN'; readonly operationId: string }
   | { readonly kind: 'READY'; readonly storage: ManagedContentStore;
       readonly modelPort: ModelPort; readonly persist?: PreparedPersist;
-      readonly context?: BuiltContext };
+      readonly context?: BuiltContext;
+      readonly preflightFailure?: Extract<StepExecution, { readonly outcome: 'FAILED' }> };
 
 /** 事务外只读受管内容；提交事务只能消费已核对的字节，不再执行文件 I/O。 */
 class PreloadedContentStore extends ManagedContentStore {
@@ -642,25 +680,98 @@ class PreloadedContentStore extends ManagedContentStore {
 async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
   claim: ClaimedStep): Promise<PreparedExternalWork> {
   const repositories = createRepositories(db);
-  let modelPort: ModelPort = new FakeModelPort(input.fakeModelDelayMs);
+  const modelConfig = readModelPortConfig(process.env);
+  let modelPort: ModelPort = modelConfig === undefined
+    ? new FakeModelPort(input.fakeModelDelayMs)
+    : new OpenAiCompatibleModelPort(modelConfig);
   let persist: PreparedPersist | undefined;
   let context: BuiltContext | undefined;
+  let preflightFailure: Extract<StepExecution, { readonly outcome: 'FAILED' }> | undefined;
   const reads = new Map<string, { hashHex: string; size: bigint; result: ContentReadResult }>();
 
   if (claim.step.step_kind === 'BUILD_CONTEXT') {
     const correction = await loadCorrectionInput(repositories, claim.run.id);
     context = await buildRunContext(db, { run: claim.run, task: claim.task, storage: input.storage,
+      externalModel: modelConfig !== undefined,
       ...(input.fakeScenario === undefined ? {} : { fakeScenario: input.fakeScenario }),
       ...(input.contextBudgetTokens === undefined ? {} : { budgetTokens: input.contextBudgetTokens }),
       ...(correction === undefined ? {} : { correction }) });
   }
 
   if (claim.step.step_kind === 'DRAFT') {
-    const manifest = await loadManifestForDraft(repositories, claim.run.id, claim.task.id);
-    const result = await modelPort.generate({ manifest: manifest.payload,
-      outputSchema: CANDIDATE_OUTPUT_SCHEMA,
-      ...(input.signal === undefined ? {} : { signal: input.signal }) });
-    modelPort = { generate: async () => result };
+    let manifest: Awaited<ReturnType<typeof loadManifestForDraft>> | undefined;
+    try { manifest = await loadManifestForDraft(repositories, claim.run.id, claim.task.id); }
+    catch (error) {
+      if (!(error instanceof ReadInputBudgetError)) throw error;
+      preflightFailure = { outcome: 'FAILED', reason: 'CONTEXT_REQUIRED_OVER_BUDGET',
+        evidence: { reason: 'CONTEXT_REQUIRED_OVER_BUDGET', source: 'GATEWAY_READ' } };
+    }
+    if (manifest !== undefined) {
+      const currentPort = modelPort;
+      const readEvidence = await loadRunReadEvidence(repositories, claim.run.id);
+      const inputHash = draftInputHash(manifest.payload, CANDIDATE_OUTPUT_SCHEMA);
+      let previewEnabled = true;
+      try {
+        const recorded = await recordModelInvocation(db, {
+          origin: { workspaceId: claim.run.workspace_id, kind: 'DRAFT',
+            stepAttemptId: claim.attempt.id, manifestId: manifest.id,
+            inputHash,
+            ...(readEvidence === undefined ? {} : {
+              readOperationId: readEvidence.operationId,
+              readInvocationId: readEvidence.invocationId,
+            }) },
+          identity: currentPort.identity,
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+          invoke: async (callId) => {
+            const preview = new AssistLivePreviewPublisher((text, truncated) =>
+              publishRunDraftPreview(db, {
+                workspaceId: claim.run.workspace_id, runId: claim.run.id,
+                stepId: claim.step.id, attemptId: claim.attempt.id,
+                attemptClaimEpoch: claim.attempt.claim_epoch,
+                runWorkerEpoch: claim.workerEpoch, workerId: input.workerId,
+                ...(input.invocationEpoch === undefined ? {} :
+                  { invocationEpoch: input.invocationEpoch }),
+                modelCallId: callId, manifestId: manifest.id, inputHash,
+                text, truncated,
+              }), () => { previewEnabled = false; });
+            const generated = await currentPort.generate({ manifest: manifest.payload,
+            outputSchema: CANDIDATE_OUTPUT_SCHEMA,
+              ...(input.signal === undefined ? {} : { signal: input.signal }),
+              onTextDelta: async (piece) => {
+                if (!previewEnabled) return;
+                try { await preview.push(piece); }
+                catch (error) {
+                  if (!(error instanceof AssistPreviewOwnershipLostError)) throw error;
+                }
+              } });
+            if (generated.kind !== 'CANCELLED' && previewEnabled) {
+              try { await preview.flush(); }
+              catch (error) {
+                if (!(error instanceof AssistPreviewOwnershipLostError)) throw error;
+              }
+            }
+            return generated;
+          },
+          settle: (result) => result.kind === 'CANCELLED'
+            ? { status: 'CANCELLED', providerRequestId: result.providerRequestId ?? null,
+              ...(result.usage === undefined ? {} : { usage: result.usage }) }
+            : result.kind === 'CONTENT'
+              ? { status: 'COMPLETED', providerRequestId: result.providerRequestId,
+                usage: result.usage }
+              : { status: 'COMPLETED' },
+        });
+        modelPort = { identity: currentPort.identity, generate: async () => recorded.result };
+      } catch (error) {
+        if (error instanceof ModelSourcePolicyError) {
+          preflightFailure = { outcome: 'FAILED', reason: 'MODEL_SOURCE_SELECTION_REQUIRED',
+            evidence: { reason: 'MODEL_SOURCE_SELECTION_REQUIRED' } };
+        } else if (error instanceof ModelScopeBudgetError ||
+            error instanceof ModelCallBudgetError) {
+          preflightFailure = { outcome: 'FAILED', reason: 'MODEL_BUDGET_EXHAUSTED',
+            evidence: { reason: 'MODEL_BUDGET_EXHAUSTED' } };
+        } else throw error;
+      }
+    }
   }
 
   if (claim.step.step_kind === 'PERSIST_CANDIDATE') {
@@ -717,7 +828,8 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
   return { kind: 'READY', modelPort,
     storage: new PreloadedContentStore(input.storage.dataRoot, reads),
     ...(persist === undefined ? {} : { persist }),
-    ...(context === undefined ? {} : { context }) };
+    ...(context === undefined ? {} : { context }),
+    ...(preflightFailure === undefined ? {} : { preflightFailure }) };
 }
 
 async function preloadVersion(repositories: Repositories, storage: ManagedContentStore, versionId: string,
@@ -858,6 +970,8 @@ export async function recordStaleAttemptResult(
 
       await repositories.activities.insertActivityRecord({
         id: randomUUID(),
+        workspaceId: run.workspace_id,
+        runId: run.id,
         actorKind: 'AI',
         actorRef: `run:${run.id}/attempt:${attempt.id}`,
         commandId: null,
@@ -901,6 +1015,8 @@ interface ExecuteStepInput {
   readonly task: TaskRow;
   readonly step: RunStepRow;
   readonly attemptNumber: bigint;
+  readonly stepAttemptId: string;
+  readonly modelCallDb: DbExecutor;
   readonly storage: ManagedContentStore;
   readonly modelPort: ModelPort;
   readonly persist?: PreparedPersist | undefined;
@@ -925,6 +1041,8 @@ async function executeStep(
         run: input.run,
         task: input.task,
         storage: input.storage,
+        modelCallDb: input.modelCallDb,
+        stepAttemptId: input.stepAttemptId,
         ...(input.fakeScenario === undefined ? {} : { fakeScenario: input.fakeScenario }),
       });
     case 'COMPLETE': {
@@ -1025,6 +1143,7 @@ async function executeDraft(
         resultRef: {
           kind: 'CONTENT',
           content: result.content,
+          input_sha256: draftInputHash(manifest.payload, CANDIDATE_OUTPUT_SCHEMA),
           provider_request_id: result.providerRequestId,
           usage: {
             input_tokens: result.usage.inputTokens,
@@ -1100,6 +1219,7 @@ async function executePersistCandidate(
   }
 
   if (baseVersion !== undefined) {
+    const previousVersion = (await repositories.artifacts.listArtifactVersions(artifactId)).at(-1);
     const version = await repositories.artifacts.insertArtifactVersion({
       id: versionId,
       artifactId,
@@ -1111,6 +1231,14 @@ async function executePersistCandidate(
       sourceKind: 'AI',
       sourceRef,
     });
+    if (previousVersion !== undefined) {
+      await repositories.lineage.insertExactEdge({ workspaceId: input.run.workspace_id,
+        childVersionId: version.id, relation: 'REVISED_FROM',
+        parentKind: 'ARTIFACT_VERSION', parentId: previousVersion.id });
+    }
+    await repositories.lineage.insertExactEdge({ workspaceId: input.run.workspace_id,
+      childVersionId: version.id, relation: 'GENERATED_BY',
+      parentKind: 'RUN_STEP', parentId: input.step.id });
 
     return { outcome: 'SUCCESS', resultRef: versionResultRef(artifactId, version) };
   }
@@ -1135,6 +1263,9 @@ async function executePersistCandidate(
     sourceKind: 'AI',
     sourceRef,
   });
+  await repositories.lineage.insertExactEdge({ workspaceId: input.run.workspace_id,
+    childVersionId: version.id, relation: 'GENERATED_BY',
+    parentKind: 'RUN_STEP', parentId: input.step.id });
 
   return { outcome: 'SUCCESS', resultRef: versionResultRef(artifact.id, version) };
 }
@@ -1189,7 +1320,10 @@ async function applyRunTransitionBefore(
     });
   }
 
-  if (step.step_kind === 'DRAFT' && run.status === 'PLANNING') {
+  // A read-first Gateway action has already moved PLANNING to RUNNING while
+  // BUILD_CONTEXT remained the position. DRAFT still becomes the current step.
+  if (step.step_kind === 'DRAFT' && (run.status === 'PLANNING' ||
+      (run.status === 'RUNNING' && run.current_step_id !== step.id))) {
     return advanceOrThrow(repositories, {
       runId: run.id,
       expectedRevision: run.revision,
@@ -1393,6 +1527,8 @@ async function failRun(
 
   await repositories.activities.insertActivityRecord({
     id: randomUUID(),
+    workspaceId: input.run.workspace_id,
+    runId: input.run.id,
     actorKind: 'AI',
     actorRef: `run:${input.run.id}`,
     commandId: null,
@@ -1436,6 +1572,8 @@ async function recordOwnershipMismatch(
 ): Promise<void> {
   await repositories.activities.insertActivityRecord({
     id: randomUUID(),
+    workspaceId: run.workspace_id,
+    runId: run.id,
     actorKind: 'SYSTEM',
     actorRef: `run:${run.id}`,
     commandId: null,
@@ -1455,7 +1593,7 @@ async function loadManifestForDraft(
   repositories: Repositories,
   runId: string,
   taskId: string,
-): Promise<{ readonly payload: JsonObject }> {
+): Promise<{ readonly id: string; readonly payload: JsonObject }> {
   const buildStep = await repositories.runs.readStepByKind(runId, 'BUILD_CONTEXT');
   const manifestHashHex = readString(buildStep?.result_ref, 'manifest_hash');
 
@@ -1472,7 +1610,10 @@ async function loadManifestForDraft(
     throw invalidTransition('Run 的 Context Manifest 不可用。', { taskId });
   }
 
-  return { payload: manifest.payload };
+  const readEvidence = await loadRunReadEvidence(repositories, runId);
+  return { id: manifest.id,
+    payload: readEvidence === undefined ? manifest.payload :
+      attachReadEvidenceWithinBudget(manifest.payload, readEvidence) };
 }
 
 async function loadDraftContent(

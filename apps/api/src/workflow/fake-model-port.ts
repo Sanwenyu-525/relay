@@ -17,8 +17,19 @@ import {
  */
 
 export interface ModelUsage {
-  readonly inputTokens: number;
-  readonly outputTokens: number;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+}
+
+export interface ModelIdentity {
+  readonly provider: string;
+  readonly model: string;
+  readonly configFingerprint: string;
+  readonly budget?: {
+    readonly callReservationTokens: number;
+    readonly scopeCallLimit: number;
+    readonly scopeTokenLimit: number;
+  };
 }
 
 export type ModelResult =
@@ -30,16 +41,58 @@ export type ModelResult =
     }
   | { readonly kind: 'SCHEMA_INVALID'; readonly reason: string; readonly raw: string }
   | { readonly kind: 'MISSING_MATERIAL'; readonly missing: readonly string[] }
-  | { readonly kind: 'CANCELLED' };
+  | { readonly kind: 'CANCELLED'; readonly providerRequestId?: string;
+      readonly usage?: ModelUsage };
 
 export interface ModelRequest {
   readonly manifest: JsonObject;
   readonly outputSchema: string;
   readonly signal?: AbortSignal | undefined;
+  /** Uncommitted Markdown text only; validation and business settlement stay separate. */
+  readonly onTextDelta?: ((text: string) => Promise<void>) | undefined;
 }
 
 export interface ModelPort {
+  readonly identity: ModelIdentity;
   generate(request: ModelRequest): Promise<ModelResult>;
+}
+
+/**
+ * Assist 对话端口（M04/P12）：与会话内已完成的轮次和显式选中资料一起构成输入。
+ * Assist 不写业务状态：端口只返回内容或 typed failure，提案由应用层校验后另行落库。
+ */
+export interface AssistTurn {
+  readonly role: 'user' | 'assistant';
+  readonly content: string;
+}
+
+export type AssistIntent = 'DISCUSS' | 'PROPOSE_CANDIDATE' | 'PROPOSE_TASK';
+
+export interface AssistRequest {
+  readonly intent: AssistIntent;
+  readonly system: string;
+  readonly turns: readonly AssistTurn[];
+  /** Structured first-party test input; the real provider consumes the rendered user turn. */
+  readonly skill?: { readonly id: string; readonly version: string;
+    readonly facts: JsonObject; readonly input?: JsonObject } | undefined;
+  readonly signal?: AbortSignal | undefined;
+  /** Only ordinary DISCUSS may expose these uncommitted text increments. */
+  readonly onTextDelta?: ((text: string) => Promise<void>) | undefined;
+}
+
+export type AssistResult =
+  | {
+      readonly kind: 'CONTENT';
+      readonly content: string;
+      readonly providerRequestId: string;
+      readonly usage: ModelUsage;
+    }
+  | { readonly kind: 'CANCELLED'; readonly providerRequestId?: string;
+      readonly usage?: ModelUsage };
+
+export interface AssistModelPort {
+  readonly identity: ModelIdentity;
+  assist(request: AssistRequest): Promise<AssistResult>;
 }
 
 /** 缺资料时声明缺失的输入名（供 DRAFT 记录证据；P05 不尝试补齐）。 */
@@ -53,8 +106,15 @@ export const MISSING_MATERIAL_INPUT = 'material';
  *
  * P06 追加：合法候选带一个可识别的引用标记，使 `citation-exists-v1` 能 PASS；
  * `CITATION_MISSING_ONCE` 只在修正轮（manifest.correction.round ≥ 1）补上引用，让修正回路收敛。
+ *
+ * M04 Assist：按 intent 返回确定性回复或提案 JSON；触发串仅用于测试
+ * （真实端口不解释这些标记），生产 Mock 路径不会包含它们。
  */
-export class FakeModelPort implements ModelPort {
+export class FakeModelPort implements AssistModelPort {
+  readonly identity: ModelIdentity = {
+    provider: 'fake', model: 'fake-model-v1',
+    configFingerprint: createHash('sha256').update('fake-model-v1').digest('hex'),
+  };
   constructor(private readonly delayMs = 0) {}
 
   async generate(request: ModelRequest): Promise<ModelResult> {
@@ -117,15 +177,113 @@ export class FakeModelPort implements ModelPort {
         return contentResult(request, renderCandidate(title, objective, { citation: true }));
     }
   }
+
+  /** Assist 确定性回复：DISCUSS 回显最后一条用户消息；提案意图返回可通过
+   * 应用层 schema 校验的 JSON。`FAKE_ASSIST_*` 触发串只服务测试断言。 */
+  async assist(request: AssistRequest): Promise<AssistResult> {
+    const lastUser = [...request.turns].reverse().find((turn) => turn.role === 'user');
+    // Skill 在原始用户轮次后另附一段权威事实；测试触发串仍取原始用户轮次。
+    const trigger = request.skill === undefined ? lastUser?.content ?? '' :
+      request.turns.filter((turn) => turn.role === 'user').at(-2)?.content ?? '';
+    if (trigger.includes('FAKE_ASSIST_ABORT')) {
+      await new Promise<void>((resolve) => {
+        if (request.signal?.aborted === true) { resolve(); return; }
+        request.signal?.addEventListener('abort', () => resolve(), { once: true });
+      });
+      if (request.signal?.aborted === true) return { kind: 'CANCELLED' };
+    }
+    if (trigger.includes('FAKE_ASSIST_THROW')) {
+      throw new Error('fake assist model failure');
+    }
+    const seed = seedOf(lastUser?.content ?? request.system);
+    const providerRequestId = `fake-assist-${seed}`;
+    const usage: ModelUsage = {
+      inputTokens: Math.max(1, Math.ceil((request.system.length +
+        request.turns.reduce((sum, turn) => sum + turn.content.length, 0)) / 4)),
+      outputTokens: 0,
+    };
+    if (request.skill !== undefined) {
+      const facts = request.skill.facts;
+      let proposal: JsonObject;
+      if (request.skill.id === 'task-to-execution-contract') {
+        const acceptance = facts.acceptance as JsonObject;
+        const existing = Array.isArray(acceptance.criteria) ? acceptance.criteria : [];
+        proposal = { objective: String(acceptance.objective ?? '明确任务结果'),
+           expected_outputs: { kind: 'MARKDOWN_DOCUMENT',
+             ...(request.skill.version === '1.1.0'
+               ? { description: '交付一份可核对的 Markdown 结果说明。' } : {}) },
+          criteria: [...(existing.length === 0
+            ? [{ statement: '存在可核对的交付说明。', required: true, method: 'HUMAN' }]
+            : existing.map((entry) => { const criterion = entry as JsonObject;
+              return { statement: String(criterion.statement),
+                required: criterion.required === true, method: String(criterion.method) }; })),
+            { statement: '交付内容包含可核对的新增摘要。', required: true,
+              method: 'MARKDOWN_STRUCTURE' }],
+          suggested_mode: 'ME' };
+      } else if (request.skill.id === 'verification-plan') {
+        const checks = Array.isArray(facts.registered_checks) ? facts.registered_checks : [];
+        proposal = request.skill.version === '1.1.0'
+          ? { additional_checks: [{ statement: '交付内容包含可核对的结论摘要。',
+            required: true, method: 'MARKDOWN_STRUCTURE' }] }
+          : { checks: checks.map((entry) => { const check = entry as JsonObject;
+            return { criterion_id: String(check.criterion_id),
+              checker_id: String(check.checker_id), required: check.required === true }; }) };
+      } else if (request.skill.id === 'goal-to-project-blueprint') {
+        const view = facts.view_configuration as JsonObject;
+        const state = facts.state as JsonObject;
+        proposal = { intent: String(request.skill.input?.desired_outcome ??
+            '将当前项目目标拆分为可审查的下一步'),
+          goal_id: request.skill.input?.goal_id ?? null,
+          phase_key: String(state.phase_key),
+          tasks: [{ local_key: 'next', title: '整理项目下一步',
+            objective: '形成可供人工审查的项目下一步清单' }],
+          next_action: { kind: 'NEW_TASK', local_key: 'next' },
+          view_kind: String(view.kind) };
+      } else {
+        const project = facts.project as JsonObject;
+        proposal = { highlights: [{ statement: '当前项目状态已读取。',
+          ref_kind: 'PROJECT', ref_id: String(project.id) }], next_steps: [] };
+      }
+      const raw = trigger.includes('FAKE_ASSIST_BAD_JSON') ? '{bad' :
+        JSON.stringify({ summary: '（Fake Assist）已依据当前事实生成建议。', proposal });
+      return { kind: 'CONTENT', content: raw, providerRequestId,
+        usage: { ...usage, outputTokens: Math.max(1, Math.ceil(raw.length / 4)) } };
+    }
+    if (request.intent === 'DISCUSS') {
+      const reply = `（Fake Assist）已收到：${(lastUser?.content ?? '').slice(0, 200)}`;
+      if (request.skill === undefined) await request.onTextDelta?.(reply);
+      return { kind: 'CONTENT', content: reply, providerRequestId,
+        usage: { ...usage, outputTokens: Math.max(1, Math.ceil(reply.length / 4)) } };
+    }
+    const body = request.intent === 'PROPOSE_CANDIDATE'
+      ? { summary: `（Fake Assist）已生成候选 Markdown（${seed.slice(0, 8)}）。`,
+          proposal: { title: `候选 ${seed.slice(0, 8)}`,
+            markdown: `# 候选 ${seed.slice(0, 8)}\n\n由 Fake Assist 确定性生成。\n` } }
+      : { summary: `（Fake Assist）已生成任务定义提案（${seed.slice(0, 8)}）。`,
+          proposal: { title: `新任务 ${seed.slice(0, 8)}`,
+            objective: `按会话讨论推进：${(lastUser?.content ?? '').slice(0, 120)}`,
+            criteria: [{ statement: '存在可核对的交付说明。', required: true, method: 'HUMAN' }],
+            expected_outputs: { kind: 'MARKDOWN_DOCUMENT' } } };
+    const raw = trigger.includes('FAKE_ASSIST_BAD_JSON')
+      ? '{"summary":"broken" "proposal":'
+      : JSON.stringify(body);
+    return { kind: 'CONTENT', content: raw, providerRequestId,
+      usage: { ...usage, outputTokens: Math.max(1, Math.ceil(raw.length / 4)) } };
+  }
 }
 
-function contentResult(request: ModelRequest, content: string): ModelResult {
+async function contentResult(request: ModelRequest, content: string): Promise<ModelResult> {
+  await request.onTextDelta?.(content);
   return {
     kind: 'CONTENT',
     content,
     providerRequestId: providerRequestIdOf(request),
     usage: usageOf(request.manifest, content),
   };
+}
+
+function seedOf(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
 function readScenario(manifest: JsonObject): FakeScenario {

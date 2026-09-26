@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import ProjectNav from "../components/ProjectNav";
+import WebImportPanel from "../components/WebImportPanel";
 import {
   createCommandId, RelayApiError, RelayTransportError,
   type RelayApiClient, type RelayCommandEnvelope, type RelayDecision,
@@ -14,6 +15,7 @@ import "./KnowledgeView.css";
 
 type InformationRow = RelayKnowledge | RelayMemory | RelayDecision | RelayRule;
 type Scope = "WORKSPACE" | "PROJECT" | "TASK";
+type WriteTarget = { readonly kind: "PROJECT" | "TASK"; readonly id: string; readonly expectedProjectId?: string | null };
 interface PendingCommand {
   readonly id: string;
   readonly commandType: string;
@@ -51,13 +53,18 @@ function validResult(result: Readonly<Record<string, unknown>>, pending: Pending
 
 export default function KnowledgeView() {
   const { id } = useParams();
+  const [routeQuery] = useSearchParams();
+  const routeKindValue = routeQuery.get("kind");
+  const routeKind: RelayInformationKind = kinds.some((item) => item.kind === routeKindValue) ? routeKindValue as RelayInformationKind : "KNOWLEDGE";
+  const routeItem = routeQuery.get("item");
+  const routeSearch = routeQuery.get("q") ?? "";
   const projectId = id ?? null;
   const connection = useRelayConnection();
   const client = connection.client;
   const live = connection.mode === "live";
-  const [kind, setKind] = useState<RelayInformationKind>("KNOWLEDGE");
+  const [kind, setKind] = useState<RelayInformationKind>(routeKind);
   const [rows, setRows] = useState<readonly InformationRow[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(routeItem);
   const [selected, setSelected] = useState<InformationRow | null>(null);
   const [knowledgeVersions, setKnowledgeVersions] = useState<readonly RelayKnowledgeVersion[]>([]);
   const [memoryRevisions, setMemoryRevisions] = useState<readonly RelayMemoryRevision[]>([]);
@@ -72,8 +79,10 @@ export default function KnowledgeView() {
   const pendingRef = useRef<PendingCommand | null>(null);
   const readVersion = useRef(0);
   const contextVersion = useRef(0);
+  const [writeGate, setWriteGate] = useState<{ key: string; reason: string | null } | null>(null);
+  const [gateReload, setGateReload] = useState(0);
 
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(routeSearch);
   const [searchItems, setSearchItems] = useState<readonly RelaySearchItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
@@ -84,7 +93,7 @@ export default function KnowledgeView() {
   const [revisionMode, setRevisionMode] = useState(false);
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
-  const [sourceKind, setSourceKind] = useState<RelayKnowledgeSource>("NOTE");
+  const [sourceKind, setSourceKind] = useState<Exclude<RelayKnowledgeSource, "WEB_PAGE">>("NOTE");
   const [artifactVersionId, setArtifactVersionId] = useState("");
   const [mediaType, setMediaType] = useState("text/plain");
   const [confirmed, setConfirmed] = useState(false);
@@ -107,6 +116,53 @@ export default function KnowledgeView() {
   const selectedMemory = kind === "MEMORY" ? selected as RelayMemory | null : null;
   const selectedDecision = kind === "DECISION" ? selected as RelayDecision | null : null;
   const selectedRule = kind === "RULE" ? selected as RelayRule | null : null;
+
+  function rowTarget(row: InformationRow): WriteTarget | null {
+    if ("scope" in row) {
+      if (row.scope === "TASK") return { kind: "TASK", id: row.scopeId, expectedProjectId: row.projectId };
+      if (row.scope === "PROJECT") return { kind: "PROJECT", id: row.scopeId };
+      return null;
+    }
+    return row.projectId ? { kind: "PROJECT", id: row.projectId } : null;
+  }
+  function newTarget(): WriteTarget | null {
+    if (kind !== "RULE") return projectId ? { kind: "PROJECT", id: projectId } : null;
+    if (scope === "TASK") return scopeId.trim() ? { kind: "TASK", id: scopeId.trim() } : null;
+    if (scope === "PROJECT") return { kind: "PROJECT", id: projectId ?? scopeId.trim() };
+    return null;
+  }
+  const activeWriteTarget = formOpen ? revisionMode && selected ? rowTarget(selected) : newTarget()
+    : selected ? rowTarget(selected) : projectId ? { kind: "PROJECT" as const, id: projectId } : null;
+  const writeTargetKey = activeWriteTarget ? `${activeWriteTarget.kind}:${activeWriteTarget.id}:${activeWriteTarget.expectedProjectId ?? ""}` : null;
+  const writeBlockedReason = writeTargetKey === null ? null : writeGate?.key === writeTargetKey
+    ? writeGate.reason : "正在核对关联 Project，不能提交新的资料命令。";
+
+  async function confirmWritable(api: RelayApiClient, target: WriteTarget | null): Promise<void> {
+    if (!target) return;
+    let targetProjectId = target.id;
+    if (target.kind === "TASK") {
+      const task = await api.getTask(target.id);
+      if (task.id !== target.id || (target.expectedProjectId !== undefined && task.projectId !== target.expectedProjectId))
+        throw new Error("Task 与当前 Rule 的项目归属不匹配。");
+      if (task.projectId === null) return;
+      targetProjectId = task.projectId;
+    }
+    const project = await api.getProject(targetProjectId);
+    if (project.id !== targetProjectId) throw new Error("Project 读取结果与命令目标不匹配。");
+    if (project.archivedAt !== null) throw new Error("关联项目已归档，不能提交新的资料命令。");
+  }
+  useEffect(() => {
+    if (!client || !writeTargetKey || !activeWriteTarget) { setWriteGate(null); return; }
+    let active = true;
+    const target = activeWriteTarget;
+    setWriteGate({ key: writeTargetKey, reason: "正在核对关联 Project，不能提交新的资料命令。" });
+    void confirmWritable(client, target).then(() => {
+      if (active) setWriteGate({ key: writeTargetKey, reason: null });
+    }).catch((caught: unknown) => {
+      if (active) setWriteGate({ key: writeTargetKey, reason: `关联 Project 无法确认可写：${describeLiveError(caught).message}` });
+    });
+    return () => { active = false; };
+  }, [client, writeTargetKey, gateReload]);
 
   function clearDraft() {
     setTitle(""); setText(""); setSourceKind("NOTE"); setArtifactVersionId("");
@@ -152,7 +208,10 @@ export default function KnowledgeView() {
       setRows(list); setSelectedId(detailId); setSelected(detail);
       setKnowledgeVersions(versions); setMemoryRevisions(revisions); setRuleVersions(rules);
     } catch (caught) {
-      if (version === readVersion.current) setError(describeLiveError(caught).message);
+      if (version === readVersion.current) {
+        setRows([]); setSelected(null); setKnowledgeVersions([]); setMemoryRevisions([]); setRuleVersions([]);
+        setError(describeLiveError(caught).message);
+      }
     } finally {
       if (version === readVersion.current) { setLoading(false); setRefreshing(false); }
     }
@@ -162,12 +221,13 @@ export default function KnowledgeView() {
     contextVersion.current++;
     readVersion.current++;
     pendingRef.current = null;
-    setPendingCommand(null); setSubmitting(false); setSelectedId(null); setSelected(null); setRows([]);
+    setPendingCommand(null); setSubmitting(false); setKind(routeKind); setSelectedId(routeItem); setSelected(null); setRows([]);
     setActionError(null); setActionMessage(null); setFormOpen(false);
+    setQuery(routeSearch);
     clearDraft();
-    void load(kind, null, client, projectId);
+    void load(routeKind, routeItem, client, projectId);
     return () => { contextVersion.current++; readVersion.current++; };
-  }, [client, connection.mode, projectId]);
+  }, [client, connection.mode, projectId, routeKind, routeItem, routeSearch]);
 
   async function runSearch(version: number, searchQuery: string, cursor?: string) {
     if (client === null || !live) return;
@@ -180,7 +240,7 @@ export default function KnowledgeView() {
       setSearchItems((current) => cursor === undefined ? page.items : [...current, ...page.items]);
       setNextCursor(page.nextCursor);
     } catch (caught) {
-      if (version === searchVersion.current) setSearchError(describeLiveError(caught).message);
+      if (version === searchVersion.current) { setSearchItems([]); setNextCursor(null); setSearchError(describeLiveError(caught).message); }
     } finally {
       if (version === searchVersion.current) setSearching(false);
     }
@@ -234,11 +294,19 @@ export default function KnowledgeView() {
     replacement: string | null = null
   ) {
     if (client === null || submitting || pendingRef.current !== null) return;
+    const target = targetId !== null
+      ? selected?.id === targetId ? rowTarget(selected) : undefined
+      : commandType === "CreateRule" ? newTarget() : projectId ? { kind: "PROJECT" as const, id: projectId } : null;
+    if (target === undefined) { setActionError("资料目标已变化，请重新读取后再提交。"); return; }
     const command: PendingCommand = { id: createCommandId(), commandType, resultKey, targetId, replacementId: replacement };
     const context = contextVersion.current;
     pendingRef.current = command; setPendingCommand(command); setSubmitting(true);
     setActionError(null); setActionMessage(null);
+    let sent = false;
     try {
+      await confirmWritable(client, target);
+      if (context !== contextVersion.current) return;
+      sent = true;
       const envelope = await send(client, command.id);
       if (context !== contextVersion.current) return;
       const resultId = envelope.commandId === command.id ? validResult(envelope.result, command) : null;
@@ -248,7 +316,11 @@ export default function KnowledgeView() {
       await load(kind, resultId);
     } catch (caught) {
       if (context !== contextVersion.current) return;
-      if (caught instanceof RelayTransportError) {
+      if (!sent) {
+        pendingRef.current = null; setPendingCommand(null);
+        setActionError(`关联 Project 状态未确认，命令尚未提交：${describeLiveError(caught).message}`);
+        setGateReload((value) => value + 1);
+      } else if (caught instanceof RelayTransportError) {
         setActionError("响应丢失或无法核对。请只查询原 command_id 回执，不要换 ID 再提交。");
       } else {
         pendingRef.current = null; setPendingCommand(null);
@@ -401,6 +473,13 @@ export default function KnowledgeView() {
           onClick={() => { void runSearch(searchVersion.current, query.trim(), nextCursor); }}>加载下一页</button>}
       </section>
 
+      {projectId && client && kind === "KNOWLEDGE" && <WebImportPanel
+        key={`${connection.epoch}:${projectId}`} client={client} projectId={projectId}
+        onOpenKnowledge={(knowledgeId) => {
+          setSelectedId(knowledgeId); setFormOpen(false); setActionError(null);
+          void load("KNOWLEDGE", knowledgeId);
+        }} />}
+
       <nav className="knowledge-tabs" aria-label="资料类型">{kinds.map((item) =>
         <button key={item.kind} type="button" className={`subnav-item${kind === item.kind ? " subnav-item--active" : ""}`}
           aria-current={kind === item.kind ? "page" : undefined} disabled={pendingCommand !== null}
@@ -410,6 +489,7 @@ export default function KnowledgeView() {
       {refreshing && <p role="status">正在读取最新版本…</p>}
       {actionError && <p className="action-error" role="alert">{actionError}</p>}
       {actionMessage && <p className="receipt-message" role="status">{actionMessage}</p>}
+      {writeBlockedReason && <p className="disabled-reason" data-testid="knowledge-project-write-blocked">{writeBlockedReason} <button type="button" className="text-button" onClick={() => setGateReload((value) => value + 1)}>重读项目状态</button></p>}
       {pendingCommand && <div className="surface-panel" data-testid="knowledge-pending-receipt">
         <h2>提交结果待核对</h2><p>原 command_id：{pendingCommand.id}。查询原命令回执前不再次提交。</p>
         <button type="button" className="secondary-button" data-testid="knowledge-check-receipt" disabled={submitting} onClick={() => { void checkReceipt(); }}>核对原命令回执</button>
@@ -441,14 +521,14 @@ export default function KnowledgeView() {
               <p className="helper-text">目标约束：{JSON.stringify(selectedRule.targetSpec)}</p></>}
 
             {selected.status === "ACTIVE" && pendingCommand === null && <div className="knowledge-actions">
-              {kind !== "DECISION" && <button type="button" className="secondary-button" data-testid="knowledge-new-version" onClick={() => openForm(true)}>追加新版本</button>}
-              {kind === "KNOWLEDGE" && <button type="button" className="danger-button" onClick={() => { void retire(); }}>归档资料</button>}
-              {(kind === "MEMORY" || kind === "RULE") && <button type="button" className="danger-button" onClick={() => { void retire(); }}>停用{kind === "MEMORY" ? "记忆" : "规则"}</button>}
+              {kind !== "DECISION" && <button type="button" className="secondary-button" data-testid="knowledge-new-version" disabled={writeBlockedReason !== null} onClick={() => openForm(true)}>追加新版本</button>}
+              {kind === "KNOWLEDGE" && <button type="button" className="danger-button" disabled={writeBlockedReason !== null} onClick={() => { void retire(); }}>归档资料</button>}
+              {(kind === "MEMORY" || kind === "RULE") && <button type="button" className="danger-button" disabled={writeBlockedReason !== null} onClick={() => { void retire(); }}>停用{kind === "MEMORY" ? "记忆" : "规则"}</button>}
             </div>}
             {selectedDecision?.status === "ACTIVE" && pendingCommand === null && <>
               <label className="field" htmlFor="decision-replacement"><span className="field-label">替代它的 Decision ID</span>
                 <input id="decision-replacement" value={replacementId} onChange={(event) => setReplacementId(event.target.value)} data-testid="decision-replacement" /></label>
-              <button type="button" className="secondary-button" data-testid="decision-supersede" onClick={() => { void supersede(); }}>记录替代关系</button>
+              <button type="button" className="secondary-button" data-testid="decision-supersede" disabled={writeBlockedReason !== null} onClick={() => { void supersede(); }}>记录替代关系</button>
             </>}
 
             {selectedKnowledge && <section className="knowledge-history"><h3>不可变资料版本</h3><ol>{knowledgeVersions.map((version) =>
@@ -466,7 +546,7 @@ export default function KnowledgeView() {
             {(kind === "MEMORY" || (kind !== "RULE" && !revisionMode)) && <label className="field"><span className="field-label">标题</span>
               <input value={title} onChange={(event) => setTitle(event.target.value)} data-testid="knowledge-title" required disabled={pendingCommand !== null} /></label>}
             {kind === "KNOWLEDGE" && <>
-              <label className="field"><span className="field-label">来源类型</span><select value={sourceKind} onChange={(event) => { setSourceKind(event.target.value as RelayKnowledgeSource); if (event.target.value === "NOTE") setMediaType("text/plain"); }} disabled={pendingCommand !== null}>
+              <label className="field"><span className="field-label">来源类型</span><select value={sourceKind} onChange={(event) => { setSourceKind(event.target.value as Exclude<RelayKnowledgeSource, "WEB_PAGE">); if (event.target.value === "NOTE") setMediaType("text/plain"); }} disabled={pendingCommand !== null}>
                 <option value="NOTE">NOTE</option><option value="MANAGED_TEXT">MANAGED_TEXT</option><option value="ARTIFACT_VERSION">ARTIFACT_VERSION</option></select></label>
               {sourceKind === "ARTIFACT_VERSION" ? <label className="field"><span className="field-label">产物版本 ID</span>
                 <input value={artifactVersionId} onChange={(event) => setArtifactVersionId(event.target.value)} data-testid="knowledge-artifact-id" disabled={pendingCommand !== null} /></label>
@@ -501,7 +581,7 @@ export default function KnowledgeView() {
               <label className="field"><span className="field-label">目标约束 JSON（可选）</span><textarea value={targetSpec} onChange={(event) => setTargetSpec(event.target.value)} rows={3} disabled={pendingCommand !== null} /></label>
               <p className="field-hint">HARD 冲突或必需检查路径不可用时，服务端拒绝写入；不会把未检查的规则当作生效。</p>
             </>}
-            <div className="knowledge-actions"><button type="submit" className="primary-button" data-testid="knowledge-save" disabled={submitting || pendingCommand !== null || (kind === "MEMORY" && !confirmed)}>保存{revisionMode ? "新版本" : ""}</button>
+            <div className="knowledge-actions"><button type="submit" className="primary-button" data-testid="knowledge-save" disabled={submitting || pendingCommand !== null || writeBlockedReason !== null || (kind === "MEMORY" && !confirmed)}>保存{revisionMode ? "新版本" : ""}</button>
               <button type="button" className="secondary-button" disabled={pendingCommand !== null} onClick={() => setFormOpen(false)}>取消</button></div>
           </form>}
         </div>

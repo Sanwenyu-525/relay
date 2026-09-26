@@ -43,12 +43,16 @@ describe("P12 Assist 目标固定", () => {
   it("切换 Project 到 Task 后迟到的旧目标响应不能落到新目标", async () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
     let releaseProject: ((value: Response) => void) | null = null;
+    let projectReads = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = String(input);
       if (url === `${prefix}/projects/${projectId}`) {
-        return new Promise<Response>((resolve) => { releaseProject = resolve; });
+        projectReads++;
+        return projectReads === 1 ? new Promise<Response>((resolve) => { releaseProject = resolve; })
+          : response({ id: projectId, title: "当前项目", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
       }
       if (url === `${prefix}/tasks/${taskId}`) return response(task());
+      if (url.startsWith(`${prefix}/assist-sessions?`)) return response({ items: [] });
       throw new Error(`unexpected request ${url}`);
     }));
     const { router, wrapper } = await mountedAssist(`/projects/${projectId}/assist`);
@@ -67,7 +71,9 @@ describe("P12 Assist 目标固定", () => {
 
   it("断开 live 时立即清除已读取目标，不展示伪会话", async () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
-    vi.stubGlobal("fetch", vi.fn(async () => response(task())));
+    vi.stubGlobal("fetch", vi.fn(async (input: string) =>
+      String(input) === `${prefix}/tasks/${taskId}` ? response(task()) :
+      String(input) === `${prefix}/projects/${projectId}` ? response({ id: projectId, title: "当前项目", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null }) : response({ items: [] })));
     const { wrapper } = await mountedAssist(`/tasks/${taskId}/assist`);
     await flush(20);
     expect(wrapper.text()).toContain("新任务目标");

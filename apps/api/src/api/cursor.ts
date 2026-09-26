@@ -113,3 +113,75 @@ function decodePayload(raw: string): DecodedCursor | undefined {
 
   return { filter: { project_id: projectId }, created_at: parsedDate, id: id.toLowerCase() };
 }
+
+/** 新的跨 Workspace Task 与 Project 列表使用完整的 PostgreSQL 微秒时间键。 */
+export interface ExactListCursor {
+  readonly createdAt: string;
+  readonly id: string;
+}
+
+export type ProjectListStatus = 'active' | 'archived' | 'all';
+
+export function encodeWorkspaceTaskListCursor(
+  workspaceId: string, cursor: ExactListCursor,
+): string {
+  return encodeExactCursor(2, { workspace_id: workspaceId, scope: 'all' }, cursor);
+}
+
+export function decodeWorkspaceTaskListCursor(raw: string, workspaceId: string): ExactListCursor {
+  return decodeExactCursor(raw, 2, { workspace_id: workspaceId, scope: 'all' });
+}
+
+export function encodeProjectListCursor(
+  workspaceId: string,
+  status: ProjectListStatus,
+  cursor: ExactListCursor,
+): string {
+  return encodeExactCursor(1, { workspace_id: workspaceId, status }, cursor);
+}
+
+export function decodeProjectListCursor(
+  raw: string, workspaceId: string, status: ProjectListStatus,
+): ExactListCursor {
+  return decodeExactCursor(raw, 1, { workspace_id: workspaceId, status });
+}
+
+function encodeExactCursor(
+  version: number,
+  filter: Record<string, string>,
+  cursor: ExactListCursor,
+): string {
+  return Buffer.from(JSON.stringify({
+    v: version, filter, created_at: cursor.createdAt, id: cursor.id,
+  }), 'utf8').toString('base64url');
+}
+
+function decodeExactCursor(
+  raw: string,
+  version: number,
+  filter: Record<string, string>,
+): ExactListCursor {
+  if (raw.length > MAX_CURSOR_LENGTH) {
+    throw invalidCursor('cursor', '游标过长；请使用上一次列表响应返回的 next_cursor。');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as unknown;
+  } catch {
+    throw invalidCursor('cursor', '游标无法解析；请使用上一次列表响应返回的 next_cursor。');
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw invalidCursor('cursor', '游标无法解析；请使用上一次列表响应返回的 next_cursor。');
+  }
+  const candidate = parsed as Record<string, unknown>;
+  const actualFilter = candidate.filter;
+  if (candidate.v !== version || typeof actualFilter !== 'object' || actualFilter === null
+    || JSON.stringify(actualFilter) !== JSON.stringify(filter)
+    || typeof candidate.created_at !== 'string'
+    || !TIMESTAMP_PATTERN.test(candidate.created_at)
+    || Number.isNaN(new Date(candidate.created_at).getTime())
+    || typeof candidate.id !== 'string' || !isUuid(candidate.id)) {
+    throw invalidCursor('cursor', '游标与当前列表条件或排序键不一致；请从第一页重新查询。');
+  }
+  return { createdAt: candidate.created_at, id: candidate.id.toLowerCase() };
+}

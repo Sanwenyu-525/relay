@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
-import { decodeTaskListCursor, encodeTaskListCursor } from '../../src/api/cursor.js';
+import { decodeProjectListCursor, decodeTaskListCursor, decodeWorkspaceTaskListCursor,
+  encodeProjectListCursor, encodeTaskListCursor, encodeWorkspaceTaskListCursor,
+} from '../../src/api/cursor.js';
 import { DomainError } from '../../src/application/domain-error.js';
 
 /** 列表游标：绑定过滤条件与稳定排序键，非法游标返回 400 INVALID_CURSOR。 */
@@ -84,4 +86,24 @@ test('encodes the inbox filter explicitly', () => {
     () => decodeTaskListCursor(encoded, filter),
     (error: unknown) => error instanceof DomainError && error.code === 'INVALID_CURSOR',
   );
+});
+
+test('new list cursors keep the exact microsecond key and bind scope or status', () => {
+  const key = { createdAt: '2026-09-20T03:04:05.678901Z', id };
+  const workspaceId = randomUUID();
+  const allTasks = encodeWorkspaceTaskListCursor(workspaceId, key);
+  assert.deepEqual(decodeWorkspaceTaskListCursor(allTasks, workspaceId), key);
+  assert.throws(() => decodeTaskListCursor(allTasks, filter),
+    (error: unknown) => error instanceof DomainError && error.code === 'INVALID_CURSOR');
+  assert.throws(() => decodeWorkspaceTaskListCursor(allTasks, randomUUID()),
+    (error: unknown) => error instanceof DomainError && error.code === 'INVALID_CURSOR');
+
+  const activeProjects = encodeProjectListCursor(workspaceId, 'active', key);
+  assert.deepEqual(decodeProjectListCursor(activeProjects, workspaceId, 'active'), key);
+  assert.throws(() => decodeProjectListCursor(activeProjects, workspaceId, 'archived'),
+    (error: unknown) => error instanceof DomainError && error.code === 'INVALID_CURSOR');
+  assert.throws(() => decodeProjectListCursor(activeProjects, randomUUID(), 'active'),
+    (error: unknown) => error instanceof DomainError && error.code === 'INVALID_CURSOR');
+  assert.throws(() => decodeWorkspaceTaskListCursor(activeProjects, workspaceId),
+    (error: unknown) => error instanceof DomainError && error.code === 'INVALID_CURSOR');
 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rm, rmdir, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readFile, rm, rmdir, symlink, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test, { after, before } from 'node:test';
 
@@ -19,6 +19,7 @@ import {
   createFakeConnection, createGatewayPolicy, createImportJob, registerManagedResource,
   revokeGatewayPolicy, setFakeConnection,
 } from '../../src/application/gateway-configuration.js';
+import { createGatewayConnectionCommand } from '../../src/application/gateway-commands.js';
 import { resolveReview } from '../../src/application/review-decisions.js';
 import { advanceRunStep } from '../../src/application/run-steps.js';
 import { withTransaction } from '../../src/application/unit-of-work.js';
@@ -823,6 +824,7 @@ test('P09 HTTP config commands replay, isolate scope, and expose full Invocation
     const connectionRead = await api.get(`${connections}/${connectionId}`);
     assert.equal(connectionRead.status, 200);
     assert.equal((connectionRead.body as { version: string }).version, '1');
+    assert.equal((connectionRead.body as { allowed_host: string | null }).allowed_host, null);
     assert.equal(connectionRead.text.includes('config'), false);
     assert.equal((await api.post(`${connections}/${connectionId}/test`, {})).status, 200);
     const listedConnections = await api.get(connections);
@@ -929,4 +931,242 @@ test('P10 Rule update after Gateway Admit preserves the old Invocation outcome a
   await assert.rejects(claimRunForGateway(app.db, { workspaceId: f.workspaceId,
     runId: f.runId, workerId: `worker-${randomUUID()}` }),
   (error: unknown) => code(error) === 'RULE_SNAPSHOT_STALE');
+});
+
+interface FileReadFixture {
+  workspaceId: string; projectId: string; taskId: string; runId: string; stepId: string;
+  root: string; resourceId: string; connectionId: string; policyId: string;
+}
+
+async function fileReadFixture(decision: 'AUTO' | 'ASK' = 'AUTO'): Promise<FileReadFixture> {
+  const workspaceId = randomUUID();
+  const projectId = randomUUID();
+  const taskId = randomUUID();
+  await withTransaction(app.db, async (repositories) => {
+    await repositories.workspaces.insertWorkspace({ id: workspaceId, name: `p09-${workspaceId}` });
+    await repositories.workspaces.insertAuthorityRow(workspaceId);
+  });
+  await withTransaction(app.db, async (repositories) => {
+    await repositories.projects.insertProject({ id: projectId, workspaceId, title: 'P09 Gateway', projectType: 'GENERAL' });
+    await repositories.projects.insertProjectState(projectId, 'PLANNING');
+    await repositories.tasks.insertTask({ id: taskId, workspaceId, projectId, title: 'File read',
+      status: 'READY', mode: 'ME', acceptanceRevision: 1n, executorKind: 'HUMAN',
+      ownershipEpoch: 0n, currentCompletionId: null });
+    await repositories.tasks.insertAcceptanceVersion({ taskId, acceptanceRevision: 1n,
+      objective: 'Gateway 执行', requiredOutputSpec: {}, source: 'CREATE' });
+    await repositories.tasks.insertCriterion({ taskId, acceptanceRevision: 1n, criterionId: 'human',
+      statement: '人工核对', required: true, method: 'HUMAN', targetSpec: {} });
+  });
+  const delegated = await delegateTask(app.db, { workspaceId, taskId, commandId: randomUUID(), expectedTaskRevision: '0' });
+  const runId = delegated.result.run_id;
+  const storage = new ManagedContentStore(dataRoot);
+  for (const kind of ['BUILD_CONTEXT', 'DRAFT'] as const) {
+    const result = await advanceRunStep(app.db, { runId, workerId: `setup-${randomUUID()}`, storage });
+    assert.equal(result.status, 'STEP_SUCCEEDED', `${kind}: ${JSON.stringify(result)}`);
+  }
+  const step = await withTransaction(app.db, (repositories) => repositories.runs.readStepByKind(runId, 'DRAFT'));
+  assert.ok(step);
+  const root = join(dataRoot, `file-read-${randomUUID()}`);
+  await mkdir(root, { recursive: true });
+  const resource = await registerManagedResource(app.db, { workspaceId, projectId, rootPath: root });
+  const connection = await createGatewayConnectionCommand(app.db, { workspaceId, projectId,
+    commandId: randomUUID(), capabilities: ['FILE_READ'], rootPath: root });
+  const policy = await createGatewayPolicy(app.db, { workspaceId, projectId, capability: 'FILE_READ',
+    actionType: 'READ_FILE', targetPrefix: resource.canonicalRoot, decision, maxPayloadBytes: 1024 });
+  return { workspaceId, projectId, taskId, runId, stepId: step.id, root: resource.canonicalRoot,
+    resourceId: resource.resourceId, connectionId: connection.result.connection_id!,
+    policyId: policy.policyId };
+}
+
+async function prepareFileRead(f: FileReadFixture, origin: GatewayOrigin, relative: string): Promise<string> {
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId,
+    operationId: randomUUID(), intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId,
+    origin, actionType: 'READ_FILE', target: join(f.root, relative), params: {} });
+  return prepared.operation_id;
+}
+
+/** Direct dispatches must release the Run worker the way the graph path does. */
+async function releaseWorker(f: FileReadFixture, origin: Extract<GatewayOrigin, { kind: 'RUN' }>): Promise<void> {
+  await releaseGatewayWorker(app.db, { workspaceId: f.workspaceId, runId: f.runId,
+    workerId: origin.workerId, workerEpoch: origin.workerEpoch });
+}
+
+test('P16 FILE_READ reads a bounded real file through the Gateway with hash evidence', async () => {
+  const f = await fileReadFixture();
+  const origin = await worker(f);
+  await writeFile(join(f.root, 'data.txt'), '受控读取的正文', 'utf8');
+  const operationId = await prepareFileRead(f, origin, 'data.txt');
+  const dispatched = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId,
+    operationId, origin });
+  assert.equal(dispatched.status, 'SUCCEEDED');
+  const result = dispatched.result_ref as { content: string; sha256: string; size: number; truncated: boolean };
+  assert.equal(result.content, '受控读取的正文');
+  assert.equal(result.size, Buffer.byteLength('受控读取的正文', 'utf8'));
+  assert.equal(result.sha256, createHash('sha256').update('受控读取的正文', 'utf8').digest('hex'));
+  assert.equal(result.truncated, false);
+  const facts = await sql<{ op_status: string; claim_status: string }>`
+    select o.status as op_status, c.status as claim_status from logical_operations o
+    join invocation_attempts i on i.operation_id = o.id
+    left join resource_claims c on c.id = i.resource_claim_id
+    where o.id = ${operationId}`.execute(app.db);
+  assert.deepEqual(facts.rows[0], { op_status: 'SUCCEEDED', claim_status: 'RELEASED' });
+  await releaseWorker(f, origin);
+});
+
+test('P16 FILE_READ rejects traversal, outside roots, missing files and link escape before any read', async () => {
+  const f = await fileReadFixture();
+  const origin = await worker(f);
+  const outside = join(dataRoot, `outside-${randomUUID()}.txt`);
+  await writeFile(outside, '根外文件', 'utf8');
+  for (const target of [
+    join(f.root, '..', `outside-${randomUUID()}.txt`),
+    outside,
+    join(f.root, 'missing.txt'),
+  ]) {
+    await assert.rejects(
+      prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: randomUUID(),
+        intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+        actionType: 'READ_FILE', target, params: {} }),
+      (error: unknown) => code(error) === 'GATEWAY_TARGET_DENIED');
+  }
+  // Windows junction pointing outside the registered root must not retarget reads.
+  const outsideDir = join(dataRoot, `escape-${randomUUID()}`);
+  await mkdir(outsideDir, { recursive: true });
+  await writeFile(join(outsideDir, 'secret.txt'), '逃逸正文', 'utf8');
+  await symlink(outsideDir, join(f.root, 'link'), 'junction');
+  await assert.rejects(
+    prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: randomUUID(),
+      intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+      actionType: 'READ_FILE', target: join(f.root, 'link', 'secret.txt'), params: {} }),
+    (error: unknown) => code(error) === 'GATEWAY_TARGET_DENIED');
+  await rm(outsideDir, { recursive: true, force: true });
+});
+
+test('P16 FILE_READ re-verifies the pinned path at execute and rejects a swapped link', async () => {
+  const f = await fileReadFixture();
+  const origin = await worker(f);
+  await writeFile(join(f.root, 'swap.txt'), '原始正文', 'utf8');
+  const operationId = await prepareFileRead(f, origin, 'swap.txt');
+  const outsideDir = join(dataRoot, `swap-escape-${randomUUID()}`);
+  await mkdir(outsideDir, { recursive: true });
+  await writeFile(join(outsideDir, 'secret.txt'), '换后的逃逸正文', 'utf8');
+  await unlink(join(f.root, 'swap.txt'));
+  await symlink(outsideDir, join(f.root, 'swap.txt'), 'junction');
+  const dispatched = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId, origin });
+  assert.equal(dispatched.status, 'FAILED');
+  assert.equal((dispatched.result_ref as { reason: string }).reason, 'GATEWAY_TARGET_CHANGED');
+  const facts = await sql<{ op_status: string; claim_status: string }>`
+    select o.status as op_status, c.status as claim_status from logical_operations o
+    join invocation_attempts i on i.operation_id = o.id
+    left join resource_claims c on c.id = i.resource_claim_id
+    where o.id = ${operationId}`.execute(app.db);
+  assert.deepEqual(facts.rows[0], { op_status: 'FAILED', claim_status: 'RELEASED' });
+  await releaseWorker(f, origin);
+  await rm(outsideDir, { recursive: true, force: true });
+});
+
+test('P16 FILE_READ enforces the output limit, binary rejection and the caller deadline', async () => {
+  const f = await fileReadFixture();
+  const origin = await worker(f);
+  await writeFile(join(f.root, 'big.txt'), 'x'.repeat(128 * 1024 + 1), 'utf8');
+  const bigId = await prepareFileRead(f, origin, 'big.txt');
+  const big = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: bigId, origin });
+  assert.equal(big.status, 'FAILED');
+  assert.equal((big.result_ref as { reason: string; limit_bytes: number }).reason, 'FILE_TOO_LARGE');
+  assert.equal((big.result_ref as { limit_bytes: number }).limit_bytes, 131072);
+  await releaseWorker(f, origin);
+
+  const binaryOrigin = await worker(f);
+  await writeFile(join(f.root, 'blob.bin'), Buffer.from([0x70, 0x00, 0x71]));
+  const binaryId = await prepareFileRead(f, binaryOrigin, 'blob.bin');
+  const binary = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: binaryId, origin: binaryOrigin });
+  assert.equal(binary.status, 'FAILED');
+  assert.equal((binary.result_ref as { reason: string }).reason, 'FILE_BINARY_UNSUPPORTED');
+  await releaseWorker(f, binaryOrigin);
+
+  const lateOrigin = await worker(f);
+  await writeFile(join(f.root, 'late.txt'), '正文', 'utf8');
+  const lateId = await prepareFileRead(f, lateOrigin, 'late.txt');
+  const late = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: lateId,
+    origin: lateOrigin, deadline: new Date(Date.now() - 1000) });
+  assert.equal(late.status, 'FAILED');
+  assert.equal((late.result_ref as { reason: string }).reason, 'GATEWAY_DEADLINE_EXCEEDED');
+  await releaseWorker(f, lateOrigin);
+});
+
+test('P16 FILE_READ without a permission policy is denied by default', async () => {
+  const f = await fileReadFixture();
+  await revokeGatewayPolicy(app.db, { workspaceId: f.workspaceId, policyId: f.policyId });
+  const origin = await worker(f);
+  await writeFile(join(f.root, 'data.txt'), '正文', 'utf8');
+  await assert.rejects(
+    prepareFileRead(f, origin, 'data.txt'),
+    (error: unknown) => code(error) === 'GATEWAY_PERMISSION_DENIED');
+});
+
+test('P16 FILE_READ reconcile re-reads: PREPARED stays not executed, a crash converges by re-reading', async () => {
+  const f = await fileReadFixture();
+  const origin = await worker(f);
+  await writeFile(join(f.root, 'reconcile.txt'), '重读正文', 'utf8');
+  const operationId = await prepareFileRead(f, origin, 'reconcile.txt');
+  const notExecuted = await reconcileGatewayInvocation(app.db, { workspaceId: f.workspaceId,
+    operationId, invocationId: (await sql<{ id: string }>`
+      select id from invocation_attempts where operation_id = ${operationId}`.execute(app.db)).rows[0]!.id,
+    stoppedWorkerId: origin.workerId, stoppedWorkerEpoch: origin.workerEpoch, oldProcessStopped: true });
+  assert.equal(notExecuted.status, 'NOT_EXECUTED');
+  // The NOT_EXECUTED reconciliation returns the operation to PREPARED and
+  // fences the old claim. Production continues the SAME operation from a fresh
+  // outer claim: the graph path skips the run-level gateway claim when the op
+  // already exists, so the test claims the Run worker directly.
+  const reclaimed = await withTransaction(app.db, (repositories) =>
+    repositories.runs.claimWorker(f.runId, `worker-${randomUUID()}`, new Date(Date.now() + 30_000)));
+  assert.ok(reclaimed);
+  assert.ok(reclaimed.worker_id !== null && reclaimed.worker_lease_until !== null);
+  const reclaimOrigin: GatewayOrigin = { kind: 'RUN', runId: f.runId, stepId: f.stepId,
+    resourceId: f.resourceId, workerId: reclaimed.worker_id, workerEpoch: BigInt(reclaimed.worker_epoch) };
+  const settledFirst = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId,
+    operationId, origin: reclaimOrigin });
+  assert.equal(settledFirst.status, 'SUCCEEDED');
+  await releaseWorker(f, reclaimOrigin);
+
+  const crashOrigin = await worker(f);
+  const crashId = await prepareFileRead(f, crashOrigin, 'reconcile.txt');
+  await assert.rejects(
+    dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: crashId,
+      origin: crashOrigin, hooks: { afterAdmit: async () => { throw new SimulatedGatewayCrash('after admit'); } } }),
+    SimulatedGatewayCrash);
+  // Preparing another action while this one is unresolved is refused by design.
+  await assert.rejects((async () => {
+    const next = await worker(f);
+    return prepareFileRead(f, next, 'reconcile.txt');
+  })(), (error: unknown) => code(error) === 'GATEWAY_OPERATION_UNRESOLVED');
+  const reconciled = await reconcileGatewayInvocation(app.db, { workspaceId: f.workspaceId,
+    operationId: crashId, invocationId: (await sql<{ id: string }>`
+      select id from invocation_attempts where operation_id = ${crashId}`.execute(app.db)).rows[0]!.id,
+    stoppedWorkerId: crashOrigin.workerId, stoppedWorkerEpoch: crashOrigin.workerEpoch, oldProcessStopped: true });
+  assert.equal(reconciled.status, 'SUCCEEDED');
+  const evidence = await sql<{ result_ref: { content: string; sha256: string } }>`
+    select result_ref from invocation_attempts where operation_id = ${crashId}`.execute(app.db);
+  assert.equal(evidence.rows[0]?.result_ref.content, '重读正文');
+
+  // A read whose target disappears while the invocation is in flight settles
+  // FAILED on reconcile: nothing happened, and the claim is released.
+  const deletedOrigin = await worker(f);
+  const deletedId = await prepareFileRead(f, deletedOrigin, 'reconcile.txt');
+  await assert.rejects(
+    dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: deletedId,
+      origin: deletedOrigin, hooks: { afterAdmit: async () => { throw new SimulatedGatewayCrash('after admit'); } } }),
+    SimulatedGatewayCrash);
+  await unlink(join(f.root, 'reconcile.txt'));
+  const failed = await reconcileGatewayInvocation(app.db, { workspaceId: f.workspaceId,
+    operationId: deletedId, invocationId: (await sql<{ id: string }>`
+      select id from invocation_attempts where operation_id = ${deletedId}`.execute(app.db)).rows[0]!.id,
+    stoppedWorkerId: deletedOrigin.workerId, stoppedWorkerEpoch: deletedOrigin.workerEpoch, oldProcessStopped: true });
+  assert.equal(failed.status, 'FAILED');
+  const claimStates = await sql<{ status: string }>`
+    select distinct c.status as status from resource_claims c
+    join invocation_attempts i on i.resource_claim_id = c.id
+    where i.operation_id in (${crashId}, ${deletedId})`.execute(app.db);
+  assert.ok(claimStates.rows.every((row) => row.status === 'RELEASED'),
+    'a pure read never quarantines its resource claim');
 });

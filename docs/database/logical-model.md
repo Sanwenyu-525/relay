@@ -145,19 +145,19 @@ Gateway 原表的 run_id/step_id 是 RUN 分支；显式 URL 导入按 [ADR-004]
 
 ## 10. Skill 与蓝图的持久化补充
 
-2026-09-20，Proposed，D 阶段设计；没有生成或执行 migration。依据 [Skill 专题](../architecture/relay-skills.md)。Skill 定义先随包注册，保留被引用的不可变定义/依赖快照，不预建通用安装市场表。
+2026-09-20 提出设计；2026-09-26 已追加 `0022_m04_first_party_skills.sql` 实现 Assist Skill 冻结快照、`0023_m04_task_skill_proposals.sql` 实现当前 Task 建议的受控接受、`0024_m05_view_configuration.sql` 实现独立 View Owner、`0025_m05_project_blueprints.sql` 实现不可变蓝图候选与应用来源。依据 [Skill 专题](../architecture/relay-skills.md)。首批定义随应用发布，保留被引用的定义/依赖快照，不预建通用安装市场表。
 
 | 记录 / Owner | 最低新增信息 | 约束 |
 |---|---|---|
-| Assist 请求 / 原 Assist Owner | 可选 Skill id/version/definition_hash、依赖引用 | 非 Skill 请求保持原行为；不能把 Assist 伪装成 Run |
+| Assist 消息 / 原 Assist Owner（0022 已实现） | `skill_snapshot`（id/version/定义、依赖精确版本/摘要及内容）、`skill_input`、`skill_output` 均可空 | 非 Skill/旧消息保持 NULL；冻结输入不可改，输出仅 RUNNING→COMPLETED 首次结算；Assist 不伪装成 Run |
 | ContextManifest / Context；ExecutionContract / Workflow | Skill 身份与解析依赖版本 | Manifest 按实际输入保存；Run 契约冻结，不被升级覆写 |
-| ProjectBlueprintProposal / Project | workspace/project、来源请求、不可变候选 payload/hash、类型化基线集合、Skill 引用、检查证据、状态/revision、替代提案引用 | 每次修改新候选；目标引用与源均校验作用域；基线覆盖实际修改的 Project/State/View 和读取依赖 |
-| Blueprint 应用来源 / Project | 唯一 proposal_id、command_id、Skill 身份、受影响对象/结果版本、新 Task 局部键到真实 ID 映射、应用时间 | 与所有效果/提案终态/回执/审计同事务；不同命令不能重复应用同提案 |
+| ProjectBlueprintProposal / Project（0025 已实现） | workspace/project、来源消息、不可变 candidate/baseline/source/hash、决策状态、替代提案引用 | 每次修改新候选；目标引用与源均校验作用域；基线覆盖实际修改的 Project/State/View 和 Skill 读取依赖 |
+| Blueprint 应用来源 / Project（0025 已实现） | 唯一 proposal_id、decision.result 中的 command_id、受影响对象版本、新 Task 局部键到真实 ID 映射、应用时间 | 与所有效果/提案终态/回执/审计同事务；不同命令只返回同一已应用结果，不重复业务效果 |
 
-应用来源是历史记录，不是第二份 Project State。项目的 `applied_skill_version` 在查询时从相关应用记录展示；允许多次显式应用并保留旧记录，不能用一个可覆盖字符串充当全部来源。后续手工编辑按正常 revision 留痕，不再冒充原蓝图版本的输出。
+应用来源是历史记录，不是第二份 Project State。当前蓝图详情通过 proposal 的 source/decision/result 显示确切应用来源；未建立可覆盖的 Project `applied_skill_version` 字段。允许多次显式应用并保留旧记录，后续手工编辑按正常 revision 留痕，不再冒充原蓝图版本的输出。
 
-Migration/兼容性：D 阶段按已落地 schema 追加迁移，不修改已执行的 V001；旧请求/Run 没有 Skill 来源应可读且不伪造回填。提案基线/结果关联需在物理设计中落实 FK 或类型化校验、proposal 应用唯一约束及全部写入口统一锁序；正式表名、序号与 SQL 待实施冻结。
+Migration/兼容性：0022 只为 Assist 消息追加可空列，0023 扩展原 AssistProposal kind/Task 双版本/Skill 来源摘要，0024 新建 View Owner，0025 新建 Blueprint 候选表；不改旧迁移，旧请求/Run 没有 Skill 来源仍可读且不伪造回填。当前 Task 接受沿 Task Owner 新建 acceptance 版本，旧有效验证/OPEN Review 失效且历史保留；读时 CheckPlan 准入预览不成为第二份执行事实。Blueprint 表通过 Workspace/Project 复合 FK 和原 Assist 消息 FK 约束范围，来源/候选冻结触发器限制改写；关联 Goal/Task 和实际应用效果在事务内由 Owner 核对，不另建配置状态表。
 
 数据迁移与回滚风险：只迁移结构，不自动套用新版 Skill 改项目。已应用蓝图产生的普通业务事实不能通过删除提案或降级包回滚；不兼容应用版本不得读取新 schema 后继续写。备份需包含历史定义快照和来源记录；删除被引用定义应保留历史可核对性，缺失明确报不可用。
 
-扩展组合的逻辑补充：当来源为 Pack 时，在既有提案/应用来源及实际使用的配置引用中保存可选 Pack 身份、版本、定义摘要和解析成员清单；ContextManifest/ExecutionContract 记录本次真正采用的 Profile/Recipe/模板版本，不复制整包未使用内容。只读定义快照由应用组合入口保留，项目应用来源归 Project，各配置绑定仍由其 Owner 写入；不新增第二份 Pack 项目状态或可覆盖的“全部已升级”标记。上述为待实施字段要求，物理列/快照结构、引用约束与迁移序号在 D 阶段冻结；旧记录无 Pack 来源保持合法，不伪造回填。更新兼容校验失败不得改当前绑定，降级/禁用不级联删除业务事实，备份保留历史依赖定义。正式 SQL 尚未生成或执行。
+扩展组合的逻辑补充：最小 Pack 是随应用发布的只读清单，不保存项目选择，也不产生配置效果。0025 的候选 `source.pack` 在用户选择时冻结 Pack 身份、版本、定义摘要和成员清单；未选择则为 null，旧记录不伪造回填。实际配置仍由 Project/State/View/Task Owner 写入；当前不新增第二份 Pack 项目状态、通用安装器或可覆盖的“全部已升级”标记。Run 的 ContextManifest/ExecutionContract 只记录真正采用的运行依赖，不复制整包未使用内容。

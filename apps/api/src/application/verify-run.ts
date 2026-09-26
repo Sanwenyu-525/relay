@@ -6,6 +6,7 @@ import type {
   VerificationSessionRow,
 } from '../infrastructure/database-schema.js';
 import type { JsonObject } from '../infrastructure/json.js';
+import type { DbExecutor } from '../infrastructure/database.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
 import { evidenceUnavailable, invalidTransition } from './domain-error.js';
 import type { StepExecution } from './run-steps.js';
@@ -20,6 +21,9 @@ import { hasChecker, resolveCheckerForScenario } from '../workflow/checkers.js';
 import type { ContextCorrectionInput, FakeScenario } from '../workflow/context-fixture.js';
 import { computeVerdict, DEFAULT_CORRECTION_BUDGET } from '../workflow/verdict.js';
 import { createVerificationReviews } from './review-requests.js';
+import { recordModelInvocation } from './model-call-recorder.js';
+import { ModelScopeBudgetError } from '../model/model-call-repository.js';
+import type { CheckOutcome } from '../workflow/checkers.js';
 
 /**
  * VERIFY 步骤（contracts/03-verification-and-approval.md 第 3–5 节、
@@ -37,6 +41,8 @@ export interface VerifyRunInput {
   readonly run: RunRow;
   readonly task: TaskRow;
   readonly storage: ManagedContentStore;
+  readonly modelCallDb: DbExecutor;
+  readonly stepAttemptId: string;
   readonly fakeScenario?: FakeScenario | undefined;
 }
 
@@ -104,13 +110,40 @@ export async function verifyRun(
       .map((row) => row.check_attempt);
     const checkAttempt = previousAttempts.length === 0 ? 1 : Math.max(...previousAttempts) + 1;
     const checker = resolveCheckerForScenario(entry, input.fakeScenario);
-    const outcome = checker.check({
+    const checkInput = {
       entry,
       content: target.content,
       artifactVersionId: target.versionId,
       contentHashHex: target.contentHash.toString('hex'),
       ...(input.fakeScenario === undefined ? {} : { fakeScenario: input.fakeScenario }),
-    });
+    };
+    let outcome: CheckOutcome;
+    if (checker.modelIdentity === undefined) {
+      outcome = await checker.check(checkInput);
+    } else {
+      try {
+        const recorded = await recordModelInvocation(input.modelCallDb, {
+          origin: { workspaceId: input.run.workspace_id, kind: 'SEMANTIC_CHECK',
+            stepAttemptId: input.stepAttemptId, criterionId: entry.criterionId, checkAttempt },
+          identity: checker.modelIdentity,
+          invoke: async () => checker.check(checkInput),
+          settle: (result) => ({ status: result.result === 'ERROR' ? 'FAILED' : 'COMPLETED',
+            ...(result.result === 'ERROR' ? { errorKind: evidenceString(result.evidence, 'error_kind')
+              ?? 'CHECKER_ERROR' } : {}),
+            providerRequestId: evidenceString(result.evidence, 'provider_request_id') ?? null,
+            usage: evidenceUsage(result.evidence) }),
+        });
+        outcome = { ...recorded.result,
+          evidence: { ...recorded.result.evidence, model_call_id: recorded.callId } };
+      } catch (error) {
+        if (!(error instanceof ModelScopeBudgetError)) throw error;
+        outcome = { result: 'ERROR', evidence: {
+          checker: checker.id, checker_version: checker.version,
+          artifact_version_id: target.versionId,
+          reason: 'MODEL_BUDGET_EXHAUSTED',
+        } };
+      }
+    }
 
     await repositories.verifications.insertCheckResult({
       id: randomUUID(),
@@ -204,6 +237,22 @@ export async function verifyRun(
   });
 
   return { outcome: 'SUCCESS', resultRef, runStatus: 'VERIFYING', waitReason: null };
+}
+
+function evidenceString(evidence: JsonObject, key: string): string | undefined {
+  const value = evidence[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function evidenceUsage(evidence: JsonObject): { inputTokens: number | null;
+  outputTokens: number | null } {
+  const usage = evidence.usage;
+  if (typeof usage !== 'object' || usage === null || Array.isArray(usage)) {
+    return { inputTokens: null, outputTokens: null };
+  }
+  const value = usage as JsonObject;
+  return { inputTokens: typeof value.input_tokens === 'number' ? value.input_tokens : null,
+    outputTokens: typeof value.output_tokens === 'number' ? value.output_tokens : null };
 }
 
 /**
@@ -324,6 +373,20 @@ async function finalizeOrThrow(
   if (finalized === undefined) {
     throw new Error('verification session finalize CAS failed while holding the run lock');
   }
+  const task = await repositories.tasks.readTask(input.session.task_id);
+  if (task === undefined) throw new Error('verification Task missing in finalize transaction');
+  for (const target of await repositories.verifications.listTargets(input.session.id)) {
+    await repositories.lineage.insertExactEdge({ workspaceId: task.workspace_id,
+      childVersionId: target.artifact_version_id, relation: 'VERIFIED_BY',
+      parentKind: 'VERIFICATION_SESSION', parentId: input.session.id });
+  }
+  await repositories.activities.insertActivityRecord({ id: randomUUID(),
+    workspaceId: task.workspace_id, runId: input.session.run_id,
+    actorKind: 'AI', actorRef: input.session.run_id === null ? 'verification' :
+      `run:${input.session.run_id}`, commandId: null,
+    projectId: task.project_id, taskId: task.id, eventType: 'VERIFICATION_FINALIZED',
+    factRefs: { verification_session_id: input.session.id,
+      run_id: input.session.run_id, verdict: input.status } });
 }
 
 function readString(value: JsonObject | null | undefined, key: string): string | undefined {

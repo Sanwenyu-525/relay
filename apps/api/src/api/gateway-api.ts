@@ -7,6 +7,7 @@ import {
   disableGatewayConnectionCommand, disableManagedResourceCommand,
   revokeGatewayPolicyCommand,
 } from '../application/gateway-commands.js';
+import { createWebImportJob } from '../application/web-import-commands.js';
 import {
   listGatewayConnections, listGatewayPolicies, listGatewayPolicyVersions,
   listImportGatewayOperations, listManagedResources, listRunGatewayOperations,
@@ -29,22 +30,38 @@ const resourceParams = Type.Object({ workspace_id: uuid, project_id: uuid, resou
 const runParams = Type.Object({ workspace_id: uuid, run_id: uuid }, strict);
 const importParams = Type.Object({ workspace_id: uuid, import_job_id: uuid }, strict);
 const operationParams = Type.Object({ workspace_id: uuid, operation_id: uuid }, strict);
-const capability = Type.Union([Type.Literal('FAKE_WRITE'), Type.Literal('FAKE_PUBLIC_READ')]);
+const capability = Type.Union([
+  Type.Literal('FAKE_WRITE'),
+  Type.Literal('FAKE_PUBLIC_READ'),
+  Type.Literal('FILE_READ'),
+  Type.Literal('WEB_FETCH'),
+  Type.Literal('FILE_WRITE'),
+  Type.Literal('GIT_READ'),
+  Type.Literal('GIT_WRITE'),
+  Type.Literal('CLI_RUN'),
+]);
 const decision = Type.Union([Type.Literal('AUTO'), Type.Literal('ASK'), Type.Literal('DENY')]);
 const commandResult = Type.Record(Type.String(), Type.String());
 
 const createConnectionBody = Type.Object({ command_id: uuid,
-  capabilities: Type.Array(capability, { minItems: 1, maxItems: 2, uniqueItems: true }) }, strict);
+  capabilities: Type.Array(capability, { minItems: 1, maxItems: 6, uniqueItems: true }),
+  root_path: Type.Optional(Type.String({ minLength: 1, maxLength: 1024 })),
+  allowed_host: Type.Optional(Type.String({ minLength: 1, maxLength: 253 })),
+  allow_private: Type.Optional(Type.Boolean()) }, strict);
 const disableBody = Type.Object({ command_id: uuid, expected_version: revision }, strict);
 const createPolicyBody = Type.Object({ command_id: uuid, capability,
   resource_id: Type.Union([uuid, Type.Null()]), decision,
-  max_payload_bytes: Type.Integer({ minimum: 0, maximum: 262144 }) }, strict);
+  max_payload_bytes: Type.Integer({ minimum: 0, maximum: 262144 }),
+  host: Type.Optional(Type.String({ minLength: 1, maxLength: 253 })) }, strict);
 const versionPolicyBody = Type.Object({ command_id: uuid, expected_revision: revision, capability,
   resource_id: Type.Union([uuid, Type.Null()]), decision,
-  max_payload_bytes: Type.Integer({ minimum: 0, maximum: 262144 }) }, strict);
+  max_payload_bytes: Type.Integer({ minimum: 0, maximum: 262144 }),
+  host: Type.Optional(Type.String({ minLength: 1, maxLength: 253 })) }, strict);
 const revokeBody = Type.Object({ command_id: uuid, expected_revision: revision }, strict);
 const createResourceBody = Type.Object({ command_id: uuid, root_path: Type.String({ minLength: 1 }) }, strict);
 const disableResourceBody = Type.Object({ command_id: uuid, expected_revision: revision }, strict);
+const createImportBody = Type.Object({ command_id: uuid,
+  url: Type.String({ minLength: 1, maxLength: 2048 }), connection_id: uuid }, strict);
 
 /** P09 config/history API. Claim, Admit, outcome and reconcile remain internal Worker ports. */
 export function registerGatewayRoutes(app: FastifyInstance, dependencies: RouteDependencies): void {
@@ -54,7 +71,10 @@ export function registerGatewayRoutes(app: FastifyInstance, dependencies: RouteD
   }, createCommandHandler(dependencies, { commandType: 'CreateGatewayConnection', bodySchema: createConnectionBody,
     execute: async ({ executor, params, body }) => {
       const outcome = await createGatewayConnectionCommand(executor, { workspaceId: params.workspace_id ?? '',
-        projectId: params.project_id ?? '', commandId: body.command_id, capabilities: body.capabilities });
+        projectId: params.project_id ?? '', commandId: body.command_id, capabilities: body.capabilities,
+        rootPath: body.root_path,
+        ...(body.allowed_host === undefined ? {} : { allowedHost: body.allowed_host }),
+        ...(body.allow_private === undefined ? {} : { allowPrivate: body.allow_private }) });
       return { outcome, result: outcome.result };
     } }));
   app.get('/projects/:project_id/connections', { schema: { params: projectParams } }, async (request, reply) => {
@@ -90,7 +110,8 @@ export function registerGatewayRoutes(app: FastifyInstance, dependencies: RouteD
     execute: async ({ executor, params, body }) => {
       const outcome = await createGatewayPolicyCommand(executor, { workspaceId: params.workspace_id ?? '',
         projectId: params.project_id ?? '', commandId: body.command_id, capability: body.capability,
-        resourceId: body.resource_id, decision: body.decision, maxPayloadBytes: body.max_payload_bytes });
+        resourceId: body.resource_id, decision: body.decision, maxPayloadBytes: body.max_payload_bytes,
+        ...(body.host === undefined ? {} : { host: body.host }) });
       return { outcome, result: outcome.result };
     } }));
   app.get('/projects/:project_id/permission-policies', { schema: { params: projectParams } }, async (request, reply) => {
@@ -111,7 +132,8 @@ export function registerGatewayRoutes(app: FastifyInstance, dependencies: RouteD
       const outcome = await addGatewayPolicyVersionCommand(executor, { workspaceId: params.workspace_id ?? '',
         projectId: params.project_id ?? '', policyId: params.policy_id ?? '', commandId: body.command_id,
         expectedRevision: body.expected_revision, capability: body.capability,
-        resourceId: body.resource_id, decision: body.decision, maxPayloadBytes: body.max_payload_bytes });
+        resourceId: body.resource_id, decision: body.decision, maxPayloadBytes: body.max_payload_bytes,
+        ...(body.host === undefined ? {} : { host: body.host }) });
       return { outcome, result: outcome.result };
     } }));
   app.post('/projects/:project_id/permission-policies/:policy_id/revoke', {
@@ -152,6 +174,17 @@ export function registerGatewayRoutes(app: FastifyInstance, dependencies: RouteD
       const outcome = await disableManagedResourceCommand(executor, { workspaceId: params.workspace_id ?? '',
         projectId: params.project_id ?? '', resourceId: params.resource_id ?? '',
         commandId: body.command_id, expectedRevision: body.expected_revision });
+      return { outcome, result: outcome.result };
+    } }));
+
+  app.post('/projects/:project_id/import-jobs', {
+    schema: { params: projectParams, body: createImportBody,
+      response: { 201: commandEnvelopeSchema(commandResult) } },
+  }, createCommandHandler(dependencies, { commandType: 'CreateWebImportJob', bodySchema: createImportBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await createWebImportJob(executor, { workspaceId: params.workspace_id ?? '',
+        projectId: params.project_id ?? '', commandId: body.command_id, url: body.url,
+        connectionId: body.connection_id });
       return { outcome, result: outcome.result };
     } }));
 

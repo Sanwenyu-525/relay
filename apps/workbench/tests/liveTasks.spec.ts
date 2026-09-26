@@ -22,26 +22,34 @@ function activate(): void {
 }
 
 describe("live 任务入口", () => {
-  it("全部和收件箱均不读取示例任务，并保留真实项目与任务 ID 入口", async () => {
+  it("全部只请求 scope=all、收件箱只请求 inbox=true，并保留真实 ID 入口", async () => {
     activate();
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("offline"); }));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === `${tasksUrl}?inbox=true` || String(input) === `${tasksUrl}?scope=all`) return { ok: true, status: 200,
+        json: async () => ({ items: [], next_cursor: null }) } as Response;
+      throw new TypeError("offline");
+    }));
     const mounted = await mountWorkbench("/tasks");
     unmount = mounted.unmount;
 
-    expect(mounted.wrapper.get('[data-testid="tasks-live-gap"]').text()).toContain("全工作空间任务列表端点");
+    expect(mounted.wrapper.get('[data-testid="tasks-live-all"]').text()).toContain("当前工作空间没有任务");
     expect(mounted.wrapper.text()).not.toContain("确定实验评价指标");
     expect(fixtureAdapter.getCallCount("listTasks")).toBe(0);
     expect(fixtureAdapter.getCallCount("loadTaskOptions")).toBe(0);
-    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toBe(`${tasksUrl}?scope=all`);
 
     await mounted.wrapper.get('[data-testid="tasks-tab-inbox"]').trigger("click");
     await flush();
-    expect(mounted.wrapper.get('[data-testid="tasks-live-gap"]').text()).toContain("收件箱列表");
+    expect(mounted.wrapper.get('[data-testid="tasks-live-inbox"]').text()).toContain("当前收件箱没有任务");
     expect(mounted.wrapper.text()).not.toContain("完善文献综述");
     expect(fixtureAdapter.getCallCount("listTasks")).toBe(0);
     expect(fixtureAdapter.getCallCount("loadTaskOptions")).toBe(0);
-    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+    expect(String(vi.mocked(fetch).mock.calls[1][0])).toBe(`${tasksUrl}?inbox=true`);
 
+    await mounted.router.push("/tasks");
+    await flush();
     await mounted.wrapper.get('input[name="live-task-project-id"]').setValue(projectId);
     await mounted.wrapper.get('[data-testid="tasks-live-open-project"]').trigger("click");
     await flush();
@@ -58,6 +66,8 @@ describe("live 任务入口", () => {
   it("真实创建回执返回任务入口后不混入示例列表", async () => {
     activate();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === `${tasksUrl}?scope=all`) return { ok: true, status: 200,
+        json: async () => ({ items: [], next_cursor: null }) } as Response;
       expect(String(input)).toBe(tasksUrl);
       expect(init?.method).toBe("POST");
       const commandId = (JSON.parse(String(init?.body)) as { command_id: string }).command_id;
@@ -83,11 +93,11 @@ describe("live 任务入口", () => {
     await flush();
 
     expect(mounted.router.currentRoute.value.path).toBe("/tasks");
-    expect(mounted.wrapper.get('[data-testid="tasks-live-gap"]').text()).toContain("当前界面尚未接入");
+    expect(mounted.wrapper.get('[data-testid="tasks-live-all"]').text()).toContain("当前工作空间没有任务");
     expect(mounted.wrapper.text()).not.toContain("确定实验评价指标");
     expect(fixtureAdapter.getCallCount("listTasks")).toBe(0);
     expect(fixtureAdapter.getCallCount("loadTaskOptions")).toBe(0);
     expect(fixtureAdapter.getCallCount("createTask")).toBe(0);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

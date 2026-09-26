@@ -1,8 +1,8 @@
 # Relay / Personal Workflow OS
 
-> 2026-09-24 当前接续：M01 技术适配与 M02 React/桌面基础已独立验收；`apps/api` 保留 Fastify/Kysely，M03 固定 Mock 图的真实 Windows/PG CRITERION Review/RESUME 和 ACTION_APPROVAL 组合已通过局部分片验收；Gateway UNKNOWN 查询/UI、在途 Mock 模型取消及可选文件动作的 React 入口已完成开发自检，可用隔离桌面会话试用。完整 G01–G08、真实 Provider 与 Windows 安装交付尚未验收，阶段结论只看 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)。取舍见 [ADR-010](docs/decisions/ADR-010-agent-stack-react-desktop.md)，工作包见 [M01–M07](prompts/stack-migration.md)。
+> 2026-09-26 当前接续：M01 技术适配与 M02 React/桌面基础已独立验收；M03 固定 Mock 图的 Windows/PG 基础闭环通过，完整 G01–G08 仍未验收。M04 的 OpenAI 兼容模型端口、Context/Assist/Skill/Blueprint 与低风险读取，M05 的 Today/工作台/追溯及部分全局入口已开发自检；未外呼真实 Provider，也未做 M04/M05 独立验收。阶段与剩余缺口只看 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)。取舍见 [ADR-010](docs/decisions/ADR-010-agent-stack-react-desktop.md)，工作包见 [M01–M07](prompts/stack-migration.md)。
 
-面向长期项目的人与 AI 协作工作系统，交付目标为 Windows 可安装应用，具有独立窗口和启动入口。仓库包含产品设计、业务契约、研究实验、UI 视觉规范，以及后端工程（`apps/api`：P00–P11 与 M03 Mock 运行切片，含受管 Artifact、人工完成/重开、Fake Run、Verification、Review、持久控制、Fake Gateway、长期信息/规则/搜索与 Context Builder）和 React 工作台。显式连接本机 API 后可走人工路径——创建项目 → 创建任务（含 ready）→ 开始 → 任务详情 → 保存 Markdown 产物版本 → 选择接受版本 → 完成 → 重开（[前端预览记录第 9、10 节](docs/development/ui-preview-acceptance.md#10-ui-10-任务详情与-ui-11-产物编辑2026-09-21)），也可在待审页处理 P07 Review、在 Run 页处理 P08 控制请求，以及在资料页管理 P10 Knowledge、Memory、Decision、Rule。后端实际接口见 [HTTP 契约第 10 节](docs/api/http-command-contract.md)。P11 Context Builder 已实现并完成开发自检；真实工具、M03 完整恢复与 Windows 安装交付仍待开发或验证。独立验收边界见 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)。本项目与 AI Manga Drama Studio 独立。
+面向长期项目的人与 AI 协作工作系统，交付目标为 Windows 可安装应用，具有独立窗口和启动入口。仓库包含产品设计、业务契约、研究实验、UI 视觉规范、Fastify/Kysely/PostgreSQL 后端、React 工作台与 Tauri 桌面宿主。显式连接本机 API 后可走人工路径——创建项目 → 创建任务（含 ready）→ 开始 → 任务详情 → 保存 Markdown 产物版本 → 选择接受版本 → 完成 → 重开（[前端预览记录第 9、10 节](docs/development/ui-preview-acceptance.md#10-ui-10-任务详情与-ui-11-产物编辑2026-09-21)），也可在待审页处理 Review、在 Run 页查看控制和追溯、在资料页管理 Knowledge/Memory/Decision/Rule。当前还提供 Mock Runtime、Context、Assist/首批 Skill 与蓝图、Today 和三套内置工作台的开发实现；真实 Provider 连通、真实 Git/CLI 工具、完整恢复及 Windows 安装交付未完成验证。后端接口见 [HTTP 契约第 10 节](docs/api/http-command-contract.md)，阶段及独立验收边界见 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)。本项目与 AI Manga Drama Studio 独立。
 
 当前工作区为 D:/Develop/Relay-Agent。阶段、已有证据、缺口及下一步统一见 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)；旧迁入路径与变更经过见[交付审计](docs/development/design-audit.md)，不作为当前启动位置。
 
@@ -17,7 +17,7 @@ P10 开发自检：后端真实 PostgreSQL 全量 158/158、P10 定向 7/7、Gat
 5. [技术选型](docs/architecture/technology-selection.md)和[桌面决策](docs/decisions/ADR-007-windows-desktop.md)：推荐主栈、桌面边界与冻结门槛；设计提案不等于已实现。
 6. [工作台交互](docs/frontend/workbench-design.md)、[设计系统](docs/frontend/design-system.md)、[设计 tokens](docs/frontend/design-tokens.json)：业务操作、图像依据和视觉实现规范。
 7. [测试计划](docs/testing/verification-plan.md)、[部署设计](docs/deployment/local-deployment.md)、[实施提示词](prompts/README.md)：分阶段验证与后续工程入口。
-8. [Relay 扩展模型](docs/architecture/relay-skills.md)：Skill、项目蓝图、Pack、Profile 与 Proposal 的组合边界，含版本、评测和受控恢复；实现设计为 Proposed，尚未实现。
+8. [Relay 扩展模型](docs/architecture/relay-skills.md)：Skill、项目蓝图、Pack、Profile 与 Proposal 的组合边界，含版本、评测和受控恢复；首批 Skill/Pack、Task 提案确认及项目蓝图已进入开发自检，其余设计项仍按文档中的状态区分。
 
 ## 当前可运行内容
 
@@ -43,7 +43,7 @@ dev-stack.bat -FrontendPort 5173 -SkipInstall -SkipBuild
 
 `dev-stack` 不启动独立 Mock Worker，也不安装 Graph checkpoint；浏览器页默认显示示例数据。试用固定 Mock Agent 请使用下方桌面隔离会话。Windows 桌面宿主位于 [apps/desktop](apps/desktop)，M02 的 React/桌面基础已独立验收。它加载同一份 React 工作台构建产物并监督真实 API 和 Mock Worker；M03 的固定 Mock 图已通过真实 Windows/PG 的 CRITERION Review/RESUME 与 ACTION_APPROVAL 局部联测，Mock 在途取消已完成开发自检，G01–G08 完整闭环尚未验收。安装、升级和卸载仍属 M07。
 
-`apps/api` 是 P00 第二段建立、P01–P11 逐段扩展的工程：存活/就绪检查、配置校验、迁移、显式 SQL Repository、事务与命令回执、Project/Goal/Task/State、受管 Artifact、人工完成/重开、Fake Run、Verification、Review、持久控制、Fake Gateway、长期信息/规则/搜索与 Context Builder。`apps/workbench` 默认渲染示例数据；浏览器可在页壳右上「数据来源」手工填入 API 地址、Workspace ID 与 `RELAY_API_BEARER_TOKEN`，只有 `/health/ready` 返回 200 才进入 live，刷新后回到示例模式。打包桌面从受信宿主内存取得本次连接并在重载时重新引导，无须在页面填写令牌；若本机 API 引导或就绪失败，桌面显示需重启应用的阻断页，不放行可操作示例数据。live 模式可调用人工路径端点，在 Task 详情发起 Delegate、查看服务端产物历史，也可在「待审」页处理 P07 Review，在 `/runs/:id` 查看 P08 控制与 P11 Context，在 `/knowledge` 或项目资料页管理 P10 四类信息。凭据只保存在页面内存，不写 URL、localStorage、日志或源码。P09 Connection、受管目录和权限策略的创建/变更仍使用后端 HTTP；已有配置可在 Task 委托页选作可选 Mock 文件动作，Run 页按需读取本次动作历史。URL/PDF 导入、四项 Skill、修改验收标准的专用命令与完整 Trace 仍未接入。Task 产物历史的 API/Chromium 组合已通过独立分片验收；M03 的 Mock 全链路、在途取消与真实安装交付均未放行。阶段与缺口见 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)；M02 开发 release 构建见上节，产品安装命令尚未提供。
+`apps/api` 提供存活/就绪检查、迁移、事务与命令回执、Project/Goal/Task/State、受管 Artifact、人工完成/重开、Mock Run、Verification/Review、持久控制、Gateway、长期信息/规则/搜索、Context、Assist/首批 Skill/蓝图以及 Today/Activity/Trace/Lineage。`apps/workbench` 默认渲染示例数据；浏览器可在页壳右上「数据来源」手工填入 API 地址、Workspace ID 与 `RELAY_API_BEARER_TOKEN`，只有 `/health/ready` 返回 200 才进入 live，刷新后回到示例模式。打包桌面从受信宿主内存取得本次连接并在重载时重新引导，无须在页面填写令牌；若本机 API 引导或就绪失败，桌面显示需重启应用的阻断页。live 模式可走人工闭环、Delegate/Review/Run 控制、资料和 URL 导入、Today、三套工作台、Assist/蓝图及确切证据追溯；Assist 普通讨论与 Run DRAFT 可显示有界的生成中草稿，最终内容仍以已结算消息和产物为准。本地 `.md/.txt` 首次导入单独写入 Knowledge。凭据只保存在页面内存，不写 URL、localStorage、日志或源码。P09 Connection、受管目录和权限策略可在项目设置页操作；委托页可选择显式 Context 来源和可选 Mock 文件动作。真实项目与全空间任务列表已接通；后端 ArchiveProject 命令、关联写入栅栏、live 归档按钮及主要 live 写入口的归档门槛已有开发自检。PDF 导入与真实 Git/CLI 工具尚未交付。M03 完整闭环、真实 Provider、M04/M05 与安装交付的验收状态见 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)。
 
 ## Windows 桌面开发包（M02）
 
@@ -84,7 +84,7 @@ P09 接续：`0008_v003_gateway` 与内部 Fake Gateway 实现 Connection/Capabi
 
 P10 接续：`0009_v004_information_rules` 增加 Knowledge、Memory、Decision、Rule 的类型化根与不可变版本；明确确认、替代、规则作用域/强度/检查路径、Rule 修订栅栏与有界字面搜索均接应用命令和 HTTP。前端加入真实资料页及项目资料入口，示例模式不伪造资料。P10 当时开发自检为后端真实 PG 全量 158/158、P10 定向 7/7、Gateway 14/14、单测 57/57，前端 P10 定向组件 7/7，类型检查、构建与文档检查通过；本段不是正式验收。
 
-P11 接续：`0010_v005_context_revision` 给 Context 来源变化独立修订号；BUILD_CONTEXT 使用冻结契约与当前合法事实装配必需、相关及修正输入，保存实际片段/版本/hash/范围、估算预算与裁剪原因。`GET /runs/{id}/context-manifests` 及详情只读端点重新过滤失效来源，Run 页展示可读证据。首次全量回归发现已发布候选后的 Task 修订被过宽 Context 栅栏拦截，修复后真实 PG 全量 **167/167**、Context 定向 **9/9**、Verification 回归 **24/24**、单测 **57/57**，前端 Sources/Run 定向组件 **14/14**；类型检查、构建、文档检查通过，临时 PG 已清理。当前仍用 FakeModelPort，最近同范围资料补位最多 3 条且仅为有界降级；P12 接真实 Provider 前须补显式来源选择并复核最小必要输入。本段未做正式验收。
+P11 接续：`0010_v005_context_revision` 给 Context 来源变化独立修订号；BUILD_CONTEXT 使用冻结契约与当前合法事实装配必需、相关及修正输入，保存实际片段/版本/hash/范围、估算预算与裁剪原因。`GET /runs/{id}/context-manifests` 及详情只读端点重新过滤失效来源，Run 页展示可读证据。首次全量回归发现已发布候选后的 Task 修订被过宽 Context 栅栏拦截，修复后真实 PG 全量 **167/167**、Context 定向 **9/9**、Verification 回归 **24/24**、单测 **57/57**，前端 Sources/Run 定向组件 **14/14**；类型检查、构建、文档检查通过，临时 PG 已清理。P11 时点仍用 FakeModelPort，最近同范围资料补位最多 3 条且仅为有界降级；后续 M04 已增加显式选源，并阻止真实 Provider 外发近期补位资料。本段测试未做正式验收。
 
 此前 2026-09-23 的 R05 独立复验结果保留在[独立验收第 9 节](docs/testing/frontend-backend-acceptance-2026-09-21.md#9-r05-修复后独立复验2026-09-23)：当时 57/57 单测、113/113 真实 PG 集成、前端 80/80 组件及 19/19 Chromium 通过。该历史结果不覆盖 P07 的阶段状态；当前阶段只看 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)。
 
@@ -126,6 +126,8 @@ Pop-Location
 ```
 
 M03 固定 Mock 图的独立 Worker 由另一个 Node 进程运行。先以迁移角色按顺序执行业务 `migrate.js` 和官方 Saver 的 `install-graph.js`（二者均需 `RELAY_MIGRATION_DB_URL`）；仅在安装成功后启动 Worker/supervisor，运行进程使用 `RELAY_DB_URL` 应用角色，不执行 DDL：
+
+`RELAY_DB_POOL_MAX` 配置的是 API 进程的连接池，允许值 1；独立 Worker 不读取该键，当前固定使用自己的 4 连接池。M04 语义检查在 VERIFY 事务持有一个连接时，会用同一 Worker 池的另一连接先提交 `model_calls` 调用事实，因此 API 配成 1 不会造成该路径等待。自建 Worker 或直接调用 `advanceRunStep` 时若使用单连接池，须提供独立计量连接或至少两个可用连接；当前受监督 Worker 路径以定向真实 PG 测试覆盖。
 
 ```powershell
 Push-Location apps\api
@@ -193,7 +195,7 @@ Pop-Location
 
 覆盖（69 个集成用例 + 28 个单元用例，2026-09-20 实测通过，`node --test`）：配置缺失与非法值明确失败、未鉴权 401、错误 Host 与错误 Origin 拒绝、liveness 最小响应、数据库正常与不可用两种 readiness、停止后进程退出与端口释放；空库迁移成功且重复启动不重复执行、并发迁移在 advisory lock 上串行化、已应用迁移文件缺失或内容变化被拒绝、迁移失败时 DDL 与台账同事务回滚；延迟外键在 COMMIT 失败、跨 Workspace 引用被拒、NULL 与越界值不能绕过 CHECK、完成周期唯一、0002 的 Goal 对齐列与 CHECK、应用角色不能 DDL 且不能 UPDATE/DELETE 不可变表、多 Repository 同事务整体回滚、相同命令重放与异 payload 拒绝、bigint（> 2^53）往返无损；两个 CLI 入口的真实进程运行（重复迁移不重建、同目标重试返回 `replayed=true`）；P02 的真实 HTTP 路径：Project/Goal/Task 创建与查询、INBOX→READY→IN_PROGRESS→CANCELLED 显式状态迁移、非法迁移被拒、展示字段更新与 status 字段被拒、缺必需版本 422、命令重放与 `COMMAND_ID_REUSED`、两个客户端版本冲突（含并发 CASE，恰一个成功）、依赖环/自依赖/跨项目/跨 Workspace 引用被拒、BLOCKS 前置阻止开始、键集分页与非法游标、Inbox 无 Project 事项、Goal 继承/显式/显式空集与解除关联影响清单、Goal 并发解除的确定结果、State 类型化命令（拒绝整对象覆盖、5 个 action、重复集合写入被拒）、State 依赖版本；P03 的受管内容与人工完成：发布后落盘内容与 SHA-256/大小一致、受授权下载返回确切版本正文、不支持类型 415 与超限 413（按 UTF-8 字节判定，边界值可接受）、未知路径字段与路径遍历输入被拒、跨作用域与未鉴权不可见、旧版本不覆盖且新版本只递增、按固定 v1 完成后 v2 不被标为已验收、无产物要求允许空集合、声明的产物种类与必需人工项必须满足、完成后上传被拒且重开后须重新 start、重开新建验收版本并保留历史凭据、旧完成命令重放只返回历史回执、旧周期新命令返回 `ACCEPTANCE_STALE`、两个并发完成命令恰一个生效、完成事务在 Task/State 之间失败整笔回滚且原样重试收敛、版本登记失败留下可核对孤儿且 Task 不误完成、证据文件缺失或被篡改时拒绝完成（503 `EVIDENCE_UNAVAILABLE`）。其后的 schema readiness 真实 PG 覆盖另行验证空库、缺 `0003`、完整当前清单、未知未来迁移和摘要不匹配；应用角色仍不能直读台账，但可读受限兼容视图。测试库 owner 为 `relay_migrator`，应用连接使用 `relay_app`，不使用超级用户冒充应用角色。包装脚本见 [apps/api/scripts/run-integration.ps1](apps/api/scripts/run-integration.ps1)、[角色 bootstrap](apps/api/sql/bootstrap-roles.sql)、[V001 migration](apps/api/migrations/0001_v001_human_core.sql)、[0002 migration](apps/api/migrations/0002_p02_task_goal_alignment.sql) 与 [0003 migration](apps/api/migrations/0003_schema_readiness.sql)。
 
-尚未交付或尚未完成整体验证（不要当作已放行）：生产恢复全场景与旧进程自动停机确认、真实 Web/Git/CLI 的 Gateway 适配与宿主外进程隔离；Context 显式选源、URL/PDF 导入、孤儿核对报告与启动内容抽检；真实模型 Provider（当前只有 FakeModelPort 与 FakeSemanticChecker）、AI Assist、Python 工具层、Skill/Pack、Windows 安装包；业务路由尚未逐一在 schema 不兼容时拒绝，备份恢复也尚未实现；未生成 OpenAPI。M02 桌面基础已独立验收，但不能据此称完整 Windows 安装交付。本段实际覆盖与下一步见 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)。
+尚未交付或尚未完成整体验证（不要当作已放行）：M03 生产恢复全场景、真实 Provider 连通和用户可见首字流式输出；真实 Git/CLI Gateway 适配与宿主外进程隔离、PDF 导入、孤儿核对报告与启动内容抽检；项目归档写命令；Python 工具层、Windows 安装包、备份恢复与 OpenAPI。OpenAI 兼容 ModelPort、Assist、首批 Skill/Pack、蓝图、低风险 Files/Web 和追溯已有代码及开发自检，不能据此宣称真实模型、真实桌面业务或 M04/M05 独立验收通过。M02 桌面基础已独立验收，但不能据此称完整 Windows 安装交付。本段实际覆盖与下一步见 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)。
 
 ## workspace 与嵌套目录
 

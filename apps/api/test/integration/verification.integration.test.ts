@@ -6,13 +6,14 @@ import { sql } from 'kysely';
 import { Client } from 'pg';
 
 import { delegateTask } from '../../src/application/delegate-task.js';
+import { readCompletionEvidence } from '../../src/application/completion-evidence-queries.js';
 import { resolveReview } from '../../src/application/review-decisions.js';
 import { listInboxReviews, readReview } from '../../src/application/review-queries.js';
 import { requestActionApproval, requestStateProposal } from '../../src/application/request-review.js';
 import { advanceRunStep, type AdvanceRunStepResult } from '../../src/application/run-steps.js';
 import { runStateCommand } from '../../src/application/state-commands.js';
 import { withTransaction } from '../../src/application/unit-of-work.js';
-import type { CriterionMethod } from '../../src/infrastructure/database-schema.js';
+import type { CriterionMethod, ModelCallRow } from '../../src/infrastructure/database-schema.js';
 import type { JsonObject } from '../../src/infrastructure/json.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { canonicalizeJson } from '../../src/receipt/payload-hash.js';
@@ -507,6 +508,19 @@ test('verifies deterministically and completes the task in one short transaction
   assert.equal(completions.rows[0]?.verification_session_id, session.id);
   assert.equal(completions.rows[0]?.run_id, fixture.runId);
   assert.equal(completions.rows[0]?.id, task.current_completion_id);
+  const evidence = await readCompletionEvidence(app.db, fixture.storage,
+    fixture.workspaceId, completions.rows[0]!.id);
+  assert.equal(evidence.basis_kind, 'AUTO');
+  assert.equal(evidence.is_current, true);
+  assert.equal(evidence.human_acceptance, null);
+  assert.equal(evidence.acceptance.availability, 'AVAILABLE');
+  assert.equal(evidence.verification_session?.availability, 'AVAILABLE');
+  assert.equal(evidence.verification_session?.id, session.id);
+  assert.equal(evidence.verification_session?.run_id, fixture.runId);
+  assert.equal(evidence.verification_session?.verdict, 'PASS');
+  assert.equal(evidence.verification_session?.applicable, true);
+  assert.equal(evidence.artifact_versions.length, 1);
+  assert.equal(evidence.artifact_versions[0]?.availability, 'AVAILABLE');
   assert.equal(await countStateCompletionRefs(fixture.projectId), 1n);
 
   const activities = await sql<{ actor_kind: string; actor_ref: string; command_id: string | null }>`
@@ -616,6 +630,22 @@ test('C05: an existing citation cannot cover an unsupported claim', async () => 
       ['c-semantic', 'FAIL'],
     ],
   );
+  const calls = (await sql<ModelCallRow>`select mc.* from model_calls mc
+    join step_attempts a on a.id = mc.step_attempt_id
+    join run_steps s on s.id = a.step_id
+    where s.run_id = ${fixture.runId} order by mc.started_at, mc.id`.execute(app.db)).rows;
+  assert.deepEqual(calls.map((call) => call.kind), ['DRAFT', 'SEMANTIC_CHECK']);
+  assert.ok(calls[0]!.manifest_id);
+  assert.equal(calls[0]!.status, 'COMPLETED');
+  assert.ok(calls[0]!.usage_input_tokens !== null && calls[0]!.usage_input_tokens > 0);
+  assert.equal(calls[1]!.criterion_id, 'c-semantic');
+  assert.equal(calls[1]!.check_attempt, 1);
+  assert.equal(calls[1]!.status, 'COMPLETED');
+  assert.equal(calls[1]!.usage_input_tokens, null, 'fake checker does not report usage');
+  const semanticEvidence = (await sql<{ evidence_refs: { model_call_id?: string } }>`
+    select evidence_refs from check_results where session_id = ${session.id}
+      and criterion_id = 'c-semantic'`.execute(app.db)).rows[0]!.evidence_refs;
+  assert.equal(semanticEvidence.model_call_id, calls[1]!.id);
   assert.equal(await countCompletionRecords(fixture.taskId), 0n);
 });
 

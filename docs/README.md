@@ -56,7 +56,7 @@
 
 ## 3. 决策与历史
 
-当前决策集合：[ADR-001](decisions/ADR-001-domain-boundaries.md)、[ADR-004](decisions/ADR-004-user-import-origin.md)、[ADR-005](decisions/ADR-005-reuse-first.md)、[ADR-006](decisions/ADR-006-typescript-first.md)、[ADR-007](decisions/ADR-007-windows-desktop.md)。分别以各文件状态为准；此列表不统一批准它们。[ADR-002](decisions/ADR-002-postgresql-jdbc.md)保留早期持久化技术提案，[ADR-003](decisions/ADR-003-browser-workbench.md)保留已被 Windows 桌面要求替代的浏览器提案。
+当前决策集合：[ADR-001](decisions/ADR-001-domain-boundaries.md)、[ADR-004](decisions/ADR-004-user-import-origin.md)、[ADR-005](decisions/ADR-005-reuse-first.md)、[ADR-006](decisions/ADR-006-typescript-first.md)、[ADR-007](decisions/ADR-007-windows-desktop.md)、[ADR-008](decisions/ADR-008-declarative-skills.md)、[ADR-009](decisions/ADR-009-rule-revision-fence.md)、[ADR-010](decisions/ADR-010-agent-stack-react-desktop.md)、[ADR-011](decisions/ADR-011-project-archive-serialization.md)。分别以各文件状态为准；此列表不统一批准它们。[ADR-002](decisions/ADR-002-postgresql-jdbc.md)保留早期持久化技术提案，[ADR-003](decisions/ADR-003-browser-workbench.md)保留已被 Windows 桌面要求替代的浏览器提案。
 
 2026-09-20 新增 [ADR-008](decisions/ADR-008-declarative-skills.md)：声明式 Skill 与蓝图应用，技术方案状态 Proposed；同日用户确认纳入评审后的首批闭环方向，目录统一见 Skill 专题。V1.5 AI Schema 生成的范围前移仍待确认，详见范围矩阵。
 

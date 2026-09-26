@@ -221,12 +221,14 @@ export class GatewayRepository {
   }
 
   async insertImportJob(input: { id: string; workspaceId: string; projectId: string;
-    actorRef: string; configVersion: string; sourceUri: string; commandId: string }): Promise<ImportJobRow> {
+    actorRef: string; configVersion: string; sourceUri: string; commandId: string;
+    connectionId?: string }): Promise<ImportJobRow> {
     const result = await sql<ImportJobRow>`
       insert into import_jobs (id, workspace_id, project_id, actor_ref, config_version,
-        source_uri, request_command_id)
+        source_uri, request_command_id, connection_id)
       values (${input.id}, ${input.workspaceId}, ${input.projectId}, ${input.actorRef},
-        ${input.configVersion}, ${input.sourceUri}, ${input.commandId}) returning *
+        ${input.configVersion}, ${input.sourceUri}, ${input.commandId},
+        ${input.connectionId ?? null}) returning *
     `.execute(this.db);
     return requireRow(result.rows, 'insert import job');
   }
@@ -239,12 +241,49 @@ export class GatewayRepository {
     return (await sql<ImportJobRow>`select * from import_jobs where id = ${id}`.execute(this.db)).rows[0];
   }
 
+  /** Also reclaims RUNNING jobs with no operation after a crash between the
+   * status change and Gateway prepare. The job row serializes each scan. */
+  async claimImportJobsNeedingPrepare(limit: number): Promise<readonly ImportJobRow[]> {
+    return (await sql<ImportJobRow>`
+      select j.* from import_jobs j
+      join projects p on p.id = j.project_id and p.archived_at is null
+      where j.connection_id is not null and
+        (j.status = 'QUEUED' or (j.status = 'RUNNING' and not exists (
+          select 1 from logical_operations o where o.import_job_id = j.id and o.origin = 'USER_IMPORT')))
+      order by j.created_at, j.id
+      limit ${limit} for update of j skip locked`.execute(this.db)).rows;
+  }
+
+  /** Include settled operations so a crash after Gateway outcome still commits
+   * the job and Knowledge version on the next tick. */
+  async listRunnableImportJobIds(): Promise<readonly { job_id: string; operation_id: string }[]> {
+    return (await sql<{ job_id: string; operation_id: string }>`
+      select j.id as job_id, o.id as operation_id
+      from import_jobs j
+      join logical_operations o on o.import_job_id = j.id and o.origin = 'USER_IMPORT'
+      where j.status = 'RUNNING' and o.status in
+        ('PREPARED', 'WAITING_APPROVAL', 'SUCCEEDED', 'FAILED')
+      order by j.created_at, j.id`.execute(this.db)).rows;
+  }
+
   async setImportJobStatus(id: string, status: ImportJobRow['status'], error: string | null): Promise<ImportJobRow> {
     const result = await sql<ImportJobRow>`
       update import_jobs set status = ${status}, error = ${error}, revision = revision + 1
       where id = ${id} returning *
     `.execute(this.db);
     return requireRow(result.rows, 'change import job status');
+  }
+
+  /** Terminal settle for an executed import; knowledge_version_id links the
+   * fetched page atomically with the SUCCEEDED status. */
+  async settleImportJob(id: string, status: Extract<ImportJobRow['status'], 'SUCCEEDED' | 'FAILED'>,
+    error: string | null, knowledgeVersionId?: string): Promise<ImportJobRow> {
+    const result = await sql<ImportJobRow>`
+      update import_jobs set status = ${status}, error = ${error},
+        knowledge_version_id = ${knowledgeVersionId ?? null}, revision = revision + 1
+      where id = ${id} returning *
+    `.execute(this.db);
+    return requireRow(result.rows, 'settle import job');
   }
 
   async insertOperation(input: Omit<LogicalOperationRow, 'created_at' | 'updated_at' | 'result_ref'>): Promise<LogicalOperationRow> {

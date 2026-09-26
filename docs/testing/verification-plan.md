@@ -59,6 +59,8 @@ Fake Adapter 用独立持久效果日志表达“外部已发生”，不能与�
 
 中文基础搜索、信息版本和 Decision 替代、Goal 显式空集、Focus 无候选、产物 Lineage 循环拒绝均需对应单测/集成测试。来源不可用必须清晰错误，不用假数据填补。
 
+2026-09-26 M05/P13 后端开发自检：`apps/api/test/integration/today.integration.test.ts` 使用隔离 PostgreSQL 与真实 HTTP 覆盖 Task 计划元数据、Workspace 级选择版本、跨午夜与 DST 的 Later、进程重启/命令重放、阻塞 Pin、Goal 显式空集、不同保存时区 Focus、同项目多 Task 排序及跨 Workspace 拒绝，6/6 通过；迁移 7/7、CLI 5/5，API TypeScript 构建和文档检查通过。该证据只覆盖后端开发自检，不代表 M05 独立验收或 Windows 桌面验收。
+
 UI 视觉、组件状态与可访问性按[设计系统验收](../frontend/design-system.md#8-验证与交付边界)核对；token 的纯色组合检查只是静态证据，不能代替桌面 WebView 字体、窗口/DPI、键盘与辅助技术验收。
 
 能力配置中 AUTO 不代表任意调用免检查。测试应覆盖连接存在但 DENY、批准已给但权限被撤销、配置更新使旧脚本授权失效，以及伪造外部文本要求扩大权限。
@@ -205,6 +207,14 @@ P11 `context.integration.test.ts` 使用真实临时 PostgreSQL 和受管 Artifa
 
 候选包携带的 Eval Cases 是测试输入，不是自我认证：发布方控制必要的独立基准，Skill/Worker 不能删改；导入的用例不能执行任意脚本或绕过 Gateway。程序性安全/契约失败阻止受影响定义启用；质量退化按预先标准处理，证据不足标未验证。Fake 只证明流程/边界；真实模型回归在独立测试项目与受控资料上进行，缺合法端点时明确未执行，不用 synthetic 成绩冒充结果。
 
+2026-09-26 第一段开发自检：`apps/api/test/unit/first-party-skills.test.ts` 覆盖定义依赖内容摘要、未知 Pack 成员、三类输出的严格字段/大小/引用/检查器边界；`apps/api/test/integration/assist.integration.test.ts` 在隔离真实 PostgreSQL 覆盖普通 Assist 回归、Skill 冻结/命令重放/首次结算、生成本身不写 Task、跨 Workspace/来源撤销、历史读时脱敏、Project Resume 新鲜 revision 与撤销/旧验收 Verification 排除。该批当时只属于首批三项 Skill 与两份只读最小 Pack；第二段 Task Owner 接受见下段，Blueprint/Pack 应用、真实模型质量和独立验收仍未覆盖。
+
+2026-09-26 蓝图开发自检补充：`apps/api/test/integration/view-configuration.integration.test.ts` 检查独立 View CAS/重放/跨范围/页面解析；`apps/api/test/integration/project-blueprint.integration.test.ts` 在隔离真实 PostgreSQL 检查 USER_DRAFT 候选的 Goal/Task/State/View 同事务效果和映射、重复接受、跨 Workspace、未知字段/零效果、View stale 无局部提交，`goal-to-project-blueprint` Assist Skill 的冻结来源、同候选 Apply、生成基线竞争 typed FAILED、取消零候选、来源归档后 GET 隐藏与 Apply 拒绝。定向复跑结果：Blueprint 5/5、Assist 29/29、migration 8/8、CLI 5/5、Skill 单测 5/5；0024 View 1/1 在 0025 后的真实 PG 迁移链上通过。类型检查、API 构建、Graph 安装与文档检查通过，临时 PostgreSQL 均已清理。这些开发自检不构成独立模块、真实 Provider 或 Windows 桌面验收。Pack 1.3.0 只作精确来源清单，不能将选择等同配置效果。
+
+2026-09-26 M04 Provider 开发自检补充：`model-endpoint-policy`/`openai-compatible-model-port` 单测用受控 SSE transport 覆盖 endpoint 解析、同源/路径、DNS 复核、重定向、完整 `[DONE]`、片段合并、结构化 JSON、usage 缺失、取消、超时、断流与单次预算；`model-call-budget.integration.test.ts` 在隔离真实 PostgreSQL 覆盖 Run DRAFT/SEMANTIC 共享额度、AssistSession 双 Worker 竞争、STARTED 与历史未知用量、实际用量超预留、网络调用在短事务外、额度耗尽时 Run 明确失败。Context 定向回归区分 Mock 最近来源补位与真实模型排除，并由模型端口拒绝升级前旧 Manifest 的该来源。定向结果：Provider/配置单测 10/10、预算 PG 5/5、Context PG 13/13、迁移 PG 8/8、CLI PG 5/5、Mock Run Steps PG 8/8、Assist PG 29/29；API 类型/构建、Graph 安装与文档检查通过，临时 PG 均清理。本片未连接获授权真实 Provider，也未证明 socket 与 DNS 预解析同地址、兼容端点全部 schema、前端首 token 反馈延迟或全 M04 出口。
+
+第二段开发自检针对 0023：真实 PostgreSQL 定向回归 Task/acceptance 双版本 CAS、同命令回放与并发不同命令、仅人工持有及活动 Run/历史 UNKNOWN 阻断、跨 Workspace 与撤销来源、已确认 required criterion 和 Expected Result 原约束保留、新描述受控合并、旧验证适用性撤销与非 Run OPEN Review 过期、审计故障下业务/提案/回执整体回滚；HTTP 回归预览、缺 CAS 拒绝、接受最终结果与 replay。纯输出测试涵盖 Task Definition 1.1.0 的描述约束、Verification Plan 1.1.0 只追加检查，原版本摘要保留。CheckPlan GET 只核对当前准入预览的来源 revision/hash，不能当成冻结 Run 或执行过的 PASS。仍需独立模块与 Windows 桌面验收，且不据 Fake 模型回归宣称真实 Provider 质量。
+
 额外组合验收：
 
 - 第一方 Thesis/Development Pack 只引用已交付成员；清单全部可解析，缺能力清楚显示，不产生假成功。
@@ -261,6 +271,20 @@ M03 Task 产物历史增量另以真实隔离 PG 核对：空 Task 为确切空�
 M02 按旧→新路由/组件/真实交互覆盖表验收全部 React 迁移。组件和 Chromium 结果只证明各自层次；Windows 真窗口需运行真实 API 人工闭环、中文 IME、键盘、长文本、DPI/缩放、鉴权引导、单实例和进程生命周期。M07 才将安装、升级/卸载、干净环境、强杀恢复与数据保留纳入最终放行；能打开开发窗口不等于安装通过。
 
 M04 在 M03 独立验收后才启用真实 Provider；记录模型/配置、实际来源选择、工具/结构化输出能力、用量与未知用量、错误和取消。至少一个实际获授权 Provider 的真实闭环是模块必要出口；历史两 Provider 对照要求保持单列，不用一次成功宣称全部协议兼容。缺凭据为未验证，不能以 Mock 顶替。
+
+M04 FILE_READ/WEB_FETCH 模型输入切片的定向自测还需分别核对：AUTO 在 DRAFT 前取得原 `SUCCEEDED` Invocation，模型调用记录的 `input_sha256` 与原 operation/invocation 身份可重建；ASK 等待时零 DRAFT Attempt/模型调用，原 Review 的 RESUME 仅执行一次；读取后、图 checkpoint 前崩溃沿原动作核对并复用成功证据；默认 DENY/撤权/Context 失效、控制意图或 UNKNOWN 均不把正文交模型。文件超限与网页非 2xx 等类型化 `FAILED` 应保留原 Invocation/operation 失败证据、停止 DRAFT 模型调用，并将 Run 及 Task 安全收敛。长 UTF-8 文本既要按完整字符限 16 KiB，也须计入 Manifest 总预算和输出预留，超预算时缩小读片段或停止 DRAFT，不能绕开预算。升级前已成功 DRAFT 且原读 Review 待续的 Run 应保持原 DRAFT/operation 绑定、不重做模型。Mock/隔离 PostgreSQL 定向通过仍不替代真实 Provider、Windows 会话或 M04 独立验收。
+
+M05/P15 后端定向回归覆盖：0021 对 Workspace 初始化、Goal 创建及清空 Focus 的历史审计归属回填，孤立行使迁移整体回滚；Activity 按 Workspace/Project/Task/Run 和时间过滤、`(created_at,id)` 游标续页、跨域 ID 隐藏、命令重放不新增审计、业务回滚不留事件、自由字段/凭据不出 DTO；Trace 只展示原 Step/Attempt/模型调用/Manifest/验证/Review/Gateway/效果证据，当前来源权限变化后失效，不泄露原正文或越权引用，批准和效果状态保持分离；Lineage 的自环、跨域、版本环及错误 typed 关系由数据库拒绝，重复写只留一条，源缺失时保留不可用状态而不替换历史父版本。对应真实隔离 PostgreSQL 自动化仅证明开发切片，M05 独立与 Windows 工作台验收另行执行。
+
+完成凭据详情增量在既有人工完成与自动验证测试中补充定向反例：真实 API 对 HUMAN 完成返回原验收版本、人工判断和原接受产物，不把同 Artifact 新版替代旧版；重开后凭据仍可读但 `is_current=false`；跨 Workspace ID 为 404、错误 Bearer 为 401；受管内容删除后原版本项标 `UNAVAILABLE` 且隐藏 ID/hash。自动 PASS 的真实 PostgreSQL 完成闭环从同一 CompletionRecord 读取原 Run/VerificationSession、verdict、适用性和原产物。读取不写业务事实；异常引用只可显式不可用，不推断当前完成。此增量仍需 M05 独立及 Windows 工作台验收。
+
+M05/P14 Workspace 列表后端定向回归覆盖：Project `active/archived/all` 默认与显式过滤、State 阶段/Next Action 确切投影、全 Workspace Task 对 Project/Inbox/终态的覆盖、跨项目 blocker 不串值、跨 Workspace 不泄漏、缺省 Task 过滤仍拒绝、混用过滤拒绝、limit 上界与游标绑定。对相邻 PostgreSQL 微秒时间的项目和任务逐页检查无重复/漏项；换 Workspace 或状态复用游标返回 `INVALID_CURSOR`。`api-lists.integration.test.ts` 走隔离 PostgreSQL 和真实 HTTP；开发自检不替代 M05 独立或 Windows 工作台验收。归档写命令及归档后写权限协议另片设计。
+
+M05/P14 归档写保护 A 段以 `project-archive-gate.integration.test.ts` 在真实隔离 PostgreSQL/HTTP 验证：手工设置归档字段的夹具下，各类关联写命令返回 `PROJECT_ARCHIVED`、跨 Workspace 继续隐藏，Workspace Rule 和历史读取不受单个 Project 影响；Project `FOR UPDATE` 先到时并发 Task 写等待后拒绝，业务写 `FOR KEY SHARE` 先到时归档行锁等待其提交；Artifact 请求在受管文件发布之前被拒，未登记版本，也不留下文件。B 段 `project-archive.integration.test.ts` 以真实归档 HTTP/PG 反例覆盖作用域/CAS/回执与审计单次、历史可读/新写拒绝、HUMAN 与 AI Run、未决 Gateway/UNKNOWN/资源 claim、Import/Assist/STARTED 模型调用/OPEN Review，以及写者先持栅栏、归档先持排他锁两种次序。模型预约补测 Project 栅栏与 STARTED 插入相对归档的两种顺序，并让旧终态 Run/Step 路径确认不能在归档后外呼 Provider。两段定向通过仍只是开发自检；独立与 Windows 桌面验收后置，涉及旧包升级、故障后核对的真实会话仍须另验。
+
+M04 Assist `DISCUSS` 临时草稿的开发自检使用 `assist-live-preview.integration.test.ts` 的隔离 PostgreSQL 和独立 API 进程：首片段在完整消息结算前可读，累计 revision 支持重读；Workspace/Session/Message 与 Bearer 作用域不能串读；取消、Provider 失败、来源撤销、租约过期隐藏并清理暂存；结构化提案不暴露未校验 JSON，完成仍回到原消息投影。`assist-live-preview.test.ts` 核对 16 KiB UTF-8 完整字符截取、拆开的 surrogate 与更新节流；模型端口单测证实普通 DISCUSS 在 SSE 完成前回调片段、结构化 Assist 不回调。首次 PG 用例因夹具把 Project 会话误用 TASK 专属 `PROPOSE_CANDIDATE` 而 4/5，修正为合法 `PROPOSE_TASK` 后定向复跑 5/5；新增失败/取消竞态反例后最终定向 6/6、既有 Assist 回归 29/29、草稿与端口单测 6/6，类型检查与构建通过。上述只证明受控 Fake/transport 的开发路径，真实 Provider 网络、前端轮询首字延迟、Windows 桌面及独立验收仍待运行。
+
+M04 Run DRAFT 临时草稿的开发自检使用 `run-draft-preview.integration.test.ts` 的隔离真实 PostgreSQL、受控 Fake 生成与独立 API 进程：DRAFT 完整候选提交前可读首批 Markdown，重读保持 Attempt/claim/model call/revision 身份；尚未生成 Artifact；跨 Workspace 和错误 Bearer 拒绝；成功结算删除草稿。fence 旧 Worker 后迟到写入被拒，新领取只能以新 claim/model call 发布。待处理控制、Task Context 变化或已选 Knowledge 退役时，读取立即遮蔽前缀且不回显来源 ID。实际 AUTO FILE_READ/WEB_FETCH 图链在 DRAFT 模型 STARTED 时分别证明原读证据仍可授权预览，FILE_READ Policy 随后撤销时 GET 即时隐藏；读动作先将 Run 置 RUNNING 的情况现在由原 Run CAS 把 current_step_id 推进 DRAFT。共用 `AssistLivePreviewPublisher` 的单元测试覆盖 16 KiB UTF-8 安全截取及节流；端口受控 SSE 单测覆盖完整输出前 DRAFT 片段回调。定向结果为预览 PG/HTTP 5/5、实际读链补测 2/2、撤权 1/1、Run Steps 8/8、完整 Run Graph 53/53、相关单测 7/7；项目 Node24 类型检查/构建、29 个迁移、Graph 安装、PG 启停与临时目录清理、文档检查通过。首轮新增来源测试 3/4 是把只读遮蔽误断言为业务 STALE_RESULT 的测试错误，修正后 4/4；首轮 Graph 47/53 的 6 个读链失败已由上述 Run 位置修复并复跑 53/53。真实 Provider 网络首字延迟、桌面流畅度、独立验收仍待运行；Run SSE 仍仅是事实提示，文字预览走单独 GET。
 
 性能分别报告 Mock 自身开销与真实模型端到端指标。固定任务、输入/输出规模、工具行为、并发、权限、检查点和持久化语义，报告接受/排队/首输出/完成 P50/P95/P99、成功吞吐、重试、取消收敛、事件循环、CPU/RSS、数据库/分发等待及每成功任务的调用/token 成本；样本不足和未知值明确说明。不得靠降低成功率、关闭 checkpoint 或取消准入来制造改善。
 

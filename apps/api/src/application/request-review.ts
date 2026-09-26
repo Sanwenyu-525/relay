@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import { toDecimalString } from '../shared/decimal.js';
-import { httpCommandScopeKey } from './actor.js';
+import { httpCommandScopeKey, LOCAL_ACTOR_REF } from './actor.js';
 import { runIdempotentCommand, type CommandOutcome } from './command.js';
 import { invalidTransition, resourceNotFound, revisionConflict } from './domain-error.js';
 import { requireRevision } from './revisions.js';
@@ -11,6 +11,7 @@ import { reviewTargetHash } from './review-requests.js';
 import { normalizeStateAction } from './state-action.js';
 import { withTransaction } from './unit-of-work.js';
 import { lockTaskAndRun } from './lock-task-run.js';
+import { lockWritableProjectInWorkspace } from './guards.js';
 
 /** P09 Gateway 后续消费此批准；P07 仅预分配稳定 operation_id 并保存决定。 */
 export async function requestActionApproval(db: DbExecutor, input: {
@@ -49,6 +50,7 @@ export async function requestActionApproval(db: DbExecutor, input: {
     const review = await repositories.reviews.insertRequest({
       id: randomUUID(), workspaceId: input.workspaceId, projectId: task.project_id, taskId: task.id,
       runId: run.id, verificationSessionId: null, criterionId: null, operationId: input.operationId,
+      importJobId: null,
       kind: 'ACTION_APPROVAL', reason: input.reason, targetHash, target,
       evidence: { step_id: step.id, action_type: input.actionType, normalized_target: input.normalizedTarget },
       effect: { summary: '批准只授权此逻辑操作；外部执行由后续 Gateway 在再次校验权限后进行。', external_effect_executed: false },
@@ -61,6 +63,12 @@ export async function requestActionApproval(db: DbExecutor, input: {
         expectedRevision: task.revision, fromStatus: 'IN_PROGRESS', toStatus: 'WAITING' });
       if (waiting === undefined) throw new Error('approval request Task CAS failed');
     }
+    await repositories.activities.insertActivityRecord({ id: randomUUID(),
+      workspaceId: run.workspace_id, runId: run.id,
+      actorKind: 'AI', actorRef: `run:${run.id}`, commandId: null,
+      projectId: task.project_id, taskId: task.id, eventType: 'REVIEW_REQUESTED',
+      factRefs: { review_id: review.id, run_id: run.id, operation_id: input.operationId,
+        kind: review.kind } });
     return { reviewId: review.id, targetHash: targetHash.toString('hex') };
   });
 }
@@ -82,8 +90,7 @@ export async function requestStateProposal(db: DbExecutor, input: {
     target: { project_id: input.projectId },
     body: { base_revision: toDecimalString(base), action: normalized.body, reason: input.reason },
     execute: async (repositories) => {
-      const project = await repositories.projects.readProject(input.projectId);
-      if (project === undefined || project.workspace_id !== input.workspaceId) throw resourceNotFound('Project');
+      const project = await lockWritableProjectInWorkspace(repositories, input.workspaceId, input.projectId);
       const state = await repositories.projects.readProjectState(project.id);
       if (state === undefined) throw resourceNotFound('Project State');
       if (state.revision !== base) throw revisionConflict({ entityType: 'PROJECT_STATE', expectedRevision: toDecimalString(base), actualRevision: toDecimalString(state.revision) });
@@ -93,11 +100,16 @@ export async function requestStateProposal(db: DbExecutor, input: {
       const review = await repositories.reviews.insertRequest({
         id: randomUUID(), workspaceId: input.workspaceId, projectId: project.id, taskId: null,
         runId: null, verificationSessionId: null, criterionId: null, operationId: null,
+        importJobId: null,
         kind: 'STATE_PROPOSAL', reason: input.reason, targetHash, target,
         evidence: { base_revision: toDecimalString(base), source_command_id: input.commandId },
         effect: { summary: '接受后对当前 Project State 应用类型化命令；若基线已变化则拒绝。', action: normalized.action },
         allowedDecisions: ['ACCEPT', 'DENY'], expiresAt: null,
       });
+      await repositories.activities.insertActivityRecord({ id: randomUUID(),
+        workspaceId: input.workspaceId, actorKind: 'HUMAN', actorRef: LOCAL_ACTOR_REF,
+        commandId: input.commandId, projectId: project.id, taskId: null,
+        eventType: 'REVIEW_REQUESTED', factRefs: { review_id: review.id, kind: review.kind } });
       return { review_id: review.id, target_hash: targetHash.toString('hex') };
     },
   });

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import { mkdir, readFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createServer, type Server } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
+import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -14,15 +16,22 @@ import type { ClaimedRunCommand } from '../../src/application/run-dispatch.js';
 import { denyGraphActionBeforeInvocation } from '../../src/application/gateway-actions.js';
 import { createFakeConnection, createGatewayPolicy, registerManagedResource,
   revokeGatewayPolicy } from '../../src/application/gateway-configuration.js';
+import { createGatewayConnectionCommand } from '../../src/application/gateway-commands.js';
 import { applySafeControl, requestRunControl, resumeRun } from '../../src/application/control-requests.js';
 import { recoverStoppedWorker } from '../../src/application/recover-run.js';
+import { advanceRunStep } from '../../src/application/run-steps.js';
+import { publishRunDraftPreview } from '../../src/application/run-draft-preview.js';
 import { reviewTargetHash } from '../../src/application/review-requests.js';
-import { withTransaction } from '../../src/application/unit-of-work.js';
+import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
+import { draftInputHash, loadRunReadEvidence,
+  MAX_MODEL_READ_BYTES } from '../../src/application/run-read-evidence.js';
 import type { JsonObject, JsonValue } from '../../src/infrastructure/json.js';
 import type { DbExecutor } from '../../src/infrastructure/database.js';
 import { graphCheckpointsReady, installGraphCheckpoints } from '../../src/infrastructure/graph-checkpoints.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
+import { CANDIDATE_OUTPUT_SCHEMA } from '../../src/workflow/markdown-deliverable.js';
+import { extractWebText } from '../../src/web/web-fetch.js';
 import { runOneCommand } from '../../src/worker/run-command.js';
 import { runSupervisedWorkerOnce } from '../../src/worker/supervisor.js';
 import {
@@ -45,14 +54,15 @@ interface Fixture {
   close(): Promise<void>;
 }
 
-async function fixture(install: boolean): Promise<Fixture> {
+async function fixture(install: boolean, apiPoolMax = 4): Promise<Fixture> {
   const database = await createTemporaryDatabase('m03_graph');
   try {
     await runMigrations({ connectionString: database.migrationUrl, directory: MIGRATIONS_DIRECTORY });
     if (install) await installGraphCheckpoints(database.migrationUrl);
     const app = openDatabase(database.appUrl, 'relay-m03-graph-test');
     try {
-      const api = await startTestApi({ databaseUrl: database.appUrl });
+      const api = await startTestApi({ databaseUrl: database.appUrl,
+        databasePoolMax: apiPoolMax });
       const workspaceId = await createWorkspace(app.db);
       return { database, app, api, workspaceId, close: async () => {
         await api.stop();
@@ -69,7 +79,7 @@ async function fixture(install: boolean): Promise<Fixture> {
   }
 }
 
-async function delegatedRun(f: Fixture): Promise<string> {
+async function delegatedRun(f: Fixture, method: 'HUMAN' | 'SEMANTIC' = 'HUMAN'): Promise<string> {
   const projectCommand = randomUUID();
   const project = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, '/projects'), {
     command_id: projectCommand, title: `graph-${projectCommand.slice(0, 8)}`,
@@ -79,7 +89,7 @@ async function delegatedRun(f: Fixture): Promise<string> {
   const task = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, '/tasks'), {
     command_id: taskCommand, project_id: project.project_id,
     title: 'Graph checkpoint replay', objective: 'Verify one managed Mock candidate',
-    criteria: [{ criterion_id: 'human', statement: 'Review the candidate', method: 'HUMAN' }],
+    criteria: [{ criterion_id: method.toLowerCase(), statement: 'Review the candidate', method }],
   }), 201, taskCommand);
   const readyCommand = randomUUID();
   const ready = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId,
@@ -110,10 +120,12 @@ async function approveValidationReview(f: Fixture, runId: string): Promise<strin
   return decided.decision_id as string;
 }
 
-async function workerOnce(f: Fixture): Promise<{ code: number | null; output: string }> {
+async function workerOnce(f: Fixture, env: Record<string, string> = {}): Promise<{
+  code: number | null; output: string }> {
   const child = spawn(process.execPath, [WORKER_ENTRY, '--once'], {
     env: { ...process.env, RELAY_DB_URL: f.database.appUrl,
-      RELAY_DATA_ROOT: f.api.dataRoot, RELAY_WORKER_ID: `worker:${randomUUID()}` },
+      RELAY_DATA_ROOT: f.api.dataRoot, RELAY_WORKER_ID: `worker:${randomUUID()}`,
+      ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -217,6 +229,25 @@ async function decideAction(f: Fixture, operationId: string,
   assert.equal(replay.decision_id, decided.decision_id);
   return { decisionId: decided.decision_id as string, commandId };
 }
+
+test('API pool size one leaves the separate Worker semantic accounting path runnable', async () => {
+  const f = await fixture(true, 1);
+  try {
+    const runId = await delegatedRun(f, 'SEMANTIC');
+    const delivered = await workerOnce(f, { RELAY_DB_POOL_MAX: '1' });
+    assert.equal(delivered.code, 0, delivered.output);
+    const calls = (await sql<{ kind: string; status: string }>`
+      select mc.kind, mc.status from model_calls mc
+      join step_attempts a on a.id = mc.step_attempt_id
+      join run_steps s on s.id = a.step_id
+      where s.run_id = ${runId} order by mc.started_at, mc.id
+    `.execute(f.app.db)).rows;
+    assert.deepEqual(calls, [
+      { kind: 'DRAFT', status: 'COMPLETED' },
+      { kind: 'SEMANTIC_CHECK', status: 'COMPLETED' },
+    ]);
+  } finally { await f.close(); }
+});
 
 test('the fixed Mock graph prepares ASK and only the approved RESUME executes its original operation', async () => {
   const f = await fixture(true);
@@ -1468,8 +1499,45 @@ const MANIFEST_CORRUPTIONS: ReadonlyArray<readonly [string, ManifestTamper]> = [
     await sql`update run_steps set result_ref = result_ref - 'manifest_hash'
       where run_id = ${runId} and step_kind = 'BUILD_CONTEXT'`.execute(migrationDb);
   }],
-  ['manifest row missing', async (_f, migrationDb, runId) => {
-    await sql`delete from context_manifests where run_id = ${runId}`.execute(migrationDb);
+  ['manifest row missing', async (f, _migrationDb, runId) => {
+    // Only the isolated test-cluster admin may bypass the model-call FK to
+    // simulate physical corruption; the production migrator cannot delete it.
+    const admin = openDatabase(f.database.adminUrl, 'relay-m03-manifest-corruption-admin');
+    try {
+      await admin.db.transaction().execute(async (transaction) => {
+        await sql`set local session_replication_role = replica`.execute(transaction);
+        await sql`delete from context_manifests where run_id = ${runId}`.execute(transaction);
+      });
+    } finally {
+      await admin.close();
+    }
+  }],
+  ['contract source content tampered', async (f, migrationDb, runId) => {
+    await rewriteManifestPayload(f, migrationDb, runId, (payload) => {
+      const contractSource = (payload.sources as WritableJsonObject[])
+        .find((source) => source.kind === 'CONTRACT');
+      assert.ok(contractSource);
+      contractSource.content = '{"workflow":{"version":"tampered"}}';
+    });
+  }],
+  ['contract source self-consistent tamper', async (f, migrationDb, runId) => {
+    await rewriteManifestPayload(f, migrationDb, runId, (payload) => {
+      const contractSource = (payload.sources as WritableJsonObject[])
+        .find((source) => source.kind === 'CONTRACT');
+      assert.ok(contractSource);
+      contractSource.content = '{"workflow":{"version":"self-consistent"}}';
+      const digest = createHash('sha256').update(String(contractSource.content), 'utf8').digest('hex');
+      contractSource.sha256 = digest;
+      contractSource.source_sha256 = digest;
+    });
+  }],
+  ['project source content tampered', async (f, migrationDb, runId) => {
+    await rewriteManifestPayload(f, migrationDb, runId, (payload) => {
+      const projectSource = (payload.sources as WritableJsonObject[])
+        .find((source) => source.kind === 'PROJECT');
+      assert.ok(projectSource);
+      projectSource.content = '{"id":"tampered"}';
+    });
   }],
 ];
 
@@ -1746,4 +1814,715 @@ test('an approved Mock action checkpointed by an older graph layout replays its 
     `.execute(f.app.db);
     assert.equal(completions.rows[0]?.count, 1n);
   } finally { await f.close(); }
+});
+
+async function delegatedFileReadRun(f: Fixture, decision: 'AUTO' | 'ASK' = 'ASK'): Promise<{
+  runId: string; taskId: string; root: string; operationId: string;
+  connectionId: string; resourceId: string; targetPath: string;
+}> {
+  const projectCommand = randomUUID();
+  const project = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, '/projects'), {
+    command_id: projectCommand, title: 'Graph FileRead', project_type: 'GENERAL',
+  }), 201, projectCommand);
+  const projectId = project.project_id as string;
+  const root = join(f.api.dataRoot, `graph-file-read-${randomUUID()}`);
+  await mkdir(root, { recursive: true });
+  const resource = await registerManagedResource(f.app.db, { workspaceId: f.workspaceId,
+    projectId, rootPath: root });
+  const connection = await createGatewayConnectionCommand(f.app.db, { workspaceId: f.workspaceId,
+    projectId, commandId: randomUUID(), capabilities: ['FILE_READ'], rootPath: root });
+  const policy = await createGatewayPolicy(f.app.db, { workspaceId: f.workspaceId, projectId,
+    capability: 'FILE_READ', actionType: 'READ_FILE', targetPrefix: resource.canonicalRoot,
+    decision, maxPayloadBytes: 1024 });
+  const taskCommand = randomUUID();
+  const task = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, '/tasks'), {
+    command_id: taskCommand, project_id: projectId, title: 'Graph approved file read',
+    objective: 'Read a managed file through the Gateway',
+    criteria: [{ criterion_id: 'human', statement: 'Review the candidate', method: 'HUMAN' }],
+  }), 201, taskCommand);
+  const readyCommand = randomUUID();
+  const ready = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId,
+    `/tasks/${task.task_id as string}/ready`), {
+    command_id: readyCommand, expected_revision: task.revision,
+  }), 200, readyCommand);
+  const delegateCommand = randomUUID();
+  const delegated = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId,
+    `/tasks/${task.task_id as string}/delegations`), {
+    command_id: delegateCommand, expected_task_revision: ready.revision,
+    file_read_action: { connection_id: connection.result.connection_id!,
+      resource_id: resource.resourceId, relative_target: 'read-target.txt' },
+  }), 202, delegateCommand);
+  const runId = delegated.run_id as string;
+  const contract = await sql<{ frozen_snapshot: { file_read_action: { operation_id: string } } }>`
+    select frozen_snapshot from execution_contracts where run_id = ${runId}`.execute(f.app.db);
+  return { runId, taskId: task.task_id as string, root: resource.canonicalRoot,
+    operationId: contract.rows[0]!.frozen_snapshot.file_read_action.operation_id,
+    connectionId: connection.result.connection_id!, resourceId: resource.resourceId,
+    targetPath: join(resource.canonicalRoot, 'read-target.txt') };
+}
+
+async function deliverWithReadPreview(f: Fixture, runId: string,
+  revokeAfterPreview = false) {
+  let claim: ClaimedRunCommand | undefined;
+  let revocationError: unknown;
+  const delivery = runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+    dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl,
+    fakeModelDelayMs: 2_500, onClaim: async (value) => { claim = value; } });
+  try {
+    const current = await withTimeout((async () => {
+      for (;;) {
+        const rows = await sql<{ call_id: string; manifest_id: string;
+          input_sha256: string; attempt_id: string; claim_epoch: bigint;
+          step_id: string; worker_epoch: bigint; worker_id: string }>`
+          select c.id as call_id, c.manifest_id, c.input_sha256,
+            a.id as attempt_id, a.claim_epoch, s.id as step_id,
+            r.worker_epoch, r.worker_id
+          from model_calls c
+          join step_attempts a on a.id = c.step_attempt_id
+          join run_steps s on s.id = a.step_id
+          join runs r on r.id = s.run_id
+          where s.run_id = ${runId} and c.kind = 'DRAFT' and c.status = 'STARTED'
+          order by c.started_at desc limit 1`.execute(f.app.db);
+        if (rows.rows[0] !== undefined) return rows.rows[0];
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    })(), 8_000, 'read-first DRAFT model call');
+    assert.ok(claim);
+    assert.equal(await publishRunDraftPreview(f.app.db, {
+      workspaceId: f.workspaceId, runId, stepId: current.step_id,
+      attemptId: current.attempt_id, attemptClaimEpoch: current.claim_epoch,
+      runWorkerEpoch: current.worker_epoch, workerId: current.worker_id,
+      invocationEpoch: claim.epoch, modelCallId: current.call_id,
+      manifestId: current.manifest_id, inputHash: current.input_sha256,
+      text: '# 受控读入生成中的预览', truncated: false,
+    }), true);
+    const response = await f.api.get(workspacePath(f.workspaceId,
+      `/runs/${runId}/draft-preview`));
+    assert.equal(response.status, 200, response.text);
+    assert.equal((response.body as { preview_text: string | null }).preview_text,
+      '# 受控读入生成中的预览');
+    assert.equal((response.body as { preview_available: boolean }).preview_available, true);
+    if (revokeAfterPreview) {
+      const operation = (await sql<{ id: string; policy_id: string }>`
+        select id, policy_id from logical_operations where run_id = ${runId}
+        and capability_key in ('FILE_READ', 'WEB_FETCH') limit 1`
+        .execute(f.app.db)).rows[0]!;
+      await revokeGatewayPolicy(f.app.db, { workspaceId: f.workspaceId,
+        policyId: operation.policy_id });
+      const hidden = await f.api.get(workspacePath(f.workspaceId,
+        `/runs/${runId}/draft-preview`));
+      assert.equal(hidden.status, 200, hidden.text);
+      assert.equal((hidden.body as { preview_available: boolean }).preview_available, false);
+      assert.equal((hidden.body as { preview_text: string | null }).preview_text, null);
+      assert.equal(JSON.stringify(hidden.body).includes(operation.id), false);
+    }
+  } finally {
+    if (revokeAfterPreview) {
+      try { await delivery; } catch (error) { revocationError = error; }
+    } else await delivery;
+  }
+  if (revokeAfterPreview) {
+    assert.equal((revocationError as { code?: string } | undefined)?.code,
+      'INVALID_TRANSITION');
+    return undefined;
+  }
+  return delivery;
+}
+
+test('an AUTO frozen file-read intent reads the real file once and records hash evidence', async () => {
+  const f = await fixture(true);
+  try {
+    const action = await delegatedFileReadRun(f, 'AUTO');
+    await writeFile(action.targetPath, '受控读取的图内正文', 'utf8');
+    const delivered = await deliverWithReadPreview(f, action.runId);
+    assert.equal(delivered?.outcome, 'DONE');
+    const facts = await sql<{ status: string; invocation_count: bigint; content: string; sha256: string }>`
+      select o.status, count(i.id)::bigint as invocation_count,
+        (i.result_ref->>'content') as content, (i.result_ref->>'sha256') as sha256
+      from logical_operations o join invocation_attempts i on i.operation_id = o.id
+      where o.id = ${action.operationId} group by o.id, i.result_ref`.execute(f.app.db);
+    assert.equal(facts.rows.length, 1);
+    assert.equal(facts.rows[0]?.status, 'SUCCEEDED');
+    assert.equal(facts.rows[0]?.invocation_count, 1n);
+    assert.equal(facts.rows[0]?.content, '受控读取的图内正文');
+    assert.equal(facts.rows[0]?.sha256,
+      createHash('sha256').update('受控读取的图内正文', 'utf8').digest('hex'));
+    const bound = await sql<{ step_kind: string; invocation_id: string; input_sha256: string;
+      draft_input_sha256: string }>`
+      select s.step_kind, i.id as invocation_id, mc.input_sha256,
+        a.result_ref->>'input_sha256' as draft_input_sha256
+      from logical_operations o join run_steps s on s.id = o.step_id
+      join invocation_attempts i on i.operation_id = o.id
+      join model_calls mc on mc.read_operation_id = o.id and mc.read_invocation_id = i.id
+      join step_attempts a on a.id = mc.step_attempt_id
+      where o.id = ${action.operationId}`.execute(f.app.db);
+    assert.equal(bound.rows.length, 1);
+    assert.equal(bound.rows[0]!.step_kind, 'BUILD_CONTEXT');
+    assert.equal(bound.rows[0]!.input_sha256, bound.rows[0]!.draft_input_sha256);
+    const manifest = await sql<{ payload: JsonObject }>`select payload from context_manifests
+      where run_id = ${action.runId}`.execute(f.app.db);
+    const read = await loadRunReadEvidence(createRepositories(f.app.db), action.runId);
+    assert.ok(read);
+    assert.equal(read.invocationId, bound.rows[0]!.invocation_id);
+    assert.equal(read.input.content, '受控读取的图内正文');
+    assert.equal(read.input.trust, 'UNTRUSTED_DATA');
+    assert.equal(bound.rows[0]!.input_sha256, draftInputHash(
+      { ...manifest.rows[0]!.payload, tool_read: read.input }, CANDIDATE_OUTPUT_SCHEMA));
+    assert.equal(await readFile(action.targetPath, 'utf8'), '受控读取的图内正文',
+      'a read must never modify its target');
+    const run = await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`));
+    assert.equal((run.body as { status: string }).status, 'WAITING_APPROVAL');
+    const attempts = await sql<{ step_kind: string; count: bigint }>`
+      select s.step_kind, count(a.id)::bigint as count from step_attempts a
+      join run_steps s on s.id = a.step_id
+      where s.run_id = ${action.runId} and s.step_kind in ('BUILD_CONTEXT', 'DRAFT')
+      group by s.step_kind`.execute(f.app.db);
+    assert.deepEqual(attempts.rows.map((row) => [row.step_kind, row.count]),
+      [['BUILD_CONTEXT', 1n], ['DRAFT', 1n]]);
+
+    await approveValidationReview(f, action.runId);
+    const final = await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl });
+    assert.equal(final?.outcome, 'DONE');
+    const doneRun = await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`));
+    assert.equal((doneRun.body as { status: string }).status, 'COMPLETED');
+  } finally { await f.close(); }
+});
+
+test('revoking the completed FILE_READ policy hides its in-flight DRAFT preview', async () => {
+  const f = await fixture(true);
+  try {
+    const action = await delegatedFileReadRun(f, 'AUTO');
+    await writeFile(action.targetPath, '稍后撤销的受管文件', 'utf8');
+    await deliverWithReadPreview(f, action.runId, true);
+  } finally { await f.close(); }
+});
+
+test('an ASK frozen file-read intent waits, and only the approved RESUME reads once', async () => {
+  const f = await fixture(true);
+  try {
+    const action = await delegatedFileReadRun(f, 'ASK');
+    await writeFile(action.targetPath, '批准后的读取正文', 'utf8');
+    const prepared = await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl });
+    if (prepared === undefined) {
+      const diag = await sql`select c.kind, o.status from run_commands c
+        join run_command_outbox o on o.command_id = c.id where c.run_id = ${action.runId}`.execute(f.app.db);
+      process.stderr.write(`ASK_DIAG ${JSON.stringify(diag.rows)}
+`);
+    }
+    assert.equal(prepared?.outcome, 'DONE');
+    const beforeFacts = await sql<{ status: string; invocation_count: bigint }>`
+      select o.status, count(i.id)::bigint as invocation_count from logical_operations o
+      left join invocation_attempts i on i.operation_id = o.id
+      where o.id = ${action.operationId} group by o.id`.execute(f.app.db);
+    assert.deepEqual(beforeFacts.rows[0], { status: 'WAITING_APPROVAL', invocation_count: 0n });
+    const beforeDraft = await sql<{ count: bigint }>`select count(*)::bigint as count
+      from step_attempts a join run_steps s on s.id = a.step_id
+      where s.run_id = ${action.runId} and s.step_kind = 'DRAFT'`.execute(f.app.db);
+    assert.equal(beforeDraft.rows[0]?.count, 0n, 'ASK must precede model generation');
+    await decideAction(f, action.operationId, 'APPROVE');
+    const delivered = await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl });
+    if (delivered === undefined) {
+      const diag = await sql`select c.kind, c.ordinal, o.status as outbox, r.status as run_status,
+        (select count(*) from review_requests rr where rr.run_id = ${action.runId}) as reviews
+        from run_commands c join run_command_outbox o on o.command_id = c.id
+        join runs r on r.id = c.run_id where c.run_id = ${action.runId}`.execute(f.app.db);
+      process.stderr.write(`RESUME_DIAG ${JSON.stringify(diag.rows, (_k, v) => typeof v === 'bigint' ? v.toString() : v)}
+`);
+    }
+    assert.equal(delivered?.outcome, 'DONE');
+    const facts = await sql<{ status: string; invocation_count: bigint; content: string }>`
+      select o.status, count(i.id)::bigint as invocation_count,
+        (i.result_ref->>'content') as content
+      from logical_operations o join invocation_attempts i on i.operation_id = o.id
+      where o.id = ${action.operationId} group by o.id, i.result_ref`.execute(f.app.db);
+    assert.equal(facts.rows.length, 1);
+    assert.deepEqual(facts.rows[0], { status: 'SUCCEEDED', invocation_count: 1n,
+      content: '批准后的读取正文' });
+    const modelCalls = await sql<{ operation_id: string; invocation_id: string;
+      status: string }>`select read_operation_id as operation_id,
+        read_invocation_id as invocation_id, status from model_calls
+        where step_attempt_id in (select a.id from step_attempts a
+          join run_steps s on s.id = a.step_id
+          where s.run_id = ${action.runId} and s.step_kind = 'DRAFT')`.execute(f.app.db);
+    assert.deepEqual(modelCalls.rows, [{ operation_id: action.operationId,
+      invocation_id: (await sql<{ id: string }>`select id from invocation_attempts
+        where operation_id = ${action.operationId}`.execute(f.app.db)).rows[0]!.id,
+      status: 'COMPLETED' }]);
+    const run = await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`));
+    assert.equal((run.body as { status: string }).status, 'WAITING_APPROVAL');
+  } finally { await f.close(); }
+});
+
+test('a long UTF-8 file read is budgeted before DRAFT and retains the full capture hash', async () => {
+  const f = await fixture(true);
+  try {
+    const action = await delegatedFileReadRun(f, 'AUTO');
+    const content = '😀'.repeat(8_000);
+    await writeFile(action.targetPath, content, 'utf8');
+    assert.equal((await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl }))?.outcome, 'DONE');
+    const read = await loadRunReadEvidence(createRepositories(f.app.db), action.runId);
+    assert.ok(read);
+    assert.equal(read.input.content_bytes, Buffer.byteLength(content, 'utf8'));
+    assert.equal(read.input.source_sha256, createHash('sha256').update(content).digest('hex'));
+    assert.equal(read.input.input_truncated, true);
+    assert.ok((read.input.included_bytes as number) <= MAX_MODEL_READ_BYTES);
+    assert.equal((read.input.content as string).includes('\ufffd'), false,
+      'UTF-8 cut must never create a replacement character');
+    const call = await sql<{ input_sha256: string; read_operation_id: string }>`
+      select input_sha256, read_operation_id from model_calls
+      where read_operation_id = ${action.operationId}`.execute(f.app.db);
+    assert.equal(call.rows.length, 1);
+    assert.equal(call.rows[0]!.read_operation_id, action.operationId);
+    assert.match(call.rows[0]!.input_sha256, /^[0-9a-f]{64}$/u);
+  } finally { await f.close(); }
+});
+
+test('a typed failed file read releases execution without starting DRAFT', async () => {
+  const f = await fixture(true);
+  try {
+    const action = await delegatedFileReadRun(f, 'AUTO');
+    await writeFile(action.targetPath, 'x'.repeat(128 * 1024 + 1), 'utf8');
+    assert.equal((await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl }))?.outcome, 'DONE');
+    const facts = await sql<{ status: string; reason: string; invocation_id: string;
+      invocation_status: string; run_status: string; wait_reason: string; worker_id: string | null;
+      task_status: string; executor_run_id: string | null; draft_count: bigint }>`
+      select o.status, o.result_ref->>'reason' as reason, i.id as invocation_id,
+        i.status as invocation_status, r.status as run_status, r.wait_reason,
+        r.worker_id, t.status as task_status, t.executor_run_id,
+        (select count(*)::bigint from model_calls mc join step_attempts a
+          on a.id = mc.step_attempt_id join run_steps s on s.id = a.step_id
+          where s.run_id = r.id and s.step_kind = 'DRAFT') as draft_count
+      from logical_operations o join invocation_attempts i on i.operation_id = o.id
+      join runs r on r.id = o.run_id join tasks t on t.id = r.task_id
+      where o.id = ${action.operationId}`.execute(f.app.db);
+    assert.equal(facts.rows.length, 1);
+    assert.equal(facts.rows[0]?.status, 'FAILED');
+    assert.equal(facts.rows[0]?.reason, 'FILE_TOO_LARGE');
+    assert.equal(facts.rows[0]?.invocation_status, 'FAILED');
+    assert.ok(facts.rows[0]?.invocation_id);
+    assert.equal(facts.rows[0]?.run_status, 'FAILED');
+    assert.equal(facts.rows[0]?.wait_reason, 'FILE_TOO_LARGE');
+    assert.equal(facts.rows[0]?.worker_id, null);
+    assert.equal(facts.rows[0]?.task_status, 'READY');
+    assert.equal(facts.rows[0]?.executor_run_id, null);
+    assert.equal(facts.rows[0]?.draft_count, 0n);
+  } finally { await f.close(); }
+});
+
+test('a revoked ASK file-read source does not invoke the model after approval', async () => {
+  const f = await fixture(true);
+  try {
+    const action = await delegatedFileReadRun(f, 'ASK');
+    await writeFile(action.targetPath, '未授权正文', 'utf8');
+    assert.equal((await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl }))?.outcome, 'DONE');
+    const policy = await sql<{ policy_id: string }>`select policy_id from logical_operations
+      where id = ${action.operationId}`.execute(f.app.db);
+    await revokeGatewayPolicy(f.app.db, { workspaceId: f.workspaceId,
+      policyId: policy.rows[0]!.policy_id });
+    await decideAction(f, action.operationId, 'APPROVE');
+    assert.equal((await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl }))?.outcome, 'DONE');
+    const facts = await sql<{ status: string; invocation_count: bigint; model_count: bigint }>`
+      select o.status, (select count(*)::bigint from invocation_attempts i
+        where i.operation_id = o.id) as invocation_count,
+        (select count(*)::bigint from model_calls mc join step_attempts a
+          on a.id = mc.step_attempt_id join run_steps s on s.id = a.step_id
+          where s.run_id = o.run_id and mc.kind = 'DRAFT') as model_count
+      from logical_operations o where o.id = ${action.operationId}`.execute(f.app.db);
+    assert.deepEqual(facts.rows[0], { status: 'DENIED', invocation_count: 0n,
+      model_count: 0n });
+  } finally { await f.close(); }
+});
+
+test('a read crash after the adapter call resumes the original action before drafting', async () => {
+  const f = await fixture(true);
+  try {
+    const action = await delegatedFileReadRun(f, 'AUTO');
+    await writeFile(action.targetPath, '崩溃后读取正文', 'utf8');
+    const stopped = await runSupervisedWorkerOnce({ db: f.app.db,
+      databaseUrl: f.database.appUrl, dataRoot: f.api.dataRoot,
+      testExitAfterGatewayEffect: true });
+    assert.equal(stopped.exitCode, 97, stopped.output);
+    assert.deepEqual(stopped.requeuedRunIds, [action.runId]);
+    const before = await sql<{ status: string; invocation_count: bigint;
+      draft_count: bigint }>`select o.status,
+        (select count(*)::bigint from invocation_attempts i where i.operation_id = o.id)
+          as invocation_count,
+        (select count(*)::bigint from model_calls mc join step_attempts a
+          on a.id = mc.step_attempt_id join run_steps s on s.id = a.step_id
+          where s.run_id = o.run_id and mc.kind = 'DRAFT') as draft_count
+        from logical_operations o where o.id = ${action.operationId}`.execute(f.app.db);
+    assert.deepEqual(before.rows[0], { status: 'SUCCEEDED', invocation_count: 1n,
+      draft_count: 0n });
+    assert.equal((await workerOnce(f)).code, 0);
+    const after = await sql<{ status: string; invocation_count: bigint;
+      draft_count: bigint }>`select o.status,
+        (select count(*)::bigint from invocation_attempts i where i.operation_id = o.id)
+          as invocation_count,
+        (select count(*)::bigint from model_calls mc join step_attempts a
+          on a.id = mc.step_attempt_id join run_steps s on s.id = a.step_id
+          where s.run_id = o.run_id and mc.kind = 'DRAFT') as draft_count
+        from logical_operations o where o.id = ${action.operationId}`.execute(f.app.db);
+    assert.deepEqual(after.rows[0], { status: 'SUCCEEDED', invocation_count: 1n,
+      draft_count: 1n });
+  } finally { await f.close(); }
+});
+
+test('a persisted legacy DRAFT and approved read Review resume on the original DRAFT step', async () => {
+  const f = await fixture(true);
+  const migrator = openDatabase(f.database.migrationUrl, 'relay-legacy-read-fixture');
+  try {
+    const action = await delegatedFileReadRun(f, 'ASK');
+    await writeFile(action.targetPath, '旧 Run 读取正文', 'utf8');
+    assert.equal((await advanceRunStep(f.app.db, { runId: action.runId,
+      workerId: `legacy:${randomUUID()}`,
+      storage: new ManagedContentStore(f.api.dataRoot) })).status, 'STEP_SUCCEEDED');
+    const legacyContent = '# 旧 Run 候选\n\n## 摘要\n\n升级前草稿。\n\n## 结论\n\n保留原草稿。\n';
+    await sql`update run_steps set status = 'SUCCEEDED', revision = revision + 1,
+      result_ref = ${JSON.stringify({ kind: 'CONTENT', content: legacyContent })}::jsonb
+      where run_id = ${action.runId} and step_kind = 'DRAFT'`.execute(migrator.db);
+    await sql`update runs set status = 'RUNNING', revision = revision + 1
+      where id = ${action.runId}`.execute(migrator.db);
+    const draft = await sql<{ id: string }>`select id from run_steps
+      where run_id = ${action.runId} and step_kind = 'DRAFT'`.execute(f.app.db);
+    assert.equal((await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl }))?.outcome, 'DONE');
+    const waiting = await sql<{ status: string; step_id: string }>`select status, step_id
+      from logical_operations where id = ${action.operationId}`.execute(f.app.db);
+    assert.deepEqual(waiting.rows[0], { status: 'WAITING_APPROVAL', step_id: draft.rows[0]!.id });
+    await decideAction(f, action.operationId, 'APPROVE');
+    assert.equal((await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl }))?.outcome, 'DONE');
+    const result = await sql<{ status: string; step_id: string; invocation_count: bigint;
+      draft_content: string; model_count: bigint }>`select o.status, o.step_id,
+      (select count(*)::bigint from invocation_attempts i where i.operation_id = o.id)
+        as invocation_count,
+      (select s.result_ref->>'content' from run_steps s where s.run_id = o.run_id
+        and s.step_kind = 'DRAFT') as draft_content,
+      (select count(*)::bigint from model_calls mc join step_attempts a
+        on a.id = mc.step_attempt_id join run_steps s on s.id = a.step_id
+        where s.run_id = o.run_id and mc.kind = 'DRAFT') as model_count
+      from logical_operations o where o.id = ${action.operationId}`.execute(f.app.db);
+    assert.deepEqual(result.rows[0], { status: 'SUCCEEDED', step_id: draft.rows[0]!.id,
+      invocation_count: 1n, draft_content: legacyContent, model_count: 0n });
+  } finally { await migrator.close(); await f.close(); }
+});
+
+test('a context change during an ASK file-read wait denies the original operation before any read', async () => {
+  const f = await fixture(true);
+  try {
+    const action = await delegatedFileReadRun(f, 'ASK');
+    await writeFile(action.targetPath, '不应被读取的正文', 'utf8');
+    assert.equal((await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl }))?.outcome, 'DONE');
+    await sql`update tasks set title = 'Changed during file-read approval wait', revision = revision + 1
+      where id = ${action.taskId}`.execute(f.app.db);
+    await decideAction(f, action.operationId, 'APPROVE');
+    const delivered = await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl });
+    assert.equal(delivered?.outcome, 'DONE');
+    const facts = await sql<{ status: string; invocation_count: bigint }>`
+      select o.status, count(i.id)::bigint as invocation_count from logical_operations o
+      left join invocation_attempts i on i.operation_id = o.id
+      where o.id = ${action.operationId} group by o.id`.execute(f.app.db);
+    assert.deepEqual(facts.rows[0], { status: 'DENIED', invocation_count: 0n });
+    const run = await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`));
+    assert.equal((run.body as { status: string }).status, 'FAILED');
+    const task = await f.api.get(workspacePath(f.workspaceId, `/tasks/${action.taskId}`));
+    assert.equal((task.body as { status: string }).status, 'READY');
+  } finally { await f.close(); }
+});
+
+test('a missing file read target fails the delivery deterministically and succeeds once the file exists', async () => {
+  const f = await fixture(true);
+  let claim: ClaimedRunCommand | undefined;
+  try {
+    const action = await delegatedFileReadRun(f, 'AUTO');
+    // The frozen target does not exist yet: prepare refuses deterministically
+    // before any operation row or invocation, and the delivery fails.
+    await assert.rejects(
+      runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+        dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl,
+        onClaim: async (captured) => { claim = captured; } }),
+      (error: unknown) => typeof error === 'object' && error !== null && 'code' in error &&
+        (error as { code: string }).code === 'GATEWAY_TARGET_DENIED');
+    const operations = await sql<{ count: bigint }>`
+      select count(*)::bigint as count from logical_operations where run_id = ${action.runId}`.execute(f.app.db);
+    assert.equal(operations.rows[0]?.count, 0n, 'no operation row is created for a refused target');
+    assert.equal(await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`)).then(
+      (run) => (run.body as { status: string }).status), 'RUNNING');
+
+    // The supervisor would fence the stopped claim, requeue the same command,
+    // and the next delivery succeeds once the file exists.
+    assert.ok(claim);
+    await recoverStoppedWorker(f.app.db, { runId: action.runId, stoppedWorkerId: claim.workerId,
+      stoppedEvidence: 'test: file read target missing',
+      storage: new ManagedContentStore(f.api.dataRoot) });
+    await withTransaction(f.app.db, async (repositories) => {
+      await repositories.runs.lockRun(action.runId);
+      await repositories.dispatch.lockInvocation(action.runId);
+      await repositories.dispatch.lockOutbox(claim!.commandId);
+      await repositories.dispatch.requeueStoppedClaim(action.runId, claim!.workerId,
+        claim!.epoch, claim!.commandId, 'test: file read target missing');
+    });
+    await writeFile(action.targetPath, '迟到的正文', 'utf8');
+    const delivered = await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl });
+    assert.equal(delivered?.outcome, 'DONE');
+    const facts = await sql<{ status: string; invocation_count: bigint; content: string }>`
+      select o.status, count(i.id)::bigint as invocation_count, (i.result_ref->>'content') as content
+      from logical_operations o join invocation_attempts i on i.operation_id = o.id
+      where o.id = ${action.operationId} group by o.id, i.result_ref`.execute(f.app.db);
+    assert.equal(facts.rows.length, 1);
+    assert.equal(facts.rows[0]?.status, 'SUCCEEDED');
+    assert.equal(facts.rows[0]?.content, '迟到的正文');
+  } finally { await f.close(); }
+});
+
+const WEB_PAGE_BODY = '<!DOCTYPE html><html><head><script>evil()</script><style>.x{}</style></head>' +
+  '<body><h1>图内网页读</h1><p>正文段落 &amp; 更多</p><!-- 注释 --><p>第二段</p></body></html>';
+
+interface PageServer {
+  url(path: string): string;
+  close(): Promise<void>;
+}
+
+function startPageServer(): Promise<PageServer> {
+  return new Promise((resolve, reject) => {
+    let server: Server | undefined;
+    const done = (error?: unknown): void => {
+      if (server === undefined) reject(error ?? new Error('page server failed'));
+    };
+    server = createServer((request, response) => {
+      if ((request.url ?? '/') === '/ok') {
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        response.end(WEB_PAGE_BODY);
+        return;
+      }
+      response.writeHead(404, { 'content-type': 'text/plain' });
+      response.end('not found');
+    });
+    server.once('error', done);
+    server.listen(0, '127.0.0.1', () => {
+      const port = (server.address() as AddressInfo).port;
+      resolve({
+        url: (path: string) => `http://127.0.0.1:${port}${path}`,
+        close: () => new Promise((done2, fail) => server!.close((error) => error ? fail(error) : done2())),
+      });
+    });
+  });
+}
+
+async function delegatedWebFetchRun(f: Fixture, decision: 'AUTO' | 'ASK', url: string): Promise<{
+  runId: string; taskId: string; operationId: string; connectionId: string;
+}> {
+  const projectCommand = randomUUID();
+  const project = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, '/projects'), {
+    command_id: projectCommand, title: 'Graph WebFetch', project_type: 'GENERAL',
+  }), 201, projectCommand);
+  const projectId = project.project_id as string;
+  const connection = await createGatewayConnectionCommand(f.app.db, { workspaceId: f.workspaceId,
+    projectId, commandId: randomUUID(), capabilities: ['WEB_FETCH'],
+    allowedHost: '127.0.0.1', allowPrivate: true });
+  const policy = await createGatewayPolicy(f.app.db, { workspaceId: f.workspaceId, projectId,
+    capability: 'WEB_FETCH', actionType: 'WEB_FETCH', targetPrefix: '127.0.0.1',
+    decision, maxPayloadBytes: 1024 });
+  assert.ok(policy.policyId);
+  const taskCommand = randomUUID();
+  const task = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, '/tasks'), {
+    command_id: taskCommand, project_id: projectId, title: 'Graph approved web fetch',
+    objective: 'Read a public page through the Gateway',
+    criteria: [{ criterion_id: 'human', statement: 'Review the candidate', method: 'HUMAN' }],
+  }), 201, taskCommand);
+  const readyCommand = randomUUID();
+  const ready = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId,
+    `/tasks/${task.task_id as string}/ready`), {
+      command_id: readyCommand, expected_revision: task.revision,
+    }), 200, readyCommand);
+  const delegateCommand = randomUUID();
+  const delegated = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId,
+    `/tasks/${task.task_id as string}/delegations`), {
+      command_id: delegateCommand, expected_task_revision: ready.revision,
+      web_fetch_action: { connection_id: connection.result.connection_id!, url },
+    }), 202, delegateCommand);
+  const runId = delegated.run_id as string;
+  const contract = await sql<{ frozen_snapshot: { web_fetch_action: { operation_id: string } } }>`
+    select frozen_snapshot from execution_contracts where run_id = ${runId}`.execute(f.app.db);
+  return { runId, taskId: task.task_id as string,
+    operationId: contract.rows[0]!.frozen_snapshot.web_fetch_action.operation_id,
+    connectionId: connection.result.connection_id! };
+}
+
+test('an AUTO frozen web-fetch intent reads the page once and records extraction evidence', async () => {
+  const f = await fixture(true);
+  const page = await startPageServer();
+  try {
+    const action = await delegatedWebFetchRun(f, 'AUTO', page.url('/ok'));
+    const delivered = await deliverWithReadPreview(f, action.runId);
+    assert.equal(delivered?.outcome, 'DONE');
+    const facts = await sql<{ status: string; invocation_count: bigint; content: string;
+      sha256: string; status_code: string; extractor: string }>`
+      select o.status, count(i.id)::bigint as invocation_count,
+        (i.result_ref->>'content') as content, (i.result_ref->>'sha256') as sha256,
+        (i.result_ref->>'status') as status_code, (i.result_ref->>'extractor') as extractor
+      from logical_operations o join invocation_attempts i on i.operation_id = o.id
+      where o.id = ${action.operationId} group by o.id, i.result_ref`.execute(f.app.db);
+    assert.equal(facts.rows.length, 1);
+    assert.equal(facts.rows[0]?.status, 'SUCCEEDED');
+    assert.equal(facts.rows[0]?.invocation_count, 1n);
+    assert.equal(facts.rows[0]?.status_code, '200');
+    assert.equal(facts.rows[0]?.extractor, 'web-text-extract-v1');
+    assert.equal(facts.rows[0]?.content, extractWebText(WEB_PAGE_BODY));
+    assert.equal(facts.rows[0]?.sha256,
+      createHash('sha256').update(WEB_PAGE_BODY, 'utf8').digest('hex'));
+    const read = await loadRunReadEvidence(createRepositories(f.app.db), action.runId);
+    assert.ok(read);
+    assert.equal(read.input.kind, 'WEB_FETCH');
+    assert.equal(read.input.content, extractWebText(WEB_PAGE_BODY));
+    assert.equal(read.input.trust, 'UNTRUSTED_DATA');
+    const call = await sql<{ step_kind: string; operation_id: string;
+      invocation_id: string; input_sha256: string }>`select s.step_kind,
+        mc.read_operation_id as operation_id, mc.read_invocation_id as invocation_id,
+        mc.input_sha256 from model_calls mc
+        join logical_operations o on o.id = mc.read_operation_id
+        join run_steps s on s.id = o.step_id
+        where o.id = ${action.operationId}`.execute(f.app.db);
+    assert.deepEqual(call.rows, [{ step_kind: 'BUILD_CONTEXT',
+      operation_id: action.operationId, invocation_id: read.invocationId,
+      input_sha256: call.rows[0]!.input_sha256 }]);
+    assert.match(call.rows[0]!.input_sha256, /^[0-9a-f]{64}$/u);
+    const run = await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`));
+    assert.equal((run.body as { status: string }).status, 'WAITING_APPROVAL');
+    const attempts = await sql<{ step_kind: string; count: bigint }>`
+      select s.step_kind, count(a.id)::bigint as count from step_attempts a
+      join run_steps s on s.id = a.step_id
+      where s.run_id = ${action.runId} and s.step_kind in ('BUILD_CONTEXT', 'DRAFT')
+      group by s.step_kind`.execute(f.app.db);
+    assert.deepEqual(attempts.rows.map((row) => [row.step_kind, row.count]),
+      [['BUILD_CONTEXT', 1n], ['DRAFT', 1n]]);
+
+    await approveValidationReview(f, action.runId);
+    const final = await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl });
+    assert.equal(final?.outcome, 'DONE');
+    const doneRun = await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`));
+    assert.equal((doneRun.body as { status: string }).status, 'COMPLETED');
+  } finally { await page.close(); await f.close(); }
+});
+
+test('a typed failed web fetch releases execution without starting DRAFT', async () => {
+  const f = await fixture(true);
+  const page = await startPageServer();
+  try {
+    const action = await delegatedWebFetchRun(f, 'AUTO', page.url('/missing'));
+    assert.equal((await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl }))?.outcome, 'DONE');
+    const facts = await sql<{ status: string; reason: string; invocation_status: string;
+      run_status: string; wait_reason: string; worker_id: string | null;
+      task_status: string; executor_run_id: string | null; draft_count: bigint }>`
+      select o.status, o.result_ref->>'reason' as reason, i.status as invocation_status,
+        r.status as run_status, r.wait_reason, r.worker_id,
+        t.status as task_status, t.executor_run_id,
+        (select count(*)::bigint from model_calls mc join step_attempts a
+          on a.id = mc.step_attempt_id join run_steps s on s.id = a.step_id
+          where s.run_id = r.id and s.step_kind = 'DRAFT') as draft_count
+      from logical_operations o join invocation_attempts i on i.operation_id = o.id
+      join runs r on r.id = o.run_id join tasks t on t.id = r.task_id
+      where o.id = ${action.operationId}`.execute(f.app.db);
+    assert.deepEqual(facts.rows, [{ status: 'FAILED', reason: 'WEB_HTTP_STATUS',
+      invocation_status: 'FAILED', run_status: 'FAILED', wait_reason: 'WEB_HTTP_STATUS',
+      worker_id: null, task_status: 'READY', executor_run_id: null, draft_count: 0n }]);
+  } finally { await page.close(); await f.close(); }
+});
+
+test('an ASK frozen web-fetch intent waits, and only the approved RESUME fetches once', async () => {
+  const f = await fixture(true);
+  const page = await startPageServer();
+  try {
+    const action = await delegatedWebFetchRun(f, 'ASK', page.url('/ok'));
+    const prepared = await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl });
+    assert.equal(prepared?.outcome, 'DONE');
+    const beforeFacts = await sql<{ status: string; invocation_count: bigint }>`
+      select o.status, count(i.id)::bigint as invocation_count from logical_operations o
+      left join invocation_attempts i on i.operation_id = o.id
+      where o.id = ${action.operationId} group by o.id`.execute(f.app.db);
+    assert.deepEqual(beforeFacts.rows[0], { status: 'WAITING_APPROVAL', invocation_count: 0n });
+    const beforeDraft = await sql<{ count: bigint }>`select count(*)::bigint as count
+      from step_attempts a join run_steps s on s.id = a.step_id
+      where s.run_id = ${action.runId} and s.step_kind = 'DRAFT'`.execute(f.app.db);
+    assert.equal(beforeDraft.rows[0]?.count, 0n);
+    await decideAction(f, action.operationId, 'APPROVE');
+    const delivered = await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl });
+    assert.equal(delivered?.outcome, 'DONE');
+    const facts = await sql<{ status: string; invocation_count: bigint; content: string }>`
+      select o.status, count(i.id)::bigint as invocation_count,
+        (i.result_ref->>'content') as content
+      from logical_operations o join invocation_attempts i on i.operation_id = o.id
+      where o.id = ${action.operationId} group by o.id, i.result_ref`.execute(f.app.db);
+    assert.equal(facts.rows.length, 1);
+    assert.deepEqual(facts.rows[0], { status: 'SUCCEEDED', invocation_count: 1n,
+      content: extractWebText(WEB_PAGE_BODY) });
+    const modelCall = await sql<{ operation_id: string; invocation_id: string }>`
+      select read_operation_id as operation_id, read_invocation_id as invocation_id
+      from model_calls where read_operation_id = ${action.operationId}`.execute(f.app.db);
+    assert.equal(modelCall.rows.length, 1);
+    assert.equal(modelCall.rows[0]!.operation_id, action.operationId);
+    const run = await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`));
+    assert.equal((run.body as { status: string }).status, 'WAITING_APPROVAL');
+  } finally { await page.close(); await f.close(); }
+});
+
+test('a context change during an ASK web-fetch wait denies the original operation before any fetch', async () => {
+  const f = await fixture(true);
+  const page = await startPageServer();
+  try {
+    const action = await delegatedWebFetchRun(f, 'ASK', page.url('/ok'));
+    assert.equal((await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl }))?.outcome, 'DONE');
+    await sql`update tasks set title = 'Changed during web-fetch approval wait', revision = revision + 1
+      where id = ${action.taskId}`.execute(f.app.db);
+    await decideAction(f, action.operationId, 'APPROVE');
+    const delivered = await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl });
+    assert.equal(delivered?.outcome, 'DONE');
+    const facts = await sql<{ status: string; invocation_count: bigint }>`
+      select o.status, count(i.id)::bigint as invocation_count from logical_operations o
+      left join invocation_attempts i on i.operation_id = o.id
+      where o.id = ${action.operationId} group by o.id`.execute(f.app.db);
+    assert.deepEqual(facts.rows[0], { status: 'DENIED', invocation_count: 0n });
+    const run = await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`));
+    assert.equal((run.body as { status: string }).status, 'FAILED');
+    const task = await f.api.get(workspacePath(f.workspaceId, `/tasks/${action.taskId}`));
+    assert.equal((task.body as { status: string }).status, 'READY');
+  } finally { await page.close(); await f.close(); }
+});
+
+test('a frozen web-fetch URL outside the connection host refuses deterministically before any operation', async () => {
+  const f = await fixture(true);
+  const page = await startPageServer();
+  try {
+    // The server URL host is 127.0.0.1 but the frozen intent names another host:
+    // the connection binding is the admission boundary and the prepare refuses
+    // with no operation row, so the Run stays RUNNING and the delivery fails
+    // (same frozen-intent semantics as an absent file read target).
+    const action = await delegatedWebFetchRun(f, 'AUTO', 'http://other.example/ok');
+    await assert.rejects(
+      runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+        dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl }),
+      (error: unknown) => typeof error === 'object' && error !== null && 'code' in error &&
+        (error as { code: string }).code === 'GATEWAY_TARGET_DENIED');
+    const operations = await sql<{ count: bigint }>`
+      select count(*)::bigint as count from logical_operations where run_id = ${action.runId}`.execute(f.app.db);
+    assert.equal(operations.rows[0]?.count, 0n, 'no operation row is created for a refused host');
+    assert.equal(await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`)).then(
+      (run) => (run.body as { status: string }).status), 'RUNNING');
+  } finally { await page.close(); await f.close(); }
 });

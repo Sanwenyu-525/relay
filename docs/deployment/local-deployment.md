@@ -30,6 +30,8 @@ Windows 内容缩放由宿主显式启用 WebView2 原生快捷键：`Ctrl++` �
 
 按 [ADR-006](../decisions/ADR-006-typescript-first.md)，人工阶段有桌面壳、UI 与 API，阶段 B 增加同仓同版本 Worker，API/Worker 经应用用例及 PG 协议共享事实，不新增领域 RPC。桌面壳不拥有业务事务；独立限制连接池和并发，监督健康/退出，Worker 先恢复核对再领取。进程分离不隔离 CPU、磁盘及数据库竞争，也不构成沙箱。Python 仅按需启动固定工具入口；子进程树取消和实际资源限制需 Windows 验证。
 
+连接池边界：桌面配置的 `RELAY_DB_POOL_MAX` 只用于 API，值 1 仍有效；随包独立 Worker 当前使用自己的固定 4 连接池，不继承该值。M04 VERIFY 的语义模型调用在业务事务占用一个连接期间，将调用计量 `STARTED`/结局通过池内另一连接独立提交；这保留崩溃后的未知调用事实。自行嵌入 `advanceRunStep` 的运行方需要保证此路径有第二连接或专用计量连接。该边界已有真实 PG 的 API 单连接配置 + Worker 语义调用定向回归，尚非 Windows 桌面验收。
+
 当前桌面启动顺序：取得单实例锁并校验配置/随包资源 → 逐一核验旧 `ARMED` 对应 Job 整组停机 → 持久化本次 `ARMED` 并以创建时 Job 绑定启动 API → API 校验 DB/schema/Workspace 并完成私有 readiness → 启动 supervisor、核对旧 claim 与动作并完成私有 dispatch readiness → 开放窗口 bootstrap 与新领取。未就绪只提供最小存活/启动错误信息，业务写入关闭。PG 未安装、未启动或 schema 不兼容时在窗口给出可操作错误，不要求用户找隐藏终端。旧 UNKNOWN 不阻止全部浏览，但阻止相关写资源。重复启动聚焦已有窗口；锁不替代数据库 claim 和恢复隔离。
 
 配置项最低包含：DB URL/账号/secret_ref、data_root、bind_host/port 策略、allowed_origins、worker 并发、模型/工具预算、日志级别与脱敏。安装版推荐由系统分配空闲 loopback 端口，启动器通过私有父子进程通道取得实际端口和实例握手；禁止探测某端口就信任已有服务。开发可显式固定端口，被占用则失败。完整凭据不出现在命令行参数、端口发现文件或普通 stdout 日志中。

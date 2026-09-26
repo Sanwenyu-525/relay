@@ -11,6 +11,7 @@ import type { ContextCorrectionInput, FakeScenario } from '../workflow/context-f
 import { DEFAULT_FAKE_SCENARIO } from '../workflow/context-fixture.js';
 import { searchInformation } from './information-queries.js';
 import { createRepositories } from './unit-of-work.js';
+import { readContextSources } from '../workflow/execution-contract.js';
 
 export const CONTEXT_BUILDER_VERSION = 'context-builder-v1';
 export const CONTEXT_TEMPLATE_VERSION = 'markdown-draft-v1';
@@ -40,7 +41,7 @@ export interface ContextSource extends JsonObject {
   content: string;
   role: 'MANDATORY' | 'RELEVANT' | 'STEP_SPECIFIC';
   trust: 'CANONICAL' | 'UNTRUSTED_DATA';
-  selection_reason?: 'TITLE_MATCH' | 'RECENT_SCOPE_FALLBACK';
+  selection_reason?: 'EXPLICIT_SELECTION' | 'TITLE_MATCH' | 'RECENT_SCOPE_FALLBACK';
 }
 
 export type BuiltContext = { readonly kind: 'READY'; readonly builderVersion: string;
@@ -53,7 +54,7 @@ export type BuiltContext = { readonly kind: 'READY'; readonly builderVersion: st
 export async function buildRunContext(db: DbExecutor, input: { readonly run: RunRow;
   readonly task: TaskRow; readonly storage: ManagedContentStore;
   readonly fakeScenario?: FakeScenario; readonly correction?: ContextCorrectionInput;
-  readonly budgetTokens?: number }): Promise<BuiltContext> {
+  readonly budgetTokens?: number; readonly externalModel?: boolean }): Promise<BuiltContext> {
   const r = createRepositories(db);
   const contract = await r.runs.readContract(input.run.id);
   const project = input.task.project_id === null ? undefined :
@@ -124,17 +125,38 @@ export async function buildRunContext(db: DbExecutor, input: { readonly run: Run
   const selected = [...required];
   const exclusions: JsonObject[] = [];
   const query = input.task.title.trim().slice(0, 12);
+  const explicitRefs = readContextSources(contract.frozen_snapshot);
+  const explicitSelections = explicitRefs.length > 0;
   const matches = query ? await searchInformation(db, { workspaceId: input.run.workspace_id,
       projectId: project.id, query, types: 'KNOWLEDGE,MEMORY,DECISION', limit: MAX_RELEVANT })
     : { items: [] };
   const ranked = matches.items.filter((match) => match.type !== 'RULE').map((match) => ({
     type: match.type as 'KNOWLEDGE' | 'MEMORY' | 'DECISION', id: match.id,
     source_ref: match.source_ref, selection_reason: 'TITLE_MATCH' as const }));
-  const recent = await r.information.listContextCandidates(input.run.workspace_id, project.id, MAX_FALLBACK);
+  // 显式选中资料优先，且引用随 Run 冻结的不可变版本；存在显式选择时按最小必要
+  // 输入不再做最近同范围资料补位，同作用域检索仍按设计保留。
+  const recent = explicitSelections || input.externalModel === true ? [] :
+    await r.information.listContextCandidates(input.run.workspace_id, project.id, MAX_FALLBACK);
   const candidates = [...ranked, ...recent.map((entry) => ({ type: entry.kind, id: entry.id,
     source_ref: `${entry.kind.toLowerCase()}:${entry.id}`,
     selection_reason: 'RECENT_SCOPE_FALLBACK' as const }))];
   const seen = new Set<string>();
+  for (const ref of explicitRefs) {
+    if (seen.has(`${ref.kind}:${ref.root_id}`)) continue;
+    seen.add(`${ref.kind}:${ref.root_id}`);
+    const reference = `${ref.kind.toLowerCase()}:${ref.root_id}:v${ref.version}`;
+    const optional = await loadRelevant(db, input.storage, input.run.workspace_id,
+      project.id, ref.kind, ref.root_id, query, 'EXPLICIT_SELECTION', BigInt(ref.version));
+    if (optional === null) {
+      exclusions.push({ source_ref: reference, reason: 'SOURCE_UNAVAILABLE' });
+      continue;
+    }
+    if (projected([...selected, optional], exclusions) + RESERVED_TOKENS > limit) {
+      exclusions.push({ source_ref: optional.source_ref, reason: 'BUDGET_TRIMMED' });
+      continue;
+    }
+    selected.push(optional);
+  }
   for (const match of candidates) {
     if (seen.has(`${match.type}:${match.id}`) || seen.size >= MAX_RELEVANT) continue;
     seen.add(`${match.type}:${match.id}`);
@@ -169,15 +191,18 @@ export async function buildRunContext(db: DbExecutor, input: { readonly run: Run
 
 async function loadRelevant(db: DbExecutor, storage: ManagedContentStore,
   workspaceId: string, projectId: string, kind: 'KNOWLEDGE' | 'MEMORY' | 'DECISION',
-  id: string, query: string, selectionReason: 'TITLE_MATCH' | 'RECENT_SCOPE_FALLBACK'):
-    Promise<ContextSource | null> {
+  id: string, query: string, selectionReason: 'EXPLICIT_SELECTION' | 'TITLE_MATCH' |
+    'RECENT_SCOPE_FALLBACK', pinnedVersion?: bigint): Promise<ContextSource | null> {
   const r = createRepositories(db);
   const key = kind.toLowerCase() as 'knowledge' | 'memory' | 'decision';
   const root = await r.information.readRoot<InformationRootRow | DecisionRow>(key, id);
   if (root?.workspace_id !== workspaceId || root.status !== 'ACTIVE' ||
       root.project_id !== null && root.project_id !== projectId) return null;
-  const version = await r.information.readCurrentVersion<KnowledgeVersionRow | MemoryVersionRow |
-    DecisionVersionRow>(key, id);
+  const version = pinnedVersion === undefined ?
+    await r.information.readCurrentVersion<KnowledgeVersionRow | MemoryVersionRow |
+      DecisionVersionRow>(key, id) :
+    await r.information.readVersion<KnowledgeVersionRow | MemoryVersionRow |
+      DecisionVersionRow>(key, id, pinnedVersion);
   if (version === undefined) return null;
   let content: string;
   let fullHash: string;

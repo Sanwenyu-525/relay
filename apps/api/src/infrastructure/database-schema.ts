@@ -115,6 +115,34 @@ export interface ProjectRow {
   readonly updated_at: Date;
 }
 
+export interface ProjectViewConfigurationRow {
+  readonly project_id: string;
+  readonly workspace_id: string;
+  readonly revision: bigint;
+  readonly kind: 'general' | 'thesis' | 'development';
+  readonly template_version: string;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
+
+export interface ProjectBlueprintProposalRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly project_id: string;
+  readonly status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'SUPERSEDED';
+  readonly origin: 'USER_DRAFT' | 'SKILL';
+  readonly skill_message_id: string | null;
+  readonly supersedes_proposal_id: string | null;
+  readonly candidate: JsonObject;
+  readonly baseline: JsonObject;
+  readonly source: JsonObject;
+  readonly candidate_sha256: string;
+  readonly decision: JsonObject | null;
+  readonly created_at: Date;
+  readonly decided_at: Date | null;
+  readonly updated_at: Date;
+}
+
 export interface GoalRow {
   readonly id: string;
   readonly workspace_id: string;
@@ -148,6 +176,10 @@ export interface TaskRow {
   readonly current_completion_id: string | null;
   /** 0002 新增：Goal 对齐模式。 */
   readonly goal_alignment_mode: TaskGoalAlignmentMode;
+  /** 0020：用户显式调度元数据，不属于验收版本。 */
+  readonly priority: 'LOW' | 'NORMAL' | 'HIGH' | null;
+  readonly due_local_date: string | null;
+  readonly due_timezone: string | null;
   readonly revision: bigint;
   readonly created_at: Date;
   readonly updated_at: Date;
@@ -291,14 +323,22 @@ export interface RunEffectActionRow {
 
 /** 0008: Gateway facts. Connection, capability and permission remain separate. */
 export type GatewayDecision = 'AUTO' | 'ASK' | 'DENY';
-export type GatewayCapability = 'FAKE_WRITE' | 'FAKE_PUBLIC_READ';
+export type GatewayCapability =
+  | 'FAKE_WRITE'
+  | 'FAKE_PUBLIC_READ'
+  | 'FILE_READ'
+  | 'WEB_FETCH'
+  | 'FILE_WRITE'
+  | 'GIT_READ'
+  | 'GIT_WRITE'
+  | 'CLI_RUN';
 export type GatewayOperationStatus = 'WAITING_APPROVAL' | 'PREPARED' | 'DISPATCHING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN' | 'DENIED';
 export type InvocationStatus = 'PREPARED' | 'DISPATCHING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN' | 'NOT_EXECUTED';
 export type ResourceClaimStatus = 'HELD' | 'QUARANTINED' | 'RELEASED';
 
 export interface GatewayConnectionRow {
   readonly id: string; readonly workspace_id: string; readonly project_id: string;
-  readonly adapter_kind: 'FAKE'; readonly status: 'ACTIVE' | 'DISABLED';
+  readonly adapter_kind: 'FAKE' | 'REAL'; readonly status: 'ACTIVE' | 'DISABLED';
   readonly version: bigint; readonly config: JsonObject;
   readonly created_at: Date; readonly updated_at: Date;
 }
@@ -331,6 +371,8 @@ export interface ImportJobRow {
   readonly id: string; readonly workspace_id: string; readonly project_id: string;
   readonly actor_ref: string; readonly config_version: string; readonly source_uri: string;
   readonly request_command_id: string;
+  /** WEB_FETCH imports freeze their connection boundary here; Fake imports keep NULL. */
+  readonly connection_id: string | null;
   readonly status: 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
   readonly error: string | null; readonly knowledge_version_id: string | null;
   readonly revision: bigint; readonly created_at: Date;
@@ -543,6 +585,8 @@ export interface ReviewRequestRow {
   readonly verification_session_id: string | null;
   readonly criterion_id: string | null;
   readonly operation_id: string | null;
+  /** USER_IMPORT 动作审批指向的导入 job；Run/State Review 保持 NULL。 */
+  readonly import_job_id: string | null;
   readonly kind: ReviewKind;
   readonly reason: string;
   readonly status: ReviewStatus;
@@ -631,13 +675,26 @@ export interface CommandReceiptRow {
 
 export interface ActivityRecordRow {
   readonly id: string;
+  readonly workspace_id: string;
   readonly actor_kind: ActivityActorKind;
   readonly actor_ref: string;
   readonly command_id: string | null;
   readonly project_id: string | null;
   readonly task_id: string | null;
+  readonly run_id: string | null;
   readonly event_type: string;
   readonly fact_refs: JsonObject;
+  readonly created_at: Date;
+}
+
+export interface ArtifactLineageEdgeRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly child_version_id: string;
+  readonly relation: 'DERIVED_FROM' | 'REVISED_FROM' | 'GENERATED_BY' | 'VERIFIED_BY' | 'ACCEPTED_BY';
+  readonly parent_kind: 'ARTIFACT_VERSION' | 'KNOWLEDGE_VERSION' | 'RUN_STEP' |
+    'VERIFICATION_SESSION' | 'COMPLETION_RECORD';
+  readonly parent_id: string;
   readonly created_at: Date;
 }
 
@@ -658,10 +715,11 @@ export interface KnowledgeVersionRow {
   readonly id: string;
   readonly knowledge_id: string;
   readonly version: bigint;
-  readonly source_kind: 'NOTE' | 'MANAGED_TEXT' | 'ARTIFACT_VERSION';
+  readonly source_kind: 'NOTE' | 'MANAGED_TEXT' | 'ARTIFACT_VERSION' | 'WEB_PAGE';
   readonly media_type: string;
   readonly content_text: string | null;
   readonly content_sha256: Buffer;
+  readonly source_uri: string | null;
   readonly artifact_version_id: string | null;
   readonly availability: 'AVAILABLE' | 'UNAVAILABLE';
   readonly source_refs: JsonObject;
@@ -710,8 +768,136 @@ export interface RuleVersionRow {
   readonly created_at: Date;
 }
 
+/** 0015：Assist 会话；只服务对话与提案，不参与业务判定。 */
+export type AssistSessionStatus = 'ACTIVE' | 'ARCHIVED';
+
+/** 0015：消息生成意图；提案意图要求会话绑定对应作用域（命令层校验）。 */
+export type AssistIntent = 'DISCUSS' | 'PROPOSE_CANDIDATE' | 'PROPOSE_TASK';
+
+/** 0015：ASSISTANT 消息生成生命周期；USER 消息恒为 COMPLETED。 */
+export type AssistMessageStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+
+/** 0015：类型化提案状态；接受复用既有业务命令，重复接受按命令回执幂等。 */
+export type AssistProposalStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED';
+
+export type AssistProposalKind = 'CANDIDATE_MARKDOWN' | 'TASK_DEFINITION' |
+  'TASK_CONTRACT_CHANGE' | 'VERIFICATION_PLAN_CHANGE';
+
+export interface AssistSessionRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly project_id: string | null;
+  readonly task_id: string | null;
+  readonly title: string;
+  readonly status: AssistSessionStatus;
+  readonly revision: bigint;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
+
+export interface AssistMessageRow {
+  readonly id: string;
+  readonly session_id: string;
+  readonly seq: bigint;
+  readonly role: 'USER' | 'ASSISTANT';
+  readonly status: AssistMessageStatus;
+  readonly intent: AssistIntent;
+  readonly content: string | null;
+  readonly error_code: string | null;
+  readonly sources: JsonObject;
+  readonly skill_snapshot: JsonObject | null;
+  readonly skill_input: JsonObject | null;
+  readonly skill_output: JsonObject | null;
+  readonly provider_request_id: string | null;
+  readonly usage_input_tokens: number | null;
+  readonly usage_output_tokens: number | null;
+  readonly worker_id: string | null;
+  readonly cancel_requested: boolean;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
+
+/** Disposable, bounded DISCUSS prefix. Removed in the same transaction as settlement. */
+export interface AssistMessagePreviewRow {
+  readonly message_id: string;
+  readonly revision: bigint;
+  readonly preview_text: string;
+  readonly truncated: boolean;
+  readonly updated_at: Date;
+}
+
+/** Disposable prefix for one current DRAFT claim and one actual model call. */
+export interface RunDraftPreviewRow {
+  readonly run_id: string;
+  readonly step_attempt_id: string;
+  readonly attempt_claim_epoch: bigint;
+  readonly run_worker_epoch: bigint;
+  readonly worker_id: string;
+  readonly invocation_epoch: bigint | null;
+  readonly model_call_id: string;
+  readonly revision: bigint;
+  readonly preview_text: string;
+  readonly truncated: boolean;
+  readonly updated_at: Date;
+}
+
+/** One actual invocation; STARTED is an unknown outcome after process loss. */
+export interface ModelCallRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly kind: 'DRAFT' | 'SEMANTIC_CHECK' | 'ASSIST';
+  readonly step_attempt_id: string | null;
+  readonly assist_message_id: string | null;
+  readonly manifest_id: string | null;
+  readonly criterion_id: string | null;
+  readonly check_attempt: number | null;
+  readonly provider: string;
+  readonly model: string;
+  readonly config_fingerprint: string;
+  readonly input_sha256: string | null;
+  readonly read_operation_id: string | null;
+  readonly read_invocation_id: string | null;
+  readonly provider_request_id: string | null;
+  readonly status: 'STARTED' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+  readonly usage_input_tokens: number | null;
+  readonly usage_output_tokens: number | null;
+  readonly budget_reserved_tokens: number | null;
+  readonly error_kind: string | null;
+  readonly started_at: Date;
+  readonly settled_at: Date | null;
+}
+
+export interface AssistProposalRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly session_id: string;
+  readonly message_id: string;
+  readonly kind: AssistProposalKind;
+  readonly project_id: string | null;
+  readonly task_id: string | null;
+  readonly target_type: 'TASK' | 'PROJECT';
+  readonly target_id: string;
+  readonly base_revision: bigint;
+  readonly base_acceptance_revision: bigint | null;
+  readonly payload: JsonObject;
+  readonly payload_hash: string;
+  readonly skill_sha256: string | null;
+  readonly skill_output_sha256: string | null;
+  readonly status: AssistProposalStatus;
+  readonly decision: JsonObject | null;
+  readonly created_at: Date;
+  readonly decided_at: Date | null;
+  readonly updated_at: Date;
+}
+
 /** Kysely 的表名映射；Repository 使用显式 SQL，因此这里主要用于结果类型与后续查询构建。 */
 export interface RelayDatabaseSchema {
+  model_calls: ModelCallRow;
+  assist_sessions: AssistSessionRow;
+  assist_messages: AssistMessageRow;
+  assist_message_previews: AssistMessagePreviewRow;
+  run_draft_previews: RunDraftPreviewRow;
+  assist_proposals: AssistProposalRow;
   knowledge_items: KnowledgeItemRow;
   knowledge_versions: KnowledgeVersionRow;
   memory_items: MemoryItemRow;
@@ -720,7 +906,7 @@ export interface RelayDatabaseSchema {
   decision_versions: DecisionVersionRow;
   rules: RuleRow;
   rule_versions: RuleVersionRow;
-  gateway_capabilities: { readonly capability_key: GatewayCapability; readonly adapter_kind: 'FAKE'; readonly effect_kind: 'READ' | 'WRITE' };
+  gateway_capabilities: { readonly capability_key: GatewayCapability; readonly adapter_kind: 'FAKE' | 'REAL'; readonly effect_kind: 'READ' | 'WRITE' };
   gateway_connections: GatewayConnectionRow;
   gateway_connection_capabilities: { readonly connection_id: string; readonly capability_key: GatewayCapability };
   gateway_permission_policies: GatewayPermissionPolicyRow;
@@ -735,6 +921,8 @@ export interface RelayDatabaseSchema {
   workspaces: WorkspaceRow;
   workspace_execution_authority: WorkspaceExecutionAuthorityRow;
   projects: ProjectRow;
+  project_view_configurations: ProjectViewConfigurationRow;
+  project_blueprint_proposals: ProjectBlueprintProposalRow;
   goals: GoalRow;
   project_goals: ProjectGoalRow;
   tasks: TaskRow;
@@ -753,11 +941,13 @@ export interface RelayDatabaseSchema {
   state_artifact_refs: StateArtifactRefRow;
   command_receipts: CommandReceiptRow;
   activity_records: ActivityRecordRow;
+  artifact_lineage_edges: ArtifactLineageEdgeRow;
   runs: RunRow;
   run_events: RunEventRow;
   run_commands: RunCommandRow;
   run_command_outbox: RunCommandOutboxRow;
   run_invocations: RunInvocationRow;
+  run_effect_actions: RunEffectActionRow;
   execution_contracts: ExecutionContractRow;
   run_steps: RunStepRow;
   step_attempts: StepAttemptRow;

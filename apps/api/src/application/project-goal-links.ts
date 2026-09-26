@@ -112,6 +112,7 @@ export async function linkProjectGoal(
 
       await repositories.activities.insertActivityRecord({
         id: randomUUID(),
+        workspaceId: project.workspace_id,
         actorKind: 'HUMAN',
         actorRef: LOCAL_ACTOR_REF,
         commandId: input.commandId,
@@ -231,6 +232,7 @@ export async function unlinkProjectGoal(
 
       await repositories.activities.insertActivityRecord({
         id: randomUUID(),
+        workspaceId: project.workspace_id,
         actorKind: 'HUMAN',
         actorRef: LOCAL_ACTOR_REF,
         commandId: input.commandId,

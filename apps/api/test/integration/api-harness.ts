@@ -230,6 +230,7 @@ export function baseEnvironment(input: {
   bearerToken: string;
   dataRoot: string;
   databaseUrl?: string;
+  databasePoolMax?: number;
 }): Record<string, string | undefined> {
   return {
     ...process.env,
@@ -238,7 +239,7 @@ export function baseEnvironment(input: {
     RELAY_API_ALLOWED_ORIGINS: input.allowedOrigin,
     RELAY_API_BEARER_TOKEN: input.bearerToken,
     RELAY_DB_URL: input.databaseUrl ?? requireTestDatabaseUrl(),
-    RELAY_DB_POOL_MAX: '4',
+    RELAY_DB_POOL_MAX: String(input.databasePoolMax ?? 4),
     RELAY_DB_CONNECT_TIMEOUT_MS: '2000',
     RELAY_DATA_ROOT: input.dataRoot,
     RELAY_LOG_LEVEL: 'info',
@@ -318,7 +319,8 @@ export interface TestApi {
 }
 
 /** 启动一个真实 API 进程（真实监听端口 + 真实 PostgreSQL），并返回带默认 Host/Bearer 的客户端。 */
-export async function startTestApi(options: { databaseUrl?: string } = {}): Promise<TestApi> {
+export async function startTestApi(options: { databaseUrl?: string;
+  databasePoolMax?: number } = {}): Promise<TestApi> {
   const port = await pickFreePort();
   const allowedOrigin = `http://127.0.0.1:${await pickFreePort()}`;
   const bearerToken = randomBytes(32).toString('hex');

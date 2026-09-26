@@ -8,6 +8,7 @@ import {
 } from '../../src/workflow/check-plan.js';
 import {
   hasChecker,
+  ModelSemanticChecker,
   resolveChecker,
   resolveCheckerForScenario,
 } from '../../src/workflow/checkers.js';
@@ -67,14 +68,15 @@ function check(
   fakeScenario?: string,
 ): { readonly result: string; readonly evidence: Record<string, unknown> } {
   const checker = resolveCheckerForScenario(entry, fakeScenario);
-
-  return checker.check({
+  const outcome = checker.check({
     entry,
     content,
     artifactVersionId: '22222222-2222-2222-2222-222222222222',
     contentHashHex: 'ab'.repeat(32),
     ...(fakeScenario === undefined ? {} : { fakeScenario }),
   });
+  if (outcome instanceof Promise) throw new Error('unexpected async checker outcome');
+  return outcome;
 }
 
 test('markdown-structure-v1 only judges the required structure', () => {
@@ -136,4 +138,54 @@ test('the registry resolves by id and version and refuses unregistered pairs', (
   assert.equal(hasChecker('markdown-structure-v1', '2'), false);
   assert.equal(resolveChecker('markdown-structure-v1', '1')?.id, 'markdown-structure-v1');
   assert.equal(resolveChecker('unknown-checker', '1'), undefined);
+});
+
+test('semantic-model-v1 maps model verdicts and treats evaluation failures as ERROR', async () => {
+  const entry: CheckPlanEntry = {
+    criterionId: 'rule:semantic:v1', statement: '候选必须给出明确结论', required: true,
+    method: 'SEMANTIC', severity: 'HARD', checkerId: 'semantic-model-v1',
+    checkerVersion: '1', targetSpec: { severity: 'HARD' },
+  };
+  const base = { entry, artifactVersionId: '3', contentHashHex: 'cd'.repeat(32) };
+
+  const checker = new ModelSemanticChecker(async ({ statement, content }) => {
+    assert.equal(statement, '候选必须给出明确结论');
+    assert.ok(content.includes('结论'));
+    return { verdict: 'PASS', reason: '陈述满足', providerRequestId: 'req-1',
+      usage: { inputTokens: 12, outputTokens: 8 } };
+  });
+  const passed = await checker.check({ ...base, content: '## 结论\n明确' });
+  assert.equal(passed.result, 'PASS');
+  const evidence = passed.evidence as { fake: boolean; usage: { input_tokens: number };
+    provider_request_id: string };
+  assert.equal(evidence.fake, false);
+  assert.equal(evidence.usage.input_tokens, 12);
+  assert.equal(evidence.provider_request_id, 'req-1');
+
+  const failed = await new ModelSemanticChecker(async () => ({
+    verdict: 'FAIL', reason: '陈述未满足', providerRequestId: 'req-2',
+    usage: { inputTokens: 10, outputTokens: 5 } })).check({ ...base, content: '没有结论' });
+  assert.equal(failed.result, 'FAIL');
+
+  const uncertain = await new ModelSemanticChecker(async () => ({
+    verdict: 'UNCERTAIN', reason: '依据不足', providerRequestId: 'req-3',
+    usage: { inputTokens: 10, outputTokens: 5 } })).check({ ...base, content: '含糊' });
+  assert.equal(uncertain.result, 'UNCERTAIN');
+
+  const errored = await new ModelSemanticChecker(async () => {
+    throw new Error('model timeout');
+  }).check({ ...base, content: '任意' });
+  assert.equal(errored.result, 'ERROR');
+  assert.equal((errored.evidence as { reason: string }).reason, 'SEMANTIC_EVALUATION_FAILED');
+
+  const responseError = Object.assign(new Error('invalid verdict'), {
+    providerRequestId: 'req-invalid',
+    usage: { inputTokens: 7, outputTokens: null },
+  });
+  const invalid = await new ModelSemanticChecker(async () => {
+    throw responseError;
+  }).check({ ...base, content: '任意' });
+  assert.equal(invalid.result, 'ERROR');
+  assert.deepEqual(invalid.evidence.usage, { input_tokens: 7, output_tokens: null });
+  assert.equal(invalid.evidence.provider_request_id, 'req-invalid');
 });

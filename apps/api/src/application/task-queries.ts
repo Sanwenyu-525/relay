@@ -61,6 +61,9 @@ export interface TaskSummaryDto {
   readonly mode: string;
   readonly revision: string;
   readonly acceptance_revision: string;
+  readonly priority: TaskRow['priority'];
+  readonly due_local_date: string | null;
+  readonly timezone: string | null;
   readonly executor: TaskExecutorDto;
   readonly current_completion_id: string | null;
   readonly waiting_reason: string | null;
@@ -90,9 +93,12 @@ export async function readTaskDetail(
   const goalAlignment = await readGoalAlignment(repositories, task);
   const dependencies = await repositories.tasks.listDependencies(task.id);
   const waitingReason = await currentRunWaitReason(repositories, task);
+  const archived = task.project_id !== null &&
+    (await repositories.projects.readProject(task.project_id))?.archived_at !== null;
 
   return {
-    ...summarize(task, readiness.blockingTaskIds, readiness.unresolvedBlockerIds, readiness.requiredCriterionCount, waitingReason),
+    ...summarize(task, readiness.blockingTaskIds, readiness.unresolvedBlockerIds,
+      readiness.requiredCriterionCount, waitingReason, archived),
     acceptance: buildAcceptance(task, acceptance, criteria),
     goal_alignment: goalAlignment,
     dependencies: dependencies.map((dependency) => ({
@@ -107,9 +113,13 @@ export async function readTaskDetail(
 export async function listTasksSummary(
   repositories: Repositories,
   tasks: readonly TaskRow[],
-  projectId: string | null,
+  projectId: string | null | undefined,
 ): Promise<readonly TaskSummaryDto[]> {
   const readiness = await loadReadinessForTasks(repositories, tasks, projectId);
+  const archivedByProject = new Map<string, boolean>();
+  for (const id of new Set(tasks.map((task) => task.project_id).filter((id): id is string => id !== null))) {
+    archivedByProject.set(id, (await repositories.projects.readProject(id))?.archived_at !== null);
+  }
 
   return Promise.all(tasks.map(async (task) => {
     const facts = readiness.get(task.id);
@@ -120,22 +130,24 @@ export async function listTasksSummary(
       facts?.unresolvedBlockerIds ?? [],
       facts?.requiredCriterionCount ?? 0,
       await currentRunWaitReason(repositories, task),
+      task.project_id !== null && archivedByProject.get(task.project_id) === true,
     );
   }));
 }
 
 export interface ListTasksInput {
   readonly workspaceId: string;
-  /** 与 inbox 互斥：project_id 为 null 且 inbox=true 表示没有 Project 的人工事项。 */
-  readonly projectId: string | null;
+  /** undefined 表示显式 scope=all；null 且 inbox=true 表示没有 Project 的人工事项。 */
+  readonly projectId: string | null | undefined;
   readonly limit: number;
-  readonly before: { readonly createdAt: Date; readonly id: string } | null;
+  readonly before: { readonly createdAt: Date | string; readonly id: string } | null;
 }
 
 export interface ListTasksResult {
   readonly items: readonly TaskSummaryDto[];
   /** 下一页游标；null 表示当前页已是最后一页。 */
-  readonly next_cursor: { readonly createdAt: Date; readonly id: string } | null;
+  readonly next_cursor: { readonly createdAt: Date; readonly exactCreatedAt: string;
+    readonly id: string } | null;
 }
 
 export async function listTasks(
@@ -156,7 +168,9 @@ export async function listTasks(
   return {
     items: await listTasksSummary(repositories, page, input.projectId),
     next_cursor:
-      hasMore && last !== undefined ? { createdAt: last.created_at, id: last.id } : null,
+      hasMore && last !== undefined ? {
+        createdAt: last.created_at, exactCreatedAt: last.cursor_created_at, id: last.id,
+      } : null,
   };
 }
 
@@ -177,6 +191,7 @@ function summarize(
   unresolvedBlockerIds: readonly string[],
   requiredCriterionCount: number,
   waitingReason: string | null,
+  archived: boolean,
 ): TaskSummaryDto {
   return {
     id: task.id,
@@ -186,6 +201,9 @@ function summarize(
     mode: task.mode,
     revision: toDecimalString(task.revision),
     acceptance_revision: toDecimalString(task.acceptance_revision),
+    priority: task.priority,
+    due_local_date: task.due_local_date,
+    timezone: task.due_timezone,
     executor: {
       kind: task.executor_kind,
       // P05：AI 执行权指向当前 Run；HUMAN 时必须为 null（与 ck_tasks_executor 一致）。
@@ -197,7 +215,7 @@ function summarize(
     waiting_reason: waitingReason,
     blocking_task_ids: [...blockingTaskIds].sort(),
     unresolved_blocker_ids: [...unresolvedBlockerIds],
-    allowed_actions: taskAllowedActions({
+    allowed_actions: archived ? [] : taskAllowedActions({
       status: task.status,
       satisfiable: requiredCriterionCount > 0
         && blockingTaskIds.length === 0

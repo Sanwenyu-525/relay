@@ -11,7 +11,7 @@ import type {
 import type { JsonObject } from '../infrastructure/json.js';
 import { requireRow } from '../shared/sql-rows.js';
 
-const REQUEST_COLUMNS = sql.raw('id, workspace_id, project_id, task_id, run_id, verification_session_id, criterion_id, operation_id, kind, reason, status, revision, target_hash, target, evidence, effect, allowed_decisions, expires_at, created_at, decided_at');
+const REQUEST_COLUMNS = sql.raw('id, workspace_id, project_id, task_id, run_id, verification_session_id, criterion_id, operation_id, import_job_id, kind, reason, status, revision, target_hash, target, evidence, effect, allowed_decisions, expires_at, created_at, decided_at');
 const DECISION_COLUMNS = sql.raw('id, review_id, command_id, decision, feedback, retry_budget, target_hash, effect, decided_at');
 
 export interface NewReviewRequest {
@@ -23,6 +23,7 @@ export interface NewReviewRequest {
   readonly verificationSessionId: string | null;
   readonly criterionId: string | null;
   readonly operationId: string | null;
+  readonly importJobId: string | null;
   readonly kind: ReviewKind;
   readonly reason: string;
   readonly targetHash: Buffer;
@@ -40,11 +41,11 @@ export class ReviewRepository {
     const result = await sql<ReviewRequestRow>`
       insert into review_requests (
         id, workspace_id, project_id, task_id, run_id, verification_session_id,
-        criterion_id, operation_id, kind, reason, target_hash, target,
+        criterion_id, operation_id, import_job_id, kind, reason, target_hash, target,
         evidence, effect, allowed_decisions, expires_at
       ) values (
         ${input.id}, ${input.workspaceId}, ${input.projectId}, ${input.taskId}, ${input.runId},
-        ${input.verificationSessionId}, ${input.criterionId}, ${input.operationId},
+        ${input.verificationSessionId}, ${input.criterionId}, ${input.operationId}, ${input.importJobId},
         ${input.kind}, ${input.reason}, ${input.targetHash}, ${JSON.stringify(input.target)}::jsonb,
         ${JSON.stringify(input.evidence)}::jsonb, ${JSON.stringify(input.effect)}::jsonb,
         ${sql`array[${sql.join(input.allowedDecisions)}]::text[]`}, ${input.expiresAt}

@@ -61,11 +61,15 @@ Focus 保存日期、时区、目标类型（Goal/Project/Task）与目标 ID，
 
 每条建议返回 reason_codes 及依据（例如 PINNED、DUE_TODAY、PROJECT_NEXT_ACTION），界面用固定模板呈现。“AI 建议优先”不能成为没有来源的理由。
 
+2026-09-26 的 P13 后端开发切片已把上述规则接入 `GET /today`：Task 的 priority 与 due_local_date/timezone 是可清空的显式元数据，更新只推进 Task revision，不推进 acceptance_revision；Pin/Later 与日期 Focus 是独立于 Task 的用户选择，以 Workspace 级 `selection_revision` 串行化命令。查询在 PostgreSQL 的可重复读快照内读取 Workspace Task、依赖/blocker、Project Next Action、当前 Goal 关联和选择事实，不保存推荐结果。`waiting_items` 包含不合格的活动 Task，`blocked_pinned_items` 是其中 Pin 项的子集；AI 占有、依赖、blocker、Later 和未就绪均带真实 reason_codes/evidence_refs。Focus 以 Workspace + 本地日期唯一，原时区与目标即使和查询时区不同也在响应中保留；仅日期和时区均匹配时对合格候选排序。Later 截止与查询日期的观察点分别取各自 IANA 时区当地 00:00 对应的绝对时刻；查询不运行后台午夜改写。此段只表示后端开发自检范围，尚非 M05 或桌面验收。
+
 ## 5. Goal 和项目迁移
 
 Goal 只有标题、说明、生命周期和显式 Project 关联，不做百分比/KPI 引擎。Task goal_alignment_mode 使用 INHERIT/EXPLICIT；EXPLICIT 可以是空集合，不能用“空集合”歧义表示继承。
 
 解除 Project–Goal 时先查询影响；提交包含 impacted_task_ids 与处理方式，并在锁下重新核对。列表已变化返回 409，不静默清理新增引用。Project 归档阻止新 Delegate，保留历史浏览；存在活动 Run/UNKNOWN 先拒绝归档并显示阻塞。
+
+2026-09-26 归档协议分两段落地，取舍见 [ADR-011](../decisions/ADR-011-project-archive-serialization.md)。A 段在 Project、Task、State、Goal 关联、Information/Rule、Assist、Blueprint、View、Gateway、Import、Today 与 Run/Review 的业务写事务加入 Project 行 `FOR KEY SHARE` 可写栅栏；归档字段非空时返回 `PROJECT_ARCHIVED`。模型调用的 STARTED 预约也在短事务内先取该栅栏，再锁 Run 或 AssistSession 预算范围；事务提交后才外呼 Provider。B 段 `ArchiveProject` 先取同一行 `FOR UPDATE`，在锁内读取持久在途事实；HUMAN 活动 Task、AI 占有、非终态 Run/投递/运行中的 Step/尝试/验证、Gateway 操作与调用、UNKNOWN、资源 claim、Import、Assist/STARTED 模型调用、OPEN Review 任一未安全收敛即返回 `PROJECT_ARCHIVE_BLOCKED`，不会因租约过期推断进程已停止。检查通过后仅更新 Project 的 `archived_at/revision`，与审计、命令回执同事务。归档不取消任务、重试动作或清除历史。文件产物发布前须取得栅栏；模型、网页和工具调用仍在短事务外。历史 Project/Task/Assist 读取保留，归档 Project 的 Task 不给可执行动作，Today 不列为候选。原有跨模块写命令沿 A 段栅栏在归档提交后拒绝。
 
 Task 移动 Project 仅允许 HUMAN、无活动 Run、无未知动作、非 DONE；清理 Next Action/显式关联与 State 选择，由一次显式用例完成。历史 Run/产物来源不改写；当前跨项目资料引用重新授权。
 
@@ -76,6 +80,10 @@ Activity 是用户业务事件：创建任务、改验收、请求控制、人�
 Artifact lineage_edges 使用 child_version_id、relation、typed_parent_ref，关系只开放 DERIVED_FROM、REVISED_FROM、GENERATED_BY、VERIFIED_BY、ACCEPTED_BY。产物版本关系拒绝自环与循环；Run/资料可共享引用，多父合法。界面以直接父来源和执行路径展开，不做通用图谱编辑器。
 
 查询支持 project/task/run 和时间过滤、游标分页；展示“决定已批准”与“动作已成功”分别引用 Review/Gateway。用户完成凭据可一路跳转到验收、产物、资料版本；正文已移除时显示 unavailable，不用当前正文替代历史。
+
+2026-09-26 M05/P15 后端开发切片已提供只读 Activity、Run Trace 与单个 ArtifactVersion 的直接父来源查询。Activity 使用原业务事务里的审计行和 Workspace 归属做稳定倒序分页，公开投影只选固定摘要及经当前 Workspace 核对的实体引用；原 `fact_refs`、自由文本和凭据不出接口。Trace 从现有 Step/Attempt、模型调用、Manifest、Verification、Review、Gateway 与受管效果事实装配；Review 决定与操作/效果结算分别展示，不从批准推断成功。Manifest 的历史来源须在读取时重新核对当前作用域、确切版本和正文可用性；不可读来源只显示 `UNAVAILABLE`，不返回原引用或用最新版本替代。
+
+Lineage 只在明确的保存、验证和完成事务写入确切 typed relation；`VERIFIED_BY` 对应实际 VerificationTarget，`ACCEPTED_BY` 对应完成凭据接受的版本。查询仅展示直接父边，源内容缺失或当前不可读时保留边的关系与 `UNAVAILABLE` 状态，隐藏父 ID。数据库在同 Workspace 事务锁下拒绝跨域、自环和 ArtifactVersion 环。`DERIVED_FROM` 虽为允许的关系，目前没有自动推断写入者；不能把资料或相似内容推测成已确认来源。本切片的真实 PostgreSQL 回归属于开发自检，独立模块与 Windows 桌面验收仍后置。
 
 ## 7. 验收
 

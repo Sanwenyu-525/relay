@@ -1,0 +1,38 @@
+// Opt-in real-model connectivity probe. Reads apps/api/.env via --env-file.
+// Never prints the API key. Usage: node model-probe.mjs [--bad-key] [--cancel]
+import { OpenAiCompatibleModelPort } from 'file:///D:/Develop/Relay-Agent/apps/api/dist/src/workflow/openai-compatible-model-port.js';
+import { readModelPortConfig } from 'file:///D:/Develop/Relay-Agent/apps/api/dist/src/workflow/model-port-config.js';
+
+const mode = process.argv[2] ?? '--connect';
+const config = readModelPortConfig(process.env);
+if (config === undefined) throw new Error('model port not configured');
+
+const controller = new AbortController();
+const signal = mode === '--cancel' ? controller.signal : undefined;
+if (mode === '--cancel') queueMicrotask(() => controller.abort());
+
+const port = new OpenAiCompatibleModelPort(
+  mode === '--bad-key' ? { ...config, apiKey: 'sk-invalid-probe' } : config,
+);
+const startedAt = Date.now();
+try {
+  const result = await port.generate({
+    manifest: {
+      task: { id: 'probe', title: '连通性探针' },
+      contract: { objective: '用一句话说明连通验证成功' },
+      sources: [{ kind: 'NOTE', source_ref: 'probe:1', version: '1',
+        content: '这是一条探针资料：仅含本句。' }],
+    },
+    outputSchema: 'markdown-draft-v1',
+    ...(signal === undefined ? {} : { signal }),
+  });
+  const summary = result.kind === 'CONTENT'
+    ? { kind: result.kind, providerRequestId: result.providerRequestId,
+        usage: result.usage, contentPreview: result.content.slice(0, 120) }
+    : result;
+  console.log(JSON.stringify({ mode, latencyMs: Date.now() - startedAt, summary }));
+} catch (error) {
+  console.log(JSON.stringify({ mode, latencyMs: Date.now() - startedAt,
+    error: error instanceof Error ? `${error.name}: ${String(error.message).slice(0, 200)}` : 'unknown' }));
+  process.exitCode = mode === '--bad-key' ? 0 : 3;
+}

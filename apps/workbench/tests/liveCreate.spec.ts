@@ -142,6 +142,8 @@ describe("live 创建闭环", () => {
   it("创建任务：仅创建与 ready，结果链接直达真实任务详情，不自动创建 Run", async () => {
     activate();
     const { calls } = stubFetch(async (url, method, body) => {
+      if (method === "GET" && url === `${BASE_URL}/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}`)
+        return jsonResponse(200, { id: PROJECT_ID, title: "真实项目", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
       if (method === "GET" && url.startsWith(`${tasksUrl}?`)) {
         // 依赖候选读取：返回空列表即可。
         return jsonResponse(200, { items: [], next_cursor: null });

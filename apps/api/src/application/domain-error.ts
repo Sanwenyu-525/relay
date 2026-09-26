@@ -1,4 +1,5 @@
 import type { FieldError } from '../shared/field-error.js';
+import type { ProjectArchiveBlockerReason } from '../project/project-repository.js';
 
 /**
  * 应用层领域错误。
@@ -32,6 +33,11 @@ export interface DomainConflict {
   readonly criterionIds?: readonly string[];
   readonly artifactVersionIds?: readonly string[];
   readonly artifactKinds?: readonly string[];
+  /** Assist 会话/消息/提案的冲突定位（M04）。 */
+  readonly sessionId?: string;
+  readonly messageId?: string;
+  readonly proposalId?: string;
+  readonly blockingReasons?: readonly ProjectArchiveBlockerReason[];
 }
 
 export interface DomainErrorOptions {
@@ -83,6 +89,35 @@ export function resourceNotFound(entity: string): DomainError {
     detail: `${entity}在当前作用域中不可见或不存在。`,
     retryable: false,
     retryAction: 'NONE',
+  });
+}
+
+/** Project 历史仍可读取，但普通业务写入必须重新选择未归档的工作范围。 */
+export function projectArchived(): DomainError {
+  return new DomainError({
+    code: 'PROJECT_ARCHIVED',
+    status: 409,
+    type: '/problems/project-archived',
+    title: '项目已归档',
+    detail: '该 Project 已归档，不能继续写入业务事实。',
+    retryable: false,
+    retryAction: 'NONE',
+  });
+}
+
+/** Archive does not infer that an expired lease stopped its owner or settled an external effect. */
+export function projectArchiveBlocked(
+  blockingReasons: readonly ProjectArchiveBlockerReason[],
+): DomainError {
+  return new DomainError({
+    code: 'PROJECT_ARCHIVE_BLOCKED',
+    status: 409,
+    type: '/problems/project-archive-blocked',
+    title: '项目仍有未安全结束的工作',
+    detail: '先处理在途执行、审批或未知外部效果，再重新检查归档条件。',
+    retryable: false,
+    retryAction: 'REFRESH_AND_REDECIDE',
+    conflict: { blockingReasons },
   });
 }
 

@@ -26,6 +26,7 @@
 | 人工 Inbox | /review-inbox | 无独立写入口；分发至对应 Review/Proposal 命令 | 返回 item_kind、源 ID、目标/版本、阻塞性及 allowed_actions，不复制决定状态 |
 | Activity | /activities?project_id=…&task_id=… | 无 | 有界分页、脱敏 |
 | Trace / Lineage | /runs/{id}/trace；/artifact-versions/{id}/lineage | 无 | 只读引用，不暴露隐藏思考或密钥 |
+| 完成凭据 | /completion-records/{id} | 无 | 读取确切历史验收、人工判断或验证会话和产物版本；来源缺失显式不可用 |
 | Connection | /connections、/{id} | /connections；/{id}/test、/disable | test 只做指定健康检查，不测试写副作用；secret_ref 不返回密钥 |
 | Permission | /permission-policies、/{id}/versions | /permission-policies；/{id}/versions | 不由批准动作修改，遵守 authority 锁 |
 | 资源 | /managed-resources | /managed-resources；/{id}/disable | 规范路径/重叠核验；存在 claim 不可直接停用并丢记录 |
@@ -62,17 +63,19 @@ ProposalDTO：id、kind、target_ref、base_revision、payload、target_hash、e
 
 ## 5. Skill 与蓝图提案
 
-2026-09-20，Proposed；未实现。Breaking Change：No（设计上添加可选 Skill 调用及新提案类型，保留现有请求路径和普通 Assist 行为；尚无已发布实现可做兼容实测）。正式 OpenAPI、严格客户端对新增 kind 的兼容与字段细节在 P12 前核验，不将本节当已发布 schema。
+2026-09-20 提出设计；2026-09-26 已有只读 Skill/Pack 注册与 Assist 调用、当前 Task Skill 建议接受/CheckPlan 准入预览、内置 View Owner 及 Project Blueprint 候选/Preview/Diff/原子 Apply 的后端开发自检。实际 HTTP 字段见[核心 API §10.31–10.34](http-command-contract.md)。Breaking Change：No（新增端点与可选 Skill 输入；普通 Assist 请求/回执不变）。下列旧 `/proposals/{id}/accept` 方案未成为蓝图生产路由，以实际独立蓝图资源为准。
 
-- Assist 消息请求可选 `skill_ref`（id、version）和与该 Skill 匹配的类型化输入。服务端解析受信定义/摘要与依赖，不接受客户端授予的权限或任意路径。生成仍返回原 202/message_id，GET 原消息读取进度与提案引用，不新增 `/skill-runs`。
-- ProposalDTO 增加 `PROJECT_BLUEPRINT` 分支。该分支包含 project 目标、候选 payload_hash、依赖版本集合、Skill 来源、蓝图变更和单列后续配置建议；多对象基线必须由服务端保存并逐一校验，不能以单个 Project revision 代替 State/View revision。候选 hash 为该分支 target_hash 的绑定依据，不维护两个独立内容摘要。
-- 沿用 `POST /proposals/{id}/accept`，携带 command_id、预览时的 target_hash 和必需 expected_revision，固定分发 `ApplyProjectBlueprint`。请求不夹带任意补丁或未预览的选中项；修改先经类型化候选生成入口产生新提案。成功回执返回 project/state/view revision、新 Task ID 与应用来源引用；不返回“Rules 已启用”或“Run 已启动”。
-- 拒绝走原 `/reject`。首次接受需重新核对权限、来源、注册定义及各对象基线；过期/版本冲突使用 409 REVISION_CONFLICT，未知注册引用/结构非法使用 422，权限拒绝沿用核心错误。错误不能触发局部应用或自动删掉非法字段后重试。
+- 已实现的 Assist 消息请求可选 `skill_ref`（id、version）和 `skill_input`。服务端解析随包注册的受信定义/摘要与依赖，不接受客户端授予的权限或任意路径；生成仍返回原 202/message_id，GET 原消息读取状态和类型化只读/建议输出，不新增 `/skill-runs`。当前 Task Skill 可产生待人工确认的 `TASK_CONTRACT_CHANGE`/`VERIFICATION_PLAN_CHANGE`，普通 Assist 与 Project Resume 不因生成而写业务事实。
+- 当前蓝图使用独立 `POST/GET /projects/{project_id}/blueprint-proposals` 与详情 GET。Proposal 固定 candidate/baseline/source/hash，服务端 Diff 显示 Goal、State、局部新 Task、解析后的 View pages；历史初稿提出的通用 `PROJECT_BLUEPRINT` AssistProposal 分支并未实施。生成修改需新建候选，可显式替代仍待确认的前一候选。
+- 实际应用路由是 `POST /projects/{project_id}/blueprint-proposals/{proposal_id}/apply`，携带 command_id、candidate_sha256 与 Project/State/View 三个 expected revision，不夹带未预览补丁。成功回执返回三者新 revision、新 Task 局部键到真实 ID 映射与应用来源；不返回“Rules 已启用”或“Run 已启动”。
+- 实际拒绝路由是同资源的 `POST .../{proposal_id}/reject`。首次接受重核当前来源、冻结定义/Pack 与各对象基线；冲突 409，未知注册引用/结构非法 422，跨 Workspace 不可见 404。错误回滚所有本地效果，不自动删掉非法字段重试。
 
 同 command_id 同内容按既有回执重放；另一个 command_id 再接受已 ACCEPTED 提案返回其既有应用引用，不再次创建任务，且请求目标 hash 必须匹配。同 ID 不同内容仍为 COMMAND_ID_REUSED；拒绝/过期提案不能被新 command_id 复活。应用协议以 [Skill 专题](../architecture/relay-skills.md)为准。
 
-首批闭环 Skill 沿用同一 Assist skill_ref 入口：任务定义和验收建议复用 Task 类型化提案，由既有验收/配置命令接受；Project Resume 返回带来源的只读消息。Skill 输出不是有效 ExecutionContract/CheckPlan，Delegate 仍独立核对并冻结。Decision 候选后续分发 Information 入口，State 推断复用 state_proposals。修复复用原 Run 步骤，Handoff 复用控制命令，不新增可直接写有效检查计划、执行者或确定性 delta 的端点。具体提案字段、原 Task 提案对这些输入的覆盖和组合交互回执在 P12 OpenAPI 冻结前补齐；本次无新已发布端点，Breaking Change：No。
+首批 Skill 沿用同一 Assist `skill_ref` 入口：Task Definition 与 Verification Plan 返回严格类型化的建议消息，Project Resume 返回生成时重新读取当前 State/Task/有效 Decision/Verification 等事实与版本引用的只读消息；没有比较基线时不生成“自上次以来”的变化。当前 Task 建议由 `POST /assist-proposals/{id}/accept` 携带 Task 与 acceptance 双版本及 payload_hash，交 Task Owner 增加新验收版本；原 `PROPOSE_TASK` 的 `TASK_DEFINITION` 仍只创建新 Task。`goal-to-project-blueprint@1.0.0` 绑定 Project Assist，会生成原消息类型化输出并在同一结算事务建立独立 Blueprint 候选，仍须另行人工确认摘要与基线后 Apply。`verification-plan@1.0.0` 是只读历史，新建议使用 1.1.0；`task-to-execution-contract@1.1.0` 可建议 Expected Result 描述，服务端保留旧产物种类和其他约束。Skill 输出不是有效 ExecutionContract/CheckPlan，Delegate 仍独立核对并冻结。Decision 候选后续分发 Information 入口，State 推断复用 state_proposals。修复复用原 Run 步骤，Handoff 复用控制命令，不新增可直接写有效检查计划、执行者或确定性 delta 的端点。本段 Breaking Change：No。
 
-扩展模型补充（Proposed）：Pack 选择与 Profile 引用只能使用服务端注册身份；最终解析版本/摘要由服务端返回并保存，不能由客户端声称已授权或兼容。提案预览的影响说明绑定目标与依赖版本，应用时重核；规则/执行配置写入与视图应用仍分开，独立命令分别返回回执。V1 不新增 SKILL_INSTALL/PACK_UPDATE 通用写端点或任意 payload 分发器。轻量来源查询复用 Manifest/Trace 读取能力，须对历史内容和排除信息重新鉴权。精确 Pack 来源字段及预览 DTO 在 D 阶段 OpenAPI 冻结前落实；本次无已发布接口改动，Breaking Change：No，不代表已做客户端兼容实测。
+扩展模型补充：Pack 选择与 Profile 引用只能使用服务端注册身份；蓝图候选 `source.pack` 保存解析版本、摘要和成员清单，不能由客户端声称已授权或兼容。提案预览绑定目标与依赖版本，应用时重核；规则/执行配置不随蓝图静默生效，视图变更由 View Owner 同事务处理。V1 不新增 SKILL_INSTALL/PACK_UPDATE 通用写端点或任意 payload 分发器。轻量来源查询复用 Manifest/Trace 读取能力，须对历史内容和排除信息重新鉴权。通用 Pack 配置应用仍为后续设计；本次 Breaking Change：No，不代表已做客户端兼容实测。
 
-P11 已新增 Run 下 `GET /context-manifests` 与 `GET /context-manifests/{manifest_id}` 的只读来源投影，当前字段和权限语义以[HTTP 契约 §10.13](http-command-contract.md)为准。Profile 仅有服务端固定 `run-default@1`；Skill/Pack、Assist 与显式资料选择尚无可用请求入口，不能从 Manifest 中的 `skill:null` 推断已安装能力。Breaking Change: No（只读模块端点增量）。
+P11 已新增 Run 下 `GET /context-manifests` 与 `GET /context-manifests/{manifest_id}` 的只读来源投影，当前字段和权限语义以[HTTP 契约 §10.13](http-command-contract.md)为准。Profile 仅有服务端固定 `run-default@1`；Assist、显式资料选择、首批 Skill/Pack 只读入口、当前 Task Skill 建议接受及 Blueprint 原子 Apply 已分别落地，不能从历史 Manifest 中的 `skill:null` 推断当前注册能力。通用 Pack 配置应用仍待做。Breaking Change: No。
+
+P15 的完成凭据详情已有独立只读 `GET /completion-records/{id}`；Task 的 `current_completion_id` 和 Lineage 的 `ACCEPTED_BY` 可指向此确切历史 ID。读取时重核当前 Workspace/Task 与受管内容，重开不删旧凭据，来源不可用不拿新版本代替。实际字段与错误见[HTTP 契约 §10.40](http-command-contract.md)。Breaking Change: No。

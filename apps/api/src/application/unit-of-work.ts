@@ -1,6 +1,8 @@
 import type { DbExecutor } from '../infrastructure/database.js';
 import { ActivityRecordRepository } from '../audit/activity-record-repository.js';
+import { AssistRepository } from '../assist/assist-repository.js';
 import { ArtifactRepository } from '../artifact/artifact-repository.js';
+import { LineageRepository } from '../artifact/lineage-repository.js';
 import { CompletionRepository } from '../completion/completion-repository.js';
 import { ProjectRepository } from '../project/project-repository.js';
 import { CommandReceiptRepository } from '../receipt/command-receipt-repository.js';
@@ -13,11 +15,16 @@ import { VerificationRepository } from '../verification/verification-repository.
 import { WorkspaceRepository } from '../workspace/workspace-repository.js';
 import { GatewayRepository } from '../gateway/gateway-repository.js';
 import { InformationRepository } from '../information/information-repository.js';
+import { TodayRepository } from '../today/today-repository.js';
+import { ViewRepository } from '../view/view-repository.js';
+import { BlueprintRepository } from '../blueprint/blueprint-repository.js';
 
 /** 同一连接上的模块写入口集合。用例只能通过这里跨模块协作，不直接拼 SQL。 */
 export interface Repositories {
   readonly activities: ActivityRecordRepository;
+  readonly assist: AssistRepository;
   readonly artifacts: ArtifactRepository;
+  readonly lineage: LineageRepository;
   readonly completions: CompletionRepository;
   readonly projects: ProjectRepository;
   readonly receipts: CommandReceiptRepository;
@@ -30,12 +37,17 @@ export interface Repositories {
   readonly workspaces: WorkspaceRepository;
   readonly gateway: GatewayRepository;
   readonly information: InformationRepository;
+  readonly today: TodayRepository;
+  readonly views: ViewRepository;
+  readonly blueprints: BlueprintRepository;
 }
 
 export function createRepositories(db: DbExecutor): Repositories {
   return {
     activities: new ActivityRecordRepository(db),
+    assist: new AssistRepository(db),
     artifacts: new ArtifactRepository(db),
+    lineage: new LineageRepository(db),
     completions: new CompletionRepository(db),
     projects: new ProjectRepository(db),
     receipts: new CommandReceiptRepository(db),
@@ -48,6 +60,9 @@ export function createRepositories(db: DbExecutor): Repositories {
     workspaces: new WorkspaceRepository(db),
     gateway: new GatewayRepository(db),
     information: new InformationRepository(db),
+    today: new TodayRepository(db),
+    views: new ViewRepository(db),
+    blueprints: new BlueprintRepository(db),
   };
 }
 

@@ -31,6 +31,7 @@ import {
   readTaskInWorkspace,
 } from './guards.js';
 import { normalizeIdSet, requireRevision, requireUuid } from './revisions.js';
+import { requireLocalDate, requireTimezone } from './local-calendar.js';
 import {
   loadTaskReadiness,
   readinessReasons,
@@ -112,6 +113,46 @@ export async function editTaskPresentation(
         factRefs: { title: updated.title },
       });
 
+      return summarize(updated);
+    },
+  });
+}
+
+/** Scheduling is a user fact on Task, independent of its acceptance version. */
+export async function setTaskPlanningMetadata(db: DbExecutor, input: {
+  readonly workspaceId: string; readonly taskId: string; readonly commandId: string;
+  readonly expectedRevision: string;
+  readonly priority: 'LOW' | 'NORMAL' | 'HIGH' | null;
+  readonly dueLocalDate: string | null; readonly timezone: string | null;
+}): Promise<CommandOutcome<TaskCommandResult>> {
+  const expectedRevision = requireRevision(input.expectedRevision, 'expected_revision');
+  if (input.priority !== null && !['LOW', 'NORMAL', 'HIGH'].includes(input.priority)) {
+    throw validationFailed([{ field: 'priority', message: 'must be LOW, NORMAL or HIGH' }]);
+  }
+  if ((input.dueLocalDate === null) !== (input.timezone === null)) {
+    throw validationFailed([{ field: 'due_local_date', message: 'date and timezone must be set or cleared together' }]);
+  }
+  const dueLocalDate = input.dueLocalDate === null ? null : requireLocalDate(input.dueLocalDate, 'due_local_date');
+  const timezone = input.timezone === null ? null : requireTimezone(input.timezone, 'timezone');
+  return runIdempotentCommand<TaskCommandResult>(db, {
+    scopeKey: httpCommandScopeKey(input.workspaceId), commandId: input.commandId,
+    commandType: 'SetTaskPlanningMetadata', target: { task_id: input.taskId },
+    body: { expected_revision: toDecimalString(expectedRevision), priority: input.priority,
+      due_local_date: dueLocalDate, timezone },
+    execute: async (repositories) => {
+      const task = await lockTaskInWorkspace(repositories, input.workspaceId, input.taskId);
+      requireRevisionMatch(task, expectedRevision);
+      const updated = await repositories.tasks.updatePlanningMetadata({
+        taskId: task.id, expectedRevision, priority: input.priority,
+        dueLocalDate, dueTimezone: timezone,
+      });
+      if (updated === undefined) throw revisionConflict({ entityType: 'TASK',
+        expectedRevision: toDecimalString(expectedRevision),
+        actualRevision: toDecimalString(task.revision) });
+      await recordActivity(repositories, { commandId: input.commandId,
+        projectId: updated.project_id, taskId: updated.id,
+        eventType: 'TASK_PLANNING_UPDATED',
+        factRefs: { priority: input.priority, due_local_date: dueLocalDate, timezone } });
       return summarize(updated);
     },
   });
@@ -309,7 +350,8 @@ export async function cancelTask(
           throw revisionConflict({ entityType: 'RUN', expectedRevision: toDecimalString(expectedRunRevision),
             actualRevision: toDecimalString(run.revision) });
         }
-        const control = await enqueueControlLocked(repositories, { task, run, type: 'CANCEL_TASK' });
+        const control = await enqueueControlLocked(repositories, { task, run,
+          type: 'CANCEL_TASK', commandId: input.commandId });
         const touched = await repositories.runs.touchRun(run.id, run.revision);
         if (touched === undefined) throw new Error('CancelTask control Run revision CAS failed');
         return { task_id: task.id, status: 'PENDING', revision: toDecimalString(task.revision),
@@ -723,8 +765,11 @@ async function recordActivity(
     readonly factRefs: JsonObject;
   },
 ): Promise<void> {
+  const task = await repositories.tasks.readTask(input.taskId);
+  if (task === undefined) throw new Error('activity Task missing in command transaction');
   await repositories.activities.insertActivityRecord({
     id: randomUUID(),
+    workspaceId: task.workspace_id,
     actorKind: 'HUMAN',
     actorRef: LOCAL_ACTOR_REF,
     commandId: input.commandId,

@@ -21,6 +21,7 @@ export type PlannedCheckerId =
   | 'markdown-structure-v1'
   | 'citation-exists-v1'
   | 'fake-semantic-v1'
+  | 'semantic-model-v1'
   | 'human-evidence-v1';
 
 export type PlannedSeverity = 'HARD' | 'RULE' | 'PREFERENCE' | 'SEMANTIC';
@@ -49,6 +50,8 @@ export interface FrozenCriterionInput {
   readonly required: boolean;
   readonly method: CriterionMethod;
   readonly targetSpec: JsonObject;
+  /** 显式检查器覆盖（如 HARD SEMANTIC 规则的真实语义检查器）；未给时按 method 映射。 */
+  readonly checkerId?: string | undefined;
 }
 
 export interface BuildCheckPlanInput {
@@ -81,14 +84,19 @@ export function buildCheckPlan(input: BuildCheckPlanInput): CheckPlan {
       throw new Error(`unregistered criterion method: ${criterion.method}`);
     }
 
+    // Only an explicit override (e.g. a HARD SEMANTIC rule whose delegate path
+    // verified the real checker is configured) may replace the method mapping.
+    const checkerId: PlannedCheckerId = criterion.checkerId !== undefined &&
+      isPlannedCheckerId(criterion.checkerId) ? criterion.checkerId : checker.id;
+
     return {
       criterionId: criterion.criterionId,
       statement: criterion.statement,
       required: criterion.required,
       method: criterion.method,
       severity: resolveSeverity(criterion),
-      checkerId: checker.id,
-      checkerVersion: checker.version,
+      checkerId,
+      checkerVersion: criterion.checkerId === undefined ? checker.version : '1',
       targetSpec: criterion.targetSpec,
     };
   });
@@ -99,6 +107,13 @@ export function buildCheckPlan(input: BuildCheckPlanInput): CheckPlan {
     workflowVersion: input.workflowVersion,
     entries,
   };
+}
+
+const PLANNED_CHECKER_IDS: readonly PlannedCheckerId[] = ['markdown-structure-v1',
+  'citation-exists-v1', 'fake-semantic-v1', 'semantic-model-v1', 'human-evidence-v1'];
+
+function isPlannedCheckerId(value: string): value is PlannedCheckerId {
+  return (PLANNED_CHECKER_IDS as readonly string[]).includes(value);
 }
 
 function resolveSeverity(criterion: FrozenCriterionInput): PlannedSeverity {
@@ -200,6 +215,7 @@ export function planFromFrozenSnapshot(snapshot: JsonObject): {
       required: criterion.required === true,
       method,
       targetSpec,
+      ...(typeof criterion.checker_id === 'string' ? { checkerId: criterion.checker_id } : {}),
     };
   });
 

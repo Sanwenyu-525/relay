@@ -14,17 +14,49 @@ import { rootsOverlap } from './gateway-configuration.js';
 import { applySafeControl } from './control-requests.js';
 import { DomainError, invalidTransition, resourceNotFound, validationFailed } from './domain-error.js';
 import { lockTaskAndRun } from './lock-task-run.js';
+import { lockWritableProjectInWorkspace } from './guards.js';
 import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
 import { requireCurrentRuleSnapshot } from './rule-fence.js';
 import { hasCurrentRunContext } from './context-fence.js';
-import { readMockGatewayAction } from '../workflow/execution-contract.js';
+import { readMockActionOperationId } from '../workflow/execution-contract.js';
+import { readWebFetchConfig, webFetchExecute, type WebFetchLimits } from '../web/web-fetch.js';
+import {
+  executeFileChangeset, reconcileFileChangeset, validateSafeRelativePath, isProtectedPath,
+  type FileChange,
+} from '../files/file-changeset.js';
+import {
+  gitGetStatus, gitGetDiff, gitGetLog, gitStageFile, gitCommit, gitPush,
+  reconcileGitCommit, reconcileGitPush,
+} from '../git/git-adapter.js';
+import { executeCliCommand, reconcileCliExecution } from '../cli-worker/cli-adapter.js';
+import { getAdapterDescriptor } from '../gateway/adapter-metadata.js';
+
+/** Test-only narrowing of WEB_FETCH budgets (production dispatch passes none). */
+type DispatchWebFetchLimits = Partial<WebFetchLimits>;
 
 export type GatewayOrigin =
   | { readonly kind: 'RUN'; readonly runId: string; readonly stepId: string;
-      readonly resourceId: string; readonly workerId: string; readonly workerEpoch: bigint;
+      readonly resourceId?: string; readonly workerId: string; readonly workerEpoch: bigint;
       readonly delivery?: { readonly commandId: string; readonly invocationEpoch: bigint } }
   | { readonly kind: 'USER_IMPORT'; readonly importJobId: string;
       readonly actorRef: string; readonly configVersion: string };
+
+export type GatewayActionType =
+  | 'WRITE_MARKER'
+  | 'READ_PUBLIC'
+  | 'READ_FILE'
+  | 'WEB_FETCH'
+  | 'WRITE_FILE'
+  | 'APPLY_CHANGESET'
+  | 'GIT_STATUS'
+  | 'GIT_DIFF'
+  | 'GIT_LOG'
+  | 'GIT_STAGE'
+  | 'GIT_COMMIT'
+  | 'GIT_PUSH'
+  | 'RUN_BUILD'
+  | 'RUN_TEST'
+  | 'CLI_RUN';
 
 export interface PrepareGatewayActionInput {
   readonly workspaceId: string;
@@ -32,7 +64,7 @@ export interface PrepareGatewayActionInput {
   readonly intentKey: string;
   readonly connectionId: string;
   readonly origin: GatewayOrigin;
-  readonly actionType: 'WRITE_MARKER' | 'READ_PUBLIC';
+  readonly actionType: GatewayActionType;
   readonly target: string;
   readonly params: JsonObject;
 }
@@ -47,7 +79,7 @@ export interface PreparedGatewayAction {
 export interface GatewayDispatchResult {
   readonly operation_id: string;
   readonly invocation_id: string;
-  readonly status: 'SUCCEEDED' | 'UNKNOWN';
+  readonly status: 'SUCCEEDED' | 'UNKNOWN' | 'FAILED';
   readonly result_ref: JsonObject | null;
 }
 
@@ -60,8 +92,15 @@ function gatewayDenied(code: string, detail: string, retryable = false): DomainE
     title: 'Gateway 拒绝执行', detail, retryable, retryAction: retryable ? 'POLL_RESOURCE' : 'REFRESH_AND_REDECIDE' });
 }
 
-function capabilityFor(action: PrepareGatewayActionInput['actionType']): GatewayCapability {
-  return action === 'WRITE_MARKER' ? 'FAKE_WRITE' : 'FAKE_PUBLIC_READ';
+function capabilityFor(action: GatewayActionType): GatewayCapability {
+  if (action === 'WRITE_MARKER') return 'FAKE_WRITE';
+  if (action === 'READ_FILE') return 'FILE_READ';
+  if (action === 'WEB_FETCH') return 'WEB_FETCH';
+  if (action === 'WRITE_FILE' || action === 'APPLY_CHANGESET') return 'FILE_WRITE';
+  if (action === 'GIT_STATUS' || action === 'GIT_DIFF' || action === 'GIT_LOG') return 'GIT_READ';
+  if (action === 'GIT_STAGE' || action === 'GIT_COMMIT' || action === 'GIT_PUSH') return 'GIT_WRITE';
+  if (action === 'RUN_BUILD' || action === 'RUN_TEST' || action === 'CLI_RUN') return 'CLI_RUN';
+  return 'FAKE_PUBLIC_READ';
 }
 
 function normalizedPublicTarget(target: string): string {
@@ -94,6 +133,46 @@ async function normalizedWriteTarget(target: string, root: string): Promise<stri
   return normalized;
 }
 
+/** Reads require an existing regular file; realpath pins the exact frozen path and
+ * rejects links or reparse points that could retarget the read outside the root. */
+async function normalizedReadTarget(target: string, root: string): Promise<string> {
+  if (!isAbsolute(target)) throw validationFailed([{ field: 'target', message: 'must be absolute' }]);
+  const resolved = resolve(target);
+  if (!containsPath(root, resolved)) throw gatewayDenied('GATEWAY_TARGET_DENIED', '目标不在已登记资源根内。');
+  let canonical: string;
+  try {
+    canonical = await realpath(resolved);
+    const entry = await lstat(resolved);
+    if (entry.isSymbolicLink() || !entry.isFile()) {
+      throw gatewayDenied('GATEWAY_TARGET_DENIED', '目标不是普通文件或经链接重定向。');
+    }
+  } catch (error) {
+    if (error instanceof DomainError) throw error;
+    throw gatewayDenied('GATEWAY_TARGET_DENIED', '目标文件不存在或无法安全规范化。');
+  }
+  if (!containsPath(root, canonical)) throw gatewayDenied('GATEWAY_TARGET_DENIED', '目标经链接逃逸出已登记资源根。');
+  return canonical;
+}
+
+/** WEB_FETCH normalization is syntactic at prepare: http(s) only, no userinfo,
+ * no fragment, lowercase host. The allowed-host and resolved-address checks
+ * happen inside the admit transaction and again on every executed hop. */
+export function normalizedWebTarget(target: string): string {
+  let url: URL;
+  try { url = new URL(target); } catch { throw validationFailed([{ field: 'target', message: 'invalid URL' }]); }
+  if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.username || url.password ||
+      url.hash !== '' || url.hostname === '') {
+    throw gatewayDenied('GATEWAY_TARGET_DENIED', 'WEB_FETCH 仅接受无用户信息、无片段的 http(s) URL。');
+  }
+  url.hash = '';
+  url.hostname = url.hostname.toLowerCase();
+  return url.toString();
+}
+
+function webFetchAllowedHost(config: JsonObject): string {
+  return readWebFetchConfig(config).allowedHost;
+}
+
 function paramsHash(input: Pick<PrepareGatewayActionInput, 'actionType' | 'params'>, target: string): Buffer {
   return createHash('sha256').update(canonicalizeJson({
     action_type: input.actionType, normalized_target: target, params: input.params,
@@ -108,6 +187,12 @@ function targetMatches(prefix: string, target: string, capability: GatewayCapabi
       if (policyUrl.origin !== targetUrl.origin || policyUrl.search || policyUrl.hash) return false;
       const path = policyUrl.pathname;
       return targetUrl.pathname === path || targetUrl.pathname.startsWith(path.endsWith('/') ? path : `${path}/`);
+    } catch { return false; }
+  }
+  if (capability === 'WEB_FETCH') {
+    // WEB_FETCH policies match by URL host (the web analogue of a path prefix).
+    try {
+      return new URL(target).hostname.toLowerCase() === prefix.toLowerCase();
     } catch { return false; }
   }
   const left = process.platform === 'win32' ? prefix.toLowerCase() : prefix;
@@ -164,22 +249,90 @@ function sameOperation(op: LogicalOperationRow, input: PrepareGatewayActionInput
 export async function prepareGatewayAction(db: DbExecutor, input: PrepareGatewayActionInput): Promise<PreparedGatewayAction> {
   if (!input.intentKey) throw validationFailed([{ field: 'intent_key', message: 'must not be empty' }]);
   const capability = capabilityFor(input.actionType);
-  if ((input.origin.kind === 'RUN') !== (capability === 'FAKE_WRITE')) {
-    throw gatewayDenied('GATEWAY_ORIGIN_DENIED', 'RUN 仅允许 Fake 写，USER_IMPORT 仅允许 Fake 公共读。');
+  const allowedRunCaps: GatewayCapability[] = [
+    'FAKE_WRITE', 'FILE_READ', 'WEB_FETCH', 'FILE_WRITE', 'GIT_READ', 'GIT_WRITE', 'CLI_RUN',
+  ];
+  if (input.origin.kind === 'RUN' ? !allowedRunCaps.includes(capability)
+    : !['FAKE_PUBLIC_READ', 'WEB_FETCH'].includes(capability)) {
+    throw gatewayDenied('GATEWAY_ORIGIN_DENIED', 'RUN 仅允许受管工具调用，USER_IMPORT 仅允许公共网络导入。');
   }
-  const resourceBefore = input.origin.kind === 'RUN'
-    ? await createRepositories(db).gateway.readResource(input.origin.resourceId) : undefined;
-  if (input.origin.kind === 'RUN' && (resourceBefore === undefined || resourceBefore.workspace_id !== input.workspaceId)) {
+  // WEB_FETCH targets a URL, not a filesystem working area: it binds no managed
+  // resource and therefore takes no resource claim (reads need no exclusivity).
+  const webFetch = input.actionType === 'WEB_FETCH';
+  const resourceBefore = input.origin.kind === 'RUN' && !webFetch
+    ? await createRepositories(db).gateway.readResource(input.origin.resourceId ?? '') : undefined;
+  if (input.origin.kind === 'RUN' && !webFetch &&
+      (resourceBefore === undefined || resourceBefore.workspace_id !== input.workspaceId)) {
     throw resourceNotFound('Managed resource');
   }
-  const target = input.origin.kind === 'RUN'
-    ? await normalizedWriteTarget(input.target, resourceBefore!.canonical_root)
-    : normalizedPublicTarget(input.target);
+
+  let target: string;
+  if (input.origin.kind === 'RUN') {
+    if (webFetch) {
+      target = normalizedWebTarget(input.target);
+    } else if (input.actionType === 'READ_FILE') {
+      target = await normalizedReadTarget(input.target, resourceBefore!.canonical_root);
+    } else if (input.actionType === 'WRITE_FILE') {
+      target = await normalizedWriteTarget(input.target, resourceBefore!.canonical_root);
+      const rel = relative(resourceBefore!.canonical_root, target);
+      if (isProtectedPath(rel)) {
+        throw gatewayDenied('GATEWAY_TARGET_DENIED', `目标路径 ${rel} 属于受保护路径，禁止写入。`);
+      }
+      if (typeof input.params.content !== 'string') {
+        throw validationFailed([{ field: 'params.content', message: 'must be a string' }]);
+      }
+    } else if (input.actionType === 'APPLY_CHANGESET') {
+      target = resourceBefore!.canonical_root;
+      if (!Array.isArray(input.params.changes) || input.params.changes.length === 0) {
+        throw validationFailed([{ field: 'params.changes', message: 'must be a non-empty array' }]);
+      }
+      for (const [idx, item] of (input.params.changes as any[]).entries()) {
+        if (!item || typeof item.path !== 'string' || !['CREATE', 'MODIFY', 'DELETE'].includes(item.action)) {
+          throw validationFailed([{ field: `params.changes[${idx}]`, message: 'invalid change item' }]);
+        }
+        try {
+          validateSafeRelativePath(resourceBefore!.canonical_root, item.path);
+        } catch (err) {
+          throw gatewayDenied('GATEWAY_TARGET_DENIED', (err as Error).message);
+        }
+      }
+    } else if (['GIT_STATUS', 'GIT_DIFF', 'GIT_LOG', 'GIT_STAGE', 'GIT_COMMIT', 'GIT_PUSH'].includes(input.actionType)) {
+      target = resourceBefore!.canonical_root;
+      if (input.actionType === 'GIT_STAGE') {
+        if (typeof input.params.file_path !== 'string' || input.params.file_path === '.' || input.params.file_path === '*') {
+          throw validationFailed([{ field: 'params.file_path', message: 'must be a specific file path' }]);
+        }
+      } else if (input.actionType === 'GIT_COMMIT') {
+        if (typeof input.params.message !== 'string' || input.params.message.trim() === '') {
+          throw validationFailed([{ field: 'params.message', message: 'commit message is required' }]);
+        }
+      } else if (input.actionType === 'GIT_PUSH') {
+        if (typeof input.params.remote !== 'string' || typeof input.params.ref !== 'string' ||
+            input.params.remote.startsWith('-') || input.params.ref.startsWith('-') || input.params.ref.startsWith('+')) {
+          throw validationFailed([{ field: 'params.remote', message: 'invalid remote or force-push ref' }]);
+        }
+      }
+    } else if (['RUN_BUILD', 'RUN_TEST', 'CLI_RUN'].includes(input.actionType)) {
+      target = resourceBefore!.canonical_root;
+      if (typeof input.params.executable !== 'string' || input.params.executable.trim() === '') {
+        throw validationFailed([{ field: 'params.executable', message: 'executable is required' }]);
+      }
+      if (!Array.isArray(input.params.args) || !input.params.args.every((a: any) => typeof a === 'string')) {
+        throw validationFailed([{ field: 'params.args', message: 'args must be an array of strings' }]);
+      }
+    } else {
+      target = await normalizedWriteTarget(input.target, resourceBefore!.canonical_root);
+    }
+  } else {
+    target = webFetch ? normalizedWebTarget(input.target) : normalizedPublicTarget(input.target);
+  }
+
   if (input.actionType === 'WRITE_MARKER' && typeof input.params.content !== 'string') {
     throw validationFailed([{ field: 'params.content', message: 'must be a string' }]);
   }
-  if (input.actionType === 'READ_PUBLIC' && Object.keys(input.params).length !== 0) {
-    throw validationFailed([{ field: 'params', message: 'Fake public read takes no parameters' }]);
+  if ((input.actionType === 'READ_PUBLIC' || input.actionType === 'READ_FILE' ||
+      input.actionType === 'WEB_FETCH') && Object.keys(input.params).length !== 0) {
+    throw validationFailed([{ field: 'params', message: 'read actions take no parameters' }]);
   }
   const hash = paramsHash(input, target);
   const payloadBytes = Buffer.byteLength(canonicalizeJson(input.params));
@@ -205,15 +358,18 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
       if (step?.run_id !== run.id || !['RUNNING', 'SUCCEEDED'].includes(step.status)) throw resourceNotFound('Run step');
       if (task.project_id === null) throw gatewayDenied('GATEWAY_PROJECT_REQUIRED', '写动作必须属于一个 Project。');
       projectId = task.project_id;
-      resource = await repositories.gateway.lockResource(input.origin.resourceId);
-      if (resource?.project_id !== projectId || resource.workspace_id !== input.workspaceId ||
-          resource.identity_key !== resourceBefore?.identity_key || resource.status !== 'ACTIVE') throw resourceNotFound('Managed resource');
+      if (!webFetch) {
+        resource = await repositories.gateway.lockResource(input.origin.resourceId ?? '');
+        if (resource?.project_id !== projectId || resource.workspace_id !== input.workspaceId ||
+            resource.identity_key !== resourceBefore?.identity_key || resource.status !== 'ACTIVE') throw resourceNotFound('Managed resource');
+      }
     } else {
       const job = await repositories.gateway.lockImportJob(input.origin.importJobId);
       if (job?.workspace_id !== input.workspaceId || job.actor_ref !== input.origin.actorRef ||
           job.config_version !== input.origin.configVersion || job.source_uri !== target ||
           !['QUEUED', 'RUNNING'].includes(job.status)) throw gatewayDenied('GATEWAY_IMPORT_STALE', '导入来源、用户或配置已失效。');
       projectId = job.project_id;
+      await lockWritableProjectInWorkspace(repositories, input.workspaceId, projectId);
     }
 
     const existing = await repositories.gateway.findOperationByIntent(input.origin.kind === 'RUN'
@@ -240,8 +396,23 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
         connection.status !== 'ACTIVE' || !(await repositories.gateway.hasConnectionCapability(connection.id, capability))) {
       throw gatewayDenied('GATEWAY_CONNECTION_DENIED', 'Connection 不存在、已停用或不具备该 Capability。');
     }
+    if (webFetch) {
+      // Host allowlist is the connection's registered boundary; it is re-checked
+      // on every executed hop against redirects as well.
+      const url = new URL(target);
+      if (url.hostname.toLowerCase() !== webFetchAllowedHost(connection.config)) {
+        throw gatewayDenied('GATEWAY_TARGET_DENIED', '目标主机不在 WEB_FETCH 连接的允许列表内。');
+      }
+    }
     const policy = await selectedPolicy(repositories, { workspaceId: input.workspaceId, projectId,
       capability, actionType: input.actionType, target, payloadBytes });
+
+    // Non-passthrough adapters (e.g. file mutations, git writes, cli executions)
+    // CANNOT execute automatically without review approval.
+    const descriptor = getAdapterDescriptor(capability);
+    const effectiveDecision: GatewayDecision =
+      !descriptor.approvalPassthrough && policy.decision === 'AUTO' ? 'ASK' : policy.decision;
+
     const op = await repositories.gateway.insertOperation({ id: input.operationId,
       workspace_id: input.workspaceId, project_id: projectId, origin: input.origin.kind,
       task_id: task?.id ?? null,
@@ -252,8 +423,8 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
       connection_config: connection.config, policy_id: policy.id, policy_version: policy.version,
       capability_key: capability, action_type: input.actionType, normalized_target: target,
       params_hash: hash, params: input.params,
-      resource_id: resource?.id ?? null, status: policy.decision === 'ASK' ? 'WAITING_APPROVAL' : 'PREPARED' });
-    if (policy.decision === 'ASK') {
+      resource_id: resource?.id ?? null, status: effectiveDecision === 'ASK' ? 'WAITING_APPROVAL' : 'PREPARED' });
+    if (effectiveDecision === 'ASK') {
       const review = await createGatewayReview(repositories, op, run, task);
       if (run !== undefined && task !== undefined && input.origin.kind === 'RUN') {
         const changed = await repositories.runs.advanceRun({ runId: run.id, expectedRevision: run.revision,
@@ -285,6 +456,7 @@ async function createGatewayReview(repositories: Repositories, op: LogicalOperat
   return repositories.reviews.insertRequest({ id: randomUUID(), workspaceId: op.workspace_id,
     projectId: op.project_id, taskId: task?.id ?? null, runId: run?.id ?? null,
     verificationSessionId: null, criterionId: null, operationId: op.id,
+    importJobId: op.import_job_id,
     kind: 'ACTION_APPROVAL', reason: '此 Fake 动作需要针对最终目标与参数的批准。',
     targetHash: reviewTargetHash(target), target,
     evidence: { capability: op.capability_key, action_type: op.action_type },
@@ -326,6 +498,10 @@ export interface DispatchGatewayInput {
   readonly operationId: string;
   readonly origin: GatewayOrigin;
   readonly signal?: AbortSignal;
+  /** Adapter deadline (e.g. the Worker execution lease); FILE_READ checks it before reading. */
+  readonly deadline?: Date | null;
+  /** Deterministic test-only narrowing of WEB_FETCH budgets; production passes none. */
+  readonly limits?: DispatchWebFetchLimits | undefined;
   /** Fault and barrier hooks used only by deterministic PG tests. */
   readonly hooks?: {
     readonly afterAdmit?: () => Promise<void>;
@@ -444,7 +620,7 @@ interface AdmittedInvocation {
 function originMatches(op: LogicalOperationRow, origin: GatewayOrigin): boolean {
   return origin.kind === 'RUN'
     ? op.origin === 'RUN' && op.run_id === origin.runId && op.step_id === origin.stepId &&
-      op.resource_id === origin.resourceId
+      op.resource_id === (origin.resourceId ?? null)
     : op.origin === 'USER_IMPORT' && op.import_job_id === origin.importJobId;
 }
 
@@ -512,15 +688,17 @@ async function admitGatewayInvocation(db: DbExecutor, input: DispatchGatewayInpu
       }
       const contract = await repositories.runs.readContract(run.id);
       const frozenAction = contract === undefined ? undefined :
-        readMockGatewayAction(contract.frozen_snapshot);
-      if (frozenAction?.operation_id === located.id &&
+        readMockActionOperationId(contract.frozen_snapshot);
+      if (frozenAction === located.id &&
           !(await hasCurrentRunContext(repositories, run, task, authority))) {
         throw gatewayDenied('GATEWAY_CONTEXT_STALE', 'Run 的 Context 来源已变化，原动作不得准入。');
       }
-      resource = await repositories.gateway.lockResource(input.origin.resourceId);
-      if (resource?.project_id !== located.project_id || resource.workspace_id !== input.workspaceId ||
-          resource.status !== 'ACTIVE') {
-        throw resourceNotFound('Managed resource');
+      if (located.capability_key !== 'WEB_FETCH') {
+        resource = await repositories.gateway.lockResource(input.origin.resourceId ?? '');
+        if (resource?.project_id !== located.project_id || resource.workspace_id !== input.workspaceId ||
+            resource.status !== 'ACTIVE') {
+          throw resourceNotFound('Managed resource');
+        }
       }
     } else {
       const job = await repositories.gateway.lockImportJob(input.origin.importJobId);
@@ -529,6 +707,7 @@ async function admitGatewayInvocation(db: DbExecutor, input: DispatchGatewayInpu
           job.source_uri !== located.normalized_target || !['QUEUED', 'RUNNING'].includes(job.status)) {
         throw gatewayDenied('GATEWAY_IMPORT_STALE', '用户导入来源或状态已失效。');
       }
+      await lockWritableProjectInWorkspace(repositories, input.workspaceId, job.project_id);
       if ((await repositories.gateway.listUnresolvedImportOperations(job.id)).some((row) => row.id !== located.id)) {
         throw gatewayDenied('GATEWAY_OPERATION_UNRESOLVED', '导入的其他动作仍未核对。');
       }
@@ -631,21 +810,25 @@ async function hasCurrentGatewayEffectLease(db: DbExecutor, admitted: AdmittedIn
     const { task, run } = await lockTaskAndRun(repositories, origin.runId, admitted.operation.workspace_id);
     await ensureGraphDelivery(repositories, origin);
     const invocation = await repositories.gateway.readInvocation(admitted.invocation.id);
+    // WEB_FETCH binds no resource and takes no claim: the fence then rests on
+    // the Run/Worker identity and the DISPATCHING invocation alone.
     const claim = admitted.invocation.resource_claim_id === null ? undefined
       : await repositories.gateway.readClaim(admitted.invocation.resource_claim_id);
     return task.executor_kind === 'AI' && task.executor_run_id === run.id &&
       task.ownership_epoch === admitted.invocation.ownership_epoch && run.status === 'RUNNING' &&
       run.worker_id === origin.workerId && run.worker_epoch === origin.workerEpoch &&
       run.worker_lease_until !== null && run.worker_lease_until.getTime() > Date.now() &&
-      invocation?.status === 'DISPATCHING' && claim?.status === 'HELD' &&
-      claim.worker_id === origin.workerId && claim.worker_epoch === origin.workerEpoch &&
-      claim.claim_token === admitted.invocation.claim_token &&
-      claim.claim_epoch === admitted.invocation.claim_epoch;
+      invocation?.status === 'DISPATCHING' &&
+      (claim === undefined ? invocation.resource_claim_id === null
+        : claim.status === 'HELD' && claim.worker_id === origin.workerId &&
+          claim.worker_epoch === origin.workerEpoch &&
+          claim.claim_token === admitted.invocation.claim_token &&
+          claim.claim_epoch === admitted.invocation.claim_epoch);
   });
 }
 
 async function settleGatewayInvocation(db: DbExecutor, admitted: AdmittedInvocation,
-  status: 'SUCCEEDED' | 'UNKNOWN', resultRef: JsonObject,
+  status: 'SUCCEEDED' | 'UNKNOWN' | 'FAILED', resultRef: JsonObject,
   origin: GatewayOrigin): Promise<GatewayDispatchResult> {
   const op = admitted.operation;
   return withTransaction(db, async (repositories) => {
@@ -654,9 +837,11 @@ async function settleGatewayInvocation(db: DbExecutor, admitted: AdmittedInvocat
     if (op.origin === 'RUN') {
       ({ task, run } = await lockTaskAndRun(repositories, op.run_id!, op.workspace_id));
       if (origin.kind === 'RUN') await ensureGraphDelivery(repositories, origin);
-      await repositories.gateway.lockResource(op.resource_id!);
+      // WEB_FETCH binds no managed resource, so there is no claim row to lock.
+      if (op.resource_id !== null) await repositories.gateway.lockResource(op.resource_id);
     } else {
       await repositories.gateway.lockImportJob(op.import_job_id!);
+      await lockWritableProjectInWorkspace(repositories, op.workspace_id, op.project_id);
     }
     const lockedOp = await repositories.gateway.lockOperation(op.id);
     const invocation = await repositories.gateway.lockInvocation(admitted.invocation.id);
@@ -664,20 +849,28 @@ async function settleGatewayInvocation(db: DbExecutor, admitted: AdmittedInvocat
       throw gatewayDenied('GATEWAY_INVOCATION_STALE', '调用结果只能归属当前 DISPATCHING 身份。');
     }
     const claim = invocation.resource_claim_id === null ? undefined : await repositories.gateway.readClaim(invocation.resource_claim_id);
+    // WEB_FETCH invocations carry no claim: staleness then rests on the
+    // Run/Worker identity and the DISPATCHING invocation alone.
+    const claimStale = claim === undefined
+      ? invocation.resource_claim_id !== null
+      : claim.status !== 'HELD' || claim.worker_id !== invocation.worker_id ||
+        claim.worker_epoch !== invocation.worker_epoch ||
+        claim.claim_token !== invocation.claim_token || claim.claim_epoch !== invocation.claim_epoch;
     const stale = op.origin === 'RUN' && (task?.executor_run_id !== run?.id ||
       task?.ownership_epoch !== invocation.ownership_epoch || run?.worker_id !== invocation.worker_id ||
       run?.worker_epoch !== invocation.worker_epoch || run.worker_lease_until === null ||
-      run.worker_lease_until.getTime() <= Date.now() || claim?.status !== 'HELD' ||
-      claim.worker_id !== invocation.worker_id || claim.worker_epoch !== invocation.worker_epoch ||
-      claim.claim_token !== invocation.claim_token || claim.claim_epoch !== invocation.claim_epoch);
+      run.worker_lease_until.getTime() <= Date.now() || claimStale);
     const finalStatus = stale ? 'UNKNOWN' : status;
     const evidence: JsonObject = stale ? { reason: 'STALE_RESULT_RECONCILE', observed: resultRef } : resultRef;
     const resolved = await repositories.gateway.transitionInvocation(invocation.id, 'DISPATCHING', finalStatus, evidence);
     if (resolved === undefined) throw new Error('Invocation outcome CAS failed');
     await repositories.gateway.setOperationStatus(op.id, finalStatus, evidence);
     if (invocation.resource_claim_id !== null) {
+      // A read never mutates the resource, so even a FAILED read releases its claim.
+      const released = finalStatus === 'SUCCEEDED' ||
+        op.capability_key === 'FILE_READ' || op.capability_key === 'WEB_FETCH';
       await repositories.gateway.setClaimStatus(invocation.resource_claim_id,
-        finalStatus === 'SUCCEEDED' ? 'RELEASED' : 'QUARANTINED');
+        released ? 'RELEASED' : 'QUARANTINED');
     }
     return { operation_id: op.id, invocation_id: invocation.id, status: finalStatus, result_ref: evidence };
   });
@@ -702,6 +895,37 @@ export async function dispatchGatewayAction(db: DbExecutor, input: DispatchGatew
     return settleGatewayInvocation(db, admitted, 'UNKNOWN',
       { reason: 'GATEWAY_EFFECT_FENCE_LOST_BEFORE_CALL' }, input.origin);
   }
+  if (admitted.operation.capability_key === 'FILE_READ') {
+    // Reads are bounded by the caller-provided deadline (the Worker execution
+    // lease) and the caller's abort signal.
+    const read = await fileReadExecute(admitted.operation, admitted.invocation, input.signal,
+      input.deadline ?? null);
+    await input.hooks?.afterFakeEffect?.();
+    return settleGatewayInvocation(db, admitted, read.outcome, read.result, input.origin);
+  }
+  if (admitted.operation.capability_key === 'WEB_FETCH') {
+    const fetch = await webFetchExecute(admitted.operation, admitted.invocation,
+      { ...(input.signal === undefined ? {} : { signal: input.signal }),
+        ...(input.deadline === undefined ? {} : { deadline: input.deadline }),
+        ...(input.limits === undefined ? {} : { limits: input.limits }) });
+    await input.hooks?.afterFakeEffect?.();
+    return settleGatewayInvocation(db, admitted, fetch.outcome, fetch.result, input.origin);
+  }
+  if (admitted.operation.capability_key === 'FILE_WRITE') {
+    const res = await fileWriteExecute(admitted.operation, admitted.invocation, input.signal);
+    await input.hooks?.afterFakeEffect?.();
+    return settleGatewayInvocation(db, admitted, res.outcome, res.result, input.origin);
+  }
+  if (admitted.operation.capability_key === 'GIT_READ' || admitted.operation.capability_key === 'GIT_WRITE') {
+    const res = await gitExecute(admitted.operation, admitted.invocation, input.signal);
+    await input.hooks?.afterFakeEffect?.();
+    return settleGatewayInvocation(db, admitted, res.outcome, res.result, input.origin);
+  }
+  if (admitted.operation.capability_key === 'CLI_RUN') {
+    const res = await cliExecute(admitted.operation, admitted.invocation, input.signal, input.deadline);
+    await input.hooks?.afterFakeEffect?.();
+    return settleGatewayInvocation(db, admitted, res.outcome, res.result, input.origin);
+  }
   let result: JsonObject;
   try {
     result = await fakeExecute(admitted.operation, admitted.invocation, input.signal);
@@ -712,6 +936,168 @@ export async function dispatchGatewayAction(db: DbExecutor, input: DispatchGatew
   }
   await input.hooks?.afterFakeEffect?.();
   return settleGatewayInvocation(db, admitted, 'SUCCEEDED', result, input.origin);
+}
+
+async function fileWriteExecute(op: LogicalOperationRow, invocation: InvocationAttemptRow,
+  signal?: AbortSignal): Promise<{ outcome: 'SUCCEEDED' | 'FAILED'; result: JsonObject }> {
+  if (signal?.aborted) throw new Error('Gateway dispatch aborted before file write');
+  if (op.action_type === 'APPLY_CHANGESET') {
+    const changes = (op.params.changes as any[]) as FileChange[];
+    const res = await executeFileChangeset(op.normalized_target, changes, signal);
+    return {
+      outcome: res.outcome,
+      result: {
+        operation_id: op.id,
+        invocation_id: invocation.id,
+        changes: res.changes as unknown as JsonObject[],
+        ...(res.reason ? { reason: res.reason } : {}),
+      },
+    };
+  }
+  const rel = relative(dirname(op.normalized_target), op.normalized_target);
+  const baselineSha = typeof op.params.baseline_sha256 === 'string' ? op.params.baseline_sha256 : null;
+  const content = typeof op.params.content === 'string' ? op.params.content : '';
+  const changes: FileChange[] = [{
+    path: rel,
+    action: baselineSha ? 'MODIFY' : 'CREATE',
+    baselineSha256: baselineSha,
+    content,
+    targetSha256: createHash('sha256').update(content).digest('hex'),
+  }];
+  const parent = dirname(op.normalized_target);
+  const res = await executeFileChangeset(parent, changes, signal);
+  return {
+    outcome: res.outcome,
+    result: {
+      operation_id: op.id,
+      invocation_id: invocation.id,
+      changes: res.changes as unknown as JsonObject[],
+      ...(res.reason ? { reason: res.reason } : {}),
+    },
+  };
+}
+
+async function gitExecute(op: LogicalOperationRow, invocation: InvocationAttemptRow,
+  signal?: AbortSignal): Promise<{ outcome: 'SUCCEEDED' | 'FAILED'; result: JsonObject }> {
+  if (signal?.aborted) throw new Error('Gateway dispatch aborted before git execution');
+  const options = { cwd: op.normalized_target, signal };
+  try {
+    if (op.action_type === 'GIT_STATUS') {
+      const status = await gitGetStatus(options);
+      return { outcome: 'SUCCEEDED', result: { status: status as unknown as JsonObject, operation_id: op.id, invocation_id: invocation.id } };
+    }
+    if (op.action_type === 'GIT_DIFF') {
+      const diff = await gitGetDiff(options, op.params as any);
+      return { outcome: 'SUCCEEDED', result: { diff, operation_id: op.id, invocation_id: invocation.id } };
+    }
+    if (op.action_type === 'GIT_LOG') {
+      const log = await gitGetLog(options, typeof op.params.max_count === 'number' ? op.params.max_count : 10);
+      return { outcome: 'SUCCEEDED', result: { log: log as unknown as JsonObject[], operation_id: op.id, invocation_id: invocation.id } };
+    }
+    if (op.action_type === 'GIT_STAGE') {
+      const res = await gitStageFile(String(op.params.file_path), options);
+      return {
+        outcome: res.success ? 'SUCCEEDED' : 'FAILED',
+        result: {
+          success: res.success,
+          ...(res.stderr !== undefined ? { stderr: res.stderr } : {}),
+          operation_id: op.id,
+          invocation_id: invocation.id,
+        },
+      };
+    }
+    if (op.action_type === 'GIT_COMMIT') {
+      const res = await gitCommit({
+        message: String(op.params.message),
+        ...(typeof op.params.expected_parent_sha === 'string' ? { expectedParentSha: op.params.expected_parent_sha } : {}),
+        ...(typeof op.params.author_name === 'string' ? { authorName: op.params.author_name } : {}),
+      }, options);
+      return { outcome: 'SUCCEEDED', result: { ...res, operation_id: op.id, invocation_id: invocation.id } };
+    }
+    if (op.action_type === 'GIT_PUSH') {
+      const res = await gitPush({
+        remote: String(op.params.remote),
+        ref: String(op.params.ref),
+        ...(typeof op.params.expected_commit_sha === 'string' ? { expectedCommitSha: op.params.expected_commit_sha } : {}),
+      }, options);
+      return { outcome: 'SUCCEEDED', result: { ...res, operation_id: op.id, invocation_id: invocation.id } };
+    }
+    return { outcome: 'FAILED', result: { reason: 'UNKNOWN_GIT_ACTION', action_type: op.action_type } };
+  } catch (err) {
+    return { outcome: 'FAILED', result: { reason: 'GIT_ERROR', error: (err as Error).message } };
+  }
+}
+
+async function cliExecute(op: LogicalOperationRow, invocation: InvocationAttemptRow,
+  signal?: AbortSignal, deadline?: Date | null): Promise<{ outcome: 'SUCCEEDED' | 'FAILED'; result: JsonObject }> {
+  if (signal?.aborted) throw new Error('Gateway dispatch aborted before CLI execution');
+  const timeoutMs = deadline ? Math.max(1000, deadline.getTime() - Date.now()) : undefined;
+  const res = await executeCliCommand({
+    executable: String(op.params.executable),
+    args: (op.params.args as any[]) ?? [],
+    cwd: op.normalized_target,
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(typeof op.params.max_output_bytes === 'number' ? { maxOutputBytes: op.params.max_output_bytes } : {}),
+    ...(op.params.env ? { additionalEnv: op.params.env as any } : {}),
+  }, signal);
+  return {
+    outcome: res.outcome === 'SUCCEEDED' ? 'SUCCEEDED' : 'FAILED',
+    result: {
+      outcome: res.outcome,
+      exitCode: res.exitCode,
+      stdout: res.stdout,
+      stderr: res.stderr,
+      truncated: res.truncated,
+      durationMs: res.durationMs,
+      ...(res.pid !== undefined ? { pid: res.pid } : {}),
+      ...(res.reason !== undefined ? { reason: res.reason } : {}),
+      operation_id: op.id,
+      invocation_id: invocation.id,
+    },
+  };
+}
+
+const FILE_READ_MAX_BYTES = 128 * 1024;
+
+/** Reads are idempotent and side-effect free: a typed failure settles FAILED
+ * (nothing happened) instead of UNKNOWN, and reconcile can safely re-read. */
+async function fileReadExecute(op: LogicalOperationRow, invocation: InvocationAttemptRow,
+  signal?: AbortSignal, deadline?: Date | null): Promise<{
+  outcome: 'SUCCEEDED' | 'FAILED'; result: JsonObject;
+}> {
+  if (signal?.aborted) throw new Error('Gateway dispatch aborted before file read');
+  if (deadline !== undefined && deadline !== null && deadline.getTime() <= Date.now()) {
+    return { outcome: 'FAILED', result: { reason: 'GATEWAY_DEADLINE_EXCEEDED', target: op.normalized_target } };
+  }
+  // The frozen path is pinned by realpath at prepare; re-verify before use so a
+  // swapped link cannot retarget the read after admission.
+  let current: string;
+  try {
+    current = await realpath(op.normalized_target);
+  } catch (error) {
+    return { outcome: 'FAILED', result: { reason: 'FILE_UNAVAILABLE', target: op.normalized_target,
+      error_code: (error as NodeJS.ErrnoException).code ?? 'UNKNOWN' } };
+  }
+  if (current !== op.normalized_target) {
+    return { outcome: 'FAILED', result: { reason: 'GATEWAY_TARGET_CHANGED',
+      target: op.normalized_target, actual: current } };
+  }
+  const stat = await lstat(op.normalized_target);
+  if (!stat.isFile()) {
+    return { outcome: 'FAILED', result: { reason: 'FILE_NOT_REGULAR', target: op.normalized_target } };
+  }
+  if (stat.size > FILE_READ_MAX_BYTES) {
+    return { outcome: 'FAILED', result: { reason: 'FILE_TOO_LARGE', target: op.normalized_target,
+      size: stat.size, limit_bytes: FILE_READ_MAX_BYTES } };
+  }
+  const bytes = await readFile(op.normalized_target, { signal });
+  if (bytes.includes(0)) {
+    return { outcome: 'FAILED', result: { reason: 'FILE_BINARY_UNSUPPORTED',
+      target: op.normalized_target, size: stat.size } };
+  }
+  return { outcome: 'SUCCEEDED', result: { target: op.normalized_target, size: stat.size,
+    sha256: createHash('sha256').update(bytes).digest('hex'), truncated: false,
+    content: bytes.toString('utf8'), invocation_id: invocation.id, operation_id: op.id } };
 }
 
 function codeOf(error: unknown): string | undefined {
@@ -743,7 +1129,8 @@ async function releaseUnadmittedApprovalClaim(db: DbExecutor, input: DispatchGat
  * DISPATCHING/UNKNOWN is deliberately excluded: it needs stopped-process reconciliation. */
 export async function denyGraphActionBeforeInvocation(db: DbExecutor, input: {
   readonly workspaceId: string; readonly runId: string; readonly operationId: string;
-  readonly resourceId: string; readonly workerId: string; readonly workerEpoch?: bigint;
+  /** WEB_FETCH binds no managed resource; the deny then requires resource_id IS NULL. */
+  readonly resourceId?: string; readonly workerId: string; readonly workerEpoch?: bigint;
   readonly delivery: { readonly commandId: string; readonly invocationEpoch: bigint };
   readonly reason: string;
 }): Promise<boolean> {
@@ -756,11 +1143,15 @@ export async function denyGraphActionBeforeInvocation(db: DbExecutor, input: {
     if ((await repositories.recovery.lockPendingControl(run.id)) !== undefined) return false;
     if (run.worker_id !== null && (run.worker_id !== input.workerId ||
         run.worker_epoch !== input.workerEpoch)) return false;
-    const resource = await repositories.gateway.lockResource(input.resourceId);
-    if (resource?.workspace_id !== input.workspaceId) return false;
+    let resourceId: string | null = null;
+    if (input.resourceId !== undefined) {
+      const resource = await repositories.gateway.lockResource(input.resourceId);
+      if (resource?.workspace_id !== input.workspaceId) return false;
+      resourceId = resource.id;
+    }
     const operation = await repositories.gateway.lockOperation(input.operationId);
     if (operation?.origin !== 'RUN' || operation.run_id !== run.id ||
-        operation.resource_id !== resource.id ||
+        operation.resource_id !== resourceId ||
         !['WAITING_APPROVAL', 'PREPARED'].includes(operation.status)) return false;
     const last = await repositories.gateway.lastInvocation(operation.id);
     if (last !== undefined && !['PREPARED', 'NOT_EXECUTED'].includes(last.status)) return false;
@@ -786,10 +1177,62 @@ export async function denyGraphActionBeforeInvocation(db: DbExecutor, input: {
     });
     if (releasedTask === undefined) throw new Error('pre-invocation deny Task CAS failed');
     await repositories.activities.insertActivityRecord({ id: randomUUID(), actorKind: 'SYSTEM',
+      workspaceId: run.workspace_id, runId: run.id,
       actorRef: `run:${run.id}`, commandId: null, projectId: task.project_id,
       taskId: task.id, eventType: 'RUN_FAILED',
       factRefs: { run_id: run.id, operation_id: operation.id, reason: input.reason } });
     return true;
+  });
+}
+
+/** A settled read failure has no uncertain effect. Converge its owning Run while
+ * keeping the original operation and failed Invocation as the failure evidence. */
+export async function failGraphReadAfterInvocation(db: DbExecutor, input: {
+  readonly workspaceId: string; readonly runId: string; readonly operationId: string;
+  readonly workerId: string; readonly workerEpoch?: bigint;
+  readonly delivery: { readonly commandId: string; readonly invocationEpoch: bigint };
+}): Promise<'FAILED' | 'CONTROL_PENDING' | 'STALE'> {
+  return withTransaction(db, async (repositories) => {
+    const { task, run } = await lockTaskAndRun(repositories, input.runId, input.workspaceId);
+    if (!(await repositories.dispatch.hasCurrentCommandInvocation(run.id,
+      input.delivery.commandId, input.workerId, input.delivery.invocationEpoch))) return 'STALE';
+    const operation = await repositories.gateway.lockOperation(input.operationId);
+    if (operation?.origin !== 'RUN' || operation.run_id !== run.id ||
+        !['FILE_READ', 'WEB_FETCH'].includes(operation.capability_key) ||
+        operation.status !== 'FAILED') return 'STALE';
+    const invocation = await repositories.gateway.lastInvocation(operation.id);
+    if (invocation?.status !== 'FAILED' ||
+        (await repositories.gateway.listUnresolvedRunOperations(run.id)).length > 0 ||
+        (await repositories.recovery.listUnresolvedEffects(run.id)).length > 0) return 'STALE';
+    if (run.status === 'FAILED' && task.executor_run_id === null) return 'FAILED';
+    if (run.status !== 'RUNNING' || task.executor_run_id !== run.id ||
+        task.ownership_epoch !== run.ownership_epoch ||
+        (run.worker_id !== null && (run.worker_id !== input.workerId ||
+          run.worker_epoch !== input.workerEpoch))) return 'STALE';
+    if (run.worker_id !== null) {
+      const released = await repositories.runs.releaseWorker(run.id, input.workerId, input.workerEpoch!);
+      if (released === undefined) throw new Error('failed read Worker release CAS failed');
+    }
+    if ((await repositories.recovery.lockPendingControl(run.id)) !== undefined) {
+      return 'CONTROL_PENDING';
+    }
+    const reason = typeof invocation.result_ref?.reason === 'string'
+      ? invocation.result_ref.reason : 'GATEWAY_READ_FAILED';
+    const failed = await repositories.runs.advanceRun({ runId: run.id,
+      expectedRevision: run.revision, status: 'FAILED',
+      currentStepId: run.current_step_id, waitReason: reason, terminal: true });
+    if (failed === undefined) throw new Error('failed read Run CAS failed');
+    const releasedTask = await repositories.tasks.releaseExecutionFromRun({
+      taskId: task.id, runId: run.id, expectedRevision: task.revision, toStatus: 'READY',
+    });
+    if (releasedTask === undefined) throw new Error('failed read Task CAS failed');
+    await repositories.activities.insertActivityRecord({ id: randomUUID(), actorKind: 'SYSTEM',
+      workspaceId: run.workspace_id, runId: run.id,
+      actorRef: `run:${run.id}`, commandId: null, projectId: task.project_id,
+      taskId: task.id, eventType: 'RUN_FAILED',
+      factRefs: { run_id: run.id, operation_id: operation.id,
+        invocation_id: invocation.id, reason } });
+    return 'FAILED';
   });
 }
 
@@ -803,7 +1246,7 @@ async function abandonPreparedForControl(db: DbExecutor, input: DispatchGatewayI
     if ((await repositories.recovery.lockPendingControl(run.id)) === undefined ||
         run.worker_id !== origin.workerId || run.worker_epoch !== origin.workerEpoch ||
         task.executor_run_id !== run.id) return false;
-    const resource = await repositories.gateway.lockResource(origin.resourceId);
+    const resource = await repositories.gateway.lockResource(origin.resourceId ?? '');
     if (resource === undefined) return false;
     const op = await repositories.gateway.lockOperation(input.operationId);
     const invocation = op === undefined ? undefined : await repositories.gateway.lastInvocation(op.id);
@@ -834,15 +1277,85 @@ export async function reconcileGatewayInvocation(db: DbExecutor, input: {
   /** Caller is the process supervisor; expiry of the Worker lease is not proof of stop. */
   readonly stoppedWorkerId?: string; readonly stoppedWorkerEpoch?: bigint;
   readonly oldProcessStopped: true;
-}): Promise<{ readonly status: 'SUCCEEDED' | 'NOT_EXECUTED' | 'UNKNOWN'; readonly operation_id: string }> {
+}): Promise<{ readonly status: 'SUCCEEDED' | 'NOT_EXECUTED' | 'UNKNOWN' | 'FAILED'; readonly operation_id: string }> {
   if (input.oldProcessStopped !== true) throw invalidTransition('必须由恢复调用方确认旧执行进程已退出。');
   const repositories = createRepositories(db);
   const op = await repositories.gateway.readOperation(input.operationId);
   const invocation = await repositories.gateway.readInvocation(input.invocationId);
   if (op?.workspace_id !== input.workspaceId || invocation?.operation_id !== op.id ||
       !['PREPARED', 'DISPATCHING', 'UNKNOWN'].includes(invocation.status)) throw resourceNotFound('Unresolved invocation');
-  let observed: 'PRESENT' | 'MISSING' | 'MISMATCH';
-  if (invocation.status === 'PREPARED' || op.capability_key === 'FAKE_PUBLIC_READ') {
+  let observed: 'PRESENT' | 'MISSING' | 'MISMATCH' | undefined;
+  let readOutcome: { outcome: 'SUCCEEDED' | 'FAILED'; result: JsonObject } | undefined;
+  let toolReconciliation: { status: 'SUCCEEDED' | 'NOT_EXECUTED' | 'UNKNOWN' | 'FAILED'; result: JsonObject } | undefined;
+
+  if (op.capability_key === 'FILE_READ') {
+    readOutcome = invocation.status === 'PREPARED' ? undefined
+      : await fileReadExecute(op, invocation);
+  } else if (op.capability_key === 'WEB_FETCH') {
+    readOutcome = invocation.status === 'PREPARED' ? undefined
+      : await webFetchExecute(op, invocation);
+  } else if (op.capability_key === 'GIT_READ') {
+    readOutcome = invocation.status === 'PREPARED' ? undefined
+      : await gitExecute(op, invocation);
+  } else if (op.capability_key === 'FILE_WRITE') {
+    if (invocation.status === 'PREPARED') {
+      toolReconciliation = { status: 'NOT_EXECUTED', result: { reason: 'PREPARED_NOT_EXECUTED' } };
+    } else {
+      const changes = op.action_type === 'APPLY_CHANGESET'
+        ? (op.params.changes as any[]) as FileChange[]
+        : [{
+            path: relative(dirname(op.normalized_target), op.normalized_target),
+            action: op.params.baseline_sha256 ? 'MODIFY' : 'CREATE',
+            baselineSha256: typeof op.params.baseline_sha256 === 'string' ? op.params.baseline_sha256 : null,
+            content: typeof op.params.content === 'string' ? op.params.content : '',
+            targetSha256: createHash('sha256').update(typeof op.params.content === 'string' ? op.params.content : '').digest('hex'),
+          } as FileChange];
+      const check = await reconcileFileChangeset(
+        op.action_type === 'APPLY_CHANGESET' ? op.normalized_target : dirname(op.normalized_target),
+        changes,
+      );
+      toolReconciliation = {
+        status: check.outcome === 'SUCCEEDED' ? 'SUCCEEDED' : 'UNKNOWN',
+        result: check.details,
+      };
+    }
+  } else if (op.capability_key === 'GIT_WRITE') {
+    if (invocation.status === 'PREPARED') {
+      toolReconciliation = { status: 'NOT_EXECUTED', result: { reason: 'PREPARED_NOT_EXECUTED' } };
+    } else if (op.action_type === 'GIT_COMMIT') {
+      const check = await reconcileGitCommit({
+        message: String(op.params.message),
+        expectedParentSha: typeof op.params.expected_parent_sha === 'string' ? op.params.expected_parent_sha : null,
+      }, { cwd: op.normalized_target });
+      toolReconciliation = {
+        status: check.outcome,
+        result: check.details,
+      };
+    } else if (op.action_type === 'GIT_PUSH') {
+      const check = await reconcileGitPush({
+        remote: String(op.params.remote),
+        ref: String(op.params.ref),
+        expectedCommitSha: String(op.params.expected_commit_sha ?? ''),
+      }, { cwd: op.normalized_target });
+      toolReconciliation = {
+        status: check.outcome,
+        result: check.details,
+      };
+    } else {
+      toolReconciliation = { status: 'UNKNOWN', result: { reason: 'GIT_STAGE_CANNOT_RECONCILE_ALONE' } };
+    }
+  } else if (op.capability_key === 'CLI_RUN') {
+    if (invocation.status === 'PREPARED') {
+      toolReconciliation = { status: 'NOT_EXECUTED', result: { reason: 'PREPARED_NOT_EXECUTED' } };
+    } else {
+      const recordedPid = typeof invocation.result_ref?.pid === 'number' ? invocation.result_ref.pid : undefined;
+      const cliCheck = reconcileCliExecution(recordedPid);
+      toolReconciliation = {
+        status: cliCheck.outcome === 'STILL_RUNNING' ? 'UNKNOWN' : 'FAILED',
+        result: cliCheck.details,
+      };
+    }
+  } else if (invocation.status === 'PREPARED' || op.capability_key === 'FAKE_PUBLIC_READ') {
     observed = 'MISSING';
   } else {
     try { observed = (await readFile(op.normalized_target, 'utf8')) === fakeMarker(op) ? 'PRESENT' : 'MISMATCH'; }
@@ -859,9 +1372,10 @@ export async function reconcileGatewayInvocation(db: DbExecutor, input: {
           run.worker_epoch !== invocation.worker_epoch)) {
         throw gatewayDenied('GATEWAY_STALE_WORKER', '另一个 Worker 已占有 Run，不能核对旧结果。');
       }
-      await tx.gateway.lockResource(op.resource_id!);
+      if (op.resource_id !== null) await tx.gateway.lockResource(op.resource_id);
     } else {
       await tx.gateway.lockImportJob(op.import_job_id!);
+      await lockWritableProjectInWorkspace(tx, op.workspace_id, op.project_id);
     }
     const lockedOp = await tx.gateway.lockOperation(op.id);
     const lockedInvocation = await tx.gateway.lockInvocation(invocation.id);
@@ -872,14 +1386,24 @@ export async function reconcileGatewayInvocation(db: DbExecutor, input: {
     if (run?.worker_id !== null && run !== undefined) await tx.runs.fenceWorker(run.id);
     // Once DISPATCHING committed, a missing target could have been written and
     // removed by an external actor. Only PREPARED proves no adapter call began.
-    const status = observed === 'PRESENT' ? 'SUCCEEDED'
-      : observed === 'MISSING' && (lockedInvocation.status === 'PREPARED' || op.capability_key === 'FAKE_PUBLIC_READ')
-        ? 'NOT_EXECUTED' : 'UNKNOWN';
-    const changed = await tx.gateway.transitionInvocation(invocation.id, lockedInvocation.status, status,
-      { reconciliation: observed, invocation_id: invocation.id });
+    const safeReread = op.capability_key === 'FILE_READ' || op.capability_key === 'WEB_FETCH' || op.capability_key === 'GIT_READ';
+    const status: 'SUCCEEDED' | 'NOT_EXECUTED' | 'UNKNOWN' | 'FAILED' =
+      safeReread
+        ? (lockedInvocation.status === 'PREPARED' ? 'NOT_EXECUTED' : readOutcome!.outcome)
+        : toolReconciliation !== undefined
+          ? toolReconciliation.status
+          : observed === 'PRESENT' ? 'SUCCEEDED'
+            : observed === 'MISSING' &&
+                (lockedInvocation.status === 'PREPARED' || op.capability_key === 'FAKE_PUBLIC_READ')
+              ? 'NOT_EXECUTED' : 'UNKNOWN';
+    const evidence: JsonObject = toolReconciliation !== undefined
+      ? { reconciliation: toolReconciliation.status, ...toolReconciliation.result, invocation_id: invocation.id }
+      : readOutcome !== undefined && lockedInvocation.status !== 'PREPARED'
+        ? { reconciliation: 'SAFE_REREAD', ...readOutcome.result }
+        : { reconciliation: observed ?? 'UNKNOWN', invocation_id: invocation.id };
+    const changed = await tx.gateway.transitionInvocation(invocation.id, lockedInvocation.status, status, evidence);
     if (changed === undefined) throw new Error('reconciliation CAS failed');
-    await tx.gateway.setOperationStatus(op.id, status === 'NOT_EXECUTED' ? 'PREPARED' : status,
-      { reconciliation: observed, invocation_id: invocation.id });
+    await tx.gateway.setOperationStatus(op.id, status === 'NOT_EXECUTED' ? 'PREPARED' : status, evidence);
     if (invocation.resource_claim_id !== null) await tx.gateway.setClaimStatus(invocation.resource_claim_id,
       status === 'UNKNOWN' ? 'QUARANTINED' : 'RELEASED');
     return { status, operation_id: op.id };

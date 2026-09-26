@@ -46,6 +46,17 @@ export class InformationRepository {
       where r.id = ${rootId}`.execute(this.db)).rows[0];
   }
 
+  async readVersion<T>(kind: Kind, rootId: string, version: bigint): Promise<T | undefined> {
+    const key = `${kind}_id`;
+    return (await sql<T>`select * from ${sql.table(VERSIONS[kind])}
+      where ${sql.ref(key)} = ${rootId} and version = ${version}`.execute(this.db)).rows[0];
+  }
+
+  async readKnowledgeVersionById(id: string): Promise<KnowledgeVersionRow | undefined> {
+    return (await sql<KnowledgeVersionRow>`select * from knowledge_versions where id = ${id}`
+      .execute(this.db)).rows[0];
+  }
+
   async insertKnowledgeRoot(id: string, workspaceId: string, projectId: string | null,
     title: string): Promise<void> {
     await sql`insert into knowledge_items (id, workspace_id, project_id, title)
@@ -56,12 +67,14 @@ export class InformationRepository {
     projectId: string | null;
     version: bigint; sourceKind: KnowledgeVersionRow['source_kind']; mediaType: string;
     text: string | null; hash: Buffer; artifactId: string | null;
-    artifactVersionId: string | null; sourceRefs: JsonObject }): Promise<void> {
+    artifactVersionId: string | null; sourceUri: string | null;
+    sourceRefs: JsonObject }): Promise<void> {
     await sql`insert into knowledge_versions (id, workspace_id, knowledge_id, project_id,
       version, source_kind,
-      media_type, content_text, content_sha256, source_artifact_id, artifact_version_id, source_refs)
+      media_type, content_text, content_sha256, source_uri, source_artifact_id, artifact_version_id, source_refs)
       values (${input.id}, ${input.workspaceId}, ${input.knowledgeId}, ${input.projectId}, ${input.version},
-      ${input.sourceKind}, ${input.mediaType}, ${input.text}, ${input.hash}, ${input.artifactId},
+      ${input.sourceKind}, ${input.mediaType}, ${input.text}, ${input.hash}, ${input.sourceUri},
+      ${input.artifactId},
       ${input.artifactVersionId}, ${JSON.stringify(input.sourceRefs)}::jsonb)`.execute(this.db);
   }
 

@@ -44,6 +44,7 @@ export async function initializeWorkspace(
 
       await repositories.activities.insertActivityRecord({
         id: randomUUID(),
+        workspaceId: input.workspaceId,
         actorKind: 'HUMAN',
         actorRef: input.actorRef,
         commandId: input.commandId,

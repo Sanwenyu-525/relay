@@ -24,10 +24,9 @@ import {
   WORKFLOW_VERSION,
   WORKFLOW_STEPS,
 } from '../workflow/markdown-deliverable.js';
-import { freezeExecutionContract } from '../workflow/execution-contract.js';
-import { buildCheckPlan } from '../workflow/check-plan.js';
-import { hasChecker } from '../workflow/checkers.js';
-import { resolveApplicableRules, ruleEnforcementUnavailable } from './information-commands.js';
+import { freezeExecutionContract, readContextSources } from '../workflow/execution-contract.js';
+import type { ContextSourceRef } from '../workflow/execution-contract.js';
+import { loadRulePlanBasis } from './rule-plan-basis.js';
 
 /**
  * DelegateTask：把一个 READY 的人工 Task 原子地交给一个新建的 AI Run
@@ -61,6 +60,16 @@ export interface DelegateTaskInput {
   readonly mockGatewayAction?: {
     readonly connection_id: string; readonly resource_id: string;
     readonly target: string; readonly content: string;
+  } | undefined;
+  /** 用户显式选中的长期信息来源；随 Run 冻结，版本不可变。 */
+  readonly contextSources?: readonly ContextSourceRef[] | undefined;
+  /** 可选固定 Mock 文件读意图；与 mockGatewayAction、webFetchAction 互斥。 */
+  readonly fileReadAction?: {
+    readonly connection_id: string; readonly resource_id: string; readonly relative_target: string;
+  } | undefined;
+  /** 可选固定 Mock 网页读意图；与 mockGatewayAction、fileReadAction 互斥。 */
+  readonly webFetchAction?: {
+    readonly connection_id: string; readonly url: string;
   } | undefined;
   /** 仅用于真实 PG barrier 测试；不属于 HTTP 请求或命令摘要。 */
   readonly hooks?: {
@@ -98,6 +107,11 @@ export async function delegateTask(
       workflow_version_id: workflowVersionId,
       execution_config_version_id: executionConfigVersionId,
       mock_gateway_action: input.mockGatewayAction ?? null,
+      context_sources: input.contextSources === undefined ? null :
+        input.contextSources.map((source) => ({ kind: source.kind,
+          root_id: source.root_id, version: source.version })),
+      file_read_action: input.fileReadAction ?? null,
+      web_fetch_action: input.webFetchAction ?? null,
     },
     execute: async (repositories) => {
       // Rule 更新持 authority UPDATE；Delegate 持 SHARE 后再锁 Task，两个提交顺序有唯一裁决。
@@ -173,38 +187,31 @@ export async function delegateTask(
         requiredOutputSpec: acceptance.required_output_spec,
       });
 
-      const allApplicableRules = await repositories.information.listApplicableRules(
-        input.workspaceId, task.project_id, task.id);
-      const applicableRules = resolveApplicableRules(allApplicableRules);
-      const ruleCriteria = applicableRules.flatMap((rule) => {
-        if (rule.enforcement === 'PRE_ACTION') {
-          if (rule.strength === 'HARD') {
-            throw ruleEnforcementUnavailable(`Rule ${rule.id} 要求 PRE_ACTION，但固定 Workflow 尚无准入前检查器。`);
-          }
-          return [];
+      const { allRules: allApplicableRules, criteria: ruleCriteria } =
+        await loadRulePlanBasis(repositories, input.workspaceId, task.project_id, task.id);
+
+      const frozenIntents = [input.mockGatewayAction, input.fileReadAction, input.webFetchAction]
+        .filter((intent) => intent !== undefined);
+      if (frozenIntents.length > 1) {
+        throw invalidTransition('mock_gateway_action、file_read_action 与 web_fetch_action 只能冻结其一。',
+          { taskId: task.id });
+      }
+      if (input.webFetchAction !== undefined) {
+        // Freeze-time syntax only (same shape as Gateway prepare): host binding
+        // and SSRF admission stay with the Gateway connection lookup.
+        let url: URL;
+        try { url = new URL(input.webFetchAction.url); } catch {
+          throw invalidTransition('web_fetch_action.url 不是合法 URL。', { taskId: task.id });
         }
-        if (rule.enforcement === 'SEMANTIC' && rule.strength === 'HARD') {
-          throw ruleEnforcementUnavailable(`Rule ${rule.id} 要求 HARD 语义检查；当前只有 Fake checker。`);
-        }
-        const method = rule.enforcement === 'HUMAN' ? 'HUMAN' :
-          rule.enforcement === 'SEMANTIC' ? 'SEMANTIC' : rule.method;
-        if (method === null) {
-          throw ruleEnforcementUnavailable(`Rule ${rule.id} 缺少可用检查器。`);
-        }
-        return [{ criterionId: `rule:${rule.id}:v${rule.version}`, statement: rule.statement,
-          required: rule.strength === 'HARD', method,
-          targetSpec: { ...rule.target_spec, severity: rule.strength,
-            rule_id: rule.id, rule_version: toDecimalString(rule.version) } }];
-      });
-      const plan = buildCheckPlan({ workflowKey: WORKFLOW_KEY, workflowVersion: WORKFLOW_VERSION,
-        criteria: ruleCriteria });
-      for (const entry of plan.entries) {
-        if (!hasChecker(entry.checkerId, entry.checkerVersion)) {
-          throw ruleEnforcementUnavailable(`Rule 检查器 ${entry.checkerId} 未注册。`);
+        if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.username ||
+            url.password || url.hash !== '' || url.hostname === '') {
+          throw invalidTransition('web_fetch_action.url 仅接受无用户信息、无片段的 http(s) URL。',
+            { taskId: task.id });
         }
       }
-
       const runId = randomUUID();
+      const contextSources = await resolveExplicitContextSources(repositories, input.workspaceId,
+        task, input.contextSources);
       const frozen = freezeExecutionContract({
         taskId: task.id,
         acceptanceRevision: task.acceptance_revision,
@@ -228,6 +235,19 @@ export async function delegateTask(
           target: input.mockGatewayAction.target,
           content: input.mockGatewayAction.content,
         } }),
+        ...(input.fileReadAction === undefined ? {} : { fileReadAction: {
+          operation_id: randomUUID(), intent_key: 'mock-file-read-v1' as const,
+          connection_id: input.fileReadAction.connection_id,
+          resource_id: input.fileReadAction.resource_id,
+          relative_target: input.fileReadAction.relative_target,
+        } }),
+        ...(input.webFetchAction === undefined ? {} : { webFetchAction: {
+          operation_id: randomUUID(), intent_key: 'mock-web-fetch-v1' as const,
+          connection_id: input.webFetchAction.connection_id,
+          url: input.webFetchAction.url,
+        } }),
+        ...(contextSources === undefined || contextSources.length === 0 ? {} :
+          { contextSources }),
       });
 
       // Run 记录本次授予的执行权 epoch：assignExecutionToRun 会把 Task 的 ownership_epoch 递增 1，
@@ -297,6 +317,8 @@ export async function delegateTask(
 
       await repositories.activities.insertActivityRecord({
         id: randomUUID(),
+        workspaceId: input.workspaceId,
+        runId,
         actorKind: 'HUMAN',
         actorRef: LOCAL_ACTOR_REF,
         commandId: input.commandId,
@@ -336,6 +358,48 @@ function requireRevisionMatch(task: { readonly revision: bigint; readonly id: st
       actualRevision: toDecimalString(task.revision),
     });
   }
+}
+
+const MAX_EXPLICIT_CONTEXT_SOURCES = 10;
+
+/**
+ * Delegate 时校验显式选中的长期信息来源：根必须在同一 Workspace、处于 ACTIVE、
+ * Project 作用域匹配，且引用的具体不可变版本存在；去重后随执行契约冻结。
+ * 构建期来源再被停用或缺失时按 SOURCE_UNAVAILABLE 排除，不在准入处静默改写。
+ */
+async function resolveExplicitContextSources(repositories: Repositories,
+  workspaceId: string, task: { readonly id: string; readonly project_id: string | null },
+  sources: readonly ContextSourceRef[] | undefined,
+): Promise<readonly ContextSourceRef[] | undefined> {
+  if (sources === undefined || sources.length === 0) return undefined;
+  if (sources.length > MAX_EXPLICIT_CONTEXT_SOURCES) {
+    throw invalidTransition(`显式来源选择最多 ${MAX_EXPLICIT_CONTEXT_SOURCES} 条。`, { taskId: task.id });
+  }
+  const frozen: ContextSourceRef[] = [];
+  const seen = new Set<string>();
+  for (const source of sources) {
+    const key = `${source.kind}:${source.root_id}:${source.version}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const kind = source.kind.toLowerCase() as 'knowledge' | 'memory' | 'decision';
+    const root = await repositories.information.readRoot(kind, source.root_id);
+    if (root === undefined || root.workspace_id !== workspaceId) {
+      throw resourceNotFound('Context source');
+    }
+    if (root.status !== 'ACTIVE') {
+      throw invalidTransition(`显式来源 ${source.root_id} 已停用，不能随 Run 冻结。`, { taskId: task.id });
+    }
+    if (root.project_id !== null && root.project_id !== task.project_id) {
+      throw resourceNotFound('Context source');
+    }
+    const version = await repositories.information.readVersion(kind, source.root_id,
+      BigInt(source.version));
+    if (version === undefined) {
+      throw resourceNotFound('Context source version');
+    }
+    frozen.push({ kind: source.kind, root_id: source.root_id, version: source.version });
+  }
+  return frozen;
 }
 
 /**

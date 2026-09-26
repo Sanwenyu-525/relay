@@ -15,12 +15,16 @@ async function requireProject(repositories: Repositories, workspaceId: string, p
 
 export interface GatewayConnectionDto {
   readonly id: string; readonly project_id: string; readonly status: string;
-  readonly version: string; readonly capabilities: readonly string[]; readonly created_at: string;
+  readonly version: string; readonly capabilities: readonly string[];
+  readonly allowed_host: string | null; readonly created_at: string;
 }
 async function connectionDto(repositories: Repositories, row: GatewayConnectionRow): Promise<GatewayConnectionDto> {
+  const capabilities = await repositories.gateway.listConnectionCapabilities(row.id);
   return { id: row.id, project_id: row.project_id, status: row.status,
     version: toDecimalString(row.version),
-    capabilities: await repositories.gateway.listConnectionCapabilities(row.id),
+    capabilities,
+    allowed_host: capabilities.includes('WEB_FETCH') &&
+      typeof row.config.allowed_host === 'string' ? row.config.allowed_host : null,
     created_at: row.created_at.toISOString() };
 }
 export async function listGatewayConnections(db: DbExecutor, workspaceId: string, projectId: string): Promise<readonly GatewayConnectionDto[]> {

@@ -5,12 +5,22 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { validateDatabaseUrl } from '../config/config.js';
+import { validateModelPortConfig } from '../workflow/model-port-config.js';
+import { FakeModelPort } from '../workflow/fake-model-port.js';
+import { OpenAiCompatibleModelPort } from '../workflow/openai-compatible-model-port.js';
+import { readModelPortConfig } from '../workflow/model-port-config.js';
 import { RelayDatabase } from '../infrastructure/database.js';
 import { graphCheckpointsReady } from '../infrastructure/graph-checkpoints.js';
 import { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
+import { ManagedContentStore } from '../storage/managed-content-store.js';
+import { runAssistGenerationTick } from '../application/assist-runner.js';
+import { runWebImportTick } from '../application/web-import-runner.js';
 import { runOneCommand } from './run-command.js';
 
 const MIGRATIONS_DIRECTORY = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'migrations');
+// Worker has its own pool, independent of RELAY_DB_POOL_MAX (API only).
+// VERIFY holds one transaction connection while model_calls commits on another.
+const WORKER_DATABASE_POOL_MAX = 4;
 const once = process.argv.includes('--once');
 const controller = new AbortController();
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK'] as const) {
@@ -34,13 +44,15 @@ async function main(): Promise<void> {
       dataRoot === undefined || !validDataRoot) {
     throw new Error('worker configuration invalid');
   }
+  // A partially configured real model must fail the Worker before any delivery.
+  validateModelPortConfig(process.env);
   const workerId = process.env.RELAY_WORKER_ID?.trim() || `worker:${randomUUID()}`;
   const pollMs = readInteger('RELAY_WORKER_POLL_MS', 250, 20, 60_000);
   const leaseMs = readInteger('RELAY_WORKER_LEASE_MS', 30_000, 100, 600_000);
   const fakeModelDelayMs = process.env.NODE_ENV === 'test'
     ? readInteger('RELAY_WORKER_TEST_MODEL_DELAY_MS', 0, 0, 60_000) : 0;
   const database = new RelayDatabase({
-    databaseUrl, databasePoolMax: 4, databaseConnectTimeoutMs: 5_000,
+    databaseUrl, databasePoolMax: WORKER_DATABASE_POOL_MAX, databaseConnectTimeoutMs: 5_000,
   }, () => controller.abort());
   try {
     const readiness = await database.checkReadiness(new SchemaReadinessChecker(MIGRATIONS_DIRECTORY));
@@ -51,6 +63,11 @@ async function main(): Promise<void> {
       throw new Error('worker graph checkpoint schema unavailable');
     }
     process.stdout.write(`${JSON.stringify({ type: 'worker_ready', worker_id: workerId })}\n`);
+    const storage = new ManagedContentStore(dataRoot);
+    const modelConfig = readModelPortConfig(process.env);
+    const assistModelPort = modelConfig === undefined
+      ? new FakeModelPort(fakeModelDelayMs)
+      : new OpenAiCompatibleModelPort(modelConfig);
     while (!controller.signal.aborted) {
       const result = await runOneCommand(database.executor, {
         workerId, dataRoot, checkpointUrl: databaseUrl, leaseMs, signal: controller.signal,
@@ -100,6 +117,22 @@ async function main(): Promise<void> {
       if (result !== undefined) {
         process.stdout.write(`${JSON.stringify({ type: 'worker_settled', command_id: result.commandId,
           run_id: result.runId, outcome: result.outcome })}\n`);
+      }
+      // Assist 生成与 Run 命令同循环；--once 是 Run 命令结算语义，不领取 Assist 消息。
+      if (!once) {
+        const assist = await runAssistGenerationTick(database.executor, {
+          workerId, storage, modelPort: assistModelPort, leaseMs, signal: controller.signal,
+        });
+        if (assist !== undefined) {
+          process.stdout.write(`${JSON.stringify({ type: 'worker_assist_settled',
+            message_id: assist.messageId, session_id: assist.sessionId, status: assist.status,
+            ...(assist.errorCode === null ? {} : { error_code: assist.errorCode }) })}\n`);
+        }
+        const webImport = await runWebImportTick(database.executor, { signal: controller.signal });
+        if (webImport.prepared + webImport.dispatched > 0) {
+          process.stdout.write(`${JSON.stringify({ type: 'worker_web_import_tick',
+            ...webImport })}\n`);
+        }
       }
       if (once) break;
       if (result === undefined) {

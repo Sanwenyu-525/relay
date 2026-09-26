@@ -42,8 +42,8 @@ test('LEGAL produces a structurally valid candidate with deterministic identity 
 
   assert.equal(validateCandidate(first.content).ok, true);
   assert.match(first.providerRequestId, /^fake-[0-9a-f]{32}$/u);
-  assert.ok(first.usage.inputTokens >= 1);
-  assert.ok(first.usage.outputTokens >= 1);
+  assert.ok(first.usage.inputTokens !== null && first.usage.inputTokens >= 1);
+  assert.ok(first.usage.outputTokens !== null && first.usage.outputTokens >= 1);
 });
 
 test('SCHEMA_INVALID produces text missing a required section', async () => {

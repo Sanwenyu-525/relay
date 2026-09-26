@@ -12,7 +12,7 @@ import {
   revisionConflict,
   validationFailed,
 } from './domain-error.js';
-import { readProjectInWorkspace, requireWorkspace } from './guards.js';
+import { lockWritableProjectInWorkspace, readProjectInWorkspace, requireWorkspace } from './guards.js';
 import { requireRevision } from './revisions.js';
 import { normalizeStateAction, type NormalizedStateAction } from './state-action.js';
 import type { Repositories } from './unit-of-work.js';
@@ -82,6 +82,8 @@ export async function runStateCommand(
         }
       }
 
+      await lockWritableProjectInWorkspace(repositories, input.workspaceId, project.id);
+
       const state = await repositories.projects.lockProjectState(project.id);
 
       if (state === undefined) {
@@ -106,6 +108,7 @@ export async function runStateCommand(
 
       await repositories.activities.insertActivityRecord({
         id: randomUUID(),
+        workspaceId: project.workspace_id,
         actorKind: 'HUMAN',
         actorRef: LOCAL_ACTOR_REF,
         commandId: input.commandId,

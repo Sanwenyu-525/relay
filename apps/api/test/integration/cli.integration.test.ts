@@ -99,8 +99,25 @@ test('migrate entry reports the applied migrations without repeating them', asyn
       '0011_m03_run_dispatch',
       '0012_m03_run_events',
       '0013_m03_run_command_order',
+      '0014_m04_file_read',
+      '0015_m04_assist',
+      '0016_m04_web_fetch',
+      '0017_m04_web_import',
+      '0018_m04_model_calls',
+      '0019_m04_draft_read_input',
+      '0020_m05_today_selections',
+      '0021_m05_activity_lineage',
+      '0022_m04_first_party_skills',
+      '0023_m04_task_skill_proposals',
+      '0024_m05_view_configuration',
+      '0025_m05_project_blueprints',
+      '0026_m04_model_call_budgets',
+      '0027_m05_workspace_lists',
+      '0028_m04_assist_live_preview',
+      '0029_m04_run_draft_live_preview',
+      '0030_m06_real_tools',
     ]);
-  assert.equal(payload.ledger_rows, 13);
+  assert.equal(payload.ledger_rows, 30);
 });
 
 test('migrate entry fails explicitly without a migration connection', async () => {

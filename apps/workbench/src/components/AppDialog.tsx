@@ -7,11 +7,12 @@ export interface AppDialogProps {
   open: boolean;
   title: string;
   variant?: "dialog" | "drawer";
+  initialFocusSelector?: string;
   onClose: () => void;
   children: ReactNode;
 }
 
-export default function AppDialog({ open, title, variant = "dialog", onClose, children }: AppDialogProps) {
+export default function AppDialog({ open, title, variant = "dialog", initialFocusSelector, onClose, children }: AppDialogProps) {
   const token = useRef(Symbol("relay-dialog"));
   const panel = useRef<HTMLElement>(null);
   const closeRef = useRef(onClose);
@@ -45,13 +46,13 @@ export default function AppDialog({ open, title, variant = "dialog", onClose, ch
       }
     };
     document.addEventListener("keydown", onKeydown);
-    requestAnimationFrame(() => (focusable()[0] ?? panel.current)?.focus());
+    requestAnimationFrame(() => ((initialFocusSelector ? panel.current?.querySelector<HTMLElement>(initialFocusSelector) : null) ?? focusable()[0] ?? panel.current)?.focus());
     return () => {
       popDialog(token.current);
       document.removeEventListener("keydown", onKeydown);
       if (returnFocus?.isConnected) returnFocus.focus();
     };
-  }, [open]);
+  }, [open, initialFocusSelector]);
 
   if (!open) return null;
   return createPortal(

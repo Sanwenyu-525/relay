@@ -6,8 +6,10 @@ import SourceDetailDialog from "../components/SourceDetailDialog";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { fixtureModeFromQuery } from "../lib/fixtureMode";
+import { useRelayConnection } from "../lib/relayConnection";
 import { executorLabels, interactionModeLabels, taskStatusLabels } from "../lib/labels";
 import type { FixtureError, ProjectSnapshot, SourceReference, TaskDefinitionDraft } from "../types";
+import LiveTaskSkillFactsView from "./LiveTaskSkillFactsView";
 
 const copyDraft = (value: TaskDefinitionDraft): TaskDefinitionDraft => ({ ...value, acceptanceCriteria: [...value.acceptanceCriteria] });
 function toActionError(caught: unknown, fallback: string) {
@@ -15,6 +17,11 @@ function toActionError(caught: unknown, fallback: string) {
 }
 
 export default function TaskDefinitionView() {
+  const connection = useRelayConnection();
+  return connection.client ? <LiveTaskSkillFactsView client={connection.client} kind="definition" /> : <FixtureTaskDefinitionView />;
+}
+
+function FixtureTaskDefinitionView() {
   const { id = "" } = useParams();
   const [query] = useSearchParams();
   const mode = fixtureModeFromQuery(query);

@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
+import type { Static } from '@sinclair/typebox';
 
 import { createGoal } from '../application/create-goal.js';
+import { archiveProject } from '../application/archive-project.js';
 import { createProject } from '../application/create-project.js';
 import { requireWorkspaceVisible } from '../application/guards.js';
 import {
@@ -9,12 +11,15 @@ import {
 } from '../application/project-goal-links.js';
 import {
   listProjectGoals,
+  listProjects,
   readGoalById,
   readProjectById,
 } from '../application/project-queries.js';
 import {
   CreateGoalBodySchema,
   CreateGoalResultSchema,
+  ArchiveProjectBodySchema,
+  ArchiveProjectResultSchema,
   CreateProjectBodySchema,
   CreateProjectResultSchema,
   GoalSchema,
@@ -23,12 +28,16 @@ import {
   ProjectGoalListSchema,
   ProjectGoalUnlinkResultSchema,
   ProjectSchema,
+  ProjectListSchema,
+  ProjectsListQuerySchema,
   UnlinkProjectGoalBodySchema,
   WorkspaceGoalParamsSchema,
   WorkspaceParamsSchema,
   WorkspaceProjectParamsSchema,
   commandEnvelopeSchema,
 } from './domain-schemas.js';
+import { decodeProjectListCursor, encodeProjectListCursor } from './cursor.js';
+import { validationFailed } from '../application/domain-error.js';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
 
 /**
@@ -42,6 +51,34 @@ export function registerProjectRoutes(
   app: FastifyInstance,
   dependencies: RouteDependencies,
 ): void {
+  app.get('/projects', {
+    schema: {
+      params: WorkspaceParamsSchema,
+      querystring: ProjectsListQuerySchema,
+      response: { 200: ProjectListSchema },
+    },
+  }, async (request, reply) => {
+    try {
+      const params = request.params as { workspace_id: string };
+      const query = request.query as Static<typeof ProjectsListQuerySchema>;
+      const status = query.status ?? 'active';
+      const limit = resolveProjectListLimit(query.limit);
+      await requireWorkspaceVisible(dependencies.database.executor, params.workspace_id);
+      const result = await listProjects(dependencies.database.executor, {
+        workspaceId: params.workspace_id, status, limit,
+        before: query.cursor === undefined ? null
+          : decodeProjectListCursor(query.cursor, params.workspace_id, status),
+      });
+      return {
+        items: result.items,
+        next_cursor: result.next_cursor === null ? null
+          : encodeProjectListCursor(params.workspace_id, status, result.next_cursor),
+      };
+    } catch (error) {
+      return sendReadError(reply, error, request.id);
+    }
+  });
+
   app.post(
     '/projects',
     {
@@ -91,6 +128,23 @@ export function registerProjectRoutes(
       }
     },
   );
+
+  app.post('/projects/:project_id/archive', {
+    schema: {
+      params: WorkspaceProjectParamsSchema,
+      body: ArchiveProjectBodySchema,
+      response: { 200: commandEnvelopeSchema(ArchiveProjectResultSchema) },
+    },
+  }, createCommandHandler(dependencies, {
+    commandType: 'ArchiveProject', bodySchema: ArchiveProjectBodySchema,
+    execute: async ({ executor, body, params }) => {
+      const outcome = await archiveProject(executor, {
+        workspaceId: params.workspace_id ?? '', projectId: params.project_id ?? '',
+        commandId: body.command_id, expectedRevision: body.expected_revision,
+      });
+      return { outcome, result: outcome.result };
+    },
+  }));
 
   app.get(
     '/projects/:project_id/goals',
@@ -221,4 +275,13 @@ export function registerProjectRoutes(
       }
     },
   );
+}
+
+function resolveProjectListLimit(raw: string | undefined): number {
+  if (raw === undefined) return 50;
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(value) || value < 1 || value > 100) {
+    throw validationFailed([{ field: 'limit', message: 'must be an integer between 1 and 100' }]);
+  }
+  return value;
 }

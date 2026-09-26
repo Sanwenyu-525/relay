@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import AssistSourcePicker from "../src/components/AssistSourcePicker";
+import type { RelayAssistSourceRef } from "../src/api/relayClient";
 import { activateRelayConnection, resetRelayConnectionForTest, useFixtureData } from "../src/lib/relayConnection";
 import { flush, mountReact } from "./mountApp";
 
@@ -13,9 +14,9 @@ function response(body: unknown): Response {
   return { ok: true, status: 200, json: async () => body } as Response;
 }
 
-async function mountPicker(props: { projectId: string; selectedRefs: readonly string[] }) {
-  const emitted: (readonly string[])[] = [];
-  const onChange = (refs: readonly string[]) => emitted.push(refs);
+async function mountPicker(props: { projectId: string; selectedRefs: readonly RelayAssistSourceRef[] }) {
+  const emitted: (readonly RelayAssistSourceRef[])[] = [];
+  const onChange = (refs: readonly RelayAssistSourceRef[]) => { emitted.push(refs); };
   const mounted = await mountReact(createElement(AssistSourcePicker, { ...props, onChange }));
   return Object.assign(mounted.wrapper, {
     unmount: mounted.unmount,
@@ -65,7 +66,7 @@ describe("P12 Assist 显式来源选择", () => {
     expect(wrapper.text()).not.toContain("其他项目资料");
     await wrapper.get('input[type="checkbox"]').setValue(true);
     expect(wrapper.emitted("update:selectedRefs")?.at(-1)?.[0]).toEqual([
-      "knowledge:33333333-3333-4333-8333-333333333333:v2"
+      { kind: "KNOWLEDGE", rootId: "33333333-3333-4333-8333-333333333333", version: "2" }
     ]);
     wrapper.unmount();
   });
@@ -75,7 +76,7 @@ describe("P12 Assist 显式来源选择", () => {
     let releaseOld: ((value: Response) => void) | null = null;
     vi.stubGlobal("fetch", vi.fn(async () => new Promise<Response>((resolve) => { releaseOld = resolve; })));
     const wrapper = await mountPicker({ projectId,
-      selectedRefs: ["knowledge:33333333-3333-4333-8333-333333333333:v1"] });
+      selectedRefs: [{ kind: "KNOWLEDGE", rootId: "33333333-3333-4333-8333-333333333333", version: "1" }] });
     await wrapper.get("#assist-source-query").setValue("旧项目");
     await wrapper.get("form").trigger("submit");
     expect(releaseOld).not.toBeNull();

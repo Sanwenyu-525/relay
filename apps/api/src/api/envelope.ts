@@ -34,7 +34,9 @@ const CREATED_COMMAND_TYPES: readonly string[] = ['SubmitHumanArtifactVersion'];
 
 export function successStatusOf(commandType: string): 200 | 201 | 202 {
   // Delegate 已原子获得执行权，但工作尚未完成：按契约第 4 节返回 202（已接受）。
-  if (commandType === 'DelegateTask' || commandType === 'RequestRunControl' || commandType === 'ResumeRun') {
+  // Assist 生成同为异步工作：202 表示消息已排队，回复以消息状态查询为准。
+  if (commandType === 'DelegateTask' || commandType === 'RequestRunControl' ||
+      commandType === 'ResumeRun' || commandType === 'RequestAssistMessage') {
     return 202;
   }
 
@@ -49,6 +51,7 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
     case 'CreateProject':
     case 'LinkProjectGoal':
     case 'UnlinkProjectGoal':
+    case 'ArchiveProject':
       return typeof result.project_id === 'string' ? `projects/${result.project_id}` : undefined;
     case 'SetProjectState':
       return typeof result.project_id === 'string'
@@ -78,6 +81,9 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
     case 'DisableManagedResource':
       return typeof result.project_id === 'string' && typeof result.resource_id === 'string'
         ? `projects/${result.project_id}/managed-resources/${result.resource_id}` : undefined;
+    case 'CreateWebImportJob':
+      return typeof result.project_id === 'string' && typeof result.import_job_id === 'string'
+        ? `projects/${result.project_id}/import-jobs/${result.import_job_id}` : undefined;
     case 'CreateKnowledge':
     case 'AddKnowledgeVersion':
     case 'ArchiveKnowledge':
@@ -95,6 +101,7 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
       return typeof result.rule_id === 'string' ? `rules/${result.rule_id}` : undefined;
     case 'CreateTask':
     case 'EditTaskPresentation':
+    case 'SetTaskPlanningMetadata':
     case 'MarkTaskReady':
     case 'StartHumanTask':
     case 'CancelTask':
@@ -104,6 +111,23 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
     case 'CompleteHumanTask':
     case 'ReopenTask':
       return typeof result.task_id === 'string' ? `tasks/${result.task_id}` : undefined;
+    case 'SetTaskSelection':
+    case 'SetFocusSelection':
+      return 'today';
+    case 'CreateAssistSession':
+      return typeof result.session_id === 'string' ? `assist-sessions/${result.session_id}` : undefined;
+    case 'CreateProjectBlueprintProposal':
+    case 'ApplyProjectBlueprint':
+    case 'RejectProjectBlueprint':
+      return typeof result.project_id === 'string' &&
+        typeof (result.id ?? result.proposal_id) === 'string'
+        ? `projects/${result.project_id}/blueprint-proposals/${result.id ?? result.proposal_id}`
+        : undefined;
+    case 'RequestAssistMessage':
+      return typeof result.session_id === 'string' ? `assist-sessions/${result.session_id}` : undefined;
+    case 'AcceptAssistProposal':
+    case 'RejectAssistProposal':
+      return typeof result.proposal_id === 'string' ? `assist-proposals/${result.proposal_id}` : undefined;
     default:
       return undefined;
   }

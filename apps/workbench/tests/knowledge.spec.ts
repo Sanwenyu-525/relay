@@ -33,6 +33,10 @@ function memory() {
     created_at: "2026-09-23T00:00:00.000Z", updated_at: "2026-09-23T00:00:00.000Z" };
 }
 
+function project(archivedAt: string | null = null) {
+  return { id: projectId, title: "项目", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: archivedAt };
+}
+
 function decision(id: string, superseded = false) {
   return { id, project_id: null, title: id === decisionId ? "旧决定" : "新决定",
     status: superseded ? "SUPERSEDED" : "ACTIVE", revision: superseded ? "1" : "0", current_version: "1",
@@ -97,6 +101,7 @@ describe("P10 information workbench", () => {
     let posted: Record<string, unknown> | null = null;
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
+      if (url === `${base}/projects/${projectId}`) return response(200, project());
       if (url === `${base}/knowledge?project_id=${projectId}`) return response(200, []);
       if (url === `${base}/memories?project_id=${projectId}` && init?.method !== "POST") return response(200, saved ? [{ ...memory(), project_id: projectId }] : []);
       if (url === `${base}/memories` && init?.method === "POST") {
@@ -121,6 +126,33 @@ describe("P10 information workbench", () => {
     await flush(60);
     expect(posted).toMatchObject({ project_id: projectId, title: "约定", text: "需要留存的事实", confirmed: true });
     expect(mounted.wrapper.text()).toContain("明确确认：local-user");
+  });
+
+  it("归档项目资料可读但新建、追加和归档命令不可发；Workspace 规则仍独立可写", async () => {
+    activate();
+    let posts = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST") { posts++; throw new Error("archived project write sent"); }
+      if (url === `${base}/projects/${projectId}`) return response(200, project("2026-09-26T00:00:00.000Z"));
+      if (url === `${base}/knowledge?project_id=${projectId}`) return response(200, [{ ...knowledge(), project_id: projectId }]);
+      if (url === `${base}/knowledge/${knowledgeId}`) return response(200, { ...knowledge(), project_id: projectId });
+      if (url === `${base}/knowledge/${knowledgeId}/versions`) return response(200, []);
+      if (url === `${base}/rules?project_id=${projectId}`) return response(200, []);
+      throw new Error(`unexpected request ${url}`);
+    }));
+    const mounted = await mountWorkbench(`/projects/${projectId}/knowledge`);
+    unmount = mounted.unmount;
+    await flush();
+    expect(mounted.wrapper.text()).toContain("设计资料");
+    expect(mounted.wrapper.get('[data-testid="knowledge-new-version"]').attributes("disabled")).toBeDefined();
+    expect(mounted.wrapper.text()).toContain("关联项目已归档");
+    await mounted.wrapper.get('[data-testid="knowledge-tab-RULE"]').trigger("click");
+    await flush();
+    await mounted.wrapper.get('[data-testid="knowledge-create"]').trigger("click");
+    await flush();
+    expect(mounted.wrapper.get('[data-testid="knowledge-save"]').attributes("disabled")).toBeDefined();
+    expect(posts).toBe(0);
   });
 
   it("写入响应丢失后只用原 command_id 查回执", async () => {

@@ -12,6 +12,7 @@ import { DomainError, invalidTransition, resourceNotFound, revisionConflict,
   validationFailed } from './domain-error.js';
 import { requireRevision } from './revisions.js';
 import type { Repositories } from './unit-of-work.js';
+import { lockWritableProjectInWorkspace } from './guards.js';
 
 type ScopeInput = { workspaceId: string; commandId: string };
 type Result = { readonly knowledge_id?: string; readonly memory_id?: string;
@@ -41,9 +42,7 @@ async function projectScope(r: Repositories, workspaceId: string,
     if (await r.workspaces.readWorkspace(workspaceId) === undefined) throw resourceNotFound('Workspace');
     return;
   }
-  if ((await r.projects.readProject(projectId))?.workspace_id !== workspaceId) {
-    throw resourceNotFound('Project');
-  }
+  await lockWritableProjectInWorkspace(r, workspaceId, projectId);
 }
 
 async function root<T extends InformationRootRow | RuleRow>(r: Repositories,
@@ -51,6 +50,9 @@ async function root<T extends InformationRootRow | RuleRow>(r: Repositories,
   id: string): Promise<T> {
   const found = await r.information.readRoot<T>(kind, id, true);
   if (found?.workspace_id !== workspaceId) throw resourceNotFound(kind);
+  if (found.project_id !== null) {
+    await lockWritableProjectInWorkspace(r, workspaceId, found.project_id);
+  }
   return found;
 }
 
@@ -122,7 +124,7 @@ export async function createKnowledge(db: DbExecutor, input: ScopeInput & {
         knowledgeId: id, projectId: input.projectId, version: 1n,
         sourceKind: source.kind, mediaType: source.mediaType,
         text: source.text, hash: source.hash, artifactId: source.artifactId,
-        artifactVersionId: source.artifactVersionId, sourceRefs: source.refs });
+        artifactVersionId: source.artifactVersionId, sourceUri: null, sourceRefs: source.refs });
       await r.workspaces.bumpContextRevision(input.workspaceId);
       return { knowledge_id: id, revision: '0', version: '1', status: 'ACTIVE' };
     } });
@@ -150,7 +152,7 @@ export async function addKnowledgeVersion(db: DbExecutor, input: ScopeInput & {
         knowledgeId: item.id, projectId: item.project_id, version,
         sourceKind: source.kind, mediaType: source.mediaType,
         text: source.text, hash: source.hash, artifactId: source.artifactId,
-        artifactVersionId: source.artifactVersionId, sourceRefs: source.refs });
+        artifactVersionId: source.artifactVersionId, sourceUri: null, sourceRefs: source.refs });
       await r.information.setRootVersion('knowledge', item.id, version);
       await r.workspaces.bumpContextRevision(input.workspaceId);
       return { knowledge_id: item.id, revision: toDecimalString(item.revision + 1n),
@@ -335,6 +337,7 @@ async function ruleScope(r: Repositories, workspaceId: string, scope: RuleRow['s
   }
   const task = await r.tasks.readTask(scopeId);
   if (task?.workspace_id !== workspaceId || task.project_id === null) throw resourceNotFound('Task');
+  await lockWritableProjectInWorkspace(r, workspaceId, task.project_id);
   return { projectId: task.project_id, taskId: task.id };
 }
 

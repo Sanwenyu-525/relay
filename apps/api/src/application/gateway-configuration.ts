@@ -6,6 +6,7 @@ import type { DbExecutor } from '../infrastructure/database.js';
 import type { GatewayCapability, GatewayDecision } from '../infrastructure/database-schema.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import { DomainError, invalidTransition, resourceNotFound, validationFailed } from './domain-error.js';
+import { lockWritableProjectInWorkspace } from './guards.js';
 import { withTransaction } from './unit-of-work.js';
 
 function gatewayConflict(code: string, detail: string): DomainError {
@@ -45,8 +46,7 @@ export async function createFakeConnection(db: DbExecutor, input: {
   ]);
   return withTransaction(db, async (repositories) => {
     await lockWritableAuthority(repositories, input.workspaceId);
-    const project = await repositories.projects.readProject(input.projectId);
-    if (project?.workspace_id !== input.workspaceId) throw resourceNotFound('Project');
+    await lockWritableProjectInWorkspace(repositories, input.workspaceId, input.projectId);
     const connection = await repositories.gateway.insertConnection({ id: randomUUID(), workspaceId: input.workspaceId,
       projectId: input.projectId, config: input.config ?? {} });
     for (const capability of input.capabilities) await repositories.gateway.addConnectionCapability(connection.id, capability);
@@ -66,6 +66,7 @@ export async function setFakeConnection(db: DbExecutor, input: {
     await lockWritableAuthority(repositories, input.workspaceId);
     const current = await repositories.gateway.readConnection(input.connectionId);
     if (current?.workspace_id !== input.workspaceId) throw resourceNotFound('Connection');
+    await lockWritableProjectInWorkspace(repositories, input.workspaceId, current.project_id);
     const changed = await repositories.gateway.setConnection({ id: current.id, status: input.status, config: input.config });
     await repositories.workspaces.bumpAuthority(input.workspaceId);
     return { version: changed.version.toString() };
@@ -84,8 +85,7 @@ export async function createGatewayPolicy(db: DbExecutor, input: {
   }
   return withTransaction(db, async (repositories) => {
     await lockWritableAuthority(repositories, input.workspaceId);
-    const project = await repositories.projects.readProject(input.projectId);
-    if (project?.workspace_id !== input.workspaceId) throw resourceNotFound('Project');
+    await lockWritableProjectInWorkspace(repositories, input.workspaceId, input.projectId);
     const policy = await repositories.gateway.insertPolicy({ id: randomUUID(), workspaceId: input.workspaceId,
       projectId: input.projectId, capability: input.capability, actionType: input.actionType,
       targetPrefix: input.targetPrefix, decision: input.decision, maxPayloadBytes: input.maxPayloadBytes });
@@ -103,6 +103,7 @@ export async function replaceGatewayPolicy(db: DbExecutor, input: {
     await lockWritableAuthority(repositories, input.workspaceId);
     const policy = await repositories.gateway.readPolicy(input.policyId);
     if (policy?.workspace_id !== input.workspaceId) throw resourceNotFound('Permission policy');
+    await lockWritableProjectInWorkspace(repositories, input.workspaceId, policy.project_id);
     const next = (await repositories.gateway.latestPolicyVersion(policy.id)) + 1n;
     await repositories.gateway.insertPolicyVersion({ policyId: policy.id, version: next,
       capability: input.capability, actionType: input.actionType, targetPrefix: input.targetPrefix,
@@ -120,6 +121,7 @@ export async function revokeGatewayPolicy(db: DbExecutor, input: {
     await lockWritableAuthority(repositories, input.workspaceId);
     const policy = await repositories.gateway.readPolicy(input.policyId);
     if (policy?.workspace_id !== input.workspaceId) throw resourceNotFound('Permission policy');
+    await lockWritableProjectInWorkspace(repositories, input.workspaceId, policy.project_id);
     if (policy.status === 'REVOKED') return;
     await repositories.gateway.revokePolicy(policy.id);
     await repositories.workspaces.bumpAuthority(input.workspaceId);
@@ -134,8 +136,7 @@ export async function registerManagedResource(db: DbExecutor, input: {
   if (!(await stat(canonicalRoot)).isDirectory()) throw validationFailed([{ field: 'root_path', message: 'must be an existing directory' }]);
   return withTransaction(db, async (repositories) => {
     await lockWritableAuthority(repositories, input.workspaceId);
-    const project = await repositories.projects.readProject(input.projectId);
-    if (project?.workspace_id !== input.workspaceId) throw resourceNotFound('Project');
+    await lockWritableProjectInWorkspace(repositories, input.workspaceId, input.projectId);
     await repositories.gateway.lockResourceRegistry();
     const existing = await repositories.gateway.listResources();
     if (existing.some((row) => row.project_id === input.projectId && row.identity_key === canonicalResourceIdentity(canonicalRoot))) {
@@ -155,6 +156,7 @@ export async function disableManagedResource(db: DbExecutor, input: {
     await lockWritableAuthority(repositories, input.workspaceId);
     const resource = await repositories.gateway.lockResource(input.resourceId);
     if (resource?.workspace_id !== input.workspaceId) throw resourceNotFound('Managed resource');
+    await lockWritableProjectInWorkspace(repositories, input.workspaceId, resource.project_id);
     if (resource.status === 'DISABLED') return;
     await repositories.gateway.lockResourceRegistry();
     if ((await repositories.gateway.listOccupiedResources()).some((row) =>
@@ -174,8 +176,7 @@ export async function createImportJob(db: DbExecutor, input: {
     throw invalidTransition('P09 Fake 用户导入只接受显式用户主体与固定公共 Fake 来源。');
   }
   return withTransaction(db, async (repositories) => {
-    const project = await repositories.projects.readProject(input.projectId);
-    if (project?.workspace_id !== input.workspaceId) throw resourceNotFound('Project');
+    await lockWritableProjectInWorkspace(repositories, input.workspaceId, input.projectId);
     const job = await repositories.gateway.insertImportJob({ id: randomUUID(), workspaceId: input.workspaceId,
       projectId: input.projectId, actorRef: input.actorRef, configVersion: input.configVersion,
       sourceUri: input.sourceUri, commandId: input.commandId });
