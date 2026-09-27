@@ -116,8 +116,9 @@ test('migrate entry reports the applied migrations without repeating them', asyn
       '0028_m04_assist_live_preview',
       '0029_m04_run_draft_live_preview',
       '0030_m06_real_tools',
+      '0031_m06_change_sets',
     ]);
-  assert.equal(payload.ledger_rows, 30);
+  assert.equal(payload.ledger_rows, 31);
 });
 
 test('migrate entry fails explicitly without a migration connection', async () => {

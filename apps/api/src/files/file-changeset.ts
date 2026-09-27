@@ -289,18 +289,30 @@ export async function executeFileChangeset(
   };
 }
 
+/** 逐文件只读核对观测：期望摘要与实际回读摘要，以及二者是否一致。 */
+export interface FileReconciliationCheck {
+  readonly path: string;
+  readonly expectedSha: string | null;
+  readonly actualSha: string | null;
+  readonly matches: boolean;
+}
+
 export async function reconcileFileChangeset(
   rootPath: string,
   changes: readonly FileChange[],
-): Promise<{ outcome: 'SUCCEEDED' | 'FAILED'; details: JsonObject }> {
+): Promise<{
+  outcome: 'SUCCEEDED' | 'FAILED';
+  checks: readonly FileReconciliationCheck[];
+  details: JsonObject;
+}> {
   let canonicalRoot: string;
   try {
     canonicalRoot = await realpath(rootPath);
   } catch {
-    return { outcome: 'FAILED', details: { reason: 'CANONICAL_ROOT_UNAVAILABLE' } };
+    return { outcome: 'FAILED', checks: [], details: { reason: 'CANONICAL_ROOT_UNAVAILABLE' } };
   }
 
-  const fileChecks: Array<{ path: string; expectedSha: string | null; actualSha: string | null; matches: boolean }> = [];
+  const fileChecks: FileReconciliationCheck[] = [];
   let allMatch = true;
 
   for (const change of changes) {
@@ -333,6 +345,7 @@ export async function reconcileFileChangeset(
 
   return {
     outcome: allMatch ? 'SUCCEEDED' : 'FAILED',
+    checks: fileChecks,
     details: {
       reconciliation: allMatch ? 'ALL_MATCH' : 'MISMATCH_OR_PARTIAL',
       checks: fileChecks as unknown as JsonObject[],

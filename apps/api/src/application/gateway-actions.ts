@@ -22,8 +22,10 @@ import { readMockActionOperationId } from '../workflow/execution-contract.js';
 import { readWebFetchConfig, webFetchExecute, type WebFetchLimits } from '../web/web-fetch.js';
 import {
   executeFileChangeset, reconcileFileChangeset, validateSafeRelativePath, isProtectedPath,
-  isFrozenBaseline, type FileChange,
+  isFrozenBaseline, type FileChange, type FileChangeOutcome, type FileReconciliationCheck,
 } from '../files/file-changeset.js';
+import type { ChangeSetLedgerFile, ChangeSetLedgerHeader } from '../files/change-set-repository.js';
+import type { ChangeSetFileStatus, ChangeSetStatus } from '../infrastructure/database-schema.js';
 import {
   gitGetStatus, gitGetDiff, gitGetLog, gitStageFile, gitCommit, gitPush,
   reconcileGitCommit, reconcileGitPush,
@@ -840,6 +842,119 @@ async function hasCurrentGatewayEffectLease(db: DbExecutor, admitted: AdmittedIn
   });
 }
 
+/** 逐文件观测：承接 executeFileChangeset 结果或 reconcileFileChangeset 回读；纯内存，无磁盘访问。 */
+interface FileObservation {
+  readonly path: string;
+  readonly status: ChangeSetFileStatus;
+  /** 本次尝试之后该路径上实际内容的摘要；null 表示不存在（DELETE 的成功形态）。 */
+  readonly actualSha256: string | null;
+  /** 执行前实测到的当前内容摘要；核对阶段无法回看前像时为 null。 */
+  readonly observedBaselineSha256: string | null;
+  readonly error: string | null;
+}
+
+/** 变化集账本草稿：冻结输入 + 逐文件观测 + 执行时使用的规范根。 */
+interface ChangeSetDraft {
+  readonly canonicalRoot: string;
+  readonly inputChanges: readonly FileChange[];
+  readonly observations: readonly FileObservation[];
+}
+
+function targetShaOfContent(content: string): string {
+  return createHash('sha256').update(content).digest('hex');
+}
+
+/** 预期目标摘要：DELETE 期望文件不存在（null）；否则取冻结目标或按内容计算。 */
+function expectedTargetOf(change: FileChange): string | null {
+  if (change.action === 'DELETE') return null;
+  return change.targetSha256 ?? (change.content !== undefined ? targetShaOfContent(change.content) : null);
+}
+
+/** executeFileChangeset 的结果 → 观测。适配器不重读文件：APPLIED 的实际摘要就是写入内容的目标摘要， */
+/** 未落盘的 CONFLICT/FAILED 则保留执行前实测内容——它仍代表当前磁盘现状。 */
+function executionObservations(outcomes: readonly FileChangeOutcome[]): FileObservation[] {
+  return outcomes.map((outcome) => ({
+    path: outcome.path,
+    status: outcome.status,
+    actualSha256: outcome.status === 'APPLIED'
+      ? (outcome.action === 'DELETE' ? null : (outcome.targetSha256 ?? null))
+      : (outcome.actualBaselineSha256 ?? null),
+    observedBaselineSha256: outcome.actualBaselineSha256 ?? null,
+    error: outcome.error ?? null,
+  }));
+}
+
+/** reconcileFileChangeset 的回读 → 观测。命中目标摘要才记 APPLIED；未命中按「没落地」与 */
+/** 「内容不符」区分 FAILED/CONFLICT，整体状态由调用方保守收敛为 UNKNOWN。 */
+function reconciliationObservations(checks: readonly FileReconciliationCheck[]): FileObservation[] {
+  return checks.map((check) => ({
+    path: check.path,
+    status: check.matches ? 'APPLIED' : (check.actualSha === null ? 'FAILED' : 'CONFLICT'),
+    actualSha256: check.actualSha,
+    observedBaselineSha256: null,
+    error: check.matches ? null : 'RECONCILE_UNCONFIRMED',
+  }));
+}
+
+/** 以冻结输入为准逐条对齐观测：声明侧取准备期事实，观测侧取真实落盘或回读结果。 */
+function ledgerFiles(draft: ChangeSetDraft): ChangeSetLedgerFile[] {
+  const byPath = new Map(draft.observations.map((item) => [item.path, item]));
+  return draft.inputChanges.map((change) => {
+    const observation: FileObservation = byPath.get(change.path) ?? {
+      path: change.path, status: 'FAILED', actualSha256: null, observedBaselineSha256: null,
+      error: 'NO_OUTCOME_RECORDED',
+    };
+    return {
+      relative_path: change.path, action: change.action,
+      baseline_sha256: change.baselineSha256 ?? null,
+      observed_baseline_sha256: observation.observedBaselineSha256,
+      target_sha256: expectedTargetOf(change),
+      actual_sha256: observation.actualSha256,
+      status: observation.status, error: observation.error, diff_ref: null,
+    };
+  });
+}
+
+/**
+ * 账本作用域取自已锁定的 operation/invocation 事实。FILE_WRITE 只允许 RUN 来源且必带受管
+ * 资源（0030 CHECK）；万一归属缺失就不写账本，也不用空值伪造一行证据（外键会拒绝，
+ * 结算事务不应因账本本身失败而丢掉调用结果）。
+ */
+function ledgerHeader(op: LogicalOperationRow, invocationId: string,
+  canonicalRoot: string): ChangeSetLedgerHeader | undefined {
+  if (op.run_id === null || op.resource_id === null) return undefined;
+  return {
+    workspace_id: op.workspace_id, project_id: op.project_id,
+    run_id: op.run_id, resource_id: op.resource_id,
+    operation_id: op.id, invocation_id: invocationId,
+    action_type: op.action_type === 'WRITE_FILE' ? 'WRITE_FILE' : 'APPLY_CHANGESET',
+    canonical_root: canonicalRoot,
+  };
+}
+
+/**
+ * 整体状态：全部落盘 SUCCEEDED；执行报告存在冲突/失败为 PARTIAL（部分应用不整体成功）；
+ * 结果无法归属本次调用时 UNKNOWN，等待核对，不写成功。
+ */
+function ledgerStatus(files: readonly ChangeSetLedgerFile[],
+  settled: 'SUCCEEDED' | 'UNKNOWN' | 'FAILED'): ChangeSetStatus {
+  if (settled === 'UNKNOWN') return 'UNKNOWN';
+  return files.every((file) => file.status === 'APPLIED') ? 'SUCCEEDED' : 'PARTIAL';
+}
+
+/** WRITE_FILE 的单文件退化变化集：执行与核对共用同一构造，账本与磁盘动作不会各自漂移。 */
+function fileWriteInputChanges(op: LogicalOperationRow): FileChange[] {
+  const baselineSha = typeof op.params.baseline_sha256 === 'string' ? op.params.baseline_sha256 : null;
+  const content = typeof op.params.content === 'string' ? op.params.content : '';
+  return [{
+    path: relative(dirname(op.normalized_target), op.normalized_target),
+    action: baselineSha ? 'MODIFY' : 'CREATE',
+    baselineSha256: baselineSha,
+    content,
+    targetSha256: targetShaOfContent(content),
+  }];
+}
+
 async function settleGatewayInvocation(db: DbExecutor, admitted: AdmittedInvocation,
   status: 'SUCCEEDED' | 'UNKNOWN' | 'FAILED', resultRef: JsonObject,
   origin: GatewayOrigin): Promise<GatewayDispatchResult> {
@@ -884,6 +999,20 @@ async function settleGatewayInvocation(db: DbExecutor, admitted: AdmittedInvocat
         op.capability_key === 'FILE_READ' || op.capability_key === 'WEB_FETCH';
       await repositories.gateway.setClaimStatus(invocation.resource_claim_id,
         released ? 'RELEASED' : 'QUARANTINED');
+    }
+    if (!stale && op.capability_key === 'FILE_WRITE' && Array.isArray(evidence.changes)) {
+      // M06 增量A：把真实执行后的逐文件结果固化为不可变账本，与结算同事务提交，无磁盘访问。
+      const canonicalRoot = op.action_type === 'APPLY_CHANGESET'
+        ? op.normalized_target : dirname(op.normalized_target);
+      const header = ledgerHeader(op, invocation.id, canonicalRoot);
+      if (header !== undefined) {
+        const inputChanges: readonly FileChange[] = op.action_type === 'APPLY_CHANGESET'
+          ? (op.params.changes as unknown as FileChange[])
+          : fileWriteInputChanges(op);
+        const files = ledgerFiles({ canonicalRoot, inputChanges,
+          observations: executionObservations(evidence.changes as unknown as FileChangeOutcome[]) });
+        await repositories.changeSets.recordExecution(header, randomUUID(), files, ledgerStatus(files, status));
+      }
     }
     return { operation_id: op.id, invocation_id: invocation.id, status: finalStatus, result_ref: evidence };
   });
@@ -1314,19 +1443,13 @@ export async function reconcileGatewayInvocation(db: DbExecutor, input: {
     if (invocation.status === 'PREPARED') {
       toolReconciliation = { status: 'NOT_EXECUTED', result: { reason: 'PREPARED_NOT_EXECUTED' } };
     } else {
+      const canonicalRoot = op.action_type === 'APPLY_CHANGESET'
+        ? op.normalized_target : dirname(op.normalized_target);
+      // 与执行侧共用同一份冻结输入构造，避免「核对用的期望」和「真正写入的期望」漂移。
       const changes = op.action_type === 'APPLY_CHANGESET'
-        ? (op.params.changes as any[]) as FileChange[]
-        : [{
-            path: relative(dirname(op.normalized_target), op.normalized_target),
-            action: op.params.baseline_sha256 ? 'MODIFY' : 'CREATE',
-            baselineSha256: typeof op.params.baseline_sha256 === 'string' ? op.params.baseline_sha256 : null,
-            content: typeof op.params.content === 'string' ? op.params.content : '',
-            targetSha256: createHash('sha256').update(typeof op.params.content === 'string' ? op.params.content : '').digest('hex'),
-          } as FileChange];
-      const check = await reconcileFileChangeset(
-        op.action_type === 'APPLY_CHANGESET' ? op.normalized_target : dirname(op.normalized_target),
-        changes,
-      );
+        ? (op.params.changes as unknown as FileChange[])
+        : fileWriteInputChanges(op);
+      const check = await reconcileFileChangeset(canonicalRoot, changes);
       toolReconciliation = {
         status: check.outcome === 'SUCCEEDED' ? 'SUCCEEDED' : 'UNKNOWN',
         result: check.details,
@@ -1417,6 +1540,21 @@ export async function reconcileGatewayInvocation(db: DbExecutor, input: {
     await tx.gateway.setOperationStatus(op.id, status === 'NOT_EXECUTED' ? 'PREPARED' : status, evidence);
     if (invocation.resource_claim_id !== null) await tx.gateway.setClaimStatus(invocation.resource_claim_id,
       status === 'UNKNOWN' ? 'QUARANTINED' : 'RELEASED');
+    if (op.capability_key === 'FILE_WRITE' && (status === 'SUCCEEDED' || status === 'UNKNOWN') &&
+        toolReconciliation?.result !== undefined && Array.isArray(toolReconciliation.result.checks)) {
+      // M06 增量A：崩溃后由核对回读固化账本；全匹配=SUCCEEDED，否则保守 UNKNOWN，同事务、无磁盘访问。
+      const canonicalRoot = op.action_type === 'APPLY_CHANGESET'
+        ? op.normalized_target : dirname(op.normalized_target);
+      const header = ledgerHeader(op, invocation.id, canonicalRoot);
+      if (header !== undefined) {
+        const inputChanges: readonly FileChange[] = op.action_type === 'APPLY_CHANGESET'
+          ? (op.params.changes as unknown as FileChange[]) : fileWriteInputChanges(op);
+        const files = ledgerFiles({ canonicalRoot, inputChanges,
+          observations: reconciliationObservations(
+            toolReconciliation.result.checks as unknown as FileReconciliationCheck[]) });
+        await tx.changeSets.recordReconciliation(header, randomUUID(), files, status === 'SUCCEEDED');
+      }
+    }
     return { status, operation_id: op.id };
   });
 }

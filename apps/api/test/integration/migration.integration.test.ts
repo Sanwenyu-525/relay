@@ -86,6 +86,7 @@ const ALL_MIGRATIONS = [
   '0028_m04_assist_live_preview',
   '0029_m04_run_draft_live_preview',
   '0030_m06_real_tools',
+  '0031_m06_change_sets',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {

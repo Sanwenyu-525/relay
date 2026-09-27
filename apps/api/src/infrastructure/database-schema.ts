@@ -404,6 +404,33 @@ export interface InvocationAttemptRow {
   readonly created_at: Date; readonly dispatched_at: Date | null; readonly resolved_at: Date | null;
 }
 
+/** 0031：一次 FILE_WRITE 执行（APPLY_CHANGESET/WRITE_FILE）的逐文件证据账本头。
+ * 与产生它的 invocation 一对一绑定；核对回到同一行收敛状态，不追加第二份历史。 */
+export type ChangeSetStatus = 'SUCCEEDED' | 'PARTIAL' | 'UNKNOWN';
+/** 整体状态的依据来源：适配器执行报告，或事后按真实内容回读核对。 */
+export type ChangeSetEvidenceSource = 'EXECUTION' | 'RECONCILIATION';
+export interface ChangeSetRow {
+  readonly id: string; readonly invocation_id: string; readonly operation_id: string;
+  readonly workspace_id: string; readonly project_id: string;
+  readonly run_id: string; readonly resource_id: string;
+  readonly action_type: 'APPLY_CHANGESET' | 'WRITE_FILE';
+  readonly canonical_root: string;
+  readonly status: ChangeSetStatus; readonly evidence_source: ChangeSetEvidenceSource;
+  readonly file_count: number; readonly created_at: Date; readonly updated_at: Date;
+}
+/** 不可变逐文件账本行：路径、动作、冻结基线/期望目标/实际摘要与应用状态。
+ * 应用角色只有 SELECT/INSERT，核对阶段只补记缺失路径，绝不改写已记录的状态与原因。
+ * diff_ref 为逐文件 diff 存储预留，本增量不生成。 */
+export type ChangeSetFileStatus = 'APPLIED' | 'CONFLICT' | 'FAILED';
+export interface ChangeSetFileRow {
+  readonly change_set_id: string; readonly invocation_id: string;
+  readonly relative_path: string; readonly action: 'CREATE' | 'MODIFY' | 'DELETE';
+  readonly baseline_sha256: string | null; readonly observed_baseline_sha256: string | null;
+  readonly target_sha256: string | null; readonly actual_sha256: string | null;
+  readonly status: ChangeSetFileStatus; readonly error: string | null;
+  readonly diff_ref: JsonObject | null; readonly created_at: Date;
+}
+
 /** BUILD_CONTEXT 的不可变快照；同一 Run 的同一摘要只写一次。 */
 export interface ContextManifestRow {
   readonly id: string;
@@ -918,6 +945,8 @@ export interface RelayDatabaseSchema {
   invocation_attempts: InvocationAttemptRow;
   approval_reservations: { readonly review_id: string; readonly operation_id: string; readonly reserved_at: Date };
   invocation_approval_bindings: { readonly invocation_id: string; readonly review_id: string; readonly operation_id: string };
+  change_sets: ChangeSetRow;
+  change_set_files: ChangeSetFileRow;
   workspaces: WorkspaceRow;
   workspace_execution_authority: WorkspaceExecutionAuthorityRow;
   projects: ProjectRow;

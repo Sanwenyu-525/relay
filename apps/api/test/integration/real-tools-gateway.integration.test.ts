@@ -5,6 +5,8 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test, { after, before } from 'node:test';
 
+import { sql } from 'kysely';
+
 import { delegateTask } from '../../src/application/delegate-task.js';
 import {
   claimGatewayWorker, claimRunForGateway, dispatchGatewayAction, prepareGatewayAction,
@@ -22,7 +24,7 @@ import type { GatewayCapability } from '../../src/infrastructure/database-schema
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
 import { isProcessAlive } from '../../src/cli-worker/process-tree.js';
 import { createDataRoot } from './api-harness.js';
-import { APP_DATABASE_URL, MIGRATIONS_DIRECTORY, MIGRATION_DATABASE_URL, openDatabase } from './integration-support.js';
+import { APP_DATABASE_URL, MIGRATIONS_DIRECTORY, MIGRATION_DATABASE_URL, expectSqlState, openDatabase } from './integration-support.js';
 
 // M06 real-tools verification: drives the already-wired FILE_WRITE / GIT_READ /
 // GIT_WRITE / CLI_RUN adapters through the full Gateway lifecycle (prepare -> approve
@@ -150,6 +152,15 @@ async function soleInvocation(workspaceId: string, operationId: string) {
   return { invocationId: invocation.id, status: invocation.status, operationStatus: persisted.operation.status };
 }
 
+/** M06 增量A：按 invocation 读回 change_sets 账本头与按路径排序的不可变逐文件行。 */
+async function readLedger(invocationId: string) {
+  return withTransaction(app.db, async (repositories) => {
+    const cs = await repositories.changeSets.readByInvocation(invocationId);
+    if (cs === undefined) return undefined;
+    return { cs, files: await repositories.changeSets.listFiles(cs.id) };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // P16 Files / changeset through the Gateway
 // ---------------------------------------------------------------------------
@@ -175,6 +186,22 @@ test('M06 FILE_WRITE APPLY_CHANGESET forces ASK, then writes real files after ap
   assert.equal(ref.changes[0]?.status, 'APPLIED');
   assert.equal(ref.changes[0]?.targetSha256, sha256(content), 'result records the applied target hash');
 
+  // M06 增量A：成功执行后应固化一份不可变账本，逐文件哈希与真实落地一致。
+  const { invocationId } = await soleInvocation(f.workspaceId, op);
+  const ledger = await readLedger(invocationId);
+  assert.ok(ledger, 'FILE_WRITE must persist a change_set ledger on settle');
+  assert.equal(ledger.cs.status, 'SUCCEEDED');
+  assert.equal(ledger.cs.operation_id, op);
+  assert.equal(ledger.files.length, 1);
+  assert.equal(ledger.files[0]?.relative_path, 'src/a.txt');
+  assert.equal(ledger.files[0]?.action, 'CREATE');
+  assert.equal(ledger.files[0]?.baseline_sha256, null, 'CREATE has no frozen baseline');
+  assert.equal(ledger.files[0]?.target_sha256, sha256(content));
+  assert.equal(ledger.files[0]?.actual_sha256, sha256(content));
+  assert.equal(ledger.files[0]?.status, 'APPLIED');
+  assert.equal(await withTransaction(app.db, (r) => r.changeSets.countByInvocation(invocationId)), 1,
+    'one settled invocation persists exactly one ledger');
+
   // A second dispatch on the settled operation must be rejected (no blind re-run).
   await assert.rejects(dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next }),
     (error: unknown) => code(error) === 'GATEWAY_OPERATION_SETTLED');
@@ -196,6 +223,17 @@ test('M06 FILE_WRITE baseline hash conflict leaves the existing file untouched',
   assert.equal(await readFile(join(f.root, 'notes.md'), 'utf8'), 'original\n', 'conflict must not touch the real file');
   const conflict = (result.result_ref as { changes?: Array<{ status: string }> }).changes?.[0];
   assert.equal(conflict?.status, 'CONFLICT');
+  // M06 增量A：部分成功固化为 PARTIAL 账本，冲突文件的实际摘要记录为磁盘原值（未被覆盖）。
+  const { invocationId } = await soleInvocation(f.workspaceId, op);
+  const ledger = await readLedger(invocationId);
+  assert.ok(ledger, 'a conflicted changeset still persists a ledger for evidence');
+  assert.equal(ledger.cs.status, 'PARTIAL');
+  assert.equal(ledger.files.length, 1);
+  assert.equal(ledger.files[0]?.relative_path, 'notes.md');
+  assert.equal(ledger.files[0]?.action, 'MODIFY');
+  assert.equal(ledger.files[0]?.status, 'CONFLICT');
+  assert.equal(ledger.files[0]?.actual_sha256, sha256('original\n'), 'ledger records the untouched on-disk hash');
+  assert.equal(ledger.files[0]?.target_sha256, sha256('overwrite\n'));
   await releaseGatewayWorker(app.db, { workspaceId: f.workspaceId, runId: f.runId, workerId: next.workerId, workerEpoch: next.workerEpoch });
 });
 
@@ -229,6 +267,17 @@ test('M06 FILE_WRITE crash after write reconciles SUCCEEDED; tampering reconcile
     invocationId: stuck.invocationId, oldProcessStopped: true, stoppedWorkerId: next.workerId, stoppedWorkerEpoch: next.workerEpoch });
   assert.equal(okReconcile.status, 'SUCCEEDED', 'present content matching the target hash reconciles as done');
   assert.equal(await readFile(join(f.root, 'keep.txt'), 'utf8'), content);
+  // M06 增量A：崩溃后由核对固化账本（结算未落账），全匹配=SUCCEEDED 且唯一一份。
+  const ledgerA = await readLedger(stuck.invocationId);
+  assert.ok(ledgerA, 'reconcile to SUCCEEDED must persist a ledger');
+  assert.equal(ledgerA.cs.status, 'SUCCEEDED');
+  assert.equal(ledgerA.files.length, 1);
+  assert.equal(ledgerA.files[0]?.relative_path, 'keep.txt');
+  assert.equal(ledgerA.files[0]?.status, 'APPLIED');
+  assert.equal(ledgerA.files[0]?.target_sha256, sha256(content));
+  assert.equal(ledgerA.files[0]?.actual_sha256, sha256(content));
+  assert.equal(await withTransaction(app.db, (r) => r.changeSets.countByInvocation(stuck.invocationId)), 1,
+    'crash-then-reconcile persists exactly one ledger');
 
   // (B) Tamper after crash: content no longer matches, so reconcile stays UNKNOWN and the Run cannot be re-claimed.
   const g = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
@@ -246,8 +295,120 @@ test('M06 FILE_WRITE crash after write reconciles SUCCEEDED; tampering reconcile
   const unknown = await reconcileGatewayInvocation(app.db, { workspaceId: g.workspaceId, operationId: gop,
     invocationId: gInvocation, oldProcessStopped: true, stoppedWorkerId: gnext.workerId, stoppedWorkerEpoch: gnext.workerEpoch });
   assert.equal(unknown.status, 'UNKNOWN', 'a mismatched partial write cannot be reported as success');
+  // M06 增量A：篡改后核对不固化成功，账本记为 UNKNOWN 且唯一一份，供证据链追溯。
+  const gInvocationRow = await soleInvocation(g.workspaceId, gop);
+  const ledgerB = await readLedger(gInvocationRow.invocationId);
+  assert.ok(ledgerB, 'reconcile to UNKNOWN must persist a ledger');
+  assert.equal(ledgerB.cs.status, 'UNKNOWN');
+  assert.equal(await withTransaction(app.db, (r) => r.changeSets.countByInvocation(gInvocationRow.invocationId)), 1);
   await assert.rejects(claimRunForGateway(app.db, { workspaceId: g.workspaceId, runId: g.runId, workerId: `worker-${randomUUID()}` }),
     (error: unknown) => code(error) === 'GATEWAY_OPERATION_UNRESOLVED');
+});
+
+// ---------------------------------------------------------------------------
+// M06 增量A：多文件部分成功的账本按路径逐条固化，冲突项不覆盖
+// ---------------------------------------------------------------------------
+test('M06 change_set ledger records per-file PARTIAL for a multi-file changeset with one conflict', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  await writeFile(join(f.root, 'stale.txt'), 'original\n', 'utf8');
+  const origin = await claim(f);
+  const created = 'created\n';
+  const changes = [
+    { path: 'new.txt', action: 'CREATE', content: created, targetSha256: sha256(created) },
+    { path: 'stale.txt', action: 'MODIFY', baselineSha256: sha256('wrong-baseline'), content: 'overwrite\n' },
+  ];
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root, params: { changes } });
+  const next = await approveAndReclaim(f, op, prepared.review_id!);
+  const result = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next });
+  assert.equal(result.status, 'FAILED', 'one conflict makes the overall changeset fail');
+  assert.equal(await readFile(join(f.root, 'new.txt'), 'utf8'), created, 'the non-conflicting file still lands');
+  assert.equal(await readFile(join(f.root, 'stale.txt'), 'utf8'), 'original\n', 'the conflicting file is untouched');
+  const { invocationId } = await soleInvocation(f.workspaceId, op);
+  const ledger = await readLedger(invocationId);
+  assert.ok(ledger);
+  assert.equal(ledger.cs.status, 'PARTIAL', 'mixed APPLIED + CONFLICT is a partial ledger');
+  assert.equal(ledger.files.length, 2);
+  const byPath = new Map(ledger.files.map((row) => [row.relative_path, row]));
+  assert.equal(byPath.get('new.txt')?.status, 'APPLIED');
+  assert.equal(byPath.get('new.txt')?.actual_sha256, sha256(created));
+  assert.equal(byPath.get('new.txt')?.target_sha256, sha256(created));
+  assert.equal(byPath.get('stale.txt')?.status, 'CONFLICT');
+  assert.equal(byPath.get('stale.txt')?.actual_sha256, sha256('original\n'));
+  assert.equal(byPath.get('stale.txt')?.target_sha256, sha256('overwrite\n'));
+  await releaseGatewayWorker(app.db, { workspaceId: f.workspaceId, runId: f.runId, workerId: next.workerId, workerEpoch: next.workerEpoch });
+});
+
+// ---------------------------------------------------------------------------
+// M06 增量A：全成功的多文件变化集逐条固化为不可变证据，且按 invocation 幂等
+// ---------------------------------------------------------------------------
+test('M06 change_set ledger binds real per-file facts to the invocation and cannot be rewritten', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  await writeFile(join(f.root, 'mod.txt'), 'before\n', 'utf8');
+  await writeFile(join(f.root, 'del.txt'), 'gone\n', 'utf8');
+  const origin = await claim(f);
+  const created = 'fresh\n';
+  const updated = 'after\n';
+  const changes = [
+    { path: 'add.txt', action: 'CREATE', content: created, targetSha256: sha256(created) },
+    { path: 'mod.txt', action: 'MODIFY', baselineSha256: sha256('before\n'), content: updated, targetSha256: sha256(updated) },
+    { path: 'del.txt', action: 'DELETE', baselineSha256: sha256('gone\n') },
+  ];
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root, params: { changes } });
+  const next = await approveAndReclaim(f, op, prepared.review_id!);
+  const result = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next });
+  assert.equal(result.status, 'SUCCEEDED');
+  const { invocationId } = await soleInvocation(f.workspaceId, op);
+  const ledger = await readLedger(invocationId);
+  assert.ok(ledger, 'a settled write must leave a durable ledger');
+  assert.equal(ledger.cs.status, 'SUCCEEDED');
+  assert.equal(ledger.cs.file_count, 3, 'file_count is the declared file count of this changeset');
+  assert.equal(ledger.cs.action_type, 'APPLY_CHANGESET');
+  assert.equal(ledger.cs.operation_id, op);
+  assert.equal(ledger.cs.evidence_source, 'EXECUTION');
+  // 相对路径只有配上账本记录的规范根才可复现：直接按该根回读真实磁盘。
+  const root = ledger.cs.canonical_root;
+  assert.equal(await readFile(join(root, 'add.txt'), 'utf8'), created);
+  assert.equal(await readFile(join(root, 'mod.txt'), 'utf8'), updated);
+  await assert.rejects(readFile(join(root, 'del.txt')),
+    (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT', 'the delete really happened');
+  const byPath = new Map(ledger.files.map((row) => [row.relative_path, row]));
+  assert.equal(byPath.get('add.txt')?.baseline_sha256, null, 'CREATE has no baseline to freeze');
+  assert.equal(byPath.get('add.txt')?.actual_sha256, sha256(created));
+  assert.equal(byPath.get('mod.txt')?.baseline_sha256, sha256('before\n'));
+  assert.equal(byPath.get('mod.txt')?.observed_baseline_sha256, sha256('before\n'));
+  assert.equal(byPath.get('mod.txt')?.actual_sha256, sha256(updated));
+  assert.equal(byPath.get('del.txt')?.status, 'APPLIED');
+  assert.equal(byPath.get('del.txt')?.target_sha256, null, 'DELETE expects absence, so no target hash');
+  assert.equal(byPath.get('del.txt')?.actual_sha256, null, 'DELETE success is proven by the path being gone');
+
+  // 幂等锚点：一次 invocation 至多一份账本（换主键重复插也要撞唯一约束），核对只能回到同一行。
+  await expectSqlState('23505', 'a second change_set for the same invocation', () => sql`
+    insert into change_sets (id, invocation_id, operation_id, workspace_id, project_id, run_id,
+      resource_id, action_type, canonical_root, status, evidence_source, file_count)
+    values (${randomUUID()}, ${invocationId}, ${op}, ${f.workspaceId}, ${f.projectId}, ${f.runId},
+      ${f.resourceId}, 'APPLY_CHANGESET', ${root}, 'SUCCEEDED', 'EXECUTION', 3)
+  `.execute(app.db));
+  // 不可变：逐文件行写定即不可改删；账本头只开放汇总状态列，身份列不在授权内。
+  await expectSqlState('42501', 'rewriting a recorded file fact', () => sql`
+    update change_set_files set status = 'FAILED' where change_set_id = ${ledger.cs.id}
+  `.execute(app.db));
+  await expectSqlState('42501', 'deleting a recorded file fact', () => sql`
+    delete from change_set_files where change_set_id = ${ledger.cs.id}
+  `.execute(app.db));
+  await expectSqlState('42501', 'deleting a ledger header', () => sql`
+    delete from change_sets where id = ${ledger.cs.id}
+  `.execute(app.db));
+  await expectSqlState('42501', 're-pointing a ledger at another invocation', () => sql`
+    update change_sets set invocation_id = ${randomUUID()} where id = ${ledger.cs.id}
+  `.execute(app.db));
+  assert.equal(await withTransaction(app.db, (r) => r.changeSets.countByInvocation(invocationId)), 1);
+  await releaseGatewayWorker(app.db, { workspaceId: f.workspaceId, runId: f.runId, workerId: next.workerId, workerEpoch: next.workerEpoch });
 });
 
 // ---------------------------------------------------------------------------

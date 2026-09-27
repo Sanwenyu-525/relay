@@ -15,6 +15,7 @@ import { VerificationRepository } from '../verification/verification-repository.
 import { WorkspaceRepository } from '../workspace/workspace-repository.js';
 import { GatewayRepository } from '../gateway/gateway-repository.js';
 import { InformationRepository } from '../information/information-repository.js';
+import { ChangeSetRepository } from '../files/change-set-repository.js';
 import { TodayRepository } from '../today/today-repository.js';
 import { ViewRepository } from '../view/view-repository.js';
 import { BlueprintRepository } from '../blueprint/blueprint-repository.js';
@@ -36,6 +37,7 @@ export interface Repositories {
   readonly verifications: VerificationRepository;
   readonly workspaces: WorkspaceRepository;
   readonly gateway: GatewayRepository;
+  readonly changeSets: ChangeSetRepository;
   readonly information: InformationRepository;
   readonly today: TodayRepository;
   readonly views: ViewRepository;
@@ -59,6 +61,7 @@ export function createRepositories(db: DbExecutor): Repositories {
     verifications: new VerificationRepository(db),
     workspaces: new WorkspaceRepository(db),
     gateway: new GatewayRepository(db),
+    changeSets: new ChangeSetRepository(db),
     information: new InformationRepository(db),
     today: new TodayRepository(db),
     views: new ViewRepository(db),
