@@ -1,10 +1,14 @@
 # Relay 当前状态与下一步
 
+2026-09-27 独立验收更新：**M06 本次退回，保持 IN_PROGRESS**。原真实工具 14 项通过，但新增 3 项反例全部失败：CLI 结果丢失后错误释放资源、无基线 MODIFY 覆盖原文件、`./.env` 绕过保护路径准入。全量真实 PG 为 393 通过 / 4 失败 / 2 跳过（399 项，新增反例前）；新增反例后的定向为 14 通过 / 3 失败。单测 103/103、类型检查通过。生产代码未修改；下一步先修复三项 P1 并复验，再处理全量失败与其余出口。范围、根因和日志见 [M06 独立验收](docs/testing/m06-independent-acceptance.md)。下文 2026-09-26「独立验收后置/未做」描述保留为当时状态，不覆盖本次退回结论。
+
 角色：项目当前进度的唯一主文档。更新：2026-09-26（M01/M02 已验收；M03 试用包基础 Mock 闭环通过，完整可靠性验收后置；M04 与 M05 继续开发自检，独立验收后置；M06 真实工具适配器进入开发自检）。目标、实现、自检和验收分别记录。
 
 **迁移前的业务线正式验收仅覆盖 P05/P06 已实现的 Fake Workflow 与完成 Gate，整体产品未放行。** R05 两项修复的独立复验记录见[第 9 节](docs/testing/frontend-backend-acceptance-2026-09-21.md#9-r05-修复后独立复验2026-09-23)：当时后端 57/57 单测、113/113 真实 PG 集成，前端 80/80 组件、19/19 Chromium 通过。此后 P07–P11 是继续开发和自检；M01、M02 及 M03 分片验收只证明各自列明的改造范围，不能推断 P07–P11 完整业务、Provider、安装或整体恢复已获放行。
 
 ## 当前改造模块状态
+
+产品补充接续（2026-09-26，仅文档）：目标托管/成果共创/变化守护及 AI 并行开发体验已同步到[提示词执行映射](prompts/README.md#产品补充的执行映射)、总提示词、M/P 工作包和逐页提示词。后续分派须按该映射说明本次实现、回归核对、待讨论或后置项；本次没有启动新增开发，不改变下列模块状态、用户已授权开发顺序或真实 Provider 门槛。
 
 验收输入边界：本次通过项绑定冻结输入与 EXE。收尾时 `apps/api/src/worker/run-graph.ts` 出现并发的旧 checkpoint 重建改动，与实际测试的编译产物不一致；该新源码尚未纳入本轮验证，不能继承下述成绩。该并发改动已于 2026-09-25 完成开发自检与全量回归，见下文[旧图 checkpoint 升级兼容增量](#2026-09-25-旧图-checkpoint-升级兼容增量开发自检)；其证据不改变本轮冻结包的验收边界。
 
@@ -19,7 +23,7 @@
 | M03 | Mock Agent Runtime 与可靠性闭环 | IN_PROGRESS | 当前试用包基础 Mock 闭环通过，完整可靠性按用户最新要求后置； React 首片、SSE 客户端与创建导航、后端分发/PG SSE/0013 顺序命令/固定 Mock 图与 ACTION_APPROVAL 后端、Task 产物历史 API/Chromium、桌面私有协议及逐旧 launch 恢复回执、Windows 宿主强杀恢复、真实 WebView2 SSE/同页重连和新版包的 CRITERION Review/RESUME 与 ACTION_APPROVAL→单次 Fake 效果均通过分片独立复验，范围见[独立验收记录](docs/testing/m03-independent-acceptance.md)；G03 查询/UI、G06 Mock 在途取消和可选 Mock 动作 React 入口已开发，仍无 G01–G08 整体通过结论，真实 Provider 保持关闭 |
 | M04 | 真实模型、Context、Assist、低风险工具 | IN_PROGRESS | 显式选源、FILE_READ/WEB_FETCH、OpenAI 兼容 ModelPort、语义检查、Assist/URL 导入、首批 Skill/Pack、Task Owner 接受、Blueprint 同候选应用、模型调用预算及 Assist/Run DRAFT 生成中预览前后端已有分片开发自检；Provider 端点约束、内部流式完整性、结构化结果、取消/超时与跨 Worker 预算已做受控自检。真实 Provider 连通、实测首字延迟和独立验收未完成 |
 | M05 | 完整工作体验与追溯 | IN_PROGRESS | P13 Today/Focus、P14 三套项目工作台/项目级 Connections/全局 Ctrl+K/ViewConfiguration/Blueprint live 交互、首次创建引导、项目/全空间任务列表与真实收件箱、P15 Activity/Trace/Lineage 及 Task 提案确认与当前 CheckPlan 预览已有分片开发自检；项目归档栅栏、ArchiveProject 后端命令、live 归档按钮及项目/任务/Run/Review/资料/Today/导入的主要 live 写入口归档门槛已开发自检，完整开发集成和独立验收仍未完成 |
-| M06 | 真实工具与 Coding Worker | IN_PROGRESS | `FILE_WRITE`/`APPLY_CHANGESET`、`GIT_READ`/`GIT_WRITE`、`CLI_RUN` 适配器、Gateway prepare/dispatch/reconcile 分支、`adapter-metadata.ts` 逐适配器声明与 `0030_m06_real_tools` 迁移已有代码与单元测试（路径保护/安全环境/退出码/元数据）；本轮修复 0030 误删 `WEB_FETCH+USER_IMPORT` 约束分支导致的 10 项导入回归并更正迁移计数测试，全量真实 PG 见下文增量。写/Git/CLI 的真实 PG 准入/冲突/UNKNOWN 反例、`change_sets` 表、固定图写意图、diff UI、Windows 与独立验收均未做 |
+| M06 | 真实工具与 Coding Worker | IN_PROGRESS | `FILE_WRITE`/`APPLY_CHANGESET`、`GIT_READ`/`GIT_WRITE`、`CLI_RUN` 适配器、Gateway prepare/dispatch/reconcile 分支、`adapter-metadata.ts` 逐适配器声明与 `0030_m06_real_tools` 迁移已有代码与单元测试（路径保护/安全环境/退出码/元数据）；修复 0030 误删 `WEB_FETCH+USER_IMPORT` 约束分支导致的 10 项导入回归并更正迁移计数测试。写/Git/CLI 已有真实隔离 PG 准入/基线冲突/UNKNOWN 核对、Git push 崩溃后 `ls-remote` 回读收敛、CLI 超时进程树终止孙进程的开发自检反例（见下文恢复类反例增量）。`change_sets` 表、固定图写意图、diff UI、`RUN_BUILD`/`RUN_TEST` 模板、worktree 共享元数据锁、Windows 与独立验收未做 |
 | M07 | Windows 安装交付与 V1 总验收 | NOT_STARTED | 尚未执行 |
 
 2026-09-24 前一版开发自检增量：G03 Gateway UNKNOWN 原 ID 已进入 Run 查询与 React 告警；G06 持久控制可中止在途 Mock 模型，并在旧 Worker 退出后收敛。API 隔离 PG 全量 251/251、React 组件 134/134、Chromium 21/21；固定 Mock 小负载 8 个完成、2 个取消，原始结果见 [Mock 测量](docs/testing/evidence/m03/mock-bench-20260924-225511-ad4f1b7c/summary.json)，只作小样本基线。该版 Windows 开发包 EXE SHA-256 为 `521b65e08c5dbdaaaf8aa3962bad6cf8d2fbd1e548efd85c3a6b00635c0adbca`，现已由下述新包替换；原始输出见[日志](docs/testing/evidence/m03/mock-g03-g06-build-release-retry.log)。按用户本轮指令，只继续开发和试用，不进行 G01–G08 独立总验收；M03 保持 IN_PROGRESS，真实 Provider 保持关闭。
@@ -127,7 +131,17 @@ M05 P13–P15、Task 提案确认、蓝图 live 交互、首次创建引导、�
 3. **证据。** 定向隔离复跑（`run-integration.ps1 -TestFile`）：web-fetch 19/19、project-blueprint 5/5，`CHECK` 违约全部消失。全量串行复跑：385 项 **379 通过 / 4 失败 / 2 按设计跳过**，构建/迁移/图安装/PG 启停退出 0、临时集群已删除；此前 10 项 `23514` 失败不复现。类型检查与 `node scripts/check-docs.mjs` 通过。
 4. **剩余 4 项为既有共享库高负载偶发，与 M06 无关。** 3 项 project-blueprint（`runAssistGenerationTick` 在串行全量下跨文件领取/时序抖动：`undefined vs true`、`FAILED vs COMPLETED`、UUID 不匹配）与 1 项 web-fetch（`runWebImportTick` 未按 job 作用域过滤，扫到其它文件遗留的 QUEUED 导入并 `failed+1`，断言期望恰为 `[1,1,1,0]`）——两文件单独复跑均全绿（见第 3 点）。这与本文档既有记录的「100 ms 轮询 / 5 s 超时 / 共享库全量高负载脆弱项」同类，本轮按「修复+文档」范围**不改产品或测试逻辑**，登记为测试基建后续工作：建议把 import/assist tick 按 job/session 作用域收窄以消除跨文件串扰。全量集成基线尚未达绿，M06 保持 IN_PROGRESS。
 
-**M06 剩余出口（未做，见 tool-adapters §2/§4/§5）：** `FILE_WRITE`/`APPLY_CHANGESET`、`GIT_READ`/`GIT_WRITE`、`CLI_RUN` 目前仅单元测试覆盖纯逻辑（路径保护、安全环境净化、退出码/stderr、逐适配器元数据），尚无真实隔离 PG 下的 Gateway 准入/执行/基线冲突/部分应用/UNKNOWN 核对反例；`change_sets`/`change_set_files` 持久表、固定图写意图接线、逐文件 diff UI、`RUN_BUILD`/`RUN_TEST` ExecutionConfig 模板、Windows Job Object breakaway 实测、隔离 worktree 与共享元数据资源锁、真实 Windows 会话与独立验收均未实现。单元测试与迁移链完整不代表「真实工具与故障/冲突测试通过」，不得据此宣称 M06 出口达成。
+### 2026-09-26 M06 恢复类反例增量（开发自检，独立验收后置）
+
+按收尾顺序补 M06「真实工具与故障/冲突测试」的恢复类反例。承接上节开工片（gateway-actions 修复 + real-tools 11 用例，仍在工作区未提交），在 `real-tools-gateway.integration.test.ts` 新增 3 例真实隔离 PG + 真实外部效果的核对反例，并驱动到全生命周期：
+
+1. **GIT_PUSH 崩溃后按真实 `ls-remote` 收敛 SUCCEEDED。** 一次性测试仓库接本地 bare remote，适配器真实 push 落远端后在结算前抛 `SimulatedGatewayCrash`（Invocation 停 `DISPATCHING`）；`reconcileGatewayInvocation` 经 `reconcileGitPush` 用真实 `ls-remote` 读回确切对象 ID，与冻结 `expected_commit_sha` 命中判 SUCCEEDED、不重推。
+2. **远端被外部推进后核对 UNKNOWN 并阻断再领取。** 同链路崩溃后由测试夹具再提交并 push，远端对象 ID 前移使冻结期望不匹配，核对记 UNKNOWN；未决动作继续以 `GATEWAY_OPERATION_UNRESOLVED` 阻断该 Run 再领取（写/Git 动作不凭 exit code 断言未执行、不盲目重试）。
+3. **CLI 超时经进程树终止孙进程。** CLI_RUN 走 Gateway，父进程 `spawn` 一个长命孙进程并把 PID 落盘、自身保活；deadline 到点后 `executeCliCommand` 经 `killProcessTree`（Windows `taskkill /pid /T /F`）连带终止孙进程，有界轮询断言孙进程消失、不残留孤儿（D07 孙进程/进程树）。
+
+一处首版缺陷已修：UNKNOWN 用例原以 `git push --delete main` 撤远端，被 bare 仓库「拒绝删除当前分支」挡回，改为「再推进一个新提交」制造对象 ID 不匹配，语义更贴 §4「目标变化原批准失效」。real-tools 定向隔离复跑 14/14 全绿（tests 14 / pass 14 / fail 0），构建/迁移/图安装/PG 启停退出 0、临时集群已删除；类型检查通过。改动仅限 `apps/api/test/integration/real-tools-gateway.integration.test.ts` 与既有未提交的 `gateway-actions.ts`，无新增生产代码、迁移或公开 API。`reconcileCliExecution` 的 `STILL_RUNNING`→quarantine 因 pid 仅在结算时持久化、崩溃未结算路径无法观测在途进程，本轮未作真实反例（登记为后续）。本增量是开发自检，不构成 M06 出口放行。
+
+**M06 剩余出口（未做，见 tool-adapters §2/§4/§5）：** FILE_WRITE/APPLY_CHANGESET、GIT_READ/GIT_WRITE、CLI_RUN 的真实隔离 PG 准入/执行/基线冲突/UNKNOWN 核对与 Git 远端回读、CLI 进程树恢复反例已有开发自检；`change_sets`/`change_set_files` 持久表、固定图写意图接线、逐文件 diff UI、`RUN_BUILD`/`RUN_TEST` ExecutionConfig 模板与脚本/构建配置 hash 变更再校验、CLI 输出过量与 `STILL_RUNNING` 隔离反例、Git 重复动作幂等/审批内容变更（C03/C09/D02）与 hooks/filter/helper 信任审查、Windows Job Object breakaway 实测、隔离 worktree 与共享元数据资源锁、真实 Windows 会话与独立验收均未实现。单元测试与迁移链完整不代表「真实工具与故障/冲突测试通过」，不得据此宣称 M06 出口达成。
 
 当前选择：React 全量迁移；Tauri 2 + Node sidecar 优先实施；保留 Fastify、Kysely/pg 和 PostgreSQL；LangGraph/PostgresSaver 先做适配；PG 持久 command/outbox 优先，不照搬附件增加 Drizzle/Redis/BullMQ。具体开发为 gpt-6-sol / ultra；本轮用户要求独立验收后置，原模块门槛见 [测试计划第 10 节](docs/testing/verification-plan.md#10-技术栈改造的大模块验收)。决策依据见 [ADR-010](docs/decisions/ADR-010-agent-stack-react-desktop.md)。
 
@@ -190,11 +204,13 @@ P09 当前只允许固定 Fake marker 写和公共假读。配置及动作历史
 
 ## 4. 下一步与本轮范围
 
-2026-09-23 的文档体系调整、提示词更新和 goal 总提示词先于本次 M01 实施；那一轮本身没有执行代码改造。现已完成 M01 开发自检并交独立验收，保留已实现 P00–P11 及历史验收，不重建已有能力。M01 独立验收通过后才开始 React 桌面迁移；再通过 Mock 创建/SSE/审批/取消/故障恢复门槛，之后接真实模型并继续 V1。
+接续时先读上方“当前改造模块状态”确定实际模块、已授权开发顺序和后置验收范围，再按[产品补充执行映射](prompts/README.md#产品补充的执行映射)与模块提示词限定本次工作；不从下列历史规划重新启动已完成模块。
 
-每模块具体开发交给 gpt-6-sol / ultra，开发自检后由协调 Agent 独立验收；未通过则修复复验，通过后自动继续已授权下一模块。缺 Provider 凭据、Windows 环境或兼容出口时记录真实阻塞，不自行降低验收要求。M01、M02 已通过独立验收；M03 开始前核对现有 Run/Review/Recovery/Gateway 与本地参考源码，先完成 Mock G01–G08，再考虑 M04 真实模型。
+每模块具体开发交给 gpt-6-sol / ultra，默认自检后由协调 Agent 独立验收，未通过则修复复验；已获准提前开发或后置验收的部分按对应用户范围执行，保留未验收状态与最终出口。缺 Provider 凭据、Windows 环境或兼容出口时记录真实阻塞，继续不依赖它的已授权工作。Mock G01–G08 门槛未通过仍不启用真实 Provider；产品补充的未决策略先讨论，不因此重做已通过功能或一律停止其他工作。
 
 ### 历史阶段经过
+
+2026-09-23 当时规划：文档体系调整、提示词更新和 goal 总提示词先于 M01 实施；该轮文档工作没有执行代码改造。当时 M01 完成开发自检并交独立验收，计划在通过后开始 React 桌面迁移，再通过 Mock 创建/SSE/审批/取消/故障恢复门槛，之后接真实模型并继续 V1。此段仅保留当时顺序；后续用户调整与实际进展见顶部当前状态。
 
 2026-09-23 本轮授权已完成：R05 两个验收阻塞项已修复，新增正式回归并通过主 Agent 独立复验。下一步 P07（Review 与人工判断）可按原阶段顺序接续，本轮没有实施 P07/P08。以下 2026-09-22 及更早段落保留为阶段经过，其测试数量为历史基线。
 

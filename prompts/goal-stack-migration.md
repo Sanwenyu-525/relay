@@ -3,9 +3,13 @@
 使用方式：在目标任务中启用 goal，将下列内容作为目标提示词；不假定某个客户端的斜杠命令参数语法。本轮仅提供提示词，没有创建 goal 或设定 token 预算。
 
 ~~~text
-在 D:/Develop/Relay-Agent 持续完成现有技术栈改造与后续 V1 开发，交付保留既有功能和视觉的 React Windows 桌面应用。每完成一个大模块即独立验收，修复并复验通过后继续下一模块，直到所有必需出口有证据通过。
+在 D:/Develop/Relay-Agent 持续完成现有技术栈改造与后续 V1 开发，交付保留既有功能和视觉的 React Windows 桌面应用。默认每完成一个大模块即独立验收，修复并复验通过后继续下一模块；用户已允许的并行开发与验收后置按 CODEX_NEXT_STEP 和当前指令执行，直到所有必需出口有证据通过。
 
 先读 AGENTS.md、CODEX_NEXT_STEP.md、docs/README.md、docs/decisions/ADR-010-agent-stack-react-desktop.md、docs/architecture/technology-selection.md、prompts/README.md、prompts/stack-migration.md 和 docs/testing/verification-plan.md 第 10 节。附件 Agent_Stack_Integration.md 是原始参考；采用适配本项目的决策，不机械照搬全部组件。
+
+同时读取 Personal_Workflow_OS_Master_Spec.md 第 0.2/0.4 节、docs/requirements/v1-scope.md 两项产品探索补充、docs/frontend/workbench-design.md 第 10/11 节及 docs/testing/verification-plan.md 第 11 节。目标托管、成果共创、变化守护，以及减少注意力切换、恢复理解和补足验收依据，按 prompts/README.md“产品补充的执行映射”落实到本次模块。先列每项的实现/回归核对/待讨论/后置/不适用及依据；不把全部 Proposed 加入本 goal，也不只做页面清单而遗漏已确认约束。
+
+需要新增提醒策略、并发限制、锁定/依赖关系、外部执行入口或验收关联模型时，先讨论影响本次实现的未决项，再冻结范围、Owner 与验收依据；继续不依赖这些决策的已授权工作。复用现有事实和单一写入口，不创建通用调度器、多 Agent Router 或第二套完成状态。恢复摘要须可追溯，验收须显示缺口，单任务通过不得冒充组合版本通过；具体义务仍按已接受契约与本次范围执行。
 
 你负责协调和独立验收；具体实现、测试、构建和修复必须分派给 gpt-6-sol / ultra。调用时显式设置模型和 reasoning effort，明确文件/模块所有权，要求保留他人的修改。不能选择该模型时如实说明阻塞，不默换模型或虚报使用。执行者自检不等于验收通过。
 
@@ -20,9 +24,11 @@ React 是完整迁移，逐路由、页面、组件和交互核对，不只替�
 
 先完整通过 Mock 的 Task/Run 创建、SSE、审批、取消、幂等、失租、双 Worker、崩溃恢复和 UNKNOWN 测试，再启用真实模型。LangGraph 是唯一通用图，领域入口仍控制业务完成和权限；PG 分发只派 command。checkpoint 不保证副作用 exactly-once；UNKNOWN 按原 operation_id 核对，审批等待释放槽位，取消送到实际客户端/子进程，SSE 从 PG 重放，断页不取消。
 
-每模块由执行者实现和自检，交 READY_FOR_ACCEPTANCE。你在当前文件基准上独立复跑必要测试和反例，检查真实 PG/进程/桌面证据，给出 ACCEPTED、CHANGES_REQUESTED 或 BLOCKED 及依据。未通过则交回修复并复验，不进入依赖它的下一模块。普通模块通过后自动继续已授权工作，无需重复问用户是否继续。
+每模块由执行者实现和自检，交 READY_FOR_ACCEPTANCE。独立验收按当前用户范围执行；未后置时，你在当前文件基准上独立复跑必要测试和反例，检查真实 PG/进程/桌面证据，给出 ACCEPTED、CHANGES_REQUESTED 或 BLOCKED 及依据。未通过则交回修复并复验，未获允许时不进入依赖它的下一模块；后置项保留未验收状态和最终出口。普通模块通过后自动继续已授权工作，无需重复问用户是否继续。
 
 只在 CODEX_NEXT_STEP.md 维护当前模块、状态、下一步和阻塞；具体证据写入对应测试/开发记录并链接。每模块报告实际修改文件、实际命令/退出码、已执行测试、未验证项、风险和文档同步，运行 node scripts/check-docs.mjs。原 P00–P22 保留业务覆盖和历史；不重做已通过功能，P22 论文实验和 V1.5 不属于此目标。
+
+交接同时说明行为变化、原因、影响、当前人工决定与下一步，附“重要要求 → 确切版本及检查/人工证据 → 未覆盖项”的本次映射。测试数量、图像、Agent 数量不证明产品目标达成；第 11 节体验评价仅在本次明确选定范围后执行，未运行则保留候选状态。同步公共、模块、单段及受影响逐页提示词，历史证据与修复提示词不改写为新增开发授权。
 
 真实 Provider 配置或 Windows 条件缺失时明确记录，继续不依赖它的已授权工作，不伪造通过或降低门槛。只用用户为本项目提供的凭据，不扫描宿主会话密钥。保持简洁进度汇报；不自动推送、公开发布或向外部协作平台发送项目材料。
 

@@ -650,7 +650,14 @@ async function requireCurrentGatewayGrant(repositories: Repositories, op: Logica
   if (selected.id !== op.policy_id || selected.version !== op.policy_version) {
     throw gatewayDenied('GATEWAY_PERMISSION_STALE', 'Permission 活动版本已变化，原批准与准备事实失效。');
   }
-  if (selected.decision === 'ASK') {
+  // Mirror the prepare-time downgrade: a non-passthrough adapter forces ASK even
+  // when the stored policy says AUTO, so the Review that prepare created here is the
+  // *expected* effective grant rather than a stale one. Without this, approved real
+  // writes (FILE_WRITE / GIT_WRITE / CLI_RUN) would be rejected as GATEWAY_APPROVAL_STALE.
+  const effectiveDecision: GatewayDecision =
+    !getAdapterDescriptor(op.capability_key).approvalPassthrough && selected.decision === 'AUTO'
+      ? 'ASK' : selected.decision;
+  if (effectiveDecision === 'ASK') {
     if (review === undefined || !reviewMatchesOperation(review, op) || review.status !== 'DECIDED' ||
         (review.expires_at !== null && review.expires_at.getTime() <= Date.now()) ||
         (await repositories.reviews.readDecision(review.id))?.decision !== 'APPROVE') {

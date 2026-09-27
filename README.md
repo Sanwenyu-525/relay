@@ -6,6 +6,8 @@
 
 当前工作区为 D:/Develop/Relay-Agent。阶段、已有证据、缺口及下一步统一见 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)；旧迁入路径与变更经过见[交付审计](docs/development/design-audit.md)，不作为当前启动位置。
 
+产品目标补充（2026-09-26）：降低并行委托 AI 时的注意力切换与上下文恢复成本，让开发者依据关键行为的验证证据接受成果。问题定义与目标见[产品总纲第 0.4 节](Personal_Workflow_OS_Master_Spec.md#04-ai-并行开发中的注意力与验收依据)；统一待处理队列、恢复摘要和面向需求的验收视图仍是待细化的体验方案，不表示现有功能已解决上述问题，也不自动改变当前开发范围。
+
 P10 开发自检：后端真实 PostgreSQL 全量 158/158、P10 定向 7/7、Gateway 14/14、单测 57/57；前端 P10 定向组件 7/7，双方类型检查、构建及文档检查通过。四类信息有类型化根/版本、HTTP 命令与查询、真实资料页和有界字面搜索；Rule 在 Delegate 时冻结到执行契约，版本变化阻止旧 Run 继续准入。现阶段仍使用 Fake Runtime 与 Fake Gateway，生产进程停机证明、真实 Web/Git/CLI 与宿主外进程隔离尚未实现；这些开发自检不构成正式验收。下一段按 [P11 提示词](prompts/D-context-product.md#p11context-builder)接入 Context Builder。
 
 ## 阅读入口
