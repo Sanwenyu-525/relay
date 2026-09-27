@@ -22,7 +22,7 @@ import { readMockActionOperationId } from '../workflow/execution-contract.js';
 import { readWebFetchConfig, webFetchExecute, type WebFetchLimits } from '../web/web-fetch.js';
 import {
   executeFileChangeset, reconcileFileChangeset, validateSafeRelativePath, isProtectedPath,
-  type FileChange,
+  isFrozenBaseline, type FileChange,
 } from '../files/file-changeset.js';
 import {
   gitGetStatus, gitGetDiff, gitGetLog, gitStageFile, gitCommit, gitPush,
@@ -294,6 +294,12 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
           validateSafeRelativePath(resourceBefore!.canonical_root, item.path);
         } catch (err) {
           throw gatewayDenied('GATEWAY_TARGET_DENIED', (err as Error).message);
+        }
+        // P1-2：修改/删除既有文件必须在产生副作用前冻结有效基线摘要，供落盘前比对
+        // 检测外部编辑；缺失或格式非法在批准之前即按输入校验拒绝，人工批准不可替代。
+        if ((item.action === 'MODIFY' || item.action === 'DELETE') && !isFrozenBaseline(item.baselineSha256)) {
+          throw validationFailed([{ field: `params.changes[${idx}].baselineSha256`,
+            message: 'MODIFY/DELETE requires a valid 64-hex frozen baseline sha256' }]);
         }
       }
     } else if (['GIT_STATUS', 'GIT_DIFF', 'GIT_LOG', 'GIT_STAGE', 'GIT_COMMIT', 'GIT_PUSH'].includes(input.actionType)) {
@@ -1356,11 +1362,9 @@ export async function reconcileGatewayInvocation(db: DbExecutor, input: {
       toolReconciliation = { status: 'NOT_EXECUTED', result: { reason: 'PREPARED_NOT_EXECUTED' } };
     } else {
       const recordedPid = typeof invocation.result_ref?.pid === 'number' ? invocation.result_ref.pid : undefined;
-      const cliCheck = reconcileCliExecution(recordedPid);
-      toolReconciliation = {
-        status: cliCheck.outcome === 'STILL_RUNNING' ? 'UNKNOWN' : 'FAILED',
-        result: cliCheck.details,
-      };
+      const cliCheck = reconcileCliExecution(recordedPid === undefined ? {} : { pid: recordedPid });
+      // DISPATCHING/UNKNOWN 且结果丢失：不能凭缺 PID 或进程停止断定未执行或已知失败，保守 UNKNOWN 隔离。
+      toolReconciliation = { status: cliCheck.outcome, result: cliCheck.details };
     }
   } else if (invocation.status === 'PREPARED' || op.capability_key === 'FAKE_PUBLIC_READ') {
     observed = 'MISSING';

@@ -57,3 +57,41 @@ APPLY_CHANGESET 使用 `./.env` 时，Prepare 未按 `GATEWAY_TARGET_DENIED` 拒
 新增红测试保留在 [real-tools 集成测试](../../apps/api/test/integration/real-tools-gateway.integration.test.ts)，不跳过或弱化断言。未修生产代码；修复后须重跑这些反例与相关回归，再更新验收结论。原 14 项通过证明既有列明场景及审批降级正常路径，不表示真实工具整体安全出口通过。
 
 文档影响检查：本轮只涉及验收证据、当前状态和适配器已知限制；没有需求、API、数据库或架构决策变更，不新建 ADR 或重复路线图。模块其余未完成项继续以 [当前进度](../../CODEX_NEXT_STEP.md) 为准。
+
+## 修复结果（2026-09-27 开发自检，待协调 Agent 独立复验）
+
+上方退回证据原样保留，作为当时的独立验收结论。以下为本轮按「仅修复、不扩展、不启用真实 Provider、不自行宣布模块验收」范围完成三项 P1 修复后的开发自检记录。改动仅限 `apps/api/src/application/gateway-actions.ts`、`apps/api/src/files/file-changeset.ts`、`apps/api/src/cli-worker/cli-adapter.ts` 及 `real-tools-gateway.integration.test.ts`、`file-changeset.test.ts`；无新增迁移、无公开 API 变更、未触碰 project-blueprint/run-command-order/web-fetch。
+
+各项最小修复：
+
+- **P1-1（CLI 丢失结果误释放资源）**：`reconcileCliExecution` 改为只在 `DISPATCHING` 丢失结果这条恢复路径上被调用，一律保守返回 `UNKNOWN` 且 `quarantined:true`——缺 PID 记 `DISPATCHING_RESULT_LOST_NO_PID`，有 PID 也只作存活证据；不再凭「无 PID」或「进程已退出」判 `STOPPED`/`FAILED` 释放 claim。Gateway 调用方随之按新签名取 `result_ref.pid` 传入。
+- **P1-2（无基线 MODIFY 覆盖原文件）**：新增 `isFrozenBaseline`/`requireFrozenBaseline`；`APPLY_CHANGESET` 的 `MODIFY`/`DELETE` 在 prepare 缺有效 64 位十六进制基线即 `VALIDATION_FAILED`（批准之前拒绝），`executeFileChangeset` 在任何副作用前再校验一次，并把落盘前的基线比对从「仅摘要存在时比较」改为无条件比对；`WRITE_FILE` 缺基线派生为 `CREATE`，对既有文件记 CONFLICT 不覆盖。人工批准不可替代基线检查。
+- **P1-3（路径别名绕过保护）**：`validateSafeRelativePath` 与 `isProtectedPath` 改为先 `resolve` 归一再据以计算根内相对路径并按前缀匹配（统一反斜杠、剥离 `./` 与根锚点前缀、大小写不敏感），逃逸检查仍先于保护检查；`./.env`、`src/../.env`、`foo/../.git/config` 等别名在 prepare 一律 `GATEWAY_TARGET_DENIED`。
+
+新增 4 项真实隔离 PG 边界反例（DELETE 缺基线拒绝、携匹配基线的合法 MODIFY 仍应用、WRITE_FILE 缺基线不覆盖既有文件、规范化别名拒绝）与 4 项单测（别名/分隔符/大小写保护、归一化路径校验、基线格式校验、按动作强制基线）。
+
+实际验证（便携 Node 24.21.0 + 现有隔离 PG 脚本，测试只写一次性目录/数据库/本地 bare remote）：
+
+| 检查 | 结果 | 命令 |
+|---|---|---|
+| API 类型检查 | 通过 | `tsc --noEmit -p apps/api/tsconfig.json` |
+| API 单元测试 | 107/107 | 随构建 |
+| real-tools 定向真实 PG | 21/21（3 项原红转绿 + 4 项边界，无失败无跳过） | `-TestFile real-tools-gateway` |
+| Gateway 回归 | 28/28 | `-TestFile gateway` |
+| 恢复回归 | 17/17 | `-TestFile recovery` |
+| CLI 回归 | 5/5 | `-TestFile cli` |
+| 全量真实 PG | 406 项：399 通过 / 5 失败 / 2 跳过 | 完整 `run-integration.ps1` |
+
+全量 5 项失败为 `project-blueprint` 的 archived explicit source、goal-to-project-blueprint、baseline change and cancellation，`run-command-order` 的「待处理 PAUSE/CANCEL/HANDOFF 旧 START 安全点优先」，以及 `web-fetch` 的 AUTO web import。五项均为计数/布尔/UUID 类 `AssertionError`，无任何 PostgreSQL 约束违反（无 23514/23505），且都不在本轮改动文件内；`-TestFile` 隔离单跑 `project-blueprint` 5/5、`run-command-order` 7/7、`web-fetch` 19/19 全部 `status: PASSED`，据此判定为共享库串行高负载偶发，而非本轮 P1 修复引入的回归。相比退回记录当时「新增反例前 399 项」，全量总数增至 406（+3 原反例 +4 边界反例）。
+
+一处环境坑记录：不要用 `powershell -Command "... 2>&1 | Select-Object"` 包裹本脚本——脚本内 `Set-StrictMode`+`$ErrorActionPreference='Stop'` 会把 initdb 关于中文 locale「could not find suitable text search configuration」的 stderr 提示当成致命错误抛出（initdb 实际退出 0），造成假 `status: FAILED`；改用 `-File` 运行并把输出重定向到文件后再读尾部汇总行，真实结论以脚本自身 `tests exit code`/`status:` 为准。
+
+结论：M06 保持 IN_PROGRESS，三项 P1 已修复并完成上述开发自检，等待协调 Agent 独立复验；本轮未启用真实 Provider、未做 Windows 会话或安装验收、未把后端结果扩展为 M06 整体出口放行。`change_sets`/`change_set_files` 持久表、固定图写意图接线、逐文件 diff UI、`RUN_BUILD`/`RUN_TEST` 模板、CLI `STILL_RUNNING` 在途 PID 直接观测反例、Windows 实测与其余未完成出口仍待后续。
+
+## 协调侧定向独立复验（2026-09-27，非完整模块验收）
+
+机器空闲时以 `-TestFile real-tools-gateway` 复跑定向套件 **21/21 全绿**（tests exit code 0、`status: PASSED`、临时集群已删除），逐项确认三项 P1 行为成立：缺有效基线的 `MODIFY`/`DELETE` 在 prepare `VALIDATION_FAILED` 且不触碰磁盘、携匹配基线的合法 `MODIFY` 仍应用、`WRITE_FILE` 缺基线派生 `CREATE` 不覆盖既有文件、`./.env`/`src/../.env`/`foo/../.git/config` 等规范化别名在 prepare `GATEWAY_TARGET_DENIED`、`CLI_RUN` 丢失结果保持 `UNKNOWN`+资源隔离且再领取被 `GATEWAY_OPERATION_UNRESOLVED` 阻断。
+
+新增一项负载脆弱数据点：一次与并行集成跑争抢时，`CLI_RUN enforces the deadline as a timeout instead of hanging` 单例断言失败（期望 `TIMEOUT`、实得 `FAILED`，该用例耗时约 2.7 秒贴近 deadline 边界）；机器空载后同一用例通过。该用例走 `executeCliCommand` 正常 deadline→超时路径，不属本轮 P1 改动面（P1-1 仅改 `reconcileCliExecution` 恢复路径），归入既有「100 ms 轮询/5 秒超时类断言在高负载下脆弱」同族，登记为测试基建后续，不因单次抖动改判本轮修复。
+
+本主机环境注记：这台中文 Windows 上直接以 `-File` 调 `run-integration.ps1` 时 `initdb` 会因缺少中文文本搜索配置**硬中止**（非仅 stderr 提示），给 `initdb` 追加 `--locale=C` 可解且集成库不用全文检索故无副作用。此 `--locale=C` 仅为本地复验绕过，未纳入提交、未改共享脚本。本记录是定向独立复验，不等同 M06 完整验收；M06 仍保持 IN_PROGRESS。

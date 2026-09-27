@@ -558,3 +558,59 @@ test('M06 CLI_RUN lost result after a real write remains UNKNOWN and keeps the r
     { reconciliation: 'UNKNOWN', claim: 'QUARANTINED', reclaim: 'GATEWAY_OPERATION_UNRESOLVED' },
     'a lost CLI result cannot prove no side effect or grant another writer');
 });
+
+test('M06 FILE_WRITE rejects a DELETE without a frozen baseline at prepare', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  await writeFile(join(f.root, 'gone.txt'), 'to be deleted\n', 'utf8');
+  const origin = await claim(f);
+  await assert.rejects(prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: randomUUID(),
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root, params: { changes: [{ path: 'gone.txt', action: 'DELETE' }] } }),
+  (error: unknown) => code(error) === 'VALIDATION_FAILED', 'DELETE without a baseline must be rejected as invalid input');
+  assert.equal(await readFile(join(f.root, 'gone.txt'), 'utf8'), 'to be deleted\n', 'rejection cannot remove the real file');
+});
+
+test('M06 FILE_WRITE still applies MODIFY when the frozen baseline matches', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  await writeFile(join(f.root, 'notes.md'), 'original\n', 'utf8');
+  const origin = await claim(f);
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: [{ path: 'notes.md', action: 'MODIFY', baselineSha256: sha256('original\n'), content: 'updated\n' }] } });
+  const next = await approveAndReclaim(f, op, prepared.review_id!);
+  const result = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next });
+  assert.equal(result.status, 'SUCCEEDED', 'a correct frozen baseline must still permit the legitimate MODIFY');
+  assert.equal(await readFile(join(f.root, 'notes.md'), 'utf8'), 'updated\n');
+  await releaseGatewayWorker(app.db, { workspaceId: f.workspaceId, runId: f.runId, workerId: next.workerId, workerEpoch: next.workerEpoch });
+});
+
+test('M06 WRITE_FILE without a baseline becomes CREATE and cannot overwrite an existing file', async () => {
+  // Field-conversion consistency: the single-file WRITE_FILE path derives its action
+  // from baseline_sha256, so a missing baseline degrades to CREATE and must not
+  // silently overwrite — the same protection the changeset MODIFY path enforces.
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'WRITE_FILE' });
+  await writeFile(join(f.root, 'keep.md'), 'original\n', 'utf8');
+  const origin = await claim(f);
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'WRITE_FILE', target: join(f.root, 'keep.md'), params: { content: 'overwrite\n' } });
+  const next = await approveAndReclaim(f, op, prepared.review_id!);
+  const result = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next });
+  assert.equal(result.status, 'FAILED', 'WRITE_FILE without a baseline cannot overwrite an existing file');
+  assert.equal(await readFile(join(f.root, 'keep.md'), 'utf8'), 'original\n', 'the existing file must be preserved');
+  await releaseGatewayWorker(app.db, { workspaceId: f.workspaceId, runId: f.runId, workerId: next.workerId, workerEpoch: next.workerEpoch });
+});
+
+test('M06 FILE_WRITE denies root-internal path aliases at the real PG prepare', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  const origin = await claim(f);
+  for (const alias of ['./.env', 'src/../.env', 'foo/../.git/config']) {
+    await assert.rejects(prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: randomUUID(),
+      intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+      actionType: 'APPLY_CHANGESET', target: f.root, params: { changes: [{ path: alias, action: 'CREATE', content: 'x' }] } }),
+    (error: unknown) => code(error) === 'GATEWAY_TARGET_DENIED', `${alias} must be denied after normalization`);
+  }
+});

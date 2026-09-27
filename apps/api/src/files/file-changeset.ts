@@ -36,8 +36,14 @@ const PROTECTED_PATH_PATTERNS = [
 ];
 
 export function isProtectedPath(relativePath: string): boolean {
-  const normalized = relativePath.replace(/^[/\\]+/, '').replaceAll('\\', '/');
-  return PROTECTED_PATH_PATTERNS.some((pattern) => pattern.test(normalized));
+  // 归一到 POSIX 风格的根内相对形态再做匹配：统一反斜杠、剥离根锚点前缀
+  // ('./' 或 '/'/'\')，并大小写不敏感（Windows 文件系统对大小写不敏感），
+  // 使 './.env'、'.\\ENV'、'foo/../.env' 等等价形式都能命中同一保护规则。
+  const normalized = relativePath
+    .replaceAll('\\', '/')
+    .replace(/^\.?\//, '')
+    .replace(/^\/+/, '');
+  return PROTECTED_PATH_PATTERNS.some((pattern) => pattern.test(normalized.toLowerCase()));
 }
 
 export function validateSafeRelativePath(rootPath: string, relativePath: string): string {
@@ -47,19 +53,37 @@ export function validateSafeRelativePath(rootPath: string, relativePath: string)
   if (isAbsolute(relativePath)) {
     throw new Error('Path must be relative');
   }
-  if (isProtectedPath(relativePath)) {
-    throw new Error(`Path '${relativePath}' is protected and cannot be modified`);
-  }
+  // 先归一再判定：resolve 会消解 './' 与根内 '..'，得到唯一的规范绝对路径，
+  // 之后据此计算根内相对路径（统一反斜杠），避免 '.\./.env'、'foo/../.env'
+  // 等等价别名绕过保护规则。逃逸检查仍在保护检查之前，不放宽禁止目录范围。
   const resolved = resolve(rootPath, relativePath);
   const rel = relative(rootPath, resolved);
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
     throw new Error(`Path '${relativePath}' escapes the resource root`);
+  }
+  if (isProtectedPath(rel)) {
+    throw new Error(`Path '${rel}' is protected and cannot be modified`);
   }
   return resolved;
 }
 
 export function computeSha256(content: string | Buffer): string {
   return createHash('sha256').update(content).digest('hex');
+}
+
+/** 冻结基线摘要必须是格式有效的 64 位十六进制 SHA-256；大小写不敏感但不容忍缺位/多余字符。 */
+export function isFrozenBaseline(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/i.test(value);
+}
+
+/**
+ * 修改/删除一个既有文件必须先冻结其基线摘要，才可能在落盘前比对当前内容检测外部编辑。
+ * CREATE 面向尚不存在的路径，无基线可冻结，因此放行。人工批准不能替代本检查。
+ */
+export function requireFrozenBaseline(change: Pick<FileChange, 'action' | 'baselineSha256'>): void {
+  if ((change.action === 'MODIFY' || change.action === 'DELETE') && !isFrozenBaseline(change.baselineSha256)) {
+    throw new Error(`${change.action} requires a valid frozen baseline SHA-256`);
+  }
 }
 
 export async function executeFileChangeset(
@@ -78,6 +102,22 @@ export async function executeFileChangeset(
         action: change.action,
         status: 'FAILED',
         error: 'Execution cancelled via AbortSignal',
+      });
+      anyFailure = true;
+      continue;
+    }
+
+    // P1-2：修改/删除必须携带格式有效的冻结基线；在解析路径、创建父目录等任何
+    // 副作用之前先验证输入，缺失或非法摘要一律拒绝且绝不触碰磁盘。
+    try {
+      requireFrozenBaseline(change);
+    } catch (err) {
+      outcomes.push({
+        path: change.path,
+        action: change.action,
+        status: 'FAILED',
+        baselineSha256: change.baselineSha256,
+        error: (err as Error).message,
       });
       anyFailure = true;
       continue;
@@ -193,7 +233,7 @@ export async function executeFileChangeset(
         anyFailure = true;
         continue;
       }
-      if (change.baselineSha256 && currentSha !== change.baselineSha256) {
+      if (currentSha !== change.baselineSha256) {
         outcomes.push({
           path: change.path,
           action: change.action,

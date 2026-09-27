@@ -207,16 +207,30 @@ export async function executeCliCommand(
   });
 }
 
-export function reconcileCliExecution(pid?: number): {
-  outcome: 'STOPPED' | 'STILL_RUNNING';
+export interface CliReconciliationInput {
+  /** 崩溃前记录的子进程 PID；仅结算时才落库，DISPATCHING 丢失结果路径通常为 undefined。 */
+  readonly pid?: number | undefined;
+}
+
+/**
+ * 核对一个已进入 DISPATCHING、但结果在落库前丢失的 CLI 调用。
+ *
+ * 缺少 PID、进程已退出或旧 Worker 已停止都只说明我们失去了对**这次**在途进程的观测，
+ * 都不能单独证明该任意 CLI 没有产生外部副作用，也不能证明结果已知——数据库 fencing
+ * 挡不住已经运行的外部程序写磁盘（契约 04 §5）。确实"未进入调用"的恢复语义由上层对
+ * PREPARED 单独走 NOT_EXECUTED，不经此处。因此这里唯一保守、可追溯且不掩盖副作用的处置
+ * 是 UNKNOWN：保持原 operation_id、隔离资源、阻断新的冲突执行，直到取得可信结果或人工处置。
+ * pid 存活只作为诊断证据记录，不据此判定终态；不虚构 PID、不伪造成功/失败、不换动作 ID、
+ * 不盲重试。
+ */
+export function reconcileCliExecution(input: CliReconciliationInput): {
+  outcome: 'UNKNOWN';
   details: JsonObject;
 } {
-  if (pid === undefined) {
-    return { outcome: 'STOPPED', details: { reason: 'NO_PID_RECORDED' } };
-  }
-  const alive = isProcessAlive(pid);
   return {
-    outcome: alive ? 'STILL_RUNNING' : 'STOPPED',
-    details: { pid, alive, quarantined: alive },
+    outcome: 'UNKNOWN',
+    details: input.pid === undefined
+      ? { reason: 'DISPATCHING_RESULT_LOST_NO_PID', quarantined: true }
+      : { reason: 'DISPATCHING_RESULT_LOST', pid: input.pid, alive: isProcessAlive(input.pid), quarantined: true },
   };
 }
