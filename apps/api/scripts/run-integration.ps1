@@ -7,13 +7,15 @@
 # The test database is owned by relay_migrator; tests connect with both real roles and never
 # impersonate the application role with a superuser.
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File apps/api/scripts/run-integration.ps1
+# On Windows hosts whose default locale is unavailable to initdb, add -UseCLocale.
 # Keep this file ASCII-only: Windows PowerShell reads BOM-less scripts as ANSI.
 
 [CmdletBinding()]
 param(
   [switch]$SkipBuild,
   [string]$TestFile = '',
-  [string]$TestNamePattern = ''
+  [string]$TestNamePattern = '',
+  [switch]$UseCLocale
 )
 
 Set-StrictMode -Version Latest
@@ -60,6 +62,23 @@ try {
     }
   }
 
+  # Windows resource registration captures the root's native File ID. Keep the
+  # source integration suites runnable without a pre-existing desktop package.
+  $needsFileIoHelper = $TestFile -eq '' -or $TestFile -in @(
+    'gateway', 'real-tools-gateway', 'run-graph', 'm06-stop-proof')
+  if ($needsFileIoHelper -and [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
+      [string]::IsNullOrWhiteSpace($env:RELAY_FILE_IO_HELPER)) {
+    $cargo = (Get-Command cargo -ErrorAction Stop).Source
+    $helperManifest = Join-Path $workspaceRoot 'apps\file-io-helper\Cargo.toml'
+    & $cargo build --locked --manifest-path $helperManifest
+    if ($LASTEXITCODE -ne 0) { throw "Native file I/O helper build failed with exit code $LASTEXITCODE" }
+    $sourceHelper = Join-Path $workspaceRoot 'apps\file-io-helper\target\debug\relay-file-io-helper.exe'
+    if (-not (Test-Path -LiteralPath $sourceHelper -PathType Leaf)) {
+      throw "Native file I/O helper was not produced: $sourceHelper"
+    }
+    $env:RELAY_FILE_IO_HELPER = $sourceHelper
+  }
+
   New-Item -ItemType Directory -Force -Path $temporaryRoot | Out-Null
 
   if (-not $SkipBuild) {
@@ -80,7 +99,9 @@ try {
     throw "Built integration tests are missing: $testPattern"
   }
 
-  & $initdbExe '-D' $dataDirectory '-U' 'relay_api_admin' '-A' 'trust' '--encoding=UTF8'
+  $initdbArgs = @('-D', $dataDirectory, '-U', 'relay_api_admin', '-A', 'trust', '--encoding=UTF8')
+  if ($UseCLocale) { $initdbArgs += '--locale=C' }
+  & $initdbExe @initdbArgs
   if ($LASTEXITCODE -ne 0) {
     throw "initdb failed with exit code $LASTEXITCODE"
   }

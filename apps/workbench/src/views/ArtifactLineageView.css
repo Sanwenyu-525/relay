@@ -2,7 +2,7 @@
 .lineage-page > h1 { margin-bottom: var(--relay-space-3); }
 .lineage-page .page-lede { margin-bottom: var(--relay-space-6); }
 .lineage-page > button { margin-bottom: var(--relay-space-4); }
-.lineage-summary, .lineage-parents { margin-top: var(--relay-space-6); }
+.lineage-summary, .lineage-parents, .lineage-content, .lineage-uses { margin-top: var(--relay-space-6); }
 .lineage-summary dl { display: grid; gap: var(--relay-space-3); margin-bottom: 0; }
 .lineage-summary dl div { display: grid; grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr); gap: var(--relay-space-3); overflow-wrap: anywhere; }
 .lineage-summary dt, .lineage-parents small { color: var(--relay-color-text-secondary); }
@@ -11,4 +11,11 @@
 .lineage-parents li { padding: var(--relay-space-4) 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); overflow-wrap: anywhere; }
 .lineage-parents small { display: block; margin-top: var(--relay-space-2); }
 .lineage-parents li p { margin-top: var(--relay-space-2); }
+.lineage-text { max-height: 32rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: var(--relay-space-4); background: var(--relay-color-bg-subtle); border: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.lineage-diff { margin-top: var(--relay-space-5); }
+.lineage-diff-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--relay-space-4); }
+.lineage-diff-columns > div { min-width: 0; }
+.lineage-uses ul { padding: 0; list-style: none; }
+.lineage-uses li { padding: var(--relay-space-3) 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 @media (max-width: 700px) { .lineage-page { padding: var(--relay-layout-main-smallPadding); } .lineage-summary dl div { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .lineage-diff-columns { grid-template-columns: 1fr; } }

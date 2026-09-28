@@ -189,6 +189,7 @@ describe("项目连接与 Permission 设置", () => {
     const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
     expect(mounted.wrapper.text()).toContain("连接目录未由此接口公开");
     expect(mounted.wrapper.text()).toContain("D:\\Workspace\\managed");
+    expect(mounted.wrapper.text()).toContain("Windows 文件写入目录身份：未绑定");
     await mounted.wrapper.get('[data-testid="policy-capability"]').setValue("FILE_READ");
     expect(mounted.wrapper.get('[data-testid="policy-resource"]').findAll("option")).toHaveLength(2);
     await mounted.wrapper.get('[data-testid="policy-resource"]').setValue(resourceId);

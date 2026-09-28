@@ -33,6 +33,14 @@ type PendingSave = {
   readonly expectedArtifactRevision: DecimalRevision;
 });
 
+interface DraftBase {
+  readonly taskId: string;
+  readonly taskRevision: DecimalRevision;
+  readonly artifactId: string;
+  readonly artifactRevision: DecimalRevision;
+  readonly versionId: string;
+}
+
 export default function ArtifactPanel(props: Props) {
   const { taskId, projectId, taskStatus, taskRevision, acceptanceRevision, criteria, allowedActions, writeBlockedReason, onRefresh } = props;
   const [title, setTitle] = useState("任务产物");
@@ -42,6 +50,11 @@ export default function ArtifactPanel(props: Props) {
   const [saveReceipt, setSaveReceipt] = useState<string | null>(null);
   const [saveFailure, setSaveFailure] = useState<LiveActionError | null>(null);
   const [savePending, setSavePending] = useState<PendingSave | null>(null);
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [draftFailure, setDraftFailure] = useState<string | null>(null);
+  const [draftBase, setDraftBase] = useState<DraftBase | null>(null);
+  const [rebasing, setRebasing] = useState(false);
+  const [rebaseFailure, setRebaseFailure] = useState<string | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [artifactSnapshot, setArtifactSnapshot] = useState<{ taskId: string; data: RelayTaskArtifacts } | null>(null);
   const [versionsLoading, setVersionsLoading] = useState(true);
@@ -63,6 +76,7 @@ export default function ArtifactPanel(props: Props) {
   const [reopenFailure, setReopenFailure] = useState<LiveActionError | null>(null);
   const disposed = useRef(false);
   const artifactsRequest = useRef(0);
+  const draftRequest = useRef(0);
   const command = useRef({ select: null as string | null, complete: null as string | null, reopen: null as string | null });
   const pendingSave = useRef<PendingSave | null>(null);
   const acceptanceRound = useRef({ taskId, revision: acceptanceRevision });
@@ -90,7 +104,12 @@ export default function ArtifactPanel(props: Props) {
   const done = taskStatus === "DONE";
   const requiredCriteria = criteria.filter((criterion) => criterion.required);
   const versionsReady = artifacts !== null && !versionsLoading && versionsFailure === null;
-  const canSave = live && writeBlockedReason === null && versionsReady && allowedActions.includes("SAVE_ARTIFACT_VERSION") && !!content.trim() && !contentTooLarge && !saving && savePending === null;
+  const baseChanged = draftBase !== null && (draftBase.taskId !== taskId || draftBase.taskRevision !== taskRevision ||
+    draftBase.artifactId !== latest?.artifactId || draftBase.artifactRevision !== latest.artifactRevision ||
+    draftBase.versionId !== latest.versionId);
+  const canSave = live && writeBlockedReason === null && versionsReady && !baseChanged &&
+    !(draftBase && saveFailure?.kind === "conflict") && allowedActions.includes("SAVE_ARTIFACT_VERSION") &&
+    !!content.trim() && !contentTooLarge && !saving && !draftLoading && !rebasing && savePending === null;
   const canComplete = live && writeBlockedReason === null && versionsReady && allowedActions.includes("COMPLETE") && requiredCriteria.every((criterion) => acceptedCriterionIds.includes(criterion.criterionId)) && !!acceptanceStatement.trim() && !completing;
   const canReopen = live && writeBlockedReason === null && allowedActions.includes("REOPEN") && !!reopenReason.trim() && !reopening;
 
@@ -121,7 +140,7 @@ export default function ArtifactPanel(props: Props) {
     try { const loaded = await client.getProjectState(projectId); if (!disposed.current) { setState(loaded); setStateFailure(null); } }
     catch (caught) { if (!disposed.current) setStateFailure(describeLiveError(caught).message); }
   }
-  useEffect(() => { disposed.current = false; setDraftGuard(guard.current); return () => { disposed.current = true; artifactsRequest.current++; clearDraftGuard(guard.current); }; }, [taskId]);
+  useEffect(() => { disposed.current = false; setDraftGuard(guard.current); return () => { disposed.current = true; artifactsRequest.current++; draftRequest.current++; clearDraftGuard(guard.current); }; }, [taskId]);
   useEffect(() => { void loadState(); void loadArtifacts(); }, [taskId, projectId, taskRevision]);
   useEffect(() => {
     if (acceptanceRound.current.taskId === taskId && acceptanceRound.current.revision === acceptanceRevision) return;
@@ -131,6 +150,8 @@ export default function ArtifactPanel(props: Props) {
   function resetAcceptanceSelection() { setSelectedVersionId(null); setAcceptedCriterionIds([]); }
   function remember(result: RelayArtifactVersionResult, attempt: PendingSave) {
     savedContentSnapshot.current = attempt.content;
+    setDraftBase({ taskId: result.taskId, taskRevision: result.taskRevision, artifactId: result.artifactId,
+      artifactRevision: result.artifactRevision, versionId: result.versionId });
     if (contentRef.current === attempt.content) setSelectedVersionId(result.versionId);
     void loadArtifacts();
   }
@@ -146,13 +167,60 @@ export default function ArtifactPanel(props: Props) {
     onRefresh();
   }
   function editContent(value: string) { contentRef.current = value; setContent(value); }
+  async function loadLatestHumanDraft() {
+    const client = liveClient();
+    if (!client || !latest || !humanArtifact || draftLoading || saving || savePending || done ||
+      contentRef.current !== savedContentSnapshot.current) return;
+    const expectedContent = contentRef.current;
+    const token = ++draftRequest.current;
+    setDraftLoading(true); setDraftFailure(null);
+    try {
+      const [body, current] = await Promise.all([
+        client.getArtifactVersionContent(latest.versionId), client.getArtifact(humanArtifact.id)
+      ]);
+      if (disposed.current || token !== draftRequest.current) return;
+      if (current.id !== humanArtifact.id || current.latestVersionId !== latest.versionId ||
+        current.revision !== latest.artifactRevision)
+        throw new Error("最新人工版本已变化；请刷新任务事实后再起草。");
+      if (contentRef.current !== expectedContent) throw new Error("读取期间草稿发生变化，已保留你的输入。");
+      savedContentSnapshot.current = body;
+      setDraftBase({ taskId, taskRevision, artifactId: current.id,
+        artifactRevision: current.revision, versionId: latest.versionId });
+      editContent(body);
+    } catch (caught) { if (!disposed.current && token === draftRequest.current) setDraftFailure(describeLiveError(caught).message); }
+    finally { if (!disposed.current && token === draftRequest.current) setDraftLoading(false); }
+  }
+  async function confirmCurrentBase() {
+    const client = liveClient();
+    if (!client || !draftBase || !humanArtifact || !latest || !versionsReady || rebasing || saving || savePending || done) return;
+    setRebasing(true); setRebaseFailure(null);
+    try {
+      const [task, artifact] = await Promise.all([client.getTask(taskId), client.getArtifact(draftBase.artifactId)]);
+      if (disposed.current) return;
+      if (task.id !== taskId || artifact.id !== draftBase.artifactId || artifact.taskId !== taskId ||
+        !artifact.latestVersionId || !task.allowedActions.includes("SAVE_ARTIFACT_VERSION"))
+        throw new Error("当前任务或产物不允许继续修订；草稿已保留。");
+      if (task.revision !== taskRevision || artifact.revision !== latest.artifactRevision ||
+        artifact.latestVersionId !== latest.versionId) {
+        onRefresh();
+        void loadArtifacts();
+        throw new Error("确认时版本又发生变化；已重新读取，请查看新版本后再次确认。草稿已保留。");
+      }
+      setDraftBase({ taskId, taskRevision: task.revision, artifactId: artifact.id,
+        artifactRevision: artifact.revision, versionId: artifact.latestVersionId });
+      setSaveFailure(null);
+      onRefresh();
+      await loadArtifacts();
+    } catch (caught) { if (!disposed.current) setRebaseFailure(describeLiveError(caught).message); }
+    finally { if (!disposed.current) setRebasing(false); }
+  }
   async function saveVersion() {
     const client = liveClient();
     if (!client || !canSave || pendingSave.current) return;
     const attempt: PendingSave = latest ? {
       kind: "append", commandId: createCommandId(), taskId,
-      expectedTaskRevision: taskRevision, artifactId: latest.artifactId,
-      expectedArtifactRevision: latest.artifactRevision, mediaType: MEDIA_TYPE, content
+      expectedTaskRevision: draftBase?.taskRevision ?? taskRevision, artifactId: draftBase?.artifactId ?? latest.artifactId,
+      expectedArtifactRevision: draftBase?.artifactRevision ?? latest.artifactRevision, mediaType: MEDIA_TYPE, content
     } : {
       kind: "create", commandId: createCommandId(), taskId,
       expectedTaskRevision: taskRevision, title: title.trim(), mediaType: MEDIA_TYPE, content
@@ -223,12 +291,16 @@ export default function ArtifactPanel(props: Props) {
   if (!live) return <section className="surface-panel" data-testid="artifact-fixture-gap"><h2>产物与完成</h2><p className="helper-text">示例数据没有产物事实，因此这里不展示任何产物、版本或完成凭据，也不提供可点的保存按钮。连接本机 API 后，产物版本、选择接受与人工完成会写入真实 PostgreSQL。</p></section>;
   return <>
     <section className="surface-panel" data-testid="artifact-editor"><h2>人工编辑与保存版本</h2><p className="helper-text">保存会创建不可变版本：旧版本不会被覆盖，新版本不继承任何验收凭据。草稿只是本地输入，保存成功前不算已发布产物。</p>{writeBlockedReason && <p className="disabled-reason" data-testid="artifact-project-write-blocked">{writeBlockedReason}</p>}{done ? <p className="warning-callout" role="status" data-testid="artifact-editor-locked"><Info aria-hidden="true" />该任务本轮已完成：编辑入口已关闭，请先在下方重开任务再保存新版本。</p> : !allowedActions.includes("SAVE_ARTIFACT_VERSION") && <p className="disabled-reason" data-testid="artifact-editor-reason"><Info aria-hidden="true" />服务端未投影 SAVE_ARTIFACT_VERSION：当前状态是{taskStatusLabels[taskStatus]}，只有进行中的人工任务可以保存产物。</p>}
+      {latest && <p><button className="secondary-button" type="button" data-testid="artifact-load-latest-draft" disabled={done || draftLoading || rebasing || saving || savePending !== null || content !== savedContentSnapshot.current} onClick={() => void loadLatestHumanDraft()}>{draftLoading ? "正在读取" : `从最新人工版本 v${latest.versionNumber} 起草修订`}</button><span className="field-hint">仅在当前草稿没有未保存改动时载入；提交仍使用原 CAS 命令。</span></p>}{draftFailure && <p className="action-error" role="alert">{draftFailure}</p>}
+      {draftBase && <p className="helper-text" data-testid="artifact-draft-base">草稿修订基线：版本 {draftBase.versionId} · Artifact revision v{draftBase.artifactRevision} · Task revision v{draftBase.taskRevision}。</p>}
+      {baseChanged && <p className="warning-callout" data-testid="artifact-draft-base-changed">当前任务或产物已不同于草稿基线；草稿仍保留，保存已暂停。请查看最新版本差异，再明确确认新基线。</p>}
+      {draftBase && (baseChanged || saveFailure?.kind === "conflict") && <p><button className="secondary-button" type="button" data-testid="artifact-confirm-new-base" disabled={rebasing || saving || savePending !== null || !versionsReady || !latest || writeBlockedReason !== null || done} onClick={() => void confirmCurrentBase()}>{rebasing ? "正在核对" : `确认以当前 v${latest?.versionNumber ?? "?"} 为基线（保留草稿）`}</button>{latest && <Link className="inline-link" to={`/artifact-versions/${latest.versionId}/lineage`}>查看 v{latest.versionNumber} 来源与差异</Link>}</p>}{rebaseFailure && <p className="action-error" role="alert">{rebaseFailure}</p>}
       <label className="field"><span className="field-label">产物名称</span><input value={humanArtifact?.title ?? title} onChange={(event) => setTitle(event.target.value)} name="artifact-title" disabled={humanArtifact !== null || done || savePending !== null} /><span className="field-hint">{humanArtifact ? "这里保存的是该人工产物的新版本。" : "尚无人工产物；保存会创建产物，之后续写不可变版本。"}</span></label>
       <div className="editor-toolbar"><span className="field-label">Markdown 内容</span><div className="segmented">{[false, true].map((showPreview) => <label key={String(showPreview)} className={`segmented-option${previewing === showPreview ? " segmented-option--selected" : ""}`}><input checked={previewing === showPreview} onChange={() => setPreviewing(showPreview)} className="visually-hidden" type="radio" name="artifact-view" value={String(showPreview)} />{showPreview ? "预览" : "编辑"}</label>)}</div></div>
       {previewing ? <SafeMarkdown source={content} /> : <textarea value={content} onChange={(event) => editContent(event.target.value)} className="markdown-editor" name="artifact-content" rows={12} disabled={done} placeholder="用 Markdown 写这一轮的成果；标题、列表、粗体、行内代码与 http/https 链接会被安全渲染。" />}
       <p className="field-counter">{contentBytes} / {CONTENT_LIMIT_BYTES} 字节</p>{contentTooLarge && <p className="field-error" role="alert"><Info aria-hidden="true" />正文超过 256 KiB（按 UTF-8 字节判定），服务端会返回 413；请拆分后再保存。</p>}<div className="form-actions"><button className="primary-button" type="button" data-testid="artifact-save" disabled={!canSave} onClick={() => void saveVersion()}><Save aria-hidden="true" />{saving ? "正在保存" : "保存新版本"}</button></div>{savePending && <p className="helper-text" data-testid="artifact-save-pending">原 command_id：{savePending.commandId}。原请求{savePending.kind === "create" ? "创建产物" : `续写产物 ${savePending.artifactId}`}，正文 {new TextEncoder().encode(savePending.content).length} 字节；结果未核对前不能提交新草稿。</p>}{saveReceipt && <p className="receipt-message" role="status" data-testid="artifact-save-receipt">{saveReceipt}</p>}{saveFailure && <p className="action-error" role="alert">{saveFailure.message}</p>}{saveFailure?.kind === "conflict" && <p className="helper-text">草稿保留在编辑器里，没有被覆盖；请先重新读取任务事实，再决定是否用新版本提交。</p>}{savePending && !saving && <button className="secondary-button" type="button" data-testid="artifact-save-receipt-query" onClick={() => void lookupSaveReceipt()}>查询本次保存回执</button>}
     </section>
-    <section className="surface-panel" data-testid="artifact-versions"><h2>版本与接受</h2><p className="helper-text">以下是服务端保存的任务产物历史。“最新”“当前选用”和“本轮接受”分别来自版本、项目 State 与当前完成凭据。</p>{versionsLoading && <p className="helper-text" role="status">正在读取产物版本。</p>}{versionsFailure && <p className="action-error" role="alert">{versionsFailure} 草稿仍保留；产物列表尚未核实，暂不能保存或完成。<button className="secondary-button" type="button" onClick={() => void loadArtifacts()}>重新读取产物</button></p>}{versionsReady && (!versions.length ? <div className="page-state"><p>该任务尚无已保存的产物版本。</p></div> : <ul className="version-list">{versions.map((version) => <li key={version.versionId} className="version-row"><label className="version-choice"><input checked={selectedVersionId === version.versionId} onChange={() => setSelectedVersionId(version.versionId)} type="radio" name="artifact-version" value={version.versionId} data-testid={`artifact-version-${version.versionId}`} /><span className="version-copy"><strong>v{version.versionNumber} · {version.title}</strong><small>sha256 {version.sha256.slice(0, 12)}… · {version.size} 字节</small></span></label><span className="version-tags">{artifacts?.items.some((item) => item.latestVersionId === version.versionId) && <span className="status-chip">最新</span>}{selectedByProject.some((ref) => ref.artifactVersionId === version.versionId) && <span className="status-chip status-chip--neutral">当前选用</span>}{artifacts?.currentAcceptedVersionIds.includes(version.versionId) && <span className="status-chip status-chip--neutral">本轮接受</span>}</span><Link className="inline-link" to={`/artifact-versions/${version.versionId}/lineage`}>查看确切来源</Link></li>)}</ul>)}
+    <section className="surface-panel" data-testid="artifact-versions"><h2>版本与接受</h2><p className="helper-text">以下是服务端保存的任务产物历史。“最新”“当前选用”和“本轮接受”分别来自版本、项目 State 与当前完成凭据。</p>{versionsLoading && <p className="helper-text" role="status">正在读取产物版本。</p>}{versionsFailure && <p className="action-error" role="alert">{versionsFailure} 草稿仍保留；产物列表尚未核实，暂不能保存或完成。<button className="secondary-button" type="button" onClick={() => void loadArtifacts()}>重新读取产物</button></p>}{versionsReady && (!versions.length ? <div className="page-state"><p>该任务尚无已保存的产物版本。</p></div> : <ul className="version-list">{versions.map((version) => <li key={version.versionId} className="version-row"><label className="version-choice"><input checked={selectedVersionId === version.versionId} onChange={() => setSelectedVersionId(version.versionId)} type="radio" name="artifact-version" value={version.versionId} data-testid={`artifact-version-${version.versionId}`} /><span className="version-copy"><strong>v{version.versionNumber} · {version.title}</strong><small>sha256 {version.sha256.slice(0, 12)}… · {version.size} 字节</small></span></label><span className="version-tags">{artifacts?.items.some((item) => item.latestVersionId === version.versionId) && <span className="status-chip">最新</span>}{selectedByProject.some((ref) => ref.artifactVersionId === version.versionId) && <span className="status-chip status-chip--neutral">当前选用</span>}{artifacts?.currentAcceptedVersionIds.includes(version.versionId) && <span className="status-chip status-chip--neutral">本轮接受</span>}</span><Link className="inline-link" to={`/artifact-versions/${version.versionId}/lineage`}>查看正文、来源与比较</Link></li>)}</ul>)}
       <section className="rail-section"><h3>当前选用（来自项目 State）</h3>{stateFailure ? <p className="action-error" role="alert">{stateFailure}</p> : projectId === null ? <p className="helper-text">该任务未归属项目：选择版本为当前选用是 Project State 命令，因此不可用。</p> : selectedByProject.length === 0 ? <ul className="helper-text">项目 State 还没有选用任何产物版本。</ul> : <ul className="version-list">{selectedByProject.map((ref) => <li key={ref.artifactVersionId} className="version-row"><span className="version-copy"><strong>v{ref.versionNumber}</strong><small>来源：{ref.sourceRef}</small></span></li>)}</ul>}<button className="secondary-button" type="button" data-testid="artifact-select-version" disabled={writeBlockedReason !== null || !versionsReady || selecting || !selectedVersion || !projectId || !state} onClick={() => void selectVersion()}>{selecting ? "正在提交" : "选择这个版本为当前选用"}</button><p className="helper-text">“当前选用”是项目级事实，只影响后续 Context 与工作台视图；它不等于“本轮接受”，完成凭据里的版本以完成命令为准。</p>{selectReceipt && <p className="receipt-message" role="status">{selectReceipt}</p>}{selectFailure && <p className="action-error" role="alert">{selectFailure.message}</p>}{selectFailure?.kind === "transport" && <button className="secondary-button" type="button" disabled={selecting} onClick={() => void lookupSelectReceipt()}>查询本次选择回执</button>}</section>
     </section>
     <section className="surface-panel" data-testid="task-completion"><h2>检查与完成</h2><p className="helper-text">完成是一次短事务：任务状态、完成凭据与项目 State 一起提交。检查通过不等于完成，完成也不等于执行成功。</p><fieldset className="field" disabled={done || !allowedActions.includes("COMPLETE")}><legend className="field-label">必需验收条件（全部勾选才能完成）</legend>{!requiredCriteria.length && <p className="field-hint">当前验收版本没有必需条件。</p>}{requiredCriteria.map((criterion) => <label key={criterion.criterionId} className="choice-option"><input type="checkbox" checked={acceptedCriterionIds.includes(criterion.criterionId)} data-testid={`criterion-${criterion.criterionId}`} onChange={(event) => toggleCriterion(criterion.criterionId, event.target.checked)} /><span>{criterion.statement}<small>方式：{criterion.method}</small></span></label>)}</fieldset><label className="field"><span className="field-label">接受说明</span><input value={acceptanceStatement} onChange={(event) => setAcceptanceStatement(event.target.value)} name="completion-statement" disabled={done} /></label><label className="field"><span className="field-label">补充理由（可选）</span><input value={acceptanceReason} onChange={(event) => setAcceptanceReason(event.target.value)} name="completion-reason" disabled={done} /></label><p className="helper-text">将随完成提交的产物版本：{selectedVersion ? `v${selectedVersion.versionNumber}` : "无（该任务未声明产物要求时允许为空集合）"}</p><div className="form-actions"><button className="primary-button" type="button" data-testid="task-complete" disabled={!canComplete} onClick={() => void completeTask()}><Check aria-hidden="true" />{completing ? "正在提交" : "完成本轮"}</button></div>{!done && !allowedActions.includes("COMPLETE") && <p className="disabled-reason" data-testid="task-complete-reason"><Info aria-hidden="true" />服务端未投影 COMPLETE：只有进行中的人工任务可以完成。</p>}{done && <p className="disabled-reason" data-testid="task-complete-done"><Info aria-hidden="true" />该任务当前已完成；需要再次编辑请先重开。</p>}{completionReceipt && <p className="receipt-message" role="status" data-testid="task-complete-receipt">{completionReceipt}</p>}{completionFailure && <p className="action-error" role="alert">{completionFailure.message}</p>}{completionFailure?.kind === "transport" && <button className="secondary-button" type="button" disabled={completing} onClick={() => void lookupCompleteReceipt()}>查询本次完成回执</button>}</section>

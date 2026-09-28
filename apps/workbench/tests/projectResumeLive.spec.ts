@@ -25,6 +25,7 @@ describe("项目恢复页 live 当前事实", () => {
       if (path === `/projects/${projectId}/state`) return response({ project_id: projectId, phase_key: "WRITING", revision: "7", next_action_task_id: "task-next",
         selected_artifact_version_refs: [{ artifact_version_id: "version-a", artifact_id: "artifact-a", version_number: "3", source_ref: "task:task-a" }],
         completed_highlight_refs: [{ completion_id: completionId, task_id: "task-a", acceptance_revision: "2" }] });
+      if (path === `/projects/${projectId}/goals`) return response({ items: [{ goal_id: "goal-one", title: "完成可复核论文", status: "ACTIVE", revision: "2" }] });
       if (path === `/tasks?project_id=${projectId}`) return response({ items: [task("task-a")], next_cursor: "next-page" });
       if (path === "/tasks/task-next") return response({ ...task("task-next"), acceptance: { acceptance_revision: "1", objective: "核对", source: "HUMAN", criteria: [] }, dependencies: [] });
       if (path === "/reviews?status=OPEN") return response({ items: [{ id: "review-a", kind: "ACTION_APPROVAL", status: "OPEN", revision: "1", project_id: projectId,
@@ -48,10 +49,32 @@ describe("项目恢复页 live 当前事实", () => {
     expect(mounted.wrapper.text()).not.toContain("其他项目");
     expect(mounted.wrapper.text()).toContain("草稿 · v3");
     expect(mounted.wrapper.text()).toContain("保留人工核对");
+    expect(mounted.wrapper.text()).toContain("完成可复核论文");
+    expect(mounted.wrapper.text()).toContain("本次查询于");
     expect(mounted.wrapper.find(`a[href="/completion-records/${completionId}"]`).exists()).toBe(true);
     expect(mounted.wrapper.text()).toContain("没有上次查看基线");
     expect(mounted.wrapper.text()).not.toContain("建议的下一步");
     expect(paths).toContain("/tasks/task-next");
+  });
+
+  it("部分来源失败时保留缺口，不把未读取的任务与待审项当成空集", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-bearer-token-0123456789abcdef" });
+    const paths: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method ?? "GET").toBe("GET");
+      const path = String(input).slice(root.length); paths.push(path);
+      if (path === `/projects/${projectId}`) return response({ id: projectId, title: "部分可读项目", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
+      if (path === `/projects/${projectId}/state`) return response({ project_id: projectId, phase_key: "PLANNING", revision: "1", next_action_task_id: null,
+        selected_artifact_version_refs: [], completed_highlight_refs: [] });
+      if (path === `/decisions?project_id=${projectId}`) return response([]);
+      throw new Error(`unavailable: ${path}`);
+    }));
+    const mounted = await mountWorkbench(`/projects/${projectId}?skill=resume`); unmount = mounted.unmount;
+    expect(mounted.wrapper.text()).toContain("Goal 关系本次读取失败");
+    expect(mounted.wrapper.text()).toContain("任务列表本次读取失败");
+    expect(mounted.wrapper.text()).toContain("Review 本次读取失败");
+    expect(mounted.wrapper.text()).not.toContain("已读首分页没有任务");
+    expect(paths.every((path) => !path.includes("/commands"))).toBe(true);
   });
 
   it("旧项目请求不会覆盖新项目事实", async () => {

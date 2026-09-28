@@ -5,6 +5,7 @@ import type {
   ChangeSetEvidenceSource, ChangeSetFileRow, ChangeSetFileStatus, ChangeSetRow, ChangeSetStatus,
 } from '../infrastructure/database-schema.js';
 import type { JsonObject } from '../infrastructure/json.js';
+import { canonicalRelativePath } from './file-changeset.js';
 import { requireRow } from '../shared/sql-rows.js';
 
 /**
@@ -54,20 +55,15 @@ function reason(value: string | null | undefined): string | null {
   return trimmed === '' ? null : trimmed;
 }
 
-/** 账本键：执行与核对都按冻结输入的同一形态归一，避免 './a' 与 'a' 生成两行证据。 */
-function ledgerPath(value: string): string {
-  return value.replaceAll('\\', '/').replace(/^\.\/+/, '');
-}
-
 /**
  * 落库前的最后一道证据守卫：状态与摘要必须自洽，否则按「未证实」如实降级记录。
  * 目的是让结算事务不会因为一条可疑的逐文件声明整体失败——账本缺项还能核对，
  * 半途异常会连带丢失 invocation 的结果事实。降级只影响账本表述，不改 Gateway 业务判定。
  */
-function guardFile(file: ChangeSetLedgerFile): ChangeSetLedgerFile {
+function guardFile(root: string, file: ChangeSetLedgerFile): ChangeSetLedgerFile {
   const baseline = sha(file.baseline_sha256);
   const target = file.action === 'DELETE' ? null : sha(file.target_sha256);
-  const actual = file.action === 'DELETE' ? null : sha(file.actual_sha256);
+  const actual = sha(file.actual_sha256);
   let status = file.status;
   let error = reason(file.error);
   if (status === 'APPLIED') {
@@ -87,7 +83,7 @@ function guardFile(file: ChangeSetLedgerFile): ChangeSetLedgerFile {
   }
   if (status !== 'APPLIED') error = error ?? 'REASON_NOT_RECORDED';
   return {
-    relative_path: ledgerPath(file.relative_path), action: file.action,
+    relative_path: canonicalRelativePath(root, file.relative_path), action: file.action,
     baseline_sha256: baseline, observed_baseline_sha256: sha(file.observed_baseline_sha256),
     target_sha256: target,
     actual_sha256: file.action === 'DELETE' && status === 'APPLIED' ? null : actual,
@@ -115,9 +111,9 @@ export class ChangeSetRepository {
   }
 
   /** 逐文件行只补记缺失路径；更早的那份观测保持不变（该表也没有 UPDATE 权限）。 */
-  private async insertMissingFiles(changeSetId: string, invocationId: string,
+  private async insertMissingFiles(changeSetId: string, invocationId: string, canonicalRoot: string,
     files: readonly ChangeSetLedgerFile[]): Promise<void> {
-    for (const file of files.map(guardFile)) {
+    for (const file of files.map((item) => guardFile(canonicalRoot, item))) {
       await sql`
         insert into change_set_files (change_set_id, invocation_id, relative_path, action,
           baseline_sha256, observed_baseline_sha256, target_sha256, actual_sha256, status, error, diff_ref)
@@ -130,12 +126,13 @@ export class ChangeSetRepository {
     }
   }
 
-  private async unappliedFileCount(changeSetId: string): Promise<bigint> {
-    const result = await sql<{ count: bigint }>`
-      select count(*)::bigint as count from change_set_files
-      where change_set_id = ${changeSetId} and status <> 'APPLIED'
+  private async fileSummary(changeSetId: string): Promise<{ total: number; unapplied: number }> {
+    const result = await sql<{ total: number; unapplied: number }>`
+      select count(*)::integer as total,
+        count(*) filter (where status <> 'APPLIED')::integer as unapplied
+      from change_set_files where change_set_id = ${changeSetId}
     `.execute(this.db);
-    return result.rows[0]?.count ?? 0n;
+    return result.rows[0] ?? { total: 0, unapplied: 0 };
   }
 
   /**
@@ -146,27 +143,49 @@ export class ChangeSetRepository {
   async recordExecution(header: ChangeSetLedgerHeader, id: string,
     files: readonly ChangeSetLedgerFile[], status: ChangeSetStatus): Promise<ChangeSetRow> {
     const changeSetId = await this.upsertHeader(header, id, files.length, status, 'EXECUTION');
-    await this.insertMissingFiles(changeSetId, header.invocation_id, files);
+    await this.insertMissingFiles(changeSetId, header.invocation_id, header.canonical_root, files);
+    const summary = await this.fileSummary(changeSetId);
     const changeSet = await this.readById(changeSetId);
     if (changeSet === undefined) throw new Error('change set row missing after execution settle');
-    return changeSet;
+    const proven = summary.total === files.length && summary.total === changeSet.file_count && summary.unapplied === 0;
+    const finalStatus = status === 'SUCCEEDED' && !proven ? 'PARTIAL' : status;
+    if (finalStatus === changeSet.status) return changeSet;
+    const result = await sql<ChangeSetRow>`
+      update change_sets set status = ${finalStatus}, updated_at = now()
+      where id = ${changeSetId} returning *
+    `.execute(this.db);
+    return requireRow(result.rows, 'settle executed change set');
   }
 
   /**
    * 恢复核对：按 invocation 回到同一份账本（崩溃于结算之前则由此处新建），补记执行阶段
-   * 缺失的逐文件观测，并把整体状态收敛为 SUCCEEDED 或保持 UNKNOWN。
-   * `confirmed` 是用例按真实内容与目标 hash 逐项比对的结果；只要还有一条未确认，或账本里
-   * 存在执行阶段记录的冲突/失败，就不写成功。
+   * 缺失的逐文件观测，并把整体状态收敛为 SUCCEEDED、已证实的 PARTIAL 或 UNKNOWN。
+   * 完整成功要求逐项匹配；首次建账的 PARTIAL 还要求原执行回执中的已应用项和冲突项
+   * 均与回读一致。已有 UNKNOWN 逐文件行不可改写，不靠后到观察升级汇总状态。
    */
   async recordReconciliation(header: ChangeSetLedgerHeader, id: string,
-    files: readonly ChangeSetLedgerFile[], confirmed: boolean): Promise<ChangeSetRow> {
+    files: readonly ChangeSetLedgerFile[], confirmed: boolean,
+    confirmedPartial: boolean): Promise<ChangeSetRow> {
+    const previous = await this.readByInvocation(header.invocation_id);
+    // A complete execution report already fixed the per-file PARTIAL facts.
+    // Later disk observations cannot rewrite that historical outcome to UNKNOWN.
+    if (previous?.status === 'PARTIAL') return previous;
     const changeSetId = await this.upsertHeader(header, id, files.length, 'UNKNOWN', 'RECONCILIATION');
-    await this.insertMissingFiles(changeSetId, header.invocation_id, files);
-    const status: ChangeSetStatus =
-      confirmed && (await this.unappliedFileCount(changeSetId)) === 0n ? 'SUCCEEDED' : 'UNKNOWN';
+    await this.insertMissingFiles(changeSetId, header.invocation_id, header.canonical_root, files);
+    const summary = await this.fileSummary(changeSetId);
+    const changeSet = await this.readById(changeSetId);
+    if (changeSet === undefined) throw new Error('change set row missing after reconciliation settle');
+    const complete = summary.total === files.length && summary.total === changeSet.file_count;
+    // A durable partial adapter receipt plus matching rereads may establish the
+    // first ledger. Existing UNKNOWN rows remain immutable and cannot be upgraded
+    // by changing only the header after a later observation.
+    const status: ChangeSetStatus = confirmed && complete && summary.unapplied === 0
+      ? 'SUCCEEDED'
+      : confirmedPartial && previous === undefined && complete && summary.unapplied > 0 &&
+          summary.unapplied < summary.total ? 'PARTIAL' : 'UNKNOWN';
     const result = await sql<ChangeSetRow>`
       update change_sets set status = ${status}, evidence_source = 'RECONCILIATION',
-        file_count = ${files.length}, updated_at = now() where id = ${changeSetId} returning *
+        updated_at = now() where id = ${changeSetId} returning *
     `.execute(this.db);
     return requireRow(result.rows, 'settle reconciled change set');
   }

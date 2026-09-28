@@ -225,6 +225,8 @@ export interface RelayAcceptanceCriterion {
   readonly statement: string;
   readonly required: boolean;
   readonly method: string;
+  /** null 表示响应未提供目标说明，不等于没有受验对象。 */
+  readonly targetSpec: Readonly<Record<string, unknown>> | null;
 }
 
 export interface RelayArtifactVersionSummary {
@@ -249,6 +251,22 @@ export interface RelayArtifactLineage {
   readonly directParents: readonly { readonly id: string; readonly relation: RelayLineageRelation;
     readonly parentKind: RelayLineageParentKind; readonly parentId: string | null;
     readonly availability: "AVAILABLE" | "UNAVAILABLE"; readonly createdAt: string }[];
+}
+
+export interface RelayArtifactDirectUses {
+  readonly sourceArtifactVersionId: string;
+  readonly sourceContentAvailability: "AVAILABLE" | "UNAVAILABLE";
+  readonly scope: "RECORDED_DIRECT_ONLY";
+  readonly complete: false;
+  readonly hasMore: boolean;
+  readonly directUses: readonly {
+    readonly relation: "DERIVED_FROM" | "REVISED_FROM";
+    readonly childArtifactVersionId: string | null;
+    readonly childArtifactId: string | null;
+    readonly childVersionNumber: DecimalRevision | null;
+    readonly availability: "AVAILABLE" | "UNAVAILABLE";
+    readonly createdAt: string;
+  }[];
 }
 
 export interface RelayArtifact {
@@ -390,6 +408,15 @@ export interface RelayKnowledgeVersion {
   readonly excerpt: string | null;
   readonly sourceRefs: Readonly<Record<string, unknown>>;
   readonly createdAt: string;
+}
+
+export interface RelayKnowledgeVersionContent extends Omit<RelayKnowledgeVersion, "excerpt"> {
+  readonly title: string;
+  readonly projectId: string | null;
+  readonly currentVersion: DecimalRevision;
+  readonly sourceUri: string | null;
+  readonly contentStatus: "FULL" | "PARTIAL" | "UNAVAILABLE" | "UNSUPPORTED" | "READ_FAILED";
+  readonly content: string | null;
 }
 
 export interface RelayMemory {
@@ -863,6 +890,7 @@ export interface RelayManagedResource {
   readonly status: string;
   readonly revision: DecimalRevision;
   readonly resourceEpoch: DecimalRevision;
+  readonly fileWriteIdentityBound: boolean;
 }
 function managedResourceFrom(value: unknown): RelayManagedResource {
   const row = object(value, "managed resource");
@@ -871,7 +899,8 @@ function managedResourceFrom(value: unknown): RelayManagedResource {
     canonicalRoot: string(row, "canonical_root", "managed resource"),
     status: string(row, "status", "managed resource"),
     revision: decimal(row, "revision", "managed resource"),
-    resourceEpoch: decimal(row, "resource_epoch", "managed resource") };
+    resourceEpoch: decimal(row, "resource_epoch", "managed resource"),
+    fileWriteIdentityBound: row.file_write_identity_bound === true };
 }
 
 export type RelayMockGatewayConnection = RelayGatewayConnection;
@@ -916,6 +945,70 @@ export interface RelayRunGatewayOperation {
   readonly actionType: string;
   readonly normalizedTarget: string;
   readonly invocationStatuses: readonly string[];
+}
+
+export interface RelayFileWriteChangeSet {
+  readonly id: string;
+  readonly invocationId: string;
+  readonly status: string;
+  readonly files: readonly { readonly relativePath: string; readonly action: string;
+    readonly status: string; readonly error: string | null }[];
+}
+
+export interface RelayFileWriteFrozenDiff {
+  readonly operationId: string;
+  readonly basis: "FROZEN_INTENT";
+  readonly files: readonly {
+    readonly relativePath: string;
+    readonly action: "CREATE" | "MODIFY" | "DELETE";
+    readonly baselineSha256: string | null;
+    readonly targetSha256: string | null;
+    readonly availability: "AVAILABLE" | "UNAVAILABLE";
+    readonly unavailableReason: string | null;
+    readonly beforeText: string | null;
+    readonly afterText: string | null;
+  }[];
+}
+
+export interface RelayFileWriteResidualCandidate {
+  readonly path: string; readonly id: string | null; readonly sha256: string | null;
+  readonly status: string; readonly error: string | null;
+}
+
+export interface RelayFileWriteDispositionPreview {
+  readonly operationId: string;
+  readonly invocationId: string | null;
+  readonly changeSetId: string | null;
+  readonly runId: string;
+  readonly runRevision: DecimalRevision;
+  readonly taskRevision: DecimalRevision;
+  readonly operationStatus: string;
+  readonly stopProofRecorded: boolean;
+  readonly canDispose: boolean;
+  readonly blockingReasons: readonly string[];
+  readonly observationSha256: string | null;
+  readonly observationMode: "PARTIAL_LEDGER" | "NO_RECEIPT" | null;
+  readonly files: readonly { readonly relativePath: string; readonly ledgerStatus: string;
+    readonly ledgerActualSha256: string | null; readonly currentSha256: string | null;
+    readonly readable: boolean; readonly currentTargetId: string | null;
+    readonly residualCandidates: readonly RelayFileWriteResidualCandidate[] }[];
+  readonly disposition: { readonly id: string; readonly decision: string;
+    readonly createdAt: string; readonly observationSha256: string;
+    readonly observationMode: "PARTIAL_LEDGER" | "NO_RECEIPT" | null;
+    readonly observationFiles: readonly { readonly path: string; readonly currentSha256: string | null;
+      readonly ledgerStatus: string; readonly ledgerActualSha256: string | null;
+      readonly currentTargetId: string | null;
+      readonly residualCandidates: readonly RelayFileWriteResidualCandidate[] }[] } | null;
+}
+
+export interface RelayClosePartialFileWriteInput {
+  readonly operationId: string;
+  readonly invocationId: string;
+  readonly runId: string;
+  readonly commandId: string;
+  readonly expectedRunRevision: DecimalRevision;
+  readonly expectedTaskRevision: DecimalRevision;
+  readonly expectedObservationSha256: string;
 }
 
 /** CreateProject 的 201 结果（docs/api/http-command-contract.md 第 3 节）。 */
@@ -1272,6 +1365,15 @@ export class RelayApiClient {
   async getKnowledgeVersions(id: string): Promise<readonly RelayKnowledgeVersion[]> {
     return directList(await this.request(this.workspacePath(`/knowledge/${encodeURIComponent(id)}/versions`)),
       "knowledge versions", knowledgeVersionFrom);
+  }
+
+  async getKnowledgeVersionContent(id: string, version: DecimalRevision): Promise<RelayKnowledgeVersionContent> {
+    const result = knowledgeVersionContentFrom(await this.request(this.workspacePath(
+      `/knowledge/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/content`)));
+    if (result.knowledgeId !== id || result.version !== version) {
+      throw new Error("知识正文响应与所选资料版本不一致。");
+    }
+    return result;
   }
 
   async createKnowledge(input: { commandId: string; projectId: string | null; title: string;
@@ -1766,6 +1868,148 @@ export class RelayApiClient {
     });
   }
 
+  async getFileWriteChangeSets(operationId: string): Promise<readonly RelayFileWriteChangeSet[]> {
+    const body = await this.request(this.workspacePath(`/operations/${encodeURIComponent(operationId)}/change-sets`));
+    const row = object(body, "FILE_WRITE ledger response");
+    if (string(row, "operation_id", "FILE_WRITE ledger response") !== operationId) throw new Error("逐文件账本与原动作不匹配。");
+    return array(row, "change_sets", "FILE_WRITE ledger response").map((item) => {
+      const ledger = object(item, "FILE_WRITE ledger");
+      return { id: string(ledger, "id", "FILE_WRITE ledger"),
+        invocationId: string(ledger, "invocation_id", "FILE_WRITE ledger"),
+        status: string(ledger, "status", "FILE_WRITE ledger"),
+        files: array(ledger, "files", "FILE_WRITE ledger").map((entry) => {
+          const file = object(entry, "FILE_WRITE ledger file");
+          return { relativePath: string(file, "relative_path", "FILE_WRITE ledger file"),
+            action: string(file, "action", "FILE_WRITE ledger file"),
+            status: string(file, "status", "FILE_WRITE ledger file"),
+            error: nullableString(file, "error", "FILE_WRITE ledger file") };
+        }) };
+    });
+  }
+
+  async getFileWriteFrozenDiff(operationId: string): Promise<RelayFileWriteFrozenDiff> {
+    const row = object(await this.request(this.workspacePath(`/operations/${encodeURIComponent(operationId)}/file-write-diff`)),
+      "FILE_WRITE frozen diff");
+    if (string(row, "operation_id", "FILE_WRITE frozen diff") !== operationId ||
+        string(row, "basis", "FILE_WRITE frozen diff") !== "FROZEN_INTENT") {
+      throw new Error("冻结文本差异与原动作不匹配。");
+    }
+    return { operationId, basis: "FROZEN_INTENT",
+      files: array(row, "files", "FILE_WRITE frozen diff").map((entry) => {
+        const file = object(entry, "FILE_WRITE frozen diff file");
+        const action = string(file, "action", "FILE_WRITE frozen diff file");
+        const availability = string(file, "availability", "FILE_WRITE frozen diff file");
+        if (!["CREATE", "MODIFY", "DELETE"].includes(action) ||
+            !["AVAILABLE", "UNAVAILABLE"].includes(availability)) {
+          throw new Error("冻结文本差异状态无效。");
+        }
+        const beforeText = nullableString(file, "before_text", "FILE_WRITE frozen diff file");
+        const afterText = nullableString(file, "after_text", "FILE_WRITE frozen diff file");
+        if (availability === "AVAILABLE" && (beforeText === null || afterText === null)) {
+          throw new Error("可用的冻结文本差异缺少正文。");
+        }
+        return { relativePath: string(file, "relative_path", "FILE_WRITE frozen diff file"),
+          action: action as "CREATE" | "MODIFY" | "DELETE",
+          baselineSha256: nullableString(file, "baseline_sha256", "FILE_WRITE frozen diff file"),
+          targetSha256: nullableString(file, "target_sha256", "FILE_WRITE frozen diff file"),
+          availability: availability as "AVAILABLE" | "UNAVAILABLE",
+          unavailableReason: nullableString(file, "unavailable_reason", "FILE_WRITE frozen diff file"),
+          beforeText, afterText };
+      }) };
+  }
+
+  async getFileWriteDispositionPreview(operationId: string): Promise<RelayFileWriteDispositionPreview> {
+    const row = object(await this.request(this.workspacePath(`/operations/${encodeURIComponent(operationId)}/file-write-disposition`)),
+      "FILE_WRITE disposition");
+    const parseMode = (value: unknown): "PARTIAL_LEDGER" | "NO_RECEIPT" | null => {
+      if (value === null || value === undefined) return null;
+      if (value !== "PARTIAL_LEDGER" && value !== "NO_RECEIPT") throw new Error("文件处置观察类型无效。");
+      return value;
+    };
+    const parseCandidates = (file: Record<string, unknown>, mode: string | null) =>
+      mode === "NO_RECEIPT" ? array(file, "residual_candidates", "FILE_WRITE residuals").map((item) => {
+        const candidate = object(item, "FILE_WRITE residual candidate");
+        return { path: string(candidate, "path", "FILE_WRITE residual candidate"),
+          id: nullableString(candidate, "id", "FILE_WRITE residual candidate"),
+          sha256: nullableString(candidate, "sha256", "FILE_WRITE residual candidate"),
+          status: string(candidate, "status", "FILE_WRITE residual candidate"),
+          error: nullableString(candidate, "error", "FILE_WRITE residual candidate") };
+      }) : [];
+    const dispositionValue = row.disposition;
+    const disposition = dispositionValue === null ? null : (() => {
+      const record = object(dispositionValue, "FILE_WRITE disposition decision");
+      const observation = object(record.observation, "FILE_WRITE disposition observation");
+      const observationMode = parseMode(observation.observation_mode);
+      return { id: string(record, "id", "FILE_WRITE disposition decision"),
+        decision: string(record, "decision", "FILE_WRITE disposition decision"),
+        createdAt: string(record, "created_at", "FILE_WRITE disposition decision"),
+        observationSha256: string(record, "observation_sha256", "FILE_WRITE disposition decision"),
+        observationMode,
+        observationFiles: array(observation, "files", "FILE_WRITE disposition observation").map((item) => {
+          const file = object(item, "FILE_WRITE disposition observed file");
+          return { path: string(file, "path", "FILE_WRITE disposition observed file"),
+            currentSha256: nullableString(file, "current_sha256", "FILE_WRITE disposition observed file"),
+            ledgerStatus: string(file, "ledger_status", "FILE_WRITE disposition observed file"),
+            ledgerActualSha256: observationMode === "NO_RECEIPT" ? null
+              : nullableString(file, "ledger_actual_sha256", "FILE_WRITE disposition observed file"),
+            currentTargetId: observationMode === "NO_RECEIPT"
+              ? nullableString(file, "current_target_id", "FILE_WRITE disposition observed file") : null,
+            residualCandidates: parseCandidates(file, observationMode) };
+        }) };
+    })();
+    const observationMode = parseMode(row.observation_mode);
+    const preview: RelayFileWriteDispositionPreview = {
+      operationId: string(row, "operation_id", "FILE_WRITE disposition"),
+      invocationId: nullableString(row, "invocation_id", "FILE_WRITE disposition"),
+      changeSetId: nullableString(row, "change_set_id", "FILE_WRITE disposition"),
+      runId: string(row, "run_id", "FILE_WRITE disposition"),
+      runRevision: decimal(row, "run_revision", "FILE_WRITE disposition"),
+      taskRevision: decimal(row, "task_revision", "FILE_WRITE disposition"),
+      operationStatus: string(row, "operation_status", "FILE_WRITE disposition"),
+      stopProofRecorded: boolean(row, "stop_proof_recorded", "FILE_WRITE disposition"),
+      canDispose: boolean(row, "can_dispose", "FILE_WRITE disposition"),
+      blockingReasons: array(row, "blocking_reasons", "FILE_WRITE disposition").map((reason) => {
+        if (typeof reason !== "string") throw new Error("阻断原因响应格式无效。");
+        return reason;
+      }),
+      observationSha256: nullableString(row, "observation_sha256", "FILE_WRITE disposition"),
+      observationMode,
+      files: array(row, "files", "FILE_WRITE disposition").map((entry) => {
+        const file = object(entry, "FILE_WRITE current file");
+        return { relativePath: string(file, "relative_path", "FILE_WRITE current file"),
+          ledgerStatus: string(file, "ledger_status", "FILE_WRITE current file"),
+          ledgerActualSha256: nullableString(file, "ledger_actual_sha256", "FILE_WRITE current file"),
+          currentSha256: nullableString(file, "current_sha256", "FILE_WRITE current file"),
+          readable: boolean(file, "readable", "FILE_WRITE current file"),
+          currentTargetId: observationMode === "NO_RECEIPT"
+            ? nullableString(file, "current_target_id", "FILE_WRITE current file") : null,
+          residualCandidates: parseCandidates(file, observationMode) };
+      }), disposition
+    };
+    if (preview.operationId !== operationId) throw new Error("处置预览与原动作不匹配。");
+    return preview;
+  }
+
+  async closePartialFileWrite(input: RelayClosePartialFileWriteInput): Promise<void> {
+    const body = await this.request(this.workspacePath(`/operations/${encodeURIComponent(input.operationId)}/file-write-disposition`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId, invocation_id: input.invocationId,
+        decision: "KEEP_CURRENT_AND_FAIL_RUN", expected_run_revision: input.expectedRunRevision,
+        expected_task_revision: input.expectedTaskRevision,
+        expected_observation_sha256: input.expectedObservationSha256 })
+    }, 200);
+    try {
+      const receipt = commandEnvelopeFrom(body);
+      if (receipt.commandId !== input.commandId ||
+          string(receipt.result, "operation_id", "FILE_WRITE disposition result") !== input.operationId ||
+          string(receipt.result, "invocation_id", "FILE_WRITE disposition result") !== input.invocationId ||
+          string(receipt.result, "run_id", "FILE_WRITE disposition result") !== input.runId ||
+          string(receipt.result, "run_status", "FILE_WRITE disposition result") !== "FAILED" ||
+          string(receipt.result, "decision", "FILE_WRITE disposition result") !== "KEEP_CURRENT_AND_FAIL_RUN") {
+        throw new Error("处置回执与原动作不匹配。");
+      }
+    } catch { throw new RelayTransportError("处置回执无法核对，请查询原 command_id。"); }
+  }
+
   /** One authenticated SSE connection. The caller owns reconnects and authoritative GET refreshes. */
   async readRunEvents(
     runId: string, after: string, signal: AbortSignal,
@@ -1971,6 +2215,10 @@ export class RelayApiClient {
 
   async getArtifactLineage(artifactVersionId: string): Promise<RelayArtifactLineage> {
     return artifactLineageFrom(await this.request(this.workspacePath(`/artifact-versions/${encodeURIComponent(artifactVersionId)}/lineage`)));
+  }
+
+  async getArtifactDirectUses(artifactVersionId: string): Promise<RelayArtifactDirectUses> {
+    return artifactDirectUsesFrom(await this.request(this.workspacePath(`/artifact-versions/${encodeURIComponent(artifactVersionId)}/direct-uses`)));
   }
 
   async completeHumanTask(input: {
@@ -2571,7 +2819,9 @@ function acceptanceFrom(record: Record<string, unknown>): RelayTaskAcceptance {
         criterionId: string(criterion, "criterion_id", "criterion"),
         statement: string(criterion, "statement", "criterion"),
         required: criterion.required === true,
-        method: string(criterion, "method", "criterion")
+        method: string(criterion, "method", "criterion"),
+        targetSpec: criterion.target_spec === undefined ? null
+          : object(criterion.target_spec, "task.acceptance.criteria.target_spec")
       };
     })
   };
@@ -2873,6 +3123,37 @@ function artifactFrom(value: unknown): RelayArtifact {
         createdAt: string(version, "created_at", "artifact version")
       };
     })
+  };
+}
+
+function artifactDirectUsesFrom(value: unknown): RelayArtifactDirectUses {
+  const row = object(value, "artifact direct uses");
+  if (row.scope !== "RECORDED_DIRECT_ONLY" || row.complete !== false) {
+    throw new Error("直接引用查询的分析范围无效。");
+  }
+  return {
+    sourceArtifactVersionId: string(row, "source_artifact_version_id", "artifact direct uses"),
+    sourceContentAvailability: availability(row, "source_content_availability", "artifact direct uses"),
+    scope: "RECORDED_DIRECT_ONLY", complete: false,
+    hasMore: boolean(row, "has_more", "artifact direct uses"),
+    directUses: array(row, "direct_uses", "artifact direct uses").map((value) => {
+      const use = object(value, "artifact direct use");
+      const relation = string(use, "relation", "artifact direct use");
+      if (relation !== "DERIVED_FROM" && relation !== "REVISED_FROM") {
+        throw new Error("直接引用的关系类型无效。");
+      }
+      const state = availability(use, "availability", "artifact direct use");
+      const childArtifactVersionId = nullableString(use, "child_artifact_version_id", "artifact direct use");
+      const childArtifactId = nullableString(use, "child_artifact_id", "artifact direct use");
+      const childVersionNumber = use.child_version_number === null ? null
+        : decimal(use, "child_version_number", "artifact direct use");
+      if (state === "AVAILABLE" ? !childArtifactVersionId || !childArtifactId || childVersionNumber === null
+        : childArtifactVersionId !== null || childArtifactId !== null || childVersionNumber !== null) {
+        throw new Error("直接引用的可用性与版本身份不一致。");
+      }
+      return { relation, childArtifactVersionId, childArtifactId, childVersionNumber,
+        availability: state, createdAt: string(use, "created_at", "artifact direct use") };
+    }),
   };
 }
 
@@ -3203,6 +3484,27 @@ function webImportOperationFrom(value: unknown, importJobId: string): RelayWebIm
     normalizedTarget: string(row, "normalized_target", "web import operation"),
     invocationStatuses: array(row, "invocations", "web import operation").map((invocation) =>
       string(object(invocation, "web import invocation"), "status", "web import invocation")) };
+}
+
+function knowledgeVersionContentFrom(value: unknown): RelayKnowledgeVersionContent {
+  const row = object(value, "knowledge content");
+  const metadata = knowledgeVersionFrom({ ...row, excerpt: null });
+  const status = string(row, "content_status", "knowledge content");
+  if (status !== "FULL" && status !== "PARTIAL" && status !== "UNAVAILABLE" &&
+    status !== "UNSUPPORTED" && status !== "READ_FAILED") throw new Error("知识正文状态无效。");
+  const content = nullableString(row, "content", "knowledge content");
+  if ((status === "FULL" || status === "PARTIAL") ? content === null : content !== null) {
+    throw new Error("知识正文状态与可读内容不一致。");
+  }
+  if ((status === "FULL" || status === "PARTIAL") && metadata.availability !== "AVAILABLE") {
+    throw new Error("知识正文状态与来源可用性不一致。");
+  }
+  return { id: metadata.id, knowledgeId: metadata.knowledgeId, version: metadata.version,
+    sourceKind: metadata.sourceKind, mediaType: metadata.mediaType, contentSha256: metadata.contentSha256,
+    availability: metadata.availability, sourceRefs: metadata.sourceRefs, createdAt: metadata.createdAt,
+    title: string(row, "title", "knowledge content"), projectId: nullableString(row, "project_id", "knowledge content"),
+    currentVersion: decimal(row, "current_version", "knowledge content"),
+    sourceUri: nullableString(row, "source_uri", "knowledge content"), contentStatus: status, content };
 }
 
 function knowledgeVersionFrom(value: unknown): RelayKnowledgeVersion {

@@ -869,7 +869,10 @@ test('P09 HTTP config commands replay, isolate scope, and expose full Invocation
       command_id: resourceCommand, root_path: resourceRoot,
     }), 201, resourceCommand);
     const resourceId = resource.resource_id as string;
-    assert.equal((await api.get(`${resources}/${resourceId}`)).status, 200);
+    const resourceRead = await api.get(`${resources}/${resourceId}`);
+    assert.equal(resourceRead.status, 200);
+    assert.equal((resourceRead.body as { file_write_identity_bound: boolean }).file_write_identity_bound,
+      process.platform === 'win32');
     assert.ok((await api.get(resources)).text.includes(resourceId));
     await rmdir(resourceRoot);
     const resourceReplay = await api.post(resources, { command_id: resourceCommand, root_path: resourceRoot });
@@ -882,6 +885,16 @@ test('P09 HTTP config commands replay, isolate scope, and expose full Invocation
       command_id: disableResourceCommand, expected_revision: resource.revision,
     }), 200, disableResourceCommand);
     assert.equal(disabledResource.status, 'DISABLED');
+    await mkdir(resourceRoot);
+    const replacementCommandId = randomUUID();
+    const replacement = expectCommandAccepted(await api.post(resources, {
+      command_id: replacementCommandId, root_path: resourceRoot,
+    }), 201, replacementCommandId);
+    assert.notEqual(replacement.resource_id, resourceId);
+    const replacementRead = await api.get(`${resources}/${replacement.resource_id}`);
+    assert.equal(replacementRead.status, 200);
+    assert.equal((replacementRead.body as { file_write_identity_bound: boolean }).file_write_identity_bound,
+      process.platform === 'win32');
 
     const origin = await worker(f);
     const action = await prepareRun(f, origin);

@@ -27,6 +27,9 @@ import {
 import { freezeExecutionContract, readContextSources } from '../workflow/execution-contract.js';
 import type { ContextSourceRef } from '../workflow/execution-contract.js';
 import { loadRulePlanBasis } from './rule-plan-basis.js';
+import { canonicalRelativePath, requireFrozenBaseline,
+  requireMatchingTarget } from '../files/file-changeset.js';
+import type { FileWriteChangeIntent } from '../workflow/execution-contract.js';
 
 /**
  * DelegateTask：把一个 READY 的人工 Task 原子地交给一个新建的 AI Run
@@ -71,6 +74,11 @@ export interface DelegateTaskInput {
   readonly webFetchAction?: {
     readonly connection_id: string; readonly url: string;
   } | undefined;
+  /** 可选固定文件写意图；与其他三种 Gateway 意图互斥。 */
+  readonly fileWriteAction?: {
+    readonly connection_id: string; readonly resource_id: string;
+    readonly changes: readonly FileWriteChangeIntent[];
+  } | undefined;
   /** 仅用于真实 PG barrier 测试；不属于 HTTP 请求或命令摘要。 */
   readonly hooks?: {
     readonly afterAuthorityLock?: () => Promise<void>;
@@ -112,6 +120,15 @@ export async function delegateTask(
           root_id: source.root_id, version: source.version })),
       file_read_action: input.fileReadAction ?? null,
       web_fetch_action: input.webFetchAction ?? null,
+      file_write_action: input.fileWriteAction === undefined ? null : {
+        connection_id: input.fileWriteAction.connection_id,
+        resource_id: input.fileWriteAction.resource_id,
+        changes: input.fileWriteAction.changes.map((change) => ({ path: change.path,
+          action: change.action,
+          ...(change.content === undefined ? {} : { content: change.content }),
+          ...(change.baselineSha256 === undefined ? {} : { baselineSha256: change.baselineSha256 }),
+          ...(change.targetSha256 === undefined ? {} : { targetSha256: change.targetSha256 }) })),
+      },
     },
     execute: async (repositories) => {
       // Rule 更新持 authority UPDATE；Delegate 持 SHARE 后再锁 Task，两个提交顺序有唯一裁决。
@@ -190,11 +207,52 @@ export async function delegateTask(
       const { allRules: allApplicableRules, criteria: ruleCriteria } =
         await loadRulePlanBasis(repositories, input.workspaceId, task.project_id, task.id);
 
-      const frozenIntents = [input.mockGatewayAction, input.fileReadAction, input.webFetchAction]
+      const frozenIntents = [input.mockGatewayAction, input.fileReadAction,
+        input.webFetchAction, input.fileWriteAction]
         .filter((intent) => intent !== undefined);
       if (frozenIntents.length > 1) {
-        throw invalidTransition('mock_gateway_action、file_read_action 与 web_fetch_action 只能冻结其一。',
+        throw invalidTransition('四种 Gateway action 只能冻结其一。',
           { taskId: task.id });
+      }
+      if (input.fileWriteAction !== undefined) {
+        const resource = await repositories.gateway.readResource(input.fileWriteAction.resource_id);
+        if (resource?.workspace_id !== input.workspaceId || resource.project_id !== task.project_id) {
+          throw invalidTransition('file_write_action.resource_id 不属于当前 Task 的 Project。',
+            { taskId: task.id });
+        }
+        const changes = input.fileWriteAction.changes;
+        if (!Array.isArray(changes) || changes.length === 0 || changes.length > 16) {
+          throw invalidTransition('file_write_action.changes 必须包含 1 至 16 项。',
+            { taskId: task.id });
+        }
+        const seen = new Set<string>();
+        for (const change of changes) {
+          if (typeof change.path !== 'string' || change.path === '' || [...change.path].length > 1024 ||
+              !['CREATE', 'MODIFY', 'DELETE'].includes(change.action)) {
+            throw invalidTransition('file_write_action.changes 含无效路径或动作。', { taskId: task.id });
+          }
+          let path: string;
+          try { path = canonicalRelativePath(resource.canonical_root, change.path); }
+          catch { throw invalidTransition('file_write_action.changes 含不安全的相对路径。', { taskId: task.id }); }
+          if (Buffer.byteLength(path, 'utf8') > 1024) {
+            throw invalidTransition('file_write_action.changes 路径超过账本 1024 UTF-8 字节上限。',
+              { taskId: task.id });
+          }
+          const key = process.platform === 'win32' ? path.toLowerCase() : path;
+          if (seen.has(key)) throw invalidTransition('file_write_action.changes 含重复目标路径。',
+            { taskId: task.id });
+          seen.add(key);
+          if (change.action === 'DELETE'
+            ? change.content !== undefined || change.targetSha256 !== undefined
+            : typeof change.content !== 'string' || [...change.content].length > 8192) {
+            throw invalidTransition('file_write_action.changes 内容与动作不符。', { taskId: task.id });
+          }
+          if (change.action === 'CREATE' && change.baselineSha256 !== undefined) {
+            throw invalidTransition('CREATE 不接受基线摘要。', { taskId: task.id });
+          }
+          try { requireFrozenBaseline(change); requireMatchingTarget(change); }
+          catch { throw invalidTransition('file_write_action.changes 的冻结摘要无效。', { taskId: task.id }); }
+        }
       }
       if (input.webFetchAction !== undefined) {
         // Freeze-time syntax only (same shape as Gateway prepare): host binding
@@ -245,6 +303,12 @@ export async function delegateTask(
           operation_id: randomUUID(), intent_key: 'mock-web-fetch-v1' as const,
           connection_id: input.webFetchAction.connection_id,
           url: input.webFetchAction.url,
+        } }),
+        ...(input.fileWriteAction === undefined ? {} : { fileWriteAction: {
+          operation_id: randomUUID(), intent_key: 'file-write-v1' as const,
+          connection_id: input.fileWriteAction.connection_id,
+          resource_id: input.fileWriteAction.resource_id,
+          changes: input.fileWriteAction.changes,
         } }),
         ...(contextSources === undefined || contextSources.length === 0 ? {} :
           { contextSources }),

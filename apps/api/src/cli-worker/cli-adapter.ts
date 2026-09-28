@@ -81,6 +81,7 @@ export async function executeCliCommand(
 
   return new Promise<CliExecutionResult>((resolvePromise) => {
     let settled = false;
+    let termination: 'TIMEOUT' | 'CANCELLED' | null = null;
     let timer: NodeJS.Timeout | null = null;
 
     const child = spawn(config.executable, [...config.args], {
@@ -111,7 +112,8 @@ export async function executeCliCommand(
     }
 
     timer = setTimeout(async () => {
-      if (!settled && child.pid) {
+      if (!settled && termination === null && child.pid) {
+        termination = 'TIMEOUT';
         await killProcessTree(child.pid);
         finish({
           outcome: 'TIMEOUT',
@@ -128,7 +130,8 @@ export async function executeCliCommand(
 
     if (signal) {
       signal.addEventListener('abort', async () => {
-        if (!settled && child.pid) {
+        if (!settled && termination === null && child.pid) {
+          termination = 'CANCELLED';
           await killProcessTree(child.pid);
           finish({
             outcome: 'CANCELLED',
@@ -190,6 +193,7 @@ export async function executeCliCommand(
     });
 
     child.on('close', (code) => {
+      if (termination !== null) return;
       const durationMs = Date.now() - startTime;
       const stdout = Buffer.concat(stdoutChunks).toString('utf8');
       const stderr = Buffer.concat(stderrChunks).toString('utf8');

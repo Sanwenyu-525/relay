@@ -47,6 +47,7 @@ export interface FreezeExecutionContractInput {
   readonly mockGatewayAction?: MockGatewayActionIntent | undefined;
   readonly fileReadAction?: FileReadActionIntent | undefined;
   readonly webFetchAction?: WebFetchActionIntent | undefined;
+  readonly fileWriteAction?: FileWriteActionIntent | undefined;
   readonly contextSources?: readonly ContextSourceRef[] | undefined;
 }
 
@@ -67,6 +68,44 @@ export interface FileReadActionIntent {
   readonly connection_id: string;
   readonly resource_id: string;
   readonly relative_target: string;
+}
+
+export interface FileWriteChangeIntent {
+  readonly path: string;
+  readonly action: 'CREATE' | 'MODIFY' | 'DELETE';
+  readonly content?: string;
+  readonly baselineSha256?: string;
+  readonly targetSha256?: string;
+}
+
+/** A bounded, explicit files changeset attached to the original Run command. */
+export interface FileWriteActionIntent {
+  readonly operation_id: string;
+  readonly intent_key: 'file-write-v1';
+  readonly connection_id: string;
+  readonly resource_id: string;
+  readonly changes: readonly FileWriteChangeIntent[];
+}
+
+export function readFileWriteAction(snapshot: JsonObject): FileWriteActionIntent | undefined {
+  const value = snapshot.file_write_action;
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('frozen Mock file write action is invalid');
+  }
+  const action = value as JsonObject;
+  if (typeof action.operation_id !== 'string' || action.intent_key !== 'file-write-v1' ||
+      typeof action.connection_id !== 'string' || typeof action.resource_id !== 'string' ||
+      !Array.isArray(action.changes) || action.changes.length === 0 || action.changes.length > 16 ||
+      action.changes.some((item) => typeof item !== 'object' || item === null || Array.isArray(item) ||
+        typeof item.path !== 'string' || item.path === '' ||
+        !['CREATE', 'MODIFY', 'DELETE'].includes(String(item.action)) ||
+        (item.content !== undefined && typeof item.content !== 'string') ||
+        (item.baselineSha256 !== undefined && typeof item.baselineSha256 !== 'string') ||
+        (item.targetSha256 !== undefined && typeof item.targetSha256 !== 'string'))) {
+    throw new Error('frozen Mock file write action is invalid');
+  }
+  return action as unknown as FileWriteActionIntent;
 }
 
 export function readFileReadAction(snapshot: JsonObject): FileReadActionIntent | undefined {
@@ -109,10 +148,11 @@ export function readWebFetchAction(snapshot: JsonObject): WebFetchActionIntent |
   return action as unknown as WebFetchActionIntent;
 }
 
-/** 统一读取冻结 Mock 意图的操作身份（写标记、文件读或网页读之一）。 */
+/** 统一读取冻结 Mock 意图的操作身份。 */
 export function readMockActionOperationId(snapshot: JsonObject): string | undefined {
   return readMockGatewayAction(snapshot)?.operation_id ??
-    readFileReadAction(snapshot)?.operation_id ?? readWebFetchAction(snapshot)?.operation_id;
+    readFileReadAction(snapshot)?.operation_id ?? readWebFetchAction(snapshot)?.operation_id ??
+    readFileWriteAction(snapshot)?.operation_id;
 }
 
 /** 用户在 Delegate 时显式选中的长期信息来源；版本随 Run 冻结，不可变。 */
@@ -207,6 +247,8 @@ export function freezeExecutionContract(
     ...(input.mockGatewayAction === undefined ? {} : { mock_gateway_action: { ...input.mockGatewayAction } }),
     ...(input.fileReadAction === undefined ? {} : { file_read_action: { ...input.fileReadAction } }),
     ...(input.webFetchAction === undefined ? {} : { web_fetch_action: { ...input.webFetchAction } }),
+    ...(input.fileWriteAction === undefined ? {} : { file_write_action: { ...input.fileWriteAction,
+      changes: input.fileWriteAction.changes.map((change) => ({ ...change })) } }),
     ...(input.contextSources === undefined || input.contextSources.length === 0 ? {} :
       { context_sources: input.contextSources.map((source) => ({ ...source })) }),
   };

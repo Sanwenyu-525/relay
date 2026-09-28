@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { sql } from 'kysely';
 
 import type { DbExecutor } from '../infrastructure/database.js';
@@ -5,6 +6,7 @@ import type { DecisionRow, DecisionVersionRow, InformationRootRow, KnowledgeVers
   MemoryVersionRow, RuleRow, RuleVersionRow } from '../infrastructure/database-schema.js';
 import { resourceNotFound, invalidCursor, validationFailed } from './domain-error.js';
 import { createRepositories } from './unit-of-work.js';
+import type { ManagedContentStore } from '../storage/managed-content-store.js';
 
 type Kind = 'knowledge' | 'memory' | 'decision' | 'rule';
 type Root = InformationRootRow | DecisionRow | RuleRow;
@@ -99,6 +101,79 @@ export async function listInformationVersions(db: DbExecutor, kind: Kind,
   if (row?.workspace_id !== workspaceId) throw resourceNotFound(kind);
   const versions = await repo.listVersions<unknown>(kind, id);
   return versions.map((version) => versionDto(kind, version));
+}
+
+export interface KnowledgeVersionContentDto {
+  readonly knowledge_id: string;
+  readonly title: string;
+  readonly project_id: string | null;
+  readonly current_version: string;
+  readonly id: string;
+  readonly version: string;
+  readonly source_kind: KnowledgeVersionRow['source_kind'];
+  readonly media_type: string;
+  readonly content_sha256: string;
+  readonly availability: KnowledgeVersionRow['availability'];
+  readonly source_refs: KnowledgeVersionRow['source_refs'];
+  readonly source_uri: string | null;
+  readonly created_at: string;
+  readonly content_status: 'FULL' | 'PARTIAL' | 'UNAVAILABLE' | 'UNSUPPORTED' | 'READ_FAILED';
+  readonly content: string | null;
+}
+
+/** 只读取所指版本；受管内容失效时返回状态，不以当前版本或外部网页补齐。 */
+export async function readKnowledgeVersionContent(db: DbExecutor, storage: ManagedContentStore,
+  workspaceId: string, knowledgeId: string, versionText: string): Promise<KnowledgeVersionContentDto> {
+  if (!/^[1-9][0-9]{0,18}$/u.test(versionText) || BigInt(versionText) > 9223372036854775807n) {
+    throw validationFailed([{ field: 'version', message: 'expected positive PostgreSQL bigint' }]);
+  }
+  const repo = createRepositories(db);
+  const root = await repo.information.readRoot<InformationRootRow>('knowledge', knowledgeId);
+  if (root?.workspace_id !== workspaceId || root.project_id !== null &&
+      (await repo.projects.readProject(root.project_id))?.workspace_id !== workspaceId) {
+    throw resourceNotFound('knowledge');
+  }
+  const version = await repo.information.readVersion<KnowledgeVersionRow>(
+    'knowledge', knowledgeId, BigInt(versionText));
+  if (version === undefined) throw resourceNotFound('KnowledgeVersion');
+  const artifactVersion = version.source_kind === 'ARTIFACT_VERSION' &&
+    version.artifact_version_id !== null ?
+      await repo.artifacts.readArtifactVersion(version.artifact_version_id) : undefined;
+  const artifact = artifactVersion === undefined ? undefined :
+    await repo.artifacts.readArtifact(artifactVersion.artifact_id);
+  if (version.source_kind === 'ARTIFACT_VERSION' && artifact !== undefined &&
+      (artifact.workspace_id !== workspaceId || artifact.project_id !== root.project_id)) {
+    throw resourceNotFound('KnowledgeVersion');
+  }
+  const summary = {
+    knowledge_id: root.id, title: root.title, project_id: root.project_id,
+    current_version: root.current_version.toString(), id: version.id,
+    version: version.version.toString(), source_kind: version.source_kind,
+    media_type: version.media_type, content_sha256: version.content_sha256.toString('hex'),
+    availability: version.availability, source_refs: version.source_refs,
+    source_uri: version.source_uri, created_at: version.created_at.toISOString(),
+  };
+  const result = (content_status: KnowledgeVersionContentDto['content_status'], content: string | null)
+    : KnowledgeVersionContentDto => ({ ...summary, content_status, content });
+  if (version.availability !== 'AVAILABLE') return result('UNAVAILABLE', null);
+  if (version.media_type !== 'text/plain' && version.media_type !== 'text/markdown') {
+    return result('UNSUPPORTED', null);
+  }
+  if (version.source_kind === 'ARTIFACT_VERSION') {
+    if (artifact === undefined || artifactVersion === undefined ||
+        artifactVersion.content_hash.toString('hex') !== summary.content_sha256 ||
+        artifactVersion.media_type !== version.media_type) return result('UNAVAILABLE', null);
+    const read = await storage.readWithHashCheck(artifactVersion.storage_ref,
+      { contentHash: artifactVersion.content_hash, size: artifactVersion.size });
+    if (read.status !== 'OK') return result(read.status === 'MISSING' ? 'UNAVAILABLE' : 'READ_FAILED', null);
+    return result('FULL', read.content.toString('utf8'));
+  }
+  if (version.content_text !== null) {
+    const actualHash = createHash('sha256').update(version.content_text, 'utf8').digest();
+    return actualHash.equals(version.content_sha256)
+      ? result('FULL', version.content_text) : result('READ_FAILED', null);
+  }
+  return result('UNAVAILABLE', null);
 }
 
 type SearchType = 'KNOWLEDGE' | 'MEMORY' | 'DECISION' | 'RULE';

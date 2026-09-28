@@ -12,3 +12,7 @@ playwright-report/
 
 # 浏览器自动化测试的临时会话日志与快照
 .playwright-cli/
+
+# Local desktop trial package and persistent test data
+/test-release/
+/.relay-test/

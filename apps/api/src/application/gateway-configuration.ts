@@ -5,6 +5,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { GatewayCapability, GatewayDecision } from '../infrastructure/database-schema.js';
 import type { JsonObject } from '../infrastructure/json.js';
+import { inspectWindowsFileRoot, WindowsFileIoError } from '../files/windows-file-io.js';
 import { DomainError, invalidTransition, resourceNotFound, validationFailed } from './domain-error.js';
 import { lockWritableProjectInWorkspace } from './guards.js';
 import { withTransaction } from './unit-of-work.js';
@@ -28,6 +29,16 @@ export function rootsOverlap(a: string, b: string): boolean {
   return leftToRight === '' || rightToLeft === '' ||
     (!leftToRight.startsWith(`..${sep}`) && leftToRight !== '..' && !isAbsolute(leftToRight)) ||
     (!rightToLeft.startsWith(`..${sep}`) && rightToLeft !== '..' && !isAbsolute(rightToLeft));
+}
+
+/** Other resource capabilities may still register a root the Windows write helper rejects. */
+export async function registrationFileWriteRootId(root: string): Promise<string | null> {
+  if (process.platform !== 'win32') return null;
+  try { return await inspectWindowsFileRoot(root); }
+  catch (error) {
+    if (error instanceof WindowsFileIoError) return null;
+    throw error;
+  }
 }
 
 async function lockWritableAuthority(repositories: Parameters<Parameters<typeof withTransaction>[1]>[0], workspaceId: string): Promise<void> {
@@ -134,16 +145,19 @@ export async function registerManagedResource(db: DbExecutor, input: {
 }): Promise<{ readonly resourceId: string; readonly canonicalRoot: string }> {
   const canonicalRoot = await realpath(input.rootPath);
   if (!(await stat(canonicalRoot)).isDirectory()) throw validationFailed([{ field: 'root_path', message: 'must be an existing directory' }]);
+  const fileWriteRootId = await registrationFileWriteRootId(canonicalRoot);
   return withTransaction(db, async (repositories) => {
     await lockWritableAuthority(repositories, input.workspaceId);
     await lockWritableProjectInWorkspace(repositories, input.workspaceId, input.projectId);
     await repositories.gateway.lockResourceRegistry();
     const existing = await repositories.gateway.listResources();
-    if (existing.some((row) => row.project_id === input.projectId && row.identity_key === canonicalResourceIdentity(canonicalRoot))) {
+    if (existing.some((row) => row.project_id === input.projectId &&
+        row.identity_key === canonicalResourceIdentity(canonicalRoot) && row.status === 'ACTIVE')) {
       throw gatewayConflict('RESOURCE_ROOT_DUPLICATE', '该 Project 已登记相同的实际目录。');
     }
     const row = await repositories.gateway.insertResource({ id: randomUUID(), workspaceId: input.workspaceId,
-      projectId: input.projectId, canonicalRoot, identityKey: canonicalResourceIdentity(canonicalRoot) });
+      projectId: input.projectId, canonicalRoot, identityKey: canonicalResourceIdentity(canonicalRoot),
+      fileWriteRootId });
     await repositories.workspaces.bumpAuthority(input.workspaceId);
     return { resourceId: row.id, canonicalRoot: row.canonical_root };
   });

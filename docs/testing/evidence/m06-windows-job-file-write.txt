@@ -1,0 +1,14 @@
+M06 Windows Job FILE_WRITE acceptance attempt
+release_sha256=577a731e3022e540e38edc6a152301afc31b5a585e75eabb999919bbd5863efc manifest_sha256=39a4d96f673e34b514739bfa2da58281acf53909d9d5cd7afd1cae156a128e93 migration_0033_sha256=297fdcf230f28bae6fe3a8f85de6eb81b725e098b67f6cb5e5358d8d0ffb8fe6
+session_id=9ad8af3558144d25b130d1ccc2293e0b
+seed run_id=a7ed9ace-3161-42c8-8868-c8c4428d2e04 task_id=1ce7cf33-3b28-4f04-a5b0-45c303b490e9 operation_id=92042bb2-de5b-47c2-a576-70b9f83ea306
+approval_wait operation=WAITING_APPROVAL run=WAITING_APPROVAL
+approved review_id=d2f10902-a398-4d03-9871-3c5f507e0c89 resume_command_id=9c2ee992-7a33-4a92-bde9-eb34b3b844df
+before_kill invocation_id=13d6cdf9-5ff2-4865-879b-a3fd3ddbbf19 worker_id=worker:desktop:8dbfa2db-385c-4070-a31f-aa3ea06987fc:0f0f23cf-d349-4a11-98e6-0eaa2cf0efe2 worker_epoch=4 dispatch_epoch=2 command_id=9c2ee992-7a33-4a92-bde9-eb34b3b844df adapter_receipt=FILE_WRITE_ADAPTER_V1 armed_sha256=062b62fb2c6f0d03be73fac426dafd2fc7b17bcef72b3d6c886cc1e31b433a91
+processes_before_kill=[{"pid":31208,"created_utc":"2026-09-27T16:40:07.1412300Z","executable":"D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\relay-desktop.exe"},{"pid":32308,"created_utc":"2026-09-27T16:40:07.1797170Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"},{"pid":26896,"created_utc":"2026-09-27T16:40:08.7138220Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"},{"pid":41104,"created_utc":"2026-09-27T16:40:13.0553060Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"}]
+after_kill host_api_supervisor_worker_alive=0 original_claim_retained=true
+after_restart_files new=APPLIED target_and_disk_match=true existing=CONFLICT original_observation_and_disk_match=true
+after_restart proof={"invocation_id":"13d6cdf9-5ff2-4865-879b-a3fd3ddbbf19","operation_id":"92042bb2-de5b-47c2-a576-70b9f83ea306","run_id":"a7ed9ace-3161-42c8-8868-c8c4428d2e04","worker_id":"worker:desktop:8dbfa2db-385c-4070-a31f-aa3ea06987fc:0f0f23cf-d349-4a11-98e6-0eaa2cf0efe2","worker_epoch":"4","dispatch_epoch":"2","command_id":"9c2ee992-7a33-4a92-bde9-eb34b3b844df","launch_id":"8dbfa2db-385c-4070-a31f-aa3ea06987fc","stop_evidence":"armed_job_absent_after_last_handle_closed"} operation=UNKNOWN invocation=UNKNOWN ledger=PARTIAL claim=QUARANTINED invocation_count=1
+after_disposition command_id=eb9802de-6694-406a-b25e-1acda3ac14db disposition_id=3c55834b-2eec-4c96-b916-e87e8a4c5b85 operation=MANUALLY_CLOSED run=FAILED task=READY claim=RELEASED dispatch=IDLE outbox=DONE invocation_count=1
+postgres_stopped=true temporary_root_removed=true
+M06_WINDOWS_JOB_FILE_WRITE=PASS

@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { addKnowledgeVersion, addMemoryRevision, addRuleVersion, createDecision,
   createKnowledge, createMemory, createRule, retireInformation, supersedeDecision,
   type KnowledgeSource } from '../application/information-commands.js';
-import { listInformation, listInformationVersions, readInformation, searchInformation }
+import { listInformation, listInformationVersions, readInformation, readKnowledgeVersionContent, searchInformation }
   from '../application/information-queries.js';
 import { validationFailed } from '../application/domain-error.js';
 import { commandEnvelopeSchema } from './domain-schemas.js';
@@ -17,6 +17,19 @@ const text = Type.String({ minLength: 1, maxLength: 262144 });
 const base = Type.Object({ workspace_id: uuid }, strict);
 const item = Type.Object({ workspace_id: uuid, id: uuid }, strict);
 const listQuery = Type.Object({ project_id: Type.Optional(uuid) }, strict);
+const knowledgeContentParams = Type.Object({ workspace_id: uuid, id: uuid,
+  version: Type.String({ pattern: '^[1-9][0-9]{0,18}$' }) }, strict);
+const knowledgeContent = Type.Object({ knowledge_id: uuid, title: Type.String(),
+  project_id: Type.Union([uuid, Type.Null()]), current_version: rev,
+  id: uuid, version: rev, source_kind: Type.Union([Type.Literal('NOTE'), Type.Literal('MANAGED_TEXT'),
+    Type.Literal('ARTIFACT_VERSION'), Type.Literal('WEB_PAGE')]),
+  media_type: Type.String(), content_sha256: Type.String(), availability: Type.String(),
+  source_refs: Type.Record(Type.String(), Type.Unknown()),
+  source_uri: Type.Union([Type.String(), Type.Null()]), created_at: Type.String(),
+  content_status: Type.Union([Type.Literal('FULL'), Type.Literal('PARTIAL'),
+    Type.Literal('UNAVAILABLE'), Type.Literal('UNSUPPORTED'), Type.Literal('READ_FAILED')]),
+  content: Type.Union([Type.String(), Type.Null()]),
+}, strict);
 const commandResult = Type.Record(Type.String(), Type.String());
 const source = {
   source_kind: Type.Union([Type.Literal('NOTE'), Type.Literal('MANAGED_TEXT'),
@@ -72,6 +85,16 @@ function parsedSource(body: { source_kind: KnowledgeSource['sourceKind']; text?:
 }
 
 export function registerInformationRoutes(app: FastifyInstance, dependencies: RouteDependencies): void {
+  app.get('/knowledge/:id/versions/:version/content', {
+    schema: { params: knowledgeContentParams, response: { 200: knowledgeContent } },
+  }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string; id: string; version: string };
+      reply.header('Cache-Control', 'no-store');
+      return await readKnowledgeVersionContent(dependencies.database.executor, dependencies.storage,
+        p.workspace_id, p.id, p.version);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
   for (const [path, kind] of [['knowledge', 'knowledge'], ['memories', 'memory'],
     ['decisions', 'decision'], ['rules', 'rule']] as const) {
     app.get(`/${path}`, { schema: { params: base, querystring: listQuery } }, async (request, reply) => {

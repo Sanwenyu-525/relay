@@ -142,10 +142,12 @@ export class GatewayRepository {
   }
 
   async insertResource(input: { id: string; workspaceId: string; projectId: string;
-    canonicalRoot: string; identityKey: string }): Promise<ManagedResourceRow> {
+    canonicalRoot: string; identityKey: string; fileWriteRootId: string | null }): Promise<ManagedResourceRow> {
     const result = await sql<ManagedResourceRow>`
-      insert into managed_resources (id, workspace_id, project_id, canonical_root, identity_key)
-      values (${input.id}, ${input.workspaceId}, ${input.projectId}, ${input.canonicalRoot}, ${input.identityKey})
+      insert into managed_resources
+        (id, workspace_id, project_id, canonical_root, identity_key, file_write_root_id)
+      values (${input.id}, ${input.workspaceId}, ${input.projectId}, ${input.canonicalRoot},
+        ${input.identityKey}, ${input.fileWriteRootId})
       returning *
     `.execute(this.db);
     return requireRow(result.rows, 'insert managed resource');
@@ -387,6 +389,16 @@ export class GatewayRepository {
         dispatched_at = case when ${to} = 'DISPATCHING' then clock_timestamp() else dispatched_at end,
         resolved_at = case when ${to} in ('SUCCEEDED', 'FAILED', 'NOT_EXECUTED') then clock_timestamp() else resolved_at end
       where id = ${id} and status = ${from} returning *
+    `.execute(this.db);
+    return result.rows[0];
+  }
+
+  /** FILE_WRITE adapter 返回后的唯一回执；保留 DISPATCHING 身份，不得覆盖已有结果。 */
+  async stageFileWriteReceipt(id: string, operationId: string, receipt: JsonObject): Promise<InvocationAttemptRow | undefined> {
+    const result = await sql<InvocationAttemptRow>`
+      update invocation_attempts set result_ref = ${JSON.stringify({ file_write_receipt: receipt })}::jsonb
+      where id = ${id} and operation_id = ${operationId} and status = 'DISPATCHING'
+        and result_ref is null returning *
     `.execute(this.db);
     return result.rows[0];
   }

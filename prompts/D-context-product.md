@@ -9,6 +9,7 @@
 ```text
 执行 P10，前置 P09。读 AGENTS.md、prompts/README.md、contracts/01-facts-and-ownership.md、docs/architecture/information-planning.md、docs/api/module-api.md。
 范围：Knowledge/Memory/Decision/Rule 的类型化根/版本/写入口、基础搜索及管理 UI。Memory 仅显式确认，Decision 替代保留历史并拒绝环，Rule HARD 与 PREFERENCE/作用域/enforcement 分开；必要检查路径缺失不能默许执行。共享规则/关键输入变更遵守 authority 锁和执行契约失效。
+知识库同时服务人和 AI：读取产品总纲第 33/90 节、信息设计第 1.1 节、工作台及测试计划第 12 节，核对确切版本全文读取、正文安全展示、来源及笔记修订，不把列表摘录当完整阅读。四类信息继续独立 Owner；导入/收录不等于验证，原件与版本快照分开，不重建需手工同步的第二份正文。导读编排、AI 建议沉淀或确认信息缺字段时先列契约缺口，不擅自增加状态/关系表。
 导入先支持受管 txt/md/note 与产物版本引用，Web 抓取由 P17；不伪造尚未支持的 PDF/URL 正文。搜索先有界字面匹配，含中文、scope、版本、稳定排序；只在实测需要时加 pg_trgm，暂不加向量服务。
 验证 A03/A04/A06、不可变版本、显式确认、跨范围搜索、中文短查询、Decision 循环及产物提升幂等。补 migration/OpenAPI，接回 P06 真实规则来源并回归，不留两套规则存储。
 ```
@@ -20,6 +21,7 @@
 源码对照：按公共“本地源码参考要求”从 .research 核对 Pi 消息转换及当前采用 SDK 的输入组织机制；可复用转换能力，必需验收、来源版本和裁剪证据仍按 Relay 契约实现。
 范围：Mandatory/Relevant/Step-specific 装配、预算、实际片段 Manifest、缓存失效与来源查询。以 Project/Task/Run canonical facts 和固定契约为输入，不把聊天历史作为当前真相。Verifier 上下文不采用 Worker 的自我评价。
 接续目标托管与恢复摘要：消费当前目标、已确认事项、变化依据、未决风险和下一步所需的真实来源；事实、模型建议、来源缺失分别标注。没有比较基线只提供当前快照，不从聊天时间戳推断“离开后变化”；核对实际送入资料及预算，不为新摘要建立第二套 Project State。
+共享知识核对：Workbench 阅读与 Context 引用同一知识版本，人可核对实际采用片段；知识更新不改写旧 Manifest。阅读不触发模型调用或资料外发，显式用于 AI 仍按当前选源、权限与预算，不把所有可搜索内容自动并入每个项目。
 必需规则和验收不能被检索淘汰或裁剪；超限明确返回 CONTEXT_REQUIRED_OVER_BUDGET。可选片段裁剪留理由，token 估算标明；保存真正送模型的来源版本/hash/range/内容及模板版本，密钥排除。权限按当前准入判断，历史快照不授权未来动作。
 替换 P05 fixture 上下文，并保留 Fake 测试。验证 A04–A06/C08：必需内容超预算、来源更新、过期缓存、无 Project Assist、重开/替代、外部注入指令不能升级权限。提供读取 Manifest 的 API/UI 证据，不暴露隐藏思考链。
 ```
@@ -59,6 +61,7 @@ UI 固定消息目标，切页后旧回复不落新 Task。测试模型超时、
 范围：General/Thesis/Development 组件注册、ProjectState 视图、AI Panel、Review/Run 页面与 Connections 设置。复用同一事实查询，不复制 Task/Run。切工作台仅改变展示；执行配置更改是独立版本化命令。Project Type 阶段词汇不随页面变化。
 General 展示下一步/任务/产物，Thesis 展示资料/草稿/引用证据，Development 展示真实 capability 状态和变化集/检查入口。E 阶段未接通工具时显示不可用，后续 P16–P19 接通；不做假 diff/假测试或动态页面平台。
 按工作台第 10/11 节及逐页补充映射核对恢复摘要、人工决定和验收证据的闭合路径；展示重要行为、确切证据、未验证项及可追溯的变化原因。统一队列、局部锁定、影响传播等新增交互只有选定范围且契约闭合后才实现；缺字段明确待接入，不用固定文案或 fixture 冒充 live 能力。
+知识入口按第 12 节提供到现有资料正文、决定与验收依据的可核对导航；项目导读仅在本次已确定组织方式时实现，没有资料或关系就显示缺口。Provider 关闭时已保存受管知识仍可通过本机 API 阅读，不能要求先向 AI 提问；不按最新内容替换历史引用。
 按工作台设计补齐五项全局导航、Ctrl+K 与首次创建项目引导；模型建议只有用户 Apply 才写入，缺连接时人工路径仍可用。测试导航可达、跨项目筛选、建议过期/重复接受；不把 Today Focus 扩展为完整 Work Session。
 组件/桌面 E2E 验证 A05、受控并发客户端冲突、202 与已完成区别、Review 过期、UNKNOWN 说明、键盘焦点、窄窗口/DPI 与安全 Markdown。不要仅截图演示；与真实 API 联调并记录尚未接通能力。
 ```

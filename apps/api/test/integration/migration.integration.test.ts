@@ -87,6 +87,14 @@ const ALL_MIGRATIONS = [
   '0029_m04_run_draft_live_preview',
   '0030_m06_real_tools',
   '0031_m06_change_sets',
+  '0032_m06_change_set_source_scope',
+  '0033_m06_file_write_stop_proofs',
+  '0034_m06_file_write_manual_dispositions',
+  '0035_m06_file_write_frozen_diff',
+  '0036_m06_file_write_path_identity',
+  '0037_m06_file_write_frozen_diff_root_path',
+  '0038_m06_managed_root_identity',
+  '0039_m06_active_resource_root',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {

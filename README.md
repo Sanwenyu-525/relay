@@ -12,6 +12,8 @@ P10 开发自检：后端真实 PostgreSQL 全量 158/158、P10 定向 7/7、Gat
 
 ## 阅读入口
 
+25–27 日产品补充的执行入口见[三日工作包](prompts/README.md#产品补充的执行映射)。当前代码中的人工待处理入口为 `/tasks?tab=attention`，原 `/tasks?tab=inbox` 仍用于未归属项目的人工任务；产物来源页可查看确切正文、版本比较和已登记直接引用。知识库支持按版本阅读保存的 Markdown/纯文本、查看来源、项目事实导读和显式收录核对。相关实现范围与证据见[工作台交互第 10–12 节](docs/frontend/workbench-design.md#10-成果共创与变化守护探索)，当前进度仍归 CODEX_NEXT_STEP。
+
 1. [AGENTS.md](AGENTS.md)：协作规则与项目边界。
 2. [文档地图与维护规范](docs/README.md)：每类内容的唯一主文档、状态与历史材料的阅读规则。
 3. [产品总纲](Personal_Workflow_OS_Master_Spec.md)和[V1 范围](docs/requirements/v1-scope.md)：目标、范围和分期。
@@ -33,10 +35,23 @@ node scripts/check-docs.mjs
 
 检查范围与限制见[文档维护规范](docs/README.md#5-轻量检查)。
 
-开发期浏览器预览入口同时启动 `apps/api` 的 Fastify API 与 `apps/workbench`：
+根目录双击 `dev-stack.bat` 打开桌面测试菜单；命令行入口如下：
 
 ```text
-dev-stack.bat                                        # 双击或命令行运行：同时启动前后端
+dev-stack.bat Build            # 构建最新桌面测试包到根目录 test-release
+dev-stack.bat Start            # 启动测试版，首次初始化，后续保留并复用数据
+dev-stack.bat Stop             # 先关闭桌面窗口，再停止专用测试数据库；不删除数据
+dev-stack.bat Status           # 查看目录、包进程数量和数据库运行状态
+```
+
+程序固定为 `test-release/relay-desktop.exe`，测试数据独立保存在 `.relay-test/`；两者均不纳入 Git。请通过 `dev-stack.bat Start` 启动，以准备数据库和配置；直接双击 EXE 不会自动准备该测试环境。这是本机目录测试包，不是安装器，也不承诺复制到其他电脑即可运行。实现及升级边界见[持久测试入口](docs/deployment/local-deployment.md#持久桌面测试入口)。首次使用先 Build；更新代码后重新 Build，平时启动无需重打包。
+
+发布包的配置、Node/WebView2 和数据库只读诊断见[部署诊断入口](docs/deployment/local-deployment.md#发布包只读诊断)；诊断通过不代表安装或业务总验收通过。
+
+开发期浏览器预览仍可同时启动 `apps/api` 的 Fastify API 与 `apps/workbench`：
+
+```text
+dev-stack.bat Preview                                # 同时启动前后端开发预览
 dev-stack.bat -FrontendOnly                          # 只启动前端 fixture 预览，不需要 apps/api/.env
 dev-stack.bat -FrontendPort 5173 -SkipInstall -SkipBuild
 ```
@@ -49,7 +64,7 @@ dev-stack.bat -FrontendPort 5173 -SkipInstall -SkipBuild
 
 ## Windows 桌面开发包（M02）
 
-桌面发布目录通过 [构建脚本](apps/desktop/scripts/build-release.ps1)生成，要求仓库内便携 Node 24.21.0、pnpm 9.15.9、Rust MSVC toolchain、VS Build Tools 和 WebView2。脚本构建真实 `apps/api` 与完整 `apps/workbench` React 产物，再执行 Tauri `--no-bundle`；从 Cargo 输出中只提取可执行文件、随包 Node/API 到 `apps/desktop/release`，不混入编译缓存。`desktop-build-manifest.json` 记录可执行文件、源码/锁/脚本和发布资源 SHA-256。该目录是可重复的开发 release 包，**不是安装包**。
+桌面发布目录通过 [构建脚本](apps/desktop/scripts/build-release.ps1)生成，要求仓库内便携 Node 24.21.0、pnpm 9.15.9、Rust MSVC toolchain、VS Build Tools 和 WebView2。脚本构建真实 `apps/api`、完整 `apps/workbench` React 产物与 Windows 文件 I/O 助手，再执行 Tauri `--no-bundle`；从 Cargo 输出中只提取可执行文件、随包 Node/API/文件助手到 `apps/desktop/release`，不混入编译缓存。`desktop-build-manifest.json` 记录可执行文件、助手、源码/锁/脚本和发布资源 SHA-256。该目录是可重复的开发 release 包，**不是安装包**。Windows 集成测试若涉及受管资源且未指定 `RELAY_FILE_IO_HELPER`，[测试脚本](apps/api/scripts/run-integration.ps1)会先用锁文件构建源码 debug 助手；要核对确切发布包时显式设置该变量为随包助手路径。
 
 ```powershell
 Set-Location D:\Develop\Relay-Agent

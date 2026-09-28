@@ -332,7 +332,7 @@ export type GatewayCapability =
   | 'GIT_READ'
   | 'GIT_WRITE'
   | 'CLI_RUN';
-export type GatewayOperationStatus = 'WAITING_APPROVAL' | 'PREPARED' | 'DISPATCHING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN' | 'DENIED';
+export type GatewayOperationStatus = 'WAITING_APPROVAL' | 'PREPARED' | 'DISPATCHING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN' | 'DENIED' | 'MANUALLY_CLOSED';
 export type InvocationStatus = 'PREPARED' | 'DISPATCHING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN' | 'NOT_EXECUTED';
 export type ResourceClaimStatus = 'HELD' | 'QUARANTINED' | 'RELEASED';
 
@@ -356,6 +356,7 @@ export interface GatewayPermissionVersionRow {
 export interface ManagedResourceRow {
   readonly id: string; readonly workspace_id: string; readonly project_id: string;
   readonly canonical_root: string; readonly identity_key: string;
+  readonly file_write_root_id: string | null;
   readonly status: 'ACTIVE' | 'DISABLED'; readonly resource_epoch: bigint;
   readonly revision: bigint;
   readonly created_at: Date;
@@ -402,6 +403,54 @@ export interface InvocationAttemptRow {
   readonly resource_claim_id: string | null; readonly claim_token: string | null;
   readonly claim_epoch: bigint | null; readonly result_ref: JsonObject | null;
   readonly created_at: Date; readonly dispatched_at: Date | null; readonly resolved_at: Date | null;
+}
+
+/** 0033: append-only desktop Job stop evidence for one original FILE_WRITE Invocation. */
+export interface FileWriteStopProofRow {
+  readonly invocation_id: string;
+  readonly operation_id: string;
+  readonly run_id: string;
+  readonly worker_id: string;
+  readonly worker_epoch: bigint;
+  readonly dispatch_epoch: bigint;
+  readonly command_id: string;
+  readonly launch_id: string;
+  readonly stop_evidence: 'armed_job_terminated_and_active_count_zero' |
+    'armed_job_absent_after_last_handle_closed';
+  readonly capability_key: 'FILE_WRITE';
+  readonly action_type: 'WRITE_FILE' | 'APPLY_CHANGESET';
+  readonly recorded_at: Date;
+}
+
+/** 0034: one append-only human disposition for an original partial FILE_WRITE. */
+export interface FileWriteDispositionRow {
+  readonly id: string; readonly invocation_id: string; readonly operation_id: string;
+  readonly change_set_id: string; readonly workspace_id: string; readonly project_id: string;
+  readonly run_id: string; readonly resource_id: string; readonly command_id: string;
+  readonly actor_ref: string; readonly decision: 'KEEP_CURRENT_AND_FAIL_RUN';
+  readonly observation_sha256: string; readonly observation: JsonObject;
+  readonly created_at: Date;
+}
+
+/** 0035: immutable, bounded baseline text captured when a FILE_WRITE intent is prepared. */
+export interface FileWriteFrozenDiffRow {
+  readonly operation_id: string; readonly workspace_id: string; readonly project_id: string;
+  readonly run_id: string; readonly resource_id: string;
+  readonly capability_key: 'FILE_WRITE';
+  readonly action_type: 'WRITE_FILE' | 'APPLY_CHANGESET';
+  readonly relative_path: string; readonly file_action: 'MODIFY' | 'DELETE';
+  readonly baseline_sha256: string; readonly baseline_text: string | null;
+  readonly unavailable_reason: string | null; readonly created_at: Date;
+}
+
+/** 0036: immutable physical-path evidence for a new Windows FILE_WRITE operation. */
+export interface FileWritePathIdentityRow {
+  readonly operation_id: string; readonly workspace_id: string; readonly project_id: string;
+  readonly run_id: string; readonly resource_id: string;
+  readonly capability_key: 'FILE_WRITE';
+  readonly action_type: 'WRITE_FILE' | 'APPLY_CHANGESET';
+  readonly root_path: string; readonly root_id: string;
+  readonly captures: JsonObject[]; readonly created_at: Date;
 }
 
 /** 0031：一次 FILE_WRITE 执行（APPLY_CHANGESET/WRITE_FILE）的逐文件证据账本头。
@@ -943,6 +992,10 @@ export interface RelayDatabaseSchema {
   import_jobs: ImportJobRow;
   logical_operations: LogicalOperationRow;
   invocation_attempts: InvocationAttemptRow;
+  file_write_stop_proofs: FileWriteStopProofRow;
+  file_write_manual_dispositions: FileWriteDispositionRow;
+  file_write_frozen_diffs: FileWriteFrozenDiffRow;
+  file_write_path_identity: FileWritePathIdentityRow;
   approval_reservations: { readonly review_id: string; readonly operation_id: string; readonly reserved_at: Date };
   invocation_approval_bindings: { readonly invocation_id: string; readonly review_id: string; readonly operation_id: string };
   change_sets: ChangeSetRow;

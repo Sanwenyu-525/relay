@@ -334,6 +334,11 @@ export class ProjectRepository {
         select 1 from invocation_attempts i
         join logical_operations o on o.id = i.operation_id
         where o.project_id = ${projectId} and i.status = 'UNKNOWN'
+          and not (o.status = 'MANUALLY_CLOSED' and exists (
+            select 1 from file_write_manual_dispositions disposition
+            where disposition.operation_id = o.id and disposition.invocation_id = i.id
+              and disposition.run_id = o.run_id
+          ))
       ) or exists (
         select 1 from run_effect_actions e
         join runs r on r.id = e.run_id join tasks t on t.id = r.task_id

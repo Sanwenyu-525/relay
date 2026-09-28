@@ -183,6 +183,13 @@ export class RunDispatchRepository {
     return result.rows[0];
   }
 
+  async readOutbox(commandId: string): Promise<RunCommandOutboxRow | undefined> {
+    const result = await sql<RunCommandOutboxRow>`
+      select ${OUTBOX_COLUMNS} from run_command_outbox where command_id = ${commandId}
+    `.execute(this.db);
+    return result.rows[0];
+  }
+
   async lockInvocation(runId: string): Promise<RunInvocationRow | undefined> {
     const result = await sql<RunInvocationRow>`
       select ${INVOCATION_COLUMNS} from run_invocations
@@ -375,5 +382,36 @@ export class RunDispatchRepository {
         and worker_id = ${workerId} and claim_epoch = ${epoch}
     `.execute(this.db);
     if (outbox.numAffectedRows !== 1n) throw new Error('stopped outbox claim changed');
+  }
+
+  /** Terminal human disposition consumes the old delivery without requeueing its effect. */
+  async settleStoppedForManualDisposition(runId: string, workerId: string,
+    epoch: bigint, commandId: string): Promise<void> {
+    const other = await sql<{ count: bigint }>`
+      select count(*)::bigint as count from run_command_outbox outbox
+      join run_commands command on command.id = outbox.command_id
+      where command.run_id = ${runId} and outbox.command_id <> ${commandId}
+        and outbox.status in ('CLAIMED', 'BLOCKED')
+    `.execute(this.db);
+    if (other.rows[0]?.count !== 0n) throw new Error('another Run delivery is unsettled');
+    const invocation = await sql`
+      update run_invocations set status = 'IDLE', worker_id = null,
+        command_id = null, lease_until = null, updated_at = now()
+      where run_id = ${runId} and worker_id = ${workerId} and epoch = ${epoch}
+        and command_id = ${commandId} and status in ('ACTIVE', 'STOP_REQUIRED')
+    `.execute(this.db);
+    if (invocation.numAffectedRows !== 1n) throw new Error('manual disposition lost its Run claim');
+    const outbox = await sql`
+      update run_command_outbox set status = 'DONE', settled_at = now(), updated_at = now()
+      where command_id = ${commandId} and worker_id = ${workerId} and claim_epoch = ${epoch}
+        and status in ('CLAIMED', 'BLOCKED')
+    `.execute(this.db);
+    if (outbox.numAffectedRows !== 1n) throw new Error('manual disposition lost its outbox claim');
+    await sql`
+      update run_command_outbox outbox set status = 'DONE', settled_at = now(), updated_at = now()
+      from run_commands command
+      where outbox.command_id = command.id and command.run_id = ${runId}
+        and outbox.status = 'PENDING'
+    `.execute(this.db);
   }
 }

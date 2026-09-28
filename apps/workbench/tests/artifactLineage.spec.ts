@@ -14,6 +14,9 @@ afterEach(() => { unmount?.(); unmount = null; resetRelayConnectionForTest(); vi
 function response(body: unknown, status = 200): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
 }
+function contentResponse(body: string): Response {
+  return { ok: true, status: 200, text: async () => body } as Response;
+}
 function lineage() { return { artifact_version_id: versionId, artifact_id: "44444444-4444-4444-8444-444444444444",
   version_number: "2", sha256: "a".repeat(64), source_kind: "HUMAN_EDIT", content_availability: "UNAVAILABLE",
   direct_parents: [
@@ -84,5 +87,95 @@ describe("P15 Artifact Lineage", () => {
     const panel = mounted.wrapper.get('[data-testid="artifact-lineage"]');
     expect(panel.text()).toContain("直接父来源 · 0");
     expect(panel.find(`a[href="/artifact-versions/${parentId}/lineage"]`).exists()).toBe(false);
+  });
+
+  it("长正文、确切历史来源与直接引用均绑定所选版本，读取全程只发 GET", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    const root = `${baseUrl}/api/v1/workspaces/${workspaceId}`;
+    const calls: string[] = [];
+    const current = `# 结果\n${"共同内容\n".repeat(1200)}新结论\n尾段`;
+    const before = `# 结果\n${"共同内容\n".repeat(1200)}旧结论\n尾段`;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method ?? "GET").toBe("GET");
+      const path = String(input).slice(root.length); calls.push(path);
+      if (path === `/artifact-versions/${versionId}/lineage`) return response({ ...lineage(), content_availability: "AVAILABLE" });
+      if (path === `/artifact-versions/${parentId}/lineage`) return response({ ...lineage(), artifact_version_id: parentId,
+        version_number: "1", sha256: "b".repeat(64), content_availability: "AVAILABLE", direct_parents: [] });
+      if (path === `/artifacts/44444444-4444-4444-8444-444444444444`) return response({
+        id: "44444444-4444-4444-8444-444444444444", task_id: "task-one", title: "实验结果", revision: "1",
+        latest_version_id: versionId, version_count: 2, versions: [
+          { artifact_version_id: parentId, version_number: "1", media_type: "text/markdown", sha256: "b".repeat(64), size: "12800", source_kind: "HUMAN", created_at: "2026-09-25T00:00:00Z" },
+          { artifact_version_id: versionId, version_number: "2", media_type: "text/markdown", sha256: "a".repeat(64), size: "12800", source_kind: "HUMAN_EDIT", created_at: "2026-09-26T00:00:00Z" }
+        ]
+      });
+      if (path === `/artifact-versions/${versionId}/content`) return contentResponse(current);
+      if (path === `/artifact-versions/${parentId}/content`) return contentResponse(before);
+      if (path === `/artifact-versions/${versionId}/direct-uses`) return response({ source_artifact_version_id: versionId,
+        source_content_availability: "AVAILABLE", scope: "RECORDED_DIRECT_ONLY", complete: false, has_more: false,
+        direct_uses: [{ relation: "DERIVED_FROM", child_artifact_version_id: parentId,
+          child_artifact_id: "44444444-4444-4444-8444-444444444444", child_version_number: "1",
+          availability: "AVAILABLE", created_at: "2026-09-26T00:00:00Z" }] });
+      throw new Error(`Unexpected ${path}`);
+    }));
+    const mounted = await mountWorkbench(`/artifact-versions/${versionId}/lineage`); unmount = mounted.unmount;
+    expect(calls).toEqual([`/artifact-versions/${versionId}/lineage`]);
+    await mounted.wrapper.get('[data-testid="artifact-version-compare"] button').trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="artifact-current-content"]').text()).toContain("新结论");
+    await mounted.wrapper.get('[data-testid="artifact-compare-select"]').setValue(parentId);
+    await mounted.wrapper.get('[data-testid="artifact-compare-submit"]').trigger("click"); await flush();
+    const diff = mounted.wrapper.get('[data-testid="artifact-compare-result"]');
+    expect(diff.text()).toContain("旧结论"); expect(diff.text()).toContain("新结论");
+    expect(diff.text()).toContain("共同前缀 1201 行");
+    expect(diff.find(`a[href="/artifact-versions/${parentId}/lineage"]`).exists()).toBe(true);
+    await mounted.wrapper.get('[data-testid="artifact-direct-uses"] button').trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="artifact-direct-uses"]').text()).toContain("完整影响范围未知");
+    expect(mounted.wrapper.get('[data-testid="artifact-direct-uses"]').text()).toContain("打开直接引用版本 v1");
+    expect(calls).toContain(`/artifact-versions/${versionId}/direct-uses`);
+  });
+
+  it("相同版本显示相同；仅 CRLF/LF 不同时不称字节相同；切换版本清理迟到正文", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    const root = `${baseUrl}/api/v1/workspaces/${workspaceId}`;
+    const current = "甲\n乙";
+    const pendingOld: { resolve?: (value: Response) => void } = {};
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input).slice(root.length);
+      if (path === `/artifact-versions/${versionId}/lineage`) return response({ ...lineage(), content_availability: "AVAILABLE" });
+      if (path === `/artifact-versions/${parentId}/lineage`) return response({ ...lineage(), artifact_version_id: parentId,
+        version_number: "1", content_availability: "AVAILABLE", direct_parents: [] });
+      if (path === "/artifacts/44444444-4444-4444-8444-444444444444") return response({
+        id: "44444444-4444-4444-8444-444444444444", task_id: "task-one", title: "结果", revision: "1",
+        latest_version_id: versionId, version_count: 2, versions: [versionId, parentId].map((id, index) => ({
+          artifact_version_id: id, version_number: String(2 - index), media_type: "text/markdown", sha256: "a".repeat(64),
+          size: "8", source_kind: "HUMAN", created_at: "2026-09-26T00:00:00Z" }))
+      });
+      if (path === `/artifact-versions/${versionId}/content`) return contentResponse(current);
+      if (path === `/artifact-versions/${parentId}/content`) return contentResponse("甲\r\n乙");
+      throw new Error(`Unexpected ${path}`);
+    }));
+    const mounted = await mountWorkbench(`/artifact-versions/${versionId}/lineage`); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="artifact-version-compare"] button').trigger("click"); await flush();
+    await mounted.wrapper.get('[data-testid="artifact-compare-select"]').setValue(versionId);
+    await mounted.wrapper.get('[data-testid="artifact-compare-submit"]').trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="artifact-compare-result"]').text()).toContain("两个确切版本正文相同");
+    await mounted.wrapper.get('[data-testid="artifact-compare-select"]').setValue(parentId);
+    await mounted.wrapper.get('[data-testid="artifact-compare-submit"]').trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="artifact-compare-result"]').text()).toContain("换行字节不同");
+
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input).slice(root.length);
+      if (path === `/artifact-versions/${versionId}/lineage`) return response({ ...lineage(), content_availability: "AVAILABLE" });
+      if (path === `/artifact-versions/${parentId}/lineage`) return response({ ...lineage(), artifact_version_id: parentId, direct_parents: [] });
+      if (path === "/artifacts/44444444-4444-4444-8444-444444444444") return new Promise<Response>((resolve) => { pendingOld.resolve = resolve; });
+      if (path === `/artifact-versions/${versionId}/content`) return contentResponse("迟到内容");
+      throw new Error(`Unexpected ${path}`);
+    }));
+    await mounted.wrapper.get('[data-testid="artifact-lineage"] > button').trigger("click"); await flush();
+    await mounted.wrapper.get('[data-testid="artifact-version-compare"] button').trigger("click");
+    await mounted.router.push(`/artifact-versions/${parentId}/lineage`); await flush();
+    pendingOld.resolve?.(response({ id: "44444444-4444-4444-8444-444444444444", task_id: "task-one", title: "旧", revision: "1",
+      latest_version_id: versionId, version_count: 0, versions: [] })); await flush();
+    expect(mounted.wrapper.text()).not.toContain("迟到内容");
+    expect(mounted.wrapper.get('[data-testid="artifact-version-compare"]').text()).not.toContain("正在读取");
   });
 });

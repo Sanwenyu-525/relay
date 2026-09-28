@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import test, { after, before } from 'node:test';
 
 import { sql } from 'kysely';
@@ -14,7 +14,7 @@ import {
   type GatewayOrigin,
 } from '../../src/application/gateway-actions.js';
 import {
-  createFakeConnection, createGatewayPolicy, registerManagedResource,
+  createFakeConnection, createGatewayPolicy, disableManagedResource, registerManagedResource,
 } from '../../src/application/gateway-configuration.js';
 import { resolveReview } from '../../src/application/review-decisions.js';
 import { advanceRunStep } from '../../src/application/run-steps.js';
@@ -23,7 +23,8 @@ import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import type { GatewayCapability } from '../../src/infrastructure/database-schema.js';
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
 import { isProcessAlive } from '../../src/cli-worker/process-tree.js';
-import { createDataRoot } from './api-harness.js';
+import type { ChangeSetLedgerFile } from '../../src/files/change-set-repository.js';
+import { createDataRoot, startTestApi } from './api-harness.js';
 import { APP_DATABASE_URL, MIGRATIONS_DIRECTORY, MIGRATION_DATABASE_URL, expectSqlState, openDatabase } from './integration-support.js';
 
 // M06 real-tools verification: drives the already-wired FILE_WRITE / GIT_READ /
@@ -165,11 +166,174 @@ async function readLedger(invocationId: string) {
 // P16 Files / changeset through the Gateway
 // ---------------------------------------------------------------------------
 
+test('M06 frozen FILE_WRITE diff uses immutable planned baseline and target text', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  await writeFile(join(f.root, 'modify.txt'), 'before\nold\n');
+  await writeFile(join(f.root, 'delete.txt'), 'remove me\n');
+  const origin = await claim(f);
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root, params: { changes: [
+      { path: 'create.txt', action: 'CREATE', content: 'created\n' },
+      { path: 'modify.txt', action: 'MODIFY', baselineSha256: sha256('before\nold\n'),
+        content: 'before\nnew\n' },
+      { path: 'delete.txt', action: 'DELETE', baselineSha256: sha256('remove me\n') },
+    ] } });
+  assert.equal(prepared.status, 'WAITING_APPROVAL');
+  const api = await startTestApi();
+  try {
+    const path = `/api/v1/workspaces/${f.workspaceId}/operations/${op}/file-write-diff`;
+    const response = await api.get(path);
+    assert.equal(response.status, 200, response.text);
+    assert.equal(response.headers['cache-control'], 'no-store');
+    const body = response.body as { operation_id: string; basis: string; files: Array<{
+      relative_path: string; availability: string; before_text: string | null;
+      after_text: string | null; baseline_sha256: string | null; target_sha256: string | null;
+    }> };
+    assert.equal(body.operation_id, op);
+    assert.equal(body.basis, 'FROZEN_INTENT');
+    const byPath = new Map(body.files.map((file) => [file.relative_path, file]));
+    assert.equal(byPath.get('create.txt')?.availability, 'AVAILABLE');
+    assert.equal(byPath.get('create.txt')?.before_text, '');
+    assert.equal(byPath.get('create.txt')?.after_text, 'created\n');
+    assert.equal(byPath.get('modify.txt')?.availability, 'AVAILABLE');
+    assert.equal(byPath.get('modify.txt')?.before_text, 'before\nold\n');
+    assert.equal(byPath.get('modify.txt')?.after_text, 'before\nnew\n');
+    assert.equal(byPath.get('modify.txt')?.baseline_sha256, sha256('before\nold\n'));
+    assert.equal(byPath.get('modify.txt')?.target_sha256, sha256('before\nnew\n'));
+    assert.equal(byPath.get('delete.txt')?.availability, 'AVAILABLE');
+    assert.equal(byPath.get('delete.txt')?.before_text, 'remove me\n');
+    assert.equal(byPath.get('delete.txt')?.after_text, '');
+    const rows = await sql<{ relative_path: string }>`select relative_path from file_write_frozen_diffs
+      where operation_id=${op} order by relative_path`.execute(app.db);
+    assert.deepEqual(rows.rows.map((row) => row.relative_path), ['delete.txt', 'modify.txt'],
+      'CREATE has an implicit empty baseline, not a persisted snapshot');
+    await expectSqlState('42501', 'rewriting frozen baseline evidence', () => sql`
+      update file_write_frozen_diffs set baseline_text='forged' where operation_id=${op}
+    `.execute(app.db));
+    await expectSqlState('42501', 'deleting frozen baseline evidence', () => sql`
+      delete from file_write_frozen_diffs where operation_id=${op}
+    `.execute(app.db));
+    await writeFile(join(f.root, 'modify.txt'), 'outside edit\n');
+    const reread = await api.get(path);
+    assert.equal(reread.status, 200, reread.text);
+    assert.equal((reread.body as typeof body).files.find((file) => file.relative_path === 'modify.txt')?.before_text,
+      'before\nold\n', 'current disk must not replace the frozen planned baseline');
+    const outside = await api.get(`/api/v1/workspaces/${randomUUID()}/operations/${op}/file-write-diff`);
+    assert.equal(outside.status, 404);
+  } finally { await api.stop(); }
+});
+
+test('M06 frozen FILE_WRITE diff marks mismatched, binary and oversized baselines unavailable', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  await writeFile(join(f.root, 'mismatch.txt'), 'actual\n');
+  const binary = Buffer.from([0, 1, 2]);
+  await writeFile(join(f.root, 'binary.txt'), binary);
+  const oversized = 'a'.repeat(64 * 1024 + 1);
+  await writeFile(join(f.root, 'oversized.txt'), oversized);
+  const op = randomUUID();
+  await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin: await claim(f),
+    actionType: 'APPLY_CHANGESET', target: f.root, params: { changes: [
+      { path: 'mismatch.txt', action: 'MODIFY', baselineSha256: sha256('wrong\n'), content: 'new\n' },
+      { path: 'binary.txt', action: 'MODIFY', baselineSha256: createHash('sha256').update(binary).digest('hex'),
+        content: 'new\n' },
+      { path: 'oversized.txt', action: 'MODIFY', baselineSha256: sha256(oversized), content: 'new\n' },
+    ] } });
+  const api = await startTestApi();
+  try {
+    const response = await api.get(`/api/v1/workspaces/${f.workspaceId}/operations/${op}/file-write-diff`);
+    assert.equal(response.status, 200, response.text);
+    const files = (response.body as { files: Array<{ relative_path: string; availability: string;
+      unavailable_reason: string | null; before_text: string | null; after_text: string | null }> }).files;
+    assert.deepEqual(files.map((file) => [file.relative_path, file.availability, file.unavailable_reason]), [
+      ['mismatch.txt', 'UNAVAILABLE', 'BASELINE_SHA_MISMATCH'],
+      ['binary.txt', 'UNAVAILABLE', 'BINARY_OR_INVALID_UTF8'],
+      ['oversized.txt', 'UNAVAILABLE', 'TEXT_TOO_LARGE'],
+    ]);
+    assert.ok(files.every((file) => file.before_text === null && file.after_text === null));
+  } finally { await api.stop(); }
+});
+
+test('M06 frozen WRITE_FILE diff uses the ledger path and immutable modify baseline', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'WRITE_FILE' });
+  const target = join(f.root, 'nested', 'note.txt');
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, 'original\n');
+  const op = randomUUID();
+  await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin: await claim(f),
+    actionType: 'WRITE_FILE', target,
+    params: { content: 'replacement\n', baseline_sha256: sha256('original\n') } });
+  const api = await startTestApi();
+  try {
+    await writeFile(target, 'external edit\n');
+    const response = await api.get(`/api/v1/workspaces/${f.workspaceId}/operations/${op}/file-write-diff`);
+    assert.equal(response.status, 200, response.text);
+    assert.deepEqual((response.body as { files: Array<{ relative_path: string; action: string;
+      availability: string; before_text: string | null; after_text: string | null }> }).files.map((file) => ({
+      path: file.relative_path, action: file.action, availability: file.availability,
+      before: file.before_text, after: file.after_text,
+    })), [{ path: process.platform === 'win32' ? 'nested/note.txt' : 'note.txt',
+      action: 'MODIFY', availability: 'AVAILABLE',
+      before: 'original\n', after: 'replacement\n' }]);
+    const rows = await sql<{ relative_path: string }>`select relative_path from file_write_frozen_diffs
+      where operation_id=${op}`.execute(app.db);
+    assert.deepEqual(rows.rows.map((row) => row.relative_path),
+      [process.platform === 'win32' ? 'nested/note.txt' : 'note.txt']);
+  } finally { await api.stop(); }
+});
+
+test('M06 Windows nested WRITE_FILE keeps its diff and ledger under the managed root',
+  { skip: process.platform !== 'win32' }, async () => {
+    const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'WRITE_FILE' });
+    const target = join(f.root, 'nested', 'note.txt');
+    await mkdir(dirname(target));
+    await writeFile(target, 'original\n');
+    const op = randomUUID();
+    const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+      intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin: await claim(f),
+      actionType: 'WRITE_FILE', target,
+      params: { content: 'replacement\n', baseline_sha256: sha256('original\n') } });
+    const next = await approveAndReclaim(f, op, prepared.review_id!);
+    const dispatched = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId,
+      operationId: op, origin: next });
+    assert.equal(dispatched.status, 'SUCCEEDED');
+    assert.equal(await readFile(target, 'utf8'), 'replacement\n');
+    const { invocationId } = await soleInvocation(f.workspaceId, op);
+    const ledger = await readLedger(invocationId);
+    assert.ok(ledger);
+    assert.equal(ledger.cs.canonical_root, f.root);
+    assert.equal(ledger.files[0]?.relative_path, 'nested/note.txt');
+    const api = await startTestApi();
+    try {
+      const response = await api.get(`/api/v1/workspaces/${f.workspaceId}/operations/${op}/file-write-diff`);
+      assert.equal(response.status, 200, response.text);
+      assert.equal((response.body as { files: Array<{ relative_path: string }> }).files[0]?.relative_path,
+        ledger.files[0]?.relative_path);
+    } finally { await api.stop(); }
+  });
+
+test('M06 direct APPLY_CHANGESET bounds frozen baseline capture to 16 files', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  const op = randomUUID();
+  await assert.rejects(prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin: await claim(f),
+    actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: Array.from({ length: 17 }, (_, index) => ({
+      path: `file-${index}.txt`, action: 'CREATE', content: 'new\n',
+    })) } }), (error: unknown) => code(error) === 'VALIDATION_FAILED');
+  const count = await sql<{ count: number }>`select count(*)::integer as count from logical_operations
+    where id=${op}`.execute(app.db);
+  assert.equal(count.rows[0]?.count, 0);
+});
+
 test('M06 FILE_WRITE APPLY_CHANGESET forces ASK, then writes real files after approval', async () => {
   const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
   const origin = await claim(f);
   const content = 'hello relay\n';
-  const changes = [{ path: 'src/a.txt', action: 'CREATE', content, targetSha256: sha256(content) }];
+  const changes = [{ path: 'src/./a.txt', action: 'CREATE', content, targetSha256: sha256(content) }];
   const op = randomUUID();
   const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
     intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
@@ -217,6 +381,13 @@ test('M06 FILE_WRITE baseline hash conflict leaves the existing file untouched',
   const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
     intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
     actionType: 'APPLY_CHANGESET', target: f.root, params: { changes } });
+  const api = await startTestApi();
+  try {
+    const pending = await api.get(`/api/v1/workspaces/${f.workspaceId}/operations/${op}/change-sets`);
+    assert.equal(pending.status, 200, pending.text);
+    assert.deepEqual((pending.body as { change_sets: unknown[] }).change_sets, [],
+      'approval before dispatch must not invent an execution ledger');
+  } finally { await api.stop(); }
   const next = await approveAndReclaim(f, op, prepared.review_id!);
   const result = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next });
   assert.equal(result.status, 'FAILED', 'a stale baseline is a conflict, not a silent overwrite');
@@ -237,6 +408,43 @@ test('M06 FILE_WRITE baseline hash conflict leaves the existing file untouched',
   await releaseGatewayWorker(app.db, { workspaceId: f.workspaceId, runId: f.runId, workerId: next.workerId, workerEpoch: next.workerEpoch });
 });
 
+test('M06 missing MODIFY parent leaves no directory before a no-effect FAILED settlement', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  const absentDir = join(f.root, 'new-dir');
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin: await claim(f),
+    actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: [{ path: 'new-dir/missing.txt', action: 'MODIFY',
+      baselineSha256: sha256('old\n'), content: 'replacement\n' }] } });
+  const next = await approveAndReclaim(f, op, prepared.review_id!);
+  const result = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next });
+  assert.equal(result.status, 'FAILED');
+  assert.equal((result.result_ref as { changes?: Array<{ status: string }> }).changes?.[0]?.status, 'CONFLICT');
+  await assert.rejects(stat(absentDir), (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT',
+    'no-effect settlement must not leave an empty parent directory');
+});
+
+test('M06 DELETE conflict ledger preserves the observed existing content digest', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  await writeFile(join(f.root, 'keep.txt'), 'still here\n', 'utf8');
+  const origin = await claim(f);
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: [{ path: 'keep.txt', action: 'DELETE', baselineSha256: sha256('wrong\n') }] } });
+  const next = await approveAndReclaim(f, op, prepared.review_id!);
+  const result = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next });
+  assert.equal(result.status, 'FAILED');
+  assert.equal(await readFile(join(f.root, 'keep.txt'), 'utf8'), 'still here\n');
+  const { invocationId } = await soleInvocation(f.workspaceId, op);
+  const ledger = await readLedger(invocationId);
+  assert.ok(ledger);
+  assert.equal(ledger.files[0]?.status, 'CONFLICT');
+  assert.equal(ledger.files[0]?.actual_sha256, sha256('still here\n'));
+});
+
 test('M06 FILE_WRITE rejects protected paths and root-escape at prepare', async () => {
   const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
   const origin = await claim(f);
@@ -246,6 +454,107 @@ test('M06 FILE_WRITE rejects protected paths and root-escape at prepare', async 
       actionType: 'APPLY_CHANGESET', target: f.root, params: { changes: [{ path: bad, action: 'CREATE', content: 'x' }] } }),
     (error: unknown) => code(error) === 'GATEWAY_TARGET_DENIED', `path ${bad} must be denied`);
   }
+});
+
+test('M06 Windows FILE_WRITE rejects unsafe path segments before approval',
+  { skip: process.platform !== 'win32' }, async () => {
+    const changeset = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE',
+      actionType: 'APPLY_CHANGESET' });
+    const changesetOrigin = await claim(changeset);
+    for (const path of ['src/config.txt:secret', 'src/COM¹.txt', 'src/file.',
+      'src/bad?.txt', 'src/bad\u0001.txt']) {
+      await assert.rejects(prepareGatewayAction(app.db, { workspaceId: changeset.workspaceId,
+        operationId: randomUUID(), intentKey: `intent-${randomUUID()}`,
+        connectionId: changeset.connectionId, origin: changesetOrigin,
+        actionType: 'APPLY_CHANGESET', target: changeset.root,
+        params: { changes: [{ path, action: 'CREATE', content: 'x' }] } }),
+      (error: unknown) => code(error) === 'GATEWAY_TARGET_DENIED', `changeset: ${path}`);
+    }
+    const single = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE',
+      actionType: 'WRITE_FILE' });
+    const singleOrigin = await claim(single);
+    for (const path of ['payload.txt:secret', 'bad?.txt', 'bad\u0000.txt', 'missing./payload.txt']) {
+      await assert.rejects(prepareGatewayAction(app.db, { workspaceId: single.workspaceId,
+        operationId: randomUUID(), intentKey: `intent-${randomUUID()}`,
+        connectionId: single.connectionId, origin: singleOrigin,
+        actionType: 'WRITE_FILE', target: join(single.root, path),
+        params: { content: 'x' } }),
+      (error: unknown) => code(error) === 'GATEWAY_TARGET_DENIED', `WRITE_FILE: ${path}`);
+    }
+  });
+
+test('M06 FILE_WRITE rejects a false target digest before approval or disk writes', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  const origin = await claim(f);
+  await assert.rejects(prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: randomUUID(),
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: [{ path: 'digest.txt', action: 'CREATE', content: 'real\n', targetSha256: sha256('fake\n') }] } }),
+  (error: unknown) => code(error) === 'VALIDATION_FAILED');
+  await assert.rejects(readFile(join(f.root, 'digest.txt')),
+    (error: unknown) => code(error) === 'ENOENT');
+});
+
+test('M06 FILE_WRITE requires explicit content for CREATE and MODIFY at prepare', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  await writeFile(join(f.root, 'existing.txt'), 'original\n', 'utf8');
+  const origin = await claim(f);
+  for (const change of [
+    { path: 'new.txt', action: 'CREATE' },
+    { path: 'existing.txt', action: 'MODIFY', baselineSha256: sha256('original\n') },
+  ]) {
+    await assert.rejects(prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: randomUUID(),
+      intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+      actionType: 'APPLY_CHANGESET', target: f.root, params: { changes: [change] } }),
+    (error: unknown) => code(error) === 'VALIDATION_FAILED', `${change.action} requires explicit content`);
+  }
+  assert.equal(await readFile(join(f.root, 'existing.txt'), 'utf8'), 'original\n');
+  await assert.rejects(readFile(join(f.root, 'new.txt')), (error: unknown) => code(error) === 'ENOENT');
+});
+
+test('M06 FILE_WRITE rejects equivalent paths and overlong UTF-8 ledger paths at prepare', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET',
+    maxPayloadBytes: 8192 });
+  const origin = await claim(f);
+  for (const paths of [['src/a.txt', 'src/./a.txt'], ['src/a.txt', 'src/../src/a.txt'],
+    ...(process.platform === 'win32' ? [['Case.txt', 'case.txt']] : [])]) {
+    await assert.rejects(prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: randomUUID(),
+      intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+      actionType: 'APPLY_CHANGESET', target: f.root,
+      params: { changes: paths.map((path) => ({ path, action: 'CREATE', content: 'x' })) } }),
+    (error: unknown) => code(error) === 'VALIDATION_FAILED', `duplicate paths ${paths.join(', ')}`);
+  }
+  const longPath = [...Array(11)].map(() => '界'.repeat(32)).join('/') + '/a.txt';
+  assert.ok(Buffer.byteLength(longPath, 'utf8') > 1024);
+  await assert.rejects(prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: randomUUID(),
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: [{ path: longPath, action: 'CREATE', content: 'x' }] } }),
+  (error: unknown) => code(error) === 'VALIDATION_FAILED');
+  await assert.rejects(readFile(join(f.root, longPath)), (error: unknown) => code(error) === 'ENOENT');
+});
+
+test('M06 FILE_WRITE DELETE reconciliation keeps UNKNOWN when the path becomes a directory', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  await writeFile(join(f.root, 'gone.txt'), 'old\n', 'utf8');
+  const origin = await claim(f);
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: [{ path: 'gone.txt', action: 'DELETE', baselineSha256: sha256('old\n') }] } });
+  const next = await approveAndReclaim(f, op, prepared.review_id!);
+  await assert.rejects(dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next,
+    hooks: { afterFakeEffect: async () => { throw new SimulatedGatewayCrash('after delete'); } } }), SimulatedGatewayCrash);
+  await mkdir(join(f.root, 'gone.txt'));
+  const { invocationId } = await soleInvocation(f.workspaceId, op);
+  const result = await reconcileGatewayInvocation(app.db, { workspaceId: f.workspaceId, operationId: op,
+    invocationId, oldProcessStopped: true, stoppedWorkerId: next.workerId, stoppedWorkerEpoch: next.workerEpoch });
+  assert.equal(result.status, 'UNKNOWN');
+  const ledger = await readLedger(invocationId);
+  assert.ok(ledger);
+  assert.equal(ledger.cs.status, 'UNKNOWN');
+  assert.notEqual(ledger.files[0]?.status, 'APPLIED');
 });
 
 test('M06 FILE_WRITE crash after write reconciles SUCCEEDED; tampering reconciles UNKNOWN and blocks re-claim', async () => {
@@ -263,6 +572,12 @@ test('M06 FILE_WRITE crash after write reconciles SUCCEEDED; tampering reconcile
     hooks: { afterFakeEffect: async () => { throw new SimulatedGatewayCrash('after write'); } } }), SimulatedGatewayCrash);
   const stuck = await soleInvocation(f.workspaceId, op);
   assert.equal(stuck.status, 'DISPATCHING');
+  const receipt = (await readGatewayOperation(app.db, f.workspaceId, op)).invocations[0]?.result_ref;
+  assert.equal((receipt?.file_write_receipt as { operation_id?: string } | undefined)?.operation_id, op,
+    'adapter returned before the crash, so its original invocation must have a durable receipt');
+  const overwritten = await withTransaction(app.db, (repositories) => repositories.gateway.stageFileWriteReceipt(
+    stuck.invocationId, op, { kind: 'FILE_WRITE_ADAPTER_V1', operation_id: randomUUID() }));
+  assert.equal(overwritten, undefined, 'the original adapter receipt cannot be replaced');
   const okReconcile = await reconcileGatewayInvocation(app.db, { workspaceId: f.workspaceId, operationId: op,
     invocationId: stuck.invocationId, oldProcessStopped: true, stoppedWorkerId: next.workerId, stoppedWorkerEpoch: next.workerEpoch });
   assert.equal(okReconcile.status, 'SUCCEEDED', 'present content matching the target hash reconciles as done');
@@ -305,6 +620,383 @@ test('M06 FILE_WRITE crash after write reconciles SUCCEEDED; tampering reconcile
     (error: unknown) => code(error) === 'GATEWAY_OPERATION_UNRESOLVED');
 });
 
+test('M06 FILE_WRITE does not attribute an existing CREATE target to an uncalled adapter', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  await writeFile(join(f.root, 'preexisting.txt'), 'expected\n');
+  const origin = await claim(f);
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: [{ path: 'preexisting.txt', action: 'CREATE', content: 'expected\n' }] } });
+  const next = await approveAndReclaim(f, op, prepared.review_id!);
+  await assert.rejects(dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next,
+    hooks: { afterAdmit: async () => { throw new SimulatedGatewayCrash('before adapter call'); } } }), SimulatedGatewayCrash);
+  const stuck = await soleInvocation(f.workspaceId, op);
+  const result = await reconcileGatewayInvocation(app.db, { workspaceId: f.workspaceId, operationId: op,
+    invocationId: stuck.invocationId, oldProcessStopped: true,
+    stoppedWorkerId: next.workerId, stoppedWorkerEpoch: next.workerEpoch });
+  assert.equal(result.status, 'UNKNOWN');
+  const ledger = await readLedger(stuck.invocationId);
+  assert.ok(ledger);
+  assert.equal(ledger.cs.status, 'UNKNOWN');
+  assert.notEqual(ledger.files[0]?.status, 'APPLIED');
+});
+
+test('M06 FILE_WRITE does not attribute an external afterAdmit write to the adapter', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  const origin = await claim(f);
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: [{ path: 'external.txt', action: 'CREATE', content: 'expected\n' }] } });
+  const next = await approveAndReclaim(f, op, prepared.review_id!);
+  await assert.rejects(dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next,
+    hooks: { afterAdmit: async () => {
+      await writeFile(join(f.root, 'external.txt'), 'expected\n');
+      throw new SimulatedGatewayCrash('external actor wrote before adapter call');
+    } } }), SimulatedGatewayCrash);
+  const stuck = await soleInvocation(f.workspaceId, op);
+  const result = await reconcileGatewayInvocation(app.db, { workspaceId: f.workspaceId, operationId: op,
+    invocationId: stuck.invocationId, oldProcessStopped: true,
+    stoppedWorkerId: next.workerId, stoppedWorkerEpoch: next.workerEpoch });
+  assert.equal(result.status, 'UNKNOWN');
+  const ledger = await readLedger(stuck.invocationId);
+  assert.ok(ledger);
+  assert.notEqual(ledger.files[0]?.status, 'APPLIED');
+});
+
+test('M06 FILE_WRITE partial adapter receipt cannot be upgraded by a later matching disk state', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  await writeFile(join(f.root, 'conflict.txt'), 'original\n');
+  const origin = await claim(f);
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: [
+      { path: 'applied.txt', action: 'CREATE', content: 'applied\n' },
+      { path: 'conflict.txt', action: 'MODIFY', baselineSha256: sha256('wrong\n'), content: 'target\n' },
+    ] } });
+  const next = await approveAndReclaim(f, op, prepared.review_id!);
+  await assert.rejects(dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next,
+    hooks: { afterFakeEffect: async () => {
+      await writeFile(join(f.root, 'conflict.txt'), 'target\n');
+      throw new SimulatedGatewayCrash('outside actor matched the failed target');
+    } } }), SimulatedGatewayCrash);
+  const stuck = await soleInvocation(f.workspaceId, op);
+  const result = await reconcileGatewayInvocation(app.db, { workspaceId: f.workspaceId, operationId: op,
+    invocationId: stuck.invocationId, oldProcessStopped: true,
+    stoppedWorkerId: next.workerId, stoppedWorkerEpoch: next.workerEpoch });
+  assert.equal(result.status, 'UNKNOWN');
+  const ledger = await readLedger(stuck.invocationId);
+  assert.ok(ledger);
+  assert.equal(ledger.cs.status, 'UNKNOWN');
+  const byPath = new Map(ledger.files.map((row) => [row.relative_path, row]));
+  assert.equal(byPath.get('applied.txt')?.status, 'APPLIED', 'the receipt and disk both prove this one file');
+  assert.notEqual(byPath.get('conflict.txt')?.status, 'APPLIED', 'an external write cannot repair the failed adapter result');
+});
+
+test('M06 FILE_WRITE crash after a partial adapter receipt preserves a PARTIAL ledger', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  await writeFile(join(f.root, 'conflict.txt'), 'external change\n');
+  const origin = await claim(f);
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: [
+      { path: 'applied.txt', action: 'CREATE', content: 'applied\n' },
+      { path: 'conflict.txt', action: 'MODIFY', baselineSha256: sha256('original\n'), content: 'target\n' },
+    ] } });
+  const next = await approveAndReclaim(f, op, prepared.review_id!);
+  await assert.rejects(dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next,
+    hooks: { afterFakeEffect: async () => { throw new SimulatedGatewayCrash('after partial receipt'); } } }),
+  SimulatedGatewayCrash);
+  const stuck = await soleInvocation(f.workspaceId, op);
+  assert.equal(await readLedger(stuck.invocationId), undefined);
+  const result = await reconcileGatewayInvocation(app.db, { workspaceId: f.workspaceId, operationId: op,
+    invocationId: stuck.invocationId, oldProcessStopped: true,
+    stoppedWorkerId: next.workerId, stoppedWorkerEpoch: next.workerEpoch });
+  assert.equal(result.status, 'UNKNOWN');
+  const ledger = await readLedger(stuck.invocationId);
+  assert.ok(ledger);
+  assert.equal(ledger.cs.status, 'PARTIAL');
+  const byPath = new Map(ledger.files.map((row) => [row.relative_path, row]));
+  assert.equal(byPath.get('applied.txt')?.status, 'APPLIED');
+  assert.equal(byPath.get('conflict.txt')?.status, 'CONFLICT');
+  assert.equal((await soleInvocation(f.workspaceId, op)).invocationId, stuck.invocationId);
+});
+
+test('M06 FILE_WRITE recovery preserves a missing DELETE as CONFLICT in a PARTIAL ledger', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  const origin = await claim(f);
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: [
+      { path: 'applied.txt', action: 'CREATE', content: 'applied\n' },
+      { path: 'missing.txt', action: 'DELETE', baselineSha256: sha256('original\n') },
+    ] } });
+  const next = await approveAndReclaim(f, op, prepared.review_id!);
+  await assert.rejects(dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next,
+    hooks: { afterFakeEffect: async () => { throw new SimulatedGatewayCrash('after partial receipt'); } } }),
+  SimulatedGatewayCrash);
+  const stuck = await soleInvocation(f.workspaceId, op);
+  const result = await reconcileGatewayInvocation(app.db, { workspaceId: f.workspaceId, operationId: op,
+    invocationId: stuck.invocationId, oldProcessStopped: true,
+    stoppedWorkerId: next.workerId, stoppedWorkerEpoch: next.workerEpoch });
+  assert.equal(result.status, 'UNKNOWN');
+  const ledger = await readLedger(stuck.invocationId);
+  assert.ok(ledger);
+  assert.equal(ledger.cs.status, 'PARTIAL');
+  const byPath = new Map(ledger.files.map((row) => [row.relative_path, row]));
+  assert.equal(byPath.get('applied.txt')?.status, 'APPLIED');
+  assert.equal(byPath.get('missing.txt')?.status, 'CONFLICT');
+  assert.equal(byPath.get('missing.txt')?.actual_sha256, null);
+  assert.equal((await soleInvocation(f.workspaceId, op)).invocationId, stuck.invocationId);
+});
+
+test('M06 FILE_WRITE rejects a receipt whose file report disagrees with frozen input', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  await writeFile(join(f.root, 'forged.txt'), 'expected\n');
+  const origin = await claim(f);
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: [{ path: 'forged.txt', action: 'CREATE', content: 'expected\n' }] } });
+  const next = await approveAndReclaim(f, op, prepared.review_id!);
+  await assert.rejects(dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next,
+    hooks: { afterAdmit: async () => { throw new SimulatedGatewayCrash('before adapter call'); } } }), SimulatedGatewayCrash);
+  const stuck = await soleInvocation(f.workspaceId, op);
+  const staged = await withTransaction(app.db, (repositories) => repositories.gateway.stageFileWriteReceipt(
+    stuck.invocationId, op, { kind: 'FILE_WRITE_ADAPTER_V1', operation_id: op,
+      invocation_id: stuck.invocationId, outcome: 'SUCCEEDED', result: {
+        operation_id: op, invocation_id: stuck.invocationId,
+        changes: [{ path: 'forged.txt', action: 'CREATE', status: 'APPLIED',
+          targetSha256: sha256('different\n') }],
+      } }));
+  assert.ok(staged, 'the test installs a malformed receipt under the original invocation');
+  const result = await reconcileGatewayInvocation(app.db, { workspaceId: f.workspaceId, operationId: op,
+    invocationId: stuck.invocationId, oldProcessStopped: true,
+    stoppedWorkerId: next.workerId, stoppedWorkerEpoch: next.workerEpoch });
+  assert.equal(result.status, 'UNKNOWN');
+  const ledger = await readLedger(stuck.invocationId);
+  assert.ok(ledger);
+  assert.notEqual(ledger.files[0]?.status, 'APPLIED');
+});
+
+test('M06 FILE_WRITE receipt cannot confirm a target after its frozen root is redirected', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  const origin = await claim(f);
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: [{ path: 'payload.txt', action: 'CREATE', content: 'expected\n' }] } });
+  const next = await approveAndReclaim(f, op, prepared.review_id!);
+  await assert.rejects(dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next,
+    hooks: { afterFakeEffect: async () => { throw new SimulatedGatewayCrash('after adapter receipt'); } } }), SimulatedGatewayCrash);
+  const outside = join(dataRoot, `m06-outside-${randomUUID()}`);
+  await mkdir(outside);
+  await writeFile(join(outside, 'payload.txt'), 'expected\n');
+  await rename(f.root, `${f.root}-old`);
+  await symlink(outside, f.root, 'junction');
+  const stuck = await soleInvocation(f.workspaceId, op);
+  const result = await reconcileGatewayInvocation(app.db, { workspaceId: f.workspaceId, operationId: op,
+    invocationId: stuck.invocationId, oldProcessStopped: true,
+    stoppedWorkerId: next.workerId, stoppedWorkerEpoch: next.workerEpoch });
+  assert.equal(result.status, 'UNKNOWN');
+  const ledger = await readLedger(stuck.invocationId);
+  assert.ok(ledger);
+  assert.notEqual(ledger.files[0]?.status, 'APPLIED');
+});
+
+test('M06 FILE_WRITE refuses a managed root replaced by a junction before dispatch', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  const origin = await claim(f);
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: [{ path: 'payload.txt', action: 'CREATE', content: 'expected\n' }] } });
+  const next = await approveAndReclaim(f, op, prepared.review_id!);
+  const outside = join(dataRoot, `m06-outside-${randomUUID()}`);
+  await mkdir(outside);
+  await rename(f.root, `${f.root}-old`);
+  await symlink(outside, f.root, 'junction');
+  const result = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next });
+  assert.equal(result.status, 'FAILED');
+  await assert.rejects(readFile(join(outside, 'payload.txt')), (error: unknown) => code(error) === 'ENOENT');
+});
+
+test('M06 Windows FILE_WRITE refuses an ordinary root replaced after resource registration',
+  { skip: process.platform !== 'win32' }, async () => {
+    const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE',
+      actionType: 'APPLY_CHANGESET' });
+    const registered = await sql<{ file_write_root_id: string | null }>`
+      select file_write_root_id from managed_resources where id = ${f.resourceId}
+    `.execute(app.db);
+    assert.match(registered.rows[0]?.file_write_root_id ?? '', /^[0-9a-f]{16}:[0-9a-f]{32}$/);
+    await rename(f.root, `${f.root}-registered`);
+    await mkdir(f.root);
+    const origin = await claim(f);
+    const operationId = randomUUID();
+    await assert.rejects(prepareGatewayAction(app.db, { workspaceId: f.workspaceId,
+      operationId, intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId,
+      origin, actionType: 'APPLY_CHANGESET', target: f.root,
+      params: { changes: [{ path: 'payload.txt', action: 'CREATE', content: 'forbidden\n' }] } }),
+    (error: unknown) => code(error) === 'GATEWAY_RESOURCE_ROOT_CHANGED');
+    const operations = await sql<{ count: bigint }>`
+      select count(*)::bigint as count from logical_operations where id = ${operationId}
+    `.execute(app.db);
+    assert.equal(operations.rows[0]?.count, 0n);
+    await assert.rejects(readFile(join(f.root, 'payload.txt')),
+      (error: unknown) => code(error) === 'ENOENT');
+  });
+
+test('M06 Windows FILE_WRITE requires explicit re-registration of a legacy resource',
+  { skip: process.platform !== 'win32' }, async () => {
+    const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE',
+      actionType: 'APPLY_CHANGESET' });
+    await assert.rejects(sql`
+      update managed_resources set file_write_root_id = null where id = ${f.resourceId}
+    `.execute(app.db), (error: unknown) => code(error) === '42501');
+    const migrator = openDatabase(MIGRATION_DATABASE_URL, 'relay-m06-legacy-root-fixture');
+    try {
+      await sql`update managed_resources set file_write_root_id = null
+        where id = ${f.resourceId}`.execute(migrator.db);
+    } finally { await migrator.close(); }
+    const origin = await claim(f);
+    const operationId = randomUUID();
+    await assert.rejects(prepareGatewayAction(app.db, { workspaceId: f.workspaceId,
+      operationId, intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId,
+      origin, actionType: 'APPLY_CHANGESET', target: f.root,
+      params: { changes: [{ path: 'payload.txt', action: 'CREATE', content: 'forbidden\n' }] } }),
+    (error: unknown) => code(error) === 'GATEWAY_RESOURCE_IDENTITY_REQUIRED');
+  });
+
+test('M06 disabled legacy resource can be re-registered with a new physical identity',
+  { skip: process.platform !== 'win32' }, async () => {
+    const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE',
+      actionType: 'APPLY_CHANGESET' });
+    const migrator = openDatabase(MIGRATION_DATABASE_URL, 'relay-m06-legacy-reregistration');
+    try {
+      await sql`update managed_resources set file_write_root_id = null
+        where id = ${f.resourceId}`.execute(migrator.db);
+    } finally { await migrator.close(); }
+    await disableManagedResource(app.db, { workspaceId: f.workspaceId, resourceId: f.resourceId });
+    const renewed = await registerManagedResource(app.db, { workspaceId: f.workspaceId,
+      projectId: f.projectId, rootPath: f.root });
+    assert.notEqual(renewed.resourceId, f.resourceId);
+    assert.equal(renewed.canonicalRoot, f.root);
+    const rows = await sql<{ id: string; status: string; file_write_root_id: string | null }>`
+      select id, status, file_write_root_id from managed_resources
+      where project_id = ${f.projectId} and canonical_root = ${f.root} order by created_at, id
+    `.execute(app.db);
+    assert.equal(rows.rows.length, 2);
+    assert.equal(rows.rows.find((row) => row.id === f.resourceId)?.status, 'DISABLED');
+    assert.equal(rows.rows.find((row) => row.id === f.resourceId)?.file_write_root_id, null);
+    assert.equal(rows.rows.find((row) => row.id === renewed.resourceId)?.status, 'ACTIVE');
+    assert.match(rows.rows.find((row) => row.id === renewed.resourceId)?.file_write_root_id ?? '',
+      /^[0-9a-f]{16}:[0-9a-f]{32}$/);
+  });
+
+test('M06 Windows FILE_WRITE refuses a replaced ordinary parent with the same path',
+  { skip: process.platform !== 'win32' }, async () => {
+    const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+    await mkdir(join(f.root, 'nested'));
+    const origin = await claim(f);
+    const op = randomUUID();
+    const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+      intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+      actionType: 'APPLY_CHANGESET', target: f.root,
+      params: { changes: [{ path: 'nested/payload.txt', action: 'CREATE', content: 'expected\n' }] } });
+    const next = await approveAndReclaim(f, op, prepared.review_id!);
+    await rename(join(f.root, 'nested'), join(f.root, 'old-nested'));
+    await mkdir(join(f.root, 'nested'));
+    const result = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next });
+    assert.equal(result.status, 'FAILED');
+    await assert.rejects(readFile(join(f.root, 'nested', 'payload.txt')),
+      (error: unknown) => code(error) === 'ENOENT');
+    await assert.rejects(readFile(join(f.root, 'old-nested', 'payload.txt')),
+      (error: unknown) => code(error) === 'ENOENT');
+  });
+
+test('M06 Windows FILE_WRITE refuses a same-content target with a different file identity',
+  { skip: process.platform !== 'win32' }, async () => {
+    const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+    await writeFile(join(f.root, 'payload.txt'), 'original\n');
+    const origin = await claim(f);
+    const op = randomUUID();
+    const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+      intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+      actionType: 'APPLY_CHANGESET', target: f.root,
+      params: { changes: [{ path: 'payload.txt', action: 'MODIFY',
+        baselineSha256: sha256('original\n'), content: 'updated\n' }] } });
+    const next = await approveAndReclaim(f, op, prepared.review_id!);
+    await rename(join(f.root, 'payload.txt'), join(f.root, 'old-payload.txt'));
+    await writeFile(join(f.root, 'payload.txt'), 'original\n');
+    const result = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next });
+    assert.equal(result.status, 'FAILED');
+    assert.equal(await readFile(join(f.root, 'payload.txt'), 'utf8'), 'original\n');
+    assert.equal(await readFile(join(f.root, 'old-payload.txt'), 'utf8'), 'original\n');
+  });
+
+test('M06 Windows FILE_WRITE recovery refuses a same-content replacement after execution',
+  { skip: process.platform !== 'win32' }, async () => {
+    const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+    const origin = await claim(f);
+    const op = randomUUID();
+    const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+      intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+      actionType: 'APPLY_CHANGESET', target: f.root,
+      params: { changes: [{ path: 'payload.txt', action: 'CREATE', content: 'expected\n' }] } });
+    const next = await approveAndReclaim(f, op, prepared.review_id!);
+    await assert.rejects(dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next,
+      hooks: { afterFakeEffect: async () => { throw new SimulatedGatewayCrash('after adapter receipt'); } } }),
+    SimulatedGatewayCrash);
+    await rename(join(f.root, 'payload.txt'), join(f.root, 'old-payload.txt'));
+    await writeFile(join(f.root, 'payload.txt'), 'expected\n');
+    const { invocationId } = await soleInvocation(f.workspaceId, op);
+    const result = await reconcileGatewayInvocation(app.db, { workspaceId: f.workspaceId, operationId: op,
+      invocationId, oldProcessStopped: true,
+      stoppedWorkerId: next.workerId, stoppedWorkerEpoch: next.workerEpoch });
+    assert.equal(result.status, 'UNKNOWN');
+    const ledger = await readLedger(invocationId);
+    assert.ok(ledger);
+    assert.notEqual(ledger.files[0]?.status, 'APPLIED');
+  });
+
+test('M06 FILE_WRITE recovery refuses matching content behind a parent junction', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  const origin = await claim(f);
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: [{ path: 'nested/payload.txt', action: 'CREATE', content: 'expected\n' }] } });
+  const next = await approveAndReclaim(f, op, prepared.review_id!);
+  await assert.rejects(dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next,
+    hooks: { afterFakeEffect: async () => { throw new SimulatedGatewayCrash('after real write'); } } }), SimulatedGatewayCrash);
+  const outside = join(dataRoot, `m06-outside-${randomUUID()}`);
+  await mkdir(outside);
+  await writeFile(join(outside, 'payload.txt'), 'expected\n');
+  await rename(join(f.root, 'nested'), join(f.root, 'old-nested'));
+  await symlink(outside, join(f.root, 'nested'), 'junction');
+  const { invocationId } = await soleInvocation(f.workspaceId, op);
+  const result = await reconcileGatewayInvocation(app.db, { workspaceId: f.workspaceId, operationId: op,
+    invocationId, oldProcessStopped: true, stoppedWorkerId: next.workerId, stoppedWorkerEpoch: next.workerEpoch });
+  assert.equal(result.status, 'UNKNOWN');
+  const ledger = await readLedger(invocationId);
+  assert.ok(ledger);
+  assert.equal(ledger.cs.status, 'UNKNOWN');
+  assert.notEqual(ledger.files[0]?.status, 'APPLIED');
+});
+
 // ---------------------------------------------------------------------------
 // M06 增量A：多文件部分成功的账本按路径逐条固化，冲突项不覆盖
 // ---------------------------------------------------------------------------
@@ -323,7 +1015,7 @@ test('M06 change_set ledger records per-file PARTIAL for a multi-file changeset 
     actionType: 'APPLY_CHANGESET', target: f.root, params: { changes } });
   const next = await approveAndReclaim(f, op, prepared.review_id!);
   const result = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next });
-  assert.equal(result.status, 'FAILED', 'one conflict makes the overall changeset fail');
+  assert.equal(result.status, 'UNKNOWN', 'a partially applied write stays on the original unresolved action');
   assert.equal(await readFile(join(f.root, 'new.txt'), 'utf8'), created, 'the non-conflicting file still lands');
   assert.equal(await readFile(join(f.root, 'stale.txt'), 'utf8'), 'original\n', 'the conflicting file is untouched');
   const { invocationId } = await soleInvocation(f.workspaceId, op);
@@ -338,7 +1030,40 @@ test('M06 change_set ledger records per-file PARTIAL for a multi-file changeset 
   assert.equal(byPath.get('stale.txt')?.status, 'CONFLICT');
   assert.equal(byPath.get('stale.txt')?.actual_sha256, sha256('original\n'));
   assert.equal(byPath.get('stale.txt')?.target_sha256, sha256('overwrite\n'));
-  await releaseGatewayWorker(app.db, { workspaceId: f.workspaceId, runId: f.runId, workerId: next.workerId, workerEpoch: next.workerEpoch });
+  const ledgerApi = await startTestApi();
+  try {
+    const path = `/api/v1/workspaces/${f.workspaceId}/operations/${op}/change-sets`;
+    const response = await ledgerApi.get(path);
+    assert.equal(response.status, 200, response.text);
+    assert.equal(response.headers['cache-control'], 'no-store');
+    const published = response.body as { operation_id: string; change_sets: Array<{
+      invocation_id: string; status: string; evidence_source: string; files: Array<{
+        relative_path: string; status: string; actual_sha256: string | null;
+      }> }> };
+    assert.equal(published.operation_id, op);
+    assert.equal(published.change_sets.length, 1);
+    assert.equal(published.change_sets[0]?.invocation_id, invocationId);
+    assert.equal(published.change_sets[0]?.status, 'PARTIAL');
+    assert.equal(published.change_sets[0]?.evidence_source, 'EXECUTION');
+    assert.deepEqual(published.change_sets[0]?.files.map((file) =>
+      [file.relative_path, file.status, file.actual_sha256]), [
+      ['new.txt', 'APPLIED', sha256(created)],
+      ['stale.txt', 'CONFLICT', sha256('original\n')],
+    ]);
+    assert.equal(response.text.includes(JSON.stringify(created).slice(1, -1)), false,
+      'ledger read must not publish escaped file content');
+    const outside = await ledgerApi.get(`/api/v1/workspaces/${randomUUID()}/operations/${op}/change-sets`);
+    assert.equal(outside.status, 404, 'another workspace cannot read operation evidence');
+  } finally { await ledgerApi.stop(); }
+  await assert.rejects(releaseGatewayWorker(app.db, { workspaceId: f.workspaceId, runId: f.runId,
+    workerId: next.workerId, workerEpoch: next.workerEpoch }),
+  (error: unknown) => code(error) === 'GATEWAY_OPERATION_UNRESOLVED');
+  const reconciled = await reconcileGatewayInvocation(app.db, { workspaceId: f.workspaceId,
+    operationId: op, invocationId, stoppedWorkerId: next.workerId,
+    stoppedWorkerEpoch: next.workerEpoch, oldProcessStopped: true });
+  assert.equal(reconciled.status, 'UNKNOWN');
+  assert.equal((await readLedger(invocationId))?.cs.status, 'PARTIAL',
+    'a later observation cannot erase the immutable execution summary');
 });
 
 // ---------------------------------------------------------------------------
@@ -409,6 +1134,80 @@ test('M06 change_set ledger binds real per-file facts to the invocation and cann
   `.execute(app.db));
   assert.equal(await withTransaction(app.db, (r) => r.changeSets.countByInvocation(invocationId)), 1);
   await releaseGatewayWorker(app.db, { workspaceId: f.workspaceId, runId: f.runId, workerId: next.workerId, workerEpoch: next.workerEpoch });
+});
+
+test('M06 change_set source FK rejects a different action, resource or project', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  const otherRoot = join(dataRoot, `m06-other-${randomUUID()}`);
+  await mkdir(otherRoot);
+  const other = await registerManagedResource(app.db, { workspaceId: f.workspaceId,
+    projectId: f.projectId, rootPath: otherRoot });
+  const otherProjectId = randomUUID();
+  await withTransaction(app.db, async (repositories) => {
+    await repositories.projects.insertProject({ id: otherProjectId, workspaceId: f.workspaceId,
+      title: 'Other source project', projectType: 'DEVELOPMENT' });
+    await repositories.projects.insertProjectState(otherProjectId, 'PLANNING');
+  });
+  const otherProjectRoot = join(dataRoot, `m06-other-project-${randomUUID()}`);
+  await mkdir(otherProjectRoot);
+  const otherProjectResource = await registerManagedResource(app.db, { workspaceId: f.workspaceId,
+    projectId: otherProjectId, rootPath: otherProjectRoot });
+  const origin = await claim(f);
+  const op = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: [{ path: 'source.txt', action: 'CREATE', content: 'source\n' }] } });
+  const next = await approveAndReclaim(f, op, prepared.review_id!);
+  await assert.rejects(dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next,
+    hooks: { afterFakeEffect: async () => { throw new SimulatedGatewayCrash('before ledger settle'); } } }), SimulatedGatewayCrash);
+  const { invocationId } = await soleInvocation(f.workspaceId, op);
+  assert.equal(await readLedger(invocationId), undefined, 'the crash left an invocation without a ledger');
+  for (const [actionType, projectId, resourceId] of [
+    ['WRITE_FILE', f.projectId, f.resourceId],
+    ['APPLY_CHANGESET', f.projectId, other.resourceId],
+    ['APPLY_CHANGESET', otherProjectId, otherProjectResource.resourceId],
+  ]) {
+    await expectSqlState('23503', `source mismatch ${actionType}/${projectId}/${resourceId}`, () => sql`
+      insert into change_sets (id, invocation_id, operation_id, workspace_id, project_id, run_id,
+        resource_id, action_type, canonical_root, status, evidence_source, file_count)
+      values (${randomUUID()}, ${invocationId}, ${op}, ${f.workspaceId}, ${projectId}, ${f.runId},
+        ${resourceId}, ${actionType}, ${f.root}, 'UNKNOWN', 'EXECUTION', 1)
+    `.execute(app.db));
+  }
+  assert.equal(await readLedger(invocationId), undefined);
+});
+
+test('M06 change_set summary trusts guarded persisted file facts and row count', async () => {
+  for (const variant of ['digest mismatch', 'duplicate rows']) {
+    const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+    const origin = await claim(f);
+    const op = randomUUID();
+    const content = 'effect\n';
+    const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op,
+      intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+      actionType: 'APPLY_CHANGESET', target: f.root,
+      params: { changes: [{ path: 'proof.txt', action: 'CREATE', content }] } });
+    const next = await approveAndReclaim(f, op, prepared.review_id!);
+    await assert.rejects(dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin: next,
+      hooks: { afterFakeEffect: async () => { throw new SimulatedGatewayCrash('before ledger settle'); } } }), SimulatedGatewayCrash);
+    const { invocationId } = await soleInvocation(f.workspaceId, op);
+    const file: ChangeSetLedgerFile = { relative_path: 'proof.txt', action: 'CREATE', baseline_sha256: null,
+      observed_baseline_sha256: null, target_sha256: sha256(content),
+      actual_sha256: variant === 'digest mismatch' ? sha256('fake\n') : sha256(content),
+      status: 'APPLIED', error: null, diff_ref: null };
+    const files = variant === 'duplicate rows' ? [file, file] : [file];
+    const ledger = await withTransaction(app.db, (repositories) => repositories.changeSets.recordExecution({
+      workspace_id: f.workspaceId, project_id: f.projectId, run_id: f.runId,
+      resource_id: f.resourceId, operation_id: op, invocation_id: invocationId,
+      action_type: 'APPLY_CHANGESET', canonical_root: f.root,
+    }, randomUUID(), files, 'SUCCEEDED'));
+    assert.equal(ledger.status, 'PARTIAL', `${variant} cannot yield a successful ledger`);
+    const persisted = await readLedger(invocationId);
+    assert.ok(persisted);
+    assert.equal(persisted.files.length, 1);
+    assert.equal(persisted.files[0]?.status, variant === 'digest mismatch' ? 'CONFLICT' : 'APPLIED');
+  }
 });
 
 // ---------------------------------------------------------------------------

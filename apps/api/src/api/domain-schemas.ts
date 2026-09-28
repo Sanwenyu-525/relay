@@ -468,6 +468,17 @@ export const DelegateTaskBodySchema = Type.Object(
       connection_id: UuidSchema,
       url: Type.String({ minLength: 1, maxLength: 2048 }),
     }, strict)),
+    file_write_action: Type.Optional(Type.Object({
+      connection_id: UuidSchema,
+      resource_id: UuidSchema,
+      changes: Type.Array(Type.Object({
+        path: Type.String({ minLength: 1, maxLength: 1024 }),
+        action: Type.Union([Type.Literal('CREATE'), Type.Literal('MODIFY'), Type.Literal('DELETE')]),
+        content: Type.Optional(Type.String({ maxLength: 8192 })),
+        baselineSha256: Type.Optional(Type.String({ pattern: '^[0-9a-fA-F]{64}$' })),
+        targetSha256: Type.Optional(Type.String({ pattern: '^[0-9a-fA-F]{64}$' })),
+      }, strict), { minItems: 1, maxItems: 16 }),
+    }, strict)),
     context_sources: Type.Optional(Type.Array(Type.Object({
       kind: Type.Union([Type.Literal('KNOWLEDGE'), Type.Literal('MEMORY'), Type.Literal('DECISION')]),
       root_id: UuidSchema,

@@ -376,6 +376,8 @@ Connection 回执为 `connection_id,project_id,version,status`，Permission 为 
 
 `GET /runs/{run_id}/operations`、`GET /import-jobs/{import_job_id}/operations` 与 `GET /operations/{operation_id}` 返回 Operation 历史；单项包含 `id,origin,project_id,run_id,step_id,import_job_id,status,action_type,normalized_target,params_hash,connection_id,connection_version,policy_id,policy_version,created_at,result_ref,invocations[]`，每个 Invocation 含 `id,attempt_number,status,authority_revision,connection_version,worker_epoch,created_at,dispatched_at,resolved_at,result_ref`。列表目前最多 100 条，无分页游标。`GET /import-jobs/{id}` 只读返回类型化 USER_IMPORT 来源与 QUEUED/RUNNING/SUCCEEDED/FAILED 状态；P17 的当前 URL 导入行为见第 10.27 节。Operation/Invocation 查询不返回参数原文、Connection config、claim token 或 Worker ID。
 
+2026-09-27 M06 内部回执增量：`FILE_WRITE` 的 Invocation 在 `DISPATCHING` 且适配器已返回、最终结算尚未提交时，既有 `result_ref` 可包含 `file_write_receipt`（原 operation/invocation ID、适配器结果及逐文件状态/摘要）；最终结算和恢复证据也可保留该字段。它只表示适配器报告已绑定原调用，客户端必须以 Invocation/Operation 的 `status` 判断是否结算，不能将回执本身当作成功。字段不含写入内容或凭据。**Breaking Change: No**：原端点、字段和状态码不变，开放对象 `result_ref` 内增加可选证据；旧客户端忽略即可。
+
 Prepare、Worker claim、Admit、Fake 执行、outcome、reconcile 目前只开放内部应用端口，HTTP 无“设置 SUCCEEDED”入口。RUN 仅允许受控 Fake marker 写，USER_IMPORT 仅允许固定公共 Fake 读；P08 受管 Markdown 发布保持专用入口。两个 Project 可以登记重叠根，但同一时刻重叠根只能有一个 HELD/QUARANTINED 占用；UNKNOWN 阻止换意图或目标绕行。DISPATCHING 后仅凭目标缺失不能证明未执行，继续 UNKNOWN；只有 PREPARED 且调用方证明旧 Worker 已停，才允许原 operation_id 的新 Invocation。生产进程管理器、真实 Web/Git/CLI、任意文件写与公开恢复调度尚未实现。
 
 ### 10.12 P10：长期信息、Rule 冻结与有界搜索（2026-09-23）
@@ -625,3 +627,53 @@ Project Assist 会话可用原 `POST /assist-sessions/{id}/messages` 发送 `{co
 响应为 `{completion_id,task_id,basis_kind,acceptance_revision,is_current,committed_at,acceptance,human_acceptance,verification_session,artifact_versions}`。`acceptance` 从完成时的确切 Task 验收修订读取，含 `availability,objective,expected_outputs,source,created_at,criteria[{criterion_id,statement,required,method,target_spec}]`。HUMAN 凭据的 `human_acceptance` 含 `availability,id,actor_kind,statement,accepted_criterion_ids,reason,created_at`，AUTO 为 null；AUTO 凭据的 `verification_session` 含 `availability,id,run_id,status,verdict,check_plan_hash,applicable`，HUMAN 为 null。`applicable=false` 显示原会话适用性已撤销，仍保留历史 verdict。`artifact_versions[]` 按原完成 `state_delta.artifact_version_ids` 顺序给出 `availability,artifact_version_id,artifact_id,version_number,sha256`，只在原 Artifact 仍属于当前可见 Workspace/Task 且受管内容 hash/大小吻合时返回可导航 ID；内容缺失、损坏或引用失权返回 `UNAVAILABLE` 且该项 ID/hash 为 null，不以最新 ArtifactVersion 代替。异常超出 100 个引用时仅展示前 100 项并追加一项 `UNAVAILABLE` 标记，不声称证据完整。
 
 验收、人工接受或验证会话历史行缺失/身份不一致时仅对应分支返回 `UNAVAILABLE` 和 null/空字段，不取当前版本补位；人工接受的 actor_ref、完整 `state_delta`、Run CheckPlan/模型正文及宿主路径不出 DTO。读取采用一致的数据库快照，并逐项核对引用；这是对已持久事实的投影，不新增完成 Owner、写命令、迁移或验收效力。真实 PostgreSQL/HTTP 定向测试覆盖历史重开、跨作用域、错误 Bearer、受管内容缺失和 AUTO PASS 来源；M05 独立与 Windows 桌面验收后置。
+
+### 10.41 M06 固定图文件写意图（2026-09-27）
+
+**Breaking Change: No。** `POST /api/v1/workspaces/{workspace_id}/tasks/{task_id}/delegations` 可选增加 `file_write_action: {connection_id,resource_id,changes}`，与 `mock_gateway_action`、`file_read_action`、`web_fetch_action` 四选一；不传的新旧客户端仍按原流程运行，202 回执与 `command_id` 幂等语义不变。`changes` 为 1–16 项，每项 `{path,action,content?,baselineSha256?,targetSha256?}`；`action` 仅为 `CREATE|MODIFY|DELETE`，HTTP 字符串长度限制为路径最多 1024、写入内容最多 8192，规范化后的路径另受 1024 UTF-8 字节的账本限制。Windows 相对路径段不接受备用数据流冒号、保留设备名（含扩展名及 COM/LPT 上标数字形式）、禁用字符与控制字符、尾随点或空格；`WRITE_FILE` 与变化集 Prepare 同样拒绝这些不安全别名。`CREATE` 不接受基线；`MODIFY`/`DELETE` 必须携带有效的 64 位十六进制基线 SHA-256；`DELETE` 不接受内容或目标摘要，其他动作必须有字符串内容，若给出目标摘要则须与内容相符。整个 Gateway 参数仍受 Permission 的 `max_payload_bytes` 限制。
+
+Delegate 校验资源属于当前 Workspace/Task Project，并在创建 Run 前拒绝不安全、等价重复路径或无效冻结摘要；实际目录、Connection、Permission、基线冲突与批准在 Gateway Prepare/Admit/执行时核对。合法意图随 Run 契约冻结为 `file-write-v1` 与唯一 `operation_id`，变化项参与命令摘要。固定图在 DRAFT 成功后以该原身份准备 `FILE_WRITE/APPLY_CHANGESET`，需批准时等待绑定原 Operation 的 `ACTION_APPROVAL` 和 RESUME；批准前不写文件，批准后通过原 Invocation 记录效果及逐文件账本。已部分应用的变化集保留原 Operation/Invocation 为 `UNKNOWN`、资源隔离、逐文件账本 `PARTIAL` 并在 Run 未决 ID 中可见；全部文件确定无写入的冲突或冻结根拒绝可记 `FAILED`，释放资源并使 Run 失败。两者均不推进候选发布、Task 完成或换 ID 自动重试。部分写入的显式人工处置见 10.43；冻结计划文本差异见 10.44，真实 WebView2 自动化点击已通过，人工交互与 M06 整体出口仍待完成。
+
+### 10.42 M06 文件写入逐文件账本只读查询（2026-09-27）
+
+**Breaking Change: No（新增只读端点）。** `GET /api/v1/workspaces/{workspace_id}/operations/{operation_id}/change-sets` 使用现有 Bearer 鉴权与 Workspace 作用域；不存在、跨 Workspace 或非 Run `FILE_WRITE` Operation 返回 404 `RESOURCE_NOT_FOUND`。存在的 FILE_WRITE Operation 在执行前返回 `200 {operation_id,change_sets:[]}`，不伪造成功或效果证据；响应带 `Cache-Control: no-store`。
+
+已有账本按创建时间和 ID 排序，响应为 `{operation_id,change_sets:[{id,invocation_id,run_id,resource_id,action_type,canonical_root,status,evidence_source,file_count,created_at,updated_at,files:[{relative_path,action,baseline_sha256,observed_baseline_sha256,target_sha256,actual_sha256,status,error,created_at}]}]}`；逐文件行按规范相对路径排序。该端点只投影持久账本，不读取当前磁盘、不输出冻结内容或 diff 正文；`canonical_root` 是当次执行根的历史记录，`actual_sha256` 是当次观测，不证明读取时文件仍相同。`PARTIAL` 仍需按原 Operation 核对和人工处置，查询本身不释放资源、不改变 Run/Task 或验收结论。真实隔离 PostgreSQL/HTTP 定向反例覆盖执行前空账本、混合 `APPLIED/CONFLICT` 与跨 Workspace 404；处置另见 10.43，冻结计划文本差异另见 10.44；此账本端点本身不提供 diff 正文。
+
+**Breaking Change: Yes（仅新 Windows `WRITE_FILE` 的路径语义）。** 0036 之后创建且有物理身份行的单文件写动作，其 `canonical_root` 为受管资源根，`relative_path` 可含子目录；此前动作仍保留目标父目录与文件名。响应形状、状态码与历史行不变；客户端应将每条文件路径与该账本自身的 `canonical_root` 配对，不能假定 `WRITE_FILE` 总是 basename。
+
+### 10.43 M06 部分文件写入的人工处置（2026-09-27）
+
+**Breaking Change: No（新增端点与终态枚举）。** `GET /api/v1/workspaces/{workspace_id}/operations/{operation_id}/file-write-disposition` 返回原 Operation/Invocation/变化集 ID、Run/Task 当前 revision、是否已有可信桌面停机证明、可处置标志与阻断原因、逐文件账本状态/当次实际摘要/当前回读摘要以及 `observation_sha256`。它读取磁盘但不写入；返回 `Cache-Control: no-store`，不输出文件正文。已经处置时返回持久 `disposition` 摘要，不再生成可提交的新快照。跨 Workspace、非 RUN `FILE_WRITE` 或不存在的 Operation 为 404。
+
+**Breaking Change: No（追加无回执观察字段和原 UNKNOWN 账本处置条件）。** 新 Windows 动作若原 Invocation 没有 `file_write_receipt` 且变化集仍为 `UNKNOWN`，GET 在冻结根/File ID 下只读观察各目标和同目录 `.__relay-file-io-` 前缀候选，返回 `observation_mode:"NO_RECEIPT"`、`files[].current_target_id`、`files[].parent_chain` 与 `files[].residual_candidates[]`（路径、File ID、sha256、状态）。`complete` 有界观察才生成可提交的 `observation_sha256`；候选只是当前目录条目，不能归因于原调用。目标缺失可作为明确的当前事实；根/冻结父链身份不符、候选或目标不安全/不可读、目录观察中变化、超限或助手失败则阻断处置。最多观察 16 个目标、全请求 32 个候选、每目录枚举 4096 项、单对象读取 1 MiB、总读取 4 MiB。旧动作缺物理身份不补造此出口。原有 `PARTIAL` 回执路径仍返回 `observation_mode:"PARTIAL_LEDGER"`，历史已处置记录可无此字段。
+
+`POST` 同一路径要求 `{command_id,invocation_id,decision:"KEEP_CURRENT_AND_FAIL_RUN",expected_run_revision,expected_task_revision,expected_observation_sha256}`。只接受原 Operation/Invocation `UNKNOWN`、原账本为有回执 `PARTIAL` 或上述缺回执 `UNKNOWN`、原资源 `QUARANTINED`，且桌面 Job 停机证明与原 Worker/epoch/投递命令一致、Run 已 fence、没有其他未决动作或运行中的步骤。服务端提交前在业务事务外再次只读核对每个目标及无回执路径的候选；观察有 10 秒超时。短事务中再核对原账本、claim、停机证明与 revision；快照摘要或 revision 改变也返回 409，用户须刷新后重新决定。客户端不能自报旧进程已停。决定的语义是**保留观察时的目标和候选，结束旧 Run**，不推断原写入整体成功，也不回滚、补写、移动或删除候选。
+
+成功与命令回执同事务插入不可改写处置事实、将原 Operation 置 `MANUALLY_CLOSED`（原 Invocation 仍为历史 `UNKNOWN`，变化集保留原 `PARTIAL` 或 `UNKNOWN`）、释放隔离 claim、把原投递及该 Run 其他未领取投递结为 `DONE`、拒绝尚待处理的控制意图、将 Run 置 `FAILED` 并把 Task 返 `READY`；不产生 CompletionRecord 或 Project State 提交。`DONE` 只表示投递已结清。响应 result 含原 operation/invocation、disposition、Run/Task ID 与终态、观察摘要；GET 在关闭后继续投影当时持久的逐文件观察值。相同 command_id/内容重放同一回执，另一命令不能重复处置。项目归档只把这条已持久处置的 Invocation `UNKNOWN` 视为历史，不绕过任何其他未决动作。文件回读与数据库提交之间仍存在外部编辑竞争窗口，不能声称 OS 级隔离或真实 Windows 桌面验收通过。
+
+### 10.44 M06 文件写入冻结计划文本差异（2026-09-27，开发自检）
+
+**Breaking Change: Yes（仅新 Windows `WRITE_FILE` 的路径语义）。** `GET /api/v1/workspaces/{workspace_id}/operations/{operation_id}/file-write-diff` 沿用 Bearer 与 Workspace 隔离；不存在、跨 Workspace 或非 Run `FILE_WRITE` Operation 返回 404 `RESOURCE_NOT_FOUND`。响应形状仍为 `200 {operation_id,basis:"FROZEN_INTENT",files:[{relative_path,action,baseline_sha256,target_sha256,availability,unavailable_reason,before_text,after_text}]}`，按原冻结变化项顺序返回，并带 `Cache-Control: no-store`。`CREATE` 的基线为空文本，`DELETE` 的目标为空文本；新 Windows `WRITE_FILE` 的 `relative_path` 与新账本一致，为受管根相对路径，可含子目录；历史动作仍为目标文件名。客户端应按返回的路径显示，不自行取 basename。
+
+新动作准备前以短事务核对原 Run/Worker、Project/Resource、Connection 与 Permission，在事务外限量读取 `MODIFY/DELETE` 基线，再以短事务重新核对授权并与 Operation 同步写入证据；仅当安全读取的 UTF-8 文本不超过单文件 64 KiB 且摘要等于冻结 `baseline_sha256`，才写入不可改写的基线正文证据。目标正文沿用冻结 Operation 参数，查询时不重读磁盘。历史动作不回填；基线缺失、摘要不符、二进制、超限或路径不可安全读取时，`availability=UNAVAILABLE`、两个文本为 null，并给出原因，仍保留已有摘要。该响应只展示**计划**，不证明文件已写入；当次执行状态见 §10.42 的账本，当前文件状态见 §10.43 的处置预览。查询不改变 Operation、Run、Task 或资源状态。真实 PostgreSQL/HTTP 与 React 组件已有定向开发自检；新 release 的真实 WebView2 自动化点击与截图检查已通过。人工交互及安装包体验尚未验证。
+
+### 10.45 产品补充：产物版本的已登记直接引用（2026-09-27）
+
+**Breaking Change: No。** 新增 `GET /api/v1/workspaces/{workspace_id}/artifact-versions/{artifact_version_id}/direct-uses`，仅读已登记且父类型为 `ARTIFACT_VERSION` 的 `DERIVED_FROM/REVISED_FROM` 反向边。返回 `source_artifact_version_id,source_content_availability,scope:"RECORDED_DIRECT_ONLY",complete:false,has_more,direct_uses[]`。每项包括 `relation,child_artifact_version_id,child_artifact_id,child_version_number,availability,created_at`；这是确切版本的关系证据，不是传播执行结果或完整影响分析。
+
+先核对源版本 Workspace 和受管正文摘要；源正文不可读时返回 `UNAVAILABLE`、空列表及 `has_more:false`，不能解读为无引用。查询最多取 101 条已登记边，展示前 100 条，额外条目由 `has_more` 表示；子版本再次核对作用域及受管正文，同作用域正文不可读时三个子身份/版本字段为 null。未知或跨 Workspace 源版本为 404。空列表只表示本次未展示到已登记直接引用，`complete` 始终为 false；不包含未登记、间接或模型推测的影响。接口没有写副作用，不触发模型或修改任何 PASS/批准。实际实现和验证范围见 25 日产品补充开发记录，尚不构成 M05/M06 整体验收。
+
+### 10.46 产品补充：按确切知识版本读取正文（2026-09-27）
+
+**Breaking Change: No。** 新增 `GET /api/v1/workspaces/{workspace_id}/knowledge/{id}/versions/{version}/content`，现有版本列表继续只返回摘录。版本为正十进制整数，不能超过 PostgreSQL bigint 上限。响应带 `Cache-Control: no-store`，返回知识身份/标题/作用域、当前版本指针及本次所选版本的身份、来源类型、媒体类型、内容摘要、可用性、来源引用、原件 URI 和保存时间，以及 `content_status`、`content`。`content_status` 为 `FULL/PARTIAL/UNAVAILABLE/UNSUPPORTED/READ_FAILED`；FULL/PARTIAL 才能带正文，其他情况正文为 null。
+
+查询必须核对 Workspace、项目/产物来源归属和确切版本摘要，不以当前版本填充旧引用；内联受管文本来自原 KnowledgeVersion，Artifact 引用读取并校验原受管产物。非法版本返回 422，缺失或跨 Workspace 对象为 404；来源标记不可用即不返回正文，摘要失配为 READ_FAILED。FULL 指本机已保存快照的完整内容，不承诺当前网页原件相同或完整。PARTIAL 供表达真实的部分内容，当前完整快照读取实现不会把损坏或列表摘录转为 PARTIAL。
+
+读取不调用 Provider、不访问原网页、不改变知识/Task/Run 状态。客户端核对返回的 knowledge_id 与 version，状态与正文或来源可用性矛盾时拒绝显示。真实隔离 PG/HTTP 定向 4/4 通过，包含完整历史正文、跨 Workspace、非法版本、不可用/损坏、离线网页快照、产物内容缺失/篡改和跨项目提升拒绝；这些工程反例不替代阅读与桌面验收。实际范围见 27 日产品补充开发记录。
+
+### 10.47 M06 Windows 受管根登记身份（2026-09-28，开发自检）
+
+**Breaking Change: Yes（旧 Windows 受管资源的新 `FILE_WRITE` 准备）。** 0038 前登记的资源没有可证明的登记时 File ID，不能从当前磁盘补造；新 Windows `WRITE_FILE`/`APPLY_CHANGESET` 在创建 Operation/Review 前返回 409 `GATEWAY_RESOURCE_IDENTITY_REQUIRED`。在 Windows 停用无未决占用的旧资源后，以相同路径重新登记为**新资源 ID**（0039 只对活动资源保持同项目路径唯一），核对新的资源 ID、连接、策略和委托引用后才能准备新动作；已停用的旧资源及其历史不迁移或删除。已有 Operation 仍使用自己冻结的 0036 物理身份，不回填或换 ID。
+
+**Breaking Change: No（新增只读字段）。** `GET /projects/{project_id}/managed-resources` 和 `GET /.../{resource_id}` 每项新增 `file_write_identity_bound:boolean`。Windows 新登记时，原生助手只读捕获当前目录卷号/File ID；无法安全捕获的目录仍可登记供其他能力使用，但该字段为 false，不能准备新的 Windows 文件写入。创建命令的请求与回执形状不变，重放即使目录后来移动仍返回原回执。新写动作准备时比较当前原生助手根身份与登记身份，不同则返回 409 `GATEWAY_RESOURCE_ROOT_CHANGED`，不生成新 Operation/Review，也不写盘。登记与准备之间目录变化不会被现有路径字符串或当前摘要当作同一资源。

@@ -489,8 +489,11 @@ fn start_api(app: &tauri::AppHandle, single_instance: SingleInstanceGuard) -> Re
         .map_err(|_| "cannot locate the bundled supervisor".to_owned())?;
     let worker_entry = app.path().resolve("api/dist/src/worker/main.js", BaseDirectory::Resource)
         .map_err(|_| "cannot locate the bundled Worker".to_owned())?;
-    if !node.is_file() || !entry.is_file() || !supervisor_entry.is_file() || !worker_entry.is_file() {
-        return Err("the release directory is incomplete (Node, API or Worker missing)".into());
+    let file_io_helper = app.path().resolve("relay-file-io-helper.exe", BaseDirectory::Resource)
+        .map_err(|_| "cannot locate the bundled file I/O helper".to_owned())?;
+    if !node.is_file() || !entry.is_file() || !supervisor_entry.is_file() ||
+        !worker_entry.is_file() || !file_io_helper.is_file() {
+        return Err("the release directory is incomplete (Node, API, Worker or file I/O helper missing)".into());
     }
     verify_supervisor_protocol(&supervisor_entry)?;
     let data_root = match std::env::var_os("RELAY_DESKTOP_DATA_ROOT") {
@@ -518,13 +521,15 @@ fn start_api(app: &tauri::AppHandle, single_instance: SingleInstanceGuard) -> Re
     let env_file = OsString::from(format!("--env-file={}", config.display()));
     let api_args = [env_file.clone(), entry.into_os_string(), "--desktop-child".into()];
     let mut api = ManagedProcess::spawn(&node, &api_args,
-        &[("RELAY_DATA_ROOT".into(), data_root.as_os_str().to_os_string())], launch.api_job)?;
+        &[("RELAY_DATA_ROOT".into(), data_root.as_os_str().to_os_string()),
+          ("RELAY_FILE_IO_HELPER".into(), file_io_helper.as_os_str().to_os_string())], launch.api_job)?;
     let frame = serde_json::json!({ "nonce": nonce, "bearerToken": token });
     api.write_frame(&frame.to_string())?;
     let (port, workspace_id) = read_startup(api.take_stdout()?, &nonce)?;
     let supervisor_args = [env_file, supervisor_entry.into_os_string()];
     let mut supervisor = ManagedProcess::spawn(&node, &supervisor_args, &[
         ("RELAY_DATA_ROOT".into(), data_root.as_os_str().to_os_string()),
+        ("RELAY_FILE_IO_HELPER".into(), file_io_helper.as_os_str().to_os_string()),
         ("RELAY_SUPERVISOR_DESKTOP_MODE".into(), "true".into()),
     ], launch.supervisor_job)?;
     supervisor.write_frame(&supervisor_frame)?;

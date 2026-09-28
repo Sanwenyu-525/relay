@@ -3,6 +3,7 @@ import { stat } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sql } from 'kysely';
 
 import { validateDatabaseUrl } from '../config/config.js';
 import { validateModelPortConfig } from '../workflow/model-port-config.js';
@@ -51,6 +52,9 @@ async function main(): Promise<void> {
   const leaseMs = readInteger('RELAY_WORKER_LEASE_MS', 30_000, 100, 600_000);
   const fakeModelDelayMs = process.env.NODE_ENV === 'test'
     ? readInteger('RELAY_WORKER_TEST_MODEL_DELAY_MS', 0, 0, 60_000) : 0;
+  const fileWriteEffectHoldMs = process.env.NODE_ENV === 'test' &&
+    process.env.RELAY_WORKER_TEST_HOLD_AFTER_GATEWAY_EFFECT_MS
+    ? readInteger('RELAY_WORKER_TEST_HOLD_AFTER_GATEWAY_EFFECT_MS', 0, 1, 120_000) : 0;
   const database = new RelayDatabase({
     databaseUrl, databasePoolMax: WORKER_DATABASE_POOL_MAX, databaseConnectTimeoutMs: 5_000,
   }, () => controller.abort());
@@ -105,9 +109,27 @@ async function main(): Promise<void> {
               process.env.RELAY_WORKER_TEST_EXIT_AFTER_GATEWAY_PREPARE === 'true' &&
               (prepared.status === 'WAITING' || prepared.status === 'PREPARED')) process.exit(96);
         },
-        afterGatewayFakeEffect: async () => {
+        afterGatewayFakeEffect: async (claim) => {
           if (process.env.NODE_ENV === 'test' &&
               process.env.RELAY_WORKER_TEST_EXIT_AFTER_GATEWAY_EFFECT === 'true') process.exit(97);
+          if (fileWriteEffectHoldMs > 0) {
+            // This callback follows the FILE_WRITE adapter's durable receipt and precedes settlement.
+            const staged = await sql<{ operation_id: string; invocation_id: string }>`
+              select o.id as operation_id, i.id as invocation_id
+              from logical_operations o join invocation_attempts i on i.operation_id = o.id
+              where o.run_id = ${claim.runId} and o.capability_key = 'FILE_WRITE'
+                and o.status = 'DISPATCHING' and i.status = 'DISPATCHING'
+                and i.worker_id = ${claim.workerId} and i.result_ref ? 'file_write_receipt'
+              order by i.created_at desc limit 1
+            `.execute(database.executor);
+            const receipt = staged.rows[0];
+            if (receipt !== undefined) {
+              process.stdout.write(`${JSON.stringify({ type: 'worker_file_write_receipt_staged',
+                command_id: claim.commandId, run_id: claim.runId,
+                operation_id: receipt.operation_id, invocation_id: receipt.invocation_id })}\n`);
+              await new Promise((done) => setTimeout(done, fileWriteEffectHoldMs));
+            }
+          }
         },
         afterGatewayAdmit: async () => {
           if (process.env.NODE_ENV === 'test' &&

@@ -8,10 +8,11 @@ import {
   revokeGatewayPolicyCommand,
 } from '../application/gateway-commands.js';
 import { createWebImportJob } from '../application/web-import-commands.js';
+import { closePartialFileWriteCommand, readFileWriteDispositionPreview } from '../application/file-write-disposition.js';
 import {
   listGatewayConnections, listGatewayPolicies, listGatewayPolicyVersions,
   listImportGatewayOperations, listManagedResources, listRunGatewayOperations,
-  readGatewayConnection, readGatewayOperationDto, readManagedResource,
+  readFileWriteChangeSets, readFileWriteFrozenDiff, readGatewayConnection, readGatewayOperationDto, readManagedResource,
   testFakeGatewayConnection,
 } from '../application/gateway-queries.js';
 import { createRepositories } from '../application/unit-of-work.js';
@@ -62,6 +63,12 @@ const createResourceBody = Type.Object({ command_id: uuid, root_path: Type.Strin
 const disableResourceBody = Type.Object({ command_id: uuid, expected_revision: revision }, strict);
 const createImportBody = Type.Object({ command_id: uuid,
   url: Type.String({ minLength: 1, maxLength: 2048 }), connection_id: uuid }, strict);
+const closePartialFileWriteBody = Type.Object({
+  command_id: uuid, invocation_id: uuid,
+  decision: Type.Literal('KEEP_CURRENT_AND_FAIL_RUN'),
+  expected_run_revision: revision, expected_task_revision: revision,
+  expected_observation_sha256: Type.String({ pattern: '^[0-9a-f]{64}$' }),
+}, strict);
 
 /** P09 config/history API. Claim, Admit, outcome and reconcile remain internal Worker ports. */
 export function registerGatewayRoutes(app: FastifyInstance, dependencies: RouteDependencies): void {
@@ -203,6 +210,39 @@ export function registerGatewayRoutes(app: FastifyInstance, dependencies: RouteD
       return await readGatewayOperationDto(dependencies.database.executor, p.workspace_id, p.operation_id);
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
+  app.get('/operations/:operation_id/change-sets', { schema: { params: operationParams } }, async (request, reply) => {
+    try { const p = request.params as { workspace_id: string; operation_id: string };
+      reply.header('Cache-Control', 'no-store');
+      return await readFileWriteChangeSets(dependencies.database.executor, p.workspace_id, p.operation_id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+  app.get('/operations/:operation_id/file-write-diff', { schema: { params: operationParams } }, async (request, reply) => {
+    try { const p = request.params as { workspace_id: string; operation_id: string };
+      reply.header('Cache-Control', 'no-store');
+      return await readFileWriteFrozenDiff(dependencies.database.executor, p.workspace_id, p.operation_id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+  app.get('/operations/:operation_id/file-write-disposition', { schema: { params: operationParams } }, async (request, reply) => {
+    try { const p = request.params as { workspace_id: string; operation_id: string };
+      reply.header('Cache-Control', 'no-store');
+      return await readFileWriteDispositionPreview(dependencies.database.executor, p.workspace_id, p.operation_id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+  app.post('/operations/:operation_id/file-write-disposition', {
+    schema: { params: operationParams, body: closePartialFileWriteBody,
+      response: { 200: commandEnvelopeSchema(commandResult) } },
+  }, createCommandHandler(dependencies, { commandType: 'ClosePartialFileWrite',
+    bodySchema: closePartialFileWriteBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await closePartialFileWriteCommand(executor, {
+        workspaceId: params.workspace_id ?? '', operationId: params.operation_id ?? '',
+        invocationId: body.invocation_id, commandId: body.command_id,
+        decision: body.decision, expectedRunRevision: body.expected_run_revision,
+        expectedTaskRevision: body.expected_task_revision,
+        expectedObservationSha256: body.expected_observation_sha256,
+      });
+      return { outcome, result: outcome.result };
+    } }));
   app.get('/import-jobs/:import_job_id', { schema: { params: importParams } }, async (request, reply) => {
     try {
       const p = request.params as { workspace_id: string; import_job_id: string };

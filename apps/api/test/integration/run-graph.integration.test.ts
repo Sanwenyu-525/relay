@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rmdir, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 import { sql } from 'kysely';
@@ -13,7 +14,7 @@ import { Client } from 'pg';
 
 import { claimNextRunCommand, settleRunCommand } from '../../src/application/run-dispatch.js';
 import type { ClaimedRunCommand } from '../../src/application/run-dispatch.js';
-import { denyGraphActionBeforeInvocation } from '../../src/application/gateway-actions.js';
+import { denyGraphActionBeforeInvocation, reconcileGatewayInvocation } from '../../src/application/gateway-actions.js';
 import { createFakeConnection, createGatewayPolicy, registerManagedResource,
   revokeGatewayPolicy } from '../../src/application/gateway-configuration.js';
 import { createGatewayConnectionCommand } from '../../src/application/gateway-commands.js';
@@ -34,6 +35,7 @@ import { CANDIDATE_OUTPUT_SCHEMA } from '../../src/workflow/markdown-deliverable
 import { extractWebText } from '../../src/web/web-fetch.js';
 import { runOneCommand } from '../../src/worker/run-command.js';
 import { runSupervisedWorkerOnce } from '../../src/worker/supervisor.js';
+import { recoverStoppedDesktopLaunch } from '../../src/worker/supervisor.js';
 import {
   createTemporaryDatabase, expectSqlState, MIGRATIONS_DIRECTORY, openDatabase,
   type TemporaryDatabase,
@@ -206,6 +208,57 @@ async function delegatedGatewayRun(f: Fixture, decision: 'ASK' | 'AUTO' = 'ASK')
     resourceId: resource.resourceId };
 }
 
+async function delegatedFileWriteRun(f: Fixture): Promise<{
+  runId: string; root: string; operationId: string; taskId: string;
+  delegateCommand: string; expectedTaskRevision: string;
+  connectionId: string; resourceId: string;
+}> {
+  const projectCommand = randomUUID();
+  const project = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, '/projects'), {
+    command_id: projectCommand, title: 'Graph FileWrite', project_type: 'GENERAL',
+  }), 201, projectCommand);
+  const projectId = project.project_id as string;
+  const root = join(f.api.dataRoot, `graph-file-write-${randomUUID()}`);
+  await mkdir(root, { recursive: true });
+  const resource = await registerManagedResource(f.app.db, { workspaceId: f.workspaceId,
+    projectId, rootPath: root });
+  const connection = await createGatewayConnectionCommand(f.app.db, { workspaceId: f.workspaceId,
+    projectId, commandId: randomUUID(), capabilities: ['FILE_WRITE'], rootPath: root });
+  await createGatewayPolicy(f.app.db, { workspaceId: f.workspaceId, projectId,
+    capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET', targetPrefix: resource.canonicalRoot,
+    decision: 'AUTO', maxPayloadBytes: 262144 });
+  await writeFile(join(root, 'existing.txt'), 'baseline\n');
+  const taskCommand = randomUUID();
+  const task = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, '/tasks'), {
+    command_id: taskCommand, project_id: projectId, title: 'Graph approved file write',
+    objective: 'Write managed files through the Gateway',
+    criteria: [{ criterion_id: 'human', statement: 'Review the candidate', method: 'HUMAN' }],
+  }), 201, taskCommand);
+  const readyCommand = randomUUID();
+  const ready = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId,
+    `/tasks/${task.task_id as string}/ready`), {
+    command_id: readyCommand, expected_revision: task.revision,
+  }), 200, readyCommand);
+  const delegateCommand = randomUUID();
+  const delegated = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId,
+    `/tasks/${task.task_id as string}/delegations`), {
+    command_id: delegateCommand, expected_task_revision: ready.revision,
+    file_write_action: { connection_id: connection.result.connection_id!,
+      resource_id: resource.resourceId, changes: [
+        { path: 'new.txt', action: 'CREATE', content: 'created\n' },
+        { path: 'existing.txt', action: 'MODIFY', content: 'updated\n',
+          baselineSha256: createHash('sha256').update('baseline\n').digest('hex') },
+      ] },
+  }), 202, delegateCommand);
+  const runId = delegated.run_id as string;
+  const frozen = await sql<{ frozen_snapshot: { file_write_action: { operation_id: string } } }>`
+    select frozen_snapshot from execution_contracts where run_id = ${runId}`.execute(f.app.db);
+  return { runId, root: resource.canonicalRoot, taskId: task.task_id as string,
+    operationId: frozen.rows[0]!.frozen_snapshot.file_write_action.operation_id,
+    delegateCommand, expectedTaskRevision: ready.revision as string,
+    connectionId: connection.result.connection_id!, resourceId: resource.resourceId };
+}
+
 async function actionReview(f: Fixture, operationId: string): Promise<{
   id: string; revision: bigint; target_hash: Buffer;
 }> {
@@ -301,6 +354,433 @@ test('the fixed Mock graph prepares ASK and only the approved RESUME executes it
       where o.id = ${waiting.rows[0]!.operation_id} group by o.id
     `.execute(f.app.db);
     assert.deepEqual(operation.rows[0], { status: 'SUCCEEDED', count: 1n });
+  } finally { await f.close(); }
+});
+
+test('a frozen file write waits for approval, then keeps one operation and an exact file ledger', async () => {
+  const f = await fixture(true);
+  try {
+    const action = await delegatedFileWriteRun(f);
+    const frozen = await sql<{ frozen_snapshot: { file_write_action: {
+      operation_id: string; intent_key: string; changes: unknown[] } }; contract_hash: Buffer }>`
+      select frozen_snapshot, contract_hash from execution_contracts where run_id = ${action.runId}`
+      .execute(f.app.db);
+    assert.equal(frozen.rows[0]?.frozen_snapshot.file_write_action.operation_id, action.operationId);
+    assert.equal(frozen.rows[0]?.frozen_snapshot.file_write_action.intent_key, 'file-write-v1');
+    assert.equal(frozen.rows[0]?.frozen_snapshot.file_write_action.changes.length, 2);
+    const reused = await f.api.post(workspacePath(f.workspaceId,
+      `/tasks/${action.taskId}/delegations`), {
+      command_id: action.delegateCommand, expected_task_revision: action.expectedTaskRevision,
+      file_write_action: { connection_id: action.connectionId, resource_id: action.resourceId,
+        changes: [{ path: 'new.txt', action: 'CREATE', content: 'different payload' }] },
+    });
+    assert.equal(reused.status, 409, reused.text);
+    assert.equal((reused.body as { code: string }).code, 'COMMAND_ID_REUSED');
+    const prepared = await workerOnce(f);
+    assert.equal(prepared.code, 0, prepared.output);
+    const before = await sql<{ status: string; action_type: string; normalized_target: string;
+      step_kind: string;
+      invocation_count: bigint }>`
+      select o.status, o.action_type, o.normalized_target, s.step_kind,
+        count(i.id)::bigint as invocation_count from logical_operations o
+      join run_steps s on s.id = o.step_id
+      left join invocation_attempts i on i.operation_id = o.id
+      where o.id = ${action.operationId}
+      group by o.id, s.step_kind`.execute(f.app.db);
+    assert.deepEqual(before.rows[0], { status: 'WAITING_APPROVAL', action_type: 'APPLY_CHANGESET',
+      normalized_target: action.root, step_kind: 'DRAFT', invocation_count: 0n });
+    await assert.rejects(readFile(join(action.root, 'new.txt')), { code: 'ENOENT' });
+    assert.equal(await readFile(join(action.root, 'existing.txt'), 'utf8'), 'baseline\n');
+    await decideAction(f, action.operationId, 'APPROVE');
+    assert.equal((await workerOnce(f)).code, 0);
+    assert.equal(await readFile(join(action.root, 'new.txt'), 'utf8'), 'created\n');
+    assert.equal(await readFile(join(action.root, 'existing.txt'), 'utf8'), 'updated\n');
+    const facts = await sql<{ operation_status: string; invocation_id: string;
+      invocation_count: bigint; change_set_status: string; relative_path: string;
+      file_status: string; actual_sha256: string }>`
+      select o.status as operation_status, i.id as invocation_id,
+        (select count(*)::bigint from invocation_attempts where operation_id = o.id) as invocation_count,
+        cs.status as change_set_status, cf.relative_path, cf.status as file_status,
+        cf.actual_sha256 from logical_operations o
+      join invocation_attempts i on i.operation_id = o.id
+      join change_sets cs on cs.invocation_id = i.id
+      join change_set_files cf on cf.change_set_id = cs.id
+      where o.id = ${action.operationId} order by cf.relative_path`.execute(f.app.db);
+    assert.deepEqual(facts.rows.map((row) => [row.operation_status, row.invocation_count,
+      row.change_set_status, row.relative_path, row.file_status, row.actual_sha256]), [
+      ['SUCCEEDED', 1n, 'SUCCEEDED', 'existing.txt', 'APPLIED',
+        createHash('sha256').update('updated\n').digest('hex')],
+      ['SUCCEEDED', 1n, 'SUCCEEDED', 'new.txt', 'APPLIED',
+        createHash('sha256').update('created\n').digest('hex')],
+    ]);
+    await writeFile(join(action.root, 'new.txt'), 'external-after-success\n');
+    assert.equal((await workerOnce(f)).code, 0);
+    assert.equal(await readFile(join(action.root, 'new.txt'), 'utf8'), 'external-after-success\n');
+    const after = await sql<{ invocation_count: bigint; ledger_count: bigint }>`
+      select (select count(*)::bigint from invocation_attempts where operation_id = ${action.operationId})
+        as invocation_count,
+        (select count(*)::bigint from change_sets where operation_id = ${action.operationId})
+        as ledger_count`.execute(f.app.db);
+    assert.deepEqual(after.rows[0], { invocation_count: 1n, ledger_count: 1n });
+    const task = await f.api.get(workspacePath(f.workspaceId, `/tasks/${action.taskId}`));
+    assert.notEqual((task.body as { status: string }).status, 'DONE');
+  } finally { await f.close(); }
+});
+
+test('a frozen file write keeps the baseline conflict after approval', async () => {
+  const f = await fixture(true);
+  try {
+    const action = await delegatedFileWriteRun(f);
+    assert.equal((await workerOnce(f)).code, 0);
+    await writeFile(join(action.root, 'existing.txt'), 'external edit\n');
+    await decideAction(f, action.operationId, 'APPROVE');
+    assert.equal((await workerOnce(f)).code, 0);
+    assert.equal(await readFile(join(action.root, 'existing.txt'), 'utf8'), 'external edit\n');
+    const files = await sql<{ relative_path: string; status: string }>`
+      select cf.relative_path, cf.status from change_set_files cf
+      join change_sets cs on cs.id = cf.change_set_id
+      where cs.operation_id = ${action.operationId} order by cf.relative_path`.execute(f.app.db);
+    assert.deepEqual(files.rows, [
+      { relative_path: 'existing.txt', status: 'CONFLICT' },
+      { relative_path: 'new.txt', status: 'APPLIED' },
+    ]);
+    const blocked = await sql<{ operation_status: string; invocation_status: string;
+      claim_status: string; run_status: string; invocation_count: bigint }>`
+      select o.status as operation_status, i.status as invocation_status,
+        c.status as claim_status, r.status as run_status,
+        (select count(*)::bigint from invocation_attempts where operation_id = o.id)
+          as invocation_count
+      from logical_operations o join runs r on r.id = o.run_id
+      join invocation_attempts i on i.operation_id = o.id
+      join resource_claims c on c.id = i.resource_claim_id
+      where o.id = ${action.operationId}`.execute(f.app.db);
+    assert.deepEqual(blocked.rows[0], { operation_status: 'UNKNOWN', invocation_status: 'UNKNOWN',
+      claim_status: 'QUARANTINED', run_status: 'RUNNING', invocation_count: 1n });
+    const visible = await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`));
+    assert.equal(visible.status, 200);
+    assert.deepEqual((visible.body as { unresolved_operation_ids: string[] }).unresolved_operation_ids,
+      [action.operationId], 'the quarantined original action must remain visible to the user');
+    const identity = await sql<{ id: string; worker_id: string; worker_epoch: bigint }>`
+      select id, worker_id, worker_epoch from invocation_attempts
+      where operation_id = ${action.operationId}`.execute(f.app.db);
+    const reconciled = await reconcileGatewayInvocation(f.app.db, {
+      workspaceId: f.workspaceId, operationId: action.operationId,
+      invocationId: identity.rows[0]!.id, stoppedWorkerId: identity.rows[0]!.worker_id,
+      stoppedWorkerEpoch: identity.rows[0]!.worker_epoch, oldProcessStopped: true,
+    });
+    assert.equal(reconciled.status, 'UNKNOWN');
+    const ledger = await sql<{ status: string }>`select status from change_sets
+      where operation_id = ${action.operationId}`.execute(f.app.db);
+    assert.equal(ledger.rows[0]?.status, 'PARTIAL', 'recovery must preserve the execution report');
+    const successor = await sql<{ status: string; attempts: bigint }>`
+      select s.status, count(a.id)::bigint as attempts from run_steps s
+      left join step_attempts a on a.step_id = s.id
+      where s.run_id = ${action.runId} and s.step_kind = 'PERSIST_CANDIDATE'
+      group by s.id`.execute(f.app.db);
+    assert.deepEqual(successor.rows[0], { status: 'PENDING', attempts: 0n });
+    assert.equal((await workerOnce(f)).code, 0);
+    const replayed = await sql<{ count: bigint }>`select count(*)::bigint as count
+      from invocation_attempts where operation_id = ${action.operationId}`.execute(f.app.db);
+    assert.equal(replayed.rows[0]?.count, 1n, 'a partial write cannot automatically retry');
+  } finally { await f.close(); }
+});
+
+test('a partial file write needs trusted stop proof and a fresh human snapshot before closure', async () => {
+  const f = await fixture(true);
+  try {
+    const action = await delegatedFileWriteRun(f);
+    assert.equal((await workerOnce(f)).code, 0);
+    await writeFile(join(action.root, 'existing.txt'), 'external edit\n');
+    await decideAction(f, action.operationId, 'APPROVE');
+    const launchId = randomUUID();
+    const workerId = `worker:desktop:${launchId}:${randomUUID()}`;
+    assert.equal((await workerOnce(f, { RELAY_WORKER_ID: workerId })).code, 0);
+    const route = workspacePath(f.workspaceId,
+      `/operations/${action.operationId}/file-write-disposition`);
+    const before = await f.api.get(route);
+    assert.equal(before.status, 200, before.text);
+    assert.equal((before.body as { can_dispose: boolean }).can_dispose, false);
+    assert.ok((before.body as { blocking_reasons: string[] }).blocking_reasons
+      .includes('TRUSTED_STOP_PROOF_REQUIRED'));
+    const invocationId = (before.body as { invocation_id: string }).invocation_id;
+    const baseBody = { invocation_id: invocationId,
+      decision: 'KEEP_CURRENT_AND_FAIL_RUN',
+      expected_run_revision: (before.body as { run_revision: string }).run_revision,
+      expected_task_revision: (before.body as { task_revision: string }).task_revision,
+      expected_observation_sha256: (before.body as { observation_sha256: string }).observation_sha256 };
+    assert.equal((await f.api.post(route, { ...baseBody, command_id: randomUUID() })).status, 409);
+    const recovered = await recoverStoppedDesktopLaunch({ db: f.app.db,
+      dataRoot: f.api.dataRoot, launchId,
+      stopEvidence: 'armed_job_terminated_and_active_count_zero' });
+    assert.deepEqual(recovered.blockedRunIds, [action.runId]);
+    const preview = await f.api.get(route);
+    assert.equal(preview.status, 200, preview.text);
+    assert.equal((preview.body as { can_dispose: boolean }).can_dispose, true);
+    assert.equal((preview.body as { stop_proof_recorded: boolean }).stop_proof_recorded, true);
+    const newFile = join(action.root, 'new.txt');
+    const savedFile = join(action.root, 'new.txt.saved');
+    await rename(newFile, savedFile);
+    await mkdir(newFile);
+    const unreadable = await f.api.get(route);
+    assert.equal((unreadable.body as { can_dispose: boolean }).can_dispose, false);
+    assert.ok((unreadable.body as { blocking_reasons: string[] }).blocking_reasons
+      .includes('CURRENT_FILES_UNREADABLE'));
+    await rmdir(newFile);
+    await rename(savedFile, newFile);
+    await writeFile(newFile, Buffer.alloc(1024 * 1024 + 1, 0x61));
+    const oversized = await f.api.get(route);
+    assert.equal((oversized.body as { can_dispose: boolean }).can_dispose, false);
+    assert.ok((oversized.body as { blocking_reasons: string[] }).blocking_reasons
+      .includes('CURRENT_FILES_UNREADABLE'), 'unbounded external files cannot be loaded for a decision');
+    await writeFile(newFile, 'created\n');
+    const freshBody = { ...baseBody,
+      expected_run_revision: (preview.body as { run_revision: string }).run_revision,
+      expected_task_revision: (preview.body as { task_revision: string }).task_revision,
+      expected_observation_sha256: (preview.body as { observation_sha256: string }).observation_sha256 };
+    await writeFile(newFile, 'human changed this after review\n');
+    assert.equal((await f.api.post(route, { ...freshBody, command_id: randomUUID() })).status, 409,
+      'the reviewed file snapshot cannot silently drift');
+    const latest = await f.api.get(route);
+    assert.equal(latest.status, 200, latest.text);
+    const commandId = randomUUID();
+    const body = { ...freshBody, command_id: commandId,
+      expected_observation_sha256: (latest.body as { observation_sha256: string }).observation_sha256 };
+    const closed = expectCommandAccepted(await f.api.post(route, body), 200, commandId);
+    assert.equal(closed.run_status, 'FAILED');
+    assert.equal(closed.task_status, 'READY');
+    assert.equal(await readFile(newFile, 'utf8'), 'human changed this after review\n');
+    const replay = expectCommandAccepted(await f.api.post(route, body), 200, commandId);
+    assert.equal(replay.disposition_id, closed.disposition_id);
+    const history = await f.api.get(route);
+    assert.equal((history.body as { disposition: { observation: { files: Array<{
+      path: string; current_sha256: string | null }> } } }).disposition.observation.files
+      .find((file) => file.path === 'new.txt')?.current_sha256,
+    createHash('sha256').update('human changed this after review\n').digest('hex'));
+    assert.equal((await f.api.post(route, { ...body, command_id: randomUUID() })).status, 409);
+    const facts = await sql<{ operation_status: string; invocation_status: string;
+      ledger_status: string; claim_status: string; run_status: string; task_status: string;
+      delivery_status: string; outbox_status: string; invocation_count: bigint;
+      disposition_count: bigint }>`
+      select o.status as operation_status, i.status as invocation_status,
+        cs.status as ledger_status, c.status as claim_status, r.status as run_status,
+        t.status as task_status, d.status as delivery_status, outbox.status as outbox_status,
+        (select count(*)::bigint from invocation_attempts where operation_id = o.id) as invocation_count,
+        (select count(*)::bigint from file_write_manual_dispositions where operation_id = o.id) as disposition_count
+      from logical_operations o join invocation_attempts i on i.operation_id = o.id
+      join change_sets cs on cs.invocation_id = i.id
+      join resource_claims c on c.id = i.resource_claim_id
+      join runs r on r.id = o.run_id join tasks t on t.id = r.task_id
+      join run_invocations d on d.run_id = r.id
+      join file_write_stop_proofs proof on proof.invocation_id = i.id
+      join run_command_outbox outbox on outbox.command_id = proof.command_id
+      where o.id = ${action.operationId}`.execute(f.app.db);
+    assert.deepEqual(facts.rows[0], { operation_status: 'MANUALLY_CLOSED',
+      invocation_status: 'UNKNOWN', ledger_status: 'PARTIAL', claim_status: 'RELEASED',
+      run_status: 'FAILED', task_status: 'READY', delivery_status: 'IDLE',
+      outbox_status: 'DONE', invocation_count: 1n, disposition_count: 1n });
+    const project = await sql<{ project_id: string }>`select project_id from tasks where id = ${action.taskId}`
+      .execute(f.app.db);
+    const blockers = await createRepositories(f.app.db).projects.listArchiveBlockers(project.rows[0]!.project_id);
+    assert.equal(blockers.includes('UNKNOWN_EFFECT'), false,
+      'the disposed historical UNKNOWN is no longer an active archive blocker');
+    assert.equal((await workerOnce(f)).code, 0);
+    const count = await sql<{ count: bigint }>`select count(*)::bigint as count
+      from invocation_attempts where operation_id = ${action.operationId}`.execute(f.app.db);
+    assert.equal(count.rows[0]?.count, 1n, 'the old action cannot be replayed after closure');
+  } finally { await f.close(); }
+});
+
+test('a killed Windows helper with no receipt requires observed residuals and a fresh human decision',
+  { skip: process.platform !== 'win32' || !process.env.RELAY_FILE_IO_DEBUG_HELPER }, async () => {
+    const f = await fixture(true);
+    try {
+      const action = await delegatedFileWriteRun(f);
+      assert.equal((await workerOnce(f)).code, 0);
+      await decideAction(f, action.operationId, 'APPROVE');
+      const launchId = randomUUID();
+      const workerId = `worker:desktop:${launchId}:${randomUUID()}`;
+      const ready = join(f.api.dataRoot, `file-io-gap-${randomUUID()}.ready`);
+      const release = join(f.api.dataRoot, `file-io-gap-${randomUUID()}.release`);
+      const running = workerOnce(f, { RELAY_WORKER_ID: workerId,
+        RELAY_FILE_IO_HELPER: process.env.RELAY_FILE_IO_DEBUG_HELPER!,
+        RELAY_FILE_IO_TEST_STAGE: 'gap', RELAY_FILE_IO_TEST_READY: ready,
+        RELAY_FILE_IO_TEST_RELEASE: release });
+      let helperPid: number | null = null;
+      for (let attempt = 0; attempt < 500; attempt++) {
+        try {
+          helperPid = Number(await readFile(ready, 'utf8'));
+          break;
+        } catch { await delay(10); }
+      }
+      assert.ok(helperPid !== null && Number.isSafeInteger(helperPid) && helperPid > 0,
+        'debug helper did not reach the backup rename gap');
+      assert.equal(await readFile(join(action.root, 'new.txt'), 'utf8'), 'created\n');
+      await assert.rejects(readFile(join(action.root, 'existing.txt')),
+        { code: 'ENOENT' });
+      process.kill(helperPid);
+      const stopped = await running;
+      assert.equal(stopped.code, 1, stopped.output);
+      assert.match(stopped.output, /worker_failed/u);
+      const names = (await readdir(action.root)).filter((name) =>
+        name.startsWith('.__relay-file-io-'));
+      assert.equal(names.length, 2, 'the original and staged bytes must remain observable');
+      const route = workspacePath(f.workspaceId,
+        `/operations/${action.operationId}/file-write-disposition`);
+      const before = await f.api.get(route);
+      assert.equal(before.status, 200, before.text);
+      assert.equal((before.body as { can_dispose: boolean }).can_dispose, false);
+      assert.ok((before.body as { blocking_reasons: string[] }).blocking_reasons
+        .includes('TRUSTED_STOP_PROOF_REQUIRED'));
+      const recovered = await recoverStoppedDesktopLaunch({ db: f.app.db,
+        dataRoot: f.api.dataRoot, launchId,
+        stopEvidence: 'armed_job_terminated_and_active_count_zero' });
+      assert.deepEqual(recovered.blockedRunIds, [action.runId]);
+      const preview = await f.api.get(route);
+      assert.equal(preview.status, 200, preview.text);
+      const observed = preview.body as { can_dispose: boolean; observation_mode: string;
+        observation_sha256: string; invocation_id: string; run_revision: string;
+        task_revision: string; files: Array<{ relative_path: string;
+          current_sha256: string | null; current_target_id: string | null;
+          residual_candidates: Array<{ path: string; sha256: string; id: string }> }> };
+      assert.equal(observed.can_dispose, true, preview.text);
+      assert.equal(observed.observation_mode, 'NO_RECEIPT');
+      const missing = observed.files.find((file) => file.relative_path === 'existing.txt');
+      assert.ok(missing);
+      assert.equal(missing.current_target_id, null);
+      assert.equal(missing.current_sha256, null);
+      assert.equal(missing.residual_candidates.length, 2);
+      assert.deepEqual(new Set(missing.residual_candidates.map((candidate) => candidate.path)),
+        new Set(names));
+      const command = { command_id: randomUUID(), invocation_id: observed.invocation_id,
+        decision: 'KEEP_CURRENT_AND_FAIL_RUN', expected_run_revision: observed.run_revision,
+        expected_task_revision: observed.task_revision,
+        expected_observation_sha256: observed.observation_sha256 };
+      await writeFile(join(action.root, names[0]!), 'human changed candidate\n');
+      assert.equal((await f.api.post(route, command)).status, 409,
+        'a changed residual invalidates the reviewed snapshot');
+      const latest = await f.api.get(route);
+      assert.equal(latest.status, 200, latest.text);
+      const current = latest.body as typeof observed;
+      assert.notEqual(current.observation_sha256, observed.observation_sha256);
+      const closeCommandId = randomUUID();
+      const committed = expectCommandAccepted(await f.api.post(route, {
+        ...command, command_id: closeCommandId,
+        expected_observation_sha256: current.observation_sha256,
+      }), 200, closeCommandId);
+      assert.equal(committed.run_status, 'FAILED');
+      assert.equal(committed.task_status, 'READY');
+      assert.deepEqual((await readdir(action.root)).filter((name) =>
+        name.startsWith('.__relay-file-io-')).sort(), names.sort());
+      await assert.rejects(readFile(join(action.root, 'existing.txt')),
+        { code: 'ENOENT' });
+      assert.equal(await readFile(join(action.root, 'new.txt'), 'utf8'), 'created\n');
+      assert.equal((await workerOnce(f)).code, 0);
+      const facts = await sql<{ operation_status: string; invocation_status: string;
+        ledger_status: string; claim_status: string; invocation_count: bigint }>`
+        select o.status as operation_status, i.status as invocation_status,
+          cs.status as ledger_status, c.status as claim_status,
+          (select count(*)::bigint from invocation_attempts where operation_id = o.id)
+            as invocation_count
+        from logical_operations o join invocation_attempts i on i.operation_id = o.id
+        join change_sets cs on cs.invocation_id = i.id
+        join resource_claims c on c.id = i.resource_claim_id
+        where o.id = ${action.operationId}`.execute(f.app.db);
+      assert.deepEqual(facts.rows[0], { operation_status: 'MANUALLY_CLOSED',
+        invocation_status: 'UNKNOWN', ledger_status: 'UNKNOWN',
+        claim_status: 'RELEASED', invocation_count: 1n });
+      const history = await f.api.get(route);
+      assert.equal((history.body as { disposition: { observation: {
+        observation_mode: string } } }).disposition.observation.observation_mode,
+      'NO_RECEIPT');
+    } finally { await f.close(); }
+  });
+
+test('an all-conflict file write fails its Run without leaving a quarantined resource', async () => {
+  const f = await fixture(true);
+  try {
+    const action = await delegatedFileWriteRun(f);
+    assert.equal((await workerOnce(f)).code, 0);
+    await writeFile(join(action.root, 'new.txt'), 'occupied\n');
+    await writeFile(join(action.root, 'existing.txt'), 'external edit\n');
+    await decideAction(f, action.operationId, 'APPROVE');
+    assert.equal((await workerOnce(f)).code, 0);
+    const facts = await sql<{ operation_status: string; invocation_status: string;
+      claim_status: string; run_status: string; invocation_count: bigint }>`
+      select o.status as operation_status, i.status as invocation_status,
+        c.status as claim_status, r.status as run_status,
+        (select count(*)::bigint from invocation_attempts where operation_id = o.id)
+          as invocation_count
+      from logical_operations o join runs r on r.id = o.run_id
+      join invocation_attempts i on i.operation_id = o.id
+      join resource_claims c on c.id = i.resource_claim_id
+      where o.id = ${action.operationId}`.execute(f.app.db);
+    assert.deepEqual(facts.rows[0], { operation_status: 'FAILED', invocation_status: 'FAILED',
+      claim_status: 'RELEASED', run_status: 'FAILED', invocation_count: 1n });
+    const task = await f.api.get(workspacePath(f.workspaceId, `/tasks/${action.taskId}`));
+    assert.equal((task.body as { status: string }).status, 'READY');
+    assert.equal(await readFile(join(action.root, 'new.txt'), 'utf8'), 'occupied\n');
+    assert.equal(await readFile(join(action.root, 'existing.txt'), 'utf8'), 'external edit\n');
+  } finally { await f.close(); }
+});
+
+test('Delegate rejects mixed file write intents and invalid frozen changes before creating a Run', async () => {
+  const f = await fixture(true);
+  try {
+    const action = await delegatedFileWriteRun(f);
+    const source = await sql<{ project_id: string; file_write_action: {
+      connection_id: string; resource_id: string } }>`
+      select t.project_id, ec.frozen_snapshot->'file_write_action' as file_write_action
+      from tasks t join runs r on r.task_id = t.id
+      join execution_contracts ec on ec.run_id = r.id where r.id = ${action.runId}`.execute(f.app.db);
+    const projectId = source.rows[0]!.project_id;
+    const { connection_id, resource_id } = source.rows[0]!.file_write_action;
+    const taskCommand = randomUUID();
+    const task = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, '/tasks'), {
+      command_id: taskCommand, project_id: projectId, title: 'Reject mixed frozen actions',
+      objective: 'Keep the input boundary explicit',
+      criteria: [{ criterion_id: 'human', statement: 'Review', method: 'HUMAN' }],
+    }), 201, taskCommand);
+    const readyCommand = randomUUID();
+    const ready = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId,
+      `/tasks/${task.task_id as string}/ready`), {
+      command_id: readyCommand, expected_revision: task.revision,
+    }), 200, readyCommand);
+    const common = { connection_id, resource_id };
+    const otherProjectCommand = randomUUID();
+    const otherProject = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId,
+      '/projects'), { command_id: otherProjectCommand, title: 'Other file project',
+      project_type: 'GENERAL' }), 201, otherProjectCommand);
+    const otherRoot = join(f.api.dataRoot, `graph-other-resource-${randomUUID()}`);
+    await mkdir(otherRoot, { recursive: true });
+    const otherResource = await registerManagedResource(f.app.db, { workspaceId: f.workspaceId,
+      projectId: otherProject.project_id as string, rootPath: otherRoot });
+    const invalid = [
+      { file_write_action: { ...common, changes: [{ path: 'a.txt', action: 'CREATE', content: 'x' }] },
+        web_fetch_action: { connection_id, url: 'https://example.com/' } },
+      { file_write_action: { ...common, changes: [
+        { path: 'dir/../a.txt', action: 'CREATE', content: 'x' },
+        { path: 'a.txt', action: 'CREATE', content: 'y' },
+      ] } },
+      { file_write_action: { ...common, changes: [
+        { path: 'a.txt', action: 'CREATE', content: 'x', targetSha256: '0'.repeat(64) },
+      ] } },
+      { file_write_action: { ...common, changes: [
+        { path: 'a.txt', action: 'MODIFY', content: 'x' },
+      ] } },
+      { file_write_action: { ...common, resource_id: otherResource.resourceId,
+        changes: [{ path: 'a.txt', action: 'CREATE', content: 'x' }] } },
+    ];
+    for (const extra of invalid) {
+      const response = await f.api.post(workspacePath(f.workspaceId,
+        `/tasks/${task.task_id as string}/delegations`), {
+        command_id: randomUUID(), expected_task_revision: ready.revision, ...extra,
+      });
+      assert.equal(response.status, 409, response.text);
+      assert.equal((response.body as { code: string }).code, 'INVALID_TRANSITION');
+    }
+    const runs = await sql<{ count: bigint }>`select count(*)::bigint as count from runs
+      where task_id = ${task.task_id as string}`.execute(f.app.db);
+    assert.equal(runs.rows[0]?.count, 0n);
   } finally { await f.close(); }
 });
 

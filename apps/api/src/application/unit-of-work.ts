@@ -16,6 +16,10 @@ import { WorkspaceRepository } from '../workspace/workspace-repository.js';
 import { GatewayRepository } from '../gateway/gateway-repository.js';
 import { InformationRepository } from '../information/information-repository.js';
 import { ChangeSetRepository } from '../files/change-set-repository.js';
+import { FileWriteStopProofRepository } from '../files/file-write-stop-proof-repository.js';
+import { FileWriteDispositionRepository } from '../files/file-write-disposition-repository.js';
+import { FileWriteDiffRepository } from '../files/file-write-diff-repository.js';
+import { FileWritePathRepository } from '../files/file-write-path-repository.js';
 import { TodayRepository } from '../today/today-repository.js';
 import { ViewRepository } from '../view/view-repository.js';
 import { BlueprintRepository } from '../blueprint/blueprint-repository.js';
@@ -38,6 +42,10 @@ export interface Repositories {
   readonly workspaces: WorkspaceRepository;
   readonly gateway: GatewayRepository;
   readonly changeSets: ChangeSetRepository;
+  readonly fileWriteStopProofs: FileWriteStopProofRepository;
+  readonly fileWriteDispositions: FileWriteDispositionRepository;
+  readonly fileWriteDiffs: FileWriteDiffRepository;
+  readonly fileWritePaths: FileWritePathRepository;
   readonly information: InformationRepository;
   readonly today: TodayRepository;
   readonly views: ViewRepository;
@@ -62,6 +70,10 @@ export function createRepositories(db: DbExecutor): Repositories {
     workspaces: new WorkspaceRepository(db),
     gateway: new GatewayRepository(db),
     changeSets: new ChangeSetRepository(db),
+    fileWriteStopProofs: new FileWriteStopProofRepository(db),
+    fileWriteDispositions: new FileWriteDispositionRepository(db),
+    fileWriteDiffs: new FileWriteDiffRepository(db),
+    fileWritePaths: new FileWritePathRepository(db),
     information: new InformationRepository(db),
     today: new TodayRepository(db),
     views: new ViewRepository(db),

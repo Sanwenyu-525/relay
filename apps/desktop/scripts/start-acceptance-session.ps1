@@ -1,7 +1,8 @@
 # Start a disposable PostgreSQL-backed desktop session for real Windows UI acceptance.
 # This is test infrastructure; it never configures or manages an existing user PostgreSQL service.
 [CmdletBinding()]
-param([switch]$SkipDesktop, [switch]$InstallGraph)
+param([switch]$SkipDesktop, [switch]$InstallGraph, [switch]$UseCLocale,
+  [ValidatePattern('^[0-9a-f]{32}$')][string]$SessionId)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -24,7 +25,7 @@ foreach ($required in $requiredInputs) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Required acceptance input is missing: $required" }
 }
 
-$sessionId = [guid]::NewGuid().ToString('N')
+$sessionId = if ($SessionId) { $SessionId } else { [guid]::NewGuid().ToString('N') }
 $sessionRoot = Join-Path ([IO.Path]::GetTempPath()) "relay-m02-acceptance-$sessionId"
 $cluster = Join-Path $sessionRoot 'cluster'
 $log = Join-Path $sessionRoot 'postgres.log'
@@ -35,7 +36,9 @@ $pgStarted = $false
 $desktopStarted = $false
 New-Item -ItemType Directory -Path $sessionRoot, $data -Force | Out-Null
 try {
-  & $initdb '-D' $cluster '-U' 'relay_api_admin' '-A' 'trust' '--encoding=UTF8'
+  $initdbArgs = @('-D', $cluster, '-U', 'relay_api_admin', '-A', 'trust', '--encoding=UTF8')
+  if ($UseCLocale) { $initdbArgs += '--locale=C' }
+  & $initdb @initdbArgs
   if ($LASTEXITCODE -ne 0) { throw "initdb exit: $LASTEXITCODE" }
   $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
   $listener.Start()

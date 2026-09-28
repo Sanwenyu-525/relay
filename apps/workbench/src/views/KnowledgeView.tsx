@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import ProjectNav from "../components/ProjectNav";
+import KnowledgeReader from "../components/KnowledgeReader";
+import ProjectKnowledgeGuide from "../components/ProjectKnowledgeGuide";
 import WebImportPanel from "../components/WebImportPanel";
 import {
   createCommandId, RelayApiError, RelayTransportError,
@@ -53,10 +55,11 @@ function validResult(result: Readonly<Record<string, unknown>>, pending: Pending
 
 export default function KnowledgeView() {
   const { id } = useParams();
-  const [routeQuery] = useSearchParams();
+  const [routeQuery, setRouteQuery] = useSearchParams();
   const routeKindValue = routeQuery.get("kind");
   const routeKind: RelayInformationKind = kinds.some((item) => item.kind === routeKindValue) ? routeKindValue as RelayInformationKind : "KNOWLEDGE";
   const routeItem = routeQuery.get("item");
+  const routeVersion = routeQuery.get("version");
   const routeSearch = routeQuery.get("q") ?? "";
   const projectId = id ?? null;
   const connection = useRelayConnection();
@@ -79,6 +82,7 @@ export default function KnowledgeView() {
   const pendingRef = useRef<PendingCommand | null>(null);
   const readVersion = useRef(0);
   const contextVersion = useRef(0);
+  const previewReadVersion = useRef(0);
   const [writeGate, setWriteGate] = useState<{ key: string; reason: string | null } | null>(null);
   const [gateReload, setGateReload] = useState(0);
 
@@ -90,11 +94,16 @@ export default function KnowledgeView() {
   const searchVersion = useRef(0);
 
   const [formOpen, setFormOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const [revisionMode, setRevisionMode] = useState(false);
+  const [knowledgeDraftBase, setKnowledgeDraftBase] = useState<{ id: string; revision: string; projectId: string | null } | null>(null);
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
   const [sourceKind, setSourceKind] = useState<Exclude<RelayKnowledgeSource, "WEB_PAGE">>("NOTE");
   const [artifactVersionId, setArtifactVersionId] = useState("");
+  const [artifactPreview, setArtifactPreview] = useState<{ id: string; text: string } | null>(null);
+  const [artifactPreviewError, setArtifactPreviewError] = useState<string | null>(null);
+  const [captureConfirmed, setCaptureConfirmed] = useState(false);
   const [mediaType, setMediaType] = useState("text/plain");
   const [confirmed, setConfirmed] = useState(false);
   const [expiresAt, setExpiresAt] = useState("");
@@ -165,7 +174,10 @@ export default function KnowledgeView() {
   }, [client, writeTargetKey, gateReload]);
 
   function clearDraft() {
+    previewReadVersion.current++;
+    setKnowledgeDraftBase(null);
     setTitle(""); setText(""); setSourceKind("NOTE"); setArtifactVersionId("");
+    setArtifactPreview(null); setArtifactPreviewError(null); setCaptureConfirmed(false);
     setMediaType("text/plain"); setConfirmed(false); setExpiresAt("");
     setChoice(""); setRationale(""); setAlternatives(""); setCosts("");
     setReplacementId(""); setScope(projectId === null ? "WORKSPACE" : "PROJECT");
@@ -223,6 +235,7 @@ export default function KnowledgeView() {
     pendingRef.current = null;
     setPendingCommand(null); setSubmitting(false); setKind(routeKind); setSelectedId(routeItem); setSelected(null); setRows([]);
     setActionError(null); setActionMessage(null); setFormOpen(false);
+    setGuideOpen(false);
     setQuery(routeSearch);
     clearDraft();
     void load(routeKind, routeItem, client, projectId);
@@ -272,6 +285,14 @@ export default function KnowledgeView() {
 
   function openSearchItem(item: RelaySearchItem) {
     if (pendingRef.current !== null) return;
+    if (item.type === "KNOWLEDGE") {
+      setRouteQuery((current) => {
+        const next = new URLSearchParams(current);
+        next.set("kind", "KNOWLEDGE"); next.set("item", item.id); next.set("version", item.version);
+        return next;
+      });
+      return;
+    }
     setKind(item.type); setSelected(null); setRows([]); setFormOpen(false); clearDraft();
     setSelectedId(item.id);
     void load(item.type, item.id);
@@ -280,11 +301,32 @@ export default function KnowledgeView() {
   function openForm(asRevision: boolean) {
     if (pendingRef.current !== null) return;
     clearDraft(); setRevisionMode(asRevision); setFormOpen(true); setActionError(null);
+    if (asRevision && kind === "KNOWLEDGE" && selectedKnowledge !== null)
+      setKnowledgeDraftBase({ id: selectedKnowledge.id, revision: selectedKnowledge.revision,
+        projectId: selectedKnowledge.projectId });
     if (asRevision && selectedMemory !== null) { setTitle(selectedMemory.title); setText(selectedMemory.text); }
     if (asRevision && selectedRule !== null) {
       setRuleKey(selectedRule.ruleKey); setStatement(selectedRule.statement);
       setStrength(selectedRule.strength); setEnforcement(selectedRule.enforcement);
       setMethod(selectedRule.method ?? ""); setTargetSpec(JSON.stringify(selectedRule.targetSpec, null, 2));
+    }
+  }
+
+  async function readArtifactPreview() {
+    const sourceId = artifactVersionId.trim();
+    if (client === null || !/^[0-9a-f-]{36}$/iu.test(sourceId)) {
+      setArtifactPreviewError("请填写有效的产物版本 ID。"); return;
+    }
+    setArtifactPreview(null); setArtifactPreviewError(null); setCaptureConfirmed(false);
+    const readVersion = ++previewReadVersion.current;
+    const context = contextVersion.current;
+    try {
+      const body = await client.getArtifactVersionContent(sourceId);
+      if (readVersion === previewReadVersion.current && context === contextVersion.current)
+        setArtifactPreview({ id: sourceId, text: body });
+    } catch (caught) {
+      if (readVersion === previewReadVersion.current && context === contextVersion.current)
+        setArtifactPreviewError(describeLiveError(caught).message);
     }
   }
 
@@ -342,12 +384,20 @@ export default function KnowledgeView() {
       if ((!revisionMode && !titleValue) || (sourceKind === "ARTIFACT_VERSION" ? !artifactVersionId.trim() : !textValue)) {
         setActionError("请填写标题及当前来源所需的正文或产物版本 ID。"); return;
       }
+      if (sourceKind === "ARTIFACT_VERSION" &&
+          (artifactPreview?.id !== artifactVersionId.trim() || !captureConfirmed)) {
+        setActionError("请先读取确切产物版本并确认内容、来源和目标范围。"); return;
+      }
       const source = sourceKind === "ARTIFACT_VERSION"
         ? { artifactVersionId: artifactVersionId.trim() }
         : { text: textValue, mediaType: mediaType.trim() || "text/plain" };
-      if (revisionMode && itemId !== null && revision !== undefined) {
-        await submit("AddKnowledgeVersion", "knowledge_id", itemId, (api, commandId) =>
-          api.addKnowledgeVersion({ id: itemId, commandId, expectedRevision: revision, sourceKind, ...source }));
+      if (revisionMode && knowledgeDraftBase === null) {
+        setActionError("修订目标已失效，请保留草稿并重新打开目标版本。"); return;
+      }
+      if (revisionMode && knowledgeDraftBase !== null) {
+        await submit("AddKnowledgeVersion", "knowledge_id", knowledgeDraftBase.id, (api, commandId) =>
+          api.addKnowledgeVersion({ id: knowledgeDraftBase.id, commandId,
+            expectedRevision: knowledgeDraftBase.revision, sourceKind, ...source }));
       } else {
         await submit("CreateKnowledge", "knowledge_id", null, (api, commandId) =>
           api.createKnowledge({ commandId, projectId, title: titleValue, sourceKind, ...source }));
@@ -451,6 +501,14 @@ export default function KnowledgeView() {
     <h1>知识与长期信息</h1>
     <p className="page-lede">资料、已确认记忆、决定和规则分别保存版本；搜索只查真实服务端事实。</p>
     {projectId && <ProjectNav projectId={projectId} active="knowledge" />}
+    {projectId && live && client && <div className="knowledge-guide-toggle"><button type="button"
+      className="secondary-button" data-testid="knowledge-guide-toggle"
+      onClick={() => setGuideOpen((value) => !value)}>{guideOpen ? "返回资料列表" : "打开项目导读"}</button></div>}
+    {guideOpen && projectId && client && <ProjectKnowledgeGuide key={`${connection.epoch}:${projectId}`}
+      client={client} projectId={projectId} onOpen={(nextKind, nextId) => {
+        setGuideOpen(false); setKind(nextKind); setSelectedId(nextId); setSelected(null);
+        void load(nextKind, nextId);
+      }} />}
 
     {!live ? <section className="surface-panel" data-testid="knowledge-fixture-gap">
       <h2>示例模式未接入资料</h2>
@@ -531,9 +589,9 @@ export default function KnowledgeView() {
               <button type="button" className="secondary-button" data-testid="decision-supersede" disabled={writeBlockedReason !== null} onClick={() => { void supersede(); }}>记录替代关系</button>
             </>}
 
-            {selectedKnowledge && <section className="knowledge-history"><h3>不可变资料版本</h3><ol>{knowledgeVersions.map((version) =>
-              <li key={version.id}>v{version.version} · {version.sourceKind} · {version.availability}
-                <p>{version.excerpt ?? "该版本引用受管产物，无内联摘录。"}</p><small>摘要 {version.contentSha256}{typeof version.sourceRefs.artifact_version_id === "string" && <> · 产物版本 {version.sourceRefs.artifact_version_id}</>}</small></li>)}</ol></section>}
+            {selectedKnowledge && client && <KnowledgeReader key={`${selectedKnowledge.id}:${selectedKnowledge.currentVersion}:${routeItem === selectedKnowledge.id ? routeVersion ?? "" : ""}`}
+              client={client} knowledge={selectedKnowledge} versions={knowledgeVersions}
+              initialVersion={routeItem === selectedKnowledge.id ? routeVersion : null} />}
             {selectedMemory && <section className="knowledge-history"><h3>确认修订历史</h3><ol>{memoryRevisions.map((revision) =>
               <li key={revision.id}>v{revision.version} · {revision.title} · {revision.confirmedBy} 于 {revision.confirmedAt}<p>{revision.text}</p></li>)}</ol></section>}
             {selectedRule && <section className="knowledge-history"><h3>规则版本历史</h3><ol>{ruleVersions.map((version) =>
@@ -542,17 +600,30 @@ export default function KnowledgeView() {
 
           {formOpen && <form className="surface-panel knowledge-form" data-testid="knowledge-form" onSubmit={(event) => { void save(event); }}>
             <h2>{revisionMode ? "追加新版本" : `新建 ${kind}`}</h2>
-            {revisionMode && <p className="helper-text">基于当前修订 v{selected?.revision} 提交；旧版本不会被覆盖。</p>}
+            {revisionMode && <p className="helper-text">基于起草时修订 v{kind === "KNOWLEDGE" ? knowledgeDraftBase?.revision : selected?.revision} 提交；冲突时保留草稿，旧版本不会被覆盖。</p>}
             {(kind === "MEMORY" || (kind !== "RULE" && !revisionMode)) && <label className="field"><span className="field-label">标题</span>
               <input value={title} onChange={(event) => setTitle(event.target.value)} data-testid="knowledge-title" required disabled={pendingCommand !== null} /></label>}
             {kind === "KNOWLEDGE" && <>
-              <label className="field"><span className="field-label">来源类型</span><select value={sourceKind} onChange={(event) => { setSourceKind(event.target.value as Exclude<RelayKnowledgeSource, "WEB_PAGE">); if (event.target.value === "NOTE") setMediaType("text/plain"); }} disabled={pendingCommand !== null}>
+               <label className="field"><span className="field-label">来源类型</span><select value={sourceKind} onChange={(event) => { previewReadVersion.current++; setSourceKind(event.target.value as Exclude<RelayKnowledgeSource, "WEB_PAGE">); setArtifactPreview(null); setCaptureConfirmed(false); if (event.target.value === "NOTE") setMediaType("text/plain"); }} disabled={pendingCommand !== null}>
                 <option value="NOTE">NOTE</option><option value="MANAGED_TEXT">MANAGED_TEXT</option><option value="ARTIFACT_VERSION">ARTIFACT_VERSION</option></select></label>
-              {sourceKind === "ARTIFACT_VERSION" ? <label className="field"><span className="field-label">产物版本 ID</span>
-                <input value={artifactVersionId} onChange={(event) => setArtifactVersionId(event.target.value)} data-testid="knowledge-artifact-id" disabled={pendingCommand !== null} /></label>
-                : <><label className="field"><span className="field-label">受管文本</span><textarea value={text} onChange={(event) => setText(event.target.value)} data-testid="knowledge-text" rows={6} disabled={pendingCommand !== null} /></label>
-                  <label className="field"><span className="field-label">媒体类型</span><select value={mediaType} onChange={(event) => setMediaType(event.target.value)} disabled={pendingCommand !== null}>
-                    <option value="text/plain">text/plain</option>{sourceKind === "MANAGED_TEXT" && <option value="text/markdown">text/markdown</option>}</select></label></>}
+               {sourceKind === "ARTIFACT_VERSION" ? <><label className="field"><span className="field-label">产物版本 ID</span>
+                 <input value={artifactVersionId} onChange={(event) => { previewReadVersion.current++; setArtifactVersionId(event.target.value); setArtifactPreview(null); setCaptureConfirmed(false); }} data-testid="knowledge-artifact-id" disabled={pendingCommand !== null} /></label>
+                 <button type="button" className="secondary-button" disabled={pendingCommand !== null}
+                   onClick={() => { void readArtifactPreview(); }}>核对确切产物版本</button>
+                 {artifactPreviewError && <p className="action-error" role="alert">{artifactPreviewError}</p>}
+                 {artifactPreview?.id === artifactVersionId.trim() && <><pre className="knowledge-capture-preview">{artifactPreview.text}</pre>
+                   <label className="knowledge-check"><input type="checkbox" checked={captureConfirmed}
+                     onChange={(event) => setCaptureConfirmed(event.target.checked)} data-testid="knowledge-capture-confirmed" />我已核对正文、来源版本和目标范围；收录不修改原产物，也不代表通过验收。</label></>}
+               </>
+                 : <><label className="field"><span className="field-label">受管文本</span><textarea value={text} onChange={(event) => setText(event.target.value)} data-testid="knowledge-text" rows={6} disabled={pendingCommand !== null} /></label>
+                   <label className="field"><span className="field-label">媒体类型</span><select value={mediaType} onChange={(event) => setMediaType(event.target.value)} disabled={pendingCommand !== null}>
+                     <option value="text/plain">text/plain</option>{sourceKind === "MANAGED_TEXT" && <option value="text/markdown">text/markdown</option>}</select></label></>}
+               <section className="knowledge-capture-review" aria-label="保存前核对"><h3>保存前核对</h3>
+                 <p>归类：Knowledge · {sourceKind}；目标范围：{(revisionMode ? knowledgeDraftBase?.projectId : projectId) ? `项目 ${revisionMode ? knowledgeDraftBase?.projectId : projectId}` : "工作空间"}。</p>
+                 {sourceKind === "ARTIFACT_VERSION" ? <p>来源：确切产物版本 {artifactVersionId || "未填写"}。</p>
+                   : <p className="knowledge-body">正文预览：{text || "尚未填写"}</p>}
+                 <p className="helper-text">只有服务端命令成功并重读后才成为已收录版本；阅读和收录不授予 AI 使用权限。</p>
+               </section>
             </>}
             {kind === "MEMORY" && <>
               <label className="field"><span className="field-label">需要长期保留的事实</span><textarea value={text} onChange={(event) => setText(event.target.value)} data-testid="memory-text" rows={6} disabled={pendingCommand !== null} /></label>

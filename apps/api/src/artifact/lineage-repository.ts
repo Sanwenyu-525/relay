@@ -31,4 +31,16 @@ export class LineageRepository {
     `.execute(this.db);
     return result.rows;
   }
+
+  async listByParent(workspaceId: string, parentVersionId: string, limit = 101): Promise<readonly ArtifactLineageEdgeRow[]> {
+    const result = await sql<ArtifactLineageEdgeRow>`
+      select id, workspace_id, child_version_id, relation, parent_kind, parent_id, created_at
+      from artifact_lineage_edges
+      where workspace_id = ${workspaceId} and parent_kind = 'ARTIFACT_VERSION'
+        and parent_id = ${parentVersionId} and relation in ('DERIVED_FROM', 'REVISED_FROM')
+      order by created_at, id
+      limit ${limit}
+    `.execute(this.db);
+    return result.rows;
+  }
 }

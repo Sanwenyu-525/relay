@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { RelayApiError, type RelayArtifactLineage } from "../api/relayClient";
+import { RelayApiError, type RelayArtifactDirectUses, type RelayArtifactLineage } from "../api/relayClient";
+import ArtifactVersionCompare from "../components/ArtifactVersionCompare";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import "./ArtifactLineageView.css";
@@ -21,9 +22,15 @@ export default function ArtifactLineageView() {
   const [loading, setLoading] = useState(client !== null);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const [uses, setUses] = useState<RelayArtifactDirectUses | null>(null);
+  const [usesLoading, setUsesLoading] = useState(false);
+  const [usesError, setUsesError] = useState<string | null>(null);
   const requestVersion = useRef(0);
+  const usesRequest = useRef(0);
   useEffect(() => {
     const request = ++requestVersion.current;
+    usesRequest.current++;
+    setUses(null); setUsesLoading(false); setUsesError(null);
     setLineage(null); setError(null); setLoading(client !== null);
     if (client === null) return;
     void client.getArtifactLineage(id).then((next) => {
@@ -33,8 +40,22 @@ export default function ArtifactLineageView() {
       if (request === requestVersion.current) setError(caught instanceof RelayApiError && [403, 404].includes(caught.problem.status)
         ? "该产物版本当前不可读取或无权查看；旧来源详情已清除。" : describeLiveError(caught).message);
     }).finally(() => { if (request === requestVersion.current) setLoading(false); });
-    return () => { requestVersion.current++; };
+    return () => { requestVersion.current++; usesRequest.current++; };
   }, [client, id, reload]);
+
+  async function checkDirectUses() {
+    if (!client || !lineage || usesLoading) return;
+    const request = ++usesRequest.current;
+    setUsesLoading(true); setUsesError(null); setUses(null);
+    try {
+      const result = await client.getArtifactDirectUses(lineage.artifactVersionId);
+      if (request !== usesRequest.current) return;
+      if (result.sourceArtifactVersionId !== lineage.artifactVersionId)
+        throw new Error("直接引用检查返回了其他来源版本。");
+      setUses(result);
+    } catch (caught) { if (request === usesRequest.current) setUsesError(describeLiveError(caught).message); }
+    finally { if (request === usesRequest.current) setUsesLoading(false); }
+  }
 
   return <section className="lineage-page" data-testid="artifact-lineage"><p className="eyebrow">产物来源</p><h1>Artifact Lineage</h1>
     <p className="page-lede">只展示服务端确认的当前版本与直接父来源；关系记录不等于完整因果图，也不替代原版本正文。</p>
@@ -56,7 +77,21 @@ export default function ArtifactLineageView() {
               : edge.parentKind === "COMPLETION_RECORD"
                 ? <p><Link className="inline-link" to={`/completion-records/${edge.parentId}`}>打开完成凭据 {edge.parentId}</Link></p>
               : <p>父来源 ID {edge.parentId}；当前没有该类型的确切直达页。</p>}</li>)}</ul>
-          : <p className="helper-text">服务端未记录直接父来源；不从相同标题、时间或版本号推断关系。</p>}</section></>}
+          : <p className="helper-text">服务端未记录直接父来源；不从相同标题、时间或版本号推断关系。</p>}</section>
+        <ArtifactVersionCompare key={lineage.artifactVersionId} client={client} lineage={lineage} />
+        <section className="surface-panel lineage-uses" data-testid="artifact-direct-uses"><h2>主动检查直接引用</h2>
+          <p className="helper-text">只检查服务端已登记、直接指向版本 {lineage.artifactVersionId} 的派生或修订关系。未登记关系、间接下游和语义影响仍未分析。</p>
+          <button className="secondary-button" type="button" disabled={usesLoading} onClick={() => void checkDirectUses()}>{usesLoading ? "正在检查" : "检查已登记直接引用"}</button>
+          {usesError && <p className="action-error" role="alert">{usesError}；不能据此判断没有影响。</p>}
+          {uses && (uses.sourceContentAvailability === "UNAVAILABLE" ? <p className="warning-callout">来源版本正文不可用；直接引用未展示，影响仍待核对。</p>
+            : <><p className="helper-text">检查结果仅覆盖已登记的直接关系，完整影响范围未知。{uses.hasMore ? "还有未展示的登记关系。" : "本次登记关系已展示完毕。"}</p>
+              {uses.directUses.length ? <ul>{uses.directUses.map((edge, index) => <li key={`${edge.childArtifactVersionId ?? "hidden"}-${index}`}>
+                <strong>{edge.relation === "DERIVED_FROM" ? "派生自此版本" : "修订自此版本"}</strong> · {edge.createdAt}
+                {edge.availability === "AVAILABLE" && edge.childArtifactVersionId
+                  ? <p><Link className="inline-link" to={`/artifact-versions/${edge.childArtifactVersionId}/lineage`}>打开直接引用版本 v{edge.childVersionNumber}</Link></p>
+                  : <p>该关系的子版本不可读取或无权查看；身份与正文未展示。</p>}</li>)}</ul>
+                : <p className="helper-text">未记录可展示的直接引用；这不代表没有影响。</p>}</>)}
+        </section></>}
     </>}
   </section>;
 }

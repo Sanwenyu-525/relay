@@ -287,7 +287,8 @@ export function ProjectConnectionsView() {
         </section>
 
         <section className="surface-panel"><h2>受管资源</h2><p className="helper-text">本列表最多读取服务端前 100 条且无游标。下列目录是 FILE_READ / FAKE_WRITE 策略可引用的独立受管资源；不等于 FILE_READ 连接目录。</p>
-          {snapshot.resources.length === 0 ? <p>本项目尚无受管资源。</p> : <ul className="connections-list">{snapshot.resources.map((item) => <li key={item.id}><div><strong>{item.canonicalRoot}</strong><small>{item.status} · rev {item.revision} · epoch {item.resourceEpoch} · {item.id}</small></div>
+          {snapshot.resources.length === 0 ? <p>本项目尚无受管资源。</p> : <ul className="connections-list">{snapshot.resources.map((item) => <li key={item.id}><div><strong>{item.canonicalRoot}</strong><small>{item.status} · rev {item.revision} · epoch {item.resourceEpoch} · {item.id}</small>
+            <small>Windows 文件写入目录身份：{item.fileWriteIdentityBound ? "已绑定" : "未绑定；若需在 Windows 使用 FILE_WRITE，请在 Windows 停用后重新登记此目录"}</small></div>
             {item.status === "ACTIVE" && <button className="danger-button" type="button" disabled={busy || writeBlockedReason !== null} onClick={() => { void sendCommand({
               id: createCommandId(), type: "DisableManagedResource", resultKey: "resource_id", targetId: item.id, expectedStatus: "DISABLED",
               label: "受管资源停用", send: (api, commandId) => api.disableManagedResource({ projectId, resourceId: item.id,

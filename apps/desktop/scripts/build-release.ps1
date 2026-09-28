@@ -1,10 +1,11 @@
 # Build a release-directory package from the pinned Node, pnpm and MSVC toolchain.
 # Keep this script ASCII-only for Windows PowerShell 5.1.
 [CmdletBinding()]
-param([switch]$SkipInstall)
+param([switch]$SkipInstall, [switch]$TestPackage)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1') -Force -ErrorAction Stop
 $desktopRoot = Split-Path -Parent $PSScriptRoot
 $appsRoot = Split-Path -Parent $desktopRoot
 $workspaceRoot = Split-Path -Parent $appsRoot
@@ -16,9 +17,17 @@ $node = Join-Path $workspaceRoot '.research\runtime-cache\node-v24.21.0-win-x64\
 $corepack = Join-Path (Split-Path -Parent $node) 'node_modules\corepack\dist\corepack.js'
 $vsDevCmd = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat'
 $workbenchRoot = Join-Path $appsRoot 'workbench'
+$helperRoot = Join-Path $appsRoot 'file-io-helper'
+$helperExe = Join-Path $helperRoot 'target\release\relay-file-io-helper.exe'
 $cargoReleaseRoot = Join-Path $tauriRoot 'target\release'
 $releaseRoot = Join-Path $desktopRoot 'release'
+if ($TestPackage) { $releaseRoot = Join-Path $workspaceRoot 'test-release' }
 $exe = Join-Path $releaseRoot 'relay-desktop.exe'
+if (@(Get-CimInstance Win32_Process | Where-Object {
+  $processPath = $_.ExecutablePath
+  if ($processPath -and $processPath.StartsWith('\\?\')) { $processPath = $processPath.Substring(4) }
+  $processPath -and $processPath.StartsWith($releaseRoot + '\', [StringComparison]::OrdinalIgnoreCase)
+}).Count -gt 0) { throw 'Close the running release package before building.' }
 
 foreach ($path in @($node, $corepack, $vsDevCmd, (Join-Path $workbenchRoot 'package.json'))) {
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required build input is missing: $path" }
@@ -37,7 +46,7 @@ function Invoke-Pnpm {
 
 function Get-BuildInputFingerprint {
   $inputs = @()
-  foreach ($directory in @('apps\api\src', 'apps\api\migrations', 'apps\workbench\src', 'apps\desktop\src-tauri\src', 'apps\desktop\scripts')) {
+  foreach ($directory in @('apps\api\src', 'apps\api\migrations', 'apps\workbench\src', 'apps\desktop\src-tauri\src', 'apps\desktop\scripts', 'apps\file-io-helper\src')) {
     $inputs += @(Get-ChildItem -LiteralPath (Join-Path $workspaceRoot $directory) -Recurse -File)
   }
   foreach ($relative in @(
@@ -47,7 +56,8 @@ function Get-BuildInputFingerprint {
     'apps\desktop\pnpm-lock.yaml', 'apps\desktop\pnpm-workspace.yaml',
     'apps\desktop\src-tauri\Cargo.toml', 'apps\desktop\src-tauri\Cargo.lock',
     'apps\desktop\src-tauri\tauri.conf.json', 'apps\desktop\src-tauri\build.rs',
-    'apps\desktop\src-tauri\capabilities\default.json', 'apps\desktop\src-tauri\icons\icon.ico'
+    'apps\desktop\src-tauri\capabilities\default.json', 'apps\desktop\src-tauri\icons\icon.ico',
+    'apps\file-io-helper\Cargo.toml', 'apps\file-io-helper\Cargo.lock'
   )) { $inputs += Get-Item -LiteralPath (Join-Path $workspaceRoot $relative) }
   $lines = foreach ($file in @($inputs | Sort-Object FullName)) {
     "$($file.FullName)|$((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash)"
@@ -183,20 +193,26 @@ cmd.exe /d /s /c "call `"$vsDevCmd`" -arch=x64 >nul && set" | ForEach-Object {
   $name, $value = $_ -split '=', 2
   if ($name -and $null -ne $value) { Set-Item -Path "Env:$name" -Value $value }
 }
+& cargo build --release --locked --manifest-path (Join-Path $helperRoot 'Cargo.toml')
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $helperExe -PathType Leaf)) {
+  throw 'The Windows file I/O helper build failed'
+}
+Copy-Item -LiteralPath $helperExe -Destination (Join-Path $resourceRoot 'relay-file-io-helper.exe') -Force
 Invoke-Pnpm $desktopRoot @('exec', 'tauri', 'build', '--no-bundle')
 if ((Get-BuildInputFingerprint) -ne $buildInputFingerprint) {
   throw 'Build input changed during release compilation; artifact manifest was not published'
 }
 
 $compiledExe = Join-Path $cargoReleaseRoot 'relay-desktop.exe'
-foreach ($required in @($compiledExe, (Join-Path $cargoReleaseRoot 'node.exe'), (Join-Path $cargoReleaseRoot 'api\dist\src\main.js'), (Join-Path $cargoReleaseRoot 'api\dist\src\worker\supervisor-main.js'), (Join-Path $cargoReleaseRoot 'api\dist\src\worker\main.js'))) {
+foreach ($required in @($compiledExe, (Join-Path $cargoReleaseRoot 'node.exe'), (Join-Path $cargoReleaseRoot 'relay-file-io-helper.exe'), (Join-Path $cargoReleaseRoot 'api\dist\src\main.js'), (Join-Path $cargoReleaseRoot 'api\dist\src\worker\supervisor-main.js'), (Join-Path $cargoReleaseRoot 'api\dist\src\worker\main.js'))) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Tauri build output is incomplete: $required" }
 }
 if (Test-Path -LiteralPath $releaseRoot) {
   $resolvedDesktop = [IO.Path]::GetFullPath($desktopRoot).TrimEnd('\')
   $resolvedRelease = [IO.Path]::GetFullPath($releaseRoot)
   $releaseItem = Get-Item -LiteralPath $releaseRoot -Force
-  if ($resolvedRelease -ne (Join-Path $resolvedDesktop 'release') -or
+  $expectedRelease = if ($TestPackage) { Join-Path $workspaceRoot 'test-release' } else { Join-Path $resolvedDesktop 'release' }
+  if ($resolvedRelease -ne $expectedRelease -or
       ($releaseItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
     throw 'Refusing to replace an unexpected release directory'
   }
@@ -205,14 +221,15 @@ if (Test-Path -LiteralPath $releaseRoot) {
 New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
 Copy-Item -LiteralPath $compiledExe -Destination $exe
 Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'node.exe') -Destination (Join-Path $releaseRoot 'node.exe')
+Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'relay-file-io-helper.exe') -Destination (Join-Path $releaseRoot 'relay-file-io-helper.exe')
 Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'api') -Destination $releaseRoot -Recurse
 
 $releaseEntries = @(Get-ChildItem -LiteralPath $releaseRoot -Force | Select-Object -ExpandProperty Name | Sort-Object)
-if (($releaseEntries -join '|') -ne (@('api', 'node.exe', 'relay-desktop.exe') -join '|')) {
+if (($releaseEntries -join '|') -ne (@('api', 'node.exe', 'relay-desktop.exe', 'relay-file-io-helper.exe') -join '|')) {
   throw "Final release contains unexpected top-level entries: $($releaseEntries -join ', ')"
 }
 
-foreach ($required in @($exe, (Join-Path $releaseRoot 'node.exe'), (Join-Path $releaseRoot 'api\dist\src\main.js'), (Join-Path $releaseRoot 'api\dist\src\worker\supervisor-main.js'), (Join-Path $releaseRoot 'api\dist\src\worker\main.js'), (Join-Path $releaseRoot 'api\migrations\0001_v001_human_core.sql'))) {
+foreach ($required in @($exe, (Join-Path $releaseRoot 'node.exe'), (Join-Path $releaseRoot 'relay-file-io-helper.exe'), (Join-Path $releaseRoot 'api\dist\src\main.js'), (Join-Path $releaseRoot 'api\dist\src\worker\supervisor-main.js'), (Join-Path $releaseRoot 'api\dist\src\worker\main.js'), (Join-Path $releaseRoot 'api\migrations\0001_v001_human_core.sql'))) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Release package is incomplete: $required" }
 }
 if (Test-Path -LiteralPath (Join-Path $releaseRoot 'api\.env')) { throw 'Release package includes a dotenv file' }
@@ -253,13 +270,15 @@ $sourceHashes['desktop'] = Get-FileHashes $desktopRoot @('src-tauri\src', 'scrip
   'src-tauri\icons\icon.ico'
 )
 $sourceHashes['api'] = Get-FileHashes (Join-Path $appsRoot 'api') @('src', 'migrations') @('package.json', 'tsconfig.json')
+$sourceHashes['file_io_helper'] = Get-FileHashes $helperRoot @('src') @('Cargo.toml', 'Cargo.lock')
 $sourceHashes['workbench'] = Get-FileHashes $workbenchRoot @('src') @('package.json', 'pnpm-lock.yaml', 'vite.config.ts', 'tsconfig.json', 'index.html')
 $sourceHashes['workspace_lock'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'pnpm-lock.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
 $sourceHashes['workspace_manifest'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'pnpm-workspace.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
-$resourceHashes = Get-FileHashes $releaseRoot @('api') @('node.exe')
+$resourceHashes = Get-FileHashes $releaseRoot @('api') @('node.exe', 'relay-file-io-helper.exe')
 
 $manifest = [ordered]@{
   schema_version = 1
+  built_at_utc = [DateTime]::UtcNow.ToString('o')
   node_version = (& $node --version)
   tauri_crate = '2.11.6'
   tauri_cli = '2.11.5'

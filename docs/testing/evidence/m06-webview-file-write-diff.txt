@@ -1,0 +1,10 @@
+M06 packaged WebView2 frozen diff acceptance
+release_sha256=577a731e3022e540e38edc6a152301afc31b5a585e75eabb999919bbd5863efc
+session_id=fdfb0b58af814df0bb81afac29ea7a08
+run_id=b3659239-acbe-4853-b453-8b993ad9d9c4 operation_id=c94535a2-d07e-4c4f-b94b-a11eec255648
+CREATE and MODIFY frozen planned text visible; planned effect explicitly separated from ledger and disk
+screenshot=D:\Develop\Relay-Agent\docs\testing\evidence\m06-webview-file-write-diff.png
+registered Windows FILE_WRITE root identity visible in the packaged Connections page
+identity_screenshot=D:\Develop\Relay-Agent\docs\testing\evidence\m06-webview-managed-root-identity.png
+postgres_stopped=true temporary_root_removed=true
+M06_WEBVIEW_FILE_WRITE_DIFF=PASS

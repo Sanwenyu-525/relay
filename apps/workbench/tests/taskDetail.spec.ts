@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
+import { MemoryRouter } from "react-router-dom";
+import ArtifactPanel from "../src/components/ArtifactPanel";
 import SafeMarkdown from "../src/components/SafeMarkdown";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { resetSessionArtifactsForTest } from "../src/lib/sessionArtifacts";
@@ -734,6 +736,108 @@ describe("产物与完成闭环（UI-11，live）", () => {
     expect(mounted.wrapper.get('[data-testid="artifact-select-version"]').attributes("disabled")).toBeDefined();
     await mounted.wrapper.get('[data-testid="artifact-save"]').trigger("click");
     expect(calls.filter((call) => call.method === "POST")).toHaveLength(0);
+  });
+});
+
+describe("人工产物版本修订", () => {
+  it("载入 v1 后外部生成 v2，刷新不会悄悄改用 v2 的 CAS；显式确认才可保稿续写", async () => {
+    activateRelayConnection({ baseUrl: BASE_URL, workspaceId: WORKSPACE_ID, bearerToken: TOKEN });
+    let externalAdvanced = false;
+    const { calls } = stubFetch(async (url, method, body) => {
+      if (method === "GET" && url === stateUrl) return jsonResponse(200, projectStateBody());
+      if (method === "GET" && url === taskUrl) return jsonResponse(200, taskDetailBody({ revision: externalAdvanced ? "3" : "2" }));
+      if (method === "GET" && url === `${taskUrl}/artifacts`) return jsonResponse(200, taskArtifactsBody(
+        externalAdvanced ? [{ id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "8" },
+          { id: VERSION_TWO_ID, number: "2", hash: "b".repeat(64), size: "9" }]
+          : [{ id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "8" }], externalAdvanced ? "1" : "0"));
+      if (method === "GET" && url === `${artifactsUrl}/${ARTIFACT_ID}`) return jsonResponse(200,
+        (taskArtifactsBody(externalAdvanced ? [
+          { id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "8" },
+          { id: VERSION_TWO_ID, number: "2", hash: "b".repeat(64), size: "9" }
+        ] : [{ id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "8" }], externalAdvanced ? "1" : "0").items as unknown[])[0]);
+      if (method === "GET" && url === `${BASE_URL}/api/v1/workspaces/${WORKSPACE_ID}/artifact-versions/${VERSION_ID}/content`)
+        return { ok: true, status: 200, text: async () => "# 原正文" } as Response;
+      if (method === "POST" && url === `${artifactsUrl}/${ARTIFACT_ID}/versions`)
+        return body.expected_artifact_revision === "0"
+          ? jsonResponse(409, { code: "REVISION_CONFLICT", detail: "Artifact revision 已变化" })
+          : jsonResponse(201, envelope(String(body.command_id), { task_id: TASK_ID, artifact_id: ARTIFACT_ID,
+            artifact_revision: "2", version_id: OTHER_VERSION_ID, version_number: "3", media_type: "text/markdown",
+            sha256: "c".repeat(64), size: "9", task_revision: "4" }));
+      throw new Error(`unexpected request: ${method} ${url}`);
+    });
+    const props = { taskId: TASK_ID, projectId: PROJECT_ID, taskStatus: "IN_PROGRESS" as const,
+      taskRevision: "2", acceptanceRevision: "1", criteria: [],
+      allowedActions: ["SAVE_ARTIFACT_VERSION"], writeBlockedReason: null, onRefresh: vi.fn() };
+    const render = (taskRevision: string) => createElement(MemoryRouter, {}, createElement(ArtifactPanel, { ...props, taskRevision }));
+    const mounted = await mountReact(render("2")); unmount = mounted.unmount;
+    await flush();
+    await mounted.wrapper.get('[data-testid="artifact-load-latest-draft"]').trigger("click"); await flush();
+    await mounted.wrapper.get('textarea[name="artifact-content"]').setValue("# v1 上的人工草稿");
+    expect(mounted.wrapper.get('[data-testid="artifact-draft-base"]').text()).toContain("Task revision v2");
+
+    externalAdvanced = true;
+    await mounted.wrapper.get('[data-testid="artifact-save"]').trigger("click"); await flush();
+    expect(calls.filter((call) => call.method === "POST").at(-1)?.body)
+      .toMatchObject({ expected_artifact_revision: "0", expected_task_revision: "2" });
+    expect(mounted.wrapper.get('textarea[name="artifact-content"]').element).toHaveProperty("value", "# v1 上的人工草稿");
+    expect(mounted.wrapper.get('[data-testid="artifact-save"]').attributes("disabled")).toBeDefined();
+    expect(mounted.wrapper.get('[data-testid="artifact-confirm-new-base"]').exists()).toBe(true);
+    await mounted.wrapper.get('[data-testid="artifact-confirm-new-base"]').trigger("click"); await flush();
+    expect(mounted.wrapper.text()).toContain("确认时版本又发生变化");
+    expect(mounted.wrapper.get('[data-testid="artifact-draft-base"]').text()).toContain("Task revision v2");
+    await mounted.rerender(render("3")); await flush();
+    expect(mounted.wrapper.get('[data-testid="artifact-draft-base-changed"]').text()).toContain("保存已暂停");
+    expect(mounted.wrapper.get('[data-testid="artifact-save"]').attributes("disabled")).toBeDefined();
+    await mounted.wrapper.get('[data-testid="artifact-save"]').trigger("click");
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
+    expect(mounted.wrapper.get('textarea[name="artifact-content"]').element).toHaveProperty("value", "# v1 上的人工草稿");
+
+    await mounted.wrapper.get('[data-testid="artifact-confirm-new-base"]').trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="artifact-draft-base"]').text()).toContain("Task revision v3");
+    expect(mounted.wrapper.get('[data-testid="artifact-save"]').attributes("disabled")).toBeUndefined();
+    await mounted.wrapper.get('[data-testid="artifact-save"]').trigger("click"); await flush();
+    expect(calls.filter((call) => call.method === "POST").at(-1)?.body).toMatchObject({
+      expected_artifact_revision: "1", expected_task_revision: "3", content: "# v1 上的人工草稿"
+    });
+  });
+
+  it("只从最新人工版本载入草稿，未保存改动不被覆盖，保存后不继承旧接受", async () => {
+    activateRelayConnection({ baseUrl: BASE_URL, workspaceId: WORKSPACE_ID, bearerToken: TOKEN });
+    let appended = false;
+    const { calls } = stubFetch(async (url, method, body) => {
+      if (method === "GET" && url === taskUrl) return jsonResponse(200, taskDetailBody({ revision: appended ? "3" : "2" }));
+      if (method === "GET" && url === stateUrl) return jsonResponse(200, projectStateBody());
+      if (method === "GET" && url === `${taskUrl}/artifacts`) return jsonResponse(200, taskArtifactsBody(
+        appended ? [{ id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "8" },
+          { id: VERSION_TWO_ID, number: "2", hash: "b".repeat(64), size: "9" }]
+          : [{ id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "8" }], appended ? "1" : "0", [VERSION_ID]));
+      if (method === "GET" && url === `${artifactsUrl}/${ARTIFACT_ID}`) return jsonResponse(200,
+        (taskArtifactsBody([{ id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "8" }]).items as unknown[])[0]);
+      if (method === "GET" && url === `${BASE_URL}/api/v1/workspaces/${WORKSPACE_ID}/artifact-versions/${VERSION_ID}/content`)
+        return { ok: true, status: 200, text: async () => "# 原正文" } as Response;
+      if (method === "POST" && url === `${artifactsUrl}/${ARTIFACT_ID}/versions`) {
+        appended = true;
+        return jsonResponse(201, envelope(String(body.command_id), { task_id: TASK_ID, artifact_id: ARTIFACT_ID,
+          artifact_revision: "1", version_id: VERSION_TWO_ID, version_number: "2", media_type: "text/markdown",
+          sha256: "b".repeat(64), size: "9", task_revision: "3" }));
+      }
+      throw new Error(`unexpected request: ${method} ${url}`);
+    });
+    const mounted = await mountWorkbench(`/tasks/${TASK_ID}`); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="task-detail-tab-artifacts"]').trigger("click"); await flush();
+    await mounted.wrapper.get('textarea[name="artifact-content"]').setValue("未保存草稿");
+    expect(mounted.wrapper.get('[data-testid="artifact-load-latest-draft"]').attributes("disabled")).toBeDefined();
+    expect(mounted.wrapper.get('textarea[name="artifact-content"]').element).toHaveProperty("value", "未保存草稿");
+    await mounted.wrapper.get('textarea[name="artifact-content"]').setValue("");
+    await mounted.wrapper.get('[data-testid="artifact-load-latest-draft"]').trigger("click"); await flush();
+    expect(mounted.wrapper.get('textarea[name="artifact-content"]').element).toHaveProperty("value", "# 原正文");
+    await mounted.wrapper.get('textarea[name="artifact-content"]').setValue("# 人工修订");
+    await mounted.wrapper.get('[data-testid="artifact-save"]').trigger("click"); await flush();
+    expect(calls.find((call) => call.method === "POST" && call.url === `${artifactsUrl}/${ARTIFACT_ID}/versions`)?.body)
+      .toMatchObject({ expected_artifact_revision: "0", expected_task_revision: "2", content: "# 人工修订" });
+    const rows = mounted.wrapper.get('[data-testid="artifact-versions"]').findAll(".version-row");
+    expect(rows.find((row) => row.text().includes("v1"))?.text()).toContain("本轮接受");
+    expect(rows.find((row) => row.text().includes("v2"))?.text()).not.toContain("本轮接受");
   });
 });
 

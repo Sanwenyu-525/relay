@@ -1,7 +1,8 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { stat } from 'node:fs/promises';
-import { isAbsolute, dirname, resolve } from 'node:path';
+import { realpath, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, isAbsolute, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TextDecoder } from 'node:util';
 
@@ -130,6 +131,26 @@ function readDesktopFrame(): Promise<DesktopStartupFrame> {
   });
 }
 
+async function readAcceptanceFileWriteHoldMs(dataRoot: string,
+  desktopFrame: DesktopStartupFrame | undefined): Promise<number | undefined> {
+  const raw = process.env.M06_ACCEPTANCE_FILE_WRITE_HOLD_MS;
+  if (raw === undefined) return undefined;
+  const holdMs = Number(raw);
+  if (process.platform !== 'win32' || desktopFrame === undefined ||
+      !/^[1-9][0-9]*$/u.test(raw) || holdMs > 120_000) {
+    throw new Error('supervisor configuration invalid');
+  }
+  const physicalDataRoot = await realpath(dataRoot);
+  const physicalTempRoot = await realpath(tmpdir());
+  const sessionRoot = dirname(physicalDataRoot);
+  if (basename(physicalDataRoot).toLowerCase() !== 'data' ||
+      !/^relay-m02-acceptance-[0-9a-f]{32}$/iu.test(basename(sessionRoot)) ||
+      dirname(sessionRoot).toLowerCase() !== physicalTempRoot.toLowerCase()) {
+    throw new Error('supervisor configuration invalid');
+  }
+  return holdMs;
+}
+
 async function main(): Promise<void> {
   if (process.env.RELAY_SUPERVISOR_DESKTOP_MODE !== undefined && !desktopMode) {
     throw new Error('supervisor configuration invalid');
@@ -144,6 +165,7 @@ async function main(): Promise<void> {
       dataRoot === undefined || !validDataRoot) {
     throw new Error('supervisor configuration invalid');
   }
+  const testHoldAfterGatewayEffectMs = await readAcceptanceFileWriteHoldMs(dataRoot, desktopFrame);
   const database = new RelayDatabase({
     databaseUrl, databasePoolMax: 4, databaseConnectTimeoutMs: 5_000,
   }, () => controller.abort());
@@ -225,6 +247,7 @@ async function main(): Promise<void> {
             leaseMs: Number(process.env.RELAY_WORKER_LEASE_MS ?? '30000'),
             testHoldMs: Number(process.env.RELAY_WORKER_TEST_HOLD_MS ?? '0'),
           } : {}),
+          ...(testHoldAfterGatewayEffectMs === undefined ? {} : { testHoldAfterGatewayEffectMs }),
           onSpawn: (spawned, workerId) => {
             child = spawned;
             process.stdout.write(`${JSON.stringify({ type: 'worker_started',

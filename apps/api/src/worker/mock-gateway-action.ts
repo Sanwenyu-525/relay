@@ -4,15 +4,16 @@ import { sql } from 'kysely';
 
 import {
   claimGatewayWorker, claimRunForGateway, denyGraphActionBeforeInvocation, dispatchGatewayAction,
-  failGraphReadAfterInvocation, prepareGatewayAction, releaseGatewayWorker, type GatewayOrigin,
+  failGraphActionAfterInvocation, prepareGatewayAction, releaseGatewayWorker, type GatewayOrigin,
 } from '../application/gateway-actions.js';
 import type { ClaimedRunCommand } from '../application/run-dispatch.js';
 import { DomainError, resourceNotFound } from '../application/domain-error.js';
 import { applySafeControl } from '../application/control-requests.js';
 import { createRepositories } from '../application/unit-of-work.js';
 import type { DbExecutor } from '../infrastructure/database.js';
-import { readFileReadAction, readMockGatewayAction, readWebFetchAction,
-  type FileReadActionIntent, type MockGatewayActionIntent,
+import type { JsonObject } from '../infrastructure/json.js';
+import { readFileReadAction, readFileWriteAction, readMockGatewayAction, readWebFetchAction,
+  type FileReadActionIntent, type FileWriteActionIntent, type MockGatewayActionIntent,
   type WebFetchActionIntent } from '../workflow/execution-contract.js';
 
 export interface MockGatewayStepResult {
@@ -25,6 +26,7 @@ export interface MockGatewayStepResult {
  * file read or a real bounded public web read. All run through Gateway admission. */
 type MockIntent =
   | ({ readonly kind: 'WRITE' } & MockGatewayActionIntent)
+  | ({ readonly kind: 'FILE_WRITE' } & FileWriteActionIntent)
   | ({ readonly kind: 'READ' } & FileReadActionIntent)
   | ({ readonly kind: 'WEB' } & WebFetchActionIntent);
 
@@ -32,12 +34,14 @@ function readFrozenIntent(snapshot: Parameters<typeof readMockGatewayAction>[0])
   const write = readMockGatewayAction(snapshot);
   const read = readFileReadAction(snapshot);
   const web = readWebFetchAction(snapshot);
-  if ([write, read, web].filter((intent) => intent !== undefined).length > 1) {
+  const fileWrite = readFileWriteAction(snapshot);
+  if ([write, read, web, fileWrite].filter((intent) => intent !== undefined).length > 1) {
     throw new Error('frozen contract carries more than one Mock intent');
   }
   if (write !== undefined) return { kind: 'WRITE', ...write };
   if (read !== undefined) return { kind: 'READ', ...read };
   if (web !== undefined) return { kind: 'WEB', ...web };
+  if (fileWrite !== undefined) return { kind: 'FILE_WRITE', ...fileWrite };
   return undefined;
 }
 
@@ -80,11 +84,12 @@ export async function executeMockGatewayStep(db: DbExecutor, input: {
   // Existing Runs bound their read to DRAFT. A pending read in a new Run is
   // bound to BUILD_CONTEXT so its result is available before model generation.
   const step = operation === undefined
-    ? (action.kind === 'WRITE' || draft?.status === 'SUCCEEDED' ? draft : built)
+    ? (action.kind === 'WRITE' || action.kind === 'FILE_WRITE' || draft?.status === 'SUCCEEDED' ? draft : built)
     : operation.step_id === draft?.id ? draft : operation.step_id === built?.id ? built : undefined;
   if (step?.status !== 'SUCCEEDED' ||
-      (action.kind === 'WRITE' && step.step_kind !== 'DRAFT') ||
-      (action.kind !== 'WRITE' && step.step_kind === 'DRAFT' && draft?.status !== 'SUCCEEDED')) {
+      ((action.kind === 'WRITE' || action.kind === 'FILE_WRITE') && step.step_kind !== 'DRAFT') ||
+      (action.kind !== 'WRITE' && action.kind !== 'FILE_WRITE' &&
+        step.step_kind === 'DRAFT' && draft?.status !== 'SUCCEEDED')) {
     throw new Error('Mock Gateway action has no completed owner step');
   }
   const delivery = { commandId: claim.commandId, invocationEpoch: claim.epoch };
@@ -101,6 +106,8 @@ export async function executeMockGatewayStep(db: DbExecutor, input: {
         ? ['GATEWAY_TARGET_DENIED', 'RESOURCE_NOT_FOUND'] as const : []),
       ...(action.kind === 'WEB'
         ? ['GATEWAY_TARGET_DENIED'] as const : []),
+      ...(action.kind === 'FILE_WRITE'
+        ? ['GATEWAY_TARGET_DENIED', 'RESOURCE_NOT_FOUND'] as const : []),
     ]).has(error.code);
     if (authorizationRefusal) {
       const denied = await denyGraphActionBeforeInvocation(db, {
@@ -123,12 +130,12 @@ export async function executeMockGatewayStep(db: DbExecutor, input: {
     ...(action.kind === 'WEB' ? {} : { resourceId: action.resource_id }),
     workerId: claim.workerId, workerEpoch, delivery,
   });
-  const failedRead = async (workerEpoch?: bigint): Promise<MockGatewayStepResult> => {
-    const settled = await failGraphReadAfterInvocation(db, {
+  const failedNoEffect = async (workerEpoch?: bigint): Promise<MockGatewayStepResult> => {
+    const settled = await failGraphActionAfterInvocation(db, {
       workspaceId: claim.workspaceId, runId: claim.runId, operationId: action.operation_id,
       workerId: claim.workerId, ...(workerEpoch === undefined ? {} : { workerEpoch }), delivery,
     });
-    if (settled === 'STALE') throw new Error('Failed Gateway read no longer owns this Run');
+    if (settled === 'STALE') throw new Error('Failed Gateway action no longer owns this Run');
     // A pending control is applied after this outer command is settled.
     return { status: 'DENIED', operationId: action.operation_id };
   };
@@ -165,6 +172,19 @@ export async function executeMockGatewayStep(db: DbExecutor, input: {
           intentKey: action.intent_key, connectionId: action.connection_id,
           origin, actionType: 'READ_FILE',
           target: join(resource.canonical_root, action.relative_target), params: {},
+        });
+      } else if (action.kind === 'FILE_WRITE') {
+        const run = await repositories.runs.readRun(claim.runId);
+        const task = run === undefined ? undefined : await repositories.tasks.readTask(run.task_id);
+        const resource = await repositories.gateway.readResource(action.resource_id);
+        if (resource?.workspace_id !== claim.workspaceId || resource.project_id !== task?.project_id) {
+          return deniedBeforeInvocation(resourceNotFound('File write resource'));
+        }
+        prepared = await prepareGatewayAction(db, {
+          workspaceId: claim.workspaceId, operationId: action.operation_id,
+          intentKey: action.intent_key, connectionId: action.connection_id,
+          origin, actionType: 'APPLY_CHANGESET', target: resource.canonical_root,
+          params: { changes: action.changes as unknown as JsonObject[] },
         });
       } else {
         prepared = await prepareGatewayAction(db, {
@@ -218,7 +238,7 @@ export async function executeMockGatewayStep(db: DbExecutor, input: {
     return { status: 'SUCCEEDED', operationId: action.operation_id };
   } else if (operation?.status === 'FAILED' && action.kind !== 'WRITE') {
     const run = await repositories.runs.readRun(claim.runId);
-    return failedRead(run?.worker_id === claim.workerId ? run.worker_epoch : undefined);
+    return failedNoEffect(run?.worker_id === claim.workerId ? run.worker_epoch : undefined);
   } else if (operation?.status === 'DENIED' || operation?.status === 'FAILED') {
     return { status: 'DENIED', operationId: action.operation_id };
   } else if (operation?.status === 'DISPATCHING' || operation?.status === 'UNKNOWN') {
@@ -232,7 +252,7 @@ export async function executeMockGatewayStep(db: DbExecutor, input: {
       workspaceId: claim.workspaceId, operationId: action.operation_id, origin,
       signal: input.signal,
       // Read-only intents are bounded by the Run worker's own lease deadline.
-      ...(action.kind !== 'WRITE' ? await (async () => {
+      ...(action.kind !== 'WRITE' && action.kind !== 'FILE_WRITE' ? await (async () => {
         const run = await repositories.runs.readRun(claim.runId);
         return run?.worker_lease_until === null || run === undefined ? {} : { deadline: run.worker_lease_until };
       })() : {}),
@@ -244,7 +264,7 @@ export async function executeMockGatewayStep(db: DbExecutor, input: {
     await releaseGatewayWorker(db, { workspaceId: claim.workspaceId, runId: claim.runId,
       workerId: claim.workerId, workerEpoch, delivery });
   } else if (dispatched.status === 'FAILED' && action.kind !== 'WRITE') {
-    return failedRead(workerEpoch);
+    return failedNoEffect(workerEpoch);
   }
   return { status: dispatched.status === 'SUCCEEDED' ? 'SUCCEEDED' : 'UNKNOWN',
     operationId: action.operation_id };

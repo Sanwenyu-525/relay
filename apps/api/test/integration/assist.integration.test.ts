@@ -1260,7 +1260,7 @@ test('Task Skill acceptance rejects UNKNOWN from a terminal Run without releasin
       targetPrefix: '.', decision: 'AUTO', maxPayloadBytes: 4096 });
     await r.gateway.insertResource({ id: resourceId, workspaceId: f.workspaceId,
       projectId: f.projectId, canonicalRoot: 'C:\\relay-unknown-test',
-      identityKey: `test:${resourceId}` });
+      identityKey: `test:${resourceId}`, fileWriteRootId: null });
     await r.gateway.insertOperation({ id: operationId,
       workspace_id: f.workspaceId, project_id: f.projectId,
       origin: 'RUN', task_id: f.taskId, run_id: runId, step_id: stepId,

@@ -19,6 +19,7 @@
 | 当前阶段、阻塞、下一步 | [CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md) | 历史研究日志不另写一份当前进度 |
 | 业务不变量 | [契约包](../contracts/README.md) | 01–04 分别拥有事实、执行、验证、恢复；其他文档引用 |
 | 当前架构与模块职责 | [领域模型](architecture/domain-model.md) | 架构主入口；运行/信息/工具专题补充实现边界 |
+| 共享知识来源与长期信息 | [信息与计划](architecture/information-planning.md#11-人和-ai-共用知识来源) | 人与 AI 同源的版本、原件及收录边界；阅读交互归工作台第 12 节，产品定义归 Master Spec 第 33/90 节 |
 | 扩展组合、Skill 与蓝图协议 | [Relay 扩展模型](architecture/relay-skills.md) | Pack/Profile/Recipe/Proposal 复用既有模块，设计仍 Proposed；API/存储字段和 Eval 规格各归所属文档 |
 | 主栈、可选依赖与冻结门槛 | [技术选型](architecture/technology-selection.md) | 不在 README、提示词或 UI 文档复制版本表 |
 | 决策理由与替代关系 | [ADR 入口](#3-决策与历史) | 保存为什么；不代替当前实现证据 |
@@ -26,7 +27,7 @@
 | 数据库物理约束 | [物理设计](database/physical-design-postgresql.md) | DDL 片段不是已执行 migration；未来以实际 migration 核验 |
 | API 命令与错误 | [HTTP 契约](api/http-command-contract.md) | 模块补充见 [module-api](api/module-api.md)，同一字段只在所属接口定义 |
 | 页面结构与业务交互 | [工作台交互](frontend/workbench-design.md) | 路由、命令、状态与权限，不拥有 token 色值 |
-| 页面效果图与开发输入 | [页面开发提示词](frontend/page-development-prompts.md)、[效果图目录](frontend/mockups/2026-09-19/README.md) | 32张生成图与1张原始参考；33个页面/状态单元，不代表实现或新增路由 |
+| 页面效果图与开发输入 | [页面开发提示词](frontend/page-development-prompts.md)、[效果图目录](frontend/mockups/2026-09-19/README.md)、[最新知识库图](frontend/mockups/2026-09-27/README.md) | 原批次32张生成图与1张原始参考，另补充3张知识库图；仍为33个页面/状态单元，不代表实现或新增路由 |
 | UI 视觉、组件与适配 | [设计系统](frontend/design-system.md) | 基于现有图；组件外观与可访问性交互，不重定义业务状态 |
 | UI 数值与语义别名 | [design-tokens.json](frontend/design-tokens.json) | 数值唯一来源；图片、提示词和 Markdown 不另维护可冲突数值表 |
 | 前端预览实现与验收 | [前端预览记录](development/ui-preview-acceptance.md) | 按批次记录已实现交互、自测证据与待验证项；不是桌面验收 |
@@ -36,6 +37,7 @@
 | 部署、身份与运维 | [本机部署](deployment/local-deployment.md) | 当前为设计；实际启动命令在有工程后写根 README |
 | 研究证据 | [P00 研究记录](research/p00-source-study.md) | 固定来源、运行结果、限制；不替代生产能力证明 |
 | 开发/文档变更的原因 | [设计交付审计](development/design-audit.md) | 按时间追加记录，不承担最新状态表 |
+| 25–27 日产品补充实施证据 | [25 日恢复与成果](development/product-supplement-2026-09-25.md)、[26 日人工待处理与验收](development/product-supplement-2026-09-26.md)、[27 日知识阅读与收录](development/product-supplement-2026-09-27.md) | 条目映射、实际代码、自检与协调复核边界；当前进度仍归 CODEX_NEXT_STEP |
 | 实施任务入口 | [prompts](../prompts/README.md) | 引用主文档；提示词只能在当前用户授权范围内执行 |
 
 代码描述实际实现；契约描述目标约束；ADR 描述取舍；测试结果描述已证实范围。冲突时核对这四类证据，不能用“谁更新得晚”自动裁决，也不能因历史图里有某项功能就扩大范围。
@@ -58,7 +60,7 @@
 
 ## 3. 决策与历史
 
-当前决策集合：[ADR-001](decisions/ADR-001-domain-boundaries.md)、[ADR-004](decisions/ADR-004-user-import-origin.md)、[ADR-005](decisions/ADR-005-reuse-first.md)、[ADR-006](decisions/ADR-006-typescript-first.md)、[ADR-007](decisions/ADR-007-windows-desktop.md)、[ADR-008](decisions/ADR-008-declarative-skills.md)、[ADR-009](decisions/ADR-009-rule-revision-fence.md)、[ADR-010](decisions/ADR-010-agent-stack-react-desktop.md)、[ADR-011](decisions/ADR-011-project-archive-serialization.md)。分别以各文件状态为准；此列表不统一批准它们。[ADR-002](decisions/ADR-002-postgresql-jdbc.md)保留早期持久化技术提案，[ADR-003](decisions/ADR-003-browser-workbench.md)保留已被 Windows 桌面要求替代的浏览器提案。
+当前决策集合：[ADR-001](decisions/ADR-001-domain-boundaries.md)、[ADR-004](decisions/ADR-004-user-import-origin.md)、[ADR-005](decisions/ADR-005-reuse-first.md)、[ADR-006](decisions/ADR-006-typescript-first.md)、[ADR-007](decisions/ADR-007-windows-desktop.md)、[ADR-008](decisions/ADR-008-declarative-skills.md)、[ADR-009](decisions/ADR-009-rule-revision-fence.md)、[ADR-010](decisions/ADR-010-agent-stack-react-desktop.md)、[ADR-011](decisions/ADR-011-project-archive-serialization.md)、[ADR-012](decisions/ADR-012-windows-file-io-handle-boundary.md)。分别以各文件状态为准；此列表不统一批准它们。[ADR-002](decisions/ADR-002-postgresql-jdbc.md)保留早期持久化技术提案，[ADR-003](decisions/ADR-003-browser-workbench.md)保留已被 Windows 桌面要求替代的浏览器提案。
 
 2026-09-20 新增 [ADR-008](decisions/ADR-008-declarative-skills.md)：声明式 Skill 与蓝图应用，技术方案状态 Proposed；同日用户确认纳入评审后的首批闭环方向，目录统一见 Skill 专题。V1.5 AI Schema 生成的范围前移仍待确认，详见范围矩阵。
 

@@ -1,0 +1,7 @@
+M06 packaged Windows Job no-receipt acceptance attempt
+release_sha256=577a731e3022e540e38edc6a152301afc31b5a585e75eabb999919bbd5863efc session_id=8f89ffa884594cbe88c7f8c369f133dd
+before_kill invocation_id=13b785db-53ca-416c-ae67-627245c02fec worker_id=worker:desktop:9bf8924a-ad6d-4cd6-85c6-de96f30f5fa3:be20b8d9-0d06-4426-be3b-bab04a5dc536 receipt=null original_effect_sha256=69860c681ef0757d47f83abf3686debe587b8e898826e6295eccf11384a19736
+after_kill old_host_api_supervisor_worker_alive=0 original_receipt=null invocation_count=1
+after_restart stop_evidence=armed_job_absent_after_last_handle_closed original_worker_bound=true operation=UNKNOWN invocation=UNKNOWN ledger=UNKNOWN claim=QUARANTINED observation=NO_RECEIPT can_dispose=true invocation_count=1
+after_webview_disposition run=FAILED task=READY claim=RELEASED invocation=UNKNOWN invocation_count=1 before_screenshot=D:\Develop\Relay-Agent\docs\testing\evidence\m06-webview-no-receipt-before.png after_screenshot=D:\Develop\Relay-Agent\docs\testing\evidence\m06-webview-no-receipt-after.png
+M06_WINDOWS_JOB_NO_RECEIPT=PASS

@@ -621,8 +621,58 @@ API 不需要 Saver；Worker 与 supervisor 在领取前只读核对业务 schem
 
 追加 [0031_m06_change_sets.sql](../../apps/api/migrations/0031_m06_change_sets.sql)，新建两张写入即固定的证据表，不改 0001–0030 的内容或 SHA，无自动 down migration（删表只丢失逐文件落盘账本，不触碰已结算的 operation/invocation 事实）。
 
-`change_sets` 是账本头，与产生它的 invocation 一对一：`uq_change_set_invocation UNIQUE (invocation_id)` 是幂等锚点——执行结算与恢复核对都按此回到同一行，核对不追加第二份历史、也不新建伪造成功；`uq_change_set_identity UNIQUE (id, invocation_id)` 供子表复合外键证明文件行确属那份变化集。作用域由复合外键与来源动作保持一致（`fk_change_set_invocation`→`invocation_attempts(id,operation_id)`、`fk_change_set_project`→`projects`、`fk_change_set_run`→`runs(workspace_id,id)`、`fk_change_set_resource`→`managed_resources(workspace_id,project_id,id)`），使逐文件证据能按 Run/Resource 直接取用并受归档栅栏保护。`action_type` 固定为 `APPLY_CHANGESET`/`WRITE_FILE` 两种受管写动作（0030 登记，均 RUN 来源且绑定资源根），`canonical_root` 记录执行时使用的规范根（变化集为受管资源根、单文件为其父目录），相对路径只有在该根语境下才可复现。`status` 取 `SUCCEEDED/PARTIAL/UNKNOWN`（部分应用不整体成功），`evidence_source` 标明整体状态来自适配器执行报告（`EXECUTION`）还是事后按真实内容回读（`RECONCILIATION`），`file_count >= 1` 用于识别「结果丢失后一条证据都没落下」。
+`change_sets` 是账本头，与产生它的 invocation 一对一：`uq_change_set_invocation UNIQUE (invocation_id)` 是幂等锚点——执行结算与恢复核对都按此回到同一行，核对不追加第二份历史、也不新建伪造成功；`uq_change_set_identity UNIQUE (id, invocation_id)` 供子表复合外键证明文件行确属那份变化集。0031 的 `fk_change_set_invocation` 证明 invocation 与 operation 成对，项目、Run、资源外键却只分别证明各行存在，**未证明它们属于同一 operation**；该遗漏由下节 0032 修正。`action_type` 固定为 `APPLY_CHANGESET`/`WRITE_FILE` 两种受管写动作（0030 登记，均 RUN 来源且绑定资源根），`canonical_root` 记录执行时使用的规范根（变化集为受管资源根、单文件为其父目录），相对路径只有在该根语境下才可复现。`status` 取 `SUCCEEDED/PARTIAL/UNKNOWN`（部分应用不整体成功），`evidence_source` 标明整体状态来自适配器执行报告（`EXECUTION`）还是事后按真实内容回读（`RECONCILIATION`），`file_count >= 1` 用于识别「结果丢失后一条证据都没落下」。
 
 `change_set_files` 是逐文件观测，主键 `(change_set_id, relative_path)`：声明侧（`action`/`baseline_sha256`/`target_sha256`）取冻结输入，观测侧（`observed_baseline_sha256`/`actual_sha256`/`status`/`error`）取真实落盘或回读。四条 CHECK 把「成功必须可证」写进库：非 CREATE 或未成功的修改/删除必须留可信冻结基线（`ck_change_set_files_baseline`）；`DELETE` 无目标内容（`ck_change_set_files_delete`）；声称 `APPLIED` 必须有与目标一致的实际摘要、删除的成功是 `actual_sha256 IS NULL`（`ck_change_set_files_applied`）；未成功必须留原因（`ck_change_set_files_reason`）。摘要列只接受真正的 64 位十六进制（`ck_change_set_files_hashes`），`relative_path` 非空且不超 1024 字节，`diff_ref` 预留为 jsonb 对象但本增量不生成。
 
 授权落实不可抹除：`relay_app` 对 `change_sets` 只有 `SELECT/INSERT` 加上受限的 `UPDATE (status, evidence_source, file_count, updated_at)`（仅供核对收敛整体状态，身份/作用域/规范根等声明列由权限禁止改写），对 `change_set_files` 只有 `SELECT/INSERT`——两表均无 `DELETE`，逐文件行连 `UPDATE` 都不授予，核对阶段以 `ON CONFLICT DO NOTHING` 只补记执行缺失的路径。`ChangeSetRepository`（`apps/api/src/files/change-set-repository.ts`）是这两张表的唯一 SQL Owner；磁盘 I/O 全在事务外，落库与调用结果结算同处一个短事务。本轮为开发自检（real-tools 定向 23 例）：真实隔离 PG 反例（`real-tools-gateway.integration.test.ts`）覆盖成功写唯一一份 `SUCCEEDED`、基线冲突 `PARTIAL` 且冲突文件记磁盘原值、崩溃后核对收敛 `SUCCEEDED`/`UNKNOWN` 且唯一一份、多文件单冲突按路径逐条固化、多文件全成功（`CREATE`/`MODIFY`/`DELETE` 各一）按账本 `canonical_root` 回读磁盘一致并在库层验证约束与授权（同一 invocation 换主键重复插撞 `23505`；改写或删除逐文件行、删除账本头、改账本头身份列均 `42501`）。不构成 M06 出口放行，逐文件 diff 生成与展示 UI 未实现。
+
+## 45. 0032 M06 账本来源作用域约束（2026-09-27，定向独立复验）
+
+追加 [0032_m06_change_set_source_scope.sql](../../apps/api/migrations/0032_m06_change_set_source_scope.sql)，不修改已应用的 0031 或其 SHA。`logical_operations` 新增受管写能力与 `WRITE_FILE`/`APPLY_CHANGESET` 动作类型的配对 CHECK，以及覆盖 `(id, workspace_id, project_id, run_id, resource_id, action_type)` 的可引用唯一键；`change_sets.fk_change_set_source` 用单个复合外键绑定同一来源动作的项目、Run、资源与动作类型。0031 原有 invocation 成对外键仍证明这是该 operation 的调用。此约束针对审查发现的“同 Workspace 内拿真实 invocation 搭配别的有效项目/Run/资源”错账路径，不改变磁盘动作或公开 API。
+
+迁移会校验既有 `change_sets`：如果曾写入来源不一致的行，0032 应失败并要求先核对证据，不能静默改写不可变逐文件账本。无自动 down migration；回退约束会重新开放错账准入，故不得把删除约束当常规恢复。`canonical_root` 由应用用例从已锁定的 operation 目标推导并保持不可变，数据库复合外键不证明磁盘路径真实内容；实际落盘摘要及恢复回读仍须由文件适配器与 Gateway 反例核对。
+
+协调侧在一次性 PostgreSQL 18.6 上独立复跑完整迁移链（32 行迁移账本）、migration 8/8 与 real-tools 37/37；新增真实 PG 反例分别用有效的其他动作类型、资源和 Project 组装错账，复合外键均拒绝。执行回执与账本最终结算分别在短事务写入：前者只证明原 Invocation 的适配器曾返回，后者与 Invocation 终态同事务提交；恢复仍须按冻结输入与当前文件状态核对，不把回执或文件终态单独算成功。本节是 0032 与增量 A 的定向证据，不表示所有历史数据迁移场景或 M06 总验收已完成。
+
+2026-09-27 增量 B 后续修复：部分文件已应用时原 Operation/Invocation 保持 `UNKNOWN`，执行阶段形成的 `change_sets.status=PARTIAL` 与不可改写的逐文件行保留其历史观测；后续恢复回读不能将该账本头覆盖为 `UNKNOWN` 或伪装成 `SUCCEEDED`。这只调整既有 `ChangeSetRepository.recordReconciliation` 的收敛条件，没有新 migration 或表。全文件确定无写入的冲突/冻结根拒绝则可把原调用结算为 `FAILED` 并释放 claim；仍记录 `PARTIAL` 账本表示请求未全部应用，不表示曾有已应用文件。人工处置和 diff 证据持久化仍待实现。
+
+## 46. 0033 M06 桌面 Job 停机证明（2026-09-27，开发自检）
+
+追加 [0033_m06_file_write_stop_proofs.sql](../../apps/api/migrations/0033_m06_file_write_stop_proofs.sql)。`file_write_stop_proofs` 以原 `invocation_id` 为主键，只允许 `relay_app` SELECT/INSERT；复合外键同时约束原 Operation/Run/Invocation/Worker ID 与 epoch、Run 投递命令，CHECK 只接受 `FILE_WRITE` 两种动作和桌面 Job 停止证据枚举，`launch_id` 必须对应桌面 Worker ID。可信桌面启动帧带来的已停止 Job 在 `recoverStoppedDesktopLaunch` 的旧 claim 会话锁内、Run fence 前校验并插入；重复恢复只读原行，不改证据。租约过期、普通 child close 与客户端布尔值都不能生成此证明。旧 `run_invocations.stop_evidence` 可随重新领取清空，因此不可作为人工解除隔离的持久前提。
+
+新增复合唯一键仅供上述外键引用，不修改既有 Invocation、Operation 或 RunCommand 内容；旧行无回填，未有可信证据的历史 UNKNOWN 继续隔离。无自动 down migration；删除此表会丢失已停旧 Job 与原调用的持久关联，使依赖它的人工处置无法再授权，不能当作安全回滚。隔离 PostgreSQL 定向 5/5 和 run-dispatch 回归 22/22 通过；尚无真实 Windows Job handle 活进程反例。
+
+## 47. 0034 M06 部分文件写入的人工处置（2026-09-27，开发自检）
+
+追加 [0034_m06_file_write_manual_dispositions.sql](../../apps/api/migrations/0034_m06_file_write_manual_dispositions.sql)：`logical_operations` CHECK 增加终态 `MANUALLY_CLOSED`，`file_write_manual_dispositions` 对原 Invocation 唯一且只授予 SELECT/INSERT。处置行用复合外键绑定同一变化集的 Invocation、Operation、Workspace、Project、Run、Resource，另与 0033 停机证明绑定；保存本机人工主体、命令 ID、唯一受支持决定 `KEEP_CURRENT_AND_FAIL_RUN`、逐文件当前摘要及整体观察 SHA-256，不保存文件正文。旧 Operation 的结果引用指向 disposition，原 Invocation `UNKNOWN` 与原 `PARTIAL` 账本不改写。后续无回执崩溃场景复用同一表和外键，原变化集可保持 `UNKNOWN`；观察 JSON 额外保存目标与候选残留的 File ID/摘要，不证明候选归属，也不需要修改 0034 表结构。
+
+应用用例先在业务事务外限量回读逐文件当前状态，再在 Task→Run 事务中核对 revision、原隔离 claim、停机证明、投递、唯一未决动作及回读所依据的账本身份；命令回执、处置行、Operation 终态、claim 释放、旧投递结清、待处理控制拒绝、Run 失败、Task 返 READY 与 Activity 同事务提交。项目归档的 `UNKNOWN_EFFECT` 查询只排除 Operation 已为 `MANUALLY_CLOSED` 且有匹配处置行的历史 Invocation，其他 UNKNOWN 仍阻断。旧数据无自动回填；0034 会校验已有账本/证明键，错配必须先核对，不能删除或改写原证据。无自动 down migration；旧应用不认识新终态，回退须先停用新入口并保留新表/状态解释能力。数据库约束不消除文件回读到事务提交之间的外部编辑竞争。
+
+## 48. 0035 M06 冻结计划文本差异证据（2026-09-27，开发自检）
+
+追加 [0035_m06_file_write_frozen_diff.sql](../../apps/api/migrations/0035_m06_file_write_frozen_diff.sql)。`file_write_frozen_diffs` 只为新 `FILE_WRITE` 的 `MODIFY/DELETE` 保存准备时核验的基线正文或不可用原因，`CREATE` 的空基线由动作语义推出；目标正文仍在原 `logical_operations.params`。主键 `(operation_id,relative_path)` 防止重复行，联合外键绑定原 Operation 的 Workspace、Project、Run、Resource、Capability 和动作类型，CHECK 限定相对路径、动作、64 KiB 文本上限及基线正文 SHA-256。`relay_app` 仅有 SELECT/INSERT，基线证据与 Operation 同事务写入；同一意图不会刷新已有行。
+
+先以短事务核对 Workspace authority、Task/Run、资源、Connection 与 Permission，再在事务外限量读取最多 16 个文件的基线，最终以另一个短事务重新核对授权并把冻结证据与 Operation 同步提交；不在持锁事务内等待原生助手。可展示正文每文件最多 64 KiB。文件不安全、内容不匹配、非可展示文本或超过上限只记原因，不把当前磁盘内容伪装成旧基线。旧 Operation 不回填：缺失证据在查询中明确为 `BASELINE_UNAVAILABLE`。无自动 down migration；删除此表将丢失新动作的冻结基线文本，旧版本无法重建，回退需保留该证据或明确接受文本差异不可用。此前真实隔离 PostgreSQL migration 8/8 与 `real-tools-gateway` 42/42 已通过；Windows 句柄级读写的后续验证另见 M06 验收记录。
+
+## 49. 0036 M06 文件路径物理身份（2026-09-27，开发中）
+
+追加 [0036_m06_file_write_path_identity.sql](../../apps/api/migrations/0036_m06_file_write_path_identity.sql)。`file_write_path_identity` 仅对**新** `FILE_WRITE` Operation 保存受管根规范路径及卷号/File ID、逐文件相对路径、父目录链和目标身份；主键为 `operation_id`，复合外键把 Workspace、Project、Run、Resource、Capability 与动作类型绑定到同一来源 Operation。`relay_app` 仅有 SELECT/INSERT，既有行不自动回填，也不改写 0030–0035 或其摘要。
+
+准备时先授权，再由 Windows 原生助手捕获身份，最终在短事务中复核授权并与新 Operation 一同插入。执行和恢复只用原行核对根、父目录与目标；旧 Operation 缺失身份不能靠当前磁盘补造原身份，仍按 UNKNOWN/隔离处理。新 `WRITE_FILE` 账本以受管资源根作为 `canonical_root`，逐文件路径相对该根；历史账本原值不改。单文件上限 1 MiB、单次最多 16 文件，超限不能冻结物理证据。无自动 down migration；删除此表会令依赖它的新 Windows 写动作无法安全恢复。迁移 8/8 已在隔离 PostgreSQL 验证；原生助手与桌面恢复链的确切结果见 M06 验收记录，不能由迁移测试推断文件系统安全。
+
+## 50. 0037 M06 单文件冻结差异的根相对路径（2026-09-27，开发自检）
+
+追加 [0037_m06_file_write_frozen_diff_root_path.sql](../../apps/api/migrations/0037_m06_file_write_frozen_diff_root_path.sql)，只替换 0035 的 `ck_frozen_diff_action`：`WRITE_FILE` 仍限 `MODIFY`，但允许根相对的子目录路径；0035 的路径格式、长度、冻结摘要和只追加权限约束不变。原因是新 Windows 单文件账本以受管根为 `canonical_root`，冻结计划差异需与账本使用同一路径。历史 basename 行不更新，旧迁移及 SHA 不改。回退此约束会拒绝新嵌套路径的写入，不作为无损回滚。完整迁移链 37 行、迁移测试 8/8、真实隔离 PG real-tools 49/49 通过。
+
+## 51. 0038 M06 受管资源登记时物理身份（2026-09-28，开发自检）
+
+追加 [0038_m06_managed_root_identity.sql](../../apps/api/migrations/0038_m06_managed_root_identity.sql)，为 `managed_resources` 增加可空 `file_write_root_id`（卷号/File ID 格式 CHECK）。旧行保持 NULL；数据库迁移不能从当前文件系统推断登记时身份，也不自动更新历史 Operation。新 Windows 资源登记在业务事务外调用原生助手捕获当时目录身份，并与资源行同事务写入；助手认为目录不安全时可以登记供其他能力使用，但 `file_write_root_id` 留空，新 Windows `FILE_WRITE` 准备拒绝。非 Windows 登记同样留空，其原有路径实现不因此改为 Windows 句柄保证。
+
+0038 撤销 `relay_app` 对 `managed_resources` 的表级 UPDATE，只重新授予 `status,revision,resource_epoch` 列更新；目录路径、规范键和登记物理身份不由应用角色改写。准备新 Windows 写动作时要求非空且与当前助手捕获的根 File ID 相同，再冻结 0036 的 Operation 身份；旧已准备动作沿其原冻结证据执行/核对。停用旧资源并重新登记会生成新资源 ID，原 claim、Operation 与审计历史不搬迁。无自动 down migration；去掉身份列和门槛会重新开放原资源路径被普通目录替换的准入风险，回退必须先停止新写动作。真实隔离 PostgreSQL 迁移 8/8、Windows 替换/旧空身份定向 2/2、完整 real-tools 51/51 已通过，测试数据库及进程清理；确切桌面包的相邻 Job/WebView2 旧路径已复验，新身份提示的人工交互与 M06 总出口另验。
+
+## 52. 0039 M06 已停用资源的同路径重新登记（2026-09-28，开发自检）
+
+追加 [0039_m06_active_resource_root.sql](../../apps/api/migrations/0039_m06_active_resource_root.sql)：原 `uq_managed_resource_project_root` 覆盖已停用行，会令 0038 的“停用旧资源并重新登记”实际不可执行。0039 将其替换为仅覆盖 `status='ACTIVE'` 的 `(project_id,identity_key)` 唯一索引；登记命令的重复检查也只看活动资源，并仍持有跨 Workspace 登记 advisory 事务锁。旧资源行、Operation、claim、策略和审计记录不删除或回填；同项目同路径活动资源仍最多一个，停用须先处理占用或隔离。新登记得到新资源 ID 和捕获时根 File ID，旧 Run/Task 的冻结资源 ID 不自动改绑；用户须重新检查连接、Permission 与委托引用。
+
+迁移不改写已有行或权限。回退该部分唯一索引并恢复旧无条件唯一约束之前，若已有同路径历史停用行，约束会失败；不得删除历史行换取回退。真实隔离 PostgreSQL 完整迁移 8/8、Windows 重新登记定向 3/3、完整 Gateway 28/28 与 real-tools 52/52 已通过。0039 已包含在 EXE SHA-256 为 `577a731e3022e540e38edc6a152301afc31b5a585e75eabb999919bbd5863efc` 的确切桌面目录包内，清单核验及相邻 Windows Job/WebView2 路径通过；无回执强杀的桌面同场景另验。

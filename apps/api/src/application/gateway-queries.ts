@@ -1,12 +1,15 @@
 import type { DbExecutor } from '../infrastructure/database.js';
+import { basename, dirname, relative } from 'node:path';
 import type {
-  GatewayConnectionRow, GatewayPermissionPolicyRow, GatewayPermissionVersionRow,
+  ChangeSetFileRow, ChangeSetRow, GatewayConnectionRow, GatewayPermissionPolicyRow, GatewayPermissionVersionRow,
   InvocationAttemptRow, LogicalOperationRow, ManagedResourceRow,
 } from '../infrastructure/database-schema.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import { toDecimalString } from '../shared/decimal.js';
 import { resourceNotFound } from './domain-error.js';
 import { createRepositories, type Repositories } from './unit-of-work.js';
+import { canonicalRelativePath, computeSha256, MAX_FILE_WRITE_DIFF_TEXT_BYTES,
+  type FileChange } from '../files/file-changeset.js';
 
 async function requireProject(repositories: Repositories, workspaceId: string, projectId: string): Promise<void> {
   const project = await repositories.projects.readProject(projectId);
@@ -78,11 +81,13 @@ export async function listGatewayPolicyVersions(db: DbExecutor, workspaceId: str
 export interface ManagedResourceDto {
   readonly id: string; readonly project_id: string; readonly canonical_root: string;
   readonly status: string; readonly revision: string; readonly resource_epoch: string;
+  readonly file_write_identity_bound: boolean;
 }
 function resourceDto(row: ManagedResourceRow): ManagedResourceDto {
   return { id: row.id, project_id: row.project_id, canonical_root: row.canonical_root,
     status: row.status, revision: toDecimalString(row.revision),
-    resource_epoch: toDecimalString(row.resource_epoch) };
+    resource_epoch: toDecimalString(row.resource_epoch),
+    file_write_identity_bound: row.file_write_root_id !== null };
 }
 export async function listManagedResources(db: DbExecutor, workspaceId: string, projectId: string): Promise<readonly ManagedResourceDto[]> {
   const repositories = createRepositories(db);
@@ -151,4 +156,102 @@ export async function readGatewayOperationDto(db: DbExecutor, workspaceId: strin
   const operation = await repositories.gateway.readOperation(operationId);
   if (operation?.workspace_id !== workspaceId) throw resourceNotFound('Gateway operation');
   return operationDto(repositories, operation);
+}
+
+export interface FileWriteChangeSetDto {
+  readonly id: string; readonly invocation_id: string; readonly run_id: string;
+  readonly resource_id: string; readonly action_type: string; readonly canonical_root: string;
+  readonly status: string; readonly evidence_source: string; readonly file_count: number;
+  readonly created_at: string; readonly updated_at: string;
+  readonly files: readonly {
+    readonly relative_path: string; readonly action: string;
+    readonly baseline_sha256: string | null; readonly observed_baseline_sha256: string | null;
+    readonly target_sha256: string | null; readonly actual_sha256: string | null;
+    readonly status: string; readonly error: string | null; readonly created_at: string;
+  }[];
+}
+
+function fileWriteFileDto(row: ChangeSetFileRow): FileWriteChangeSetDto['files'][number] {
+  return { relative_path: row.relative_path, action: row.action,
+    baseline_sha256: row.baseline_sha256, observed_baseline_sha256: row.observed_baseline_sha256,
+    target_sha256: row.target_sha256, actual_sha256: row.actual_sha256,
+    status: row.status, error: row.error, created_at: row.created_at.toISOString() };
+}
+
+async function fileWriteChangeSetDto(repositories: Repositories, row: ChangeSetRow): Promise<FileWriteChangeSetDto> {
+  return { id: row.id, invocation_id: row.invocation_id, run_id: row.run_id,
+    resource_id: row.resource_id, action_type: row.action_type, canonical_root: row.canonical_root,
+    status: row.status, evidence_source: row.evidence_source, file_count: row.file_count,
+    created_at: row.created_at.toISOString(), updated_at: row.updated_at.toISOString(),
+    files: (await repositories.changeSets.listFiles(row.id)).map(fileWriteFileDto) };
+}
+
+/** Historical ledger projection only; it does not read current disk state or infer acceptance. */
+export async function readFileWriteChangeSets(db: DbExecutor, workspaceId: string, operationId: string): Promise<{
+  readonly operation_id: string; readonly change_sets: readonly FileWriteChangeSetDto[];
+}> {
+  const repositories = createRepositories(db);
+  const operation = await repositories.gateway.readOperation(operationId);
+  if (operation?.workspace_id !== workspaceId || operation.capability_key !== 'FILE_WRITE' ||
+      operation.origin !== 'RUN') throw resourceNotFound('File write operation');
+  const rows = await repositories.changeSets.listByOperation(operationId);
+  return { operation_id: operationId,
+    change_sets: await Promise.all(rows.map((row) => fileWriteChangeSetDto(repositories, row))) };
+}
+
+/** Frozen intent only: this projection never rereads a mutable target file. */
+export async function readFileWriteFrozenDiff(db: DbExecutor, workspaceId: string, operationId: string): Promise<{
+  readonly operation_id: string;
+  readonly basis: 'FROZEN_INTENT';
+  readonly files: readonly {
+    readonly relative_path: string;
+    readonly action: FileChange['action'];
+    readonly baseline_sha256: string | null;
+    readonly target_sha256: string | null;
+    readonly availability: 'AVAILABLE' | 'UNAVAILABLE';
+    readonly unavailable_reason: string | null;
+    readonly before_text: string | null;
+    readonly after_text: string | null;
+  }[];
+}> {
+  const repositories = createRepositories(db);
+  const operation = await repositories.gateway.readOperation(operationId);
+  if (operation?.workspace_id !== workspaceId || operation.capability_key !== 'FILE_WRITE' ||
+      operation.origin !== 'RUN') throw resourceNotFound('File write operation');
+  const pathEvidence = await repositories.fileWritePaths.readByOperation(operationId);
+  const root = pathEvidence?.root_path ?? (operation.action_type === 'APPLY_CHANGESET'
+    ? operation.normalized_target : dirname(operation.normalized_target));
+  const changes: readonly FileChange[] = operation.action_type === 'APPLY_CHANGESET'
+    ? operation.params.changes as unknown as FileChange[]
+    : [{ path: pathEvidence === undefined ? basename(operation.normalized_target)
+      : relative(root, operation.normalized_target),
+      action: typeof operation.params.baseline_sha256 === 'string' ? 'MODIFY' : 'CREATE',
+      baselineSha256: operation.params.baseline_sha256 as string | null | undefined,
+      content: operation.params.content as string | undefined }];
+  const snapshots = new Map((await repositories.fileWriteDiffs.listByOperation(operationId))
+    .map((row) => [row.relative_path, row]));
+  return { operation_id: operationId, basis: 'FROZEN_INTENT', files: changes.map((change) => {
+    const path = canonicalRelativePath(root, change.path);
+    const baselineSha = change.action === 'CREATE' ? null : change.baselineSha256?.toLowerCase() ?? null;
+    const targetSha = change.action === 'DELETE' ? null :
+      typeof change.content === 'string' ? computeSha256(change.content) : null;
+    const snapshot = snapshots.get(path);
+    let reason: string | null = null;
+    const before = change.action === 'CREATE' ? '' : snapshot?.baseline_text ?? null;
+    const after = change.action === 'DELETE' ? '' : change.content ?? null;
+    if (before === null) reason = snapshot?.unavailable_reason ?? 'BASELINE_UNAVAILABLE';
+    else if (change.action !== 'CREATE' && (snapshot?.baseline_sha256 !== baselineSha ||
+        Buffer.byteLength(before, 'utf8') > MAX_FILE_WRITE_DIFF_TEXT_BYTES ||
+        computeSha256(before) !== baselineSha)) reason = 'BASELINE_EVIDENCE_MISMATCH';
+    if (reason === null && (after === null ||
+        Buffer.byteLength(after, 'utf8') > MAX_FILE_WRITE_DIFF_TEXT_BYTES ||
+        (change.action !== 'DELETE' && (targetSha === null ||
+          (change.targetSha256 !== undefined && change.targetSha256.toLowerCase() !== targetSha))))) {
+      reason = 'TARGET_TEXT_UNAVAILABLE';
+    }
+    return { relative_path: path, action: change.action, baseline_sha256: baselineSha,
+      target_sha256: targetSha, availability: reason === null ? 'AVAILABLE' : 'UNAVAILABLE',
+      unavailable_reason: reason, before_text: reason === null ? before : null,
+      after_text: reason === null ? after : null };
+  }) };
 }

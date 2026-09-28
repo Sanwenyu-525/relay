@@ -45,7 +45,8 @@ export async function recoverStoppedDesktopLaunch(input: {
       continue;
     }
     const outcome = await recoverStoppedClaim(input.db, input.dataRoot, claim,
-      `desktop-launch:${input.launchId}:${input.stopEvidence}`);
+      `desktop-launch:${input.launchId}:${input.stopEvidence}`,
+      { launchId: input.launchId, stopEvidence: input.stopEvidence });
     if (outcome === 'REQUEUED') requeuedRunIds.push(claim.run_id);
     if (outcome === 'BLOCKED') blockedRunIds.push(claim.run_id);
   }
@@ -53,7 +54,8 @@ export async function recoverStoppedDesktopLaunch(input: {
 }
 
 async function recoverStoppedClaim(db: DbExecutor, dataRoot: string, claim: RunInvocationRow,
-  evidence: string): Promise<'REQUEUED' | 'BLOCKED' | 'SKIPPED'> {
+  evidence: string, desktop?: { launchId: string; stopEvidence: DesktopStopEvidence },
+): Promise<'REQUEUED' | 'BLOCKED' | 'SKIPPED'> {
   if (claim.worker_id === null || claim.command_id === null) return 'BLOCKED';
   const workerId = claim.worker_id;
   const commandId = claim.command_id;
@@ -67,6 +69,49 @@ async function recoverStoppedClaim(db: DbExecutor, dataRoot: string, claim: RunI
       if (current?.worker_id !== workerId || current.epoch !== claim.epoch ||
           current.command_id !== commandId ||
           (current.status !== 'ACTIVE' && current.status !== 'STOP_REQUIRED')) return 'SKIPPED';
+      if (desktop !== undefined) {
+        // The host confirmed the old launch's whole Job is stopped. Persist the
+        // exact FILE_WRITE identity while the outer claim still has its session
+        // lock and before recoverStoppedWorker fences the inner Run worker.
+        const proofReady = await withTransaction(db, async (tx) => {
+          const run = await tx.runs.lockRun(claim.run_id);
+          const lockedClaim = await tx.dispatch.lockInvocation(claim.run_id);
+          if (run === undefined || lockedClaim?.worker_id !== workerId ||
+              lockedClaim.epoch !== claim.epoch || lockedClaim.command_id !== commandId ||
+              (lockedClaim.status !== 'ACTIVE' && lockedClaim.status !== 'STOP_REQUIRED')) return false;
+          const candidates: { operationId: string; invocationId: string;
+            workerEpoch: bigint; actionType: 'WRITE_FILE' | 'APPLY_CHANGESET' }[] = [];
+          for (const operation of await tx.gateway.listUnresolvedRunOperations(claim.run_id)) {
+            if (operation.capability_key !== 'FILE_WRITE' ||
+                !['PREPARED', 'DISPATCHING', 'UNKNOWN'].includes(operation.status)) continue;
+            const lockedOperation = await tx.gateway.lockOperation(operation.id);
+            const last = await tx.gateway.lastInvocation(operation.id);
+            const invocation = last === undefined ? undefined : await tx.gateway.lockInvocation(last.id);
+            if (lockedOperation?.run_id !== claim.run_id || invocation?.run_id !== claim.run_id ||
+                invocation.operation_id !== operation.id || invocation.worker_id !== workerId ||
+                invocation.worker_epoch === null ||
+                !['PREPARED', 'DISPATCHING', 'UNKNOWN'].includes(invocation.status) ||
+                (run.worker_id !== null &&
+                  (run.worker_id !== workerId || run.worker_epoch !== invocation.worker_epoch))) return false;
+            const existing = await tx.fileWriteStopProofs.readByInvocation(invocation.id);
+            if (existing === undefined &&
+                (run.worker_id !== workerId || run.worker_epoch !== invocation.worker_epoch)) return false;
+            candidates.push({ operationId: operation.id, invocationId: invocation.id,
+              workerEpoch: invocation.worker_epoch,
+              actionType: operation.action_type as 'WRITE_FILE' | 'APPLY_CHANGESET' });
+          }
+          for (const candidate of candidates) {
+            await tx.fileWriteStopProofs.insertOnce({
+              invocation_id: candidate.invocationId, operation_id: candidate.operationId,
+              run_id: claim.run_id, worker_id: workerId, worker_epoch: candidate.workerEpoch,
+              dispatch_epoch: claim.epoch, command_id: commandId, launch_id: desktop.launchId,
+              stop_evidence: desktop.stopEvidence, action_type: candidate.actionType,
+            });
+          }
+          return true;
+        });
+        if (!proofReady) return 'BLOCKED';
+      }
       const recovered = await recoverStoppedWorker(db, {
         runId: claim.run_id, stoppedWorkerId: workerId, stoppedEvidence: evidence,
         storage: new ManagedContentStore(dataRoot),
@@ -124,6 +169,7 @@ export async function runSupervisedWorkerOnce(input: {
   workerId?: string;
   leaseMs?: number;
   testHoldMs?: number;
+  testHoldAfterGatewayEffectMs?: number;
   testModelDelayMs?: number;
   testExitAfterApprovalWait?: boolean;
   testExitAfterStepKind?: string;
@@ -145,6 +191,10 @@ export async function runSupervisedWorkerOnce(input: {
       ...(input.leaseMs === undefined ? {} : { RELAY_WORKER_LEASE_MS: String(input.leaseMs) }),
       ...(input.testHoldMs === undefined ? {} : {
         NODE_ENV: 'test', RELAY_WORKER_TEST_HOLD_MS: String(input.testHoldMs),
+      }),
+      ...(input.testHoldAfterGatewayEffectMs === undefined ? {} : {
+        NODE_ENV: 'test',
+        RELAY_WORKER_TEST_HOLD_AFTER_GATEWAY_EFFECT_MS: String(input.testHoldAfterGatewayEffectMs),
       }),
       ...(input.testModelDelayMs === undefined ? {} : {
         NODE_ENV: 'test', RELAY_WORKER_TEST_MODEL_DELAY_MS: String(input.testModelDelayMs),

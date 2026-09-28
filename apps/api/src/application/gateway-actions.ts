@@ -21,11 +21,17 @@ import { hasCurrentRunContext } from './context-fence.js';
 import { readMockActionOperationId } from '../workflow/execution-contract.js';
 import { readWebFetchConfig, webFetchExecute, type WebFetchLimits } from '../web/web-fetch.js';
 import {
-  executeFileChangeset, reconcileFileChangeset, validateSafeRelativePath, isProtectedPath,
-  isFrozenBaseline, type FileChange, type FileChangeOutcome, type FileReconciliationCheck,
+  executeFileChangeset, reconcileFileChangeset, canonicalRelativePath,
+  isProtectedPath, isFrozenBaseline, requireMatchingTarget, assertSafeWindowsPathSegments,
+  readFrozenFileWriteBaseline,
+  type FileChange, type FileChangeOutcome, type FileReconciliationCheck,
 } from '../files/file-changeset.js';
 import type { ChangeSetLedgerFile, ChangeSetLedgerHeader } from '../files/change-set-repository.js';
 import type { ChangeSetFileStatus, ChangeSetStatus } from '../infrastructure/database-schema.js';
+import {
+  captureWindowsFilePaths, executeWindowsFileChangeset, inspectWindowsFileRoot,
+  reconcileWindowsFileChangeset, WindowsFileIoError, type WindowsFilePathEvidence,
+} from '../files/windows-file-io.js';
 import {
   gitGetStatus, gitGetDiff, gitGetLog, gitStageFile, gitCommit, gitPush,
   reconcileGitCommit, reconcileGitPush,
@@ -123,6 +129,8 @@ function containsPath(root: string, target: string): boolean {
 
 async function normalizedWriteTarget(target: string, root: string): Promise<string> {
   if (!isAbsolute(target)) throw validationFailed([{ field: 'target', message: 'must be absolute' }]);
+  try { assertSafeWindowsPathSegments(target); }
+  catch (error) { throw gatewayDenied('GATEWAY_TARGET_DENIED', (error as Error).message); }
   const parent = await realpath(dirname(target));
   const normalized = resolve(parent, basename(target));
   if (!containsPath(root, normalized)) throw gatewayDenied('GATEWAY_TARGET_DENIED', '最终目标不在已登记资源根内。');
@@ -247,6 +255,120 @@ function sameOperation(op: LogicalOperationRow, input: PrepareGatewayActionInput
     op.origin === input.origin.kind;
 }
 
+type FrozenFileWriteDiffEvidence = { relativePath: string; fileAction: 'MODIFY' | 'DELETE';
+  baselineSha256: string; baselineText: string | null; unavailableReason: string | null };
+
+/** Check authority before local capture, then recheck it when the frozen evidence is committed. */
+async function captureAuthorizedFileWriteDiffs(db: DbExecutor, input: PrepareGatewayActionInput,
+  resourceBefore: ManagedResourceRow, target: string, hash: Buffer,
+  payloadBytes: number): Promise<{ frozenDiffs: FrozenFileWriteDiffEvidence[];
+    pathEvidence?: WindowsFilePathEvidence }> {
+  const origin = input.origin;
+  if (origin.kind !== 'RUN') return { frozenDiffs: [] };
+  const registered = await withTransaction(db, async (repositories) => {
+    const authority = await repositories.workspaces.lockAuthority(input.workspaceId, 'share');
+    if (authority === undefined) throw resourceNotFound('Workspace authority');
+    const { task, run } = await lockTaskAndRun(repositories, origin.runId, input.workspaceId);
+    await requireCurrentRuleSnapshot(repositories, run.id, authority);
+    ensureRunOwner(task, run, origin.workerId, origin.workerEpoch);
+    await ensureGraphDelivery(repositories, origin);
+    if (run.status !== 'RUNNING' || (await repositories.recovery.lockPendingControl(run.id)) !== undefined) {
+      throw gatewayDenied('GATEWAY_RUN_NOT_READY', 'Run 不在可准备动作的安全执行状态。');
+    }
+    if ((await repositories.recovery.listUnresolvedEffects(run.id)).length > 0) {
+      throw gatewayDenied('GATEWAY_OPERATION_UNRESOLVED', '该 Run 有尚未核对的受管发布动作。');
+    }
+    const step = await repositories.runs.readStep(origin.stepId);
+    if (step?.run_id !== run.id || !['RUNNING', 'SUCCEEDED'].includes(step.status)) throw resourceNotFound('Run step');
+    if (task.project_id === null) throw gatewayDenied('GATEWAY_PROJECT_REQUIRED', '写动作必须属于一个 Project。');
+    const resource = await repositories.gateway.lockResource(origin.resourceId ?? '');
+    if (resource?.project_id !== task.project_id || resource.workspace_id !== input.workspaceId ||
+        resource.identity_key !== resourceBefore.identity_key ||
+        resource.file_write_root_id !== resourceBefore.file_write_root_id ||
+        resource.status !== 'ACTIVE') {
+      throw resourceNotFound('Managed resource');
+    }
+    const existing = await repositories.gateway.findOperationByIntent({
+      runId: run.id, stepId: origin.stepId, intentKey: input.intentKey,
+    });
+    if (existing !== undefined) {
+      if (!sameOperation(existing, input, target, hash)) {
+        throw gatewayDenied('GATEWAY_INTENT_CONFLICT', '同一 intent_key 已绑定其他最终动作。');
+      }
+      return null;
+    }
+    if ((await repositories.gateway.listUnresolvedRunOperations(run.id)).length > 0) {
+      throw gatewayDenied('GATEWAY_OPERATION_UNRESOLVED', '该 Run 有未决 Gateway 动作，不能更换动作身份或目标绕过核对。');
+    }
+    if (await repositories.reviews.readByOperationId(input.operationId) !== undefined) {
+      throw gatewayDenied('GATEWAY_APPROVAL_ID_CONFLICT', '旧 Review 已使用该 operation_id，不能作为 Gateway 批准。');
+    }
+    const connection = await repositories.gateway.readConnection(input.connectionId);
+    if (connection?.workspace_id !== input.workspaceId || connection.project_id !== task.project_id ||
+        connection.status !== 'ACTIVE' ||
+        !(await repositories.gateway.hasConnectionCapability(connection.id, 'FILE_WRITE'))) {
+      throw gatewayDenied('GATEWAY_CONNECTION_DENIED', 'Connection 不存在、已停用或不具备该 Capability。');
+    }
+    await selectedPolicy(repositories, { workspaceId: input.workspaceId, projectId: task.project_id,
+      capability: 'FILE_WRITE', actionType: input.actionType, target, payloadBytes });
+    return { root: resource.canonical_root, rootId: resource.file_write_root_id };
+  });
+  if (registered === null) return { frozenDiffs: [] };
+  const { root } = registered;
+  if (process.platform === 'win32' && registered.rootId === null) {
+    throw gatewayDenied('GATEWAY_RESOURCE_IDENTITY_REQUIRED',
+      '该资源登记时未绑定 Windows 目录身份；停用旧资源并重新登记后才能准备新文件写动作。');
+  }
+  const frozenDiffs: FrozenFileWriteDiffEvidence[] = [];
+  const changes = input.actionType === 'APPLY_CHANGESET'
+    ? input.params.changes as unknown as FileChange[]
+    : [{ path: relative(root, target), action: 'MODIFY' as const,
+      baselineSha256: typeof input.params.baseline_sha256 === 'string'
+        ? input.params.baseline_sha256 : null }];
+  const canonicalChanges = changes.map((change) => ({
+    ...change, path: canonicalRelativePath(root, change.path),
+    ...(input.actionType !== 'WRITE_FILE' ? {} : {
+      action: isFrozenBaseline(change.baselineSha256) ? 'MODIFY' as const : 'CREATE' as const,
+    }),
+  }));
+  const rootId = process.platform === 'win32' ? await inspectWindowsFileRoot(root) : undefined;
+  if (rootId !== undefined && rootId.toLowerCase() !== registered.rootId?.toLowerCase()) {
+    throw gatewayDenied('GATEWAY_RESOURCE_ROOT_CHANGED',
+      '受管资源根目录已不是登记时的目录，不能把原权限用于替换后的目录。');
+  }
+  const captured = rootId === undefined ? undefined :
+    await captureWindowsFilePaths(root, rootId, canonicalChanges);
+  if (captured?.some((file, index) => file.path !== canonicalChanges[index]?.path ||
+      file.action !== canonicalChanges[index]?.action || file.error !== undefined)) {
+    throw gatewayDenied('GATEWAY_TARGET_DENIED', '文件路径物理身份无法安全冻结。');
+  }
+  for (const [index, change] of canonicalChanges.entries()) {
+    if ((change.action !== 'MODIFY' && change.action !== 'DELETE') ||
+        !isFrozenBaseline(change.baselineSha256)) continue;
+    const rootRelativePath = change.path;
+      const relativePath = input.actionType === 'WRITE_FILE' && captured === undefined
+        ? basename(target) : rootRelativePath;
+    const safeCaptured = captured?.[index];
+    const evidence = safeCaptured === undefined
+      ? await readFrozenFileWriteBaseline(root, rootRelativePath, change.baselineSha256)
+      : safeCaptured.sha256 !== change.baselineSha256.toLowerCase()
+        ? { baselineSha256: change.baselineSha256.toLowerCase(),
+          baselineText: null, unavailableReason: 'BASELINE_SHA_MISMATCH' }
+        : { baselineSha256: change.baselineSha256.toLowerCase(),
+          baselineText: safeCaptured.text,
+          unavailableReason: safeCaptured.text === null
+            ? (safeCaptured.text_unavailable_reason ?? 'UNSAFE_OR_UNREADABLE') : null };
+    frozenDiffs.push({ relativePath, fileAction: change.action,
+      baselineSha256: evidence.baselineSha256, baselineText: evidence.baselineText,
+      unavailableReason: evidence.unavailableReason });
+  }
+  return { frozenDiffs, ...(rootId === undefined || captured === undefined ? {} : {
+    pathEvidence: { root_path: root, root_id: rootId,
+      captures: captured.map((file) => ({ ...file, text: null,
+        text_unavailable_reason: null })) },
+  }) };
+}
+
 /** Prepare persists one logical action; ASK creates Review, never an Invocation. */
 export async function prepareGatewayAction(db: DbExecutor, input: PrepareGatewayActionInput): Promise<PreparedGatewayAction> {
   if (!input.intentKey) throw validationFailed([{ field: 'intent_key', message: 'must not be empty' }]);
@@ -280,22 +402,50 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
       if (isProtectedPath(rel)) {
         throw gatewayDenied('GATEWAY_TARGET_DENIED', `目标路径 ${rel} 属于受保护路径，禁止写入。`);
       }
+      try {
+        canonicalRelativePath(resourceBefore!.canonical_root, rel);
+      } catch (error) {
+        throw gatewayDenied('GATEWAY_TARGET_DENIED', (error as Error).message);
+      }
       if (typeof input.params.content !== 'string') {
         throw validationFailed([{ field: 'params.content', message: 'must be a string' }]);
       }
+      if (Buffer.byteLength(relative(dirname(target), target).replaceAll('\\', '/'), 'utf8') > 1024) {
+        throw validationFailed([{ field: 'target', message: 'ledger relative path exceeds 1024 UTF-8 bytes' }]);
+      }
     } else if (input.actionType === 'APPLY_CHANGESET') {
       target = resourceBefore!.canonical_root;
-      if (!Array.isArray(input.params.changes) || input.params.changes.length === 0) {
-        throw validationFailed([{ field: 'params.changes', message: 'must be a non-empty array' }]);
+      if (!Array.isArray(input.params.changes) || input.params.changes.length === 0 ||
+          input.params.changes.length > 16) {
+        throw validationFailed([{ field: 'params.changes', message: 'must contain 1 to 16 changes' }]);
       }
+      const seenPaths = new Set<string>();
       for (const [idx, item] of (input.params.changes as any[]).entries()) {
         if (!item || typeof item.path !== 'string' || !['CREATE', 'MODIFY', 'DELETE'].includes(item.action)) {
           throw validationFailed([{ field: `params.changes[${idx}]`, message: 'invalid change item' }]);
         }
+        let ledgerPath: string;
         try {
-          validateSafeRelativePath(resourceBefore!.canonical_root, item.path);
+          ledgerPath = canonicalRelativePath(resourceBefore!.canonical_root, item.path);
         } catch (err) {
           throw gatewayDenied('GATEWAY_TARGET_DENIED', (err as Error).message);
+        }
+        if (Buffer.byteLength(ledgerPath, 'utf8') > 1024) {
+          throw validationFailed([{ field: `params.changes[${idx}].path`,
+            message: 'ledger relative path exceeds 1024 UTF-8 bytes' }]);
+        }
+        const pathKey = process.platform === 'win32' ? ledgerPath.toLowerCase() : ledgerPath;
+        if (seenPaths.has(pathKey)) {
+          throw validationFailed([{ field: `params.changes[${idx}].path`, message: 'duplicate target path' }]);
+        }
+        seenPaths.add(pathKey);
+        if (item.action !== 'DELETE' && typeof item.content !== 'string') {
+          throw validationFailed([{ field: `params.changes[${idx}].content`, message: 'CREATE/MODIFY requires string content' }]);
+        }
+        try {
+          requireMatchingTarget(item);
+        } catch (err) {
+          throw validationFailed([{ field: `params.changes[${idx}].targetSha256`, message: (err as Error).message }]);
         }
         // P1-2：修改/删除既有文件必须在产生副作用前冻结有效基线摘要，供落盘前比对
         // 检测外部编辑；缺失或格式非法在批准之前即按输入校验拒绝，人工批准不可替代。
@@ -344,6 +494,12 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
   }
   const hash = paramsHash(input, target);
   const payloadBytes = Buffer.byteLength(canonicalizeJson(input.params));
+  // Every new Windows write freezes physical identity, including CREATE with no baseline text.
+  // A repeated intent never refreshes its original evidence.
+  const fileWriteAction = input.actionType === 'WRITE_FILE' || input.actionType === 'APPLY_CHANGESET';
+  const frozen = input.origin.kind === 'RUN' && resourceBefore !== undefined && fileWriteAction
+    ? await captureAuthorizedFileWriteDiffs(db, input, resourceBefore, target, hash, payloadBytes)
+    : { frozenDiffs: [] };
   return withTransaction(db, async (repositories) => {
     const authority = await repositories.workspaces.lockAuthority(input.workspaceId, 'share');
     if (authority === undefined) throw resourceNotFound('Workspace authority');
@@ -369,7 +525,12 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
       if (!webFetch) {
         resource = await repositories.gateway.lockResource(input.origin.resourceId ?? '');
         if (resource?.project_id !== projectId || resource.workspace_id !== input.workspaceId ||
-            resource.identity_key !== resourceBefore?.identity_key || resource.status !== 'ACTIVE') throw resourceNotFound('Managed resource');
+            resource.identity_key !== resourceBefore?.identity_key || resource.status !== 'ACTIVE' ||
+            (frozen.pathEvidence !== undefined &&
+              (resource.canonical_root !== frozen.pathEvidence.root_path ||
+                resource.file_write_root_id !== frozen.pathEvidence.root_id))) {
+          throw resourceNotFound('Managed resource');
+        }
       }
     } else {
       const job = await repositories.gateway.lockImportJob(input.origin.importJobId);
@@ -432,6 +593,23 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
       capability_key: capability, action_type: input.actionType, normalized_target: target,
       params_hash: hash, params: input.params,
       resource_id: resource?.id ?? null, status: effectiveDecision === 'ASK' ? 'WAITING_APPROVAL' : 'PREPARED' });
+    if (frozen.pathEvidence !== undefined) {
+      await repositories.fileWritePaths.insert({ operation_id: op.id,
+        workspace_id: op.workspace_id, project_id: op.project_id,
+        run_id: op.run_id!, resource_id: op.resource_id!, capability_key: 'FILE_WRITE',
+        action_type: op.action_type as 'WRITE_FILE' | 'APPLY_CHANGESET',
+        root_path: frozen.pathEvidence.root_path, root_id: frozen.pathEvidence.root_id,
+        captures: frozen.pathEvidence.captures as unknown as JsonObject[] });
+    }
+    for (const evidence of frozen.frozenDiffs) {
+      await repositories.fileWriteDiffs.insert({ operation_id: op.id,
+        workspace_id: op.workspace_id, project_id: op.project_id,
+        run_id: op.run_id!, resource_id: op.resource_id!, capability_key: 'FILE_WRITE',
+        action_type: op.action_type as 'WRITE_FILE' | 'APPLY_CHANGESET',
+        relative_path: evidence.relativePath, file_action: evidence.fileAction,
+        baseline_sha256: evidence.baselineSha256, baseline_text: evidence.baselineText,
+        unavailable_reason: evidence.unavailableReason });
+    }
     if (effectiveDecision === 'ASK') {
       const review = await createGatewayReview(repositories, op, run, task);
       if (run !== undefined && task !== undefined && input.origin.kind === 'RUN') {
@@ -867,7 +1045,78 @@ function targetShaOfContent(content: string): string {
 /** 预期目标摘要：DELETE 期望文件不存在（null）；否则取冻结目标或按内容计算。 */
 function expectedTargetOf(change: FileChange): string | null {
   if (change.action === 'DELETE') return null;
-  return change.targetSha256 ?? (change.content !== undefined ? targetShaOfContent(change.content) : null);
+  return change.targetSha256?.toLowerCase() ?? (change.content !== undefined ? targetShaOfContent(change.content) : null);
+}
+
+function jsonObject(value: unknown): JsonObject | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as JsonObject : undefined;
+}
+
+function fileWriteReceipt(resultRef: JsonObject | null): JsonObject | undefined {
+  return jsonObject(resultRef?.file_write_receipt);
+}
+
+/** 回执必须属于原调用，且每项路径、动作和冻结摘要与适配器报告一致。 */
+function validatedFileWriteReport(op: LogicalOperationRow, invocation: InvocationAttemptRow,
+  changes: readonly FileChange[], receipt: JsonObject | undefined):
+  { outcome: 'SUCCEEDED' | 'FAILED'; applied: readonly boolean[] } | undefined {
+  if (receipt?.kind !== 'FILE_WRITE_ADAPTER_V1' || receipt.operation_id !== op.id ||
+      receipt.invocation_id !== invocation.id ||
+      (receipt.outcome !== 'SUCCEEDED' && receipt.outcome !== 'FAILED')) return undefined;
+  const result = jsonObject(receipt.result);
+  const outcomes = result?.changes;
+  if (result?.operation_id !== op.id || result.invocation_id !== invocation.id ||
+      !Array.isArray(outcomes) || outcomes.length !== changes.length) return undefined;
+  const applied: boolean[] = [];
+  for (const [idx, change] of changes.entries()) {
+    const observed = jsonObject(outcomes[idx]);
+    if (observed?.path !== change.path || observed.action !== change.action ||
+        !['APPLIED', 'CONFLICT', 'FAILED'].includes(String(observed.status))) return undefined;
+    const expected = expectedTargetOf(change);
+    if (observed.targetSha256 != null && observed.targetSha256 !== expected) return undefined;
+    if (change.action === 'CREATE' && observed.baselineSha256 != null) return undefined;
+    if (change.action !== 'CREATE' && observed.baselineSha256 != null) {
+      if (typeof observed.baselineSha256 !== 'string' ||
+          observed.baselineSha256.toLowerCase() !== change.baselineSha256?.toLowerCase()) return undefined;
+    }
+    if (observed.status === 'APPLIED') {
+      if (observed.error != null ||
+          (change.action === 'DELETE' ? observed.targetSha256 != null : observed.targetSha256 !== expected)) return undefined;
+      if (change.action === 'CREATE') {
+        if (observed.actualBaselineSha256 != null) return undefined;
+      } else if (typeof observed.baselineSha256 !== 'string' ||
+          typeof observed.actualBaselineSha256 !== 'string' ||
+          observed.actualBaselineSha256.toLowerCase() !== change.baselineSha256?.toLowerCase()) return undefined;
+      applied.push(true);
+    } else {
+      if (typeof observed.error !== 'string' || observed.error === '') return undefined;
+      applied.push(false);
+    }
+  }
+  if ((receipt.outcome === 'SUCCEEDED') !== applied.every(Boolean)) return undefined;
+  return { outcome: receipt.outcome, applied };
+}
+
+/** A partial receipt is usable only while every reported effect still matches disk. */
+function confirmedPartialFileWrite(changes: readonly FileChange[], receipt: JsonObject | undefined,
+  report: { outcome: 'SUCCEEDED' | 'FAILED'; applied: readonly boolean[] } | undefined,
+  checks: readonly FileReconciliationCheck[] | undefined, applied: readonly boolean[]): boolean {
+  const outcomes = jsonObject(receipt?.result)?.changes;
+  if (report?.outcome !== 'FAILED' || !applied.some(Boolean) ||
+      !Array.isArray(outcomes) || outcomes.length !== changes.length ||
+      checks?.length !== changes.length) return false;
+  return changes.every((change, idx) => {
+    const outcome = jsonObject(outcomes[idx]);
+    const check = checks[idx];
+    if (outcome?.path !== change.path || check?.path !== change.path ||
+        check.readError !== undefined) return false;
+    if (report.applied[idx]) return applied[idx] === true;
+    const baseline = outcome.actualBaselineSha256;
+    return outcome.status === 'CONFLICT' && Object.hasOwn(outcome, 'actualBaselineSha256') &&
+      (baseline === null || (typeof baseline === 'string' && /^[0-9a-f]{64}$/iu.test(baseline))) &&
+      check.actualSha === (typeof baseline === 'string' ? baseline.toLowerCase() : null);
+  });
 }
 
 /** executeFileChangeset 的结果 → 观测。适配器不重读文件：APPLIED 的实际摘要就是写入内容的目标摘要， */
@@ -884,15 +1133,15 @@ function executionObservations(outcomes: readonly FileChangeOutcome[]): FileObse
   }));
 }
 
-/** reconcileFileChangeset 的回读 → 观测。命中目标摘要才记 APPLIED；未命中按「没落地」与 */
-/** 「内容不符」区分 FAILED/CONFLICT，整体状态由调用方保守收敛为 UNKNOWN。 */
-function reconciliationObservations(checks: readonly FileReconciliationCheck[]): FileObservation[] {
-  return checks.map((check) => ({
+/** 原 Invocation 回执确认该文件已应用，且按冻结输入回读匹配，才记 APPLIED。 */
+function reconciliationObservations(checks: readonly FileReconciliationCheck[],
+  applied: readonly boolean[]): FileObservation[] {
+  return checks.map((check, idx) => ({
     path: check.path,
-    status: check.matches ? 'APPLIED' : (check.actualSha === null ? 'FAILED' : 'CONFLICT'),
+    status: applied[idx] && check.matches ? 'APPLIED' : (check.actualSha === null ? 'FAILED' : 'CONFLICT'),
     actualSha256: check.actualSha,
     observedBaselineSha256: null,
-    error: check.matches ? null : 'RECONCILE_UNCONFIRMED',
+    error: applied[idx] && check.matches ? null : (check.readError ?? 'RECONCILE_UNCONFIRMED'),
   }));
 }
 
@@ -905,7 +1154,7 @@ function ledgerFiles(draft: ChangeSetDraft): ChangeSetLedgerFile[] {
       error: 'NO_OUTCOME_RECORDED',
     };
     return {
-      relative_path: change.path, action: change.action,
+      relative_path: canonicalRelativePath(draft.canonicalRoot, change.path), action: change.action,
       baseline_sha256: change.baselineSha256 ?? null,
       observed_baseline_sha256: observation.observedBaselineSha256,
       target_sha256: expectedTargetOf(change),
@@ -943,11 +1192,11 @@ function ledgerStatus(files: readonly ChangeSetLedgerFile[],
 }
 
 /** WRITE_FILE 的单文件退化变化集：执行与核对共用同一构造，账本与磁盘动作不会各自漂移。 */
-function fileWriteInputChanges(op: LogicalOperationRow): FileChange[] {
+function fileWriteInputChanges(op: LogicalOperationRow, root = dirname(op.normalized_target)): FileChange[] {
   const baselineSha = typeof op.params.baseline_sha256 === 'string' ? op.params.baseline_sha256 : null;
   const content = typeof op.params.content === 'string' ? op.params.content : '';
   return [{
-    path: relative(dirname(op.normalized_target), op.normalized_target),
+    path: relative(root, op.normalized_target).replaceAll('\\', '/'),
     action: baselineSha ? 'MODIFY' : 'CREATE',
     baselineSha256: baselineSha,
     content,
@@ -988,28 +1237,53 @@ async function settleGatewayInvocation(db: DbExecutor, admitted: AdmittedInvocat
       task?.ownership_epoch !== invocation.ownership_epoch || run?.worker_id !== invocation.worker_id ||
       run?.worker_epoch !== invocation.worker_epoch || run.worker_lease_until === null ||
       run.worker_lease_until.getTime() <= Date.now() || claimStale);
-    const finalStatus = stale ? 'UNKNOWN' : status;
-    const evidence: JsonObject = stale ? { reason: 'STALE_RESULT_RECONCILE', observed: resultRef } : resultRef;
+    const receipt = op.capability_key === 'FILE_WRITE' ? fileWriteReceipt(invocation.result_ref) : undefined;
+    const pathEvidence = op.capability_key === 'FILE_WRITE'
+      ? await repositories.fileWritePaths.readByOperation(op.id) : undefined;
+    const fileChanges: readonly FileChange[] = op.capability_key !== 'FILE_WRITE' ? [] :
+      op.action_type === 'APPLY_CHANGESET'
+        ? op.params.changes as unknown as FileChange[]
+        : fileWriteInputChanges(op, pathEvidence?.root_path);
+    const report = op.capability_key === 'FILE_WRITE'
+      ? validatedFileWriteReport(op, invocation, fileChanges, receipt) : undefined;
+    const reportedChanges = jsonObject(receipt?.result)?.changes;
+    const rootRejectedBeforeWrite = resultRef.reason === 'CANONICAL_ROOT_CHANGED' ||
+      resultRef.reason === 'CANONICAL_ROOT_UNAVAILABLE';
+    const allConflicted = Array.isArray(reportedChanges) &&
+      reportedChanges.every((change) => jsonObject(change)?.status === 'CONFLICT');
+    const rootFailedBeforeWrite = rootRejectedBeforeWrite && Array.isArray(reportedChanges) &&
+      reportedChanges.every((change) => {
+        const row = jsonObject(change);
+        return row?.status === 'FAILED' && row.error === resultRef.reason;
+      });
+    const knownNoFileEffect = status === 'FAILED' && report?.outcome === 'FAILED' &&
+      Array.isArray(reportedChanges) && reportedChanges.length === fileChanges.length &&
+      (allConflicted || rootFailedBeforeWrite);
+    // FAILED is reserved for a proven no-effect action. A write that applied any
+    // file, or whose failed I/O could have changed bytes, remains unresolved.
+    const finalStatus = stale || (op.capability_key === 'FILE_WRITE' && status === 'FAILED' &&
+      !knownNoFileEffect) ? 'UNKNOWN' : status;
+    const evidence: JsonObject = stale
+      ? { reason: 'STALE_RESULT_RECONCILE', observed: resultRef,
+          ...(receipt === undefined ? {} : { file_write_receipt: receipt }) }
+      : receipt === undefined ? resultRef : { ...resultRef, file_write_receipt: receipt };
     const resolved = await repositories.gateway.transitionInvocation(invocation.id, 'DISPATCHING', finalStatus, evidence);
     if (resolved === undefined) throw new Error('Invocation outcome CAS failed');
     await repositories.gateway.setOperationStatus(op.id, finalStatus, evidence);
     if (invocation.resource_claim_id !== null) {
       // A read never mutates the resource, so even a FAILED read releases its claim.
-      const released = finalStatus === 'SUCCEEDED' ||
+      const released = finalStatus === 'SUCCEEDED' || (!stale && knownNoFileEffect) ||
         op.capability_key === 'FILE_READ' || op.capability_key === 'WEB_FETCH';
       await repositories.gateway.setClaimStatus(invocation.resource_claim_id,
         released ? 'RELEASED' : 'QUARANTINED');
     }
     if (!stale && op.capability_key === 'FILE_WRITE' && Array.isArray(evidence.changes)) {
       // M06 增量A：把真实执行后的逐文件结果固化为不可变账本，与结算同事务提交，无磁盘访问。
-      const canonicalRoot = op.action_type === 'APPLY_CHANGESET'
-        ? op.normalized_target : dirname(op.normalized_target);
+      const canonicalRoot = pathEvidence?.root_path ?? (op.action_type === 'APPLY_CHANGESET'
+        ? op.normalized_target : dirname(op.normalized_target));
       const header = ledgerHeader(op, invocation.id, canonicalRoot);
       if (header !== undefined) {
-        const inputChanges: readonly FileChange[] = op.action_type === 'APPLY_CHANGESET'
-          ? (op.params.changes as unknown as FileChange[])
-          : fileWriteInputChanges(op);
-        const files = ledgerFiles({ canonicalRoot, inputChanges,
+        const files = ledgerFiles({ canonicalRoot, inputChanges: fileChanges,
           observations: executionObservations(evidence.changes as unknown as FileChangeOutcome[]) });
         await repositories.changeSets.recordExecution(header, randomUUID(), files, ledgerStatus(files, status));
       }
@@ -1054,7 +1328,13 @@ export async function dispatchGatewayAction(db: DbExecutor, input: DispatchGatew
     return settleGatewayInvocation(db, admitted, fetch.outcome, fetch.result, input.origin);
   }
   if (admitted.operation.capability_key === 'FILE_WRITE') {
-    const res = await fileWriteExecute(admitted.operation, admitted.invocation, input.signal);
+    const res = await fileWriteExecute(db, admitted.operation, admitted.invocation, input.signal);
+    const receipt: JsonObject = { kind: 'FILE_WRITE_ADAPTER_V1',
+      operation_id: admitted.operation.id, invocation_id: admitted.invocation.id,
+      outcome: res.outcome, result: res.result };
+    const staged = await createRepositories(db).gateway.stageFileWriteReceipt(
+      admitted.invocation.id, admitted.operation.id, receipt);
+    if (staged === undefined) throw new Error('FILE_WRITE adapter receipt CAS failed');
     await input.hooks?.afterFakeEffect?.();
     return settleGatewayInvocation(db, admitted, res.outcome, res.result, input.origin);
   }
@@ -1080,9 +1360,56 @@ export async function dispatchGatewayAction(db: DbExecutor, input: DispatchGatew
   return settleGatewayInvocation(db, admitted, 'SUCCEEDED', result, input.origin);
 }
 
-async function fileWriteExecute(op: LogicalOperationRow, invocation: InvocationAttemptRow,
+async function fileWriteExecute(db: DbExecutor, op: LogicalOperationRow, invocation: InvocationAttemptRow,
   signal?: AbortSignal): Promise<{ outcome: 'SUCCEEDED' | 'FAILED'; result: JsonObject }> {
   if (signal?.aborted) throw new Error('Gateway dispatch aborted before file write');
+  if (process.platform === 'win32') {
+    const pathRow = await createRepositories(db).fileWritePaths.readByOperation(op.id);
+    if (pathRow === undefined) throw new Error('Windows FILE_WRITE has no frozen path identity');
+    const changes = op.action_type === 'APPLY_CHANGESET'
+      ? op.params.changes as unknown as FileChange[]
+      : fileWriteInputChanges(op, pathRow.root_path);
+    const nativeChanges = changes.map((change) => ({
+      ...change, path: canonicalRelativePath(pathRow.root_path, change.path),
+    }));
+    const capturedRows = pathRow.captures as unknown as WindowsFilePathEvidence['captures'];
+    let result: Awaited<ReturnType<typeof executeWindowsFileChangeset>>;
+    try {
+      result = await executeWindowsFileChangeset({ root_path: pathRow.root_path,
+        root_id: pathRow.root_id, captures: capturedRows }, nativeChanges, signal);
+    } catch (error) {
+      if (error instanceof WindowsFileIoError && new Set([
+        'ROOT_CHANGED', 'ROOT_PATH_CHANGED', 'ROOT_UNAVAILABLE', 'UNSAFE_ENTRY', 'INVALID_ROOT',
+      ]).has(error.code)) {
+        const reason = error.code === 'ROOT_UNAVAILABLE'
+          ? 'CANONICAL_ROOT_UNAVAILABLE' : 'CANONICAL_ROOT_CHANGED';
+        return { outcome: 'FAILED', result: { operation_id: op.id,
+          invocation_id: invocation.id, reason,
+          changes: changes.map((change) => ({ path: change.path, action: change.action,
+            status: 'FAILED', error: reason })) as unknown as JsonObject[] } };
+      }
+      throw error;
+    }
+    if (result.files.some((file) => file.effect_uncertain === true)) {
+      throw new Error('Windows FILE_WRITE effect is uncertain after native mutation');
+    }
+    const outcomes: FileChangeOutcome[] = result.files.map((file, index) => {
+      const change = changes[index]!;
+      return { path: change.path, action: change.action, status: file.status,
+        ...(change.action === 'CREATE' ? {} : { baselineSha256: change.baselineSha256 }),
+        actualBaselineSha256: file.status === 'APPLIED'
+          ? (change.action === 'CREATE' ? null : capturedRows[index]?.sha256 ?? null)
+          : file.actual_sha256,
+        ...(file.status === 'APPLIED' && change.action !== 'DELETE'
+          ? { targetSha256: expectedTargetOf(change) } : {}),
+        ...(file.status === 'APPLIED' ? {} : { error: file.error ?? 'FILE_IO_UNCONFIRMED' }),
+      };
+    });
+    return { outcome: result.outcome, result: { operation_id: op.id,
+      invocation_id: invocation.id, changes: outcomes as unknown as JsonObject[],
+      physical_files: result.files as unknown as JsonObject[],
+      ...(result.outcome === 'FAILED' ? { reason: 'SOME_CHANGES_FAILED_OR_CONFLICTED' } : {}) } };
+  }
   if (op.action_type === 'APPLY_CHANGESET') {
     const changes = (op.params.changes as any[]) as FileChange[];
     const res = await executeFileChangeset(op.normalized_target, changes, signal);
@@ -1327,9 +1654,9 @@ export async function denyGraphActionBeforeInvocation(db: DbExecutor, input: {
   });
 }
 
-/** A settled read failure has no uncertain effect. Converge its owning Run while
- * keeping the original operation and failed Invocation as the failure evidence. */
-export async function failGraphReadAfterInvocation(db: DbExecutor, input: {
+/** A settled read failure, or a file write proven to have changed no file,
+ * can end its owning Run while retaining the original failure evidence. */
+export async function failGraphActionAfterInvocation(db: DbExecutor, input: {
   readonly workspaceId: string; readonly runId: string; readonly operationId: string;
   readonly workerId: string; readonly workerEpoch?: bigint;
   readonly delivery: { readonly commandId: string; readonly invocationEpoch: bigint };
@@ -1340,12 +1667,26 @@ export async function failGraphReadAfterInvocation(db: DbExecutor, input: {
       input.delivery.commandId, input.workerId, input.delivery.invocationEpoch))) return 'STALE';
     const operation = await repositories.gateway.lockOperation(input.operationId);
     if (operation?.origin !== 'RUN' || operation.run_id !== run.id ||
-        !['FILE_READ', 'WEB_FETCH'].includes(operation.capability_key) ||
+        !['FILE_READ', 'WEB_FETCH', 'FILE_WRITE'].includes(operation.capability_key) ||
         operation.status !== 'FAILED') return 'STALE';
     const invocation = await repositories.gateway.lastInvocation(operation.id);
     if (invocation?.status !== 'FAILED' ||
         (await repositories.gateway.listUnresolvedRunOperations(run.id)).length > 0 ||
         (await repositories.recovery.listUnresolvedEffects(run.id)).length > 0) return 'STALE';
+    if (operation.capability_key === 'FILE_WRITE') {
+      const ledger = await repositories.changeSets.readLedgerByInvocation(invocation.id);
+      const claim = invocation.resource_claim_id === null ? undefined :
+        await repositories.gateway.readClaim(invocation.resource_claim_id);
+      const rootRejectedBeforeWrite = invocation.result_ref?.reason === 'CANONICAL_ROOT_CHANGED' ||
+        invocation.result_ref?.reason === 'CANONICAL_ROOT_UNAVAILABLE';
+      const noFileEffect = ledger?.files.every((file) => file.status === 'CONFLICT') ||
+        (rootRejectedBeforeWrite && ledger?.files.every((file) => file.status === 'FAILED' &&
+          file.error === invocation.result_ref?.reason));
+      if (ledger === undefined || ledger.files.length === 0 || !noFileEffect ||
+          claim?.status !== 'RELEASED') {
+        return 'STALE';
+      }
+    }
     if (run.status === 'FAILED' && task.executor_run_id === null) return 'FAILED';
     if (run.status !== 'RUNNING' || task.executor_run_id !== run.id ||
         task.ownership_epoch !== run.ownership_epoch ||
@@ -1359,7 +1700,7 @@ export async function failGraphReadAfterInvocation(db: DbExecutor, input: {
       return 'CONTROL_PENDING';
     }
     const reason = typeof invocation.result_ref?.reason === 'string'
-      ? invocation.result_ref.reason : 'GATEWAY_READ_FAILED';
+      ? invocation.result_ref.reason : 'GATEWAY_ACTION_FAILED';
     const failed = await repositories.runs.advanceRun({ runId: run.id,
       expectedRevision: run.revision, status: 'FAILED',
       currentStepId: run.current_step_id, waitReason: reason, terminal: true });
@@ -1443,17 +1784,79 @@ export async function reconcileGatewayInvocation(db: DbExecutor, input: {
     if (invocation.status === 'PREPARED') {
       toolReconciliation = { status: 'NOT_EXECUTED', result: { reason: 'PREPARED_NOT_EXECUTED' } };
     } else {
-      const canonicalRoot = op.action_type === 'APPLY_CHANGESET'
-        ? op.normalized_target : dirname(op.normalized_target);
+      const pathRow = await repositories.fileWritePaths.readByOperation(op.id);
+      const canonicalRoot = pathRow?.root_path ?? (op.action_type === 'APPLY_CHANGESET'
+        ? op.normalized_target : dirname(op.normalized_target));
       // 与执行侧共用同一份冻结输入构造，避免「核对用的期望」和「真正写入的期望」漂移。
       const changes = op.action_type === 'APPLY_CHANGESET'
         ? (op.params.changes as unknown as FileChange[])
-        : fileWriteInputChanges(op);
-      const check = await reconcileFileChangeset(canonicalRoot, changes);
-      toolReconciliation = {
-        status: check.outcome === 'SUCCEEDED' ? 'SUCCEEDED' : 'UNKNOWN',
-        result: check.details,
-      };
+        : fileWriteInputChanges(op, canonicalRoot);
+      if (process.platform === 'win32') {
+        const receipt = fileWriteReceipt(invocation.result_ref);
+        const physical = jsonObject(receipt?.result)?.physical_files;
+        if (pathRow === undefined || !Array.isArray(physical) || physical.length !== changes.length) {
+          const checks: FileReconciliationCheck[] = changes.map((change) => ({
+            path: change.path, expectedSha: expectedTargetOf(change), actualSha: null,
+            matches: false, readError: 'FILE_WRITE_PHYSICAL_RECEIPT_MISSING',
+          }));
+          toolReconciliation = { status: 'UNKNOWN',
+            result: { reason: 'FILE_WRITE_PHYSICAL_RECEIPT_MISSING',
+              checks: checks as unknown as JsonObject[] } };
+        } else {
+          try {
+            const outcomes = jsonObject(receipt?.result)?.changes;
+            if (!Array.isArray(outcomes) || outcomes.length !== changes.length) {
+              throw new Error('FILE_WRITE_REPORT_MISSING');
+            }
+            const files = changes.map((change, index) => {
+              const observed = jsonObject(physical[index]);
+              const reported = jsonObject(outcomes[index]);
+              const path = canonicalRelativePath(canonicalRoot, change.path);
+              if (observed?.path !== path || reported?.path !== change.path ||
+                  !Array.isArray(observed.parent_chain) ||
+                  (observed.target_id !== null && typeof observed.target_id !== 'string')) {
+                throw new Error('FILE_WRITE_PHYSICAL_RECEIPT_MISMATCH');
+              }
+              const expectedSha = reported.status === 'APPLIED'
+                ? expectedTargetOf(change)
+                : typeof reported.actualBaselineSha256 === 'string'
+                  ? reported.actualBaselineSha256 : null;
+              return { path, parent_chain: observed.parent_chain as unknown as WindowsFilePathEvidence['captures'][number]['parent_chain'],
+                target_id: observed.target_id, expected_sha256: expectedSha };
+            });
+            const observed = await reconcileWindowsFileChangeset({ root_path: pathRow.root_path,
+              root_id: pathRow.root_id,
+              captures: pathRow.captures as unknown as WindowsFilePathEvidence['captures'] }, files);
+            const checks: FileReconciliationCheck[] = observed.map((file, index) => {
+              const change = changes[index]!;
+              const expectedSha = expectedTargetOf(change);
+              return { path: change.path, expectedSha, actualSha: file.sha256,
+                matches: file.matches && file.sha256 === expectedSha,
+                ...(!file.matches || file.error !== undefined
+                  ? { readError: file.error ?? 'PHYSICAL_IDENTITY_MISMATCH' } : {}) };
+            });
+            const allMatch = checks.every((check) => check.matches);
+            toolReconciliation = { status: allMatch ? 'SUCCEEDED' : 'UNKNOWN',
+              result: { reconciliation: allMatch ? 'ALL_MATCH' : 'MISMATCH_OR_PARTIAL',
+                checks: checks as unknown as JsonObject[] } };
+          } catch (error) {
+            const checks: FileReconciliationCheck[] = changes.map((change) => ({
+              path: change.path, expectedSha: expectedTargetOf(change), actualSha: null,
+              matches: false, readError: 'FILE_WRITE_PHYSICAL_RECONCILE_FAILED',
+            }));
+            toolReconciliation = { status: 'UNKNOWN',
+              result: { reason: 'FILE_WRITE_PHYSICAL_RECONCILE_FAILED',
+                error_kind: error instanceof Error ? error.name : 'UNKNOWN',
+                checks: checks as unknown as JsonObject[] } };
+          }
+        }
+      } else {
+        const check = await reconcileFileChangeset(canonicalRoot, changes);
+        toolReconciliation = {
+          status: check.outcome === 'SUCCEEDED' ? 'SUCCEEDED' : 'UNKNOWN',
+          result: { ...check.details, checks: check.checks as unknown as JsonObject[] },
+        };
+      }
     }
   } else if (op.capability_key === 'GIT_WRITE') {
     if (invocation.status === 'PREPARED') {
@@ -1518,6 +1921,44 @@ export async function reconcileGatewayInvocation(db: DbExecutor, input: {
       throw gatewayDenied('GATEWAY_INVOCATION_STALE', '未决调用已经变化。');
     }
     if (run?.worker_id !== null && run !== undefined) await tx.runs.fenceWorker(run.id);
+    let fileWriteProven = false;
+    let fileWritePartialProven = false;
+    let fileWriteApplied: boolean[] = [];
+    let fileWritePartialObservations: FileObservation[] | undefined;
+    const pathRow = op.capability_key === 'FILE_WRITE'
+      ? await tx.fileWritePaths.readByOperation(op.id) : undefined;
+    if (op.capability_key === 'FILE_WRITE' && lockedInvocation.status !== 'PREPARED') {
+      const canonicalRoot = pathRow?.root_path ?? (op.action_type === 'APPLY_CHANGESET'
+        ? op.normalized_target : dirname(op.normalized_target));
+      const changes: readonly FileChange[] = op.action_type === 'APPLY_CHANGESET'
+        ? (op.params.changes as unknown as FileChange[]) : fileWriteInputChanges(op, canonicalRoot);
+      const receipt = fileWriteReceipt(lockedInvocation.result_ref);
+      const report = validatedFileWriteReport(lockedOp, lockedInvocation, changes, receipt);
+      const checks = toolReconciliation?.result.checks as unknown as FileReconciliationCheck[] | undefined;
+      const priorLedger = await tx.changeSets.readLedgerByInvocation(invocation.id);
+      const priorEvidenceAgrees = priorLedger === undefined ||
+        (priorLedger.files.length === changes.length && priorLedger.files.every((file) => file.status === 'APPLIED'));
+      const previousStatus = new Map(priorLedger?.files.map((file) => [file.relative_path, file.status]));
+      fileWriteApplied = changes.map((change, idx) => report?.applied[idx] === true &&
+        checks?.[idx]?.path === change.path && checks[idx]?.matches === true &&
+        previousStatus.get(canonicalRelativePath(canonicalRoot, change.path)) !== 'CONFLICT' &&
+        previousStatus.get(canonicalRelativePath(canonicalRoot, change.path)) !== 'FAILED');
+      fileWriteProven = toolReconciliation?.status === 'SUCCEEDED' &&
+        report?.outcome === 'SUCCEEDED' && fileWriteApplied.every(Boolean) && priorEvidenceAgrees;
+      fileWritePartialProven = priorLedger === undefined &&
+        confirmedPartialFileWrite(changes, receipt, report, checks, fileWriteApplied);
+      if (fileWritePartialProven) {
+        const receiptChanges = jsonObject(receipt?.result)?.changes;
+        fileWritePartialObservations = executionObservations(receiptChanges as unknown as FileChangeOutcome[]);
+      }
+      toolReconciliation = {
+        status: fileWriteProven ? 'SUCCEEDED' : 'UNKNOWN',
+        result: { ...toolReconciliation!.result,
+          ...(receipt === undefined ? { reason: 'FILE_WRITE_RECEIPT_MISSING' }
+            : { file_write_receipt: receipt,
+                ...(fileWriteProven ? {} : { reason: 'FILE_WRITE_RECEIPT_OR_DISK_UNCONFIRMED' }) }) },
+      };
+    }
     // Once DISPATCHING committed, a missing target could have been written and
     // removed by an external actor. Only PREPARED proves no adapter call began.
     const safeReread = op.capability_key === 'FILE_READ' || op.capability_key === 'WEB_FETCH' || op.capability_key === 'GIT_READ';
@@ -1542,17 +1983,18 @@ export async function reconcileGatewayInvocation(db: DbExecutor, input: {
       status === 'UNKNOWN' ? 'QUARANTINED' : 'RELEASED');
     if (op.capability_key === 'FILE_WRITE' && (status === 'SUCCEEDED' || status === 'UNKNOWN') &&
         toolReconciliation?.result !== undefined && Array.isArray(toolReconciliation.result.checks)) {
-      // M06 增量A：崩溃后由核对回读固化账本；全匹配=SUCCEEDED，否则保守 UNKNOWN，同事务、无磁盘访问。
-      const canonicalRoot = op.action_type === 'APPLY_CHANGESET'
-        ? op.normalized_target : dirname(op.normalized_target);
+      // 原 Invocation 适配器回执、冻结输入和当前回读共同限定逐文件结果；未确认保持 UNKNOWN。
+      const canonicalRoot = pathRow?.root_path ?? (op.action_type === 'APPLY_CHANGESET'
+        ? op.normalized_target : dirname(op.normalized_target));
       const header = ledgerHeader(op, invocation.id, canonicalRoot);
       if (header !== undefined) {
         const inputChanges: readonly FileChange[] = op.action_type === 'APPLY_CHANGESET'
-          ? (op.params.changes as unknown as FileChange[]) : fileWriteInputChanges(op);
+          ? (op.params.changes as unknown as FileChange[]) : fileWriteInputChanges(op, canonicalRoot);
         const files = ledgerFiles({ canonicalRoot, inputChanges,
-          observations: reconciliationObservations(
-            toolReconciliation.result.checks as unknown as FileReconciliationCheck[]) });
-        await tx.changeSets.recordReconciliation(header, randomUUID(), files, status === 'SUCCEEDED');
+          observations: fileWritePartialObservations ?? reconciliationObservations(
+            toolReconciliation.result.checks as unknown as FileReconciliationCheck[], fileWriteApplied) });
+        await tx.changeSets.recordReconciliation(header, randomUUID(), files,
+          status === 'SUCCEEDED', fileWritePartialProven);
       }
     }
     return { status, operation_id: op.id };

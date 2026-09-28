@@ -10,6 +10,10 @@ Windows 启动入口 → 桌面壳 → 随包 React UI + 本机 Node API/Worker�
 
 M02 桌面发布目录由 [构建脚本](../../apps/desktop/scripts/build-release.ps1)生成；其已验收的基础机制见 [开发记录](../development/m02-desktop-foundation.md)。随包使用**真实 Fastify API**，没有另起业务接口；发布物尚无安装器。API 的桌面模式只绑定 `127.0.0.1` 的 OS 分配端口、仅接受 `http://tauri.localhost` Origin 与本次令牌；无 Origin 的本机请求仍需令牌。API 仅用私有 stdin 取得令牌与 nonce，在确认 PG/schema/Workspace/HTTP 边界后用类型化 stdout 报端口。启动失败显示可操作错误，不放行工作台；服务在运行中退出后，页面重载会拒绝失效凭据并显示阻断页，而非回落到可操作示例数据。独立 PG 是用户事先配置的服务，不由桌面程序安装或停止。
 
+2026-09-27 M06 Windows 文件助手接线：发布脚本以锁定的 Rust 依赖构建 `apps/file-io-helper`，将 `relay-file-io-helper.exe` 与 Node/API 一并打包并写入源码及资源 SHA-256 清单；包校验缺少或摘要不符时失败。桌面宿主启动前要求该资源存在，并把确切资源路径经 `RELAY_FILE_IO_HELPER` 传给 API 与 supervisor/Worker。新 Windows `FILE_WRITE` 的准备、执行、核对需要此助手；缺失时拒绝动作，不回退到 Node 按路径写入。当前目录包不是安装器，文件助手的真实 Job 恢复链与安装升级需另见验收记录。
+
+2026-09-28 M06 登记身份接续：Windows API 登记新受管资源时也调用原生助手读取当前根 File ID，并写入 0038；助手判定目录不可安全绑定时可继续登记供其他能力使用，但不能准备新的 Windows `FILE_WRITE`。既有资源没有注册时身份，须显式停用并重新登记，旧 Operation 继续按原 0036 冻结身份核对。桌面目录包携带该 migration 和助手；开发集成脚本在需要受管资源的 Windows 套件且未给定 `RELAY_FILE_IO_HELPER` 时，以锁文件构建源码 debug 助手供测试，显式给定该变量时按指定助手验证。
+
 M03 宿主已接入独立 supervisor 的私有恢复握手，但完整 M03 尚未验收。宿主先检查随包编译后的 supervisor 入口包含精确 `relay-desktop-supervisor-v1` 协议标记；旧入口在任何 Node 启动前被拒绝，构建脚本也拒绝缺标记的发布资源。宿主为 API 与 supervisor 分别创建 Windows Job，经 `PROC_THREAD_ATTRIBUTE_JOB_LIST` 在 `CreateProcessW` 时绑定，关闭最后 Job 句柄终止进程组；不以父 PID 退出或租约过期证明 Worker 停止。宿主在实际 `data_root/runtime-launches/` 原子写入每次唯一 `ARMED` 启动记录后，才发送 supervisor 私有帧。下次启动只对格式、版本和 Job 不变量完整的旧记录核验命名 Job：仍存在则终止并查询 `ActiveProcesses=0`，已不存在则依赖已持久化记录、创建时绑定、非继承 Job 句柄和禁止 breakaway 的组合证明；记录缺损、Job 查询失败或停机超时均拒绝新 Worker。启动前还检查旧记录不超过 4096 条，私有 JSON 帧连同换行不超过 1 MiB；超限拒绝启动 Node。
 
 隔离桌面验收的 [会话启动脚本](../../apps/desktop/scripts/start-acceptance-session.ps1)现提供可选 `-InstallGraph`：在临时 PostgreSQL 的业务 migration 后，以同一 migrator URL 调用随包 `install-graph.js`，随后清除该 migrator URL，再以 runtime 身份初始化 Workspace 和启动桌面。旧验收脚本未指定该开关时保持原顺序，也会在运行期前清除 migrator URL。该开关只操作本次创建的临时集群；[新图包 Windows 开发自检](../../apps/desktop/results/m03-review-resume-evidence.txt)已核对顺序、角色隔离与无运行期 migrator 会话，尚待协调 Agent 独立复跑。
@@ -37,6 +41,34 @@ Windows 内容缩放由宿主显式启用 WebView2 原生快捷键：`Ctrl++` �
 配置项最低包含：DB URL/账号/secret_ref、data_root、bind_host/port 策略、allowed_origins、worker 并发、模型/工具预算、日志级别与脱敏。安装版推荐由系统分配空闲 loopback 端口，启动器通过私有父子进程通道取得实际端口和实例握手；禁止探测某端口就信任已有服务。开发可显式固定端口，被占用则失败。完整凭据不出现在命令行参数、端口发现文件或普通 stdout 日志中。
 
 data_root 分 artifacts、knowledge、staging、runtime-workspaces、logs；数据库备份放用户指定的独立 backup_root。运行账号最小文件权限；data_root 不能是源码仓库根、共享网络路径或系统目录。配置/凭据不写入 Context。
+
+### 持久桌面测试入口
+
+2026-09-27：根目录 [dev-stack.bat](../../dev-stack.bat) 通过 [test-desktop.ps1](../../scripts/test-desktop.ps1) 提供菜单和 Build / Start / Stop / Status / Preview。原浏览器预览脚本保留；旧 `-FrontendOnly`、`-FrontendPort`、`-SkipInstall`、`-SkipBuild` 参数形式仍进入预览。Build 复用既有桌面构建脚本的 `-TestPackage`，将目录包固定输出到仓库根 `test-release/`；默认构建出口仍为 `apps/desktop/release/`，临时验收脚本不变。
+
+Start 校验包内 EXE 和资源摘要，使用仓库便携 PostgreSQL 在 `.relay-test/cluster` 初始化专用测试集群，只监听 loopback，采用本机测试 trust 认证，不能作为生产部署。首次执行业务迁移、Graph 安装和 Workspace 初始化；Workspace/命令 UUID 先落盘，同一初始化可重试。后续启动复用原 Workspace、数据库和 `.relay-test/data`，配置单独保存在 `.relay-test/desktop.env`，通过进程环境传给桌面。包已变化时，已有测试库先做 `pg_dump` 备份，再以迁移角色执行迁移和 Graph 安装，随后清除迁移身份启动运行进程。备份只覆盖数据库，数据目录原样保留，不代表完整外部文件备份或自动回滚。
+
+启动器以独占文件句柄避免并发启停；运行中的测试包禁止覆盖，重复 Start 不再创建窗口。Stop 要求先正常关闭桌面窗口并确认包内进程退出，再停止专用 PG，任何失败均保留数据；它不强杀宿主，不清理 UNKNOWN，不删除集群。重建只替换程序目录，数据不在构建删除范围内。若启动失败，可关闭窗口后 Stop 并查 `.relay-test/postgres.log` 及 data 中的日志；集群初始化中断且目录不完整时需人工检查，不自动删除重建。未提供数据清空入口。
+
+此入口面向当前仓库的日常试用；便携运行时和编译工具仍按 README 准备。单独双击包内 EXE 不会启动该专用 PG 或选择试用配置，因此日常使用根目录菜单的 Start。`Start -SkipDesktop` 只准备环境，供脚本回归使用，不能计作真实桌面验收。构建、启停回归与 UI/业务/安装验收分开记录，不改变 M03–M06 的验收结论。
+
+验证入口：构建后运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-desktop-smoke.ps1`。该回归使用专用试用库，覆盖首次准备、重复启动/停止、停止后的 PG 状态、重启后同一 Workspace 与命令身份、数据库记录与文件保留、并发启动器锁；结束时停止 PG、删除自身探针文件，保留其他数据。2026-09-27 本轮上述实跑通过。另实测桌面和两个随包 Node 进程启动、重复 Start 无新增进程、窗口运行时 Stop 拒绝；程序化正常关窗请求未在 20 秒内退出，本轮核验进程路径和启动记录后仅为清理测试强制结束了该测试宿主，随后 Job 内进程退出、Stop 正常停止 PG。这不算正常关窗验收，也没有向日常 Stop 加入强杀行为；真实 UI 操作与安装验收仍需另验。
+
+包校验反例运行 `node --test scripts/test-desktop-package.test.mjs`：完整包通过，资源内容变化、清单路径越界、缺少 Node 摘要均拒绝。本轮已通过；旧 `-FrontendOnly -SkipInstall -SmokeSeconds 2` 入口也已实跑，Vite 启动、HTTP 可达、自动停止通过。
+
+### 发布包只读诊断
+
+在仓库根目录使用已信任目录包中的 Node 运行 [诊断入口](../../scripts/diagnose-desktop.mjs)：
+
+```powershell
+& ./apps/desktop/release/node.exe scripts/diagnose-desktop.mjs apps/desktop/release 'C:\absolute\path\desktop.env'
+```
+
+配置路径省略时使用 `RELAY_DESKTOP_CONFIG_PATH`，否则使用 `%APPDATA%/dev.relay.agent/desktop.env`。命令输出 JSON，全部检查通过退出 0，失败或未能完成退出 1。依次检查既有 manifest 所列资源摘要、随包 Node 24 与 manifest 版本一致、WebView2 Evergreen 注册信息、四项桌面配置，以及只读 PostgreSQL 会话中的业务 migration SHA 和 Workspace。WebView2 注册位置依据 [Microsoft 分发文档](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution)。配置值、连接 URL 和驱动原始错误不输出；不会启动 API/Worker、执行 migration 或修改用户数据。
+
+完整资源摘要校验上限 5 分钟；超时表示完整性未知，应待磁盘空闲后重试，不表示已证明包损坏。配置文件上限 64 KiB，拒绝未知/重复键；沿用随包 API 的 URL、UUID 和 schema 校验。诊断只读指定文件，不模拟进程中其他 `RELAY_*` 环境覆盖。数据库连接最长 5 秒、查询最长约 6 秒，使用单连接、显式只读事务与 5 秒服务端 statement timeout。PG 连接失败、schema 不兼容/兼容视图无权访问、Workspace 缺失分别报告；后继检查未运行不会报 PASS。
+
+本命令仍是仓库运维入口，尚未集成到安装包。hash 一致不代表可信发行签名；仅应执行可信来源的 Node/包。全部 PASS 仅表示这些诊断项通过，不证明图 checkpoint 升级兼容、目录写权限、窗口实际创建、业务闭环、安装/升级/卸载或备份恢复。真实 Provider 不参与检查。
 
 ## 2. 本机身份与前端凭据
 

@@ -24,6 +24,55 @@ export interface ArtifactLineageDto {
   readonly direct_parents: readonly LineageEdgeDto[];
 }
 
+export interface ArtifactDirectUsesDto {
+  readonly source_artifact_version_id: string;
+  readonly source_content_availability: 'AVAILABLE' | 'UNAVAILABLE';
+  readonly scope: 'RECORDED_DIRECT_ONLY';
+  readonly complete: false;
+  readonly has_more: boolean;
+  readonly direct_uses: readonly {
+    readonly relation: 'DERIVED_FROM' | 'REVISED_FROM';
+    readonly child_artifact_version_id: string | null;
+    readonly child_artifact_id: string | null;
+    readonly child_version_number: string | null;
+    readonly availability: 'AVAILABLE' | 'UNAVAILABLE';
+    readonly created_at: string;
+  }[];
+}
+
+/** Reverse lookup of explicitly recorded edges, never a complete impact analysis. */
+export async function readArtifactDirectUses(db: DbExecutor, storage: ManagedContentStore,
+  workspaceId: string, versionId: string): Promise<ArtifactDirectUsesDto> {
+  return db.transaction().setIsolationLevel('repeatable read').execute(async (snapshot) => {
+    const r = createRepositories(snapshot);
+    const { version } = await readArtifactVersionInWorkspace(r, workspaceId, versionId);
+    const source = await storage.readWithHashCheck(version.storage_ref,
+      { contentHash: version.content_hash, size: version.size });
+    const base = { source_artifact_version_id: version.id, scope: 'RECORDED_DIRECT_ONLY' as const,
+      complete: false as const };
+    if (source.status !== 'OK') return { ...base, source_content_availability: 'UNAVAILABLE',
+      has_more: false, direct_uses: [] };
+
+    const edges = await r.lineage.listByParent(workspaceId, version.id);
+    const visible = await Promise.all(edges.slice(0, 100).map(async (edge) => {
+      const child = await r.artifacts.readArtifactVersion(edge.child_version_id);
+      const owner = child === undefined ? undefined : await r.artifacts.readArtifact(child.artifact_id);
+      if (child === undefined || owner?.workspace_id !== workspaceId) return null;
+      const content = await storage.readWithHashCheck(child.storage_ref,
+        { contentHash: child.content_hash, size: child.size });
+      const available = content.status === 'OK';
+      return { relation: edge.relation as 'DERIVED_FROM' | 'REVISED_FROM',
+        child_artifact_version_id: available ? child.id : null,
+        child_artifact_id: available ? owner.id : null,
+        child_version_number: available ? child.version_number.toString() : null,
+        availability: available ? 'AVAILABLE' as const : 'UNAVAILABLE' as const,
+        created_at: edge.created_at.toISOString() };
+    }));
+    return { ...base, source_content_availability: 'AVAILABLE', has_more: edges.length > 100,
+      direct_uses: visible.filter((item): item is NonNullable<typeof item> => item !== null) };
+  });
+}
+
 export async function readArtifactLineage(db: DbExecutor, storage: ManagedContentStore,
   workspaceId: string, versionId: string): Promise<ArtifactLineageDto> {
   return db.transaction().setIsolationLevel('repeatable read').execute(async (snapshot) => {

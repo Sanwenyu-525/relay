@@ -63,6 +63,7 @@ export function registerRunRoutes(app: FastifyInstance, dependencies: RouteDepen
           mockGatewayAction: body.mock_gateway_action,
           fileReadAction: body.file_read_action,
           webFetchAction: body.web_fetch_action,
+          fileWriteAction: body.file_write_action,
           contextSources: body.context_sources,
         });
 

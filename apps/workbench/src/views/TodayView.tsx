@@ -308,6 +308,7 @@ export default function TodayView() {
   return <section className="today-page">
     <p className="eyebrow">今日</p><h1>Today</h1>
     <p className="page-lede">任务资格、排序与依据由服务端给出。Pin、Later、Focus 是用户选择，不会跳过任务准入。</p>
+    <p className="helper-text"><Link to="/tasks?tab=attention">查看跨项目人工待处理</Link>。Later 与 Focus 不会处理或隐藏待审决定；Today 仍按服务端资格展示任务。</p>
     {client === null ? <div className="warning-callout" role="status">当前为示例数据预览，没有真实 Today 投影。<Link to="/projects">打开项目</Link> 或 <Link to="/tasks">打开任务</Link> 继续人工工作。</div> : <>
       <div className="surface-panel today-query"><label>查询日期<input type="date" value={date} onChange={(event) => { if (event.target.value) setDate(event.target.value); }} /></label>
         <form onSubmit={applyTimezone}><label>查询时区（IANA）<input value={timezoneDraft} onChange={(event) => setTimezoneDraft(event.target.value)} /></label>

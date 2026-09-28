@@ -10,10 +10,10 @@ import { toDecimalString } from '../shared/decimal.js';
 import { httpCommandScopeKey } from './actor.js';
 import { runIdempotentCommand, type CommandOutcome } from './command.js';
 import { invalidTransition, resourceNotFound, revisionConflict, validationFailed } from './domain-error.js';
-import { canonicalResourceIdentity, rootsOverlap } from './gateway-configuration.js';
+import { canonicalResourceIdentity, registrationFileWriteRootId, rootsOverlap } from './gateway-configuration.js';
 import { lockWritableProjectInWorkspace } from './guards.js';
 import { requireRevision } from './revisions.js';
-import type { Repositories } from './unit-of-work.js';
+import { createRepositories, type Repositories } from './unit-of-work.js';
 
 type IdResult = { readonly project_id?: string; readonly connection_id?: string; readonly policy_id?: string;
   readonly resource_id?: string; readonly version?: string; readonly revision?: string;
@@ -253,31 +253,42 @@ export async function revokeGatewayPolicyCommand(db: DbExecutor, input: {
 export async function createManagedResourceCommand(db: DbExecutor, input: {
   workspaceId: string; projectId: string; commandId: string; rootPath: string;
 }): Promise<CommandOutcome<IdResult>> {
-  return runIdempotentCommand(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
+  const scopeKey = httpCommandScopeKey(input.workspaceId);
+  // A committed receipt must replay even if its directory has since moved. Native
+  // inspection is outside the registration transaction and only runs for first use.
+  const prior = await createRepositories(db).receipts.findReceipt({ scopeKey,
+    commandId: input.commandId });
+  let prepared: { root: string; fileWriteRootId: string | null } | undefined;
+  if (prior === undefined) {
+    let root: string;
+    try { root = await realpath(input.rootPath); }
+    catch (error) {
+      if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+        throw validationFailed([{ field: 'root_path', message: 'must be an existing directory' }]);
+      }
+      throw error;
+    }
+    if (!(await stat(root)).isDirectory()) throw validationFailed([{ field: 'root_path', message: 'must be an existing directory' }]);
+    const fileWriteRootId = await registrationFileWriteRootId(root);
+    prepared = { root, fileWriteRootId };
+  }
+  return runIdempotentCommand(db, { scopeKey,
     commandId: input.commandId, commandType: 'CreateManagedResource',
     target: { project_id: input.projectId }, body: { root_path: input.rootPath },
     execute: async (repositories) => {
-      // Receipt replay bypasses this local metadata read. It occurs before DB
-      // locks; the Fake adapter checks the parent again at use.
-      let root: string;
-      try { root = await realpath(input.rootPath); }
-      catch (error) {
-        if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) {
-          throw validationFailed([{ field: 'root_path', message: 'must be an existing directory' }]);
-        }
-        throw error;
-      }
-      if (!(await stat(root)).isDirectory()) throw validationFailed([{ field: 'root_path', message: 'must be an existing directory' }]);
+      if (prepared === undefined) throw new Error('Managed resource receipt disappeared during replay');
+      const { root, fileWriteRootId } = prepared;
       const key = canonicalResourceIdentity(root);
       await authorityWrite(repositories, input.workspaceId);
       await projectVisible(repositories, input.workspaceId, input.projectId);
       await repositories.gateway.lockResourceRegistry();
       if ((await repositories.gateway.listResources()).some((row) =>
-        row.project_id === input.projectId && row.identity_key === key)) {
+        row.project_id === input.projectId && row.identity_key === key && row.status === 'ACTIVE')) {
         throw invalidTransition('同一 Project 已登记该实际目录。');
       }
       const resource = await repositories.gateway.insertResource({ id: randomUUID(),
-        workspaceId: input.workspaceId, projectId: input.projectId, canonicalRoot: root, identityKey: key });
+        workspaceId: input.workspaceId, projectId: input.projectId, canonicalRoot: root,
+        identityKey: key, fileWriteRootId });
       await repositories.workspaces.bumpAuthority(input.workspaceId);
       return { project_id: input.projectId, resource_id: resource.id,
         revision: toDecimalString(resource.revision),
