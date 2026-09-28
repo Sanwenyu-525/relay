@@ -1,6 +1,8 @@
 # 技术栈改造与后续开发：大模块工作包
 
-角色：当前执行顺序与模块范围。依据：[ADR-010](../docs/decisions/ADR-010-agent-stack-react-desktop.md)、[技术选型](../docs/architecture/technology-selection.md)、[测试计划](../docs/testing/verification-plan.md#10-技术栈改造的大模块验收)。当前状态只看 [CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md)。本文定义工作包，不记录开发或验收结论。
+2026-09-28 范围隔离：用户要求规划 V1 之后的能力，新增[N 工作包](post-v1-collaboration.md)；只做规划、尚未实施，不追加为本文件 M08，也不改变本 M01–M07 的完成条件。V1 原缺口继续在本范围闭合，不能转移到后续版本冒充完成。
+
+角色：当前执行顺序与模块范围。依据：[ADR-010](../docs/decisions/ADR-010-agent-stack-react-desktop.md)、[技术选型](../docs/architecture/技术选型.md)、[测试计划](../docs/testing/verification-plan.md#10-技术栈改造的大模块验收)。当前状态只看 [CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md)。本文定义工作包，不记录开发或验收结论。
 
 2026-09-26 接续：下列前置是默认依赖，已获用户授权的并行开发与验收后置以当前状态及当前指令为准；后置不表示通过，不取消真实 Provider 或最终交付门槛。产品补充按[执行映射](README.md#产品补充的执行映射)进入相关模块，具体候选不因写入提示词而全部获准实施。
 

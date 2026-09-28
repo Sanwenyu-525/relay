@@ -72,4 +72,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File apps/workbench/scripts/run-r
 
 ## 文档影响与剩余验收
 
-[工作台 README](../../apps/workbench/README.md)、[工作台交互](../frontend/workbench-design.md)、[设计系统](../frontend/design-system.md)及[技术选型](../architecture/technology-selection.md)已经同步 React 当前状态。两个旧验收记录中的 `.vue` 链接指向归档原件，保留历史证据。需求/领域契约、ADR、API、数据库和 migration 未改变；无新 ADR、数据库或 API 文档变更。桌面窗口人工闭环、WebView/IME/DPI/缩放/关闭生命周期须由并行宿主包与 M02 独立验收验证；本前端子包的浏览器或截图结果不替代它们。
+[工作台 README](../../apps/workbench/README.md)、[工作台交互](../frontend/workbench-design.md)、[设计系统](../frontend/design-system.md)及[技术选型](../architecture/技术选型.md)已经同步 React 当前状态。两个旧验收记录中的 `.vue` 链接指向归档原件，保留历史证据。需求/领域契约、ADR、API、数据库和 migration 未改变；无新 ADR、数据库或 API 文档变更。桌面窗口人工闭环、WebView/IME/DPI/缩放/关闭生命周期须由并行宿主包与 M02 独立验收验证；本前端子包的浏览器或截图结果不替代它们。

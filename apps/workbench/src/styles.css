@@ -56,6 +56,33 @@ button {
   cursor: pointer;
 }
 
+/* 控件字体与文字颜色继承：文本输入、下拉与多行框不落回浏览器默认字体（导航/正文/控件观感统一）。 */
+/* 文本输入与下拉的最低几何统一：未被页面级样式覆盖的控件不再呈现浏览器原生外观。 */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]),
+select {
+  font: inherit;
+  color: inherit;
+  min-height: var(--relay-control-height);
+  padding: var(--relay-space-2) var(--relay-space-3);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-control);
+}
+
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* 锚点与焦点滚入视口时预留顶栏（桌面含标题栏）高度，避免被固定区域遮住。 */
+html {
+  scroll-padding-top: var(--relay-layout-header-height);
+}
+
+html.app-desktop {
+  scroll-padding-top: calc(var(--relay-control-height-comfort) + var(--relay-layout-header-height));
+}
+
 button:disabled {
   cursor: not-allowed;
 }
@@ -86,9 +113,11 @@ svg {
 /* 页壳 ------------------------------------------------------------------ */
 
 .skip-link {
-  position: absolute;
+  position: fixed;
   left: var(--relay-space-4);
-  top: calc(-1 * var(--relay-space-10));
+  top: 0;
+  transform: translateY(-100%);
+  pointer-events: none;
   z-index: var(--relay-zIndex-dialog);
   padding: var(--relay-space-2) var(--relay-space-4);
   background: var(--relay-color-bg-surface);
@@ -99,6 +128,153 @@ svg {
 
 .skip-link:focus {
   top: var(--relay-space-4);
+  transform: none;
+  pointer-events: auto;
+}
+
+.desktop-window .skip-link:focus {
+  top: calc(var(--relay-control-height-comfort) + var(--relay-space-4));
+}
+
+.desktop-titlebar {
+  position: sticky;
+  top: 0;
+  z-index: var(--relay-zIndex-popover);
+  display: flex;
+  height: var(--relay-control-height-comfort);
+  background: var(--relay-color-bg-navigation);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.desktop-titlebar__drag {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+  user-select: none;
+  cursor: default;
+}
+
+.desktop-titlebar__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  padding-left: var(--relay-space-4);
+}
+
+.desktop-titlebar__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--relay-space-2);
+  height: 100%;
+  padding: 0 var(--relay-space-2);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: var(--relay-font-size-meta);
+  white-space: nowrap;
+}
+
+.desktop-titlebar__action--icon {
+  width: var(--relay-control-height-comfort);
+  padding: 0;
+}
+
+.desktop-titlebar__action:hover:not(:disabled) {
+  background: var(--relay-color-selection-hover);
+}
+
+.desktop-titlebar__action:disabled {
+  color: var(--relay-color-disabled-text);
+}
+
+.desktop-titlebar__action svg {
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+}
+
+.desktop-titlebar__action kbd {
+  color: var(--relay-color-text-secondary);
+  font: inherit;
+}
+
+.desktop-titlebar__separator {
+  height: var(--relay-space-4);
+  margin: 0 var(--relay-space-2);
+  border-left: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.desktop-titlebar__error {
+  margin-left: var(--relay-space-4);
+  color: var(--relay-color-status-danger-text);
+}
+
+.desktop-titlebar__controls {
+  display: flex;
+  flex: none;
+}
+
+.desktop-titlebar__button {
+  display: grid;
+  place-items: center;
+  width: var(--relay-control-height-comfort);
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.desktop-titlebar__button:hover {
+  background: var(--relay-color-selection-hover);
+}
+
+.desktop-titlebar__button--close:hover {
+  background: var(--relay-color-status-danger-bg);
+  color: var(--relay-color-status-danger-text);
+}
+
+.desktop-titlebar__button svg {
+  width: var(--relay-font-size-meta);
+  height: var(--relay-font-size-meta);
+}
+
+@media (max-width: 700px) {
+  .desktop-titlebar__action kbd {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .desktop-titlebar__action-label {
+    display: none;
+  }
+
+  .desktop-titlebar__action:not(.desktop-titlebar__action--icon) {
+    width: var(--relay-control-height-comfort);
+    padding: 0;
+  }
+}
+
+.desktop-window .app-frame {
+  min-height: calc(100vh - var(--relay-control-height-comfort));
+}
+
+.desktop-window .app-sidebar {
+  top: var(--relay-control-height-comfort);
+  height: calc(100vh - var(--relay-control-height-comfort));
+}
+
+.desktop-window .app-topbar {
+  top: var(--relay-control-height-comfort);
+}
+
+.desktop-window .app-topbar__command-open {
+  display: none;
 }
 
 /* 仅供辅助技术读取的标签；可见标签仍由界面文字提供。 */
@@ -259,6 +435,25 @@ svg {
 
 .data-source-button:hover {
   background: var(--relay-color-selection-hover);
+}
+
+.data-source-button--live {
+  color: var(--relay-color-selection-text);
+  border-color: var(--relay-color-selection-text);
+}
+
+/* 状态圆点：live 用主操作色，示例数据用中性色；颜色不是唯一指示，文字始终可读。 */
+.data-source-button::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
+  border-radius: var(--relay-radius-round);
+  background: var(--relay-color-text-muted);
+}
+
+.data-source-button--live::before {
+  background: var(--relay-color-action-primary);
 }
 
 .data-source-button > svg {
@@ -2153,4 +2348,28 @@ fieldset.field {
 
 @media (max-width: 45rem) {
   .file-write-frozen-diff__compare { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 证据与追溯：长 hash 与产物类型以辅助信息呈现，不挤占判断所需的标题与操作。 */
+.hash-code {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 0 var(--relay-space-2);
+  font-family: var(--relay-font-family-code);
+  font-size: var(--relay-font-size-meta);
+  color: var(--relay-color-text-secondary);
+  background: var(--relay-color-bg-surface);
+  border-radius: var(--relay-radius-badge);
+}
+
+.expected-output-chip {
+  display: inline-block;
+  margin: 0 var(--relay-space-2) var(--relay-space-1) 0;
+  padding: 0 var(--relay-space-2);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-badge);
+  font-size: var(--relay-font-size-meta);
+  color: var(--relay-color-text-secondary);
 }

@@ -141,7 +141,7 @@ M01 固定版本实测显示根图忽略传入非空 `checkpoint_ns` 并实际�
 
 本片定向真实 PG 自检：Gateway [21/21](../testing/evidence/m03/gateway-inner-lease-green.log)、官方图 [26/26](../testing/evidence/m03/gateway-action-run-graph-final-v4.log)、Review/验证 [25/25](../testing/evidence/m03/gateway-action-verification-final-v3.log)、命令顺序/控制 [7/7](../testing/evidence/m03/gateway-action-run-command-order-final-v3.log)，均退出 0；后两项在内层 lease 修复前单独执行，最终同源码的完整回归包括它们。[完整真实 PG 回归](../testing/evidence/m03/gateway-action-full-integration-final.log) 241/241、退出 0，business migration、graph 安装、PostgreSQL 启停均退出 0，临时集群清理 True；此前[240/240 中间轮](../testing/evidence/m03/gateway-action-full-integration-pre-graph-lease.log)未编入最后一条外层心跳/内层失租图反例，保留为历史而不作为最终覆盖。其他静态/打包结果见本片 SHA 证据清单，均仅为开发自检，需协调 Agent 独立复验。
 
-本片尚未验证旧版 Windows 固定图包的待审 checkpoint 原样升级：旧状态没有 `reviewId/reviewKind`，不能安全猜测新 interrupt 的绑定，当前版本失败关闭。M07 安装/升级出口须有受信迁移或唯一性证明并做真实 PG 旧包→新包试验，见[部署限制](../deployment/local-deployment.md)。本片交付时，G06 在途模型取消与 G03 Gateway UNKNOWN 页面可见性尚未完成；后续开发切片见下文。任一后端局部结果均不代表 G01–G08、M03 整体或真实 Provider 已通过。
+本片尚未验证旧版 Windows 固定图包的待审 checkpoint 原样升级：旧状态没有 `reviewId/reviewKind`，不能安全猜测新 interrupt 的绑定，当前版本失败关闭。M07 安装/升级出口须有受信迁移或唯一性证明并做真实 PG 旧包→新包试验，见[部署限制](../deployment/本机部署.md)。本片交付时，G06 在途模型取消与 G03 Gateway UNKNOWN 页面可见性尚未完成；后续开发切片见下文。任一后端局部结果均不代表 G01–G08、M03 整体或真实 Provider 已通过。
 
 ## Windows ACTION 组合重跑的 Context 栅栏修复
 

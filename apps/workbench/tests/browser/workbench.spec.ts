@@ -8,6 +8,12 @@ const verification = "/tasks/task-evaluation-metrics?skill=verification";
 test.describe("桌面视口", () => {
   test.use({ viewport: { width: 1487, height: 1058 } });
 
+  test("浏览器预览不显示桌面窗口控制", async ({ page }) => {
+    await page.goto(blueprint);
+    await expect(page.getByTestId("desktop-titlebar")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "关闭窗口" })).toHaveCount(0);
+  });
+
   test("四个状态都渲染真实中文 DOM 且无整页横向滚动", async ({ page }) => {
     for (const path of [blueprint, resume, definition, verification]) {
       await page.goto(path);
@@ -148,10 +154,63 @@ test("R02：创建页草稿会拦截侧栏和浏览器返回，明确放弃后�
   await expect(page).toHaveURL(/\/tasks$/);
 });
 
-test("键盘可达：跳转主内容链接先获得焦点", async ({ page }) => {
+for (const [name, zoom] of [["默认字号", "1"], ["放大字号与页面缩放", "1.5"]] as const) {
+  test(`键盘可达：辅助链接在${name}下隐藏、显示并跳转焦点`, async ({ page }) => {
+    await page.goto(definition);
+    if (zoom !== "1") {
+      await page.evaluate(() => {
+        document.documentElement.style.fontSize = "24px";
+        document.body.style.zoom = "1.5";
+      });
+    }
+    const link = page.locator(".skip-link");
+    const hidden = await link.boundingBox();
+    expect(hidden).not.toBeNull();
+    expect((hidden?.y ?? 0) + (hidden?.height ?? 0)).toBeLessThanOrEqual(0);
+    expect(await page.evaluate(() => {
+      const link = document.querySelector(".skip-link");
+      const rect = link?.getBoundingClientRect();
+      return link !== document.elementFromPoint((rect?.left ?? 0) + (rect?.width ?? 0) / 2, 1);
+    })).toBe(true);
+
+    await page.keyboard.press("Tab");
+    await expect(link).toBeFocused();
+    const shown = await link.boundingBox();
+    expect(shown).not.toBeNull();
+    expect(shown?.y).toBeGreaterThanOrEqual(0);
+    expect((shown?.y ?? 0) + (shown?.height ?? 0)).toBeLessThanOrEqual(page.viewportSize()?.height ?? 0);
+
+    const beforeSkipUrl = page.url();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#main-content")).toBeFocused();
+    await expect(page).toHaveURL(beforeSkipUrl);
+    const hiddenAgain = await link.boundingBox();
+    expect((hiddenAgain?.y ?? 0) + (hiddenAgain?.height ?? 0)).toBeLessThanOrEqual(0);
+  });
+}
+
+test("桌面标题栏偏移下的辅助链接不遮挡窗口控制", async ({ page }) => {
   await page.goto(definition);
+  await page.evaluate(() => {
+    const root = document.querySelector("#app > div");
+    if (!root) throw new Error("App root missing");
+    root.classList.add("desktop-window");
+    const bar = document.createElement("div");
+    bar.className = "desktop-titlebar";
+    bar.innerHTML = '<div class="desktop-titlebar__drag"></div><div class="desktop-titlebar__controls"><span class="desktop-titlebar__button"></span><span class="desktop-titlebar__button"></span><span class="desktop-titlebar__button"></span></div>';
+    root.prepend(bar);
+  });
   await page.keyboard.press("Tab");
-  await expect(page.locator(".skip-link")).toBeFocused();
+  const link = page.locator(".skip-link");
+  await expect(link).toBeFocused();
+  const linkBox = await link.boundingBox();
+  const barBox = await page.locator(".desktop-titlebar").boundingBox();
+  const controlBox = await page.locator(".desktop-titlebar__controls").boundingBox();
+  expect(linkBox).not.toBeNull();
+  expect(barBox).not.toBeNull();
+  expect(controlBox).not.toBeNull();
+  expect(linkBox!.y).toBeGreaterThanOrEqual(barBox!.y + barBox!.height);
+  expect(linkBox!.x + linkBox!.width).toBeLessThan(controlBox!.x);
 });
 
 const projects = "/projects";

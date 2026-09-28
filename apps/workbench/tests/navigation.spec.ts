@@ -122,7 +122,7 @@ describe("局部导航与浮层行为", () => {
     unmount = mounted.unmount;
 
     expect(mounted.wrapper.text()).toContain("当前为示例数据预览，没有真实 Today 投影");
-    expect(mounted.wrapper.text()).toContain("Pin、Later、Focus 是用户选择");
+    expect(mounted.wrapper.text()).toContain("置顶、延后和今日焦点只表达你的安排");
   });
 
   it("/inbox 别名与顶栏快捷入口都进入原收件箱，主导航不增项", async () => {

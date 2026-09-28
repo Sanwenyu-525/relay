@@ -9,6 +9,18 @@ import type {
 } from '../infrastructure/database-schema.js';
 import { requireRow } from '../shared/sql-rows.js';
 
+export interface ArtifactTextLockRow {
+  readonly id: string;
+  readonly artifact_id: string;
+  readonly base_version_id: string;
+  readonly block_kind: 'PARAGRAPH' | 'SECTION';
+  readonly block_index: number | null;
+  readonly locked_text: string;
+  readonly status: 'MAPPED' | 'UNMAPPED';
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
+
 export interface NewArtifact {
   readonly id: string;
   readonly workspaceId: string;
@@ -40,6 +52,47 @@ export class ArtifactRepository {
 
   constructor(db: DbExecutor) {
     this.db = db;
+  }
+
+  async recordTextLockConflict(input: { id: string; workspaceId: string; runId: string;
+    taskId: string; artifactId: string; baseVersionId: string; reason: string }): Promise<void> {
+    await sql`insert into artifact_lock_conflicts
+      (id, workspace_id, run_id, task_id, artifact_id, base_version_id, reason)
+      values (${input.id}, ${input.workspaceId}, ${input.runId}, ${input.taskId},
+        ${input.artifactId}, ${input.baseVersionId}, ${input.reason})
+      on conflict (id) do nothing`.execute(this.db);
+  }
+
+  async listTextLocks(artifactId: string): Promise<readonly ArtifactTextLockRow[]> {
+    const result = await sql<ArtifactTextLockRow>`
+      select * from artifact_text_locks where artifact_id = ${artifactId}
+      order by created_at, id
+    `.execute(this.db);
+    return result.rows;
+  }
+
+  async insertTextLock(input: { id: string; artifactId: string; versionId: string;
+    kind: 'PARAGRAPH' | 'SECTION'; index: number; text: string }): Promise<ArtifactTextLockRow> {
+    const result = await sql<ArtifactTextLockRow>`
+      insert into artifact_text_locks
+        (id, artifact_id, base_version_id, block_kind, block_index, locked_text, status)
+      values (${input.id}, ${input.artifactId}, ${input.versionId}, ${input.kind},
+        ${input.index}, ${input.text}, 'MAPPED') returning *
+    `.execute(this.db);
+    return requireRow(result.rows, 'insert into artifact_text_locks');
+  }
+
+  async rebindTextLock(input: { id: string; versionId: string; index: number | null;
+    text: string; status: 'MAPPED' | 'UNMAPPED' }): Promise<void> {
+    await sql`update artifact_text_locks set base_version_id = ${input.versionId},
+      block_index = ${input.index}, locked_text = ${input.text}, status = ${input.status},
+      updated_at = now() where id = ${input.id}`.execute(this.db);
+  }
+
+  async deleteTextLock(id: string, artifactId: string): Promise<boolean> {
+    const result = await sql`delete from artifact_text_locks where id = ${id}
+      and artifact_id = ${artifactId}`.execute(this.db);
+    return (result.numAffectedRows ?? 0n) > 0n;
   }
 
   async insertArtifact(artifact: NewArtifact): Promise<ArtifactRow> {

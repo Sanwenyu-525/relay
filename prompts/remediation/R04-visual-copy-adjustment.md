@@ -2,7 +2,7 @@
 
 状态：已执行（2026-09-21）、非阻断调整。此项不改变业务契约或页面范围。
 
-执行结果：项目列表右区强化当前对象、阶段、状态修订与待审信息的层级；CreateTask 与回执改为结果说明，不再把 `INBOX`、`HUMAN`、`ready`、`Delegate` 作为用户文案。未改 `design-tokens.json`，保留现有暖白/墨绿/宋体方向和响应式页壳。浏览器回归、9 页截图、Chromium CDP 200% 内容缩放与 480px 等效视口检查见[前端预览记录](../../docs/development/ui-preview-acceptance.md#8-r04视觉层级与产品文案复验)；Windows WebView、DPI 与 IME 仍未验证。
+执行结果：项目列表右区强化当前对象、阶段、状态修订与待审信息的层级；CreateTask 与回执改为结果说明，不再把 `INBOX`、`HUMAN`、`ready`、`Delegate` 作为用户文案。未改 `design-tokens.json`，保留现有暖白/墨绿/宋体方向和响应式页壳。浏览器回归、9 页截图、Chromium CDP 200% 内容缩放与 480px 等效视口检查见[前端预览记录](../../docs/development/前端预览实施与验收.md#8-r04视觉层级与产品文案复验)；Windows WebView、DPI 与 IME 仍未验证。
 
 ```text
 请只调整 D:/Develop/Relay-Agent 已有前端预览的视觉层级与产品文案。

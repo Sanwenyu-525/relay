@@ -1,5 +1,7 @@
 # Relay 扩展模型：Skill、Blueprint 与 Pack
 
+2026-09-28 后续规划：接续点、知识整理、计划、Trigger 与配置编辑按[后续路线](../requirements/post-v1-roadmap.md)建议分片；连续委托的职责与取舍见 [ADR-013](../decisions/ADR-013-bounded-project-continuation.md)。具体策略仍 Proposed，本专题原有版本/权限/Proposal/Checkpoint 约束保留；不将后续候选前移到 V1。
+
 角色：扩展组合、Skill 定义及蓝图应用的专题设计，沿用原路径避免重复事实源。日期：2026-09-21；2026-09-26 补充实现状态。首批只读第一方注册、最小 Thesis/Development Pack 清单、Assist 生成、当前 Task Skill 建议显式接受、内置 ViewConfiguration Owner 与 Project Blueprint 候选/Preview/Diff/原子 Apply 已进入后端开发自检；Pack 选择仅固定候选来源，不等于批量配置应用。通用 Pack 安装、任意页面编辑、Rule/Workflow/Permission 随蓝图应用仍为 Proposed。来源：用户三份扩展建议及后续文档修改指令；与现有总纲、Assist、领域 Owner 和四份契约对照后形成。取舍见 [ADR-008](../decisions/ADR-008-declarative-skills.md)，分期与差异见[范围矩阵](../requirements/v1-scope.md)。
 
 本次后端事实：`goal-to-project-blueprint@1.0.0` 通过 Project Assist 生成严格 JSON 建议，生成时重读当前 Project/State/Task、显式选择的同 Workspace ACTIVE Goal、内置 View；`thesis-minimal`/`development-minimal@1.3.0` 固定引用该 Skill 与已交付的三项第一方 Skill。旧 Skill/Pack 版本定义与摘要保留。蓝图 `USER_DRAFT` 和 `SKILL` 走同一不可变候选、服务端 Diff、摘要确认和单事务 Apply：Goal 只关联已有目标，新 Task 仅 HUMAN/ME/INBOX，State 使用类型化阶段与 Next Action，View 只切固定 kind；后续 Rule/Workflow/Permission 建议不在本次事务中生效。当前实现没有项目级 Pack 绑定或自动授权。详见 [HTTP 契约 §10.33–10.34](../api/http-command-contract.md)。
@@ -216,7 +218,7 @@ Run Checkpoint 复用已持久 Step/Attempt、Manifest、产物/工具结果、�
 
 Contract Eval 检查 schema/引用与输出完整性；Behavior Eval 检查规则、作用域、权限、提案及恢复边界；Outcome Eval 评估结果质量、错误接受/拒绝、完成率与成本。Verification 判一次 Task 的具体版本，Eval 比较固定定义版本在样本集上的表现，二者不能共享一个可被 Skill 修改的最终判定标准。V1 每个实际交付 Skill 附必要用例，Pack 再验证成员组合；升级基于固定基准回归，程序性安全失败阻止启用受影响定义，语义质量变化需报告而非仅看内部 PASS 数。
 
-具体发布证据与场景归[测试计划](../testing/verification-plan.md#9-扩展组合与版本评测)，论文研究仍按[实验协议](../research/evaluation-protocol.md)另行确认；工程 Eval 不依赖选做 P22，也不能据此声称论文结论。
+具体发布证据与场景归[测试计划](../testing/verification-plan.md#9-扩展组合与版本评测)，论文研究仍按[实验协议](../research/评价协议.md)另行确认；工程 Eval 不依赖选做 P22，也不能据此声称论文结论。
 
 V1.5 Trigger/Automation 是经过授权的请求入口，须定义稳定事件/计划身份、重复触发去重、作用域、预算、并发排他、取消和审计，不能绕过 Delegate/Gateway。Agent-detected 结果先作触发建议；验证通过也不自动提升 Knowledge、解除风险或授予权限，除非后续已有明确可审计的授权策略。正文中的周日/事件触发只是产品设计例子，不创建实际定时任务。
 

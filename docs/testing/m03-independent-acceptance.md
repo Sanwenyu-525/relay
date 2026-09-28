@@ -99,7 +99,7 @@ G01–G08 必须以真实 PostgreSQL、独立 API/Worker 和可控 Mock Model/�
 
 ## Windows 监督器事件读取准备片独立检查
 
-结论：**HOST_READER_SLICE_ACCEPTED（仅握手后持续读取与异常输出处理）**；M03 仍为 IN_PROGRESS。执行者的[11 项输入清单](../../apps/desktop/results/m03-host-reader-inputs.sha256) SHA-256 为 `4beb0ab3a1cd0a3be7e4cae30f1881324e2cc17aae59ede7771780f58729597c`，协调 Agent 在独立复跑前后核对 11/11 一致；源代码与上述宿主基础片基准相比只改 `apps/desktop/src-tauri/src/lib.rs` 和[本机部署说明](../deployment/local-deployment.md)。
+结论：**HOST_READER_SLICE_ACCEPTED（仅握手后持续读取与异常输出处理）**；M03 仍为 IN_PROGRESS。执行者的[11 项输入清单](../../apps/desktop/results/m03-host-reader-inputs.sha256) SHA-256 为 `4beb0ab3a1cd0a3be7e4cae30f1881324e2cc17aae59ede7771780f58729597c`，协调 Agent 在独立复跑前后核对 11/11 一致；源代码与上述宿主基础片基准相比只改 `apps/desktop/src-tauri/src/lib.rs` 和[本机部署说明](../deployment/本机部署.md)。
 
 | 独立检查 | 结果 | 原始输出 |
 |---|---|---|
@@ -264,7 +264,7 @@ G01–G08 必须以真实 PostgreSQL、独立 API/Worker 和可控 Mock Model/�
 
 源码与 PG 事实复核确认：可选冻结 `mock_gateway_action` 只在 DRAFT 后/PERSIST 前进入 Gateway；ASK 保存原 Review/operation 并释放等待槽，只有绑定该决定的新 RESUME 执行一次 Fake marker，DENY 使 Run 失败并归还 Task。批准不等于效果完成；后继 CRITERION Review 不受旧 ACTION RESUME 唤醒。快速批准、旧 START 崩溃、Fake 写入与图 checkpoint 间崩溃、Admit 后结果不明、权限撤销、PAUSE/CANCEL/HANDOFF 竞争、同 Run 错绑 Review 及双 Worker 争领均以原身份测试。P07 预留审批和 P09 直接 Gateway 保留旧调用语义，不生成固定图无法领取的 RESUME；冻结 Mock 的 outbox 故障注入验证决定、业务状态、命令和回执一起回滚。
 
-只读高风险审查发现内层 Gateway lease 过期仍可提交 `SUCCEEDED` 的 P1；执行者在真实 PG 保存[修复前 19/21 红灯](evidence/m03/gateway-inner-lease-red.log)及[修复后 21/21 绿灯](evidence/m03/gateway-inner-lease-green.log)。独立复跑又验证效果前不写 marker、效果后过期保留原 Invocation/operation UNKNOWN 与 QUARANTINED claim；图反例明确观测外层 invocation 仍 ACTIVE，不能用它替代内层租约。检查点、数据库与文件效果不构成原子事务，写入中途失租仍须按同一 operation 核对，不能因 lease 到期释放资源。旧固定图 checkpoint 缺少本版 Review ID/类型，待审旧 Run 升级当前失败关闭；[部署记录](../deployment/local-deployment.md)要求 M07 前用受信迁移或可证明身份的重建及真实升级反例解决。G03 Gateway UNKNOWN 的 Run 查询/UI、G06 在途取消、真实 Windows ACTION 组合和完整 G01–G08 尚未通过；真实 Provider 保持关闭。
+只读高风险审查发现内层 Gateway lease 过期仍可提交 `SUCCEEDED` 的 P1；执行者在真实 PG 保存[修复前 19/21 红灯](evidence/m03/gateway-inner-lease-red.log)及[修复后 21/21 绿灯](evidence/m03/gateway-inner-lease-green.log)。独立复跑又验证效果前不写 marker、效果后过期保留原 Invocation/operation UNKNOWN 与 QUARANTINED claim；图反例明确观测外层 invocation 仍 ACTIVE，不能用它替代内层租约。检查点、数据库与文件效果不构成原子事务，写入中途失租仍须按同一 operation 核对，不能因 lease 到期释放资源。旧固定图 checkpoint 缺少本版 Review ID/类型，待审旧 Run 升级当前失败关闭；[部署记录](../deployment/本机部署.md)要求 M07 前用受信迁移或可证明身份的重建及真实升级反例解决。G03 Gateway UNKNOWN 的 Run 查询/UI、G06 在途取消、真实 Windows ACTION 组合和完整 G01–G08 尚未通过；真实 Provider 保持关闭。
 
 ## Task 产物历史与 React 刷新恢复独立复验
 

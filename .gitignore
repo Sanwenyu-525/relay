@@ -16,3 +16,6 @@ playwright-report/
 # Local desktop trial package and persistent test data
 /test-release/
 /.relay-test/
+
+# 本机开发数据库（PostgreSQL 5432/relay_dev，供 dev-stack Preview 与 apps/api/.env 直连）
+/.relay-dev/

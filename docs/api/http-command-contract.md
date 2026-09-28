@@ -1,5 +1,7 @@
 # Personal Workflow OS：HTTP、应用命令与错误契约
 
+> 2026-09-28 协作控制增量：新增 Artifact 原文锁定、手动影响检查/逐目标候选，以及人工介入提醒投影与投递回执；具体路径、状态与已验边界见[开发记录](../development/collaboration-controls-2026-09-28.md)。Breaking Change：**否**（仅新增端点，既有请求/响应未删改）。通知 claim/settle 是可去重的投递回执，不改变 Task/Run/Review 业务状态；同一事项/变化由数据库唯一键保证不重复认领。
+
 > 2026-09-24 技术改造状态：当前已实现接口仍以下文第 10 节与代码为准。M03 SSE、Review/RESUME 顺序、固定图及 Mock Gateway 工具动作已分别通过列明范围的独立分片验收；完整 G01–G08 待验。Idempotency-Key 若引入，需明确与 command_id 的唯一身份、载荷冲突和旧客户端兼容；不得开无鉴权别名。真实 Provider 仍关闭。
 
 日期：2026-09-19。设计正文状态：Proposed；实际已实现范围与阶段边界见第 10 节。依据：[四份业务契约](../../contracts/README.md)、[领域模型](../architecture/domain-model.md)、[物理设计](../database/physical-design-postgresql.md)。
@@ -201,7 +203,7 @@ retryable 仅表示是否允许原样重试当前命令，不是承诺会成功�
 
 开发 API 绑定 loopback，使用外部注入的随机 Bearer 凭据；不硬编码或写进示例配置。所有读写与下载校验凭据和作用域。前端来源采用明确允许列表，不能因“本机”就允许任意网页调用；禁止在 URL query 中传令牌。
 
-完整 V1 为 Windows 可安装应用。桌面壳经受控启动握手向受信窗口交付当前 loopback 端点与短期 Bearer，前端仅保存在内存；重载后通过窄 IPC 重新获取当前实例信息，服务重启轮换凭据。DB/Provider 密钥不交前端，领域命令不另走 IPC。实际生产 WebView Origin、CORS/CSP、实例验证和停机边界见[部署设计](../deployment/local-deployment.md)及 [ADR-007](../decisions/ADR-007-windows-desktop.md)。不开放 Cookie 会话、匿名业务 API 或远程访问。
+完整 V1 为 Windows 可安装应用。桌面壳经受控启动握手向受信窗口交付当前 loopback 端点与短期 Bearer，前端仅保存在内存；重载后通过窄 IPC 重新获取当前实例信息，服务重启轮换凭据。DB/Provider 密钥不交前端，领域命令不另走 IPC。实际生产 WebView Origin、CORS/CSP、实例验证和停机边界见[部署设计](../deployment/本机部署.md)及 [ADR-007](../decisions/ADR-007-windows-desktop.md)。不开放 Cookie 会话、匿名业务 API 或远程访问。
 
 此次交付形态调整的业务 API Breaking Change：No；路径、DTO、command_id、回执和权限语义不变。变化的是尚未发布的启动与凭据交付方案；不能沿用“用户手填 token、刷新重连”的旧部署说明。
 
@@ -677,3 +679,15 @@ Delegate 校验资源属于当前 Workspace/Task Project，并在创建 Run 前�
 **Breaking Change: Yes（旧 Windows 受管资源的新 `FILE_WRITE` 准备）。** 0038 前登记的资源没有可证明的登记时 File ID，不能从当前磁盘补造；新 Windows `WRITE_FILE`/`APPLY_CHANGESET` 在创建 Operation/Review 前返回 409 `GATEWAY_RESOURCE_IDENTITY_REQUIRED`。在 Windows 停用无未决占用的旧资源后，以相同路径重新登记为**新资源 ID**（0039 只对活动资源保持同项目路径唯一），核对新的资源 ID、连接、策略和委托引用后才能准备新动作；已停用的旧资源及其历史不迁移或删除。已有 Operation 仍使用自己冻结的 0036 物理身份，不回填或换 ID。
 
 **Breaking Change: No（新增只读字段）。** `GET /projects/{project_id}/managed-resources` 和 `GET /.../{resource_id}` 每项新增 `file_write_identity_bound:boolean`。Windows 新登记时，原生助手只读捕获当前目录卷号/File ID；无法安全捕获的目录仍可登记供其他能力使用，但该字段为 false，不能准备新的 Windows 文件写入。创建命令的请求与回执形状不变，重放即使目录后来移动仍返回原回执。新写动作准备时比较当前原生助手根身份与登记身份，不同则返回 409 `GATEWAY_RESOURCE_ROOT_CHANGED`，不生成新 Operation/Review，也不写盘。登记与准备之间目录变化不会被现有路径字符串或当前摘要当作同一资源。
+
+### 10.48 协作控制增量（2026-09-28，开发自检）
+
+**Breaking Change: No。** 以下均是新增路径，沿用 `/api/v1/workspaces/{workspace_id}` 前缀与 Bearer/Workspace 边界。Artifact 锁定命令沿用原 `command_id`、`expected_artifact_revision` 的回执与 CAS：`GET /artifacts/{artifact_id}/text-locks` 返回当前锁定原文及绑定版本；`POST` 同路径额外接收 `expected_version_id`、`block_kind:PARAGRAPH|SECTION`、零基 `block_index`；`POST /artifacts/{artifact_id}/text-locks/{lock_id}/unlock` 只解除该处锁定。AI 修正轮与影响候选应用在实际写版本前核对，冲突保留旧版本并返回原目标/原因。人工新版本会保守继承锁定，不能映射时保留锁事实并阻断 AI 写入。
+
+手动分析：`POST /artifact-versions/{before_version_id}/impact-checks` 接收 `command_id`、`source_after_version_id`、`expected_artifact_revision`、`analysis_target_version_ids`（最多 10 个、须为登记直接引用），返回 202 的检查/Assist 消息 ID。只把用户逐项选入的目标摘录送入模型；`GET /impact-checks/{id}` 分别返回登记直接引用、模型推测、未分析范围、截断/过期事实与真实状态。`POST /impact-checks/{id}/candidates` 再接收目标确切版本、目标 revision、推测确认标志和 `command_id`；`GET /impact-candidates/{id}` 返回候选或失败状态；`POST /impact-candidates/{id}/apply` 要求目标 revision，只有用户显式应用才保存 AI 来源的新不可变版本。读取与应用共用候选 Markdown 校验：空白、格式错误或超过 256 KiB 均显示 `FAILED/OUTPUT_SCHEMA_INVALID`，应用返回 409 `INVALID_TRANSITION`，不生成版本或成功提交事实。来源/目标/锁定变化拒绝旧候选，不继承旧验证。此处修复未发布接口的服务端拒绝行为，**Breaking Change: No**。真实 Provider 的准入未改变。
+
+`GET /attention/interventions` 从当前业务事实读取必须介入事项及原入口，普通 HUMAN INBOX/READY 不包含在主动提醒投影。桌面失焦 3 秒后调用 `POST /attention/notifications/claim`，数据库按事项身份与变化原子去重；`POST /attention/notifications/settle` 记 `DISPATCHED/DENIED/FAILED` 投递尝试状态。后两者是通知传输回执，不决定 Review/Run/Task，也不以投递成功表示用户已处理。隔离 Windows 宿主已实测投递和点击；安装包与协调侧验收未完成，见[专项开发记录](../development/collaboration-controls-2026-09-28.md)。
+
+### 10.49 模型端口只读状态（2026-09-28，开发自检）
+
+**Breaking Change: No。** 新增 `GET /api/v1/workspaces/{workspace_id}/model-port`：返回当前服务实例的模型端口状态 `{ provider: fake|openai-compatible|invalid, configured, model, base_url }`。配置来自进程环境变量（`RELAY_MODEL_PROVIDER` 等），`RELAY_MODEL_API_KEY` 永不返回、不出现在任何响应字段；`base_url` 已由端点策略保证为含公开 https 主机、无凭据/query/fragment 的完整地址。`provider=fake` 表示实例未配置真实模型（委托与 Assist 使用 Mock 模型端口，当前阶段既定门槛）；`invalid` 表示真实 Provider 配置残缺（生产进程本会拒绝启动，此状态供显式读取场景）。状态是实例级只读事实，不依赖 Workspace 数据；沿用 Bearer 边界，未授权 401，`workspace_id` 非 UUID 422。无写命令。验证：真实 PG/HTTP 集成 2 项（真实配置脱敏可见、未配置报 Mock）与单测 4 项。

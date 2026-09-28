@@ -24,7 +24,7 @@
 | 模型接入 | @langchain/core + 一个实际 Provider 包 | 与选定编排边界一致；默认评估 @langchain/openai，不安装全部 Provider SDK |
 | UI 状态与样式 | React 局部状态、现有窄 API client、现有 CSS/token | 不为迁移同时引入 Redux、重做设计系统或强制组件库；真实共享缓存需求出现后再选查询库 |
 
-精确稳定版本在实施时核验官方发布、兼容范围与实际构建后锁定，不在本次文档里编造版本。完整技术组合只维护在 [技术选型](../architecture/technology-selection.md)。
+精确稳定版本在实施时核验官方发布、兼容范围与实际构建后锁定，不在本次文档里编造版本。完整技术组合只维护在 [技术选型](../architecture/技术选型.md)。
 
 ## 责任边界
 

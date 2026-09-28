@@ -66,7 +66,7 @@ export interface AssistTurn {
   readonly content: string;
 }
 
-export type AssistIntent = 'DISCUSS' | 'PROPOSE_CANDIDATE' | 'PROPOSE_TASK';
+export type AssistIntent = 'DISCUSS' | 'PROPOSE_CANDIDATE' | 'PROPOSE_TASK' | 'IMPACT_CHECK' | 'IMPACT_CANDIDATE';
 
 export interface AssistRequest {
   readonly intent: AssistIntent;
@@ -254,6 +254,25 @@ export class FakeModelPort implements AssistModelPort {
       if (request.skill === undefined) await request.onTextDelta?.(reply);
       return { kind: 'CONTENT', content: reply, providerRequestId,
         usage: { ...usage, outputTokens: Math.max(1, Math.ceil(reply.length / 4)) } };
+    }
+    if (request.intent === 'IMPACT_CHECK') {
+      let firstTarget: string | null = null;
+      try {
+        const input = JSON.parse(lastUser?.content ?? '') as { direct_targets?: { version_id?: string }[] };
+        firstTarget = input.direct_targets?.[0]?.version_id ?? null;
+      } catch { /* invalid input is rejected by the caller's output validation */ }
+      const raw = JSON.stringify({ possibly_related: firstTarget === null ? [] : [{
+        target_version_id: firstTarget, reason: 'Fake 模型建议人工核对该直接引用的语义影响。' }] });
+      return { kind: 'CONTENT', content: raw, providerRequestId,
+        usage: { ...usage, outputTokens: Math.max(1, Math.ceil(raw.length / 4)) } };
+    }
+    if (request.intent === 'IMPACT_CANDIDATE') {
+      let targetText = '';
+      try { targetText = (JSON.parse(lastUser?.content ?? '') as { target_text?: string }).target_text ?? ''; }
+      catch { /* invalid input remains an invalid candidate */ }
+      const raw = JSON.stringify({ markdown: `${targetText}\n\n> Fake 候选：请核对新来源后决定是否应用。\n` });
+      return { kind: 'CONTENT', content: raw, providerRequestId,
+        usage: { ...usage, outputTokens: Math.max(1, Math.ceil(raw.length / 4)) } };
     }
     const body = request.intent === 'PROPOSE_CANDIDATE'
       ? { summary: `（Fake Assist）已生成候选 Markdown（${seed.slice(0, 8)}）。`,

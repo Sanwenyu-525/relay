@@ -4,7 +4,7 @@
 
 2026-09-27 用户授权按提示词开发 M7/M8 中不依赖前序部分的内容。当前 [工作包](../../prompts/stack-migration.md) 只定义 M01–M07；M08 已请求澄清，不将可选 P22 论文实验自动当成 M08。
 
-本次落地 M07/P20 的发布包只读诊断，Owner 为仓库运维脚本，复用现有资源校验和随包 API 配置/schema 契约。业务状态和数据库没有新增写入入口，API Breaking Change：No，无 migration 或新依赖。运行说明唯一维护在[部署文档](../deployment/local-deployment.md#发布包只读诊断)。M07 整体未验收。
+本次落地 M07/P20 的发布包只读诊断，Owner 为仓库运维脚本，复用现有资源校验和随包 API 配置/schema 契约。业务状态和数据库没有新增写入入口，API Breaking Change：No，无 migration 或新依赖。运行说明唯一维护在[部署文档](../deployment/本机部署.md#发布包只读诊断)。M07 整体未验收。
 
 | 主文档要求 | 本次处理 | 依据与限制 |
 |---|---|---|

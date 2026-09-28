@@ -2,6 +2,7 @@ import type { DbExecutor } from '../infrastructure/database.js';
 import { ActivityRecordRepository } from '../audit/activity-record-repository.js';
 import { AssistRepository } from '../assist/assist-repository.js';
 import { ArtifactRepository } from '../artifact/artifact-repository.js';
+import { ImpactRepository } from '../artifact/impact-repository.js';
 import { LineageRepository } from '../artifact/lineage-repository.js';
 import { CompletionRepository } from '../completion/completion-repository.js';
 import { ProjectRepository } from '../project/project-repository.js';
@@ -29,6 +30,7 @@ export interface Repositories {
   readonly activities: ActivityRecordRepository;
   readonly assist: AssistRepository;
   readonly artifacts: ArtifactRepository;
+  readonly impacts: ImpactRepository;
   readonly lineage: LineageRepository;
   readonly completions: CompletionRepository;
   readonly projects: ProjectRepository;
@@ -57,6 +59,7 @@ export function createRepositories(db: DbExecutor): Repositories {
     activities: new ActivityRecordRepository(db),
     assist: new AssistRepository(db),
     artifacts: new ArtifactRepository(db),
+    impacts: new ImpactRepository(db),
     lineage: new LineageRepository(db),
     completions: new CompletionRepository(db),
     projects: new ProjectRepository(db),

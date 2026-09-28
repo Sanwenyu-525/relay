@@ -37,7 +37,7 @@ commit 绑定 parent/tree/message/config，push 绑定 remote/ref/commit 和远�
 ## P19：受信 CLI 与进程恢复
 
 ```text
-执行 P19，前置 P18。读 AGENTS.md、prompts/README.md、docs/architecture/tool-adapters.md、docs/deployment/local-deployment.md、docs/testing/verification-plan.md。
+执行 P19，前置 P18。读 AGENTS.md、prompts/README.md、docs/architecture/tool-adapters.md、docs/deployment/本机部署.md、docs/testing/verification-plan.md。
 源码对照：按公共“本地源码参考要求”核对 .research 中相关执行器的取消、超时、输出限制和进程管理测试，并结合 desktop-p00 已有证据；非 Windows 机制不能直接当作本机进程树回收证明。
 范围：固定 RUN_BUILD/RUN_TEST 模板、ExecutionConfig 信任、最小环境、时间/输出上限、进程树控制、核对恢复。先验证目标 Windows 上的进程组封装；ProcessBuilder/cwd/白名单不称为沙箱。只支持明确受信项目，未知代码保持 DENY。
 执行文件/参数/脚本/构建配置变化重新校验。记录基线、测试集合/配置 hash、实际 argv、exit code 和输出；测试被删/跳过不能算 required 通过。取消核对整个受管进程树，PID 复用不误杀；不能证明旧进程停止时保留 QUARANTINED。

@@ -5,6 +5,7 @@ import type { RelayApiConnection } from "./api/relayClient";
 import { RelayApiClient } from "./api/relayClient";
 import AppDialog from "./components/AppDialog";
 import AppShell from "./components/AppShell";
+import DesktopTitleBar from "./components/DesktopTitleBar";
 import { currentDraftGuard, hasUnsavedDraft } from "./lib/draftGuard";
 import { activateRelayConnection, useFixtureData, useRelayConnection } from "./lib/relayConnection";
 
@@ -22,9 +23,16 @@ export default function App() {
   const blocker = useBlocker(() => hasUnsavedDraft());
   const [desktopStatus, setDesktopStatus] = useState<"idle" | "connecting" | "error">(() => isTauri() ? "connecting" : "idle");
   const [closeDialogOpen, setCloseDialogOpen] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
   const allowClose = useRef(false);
 
   useEffect(() => { window.scrollTo(0, 0); }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    document.documentElement.classList.add("app-desktop");
+    return () => document.documentElement.classList.remove("app-desktop");
+  }, []);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -88,7 +96,7 @@ export default function App() {
   }
 
   if (desktopStatus !== "idle") {
-    return <main className="page-state" data-testid={desktopStatus === "error" ? "desktop-service-unavailable" : "desktop-service-connecting"} role="status">
+    return <div className="desktop-window"><DesktopTitleBar available={false} onSearch={() => setCommandOpen(true)} /><main className="page-state" data-testid={desktopStatus === "error" ? "desktop-service-unavailable" : "desktop-service-connecting"} role="status">
       {desktopStatus === "error" ? <>
         <h1>本机服务不可用</h1>
         <p>无法连接桌面工作空间。请关闭并重新启动 Relay Agent；如果问题持续，请检查 PostgreSQL 和桌面配置。</p>
@@ -96,12 +104,13 @@ export default function App() {
         <h1>正在连接本机服务</h1>
         <p>正在核对桌面工作空间与 API 就绪状态。</p>
       </>}
-    </main>;
+    </main></div>;
   }
 
   const preserveCreateTask = location.pathname === "/tasks" && new URLSearchParams(location.search).get("view") === "create";
-  return <>
-    <AppShell desktopStatus={desktopStatus}>
+  return <div className={isTauri() ? "desktop-window" : undefined}>
+    <DesktopTitleBar available onSearch={() => setCommandOpen(true)} />
+    <AppShell desktopStatus={desktopStatus} commandOpen={commandOpen} onCommandOpen={() => setCommandOpen(true)} onCommandClose={() => setCommandOpen(false)}>
       <div key={`${preserveCreateTask ? "create-task" : connection.epoch}:${location.pathname}${location.search}`}><Outlet /></div>
     </AppShell>
     <AppDialog open={blocker.state === "blocked"} title="保留未保存的修改" onClose={() => blocker.reset?.()}>
@@ -118,5 +127,5 @@ export default function App() {
         <button className="danger-button" type="button" onClick={() => void discardAndClose()}>丢弃草稿并关闭</button>
       </div>
     </AppDialog>
-  </>;
+  </div>;
 }

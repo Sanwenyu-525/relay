@@ -2,9 +2,9 @@
 
 > 2026-09-24：工作台已以 React 组件复用原 CSS 与唯一 token 源；迁移前 Vue 原件和 15 张旧页面图归档于 [M02 开发记录](../development/m02-react-migration.md)。浏览器逐页对照与真实 Windows 窗口分别记录，前者不代替后者。
 
-状态：Proposed（从现有图提炼的实现基线）。更新：2026-09-24。
+状态：Proposed（从现有图提炼的实现基线）。更新：2026-09-28。
 
-本文只拥有视觉、布局、组件外观与可访问性交互规则。用户已确认 Windows 可安装桌面应用，宿主边界见 [ADR-007](../decisions/ADR-007-windows-desktop.md)。页面路由、业务状态、权限和命令仍以[工作台交互](workbench-design.md)及其引用契约为准；技术依赖以[技术选型](../architecture/technology-selection.md)为准。数值唯一来源为 [design-tokens.json](design-tokens.json)，本文用 token 名称引用，不再维护一套色值表。当前 React 工作台保留原页面 class 与布局，真实桌面验收由 M02 整体验收记录确认。
+本文只拥有视觉、布局、组件外观与可访问性交互规则。用户已确认 Windows 可安装桌面应用，宿主边界见 [ADR-007](../decisions/ADR-007-windows-desktop.md)。页面路由、业务状态、权限和命令仍以[工作台交互](workbench-design.md)及其引用契约为准；技术依赖以[技术选型](../architecture/技术选型.md)为准。数值唯一来源为 [design-tokens.json](design-tokens.json)，本文用 token 名称引用，不再维护一套色值表。当前 React 工作台保留原页面 class 与布局，真实桌面验收由 M02 整体验收记录确认。
 
 ## 1. 视觉依据与提取边界
 
@@ -27,7 +27,7 @@
 
 图片里的“Workflow OS”、Rust 片段、日期、用户项目和通过结果均为示例。仓库名称 Relay 不意味着本轮已决定改图中品牌标识；最终产品显示名待确认，不影响本规范的样式定义。
 
-Windows 桌面宿主当前图标来自用户提供的 [B 任务卡片素材包](../../tauri_icons_B_taskcards/src-tauri/icons/icon.png)。产品 [PNG](../../apps/desktop/src-tauri/icons/icon.png)与素材包原文件一致；[ICO](../../apps/desktop/src-tauri/icons/icon.ico)保留素材包十层各自的原始图像，只将 256px 层移到首层，以供锁定的 Tauri Windows 默认窗口图标解码。ICO 仍由 Tauri bundle 配置引用，图形只作为品牌视觉，不额外定义业务状态或交互语义。此前机器人母版、中央裁切和透明圆角的处理属于 [2026-09-24 图标历史](../development/m02-desktop-foundation.md#2026-09-24-windows-图标小尺寸修复)，不再描述当前图标来源。
+Windows 桌面宿主当前图标使用用户于 2026-09-28 指定的[透明机器人原图](../../apps/desktop/src-tauri/icons/icon-source-20260928-v2.png)。该来源为 1254×1254 RGBA 图；[产品 PNG](../../apps/desktop/src-tauri/icons/icon.png)与[ICO](../../apps/desktop/src-tauri/icons/icon.ico)均以它作为当前输入，ICO 保持 256px 层位于首层，供 Tauri Windows 默认窗口图标解码。ICO 仍由 Tauri bundle 配置引用。此前的[方角图标来源](../../apps/desktop/src-tauri/icons/icon-source-20260928.png)作为历史素材保留；本次只替换图标视觉来源，不额外定义业务状态或交互语义。图标接入历史与当前验证边界保留在 [M02 开发记录](../development/m02-desktop-foundation.md)。
 
 ## 2. Token 规则
 
@@ -63,12 +63,12 @@ token 文件使用本项目简单扁平结构：metadata 保存版本/状态/来
 
 | 角色 | 尺寸 / 行高 token | 字体 / 字重 | 用法 |
 |---|---|---|---|
-| 今日主标题 | font.size.display / font.lineHeight.heading | editorial / semibold | 仅一个顶级主标题，允许换行 |
+| 今日主标题 | font.size.compactPage / font.lineHeight.heading | editorial / semibold | 仅一个顶级主标题，允许换行；2026-09-28 按用户反馈从 display 调整为 compactPage——空态与窄窗不再铺展示型尺寸，宽窗如需更大另行评估，不无条件恢复 display |
 | 普通页面标题 | font.size.page / heading | editorial / semibold | 项目名、验收标题、变更审查标题 |
 | 窄屏页面标题 | font.size.compactPage / heading | editorial / semibold | 不把整页缩放来容纳桌面标题 |
-| 区域标题 | font.size.section / heading | editorial / semibold | 今日焦点、项目状态、等待判断 |
+| 区域标题 | font.size.section / heading | editorial / semibold | 今日焦点、项目状态、等待判断；零数量的分组标题收为一行提示，不以区域标题占位 |
 | 行标题 | font.size.rowTitle / ui | editorial 或 ui / medium | 任务/产物名称，长名换行 |
-| 控件与业务正文 | font.size.body / ui | ui / regular 或 medium | 按钮、导航、状态、字段 |
+| 控件与业务正文 | font.size.body / ui | ui / regular 或 medium | 按钮、导航、状态、字段；文本输入与下拉继承 UI 字体，不落回浏览器默认字体 |
 | 辅助信息 | font.size.meta / ui | ui / regular | 时间、来源、版本；不能承担长正文 |
 | 长文阅读 | font.size.reading / reading | editorial / regular | 论文/Markdown 阅读内容；编辑输入保持清晰 |
 | 代码与 diff | font.size.meta / code | code / regular | 保留等宽与可复制文本；不使用图片充当代码 |
@@ -79,7 +79,11 @@ token 文件使用本项目简单扁平结构：metadata 保存版本/状态/来
 
 ## 5. 间距、页壳与桌面窗口适配
 
-现有图定义应用客户区，不包含 Windows 原生标题栏。首版推荐保留系统标题栏及最小化/最大化/关闭按钮；图中的应用顶栏继续承载面包屑等内容，不与系统按钮混排，不把操作区设为拖动区。窗口启动/关闭交互按[部署设计](../deployment/local-deployment.md)，不新增托盘或多窗口。
+2026-09-28 设计接续：用户要求标题栏左侧放常用操作，不显示 `Relay Agent`。[完整窗口 v2](mockups/2026-09-28/README.md)展示左侧后退、前进、搜索、新建任务，中间空白拖动区，右侧最小化/最大化或还原/关闭。该共享窗口层适用于全部页面，旧图仍仅定义页面内容。操作区已接入工作台代码；效果图本身不构成真实 Windows 验收。
+
+标题栏与下一层应用顶栏分开；面包屑及适用工作台页签仍在应用顶栏，不重复放一组快捷操作。高度及窗口按钮宽度复用 `control.height.comfort`，其他颜色、字体、图标、细线与留白引用现有 token；不从概念图建立第二套数值。只有中间空白参与拖动/双击，所有按钮及浮层排除拖动命中。窄窗优先隐藏快捷键提示和可替代的文字标签，保留可访问名称、焦点和窗口按钮。浏览器不显示桌面控制时，业务搜索和创建入口仍应可达。具体动作及草稿保护见[工作台第2节](workbench-design.md#2-信息架构与路由)。
+
+现有图定义应用客户区，不包含 Windows 原生标题栏。当前 Windows 主窗口使用浅色自定义标题栏，复用 navigation 背景、UI 字体、separator 和 `control.height.comfort`；图中的应用顶栏继续承载面包屑等内容。左侧操作按钮与中间空白拖动区分离，只有空白区可拖动、双击切换最大化；右侧窗口按钮有独立命中区，关闭请求仍受未保存草稿确认保护。桌面搜索复用 Ctrl+K 命令面板，应用顶栏原搜索图标在桌面隐藏；浏览器顶栏入口保留。连接中和服务失败页保留窗口控制，业务操作禁用；浏览器预览不显示桌面标题栏。侧栏高度扣除标题栏，侧栏和应用顶栏的 sticky 起点移至标题栏下方；跳转主内容链接聚焦后显示在标题栏下方，不覆盖窗口按钮。窗口启动/关闭交互按[部署设计](../deployment/本机部署.md)，不新增托盘或多窗口。
 
 window.content.initialWidth/initialHeight 与 minWidth/minHeight 为客户区逻辑 DIP 推荐值；不按截图像素设置窗口。首次打开和恢复窗口位置时，依据当前显示器工作区扣除系统边框/标题栏后限制尺寸和位置；工作区小于推荐最小值时允许继续收缩，避免窗口伸出屏幕。DIP 与 CSS px/rem 分开处理，不手工重复乘 Windows 缩放倍数。
 
@@ -197,7 +201,7 @@ hover/focus 的颜色过渡用 motion.duration.fast；抽屉/面板用 panel；�
 后续 UI 必验：
 
 1. 原图桌面比例和三页共享样式一致；不复制示例通过状态、日期或 Rust 代码作为真实事实。
-2. 上述桌面窗口及系统/内容缩放下，标题/长中文/版本说明不遮挡，关键操作与焦点可达；跨屏恢复不出现屏外窗口，原生标题栏可操作。
+2. 上述桌面窗口及系统/内容缩放下，标题/长中文/版本说明不遮挡，关键操作与焦点可达；跨屏恢复不出现屏外窗口，自定义标题栏的拖动、窗口控制与草稿关闭保护可操作。
 3. 按钮、表单、Tab、弹窗、加载、冲突、UNKNOWN 和审批过期具备可测试状态。
 4. 实际桌面 WebView 字体、背景、hover/focus、透明层和 disabled 的对比度重新检查；中文输入法组合输入、键盘与 Windows 辅助技术实测，快捷键不截断输入法输入或系统操作。
 5. 所有颜色通过语义 token 引用，布局尺度无无依据硬编码；必要局部值写明用途，避免无限扩张 token。

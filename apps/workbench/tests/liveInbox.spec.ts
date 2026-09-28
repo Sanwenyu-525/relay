@@ -33,7 +33,9 @@ describe("live 任务收件箱", () => {
   it("/inbox 直达真实收件箱 API", async () => {
     connect();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      expect(String(input)).toBe(path);
+      const url = String(input);
+      if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
+      expect(url).toBe(path);
       return response(200, { items: [task(taskId1, "直达任务")], next_cursor: null });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -41,14 +43,16 @@ describe("live 任务收件箱", () => {
     expect(mounted.router.currentRoute.value.path).toBe("/tasks");
     expect(mounted.router.currentRoute.value.query.tab).toBe("inbox");
     expect(mounted.wrapper.get(`[data-testid="task-row-${taskId1}"]`).text()).toContain("直达任务");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === path)).toHaveLength(1);
   });
 
   it("按真实游标追加页，状态、模式和标题只筛选已加载任务且计数准确", async () => {
     connect();
     const urls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input); urls.push(url);
+      const url = String(input);
+      if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
+      if (url.includes("/tasks?")) urls.push(url);
       if (url === path) return response(200, { items: [
         task(taskId1, "整理资料"), task(taskId2, "讨论提纲", "READY")], next_cursor: "opaque+2" });
       if (url === `${path}&cursor=opaque%2B2`) return response(200, {

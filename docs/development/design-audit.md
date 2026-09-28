@@ -8,15 +8,15 @@
 |---|---|---|
 | 保留原产品范围，不只交人工原型 | [F01–F23](../requirements/v1-scope.md)，General/Thesis/Development、四类工具均列入 | 已有明确范围与阶段，研究为单独可选项 |
 | 总体架构与模块责任 | [领域模型](../architecture/domain-model.md)、四份契约、ADR-001 | Owner/依赖/聚合/短事务齐全 |
-| 技术与数据库设计 | [技术选型](../architecture/technology-selection.md)、逻辑/物理模型、ADR-002 | 有推荐与代价、FK/唯一/锁/恢复；不宣称 DDL 已执行 |
+| 技术与数据库设计 | [技术选型](../architecture/技术选型.md)、逻辑/物理模型、ADR-002 | 有推荐与代价、FK/唯一/锁/恢复；不宣称 DDL 已执行 |
 | 执行与 AI 设计 | [Runtime/Context](../architecture/runtime-context.md) | 固定流程、预算、契约冻结、模型端口、Assist/提案、输入证据 |
 | 产品辅助模块 | [信息与计划](../architecture/information-planning.md) | Goal/长期信息/规则/检索/Today/审计/Lineage |
 | 前端可实现交互 | [工作台](../frontend/workbench-design.md)、ADR-003 | 路由/三套页面/组件边界/状态/冲突/可访问性 |
 | 工具与安全执行 | [适配器](../architecture/tool-adapters.md)、ADR-004 | Files/Web/Git/CLI 的输入、准入、未知核对和平台限制 |
 | API 与错误 | [核心 API](../api/http-command-contract.md)、[模块 API](../api/module-api.md) | 公开/内部边界、幂等、revision、202、Problem Details |
-| 测试和发布设计 | [测试](../testing/verification-plan.md)、[部署](../deployment/local-deployment.md) | 37 场景责任、真实 PG/故障/前端/备份恢复出口 |
+| 测试和发布设计 | [测试](../testing/verification-plan.md)、[部署](../deployment/本机部署.md) | 37 场景责任、真实 PG/故障/前端/备份恢复出口 |
 | 分阶段编码提示词 | [P00–P22](../../prompts/README.md) | 23 段可复制任务；前置、范围、必读文档、验收、交付 |
-| 毕业论文方向不丢失 | [实验协议](../research/evaluation-protocol.md)、P22 | 有组别/独立评价/指标/复现；无虚构结果 |
+| 毕业论文方向不丢失 | [实验协议](../research/评价协议.md)、P22 | 有组别/独立评价/指标/复现；无虚构结果 |
 
 ## 2. 一致性复核及修正
 
@@ -72,7 +72,7 @@
 
 ## 7. 实施方向修订（2026-09-19）
 
-用户明确要求参考借鉴成熟项目而非从头自研，也不照抄；已确认 DeepSeek Harness 的具体仓库。新增[复用策略](../architecture/reuse-strategy.md)和 [ADR-005](../decisions/ADR-005-reuse-first.md)，同步入口、技术选型、Runtime、部署候选及 P00/P05/P08/P09/P12。P00 从直接建工程改为先做源码研究、采用表和最小复用验证，之后再按实测结论搭建。
+用户明确要求参考借鉴成熟项目而非从头自研，也不照抄；已确认 DeepSeek Harness 的具体仓库。新增[复用策略](../architecture/复用策略.md)和 [ADR-005](../decisions/ADR-005-reuse-first.md)，同步入口、技术选型、Runtime、部署候选及 P00/P05/P08/P09/P12。P00 从直接建工程改为先做源码研究、采用表和最小复用验证，之后再按实测结论搭建。
 
 本节记录实施方向初次修订时的状态：当时只核对官方文档/仓库入口并调整计划，尚未固定源码提交、运行框架或选定依赖。后续实验状态见第 8 节。旧物理表设计仍为候选；选型后先消除框架 checkpoint 与自研 Step/恢复器的重叠，再写 migration。产品范围、业务事务不变量和既有 Proposed ADR 未被静默改为 Accepted。
 
@@ -212,12 +212,12 @@ Personal_Workflow_OS_Master_Spec.md
 README.md
 contracts/README.md
 docs/README.md
-docs/architecture/technology-selection.md
+docs/architecture/技术选型.md
 docs/architecture/runtime-context.md
 docs/decisions/ADR-006-typescript-first.md
 docs/decisions/ADR-007-windows-desktop.md
 docs/decisions/ADR-010-agent-stack-react-desktop.md
-docs/deployment/local-deployment.md
+docs/deployment/本机部署.md
 docs/frontend/workbench-design.md
 docs/frontend/design-system.md
 docs/frontend/page-development-prompts.md
@@ -280,3 +280,23 @@ Documentation Impact Check：同步上述主文档、V1 范围、文档地图、
 已补齐原事实源上的恢复信息、产物版本比较与已登记直接引用、人工待处理读取投影、按验收条件组织的证据，以及知识正文阅读、项目事实导读与显式收录核对。复核修正起草基线被刷新暗换、历史 PASS 被误解为当前有效、空产物合法完成被误判、指定历史知识缺失时回退最新、预览迟到及目标范围误示等问题。自动改写/锁定/传播、提醒调度、知识人工编排和自动沉淀仍有待定策略，未自行新增相应业务状态。
 
 Documentation Impact Check：同步提示词入口、需求范围、工作台交互、API 契约、测试计划、README、文档地图和 CODEX_NEXT_STEP，并保存三包开发记录。两个新增 API 均只读，Breaking Change: No；本轮没有新增迁移、依赖或改变领域 Owner，无需额外 ADR 或重复路线图。工作区并行 M06 改动保持独立；源码构建输出到临时目录，不覆盖其 Windows 发布包。相关工程检查和文档检查以开发记录及当前状态记载为准，不将其声明为 Windows 阅读验收、正式使用体验实验或 M03–M07 总验收。
+
+## 23. 锁定、影响检查与提醒的产品决策（2026-09-28）
+
+用户要求逐问讨论三类未定能力，并依次选择：原文锁定、章节/段落粒度、只约束 AI、局部冲突局部暂停；先列影响再选范围、明确引用与推测分组、主动点击检查；仅必须介入、应用内与 Windows 通知、同事项一次、短时多项合并。详细行为与理由只在工作台 10.1/11.5 维护，不在本记录复制第二套规则。
+
+本次将对应产品规则从待讨论转为已确认，保留原探索、三日实施记录与历史验证结论。同步总纲导航、范围矩阵、工作台交互、验证计划、公共与 25/26 日提示词、文档地图及 CODEX_NEXT_STEP；新验收规格尚未运行。稳定块身份/锁定继承、引用/候选、聚合窗口与投递去重等工程契约仍待设计，不伪造数值、数据库结构或完成状态。
+
+Documentation Impact Check：只修改上述相关 Markdown，没有产品代码、API/数据库或架构 Owner 变更，无需新 ADR、migration、独立路线图或重复规格。未启动新开发、子代理、模型调用、系统通知或自动化，也不将应用运行期间通知扩成后台内容扫描。文档检查与相关差异检查通过；功能、数据库和 Windows 验收本轮未运行。
+
+## 24. V1 后续长期项目协作规划（2026-09-28）
+
+用户在确认 M01–M07 对应完整 V1 后要求继续规划新功能、架构与提示词，并选择优先长期项目协作。仓库原第 106–108 节只有远期能力目录，缺少这一方向的可实施次序；本轮新增唯一[后续路线](../requirements/post-v1-roadmap.md)，提出 V1.1 协作打磨与 V1.5 有限自动推进，保留原长期候选而不全量纳入下一版。
+
+定向读取项目恢复、Lineage、影响检查和 Information 命令，用于划分已有入口与新增范围，不将源码存在当作独立验收。路线包含 N00 实用基线、N01 接续点、N02 跨成果共创、N03 知识整理、N04 周期计划、N05 有限触发、N06 连续委托、N07 可选声明配置。具体策略与分期仍 Proposed；不重复建设 V1 锁定/提醒，也不把未完成 V1 出口后移。
+
+架构主文档补 Owner、事务、预算预留、撤销竞争、版本与恢复边界；新增 Proposed ADR-013 比较人工逐次启动、既有命令上的有限委托和另建自主平台。默认保留既有主栈与业务 Owner，不新建服务/Runtime。新增 N 分包、设计深化和独立验收提示词；验收主文档加入 PV00–PV08 未运行规格和使用指标口径。旧 M 工作包/goal 只加范围隔离，不改变执行出口。
+
+Documentation Impact Check：更新需求入口、产品总纲、架构/扩展专题、ADR、测试计划、README、文档地图、提示词、CODEX_NEXT_STEP 的规划导航及本记录。后续分期由新专题独占，不创建重复根 ROADMAP/CHANGELOG/KNOWN_ISSUES。API/数据库仅列未来设计义务，本轮无端点、类型、schema、migration、依赖或生产代码变更，当前 Breaking Change: No。没有创建 goal、子代理、模型请求或自动化；未执行功能、数据库、真实模型或 Windows 验收。
+
+验证：`node scripts/check-docs.mjs` 通过（Markdown 96 个、链接 1754 个、标题锚点 1242 个、设计令牌 126 个、对比度 29 条），`git diff --check` 无空白错误。另以开工前快照逐行核对 12 份已有文档，本轮仅插入内容、原文本全部保留；新文档 UTF-8/空白检查、8 个 N 包的范围/提示词/PV 映射和 10 段提示词围栏检查通过。人工核对分期、状态、授权、唯一 Owner、事务、UNKNOWN、历史/当前边界及待定事项；上述检查只证明文档一致性，不证明后续运行能力。

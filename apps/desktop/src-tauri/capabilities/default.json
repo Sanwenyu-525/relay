@@ -1,11 +1,27 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-window",
-  "description": "The packaged main window is the only desktop IPC surface.",
-  "windows": ["main"],
+  "description": "打包主窗口是唯一的桌面 IPC 面；remote 仅放行 tauri dev 的 Vite 开发来源（127.0.0.1:5173），打包窗口的导航守卫会拦截该来源。",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
+    "core:window:allow-is-focused",
+    "core:window:allow-show",
+    "core:window:allow-unminimize",
+    "core:window:allow-set-focus",
+    "core:window:allow-is-maximized",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
     "core:window:allow-destroy"
-  ]
+  ],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:5173"
+    ]
+  }
 }

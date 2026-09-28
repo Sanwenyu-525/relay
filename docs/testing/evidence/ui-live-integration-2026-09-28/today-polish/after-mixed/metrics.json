@@ -1,0 +1,467 @@
+[
+  {
+    "label": "first-entry-1280",
+    "url": "http://127.0.0.1:5173/today",
+    "scrollY": 0,
+    "viewport": {
+      "w": 1280,
+      "h": 800
+    },
+    "dpr": 1,
+    "rootFontSize": "16px",
+    "docHeight": 1748,
+    "h1": {
+      "text": "把今天留给重要的事",
+      "rect": {
+        "top": 125,
+        "bottom": 165,
+        "left": 248,
+        "width": 992,
+        "height": 40
+      },
+      "style": {
+        "font-size": "32px",
+        "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif",
+        "line-height": "40px"
+      }
+    },
+    "eyebrow": {
+      "rect": {
+        "top": 104,
+        "bottom": 125,
+        "left": 248,
+        "width": 992,
+        "height": 21
+      }
+    },
+    "topbar": {
+      "rect": {
+        "top": 0,
+        "bottom": 64,
+        "left": 208,
+        "width": 1072,
+        "height": 64
+      }
+    },
+    "navFont": {
+      "font-family": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+      "font-size": "16px"
+    },
+    "dateInput": {
+      "rect": {
+        "top": 281,
+        "bottom": 325,
+        "left": 284,
+        "width": 178,
+        "height": 44
+      },
+      "style": {
+        "font-family": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "font-size": "16px",
+        "height": "44px",
+        "border": "1px solid rgb(133, 138, 128)"
+      }
+    },
+    "groups": [
+      {
+        "heading": "可开始或继续 · 4",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        }
+      },
+      {
+        "heading": "已置顶，待处理 · 1",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        }
+      }
+    ],
+    "focusPanel": {
+      "text": "今日焦点还未选择今日焦点。可从下方任务中选择一件最重要的事。"
+    },
+    "demoNotice": {
+      "text": null
+    },
+    "container": {
+      "top": 64,
+      "bottom": 1748,
+      "left": 208,
+      "width": 1072,
+      "height": 1684
+    }
+  },
+  {
+    "label": "bottom-1280",
+    "url": "http://127.0.0.1:5173/today",
+    "scrollY": 948,
+    "viewport": {
+      "w": 1280,
+      "h": 800
+    },
+    "dpr": 1,
+    "rootFontSize": "16px",
+    "docHeight": 1748,
+    "h1": {
+      "text": "把今天留给重要的事",
+      "rect": {
+        "top": -823,
+        "bottom": -783,
+        "left": 248,
+        "width": 992,
+        "height": 40
+      },
+      "style": {
+        "font-size": "32px",
+        "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif",
+        "line-height": "40px"
+      }
+    },
+    "eyebrow": {
+      "rect": {
+        "top": -844,
+        "bottom": -823,
+        "left": 248,
+        "width": 992,
+        "height": 21
+      }
+    },
+    "topbar": {
+      "rect": {
+        "top": 0,
+        "bottom": 64,
+        "left": 208,
+        "width": 1072,
+        "height": 64
+      }
+    },
+    "navFont": {
+      "font-family": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+      "font-size": "16px"
+    },
+    "dateInput": {
+      "rect": {
+        "top": -667,
+        "bottom": -623,
+        "left": 284,
+        "width": 178,
+        "height": 44
+      },
+      "style": {
+        "font-family": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "font-size": "16px",
+        "height": "44px",
+        "border": "1px solid rgb(133, 138, 128)"
+      }
+    },
+    "groups": [
+      {
+        "heading": "可开始或继续 · 4",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        }
+      },
+      {
+        "heading": "已置顶，待处理 · 1",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        }
+      }
+    ],
+    "focusPanel": {
+      "text": "今日焦点还未选择今日焦点。可从下方任务中选择一件最重要的事。"
+    },
+    "demoNotice": {
+      "text": null
+    },
+    "container": {
+      "top": -884,
+      "bottom": 800,
+      "left": 208,
+      "width": 1072,
+      "height": 1684
+    }
+  },
+  {
+    "label": "toolbar-focus",
+    "url": "http://127.0.0.1:5173/today",
+    "scrollY": 0,
+    "viewport": {
+      "w": 1280,
+      "h": 800
+    },
+    "dpr": 1,
+    "rootFontSize": "16px",
+    "docHeight": 1748,
+    "h1": {
+      "text": "把今天留给重要的事",
+      "rect": {
+        "top": 125,
+        "bottom": 165,
+        "left": 248,
+        "width": 992,
+        "height": 40
+      },
+      "style": {
+        "font-size": "32px",
+        "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif",
+        "line-height": "40px"
+      }
+    },
+    "eyebrow": {
+      "rect": {
+        "top": 104,
+        "bottom": 125,
+        "left": 248,
+        "width": 992,
+        "height": 21
+      }
+    },
+    "topbar": {
+      "rect": {
+        "top": 0,
+        "bottom": 64,
+        "left": 208,
+        "width": 1072,
+        "height": 64
+      }
+    },
+    "navFont": {
+      "font-family": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+      "font-size": "16px"
+    },
+    "dateInput": {
+      "rect": {
+        "top": 281,
+        "bottom": 325,
+        "left": 284,
+        "width": 178,
+        "height": 44
+      },
+      "style": {
+        "font-family": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "font-size": "16px",
+        "height": "44px",
+        "border": "1px solid rgb(133, 138, 128)"
+      }
+    },
+    "groups": [
+      {
+        "heading": "可开始或继续 · 4",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        }
+      },
+      {
+        "heading": "已置顶，待处理 · 1",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        }
+      }
+    ],
+    "focusPanel": {
+      "text": "今日焦点还未选择今日焦点。可从下方任务中选择一件最重要的事。"
+    },
+    "demoNotice": {
+      "text": null
+    },
+    "container": {
+      "top": 64,
+      "bottom": 1748,
+      "left": 208,
+      "width": 1072,
+      "height": 1684
+    }
+  },
+  {
+    "label": "narrow-960",
+    "url": "http://127.0.0.1:5173/today",
+    "scrollY": 0,
+    "viewport": {
+      "w": 960,
+      "h": 640
+    },
+    "dpr": 1,
+    "rootFontSize": "16px",
+    "docHeight": 1748,
+    "h1": {
+      "text": "把今天留给重要的事",
+      "rect": {
+        "top": 125,
+        "bottom": 165,
+        "left": 104,
+        "width": 816,
+        "height": 40
+      },
+      "style": {
+        "font-size": "32px",
+        "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif",
+        "line-height": "40px"
+      }
+    },
+    "eyebrow": {
+      "rect": {
+        "top": 104,
+        "bottom": 125,
+        "left": 104,
+        "width": 816,
+        "height": 21
+      }
+    },
+    "topbar": {
+      "rect": {
+        "top": 0,
+        "bottom": 64,
+        "left": 64,
+        "width": 896,
+        "height": 64
+      }
+    },
+    "navFont": {
+      "font-family": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+      "font-size": "16px"
+    },
+    "dateInput": {
+      "rect": {
+        "top": 281,
+        "bottom": 325,
+        "left": 140,
+        "width": 178,
+        "height": 44
+      },
+      "style": {
+        "font-family": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "font-size": "16px",
+        "height": "44px",
+        "border": "1px solid rgb(133, 138, 128)"
+      }
+    },
+    "groups": [
+      {
+        "heading": "可开始或继续 · 4",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        }
+      },
+      {
+        "heading": "已置顶，待处理 · 1",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        }
+      }
+    ],
+    "focusPanel": {
+      "text": "今日焦点还未选择今日焦点。可从下方任务中选择一件最重要的事。"
+    },
+    "demoNotice": {
+      "text": null
+    },
+    "container": {
+      "top": 64,
+      "bottom": 1748,
+      "left": 64,
+      "width": 896,
+      "height": 1684
+    }
+  },
+  {
+    "label": "wide-1536",
+    "url": "http://127.0.0.1:5173/today",
+    "scrollY": 0,
+    "viewport": {
+      "w": 1536,
+      "h": 832
+    },
+    "dpr": 1,
+    "rootFontSize": "16px",
+    "docHeight": 1748,
+    "h1": {
+      "text": "把今天留给重要的事",
+      "rect": {
+        "top": 125,
+        "bottom": 165,
+        "left": 272,
+        "width": 1200,
+        "height": 40
+      },
+      "style": {
+        "font-size": "32px",
+        "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif",
+        "line-height": "40px"
+      }
+    },
+    "eyebrow": {
+      "rect": {
+        "top": 104,
+        "bottom": 125,
+        "left": 272,
+        "width": 1200,
+        "height": 21
+      }
+    },
+    "topbar": {
+      "rect": {
+        "top": 0,
+        "bottom": 64,
+        "left": 208,
+        "width": 1328,
+        "height": 64
+      }
+    },
+    "navFont": {
+      "font-family": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+      "font-size": "16px"
+    },
+    "dateInput": {
+      "rect": {
+        "top": 281,
+        "bottom": 325,
+        "left": 308,
+        "width": 178,
+        "height": 44
+      },
+      "style": {
+        "font-family": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "font-size": "16px",
+        "height": "44px",
+        "border": "1px solid rgb(133, 138, 128)"
+      }
+    },
+    "groups": [
+      {
+        "heading": "可开始或继续 · 4",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        }
+      },
+      {
+        "heading": "已置顶，待处理 · 1",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        }
+      }
+    ],
+    "focusPanel": {
+      "text": "今日焦点还未选择今日焦点。可从下方任务中选择一件最重要的事。"
+    },
+    "demoNotice": {
+      "text": null
+    },
+    "container": {
+      "top": 64,
+      "bottom": 1748,
+      "left": 232,
+      "width": 1280,
+      "height": 1684
+    }
+  }
+]

@@ -98,6 +98,9 @@ describe("P15 Artifact Lineage", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(init?.method ?? "GET").toBe("GET");
       const path = String(input).slice(root.length); calls.push(path);
+      if (path === "/attention/interventions") return response({ items: [] });
+      if (path === "/artifacts/44444444-4444-4444-8444-444444444444/text-locks") return response({
+        artifact_id: "44444444-4444-4444-8444-444444444444", locks: [] });
       if (path === `/artifact-versions/${versionId}/lineage`) return response({ ...lineage(), content_availability: "AVAILABLE" });
       if (path === `/artifact-versions/${parentId}/lineage`) return response({ ...lineage(), artifact_version_id: parentId,
         version_number: "1", sha256: "b".repeat(64), content_availability: "AVAILABLE", direct_parents: [] });
@@ -118,7 +121,8 @@ describe("P15 Artifact Lineage", () => {
       throw new Error(`Unexpected ${path}`);
     }));
     const mounted = await mountWorkbench(`/artifact-versions/${versionId}/lineage`); unmount = mounted.unmount;
-    expect(calls).toEqual([`/artifact-versions/${versionId}/lineage`]);
+    expect(calls).toContain(`/artifact-versions/${versionId}/lineage`);
+    expect(calls).not.toContain(`/artifact-versions/${versionId}/direct-uses`);
     await mounted.wrapper.get('[data-testid="artifact-version-compare"] button').trigger("click"); await flush();
     expect(mounted.wrapper.get('[data-testid="artifact-current-content"]').text()).toContain("新结论");
     await mounted.wrapper.get('[data-testid="artifact-compare-select"]').setValue(parentId);

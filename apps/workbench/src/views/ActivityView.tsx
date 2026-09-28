@@ -7,6 +7,17 @@ import "./ActivityView.css";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const actorLabels = { HUMAN: "人工", AI: "AI", SYSTEM: "系统" } as const;
+const eventTypeLabels: Record<string, string> = {
+  PROJECT_CREATED: "创建项目", PROJECT_STATE_UPDATED: "更新项目状态", PROJECT_ARCHIVED: "归档项目",
+  TASK_CREATED: "创建任务", TASK_UPDATED: "更新任务", TASK_STARTED: "开始任务", TASK_CANCELLED: "取消任务",
+  TASK_COMPLETED: "完成任务", TASK_REOPENED: "重开任务", TASK_READY: "任务进入可执行",
+  ARTIFACT_VERSION_SAVED: "保存产物版本", ARTIFACT_VERSION_SELECTED: "选用产物版本",
+  DELEGATION_CREATED: "委托 AI 执行", RUN_CREATED: "创建 Run", RUN_FINISHED: "Run 结束",
+  REVIEW_DECIDED: "作出审批决定", VERIFICATION_COMPLETED: "验证完成"
+};
+function eventTypeLabel(eventType: string): string {
+  return eventTypeLabels[eventType] ?? eventType;
+}
 const refLabels: Record<RelayActivityRefKind, string> = {
   PROJECT: "项目", TASK: "任务", RUN: "Run", GOAL: "目标", ARTIFACT_VERSION: "产物版本",
   REVIEW: "Review", COMPLETION: "完成凭据", VERIFICATION_SESSION: "验证会话"
@@ -34,16 +45,26 @@ function refTarget(kind: RelayActivityRefKind, id: string): string | null {
   return null;
 }
 
+function localTime(utc: string): string {
+  const date = new Date(utc);
+  if (!Number.isFinite(date.getTime())) return utc;
+  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
+}
+
 function ActivityRow({ item }: { item: RelayActivityItem }) {
-  return <li className="activity-row"><div className="activity-row-heading"><strong>{item.summary}</strong><time dateTime={item.createdAt}>{item.createdAt}</time></div>
-    <p className="activity-meta">{actorLabels[item.actorKind]} · {item.eventType} · Activity ID {item.id}</p>
-    {item.commandId && <p className="activity-meta">原 command_id：{item.commandId}</p>}
-    <div className="activity-refs"><strong>已核实引用</strong>{item.entityRefs.length ? <ul>{item.entityRefs.map((ref) => {
+  return <li className="activity-row"><div className="activity-row-heading"><strong>{item.summary}</strong><time dateTime={item.createdAt}>{localTime(item.createdAt)}</time></div>
+    <p className="activity-meta">{actorLabels[item.actorKind]} · {eventTypeLabel(item.eventType)}</p>
+    <div className="activity-refs">{item.entityRefs.length ? <ul>{item.entityRefs.map((ref) => {
       const target = refTarget(ref.kind, ref.id);
       return <li key={`${ref.kind}:${ref.id}`}>{target
         ? <Link className="inline-link" to={target}>{refLabels[ref.kind]} {ref.id}</Link>
         : <span>{refLabels[ref.kind]} {ref.id}（当前无直达页）</span>}</li>;
-    })}</ul> : <p>本条未返回可展示的实体引用。</p>}</div>
+    })}</ul> : <p className="activity-meta">本条未返回可展示的实体引用。</p>}</div>
+    <details><summary>追溯详情</summary>
+      <p className="activity-meta">Activity ID：{item.id}</p>
+      {item.commandId && <p className="activity-meta">原 command_id：{item.commandId}</p>}
+      <p className="activity-meta">事件类型：{item.eventType}</p>
+    </details>
   </li>;
 }
 
@@ -126,8 +147,8 @@ export default function ActivityView() {
     else navigate(path);
   }
 
-  return <section className="activity-page"><p className="eyebrow">动态</p><h1>Activity</h1>
-    <p className="page-lede">按服务端业务审计记录查看发生过的动作。摘要与已核实引用可导航；审批决定和实际效果仍须分别查看。</p>
+  return <section className="activity-page"><p className="eyebrow">工作空间</p><h1>动态</h1>
+    <p className="page-lede">这里按时间记录项目里真实发生过的动作，可以按项目、任务、Run 或时间筛选，并直达相关对象。</p>
     {client === null ? <p className="warning-callout" role="status">当前是示例数据预览，没有真实 Activity 记录。<Link to="/projects">打开项目</Link> 继续人工工作。</p> : <>
       <form className="surface-panel activity-filter" onSubmit={apply}>
         <label>Project ID<input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="可选 UUID" /></label>

@@ -10,7 +10,7 @@
 在 D:/Develop/Relay-Agent 实现可运行的 Vue 3 + TypeScript + Vite 前端，目录 apps/workbench/。该目录含组件、路由、明确开发用途的 fixture adapter、测试、配置及 README，由你负责。不创建生产后端、数据库迁移、桌面壳或任意新的平台抽象。
 你不是唯一开发者；主 Agent 维护根文档/验收记录，其他工作可能正在修改后端准备文档。不要覆盖、回退或删除任何他人改动。仓库当前全为未跟踪文件，不能据 git diff 空白推断无内容。不要修改根 package.json、AGENTS.md、CODEX_NEXT_STEP.md 或技术 ADR；需要根文档变化向主 Agent报告。
 
-先读根 AGENTS.md、CODEX_NEXT_STEP.md、README.md、docs/frontend/page-development-prompts.md 公共约束及 UI-30–33、design-system.md、design-tokens.json、workbench-design.md，以及 docs/architecture/relay-skills.md 第4、5、7、8.2节。理解 reuse-strategy.md / ADR-005；页面层直接复用 Vue、Vue Router 与合适的成熟图标库，不研究无关后端框架。你应使用工具直接查看四张原图，不仅阅读文案：
+先读根 AGENTS.md、CODEX_NEXT_STEP.md、README.md、docs/frontend/page-development-prompts.md 公共约束及 UI-30–33、design-system.md、design-tokens.json、workbench-design.md，以及 docs/architecture/relay-skills.md 第4、5、7、8.2节。理解 复用策略.md / ADR-005；页面层直接复用 Vue、Vue Router 与合适的成熟图标库，不研究无关后端框架。你应使用工具直接查看四张原图，不仅阅读文案：
 docs/frontend/mockups/2026-09-19/extensions/project-blueprint.png
 docs/frontend/mockups/2026-09-19/extensions/task-definition.png
 docs/frontend/mockups/2026-09-19/extensions/verification-plan.png

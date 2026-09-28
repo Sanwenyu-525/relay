@@ -1,6 +1,6 @@
 # Personal Workflow OS — Master Product Specification
 
-> 2026-09-23 接续：用户确认 React 全量迁移与 Windows 桌面交付，并要求按项目现状选栈。技术事实源为 [技术选型](docs/architecture/technology-selection.md)及 [ADR-010](docs/decisions/ADR-010-agent-stack-react-desktop.md)；本文原始技术示例不覆盖当前选择。既有业务闭环、范围编号和视觉保留。
+> 2026-09-23 接续：用户确认 React 全量迁移与 Windows 桌面交付，并要求按项目现状选栈。技术事实源为 [技术选型](docs/architecture/技术选型.md)及 [ADR-010](docs/decisions/ADR-010-agent-stack-react-desktop.md)；本文原始技术示例不覆盖当前选择。既有业务闭环、范围编号和视觉保留。
 
 > 状态：功能讨论阶段基本完成，本文档作为后续 Codex / 架构设计 / 开发规划的**产品事实源（Product Source of Truth）**。  
 > 当前阶段：**尚未冻结数据库、API、具体技术栈实现、表结构、前端组件实现。**  
@@ -20,6 +20,8 @@
 **Personal Workflow OS** 是一个以 **Goal / Project State** 为长期工作状态，以 **Task** 为人机协作与工作分配单位，以 **Workflow + Verification** 为 AI 执行闭环，并可根据不同 Project / Task 类型切换 **Workbench** 的个人 Agent 工作系统。
 
 ## 0.2 协作形态补充（2026-09-25，Proposed）
+
+2026-09-28 决策接续：其中锁定、手动影响检查与人工介入提醒已有用户逐项确认，具体行为统一见[工作台 10.1](docs/frontend/workbench-design.md#101-已确认的锁定与影响检查规则)与[11.5](docs/frontend/workbench-design.md#115-已确认的人工介入提醒规则)。这是对应产品规则的确认，不表示本节全部探索已定稿、已实现或已通过验收。
 
 来源：用户提供的 Agent 产品形态讨论及本轮项目评估，并要求补充到文档。此节保存产品探索方向，不代表相关能力已实现、验收通过或已加入当前开发工作包；当前进度仍以 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)为准。
 
@@ -2879,6 +2881,8 @@ Agent/System needs decision
 ---
 
 # 106. V1.5
+
+2026-09-28 规划接续：用户选择后续优先“长期项目协作：恢复上下文、成果共创、知识整理、有限自动推进”。具体推荐批次、最小范围、依赖与未决项统一见[后续路线](docs/requirements/post-v1-roadmap.md)。其中 V1.1 是本轮提出的协作打磨标签，不改变当前 V1 必需范围；N 工作包仍为规划，未授权开发。下方与第 107–108 节保留长期能力目录，不能理解为全部进入下一版或已选定实现。
 
 - Calendar
 - Work Session

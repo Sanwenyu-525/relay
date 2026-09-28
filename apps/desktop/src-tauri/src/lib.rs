@@ -24,9 +24,12 @@ use job_sidecar::{ManagedProcess, StoppedLaunch, arm_launch, recover_old_launche
 #[cfg(windows)]
 use std::ffi::OsString;
 #[cfg(windows)]
-use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2_4, ICoreWebView2Frame2};
+use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2_4, ICoreWebView2Frame2,
+    COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS,
+    COREWEBVIEW2_PERMISSION_STATE_ALLOW, COREWEBVIEW2_PERMISSION_STATE_DENY};
 #[cfg(windows)]
-use webview2_com::{FrameCreatedEventHandler, FrameNavigationStartingEventHandler};
+use webview2_com::{FrameCreatedEventHandler, FrameNavigationStartingEventHandler,
+    PermissionRequestedEventHandler, take_pwstr};
 #[cfg(windows)]
 use windows::{
     Win32::{
@@ -34,10 +37,29 @@ use windows::{
         System::Threading::CreateMutexW,
         UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow, MessageBoxW, MB_ICONERROR, MB_OK},
     },
-    core::{HSTRING, Interface},
+    core::{HSTRING, Interface, PWSTR},
 };
 
 const TRUSTED_ORIGIN: &str = "http://tauri.localhost";
+/// tauri dev 模式加载的前端开发服务器；打包产物不受此常量影响。
+const DEV_ORIGIN: &str = "http://127.0.0.1:5173";
+
+fn frontend_origin() -> &'static str {
+    if tauri::is_dev() { DEV_ORIGIN } else { TRUSTED_ORIGIN }
+}
+
+fn is_dev_frontend_origin(url: &tauri::Url) -> bool {
+    url.scheme() == "http" && url.host_str() == Some("127.0.0.1") && url.port() == Some(5173)
+}
+
+fn is_allowed_frontend_navigation(url: &tauri::Url) -> bool {
+    if url.as_str() == "about:blank" { return true; }
+    if url.scheme() != "http" { return false; }
+    if tauri::is_dev() {
+        return is_dev_frontend_origin(url);
+    }
+    url.host_str() == Some("tauri.localhost") && url.port().is_none()
+}
 const WINDOW_TITLE: &str = "Relay Agent";
 const NODE_VERSION: &str = "v24.21.0";
 #[cfg(windows)]
@@ -181,8 +203,13 @@ fn desktop_bootstrap(window: WebviewWindow, state: tauri::State<'_, RuntimeState
         return Err("desktop bootstrap is limited to the packaged main frame".into());
     }
     let url = window.url().map_err(|_| "cannot verify the desktop window".to_owned())?;
-    if url.scheme() != "http" || url.host_str() != Some("tauri.localhost")
-        || url.port().is_some() || !url.username().is_empty() || url.password().is_some() {
+    let origin_allowed = if tauri::is_dev() {
+        is_dev_frontend_origin(&url)
+    } else {
+        url.scheme() == "http" && url.host_str() == Some("tauri.localhost")
+            && url.port().is_none() && url.username().is_empty() && url.password().is_none()
+    };
+    if !origin_allowed {
         return Err("desktop bootstrap is limited to the packaged local origin".into());
     }
     let mut api = state.api.lock().expect("API mutex poisoned");
@@ -520,9 +547,13 @@ fn start_api(app: &tauri::AppHandle, single_instance: SingleInstanceGuard) -> Re
     let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     let env_file = OsString::from(format!("--env-file={}", config.display()));
     let api_args = [env_file.clone(), entry.into_os_string(), "--desktop-child".into()];
-    let mut api = ManagedProcess::spawn(&node, &api_args,
-        &[("RELAY_DATA_ROOT".into(), data_root.as_os_str().to_os_string()),
-          ("RELAY_FILE_IO_HELPER".into(), file_io_helper.as_os_str().to_os_string())], launch.api_job)?;
+    // 打包构建不注入该变量；tauri dev 时允许开发服务器来源访问本机 API。
+    let mut api_env: Vec<(String, OsString)> = vec![
+        ("RELAY_DATA_ROOT".into(), data_root.as_os_str().to_os_string()),
+        ("RELAY_FILE_IO_HELPER".into(), file_io_helper.as_os_str().to_os_string()),
+    ];
+    if tauri::is_dev() { api_env.push(("RELAY_DESKTOP_EXTRA_ORIGIN".into(), DEV_ORIGIN.into())); }
+    let mut api = ManagedProcess::spawn(&node, &api_args, &api_env, launch.api_job)?;
     let frame = serde_json::json!({ "nonce": nonce, "bearerToken": token });
     api.write_frame(&frame.to_string())?;
     let (port, workspace_id) = read_startup(api.take_stdout()?, &nonce)?;
@@ -593,13 +624,37 @@ fn start_api(app: &tauri::AppHandle) -> Result<RuntimeState, String> {
 }
 
 #[cfg(windows)]
+fn trusted_notification_uri(uri: &str) -> bool {
+    tauri::Url::parse(uri).is_ok_and(|url| url.scheme() == "http"
+        && url.host_str() == Some("tauri.localhost") && url.port().is_none()
+        && url.username().is_empty() && url.password().is_none())
+}
+
+#[cfg(windows)]
 fn install_frame_guard(window: &WebviewWindow, tainted: Arc<AtomicBool>) -> Result<(), String> {
     let result = Arc::new(Mutex::new(None));
     let result_for_webview = Arc::clone(&result);
     window.with_webview(move |webview| {
         let setup = (|| -> windows::core::Result<()> {
             unsafe {
-                let core = webview.controller().CoreWebView2()?.cast::<ICoreWebView2_4>()?;
+                let core = webview.controller().CoreWebView2()?;
+                let on_permission = PermissionRequestedEventHandler::create(Box::new(|_, args| {
+                    let Some(args) = args else { return Ok(()); };
+                    let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
+                    args.PermissionKind(&mut kind)?;
+                    if kind == COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS {
+                        let mut uri = PWSTR::null();
+                        args.Uri(&mut uri)?;
+                        let state = if trusted_notification_uri(&take_pwstr(uri)) {
+                            COREWEBVIEW2_PERMISSION_STATE_ALLOW
+                        } else { COREWEBVIEW2_PERMISSION_STATE_DENY };
+                        args.SetState(state)?;
+                    }
+                    Ok(())
+                }));
+                let mut permission_token = 0_i64;
+                core.add_PermissionRequested(&on_permission, &mut permission_token)?;
+                let core = core.cast::<ICoreWebView2_4>()?;
                 let on_frame = FrameCreatedEventHandler::create(Box::new(move |_, args| {
                     // Any child frame permanently revokes IPC for this launch, including about:blank/srcdoc.
                     tainted.store(true, Ordering::SeqCst);
@@ -645,10 +700,9 @@ fn create_window(app: &tauri::AppHandle, state: &RuntimeState) -> Result<(), Str
     let window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::External(
         "about:blank".parse().map_err(|_| "invalid blank startup URL".to_owned())?
     ))
-        .title(WINDOW_TITLE).inner_size(1160.0, 780.0).visible(false)
+        .title(WINDOW_TITLE).decorations(false).inner_size(1160.0, 780.0).visible(false)
         .zoom_hotkeys_enabled(true)
-        .on_navigation(|url| url.as_str() == "about:blank" ||
-            (url.scheme() == "http" && url.host_str() == Some("tauri.localhost") && url.port().is_none()))
+        .on_navigation(|url| is_allowed_frontend_navigation(&url))
         .on_new_window(|_, _| NewWindowResponse::Deny)
         .on_web_resource_request(move |request, response| {
             // Wry maps the visible http://tauri.localhost URL back to tauri://localhost
@@ -667,8 +721,8 @@ fn create_window(app: &tauri::AppHandle, state: &RuntimeState) -> Result<(), Str
         .build().map_err(|_| "cannot create the Relay Agent window".to_owned())?;
     #[cfg(windows)]
     install_frame_guard(&window, Arc::clone(&state.frame_created))?;
-    window.navigate(TRUSTED_ORIGIN.parse().map_err(|_| "invalid packaged app URL".to_owned())?)
-        .map_err(|_| "cannot load the packaged workbench".to_owned())?;
+    window.navigate(frontend_origin().parse().map_err(|_| "invalid frontend URL".to_owned())?)
+        .map_err(|_| "cannot load the workbench".to_owned())?;
     window.show().map_err(|_| "cannot show the Relay Agent window".to_owned())?;
     Ok(())
 }
@@ -716,6 +770,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{csp_with_api, is_packaged_asset_request, read_startup, read_startup_with_timeout};
+    #[cfg(windows)]
+    use super::trusted_notification_uri;
     use std::{io::{Cursor, Read}, thread, time::Duration};
     #[cfg(windows)]
     use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}, mpsc};
@@ -766,6 +822,19 @@ mod tests {
         }
         for address in ["http://tauri.localhost/", "tauri://localhost.evil/", "tauri://user@localhost/"] {
             assert!(!is_packaged_asset_request(&address.parse().unwrap()));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn notification_permission_is_limited_to_the_packaged_page_origin() {
+        for uri in ["http://tauri.localhost/", "http://tauri.localhost/tasks?tab=attention"] {
+            assert!(trusted_notification_uri(uri));
+        }
+        for uri in ["https://tauri.localhost/", "http://tauri.localhost.evil/",
+            "http://user@tauri.localhost/", "http://tauri.localhost:8080/",
+            "tauri://localhost/", "http://127.0.0.1/"] {
+            assert!(!trusted_notification_uri(uri));
         }
     }
 

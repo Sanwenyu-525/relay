@@ -1,0 +1,220 @@
+[
+  {
+    "name": "projects",
+    "source": null,
+    "badFonts": [],
+    "controls": [
+      {
+        "type": "search",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 42
+      },
+      {
+        "type": "text",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 42
+      }
+    ]
+  },
+  {
+    "name": "projects-create",
+    "source": null,
+    "badFonts": [],
+    "controls": [
+      {
+        "type": "text",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 42
+      },
+      {
+        "type": "radio",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 40
+      },
+      {
+        "type": "radio",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 40
+      },
+      {
+        "type": "radio",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 40
+      },
+      {
+        "type": "file",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 40
+      }
+    ]
+  },
+  {
+    "name": "tasks",
+    "source": null,
+    "badFonts": [],
+    "controls": [
+      {
+        "type": "select-one",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 40
+      },
+      {
+        "type": "select-one",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 40
+      },
+      {
+        "type": "select-one",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 40
+      },
+      {
+        "type": "search",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 42
+      },
+      {
+        "type": "text",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 42
+      },
+      {
+        "type": "text",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 42
+      }
+    ]
+  },
+  {
+    "name": "tasks-create",
+    "source": null,
+    "badFonts": [],
+    "controls": [
+      {
+        "type": "text",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 42
+      },
+      {
+        "type": "text",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 42
+      },
+      {
+        "type": "text",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 42
+      },
+      {
+        "type": "radio",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 13
+      },
+      {
+        "type": "radio",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 13
+      },
+      {
+        "type": "radio",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 13
+      },
+      {
+        "type": "select-one",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 40
+      }
+    ]
+  },
+  {
+    "name": "inbox",
+    "source": null,
+    "badFonts": [],
+    "controls": [
+      {
+        "type": "select-one",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 40
+      },
+      {
+        "type": "select-one",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 40
+      },
+      {
+        "type": "search",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 42
+      }
+    ]
+  },
+  {
+    "name": "knowledge",
+    "source": null,
+    "badFonts": [],
+    "controls": [
+      {
+        "type": "search",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 42
+      }
+    ]
+  },
+  {
+    "name": "activity",
+    "source": null,
+    "badFonts": [],
+    "controls": [
+      {
+        "type": "text",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 42
+      },
+      {
+        "type": "text",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 42
+      },
+      {
+        "type": "text",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 42
+      },
+      {
+        "type": "datetime-local",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 44
+      },
+      {
+        "type": "datetime-local",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 44
+      }
+    ]
+  },
+  {
+    "name": "reviews",
+    "source": null,
+    "badFonts": [],
+    "controls": []
+  },
+  {
+    "name": "connections",
+    "source": null,
+    "badFonts": [],
+    "controls": [
+      {
+        "type": "text",
+        "font": "\"Microsoft YaHei UI\", \"Micro",
+        "height": 42
+      }
+    ]
+  },
+  {
+    "name": "settings",
+    "source": null,
+    "badFonts": [],
+    "controls": []
+  }
+]

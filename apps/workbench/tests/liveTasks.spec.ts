@@ -25,6 +25,8 @@ describe("live 任务入口", () => {
   it("全部只请求 scope=all、收件箱只请求 inbox=true，并保留真实 ID 入口", async () => {
     activate();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/attention/interventions")) return { ok: true, status: 200,
+        json: async () => ({ items: [] }) } as Response;
       if (String(input) === `${tasksUrl}?inbox=true` || String(input) === `${tasksUrl}?scope=all`) return { ok: true, status: 200,
         json: async () => ({ items: [], next_cursor: null }) } as Response;
       throw new TypeError("offline");
@@ -36,8 +38,9 @@ describe("live 任务入口", () => {
     expect(mounted.wrapper.text()).not.toContain("确定实验评价指标");
     expect(fixtureAdapter.getCallCount("listTasks")).toBe(0);
     expect(fixtureAdapter.getCallCount("loadTaskOptions")).toBe(0);
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
-    expect(String(vi.mocked(fetch).mock.calls[0][0])).toBe(`${tasksUrl}?scope=all`);
+    const taskCalls = () => vi.mocked(fetch).mock.calls.map(([input]) => String(input))
+      .filter((url) => url.startsWith(tasksUrl));
+    expect(taskCalls()).toEqual([`${tasksUrl}?scope=all`]);
 
     await mounted.wrapper.get('[data-testid="tasks-tab-inbox"]').trigger("click");
     await flush();
@@ -45,8 +48,7 @@ describe("live 任务入口", () => {
     expect(mounted.wrapper.text()).not.toContain("完善文献综述");
     expect(fixtureAdapter.getCallCount("listTasks")).toBe(0);
     expect(fixtureAdapter.getCallCount("loadTaskOptions")).toBe(0);
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
-    expect(String(vi.mocked(fetch).mock.calls[1][0])).toBe(`${tasksUrl}?inbox=true`);
+    expect(taskCalls()).toEqual([`${tasksUrl}?scope=all`, `${tasksUrl}?inbox=true`]);
 
     await mounted.router.push("/tasks");
     await flush();
@@ -66,6 +68,8 @@ describe("live 任务入口", () => {
   it("真实创建回执返回任务入口后不混入示例列表", async () => {
     activate();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/attention/interventions")) return { ok: true, status: 200,
+        json: async () => ({ items: [] }) } as Response;
       if (String(input) === `${tasksUrl}?scope=all`) return { ok: true, status: 200,
         json: async () => ({ items: [], next_cursor: null }) } as Response;
       expect(String(input)).toBe(tasksUrl);
@@ -98,6 +102,7 @@ describe("live 任务入口", () => {
     expect(fixtureAdapter.getCallCount("listTasks")).toBe(0);
     expect(fixtureAdapter.getCallCount("loadTaskOptions")).toBe(0);
     expect(fixtureAdapter.getCallCount("createTask")).toBe(0);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.filter(([input]) => !String(input).endsWith("/attention/interventions")))
+      .toHaveLength(2);
   });
 });

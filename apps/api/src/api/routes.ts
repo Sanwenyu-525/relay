@@ -4,6 +4,7 @@ import type { RelayDatabase } from '../infrastructure/database.js';
 import type { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
 import { ManagedContentStore } from '../storage/managed-content-store.js';
 import { registerArtifactRoutes } from './artifact-api.js';
+import { registerAttentionRoutes } from './attention-api.js';
 import { registerAssistRoutes } from './assist-api.js';
 import { createBearerGuard, type BoundaryConfig } from './boundary.js';
 import { registerCommandRoutes } from './command-api.js';
@@ -26,6 +27,7 @@ import { registerLineageRoutes } from './lineage-api.js';
 import { registerFirstPartySkillRoutes } from './first-party-skills-api.js';
 import { registerViewConfigurationRoutes } from './view-configuration-api.js';
 import { registerBlueprintRoutes } from './blueprint-api.js';
+import { registerModelRoutes } from './model-api.js';
 
 export type { RouteDependencies };
 
@@ -120,6 +122,8 @@ export function registerRoutes(
       registerViewConfigurationRoutes(scope, apiDependencies);
       registerBlueprintRoutes(scope, apiDependencies);
       registerArtifactRoutes(scope, apiDependencies);
+      registerAttentionRoutes(scope, apiDependencies);
+      registerModelRoutes(scope, apiDependencies);
       registerCompletionRoutes(scope, apiDependencies);
       registerStateRoutes(scope, apiDependencies);
       registerRunRoutes(scope, apiDependencies);

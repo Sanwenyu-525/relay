@@ -35,7 +35,9 @@ const CREATED_COMMAND_TYPES: readonly string[] = ['SubmitHumanArtifactVersion'];
 export function successStatusOf(commandType: string): 200 | 201 | 202 {
   // Delegate 已原子获得执行权，但工作尚未完成：按契约第 4 节返回 202（已接受）。
   // Assist 生成同为异步工作：202 表示消息已排队，回复以消息状态查询为准。
-  if (commandType === 'DelegateTask' || commandType === 'RequestRunControl' ||
+  if (commandType === 'StartArtifactImpactCheck' ||
+      commandType === 'StartArtifactImpactCandidate' ||
+      commandType === 'DelegateTask' || commandType === 'RequestRunControl' ||
       commandType === 'ResumeRun' || commandType === 'RequestAssistMessage') {
     return 202;
   }

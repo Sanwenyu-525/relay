@@ -2,6 +2,9 @@ node_modules/
 src-tauri/target/
 src-tauri/resources/
 src-tauri/gen/
+src-tauri/node.exe
+src-tauri/relay-file-io-helper.exe
+src-tauri/api/
 dist/
 release/
 *.log

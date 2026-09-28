@@ -1,0 +1,26 @@
+[
+  {
+    "name": "route-leave-return",
+    "ok": true
+  },
+  {
+    "name": "timezone-invalid-then-valid",
+    "ok": true
+  },
+  {
+    "name": "date-switch",
+    "ok": true
+  },
+  {
+    "name": "refresh",
+    "ok": true
+  },
+  {
+    "name": "focus-set-clear",
+    "ok": true
+  },
+  {
+    "name": "pin-toggle",
+    "ok": true
+  }
+]

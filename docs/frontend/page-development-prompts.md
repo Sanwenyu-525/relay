@@ -16,8 +16,12 @@
 
 ## 公共开发提示词
 
+2026-09-28：以下公共窗口补充适用于所有逐页单元；当前完整窗口参考见[标题栏 v2](mockups/2026-09-28/README.md)。
+
 ```text
-在 D:/Develop/Relay-Agent 中实现本次指定页面。先读 AGENTS.md、CODEX_NEXT_STEP.md、docs/README.md、docs/frontend/workbench-design.md、docs/frontend/design-system.md、docs/frontend/design-tokens.json、docs/architecture/technology-selection.md、docs/decisions/ADR-007-windows-desktop.md，以及该页引用的契约/API。检查实际源码与未提交改动，再明确本次文件范围和验收条件。
+在 D:/Develop/Relay-Agent 中实现本次指定页面。先读 AGENTS.md、CODEX_NEXT_STEP.md、docs/README.md、docs/frontend/workbench-design.md、docs/frontend/design-system.md、docs/frontend/design-tokens.json、docs/architecture/技术选型.md、docs/decisions/ADR-007-windows-desktop.md，以及该页引用的契约/API。检查实际源码与未提交改动，再明确本次文件范围和验收条件。
+
+完整窗口接续（2026-09-28）：同时查看 docs/frontend/mockups/2026-09-28/README.md 的 v2 完整窗口图与本页原内容图。标题栏左侧不放 Relay Agent，采用后退、前进、搜索、新建任务，中间留空白拖动区，右侧最小化/最大化或还原/关闭。复用现有 DesktopTitleBar、路由和命令面板，先核对并发改动；不要叠加原生装饰造成两套窗口按钮。动作与草稿保护按 workbench-design 第2节，视觉和尺寸按 design-system 第5节与唯一 tokens。按钮不属于拖动区，无内部历史禁用对应箭头，关闭沿用安全退出。每页不重复创建窗口栏；只有共用窗口开发任务修改标题栏，普通逐页任务核对适配。图像不是精确像素规格；真实 Windows 控制、DPI/缩放、窄窗和未保存草稿必须另行验收。
 
 产品接续：读取 prompts/README.md“产品补充的执行映射”及本文件“后续产品补充与页面映射”，按工作台第 10/11 节列出本页本次实现、回归核对、待讨论和后置项；图片没有画出的已确认约束仍须落实。新增提醒/队列排序、局部锁定/影响传播或验收关联等策略未定时，只先讨论依赖它的部分；缺接口不造假数据，不自动加导航、后端字段或通用框架。
 

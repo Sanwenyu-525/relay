@@ -5,7 +5,7 @@
 ## P20：本机发布与备份恢复
 
 ```text
-执行 P20，前置 P15–P19。读 AGENTS.md、prompts/README.md、docs/deployment/local-deployment.md、docs/testing/verification-plan.md。
+执行 P20，前置 P15–P19。读 AGENTS.md、prompts/README.md、docs/deployment/本机部署.md、docs/testing/verification-plan.md。
 范围：按 ADR-007 交付 Windows 安装包与启动入口、随包 UI/Node、WebView2 前提、启动/配置/鉴权收口、DB 角色、日志/健康、维护态、备份/恢复。保持 loopback、显式 Host/Origin、所有业务鉴权；前端短期 token 经受限 IPC 引导且仅内存，不写日志或 URL。验证包内运行时版本；PG 是独立前提，不静默安装或管理。schema 不兼容拒写；模型离线不阻止人工任务。
 备份冻结业务写入/内容清理并记录未决动作，以 pg_dump 加不可变内容/hash manifest 形成一套。恢复到新 DB/data_root、禁真实执行先核验，再切换配置。不要自动删除原库/目录，不在用户数据上测试破坏。
 在干净 Windows 测试环境演练从安装入口启动、单实例、运行中关闭/强杀重启、升级前安全停机与备份、恢复与 UNKNOWN 保留、卸载默认保留用户数据。完成测试计划第 7 节，实际记录签名/系统提示、支持版本与限制，不将开发窗口视为安装验收。报告实际命令、版本、RPO/RTO 测量和失败；源码/README/配置示例无密钥。完成后交 P21，而非只交启动脚本。
@@ -24,7 +24,7 @@
 ## P22：可选毕业论文实验
 
 ```text
-执行 P22，仅在研究方向与任务集获得用户/导师确认后。读 AGENTS.md、prompts/README.md、docs/research/evaluation-protocol.md、docs/architecture/runtime-context.md、docs/testing/verification-plan.md。
+执行 P22，仅在研究方向与任务集获得用户/导师确认后。读 AGENTS.md、prompts/README.md、docs/research/评价协议.md、docs/architecture/runtime-context.md、docs/testing/verification-plan.md。
 先确认本次研究问题：原“验证策略与错误接受”协议，或测试计划第 11 节的注意力/恢复/验收体验候选；不自动把两类实验叠加，也不因产品目标补充替换已选协议。若选体验评价，先冻结对照、任务/缺陷集、参与者熟悉程度与顺序、指标分母和通过标准；下述四组策略仅适用于原验证策略研究。
 范围：实验配置/固定任务集、所选协议的对照组（原验证策略研究为四组）、运行记录、独立标注流程、统计脚本和可复现说明。实验配置不改变产品安全底线，不授权非法工具。冻结 rubric/输入/生成模型/预算，保存失败、超时、人工介入和未知用量。
 最终评价独立于系统内 Judge；记录标注分歧、分母和不确定性。示例数据只能标 synthetic，不能编造实测结果/显著性/创新点。真实模型费用与外发资料遵守用户授权，缺授权时完成离线脚本与 synthetic 验证，并明确真实实验未跑。

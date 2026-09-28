@@ -73,7 +73,7 @@
     },
     "color.palette.control": {
       "$type": "color",
-      "$value": "#858A80",
+      "$value": "#8E8A80",
       "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
     },
     "color.palette.forest": {
@@ -482,11 +482,11 @@
     },
     "radius.control": {
       "$type": "dimension",
-      "$value": "0.25rem"
+      "$value": "0.5rem"
     },
     "radius.panel": {
       "$type": "dimension",
-      "$value": "0.25rem"
+      "$value": "0.5rem"
     },
     "radius.badge": {
       "$type": "dimension",

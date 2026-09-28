@@ -41,7 +41,9 @@ describe("live Workspace 项目与任务列表", () => {
     connect();
     const urls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input); urls.push(url);
+      const url = String(input);
+      if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
+      urls.push(url);
       if (url === `${root}/projects?status=active`) return response(200, { items: [
         project(projectA, "甲项目", false, taskA), project(projectB, "乙项目")], next_cursor: "p+2" });
       if (url === `${root}/projects?status=active&cursor=p%2B2`) return response(200, {
@@ -111,7 +113,9 @@ describe("live Workspace 项目与任务列表", () => {
     connect();
     const urls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input); urls.push(url);
+      const url = String(input);
+      if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
+      urls.push(url);
       if (url === `${root}/tasks?scope=all`) return response(200, { items: [
         task(taskA, "项目任务", projectA, "READY"), task(taskB, "收件箱任务", null)], next_cursor: "t+2" });
       if (url === `${root}/tasks?scope=all&cursor=t%2B2`) return response(200, {

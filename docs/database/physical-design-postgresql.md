@@ -1,8 +1,10 @@
 # Personal Workflow OS：PostgreSQL 物理数据库设计
 
+> 2026-09-28 增量：`0040_collaboration_artifact_text_locks.sql` 保存当前锁定原文及映射状态；`0041_collaboration_impact_checks.sql` 扩展 Assist intent 并保存确切来源/目标与候选；`0042_collaboration_attention.sql` 保存已发现的锁冲突原目标及通知去重回执。三份 migration 在隔离 PostgreSQL 18.6 成功应用，详见[专项开发记录](../development/collaboration-controls-2026-09-28.md)。新表为空起步，既有版本不改写；回滚删表会丢失当前锁定/回执，须先停写并保存事实。
+
 > 2026-09-24 当前实现：保留 Kysely/pg、业务表及已应用 SQL migration/SHA 台账；M03 已追加 `0011` 的 command/outbox/invocation、`0012` 的 Run 刷新事件及 `0013` 的每 Run 命令顺序。官方 PostgresSaver 的固定 schema 安装与 Worker 接入已通过后端固定图分片独立复验；Windows 组合及 M03 整体仍待验收。业务事务与检查点按稳定身份对账，不能假装原子。
 
-日期：2026-09-19。状态：Proposed。用户已确认允许本机 PostgreSQL；完整技术组合、DDL 与协议仍需工程验证。上游：[逻辑模型](logical-model.md)、[技术选型](../architecture/technology-selection.md)。
+日期：2026-09-19。状态：Proposed。用户已确认允许本机 PostgreSQL；完整技术组合、DDL 与协议仍需工程验证。上游：[逻辑模型](logical-model.md)、[技术选型](../architecture/技术选型.md)。
 
 本文件给出 PostgreSQL 17 基线上的类型、约束、索引、锁协议和建表顺序。SQL 块是需合入后续 migration 的设计片段，不是可以逐段运行的完整脚本。本文业务 DDL 尚未完成真实数据库验证；[P00 基础实验](../research/p00-source-study.md#7-后端开工前准备接续2026-09-20)不代表这些业务 migration 或并发验收通过。
 

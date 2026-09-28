@@ -1,11 +1,13 @@
 # Goal：技术栈改造与后续 V1 开发
 
+2026-09-28 接续：新[N 工作包](post-v1-collaboration.md)是独立的后续规划，不属于本 goal；完成 V1 后不因仓库中存在这些提示词自动继续，需要后续明确的执行范围。
+
 使用方式：在目标任务中启用 goal，将下列内容作为目标提示词；不假定某个客户端的斜杠命令参数语法。本轮仅提供提示词，没有创建 goal 或设定 token 预算。
 
 ~~~text
 在 D:/Develop/Relay-Agent 持续完成现有技术栈改造与后续 V1 开发，交付保留既有功能和视觉的 React Windows 桌面应用。默认每完成一个大模块即独立验收，修复并复验通过后继续下一模块；用户已允许的并行开发与验收后置按 CODEX_NEXT_STEP 和当前指令执行，直到所有必需出口有证据通过。
 
-先读 AGENTS.md、CODEX_NEXT_STEP.md、docs/README.md、docs/decisions/ADR-010-agent-stack-react-desktop.md、docs/architecture/technology-selection.md、prompts/README.md、prompts/stack-migration.md 和 docs/testing/verification-plan.md 第 10 节。附件 Agent_Stack_Integration.md 是原始参考；采用适配本项目的决策，不机械照搬全部组件。
+先读 AGENTS.md、CODEX_NEXT_STEP.md、docs/README.md、docs/decisions/ADR-010-agent-stack-react-desktop.md、docs/architecture/技术选型.md、prompts/README.md、prompts/stack-migration.md 和 docs/testing/verification-plan.md 第 10 节。附件 Agent_Stack_Integration.md 是原始参考；采用适配本项目的决策，不机械照搬全部组件。
 
 同时读取 Personal_Workflow_OS_Master_Spec.md 第 0.2/0.4 节、docs/requirements/v1-scope.md 两项产品探索补充、docs/frontend/workbench-design.md 第 10/11 节及 docs/testing/verification-plan.md 第 11 节。目标托管、成果共创、变化守护，以及减少注意力切换、恢复理解和补足验收依据，按 prompts/README.md“产品补充的执行映射”落实到本次模块。先列每项的实现/回归核对/待讨论/后置/不适用及依据；不把全部 Proposed 加入本 goal，也不只做页面清单而遗漏已确认约束。
 

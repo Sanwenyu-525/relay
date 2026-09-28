@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import type { RelayApiClient, RelayReview, RelayRun, RelayTaskSummary } from "../api/relayClient";
+import type { RelayApiClient, RelayInterventionItem, RelayReview, RelayRun, RelayTaskSummary } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { taskStatusLabels } from "../lib/labels";
 
 interface AttentionSnapshot {
   readonly queriedAt: string;
   readonly reviews: readonly RelayReview[];
+  readonly interventions: readonly RelayInterventionItem[];
   readonly tasks: readonly RelayTaskSummary[];
   readonly runs: readonly { readonly task: RelayTaskSummary; readonly run: RelayRun }[];
   readonly failures: readonly string[];
@@ -26,6 +27,9 @@ function needsTaskAttention(task: RelayTaskSummary, reviewTaskIds: ReadonlySet<s
 async function readAttention(client: RelayApiClient, active: () => boolean,
   previous: AttentionSnapshot | null): Promise<AttentionSnapshot> {
   const failures: string[] = [];
+  let interventions: readonly RelayInterventionItem[] = [];
+  try { interventions = await client.getInterventions(); }
+  catch (caught) { failures.push(`必须介入事项未核对：${describeLiveError(caught).message}`); }
   let reviews: readonly RelayReview[] = [];
   try {
     const seen = new Set<string>();
@@ -69,7 +73,8 @@ async function readAttention(client: RelayApiClient, active: () => boolean,
       } else runs.push(result.value);
     });
   }
-  return { queriedAt: new Date().toISOString(), reviews, tasks, runs, failures, taskPagesComplete, nextCursor, seenCursors: cursors };
+  return { queriedAt: new Date().toISOString(), reviews, interventions, tasks, runs,
+    failures, taskPagesComplete, nextCursor, seenCursors: cursors };
 }
 
 export default function AttentionQueue({ client }: { readonly client: RelayApiClient }) {
@@ -104,7 +109,13 @@ export default function AttentionQueue({ client }: { readonly client: RelayApiCl
         <p>已读取的事项仍可打开；不能据此判断其他项目或 Run 没有待办。</p>
         <ul>{snapshot.failures.map((failure) => <li key={failure}>{failure}</li>)}</ul>
         {snapshot.nextCursor && <p>Task 分页每次最多读取 10 页，尚有后续页。<button className="secondary-button" type="button" disabled={loading} onClick={() => void load(true)}>继续读取后续页</button></p>}</div>}
-      {complete && snapshot.reviews.length === 0 && runItems.length === 0 && taskItems.length === 0 &&
+      <section className="surface-panel" data-testid="required-interventions"><h2>必须介入 · {snapshot.interventions.length}</h2>
+        <p className="helper-text">来自当前服务端事实；普通收件箱与 READY 任务不会因此主动通知。进入原入口后重新核对是否仍待处理。</p>
+        {snapshot.interventions.length ? <ul>{snapshot.interventions.map((item) => <li key={`${item.itemKey}:${item.changeKey}`}>
+          <strong>{item.title}</strong><p>{item.reason}</p><p><Link to={item.targetUrl}>打开原处理入口</Link></p>
+        </li>)}</ul> : <p className="helper-text">当前读取范围未发现必须介入事项。</p>}</section>
+      {complete && snapshot.interventions.length === 0 && snapshot.reviews.length === 0 &&
+        runItems.length === 0 && taskItems.length === 0 &&
         <p className="helper-text">当前读取范围内没有待处理项。历史 Run 与其他外部执行回执仍需从原入口核对。</p>}
       <section className="surface-panel"><h2>待判断 Review · {snapshot.reviews.length}</h2>
         <p className="helper-text">每条决定绑定独立目标与版本；进入 Review 后重新读取，不批量批准。</p>

@@ -1,0 +1,15 @@
+.settings-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; padding: var(--relay-layout-main-padding); }
+.settings-page > h1 { margin-bottom: var(--relay-space-3); }
+.settings-page .page-lede { margin-bottom: var(--relay-space-6); }
+.settings-card { margin-top: var(--relay-space-5); }
+.settings-definition-list { margin: var(--relay-space-4) 0 0; display: grid; gap: var(--relay-space-3); }
+.settings-definition-list > div { display: grid; grid-template-columns: 8rem 1fr; gap: var(--relay-space-3); align-items: baseline; }
+.settings-definition-list dt { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+.settings-definition-list dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.settings-links { margin: var(--relay-space-3) 0 0; padding: 0; list-style: none; display: grid; gap: var(--relay-space-2); }
+.settings-links .inline-link { margin-right: var(--relay-space-2); }
+
+@media (max-width: 700px) {
+  .settings-page { padding: var(--relay-layout-main-smallPadding); }
+  .settings-definition-list > div { grid-template-columns: 1fr; gap: var(--relay-space-1); }
+}

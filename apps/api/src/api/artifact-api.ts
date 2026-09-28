@@ -6,6 +6,10 @@ import {
   submitHumanArtifactVersion,
 } from '../application/artifact-commands.js';
 import { listTaskArtifacts, readArtifactById, readArtifactContent } from '../application/artifact-queries.js';
+import { listArtifactTextLocks, lockArtifactText, unlockArtifactText } from '../application/artifact-text-locks.js';
+import { applyArtifactImpactCandidate, readArtifactImpactCandidate,
+  readArtifactImpactCheck, startArtifactImpactCandidate,
+  startArtifactImpactCheck } from '../application/artifact-impact-checks.js';
 import {
   ArtifactSchema,
   ArtifactVersionResultSchema,
@@ -24,6 +28,49 @@ const TaskArtifactsSchema = Type.Object({
   current_accepted_version_ids: Type.Array(UuidSchema),
 }, { additionalProperties: false });
 
+const TextLockSchema = Type.Object({ id: UuidSchema, artifact_id: UuidSchema,
+  base_version_id: UuidSchema,
+  block_kind: Type.Union([Type.Literal('PARAGRAPH'), Type.Literal('SECTION')]),
+  block_index: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+  text: Type.String(), status: Type.Union([Type.Literal('MAPPED'), Type.Literal('UNMAPPED')]),
+}, { additionalProperties: false });
+const TextLockBodySchema = Type.Object({ command_id: UuidSchema,
+  expected_artifact_revision: Type.String({ pattern: '^(0|[1-9][0-9]*)$' }),
+  expected_version_id: UuidSchema,
+  block_kind: Type.Union([Type.Literal('PARAGRAPH'), Type.Literal('SECTION')]),
+  block_index: Type.Integer({ minimum: 0 }),
+}, { additionalProperties: false });
+const UnlockTextBodySchema = Type.Object({ command_id: UuidSchema,
+  expected_artifact_revision: Type.String({ pattern: '^(0|[1-9][0-9]*)$' }),
+}, { additionalProperties: false });
+const ImpactBodySchema = Type.Object({ command_id: UuidSchema,
+  source_after_version_id: UuidSchema,
+  expected_artifact_revision: Type.String({ pattern: '^(0|[1-9][0-9]*)$' }),
+  analysis_target_version_ids: Type.Array(UuidSchema, { maxItems: 10, uniqueItems: true }),
+}, { additionalProperties: false });
+const ImpactCheckSchema = Type.Object({ id: UuidSchema, artifact_id: UuidSchema,
+  source_before_version_id: UuidSchema, source_after_version_id: UuidSchema,
+  status: Type.String(), error_code: Type.Union([Type.String(), Type.Null()]),
+  direct_targets: Type.Array(Type.Object({}, { additionalProperties: true })),
+  possibly_related: Type.Array(Type.Object({}, { additionalProperties: true })),
+  has_more: Type.Boolean(), input_truncated: Type.Boolean(),
+  unanalysed_scope: Type.Array(Type.String()), stale: Type.Boolean(),
+}, { additionalProperties: false });
+const ImpactCandidateBodySchema = Type.Object({ command_id: UuidSchema,
+  target_version_id: UuidSchema,
+  expected_target_revision: Type.String({ pattern: '^(0|[1-9][0-9]*)$' }),
+  confirmed_possible: Type.Boolean(),
+}, { additionalProperties: false });
+const ApplyImpactBodySchema = Type.Object({ command_id: UuidSchema,
+  expected_target_revision: Type.String({ pattern: '^(0|[1-9][0-9]*)$' }),
+}, { additionalProperties: false });
+const ImpactCandidateSchema = Type.Object({ id: UuidSchema, impact_check_id: UuidSchema,
+  target_artifact_id: UuidSchema, target_version_id: UuidSchema, status: Type.String(),
+  error_code: Type.Union([Type.String(), Type.Null()]),
+  markdown: Type.Union([Type.String(), Type.Null()]), stale: Type.Boolean(),
+  applied_version_id: Type.Union([UuidSchema, Type.Null()]),
+}, { additionalProperties: false });
+
 /**
  * Artifact 端点（docs/api/http-command-contract.md 第 3 节）。
  *
@@ -35,6 +82,108 @@ export function registerArtifactRoutes(
   app: FastifyInstance,
   dependencies: RouteDependencies,
 ): void {
+  app.post('/artifact-versions/:artifact_version_id/impact-checks', {
+    schema: { params: WorkspaceArtifactVersionParamsSchema, body: ImpactBodySchema,
+      response: { 202: commandEnvelopeSchema(Type.Object({ impact_check_id: UuidSchema,
+        assistant_message_id: UuidSchema }, { additionalProperties: false })) } },
+  }, createCommandHandler(dependencies, { commandType: 'StartArtifactImpactCheck',
+    bodySchema: ImpactBodySchema, execute: async ({ executor, body, params }) => {
+      const outcome = await startArtifactImpactCheck(executor, dependencies.storage, {
+        workspaceId: params.workspace_id ?? '', beforeVersionId: params.artifact_version_id ?? '',
+        afterVersionId: body.source_after_version_id, commandId: body.command_id,
+        expectedArtifactRevision: body.expected_artifact_revision,
+        analysisTargetVersionIds: body.analysis_target_version_ids });
+      return { outcome, result: outcome.result };
+    } }));
+  app.get('/impact-checks/:impact_check_id', {
+    schema: { params: Type.Object({ workspace_id: UuidSchema,
+      impact_check_id: UuidSchema }, { additionalProperties: false }),
+      response: { 200: ImpactCheckSchema } },
+  }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string; impact_check_id: string };
+      return await readArtifactImpactCheck(dependencies.database.executor,
+        p.workspace_id, p.impact_check_id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+  app.post('/impact-checks/:impact_check_id/candidates', {
+    schema: { params: Type.Object({ workspace_id: UuidSchema,
+      impact_check_id: UuidSchema }, { additionalProperties: false }),
+      body: ImpactCandidateBodySchema,
+      response: { 202: commandEnvelopeSchema(Type.Object({ candidate_id: UuidSchema,
+        assistant_message_id: UuidSchema }, { additionalProperties: false })) } },
+  }, createCommandHandler(dependencies, { commandType: 'StartArtifactImpactCandidate',
+    bodySchema: ImpactCandidateBodySchema, execute: async ({ executor, body, params }) => {
+      const outcome = await startArtifactImpactCandidate(executor, dependencies.storage, {
+        workspaceId: params.workspace_id ?? '', checkId: params.impact_check_id ?? '',
+        targetVersionId: body.target_version_id, commandId: body.command_id,
+        expectedTargetRevision: body.expected_target_revision,
+        confirmedPossible: body.confirmed_possible });
+      return { outcome, result: outcome.result };
+    } }));
+  app.get('/impact-candidates/:candidate_id', {
+    schema: { params: Type.Object({ workspace_id: UuidSchema,
+      candidate_id: UuidSchema }, { additionalProperties: false }),
+      response: { 200: ImpactCandidateSchema } },
+  }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string; candidate_id: string };
+      return await readArtifactImpactCandidate(dependencies.database.executor,
+        p.workspace_id, p.candidate_id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+  app.post('/impact-candidates/:candidate_id/apply', {
+    schema: { params: Type.Object({ workspace_id: UuidSchema,
+      candidate_id: UuidSchema }, { additionalProperties: false }),
+      body: ApplyImpactBodySchema,
+      response: { 200: commandEnvelopeSchema(Type.Object({ artifact_id: UuidSchema,
+        version_id: UuidSchema, artifact_revision: Type.String(),
+        task_revision: Type.String() }, { additionalProperties: false })) } },
+  }, createCommandHandler(dependencies, { commandType: 'ApplyArtifactImpactCandidate',
+    bodySchema: ApplyImpactBodySchema, execute: async ({ executor, body, params }) => {
+      const outcome = await applyArtifactImpactCandidate(executor, dependencies.storage, {
+        workspaceId: params.workspace_id ?? '', candidateId: params.candidate_id ?? '',
+        commandId: body.command_id, expectedTargetRevision: body.expected_target_revision });
+      return { outcome, result: outcome.result };
+    } }));
+  app.get('/artifacts/:artifact_id/text-locks', {
+    schema: { params: WorkspaceArtifactParamsSchema,
+      response: { 200: Type.Object({ artifact_id: UuidSchema,
+        locks: Type.Array(TextLockSchema) }, { additionalProperties: false }) } },
+  }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string; artifact_id: string };
+      return await listArtifactTextLocks(dependencies.database.executor, p.workspace_id, p.artifact_id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
+  app.post('/artifacts/:artifact_id/text-locks', {
+    schema: { params: WorkspaceArtifactParamsSchema, body: TextLockBodySchema,
+      response: { 200: commandEnvelopeSchema(Type.Object({ artifact_id: UuidSchema,
+        artifact_revision: Type.String(), lock: TextLockSchema }, { additionalProperties: false })) } },
+  }, createCommandHandler(dependencies, { commandType: 'LockArtifactText',
+    bodySchema: TextLockBodySchema, execute: async ({ executor, body, params }) => {
+      const outcome = await lockArtifactText(executor, dependencies.storage, {
+        workspaceId: params.workspace_id ?? '', artifactId: params.artifact_id ?? '',
+        commandId: body.command_id, expectedArtifactRevision: body.expected_artifact_revision,
+        expectedVersionId: body.expected_version_id, blockKind: body.block_kind,
+        blockIndex: body.block_index });
+      return { outcome, result: outcome.result };
+    } }));
+
+  app.post('/artifacts/:artifact_id/text-locks/:lock_id/unlock', {
+    schema: { params: Type.Object({ workspace_id: UuidSchema, artifact_id: UuidSchema,
+      lock_id: UuidSchema }, { additionalProperties: false }), body: UnlockTextBodySchema,
+      response: { 200: commandEnvelopeSchema(Type.Object({ artifact_id: UuidSchema,
+        artifact_revision: Type.String(), unlocked_lock_id: UuidSchema },
+      { additionalProperties: false })) } },
+  }, createCommandHandler(dependencies, { commandType: 'UnlockArtifactText',
+    bodySchema: UnlockTextBodySchema, execute: async ({ executor, body, params }) => {
+      const outcome = await unlockArtifactText(executor, { workspaceId: params.workspace_id ?? '',
+        artifactId: params.artifact_id ?? '', lockId: params.lock_id ?? '',
+        commandId: body.command_id, expectedArtifactRevision: body.expected_artifact_revision });
+      return { outcome, result: outcome.result };
+    } }));
   app.get(
     '/tasks/:task_id/artifacts',
     {

@@ -1,6 +1,8 @@
 # 文档入口与维护规范
 
-当前改造导航（2026-09-24）：[ADR-010](decisions/ADR-010-agent-stack-react-desktop.md)记录技术取舍与用户决定；[技术选型](architecture/technology-selection.md)维护目标组合；[CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md)独占当前模块状态；[大模块提示词](../prompts/stack-migration.md)维护工作包；[验收门槛](testing/verification-plan.md#10-技术栈改造的大模块验收)维护出口；[goal 提示词](../prompts/goal-stack-migration.md)是长期执行入口；[M01 开发记录](development/m01-stack-baseline.md)保存基线和适配证据。原始 [Agent Stack 附件](../Agent_Stack_Integration.md)作为来源保留，已适配项以 ADR-010 为准，不重复维护第二份技术真相。
+2026-09-28 后续规划导航：[V1 后续路线](requirements/post-v1-roadmap.md)拥有推荐范围、顺序与未决项；[领域模型第 11 节](architecture/domain-model.md#11-v1-后续协作的架构演进提案)维护责任与事务，[ADR-013](decisions/ADR-013-bounded-project-continuation.md)记录 Proposed 取舍，[验收第 14 节](testing/verification-plan.md#14-v1-后续长期协作验收提案)维护未运行规格，[N 工作包](../prompts/post-v1-collaboration.md)提供分包提示词。用户选择长期协作优先，具体方案仍为规划，未启动实现、不扩大 V1 goal。
+
+当前改造导航（2026-09-24）：[ADR-010](decisions/ADR-010-agent-stack-react-desktop.md)记录技术取舍与用户决定；[技术选型](architecture/技术选型.md)维护目标组合；[CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md)独占当前模块状态；[大模块提示词](../prompts/stack-migration.md)维护工作包；[验收门槛](testing/verification-plan.md#10-技术栈改造的大模块验收)维护出口；[goal 提示词](../prompts/goal-stack-migration.md)是长期执行入口；[M01 开发记录](development/m01-stack-baseline.md)保存基线和适配证据。原始 [Agent Stack 附件](../Agent_Stack_Integration.md)作为来源保留，已适配项以 ADR-010 为准，不重复维护第二份技术真相。
 
 角色：当前文档地图与维护规则。更新：2026-09-21。
 
@@ -10,18 +12,21 @@
 
 ## 1. 唯一事实源
 
+2026-09-28 产品决策导航：[锁定与手动影响检查](frontend/workbench-design.md#101-已确认的锁定与影响检查规则)、[人工介入提醒](frontend/workbench-design.md#115-已确认的人工介入提醒规则)记录用户已确认行为及工程待定项；[验收规格](testing/verification-plan.md#13-锁定影响检查与提醒的已确认规则验收)尚未运行，[执行映射](../prompts/README.md#产品补充的执行映射)同步后续分派输入。已确认不等于已实现。
+
 “当前”指现在应读取的设计版本，不代表已批准或已实现。下表每一行只指定一个主入口，详细规则在主入口所链接的所属文档维护。
 
 | 内容 | 主文档 | 边界 |
 |---|---|---|
 | 产品定义与目标 | [Master Spec](../Personal_Workflow_OS_Master_Spec.md) | 不重复维护技术依赖版本和实时进度 |
 | V1 最小范围与阶段覆盖 | [范围矩阵](requirements/v1-scope.md) | 对照产品定义，不以第一切片代表完整 V1 |
+| V1 之后的推荐范围与依赖 | [后续路线](requirements/post-v1-roadmap.md) | 唯一后续分期主表，Proposed 不是开发授权；不记录当前模块进度 |
 | 当前阶段、阻塞、下一步 | [CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md) | 历史研究日志不另写一份当前进度 |
 | 业务不变量 | [契约包](../contracts/README.md) | 01–04 分别拥有事实、执行、验证、恢复；其他文档引用 |
 | 当前架构与模块职责 | [领域模型](architecture/domain-model.md) | 架构主入口；运行/信息/工具专题补充实现边界 |
 | 共享知识来源与长期信息 | [信息与计划](architecture/information-planning.md#11-人和-ai-共用知识来源) | 人与 AI 同源的版本、原件及收录边界；阅读交互归工作台第 12 节，产品定义归 Master Spec 第 33/90 节 |
 | 扩展组合、Skill 与蓝图协议 | [Relay 扩展模型](architecture/relay-skills.md) | Pack/Profile/Recipe/Proposal 复用既有模块，设计仍 Proposed；API/存储字段和 Eval 规格各归所属文档 |
-| 主栈、可选依赖与冻结门槛 | [技术选型](architecture/technology-selection.md) | 不在 README、提示词或 UI 文档复制版本表 |
+| 主栈、可选依赖与冻结门槛 | [技术选型](architecture/技术选型.md) | 不在 README、提示词或 UI 文档复制版本表 |
 | 决策理由与替代关系 | [ADR 入口](#3-决策与历史) | 保存为什么；不代替当前实现证据 |
 | 逻辑数据关系 | [逻辑模型](database/logical-model.md) | 物理类型/索引/锁协议见其对应物理设计 |
 | 数据库物理约束 | [物理设计](database/physical-design-postgresql.md) | DDL 片段不是已执行 migration；未来以实际 migration 核验 |
@@ -30,11 +35,11 @@
 | 页面效果图与开发输入 | [页面开发提示词](frontend/page-development-prompts.md)、[效果图目录](frontend/mockups/2026-09-19/README.md)、[最新知识库图](frontend/mockups/2026-09-27/README.md) | 原批次32张生成图与1张原始参考，另补充3张知识库图；仍为33个页面/状态单元，不代表实现或新增路由 |
 | UI 视觉、组件与适配 | [设计系统](frontend/design-system.md) | 基于现有图；组件外观与可访问性交互，不重定义业务状态 |
 | UI 数值与语义别名 | [design-tokens.json](frontend/design-tokens.json) | 数值唯一来源；图片、提示词和 Markdown 不另维护可冲突数值表 |
-| 前端预览实现与验收 | [前端预览记录](development/ui-preview-acceptance.md) | 按批次记录已实现交互、自测证据与待验证项；不是桌面验收 |
+| 前端预览实现与验收 | [前端预览记录](development/前端预览实施与验收.md) | 按批次记录已实现交互、自测证据与待验证项；不是桌面验收 |
 | 验收规格与分层证据要求 | [测试计划](testing/verification-plan.md) | 规格不是结果；研究结果引用原记录 |
 | 前后端独立验收证据 | [2026-09-21 验收](testing/frontend-backend-acceptance-2026-09-21.md) | 当前已实现范围的复跑、补充反例与问题；不替代阶段主文档 |
 | 独立修复与调整任务 | [验收修复提示词](../prompts/remediation/README.md) | 与原开发提示词分开；以各 R 记录的执行与证据边界为准 |
-| 部署、身份与运维 | [本机部署](deployment/local-deployment.md) | 当前为设计；实际启动命令在有工程后写根 README |
+| 部署、身份与运维 | [本机部署](deployment/本机部署.md) | 当前为设计；实际启动命令在有工程后写根 README |
 | 研究证据 | [P00 研究记录](research/p00-source-study.md) | 固定来源、运行结果、限制；不替代生产能力证明 |
 | 开发/文档变更的原因 | [设计交付审计](development/design-audit.md) | 按时间追加记录，不承担最新状态表 |
 | 25–27 日产品补充实施证据 | [25 日恢复与成果](development/product-supplement-2026-09-25.md)、[26 日人工待处理与验收](development/product-supplement-2026-09-26.md)、[27 日知识阅读与收录](development/product-supplement-2026-09-27.md) | 条目映射、实际代码、自检与协调复核边界；当前进度仍归 CODEX_NEXT_STEP |

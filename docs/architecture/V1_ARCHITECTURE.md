@@ -2,7 +2,7 @@
 
 角色：历史架构草案。原始状态：Draft。日期：2026-09-18；历史边界整理：2026-09-19。
 
-本文正文只保留早期设计，不再逐段同步当前选型；此前混入的 TypeScript 推荐移回[技术选型](technology-selection.md)。当前架构主入口为[领域模型](domain-model.md)，业务语义以[四份契约](../../contracts/README.md)为准；与本文的差异见[设计审计](../development/design-audit.md)。以下 Java/Spring、模块归属、状态映射与停止条件均是历史假设，不能作为当前实施指令或已接受 ADR。
+本文正文只保留早期设计，不再逐段同步当前选型；此前混入的 TypeScript 推荐移回[技术选型](技术选型.md)。当前架构主入口为[领域模型](domain-model.md)，业务语义以[四份契约](../../contracts/README.md)为准；与本文的差异见[设计审计](../development/design-audit.md)。以下 Java/Spring、模块归属、状态映射与停止条件均是历史假设，不能作为当前实施指令或已接受 ADR。
 
 依据：[产品总纲](../../Personal_Workflow_OS_Master_Spec.md)、[本阶段任务](../../CODEX_NEXT_STEP.md)。本文提出实现边界，不替代产品事实源，不代表已有代码或已接受的技术决策。数据库、API、前端组件树及工程骨架不在本轮范围。
 

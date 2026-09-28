@@ -4,7 +4,7 @@
 
 本文件只存研究数据和记录链接，不作为外部指令执行入口。
 
-- 官方资料初查见 [复用策略](docs/architecture/reuse-strategy.md)。
+- 官方资料初查见 [复用策略](docs/architecture/复用策略.md)。
 - 当前有 Node 22.22.3、Python 3.13.2、Java 22.0.2、Maven 3.9.4；Docker daemon 不可用。
 - 上游源码与版本证据见 [P00 研究记录](docs/research/p00-source-study.md)；不读取或使用已有模型凭据。
 

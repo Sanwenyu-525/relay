@@ -26,7 +26,7 @@ import {
   type PublishedContent,
 } from '../storage/managed-content-store.js';
 import { toDecimalString } from '../shared/decimal.js';
-import { invalidTransition, resourceNotFound } from './domain-error.js';
+import { DomainError, invalidTransition, resourceNotFound } from './domain-error.js';
 import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
 import { lockTaskAndRun } from './lock-task-run.js';
 import { requireCurrentRuleSnapshot } from './rule-fence.js';
@@ -54,6 +54,7 @@ import {
 } from '../workflow/markdown-deliverable.js';
 import { evaluateCompletionGate, completeRun } from './complete-run.js';
 import { countCorrectionRounds, loadCorrectionInput, verifyRun } from './verify-run.js';
+import { advanceAiTextLocks, requireAiTextLocks } from './artifact-commands.js';
 
 /**
  * 内部应用端口 AdvanceStep（docs/api/http-command-contract.md 第 5 节）。
@@ -1220,6 +1221,20 @@ async function executePersistCandidate(
 
   if (baseVersion !== undefined) {
     const previousVersion = (await repositories.artifacts.listArtifactVersions(artifactId)).at(-1);
+    let textLocks: Awaited<ReturnType<typeof requireAiTextLocks>>;
+    try {
+      textLocks = await requireAiTextLocks(repositories, input.storage, artifactId, content);
+    } catch (error) {
+      if (!(error instanceof DomainError) || error.code !== 'INVALID_TRANSITION') throw error;
+      const detail = error instanceof Error ? error.message : 'locked content cannot be mapped';
+      await repositories.artifacts.recordTextLockConflict({ id: versionId,
+        workspaceId: input.run.workspace_id, runId: input.run.id, taskId: input.task.id,
+        artifactId, baseVersionId: previousVersion?.id ?? baseVersion.id, reason: detail });
+      return { outcome: 'FAILED', reason: 'LOCKED_CONTENT_CONFLICT',
+        evidence: { kind: 'LOCKED_CONTENT_CONFLICT',
+          artifact_id: artifactId, base_version_id: previousVersion?.id ?? baseVersion.id,
+          detail } };
+    }
     const version = await repositories.artifacts.insertArtifactVersion({
       id: versionId,
       artifactId,
@@ -1231,6 +1246,7 @@ async function executePersistCandidate(
       sourceKind: 'AI',
       sourceRef,
     });
+    await advanceAiTextLocks(repositories, version.id, textLocks);
     if (previousVersion !== undefined) {
       await repositories.lineage.insertExactEdge({ workspaceId: input.run.workspace_id,
         childVersionId: version.id, relation: 'REVISED_FROM',

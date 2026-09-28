@@ -1,6 +1,6 @@
 # 个人工作流智能体：技术栈与接入规格
 
-> 文档角色：2026-09-23 用户提供的原始参考规格，正文保留。后续用户明确要求全部既有界面迁移 React、交付 Windows 桌面，并按本项目现状挑选组件。当前实施取舍见 [ADR-010](docs/decisions/ADR-010-agent-stack-react-desktop.md) 与 [技术选型](docs/architecture/technology-selection.md)：保留 Kysely/PG，分发优先 PG，Drizzle/Redis/BullMQ 不作为必装项。附件内的 React 已有、Linux 生产部署等假设不是仓库事实；内嵌执行提示词由 [当前提示词](prompts/README.md)接续。
+> 文档角色：2026-09-23 用户提供的原始参考规格，正文保留。后续用户明确要求全部既有界面迁移 React、交付 Windows 桌面，并按本项目现状挑选组件。当前实施取舍见 [ADR-010](docs/decisions/ADR-010-agent-stack-react-desktop.md) 与 [技术选型](docs/architecture/技术选型.md)：保留 Kysely/PG，分发优先 PG，Drizzle/Redis/BullMQ 不作为必装项。附件内的 React 已有、Linux 生产部署等假设不是仓库事实；内嵌执行提示词由 [当前提示词](prompts/README.md)接续。
 
 **决策日期：2026-09-23**  
 **目标：在同等任务成功率、恢复能力和权限边界下，优化端到端延迟、成功任务吞吐与资源占用。**  

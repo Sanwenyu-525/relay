@@ -55,8 +55,30 @@ function confirmResult(envelope: RelayCommandEnvelope, command: TodayCommand): v
   }
 }
 
-function TodayTask({ item, eligible, busy, queryTimezone, queryDate, onSelection, onFocus, onPlanning }: {
+/** 服务端 reason_codes 的展示文案；未收录的代码原样显示，不编造含义。 */
+const todayReasonLabels: Record<string, string> = {
+  FOCUS_ALIGNED: "今日焦点对齐",
+  PINNED: "已置顶",
+  OVERDUE: "已过截止",
+  DUE_TODAY: "今日截止",
+  PRIORITY_HIGH: "优先级高",
+  PRIORITY_LOW: "优先级低",
+  PROJECT_NEXT_ACTION: "项目下一步",
+  HUMAN_IN_PROGRESS: "进行中",
+  AI_OCCUPIED: "AI 执行中",
+  TASK_NOT_READY: "任务未就绪",
+  REQUIRED_CRITERION_MISSING: "缺必需验收条件",
+  DEPENDENCY_UNSATISFIED: "依赖未完成",
+  TASK_BLOCKED: "有阻塞事项",
+  LATER_ACTIVE: "已延后",
+  READY_TO_START: "可开始"
+};
+
+const priorityLabels: Record<RelayTodayPriority, string> = { LOW: "低", NORMAL: "中", HIGH: "高" };
+
+function TodayTask({ item, eligible, busy, queryTimezone, queryDate, projectTitle, onSelection, onFocus, onPlanning }: {
   item: RelayTodayItem; eligible: boolean; busy: boolean; queryTimezone: string; queryDate: string;
+  projectTitle: string | null;
   onSelection: (item: RelayTodayItem, pin: boolean, laterLocalDate: string | null, timezone: string | null) => void;
   onFocus: (item: RelayTodayItem) => void;
   onPlanning: (item: RelayTodayItem, priority: RelayTodayPriority | null, dueLocalDate: string | null, timezone: string | null) => void;
@@ -71,7 +93,7 @@ function TodayTask({ item, eligible, busy, queryTimezone, queryDate, onSelection
 
   function submitLater(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!laterDate || !validTimezone(laterZone)) { setFieldError("Later 需要有效日期和 IANA 时区。"); return; }
+    if (!laterDate || !validTimezone(laterZone)) { setFieldError("延后需要有效日期和 IANA 时区。"); return; }
     setFieldError(null);
     onSelection(item, item.pin, laterDate, laterZone);
   }
@@ -83,38 +105,55 @@ function TodayTask({ item, eligible, busy, queryTimezone, queryDate, onSelection
     onPlanning(item, priority || null, dueDate || null, dueDate ? dueZone : null);
   }
 
+  const statusLabel = taskStatusLabels[item.status] ?? item.status;
   return <li className="today-task">
-    <div className="today-task-heading"><div><Link to={`/tasks/${item.taskId}`}>{item.title}</Link>
-      <span className="today-task-meta">{taskStatusLabels[item.status]} · Task revision v{item.taskRevision}{item.projectId && <> · <Link to={`/projects/${item.projectId}/tasks`}>所属项目</Link></>}</span></div>
-      <span className={eligible ? "today-eligibility today-eligibility--ready" : "today-eligibility"}>{eligible ? "服务端判定可开始/继续" : "当前不可开始"}</span></div>
-    <p className="today-task-facts">优先级：{item.priority ?? "未设"}；截止：{item.dueLocalDate ? `${item.dueLocalDate}（${item.timezone}）` : "未设"}；
-      Pin：{item.pin ? "是" : "否"}；Later：{item.laterLocalDate ? `${item.laterLocalDate}（${item.laterTimezone}）` : "未设"}</p>
-    <div className="today-task-actions">
-      {eligible && actions.has("START") && <Link className="inline-link" to={`/tasks/${item.taskId}`}>打开任务并确认开始</Link>}
-      {actions.has(item.pin ? "UNPIN" : "PIN") && <button className="secondary-button" type="button" disabled={busy}
-        onClick={() => onSelection(item, !item.pin, item.laterLocalDate, item.laterTimezone)}>{item.pin ? "取消 Pin" : "Pin"}</button>}
-      {actions.has("SET_FOCUS") && <button className="secondary-button" type="button" disabled={busy} onClick={() => onFocus(item)}>设为本日 Focus</button>}
-      {actions.has("CLEAR_LATER") && <button className="secondary-button" type="button" disabled={busy}
-        onClick={() => onSelection(item, item.pin, null, null)}>清除 Later</button>}
+    <div className="today-task__main">
+      <div className="today-task__heading">
+        <Link className="today-task__title" to={`/tasks/${item.taskId}`}>{item.title}</Link>
+        <span className={eligible ? "today-eligibility today-eligibility--ready" : "today-eligibility"}>
+          {eligible ? (item.status === "IN_PROGRESS" ? "可继续" : "可开始") : "待处理"}</span>
+      </div>
+      <p className="today-task__meta">
+        <span>{statusLabel}</span>
+        {item.projectId && <><span className="today-task__dot" aria-hidden="true">·</span>
+          <Link to={`/projects/${item.projectId}/tasks`}>{projectTitle ?? "所属项目"}</Link></>}
+        {item.priority && <><span className="today-task__dot" aria-hidden="true">·</span><span>优先级 {priorityLabels[item.priority] ?? item.priority}</span></>}
+        {item.dueLocalDate && <><span className="today-task__dot" aria-hidden="true">·</span><span>截止 {item.dueLocalDate}</span></>}
+        {item.pin && <><span className="today-task__dot" aria-hidden="true">·</span><span>已置顶</span></>}
+        {item.laterLocalDate && <><span className="today-task__dot" aria-hidden="true">·</span><span>延后至 {item.laterLocalDate}</span></>}
+      </p>
     </div>
-    <div className="today-task-forms">
+    <div className="today-task__actions">
+      {eligible && actions.has("START") && <Link className="inline-link" to={`/tasks/${item.taskId}`}>打开任务</Link>}
+      {actions.has(item.pin ? "UNPIN" : "PIN") && <button className="text-button" type="button" disabled={busy}
+        onClick={() => onSelection(item, !item.pin, item.laterLocalDate, item.laterTimezone)}>{item.pin ? "取消置顶" : "置顶"}</button>}
+      {actions.has("SET_FOCUS") && <button className="text-button" type="button" disabled={busy} onClick={() => onFocus(item)}>设为今日焦点</button>}
+      {actions.has("CLEAR_LATER") && <button className="text-button" type="button" disabled={busy}
+        onClick={() => onSelection(item, item.pin, null, null)}>取消延后</button>}
+    </div>
+    <details className="today-task__plans">
+      <summary>延后与计划</summary>
+      <div className="today-task__forms">
       {actions.has("SET_LATER") && <form onSubmit={submitLater}>
-        <strong>Later</strong><label>日期<input type="date" value={laterDate} onChange={(event) => setLaterDate(event.target.value)} min={queryDate} disabled={busy} required /></label>
+        <strong>延后</strong><label>日期<input type="date" value={laterDate} onChange={(event) => setLaterDate(event.target.value)} min={queryDate} disabled={busy} required /></label>
         <label>时区<input value={laterZone} onChange={(event) => setLaterZone(event.target.value)} disabled={busy} required /></label>
-        <button className="secondary-button" type="submit" disabled={busy}>保存 Later</button>
+        <button className="secondary-button" type="submit" disabled={busy}>保存延后</button>
       </form>}
       <form onSubmit={submitPlanning}>
         <strong>任务计划</strong><label>优先级<select value={priority} onChange={(event) => setPriority(event.target.value as RelayTodayPriority | "") } disabled={busy}>
-          <option value="">未设</option><option value="LOW">LOW</option><option value="NORMAL">NORMAL</option><option value="HIGH">HIGH</option></select></label>
+          <option value="">未设</option><option value="LOW">低</option><option value="NORMAL">中</option><option value="HIGH">高</option></select></label>
         <label>截止日期<input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} disabled={busy} /></label>
         <label>截止时区<input value={dueZone} onChange={(event) => setDueZone(event.target.value)} disabled={busy || !dueDate} /></label>
         <button className="secondary-button" type="submit" disabled={busy}>保存计划</button>
       </form>
-    </div>
+      </div>
+    </details>
     {fieldError && <p className="action-error" role="alert">{fieldError}</p>}
-    <details><summary>排序依据、证据与允许操作</summary><p>依据：{item.reasonCodes.length ? item.reasonCodes.join(" · ") : "服务端未给出 reason_codes"}</p>
+    <details className="today-task__trace"><summary>排序依据与允许操作</summary>
+      <p>依据：{item.reasonCodes.length ? item.reasonCodes.map((code) => `${todayReasonLabels[code] ?? code}（${code}）`).join(" · ") : "服务端未给出 reason_codes"}</p>
       <p>证据：{item.evidenceRefs.length ? item.evidenceRefs.join(" · ") : "服务端未给出 evidence_refs"}</p>
-      <p>允许操作：{item.allowedActions.length ? item.allowedActions.join(" · ") : "无"}</p></details>
+      <p>允许操作：{item.allowedActions.length ? item.allowedActions.join(" · ") : "无"}</p>
+      <p>任务修订 v{item.taskRevision}</p></details>
   </li>;
 }
 
@@ -125,16 +164,21 @@ export default function TodayView() {
   const [date, setDate] = useState(() => localDate(initialTimezone));
   const [timezone, setTimezone] = useState(initialTimezone);
   const [timezoneDraft, setTimezoneDraft] = useState(initialTimezone);
+  const [zoneEditorOpen, setZoneEditorOpen] = useState(false);
+  const zoneSummaryRef = useRef<HTMLButtonElement | null>(null);
   const [snapshot, setSnapshot] = useState<RelayToday | null>(null);
   const [loading, setLoading] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [lastReceiptId, setLastReceiptId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [pending, setPending] = useState<TodayCommand | null>(null);
   const [mayRetry, setMayRetry] = useState(false);
   const [failedCommandId, setFailedCommandId] = useState<string | null>(null);
   const [timezoneError, setTimezoneError] = useState<string | null>(null);
+  const [projectTitles, setProjectTitles] = useState<Record<string, string | null>>({});
+  const requestedProjectIds = useRef<Set<string>>(new Set());
   const requestVersion = useRef(0);
   const viewScope = useRef(0);
   const pendingRef = useRef<TodayCommand | null>(null);
@@ -163,12 +207,34 @@ export default function TodayView() {
   useEffect(() => {
     viewScope.current++;
     pendingRef.current = null; setPending(null); setMayRetry(false); setSnapshot(null);
+    requestedProjectIds.current = new Set(); setProjectTitles({});
     return () => { viewScope.current++; requestVersion.current++; pendingRef.current = null; };
   }, [client, connection.epoch]);
   useEffect(() => {
     if (client !== null) void loadToday(client, date, timezone);
     return () => { requestVersion.current++; };
   }, [client, date, timezone, connection.epoch]);
+
+  // 项目标题按确切 Project 单读补充；读取失败显示中性回退，不编造名称。
+  useEffect(() => {
+    if (client === null || snapshot === null) return;
+    const missing = new Set<string>();
+    for (const item of [...snapshot.eligibleItems, ...snapshot.waitingItems, ...snapshot.blockedPinnedItems]) {
+      if (item.projectId && !requestedProjectIds.current.has(item.projectId)) missing.add(item.projectId);
+    }
+    if (missing.size === 0) return;
+    for (const id of missing) requestedProjectIds.current.add(id);
+    const scope = viewScope.current;
+    void Promise.all([...missing].map(async (id) => {
+      try {
+        const project = await client.getProject(id);
+        return [id, project.archivedAt === null ? project.title : null] as const;
+      } catch { return [id, null] as const; }
+    })).then((entries) => {
+      if (scope !== viewScope.current) return;
+      setProjectTitles((current) => ({ ...current, ...Object.fromEntries(entries) }));
+    });
+  }, [client, snapshot]);
 
   async function confirmTodayTarget(api: RelayApiClient, command: TodayCommand): Promise<void> {
     if (command.kind === "focus" && command.targetId === null) return;
@@ -216,7 +282,8 @@ export default function TodayView() {
             dueLocalDate: command.dueLocalDate, timezone: command.timezone });
       if (scope !== viewScope.current) return;
       confirmResult(envelope, command);
-      pendingRef.current = null; setPending(null); setMessage(`原 command_id ${command.id} 已由服务端确认；正在重读 Today。`);
+      pendingRef.current = null; setPending(null);
+      setMessage("操作已由服务端确认，今日安排已更新。"); setLastReceiptId(command.id);
       const [currentDate, currentTimezone] = queryRef.current.split("|");
       await loadToday(client, currentDate!, currentTimezone!);
     } catch (caught) {
@@ -252,7 +319,7 @@ export default function TodayView() {
       }
       confirmResult(receipt, command);
       pendingRef.current = null; setPending(null); setMayRetry(false);
-      setMessage(`原 command_id ${command.id} 的提交回执已确认；正在重读 Today。`);
+      setMessage("提交回执已核对，今日安排已更新。"); setLastReceiptId(command.id);
       const [currentDate, currentTimezone] = queryRef.current.split("|");
       await loadToday(client, currentDate!, currentTimezone!);
     } catch (caught) {
@@ -267,6 +334,14 @@ export default function TodayView() {
   const current = snapshot?.date === date && snapshot.timezone === timezone ? snapshot : null;
   const busy = submitting || pending !== null || loading;
   const waitingOther = current?.waitingItems.filter((item) => !current.blockedPinnedItems.some((blocked) => blocked.taskId === item.taskId)) ?? [];
+  const weekday = new Intl.DateTimeFormat("zh-CN", { timeZone: timezone, weekday: "long" }).format(new Date(`${date}T12:00:00`));
+  const focusTaskId = current?.focus?.targetKind === "TASK" ? current.focus.targetId : null;
+  const focusTask = focusTaskId
+    ? [...(current?.eligibleItems ?? []), ...(current?.waitingItems ?? [])].find((item) => item.taskId === focusTaskId) ?? null
+    : null;
+  const allEmpty = current !== null && current.eligibleItems.length === 0
+    && current.blockedPinnedItems.length === 0 && waitingOther.length === 0;
+  const hasCandidates = current !== null && current.eligibleItems.length > 0;
 
   function select(item: RelayTodayItem, pin: boolean, laterLocalDate: string | null, laterTimezone: string | null) {
     if (!current || busy) return;
@@ -296,28 +371,63 @@ export default function TodayView() {
     event.preventDefault();
     const next = timezoneDraft.trim();
     if (!validTimezone(next)) { setTimezoneError("请输入有效 IANA 时区，如 Asia/Shanghai。"); return; }
-    setTimezoneError(null); setTimezone(next);
+    setTimezoneError(null);
+    setTimezone(next);
+    setZoneEditorOpen(false);
+    zoneSummaryRef.current?.focus();
+  }
+  function cancelTimezoneEdit() {
+    setTimezoneDraft(timezone);
+    setTimezoneError(null);
+    setZoneEditorOpen(false);
+    zoneSummaryRef.current?.focus();
   }
   function renderList(items: readonly RelayTodayItem[], eligible: boolean) {
-    return items.length ? <ul className="today-list">{items.map((item) => <TodayTask key={`${date}|${timezone}|${item.taskId}`} item={item}
+    return <ul className="today-list">{items.map((item) => <TodayTask key={`${date}|${timezone}|${item.taskId}`} item={item}
       eligible={eligible} busy={busy} queryTimezone={timezone} queryDate={date}
-      onSelection={select} onFocus={focus} onPlanning={plan} />)}</ul>
-      : <p className="helper-text">当前查询中没有此类任务。</p>;
+      projectTitle={item.projectId ? projectTitles[item.projectId] ?? null : null}
+      onSelection={select} onFocus={focus} onPlanning={plan} />)}</ul>;
+  }
+  function renderGroup(title: string, count: number, list: readonly RelayTodayItem[], eligible: boolean) {
+    if (count === 0) return <p className="today-group__empty">{title} · 0 项</p>;
+    return <section className="today-group"><h2>{title} · {count}</h2>{renderList(list, eligible)}</section>;
   }
 
   return <section className="today-page">
-    <p className="eyebrow">今日</p><h1>Today</h1>
-    <p className="page-lede">任务资格、排序与依据由服务端给出。Pin、Later、Focus 是用户选择，不会跳过任务准入。</p>
-    <p className="helper-text"><Link to="/tasks?tab=attention">查看跨项目人工待处理</Link>。Later 与 Focus 不会处理或隐藏待审决定；Today 仍按服务端资格展示任务。</p>
+    <p className="eyebrow">{date} · {weekday}</p>
+    <h1>把今天留给重要的事</h1>
+    <p className="page-lede">从上次停下的地方，继续推进。</p>
+    <p className="page-note">置顶和今日焦点帮助安排今天；受阻任务需先处理阻碍。<details className="today-arrange-note">
+      <summary>安排说明</summary>
+      <p>任务能否开始、如何排序由服务端按当前事实判定；置顶、延后和今日焦点只表达你的安排，不会绕过任务准入。等待中的任务里，已置顶的会单独列在「已置顶，待处理」。</p>
+      <p>跨项目的人工待处理事项在 <Link to="/tasks?tab=attention">人工待处理</Link> 列表中查看。</p>
+      {current && <p>当前选择版本 v{current.selectionRevision}。</p>}
+    </details></p>
     {client === null ? <div className="warning-callout" role="status">当前为示例数据预览，没有真实 Today 投影。<Link to="/projects">打开项目</Link> 或 <Link to="/tasks">打开任务</Link> 继续人工工作。</div> : <>
-      <div className="surface-panel today-query"><label>查询日期<input type="date" value={date} onChange={(event) => { if (event.target.value) setDate(event.target.value); }} /></label>
-        <form onSubmit={applyTimezone}><label>查询时区（IANA）<input value={timezoneDraft} onChange={(event) => setTimezoneDraft(event.target.value)} /></label>
-          <button className="secondary-button" type="submit">应用时区</button></form>
+      <div className="today-query" data-testid="today-query">
+        <label className="today-query__field"><span className="today-query__label">日期</span>
+          <input type="date" value={date} onChange={(event) => { if (event.target.value) setDate(event.target.value); }} /></label>
+        <div className="today-query__timezone">
+          <span className="today-query__label">时区</span>
+          <span className="today-query__zone">{timezone}</span>
+          <button className="today-query__adjust-toggle" type="button" aria-expanded={zoneEditorOpen}
+            ref={zoneSummaryRef}
+            onClick={() => { if (zoneEditorOpen) cancelTimezoneEdit(); else { setTimezoneDraft(timezone); setTimezoneError(null); setZoneEditorOpen(true); } }}>调整时区</button>
+        </div>
         <button className="secondary-button" type="button" disabled={loading} onClick={() => { void loadToday(client, date, timezone); }}>刷新</button>
-        {timezoneError && <p className="action-error" role="alert">{timezoneError}</p>}</div>
-      {loading && <p role="status">正在读取 {date} · {timezone} 的服务端 Today…</p>}
+        {loading && <p role="status" className="today-query__status">{current ? "正在刷新…" : "正在读取…"}</p>}
+        {zoneEditorOpen && <form className="today-query__editor" onSubmit={applyTimezone}>
+          <label><span>IANA 时区</span>
+            <input value={timezoneDraft} onChange={(event) => setTimezoneDraft(event.target.value)} aria-label="时区名称" /></label>
+          <button className="secondary-button" type="submit">应用</button>
+          <button className="text-button" type="button" onClick={cancelTimezoneEdit}>取消</button>
+          {timezoneError && <p className="action-error" role="alert">{timezoneError}</p>}
+        </form>}
+      </div>
       {readError && <p className="action-error" role="alert">读取失败：{readError}</p>}
-      {message && <p className="success-callout" role="status">{message}</p>}
+      {message && <div className="success-callout" role="status">{message}
+        {lastReceiptId && <details className="today-receipt-note"><summary>核对信息</summary>
+          <p>原 command_id：{lastReceiptId}</p></details>}</div>}
       {actionError && <p className="action-error" role="alert">{actionError}</p>}
       {failedCommandId && <p className="helper-text">上次失败命令 ID：{failedCommandId}</p>}
       {pending && <div className="warning-callout" data-testid="today-pending"><strong>提交结果待核对</strong>
@@ -326,18 +436,56 @@ export default function TodayView() {
         <button className="secondary-button" type="button" disabled={submitting} onClick={() => { void checkReceipt(); }}>查询原命令回执</button>
         {mayRetry && <button className="secondary-button" type="button" disabled={submitting} onClick={() => { void sendFrozen(pending, true); }}>用原 ID 和内容重试</button>}
       </div>}
+      {loading && current === null && <p className="today-loading" role="status">正在读取今日安排…</p>}
       {current && <>
-        <div className="surface-panel today-focus"><div><h2>Focus</h2><p>查询：{current.date} · {current.timezone}；选择版本 v{current.selectionRevision}</p></div>
-          {current.focus ? <div><p>已选 {current.focus.targetKind}：{current.focus.targetId}</p>
+        <div className="today-focus" data-testid="today-focus">
+          <h2>今日焦点</h2>
+          {current.focus ? (focusTask
+            ? <div className="today-focus__target">
+              <p className="today-focus__project">{focusTask.projectId
+                ? <>项目：<Link to={`/projects/${focusTask.projectId}/tasks`}>{projectTitles[focusTask.projectId] ?? "所属项目"}</Link></>
+                : "未归属项目的人工任务"}</p>
+              <p className="today-focus__title"><Link to={`/tasks/${focusTask.taskId}`}>{focusTask.title}</Link></p>
+              <p className="today-focus__meta">{taskStatusLabels[focusTask.status] ?? focusTask.status}
+                {focusTask.priority && <> · 优先级 {priorityLabels[focusTask.priority] ?? focusTask.priority}</>}
+                {focusTask.dueLocalDate && <> · 截止 {focusTask.dueLocalDate}</>}</p>
+              <div className="today-focus__actions">
+                <Link className="inline-link" to={`/tasks/${focusTask.taskId}`}>打开任务</Link>
+                <button className="text-button" type="button" disabled={busy} onClick={clearFocus}>清除今日焦点</button>
+              </div>
+            </div>
+            : <div className="today-focus__target">
+              <p className="today-focus__missing">所选焦点任务不在当前查询结果中，本次未参与排序；下方不因此显示可执行状态。</p>
+              <details className="today-task__trace"><summary>焦点详情</summary>
+                <p>目标：{current.focus.targetKind} {current.focus.targetId}</p>
+                <p>选择原时区：{current.focus.timezone}；查询时区：{current.timezone}；{current.focus.activeInQuery ? "本次查询生效" : "本次查询不生效"}。</p>
+              </details>
+              <div className="today-focus__actions">
+                <button className="text-button" type="button" disabled={busy} onClick={clearFocus}>清除今日焦点</button>
+              </div>
+            </div>)
+            : <p className="today-focus__empty">还未选择今日焦点。{hasCandidates
+              ? "可从下方任务中选择一件最重要的事。"
+              : "创建或查看任务后，可在这里置顶今天最重要的一件事。"}</p>}
+          {current.focus && <details className="today-task__trace today-focus__facts"><summary>焦点详情</summary>
             <p>选择原时区：{current.focus.timezone}；查询时区：{current.timezone}；{current.focus.activeInQuery ? "本次查询生效" : "本次查询不生效"}。</p>
-            <p>{current.focusHasEligibleCandidate ? "有符合 Focus 的可执行任务" : "当前没有符合 Focus 的可执行任务"}；Focus 不改变资格。</p>
-            <button className="secondary-button" type="button" disabled={busy} onClick={clearFocus}>清除本日 Focus</button></div>
-            : <p>本日尚未选择 Focus。可在任务行明确设置。</p>}</div>
-        <section className="today-group"><h2>可开始或继续 · {current.eligibleItems.length}</h2>{renderList(current.eligibleItems, true)}</section>
-        <section className="today-group"><h2>Pin 但仍受阻 · {current.blockedPinnedItems.length}</h2>
-          <p className="helper-text">这组是等待任务的子集，Pin 不改变服务端准入。</p>{renderList(current.blockedPinnedItems, false)}</section>
-        <section className="today-group"><h2>其他等待 · {waitingOther.length}</h2>
-          <p className="helper-text">等待总数 {current.waitingItems.length}，其中 {current.blockedPinnedItems.length} 项已在上方显示。</p>{renderList(waitingOther, false)}</section>
+            <p>{current.focusHasEligibleCandidate ? "今日焦点有符合资格的任务" : "当前没有符合今日焦点资格的任务"}；焦点不改变任务资格。</p>
+          </details>}
+        </div>
+        {allEmpty
+          ? <div className="today-empty" data-testid="today-empty">
+            <p className="today-empty__title">当前日期下没有可安排的任务。</p>
+            <p className="today-empty__hint">这一天没有符合条件的人工任务；可创建新任务，或查看其他日期。</p>
+            <div className="today-empty__actions">
+              <Link className="primary-button" to="/tasks?view=create">新建任务</Link>
+              <Link className="secondary-button" to="/tasks">查看全部任务</Link>
+            </div>
+          </div>
+          : <>
+            {renderGroup("可开始或继续", current.eligibleItems.length, current.eligibleItems, true)}
+            {renderGroup("已置顶，待处理", current.blockedPinnedItems.length, current.blockedPinnedItems, false)}
+            {renderGroup("其他等待", waitingOther.length, waitingOther, false)}
+          </>}
       </>}
     </>}
   </section>;

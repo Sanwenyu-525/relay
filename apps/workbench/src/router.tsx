@@ -12,6 +12,7 @@ import ProjectWorkbenchEntry from "./views/ProjectWorkbenchEntry";
 import ProjectsView from "./views/ProjectsView";
 import ReviewsView from "./views/ReviewsView";
 import RunView from "./views/RunView";
+import SettingsView from "./views/SettingsView";
 import TaskSkillView from "./views/TaskSkillView";
 import TasksView from "./views/TasksView";
 import TodayView from "./views/TodayView";
@@ -40,6 +41,7 @@ export const workbenchRoutes: RouteObject[] = [{
     { path: "reviews", element: <ReviewsView /> },
     { path: "knowledge", element: <KnowledgeView /> },
     { path: "connections", element: <ConnectionsView /> },
+    { path: "settings", element: <SettingsView /> },
     { path: "settings/connections", element: <ConnectionsView /> },
     { path: "runs/:id", element: <RunView /> },
     { path: "tasks/:id", element: <TaskSkillView /> },

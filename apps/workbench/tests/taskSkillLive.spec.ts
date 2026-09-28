@@ -36,7 +36,9 @@ describe("P12 Task Skill live 当前事实", () => {
   it("定义页只展示 Task/acceptance 当前事实和 Assist 入口，不读取 fixture 或提交提案", async () => {
     connect(); const fixtureRead = vi.spyOn(fixtureAdapter, "loadTask"); const calls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      expect(init?.method ?? "GET").toBe("GET"); const url = String(input); calls.push(url);
+      expect(init?.method ?? "GET").toBe("GET"); const url = String(input);
+      if (url.endsWith("/attention/interventions")) return response({ items: [] });
+      calls.push(url);
       if (url === `${root}/tasks/${taskId}`) return response(task());
       throw new Error(`Unexpected ${url}`);
     }));

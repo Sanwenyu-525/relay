@@ -102,7 +102,10 @@ async function main(): Promise<void> {
       ...process.env,
       RELAY_API_BIND_HOST: '127.0.0.1',
       RELAY_API_PORT: '0',
-      RELAY_API_ALLOWED_ORIGINS: 'http://tauri.localhost',
+      // 桌面宿主仅在 tauri dev 构建注入该变量；打包产物保持 tauri.localhost 单一来源。
+      RELAY_API_ALLOWED_ORIGINS: process.env.RELAY_DESKTOP_EXTRA_ORIGIN
+        ? `http://tauri.localhost,${process.env.RELAY_DESKTOP_EXTRA_ORIGIN}`
+        : 'http://tauri.localhost',
       RELAY_API_BEARER_TOKEN: desktopFrame.bearerToken,
       RELAY_API_STOP_ON_STDIN_EOF: 'true',
       RELAY_LOG_LEVEL: 'fatal',

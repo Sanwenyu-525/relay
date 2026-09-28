@@ -159,7 +159,7 @@ describe("Ctrl+K 全局命令面板", () => {
     const delegate = Array.from(palette().querySelectorAll<HTMLButtonElement>(".command-palette-actions button")).find((item) => item.textContent?.includes("委托当前任务"))!;
     expect(delegate.disabled).toBe(true);
     await key("Escape");
-    await mounted.router.push("/today"); await flush(); expect(mounted.wrapper.text()).toContain("可开始或继续 · 0");
+    await mounted.router.push("/today"); await flush(); expect(mounted.wrapper.text()).toContain("当前日期下没有可安排的任务");
     await mounted.router.push("/activity"); await flush(); expect(mounted.wrapper.text()).toContain("当前筛选范围没有返回 Activity");
   });
 });

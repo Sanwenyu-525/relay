@@ -3,7 +3,10 @@
   "productName": "Relay Agent",
   "version": "0.1.0",
   "identifier": "dev.relay.agent",
-  "build": { "frontendDist": "../../workbench/dist" },
+  "build": {
+    "frontendDist": "../../workbench/dist",
+    "devUrl": "http://127.0.0.1:5173"
+  },
   "app": {
     "security": {
       "csp": "default-src 'self'; connect-src 'self' http://ipc.localhost; frame-src 'none'; child-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
@@ -17,6 +20,8 @@
       "resources/relay-file-io-helper.exe": "relay-file-io-helper.exe",
       "resources/api/": "api/"
     },
-    "icon": ["icons/icon.ico"]
+    "icon": [
+      "icons/icon.ico"
+    ]
   }
 }

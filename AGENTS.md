@@ -19,8 +19,8 @@ Workbench 与 Context Builder 分别面向用户和 Agent，消费同一事实�
 | 当前阶段、阻塞与下一步 | [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)，唯一进度主文档 |
 | 完整文档地图、事实源与历史角色 | [docs/README](docs/README.md) |
 | 业务不变量与状态契约 | [契约包](contracts/README.md)，按任务读取 01–04 |
-| 架构、依赖与技术决策 | [领域模型](docs/architecture/domain-model.md)、[技术选型](docs/architecture/technology-selection.md)、[ADR-010](docs/decisions/ADR-010-agent-stack-react-desktop.md) |
-| 开工前的复用原则 | [复用策略](docs/architecture/reuse-strategy.md)、[ADR-005](docs/decisions/ADR-005-reuse-first.md) |
+| 架构、依赖与技术决策 | [领域模型](docs/architecture/domain-model.md)、[技术选型](docs/architecture/技术选型.md)、[ADR-010](docs/decisions/ADR-010-agent-stack-react-desktop.md) |
+| 开工前的复用原则 | [复用策略](docs/architecture/复用策略.md)、[ADR-005](docs/decisions/ADR-005-reuse-first.md) |
 | 实施工作包与验收出口 | [大模块工作包](prompts/stack-migration.md)、[测试计划](docs/testing/verification-plan.md) |
 | UI 变更 | 现有参考图、[工作台交互](docs/frontend/workbench-design.md)、[设计系统](docs/frontend/design-system.md)、[tokens](docs/frontend/design-tokens.json) |
 

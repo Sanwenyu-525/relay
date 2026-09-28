@@ -66,13 +66,13 @@ describe("P13 Today 真实投影", () => {
     }));
     mounted = await mountWorkbench("/today"); unmount = mounted.unmount;
     expect(mounted.wrapper.text()).toContain("可开始或继续 · 1");
-    expect(mounted.wrapper.text()).toContain("Pin 但仍受阻 · 1");
+    expect(mounted.wrapper.text()).toContain("已置顶，待处理 · 1");
     expect(mounted.wrapper.text()).toContain("其他等待 · 0");
     expect(mounted.wrapper.text()).toContain("LATER_ACTIVE");
     expect(mounted.wrapper.text()).toContain(`task:${blockedId}/revision:2`);
     const blocked = mounted.wrapper.get(".today-group:nth-of-type(2)");
-    expect(blocked.text()).not.toContain("打开任务并确认开始");
-    await mounted.wrapper.get(".today-group .today-task-actions button").trigger("click"); await flush();
+    expect(blocked.text()).not.toContain("打开任务");
+    await mounted.wrapper.get(".today-group .today-task__actions button").trigger("click"); await flush();
     expect(posts).toHaveLength(1);
     expect(posts[0]).toMatchObject({ expected_revision: "1", pin: true, later_local_date: null, timezone: null });
     expect(mounted.wrapper.text()).toContain("选择版本 v2");
@@ -94,6 +94,9 @@ describe("P13 Today 真实投影", () => {
     }));
     const mounted = await mountWorkbench("/today"); unmount = mounted.unmount;
     await mounted.wrapper.get('.today-query input[type="date"]').setValue("2026-09-27"); await flush();
+    const adjustToggle = Array.from(mounted.wrapper.element!.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("调整时区"))!;
+    await new DomWrapper(adjustToggle).trigger("click"); await flush();
     await mounted.wrapper.get('.today-query input:not([type="date"])').setValue("Asia/Tokyo");
     await mounted.wrapper.get(".today-query form").trigger("submit"); await flush();
     expect(requests.some((path) => path.includes("date=2026-09-27") && path.includes("Asia%2FTokyo"))).toBe(true);
@@ -119,7 +122,7 @@ describe("P13 Today 真实投影", () => {
       throw new Error(`Unexpected ${path}`);
     }));
     const mounted = await mountWorkbench("/today"); unmount = mounted.unmount;
-    await mounted.wrapper.get(".today-group .today-task-actions button").trigger("click"); await flush();
+    await mounted.wrapper.get(".today-group .today-task__actions button").trigger("click"); await flush();
     expect(posts).toBe(0);
     expect(mounted.wrapper.text()).toContain("项目已归档");
     expect(mounted.wrapper.text()).not.toContain("可执行任务");
@@ -141,7 +144,7 @@ describe("P13 Today 真实投影", () => {
       throw new Error(`Unexpected ${path}`);
     }));
     const mounted = await mountWorkbench("/today"); unmount = mounted.unmount;
-    await mounted.wrapper.get(".today-group .today-task-actions button").trigger("click"); await flush();
+    await mounted.wrapper.get(".today-group .today-task__actions button").trigger("click"); await flush();
     expect(posts).toHaveLength(1);
     expect(projectReads).toBe(0);
   });
@@ -161,7 +164,7 @@ describe("P13 Today 真实投影", () => {
       throw new Error(`Unexpected ${path}`);
     }));
     const mounted = await mountWorkbench("/today"); unmount = mounted.unmount;
-    const form = mounted.wrapper.get(".today-task-forms form:nth-of-type(2)");
+    const form = mounted.wrapper.get(".today-task__forms form:nth-of-type(2)");
     await form.get("select").setValue("HIGH"); await form.get('input[type="date"]').setValue("2026-10-02");
     await form.trigger("submit"); await flush();
     expect(posts[0]).toMatchObject({ expected_revision: "2", priority: "HIGH", due_local_date: "2026-10-02" });
@@ -189,11 +192,11 @@ describe("P13 Today 真实投影", () => {
     }));
     const mounted = await mountWorkbench("/today"); unmount = mounted.unmount;
     const blocked = mounted.wrapper.get(".today-group:nth-of-type(2)");
-    const focusButton = Array.from(blocked.element!.querySelectorAll("button")).find((button) => button.textContent?.includes("设为本日 Focus"))!;
+    const focusButton = Array.from(blocked.element!.querySelectorAll("button")).find((button) => button.textContent?.includes("设为今日焦点"))!;
     await new DomWrapper(focusButton).trigger("click"); await flush();
     expect(mounted.wrapper.text()).toContain("提交结果待核对");
     expect(posts[0]).toMatchObject({ expected_revision: "1", target_kind: "TASK", target_id: blockedId });
-    expect(blocked.text()).not.toContain("打开任务并确认开始");
+    expect(blocked.text()).not.toContain("打开任务");
     await mounted.wrapper.get('[data-testid="today-pending"] button').trigger("click"); await flush();
     expect(receiptCount).toBe(1);
     expect(mounted.wrapper.text()).toContain("同一 ID 和原内容重试");
@@ -230,16 +233,16 @@ describe("P13 Today 真实投影", () => {
     }));
     const mounted = await mountWorkbench("/today"); unmount = mounted.unmount;
     const blocked = mounted.wrapper.get(".today-group:nth-of-type(2)");
-    await blocked.get('.today-task-forms form input[type="date"]').setValue("2026-10-04");
-    await blocked.get(".today-task-forms form").trigger("submit"); await flush();
+    await blocked.get('.today-task__forms form input[type="date"]').setValue("2026-10-04");
+    await blocked.get(".today-task__forms form").trigger("submit"); await flush();
     expect(posts[0]!.body).toMatchObject({ expected_revision: "1", pin: true, later_local_date: "2026-10-04" });
-    const clearLater = Array.from(blocked.element!.querySelectorAll("button")).find((button) => button.textContent?.includes("清除 Later"))!;
+    const clearLater = Array.from(blocked.element!.querySelectorAll("button")).find((button) => button.textContent?.includes("取消延后"))!;
     await new DomWrapper(clearLater).trigger("click"); await flush();
     expect(posts[1]!.body).toMatchObject({ expected_revision: "2", pin: true, later_local_date: null, timezone: null });
-    const clearFocus = Array.from(mounted.wrapper.element!.querySelectorAll(".today-focus button")).find((button) => button.textContent?.includes("清除本日 Focus"))!;
+    const clearFocus = Array.from(mounted.wrapper.element!.querySelectorAll(".today-focus button")).find((button) => button.textContent?.includes("清除今日焦点"))!;
     await new DomWrapper(clearFocus).trigger("click"); await flush();
     expect(posts[2]!.body).toMatchObject({ expected_revision: "3", timezone: "Asia/Shanghai", target_kind: null, target_id: null });
-    expect(mounted.wrapper.text()).toContain("本日尚未选择 Focus");
+    expect(mounted.wrapper.text()).toContain("还未选择今日焦点");
   });
 
   it("响应不明时匹配原回执后重读事实，不重复提交选择命令", async () => {
@@ -257,7 +260,7 @@ describe("P13 Today 真实投影", () => {
       throw new Error(`Unexpected ${path}`);
     }));
     const mounted = await mountWorkbench("/today"); unmount = mounted.unmount;
-    await mounted.wrapper.get(".today-group .today-task-actions button").trigger("click"); await flush();
+    await mounted.wrapper.get(".today-group .today-task__actions button").trigger("click"); await flush();
     expect(mounted.wrapper.text()).toContain("提交结果待核对");
     await mounted.wrapper.get('[data-testid="today-pending"] button').trigger("click"); await flush();
     expect(mounted.wrapper.text()).toContain("选择版本 v2");

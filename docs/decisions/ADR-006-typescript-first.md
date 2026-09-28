@@ -27,7 +27,7 @@ Proposed。2026-09-19 用户授权评审和同步文档，暂不写代码；2026
 
 ## 推荐决策
 
-选择第三种作为下一轮验证方向。TypeScript/Node API 与 Worker 共用版本和业务数据库，PostgreSQL 保存 Run/Review/动作/完成事实；AI SDK 负责模型适配，Relay 保留 Workflow 和准入边界。Python、pg-boss、专用 Agents SDK Adapter 按需引入。精确组合以[技术选型](../architecture/technology-selection.md)为单一事实源。
+选择第三种作为下一轮验证方向。TypeScript/Node API 与 Worker 共用版本和业务数据库，PostgreSQL 保存 Run/Review/动作/完成事实；AI SDK 负责模型适配，Relay 保留 Workflow 和准入边界。Python、pg-boss、专用 Agents SDK Adapter 按需引入。精确组合以[技术选型](../architecture/技术选型.md)为单一事实源。
 
 ## 原因
 

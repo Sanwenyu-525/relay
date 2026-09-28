@@ -6,7 +6,7 @@
 
 ## 1. 运行职责与模型端口
 
-本文件描述业务需要的职责，不要求每层自研。按[复用策略](reuse-strategy.md)优先选用现成 SDK、Agent loop 或 runtime；P00 验证后明确唯一执行 Owner。当前 StepResult/ModelPort 是候选边界，只实现实际调用需要的适配，不为所有候选预建通用插件层。
+本文件描述业务需要的职责，不要求每层自研。按[复用策略](复用策略.md)优先选用现成 SDK、Agent loop 或 runtime；P00 验证后明确唯一执行 Owner。当前 StepResult/ModelPort 是候选边界，只实现实际调用需要的适配，不为所有候选预建通用插件层。
 
 Application 调用 Workflow 决定下一步，Runtime 只执行一次有界步骤。返回 StepResult（结果类型、产物/工具请求、证据、耗时、用量），不能修改 Task 状态。模型输出先按 schema 解析、校验引用和作用域，再变成受约束命令；自由文本中出现“已完成”不触发完成。
 
@@ -28,7 +28,7 @@ ModelPort 输入：模型配置版本、实际 ContextManifest、输出 schema�
 
 内置 `markdown-deliverable-v1`：BUILD_CONTEXT → DRAFT → PERSIST_CANDIDATE → VERIFY → COMPLETE。CREATE Run 时冻结 ExecutionContract；BUILD_CONTEXT 只装配/复核，不修改冻结的验收内容。修正回路由 Workflow 的 RETRYING 处理，不引入任意图结构。
 
-M03 当前源码以一个官方 `StateGraph` 编排该固定流程：`advance` 节点每次只调用一次 `advanceRunStep`；实际 OPEN 的验证类 Review 进入 `awaitCommand` interrupt，FAKE_WRITE 在 DRAFT 后、PERSIST 前进入 `gatewayAction`，M04 的 FILE_READ/WEB_FETCH 在 BUILD_CONTEXT 后、DRAFT 前进入同一节点，ASK 的 ACTION_APPROVAL 进入 `awaitAction` interrupt。两个 interrupt 都核对当前 Review 的确切 ID、类型及原决定，工具路径还核对冻结的原 `operation_id`；旧 RESUME 遇到后继 Review 只能确认自身投递，不能唤醒新 Review。升级前已完成 DRAFT 的读动作保持旧 DRAFT 绑定和原 Review/operation 身份，不重做草稿；修正轮复用已成功的读证据。Gateway 准入、动作身份、效果核对和 Run/Task 变更仍由原 Owner 负责，图只保存 Run ID 与路由提示。`thread_id=run_id`；LangGraph 1.4.17 的根图实际写入空 `checkpoint_ns`，版本隔离使用固定物理 schema `relay_graph_v1`，不依赖传入 namespace。官方 Saver 与业务提交是两个事务：崩溃后按原 command/attempt/operation 身份重入，不能将图状态视作已发生效果的凭据。Worker 启动前只读核对 Saver schema，不执行 DDL；安装见[部署设计](../deployment/local-deployment.md)。M03 固定图与 Mock Gateway 的既有分片独立复验结论见[M03 独立验收](../testing/m03-independent-acceptance.md#windows-action-context-修复与新版-mock-试用链独立复验)；M04 读入模型切片已进入开发自检，尚未独立验收。
+M03 当前源码以一个官方 `StateGraph` 编排该固定流程：`advance` 节点每次只调用一次 `advanceRunStep`；实际 OPEN 的验证类 Review 进入 `awaitCommand` interrupt，FAKE_WRITE 在 DRAFT 后、PERSIST 前进入 `gatewayAction`，M04 的 FILE_READ/WEB_FETCH 在 BUILD_CONTEXT 后、DRAFT 前进入同一节点，ASK 的 ACTION_APPROVAL 进入 `awaitAction` interrupt。两个 interrupt 都核对当前 Review 的确切 ID、类型及原决定，工具路径还核对冻结的原 `operation_id`；旧 RESUME 遇到后继 Review 只能确认自身投递，不能唤醒新 Review。升级前已完成 DRAFT 的读动作保持旧 DRAFT 绑定和原 Review/operation 身份，不重做草稿；修正轮复用已成功的读证据。Gateway 准入、动作身份、效果核对和 Run/Task 变更仍由原 Owner 负责，图只保存 Run ID 与路由提示。`thread_id=run_id`；LangGraph 1.4.17 的根图实际写入空 `checkpoint_ns`，版本隔离使用固定物理 schema `relay_graph_v1`，不依赖传入 namespace。官方 Saver 与业务提交是两个事务：崩溃后按原 command/attempt/operation 身份重入，不能将图状态视作已发生效果的凭据。Worker 启动前只读核对 Saver schema，不执行 DDL；安装见[部署设计](../deployment/本机部署.md)。M03 固定图与 Mock Gateway 的既有分片独立复验结论见[M03 独立验收](../testing/m03-independent-acceptance.md#windows-action-context-修复与新版-mock-试用链独立复验)；M04 读入模型切片已进入开发自检，尚未独立验收。
 
 M03 在途 Mock 取消由独立 Worker 观察 PostgreSQL 中已提交的 `PENDING` 控制请求，并向当前图、FakeModelPort 与 Gateway 传递 `AbortSignal`。DRAFT 模型等待在业务事务外；步骤结果写入前仍在 Task→Run 短事务里复核控制，未发生外部效果时不把中止结果写成成功。Worker 停止后，监督器须先观察子进程 `close` 并 fence 旧 epoch；若没有未决效果，恢复用例才把旧纯计算 `RUNNING` Attempt 结清，再应用控制。已派发或结果不明的效果保留原 `operation_id` 和资源隔离，继续按既有核对路径处理。Windows 强制终止子进程不能假定模型在进程内收到可处理信号；只有停机证据可用于恢复。真实 Provider 的取消仍属 M04。
 

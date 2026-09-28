@@ -1,0 +1,26 @@
+Relay collaboration controls: Windows notification repair self-check, 2026-09-28
+
+Scope: isolated PostgreSQL 18.6 on port 8051, isolated workbench frontend output and CARGO_TARGET_DIR, no M06 test-release package or real Provider. Review reasons were marked [RELAY NOTIFICATION ACCEPTANCE TEST]. Reviews were inserted solely into the disposable acceptance database to exercise the notification projection; their unrelated decision UI was not an acceptance subject.
+
+Final host: %TEMP%\relay-notification-repair-20260928\cargo-target\release\relay-desktop.exe
+SHA-256: a5bac1b61c2c04a4b7d49377915892c3f438a3b5326d4fcbf8bcd1a1b5eb684a
+WebView2 page: http://tauri.localhost/projects
+Host permission button: Notification.permission changed from default to granted.
+
+Foreground: after invoking window set_focus, WebView2 window isFocused=true. Inserted review 92fd3961-0ca3-4b6f-91e6-2cd6da3d6d8f; after 14 seconds the app showed 2 intervention items and this review had zero notification receipts. The earlier review fced4bab-374f-42dc-833c-ddc5a12f4d96 was inserted while the host was not focused and was dispatched; it is not foreground evidence.
+
+Unfocused single: after minimizing the real host, Windows UIAutomation found a tauri.localhost notification containing the marked review 68fca010-1adf-4581-956e-62bd438860ff. See collaboration-controls-windows-single.png, captured directly from that native toast. Clicking it navigated to /reviews?id=68fca010-1adf-4581-956e-62bd438860ff. Win32 IsIconic=0 and Tauri isFocused=true after click. A previous same-host run exposed a defect: show+setFocus navigated but left IsIconic=1 and isFocused=false. The repair added unminimize plus its specific capability, then the final binary passed.
+
+Unfocused aggregate: inserted reviews c7abd7eb-e5fc-4d82-9cf6-921a1942d4da and 25c1213c-3fd8-49ab-aa94-6fb7892831c1 in one SQL statement, minimized host, and Windows UIAutomation found one native toast titled "2 个事项需要你处理". See collaboration-controls-windows-aggregate.png, captured directly from the toast. Clicking entered /tasks?tab=attention; both receipts were DISPATCHED, host regained focus, and the app listed both original item entries.
+
+Denied: with a CDP permission override kept active during delivery, Notification.permission=denied for review 6ebf73eb-8646-4e6a-82ec-25ddb7010bef; receipt became DENIED. After refreshing the real app, the marked review remained in "必须介入". This simulates denial through browser permission control; it does not claim a Windows Settings policy test. A disconnected override reverted and another review 06ddb064-1f27-454b-8a49-e35b9537db93 was DISPATCHED; that run is not denial evidence.
+
+Failure: in the running WebView2 page, the Notification constructor was temporarily replaced with one that throws a marked test error. Review 318b2935-ad2c-4747-ab40-39caa12aa5ae produced a FAILED receipt, and refreshing the real app still listed it. This is targeted failure injection, not an observed operating-system delivery failure.
+
+Resolved before click: Windows displayed the marked review 0c401c2f-812a-4502-b19b-a98c1b122506. While the toast remained visible, SQL changed its review status OPEN -> DECIDED, then native UIAutomation clicked the old toast. The app entered the historical /reviews?id=0c401c2f-812a-4502-b19b-a98c1b122506 page; PostgreSQL still showed DECIDED and the existing DISPATCHED receipt. After one poll, the intervention count decreased from 10 to 9; no item was revived.
+
+Repeated polling/restart: before restarting the final binary, receipts total=13 (DISPATCHED=11, DENIED=1, FAILED=1), open reviews=12. Restarted the same SHA-256 host against the same disposable database, let it poll for 16 seconds while unfocused, and queried again: receipts remained 13|11|1|1 while the app displayed 12 unresolved interventions. No duplicate receipt was created. The 10-second repeat polling also ran throughout the session.
+
+Methods: the existing acceptance-session launcher prepared private PostgreSQL and desktop.env. Packaged API migrations and graph install completed before host launch. The Workbench page was inspected via Playwright connectOverCDP to the packaged WebView2; native Windows toasts were found and clicked with pywinauto UIAutomation, and Win32 IsIconic/GetForegroundWindow checked restoration. SQL was queried with the repository's portable psql.exe. The CDP probe and fault injection are disposable test harnesses, not application changes. Screenshots contain only the native toast surface.
+
+Limit: this is developer self-check of an unbundled isolated Windows executable, not an installed-package or coordinator independent acceptance. Denial and failure were controlled test injections as described above. No claim is made about app-exit notifications, Windows Settings policy, M03-M07 overall status, or real Provider.

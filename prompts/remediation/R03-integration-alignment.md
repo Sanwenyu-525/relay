@@ -2,7 +2,7 @@
 
 状态：已执行（2026-09-21）；依赖 R01/R02 的修复结果。本任务只完成已有边界对齐，不自动实现缺失 API、完整 P04 或真实联调。
 
-执行结果：前端 `InteractionMode` 已从 `HUMAN` 对齐为 API `ME`，`executor_kind=HUMAN` 保持独立；Task 与验收 revision 改为十进制字符串，并新增超过 `2^53` 的比较/递增回归。页面到真实 API 的精简映射、未接入能力和 schema readiness 前置见[前端预览记录](../../docs/development/ui-preview-acceptance.md#7-r03接入前契约与能力对齐)。所有页面仍调用内存 `fixtureAdapter`，未写入 Bearer、未接真实 API，不能称为联调通过。
+执行结果：前端 `InteractionMode` 已从 `HUMAN` 对齐为 API `ME`，`executor_kind=HUMAN` 保持独立；Task 与验收 revision 改为十进制字符串，并新增超过 `2^53` 的比较/递增回归。页面到真实 API 的精简映射、未接入能力和 schema readiness 前置见[前端预览记录](../../docs/development/前端预览实施与验收.md#7-r03接入前契约与能力对齐)。所有页面仍调用内存 `fixtureAdapter`，未写入 Bearer、未接真实 API，不能称为联调通过。
 
 ```text
 请在 D:/Develop/Relay-Agent 完成真实接入前的契约对齐与缺口确认。

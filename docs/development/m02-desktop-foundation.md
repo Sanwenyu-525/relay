@@ -58,3 +58,33 @@ J 后目录发布重建已通过（`apps/desktop/results/build-release-j-fix.txt
 重排 256px 首层是因为锁定的 `tauri-codegen 2.6.3` 在 Windows 默认窗口图标生成时只解码 ICO 第一层，而宿主没有运行时覆盖图标。产品 Tauri 配置仍只引用 `icons/icon.ico`；本次没有改 identifier、界面、业务逻辑或安装器。素材包 SHA256SUMS 中列出的 28 个文件已逐一核对匹配，并查看了 `preview/native-sizes.png` 的透明背景与任务卡构图；小尺寸细节有限，Windows 任务栏和快捷方式真实显示仍待验收。既有 `apps/desktop/release` 是此前机器人的冻结试用包，本次不刷新，也不将其既往验收结论移用于新图标。
 
 首次 `tauri build --no-bundle` 虽退出码 0，新 EXE 的唯一 PE 图标组仍是旧七层，图标组及七个 RT_ICON payload 与冻结包逐字节相同。原因是此前 `build.rs` 未声明 ICO 为 Cargo 重跑输入，锁定的 Tauri 构建逻辑也未为该图标路径输出对应声明；只改 ICO 未触发资源重新编译。现于 `build.rs` 的 Tauri 构建调用前声明 `cargo:rerun-if-changed=icons/icon.ico`。第二次使用仓库固定的 Node 24.21.0、pnpm 9.15.9 和 MSVC 环境执行同一 `tauri build --no-bundle`，退出码 0；`target/release/relay-desktop.exe` SHA-256 为 `f12864302d8864551ea2b12813313f41e5dc9459caf611fae9776f7736e29c63`。Windows PE 唯一图标组现为十层，顺序和十个 RT_ICON payload 均与产品 ICO 对应层一致。`node scripts/check-docs.mjs` 退出码 0。冻结包 EXE 与 manifest 的 SHA-256 仍分别为 `ad4a40cd08502c3a5013f081acc08bce0bed4bfb671991f91609979f52086a25`、`867c2cdfa9ff9a0752073bede4088e36131b43e9fc10c83537564f7c071a8538`；未刷新发布目录，亦未进行 Windows 真实显示验收。
+
+## 2026-09-28 用户指定新桌面图标
+
+用户反馈前一版任务栏图标显小，并指定新的 1254×1254 RGB 图接入。原图保存在 `apps/desktop/src-tauri/icons/icon-source-20260928.png`。产品 `icon.png` 从原图保留圆角方块主体，对外侧深蓝背景做抗锯齿透明蒙版，裁切后缩放为 1024×1024；主体 Alpha 边界为 `(35, 37, 989, 981)`，占画布约 93% 高度。产品 `icon.ico` 包含 256、128、96、64、48、40、32、24、20、16px 十层，256px 位于首层，延续 Tauri 默认窗口图标的解码要求。配置及业务逻辑未变。当前构建和 Windows 任务栏实际显示结果以本节后续验证记录为准；此前的发布包证据不能视作新图标验收。
+
+## 2026-09-28 用户替换为透明机器人图标
+
+用户随后提供透明背景的机器人图作为新的桌面图标来源。当前原图保存在 `apps/desktop/src-tauri/icons/icon-source-20260928-v2.png`，尺寸为 1254×1254、RGBA；上一版方角图 `icon-source-20260928.png` 保留为历史素材。产品 `icon.png` 与 `icon.ico` 已按该新来源更新，路径保持不变，ICO 包含 256、128、96、64、48、40、32、24、20、16px 十层，并继续保留 256px 首层以满足 Tauri Windows 默认窗口图标的解码要求。`pnpm --dir apps/desktop exec tauri build --no-bundle` 退出码为 0，生成的 `target/release/relay-desktop.exe` SHA-256 为 `d8b19770a0c24f2d0123f1e5af7f1ed3d111c3f0ab862d30bf5f4224c9d7c6e0`；从该 EXE 的 Windows PE 图标组读取十层 RT_ICON，逐层 payload 与产品 ICO 原始字节一致。当前运行中的开发实例与冻结发布包未替换，Windows 任务栏实际显示仍未验收；上一节及更早发布包证据不自动适用于本图。
+
+## 2026-09-28 自定义标题栏与辅助链接修复
+
+动态创建的 main 窗口原先仍启用 Windows decorations；现在仅在该创建入口关闭，React App 顶层在正常页、连接中和失败页显示浅色标题栏。Tauri 2 的拖动、最小化、最大化切换和 `close()` 只向 main capability 补实际所需权限；关闭事件继续进入现有草稿确认，确认后 `destroy()`，Rust 的 `Destroyed → RuntimeState.stop()` 链路未改。侧栏和 sticky 顶栏从标题栏下方开始，侧栏高度扣除标题栏。浏览器模式不渲染窗口控制。原 `skip-link` 使用负的固定 top，链接实测 `y=-40、height=42、bottom=2`，顶部 `(81,1)` 命中链接；现以自身高度的 `translateY(-100%)` 和 `pointer-events: none` 隐藏，保持 Tab 可达，聚焦后完整显示并由 Enter 聚焦 `main-content`。普通字号修复后 `y=-42、bottom=0` 且顶部不命中；根字号 24px 加页面 zoom 1.5 时 `y=-94、bottom=0`，同样不命中。
+
+前端类型检查、生产构建、桌面 `cargo check`、隔离 MSVC `tauri build --no-bundle` 与文档检查退出码均为 0。辅助链接浏览器定向 2/2；`workbench.spec.ts` 首轮全文件 21/22，唯一 R02 草稿返回用例单独复跑 1/1，最终包含桌面标题栏偏移回归的整文件复跑 23/23，记录首轮间歇失败而非静默抹去。Workbench Vitest 全量 300/308；8 项失败均因工作区并行未提交的 InterventionNotifications 新请求使旧列表测试的 fetch 次数/URL 断言失效，本次未改这些测试或业务实现。桌面启动页定向 2/2。以上前端结果不能替代 Windows 宿主验收。
+
+确切 Windows WebView2 自检使用系统临时目录 `relay-titlebar-cargo-20260928/release/relay-desktop.exe`，SHA-256 `bce6661d8457239e20fe55f65bf732a947c4bb0c33d3e28b6ebbe6b7a528bb1e`；未替换 `apps/desktop/release`。一次性 PG 会话补齐该包所需的 0040–0042 migration 与 Graph checkpoint 后启动成功。单屏 Windows 125% 缩放下，普通客户区为 1160×780 CSS px，标题栏 44 CSS px、侧栏从 y=44 延至 780；最大化时视口 1536×816，侧栏延至 816，均无整页横向溢出。WebView2/CDP 点击窗口按钮后，宿主最大化与还原、图标文案同步；双击空白标题栏亦可切换。Windows 原生鼠标输入使窗口左上角从 `(134,37)` 移至 `(334,167)`，边框拖动使宽度从 1174 缩至 1014，拖至左屏边形成约半屏窗口 `(-6,0)–(775,822)`；贴边后的 CSS 视口约 767×815，侧栏底边仍在视口内。最小化由真实主 HWND 的 `IsIconic=true` 确认，Win32 恢复后为 false；进程和页面持续存在。通过拦截本次 WebView2 的 readiness 请求复现连接中与失败页，两页均显示三枚窗口按钮，失败页最大化/还原可用。新建任务草稿下点击标题栏关闭弹出既有确认，取消后草稿与窗口保留；再次确认丢弃后宿主和该测试包的 Node 子进程均退出，一次性 PG 会话已停止并删除。
+
+本节仅证明上述确切 EXE、当前 125% Windows 显示缩放和受控交互；按钮点击与草稿确认由 CDP 驱动，拖动/缩放/贴边由 Windows 输入驱动，未据此宣称人工试用。辅助链接在浏览器回归中验证了键盘焦点和桌面偏移样式，但未在该 EXE 内重演 Tab/Enter；100%/150%/200% Windows DPI、多屏移动、任务栏手动恢复、WebView2 200% 内容缩放及安装包也未验证；M06/M07 总出口不因本修复改变。
+
+## 2026-09-28 操作型标题栏 v2 接续
+
+根据[修正版完整窗口图](../frontend/mockups/2026-09-28/README.md)，标题栏左侧由 `Relay Agent` 文本改为后退、前进、搜索、新建任务。仅记录应用内已访问的路由位置，初始两箭头禁用；搜索与原 Ctrl+K 面板共用状态，桌面应用顶栏不重复显示搜索入口；项目路由进入原任务表单时预填项目 ID，仍允许更改并在提交前按原逻辑核对。中间空白区继续承担拖动/双击，右侧三枚窗口按钮和原关闭链路不变。连接中与失败页禁用左侧业务操作，保留窗口控制；浏览器预览沿用原入口。辅助链接改为直接聚焦主内容，不向浏览器写入仅含 hash 的历史项，避免污染标题栏路由记录。
+
+定向 Vitest 6/6、`workbench.spec.ts` 浏览器回归 23/23、Workbench 类型检查与生产构建、文档检查均通过。Workbench Vitest 全量两次分别为 304/312、303/312；共同的 8 项失败均由工作区并行的人工介入提醒新增请求使旧测试的 fetch 次数或 URL 断言失效，本轮未改该业务模块及其旧测试。第二次多出的 Run SSE 时序断言失败在该文件单独复跑 5/5 后未复现，保留首轮结果，不据此认定全量通过。
+
+首轮隔离 Windows WebView2 自检 EXE SHA-256 `cd7b9afeed38f1737f584b7ca465f8910369eed57635a68a36108199e0361382`。一次性 PostgreSQL、Graph 会话启动后，真实 WebView2 截图确认左侧按钮顺序、原侧栏品牌、右侧窗口按钮及应用顶栏无重复搜索图标。CDP 实测初始后退/前进禁用；搜索打开原面板；新建任务进入原表单；草稿下后退弹出原确认，取消保留草稿，确认丢弃后可前进返回空表单；关闭按钮同样先询问，取消保留窗口和草稿，确认后宿主退出。最大化/还原按钮文案随状态切换。125% 显示缩放下，缩至 520 物理像素宽时客户区约 402 CSS px，操作文字和快捷键提示隐藏，三枚窗口按钮仍在视口内，整页无横向溢出，中间拖动区约 30 CSS px。
+
+补上辅助链接的无 hash 历史跳转后重建的最终 EXE 位于系统临时目录 `relay-titlebar-ui-check-20260928/relay-desktop.exe`，SHA-256 `86bbcdad91f654ae9b2bb7308f7e6da31d4e5212bfbf7b20279f95b0555fd480`；未替换 `apps/desktop/release`。最终 EXE 的真实 WebView2 中，辅助链接 Enter 后 `main-content` 获得焦点、URL 与浏览器历史长度不变；搜索仍打开原面板，新建任务可进入原表单，有草稿时标题栏后退与关闭仍走原确认，确认关闭后宿主退出。两次一次性 PostgreSQL 会话及宿主进程均已清理。
+
+该测试包复用此前冻结的 API 侧车，缺少当前并行增量的人工介入提醒读取路径，因此项目页显示该读取失败提示；本轮只据此验收标题栏和导航，不把它作为完整业务包验收。最终 EXE 未重演原生鼠标拖动、贴边和最小化恢复，也未测其他 DPI、多屏及安装包；这些旧构建的验证证据不能自动移用于 v2。M06/M07 总出口不变。

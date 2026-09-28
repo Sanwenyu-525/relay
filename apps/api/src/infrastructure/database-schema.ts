@@ -848,7 +848,7 @@ export interface RuleVersionRow {
 export type AssistSessionStatus = 'ACTIVE' | 'ARCHIVED';
 
 /** 0015：消息生成意图；提案意图要求会话绑定对应作用域（命令层校验）。 */
-export type AssistIntent = 'DISCUSS' | 'PROPOSE_CANDIDATE' | 'PROPOSE_TASK';
+export type AssistIntent = 'DISCUSS' | 'PROPOSE_CANDIDATE' | 'PROPOSE_TASK' | 'IMPACT_CHECK' | 'IMPACT_CANDIDATE';
 
 /** 0015：ASSISTANT 消息生成生命周期；USER 消息恒为 COMPLETED。 */
 export type AssistMessageStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';

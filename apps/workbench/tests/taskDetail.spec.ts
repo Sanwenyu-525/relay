@@ -174,12 +174,13 @@ function activate(): void {
 }
 
 describe("任务详情（UI-10）", () => {
-  it("fixture：展示三个独立事实与示例验收条件，产物页签不提供写入", async () => {
+  it("fixture：展示任务当前状态（状态、模式、执行者分离）与示例验收条件，产物页签不提供写入", async () => {
     const mounted = await mountWorkbench("/tasks/task-evaluation-metrics");
     unmount = mounted.unmount;
 
     const text = mounted.wrapper.text();
-    expect(text).toContain("三个独立事实");
+    expect(text).toContain("当前状态");
+    expect(text).toContain("执行模式");
     expect(text).toContain("验收版本");
     expect(mounted.wrapper.find('[data-testid="task-detail"]').exists()).toBe(true);
 

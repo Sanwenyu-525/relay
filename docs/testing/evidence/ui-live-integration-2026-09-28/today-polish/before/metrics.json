@@ -1,0 +1,486 @@
+[
+  {
+    "label": "first-entry-1280",
+    "url": "http://127.0.0.1:5175/today",
+    "scrollY": 0,
+    "viewport": {
+      "w": 1280,
+      "h": 800
+    },
+    "dpr": 1,
+    "rootFontSize": "16px",
+    "docHeight": 857,
+    "h1": {
+      "text": "把今天留给重要的事",
+      "rect": {
+        "top": 125,
+        "bottom": 195,
+        "left": 248,
+        "right": 1240,
+        "width": 992,
+        "height": 70
+      },
+      "style": {
+        "font-size": "56px",
+        "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif",
+        "line-height": "70px",
+        "margin-top": "0px"
+      }
+    },
+    "eyebrow": {
+      "rect": {
+        "top": 104,
+        "bottom": 125,
+        "left": 248,
+        "right": 1240,
+        "width": 992,
+        "height": 21
+      }
+    },
+    "topbar": {
+      "rect": {
+        "top": 0,
+        "bottom": 64,
+        "left": 208,
+        "right": 1280,
+        "width": 1072,
+        "height": 64
+      }
+    },
+    "titlebar": {
+      "rect": null
+    },
+    "navFont": {
+      "font-family": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+      "font-size": "16px"
+    },
+    "dateInput": {
+      "rect": {
+        "top": 305,
+        "bottom": 326.328125,
+        "left": 248,
+        "right": 424,
+        "width": 176,
+        "height": 21.328125
+      },
+      "style": {
+        "font-family": "monospace",
+        "font-size": "13.3333px",
+        "height": "21.3281px",
+        "border": "2px inset rgb(118, 118, 118)",
+        "padding": "0px 0px 0px 1px"
+      }
+    },
+    "groups": [
+      {
+        "heading": "可开始或继续 · 0",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        },
+        "emptyText": "当前查询中没有此类任务。"
+      },
+      {
+        "heading": "Pin 但仍受阻 · 0",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        },
+        "emptyText": "这组是等待任务的子集，Pin 不改变服务端准入。"
+      },
+      {
+        "heading": "其他等待 · 0",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        },
+        "emptyText": "等待总数 0，其中 0 项已在上方显示。"
+      }
+    ],
+    "focusPanel": {
+      "rect": {
+        "top": 374.328125,
+        "bottom": 486.328125,
+        "left": 248,
+        "right": 1240,
+        "width": 992,
+        "height": 112
+      },
+      "text": "今日焦点本日尚未选择 Focus。可在下方任务中设为本日 Focus，置顶今天最重要的一件事。"
+    },
+    "demoNotice": {
+      "text": "已连接本机 API · 写入真实 PostgreSQL"
+    },
+    "contentWidth": {
+      "top": 64,
+      "bottom": 857.328125,
+      "left": 208,
+      "right": 1280,
+      "width": 1072,
+      "height": 793.328125
+    }
+  },
+  {
+    "label": "bottom-1280",
+    "url": "http://127.0.0.1:5175/today",
+    "scrollY": 57,
+    "viewport": {
+      "w": 1280,
+      "h": 800
+    },
+    "dpr": 1,
+    "rootFontSize": "16px",
+    "docHeight": 857,
+    "h1": {
+      "text": "把今天留给重要的事",
+      "rect": {
+        "top": 68,
+        "bottom": 138,
+        "left": 248,
+        "right": 1240,
+        "width": 992,
+        "height": 70
+      },
+      "style": {
+        "font-size": "56px",
+        "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif",
+        "line-height": "70px",
+        "margin-top": "0px"
+      }
+    },
+    "eyebrow": {
+      "rect": {
+        "top": 47,
+        "bottom": 68,
+        "left": 248,
+        "right": 1240,
+        "width": 992,
+        "height": 21
+      }
+    },
+    "topbar": {
+      "rect": {
+        "top": 0,
+        "bottom": 64,
+        "left": 208,
+        "right": 1280,
+        "width": 1072,
+        "height": 64
+      }
+    },
+    "titlebar": {
+      "rect": null
+    },
+    "navFont": {
+      "font-family": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+      "font-size": "16px"
+    },
+    "dateInput": {
+      "rect": {
+        "top": 248,
+        "bottom": 269.328125,
+        "left": 248,
+        "right": 424,
+        "width": 176,
+        "height": 21.328125
+      },
+      "style": {
+        "font-family": "monospace",
+        "font-size": "13.3333px",
+        "height": "21.3281px",
+        "border": "2px inset rgb(118, 118, 118)",
+        "padding": "0px 0px 0px 1px"
+      }
+    },
+    "groups": [
+      {
+        "heading": "可开始或继续 · 0",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        },
+        "emptyText": "当前查询中没有此类任务。"
+      },
+      {
+        "heading": "Pin 但仍受阻 · 0",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        },
+        "emptyText": "这组是等待任务的子集，Pin 不改变服务端准入。"
+      },
+      {
+        "heading": "其他等待 · 0",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        },
+        "emptyText": "等待总数 0，其中 0 项已在上方显示。"
+      }
+    ],
+    "focusPanel": {
+      "rect": {
+        "top": 317.328125,
+        "bottom": 429.328125,
+        "left": 248,
+        "right": 1240,
+        "width": 992,
+        "height": 112
+      },
+      "text": "今日焦点本日尚未选择 Focus。可在下方任务中设为本日 Focus，置顶今天最重要的一件事。"
+    },
+    "demoNotice": {
+      "text": "已连接本机 API · 写入真实 PostgreSQL"
+    },
+    "contentWidth": {
+      "top": 7,
+      "bottom": 800.328125,
+      "left": 208,
+      "right": 1280,
+      "width": 1072,
+      "height": 793.328125
+    }
+  },
+  {
+    "label": "narrow-960",
+    "url": "http://127.0.0.1:5175/today",
+    "scrollY": 0,
+    "viewport": {
+      "w": 960,
+      "h": 640
+    },
+    "dpr": 1,
+    "rootFontSize": "16px",
+    "docHeight": 878,
+    "h1": {
+      "text": "把今天留给重要的事",
+      "rect": {
+        "top": 125,
+        "bottom": 195,
+        "left": 104,
+        "right": 920,
+        "width": 816,
+        "height": 70
+      },
+      "style": {
+        "font-size": "56px",
+        "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif",
+        "line-height": "70px",
+        "margin-top": "0px"
+      }
+    },
+    "eyebrow": {
+      "rect": {
+        "top": 104,
+        "bottom": 125,
+        "left": 104,
+        "right": 920,
+        "width": 816,
+        "height": 21
+      }
+    },
+    "topbar": {
+      "rect": {
+        "top": 0,
+        "bottom": 64,
+        "left": 64,
+        "right": 960,
+        "width": 896,
+        "height": 64
+      }
+    },
+    "titlebar": {
+      "rect": null
+    },
+    "navFont": {
+      "font-family": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+      "font-size": "16px"
+    },
+    "dateInput": {
+      "rect": {
+        "top": 326,
+        "bottom": 347.328125,
+        "left": 104,
+        "right": 280,
+        "width": 176,
+        "height": 21.328125
+      },
+      "style": {
+        "font-family": "monospace",
+        "font-size": "13.3333px",
+        "height": "21.3281px",
+        "border": "2px inset rgb(118, 118, 118)",
+        "padding": "0px 0px 0px 1px"
+      }
+    },
+    "groups": [
+      {
+        "heading": "可开始或继续 · 0",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        },
+        "emptyText": "当前查询中没有此类任务。"
+      },
+      {
+        "heading": "Pin 但仍受阻 · 0",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        },
+        "emptyText": "这组是等待任务的子集，Pin 不改变服务端准入。"
+      },
+      {
+        "heading": "其他等待 · 0",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        },
+        "emptyText": "等待总数 0，其中 0 项已在上方显示。"
+      }
+    ],
+    "focusPanel": {
+      "rect": {
+        "top": 395.328125,
+        "bottom": 507.328125,
+        "left": 104,
+        "right": 920,
+        "width": 816,
+        "height": 112
+      },
+      "text": "今日焦点本日尚未选择 Focus。可在下方任务中设为本日 Focus，置顶今天最重要的一件事。"
+    },
+    "demoNotice": {
+      "text": "已连接本机 API · 写入真实 PostgreSQL"
+    },
+    "contentWidth": {
+      "top": 64,
+      "bottom": 878.328125,
+      "left": 64,
+      "right": 960,
+      "width": 896,
+      "height": 814.328125
+    }
+  },
+  {
+    "label": "wide-1536",
+    "url": "http://127.0.0.1:5175/today",
+    "scrollY": 0,
+    "viewport": {
+      "w": 1536,
+      "h": 832
+    },
+    "dpr": 1,
+    "rootFontSize": "16px",
+    "docHeight": 857,
+    "h1": {
+      "text": "把今天留给重要的事",
+      "rect": {
+        "top": 125,
+        "bottom": 195,
+        "left": 272,
+        "right": 1472,
+        "width": 1200,
+        "height": 70
+      },
+      "style": {
+        "font-size": "56px",
+        "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif",
+        "line-height": "70px",
+        "margin-top": "0px"
+      }
+    },
+    "eyebrow": {
+      "rect": {
+        "top": 104,
+        "bottom": 125,
+        "left": 272,
+        "right": 1472,
+        "width": 1200,
+        "height": 21
+      }
+    },
+    "topbar": {
+      "rect": {
+        "top": 0,
+        "bottom": 64,
+        "left": 208,
+        "right": 1536,
+        "width": 1328,
+        "height": 64
+      }
+    },
+    "titlebar": {
+      "rect": null
+    },
+    "navFont": {
+      "font-family": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+      "font-size": "16px"
+    },
+    "dateInput": {
+      "rect": {
+        "top": 305,
+        "bottom": 326.328125,
+        "left": 272,
+        "right": 448,
+        "width": 176,
+        "height": 21.328125
+      },
+      "style": {
+        "font-family": "monospace",
+        "font-size": "13.3333px",
+        "height": "21.3281px",
+        "border": "2px inset rgb(118, 118, 118)",
+        "padding": "0px 0px 0px 1px"
+      }
+    },
+    "groups": [
+      {
+        "heading": "可开始或继续 · 0",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        },
+        "emptyText": "当前查询中没有此类任务。"
+      },
+      {
+        "heading": "Pin 但仍受阻 · 0",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        },
+        "emptyText": "这组是等待任务的子集，Pin 不改变服务端准入。"
+      },
+      {
+        "heading": "其他等待 · 0",
+        "headingStyle": {
+          "font-size": "24px",
+          "font-family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif"
+        },
+        "emptyText": "等待总数 0，其中 0 项已在上方显示。"
+      }
+    ],
+    "focusPanel": {
+      "rect": {
+        "top": 374.328125,
+        "bottom": 486.328125,
+        "left": 272,
+        "right": 1472,
+        "width": 1200,
+        "height": 112
+      },
+      "text": "今日焦点本日尚未选择 Focus。可在下方任务中设为本日 Focus，置顶今天最重要的一件事。"
+    },
+    "demoNotice": {
+      "text": "已连接本机 API · 写入真实 PostgreSQL"
+    },
+    "contentWidth": {
+      "top": 64,
+      "bottom": 857.328125,
+      "left": 232,
+      "right": 1512,
+      "width": 1280,
+      "height": 793.328125
+    }
+  }
+]

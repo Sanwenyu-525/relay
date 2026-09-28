@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { ArtifactRow, TaskRow } from '../infrastructure/database-schema.js';
+import { markdownBlocks, mapHumanLocks, protectedTextConflict } from '../artifact/markdown-locks.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import { toDecimalString } from '../shared/decimal.js';
 import { checkRequiredText, normalizeText } from '../shared/text.js';
@@ -16,6 +17,7 @@ import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
 import { runIdempotentCommand, type CommandOutcome } from './command.js';
 import {
   contentTooLarge,
+  evidenceUnavailable,
   invalidTransition,
   revisionConflict,
   storageUnavailable,
@@ -287,6 +289,14 @@ export async function submitHumanArtifactVersion(
       }
 
       const previousVersion = (await repositories.artifacts.listArtifactVersions(artifact.id)).at(-1);
+      const locks = await repositories.artifacts.listTextLocks(artifact.id);
+      let previousContent: string | null = null;
+      if (locks.length && previousVersion) {
+        const read = await storage.readWithHashCheck(previousVersion.storage_ref,
+          { contentHash: previousVersion.content_hash, size: previousVersion.size });
+        if (read.status !== 'OK') throw invalidTransition('锁定区域的原版本不可核对，不能静默继承锁定。');
+        previousContent = read.content.toString('utf8');
+      }
       const versionNumber = await repositories.artifacts.nextVersionNumber(artifact.id);
       const versionId = randomUUID();
       const published = await publishContent(storage, {
@@ -306,6 +316,14 @@ export async function submitHumanArtifactVersion(
         sourceKind: 'HUMAN',
         sourceRef: null,
       });
+      if (previousContent !== null) {
+        const nextLocks = mapHumanLocks(locks.map((lock) => ({ id: lock.id,
+          kind: lock.block_kind, block_index: lock.block_index, text: lock.locked_text,
+          status: lock.status })), previousContent, input.content);
+        for (const lock of nextLocks) await repositories.artifacts.rebindTextLock({
+          id: lock.id, versionId: version.id, index: lock.block_index,
+          text: lock.text, status: lock.status });
+      }
       if (previousVersion !== undefined) {
         await repositories.lineage.insertExactEdge({ workspaceId: input.workspaceId,
           childVersionId: version.id, relation: 'REVISED_FROM',
@@ -356,6 +374,35 @@ export async function submitHumanArtifactVersion(
       };
     },
   });
+}
+
+/** Apply at the real AI version write boundary, after Task/Artifact locking and before registration. */
+export async function requireAiTextLocks(repositories: Repositories,
+  storage: ManagedContentStore, artifactId: string, candidate: string): Promise<
+    readonly { id: string; kind: 'PARAGRAPH' | 'SECTION'; index: number; text: string }[]> {
+  const locks = await repositories.artifacts.listTextLocks(artifactId);
+  if (!locks.length) return [];
+  const previous = (await repositories.artifacts.listArtifactVersions(artifactId)).at(-1);
+  if (!previous || locks.some((lock) => lock.base_version_id !== previous.id)) {
+    throw invalidTransition('锁定基线与产物最新版本不一致，不能应用 AI 候选。');
+  }
+  const read = await storage.readWithHashCheck(previous.storage_ref,
+    { contentHash: previous.content_hash, size: previous.size });
+  if (read.status !== 'OK') throw evidenceUnavailable({ artifactVersionId: previous.id,
+    reason: read.status });
+  const conflict = protectedTextConflict(locks.map((lock) => ({ id: lock.id,
+    kind: lock.block_kind, block_index: lock.block_index, text: lock.locked_text,
+    status: lock.status })), read.content.toString('utf8'), candidate);
+  if (conflict) throw invalidTransition(conflict);
+  return locks.map((lock) => ({ id: lock.id, kind: lock.block_kind,
+    index: markdownBlocks(candidate, lock.block_kind).find((block) => block.text === lock.locked_text)!.index,
+    text: lock.locked_text }));
+}
+
+export async function advanceAiTextLocks(repositories: Repositories, versionId: string,
+  locks: readonly { id: string; index: number; text: string }[]): Promise<void> {
+  for (const lock of locks) await repositories.artifacts.rebindTextLock({
+    id: lock.id, versionId, index: lock.index, text: lock.text, status: 'MAPPED' });
 }
 
 /** 人工保存与人工完成共用的执行权判定（契约第 3 节）。 */

@@ -40,7 +40,9 @@ describe("live 创建任务的真实项目选择", () => {
     const posts: Record<string, unknown>[] = [];
     const urls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input); urls.push(url);
+      const url = String(input);
+      if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
+      urls.push(url);
       if (url === `${root}/projects?status=active`) return response(200, {
         items: [project(projectA, "甲项目")], next_cursor: "page+2" });
       if (url === `${root}/projects?status=active&cursor=page%2B2`) return response(200, {

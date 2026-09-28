@@ -71,15 +71,18 @@ export default function TaskAcceptanceEvidence({ client, taskId, taskRevision, a
     snapshot.completion.acceptance.availability === "AVAILABLE" &&
     snapshot.completion.artifactVersions.every((version) => version.availability === "AVAILABLE");
   const historicalSessions = snapshot?.trace?.verifications ?? [];
-  return <section className="surface-panel" data-testid="task-acceptance-evidence"><h2>面向需求的验收依据</h2>
-    <p className="helper-text">目标 → 必需行为 → 受验对象 → 检查与人工证据 → 缺口。当前准入计划不是执行结果；这里只显示能与当前版本核对的证据。</p>
+  const expectedOutputs = acceptance.expectedOutputs === null ? [] : Object.entries(acceptance.expectedOutputs);
+  return <section className="surface-panel" data-testid="task-acceptance-evidence"><h2>验收依据</h2>
+    <p className="helper-text">接受这个任务前，这里汇总它与当前版本的验收目标、检查计划和 Run 证据；计划只是准入预览，不代表已经执行或通过。</p>
     <button className="secondary-button" type="button" disabled={loading} onClick={() => void load()}>刷新验收依据</button>
     <p>目标：{acceptance.objective || "当前验收目标为空。"} · 验收 v{acceptance.acceptanceRevision} · 来源 {acceptance.source}</p>
-    <p>预期产物：{acceptance.expectedOutputs === null ? "当前响应未提供" : JSON.stringify(acceptance.expectedOutputs)}</p>
+    <p>预期产物：{expectedOutputs.length
+      ? expectedOutputs.map(([name, kind]) => <span key={name} className="expected-output-chip">{name}：{String(kind)}</span>)
+      : "当前响应未提供"}</p>
     {loading && <p role="status">正在核对计划、产物、Run 与完成凭据…</p>}
     {snapshot?.stale && <p role="alert">Task 或验收版本在读取期间变化；以下结果不能视为当前证据，请刷新任务详情。</p>}
     {snapshot && snapshot.errors.length > 0 && <div className="warning-callout" role="alert"><strong>证据读取不完整，不能判定当前通过</strong><ul>{snapshot.errors.map((error) => <li key={error}>{error}</li>)}</ul></div>}
-    {snapshot && <><p>当前 CheckPlan：{snapshot.plan?.status ?? "不可用"}；{snapshot.plan?.checkPlanSha256 ?? "无计划摘要"}。这是读时预览，尚未执行。</p>
+    {snapshot && <><p>当前 CheckPlan：{snapshot.plan?.status ?? "不可用"}<code className="hash-code">{snapshot.plan?.checkPlanSha256 ?? "无计划摘要"}</code>。这是读时预览，尚未执行。</p>
       <p>当前 Run 验证会话：{historicalSessions.length} 项；版本与计划匹配的历史会话：{session ? session.id : "无"}。Trace 不含当前适用性或撤销事实，匹配也不能证明当前有效。</p>
       {completionId && <p>完成凭据 {completionId}：{completed ? "当前周期、验收与产物来源已核对" : "不适用、来源缺失或读取未完成"}；
         验证 {snapshot.completion?.verificationSession?.status ?? "未关联"} / {snapshot.completion?.verificationSession?.verdict ?? "无判定"}；

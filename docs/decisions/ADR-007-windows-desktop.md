@@ -32,7 +32,7 @@ React → 已鉴权 loopback HTTP → Application / Domain / Gateway → PG / �
 
 桌面壳只负责窗口、受控启动、连接引导与进程生命周期。Rust 不承载第二套 Workflow/领域业务；Node 业务进程保持短事务与原恢复协议。Renderer 不直连 PG，不持有 DB/Provider 密钥，不获得通用 shell、文件系统或任意 IPC 调用权。
 
-保留 Fastify HTTP 命令、幂等键和回执，不另建第二套领域 IPC。窄 IPC 只向受信本地窗口交付当前实例的连接信息和受限生命周期操作；校验调用窗口、主 frame、载荷与实例归属，远程内容无此能力。当前实例的短期 Bearer 可以进入 renderer 内存，不能写入 URL、持久存储或日志；其权限仍由后端逐请求校验。启动握手、CORS/CSP 和刷新重连详见[部署设计](../deployment/local-deployment.md)，不以“桌面应用”替代鉴权。
+保留 Fastify HTTP 命令、幂等键和回执，不另建第二套领域 IPC。窄 IPC 只向受信本地窗口交付当前实例的连接信息和受限生命周期操作；校验调用窗口、主 frame、载荷与实例归属，远程内容无此能力。当前实例的短期 Bearer 可以进入 renderer 内存，不能写入 URL、持久存储或日志；其权限仍由后端逐请求校验。启动握手、CORS/CSP 和刷新重连详见[部署设计](../deployment/本机部署.md)，不以“桌面应用”替代鉴权。
 
 ## 生命周期与安装
 

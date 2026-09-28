@@ -5,16 +5,16 @@
 前置：提供完整设计包和独立 PROJECT_ROOT。2026-09-20 后端开工请求从本文末尾的 Terra 接续提示词进入，先补已有 P00 的缺项；以下完整提示词保留作为范围依据。
 
 ```text
-为 Personal Workflow OS 创建或完善独立工程。先读 AGENTS.md、prompts/README.md 公共约束、docs/architecture/technology-selection.md、docs/frontend/workbench-design.md、docs/deployment/local-deployment.md。核验当前目录属于本项目；若仍是 AI Manga Drama Studio，停止该目录写入，只询问独立工程位置。
+为 Personal Workflow OS 创建或完善独立工程。先读 AGENTS.md、prompts/README.md 公共约束、docs/architecture/技术选型.md、docs/frontend/workbench-design.md、docs/deployment/本机部署.md。核验当前目录属于本项目；若仍是 AI Manga Drama Studio，停止该目录写入，只询问独立工程位置。
 
-先读 docs/architecture/reuse-strategy.md 和 ADR-005。第一段研究 Codex App Server、DeepSeek Harness、Pi、LangChain、LangGraph 的相关源码，固定 tag/commit，记录具体模块/测试、许可证、维护与兼容限制。按职责区分直接依赖、协议集成、机制借鉴和必须自研；不要仅增加参考名单，也不要整仓照搬。
+先读 docs/architecture/复用策略.md 和 ADR-005。第一段研究 Codex App Server、DeepSeek Harness、Pi、LangChain、LangGraph 的相关源码，固定 tag/commit，记录具体模块/测试、许可证、维护与兼容限制。按职责区分直接依赖、协议集成、机制借鉴和必须自研；不要仅增加参考名单，也不要整仓照搬。
 源码优先从 D:/Develop/Relay-Agent/.research 读取，路径和提交查 docs/research/p00-source-study.md 的本地源码清单；执行 prompts/README.md 的“本地源码参考要求”，按当前机制定位实现与测试，并交付采用差异和验证依据。
 
 当前 TypeScript-first 推荐为 Proposed，先读 ADR-006 和测试计划第 6 节。在已有源码证据与实验上补 AI SDK/Kysely 等必要源码及兼容验证，不重做已有研究。完成三个 Spike：真实 PG 审批后跨进程恢复、外部成功但未落库的 UNKNOWN 核对、两个真实 Provider 的适配。Fake 只替代明确标注的模型/外部效果，不能证明真实 Provider 通过；不为 Spike 开放真实用户项目的 Git/CLI。补并发 Delegate、停止/完成竞争、迁移完整性及事务测试。统一工作量比较延迟、总 RSS、吞吐和事件循环延迟，性能预算在运行前明确；保留 Rust 对照，不把本地微基准当端到端结论。输出采用表、证据与未验证项，不默认重写通用框架。
 
 同时读 ADR-007 和测试计划第 7 节，在隔离目录验证 Windows 桌面打包、随包 Node、loopback 引导/来源校验、单实例与退出；框架仍 Proposed，不以空壳性能替代完整组合。用户交付目标为可安装应用、独立窗口和启动入口。
 
-仅在用户当前任务授权实施且第一段证据满足出口后，第二段再建立 pnpm workspace、apps/desktop、apps/api、apps/web 和开发说明。推荐组合、引入阶段与精确版本以 docs/architecture/technology-selection.md 为准，验证后锁定；提示词不另维护依赖版本表。Kysely Migrator 候选须验证历史内容校验和并发迁移，JSON Schema 须验证 SDK/Provider 子集兼容。Python、pg-boss、专用 Agent Adapter 按需引入，实验依赖不自动成为生产依赖。不使用 latest/SNAPSHOT 可变依赖，已有兼容工程不重写。具体模型配置遵循 prompts/README.md 的当前用户指令。
+仅在用户当前任务授权实施且第一段证据满足出口后，第二段再建立 pnpm workspace、apps/desktop、apps/api、apps/web 和开发说明。推荐组合、引入阶段与精确版本以 docs/architecture/技术选型.md 为准，验证后锁定；提示词不另维护依赖版本表。Kysely Migrator 候选须验证历史内容校验和并发迁移，JSON Schema 须验证 SDK/Provider 子集兼容。Python、pg-boss、专用 Agent Adapter 按需引入，实验依赖不自动成为生产依赖。不使用 latest/SNAPSHOT 可变依赖，已有兼容工程不重写。具体模型配置遵循 prompts/README.md 的当前用户指令。
 
 人工阶段有桌面壳、API/web；执行阶段增加同仓同版本 apps/worker，通过共享应用用例和数据库协议执行，不新增微服务或领域 IPC。只有出现实际共享调用方才提取 packages，不生成完整空包树。同步进程健康、连接池/并发上限、取消、恢复和打包；Python 工具按需启动并验证子进程树取消。配置来自外部环境，data_root 与源码分离。加入 loopback、短期 Bearer、窄 IPC 启动握手及无敏感细节的 liveness；所有业务接口继承鉴权。发布 WebView 的显式来源与 Vite 开发代理分开验证，不加入团队登录、托盘、自启或多窗口。
 
@@ -43,7 +43,7 @@
 你是负责开发的 Terra。在 D:/Develop/Relay-Agent 执行 P00 验证接续，先读取 prompts/00-foundation.md 的共同约束。本段范围仅为补齐实验、测试及证据，不创建生产 apps/api、正式 V001 或业务页面。不要只回复计划，直接完成当前条件下可运行的验证与修复。
 
 1. 建立缺口表，再执行。
-读取 docs/research/p00-source-study.md、docs/architecture/reuse-strategy.md、docs/architecture/technology-selection.md、ADR-005/006/007、docs/testing/verification-plan.md 第6/7节，以及 experiments/typescript-p00、ai-sdk-p00、recovery-p00、desktop-p00 的 README、输入锁定和逐次结果。
+读取 docs/research/p00-source-study.md、docs/architecture/复用策略.md、docs/architecture/技术选型.md、ADR-005/006/007、docs/testing/verification-plan.md 第6/7节，以及 experiments/typescript-p00、ai-sdk-p00、recovery-p00、desktop-p00 的 README、输入锁定和逐次结果。
 按“规格条目 / 实测状态 / 输入摘要与证据 / 未覆盖项 / 本次动作”列出缺口。核对后复用有效的基础 PG、SDK 离线、恢复和真实 WebView 局部证据；输入变化或证据不充分才重跑相关检查。不重做已有六仓研究，不重复搭建环境，不把测试数量当完整 Spike 通过。
 
 2. 补真实 PG 恢复、并发与事务缺口。
@@ -75,7 +75,7 @@
 
 挂账项必须作为未覆盖项随交付保留，不得记为通过、不得删除、不得据其冻结 ADR-006/007：Spike 3（缺两个真实 Provider 端点）、多产物版本集合与人工处置链、生产权限/Gateway、桌面宿主剩余必要安全边界、固定工作量性能预算。放行只覆盖本段最小工程范围，不覆盖 P01；若核对发现第一段结论与该记录不符，报告差异并回到对应验证，不自行扩大放行范围或降低本段验收要求。
 
-读取 docs/architecture/technology-selection.md、docs/development/first-human-slice.md、docs/deployment/local-deployment.md、docs/database/physical-design-postgresql.md 及 ADR-006/007。先核对现有 apps 和锁文件，按已验证组合搭最小 pnpm workspace、API 与必要桌面启动边界；复用现有前端工程，不因旧提示词写 apps/web 就复制 apps/workbench。需要共享配置时保持其既有命令可用，业务页面由独立前端任务负责。
+读取 docs/architecture/技术选型.md、docs/development/first-human-slice.md、docs/deployment/本机部署.md、docs/database/physical-design-postgresql.md 及 ADR-006/007。先核对现有 apps 和锁文件，按已验证组合搭最小 pnpm workspace、API 与必要桌面启动边界；复用现有前端工程，不因旧提示词写 apps/web 就复制 apps/workbench。需要共享配置时保持其既有命令可用，业务页面由独立前端任务负责。
 
 只建立当前可运行调用链需要的目录、配置和接口。配置外置，data_root 与源码分离；loopback 绑定、短期 Bearer、窄 IPC 引导、精确 Host/Origin、无敏感信息的 liveness 及退出处理符合既有部署契约。健康检查不伪装成业务功能。暂不建立生产 Worker 平台、Python 常驻服务、通用 DSL、Skill/Pack 或未来空模块，实验依赖不自动转成生产依赖。
 

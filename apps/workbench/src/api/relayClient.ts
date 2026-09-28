@@ -269,6 +269,53 @@ export interface RelayArtifactDirectUses {
   }[];
 }
 
+export interface RelayArtifactTextLock {
+  readonly id: string;
+  readonly artifactId: string;
+  readonly baseVersionId: string;
+  readonly blockKind: "PARAGRAPH" | "SECTION";
+  readonly blockIndex: number | null;
+  readonly text: string;
+  readonly status: "MAPPED" | "UNMAPPED";
+}
+
+export interface RelayArtifactImpactCheck {
+  readonly id: string; readonly artifactId: string;
+  readonly sourceBeforeVersionId: string; readonly sourceAfterVersionId: string;
+  readonly status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
+  readonly errorCode: string | null;
+  readonly directTargets: readonly { readonly targetVersionId: string;
+    readonly targetArtifactId: string; readonly relation: string;
+    readonly versionNumber: DecimalRevision;
+    readonly availability: "AVAILABLE" | "UNAVAILABLE";
+    readonly analysed: boolean }[];
+  readonly possiblyRelated: readonly { readonly targetVersionId: string; readonly reason: string }[];
+  readonly hasMore: boolean; readonly inputTruncated: boolean;
+  readonly unanalysedScope: readonly string[]; readonly stale: boolean;
+}
+
+export interface RelayArtifactImpactCandidate {
+  readonly id: string; readonly impactCheckId: string;
+  readonly targetArtifactId: string; readonly targetVersionId: string;
+  readonly status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
+  readonly errorCode: string | null; readonly markdown: string | null;
+  readonly stale: boolean; readonly appliedVersionId: string | null;
+}
+
+export interface RelayInterventionItem {
+  readonly itemKey: string; readonly changeKey: string;
+  readonly kind: "REVIEW" | "LOCK_CONFLICT" | "RUN_FAILED" | "UNKNOWN";
+  readonly title: string; readonly reason: string; readonly targetUrl: string;
+}
+
+/** 只读模型端口状态：密钥永不出现在此结构中。 */
+export interface RelayModelPortStatus {
+  readonly provider: "fake" | "openai-compatible" | "invalid";
+  readonly configured: boolean;
+  readonly model: string | null;
+  readonly baseUrl: string | null;
+}
+
 export interface RelayArtifact {
   readonly id: string;
   readonly taskId: string;
@@ -2221,6 +2268,105 @@ export class RelayApiClient {
     return artifactDirectUsesFrom(await this.request(this.workspacePath(`/artifact-versions/${encodeURIComponent(artifactVersionId)}/direct-uses`)));
   }
 
+  async getArtifactTextLocks(artifactId: string): Promise<readonly RelayArtifactTextLock[]> {
+    const row = object(await this.request(this.workspacePath(`/artifacts/${encodeURIComponent(artifactId)}/text-locks`)), "artifact text locks");
+    if (string(row, "artifact_id", "artifact text locks") !== artifactId) throw new Error("锁定列表目标不匹配。");
+    return array(row, "locks", "artifact text locks").map(artifactTextLockFrom);
+  }
+
+  async lockArtifactText(input: { readonly artifactId: string; readonly commandId: string;
+    readonly expectedArtifactRevision: DecimalRevision; readonly expectedVersionId: string;
+    readonly blockKind: "PARAGRAPH" | "SECTION"; readonly blockIndex: number }):
+    Promise<{ readonly artifactRevision: DecimalRevision; readonly lock: RelayArtifactTextLock }> {
+    const row = object(commandEnvelopeFrom(await this.request(this.workspacePath(`/artifacts/${encodeURIComponent(input.artifactId)}/text-locks`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId,
+        expected_artifact_revision: input.expectedArtifactRevision,
+        expected_version_id: input.expectedVersionId, block_kind: input.blockKind,
+        block_index: input.blockIndex }) })).result, "lock artifact text");
+    if (string(row, "artifact_id", "lock artifact text") !== input.artifactId) throw new Error("锁定回执目标不匹配。");
+    return { artifactRevision: decimal(row, "artifact_revision", "lock artifact text"),
+      lock: artifactTextLockFrom(row.lock) };
+  }
+
+  async unlockArtifactText(input: { readonly artifactId: string; readonly lockId: string;
+    readonly commandId: string; readonly expectedArtifactRevision: DecimalRevision }): Promise<DecimalRevision> {
+    const row = object(commandEnvelopeFrom(await this.request(this.workspacePath(`/artifacts/${encodeURIComponent(input.artifactId)}/text-locks/${encodeURIComponent(input.lockId)}/unlock`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId,
+        expected_artifact_revision: input.expectedArtifactRevision }) })).result, "unlock artifact text");
+    if (string(row, "artifact_id", "unlock artifact text") !== input.artifactId ||
+        string(row, "unlocked_lock_id", "unlock artifact text") !== input.lockId)
+      throw new Error("解锁回执目标不匹配。");
+    return decimal(row, "artifact_revision", "unlock artifact text");
+  }
+
+  async startArtifactImpactCheck(input: { readonly beforeVersionId: string;
+    readonly afterVersionId: string; readonly expectedArtifactRevision: DecimalRevision;
+    readonly analysisTargetVersionIds: readonly string[]; readonly commandId: string }): Promise<string> {
+    const row = object(commandEnvelopeFrom(await this.request(this.workspacePath(`/artifact-versions/${encodeURIComponent(input.beforeVersionId)}/impact-checks`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId,
+        source_after_version_id: input.afterVersionId,
+        expected_artifact_revision: input.expectedArtifactRevision,
+        analysis_target_version_ids: input.analysisTargetVersionIds }) })).result, "impact check request");
+    return string(row, "impact_check_id", "impact check request");
+  }
+
+  async getArtifactImpactCheck(id: string): Promise<RelayArtifactImpactCheck> {
+    return impactCheckFrom(await this.request(this.workspacePath(`/impact-checks/${encodeURIComponent(id)}`)));
+  }
+
+  async startArtifactImpactCandidate(input: { readonly checkId: string;
+    readonly targetVersionId: string; readonly expectedTargetRevision: DecimalRevision;
+    readonly confirmedPossible: boolean; readonly commandId: string }): Promise<string> {
+    const row = object(commandEnvelopeFrom(await this.request(this.workspacePath(`/impact-checks/${encodeURIComponent(input.checkId)}/candidates`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId,
+        target_version_id: input.targetVersionId,
+        expected_target_revision: input.expectedTargetRevision,
+        confirmed_possible: input.confirmedPossible }) })).result, "impact candidate request");
+    return string(row, "candidate_id", "impact candidate request");
+  }
+
+  async getArtifactImpactCandidate(id: string): Promise<RelayArtifactImpactCandidate> {
+    return impactCandidateFrom(await this.request(this.workspacePath(`/impact-candidates/${encodeURIComponent(id)}`)));
+  }
+
+  async getInterventions(): Promise<readonly RelayInterventionItem[]> {
+    const row = object(await this.request(this.workspacePath('/attention/interventions')), "interventions");
+    return array(row, "items", "interventions").map(interventionFrom);
+  }
+
+  /** 模型端口只读状态：服务端保证不含密钥。 */
+  async getModelPortStatus(): Promise<RelayModelPortStatus> {
+    const row = object(await this.request(this.workspacePath('/model-port')), "model-port");
+    const provider = string(row, "provider", "model-port");
+    if (provider !== "fake" && provider !== "openai-compatible" && provider !== "invalid") {
+      throw new Error("服务端返回了无法识别的模型端口状态。");
+    }
+    return { provider,
+      configured: row.configured === true,
+      model: row.model === null ? null : string(row, "model", "model-port"),
+      baseUrl: row.base_url === null ? null : string(row, "base_url", "model-port") };
+  }
+
+  async claimInterventionNotifications(): Promise<readonly RelayInterventionItem[]> {
+    const row = object(await this.request(this.workspacePath('/attention/notifications/claim'),
+      { method: 'POST' }), "claimed interventions");
+    return array(row, "items", "claimed interventions").map(interventionFrom);
+  }
+
+  async settleInterventionNotification(item: RelayInterventionItem,
+    status: "DISPATCHED" | "DENIED" | "FAILED"): Promise<void> {
+    await this.request(this.workspacePath('/attention/notifications/settle'), { method: 'POST',
+      body: JSON.stringify({ item_key: item.itemKey, change_key: item.changeKey, status }) });
+  }
+
+  async applyArtifactImpactCandidate(input: { readonly candidateId: string;
+    readonly expectedTargetRevision: DecimalRevision; readonly commandId: string }): Promise<string> {
+    const row = object(commandEnvelopeFrom(await this.request(this.workspacePath(`/impact-candidates/${encodeURIComponent(input.candidateId)}/apply`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId,
+        expected_target_revision: input.expectedTargetRevision }) })).result, "apply impact candidate");
+    return string(row, "version_id", "apply impact candidate");
+  }
+
   async completeHumanTask(input: {
     readonly taskId: string;
     readonly commandId: string;
@@ -3100,6 +3246,84 @@ export function stateMutationFrom(result: Readonly<Record<string, unknown>>): Re
     action: string(result, "action", "command result"),
     revision: decimal(result, "revision", "command result")
   };
+}
+
+function interventionFrom(value: unknown): RelayInterventionItem {
+  const row = object(value, "intervention");
+  const kind = string(row, "kind", "intervention");
+  if (!["REVIEW", "LOCK_CONFLICT", "RUN_FAILED", "UNKNOWN"].includes(kind))
+    throw new Error("人工介入事项类型无效。");
+  const targetUrl = string(row, "target_url", "intervention");
+  if (!/^\/(?:runs\/[^/]+|reviews\?id=[^/]+|tasks\?tab=attention)$/u.test(targetUrl))
+    throw new Error("人工介入事项入口无效。");
+  return { itemKey: string(row, "item_key", "intervention"),
+    changeKey: string(row, "change_key", "intervention"),
+    kind: kind as RelayInterventionItem["kind"],
+    title: string(row, "title", "intervention"),
+    reason: string(row, "reason", "intervention"), targetUrl };
+}
+
+function impactCheckFrom(value: unknown): RelayArtifactImpactCheck {
+  const row = object(value, "impact check");
+  const status = string(row, "status", "impact check");
+  if (!["PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"].includes(status))
+    throw new Error("影响检查状态无效。");
+  return { id: string(row, "id", "impact check"), artifactId: string(row, "artifact_id", "impact check"),
+    sourceBeforeVersionId: string(row, "source_before_version_id", "impact check"),
+    sourceAfterVersionId: string(row, "source_after_version_id", "impact check"),
+    status: status as RelayArtifactImpactCheck["status"],
+    errorCode: row.error_code === null ? null : string(row, "error_code", "impact check"),
+    directTargets: array(row, "direct_targets", "impact check").map((value) => {
+      const item = object(value, "direct target");
+      const availability = string(item, "availability", "direct target");
+      if (availability !== "AVAILABLE" && availability !== "UNAVAILABLE") throw new Error("直接引用可用性无效。");
+      return { targetVersionId: string(item, "target_version_id", "direct target"),
+        targetArtifactId: string(item, "target_artifact_id", "direct target"),
+        relation: string(item, "relation", "direct target"),
+        versionNumber: decimal(item, "version_number", "direct target"), availability,
+        analysed: boolean(item, "analysed", "direct target") };
+    }),
+    possiblyRelated: array(row, "possibly_related", "impact check").map((value) => {
+      const item = object(value, "possibly related");
+      return { targetVersionId: string(item, "target_version_id", "possibly related"),
+        reason: string(item, "reason", "possibly related") };
+    }),
+    hasMore: boolean(row, "has_more", "impact check"),
+    inputTruncated: boolean(row, "input_truncated", "impact check"),
+    unanalysedScope: stringArray(row, "unanalysed_scope", "impact check"),
+    stale: boolean(row, "stale", "impact check") };
+}
+
+function impactCandidateFrom(value: unknown): RelayArtifactImpactCandidate {
+  const row = object(value, "impact candidate");
+  const status = string(row, "status", "impact candidate");
+  if (!["PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"].includes(status))
+    throw new Error("修改候选状态无效。");
+  return { id: string(row, "id", "impact candidate"),
+    impactCheckId: string(row, "impact_check_id", "impact candidate"),
+    targetArtifactId: string(row, "target_artifact_id", "impact candidate"),
+    targetVersionId: string(row, "target_version_id", "impact candidate"),
+    status: status as RelayArtifactImpactCandidate["status"],
+    errorCode: row.error_code === null ? null : string(row, "error_code", "impact candidate"),
+    markdown: row.markdown === null ? null : string(row, "markdown", "impact candidate"),
+    stale: boolean(row, "stale", "impact candidate"),
+    appliedVersionId: row.applied_version_id === null ? null : string(row, "applied_version_id", "impact candidate") };
+}
+
+function artifactTextLockFrom(value: unknown): RelayArtifactTextLock {
+  const row = object(value, "artifact text lock");
+  const kind = string(row, "block_kind", "artifact text lock");
+  const status = string(row, "status", "artifact text lock");
+  const index = row.block_index === null ? null : integer(row, "block_index", "artifact text lock");
+  if ((kind !== "PARAGRAPH" && kind !== "SECTION") ||
+      (status !== "MAPPED" && status !== "UNMAPPED") ||
+      (status === "MAPPED" && index === null) || (status === "UNMAPPED" && index !== null))
+    throw new Error("锁定块状态无效。");
+  return { id: string(row, "id", "artifact text lock"),
+    artifactId: string(row, "artifact_id", "artifact text lock"),
+    baseVersionId: string(row, "base_version_id", "artifact text lock"),
+    blockKind: kind, blockIndex: index, text: string(row, "text", "artifact text lock"),
+    status };
 }
 
 function artifactFrom(value: unknown): RelayArtifact {

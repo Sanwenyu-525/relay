@@ -80,6 +80,33 @@ export function validateModelPortConfig(env: NodeJS.ProcessEnv): void {
   readModelPortConfig(env);
 }
 
+/**
+ * 只读的模型端口状态（供设置页展示）：不含密钥。`base_url` 已由
+ * parseModelBaseUrl 保证是含公开 https 主机、无凭据/query/fragment 的完整地址，
+ * 可安全展示；未自定义时为 null（使用内置默认端点）。`invalid` 表示真实
+ * Provider 配置残缺——生产进程本会拒绝启动，该状态只出现在显式读取配置的场景。
+ */
+export interface ModelPortStatus {
+  readonly provider: 'fake' | 'openai-compatible' | 'invalid';
+  readonly configured: boolean;
+  readonly model: string | null;
+  readonly baseUrl: string | null;
+}
+
+export function describeModelPortStatus(env: NodeJS.ProcessEnv): ModelPortStatus {
+  const provider = env.RELAY_MODEL_PROVIDER;
+  if (provider === undefined || provider === '' || provider === 'fake') {
+    return { provider: 'fake', configured: false, model: null, baseUrl: null };
+  }
+  try {
+    const config: ModelPortConfig = readModelPortConfig(env)!;
+    return { provider: 'openai-compatible', configured: true, model: config.model,
+      baseUrl: config.baseUrl ?? null };
+  } catch {
+    return { provider: 'invalid', configured: false, model: null, baseUrl: null };
+  }
+}
+
 function readBoundedInteger(raw: string | undefined, fallback: number, minimum: number,
   maximum: number, field: string, issues: string[]): number {
   if (raw === undefined || raw === '') return fallback;

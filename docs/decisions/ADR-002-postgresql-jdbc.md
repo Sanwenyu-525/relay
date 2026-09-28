@@ -4,7 +4,7 @@
 
 Superseded（推荐方案层面），2026-09-19，由 Proposed 的 [ADR-006](ADR-006-typescript-first.md)接续；本 ADR 从未 Accepted 或作为生产栈实施。PostgreSQL 部署前提与显式事务原则保留。与 [ADR-001](ADR-001-domain-boundaries.md)互补，不替代其领域边界。
 
-后续约束更新：用户要求性能优先并将 Rust 纳入主要候选。以下保留早期 Java/JDBC/Flyway 推荐的历史依据；它未被接受为生产技术栈，现进入重新评估。PostgreSQL 部署前提与显式事务原则保留，当前候选以[技术选型](../architecture/technology-selection.md)为准，待工程验证后记录最终决策。
+后续约束更新：用户要求性能优先并将 Rust 纳入主要候选。以下保留早期 Java/JDBC/Flyway 推荐的历史依据；它未被接受为生产技术栈，现进入重新评估。PostgreSQL 部署前提与显式事务原则保留，当前候选以[技术选型](../architecture/技术选型.md)为准，待工程验证后记录最终决策。
 
 ## 背景与候选
 
@@ -26,6 +26,6 @@ Superseded（推荐方案层面），2026-09-19，由 Proposed 的 [ADR-006](ADR
 
 ## 影响与后续
 
-影响 Repository、应用事务、migration、开发部署及测试；不改变 Task/Run 生命周期、权限范围或前端选型。依据与官方链接统一保存在[技术选型](../architecture/technology-selection.md)，落地方式见[物理设计](../database/physical-design-postgresql.md)。
+影响 Repository、应用事务、migration、开发部署及测试；不改变 Task/Run 生命周期、权限范围或前端选型。依据与官方链接统一保存在[技术选型](../architecture/技术选型.md)，落地方式见[物理设计](../database/physical-design-postgresql.md)。
 
 下一阶段用真实 PostgreSQL 核验 DDL、交叉引用插入、竞争事务和崩溃恢复；冻结状态在 ADR-006 维护，本历史提案不再作为默认开工方案。

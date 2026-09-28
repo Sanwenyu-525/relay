@@ -18,6 +18,7 @@ function task(id: string, projectId: string, status = "WAITING", runId: string |
 describe("26 日人工待处理汇总", () => {
   it("两个项目的 Review、Task、未决 Run 分组展示，重复业务 ID 去重且正常 Run 不冒充待办", async () => {
     const client = {
+      getInterventions: vi.fn(async () => []),
       getReviews: vi.fn(async () => [{ id: "review-1", kind: "CRITERION", status: "OPEN", revision: "1",
         projectId: "project-a", taskId: "task-a", runId: "run-a", reason: "需要人工判断" },
       { id: "review-1", kind: "CRITERION", status: "OPEN", revision: "1",
@@ -42,6 +43,7 @@ describe("26 日人工待处理汇总", () => {
   it("分页读取有上限并可继续，Run 失败时保留已读事项和不完整提示", async () => {
     let pages = 0;
     const client = {
+      getInterventions: vi.fn(async () => []),
       getReviews: vi.fn(async () => []),
       getWorkspaceTasksPage: vi.fn(async (cursor: string | null) => {
         pages++;
@@ -67,6 +69,7 @@ describe("26 日人工待处理汇总", () => {
     let open = true;
     let fail = false;
     const client = {
+      getInterventions: vi.fn(async () => []),
       getReviews: vi.fn(async () => {
         if (fail) throw new Error("Review 不可读");
         return open ? [{ id: "review-1", kind: "CRITERION", status: "OPEN", revision: "1",

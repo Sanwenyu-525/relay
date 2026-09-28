@@ -91,4 +91,4 @@ M01 固定独立实验的直接依赖和完整 `pnpm-lock.yaml` / `Cargo.lock`�
 
 ## 文档影响检查
 
-本轮没有改变需求、HTTP API、领域状态、业务数据库表或历史 ADR，故不改对应契约和 migration。已同步 [技术选型](../architecture/technology-selection.md)的精确实验组合、[本机部署](../deployment/local-deployment.md)的 checkpoint 安装/角色与保留边界、[实验索引](../../experiments/README.md)及当前模块状态。旧页面视觉数值仍以既有设计系统和旧源码为准；M01 截图是迁移比对输入。
+本轮没有改变需求、HTTP API、领域状态、业务数据库表或历史 ADR，故不改对应契约和 migration。已同步 [技术选型](../architecture/技术选型.md)的精确实验组合、[本机部署](../deployment/本机部署.md)的 checkpoint 安装/角色与保留边界、[实验索引](../../experiments/README.md)及当前模块状态。旧页面视觉数值仍以既有设计系统和旧源码为准；M01 截图是迁移比对输入。

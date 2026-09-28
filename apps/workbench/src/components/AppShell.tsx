@@ -4,6 +4,7 @@ import { Bell, BookOpen, FolderKanban, House, Inbox, Link2, ListChecks, ListTree
 import AppDialog from "./AppDialog";
 import CommandPalette from "./CommandPalette";
 import RelayConnectionDialog from "./RelayConnectionDialog";
+import InterventionNotifications from "./InterventionNotifications";
 import { dialogCount } from "../lib/dialogStack";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { useRelayConnection } from "../lib/relayConnection";
@@ -16,27 +17,29 @@ const skillPageNames: Record<string, string> = {
   blueprint: "蓝图预览", resume: "继续项目", definition: "完善定义", verification: "验收方案"
 };
 
-export default function AppShell({ children, desktopStatus }: {
+export default function AppShell({ children, desktopStatus, commandOpen, onCommandOpen, onCommandClose }: {
   children: ReactNode;
   desktopStatus: "idle" | "connecting" | "error";
+  commandOpen: boolean;
+  onCommandOpen: () => void;
+  onCommandClose: () => void;
 }) {
   const location = useLocation();
   const connection = useRelayConnection();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
-  const [commandOpen, setCommandOpen] = useState(false);
   const chrome = useMemo(() => fixtureAdapter.getNavigationLabels(), [location.key]);
   const dataSourceLabel = connection.mode === "live" ? "已连接本机 API" : "示例数据";
   useEffect(() => {
     const openCommand = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey || event.isComposing || event.key.toLowerCase() !== "k") return;
       if (commandOpen || dialogCount() > 0) { event.preventDefault(); return; }
-      event.preventDefault(); setCommandOpen(true);
+      event.preventDefault(); onCommandOpen();
     };
     document.addEventListener("keydown", openCommand);
     return () => document.removeEventListener("keydown", openCommand);
-  }, [commandOpen]);
-  useEffect(() => { setCommandOpen(false); }, [location.pathname, location.search]);
+  }, [commandOpen, onCommandOpen]);
+  useEffect(() => { onCommandClose(); }, [location.pathname, location.search]);
   const primaryNavigation = [
     { label: "今日", to: "/today", icon: House, count: "" },
     { label: "项目", to: "/projects", icon: FolderKanban, count: "" },
@@ -83,7 +86,7 @@ export default function AppShell({ children, desktopStatus }: {
   const weekday = new Intl.DateTimeFormat("zh-CN", { weekday: "long" }).format(now);
 
   return <>
-    <a className="skip-link" href="#main-content">跳到主要内容</a>
+    <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById("main-content")?.focus(); }}>跳到主要内容</a>
     <div className="app-frame">
       <aside className="app-sidebar">
         <div className="brand" title="示例品牌标识，最终产品显示名待确认">Workflow OS</div>
@@ -110,19 +113,22 @@ export default function AppShell({ children, desktopStatus }: {
           <time className="topbar-date">{date}　{weekday}</time>
           <Link className="icon-button" to="/inbox" aria-label="打开任务收件箱" title="任务收件箱"
             data-testid="inbox-open"><Inbox aria-hidden="true" /></Link>
-          <button className="icon-button" type="button" aria-label="打开命令面板，快捷键 Ctrl+K" data-testid="command-open" onClick={() => setCommandOpen(true)}><Search aria-hidden="true" /></button>
-          <button className="data-source-button" type="button" data-testid="relay-connection-open" aria-label={`数据来源：${dataSourceLabel}，打开连接设置`} onClick={() => setConnectionOpen(true)}>
+          <button className="icon-button app-topbar__command-open" type="button" aria-label="打开命令面板，快捷键 Ctrl+K" data-testid="command-open" onClick={onCommandOpen}><Search aria-hidden="true" /></button>
+          <button className={`data-source-button${connection.mode === "live" ? " data-source-button--live" : ""}`} type="button" data-testid="relay-connection-open" aria-label={`数据来源：${dataSourceLabel}，打开连接设置`} onClick={() => setConnectionOpen(true)}>
             <Link2 aria-hidden="true" /><span>{dataSourceLabel}</span>
           </button>
         </header>
+        {connection.mode === "live" && connection.client && <InterventionNotifications
+          key={connection.epoch} client={connection.client} />}
         {desktopStatus === "connecting" && <p className="helper-text desktop-bootstrap-status" role="status">正在连接桌面本机服务…</p>}
         {desktopStatus === "error" && <p className="action-error desktop-bootstrap-status" role="alert" data-testid="desktop-bootstrap-error">桌面本机服务未就绪。当前仍为示例数据；请检查连接与服务状态。</p>}
         <main id="main-content" className="app-main" tabIndex={-1}>{children}</main>
       </div>
     </div>
-    <p className="demo-notice">{connection.mode === "live" ? "已连接本机 API · 写入真实 PostgreSQL" : "交互预览 · 示例数据，刷新后重置"}</p>
+    {/* 连接状态只在顶栏保留一个主入口；底部示例标识仅用于非 live 模式（连接详情里有“写入真实 PostgreSQL”说明）。 */}
+    {connection.mode !== "live" && <p className="demo-notice">交互预览 · 示例数据，刷新后重置</p>}
     <RelayConnectionDialog open={connectionOpen} onClose={() => setConnectionOpen(false)} />
-    <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} />
+    <CommandPalette open={commandOpen} onClose={onCommandClose} />
     <AppDialog open={navigationOpen} title="导航" variant="drawer" onClose={() => setNavigationOpen(false)}>
       <nav className="mobile-navigation-list" aria-label="完整导航">
         {[...primaryNavigation, ...secondaryNavigation].map((item) => <NavLink key={item.label} to={item.to} className="mobile-navigation-item" onClick={() => setNavigationOpen(false)}>

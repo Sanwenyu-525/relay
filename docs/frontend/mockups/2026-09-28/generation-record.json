@@ -1,0 +1,22 @@
+{
+  "date": "2026-09-28",
+  "tool": "built-in Image Gen",
+  "status": "设计概念，未修改产品实现",
+  "initialPrompt": "Edit the attached UI mockup to correct the missing Windows desktop window title bar. This is a precise single change to the established design, NOT a redesign. Preserve the attached app content, typography, warm ivory and forest green color system, left navigation, existing internal breadcrumb header, text and all functional controls. Create ONE complete desktop application window, no surrounding desktop wallpaper, no device, no browser URL bar. The existing image is 1487x1058 approximately; output a 1487x1102 composition, preserving the client layout and adding a 44px-high full-width TOP title bar above ALL existing UI including the left brand. Do not stretch or squash the original content. Visually separate the native-style custom title bar with a thin warm-gray bottom divider. Title bar flat warm gray #F2EEE7, left-aligned small clean sans-serif text \"Relay Agent\", no duplicated logo in title bar. Empty middle is the window drag area. At the far right EXACTLY THREE compact buttons, each ~44px square: horizontal minimize stroke, single square maximize glyph, X close glyph. Windows controls, not colored macOS traffic lights. Neutral black/gray glyphs in normal state. Top title bar no breadcrumbs, no tabs, no page actions, no extra window menus. Below titlebar, retain existing original inner header and original sidebar brand \"Workflow OS\"; don't merge the titlebar with this app header. Sidebar, breadcrumb and content must start BELOW titlebar and all bottom controls must remain visible. Existing dates are historical example data and must stay unchanged. Small footer \"设计概念 · 示例数据\" preserved. Show window in restored state so maximize glyph is one square. Clean sharp full-frame professional UI concept. Avoid new features, banners, legend panels, mock browser chrome, decorative exterior shadows, or extra text.",
+  "revisionPrompt": "Edit the attached COMPLETE desktop application mockup. The user explicitly wants the left of the Windows custom title bar to contain commonly used action buttons INSTEAD OF the text \"Relay Agent\". Change ONLY the topmost title bar and preserve all content below it, including the app's original \"Workflow OS\" sidebar brand, breadcrumb header, page text, palette, layout, sidebars and controls. Output same complete-window dimensions/aspect ratio as the input, approximately 1460 x 1080. Single image, no montage. REMOVE \"Relay Agent\" entirely from the TOP titlebar, do not replace it with any brand name or a logo. TOP LEFT action group from x16 in this exact order: a left arrow icon (Back), a right arrow icon in muted disabled gray (Forward), thin short vertical separator, magnifying glass plus Chinese text \"搜索\" and compact quiet keyboard hint \"Ctrl K\", thin short separator, plus icon and Chinese text \"新建任务\". Align these horizontally in a compact 44px-tall warm ivory title bar with no boxed button cards. Back/forward icon controls each approximately44px wide, search approximately112px, new task approximately100px. Icons precise 16px monoline, UI text 13-14px sans serif, warm black/gray. Large uncluttered EMPTY center region remains for window dragging. TOP RIGHT exactly three Windows controls: minus minimize, single square maximize, X close, in normal neutral state. Keep these visually and spatially separated from the left action group by ample blank space. Warm gray titlebar background #F2EEE7, thin bottom divider. Do not put \"拖动区\", diagram annotations, extra menus, browser address bar, or product name in titlebar. Do not duplicate back/forward/search/new task in the second breadcrumb header. Never place any interactive control inside the conceptual drag-only center. No added features in content. Retain all original historical example dates, metadata and footer \"设计概念 · 示例数据\". Faithful sharp high quality UI screenshot-style concept, no desktop wallpaper or device frame.",
+  "references": [
+    "../2026-09-19/today.png",
+    "../2026-09-27/knowledge-reading.png",
+    "../../../../exec-e4781944-a9b1-4906-8cd8-994841a0c21f.png"
+  ],
+  "current": [
+    "today-window-v2.png",
+    "knowledge-reading-window-v2.png",
+    "thesis-review-window-v2.png"
+  ],
+  "history": [
+    "today-window.png",
+    "knowledge-reading-window.png",
+    "thesis-review-window.png"
+  ]
+}

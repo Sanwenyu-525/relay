@@ -6,7 +6,7 @@
 
 项目协作入口：[AGENTS.md](../AGENTS.md)。后续设计和实现从该入口读取本契约包。
 
-下游设计：[领域模型与模块边界](../docs/architecture/domain-model.md)、[数据库逻辑模型](../docs/database/logical-model.md)、[技术选型](../docs/architecture/technology-selection.md)、[PostgreSQL 物理设计](../docs/database/physical-design-postgresql.md)、[API 契约](../docs/api/http-command-contract.md)与[首条工程切片](../docs/development/first-human-slice.md)（2026-09-19，Proposed）；取舍见 [ADR-001](../docs/decisions/ADR-001-domain-boundaries.md)及 [ADR-002](../docs/decisions/ADR-002-postgresql-jdbc.md)。用户已确认允许本机 PostgreSQL。下一项为 [TypeScript-first 提案](../docs/decisions/ADR-006-typescript-first.md) 的 P00 验证，通过后再搭工程、V001 及人工闭环。
+下游设计：[领域模型与模块边界](../docs/architecture/domain-model.md)、[数据库逻辑模型](../docs/database/logical-model.md)、[技术选型](../docs/architecture/技术选型.md)、[PostgreSQL 物理设计](../docs/database/physical-design-postgresql.md)、[API 契约](../docs/api/http-command-contract.md)与[首条工程切片](../docs/development/first-human-slice.md)（2026-09-19，Proposed）；取舍见 [ADR-001](../docs/decisions/ADR-001-domain-boundaries.md)及 [ADR-002](../docs/decisions/ADR-002-postgresql-jdbc.md)。用户已确认允许本机 PostgreSQL。下一项为 [TypeScript-first 提案](../docs/decisions/ADR-006-typescript-first.md) 的 P00 验证，通过后再搭工程、V001 及人工闭环。
 
 依据：[完整聊天评审](../architecture-review.md)。三份原始文档已在当前目录取得；产品范围和关键语义对照见 [设计审计](../docs/development/design-audit.md)。本包记录明确的设计选择与验收条件，不将这些选择伪装成既有实现或已接受的历史决策。
 

@@ -1,4 +1,4 @@
-﻿﻿# 开发用途：开发期前后端启停的唯一入口。
+﻿# 开发用途：开发期前后端启停的唯一入口。
 # - 默认并行启动 apps/api（Fastify API）与 apps/workbench（Vite fixture 预览），退出时按序停止两者。
 # - -FrontendOnly 只启动 apps/workbench：不需要 apps/api/.env、不构建后端、不启动 API，
 #   用于在没有任何后端配置时预览 fixture 页面。

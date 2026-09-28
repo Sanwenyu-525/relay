@@ -139,7 +139,7 @@ Gateway 原表的 run_id/step_id 是 RUN 分支；显式 URL 导入按 [ADR-004]
 5. 确定产物路径布局、持久化完成语义、孤儿清理宽限期和历史保留策略；未完成前不启用自动清理。
 6. 基于 A01–D11 编写真实数据库测试与故障注入；本文不声称这些检查已经执行。
 
-已形成[技术选型](../architecture/technology-selection.md)与[物理设计](physical-design-postgresql.md)。物理层将 execution_contracts 改为共享 run_id 主键、多资源关系改为关联表、批准占用与调用绑定拆开，并新增 Workspace authority 锁定点；这些是本逻辑语义的落实，不是第二套业务 Owner。物理层锁序在原顺序前增加 Authority，所有相关写入入口需统一遵守。
+已形成[技术选型](../architecture/技术选型.md)与[物理设计](physical-design-postgresql.md)。物理层将 execution_contracts 改为共享 run_id 主键、多资源关系改为关联表、批准占用与调用绑定拆开，并新增 Workspace authority 锁定点；这些是本逻辑语义的落实，不是第二套业务 Owner。物理层锁序在原顺序前增加 Authority，所有相关写入入口需统一遵守。
 
 下游已形成 [API 契约](../api/http-command-contract.md)及[首条工程切片](../development/first-human-slice.md)；下一步建仓时生成 migration 并在 PostgreSQL 验证。原件差异见设计审计，不得把推荐技术写成已运行事实。
 

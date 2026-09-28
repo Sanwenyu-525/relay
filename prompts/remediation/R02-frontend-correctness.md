@@ -5,7 +5,7 @@
 ```text
 请在 D:/Develop/Relay-Agent 修复独立验收中的 FE-01、FE-02、FE-03、FE-04。
 先读 AGENTS.md、CODEX_NEXT_STEP.md、docs/testing/frontend-backend-acceptance-2026-09-21.md、
-docs/development/ui-preview-acceptance.md、docs/frontend/design-system.md 和现有页面代码。
+docs/development/前端预览实施与验收.md、docs/frontend/design-system.md 和现有页面代码。
 这些是独立修复项，不重跑原开发提示词、不重写布局、不更换技术栈。
 
 负责范围：apps/workbench 的 fixtureAdapter、受影响视图/草稿导航及相关测试。
@@ -50,7 +50,7 @@ fixture 应模拟契约，不能给未来接入留下“前端已通过、后端
 运行 npm run build、npm run test、npm run test:browser，必要截图覆盖宽/窄窗口。
 仍使用唯一 design-tokens.json；本修复不做新主题、字体下载或大范围 CSS 改写。
 
-同步 docs/development/ui-preview-acceptance.md 和本轮验收状态，只对有新证据的编号标修复。
+同步 docs/development/前端预览实施与验收.md 和本轮验收状态，只对有新证据的编号标修复。
 运行 node scripts/check-docs.mjs。交付时逐项说明 FE 编号、证据、未覆盖场景。
 全部 fixture 测试通过也不能声明真实 API、数据库联调或 Windows WebView 已验收。
 ```

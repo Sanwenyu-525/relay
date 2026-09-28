@@ -32,4 +32,4 @@ Accepted（实施原则），2026-09-19。依据：用户要求参考借鉴成�
 
 2026-09-19 后续评审：当前 TypeScript-first 推荐见 [ADR-006](ADR-006-typescript-first.md)，接续 Rust 候选研究；本 ADR 的 Accepted 仍仅涵盖复用实施原则，不代表接受新技术组合。
 
-按[复用策略](../architecture/reuse-strategy.md)产出采用表与 PoC 证据。实际选型另行记录或更新对应技术 ADR；跨进程恢复不能假装共享业务事务。
+按[复用策略](../architecture/复用策略.md)产出采用表与 PoC 证据。实际选型另行记录或更新对应技术 ADR；跨进程恢复不能假装共享业务事务。
