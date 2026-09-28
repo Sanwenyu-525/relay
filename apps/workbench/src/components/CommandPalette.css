@@ -3,11 +3,13 @@
 .command-palette-scope { display: flex; align-items: center; gap: var(--relay-space-2); margin-top: var(--relay-space-3); }
 .command-palette-results { list-style: none; padding: 0; margin: var(--relay-space-4) 0; max-height: 16rem; overflow-y: auto; }
 .command-palette-results li { border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
-.command-palette-results button, .command-palette-actions > button { display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: var(--relay-space-3); border: 0; background: transparent; color: var(--relay-color-text-primary); text-align: left; cursor: pointer; }
+.command-palette-results button, .command-palette-actions > button { display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: var(--relay-space-3); border: 0; border-radius: var(--relay-radius-control); background: transparent; color: var(--relay-color-text-primary); text-align: left; cursor: pointer; }
 .command-palette-results button:hover, .command-palette-actions > button:hover:not(:disabled) { background: var(--relay-color-selection-hover); }
+.command-palette-results button.is-active { background: var(--relay-color-selection-bg); color: var(--relay-color-text-primary); }
 .command-palette-results small, .command-palette-actions small { color: var(--relay-color-text-secondary); overflow-wrap: anywhere; }
 .command-palette-actions { margin-top: var(--relay-space-6); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .command-palette-actions h3 { margin: var(--relay-space-4) 0; }
+.command-palette-actions > button + button { margin-top: var(--relay-space-1); }
 .command-palette-actions > button:disabled { color: var(--relay-color-disabled-text); cursor: default; }
 .command-palette-project { margin-top: var(--relay-space-6); padding-top: var(--relay-space-4); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .command-palette-project .secondary-button { margin-top: var(--relay-space-4); }

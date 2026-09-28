@@ -216,6 +216,26 @@ describe("项目连接与 Permission 设置", () => {
     expect(fetchMock.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET")).toBe(true);
   });
 
+  it("连接只读健康核对只重读服务端配置，不触发写入", async () => {
+    connect(); const data = state();
+    data.connections = [{ id: connectionId, project_id: projectId, status: "ACTIVE", version: "1", capabilities: ["WEB_FETCH"], allowed_host: "example.org", created_at: created }];
+    const detail = { id: connectionId, project_id: projectId, status: "ACTIVE", version: "1", capabilities: ["WEB_FETCH"], allowed_host: "example.org", created_at: created };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if ((init?.method ?? "GET") !== "GET") throw new Error(`Unexpected write ${path}`);
+      if (path === `/projects/${projectId}/connections/${connectionId}`) return response(200, detail);
+      return baseGet(path, data) ?? response(404, {});
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+    expect(mounted.wrapper.text()).toContain("已连接（尚未授权）");
+    await mounted.wrapper.get(`[data-testid="connection-health-${connectionId}"]`).trigger("click"); await flush();
+    expect(mounted.wrapper.text()).toContain("服务端只读核对");
+    expect(mounted.wrapper.text()).toContain("允许主机 example.org");
+    expect(mounted.wrapper.text()).toContain("真实可达性探针当前无只读接口");
+    expect(fetchMock.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET")).toBe(true);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  });
+
   it("版本冲突保留策略草稿与原 command_id；不静默覆盖新版", async () => {
     connect(); const data = state();
     data.policies = [{ id: policyId, project_id: projectId, status: "ACTIVE", active_version: "1", revision: "1", created_at: created }];

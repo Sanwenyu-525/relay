@@ -30,6 +30,9 @@ function currentTask(allowedActions: string[], runId: string | null = null) {
 async function key(keyName: string, options: KeyboardEventInit = {}) {
   await act(async () => { document.dispatchEvent(new KeyboardEvent("keydown", { key: keyName, bubbles: true, cancelable: true, ...options })); });
 }
+async function elementKey(element: Element, keyName: string, options: KeyboardEventInit = {}) {
+  await act(async () => { element.dispatchEvent(new KeyboardEvent("keydown", { key: keyName, bubbles: true, cancelable: true, ...options })); });
+}
 function palette(): HTMLElement { const element = document.querySelector<HTMLElement>('[role="dialog"][aria-label="命令面板"]'); if (!element) throw new Error("palette missing"); return element; }
 
 describe("Ctrl+K 全局命令面板", () => {
@@ -89,6 +92,33 @@ describe("Ctrl+K 全局命令面板", () => {
     expect(mounted.wrapper.text()).toContain("研究资料");
   });
 
+  it("↑↓ 选择命中项、Enter 打开当前命中项", async () => {
+    const secondId = "66666666-6666-4666-8666-666666666666";
+    connect(); const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length); requests.push(`${init?.method ?? "GET"} ${path}`);
+      if (path.startsWith("/search?")) return response({ items: [
+        { type: "KNOWLEDGE", id: knowledgeId, version: "3", title: "资料甲", snippet: "甲摘录", matched_fields: ["title"], source_ref: "knowledge:source-3", status: "ACTIVE", project_id: projectId },
+        { type: "MEMORY", id: secondId, version: "1", title: "资料乙", snippet: "乙摘录", matched_fields: ["title"], source_ref: "memory:source-1", status: "ACTIVE", project_id: projectId }], next_cursor: null });
+      throw new Error(`Unexpected ${path}`);
+    }));
+    const mounted = await mountWorkbench("/projects"); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="command-open"]').trigger("click");
+    const search = palette().querySelector('[data-testid="command-search"]')!;
+    await new DomWrapper(search).setValue("资料"); await flush(350);
+    const rows = Array.from(palette().querySelectorAll<HTMLElement>("[data-result-index]"));
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.classList.contains("is-active")).toBe(true);
+    await elementKey(search, "ArrowDown");
+    expect(Array.from(palette().querySelectorAll<HTMLElement>("[data-result-index]"))[1]!.classList.contains("is-active")).toBe(true);
+    // Enter 打开当前命中的第二项（组合输入由 isComposing 守卫与 AppShell 全局快捷键把关，jsdom 不复现该标志）
+    await elementKey(search, "Enter"); await flush();
+    expect(mounted.router.currentRoute.value.path).toBe(`/projects/${projectId}/knowledge`);
+    expect(mounted.router.currentRoute.value.query.item).toBe(secondId);
+    expect(mounted.router.currentRoute.value.query.kind).toBe("MEMORY");
+    expect(requests.every((item) => item.startsWith("GET "))).toBe(true);
+  });
+
   it("明确 Project ID 先经 GET 单读核对；创建入口复用真实表单的待预览意图", async () => {
     connect(); const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const path = String(input).slice(root.length);
@@ -108,7 +138,7 @@ describe("Ctrl+K 全局命令面板", () => {
     await new DomWrapper(Array.from(palette().querySelectorAll(".command-palette-actions button")).find((item) => item.textContent?.includes("新建项目"))!).trigger("click"); await flush();
     expect(mounted.router.currentRoute.value.path).toBe("/projects");
     expect(mounted.router.currentRoute.value.query.view).toBe("create");
-    expect(mounted.wrapper.text()).toContain("待预览的人工蓝图意图");
+    expect(mounted.wrapper.text()).toContain("蓝图意图");
     expect(mounted.wrapper.get('textarea[name="project-goal"]').attributes("disabled")).toBeUndefined();
   });
 

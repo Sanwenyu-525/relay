@@ -14,6 +14,8 @@ import "./ConnectionsView.css";
 
 const capabilities: readonly RelayGatewayCapability[] = ["WEB_FETCH", "FILE_READ", "FAKE_WRITE", "FAKE_PUBLIC_READ"];
 const isFileCapability = (capability: RelayGatewayCapability) => capability === "FILE_READ" || capability === "FAKE_WRITE";
+const connectionStatusText = (status: string): string => status === "ACTIVE" ? "已连接（尚未授权）"
+  : status === "DISABLED" ? "已停用（失效）" : status === "REVOKED" ? "已撤销" : `未连接（${status}）`;
 
 interface PolicyRow {
   readonly policy: RelayGatewayPolicy;
@@ -107,6 +109,27 @@ export function ProjectConnectionsView() {
   const [policyHost, setPolicyHost] = useState("");
   const [policyResourceId, setPolicyResourceId] = useState("");
   const [maxPayloadBytes, setMaxPayloadBytes] = useState("2");
+  const [health, setHealth] = useState<Record<string, { checking: boolean; result: string | null; error: string | null }>>({});
+
+  async function checkConnectionHealth(connectionId: string) {
+    if (client === null || health[connectionId]?.checking) return;
+    const request = scope.current;
+    setHealth((current) => ({ ...current, [connectionId]: { checking: true, result: null, error: null } }));
+    try {
+      const detail = await client.getGatewayConnectionSetting(projectId, connectionId);
+      if (request !== scope.current) return;
+      if (detail.id !== connectionId || detail.projectId !== projectId) throw new Error("连接详情与目标不匹配。");
+      const active = detail.status === "ACTIVE";
+      setHealth((current) => ({ ...current, [connectionId]: { checking: false, error: null,
+        result: `服务端只读核对：状态 ${detail.status}（${active ? "已连接" : "未连接/已停用"}） · 版本 v${detail.version}`
+          + (detail.capabilities.length > 0 ? ` · 能力 ${detail.capabilities.join(" · ")}` : "")
+          + (detail.allowedHost ? ` · 允许主机 ${detail.allowedHost}` : "")
+          + (active ? "" : "；连接存在不等于已获授权，失效后原批准不可继续复用。") } }));
+    } catch (caught) {
+      if (request !== scope.current) return;
+      setHealth((current) => ({ ...current, [connectionId]: { checking: false, result: null, error: describeLiveError(caught).message } }));
+    }
+  }
 
   async function refresh(activeClient: RelayApiClient, request = scope.current): Promise<Snapshot | null> {
     setLoading(true); setError(null);
@@ -126,7 +149,7 @@ export function ProjectConnectionsView() {
   useEffect(() => {
     const request = ++scope.current;
     pendingRef.current = null; setPending(null); setMayRetry(false); setSnapshot(null);
-    setActionError(null); setFailedCommandId(null); setMessage(null); setPolicyId("");
+    setActionError(null); setFailedCommandId(null); setMessage(null); setPolicyId(""); setHealth({});
     if (client !== null) void refresh(client, request);
     return () => { scope.current++; pendingRef.current = null; };
   }, [client, projectId, connection.epoch]);
@@ -254,7 +277,7 @@ export function ProjectConnectionsView() {
     {client === null ? <p className="warning-callout" role="status">当前为示例数据预览；没有真实连接或权限配置。请先连接本机 API。</p> : <>
       <div className="connections-title"><h2>{snapshot?.project.title ?? "当前项目"}</h2>
         <button className="secondary-button" type="button" onClick={() => { void refresh(client); }} disabled={loading || busy}>刷新服务端配置</button></div>
-      <p className="helper-text">Project ID：{projectId}</p>
+      <p className="helper-text">Project ID：<code className="hash-code">{projectId}</code></p>
       {loading && <p role="status">正在读取项目连接、受管资源与权限版本…</p>}
       {error && <p className="action-error" role="alert">{error}</p>}
       {writeBlockedReason && <p className="disabled-reason" data-testid="connections-archive-reason">{writeBlockedReason}</p>}
@@ -268,15 +291,23 @@ export function ProjectConnectionsView() {
       {snapshot && <>
         <section className="surface-panel"><h2>连接</h2>
           <p className="helper-text">本列表最多读取服务端前 100 条且无游标。状态与 capability 来自服务端；WEB_FETCH 只公开 allowed_host，FILE_READ 的连接目录未由此接口公开。连接本身不是授权。</p>
-          {snapshot.connections.length === 0 ? <p>本项目尚无连接。</p> : <ul className="connections-list">{snapshot.connections.map((item) => <li key={item.id}>
-            <div><strong>{item.capabilities.join(" · ")}</strong><small>{item.status} · v{item.version} · {item.id}</small>
+          {snapshot.connections.length === 0 ? <p className="helper-text">本项目尚无连接。</p> : <ul className="connections-list">{snapshot.connections.map((item) => {
+            const healthState = health[item.id];
+            return <li key={item.id}>
+            <div><strong>{item.capabilities.join(" · ")}</strong><small>{connectionStatusText(item.status)} · {item.status} · v{item.version} · {item.id}</small>
               {item.capabilities.includes("WEB_FETCH") && <small>允许主机：{item.allowedHost ?? "未由接口公开"}</small>}
-              {item.capabilities.includes("FILE_READ") && <small>连接目录未由此接口公开；下方受管资源目录是独立配置，不推定同根。</small>}</div>
-            {item.status === "ACTIVE" && <button className="danger-button" type="button" disabled={busy || writeBlockedReason !== null} onClick={() => { void sendCommand({
+              {item.capabilities.includes("FILE_READ") && <small>连接目录未由此接口公开；下方受管资源目录是独立配置，不推定同根。</small>}
+              {healthState?.result && <small className="connection-health" role="status">{healthState.result}</small>}
+              {healthState?.error && <small className="action-error" role="alert">健康核对失败：{healthState.error}</small>}</div>
+            <div className="connections-actions">
+              <button className="secondary-button" type="button" disabled={healthState?.checking === true} onClick={() => { void checkConnectionHealth(item.id); }} data-testid={`connection-health-${item.id}`}>{healthState?.checking ? "正在只读核对…" : "只读健康核对"}</button>
+              {item.status === "ACTIVE" && <button className="danger-button" type="button" disabled={busy || writeBlockedReason !== null} onClick={() => { void sendCommand({
               id: createCommandId(), type: "DisableGatewayConnection", resultKey: "connection_id", targetId: item.id, expectedStatus: "DISABLED",
               label: "连接停用", send: (api, commandId) => api.disableGatewayConnection({ projectId, connectionId: item.id,
                 expectedVersion: item.version, commandId }) }); }}>停用连接</button>}
-          </li>)}</ul>}
+            </div>
+          </li>; })}</ul>}
+          <p className="field-hint">「只读健康核对」只重新读取服务端连接配置，不触发任何写入或外部动作；主机/目录真实可达性探针当前无只读接口，标记为待接入。</p>
           <form className="connections-form" onSubmit={submitConnection}>
             <h3>创建连接</h3><label className="field"><span className="field-label">Capability</span><select value={connectionCapability} disabled={busy} onChange={(event) => setConnectionCapability(event.target.value as RelayGatewayCapability)} data-testid="connection-capability">
               {capabilities.map((capability) => <option key={capability} value={capability}>{capability}</option>)}</select></label>
@@ -287,7 +318,7 @@ export function ProjectConnectionsView() {
         </section>
 
         <section className="surface-panel"><h2>受管资源</h2><p className="helper-text">本列表最多读取服务端前 100 条且无游标。下列目录是 FILE_READ / FAKE_WRITE 策略可引用的独立受管资源；不等于 FILE_READ 连接目录。</p>
-          {snapshot.resources.length === 0 ? <p>本项目尚无受管资源。</p> : <ul className="connections-list">{snapshot.resources.map((item) => <li key={item.id}><div><strong>{item.canonicalRoot}</strong><small>{item.status} · rev {item.revision} · epoch {item.resourceEpoch} · {item.id}</small>
+          {snapshot.resources.length === 0 ? <p className="helper-text">本项目尚无受管资源。</p> : <ul className="connections-list">{snapshot.resources.map((item) => <li key={item.id}><div><strong>{item.canonicalRoot}</strong><small>{item.status} · rev {item.revision} · epoch {item.resourceEpoch} · {item.id}</small>
             <small>Windows 文件写入目录身份：{item.fileWriteIdentityBound ? "已绑定" : "未绑定；若需在 Windows 使用 FILE_WRITE，请在 Windows 停用后重新登记此目录"}</small></div>
             {item.status === "ACTIVE" && <button className="danger-button" type="button" disabled={busy || writeBlockedReason !== null} onClick={() => { void sendCommand({
               id: createCommandId(), type: "DisableManagedResource", resultKey: "resource_id", targetId: item.id, expectedStatus: "DISABLED",
@@ -300,7 +331,7 @@ export function ProjectConnectionsView() {
 
         <section className="surface-panel"><h2>PermissionPolicy</h2>
           <p className="helper-text">本列表最多读取服务端前 100 条且无游标。没有匹配的有效策略时默认 DENY。AUTO / ASK / DENY 只在你明确提交策略后生效；还需有效连接及目标边界匹配。</p>
-          {snapshot.policies.length === 0 ? <p>本项目没有权限策略，当前默认 DENY。</p> : <ul className="connections-list">{snapshot.policies.map(({ policy, versions }) => {
+          {snapshot.policies.length === 0 ? <p className="helper-text">本项目没有权限策略，当前默认 DENY。</p> : <ul className="connections-list">{snapshot.policies.map(({ policy, versions }) => {
             const active = versions.find((version) => version.version === policy.activeVersion);
             return <li key={policy.id}><div><strong>{active ? `${active.capability} · ${active.decision}` : "无有效版本 · DENY"}</strong>
               <small>{policy.status} · rev {policy.revision} · active v{policy.activeVersion ?? "无"} · {policy.id}</small>

@@ -26,15 +26,20 @@ interface PendingCommand {
   readonly replacementId: string | null;
 }
 
-const kinds: readonly { kind: RelayInformationKind; label: string }[] = [
-  { kind: "KNOWLEDGE", label: "Knowledge 资料" },
-  { kind: "MEMORY", label: "Memory 记忆" },
-  { kind: "DECISION", label: "Decision 决定" },
-  { kind: "RULE", label: "Rule 规则" }
+const kinds: readonly { kind: RelayInformationKind; label: string; noun: string }[] = [
+  { kind: "KNOWLEDGE", label: "Knowledge 资料", noun: "资料" },
+  { kind: "MEMORY", label: "Memory 记忆", noun: "记忆" },
+  { kind: "DECISION", label: "Decision 决定", noun: "决定" },
+  { kind: "RULE", label: "Rule 规则", noun: "规则" }
 ];
 
 function rowTitle(row: InformationRow): string {
   return "title" in row ? row.title : row.ruleKey;
+}
+
+function rowScopeLabel(row: InformationRow): string {
+  if ("scope" in row) return row.scope === "WORKSPACE" ? "工作空间" : row.scope === "PROJECT" ? "项目" : "任务";
+  return row.projectId ? "项目" : "工作空间";
 }
 
 function splitLines(value: string): string[] {
@@ -125,6 +130,7 @@ export default function KnowledgeView() {
   const selectedMemory = kind === "MEMORY" ? selected as RelayMemory | null : null;
   const selectedDecision = kind === "DECISION" ? selected as RelayDecision | null : null;
   const selectedRule = kind === "RULE" ? selected as RelayRule | null : null;
+  const currentNoun = kinds.find((item) => item.kind === kind)?.noun ?? "资料";
 
   function rowTarget(row: InformationRow): WriteTarget | null {
     if ("scope" in row) {
@@ -557,16 +563,18 @@ export default function KnowledgeView() {
         <section className="surface-panel knowledge-list">
           <div className="section-heading-row"><h2>{kinds.find((item) => item.kind === kind)?.label}</h2>
             <button type="button" className="secondary-button" data-testid="knowledge-create" disabled={pendingCommand !== null} onClick={() => openForm(false)}>新建</button></div>
-          {!loading && rows.length === 0 && <p className="helper-text">当前范围还没有这类资料。</p>}
+          {!loading && rows.length === 0 && <p className="helper-text">当前范围还没有{currentNoun}。点击右上角「新建」添加第一条{currentNoun}。</p>}
           {rows.map((row) => <button key={row.id} type="button" className={`knowledge-row${row.id === selectedId ? " knowledge-row--active" : ""}`}
-            disabled={pendingCommand !== null} onClick={() => selectRow(row.id)}><strong>{rowTitle(row)}</strong><small>{row.status} · v{row.revision}</small></button>)}
+            disabled={pendingCommand !== null} onClick={() => selectRow(row.id)}><strong>{rowTitle(row)}</strong><small>{row.status} · 当前 v{row.currentVersion} · {rowScopeLabel(row)}</small></button>)}
         </section>
 
         <div className="knowledge-detail">
           {selected ? <section className="surface-panel">
             <div className="section-heading-row"><h2>{rowTitle(selected)}</h2><span>{selected.status} · 修订 v{selected.revision}</span></div>
             <p className="helper-text">ID：{selected.id} · 当前版本 v{selected.currentVersion}</p>
-            {selectedKnowledge && <p className="helper-text">资料归属：{selectedKnowledge.projectId ?? "工作空间"}</p>}
+            <p className="helper-text" data-testid="knowledge-detail-scope">范围：{"scope" in selected
+              ? (selected.scope === "WORKSPACE" ? "工作空间" : `${selected.scope === "PROJECT" ? "项目" : "任务"} ${selected.scopeId}`)
+              : selected.projectId ? `项目 ${selected.projectId}` : "工作空间"}</p>
             {selectedMemory && <><p className="knowledge-body">{selectedMemory.text}</p>
               <p className="helper-text">明确确认：{selectedMemory.confirmedBy} · {selectedMemory.confirmedAt}{selectedMemory.expiresAt && <> · 到期 {selectedMemory.expiresAt}</>}</p></>}
             {selectedDecision && <><p className="knowledge-body">选择：{selectedDecision.choice}</p>

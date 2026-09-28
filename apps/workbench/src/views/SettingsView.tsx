@@ -72,5 +72,16 @@ export default function SettingsView() {
         </ul>
       </section>
     </>}
+      <section className="surface-panel settings-card">
+        <h2>偏好与暂不可用项</h2>
+        <p className="helper-text">本页只呈现当前服务实例已定义、且可安全只读的事实。以下偏好尚无对应的服务端契约，明确标记为暂不可用，不提供假开关，也不新建万能 settings 保存接口。</p>
+        <dl className="settings-definition-list">
+          <div><dt>深色主题 / 主题切换</dt><dd><span className="status-chip status-chip--neutral">暂不可用</span> 当前设计系统只定义浅色实现，未决定深色主题，不提供切换开关。</dd></div>
+          <div><dt>界面语言</dt><dd><span className="status-chip status-chip--neutral">暂不可用</span> 尚无语言偏好接口。</dd></div>
+          <div><dt>通知偏好</dt><dd><span className="status-chip status-chip--neutral">暂不可用</span> 人工介入提醒的策略与调度尚未冻结，不在本页写入。</dd></div>
+          <div><dt>工作空间级显示偏好持久化</dt><dd><span className="status-chip status-chip--neutral">暂不可用</span> 没有对应的写接口；项目级「默认工作台视图」在项目设置内按 ViewConfiguration 契约管理。</dd></div>
+        </dl>
+        <p className="helper-text"><Info aria-hidden="true" />界面时区只在「今日」页作为显示核对，不改变 Later 的存储语义；切换通用/论文/开发视图只改展示，不改变活动 Run 的契约。两者均不在本页写入。</p>
+      </section>
   </section>;
 }

@@ -472,6 +472,13 @@ export default function TodayView() {
             <p>{current.focusHasEligibleCandidate ? "今日焦点有符合资格的任务" : "当前没有符合今日焦点资格的任务"}；焦点不改变任务资格。</p>
           </details>}
         </div>
+        <aside className="today-review-entry" data-testid="today-review-entry">
+          <div className="today-review-entry__copy">
+            <h2>待审与人工判断</h2>
+            <p>需要人工验收、动作批准或决定的事项集中在待审中心逐项处理。今日页只帮你安排任务，不在此完成判断，也不会改变待审状态。</p>
+          </div>
+          <Link className="secondary-button" to="/reviews">打开待审中心</Link>
+        </aside>
         {allEmpty
           ? <div className="today-empty" data-testid="today-empty">
             <p className="today-empty__title">当前日期下没有可安排的任务。</p>

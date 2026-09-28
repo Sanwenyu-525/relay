@@ -10,6 +10,9 @@
 .connections-page .connections-form { margin-top: var(--relay-space-6); padding-top: var(--relay-space-4); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .connections-page .connections-form h3 { margin: 0; }
 .connections-page .connections-form > button, .connections-page .connections-entry > button { margin-top: var(--relay-space-6); }
+.connections-page .connections-entry input { max-width: min(100%, var(--relay-layout-dialog-maxWidth)); }
+.connections-page > .inline-link { display: inline-block; margin-top: var(--relay-space-4); }
 .connections-page .connections-actions { display: flex; align-items: flex-start; flex-wrap: wrap; gap: var(--relay-space-3); }
 .connections-page .success-callout { color: var(--relay-color-status-success-text); background: var(--relay-color-status-success-bg); padding: var(--relay-space-4); }
+.connections-page .connections-list small.connection-health { color: var(--relay-color-status-success-text); margin-top: var(--relay-space-2); }
 .connections-page .warning-callout button { margin: var(--relay-space-3) var(--relay-space-3) 0 0; }

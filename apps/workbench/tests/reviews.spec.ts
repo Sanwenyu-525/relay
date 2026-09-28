@@ -247,4 +247,98 @@ describe("P07 Review Inbox", () => {
     expect(posts).toBe(1);
     expect(mounted.wrapper.text()).toContain("已核对原命令回执");
   });
+
+  it("过期请求停用决定并给出刷新入口，点击不提交新决定", async () => {
+    activate();
+    const expired = { ...review(), expires_at: "2020-01-01T00:00:00.000Z" };
+    let posts = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `${reviewUrl}?status=OPEN`) return response(200, { items: [expired] });
+      if (url === `${reviewUrl}/${reviewId}`) return response(200, expired);
+      if (url === `${reviewUrl}/${reviewId}/decisions` && init?.method === "POST") { posts += 1; throw new Error("过期决定不应提交"); }
+      throw new Error(`unexpected request: ${url}`);
+    }));
+    const mounted = await mountWorkbench(`/reviews?id=${reviewId}`); unmount = mounted.unmount;
+    await flush();
+    expect(mounted.wrapper.text()).toContain("已超过有效期");
+    expect(mounted.wrapper.get('[data-testid="review-expired-reason"]').exists()).toBe(true);
+    expect(mounted.wrapper.get('[data-testid="review-expired-refresh"]').exists()).toBe(true);
+    expect(mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').attributes("disabled")).toBeDefined();
+    await mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').trigger("click");
+    await flush();
+    expect(posts).toBe(0);
+  });
+
+  it("列表逐项提示与拒绝不等于执行失败说明", async () => {
+    activate();
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const url = String(input);
+      if (url === `${reviewUrl}?status=OPEN`) return response(200, { items: [review()] });
+      if (url === `${reviewUrl}/${reviewId}`) return response(200, review());
+      throw new Error(`unexpected request: ${url}`);
+    }));
+    const mounted = await mountWorkbench(`/reviews?id=${reviewId}`); unmount = mounted.unmount;
+    await flush();
+    expect(mounted.wrapper.text()).toContain("逐项判断");
+    expect(mounted.wrapper.text()).toContain("不能绕过证据自动接受");
+    expect(mounted.wrapper.text()).toContain("不等于执行失败");
+  });
+
+  it("动作批准绑定权限版本与变化集，说明本地 commit 不授权 push", async () => {
+    activate();
+    const approval = {
+      ...review(),
+      kind: "ACTION_APPROVAL",
+      reason: "Git commit 需要你的批准",
+      target: { operation_id: "op-1", action_type: "GIT_COMMIT", normalized_target: "repo/main", params_hash: "b".repeat(64), permission_version: "4", changeset_hash: "c".repeat(64) },
+      evidence: { changeset_id: "cs-9", changeset_version: "3" },
+      effect: { on_approve: "仅允许这一次本地 commit，不授权 push" },
+      allowed_decisions: ["APPROVE", "DENY"],
+      expires_at: null
+    };
+    const posts: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `${reviewUrl}?status=OPEN`) return response(200, { items: [approval] });
+      if (url === `${reviewUrl}/${reviewId}`) return response(200, approval);
+      if (url === `${reviewUrl}/${reviewId}/decisions` && init?.method === "POST") {
+        posts.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return response(200, { command_id: posts[0].command_id, committed_at: "2026-09-23T00:01:00.000Z", result: { review_id: reviewId, decision_id: "d-1", decision: "APPROVE", effect: {}, revision: "2" } });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }));
+    const mounted = await mountWorkbench(`/reviews?id=${reviewId}`); unmount = mounted.unmount;
+    await flush();
+    expect(mounted.wrapper.text()).toContain("权限版本");
+    expect(mounted.wrapper.text()).toContain("变化集摘要");
+    expect(mounted.wrapper.text()).toContain("批准本地 commit 不授权 push");
+    await mounted.wrapper.get('[data-testid="review-decision-APPROVE"]').trigger("click");
+    await flush();
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({ decision: "APPROVE", target_hash: "a".repeat(64) });
+    expect(mounted.wrapper.text()).toContain("动作批准不表示动作已经执行");
+  });
+
+  it("批准后目标变化时说明失效并重新读取，不显示为已批准", async () => {
+    activate();
+    let reloads = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `${reviewUrl}?status=OPEN`) return response(200, { items: [review()] });
+      if (url === `${reviewUrl}/${reviewId}`) { reloads += 1; return response(200, review()); }
+      if (url === `${reviewUrl}/${reviewId}/decisions` && init?.method === "POST") {
+        return response(409, { code: "REVIEW_TARGET_CHANGED", detail: "review target changed" });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }));
+    const mounted = await mountWorkbench(`/reviews?id=${reviewId}`); unmount = mounted.unmount;
+    const initialReloads = reloads;
+    await flush();
+    await mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').trigger("click");
+    await flush();
+    expect(mounted.wrapper.text()).toContain("动作内容或目标已经变化");
+    expect(mounted.wrapper.text()).not.toContain("决定已保存");
+    expect(reloads).toBeGreaterThan(initialReloads);
+  });
 });

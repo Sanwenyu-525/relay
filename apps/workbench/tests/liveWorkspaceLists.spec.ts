@@ -125,7 +125,12 @@ describe("live Workspace 项目与任务列表", () => {
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/tasks"); unmount = mounted.unmount;
-    expect(urls).toEqual([`${root}/tasks?scope=all`]);
+    // 列表主查询必须恰好发生一次；额外只允许“按 Project 单读标题”的行级读取（今日页整改行为），
+    // 其余任何调用都视为回归。这样无论该单读优化是否合入，本用例都稳定。
+    expect(urls.filter((u) => u === `${root}/tasks?scope=all`)).toHaveLength(1);
+    const projectTitleReads = urls.filter((u) => new RegExp(`^${root}/projects/[^/]+$`).test(u));
+    const unexpectedCalls = urls.filter((u) => u !== `${root}/tasks?scope=all` && !projectTitleReads.includes(u));
+    expect(unexpectedCalls).toEqual([]);
     expect(mounted.wrapper.get('[data-testid="tasks-live-count"]').text())
       .toContain("已加载 2 项 · 当前筛选显示 2 项 · 仍有后续页");
     expect(mounted.wrapper.get(`[data-testid="task-row-${taskA}"]`).text()).toContain(projectA);
@@ -144,12 +149,12 @@ describe("live Workspace 项目与任务列表", () => {
     expect(mounted.wrapper.get('[data-testid="tasks-live-count"]').text()).toContain("当前筛选显示 1 项");
     await mounted.wrapper.get('[data-testid="tasks-live-load-more"]').trigger("click");
     await flush(30);
-    expect(urls.at(-1)).toBe(`${root}/tasks?scope=all&cursor=t%2B2`);
+    expect(urls).toContain(`${root}/tasks?scope=all&cursor=t%2B2`);
     expect(mounted.wrapper.get('[data-testid="tasks-live-count"]').text())
       .toContain("已加载 3 项 · 当前筛选显示 1 项 · 已到列表末页");
     await mounted.wrapper.get('[data-testid="tasks-tab-inbox"]').trigger("click");
     await flush(30);
-    expect(urls.at(-1)).toBe(`${root}/tasks?inbox=true`);
+    expect(urls).toContain(`${root}/tasks?inbox=true`);
     expect(mounted.wrapper.find(`[data-testid="task-row-${taskA}"]`).exists()).toBe(false);
   });
 

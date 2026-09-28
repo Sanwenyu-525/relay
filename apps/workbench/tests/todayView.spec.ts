@@ -266,4 +266,19 @@ describe("P13 Today 真实投影", () => {
     expect(mounted.wrapper.text()).toContain("选择版本 v2");
     expect(mounted.wrapper.text()).not.toContain("提交结果待核对");
   });
+
+  it("live 提供待审入口指向待审中心，不伪造待审计数", async () => {
+    connect();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input).slice(root.length);
+      if (path.startsWith("/today?")) return response(today(path));
+      const target = targetRead(path); if (target) return target;
+      throw new Error(`Unexpected ${path}`);
+    }));
+    const mounted = await mountWorkbench("/today"); unmount = mounted.unmount;
+    const entry = mounted.wrapper.get('[data-testid="today-review-entry"]');
+    expect(entry.text()).toContain("打开待审中心");
+    expect(mounted.wrapper.element!.querySelector('a[href="/reviews"]')).not.toBeNull();
+    expect(entry.text()).not.toMatch(/\d/);
+  });
 });

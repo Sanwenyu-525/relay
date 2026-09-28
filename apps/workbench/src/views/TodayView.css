@@ -60,6 +60,17 @@
 .today-focus__facts { margin-top: var(--relay-space-3); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .today-focus__facts p, .today-task__trace p { margin-top: var(--relay-space-2); }
 
+/* 待审入口：通往待审中心；今日页不代替逐项人工判断，也不显示伪造的待审计数。 */
+.today-review-entry { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--relay-space-4); margin-top: var(--relay-space-6); padding: var(--relay-space-4) var(--relay-space-6);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-panel);
+  background: var(--relay-color-bg-subtle); }
+.today-review-entry__copy { flex: 1 1 20rem; min-width: 0; }
+.today-review-entry__copy h2 { font-size: var(--relay-font-size-rowTitle); }
+.today-review-entry__copy p { margin-top: var(--relay-space-1); color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta); max-width: 46rem; }
+.today-review-entry .secondary-button { flex: none; }
+
 /* 分组：有数据保留标题与列表；零数量组收为一行提示，不再整段铺开。 */
 .today-group { margin-top: var(--relay-space-8); }
 .today-group > h2 { font-size: var(--relay-font-size-section); }

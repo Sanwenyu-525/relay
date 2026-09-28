@@ -19,6 +19,11 @@ describe("设置页模型端口状态", () => {
     vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
     expect(mounted.wrapper.text()).toContain("没有真实服务实例状态");
+    expect(mounted.wrapper.text()).toContain("偏好与暂不可用项");
+    expect(mounted.wrapper.text()).toContain("暂不可用");
+    expect(mounted.wrapper.text()).toContain("深色主题");
+    expect(mounted.wrapper.text()).toContain("不改变 Later 的存储语义");
+    expect(mounted.wrapper.findAll("button").some((button) => /深色|主题切换|切换主题/.test(button.text()))).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

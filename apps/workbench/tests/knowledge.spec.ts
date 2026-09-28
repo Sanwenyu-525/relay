@@ -285,4 +285,30 @@ describe("P10 information workbench", () => {
     expect(mounted.wrapper.text()).toContain("检查路径不可用");
     expect((mounted.wrapper.get('[data-testid="knowledge-form"]').find("textarea").element as HTMLTextAreaElement).value).toBe("所有引用须核验");
   });
+
+  it("列表显示当前版本与范围，详情范围行区分项目与工作空间", async () => {
+    activate();
+    const spaceId = "99999999-9999-4999-8999-999999999999";
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const url = String(input);
+      if (url === `${base}/projects/${projectId}`) return response(200, project());
+      if (url === `${base}/knowledge`) return response(200, [
+        { ...knowledge(), revision: "0", current_version: "5", project_id: projectId },
+        { ...knowledge(), id: spaceId, title: "空间资料", revision: "0", current_version: "2", project_id: null }
+      ]);
+      if (url === `${base}/knowledge/${knowledgeId}`) return response(200, { ...knowledge(), revision: "0", current_version: "5", project_id: projectId });
+      if (url === `${base}/knowledge/${knowledgeId}/versions`) return response(200, []);
+      throw new Error(`unexpected request ${url}`);
+    }));
+    const mounted = await mountWorkbench("/knowledge");
+    unmount = mounted.unmount;
+    await flush();
+    const rows = mounted.wrapper.findAll(".knowledge-row");
+    expect(rows[0]!.text()).toContain("当前 v5");
+    expect(rows[0]!.text()).not.toContain("v0");
+    expect(rows[0]!.text()).toContain("项目");
+    expect(rows[1]!.text()).toContain("当前 v2");
+    expect(rows[1]!.text()).toContain("工作空间");
+    expect(mounted.wrapper.get('[data-testid="knowledge-detail-scope"]').text()).toContain(`项目 ${projectId}`);
+  });
 });

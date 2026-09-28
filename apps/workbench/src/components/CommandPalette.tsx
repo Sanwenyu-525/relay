@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import type { RelayApiClient, RelayProject, RelayReview, RelayRun, RelaySearchItem, RelayTaskDetail } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
@@ -52,9 +52,12 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   const [knownProjectId, setKnownProjectId] = useState("");
   const [projectError, setProjectError] = useState<string | null>(null);
   const [openingProject, setOpeningProject] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const contextEpoch = useRef(0);
   const searchEpoch = useRef(0);
   const projectEpoch = useRef(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const resultsListRef = useRef<HTMLUListElement>(null);
   const currentProjectId = context?.project?.id ?? null;
 
   useEffect(() => {
@@ -93,6 +96,16 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
     return () => { window.clearTimeout(timer); searchEpoch.current++; };
   }, [open, client, query, projectScope, currentProjectId]);
 
+  useEffect(() => {
+    setActiveIndex((current) => results.length === 0 ? -1 : Math.min(Math.max(current, 0), results.length - 1));
+  }, [results]);
+
+  useEffect(() => {
+    if (activeIndex < 0) return;
+    const node = resultsListRef.current?.querySelector<HTMLElement>(`[data-result-index="${activeIndex}"]`);
+    if (node && typeof node.scrollIntoView === "function") node.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
+
   async function loadMore() {
     const cursor = nextCursor;
     if (client === null || cursor === null || searching) return;
@@ -111,6 +124,26 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   function go(path: string) {
     onClose();
     void navigate(path);
+  }
+
+  function openResult(item: RelaySearchItem) {
+    const params = new URLSearchParams({ kind: item.type, item: item.id, q: query.trim() });
+    go(`${item.projectId ? `/projects/${encodeURIComponent(item.projectId)}` : ""}/knowledge?${params}`);
+  }
+
+  function handleSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.nativeEvent.isComposing || results.length === 0) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveIndex((current) => Math.min(current < 0 ? 0 : current + 1, results.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((current) => Math.max(current - 1, 0));
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const item = results[activeIndex];
+      if (item !== undefined) openResult(item);
+    }
   }
 
   async function openKnownProject(event: FormEvent<HTMLFormElement>) {
@@ -136,15 +169,18 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   const review = context?.reviews[0] ?? null;
   return <AppDialog open={open} title="命令面板" initialFocusSelector="[data-testid='command-search']" onClose={onClose}>
     <div className="command-palette" data-testid="command-palette">
-      <p className="helper-text">Ctrl+K / ⌘K 打开；Esc 关闭。导航不提交业务命令，委托与审批仍在目标页确认。</p>
-      <label className="field"><span className="field-label">搜索资料</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} maxLength={200} placeholder="搜索 Knowledge、Memory、Decision、Rule" data-testid="command-search" /></label>
+      <p className="helper-text">Ctrl+K / ⌘K 打开；↑↓ 选择、Enter 打开、Esc 返回。搜索资料是按关键词的字面匹配（Knowledge、Memory、Decision、Rule 四类），不是语义检索。导航不提交业务命令，委托与审批仍在目标页确认。</p>
+      <label className="field"><span className="field-label">搜索资料</span><input ref={searchInputRef} type="search" value={query}
+        onChange={(event) => setQuery(event.target.value)} onKeyDown={handleSearchKeyDown} maxLength={200}
+        placeholder="搜索 Knowledge、Memory、Decision、Rule" data-testid="command-search"
+        role="combobox" aria-expanded={results.length > 0} aria-controls="command-palette-results"
+        aria-activedescendant={activeIndex >= 0 && results.length > 0 ? `command-result-${activeIndex}` : undefined} /></label>
       {currentProjectId && <label className="command-palette-scope"><input type="checkbox" checked={projectScope} onChange={(event) => setProjectScope(event.target.checked)} />仅搜索当前项目 {context?.project?.title}</label>}
       {client === null ? <p className="helper-text">当前为示例数据；真实资料搜索需要连接本机 API。</p> : <>
         {searching && <p role="status">正在搜索真实资料…</p>}
         {searchError && <p className="action-error" role="alert">{searchError}</p>}
-        {results.length > 0 && <ul className="command-palette-results">{results.map((item) => <li key={`${item.type}-${item.id}-${item.version}`}>
-          <button type="button" onClick={() => { const params = new URLSearchParams({ kind: item.type, item: item.id, q: query.trim() });
-            go(`${item.projectId ? `/projects/${encodeURIComponent(item.projectId)}` : ""}/knowledge?${params}`); }}>
+        {results.length > 0 && <ul ref={resultsListRef} id="command-palette-results" className="command-palette-results" role="listbox" aria-label="资料搜索结果">{results.map((item, index) => <li key={`${item.type}-${item.id}-${item.version}`} id={`command-result-${index}`} role="option" aria-selected={index === activeIndex}>
+          <button type="button" data-result-index={index} className={index === activeIndex ? "is-active" : undefined} aria-current={index === activeIndex ? "true" : undefined} onClick={() => openResult(item)}>
             <strong>{item.title}</strong><span>{item.type} v{item.version} · {item.status}</span><small>{item.snippet}</small>
             <small>来源：{item.sourceRef} · {item.projectId ? `项目 ${item.projectId}` : "工作空间"}</small>
           </button></li>)}</ul>}

@@ -93,3 +93,63 @@ describe("P15 Activity 只读追溯", () => {
     expect(mounted.wrapper.find(`a[href="/runs/${runId}"]`).exists()).toBe(false);
   });
 });
+
+function makeActivity(id: string, options: { event: string; actor: string; created: string; summary: string }) {
+  return { id, created_at: options.created, actor_kind: options.actor, actor_ref: "raw-actor-ref", command_id: null,
+    event_type: options.event, summary: options.summary, project_id: projectId, task_id: taskId, run_id: runId, entity_refs: [] };
+}
+function basisButton(mounted: Awaited<ReturnType<typeof mountWorkbench>>, id: string) {
+  return mounted.wrapper.find(`[data-testid="activity-basis-${id}"]`);
+}
+
+describe("P15 Activity 分组、执行方筛选与依据侧栏", () => {
+  it("按日历日分组，选中事件在侧栏显示依据并分开批准与执行", async () => {
+    connect();
+    const approval = makeActivity("aaaaaaaa-0000-4000-8000-000000000001", { event: "REVIEW_DECIDED", actor: "HUMAN", created: "2026-09-26T12:00:00Z", summary: "接受研究问题" });
+    const execution = makeActivity("aaaaaaaa-0000-4000-8000-000000000002", { event: "ARTIFACT_VERSION_SAVED", actor: "AI", created: "2026-09-26T12:00:00Z", summary: "保存候选产物" });
+    const older = makeActivity("aaaaaaaa-0000-4000-8000-000000000003", { event: "TASK_COMPLETED", actor: "SYSTEM", created: "2026-09-20T12:00:00Z", summary: "完成任务" });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).slice(root.length) !== "/activities") throw new Error("Unexpected");
+      return response({ items: [approval, execution, older], next_cursor: null });
+    }));
+    const mounted = await mountWorkbench("/activity"); unmount = mounted.unmount;
+    // 同一天的两条聚合在一个分组，另一天单独成组。
+    expect(mounted.wrapper.findAll(".activity-day")).toHaveLength(2);
+    expect(mounted.wrapper.text()).not.toContain("raw-actor-ref");
+    // 批准事件：侧栏说明批准不等于执行成功。
+    await basisButton(mounted, approval.id).trigger("click"); await flush();
+    let panel = mounted.wrapper.get('[data-testid="activity-basis-panel"]');
+    expect(panel.text()).toContain("作出审批决定");
+    expect(panel.text()).toContain("不代表相关动作已经执行成功");
+    expect(panel.text()).toContain("本页面不展示 AI 的原始推理过程");
+    // 执行事件：与批准分开的独立事实。
+    await basisButton(mounted, execution.id).trigger("click"); await flush();
+    panel = mounted.wrapper.get('[data-testid="activity-basis-panel"]');
+    expect(panel.text()).toContain("保存产物版本");
+    expect(panel.text()).toContain("分开的独立事实");
+  });
+
+  it("执行方筛选只作用于已加载项并如实标注服务端缺口", async () => {
+    connect();
+    const human = makeActivity("bbbbbbbb-0000-4000-8000-000000000001", { event: "TASK_STARTED", actor: "HUMAN", created: "2026-09-26T12:00:00Z", summary: "我开始了任务" });
+    const ai = makeActivity("bbbbbbbb-0000-4000-8000-000000000002", { event: "RUN_CREATED", actor: "AI", created: "2026-09-26T12:00:00Z", summary: "AI 创建了运行" });
+    const system = makeActivity("bbbbbbbb-0000-4000-8000-000000000003", { event: "VERIFICATION_COMPLETED", actor: "SYSTEM", created: "2026-09-26T12:00:00Z", summary: "系统完成验证" });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).slice(root.length) !== "/activities") throw new Error("Unexpected");
+      return response({ items: [human, ai, system], next_cursor: null });
+    }));
+    const mounted = await mountWorkbench("/activity"); unmount = mounted.unmount;
+    expect(mounted.wrapper.text()).toContain("我开始了任务");
+    expect(mounted.wrapper.text()).toContain("AI 创建了运行");
+    expect(mounted.wrapper.text()).toContain("系统完成验证");
+    expect(mounted.wrapper.text()).toContain("服务端暂不支持按执行方分页筛选（待接入）");
+    const aiChip = mounted.wrapper.findAll("button").find((button) => button.text() === "AI")!;
+    await aiChip.trigger("click"); await flush();
+    expect(mounted.wrapper.text()).toContain("AI 创建了运行");
+    expect(mounted.wrapper.text()).not.toContain("我开始了任务");
+    expect(mounted.wrapper.text()).not.toContain("系统完成验证");
+    const allChip = mounted.wrapper.findAll("button").find((button) => button.text() === "全部")!;
+    await allChip.trigger("click"); await flush();
+    expect(mounted.wrapper.text()).toContain("我开始了任务");
+  });
+});
