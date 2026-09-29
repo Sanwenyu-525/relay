@@ -441,6 +441,11 @@ test('P09 USER_IMPORT has a real job source, ASK Review and no Run/claim identit
   assert.equal(invocation?.resource_claim_id, null);
   const currentJob = await withTransaction(app.db, (repositories) => repositories.gateway.readImportJob(job.importJobId));
   assert.equal(currentJob?.status, 'RUNNING'); // P17 persists a KnowledgeVersion before marking SUCCEEDED.
+  // P17/web-fetch 的 Knowledge 结算用各自 fixture 覆盖；共享库里不能留下
+  // RUNNING+已成功 USER_IMPORT operation——后续 web-fetch 的全局 tick 会把它
+  // 结算为 WEB_TEXT_UNAVAILABLE 并计入 failed，污染其计数断言。断言后清理。
+  await withTransaction(app.db, (repositories) =>
+    repositories.gateway.settleImportJob(job.importJobId, 'FAILED', 'gateway-fixture-cleanup'));
 });
 
 test('P09 revocation before Admit rejects, while Admit before revocation completes the already admitted effect', async () => {

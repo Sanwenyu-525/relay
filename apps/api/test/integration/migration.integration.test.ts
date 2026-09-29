@@ -95,6 +95,10 @@ const ALL_MIGRATIONS = [
   '0037_m06_file_write_frozen_diff_root_path',
   '0038_m06_managed_root_identity',
   '0039_m06_active_resource_root',
+  '0040_collaboration_artifact_text_locks',
+  '0041_collaboration_impact_checks',
+  '0042_collaboration_attention',
+  '0043_model_call_verify',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {

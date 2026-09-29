@@ -225,17 +225,42 @@ test('M03 pending PAUSE, CANCEL and HANDOFF outrank an approved successor at the
       release();
       const settled = await withTimeout(old, 15_000, `${type} old START release`);
       if (settled?.outcome === 'LOST') {
-        // The 100 ms control poll observed the pending control while the old
-        // START was parked, so the delivery stopped without settling. The
-        // supervisor fences that claim and redelivers; a redelivered claim runs
-        // the same poll, so under load it may be fenced again before reaching
-        // its settle safe point. Production keeps requeueing until one delivery
-        // survives to settle, which applies the control; mirror that loop with
-        // a bounded attempt budget instead of asserting one lucky delivery.
+        // LOST 只说明本地投递被控制轮询中止：claim 仍被旧投递占用。与
+        // supervisor 见证子进程退出后的顺序一致，必须先停机核对（fence +
+        // 效果核对），再 requeue，重投递才可能领取；原编排先领取再 requeue，
+        // 第一次尝试必然拿到 undefined。
         assert.ok(oldClaim);
+        const stopAndRequeue = async (workerId: string, commandId: string): Promise<void> => {
+          await recoverStoppedWorker(app.db, { runId: run.runId,
+            stoppedWorkerId: workerId,
+            stoppedEvidence: 'test: control poll aborted the parked START',
+            storage: new ManagedContentStore(api.dataRoot) });
+          const invocation = await sql<{ worker_id: string | null; epoch: bigint }>`
+            select worker_id, epoch from run_invocations where run_id = ${run.runId}
+          `.execute(app.db);
+          assert.equal(invocation.rows[0]?.worker_id, workerId,
+            `${type}: stop-witness must fence the claim that held the invocation`);
+          const outbox = await sql<{ worker_id: string | null; claim_epoch: bigint | null }>`
+            select worker_id, claim_epoch from run_command_outbox where command_id = ${commandId}
+          `.execute(app.db);
+          assert.equal(outbox.rows[0]?.worker_id, workerId,
+            `${type}: the stopped outbox claim belongs to the witnessed worker`);
+          assert.equal(outbox.rows[0]?.claim_epoch, invocation.rows[0]?.epoch,
+            `${type}: invocation and outbox claim epochs must agree before requeue`);
+          await withTransaction(app.db, async (repositories) => {
+            await repositories.runs.lockRun(run.runId);
+            await repositories.dispatch.lockInvocation(run.runId);
+            await repositories.dispatch.lockOutbox(commandId);
+            await repositories.dispatch.requeueStoppedClaim(run.runId, workerId,
+              invocation.rows[0]!.epoch, commandId,
+              'test: control poll aborted the parked START');
+          });
+        };
+        await stopAndRequeue(oldClaim.workerId, oldClaim.commandId);
         let applied = false;
         for (let attempt = 0; attempt < 25 && !applied; attempt++) {
-          const redelivered = await runOneCommand(app.db, { workerId: `worker:${randomUUID()}`,
+          const workerId = `worker:${randomUUID()}`;
+          const redelivered = await runOneCommand(app.db, { workerId,
             dataRoot: api.dataRoot, checkpointUrl: temporaryDatabase.appUrl });
           assert.ok(redelivered !== undefined, `${type}: requeued delivery must claim the CONTROL_PENDING command`);
           if (redelivered.outcome !== 'LOST') {
@@ -244,17 +269,7 @@ test('M03 pending PAUSE, CANCEL and HANDOFF outrank an approved successor at the
             applied = true;
             break;
           }
-          await recoverStoppedWorker(app.db, { runId: run.runId,
-            stoppedWorkerId: oldClaim.workerId,
-            stoppedEvidence: 'test: control poll aborted the parked START',
-            storage: new ManagedContentStore(api.dataRoot) });
-          await withTransaction(app.db, async (repositories) => {
-            await repositories.runs.lockRun(run.runId);
-            await repositories.dispatch.lockInvocation(run.runId);
-            await repositories.dispatch.lockOutbox(oldClaim!.commandId);
-            await repositories.dispatch.requeueStoppedClaim(run.runId, oldClaim!.workerId,
-              oldClaim!.epoch, oldClaim!.commandId, 'test: control poll aborted the parked START');
-          });
+          await stopAndRequeue(workerId, redelivered.commandId);
         }
         assert.ok(applied, `${type}: supervised redelivery must eventually apply the control`);
       } else {

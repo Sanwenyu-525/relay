@@ -8,6 +8,8 @@
 .settings-definition-list dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .settings-links { margin: var(--relay-space-3) 0 0; padding: 0; list-style: none; display: grid; gap: var(--relay-space-2); }
 .settings-links .inline-link { margin-right: var(--relay-space-2); }
+.settings-verify-actions { margin: var(--relay-space-4) 0 0; display: flex; flex-wrap: wrap; gap: var(--relay-space-3); align-items: center; }
+.settings-verify-actions .helper-text { margin: 0; }
 .settings-page .pack-catalog .assist-proposal { margin-top: var(--relay-space-4); }
 .settings-page .pack-catalog-members { margin: var(--relay-space-3) 0 0; padding: 0; list-style: none; }
 .settings-page .pack-catalog-members li { padding: var(--relay-space-3) 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); overflow-wrap: anywhere; }

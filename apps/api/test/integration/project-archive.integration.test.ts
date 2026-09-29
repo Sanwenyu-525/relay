@@ -4,7 +4,8 @@ import test, { after, before } from 'node:test';
 
 import { sql } from 'kysely';
 
-import { createAssistSession, requestAssistMessage } from '../../src/application/assist-commands.js';
+import { cancelAssistMessage, createAssistSession, requestAssistMessage }
+  from '../../src/application/assist-commands.js';
 import { prepareGatewayAction } from '../../src/application/gateway-actions.js';
 import { createFakeConnection, createGatewayPolicy,
   createImportJob } from '../../src/application/gateway-configuration.js';
@@ -27,7 +28,7 @@ before(async () => {
     directory: MIGRATIONS_DIRECTORY });
   api = await startTestApi();
 });
-after(async () => { await api.stop(); await app.close(); });
+after(async () => { await api?.stop(); await app.close(); });
 
 async function fixture() {
   const workspaceId = await createWorkspace(app.db);
@@ -187,10 +188,14 @@ test('pending Import and Assist generation block archive even before external di
     sourceUri: 'https://public.example/data' });
   const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
     projectId: f.projectId, commandId: randomUUID(), title: 'Pending assist' });
-  await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+  const requested = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
     sessionId: session.result.session_id, commandId: randomUUID(), content: 'Summarize' });
   assert.deepEqual(blockers(await archive(f.workspaceId, f.projectId, f.revision)),
     ['IMPORT_IN_FLIGHT', 'ASSIST_IN_FLIGHT']);
+  // 共享库按 created_at 全局领取 PENDING 助手消息；本用例只为验证归档阻断，
+  // 不清理会让后续 project-blueprint 的 tick 先消费这条遗留消息。
+  await cancelAssistMessage(app.db, { workspaceId: f.workspaceId,
+    messageId: requested.result.assistant_message_id, commandId: randomUUID() });
 });
 
 test('prepared Gateway identity and UNKNOWN remain blockers after Import is terminal', async () => {

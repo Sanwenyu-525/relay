@@ -1,5 +1,5 @@
 .live-blueprint .live-blueprint-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-4); margin: var(--relay-space-4) 0; }
-.live-blueprint .live-blueprint-form, .live-blueprint .live-blueprint-generator, .live-blueprint .live-blueprint-preview, .live-blueprint .live-blueprint-followups { margin-top: var(--relay-space-5); }
+.live-blueprint .live-blueprint-form, .live-blueprint .live-blueprint-generator, .live-blueprint .live-blueprint-preview, .live-blueprint .live-blueprint-followups { margin-top: var(--relay-space-6); }
 .live-blueprint .live-blueprint-form fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .live-blueprint .live-blueprint-form .field { margin-top: var(--relay-space-4); }
 .live-blueprint .live-blueprint-form textarea { min-height: 5rem; }

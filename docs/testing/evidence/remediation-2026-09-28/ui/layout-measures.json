@@ -1,0 +1,80 @@
+{
+  "tasks-960x640": {
+    "firstRowTop": 312,
+    "createText": "新建任务",
+    "createWidth": 126,
+    "createHeight": 48,
+    "createWhiteSpace": "nowrap",
+    "searchBorder": "0px",
+    "searchPadding": "0px",
+    "searchMinHeight": "0px",
+    "h1FontSize": "32px",
+    "listToolbarClass": "list-toolbar list-toolbar--compact",
+    "listHeaderClass": "list-header list-header--compact"
+  },
+  "tasks-1280x800": {
+    "firstRowTop": 380,
+    "createText": "新建任务",
+    "createWidth": 126,
+    "createHeight": 48,
+    "createWhiteSpace": "nowrap",
+    "searchBorder": "0px",
+    "searchPadding": "0px",
+    "searchMinHeight": "0px",
+    "h1FontSize": "32px",
+    "listToolbarClass": "list-toolbar list-toolbar--compact",
+    "listHeaderClass": "list-header list-header--compact"
+  },
+  "knowledge-1280x800": {
+    "firstRowTop": null,
+    "createText": null,
+    "createWidth": null,
+    "createHeight": null,
+    "createWhiteSpace": null,
+    "searchBorder": null,
+    "searchPadding": null,
+    "searchMinHeight": null,
+    "h1FontSize": "32px",
+    "listToolbarClass": null,
+    "listHeaderClass": null
+  },
+  "reviews-1280x800": {
+    "firstRowTop": 469,
+    "createText": null,
+    "createWidth": null,
+    "createHeight": null,
+    "createWhiteSpace": null,
+    "searchBorder": null,
+    "searchPadding": null,
+    "searchMinHeight": null,
+    "h1FontSize": "32px",
+    "listToolbarClass": null,
+    "listHeaderClass": null
+  },
+  "today-960x640": {
+    "firstRowTop": null,
+    "createText": null,
+    "createWidth": null,
+    "createHeight": null,
+    "createWhiteSpace": null,
+    "searchBorder": null,
+    "searchPadding": null,
+    "searchMinHeight": null,
+    "h1FontSize": "32px",
+    "listToolbarClass": null,
+    "listHeaderClass": null
+  },
+  "connections-960x640": {
+    "firstRowTop": null,
+    "createText": null,
+    "createWidth": null,
+    "createHeight": null,
+    "createWhiteSpace": null,
+    "searchBorder": null,
+    "searchPadding": null,
+    "searchMinHeight": null,
+    "h1FontSize": "32px",
+    "listToolbarClass": null,
+    "listHeaderClass": null
+  }
+}

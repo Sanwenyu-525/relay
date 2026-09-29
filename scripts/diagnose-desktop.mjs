@@ -6,10 +6,14 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Only fixed messages are returned: driver errors may contain connection secrets.
+const RUNTIME_KEYS = ['RELAY_DB_URL', 'RELAY_DB_POOL_MAX', 'RELAY_DB_CONNECT_TIMEOUT_MS', 'RELAY_DESKTOP_WORKSPACE_ID'];
+const MODEL_KEYS = ['RELAY_MODEL_PROVIDER', 'RELAY_MODEL_NAME', 'RELAY_MODEL_API_KEY', 'RELAY_MODEL_BASE_URL',
+  'RELAY_MODEL_TIMEOUT_MS', 'RELAY_MODEL_MAX_OUTPUT_TOKENS', 'RELAY_MODEL_MAX_CALL_TOKENS',
+  'RELAY_MODEL_MAX_SCOPE_CALLS', 'RELAY_MODEL_MAX_SCOPE_TOKENS'];
 export function readDesktopConfig(file) {
   if (!path.isAbsolute(file) || statSync(file).size > 65536) throw new Error('CONFIG_INVALID');
   const text = readFileSync(file, 'utf8');
-  const keys = ['RELAY_DB_URL', 'RELAY_DB_POOL_MAX', 'RELAY_DB_CONNECT_TIMEOUT_MS', 'RELAY_DESKTOP_WORKSPACE_ID'];
+  const keys = [...RUNTIME_KEYS, ...MODEL_KEYS];
   const seen = new Set();
   for (const line of text.split(/\r?\n/).map(value => value.trim())) {
     if (!line || line.startsWith('#')) continue;
@@ -18,7 +22,7 @@ export function readDesktopConfig(file) {
     seen.add(key);
   }
   const config = parseEnv(text);
-  if (keys.some(key => !config[key]?.trim())) throw new Error('CONFIG_INVALID');
+  if (RUNTIME_KEYS.some(key => !config[key]?.trim())) throw new Error('CONFIG_INVALID');
   for (const [key, min, max] of [['RELAY_DB_POOL_MAX', 1, 64], ['RELAY_DB_CONNECT_TIMEOUT_MS', 100, 60000]]) {
     if (!/^\d+$/.test(config[key]) || Number(config[key]) < min || Number(config[key]) > max) {
       throw new Error('CONFIG_INVALID');
@@ -70,7 +74,7 @@ export async function diagnoseDesktop(root, configFile) {
     desktopWorkspaceId(config.RELAY_DESKTOP_WORKSPACE_ID);
     schemaChecker = new SchemaReadinessChecker(path.join(root, 'api/migrations'));
   } catch {
-    add('config', 'FAIL', 'Cannot validate desktop.env. Check the documented four keys, numeric bounds and workspace UUID; duplicate keys are rejected.');
+    add('config', 'FAIL', 'Cannot validate desktop.env. Check the documented runtime keys (plus optional RELAY_MODEL_* keys), numeric bounds and workspace UUID; duplicate keys are rejected.');
     return result();
   }
   add('config', 'PASS', 'Configuration syntax validated; values are omitted. Environment overrides are not applied.');

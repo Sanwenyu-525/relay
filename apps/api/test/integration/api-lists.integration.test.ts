@@ -19,7 +19,7 @@ before(async () => {
   api = await startTestApi();
 });
 after(async () => {
-  await api.stop();
+  await api?.stop();
   await app.close();
 });
 

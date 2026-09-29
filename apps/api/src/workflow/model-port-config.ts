@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto';
+
 import { ConfigError } from '../config/config.js';
-import { parseModelBaseUrl } from './model-endpoint-policy.js';
+import { DEFAULT_MODEL_BASE_URL, parseModelBaseUrl } from './model-endpoint-policy.js';
 
 /**
  * 真实模型端口的配置（M04）：模型、endpoint、密钥全部外置，密钥只经环境变量
@@ -78,6 +80,22 @@ export function readModelPortConfig(env: NodeJS.ProcessEnv): ModelPortConfig | u
 /** 启动校验：残缺的真实模型配置让 Worker 明确失败，而不是静默回退 Fake。 */
 export function validateModelPortConfig(env: NodeJS.ProcessEnv): void {
   readModelPortConfig(env);
+}
+
+/**
+ * 配置指纹：与 ModelIdentity.configFingerprint 同一算法（不含密钥明文）。
+ * 配置（模型/端点/限额）变化后指纹变化，旧验证结果按不匹配处理。
+ */
+export function computeModelConfigFingerprint(config: Pick<ModelPortConfig,
+  'provider' | 'model' | 'baseUrl' | 'timeoutMs' | 'maxOutputTokens' |
+  'maxCallTokens' | 'maxScopeCalls' | 'maxScopeTokens'>): string {
+  const baseUrl = parseModelBaseUrl(config.baseUrl ?? DEFAULT_MODEL_BASE_URL);
+  return createHash('sha256').update(JSON.stringify({
+    provider: config.provider, model: config.model, baseUrl,
+    timeoutMs: config.timeoutMs, maxOutputTokens: config.maxOutputTokens,
+    maxCallTokens: config.maxCallTokens, maxScopeCalls: config.maxScopeCalls,
+    maxScopeTokens: config.maxScopeTokens,
+  })).digest('hex');
 }
 
 /**

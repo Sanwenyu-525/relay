@@ -1,8 +1,8 @@
 .knowledge-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; padding: var(--relay-layout-main-padding); }
-.knowledge-page h1 { margin: var(--relay-space-3) 0 var(--relay-space-4); font-size: var(--relay-font-size-page); }
+.knowledge-page h1 { margin: var(--relay-space-2) 0 var(--relay-space-3); font-size: var(--relay-font-size-compactPage); }
 .knowledge-tabs { display: flex; flex-wrap: wrap; gap: var(--relay-space-2); margin-top: var(--relay-space-6); }
 .knowledge-tabs button { cursor: pointer; }
-.knowledge-columns { display: grid; grid-template-columns: minmax(15rem, 0.35fr) minmax(0, 1fr); gap: var(--relay-space-6); }
+.knowledge-columns { display: grid; grid-template-columns: minmax(13rem, 0.3fr) minmax(0, 1fr); gap: var(--relay-space-5); }
 .knowledge-list { align-self: start; }
 .knowledge-row, .knowledge-result { display: flex; flex-direction: column; width: 100%; gap: var(--relay-space-2); padding: var(--relay-space-4); border: 0; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); background: transparent; color: var(--relay-color-text-primary); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
 .knowledge-row:hover, .knowledge-result:hover { background: var(--relay-color-selection-hover); }

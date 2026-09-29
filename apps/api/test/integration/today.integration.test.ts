@@ -17,7 +17,7 @@ before(async () => {
     directory: MIGRATIONS_DIRECTORY });
   api = await startTestApi();
 });
-after(async () => { await api.stop(); await app.close(); });
+after(async () => { await api?.stop(); await app.close(); });
 
 async function project(workspaceId: string): Promise<{ id: string; revision: string;
   stateRevision: string }> {
@@ -94,7 +94,7 @@ test('Later survives API restart and expires at saved local midnight across time
   const before = await today(workspaceId, '2026-01-01', 'America/Los_Angeles');
   assert.equal(before.eligible_items.length, 0);
   assert.ok(before.waiting_items[0]?.reason_codes.includes('LATER_ACTIVE'));
-  await api.stop();
+  await api?.stop();
   api = await startTestApi();
   const replay = await selectTask(workspaceId, item.id, '0', false,
     '2026-01-02', 'Pacific/Kiritimati', commandId);

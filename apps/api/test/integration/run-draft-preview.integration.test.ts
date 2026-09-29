@@ -29,7 +29,7 @@ before(async () => {
   api = await startTestApi();
   storage = new ManagedContentStore(await createDataRoot());
 });
-after(async () => { await api.stop(); await app.close(); });
+after(async () => { await api?.stop(); await app.close(); });
 
 async function fixture(withSource = false) {
   const workspaceId = randomUUID();

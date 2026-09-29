@@ -921,7 +921,7 @@ export interface RunDraftPreviewRow {
 export interface ModelCallRow {
   readonly id: string;
   readonly workspace_id: string;
-  readonly kind: 'DRAFT' | 'SEMANTIC_CHECK' | 'ASSIST';
+  readonly kind: 'DRAFT' | 'SEMANTIC_CHECK' | 'ASSIST' | 'VERIFY';
   readonly step_attempt_id: string | null;
   readonly assist_message_id: string | null;
   readonly manifest_id: string | null;

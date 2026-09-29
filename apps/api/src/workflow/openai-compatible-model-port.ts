@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { ModelAbortError } from '@langchain/core/errors';
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { ChatOpenAI } from '@langchain/openai';
@@ -8,6 +7,7 @@ import { CANDIDATE_OUTPUT_SCHEMA } from './markdown-deliverable.js';
 import type { AssistModelPort, AssistRequest, AssistResult, ModelPort, ModelRequest,
   ModelResult, ModelIdentity, ModelUsage } from './fake-model-port.js';
 import type { ModelPortConfig } from './model-port-config.js';
+import { computeModelConfigFingerprint } from './model-port-config.js';
 import { DEFAULT_MODEL_BASE_URL, guardedModelFetch, parseModelBaseUrl,
   type ModelFetchDependencies } from './model-endpoint-policy.js';
 
@@ -43,12 +43,7 @@ export class OpenAiCompatibleModelPort implements ModelPort, AssistModelPort {
     transport: ModelFetchDependencies = {}) {
     const baseUrl = parseModelBaseUrl(config.baseUrl ?? DEFAULT_MODEL_BASE_URL);
     this.identity = { provider: config.provider, model: config.model,
-      configFingerprint: createHash('sha256').update(JSON.stringify({
-        provider: config.provider, model: config.model, baseUrl,
-        timeoutMs: config.timeoutMs, maxOutputTokens: config.maxOutputTokens,
-        maxCallTokens: config.maxCallTokens, maxScopeCalls: config.maxScopeCalls,
-        maxScopeTokens: config.maxScopeTokens,
-      })).digest('hex'), budget: {
+      configFingerprint: computeModelConfigFingerprint(config), budget: {
         callReservationTokens: config.maxCallTokens,
         scopeCallLimit: config.maxScopeCalls,
         scopeTokenLimit: config.maxScopeTokens,
@@ -93,8 +88,10 @@ export class OpenAiCompatibleModelPort implements ModelPort, AssistModelPort {
   }
 
   /** 判定型语义评估：规则 statement + 候选正文 → JSON 判定；解析失败抛出，
-   * 由调用方按检查器故障处理（≠ FAIL，更 ≠ PASS）。 */
-  async evaluate(input: { readonly statement: string; readonly content: string }): Promise<{
+   * 由调用方按检查器故障处理（≠ FAIL，更 ≠ PASS）。
+   * 取消语义与 generate 相同：AbortSignal 传给 SDK，中断的调用按调用方取消处理。 */
+  async evaluate(input: { readonly statement: string; readonly content: string },
+    signal?: AbortSignal): Promise<{
     readonly verdict: 'PASS' | 'FAIL' | 'UNCERTAIN'; readonly reason: string;
     readonly providerRequestId: string; readonly usage: ModelUsage;
   }> {
@@ -110,7 +107,7 @@ export class OpenAiCompatibleModelPort implements ModelPort, AssistModelPort {
 候选正文：
 ${input.content}`),
     ];
-    const response = await this.complete(messages, undefined, true);
+    const response = await this.complete(messages, signal, true);
     let parsed: ReturnType<typeof parseVerdict>;
     try { parsed = parseVerdict(response.text); }
     catch { throw new SemanticResponseError(response.providerRequestId, response.usage); }

@@ -46,6 +46,10 @@ describe("live Workspace 项目与任务列表", () => {
       urls.push(url);
       if (url === `${root}/projects?status=active`) return response(200, { items: [
         project(projectA, "甲项目", false, taskA), project(projectB, "乙项目")], next_cursor: "p+2" });
+      if (url === `${root}/tasks/${taskA}`) return response(200, {
+        ...task(taskA, "下一步任务甲", projectA),
+        acceptance: { acceptance_revision: "1", objective: "核对下一步", source: "HUMAN", criteria: [] },
+        dependencies: [] });
       if (url === `${root}/projects?status=active&cursor=p%2B2`) return response(200, {
         items: [project(projectC, "丙项目")], next_cursor: null });
       if (url === `${root}/projects?status=archived`) return response(200, {
@@ -53,13 +57,16 @@ describe("live Workspace 项目与任务列表", () => {
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/projects"); unmount = mounted.unmount;
-    expect(urls).toEqual([`${root}/projects?status=active`]);
+    expect(urls[0]).toBe(`${root}/projects?status=active`);
+    expect(urls).toContain(`${root}/tasks/${taskA}`);
     expect(mounted.wrapper.get('[data-testid="projects-live-count"]').text())
       .toContain("已加载 2 项 · 当前搜索显示 2 项 · 仍有后续页");
-    expect(mounted.wrapper.get(`[data-testid="project-row-${projectA}"]`).text()).toContain(taskA);
+    // 下一步按 Task ID 单读真实标题：行内显示标题，不再把原始 UUID 摆在列表主区。
+    expect(mounted.wrapper.get(`[data-testid="project-row-${projectA}"]`).text()).toContain("下一步任务甲");
+    expect(mounted.wrapper.get(`[data-testid="project-row-${projectA}"]`).text()).not.toContain(taskA);
     expect(mounted.wrapper.get('[data-testid="project-archive"]').attributes("disabled")).toBeUndefined();
     expect(mounted.wrapper.text()).toContain("归档前会单读当前 Project");
-    expect(urls.every((url) => url.includes("/projects?status="))).toBe(true);
+    expect(urls.every((url) => url.includes("/projects?status=") || url.includes("/tasks/"))).toBe(true);
     await mounted.wrapper.get('input[name="live-project-search"]').setValue("乙");
     expect(mounted.wrapper.get('[data-testid="projects-live-count"]').text()).toContain("当前搜索显示 1 项");
     expect(mounted.wrapper.find(`[data-testid="project-row-${projectA}"]`).exists()).toBe(false);

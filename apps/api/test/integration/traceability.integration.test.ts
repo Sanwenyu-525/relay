@@ -19,7 +19,7 @@ before(async () => {
     directory: MIGRATIONS_DIRECTORY });
   api = await startTestApi();
 });
-after(async () => { await api.stop(); await app.close(); });
+after(async () => { await api?.stop(); await app.close(); });
 
 function hash(text: string): Buffer {
   return createHash('sha256').update(text).digest();

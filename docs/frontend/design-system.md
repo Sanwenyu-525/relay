@@ -2,7 +2,7 @@
 
 > 2026-09-24：工作台已以 React 组件复用原 CSS 与唯一 token 源；迁移前 Vue 原件和 15 张旧页面图归档于 [M02 开发记录](../development/m02-react-migration.md)。浏览器逐页对照与真实 Windows 窗口分别记录，前者不代替后者。
 
-状态：Proposed（从现有图提炼的实现基线）。更新：2026-09-28。
+状态：Proposed（从现有图提炼的实现基线）。更新：2026-09-29。
 
 本文只拥有视觉、布局、组件外观与可访问性交互规则。用户已确认 Windows 可安装桌面应用，宿主边界见 [ADR-007](../decisions/ADR-007-windows-desktop.md)。页面路由、业务状态、权限和命令仍以[工作台交互](workbench-design.md)及其引用契约为准；技术依赖以[技术选型](../architecture/技术选型.md)为准。数值唯一来源为 [design-tokens.json](design-tokens.json)，本文用 token 名称引用，不再维护一套色值表。当前 React 工作台保留原页面 class 与布局，真实桌面验收由 M02 整体验收记录确认。
 
@@ -27,7 +27,7 @@
 
 图片里的“Workflow OS”、Rust 片段、日期、用户项目和通过结果均为示例。仓库名称 Relay 不意味着本轮已决定改图中品牌标识；最终产品显示名待确认，不影响本规范的样式定义。
 
-Windows 桌面宿主当前图标使用用户于 2026-09-28 指定的[透明机器人原图](../../apps/desktop/src-tauri/icons/icon-source-20260928-v2.png)。该来源为 1254×1254 RGBA 图；[产品 PNG](../../apps/desktop/src-tauri/icons/icon.png)与[ICO](../../apps/desktop/src-tauri/icons/icon.ico)均以它作为当前输入，ICO 保持 256px 层位于首层，供 Tauri Windows 默认窗口图标解码。ICO 仍由 Tauri bundle 配置引用。此前的[方角图标来源](../../apps/desktop/src-tauri/icons/icon-source-20260928.png)作为历史素材保留；本次只替换图标视觉来源，不额外定义业务状态或交互语义。图标接入历史与当前验证边界保留在 [M02 开发记录](../development/m02-desktop-foundation.md)。
+Windows 桌面宿主当前图标使用[透明机器人优化图](../../apps/desktop/src-tauri/icons/icon-source-20260929.png)。用户于 2026-09-29 确认继续保留透明背景，并增强机器人主体与橙色徽章在任务栏小尺寸下的辨识度。该来源为 1254×1254 RGBA 图；[产品 PNG](../../apps/desktop/src-tauri/icons/icon.png)与[ICO](../../apps/desktop/src-tauri/icons/icon.ico)均以它作为当前输入，ICO 保持 256px 层位于首层，供 Tauri Windows 默认窗口图标解码。ICO 仍由 Tauri bundle 配置引用。[上一版透明机器人原图](../../apps/desktop/src-tauri/icons/icon-source-20260928-v2.png)和[更早的深蓝方形来源](../../apps/desktop/src-tauri/icons/icon-source-20260928.png)作为历史素材保留。本次只调整图标视觉，不改变业务状态或交互语义。图标接入历史与验证边界保留在 [M02 开发记录](../development/m02-desktop-foundation.md)。
 
 ## 2. Token 规则
 

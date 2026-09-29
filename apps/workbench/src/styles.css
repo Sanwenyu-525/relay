@@ -21,6 +21,43 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* 桌面态：document 不滚动，滚动只发生在主内容区，杜绝窗口右缘网页式根滚动条。 */
+.app-desktop,
+.app-desktop body {
+  overflow: hidden;
+}
+
+/* 滚动条原生化：细、透明轨道、悬浮显形圆角 thumb。标准属性 + WebView2/Chromium 前缀双写。 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--relay-color-border-control) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--relay-color-border-control);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--relay-radius-round);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--relay-color-text-muted);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 h1,
 h2,
 h3 {
@@ -260,17 +297,53 @@ svg {
   }
 }
 
+/* 桌面态：外壳铺满视口且自身不滚动，只有主内容区滚动，避免窗口右缘出现网页式根滚动条。 */
+.desktop-window {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.desktop-window > .page-state {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .desktop-window .app-frame {
-  min-height: calc(100vh - var(--relay-control-height-comfort));
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+  overflow: hidden;
 }
 
 .desktop-window .app-sidebar {
-  top: var(--relay-control-height-comfort);
-  height: calc(100vh - var(--relay-control-height-comfort));
+  position: static;
+  top: auto;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.desktop-window .app-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .desktop-window .app-topbar {
-  top: var(--relay-control-height-comfort);
+  position: static;
+  top: auto;
+  flex: none;
+}
+
+.desktop-window .app-main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .desktop-window .app-topbar__command-open {
@@ -1680,7 +1753,10 @@ svg {
 }
 
 /* 主操作不参与压缩，标题与说明换行而不是把按钮挤成两行。 */
-.list-header > .primary-button {
+.list-header > .primary-button,
+.section-heading-row > button,
+.section-heading-row > .secondary-button,
+.section-heading-row > .primary-button {
   flex: none;
   white-space: nowrap;
 }
@@ -1691,6 +1767,78 @@ svg {
   align-items: flex-end;
   gap: var(--relay-space-4);
   margin-top: var(--relay-space-6);
+}
+
+/* 紧凑筛选：标签与控件同行，窄窗首屏优先留给任务行。 */
+.list-toolbar--compact {
+  align-items: center;
+  gap: var(--relay-space-3);
+  margin-top: var(--relay-space-3);
+}
+
+.list-toolbar--compact .filter-field {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--relay-space-2);
+  white-space: nowrap;
+}
+
+.list-toolbar--compact .filter-field select {
+  min-width: 6.5rem;
+}
+
+.list-toolbar--compact .search-field {
+  min-width: 10rem;
+}
+
+.list-header--compact {
+  align-items: center;
+}
+
+.list-header--compact h1 {
+  font-size: var(--relay-font-size-compactPage);
+}
+
+.list-header--compact .page-lede {
+  margin-top: var(--relay-space-1);
+  font-size: var(--relay-font-size-meta);
+}
+
+.list-header--compact + .subnav {
+  margin-top: var(--relay-space-3);
+}
+
+/* 知识/待审列表标题与今日页对齐，避免 3rem 展示型字号挤占首屏。 */
+.knowledge-page h1,
+.review-heading h1 {
+  font-size: var(--relay-font-size-compactPage);
+}
+
+/* 窄窗：范围说明入口不占首屏整行，改为右上轻量按钮。 */
+@media (max-width: 79.9375rem) {
+  .page-layout {
+    position: relative;
+  }
+
+  .rail-trigger {
+    position: absolute;
+    top: 0;
+    right: 0;
+    margin: var(--relay-space-2) 0 0;
+    min-height: var(--relay-control-target-minimum);
+    padding: 0 var(--relay-space-2);
+  }
+
+  .list-header--compact {
+    padding-right: 9.5rem;
+  }
+}
+
+/* 列表范围计数贴近筛选，不单独占一块间距。 */
+.list-count-note {
+  margin-top: var(--relay-space-2);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
 }
 
 .filter-field {
@@ -1730,9 +1878,12 @@ svg {
   color: var(--relay-color-text-muted);
 }
 
-.search-field input {
+/* 与全局 input 基线同级对齐，压掉内层第二套边框/内边距/最小高度。 */
+.search-field input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]) {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  padding: 0;
   border: none;
   background: transparent;
   color: inherit;
@@ -2372,4 +2523,34 @@ fieldset.field {
   border-radius: var(--relay-radius-badge);
   font-size: var(--relay-font-size-meta);
   color: var(--relay-color-text-secondary);
+}
+
+/* Pack 清单：默认只呈现简明摘要，协议/hash/成员详情逐项展开，避免新建项目等页面默认铺开。 */
+.pack-catalog-summary {
+  margin-top: var(--relay-space-3);
+}
+
+.pack-catalog-historical {
+  margin-top: var(--relay-space-3);
+}
+
+.pack-catalog-historical > summary,
+.pack-catalog-details > summary {
+  cursor: pointer;
+  padding: var(--relay-space-2) 0;
+  color: var(--relay-color-text-secondary);
+  font-size: 0.875rem;
+}
+
+.pack-catalog-historical > summary:hover,
+.pack-catalog-details > summary:hover {
+  color: var(--relay-color-text-primary);
+}
+
+.pack-catalog-details {
+  margin-top: var(--relay-space-2);
+}
+
+.pack-catalog-historical .assist-proposal {
+  margin-top: var(--relay-space-3);
 }

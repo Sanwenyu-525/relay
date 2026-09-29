@@ -1,0 +1,22 @@
+{
+  "captured_at": "2026-09-29T08:37:15",
+  "hwnd": 13636308,
+  "windowRect_physical": {
+    "l": 32,
+    "t": 32,
+    "r": 1500,
+    "b": 1017,
+    "w": 1468,
+    "h": 985
+  },
+  "dwmFrameBounds_physical": {
+    "l": 40,
+    "t": 32,
+    "r": 1492,
+    "b": 1009,
+    "w": 1452,
+    "h": 977
+  },
+  "dpiForWindow": 120,
+  "scalePct": 125
+}

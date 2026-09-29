@@ -96,9 +96,22 @@ before(async () => {
   port = (server.address() as AddressInfo).port;
 });
 after(async () => {
-  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-  await app.close();
-  await rm(dataRoot, { recursive: true, force: true });
+  // before 失败时 server 可能未赋值；清理不能抛 undefined.close
+  try {
+    if (server !== undefined) {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  } finally {
+    try {
+      await app.close();
+    } finally {
+      if (dataRoot !== undefined) {
+        await rm(dataRoot, { recursive: true, force: true });
+      }
+    }
+  }
 });
 
 interface WebFixture {

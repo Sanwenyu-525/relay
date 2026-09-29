@@ -55,6 +55,7 @@ export default function LiveTaskSkillFactsView({ client, kind }: {
 
   const title = kind === "definition" ? "完善任务定义" : "生成验收方案";
   return <section className="skill-page" data-testid={`live-${kind}`}>
+    <div className="page-layout"><div className="page-primary">
     <p className="eyebrow">{title} · 当前事实</p><h1>{kind === "definition" ? "当前任务定义" : "当前验收与验证来源"}</h1>
     <p className="page-lede">此页读取已保存的任务事实；可确认的 Skill 合并提案请在该任务的 Assist 会话中查看。</p>
     <button className="secondary-button" type="button" disabled={loading || traceLoading} onClick={() => setReload((value) => value + 1)}>刷新当前事实</button>
@@ -67,11 +68,19 @@ export default function LiveTaskSkillFactsView({ client, kind }: {
           : projectArchivedAt !== null ? "项目已归档；这里只保留已接受事实和历史证据的阅读入口。"
             : "所属 Project 正在进行中。"}</p>}
       <section className="surface-panel" data-testid="live-task-accepted-facts"><h2>已接受的当前事实</h2>
-        <p><strong>{task.title}</strong> · 任务 v{task.revision} · {taskStatusLabels[task.status]} · {interactionModeLabels[task.mode]} · 执行者 {executorLabels[task.executor]}</p>
-        <p>验收版本 v{task.acceptance.acceptanceRevision} · 来源 {task.acceptance.source}</p>
+        <p className="metadata-row"><strong>{task.title}</strong>
+          <span aria-hidden="true"> · </span>任务 v{task.revision}
+          <span aria-hidden="true"> · </span>{taskStatusLabels[task.status]}
+          <span aria-hidden="true"> · </span>{interactionModeLabels[task.mode]}
+          <span aria-hidden="true"> · </span>执行者 {executorLabels[task.executor]}</p>
+        <p className="metadata-row">验收版本 v{task.acceptance.acceptanceRevision}
+          <span aria-hidden="true"> · </span>来源 {task.acceptance.source}</p>
         <h3>目标</h3><p>{task.acceptance.objective || "当前验收目标为空。"}</p>
-        <h3>当前验收条件</h3>{task.acceptance.criteria.length ? <ol>{task.acceptance.criteria.map((criterion) =>
-          <li key={criterion.criterionId}><strong>{criterion.statement}</strong><small>条件 ID {criterion.criterionId} · {criterion.required ? "必需" : "可选"} · 方式 {criterion.method}</small></li>)}</ol>
+        <h3>当前验收条件</h3>{task.acceptance.criteria.length ? <ul className="criteria-list">{task.acceptance.criteria.map((criterion) =>
+          <li className="criteria-row" key={criterion.criterionId}><span className="criteria-copy">
+            <strong>{criterion.statement}</strong>
+            <small>条件 ID {criterion.criterionId} · {criterion.required ? "必需" : "可选"} · 方式 {criterion.method}</small>
+          </span></li>)}</ul>
           : <p className="helper-text">当前版本没有验收条件。</p>}
         <p className="helper-text">{kind === "definition"
           ? `当前验收预期产物类型：${task.acceptance.expectedOutputs === null ? "此响应未提供" :
@@ -95,13 +104,13 @@ export default function LiveTaskSkillFactsView({ client, kind }: {
           {traceError && <p className="action-error" role="alert">{traceError}</p>}
           {trace && (trace.verifications.length ? <ul>{trace.verifications.map((session) => <li key={session.id}>
             <strong>Verification Session {session.id} · {session.status} · 判定 {session.verdict ?? "尚无"}</strong>
-            <small>验收 v{session.acceptanceRevision} · CheckPlan hash {session.checkPlanHash} · {session.createdAt}</small>
+            <small>验收 v{session.acceptanceRevision} · CheckPlan hash <code className="hash-code">{session.checkPlanHash}</code> · {session.createdAt}</small>
             <p>{session.checks.length ? session.checks.map((check) => `${check.criterionId}: ${check.result}`).join("；") : "该会话没有检查结果。"}</p>
-            {session.targets.map((target) => <p key={target.artifactVersionId}>目标产物版本 <Link className="inline-link" to={`/artifact-versions/${target.artifactVersionId}/lineage`}>{target.artifactVersionId}</Link> · sha256 {target.contentSha256}</p>)}</li>)}</ul>
+            {session.targets.map((target) => <p key={target.artifactVersionId}>目标产物版本 <Link className="inline-link" to={`/artifact-versions/${target.artifactVersionId}/lineage`}>{target.artifactVersionId}</Link> · sha256 <code className="hash-code">{target.contentSha256}</code></p>)}</li>)}</ul>
             : <p className="helper-text">该 Run 的 Trace 未记录验证会话。</p>)}
           <p className="helper-text">Run Trace 是历史证据；版本号或 PASS 不单独证明当前验收仍有效，也不表示任务已完成。</p></>
           : <p className="helper-text">当前 Task 没有指向 Run；本接口不提供历史 Run 列表，不能由任务状态推断曾运行过验证。</p>}
       </section>
-    </>}
+    </>}</div></div>
   </section>;
 }

@@ -2,7 +2,7 @@
 setlocal
 
 rem Double-click for the desktop trial menu. Legacy preview flags remain supported.
-rem Usage: dev-stack.bat [Build|Start|Stop|Preview|Status] [options]
+rem Usage: dev-stack.bat [Build|Start|Stop|Preview|DesktopDev|Status] [options]
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\test-desktop.ps1" %*
 set "DEV_STACK_EXIT=%ERRORLEVEL%"

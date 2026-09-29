@@ -18,7 +18,7 @@ before(async () => {
   api = await startTestApi();
   workspaceId = await createWorkspace(database.db);
 });
-after(async () => { await api.stop(); await database.close(); });
+after(async () => { await api?.stop(); await database.close(); });
 const endpoint = (id: string, version = '1', workspace = workspaceId) =>
   workspacePath(workspace, `/knowledge/${id}/versions/${version}/content`);
 const digest = (text: string) => createHash('sha256').update(text).digest();

@@ -1,0 +1,22 @@
+[
+  {
+    "id": "UI-26",
+    "note": "真实409冲突：草稿保留+基线变化提示",
+    "hOverflow": false,
+    "errs": [
+      "服务端当前版本是 9，本次提交基于 8。请重新读取后再提交，本次输入不会被覆盖。"
+    ],
+    "h1": "UI取证-20260929 产物任务T2",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-26-1280x800.png"
+  },
+  {
+    "id": "UI-26b",
+    "note": "冲突后重取事实区（版本列表）",
+    "hOverflow": false,
+    "errs": [
+      "服务端当前版本是 9，本次提交基于 8。请重新读取后再提交，本次输入不会被覆盖。"
+    ],
+    "h1": "UI取证-20260929 产物任务T2",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-26b-1280x800.png"
+  }
+]

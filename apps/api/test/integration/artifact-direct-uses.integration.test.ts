@@ -17,7 +17,7 @@ before(async () => {
   api = await startTestApi();
   workspaceId = await createWorkspace(database.db);
 });
-after(async () => { await api.stop(); await database.close(); });
+after(async () => { await api?.stop(); await database.close(); });
 
 test('direct-uses only exposes recorded same-workspace child versions with readable evidence', async () => {
   const created = await api.post(workspacePath(workspaceId, '/tasks'), {

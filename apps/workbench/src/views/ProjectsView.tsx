@@ -19,6 +19,11 @@ function message(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message.trim() : fallback;
 }
 
+// 全局控件规则会给所有文本输入统一底色与边框；搜索框的外观由外层 .search-field 提供，
+// 这里在行内归零内层输入，避免出现双层边框与高度溢出（共享层修复前先由页面自行约束）。
+const searchInputStyle = { appearance: "none", background: "transparent", border: "none",
+  padding: 0, minHeight: 0 } as const;
+
 interface PendingArchive {
   readonly commandId: string;
   readonly projectId: string;
@@ -175,7 +180,7 @@ export default function ProjectsView() {
     <div className="page-primary">
       <div className="list-header"><div><h1>项目</h1><p className="page-lede">每一个长期目标，都有可继续的下一步。</p></div><button className="primary-button" type="button" data-testid="project-create-open" onClick={() => navigate("/projects?view=create")}><Plus aria-hidden="true" />新建项目</button></div>
       <nav className="subnav" aria-label="项目范围"><Link className={`subnav-item${archivedTab ? "" : " subnav-item--active"}`} to="/projects" data-testid="projects-tab-active" aria-current={archivedTab ? undefined : "page"}>进行中 ({activeProjects.length})</Link><Link className={`subnav-item${archivedTab ? " subnav-item--active" : ""}`} to="/projects?archived=1" data-testid="projects-tab-archived" aria-current={archivedTab ? "page" : undefined}>已归档 ({archivedProjects.length})</Link></nav>
-      <div className="list-toolbar"><label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">按项目名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="project-search" placeholder="搜索项目" /></label></div>
+      <div className="list-toolbar"><label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">按项目名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="project-search" placeholder="搜索项目" style={searchInputStyle} /></label></div>
       {refreshing && <p className="helper-text" role="status">正在更新项目列表，已显示的内容保持可见。</p>}
       {visibleProjects.length === 0 ? <div className="page-state"><p>{search.trim() ? `当前范围没有匹配“${search.trim()}”的项目。` : archivedTab ? "还没有已归档的项目；归档后仍会保留历史事实。" : "还没有进行中的项目。"}</p>{!archivedTab && !search.trim() ? <button className="primary-button" type="button" onClick={() => navigate("/projects?view=create")}><Plus aria-hidden="true" />新建项目</button> : <button className="secondary-button" type="button" onClick={() => setSearch("")}>清除搜索</button>}</div> :
         <div className="table-scroll"><div className="data-table"><div className="data-row data-row--head data-row--projects" aria-hidden="true"><span className="data-cell">项目</span><span className="data-cell">类型</span><span className="data-cell">当前阶段</span><span className="data-cell">下一步</span></div><ul className="data-list">{visibleProjects.map((project) => <li key={project.id}><button className={`data-row data-row--projects data-row--interactive${project.id === selectedId ? " data-row--selected" : ""}`} type="button" aria-current={project.id === selectedId ? "true" : undefined} data-testid={`project-row-${project.id}`} onClick={() => selectProject(project)}><span className="data-cell"><strong>{project.title}</strong><small>{project.goal}</small></span><span className="data-cell data-cell--meta">{projectTypeLabels[project.projectType]}</span><span className="data-cell data-cell--meta">{phaseLabel(project.phase)}</span><span className="data-cell data-cell--meta">{project.nextAction ?? "尚未明确"}</span></button></li>)}</ul></div></div>}
@@ -219,6 +224,8 @@ function LiveProjectsListView({ client, archived, onCreate }: {
     busy.current = true;
     const request = ++requestVersion.current;
     if (cursor === null) {
+      // 重新读取列表时下一步标题缓存一并失效，避免继续显示过期标题。
+      invalidateTaskTitles();
       setItems([]); setNextCursor(null); setSelectedId(null); setLoading(true);
     } else setLoadingMore(true);
     setError(null);
@@ -332,19 +339,54 @@ function LiveProjectsListView({ client, archived, onCreate }: {
   const needle = search.trim().toLocaleLowerCase();
   const visible = items.filter((project) => !needle || project.title.toLocaleLowerCase().includes(needle));
   const selected = visible.find((project) => project.id === selectedId) ?? null;
+  // 下一步只拿到 Task ID；按 ID 单读真实标题。缓存仅在请求结束后写入；
+  // 显式刷新列表时整批失效并重读，失败结果也可在下次刷新时重试。
+  const [taskTitles, setTaskTitles] = useState<Record<string, string | null>>({});
+  const [titleReloadToken, setTitleReloadToken] = useState(0);
+  const resolvedTasks = useRef<Set<string>>(new Set());
+  const inFlightTitles = useRef<Set<string>>(new Set());
+  const titleEpoch = useRef(0);
+  const invalidateTaskTitles = () => {
+    titleEpoch.current++;
+    resolvedTasks.current.clear();
+    inFlightTitles.current.clear();
+    setTaskTitles({});
+    setTitleReloadToken((token) => token + 1);
+  };
+  useEffect(() => {
+    const missing = [...new Set(visible.map((project) => project.nextActionTaskId)
+      .filter((id): id is string => id !== null))]
+      .filter((id) => !resolvedTasks.current.has(id) && !inFlightTitles.current.has(id));
+    if (missing.length === 0) return;
+    for (const id of missing) inFlightTitles.current.add(id);
+    const epoch = titleEpoch.current;
+    void Promise.all(missing.map(async (id) => {
+      try { const task = await client.getTask(id); return [id, task.title] as const; }
+      catch { return [id, null] as const; }
+    })).then((entries) => {
+      for (const [id] of entries) inFlightTitles.current.delete(id);
+      if (disposed.current || epoch !== titleEpoch.current) return;
+      for (const [id] of entries) resolvedTasks.current.add(id);
+      setTaskTitles((current) => ({ ...current, ...Object.fromEntries(entries) }));
+    });
+  }, [client, visible, titleReloadToken]);
+  const nextLabel = (project: RelayProjectListItem): string =>
+    project.nextActionTaskId === null ? "尚未明确"
+      : taskTitles[project.nextActionTaskId] ?? "标题暂不可读";
   return <section className="skill-page" data-testid="projects-live-list"><div className="page-layout">
     <div className="page-primary">
-      <div className="list-header"><div><h1>项目</h1><p className="page-lede">按当前归档范围读取真实项目；列表与下一步均只显示服务端已返回的事实。</p></div>
+      <div className="list-header"><div><h1>项目</h1><p className="page-lede">连接本机 API 后，按当前归档范围读取真实项目；列表、下一步与计数只显示服务端已返回的事实。</p></div>
         <button className="primary-button" type="button" data-testid="project-create-open" onClick={onCreate}><Plus aria-hidden="true" />新建项目</button></div>
       <nav className="subnav" aria-label="项目范围"><Link className={`subnav-item${archived ? "" : " subnav-item--active"}`}
         to="/projects" data-testid="projects-tab-active" aria-current={archived ? undefined : "page"}>进行中</Link>
         <Link className={`subnav-item${archived ? " subnav-item--active" : ""}`} to="/projects?archived=1"
           data-testid="projects-tab-archived" aria-current={archived ? "page" : undefined}>已归档</Link></nav>
-      <button className="secondary-button" type="button" data-testid="projects-live-refresh" disabled={loading || loadingMore}
-        onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />刷新当前范围</button>
-      <div className="list-toolbar"><label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">在已加载项目中按名称搜索</span>
-        <input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="live-project-search"
-          placeholder="搜索已加载项目" /></label></div>
+      <div className="list-toolbar">
+        <button className="secondary-button" type="button" data-testid="projects-live-refresh" disabled={loading || loadingMore}
+          onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />刷新当前范围</button>
+        <label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">在已加载项目中按名称搜索</span>
+          <input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="live-project-search"
+            placeholder="搜索已加载项目" style={searchInputStyle} /></label></div>
       {archiveSuccess && <p className="receipt-message" role="status" data-testid="project-archive-success">已归档 Project {archiveSuccess.id}（{archiveSuccess.archivedAt}）。<Link className="inline-link" to={`/projects/${archiveSuccess.id}`}>查看历史项目</Link> · <Link className="inline-link" to="/projects?archived=1">查看已归档列表</Link></p>}
       {archiveError && <p className="action-error" role="alert" data-testid="project-archive-error">{archiveError}</p>}
       {archiveBlockers.length > 0 && <div className="warning-callout" data-testid="project-archive-blockers"><strong>归档阻断原因</strong><ul>{archiveBlockers.map((reason, index) => <li key={`${reason}-${index}`}><strong>{reason}</strong>：{archiveBlockerLabels[reason] ?? "服务端报告未识别的阻断事实；请重新读取项目并核对当前状态。"}</li>)}</ul></div>}
@@ -358,24 +400,26 @@ function LiveProjectsListView({ client, archived, onCreate }: {
             ? archived ? "当前没有已归档项目。" : "当前没有进行中项目。"
             : "已加载项目中没有匹配项；后续页可能仍有匹配项目。"}</p>
             {needle && <button className="secondary-button" type="button" onClick={() => setSearch("")}>清除搜索</button>}</div> :
-            <div className="table-scroll"><div className="data-table"><div className="data-row data-row--head data-row--projects" aria-hidden="true"><span className="data-cell">项目</span><span className="data-cell">类型</span><span className="data-cell">当前阶段</span><span className="data-cell">下一步 Task ID</span></div>
+            <div className="table-scroll"><div className="data-table"><div className="data-row data-row--head data-row--projects" aria-hidden="true"><span className="data-cell">项目</span><span className="data-cell">类型</span><span className="data-cell">当前阶段</span><span className="data-cell">下一步</span></div>
               <ul className="data-list">{visible.map((project) => <li key={project.id}><button className={`data-row data-row--projects data-row--interactive${project.id === selectedId ? " data-row--selected" : ""}`}
                 type="button" aria-current={project.id === selectedId ? "true" : undefined} data-testid={`project-row-${project.id}`}
-                onClick={() => setSelectedId(project.id)}><span className="data-cell"><strong>{project.title}</strong><small>{project.id}</small></span>
+                onClick={() => setSelectedId(project.id)}><span className="data-cell"><strong>{project.title}</strong></span>
                 <span className="data-cell data-cell--meta">{projectTypeLabels[project.projectType as ProjectType] ?? project.projectType}</span>
                 <span className="data-cell data-cell--meta">{phaseLabel(project.phaseKey)}</span>
-                <span className="data-cell data-cell--meta">{project.nextActionTaskId ?? "尚未明确"}</span></button></li>)}</ul></div></div>}
+                <span className="data-cell data-cell--meta">{nextLabel(project)}</span></button></li>)}</ul></div></div>}
           {nextCursor && <button className="secondary-button" type="button" data-testid="projects-live-load-more"
             disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>{loadingMore ? "正在加载" : "加载更多"}</button>}
         </>}
-      <p className="list-footer-note"><Info aria-hidden="true" />下一步只显示服务端 Task ID；列表未单读 Task，不能推断其标题。</p>
+      <p className="list-footer-note"><Info aria-hidden="true" />下一步来自项目状态，显示对应任务的标题；任务的确切 ID、修订与打开入口在选中项目后的右侧摘要中。</p>
     </div><ResponsiveRail label="查看项目摘要" title={selected?.title ?? "项目摘要"}><div className="rail-content">
       <h2>{selected?.title ?? "项目摘要"}</h2>{selected ? <><p className="rail-intro">Project ID：{selected.id}</p>
         <section className="project-state-summary" aria-label="项目当前状态"><span>项目阶段</span>
           <strong>{phaseLabel(selected.phaseKey)}</strong><small>Project v{selected.revision} · State v{selected.stateRevision}</small></section>
         <section className="rail-section"><h3>下一步</h3><p>{selected.nextActionTaskId
-          ? <Link className="inline-link" to={`/tasks/${selected.nextActionTaskId}`}>{selected.nextActionTaskId}</Link>
-          : "尚未明确"}</p><small>仅有 Task ID，未在列表中读取标题。</small></section>
+          ? <Link className="inline-link" to={`/tasks/${selected.nextActionTaskId}`}>
+            {taskTitles[selected.nextActionTaskId] ?? "打开任务"}</Link>
+          : "尚未明确"}</p>
+          {selected.nextActionTaskId && <small>任务 ID：{selected.nextActionTaskId}</small>}</section>
         <Link className="primary-button primary-button--wide" data-testid="project-open" to={`/projects/${selected.id}`}>打开项目<ArrowRight aria-hidden="true" /></Link>
         {!archived && <><button className="secondary-button secondary-button--wide" type="button" data-testid="project-archive"
           disabled={checkingArchive || archiveBusy || pendingArchive !== null || loading || loadingMore || error !== null ||

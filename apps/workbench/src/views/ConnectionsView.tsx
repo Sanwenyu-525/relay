@@ -68,12 +68,12 @@ export default function ConnectionsView() {
   const [projectId, setProjectId] = useState("");
   return <section className="connections-page">
     <p className="eyebrow">项目设置</p><h1>连接与权限</h1>
-    <p className="page-lede">连接绑定能力和目标边界；PermissionPolicy 另行授权。默认拒绝，不会因创建连接自动放行。</p>
+    <p className="page-lede">连接绑定能力和目标边界；权限策略另行授权。默认拒绝，不会因创建连接自动放行。</p>
     {connection.mode === "fixture" && <p className="warning-callout" role="status">当前为示例数据；连接设置只在显式连接本机 API 后可用。</p>}
     <form className="surface-panel connections-entry" onSubmit={(event) => { event.preventDefault(); if (projectId.trim()) navigate(`/projects/${encodeURIComponent(projectId.trim())}/connections`); }}>
       <h2>打开项目连接设置</h2>
       <p className="helper-text">可从项目列表打开项目后进入连接设置，或输入已知的 Project ID。</p>
-      <label className="field"><span className="field-label">Project ID</span><input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="Project UUID" data-testid="connections-project-id" /></label>
+      <label className="field"><span className="field-label">项目 ID</span><input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="项目的 UUID" data-testid="connections-project-id" /></label>
       <button className="primary-button" type="submit" disabled={!projectId.trim()}>打开连接设置</button>
     </form>
     <Link className="inline-link" to="/projects">返回项目入口</Link>
@@ -290,7 +290,7 @@ export function ProjectConnectionsView() {
       </div>}
       {snapshot && <>
         <section className="surface-panel"><h2>连接</h2>
-          <p className="helper-text">本列表最多读取服务端前 100 条且无游标。状态与 capability 来自服务端；WEB_FETCH 只公开 allowed_host，FILE_READ 的连接目录未由此接口公开。连接本身不是授权。</p>
+          <p className="helper-text">本列表最多读取服务端前 100 条，没有下一页。状态与能力来自服务端；网页抓取（WEB_FETCH）只公开允许的主机，文件读取（FILE_READ）的连接目录未由此接口公开。连接本身不是授权。</p>
           {snapshot.connections.length === 0 ? <p className="helper-text">本项目尚无连接。</p> : <ul className="connections-list">{snapshot.connections.map((item) => {
             const healthState = health[item.id];
             return <li key={item.id}>
@@ -317,7 +317,7 @@ export function ProjectConnectionsView() {
           </form>
         </section>
 
-        <section className="surface-panel"><h2>受管资源</h2><p className="helper-text">本列表最多读取服务端前 100 条且无游标。下列目录是 FILE_READ / FAKE_WRITE 策略可引用的独立受管资源；不等于 FILE_READ 连接目录。</p>
+        <section className="surface-panel"><h2>受管资源</h2><p className="helper-text">本列表最多读取服务端前 100 条，没有下一页。下列目录是文件读取 / 写入类策略可引用的独立受管资源，不等于文件读取连接自身的目录。</p>
           {snapshot.resources.length === 0 ? <p className="helper-text">本项目尚无受管资源。</p> : <ul className="connections-list">{snapshot.resources.map((item) => <li key={item.id}><div><strong>{item.canonicalRoot}</strong><small>{item.status} · rev {item.revision} · epoch {item.resourceEpoch} · {item.id}</small>
             <small>Windows 文件写入目录身份：{item.fileWriteIdentityBound ? "已绑定" : "未绑定；若需在 Windows 使用 FILE_WRITE，请在 Windows 停用后重新登记此目录"}</small></div>
             {item.status === "ACTIVE" && <button className="danger-button" type="button" disabled={busy || writeBlockedReason !== null} onClick={() => { void sendCommand({
@@ -329,8 +329,8 @@ export function ProjectConnectionsView() {
             <button className="secondary-button" type="submit" disabled={busy || writeBlockedReason !== null}>登记受管资源</button></form>
         </section>
 
-        <section className="surface-panel"><h2>PermissionPolicy</h2>
-          <p className="helper-text">本列表最多读取服务端前 100 条且无游标。没有匹配的有效策略时默认 DENY。AUTO / ASK / DENY 只在你明确提交策略后生效；还需有效连接及目标边界匹配。</p>
+        <section className="surface-panel"><h2>权限策略</h2>
+          <p className="helper-text">本列表最多读取服务端前 100 条，没有下一页。没有匹配的有效策略时默认拒绝（DENY）。自动放行 / 询问 / 拒绝（AUTO / ASK / DENY）只在你明确提交策略后生效；还需有效连接及目标边界匹配。</p>
           {snapshot.policies.length === 0 ? <p className="helper-text">本项目没有权限策略，当前默认 DENY。</p> : <ul className="connections-list">{snapshot.policies.map(({ policy, versions }) => {
             const active = versions.find((version) => version.version === policy.activeVersion);
             return <li key={policy.id}><div><strong>{active ? `${active.capability} · ${active.decision}` : "无有效版本 · DENY"}</strong>

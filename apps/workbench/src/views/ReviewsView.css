@@ -1,0 +1,5 @@
+/* 待审页标题层级：与今日页对齐使用 compactPage，避免 3rem 展示型字号挤占首屏。 */
+/* 权重压过 migrated-scoped.css 的同名选择器（组件 CSS 在其后注入时仍需更高特指）。 */
+.review-page .review-heading h1 {
+  font-size: var(--relay-font-size-compactPage);
+}

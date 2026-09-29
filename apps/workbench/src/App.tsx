@@ -26,7 +26,11 @@ export default function App() {
   const [commandOpen, setCommandOpen] = useState(false);
   const allowClose = useRef(false);
 
-  useEffect(() => { window.scrollTo(0, 0); }, [location.pathname, location.search]);
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    const main = document.getElementById("main-content");
+    if (main) main.scrollTop = 0;
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     if (!isTauri()) return;

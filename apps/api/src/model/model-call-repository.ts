@@ -47,6 +47,17 @@ export class ModelCallRepository {
 
   async begin(id: string, origin: ModelCallOrigin, identity: ModelIdentity): Promise<void> {
     const budget = identity.budget;
+    // VERIFY 是实例级连通性探针：无 Run/Assist 作用域、不占预算。
+    if (origin.kind === 'VERIFY') {
+      if (origin.stepAttemptId !== undefined || origin.assistMessageId !== undefined ||
+          origin.manifestId !== undefined || origin.criterionId !== undefined) {
+        throw new Error('VERIFY model call must not carry run or assist scope');
+      }
+      await this.db.transaction().execute(async (trx) => {
+        await this.insert(trx, id, origin, identity);
+      });
+      return;
+    }
     await this.db.transaction().execute(async (trx) => {
       const runScope = origin.stepAttemptId === undefined ? undefined
         : (await sql<{ id: string; project_id: string | null }>`select r.id, t.project_id
@@ -147,5 +158,11 @@ export class ModelCallRepository {
   async listForAssistMessage(messageId: string): Promise<readonly ModelCallRow[]> {
     return (await sql<ModelCallRow>`select * from model_calls
       where assist_message_id = ${messageId} order by started_at, id`.execute(this.db)).rows;
+  }
+
+  /** 最近一次模型端口验证（实例级：跨 Workspace 取最新一条 VERIFY）。 */
+  async latestVerify(): Promise<ModelCallRow | undefined> {
+    return (await sql<ModelCallRow>`select * from model_calls where kind = 'VERIFY'
+      order by started_at desc, id desc limit 1`.execute(this.db)).rows[0];
   }
 }

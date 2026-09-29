@@ -10,7 +10,7 @@ import type { DbExecutor } from '../infrastructure/database.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
 import { evidenceUnavailable, invalidTransition } from './domain-error.js';
 import type { StepExecution } from './run-steps.js';
-import type { Repositories } from './unit-of-work.js';
+import { createRepositories, type Repositories } from './unit-of-work.js';
 import {
   buildCheckPlan,
   checkPlanHash,
@@ -22,7 +22,8 @@ import type { ContextCorrectionInput, FakeScenario } from '../workflow/context-f
 import { computeVerdict, DEFAULT_CORRECTION_BUDGET } from '../workflow/verdict.js';
 import { createVerificationReviews } from './review-requests.js';
 import { recordModelInvocation } from './model-call-recorder.js';
-import { ModelScopeBudgetError } from '../model/model-call-repository.js';
+import { ModelScopeBudgetError, type ModelCallSettlement }
+  from '../model/model-call-repository.js';
 import type { CheckOutcome } from '../workflow/checkers.js';
 
 /**
@@ -44,6 +45,31 @@ export interface VerifyRunInput {
   readonly modelCallDb: DbExecutor;
   readonly stepAttemptId: string;
   readonly fakeScenario?: FakeScenario | undefined;
+  /** prepare 阶段（结果事务之外）已完成的模型型检查调用，按 criterionId 索引。 */
+  readonly precomputedChecks?: ReadonlyMap<string, PreparedSemanticCheck> | undefined;
+}
+
+/**
+ * 携带 budget 的检查器在 begin() 时对 runs 行 `for update`；若该调用发生在结果事务内，
+ * 会与结果事务持有的同一场 runs 行锁互相等待（同进程自死锁）。因此模型调用与记账必须
+ * 在结果事务之外完成（对齐 DRAFT 的 prepare/execute 分离），结果事务只写 check_results
+ * 并推进 Run 状态。
+ */
+export type PreparedSemanticCheck =
+  | { readonly kind: 'RECORDED'; readonly callId: string; readonly outcome: CheckOutcome }
+  | { readonly kind: 'BUDGET_EXHAUSTED' };
+
+/** 结算映射：CANCEL（信号中止）> 检查器故障（ERROR → FAILED）> 正常完成。 */
+export function semanticCheckSettlement(result: CheckOutcome,
+  signal?: AbortSignal | undefined): ModelCallSettlement {
+  const base = { providerRequestId: evidenceString(result.evidence, 'provider_request_id') ?? null,
+    usage: evidenceUsage(result.evidence) };
+  if (signal?.aborted === true) return { status: 'CANCELLED', ...base };
+  if (result.result === 'ERROR') {
+    return { status: 'FAILED',
+      errorKind: evidenceString(result.evidence, 'error_kind') ?? 'CHECKER_ERROR', ...base };
+  }
+  return { status: 'COMPLETED', ...base };
 }
 
 export async function verifyRun(
@@ -121,27 +147,33 @@ export async function verifyRun(
     if (checker.modelIdentity === undefined) {
       outcome = await checker.check(checkInput);
     } else {
-      try {
-        const recorded = await recordModelInvocation(input.modelCallDb, {
-          origin: { workspaceId: input.run.workspace_id, kind: 'SEMANTIC_CHECK',
-            stepAttemptId: input.stepAttemptId, criterionId: entry.criterionId, checkAttempt },
-          identity: checker.modelIdentity,
-          invoke: async () => checker.check(checkInput),
-          settle: (result) => ({ status: result.result === 'ERROR' ? 'FAILED' : 'COMPLETED',
-            ...(result.result === 'ERROR' ? { errorKind: evidenceString(result.evidence, 'error_kind')
-              ?? 'CHECKER_ERROR' } : {}),
-            providerRequestId: evidenceString(result.evidence, 'provider_request_id') ?? null,
-            usage: evidenceUsage(result.evidence) }),
-        });
-        outcome = { ...recorded.result,
-          evidence: { ...recorded.result.evidence, model_call_id: recorded.callId } };
-      } catch (error) {
-        if (!(error instanceof ModelScopeBudgetError)) throw error;
-        outcome = { result: 'ERROR', evidence: {
-          checker: checker.id, checker_version: checker.version,
-          artifact_version_id: target.versionId,
-          reason: 'MODEL_BUDGET_EXHAUSTED',
-        } };
+      const precomputed = input.precomputedChecks?.get(entry.criterionId);
+      if (precomputed !== undefined) {
+        outcome = precomputed.kind === 'BUDGET_EXHAUSTED'
+          ? { result: 'ERROR', evidence: {
+              checker: checker.id, checker_version: checker.version,
+              artifact_version_id: target.versionId,
+              reason: 'MODEL_BUDGET_EXHAUSTED' } }
+          : { ...precomputed.outcome,
+              evidence: { ...precomputed.outcome.evidence, model_call_id: precomputed.callId } };
+      } else {
+        try {
+          const recorded = await recordModelInvocation(input.modelCallDb, {
+            origin: { workspaceId: input.run.workspace_id, kind: 'SEMANTIC_CHECK',
+              stepAttemptId: input.stepAttemptId, criterionId: entry.criterionId, checkAttempt },
+            identity: checker.modelIdentity,
+            invoke: async () => checker.check(checkInput),
+            settle: (result) => semanticCheckSettlement(result),
+          });
+          outcome = { ...recorded.result,
+            evidence: { ...recorded.result.evidence, model_call_id: recorded.callId } };
+        } catch (error) {
+          if (!(error instanceof ModelScopeBudgetError)) throw error;
+          outcome = { result: 'ERROR', evidence: {
+            checker: checker.id, checker_version: checker.version,
+            artifact_version_id: target.versionId,
+            reason: 'MODEL_BUDGET_EXHAUSTED' } };
+        }
       }
     }
 
@@ -256,6 +288,86 @@ function evidenceUsage(evidence: JsonObject): { inputTokens: number | null;
 }
 
 /**
+ * VERIFY 的模型外呼与记账在结果事务之外执行（对齐 DRAFT 的 prepare/execute 分离）。
+ *
+ * 必须在 advanceRunStep 的结果事务之前、本 Worker 的 run claim 生效期间调用：
+ *   * budget 型 begin() 对 runs 行 `for update`，结果事务持有同一行锁时调用会自死锁；
+ *   * 该窗口内同一 Run 的 session/check_results 没有其他写入者（任务/Run 排他），
+ *     因此此处计算的 checkAttempt 与结果事务内 verifyRun 的计算一致；
+ *   * 契约缺失、checker 未注册或证据核对失败时不预算：返回空 Map，由 verifyRun 在
+ *     事务内按既有语义结算（invalidTransition / CHECKER_NOT_REGISTERED /
+ *     EVIDENCE_UNAVAILABLE）。
+ */
+export async function prepareSemanticChecks(
+  db: DbExecutor,
+  input: {
+    readonly run: RunRow;
+    readonly task: TaskRow;
+    readonly storage: ManagedContentStore;
+    readonly stepAttemptId: string;
+    readonly fakeScenario?: FakeScenario | undefined;
+    readonly signal?: AbortSignal | undefined;
+  },
+): Promise<ReadonlyMap<string, PreparedSemanticCheck>> {
+  const precomputed = new Map<string, PreparedSemanticCheck>();
+  const repositories = createRepositories(db);
+  const contract = await repositories.runs.readContract(input.run.id);
+  if (contract === undefined) return precomputed;
+  const plan = buildCheckPlan(planFromFrozenSnapshot(contract.frozen_snapshot));
+  if (plan.entries.some((entry) => !hasChecker(entry.checkerId, entry.checkerVersion))) {
+    return precomputed;
+  }
+
+  let target: VerifiedTarget;
+  try {
+    target = await loadVerifiedTarget(repositories, input);
+  } catch {
+    // 证据核对失败按既有路径在结果事务内结算，不在这里提前消耗模型调用。
+    return precomputed;
+  }
+
+  const sessions = await repositories.verifications.listSessionsByRun(input.run.id);
+  const open = sessions.find((session) => session.status === 'OPEN');
+  const history = open === undefined ? [] :
+    await repositories.verifications.listCheckResults(open.id);
+
+  for (const entry of plan.entries) {
+    const checker = resolveCheckerForScenario(entry, input.fakeScenario);
+    // 只有携带 budget 的模型检查器才会对 runs 行加锁：无 budget 的替身路径保持原状，
+    // 仍在 verifyRun 的事务内记账。
+    if (checker.modelIdentity === undefined || checker.modelIdentity.budget === undefined) continue;
+    const previousAttempts = history
+      .filter((row) => row.criterion_id === entry.criterionId)
+      .map((row) => row.check_attempt);
+    const checkAttempt = previousAttempts.length === 0 ? 1 : Math.max(...previousAttempts) + 1;
+    const checkInput = {
+      entry,
+      content: target.content,
+      artifactVersionId: target.versionId,
+      contentHashHex: target.contentHash.toString('hex'),
+      ...(input.fakeScenario === undefined ? {} : { fakeScenario: input.fakeScenario }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    };
+    try {
+      const recorded = await recordModelInvocation(db, {
+        origin: { workspaceId: input.run.workspace_id, kind: 'SEMANTIC_CHECK',
+          stepAttemptId: input.stepAttemptId, criterionId: entry.criterionId, checkAttempt },
+        identity: checker.modelIdentity,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+        invoke: async () => checker.check(checkInput),
+        settle: (result) => semanticCheckSettlement(result, input.signal),
+      });
+      precomputed.set(entry.criterionId, { kind: 'RECORDED', callId: recorded.callId,
+        outcome: recorded.result });
+    } catch (error) {
+      if (!(error instanceof ModelScopeBudgetError)) throw error;
+      precomputed.set(entry.criterionId, { kind: 'BUDGET_EXHAUSTED' });
+    }
+  }
+  return precomputed;
+}
+
+/**
  * 该 Run 已 finalize 为 RETRY 的 session 数：既是下一轮修正的 round，也是已用修正预算。
  * 同一 Run 内它是单调递增的事实，因此修正轮输入与预算都不需要额外计数列。
  */
@@ -320,13 +432,19 @@ interface VerifiedTarget {
   readonly content: string;
 }
 
+interface VerifiedTargetInput {
+  readonly run: RunRow;
+  readonly task: TaskRow;
+  readonly storage: ManagedContentStore;
+}
+
 /**
  * 读 PERSIST_CANDIDATE 的候选版本并核对受管内容：文件缺失、被替换或 hash/size 不一致一律
  * EVIDENCE_UNAVAILABLE，不写任何检查结果，也不把缺失当成 FAIL。
  */
 async function loadVerifiedTarget(
   repositories: Repositories,
-  input: VerifyRunInput,
+  input: VerifiedTargetInput,
 ): Promise<VerifiedTarget> {
   const persistStep = await repositories.runs.readStepByKind(input.run.id, 'PERSIST_CANDIDATE');
   const versionId = readString(persistStep?.result_ref, 'artifact_version_id');

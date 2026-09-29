@@ -118,8 +118,19 @@ test('migrate entry reports the applied migrations without repeating them', asyn
       '0030_m06_real_tools',
       '0031_m06_change_sets',
       '0032_m06_change_set_source_scope',
+      '0033_m06_file_write_stop_proofs',
+      '0034_m06_file_write_manual_dispositions',
+      '0035_m06_file_write_frozen_diff',
+      '0036_m06_file_write_path_identity',
+      '0037_m06_file_write_frozen_diff_root_path',
+      '0038_m06_managed_root_identity',
+      '0039_m06_active_resource_root',
+      '0040_collaboration_artifact_text_locks',
+      '0041_collaboration_impact_checks',
+      '0042_collaboration_attention',
+      '0043_model_call_verify',
     ]);
-  assert.equal(payload.ledger_rows, 32);
+  assert.equal(payload.ledger_rows, 43);
 });
 
 test('migrate entry fails explicitly without a migration connection', async () => {

@@ -17,9 +17,13 @@ import type { DbExecutor } from '../../src/infrastructure/database.js';
  */
 
 const API_ENTRY = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'main.js');
-const STARTUP_TIMEOUT_MS = 15000;
+/** 启动探测上限。默认 30s：独立复跑实测 18 次启动均在 2s 内 live，15s 仅覆盖空输出挂死；
+ *  加长窗口配合“子进程已退出则立即失败”，避免把崩溃误判成慢启动。 */
+const STARTUP_TIMEOUT_MS = 30000;
 const EXIT_TIMEOUT_MS = 10000;
+const FORCE_KILL_TIMEOUT_MS = 5000;
 const PROBE_INTERVAL_MS = 100;
+const PROBE_REQUEST_TIMEOUT_MS = 2000;
 
 export function requireTestDatabaseUrl(): string {
   const value = process.env.RELAY_TEST_DATABASE_URL?.trim();
@@ -43,6 +47,9 @@ export interface HttpResponse {
 export interface RunningApi {
   readonly child: ChildProcessWithoutNullStreams;
   readonly exit: Promise<number | null>;
+  readonly pid: number | undefined;
+  readonly spawnedAt: number;
+  firstOutputAt: () => number | undefined;
   readOutput: () => string;
 }
 
@@ -105,6 +112,8 @@ export interface SendOptions {
   readonly origin?: string;
   /** 直接发送字符串 body（用于非法 JSON 等负例）。 */
   readonly rawBody?: string;
+  /** 单次请求超时，避免 connect 挂起时阻塞启动探测循环。 */
+  readonly timeoutMs?: number;
 }
 
 export function sendRequest(
@@ -161,6 +170,12 @@ export function sendRequest(
 
     request.on('error', rejectResponse);
 
+    if (options.timeoutMs !== undefined) {
+      request.setTimeout(options.timeoutMs, () => {
+        request.destroy(new Error(`request timed out after ${options.timeoutMs}ms`));
+      });
+    }
+
     if (payload !== undefined) {
       request.write(payload);
     }
@@ -170,19 +185,28 @@ export function sendRequest(
 }
 
 export function startApi(env: Record<string, string | undefined>): RunningApi {
+  const spawnedAt = Date.now();
   const child = spawn(process.execPath, [API_ENTRY], {
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   let output = '';
+  let firstOutputAt: number | undefined;
 
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
   child.stdout.on('data', (chunk: string) => {
+    firstOutputAt ??= Date.now();
     output += chunk;
   });
   child.stderr.on('data', (chunk: string) => {
+    firstOutputAt ??= Date.now();
     output += chunk;
+  });
+  // spawn 失败（可执行文件被占用、资源不足等）不会产生 stdio，必须单独捕获
+  child.on('error', (error: Error) => {
+    firstOutputAt ??= Date.now();
+    output += `\n[harness] spawn error: ${error.message}\n`;
   });
 
   const exit = new Promise<number | null>((resolveExit) => {
@@ -191,33 +215,117 @@ export function startApi(env: Record<string, string | undefined>): RunningApi {
     });
   });
 
-  return { child, exit, readOutput: () => output };
+  return {
+    child,
+    exit,
+    pid: child.pid,
+    spawnedAt,
+    firstOutputAt: () => firstOutputAt,
+    readOutput: () => output,
+  };
+}
+
+function describeProcessState(api: RunningApi): string {
+  const alive = api.child.exitCode === null && api.child.signalCode === null;
+  const firstOutputAt = api.firstOutputAt();
+  const firstOutputMs = firstOutputAt === undefined ? 'none' : String(firstOutputAt - api.spawnedAt);
+
+  return [
+    `pid=${api.pid ?? 'unavailable'}`,
+    `alive=${alive}`,
+    `exitCode=${api.child.exitCode}`,
+    `signal=${api.child.signalCode}`,
+    `firstOutputMs=${firstOutputMs}`,
+    `outputBytes=${Buffer.byteLength(api.readOutput())}`,
+  ].join(' ');
 }
 
 export async function waitForLiveness(api: RunningApi, port: number): Promise<void> {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+  let probes = 0;
+  let lastProbeError = '';
 
   while (Date.now() < deadline) {
+    // 子进程已退出就立刻失败：继续探测只会把崩溃拖成超时
+    if (api.child.exitCode !== null || api.child.signalCode !== null) {
+      throw new Error(
+        `the API process exited before becoming live after ${Date.now() - api.spawnedAt}ms ` +
+          `(${describeProcessState(api)}):\n${api.readOutput()}`,
+      );
+    }
+
+    probes += 1;
+
     try {
-      const response = await sendRequest(port, 'GET', '/health/live');
+      const response = await sendRequest(port, 'GET', '/health/live', {
+        timeoutMs: PROBE_REQUEST_TIMEOUT_MS,
+      });
 
       if (response.status === 200) {
+        const liveMs = Date.now() - api.spawnedAt;
+
+        // 阶段耗时证据，写入测试输出便于全量日志归因
+        console.error(
+          `[api-harness] live pid=${api.pid} port=${port} livenessMs=${liveMs} ` +
+            `firstOutputMs=${api.firstOutputAt() === undefined
+              ? 'none'
+              : String(api.firstOutputAt()! - api.spawnedAt)} probes=${probes}`,
+        );
         return;
       }
-    } catch {
-      // 服务尚未开始监听
+
+      lastProbeError = `status=${response.status}`;
+    } catch (error) {
+      lastProbeError = error instanceof Error ? error.message : String(error);
     }
 
     await delay(PROBE_INTERVAL_MS);
   }
 
-  throw new Error(`the API did not become live within ${STARTUP_TIMEOUT_MS}ms:\n${api.readOutput()}`);
+  throw new Error(
+    `the API did not become live within ${STARTUP_TIMEOUT_MS}ms ` +
+      `(${describeProcessState(api)}, probes=${probes}, lastProbeError=${lastProbeError}):\n${api.readOutput()}`,
+  );
 }
 
+/** 先走 stdin 优雅退出；超时则只终止本 harness 拥有的子进程 PID，不触碰其他 node/postgres。 */
 export async function stopApi(api: RunningApi): Promise<number | null> {
+  if (api.child.exitCode !== null || api.child.signalCode !== null) {
+    return api.exit;
+  }
+
   api.child.stdin.end();
 
-  return withTimeout(api.exit, EXIT_TIMEOUT_MS, 'the API process to exit after stdin closed');
+  try {
+    return await withTimeout(api.exit, EXIT_TIMEOUT_MS, 'the API process to exit after stdin closed');
+  } catch (error) {
+    console.error(
+      `[api-harness] stdin stop timed out for pid=${api.pid}, force-killing ` +
+        `(${describeProcessState(api)})`,
+    );
+    api.child.kill();
+    try {
+      return await withTimeout(api.exit, FORCE_KILL_TIMEOUT_MS, 'the API process to exit after kill');
+    } catch {
+      console.error(`[api-harness] pid=${api.pid} still alive after kill; leaving OS reaper to collect it`);
+      throw error;
+    }
+  }
+}
+
+/** 启动失败路径的确定性回收：确保子进程与临时 data_root 不泄漏。 */
+async function discardFailedStart(running: RunningApi, dataRoot: string): Promise<void> {
+  try {
+    await stopApi(running);
+  } catch (error) {
+    console.error(`[api-harness] failed to stop API during startup cleanup: ${String(error)}`);
+  }
+
+  try {
+    await rm(dataRoot, { recursive: true, force: true });
+  } catch (error) {
+    console.error(`[api-harness] failed to remove data root during startup cleanup: ${String(error)}`);
+  }
 }
 
 export async function createDataRoot(): Promise<string> {
@@ -330,7 +438,13 @@ export async function startTestApi(options: { databaseUrl?: string;
   }));
   const authorization = { authorization: `Bearer ${bearerToken}` };
 
-  await waitForLiveness(running, port);
+  try {
+    await waitForLiveness(running, port);
+  } catch (error) {
+    // before hook 失败时 after 可能拿不到 api 引用；这里必须自行回收进程与临时目录
+    await discardFailedStart(running, dataRoot);
+    throw error;
+  }
 
   const request: TestApi['request'] = (method, path, options = {}) =>
     sendRequest(port, method, path, {

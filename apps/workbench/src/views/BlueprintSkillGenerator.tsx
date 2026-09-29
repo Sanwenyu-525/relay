@@ -280,7 +280,7 @@ export default function BlueprintSkillGenerator({ client, projectId, goals, pack
   return <section className="surface-panel live-blueprint-generator" data-testid="blueprint-skill-generator">
     <h2>通过 Skill 生成蓝图建议</h2>
     <p className="helper-text">使用真实 Project Assist 会话和 {skillId} v{skillVersion}。生成完成后只读取与该消息绑定的服务端候选；模型建议本身不修改项目。</p>
-    {definition && <p className="helper-text">Skill 定义 SHA-256 <code>{definition.sha256}</code> ·
+    {definition && <p className="helper-text">Skill 定义 SHA-256 <code className="hash-code">{definition.sha256}</code> ·
       {definition.callSupported && !definition.missingCapabilities.length ? "当前可调用" : "当前不可调用"}。
       Pack 只登记来源版本，不授予能力或 Permission。</p>}
     {definitionError && <p className="action-error" role="alert">Skill 定义不可用：{definitionError}</p>}
@@ -310,13 +310,13 @@ export default function BlueprintSkillGenerator({ client, projectId, goals, pack
     {error && <p className="action-error" role="alert">{error}</p>}
     {frozen && <div className="warning-callout" data-testid="blueprint-skill-pending">
       {frozen.stage === "wait" ? <>
-        <p>Assist 会话 {frozen.sessionId} · assistant message {frozen.messageId}。服务端状态轮询中。</p>
+        <p>Assist 会话 <code className="hash-code">{frozen.sessionId}</code> · assistant message <code className="hash-code">{frozen.messageId}</code>。服务端状态轮询中。</p>
         <button className="secondary-button" type="button" onClick={() => {
           save(null); setNotice(`已停止页面轮询；Assist 消息 ${frozen.messageId} 未被取消。稍后可刷新服务端候选。`);
         }}>停止页面轮询</button>
       </> : <>
         <p>原 {frozen.stage === "create" ? "CreateAssistSession" : "RequestAssistMessage"} command_id：
-          {frozen.commandId}。原内容与 Skill 输入已冻结。</p>
+          <code className="hash-code">{frozen.commandId}</code>。原内容与 Skill 输入已冻结。</p>
         <button className="secondary-button" type="button" disabled={busy}
           onClick={() => void run(() => checkReceipt(frozen, scope.current))}>查询原命令回执</button>
         {mayRetry && !frozen.conflict && <button className="secondary-button" type="button" disabled={busy}

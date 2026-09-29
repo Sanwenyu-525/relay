@@ -28,7 +28,7 @@ before(async () => {
   api = await startTestApi();
   storage = new ManagedContentStore(api.dataRoot);
 });
-after(async () => { await api.stop(); await app.close(); });
+after(async () => { await api?.stop(); await app.close(); });
 
 interface Preview {
   session_id: string; message_id: string; status: string;

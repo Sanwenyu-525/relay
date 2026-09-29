@@ -1,7 +1,7 @@
 ﻿# Desktop trial entry point. Save as UTF-8 with BOM for Windows PowerShell 5.1.
 [CmdletBinding()]
 param(
-  [ValidateSet('Menu', 'Build', 'Start', 'Stop', 'Status', 'Preview')]
+  [ValidateSet('Menu', 'Build', 'Start', 'Stop', 'Status', 'Preview', 'DesktopDev')]
   [string]$Action = 'Menu',
   [switch]$SkipInstall,
   [switch]$FrontendOnly,
@@ -18,19 +18,24 @@ if ($Action -eq 'Menu' -and ($FrontendOnly -or $PSBoundParameters.ContainsKey('F
   $Action = 'Preview'
 }
 if ($Action -eq 'Menu') {
-  Write-Host "Relay 桌面测试版`n1. 启动测试版`n2. 打包最新测试版`n3. 停止测试环境（保留数据）`n4. 查看状态和目录`n5. 浏览器开发预览`n0. 退出"
+  Write-Host "Relay 桌面测试版`n1. 启动测试版`n2. 打包最新测试版`n3. 停止测试环境（保留数据）`n4. 查看状态和目录`n5. 浏览器开发预览`n6. 桌面开发窗口(tauri dev)`n0. 退出"
   switch (Read-Host '请选择') {
     '1' { $Action = 'Start' }
     '2' { $Action = 'Build' }
     '3' { $Action = 'Stop' }
     '4' { $Action = 'Status' }
     '5' { $Action = 'Preview' }
+    '6' { $Action = 'DesktopDev' }
     '0' { return }
     default { throw 'Unknown selection' }
   }
 }
 if ($Action -eq 'Preview') {
   & (Join-Path $PSScriptRoot 'dev-stack.ps1') -FrontendOnly:$FrontendOnly -FrontendPort $FrontendPort -SkipInstall:$SkipInstall -SkipBuild:$SkipBuild -SmokeSeconds $SmokeSeconds
+  return
+}
+if ($Action -eq 'DesktopDev') {
+  & (Join-Path $PSScriptRoot 'desktop-dev.ps1') -FrontendPort $FrontendPort
   return
 }
 $package = Join-Path $root 'test-release'
@@ -156,7 +161,24 @@ try {
   $state.manifest_hash = $manifestHash
   Save-State
   $config = Join-Path $trial 'desktop.env'
-  [IO.File]::WriteAllText($config, "RELAY_DB_URL=$env:RELAY_DB_URL`nRELAY_DB_POOL_MAX=4`nRELAY_DB_CONNECT_TIMEOUT_MS=3000`nRELAY_DESKTOP_WORKSPACE_ID=$($state.workspace_id)`n", [Text.UTF8Encoding]::new($false))
+  # 字段 Owner：DB/工作区四个运行时键由本脚本按当前状态重写；其余键（如 RELAY_MODEL_*
+  # 用户模型配置）归用户所有，从既有文件原样保留——Start/Stop/重打包不丢用户配置。
+  $runtimeOwnedKeys = @('RELAY_DB_URL', 'RELAY_DB_POOL_MAX', 'RELAY_DB_CONNECT_TIMEOUT_MS', 'RELAY_DESKTOP_WORKSPACE_ID')
+  $userLines = @()
+  if (Test-Path -LiteralPath $config) {
+    $userLines = @(Get-Content -LiteralPath $config | Where-Object {
+      $line = $_
+      if ($line -match '^\s*([A-Za-z0-9_]+)\s*=') { -not ($runtimeOwnedKeys -contains $Matches[1]) }
+      elseif ($line -match '^\s*#') { $true }
+      else { $false }
+    })
+  }
+  $runtimeLines = @(
+    "RELAY_DB_URL=$env:RELAY_DB_URL",
+    'RELAY_DB_POOL_MAX=4',
+    'RELAY_DB_CONNECT_TIMEOUT_MS=3000',
+    "RELAY_DESKTOP_WORKSPACE_ID=$($state.workspace_id)")
+  [IO.File]::WriteAllText($config, (($runtimeLines + $userLines) -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
   $env:RELAY_DESKTOP_CONFIG_PATH = $config
   $env:RELAY_DESKTOP_DATA_ROOT = Join-Path $trial 'data'
   New-Item -ItemType Directory -Path $env:RELAY_DESKTOP_DATA_ROOT -Force | Out-Null

@@ -1,0 +1,38 @@
+[
+  {
+    "path": "apps/api/test/integration/cli.integration.test.ts",
+    "sha256": "4E84C1B7FAFC364ECA5537E15AFDDDBC3EB440D2FB77C387309692B506356E68"
+  },
+  {
+    "path": "apps/api/test/integration/run-command-order.integration.test.ts",
+    "sha256": "76E351F4B8A6B9D4335CD0F019CF921A5C5B1D242810287DC62B7E423F740538"
+  },
+  {
+    "path": "apps/api/src/workflow/model-port-config.ts",
+    "sha256": "14ECE5144D4A324F84FACE0A9FE97A458276B02F3C48076E9A5470CB77898AE0"
+  },
+  {
+    "path": "apps/api/src/api/model-api.ts",
+    "sha256": "0E238ED5ABC42D89C6F5FCEC70D429FAF3BFFCF1017DAC6336C42D40696EF933"
+  },
+  {
+    "path": "apps/workbench/src/views/SettingsView.tsx",
+    "sha256": "D7B8F6BDAB8E89EE37A1935AEA0663A3C35B20E67CC1F77C1CFE9D551E2ECF1E"
+  },
+  {
+    "path": "apps/workbench/src/views/ProjectsView.tsx",
+    "sha256": "0B580426A51D1610DFB13697C0D7C3EE84BBAA21CD42E55A2FE01159193E5641"
+  },
+  {
+    "path": "apps/workbench/src/views/TasksView.tsx",
+    "sha256": "8BB369776AF0DE03D5D6C83D198F5CAC700C4BAFB3A4B8152572DC116CE35BBC"
+  },
+  {
+    "path": "apps/workbench/src/views/KnowledgeView.tsx",
+    "sha256": "096A1F180B7D6698A732913401636BB5DB30412CB54902AEBAB06A542C1A64B9"
+  },
+  {
+    "path": "scripts/test-desktop.ps1",
+    "sha256": "FED11F6120225B380694461C827789279A077A523373A0FD73BB2FBE32A29B69"
+  }
+]

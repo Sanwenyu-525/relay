@@ -88,3 +88,13 @@ J 后目录发布重建已通过（`apps/desktop/results/build-release-j-fix.txt
 补上辅助链接的无 hash 历史跳转后重建的最终 EXE 位于系统临时目录 `relay-titlebar-ui-check-20260928/relay-desktop.exe`，SHA-256 `86bbcdad91f654ae9b2bb7308f7e6da31d4e5212bfbf7b20279f95b0555fd480`；未替换 `apps/desktop/release`。最终 EXE 的真实 WebView2 中，辅助链接 Enter 后 `main-content` 获得焦点、URL 与浏览器历史长度不变；搜索仍打开原面板，新建任务可进入原表单，有草稿时标题栏后退与关闭仍走原确认，确认关闭后宿主退出。两次一次性 PostgreSQL 会话及宿主进程均已清理。
 
 该测试包复用此前冻结的 API 侧车，缺少当前并行增量的人工介入提醒读取路径，因此项目页显示该读取失败提示；本轮只据此验收标题栏和导航，不把它作为完整业务包验收。最终 EXE 未重演原生鼠标拖动、贴边和最小化恢复，也未测其他 DPI、多屏及安装包；这些旧构建的验证证据不能自动移用于 v2。M06/M07 总出口不变。
+
+## 2026-09-29 透明桌面图标的小尺寸观感调整
+
+用户提供的 Windows 任务栏截图显示 Relay 图标比相邻应用显小，并确认继续保留透明背景。上一版透明图的可见内容已接近画布左右边缘，直接等比放大容易切掉外圈箭头或橙色徽章。因此以原透明机器人为依据生成[优化来源](../../apps/desktop/src-tauri/icons/icon-source-20260929.png)，让机器人浅色主体和橙色徽章在小尺寸下更醒目，同时保留完整外圈与透明背景。上一版来源保留，便于对照。新图会改变局部绘制细节，并非原图的纯缩放。
+
+产品 `icon.png` 由该 1254×1254 RGBA 来源缩放为 1024×1024；`icon.ico` 从同一母版生成 256、128、96、64、48、40、32、24、20、16px 十层，256px 保持首层。静态检查确认每层为 32 位 RGBA、透明角和尺寸顺序正确。32px 下，完全不透明或半透明的主体占用像素数与上一版接近，但橙色区域由 42 增至 59 像素、浅色区域由 127 增至 136 像素（固定颜色阈值，仅用于小尺寸对照，不代表 Windows 任务栏观感已通过）。此次没有改变 Tauri 配置、业务逻辑或窗口行为。
+
+`pnpm --dir apps/desktop exec tauri build --no-bundle` 最终退出码为 0，生成的 `target/release/relay-desktop.exe` SHA-256 为 `5bc973d47661548fa466f94853cb2f0acd6fa5aa70325885a877dff3f815c8fd`。其唯一 Windows PE 图标组含十层 RT_ICON，顺序及各层 payload 均与新 ICO（SHA-256 `43c1df2ea46da1369f04aa8a43e69901b8acce67dcb143a1f4003cc36d4e9e60`）逐字节一致。前两次构建分别撞上并行编辑中的 `RuntimeState` 字段不匹配与测试语法错误；该文件随后由并行工作修正，本次未修改其代码。最终构建证明新资源进入 EXE，不代替任务栏观感验收。
+
+`test-release` 在此次调整前已包含 2026-09-28 透明图（manifest 中 ICO SHA-256 为 `fd4ff5af…`）；`apps/desktop/release` 仍包含更早的 B 任务卡图（`6d178129…`），两者都不能作为新图的运行验收。新图的真实 Windows 任务栏显示与发布包更新仍需单独验证。

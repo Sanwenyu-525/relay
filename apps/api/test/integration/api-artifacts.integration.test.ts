@@ -57,13 +57,20 @@ before(async () => {
 });
 
 after(async () => {
-  await dropFailingTrigger('state_completion_refs');
-  await dropFailingTrigger('artifact_versions');
-  await dropFailingTrigger('project_states');
-  await dropProjectStateDelayTrigger();
-  await dropTaskReadDelayPolicy();
-  await api.stop();
-  await appDatabase.close();
+  try {
+    await dropFailingTrigger('state_completion_refs');
+    await dropFailingTrigger('artifact_versions');
+    await dropFailingTrigger('project_states');
+    await dropProjectStateDelayTrigger();
+    await dropTaskReadDelayPolicy();
+  } finally {
+    // before 失败时 api 可能未赋值；清理不能抛 undefined.stop
+    try {
+      await api?.stop();
+    } finally {
+      await appDatabase.close();
+    }
+  }
 });
 
 /* -------------------------------------------------------------------------- */

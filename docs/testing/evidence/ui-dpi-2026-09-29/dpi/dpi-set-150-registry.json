@@ -1,0 +1,8 @@
+{
+  "captured_at": "2026-09-29T08:49:46",
+  "action": "set-150",
+  "target": 1440,
+  "appliedDPI_now": 1440,
+  "getDpiForSystem": 120,
+  "gdi_logpixels_y": 120
+}

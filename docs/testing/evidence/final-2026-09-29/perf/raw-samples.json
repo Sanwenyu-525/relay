@@ -1,0 +1,494 @@
+{
+  "m1": [
+    {
+      "run": 1,
+      "domContentLoaded_ms": 165.7,
+      "firstContentfulPaint_ms": null,
+      "loadEventEnd_ms": 169.5,
+      "jsTransferBytes": 312315,
+      "jsDecodedBytes": 1190473,
+      "clickToFeedback_ms": 126,
+      "navStartToInteractive_ms": 401
+    },
+    {
+      "run": 2,
+      "domContentLoaded_ms": 77.7,
+      "firstContentfulPaint_ms": null,
+      "loadEventEnd_ms": 77.8,
+      "jsTransferBytes": 312315,
+      "jsDecodedBytes": 1190473,
+      "clickToFeedback_ms": 75,
+      "navStartToInteractive_ms": 209
+    },
+    {
+      "run": 3,
+      "domContentLoaded_ms": 80.4,
+      "firstContentfulPaint_ms": null,
+      "loadEventEnd_ms": 80.6,
+      "jsTransferBytes": 312315,
+      "jsDecodedBytes": 1190473,
+      "clickToFeedback_ms": 83,
+      "navStartToInteractive_ms": 215
+    },
+    {
+      "run": 4,
+      "domContentLoaded_ms": 84.7,
+      "firstContentfulPaint_ms": null,
+      "loadEventEnd_ms": 84.9,
+      "jsTransferBytes": 312315,
+      "jsDecodedBytes": 1190473,
+      "clickToFeedback_ms": 98,
+      "navStartToInteractive_ms": 235
+    },
+    {
+      "run": 5,
+      "domContentLoaded_ms": 88.7,
+      "firstContentfulPaint_ms": null,
+      "loadEventEnd_ms": 88.9,
+      "jsTransferBytes": 312315,
+      "jsDecodedBytes": 1190473,
+      "clickToFeedback_ms": 85,
+      "navStartToInteractive_ms": 237
+    },
+    {
+      "run": 6,
+      "domContentLoaded_ms": 83.6,
+      "firstContentfulPaint_ms": null,
+      "loadEventEnd_ms": 83.7,
+      "jsTransferBytes": 312315,
+      "jsDecodedBytes": 1190473,
+      "clickToFeedback_ms": 91,
+      "navStartToInteractive_ms": 230
+    },
+    {
+      "run": 7,
+      "domContentLoaded_ms": 74.7,
+      "firstContentfulPaint_ms": null,
+      "loadEventEnd_ms": 75,
+      "jsTransferBytes": 312315,
+      "jsDecodedBytes": 1190473,
+      "clickToFeedback_ms": 77,
+      "navStartToInteractive_ms": 208
+    }
+  ],
+  "browser": {
+    "m1_first_screen": [],
+    "m2_route_switch": {
+      "今日": [
+        {
+          "round": 1,
+          "ms": 71
+        },
+        {
+          "round": 2,
+          "ms": 96
+        },
+        {
+          "round": 3,
+          "ms": 53
+        },
+        {
+          "round": 4,
+          "ms": 61
+        },
+        {
+          "round": 5,
+          "ms": 64
+        },
+        {
+          "round": 6,
+          "ms": 76
+        },
+        {
+          "round": 7,
+          "ms": 61
+        }
+      ],
+      "项目": [
+        {
+          "round": 1,
+          "ms": 71
+        },
+        {
+          "round": 2,
+          "ms": 67
+        },
+        {
+          "round": 3,
+          "ms": 73
+        },
+        {
+          "round": 4,
+          "ms": 75
+        },
+        {
+          "round": 5,
+          "ms": 74
+        },
+        {
+          "round": 6,
+          "ms": 64
+        },
+        {
+          "round": 7,
+          "ms": 77
+        }
+      ],
+      "任务": [
+        {
+          "round": 1,
+          "ms": 69
+        },
+        {
+          "round": 2,
+          "ms": 76
+        },
+        {
+          "round": 3,
+          "ms": 75
+        },
+        {
+          "round": 4,
+          "ms": 64
+        },
+        {
+          "round": 5,
+          "ms": 64
+        },
+        {
+          "round": 6,
+          "ms": 75
+        },
+        {
+          "round": 7,
+          "ms": 63
+        }
+      ],
+      "知识": [
+        {
+          "round": 1,
+          "ms": 66
+        },
+        {
+          "round": 2,
+          "ms": 72
+        },
+        {
+          "round": 3,
+          "ms": 55
+        },
+        {
+          "round": 4,
+          "ms": 68
+        },
+        {
+          "round": 5,
+          "ms": 57
+        },
+        {
+          "round": 6,
+          "ms": 52
+        },
+        {
+          "round": 7,
+          "ms": 62
+        }
+      ],
+      "动态": [
+        {
+          "round": 1,
+          "ms": 85
+        },
+        {
+          "round": 2,
+          "ms": 64
+        },
+        {
+          "round": 3,
+          "ms": 71
+        },
+        {
+          "round": 4,
+          "ms": 72
+        },
+        {
+          "round": 5,
+          "ms": 69
+        },
+        {
+          "round": 6,
+          "ms": 75
+        },
+        {
+          "round": 7,
+          "ms": 77
+        }
+      ],
+      "设置": [
+        {
+          "round": 1,
+          "ms": 85
+        },
+        {
+          "round": 2,
+          "ms": 78
+        },
+        {
+          "round": 3,
+          "ms": 65
+        },
+        {
+          "round": 4,
+          "ms": 61
+        },
+        {
+          "round": 5,
+          "ms": 79
+        },
+        {
+          "round": 6,
+          "ms": 63
+        },
+        {
+          "round": 7,
+          "ms": 63
+        }
+      ]
+    },
+    "m6_command_palette": [
+      {
+        "run": 1,
+        "keyToPanelVisible_ms": 33,
+        "inputToResults_ms": 306,
+        "panelToResults_ms": 311,
+        "resultCount": 1
+      },
+      {
+        "run": 2,
+        "keyToPanelVisible_ms": 10,
+        "inputToResults_ms": 311,
+        "panelToResults_ms": 317,
+        "resultCount": 1
+      },
+      {
+        "run": 3,
+        "keyToPanelVisible_ms": 11,
+        "inputToResults_ms": 314,
+        "panelToResults_ms": 319,
+        "resultCount": 1
+      },
+      {
+        "run": 4,
+        "keyToPanelVisible_ms": 9,
+        "inputToResults_ms": 315,
+        "panelToResults_ms": 320,
+        "resultCount": 1
+      },
+      {
+        "run": 5,
+        "keyToPanelVisible_ms": 11,
+        "inputToResults_ms": 313,
+        "panelToResults_ms": 318,
+        "resultCount": 1
+      },
+      {
+        "run": 6,
+        "keyToPanelVisible_ms": 9,
+        "inputToResults_ms": 317,
+        "panelToResults_ms": 320,
+        "resultCount": 1
+      },
+      {
+        "run": 7,
+        "keyToPanelVisible_ms": 10,
+        "inputToResults_ms": 315,
+        "panelToResults_ms": 319,
+        "resultCount": 1
+      }
+    ],
+    "meta": {
+      "base": "http://127.0.0.1:4173",
+      "api": "http://127.0.0.1:8790",
+      "samples": {
+        "liveConnect_ms": 176
+      }
+    }
+  },
+  "api": {
+    "m4_delegate": [
+      {
+        "run": 1,
+        "taskId": "0a9b9d9b-49b3-4e90-bfa0-fe4fb8faca75",
+        "runId": "ff4cfb81-d3a0-4104-8d9a-cfd79880d6a3",
+        "delegateReturn_ms": 46,
+        "runFirstVisible_ms": 84,
+        "firstStatus": "CREATED",
+        "statusesSeen": [
+          "CREATED"
+        ]
+      },
+      {
+        "run": 2,
+        "taskId": "2a3cb9a1-7ee8-4719-8581-d3fe92b52ba5",
+        "runId": "3c7313d7-f746-41d6-bd7b-39090337ba66",
+        "delegateReturn_ms": 12,
+        "runFirstVisible_ms": 18,
+        "firstStatus": "CREATED",
+        "statusesSeen": [
+          "CREATED"
+        ]
+      },
+      {
+        "run": 3,
+        "taskId": "6fc8512a-63d2-44d5-a9ba-b039529fd1ed",
+        "runId": "f1317aaf-640a-4cfd-a50e-64385d36299e",
+        "delegateReturn_ms": 10,
+        "runFirstVisible_ms": 18,
+        "firstStatus": "CREATED",
+        "statusesSeen": [
+          "CREATED"
+        ]
+      },
+      {
+        "run": 4,
+        "taskId": "4af7cb11-c506-41be-b99b-20e85a5d6083",
+        "runId": "6b468069-723f-4768-a359-1ef1afe6d961",
+        "delegateReturn_ms": 10,
+        "runFirstVisible_ms": 15,
+        "firstStatus": "CREATED",
+        "statusesSeen": [
+          "CREATED"
+        ]
+      },
+      {
+        "run": 5,
+        "taskId": "2deb9ade-408d-4d90-9207-76e5e40fa1f9",
+        "runId": "7f6d3ab6-7da9-48bb-b69e-a8fd36a251e4",
+        "delegateReturn_ms": 13,
+        "runFirstVisible_ms": 19,
+        "firstStatus": "CREATED",
+        "statusesSeen": [
+          "CREATED"
+        ]
+      },
+      {
+        "run": 6,
+        "taskId": "cad25b68-5c11-4e01-a6cd-a1182c27ea27",
+        "runId": "409298e9-442f-4588-9c04-4ced62554256",
+        "delegateReturn_ms": 12,
+        "runFirstVisible_ms": 20,
+        "firstStatus": "CREATED",
+        "statusesSeen": [
+          "CREATED"
+        ]
+      },
+      {
+        "run": 7,
+        "taskId": "77c2c245-93a4-4f90-ae66-a5f409d239ee",
+        "runId": "4f965729-4be9-468f-bdb6-98d278c5cef8",
+        "delegateReturn_ms": 10,
+        "runFirstVisible_ms": 14,
+        "firstStatus": "CREATED",
+        "statusesSeen": [
+          "CREATED"
+        ]
+      }
+    ],
+    "m5_cancel": [
+      {
+        "run": 1,
+        "runId": "ff4cfb81-d3a0-4104-8d9a-cfd79880d6a3",
+        "commandReturn_ms": 39,
+        "converge_ms": 12,
+        "firstVisibleConverged_ms": 51,
+        "finalStatus": "CANCELLED",
+        "controlRequestId": "ccb1a97a-104b-4f03-9591-57a0b00e5824"
+      },
+      {
+        "run": 2,
+        "runId": "3c7313d7-f746-41d6-bd7b-39090337ba66",
+        "commandReturn_ms": 12,
+        "converge_ms": 6,
+        "firstVisibleConverged_ms": 18,
+        "finalStatus": "CANCELLED",
+        "controlRequestId": "819f8d8b-4c22-4aa8-b2ce-aea3a8919797"
+      },
+      {
+        "run": 3,
+        "runId": "f1317aaf-640a-4cfd-a50e-64385d36299e",
+        "commandReturn_ms": 13,
+        "converge_ms": 5,
+        "firstVisibleConverged_ms": 18,
+        "finalStatus": "CANCELLED",
+        "controlRequestId": "45e768d3-320c-4c59-bec4-34485b7afa09"
+      },
+      {
+        "run": 4,
+        "runId": "6b468069-723f-4768-a359-1ef1afe6d961",
+        "commandReturn_ms": 11,
+        "converge_ms": 8,
+        "firstVisibleConverged_ms": 19,
+        "finalStatus": "CANCELLED",
+        "controlRequestId": "1f2691cc-6ffe-4fd5-b8e2-221254f7795e"
+      },
+      {
+        "run": 5,
+        "runId": "7f6d3ab6-7da9-48bb-b69e-a8fd36a251e4",
+        "commandReturn_ms": 12,
+        "converge_ms": 7,
+        "firstVisibleConverged_ms": 19,
+        "finalStatus": "CANCELLED",
+        "controlRequestId": "c8049006-0aca-4b9d-8978-a8b1175634d1"
+      },
+      {
+        "run": 6,
+        "runId": "409298e9-442f-4588-9c04-4ced62554256",
+        "commandReturn_ms": 10,
+        "converge_ms": 6,
+        "firstVisibleConverged_ms": 16,
+        "finalStatus": "CANCELLED",
+        "controlRequestId": "ce592550-8810-44a6-be38-1c23dbf5f7ff"
+      },
+      {
+        "run": 7,
+        "runId": "4f965729-4be9-468f-bdb6-98d278c5cef8",
+        "commandReturn_ms": 12,
+        "converge_ms": 3,
+        "firstVisibleConverged_ms": 15,
+        "finalStatus": "CANCELLED",
+        "controlRequestId": "87bc7b4c-c80e-4288-b521-5dbbda6bc587"
+      }
+    ],
+    "meta": {
+      "projectId": "ff7bfc43-7576-43d9-830c-d8800154b59e"
+    }
+  },
+  "cold": {
+    "samples": [
+      {
+        "run": 1,
+        "port": 8791,
+        "spawnToReady_ms": 2858,
+        "pollAttempts": 1,
+        "ok": true,
+        "kill_ms": 35
+      },
+      {
+        "run": 2,
+        "port": 8792,
+        "spawnToReady_ms": 1890,
+        "pollAttempts": 1,
+        "ok": true,
+        "kill_ms": 38
+      },
+      {
+        "run": 3,
+        "port": 8793,
+        "spawnToReady_ms": 1935,
+        "pollAttempts": 1,
+        "ok": true,
+        "kill_ms": 34
+      }
+    ]
+  }
+}

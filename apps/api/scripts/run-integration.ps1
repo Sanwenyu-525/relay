@@ -101,10 +101,12 @@ try {
 
   $initdbArgs = @('-D', $dataDirectory, '-U', 'relay_api_admin', '-A', 'trust', '--encoding=UTF8')
   if ($UseCLocale) { $initdbArgs += '--locale=C' }
+  $phaseWatch = [System.Diagnostics.Stopwatch]::StartNew()
   & $initdbExe @initdbArgs
   if ($LASTEXITCODE -ne 0) {
     throw "initdb failed with exit code $LASTEXITCODE"
   }
+  Write-Host ("[timing] initdbMs=" + $phaseWatch.ElapsedMilliseconds)
 
   $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
   $listener.Start()
@@ -113,11 +115,13 @@ try {
 
   # Do not pipe pg_ctl start: postgres inherits the pipe write handle and PowerShell would
   # wait for an EOF that never arrives.
+  $pgWatch = [System.Diagnostics.Stopwatch]::StartNew()
   & $pgCtlExe 'start' '-D' $dataDirectory '-l' $serverLog '-o' "-h 127.0.0.1 -p $port" '-w' '-t' '30'
   $postgresStartExitCode = $LASTEXITCODE
   if ($postgresStartExitCode -ne 0) {
     throw "pg_ctl start failed with exit code $postgresStartExitCode; inspect $serverLog"
   }
+  Write-Host ("[timing] postgresStartMs=" + $pgWatch.ElapsedMilliseconds)
   $serverStarted = $true
 
   & $pgCtlExe 'status' '-D' $dataDirectory
@@ -148,11 +152,13 @@ try {
   $previousMigrationDatabaseUrl = [Environment]::GetEnvironmentVariable('RELAY_MIGRATION_DB_URL', 'Process')
   try {
     $env:RELAY_MIGRATION_DB_URL = $env:RELAY_TEST_MIGRATION_DATABASE_URL
+    $migrateWatch = [System.Diagnostics.Stopwatch]::StartNew()
     & $nodeExe (Join-Path $apiRoot 'dist\src\cli\migrate.js')
     $businessMigrationExitCode = $LASTEXITCODE
     if ($businessMigrationExitCode -ne 0) {
       throw "business migration failed with exit code $businessMigrationExitCode"
     }
+    Write-Host ("[timing] businessMigrationMs=" + $migrateWatch.ElapsedMilliseconds)
     & $nodeExe (Join-Path $apiRoot 'dist\src\cli\install-graph.js')
     $graphInstallExitCode = $LASTEXITCODE
     if ($graphInstallExitCode -ne 0) {

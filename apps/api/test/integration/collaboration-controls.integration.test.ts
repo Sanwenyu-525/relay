@@ -29,7 +29,7 @@ before(async () => {
   api = await startTestApi();
   workspaceId = await createWorkspace(database.db);
 });
-after(async () => { await api.stop(); await database.close(); });
+after(async () => { await api?.stop(); await database.close(); });
 
 async function taskAndArtifact(content: string) {
   const projectCommand = randomUUID();

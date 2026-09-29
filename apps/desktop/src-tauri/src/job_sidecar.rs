@@ -25,8 +25,8 @@ use windows::{
         },
         Security::SECURITY_ATTRIBUTES,
         Storage::FileSystem::{
-            CreateFileW, MoveFileExW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE,
-            MOVEFILE_WRITE_THROUGH, OPEN_EXISTING,
+            CreateFileW, MoveFileExW, FILE_APPEND_DATA, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_DELETE,
+            FILE_SHARE_READ, FILE_SHARE_WRITE, MOVEFILE_WRITE_THROUGH, OPEN_ALWAYS, OPEN_EXISTING,
         },
         System::{
             JobObjects::{
@@ -280,6 +280,56 @@ pub fn remove_reconciled_launches(data_root: &Path, launch_ids: &[String]) -> Re
     Ok(())
 }
 
+/// In-place supervisor restart recovery: unlike `recover_old_launches`, the
+/// recorded launch whose API Job still hosts the running desktop API keeps that
+/// Job untouched. Every recorded supervisor/worker tree is confirmed stopped
+/// (terminated or already absent) before the restarted supervisor re-recovers
+/// the recorded launches' claims.
+pub fn recover_supervisor_restart_launches(
+    data_root: &Path,
+    keep_api_launch: &str,
+) -> Result<Vec<StoppedLaunch>, String> {
+    let directory = records_dir(data_root);
+    if !directory.exists() {
+        return Ok(Vec::new());
+    }
+    let mut records = Vec::new();
+    for item in
+        fs::read_dir(&directory).map_err(|_| "cannot inspect prior desktop launch records")?
+    {
+        let item = item.map_err(|_| "cannot inspect prior desktop launch records")?;
+        let path = item.path();
+        if path.extension().is_none_or(|extension| extension != "json") {
+            continue;
+        }
+        let record = read_armed_record(&path)?;
+        let worker = Job::open_old(&record.supervisor_job)?;
+        let worker_present = worker.is_some();
+        if let Some(worker) = worker {
+            worker.terminate_and_wait(Duration::from_secs(10))?;
+        }
+        let mut api_present = false;
+        if record.launch_id != keep_api_launch {
+            let api = Job::open_old(&record.api_job)?;
+            api_present = api.is_some();
+            if let Some(api) = api {
+                api.terminate_and_wait(Duration::from_secs(10))?;
+            }
+        }
+        let proof = if worker_present || api_present {
+            "armed_job_terminated_and_active_count_zero"
+        } else {
+            "armed_job_absent_after_last_handle_closed"
+        };
+        records.push(StoppedLaunch {
+            launch_id: record.launch_id,
+            stop_evidence: proof.into(),
+        });
+    }
+    records.sort_by(|a, b| a.launch_id.cmp(&b.launch_id));
+    Ok(records)
+}
+
 pub fn arm_launch(data_root: &Path) -> Result<Launch, String> {
     let id = Uuid::new_v4().to_string();
     let (api_name, supervisor_name) = names(&id);
@@ -338,6 +388,36 @@ fn create_pipe() -> Result<(OwnedHandle, OwnedHandle), String> {
     unsafe { CreatePipe(&mut read, &mut write, Some(&mut attributes), 0) }
         .map_err(|_| "cannot create a desktop private pipe".to_owned())?;
     Ok((unsafe { own(read) }, unsafe { own(write) }))
+}
+
+/// 为子进程继承的 stderr 打开（或创建）共享诊断日志。以 FILE_APPEND_DATA
+/// 打开保证宿主与子进程并发写入都落在文件末尾；FILE_SHARE_DELETE 允许宿主
+/// 在子进程存活时尽力轮转。日志只承载 stderr 诊断，不承载任何配置或密钥。
+fn open_append_log(path: &Path) -> Result<OwnedHandle, String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|_| "cannot create the desktop worker log directory".to_owned())?;
+    }
+    crate::rotate_worker_log_if_large(path, crate::WORKER_LOG_ROTATE_BYTES);
+    let wide = HSTRING::from(path.as_os_str());
+    let mut attributes = SECURITY_ATTRIBUTES {
+        nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: ptr::null_mut(),
+        bInheritHandle: BOOL(1),
+    };
+    let handle = unsafe {
+        CreateFileW(
+            PCWSTR(wide.as_ptr()),
+            FILE_APPEND_DATA.0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            Some(&mut attributes),
+            OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
+            None,
+        )
+    }
+    .map_err(|_| "cannot open the desktop worker diagnostic log".to_owned())?;
+    Ok(unsafe { own(handle) })
 }
 
 fn quote_arg(value: &OsStr) -> Vec<u16> {
@@ -416,11 +496,14 @@ pub struct ManagedProcess {
 }
 
 impl ManagedProcess {
+    /// `stderr_log` 为 `Some` 时子进程 stderr 追加到该轮转日志文件（D2），
+    /// 为 `None` 时保持既有 NUL 行为（丢弃）。
     pub fn spawn(
         node: &Path,
         args: &[OsString],
         overrides: &[(String, OsString)],
         job: Job,
+        stderr_log: Option<&Path>,
     ) -> Result<Self, String> {
         let (child_stdin, parent_stdin) = create_pipe()?;
         let (parent_stdout, child_stdout) = create_pipe()?;
@@ -443,19 +526,23 @@ impl ManagedProcess {
             lpSecurityDescriptor: ptr::null_mut(),
             bInheritHandle: BOOL(1),
         };
-        let nul = unsafe {
-            CreateFileW(
-                windows::core::w!("NUL"),
-                GENERIC_WRITE.0,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                Some(&mut attributes),
-                OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL,
-                None,
-            )
-        }
-        .map_err(|_| "cannot create the desktop null error stream".to_owned())?;
-        let nul = unsafe { own(nul) };
+        let stderr = match stderr_log {
+            Some(path) => open_append_log(path)?,
+            None => unsafe {
+                own(
+                    CreateFileW(
+                        windows::core::w!("NUL"),
+                        GENERIC_WRITE.0,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE,
+                        Some(&mut attributes),
+                        OPEN_EXISTING,
+                        FILE_ATTRIBUTE_NORMAL,
+                        None,
+                    )
+                    .map_err(|_| "cannot create the desktop null error stream".to_owned())?,
+                )
+            },
+        };
 
         let mut bytes = 0;
         let _ = unsafe { InitializeProcThreadAttributeList(None, 2, None, &mut bytes) };
@@ -468,7 +555,7 @@ impl ManagedProcess {
             .map_err(|_| "cannot initialize Windows process attributes".to_owned())?;
         let _attributes = Attributes(list);
         let job_handle = raw(&job.handle);
-        let child_handles = [raw(&child_stdin), raw(&child_stdout), raw(&nul)];
+        let child_handles = [raw(&child_stdin), raw(&child_stdout), raw(&stderr)];
         unsafe {
             UpdateProcThreadAttribute(
                 list,
@@ -530,7 +617,7 @@ impl ManagedProcess {
         }
         drop(child_stdin);
         drop(child_stdout);
-        drop(nul);
+        drop(stderr);
         Ok(Self {
             process,
             stdin: Some(File::from(parent_stdin)),
@@ -638,7 +725,7 @@ mod tests {
             "require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});setInterval(()=>{},1000)"
         )];
         let process =
-            ManagedProcess::spawn(Path::new(&node), &args, &[], job).expect("start Job-bound Node");
+            ManagedProcess::spawn(Path::new(&node), &args, &[], job, None).expect("start Job-bound Node");
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
             if process.job.active_count().expect("inspect Job") >= 2 {
@@ -679,7 +766,7 @@ mod tests {
             OsString::from("-e"),
             OsString::from("setInterval(()=>{},1000)"),
         ];
-        let process = ManagedProcess::spawn(Path::new(&node), &args, &[], launch.supervisor_job)
+        let process = ManagedProcess::spawn(Path::new(&node), &args, &[], launch.supervisor_job, None)
             .expect("start old Worker group");
         let stopped = recover_old_launches(&root).expect("verify and stop old Job");
         assert_eq!(stopped.len(), 1);
@@ -702,6 +789,50 @@ mod tests {
             .expect("test root")
             .starts_with(&root_prefix));
         std::fs::remove_dir_all(&root).expect("remove isolated test root");
+    }
+
+    #[test]
+    fn supervisor_restart_recovery_stops_workers_but_keeps_the_running_api_job() {
+        let Some(node) = std::env::var_os("RELAY_TEST_NODE") else {
+            return;
+        };
+        let root =
+            std::env::temp_dir().join(format!("relay-restart-recover-{}", uuid::Uuid::new_v4()));
+        let launch = arm_launch(&root).expect("arm launch");
+        let sleeper = [
+            OsString::from("-e"),
+            OsString::from("setInterval(()=>{},1000)"),
+        ];
+        let supervisor_side = ManagedProcess::spawn(
+            Path::new(&node), &sleeper, &[], launch.supervisor_job, None,
+        )
+        .expect("start supervisor-side sleeper");
+        let mut api_side = ManagedProcess::spawn(
+            Path::new(&node), &sleeper, &[], launch.api_job, None,
+        )
+        .expect("start API-side sleeper");
+        let stopped = super::recover_supervisor_restart_launches(&root, &launch.id)
+            .expect("recover recorded launches for a supervisor restart");
+        assert_eq!(stopped.len(), 1);
+        assert_eq!(stopped[0].launch_id, launch.id);
+        assert_eq!(
+            stopped[0].stop_evidence,
+            "armed_job_terminated_and_active_count_zero"
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while supervisor_side.try_wait().expect("wait supervisor sleeper").is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "supervisor-side sleeper survived restart recovery"
+            );
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert!(
+            api_side.try_wait().expect("wait API sleeper").is_none(),
+            "the running API Job must survive a supervisor restart recovery"
+        );
+        api_side.stop(Duration::from_secs(5)).expect("stop API-side sleeper");
+        std::fs::remove_dir_all(&root).expect("remove isolated record root");
     }
 
     #[test]
@@ -763,7 +894,7 @@ mod tests {
         let args = [OsString::from("-e"), OsString::from(
             "const c=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});console.log(c.pid);setInterval(()=>{},1000)"
         )];
-        let mut process = ManagedProcess::spawn(&node, &args, &[], launch.supervisor_job)
+        let mut process = ManagedProcess::spawn(&node, &args, &[], launch.supervisor_job, None)
             .expect("start crash probe process tree");
         let mut reader = std::io::BufReader::new(process.take_stdout().expect("probe stdout"));
         let mut child_pid = String::new();

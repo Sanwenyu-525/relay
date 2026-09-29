@@ -4,6 +4,7 @@ import { Info, RotateCcw } from "lucide-react";
 import { createCommandId, RelayApiError, RelayTransportError, type RelayReview, type RelayReviewDecision } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { liveClient, useRelayConnection } from "../lib/relayConnection";
+import "./ReviewsView.css";
 
 const kindLabels: Record<RelayReview["kind"], string> = { CRITERION: "人工验收", RETRY_BUDGET: "修正预算", CHECKER_RETRY: "检查器重试", ACTION_APPROVAL: "动作批准", STATE_PROPOSAL: "项目状态提案" };
 const decisionLabels: Record<RelayReviewDecision, string> = { ACCEPT: "接受这项判断", REQUEST_CHANGES: "请求修改", SET_RETRY_BUDGET: "设置修正预算", RETRY_CHECKS: "重新运行检查", APPROVE: "批准这项动作", DENY: "拒绝这项请求" };

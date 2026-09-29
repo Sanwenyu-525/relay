@@ -1,0 +1,909 @@
+[
+  {
+    "id": "UI-01",
+    "name": "今日工作台",
+    "route": "/today",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-01-1280x800.png",
+    "h1": "把今天留给重要的事",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-05",
+    "name": "项目列表",
+    "route": "/projects",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        "",
+        "打开项目任务"
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-05-1280x800.png",
+    "h1": "项目",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-06",
+    "name": "创建项目",
+    "route": "/projects?view=create",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-06-1280x800.png",
+    "h1": "开始一个长期项目",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-07",
+    "name": "全部任务",
+    "route": "/tasks",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [
+        "进行中",
+        "可开始",
+        "进行中",
+        "可开始",
+        "待整理",
+        "待整理",
+        "待整理",
+        "进行中"
+      ],
+      "disabledButtons": [
+        "",
+        "",
+        "打开项目任务",
+        "打开真实任务"
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-07-1280x800.png",
+    "h1": "任务",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-07b",
+    "name": "人工待处理",
+    "route": "/tasks?tab=attention",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "UI-07 的筛选状态变体",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-07b-1280x800.png",
+    "h1": "需要你查看的事项",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-08",
+    "name": "任务收件箱",
+    "route": "/tasks?tab=inbox",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [
+        "待整理"
+      ],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-08-1280x800.png",
+    "h1": "任务收件箱",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-09",
+    "name": "项目任务",
+    "route": "/projects/4254461d-c6e2-4b08-8ce9-679d3b8393f3/tasks",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [
+        "进行中",
+        "可开始",
+        "进行中",
+        "可开始",
+        "待整理",
+        "待整理",
+        "进行中",
+        "进行中"
+      ],
+      "disabledButtons": [
+        "",
+        "",
+        "开始任务"
+      ],
+      "disabledReasons": [
+        "服务端未投影 START 动作：当前状态是待整理；有 1 个前置任务尚未完成；前置任务尚未完成，服务端未投影 START 动作。。"
+      ],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-09-1280x800.png",
+    "h1": "项目任务",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-02",
+    "name": "项目总览",
+    "route": "/projects/4254461d-c6e2-4b08-8ce9-679d3b8393f3",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [
+        "State 的确认人与确认时间、以及「已确认 / 仍需明确」清单字段服务端尚未提供（待接入）；本页只呈现 revision、阶段、下一步、选用产物与 Decision 等真实事实，不推断状态由任务数量决定。"
+      ],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-02-1280x800.png",
+    "h1": "UI取证-20260929 项目A",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-12",
+    "name": "通用工作台",
+    "route": "/projects/4254461d-c6e2-4b08-8ce9-679d3b8393f3/workbench/general",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [
+        "进行中",
+        "可开始",
+        "进行中",
+        "可开始",
+        "待整理",
+        "待整理",
+        "进行中",
+        "进行中"
+      ],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-12-1280x800.png",
+    "h1": "项目工作台",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-13",
+    "name": "论文工作台",
+    "route": "/projects/4254461d-c6e2-4b08-8ce9-679d3b8393f3/workbench/thesis",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        "",
+        "将论文设为默认"
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-13-1280x800.png",
+    "h1": "项目工作台",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-14",
+    "name": "全局知识库",
+    "route": "/knowledge",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-14-1280x800.png",
+    "h1": "知识与长期信息",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-15",
+    "name": "资料详情与来源版本",
+    "route": "/knowledge?item=7bcc828b-6188-4cb5-b327-11a59d97b126",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-15-1280x800.png",
+    "h1": "知识与长期信息",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-16",
+    "name": "项目资料-资料",
+    "route": "/projects/4254461d-c6e2-4b08-8ce9-679d3b8393f3/knowledge",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        "",
+        "提交导入",
+        "查询 Job"
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-16-1280x800.png",
+    "h1": "知识与长期信息",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-16b",
+    "name": "项目资料-规则",
+    "route": "/projects/4254461d-c6e2-4b08-8ce9-679d3b8393f3/knowledge?kind=RULE",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "UI-16 四页签之一",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-16b-1280x800.png",
+    "h1": "知识与长期信息",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-17",
+    "name": "全局动态",
+    "route": "/activities",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [
+        "RUN_CONTROL_REQUESTED",
+        "RUN_WORKER_FENCED",
+        "RUN_WORKER_FENCED",
+        "TASK_DELEGATED",
+        "TASK_READIED",
+        "创建任务",
+        "TASK_READIED",
+        "创建任务"
+      ],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-17-1280x800.png",
+    "h1": "动态",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-18",
+    "name": "执行详情与暂停请求",
+    "route": "/runs/8d19e398-b5f7-4a04-8735-4d2832ea17c6",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        "",
+        "请求暂停 Run",
+        "请求停止 Run",
+        "请求交接给人工",
+        "请求取消任务"
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "RUNNING + PENDING PAUSE 控制请求（真实 Run）",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-18-1280x800.png",
+    "h1": "UI取证-20260929 委托任务T6-1",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-21",
+    "name": "待审中心",
+    "route": "/reviews",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "OPEN 待审自然为空（无模型不产生待审）",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-21-1280x800.png",
+    "h1": "等待你的判断",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-23",
+    "name": "连接与执行权限",
+    "route": "/settings/connections",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        "",
+        "打开连接设置"
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-23-1280x800.png",
+    "h1": "连接与权限",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-24",
+    "name": "设置与工作偏好",
+    "route": "/settings",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [
+        "已连接",
+        "未配置",
+        "未配置",
+        "未探测",
+        "暂不可用",
+        "暂不可用",
+        "暂不可用",
+        "暂不可用"
+      ],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-24-1280x800.png",
+    "h1": "设置",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-29",
+    "name": "新建任务",
+    "route": "/tasks?view=create",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-29-1280x800.png",
+    "h1": "把想做的事，变成可完成的任务",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-30",
+    "name": "项目蓝图预览",
+    "route": "/projects/4254461d-c6e2-4b08-8ce9-679d3b8393f3?skill=blueprint",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-30-1280x800.png",
+    "h1": "项目蓝图",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-33",
+    "name": "继续这个项目",
+    "route": "/projects/4254461d-c6e2-4b08-8ce9-679d3b8393f3?skill=resume",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-33-1280x800.png",
+    "h1": "当前事实速览",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-28",
+    "name": "委托与执行记录",
+    "route": "/tasks/aff6549b-c158-4216-8c8e-305e8aefee4a?tab=runs",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [
+        "进行中"
+      ],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "T6 已委托（mock）：执行记录面板",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-28-1280x800.png",
+    "h1": "UI取证-20260929 委托任务T6-1",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-28b",
+    "name": "委托面板无Run",
+    "route": "/tasks/21071df6-b10b-487a-b62b-1645e4e0df5f?tab=runs",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [
+        "进行中"
+      ],
+      "disabledButtons": [
+        "",
+        "",
+        "委托 AI 执行"
+      ],
+      "disabledReasons": [
+        "只有 READY 的任务可委托。"
+      ],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "UI-28 的无 Run 变体",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-28b-1280x800.png",
+    "h1": "UI取证-20260929 产物任务T2",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-10",
+    "name": "任务详情",
+    "route": "/tasks/21071df6-b10b-487a-b62b-1645e4e0df5f",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [
+        "进行中",
+        "必需"
+      ],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-10-1280x800.png",
+    "h1": "UI取证-20260929 产物任务T2",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-31",
+    "name": "完善任务定义",
+    "route": "/tasks/21071df6-b10b-487a-b62b-1645e4e0df5f?skill=definition",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-31-1280x800.png",
+    "h1": "当前任务定义",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-32",
+    "name": "生成验收方案",
+    "route": "/tasks/21071df6-b10b-487a-b62b-1645e4e0df5f?skill=verification",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-32-1280x800.png",
+    "h1": "当前验收与验证来源",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-04",
+    "name": "产物验收状态",
+    "route": "/tasks/21071df6-b10b-487a-b62b-1645e4e0df5f?tab=artifacts",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [
+        "进行中",
+        "最新"
+      ],
+      "disabledButtons": [
+        "",
+        "",
+        "保存新版本",
+        "选择这个版本为当前选用",
+        "完成本轮"
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-04-1280x800.png",
+    "h1": "UI取证-20260929 产物任务T2",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-11",
+    "name": "人工编辑与保存版本",
+    "route": "/tasks/21071df6-b10b-487a-b62b-1645e4e0df5f?tab=artifacts",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [
+        "进行中",
+        "最新"
+      ],
+      "disabledButtons": [
+        "",
+        "",
+        "从最新人工版本 v2 起草修订",
+        "选择这个版本为当前选用",
+        "完成本轮"
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": " 已载入草稿并输入未保存内容",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-11-1280x800.png",
+    "h1": "UI取证-20260929 产物任务T2",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-26",
+    "name": "版本冲突与草稿保留",
+    "route": "/tasks/21071df6-b10b-487a-b62b-1645e4e0df5f?tab=artifacts",
+    "round": "1280x800",
+    "ok": false,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {},
+    "notes": " ERR:locator.waitFor: Timeout 15000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('[data-testid=\"artifact-editor\"] .action-error, [data-testid=\"artifact-draft-base-changed\"]').first() to be visible\u001b[22m\n",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-26-1280x800.png"
+  },
+  {
+    "id": "UI-25",
+    "name": "全局搜索浮层",
+    "route": "/projects",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        "",
+        "打开项目任务",
+        "打开当前项目 先打开真实项目",
+        "委托当前任务 需真实 READY 任务、人工执行权及 STA",
+        "查看当前任务待审 当前读取范围未发现待审请求"
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": " Ctrl+K 已触发",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-25-1280x800.png",
+    "h1": "项目",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-27",
+    "name": "完成凭据",
+    "route": "/tasks/21071df6-b10b-487a-b62b-1645e4e0df5f?tab=artifacts",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [
+        "已完成",
+        "最新"
+      ],
+      "disabledButtons": [
+        "",
+        "",
+        "从最新人工版本 v3 起草修订",
+        "保存新版本",
+        "选择这个版本为当前选用",
+        "完成本轮"
+      ],
+      "disabledReasons": [
+        "该任务当前已完成；需要再次编辑请先重开。"
+      ],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-27-1280x800.png",
+    "h1": "UI取证-20260929 产物任务T2",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-27b",
+    "name": "完成后的任务详情",
+    "route": "/tasks/21071df6-b10b-487a-b62b-1645e4e0df5f",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [
+        "已完成",
+        "必需"
+      ],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "DONE 态",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-27b-1280x800.png",
+    "h1": "UI取证-20260929 产物任务T2",
+    "innerSize": "1280x800"
+  },
+  {
+    "id": "UI-27c",
+    "name": "完成凭据记录页",
+    "route": "/completion-records/3830ab91-b492-4c45-8408-dc23aee15a8d",
+    "round": "1280x800",
+    "ok": true,
+    "pageErrors": [],
+    "consoleErrors": [],
+    "actionErrors": [],
+    "horizontalOverflow": false,
+    "keyChecks": {
+      "chips": [],
+      "disabledButtons": [
+        "",
+        ""
+      ],
+      "disabledReasons": [],
+      "scrollOverflow": "1280/1280"
+    },
+    "notes": "completion=3830ab91-b492-4c45-8408-dc23aee15a8d",
+    "screenshot": "D:/Develop/Relay-Agent/docs/testing/evidence/ui-dpi-2026-09-29/matrix/UI-27c-1280x800.png",
+    "h1": "历史完成依据",
+    "innerSize": "1280x800"
+  }
+]

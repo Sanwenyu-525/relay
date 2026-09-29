@@ -691,3 +691,21 @@ Delegate 校验资源属于当前 Workspace/Task Project，并在创建 Run 前�
 ### 10.49 模型端口只读状态（2026-09-28，开发自检）
 
 **Breaking Change: No。** 新增 `GET /api/v1/workspaces/{workspace_id}/model-port`：返回当前服务实例的模型端口状态 `{ provider: fake|openai-compatible|invalid, configured, model, base_url }`。配置来自进程环境变量（`RELAY_MODEL_PROVIDER` 等），`RELAY_MODEL_API_KEY` 永不返回、不出现在任何响应字段；`base_url` 已由端点策略保证为含公开 https 主机、无凭据/query/fragment 的完整地址。`provider=fake` 表示实例未配置真实模型（委托与 Assist 使用 Mock 模型端口，当前阶段既定门槛）；`invalid` 表示真实 Provider 配置残缺（生产进程本会拒绝启动，此状态供显式读取场景）。状态是实例级只读事实，不依赖 Workspace 数据；沿用 Bearer 边界，未授权 401，`workspace_id` 非 UUID 422。无写命令。验证：真实 PG/HTTP 集成 2 项（真实配置脱敏可见、未配置报 Mock）与单测 4 项。
+
+### 10.50 模型连接验证与最近验证状态（2026-09-29，整改实现）
+
+**Breaking Change: No。** 新增两个实例级端点，响应永不包含密钥或原始响应头。
+
+| 端点 | 行为 |
+|---|---|
+| POST /api/v1/workspaces/{workspace_id}/model-port/verify | 以固定短文本 
+elay-verify-1、非流式、15s 超时发起一次连接验证；结果写入 model_calls（kind='VERIFY'）。响应 { ok, latency_ms, provider, model, config_fingerprint, error_category, verified_at }。并发验证返回 409 MODEL_VERIFY_IN_PROGRESS |
+| GET /api/v1/workspaces/{workspace_id}/model-port/verification | 读取最近一次验证结果 + 当前配置指纹是否匹配 + Worker 启动校验诊断 |
+
+配置态拒绝（不外呼、不落账本）：ake/未配置 → 409 MODEL_PORT_NOT_CONFIGURED；残缺 → 409 MODEL_CONFIG_INVALID。
+
+error_category 枚举与设置页指引一一对应：AUTH(401/403)、RATE_LIMIT(429)、TIMEOUT、STREAM_BROKEN、PROTOCOL、NETWORK。
+
+配置指纹与 ModelIdentity.configFingerprint 同算法（不含 API Key）；配置变更后旧验证不自动继承为当前已验证。**连接验证通过不等于真实任务执行成功**，两者在 UI 与本契约中分开表述。验证调用不携带 ContextManifest、不读项目资料。
+
+验证：Fake 注入五分支（SUCCESS/AUTH/TIMEOUT/INVALID_MODEL/NETWORK）真实 PG 落账本可回读；API 单测 5 项；设置页组件 10 项。真实 Provider 外呼待放行，未执行。

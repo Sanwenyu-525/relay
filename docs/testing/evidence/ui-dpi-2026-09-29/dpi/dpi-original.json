@@ -1,0 +1,12 @@
+{
+  "captured_at": "2026-09-29T08:36:06",
+  "logPixels": null,
+  "appliedDPI_WinMetrics": 120,
+  "dpiScalingVer": 4096,
+  "Win8DpiScaling": 0,
+  "getDpiForSystem_raw": 96,
+  "getDpiForSystem_aware": 120,
+  "gdi_screen_width_px": 1920,
+  "gdi_screen_height_px": 1080,
+  "gdi_logpixels_y": 120
+}

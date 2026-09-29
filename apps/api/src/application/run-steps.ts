@@ -53,7 +53,13 @@ import {
   validateCandidate,
 } from '../workflow/markdown-deliverable.js';
 import { evaluateCompletionGate, completeRun } from './complete-run.js';
-import { countCorrectionRounds, loadCorrectionInput, verifyRun } from './verify-run.js';
+import {
+  countCorrectionRounds,
+  loadCorrectionInput,
+  prepareSemanticChecks,
+  verifyRun,
+  type PreparedSemanticCheck,
+} from './verify-run.js';
 import { advanceAiTextLocks, requireAiTextLocks } from './artifact-commands.js';
 
 /**
@@ -511,6 +517,8 @@ export async function advanceRunStep(
       storage: prepared.storage, modelPort: prepared.modelPort,
       ...(prepared.persist === undefined ? {} : { persist: prepared.persist }),
       ...(prepared.context === undefined ? {} : { context: prepared.context }),
+      ...(prepared.semanticChecks === undefined ? {} :
+        { precomputedChecks: prepared.semanticChecks }),
       ...(input.fakeScenario === undefined ? {} : { fakeScenario: input.fakeScenario }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
@@ -655,6 +663,7 @@ type PreparedExternalWork =
   | { readonly kind: 'READY'; readonly storage: ManagedContentStore;
       readonly modelPort: ModelPort; readonly persist?: PreparedPersist;
       readonly context?: BuiltContext;
+      readonly semanticChecks?: ReadonlyMap<string, PreparedSemanticCheck>;
       readonly preflightFailure?: Extract<StepExecution, { readonly outcome: 'FAILED' }> };
 
 /** 事务外只读受管内容；提交事务只能消费已核对的字节，不再执行文件 I/O。 */
@@ -687,6 +696,7 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
     : new OpenAiCompatibleModelPort(modelConfig);
   let persist: PreparedPersist | undefined;
   let context: BuiltContext | undefined;
+  let semanticChecks: ReadonlyMap<string, PreparedSemanticCheck> | undefined;
   let preflightFailure: Extract<StepExecution, { readonly outcome: 'FAILED' }> | undefined;
   const reads = new Map<string, { hashHex: string; size: bigint; result: ContentReadResult }>();
 
@@ -814,6 +824,14 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
     const persistStep = await repositories.runs.readStepByKind(claim.run.id, 'PERSIST_CANDIDATE');
     const versionId = readString(persistStep?.result_ref, 'artifact_version_id');
     if (versionId !== undefined) await preloadVersion(repositories, input.storage, versionId, reads);
+    // 模型型语义检查在结果事务之外调用与记账（携带 budget 的 begin() 会对 runs 行
+    // for update，留在事务内会与结果事务的行锁自死锁）；对齐 DRAFT 的 prepare 阶段。
+    semanticChecks = await prepareSemanticChecks(db, {
+      run: claim.run, task: claim.task, storage: input.storage,
+      stepAttemptId: claim.attempt.id,
+      ...(input.fakeScenario === undefined ? {} : { fakeScenario: input.fakeScenario }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
   }
 
   if (claim.step.step_kind === 'COMPLETE') {
@@ -830,6 +848,7 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
     storage: new PreloadedContentStore(input.storage.dataRoot, reads),
     ...(persist === undefined ? {} : { persist }),
     ...(context === undefined ? {} : { context }),
+    ...(semanticChecks === undefined ? {} : { semanticChecks }),
     ...(preflightFailure === undefined ? {} : { preflightFailure }) };
 }
 
@@ -1022,6 +1041,7 @@ interface ExecuteStepInput {
   readonly modelPort: ModelPort;
   readonly persist?: PreparedPersist | undefined;
   readonly context?: BuiltContext | undefined;
+  readonly precomputedChecks?: ReadonlyMap<string, PreparedSemanticCheck> | undefined;
   readonly fakeScenario?: FakeScenario | undefined;
   readonly signal?: AbortSignal | undefined;
 }
@@ -1044,6 +1064,8 @@ async function executeStep(
         storage: input.storage,
         modelCallDb: input.modelCallDb,
         stepAttemptId: input.stepAttemptId,
+        ...(input.precomputedChecks === undefined ? {} :
+          { precomputedChecks: input.precomputedChecks }),
         ...(input.fakeScenario === undefined ? {} : { fakeScenario: input.fakeScenario }),
       });
     case 'COMPLETE': {

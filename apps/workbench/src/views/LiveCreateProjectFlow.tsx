@@ -299,15 +299,19 @@ export default function LiveCreateProjectFlow({ client, onCancel }: {
   return <div className="page-layout"><div className="page-primary">
     <h1>开始一个长期项目</h1>
     <p className="page-lede">先创建项目，再单独登记初始资料并预览蓝图意图。</p>
-    <div className="warning-callout" role="status">CreateProject 只保存名称与类型。目标暂存为待预览的人工蓝图意图，不会自动创建 Goal、调用模型或应用蓝图。可选文本资料在项目创建成功后用独立 Knowledge 命令登记。</div>
+    <div className="warning-callout" role="status">创建命令（CreateProject）只保存名称与类型。填写的目标会暂存为待预览的蓝图意图，不会自动创建 Goal、调用模型或应用蓝图；可选文本资料在项目创建成功后用独立的 Knowledge 命令登记。</div>
     <form className="create-form" noValidate onSubmit={(event) => void submit(event)}>
-      <label className="field"><span className="field-label">项目名称 *</span>
+      <label className="field"><span className="field-label">项目名称<span className="field-required" aria-hidden="true">*</span></span>
         <input name="project-title" value={flow.title} disabled={locked} maxLength={200}
-          onChange={(event) => save({ ...flowRef.current, title: event.target.value })} /></label>
-      <label className="field"><span className="field-label">项目目标（待预览蓝图意图，可选）</span>
+          placeholder="例如：人机协作工作流研究"
+          onChange={(event) => save({ ...flowRef.current, title: event.target.value })} />
+        <span className="field-hint">一个清晰的名称有助于你在长期工作中快速识别这个项目。</span></label>
+      <label className="field"><span className="field-label">项目目标（可选）</span>
         <textarea name="project-goal" value={flow.goal} disabled={locked} maxLength={2000} rows={3}
-          onChange={(event) => save({ ...flowRef.current, goal: event.target.value })} /></label>
-      <fieldset className="field" disabled={locked}><legend className="field-label">项目类型 *</legend>
+          placeholder="例如：研究可追溯、可恢复的人与 AI 协作方法"
+          onChange={(event) => save({ ...flowRef.current, goal: event.target.value })} />
+        <span className="field-hint">会暂存为待预览的蓝图意图；到蓝图页生成候选并核对 Diff 后才可能生效，不会自动成为 Goal。</span></label>
+      <fieldset className="field" disabled={locked}><legend className="field-label">项目类型<span className="field-required" aria-hidden="true">*</span></legend>
         <div className="segmented">{projectTypes.map((type) => <label key={type}
           className={`segmented-option${flow.projectType === type ? " segmented-option--selected" : ""}`}>
           <input className="visually-hidden" type="radio" name="project-type" value={type}

@@ -174,7 +174,7 @@ test('archived explicit source makes Skill Blueprint stale and prevents Apply', 
     source: { sourceKind: 'NOTE', text: '确认的项目背景资料' } });
   const session = await createAssistSession(app.db, { workspaceId,
     commandId: randomUUID(), projectId, title: '带来源蓝图' });
-  await requestAssistMessage(app.db, { workspaceId,
+  const requested = await requestAssistMessage(app.db, { workspaceId,
     sessionId: session.result.session_id, commandId: randomUUID(),
     content: '根据资料生成候选',
     skillRef: { id: 'goal-to-project-blueprint', version: '1.0.0' },
@@ -182,6 +182,8 @@ test('archived explicit source makes Skill Blueprint stale and prevents Apply', 
       root_id: source.result.knowledge_id!, version: '1' }] });
   const tick = await runAssistGenerationTick(app.db, { workerId: 'blueprint-source',
     storage, modelPort, leaseMs: 30_000 });
+  assert.equal(tick?.messageId, requested.result.assistant_message_id,
+    'tick must consume exactly the message this test requested');
   assert.equal(tick?.status, 'COMPLETED');
   const proposalId = tick.proposalIds[0]!;
   const stored = await sql<{ candidate_sha256: string }>`select candidate_sha256
@@ -230,6 +232,8 @@ test('goal-to-project-blueprint Skill freezes source and applies through the sam
       pack_ref: { id: 'thesis-minimal', version: '1.3.0' } } });
   const tick = await runAssistGenerationTick(app.db, { workerId: 'blueprint-skill',
     storage, modelPort, leaseMs: 30_000 });
+  assert.equal(tick?.messageId, requested.result.assistant_message_id,
+    'tick must consume exactly the message this test requested');
   assert.equal(tick?.status, 'COMPLETED');
   assert.equal(tick.proposalIds.length, 1);
   const proposalId = tick.proposalIds[0]!;

@@ -27,10 +27,10 @@ interface PendingCommand {
 }
 
 const kinds: readonly { kind: RelayInformationKind; label: string; noun: string }[] = [
-  { kind: "KNOWLEDGE", label: "Knowledge 资料", noun: "资料" },
-  { kind: "MEMORY", label: "Memory 记忆", noun: "记忆" },
-  { kind: "DECISION", label: "Decision 决定", noun: "决定" },
-  { kind: "RULE", label: "Rule 规则", noun: "规则" }
+  { kind: "KNOWLEDGE", label: "资料", noun: "资料" },
+  { kind: "MEMORY", label: "记忆", noun: "记忆" },
+  { kind: "DECISION", label: "决定", noun: "决定" },
+  { kind: "RULE", label: "规则", noun: "规则" }
 ];
 
 function rowTitle(row: InformationRow): string {
@@ -518,7 +518,7 @@ export default function KnowledgeView() {
 
     {!live ? <section className="surface-panel" data-testid="knowledge-fixture-gap">
       <h2>示例模式未接入资料</h2>
-      <p>此处不生成虚构的 Knowledge、Memory、Decision 或 Rule。连接本机 API 后可读取和管理真实资料。</p>
+      <p>此处不生成虚构的资料、记忆、决定或规则。连接本机 API 后可读取和管理真实内容。</p>
     </section> : <>
       <section className="surface-panel" aria-label="资料搜索">
         <h2>有界搜索</h2>
@@ -530,7 +530,7 @@ export default function KnowledgeView() {
         {searchError && <p className="action-error" role="alert">{searchError}</p>}
         {searchItems.length > 0 ? <ul className="knowledge-search-list">{searchItems.map((item) =>
           <li key={`${item.type}-${item.id}-${item.version}`}><button type="button" className="knowledge-result" disabled={pendingCommand !== null} onClick={() => openSearchItem(item)}>
-            <strong>{item.title}</strong> · {item.type} v{item.version} · {item.status}
+            <strong>{item.title}</strong> · {kinds.find((k) => k.kind === item.type)?.noun ?? item.type} v{item.version} · {item.status}
             <span>{item.snippet}</span><small>匹配：{item.matchedFields.join("、")} · 来源 {item.sourceRef}</small>
           </button></li>)}</ul> : query.trim() && !searching && !searchError && <p className="helper-text">没有匹配的当前有效资料。</p>}
         {nextCursor && <button type="button" className="secondary-button" data-testid="knowledge-more" disabled={searching}
@@ -580,7 +580,7 @@ export default function KnowledgeView() {
             {selectedDecision && <><p className="knowledge-body">选择：{selectedDecision.choice}</p>
               <p className="knowledge-body">依据：{selectedDecision.rationale}</p>
               <p>备选：{selectedDecision.alternatives.join("、") || "未记录"}</p><p>代价：{selectedDecision.costs.join("、") || "未记录"}</p>
-              {selectedDecision.supersededById && <p data-testid="decision-supersession">已由 Decision {selectedDecision.supersededById} 替代；旧决定保留可查。</p>}</>}
+              {selectedDecision.supersededById && <p data-testid="decision-supersession">已由决定 {selectedDecision.supersededById} 替代；旧决定保留可查。</p>}</>}
             {selectedRule && <><p className="knowledge-body">{selectedRule.statement}</p>
               <p>{selectedRule.strength} · {selectedRule.scope} / {selectedRule.scopeId} · {selectedRule.applicability}</p>
               <p>执行检查：{selectedRule.enforcement}{selectedRule.method && <> · {selectedRule.method}</>}</p>
@@ -592,7 +592,7 @@ export default function KnowledgeView() {
               {(kind === "MEMORY" || kind === "RULE") && <button type="button" className="danger-button" disabled={writeBlockedReason !== null} onClick={() => { void retire(); }}>停用{kind === "MEMORY" ? "记忆" : "规则"}</button>}
             </div>}
             {selectedDecision?.status === "ACTIVE" && pendingCommand === null && <>
-              <label className="field" htmlFor="decision-replacement"><span className="field-label">替代它的 Decision ID</span>
+              <label className="field" htmlFor="decision-replacement"><span className="field-label">替代它的决定 ID</span>
                 <input id="decision-replacement" value={replacementId} onChange={(event) => setReplacementId(event.target.value)} data-testid="decision-replacement" /></label>
               <button type="button" className="secondary-button" data-testid="decision-supersede" disabled={writeBlockedReason !== null} onClick={() => { void supersede(); }}>记录替代关系</button>
             </>}
@@ -607,13 +607,13 @@ export default function KnowledgeView() {
           </section> : !loading && <section className="surface-panel"><p>选择一项资料查看详情与版本。</p></section>}
 
           {formOpen && <form className="surface-panel knowledge-form" data-testid="knowledge-form" onSubmit={(event) => { void save(event); }}>
-            <h2>{revisionMode ? "追加新版本" : `新建 ${kind}`}</h2>
+            <h2>{revisionMode ? "追加新版本" : `新建${currentNoun}`}</h2>
             {revisionMode && <p className="helper-text">基于起草时修订 v{kind === "KNOWLEDGE" ? knowledgeDraftBase?.revision : selected?.revision} 提交；冲突时保留草稿，旧版本不会被覆盖。</p>}
             {(kind === "MEMORY" || (kind !== "RULE" && !revisionMode)) && <label className="field"><span className="field-label">标题</span>
               <input value={title} onChange={(event) => setTitle(event.target.value)} data-testid="knowledge-title" required disabled={pendingCommand !== null} /></label>}
             {kind === "KNOWLEDGE" && <>
                <label className="field"><span className="field-label">来源类型</span><select value={sourceKind} onChange={(event) => { previewReadVersion.current++; setSourceKind(event.target.value as Exclude<RelayKnowledgeSource, "WEB_PAGE">); setArtifactPreview(null); setCaptureConfirmed(false); if (event.target.value === "NOTE") setMediaType("text/plain"); }} disabled={pendingCommand !== null}>
-                <option value="NOTE">NOTE</option><option value="MANAGED_TEXT">MANAGED_TEXT</option><option value="ARTIFACT_VERSION">ARTIFACT_VERSION</option></select></label>
+                <option value="NOTE">笔记（NOTE）</option><option value="MANAGED_TEXT">受管文本（MANAGED_TEXT）</option><option value="ARTIFACT_VERSION">产物版本（ARTIFACT_VERSION）</option></select></label>
                {sourceKind === "ARTIFACT_VERSION" ? <><label className="field"><span className="field-label">产物版本 ID</span>
                  <input value={artifactVersionId} onChange={(event) => { previewReadVersion.current++; setArtifactVersionId(event.target.value); setArtifactPreview(null); setCaptureConfirmed(false); }} data-testid="knowledge-artifact-id" disabled={pendingCommand !== null} /></label>
                  <button type="button" className="secondary-button" disabled={pendingCommand !== null}

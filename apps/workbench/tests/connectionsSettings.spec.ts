@@ -159,7 +159,7 @@ describe("项目连接与 Permission 设置", () => {
     await mounted.wrapper.get('[data-testid="connection-host"]').setValue("example.org");
     await mounted.wrapper.get(".connections-form").trigger("submit"); await flush();
     expect(mounted.wrapper.text()).toContain("连接创建已由服务端回执和最新项目查询确认");
-    expect(mounted.wrapper.text()).toContain("本列表最多读取服务端前 100 条且无游标");
+    expect(mounted.wrapper.text()).toContain("本列表最多读取服务端前 100 条，没有下一页");
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith(`/connections/${connectionId}`))).toBe(true);
     expect(mounted.wrapper.text()).toContain("本项目没有权限策略，当前默认 DENY");
   });

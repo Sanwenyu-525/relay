@@ -1,0 +1,66 @@
+{
+  "date": "2026-09-29",
+  "scope": "UI 状态矩阵与桌面会话取证中发现的缺陷；结构性问题只登记不动手，小缺陷（CSS 单文件/文案）直修",
+  "defects": [
+    {
+      "id": "D1",
+      "severity": "高（桌面试用阻断级）",
+      "area": "桌面壳/Worker 编排",
+      "title": "worker 单次非零退出导致 supervisor 进程退出，desktop_bootstrap 永久失败，桌面 UI 重载即\"本机服务不可用\"，无进程级自愈",
+      "steps": [
+        "经真实领域入口 delegate（mock FAKE_WRITE）产生 Run（202→CREATED→RUNNING）",
+        "约 1 分钟后 supervisor（node）进程消失，随后 desktop_bootstrap 返回 'desktop Worker supervisor is no longer running'",
+        "桌面窗口内任何页面重载显示\"本机服务不可用\"，只能关窗重启"
+      ],
+      "evidence": [
+        "start-stop.log 第二次启动章节",
+        ".tmp-uidpi/worker-diagnose.sh：手动以相同环境运行打包 worker（--once）：worker_claimed 后无任何 step 输出即退出，stderr 仅 'worker_failed'，exit=1",
+        "run 8d19e398 卡 RUNNING；outbox 命令 620213a1 CLAIMED（epoch 3）后无 worker 收尾"
+      ],
+      "rootCauseNote": "worker main.ts 的 catch 只写 'worker_failed' 不含 message/stack；supervisor-main.ts 在 worker exitCode!=0 时 throw 'worker failed' 直接终止自身；桌面壳对 supervisor 用 Stdio::null（apps/desktop/src-tauri/src/lib.rs:626）丢弃全部诊断输出",
+      "action": "结构性改动，只登记不修改；建议 supervisor 与 worker 崩溃隔离 + stderr 落盘 + desktop_bootstrap 自愈/重拉路径",
+      "resolution": {
+        "status": "已修复（2026-09-29 白天，桌面宿主侧）",
+        "summary": "宿主有界重启（连续 3 次预算 + 指数退避 2s/4s/8s + supervisor 稳定 300s 后预算重置）；desktop_bootstrap 不再被 supervisor 状态拖垮；重启恢复只终止 supervisor/worker 树、保留活动 API Job（门控单测覆盖）",
+        "regression": "真实复现 worker exit=1 → 宿主 2s 退避重启 → 3s 内恢复派发，崩溃后两次独立 bootstrap OK，claim 真实收敛无假活；Rust 27/27（含新增 5 例）",
+        "open": "worker 自然崩溃根因（exit=1，claim 后无 step 输出）仍未定位：worker catch 只写 worker_failed，apps/api 侧 supervisor 未透传 worker stderr，需另行授权后按日志定位",
+        "evidence": ["docs/testing/evidence/final-2026-09-29/desktop-fix.log", "docs/testing/evidence/final-2026-09-29/d1-regression.log"]
+      }
+    },
+    {
+      "id": "D2",
+      "severity": "中",
+      "area": "可观测性",
+      "title": "supervisor/worker stderr 全部丢弃（Stdio::null），运行期崩溃不可诊断",
+      "evidence": ["apps/desktop/src-tauri/src/lib.rs:626（Windows 启动路径）"],
+      "action": "结构性改动，只登记；建议至少把 supervisor/worker stderr 写入 .relay-test/data 日志文件",
+      "resolution": {
+        "status": "宿主侧已修复（2026-09-29 白天）",
+        "summary": "supervisor stderr 改轮转日志 <data-root>/logs/worker-supervisor.log（8MiB 轮转保留一代 .old.log），协议事件（worker_started/worker_exit/握手帧）+ 重启诊断 + UTC 时间戳落盘；密钥扫描 0 命中",
+        "open": "worker 进程内部异常栈仍不可观测：apps/api 侧 supervisor 以管道收集 worker stderr 后未写出口（未在本轮授权范围），崩溃根因级栈信息需该侧补透传",
+        "evidence": ["docs/testing/evidence/final-2026-09-29/desktop-fix.log"]
+      }
+    },
+    {
+      "id": "D3",
+      "severity": "低（取证受阻说明，非运行缺陷）",
+      "area": "DPI",
+      "title": "Windows 每显示器缩放无法在本用户会话内程序化切换（注册表+WM_SETTINGCHANGE+重启桌面进程均不生效），150% 真实取证不可行",
+      "evidence": [
+        "dpi/dpi-original.json（原值 125%）、dpi-set-150-registry.json（AppliedDPI=1440 广播后 GetDpiForSystem 仍 120）",
+        "dpi-set-150-logpixels.json（Win8DpiScaling=1+LogPixels=144 广播后仍 120）",
+        "第四会话新进程 GetDpiForWindow 仍 120"
+      ],
+      "action": "已按任务要求如实报告并恢复原值；150% 真实取证以\"行为取证（125% 全链路）+ manifest 声明核对\"替代并说明限制"
+    },
+    {
+      "id": "D4",
+      "severity": "低",
+      "area": "桌面打包",
+      "title": "EXE 内嵌 manifest 未声明 dpiAware/dpiAwareness（依赖 Tauri/wry 运行时 SetProcessDpiAwarenessContext）",
+      "evidence": ["dpi/desktop-exe-manifest-dpi.xml（无 dpi 节点）", "运行时实测 dpiForWindow=120、devicePixelRatio=1.25、物理尺寸 1452x977（逻辑 1160x780），行为为每显示器感知"],
+      "action": "登记；行为正确（运行时 API 已生效），若要求静态声明可在打包清单补 per-monitor v2 声明（结构性，不动手）"
+    }
+  ],
+  "uiFixes": []
+}

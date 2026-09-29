@@ -316,6 +316,30 @@ export interface RelayModelPortStatus {
   readonly baseUrl: string | null;
 }
 
+/** 验证错误分类：与设置页指引一一对应。 */
+export type RelayModelVerifyErrorCategory =
+  | "AUTH" | "RATE_LIMIT" | "TIMEOUT" | "STREAM_BROKEN" | "PROTOCOL" | "NETWORK";
+
+/** 一次验证结果：永不包含密钥。 */
+export interface RelayModelVerifyResult {
+  readonly ok: boolean;
+  readonly latencyMs: number | null;
+  readonly provider: string;
+  readonly model: string;
+  readonly configFingerprint: string;
+  readonly errorCategory: RelayModelVerifyErrorCategory | null;
+  readonly verifiedAt: string;
+}
+
+/** 最近一次验证 + 当前配置指纹匹配情况。 */
+export interface RelayModelVerificationState {
+  readonly currentConfigFingerprint: string | null;
+  readonly last: RelayModelVerifyResult | null;
+  readonly matchesCurrentConfig: boolean;
+  /** API 进程环境的启动校验；不代表 Worker 进程已被探测。 */
+  readonly workerStartupValidation: "NOT_CONFIGURED" | "OK" | "FAILED";
+}
+
 export interface RelayArtifact {
   readonly id: string;
   readonly taskId: string;
@@ -2347,6 +2371,29 @@ export class RelayApiClient {
       baseUrl: row.base_url === null ? null : string(row, "base_url", "model-port") };
   }
 
+  /** 最近一次模型验证与当前配置指纹匹配情况。 */
+  async getModelPortVerification(): Promise<RelayModelVerificationState> {
+    const row = object(await this.request(this.workspacePath("/model-port/verification")),
+      "model-port verification");
+    const fingerprint = row.current_config_fingerprint === null
+      ? null : string(row, "current_config_fingerprint", "model-port verification");
+    const last = row.last === null ? null : modelVerifyResultFrom(
+      object(row.last, "model-port verification.last"));
+    const worker = string(row, "worker_startup_validation", "model-port verification");
+    if (worker !== "NOT_CONFIGURED" && worker !== "OK" && worker !== "FAILED") {
+      throw new Error("服务端返回了无法识别的 Worker 启动校验状态。");
+    }
+    return { currentConfigFingerprint: fingerprint, last,
+      matchesCurrentConfig: row.matches_current_config === true,
+      workerStartupValidation: worker };
+  }
+
+  /** 触发一次连接/模型验证；结果由服务端写入 model_calls，不含密钥。 */
+  async verifyModelPort(): Promise<RelayModelVerifyResult> {
+    return modelVerifyResultFrom(object(await this.request(
+      this.workspacePath("/model-port/verify"), { method: "POST" }), "model-port verify"));
+  }
+
   async claimInterventionNotifications(): Promise<readonly RelayInterventionItem[]> {
     const row = object(await this.request(this.workspacePath('/attention/notifications/claim'),
       { method: 'POST' }), "claimed interventions");
@@ -3839,6 +3886,24 @@ function object(value: unknown, name: string): Record<string, unknown> {
     throw new Error(`${name} 响应格式无效。`);
   }
   return value;
+}
+
+function modelVerifyResultFrom(row: Record<string, unknown>): RelayModelVerifyResult {
+  const category = row.error_category;
+  if (category !== null && category !== "AUTH" && category !== "RATE_LIMIT" &&
+      category !== "TIMEOUT" && category !== "STREAM_BROKEN" && category !== "PROTOCOL" &&
+      category !== "NETWORK") {
+    throw new Error("model-port verify.error_category 响应格式无效。");
+  }
+  return {
+    ok: row.ok === true,
+    latencyMs: typeof row.latency_ms === "number" ? row.latency_ms : null,
+    provider: string(row, "provider", "model-port verify"),
+    model: string(row, "model", "model-port verify"),
+    configFingerprint: string(row, "config_fingerprint", "model-port verify"),
+    errorCategory: category,
+    verifiedAt: string(row, "verified_at", "model-port verify")
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

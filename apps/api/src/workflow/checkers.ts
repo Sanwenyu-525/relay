@@ -23,6 +23,8 @@ export interface CheckInput {
   readonly contentHashHex: string;
   /** 测试注入：驱动 FakeSemanticChecker / 检查器故障场景。 */
   readonly fakeScenario?: string | undefined;
+  /** 取消语义：模型型检查器把信号传给 Provider 调用（对齐 DRAFT）。 */
+  readonly signal?: AbortSignal | undefined;
 }
 
 export interface CheckOutcome {
@@ -225,7 +227,8 @@ export class ModelSemanticChecker implements Checker {
       content_sha256: input.contentHashHex,
     };
     try {
-      const verdict = await this.evaluate({ statement: input.entry.statement, content: input.content });
+      const verdict = await this.evaluate({ statement: input.entry.statement, content: input.content },
+        input.signal);
       return {
         result: verdict.verdict,
         evidence: { ...base, reason: verdict.reason,
@@ -259,7 +262,7 @@ export interface SemanticVerdict {
 }
 
 export type SemanticEvaluate = (input: { readonly statement: string;
-  readonly content: string }) => Promise<SemanticVerdict>;
+  readonly content: string }, signal?: AbortSignal) => Promise<SemanticVerdict>;
 
 const REGISTRY = new Map<string, Checker>();
 
@@ -278,8 +281,8 @@ const semanticModelConfig = readModelPortConfig(process.env);
 if (semanticModelConfig !== undefined) {
   const { OpenAiCompatibleModelPort } = await import('./openai-compatible-model-port.js');
   const modelPort = new OpenAiCompatibleModelPort(semanticModelConfig);
-  register(new ModelSemanticChecker(async ({ statement, content }) =>
-    modelPort.evaluate({ statement, content }), modelPort.identity));
+  register(new ModelSemanticChecker(async ({ statement, content }, signal) =>
+    modelPort.evaluate({ statement, content }, signal), modelPort.identity));
 }
 // ErrorChecker 不进入 registry：它只由 resolveCheckerForScenario 按故障场景替换出来，
 // 若注册就会覆盖同 id/version 的真实检查器，把确定性检查永久变成 ERROR。
