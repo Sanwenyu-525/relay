@@ -1,0 +1,7 @@
+{
+  "lostResponseRecovered": true,
+  "commandIdMatched": true,
+  "errorVisible": "请求响应丢失或无法核对，本次提交是否生效尚未确定。若刚提交命令，请用同一个 command ID 查询回执，不要换 ID 重新提交。 重读",
+  "retryRestored": true,
+  "errors": []
+}

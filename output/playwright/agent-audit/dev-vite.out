@@ -1,0 +1,14 @@
+15:04:00 [vite] (client) Re-optimizing dependencies because vite config has changed
+
+  VITE v8.3.0  ready in 1595 ms
+
+  ➜  Local:   http://127.0.0.1:5173/
+  ➜  press h + enter to show help
+15:04:02 [vite] (client) [optimizer] bundling dependencies...
+15:05:48 [vite] (client) hmr update /src/views/AgentChatView.css
+15:06:30 [vite] (client) hmr update /src/views/AgentChatView.css
+15:07:18 [vite] (client) hmr update /src/views/AgentChatView.css
+15:11:53 [vite] (client) hmr update /src/views/AssistView.tsx
+15:12:11 [vite] (client) hmr update /src/views/AgentChatView.css
+15:16:06 [vite] (client) hmr update /src/views/AssistView.tsx
+15:21:06 [vite] (client) hmr update /src/views/AgentChatView.css

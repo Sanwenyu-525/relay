@@ -1,0 +1,9 @@
+{
+  "sourceSendReachable": true,
+  "optionSendReachable": true,
+  "keyboardFocus": {
+    "tag": "BUTTON",
+    "text": "取消"
+  },
+  "errors": []
+}

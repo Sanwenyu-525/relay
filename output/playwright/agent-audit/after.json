@@ -1,0 +1,44 @@
+{
+  "measures": [
+    {
+      "width": 1440,
+      "height": 900,
+      "documentWidth": 1440,
+      "draftY": 717,
+      "draftBottom": 783,
+      "sendBottom": 839,
+      "transcriptHeight": 435
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "documentWidth": 1280,
+      "draftY": 617,
+      "draftBottom": 683,
+      "sendBottom": 739,
+      "transcriptHeight": 335
+    },
+    {
+      "width": 960,
+      "height": 640,
+      "documentWidth": 960,
+      "draftY": 490,
+      "draftBottom": 556,
+      "sendBottom": 612,
+      "transcriptHeight": 96
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "documentWidth": 390,
+      "draftY": 669,
+      "draftBottom": 735,
+      "sendBottom": 791,
+      "transcriptHeight": 283
+    }
+  ],
+  "preserved": true,
+  "discarded": true,
+  "internalAndRouteGuards": true,
+  "errors": []
+}

@@ -1,0 +1,15 @@
+{
+  "initial": {
+    "top": 1129,
+    "gap": 0
+  },
+  "afterHistoryRefresh": {
+    "top": 0,
+    "gap": 1129
+  },
+  "afterSend": {
+    "top": 1423,
+    "gap": 0
+  },
+  "errors": []
+}

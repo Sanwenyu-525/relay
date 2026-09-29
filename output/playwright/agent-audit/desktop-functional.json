@@ -1,0 +1,6 @@
+{
+  "projectId": "36c9b36a-75c1-4853-a292-7a1678913132",
+  "engine": "Windows WebView2 dev + isolated PostgreSQL + Mock Worker",
+  "messages": "你 · COMPLETED\n\n请简短说明这个项目可以怎样开始。\n\nAssist · COMPLETED\n\n（Fake Assist）已收到：请简短说明这个项目可以怎样开始。\n\n用量：输入 50、输出 9 tokens",
+  "errors": []
+}

@@ -1,0 +1,39 @@
+{
+  "projectId": "6619e505-6ad4-4d05-94f4-169e08b4f24f",
+  "sessions": [
+    "2bce3e38-bca3-4036-9c10-fb0b518d73b0",
+    "322da781-eda7-40af-8034-07d2ed6caa96"
+  ],
+  "measures": [
+    {
+      "width": 1440,
+      "height": 900,
+      "documentWidth": 1440,
+      "draftY": 1015.5,
+      "draftBottom": 1129.5
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "documentWidth": 1280,
+      "draftY": 1015.5,
+      "draftBottom": 1129.5
+    },
+    {
+      "width": 960,
+      "height": 640,
+      "documentWidth": 960,
+      "draftY": 1284.484375,
+      "draftBottom": 1398.484375
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "documentWidth": 422,
+      "draftY": 1484.484375,
+      "draftBottom": 1598.484375
+    }
+  ],
+  "draftAfterSwitch": "",
+  "errors": []
+}

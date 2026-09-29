@@ -1,0 +1,22 @@
+[
+  {
+    "Path": "D:\\Develop\\Relay-Agent\\apps\\desktop\\src-tauri\\target\\debug\\api\\dist\\src\\assist\\assist-repository.js",
+    "Hash": "E8BE4A7E4560BCCE18AFAF5577FE52DF40D1BFBCC1F1C97B5AF5D1F38F8DB670"
+  },
+  {
+    "Path": "D:\\Develop\\Relay-Agent\\apps\\desktop\\src-tauri\\target\\debug\\api\\dist\\src\\application\\assist-runner.js",
+    "Hash": "C591EEE00576AF7FB2F13C2AB08DC1BB3D34A602FC15F5E874491E246EA8F4DF"
+  },
+  {
+    "Path": "D:\\Develop\\Relay-Agent\\apps\\desktop\\src-tauri\\target\\debug\\api\\dist\\src\\worker\\main.js",
+    "Hash": "CE85AE66560A2F158BC2C05CDD323C453049C997894AD0E4B9173BF42DBBD1F8"
+  },
+  {
+    "Path": "D:\\Develop\\Relay-Agent\\apps\\desktop\\src-tauri\\target\\debug\\api\\dist\\src\\worker\\supervisor.js",
+    "Hash": "8F3F8098F4A899FE78A499C87D53E94FADBF070F5A5D41D4CA5A5BF5D597BBBD"
+  },
+  {
+    "Path": "D:\\Develop\\Relay-Agent\\apps\\desktop\\src-tauri\\target\\debug\\api\\dist\\src\\worker\\supervisor-main.js",
+    "Hash": "DE57378E3B770F2FA69618D1E4B969D2F8B55C9D6073C36F1B4C6F29147A1B6F"
+  }
+]
