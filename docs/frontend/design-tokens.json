@@ -9,7 +9,7 @@
     "unit": "rem 按桌面 WebView 默认 16 CSS px 解释，保留字号缩放；window.content.* 的 number 单位为逻辑 DIP，不能当成物理像素或 rem。",
     "sourceDocument": "design-system.md",
     "sources": [
-      "../../exec-e4781944-a9b1-4906-8cd8-994841a0c21f.png",
+      "../../thesis-review-original-20260919.png",
       "mockups/2026-09-19/today.png",
       "mockups/2026-09-19/project-overview.png",
       "mockups/2026-09-19/development-workbench.png"

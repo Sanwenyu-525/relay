@@ -43,7 +43,7 @@ J 后目录发布重建已通过（`apps/desktop/results/build-release-j-fix.txt
 
 桌面快捷方式与运行中任务栏的图标观感不同。产品 [Tauri 配置](../../apps/desktop/src-tauri/tauri.conf.json)只引用 `icons/icon.ico`，主窗口由 [Rust 宿主](../../apps/desktop/src-tauri/src/lib.rs)动态创建且没有单独设置窗口图标；产品代码中也没有 `setIcon`、`set_icon` 或其他运行时覆盖。锁定的 `tauri-codegen 2.6.3` 在 Windows 生成默认窗口图标时只解码 ICO 第一层，`tauri 2.11.6` 将此默认图标用于未单独指定图标的窗口。旧 ICO 虽有七层，但第一层为 16×16；EXE/快捷方式资源保留多层，因而任务栏取得的小图层与快捷方式选择的图层不同。七层原本均来自同一母版缩放，未发现旧图案混层；未先归因于系统缓存。
 
-保留用户提供的 1254×1254 [原始母版](../../2f831075-1288-4657-9a9c-447e1f439d78.png)，从坐标 `(202, 202)` 至 `(1052, 1052)` 裁出 850×850 [RGBA 派生图](../../apps/desktop/src-tauri/icons/icon.png)。[ICO](../../apps/desktop/src-tauri/icons/icon.ico)的全部七层统一由此图缩放，顺序改为 256、128、64、48、32、24、16px，使 Tauri 默认窗口图标取高分辨率层；小层只做轻度锐化，未重画机器人。没有改应用 identifier、业务逻辑或 Tauri 图标引用配置。后续重新生成 ICO 时须保留 256px 首层，否则会重现此问题。
+保留用户提供的 1254×1254 [原始母版](../../icon-master-20260924.png)，从坐标 `(202, 202)` 至 `(1052, 1052)` 裁出 850×850 [RGBA 派生图](../../apps/desktop/src-tauri/icons/icon.png)。[ICO](../../apps/desktop/src-tauri/icons/icon.ico)的全部七层统一由此图缩放，顺序改为 256、128、64、48、32、24、16px，使 Tauri 默认窗口图标取高分辨率层；小层只做轻度锐化，未重画机器人。没有改应用 identifier、业务逻辑或 Tauri 图标引用配置。后续重新生成 ICO 时须保留 256px 首层，否则会重现此问题。
 
 使用现有 pnpm 执行 `pnpm --dir apps/desktop exec tauri build --no-bundle`，退出码 0，首次产物的七个 PE 图标资源与新 ICO 各层逐字节一致。同期另一个 `build-release.ps1` 进程覆盖了共享 `target/release` 和 `apps/desktop/release`；其结束后的 release manifest 记录 ICO SHA-256 `2c136070eef618265295833e343156b5ccd81ef3599201eca44090c5c6dde454`、EXE SHA-256 `521b65e08c5dbdaaaf8aa3962bad6cf8d2fbd1e548efd85c3a6b00635c0adbca`，与当前文件一致，最终 EXE 的七层 PE 资源再次逐字节匹配。原冻结包已被并行构建替换，旧包验收证据不能自动用于新包。Windows 桌面快捷方式与任务栏实际显示效果仍待人工验证；没有清理全局图标缓存。
 

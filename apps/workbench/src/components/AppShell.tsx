@@ -1,13 +1,25 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
-import { Bell, BookOpen, FolderKanban, House, Inbox, Link2, ListChecks, ListTree, Menu, Search, Settings } from "lucide-react";
+import { Bell, BookOpen, FolderKanban, House, Inbox, Link2, ListChecks, ListTree, Menu, MessageSquareText, Search, Settings } from "lucide-react";
 import AppDialog from "./AppDialog";
 import CommandPalette from "./CommandPalette";
 import RelayConnectionDialog from "./RelayConnectionDialog";
 import InterventionNotifications from "./InterventionNotifications";
+import SidebarResizeHandle, { clampSidebarWidth } from "./SidebarResizeHandle";
 import { dialogCount } from "../lib/dialogStack";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { useRelayConnection } from "../lib/relayConnection";
+
+// 侧栏宽度是纯展示偏好，不是业务事实；localStorage 只保存这一个数值，读写失败时本次会话仍可调整。
+const SIDEBAR_WIDTH_STORAGE_KEY = "relay.workbench.sidebarWidthPx";
+function readStoredSidebarWidth(): number | null {
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+    if (raw === null) return null;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) ? clampSidebarWidth(parsed) : null;
+  } catch { return null; }
+}
 
 const secondaryNavigation = [
   { label: "连接", to: "/connections", icon: Link2 },
@@ -28,6 +40,17 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
   const connection = useRelayConnection();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState<number | null>(readStoredSidebarWidth);
+  const changeSidebarWidth = useCallback((next: number | null, commit: boolean) => {
+    setSidebarWidth(next);
+    if (!commit) return;
+    try {
+      if (next === null) window.localStorage.removeItem(SIDEBAR_WIDTH_STORAGE_KEY);
+      else window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(next));
+    } catch { /* 存储不可写时仅本次会话生效 */ }
+  }, []);
+  const frameStyle = sidebarWidth === null ? undefined
+    : { "--relay-sidebar-user-width": `${sidebarWidth}px` } as CSSProperties;
   const chrome = useMemo(() => fixtureAdapter.getNavigationLabels(), [location.key]);
   const dataSourceLabel = connection.mode === "live" ? "已连接本机 API" : "示例数据";
   useEffect(() => {
@@ -44,6 +67,7 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
     { label: "今日", to: "/today", icon: House, count: "" },
     { label: "项目", to: "/projects", icon: FolderKanban, count: "" },
     { label: "任务", to: "/tasks", icon: ListChecks, count: "" },
+    { label: "Agent 聊天", to: "/agent", icon: MessageSquareText, count: "" },
     { label: "知识", to: "/knowledge", icon: BookOpen, count: "" },
     { label: "动态", to: "/activity", icon: ListTree, count: "" },
     { label: "待审", to: "/reviews", icon: Bell, count: connection.mode === "live" ? "" : String(chrome.pendingReviewCount) }
@@ -53,6 +77,7 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
   const breadcrumb = (() => {
     if (path === "/today") return ["工作空间", "今日"];
     if (path === "/activity" || path === "/activities") return ["工作空间", "动态"];
+    if (path === "/agent") return ["工作空间", "Agent 聊天"];
     if (/^\/artifact-versions\/[^/]+\/lineage$/u.test(path)) return ["产物版本", "来源"];
     if (path === "/projects") return ["工作空间", query.get("view") === "create" ? "新建项目" : "项目"];
     if (path === "/tasks") return query.get("view") === "create"
@@ -87,7 +112,7 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
 
   return <>
     <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById("main-content")?.focus(); }}>跳到主要内容</a>
-    <div className="app-frame">
+    <div className="app-frame" style={frameStyle}>
       <aside className="app-sidebar">
         <div className="brand" title="示例品牌标识，最终产品显示名待确认">Workflow OS</div>
         <nav className="navigation-list" aria-label="主导航">
@@ -124,6 +149,8 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
         {desktopStatus === "error" && <p className="action-error desktop-bootstrap-status" role="alert" data-testid="desktop-bootstrap-error">桌面本机服务未就绪。当前仍为示例数据；请检查连接与服务状态。</p>}
         <main id="main-content" className="app-main" tabIndex={-1}>{children}</main>
       </div>
+      {/* 分隔条放在内容之后：Tab 顺序为导航 → 内容 → 调宽；视觉位置由 CSS 绝对定位决定。 */}
+      <SidebarResizeHandle width={sidebarWidth} onWidthChange={changeSidebarWidth} />
     </div>
     {/* 连接状态只在顶栏保留一个主入口；底部示例标识仅用于非 live 模式（连接详情里有“写入真实 PostgreSQL”说明）。 */}
     {connection.mode !== "live" && <p className="demo-notice">交互预览 · 示例数据，刷新后重置</p>}

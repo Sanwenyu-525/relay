@@ -122,3 +122,38 @@
 ### 10.6 控件观感校正（用户反馈"白色输入框按钮突兀"接续）
 
 用户在真实桌面窗口核查任务页时问"白色输入框按钮是没加 CSS 还是开发完就这样"。核对结论：**这些控件一直有样式，白色来自既有 token**（`color.palette.surface=#FFFFFF` 叠在暖纸 `#FAF8F3` 画布上）；但对照效果图（knowledge-capture-review、thesis-review-window-v2）确认两处真实偏差——效果图输入/次级按钮为**浅暖细边 + 约 8px 圆角**，而实现用的 `color.palette.control=#858A80`（灰绿中灰）边框偏重、`radius.control/panel=0.25rem` 偏方。校正：`color.palette.control` → `#8E8A80`（暖灰，仍满足 contrastChecks 对画布/表面 ≥3:1 的既有检查，check-docs 实测通过）、`radius.control/panel` → `0.5rem`。仅改 token 值，不改语义结构；10 个 live 页面复扫无回归（[pages/](../testing/evidence/ui-live-integration-2026-09-28/today-polish/pages/)，校正前对照 [pages-before-control-soften/](../testing/evidence/ui-live-integration-2026-09-28/today-polish/pages-before-control-soften/)），真实桌面窗口经 HMR 复核（desktop-dev-window-softened.png），定向组件测试 18/18。另注：用户截图的任务页为空是 dev-desktop 配置连的 `.relay-test` 测试工作空间本身无任务，不是数据缺失。
+
+## 11. 独立 Agent 聊天验收（2026-09-29）
+
+用户指定侧栏独立聊天入口，并提供 Codex 截图作为布局参考。本轮由协调 Agent 独立验证，初验不通过后退回修复；最终结果见本节后续复验记录。证据目录：[agent-audit](../../output/playwright/agent-audit/)。验收数据通过 API / UI 写入专用测试项目；不是用户工作结果。
+
+### 11.1 初验发现
+
+- 视觉：1440×900 的输入框 top=1015.5px，1280×800 同样在首屏之外；960×640 top=1284.48px。主区叠加大标题、会话表单、资料卡，未形成参考图的消息区与常驻输入区。
+- 窄窗：390×844 下 documentWidth=422，存在横向溢出。
+- 草稿：切换会话直接卸载旧面板，未发送草稿变为空，缺少保护。
+- 桌面运行：真实 WebView2 新建会话后发送，超过 30 秒仍为 PENDING。代码核对发现 Supervisor 仅扫描 Run 分发队列并启动 `worker --once`，而该模式明确跳过 Assist tick；不是把轮询超时推定为模型故障。
+- 模型设置：真实页面能显示 Mock / 未配置 / Worker 未探测状态；仍为只读，不具备编辑保存 Provider、模型、端点、密钥的功能。本轮未擅自扩大配置写入范围。
+
+### 11.2 已执行的独立验证
+
+- 浏览器连接现有开发 API：发送持久化 PENDING → 取消持久化 CANCELLED → 刷新页面、重新连接后历史仍存在；没有 pageerror。证据 `functional.json`。
+- 响应丢失：测试代理先让 POST 在真实 API 提交，再丢弃响应；UI 查询原 command_id 回执成功，核对身份后恢复。GET 断线显示错误，重读恢复。证据 `recovery.json`。失败脚本遗留的专用测试 PENDING 已通过取消入口清理。
+- 隔离 PostgreSQL：Assist 集成 29/29、实时预览集成 6/6；包含生成、取消、失败、租约丢失、提案约束和事务回滚，不代表真实 Provider 调用。
+- 设置页组件测试 10/10；真实页面截图 `settings.png`。
+- 桌面基线：Windows WebView2 开发宿主 SHA-256 `6466253bccf811500b87cbd12ffcec7727bcada73ee35dcbf313793eb86d9756`，加载 Vite 当前前端，独立 PG / Mock。验收脚本先用旧 release 迁移，缺少 0040–0043；补齐当前迁移后宿主启动成功。此过程不更新发布包，不替代安装升级验收。
+
+### 11.3 修复后的独立复验
+
+- 页面按 Codex 参考的会话列表 / 消息 / 输入区分工收紧；去除独立页重复会话选择，资料与发送选项折叠。修正全局样式优先级、Grid 的 start 对齐和 Outlet 包装层高度，避免内容把视口撑开；短窗口仍保留至少 96px 可滚动消息区。展开资料/发送选项后可滚动到操作区。
+- 浏览器四尺寸均无横向溢出且输入/发送在首屏：1440×900 消息区 435px、1280×800 为 335px、960×640 为 96px、390×844 为 283px。见 `after.json`、`after-*.png`；这是浏览器视口尺寸，不是系统 DPI 矩阵。
+- 未发送内容的切会话、新建、路由离开提示、Esc 保留、明确丢弃均实测通过。未确认命令内部切换被阻止；外部路由离开后回来仍可查询同一 command_id，sessionStorage 不存消息正文，见 `navigation-recovery.json`。资料展开、选项选择和 Tab 到取消按钮有真实 DOM 验证，未据此宣称屏幕阅读器验收。
+- 长消息区首次显示末尾，本人发送后跟随新消息；上翻到历史后刷新保持 scrollTop=0，见 `scroll.json`。无页面脚本异常。
+- 桌面 Supervisor 改为分别派发一次 Run 和一次 Assist 子 Worker；宿主中断不伪造用户取消，失联领取按原身份收敛。实现细节和自检见 [Run 分发记录](m03-run-dispatch-slice.md)。协调侧独立重跑 `run-dispatch` 27/27 通过，PG 迁移/Graph/启停/清理通过，见 `dispatch-integration.log`。
+- 修复后的 5 个编译运行文件复制到验收用 debug 资源，确切 SHA-256 见 `desktop-runtime-hashes.json`（不以 EXE 哈希单独代表完整资源）。真实 WebView2 + 独立 PG + Mock Worker：UI 新建 Project、选择目标、新建会话、发送后自动生成 COMPLETED，零 pageerror；见 `desktop-functional.json`。当前 Windows 125% / WebView DPR=1.25，CSS 视口 1160×780，消息区 224px、末尾差值 0、发送按钮 bottom=719.2px，见 `desktop-final.png`。
+- 前端全量组件 60 文件 353/353；最后滚动修正后定向 5 文件 22/22、生产构建通过。构建仍有既有大 chunk / Tauri 动静态混合 import 提示，不作为本轮功能失败或性能回归证据。文档检查通过。
+
+**本轮结论：独立聊天开发版在上述浏览器 / Windows WebView2 / Mock 范围通过。** 模型配置编辑仍未实现；真实 Provider 对话、本轮修改后的发布包、安装升级卸载、其它系统 DPI、真实中文 IME 和屏幕阅读器没有在本轮验证。没有把开发宿主或 Mock 通过扩大为完整发布验收。
+
+文档影响检查：更新交互规则、当前进度与已有开发记录；本轮没有新增 HTTP API、数据库迁移、领域权限或框架依赖，不另建重复 ADR / API / 数据库规格。
+- 补充：延迟首次会话列表响应后先打开新建选择器，响应返回不会抢占新建界面，见 `list-race.json`。验收结束已通过真实窗口关闭按钮退出宿主，随后按会话标记停止并移除隔离 PostgreSQL 临时目录；标准开发服务保留。

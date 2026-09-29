@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { sql } from 'kysely';
 
 import { delegateTask } from '../../src/application/delegate-task.js';
+import { cancelAssistMessage, createAssistSession, requestAssistMessage }
+  from '../../src/application/assist-commands.js';
 import { claimNextRunCommand, type ClaimedRunCommand } from '../../src/application/run-dispatch.js';
 import { advanceRunStep, SimulatedWorkerCrash } from '../../src/application/run-steps.js';
 import { recoverStoppedWorker } from '../../src/application/recover-run.js';
@@ -782,6 +784,153 @@ test('desktop startup emits private readiness before any claim and tags its Work
     assert.equal(outbox.rows[0]?.status, 'DONE');
   } finally {
     supervisor.child.kill('SIGKILL');
+  }
+});
+
+test('desktop supervisor starts an Assist child without a Run command and settles the message', async () => {
+  const session = await createAssistSession(app.db, { workspaceId,
+    commandId: randomUUID(), title: 'Desktop Assist dispatch' });
+  const requested = await requestAssistMessage(app.db, { workspaceId,
+    sessionId: session.result.session_id, commandId: randomUUID(),
+    content: '请回复桌面消息', intent: 'DISCUSS' });
+  const messageId = requested.result.assistant_message_id;
+  const frame = desktopFrame();
+  const supervisor = startDesktopSupervisor({ frame, once: true });
+  try {
+    assert.equal(await withTimeout(supervisor.closed, 15_000, 'desktop Assist delivery'), 0,
+      supervisor.readOutput());
+    const started = supervisor.events.filter((event) => event.type === 'worker_started');
+    assert.equal(started.length, 1, supervisor.readOutput());
+    assert.match(String(started[0]?.worker_id),
+      new RegExp(`^worker:desktop:${frame.launchId}:[0-9a-f-]+$`, 'u'));
+    const row = (await sql<{ status: string; content: string | null }>`
+      select status, content from assist_messages where id = ${messageId}
+    `.execute(app.db)).rows[0];
+    assert.equal(row?.status, 'COMPLETED', supervisor.readOutput());
+    assert.match(row?.content ?? '', /Fake Assist/u);
+  } finally {
+    supervisor.child.kill('SIGKILL');
+  }
+});
+
+test('desktop supervisor delivers one Run and one Assist from concurrent backlogs', async () => {
+  const { runId } = await delegatedRun();
+  const session = await createAssistSession(app.db, { workspaceId,
+    commandId: randomUUID(), title: 'Concurrent desktop queues' });
+  const requested = await requestAssistMessage(app.db, { workspaceId,
+    sessionId: session.result.session_id, commandId: randomUUID(),
+    content: '并存队列', intent: 'DISCUSS' });
+  const supervisor = startDesktopSupervisor({ frame: desktopFrame(), once: true });
+  try {
+    assert.equal(await withTimeout(supervisor.closed, 20_000, 'desktop Run and Assist delivery'), 0,
+      supervisor.readOutput());
+    assert.equal(supervisor.events.filter((event) => event.type === 'worker_started').length, 2,
+      supervisor.readOutput());
+    const run = (await sql<{ status: string }>`select status from run_command_outbox o
+      join run_commands c on c.id = o.command_id where c.run_id = ${runId}`
+      .execute(app.db)).rows[0];
+    const message = (await sql<{ status: string }>`select status from assist_messages
+      where id = ${requested.result.assistant_message_id}`.execute(app.db)).rows[0];
+    assert.equal(run?.status, 'DONE');
+    assert.equal(message?.status, 'COMPLETED');
+  } finally {
+    supervisor.child.kill('SIGKILL');
+  }
+});
+
+test('desktop supervised Assist model failure settles FAILED without another delivery', async () => {
+  const session = await createAssistSession(app.db, { workspaceId,
+    commandId: randomUUID(), title: 'Desktop Assist failure' });
+  const requested = await requestAssistMessage(app.db, { workspaceId,
+    sessionId: session.result.session_id, commandId: randomUUID(),
+    content: 'FAKE_ASSIST_THROW', intent: 'DISCUSS' });
+  const messageId = requested.result.assistant_message_id;
+  const supervisor = startDesktopSupervisor({ frame: desktopFrame(), once: true });
+  try {
+    assert.equal(await withTimeout(supervisor.closed, 15_000, 'desktop Assist failure'), 0,
+      supervisor.readOutput());
+    assert.equal(supervisor.events.filter((event) => event.type === 'worker_started').length, 1);
+    const row = (await sql<{ status: string; error_code: string | null }>`
+      select status, error_code from assist_messages where id = ${messageId}
+    `.execute(app.db)).rows[0];
+    assert.deepEqual(row, { status: 'FAILED', error_code: 'MODEL_FAILED' });
+  } finally {
+    supervisor.child.kill('SIGKILL');
+  }
+});
+
+test('desktop supervised Assist child observes a persisted running cancellation', async () => {
+  const session = await createAssistSession(app.db, { workspaceId,
+    commandId: randomUUID(), title: 'Desktop Assist cancel' });
+  const requested = await requestAssistMessage(app.db, { workspaceId,
+    sessionId: session.result.session_id, commandId: randomUUID(),
+    content: 'FAKE_ASSIST_ABORT 请等待取消', intent: 'DISCUSS' });
+  const messageId = requested.result.assistant_message_id;
+  const supervisor = startDesktopSupervisor({ frame: desktopFrame(), once: true });
+  try {
+    await withTimeout((async () => {
+      while (true) {
+        const row = (await sql<{ status: string }>`select status from assist_messages
+          where id = ${messageId}`.execute(app.db)).rows[0];
+        if (row?.status === 'RUNNING') return;
+        await delay(20);
+      }
+    })(), 10_000, 'desktop Assist claim');
+    await cancelAssistMessage(app.db, { workspaceId, messageId, commandId: randomUUID() });
+    assert.equal(await withTimeout(supervisor.closed, 15_000, 'desktop Assist cancellation'), 0,
+      supervisor.readOutput());
+    const row = (await sql<{ status: string; cancel_requested: boolean }>`
+      select status, cancel_requested from assist_messages where id = ${messageId}
+    `.execute(app.db)).rows[0];
+    assert.deepEqual(row, { status: 'CANCELLED', cancel_requested: true });
+  } finally {
+    supervisor.child.kill('SIGKILL');
+  }
+});
+
+test('desktop EOF during Assist generation leaves no false user cancellation and expires its claim', async () => {
+  const session = await createAssistSession(app.db, { workspaceId,
+    commandId: randomUUID(), title: 'Desktop Assist shutdown' });
+  const requested = await requestAssistMessage(app.db, { workspaceId,
+    sessionId: session.result.session_id, commandId: randomUUID(),
+    content: 'FAKE_ASSIST_ABORT 请等待停机', intent: 'DISCUSS' });
+  const messageId = requested.result.assistant_message_id;
+  const env = { NODE_ENV: 'test', RELAY_WORKER_LEASE_MS: '150' };
+  const first = startDesktopSupervisor({ frame: desktopFrame(), once: true, env });
+  try {
+    await withTimeout((async () => {
+      while (true) {
+        const row = (await sql<{ status: string }>`select status from assist_messages
+          where id = ${messageId}`.execute(app.db)).rows[0];
+        if (row?.status === 'RUNNING') return;
+        await delay(20);
+      }
+    })(), 10_000, 'desktop Assist claim before EOF');
+    first.child.stdin.end();
+    assert.equal(await withTimeout(first.closed, 10_000, 'desktop Assist EOF'), 0,
+      first.readOutput());
+    const running = (await sql<{ status: string; cancel_requested: boolean }>`
+      select status, cancel_requested from assist_messages where id = ${messageId}
+    `.execute(app.db)).rows[0];
+    assert.deepEqual(running, { status: 'RUNNING', cancel_requested: false });
+    await sql`update assist_messages set updated_at = now() - interval '1 second'
+      where id = ${messageId}`.execute(app.db);
+    const recovery = startDesktopSupervisor({ frame: desktopFrame(), once: true, env });
+    try {
+      assert.equal(await withTimeout(recovery.closed, 15_000, 'desktop Assist lease sweep'), 0,
+        recovery.readOutput());
+      const failed = (await sql<{ status: string; error_code: string | null }>`
+        select status, error_code from assist_messages where id = ${messageId}
+      `.execute(app.db)).rows[0];
+      assert.deepEqual(failed, { status: 'FAILED', error_code: 'LEASE_LOST' });
+      const calls = (await sql<{ count: bigint }>`select count(*) as count from model_calls
+        where assist_message_id = ${messageId}`.execute(app.db)).rows[0];
+      assert.equal(calls?.count, 1n);
+    } finally {
+      recovery.child.kill('SIGKILL');
+    }
+  } finally {
+    first.child.kill('SIGKILL');
   }
 });
 

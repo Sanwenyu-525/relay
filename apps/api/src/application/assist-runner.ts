@@ -175,6 +175,11 @@ export async function runAssistGenerationTick(db: DbExecutor,
     if (result.kind === 'CONTENT') await preview?.flush();
 
     if (result.kind === 'CANCELLED') {
+      if (options.signal?.aborted && !(await r.assist.isCancelRequested(message.id))) {
+        // Host shutdown has no persisted user cancel intent. Leave this claim for LEASE_LOST.
+        return { messageId: message.id, sessionId: session.id, status: 'DISCARDED',
+          errorCode: null, proposalIds: [] };
+      }
       await settleInTransaction(db, message, options.workerId, { status: 'CANCELLED', errorCode: null,
         content: null, providerRequestId: result.providerRequestId ?? null,
         usage: result.usage ?? { inputTokens: null, outputTokens: null },
@@ -307,6 +312,18 @@ export async function runAssistGenerationTick(db: DbExecutor,
     return { messageId: message.id, sessionId: session.id,
       status: settled ? 'COMPLETED' : 'DISCARDED', errorCode: null, proposalIds };
   } catch (error) {
+    if (options.signal?.aborted) {
+      const cancelled = await r.assist.isCancelRequested(message.id);
+      if (!cancelled) {
+        return { messageId: message.id, sessionId: message.session_id,
+          status: 'DISCARDED', errorCode: null, proposalIds: [] };
+      }
+      await settleInTransaction(db, message, options.workerId, { status: 'CANCELLED',
+        errorCode: null, content: null, providerRequestId: null,
+        usage: { inputTokens: null, outputTokens: null } });
+      return { messageId: message.id, sessionId: message.session_id,
+        status: 'CANCELLED', errorCode: null, proposalIds: [] };
+    }
     if (error instanceof AssistPreviewOwnershipLostError) {
       const current = await r.assist.readMessage(message.id);
       if (current?.status !== 'RUNNING' || current.worker_id !== options.workerId) {

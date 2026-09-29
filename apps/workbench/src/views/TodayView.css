@@ -1,4 +1,4 @@
-/* 今日页：排版层级、查询工具条、焦点与空态。数值只引用 design-tokens 生成的 --relay-* 变量。 */
+/* 今日页：排版层级、查询工具条、焦点、右判断栏与空态。数值只引用 design-tokens 生成的 --relay-* 变量。 */
 
 .today-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; padding: var(--relay-layout-main-padding); }
 
@@ -7,7 +7,7 @@
 .today-page .page-lede { margin-top: 0; margin-bottom: var(--relay-space-3); color: var(--relay-color-text-secondary); }
 .today-page .page-note { margin-bottom: var(--relay-space-6); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .today-arrange-note { margin-top: var(--relay-space-1); }
-.today-arrange-note > summary { display: inline; cursor: pointer; color: var(--relay-color-action-text); }
+.today-arrange-note > summary { display: inline; cursor: pointer; color: var(--relay-color-text-secondary); }
 .today-arrange-note > summary:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 .today-arrange-note[open] > summary { margin-bottom: var(--relay-space-1); }
 .today-arrange-note p { margin-top: var(--relay-space-2); }
@@ -41,26 +41,63 @@
 .today-receipt-note p { margin-top: var(--relay-space-1); }
 .today-loading { margin-top: var(--relay-space-6); color: var(--relay-color-text-secondary); }
 
-/* 今日焦点：紧凑单列；有焦点时任务名是视觉中心，技术细节收进详情。 */
+/* 主列 + 右判断栏：rail 断点按 design-system 第 5 节——80rem 起窄右区，90rem 起标准右区；
+   窄于 80rem 时右区不常驻，保留「打开待审中心」横幅入口。 */
+.today-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--relay-space-8); align-items: start; }
+.today-main { min-width: 0; }
+.today-rail { display: none; }
+
+@media (min-width: 80rem) {
+  .today-body { grid-template-columns: minmax(0, 1fr) var(--relay-layout-rail-narrowWidth); }
+  .today-rail { display: block; border-left: var(--relay-border-width) solid var(--relay-color-border-separator);
+    padding-left: var(--relay-space-8); }
+}
+
+@media (min-width: 90rem) {
+  .today-body { grid-template-columns: minmax(0, 1fr) var(--relay-layout-rail-width); }
+}
+
+/* 右判断栏：独立标题、真实待审事实与机制说明；普通内容区无阴影，靠细分隔线分组。 */
+.today-rail__section + .today-rail__section { margin-top: var(--relay-space-8); padding-top: var(--relay-space-8);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.today-rail__count { display: flex; align-items: flex-start; gap: var(--relay-space-4); margin: var(--relay-space-4) 0 0; }
+.today-rail__number { flex: none; font-family: var(--relay-font-family-editorial); font-weight: var(--relay-font-weight-semibold);
+  font-size: var(--relay-font-size-display); line-height: var(--relay-font-lineHeight-heading); color: var(--relay-color-text-primary); }
+.today-rail__count-copy { padding-top: var(--relay-space-2); color: var(--relay-color-text-secondary); }
+.today-rail__empty { margin: var(--relay-space-4) 0 0; color: var(--relay-color-text-secondary); }
+.today-rail__link { display: inline-flex; align-items: center; min-height: var(--relay-control-target-minimum);
+  margin-top: var(--relay-space-3); color: var(--relay-color-action-text); text-decoration: underline; text-underline-offset: 0.2em; }
+.today-rail__link:hover { color: var(--relay-color-action-hover); }
+.today-rail__basis { padding: 0; margin: var(--relay-space-3) 0 0; list-style: none;
+  display: grid; gap: var(--relay-space-2); color: var(--relay-color-text-secondary); }
+.today-rail__note { margin-top: var(--relay-space-10); color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); }
+
+/* 今日焦点：有焦点时任务名是视觉中心；置顶徽标、细线元信息与主按钮对齐效果图。 */
 .today-focus { margin-top: var(--relay-space-6); padding-bottom: var(--relay-space-6);
   border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
-.today-focus > h2 { font-size: var(--relay-font-size-rowTitle); }
+.today-focus__header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-3); }
+.today-focus__header h2 { font-size: var(--relay-font-size-section); }
+.today-focus__pin-badge { padding: 0.125rem var(--relay-space-2); border-radius: var(--relay-radius-badge);
+  background: var(--relay-color-status-success-bg); color: var(--relay-color-status-success-text); font-size: var(--relay-font-size-meta); }
 .today-focus__empty { margin-top: var(--relay-space-2); color: var(--relay-color-text-secondary); max-width: 42rem; }
 .today-focus__target { margin-top: var(--relay-space-3); }
 .today-focus__project { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .today-focus__title { margin-top: var(--relay-space-2); }
-.today-focus__title a { font-family: var(--relay-font-family-editorial); font-size: var(--relay-font-size-rowTitle);
-  font-weight: var(--relay-font-weight-semibold); color: var(--relay-color-text-primary); text-decoration: none; }
+.today-focus__title a { font-family: var(--relay-font-family-editorial); font-size: var(--relay-font-size-compactPage);
+  font-weight: var(--relay-font-weight-semibold); line-height: var(--relay-font-lineHeight-heading);
+  color: var(--relay-color-text-primary); text-decoration: none; overflow-wrap: anywhere; }
 .today-focus__title a:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 .today-focus__project a { color: var(--relay-color-action-text); text-decoration: none; }
 .today-focus__project a:hover { text-decoration: underline; text-underline-offset: 0.2em; }
-.today-focus__meta { margin-top: var(--relay-space-2); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
-.today-focus__actions { display: flex; align-items: center; gap: var(--relay-space-3); margin-top: var(--relay-space-3); }
+.today-focus__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-3);
+  margin-top: var(--relay-space-3); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+.today-focus__meta-sep { width: var(--relay-border-width); height: 1rem; background: var(--relay-color-border-separator); }
+.today-focus__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-4); margin-top: var(--relay-space-4); }
 .today-focus__missing { max-width: 42rem; color: var(--relay-color-text-secondary); }
 .today-focus__facts { margin-top: var(--relay-space-3); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .today-focus__facts p, .today-task__trace p { margin-top: var(--relay-space-2); }
 
-/* 待审入口：通往待审中心；今日页不代替逐项人工判断，也不显示伪造的待审计数。 */
+/* 待审入口横幅：仅作右判断栏的窄窗回退；通往待审中心，不在此完成判断，也不显示伪造的待审计数。 */
 .today-review-entry { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
   gap: var(--relay-space-4); margin-top: var(--relay-space-6); padding: var(--relay-space-4) var(--relay-space-6);
   border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-panel);
@@ -77,22 +114,22 @@
 .today-group__empty { margin-top: var(--relay-space-4); color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); }
 .today-list { padding: 0; margin: var(--relay-space-3) 0 0; list-style: none; }
 .today-task { padding: var(--relay-space-6) 0; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
-.today-task__heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--relay-space-3); }
+.today-task__heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--relay-space-3); }
+.today-task__heading-text { flex: 1 1 18rem; min-width: 0; }
 .today-task__title { font-family: var(--relay-font-family-editorial); font-size: var(--relay-font-size-rowTitle);
   font-weight: var(--relay-font-weight-semibold); color: var(--relay-color-text-primary);
   text-decoration: none; overflow-wrap: anywhere; }
 .today-task__title:hover { text-decoration: underline; text-underline-offset: 0.2em; }
-.today-eligibility { flex: none; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
-.today-eligibility--ready { color: var(--relay-color-status-success-text); }
+.today-task__side { display: flex; flex: none; align-items: center; gap: var(--relay-space-4); padding-top: var(--relay-space-1); }
 .today-task__meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--relay-space-2);
-  margin-top: var(--relay-space-2); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); overflow-wrap: anywhere; }
+  margin-top: var(--relay-space-1); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); overflow-wrap: anywhere; }
 .today-task__dot { color: var(--relay-color-text-muted); }
 .today-task__meta a { color: var(--relay-color-action-text); text-decoration: none; }
 .today-task__meta a:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 .today-task__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-2); margin-top: var(--relay-space-3); }
 .today-task__plans { margin-top: var(--relay-space-3); }
 .today-task__plans > summary { min-height: var(--relay-control-target-minimum); display: inline-flex; align-items: center;
-  color: var(--relay-color-action-text); font-size: var(--relay-font-size-meta); cursor: pointer; }
+  color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); cursor: pointer; }
 .today-task__plans > summary:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 .today-task__forms, .today-task__forms form { display: flex; flex-wrap: wrap; align-items: end; gap: var(--relay-space-3); }
 .today-task__forms { margin-top: var(--relay-space-3); }
@@ -103,7 +140,7 @@
 .today-task details { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); overflow-wrap: anywhere; }
 .today-task__trace { margin-top: var(--relay-space-3); }
 .today-task__trace > summary { min-height: var(--relay-control-target-minimum); display: inline-flex; align-items: center;
-  color: var(--relay-color-action-text); cursor: pointer; }
+  color: var(--relay-color-text-secondary); cursor: pointer; }
 .today-task__trace > summary:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 
 /* 全空：单一空态与真实入口，不重复三份零组说明。 */
@@ -118,4 +155,9 @@
   .today-page { padding: var(--relay-layout-main-smallPadding); }
   .today-query { align-items: stretch; flex-direction: column; gap: var(--relay-space-3); }
   .today-task__forms form { width: 100%; }
+}
+
+/* 右判断栏常驻时隐藏横幅入口；规则置于基础规则之后，避免同优先级被覆盖。 */
+@media (min-width: 80rem) {
+  .today-review-entry { display: none; }
 }

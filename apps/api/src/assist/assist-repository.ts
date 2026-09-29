@@ -106,6 +106,17 @@ export class AssistRepository {
     return rows.reverse();
   }
 
+  /** 监督器只为可领取消息或待清扫的失联领取启动子 Worker。 */
+  async hasRunnableGeneration(olderThan: Date): Promise<boolean> {
+    const result = await sql<{ id: string }>`select m.id from assist_messages m
+      join assist_sessions s on s.id = m.session_id
+      left join projects p on p.id = s.project_id
+      where (m.status = 'PENDING' and (s.project_id is null or p.archived_at is null))
+        or (m.status = 'RUNNING' and m.updated_at < ${olderThan})
+      limit 1`.execute(this.db);
+    return result.rows.length > 0;
+  }
+
   /** 原子领取：for update skip locked 保证多 Worker/多 tick 恰好一个领取者。 */
   async claimNextPendingMessage(workerId: string): Promise<AssistMessageRow | undefined> {
     return (await sql<AssistMessageRow>`update assist_messages set status = 'RUNNING',

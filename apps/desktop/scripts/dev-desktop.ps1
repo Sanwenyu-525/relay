@@ -1,6 +1,11 @@
 ﻿# Tauri 开发模式桌面窗口：真实窗口 + Vite 前端热更新，不生成安装包。
 # 用法：
 #   powershell -NoProfile -ExecutionPolicy Bypass -File apps\desktop\scripts\dev-desktop.ps1
+#     前台运行（Ctrl+C 停止）。
+#   powershell -NoProfile -ExecutionPolicy Bypass -File apps\desktop\scripts\dev-desktop.ps1 -Action start
+#     后台启动：立即返回，runner 进程与日志记录在 .relay-dev\dev-desktop\。
+#   ... -Action status   查看后台实例状态（runner / 窗口 / Vite / 日志路径）。
+#   ... -Action stop     停止后台实例：结束 runner 进程树并兜底清理 dev 版窗口与 Vite 残留。
 # 可选参数：
 #   -ConfigPath <绝对路径>   桌面 desktop.env（默认优先 .relay-test\desktop.env，其次 %APPDATA%\dev.relay.agent\desktop.env）
 #   -FrontendPort 5173       Vite 端口（需与 src-tauri DEV_ORIGIN/tauri.conf devUrl 一致，改动需同步 Rust 常量）
@@ -9,10 +14,13 @@
 # 限制：与打包版共用单实例互斥；运行打包版时请先关闭，反之亦然。
 # Rust 源码变更由 tauri dev 自动重编译并重启应用；前端由 Vite HMR 热更新。
 param(
+  [ValidateSet('', 'start', 'stop', 'status')]
+  [string]$Action = '',
   [string]$ConfigPath,
   [int]$FrontendPort = 5173,
   [switch]$RefreshApi,
-  [switch]$SkipFrontendCheck
+  [switch]$SkipFrontendCheck,
+  [switch]$RunForeground  # 内部参数：-Action start 以隐藏窗口后台拉起本脚本时使用
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -25,6 +33,102 @@ $apiRoot = Join-Path $repoRoot 'apps\api'
 $workbenchRoot = Join-Path $repoRoot 'apps\workbench'
 $node = Join-Path $repoRoot '.research\runtime-cache\node-v24.21.0-win-x64\node.exe'
 $corepack = Join-Path (Split-Path -Parent $node) 'node_modules\corepack\dist\corepack.js'
+
+$stateDir = Join-Path $repoRoot '.relay-dev\dev-desktop'
+$pidFile = Join-Path $stateDir 'runner.pid'
+$logOut = Join-Path $stateDir 'runner.out.log'
+$logErr = Join-Path $stateDir 'runner.err.log'
+
+# 后台管理模式：PID 记录 + 日志集中在 .relay-dev\dev-desktop\；前台流程保持原样。
+if ($Action -eq 'start') {
+  if (Test-Path $pidFile) {
+    $old = Get-Content $pidFile -ErrorAction SilentlyContinue
+    $oldProc = if ($old) { Get-Process -Id $old -ErrorAction SilentlyContinue } else { $null }
+    if ($oldProc -and $oldProc.ProcessName -eq 'powershell') {
+      Write-Host "dev 桌面已在后台运行（runner PID $old）。"
+      Write-Host "日志：$logOut"
+      Write-Host "查看状态：-Action status；停止：-Action stop"
+      return
+    }
+    Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+  }
+  if (Get-Process relay-desktop -ErrorAction SilentlyContinue) {
+    throw '检测到 relay-desktop 正在运行（dev 或打包版）；单实例互斥，请先关闭再 -Action start。'
+  }
+  New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
+  $runnerArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath,
+    '-RunForeground', '-FrontendPort', "$FrontendPort")
+  if ($ConfigPath) { $runnerArgs += @('-ConfigPath', $ConfigPath) }
+  if ($RefreshApi) { $runnerArgs += '-RefreshApi' }
+  if ($SkipFrontendCheck) { $runnerArgs += '-SkipFrontendCheck' }
+  $runner = Start-Process -FilePath 'powershell' -ArgumentList $runnerArgs -WindowStyle Hidden -PassThru `
+    -RedirectStandardOutput $logOut -RedirectStandardError $logErr
+  Set-Content -Path $pidFile -Value $runner.Id
+  Write-Host "dev 桌面后台启动中（runner PID $($runner.Id)），窗口约 20-60 秒后出现（首次/改动大时更久）。"
+  Write-Host "日志：$logOut / $logErr"
+  Write-Host "查看状态：-Action status；停止：-Action stop"
+  return
+}
+
+if ($Action -eq 'stop') {
+  if (-not (Test-Path $pidFile)) {
+    Write-Host '没有后台运行记录（.relay-dev\dev-desktop\runner.pid 不存在）；前台运行的实例请在其终端 Ctrl+C 停止。'
+    return
+  }
+  $runnerPid = Get-Content $pidFile -ErrorAction SilentlyContinue
+  $runnerProc = if ($runnerPid) { Get-Process -Id $runnerPid -ErrorAction SilentlyContinue } else { $null }
+  if ($runnerProc) {
+    cmd.exe /d /c "taskkill /PID $runnerPid /T /F >nul 2>&1"
+    Write-Host "已结束 runner 进程树（PID $runnerPid）。"
+  } else {
+    Write-Host 'runner 进程已不在（可能异常退出），仅清理残留。'
+  }
+  Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 2
+  # 兜底清理只针对 dev 构建、且启动时间晚于 runner 的残留，不触碰打包版或用户自行启动的服务。
+  $cleanupAfter = if ($runnerProc) { $runnerProc.StartTime } else { $null }
+  if ($cleanupAfter) {
+    Get-Process relay-desktop -ErrorAction SilentlyContinue |
+      Where-Object { $_.Path -and $_.Path.StartsWith($tauriRoot, [System.StringComparison]::OrdinalIgnoreCase) -and $_.StartTime -gt $cleanupAfter } |
+      Stop-Process -Force -ErrorAction SilentlyContinue
+    $viteOwners = Get-NetTCPConnection -State Listen -LocalPort $FrontendPort -ErrorAction SilentlyContinue |
+      Select-Object -ExpandProperty OwningProcess -Unique
+    foreach ($ownerPid in $viteOwners) {
+      $owner = Get-Process -Id $ownerPid -ErrorAction SilentlyContinue
+      if ($owner -and $owner.StartTime -gt $cleanupAfter) {
+        Stop-Process -Id $ownerPid -Force -ErrorAction SilentlyContinue
+      }
+    }
+  }
+  Write-Host 'dev 桌面已停止。'
+  return
+}
+
+if ($Action -eq 'status') {
+  $running = $false
+  if (Test-Path $pidFile) {
+    $runnerPid = Get-Content $pidFile -ErrorAction SilentlyContinue
+    if ($runnerPid -and (Get-Process -Id $runnerPid -ErrorAction SilentlyContinue)) {
+      $running = $true
+      Write-Host "后台 runner：运行中（PID $runnerPid）"
+    } else {
+      Write-Host '后台 runner：已退出（PID 记录过期）'
+    }
+  } else {
+    Write-Host '后台 runner：无记录'
+  }
+  $win = Get-Process relay-desktop -ErrorAction SilentlyContinue
+  if ($win) {
+    Write-Host ("桌面窗口：运行中（PID " + (($win | Select-Object -ExpandProperty Id) -join ', ') + "）")
+  } else {
+    Write-Host '桌面窗口：未运行'
+  }
+  $up = Get-NetTCPConnection -State Listen -LocalPort $FrontendPort -ErrorAction SilentlyContinue
+  if ($up) { Write-Host "Vite（127.0.0.1:$FrontendPort）：监听中" } else { Write-Host "Vite（127.0.0.1:$FrontendPort）：未监听" }
+  if ($running) { Write-Host "日志：$logOut" }
+  elseif (-not $win -and $up) { Write-Host '提示：端口有监听但无运行记录，可能是前台实例或其它进程占用。' }
+  return
+}
 
 function Invoke-Pnpm {
   param([string]$Directory, [string[]]$Arguments)
@@ -80,8 +184,9 @@ $viteProcess = $null
 if (-not $portBusy) {
   if (-not $SkipFrontendCheck) {
     Write-Host "启动 Vite（127.0.0.1:$FrontendPort）…"
-    $viteOut = Join-Path $env:TEMP "relay-vite-dev-$PID.out.log"
-    $viteErr = Join-Path $env:TEMP "relay-vite-dev-$PID.err.log"
+    New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
+    $viteOut = Join-Path $stateDir 'vite.out.log'
+    $viteErr = Join-Path $stateDir 'vite.err.log'
     $viteProcess = Start-Process -FilePath $node -ArgumentList @((Join-Path $workbenchRoot 'node_modules\vite\bin\vite.js'), '--host', '127.0.0.1', '--port', "$FrontendPort", '--strictPort') -WorkingDirectory $workbenchRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput $viteOut -RedirectStandardError $viteErr
     $deadline = (Get-Date).AddSeconds(30)
     do {
@@ -109,5 +214,8 @@ try {
 } finally {
   if ($null -ne $viteProcess -and -not $viteProcess.HasExited) {
     Stop-Process -Id $viteProcess.Id -Force -ErrorAction SilentlyContinue
+  }
+  if ((Test-Path $pidFile) -and ((Get-Content $pidFile -ErrorAction SilentlyContinue) -eq $PID)) {
+    Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
   }
 }

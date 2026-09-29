@@ -107,6 +107,24 @@ describe("新建任务与执行准备", () => {
     expect(fixtureAdapter.getCallCount("createTask")).toBe(0);
   });
 
+  it("提交中动词等宽替换为正在保存并拦截重复激活", async () => {
+    setFixtureLatency(120);
+    const mounted = await mountWorkbench("/tasks?view=create");
+    unmount = mounted.unmount;
+
+    await mounted.wrapper.get('input[name="task-title"]').setValue("提交中状态验证");
+    await mounted.wrapper.get('input[name="task-expected-result"]').setValue("一份验证记录。");
+    await mounted.wrapper.get('textarea[name="task-acceptance"]').setValue("步骤可复现");
+    const save = mounted.wrapper.get('[data-testid="task-create-save"]');
+    await save.trigger("click");
+    expect(save.text()).toBe("正在保存");
+    expect((save.element as HTMLButtonElement).disabled).toBe(true);
+    await save.trigger("click");
+    await flush(180);
+    expect(fixtureAdapter.getCallCount("createTask")).toBe(1);
+    setFixtureLatency(0);
+  });
+
   it("保存任务先为待整理，满足条件时转为可开始且不自动执行", async () => {
     const mounted = await mountWorkbench("/tasks?view=create");
     unmount = mounted.unmount;

@@ -166,6 +166,7 @@ export async function runSupervisedWorkerOnce(input: {
   db: DbExecutor;
   databaseUrl: string;
   dataRoot: string;
+  task?: 'RUN' | 'ASSIST';
   workerId?: string;
   leaseMs?: number;
   testHoldMs?: number;
@@ -182,7 +183,8 @@ export async function runSupervisedWorkerOnce(input: {
   onOutput?: (line: string, child: ChildProcessWithoutNullStreams) => void;
 }): Promise<SupervisedWorkerResult> {
   const workerId = input.workerId ?? `worker:${randomUUID()}`;
-  const child = spawn(process.execPath, [WORKER_ENTRY, '--once'], {
+  const child = spawn(process.execPath, [WORKER_ENTRY,
+    input.task === 'ASSIST' ? '--assist-once' : '--once'], {
     env: {
       ...process.env,
       RELAY_DB_URL: input.databaseUrl,

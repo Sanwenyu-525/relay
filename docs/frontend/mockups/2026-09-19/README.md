@@ -21,7 +21,7 @@
 | UI-01 | 今日工作台 | /today | [查看图片](today.png) |
 | UI-02 | 项目总览 | /projects/:id/overview | [查看图片](project-overview.png) |
 | UI-03 | 开发工作台 | /projects/:id/workbench/development | [查看图片](development-workbench.png) |
-| UI-04 | 论文产物验收（原始参考） | /tasks/:id 产物验收状态 | [查看图片](../../../../exec-e4781944-a9b1-4906-8cd8-994841a0c21f.png) |
+| UI-04 | 论文产物验收（原始参考） | /tasks/:id 产物验收状态 | [查看图片](../../../../thesis-review-original-20260919.png) |
 | UI-05 | 项目列表 | /projects | [查看图片](pages/projects.png) |
 | UI-06 | 创建项目 | /projects 新建流程 | [查看图片](pages/create-project.png) |
 | UI-07 | 全部任务 | /tasks | [查看图片](pages/tasks.png) |
@@ -77,7 +77,7 @@ UI-30–33 依据[扩展专题首批能力](../../../architecture/relay-skills.m
 
 ## 生成依据与可追溯记录
 
-- [原始用户参考](../../../../exec-e4781944-a9b1-4906-8cd8-994841a0c21f.png)
+- [原始用户参考](../../../../thesis-review-original-20260919.png)
 - [首批3张完整提示词](prompts.md)
 - [25页生成计划与基础提示词](pages/generation-prompts.json)
 - [接续生成调用记录](pages/continuation-record.json)

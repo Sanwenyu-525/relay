@@ -267,15 +267,25 @@ describe("P13 Today 真实投影", () => {
     expect(mounted.wrapper.text()).not.toContain("提交结果待核对");
   });
 
-  it("live 提供待审入口指向待审中心，不伪造待审计数", async () => {
+  it("live 提供待审入口指向待审中心，右栏显示真实待审事实；横幅不伪造计数", async () => {
     connect();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input).slice(root.length);
       if (path.startsWith("/today?")) return response(today(path));
+      if (path.startsWith("/reviews?")) return response({ items: [{
+        id: "review-1", kind: "CRITERION", status: "OPEN", revision: "1", project_id: projectId, task_id: taskId,
+        run_id: null, reason: "需要人工判断", target_hash: "hash-1", target: {}, evidence: {}, effect: {},
+        allowed_decisions: ["ACCEPT"], expires_at: null, created_at: "2026-09-26T00:00:00.000Z", decided_at: null
+      }] });
       const target = targetRead(path); if (target) return target;
       throw new Error(`Unexpected ${path}`);
     }));
     const mounted = await mountWorkbench("/today"); unmount = mounted.unmount;
+    const rail = mounted.wrapper.get('[data-testid="today-rail"]');
+    expect(rail.text()).toContain("等待你的判断");
+    expect(rail.text()).toContain("1");
+    expect(rail.text()).toContain("人工验收");
+    expect(rail.text()).toContain("查看待审中心");
     const entry = mounted.wrapper.get('[data-testid="today-review-entry"]');
     expect(entry.text()).toContain("打开待审中心");
     expect(mounted.wrapper.element!.querySelector('a[href="/reviews"]')).not.toBeNull();

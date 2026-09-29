@@ -168,3 +168,9 @@ Windows 发布脚本首次在编译期间检测到 `icon.ico` 输入哈希变化
 前端定向开发自检：`pnpm --dir apps/workbench typecheck` 退出 0，`pnpm --dir apps/workbench exec vitest run tests/delegate-task.spec.ts tests/run.spec.ts` 14/14 通过。新增组件断言覆盖普通委托不带动作字段、可选动作冻结原请求以及 Run 动作历史按需读取；这些不是 Windows 或 M03 G01–G08 正式验收。
 
 随后 `pnpm --dir apps/workbench test` 全量 136/136、`pnpm --dir apps/workbench build` 与文档检查退出 0。用户确认旧试用窗口已结束后，旧隔离会话通过匹配 session 路径和进程身份关闭并清理（PG 停止 0、临时根删除 True）；新桌面包[构建日志](../testing/evidence/m03/mock-action-ui-build-release.log)退出 0，EXE SHA-256 `ad4a40cd08502c3a5013f081acc08bce0bed4bfb671991f91609979f52086a25`，资源哈希 13205 项、禁带配置 0 项。新的隔离 PG/Graph 桌面试用会话已打开，启动输出见[日志](../testing/evidence/m03/mock-action-ui-trial-start.log)。这里只记录打包和启动事实，没有执行本次新增 UI 的真实窗口业务验收；M03 仍为 IN_PROGRESS。
+
+## 2026-09-29 桌面 Assist 派发补漏
+
+真实 Windows 调试桌面只启动 `supervisor-main.js`。此前监督器仅按 Run outbox 启动 `worker --once`，而该入口按设计不领取 Assist，导致已提交的 ASSISTANT 消息长期停在 PENDING。现在监督器每轮最多派发一个 Run 子进程和一个 Assist 子进程，后者通过 `--assist-once` 只调用现有 Assist 领取/生成用例；两类工作仍由各自原 Owner 写入，同一轮有积压时均有处理机会。只有存在可领取 Assist 消息或过期 RUNNING 租约才启动子进程，沿用桌面 launch Worker ID、宿主 Job、stdout 启停事件与 stdin EOF 停机链路。公开 HTTP、数据库结构、Run 命令及 `--once` 的原语义均未改变。
+
+用户取消继续先持久化 `cancel_requested`，生成方按原身份结算 CANCELLED；模型/Skill 失败沿原错误码结算 FAILED。宿主停机中断不产生虚假的用户取消：原消息保持 RUNNING 与原 `worker_id`，下次监督器检测到过期租约后由原 Assist repository 清扫为 `FAILED/LEASE_LOST`，不重新调用模型。停机期间的 Provider 调用结果仍以已有 model_calls 事实记录为准，不能把消息租约过期理解为外部请求没有发生。隔离 PostgreSQL 的进程级反例覆盖自动派发、Run/Assist 同轮积压、模型失败、运行中取消与 EOF 后租约清扫；`run-dispatch` 定向 27/27、`assist` 原回归 29/29、`assist-live-preview` 6/6 均通过，临时 PG 均已清理。真实 WebView2 结果由当前独立验收记录限定。

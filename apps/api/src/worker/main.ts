@@ -23,6 +23,7 @@ const MIGRATIONS_DIRECTORY = resolve(dirname(fileURLToPath(import.meta.url)), '.
 // VERIFY holds one transaction connection while model_calls commits on another.
 const WORKER_DATABASE_POOL_MAX = 4;
 const once = process.argv.includes('--once');
+const assistOnce = process.argv.includes('--assist-once');
 const controller = new AbortController();
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK'] as const) {
   process.on(signal, () => controller.abort());
@@ -73,7 +74,7 @@ async function main(): Promise<void> {
       ? new FakeModelPort(fakeModelDelayMs)
       : new OpenAiCompatibleModelPort(modelConfig);
     while (!controller.signal.aborted) {
-      const result = await runOneCommand(database.executor, {
+      const result = assistOnce ? undefined : await runOneCommand(database.executor, {
         workerId, dataRoot, checkpointUrl: databaseUrl, leaseMs, signal: controller.signal,
         ...(fakeModelDelayMs === 0 ? {} : { fakeModelDelayMs }),
         onClaim: async (claim) => {
@@ -140,7 +141,7 @@ async function main(): Promise<void> {
         process.stdout.write(`${JSON.stringify({ type: 'worker_settled', command_id: result.commandId,
           run_id: result.runId, outcome: result.outcome })}\n`);
       }
-      // Assist 生成与 Run 命令同循环；--once 是 Run 命令结算语义，不领取 Assist 消息。
+      // 两种一次性入口各自只领取其对应的工作，持续 Worker 则处理两者。
       if (!once) {
         const assist = await runAssistGenerationTick(database.executor, {
           workerId, storage, modelPort: assistModelPort, leaseMs, signal: controller.signal,
@@ -150,13 +151,15 @@ async function main(): Promise<void> {
             message_id: assist.messageId, session_id: assist.sessionId, status: assist.status,
             ...(assist.errorCode === null ? {} : { error_code: assist.errorCode }) })}\n`);
         }
-        const webImport = await runWebImportTick(database.executor, { signal: controller.signal });
-        if (webImport.prepared + webImport.dispatched > 0) {
-          process.stdout.write(`${JSON.stringify({ type: 'worker_web_import_tick',
-            ...webImport })}\n`);
+        if (!assistOnce) {
+          const webImport = await runWebImportTick(database.executor, { signal: controller.signal });
+          if (webImport.prepared + webImport.dispatched > 0) {
+            process.stdout.write(`${JSON.stringify({ type: 'worker_web_import_tick',
+              ...webImport })}\n`);
+          }
         }
       }
-      if (once) break;
+      if (once || assistOnce) break;
       if (result === undefined) {
         await new Promise<void>((done) => {
           const timer = setTimeout(done, pollMs);
@@ -176,5 +179,14 @@ try {
     (error.message.includes('configuration') || error.message.includes('schema unavailable') ||
       error.message.endsWith(' invalid'));
   process.stderr.write(`${configFailure ? 'worker_configuration_failed' : 'worker_failed'}\n`);
+  if (error instanceof Error) {
+    process.stderr.write(`${error.stack ?? `${error.name}: ${error.message}`}\n`);
+  } else {
+    try {
+      process.stderr.write(`worker failure non-error: ${JSON.stringify(error)}\n`);
+    } catch {
+      process.stderr.write('worker failure non-serializable\n');
+    }
+  }
   process.exitCode = configFailure ? 2 : 1;
 }

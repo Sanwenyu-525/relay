@@ -363,10 +363,44 @@ svg {
 }
 
 .app-frame {
+  position: relative;
   display: grid;
-  grid-template-columns: var(--relay-layout-sidebar-width) minmax(0, 1fr);
+  /* 用户拖拽宽度（--relay-sidebar-user-width）只覆盖基础列；≤63.9375rem 的断点用显式列宽覆盖，不受影响。 */
+  grid-template-columns: var(--relay-sidebar-user-width, var(--relay-layout-sidebar-width)) minmax(0, 1fr);
   min-height: 100vh;
   align-items: start;
+}
+
+/* 侧栏拖拽分隔条：≥64rem 显示；默认透明，悬停/拖拽/聚焦显示深控制线，落在原分隔线上。 */
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--relay-sidebar-user-width, var(--relay-layout-sidebar-width)) - var(--relay-space-1));
+  width: var(--relay-space-2);
+  z-index: var(--relay-zIndex-sticky);
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.sidebar-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: var(--relay-focus-width);
+  transform: translateX(-50%);
+}
+
+.sidebar-resize-handle:hover::after,
+.sidebar-resize-handle:focus-visible::after,
+.sidebar-resize-handle--dragging::after {
+  background: var(--relay-color-border-control);
 }
 
 .app-sidebar {
@@ -443,8 +477,8 @@ svg {
   height: var(--relay-control-target-minimum);
   padding: 0 var(--relay-space-1);
   border-radius: var(--relay-radius-round);
-  background: var(--relay-color-bg-surface);
-  color: var(--relay-color-text-secondary);
+  background: var(--relay-color-action-primary);
+  color: var(--relay-color-text-onAction);
   font-size: var(--relay-font-size-meta);
 }
 
@@ -691,6 +725,27 @@ svg {
   margin-top: var(--relay-space-6);
 }
 
+/* 页签与搜索同行（对照项目列表效果图）：分隔线由行承载，窄窗自动换行。 */
+.subnav-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--relay-space-4) var(--relay-space-8);
+  margin-top: var(--relay-space-6);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.subnav-row .subnav {
+  margin-top: 0;
+  border-bottom: none;
+}
+
+.subnav-row .list-toolbar {
+  margin-top: 0;
+  padding-bottom: var(--relay-space-2);
+}
+
 .skill-tab,
 .subnav-item {
   background: none;
@@ -858,6 +913,10 @@ svg {
   background: var(--relay-color-selection-hover);
 }
 
+.secondary-button:active:not(:disabled) {
+  background: var(--relay-color-selection-bg);
+}
+
 .danger-button {
   min-height: var(--relay-control-height-prominent);
   background: var(--relay-color-bg-surface);
@@ -877,6 +936,10 @@ svg {
 
 .text-button:hover:not(:disabled) {
   background: var(--relay-color-selection-hover);
+}
+
+.text-button:active:not(:disabled) {
+  background: var(--relay-color-selection-bg);
 }
 
 .text-button--center {
@@ -1503,8 +1566,48 @@ svg {
 }
 
 .project-summary-kicker {
+  display: none;
+}
+
+/* 项目列表行右缘的打开指示（对照效果图行尾箭头）；表头与空态行不显示。 */
+.data-row--projects.data-row--interactive {
+  position: relative;
+}
+
+.data-row--projects.data-row--interactive::after {
+  content: "›";
+  position: absolute;
+  right: var(--relay-space-4);
+  top: 50%;
+  transform: translateY(-50%);
   color: var(--relay-color-text-muted);
-  font-size: var(--relay-font-size-meta);
+  font-size: var(--relay-font-size-rowTitle);
+  line-height: 1;
+  pointer-events: none;
+}
+
+.data-row--projects .data-cell:last-child {
+  padding-right: var(--relay-space-8);
+}
+
+/* 右栏「项目摘要」栏标题与宋体项目名（对照效果图右栏层级）。 */
+.rail-heading {
+  margin: 0 0 var(--relay-space-2);
+  font-family: var(--relay-font-family-editorial);
+  font-size: var(--relay-font-size-section);
+  font-weight: var(--relay-font-weight-semibold);
+  line-height: var(--relay-font-lineHeight-heading);
+  color: var(--relay-color-text-primary);
+}
+
+.rail-project-name {
+  margin: 0 0 var(--relay-space-3);
+  font-family: var(--relay-font-family-editorial);
+  font-size: var(--relay-font-size-compactPage);
+  font-weight: var(--relay-font-weight-semibold);
+  line-height: var(--relay-font-lineHeight-heading);
+  color: var(--relay-color-text-primary);
+  overflow-wrap: anywhere;
 }
 
 .project-state-summary {
@@ -2290,6 +2393,10 @@ fieldset.field {
 @media (max-width: 63.9375rem) {
   .app-frame {
     grid-template-columns: var(--relay-layout-sidebar-compactWidth) minmax(0, 1fr);
+  }
+
+  .sidebar-resize-handle {
+    display: none;
   }
 
   .app-sidebar {

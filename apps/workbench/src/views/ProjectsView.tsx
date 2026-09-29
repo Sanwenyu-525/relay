@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowRight, Archive, Info, Plus, RotateCcw, Search } from "lucide-react";
+import { ArrowRight, Archive, Info, RotateCcw, Search } from "lucide-react";
 import { createCommandId, projectArchiveResultFrom, RelayApiError, RelayTransportError,
   type RelayApiClient, type RelayCommandEnvelope, type RelayProject,
   type RelayProjectArchiveResult, type RelayProjectListItem } from "../api/relayClient";
@@ -178,15 +178,17 @@ export default function ProjectsView() {
 
   return <section className="skill-page"><div className="page-layout">
     <div className="page-primary">
-      <div className="list-header"><div><h1>项目</h1><p className="page-lede">每一个长期目标，都有可继续的下一步。</p></div><button className="primary-button" type="button" data-testid="project-create-open" onClick={() => navigate("/projects?view=create")}><Plus aria-hidden="true" />新建项目</button></div>
-      <nav className="subnav" aria-label="项目范围"><Link className={`subnav-item${archivedTab ? "" : " subnav-item--active"}`} to="/projects" data-testid="projects-tab-active" aria-current={archivedTab ? undefined : "page"}>进行中 ({activeProjects.length})</Link><Link className={`subnav-item${archivedTab ? " subnav-item--active" : ""}`} to="/projects?archived=1" data-testid="projects-tab-archived" aria-current={archivedTab ? "page" : undefined}>已归档 ({archivedProjects.length})</Link></nav>
-      <div className="list-toolbar"><label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">按项目名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="project-search" placeholder="搜索项目" style={searchInputStyle} /></label></div>
+      <div className="list-header"><div><h1>项目</h1><p className="page-lede">每一个长期目标，都有可继续的下一步。</p></div><button className="primary-button" type="button" data-testid="project-create-open" onClick={() => navigate("/projects?view=create")}>新建项目</button></div>
+      <div className="subnav-row">
+        <nav className="subnav" aria-label="项目范围"><Link className={`subnav-item${archivedTab ? "" : " subnav-item--active"}`} to="/projects" data-testid="projects-tab-active" aria-current={archivedTab ? undefined : "page"}>进行中 ({activeProjects.length})</Link><Link className={`subnav-item${archivedTab ? " subnav-item--active" : ""}`} to="/projects?archived=1" data-testid="projects-tab-archived" aria-current={archivedTab ? "page" : undefined}>已归档 ({archivedProjects.length})</Link></nav>
+        <div className="list-toolbar"><label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">按项目名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="project-search" placeholder="搜索项目" style={searchInputStyle} /></label></div>
+      </div>
       {refreshing && <p className="helper-text" role="status">正在更新项目列表，已显示的内容保持可见。</p>}
-      {visibleProjects.length === 0 ? <div className="page-state"><p>{search.trim() ? `当前范围没有匹配“${search.trim()}”的项目。` : archivedTab ? "还没有已归档的项目；归档后仍会保留历史事实。" : "还没有进行中的项目。"}</p>{!archivedTab && !search.trim() ? <button className="primary-button" type="button" onClick={() => navigate("/projects?view=create")}><Plus aria-hidden="true" />新建项目</button> : <button className="secondary-button" type="button" onClick={() => setSearch("")}>清除搜索</button>}</div> :
+      {visibleProjects.length === 0 ? <div className="page-state"><p>{search.trim() ? `当前范围没有匹配“${search.trim()}”的项目。` : archivedTab ? "还没有已归档的项目；归档后仍会保留历史事实。" : "还没有进行中的项目。"}</p>{!archivedTab && !search.trim() ? <button className="primary-button" type="button" onClick={() => navigate("/projects?view=create")}>新建项目</button> : <button className="secondary-button" type="button" onClick={() => setSearch("")}>清除搜索</button>}</div> :
         <div className="table-scroll"><div className="data-table"><div className="data-row data-row--head data-row--projects" aria-hidden="true"><span className="data-cell">项目</span><span className="data-cell">类型</span><span className="data-cell">当前阶段</span><span className="data-cell">下一步</span></div><ul className="data-list">{visibleProjects.map((project) => <li key={project.id}><button className={`data-row data-row--projects data-row--interactive${project.id === selectedId ? " data-row--selected" : ""}`} type="button" aria-current={project.id === selectedId ? "true" : undefined} data-testid={`project-row-${project.id}`} onClick={() => selectProject(project)}><span className="data-cell"><strong>{project.title}</strong><small>{project.goal}</small></span><span className="data-cell data-cell--meta">{projectTypeLabels[project.projectType]}</span><span className="data-cell data-cell--meta">{phaseLabel(project.phase)}</span><span className="data-cell data-cell--meta">{project.nextAction ?? "尚未明确"}</span></button></li>)}</ul></div></div>}
       <p className="list-footer-note"><Info aria-hidden="true" />项目阶段由你显式设置，系统不按任务完成数量自动跳阶段；列表中的下一步来自项目状态。</p>
     </div>
-    <ResponsiveRail label="查看项目摘要" title={selected?.title ?? "项目摘要"}><div className="rail-content"><h2>{selected?.title ?? "项目摘要"}</h2>{selected ? <><p className="project-summary-kicker">当前项目</p><p className="rail-intro">{selected.summary}</p><section className="project-state-summary" aria-label="项目当前状态"><span>当前阶段</span><strong>{phaseLabel(selected.phase)}</strong><small>状态修订 v{selected.stateRevision} · 待审 {selected.pendingReviewCount} 项</small></section><section className="rail-section"><h3>明确目标</h3><p>{selected.goal}</p></section>
+    <ResponsiveRail label="查看项目摘要" title={selected?.title ?? "项目摘要"}><div className="rail-content"><p className="rail-heading">项目摘要</p>{selected && <p className="rail-project-name">{selected.title}</p>}{selected ? <><p className="rail-intro">{selected.summary}</p><section className="project-state-summary" aria-label="项目当前状态"><span>当前阶段</span><strong>{phaseLabel(selected.phase)}</strong><small>状态修订 v{selected.stateRevision} · 待审 {selected.pendingReviewCount} 项</small></section><section className="rail-section"><h3>明确目标</h3><p>{selected.goal}</p></section>
       {receipt && <p className="receipt-message" role="status">{receipt}</p>}{importStatus !== "none" && <p className="helper-text" data-testid="project-import-status"><Info aria-hidden="true" />初始资料导入：{importStatus === "SUCCEEDED" ? "已完成登记，导入成功不代表内容已经验证。" : "失败，项目仍然保留，可稍后重新导入。"}</p>}{actionError && <p className="action-error" role="alert">{actionError}</p>}
       {!selected.archived ? <Link className="primary-button primary-button--wide" data-testid="project-open" to={`/projects/${selected.id}`}>打开项目<ArrowRight aria-hidden="true" /></Link> : <><button className="primary-button primary-button--wide" type="button" disabled>打开项目</button><p className="disabled-reason" data-testid="project-archived-reason"><Info aria-hidden="true" />已归档项目在本轮交互预览中只读；恢复入口尚未接入。</p></>}
       {!selected.archived && <><button className="secondary-button secondary-button--wide" type="button" data-testid="project-archive" disabled={submitting || Boolean(selected.archiveBlockedReason)} onClick={() => void archiveSelected()}><Archive aria-hidden="true" />{submitting ? "正在归档" : "归档项目"}</button>{selected.archiveBlockedReason ? <p className="disabled-reason" data-testid="project-archive-reason"><Info aria-hidden="true" />{selected.archiveBlockedReason}</p> : <p className="helper-text">归档只改变项目状态并保留历史；不会删除任务、产物或验收记录。</p>}</>}</> : <p className="rail-intro">请先在列表中选择一个项目，这里会显示它的目标与当前状态。</p>}</div></ResponsiveRail>
@@ -376,17 +378,19 @@ function LiveProjectsListView({ client, archived, onCreate }: {
   return <section className="skill-page" data-testid="projects-live-list"><div className="page-layout">
     <div className="page-primary">
       <div className="list-header"><div><h1>项目</h1><p className="page-lede">连接本机 API 后，按当前归档范围读取真实项目；列表、下一步与计数只显示服务端已返回的事实。</p></div>
-        <button className="primary-button" type="button" data-testid="project-create-open" onClick={onCreate}><Plus aria-hidden="true" />新建项目</button></div>
-      <nav className="subnav" aria-label="项目范围"><Link className={`subnav-item${archived ? "" : " subnav-item--active"}`}
-        to="/projects" data-testid="projects-tab-active" aria-current={archived ? undefined : "page"}>进行中</Link>
-        <Link className={`subnav-item${archived ? " subnav-item--active" : ""}`} to="/projects?archived=1"
-          data-testid="projects-tab-archived" aria-current={archived ? "page" : undefined}>已归档</Link></nav>
-      <div className="list-toolbar">
-        <button className="secondary-button" type="button" data-testid="projects-live-refresh" disabled={loading || loadingMore}
-          onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />刷新当前范围</button>
-        <label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">在已加载项目中按名称搜索</span>
-          <input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="live-project-search"
-            placeholder="搜索已加载项目" style={searchInputStyle} /></label></div>
+        <button className="primary-button" type="button" data-testid="project-create-open" onClick={onCreate}>新建项目</button></div>
+      <div className="subnav-row">
+        <nav className="subnav" aria-label="项目范围"><Link className={`subnav-item${archived ? "" : " subnav-item--active"}`}
+          to="/projects" data-testid="projects-tab-active" aria-current={archived ? undefined : "page"}>进行中</Link>
+          <Link className={`subnav-item${archived ? " subnav-item--active" : ""}`} to="/projects?archived=1"
+            data-testid="projects-tab-archived" aria-current={archived ? "page" : undefined}>已归档</Link></nav>
+        <div className="list-toolbar">
+          <button className="secondary-button" type="button" data-testid="projects-live-refresh" disabled={loading || loadingMore}
+            onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />刷新当前范围</button>
+          <label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">在已加载项目中按名称搜索</span>
+            <input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="live-project-search"
+              placeholder="搜索已加载项目" style={searchInputStyle} /></label></div>
+      </div>
       {archiveSuccess && <p className="receipt-message" role="status" data-testid="project-archive-success">已归档 Project {archiveSuccess.id}（{archiveSuccess.archivedAt}）。<Link className="inline-link" to={`/projects/${archiveSuccess.id}`}>查看历史项目</Link> · <Link className="inline-link" to="/projects?archived=1">查看已归档列表</Link></p>}
       {archiveError && <p className="action-error" role="alert" data-testid="project-archive-error">{archiveError}</p>}
       {archiveBlockers.length > 0 && <div className="warning-callout" data-testid="project-archive-blockers"><strong>归档阻断原因</strong><ul>{archiveBlockers.map((reason, index) => <li key={`${reason}-${index}`}><strong>{reason}</strong>：{archiveBlockerLabels[reason] ?? "服务端报告未识别的阻断事实；请重新读取项目并核对当前状态。"}</li>)}</ul></div>}
@@ -412,7 +416,7 @@ function LiveProjectsListView({ client, archived, onCreate }: {
         </>}
       <p className="list-footer-note"><Info aria-hidden="true" />下一步来自项目状态，显示对应任务的标题；任务的确切 ID、修订与打开入口在选中项目后的右侧摘要中。</p>
     </div><ResponsiveRail label="查看项目摘要" title={selected?.title ?? "项目摘要"}><div className="rail-content">
-      <h2>{selected?.title ?? "项目摘要"}</h2>{selected ? <><p className="rail-intro">Project ID：{selected.id}</p>
+      <p className="rail-heading">项目摘要</p>{selected && <p className="rail-project-name">{selected.title}</p>}{selected ? <><p className="rail-intro">Project ID：{selected.id}</p>
         <section className="project-state-summary" aria-label="项目当前状态"><span>项目阶段</span>
           <strong>{phaseLabel(selected.phaseKey)}</strong><small>Project v{selected.revision} · State v{selected.stateRevision}</small></section>
         <section className="rail-section"><h3>下一步</h3><p>{selected.nextActionTaskId

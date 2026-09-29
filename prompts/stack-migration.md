@@ -15,7 +15,7 @@
 
 具体实现、测试、构建和修复由当前 Agent 或明确分派的执行 Agent 完成。协调 Agent 分派明确文件/模块所有权，告知执行者并非独占工作区，不得回退他人修改；协调 Agent 独立验收，不虚报模型调用。
 
-沿用现有业务、视觉与数据；React 是全部既有界面迁移，Windows 是安装交付目标。按 ADR-010 选择项目需要的组件：保留 Fastify/Kysely/pg/PostgreSQL，API 与 Worker 分进程，LangGraph/PostgresSaver 先通过兼容出口，队列优先 PG 持久命令分发。不要照搬附件引入 Drizzle 或 Redis/BullMQ。
+沿用现有业务与数据；既有 React 迁移保持原视觉和功能，Windows 是安装交付目标。2026-09-29 协作体验提案见工作台第14节：只有后续明确授权改造且选定视觉目标，才按新层级调整导航和布局；不能因迁移的保留要求永远冻结旧管理页面，也不能因文档提案立即改代码。本轮文档改造不追加模块或改变验收出口。按 ADR-010 选择项目需要的组件：保留 Fastify/Kysely/pg/PostgreSQL，API 与 Worker 分进程，LangGraph/PostgresSaver 先通过兼容出口，队列优先 PG 持久命令分发。不要照搬附件引入 Drizzle 或 Redis/BullMQ。
 
 新依赖核对正式发布、许可、维护和兼容范围，精确锁定并提交 pnpm-lock.yaml；禁止 beta/RC、浮动 latest 或以仓库 main 的 package.json 代替发布依据。复用 .research 中相关机制与测试，研究缓存不成为产品依赖。
 

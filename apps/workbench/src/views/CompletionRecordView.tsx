@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { RelayApiError, type RelayCompletionEvidence } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import ResponsiveRail from "../components/ResponsiveRail";
 import { useRelayConnection } from "../lib/relayConnection";
 import "./CompletionRecordView.css";
 
@@ -33,21 +34,13 @@ export default function CompletionRecordView() {
 
   const evidence = loaded?.key === key ? loaded.value : null;
   const error = failure?.key === key ? failure.message : null;
-  return <section className="completion-page" data-testid="completion-record"><p className="eyebrow">完成凭据</p><h1>历史完成依据</h1>
+  return <section className="completion-page" data-testid="completion-record"><div className="page-layout"><div className="page-primary"><p className="eyebrow">完成凭据</p><h1>历史完成依据</h1>
     <p className="page-lede">按这一次完成提交时的验收版本与证据读取；重开后旧凭据仍是历史记录，不用当前最新版替代。</p>
     {client === null ? <p className="warning-callout" role="status">示例数据没有真实完成凭据。<Link to="/tasks">返回任务</Link></p> : <>
       <button className="secondary-button" type="button" onClick={() => { setLoaded(null); setFailure(null); setReload((value) => value + 1); }}>重读凭据</button>
       {!evidence && !error && <p role="status">正在读取完成凭据…</p>}
       {error && <p className="action-error" role="alert">{error}</p>}
       {evidence && <>
-        <section className="surface-panel completion-section"><h2>提交事实</h2><dl className="completion-facts">
-          <div><dt>完成凭据 ID</dt><dd>{evidence.completionId}</dd></div>
-          <div><dt>关联任务</dt><dd><Link className="inline-link" to={`/tasks/${evidence.taskId}`}>{evidence.taskId}</Link></dd></div>
-          <div><dt>完成依据</dt><dd>{evidence.basisKind === "HUMAN" ? "人工接受" : "自动验证"}</dd></div>
-          <div><dt>当时验收版本</dt><dd>v{evidence.acceptanceRevision}</dd></div>
-          <div><dt>当前指针</dt><dd>{evidence.isCurrent ? "当前完成周期" : "历史凭据；当前任务已不指向此凭据"}</dd></div>
-          <div><dt>提交时间</dt><dd>{evidence.committedAt}</dd></div>
-        </dl><Link className="inline-link" to={`/activity?task_id=${evidence.taskId}`}>查看该任务 Activity 历史</Link></section>
         <section className="surface-panel completion-section"><h2>当时验收条件</h2>
           {evidence.acceptance.availability === "UNAVAILABLE" ? <p>历史验收内容不可用或无权读取；不展示正文，也不以当前验收版本替代。</p> : <>
             <p>{evidence.acceptance.objective ?? "当时未记录目标正文。"}</p>
@@ -89,5 +82,16 @@ export default function CompletionRecordView() {
         </section>
       </>}
     </>}
-  </section>;
+    </div>
+    <ResponsiveRail label="查看提交事实" title="提交事实"><div className="rail-content">
+        {evidence && <section className="surface-panel completion-section"><h2>提交事实</h2><dl className="completion-facts">
+          <div><dt>完成凭据 ID</dt><dd>{evidence.completionId}</dd></div>
+          <div><dt>关联任务</dt><dd><Link className="inline-link" to={`/tasks/${evidence.taskId}`}>{evidence.taskId}</Link></dd></div>
+          <div><dt>完成依据</dt><dd>{evidence.basisKind === "HUMAN" ? "人工接受" : "自动验证"}</dd></div>
+          <div><dt>当时验收版本</dt><dd>v{evidence.acceptanceRevision}</dd></div>
+          <div><dt>当前指针</dt><dd>{evidence.isCurrent ? "当前完成周期" : "历史凭据；当前任务已不指向此凭据"}</dd></div>
+          <div><dt>提交时间</dt><dd>{evidence.committedAt}</dd></div>
+        </dl><Link className="inline-link" to={`/activity?task_id=${evidence.taskId}`}>查看该任务 Activity 历史</Link></section>}
+    </div></ResponsiveRail>
+  </div></section>;
 }

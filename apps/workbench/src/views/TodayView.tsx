@@ -2,11 +2,11 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import {
   createCommandId, RelayApiError, selectionRevisionFrom, taskMutationFrom,
-  type RelayApiClient, type RelayCommandEnvelope, type RelayToday, type RelayTodayItem,
+  type RelayApiClient, type RelayCommandEnvelope, type RelayReview, type RelayToday, type RelayTodayItem,
   type RelayTodayPriority
 } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
-import { taskStatusLabels } from "../lib/labels";
+import { reviewKindLabels, taskStatusLabels } from "../lib/labels";
 import { useRelayConnection } from "../lib/relayConnection";
 import "./TodayView.css";
 
@@ -106,30 +106,35 @@ function TodayTask({ item, eligible, busy, queryTimezone, queryDate, projectTitl
   }
 
   const statusLabel = taskStatusLabels[item.status] ?? item.status;
+  const rowActions = actions.has(item.pin ? "UNPIN" : "PIN") || actions.has("SET_FOCUS") || actions.has("CLEAR_LATER");
   return <li className="today-task">
     <div className="today-task__main">
       <div className="today-task__heading">
-        <Link className="today-task__title" to={`/tasks/${item.taskId}`}>{item.title}</Link>
-        <span className={eligible ? "today-eligibility today-eligibility--ready" : "today-eligibility"}>
-          {eligible ? (item.status === "IN_PROGRESS" ? "可继续" : "可开始") : "待处理"}</span>
+        <div className="today-task__heading-text">
+          <Link className="today-task__title" to={`/tasks/${item.taskId}`}>{item.title}</Link>
+          <p className="today-task__meta">
+            <span>{statusLabel}</span>
+            {item.projectId && <><span className="today-task__dot" aria-hidden="true">·</span>
+              <Link to={`/projects/${item.projectId}/tasks`}>{projectTitle ?? "所属项目"}</Link></>}
+            {item.priority && <><span className="today-task__dot" aria-hidden="true">·</span><span>优先级 {priorityLabels[item.priority] ?? item.priority}</span></>}
+            {item.dueLocalDate && <><span className="today-task__dot" aria-hidden="true">·</span><span>截止 {item.dueLocalDate}</span></>}
+            {item.pin && <><span className="today-task__dot" aria-hidden="true">·</span><span>已置顶</span></>}
+            {item.laterLocalDate && <><span className="today-task__dot" aria-hidden="true">·</span><span>延后至 {item.laterLocalDate}</span></>}
+          </p>
+        </div>
+        <div className="today-task__side">
+          <span className={eligible ? "status-chip status-chip--success" : "status-chip status-chip--neutral"}>
+            {eligible ? (item.status === "IN_PROGRESS" ? "可继续" : "可开始") : "待处理"}</span>
+          {eligible && actions.has("START") && <Link className="inline-link" to={`/tasks/${item.taskId}`}>打开任务</Link>}
+        </div>
       </div>
-      <p className="today-task__meta">
-        <span>{statusLabel}</span>
-        {item.projectId && <><span className="today-task__dot" aria-hidden="true">·</span>
-          <Link to={`/projects/${item.projectId}/tasks`}>{projectTitle ?? "所属项目"}</Link></>}
-        {item.priority && <><span className="today-task__dot" aria-hidden="true">·</span><span>优先级 {priorityLabels[item.priority] ?? item.priority}</span></>}
-        {item.dueLocalDate && <><span className="today-task__dot" aria-hidden="true">·</span><span>截止 {item.dueLocalDate}</span></>}
-        {item.pin && <><span className="today-task__dot" aria-hidden="true">·</span><span>已置顶</span></>}
-        {item.laterLocalDate && <><span className="today-task__dot" aria-hidden="true">·</span><span>延后至 {item.laterLocalDate}</span></>}
-      </p>
-    </div>
-    <div className="today-task__actions">
-      {eligible && actions.has("START") && <Link className="inline-link" to={`/tasks/${item.taskId}`}>打开任务</Link>}
-      {actions.has(item.pin ? "UNPIN" : "PIN") && <button className="text-button" type="button" disabled={busy}
-        onClick={() => onSelection(item, !item.pin, item.laterLocalDate, item.laterTimezone)}>{item.pin ? "取消置顶" : "置顶"}</button>}
-      {actions.has("SET_FOCUS") && <button className="text-button" type="button" disabled={busy} onClick={() => onFocus(item)}>设为今日焦点</button>}
-      {actions.has("CLEAR_LATER") && <button className="text-button" type="button" disabled={busy}
-        onClick={() => onSelection(item, item.pin, null, null)}>取消延后</button>}
+      {rowActions && <div className="today-task__actions">
+        {actions.has(item.pin ? "UNPIN" : "PIN") && <button className="text-button" type="button" disabled={busy}
+          onClick={() => onSelection(item, !item.pin, item.laterLocalDate, item.laterTimezone)}>{item.pin ? "取消置顶" : "置顶"}</button>}
+        {actions.has("SET_FOCUS") && <button className="text-button" type="button" disabled={busy} onClick={() => onFocus(item)}>设为今日焦点</button>}
+        {actions.has("CLEAR_LATER") && <button className="text-button" type="button" disabled={busy}
+          onClick={() => onSelection(item, item.pin, null, null)}>取消延后</button>}
+      </div>}
     </div>
     <details className="today-task__plans">
       <summary>延后与计划</summary>
@@ -178,8 +183,11 @@ export default function TodayView() {
   const [failedCommandId, setFailedCommandId] = useState<string | null>(null);
   const [timezoneError, setTimezoneError] = useState<string | null>(null);
   const [projectTitles, setProjectTitles] = useState<Record<string, string | null>>({});
+  const [openReviews, setOpenReviews] = useState<readonly RelayReview[]>([]);
+  const [reviewsState, setReviewsState] = useState<"loading" | "ready" | "error">("loading");
   const requestedProjectIds = useRef<Set<string>>(new Set());
   const requestVersion = useRef(0);
+  const reviewsScope = useRef(0);
   const viewScope = useRef(0);
   const pendingRef = useRef<TodayCommand | null>(null);
   const queryRef = useRef(`${date}|${timezone}`);
@@ -214,6 +222,21 @@ export default function TodayView() {
     if (client !== null) void loadToday(client, date, timezone);
     return () => { requestVersion.current++; };
   }, [client, date, timezone, connection.epoch]);
+
+  // 右栏待审计数来自真实查询；读取失败如实说明，不用占位数字补齐。
+  useEffect(() => {
+    if (client === null) return;
+    const scope = ++reviewsScope.current;
+    setReviewsState("loading");
+    client.getReviews().then((reviews) => {
+      if (scope !== reviewsScope.current) return;
+      setOpenReviews(reviews); setReviewsState("ready");
+    }).catch(() => {
+      if (scope !== reviewsScope.current) return;
+      setReviewsState("error");
+    });
+    return () => { reviewsScope.current++; };
+  }, [client, connection.epoch]);
 
   // 项目标题按确切 Project 单读补充；读取失败显示中性回退，不编造名称。
   useEffect(() => {
@@ -335,10 +358,14 @@ export default function TodayView() {
   const busy = submitting || pending !== null || loading;
   const waitingOther = current?.waitingItems.filter((item) => !current.blockedPinnedItems.some((blocked) => blocked.taskId === item.taskId)) ?? [];
   const weekday = new Intl.DateTimeFormat("zh-CN", { timeZone: timezone, weekday: "long" }).format(new Date(`${date}T12:00:00`));
+  const longDate = new Intl.DateTimeFormat("zh-CN", { timeZone: timezone, year: "numeric", month: "long", day: "numeric" }).format(new Date(`${date}T12:00:00`));
   const focusTaskId = current?.focus?.targetKind === "TASK" ? current.focus.targetId : null;
   const focusTask = focusTaskId
     ? [...(current?.eligibleItems ?? []), ...(current?.waitingItems ?? [])].find((item) => item.taskId === focusTaskId) ?? null
     : null;
+  const focusTaskEligible = current !== null && focusTaskId !== null
+    && current.eligibleItems.some((item) => item.taskId === focusTaskId);
+  const reviewKindSummary = [...new Set(openReviews.map((review) => reviewKindLabels[review.kind]))].join(" · ");
   const allEmpty = current !== null && current.eligibleItems.length === 0
     && current.blockedPinnedItems.length === 0 && waitingOther.length === 0;
   const hasCandidates = current !== null && current.eligibleItems.length > 0;
@@ -394,7 +421,7 @@ export default function TodayView() {
   }
 
   return <section className="today-page">
-    <p className="eyebrow">{date} · {weekday}</p>
+    <p className="eyebrow">{longDate} · {weekday}</p>
     <h1>把今天留给重要的事</h1>
     <p className="page-lede">从上次停下的地方，继续推进。</p>
     <p className="page-note">置顶和今日焦点帮助安排今天；受阻任务需先处理阻碍。<details className="today-arrange-note">
@@ -436,21 +463,33 @@ export default function TodayView() {
         <button className="secondary-button" type="button" disabled={submitting} onClick={() => { void checkReceipt(); }}>查询原命令回执</button>
         {mayRetry && <button className="secondary-button" type="button" disabled={submitting} onClick={() => { void sendFrozen(pending, true); }}>用原 ID 和内容重试</button>}
       </div>}
-      {loading && current === null && <p className="today-loading" role="status">正在读取今日安排…</p>}
-      {current && <>
+      <div className="today-body">
+        <div className="today-main">
+          {loading && current === null && <p className="today-loading" role="status">正在读取今日安排…</p>}
+          {current && <>
         <div className="today-focus" data-testid="today-focus">
-          <h2>今日焦点</h2>
+          <div className="today-focus__header">
+            <h2>今日焦点</h2>
+            {focusTask?.pin && <span className="today-focus__pin-badge">已置顶</span>}
+          </div>
           {current.focus ? (focusTask
             ? <div className="today-focus__target">
               <p className="today-focus__project">{focusTask.projectId
                 ? <>项目：<Link to={`/projects/${focusTask.projectId}/tasks`}>{projectTitles[focusTask.projectId] ?? "所属项目"}</Link></>
                 : "未归属项目的人工任务"}</p>
               <p className="today-focus__title"><Link to={`/tasks/${focusTask.taskId}`}>{focusTask.title}</Link></p>
-              <p className="today-focus__meta">{taskStatusLabels[focusTask.status] ?? focusTask.status}
-                {focusTask.priority && <> · 优先级 {priorityLabels[focusTask.priority] ?? focusTask.priority}</>}
-                {focusTask.dueLocalDate && <> · 截止 {focusTask.dueLocalDate}</>}</p>
+              <p className="today-focus__meta">
+                <span>{taskStatusLabels[focusTask.status] ?? focusTask.status}</span>
+                {focusTask.priority && <><span className="today-focus__meta-sep" aria-hidden="true" />
+                  <span>优先级 {priorityLabels[focusTask.priority] ?? focusTask.priority}</span></>}
+                {focusTask.dueLocalDate && <><span className="today-focus__meta-sep" aria-hidden="true" />
+                  <span>截止 {focusTask.dueLocalDate}</span></>}
+              </p>
               <div className="today-focus__actions">
-                <Link className="inline-link" to={`/tasks/${focusTask.taskId}`}>打开任务</Link>
+                {focusTaskEligible
+                  ? <Link className="primary-button" to={`/tasks/${focusTask.taskId}`}>
+                    {focusTask.status === "IN_PROGRESS" ? "继续任务" : "开始任务"}</Link>
+                  : <Link className="inline-link" to={`/tasks/${focusTask.taskId}`}>打开任务</Link>}
                 <button className="text-button" type="button" disabled={busy} onClick={clearFocus}>清除今日焦点</button>
               </div>
             </div>
@@ -493,7 +532,30 @@ export default function TodayView() {
             {renderGroup("已置顶，待处理", current.blockedPinnedItems.length, current.blockedPinnedItems, false)}
             {renderGroup("其他等待", waitingOther.length, waitingOther, false)}
           </>}
-      </>}
+          </>}
+        </div>
+        <aside className="today-rail" data-testid="today-rail" aria-label="今日页侧栏">
+          <section className="today-rail__section" aria-label="等待你的判断">
+            <h2>等待你的判断</h2>
+            {reviewsState === "loading" && <p className="helper-text" role="status">正在读取待审状态…</p>}
+            {reviewsState === "error" && <p className="helper-text">待审状态暂时不可读；可打开待审中心查看最新情况。</p>}
+            {reviewsState === "ready" && (openReviews.length > 0
+              ? <p className="today-rail__count"><span className="today-rail__number">{openReviews.length}</span>
+                <span className="today-rail__count-copy">条待审请求等待处理{reviewKindSummary ? `；类型：${reviewKindSummary}` : ""}。</span></p>
+              : <p className="today-rail__empty">当前没有等待你判断的事项。</p>)}
+            <Link className="today-rail__link" to="/reviews">查看待审中心<span aria-hidden="true"> →</span></Link>
+          </section>
+          <section className="today-rail__section" aria-label="推荐依据">
+            <h2>推荐依据</h2>
+            <ul className="today-rail__basis">
+              <li>今日焦点由你在任务里手动设置</li>
+              <li>「可开始」由服务端按依赖与阻塞判定</li>
+              <li>排序建议不会自动修改任务计划</li>
+            </ul>
+          </section>
+          <p className="today-rail__note">稍后处理的任务仍保留在任务列表。</p>
+        </aside>
+      </div>
     </>}
   </section>;
 }

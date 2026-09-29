@@ -1,5 +1,7 @@
 # 文档入口与维护规范
 
+2026-09-29 协作体验改造导航：[工作台第 14 节](frontend/workbench-design.md#14-以目标协作为中心的工作台改造)拥有目标流程、入口与兼容关系；[设计系统第 5.1 节](frontend/design-system.md#51-协作工作区的视觉层级)拥有视觉层级；[验收第 16 节](testing/verification-plan.md#16-agent-协作主线验收提案)拥有未运行场景。用户要求本轮只改文档，具体布局仍 Proposed；旧图和逐页清单用于风格/能力覆盖，不冻结旧管理导航或宣称新体验已实现。
+
 2026-09-28 后续规划导航：[V1 后续路线](requirements/post-v1-roadmap.md)拥有推荐范围、顺序与未决项；[领域模型第 11 节](architecture/domain-model.md#11-v1-后续协作的架构演进提案)维护责任与事务，[ADR-013](decisions/ADR-013-bounded-project-continuation.md)记录 Proposed 取舍，[验收第 14 节](testing/verification-plan.md#14-v1-后续长期协作验收提案)维护未运行规格，[N 工作包](../prompts/post-v1-collaboration.md)提供分包提示词。用户选择长期协作优先，具体方案仍为规划，未启动实现、不扩大 V1 goal。
 
 当前改造导航（2026-09-24）：[ADR-010](decisions/ADR-010-agent-stack-react-desktop.md)记录技术取舍与用户决定；[技术选型](architecture/技术选型.md)维护目标组合；[CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md)独占当前模块状态；[大模块提示词](../prompts/stack-migration.md)维护工作包；[验收门槛](testing/verification-plan.md#10-技术栈改造的大模块验收)维护出口；[goal 提示词](../prompts/goal-stack-migration.md)是长期执行入口；[M01 开发记录](development/m01-stack-baseline.md)保存基线和适配证据。原始 [Agent Stack 附件](../Agent_Stack_Integration.md)作为来源保留，已适配项以 ADR-010 为准，不重复维护第二份技术真相。

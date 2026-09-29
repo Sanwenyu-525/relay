@@ -3,10 +3,11 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Info, RotateCcw } from "lucide-react";
 import { createCommandId, RelayApiError, RelayTransportError, type RelayReview, type RelayReviewDecision } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import { reviewKindLabels } from "../lib/labels";
 import { liveClient, useRelayConnection } from "../lib/relayConnection";
 import "./ReviewsView.css";
 
-const kindLabels: Record<RelayReview["kind"], string> = { CRITERION: "人工验收", RETRY_BUDGET: "修正预算", CHECKER_RETRY: "检查器重试", ACTION_APPROVAL: "动作批准", STATE_PROPOSAL: "项目状态提案" };
+const kindLabels = reviewKindLabels;
 const decisionLabels: Record<RelayReviewDecision, string> = { ACCEPT: "接受这项判断", REQUEST_CHANGES: "请求修改", SET_RETRY_BUDGET: "设置修正预算", RETRY_CHECKS: "重新运行检查", APPROVE: "批准这项动作", DENY: "拒绝这项请求" };
 const reasonLabels: Record<string, string> = { CORRECTION_BUDGET_EXHAUSTED: "修正预算已用尽，需要你决定是否增加上限。", CHECKER_UNAVAILABLE: "检查器持续不可用，需要你决定是否重新运行检查。", AWAITING_HUMAN_EVIDENCE: "必需验收条件需要你的判断。", UNCERTAIN_REQUIRES_HUMAN: "检查结果不确定，需要你判断这项验收条件。" };
 const fieldLabels: Record<string, string> = { artifact_version_id: "产物版本 ID", content_hash: "内容摘要", acceptance_revision: "验收版本", criterion_id: "验收条件 ID", session_id: "验证会话 ID", operation_id: "动作 ID", action_type: "动作类型", normalized_target: "动作目标", params_hash: "参数摘要", base_revision: "项目状态基线版本", typed_changes: "建议修改", check_plan_hash: "检查计划摘要", permission_version: "权限版本", permission_revision: "权限修订", gateway_connection_id: "连接 ID", resource_id: "受管资源 ID", changeset_id: "变化集 ID", changeset_version: "变化集版本", changeset_hash: "变化集摘要", diff_hash: "差异摘要", repository: "仓库", branch: "分支", commit_message: "提交信息", current_revision: "当前版本" };

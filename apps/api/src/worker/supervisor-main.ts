@@ -166,6 +166,10 @@ async function main(): Promise<void> {
     throw new Error('supervisor configuration invalid');
   }
   const testHoldAfterGatewayEffectMs = await readAcceptanceFileWriteHoldMs(dataRoot, desktopFrame);
+  const workerLeaseMs = Number(process.env.RELAY_WORKER_LEASE_MS ?? '30000');
+  if (!Number.isInteger(workerLeaseMs) || workerLeaseMs < 100 || workerLeaseMs > 600_000) {
+    throw new Error('supervisor configuration invalid');
+  }
   const database = new RelayDatabase({
     databaseUrl, databasePoolMax: 4, databaseConnectTimeoutMs: 5_000,
   }, () => controller.abort());
@@ -248,6 +252,28 @@ async function main(): Promise<void> {
             testHoldMs: Number(process.env.RELAY_WORKER_TEST_HOLD_MS ?? '0'),
           } : {}),
           ...(testHoldAfterGatewayEffectMs === undefined ? {} : { testHoldAfterGatewayEffectMs }),
+          onSpawn: (spawned, workerId) => {
+            child = spawned;
+            process.stdout.write(`${JSON.stringify({ type: 'worker_started',
+              pid: spawned.pid, worker_id: workerId })}\n`);
+          },
+        });
+        child = undefined;
+        process.stdout.write(`${JSON.stringify({ type: 'worker_exit', code: result.exitCode,
+          requeued_run_ids: result.requeuedRunIds, blocked_run_ids: result.blockedRunIds })}\n`);
+        if (result.exitCode !== 0 && !controller.signal.aborted) throw new Error('worker failed');
+      }
+      if (controller.signal.aborted) break;
+      // One Run and one Assist delivery per pass keeps either backlog from starving the other.
+      if (await createRepositories(database.executor).assist
+        .hasRunnableGeneration(new Date(Date.now() - workerLeaseMs))) {
+        if (controller.signal.aborted) break;
+        const result = await runSupervisedWorkerOnce({
+          db: database.executor, databaseUrl, dataRoot, task: 'ASSIST',
+          ...(desktopFrame === undefined ? {} : {
+            workerId: `worker:desktop:${desktopFrame.launchId}:${randomUUID()}`,
+          }),
+          ...(process.env.NODE_ENV === 'test' ? { leaseMs: workerLeaseMs } : {}),
           onSpawn: (spawned, workerId) => {
             child = spawned;
             process.stdout.write(`${JSON.stringify({ type: 'worker_started',
