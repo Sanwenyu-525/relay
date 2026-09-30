@@ -1,0 +1,708 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-545e3636ae
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.14s
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "C".
+The default text search configuration will be set to "english".
+
+Data page checksums are enabled.
+
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-545e3636ae/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-545e3636ae^\cluster^" -l logfile start
+
+[timing] initdbMs=5676
+waiting for server to start.... done
+server started
+[timing] postgresStartMs=391
+pg_ctl: server is running (PID: 51856)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-545e3636ae/cluster" "-h" "127.0.0.1" "-p" "3964"
+DO
+CREATE DATABASE
+Test database: relay_api_test_a514c8e543de on 127.0.0.1:3964 (roles relay_migrator / relay_app)
+{
+  "applied": [
+    "0001_v001_human_core",
+    "0002_p02_task_goal_alignment",
+    "0003_schema_readiness",
+    "0004_v002_runs",
+    "0005_v002_verification",
+    "0006_v002_reviews",
+    "0007_v003_recovery_control",
+    "0008_v003_gateway",
+    "0009_v004_information_rules",
+    "0010_v005_context_revision",
+    "0011_m03_run_dispatch",
+    "0012_m03_run_events",
+    "0013_m03_run_command_order",
+    "0014_m04_file_read",
+    "0015_m04_assist",
+    "0016_m04_web_fetch",
+    "0017_m04_web_import",
+    "0018_m04_model_calls",
+    "0019_m04_draft_read_input",
+    "0020_m05_today_selections",
+    "0021_m05_activity_lineage",
+    "0022_m04_first_party_skills",
+    "0023_m04_task_skill_proposals",
+    "0024_m05_view_configuration",
+    "0025_m05_project_blueprints",
+    "0026_m04_model_call_budgets",
+    "0027_m05_workspace_lists",
+    "0028_m04_assist_live_preview",
+    "0029_m04_run_draft_live_preview",
+    "0030_m06_real_tools",
+    "0031_m06_change_sets",
+    "0032_m06_change_set_source_scope",
+    "0033_m06_file_write_stop_proofs",
+    "0034_m06_file_write_manual_dispositions",
+    "0035_m06_file_write_frozen_diff",
+    "0036_m06_file_write_path_identity",
+    "0037_m06_file_write_frozen_diff_root_path",
+    "0038_m06_managed_root_identity",
+    "0039_m06_active_resource_root",
+    "0040_collaboration_artifact_text_locks",
+    "0041_collaboration_impact_checks",
+    "0042_collaboration_attention",
+    "0043_model_call_verify"
+  ],
+  "already_applied": [],
+  "ledger_rows": 43
+}
+[timing] businessMigrationMs=722
+{"schema":"relay_graph_v1","ready":true}
+[api-harness] live pid=37892 port=5274 livenessMs=1982 firstOutputMs=1901 probes=19
+✔ lists only the visible Task artifact history and its current accepted versions (2348.7369ms)
+✔ creates a managed markdown version that is complete on disk and readable through the API (56.0735ms)
+✔ rejects an unsupported media type with 415 and oversized content with 413 (75.3198ms)
+✔ rejects user-supplied paths, non-uuid ids and cross-scope artifact reads (70.6807ms)
+✔ appends a new immutable version without overwriting the previous one (73.4288ms)
+✔ completes a task against a fixed version and never marks the newer version as accepted (92.7105ms)
+✔ completes a task that requires no artifacts with an empty version set (30.4792ms)
+✔ requires declared outputs to be covered and required human criteria to be confirmed (113.1472ms)
+✔ reopens with a new acceptance revision, keeps history and blocks new uploads until started again (91.2262ms)
+✔ replaying an old completion command after reopen returns the historical receipt only (59.2148ms)
+✔ keeps reopened completion history but removes only that cycle from the current State projection (102.3858ms)
+✔ lets only one of two concurrent completion commands win the cycle (192.1197ms)
+✔ serializes SET_NEXT_ACTION and reopen in Task → ProjectState order without a deadlock (1627.1203ms)
+✔ rolls the whole completion transaction back when the state delta fails and converges on retry (261.4909ms)
+✔ rolls the whole reopen transaction back when the State revision update fails and converges on replay (132.8069ms)
+✔ leaves a reconcilable orphan content file when the version row cannot be registered (126.5348ms)
+✔ refuses completion when the accepted evidence file is missing or tampered (104.6055ms)
+✔ reads the exact historical human completion evidence after reopen and hides lost content (118.6989ms)
+[api-harness] live pid=41216 port=10747 livenessMs=1631 firstOutputMs=1592 probes=16
+✔ delegates a READY project task and returns the documented 202 envelope (1894.9287ms)
+✔ refuses to delegate a Me Inbox task without a project (A08) (28.3734ms)
+✔ refuses to delegate a task that is not READY (15.3617ms)
+✔ refuses to delegate while a BLOCKS dependency is unfinished (33.9755ms)
+✔ lets exactly one of two concurrent delegations win and keeps a single live run (B01) (76.1671ms)
+✔ replays a delegation command and rejects a reused command_id with a different payload (62.2974ms)
+✔ refuses a second delegation while a live run exists (37.4071ms)
+✔ refuses an unknown workflow version selector (17.6091ms)
+✔ refuses unsupported or malformed declared output requirements before creating a Run (53.1893ms)
+✔ re-delegates after a FAILED run with retry_of_run_id while the old run stays FAILED (B06) (201.3019ms)
+✔ rejects a retry_of_run_id that does not exist or belongs to another task (52.8194ms)
+✔ keeps runs invisible across workspaces (28.2631ms)
+[api-harness] live pid=40500 port=7206 livenessMs=1657 firstOutputMs=1632 probes=16
+✔ GET /projects pages exact ProjectState and archive facts without crossing Workspace (1872.2871ms)
+✔ GET /tasks?scope=all keeps legacy filters and computes blockers by each Project (105.4149ms)
+[api-harness] live pid=38188 port=7254 livenessMs=1769 firstOutputMs=1667 probes=17
+✔ returns the initial state with its own revision and dependency versions (1938.2798ms)
+✔ rejects whole-object overwrites and unknown state fields (21.1404ms)
+✔ applies SET_PHASE with command replay and rejects a stale revision (31.8719ms)
+✔ accepts only the built-in phases of the project type and leaves rejected commands unrecorded (65.4148ms)
+✔ sets the next action only for tasks of the project and exposes its version (49.0748ms)
+✔ selects an artifact version through a typed action and refuses duplicates (54.6138ms)
+✔ adds a confirmed risk and resolves a blocker with typed actions (37.7212ms)
+✔ keeps in_progress and project goals in the dependency versions (44.8053ms)
+✔ lets exactly one concurrent state command win the same revision (65.8235ms)
+✔ requires the local bearer and hides state of other workspaces (17.1482ms)
+[api-harness] live pid=43504 port=7366 livenessMs=1652 firstOutputMs=1641 probes=16
+✔ creates a project with its state and returns the documented envelope (1779.7967ms)
+✔ creates an INBOX task with an immutable acceptance v1 and HUMAN execution (53.4075ms)
+✔ moves INBOX to READY to IN_PROGRESS only through explicit commands (43.7764ms)
+✔ refuses to mark a task ready without any required criterion (21.5153ms)
+✔ edits only presentation fields and rejects status or acceptance changes (23.0185ms)
+✔ replays a command with the same payload and rejects a reused command_id (21.534ms)
+✔ rejects a stale revision and reports the current one (19.392ms)
+✔ lets exactly one of two concurrent clients win the same revision (61.5584ms)
+✔ missing required revision input is rejected as a field error (15.7126ms)
+✔ handles a Me Inbox task without a project and refuses Delegate mode (31.845ms)
+✔ rejects self dependencies, cycles, cross-project and cross-workspace references (62.5283ms)
+✔ blocks ready while a BLOCKS dependency is unfinished and allows it after removal (45.7539ms)
+✔ paginates project and inbox task lists with a bound cursor (40.3265ms)
+✔ keeps cross-workspace resources invisible and requires the local bearer (24.8333ms)
+✔ links and unlinks project goals with explicit inheritance semantics (88.3614ms)
+✔ resolves concurrent goal changes deterministically (67.5696ms)
+✔ missing configuration fails explicitly with exit code 2 (1481.55ms)
+✔ illegal configuration fails explicitly with exit code 2 (1320.556ms)
+[api-harness] live pid=3892 port=2777 livenessMs=1769 firstOutputMs=1686 probes=17
+✔ serves the loopback boundary against a real PostgreSQL and exits on stop (1861.042ms)
+[api-harness] live pid=51864 port=2814 livenessMs=1652 firstOutputMs=1625 probes=16
+✔ reports database unavailability while liveness stays alive (1700.0192ms)
+[api-harness] live pid=28556 port=6112 livenessMs=1647 firstOutputMs=1594 probes=16
+✔ direct-uses only exposes recorded same-workspace child versions with readable evidence (1896.1397ms)
+[api-harness] live pid=28028 port=12468 livenessMs=1656 firstOutputMs=1635 probes=16
+✔ a separate API process reads the first DISCUSS increment before full settlement and reconnects by revision (1928.792ms)
+✔ cancel hides the temporary text and terminal settlement removes it (52.4348ms)
+✔ a Provider failure after a visible fragment clears the draft without a completed message (31.6599ms)
+✔ source revocation masks live and completed text, and a later DISCUSS cannot reuse that history (71.3508ms)
+✔ structured proposals never expose raw JSON through the preview endpoint (32.3501ms)
+✔ expired generation lease clears an in-flight preview before a stale Worker can publish again (23.0961ms)
+✔ session creation replay and scope conflicts behave deterministically (119.2281ms)
+✔ DISCUSS generation completes deterministically and records usage and source status (47.7772ms)
+✔ unavailable explicit source is recorded and excluded, not silently replaced (25.8185ms)
+✔ candidate markdown proposal accepts through the manual artifact command and replays idempotently (59.2324ms)
+✔ task definition proposal creates a task with criteria through the manual command (21.7599ms)
+✔ schema-invalid proposal output fails the message and creates no proposal (16.4072ms)
+✔ a model exception records failed call with unknown usage (15.1821ms)
+✔ cancel persists the intent and converges a running generation to CANCELLED (233.8533ms)
+✔ model invocation rows retain separate failed, successful and unknown outcomes (16.6532ms)
+✔ expired lease converges a dead worker generation to LEASE_LOST (10.7561ms)
+✔ base revision conflict expires the proposal instead of overwriting business facts (21.3823ms)
+✔ DELEGATE_AI occupation blocks candidate acceptance but discussion continues (66.8286ms)
+[api-harness] live pid=48116 port=5438 livenessMs=1668 firstOutputMs=1555 probes=16
+✔ assist HTTP surface: session, 202 message, status polling and proposal accept (1877.5754ms)
+[api-harness] live pid=38384 port=5474 livenessMs=1640 firstOutputMs=1575 probes=16
+✔ first-party registry and Packs expose only bundled, scoped, read-only versions (1698.1543ms)
+✔ Skill Assist freezes version, replays once and settles typed suggestion without business write (34.4319ms)
+[api-harness] live pid=37848 port=5504 livenessMs=1647 firstOutputMs=1546 probes=16
+✔ retired frozen Skill remains readable but cannot start a new model call (1746.7806ms)
+[api-harness] live pid=51888 port=5525 livenessMs=1639 firstOutputMs=1574 probes=16
+✔ Skill scope, source revocation and malformed output fail without stale fallback (1766.9739ms)
+[api-harness] live pid=50596 port=5548 livenessMs=1658 firstOutputMs=1566 probes=16
+✔ completed Skill history rechecks source visibility and hides revoked output (1778.5966ms)
+✔ Skill rejects combined source input over budget before any model invocation (49.6305ms)
+✔ Project Resume reads fresh owner revisions and only applicable current-cycle verification (80.4753ms)
+✔ Project Resume excludes revoked and prior-acceptance verification sessions (38.5181ms)
+✔ Task Definition acceptance uses Task Owner CAS and invalidates old evidence atomically (72.7767ms)
+[api-harness] live pid=50320 port=1119 livenessMs=1642 firstOutputMs=1541 probes=16
+✔ Task Definition v1.1 changes Expected Result description through HTTP without losing old output constraints (1790.845ms)
+✔ Task Owner rejects forged Skill payload that weakens old criteria or output requirements (50.7277ms)
+✔ verification-plan v1.1 appends registered criteria; legacy version is historical only (56.6671ms)
+[api-harness] live pid=51188 port=9422 livenessMs=1652 firstOutputMs=1551 probes=16
+✔ Task Skill acceptance rejects stale, occupied, cross-scope and revoked source (1881.5259ms)
+✔ concurrent Task Skill accept commands commit one acceptance and one receipt (64.7214ms)
+✔ Task Skill acceptance rejects UNKNOWN from a terminal Run without releasing its identity (108.4614ms)
+✔ Task Skill business writes and proposal decision roll back together on audit failure (88.2649ms)
+✔ migrate entry reports the applied migrations without repeating them (199.0573ms)
+✔ migrate entry fails explicitly without a migration connection (97.3383ms)
+✔ init-workspace entry creates the workspace with its authority row and replays retries (753.4247ms)
+✔ init-workspace entry refuses a retry that reuses command_id with a new target (315.6496ms)
+✔ init-workspace entry requires a name (319.0239ms)
+[api-harness] live pid=43888 port=9551 livenessMs=1764 firstOutputMs=1714 probes=17
+✔ lock command is idempotent, human revision rebinds original text, stale CAS fails (2182.5831ms)
+✔ persisted locks reject trailing-space and internal-CRLF edits at the AI write guard (227.4281ms)
+✔ manual impact analysis freezes versions and Fake output never applies a candidate automatically (281.9934ms)
+✔ intervention receipts dedupe across requests and resolved reviews disappear (33.7131ms)
+✔ invalid blank impact candidate cannot be applied after its read model reports FAILED (232.8154ms)
+✔ latest failed Run remains actionable after Task execution pointer is released (86.0066ms)
+✔ P11 real Context selects scoped Chinese facts and records exact fragments; Fake draft stays usable (266.862ms)
+✔ P11 fragment byte range never splits a UTF-8 character (44.5788ms)
+✔ P11 required Context over budget records a safe failure and no Manifest (35.0911ms)
+✔ P11 information update invalidates BUILD_CONTEXT and an in-flight build retries (156.4446ms)
+✔ P11 source change after published effect preserves VERIFY and completion gates (165.0982ms)
+✔ P11 optional input trims with an attributable reason and stays within estimated budget (44.3333ms)
+✔ real model Context excludes recent fallback while Mock keeps its existing selection (21.5103ms)
+✔ P11 expired Memory is excluded on historical Manifest read (1354.4274ms)
+[api-harness] live pid=18564 port=5938 livenessMs=1657 firstOutputMs=1616 probes=16
+✔ P11 retired, superseded and cross-scope facts disappear from historical read and HTTP keeps 404 (1810.3124ms)
+✔ P11 ArtifactVersion Knowledge uses checked managed content and hides damaged source (63.1611ms)
+✔ P12 explicit context sources freeze with the Run, pin immutable versions and drop the recent fallback (46.642ms)
+✔ Delegate rejects unknown, retired or missing explicit context source versions before any Run (36.395ms)
+✔ a source retired after freeze is excluded as unavailable while the frozen pin stays (22.3796ms)
+✔ desktop child uses dynamic strict boundary, private readiness, EOF stop and rotating token (3396.5286ms)
+✔ desktop child rejects absent workspace, incompatible schema and early pipe close (6695.9829ms)
+✔ P09 AUTO keeps Connection, Capability and Permission separate and records one invocation (367.1688ms)
+✔ P09 ASK releases old Worker; Review decision and new epoch admit only the original target (184.5559ms)
+✔ M03 denied or expired ACTION_APPROVAL cannot queue a Run RESUME (193.2382ms)
+✔ M03 PAUSE denies a directly approved action without blocking a later manual RESUME (143.7664ms)
+✔ M03 rejected approved claim leaves no Worker owner after expiry, Connection or Permission change (353.498ms)
+✔ M03 revocation between approved claim and Admit releases a no-effect Worker for safe control (117.2395ms)
+✔ M03 direct approval withdrawal rolls back operation, Run and control on operation failure (140.832ms)
+✔ P09 USER_IMPORT has a real job source, ASK Review and no Run/claim identity (105.4138ms)
+✔ P09 revocation before Admit rejects, while Admit before revocation completes the already admitted effect (201.0206ms)
+✔ P09 overlapping roots across Projects occupy one physical directory until the first effect settles (272.595ms)
+✔ P09 crashed Fake dispatch reconciles the same ID; tampering remains UNKNOWN and blocks new IDs (270.9164ms)
+[api-harness] live pid=4460 port=7293 livenessMs=1658 firstOutputMs=1604 probes=16
+✔ M03 G03 Run query exposes only its Workspace Gateway UNKNOWN operation ID (1990.017ms)
+✔ P09 expired inner Worker lease after Admit cannot start the Fake effect (1315.8996ms)
+✔ P09 expired inner Worker lease after Fake effect preserves original identity as UNKNOWN (1338.4494ms)
+✔ P09 database rejects crossed operation scope, Review pair, Invocation origin and claim token (422.8947ms)
+✔ P09 PREPARED Worker exit proves no dispatch; the same logical ID gets a new Invocation and epoch (143.9954ms)
+✔ P09 DISPATCHING with a missing target stays UNKNOWN; a different intent cannot bypass it (134.7385ms)
+✔ P09 pending control before Admit abandons PREPARED without a Fake effect (127.5904ms)
+✔ P09 USER_IMPORT unresolved invocation blocks a new intent for the same job (121.7945ms)
+✔ P09 URL Permission matches path segments and concurrent Review decisions consume once (198.3509ms)
+[api-harness] live pid=37692 port=3648 livenessMs=1657 firstOutputMs=1558 probes=16
+✔ P09 HTTP config commands replay, isolate scope, and expose full Invocation history (2153.2179ms)
+✔ P10 Rule update after Gateway Admit preserves the old Invocation outcome and blocks new work (226.4833ms)
+✔ P16 FILE_READ reads a bounded real file through the Gateway with hash evidence (177.8109ms)
+✔ P16 FILE_READ rejects traversal, outside roots, missing files and link escape before any read (141.4204ms)
+✔ P16 FILE_READ re-verifies the pinned path at execute and rejects a swapped link (172.0448ms)
+✔ P16 FILE_READ enforces the output limit, binary rejection and the caller deadline (264.6318ms)
+✔ P16 FILE_READ without a permission policy is denied by default (151.843ms)
+✔ P16 FILE_READ reconcile re-reads: PREPARED stays not executed, a crash converges by re-reading (271.9616ms)
+✔ P10 Knowledge/Memory immutable versions, explicit confirmation and Artifact promotion reuse (285.9714ms)
+✔ P10 Decision supersession keeps history and rejects a cycle (34.6942ms)
+✔ P10 HARD Rule freezes into Delegate; update fences the old Run at next step (63.8977ms)
+✔ P10 Rule change after managed effect preserves its outcome, then fences the next step (150.4952ms)
+✔ P10 Rule mutation and Delegate authority lock serialize both commit orders (57.9253ms)
+✔ P10 upper HARD conflict and missing PRE_ACTION checker block Delegate (42.0671ms)
+[api-harness] live pid=18968 port=14242 livenessMs=1669 firstOutputMs=1616 probes=16
+✔ P10 bounded Chinese literal search is scoped, stable and exposed through HTTP (1834.0547ms)
+[api-harness] live pid=45044 port=9668 livenessMs=1650 firstOutputMs=1604 probes=16
+✔ HTTP reads complete historical text without replacing v1 with v2 or changing excerpt API (1933.25ms)
+✔ unavailable stored text stays hidden, and an inline hash mismatch is READ_FAILED (16.5129ms)
+✔ saved web snapshot is readable with unreachable original and creates no execution work (14.8883ms)
+✔ Artifact source reads exact managed bytes; corrupt/missing bytes never fall back and cross-project promotion fails (81.4892ms)
+✔ trusted desktop Job stop stores the original FILE_WRITE identity once before fencing (1170.1946ms)
+✔ wrong Worker, epoch, or Invocation cannot become a stop proof (188.7844ms)
+✔ lease expiry and a direct Gateway reconciliation never create desktop Job evidence (183.1778ms)
+✔ a changed Run worker epoch blocks desktop proof before the old claim is fenced (167.7219ms)
+✔ ordinary child close recovery cannot create desktop Job proof (1387.1832ms)
+✔ applies V001 on an empty database and does not repeat it on a second run (1093.9797ms)
+✔ 0021 attributes historical unscoped Activity or aborts on an orphan (971.992ms)
+✔ rejects an applied migration whose file is missing or whose content changed (283.9651ms)
+✔ rejects a migration file that is not versioned by a 4-digit prefix (45.1492ms)
+✔ rolls back DDL, ledger row and digest together when a migration fails (490.1155ms)
+✔ waits for the migration advisory lock instead of running DDL concurrently (1311.2115ms)
+✔ runs concurrent migrations on one database exactly once (925.5407ms)
+✔ uses real non-superuser roles for the migration and application connections (50.1678ms)
+✔ DRAFT and SEMANTIC share one Run budget; STARTED reservation and actual usage differ (188.4994ms)
+✔ two Assist workers serialize on Session; old unknown row blocks rather than counting zero (75.4748ms)
+✔ the model call row commits before Provider work and does not hold the Run lock (61.0924ms)
+✔ failed complete Provider response retains known usage and request identity (6.2207ms)
+✔ exhausted real Provider budget fails DRAFT before any network invocation (99.5454ms)
+[api-harness] live pid=46676 port=5176 livenessMs=1753 firstOutputMs=1657 probes=17
+✔ 真实 Provider 配置经 HTTP 只读可见且不含密钥 (1888.6212ms)
+[api-harness] live pid=41060 port=10841 livenessMs=1645 firstOutputMs=1627 probes=16
+✔ 未配置模型环境时报告 Mock 端口 (1692.8087ms)
+[api-harness] live pid=48652 port=2773 livenessMs=1651 firstOutputMs=1600 probes=16
+✔ fake 配置：verify 返回 409 MODEL_PORT_NOT_CONFIGURED，不写账本 (1789.2398ms)
+✔ 残缺配置：resolveVerifyConfig 报 MODEL_CONFIG_INVALID；进程启动校验会先拒绝 (1324.455ms)
+[api-harness] live pid=7996 port=2814 livenessMs=1649 firstOutputMs=1587 probes=16
+✔ verify 需要 Bearer；GET verification 可读且不含密钥 (6731.434ms)
+✔ Fake 注入五种验证结果均写入 VERIFY 账本并可回读 (27.4304ms)
+✔ 配置指纹变化后旧验证不匹配当前配置 (8.5627ms)
+✔ 未配置时读取验证状态：无指纹、无当前匹配 (1.0226ms)
+✔ 配置侧拒绝不落库（ModelVerifyConfigError） (5.6798ms)
+✔ 真实验证外呼路径在无放行记录时不被本套件触发 (0.4175ms)
+✔ commits a task whose acceptance version is inserted later in the same transaction (100.5677ms)
+✔ fails the COMMIT when the task acceptance pointer has no matching version (6.7156ms)
+✔ fails the COMMIT when the completion pointer has no matching completion record (10.3446ms)
+✔ keeps exactly one completion per acceptance revision and records the human acceptance (13.8853ms)
+✔ rejects a completion record whose human acceptance belongs to another acceptance revision (7.417ms)
+✔ rejects cross-workspace references with composite foreign keys (16.2842ms)
+✔ rejects NULL or invalid values that would otherwise bypass CHECK constraints (18.3762ms)
+✔ round-trips bigint revisions and epochs above 2^53 without precision loss (5.5282ms)
+✔ enforces the 0002 task goal alignment column and its constraints (8.1625ms)
+✔ gives the application role only the intended privileges (35.4726ms)
+✔ rolls back every module write in one transaction (14.243ms)
+✔ replays a command with the same payload and rejects a different payload (5.4997ms)
+✔ is idempotent when two commands with the same command_id arrive concurrently (34.1139ms)
+✔ treats a concurrent command_id reuse with a different payload as a conflict (4.2009ms)
+✔ records the canonical payload hash and version with every receipt (4.1999ms)
+[api-harness] live pid=42252 port=5169 livenessMs=1648 firstOutputMs=1568 probes=16
+✔ archived Project blocks Task, State, Information, Rule, View, Today, Assist and Gateway writes (1982.1318ms)
+✔ Project FOR UPDATE serializes a concurrent CreateTask before commit (185.3565ms)
+✔ a held writable gate makes the archive row lock wait for the writer commit (175.3493ms)
+✔ Artifact publication cannot begin after the Project was archived (37.7467ms)
+✔ Assist worker does not claim an archived Project message or call the model (32.2893ms)
+[api-harness] live pid=27636 port=5218 livenessMs=1656 firstOutputMs=1554 probes=16
+✔ ArchiveProject is one scoped CAS command, preserves history, and rejects future writes (1942.3033ms)
+✔ HUMAN work and a delegated live Run each block archive without changing Project (99.5339ms)
+✔ pending Import and Assist generation block archive even before external dispatch (40.6995ms)
+✔ prepared Gateway identity and UNKNOWN remain blockers after Import is terminal (68.7154ms)
+✔ a quarantined resource claim blocks archive even if its lease would have expired (53.2027ms)
+✔ STARTED model call and OPEN Project Review remain explicit blockers after owner statuses settle (44.7482ms)
+✔ a real ArchiveProject waits for an earlier writable gate and then sees its commit (178.9913ms)
+✔ ArchiveProject holding Project FOR UPDATE makes a later Task write fail after commit (258.4038ms)
+✔ model STARTED reservation before Archive blocks the later archive decision (287.3006ms)
+✔ Archive row lock before model reservation rejects the old call without Provider work (273.8207ms)
+✔ a terminal Run with an old running Step blocks archive, and its stale model path cannot call Provider after archive (93.9661ms)
+[api-harness] live pid=38044 port=13140 livenessMs=1653 firstOutputMs=1610 probes=16
+✔ Blueprint preview, atomic Apply, exact mappings and replay use real owners (1887.2398ms)
+[api-harness] live pid=44520 port=13169 livenessMs=1654 firstOutputMs=1563 probes=16
+✔ stale View aborts Blueprint effects and cross-workspace Goal is invisible (1809.6862ms)
+[api-harness] live pid=34624 port=13197 livenessMs=1540 firstOutputMs=1530 probes=15
+✔ archived explicit source makes Skill Blueprint stale and prevents Apply (1711.9686ms)
+[api-harness] live pid=43740 port=13218 livenessMs=1652 firstOutputMs=1570 probes=16
+✔ goal-to-project-blueprint Skill freezes source and applies through the same candidate (1799.8491ms)
+✔ Skill baseline change and cancellation settle without creating Blueprint candidates (272.693ms)
+﹣ P12 the real model drafts from explicitly selected sources and passes the completion gate (151.3192ms) # RELAY_MODEL_* not configured
+﹣ P12 a HARD SEMANTIC rule is verified by the real semantic checker end to end (0.1925ms) # RELAY_MODEL_* not configured
+﹣ P12 a CANCEL intent committed during the real semantic call converges CANCELLED with a settled ledger row (0.0692ms) # RELAY_MODEL_* not configured
+﹣ P12 aborting the real semantic call mid-flight settles the ledger row CANCELLED and never writes check results (0.072ms) # RELAY_MODEL_* not configured
+[api-harness] live pid=41180 port=2919 livenessMs=1654 firstOutputMs=1615 probes=16
+✔ M06 frozen FILE_WRITE diff uses immutable planned baseline and target text (2074.4457ms)
+[api-harness] live pid=39440 port=2674 livenessMs=1647 firstOutputMs=1587 probes=16
+✔ M06 frozen FILE_WRITE diff marks mismatched, binary and oversized baselines unavailable (1860.9127ms)
+[api-harness] live pid=28188 port=8599 livenessMs=1648 firstOutputMs=1558 probes=16
+✔ M06 frozen WRITE_FILE diff uses the ledger path and immutable modify baseline (1870.8106ms)
+[api-harness] live pid=51764 port=1089 livenessMs=1649 firstOutputMs=1567 probes=16
+✔ M06 Windows nested WRITE_FILE keeps its diff and ledger under the managed root (1918.548ms)
+✔ M06 direct APPLY_CHANGESET bounds frozen baseline capture to 16 files (114.5313ms)
+✔ M06 FILE_WRITE APPLY_CHANGESET forces ASK, then writes real files after approval (236.1767ms)
+[api-harness] live pid=22208 port=1111 livenessMs=1648 firstOutputMs=1561 probes=16
+✔ M06 FILE_WRITE baseline hash conflict leaves the existing file untouched (2026.1103ms)
+✔ M06 missing MODIFY parent leaves no directory before a no-effect FAILED settlement (280.4485ms)
+✔ M06 DELETE conflict ledger preserves the observed existing content digest (286.4424ms)
+✔ M06 FILE_WRITE rejects protected paths and root-escape at prepare (139.0138ms)
+✔ M06 Windows FILE_WRITE rejects unsafe path segments before approval (280.3864ms)
+✔ M06 FILE_WRITE rejects a false target digest before approval or disk writes (142.9064ms)
+✔ M06 FILE_WRITE requires explicit content for CREATE and MODIFY at prepare (139.5907ms)
+✔ M06 FILE_WRITE rejects equivalent paths and overlong UTF-8 ledger paths at prepare (143.8088ms)
+✔ M06 FILE_WRITE DELETE reconciliation keeps UNKNOWN when the path becomes a directory (304.731ms)
+✔ M06 FILE_WRITE crash after write reconciles SUCCEEDED; tampering reconciles UNKNOWN and blocks re-claim (604.7136ms)
+✔ M06 FILE_WRITE does not attribute an existing CREATE target to an uncalled adapter (266.1586ms)
+✔ M06 FILE_WRITE does not attribute an external afterAdmit write to the adapter (244.8889ms)
+✔ M06 FILE_WRITE partial adapter receipt cannot be upgraded by a later matching disk state (363.7367ms)
+✔ M06 FILE_WRITE crash after a partial adapter receipt preserves a PARTIAL ledger (326.0691ms)
+✔ M06 FILE_WRITE recovery preserves a missing DELETE as CONFLICT in a PARTIAL ledger (294.3288ms)
+✔ M06 FILE_WRITE rejects a receipt whose file report disagrees with frozen input (260.6483ms)
+✔ M06 FILE_WRITE receipt cannot confirm a target after its frozen root is redirected (307.3425ms)
+✔ M06 FILE_WRITE refuses a managed root replaced by a junction before dispatch (292.9349ms)
+✔ M06 Windows FILE_WRITE refuses an ordinary root replaced after resource registration (179.1223ms)
+✔ M06 Windows FILE_WRITE requires explicit re-registration of a legacy resource (179.0892ms)
+✔ M06 disabled legacy resource can be re-registered with a new physical identity (182.3256ms)
+✔ M06 Windows FILE_WRITE refuses a replaced ordinary parent with the same path (274.8248ms)
+✔ M06 Windows FILE_WRITE refuses a same-content target with a different file identity (292.6561ms)
+✔ M06 Windows FILE_WRITE recovery refuses a same-content replacement after execution (343.6654ms)
+✔ M06 FILE_WRITE recovery refuses matching content behind a parent junction (322.5596ms)
+[api-harness] live pid=45784 port=14158 livenessMs=1648 firstOutputMs=1553 probes=16
+✔ M06 change_set ledger records per-file PARTIAL for a multi-file changeset with one conflict (2031.2672ms)
+✔ M06 change_set ledger binds real per-file facts to the invocation and cannot be rewritten (292.1258ms)
+✔ M06 change_set source FK rejects a different action, resource or project (332.473ms)
+✔ M06 change_set summary trusts guarded persisted file facts and row count (555.8994ms)
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+✔ M06 GIT_READ runs real git status with AUTO passthrough (453.4529ms)
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'feature.txt', LF will be replaced by CRLF the next time Git touches it
+✔ M06 GIT_WRITE rejects a wrong parent without creating a commit (477.9785ms)
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'feature.txt', LF will be replaced by CRLF the next time Git touches it
+✔ M06 GIT_WRITE commit requires approval then writes for real (574.1195ms)
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+✔ M06 GIT_WRITE rejects force-push and flag-injection refs at prepare (355.9951ms)
+✔ M06 CLI_RUN executes a real child process and records exit code and stdout (253.1648ms)
+✔ M06 CLI_RUN sanitizes the child environment (drops secret-bearing variables) (248.0706ms)
+✔ M06 CLI_RUN enforces the deadline as a timeout instead of hanging (2850.7995ms)
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'feature.txt', LF will be replaced by CRLF the next time Git touches it
+✔ M06 GIT_PUSH lands on the real remote then a crash reconciles SUCCEEDED via ls-remote (902.6769ms)
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'feature.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'later.txt', LF will be replaced by CRLF the next time Git touches it
+✔ M06 GIT_PUSH whose remote does not match reconciles UNKNOWN and blocks a new claim (1126.293ms)
+✔ M06 CLI_RUN timeout through the Gateway tears down the whole process tree (no orphaned grandchild) (3340.5184ms)
+✔ M06 FILE_WRITE rejects a protected path with a dot prefix at prepare (118.2207ms)
+✔ M06 FILE_WRITE cannot overwrite an existing file without a baseline hash (122.7922ms)
+✔ M06 CLI_RUN lost result after a real write remains UNKNOWN and keeps the resource quarantined (257.8093ms)
+✔ M06 FILE_WRITE rejects a DELETE without a frozen baseline at prepare (129.519ms)
+✔ M06 FILE_WRITE still applies MODIFY when the frozen baseline matches (295.5571ms)
+✔ M06 WRITE_FILE without a baseline becomes CREATE and cannot overwrite an existing file (297.4458ms)
+✔ M06 FILE_WRITE denies root-internal path aliases at the real PG prepare (132.5204ms)
+✔ P08 control is durable PENDING before the safe point; PAUSE/Resume keep Task and Run aligned (209.8317ms)
+✔ P08 conflicting controls reject unless explicitly superseded; terminal Run rejects a new intent (65.8792ms)
+✔ P08 control arriving before Fake publish dispatch prevents the effect (149.1342ms)
+✔ P08 control arriving after dispatch waits for the same Fake effect to settle (139.6846ms)
+✔ P08 a known pre-effect failure releases its claim, while an uncertain dispatched effect retains it (135.2239ms)
+✔ P08 scanner fences a stopped worker and retries a missing effect with the same operation_id (114.2206ms)
+✔ M03 effect reconciliation waits in Task→Run order before touching the effect row (178.0574ms)
+✔ P08 a crash after publish reconciles success without a second publish or artifact version (103.4637ms)
+✔ P08 a second crash after durable fence resumes reconciliation with the same operation_id (127.5004ms)
+✔ P08 a logged successful publish with missing or damaged content becomes UNKNOWN and blocks Handoff (189.9828ms)
+✔ P08 a verified published effect can finish a waiting Handoff while retaining the orphan target (88.4526ms)
+✔ P08 Handoff stores deterministic step and candidate references with or without a committed candidate (104.8287ms)
+✔ P08 tampered Fake effect remains UNKNOWN and blocks Handoff after worker fencing (93.5808ms)
+✔ P08 completion and control serialize: earlier control prevents completion, earlier completion rejects control (264.8854ms)
+✔ P08 an exited Worker process is fenced and a new Worker process reuses its operation_id (2171.3098ms)
+[api-harness] live pid=41784 port=2646 livenessMs=1648 firstOutputMs=1542 probes=16
+✔ P08 HTTP exposes control receipt, Run projection, Resume and AI-owned Task cancel as 202 (1914.0482ms)
+[api-harness] live pid=42984 port=2681 livenessMs=1631 firstOutputMs=1549 probes=16
+[api-harness] live pid=43788 port=2706 livenessMs=1644 firstOutputMs=1542 probes=16
+✔ P08 a real API process restart preserves PENDING and the new process reads the safe outcome (3579.6626ms)
+[api-harness] live pid=26964 port=8113 livenessMs=1647 firstOutputMs=1566 probes=16
+✔ G02: fast approval cannot let the old START invocation execute COMPLETE (4780.0632ms)
+✔ M03 pending PAUSE, CANCEL and HANDOFF outrank an approved successor at the old START safe point (918.0852ms)
+✔ M03 restarted supervisor applies a control left pending after command settlement (980.2397ms)
+✔ G04: restarted START after supervised crash cannot consume the approved continuation (4680.8665ms)
+✔ G04: a later Run command cannot overtake pending, claimed or blocked predecessor (77.7237ms)
+✔ G02: Review, RESUME, outbox and receipt roll back together on outbox failure (3242.2295ms)
+✔ G02: resuming a paused Review wait creates no runnable RESUME command (1924.2474ms)
+[api-harness] live pid=27196 port=1327 livenessMs=1554 firstOutputMs=1544 probes=15
+[api-harness] live pid=34232 port=1352 livenessMs=1549 firstOutputMs=1539 probes=15
+[api-harness] live pid=50124 port=1378 livenessMs=1544 firstOutputMs=1533 probes=15
+✔ G01/G04: 202 contains the committed Run, immutable command, outbox and receipt; restart replays it (7392.8891ms)
+✔ an already aborted shutdown cannot claim or execute a pending command (1720.4998ms)
+✔ shutdown signalled from onClaim does not execute a step after the claim (69.794ms)
+✔ a replaced invocation cannot insert PREPARED after a delayed PERSIST claim (195.5427ms)
+✔ a stale publisher cannot resolve DISPATCHING; recovery reconciles the same operation or leaves UNKNOWN (322.4952ms)
+✔ a stale retry cannot reconcile an existing DISPATCHING effect before recovery (171.9963ms)
+✔ G05: expired live Worker cannot create a second invocation or write; observed exit requeues the same command (3330.1226ms)
+✔ G04/G05: two independent supervisor entries race for one durable command (2832.1106ms)
+✔ G04: supervisor crash does not forge stop evidence or reclaim its former child (3394.9355ms)
+✔ supervisor sidecar echoes readiness nonce and Node version, then exits on stdin EOF (886.14ms)
+✔ a bounded delivery never marks an unfinished Run command DONE (202.6628ms)
+✔ Delegate rollback removes Run, command, outbox, invocation and receipt together (56.5762ms)
+✔ desktop malformed or oversized private frames fail before any PostgreSQL connection or Worker spawn (5651.6142ms)
+✔ desktop startup emits private readiness before any claim and tags its Worker with launch ID (2622.7163ms)
+✔ desktop acknowledges empty old launches in input order before dispatch readiness (999.2997ms)
+✔ two desktop supervisors use one stopped launch claim once; old Worker cannot write after requeue (2833.1065ms)
+✔ a delayed old desktop Worker process cannot write after a new launch takes its command (4340.0253ms)
+✔ desktop stopped-launch recovery reconciles the same operation and blocks UNKNOWN (3808.6373ms)
+controlled old-launch backlog held 1209 ms without ack
+✔ a slow multi-claim launch has no early ack; a killed supervisor retries the same claims (5356.2522ms)
+✔ EOF during recovery emits no unfinished launch ack or final dispatch readiness (1567.5031ms)
+✔ a recovery exception emits only prior launch progress and no final readiness (994.0377ms)
+✔ desktop stdin EOF stops new claims and waits for the active child close (2552.3953ms)
+[api-harness] live pid=39232 port=10976 livenessMs=1657 firstOutputMs=1568 probes=16
+✔ separate HTTP process reads the disposable Markdown prefix before candidate commit (2006.0728ms)
+✔ a read-first Run already in RUNNING advances its current position to DRAFT (67.7017ms)
+✔ fenced Worker cannot restore an old preview; a new claim uses a new identity (94.8353ms)
+✔ pending control and stale context suppress the prefix before full settlement (89.427ms)
+✔ retiring a selected Knowledge source hides the in-flight draft without source refs (103.9792ms)
+[api-harness] live pid=39052 port=4253 livenessMs=1547 firstOutputMs=1537 probes=15
+✔ Run events start at one, roll back without a gap, and are immutable to relay_app (2448.7413ms)
+✔ SSE enforces bearer, Host, Origin, Workspace and canonical cursor forms (76.6546ms)
+✔ Run lock serializes cross-transaction event seq in commit order (97.5676ms)
+[api-harness] live pid=1176 port=4308 livenessMs=1643 firstOutputMs=1599 probes=16
+[api-harness] live pid=47292 port=4336 livenessMs=1642 firstOutputMs=1577 probes=16
+✔ separate API stream replays Worker commits and reconnects after API restart (6446.8839ms)
+✔ committed control intent and safe point emit contiguous refresh hints (151.9219ms)
+✔ SSE disconnect does not cancel a Run and reconnect fills only committed history (58.319ms)
+✔ a non-reading SSE peer cannot stall PG/GET and reconnects after a large durable backlog (337.1551ms)
+[api-harness] live pid=47344 port=1166 livenessMs=1562 firstOutputMs=1551 probes=15
+✔ API pool size one leaves the separate Worker semantic accounting path runnable (4609.0004ms)
+[api-harness] live pid=7852 port=1204 livenessMs=1647 firstOutputMs=1563 probes=16
+✔ the fixed Mock graph prepares ASK and only the approved RESUME executes its original operation (6164.2374ms)
+[api-harness] live pid=45620 port=3209 livenessMs=1648 firstOutputMs=1536 probes=16
+✔ a frozen file write waits for approval, then keeps one operation and an exact file ledger (7401.2448ms)
+[api-harness] live pid=31192 port=10161 livenessMs=1651 firstOutputMs=1572 probes=16
+✔ a frozen file write keeps the baseline conflict after approval (7224.5843ms)
+[api-harness] live pid=2428 port=1759 livenessMs=1646 firstOutputMs=1586 probes=16
+✔ a partial file write needs trusted stop proof and a fresh human snapshot before closure (7951.9741ms)
+﹣ a killed Windows helper with no receipt requires observed residuals and a fresh human decision (0.2362ms) # SKIP
+[api-harness] live pid=27948 port=1920 livenessMs=1641 firstOutputMs=1538 probes=16
+✔ an all-conflict file write fails its Run without leaving a quarantined resource (6222.9099ms)
+[api-harness] live pid=38612 port=1967 livenessMs=1647 firstOutputMs=1556 probes=16
+✔ Delegate rejects mixed file write intents and invalid frozen changes before creating a Run (2871.7898ms)
+[api-harness] live pid=32168 port=2998 livenessMs=1642 firstOutputMs=1583 probes=16
+✔ ACTION approval status changes do not rebuild Context or rerun the successful Draft (6131.2527ms)
+[api-harness] live pid=17436 port=1048 livenessMs=1650 firstOutputMs=1582 probes=16
+✔ a changed Task input after the approved Mock effect cannot rerun Draft before publication (4990.5423ms)
+[api-harness] live pid=39232 port=4722 livenessMs=1657 firstOutputMs=1548 probes=16
+✔ a changed Task input during ASK wait denies the original operation before Fake write (4599.8936ms)
+[api-harness] live pid=39724 port=2985 livenessMs=1654 firstOutputMs=1558 probes=16
+✔ graph outer heartbeat cannot authorize an expired inner Gateway claim (4322.2203ms)
+[api-harness] live pid=39800 port=1266 livenessMs=1643 firstOutputMs=1546 probes=16
+✔ ASK business commit before interrupt checkpoint cannot strand START ahead of rapid approval (7500.6034ms)
+[api-harness] live pid=43092 port=1345 livenessMs=1646 firstOutputMs=1554 probes=16
+✔ denied required Mock action terminates the Run without a tool effect or dangling approval wait (5786.5876ms)
+[api-harness] live pid=36528 port=11584 livenessMs=1638 firstOutputMs=1586 probes=16
+✔ old ACTION RESUME cannot wake the later human-criterion Review after its graph checkpoint (8910.5311ms)
+[api-harness] live pid=51344 port=11642 livenessMs=1641 firstOutputMs=1560 probes=16
+✔ a stopped RESUME reconciles the original Fake effect and can replay after approval expiry (7550.2012ms)
+[api-harness] live pid=33976 port=4325 livenessMs=1640 firstOutputMs=1556 probes=16
+✔ a stopped RESUME after Gateway Admit but before Fake write preserves UNKNOWN and the same operation (7047.9107ms)
+[api-harness] live pid=21536 port=13291 livenessMs=1653 firstOutputMs=1562 probes=16
+✔ revoked Permission after approval cannot dispatch the frozen Mock action (5778.562ms)
+[api-harness] live pid=32804 port=7575 livenessMs=1532 firstOutputMs=1523 probes=15
+✔ a committed PAUSE wins over a pre-invocation Permission refusal under the outer claim fence (4234.8459ms)
+[api-harness] live pid=48740 port=10015 livenessMs=1642 firstOutputMs=1577 probes=16
+✔ frozen Mock approval withdrawal rolls back with its deferred outbox on failure (4750.0981ms)
+[api-harness] live pid=31856 port=6454 livenessMs=1634 firstOutputMs=1568 probes=16
+✔ stopped PREPARED Mock action replays the same operation after NOT_EXECUTED reconciliation (6276.0675ms)
+[api-harness] live pid=42992 port=2162 livenessMs=1638 firstOutputMs=1537 probes=16
+✔ PENDING control after PREPARED reconciliation prevents any replay of the Mock action (5750.6609ms)
+[api-harness] live pid=29572 port=2199 livenessMs=1640 firstOutputMs=1532 probes=16
+✔ PAUSE after rapid action approval applies before any Mock effect (5979.3241ms)
+[api-harness] live pid=49020 port=2329 livenessMs=1645 firstOutputMs=1563 probes=16
+✔ CANCEL after rapid action approval applies before any Mock effect (5756.6081ms)
+[api-harness] live pid=48160 port=4131 livenessMs=1638 firstOutputMs=1578 probes=16
+✔ HANDOFF after rapid action approval applies before any Mock effect (5734.5212ms)
+[api-harness] live pid=46312 port=4170 livenessMs=1540 firstOutputMs=1531 probes=15
+✔ manual resume cannot revive a PAUSE-invalidated Mock approval or strand a RUNNING Run (4529.0478ms)
+[api-harness] live pid=25952 port=11881 livenessMs=1546 firstOutputMs=1519 probes=15
+✔ two independent Workers racing one approved RESUME create one Gateway invocation (6341.265ms)
+[api-harness] live pid=31660 port=11927 livenessMs=1646 firstOutputMs=1557 probes=16
+✔ a Review rebound to another operation cannot wake the frozen action checkpoint (5818.8623ms)
+[api-harness] live pid=42512 port=11972 livenessMs=1553 firstOutputMs=1544 probes=15
+✔ a same-Run operation mismatch cannot approve a forged frozen Mock Review (4295.6395ms)
+[api-harness] live pid=7772 port=6309 livenessMs=1534 firstOutputMs=1525 probes=15
+✔ official Saver setup is migrator-only; missing or damaged graph schema blocks Worker before claim (5061.0352ms)
+[api-harness] live pid=30444 port=1056 livenessMs=1641 firstOutputMs=1573 probes=16
+✔ the one Run graph persists an empty-namespace Review interrupt, then resumes the original decision (4635.2223ms)
+[api-harness] live pid=43336 port=9271 livenessMs=1656 firstOutputMs=1572 probes=16
+✔ a saved Review interrupt with an unacknowledged START is replayed by the same command (6215.1392ms)
+[api-harness] live pid=31768 port=12989 livenessMs=1653 firstOutputMs=1561 probes=16
+✔ PAUSE and resume of a saved Review wait cannot strand the unacknowledged START before approval (7458.4505ms)
+[api-harness] live pid=44964 port=13050 livenessMs=1658 firstOutputMs=1567 probes=16
+✔ a claimed RESUME killed before its checkpoint reuses the one Review decision (7444.265ms)
+[api-harness] live pid=38304 port=7768 livenessMs=1640 firstOutputMs=1556 probes=16
+✔ a real child exit after business commit but before graph checkpoint replays without a second effect (6145.3195ms)
+[api-harness] live pid=456 port=7814 livenessMs=1652 firstOutputMs=1575 probes=16
+✔ lost invocation after a committed node cannot write its normal successor checkpoint (2992.7257ms)
+[api-harness] live pid=24740 port=7847 livenessMs=1547 firstOutputMs=1538 probes=15
+✔ G06 CANCEL aborts an in-flight Mock model only after durable control (5636.1267ms)
+[api-harness] live pid=29012 port=9757 livenessMs=1652 firstOutputMs=1569 probes=16
+✔ G06 CANCEL_TASK aborts an in-flight Mock model only after durable control (5726.0052ms)
+[api-harness] live pid=27440 port=9815 livenessMs=1644 firstOutputMs=1535 probes=16
+✔ G06 forced Worker termination needs close evidence and invents no user cancellation (5979.0488ms)
+[api-harness] live pid=33964 port=9863 livenessMs=1641 firstOutputMs=1546 probes=16
+✔ G06 settled independent Workers close promptly while control polling is active (7449.5651ms)
+[api-harness] live pid=46144 port=6961 livenessMs=1651 firstOutputMs=1586 probes=16
+✔ a tampered persisted manifest field denies the frozen Mock action before any invocation (12820.1074ms)
+[api-harness] live pid=50364 port=12283 livenessMs=1646 firstOutputMs=1560 probes=16
+✔ G06 a control durable across settlement converges without a second delivery (3112.6437ms)
+[api-harness] live pid=49472 port=12320 livenessMs=1646 firstOutputMs=1575 probes=16
+✔ G06 completion-race leftover control is rejected and cannot rewrite a DONE Run (3931.9029ms)
+[api-harness] live pid=46968 port=14012 livenessMs=1648 firstOutputMs=1591 probes=16
+✔ a Review wait checkpointed by an older graph layout rebuilds and completes the original RESUME (4959.1655ms)
+[api-harness] live pid=41748 port=4029 livenessMs=1654 firstOutputMs=1577 probes=16
+✔ an approved Mock action checkpointed by an older graph layout replays its effect exactly once (5013.9948ms)
+[api-harness] live pid=51264 port=5761 livenessMs=1657 firstOutputMs=1603 probes=16
+✔ an AUTO frozen file-read intent reads the real file once and records hash evidence (5922.2237ms)
+[api-harness] live pid=26608 port=5804 livenessMs=1647 firstOutputMs=1564 probes=16
+✔ revoking the completed FILE_READ policy hides its in-flight DRAFT preview (5748.9266ms)
+[api-harness] live pid=29012 port=1205 livenessMs=1649 firstOutputMs=1548 probes=16
+✔ an ASK frozen file-read intent waits, and only the approved RESUME reads once (3374.4941ms)
+[api-harness] live pid=29896 port=1247 livenessMs=1642 firstOutputMs=1581 probes=16
+✔ a long UTF-8 file read is budgeted before DRAFT and retains the full capture hash (3116.0286ms)
+[api-harness] live pid=39020 port=1282 livenessMs=1640 firstOutputMs=1538 probes=16
+✔ a typed failed file read releases execution without starting DRAFT (3061.9325ms)
+[api-harness] live pid=16832 port=1327 livenessMs=1645 firstOutputMs=1569 probes=16
+✔ a revoked ASK file-read source does not invoke the model after approval (3274.5414ms)
+[api-harness] live pid=44968 port=11319 livenessMs=1645 firstOutputMs=1545 probes=16
+✔ a read crash after the adapter call resumes the original action before drafting (5946.5703ms)
+[api-harness] live pid=22568 port=1845 livenessMs=1648 firstOutputMs=1578 probes=16
+✔ a persisted legacy DRAFT and approved read Review resume on the original DRAFT step (3491.3132ms)
+[api-harness] live pid=30528 port=9255 livenessMs=1649 firstOutputMs=1580 probes=16
+✔ a context change during an ASK file-read wait denies the original operation before any read (3333.5086ms)
+[api-harness] live pid=40528 port=3827 livenessMs=1651 firstOutputMs=1543 probes=16
+✔ a missing file read target fails the delivery deterministically and succeeds once the file exists (3330.3339ms)
+[api-harness] live pid=18544 port=3864 livenessMs=1666 firstOutputMs=1557 probes=16
+✔ an AUTO frozen web-fetch intent reads the page once and records extraction evidence (6149.4156ms)
+[api-harness] live pid=30712 port=4664 livenessMs=1651 firstOutputMs=1550 probes=16
+✔ a typed failed web fetch releases execution without starting DRAFT (2992.8278ms)
+[api-harness] live pid=12792 port=1331 livenessMs=1550 firstOutputMs=1541 probes=15
+✔ an ASK frozen web-fetch intent waits, and only the approved RESUME fetches once (3235.6575ms)
+[api-harness] live pid=8224 port=13051 livenessMs=1635 firstOutputMs=1528 probes=16
+✔ a context change during an ASK web-fetch wait denies the original operation before any fetch (3280.0985ms)
+[api-harness] live pid=5676 port=8670 livenessMs=1648 firstOutputMs=1545 probes=16
+✔ a frozen web-fetch URL outside the connection host refuses deterministically before any operation (3276.0188ms)
+✔ a status-only Task revision during Context build does not discard its unchanged inputs (236.4408ms)
+✔ Task title and acceptance input changes rebuild Context before Draft (108.2902ms)
+✔ advances the fixed workflow through PERSIST_CANDIDATE and stops at VERIFYING (157.6815ms)
+✔ replays a stable attempt key without a second attempt or duplicate writes (54.305ms)
+✔ fails the run after the second schema error and releases execution back to the human (70.5803ms)
+✔ rejects a late attempt result with a stale claim epoch and keeps the step position (B08) (115.6021ms)
+✔ a row-lock synchronized stale/current result race leaves the current claim available to commit (B08) (276.6176ms)
+✔ refuses to advance a run whose ownership epoch no longer matches the task (40.761ms)
+[api-harness] live pid=30600 port=1521 livenessMs=1651 firstOutputMs=1613 probes=16
+✔ keeps liveness available but rejects readiness for an empty database (2254.4466ms)
+✔ rechecks database reachability when the schema check fails (397.0321ms)
+[api-harness] live pid=43836 port=1558 livenessMs=1538 firstOutputMs=1527 probes=15
+✔ rejects readiness when the latest schema compatibility migration is missing (7408.8928ms)
+[api-harness] live pid=42664 port=8071 livenessMs=1643 firstOutputMs=1558 probes=16
+✔ reports database and schema as up only for the current migration manifest (2682.6968ms)
+[api-harness] live pid=31764 port=8104 livenessMs=1641 firstOutputMs=1542 probes=16
+✔ rejects an unknown future migration recorded by the database (7579.8825ms)
+[api-harness] live pid=50276 port=1898 livenessMs=1655 firstOutputMs=1645 probes=16
+✔ rejects a recorded migration whose SHA-256 no longer matches the release manifest (2583.0144ms)
+[api-harness] live pid=37824 port=8137 livenessMs=1980 firstOutputMs=1918 probes=19
+✔ planning metadata changes Task revision but not acceptance revision; projectless ready Task participates (2233.6185ms)
+[api-harness] live pid=37316 port=8170 livenessMs=2077 firstOutputMs=1988 probes=20
+✔ Later survives API restart and expires at saved local midnight across timezones (2318.9801ms)
+✔ Later uses the daylight-saving offset at the saved local midnight (103.3394ms)
+✔ Pin cannot override an unmet dependency; AI-held work stays in waiting items (190.7201ms)
+✔ Focus preserves its timezone, effective inherited Goals and explicit empty alignment (141.0711ms)
+✔ all same-project READY tasks sort stably after qualification; stale revisions and cross-workspace IDs refuse writes (244.1958ms)
+[api-harness] live pid=45372 port=1087 livenessMs=1649 firstOutputMs=1573 probes=16
+✔ Activity paginates by scoped keyset, replays once and redacts raw facts (1994.9996ms)
+✔ Activity rolls back with its business transaction (7.0472ms)
+✔ Trace returns exact source summaries with current Workspace checks and no bodies (164.0494ms)
+✔ Lineage rejects self, cross-Workspace and version cycles and marks missing content unavailable (64.9645ms)
+✔ Human revision writes exact REVISED_FROM edge once with command replay (100.4866ms)
+✔ verifies deterministically and completes the task in one short transaction (485.4609ms)
+✔ completion gate rejects unsupported or malformed frozen output requirements without writing completion facts (311.3133ms)
+✔ completion gate rejects a PASS whose exact verification targets do not cover the frozen Markdown requirement (156.3951ms)
+✔ C05: an existing citation cannot cover an unsupported claim (165.7738ms)
+✔ C06: a checker ERROR retries the check without new evidence and then stays unresolved (142.3817ms)
+✔ C07: a required PREFERENCE failure does not block PASS (133.6584ms)
+✔ C07: a required HARD failure is not covered by a passing semantic check (109.0726ms)
+✔ schedules a correction round that adds a new version of the same artifact (243.4259ms)
+✔ exhausting the correction budget stops at HUMAN and blocks completion (362.8756ms)
+✔ C04: a required human criterion keeps the run out of COMPLETED (119.0973ms)
+✔ C01: an acceptance change after PASS blocks completion of the old verification (112.3418ms)
+✔ a revoked PASS blocks completion while keeping the original result rows (105.0414ms)
+✔ deleting the required criterion after delegation cannot change the frozen plan (243.7656ms)
+✔ D04: completing after PASS adds no new version, session or draft attempt (126.6105ms)
+✔ D05: a failing completion transaction rolls back as a whole and converges on retry (228.2845ms)
+✔ D06: replaying an already completed run is terminal and writes nothing more (124.1311ms)
+✔ P07 C04/C09: Review ACCEPT creates an immutable successor PASS and preserves AI ownership until completion (150.9854ms)
+✔ P07 C02: a Review for the current candidate cannot authorize a later selected version (108.7332ms)
+✔ P07: REQUEST_CHANGES consumes one correction round and does not alter the old HUMAN session (178.6339ms)
+✔ P07: a bounded budget decision persists and VERIFY reads the new cap (342.8936ms)
+✔ P07 A02: State proposal accepts a typed command once and rejects a stale base revision (27.7389ms)
+✔ P07 A02: State proposal and typed State command serialize the same Task and State revision (20.9221ms)
+✔ P07 C09: denied operation approval keeps the operation identity and does not dispatch a step (119.9403ms)
+✔ P07 C09: approved reserved operation without a frozen Mock action queues no graph command (69.2837ms)
+[api-harness] live pid=14732 port=1167 livenessMs=1758 firstOutputMs=1674 probes=17
+[api-harness] live pid=38752 port=1190 livenessMs=1751 firstOutputMs=1662 probes=17
+✔ P07 HTTP: Inbox, detail and decision share the target hash and command receipt contract (3876.5297ms)
+[api-harness] live pid=37520 port=8985 livenessMs=1750 firstOutputMs=1711 probes=17
+✔ View Owner persists built-in template, CAS and replay without changing execution facts (1942.5289ms)
+✔ WEB_FETCH reads a controlled page with extraction, hash and identity evidence (298.3694ms)
+✔ WEB_FETCH passes plain text through, records binary as hash-only and settles HTTP errors (143.0988ms)
+✔ WEB_FETCH follows same-host redirects, rejects host escape and redirect loops (138.298ms)
+✔ WEB_FETCH enforces body size and total budget deterministically (617.9825ms)
+✔ WEB_FETCH production SSRF policy rejects private addresses without allow_private (81.3965ms)
+✔ WEB_FETCH prepare rejects scheme, userinfo and host mismatches before any effect (63.6563ms)
+✔ WEB_FETCH without a permission policy is denied by default and ASK still gates execution (132.1897ms)
+✔ WEB_FETCH reconcile safely re-reads: PREPARED stays not executed, crash converges by refetch (105.3692ms)
+[api-harness] live pid=38684 port=10924 livenessMs=1766 firstOutputMs=1736 probes=17
+✔ WEB_FETCH connection creation validates host syntax and rejects mixed boundaries (1911.1655ms)
+✔ an AUTO web import lands the fetched page in Knowledge with provenance (46.1508ms)
+✔ a RUNNING import without an operation recovers with one stable action identity (31.5575ms)
+✔ two recovery ticks keep one operation and one Knowledge version (47.739ms)
+✔ a completed Gateway read settles the original import after a crash before Knowledge commit (58.4889ms)
+✔ a failed Gateway read settles the original import after a crash before job failure (27.2567ms)
+✔ an ASK web import waits for the approval and only the decided review lands the page (53.1168ms)
+✔ a denied import review fails the job and the tick never dispatches the denied operation (32.5843ms)
+✔ a frozen URL outside the connection host fails the job deterministically with no operation (16.361ms)
+✔ a binary page fetches successfully but converges the job to WEB_TEXT_UNAVAILABLE (28.8994ms)
+[api-harness] live pid=31028 port=10962 livenessMs=1866 firstOutputMs=1760 probes=18
+✔ the import job HTTP surface creates a receipt-backed job (1968.4794ms)
+ℹ tests 471
+ℹ suites 0
+ℹ pass 466
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 5
+ℹ todo 0
+ℹ duration_ms 967760.5387
+waiting for server to shut down.... done
+server stopped
+--- integration summary ---
+tests exit code: 0
+build exit code: 0
+business migration exit code: 0
+graph install exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: PASSED

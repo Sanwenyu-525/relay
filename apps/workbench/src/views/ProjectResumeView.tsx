@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { CheckCircle2, ChevronRight, Circle, CircleEllipsis, FileText, Info, RotateCcw, TriangleAlert } from "lucide-react";
 import ResponsiveRail from "../components/ResponsiveRail";
+import ContinuationPointPanel from "../components/ContinuationPointPanel";
 import SourceDetailDialog from "../components/SourceDetailDialog";
 import type { RelayApiClient, RelayDecision, RelayProject, RelayProjectState, RelayReview, RelayTaskSummary } from "../api/relayClient";
 import type { RelayProjectGoal } from "../api/blueprintDtos";
@@ -90,8 +91,9 @@ function LiveProjectResumeView({ id, client }: { id: string; client: RelayApiCli
     <p className="eyebrow">真实项目 · {project.id}</p><h1>当前事实速览</h1>
     <p className="page-lede">{project.title} · {type} · {phaseLabel(state.phaseKey)} · State revision v{state.revision}</p>
     <p className="metadata-row">本次查询于 <time dateTime={snapshot.queriedAt}>{new Date(snapshot.queriedAt).toLocaleString("zh-CN")}</time> 完成；各来源可能在查询期间变化，非原子项目快照。</p>
-    <p className="helper-text">这是现时只读查询；没有上次查看基线，不显示变化对比、进度判断或模型建议，也不会启动 Task 或 Run。</p>
+    <p className="helper-text">这是现时只读查询；未选择接续点时不显示变化对比、进度判断或模型建议，也不会启动 Task 或 Run。</p>
     <button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}><RotateCcw aria-hidden="true" />刷新当前事实</button>
+    <ContinuationPointPanel client={client} projectId={id} />
     <section className="resume-section"><h2>项目目标</h2><p className="helper-text">项目标题来自 Project；以下仅列已关联的 Goal，不把标题解释为已确认目标。</p>
       {goals === null ? <p className="warning-callout">Goal 关系本次读取失败，目标范围待核对。</p>
         : goals.length ? <ul className="run-list">{goals.map((goal) => <li key={goal.goalId}>{goal.title} · {goal.status} · Goal v{goal.revision}<small>来源 Goal {goal.goalId}，由 Project Goal 关系查询确认。</small></li>)}</ul>
@@ -122,7 +124,7 @@ function LiveProjectResumeView({ id, client }: { id: string; client: RelayApiCli
     {decisions === null ? <p className="warning-callout">Decision 来源缺口，需重新读取。</p>
       : decisions.length ? <ul className="run-list">{decisions.slice(0, 5).map((decision) => <li key={decision.id}><Link className="inline-link" to={`/projects/${id}/knowledge?kind=DECISION&item=${decision.id}`}>{decision.title}</Link> · {decision.status} · v{decision.currentVersion}</li>)}</ul>
         : <p className="helper-text">本次查询未返回项目 Decision。</p>}
-    <p className="helper-text">来源是 Project、State、Task、OPEN Review、Artifact 与 Decision 的现时查询。没有可用的上次查看基线。</p>
+    <p className="helper-text">来源是 Project、State、Task、OPEN Review、Artifact 与 Decision 的现时查询。变化对比只在你显式保存并选择接续点后出现。</p>
   </div></ResponsiveRail></div></section>;
 }
 

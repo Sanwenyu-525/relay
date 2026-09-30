@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { flush, mountWorkbench } from "./mountApp";
+import { RelayApiClient } from "../src/api/relayClient";
 
 const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -57,6 +58,79 @@ function trace() { return { run_id: runId, task_id: taskId, project_id: null, st
     params_sha256: "1".repeat(64), result_available: false, created_at: at, resolved_at: null }] }; }
 
 describe("P15 Run Trace", () => {
+  it.each([
+    ["AUTH", "认证失败"], ["RATE_LIMIT", "限流"], ["TIMEOUT", "超时"],
+    ["STREAM_BROKEN", "流中断"], ["PROTOCOL", "响应结构异常"], ["NETWORK", "网络不可达"]
+  ])("确切历史模型调用显示 %s 类别和处理指引，不将调用失败宣称为 Run 失败", async (category, guide) => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    const data = trace();
+    const failedCall = { ...data.model_calls[0], status: "FAILED", kind: "SEMANTIC_CHECK",
+      criterion_id: "quality", check_attempt: 2, provider_error_kind: category,
+      provider_request_id: "provider-request-1", usage_input_tokens: null, usage_output_tokens: null };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === runUrl) return response(run());
+      if (url === `${root}/tasks/${taskId}`) return response(task());
+      if (url === `${runUrl}/reviews`) return response({ items: [] });
+      if (url === `${runUrl}/context-manifests`) return response({ items: [], build: { status: "NOT_STARTED", reason_code: null, message: null } });
+      if (url === `${runUrl}/trace`) return response({ ...data, model_calls: [failedCall] });
+      throw new Error(`Unexpected ${url}`);
+    }));
+    const mounted = await mountWorkbench(`/runs/${runId}`); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="run-trace-toggle"]').trigger("click"); await flush();
+    const panel = mounted.wrapper.get('[data-testid="run-trace"]');
+    expect(panel.text()).toContain(`状态 RUNNING`);
+    expect(panel.text()).toContain(guide);
+    expect(panel.text()).toContain(attemptId);
+    expect(panel.text()).toContain("SEMANTIC_CHECK");
+    expect(panel.text()).toContain("quality");
+    expect(panel.text()).toContain("检查尝试 2");
+    expect(panel.text()).toContain("provider-request-1");
+    expect(panel.text()).toContain("Token 输入 未知 / 输出 未知");
+    expect(panel.text()).toContain("调用失败不等于 Run 失败");
+  });
+
+  it("旧服务缺诊断字段时保留未知，不推断 Provider 故障", async () => {
+    const client = new RelayApiClient({ baseUrl, workspaceId, bearerToken: "test-token" });
+    vi.stubGlobal("fetch", vi.fn(async () => response(trace())));
+    expect((await client.getRunTrace(runId)).modelCalls[0]).toMatchObject({
+      kind: null, criterionId: null, checkAttempt: null, providerErrorKind: null, providerRequestId: null
+    });
+  });
+
+  it("同一步骤不同调用与条件保留独立身份；取消和本地错误仍无 Provider 类别", async () => {
+    const client = new RelayApiClient({ baseUrl, workspaceId, bearerToken: "test-token" });
+    const data = trace();
+    const calls = [
+      { ...data.model_calls[0], status: "FAILED", kind: "SEMANTIC_CHECK", criterion_id: "first",
+        check_attempt: 1, provider_error_kind: "AUTH", provider_request_id: "request-first" },
+      { ...data.model_calls[0], id: "other-call", status: "CANCELLED", kind: "SEMANTIC_CHECK", criterion_id: "second",
+        check_attempt: 2, provider_error_kind: null, provider_request_id: "request-second" },
+      { ...data.model_calls[0], id: "local-call", status: "FAILED", provider_error_kind: null }
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => response({ ...data, model_calls: calls })));
+    expect((await client.getRunTrace(runId)).modelCalls).toMatchObject([
+      { id: calls[0]!.id, stepAttemptId: attemptId, criterionId: "first", checkAttempt: 1,
+        providerErrorKind: "AUTH", providerRequestId: "request-first" },
+      { id: "other-call", stepAttemptId: attemptId, criterionId: "second", checkAttempt: 2,
+        providerErrorKind: null, providerRequestId: "request-second" },
+      { id: "local-call", status: "FAILED", providerErrorKind: null }
+    ]);
+  });
+
+  it.each([
+    { status: "CANCELLED", provider_error_kind: "NETWORK" },
+    { status: "COMPLETED", provider_error_kind: "AUTH" },
+    { status: "STARTED", provider_error_kind: "TIMEOUT" },
+    { status: "FAILED", provider_error_kind: "LOCAL_WRITE_ERROR" }
+  ])("拒绝非失败状态或词表外的 Provider 类别：%j", async (fields) => {
+    const client = new RelayApiClient({ baseUrl, workspaceId, bearerToken: "test-token" });
+    const data = trace();
+    vi.stubGlobal("fetch", vi.fn(async () => response({ ...data,
+      model_calls: [{ ...data.model_calls[0], ...fields }] })));
+    await expect(client.getRunTrace(runId)).rejects.toThrow("Provider 失败类别无效");
+  });
+
   it("按需读真实证据并分别展示 Review、Gateway 和 Effect，不泄露不可用来源", async () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
     const calls: string[] = [];

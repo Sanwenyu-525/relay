@@ -5,6 +5,7 @@ import type { ContextManifestRow, InformationRootRow, KnowledgeVersionRow,
   MemoryVersionRow, DecisionVersionRow, RunRow } from '../infrastructure/database-schema.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
+import { MODEL_ERROR_CATEGORIES } from '../workflow/model-error-classification.js';
 import { resourceNotFound } from './domain-error.js';
 import { createRepositories, type Repositories } from './unit-of-work.js';
 import { requireWorkspace } from './guards.js';
@@ -66,6 +67,11 @@ export async function readRunTrace(db: DbExecutor, storage: ManagedContentStore,
         finished_at: attempt.finished_at?.toISOString() ?? null })),
       model_calls: calls.map((call) => ({ id: call.id,
         step_attempt_id: call.step_attempt_id, manifest_id: call.manifest_id,
+        kind: call.kind, criterion_id: call.criterion_id, check_attempt: call.check_attempt,
+        provider_error_kind: call.status === 'FAILED' && call.error_kind !== null &&
+          (MODEL_ERROR_CATEGORIES as readonly string[]).includes(call.error_kind)
+          ? call.error_kind : null,
+        provider_request_id: call.provider_request_id,
         status: call.status, provider: call.provider, model: call.model,
         input_sha256: call.input_sha256, read_operation_id: call.read_operation_id,
         read_invocation_id: call.read_invocation_id,

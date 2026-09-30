@@ -24,6 +24,8 @@ ModelPort 输入：模型配置版本、实际 ContextManifest、输出 schema�
 
 `0029_m04_run_draft_live_preview` 为当前 Run 的 DRAFT 模型调用保存同样有界的临时 Markdown 前缀；每次写入在短事务内核对当前 Run/StepAttempt 的 Worker、claim epoch、租约、dispatch invocation、原 `model_call_id` 与待处理控制意图，不持锁等待模型网络。新的领取会删除旧前缀；旧 Worker 或重试轮次的迟到片段不能覆盖当前 Attempt。独立 GET 每次重新核对 Workspace、Task/Run、当前 Manifest 来源及 FILE_READ/WEB_FETCH 原动作对应的 Connection/Policy/Resource 可见性，来源失权只返回空草稿，不暴露来源身份。取消请求、租约过期、Step 完成/失败时草稿不可用；最终候选、Artifact、验证与完成仍走原业务 Owner。当前 Run SSE 仍仅传事实刷新提示，生成中文字由独立短轮询读取；端口片段实际可见延迟、真实 Provider 与桌面交互仍待测。
 
+2026-09-29 失败分类统一：`model_calls.error_kind` 与连接验证的 `error_category` 共用一套 Provider 失败词表（AUTH / RATE_LIMIT / TIMEOUT / STREAM_BROKEN / PROTOCOL / NETWORK），实现在 `model-error-classification.ts`。分类只依据 HTTP 状态与传输层特征（沿 `cause` 链检查，覆盖 `TypeError: fetch failed` 包裹真实原因），不解析自由文本；无法归因给 Provider 的失败（预算、工具拒绝、语义解析、租约）保留 Relay 自身错误名，套用 Provider 类别会误导排查。机制借鉴 `.research/upstream/deepseek-harness/packages/llm/llm/src/error.ts` 的稳定错误码与 cause 链展开思路，按本项目词表实现，未引入上游依赖。Assist 失败出口同步保全 `provider_request_id` 与已知用量：模型可能已计费时，证据必须跟着消息行落库，缺失保持 NULL 不补 0。该分类目前只写入账本，Assist/Run 界面显示的仍是 Relay 级 `error_code` 与步骤 `reason`；要让 Provider 类别上浮需要给 `assist_messages` 加列与迁移，尚未做。
+
 ## 2. 固定 Workflow
 
 内置 `markdown-deliverable-v1`：BUILD_CONTEXT → DRAFT → PERSIST_CANDIDATE → VERIFY → COMPLETE。CREATE Run 时冻结 ExecutionContract；BUILD_CONTEXT 只装配/复核，不修改冻结的验收内容。修正回路由 Workflow 的 RETRYING 处理，不引入任意图结构。

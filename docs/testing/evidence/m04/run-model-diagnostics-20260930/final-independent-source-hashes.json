@@ -1,0 +1,2447 @@
+[
+  {
+    "path": "apps/api/migrations/0001_v001_human_core.sql",
+    "last_write_utc": "2026-09-20T16:23:41.3869343Z",
+    "sha256": "C32CBA117D2D2C604E4B6BFB3B88735A51067022D96DE7C464617B65187B6F1D"
+  },
+  {
+    "path": "apps/api/migrations/0002_p02_task_goal_alignment.sql",
+    "last_write_utc": "2026-09-20T16:56:34.4467372Z",
+    "sha256": "BF615D2272EF03275C01E42246FDB9B9CEB1D99E3E9C0166E9100963A0C17E00"
+  },
+  {
+    "path": "apps/api/migrations/0003_schema_readiness.sql",
+    "last_write_utc": "2026-09-21T04:14:40.4831520Z",
+    "sha256": "926B6C78DFB7537C6295DDBC8B021121E62647C710F259C8655C0046FE167E87"
+  },
+  {
+    "path": "apps/api/migrations/0004_v002_runs.sql",
+    "last_write_utc": "2026-09-28T23:32:56.6460436Z",
+    "sha256": "06ECF305C24D36FBE25E7CCD71F9BE2244C6B177411F561992236B8BD1C7A6FA"
+  },
+  {
+    "path": "apps/api/migrations/0005_v002_verification.sql",
+    "last_write_utc": "2026-09-22T04:48:33.8059342Z",
+    "sha256": "BE419A32B63754E609B646FDA5EF819C81E800DF80EE34515F617A170A5D16DA"
+  },
+  {
+    "path": "apps/api/migrations/0006_v002_reviews.sql",
+    "last_write_utc": "2026-09-23T05:48:14.1042893Z",
+    "sha256": "B29AB6490CB6965F4FC4628A29AEB94E3386C8BABF4B405735ABE0607ED492F1"
+  },
+  {
+    "path": "apps/api/migrations/0007_v003_recovery_control.sql",
+    "last_write_utc": "2026-09-23T11:19:40.1236858Z",
+    "sha256": "BA7693A478F87D6FEA72FC7BAA5765E742A218432AD0081680667E202882071A"
+  },
+  {
+    "path": "apps/api/migrations/0008_v003_gateway.sql",
+    "last_write_utc": "2026-09-23T13:08:08.0595616Z",
+    "sha256": "3F717DA06FE7F097DED24F2D5D6FA103264465E9FE1D754276A59CAAC26E448F"
+  },
+  {
+    "path": "apps/api/migrations/0009_v004_information_rules.sql",
+    "last_write_utc": "2026-09-23T13:58:08.4459092Z",
+    "sha256": "A91448C2D93AF32DD2D145BBA4DF0B32229BC14E1232EF6E89E6E6097D55119A"
+  },
+  {
+    "path": "apps/api/migrations/0010_v005_context_revision.sql",
+    "last_write_utc": "2026-09-23T14:17:33.0916033Z",
+    "sha256": "B720D83AF0D280D91453B01FA63917855BE8E488956E2878FCD62CEDE48E0EAB"
+  },
+  {
+    "path": "apps/api/migrations/0011_m03_run_dispatch.sql",
+    "last_write_utc": "2026-09-24T00:23:07.1446651Z",
+    "sha256": "546839F85531D0988DBD3D065F3B72AD762AA4BEF7D6C5520DC78A6F06678771"
+  },
+  {
+    "path": "apps/api/migrations/0012_m03_run_events.sql",
+    "last_write_utc": "2026-09-24T04:00:56.0259433Z",
+    "sha256": "3A26BE8AD9FE420D597AFD414ABD7DF1AA6EDC110C12FCAFD6C13EF0BE527BAF"
+  },
+  {
+    "path": "apps/api/migrations/0013_m03_run_command_order.sql",
+    "last_write_utc": "2026-09-24T04:54:45.7370667Z",
+    "sha256": "5C1FCC64211A0441F975F864169B3D683D889A3723CB9AA0E7BC2517CEEE8EBB"
+  },
+  {
+    "path": "apps/api/migrations/0014_m04_file_read.sql",
+    "last_write_utc": "2026-09-25T02:51:56.4853783Z",
+    "sha256": "810FFD3F001B5F4E51CA5EC9D437335AA3DBD2286984B6669AA3BB5F0CD1C3EE"
+  },
+  {
+    "path": "apps/api/migrations/0015_m04_assist.sql",
+    "last_write_utc": "2026-09-25T14:04:41.7326677Z",
+    "sha256": "5669F5C8BBB96B047FFCF2A14647B6DFD5861D14B2EC33DFBB46E79449EC3383"
+  },
+  {
+    "path": "apps/api/migrations/0016_m04_web_fetch.sql",
+    "last_write_utc": "2026-09-25T14:52:05.1481084Z",
+    "sha256": "FEF25AA8FF1CAB7A6AA20991D20D2F8D50D02CB9DD7DE1B1182A0A1109239048"
+  },
+  {
+    "path": "apps/api/migrations/0017_m04_web_import.sql",
+    "last_write_utc": "2026-09-26T00:44:09.0278592Z",
+    "sha256": "A4F5BECD68A6189F13B1ACFD1C2EC3C113BFB7809A99BB7EE1729EE95C0729CC"
+  },
+  {
+    "path": "apps/api/migrations/0018_m04_model_calls.sql",
+    "last_write_utc": "2026-09-26T01:29:04.2588539Z",
+    "sha256": "B0DEB46D60409D0694711B5D2F646A1F931DC905CDBA99DB9BBAD9B5AA5B8E37"
+  },
+  {
+    "path": "apps/api/migrations/0019_m04_draft_read_input.sql",
+    "last_write_utc": "2026-09-26T02:00:40.3897197Z",
+    "sha256": "49FA45ECA95D60DBFF4332251B5AB8D8D8C77E142771D65F1A3832603A38992D"
+  },
+  {
+    "path": "apps/api/migrations/0020_m05_today_selections.sql",
+    "last_write_utc": "2026-09-26T02:27:56.9649045Z",
+    "sha256": "A9E9347E3A6C56B85534FB808FCE08755AE196F4B4E2A88F0E0F8875A80DCABC"
+  },
+  {
+    "path": "apps/api/migrations/0021_m05_activity_lineage.sql",
+    "last_write_utc": "2026-09-26T03:07:57.6318200Z",
+    "sha256": "68843FFD4EB016EB040B4AD3FFD421364E539CDD35E704A20D3C846A5F3CD425"
+  },
+  {
+    "path": "apps/api/migrations/0022_m04_first_party_skills.sql",
+    "last_write_utc": "2026-09-26T03:39:27.8768114Z",
+    "sha256": "BF3E157EC94BA7AC552538983D363A8DA1CE6F42502DB1960AACF7C8952309D5"
+  },
+  {
+    "path": "apps/api/migrations/0023_m04_task_skill_proposals.sql",
+    "last_write_utc": "2026-09-26T04:16:57.7090266Z",
+    "sha256": "DB598AEF78180A2F2F0C9DD20C73083E8B0818E7A0B2399F86F598CE8F2E8651"
+  },
+  {
+    "path": "apps/api/migrations/0024_m05_view_configuration.sql",
+    "last_write_utc": "2026-09-26T04:55:54.8742664Z",
+    "sha256": "30C2D0EBA286648FA04C8E31D3E69EBDC7B2115759290801C97CD07D58568BB5"
+  },
+  {
+    "path": "apps/api/migrations/0025_m05_project_blueprints.sql",
+    "last_write_utc": "2026-09-26T05:03:42.7843714Z",
+    "sha256": "61F940DBE6AF3257756E991CB709CBBD33FF9DBAA4413BF5C0D1FABF5291862A"
+  },
+  {
+    "path": "apps/api/migrations/0026_m04_model_call_budgets.sql",
+    "last_write_utc": "2026-09-26T06:03:54.4931160Z",
+    "sha256": "B288A143AD4C85718D4BDEB3A4CD3CD6460858C6D4D229880243DF2EA4231CFF"
+  },
+  {
+    "path": "apps/api/migrations/0027_m05_workspace_lists.sql",
+    "last_write_utc": "2026-09-26T06:28:23.7146543Z",
+    "sha256": "73F4DBFC914395FA30A24EBB118247DC1EFD998FB4D414E85FC16AF4C2C8CB7D"
+  },
+  {
+    "path": "apps/api/migrations/0028_m04_assist_live_preview.sql",
+    "last_write_utc": "2026-09-26T08:14:40.2818206Z",
+    "sha256": "440D12388F9BFBBB180252CFFA3BFA941088787FBCC871D6F589F0A88289B2C8"
+  },
+  {
+    "path": "apps/api/migrations/0029_m04_run_draft_live_preview.sql",
+    "last_write_utc": "2026-09-26T09:05:07.5642861Z",
+    "sha256": "D94BF18BE7FFC387EF68C15E7C1B8D55614752EC77FD9E68AA6249CB44F7CB44"
+  },
+  {
+    "path": "apps/api/migrations/0030_m06_real_tools.sql",
+    "last_write_utc": "2026-09-26T12:16:15.5933528Z",
+    "sha256": "DE109BE95F2E076934187AECF1E5189864CA13C31D4E126A33DD1ED14BC3237D"
+  },
+  {
+    "path": "apps/api/migrations/0031_m06_change_sets.sql",
+    "last_write_utc": "2026-09-27T03:33:29.8735288Z",
+    "sha256": "CD537B419D2CCD967ED90664FF1440ED794E28028F7D7CECE46E230971D82BA0"
+  },
+  {
+    "path": "apps/api/migrations/0032_m06_change_set_source_scope.sql",
+    "last_write_utc": "2026-09-27T04:22:49.0558293Z",
+    "sha256": "8E03586080A0B1F0BC3B77984FE47011ACBD2843D8C72245635A3CDD5AFF9F8C"
+  },
+  {
+    "path": "apps/api/migrations/0033_m06_file_write_stop_proofs.sql",
+    "last_write_utc": "2026-09-27T06:51:24.0951782Z",
+    "sha256": "297FDCF230F28BAE6FE3A8F85DE6EB81B725E098B67F6CB5E5358D8D0FFB8FE6"
+  },
+  {
+    "path": "apps/api/migrations/0034_m06_file_write_manual_dispositions.sql",
+    "last_write_utc": "2026-09-27T06:53:32.8028094Z",
+    "sha256": "AD9CB839171E948039C05499A3A5A114BB3DD599B211C1E400AA636776FD735C"
+  },
+  {
+    "path": "apps/api/migrations/0035_m06_file_write_frozen_diff.sql",
+    "last_write_utc": "2026-09-27T10:01:07.2713818Z",
+    "sha256": "04947C66E1E21F5341B8FAA8A74FD953E4297427D989E844CF1B1B28CEF50C16"
+  },
+  {
+    "path": "apps/api/migrations/0036_m06_file_write_path_identity.sql",
+    "last_write_utc": "2026-09-27T12:39:18.0290587Z",
+    "sha256": "F364B34C586C2E298B7FA3B37F374D0D0915C90DC06E57F06AE48F19F19545A4"
+  },
+  {
+    "path": "apps/api/migrations/0037_m06_file_write_frozen_diff_root_path.sql",
+    "last_write_utc": "2026-09-27T13:21:44.3477982Z",
+    "sha256": "5EA3C4E3EB19A16DA6A04C7F3028806D7F3AA303754AC82A4677F028A1DABC8B"
+  },
+  {
+    "path": "apps/api/migrations/0038_m06_managed_root_identity.sql",
+    "last_write_utc": "2026-09-27T15:56:37.3751747Z",
+    "sha256": "3727E363A33F425BCE5FB79C6542F2DC7BBAD043C3039796D900F112DB809302"
+  },
+  {
+    "path": "apps/api/migrations/0039_m06_active_resource_root.sql",
+    "last_write_utc": "2026-09-27T16:27:03.1857893Z",
+    "sha256": "2099A95BB8230D80C398EE001E19A9196E672628BE777EEEACF95EFF1A41493E"
+  },
+  {
+    "path": "apps/api/migrations/0040_collaboration_artifact_text_locks.sql",
+    "last_write_utc": "2026-09-28T01:27:05.5155922Z",
+    "sha256": "795BFBCF9D17A330785814A015CB57CE9BB8FC5970A1610AE39B12EC01DD1045"
+  },
+  {
+    "path": "apps/api/migrations/0041_collaboration_impact_checks.sql",
+    "last_write_utc": "2026-09-28T01:38:57.6844967Z",
+    "sha256": "1E45247B276D9A1ED4D276BE7BE80D78C5A44E525DFF263A81D1330988D9D972"
+  },
+  {
+    "path": "apps/api/migrations/0042_collaboration_attention.sql",
+    "last_write_utc": "2026-09-28T02:09:08.0886191Z",
+    "sha256": "D74D76E0D31045F2D1ED9CE7F529F56B396ECC37F37456DDB93C8A9624EC9635"
+  },
+  {
+    "path": "apps/api/migrations/0043_model_call_verify.sql",
+    "last_write_utc": "2026-09-28T16:04:21.9025721Z",
+    "sha256": "EB8DFEA4199066C32BD70DF1A185F7DD0822E326C9CF4C21CC23748B80D01288"
+  },
+  {
+    "path": "apps/api/migrations/0044_project_continuation_points.sql",
+    "last_write_utc": "2026-09-29T14:06:41.0287500Z",
+    "sha256": "DE9B7A349FCBA0F1B16F2454493EAFDE0BD08AB86FEE65DE19B0E6DAB6F889A8"
+  },
+  {
+    "path": "apps/api/migrations/0045_continuation_point_ref_target_guard.sql",
+    "last_write_utc": "2026-09-29T13:35:53.0804844Z",
+    "sha256": "F5C950421E00C3EE6DF777F7CFFCE37E0E2BD68D58E688BDAFB08391607DE94E"
+  },
+  {
+    "path": "apps/api/migrations/0046_assist_provider_error_kind.sql",
+    "last_write_utc": "2026-09-30T02:15:11.2250126Z",
+    "sha256": "D791B762C896B65B298D594FB1E773F35BDC9A83FA84D1A72C615DE28E28E742"
+  },
+  {
+    "path": "apps/api/src/api/activity-api.ts",
+    "last_write_utc": "2026-09-26T03:12:11.2604706Z",
+    "sha256": "F234A28B4353B2F35C7B000F45ACE938C5AB477733C94CCBB6F91F7948D95310"
+  },
+  {
+    "path": "apps/api/src/api/artifact-api.ts",
+    "last_write_utc": "2026-09-28T02:03:20.2373579Z",
+    "sha256": "CBF5F3B31A60773D2C0A91F1EC9FEC0F0E3DF90D4B4D0906B9D4122765BCF228"
+  },
+  {
+    "path": "apps/api/src/api/assist-api.ts",
+    "last_write_utc": "2026-09-30T02:32:12.9113524Z",
+    "sha256": "C17406CF3D3B0D51654B6DC3F13EE3F49F4668BF9ACDECBB81F1FFD6EF610FCA"
+  },
+  {
+    "path": "apps/api/src/api/attention-api.ts",
+    "last_write_utc": "2026-09-28T02:09:08.0906200Z",
+    "sha256": "2C43FA251AA807EBB74634D6DC1D2EAB2E5DC96CAAAEF7B09319679DD2E9583C"
+  },
+  {
+    "path": "apps/api/src/api/blueprint-api.ts",
+    "last_write_utc": "2026-09-26T05:34:23.1375477Z",
+    "sha256": "74EEC2A2D00565B1DAED4E40F34FCA7E50CDA0CD0D0DFE07459F6E0AC60D7197"
+  },
+  {
+    "path": "apps/api/src/api/boundary.ts",
+    "last_write_utc": "2026-09-24T04:03:19.8327615Z",
+    "sha256": "712A33707428BD619E0ED85BC98FEADBE0BB57EB53A1B164BFD7B57D824C6B3F"
+  },
+  {
+    "path": "apps/api/src/api/command-api.ts",
+    "last_write_utc": "2026-09-20T17:05:37.9540317Z",
+    "sha256": "D58ADEEA0692BC05EE0CACC9242385E4F61205C00F45A4CD2825D0610C9FCFC9"
+  },
+  {
+    "path": "apps/api/src/api/completion-api.ts",
+    "last_write_utc": "2026-09-26T10:45:53.5299444Z",
+    "sha256": "E369B56636E4996017FE6B68191E00DE3DBCE70D81F8FD2BBB2BD1B259B8F6EA"
+  },
+  {
+    "path": "apps/api/src/api/context-api.ts",
+    "last_write_utc": "2026-09-23T14:28:00.7530401Z",
+    "sha256": "CB60020F10534A9375839E8786A7EC75C71E99CB729FF759D0EDA567E671C469"
+  },
+  {
+    "path": "apps/api/src/api/cursor.ts",
+    "last_write_utc": "2026-09-26T06:30:54.3747331Z",
+    "sha256": "715B8A8C97458D31E5D86BED47DB328187697E857A990134CA95778BB6EFB3F6"
+  },
+  {
+    "path": "apps/api/src/api/domain-schemas.ts",
+    "last_write_utc": "2026-09-29T12:36:36.0373151Z",
+    "sha256": "67BBE7D36CE0411E3251C5E53243142A3861CE9B6386E790771288EF3C637E44"
+  },
+  {
+    "path": "apps/api/src/api/envelope.ts",
+    "last_write_utc": "2026-09-29T12:37:10.2608309Z",
+    "sha256": "7D3ABFDB68C89EA3C0D14B8820960C8C76D3161282D3D7BE5A92B58DB5EF0862"
+  },
+  {
+    "path": "apps/api/src/api/first-party-skills-api.ts",
+    "last_write_utc": "2026-09-26T05:19:51.8646693Z",
+    "sha256": "E7E8E133B8614EA10024348E2D9C5033CC0BF9D13FE02035EA601CE57E1D4D14"
+  },
+  {
+    "path": "apps/api/src/api/gateway-api.ts",
+    "last_write_utc": "2026-09-27T09:50:31.8806889Z",
+    "sha256": "C2EC032279222753CDF9F10C5E7FF604C6C6694E453F6DA4651BDE2E38A49A98"
+  },
+  {
+    "path": "apps/api/src/api/information-api.ts",
+    "last_write_utc": "2026-09-27T15:39:27.9640866Z",
+    "sha256": "7A45BC528BDEC76AC2514D1610A138E763DAC3DC4604083530286F194676F7FC"
+  },
+  {
+    "path": "apps/api/src/api/lineage-api.ts",
+    "last_write_utc": "2026-09-27T15:20:14.7872229Z",
+    "sha256": "E16794E872B16414C9C0A52A7C81678651875D6425BA0903C4564472DC7F5B1F"
+  },
+  {
+    "path": "apps/api/src/api/model-api.ts",
+    "last_write_utc": "2026-09-28T15:56:04.3907859Z",
+    "sha256": "AE7FF7EE7E68717DC3B025619C2D0AC22669481C48E4B81AD161DF7AEAA0913A"
+  },
+  {
+    "path": "apps/api/src/api/problem.ts",
+    "last_write_utc": "2026-09-26T07:33:29.5403172Z",
+    "sha256": "C4DDFFE6783B7073B20053AB51B29A42E611BB3644AFB8027C731EDF3FF5F484"
+  },
+  {
+    "path": "apps/api/src/api/project-api.ts",
+    "last_write_utc": "2026-09-26T07:34:15.9366458Z",
+    "sha256": "B9F94A5F33717CC5D6C0D9E9F736F09581185C415263BD45C66450AAF19D9B55"
+  },
+  {
+    "path": "apps/api/src/api/project-continuation-api.ts",
+    "last_write_utc": "2026-09-29T12:36:47.4382849Z",
+    "sha256": "BD2735EACEC5609923ED93E68F022FE627EE8967FDE2EC61250399835C42A700"
+  },
+  {
+    "path": "apps/api/src/api/review-api.ts",
+    "last_write_utc": "2026-09-23T05:54:01.0516568Z",
+    "sha256": "B1ECAD0289FDAA7DDCB0593654989EDF32836FFC269808C6AFC4FB609829FB5C"
+  },
+  {
+    "path": "apps/api/src/api/routes.ts",
+    "last_write_utc": "2026-09-29T12:37:19.3035851Z",
+    "sha256": "A9AF224DBE9BC45677343CF42E1DD531CCBE58B986C8D1E2BAAF0F58379584DC"
+  },
+  {
+    "path": "apps/api/src/api/run-api.ts",
+    "last_write_utc": "2026-09-28T23:32:56.8212111Z",
+    "sha256": "2BCCBFF69A31D5BAA481F49335A7DABF35325998195F070235DB7F4916CB7609"
+  },
+  {
+    "path": "apps/api/src/api/run-events-api.ts",
+    "last_write_utc": "2026-09-24T04:17:17.1191237Z",
+    "sha256": "3DE53E5A3644852F80E1D556843179769FD41CE988587D1529D9F92B2B2F33F1"
+  },
+  {
+    "path": "apps/api/src/api/schemas.ts",
+    "last_write_utc": "2026-09-21T04:14:40.4811432Z",
+    "sha256": "F3C3242EFA84E7E81955DE51D5A3042DDD97EDDE6350190CBB96DF22D662E74C"
+  },
+  {
+    "path": "apps/api/src/api/server.ts",
+    "last_write_utc": "2026-09-23T16:29:00.9076408Z",
+    "sha256": "7986CD4585CC6ACA09317607849E434F3C9DFF54D790D525136C1356512C317D"
+  },
+  {
+    "path": "apps/api/src/api/state-api.ts",
+    "last_write_utc": "2026-09-20T17:05:37.7586390Z",
+    "sha256": "F0BF506EF4FF7605FDE61B09E92BBBDF760666C3CC91CE3E6B6B898F0C606DDB"
+  },
+  {
+    "path": "apps/api/src/api/task-api.ts",
+    "last_write_utc": "2026-09-26T06:31:03.1272393Z",
+    "sha256": "AE2D5D6EBE8952091C42415018B1C450B55A02A2F91ED8F8D983E1CAF0C7BB22"
+  },
+  {
+    "path": "apps/api/src/api/today-api.ts",
+    "last_write_utc": "2026-09-26T02:35:26.7963279Z",
+    "sha256": "18569B9D280FB440AFDD077B9E9B292FE50DD8C2909912A5614C31596CAC4CF1"
+  },
+  {
+    "path": "apps/api/src/api/trace-api.ts",
+    "last_write_utc": "2026-09-30T04:26:26.0520200Z",
+    "sha256": "D4AE86D97C24283E6B9A27D244918735104778F6D0DD2D44038A9F531AFC1568"
+  },
+  {
+    "path": "apps/api/src/api/view-configuration-api.ts",
+    "last_write_utc": "2026-09-26T04:58:08.4823226Z",
+    "sha256": "ACF435BBC9E9F2F77A7BC4C5B2068FB14AE40BD6EF05C5D66C0856A090020A26"
+  },
+  {
+    "path": "apps/api/src/application/activity-queries.ts",
+    "last_write_utc": "2026-09-26T07:46:08.6071471Z",
+    "sha256": "551E40AB5639F791F0CFE1A987486C10B8BF17CF9E0BA6F130160719557005B5"
+  },
+  {
+    "path": "apps/api/src/application/actor.ts",
+    "last_write_utc": "2026-09-20T16:57:26.8973287Z",
+    "sha256": "EF468AB3030F5E5709BDAA9B246573E7FFD3578B1AEE2BF8E1D81125C7522F4D"
+  },
+  {
+    "path": "apps/api/src/application/archive-project.ts",
+    "last_write_utc": "2026-09-26T07:34:15.9331239Z",
+    "sha256": "FFD4EFD5D70F16E8B49970D95CA772152275D79F1333EA69A1CDCC86B9F13623"
+  },
+  {
+    "path": "apps/api/src/application/artifact-commands.ts",
+    "last_write_utc": "2026-09-28T02:08:18.0504996Z",
+    "sha256": "C3B91A4A6D529BD939FBE8130C75A1D5B44CC0608D436489907C05E256C50D48"
+  },
+  {
+    "path": "apps/api/src/application/artifact-impact-checks.ts",
+    "last_write_utc": "2026-09-28T03:02:11.0887834Z",
+    "sha256": "C22F3D6A6C0CA4DF51FB9FD304D6B67E7765B08FE306C79991842E5CEFA967AC"
+  },
+  {
+    "path": "apps/api/src/application/artifact-queries.ts",
+    "last_write_utc": "2026-09-24T10:14:17.3596379Z",
+    "sha256": "B29F59755FC814C82F769FAC10E9EE26558E9DF020B1E10BB06CA0E5D6F7220C"
+  },
+  {
+    "path": "apps/api/src/application/artifact-text-locks.ts",
+    "last_write_utc": "2026-09-28T01:25:09.0882569Z",
+    "sha256": "BC4243D0960BD55208C8FDBCFAC1F09046F05BFBA65307C84A0A4CF4DAED8F18"
+  },
+  {
+    "path": "apps/api/src/application/assist-commands.ts",
+    "last_write_utc": "2026-09-28T01:45:43.8736388Z",
+    "sha256": "CB5378362CAAF9290D05D2DB07D66BEDB818F86B88E59FFFBCDCBF557D69AC14"
+  },
+  {
+    "path": "apps/api/src/application/assist-queries.ts",
+    "last_write_utc": "2026-09-26T08:39:46.1714627Z",
+    "sha256": "85260FBFDC33F2D03D46A296C34C7DE81DF31B4FB92523508DBCC1F0C124CD8D"
+  },
+  {
+    "path": "apps/api/src/application/assist-runner.ts",
+    "last_write_utc": "2026-09-30T02:40:49.0971771Z",
+    "sha256": "55D839C91B2741864AB7ABDC2CE3FD21D37BE08E7E3455255B8214700DA4D99F"
+  },
+  {
+    "path": "apps/api/src/application/attention-notifications.ts",
+    "last_write_utc": "2026-09-28T02:18:53.5610585Z",
+    "sha256": "868C7A618FFA058814B8EDE30085B261D65D5A7494F477FD7A7F2B61DD90861C"
+  },
+  {
+    "path": "apps/api/src/application/blueprint-apply.ts",
+    "last_write_utc": "2026-09-26T06:52:13.3691323Z",
+    "sha256": "C1958AA9D39CB3F986F372BC09BA66E471B6634A52351F454C2E92937DC25ED9"
+  },
+  {
+    "path": "apps/api/src/application/blueprint-proposals.ts",
+    "last_write_utc": "2026-09-26T05:39:10.9460240Z",
+    "sha256": "07F49B637814635868339B6ADF1EC42729559AA663C67234615B7042221B6B51"
+  },
+  {
+    "path": "apps/api/src/application/check-plan-preview.ts",
+    "last_write_utc": "2026-09-26T04:28:09.8128468Z",
+    "sha256": "F91B72FE26D6007D5D632A8906A552378322BBE37B7B0EDA46412A8FB135A268"
+  },
+  {
+    "path": "apps/api/src/application/command.ts",
+    "last_write_utc": "2026-09-20T16:27:12.9516765Z",
+    "sha256": "D2945C2F5C4E5A2A62A79A59573C5A5AC0693AA060E8BFA7C5B884C518AA50DA"
+  },
+  {
+    "path": "apps/api/src/application/complete-run.ts",
+    "last_write_utc": "2026-09-28T23:32:56.8499769Z",
+    "sha256": "274D79ED605A395FB019186802484C18F5086D7EC6CBAB0F7314C791AD74F6A8"
+  },
+  {
+    "path": "apps/api/src/application/completion-commands.ts",
+    "last_write_utc": "2026-09-26T03:04:10.0775633Z",
+    "sha256": "AE81E7F14EEE8DF2D335D8A2DFDE698395C3F7F024DDEC64FB5CAE847AAF06C7"
+  },
+  {
+    "path": "apps/api/src/application/completion-evidence-queries.ts",
+    "last_write_utc": "2026-09-26T10:41:07.0057747Z",
+    "sha256": "F398988775A3748B3D986F77D3342E53549AB7A27D1BB9B57B2EE60081C42A3C"
+  },
+  {
+    "path": "apps/api/src/application/context-builder.ts",
+    "last_write_utc": "2026-09-26T06:10:13.0566355Z",
+    "sha256": "60C8AA3E3F0FAEEF27438B2F4B44DC533F91251B3557379F6CDFE3F4105B1EAE"
+  },
+  {
+    "path": "apps/api/src/application/context-fence.ts",
+    "last_write_utc": "2026-09-25T01:04:54.7457123Z",
+    "sha256": "685641081049383D5C08E40CD12D0D0D4EF9938F27CED1590451622A81F4D442"
+  },
+  {
+    "path": "apps/api/src/application/context-queries.ts",
+    "last_write_utc": "2026-09-23T14:27:32.0105792Z",
+    "sha256": "800560BB1530B50618C0E43CEF0ED49E60F27B1F1903D53491AABBFEAF210A76"
+  },
+  {
+    "path": "apps/api/src/application/control-requests.ts",
+    "last_write_utc": "2026-09-26T03:05:07.8157768Z",
+    "sha256": "7A546E8A4D9947D82E0D7D055F8681699F28499A7A94084658D5814C08F8B8C8"
+  },
+  {
+    "path": "apps/api/src/application/create-goal.ts",
+    "last_write_utc": "2026-09-26T02:57:05.8639167Z",
+    "sha256": "E32795BB850A221C3866FF74E76CD0C444F69FA3B777BD3F69616FFC8ABB69B9"
+  },
+  {
+    "path": "apps/api/src/application/create-project.ts",
+    "last_write_utc": "2026-09-26T04:57:09.0744567Z",
+    "sha256": "2AE2E67BD6C22BD0FE1B22D66F9322A23D31A17FE5E68BBFA27084AFF8D21A32"
+  },
+  {
+    "path": "apps/api/src/application/create-task.ts",
+    "last_write_utc": "2026-09-26T06:51:44.4598674Z",
+    "sha256": "9495FD9FE26AA64993166E1C39C56928175FEA16EE7F4C774C37CA777D5717D5"
+  },
+  {
+    "path": "apps/api/src/application/declared-output-requirements.ts",
+    "last_write_utc": "2026-09-23T00:27:28.8228770Z",
+    "sha256": "8FA7AC9496B0DFE9523F01CBD8C79A2364D8A5C047B68A8ED73F25FC0889BFD1"
+  },
+  {
+    "path": "apps/api/src/application/delegate-task.ts",
+    "last_write_utc": "2026-09-28T23:32:56.8803859Z",
+    "sha256": "A9EE99F6DB0CF74FA2D11016716C7DEC240B2039299A02B16CDA7D36B1DD2877"
+  },
+  {
+    "path": "apps/api/src/application/domain-error.ts",
+    "last_write_utc": "2026-09-28T23:32:56.9382181Z",
+    "sha256": "9058CD7297636E1A284791A0412CE33FCD6BF1BB72C4F1EACBAB008889AF4BFB"
+  },
+  {
+    "path": "apps/api/src/application/file-write-disposition.ts",
+    "last_write_utc": "2026-09-27T15:30:21.4644286Z",
+    "sha256": "F923229310C5A754B94E7FE60E86404ED823B7BA067DF064E2C98BE170820840"
+  },
+  {
+    "path": "apps/api/src/application/gateway-actions.ts",
+    "last_write_utc": "2026-09-27T15:57:35.5889940Z",
+    "sha256": "223AE945D5E66AA7EA6B8186D6EB22D27AC096B4BB24C2DC5192D33613B640E7"
+  },
+  {
+    "path": "apps/api/src/application/gateway-commands.ts",
+    "last_write_utc": "2026-09-27T16:27:03.1867905Z",
+    "sha256": "37D1DFBB7177E862CB4A463A5F44FE457C6A768A66723DF0D36FDCBBC508913A"
+  },
+  {
+    "path": "apps/api/src/application/gateway-configuration.ts",
+    "last_write_utc": "2026-09-27T16:27:03.1877900Z",
+    "sha256": "59D4962119B854265BD6EB058E2FC6BA00C97E2651362B472A3FDC0244C192DE"
+  },
+  {
+    "path": "apps/api/src/application/gateway-queries.ts",
+    "last_write_utc": "2026-09-27T16:01:53.5415830Z",
+    "sha256": "76FF609F066B8E78C47BB4752E1C8D9E521BEBFDFAACF284D059C2944E91842E"
+  },
+  {
+    "path": "apps/api/src/application/guards.ts",
+    "last_write_utc": "2026-09-26T06:51:19.3115962Z",
+    "sha256": "E362D5EC53B93A074377E01B67BA87010533BF4DA20B36351AD1E9714372B78A"
+  },
+  {
+    "path": "apps/api/src/application/information-commands.ts",
+    "last_write_utc": "2026-09-26T06:52:32.2211868Z",
+    "sha256": "1380564D77377C69CAC625C32B5D8980F5965AB46EB854A79D6FC2D87C4D4496"
+  },
+  {
+    "path": "apps/api/src/application/information-queries.ts",
+    "last_write_utc": "2026-09-27T15:47:02.7500118Z",
+    "sha256": "3B75D6EC9372923D3E4828A13BD10BC58BBBEBBD138D9169EB4C5653EBA6FD2D"
+  },
+  {
+    "path": "apps/api/src/application/initialize-workspace.ts",
+    "last_write_utc": "2026-09-26T02:57:05.8729810Z",
+    "sha256": "8BD039968490B04B8B854A8EC3D5F10739208149387044CE6595ECDF8A64407E"
+  },
+  {
+    "path": "apps/api/src/application/lineage-queries.ts",
+    "last_write_utc": "2026-09-27T15:19:51.1433831Z",
+    "sha256": "921E2294A3D90ACFE8D717EA6B29E9F2315CFE88135DFBAF7B5B7E0C928E3E56"
+  },
+  {
+    "path": "apps/api/src/application/local-calendar.ts",
+    "last_write_utc": "2026-09-26T02:28:39.8880113Z",
+    "sha256": "96E6DE1E6F65ACAFF9FB5CBFCE623821BB376F3578583C3298BADB8FE9C7EF7C"
+  },
+  {
+    "path": "apps/api/src/application/lock-task-run.ts",
+    "last_write_utc": "2026-09-26T06:55:56.2418324Z",
+    "sha256": "924C1F4BA0034B1419A4D12CA53E542E295E76F4AE6DA113A1E17627B3BB7B0A"
+  },
+  {
+    "path": "apps/api/src/application/model-call-recorder.ts",
+    "last_write_utc": "2026-09-29T13:51:01.1592390Z",
+    "sha256": "D22627F1A542C8606DFE921089EC87747B18D7F03800C9297821E2D411C4D084"
+  },
+  {
+    "path": "apps/api/src/application/project-continuation-points.ts",
+    "last_write_utc": "2026-09-29T13:33:47.0187651Z",
+    "sha256": "2FFC65AA9BA257FC93D4684464C7A60C8CF1A7002D70C21FD5A98801D1B42B09"
+  },
+  {
+    "path": "apps/api/src/application/project-goal-links.ts",
+    "last_write_utc": "2026-09-26T02:57:05.8779799Z",
+    "sha256": "EE22FAF2ED90F0AA406E85DD8E9EF8915DF78EB2040E7D2ADC1F08C692356CE6"
+  },
+  {
+    "path": "apps/api/src/application/project-queries.ts",
+    "last_write_utc": "2026-09-26T06:25:50.4433083Z",
+    "sha256": "76A70488D46DBE7DDC0B7F04CC7483957E1F9676D56D8A4A00D5AF83D17AD1DF"
+  },
+  {
+    "path": "apps/api/src/application/recover-run.ts",
+    "last_write_utc": "2026-09-26T02:57:05.8825206Z",
+    "sha256": "7FD96B84BFEFFB70649D1CCBB8259DDC59C061705CDD3C652BA012E63C82B120"
+  },
+  {
+    "path": "apps/api/src/application/request-review.ts",
+    "last_write_utc": "2026-09-26T06:56:15.2341526Z",
+    "sha256": "AB51AD7A937B56C491882B3EA96090E58DA75AE959FA9A95019587BBFFA01A00"
+  },
+  {
+    "path": "apps/api/src/application/review-decisions.ts",
+    "last_write_utc": "2026-09-26T06:56:15.2361512Z",
+    "sha256": "6429392CC0A694422C6E0126C2EB591A23DC4969F0F3E5EDB8952244E74F9F0D"
+  },
+  {
+    "path": "apps/api/src/application/review-queries.ts",
+    "last_write_utc": "2026-09-23T07:19:22.9052963Z",
+    "sha256": "BCE19F666BA07155D4FA82B1679FFCA13D4207681F3B9333685E055C7664CD81"
+  },
+  {
+    "path": "apps/api/src/application/review-requests.ts",
+    "last_write_utc": "2026-09-26T03:05:07.8213128Z",
+    "sha256": "C1A77F0DA227873546595AE81A125705944509BAE0AC6A529F918ED05CDF3A2C"
+  },
+  {
+    "path": "apps/api/src/application/revisions.ts",
+    "last_write_utc": "2026-09-20T16:59:11.7205270Z",
+    "sha256": "6E78F66EB9EAC75C87B939427ABCB04840BBB67CE2D171A7F5DB751473352BFB"
+  },
+  {
+    "path": "apps/api/src/application/rule-fence.ts",
+    "last_write_utc": "2026-09-23T13:34:19.7240966Z",
+    "sha256": "EEE63CFA9B38D39CE7B4A385B8F46815F1A2B2B6E3F3147A10F091B9E61CDD21"
+  },
+  {
+    "path": "apps/api/src/application/rule-plan-basis.ts",
+    "last_write_utc": "2026-09-26T04:24:48.5602561Z",
+    "sha256": "27A7DBDE57C7B5222B4DA1F3DD9A0A2843507CED590B0906852B51B5B8395979"
+  },
+  {
+    "path": "apps/api/src/application/run-dispatch.ts",
+    "last_write_utc": "2026-09-26T07:08:28.6618678Z",
+    "sha256": "DDE657BAE35015F9E0553E069D2A64832FC3E0E7F67D299628A160E0F0B5F6FA"
+  },
+  {
+    "path": "apps/api/src/application/run-draft-preview.ts",
+    "last_write_utc": "2026-09-26T09:30:18.6010270Z",
+    "sha256": "8CC4D51168B29C1283F8DDA9390D7084BA4473EDD07B1A8EA75563A5BC4AF27C"
+  },
+  {
+    "path": "apps/api/src/application/run-queries.ts",
+    "last_write_utc": "2026-09-28T23:32:56.9655914Z",
+    "sha256": "B0BC98E6AB7B59B13EFFD63983CD9864DE606541E159F3329FD08D550CF4DABE"
+  },
+  {
+    "path": "apps/api/src/application/run-read-evidence.ts",
+    "last_write_utc": "2026-09-26T02:05:30.6670339Z",
+    "sha256": "554780208DD485DD64EFDEDB6E74EDBE6FCF25CA71783379C24EF642A607EC8A"
+  },
+  {
+    "path": "apps/api/src/application/run-steps.ts",
+    "last_write_utc": "2026-09-30T04:26:26.0554313Z",
+    "sha256": "D114E4CF4CC436840EC44EACCAE48DC7D65210AA1D6B76F2A028C64464CBC79A"
+  },
+  {
+    "path": "apps/api/src/application/state-action.ts",
+    "last_write_utc": "2026-09-20T17:02:26.6767268Z",
+    "sha256": "FFD071784F8C5DBF043FB7FCABDB967196839866B01BAC0390D9E84886D5C18D"
+  },
+  {
+    "path": "apps/api/src/application/state-commands.ts",
+    "last_write_utc": "2026-09-26T06:51:54.4289069Z",
+    "sha256": "755B42EBE2B9153563EF51AE83D5A484C9CB70C4ED108F8CA49BDB1E183A1F6A"
+  },
+  {
+    "path": "apps/api/src/application/state-queries.ts",
+    "last_write_utc": "2026-09-20T17:18:32.1932168Z",
+    "sha256": "87CF82A81A1A57B2CDB1C3AE9F84D67EB13B29A505A428AAEEA1BC67C2C70E11"
+  },
+  {
+    "path": "apps/api/src/application/task-commands.ts",
+    "last_write_utc": "2026-09-26T03:05:07.8183038Z",
+    "sha256": "7C4241E07891C506CE4A6A83BF60A477FA3C410324F501D4B3A9B7251D8B46CE"
+  },
+  {
+    "path": "apps/api/src/application/task-contract-commands.ts",
+    "last_write_utc": "2026-09-26T04:38:22.2045391Z",
+    "sha256": "826609DF893B4A9CFCB08043B94D6FAAAB6C74115C81DE9ED00844B2F5E931CF"
+  },
+  {
+    "path": "apps/api/src/application/task-queries.ts",
+    "last_write_utc": "2026-09-28T23:32:57.0528789Z",
+    "sha256": "B3228330B8DF0C502D110ECF6EFFBA20931B1106227A2BEC39389B408FEBE495"
+  },
+  {
+    "path": "apps/api/src/application/task-readiness.ts",
+    "last_write_utc": "2026-09-26T06:27:01.1035484Z",
+    "sha256": "4343550E592AB33F17278525F21FB924EA5D0200C3BEDD9E15C5E4EC07A80D40"
+  },
+  {
+    "path": "apps/api/src/application/today-commands.ts",
+    "last_write_utc": "2026-09-26T02:57:17.9902474Z",
+    "sha256": "BE678136A87E9D45FDA2F2700C0F1146F6E95FAA12DC4909DE92F297BDB07E02"
+  },
+  {
+    "path": "apps/api/src/application/today-queries.ts",
+    "last_write_utc": "2026-09-26T02:46:40.9243254Z",
+    "sha256": "969A8547801DDF655C030D62607FEA38FE53A7848DA52AB49CF151854C36D4D5"
+  },
+  {
+    "path": "apps/api/src/application/trace-queries.ts",
+    "last_write_utc": "2026-09-30T04:26:26.0520200Z",
+    "sha256": "B5663C5D51A2123E143B471DB63A73F0C8FAF7C6C0075EE17B2B207A32CA783A"
+  },
+  {
+    "path": "apps/api/src/application/unit-of-work.ts",
+    "last_write_utc": "2026-09-29T12:34:55.1448275Z",
+    "sha256": "A7C1BB6928431612F21B3E60649143ABC33151956EBCEB4A373F4FEE54313664"
+  },
+  {
+    "path": "apps/api/src/application/verify-run.ts",
+    "last_write_utc": "2026-09-29T01:19:29.1426297Z",
+    "sha256": "DAF9CB3CAB4657607D24C441E44468A684D9FCA7A8062316042A458FDD8F39C5"
+  },
+  {
+    "path": "apps/api/src/application/view-configuration-commands.ts",
+    "last_write_utc": "2026-09-26T06:52:03.3852465Z",
+    "sha256": "FC1B9225FF326DCA14106C9DD8C3667B3128BA43B276A442EFA865B99C762D1D"
+  },
+  {
+    "path": "apps/api/src/application/web-import-commands.ts",
+    "last_write_utc": "2026-09-26T06:55:56.2408333Z",
+    "sha256": "F1A89D030C9B4039F657ED1768BF8D92670AEEE063F9A7117C0C06A35AB73DA7"
+  },
+  {
+    "path": "apps/api/src/application/web-import-runner.ts",
+    "last_write_utc": "2026-09-26T06:59:51.2348791Z",
+    "sha256": "FB87687634BB1501ACE3507733F25E57E267F9C070962386782268F0292FC30A"
+  },
+  {
+    "path": "apps/api/src/artifact/artifact-repository.ts",
+    "last_write_utc": "2026-09-28T23:32:57.2052151Z",
+    "sha256": "6DA5B6CD8C6AA0CDFE8AD6EF7DB89EAD2BE51CC0713531991BD48EBB408B297F"
+  },
+  {
+    "path": "apps/api/src/artifact/impact-repository.ts",
+    "last_write_utc": "2026-09-28T01:38:57.6854976Z",
+    "sha256": "E6026DD08683C5D13A4CEAE836CA59928D7293AB25895A465AEF53CCB8340E45"
+  },
+  {
+    "path": "apps/api/src/artifact/lineage-repository.ts",
+    "last_write_utc": "2026-09-27T15:19:31.8045612Z",
+    "sha256": "CE1DFE3B277B0B35AD85FB13A47651983E8EC8BB7FD36EE0BBBB97F3A4E5B27D"
+  },
+  {
+    "path": "apps/api/src/artifact/markdown-locks.ts",
+    "last_write_utc": "2026-09-28T03:01:27.0349557Z",
+    "sha256": "39E93385ADE008045F473EFA3B29934310463549D8EE829351F8B45803AC06F2"
+  },
+  {
+    "path": "apps/api/src/assist/assist-repository.ts",
+    "last_write_utc": "2026-09-30T02:32:12.9093691Z",
+    "sha256": "D0DCF8DF538B78F4FBD564D86A056E469D09D4C4D8EF429AE259CE91E77F7E71"
+  },
+  {
+    "path": "apps/api/src/assist/live-preview.ts",
+    "last_write_utc": "2026-09-26T08:21:39.9149428Z",
+    "sha256": "F44A547728A2D9F10052E84E1639C6FD5EF4C524751D1F70D66717A71FA17BC5"
+  },
+  {
+    "path": "apps/api/src/audit/activity-record-repository.ts",
+    "last_write_utc": "2026-09-26T03:01:45.5356273Z",
+    "sha256": "2C2C2B4329D3385D3EDBDB9DDF9A8B5BF526F7E8982A56E13C9187F6E3C66045"
+  },
+  {
+    "path": "apps/api/src/blueprint/blueprint-candidate.ts",
+    "last_write_utc": "2026-09-26T05:05:17.0211596Z",
+    "sha256": "01BD7315B1C8C90276AB29FC8BEAFFC9278C711C94F000DE8C70CA73EE341753"
+  },
+  {
+    "path": "apps/api/src/blueprint/blueprint-repository.ts",
+    "last_write_utc": "2026-09-26T05:04:06.6931953Z",
+    "sha256": "F26EA9E40BC5318B6BE21A61F0AB09C74A37713A7BEF836FCF2FFF6CC30DED04"
+  },
+  {
+    "path": "apps/api/src/cli-worker/cli-adapter.ts",
+    "last_write_utc": "2026-09-27T13:24:30.9028374Z",
+    "sha256": "2CB3507925CACB97863EB91061C7F18D3E94203E06D209744C36F8FDB34D6377"
+  },
+  {
+    "path": "apps/api/src/cli-worker/process-tree.ts",
+    "last_write_utc": "2026-09-26T11:30:49.9623304Z",
+    "sha256": "60D5E3A9869C27FE4C2AD6A2E278DC0908B5FEB02C79847149E9CDC13082C43B"
+  },
+  {
+    "path": "apps/api/src/cli/cli-support.ts",
+    "last_write_utc": "2026-09-20T16:27:35.6463373Z",
+    "sha256": "E1DA414379810A565C0A656DE0009FCCA19B6B8D51929C440774A59F50A7E86F"
+  },
+  {
+    "path": "apps/api/src/cli/init-workspace.ts",
+    "last_write_utc": "2026-09-20T16:42:32.8842848Z",
+    "sha256": "053CFA30E394981BB430254CB1EA3384FB509C4230D9B9952281A52EA51C6807"
+  },
+  {
+    "path": "apps/api/src/cli/install-graph.ts",
+    "last_write_utc": "2026-09-24T06:47:30.2245425Z",
+    "sha256": "91CFE867C2399426096B63A89A9021CF7071079B1554C6BAEA71CF2A6C775C3F"
+  },
+  {
+    "path": "apps/api/src/cli/migrate.ts",
+    "last_write_utc": "2026-09-20T16:27:40.9435556Z",
+    "sha256": "129E8AF9785B21920B4703DAD39DFD2B48DBDA26976E71C3F2659A7AA52BAF56"
+  },
+  {
+    "path": "apps/api/src/completion/completion-repository.ts",
+    "last_write_utc": "2026-09-26T10:39:52.5897636Z",
+    "sha256": "E7BCCD2DAD18AEBDD826790B2D0F77E0697608313F8E1B982FA7C2D1BB61B3BA"
+  },
+  {
+    "path": "apps/api/src/config/config.ts",
+    "last_write_utc": "2026-09-23T16:23:03.7579287Z",
+    "sha256": "C3815925812B1C96A8178E7DEB9ECB00807B0BE9896C2C06623075D1B358DA78"
+  },
+  {
+    "path": "apps/api/src/desktop/child.ts",
+    "last_write_utc": "2026-09-23T16:30:06.3580383Z",
+    "sha256": "2C1B0D1BA3B7B6A6217AA2467DC240547C45F0E5CAF38F7280408D2D0EC89C16"
+  },
+  {
+    "path": "apps/api/src/files/change-set-repository.ts",
+    "last_write_utc": "2026-09-27T09:03:18.5594711Z",
+    "sha256": "69193084663F1BFC0EF3BB065D8D9421526BF7133226A1AE3099F26FBC71ACA0"
+  },
+  {
+    "path": "apps/api/src/files/file-changeset.ts",
+    "last_write_utc": "2026-09-27T11:22:25.5781370Z",
+    "sha256": "987F36CB99A040B7DEBDA362C0473218E09E551AC0EDB006A151B158F59B5D04"
+  },
+  {
+    "path": "apps/api/src/files/file-write-diff-repository.ts",
+    "last_write_utc": "2026-09-27T10:00:38.3760656Z",
+    "sha256": "6093A4FA2C71E16C4F2492ACC1F0F45A6BD13F8A06C54C9EFD9208EC76EB1B78"
+  },
+  {
+    "path": "apps/api/src/files/file-write-disposition-repository.ts",
+    "last_write_utc": "2026-09-27T06:58:00.0775931Z",
+    "sha256": "A1CE2BDD6E79EFA924215B8A9433998D63BF28A8139533BF25CE59CB111CE814"
+  },
+  {
+    "path": "apps/api/src/files/file-write-path-repository.ts",
+    "last_write_utc": "2026-09-27T12:40:48.6012488Z",
+    "sha256": "A30B990147113A02428E2021614DC1938A0BA84F460D8536BD13EA151DB935BE"
+  },
+  {
+    "path": "apps/api/src/files/file-write-stop-proof-repository.ts",
+    "last_write_utc": "2026-09-27T06:51:54.3369536Z",
+    "sha256": "7D6C8CE50BDC40966F0B61C759B9F2AE5DBE820F68FEB4740CF6314DE066DB36"
+  },
+  {
+    "path": "apps/api/src/files/windows-file-io.ts",
+    "last_write_utc": "2026-09-27T15:08:49.5065393Z",
+    "sha256": "CF56891302EBE0483C10180CEB9CCA449385335343267FAE206CF29295296CF5"
+  },
+  {
+    "path": "apps/api/src/gateway/adapter-metadata.ts",
+    "last_write_utc": "2026-09-26T11:30:02.6943627Z",
+    "sha256": "3C06E9D81330585C214A0C145198597523C17B0BC31754F74FBB853ED9CFAE92"
+  },
+  {
+    "path": "apps/api/src/gateway/gateway-repository.ts",
+    "last_write_utc": "2026-09-27T15:56:37.3771741Z",
+    "sha256": "FDFFD8272156C25E892EA43FF2CE55E3E8134771694ECF15AAD0C0896B7DAA5A"
+  },
+  {
+    "path": "apps/api/src/git/git-adapter.ts",
+    "last_write_utc": "2026-09-26T11:35:30.3259047Z",
+    "sha256": "1E6DBEDEAD34BAB51BB0B75299D985D0DDC5021399A4E2AD236E2D9C31FAFBFE"
+  },
+  {
+    "path": "apps/api/src/information/information-repository.ts",
+    "last_write_utc": "2026-09-26T03:06:08.3310736Z",
+    "sha256": "EE66F06B7C0675D79B7733411B75A1B7FC8F7F596924EBCEB8419AC7077B75F1"
+  },
+  {
+    "path": "apps/api/src/infrastructure/database-schema.ts",
+    "last_write_utc": "2026-09-30T02:32:12.9063496Z",
+    "sha256": "F890C1465D39FA100C5420A80D37C9BB8D7FB5ECEC2BF65FB7C687548D4EA182"
+  },
+  {
+    "path": "apps/api/src/infrastructure/database.ts",
+    "last_write_utc": "2026-09-21T04:41:03.0058236Z",
+    "sha256": "1471EE12A9AD742D6C7AC6B4465EDD12CB36EBE6F01824F2D90DB5669A1854F6"
+  },
+  {
+    "path": "apps/api/src/infrastructure/graph-checkpoints.ts",
+    "last_write_utc": "2026-09-24T06:58:27.0383043Z",
+    "sha256": "27785E434BF6DD23B77BF61498135CD110EE95F87B61C75A007238F24627A631"
+  },
+  {
+    "path": "apps/api/src/infrastructure/json.ts",
+    "last_write_utc": "2026-09-20T16:24:14.1816635Z",
+    "sha256": "6E6A84081973629CE04711A50DFFEBD7960EF50D873C1438CCF8A81AE1EAA8A1"
+  },
+  {
+    "path": "apps/api/src/infrastructure/migration-runner.ts",
+    "last_write_utc": "2026-09-21T04:14:40.4766338Z",
+    "sha256": "1C07141F82D0B0171948EAA4B2A47197A783C34E9619C763523AA2F97DCD1719"
+  },
+  {
+    "path": "apps/api/src/infrastructure/pg-types.ts",
+    "last_write_utc": "2026-09-20T16:24:35.5959746Z",
+    "sha256": "F8A4097DA8E15707FE9A9FB127D17CE1AAF03146AC0754079647063DCF29C32C"
+  },
+  {
+    "path": "apps/api/src/infrastructure/postgres-error.ts",
+    "last_write_utc": "2026-09-20T16:24:40.0068803Z",
+    "sha256": "59C409D50651005748DF12053C015EF04F689750897ECBA0A5D6B017CDDAD9BC"
+  },
+  {
+    "path": "apps/api/src/infrastructure/schema-readiness.ts",
+    "last_write_utc": "2026-09-21T04:14:40.4776344Z",
+    "sha256": "2C4E566E67FCA55F63953C9428A847C7E868CDC5FB6F794A1711D8B27255D7A9"
+  },
+  {
+    "path": "apps/api/src/main.ts",
+    "last_write_utc": "2026-09-28T06:34:48.9848174Z",
+    "sha256": "E34E09E6F1E98B09E15327087634C2BB385AD0DA31B9058C9D53ED0771A3D6EF"
+  },
+  {
+    "path": "apps/api/src/model/model-call-repository.ts",
+    "last_write_utc": "2026-09-28T15:54:54.1899007Z",
+    "sha256": "2A7B0A57B8AB63F2951D436E593DAA9E9D30CB995C00CD196B3AD8B075EB5894"
+  },
+  {
+    "path": "apps/api/src/project/continuation-point-repository.ts",
+    "last_write_utc": "2026-09-29T12:34:39.3671542Z",
+    "sha256": "4815F23667546594A22A71E2A9CBED1329605810D747EA02C70A1D48D3467AFF"
+  },
+  {
+    "path": "apps/api/src/project/project-phase.ts",
+    "last_write_utc": "2026-09-21T00:18:26.8442759Z",
+    "sha256": "7D2CEDD26962117F6C15FD14D60D306E67129760B87B41A16177AE8CBEDF4734"
+  },
+  {
+    "path": "apps/api/src/project/project-repository.ts",
+    "last_write_utc": "2026-09-27T07:17:06.4685920Z",
+    "sha256": "7C0B3B1AABF376562FF1D8E9807C0D42D029761B81A1390ED46CEE7D3CED92F8"
+  },
+  {
+    "path": "apps/api/src/receipt/command-receipt-repository.ts",
+    "last_write_utc": "2026-09-20T16:25:45.2620861Z",
+    "sha256": "572458AAC2EDFA03A8E05E1F266457FEC8BEB4B23DFF396721E1D2C2203529E1"
+  },
+  {
+    "path": "apps/api/src/receipt/payload-hash.ts",
+    "last_write_utc": "2026-09-20T16:28:09.4954936Z",
+    "sha256": "375E77C1BEB75DDFBB219130B54EDA5113EFE345DB80AF4CF78C4ED1B07AA82B"
+  },
+  {
+    "path": "apps/api/src/review/review-repository.ts",
+    "last_write_utc": "2026-09-26T00:45:03.4071637Z",
+    "sha256": "15655325C2881C536645F22CACA233AA36C958A226D91132C2F533473687233B"
+  },
+  {
+    "path": "apps/api/src/run/recovery-repository.ts",
+    "last_write_utc": "2026-09-24T11:06:49.9419160Z",
+    "sha256": "E8B14E649490280902F1BEBAC681836746E60F93BE83E44CB5F8FD03E8074B89"
+  },
+  {
+    "path": "apps/api/src/run/run-dispatch-repository.ts",
+    "last_write_utc": "2026-09-27T07:13:23.1578418Z",
+    "sha256": "1F1F57C05442F0680A9CDE614A44C4B9007B96D58C3DB48A76C3B35D905E3E7E"
+  },
+  {
+    "path": "apps/api/src/run/run-event-repository.ts",
+    "last_write_utc": "2026-09-24T04:02:10.7450325Z",
+    "sha256": "35BBE552B4E035D5E501A475EB133EFD3403A01A8AD8BA1760EA2A72473231F4"
+  },
+  {
+    "path": "apps/api/src/run/run-repository.ts",
+    "last_write_utc": "2026-09-28T23:32:57.3168633Z",
+    "sha256": "07CD558317594DB70DE523A1BF9CE51D418BFC6807404683EC2BB640403B90F1"
+  },
+  {
+    "path": "apps/api/src/shared/decimal.ts",
+    "last_write_utc": "2026-09-20T16:25:23.7458286Z",
+    "sha256": "7E2377A1CF21D60D49674DCF5D761316EF406E2875105CC8002D92991D8EDA8A"
+  },
+  {
+    "path": "apps/api/src/shared/field-error.ts",
+    "last_write_utc": "2026-09-20T16:56:50.3729655Z",
+    "sha256": "2673C7FE9640C2038CF38264BCECCA07CCA97CB3199D5DF4180133EB1C450A47"
+  },
+  {
+    "path": "apps/api/src/shared/sql-rows.ts",
+    "last_write_utc": "2026-09-20T16:25:28.8016246Z",
+    "sha256": "2A5D815608BD1B26021DE071CE9B4E8DF33A11E4492FD13221B559288C4E54D2"
+  },
+  {
+    "path": "apps/api/src/shared/text.ts",
+    "last_write_utc": "2026-09-25T13:57:48.1656659Z",
+    "sha256": "AA66E210B380D7D1B3B1EAAC168B1314B54DBFCDFFC9C19A52CFB8E030CA7D29"
+  },
+  {
+    "path": "apps/api/src/skills/first-party-registry.ts",
+    "last_write_utc": "2026-09-26T05:30:47.8354522Z",
+    "sha256": "57A941AAD593440E7B4DB2D6FCBBE45F58168903A829A2D582E50754E31F7F45"
+  },
+  {
+    "path": "apps/api/src/skills/skill-basis.ts",
+    "last_write_utc": "2026-09-26T05:23:49.9185260Z",
+    "sha256": "DE27E34400CF300745CDB123D5EAA961EA9C494AF702759082E39B249716C422"
+  },
+  {
+    "path": "apps/api/src/skills/skill-output.ts",
+    "last_write_utc": "2026-09-26T05:20:30.3252156Z",
+    "sha256": "35947AF14C8F8A5636329F1DD18F4BE8395EC7EAF15F0D8729AAC98AEF667D00"
+  },
+  {
+    "path": "apps/api/src/skills/skill-proposal.ts",
+    "last_write_utc": "2026-09-26T04:38:08.1448714Z",
+    "sha256": "6DA6BDE446937933078957F56BE8EEF90B4E25E68C022791229FE0F3198AEEFE"
+  },
+  {
+    "path": "apps/api/src/storage/managed-content-store.ts",
+    "last_write_utc": "2026-09-20T17:27:10.8253689Z",
+    "sha256": "DA4603083EC1CF4AE5F97F921973334322F0783F92D787A4517B358C6FB4AC19"
+  },
+  {
+    "path": "apps/api/src/task/task-repository.ts",
+    "last_write_utc": "2026-09-28T23:32:57.4367758Z",
+    "sha256": "7A6998D4AE687071F3AAB85587194E7CE9F79AD23CFB07856133F6209B2DCFD3"
+  },
+  {
+    "path": "apps/api/src/today/today-repository.ts",
+    "last_write_utc": "2026-09-26T02:31:55.7754328Z",
+    "sha256": "B16BB7BF250D1B981953A8184C3678EC5AAD150736CB2E67B7069B8B5F59D28E"
+  },
+  {
+    "path": "apps/api/src/verification/verification-repository.ts",
+    "last_write_utc": "2026-09-28T23:32:57.4920697Z",
+    "sha256": "DD23A92D51C4FDB504162E169CCC58B09BD82F6412575E441E6D18B88915CCA5"
+  },
+  {
+    "path": "apps/api/src/view/builtin-view.ts",
+    "last_write_utc": "2026-09-26T04:56:27.6507937Z",
+    "sha256": "20EAC7D3FFFF27AD80CEA795554799A30D04B6121F3DBB9BA68C4DE5A733ED08"
+  },
+  {
+    "path": "apps/api/src/view/view-repository.ts",
+    "last_write_utc": "2026-09-26T04:56:39.3026987Z",
+    "sha256": "DD259E28BE6A794973ED1E6B15D76B1E391A57BA01D1CC6FCAADA28F639F60E8"
+  },
+  {
+    "path": "apps/api/src/web/web-fetch.ts",
+    "last_write_utc": "2026-09-25T14:47:43.8756084Z",
+    "sha256": "04DEC27B2C55959A034787DB33698D0EAD454B2C0E965F0C1EB2A133AA1E5CA8"
+  },
+  {
+    "path": "apps/api/src/worker/desktop-supervisor-protocol.ts",
+    "last_write_utc": "2026-09-24T03:21:40.9581325Z",
+    "sha256": "58BC9EA25EF654CD4AE69EE1D21791FD50C1A20349122AA6F668532321877C06"
+  },
+  {
+    "path": "apps/api/src/worker/main.ts",
+    "last_write_utc": "2026-09-29T06:54:20.4570714Z",
+    "sha256": "060BCD3CFE678DCEDDDF964E2F320A7BD3933F7C3B940F38CC3FD260574BD999"
+  },
+  {
+    "path": "apps/api/src/worker/mock-gateway-action.ts",
+    "last_write_utc": "2026-09-27T06:03:13.4706423Z",
+    "sha256": "F3BD0FE79632F1AB19A3892BB2A5F4F3BAB59625E530C811ECDFC089639C8846"
+  },
+  {
+    "path": "apps/api/src/worker/run-command.ts",
+    "last_write_utc": "2026-09-24T14:21:51.8035893Z",
+    "sha256": "54DBC352B4E4C42DD258A37809DBE8EC88BBBDA332C187FA9A2959B2BDF95772"
+  },
+  {
+    "path": "apps/api/src/worker/run-graph.ts",
+    "last_write_utc": "2026-09-26T02:57:05.8845193Z",
+    "sha256": "23094DACF155CA9FC189E3B9BE43364C1AF9F56DDE720DBB5AC89A2F5A155404"
+  },
+  {
+    "path": "apps/api/src/worker/supervisor-main.ts",
+    "last_write_utc": "2026-09-29T06:54:38.7967466Z",
+    "sha256": "ACF6DDC18E8D29466F2C196123EE3B92EBE556B16E1EC838296A6B998DF26510"
+  },
+  {
+    "path": "apps/api/src/worker/supervisor.ts",
+    "last_write_utc": "2026-09-29T06:54:20.4559764Z",
+    "sha256": "5EA750E6BED0FC3E960FFDF1F52D1F7933A0BF91938B4D15A634EDAE353B1D83"
+  },
+  {
+    "path": "apps/api/src/workflow/check-plan.ts",
+    "last_write_utc": "2026-09-25T12:42:10.6090746Z",
+    "sha256": "388A71D146F87D69461DFAA3443E5CC3C81AD1564811B45B843FB87D2DC24C61"
+  },
+  {
+    "path": "apps/api/src/workflow/checkers.ts",
+    "last_write_utc": "2026-09-30T04:26:26.0535969Z",
+    "sha256": "67D9EE97DA6415CC48C3747AFFEDB2716AFFCCB4B11A89F54D12241EDCBC61E2"
+  },
+  {
+    "path": "apps/api/src/workflow/context-fixture.ts",
+    "last_write_utc": "2026-09-28T23:32:57.5693825Z",
+    "sha256": "9A0C1C8B9158D53BD774697259C1FBC4D5DC15FE0374373CC66CF88C4A3A2171"
+  },
+  {
+    "path": "apps/api/src/workflow/execution-contract.ts",
+    "last_write_utc": "2026-09-28T23:32:57.6199630Z",
+    "sha256": "0B18CE2106667D46B3B3398B699C93FACA20B82804CDE2008EBB7BED95CB4F47"
+  },
+  {
+    "path": "apps/api/src/workflow/fake-model-port.ts",
+    "last_write_utc": "2026-09-28T23:32:57.6447963Z",
+    "sha256": "086088CB602289E99E387BF8A0B8FB0BFAB3BA548F874BEA108EBA1046C829FE"
+  },
+  {
+    "path": "apps/api/src/workflow/markdown-deliverable.ts",
+    "last_write_utc": "2026-09-28T23:32:57.6707662Z",
+    "sha256": "337CAF7969B7C0E1A47E0056C94A673AAEB09D4CB1400AC610FD0EA603265DA3"
+  },
+  {
+    "path": "apps/api/src/workflow/model-endpoint-policy.ts",
+    "last_write_utc": "2026-09-26T06:12:13.0365645Z",
+    "sha256": "55DC85A87A57DF54BCAC6AFA9D934620312B1F2A47DCC93C23A8F9D28D5FA7BA"
+  },
+  {
+    "path": "apps/api/src/workflow/model-error-classification.ts",
+    "last_write_utc": "2026-09-30T04:38:09.2273274Z",
+    "sha256": "A4E738AF353B27D613031E26AFDB0994F2447F0C97E8A691A6A50A4A26D9F495"
+  },
+  {
+    "path": "apps/api/src/workflow/model-port-config.ts",
+    "last_write_utc": "2026-09-28T15:53:46.7032843Z",
+    "sha256": "B34B4CA0D4763D6C4E73C9565A806D35901FC757889E8A40B37036A5A3E38EB6"
+  },
+  {
+    "path": "apps/api/src/workflow/model-port-verify.ts",
+    "last_write_utc": "2026-09-29T13:50:51.6345673Z",
+    "sha256": "7F2B3C0913D1DBCB10CA718E71635B3D8A71C5EDC5A411969153D9B329A408C0"
+  },
+  {
+    "path": "apps/api/src/workflow/openai-compatible-model-port.ts",
+    "last_write_utc": "2026-09-29T01:15:14.2867398Z",
+    "sha256": "4DC4242C014A69C59215DA63D4751C46D3EAA89311AE52D731254A51E4AE84C4"
+  },
+  {
+    "path": "apps/api/src/workflow/verdict.ts",
+    "last_write_utc": "2026-09-28T23:32:57.6982119Z",
+    "sha256": "C6C0E5CC92500C835E05FF6DA6DE19363498333E70FC951000BAF29CBF35E2DD"
+  },
+  {
+    "path": "apps/api/src/workspace/workspace-repository.ts",
+    "last_write_utc": "2026-09-23T14:18:04.1369223Z",
+    "sha256": "6DD69012955F858CC01398EA3C0CC92B986DA2D7A3917E59C4A109CC2911B0F5"
+  },
+  {
+    "path": "apps/api/test/integration/api-artifacts.integration.test.ts",
+    "last_write_utc": "2026-09-28T15:53:30.5019875Z",
+    "sha256": "DA16302DFBD1F8C26A124D1032AA113AE3F7253E6B4DCC707C432045BA1BDE07"
+  },
+  {
+    "path": "apps/api/test/integration/api-delegations.integration.test.ts",
+    "last_write_utc": "2026-09-28T23:32:57.7403586Z",
+    "sha256": "1739142B2EFBE794B1E791E40E8A23D51DB9D650CCFE737BE1C8EF466133C940"
+  },
+  {
+    "path": "apps/api/test/integration/api-harness.ts",
+    "last_write_utc": "2026-09-28T15:55:53.8545925Z",
+    "sha256": "25E9C523845332C0BC864620FD1656AC573698FBACC04766AB4CB99873CEABCE"
+  },
+  {
+    "path": "apps/api/test/integration/api-lists.integration.test.ts",
+    "last_write_utc": "2026-09-28T15:55:07.1719563Z",
+    "sha256": "377B85028194BDB7A209F896B5DC66A0AFE73ABD5B69292D94CB09B69633878C"
+  },
+  {
+    "path": "apps/api/test/integration/api-state.integration.test.ts",
+    "last_write_utc": "2026-09-28T15:55:07.2066399Z",
+    "sha256": "0D6EEA9FFACB77BB0541BA39E721DE3E173A3933D6434169F1990B2415340CFE"
+  },
+  {
+    "path": "apps/api/test/integration/api-tasks.integration.test.ts",
+    "last_write_utc": "2026-09-28T15:55:07.2428246Z",
+    "sha256": "A9B91C7E1BA798F93745E11893FF435406F981B31ADBBA57890922385AFD6829"
+  },
+  {
+    "path": "apps/api/test/integration/api.integration.test.ts",
+    "last_write_utc": "2026-09-21T04:19:16.7979810Z",
+    "sha256": "9A631A93F9FD109E65576E4ADC149ED2A6F58566E459BF2363405DDF325B261A"
+  },
+  {
+    "path": "apps/api/test/integration/artifact-direct-uses.integration.test.ts",
+    "last_write_utc": "2026-09-28T15:55:07.2864934Z",
+    "sha256": "9A09022BF72BF707B7D5B24700C5451C4D88E32DFC70E15E267E302D168FB436"
+  },
+  {
+    "path": "apps/api/test/integration/assist-live-preview.integration.test.ts",
+    "last_write_utc": "2026-09-28T15:55:07.3314650Z",
+    "sha256": "36901E17A6EA1C4C7EEA95CE7DB7B5A972577D406602B3807DD28D65D48D4713"
+  },
+  {
+    "path": "apps/api/test/integration/assist.integration.test.ts",
+    "last_write_utc": "2026-09-30T02:39:27.3989880Z",
+    "sha256": "640F5FBD4C9951C34AE94AE62684D7C4CE5746FC26DB97868A3D240563EFB9E9"
+  },
+  {
+    "path": "apps/api/test/integration/cli.integration.test.ts",
+    "last_write_utc": "2026-09-30T02:28:56.3642643Z",
+    "sha256": "A5E53CD54A2EAAE387C2619C6817D9F9DDC79063A3F17A5891D1D87DBE3AA23D"
+  },
+  {
+    "path": "apps/api/test/integration/collaboration-controls.integration.test.ts",
+    "last_write_utc": "2026-09-28T15:55:07.3788429Z",
+    "sha256": "E6FEA8CB173CFB06B513E278E5D58994E26B54AD8800BB92CB247AA286B404F2"
+  },
+  {
+    "path": "apps/api/test/integration/context.integration.test.ts",
+    "last_write_utc": "2026-09-26T06:10:41.7705080Z",
+    "sha256": "FDDF89C7DEF29995695C201FC944B4B3F09073991154D7746364581171099A2F"
+  },
+  {
+    "path": "apps/api/test/integration/desktop-child.integration.test.ts",
+    "last_write_utc": "2026-09-23T16:40:11.9440427Z",
+    "sha256": "8E4255055C7B9153F82AA8E49ABE7441CF2D64A5D8B37934100420A9D24D9C47"
+  },
+  {
+    "path": "apps/api/test/integration/gateway.integration.test.ts",
+    "last_write_utc": "2026-09-28T14:31:31.7806507Z",
+    "sha256": "5A6209DEE3172A38C4826E0152FAF2BAD43AF7A36AFD9224BC47199C56043959"
+  },
+  {
+    "path": "apps/api/test/integration/information.integration.test.ts",
+    "last_write_utc": "2026-09-23T13:55:27.3926982Z",
+    "sha256": "E0AF65B822E731C88E3B8771D27350D8BABD8B270A49EC20F26EA311F4F7811C"
+  },
+  {
+    "path": "apps/api/test/integration/integration-support.ts",
+    "last_write_utc": "2026-09-20T16:29:40.0383719Z",
+    "sha256": "3BD934661F53B0CB26662D81E276B17D54C0452DAA19442EC857081D2E64F2B3"
+  },
+  {
+    "path": "apps/api/test/integration/knowledge-reading.integration.test.ts",
+    "last_write_utc": "2026-09-28T15:55:16.0796837Z",
+    "sha256": "76FD9083289D94F8D18C6AF3013E81F3A9B64D49C7CD12396F1CE748D167C1AE"
+  },
+  {
+    "path": "apps/api/test/integration/m03-mock-benchmark.bench.ts",
+    "last_write_utc": "2026-09-24T14:16:41.9579617Z",
+    "sha256": "8DE4880B5FC2CA31E89A2BBFC1D24ADB36B1B0548567D5F3B775AFA35CEE91A5"
+  },
+  {
+    "path": "apps/api/test/integration/m06-stop-proof.integration.test.ts",
+    "last_write_utc": "2026-09-27T06:56:50.0628742Z",
+    "sha256": "514516380B83D916232A3FE95717D4819874AF2EE25244C57F53899869324027"
+  },
+  {
+    "path": "apps/api/test/integration/migration.integration.test.ts",
+    "last_write_utc": "2026-09-30T02:15:14.7858263Z",
+    "sha256": "13514BE5454836BAA84AAB0156223F57E8407AAA096651F37B155FB93A27ADE2"
+  },
+  {
+    "path": "apps/api/test/integration/model-call-budget.integration.test.ts",
+    "last_write_utc": "2026-09-26T06:14:39.8702593Z",
+    "sha256": "0300BE9488E297398D946C13D692CB20CD95D3843CB45F1F2715EE0944594536"
+  },
+  {
+    "path": "apps/api/test/integration/model-port.integration.test.ts",
+    "last_write_utc": "2026-09-28T08:09:02.8617625Z",
+    "sha256": "917CF18BA116C401981A6168BC56F668609C89575CE456A08710EC652D4A1A05"
+  },
+  {
+    "path": "apps/api/test/integration/model-verify.integration.test.ts",
+    "last_write_utc": "2026-09-28T16:05:15.0754487Z",
+    "sha256": "54869EA2DA6E23784420E34B1668EABDDEBB1CED480CFECBA1BDAAC2B68ED5D4"
+  },
+  {
+    "path": "apps/api/test/integration/persistence.integration.test.ts",
+    "last_write_utc": "2026-09-28T23:32:57.9505170Z",
+    "sha256": "8665A5E76343F4899581A18765B91CFF7A5CAB7638679341565C88363FA2A546"
+  },
+  {
+    "path": "apps/api/test/integration/project-archive-gate.integration.test.ts",
+    "last_write_utc": "2026-09-28T15:55:16.1168880Z",
+    "sha256": "54D853087102C8B0415DD36B3F035783ADEC7E1205BB5C167EC7FFB229151D74"
+  },
+  {
+    "path": "apps/api/test/integration/project-archive.integration.test.ts",
+    "last_write_utc": "2026-09-28T15:55:00.1148844Z",
+    "sha256": "33FBA773ABC43D0ADF07AEE48DD85FD667B6F11561104A1AC6367A5623724AEC"
+  },
+  {
+    "path": "apps/api/test/integration/project-blueprint.integration.test.ts",
+    "last_write_utc": "2026-09-28T14:31:46.1111017Z",
+    "sha256": "C8701E719399718006B72E9BDFB1871DDE6D6625989C14DA152614F95FEA8500"
+  },
+  {
+    "path": "apps/api/test/integration/project-continuation.integration.test.ts",
+    "last_write_utc": "2026-09-29T14:07:01.2823792Z",
+    "sha256": "098D75B2A8FFBC31AD1E966D384C9C043248D185DEF159337B0BE2DCB9AB38F0"
+  },
+  {
+    "path": "apps/api/test/integration/real-model.integration.test.ts",
+    "last_write_utc": "2026-09-29T02:07:04.7987441Z",
+    "sha256": "40B04B1C676784573B856B628D8C1451AE3B449EE05D87DD1C7B0B45BE14DA17"
+  },
+  {
+    "path": "apps/api/test/integration/real-tools-gateway.integration.test.ts",
+    "last_write_utc": "2026-09-27T16:27:21.4388629Z",
+    "sha256": "9D0B8E06E87F2BA605FA13A38D379EC16F853C998A703F6C86864DB3FD6A899F"
+  },
+  {
+    "path": "apps/api/test/integration/recovery-worker-child.ts",
+    "last_write_utc": "2026-09-23T11:48:13.1730629Z",
+    "sha256": "34EBAF2E91CFA2A18CC2C914FC5B72CD3F217BC825C4BA2A01EA0F85A295E0A5"
+  },
+  {
+    "path": "apps/api/test/integration/recovery.integration.test.ts",
+    "last_write_utc": "2026-09-24T14:00:47.3635069Z",
+    "sha256": "8FEC3351AD6504EC500373E726C75C3E37AE6DB184ED61BBEF5AA4799AC91357"
+  },
+  {
+    "path": "apps/api/test/integration/run-command-order.integration.test.ts",
+    "last_write_utc": "2026-09-28T14:21:56.2998014Z",
+    "sha256": "597B38246E97712E0B25BB796DE4F41CD58A1EDBE074E58434EB0584D1E2B72E"
+  },
+  {
+    "path": "apps/api/test/integration/run-dispatch.integration.test.ts",
+    "last_write_utc": "2026-09-29T07:05:05.5181066Z",
+    "sha256": "EF36A8A5864FE0C3D64EFA3249D26C8FBD965D33A6898D26D08C81487D556A18"
+  },
+  {
+    "path": "apps/api/test/integration/run-draft-preview.integration.test.ts",
+    "last_write_utc": "2026-09-30T04:28:25.4489647Z",
+    "sha256": "1FB538098E58D4A3AC27B1FA98685D25DAECDB5590F40F516814B5604D89242E"
+  },
+  {
+    "path": "apps/api/test/integration/run-events.integration.test.ts",
+    "last_write_utc": "2026-09-24T08:28:59.6688227Z",
+    "sha256": "0F653646BAEE65044A4B1A1CF98F2F6577AD7A4166269DAB087144E75FD275F2"
+  },
+  {
+    "path": "apps/api/test/integration/run-graph.integration.test.ts",
+    "last_write_utc": "2026-09-27T15:26:16.2625046Z",
+    "sha256": "4BDED12825EFBF5C3A062F2AC3F396D46B9BCC772808EC157D636BF10213AD01"
+  },
+  {
+    "path": "apps/api/test/integration/run-steps.integration.test.ts",
+    "last_write_utc": "2026-09-28T23:32:57.9837885Z",
+    "sha256": "8AFDDC92C54EF4C7865EBCE16AD30818247D6DD8C57DA1C1CBF4C3BCF265DCE7"
+  },
+  {
+    "path": "apps/api/test/integration/schema-readiness.integration.test.ts",
+    "last_write_utc": "2026-09-28T23:32:58.0160834Z",
+    "sha256": "ED72FFD752B8C5D282E4B0EC46B1D00A5DFBF5F739952DA86E613C9B1E92EDBE"
+  },
+  {
+    "path": "apps/api/test/integration/today.integration.test.ts",
+    "last_write_utc": "2026-09-28T15:55:16.2383863Z",
+    "sha256": "A564E8FFE98D4A8B55D096BB3CF54ACC31F9BE1EB607941AB30ABEFC03B32124"
+  },
+  {
+    "path": "apps/api/test/integration/traceability.integration.test.ts",
+    "last_write_utc": "2026-09-30T04:25:14.2338617Z",
+    "sha256": "FA9A0FD065EFCF1C7DE68AF8EB606496D63A6C58B4DC34F44BF186C4017280AE"
+  },
+  {
+    "path": "apps/api/test/integration/verification.integration.test.ts",
+    "last_write_utc": "2026-09-28T23:32:58.0560349Z",
+    "sha256": "D64E50DE36D6F745DEA8E1DD0B346F52BEC0CD5063B9429C37883E27335A4366"
+  },
+  {
+    "path": "apps/api/test/integration/view-configuration.integration.test.ts",
+    "last_write_utc": "2026-09-26T05:00:30.1980075Z",
+    "sha256": "D2DA4BA6AEDB1F4A587B9F4CFB41BC52D9D0C5F3F31A6F006A5F924D0350ED95"
+  },
+  {
+    "path": "apps/api/test/integration/web-fetch.integration.test.ts",
+    "last_write_utc": "2026-09-28T16:14:45.7111570Z",
+    "sha256": "838A751B4202353F91114110BC1E918BBD16E38C2F1EF75D9D121ECD43FAAD9C"
+  },
+  {
+    "path": "apps/api/test/unit/adapter-metadata.test.ts",
+    "last_write_utc": "2026-09-26T11:36:39.3713999Z",
+    "sha256": "697EE4C877552B076E2F275A8B70C8A1460F937B99A74C0C01582E7B2802AB19"
+  },
+  {
+    "path": "apps/api/test/unit/assist-live-preview.test.ts",
+    "last_write_utc": "2026-09-26T08:23:57.3082733Z",
+    "sha256": "55F0C55186ECD3B21E2BE3C50FC0E511001A3C65373DDCA8F02D598E4852B9D3"
+  },
+  {
+    "path": "apps/api/test/unit/check-plan.test.ts",
+    "last_write_utc": "2026-09-28T23:32:58.0819484Z",
+    "sha256": "9E4FD0AF27BFB2EB347AAFC7CC6B1CAFBDF88AE55B52BC79BB37AA24186E96F1"
+  },
+  {
+    "path": "apps/api/test/unit/checkers.test.ts",
+    "last_write_utc": "2026-09-30T04:37:37.9285939Z",
+    "sha256": "EBB4EF5F008338C2D5EB4C53E0BADED1E16ADEC386A4A5C1077D7967DA0D89EC"
+  },
+  {
+    "path": "apps/api/test/unit/cli-adapter.test.ts",
+    "last_write_utc": "2026-09-26T11:36:52.6279880Z",
+    "sha256": "14CD56E266872F55965B54EC63629D1F5C5C487B636C655DF584E2AFC77652B3"
+  },
+  {
+    "path": "apps/api/test/unit/config.test.ts",
+    "last_write_utc": "2026-09-20T15:16:48.0670219Z",
+    "sha256": "AB854A76D3B2076963E51EB2BB53FB488B9717C4DCFDDB236F421577D565D2EA"
+  },
+  {
+    "path": "apps/api/test/unit/cursor.test.ts",
+    "last_write_utc": "2026-09-26T06:31:13.6969647Z",
+    "sha256": "6F6FF44BD30CC59395CB420CF8E51F89AE356E575D8412FCCD97F25C72411677"
+  },
+  {
+    "path": "apps/api/test/unit/desktop-supervisor-protocol.test.ts",
+    "last_write_utc": "2026-09-24T03:22:03.4637732Z",
+    "sha256": "6A10A5029C2C72BB164280D07B325CD03346526064F91678894FB3F7A1CB2A03"
+  },
+  {
+    "path": "apps/api/test/unit/execution-contract.test.ts",
+    "last_write_utc": "2026-09-27T05:39:49.6771316Z",
+    "sha256": "3C01F64B5752504E86A079B9279DE3FAFC27D71867C52B8B38D3C0BD401C0159"
+  },
+  {
+    "path": "apps/api/test/unit/fake-model-port.test.ts",
+    "last_write_utc": "2026-09-28T23:32:58.1396237Z",
+    "sha256": "D90DD6795F11CE466D56EB65D3FC4ADD307AB5C64B33EB5C824A7870034DEF72"
+  },
+  {
+    "path": "apps/api/test/unit/file-changeset.test.ts",
+    "last_write_utc": "2026-09-27T11:17:52.6900962Z",
+    "sha256": "B33993AF5AE2CEC692D50AF7BDB3D6A5A4BF22D1D74CACDA1BDA06729928A08B"
+  },
+  {
+    "path": "apps/api/test/unit/file-write-frozen-diff.test.ts",
+    "last_write_utc": "2026-09-27T10:02:04.6147096Z",
+    "sha256": "BF16AB61098608940BC1312A4C7B581EA3F30E75E68A8749B57B7AA6F9E06103"
+  },
+  {
+    "path": "apps/api/test/unit/first-party-skills.test.ts",
+    "last_write_utc": "2026-09-26T04:45:05.7367405Z",
+    "sha256": "7DCEBA7C7F7ADD749D6A42F00C878152DD00AE4492E070E93C550677C2D1A187"
+  },
+  {
+    "path": "apps/api/test/unit/managed-content-store.test.ts",
+    "last_write_utc": "2026-09-20T17:31:45.2433287Z",
+    "sha256": "8E1410483FE1C3256120783D6F013DF14534FD1A9C64F687242BC37FC12A698F"
+  },
+  {
+    "path": "apps/api/test/unit/markdown-deliverable.test.ts",
+    "last_write_utc": "2026-09-28T23:32:58.1643124Z",
+    "sha256": "C63526A6E6C68E122578562CE7A40FE960A4002098A2455046659B2F8BCBC74D"
+  },
+  {
+    "path": "apps/api/test/unit/markdown-locks.test.ts",
+    "last_write_utc": "2026-09-28T03:01:47.6056271Z",
+    "sha256": "57A052AB644A0962228B80B5E3E510946D48C12E0704AD266D068B3A91B3C268"
+  },
+  {
+    "path": "apps/api/test/unit/model-endpoint-policy.test.ts",
+    "last_write_utc": "2026-09-26T06:12:13.0380783Z",
+    "sha256": "08A8230AAD091679381215C81A23DB186B3DBD38A382E0E6D5BFA295B3DC76D3"
+  },
+  {
+    "path": "apps/api/test/unit/model-error-classification.test.ts",
+    "last_write_utc": "2026-09-30T04:37:37.9275887Z",
+    "sha256": "A9804C600D2FE92DC87E6EBA09ECEF901B863B45F150DAB980BD64F5349F7358"
+  },
+  {
+    "path": "apps/api/test/unit/model-port-config.test.ts",
+    "last_write_utc": "2026-09-26T06:05:41.1636472Z",
+    "sha256": "7AF954ADF2E793B80F1D73BDE34C1BB8B2062A135C57803C25809333CFBF102D"
+  },
+  {
+    "path": "apps/api/test/unit/model-port-status.test.ts",
+    "last_write_utc": "2026-09-28T08:02:04.0147811Z",
+    "sha256": "DF50DBB7A156C504AEBB407CEC2CE46B2BE32AE7EFE212FAC56700A2C0E22F8A"
+  },
+  {
+    "path": "apps/api/test/unit/model-port-verify.test.ts",
+    "last_write_utc": "2026-09-28T15:57:43.0218733Z",
+    "sha256": "13E74B79B9330E75F7FFFE6495371D34F387956E56B73054AC2FB0B266FDFE75"
+  },
+  {
+    "path": "apps/api/test/unit/openai-compatible-model-port.test.ts",
+    "last_write_utc": "2026-09-26T10:24:18.6679985Z",
+    "sha256": "8C02D4AB2F75187F4FFC7DFCF1FC7621346D36B57D0928C3C3554F3EB138BE6C"
+  },
+  {
+    "path": "apps/api/test/unit/openai-read-prompt.test.ts",
+    "last_write_utc": "2026-09-26T02:12:00.8766246Z",
+    "sha256": "97650E8653A9548376695B98C6BD8C5E5AADF274975221BF57C02CD33590D44C"
+  },
+  {
+    "path": "apps/api/test/unit/payload-hash.test.ts",
+    "last_write_utc": "2026-09-20T16:34:06.0017783Z",
+    "sha256": "059289D4DB7554838CCDE46509E1D8C98920979B7DD67DC27FB1F27C0B1A11B9"
+  },
+  {
+    "path": "apps/api/test/unit/run-events-api.test.ts",
+    "last_write_utc": "2026-09-24T04:17:38.0435586Z",
+    "sha256": "4ED7585168498E110C2E2EC5C9EC3F94AA1EC048487FB6D2226D5073582ED85A"
+  },
+  {
+    "path": "apps/api/test/unit/run-read-evidence.test.ts",
+    "last_write_utc": "2026-09-26T02:06:38.0897466Z",
+    "sha256": "556AFDBC1DD2D1720CC4BF839FA4615889D9397B69D9E5455B1ACCCE28A6894E"
+  },
+  {
+    "path": "apps/api/test/unit/state-action.test.ts",
+    "last_write_utc": "2026-09-20T17:09:27.7902719Z",
+    "sha256": "DFFA90257FA2AFA422F4393D9F33E014B530857FBB2DB05DC90CE610D645C681"
+  },
+  {
+    "path": "apps/api/test/unit/verdict.test.ts",
+    "last_write_utc": "2026-09-28T23:32:58.1922776Z",
+    "sha256": "F1FA28D1345FCE53C8CF9F80EF67EF2C1427D1912567CFEFF4600A0CB30B6673"
+  },
+  {
+    "path": "apps/api/test/unit/verify-run.test.ts",
+    "last_write_utc": "2026-09-29T01:23:53.1264453Z",
+    "sha256": "6FFBC8A8D87C125E7FEE139792BDE91E8AC34AFC6D9FA795A43F35C3669B3E18"
+  },
+  {
+    "path": "apps/workbench/src/api/blueprintDtos.ts",
+    "last_write_utc": "2026-09-26T05:43:02.4928637Z",
+    "sha256": "8376092B792DB8321B419C7C09FBA6A0581E30AA2E559D3838E6DEADFEC09244"
+  },
+  {
+    "path": "apps/workbench/src/api/relayClient.ts",
+    "last_write_utc": "2026-09-30T04:16:51.8452564Z",
+    "sha256": "E9FD403624DDD4EBF0ECE870896B31CB0CE09E373F3E0F627AD4ED6F513C8ADF"
+  },
+  {
+    "path": "apps/workbench/src/api/runEvents.ts",
+    "last_write_utc": "2026-09-24T02:24:37.8350487Z",
+    "sha256": "7243EB8E2B2D440A9FE90CB6D7F98D90D4F19B4410C4BA12586AEAB770D3275C"
+  },
+  {
+    "path": "apps/workbench/src/App.tsx",
+    "last_write_utc": "2026-09-29T14:23:52.5418128Z",
+    "sha256": "8418775FDC02971B0B0ADB28B4054E03FF1042E324C28BE42FD9BE64DD0DF066"
+  },
+  {
+    "path": "apps/workbench/src/components/AppDialog.tsx",
+    "last_write_utc": "2026-09-26T02:25:54.8438406Z",
+    "sha256": "400EFD1230264DE0AF23AA922AB1F796505F67E8346747BFC3B1A9D47FDE24F7"
+  },
+  {
+    "path": "apps/workbench/src/components/AppShell.tsx",
+    "last_write_utc": "2026-09-30T03:46:51.7451786Z",
+    "sha256": "D4CE3BB3B8242C27AD364508720E07E0BA3141A7564D04DBE01BD66DB79A7D36"
+  },
+  {
+    "path": "apps/workbench/src/components/ArtifactImpactCheckPanel.tsx",
+    "last_write_utc": "2026-09-28T02:23:35.4793506Z",
+    "sha256": "C805FE57185B84E41423A4058065FFEA5DF1A5DBE0D2BB22F78F282DB03FB71A"
+  },
+  {
+    "path": "apps/workbench/src/components/ArtifactPanel.tsx",
+    "last_write_utc": "2026-09-29T11:49:14.3328366Z",
+    "sha256": "3B45A0BEA8FEB01AE8D25EB6569B6FD06A2D16E9C6A8ECF6B5846BBDE51F9EAC"
+  },
+  {
+    "path": "apps/workbench/src/components/ArtifactReaderPanel.tsx",
+    "last_write_utc": "2026-09-30T03:24:34.1150681Z",
+    "sha256": "1E8CABEFC056BA25FB69B1A4114B37A38E2F901EDEE486D6D20A0E01F511568E"
+  },
+  {
+    "path": "apps/workbench/src/components/ArtifactTextLocksPanel.tsx",
+    "last_write_utc": "2026-09-28T01:29:20.9359972Z",
+    "sha256": "B746CEFF0D07B7EAF5988544E9E70828F1F463462C5E404724840DEDB51C4DE9"
+  },
+  {
+    "path": "apps/workbench/src/components/ArtifactVersionCompare.tsx",
+    "last_write_utc": "2026-09-27T15:26:20.9296533Z",
+    "sha256": "93218875A4E649707B1F3F61F534B74305FCAE24916D7EA7030587F8828AB319"
+  },
+  {
+    "path": "apps/workbench/src/components/AssistSkillOutput.tsx",
+    "last_write_utc": "2026-09-26T05:30:08.4737844Z",
+    "sha256": "EE83B83B49344F73BEB7DF39C127E7E54BEE92D1D2F559FB2BDEF6C4A3E2E735"
+  },
+  {
+    "path": "apps/workbench/src/components/AssistSourcePicker.tsx",
+    "last_write_utc": "2026-09-26T01:07:40.8847481Z",
+    "sha256": "4780D793D01EFC5106EF7560EFDB6B00E514C07A3B74DD24EA8F40579B5701C5"
+  },
+  {
+    "path": "apps/workbench/src/components/AttentionQueue.tsx",
+    "last_write_utc": "2026-09-28T03:02:11.0897851Z",
+    "sha256": "276D82F20E76C567543B6423E0070BFBF2ADAA4E3CE13A3A88270B586C8B1DDE"
+  },
+  {
+    "path": "apps/workbench/src/components/CommandPalette.css",
+    "last_write_utc": "2026-09-28T12:38:42.5766148Z",
+    "sha256": "636779FCC09F3AFF53CCB2CA2548088747B2640EF21273B864DAA8440759F7B0"
+  },
+  {
+    "path": "apps/workbench/src/components/CommandPalette.tsx",
+    "last_write_utc": "2026-09-28T12:49:43.6277439Z",
+    "sha256": "CC63CDF3C55BB76D59759BCD6AC87F5F418EF1738025E59820141BACF2AB76EF"
+  },
+  {
+    "path": "apps/workbench/src/components/ContinuationPointPanel.tsx",
+    "last_write_utc": "2026-09-29T12:44:54.7795981Z",
+    "sha256": "50E8B968C8AD73D699633A7CE4D5F909AEF8FCDCEAF73D50CBE0A7658EF4B57A"
+  },
+  {
+    "path": "apps/workbench/src/components/DesktopTitleBar.tsx",
+    "last_write_utc": "2026-09-28T04:45:57.7809065Z",
+    "sha256": "766B6E0B0FB4DCB7EF20BC915DFED021E0368F88FAF863AF03BA1879208B8A43"
+  },
+  {
+    "path": "apps/workbench/src/components/DevToolsPanel.css",
+    "last_write_utc": "2026-09-29T13:36:33.0860532Z",
+    "sha256": "E51A14D6C2529D52C68E4B888CD364A1046015BE875D4E0E9DD7CDB4189264D0"
+  },
+  {
+    "path": "apps/workbench/src/components/DevToolsPanel.tsx",
+    "last_write_utc": "2026-09-29T13:36:24.4643506Z",
+    "sha256": "3E001313045A31F43ACAA322B326403095ACF562D65501D52D886ABBEF5F14B1"
+  },
+  {
+    "path": "apps/workbench/src/components/FileWriteDispositionPanel.tsx",
+    "last_write_utc": "2026-09-27T15:02:04.3413621Z",
+    "sha256": "9B04EA085A526EA0178396A2560E0E27823A7A0BCBDAE2C6D37786BB27BA053F"
+  },
+  {
+    "path": "apps/workbench/src/components/FileWriteFrozenDiffPanel.tsx",
+    "last_write_utc": "2026-09-27T09:57:10.6822134Z",
+    "sha256": "9535973C960FAAEFD57812C9AA3A5820C56DA9404367E6537062755790EAB3C9"
+  },
+  {
+    "path": "apps/workbench/src/components/InterventionNotifications.tsx",
+    "last_write_utc": "2026-09-28T03:56:20.5225551Z",
+    "sha256": "2E77A056823952338426CEB9DFADDEB006E49E9C362DB5B6C9D8F79248821A15"
+  },
+  {
+    "path": "apps/workbench/src/components/KnowledgeReader.tsx",
+    "last_write_utc": "2026-09-27T15:52:01.2901163Z",
+    "sha256": "ACFD9FD293B1AF6D6E5C58840EE89CB5DB55995BA62AA30B4C4B2923BD9C6173"
+  },
+  {
+    "path": "apps/workbench/src/components/ModelConnectionStrip.tsx",
+    "last_write_utc": "2026-09-30T03:22:54.8624946Z",
+    "sha256": "27021D8E96058141B148C04000DD5FA8A252F6B2310DF37EB68E564DED6A93DC"
+  },
+  {
+    "path": "apps/workbench/src/components/PackCatalogPanel.tsx",
+    "last_write_utc": "2026-09-28T16:08:01.7335054Z",
+    "sha256": "43E3994C0DEFD40FFDB1221DEB09F54659EB9936D3BD7CC56D4AD106CE81E5A1"
+  },
+  {
+    "path": "apps/workbench/src/components/ProjectKnowledgeGuide.tsx",
+    "last_write_utc": "2026-09-27T15:54:00.1106878Z",
+    "sha256": "08A88FB20F6E498B231A9582A0E965D2214779FF403A4F742D5C8FE6DB545AA7"
+  },
+  {
+    "path": "apps/workbench/src/components/ProjectNav.tsx",
+    "last_write_utc": "2026-09-26T05:06:26.9135965Z",
+    "sha256": "2C91534B6F25EDC6810B5160C3B5A4DB2E99BC213AED770DDBC35C15C0111088"
+  },
+  {
+    "path": "apps/workbench/src/components/RecentWorkRail.tsx",
+    "last_write_utc": "2026-09-30T03:32:15.6514230Z",
+    "sha256": "2EADA7C063AB8DB505985B128A18210CF036EFD21BFDE039CF15FB070B37C433"
+  },
+  {
+    "path": "apps/workbench/src/components/RelayConnectionDialog.tsx",
+    "last_write_utc": "2026-09-23T17:21:52.2332247Z",
+    "sha256": "D19C0E733E82F2E9B5736DA801DB166A37FB16A24A202DB85CC1D41D5A670950"
+  },
+  {
+    "path": "apps/workbench/src/components/ResponsiveRail.tsx",
+    "last_write_utc": "2026-09-23T16:27:08.9750763Z",
+    "sha256": "770C020AF7FA5DB3D54487FCEA83607738360A13828864CA7E92ACDA76D2087D"
+  },
+  {
+    "path": "apps/workbench/src/components/ReviewDecisionPanel.tsx",
+    "last_write_utc": "2026-09-30T03:52:58.2293825Z",
+    "sha256": "F983D5DDC43FE68572BD8E31BE40954112495F06B1B4BD36FD4E73E8F660C32E"
+  },
+  {
+    "path": "apps/workbench/src/components/RunControlPanel.tsx",
+    "last_write_utc": "2026-09-29T11:30:51.5668333Z",
+    "sha256": "4271CDFB74DD1B0EA1842B84E07C4EBC7103DDB37B1A89D760092074522C8C13"
+  },
+  {
+    "path": "apps/workbench/src/components/RunSourcesPanel.tsx",
+    "last_write_utc": "2026-09-23T16:50:15.1310228Z",
+    "sha256": "1AF687E57C543AC2E5AA1F2E91BE7375F71A5A6C45930F86CDC9998D7694C1DE"
+  },
+  {
+    "path": "apps/workbench/src/components/RunTracePanel.css",
+    "last_write_utc": "2026-09-26T03:09:42.8174731Z",
+    "sha256": "8D8B3CC61FC639769CC583C9EB0E1CCD7486DACAF6BB4346BA7D0E9DDF9FD868"
+  },
+  {
+    "path": "apps/workbench/src/components/RunTracePanel.tsx",
+    "last_write_utc": "2026-09-30T04:16:51.8479711Z",
+    "sha256": "71B750A354F515D5AE0614812AF44FA3E5ED506B73C2B94CA1F86B309F43C432"
+  },
+  {
+    "path": "apps/workbench/src/components/SafeInline.tsx",
+    "last_write_utc": "2026-09-23T16:27:08.9790040Z",
+    "sha256": "1FA108687C7A31C8C2D3884A921C4EA0839F038296A907855736737A17DBB127"
+  },
+  {
+    "path": "apps/workbench/src/components/SafeMarkdown.tsx",
+    "last_write_utc": "2026-09-23T16:27:08.9790040Z",
+    "sha256": "EA91349C16F3375224D70919106379486B5C1162EEBD2FF2E24B3B61FAF355BF"
+  },
+  {
+    "path": "apps/workbench/src/components/SidebarResizeHandle.tsx",
+    "last_write_utc": "2026-09-29T04:01:05.4290414Z",
+    "sha256": "A7B6387D56E6893BA701CDA58CB980BA9114653F212171CCA63A04B47FE69814"
+  },
+  {
+    "path": "apps/workbench/src/components/SourceDetailDialog.tsx",
+    "last_write_utc": "2026-09-23T16:27:08.9780929Z",
+    "sha256": "7886A8F556BB715E8897CF8529723FADFFC697C83149771506CA9CE0C35DC735"
+  },
+  {
+    "path": "apps/workbench/src/components/StatusChip.tsx",
+    "last_write_utc": "2026-09-23T16:27:08.9660862Z",
+    "sha256": "09F7DE108D0926BA1DE9225B058E618E3A22CA7288C8DC2F4214314BB7E173AC"
+  },
+  {
+    "path": "apps/workbench/src/components/TaskAcceptanceEvidence.tsx",
+    "last_write_utc": "2026-09-28T07:05:36.0573358Z",
+    "sha256": "71C67037390978D740C0A3695EC3857A12B8D85C98021795B0512FE6E7F11278"
+  },
+  {
+    "path": "apps/workbench/src/components/TaskCheckPlanPreview.tsx",
+    "last_write_utc": "2026-09-26T04:31:23.5169112Z",
+    "sha256": "3C6D58A264711AED99D7C1CDB3B85931D99C8ABE160DB7BC304B968DE43EAFF9"
+  },
+  {
+    "path": "apps/workbench/src/components/TaskCompletionPanel.tsx",
+    "last_write_utc": "2026-09-29T11:51:46.0592431Z",
+    "sha256": "2CC8D6CFFD268B7EB9B063BB9CE505AC66A4AB20AC72E451F7D141DAA0D29425"
+  },
+  {
+    "path": "apps/workbench/src/components/TaskContractProposalPreview.tsx",
+    "last_write_utc": "2026-09-26T04:46:28.8150538Z",
+    "sha256": "36894216456DCA729F921AE01F2EECB0BF670B5389608735FB76F155E3EEC04A"
+  },
+  {
+    "path": "apps/workbench/src/components/TaskDefinitionDiff.tsx",
+    "last_write_utc": "2026-09-26T04:43:09.5308264Z",
+    "sha256": "44877D8B779D0998191307291676BBB2AF884AEC8C4F42FCF6586B850EC062AF"
+  },
+  {
+    "path": "apps/workbench/src/components/TaskDelegatePanel.tsx",
+    "last_write_utc": "2026-09-29T12:35:41.5280857Z",
+    "sha256": "D1BBC574DBD821216424F1FF7A1739894C6665BFE9CC61D4B5DC270EA6D62E61"
+  },
+  {
+    "path": "apps/workbench/src/components/ViewConfigurationPanel.css",
+    "last_write_utc": "2026-09-26T05:05:43.6074279Z",
+    "sha256": "9EED91865FBEF4FF7BD4B47F9E72C3BB45D31D4EC2B838BAC3FCBF636909F0FB"
+  },
+  {
+    "path": "apps/workbench/src/components/ViewConfigurationPanel.tsx",
+    "last_write_utc": "2026-09-26T07:33:49.2068748Z",
+    "sha256": "F07EAED87A28B8B17E4EE18F341D6B6C0408BA1ADF4B98DF61692820A88AD92A"
+  },
+  {
+    "path": "apps/workbench/src/components/WebImportPanel.tsx",
+    "last_write_utc": "2026-09-26T09:00:28.3190107Z",
+    "sha256": "5B71DBA2F51C737D95DBBC2F84BC38B12E14968694978412CBBD9422AE98D966"
+  },
+  {
+    "path": "apps/workbench/src/components/WorkspaceSidePanel.tsx",
+    "last_write_utc": "2026-09-30T03:52:58.2268676Z",
+    "sha256": "D8DB18004AD27B9574BCB304986ADDE51D1E8D686CB5950E04DB1549A2E06FF6"
+  },
+  {
+    "path": "apps/workbench/src/fixtures/fixtureAdapter.ts",
+    "last_write_utc": "2026-09-21T14:30:19.7370169Z",
+    "sha256": "5F10D1B4445C43E5026B2E323A69CFBB8EE7A634E6CC6300565684033B6FD785"
+  },
+  {
+    "path": "apps/workbench/src/fixtures/seed.ts",
+    "last_write_utc": "2026-09-21T14:30:19.7702171Z",
+    "sha256": "49640E27F98DEA4C22EB773AD8E272C7F848838A3B7E382F5CC1F295BAE5097F"
+  },
+  {
+    "path": "apps/workbench/src/lib/decimalRevision.ts",
+    "last_write_utc": "2026-09-21T00:47:59.2122869Z",
+    "sha256": "C9E227B78AAD9280F63F657332A997B52DBFEDB1A9B2CD312577318D7260EB0B"
+  },
+  {
+    "path": "apps/workbench/src/lib/dialogStack.ts",
+    "last_write_utc": "2026-09-23T16:22:08.2348691Z",
+    "sha256": "AB9DC2BFFABD62BD4F23F80F3DE2DE3B15B145C8BAE06620179EE8E1944873AA"
+  },
+  {
+    "path": "apps/workbench/src/lib/draftGuard.ts",
+    "last_write_utc": "2026-09-23T16:22:08.2277495Z",
+    "sha256": "E1EF419D72B4723F06106036F0586CDBEA9D18EC1D51C65427B8410F882948EC"
+  },
+  {
+    "path": "apps/workbench/src/lib/fixtureMode.ts",
+    "last_write_utc": "2026-09-23T16:22:08.2337531Z",
+    "sha256": "E829C5A828B239F37F1866284BE370E07A303AF84F93C0A061605FDD601B591B"
+  },
+  {
+    "path": "apps/workbench/src/lib/initialBlueprintIntent.ts",
+    "last_write_utc": "2026-09-26T05:50:25.5780860Z",
+    "sha256": "5BE5BD815AF5B4C6E071D887489AA33F17AB3ECECA8D7B04B0EA453B5E638A86"
+  },
+  {
+    "path": "apps/workbench/src/lib/labels.ts",
+    "last_write_utc": "2026-09-29T03:20:53.1127799Z",
+    "sha256": "5B48B73D5F116383204091607D9458D13AFF803FB5B6B7F81A3772E8D2EB0956"
+  },
+  {
+    "path": "apps/workbench/src/lib/liveErrors.ts",
+    "last_write_utc": "2026-09-29T14:01:09.9816572Z",
+    "sha256": "1366CDAB25DA4C259AB19E34336151CBD7A605910628BC71A2F3CB4B107599DF"
+  },
+  {
+    "path": "apps/workbench/src/lib/modelErrorGuides.ts",
+    "last_write_utc": "2026-09-30T02:25:25.7372515Z",
+    "sha256": "741248DEB4883C33AA5D5C8D6973802BA007BBB1EC199D99FD547AFCF5EFA3D3"
+  },
+  {
+    "path": "apps/workbench/src/lib/navigationFlash.ts",
+    "last_write_utc": "2026-09-23T16:22:08.2297720Z",
+    "sha256": "4B0C4F3225F329F7D94B1BC5A785E23140FEB3AB518727744BA564C5BD574DBF"
+  },
+  {
+    "path": "apps/workbench/src/lib/relayConnection.ts",
+    "last_write_utc": "2026-09-28T23:33:02.2066385Z",
+    "sha256": "E4BE2687F8A1ACF01CEB1D1ED0471D4420D5AB2B47E301B26B47AD95DF1B0B38"
+  },
+  {
+    "path": "apps/workbench/src/lib/sessionArtifacts.ts",
+    "last_write_utc": "2026-09-28T23:33:02.2300966Z",
+    "sha256": "3E07E1179BE12C5F4D80FDE96CCE7B24A7D98206821A529C95CACBD5A0E46FD1"
+  },
+  {
+    "path": "apps/workbench/src/lib/tokens.ts",
+    "last_write_utc": "2026-09-20T14:42:53.6990887Z",
+    "sha256": "B8D4D95D3873372DC167CDCECB0B6C60556F795A08309952C3EF560C07AB6218"
+  },
+  {
+    "path": "apps/workbench/src/lib/useRunDraftPreview.ts",
+    "last_write_utc": "2026-09-29T11:31:57.7253579Z",
+    "sha256": "965C441D6C266C00A3292B602F1D2D0507D9BAF8AC689C50572B232B5784F6B5"
+  },
+  {
+    "path": "apps/workbench/src/main.tsx",
+    "last_write_utc": "2026-09-23T16:55:16.3082256Z",
+    "sha256": "673E74626A89A18EE07E8E9C6D58B9653AA7360F717E90ED7CEF2650EF4EDEFE"
+  },
+  {
+    "path": "apps/workbench/src/migrated-scoped.css",
+    "last_write_utc": "2026-09-26T09:32:52.4540483Z",
+    "sha256": "442DBA58D669B048C6A66B5257238FB59167D4796EFECADB64B5874ADB682AAF"
+  },
+  {
+    "path": "apps/workbench/src/router.tsx",
+    "last_write_utc": "2026-09-29T11:54:40.4340454Z",
+    "sha256": "2F5FCE4D5336155C77C3FD3AB1AB98A54B17A6FF8CDDE44267FC263D94782689"
+  },
+  {
+    "path": "apps/workbench/src/styles.css",
+    "last_write_utc": "2026-09-29T14:38:37.9231724Z",
+    "sha256": "DA9FFF58FAAD5A04F2A0D8805747E2C3243116EB00CA1E841F7BE8F41F57D668"
+  },
+  {
+    "path": "apps/workbench/src/types.ts",
+    "last_write_utc": "2026-09-21T14:30:20.1353660Z",
+    "sha256": "5A8E5E9B3A4F77E43EA02D430862A571A6CF3C6293C9402680006583834974C9"
+  },
+  {
+    "path": "apps/workbench/src/views/ActivityView.css",
+    "last_write_utc": "2026-09-28T12:39:49.6631129Z",
+    "sha256": "49A07C3B87C402582EEC153CC307AD092EF01295B3B277BAE9A2F61B5A45F630"
+  },
+  {
+    "path": "apps/workbench/src/views/ActivityView.tsx",
+    "last_write_utc": "2026-09-28T12:40:21.7788545Z",
+    "sha256": "79681C4194E7E75BAB47E172BFBDE386689A7054E90EBF43467D2BA5DCEAECF9"
+  },
+  {
+    "path": "apps/workbench/src/views/ArtifactLineageView.css",
+    "last_write_utc": "2026-09-27T15:32:53.1388909Z",
+    "sha256": "F16B6939CB048FB82F32B663184AF942FEC6344100E89E2ACFCF5A160C0F2AF5"
+  },
+  {
+    "path": "apps/workbench/src/views/ArtifactLineageView.tsx",
+    "last_write_utc": "2026-09-28T07:03:33.2246759Z",
+    "sha256": "A473184F778CA30E1B4646F14E253BD3C4CAC6FB9DF0B0D67131181CEAAD6193"
+  },
+  {
+    "path": "apps/workbench/src/views/AssistView.css",
+    "last_write_utc": "2026-09-29T13:54:18.1013199Z",
+    "sha256": "6601A2C4F5EEFCBC0D24307C0C0546A96D21A28906576851ECE9ABF7C7B028BA"
+  },
+  {
+    "path": "apps/workbench/src/views/AssistView.tsx",
+    "last_write_utc": "2026-09-30T03:16:39.2269292Z",
+    "sha256": "1C4EB21B9D63E0C004FC3C114EFB9B31FB5CC183B4F285C33E0B69738E722699"
+  },
+  {
+    "path": "apps/workbench/src/views/BlueprintSkillGenerator.tsx",
+    "last_write_utc": "2026-09-28T10:48:01.0376972Z",
+    "sha256": "751CA52B5DDEBFCACAB63B241A641C970DA6F4975B718C07B96D175BE06A6ABE"
+  },
+  {
+    "path": "apps/workbench/src/views/BlueprintView.tsx",
+    "last_write_utc": "2026-09-26T05:23:03.8920841Z",
+    "sha256": "230056DD7DD9D252FED1EE05EF3B71D8C322F94FC2B2E2A1FBF75B865EF65C0D"
+  },
+  {
+    "path": "apps/workbench/src/views/CollaborationView.css",
+    "last_write_utc": "2026-09-30T04:14:22.8208104Z",
+    "sha256": "41A7D4FCEA785832D9C8D74D988957703490965B5A1A6DE1603D992FCF985143"
+  },
+  {
+    "path": "apps/workbench/src/views/CollaborationView.tsx",
+    "last_write_utc": "2026-09-30T04:13:39.5466604Z",
+    "sha256": "0FAAC1B8F4FF89943F5D28E114DEBD094AD3E71E8A2E07552356448A142DF721"
+  },
+  {
+    "path": "apps/workbench/src/views/CompletionRecordView.css",
+    "last_write_utc": "2026-09-26T10:52:45.5224471Z",
+    "sha256": "59F4DA5E883E02ECF6DB5CE8E73ABFC7AE72847A3D6FBC3F3ABC8F33FD4F9A1A"
+  },
+  {
+    "path": "apps/workbench/src/views/CompletionRecordView.tsx",
+    "last_write_utc": "2026-09-29T06:47:13.5284453Z",
+    "sha256": "EBFE2F9EE6B037D3D06F1C4B51CDA44B3E9B994E7C7C8CFA69B1C770853B07DD"
+  },
+  {
+    "path": "apps/workbench/src/views/ConnectionsView.css",
+    "last_write_utc": "2026-09-28T12:39:48.4514491Z",
+    "sha256": "8D51FDCFB909E7C80F1F34D7435F32EB095A27A966713403C4EC14662E5D4DFD"
+  },
+  {
+    "path": "apps/workbench/src/views/ConnectionsView.tsx",
+    "last_write_utc": "2026-09-28T16:09:45.0664786Z",
+    "sha256": "CD60B98AD77B4BBAC287451231F4DE6AEEE309959F5A30B4BA141E5A9377404C"
+  },
+  {
+    "path": "apps/workbench/src/views/CreateProjectView.tsx",
+    "last_write_utc": "2026-09-28T10:48:32.1780631Z",
+    "sha256": "1183100812428DAB8033A65156639415F83538E4A7D6E5291016BFF018824C68"
+  },
+  {
+    "path": "apps/workbench/src/views/CreateTaskView.tsx",
+    "last_write_utc": "2026-09-26T08:26:38.1328978Z",
+    "sha256": "60E6172AB31E7EB7897E078B71CB4BE03AC080971B57D0C2DB9C8761818DE264"
+  },
+  {
+    "path": "apps/workbench/src/views/KnowledgeView.css",
+    "last_write_utc": "2026-09-28T16:06:55.8195588Z",
+    "sha256": "BBAE7288173832862777179F163D0BB9CDA5BB3950BB4C67E8A396DA85333141"
+  },
+  {
+    "path": "apps/workbench/src/views/KnowledgeView.tsx",
+    "last_write_utc": "2026-09-28T16:06:55.8175521Z",
+    "sha256": "AB2A9CEE2E93ED61AF12CCB47BD558D0A7D3FE10CD0750567D18ECB832A911BE"
+  },
+  {
+    "path": "apps/workbench/src/views/LiveBlueprintView.css",
+    "last_write_utc": "2026-09-28T10:47:43.6006487Z",
+    "sha256": "A7929BDB9B83BBEEFCBE29E91AF37F116EDD680785C5B521F53E557C116CEA7C"
+  },
+  {
+    "path": "apps/workbench/src/views/LiveBlueprintView.tsx",
+    "last_write_utc": "2026-09-28T10:48:06.6050814Z",
+    "sha256": "F3F63B525E071A03947E896B7791D39A541372E1AEED81291E36FC4AAFA814AA"
+  },
+  {
+    "path": "apps/workbench/src/views/LiveCreateProjectFlow.tsx",
+    "last_write_utc": "2026-09-28T10:48:42.9495663Z",
+    "sha256": "B7195EAF779218BD26F6937A34354A171AB23A369A82B096D6A11583D8A8BEBF"
+  },
+  {
+    "path": "apps/workbench/src/views/LiveTaskSkillFactsView.tsx",
+    "last_write_utc": "2026-09-28T10:44:34.0141842Z",
+    "sha256": "40BA6FDC177D71B2133DA67E52186601FD77B99ED0C9E1E79E0E6C271305E287"
+  },
+  {
+    "path": "apps/workbench/src/views/ProjectResumeView.tsx",
+    "last_write_utc": "2026-09-29T12:43:16.3371413Z",
+    "sha256": "1FF626B6C4DDB694609265A329392CD1E7ACFB8F35BDDB3BF3D0D8BB2CA982E6"
+  },
+  {
+    "path": "apps/workbench/src/views/ProjectSkillView.tsx",
+    "last_write_utc": "2026-09-28T12:47:00.2292051Z",
+    "sha256": "B873FEAEDDA7FC5D57792A1B4024F4A0454796D6326BC73DF65113CB488509C2"
+  },
+  {
+    "path": "apps/workbench/src/views/ProjectsView.tsx",
+    "last_write_utc": "2026-09-29T06:03:58.1773798Z",
+    "sha256": "CA6A8A9F562B9927ACA9F7D92363E3E1F62682E8BEF8C699D21594A7821AF814"
+  },
+  {
+    "path": "apps/workbench/src/views/ProjectTasksView.tsx",
+    "last_write_utc": "2026-09-28T07:07:02.8759157Z",
+    "sha256": "177AD2A4F2AD2E9F62A2F04BF0B693BC23FA7F806C9B5FDD51ED621DADCAC4C2"
+  },
+  {
+    "path": "apps/workbench/src/views/ProjectWorkbenchEntry.tsx",
+    "last_write_utc": "2026-09-26T05:12:47.8306377Z",
+    "sha256": "636F1F14BD96D4F660B75A94A8AF7142B0AB07F025CC185294EC08B71E32741F"
+  },
+  {
+    "path": "apps/workbench/src/views/ProjectWorkbenchView.css",
+    "last_write_utc": "2026-09-26T02:05:53.0541180Z",
+    "sha256": "E53050B4217E2042D6C91D20BDBE4B56687DF9AAB889CB5AF7AF3882F76EE043"
+  },
+  {
+    "path": "apps/workbench/src/views/ProjectWorkbenchView.tsx",
+    "last_write_utc": "2026-09-26T10:58:51.4264462Z",
+    "sha256": "D61B0AEFB59A1727BD4D4DF9C25535B7F868B123E53EE08460E190D73A59FB7E"
+  },
+  {
+    "path": "apps/workbench/src/views/ReviewsView.css",
+    "last_write_utc": "2026-09-28T16:18:38.9020040Z",
+    "sha256": "7293FEAE703322AF0EFAA75C623DC424E7B1383F39A7E09AF26571E79A43EC1B"
+  },
+  {
+    "path": "apps/workbench/src/views/ReviewsView.tsx",
+    "last_write_utc": "2026-09-29T11:49:34.7865306Z",
+    "sha256": "BD54549BB18C8D5DA9BF073FCCEE395CF0C7C65C8C39B7C43BA93E82B0212477"
+  },
+  {
+    "path": "apps/workbench/src/views/RunView.tsx",
+    "last_write_utc": "2026-09-29T14:03:25.5929779Z",
+    "sha256": "267AFC6307A63FEE594F0DE8412C9597B1B8644C33A76B669B9FE276DA559CE2"
+  },
+  {
+    "path": "apps/workbench/src/views/SettingsView.css",
+    "last_write_utc": "2026-09-28T15:59:59.1504417Z",
+    "sha256": "63D067A3E92082AD20D1DB62965078A418FEBE79D056109EFE7B205F5A67A87E"
+  },
+  {
+    "path": "apps/workbench/src/views/SettingsView.tsx",
+    "last_write_utc": "2026-09-30T02:25:25.7382525Z",
+    "sha256": "98ED5F6B133E9B76C5401532333085B75B064CA270F168B0B0CF02543A15030A"
+  },
+  {
+    "path": "apps/workbench/src/views/TaskDefinitionView.tsx",
+    "last_write_utc": "2026-09-26T03:24:08.2448605Z",
+    "sha256": "A075798542587AD5F422131E7796A622E50DB2A9AED1C83DE572448A6BDD6FD6"
+  },
+  {
+    "path": "apps/workbench/src/views/TaskDetailView.tsx",
+    "last_write_utc": "2026-09-29T11:28:29.3975502Z",
+    "sha256": "F2E65DD1F064EFFD9987EA118C2C695DBB71D4623BA73837A8A6E570860C5791"
+  },
+  {
+    "path": "apps/workbench/src/views/TaskSkillView.tsx",
+    "last_write_utc": "2026-09-26T01:08:30.5881874Z",
+    "sha256": "07D7F13C2D74B998FAC15B1E8FB4F15A8D8D5D0ADC2712ECA1ECDF00F1DD3D20"
+  },
+  {
+    "path": "apps/workbench/src/views/TasksView.tsx",
+    "last_write_utc": "2026-09-28T16:08:32.6135379Z",
+    "sha256": "0E6A0763253B39ACCA56DC57C107A870A526080F2CB764CF8808BCA10E272F9A"
+  },
+  {
+    "path": "apps/workbench/src/views/TodayView.css",
+    "last_write_utc": "2026-09-29T03:39:05.9534894Z",
+    "sha256": "81F8A3A09C9B9914C3ED978AAAB6538CA6F72FD4A7ACBBDE50CD093B94511261"
+  },
+  {
+    "path": "apps/workbench/src/views/TodayView.tsx",
+    "last_write_utc": "2026-09-29T03:27:03.6244707Z",
+    "sha256": "C37A4624B99A8E4BE32D43CC5BAE93E55338B0F72607B412A750879E88D543CB"
+  },
+  {
+    "path": "apps/workbench/src/views/UnsupportedView.tsx",
+    "last_write_utc": "2026-09-28T08:22:39.2276641Z",
+    "sha256": "AC424BC79A841D43FF362163996ADD61552CE9E97B517C7C3497D510C2588633"
+  },
+  {
+    "path": "apps/workbench/src/views/VerificationPlanView.tsx",
+    "last_write_utc": "2026-09-26T03:24:08.2463743Z",
+    "sha256": "76B62C97E9FF168A6A13477FA510C45CF350FC5D829E34793D521B7E07E8764B"
+  },
+  {
+    "path": "apps/workbench/tests/activityView.spec.ts",
+    "last_write_utc": "2026-09-28T12:41:24.0324792Z",
+    "sha256": "E6B2416A6529A13AC47DF7D67B274004084ED1D6742B7C48BFBD8D63F2A1A1E1"
+  },
+  {
+    "path": "apps/workbench/tests/artifactDirectUsesClient.spec.ts",
+    "last_write_utc": "2026-09-27T15:21:33.9388194Z",
+    "sha256": "6BA5ECE2577484104341871136094FBFA5133B0264699F8C6EEBE4B19A68BACC"
+  },
+  {
+    "path": "apps/workbench/tests/artifactLineage.spec.ts",
+    "last_write_utc": "2026-09-28T01:59:32.3478362Z",
+    "sha256": "933D30F8615B3E437D93736D6E670CFF9DA8F274CF1EBDFAF5FD1F450A8D048E"
+  },
+  {
+    "path": "apps/workbench/tests/assist-flow.spec.ts",
+    "last_write_utc": "2026-09-30T02:24:30.3754439Z",
+    "sha256": "9A28396C9C5EE538DC9ED1F195D8D118D992FB85F73C3B74DEC964FF3112A2CB"
+  },
+  {
+    "path": "apps/workbench/tests/assist-preview.spec.ts",
+    "last_write_utc": "2026-09-26T09:27:10.3087367Z",
+    "sha256": "BCE43E2D9219E00D433AE2E8CA876341CCD41496B96D994927BC15D55BB030E4"
+  },
+  {
+    "path": "apps/workbench/tests/assist-source-picker.spec.ts",
+    "last_write_utc": "2026-09-26T01:09:08.4383255Z",
+    "sha256": "4E5A07532D9EF1169B5AF05CBE0633C53741A7D73E5682EF71B7767CE31BC1D9"
+  },
+  {
+    "path": "apps/workbench/tests/assist-target.spec.ts",
+    "last_write_utc": "2026-09-26T08:30:24.9319436Z",
+    "sha256": "5E942559BEF56EADEB7C5C8E0E7732BA0668CE8FAA301591088FFB9D81B93307"
+  },
+  {
+    "path": "apps/workbench/tests/assistProviderErrorClient.spec.ts",
+    "last_write_utc": "2026-09-30T02:23:58.4416497Z",
+    "sha256": "F7B7D7EE38A0222DB6192C96AF07B55B3A42C84E9D9CE18C16CE3982C0B3FD5B"
+  },
+  {
+    "path": "apps/workbench/tests/blueprint.spec.ts",
+    "last_write_utc": "2026-09-21T00:51:39.9722770Z",
+    "sha256": "B1B488D1075F1DB59F2482879680E8B66E0ABA6B0B2C4D75666B3E96D376EA95"
+  },
+  {
+    "path": "apps/workbench/tests/blueprintLive.spec.ts",
+    "last_write_utc": "2026-09-26T07:48:05.7385874Z",
+    "sha256": "A1CF8BE24A4247B796DAC6B76FF07FF378802702437102F962550CF2346BC25A"
+  },
+  {
+    "path": "apps/workbench/tests/browser/real-api.spec.ts",
+    "last_write_utc": "2026-09-24T10:17:59.4361309Z",
+    "sha256": "833ED8AF48C67174DF22F83B5CB7AA1728A494196B36CC56FC35C14A881E4A9E"
+  },
+  {
+    "path": "apps/workbench/tests/browser/run-events.spec.ts",
+    "last_write_utc": "2026-09-24T02:27:01.2894765Z",
+    "sha256": "E1C7B9D8C13360044179BF4D4996C2373DEE950B875571CC7DA1556D37F30A76"
+  },
+  {
+    "path": "apps/workbench/tests/browser/workbench.spec.ts",
+    "last_write_utc": "2026-09-28T04:49:55.9298963Z",
+    "sha256": "FD4E7E918DF677D53914B556A7001F8E5F6BF7813B89730C834D971324F36CE1"
+  },
+  {
+    "path": "apps/workbench/tests/collaborationWorkspace.spec.ts",
+    "last_write_utc": "2026-09-30T04:01:50.9262475Z",
+    "sha256": "5B1B5C9D144FBB729AD2EF0E3B5EC7B352825FD2FB5E28C40E3D28D6E9D5860A"
+  },
+  {
+    "path": "apps/workbench/tests/commandPalette.spec.ts",
+    "last_write_utc": "2026-09-28T12:44:04.7389292Z",
+    "sha256": "9D8F75E76F40F723C71606DA102EDC921E3B86F6F89F80A39CC5F6075BD3014D"
+  },
+  {
+    "path": "apps/workbench/tests/completionRecord.spec.ts",
+    "last_write_utc": "2026-09-26T10:59:49.0440560Z",
+    "sha256": "718870062CFA5F4D6CBE39748EBEAD222BB90301495DD9B4A9D772554DA820BB"
+  },
+  {
+    "path": "apps/workbench/tests/connection-switch.spec.ts",
+    "last_write_utc": "2026-09-23T17:14:44.8481816Z",
+    "sha256": "D334EA3D3B06BF72DE436742000C74EF226C00EDC962408D277CF70985B65970"
+  },
+  {
+    "path": "apps/workbench/tests/connectionsSettings.spec.ts",
+    "last_write_utc": "2026-09-28T16:09:45.0674781Z",
+    "sha256": "1EA4F2EB6F979FA20764E971B28D33424EC5D108369CEB7BFF6B15781BFABF5C"
+  },
+  {
+    "path": "apps/workbench/tests/continuationPoint.spec.ts",
+    "last_write_utc": "2026-09-29T12:54:52.5260183Z",
+    "sha256": "5BE250F491D14FD8BD95C638046CADFA0884704A3AF6274F22DCBF4D90AF9147"
+  },
+  {
+    "path": "apps/workbench/tests/createProjectOnboarding.spec.ts",
+    "last_write_utc": "2026-09-26T06:05:07.2259126Z",
+    "sha256": "5BEAB963C2D705DC3F1F5995D6A09C2D3F38909B09392EBB487058321F40E80C"
+  },
+  {
+    "path": "apps/workbench/tests/createTaskProjectPicker.spec.ts",
+    "last_write_utc": "2026-09-28T07:26:01.6281088Z",
+    "sha256": "065B4CD5A9321DD77CEF91BE8552DB0656DFEB4CE74BFAF8BD299D645CAE15AC"
+  },
+  {
+    "path": "apps/workbench/tests/decimalRevision.spec.ts",
+    "last_write_utc": "2026-09-21T00:47:59.2232090Z",
+    "sha256": "ADF65BB0B63F50F5221CAEC9D925CCF3EA05EB7AB639434892B8158C66E859BE"
+  },
+  {
+    "path": "apps/workbench/tests/definition.spec.ts",
+    "last_write_utc": "2026-09-21T01:21:42.5304657Z",
+    "sha256": "A58F961DD47387071D259BD52FD22EA1AF4DC39D40624C61DCF7E1969565AABD"
+  },
+  {
+    "path": "apps/workbench/tests/delegate-task.spec.ts",
+    "last_write_utc": "2026-09-26T08:32:51.2625268Z",
+    "sha256": "104B9248FB614B3223855518832867E87C5C4011C59B619BD647863E59E1C088"
+  },
+  {
+    "path": "apps/workbench/tests/desktop-bootstrap.spec.ts",
+    "last_write_utc": "2026-09-28T04:25:05.1227327Z",
+    "sha256": "7E7FBAC979961671BF4467B85345B09ABCCDF201A70493FBC5B1450F56E1FFB6"
+  },
+  {
+    "path": "apps/workbench/tests/desktop-titlebar.spec.ts",
+    "last_write_utc": "2026-09-28T04:22:22.4166991Z",
+    "sha256": "73053DC50D7B0D877FEAD77270FB89BC1E36AAA61A861CAD76ACC19B7344016F"
+  },
+  {
+    "path": "apps/workbench/tests/firstPartySkills.spec.ts",
+    "last_write_utc": "2026-09-26T08:40:57.7011538Z",
+    "sha256": "AAEE87EE6418C8A41ABD20BFC6048E52CC4B9D614F11D6253AF7A286F777DA65"
+  },
+  {
+    "path": "apps/workbench/tests/interventionNotifications.spec.ts",
+    "last_write_utc": "2026-09-28T04:06:44.5172083Z",
+    "sha256": "A4012FB924EF1A372B3D1244356949243A9CA162B811B445DACE730237C157F6"
+  },
+  {
+    "path": "apps/workbench/tests/knowledge.spec.ts",
+    "last_write_utc": "2026-09-28T12:39:51.9338389Z",
+    "sha256": "4D9E9E2666F4426518765F4B3D46164AEF1E822D0C58AC081B2FDD5DB4AC77A8"
+  },
+  {
+    "path": "apps/workbench/tests/knowledgeContentClient.spec.ts",
+    "last_write_utc": "2026-09-27T15:53:14.1161976Z",
+    "sha256": "6475047A9BBCC646FCC1527F12E65A63AB6D9BE4D3C6EFB66EA6C24A69B3527C"
+  },
+  {
+    "path": "apps/workbench/tests/knowledgeReading.spec.ts",
+    "last_write_utc": "2026-09-27T16:08:58.9441699Z",
+    "sha256": "D6373B4393F34F5A1BACA6D8B59AE0677560722E908F0E65DA4B928A4DDFD74C"
+  },
+  {
+    "path": "apps/workbench/tests/liveCreate.spec.ts",
+    "last_write_utc": "2026-09-28T23:33:02.4047234Z",
+    "sha256": "F64A1CB9AAC55A1C79392B719BDB1B719BA99D617ABDEEC127417B33AA242CAC"
+  },
+  {
+    "path": "apps/workbench/tests/liveInbox.spec.ts",
+    "last_write_utc": "2026-09-28T07:16:52.6867942Z",
+    "sha256": "B34E32AD2BC90021E6A7E5CF5E45B0A691698BFC6779EF8FDD17BF689FFE9F3B"
+  },
+  {
+    "path": "apps/workbench/tests/liveTasks.spec.ts",
+    "last_write_utc": "2026-09-28T07:28:02.0795834Z",
+    "sha256": "6ED48D12CDB1197F9967A112F0ECF786468CA05EFCADF4AE4081423F80DEBF0A"
+  },
+  {
+    "path": "apps/workbench/tests/liveWorkspaceLists.spec.ts",
+    "last_write_utc": "2026-09-28T14:54:14.0341597Z",
+    "sha256": "0C85729790FA125B64DE4863BB91844EB351092FE3DD4E09FC48B43982AE6E3B"
+  },
+  {
+    "path": "apps/workbench/tests/modelConnectionStrip.spec.ts",
+    "last_write_utc": "2026-09-29T14:22:49.6523231Z",
+    "sha256": "64E33658C1B82C9FB599781261B51F657E7D45496C6F9A6BA1A385BF5A8093BF"
+  },
+  {
+    "path": "apps/workbench/tests/mountApp.tsx",
+    "last_write_utc": "2026-09-23T17:03:27.6578959Z",
+    "sha256": "21AEF326E2526B95CCA481BE07026C756DDD2272C1226943F0E9D423711F1DD4"
+  },
+  {
+    "path": "apps/workbench/tests/navigation.spec.ts",
+    "last_write_utc": "2026-09-28T09:53:02.8961606Z",
+    "sha256": "DCCEC34CF073106FF8B770586EB4E67BB8004E35FB23138E4A79AE6E42237F44"
+  },
+  {
+    "path": "apps/workbench/tests/productSupplement26.spec.ts",
+    "last_write_utc": "2026-09-28T03:02:11.0947840Z",
+    "sha256": "40C0254E9302835B537B8F041F110C88CC0357DB8FD8FD1090B2677A583CBD03"
+  },
+  {
+    "path": "apps/workbench/tests/projectArchiveLive.spec.ts",
+    "last_write_utc": "2026-09-26T08:15:19.2984082Z",
+    "sha256": "0FF4F8ED8D1C25B982538FE491CB4EC1CD9E5876B961C6786AAFC5CCC4750F42"
+  },
+  {
+    "path": "apps/workbench/tests/projectOverview.spec.ts",
+    "last_write_utc": "2026-09-28T12:47:10.3236458Z",
+    "sha256": "C0C13C17FF9936458D1F0DC8CA52F8BD6E8FA907F72AEDBD616C918B46A457DB"
+  },
+  {
+    "path": "apps/workbench/tests/projectResumeLive.spec.ts",
+    "last_write_utc": "2026-09-29T12:47:22.3139726Z",
+    "sha256": "DFDD3D1C488F96A47A7A325F2EFFF44069B8FC7C99A97BF95919759AA5F8D258"
+  },
+  {
+    "path": "apps/workbench/tests/projects.spec.ts",
+    "last_write_utc": "2026-09-21T14:30:20.4417559Z",
+    "sha256": "A08AE18E4C63D089E258EE259D21E1CCE4287AB1A5C67AFADD67BC53184C914C"
+  },
+  {
+    "path": "apps/workbench/tests/projectsTitleRefresh.spec.ts",
+    "last_write_utc": "2026-09-28T15:48:45.8032485Z",
+    "sha256": "A4BF1F47ED75ADC1CB529A9194AA716F06C9791B3D1798527B49518406E47DA7"
+  },
+  {
+    "path": "apps/workbench/tests/projectTasks.spec.ts",
+    "last_write_utc": "2026-09-26T08:03:16.1565258Z",
+    "sha256": "7A3FA400F8B874476CDA16E520AF616A5AD07830675D7AB87BBFBEF9C7BEEC58"
+  },
+  {
+    "path": "apps/workbench/tests/projectWorkbench.spec.ts",
+    "last_write_utc": "2026-09-26T10:56:39.7806235Z",
+    "sha256": "90EAAAAC9E005C7E8AE1B21024F27D4E57729D25770BBC791161743C8856BB02"
+  },
+  {
+    "path": "apps/workbench/tests/remediation.spec.ts",
+    "last_write_utc": "2026-09-21T01:16:49.6034228Z",
+    "sha256": "8647FC7704C66C22FF19CB721FCDFC21490D1ED33B30AD4A72679316B3D47396"
+  },
+  {
+    "path": "apps/workbench/tests/resume.spec.ts",
+    "last_write_utc": "2026-09-21T00:19:59.3282456Z",
+    "sha256": "DA038085D8DB52D61286E83F1FAF3B09B8B8E8CF9693CC3E00051058174FB6ED"
+  },
+  {
+    "path": "apps/workbench/tests/reviews.spec.ts",
+    "last_write_utc": "2026-09-28T12:42:16.6527944Z",
+    "sha256": "C10B0181142BCD25C0766ABE1F43B159376464FFF64919A70F7B47D07AA7C77F"
+  },
+  {
+    "path": "apps/workbench/tests/run-draft-preview.spec.ts",
+    "last_write_utc": "2026-09-26T09:35:38.9721445Z",
+    "sha256": "61617274EF58EE802FDDD7B56E08B4A7ABD36B12DFE4164D9E1FD50549CBCE4E"
+  },
+  {
+    "path": "apps/workbench/tests/run-events.spec.ts",
+    "last_write_utc": "2026-09-24T02:29:14.1634477Z",
+    "sha256": "C43ADDACCF01B64D9F9F3776957B997BA481D3952E9EF99F26F715C865DB4FAD"
+  },
+  {
+    "path": "apps/workbench/tests/run-file-write-disposition.spec.ts",
+    "last_write_utc": "2026-09-27T15:47:24.5653074Z",
+    "sha256": "3FB36A04E505B9895ED3191317645224858B6B050AC39B440DFC1A9CB9B45730"
+  },
+  {
+    "path": "apps/workbench/tests/run-sources.spec.ts",
+    "last_write_utc": "2026-09-23T14:42:23.8750692Z",
+    "sha256": "93E4DBA0362AFE707C5CF8D200ED144931852C28F5946605B1B10CE79E6B5415"
+  },
+  {
+    "path": "apps/workbench/tests/run-ui1820.spec.ts",
+    "last_write_utc": "2026-09-28T12:42:01.9950870Z",
+    "sha256": "85F67A8A00487C1AD69D18936937B2F4F002DF622476FF659F609F7185D15E4E"
+  },
+  {
+    "path": "apps/workbench/tests/run.spec.ts",
+    "last_write_utc": "2026-09-26T08:33:46.9099475Z",
+    "sha256": "2EF89BC18D5B4778EBDF6A02F51FFCA8218FE16372B8D7B4116E67894549E56A"
+  },
+  {
+    "path": "apps/workbench/tests/runTrace.spec.ts",
+    "last_write_utc": "2026-09-30T04:24:47.6727340Z",
+    "sha256": "7EC3A0AB2D1B7F5487FB16557E84B6F698112CF1063369D6D5E9B768A1151FEF"
+  },
+  {
+    "path": "apps/workbench/tests/screenshots/pages.spec.ts",
+    "last_write_utc": "2026-09-23T15:48:08.9586665Z",
+    "sha256": "ECAB319B8D9C0A5E1CFB56B99051FFD15C74CCE4F91F670F0EA80AEA66423259"
+  },
+  {
+    "path": "apps/workbench/tests/settingsView.spec.ts",
+    "last_write_utc": "2026-09-28T16:01:29.6721992Z",
+    "sha256": "40A13D7805338110D4121BDD1F1F65BF0014AE81CABF1CB18716E944CD14CF01"
+  },
+  {
+    "path": "apps/workbench/tests/setup.ts",
+    "last_write_utc": "2026-09-23T17:01:39.9708282Z",
+    "sha256": "72AFB6DE150A4D5E3D1D1D8951BB5EFA68F0939252CDCEC92DA5F183474E088B"
+  },
+  {
+    "path": "apps/workbench/tests/sidebarResize.spec.ts",
+    "last_write_utc": "2026-09-29T04:03:16.1796930Z",
+    "sha256": "312703D7431913B83F0CF85C22E89DC053E0F7801C173F640FF2121929DF92F7"
+  },
+  {
+    "path": "apps/workbench/tests/taskDetail.spec.ts",
+    "last_write_utc": "2026-09-29T11:51:18.3067071Z",
+    "sha256": "A1D6ACD53A9313859C02553D6DDD5AF35FB0524E3415AA6151D9CA8659C4E751"
+  },
+  {
+    "path": "apps/workbench/tests/tasks.spec.ts",
+    "last_write_utc": "2026-09-29T04:14:08.2805465Z",
+    "sha256": "A724B582BCF0482110E12BEE6F5BA5E0DCFB91A5DB8997F2AA78B3D6DCCDC458"
+  },
+  {
+    "path": "apps/workbench/tests/taskSkillLive.spec.ts",
+    "last_write_utc": "2026-09-28T07:26:51.2706916Z",
+    "sha256": "3DAD6852947A0606DCE898CFA8D71A31822D30FA21DCDC2DD004F2D90FA58607"
+  },
+  {
+    "path": "apps/workbench/tests/taskSkillProposal.spec.ts",
+    "last_write_utc": "2026-09-26T08:37:34.2609622Z",
+    "sha256": "1ADA999484F047C12C94CC8B434068753528DE7AB92F7A7D11A1DA7ABD485047"
+  },
+  {
+    "path": "apps/workbench/tests/todayView.spec.ts",
+    "last_write_utc": "2026-09-29T03:25:52.8937317Z",
+    "sha256": "02CEB96A40C1A5BF729C161B8EF89D6D7AB2A30D574532F573AB8D77C0C1DEEF"
+  },
+  {
+    "path": "apps/workbench/tests/uiRemediation20260928.spec.ts",
+    "last_write_utc": "2026-09-28T16:11:19.8532160Z",
+    "sha256": "66EBA8035226BEA1EBEE466A08903BD57A3D8EB20503441E427D63602F310BB4"
+  },
+  {
+    "path": "apps/workbench/tests/verification.spec.ts",
+    "last_write_utc": "2026-09-20T14:46:24.8617836Z",
+    "sha256": "686FFE54DD6AB9ACFCD820188A7F1845BD6DA0B5DE88DA84A753B351C23A101E"
+  },
+  {
+    "path": "apps/workbench/tests/viewConfiguration.spec.ts",
+    "last_write_utc": "2026-09-26T07:48:19.1256031Z",
+    "sha256": "A3D2571E7A3B38F79B35D6AC798E98D23CCCC8570AFAC217C239021121DCCE56"
+  },
+  {
+    "path": "apps/workbench/tests/web-import.spec.ts",
+    "last_write_utc": "2026-09-26T09:03:31.0899152Z",
+    "sha256": "2CC236A25502BDE419B01A8EA78258076B80E96B116104BCBDF1AB5B04AAF111"
+  }
+]

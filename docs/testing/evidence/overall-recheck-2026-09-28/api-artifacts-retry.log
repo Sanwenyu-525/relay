@@ -1,0 +1,117 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-4f0493f1be
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "C".
+The default text search configuration will be set to "english".
+
+Data page checksums are enabled.
+
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-4f0493f1be/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-4f0493f1be^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 24020)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-4f0493f1be/cluster" "-h" "127.0.0.1" "-p" "10702"
+DO
+CREATE DATABASE
+Test database: relay_api_test_488c3c1be1fa on 127.0.0.1:10702 (roles relay_migrator / relay_app)
+{
+  "applied": [
+    "0001_v001_human_core",
+    "0002_p02_task_goal_alignment",
+    "0003_schema_readiness",
+    "0004_v002_runs",
+    "0005_v002_verification",
+    "0006_v002_reviews",
+    "0007_v003_recovery_control",
+    "0008_v003_gateway",
+    "0009_v004_information_rules",
+    "0010_v005_context_revision",
+    "0011_m03_run_dispatch",
+    "0012_m03_run_events",
+    "0013_m03_run_command_order",
+    "0014_m04_file_read",
+    "0015_m04_assist",
+    "0016_m04_web_fetch",
+    "0017_m04_web_import",
+    "0018_m04_model_calls",
+    "0019_m04_draft_read_input",
+    "0020_m05_today_selections",
+    "0021_m05_activity_lineage",
+    "0022_m04_first_party_skills",
+    "0023_m04_task_skill_proposals",
+    "0024_m05_view_configuration",
+    "0025_m05_project_blueprints",
+    "0026_m04_model_call_budgets",
+    "0027_m05_workspace_lists",
+    "0028_m04_assist_live_preview",
+    "0029_m04_run_draft_live_preview",
+    "0030_m06_real_tools",
+    "0031_m06_change_sets",
+    "0032_m06_change_set_source_scope",
+    "0033_m06_file_write_stop_proofs",
+    "0034_m06_file_write_manual_dispositions",
+    "0035_m06_file_write_frozen_diff",
+    "0036_m06_file_write_path_identity",
+    "0037_m06_file_write_frozen_diff_root_path",
+    "0038_m06_managed_root_identity",
+    "0039_m06_active_resource_root",
+    "0040_collaboration_artifact_text_locks",
+    "0041_collaboration_impact_checks",
+    "0042_collaboration_attention"
+  ],
+  "already_applied": [],
+  "ledger_rows": 42
+}
+{"schema":"relay_graph_v1","ready":true}
+✔ lists only the visible Task artifact history and its current accepted versions (2016.3343ms)
+✔ creates a managed markdown version that is complete on disk and readable through the API (59.9005ms)
+✔ rejects an unsupported media type with 415 and oversized content with 413 (73.5575ms)
+✔ rejects user-supplied paths, non-uuid ids and cross-scope artifact reads (71.1814ms)
+✔ appends a new immutable version without overwriting the previous one (81.0976ms)
+✔ completes a task against a fixed version and never marks the newer version as accepted (96.556ms)
+✔ completes a task that requires no artifacts with an empty version set (24.4245ms)
+✔ requires declared outputs to be covered and required human criteria to be confirmed (114.8356ms)
+✔ reopens with a new acceptance revision, keeps history and blocks new uploads until started again (95.885ms)
+✔ replaying an old completion command after reopen returns the historical receipt only (65.0587ms)
+✔ keeps reopened completion history but removes only that cycle from the current State projection (100.5924ms)
+✔ lets only one of two concurrent completion commands win the cycle (91.0888ms)
+✔ serializes SET_NEXT_ACTION and reopen in Task → ProjectState order without a deadlock (1610.2076ms)
+✔ rolls the whole completion transaction back when the state delta fails and converges on retry (161.6436ms)
+✔ rolls the whole reopen transaction back when the State revision update fails and converges on replay (144.2732ms)
+✔ leaves a reconcilable orphan content file when the version row cannot be registered (150.8924ms)
+✔ refuses completion when the accepted evidence file is missing or tampered (116.6774ms)
+✔ reads the exact historical human completion evidence after reopen and hides lost content (127.9227ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 15727.5393
+waiting for server to shut down..... done
+server stopped
+--- integration summary ---
+tests exit code: 0
+build exit code: skipped
+business migration exit code: 0
+graph install exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: PASSED

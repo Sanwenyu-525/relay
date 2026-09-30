@@ -1,0 +1,25 @@
+✔ P07: a bounded budget decision persists and VERIFY reads the new cap (273.709ms)
+✔ P07 A02: State proposal accepts a typed command once and rejects a stale base revision (25.7213ms)
+✔ P07 A02: State proposal and typed State command serialize the same Task and State revision (24.5633ms)
+✔ P07 C09: denied operation approval keeps the operation identity and does not dispatch a step (112.1433ms)
+✔ P07 C09: approved reserved operation without a frozen Mock action queues no graph command (58.4579ms)
+✔ P07 HTTP: Inbox, detail and decision share the target hash and command receipt contract (2340.3647ms)
+ℹ tests 282
+ℹ suites 0
+ℹ pass 280
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 2
+ℹ todo 0
+ℹ duration_ms 548311.9009
+waiting for server to shut down.... done
+server stopped
+--- integration summary ---
+tests exit code: 0
+build exit code: 0
+business migration exit code: 0
+graph install exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: PASSED

@@ -678,3 +678,9 @@ API 不需要 Saver；Worker 与 supervisor 在领取前只读核对业务 schem
 追加 [0039_m06_active_resource_root.sql](../../apps/api/migrations/0039_m06_active_resource_root.sql)：原 `uq_managed_resource_project_root` 覆盖已停用行，会令 0038 的“停用旧资源并重新登记”实际不可执行。0039 将其替换为仅覆盖 `status='ACTIVE'` 的 `(project_id,identity_key)` 唯一索引；登记命令的重复检查也只看活动资源，并仍持有跨 Workspace 登记 advisory 事务锁。旧资源行、Operation、claim、策略和审计记录不删除或回填；同项目同路径活动资源仍最多一个，停用须先处理占用或隔离。新登记得到新资源 ID 和捕获时根 File ID，旧 Run/Task 的冻结资源 ID 不自动改绑；用户须重新检查连接、Permission 与委托引用。
 
 迁移不改写已有行或权限。回退该部分唯一索引并恢复旧无条件唯一约束之前，若已有同路径历史停用行，约束会失败；不得删除历史行换取回退。真实隔离 PostgreSQL 完整迁移 8/8、Windows 重新登记定向 3/3、完整 Gateway 28/28 与 real-tools 52/52 已通过。0039 已包含在 EXE SHA-256 为 `577a731e3022e540e38edc6a152301afc31b5a585e75eabb999919bbd5863efc` 的确切桌面目录包内，清单核验及相邻 Windows Job/WebView2 路径通过；无回执强杀的桌面同场景另验。
+
+## 53. 0046 M04 Assist Provider 失败类别（2026-09-30）
+
+追加 [0046_assist_provider_error_kind.sql](../../apps/api/migrations/0046_assist_provider_error_kind.sql)：`assist_messages` 新增可空 `provider_error_kind text`，封闭词表为 `AUTH/RATE_LIMIT/TIMEOUT/STREAM_BROKEN/PROTOCOL/NETWORK`，另一 CHECK 仅允许 `FAILED` 消息带非空类别。该字段与原 Relay `error_code` 分开，避免将预算、取消、解析或本地处理失败归因给 Provider。Assist Owner 在原领取 Worker 身份的 CAS 结算中保存类别；查询只投影持久事实，不重算历史分类、不增加业务写入 Owner。
+
+旧行保持 NULL，迁移无回填、无新表/索引、无权限变化；旧客户端可忽略新增响应字段，新客户端兼容旧服务缺字段。迁移按既有摘要台账顺序应用，不改写 0015。没有自动 down migration；回退代码前需核对 schema 兼容门，删除该列会丢失已保存的诊断类别，不能删除历史消息来绕过约束。API Breaking Change: No，原请求与执行权契约不变。隔离 PostgreSQL 与接口验证结果见[开发记录](../development/ui-live-integration-2026-09-28.md#12-m04-assist-provider-失败诊断2026-09-30)。

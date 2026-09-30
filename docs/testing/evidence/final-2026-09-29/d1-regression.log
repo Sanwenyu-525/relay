@@ -1,0 +1,62 @@
+== D1 回归验证 2026-09-29T01:46:13Z ==
+[regression] 会话B（新包 5FA62913）中经真实领域入口 delegate...
+script exit=0
+[01:46:13.620] bootstrap OK http://127.0.0.1:9534
+[01:46:13.641] project: 7d576bef-855e-4cd8-84af-101bd9995277 UI取证-20260929 空项目B
+[01:46:13.816] resource created: c7cfcee3-6cd9-454c-b5b9-a52cba1087e0
+[01:46:13.833] connection: b92bede7-55a3-4e0a-bb83-b6963e4e0cf1
+[01:46:13.904] task READY: 1ad05401-a5fe-4cbe-b79c-d951dbd6f7c1 rev 1
+[01:46:13.992] delegate: 202 {"command_id":"22fe4765-56e6-4a0d-a089-7613dd12b2ff","committed_at":"2026-09-29T01:46:13.916Z","result":{"run_id":"6e5f6ffb-b485-4d05-a7cd-dd99b5ac0db1","task_id":"1ad05401-a5fe-4cbe-b79c-d951dbd6f7c1","task_revision":"2","run_revision":"0","status":"CREATED","retry_of_run_id":null},"links":{"resour
+[01:46:13.992] run: 6e5f6ffb-b485-4d05-a7cd-dd99b5ac0db1
+[01:46:14.047] run: {"status":"CREATED","control":null,"pending":null} task: IN_PROGRESS
+[01:46:16.080] run: {"status":"RUNNING","control":null,"pending":null} task: IN_PROGRESS
+[01:46:16.099] PAUSE request: 202 {"command_id":"e21a80b7-19f7-4005-b044-74fbd76f009b","committed_at":"2026-09-29T01:46:16.083Z","result":{"control_request_id":"65f0897c-bbc9-404f-94da-c5e13ef0fecd","run_id":"6e5f6ffb-b485-4d05-a7cd-d
+[01:46:17.124] run: {"status":"PAUSED","control":null,"pending":null} task: WAITING
+[01:46:17.124] final-ish status: PAUSED
+[01:46:17.130] run full: {"status":"PAUSED","control_state":null,"wait_reason":"PAUSED_BY_USER","revision":"6"}
+[01:46:17.184] trace tail: {"run_id":"6e5f6ffb-b485-4d05-a7cd-dd99b5ac0db1","task_id":"1ad05401-a5fe-4cbe-b79c-d951dbd6f7c1","project_id":"7d576bef-855e-4cd8-84af-101bd9995277","status":"PAUSED","steps":[{"id":"7aa16702-dfd6-41a4-b7cc-5827d1e2a7ea","step_index":0,"kind":"BUILD_CONTEXT","status":"SUCCEEDED","revision":"2","result_available":true,"started_at":"2026-09-29T01:46:15.299Z","finished_at":"2026-09-29T01:46:15.364Z"},{"id":"1f517669-0711-4d5b-aba6-baa9f8c021e7","step_index":1,"kind":"DRAFT","status":"SUCCEEDED","r
+[01:46:17.192] DONE runId=6e5f6ffb-b485-4d05-a7cd-dd99b5ac0db1 taskId=1ad05401-a5fe-4cbe-b79c-d951dbd6f7c1
+
+## 宿主诊断日志（.relay-test/data/logs/worker-supervisor.log，D2 落盘证据）
+2026-09-29T01:45:41.629Z {"type":"supervisor_ready","nonce":"ff129a33-...","launchId":"9b55aae1-aa20-44bb-8635-1eeef419e25c","nodeVersion":"v24.21.0"}
+2026-09-29T01:45:41.638Z {"type":"launch_recovery_ack",...,"launchId":"c8649251-...","retainedClaims":0}
+2026-09-29T01:45:41.638Z {"type":"dispatch_ready",...,"launchId":"9b55aae1-...","requeuedRunIds":[],"blockedRunIds":[]}
+2026-09-29T01:45:41.639Z host: supervisor ready (launch 9b55aae1-aa20-44bb-8635-1eeef419e25c)
+2026-09-29T01:45:41.639Z {"type":"worker_recovery_required","run_id":"8d19e398-...","epoch":"3","status":"ACTIVE"}
+2026-09-29T01:46:14.055Z {"type":"worker_started","pid":47108,"worker_id":"worker:desktop:9b55aae1-...:a2d20820-..."}
+2026-09-29T01:46:15.572Z {"type":"worker_exit","code":1,"requeued_run_ids":["6e5f6ffb-b485-4d05-a7cd-dd99b5ac0db1"],"blocked_run_ids":[]}
+supervisor_failed
+2026-09-29T01:46:15.662Z host: supervisor exited after 34 s; restart 1/3 in 2000 ms
+2026-09-29T01:46:18.487Z {"type":"supervisor_ready","nonce":"9f7c71b1-...","launchId":"31dfc458-2304-49e5-a31c-de5dbec1bc7d","nodeVersion":"v24.21.0"}
+2026-09-29T01:46:18.494Z {"type":"launch_recovery_ack",...,"launchId":"9b55aae1-...","retainedClaims":0}
+2026-09-29T01:46:18.494Z {"type":"dispatch_ready",...,"launchId":"31dfc458-...","requeuedRunIds":[],"blockedRunIds":[]}
+2026-09-29T01:46:18.495Z host: supervisor restarted; worker dispatch resumes
+（此后至清理前无新增 worker_started/worker_exit，系统稳定；文件 19 行 2885 字节，密钥扫描 0 命中）
+
+## 断言核对
+1. 宿主不崩：relay-desktop.exe（PID 36324）全程存活；API node（test-release\node.exe）存活。PASS
+2. bootstrap 可恢复/仍可用：worker 崩溃与 supervisor 重启后两次独立 desktop_bootstrap 调用均返回 OK
+   （01:48 bootstrap-check.mjs → baseUrl=http://127.0.0.1:9534；01:52 ui19-capture.mjs 同样 OK；
+   UI 顶栏持续显示"已连接本机 API"——原缺陷症状"重载即本机服务不可用"未复现）。PASS
+3. stderr 日志有崩溃记录：worker_exit code=1、supervisor stderr 原文 "supervisor_failed"、
+   宿主重启诊断（时间戳+退避+launch ID）均在 worker-supervisor.log。PASS（限制：worker 进程内部
+   异常栈被 supervisor 吞没——supervisor.ts 以管道收集 worker stderr 后未落任何出口，属 apps/api
+   侧可观测性缺口，本轮不碰 apps/api；宿主侧已把协议事件全部落盘）
+4. worker 被重启或明确诊断：崩溃 run 的 claim 由 supervisor 收敛（requeued_run_ids=[6e5f6ffb]），
+   supervisor 以新 launch（31dfc458）重启并恢复派发；Run 已 PAUSED，其命令不再被领取（60s+ 无
+   worker_started），无"向死进程派发"的假活状态。PASS
+5. 有界性：本会话崩溃后仅重启 1/3 即稳定（PAUSED 阻断了毒命令再领取），未触发预算耗尽路径；
+   预算与退避逻辑由单测 supervisor_restart_policy_bounds_rapid_loops_and_recovers_stable_runs 覆盖。
+
+## 与取证基线的差异说明
+- 原缺陷（defects-2026-09-29.json D1）：worker exit=1 → supervisor 抛 'worker failed' 退出 →
+  desktop_bootstrap 永久失败 → 桌面重载"本机服务不可用"，只能关窗重启。
+- 本会话：同一崩溃链在宿主层自愈——supervisor 退出被 watcher 捕获，2s 退避后以新 launch 重启，
+  恢复两段式握手与孤儿收敛，bootstrap/UI 全程可用。
+
+## 清理记录
+- 会话B 窗口 WM_CLOSE 正常关闭（IsWindow=False）→ test-desktop.ps1 Stop：PG 正常停止，数据保留。
+- 终态核验：6189 监听 0、9333 监听 0、relay-desktop 进程 0、test-release node 进程 0。
+- .relay-test/data 保留（artifacts/logs/runtime-launches/staging；logs/worker-supervisor.log 为 D2 修复的持久诊断日志，随数据保留）。
+- UI-19 截图：docs/testing/evidence/ui-dpi-2026-09-29/matrix/ui19-paused-补取证-1280x800.png（已登记 matrix-registry.json，UI-19 unverified→pass，summary 31 pass/2 unverified/0 fail）。
+- 回归产生的 Run 6e5f6ffb 保持 PAUSED 终态（真实事实，非演示态）；其收敛链证据见上。

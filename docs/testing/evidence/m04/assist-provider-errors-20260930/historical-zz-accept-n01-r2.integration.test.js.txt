@@ -1,0 +1,294 @@
+import assert from 'node:assert/strict';
+import { createHash, randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { sql } from 'kysely';
+import test, { after, before } from 'node:test';
+import { createProject } from '../../src/application/create-project.js';
+import { createTask } from '../../src/application/create-task.js';
+import { editTaskPresentation } from '../../src/application/task-commands.js';
+import { runStateCommand } from '../../src/application/state-commands.js';
+import { runMigrations } from '../../src/infrastructure/migration-runner.js';
+import { withTransaction } from '../../src/application/unit-of-work.js';
+import { createWorkspace, expectProblem, startTestApi, workspacePath } from './api-harness.js';
+import { APP_DATABASE_URL, MIGRATIONS_DIRECTORY, MIGRATION_DATABASE_URL, createMigrationDirectoryFixture, createTemporaryDatabase, expectSqlState, openDatabase } from './integration-support.js';
+const app = openDatabase(APP_DATABASE_URL, 'relay-api-test-n01-accept-r2');
+const migrator = openDatabase(MIGRATION_DATABASE_URL, 'relay-api-test-n01-accept-r2-migrator');
+before(async () => {
+    await runMigrations({ connectionString: MIGRATION_DATABASE_URL,
+        directory: MIGRATIONS_DIRECTORY });
+});
+after(async () => { await app.close(); await migrator.close(); });
+const newTaskIn = async (db, workspaceId, projectId, title) => (await createTask(db, { workspaceId, commandId: randomUUID(), projectId, title,
+    objective: title, criteria: [], expectedOutputs: {}, mode: 'ME' })).result.task_id;
+const newTask = async (workspaceId, projectId, title) => newTaskIn(app.db, workspaceId, projectId, title);
+async function seedArtifactVersion(workspaceId, projectId, taskId, versionNumber) {
+    return withTransaction(app.db, async (repositories) => {
+        const artifactId = randomUUID();
+        await repositories.artifacts.insertArtifact({ id: artifactId, workspaceId, projectId, taskId,
+            artifactKind: 'MARKDOWN_DOCUMENT', title: 'accept-artifact' });
+        return { artifactId, versionId: await appendVersion(repositories, artifactId, versionNumber) };
+    });
+}
+async function appendVersion(repositories, artifactId, versionNumber) {
+    const versionId = randomUUID();
+    await repositories.artifacts.insertArtifactVersion({ id: versionId, artifactId, versionNumber,
+        storageRef: `artifacts/${artifactId}/v${versionNumber}/content.md`,
+        contentHash: createHash('sha256').update(`body-${artifactId}-${versionNumber}`, 'utf8').digest(),
+        size: 4n, mediaType: 'text/markdown', sourceKind: 'HUMAN', sourceRef: null });
+    return versionId;
+}
+test('R2-P1 引用目标栅栏在数据库层拒绝脏行，且两个目标外键为即时检查', async () => {
+    const workspaceId = await createWorkspace(app.db);
+    const project = await createProject(app.db, { workspaceId, commandId: randomUUID(),
+        title: 'R2 栅栏', projectType: 'GENERAL' });
+    const projectId = project.result.project_id;
+    const taskA = await newTask(workspaceId, projectId, '任务甲');
+    const taskB = await newTask(workspaceId, projectId, '任务乙');
+    const api = await startTestApi();
+    try {
+        const collection = `${workspacePath(workspaceId)}/projects/${projectId}/continuation-points`;
+        const captured = await api.post(collection, { command_id: randomUUID(), name: '栅栏', note: null });
+        assert.equal(captured.status, 201);
+        const pointId = captured.body.result.id;
+        const cases = [
+            { label: 'TASK 但 task_id 为 NULL', kind: 'TASK', refId: taskA, revision: '0', ordinal: 90,
+                taskId: null, artifactVersionId: null },
+            { label: 'TASK 且 task_id 与 ref_id 错配', kind: 'TASK', refId: taskA, revision: '0',
+                ordinal: 91, taskId: taskB, artifactVersionId: null },
+            { label: 'TASK 同时带 artifact_version_id', kind: 'TASK', refId: taskA, revision: '0',
+                ordinal: 92, taskId: taskA, artifactVersionId: randomUUID() },
+            { label: 'ARTIFACT_VERSION 但 artifact_version_id 为 NULL', kind: 'ARTIFACT_VERSION',
+                refId: randomUUID(), revision: '0', ordinal: 93, taskId: null, artifactVersionId: null },
+            { label: 'ARTIFACT_VERSION 却带 task_id', kind: 'ARTIFACT_VERSION', refId: randomUUID(),
+                revision: '0', ordinal: 94, taskId: taskA, artifactVersionId: null },
+            { label: 'ref_revision 为负', kind: 'TASK', refId: taskA, revision: '-1', ordinal: 95,
+                taskId: taskA, artifactVersionId: null },
+            { label: 'ordinal 为负', kind: 'TASK', refId: taskA, revision: '0', ordinal: -1,
+                taskId: taskA, artifactVersionId: null },
+        ];
+        for (const row of cases) {
+            await expectSqlState('23514', `数据库层拒绝：${row.label}`, () => sql `
+        insert into project_continuation_point_refs (continuation_point_id, ref_kind, ref_id,
+          ref_revision, ordinal, task_id, artifact_version_id)
+        values (${pointId}, ${row.kind}, ${row.refId}, ${row.revision},
+          ${row.ordinal}, ${row.taskId}, ${row.artifactVersionId})`.execute(app.db));
+        }
+        // 同一连接、同一应用角色能插入合法行，说明上面的拒绝来自 CHECK 而不是权限。
+        const freshTask = await newTask(workspaceId, projectId, '捕获后新增');
+        await sql `insert into project_continuation_point_refs (continuation_point_id, ref_kind,
+      ref_id, ref_revision, ordinal, task_id, artifact_version_id)
+      values (${pointId}, 'TASK', ${freshTask}, 0, 96, ${freshTask}, null)`.execute(app.db);
+        const counts = await sql `select count(*)::text as total
+      from project_continuation_point_refs where continuation_point_id = ${pointId}`
+            .execute(app.db);
+        assert.equal(counts.rows[0].total, '3');
+        const constraints = await sql `
+      select conname, contype, pg_get_constraintdef(oid) as condef,
+        condeferrable, condeferred
+      from pg_constraint where conrelid = 'project_continuation_point_refs'::regclass
+      order by conname`.execute(app.db);
+        const check = constraints.rows.find((row) => row.conname === 'ck_project_continuation_point_refs_target');
+        assert.ok(check, '未找到 ck_project_continuation_point_refs_target');
+        assert.match(check.condef, /IS NOT NULL/iu);
+        const foreignKeys = constraints.rows.filter((row) => row.contype === 'f' &&
+            row.conname.startsWith('fk_project_continuation_point_refs_'));
+        assert.deepEqual(foreignKeys.map((row) => row.conname).sort(), ['fk_project_continuation_point_refs_artifact_version', 'fk_project_continuation_point_refs_task']);
+        for (const key of foreignKeys) {
+            assert.equal(key.condeferrable, false, `${key.conname} 仍是 DEFERRABLE`);
+            assert.equal(key.condeferred, false, `${key.conname} 仍是 INITIALLY DEFERRED`);
+        }
+    }
+    finally {
+        await api.stop();
+    }
+});
+test('R2-P1 0044 台账摘要与仓库文件一致，0045 为追加修正', async () => {
+    const ledger = await sql `select name,
+    encode(content_sha256, 'hex') as digest from relay_schema_migrations
+    where name in ('0044_project_continuation_points', '0045_continuation_point_ref_target_guard')
+    order by name`.execute(migrator.db);
+    const names = ledger.rows.map((row) => row.name);
+    assert.deepEqual(names, ['0044_project_continuation_points', '0045_continuation_point_ref_target_guard']);
+    const total = await sql `select count(*)::text as total
+    from relay_schema_migrations`.execute(migrator.db);
+    assert.equal(total.rows[0].total, '45');
+    const file44 = createHash('sha256')
+        .update(await readFile(join(MIGRATIONS_DIRECTORY, '0044_project_continuation_points.sql')))
+        .digest('hex');
+    assert.equal(ledger.rows[0].digest, file44, '0044 台账摘要与仓库文件不一致');
+});
+test('R2-P1 0044 单独应用时确为 NULL 不安全，0045 在已有合法行的库上可追加升级', async () => {
+    const withoutGuard = await createMigrationDirectoryFixture((files) => {
+        files.delete('0045_continuation_point_ref_target_guard.sql');
+    });
+    const withGuard = await createMigrationDirectoryFixture(() => { });
+    const database = await createTemporaryDatabase('r2upgrade');
+    const appRole = openDatabase(database.appUrl, 'relay-accept-r2-upgrade-app');
+    const migratorRole = openDatabase(database.migrationUrl, 'relay-accept-r2-upgrade-migrator');
+    try {
+        const first = await runMigrations({ connectionString: database.migrationUrl,
+            directory: withoutGuard });
+        assert.equal(first.ledgerRows, 44, '只到 0044 时台账应为 44 行');
+        assert.ok(first.applied.includes('0044_project_continuation_points'));
+        const workspaceId = await createWorkspace(appRole.db);
+        const projectId = (await createProject(appRole.db, { workspaceId,
+            commandId: randomUUID(), title: 'R2 升级', projectType: 'GENERAL' })).result.project_id;
+        const taskId = await newTaskIn(appRole.db, workspaceId, projectId, '升级任务');
+        const pointId = randomUUID();
+        await sql `insert into project_continuation_points (id, workspace_id, project_id, name,
+      state_phase_key, state_revision) values (${pointId}, ${workspaceId}, ${projectId},
+      '升级前基线', 'DISCOVERY', 0)`.execute(appRole.db);
+        await sql `insert into project_continuation_point_refs (continuation_point_id, ref_kind,
+      ref_id, ref_revision, ordinal, task_id, artifact_version_id)
+      values (${pointId}, 'TASK', ${taskId}, 0, 0, ${taskId}, null)`.execute(appRole.db);
+        // 0044 阶段的原始行为：脏行可以落库，task 外键是 DEFERRABLE。
+        await sql `insert into project_continuation_point_refs (continuation_point_id, ref_kind,
+      ref_id, ref_revision, ordinal, task_id, artifact_version_id)
+      values (${pointId}, 'ARTIFACT_VERSION', ${randomUUID()}, 0, 1, null, null)`
+            .execute(appRole.db);
+        const beforeGuard = await sql `
+      select condeferrable from pg_constraint
+      where conrelid = 'project_continuation_point_refs'::regclass
+        and conname = 'project_continuation_point_refs_task_id_fkey'`.execute(migratorRole.db);
+        assert.equal(beforeGuard.rows[0]?.condeferrable, true, '0044 阶段 task 外键应为 DEFERRABLE');
+        // 0045 会校验既有行，因此脏行库必须显式失败而不是被静默改写。
+        await assert.rejects(() => runMigrations({ connectionString: database.migrationUrl,
+            directory: withGuard }), '含脏行的库不应静默通过 0045');
+        // 干净库：既有接续点与合法引用必须完整存活。
+        const cleanDatabase = await createTemporaryDatabase('r2clean');
+        const cleanMigrator = openDatabase(cleanDatabase.migrationUrl, 'relay-accept-r2-clean');
+        const cleanApp = openDatabase(cleanDatabase.appUrl, 'relay-accept-r2-clean-app');
+        try {
+            const staged = await runMigrations({ connectionString: cleanDatabase.migrationUrl,
+                directory: withoutGuard });
+            assert.equal(staged.ledgerRows, 44);
+            const workspaceId2 = await createWorkspace(cleanApp.db);
+            const projectId2 = (await createProject(cleanApp.db, { workspaceId: workspaceId2,
+                commandId: randomUUID(), title: 'R2 干净升级', projectType: 'GENERAL' })).result.project_id;
+            const taskId2 = await newTaskIn(cleanApp.db, workspaceId2, projectId2, '干净升级任务');
+            const pointId2 = randomUUID();
+            await sql `insert into project_continuation_points (id, workspace_id, project_id, name,
+        state_phase_key, state_revision) values (${pointId2}, ${workspaceId2}, ${projectId2},
+        '干净基线', 'DISCOVERY', 0)`.execute(cleanApp.db);
+            await sql `insert into project_continuation_point_refs (continuation_point_id, ref_kind,
+        ref_id, ref_revision, ordinal, task_id, artifact_version_id)
+        values (${pointId2}, 'TASK', ${taskId2}, 0, 0, ${taskId2}, null)`.execute(cleanApp.db);
+            const upgraded = await runMigrations({ connectionString: cleanDatabase.migrationUrl,
+                directory: withGuard });
+            assert.deepEqual(upgraded.applied, ['0045_continuation_point_ref_target_guard']);
+            assert.equal(upgraded.ledgerRows, 45);
+            const survived = await sql `select
+        (select count(*)::text from project_continuation_points where id = ${pointId2}) as points,
+        (select count(*)::text from project_continuation_point_refs
+          where continuation_point_id = ${pointId2} and ref_id = ${taskId2}) as refs`
+                .execute(cleanMigrator.db);
+            assert.deepEqual(survived.rows[0], { points: '1', refs: '1' });
+            await expectSqlState('23514', '0045 之后脏行被拒绝', () => sql `
+        insert into project_continuation_point_refs (continuation_point_id, ref_kind, ref_id,
+          ref_revision, ordinal, task_id, artifact_version_id)
+        values (${pointId2}, 'ARTIFACT_VERSION', ${randomUUID()}, 0, 5, null, null)`
+                .execute(cleanApp.db));
+        }
+        finally {
+            await cleanMigrator.close();
+            await cleanApp.close();
+            await cleanDatabase.drop();
+        }
+    }
+    finally {
+        await appRole.close();
+        await migratorRole.close();
+        await database.drop();
+    }
+});
+test('R2-P2-1 成果版本引用：捕获后先 CURRENT、追加 v2 后 SUPERSEDED、重新选用后同时含 v1/v2', async () => {
+    const workspaceId = await createWorkspace(app.db);
+    const project = await createProject(app.db, { workspaceId, commandId: randomUUID(),
+        title: 'R2 成果链', projectType: 'DEVELOPMENT' });
+    const projectId = project.result.project_id;
+    const taskId = await newTask(workspaceId, projectId, '产物任务');
+    const { artifactId, versionId: v1 } = await seedArtifactVersion(workspaceId, projectId, taskId, 1n);
+    await runStateCommand(app.db, { workspaceId, projectId, commandId: randomUUID(),
+        expectedRevision: '0', action: 'SELECT_ARTIFACT_VERSION',
+        params: { artifact_version_id: v1, source_ref: `task:${taskId}` } });
+    const api = await startTestApi();
+    try {
+        const collection = `${workspacePath(workspaceId)}/projects/${projectId}/continuation-points`;
+        const pointId = (await api.post(collection, { command_id: randomUUID(), name: 'v1 基线', note: null })).body.result.id;
+        const before = (await api.get(`${collection}/${pointId}/comparison`)).body;
+        const first = before.ref_changes.find((ref) => ref.ref_id === v1);
+        assert.equal(first?.change, 'CURRENT');
+        assert.equal(first?.current_revision, '1');
+        const v2 = await withTransaction(app.db, async (repositories) => appendVersion(repositories, artifactId, 2n));
+        const afterV2 = (await api.get(`${collection}/${pointId}/comparison`)).body;
+        const superseded = afterV2.ref_changes.find((ref) => ref.ref_id === v1);
+        assert.equal(superseded?.change, 'SUPERSEDED');
+        assert.equal(superseded?.current_revision, '1', 'SUPERSEDED 不得替换为最新版');
+        await runStateCommand(app.db, { workspaceId, projectId, commandId: randomUUID(),
+            expectedRevision: '1', action: 'SELECT_ARTIFACT_VERSION',
+            params: { artifact_version_id: v2, source_ref: `task:${taskId}` } });
+        const reCaptured = (await api.post(collection, { command_id: randomUUID(), name: 'v2 基线', note: null })).body.result;
+        const recaptured = (await api.get(`${collection}/${reCaptured.id}/comparison`)).body;
+        const v1Again = recaptured.ref_changes.find((ref) => ref.ref_id === v1);
+        const v2Ref = recaptured.ref_changes.find((ref) => ref.ref_id === v2);
+        assert.equal(v1Again?.change, 'SUPERSEDED');
+        assert.equal(v2Ref?.change, 'CURRENT');
+        assert.equal(v2Ref?.captured_revision, '2');
+    }
+    finally {
+        await api.stop();
+    }
+});
+test('R2-P2-3 跨项目引用按 MISSING 处理，且正常引用不被误伤', async () => {
+    const workspaceId = await createWorkspace(app.db);
+    const host = await createProject(app.db, { workspaceId, commandId: randomUUID(),
+        title: 'R2 宿主', projectType: 'DEVELOPMENT' });
+    const hostId = host.result.project_id;
+    const other = await createProject(app.db, { workspaceId, commandId: randomUUID(),
+        title: 'R2 他项目', projectType: 'DEVELOPMENT' });
+    const otherId = other.result.project_id;
+    const hostTaskId = await newTask(workspaceId, hostId, '宿主任务');
+    const otherTaskId = await newTask(workspaceId, otherId, '他项目任务');
+    const { versionId: otherVersion } = await seedArtifactVersion(workspaceId, otherId, otherTaskId, 1n);
+    const { versionId: hostVersion } = await seedArtifactVersion(workspaceId, hostId, hostTaskId, 1n);
+    await runStateCommand(app.db, { workspaceId, projectId: hostId, commandId: randomUUID(),
+        expectedRevision: '0', action: 'SELECT_ARTIFACT_VERSION',
+        params: { artifact_version_id: hostVersion, source_ref: `task:${hostTaskId}` } });
+    const api = await startTestApi();
+    try {
+        const collection = `${workspacePath(workspaceId)}/projects/${hostId}/continuation-points`;
+        const pointId = (await api.post(collection, { command_id: randomUUID(), name: '跨项目反例', note: null })).body.result.id;
+        // 应用角色本身持有 INSERT，这两条跨项目引用可以被真实写入，不需要迁移角色。
+        await sql `insert into project_continuation_point_refs (continuation_point_id, ref_kind,
+      ref_id, ref_revision, ordinal, task_id, artifact_version_id)
+      values (${pointId}, 'TASK', ${otherTaskId}, 0, 80, ${otherTaskId}, null)`.execute(app.db);
+        await sql `insert into project_continuation_point_refs (continuation_point_id, ref_kind,
+      ref_id, ref_revision, ordinal, task_id, artifact_version_id)
+      values (${pointId}, 'ARTIFACT_VERSION', ${otherVersion}, 1, 81, null, ${otherVersion})`
+            .execute(app.db);
+        const comparison = (await api.get(`${collection}/${pointId}/comparison`)).body;
+        const foreignTask = comparison.ref_changes.find((ref) => ref.ref_id === otherTaskId);
+        const foreignVersion = comparison.ref_changes.find((ref) => ref.ref_id === otherVersion);
+        assert.equal(foreignTask?.change, 'MISSING');
+        assert.equal(foreignTask?.current_revision, null);
+        assert.equal(foreignVersion?.change, 'MISSING');
+        assert.equal(foreignVersion?.current_revision, null);
+        // 本项目自己的 Task 与成果版本不能被新的可见性判断打成 MISSING。
+        assert.equal(comparison.ref_changes.find((ref) => ref.ref_id === hostTaskId)?.change, 'UNCHANGED');
+        assert.equal(comparison.ref_changes.find((ref) => ref.ref_id === hostVersion)?.change, 'CURRENT');
+        assert.equal(comparison.interpretation, null);
+        await editTaskPresentation(app.db, { workspaceId, taskId: hostTaskId, commandId: randomUUID(),
+            expectedRevision: '0', title: '宿主任务（改过）' });
+        const revised = (await api.get(`${collection}/${pointId}/comparison`)).body;
+        assert.equal(revised.ref_changes.find((ref) => ref.ref_id === hostTaskId)?.change, 'REVISED');
+        assert.equal(revised.ref_changes.find((ref) => ref.ref_id === hostTaskId)?.current_revision, '1');
+        // 端点形状与作用域不变：跨 Workspace 读比较仍 404。
+        const otherWorkspaceId = await createWorkspace(app.db);
+        expectProblem(await api.get(`${workspacePath(otherWorkspaceId)}/projects/${hostId}` +
+            `/continuation-points/${pointId}/comparison`), 404, 'RESOURCE_NOT_FOUND');
+    }
+    finally {
+        await api.stop();
+    }
+});

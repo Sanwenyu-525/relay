@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { JsonObject } from '../infrastructure/json.js';
 import { readModelPortConfig } from './model-port-config.js';
+import { classifyProviderError } from './model-error-classification.js';
 import type { ModelIdentity, ModelUsage } from './fake-model-port.js';
 import type { CheckResultValue } from '../infrastructure/database-schema.js';
 import type { CheckPlanEntry } from './check-plan.js';
@@ -243,7 +244,8 @@ export class ModelSemanticChecker implements Checker {
       return {
         result: 'ERROR',
         evidence: { ...base, reason: 'SEMANTIC_EVALUATION_FAILED',
-          error_kind: error instanceof Error ? error.name : 'UNKNOWN',
+          error_kind: (input.signal?.aborted === true ? undefined : classifyProviderError(error))
+            ?? (error instanceof Error ? error.name : 'UNKNOWN'),
           ...(response.usage === undefined ? {} : { usage: {
             input_tokens: response.usage.inputTokens,
             output_tokens: response.usage.outputTokens } }),

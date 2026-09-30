@@ -1,0 +1,289 @@
+/* 协作工作区：单左栏（全局 AppShell）+ 对话中栏 + 产物右栏。
+   所有间距、颜色与字号沿用唯一 token；此处不新增第二套数值。 */
+
+.app-frame:has(.collab-page) { height: 100dvh; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; overflow: hidden; }
+.desktop-window .app-frame:has(.collab-page) { height: auto; }
+.app-content:has(.collab-page) { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.app-main:has(.collab-page) { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; }
+.app-main:has(.collab-page) > div { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+
+.collab-page { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+.collab-main { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+
+.collab-recovery { flex: none; margin: var(--relay-space-4) var(--relay-space-6) 0; padding: var(--relay-space-3); border: var(--relay-border-width) solid var(--relay-color-border-control); border-radius: var(--relay-radius-control); overflow-wrap: anywhere; }
+.collab-recovery > div { display: grid; gap: var(--relay-space-2); margin-top: var(--relay-space-2); }
+
+.collab-columns { flex: 1; display: grid; grid-template-columns: minmax(var(--relay-layout-workspace-centerMin), 1.1fr) minmax(var(--relay-layout-workspace-sideWidth), 1fr); min-height: 0; overflow: hidden; }
+.collab-center { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: var(--relay-space-6); gap: var(--relay-space-3); }
+.collab-center > * { flex: none; }
+.collab-center > .agent-assist { flex: 1; min-height: 0; gap: var(--relay-space-2); }
+/* 目标已经由上方上下文栏承担；对话区不再重复标题、返回链接与会话信息摘要。 */
+.collab-center > .agent-assist > .agent-assist-heading,
+.collab-center .agent-chat-conversation-heading { display: none; }
+.collab-center .agent-chat-conversation { flex: 1; min-height: 0; gap: var(--relay-space-3); margin: 0; padding: 0; background: transparent; border: 0; }
+/* 提案与选项是补充信息，不占据消息流的常驻高度。 */
+.collab-center .agent-chat-proposals { display: none; }
+.collab-center .agent-chat-composer textarea { min-height: var(--relay-control-height); resize: vertical; border: 0; padding: 0; background: transparent; }
+/* 会话操作压成一行，消息流才有可用高度。 */
+.collab-center > .agent-assist > .agent-assist-session-bar > .form-actions { flex-wrap: nowrap; }
+.collab-center > .agent-assist > .agent-assist-session-bar { margin: 0; padding: 0; background: transparent; border: 0; }
+.collab-center > .agent-assist > .agent-assist-session-bar .form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-2); margin: 0; }
+.collab-center > .agent-assist > .agent-assist-session-bar .helper-text { flex-basis: 100%; margin: var(--relay-space-1) 0 0; }
+.collab-center .agent-chat-sources { margin: 0; }
+.collab-center .agent-chat-sources > summary { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); cursor: pointer; }
+.collab-center .collab-empty { overflow-y: auto; }
+.collab-tools-toggle { justify-self: start; }
+
+/* 目标头：项目 eyebrow + 状态 + 标题 + 目标 + 三格事实条 */
+.collab-goal { flex: none; display: grid; gap: var(--relay-space-3); padding: 0; }
+/* 执行控制默认折叠，状态行常驻；控制请求、未结清动作或失败时自动展开，
+   避免五个按钮长期占据首屏而不改变可见性。 */
+.collab-goal-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--relay-space-2) var(--relay-space-4);
+  min-width: 0;
+}
+.collab-goal-toolbar > .collab-model-connection { min-width: 0; overflow-wrap: anywhere; }
+.collab-run-disclosure { min-width: 0; }
+.collab-run-disclosure > summary { cursor: pointer; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); white-space: nowrap; }
+.collab-run-disclosure[open] { flex: 1 1 100%; }
+.collab-run-disclosure[open] > summary { color: var(--relay-color-text-primary); }
+.collab-run-disclosure > .collab-run-control { margin-top: var(--relay-space-2); }
+.collab-goal-main { min-width: 0; }
+.collab-goal-context { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-3); margin-bottom: var(--relay-space-3); }
+.collab-goal .collab-goal-context .eyebrow { margin: 0; color: var(--relay-color-text-primary); }
+.collab-goal-context .status-chip { background: var(--relay-color-selection-bg); color: var(--relay-color-selection-text); font-weight: var(--relay-font-weight-medium); }
+.collab-goal h1 { margin: 0; font-size: var(--relay-font-size-page); overflow-wrap: anywhere; }
+.collab-goal-title { display: flex; align-items: center; gap: var(--relay-space-3); flex-wrap: wrap; margin-bottom: var(--relay-space-2); }
+.collab-goal .eyebrow { margin: 0 0 var(--relay-space-3); font-family: var(--relay-font-family-editorial); font-size: var(--relay-font-size-rowTitle); font-weight: var(--relay-font-weight-semibold); overflow-wrap: anywhere; }
+.collab-goal .page-lede { font-size: var(--relay-font-size-rowTitle); }
+.collab-goal .page-lede { margin: 0 0 var(--relay-space-2); }
+.collab-goal .collab-run-control { flex: 1 1 20rem; }
+.collab-goal .collab-run-control p:first-of-type { margin-top: 0; }
+
+/* 事实条：效果图的一条三格。格内是"现在需要什么 / 已绑定什么 / 证据在哪"，
+   不放统计卡，也不重复状态块。 */
+.collab-factbar {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1.1fr;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-surface);
+  overflow: hidden;
+}
+.collab-factbar > li { display: grid; align-content: start; gap: var(--relay-space-1); min-width: 0; padding: var(--relay-space-2) var(--relay-space-4); }
+.collab-factbar > li + li { border-left: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.collab-factbar-label { display: flex; align-items: center; gap: var(--relay-space-2); font-weight: var(--relay-font-weight-semibold); overflow-wrap: anywhere; }
+.collab-factbar-label > svg { flex: none; width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+.collab-factbar-note { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); overflow-wrap: anywhere; }
+.collab-factbar .text-link { justify-self: start; }
+
+.collab-notices { flex: none; padding: 0; }
+.collab-notices p { margin: var(--relay-space-2) 0 0; }
+
+/* 右栏：文档 / 检查 / 版本历史 */
+.collab-side { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; border-left: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.collab-side > [hidden] { display: none; }
+.collab-judgment .review-bound-summary { font-size: var(--relay-font-size-meta); overflow-wrap: anywhere; }
+.collab-judgment .review-bound-summary p { margin: 0; }
+.collab-judgment .review-bound-summary .review-facts { display: flex; flex-wrap: wrap; gap: var(--relay-space-2); margin: 0; }
+.collab-judgment .review-bound-summary .review-facts > div { display: flex; gap: var(--relay-space-1); padding: 0; }
+.collab-side-tabs { flex: none; display: flex; align-items: stretch; gap: var(--relay-space-6); min-height: var(--relay-layout-header-height); padding: 0 var(--relay-space-6); border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.collab-side-tab { padding: var(--relay-space-3) var(--relay-space-2) var(--relay-space-2); background: none; border: none; border-bottom: var(--relay-focus-width) solid transparent; color: var(--relay-color-text-secondary); cursor: pointer; font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-body); }
+.collab-side-tab:first-child { padding-left: 0; }
+.collab-side-tab:hover { color: var(--relay-color-action-text); }
+.collab-side-tab--active { color: var(--relay-color-selection-text); font-weight: var(--relay-font-weight-medium); border-bottom-color: var(--relay-color-action-primary); }
+.collab-side-body { flex: 1; display: flex; flex-direction: column; gap: var(--relay-space-4); min-height: 0; overflow-y: auto; padding: var(--relay-space-6); background: var(--relay-color-bg-surface); }
+.collab-side-body > * { flex: none; }
+.collab-side-empty { display: grid; gap: var(--relay-space-2); }
+.collab-side-empty h2 { margin: var(--relay-space-2) 0 0; font-size: var(--relay-font-size-body); }
+.collab-side-empty h2:first-child { margin-top: 0; }
+
+.collab-delegate, .collab-run-control, .collaboration-completion, .collab-reader, .collab-judgment {
+  padding: var(--relay-space-4);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+}
+.collab-delegate h2, .collaboration-completion h2, .collab-reader h2 { margin: 0 0 var(--relay-space-2); font-size: var(--relay-font-size-body); }
+.collab-run-control p:first-of-type { margin-top: 0; }
+.collaboration-completion fieldset { margin-top: var(--relay-space-3); }
+.collab-judgment-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--relay-space-3); }
+.collab-judgment-heading h2 { display: flex; align-items: center; gap: var(--relay-space-2); margin: 0 0 var(--relay-space-2); font-size: var(--relay-font-size-body); }
+.collab-judgment-heading h2 > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); color: var(--relay-color-selection-text); }
+
+.collab-draft { margin-top: var(--relay-space-3); padding: var(--relay-space-3); border: var(--relay-border-width) solid var(--relay-color-border-control); border-radius: var(--relay-radius-control); background: var(--relay-color-bg-subtle); }
+.collab-draft h3 { margin: 0 0 var(--relay-space-2); font-size: var(--relay-font-size-body); }
+.collab-draft-text { max-height: 18rem; overflow: auto; font-family: var(--relay-font-family-code); font-size: var(--relay-font-size-meta); white-space: pre-wrap; }
+.collab-compare-controls { display: flex; align-items: flex-end; gap: var(--relay-space-3); margin-top: var(--relay-space-3); }
+.collab-compare-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--relay-space-3); margin-top: var(--relay-space-2); }
+.collab-compare-columns article { padding: var(--relay-space-3); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-control); background: var(--relay-color-bg-subtle); }
+.collab-reading { margin-top: var(--relay-space-3); }
+.collab-reading-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--relay-space-3); }
+.collab-reading-heading h3 { margin: 0; font-size: var(--relay-font-size-body); }
+.collab-reading-body { max-height: 24rem; overflow-y: auto; padding: var(--relay-space-3) 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); margin-top: var(--relay-space-2); }
+
+.collab-run-progress { padding: var(--relay-space-3) 0; }
+.collab-run-progress h3 { margin: 0 0 var(--relay-space-2); font-size: var(--relay-font-size-body); }
+.collab-run-progress .run-list { margin: var(--relay-space-2) 0; }
+/* 序号取服务端 step.index，不再叠加 <ol> 的 CSS 计数，避免出现「1. 1. 构建上下文」。 */
+.collab-run-progress .run-list { list-style: none; padding-left: 0; }
+.collab-history-detail { display: grid; gap: var(--relay-space-2); }
+.collab-history-detail p { margin: 0; }
+
+/* 文档头 + 正文：文件名·版本·保存状态·最后保存，正文紧随其后。 */
+.collab-page .artifact-doc { display: grid; gap: var(--relay-space-3); }
+.collab-page .artifact-doc-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--relay-space-3); }
+.collab-page .artifact-doc-heading h3 { margin: 0; font-size: var(--relay-font-size-section); overflow-wrap: anywhere; }
+.collab-page .artifact-doc-version { color: var(--relay-color-text-secondary); font-weight: var(--relay-font-weight-regular); }
+.collab-page .artifact-doc-heading .helper-text { margin: var(--relay-space-1) 0 0; }
+.collab-page .artifact-doc-body {
+  padding: var(--relay-space-6);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  max-height: calc(var(--relay-layout-workspace-sideWidth) + var(--relay-space-8));
+  overflow-y: auto;
+}
+.version-list--compact { gap: var(--relay-space-1); }
+.version-row--compact { align-items: center; padding: var(--relay-space-2) var(--relay-space-3); }
+.version-row--active { background: var(--relay-color-selection-bg); border-color: var(--relay-color-border-control); }
+
+.collab-empty { margin: auto; max-width: var(--relay-layout-reading-maxWidth); text-align: left; }
+.collab-empty > svg { width: 2rem; height: 2rem; color: var(--relay-color-text-muted); }
+.collab-empty h1 { font-size: var(--relay-font-size-section); }
+.collab-picker { margin-top: var(--relay-space-4); text-align: left; }
+
+/* 同一 token 源下复现双页工作桌的纸面层级，仅影响 /agent。 */
+.collab-narrow-tabs { display: none; }
+.app-frame:has(.collab-page) .brand { font-size: var(--relay-font-size-section); }
+.app-frame:has(.collab-page) .navigation-item { min-height: var(--relay-space-12); font-size: var(--relay-font-size-reading); }
+.app-frame:has(.collab-page) .recent-work-heading h2 { font-size: var(--relay-font-size-reading); }
+.app-frame:has(.collab-page) .recent-work-item { padding: var(--relay-space-3) var(--relay-space-2); gap: var(--relay-space-2); border: 0; border-left: var(--relay-focus-width) solid transparent; }
+.app-frame:has(.collab-page) .recent-work-item--active { border-left-color: var(--relay-color-action-primary); }
+.app-frame:has(.collab-page) .recent-work-title { font-size: var(--relay-font-size-meta); }
+.app-frame:has(.collab-page) .recent-work-project { font-size: var(--relay-font-size-meta); }
+.collab-center .agent-assist-session-bar button { min-height: var(--relay-control-target-minimum); padding: var(--relay-space-1) var(--relay-space-2); background: transparent; border-color: transparent; font-size: var(--relay-font-size-meta); }
+.collab-center .agent-chat-sources:not([open]) { align-self: flex-end; margin-top: calc(-1 * var(--relay-space-8)); }
+.collab-center .agent-chat-composer-heading { color: var(--relay-color-text-secondary); font-weight: var(--relay-font-weight-regular); }
+.collab-center .agent-chat-composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; margin: 0; gap: var(--relay-space-1); max-height: 70%; overflow-y: auto; padding: var(--relay-space-3) var(--relay-space-4); }
+.collab-center .agent-chat-composer-heading { grid-column: 1; grid-row: 1; }
+.collab-center .agent-chat-composer > .field { grid-column: 1 / -1; grid-row: 2; }
+.collab-center .agent-chat-composer .agent-chat-options { grid-column: 2; grid-row: 1; }
+.collab-center .agent-chat-composer .agent-chat-options[open] { grid-column: 1 / -1; grid-row: 3; max-height: var(--relay-layout-rail-narrowWidth); overflow: auto; }
+.collab-center .agent-chat-composer-actions { grid-column: 1 / -1; }
+.collab-center .agent-chat-composer textarea { height: var(--relay-control-height); font-size: var(--relay-font-size-meta); }
+.collab-center .agent-chat-composer-actions .primary-button { min-height: var(--relay-control-height); padding: 0 var(--relay-space-4); }
+.collab-center .agent-chat-composer .field { margin: 0; }
+.collab-center .agent-message-avatar { width: var(--relay-control-height-comfort); height: var(--relay-control-height-comfort); font-size: var(--relay-font-size-body); }
+.collab-center .agent-message[data-role="ASSISTANT"] .agent-message-avatar { background: var(--relay-color-selection-bg); color: var(--relay-color-selection-text); }
+.collab-center .agent-message-list { gap: var(--relay-space-4); }
+.collab-center .agent-message-meta { font-size: var(--relay-font-size-meta); }
+.collab-goal-toolbar [data-testid="collab-model-connection"] { margin: 0; font-size: var(--relay-font-size-meta); }
+.collab-goal-toolbar .collab-tools-toggle { padding: var(--relay-space-1) var(--relay-space-2); min-height: var(--relay-control-target-minimum); font-size: var(--relay-font-size-meta); }
+.collab-reader { border: 0; padding: 0; background: transparent; }
+.collab-reader .artifact-doc { gap: var(--relay-space-4); }
+.collab-reader .artifact-doc-heading { align-items: center; flex-wrap: wrap; }
+.collab-reader .artifact-doc-heading h3 { font-family: var(--relay-font-family-editorial); }
+.collab-reader .artifact-doc-heading h3 { font-weight: var(--relay-font-weight-semibold); }
+.collab-reader .markdown-preview { margin: 0; padding: var(--relay-space-6); border: 0; font-family: var(--relay-font-family-editorial); font-size: var(--relay-font-size-reading); line-height: var(--relay-font-lineHeight-ui); }
+.collab-reader .markdown-preview__heading { margin: var(--relay-space-6) 0 var(--relay-space-2); font-size: var(--relay-font-size-section); font-weight: var(--relay-font-weight-semibold); }
+.collab-reader .markdown-preview__heading:first-child { margin-top: 0; font-size: var(--relay-font-size-compactPage); }
+.collab-reader .markdown-preview__subheading { margin: var(--relay-space-4) 0 var(--relay-space-2); font-size: var(--relay-font-size-rowTitle); }
+.collab-reader .markdown-preview__heading, .collab-reader .markdown-preview__subheading { font-family: var(--relay-font-family-editorial); }
+.collab-reader .artifact-doc-body { padding: 0; }
+.collab-factbar .text-link { padding: 0; background: transparent; border: 0; text-align: left; color: var(--relay-color-action-text); font: inherit; font-size: var(--relay-font-size-meta); cursor: pointer; }
+.collab-model-details { font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); }
+.collab-model-details > summary { cursor: pointer; }
+.collab-model-details[open] { flex-basis: 100%; }
+.collab-model-details p { margin: var(--relay-space-2) 0; }
+.collab-reader .markdown-preview__paragraph { margin: 0 0 var(--relay-space-4); }
+.collab-version-details > summary { cursor: pointer; font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); padding: var(--relay-space-2) 0; }
+.collab-judgment { padding: var(--relay-space-4); background: var(--relay-color-bg-surface); }
+.collab-judgment-heading { margin: calc(-1 * var(--relay-space-4)) calc(-1 * var(--relay-space-4)) var(--relay-space-2); padding: var(--relay-space-3) var(--relay-space-4); background: var(--relay-color-selection-bg); }
+.collab-judgment-heading h2 { margin-bottom: 0; }
+.collab-judgment .review-bound-summary > p { color: var(--relay-color-text-secondary); font-family: var(--relay-font-family-code); overflow-wrap: anywhere; }
+.collab-judgment-heading h2 { font-family: var(--relay-font-family-editorial); font-size: var(--relay-font-size-rowTitle); }
+.collab-side .devtools { flex: 1; max-height: none; min-height: 0; border-top: 0; }
+.collab-side-body[data-testid="collab-panel-DOCUMENT"] { overflow: hidden; }
+.collab-document-reading { flex: 1; min-height: var(--relay-control-height-comfort); overflow-y: auto; }
+.collab-document-reading .artifact-doc-body { max-height: none; overflow: visible; }
+.collab-judgment { flex: none; }
+.collab-judgment > .helper-text { margin: var(--relay-space-1) 0 var(--relay-space-2); }
+.collab-judgment .review-evidence-details > summary, .collab-completion-details > summary { cursor: pointer; color: var(--relay-color-action-text); font-size: var(--relay-font-size-meta); }
+.collab-judgment .review-evidence-details[open] { max-height: var(--relay-layout-rail-narrowWidth); overflow: auto; }
+.collab-judgment .review-decision--compact { margin-top: var(--relay-space-2); border-top: 0; }
+.collab-judgment .review-decision--compact .field { margin-top: var(--relay-space-2); display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--relay-space-2); align-items: baseline; }
+.collab-judgment .review-decision--compact .field textarea,
+.collab-judgment .review-decision--compact .field input { grid-column: 1 / -1; }
+.collab-judgment .review-decision--compact textarea { min-height: var(--relay-control-height); height: var(--relay-control-height); }
+.collab-judgment .review-decision--compact .review-actions { margin-top: var(--relay-space-2); display: flex; gap: var(--relay-space-3); }
+.collab-judgment .review-actions > button { flex: 1; min-height: var(--relay-control-height); padding: var(--relay-space-2); }
+.collab-judgment .review-decision--compact > .helper-text { margin: var(--relay-space-2) 0 0; }
+.collab-judgment .disabled-reason { margin: var(--relay-space-2) 0; }
+.collab-completion-details { flex: none; max-height: 50%; overflow: auto; }
+
+@media (max-width: 80rem) {
+  /* 低于 breakpoint.rail：不再强留三列，按右栏页签单区显示，目标与事实条常驻。 */
+  .collab-columns { display: flex; flex-direction: column; }
+  .collab-center { display: contents; }
+  .collab-center > .collab-goal, .collab-center > .collab-notices { margin: var(--relay-space-4) var(--relay-space-6) 0; }
+  .collab-center > .agent-assist { margin: 0 var(--relay-space-6) var(--relay-space-4); }
+  .collab-side { display: none; }
+  .collab-columns[data-narrow-side="open"] .collab-center > .agent-assist,
+  .collab-columns[data-narrow-side="open"] .collab-center > .collaboration-delegate { display: none; }
+  .collab-columns[data-narrow-side="open"] .collab-side,
+  .collab-columns:has([data-pane="DEVTOOLS"]) .collab-side { display: flex; flex: 1; border-left: 0; }
+  .collab-columns:has([data-pane="DEVTOOLS"]) .collab-center > .agent-assist { display: none; }
+  .collab-narrow-tabs { display: flex; flex: none; gap: var(--relay-space-4); margin: var(--relay-space-3) var(--relay-space-6); border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
+  .collab-goal h1 { font-size: var(--relay-font-size-compactPage); }
+  .collab-side-body[data-testid="collab-panel-DOCUMENT"] { overflow-y: auto; }
+  .collab-document-reading { flex: none; min-height: 0; overflow: visible; }
+  .collab-side-tabs { display: none; }
+}
+
+@media (max-width: 64rem) {
+  .collab-goal, .collab-notices, .collab-center { padding-left: var(--relay-space-4); padding-right: var(--relay-space-4); }
+  .collab-goal { gap: var(--relay-space-2); }
+  .collab-goal .eyebrow { margin-bottom: var(--relay-space-1); font-size: var(--relay-font-size-body); }
+  .collab-goal-context { gap: var(--relay-space-2); margin-bottom: var(--relay-space-1); }
+  .collab-goal-context .eyebrow { margin-bottom: 0; }
+  .collab-goal .page-lede { font-size: var(--relay-font-size-body); margin-bottom: 0; }
+  .collab-factbar { grid-template-columns: repeat(var(--relay-layout-factbar-columns), minmax(0, 1fr)); }
+  .collab-factbar > li { padding: var(--relay-space-2); }
+  .collab-factbar-label { font-size: var(--relay-font-size-meta); }
+  .collab-side-body { padding: var(--relay-space-4); }
+  .collab-compare-columns { grid-template-columns: minmax(0, 1fr); }
+  .collab-center .agent-chat-composer-actions { flex-direction: row; align-items: center; }
+  .collab-center .agent-chat-composer-actions .primary-button { width: auto; }
+  .collab-center .agent-chat-composer-tools { gap: var(--relay-space-1); }
+  .collab-center .agent-chat-composer-tools .agent-chat-tool { padding: 0; }
+  .app-frame:has(.collab-page) .recent-work-copy, .app-frame:has(.collab-page) .recent-work-scope { display: none; }
+  .app-frame:has(.collab-page) .recent-work-heading h2 { font-size: 0; gap: 0; }
+  .app-frame:has(.collab-page) .recent-work-heading > button { display: none; }
+  .app-frame:has(.collab-page) .recent-work-item { justify-content: center; padding: var(--relay-space-2) 0; }
+  .app-frame:has(.collab-page) .recent-work-new, .app-frame:has(.collab-page) [data-testid="recent-work-new"] { font-size: 0; padding: 0; min-height: var(--relay-control-height); }
+}
+
+@media (max-width: 40rem) {
+  .app-frame:has(.collab-page) .app-topbar { gap: var(--relay-space-2); padding: 0 var(--relay-space-4); }
+  .app-frame:has(.collab-page) .breadcrumbs { flex: 1; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
+  .app-frame:has(.collab-page) .breadcrumb-item:not(:last-child), .app-frame:has(.collab-page) .topbar-date { display: none; }
+  .app-frame:has(.collab-page) .breadcrumb-item:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .app-frame:has(.collab-page) .data-source-button { padding: var(--relay-space-1); }
+  .app-frame:has(.collab-page) .data-source-button > span { display: none; }
+  .collab-center > .collab-goal, .collab-center > .collab-notices { margin-left: var(--relay-space-4); margin-right: var(--relay-space-4); padding: 0; }
+  .collab-center > .agent-assist, .collab-narrow-tabs { margin-left: var(--relay-space-4); margin-right: var(--relay-space-4); }
+  .collab-goal h1 { font-size: var(--relay-font-size-section); }
+  .collab-factbar-label > svg { display: none; }
+  .collab-goal-toolbar { gap: var(--relay-space-1) var(--relay-space-2); }
+  .collab-run-disclosure > summary { white-space: normal; }
+  .collab-center .agent-chat-composer-actions { gap: var(--relay-space-1); }
+  .collab-center .agent-chat-composer-tools { font-size: var(--relay-font-size-meta); }
+}

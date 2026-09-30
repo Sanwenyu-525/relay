@@ -1,0 +1,886 @@
+# desktop-fix diff 摘要（相对并行基线，2026-09-29 UTC）
+
+## git diff --stat（本次修复触碰的文件）
+ apps/desktop/src-tauri/src/job_sidecar.rs | 171 ++++++++++--
+ apps/desktop/src-tauri/src/lib.rs         | 423 ++++++++++++++++++++++++++----
+ 2 files changed, 527 insertions(+), 67 deletions(-)
+
+## job_sidecar.rs diff
+diff --git a/apps/desktop/src-tauri/src/job_sidecar.rs b/apps/desktop/src-tauri/src/job_sidecar.rs
+index 8d7ac61..20bd1b6 100644
+--- a/apps/desktop/src-tauri/src/job_sidecar.rs
++++ b/apps/desktop/src-tauri/src/job_sidecar.rs
+@@ -25,8 +25,8 @@ use windows::{
+         },
+         Security::SECURITY_ATTRIBUTES,
+         Storage::FileSystem::{
+-            CreateFileW, MoveFileExW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE,
+-            MOVEFILE_WRITE_THROUGH, OPEN_EXISTING,
++            CreateFileW, MoveFileExW, FILE_APPEND_DATA, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_DELETE,
++            FILE_SHARE_READ, FILE_SHARE_WRITE, MOVEFILE_WRITE_THROUGH, OPEN_ALWAYS, OPEN_EXISTING,
+         },
+         System::{
+             JobObjects::{
+@@ -280,6 +280,56 @@ pub fn remove_reconciled_launches(data_root: &Path, launch_ids: &[String]) -> Re
+     Ok(())
+ }
+ 
++/// In-place supervisor restart recovery: unlike `recover_old_launches`, the
++/// recorded launch whose API Job still hosts the running desktop API keeps that
++/// Job untouched. Every recorded supervisor/worker tree is confirmed stopped
++/// (terminated or already absent) before the restarted supervisor re-recovers
++/// the recorded launches' claims.
++pub fn recover_supervisor_restart_launches(
++    data_root: &Path,
++    keep_api_launch: &str,
++) -> Result<Vec<StoppedLaunch>, String> {
++    let directory = records_dir(data_root);
++    if !directory.exists() {
++        return Ok(Vec::new());
++    }
++    let mut records = Vec::new();
++    for item in
++        fs::read_dir(&directory).map_err(|_| "cannot inspect prior desktop launch records")?
++    {
++        let item = item.map_err(|_| "cannot inspect prior desktop launch records")?;
++        let path = item.path();
++        if path.extension().is_none_or(|extension| extension != "json") {
++            continue;
++        }
++        let record = read_armed_record(&path)?;
++        let worker = Job::open_old(&record.supervisor_job)?;
++        let worker_present = worker.is_some();
++        if let Some(worker) = worker {
++            worker.terminate_and_wait(Duration::from_secs(10))?;
++        }
++        let mut api_present = false;
++        if record.launch_id != keep_api_launch {
++            let api = Job::open_old(&record.api_job)?;
++            api_present = api.is_some();
++            if let Some(api) = api {
++                api.terminate_and_wait(Duration::from_secs(10))?;
++            }
++        }
++        let proof = if worker_present || api_present {
++            "armed_job_terminated_and_active_count_zero"
++        } else {
++            "armed_job_absent_after_last_handle_closed"
++        };
++        records.push(StoppedLaunch {
++            launch_id: record.launch_id,
++            stop_evidence: proof.into(),
++        });
++    }
++    records.sort_by(|a, b| a.launch_id.cmp(&b.launch_id));
++    Ok(records)
++}
++
+ pub fn arm_launch(data_root: &Path) -> Result<Launch, String> {
+     let id = Uuid::new_v4().to_string();
+     let (api_name, supervisor_name) = names(&id);
+@@ -340,6 +390,36 @@ fn create_pipe() -> Result<(OwnedHandle, OwnedHandle), String> {
+     Ok((unsafe { own(read) }, unsafe { own(write) }))
+ }
+ 
++/// 为子进程继承的 stderr 打开（或创建）共享诊断日志。以 FILE_APPEND_DATA
++/// 打开保证宿主与子进程并发写入都落在文件末尾；FILE_SHARE_DELETE 允许宿主
++/// 在子进程存活时尽力轮转。日志只承载 stderr 诊断，不承载任何配置或密钥。
++fn open_append_log(path: &Path) -> Result<OwnedHandle, String> {
++    if let Some(parent) = path.parent() {
++        fs::create_dir_all(parent)
++            .map_err(|_| "cannot create the desktop worker log directory".to_owned())?;
++    }
++    crate::rotate_worker_log_if_large(path, crate::WORKER_LOG_ROTATE_BYTES);
++    let wide = HSTRING::from(path.as_os_str());
++    let mut attributes = SECURITY_ATTRIBUTES {
++        nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
++        lpSecurityDescriptor: ptr::null_mut(),
++        bInheritHandle: BOOL(1),
++    };
++    let handle = unsafe {
++        CreateFileW(
++            PCWSTR(wide.as_ptr()),
++            FILE_APPEND_DATA.0,
++            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
++            Some(&mut attributes),
++            OPEN_ALWAYS,
++            FILE_ATTRIBUTE_NORMAL,
++            None,
++        )
++    }
++    .map_err(|_| "cannot open the desktop worker diagnostic log".to_owned())?;
++    Ok(unsafe { own(handle) })
++}
++
+ fn quote_arg(value: &OsStr) -> Vec<u16> {
+     let units: Vec<u16> = value.encode_wide().collect();
+     let mut quoted = vec![b'"' as u16];
+@@ -416,11 +496,14 @@ pub struct ManagedProcess {
+ }
+ 
+ impl ManagedProcess {
++    /// `stderr_log` 为 `Some` 时子进程 stderr 追加到该轮转日志文件（D2），
++    /// 为 `None` 时保持既有 NUL 行为（丢弃）。
+     pub fn spawn(
+         node: &Path,
+         args: &[OsString],
+         overrides: &[(String, OsString)],
+         job: Job,
++        stderr_log: Option<&Path>,
+     ) -> Result<Self, String> {
+         let (child_stdin, parent_stdin) = create_pipe()?;
+         let (parent_stdout, child_stdout) = create_pipe()?;
+@@ -443,19 +526,23 @@ impl ManagedProcess {
+             lpSecurityDescriptor: ptr::null_mut(),
+             bInheritHandle: BOOL(1),
+         };
+-        let nul = unsafe {
+-            CreateFileW(
+-                windows::core::w!("NUL"),
+-                GENERIC_WRITE.0,
+-                FILE_SHARE_READ | FILE_SHARE_WRITE,
+-                Some(&mut attributes),
+-                OPEN_EXISTING,
+-                FILE_ATTRIBUTE_NORMAL,
+-                None,
+-            )
+-        }
+-        .map_err(|_| "cannot create the desktop null error stream".to_owned())?;
+-        let nul = unsafe { own(nul) };
++        let stderr = match stderr_log {
++            Some(path) => open_append_log(path)?,
++            None => unsafe {
++                own(
++                    CreateFileW(
++                        windows::core::w!("NUL"),
++                        GENERIC_WRITE.0,
++                        FILE_SHARE_READ | FILE_SHARE_WRITE,
++                        Some(&mut attributes),
++                        OPEN_EXISTING,
++                        FILE_ATTRIBUTE_NORMAL,
++                        None,
++                    )
++                    .map_err(|_| "cannot create the desktop null error stream".to_owned())?,
++                )
++            },
++        };
+ 
+         let mut bytes = 0;
+         let _ = unsafe { InitializeProcThreadAttributeList(None, 2, None, &mut bytes) };
+@@ -468,7 +555,7 @@ impl ManagedProcess {
+             .map_err(|_| "cannot initialize Windows process attributes".to_owned())?;
+         let _attributes = Attributes(list);
+         let job_handle = raw(&job.handle);
+-        let child_handles = [raw(&child_stdin), raw(&child_stdout), raw(&nul)];
++        let child_handles = [raw(&child_stdin), raw(&child_stdout), raw(&stderr)];
+         unsafe {
+             UpdateProcThreadAttribute(
+                 list,
+@@ -530,7 +617,7 @@ impl ManagedProcess {
+         }
+         drop(child_stdin);
+         drop(child_stdout);
+-        drop(nul);
++        drop(stderr);
+         Ok(Self {
+             process,
+             stdin: Some(File::from(parent_stdin)),
+@@ -638,7 +725,7 @@ mod tests {
+             "require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});setInterval(()=>{},1000)"
+         )];
+         let process =
+-            ManagedProcess::spawn(Path::new(&node), &args, &[], job).expect("start Job-bound Node");
++            ManagedProcess::spawn(Path::new(&node), &args, &[], job, None).expect("start Job-bound Node");
+         let deadline = std::time::Instant::now() + Duration::from_secs(5);
+         loop {
+             if process.job.active_count().expect("inspect Job") >= 2 {
+@@ -679,7 +766,7 @@ mod tests {
+             OsString::from("-e"),
+             OsString::from("setInterval(()=>{},1000)"),
+         ];
+-        let process = ManagedProcess::spawn(Path::new(&node), &args, &[], launch.supervisor_job)
++        let process = ManagedProcess::spawn(Path::new(&node), &args, &[], launch.supervisor_job, None)
+             .expect("start old Worker group");
+         let stopped = recover_old_launches(&root).expect("verify and stop old Job");
+         assert_eq!(stopped.len(), 1);
+@@ -704,6 +791,50 @@ mod tests {
+         std::fs::remove_dir_all(&root).expect("remove isolated test root");
+     }
+ 
++    #[test]
++    fn supervisor_restart_recovery_stops_workers_but_keeps_the_running_api_job() {
++        let Some(node) = std::env::var_os("RELAY_TEST_NODE") else {
++            return;
++        };
++        let root =
++            std::env::temp_dir().join(format!("relay-restart-recover-{}", uuid::Uuid::new_v4()));
++        let launch = arm_launch(&root).expect("arm launch");
++        let sleeper = [
++            OsString::from("-e"),
++            OsString::from("setInterval(()=>{},1000)"),
++        ];
++        let supervisor_side = ManagedProcess::spawn(
++            Path::new(&node), &sleeper, &[], launch.supervisor_job, None,
++        )
++        .expect("start supervisor-side sleeper");
++        let mut api_side = ManagedProcess::spawn(
++            Path::new(&node), &sleeper, &[], launch.api_job, None,
++        )
++        .expect("start API-side sleeper");
++        let stopped = super::recover_supervisor_restart_launches(&root, &launch.id)
++            .expect("recover recorded launches for a supervisor restart");
++        assert_eq!(stopped.len(), 1);
++        assert_eq!(stopped[0].launch_id, launch.id);
++        assert_eq!(
++            stopped[0].stop_evidence,
++            "armed_job_terminated_and_active_count_zero"
++        );
++        let deadline = std::time::Instant::now() + Duration::from_secs(5);
++        while supervisor_side.try_wait().expect("wait supervisor sleeper").is_none() {
++            assert!(
++                std::time::Instant::now() < deadline,
++                "supervisor-side sleeper survived restart recovery"
++            );
++            std::thread::sleep(Duration::from_millis(25));
++        }
++        assert!(
++            api_side.try_wait().expect("wait API sleeper").is_none(),
++            "the running API Job must survive a supervisor restart recovery"
++        );
++        api_side.stop(Duration::from_secs(5)).expect("stop API-side sleeper");
++        std::fs::remove_dir_all(&root).expect("remove isolated record root");
++    }
++
+     #[test]
+     fn incomplete_armed_record_blocks_recovery() {
+         let root =
+@@ -763,7 +894,7 @@ mod tests {
+         let args = [OsString::from("-e"), OsString::from(
+             "const c=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});console.log(c.pid);setInterval(()=>{},1000)"
+         )];
+-        let mut process = ManagedProcess::spawn(&node, &args, &[], launch.supervisor_job)
++        let mut process = ManagedProcess::spawn(&node, &args, &[], launch.supervisor_job, None)
+             .expect("start crash probe process tree");
+         let mut reader = std::io::BufReader::new(process.take_stdout().expect("probe stdout"));
+         let mut child_pid = String::new();
+
+## lib.rs diff（含并行基线已有的 desktop.env 白名单未提交改动，其上叠加本次 D1/D2 修改）
+diff --git a/apps/desktop/src-tauri/src/lib.rs b/apps/desktop/src-tauri/src/lib.rs
+index 7e326e6..09e2259 100644
+--- a/apps/desktop/src-tauri/src/lib.rs
++++ b/apps/desktop/src-tauri/src/lib.rs
+@@ -162,12 +162,13 @@ struct RuntimeState {
+     api: Mutex<Option<ManagedApi>>,
+     #[cfg(windows)]
+     supervisor: Arc<Mutex<Option<ManagedProcess>>>,
+-    #[cfg(windows)]
+-    supervisor_failed: Arc<AtomicBool>,
++    /// Set when shutdown began so the supervisor watcher stops restarting.
++    stopping: Arc<AtomicBool>,
+ }
+ 
+ impl RuntimeState {
+     fn stop(&self) {
++        self.stopping.store(true, Ordering::SeqCst);
+         #[cfg(windows)]
+         {
+             if let Some(mut supervisor) = self.supervisor.lock().expect("supervisor mutex poisoned").take() {
+@@ -230,10 +231,9 @@ fn desktop_bootstrap(window: WebviewWindow, state: tauri::State<'_, RuntimeState
+         state.stop();
+         return Err("desktop API is no longer running".into());
+     }
+-    #[cfg(windows)]
+-    if state.supervisor_failed.load(Ordering::SeqCst) {
+-        return Err("desktop Worker supervisor is no longer running".into());
+-    }
++    // supervisor 失效不再让 bootstrap 永久失败（D1）：宿主 watcher 按有界策略
++    // 重启 supervisor；重启预算耗尽时本地 API 仍可用，worker 是否真正在派发由
++    // supervisor 进程事实决定，这里不伪装存活。
+     Ok(BootstrapResponse {
+         base_url: state.base_url.clone(),
+         workspace_id: state.workspace_id.clone(),
+@@ -283,16 +283,89 @@ fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+     let metadata = fs::metadata(&path).map_err(|_| "cannot inspect desktop.env")?;
+     if metadata.len() > 65_536 { return Err("desktop.env exceeds the size limit".into()); }
+     let config = fs::read_to_string(&path).map_err(|_| "cannot read desktop.env")?;
++    validate_desktop_config_keys(&config)?;
++    Ok(path)
++}
++
++/// desktop.env 键白名单：四个运行时字段由启动脚本/宿主管理，RELAY_MODEL_* 为
++/// 用户模型配置（密钥只留在该本地文件，经 --env-file 传给 API/Supervisor/Worker，
++/// 不入库、不进 UI、不写日志）。其余键一律拒绝，防止注入任意环境变量。
++fn validate_desktop_config_keys(config: &str) -> Result<(), String> {
+     for line in config.lines() {
+         let line = line.trim();
+         if line.is_empty() || line.starts_with('#') { continue; }
+         let Some((key, _)) = line.split_once('=') else { return Err("desktop.env contains an invalid setting".into()); };
+         if !matches!(key.trim(), "RELAY_DB_URL" | "RELAY_DB_POOL_MAX" |
+-            "RELAY_DB_CONNECT_TIMEOUT_MS" | "RELAY_DESKTOP_WORKSPACE_ID") {
++            "RELAY_DB_CONNECT_TIMEOUT_MS" | "RELAY_DESKTOP_WORKSPACE_ID" |
++            "RELAY_MODEL_PROVIDER" | "RELAY_MODEL_NAME" | "RELAY_MODEL_API_KEY" |
++            "RELAY_MODEL_BASE_URL" | "RELAY_MODEL_TIMEOUT_MS" |
++            "RELAY_MODEL_MAX_OUTPUT_TOKENS" | "RELAY_MODEL_MAX_CALL_TOKENS" |
++            "RELAY_MODEL_MAX_SCOPE_CALLS" | "RELAY_MODEL_MAX_SCOPE_TOKENS") {
+             return Err("desktop.env contains an unsupported setting".into());
+         }
+     }
+-    Ok(path)
++    Ok(())
++}
++
++/// supervisor/worker 诊断日志路径：跟随桌面数据目录约定（`<data-root>/logs`）。
++/// 只写 supervisor 协议事件（worker 启动/退出/恢复请求）与宿主诊断（launch、
++/// 退出码、重启决策）；不写 desktop.env 内容、模型密钥或 Bearer Token。
++fn worker_log_path(data_root: &std::path::Path) -> PathBuf {
++    data_root.join("logs").join("worker-supervisor.log")
++}
++
++/// 超过大小上限时尽力把当前日志轮转为 `<name>.old.log`（仅保留一代）。
++/// 子进程继承的日志句柄可能暂时锁住重命名；轮转失败不阻塞写入，待其退出后
++/// 下一次写入会再次尝试轮转。
++fn rotate_worker_log_if_large(path: &std::path::Path, rotate_bytes: u64) {
++    if let Ok(metadata) = fs::metadata(path) {
++        if metadata.len() > rotate_bytes {
++            let mut rotated = path.as_os_str().to_os_string();
++            rotated.push(".old.log");
++            let _ = fs::rename(path, PathBuf::from(rotated));
++        }
++    }
++}
++
++/// 追加一行带 UTC 时间戳的诊断日志；目录不存在则创建。写入失败静默忽略：
++/// 诊断日志不得影响宿主可用性。
++fn append_worker_log_capped(path: &std::path::Path, line: &str, rotate_bytes: u64) {
++    rotate_worker_log_if_large(path, rotate_bytes);
++    if let Some(parent) = path.parent() {
++        let _ = fs::create_dir_all(parent);
++    }
++    let stamped = format!("{} {}", iso_utc_timestamp(), line);
++    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) {
++        use std::io::Write;
++        let _ = file.write_all(stamped.as_bytes()).and_then(|_| file.write_all(b"\n"));
++    }
++}
++
++fn append_worker_log(path: &std::path::Path, line: &str) {
++    append_worker_log_capped(path, line, WORKER_LOG_ROTATE_BYTES);
++}
++
++/// UTC ISO-8601（毫秒）时间戳；civil-from-days（Howard Hinnant 算法）免依赖。
++fn iso_utc_timestamp() -> String {
++    let now = std::time::SystemTime::now()
++        .duration_since(std::time::UNIX_EPOCH)
++        .unwrap_or_default();
++    let (days, rest) = ((now.as_secs() / 86_400) as i64, now.as_secs() % 86_400);
++    let (hour, minute, second) = (rest / 3_600, (rest % 3_600) / 60, rest % 60);
++    let z = days + 719_468;
++    let era = z.div_euclid(146_097);
++    let day_of_era = z.rem_euclid(146_097);
++    let year_of_era =
++        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
++    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
++    let month_index = (5 * day_of_year + 2) / 153;
++    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
++    let month = if month_index < 10 { month_index + 3 } else { month_index - 9 };
++    let year = if month <= 2 { year_of_era + era * 400 + 1 } else { year_of_era + era * 400 };
++    format!(
++        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z",
++        millis = now.subsec_millis()
++    )
+ }
+ 
+ fn read_startup(stdout: impl std::io::Read + Send + 'static, nonce: &str) -> Result<(u16, String), String> {
+@@ -351,6 +424,18 @@ const JS_SAFE_INTEGER_MAX: u64 = 9_007_199_254_740_991;
+ const RECOVERY_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+ #[cfg(windows)]
+ const RECOVERY_TOTAL_TIMEOUT: Duration = Duration::from_secs(20 * 60);
++/// Supervisor 重启预算：同一稳定期内最多连续重启次数；超过后本轮运行放弃重启，
++/// 保留 API 可用（D1），桌面应用重启后预算重置。
++#[cfg(windows)]
++const SUPERVISOR_RESTART_LIMIT: u32 = 3;
++#[cfg(windows)]
++const SUPERVISOR_RESTART_BASE_BACKOFF_MS: u64 = 2_000;
++/// supervisor 达到 dispatch_ready 后稳定运行超过该时长，其后的退出视为独立事件，
++/// 重启预算重新计满（长期运行中的偶发故障不会被历史崩溃次数耗尽预算）。
++#[cfg(windows)]
++const SUPERVISOR_STABILITY_WINDOW: Duration = Duration::from_secs(300);
++/// supervisor/worker 诊断日志超过该大小时轮转保留一代（约 2x 上限）。
++const WORKER_LOG_ROTATE_BYTES: u64 = 8 * 1024 * 1024;
+ 
+ #[cfg(windows)]
+ enum SupervisorProgress {
+@@ -407,16 +492,16 @@ fn read_supervisor_line(reader: &mut impl BufRead) -> Result<Option<String>, Str
+ fn read_supervisor_startup(
+     stdout: impl std::io::Read + Send + 'static, nonce: &str, launch_id: &str,
+     stopped_launches: &[StoppedLaunch],
+-    failed: Arc<AtomicBool>,
++    failed: Arc<AtomicBool>, worker_log: Option<PathBuf>,
+ ) -> Result<Vec<String>, String> {
+     read_supervisor_startup_with_timeouts(stdout, nonce, launch_id, stopped_launches, failed,
+-        Duration::from_secs(30), RECOVERY_IDLE_TIMEOUT, RECOVERY_TOTAL_TIMEOUT)
++        worker_log, Duration::from_secs(30), RECOVERY_IDLE_TIMEOUT, RECOVERY_TOTAL_TIMEOUT)
+ }
+ 
+ #[cfg(windows)]
+ fn read_supervisor_startup_with_timeouts(
+     stdout: impl std::io::Read + Send + 'static, nonce: &str, launch_id: &str,
+-    stopped_launches: &[StoppedLaunch], failed: Arc<AtomicBool>,
++    stopped_launches: &[StoppedLaunch], failed: Arc<AtomicBool>, worker_log: Option<PathBuf>,
+     ready_timeout: Duration, idle_timeout: Duration, total_timeout: Duration,
+ ) -> Result<Vec<String>, String> {
+     let expected_nonce = nonce.to_owned();
+@@ -441,6 +526,8 @@ fn read_supervisor_startup_with_timeouts(
+                     break;
+                 }
+             };
++            // D2：supervisor 协议事件逐行落盘；崩溃时日志保留 worker 生命周期证据。
++            if let Some(log) = worker_log.as_ref() { append_worker_log(log, &line); }
+             let event = match serde_json::from_str::<SupervisorEvent>(&line) {
+                 Ok(event) => event,
+                 Err(_) => {
+@@ -505,6 +592,157 @@ fn read_supervisor_startup_with_timeouts(
+     }
+ }
+ 
++/// D1 重启预算：快速连续崩溃受连续重启次数约束；稳定运行超过稳定窗的
++/// supervisor 死亡视为独立事件，预算重新计满（长期偶发故障仍可自愈）。
++#[cfg(windows)]
++fn supervisor_restart_allowed(consecutive_restarts: u32, supervisor_uptime: Duration) -> bool {
++    supervisor_uptime >= SUPERVISOR_STABILITY_WINDOW || consecutive_restarts < SUPERVISOR_RESTART_LIMIT
++}
++
++/// 连续重启的指数退避：2s、4s、8s，之后封顶增长。
++#[cfg(windows)]
++fn supervisor_restart_backoff(consecutive_restarts: u32) -> Duration {
++    let shift = consecutive_restarts.saturating_sub(1).min(4);
++    Duration::from_millis(SUPERVISOR_RESTART_BASE_BACKOFF_MS << shift)
++}
++
++/// 重启 supervisor 所需的静态启动参数（由 start_api 解析一次）。
++#[cfg(windows)]
++struct SupervisorSpawnContext {
++    node: PathBuf,
++    supervisor_entry: PathBuf,
++    env_file: OsString,
++    data_root: PathBuf,
++    file_io_helper: OsString,
++    worker_log: PathBuf,
++    /// 仍在运行的 API 所属 launch：重启恢复时其 API Job 不得被终止。
++    api_launch_id: String,
++}
++
++/// 以新的 launch（新 Job、新 ARMED 记录）重启 supervisor：恢复既有 launch
++/// 记录、两段式握手、清理已收敛记录。失败时丢弃半武装记录；任何已派生的
++/// 进程树随 ManagedProcess 丢弃由 Job kill-on-close 终止。
++#[cfg(windows)]
++fn spawn_supervisor(context: &SupervisorSpawnContext)
++    -> Result<(ManagedProcess, Arc<AtomicBool>), String> {
++    let stopped_launches = job_sidecar::recover_supervisor_restart_launches(
++        &context.data_root, &context.api_launch_id)?;
++    let launch = job_sidecar::arm_launch(&context.data_root)?;
++    let record = context.data_root.join("runtime-launches").join(format!("{}.json", launch.id));
++    let attempt = (|| {
++        let nonce = Uuid::new_v4().to_string();
++        let frame = supervisor_startup_frame(&nonce, &launch.id, &stopped_launches)?;
++        let mut supervisor = ManagedProcess::spawn(&context.node,
++            &[context.env_file.clone(), context.supervisor_entry.clone().into_os_string()],
++            &[
++                ("RELAY_DATA_ROOT".into(), context.data_root.as_os_str().to_os_string()),
++                ("RELAY_FILE_IO_HELPER".into(), context.file_io_helper.clone()),
++                ("RELAY_SUPERVISOR_DESKTOP_MODE".into(), "true".into()),
++            ],
++            launch.supervisor_job, Some(&context.worker_log))?;
++        supervisor.write_frame(&frame)?;
++        let failure = Arc::new(AtomicBool::new(false));
++        let reconciled = read_supervisor_startup(supervisor.take_stdout()?, &nonce, &launch.id,
++            &stopped_launches, Arc::clone(&failure), Some(context.worker_log.clone()))?;
++        if failure.load(Ordering::SeqCst) || !matches!(supervisor.try_wait(), Ok(None)) {
++            return Err("supervisor private output or process failed after readiness".into());
++        }
++        Ok((supervisor, failure, reconciled))
++    })();
++    match attempt {
++        Ok((supervisor, failure, reconciled)) => {
++            // 已收敛记录的清理属于卫生工作而非可用性：即使删除失败也保留
++            // 已就绪的 supervisor，残留记录会在下次启动协调中再次被收敛。
++            if let Err(error) = job_sidecar::remove_reconciled_launches(&context.data_root, &reconciled) {
++                append_worker_log(&context.worker_log,
++                    &format!("host: reconciled launch record cleanup failed: {error}"));
++            }
++            Ok((supervisor, failure))
++        }
++        Err(error) => {
++            let _ = fs::remove_file(&record);
++            Err(error)
++        }
++    }
++}
++
++/// supervisor 存活 watcher：退出（无论退出码，D1）后先终止其进程树，再按
++/// 有界预算与指数退避重启；预算耗尽则写明诊断并放弃（API 保持可用）。
++#[cfg(windows)]
++fn spawn_supervisor_watcher(
++    context: SupervisorSpawnContext,
++    supervisor: Arc<Mutex<Option<ManagedProcess>>>,
++    failure: Arc<AtomicBool>,
++    stopping: Arc<AtomicBool>,
++    ready_at: std::time::Instant,
++) {
++    thread::spawn(move || {
++        let mut failure = failure;
++        let mut consecutive_restarts = 0_u32;
++        let mut ready_at = Some(ready_at);
++        loop {
++            if stopping.load(Ordering::SeqCst) { break; }
++            thread::sleep(Duration::from_millis(100));
++            let exited = {
++                let guard = supervisor.lock().expect("supervisor mutex poisoned");
++                match guard.as_ref() {
++                    // stop() 已接管进程槽；关闭流程拥有其生命周期。
++                    None => break,
++                    Some(managed) =>
++                        failure.load(Ordering::SeqCst) || !matches!(managed.try_wait(), Ok(None)),
++                }
++            };
++            if !exited { continue; }
++            let process = supervisor.lock().expect("supervisor mutex poisoned").take()
++                .expect("supervisor was present");
++            if let Err(error) = process.job.terminate_and_wait(Duration::from_secs(10)) {
++                append_worker_log(&context.worker_log,
++                    &format!("host: supervisor process tree stop failed: {error}"));
++            }
++            drop(process);
++            let uptime = ready_at.map_or(Duration::ZERO, |started| started.elapsed());
++            if uptime >= SUPERVISOR_STABILITY_WINDOW { consecutive_restarts = 0; }
++            let mut restarted = None;
++            while supervisor_restart_allowed(consecutive_restarts, uptime)
++                && !stopping.load(Ordering::SeqCst) {
++                consecutive_restarts += 1;
++                let backoff = supervisor_restart_backoff(consecutive_restarts);
++                append_worker_log(&context.worker_log, &format!(
++                    "host: supervisor exited after {} s; restart {}/{} in {} ms",
++                    uptime.as_secs(), consecutive_restarts, SUPERVISOR_RESTART_LIMIT,
++                    backoff.as_millis()));
++                let deadline = std::time::Instant::now() + backoff;
++                while std::time::Instant::now() < deadline && !stopping.load(Ordering::SeqCst) {
++                    thread::sleep(Duration::from_millis(50));
++                }
++                if stopping.load(Ordering::SeqCst) { break; }
++                match spawn_supervisor(&context) {
++                    Ok((managed, next_failure)) => { restarted = Some((managed, next_failure)); break; }
++                    Err(error) => append_worker_log(&context.worker_log, &format!(
++                        "host: supervisor restart {}/{} failed: {error}",
++                        consecutive_restarts, SUPERVISOR_RESTART_LIMIT)),
++                }
++            }
++            match restarted {
++                Some((managed, next_failure)) => {
++                    *supervisor.lock().expect("supervisor mutex poisoned") = Some(managed);
++                    failure = next_failure;
++                    ready_at = Some(std::time::Instant::now());
++                    append_worker_log(&context.worker_log,
++                        "host: supervisor restarted; worker dispatch resumes");
++                }
++                None => {
++                    if stopping.load(Ordering::SeqCst) { break; }
++                    failure.store(true, Ordering::SeqCst);
++                    append_worker_log(&context.worker_log,
++                        "host: supervisor restart budget exhausted; worker dispatch stays stopped while the local API remains available; restart the desktop app to retry");
++                    break;
++                }
++            }
++        }
++    });
++}
++
+ #[cfg(windows)]
+ fn start_api(app: &tauri::AppHandle, single_instance: SingleInstanceGuard) -> Result<RuntimeState, String> {
+     let config = config_path(app)?;
+@@ -541,6 +779,7 @@ fn start_api(app: &tauri::AppHandle, single_instance: SingleInstanceGuard) -> Re
+     }
+     let launch = arm_launch(&data_root)?;
+     let launch_id = launch.id;
++    let worker_log = worker_log_path(&data_root);
+     let nonce = Uuid::new_v4().simple().to_string();
+     let supervisor_nonce = Uuid::new_v4().to_string();
+     let supervisor_frame = supervisor_startup_frame(&supervisor_nonce, &launch_id, &stopped_launches)?;
+@@ -553,47 +792,40 @@ fn start_api(app: &tauri::AppHandle, single_instance: SingleInstanceGuard) -> Re
+         ("RELAY_FILE_IO_HELPER".into(), file_io_helper.as_os_str().to_os_string()),
+     ];
+     if tauri::is_dev() { api_env.push(("RELAY_DESKTOP_EXTRA_ORIGIN".into(), DEV_ORIGIN.into())); }
+-    let mut api = ManagedProcess::spawn(&node, &api_args, &api_env, launch.api_job)?;
++    let mut api = ManagedProcess::spawn(&node, &api_args, &api_env, launch.api_job, None)?;
+     let frame = serde_json::json!({ "nonce": nonce, "bearerToken": token });
+     api.write_frame(&frame.to_string())?;
+     let (port, workspace_id) = read_startup(api.take_stdout()?, &nonce)?;
+-    let supervisor_args = [env_file, supervisor_entry.into_os_string()];
++    let supervisor_args = [env_file.clone(), supervisor_entry.clone().into_os_string()];
+     let mut supervisor = ManagedProcess::spawn(&node, &supervisor_args, &[
+         ("RELAY_DATA_ROOT".into(), data_root.as_os_str().to_os_string()),
+         ("RELAY_FILE_IO_HELPER".into(), file_io_helper.as_os_str().to_os_string()),
+         ("RELAY_SUPERVISOR_DESKTOP_MODE".into(), "true".into()),
+-    ], launch.supervisor_job)?;
++    ], launch.supervisor_job, Some(&worker_log))?;
+     supervisor.write_frame(&supervisor_frame)?;
+     let supervisor_failed = Arc::new(AtomicBool::new(false));
+     let reconciled = read_supervisor_startup(supervisor.take_stdout()?, &supervisor_nonce,
+-        &launch_id, &stopped_launches, Arc::clone(&supervisor_failed))?;
++        &launch_id, &stopped_launches, Arc::clone(&supervisor_failed), Some(worker_log.clone()))?;
+     if supervisor_failed.load(Ordering::SeqCst) || !matches!(supervisor.try_wait(), Ok(None)) {
+         return Err("supervisor private output or process failed after readiness".into());
+     }
+     remove_reconciled_launches(&data_root, &reconciled)?;
++    append_worker_log(&worker_log, &format!("host: supervisor ready (launch {launch_id})"));
+     let supervisor = Arc::new(Mutex::new(Some(supervisor)));
+-    let watched_supervisor = Arc::clone(&supervisor);
+-    let watched_failure = Arc::clone(&supervisor_failed);
+-    thread::spawn(move || loop {
+-        thread::sleep(Duration::from_millis(100));
+-        let mut guard = watched_supervisor.lock().expect("supervisor mutex poisoned");
+-        let Some(managed) = guard.as_ref() else { break };
+-        let exited = watched_failure.load(Ordering::SeqCst) || !matches!(managed.try_wait(), Ok(None));
+-        if exited {
+-            let process = guard.take().expect("supervisor was present");
+-            drop(guard);
+-            if let Err(error) = process.job.terminate_and_wait(Duration::from_secs(10)) {
+-                eprintln!("Relay Agent supervisor process tree stop failed: {error}");
+-            }
+-            watched_failure.store(true, Ordering::SeqCst);
+-            break;
+-        }
+-    });
++    let stopping = Arc::new(AtomicBool::new(false));
++    // D1：supervisor 与 API 进程解耦——API 存活期间 supervisor 意外退出由
++    // watcher 按有界预算重启，不再把桌面 bootstrap 拖入永久失败。
++    spawn_supervisor_watcher(SupervisorSpawnContext {
++        node, supervisor_entry, env_file, data_root,
++        file_io_helper: file_io_helper.as_os_str().to_os_string(),
++        worker_log, api_launch_id: launch_id,
++    }, Arc::clone(&supervisor), supervisor_failed, Arc::clone(&stopping),
++        std::time::Instant::now());
+     Ok(RuntimeState {
+         base_url: format!("http://127.0.0.1:{port}"), workspace_id,
+         bearer_token: token, frame_created: Arc::new(AtomicBool::new(false)),
+         _single_instance: single_instance,
+-        api: Mutex::new(Some(api)), supervisor, supervisor_failed,
++        api: Mutex::new(Some(api)), supervisor, stopping,
+     })
+ }
+ 
+@@ -620,7 +852,8 @@ fn start_api(app: &tauri::AppHandle) -> Result<RuntimeState, String> {
+     let (port, workspace_id) = read_startup(stdout, &nonce)?;
+     Ok(RuntimeState { base_url: format!("http://127.0.0.1:{port}"), workspace_id,
+         bearer_token: token, frame_created: Arc::new(AtomicBool::new(false)),
+-        api: Mutex::new(Some(ManagedApi { child, stdin })) })
++        api: Mutex::new(Some(ManagedApi { child, stdin })),
++        stopping: Arc::new(AtomicBool::new(false)) })
+ }
+ 
+ #[cfg(windows)]
+@@ -769,7 +1002,8 @@ pub fn run() {
+ 
+ #[cfg(test)]
+ mod tests {
+-    use super::{csp_with_api, is_packaged_asset_request, read_startup, read_startup_with_timeout};
++    use super::{csp_with_api, is_packaged_asset_request, read_startup, read_startup_with_timeout,
++        validate_desktop_config_keys};
+     #[cfg(windows)]
+     use super::trusted_notification_uri;
+     use std::{io::{Cursor, Read}, thread, time::Duration};
+@@ -802,6 +1036,20 @@ mod tests {
+         assert!(read_startup_with_timeout(SlowPipe, "expected", Duration::from_millis(1)).is_err());
+     }
+ 
++    #[test]
++    fn desktop_config_accepts_runtime_and_model_keys_and_rejects_others() {
++        assert!(validate_desktop_config_keys(
++            "# comment\n\nRELAY_DB_URL=postgresql://x\nRELAY_DB_POOL_MAX=4\n\
++             RELAY_DB_CONNECT_TIMEOUT_MS=3000\nRELAY_DESKTOP_WORKSPACE_ID=00000000-0000-4000-8000-000000000000\n\
++             RELAY_MODEL_PROVIDER=openai-compatible\nRELAY_MODEL_NAME=test-model\n\
++             RELAY_MODEL_API_KEY=sk-local-only\nRELAY_MODEL_BASE_URL=https://api.example.cn/v1\n").is_ok());
++        for text in ["RELAY_DB_URL=x\nNODE_OPTIONS=--import=evil\n",
++            "RELAY_DB_URL=x\nRELAY_MODEL_PROVIDER=openai-compatible\nRELAY_SOMETHING=1\n",
++            "RELAY_DB_URL=x\nmalformed"] {
++            assert!(validate_desktop_config_keys(text).is_err(), "must reject: {text}");
++        }
++    }
++
+     #[test]
+     fn csp_keeps_tauri_script_sources_and_limits_api_port() {
+         let original = "default-src 'self'; connect-src 'self' http://ipc.localhost; script-src 'self' 'nonce-test' 'sha256-test'; frame-src 'none'";
+@@ -858,19 +1106,19 @@ mod tests {
+     #[test]
+     fn supervisor_requires_matching_two_stage_private_handshake() {
+         let valid = Cursor::new(b"{\"type\":\"supervisor_ready\",\"nonce\":\"nonce\",\"launchId\":\"launch\",\"nodeVersion\":\"v24.21.0\"}\n{\"type\":\"dispatch_ready\",\"nonce\":\"nonce\",\"launchId\":\"launch\",\"requeuedRunIds\":[],\"blockedRunIds\":[]}\n".to_vec());
+-        assert!(super::read_supervisor_startup(valid, "nonce", "launch", &[], Arc::new(AtomicBool::new(false))).is_ok());
++        assert!(super::read_supervisor_startup(valid, "nonce", "launch", &[], Arc::new(AtomicBool::new(false)), None).is_ok());
+         let wrong_launch = Cursor::new(b"{\"type\":\"supervisor_ready\",\"nonce\":\"nonce\",\"launchId\":\"old\",\"nodeVersion\":\"v24.21.0\"}\n".to_vec());
+-        assert!(super::read_supervisor_startup(wrong_launch, "nonce", "launch", &[], Arc::new(AtomicBool::new(false))).is_err());
++        assert!(super::read_supervisor_startup(wrong_launch, "nonce", "launch", &[], Arc::new(AtomicBool::new(false)), None).is_err());
+         let wrong_nonce = Cursor::new(b"{\"type\":\"supervisor_ready\",\"nonce\":\"other\",\"launchId\":\"launch\",\"nodeVersion\":\"v24.21.0\"}\n".to_vec());
+-        assert!(super::read_supervisor_startup(wrong_nonce, "nonce", "launch", &[], Arc::new(AtomicBool::new(false))).is_err());
++        assert!(super::read_supervisor_startup(wrong_nonce, "nonce", "launch", &[], Arc::new(AtomicBool::new(false)), None).is_err());
+         let wrong_node = Cursor::new(b"{\"type\":\"supervisor_ready\",\"nonce\":\"nonce\",\"launchId\":\"launch\",\"nodeVersion\":\"v22.0.0\"}\n".to_vec());
+-        assert!(super::read_supervisor_startup(wrong_node, "nonce", "launch", &[], Arc::new(AtomicBool::new(false))).is_err());
++        assert!(super::read_supervisor_startup(wrong_node, "nonce", "launch", &[], Arc::new(AtomicBool::new(false)), None).is_err());
+         let out_of_order = Cursor::new(b"{\"type\":\"dispatch_ready\",\"nonce\":\"nonce\",\"launchId\":\"launch\",\"requeuedRunIds\":[],\"blockedRunIds\":[]}\n".to_vec());
+-        assert!(super::read_supervisor_startup(out_of_order, "nonce", "launch", &[], Arc::new(AtomicBool::new(false))).is_err());
++        assert!(super::read_supervisor_startup(out_of_order, "nonce", "launch", &[], Arc::new(AtomicBool::new(false)), None).is_err());
+         let missing_dispatch = Cursor::new(b"{\"type\":\"supervisor_ready\",\"nonce\":\"nonce\",\"launchId\":\"launch\",\"nodeVersion\":\"v24.21.0\"}\n".to_vec());
+-        assert!(super::read_supervisor_startup(missing_dispatch, "nonce", "launch", &[], Arc::new(AtomicBool::new(false))).is_err());
++        assert!(super::read_supervisor_startup(missing_dispatch, "nonce", "launch", &[], Arc::new(AtomicBool::new(false)), None).is_err());
+         let oversized = Cursor::new(vec![b'x'; super::SUPERVISOR_LINE_LIMIT + 1]);
+-        assert!(super::read_supervisor_startup(oversized, "nonce", "launch", &[], Arc::new(AtomicBool::new(false))).is_err());
++        assert!(super::read_supervisor_startup(oversized, "nonce", "launch", &[], Arc::new(AtomicBool::new(false)), None).is_err());
+     }
+ 
+     #[cfg(windows)]
+@@ -890,7 +1138,7 @@ mod tests {
+             bytes.push(b'\n');
+         }
+         super::read_supervisor_startup_with_timeouts(Cursor::new(bytes), "n", "current", old,
+-            Arc::new(AtomicBool::new(false)), Duration::from_secs(1),
++            Arc::new(AtomicBool::new(false)), None, Duration::from_secs(1),
+             Duration::from_secs(2), Duration::from_secs(3))
+     }
+ 
+@@ -972,7 +1220,7 @@ mod tests {
+         };
+         sender.send(b"{\"type\":\"supervisor_ready\",\"nonce\":\"n\",\"launchId\":\"current\",\"nodeVersion\":\"v24.21.0\"}\n".to_vec()).unwrap();
+         assert!(super::read_supervisor_startup_with_timeouts(output, "n", "current",
+-            &[stopped("first")], Arc::new(AtomicBool::new(false)),
++            &[stopped("first")], Arc::new(AtomicBool::new(false)), None,
+             Duration::from_millis(50), Duration::from_millis(15), Duration::from_millis(100)).is_err());
+         drop(sender);
+ 
+@@ -990,7 +1238,7 @@ mod tests {
+         let old = (0..20).map(|index| stopped(&format!("old-{index}"))).collect::<Vec<_>>();
+         let started = std::time::Instant::now();
+         assert!(super::read_supervisor_startup_with_timeouts(output, "n", "current", &old,
+-            Arc::new(AtomicBool::new(false)), Duration::from_millis(100),
++            Arc::new(AtomicBool::new(false)), None, Duration::from_millis(100),
+             Duration::from_millis(100), Duration::from_millis(60)).is_err());
+         assert!(started.elapsed() < Duration::from_millis(200), "absolute deadline did not interrupt ack progress");
+         writer.join().unwrap();
+@@ -1050,7 +1298,8 @@ mod tests {
+         };
+         sender.send(b"{\"type\":\"supervisor_ready\",\"nonce\":\"n\",\"launchId\":\"l\",\"nodeVersion\":\"v24.21.0\"}\n".to_vec()).unwrap();
+         sender.send(b"{\"type\":\"dispatch_ready\",\"nonce\":\"n\",\"launchId\":\"l\",\"requeuedRunIds\":[],\"blockedRunIds\":[]}\n".to_vec()).unwrap();
+-        super::read_supervisor_startup(output, "n", "l", &[], Arc::clone(&failed)).expect("two-stage readiness");
++        super::read_supervisor_startup(output, "n", "l", &[], Arc::clone(&failed), None)
++            .expect("two-stage readiness");
+         sender.send(b"{\"type\":\"worker_started\",\"pid\":10,\"worker_id\":\"worker:desktop:l:x\"}\n".to_vec()).unwrap();
+         sender.send(b"{\"type\":\"worker_exit\",\"code\":0,\"requeued_run_ids\":[],\"blocked_run_ids\":[]}\n".to_vec()).unwrap();
+         let deadline = std::time::Instant::now() + Duration::from_secs(2);
+@@ -1076,7 +1325,8 @@ mod tests {
+         };
+         sender.send(b"{\"type\":\"supervisor_ready\",\"nonce\":\"n\",\"launchId\":\"l\",\"nodeVersion\":\"v24.21.0\"}\n".to_vec()).unwrap();
+         sender.send(b"{\"type\":\"dispatch_ready\",\"nonce\":\"n\",\"launchId\":\"l\",\"requeuedRunIds\":[],\"blockedRunIds\":[]}\n".to_vec()).unwrap();
+-        super::read_supervisor_startup(output, "n", "l", &[], Arc::clone(&failed)).expect("two-stage readiness");
++        super::read_supervisor_startup(output, "n", "l", &[], Arc::clone(&failed), None)
++            .expect("two-stage readiness");
+         sender.send(b"{\"type\":\"unexpected_event\"}\n".to_vec()).unwrap();
+         let deadline = std::time::Instant::now() + Duration::from_secs(2);
+         while !failed.load(Ordering::SeqCst) {
+@@ -1084,4 +1334,83 @@ mod tests {
+             thread::sleep(Duration::from_millis(5));
+         }
+     }
++
++    #[test]
++    fn supervisor_restart_policy_bounds_rapid_loops_and_recovers_stable_runs() {
++        assert_eq!(super::supervisor_restart_backoff(1), Duration::from_secs(2));
++        assert_eq!(super::supervisor_restart_backoff(2), Duration::from_secs(4));
++        assert_eq!(super::supervisor_restart_backoff(3), Duration::from_secs(8));
++        assert_eq!(super::supervisor_restart_backoff(9), Duration::from_secs(32));
++        assert!(super::supervisor_restart_allowed(0, Duration::ZERO));
++        assert!(super::supervisor_restart_allowed(2, Duration::from_secs(10)));
++        assert!(!super::supervisor_restart_allowed(3, Duration::from_secs(10)),
++            "rapid crash loop must exhaust the bounded restart budget");
++        assert!(super::supervisor_restart_allowed(5, super::SUPERVISOR_STABILITY_WINDOW),
++            "a stable supervisor death resets the budget");
++    }
++
++    #[test]
++    fn worker_log_appends_rotates_and_keeps_one_generation() {
++        let root = std::env::temp_dir()
++            .join(format!("relay-worker-log-{}", uuid::Uuid::new_v4()));
++        let log = root.join("logs").join("worker-supervisor.log");
++        super::append_worker_log_capped(&log, "first {\"type\":\"worker_started\"}", u64::MAX);
++        super::append_worker_log_capped(&log, "second", u64::MAX);
++        let content = std::fs::read_to_string(&log).expect("log written");
++        assert!(content.contains("first {\"type\":\"worker_started\"}"));
++        assert!(content.contains("second"));
++        assert_eq!(content.lines().count(), 2);
++        super::append_worker_log_capped(&log, "after rotate", 0);
++        let rotated = root.join("logs").join("worker-supervisor.log.old.log");
++        assert!(rotated.exists(), "rotated generation must be kept");
++        assert!(std::fs::read_to_string(&rotated).expect("rotated log").contains("second"));
++        let fresh = std::fs::read_to_string(&log).expect("fresh log");
++        assert_eq!(fresh.lines().count(), 1);
++        assert!(fresh.contains("after rotate"));
++        std::fs::remove_dir_all(&root).expect("remove isolated log root");
++    }
++
++    #[test]
++    fn iso_utc_timestamp_shape_is_sortable() {
++        let first = super::iso_utc_timestamp();
++        assert_eq!(first.len(), 24);
++        let bytes = first.as_bytes();
++        for position in [4, 7] { assert_eq!(bytes[position], b'-'); }
++        assert_eq!(bytes[10], b'T');
++        for position in [13, 16] { assert_eq!(bytes[position], b':'); }
++        assert_eq!(bytes[19], b'.');
++        assert_eq!(bytes[23], b'Z');
++        assert!(first.as_str() <= super::iso_utc_timestamp().as_str(),
++            "same-format timestamps sort chronologically");
++    }
++
++    #[cfg(windows)]
++    #[test]
++    fn supervisor_reader_streams_runtime_events_into_the_worker_log() {
++        let root = std::env::temp_dir()
++            .join(format!("relay-reader-log-{}", uuid::Uuid::new_v4()));
++        let log = root.join("logs").join("worker-supervisor.log");
++        let (sender, receiver) = mpsc::channel();
++        let failed = Arc::new(AtomicBool::new(false));
++        let output = StagedSupervisorOutput {
++            receiver, current: Cursor::new(Vec::new()), chunks_read: Arc::new(AtomicUsize::new(0)),
++        };
++        sender.send(b"{\"type\":\"supervisor_ready\",\"nonce\":\"n\",\"launchId\":\"l\",\"nodeVersion\":\"v24.21.0\"}\n".to_vec()).unwrap();
++        sender.send(b"{\"type\":\"dispatch_ready\",\"nonce\":\"n\",\"launchId\":\"l\",\"requeuedRunIds\":[],\"blockedRunIds\":[]}\n".to_vec()).unwrap();
++        super::read_supervisor_startup_with_timeouts(output, "n", "l", &[], Arc::clone(&failed),
++            Some(log.clone()), Duration::from_secs(1), Duration::from_secs(2), Duration::from_secs(3))
++            .expect("two-stage readiness");
++        sender.send(b"{\"type\":\"worker_started\",\"pid\":10,\"worker_id\":\"worker:desktop:l:x\"}\n".to_vec()).unwrap();
++        let deadline = std::time::Instant::now() + Duration::from_secs(2);
++        while !std::fs::read_to_string(&log)
++            .map(|content| content.contains("\"type\":\"worker_started\""))
++            .unwrap_or(false) {
++            assert!(std::time::Instant::now() < deadline, "runtime event was not logged");
++            thread::sleep(Duration::from_millis(5));
++        }
++        assert!(!std::fs::read_to_string(&log).expect("log").contains("sk-local-only"),
++            "the diagnostic log must not collect configuration values");
++        drop(sender);
++        std::fs::remove_dir_all(&root).expect("remove isolated log root");
++    }
+ }
+
+## Rust 检查（打包前）
+- 命令：VsDevCmd -arch=x64 + RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-msvc + `cargo test --target x86_64-pc-windows-msvc --manifest-path apps/desktop/src-tauri/Cargo.toml`（RELAY_TEST_NODE=内置 node.exe 以启用 Job 门控测试）
+- 结果：27 passed / 0 failed / 0 ignored；0 warning（编译与测试均 MSVC target，无 GNU target 使用）
+- 新增测试：supervisor_restart_policy_bounds_rapid_loops_and_recovers_stable_runs、worker_log_appends_rotates_and_keeps_one_generation、iso_utc_timestamp_shape_is_sortable、supervisor_reader_streams_runtime_events_into_the_worker_log、job_sidecar::supervisor_restart_recovery_stops_workers_but_keeps_the_running_api_job
+
+## 重新打包（build-release.ps1 -TestPackage）
+- 构建退出码：0（含 pnpm frozen-lockfile 安装、api/workbench 构建、tauri build --no-bundle、指纹一致性校验）
+- Release directory: D:\Develop\Relay-Agent\test-release
+- EXE SHA-256: 5FA6291300D074080D15F9D890FD27DE9B6A564E3476A2206DEE483481576354
+- desktop-build-manifest.json SHA-256: 6D1AF1797E20AC1F6A8FF8873485343B7052E17F3407F3636E1FA055A1B4831C
+- built_at_utc: 2026-09-29T01:40:12.0758974Z
+- 资源哈希：17169 个文件全部校验（node scripts/verify-desktop-package.mjs → "Package hashes verified."）；forbidden config files: 0
+
+## 修复内容对应关系
+- D1：lib.rs——desktop_bootstrap 移除 supervisor_failed 永久失败检查；新增 supervisor_restart_allowed/supervisor_restart_backoff（3 次指数退避 2/4/8s，稳定窗 300s 重置）；spawn_supervisor（新 launch ARMED 记录 + 两段式握手 + recover_supervisor_restart_launches 保留活动 API Job）；spawn_supervisor_watcher（退出即终止进程树→有界重启→预算耗尽写诊断并保持 API 可用）；RuntimeState.stopping 防关机竞态。
+- D2：lib.rs worker_log_path=<data-root>/logs/worker-supervisor.log（.relay-test 数据目录约定）；append_worker_log_capped 8MiB 轮转保留一代 .old.log；supervisor spawn stderr 由 NUL 改为该日志（job_sidecar open_append_log，FILE_APPEND_DATA+FILE_SHARE_DELETE）；read_supervisor_startup reader 线程把协议事件（worker_started/worker_exit/worker_recovery_required 等）逐行落盘；日志不含 desktop.env 内容/密钥/Token。

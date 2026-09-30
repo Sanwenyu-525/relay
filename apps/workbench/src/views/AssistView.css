@@ -1,0 +1,123 @@
+/* 对话主轴（效果图 2026-09-29）：头像 + 时间戳 + 角色底色 + 日期分隔线 + 常驻输入区。
+   这些类名此前只存在于 JSX、没有任何样式，这里是它们的唯一定义处。 */
+
+.agent-assist { display: flex; flex-direction: column; min-height: 0; gap: var(--relay-space-3); }
+.agent-assist-session-bar { flex: none; }
+.agent-chat-sources { flex: none; }
+
+.agent-chat-conversation {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: var(--relay-space-3);
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+.agent-chat-conversation-heading {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--relay-space-3);
+}
+.agent-chat-conversation-heading h2 { margin: 0; font-size: var(--relay-font-size-body); }
+.agent-chat-conversation-heading .helper-text { margin: var(--relay-space-1) 0 0; }
+
+/* 消息流自己滚动；目标、事实条和输入区留在视野内。 */
+.agent-chat-transcript {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--relay-space-2) 0;
+  scrollbar-gutter: stable;
+}
+.agent-message-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--relay-space-4); }
+.agent-message-slot { display: grid; gap: var(--relay-space-3); }
+
+/* 日期分隔线：跨栏细线 + 居中日期，不新增色值。 */
+.agent-date-separator {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-3);
+  margin: 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+}
+.agent-date-separator::before,
+.agent-date-separator::after { content: ""; flex: 1; height: var(--relay-border-width); background: var(--relay-color-border-separator); }
+
+.agent-message { display: flex; align-items: flex-start; gap: var(--relay-space-3); }
+.agent-message-avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--relay-control-avatar-size);
+  height: var(--relay-control-avatar-size);
+  border-radius: var(--relay-radius-round);
+  background: var(--relay-color-bg-subtle);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+}
+.agent-message-body { display: grid; gap: var(--relay-space-2); min-width: 0; flex: 1; }
+.agent-message-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--relay-space-2); margin: 0; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+.agent-message-role { font-weight: var(--relay-font-weight-medium); color: var(--relay-color-text-primary); }
+/* 角色不只靠颜色区分：头像文字与角色名同时表达。 */
+.agent-message-status { color: var(--relay-color-text-muted); }
+.agent-message-content { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: var(--relay-font-lineHeight-reading); }
+
+/* AI 消息用浅底色区分，人工消息保持纸面底色。 */
+.agent-message[data-role="ASSISTANT"] .agent-message-body {
+  padding: var(--relay-space-3) var(--relay-space-4);
+  background: var(--relay-color-selection-bg);
+  border-radius: var(--relay-radius-control);
+}
+.agent-message[data-role="ASSISTANT"] .agent-message-avatar { background: var(--relay-color-action-primary); color: var(--relay-color-text-onAction); }
+
+.agent-message-body details { font-size: var(--relay-font-size-meta); }
+.agent-message-body ul { margin: var(--relay-space-2) 0 0; padding-left: var(--relay-space-5); }
+
+/* 输入区：常驻底部，不随消息滚动；按钮不被末段遮挡。 */
+.agent-chat-composer {
+  flex: none;
+  display: grid;
+  gap: var(--relay-space-2);
+  margin: 0;
+  padding: var(--relay-space-3);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+}
+.agent-chat-composer-heading { margin: 0; font-weight: var(--relay-font-weight-medium); }
+.agent-chat-composer .field { display: grid; gap: var(--relay-space-1); }
+.agent-chat-composer textarea { min-height: 3.5rem; resize: vertical; }
+.agent-chat-composer-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--relay-space-3); flex-wrap: wrap; }
+.agent-chat-composer-tools { display: flex; align-items: center; gap: var(--relay-space-3); flex-wrap: wrap; }
+.agent-chat-tool {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--relay-control-height);
+  padding: 0 var(--relay-space-2);
+  background: none;
+  border: 0;
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-secondary);
+  font-family: var(--relay-font-family-ui);
+  font-size: var(--relay-font-size-meta);
+  cursor: pointer;
+}
+button.agent-chat-tool:hover { background: var(--relay-color-selection-hover); color: var(--relay-color-text-primary); }
+/* 无接口的能力明确标待接入并不可点击，不用外观假装可用。 */
+.agent-chat-tool--pending { color: var(--relay-color-text-muted); cursor: not-allowed; }
+
+.agent-chat-options, .agent-chat-proposals { font-size: var(--relay-font-size-meta); }
+.agent-chat-options summary, .agent-chat-proposals summary { cursor: pointer; color: var(--relay-color-text-secondary); }
+.agent-pending { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-3); }
+.agent-pending p { margin: 0; }
+
+@media (max-width: 64rem) {
+  .agent-chat-composer-actions { flex-direction: column; align-items: stretch; }
+  .agent-chat-composer-actions .primary-button { width: 100%; }
+}

@@ -1,0 +1,34 @@
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./vite.config" without a file extension (vitest.config.ts:2:24). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.1 D:/Develop/Relay-Agent/apps/workbench
+
+ ✓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > Review 判定：读取挂起时禁止用旧请求提交，最新响应到达后启用 543ms
+ ✓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > Review 判定：切换检查、历史和工具保留反馈及响应丢失原命令 945ms
+ ✓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > Review 判定：核对成功后通过原决定接口提交确切身份 361ms
+ ✓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > Review 判定：项目归档禁止提交并说明原因 237ms
+ ✓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > Review 判定：项目读取失败禁止提交并说明原因 231ms
+ ✓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > Review 判定：Review项目不匹配禁止提交并说明原因 235ms
+ ✓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > Review 判定：另一个Task的请求不显示为当前判断，零提交 232ms
+ ✓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > Review 判定：重读失败禁止使用旧请求，成功重读清除错误 482ms
+ ✓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > Review 判定：合法无项目Task与null项目请求匹配可判断 231ms
+ ↓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > 窄窗视图切换保留讨论草稿，返回讨论会关闭工具展示，不提交业务命令
+ ↓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > 示例模式明确没有真实工作；live 首次进入只读取，不新建任务也不显示虚构近期工作
+ ↓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > 归属未确认时不发送；选定确切任务后恢复目标、Run 事实、草稿与待判断项
+ ↓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > 生成中草稿与已保存版本分开表达；接受、暂存、提交、推送分别声明
+ ↓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > 执行输出只显示服务端保存的真实 stdout，绑定 Run 与 Invocation；Trace 不冒充输出
+ ↓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > 暂停请求中、已暂停与等待安全接手分别表达，且请求受理不显示为已暂停
+ ↓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > 局部读取失败只影响该区域；普通查询失败不渲染成无数据或外部 UNKNOWN
+ ↓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > 执行失败保留可读成果并说明重试走新 Run；外部 UNKNOWN 沿原动作核对
+ ↓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > 切换工作保护未提交输入；迟到响应不注入新目标
+ ↓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > 无模型时的人工路径仍可达：产物、完成与判断入口不依赖生成
+ ↓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > 右栏三页签共享同一任务；切换页签不改变 Run 或业务对象
+ ↓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > 选中工作写入 URL，刷新与深链接恢复同一任务
+ ↓ tests/collaborationWorkspace.spec.ts > 协作工作区主路径 > Run 失败原因原样显示，不推断也不吞掉
+
+ Test Files  1 passed (1)
+      Tests  9 passed | 13 skipped (22)
+   Start at  11:52:59
+   Duration  7.45s (tests 48%, import 21%, transform 17%, environment 13%, setup 1%)
+

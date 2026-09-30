@@ -1,0 +1,120 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-9149e0962a
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-9149e0962a/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-9149e0962a^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 21676)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-9149e0962a/cluster" "-h" "127.0.0.1" "-p" "14721"
+DO
+CREATE DATABASE
+Test database: relay_api_test_99e051864854 on 127.0.0.1:14721 (roles relay_migrator / relay_app)
+{
+  "applied": [
+    "0001_v001_human_core",
+    "0002_p02_task_goal_alignment",
+    "0003_schema_readiness",
+    "0004_v002_runs",
+    "0005_v002_verification",
+    "0006_v002_reviews",
+    "0007_v003_recovery_control",
+    "0008_v003_gateway",
+    "0009_v004_information_rules",
+    "0010_v005_context_revision",
+    "0011_m03_run_dispatch",
+    "0012_m03_run_events",
+    "0013_m03_run_command_order",
+    "0014_m04_file_read",
+    "0015_m04_assist",
+    "0016_m04_web_fetch"
+  ],
+  "already_applied": [],
+  "ledger_rows": 16
+}
+{"schema":"relay_graph_v1","ready":true}
+✔ the fixed Mock graph prepares ASK and only the approved RESUME executes its original operation (5866.3836ms)
+✔ ACTION approval status changes do not rebuild Context or rerun the successful Draft (5148.1239ms)
+✔ a changed Task input after the approved Mock effect cannot rerun Draft before publication (3780.5364ms)
+✔ a changed Task input during ASK wait denies the original operation before Fake write (3758.7215ms)
+✔ graph outer heartbeat cannot authorize an expired inner Gateway claim (3347.1555ms)
+✔ ASK business commit before interrupt checkpoint cannot strand START ahead of rapid approval (6451.8436ms)
+✔ denied required Mock action terminates the Run without a tool effect or dangling approval wait (4601.6429ms)
+✔ old ACTION RESUME cannot wake the later human-criterion Review after its graph checkpoint (7916.1595ms)
+✔ a stopped RESUME reconciles the original Fake effect and can replay after approval expiry (6210.247ms)
+✔ a stopped RESUME after Gateway Admit but before Fake write preserves UNKNOWN and the same operation (6080.1292ms)
+✔ revoked Permission after approval cannot dispatch the frozen Mock action (4932.7449ms)
+✔ a committed PAUSE wins over a pre-invocation Permission refusal under the outer claim fence (3332.5767ms)
+✔ frozen Mock approval withdrawal rolls back with its deferred outbox on failure (3365.7065ms)
+✔ stopped PREPARED Mock action replays the same operation after NOT_EXECUTED reconciliation (5109.9924ms)
+✔ PENDING control after PREPARED reconciliation prevents any replay of the Mock action (4687.2083ms)
+✔ PAUSE after rapid action approval applies before any Mock effect (4604.4349ms)
+✔ CANCEL after rapid action approval applies before any Mock effect (4647.0866ms)
+✔ HANDOFF after rapid action approval applies before any Mock effect (4887.6795ms)
+✔ manual resume cannot revive a PAUSE-invalidated Mock approval or strand a RUNNING Run (3517.5311ms)
+✔ two independent Workers racing one approved RESUME create one Gateway invocation (5081.6161ms)
+✔ a Review rebound to another operation cannot wake the frozen action checkpoint (4719.7261ms)
+✔ a same-Run operation mismatch cannot approve a forged frozen Mock Review (3565.3225ms)
+✔ official Saver setup is migrator-only; missing or damaged graph schema blocks Worker before claim (4341.5746ms)
+✔ the one Run graph persists an empty-namespace Review interrupt, then resumes the original decision (3680.9896ms)
+✔ a saved Review interrupt with an unacknowledged START is replayed by the same command (4835.3183ms)
+✔ PAUSE and resume of a saved Review wait cannot strand the unacknowledged START before approval (6409.6943ms)
+✔ a claimed RESUME killed before its checkpoint reuses the one Review decision (6210.8963ms)
+✔ a real child exit after business commit but before graph checkpoint replays without a second effect (4994.0017ms)
+✔ lost invocation after a committed node cannot write its normal successor checkpoint (1913.6746ms)
+✔ G06 CANCEL aborts an in-flight Mock model only after durable control (4730.7878ms)
+✔ G06 CANCEL_TASK aborts an in-flight Mock model only after durable control (4753.9171ms)
+✔ G06 forced Worker termination needs close evidence and invents no user cancellation (4833.3483ms)
+✔ G06 settled independent Workers close promptly while control polling is active (6573.9465ms)
+✔ a tampered persisted manifest field denies the frozen Mock action before any invocation (10571.4757ms)
+✔ G06 a control durable across settlement converges without a second delivery (2427.3083ms)
+✔ G06 completion-race leftover control is rejected and cannot rewrite a DONE Run (2608.5118ms)
+✔ a Review wait checkpointed by an older graph layout rebuilds and completes the original RESUME (3714.6283ms)
+✔ an approved Mock action checkpointed by an older graph layout replays its effect exactly once (3903.3981ms)
+✔ an AUTO frozen file-read intent reads the real file once and records hash evidence (2323.1797ms)
+✔ an ASK frozen file-read intent waits, and only the approved RESUME reads once (2405.1197ms)
+✔ a context change during an ASK file-read wait denies the original operation before any read (2427.1129ms)
+✔ a missing file read target fails the delivery deterministically and succeeds once the file exists (2347.3757ms)
+✔ an AUTO frozen web-fetch intent reads the page once and records extraction evidence (2590.2719ms)
+✔ an ASK frozen web-fetch intent waits, and only the approved RESUME fetches once (2652.8197ms)
+✔ a context change during an ASK web-fetch wait denies the original operation before any fetch (2391.3038ms)
+✔ a frozen web-fetch URL outside the connection host refuses deterministically before any operation (2026.2535ms)
+ℹ tests 46
+ℹ suites 0
+ℹ pass 46
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 212287.3954
+waiting for server to shut down.... done
+server stopped
+--- integration summary ---
+tests exit code: 0
+build exit code: 0
+business migration exit code: 0
+graph install exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: PASSED

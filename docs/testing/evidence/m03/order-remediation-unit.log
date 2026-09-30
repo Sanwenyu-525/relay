@@ -1,0 +1,412 @@
+.                                        |  WARN  Unsupported engine: wanted: {"node":">=24.0.0 <25"} (current: {"node":"v22.22.3","pnpm":"9.15.9"})
+apps/api                                 |  WARN  Unsupported engine: wanted: {"node":">=24.0.0 <25"} (current: {"node":"v22.22.3","pnpm":"9.15.9"})
+
+> @relay-agent/api@0.0.0 test D:\Develop\Relay-Agent\apps\api
+> tsc -p tsconfig.json && node --test "dist/test/unit/**/*.test.js"
+
+TAP version 13
+# Subtest: severity defaults to HARD for required criteria and PREFERENCE otherwise
+ok 1 - severity defaults to HARD for required criteria and PREFERENCE otherwise
+  ---
+  duration_ms: 1.6796
+  type: 'test'
+  ...
+# Subtest: an explicit target_spec severity wins and invalid values are rejected
+ok 2 - an explicit target_spec severity wins and invalid values are rejected
+  ---
+  duration_ms: 0.535
+  type: 'test'
+  ...
+# Subtest: every method maps to a registered checker and an unknown method throws
+ok 3 - every method maps to a registered checker and an unknown method throws
+  ---
+  duration_ms: 0.2703
+  type: 'test'
+  ...
+# Subtest: the plan hash is stable for the same plan and 32 bytes long
+ok 4 - the plan hash is stable for the same plan and 32 bytes long
+  ---
+  duration_ms: 1.5726
+  type: 'test'
+  ...
+# Subtest: the plan can be rebuilt from the frozen contract snapshot
+ok 5 - the plan can be rebuilt from the frozen contract snapshot
+  ---
+  duration_ms: 1.0669
+  type: 'test'
+  ...
+# Subtest: markdown-structure-v1 only judges the required structure
+ok 6 - markdown-structure-v1 only judges the required structure
+  ---
+  duration_ms: 2.364
+  type: 'test'
+  ...
+# Subtest: citation-exists-v1 reports existence only and never claims support
+ok 7 - citation-exists-v1 reports existence only and never claims support
+  ---
+  duration_ms: 1.4326
+  type: 'test'
+  ...
+# Subtest: fake-semantic-v1 distinguishes unsupported claims from uncertainty
+ok 8 - fake-semantic-v1 distinguishes unsupported claims from uncertainty
+  ---
+  duration_ms: 0.3584
+  type: 'test'
+  ...
+# Subtest: human-evidence-v1 stays NOT_RUN so the worker cannot self-accept
+ok 9 - human-evidence-v1 stays NOT_RUN so the worker cannot self-accept
+  ---
+  duration_ms: 0.3379
+  type: 'test'
+  ...
+# Subtest: CHECKER_ERROR replaces the deterministic checkers with an ERROR result
+ok 10 - CHECKER_ERROR replaces the deterministic checkers with an ERROR result
+  ---
+  duration_ms: 0.3678
+  type: 'test'
+  ...
+# Subtest: the registry resolves by id and version and refuses unregistered pairs
+ok 11 - the registry resolves by id and version and refuses unregistered pairs
+  ---
+  duration_ms: 0.3468
+  type: 'test'
+  ...
+# Subtest: accepts a complete environment and normalizes the data root
+ok 12 - accepts a complete environment and normalizes the data root
+  ---
+  duration_ms: 10.3527
+  type: 'test'
+  ...
+# Subtest: reports every missing key at once instead of silently defaulting
+ok 13 - reports every missing key at once instead of silently defaulting
+  ---
+  duration_ms: 2.9389
+  type: 'test'
+  ...
+# Subtest: rejects a non-loopback bind host, a privileged port and illegal values
+ok 14 - rejects a non-loopback bind host, a privileged port and illegal values
+  ---
+  duration_ms: 2.8508
+  type: 'test'
+  ...
+# Subtest: rejects wildcard, null and non-loopback origins
+ok 15 - rejects wildcard, null and non-loopback origins
+  ---
+  duration_ms: 1.8236
+  type: 'test'
+  ...
+# Subtest: rejects placeholder and short bearer credentials
+ok 16 - rejects placeholder and short bearer credentials
+  ---
+  duration_ms: 2.518
+  type: 'test'
+  ...
+# Subtest: rejects a data root inside the repository or missing on disk
+ok 17 - rejects a data root inside the repository or missing on disk
+  ---
+  duration_ms: 5.0334
+  type: 'test'
+  ...
+# Subtest: origin, database URL and data root validators stay explicit
+ok 18 - origin, database URL and data root validators stay explicit
+  ---
+  duration_ms: 0.5802
+  type: 'test'
+  ...
+# Subtest: round-trips a bound cursor
+ok 19 - round-trips a bound cursor
+  ---
+  duration_ms: 3.47
+  type: 'test'
+  ...
+# Subtest: rejects a cursor used with a different filter
+ok 20 - rejects a cursor used with a different filter
+  ---
+  duration_ms: 1.2438
+  type: 'test'
+  ...
+# Subtest: rejects unparsable, tampered and oversized cursors
+ok 21 - rejects unparsable, tampered and oversized cursors
+  ---
+  duration_ms: 0.923
+  type: 'test'
+  ...
+# Subtest: encodes the inbox filter explicitly
+ok 22 - encodes the inbox filter explicitly
+  ---
+  duration_ms: 0.4549
+  type: 'test'
+  ...
+# Subtest: small desktop dispatch readiness preserves Rust Vec fields and complete counts
+ok 23 - small desktop dispatch readiness preserves Rust Vec fields and complete counts
+  ---
+  duration_ms: 3.1783
+  type: 'test'
+  ...
+# Subtest: 1677 blocked Run IDs cannot exceed the Rust stdout line limit
+ok 24 - 1677 blocked Run IDs cannot exceed the Rust stdout line limit
+  ---
+  duration_ms: 2.4317
+  type: 'test'
+  ...
+# Subtest: 4096 recovered launches can report both outcomes without losing total counts
+ok 25 - 4096 recovered launches can report both outcomes without losing total counts
+  ---
+  duration_ms: 4.4614
+  type: 'test'
+  ...
+# Subtest: line bound is checked in UTF-8 bytes after JSON encoding
+ok 26 - line bound is checked in UTF-8 bytes after JSON encoding
+  ---
+  duration_ms: 3.0733
+  type: 'test'
+  ...
+# Subtest: launch recovery acknowledgement keeps a bounded exact JSON count
+ok 27 - launch recovery acknowledgement keeps a bounded exact JSON count
+  ---
+  duration_ms: 1.0783
+  type: 'test'
+  ...
+# Subtest: LEGAL produces a structurally valid candidate with deterministic identity and usage
+ok 28 - LEGAL produces a structurally valid candidate with deterministic identity and usage
+  ---
+  duration_ms: 5.2792
+  type: 'test'
+  ...
+# Subtest: SCHEMA_INVALID produces text missing a required section
+ok 29 - SCHEMA_INVALID produces text missing a required section
+  ---
+  duration_ms: 0.5301
+  type: 'test'
+  ...
+# Subtest: MISSING_MATERIAL declares the missing input
+ok 30 - MISSING_MATERIAL declares the missing input
+  ---
+  duration_ms: 0.332
+  type: 'test'
+  ...
+# Subtest: an aborted signal yields CANCELLED without producing content
+ok 31 - an aborted signal yields CANCELLED without producing content
+  ---
+  duration_ms: 0.3258
+  type: 'test'
+  ...
+# Subtest: builds the managed content path from internal ids only
+ok 32 - builds the managed content path from internal ids only
+  ---
+  duration_ms: 1.2058
+  type: 'test'
+  ...
+# Subtest: refuses to build a storage path from anything that is not a uuid
+ok 33 - refuses to build a storage path from anything that is not a uuid
+  ---
+  duration_ms: 0.8445
+  type: 'test'
+  ...
+# Subtest: rejects storage refs that are absolute, traversing or escaping the data root
+ok 34 - rejects storage refs that are absolute, traversing or escaping the data root
+  ---
+  duration_ms: 0.9828
+  type: 'test'
+  ...
+# Subtest: publishes immutable content, flushes it and ignores the staging file afterwards
+ok 35 - publishes immutable content, flushes it and ignores the staging file afterwards
+  ---
+  duration_ms: 33.2662
+  type: 'test'
+  ...
+# Subtest: never overwrites an already published version directory
+ok 36 - never overwrites an already published version directory
+  ---
+  duration_ms: 18.3565
+  type: 'test'
+  ...
+# Subtest: reports missing and tampered content instead of returning it
+ok 37 - reports missing and tampered content instead of returning it
+  ---
+  duration_ms: 19.6543
+  type: 'test'
+  ...
+# Subtest: exposes the fixed workflow identity and step sequence
+ok 38 - exposes the fixed workflow identity and step sequence
+  ---
+  duration_ms: 1.6614
+  type: 'test'
+  ...
+# Subtest: accepts a candidate with a title and every required non-empty section
+ok 39 - accepts a candidate with a title and every required non-empty section
+  ---
+  duration_ms: 0.5777
+  type: 'test'
+  ...
+# Subtest: reports a missing required section deterministically
+ok 40 - reports a missing required section deterministically
+  ---
+  duration_ms: 1.0451
+  type: 'test'
+  ...
+# Subtest: reports a missing top-level title and an empty section
+ok 41 - reports a missing top-level title and an empty section
+  ---
+  duration_ms: 0.3336
+  type: 'test'
+  ...
+# Subtest: reports a candidate shorter than the minimum length
+ok 42 - reports a candidate shorter than the minimum length
+  ---
+  duration_ms: 0.1864
+  type: 'test'
+  ...
+# Subtest: canonical JSON sorts keys and keeps array order
+ok 43 - canonical JSON sorts keys and keeps array order
+  ---
+  duration_ms: 1.3489
+  type: 'test'
+  ...
+# Subtest: payload hash ignores key order but not array order or command type
+ok 44 - payload hash ignores key order but not array order or command type
+  ---
+  duration_ms: 1.4329
+  type: 'test'
+  ...
+# Subtest: canonical JSON rejects values that cannot be encoded deterministically
+ok 45 - canonical JSON rejects values that cannot be encoded deterministically
+  ---
+  duration_ms: 0.6645
+  type: 'test'
+  ...
+# Subtest: decimal strings keep bigint values exact
+ok 46 - decimal strings keep bigint values exact
+  ---
+  duration_ms: 0.2722
+  type: 'test'
+  ...
+# Subtest: Run cursor accepts canonical signed-int64 values and query takes precedence
+ok 47 - Run cursor accepts canonical signed-int64 values and query takes precedence
+  ---
+  duration_ms: 1.0103
+  type: 'test'
+  ...
+# Subtest: Run event writer waits for drain after an explicit false write
+ok 48 - Run event writer waits for drain after an explicit false write
+  ---
+  duration_ms: 0.8076
+  type: 'test'
+  ...
+# Subtest: Run event writer stops waiting when a slow client aborts
+ok 49 - Run event writer stops waiting when a slow client aborts
+  ---
+  duration_ms: 0.2349
+  type: 'test'
+  ...
+# Subtest: Run event writer closes a permanently backpressured frame after its bound
+ok 50 - Run event writer closes a permanently backpressured frame after its bound
+  ---
+  duration_ms: 5014.1583
+  type: 'test'
+  ...
+# Subtest: normalizes SET_PHASE with trimmed text
+ok 51 - normalizes SET_PHASE with trimmed text
+  ---
+  duration_ms: 2.5752
+  type: 'test'
+  ...
+# Subtest: accepts null for SET_NEXT_ACTION and rejects non-uuid values
+ok 52 - accepts null for SET_NEXT_ACTION and rejects non-uuid values
+  ---
+  duration_ms: 1.5438
+  type: 'test'
+  ...
+# Subtest: requires the parameters of each action
+ok 53 - requires the parameters of each action
+  ---
+  duration_ms: 0.5518
+  type: 'test'
+  ...
+# Subtest: rejects parameters that do not belong to the action
+ok 54 - rejects parameters that do not belong to the action
+  ---
+  duration_ms: 0.3287
+  type: 'test'
+  ...
+# Subtest: rejects unknown actions without inventing a placeholder branch
+ok 55 - rejects unknown actions without inventing a placeholder branch
+  ---
+  duration_ms: 0.2271
+  type: 'test'
+  ...
+# Subtest: enforces entry text limits and produces a canonical body
+ok 56 - enforces entry text limits and produces a canonical body
+  ---
+  duration_ms: 0.3173
+  type: 'test'
+  ...
+# Subtest: keeps every action result assignable to a JSON command body
+ok 57 - keeps every action result assignable to a JSON command body
+  ---
+  duration_ms: 0.3501
+  type: 'test'
+  ...
+# Subtest: a HARD failure is never covered by a semantic PASS
+ok 58 - a HARD failure is never covered by a semantic PASS
+  ---
+  duration_ms: 1.9302
+  type: 'test'
+  ...
+# Subtest: a required PREFERENCE failure does not block PASS but stays recorded
+ok 59 - a required PREFERENCE failure does not block PASS but stays recorded
+  ---
+  duration_ms: 0.3381
+  type: 'test'
+  ...
+# Subtest: an exhausted correction budget turns a correctable failure into HUMAN
+ok 60 - an exhausted correction budget turns a correctable failure into HUMAN
+  ---
+  duration_ms: 0.1905
+  type: 'test'
+  ...
+# Subtest: checker ERROR retries the check once and then falls back to HUMAN
+ok 61 - checker ERROR retries the check once and then falls back to HUMAN
+  ---
+  duration_ms: 0.5611
+  type: 'test'
+  ...
+# Subtest: checker ERROR is decided before a correctable FAIL so fixable checks are not locked
+ok 62 - checker ERROR is decided before a correctable FAIL so fixable checks are not locked
+  ---
+  duration_ms: 0.3263
+  type: 'test'
+  ...
+# Subtest: NOT_RUN and UNCERTAIN on required criteria both stop at HUMAN
+ok 63 - NOT_RUN and UNCERTAIN on required criteria both stop at HUMAN
+  ---
+  duration_ms: 0.2256
+  type: 'test'
+  ...
+# Subtest: non-required results and NOT_APPLICABLE never change the decision
+ok 64 - non-required results and NOT_APPLICABLE never change the decision
+  ---
+  duration_ms: 0.2333
+  type: 'test'
+  ...
+# Subtest: a required criterion without any result is treated as NOT_RUN, never PASS
+ok 65 - a required criterion without any result is treated as NOT_RUN, never PASS
+  ---
+  duration_ms: 0.1318
+  type: 'test'
+  ...
+# Subtest: only the latest attempt of each criterion is considered
+ok 66 - only the latest attempt of each criterion is considered
+  ---
+  duration_ms: 0.3692
+  type: 'test'
+  ...
+1..66
+# tests 66
+# suites 0
+# pass 66
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5512.4416

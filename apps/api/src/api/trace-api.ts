@@ -2,6 +2,7 @@ import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 
 import { readRunTrace } from '../application/trace-queries.js';
+import { MODEL_ERROR_CATEGORIES } from '../workflow/model-error-classification.js';
 import { UuidSchema } from './domain-schemas.js';
 import { sendReadError, type RouteDependencies } from './envelope.js';
 
@@ -23,6 +24,10 @@ const trace = Type.Object({
     attempt_number: Type.String(), status: Type.String(), claim_epoch: Type.String(),
     result_available: Type.Boolean(), started_at: timestamp, finished_at: timestamp }, strict)),
   model_calls: Type.Array(Type.Object({ id: UuidSchema, step_attempt_id: nullableId,
+    kind: Type.String(), criterion_id: nullableString, check_attempt: nullableNumber,
+    provider_error_kind: Type.Union([
+      ...MODEL_ERROR_CATEGORIES.map((category) => Type.Literal(category)), Type.Null()]),
+    provider_request_id: nullableString,
     manifest_id: nullableId, status: Type.String(), provider: Type.String(),
     model: Type.String(), input_sha256: nullableString, read_operation_id: nullableId,
     read_invocation_id: nullableId, usage_input_tokens: nullableNumber,

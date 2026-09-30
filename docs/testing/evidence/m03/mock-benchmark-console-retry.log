@@ -1,0 +1,86 @@
+Benchmark output: D:\Develop\Relay-Agent\docs\testing\evidence\m03\mock-bench-20260924-225511-ad4f1b7c
+INPUT_SHA256 8DE4880B5FC2CA31E89A2BBFC1D24ADB36B1B0548567D5F3B775AFA35CEE91A5 D:\Develop\Relay-Agent\apps\api\test\integration\m03-mock-benchmark.bench.ts
+INPUT_SHA256 2B215D596E16CE57CBF4E9D41EEF56D88059BC17A78311A11A43D32487EA6BAC D:\Develop\Relay-Agent\apps\api\scripts\m03-mock-metrics-preload.mjs
+INPUT_SHA256 23D813B24BEE9ACE88DF639A54F5E26A1B23605782891C961C7B138CA3DB4A11 D:\Develop\Relay-Agent\apps\api\scripts\run-integration.ps1
+BUILD_EXIT_CODE=0
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-b86104943f
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+powershell.exe : initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+At D:\Develop\Relay-Agent\apps\api\scripts\run-m03-mock-benchmark.ps1:54 char:5
++     & powershell -NoProfile -ExecutionPolicy Bypass -File $integratio ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (initdb: could n...ied)_China.936":String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-b86104943f/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-b86104943f^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 16308)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-b86104943f/cluster" "-h" "127.0.0.1" "-p" "7045"
+DO
+CREATE DATABASE
+Test database: relay_api_test_a71d44a78d76 on 127.0.0.1:7045 (roles relay_migrator / relay_app)
+{
+  "applied": [
+    "0001_v001_human_core",
+    "0002_p02_task_goal_alignment",
+    "0003_schema_readiness",
+    "0004_v002_runs",
+    "0005_v002_verification",
+    "0006_v002_reviews",
+    "0007_v003_recovery_control",
+    "0008_v003_gateway",
+    "0009_v004_information_rules",
+    "0010_v005_context_revision",
+    "0011_m03_run_dispatch",
+    "0012_m03_run_events",
+    "0013_m03_run_command_order"
+  ],
+  "already_applied": [],
+  "ledger_rows": 13
+}
+{"schema":"relay_graph_v1","ready":true}
+{"type":"m03_mock_benchmark_summary","status":"MEASURED","success":8,"cancelled":2,"evidence_dir":"D:\\Develop\\Relay-Agent\\docs\\testing\\evidence\\m03\\mock-bench-20260924-225511-ad4f1b7c"}
+✔ M03 fixed Mock workload against independent API, supervisor, Worker and isolated PG (19430.8289ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 39776.3999
+waiting for server to shut down..... done
+server stopped
+--- integration summary ---
+tests exit code: 0
+build exit code: skipped
+business migration exit code: 0
+graph install exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: PASSED
+BENCHMARK_EXIT_CODE=0
+EVIDENCE_DIR=D:\Develop\Relay-Agent\docs\testing\evidence\m03\mock-bench-20260924-225511-ad4f1b7c

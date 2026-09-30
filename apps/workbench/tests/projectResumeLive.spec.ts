@@ -39,6 +39,7 @@ describe("项目恢复页 live 当前事实", () => {
       if (path === "/artifacts/artifact-a") return response({ id: "artifact-a", task_id: "task-a", title: "草稿", revision: "3", latest_version_id: "version-a",
         version_count: 1, versions: [{ artifact_version_id: "version-a", version_number: "3", media_type: "text/markdown", sha256: "sha", size: "12",
           source_kind: "HUMAN", created_at: "2026-09-26T00:00:00Z" }] });
+      if (path === `/projects/${projectId}/continuation-points`) return response({ items: [] });
       throw new Error(`Unexpected ${path}`);
     }));
     const mounted = await mountWorkbench(`/projects/${projectId}?skill=resume`); unmount = mounted.unmount;
@@ -52,7 +53,7 @@ describe("项目恢复页 live 当前事实", () => {
     expect(mounted.wrapper.text()).toContain("完成可复核论文");
     expect(mounted.wrapper.text()).toContain("本次查询于");
     expect(mounted.wrapper.find(`a[href="/completion-records/${completionId}"]`).exists()).toBe(true);
-    expect(mounted.wrapper.text()).toContain("没有上次查看基线");
+    expect(mounted.wrapper.text()).toContain("未选择接续点时不显示变化对比");
     expect(mounted.wrapper.text()).not.toContain("建议的下一步");
     expect(paths).toContain("/tasks/task-next");
   });

@@ -1,0 +1,94 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-495aceda9c
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-495aceda9c/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-495aceda9c^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 28060)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-495aceda9c/cluster" "-h" "127.0.0.1" "-p" "6068"
+DO
+CREATE DATABASE
+Test database: relay_api_test_40ad27d12576 on 127.0.0.1:6068 (roles relay_migrator / relay_app)
+{
+  "applied": [
+    "0001_v001_human_core",
+    "0002_p02_task_goal_alignment",
+    "0003_schema_readiness",
+    "0004_v002_runs",
+    "0005_v002_verification",
+    "0006_v002_reviews",
+    "0007_v003_recovery_control",
+    "0008_v003_gateway",
+    "0009_v004_information_rules",
+    "0010_v005_context_revision",
+    "0011_m03_run_dispatch",
+    "0012_m03_run_events",
+    "0013_m03_run_command_order"
+  ],
+  "already_applied": [],
+  "ledger_rows": 13
+}
+{"schema":"relay_graph_v1","ready":true}
+✔ the fixed Mock graph prepares ASK and only the approved RESUME executes its original operation (5574.4123ms)
+✔ ASK business commit before interrupt checkpoint cannot strand START ahead of rapid approval (5264.452ms)
+✔ denied required Mock action terminates the Run without a tool effect or dangling approval wait (3868.9997ms)
+✔ old ACTION RESUME cannot wake the later human-criterion Review after its graph checkpoint (6647.9091ms)
+✔ a stopped RESUME reconciles the original Fake effect and can replay after approval expiry (6235.6757ms)
+✔ a stopped RESUME after Gateway Admit but before Fake write preserves UNKNOWN and the same operation (5048.0732ms)
+✔ revoked Permission after approval cannot dispatch the frozen Mock action (4234.7368ms)
+✔ a committed PAUSE wins over a pre-invocation Permission refusal under the outer claim fence (3013.7784ms)
+✔ stopped PREPARED Mock action replays the same operation after NOT_EXECUTED reconciliation (4250.7225ms)
+✔ PENDING control after PREPARED reconciliation prevents any replay of the Mock action (3980.6097ms)
+✔ PAUSE after rapid action approval applies before any Mock effect (3882.4866ms)
+✔ CANCEL after rapid action approval applies before any Mock effect (3961.564ms)
+✔ HANDOFF after rapid action approval applies before any Mock effect (4019.9024ms)
+✔ manual resume cannot revive a PAUSE-invalidated Mock approval or strand a RUNNING Run (3170.4505ms)
+✔ two independent Workers racing one approved RESUME create one Gateway invocation (4322.3167ms)
+✔ a Review rebound to another operation cannot wake the frozen action checkpoint (4348.7218ms)
+✔ official Saver setup is migrator-only; missing or damaged graph schema blocks Worker before claim (4133.4653ms)
+✔ the one Run graph persists an empty-namespace Review interrupt, then resumes the original decision (3446.9012ms)
+✔ a saved Review interrupt with an unacknowledged START is replayed by the same command (4129.8324ms)
+✔ PAUSE and resume of a saved Review wait cannot strand the unacknowledged START before approval (5421.4367ms)
+✔ a claimed RESUME killed before its checkpoint reuses the one Review decision (5266.4403ms)
+✔ a real child exit after business commit but before graph checkpoint replays without a second effect (4275.109ms)
+✔ lost invocation after a committed node cannot write its normal successor checkpoint (1978.2892ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 117976.3701
+waiting for server to shut down.... done
+server stopped
+--- integration summary ---
+tests exit code: 0
+build exit code: skipped
+business migration exit code: 0
+graph install exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: PASSED

@@ -3,9 +3,9 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { Info, RotateCcw } from "lucide-react";
 import ArtifactPanel from "../components/ArtifactPanel";
 import TaskAcceptanceEvidence from "../components/TaskAcceptanceEvidence";
-import AssistSourcePicker from "../components/AssistSourcePicker";
+import TaskDelegatePanel from "../components/TaskDelegatePanel";
 import StatusChip from "../components/StatusChip";
-import { createCommandId, delegateSubmissionFrom, RelayApiError, RelayTransportError, type RelayAcceptanceCriterion, type RelayApiClient, type RelayAssistSourceRef, type RelayMockGatewayConnection, type RelayMockManagedResource, type RelayTaskAcceptance } from "../api/relayClient";
+import type { RelayAcceptanceCriterion, RelayApiClient, RelayTaskAcceptance } from "../api/relayClient";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { fixtureModeFromQuery } from "../lib/fixtureMode";
 import { executorLabels, interactionModeLabels, taskStatusLabels } from "../lib/labels";
@@ -42,22 +42,7 @@ export default function TaskDetailView() {
     return requested === "artifacts" || requested === "runs" ? requested : "overview";
   });
   const [refreshing, setRefreshing] = useState(false);
-  const [delegating, setDelegating] = useState(false);
-  const [delegateError, setDelegateError] = useState<string | null>(null);
-  const [pendingDelegate, setPendingDelegate] = useState<{ taskId: string; commandId: string } | null>(null);
-  const [mockActionEnabled, setMockActionEnabled] = useState(false);
-  const [mockConnections, setMockConnections] = useState<readonly RelayMockGatewayConnection[]>([]);
-  const [mockResources, setMockResources] = useState<readonly RelayMockManagedResource[]>([]);
-  const [mockConfigLoading, setMockConfigLoading] = useState(false);
-  const [mockConfigError, setMockConfigError] = useState<string | null>(null);
-  const [mockConfigEpoch, setMockConfigEpoch] = useState(0);
-  const [mockConnectionId, setMockConnectionId] = useState("");
-  const [mockResourceId, setMockResourceId] = useState("");
-  const [mockTarget, setMockTarget] = useState("");
-  const [mockContent, setMockContent] = useState("");
-  const [delegateSources, setDelegateSources] = useState<readonly RelayAssistSourceRef[]>([]);
   const requestVersion = useRef(0);
-  const actionVersion = useRef(0);
   const disposed = useRef(false);
   const loadedTarget = useRef<string | null>(null);
   const activeTarget = useRef(targetKey);
@@ -93,109 +78,27 @@ export default function TaskDetailView() {
     finally { if (request === requestVersion.current && !disposed.current && activeTarget.current === targetKey) { setLoading(false); setRefreshing(false); } }
   }
   useEffect(() => {
-    disposed.current = false; actionVersion.current++;
-    setPendingDelegate(null); setDelegateError(null); setDelegating(false);
-    setMockActionEnabled(false); setMockConnectionId(""); setMockResourceId(""); setMockTarget(""); setMockContent("");
-    setDelegateSources([]);
+    disposed.current = false;
     void load();
-    return () => { disposed.current = true; requestVersion.current++; actionVersion.current++; };
+    return () => { disposed.current = true; requestVersion.current++; };
   }, [targetKey]);
-  useEffect(() => {
-    const projectId = result?.source === "live" ? result.task.projectId : null;
-    const client = connection.client;
-    if (!mockActionEnabled || !projectId || !client) return;
-    let active = true;
-    setMockConfigLoading(true); setMockConfigError(null);
-    void Promise.all([client.getMockGatewayConnections(projectId), client.getMockManagedResources(projectId)]).then(
-      ([connections, resources]) => {
-        if (!active) return;
-        const writable = connections.filter((item) => item.status === "ACTIVE" && item.capabilities.includes("FAKE_WRITE"));
-        const managed = resources.filter((item) => item.status === "ACTIVE");
-        setMockConnections(writable); setMockResources(managed);
-        setMockConnectionId((current) => writable.some((item) => item.id === current) ? current : writable[0]?.id ?? "");
-        setMockResourceId((current) => managed.some((item) => item.id === current) ? current : managed[0]?.id ?? "");
-      }, (caught: unknown) => { if (active) { setMockConnections([]); setMockResources([]); setMockConfigError(describeLiveError(caught).message); } }
-    ).finally(() => { if (active) setMockConfigLoading(false); });
-    return () => { active = false; };
-  }, [mockActionEnabled, result?.task.projectId, result?.source, connection.client, mockConfigEpoch]);
   const projectWriteBlockedReason = result?.source !== "live" || result.task.projectId === null ? null :
     refreshing || loading || error !== null || result.projectArchivedAt === undefined ?
       `Project 事实正在核对或读取失败，不能提交新的任务命令。${result.projectReadError ?? ""}` :
       result.projectArchivedAt !== null ? "项目已归档，不能提交新的任务命令。" : null;
-  const delegateBlockedReason = result?.source !== "live" ? "示例数据不创建真实 Run。"
-    : projectWriteBlockedReason ? projectWriteBlockedReason
-    : result.task.status !== "READY" ? "只有 READY 的任务可委托。"
-    : result.task.executor !== "HUMAN" ? "当前执行权不属于人工，不能重复委托。"
-    : result.task.projectId === null ? "没有所属项目，缺少 AI 执行作用域。"
-    : !result.task.allowedActions?.includes("START") ? "当前前置条件不允许开始任务，请刷新核对。" : null;
   // UI-10：AI 持有执行权时，人工不能直接编辑产物或验收；编辑入口改为“请求接手”，接手在运行页生效后再编辑。
   const aiHolds = result?.source === "live" && result.task.executor === "AI";
-  const mockActionBlockedReason = !mockActionEnabled ? null
-    : mockConfigLoading ? "正在读取项目动作配置。"
-    : mockConfigError ? `动作配置无法读取：${mockConfigError}`
-    : !mockConnectionId ? "此项目没有可用的 Mock 写入连接。"
-    : !mockResourceId ? "此项目没有可用的受管目录。"
-    : !mockTarget.trim() ? "请填写受管目录内的完整目标文件路径。"
-    : !mockContent.trim() ? "请填写要写入的 Mock 内容。" : null;
-  async function delegate() {
-    const task = result?.task; const client = connection.client;
-    if (!task || !client || delegateBlockedReason || mockActionBlockedReason || pendingDelegate || delegating) return;
-    const commandId = createCommandId(); const version = actionVersion.current;
-    setPendingDelegate({ taskId: task.id, commandId }); setDelegateError(null); setDelegating(true);
-    try {
-      const accepted = await client.delegateTask({ taskId: task.id, commandId, expectedTaskRevision: task.revision,
-        contextSources: delegateSources.map((source) => ({ ...source })),
-        ...(mockActionEnabled ? { mockGatewayAction: { connectionId: mockConnectionId,
-          resourceId: mockResourceId, target: mockTarget.trim(), content: mockContent.trim() } } : {}) });
-      if (version !== actionVersion.current) return;
-      setPendingDelegate(null); navigate(`/runs/${accepted.runId}`);
-    } catch (caught) {
-      if (version !== actionVersion.current) return;
-      if (caught instanceof RelayTransportError) setDelegateError("提交结果尚未确定。只能查询原 command_id 回执，不能生成新命令重试。");
-      else {
-        setPendingDelegate(null); setDelegateError(describeLiveError(caught).message);
-        if (caught instanceof RelayApiError) void load();
-      }
-    } finally { if (version === actionVersion.current) setDelegating(false); }
-  }
-  async function checkDelegateReceipt() {
-    const pending = pendingDelegate; const client = connection.client;
-    if (!pending || !client || delegating) return;
-    const version = actionVersion.current; setDelegating(true);
-    try {
-      const receipt = await client.getCommandReceipt(pending.commandId);
-      if (version !== actionVersion.current) return;
-      const accepted = delegateSubmissionFrom(receipt.result);
-      if (receipt.commandId !== pending.commandId || receipt.commandType !== "DelegateTask" ||
-          accepted.taskId !== pending.taskId) throw new Error("原命令回执与当前任务不匹配。");
-      setPendingDelegate(null); setDelegateError(null); navigate(`/runs/${accepted.runId}`);
-    } catch (caught) {
-      if (version !== actionVersion.current) return;
-      setDelegateError(caught instanceof RelayApiError && caught.problem.code === "COMMAND_NOT_FOUND"
-        ? "尚未找到原命令回执，结果仍未确定；请稍后继续查询同一个 command_id。"
-        : caught instanceof RelayApiError ? describeLiveError(caught).message
-        : "原命令回执无法匹配 Delegate 与当前任务，结果仍未确定；请保留原 command_id 核对。");
-    } finally { if (version === actionVersion.current) setDelegating(false); }
-  }
-  const mockActionOptions = result?.source === "live" && !result.task.runId ? <div className="create-form" data-testid="task-mock-action-options">
-    <label className="choice-option"><input type="checkbox" checked={mockActionEnabled} onChange={(event) => setMockActionEnabled(event.target.checked)} disabled={pendingDelegate !== null || delegating} data-testid="task-mock-action-toggle" /><span>附加 Mock 文件动作<small>可选；仅向已登记的受管目录写入固定内容，执行前仍会核对权限并可能等待批准。</small></span></label>
-    {mockActionEnabled && <>
-      <label className="field"><span className="field-label">Mock 写入连接</span><select value={mockConnectionId} onChange={(event) => setMockConnectionId(event.target.value)} disabled={mockConfigLoading || pendingDelegate !== null || delegating} data-testid="task-mock-connection"><option value="">选择连接</option>{mockConnections.map((item) => <option key={item.id} value={item.id}>{item.id}</option>)}</select></label>
-      <label className="field"><span className="field-label">受管目录</span><select value={mockResourceId} onChange={(event) => { setMockResourceId(event.target.value); setMockTarget(""); }} disabled={mockConfigLoading || pendingDelegate !== null || delegating} data-testid="task-mock-resource"><option value="">选择目录</option>{mockResources.map((item) => <option key={item.id} value={item.id}>{item.canonicalRoot}</option>)}</select></label>
-      <label className="field"><span className="field-label">目标文件完整路径</span><input value={mockTarget} onChange={(event) => setMockTarget(event.target.value)} maxLength={4096} disabled={pendingDelegate !== null || delegating} data-testid="task-mock-target" /><span className="field-hint">目标必须在所选受管目录内；文件名由你明确指定。</span></label>
-      <label className="field"><span className="field-label">Mock 写入内容</span><textarea value={mockContent} onChange={(event) => setMockContent(event.target.value)} maxLength={1024} rows={3} disabled={pendingDelegate !== null || delegating} data-testid="task-mock-content" /></label>
-      <p className="helper-text">连接、目录和写入权限须先在该项目登记。委托回执不会执行文件动作；审批回执也不代表写入已完成。</p>
-      {mockActionBlockedReason && <p className="disabled-reason" data-testid="task-mock-blocked">{mockActionBlockedReason}</p>}
-      {mockConfigError && <button className="secondary-button" type="button" onClick={() => setMockConfigEpoch((value) => value + 1)}>重读动作配置</button>}
-    </>}
-  </div> : null;
   if (loadedTarget.current !== targetKey || loading) return <section className="page-state" aria-live="polite"><p className="eyebrow">任务详情</p><h1>正在读取任务</h1><p>{live ? "正在从本机 API 读取真实任务事实。" : "示例数据正在加载。"}</p></section>;
   if (error) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">任务详情</p><h1>暂时无法读取这个任务</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
   if (!result) return <section className="page-state"><p className="eyebrow">任务详情</p><h1>{live ? "服务端没有返回这个任务" : "示例数据没有这个任务"}</h1><p>{live ? "跨作用域或已删除的任务按不可见处理；页面不会据此创建任务。" : "示例数据里只有“确定实验评价指标”这一个任务，其他任务不显示示例内容。"}</p><Link className="text-link" to="/tasks">返回任务列表</Link></section>;
   return <section className="skill-page" data-testid="task-detail"><div className="page-layout"><div className="page-primary"><p className="eyebrow">{live ? "任务" : "示例任务"}</p><h1>{result.task.title}</h1>{result.objective && <p className="page-lede">{result.objective}</p>}{refreshing && <p className="helper-text" role="status">正在更新任务事实，已显示的内容保持可见。</p>}{projectWriteBlockedReason && <p className="disabled-reason" data-testid="task-project-archive-reason">{projectWriteBlockedReason}</p>}
     <section className="rail-section"><h3>当前状态</h3><dl className="rail-definition-list"><div><dt>工作状态</dt><dd><StatusChip status={result.task.status} /></dd></div><div><dt>执行模式</dt><dd>{interactionModeLabels[result.task.mode]}</dd></div><div><dt>当前执行者</dt><dd>{executorLabels[result.task.executor]}</dd></div><div><dt>任务修订</dt><dd>v{result.task.revision}</dd></div><div><dt>验收版本</dt><dd>v{result.task.acceptanceRevision}</dd></div></dl>{result.source === "live" && result.task.currentCompletionId && <Link className="inline-link" to={`/completion-records/${result.task.currentCompletionId}`}>查看当前完成凭据</Link>}</section>
     <nav className="skill-tabs" aria-label="任务详情页签">{tabs.map((item) => <button key={item.key} className={`skill-tab${tab === item.key ? " skill-tab--active" : ""}`} type="button" aria-current={tab === item.key ? "page" : undefined} data-testid={`task-detail-tab-${item.key}`} onClick={() => setTab(item.key)}>{item.label}</button>)}</nav>
-    {tab === "runs" && result.source === "live" && !result.task.runId && <section className="surface-panel" data-testid="task-delegate-panel"><h2>委托执行</h2><p className="helper-text">委托命令返回 202 只表示已创建 Run 并授予执行权；实际进度以 Run 查询为准。</p>{result.task.projectId && <AssistSourcePicker projectId={result.task.projectId} selectedRefs={delegateSources} onChange={setDelegateSources} disabled={delegating || pendingDelegate !== null} />}{mockActionOptions}{delegateError && <p className="action-error" role="alert">{delegateError}</p>}{pendingDelegate ? <><p className="helper-text" data-testid="delegate-command-id">原 command_id：{pendingDelegate.commandId}</p><button className="secondary-button" type="button" data-testid="delegate-check-receipt" disabled={delegating} onClick={() => void checkDelegateReceipt()}>核对原命令回执</button></> : <><button className="primary-button" type="button" data-testid="task-delegate" disabled={delegateBlockedReason !== null || mockActionBlockedReason !== null || delegating} onClick={() => void delegate()}>{delegating ? "正在提交" : "委托 AI 执行"}</button>{delegateBlockedReason && <p className="disabled-reason">{delegateBlockedReason}</p>}</>}</section>}
+    {tab === "runs" && result.source === "live" && connection.client && !result.task.runId &&
+      <TaskDelegatePanel client={connection.client} task={{ id: result.task.id, projectId: result.task.projectId,
+        status: result.task.status, executor: result.task.executor, revision: result.task.revision,
+        executorRunId: result.task.runId, allowedActions: result.task.allowedActions ?? [] }}
+        projectWriteBlockedReason={projectWriteBlockedReason} onDelegated={(runId) => navigate(`/runs/${runId}`)} />}
     {tab === "overview" && result.source === "live" && result.acceptance && connection.client &&
       <TaskAcceptanceEvidence client={connection.client} taskId={result.task.id} taskRevision={result.task.revision}
         acceptance={result.acceptance} runId={result.task.runId} completionId={result.task.currentCompletionId} />}

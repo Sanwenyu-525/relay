@@ -1,0 +1,1097 @@
+
+> relay-workbench-fixture@0.1.0 test
+> vitest run --reporter=dot
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./vite.config" without a file extension (vitest.config.ts:2:24). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.1 D:/Develop/Relay-Agent/apps/workbench
+
+stderr | tests/todayView.spec.ts > P13 Today 真实投影 > fixture 不查询 Today；live 区分候选、等待子集和服务端准入，Pin 发送全量选择
+In HTML, <summary> cannot be a descendant of <p>.
+This will cause a hydration error.
+
+  ...
+    <RenderedRoute match={{params:{}, ...}} routeContext={{...}}>
+      <App>
+        <div className={undefined}>
+          <DesktopTitleBar>
+          <AppShell desktopStatus="idle" commandOpen={false} onCommandOpen={function onCommandOpen} ...>
+            <a>
+            <div className="app-frame" style={undefined}>
+              <aside>
+              <div className="app-content">
+                <header>
+                <main id="main-content" className="app-main" tabIndex={-1}>
+                  <div>
+                    <Outlet>
+                      <RenderedRoute match={{params:{}, ...}} routeContext={{outlet:null, ...}}>
+                        <TodayView>
+                          <section className="today-page">
+                            <p>
+                            <h1>
+                            <p>
+>                           <p className="page-note">
+                              <details className="today-arra...">
+>                               <summary>
+                                ...
+                            ...
+              ...
+            ...
+          ...
+
+<p> cannot contain a nested <summary>.
+See this log for the ancestor stack trace.
+In HTML, <p> cannot be a descendant of <p>.
+This will cause a hydration error.
+
+  ...
+    <RenderedRoute match={{params:{}, ...}} routeContext={{...}}>
+      <App>
+        <div className={undefined}>
+          <DesktopTitleBar>
+          <AppShell desktopStatus="idle" commandOpen={false} onCommandOpen={function onCommandOpen} ...>
+            <a>
+            <div className="app-frame" style={undefined}>
+              <aside>
+              <div className="app-content">
+                <header>
+                <main id="main-content" className="app-main" tabIndex={-1}>
+                  <div>
+                    <Outlet>
+                      <RenderedRoute match={{params:{}, ...}} routeContext={{outlet:null, ...}}>
+                        <TodayView>
+                          <section className="today-page">
+                            <p>
+                            <h1>
+                            <p>
+>                           <p className="page-note">
+                              <details className="today-arra...">
+                                <summary>
+>                               <p>
+                                ...
+                            ...
+              ...
+            ...
+          ...
+
+<p> cannot contain a nested <p>.
+See this log for the ancestor stack trace.
+In HTML, <details> cannot be a descendant of <p>.
+This will cause a hydration error.
+
+  ...
+    <RenderedRoute match={{params:{}, ...}} routeContext={{...}}>
+      <App>
+        <div className={undefined}>
+          <DesktopTitleBar>
+          <AppShell desktopStatus="idle" commandOpen={false} onCommandOpen={function onCommandOpen} ...>
+            <a>
+            <div className="app-frame" style={undefined}>
+              <aside>
+              <div className="app-content">
+                <header>
+                <main id="main-content" className="app-main" tabIndex={-1}>
+                  <div>
+                    <Outlet>
+                      <RenderedRoute match={{params:{}, ...}} routeContext={{outlet:null, ...}}>
+                        <TodayView>
+                          <section className="today-page">
+                            <p>
+                            <h1>
+                            <p>
+>                           <p className="page-note">
+>                             <details className="today-arrange-note">
+                            ...
+              ...
+            ...
+          ...
+
+
+stderr | tests/navigation.spec.ts > 局部导航与浮层行为 > 切换局部页签时保留未保存草稿
+An update to RouterProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | tests/commandPalette.spec.ts > Ctrl+K 全局命令面板 > 收件箱快捷命令复用 /inbox 别名，动态说明与已接入的 Activity 一致
+In HTML, <summary> cannot be a descendant of <p>.
+This will cause a hydration error.
+
+  ...
+    <RenderedRoute match={{params:{}, ...}} routeContext={{...}}>
+      <App>
+        <div className={undefined}>
+          <DesktopTitleBar>
+          <AppShell desktopStatus="idle" commandOpen={false} onCommandOpen={function onCommandOpen} ...>
+            <a>
+            <div className="app-frame" style={undefined}>
+              <aside>
+              <div className="app-content">
+                <header>
+                <main id="main-content" className="app-main" tabIndex={-1}>
+                  <div>
+                    <Outlet>
+                      <RenderedRoute match={{params:{}, ...}} routeContext={{outlet:null, ...}}>
+                        <TodayView>
+                          <section className="today-page">
+                            <p>
+                            <h1>
+                            <p>
+>                           <p className="page-note">
+                              <details className="today-arra...">
+>                               <summary>
+                                ...
+                            ...
+              ...
+            ...
+          ...
+
+<p> cannot contain a nested <summary>.
+See this log for the ancestor stack trace.
+In HTML, <p> cannot be a descendant of <p>.
+This will cause a hydration error.
+
+  ...
+    <RenderedRoute match={{params:{}, ...}} routeContext={{...}}>
+      <App>
+        <div className={undefined}>
+          <DesktopTitleBar>
+          <AppShell desktopStatus="idle" commandOpen={false} onCommandOpen={function onCommandOpen} ...>
+            <a>
+            <div className="app-frame" style={undefined}>
+              <aside>
+              <div className="app-content">
+                <header>
+                <main id="main-content" className="app-main" tabIndex={-1}>
+                  <div>
+                    <Outlet>
+                      <RenderedRoute match={{params:{}, ...}} routeContext={{outlet:null, ...}}>
+                        <TodayView>
+                          <section className="today-page">
+                            <p>
+                            <h1>
+                            <p>
+>                           <p className="page-note">
+                              <details className="today-arra...">
+                                <summary>
+>                               <p>
+                                ...
+                            ...
+              ...
+            ...
+          ...
+
+<p> cannot contain a nested <p>.
+See this log for the ancestor stack trace.
+In HTML, <details> cannot be a descendant of <p>.
+This will cause a hydration error.
+
+  ...
+    <RenderedRoute match={{params:{}, ...}} routeContext={{...}}>
+      <App>
+        <div className={undefined}>
+          <DesktopTitleBar>
+          <AppShell desktopStatus="idle" commandOpen={false} onCommandOpen={function onCommandOpen} ...>
+            <a>
+            <div className="app-frame" style={undefined}>
+              <aside>
+              <div className="app-content">
+                <header>
+                <main id="main-content" className="app-main" tabIndex={-1}>
+                  <div>
+                    <Outlet>
+                      <RenderedRoute match={{params:{}, ...}} routeContext={{outlet:null, ...}}>
+                        <TodayView>
+                          <section className="today-page">
+                            <p>
+                            <h1>
+                            <p>
+>                           <p className="page-note">
+>                             <details className="today-arrange-note">
+                            ...
+              ...
+            ...
+          ...
+
+
+stderr | tests/navigation.spec.ts > 局部导航与浮层行为 > 丢弃草稿后完成页签切换
+An update to FixtureBlueprintView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to FixtureBlueprintView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to RouterProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to RouterProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | tests/navigation.spec.ts > 局部导航与浮层行为 > 来源详情浮层支持 Esc 关闭并回落焦点
+An update to FixtureProjectResumeView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | tests/navigation.spec.ts > 局部导航与浮层行为 > 从右区抽屉打开来源详情时不会叠加两个对话框
+An update to FixtureProjectResumeView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to FixtureProjectResumeView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | tests/assist-preview.spec.ts > M04 Assist DISCUSS 生成中草稿 > 连接重建后按原会话与消息 ID 重新读取草稿
+An update to AssistView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to RelayConnectionDialog inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to CommandPalette inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to AppShell inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to App inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to AssistSourcePicker inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | tests/navigation.spec.ts > 局部导航与浮层行为 > Today 示例入口明确标注非真实投影
+In HTML, <summary> cannot be a descendant of <p>.
+This will cause a hydration error.
+
+  ...
+    <RenderedRoute match={{params:{}, ...}} routeContext={{...}}>
+      <App>
+        <div className={undefined}>
+          <DesktopTitleBar>
+          <AppShell desktopStatus="idle" commandOpen={false} onCommandOpen={function onCommandOpen} ...>
+            <a>
+            <div className="app-frame" style={undefined}>
+              <aside>
+              <div className="app-content">
+                <header>
+                <main id="main-content" className="app-main" tabIndex={-1}>
+                  <div>
+                    <Outlet>
+                      <RenderedRoute match={{params:{}, ...}} routeContext={{outlet:null, ...}}>
+                        <TodayView>
+                          <section className="today-page">
+                            <p>
+                            <h1>
+                            <p>
+>                           <p className="page-note">
+                              <details className="today-arra...">
+>                               <summary>
+                                ...
+                            ...
+              ...
+            ...
+          ...
+
+<p> cannot contain a nested <summary>.
+See this log for the ancestor stack trace.
+In HTML, <p> cannot be a descendant of <p>.
+This will cause a hydration error.
+
+  ...
+    <RenderedRoute match={{params:{}, ...}} routeContext={{...}}>
+      <App>
+        <div className={undefined}>
+          <DesktopTitleBar>
+          <AppShell desktopStatus="idle" commandOpen={false} onCommandOpen={function onCommandOpen} ...>
+            <a>
+            <div className="app-frame" style={undefined}>
+              <aside>
+              <div className="app-content">
+                <header>
+                <main id="main-content" className="app-main" tabIndex={-1}>
+                  <div>
+                    <Outlet>
+                      <RenderedRoute match={{params:{}, ...}} routeContext={{outlet:null, ...}}>
+                        <TodayView>
+                          <section className="today-page">
+                            <p>
+                            <h1>
+                            <p>
+>                           <p className="page-note">
+                              <details className="today-arra...">
+                                <summary>
+>                               <p>
+                                ...
+                            ...
+              ...
+            ...
+          ...
+
+<p> cannot contain a nested <p>.
+See this log for the ancestor stack trace.
+In HTML, <details> cannot be a descendant of <p>.
+This will cause a hydration error.
+
+  ...
+    <RenderedRoute match={{params:{}, ...}} routeContext={{...}}>
+      <App>
+        <div className={undefined}>
+          <DesktopTitleBar>
+          <AppShell desktopStatus="idle" commandOpen={false} onCommandOpen={function onCommandOpen} ...>
+            <a>
+            <div className="app-frame" style={undefined}>
+              <aside>
+              <div className="app-content">
+                <header>
+                <main id="main-content" className="app-main" tabIndex={-1}>
+                  <div>
+                    <Outlet>
+                      <RenderedRoute match={{params:{}, ...}} routeContext={{outlet:null, ...}}>
+                        <TodayView>
+                          <section className="today-page">
+                            <p>
+                            <h1>
+                            <p>
+>                           <p className="page-note">
+>                             <details className="today-arrange-note">
+                            ...
+              ...
+            ...
+          ...
+
+
+stderr | tests/run.spec.ts > P08 Run 工作台 > 切换连接时丢弃旧 Run 的控制状态和迟到查询
+An update to RunView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to RelayConnectionDialog inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to CommandPalette inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to AppShell inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to App inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | tests/run-sources.spec.ts > P11 Run Sources View > 连接切换后迟到的旧 Manifest 详情不能注入新 Workspace
+An update to RunView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to RelayConnectionDialog inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to CommandPalette inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to AppShell inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to App inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | tests/run-sources.spec.ts > P11 Run Sources View > 断开 live 后清除来源正文并返回示例模式说明
+An update to RunView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to RelayConnectionDialog inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to CommandPalette inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to AppShell inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to App inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | tests/liveWorkspaceLists.spec.ts > live Workspace 项目与任务列表 > 项目刷新失权清旧数据，切范围和 Workspace 后迟到响应不能回写
+An update to RelayConnectionDialog inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to CommandPalette inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to AppShell inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to App inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ProjectsView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | tests/liveWorkspaceLists.spec.ts > live Workspace 项目与任务列表 > 全空间任务刷新失权清旧行，换 Workspace 不保留旧计数
+An update to TasksView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to RelayConnectionDialog inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to CommandPalette inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to AppShell inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to App inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | tests/resume.spec.ts > 继续这个项目 > 完成依据、待审产物与来源列表打开的详情标题与内容一致
+An update to FixtureProjectResumeView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | tests/resume.spec.ts > 继续这个项目 > 完成依据、待审产物与来源列表打开的详情标题与内容一致
+An update to FixtureProjectResumeView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | tests/liveInbox.spec.ts > live 任务收件箱 > 切换范围和 Workspace 后不保留旧页，也不让晚到响应覆盖当前范围
+An update to RelayConnectionDialog inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to CommandPalette inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to AppShell inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to App inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TasksView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | tests/desktop-bootstrap.spec.ts > 桌面标题栏搜索打开原命令面板，应用顶栏不重复显示搜索按钮
+In HTML, <summary> cannot be a descendant of <p>.
+This will cause a hydration error.
+
+  ...
+    <RenderedRoute match={{params:{}, ...}} routeContext={{...}}>
+      <App>
+        <div className="desktop-wi...">
+          <DesktopTitleBar>
+          <AppShell desktopStatus="idle" commandOpen={false} onCommandOpen={function onCommandOpen} ...>
+            <a>
+            <div className="app-frame" style={undefined}>
+              <aside>
+              <div className="app-content">
+                <header>
+                <InterventionNotifications>
+                <main id="main-content" className="app-main" tabIndex={-1}>
+                  <div>
+                    <Outlet>
+                      <RenderedRoute match={{params:{}, ...}} routeContext={{outlet:null, ...}}>
+                        <TodayView>
+                          <section className="today-page">
+                            <p>
+                            <h1>
+                            <p>
+>                           <p className="page-note">
+                              <details className="today-arra...">
+>                               <summary>
+                                ...
+                            ...
+              ...
+            ...
+          ...
+
+<p> cannot contain a nested <summary>.
+See this log for the ancestor stack trace.
+In HTML, <p> cannot be a descendant of <p>.
+This will cause a hydration error.
+
+  ...
+    <RenderedRoute match={{params:{}, ...}} routeContext={{...}}>
+      <App>
+        <div className="desktop-wi...">
+          <DesktopTitleBar>
+          <AppShell desktopStatus="idle" commandOpen={false} onCommandOpen={function onCommandOpen} ...>
+            <a>
+            <div className="app-frame" style={undefined}>
+              <aside>
+              <div className="app-content">
+                <header>
+                <InterventionNotifications>
+                <main id="main-content" className="app-main" tabIndex={-1}>
+                  <div>
+                    <Outlet>
+                      <RenderedRoute match={{params:{}, ...}} routeContext={{outlet:null, ...}}>
+                        <TodayView>
+                          <section className="today-page">
+                            <p>
+                            <h1>
+                            <p>
+>                           <p className="page-note">
+                              <details className="today-arra...">
+                                <summary>
+>                               <p>
+                                ...
+                            ...
+              ...
+            ...
+          ...
+
+<p> cannot contain a nested <p>.
+See this log for the ancestor stack trace.
+In HTML, <details> cannot be a descendant of <p>.
+This will cause a hydration error.
+
+  ...
+    <RenderedRoute match={{params:{}, ...}} routeContext={{...}}>
+      <App>
+        <div className="desktop-wi...">
+          <DesktopTitleBar>
+          <AppShell desktopStatus="idle" commandOpen={false} onCommandOpen={function onCommandOpen} ...>
+            <a>
+            <div className="app-frame" style={undefined}>
+              <aside>
+              <div className="app-content">
+                <header>
+                <InterventionNotifications>
+                <main id="main-content" className="app-main" tabIndex={-1}>
+                  <div>
+                    <Outlet>
+                      <RenderedRoute match={{params:{}, ...}} routeContext={{outlet:null, ...}}>
+                        <TodayView>
+                          <section className="today-page">
+                            <p>
+                            <h1>
+                            <p>
+>                           <p className="page-note">
+>                             <details className="today-arrange-note">
+                            ...
+              ...
+            ...
+          ...
+
+
+stderr | tests/sidebarResize.spec.ts > 侧边栏拖拽调宽 > 键盘方向键调整宽度并持久化；双击复位恢复默认
+In HTML, <summary> cannot be a descendant of <p>.
+This will cause a hydration error.
+
+  ...
+    <RenderedRoute match={{params:{}, ...}} routeContext={{...}}>
+      <App>
+        <div className={undefined}>
+          <DesktopTitleBar>
+          <AppShell desktopStatus="idle" commandOpen={false} onCommandOpen={function onCommandOpen} ...>
+            <a>
+            <div className="app-frame" style={undefined}>
+              <aside>
+              <div className="app-content">
+                <header>
+                <main id="main-content" className="app-main" tabIndex={-1}>
+                  <div>
+                    <Outlet>
+                      <RenderedRoute match={{params:{}, ...}} routeContext={{outlet:null, ...}}>
+                        <TodayView>
+                          <section className="today-page">
+                            <p>
+                            <h1>
+                            <p>
+>                           <p className="page-note">
+                              <details className="today-arra...">
+>                               <summary>
+                                ...
+                            ...
+              ...
+            ...
+          ...
+
+<p> cannot contain a nested <summary>.
+See this log for the ancestor stack trace.
+In HTML, <p> cannot be a descendant of <p>.
+This will cause a hydration error.
+
+  ...
+    <RenderedRoute match={{params:{}, ...}} routeContext={{...}}>
+      <App>
+        <div className={undefined}>
+          <DesktopTitleBar>
+          <AppShell desktopStatus="idle" commandOpen={false} onCommandOpen={function onCommandOpen} ...>
+            <a>
+            <div className="app-frame" style={undefined}>
+              <aside>
+              <div className="app-content">
+                <header>
+                <main id="main-content" className="app-main" tabIndex={-1}>
+                  <div>
+                    <Outlet>
+                      <RenderedRoute match={{params:{}, ...}} routeContext={{outlet:null, ...}}>
+                        <TodayView>
+                          <section className="today-page">
+                            <p>
+                            <h1>
+                            <p>
+>                           <p className="page-note">
+                              <details className="today-arra...">
+                                <summary>
+>                               <p>
+                                ...
+                            ...
+              ...
+            ...
+          ...
+
+<p> cannot contain a nested <p>.
+See this log for the ancestor stack trace.
+In HTML, <details> cannot be a descendant of <p>.
+This will cause a hydration error.
+
+  ...
+    <RenderedRoute match={{params:{}, ...}} routeContext={{...}}>
+      <App>
+        <div className={undefined}>
+          <DesktopTitleBar>
+          <AppShell desktopStatus="idle" commandOpen={false} onCommandOpen={function onCommandOpen} ...>
+            <a>
+            <div className="app-frame" style={undefined}>
+              <aside>
+              <div className="app-content">
+                <header>
+                <main id="main-content" className="app-main" tabIndex={-1}>
+                  <div>
+                    <Outlet>
+                      <RenderedRoute match={{params:{}, ...}} routeContext={{outlet:null, ...}}>
+                        <TodayView>
+                          <section className="today-page">
+                            <p>
+                            <h1>
+                            <p>
+>                           <p className="page-note">
+>                             <details className="today-arrange-note">
+                            ...
+              ...
+            ...
+          ...
+
+
+stderr | tests/desktop-bootstrap.spec.ts > 标题栏后退遵守新建任务未保存草稿保护
+An update to RouterProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | tests/sidebarResize.spec.ts > 侧边栏拖拽调宽 > 键盘方向键调整宽度并持久化；双击复位恢复默认
+An update to AppShell inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | tests/assist-source-picker.spec.ts > P12 Assist 显式来源选择 > 断开 live 连接时清除可见搜索结果
+An update to AssistSourcePicker inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | tests/assist-target.spec.ts > P12 Assist 目标固定 > 断开 live 时立即清除已读取目标，不展示伪会话
+An update to AssistView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+·····································································x···········x·····································································································································································································································································································································
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/run-events.spec.ts > Run SSE 仅作重新读取提示 > 断线以已消费 seq 补历史，重复事件不刷新；页面卸载只 Abort
+AssertionError: expected 4 to be less than or equal to 2
+ ❯ tests/run-events.spec.ts:157:36
+    155|     await flush(260);
+    156|     expect(mounted.wrapper.get('[data-testid="run-detail"]').text()).t…
+    157|     expect(runReads - beforeBurst).toBeLessThanOrEqual(2);
+       |                                    ^
+    158|     expect(sourceReads).toBe(beforeSources);
+    159|     mounted.unmount(); unmount = null;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/tasks.spec.ts > 全部任务 > 筛选刷新保留已知内容并标识更新，不整页锁死
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ tests/tasks.spec.ts:86:79
+     84|     await flush(10);
+     85|
+     86|     expect(mounted.wrapper.find('[data-testid="tasks-refreshing"]').ex…
+       |                                                                               ^
+     87|     expect(mounted.wrapper.text()).toContain("修复任务恢复逻辑");
+     88|     expect(mounted.wrapper.text()).not.toContain("正在读取任务列表");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 61 passed (63)
+      Tests  2 failed | 405 passed (407)
+   Start at  12:30:13
+   Duration  48.11s (environment 46%, tests 32%, import 12%, transform 9%, setup 1%)
+
+Environment  jsdom was created 63 times · 381.65s total, 46% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+

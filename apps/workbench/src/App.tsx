@@ -121,7 +121,7 @@ export default function App() {
       <p>即将离开的页面还有未保存的修改。你可以继续编辑，或丢弃草稿后离开。</p>
       <div className="dialog-actions">
         <button className="secondary-button" type="button" onClick={() => blocker.reset?.()}>保留并继续编辑</button>
-        <button className="danger-button" type="button" onClick={discardAndContinue}>丢弃草稿并离开</button>
+        <button className="danger-button" type="button" data-testid="discard-draft-leave" onClick={discardAndContinue}>丢弃草稿并离开</button>
       </div>
     </AppDialog>
     <AppDialog open={closeDialogOpen} title="保留未保存的修改" onClose={() => setCloseDialogOpen(false)}>

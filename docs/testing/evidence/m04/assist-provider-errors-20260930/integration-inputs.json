@@ -1,0 +1,170 @@
+{
+  "captured_during_run_utc": "2026-09-30T03:11:23.8069476Z",
+  "runner_sha256": "8b26c8794147c502dd14868319f0a23ad415ae0fcdd45f077ccb9f2a807dfa2c",
+  "suites": [
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\api-artifacts.integration.test.ts",
+      "sha256": "da16302dfbd1f8c26a124d1032aa113ae3f7253e6b4dcc707c432045ba1bde07"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\api-delegations.integration.test.ts",
+      "sha256": "1739142b2efbe794b1e791e40e8a23d51db9d650ccfe737be1c8ef466133c940"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\api-lists.integration.test.ts",
+      "sha256": "377b85028194bdb7a209f896b5dc66a0afe73abd5b69292d94cb09b69633878c"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\api-state.integration.test.ts",
+      "sha256": "0d6eea9ffacb77bb0541ba39e721de3e173a3933d6434169f1990b2415340cfe"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\api-tasks.integration.test.ts",
+      "sha256": "a9b91c7e1ba798f93745e11893ff435406f981b31adbba57890922385afd6829"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\api.integration.test.ts",
+      "sha256": "9a631a93f9fd109e65576e4adc149ed2a6f58566e459bf2363405ddf325b261a"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\artifact-direct-uses.integration.test.ts",
+      "sha256": "9a09022bf72bf707b7d5b24700c5451c4d88e32dfc70e15e267e302d168fb436"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\assist-live-preview.integration.test.ts",
+      "sha256": "36901e17a6ea1c4c7eea95ce7db7b5a972577d406602b3807dd28d65d48d4713"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\assist.integration.test.ts",
+      "sha256": "640f5fbd4c9951c34ae94ae62684d7c4ce5746fc26db97868a3d240563efb9e9"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\cli.integration.test.ts",
+      "sha256": "a5e53cd54a2eaae387c2619c6817d9f9ddc79063a3f17a5891d1d87dbe3aa23d"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\collaboration-controls.integration.test.ts",
+      "sha256": "e6fea8cb173cfb06b513e278e5d58994e26b54ad8800bb92cb247aa286b404f2"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\context.integration.test.ts",
+      "sha256": "fddf89c7def29995695c201fc944b4b3f09073991154d7746364581171099a2f"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\desktop-child.integration.test.ts",
+      "sha256": "8e4255055c7b9153f82aa8e49abe7441cf2d64a5d8b37934100420a9d24d9c47"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\gateway.integration.test.ts",
+      "sha256": "5a6209dee3172a38c4826e0152faf2bad43af7a36afd9224bc47199c56043959"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\information.integration.test.ts",
+      "sha256": "e0af65b822e731c88e3b8771d27350d8babd8b270a49ec20f26ea311f4f7811c"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\knowledge-reading.integration.test.ts",
+      "sha256": "76fd9083289d94f8d18c6af3013e81f3a9b64d49c7cd12396f1ce748d167c1ae"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\m06-stop-proof.integration.test.ts",
+      "sha256": "514516380b83d916232a3fe95717d4819874af2ee25244c57f53899869324027"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\migration.integration.test.ts",
+      "sha256": "13514be5454836baa84aab0156223f57e8407aaa096651f37b155fb93a27ade2"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\model-call-budget.integration.test.ts",
+      "sha256": "0300be9488e297398d946c13d692cb20cd95d3843cb45f1f2715ee0944594536"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\model-port.integration.test.ts",
+      "sha256": "917cf18ba116c401981a6168bc56f668609c89575ce456a08710ec652d4a1a05"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\model-verify.integration.test.ts",
+      "sha256": "54869ea2da6e23784420e34b1668eabddebb1ced480cfecba1bdaac2b68ed5d4"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\persistence.integration.test.ts",
+      "sha256": "8665a5e76343f4899581a18765b91cff7a5cab7638679341565c88363fa2a546"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\project-archive-gate.integration.test.ts",
+      "sha256": "54d853087102c8b0415dd36b3f035783adec7e1205bb5c167ec7ffb229151d74"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\project-archive.integration.test.ts",
+      "sha256": "33fba773abc43d0adf07aee48dd85fd667b6f11561104a1ac6367a5623724aec"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\project-blueprint.integration.test.ts",
+      "sha256": "c8701e719399718006b72e9bdfb1871dde6d6625989c14da152614f95fea8500"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\project-continuation.integration.test.ts",
+      "sha256": "098d75b2a8ffbc31ad1e966d384c9c043248d185def159337b0be2dcb9ab38f0"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\real-model.integration.test.ts",
+      "sha256": "40b04b1c676784573b856b628d8c1451ae3b449ee05d87dd1c7b0b45be14da17"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\real-tools-gateway.integration.test.ts",
+      "sha256": "9d0b8e06e87f2ba605fa13a38d379ec16f853c998a703f6c86864db3fd6a899f"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\recovery.integration.test.ts",
+      "sha256": "8fec3351ad6504ec500373e726c75c3e37ae6db184ed61bbef5aa4799ac91357"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\run-command-order.integration.test.ts",
+      "sha256": "597b38246e97712e0b25bb796de4f41cd58a1edbe074e58434eb0584d1e2b72e"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\run-dispatch.integration.test.ts",
+      "sha256": "ef36a8a5864fe0c3d64efa3249d26c8fbd965d33a6898d26d08c81487d556a18"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\run-draft-preview.integration.test.ts",
+      "sha256": "88baa8fd7c302f55c02f41da6afc72ac0d71ad7083a023d1ad79f20211d67f5e"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\run-events.integration.test.ts",
+      "sha256": "0f653646baee65044a4b1a1cf98f2f6577ad7a4166269dab087144e75fd275f2"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\run-graph.integration.test.ts",
+      "sha256": "4bded12825efbf5c3a062f2ac3f396d46b9bcc772808ec157d636bf10213ad01"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\run-steps.integration.test.ts",
+      "sha256": "8afddc92c54ef4c7865ebce16ad30818247d6dd8c57da1c1cbf4c3bcf265dce7"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\schema-readiness.integration.test.ts",
+      "sha256": "ed72ffd752b8c5d282e4b0ec46b1d00a5dfbf5f739952da86e613c9b1e92edbe"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\today.integration.test.ts",
+      "sha256": "a564e8ffe98d4a8b55d096bb3cf54acc31f9be1eb607941ab30abefc03b32124"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\traceability.integration.test.ts",
+      "sha256": "330e8a8ae1da8e51170d723cbb3d3dbcb07cbd2e8d6f030016d20cf6059a18f7"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\verification.integration.test.ts",
+      "sha256": "d64e50de36d6f745dea8e1dd0b346f52bec0cd5063b9429c37883e27335a4366"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\view-configuration.integration.test.ts",
+      "sha256": "d2da4ba6aedb1f4a587b9f4cfb41bc52d9d0c5f3f31a6f006a5f924d0350ed95"
+    },
+    {
+      "source": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\web-fetch.integration.test.ts",
+      "sha256": "838a751b4202353f91114110bc1e918bbd16e38c2f1ef75d9d121ecd43faad9c"
+    }
+  ]
+}

@@ -32,10 +32,9 @@ $psqlExe = Join-Path $postgresBin 'psql.exe'
 $tscEntry = Join-Path $apiRoot 'node_modules\typescript\bin\tsc'
 $bootstrapRoles = Join-Path $apiRoot 'sql\bootstrap-roles.sql'
 $testDirectory = Join-Path $apiRoot 'dist\test\integration'
-$testPattern = Join-Path $apiRoot 'dist\test\integration\**\*.test.js'
+$testSourceDirectory = Join-Path $apiRoot 'test\integration'
 if ($TestFile -ne '') {
   if ($TestFile -notmatch '^[a-z0-9-]+$') { throw 'TestFile must be a simple integration test basename' }
-  $testPattern = Join-Path $testDirectory "$TestFile.integration.test.js"
 }
 
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("relay-api-integration-$($([guid]::NewGuid().ToString('N')).Substring(0, 10))")
@@ -94,10 +93,27 @@ try {
       throw "tsc build failed with exit code $buildExitCode"
     }
   }
-  if (-not (Test-Path -LiteralPath $testDirectory) -or
-      ($TestFile -ne '' -and -not (Test-Path -LiteralPath $testPattern))) {
-    throw "Built integration tests are missing: $testPattern"
+  # tsc leaves outputs for deleted sources behind. Run the current source suites,
+  # so historical temporary acceptance probes cannot enter later regressions.
+  $testSources = @(if ($TestFile -eq 'm03-mock-benchmark') {
+    Get-Item -LiteralPath (Join-Path $testSourceDirectory 'm03-mock-benchmark.bench.ts')
+  } else {
+    Get-ChildItem -LiteralPath $testSourceDirectory -Recurse -File -Filter '*.test.ts' |
+      Where-Object { $TestFile -eq '' -or $_.Name -eq "$TestFile.integration.test.ts" }
+  })
+  if ($testSources.Count -eq 0) {
+    throw "Integration test sources are missing: $TestFile"
   }
+  $testFiles = @($testSources | ForEach-Object {
+    $relative = $_.FullName.Substring($testSourceDirectory.Length + 1)
+    Join-Path $testDirectory ($relative -replace '\.ts$', '.js')
+  })
+  foreach ($testPath in $testFiles) {
+    if (-not (Test-Path -LiteralPath $testPath -PathType Leaf)) {
+      throw "Built integration test is missing: $testPath"
+    }
+  }
+  Write-Host ("Current source integration suites: " + $testFiles.Count)
 
   $initdbArgs = @('-D', $dataDirectory, '-U', 'relay_api_admin', '-A', 'trust', '--encoding=UTF8')
   if ($UseCLocale) { $initdbArgs += '--locale=C' }
@@ -174,9 +190,9 @@ try {
   Push-Location $apiRoot
   try {
     if ($TestNamePattern -eq '') {
-      & $nodeExe '--test' '--test-concurrency=1' $testPattern
+      & $nodeExe '--test' '--test-concurrency=1' @testFiles
     } else {
-      & $nodeExe '--test' '--test-concurrency=1' "--test-name-pattern=$TestNamePattern" $testPattern
+      & $nodeExe '--test' '--test-concurrency=1' "--test-name-pattern=$TestNamePattern" @testFiles
     }
     $testExitCode = $LASTEXITCODE
   } finally {

@@ -1,0 +1,87 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-4373011e81
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-4373011e81/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-4373011e81^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 40256)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-4373011e81/cluster" "-h" "127.0.0.1" "-p" "2887"
+DO
+CREATE DATABASE
+Test database: relay_api_test_80f533dc3af4 on 127.0.0.1:2887 (roles relay_migrator / relay_app)
+✔ G01/G04: 202 contains the committed Run, immutable command, outbox and receipt; restart replays it (4087.191ms)
+✔ an already aborted shutdown cannot claim or execute a pending command (621.4342ms)
+✔ shutdown signalled from onClaim does not execute a step after the claim (32.3768ms)
+✔ a replaced invocation cannot insert PREPARED after a delayed PERSIST claim (115.8726ms)
+✔ a stale publisher cannot resolve DISPATCHING; recovery reconciles the same operation or leaves UNKNOWN (184.7877ms)
+✖ a stale retry cannot reconcile an existing DISPATCHING effect before recovery (106.3244ms)
+✔ G05: expired live Worker cannot create a second invocation or write; observed exit requeues the same command (1311.0118ms)
+✔ G04/G05: two independent supervisor entries race for one durable command (1027.879ms)
+✔ G04: supervisor crash does not forge stop evidence or reclaim its former child (1499.7106ms)
+✔ supervisor sidecar echoes readiness nonce and Node version, then exits on stdin EOF (652.0732ms)
+✔ a bounded delivery never marks an unfinished Run command DONE (52.7514ms)
+✔ Delegate rollback removes Run, command, outbox, invocation and receipt together (25.8188ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 11
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21917.223
+
+✖ failing tests:
+
+test at dist\test\integration\run-dispatch.integration.test.js:294:1
+✖ a stale retry cannot reconcile an existing DISPATCHING effect before recovery (106.3244ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+      dispatch_count: 1,
+      operation_id: '1d76b485-35d2-4725-9820-e0818279ffa4',
+  +   status: 'SUCCEEDED'
+  -   status: 'DISPATCHING'
+    }
+  
+      at TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/run-dispatch.integration.test.js:339:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { operation_id: '1d76b485-35d2-4725-9820-e0818279ffa4', status: 'SUCCEEDED', dispatch_count: 1 },
+    expected: { operation_id: '1d76b485-35d2-4725-9820-e0818279ffa4', status: 'DISPATCHING', dispatch_count: 1 },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+waiting for server to shut down.... done
+server stopped
+--- integration summary ---
+tests exit code: 1
+build exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: FAILED

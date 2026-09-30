@@ -1,0 +1,4 @@
+M3 {"run":1,"port":8791,"spawnToReady_ms":2858,"pollAttempts":1,"ok":true}
+M3 {"run":2,"port":8792,"spawnToReady_ms":1890,"pollAttempts":1,"ok":true}
+M3 {"run":3,"port":8793,"spawnToReady_ms":1935,"pollAttempts":1,"ok":true}
+COLDSTART_DONE

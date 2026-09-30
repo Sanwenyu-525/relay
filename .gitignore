@@ -6,9 +6,27 @@ node_modules/
 target/
 dist/
 .env
+.env.*
+*.env
+*.env.*
+!.env.example
+!*.env.example
 *.log
+!/docs/testing/evidence/**/*.log
 test-results/
 playwright-report/
+
+# 本机临时工具、缓存与覆盖率产物
+.tmp-*/
+.vite/
+.cache/
+coverage/
+*.tsbuildinfo
+
+# 可重新生成的验收构建与进程输出；截图、JSON 和复跑脚本保留
+/output/*-build/
+/output/playwright/agent-audit/*.out
+/output/playwright/agent-audit/*.err
 
 # 浏览器自动化测试的临时会话日志与快照
 .playwright-cli/

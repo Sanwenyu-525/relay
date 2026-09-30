@@ -5,6 +5,8 @@ import test, { after, before } from 'node:test';
 import { sql } from 'kysely';
 
 import { withTransaction } from '../../src/application/unit-of-work.js';
+import { ModelCallRepository } from '../../src/model/model-call-repository.js';
+import { MODEL_ERROR_CATEGORIES } from '../../src/workflow/model-error-classification.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { APP_DATABASE_URL, MIGRATIONS_DIRECTORY, MIGRATION_DATABASE_URL,
   expectSqlState, openDatabase } from './integration-support.js';
@@ -169,6 +171,87 @@ test('Trace returns exact source summaries with current Workspace checks and no 
     `/runs/${runId}/trace`)), 404, 'RESOURCE_NOT_FOUND');
   expectProblem(await api.get(workspacePath(foreignWorkspace,
     `/activities?run_id=${runId}`)), 404, 'RESOURCE_NOT_FOUND');
+});
+
+test('Trace exposes only failed Provider categories and preserves each model invocation identity', async () => {
+  const workspaceId = await createWorkspace(app.db);
+  const foreignWorkspace = await createWorkspace(app.db);
+  const projectId = await createProject(workspaceId);
+  const task = await createTask(workspaceId, projectId, 'Model diagnostics');
+  const revision = await ready(workspaceId, task.id, task.revision);
+  const commandId = randomUUID();
+  const delegated = expectCommandAccepted(await api.post(workspacePath(workspaceId,
+    `/tasks/${task.id}/delegations`), { command_id: commandId,
+    expected_task_revision: revision }), 202, commandId);
+  const runId = delegated.run_id as string;
+  const attempts = [randomUUID(), randomUUID()];
+  const manifestId = randomUUID();
+  await withTransaction(app.db, async (r) => {
+    const step = (await r.runs.listSteps(runId)).find((row) => row.step_kind === 'DRAFT')!;
+    for (const [index, id] of attempts.entries()) {
+      await r.runs.insertStepAttempt({ id, stepId: step.id,
+        attemptNumber: BigInt(index + 1), attemptKey: `diagnostics-${index}` });
+    }
+    await r.runs.insertContextManifest({ id: manifestId, runId, stepId: step.id,
+      builderVersion: 'diagnostics', manifestHash: hash('diagnostics'), payload: {} });
+  });
+  const calls = new ModelCallRepository(app.db);
+  const identity = { provider: 'diagnostic-double', model: 'diagnostic-model',
+    configFingerprint: hash('diagnostics').toString('hex') };
+  const expected = new Map<string, { kind: string; step_attempt_id: string;
+    criterion_id: string | null; check_attempt: number | null;
+    provider_error_kind: string | null; provider_request_id: string | null }>();
+  for (const [index, category] of MODEL_ERROR_CATEGORIES.entries()) {
+    const id = randomUUID();
+    const semantic = index >= 3;
+    const stepAttemptId = attempts[index % 2]!;
+    await calls.begin(id, { workspaceId, kind: semantic ? 'SEMANTIC_CHECK' : 'DRAFT',
+      stepAttemptId, ...(semantic ? { criterionId: `c${index % 2}`, checkAttempt: 1 }
+        : { manifestId }) }, identity);
+    await calls.settle(id, { status: 'FAILED', errorKind: category,
+      providerRequestId: `request-${index}`,
+      ...(index === 0 ? { usage: { inputTokens: 7, outputTokens: null } } : {}) });
+    expected.set(id, { kind: semantic ? 'SEMANTIC_CHECK' : 'DRAFT',
+      step_attempt_id: stepAttemptId, criterion_id: semantic ? `c${index % 2}` : null,
+      check_attempt: semantic ? 1 : null, provider_error_kind: category,
+      provider_request_id: `request-${index}` });
+  }
+  for (const [status, errorKind] of [['FAILED', 'TOP_SECRET_LOCAL_ERROR_AND_TOKEN'],
+    ['CANCELLED', 'AUTH'], ['COMPLETED', null], ['STARTED', null]] as const) {
+    const id = randomUUID();
+    await calls.begin(id, { workspaceId, kind: 'SEMANTIC_CHECK',
+      stepAttemptId: attempts[1]!, criterionId: 'c1', checkAttempt: 2 }, identity);
+    if (status !== 'STARTED') await calls.settle(id, { status, errorKind });
+    expected.set(id, { kind: 'SEMANTIC_CHECK', step_attempt_id: attempts[1]!,
+      criterion_id: 'c1', check_attempt: 2, provider_error_kind: null,
+      provider_request_id: null });
+  }
+  const probeId = randomUUID();
+  await calls.begin(probeId, { workspaceId, kind: 'VERIFY' }, identity);
+  const response = await api.get(workspacePath(workspaceId, `/runs/${runId}/trace`));
+  assert.equal(response.status, 200, response.text);
+  const rows = (response.body as { model_calls: { id: string; provider: string;
+    model: string; status: string; provider_request_id: string | null;
+    usage_input_tokens: number | null; usage_output_tokens: number | null }[] })
+    .model_calls;
+  assert.equal(rows.length, expected.size);
+  for (const row of rows) {
+    const exact = expected.get(row.id);
+    assert.ok(exact);
+    for (const [key, value] of Object.entries(exact)) {
+      assert.equal((row as unknown as Record<string, unknown>)[key], value, `${row.id}.${key}`);
+    }
+    assert.equal(row.provider, identity.provider);
+    assert.equal(row.model, identity.model);
+    assert.equal(row.usage_output_tokens, null);
+    assert.equal(row.usage_input_tokens, row.provider_request_id === 'request-0' ? 7 : null);
+    assert.equal(Object.hasOwn(row, 'error_kind'), false);
+    assert.equal(Object.hasOwn(row, 'config_fingerprint'), false);
+  }
+  assert.equal(response.text.includes('TOP_SECRET_LOCAL_ERROR_AND_TOKEN'), false);
+  assert.equal(response.text.includes(probeId), false);
+  expectProblem(await api.get(workspacePath(foreignWorkspace,
+    `/runs/${runId}/trace`)), 404, 'RESOURCE_NOT_FOUND');
 });
 
 test('Lineage rejects self, cross-Workspace and version cycles and marks missing content unavailable', async () => {

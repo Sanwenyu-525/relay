@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { RelayApiError, type RelayApiClient, type RelayRunTrace } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import { modelErrorGuides } from "../lib/modelErrorGuides";
 import "./RunTracePanel.css";
 
 function resultRef(value: boolean): string { return value ? "有结果引用（不代表成功）" : "无结果引用"; }
@@ -41,6 +42,9 @@ export default function RunTracePanel({ client, runId, taskId, runRevision }: {
       <section><h3>模型调用元数据 · {trace.modelCalls.length}</h3>
         {trace.modelCalls.length ? <ul>{trace.modelCalls.map((call) => <li key={call.id}><strong>{call.provider} / {call.model} · {call.status}</strong>
           <small>Call {call.id} · Attempt {call.stepAttemptId ?? "未关联"} · Manifest {call.manifestId ?? "未关联"}</small>
+          {call.kind !== null && <small>用途 {call.kind}{call.criterionId !== null && <> · 验收条件 {call.criterionId}</>}{call.checkAttempt !== null && <> · 检查尝试 {call.checkAttempt}</>}</small>}
+          {call.providerRequestId !== null && <small>Provider 请求 {call.providerRequestId}</small>}
+          {call.providerErrorKind !== null && <p className="warning-callout" data-testid={`trace-model-error-${call.id}`}>模型调用失败 · {modelErrorGuides[call.providerErrorKind]} 调用失败不等于 Run 失败，当前执行状态以 Run 事实为准。</p>}
           <small>输入 sha256 {call.inputSha256 ?? "无"} · 读取 Operation {call.readOperationId ?? "无"} / Invocation {call.readInvocationId ?? "无"}</small>
           <small>Token 输入 {call.inputTokens ?? "未知"} / 输出 {call.outputTokens ?? "未知"} · {call.startedAt} → {call.settledAt ?? "未结清"}</small></li>)}</ul>
           : <p className="helper-text">本次 Run 没有模型调用记录。</p>}</section>

@@ -14,7 +14,7 @@
       ],
       "evidence": [
         "start-stop.log 第二次启动章节",
-        ".tmp-uidpi/worker-diagnose.sh：手动以相同环境运行打包 worker（--once）：worker_claimed 后无任何 step 输出即退出，stderr 仅 'worker_failed'，exit=1",
+        "worker-diagnose.sh（同目录保留脚本，历史位置 .tmp-uidpi/worker-diagnose.sh）：手动以相同环境运行打包 worker（--once）：worker_claimed 后无任何 step 输出即退出，stderr 仅 'worker_failed'，exit=1",
         "run 8d19e398 卡 RUNNING；outbox 命令 620213a1 CLAIMED（epoch 3）后无 worker 收尾"
       ],
       "rootCauseNote": "worker main.ts 的 catch 只写 'worker_failed' 不含 message/stack；supervisor-main.ts 在 worker exitCode!=0 时 throw 'worker failed' 直接终止自身；桌面壳对 supervisor 用 Stdio::null（apps/desktop/src-tauri/src/lib.rs:626）丢弃全部诊断输出",

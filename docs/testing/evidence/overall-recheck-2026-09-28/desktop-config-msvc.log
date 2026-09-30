@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.85s
+     Running unittests src\lib.rs (apps\desktop\src-tauri\target\x86_64-pc-windows-msvc\debug\deps\relay_desktop-707720d95ada5241.exe)
+
+running 1 test
+test tests::desktop_config_accepts_runtime_and_model_keys_and_rejects_others ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.00s
+

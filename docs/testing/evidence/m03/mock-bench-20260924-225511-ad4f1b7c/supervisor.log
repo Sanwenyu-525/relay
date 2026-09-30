@@ -1,0 +1,17 @@
+{"type":"supervisor_ready","nonce":null,"nodeVersion":"v24.21.0"}
+{"type":"worker_started","pid":42904,"worker_id":"worker:96ae9513-697b-44c6-8cf3-befb8baed3d6"}
+{"type":"worker_exit","code":0,"requeued_run_ids":[],"blocked_run_ids":[]}
+{"type":"worker_started","pid":42132,"worker_id":"worker:3434c2ea-a638-4392-93dd-a58c94fab8df"}
+{"type":"worker_exit","code":0,"requeued_run_ids":[],"blocked_run_ids":[]}
+{"type":"worker_started","pid":43420,"worker_id":"worker:b63c51c7-1ea3-4688-a967-6d1845a86efe"}
+{"type":"worker_exit","code":0,"requeued_run_ids":[],"blocked_run_ids":[]}
+{"type":"worker_started","pid":40492,"worker_id":"worker:e3bf3656-c940-4171-a0ae-506ea90d76ed"}
+{"type":"worker_exit","code":0,"requeued_run_ids":[],"blocked_run_ids":[]}
+{"type":"worker_started","pid":22140,"worker_id":"worker:be817626-ad9b-42dd-8dd1-32ee0b160992"}
+{"type":"worker_exit","code":0,"requeued_run_ids":[],"blocked_run_ids":[]}
+{"type":"worker_started","pid":38028,"worker_id":"worker:3aa26183-91b6-441f-96d4-fb68c52ab09c"}
+{"type":"worker_exit","code":0,"requeued_run_ids":[],"blocked_run_ids":[]}
+{"type":"worker_started","pid":34416,"worker_id":"worker:027c8303-f800-495b-8181-57784f40301b"}
+{"type":"worker_exit","code":0,"requeued_run_ids":[],"blocked_run_ids":[]}
+{"type":"worker_started","pid":27864,"worker_id":"worker:32a924af-9812-491b-a372-965e8542a5fe"}
+{"type":"worker_exit","code":0,"requeued_run_ids":[],"blocked_run_ids":[]}

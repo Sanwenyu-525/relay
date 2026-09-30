@@ -1,0 +1,20 @@
+{
+  "captured_at_utc": "2026-09-30T02:42:39.5102567Z",
+  "scope": "M04 Assist provider errors source and regression inputs",
+  "source_sha256": {
+    "apps/api/migrations/0046_assist_provider_error_kind.sql": "d791b762c896b65b298d594fb1e773f35bdc9a83fa84d1a72c615de28e28e742",
+    "apps/api/src/application/assist-runner.ts": "55d839c91b2741864ab7abdc2ce3fd21d37be08e7e3455255b8214700da4d99f",
+    "apps/api/src/assist/assist-repository.ts": "d0dcf8df538b78f4fbd564d86a056e469d09d4c4d8ef429ae259ce91e77f7e71",
+    "apps/api/src/api/assist-api.ts": "c17406cf3d3b0d51654b6dc3f13ee3f49f4668bf9acdecbb81f1ffd6ef610fca",
+    "apps/api/src/infrastructure/database-schema.ts": "f890c1465d39fa100c5420a80d37c9bb8d7fb5ecec2bf65fb7c687548d4ea182",
+    "apps/api/test/integration/assist.integration.test.ts": "640f5fbd4c9951c34ae94ae62684d7c4ce5746fc26db97868a3d240563efb9e9",
+    "apps/api/test/integration/cli.integration.test.ts": "a5e53cd54a2eaae387c2619c6817d9f9ddc79063a3f17a5891d1d87dbe3aa23d",
+    "apps/api/test/integration/migration.integration.test.ts": "13514be5454836baa84aab0156223f57e8407aaa096651f37b155fb93a27ade2",
+    "apps/workbench/src/api/relayClient.ts": "58c51a4005d2562db978cc88e9b7be900123c0979739977cae1c8d972b7af1a4",
+    "apps/workbench/src/lib/modelErrorGuides.ts": "741248deb4883c33aa5d5c8d6973802ba007bbb1ec199d99fd547afcf5efa3d3",
+    "apps/workbench/src/views/AssistView.tsx": "c180380f854cc2db7cc5604c0f45ce77f192268bf1ee93265b0d77f853bfb65b",
+    "apps/workbench/src/views/SettingsView.tsx": "98ed5f6b133e9b76c5401532333085b75b064ca270f168b0b0cf02543a15030a",
+    "apps/workbench/tests/assist-flow.spec.ts": "9a28396c9c5ee538dc9ed1f195d8d118d992fb85f73c3b74dec964ff3112a2cb",
+    "apps/workbench/tests/assistProviderErrorClient.spec.ts": "f7b7d7ee38a0222db6192c96af07b55b3a42c84e9d9ce18c16ce3982c0b3fd5b"
+  }
+}

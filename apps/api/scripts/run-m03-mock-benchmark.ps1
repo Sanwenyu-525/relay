@@ -9,22 +9,17 @@ $nodeExe = Join-Path $workspaceRoot '.research\runtime-cache\node-v24.21.0-win-x
 $tscEntry = Join-Path $apiRoot 'node_modules\typescript\bin\tsc'
 $fixtureSource = Join-Path $apiRoot 'test\integration\m03-mock-benchmark.bench.ts'
 $compiledFixture = Join-Path $apiRoot 'dist\test\integration\m03-mock-benchmark.bench.js'
-$temporaryTest = Join-Path $apiRoot 'dist\test\integration\m03-mock-benchmark.integration.test.js'
 $integrationRunner = Join-Path $PSScriptRoot 'run-integration.ps1'
 $outputDir = Join-Path $workspaceRoot ('docs\testing\evidence\m03\mock-bench-' +
   (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 $runnerLog = Join-Path $outputDir 'runner.log'
 $oldOutputDir = [Environment]::GetEnvironmentVariable('RELAY_M03_BENCH_OUTPUT_DIR', 'Process')
-$copiedFixture = $false
 $benchmarkExit = 1
 
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 try {
   foreach ($required in @($nodeExe, $tscEntry, $fixtureSource, $integrationRunner)) {
     if (-not (Test-Path -LiteralPath $required)) { throw "Required benchmark input is missing: $required" }
-  }
-  if (Test-Path -LiteralPath $temporaryTest) {
-    throw "Temporary benchmark test already exists; inspect it before retrying: $temporaryTest"
   }
   $env:RELAY_M03_BENCH_OUTPUT_DIR = $outputDir
   "Benchmark output: $outputDir" | Tee-Object -FilePath $runnerLog
@@ -41,8 +36,6 @@ try {
   if (-not (Test-Path -LiteralPath $compiledFixture)) {
     throw "Compiled benchmark fixture is missing: $compiledFixture"
   }
-  Copy-Item -LiteralPath $compiledFixture -Destination $temporaryTest
-  $copiedFixture = $true
 
   # Windows PowerShell 5.1 promotes native stderr merged with 2>&1 to an
   # ErrorRecord. initdb emits a harmless locale warning there; keep the exact
@@ -59,7 +52,6 @@ try {
 } catch {
   "BENCHMARK_ERROR=$($_.Exception.Message)" | Tee-Object -FilePath $runnerLog -Append
 } finally {
-  if ($copiedFixture) { Remove-Item -LiteralPath $temporaryTest -Force }
   [Environment]::SetEnvironmentVariable('RELAY_M03_BENCH_OUTPUT_DIR', $oldOutputDir, 'Process')
 }
 

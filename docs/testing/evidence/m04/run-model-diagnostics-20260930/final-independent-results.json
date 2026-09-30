@@ -1,0 +1,80 @@
+{
+  "api_unit": {
+    "failed": 0,
+    "build": "PASS",
+    "log": "api-unit-final-independent.log",
+    "passed": 144
+  },
+  "workbench": {
+    "build_log": "../frontend-visual-fidelity-20260930/workbench-final-build-independent.log",
+    "failed": 0,
+    "max_workers": 2,
+    "files": 63,
+    "full_log": "../frontend-visual-fidelity-20260930/workbench-final-bounded-independent.log",
+    "high_concurrency_attempt": {
+      "failed": 2,
+      "log": "../frontend-visual-fidelity-20260930/workbench-final-independent.log",
+      "passed": 405
+    },
+    "passed": 407,
+    "timing_recheck": {
+      "failed": 0,
+      "log": "../frontend-visual-fidelity-20260930/workbench-timing-recheck.log",
+      "passed": 19
+    },
+    "build": "PASS"
+  },
+  "pg_migrations": 46,
+  "source_hashes": "final-independent-source-hashes.json",
+  "pg_start_stop_cleanup": "PASS",
+  "hashes_captured_after_validation": true,
+  "integration_total": {
+    "failed": 0,
+    "skipped": 0,
+    "passed": 65
+  },
+  "real_provider_calls_this_increment": 0,
+  "independent_browser": {
+    "business_commands_submitted": 0,
+    "warn_error_count": 0,
+    "review_enabled": true,
+    "discussion_and_feedback_drafts_preserved": true,
+    "fixture": "read-only 8794",
+    "viewport": "1487x1010"
+  },
+  "graph_install": "PASS",
+  "integration_suites": [
+    {
+      "log": "api-traceability-final-independent.log",
+      "suite": "traceability",
+      "passed": 6
+    },
+    {
+      "log": "api-run-draft-preview-final-independent.log",
+      "suite": "run-draft-preview",
+      "passed": 6
+    },
+    {
+      "log": "api-assist-final-independent.log",
+      "suite": "assist",
+      "passed": 45
+    },
+    {
+      "log": "api-model-verify-final-independent.log",
+      "suite": "model-verify",
+      "passed": 8
+    }
+  ],
+  "production_database_changed": false,
+  "visual_source_hashes_match": true,
+  "captured_at": "2026-09-30T12:54:42.3512016+08:00",
+  "source_file_count": 489,
+  "not_verified": [
+    "Windows IME/DPI for this increment",
+    "real Provider fault end-to-end",
+    "full M04-M07 acceptance",
+    "full PostgreSQL suite after this increment"
+  ],
+  "desktop_release_changed": false,
+  "review": "No new P0-P2; local Header TypeError has zero DNS/fetch; explicit transport categories and cancellation preserved"
+}

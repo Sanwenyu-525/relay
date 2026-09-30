@@ -18,7 +18,7 @@ if ($Action -eq 'Menu' -and ($FrontendOnly -or $PSBoundParameters.ContainsKey('F
   $Action = 'Preview'
 }
 if ($Action -eq 'Menu') {
-  Write-Host "Relay 桌面测试版`n1. 启动测试版`n2. 打包最新测试版`n3. 停止测试环境（保留数据）`n4. 查看状态和目录`n5. 浏览器开发预览`n6. 桌面开发窗口(tauri dev)`n0. 退出"
+  Write-Host "Relay 桌面测试版`n1. 启动测试版`n2. 打包最新测试版`n3. 停止测试环境（保留数据）`n4. 查看状态和目录`n5. 浏览器开发预览`n6. 桌面开发窗口（热更新，无需重新打包）`n0. 退出"
   switch (Read-Host '请选择') {
     '1' { $Action = 'Start' }
     '2' { $Action = 'Build' }
@@ -32,10 +32,6 @@ if ($Action -eq 'Menu') {
 }
 if ($Action -eq 'Preview') {
   & (Join-Path $PSScriptRoot 'dev-stack.ps1') -FrontendOnly:$FrontendOnly -FrontendPort $FrontendPort -SkipInstall:$SkipInstall -SkipBuild:$SkipBuild -SmokeSeconds $SmokeSeconds
-  return
-}
-if ($Action -eq 'DesktopDev') {
-  & (Join-Path $PSScriptRoot 'desktop-dev.ps1') -FrontendPort $FrontendPort
   return
 }
 $package = Join-Path $root 'test-release'
@@ -109,7 +105,14 @@ try {
     Write-Host "测试环境已停止，数据已保留：$trial"
     return
   }
-  if (@(Get-TrialProcesses).Count) { Write-Host 'The trial is already running. Use its existing window.'; return }
+  if ($Action -eq 'DesktopDev' -and (Get-Process -Name 'relay-desktop' -ErrorAction SilentlyContinue)) {
+    throw '桌面窗口已在运行，请先关闭现有窗口，再启动桌面开发窗口。'
+  }
+  if (@(Get-TrialProcesses).Count) {
+    if ($Action -eq 'DesktopDev') { throw '测试包进程仍在运行，请先关闭测试版，再启动桌面开发窗口。' }
+    Write-Host 'The trial is already running. Use its existing window.'
+    return
+  }
   foreach ($file in @($exe, $node, $pgCtl, $psql, (Join-Path $package 'desktop-build-manifest.json'))) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing input: $file. Run dev-stack.bat Build first." }
   }
@@ -182,7 +185,12 @@ try {
   $env:RELAY_DESKTOP_CONFIG_PATH = $config
   $env:RELAY_DESKTOP_DATA_ROOT = Join-Path $trial 'data'
   New-Item -ItemType Directory -Path $env:RELAY_DESKTOP_DATA_ROOT -Force | Out-Null
-  if (-not $SkipDesktop) {
+  if ($Action -eq 'DesktopDev') {
+    # Preparation is complete; release the launcher lock before the long-running dev session.
+    $lock.Dispose()
+    Write-Host '测试数据库和配置已准备，正在启动桌面开发窗口（Ctrl+C 停止）…'
+    & (Join-Path $root 'apps\desktop\scripts\dev-desktop.ps1') -ConfigPath $config -FrontendPort $FrontendPort
+  } elseif (-not $SkipDesktop) {
     $desktop = Start-Process -FilePath $exe -PassThru
     Start-Sleep -Seconds 3
     if ($desktop.HasExited) { throw 'Desktop exited during startup. Inspect the trial data logs.' }

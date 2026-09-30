@@ -10,6 +10,7 @@ export type LiveErrorKind =
   | "validation"
   | "transition"
   | "evidence"
+  | "model"
   | "transport"
   | "unknown";
 
@@ -94,6 +95,25 @@ export function describeLiveError(caught: unknown): LiveActionError {
         return { ...base, kind: "transition", message: "这次提交依据的验收版本已经失效：请重新读取任务后再操作。" };
       case "EVIDENCE_UNAVAILABLE":
         return { ...base, kind: "evidence", message: "所需产物内容不可用：完成被拒绝，请核对产物版本后重试。" };
+      case "MODEL_PORT_NOT_CONFIGURED":
+        return {
+          ...base,
+          kind: "model",
+          message:
+            "当前服务实例没有配置真实模型端口：Assist 与 Run 生成不会调用真实模型（会走 Mock）。请在服务实例的环境配置里设置 RELAY_MODEL_PROVIDER / RELAY_MODEL_NAME / RELAY_MODEL_API_KEY 后重启该实例。"
+        };
+      case "MODEL_CONFIG_INVALID":
+        return {
+          ...base,
+          kind: "model",
+          message: `真实模型配置残缺，实例不会静默回退 Mock：${problem.detail}`
+        };
+      case "MODEL_VERIFY_IN_PROGRESS":
+        return {
+          ...base,
+          kind: "model",
+          message: "本实例已有一项模型连接验证在执行，请等它结束后再试；验证结果会写入调用账本。"
+        };
       default:
         return { ...base, kind: "unknown", message: problem.detail };
     }

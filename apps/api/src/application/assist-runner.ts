@@ -11,6 +11,8 @@ import { assistPayloadHash } from './assist-commands.js';
 import { recordModelInvocation } from './model-call-recorder.js';
 import { ModelScopeBudgetError } from '../model/model-call-repository.js';
 import { ModelCallBudgetError } from '../workflow/openai-compatible-model-port.js';
+import { classifyProviderError, type ModelErrorCategory }
+  from '../workflow/model-error-classification.js';
 import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
 import { availableFrozenSkill, isCallableSkill,
   type FrozenSkill } from '../skills/first-party-registry.js';
@@ -96,6 +98,8 @@ export async function runAssistGenerationTick(db: DbExecutor,
   }, CANCEL_POLL_MS);
 
   let outcome: AssistGenerationOutcome;
+  let modelInvocationFailed = false;
+  let modelInvocationError: unknown;
   try {
     const session = await r.assist.readSession(message.session_id);
     if (session === undefined) {
@@ -147,19 +151,35 @@ export async function runAssistGenerationTick(db: DbExecutor,
       origin: { workspaceId: session.workspace_id, kind: 'ASSIST', assistMessageId: message.id },
       identity: options.modelPort.identity,
       signal: controller.signal,
-      invoke: () => options.modelPort.assist({
-        intent: message.intent as AssistIntent,
-        system: skill === null ? systemPromptFor(message.intent as AssistIntent)
-          : systemPromptForSkill(skill),
-        turns: skillTurns,
-        ...(basis === null ? {} : { skill: { id: skill!.id,
-          version: skill!.version, facts: basis.facts,
-          input: message.skill_input ?? {} } }),
-        signal: controller.signal,
-        ...(message.intent === 'DISCUSS' && skill === null ? {
-          onTextDelta: (piece: string) => preview!.push(piece),
-        } : {}),
-      }),
+      invoke: async () => {
+        try {
+          return await options.modelPort.assist({
+            intent: message.intent as AssistIntent,
+            system: skill === null ? systemPromptFor(message.intent as AssistIntent)
+              : systemPromptForSkill(skill),
+            turns: skillTurns,
+            ...(basis === null ? {} : { skill: { id: skill!.id,
+              version: skill!.version, facts: basis.facts,
+              input: message.skill_input ?? {} } }),
+            signal: controller.signal,
+            ...(message.intent === 'DISCUSS' && skill === null ? {
+              onTextDelta: async (piece: string) => {
+                try { await preview!.push(piece); }
+                catch (error) {
+                  if (error instanceof AssistPreviewOwnershipLostError) throw error;
+                  throw new AssistPreviewWriteError();
+                }
+              },
+            } : {}),
+          });
+        } catch (error) {
+          // Only this exact invocation error can carry a Provider category.
+          // Input preparation, ledger writes and later parsing have separate owners.
+          modelInvocationFailed = true;
+          modelInvocationError = error;
+          throw error;
+        }
+      },
       settle: (result) => result.kind === 'CANCELLED'
         ? { status: 'CANCELLED', providerRequestId: result.providerRequestId ?? null,
           ...(result.usage === undefined ? {} : { usage: result.usage }) }
@@ -302,42 +322,25 @@ export async function runAssistGenerationTick(db: DbExecutor,
         errorCode: 'OUTPUT_SCHEMA_INVALID', proposalIds: [] };
     }
 
-    const { proposalIds, settled } = await withTransaction(db, async (tx) => {
-      const settled = await settle(tx, message, options.workerId, { status: 'COMPLETED',
-        errorCode: null, content: parsed.summary, providerRequestId: result.providerRequestId,
+    const { proposalIds, settled, cancelled } = await withTransaction(db, async (tx) => {
+      const current = await tx.assist.readMessage(message.id, true);
+      if (current?.status !== 'RUNNING' || current.worker_id !== options.workerId) {
+        return { proposalIds: [], settled: false, cancelled: false };
+      }
+      const cancelled = current.cancel_requested;
+      const settled = await settle(tx, message, options.workerId, {
+        status: cancelled ? 'CANCELLED' : 'COMPLETED',
+        errorCode: null, content: cancelled ? null : parsed.summary,
+        providerRequestId: result.providerRequestId,
         usage: result.usage, finalSources: input.sourceRecords });
-      const proposalIds = settled ? await persistProposals(tx, session, message, parsed.proposals) : [];
-      return { proposalIds, settled };
+      const proposalIds = settled && !cancelled
+        ? await persistProposals(tx, session, message, parsed.proposals) : [];
+      return { proposalIds, settled, cancelled };
     });
     return { messageId: message.id, sessionId: session.id,
-      status: settled ? 'COMPLETED' : 'DISCARDED', errorCode: null, proposalIds };
+      status: settled ? cancelled ? 'CANCELLED' : 'COMPLETED' : 'DISCARDED',
+      errorCode: null, proposalIds };
   } catch (error) {
-    if (options.signal?.aborted) {
-      const cancelled = await r.assist.isCancelRequested(message.id);
-      if (!cancelled) {
-        return { messageId: message.id, sessionId: message.session_id,
-          status: 'DISCARDED', errorCode: null, proposalIds: [] };
-      }
-      await settleInTransaction(db, message, options.workerId, { status: 'CANCELLED',
-        errorCode: null, content: null, providerRequestId: null,
-        usage: { inputTokens: null, outputTokens: null } });
-      return { messageId: message.id, sessionId: message.session_id,
-        status: 'CANCELLED', errorCode: null, proposalIds: [] };
-    }
-    if (error instanceof AssistPreviewOwnershipLostError) {
-      const current = await r.assist.readMessage(message.id);
-      if (current?.status !== 'RUNNING' || current.worker_id !== options.workerId) {
-        return { messageId: message.id, sessionId: message.session_id,
-          status: 'DISCARDED', errorCode: null, proposalIds: [] };
-      }
-      if (current.cancel_requested) {
-        await settleInTransaction(db, message, options.workerId, { status: 'CANCELLED',
-          errorCode: null, content: null, providerRequestId: null,
-          usage: { inputTokens: null, outputTokens: null } });
-        return { messageId: message.id, sessionId: message.session_id,
-          status: 'CANCELLED', errorCode: null, proposalIds: [] };
-      }
-    }
     const errorCode = error instanceof SkillBasisUnavailable ? error.code :
       error instanceof AssistHistorySourceUnavailable ? 'ASSIST_HISTORY_SOURCE_UNAVAILABLE' :
       error instanceof AssistPreviewOwnershipLostError ? 'PREVIEW_OWNERSHIP_LOST' :
@@ -345,10 +348,26 @@ export async function runAssistGenerationTick(db: DbExecutor,
         ? 'MODEL_BUDGET_EXHAUSTED' :
       error instanceof DomainError && message.skill_snapshot !== null
         ? 'SKILL_PROPOSAL_UNAVAILABLE' : 'MODEL_FAILED';
-    await settleInTransaction(db, message, options.workerId, { status: 'FAILED', errorCode,
-      content: null, providerRequestId: null, usage: { inputTokens: null, outputTokens: null } });
-    return { messageId: message.id, sessionId: message.session_id, status: 'FAILED',
-      errorCode, proposalIds: [] };
+    return withTransaction(db, async (tx): Promise<AssistGenerationOutcome> => {
+      // Serialize with the cancel command before attributing an exception.
+      const current = await tx.assist.readMessage(message.id, true);
+      if (current?.status !== 'RUNNING' || current.worker_id !== options.workerId ||
+          controller.signal.aborted && !current.cancel_requested) {
+        return { messageId: message.id, sessionId: message.session_id,
+          status: 'DISCARDED', errorCode: null, proposalIds: [] };
+      }
+      const status = current.cancel_requested ? 'CANCELLED' : 'FAILED';
+      const providerErrorKind = status === 'FAILED' && errorCode === 'MODEL_FAILED' &&
+          modelInvocationFailed && Object.is(error, modelInvocationError) &&
+          !(error instanceof DomainError)
+        ? classifyProviderError(error) ?? null : null;
+      const settled = await settle(tx, message, options.workerId, { status,
+        errorCode: status === 'FAILED' ? errorCode : null, providerErrorKind,
+        content: null, ...modelErrorEvidence(error) });
+      return { messageId: message.id, sessionId: message.session_id,
+        status: settled ? status : 'DISCARDED',
+        errorCode: settled && status === 'FAILED' ? errorCode : null, proposalIds: [] };
+    });
   } finally {
     clearInterval(heartbeat);
     options.signal?.removeEventListener('abort', onOuterAbort);
@@ -357,6 +376,7 @@ export async function runAssistGenerationTick(db: DbExecutor,
 
 async function settle(r: Repositories, message: AssistMessageRow, workerId: string,
   input: { status: 'COMPLETED' | 'FAILED' | 'CANCELLED'; errorCode: string | null;
+    providerErrorKind?: ModelErrorCategory | null;
     content: string | null; providerRequestId: string | null;
     usage: { inputTokens: number | null; outputTokens: number | null };
     finalSources?: readonly JsonObject[]; skillOutput?: JsonObject }): Promise<boolean> {
@@ -367,6 +387,7 @@ async function settle(r: Repositories, message: AssistMessageRow, workerId: stri
   return r.assist.settleGeneration({
     messageId: message.id, workerId, status: input.status, content: input.content,
     errorCode: input.errorCode, providerRequestId: input.providerRequestId,
+    providerErrorKind: input.providerErrorKind ?? null,
     usageInputTokens: input.usage.inputTokens, usageOutputTokens: input.usage.outputTokens,
     ...(input.finalSources === undefined ? {} : { finalSources: input.finalSources }),
     ...(input.skillOutput === undefined ? {} : { skillOutput: input.skillOutput }),
@@ -376,6 +397,39 @@ async function settle(r: Repositories, message: AssistMessageRow, workerId: stri
 async function settleInTransaction(db: DbExecutor, message: AssistMessageRow,
   workerId: string, input: Parameters<typeof settle>[3]): Promise<boolean> {
   return withTransaction(db, (tx) => settle(tx, message, workerId, input));
+}
+
+/** Local storage failure, never a Provider transport error or raw error payload. */
+class AssistPreviewWriteError extends Error {
+  override readonly name = 'AssistPreviewWriteError';
+  constructor() { super('Assist live preview write failed'); }
+}
+
+/**
+ * 失败出口的证据保全：模型可能已经产生费用，provider request id 与用量必须跟着
+ * 消息行落库，否则只剩 errorCode。缺失保持 null，不补 0。
+ */
+function modelErrorEvidence(error: unknown): {
+  providerRequestId: string | null;
+  usage: { inputTokens: number | null; outputTokens: number | null };
+} {
+  const empty = { providerRequestId: null,
+    usage: { inputTokens: null, outputTokens: null } };
+  if (typeof error !== 'object' || error === null) return empty;
+  const evidence = error as { providerRequestId?: unknown; usage?: unknown };
+  const usage = evidence.usage;
+  if (typeof usage !== 'object' || usage === null ||
+      !('inputTokens' in usage) || !('outputTokens' in usage)) {
+    return { ...empty, providerRequestId: typeof evidence.providerRequestId === 'string'
+      ? evidence.providerRequestId : null };
+  }
+  const read = (value: unknown): number | null =>
+    Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : null;
+  return {
+    providerRequestId: typeof evidence.providerRequestId === 'string'
+      ? evidence.providerRequestId : null,
+    usage: { inputTokens: read(usage.inputTokens), outputTokens: read(usage.outputTokens) },
+  };
 }
 
 interface GenerationInput {

@@ -189,3 +189,41 @@ test('semantic-model-v1 maps model verdicts and treats evaluation failures as ER
   assert.deepEqual(invalid.evidence.usage, { input_tokens: 7, output_tokens: null });
   assert.equal(invalid.evidence.provider_request_id, 'req-invalid');
 });
+
+test('semantic failures retain the six Provider categories without raw messages', async () => {
+  const entry = entryOf('semantic', 'SEMANTIC');
+  const cases = [
+    ['AUTH', Object.assign(new Error('private provider payload'), { status: 401 })],
+    ['RATE_LIMIT', Object.assign(new Error('private provider payload'), { status: 429 })],
+    ['TIMEOUT', Object.assign(new Error('private provider payload'), { name: 'TimeoutError' })],
+    ['STREAM_BROKEN', Object.assign(new Error('private provider payload'), {
+      name: 'MODEL_STREAM_INCOMPLETE' })],
+    ['PROTOCOL', Object.assign(new Error('private provider payload'), { status: 422 })],
+    ['NETWORK', new TypeError('fetch failed: private provider payload')],
+  ] as const;
+  for (const [category, error] of cases) {
+    const outcome = await new ModelSemanticChecker(async () => { throw error; }).check({
+      entry, content: LEGAL_CONTENT, artifactVersionId: 'v1', contentHashHex: 'ab'.repeat(32) });
+    assert.equal(outcome.result, 'ERROR');
+    assert.equal(outcome.evidence.error_kind, category);
+    assert.equal(JSON.stringify(outcome).includes('private provider payload'), false);
+  }
+});
+
+test('semantic local failures and cancellation do not invent a Provider category', async () => {
+  const entry = entryOf('semantic', 'SEMANTIC');
+  const local = Object.assign(new Error('private local payload'), { name: 'LocalCheckerError' });
+  const controller = new AbortController();
+  controller.abort();
+  for (const [error, signal] of [[local, undefined],
+    [new TypeError('private local payload'), undefined],
+    [Object.assign(new Error('private cancellation payload'), { name: 'AbortError' }),
+      controller.signal]] as const) {
+    const outcome = await new ModelSemanticChecker(async () => { throw error; }).check({
+      entry, content: LEGAL_CONTENT, artifactVersionId: 'v1', contentHashHex: 'ab'.repeat(32),
+      ...(signal === undefined ? {} : { signal }) });
+    assert.equal(outcome.result, 'ERROR');
+    assert.equal(outcome.evidence.error_kind, error.name);
+    assert.equal(JSON.stringify(outcome).includes('private'), false);
+  }
+});

@@ -146,6 +146,7 @@ export class AssistRepository {
   async settleGeneration(input: { messageId: string; workerId: string;
     status: 'COMPLETED' | 'FAILED' | 'CANCELLED';
     content: string | null; errorCode: string | null; providerRequestId: string | null;
+    providerErrorKind?: AssistMessageRow['provider_error_kind'];
     usageInputTokens: number | null; usageOutputTokens: number | null;
     finalSources?: readonly JsonObject[] | undefined;
     skillOutput?: JsonObject | undefined }): Promise<boolean> {
@@ -155,6 +156,7 @@ export class AssistRepository {
       sql`, skill_output = ${JSON.stringify(input.skillOutput)}::jsonb`;
     const updated = (await sql<{ id: string }>`update assist_messages set status = ${input.status},
       content = ${input.content}, error_code = ${input.errorCode},
+      provider_error_kind = ${input.providerErrorKind ?? null},
       provider_request_id = ${input.providerRequestId},
       usage_input_tokens = ${input.usageInputTokens},
       usage_output_tokens = ${input.usageOutputTokens},

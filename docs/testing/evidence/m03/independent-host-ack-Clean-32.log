@@ -1,0 +1,47 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260924120748
+Username: LAPTOP-RTUVXZ-G\ASUS
+RunAs User: LAPTOP-RTUVXZ-G\ASUS
+Configuration Name: 
+Machine: LAPTOP-RTUVXZ-G (Microsoft Windows NT 10.0.22631.0)
+Host Application: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File apps/desktop/scripts/test-m03-host-real-pg.ps1 -Scenario Clean -BacklogCount 32 -ExpectLaunchAck
+Process ID: 33856
+PSVersion: 5.1.22621.4391
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.22621.4391
+BuildVersion: 10.0.22621.4391
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+[Y] Yes  [A] Yes to All  [N] No  [L] No to All  [S] Suspend  [?] Help (default is "Y"):
+[Y] Yes  [A] Yes to All  [N] No  [L] No to All  [S] Suspend  [?] Help (default is "Y"):
+[Y] Yes  [A] Yes to All  [N] No  [L] No to All  [S] Suspend  [?] Help (default is "Y"):
+[Y] Yes  [A] Yes to All  [N] No  [L] No to All  [S] Suspend  [?] Help (default is "Y"):
+[Y] Yes  [A] Yes to All  [N] No  [L] No to All  [S] Suspend  [?] Help (default is "Y"):
+session_id=458307758f4947fbb2ecfe618b19acdd
+session_root=C:\Users\ASUS\AppData\Local\Temp\relay-m02-acceptance-458307758f4947fbb2ecfe618b19acdd
+postgres_port=7593
+desktop_pid=0
+release_sha256=0769b1dd762fce84690bdc9955bd18a4562c253f2854a49c6630015b0082523e
+cleanup: powershell -NoProfile -ExecutionPolicy Bypass -File apps/desktop/scripts/stop-acceptance-session.ps1 -SessionRoot "C:\Users\ASUS\AppData\Local\Temp\relay-m02-acceptance-458307758f4947fbb2ecfe618b19acdd"
+session_id=458307758f4947fbb2ecfe618b19acdd pg_port=7593 release_sha256=0769b1dd762fce84690bdc9955bd18a4562c253f2854a49c6630015b0082523e
+seeded_run_ids=b46b5e46-b5d8-4dcb-880f-6369894f9022,9c1567f1-fea4-4ad0-8d26-3b2ea6a711c7,b68af796-25ce-4f17-8464-d6391bdd207b,ea4eebde-b032-4681-ba29-04635fa5c478,0a09785f-4aec-4da2-9225-610c480924e1,63685b44-25f8-4348-acfe-9fe1a937ae40,fa451d3b-1ce6-4993-917d-0d9cd4ee279c,8ad454a1-d02d-4f49-a88e-0996b845e380,e57acd8e-a4f4-46f6-89a2-4e504e6e92ff,08eda88c-2a42-4b43-ae68-36e6293340cb,f26626fb-1469-4d89-b6f8-40f9d6afba27,2550ff86-b2e4-46f1-8073-cc07e05240dc,0325e68d-1d4d-4dde-8481-92e9d82e5f9f,197d4953-0057-4dbb-93b4-3f371715edea,1201d42b-513d-4372-bbd4-598b27015edb,be0479f7-bd2c-49b9-9d44-778bc529485c,63c226f7-146c-46f1-844a-9a4bad3f7081,f7cd5a39-cd36-4466-9115-fc5d71cd993c,bdb8e5df-286e-45fe-97c2-e31393eca345,2b8659c0-1623-4ab5-ae7b-d1d1f51bcb95,f1321e1e-89e3-403f-b967-9958d5ccf111,0baa9d23-3bf4-4d76-a69c-e172e7fda69f,c4e4ca18-d3b7-4a07-a2e0-ac6f18fb57c5,5c86d935-b8e4-40d0-b297-d6e63939af4d,e62ad542-d07a-4d1e-85b4-13027f8ce0be,145f9ca3-d4ad-4a47-958f-69146323c9f8,429204ce-43b6-4e40-9896-319c7cc2cb90,ba5db4d1-06cb-413f-84e2-77c6a1a7c482,9a6ad378-97a5-4baa-b916-8e64c8aabd5d,1f8ded07-9eae-4c78-906d-047167e4020f,7206c5f1-1c43-4cbd-907a-b048828e9cea,d59e4da9-2f61-46eb-b30b-bd2a84533e81 seed_api_exit=0
+run_steps_exclusive_lock=1 lock_psql_pid=29636
+run_steps_ungranted_worker_lock_count=1
+controlled_old_launch_claims=32 claimed_run_ids=9c1567f1-fea4-4ad0-8d26-3b2ea6a711c7,b68af796-25ce-4f17-8464-d6391bdd207b,ea4eebde-b032-4681-ba29-04635fa5c478,0a09785f-4aec-4da2-9225-610c480924e1,63685b44-25f8-4348-acfe-9fe1a937ae40,fa451d3b-1ce6-4993-917d-0d9cd4ee279c,8ad454a1-d02d-4f49-a88e-0996b845e380,e57acd8e-a4f4-46f6-89a2-4e504e6e92ff,08eda88c-2a42-4b43-ae68-36e6293340cb,f26626fb-1469-4d89-b6f8-40f9d6afba27,2550ff86-b2e4-46f1-8073-cc07e05240dc,0325e68d-1d4d-4dde-8481-92e9d82e5f9f,197d4953-0057-4dbb-93b4-3f371715edea,1201d42b-513d-4372-bbd4-598b27015edb,be0479f7-bd2c-49b9-9d44-778bc529485c,63c226f7-146c-46f1-844a-9a4bad3f7081,f7cd5a39-cd36-4466-9115-fc5d71cd993c,bdb8e5df-286e-45fe-97c2-e31393eca345,2b8659c0-1623-4ab5-ae7b-d1d1f51bcb95,f1321e1e-89e3-403f-b967-9958d5ccf111,0baa9d23-3bf4-4d76-a69c-e172e7fda69f,c4e4ca18-d3b7-4a07-a2e0-ac6f18fb57c5,5c86d935-b8e4-40d0-b297-d6e63939af4d,e62ad542-d07a-4d1e-85b4-13027f8ce0be,145f9ca3-d4ad-4a47-958f-69146323c9f8,429204ce-43b6-4e40-9896-319c7cc2cb90,ba5db4d1-06cb-413f-84e2-77c6a1a7c482,9a6ad378-97a5-4baa-b916-8e64c8aabd5d,1f8ded07-9eae-4c78-906d-047167e4020f,7206c5f1-1c43-4cbd-907a-b048828e9cea,d59e4da9-2f61-46eb-b30b-bd2a84533e81
+before_kill run_id=b46b5e46-b5d8-4dcb-880f-6369894f9022 command_id=adf29ee1-8e15-4e61-a227-adaa2eebd5de launch_id=89bf042e-397b-4285-ae5e-25ed08028050 facts={"invocation_status":"ACTIVE","epoch":1,"worker_id":"worker:desktop:89bf042e-397b-4285-ae5e-25ed08028050:7338783a-f42b-409e-ba76-1b3243e5b606","outbox_status":"CLAIMED","receipt_count":1,"command_count":1,"first_step_attempts":null}
+processes_before_kill=[{"pid":28528,"parent_pid":33856,"created_utc":"2026-09-24T04:07:57.4509390Z","executable":"D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\relay-desktop.exe"},{"pid":32904,"parent_pid":28528,"created_utc":"2026-09-24T04:07:57.4713620Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"},{"pid":5504,"parent_pid":28528,"created_utc":"2026-09-24T04:07:58.3584700Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"},{"pid":32812,"parent_pid":5504,"created_utc":"2026-09-24T04:07:58.7533220Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"}]
+after_kill host_api_supervisor_worker_alive=0 old_record_retained=True facts={"invocation_status":"ACTIVE","epoch":1,"worker_id":"worker:desktop:89bf042e-397b-4285-ae5e-25ed08028050:7338783a-f42b-409e-ba76-1b3243e5b606","outbox_status":"CLAIMED","receipt_count":1,"command_count":1,"first_step_attempts":null}
+run_steps_exclusive_lock_after_release=0
+restart_bootstrap_elapsed_ms=2077 controlled_old_launch_claims=32
+after_restart new_host_pid=31188 old_record_retained=False facts={"invocation_status":"IDLE","epoch":2,"worker_id":"","outbox_status":"DONE","receipt_count":1,"command_count":1,"first_step_attempts":1}
+[Y] Yes  [A] Yes to All  [N] No  [L] No to All  [S] Suspend  [?] Help (default is "Y"):
+session_id=458307758f4947fbb2ecfe618b19acdd postgres_stop_exit=0 temporary_root_removed=True
+M03_REAL_HOST_RECOVERY=PASS scenario=Clean backlog=32 pg_stop=0 temporary_root_removed=True
+**********************
+Windows PowerShell transcript end
+End time: 20260924120821
+**********************

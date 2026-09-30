@@ -1,0 +1,140 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-f8df2afc81
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-f8df2afc81/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-f8df2afc81^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 36860)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-f8df2afc81/cluster" "-h" "127.0.0.1" "-p" "1192"
+DO
+CREATE DATABASE
+Test database: relay_api_test_42c705483286 on 127.0.0.1:1192 (roles relay_migrator / relay_app)
+✔ G01/G04: 202 contains the committed Run, immutable command, outbox and receipt; restart replays it (4146.0628ms)
+✔ an already aborted shutdown cannot claim or execute a pending command (633.9674ms)
+✔ shutdown signalled from onClaim does not execute a step after the claim (34.2605ms)
+✔ a replaced invocation cannot insert PREPARED after a delayed PERSIST claim (118.287ms)
+✔ a stale publisher cannot resolve DISPATCHING; recovery reconciles the same operation or leaves UNKNOWN (186.976ms)
+✔ a stale retry cannot reconcile an existing DISPATCHING effect before recovery (107.3411ms)
+✔ G05: expired live Worker cannot create a second invocation or write; observed exit requeues the same command (1478.6134ms)
+✔ G04/G05: two independent supervisor entries race for one durable command (1101.3263ms)
+✔ G04: supervisor crash does not forge stop evidence or reclaim its former child (1585.3883ms)
+✔ supervisor sidecar echoes readiness nonce and Node version, then exits on stdin EOF (371.3855ms)
+✔ a bounded delivery never marks an unfinished Run command DONE (48.956ms)
+✔ Delegate rollback removes Run, command, outbox, invocation and receipt together (25.4774ms)
+✔ desktop malformed or oversized private frames fail before any PostgreSQL connection or Worker spawn (2328.0273ms)
+✔ desktop startup emits private readiness before any claim and tags its Worker with launch ID (1056.3952ms)
+✖ desktop acknowledges empty old launches in input order before dispatch readiness (387.9862ms)
+✖ two desktop supervisors use one stopped launch claim once; old Worker cannot write after requeue (1119.1168ms)
+✔ a delayed old desktop Worker process cannot write after a new launch takes its command (3431.1627ms)
+✖ desktop stopped-launch recovery reconciles the same operation and blocks UNKNOWN (1050.9719ms)
+✔ desktop stdin EOF stops new claims and waits for the active child close (1187.8182ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 16
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 34049.7695
+
+✖ failing tests:
+
+test at dist\test\integration\run-dispatch.integration.test.js:734:1
+✖ desktop acknowledges empty old launches in input order before dispatch readiness (387.9862ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      'supervisor_ready',
+  -   'launch_recovery_ack',
+  -   'launch_recovery_ack',
+      'dispatch_ready',
+  +   'worker_recovery_required',
+  +   'worker_recovery_required'
+    ]
+  
+      at TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/run-dispatch.integration.test.js:742:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'supervisor_ready', 'dispatch_ready', 'worker_recovery_required', 'worker_recovery_required' ],
+    expected: [ 'supervisor_ready', 'launch_recovery_ack', 'launch_recovery_ack', 'dispatch_ready' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at dist\test\integration\run-dispatch.integration.test.js:751:1
+✖ two desktop supervisors use one stopped launch claim once; old Worker cannot write after requeue (1119.1168ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+  
+    assert.ok(types.indexOf('launch_recovery_ack') > types.indexOf('supervisor_ready'))
+  
+      at TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/run-dispatch.integration.test.js:767:20)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at dist\test\integration\run-dispatch.integration.test.js:852:1
+✖ desktop stopped-launch recovery reconciles the same operation and blocks UNKNOWN (1050.9719ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   launchId: undefined,
+  +   nonce: undefined,
+  +   retainedClaims: undefined
+  -   launchId: '5d95defd-cc06-4e6b-8eae-742427020352',
+  -   nonce: '26413e25-d070-49f2-bb15-7889ab5a65d0',
+  -   retainedClaims: 0
+    }
+  
+      at TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/run-dispatch.integration.test.js:900:20)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { nonce: undefined, launchId: undefined, retainedClaims: undefined },
+    expected: { nonce: '26413e25-d070-49f2-bb15-7889ab5a65d0', launchId: '5d95defd-cc06-4e6b-8eae-742427020352', retainedClaims: 0 },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+waiting for server to shut down.... done
+server stopped
+--- integration summary ---
+tests exit code: 1
+build exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: FAILED

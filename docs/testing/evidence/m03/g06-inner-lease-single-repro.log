@@ -1,0 +1,50 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-dd4cdc40f8
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-dd4cdc40f8/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-dd4cdc40f8^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 29352)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-dd4cdc40f8/cluster" "-h" "127.0.0.1" "-p" "5580"
+DO
+CREATE DATABASE
+Test database: relay_api_test_58bf624145f0 on 127.0.0.1:5580 (roles relay_migrator / relay_app)
+D:\Develop\Relay-Agent\.research\runtime-cache\node-v24.21.0-win-x64\node.exe: --test-timeout= is not allowed in NODE_OPTIONS
+--- dedicated PostgreSQL log (tail) ---
+2026-09-24 22:12:51.093 CST [29352] 日志:  正在启动 PostgreSQL 18.6 on x86_64-windows, compiled by msvc-19.44.35228, 64-bit
+2026-09-24 22:12:51.094 CST [29352] 日志:  正在监听IPv4地址"127.0.0.1"，端口 5580
+2026-09-24 22:12:51.214 CST [20180] 日志:  数据库上次关闭时间为 2026-09-24 22:12:47 CST
+2026-09-24 22:12:51.221 CST [29352] 日志:  数据库系统准备接受连接
+waiting for server to shut down.... done
+server stopped
+--- integration summary ---
+tests exit code: not run
+build exit code: skipped
+business migration exit code: 9
+graph install exit code: not run
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+failure: business migration failed with exit code 9
+status: FAILED

@@ -1,0 +1,68 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-4addd69379
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-4addd69379/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-4addd69379^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 37144)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-4addd69379/cluster" "-h" "127.0.0.1" "-p" "4876"
+DO
+CREATE DATABASE
+Test database: relay_api_test_cddbb5377f59 on 127.0.0.1:4876 (roles relay_migrator / relay_app)
+✔ P09 AUTO keeps Connection, Capability and Permission separate and records one invocation (710.4255ms)
+✔ P09 ASK releases old Worker; Review decision and new epoch admit only the original target (164.442ms)
+✔ M03 denied or expired ACTION_APPROVAL cannot queue a Run RESUME (120.74ms)
+✔ M03 PAUSE invalidates a deferred approved action before a later manual RESUME (80.7702ms)
+✔ M03 rejected approved claim leaves no Worker owner after expiry, Connection or Permission change (209.3931ms)
+✔ M03 revocation between approved claim and Admit releases a no-effect Worker for safe control (83.6234ms)
+✔ M03 approval withdrawal rolls back operation, Run and control when outbox settlement fails (131.7036ms)
+✔ P09 USER_IMPORT has a real job source, ASK Review and no Run/claim identity (78.435ms)
+✔ P09 revocation before Admit rejects, while Admit before revocation completes the already admitted effect (125.083ms)
+✔ P09 overlapping roots across Projects occupy one physical directory until the first effect settles (191.4814ms)
+✔ P09 crashed Fake dispatch reconciles the same ID; tampering remains UNKNOWN and blocks new IDs (203.3561ms)
+✔ P09 database rejects crossed operation scope, Review pair, Invocation origin and claim token (190.4289ms)
+✔ P09 PREPARED Worker exit proves no dispatch; the same logical ID gets a new Invocation and epoch (66.7852ms)
+✔ P09 DISPATCHING with a missing target stays UNKNOWN; a different intent cannot bypass it (61.4653ms)
+✔ P09 pending control before Admit abandons PREPARED without a Fake effect (65.0501ms)
+✔ P09 USER_IMPORT unresolved invocation blocks a new intent for the same job (63.3821ms)
+✔ P09 URL Permission matches path segments and concurrent Review decisions consume once (75.734ms)
+✔ P09 HTTP config commands replay, isolate scope, and expose full Invocation history (1150.8645ms)
+✔ P10 Rule update after Gateway Admit preserves the old Invocation outcome and blocks new work (66.8465ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 14132.9039
+waiting for server to shut down..... done
+server stopped
+--- integration summary ---
+tests exit code: 0
+build exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: PASSED

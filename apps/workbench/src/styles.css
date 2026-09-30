@@ -409,6 +409,8 @@ svg {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  min-width: 0;
+  overflow-x: hidden;
   padding: var(--relay-space-6) var(--relay-space-4);
   background: var(--relay-color-bg-navigation);
   border-right: var(--relay-border-width) solid var(--relay-color-border-separator);
@@ -425,6 +427,73 @@ svg {
   display: flex;
   flex-direction: column;
   gap: var(--relay-space-1);
+}
+
+.navigation-list--secondary {
+  margin-top: var(--relay-space-4);
+  padding-top: var(--relay-space-3);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+/* 全局左栏的「近期工作」分组：效果图 2026-09-29 的单栏结构。
+   范围与排序常驻可见（业务要求写明），详细说明进入 title，不占首屏。 */
+.recent-work {
+  display: grid;
+  gap: var(--relay-space-1);
+  min-width: 0;
+  margin-bottom: var(--relay-space-4);
+  padding-bottom: var(--relay-space-4);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+/* 错误里的 URL 和 ID 不能撑破侧栏：长标识允许断行，不产生整页横向滚动。 */
+.recent-work .action-error, .recent-work .helper-text { overflow-wrap: anywhere; }
+.recent-work-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--relay-space-2); }
+.recent-work-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  margin: 0;
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-medium);
+  color: var(--relay-color-text-primary);
+}
+.recent-work-heading h2 > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+.recent-work-scope { margin: 0 0 var(--relay-space-2); color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); }
+.recent-work-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--relay-space-1); }
+.recent-work-item {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--relay-space-3);
+  padding: var(--relay-space-2) var(--relay-space-3);
+  text-align: left;
+  background: transparent;
+  border: var(--relay-border-width) solid transparent;
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-primary);
+  cursor: pointer;
+}
+.recent-work-item:hover { background: var(--relay-color-selection-hover); }
+.recent-work-item--active { background: var(--relay-color-selection-bg); border-color: var(--relay-color-border-control); }
+.recent-work-icon { flex: none; color: var(--relay-color-text-secondary); margin-top: var(--relay-space-1); }
+.recent-work-icon > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+.recent-work-copy { display: grid; gap: var(--relay-space-1); min-width: 0; }
+.recent-work-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  font-weight: var(--relay-font-weight-medium);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+.recent-work-project {
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .navigation-list--bottom {

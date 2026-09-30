@@ -1,0 +1,48 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260924120654
+Username: LAPTOP-RTUVXZ-G\ASUS
+RunAs User: LAPTOP-RTUVXZ-G\ASUS
+Configuration Name: 
+Machine: LAPTOP-RTUVXZ-G (Microsoft Windows NT 10.0.22631.0)
+Host Application: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File apps/desktop/scripts/test-m03-host-real-pg.ps1 -Scenario Unknown -BacklogCount 1 -ExpectLaunchAck
+Process ID: 30864
+PSVersion: 5.1.22621.4391
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.22621.4391
+BuildVersion: 10.0.22621.4391
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+[Y] Yes  [A] Yes to All  [N] No  [L] No to All  [S] Suspend  [?] Help (default is "Y"):
+[Y] Yes  [A] Yes to All  [N] No  [L] No to All  [S] Suspend  [?] Help (default is "Y"):
+[Y] Yes  [A] Yes to All  [N] No  [L] No to All  [S] Suspend  [?] Help (default is "Y"):
+[Y] Yes  [A] Yes to All  [N] No  [L] No to All  [S] Suspend  [?] Help (default is "Y"):
+[Y] Yes  [A] Yes to All  [N] No  [L] No to All  [S] Suspend  [?] Help (default is "Y"):
+session_id=ce1ff68b5e994f63b1e4722c634e674f
+session_root=C:\Users\ASUS\AppData\Local\Temp\relay-m02-acceptance-ce1ff68b5e994f63b1e4722c634e674f
+postgres_port=11503
+desktop_pid=0
+release_sha256=0769b1dd762fce84690bdc9955bd18a4562c253f2854a49c6630015b0082523e
+cleanup: powershell -NoProfile -ExecutionPolicy Bypass -File apps/desktop/scripts/stop-acceptance-session.ps1 -SessionRoot "C:\Users\ASUS\AppData\Local\Temp\relay-m02-acceptance-ce1ff68b5e994f63b1e4722c634e674f"
+session_id=ce1ff68b5e994f63b1e4722c634e674f pg_port=11503 release_sha256=0769b1dd762fce84690bdc9955bd18a4562c253f2854a49c6630015b0082523e
+seeded_run_ids=9dca0173-e27c-4c9a-82c4-793a8fe16651 seed_api_exit=0
+run_steps_exclusive_lock=1 lock_psql_pid=6544
+run_steps_ungranted_worker_lock_count=1
+before_kill run_id=9dca0173-e27c-4c9a-82c4-793a8fe16651 command_id=3e281d41-0fb8-45dd-acf8-e3b4c216f9a8 launch_id=6f49512f-dc47-446d-8f2d-7879ffd1c116 facts={"invocation_status":"ACTIVE","epoch":1,"worker_id":"worker:desktop:6f49512f-dc47-446d-8f2d-7879ffd1c116:f38058e0-9e6e-4715-a1eb-18fcf115eb50","outbox_status":"CLAIMED","receipt_count":1,"command_count":1,"first_step_attempts":null}
+processes_before_kill=[{"pid":38464,"parent_pid":30864,"created_utc":"2026-09-24T04:07:02.6098890Z","executable":"D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\relay-desktop.exe"},{"pid":35112,"parent_pid":38464,"created_utc":"2026-09-24T04:07:02.6364550Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"},{"pid":6256,"parent_pid":38464,"created_utc":"2026-09-24T04:07:03.7168040Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"},{"pid":16140,"parent_pid":6256,"created_utc":"2026-09-24T04:07:04.1659080Z","executable":"\\\\?\\D:\\Develop\\Relay-Agent\\apps\\desktop\\release\\node.exe"}]
+after_kill host_api_supervisor_worker_alive=0 old_record_retained=True facts={"invocation_status":"ACTIVE","epoch":1,"worker_id":"worker:desktop:6f49512f-dc47-446d-8f2d-7879ffd1c116:f38058e0-9e6e-4715-a1eb-18fcf115eb50","outbox_status":"CLAIMED","receipt_count":1,"command_count":1,"first_step_attempts":null}
+run_steps_exclusive_lock_after_release=0
+before_unknown_recovery effect={"operation_id":"159093d7-ba1f-4526-b9ba-8e2289fa1f29","status":"DISPATCHING","dispatch_count":1}
+restart_bootstrap_elapsed_ms=1919 controlled_old_launch_claims=1
+after_unknown_recovery effect={"operation_id":"159093d7-ba1f-4526-b9ba-8e2289fa1f29","status":"UNKNOWN","dispatch_count":1} worker_count=0
+after_restart new_host_pid=39668 old_record_retained=True facts={"invocation_status":"ACTIVE","epoch":1,"worker_id":"worker:desktop:6f49512f-dc47-446d-8f2d-7879ffd1c116:f38058e0-9e6e-4715-a1eb-18fcf115eb50","outbox_status":"CLAIMED","receipt_count":1,"command_count":1,"first_step_attempts":null}
+[Y] Yes  [A] Yes to All  [N] No  [L] No to All  [S] Suspend  [?] Help (default is "Y"):
+session_id=ce1ff68b5e994f63b1e4722c634e674f postgres_stop_exit=0 temporary_root_removed=True
+M03_REAL_HOST_RECOVERY=PASS scenario=Unknown backlog=1 pg_stop=0 temporary_root_removed=True
+**********************
+Windows PowerShell transcript end
+End time: 20260924120712
+**********************

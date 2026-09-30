@@ -1,0 +1,24 @@
+# A02 遗留补测：Stop→Start 重启 desktop.env 配置保留验证（2026-09-29 UTC）
+
+- 方法：scripts/test-desktop.ps1 Start（两次均附 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333，与取证会话同款）
+- 说明：探针键未按任务示例用 RELAY_TEST_PERSIST_KEY——宿主 desktop.env 键白名单（安全不变量）会拒绝未知键导致桌面无法启动；改用白名单内的用户自有键 RELAY_MODEL_NAME=persist-probe-20260929（不带 RELAY_MODEL_PROVIDER 时运行时按 FakeModelPort 处理，不影响行为），同样验证"脚本合并逻辑不丢用户自定义键"。
+
+## 步骤与证据
+1. [01:41:33Z] Start#1（会话A）：exit=0，Trial prepared，workspace f2d4679d-04e5-40f3-b015-2f3c9c78a3a9；manifest 变更触发迁移检查（43 个 migration 已应用，无新迁移，备份 before-upgrade-20260929-014144.dump）。
+2. 会话A bootstrap 验证：desktop_bootstrap OK（baseUrl=http://127.0.0.1:4276）。
+3. 向 .relay-test/desktop.env 追加探针键：RELAY_MODEL_NAME=persist-probe-20260929（追加后文件 5 行）。
+4. 会话A 正常关窗：WM_CLOSE（hwnd 3150954）→ IsWindow=False；随后清点 test-release 进程数=0（宿主 stop() 经 Job kill-on-close 清理 API/supervisor/worker 树）。
+5. test-desktop.ps1 Stop：PG 正常停止（"waiting for server to shut down.... done / server stopped"），数据保留。
+6. [02:43Z 前后] Start#2（会话B）：exit=0 耗时 89s；脚本重写四个运行时键并原样保留用户行。
+7. Start#2 后 desktop.env 仍含 RELAY_MODEL_NAME=persist-probe-20260929（grep 计数=1）→ 合并逻辑不丢自定义键，PASS。
+8. 会话B bootstrap 验证：desktop_bootstrap OK（baseUrl=http://127.0.0.1:9534）。
+9. 探针键已从 desktop.env 移除（清理后文件仅剩 4 个运行时键，见下），运行中会话 B 不受影响（键在进程启动时经 --env-file 读入，且单独 RELAY_MODEL_NAME 为惰性配置）。
+
+## 清理后 desktop.env 终态
+RELAY_DB_URL=postgresql://relay_app@127.0.0.1:6189/relay_trial
+RELAY_DB_POOL_MAX=4
+RELAY_DB_CONNECT_TIMEOUT_MS=3000
+RELAY_DESKTOP_WORKSPACE_ID=f2d4679d-04e5-40f3-b015-2f3c9c78a3a9
+
+## 结论
+Stop→Start 链路中：用户自定义键被 Start 的合并逻辑保留（不丢）、运行时键由脚本按当前状态重写（Owner 正确）、PG 数据保留、窗口正常关闭后进程零残留。A02 遗留项补测通过。

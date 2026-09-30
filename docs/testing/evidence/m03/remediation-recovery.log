@@ -1,0 +1,65 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-3347cb2f1f
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-3347cb2f1f/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-3347cb2f1f^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 30940)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-3347cb2f1f/cluster" "-h" "127.0.0.1" "-p" "14957"
+DO
+CREATE DATABASE
+Test database: relay_api_test_bfc5cff78f9b on 127.0.0.1:14957 (roles relay_migrator / relay_app)
+✔ P08 control is durable PENDING before the safe point; PAUSE/Resume keep Task and Run aligned (516.873ms)
+✔ P08 conflicting controls reject unless explicitly superseded; terminal Run rejects a new intent (34.1281ms)
+✔ P08 control arriving before Fake publish dispatch prevents the effect (96.0707ms)
+✔ P08 control arriving after dispatch waits for the same Fake effect to settle (93.1113ms)
+✔ P08 a known pre-effect failure releases its claim, while an uncertain dispatched effect retains it (102.7461ms)
+✔ P08 scanner fences a stopped worker and retries a missing effect with the same operation_id (89.4454ms)
+✔ P08 a crash after publish reconciles success without a second publish or artifact version (80.3857ms)
+✔ P08 a second crash after durable fence resumes reconciliation with the same operation_id (92.2215ms)
+✔ P08 a logged successful publish with missing or damaged content becomes UNKNOWN and blocks Handoff (156.8719ms)
+✔ P08 a verified published effect can finish a waiting Handoff while retaining the orphan target (75.3656ms)
+✔ P08 Handoff stores deterministic step and candidate references with or without a committed candidate (92.9246ms)
+✔ P08 tampered Fake effect remains UNKNOWN and blocks Handoff after worker fencing (80.1967ms)
+✔ P08 completion and control serialize: earlier control prevents completion, earlier completion rejects control (207.5056ms)
+✔ P08 an exited Worker process is fenced and a new Worker process reuses its operation_id (1135.0135ms)
+✔ P08 HTTP exposes control receipt, Run projection, Resume and AI-owned Task cancel as 202 (1174.4378ms)
+✔ P08 a real API process restart preserves PENDING and the new process reads the safe outcome (2108.4009ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16519.0657
+waiting for server to shut down..... done
+server stopped
+--- integration summary ---
+tests exit code: 0
+build exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: PASSED

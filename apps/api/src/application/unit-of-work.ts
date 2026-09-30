@@ -6,6 +6,7 @@ import { ImpactRepository } from '../artifact/impact-repository.js';
 import { LineageRepository } from '../artifact/lineage-repository.js';
 import { CompletionRepository } from '../completion/completion-repository.js';
 import { ProjectRepository } from '../project/project-repository.js';
+import { ContinuationPointRepository } from '../project/continuation-point-repository.js';
 import { CommandReceiptRepository } from '../receipt/command-receipt-repository.js';
 import { RunRepository } from '../run/run-repository.js';
 import { RecoveryRepository } from '../run/recovery-repository.js';
@@ -34,6 +35,7 @@ export interface Repositories {
   readonly lineage: LineageRepository;
   readonly completions: CompletionRepository;
   readonly projects: ProjectRepository;
+  readonly continuationPoints: ContinuationPointRepository;
   readonly receipts: CommandReceiptRepository;
   readonly runs: RunRepository;
   readonly recovery: RecoveryRepository;
@@ -63,6 +65,7 @@ export function createRepositories(db: DbExecutor): Repositories {
     lineage: new LineageRepository(db),
     completions: new CompletionRepository(db),
     projects: new ProjectRepository(db),
+    continuationPoints: new ContinuationPointRepository(db),
     receipts: new CommandReceiptRepository(db),
     runs: new RunRepository(db),
     recovery: new RecoveryRepository(db),

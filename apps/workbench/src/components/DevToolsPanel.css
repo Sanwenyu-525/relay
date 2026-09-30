@@ -1,0 +1,84 @@
+/* 工具面板：右栏只读工具 + 底部命令输出抽屉；只承载只读事实，展开/收起不执行命令也不停止进程。 */
+
+.devtools {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  max-height: 40vh;
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+  background: var(--relay-color-bg-surface);
+}
+.devtools-pane { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.devtools-header { flex: none; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.devtools-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
+.devtools-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--relay-space-2);
+  min-height: var(--relay-control-height-comfort);
+  padding: var(--relay-space-2) var(--relay-space-3);
+  background: transparent;
+  border: 0;
+  border-bottom: calc(var(--relay-border-width) * 2) solid transparent;
+  color: var(--relay-color-text-secondary);
+  cursor: pointer;
+  font-family: var(--relay-font-family-ui);
+  font-size: var(--relay-font-size-meta);
+  white-space: nowrap;
+}
+.devtools-tab > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+.devtools-tab:hover { background: var(--relay-color-selection-hover); }
+.devtools-tab--active {
+  color: var(--relay-color-selection-text);
+  border-bottom-color: var(--relay-color-action-primary);
+  transition: border-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.devtools-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--relay-space-4); }
+.devtools-body h3 { margin: 0 0 var(--relay-space-2); font-size: var(--relay-font-size-rowTitle); }
+.devtools-list { list-style: none; margin: 0 0 var(--relay-space-3); padding: 0; display: grid; gap: var(--relay-space-2); }
+.devtools-list li { padding: var(--relay-space-2) var(--relay-space-3); background: var(--relay-color-bg-subtle); border-radius: var(--relay-radius-control); }
+.devtools-list small { display: block; color: var(--relay-color-text-secondary); }
+.devtools-operation { margin-top: var(--relay-space-3); padding-top: var(--relay-space-2); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.devtools-operation h4 { margin: 0 0 var(--relay-space-1); font-size: var(--relay-font-size-body); }
+.devtools-invocation { margin-top: var(--relay-space-2); }
+.devtools-output pre {
+  margin: var(--relay-space-2) 0 0;
+  padding: var(--relay-space-3);
+  max-height: 16rem;
+  overflow: auto;
+  background: var(--relay-color-bg-subtle);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  font-family: var(--relay-font-family-code);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.devtools-output pre.devtools-stderr { border-color: var(--relay-color-status-danger-text); }
+
+/* 底部抽屉：命令输出来自服务端保存的真实结果，交互终端仍是待设计声明。 */
+.devtools-drawer { flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--relay-color-bg-surface); }
+.devtools-drawer-header {
+  display: flex;
+  align-items: stretch;
+  gap: var(--relay-space-2);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+  background: var(--relay-color-bg-canvas);
+}
+.devtools-tabs--drawer { display: flex; flex: 1; min-width: 0; }
+.devtools-drawer-pending {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  padding: var(--relay-space-2) var(--relay-space-3);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  white-space: nowrap;
+}
+.devtools-drawer-pending > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+.devtools-drawer-header > .icon-button { align-self: center; margin-right: var(--relay-space-3); }
+.devtools-drawer-body { max-height: 16rem; overflow-y: auto; padding: var(--relay-space-4); }
+.devtools-drawer-body h3 { margin: 0 0 var(--relay-space-2); font-size: var(--relay-font-size-rowTitle); }

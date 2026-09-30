@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
-import { Bell, BookOpen, FolderKanban, House, Inbox, Link2, ListChecks, ListTree, Menu, MessageSquareText, Search, Settings } from "lucide-react";
+import { Bell, BookOpen, FolderKanban, House, Inbox, Link2, ListChecks, ListTree, Menu, Search, Settings } from "lucide-react";
 import AppDialog from "./AppDialog";
 import CommandPalette from "./CommandPalette";
 import RelayConnectionDialog from "./RelayConnectionDialog";
 import InterventionNotifications from "./InterventionNotifications";
+import RecentWorkRail from "./RecentWorkRail";
 import SidebarResizeHandle, { clampSidebarWidth } from "./SidebarResizeHandle";
 import { dialogCount } from "../lib/dialogStack";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
@@ -21,10 +22,6 @@ function readStoredSidebarWidth(): number | null {
   } catch { return null; }
 }
 
-const secondaryNavigation = [
-  { label: "连接", to: "/connections", icon: Link2 },
-  { label: "设置", to: "/settings", icon: Settings }
-];
 const skillPageNames: Record<string, string> = {
   blueprint: "蓝图预览", resume: "继续项目", definition: "完善定义", verification: "验收方案"
 };
@@ -64,20 +61,46 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
   }, [commandOpen, onCommandOpen]);
   useEffect(() => { onCommandClose(); }, [location.pathname, location.search]);
   const primaryNavigation = [
-    { label: "今日", to: "/today", icon: House, count: "" },
     { label: "项目", to: "/projects", icon: FolderKanban, count: "" },
-    { label: "任务", to: "/tasks", icon: ListChecks, count: "" },
-    { label: "Agent 聊天", to: "/agent", icon: MessageSquareText, count: "" },
-    { label: "知识", to: "/knowledge", icon: BookOpen, count: "" },
+    { label: "全部任务", to: "/tasks", icon: ListChecks, count: "" },
+    { label: "知识", to: "/knowledge", icon: BookOpen, count: "" }
+  ];
+  /** 次级入口保留路由可达性，收在折叠区，不与主要定位入口争夺首屏注意力。 */
+  const secondaryWorkNavigation = [
+    { label: "今日", to: "/today", icon: House, count: "" },
     { label: "动态", to: "/activity", icon: ListTree, count: "" },
     { label: "待审", to: "/reviews", icon: Bell, count: connection.mode === "live" ? "" : String(chrome.pendingReviewCount) }
   ];
   const query = new URLSearchParams(location.search);
   const path = location.pathname;
+  const currentWorkId = path === "/agent" ? query.get("work") : null;
+  const secondaryNavigation = [
+    { label: "连接", to: "/connections", icon: Link2 },
+    { label: "设置", to: "/settings", icon: Settings }
+  ];
+  // 面包屑只读确切 Project/Task 标题；读不到时回退到通用称谓，不用客户端缓存或推测标题。
+  const [workTrail, setWorkTrail] = useState<readonly string[]>([]);
+  useEffect(() => {
+    const client = connection.mode === "live" ? connection.client : null;
+    if (!client || currentWorkId === null) { setWorkTrail([]); return; }
+    let active = true;
+    void client.getTask(currentWorkId).then(async (task) => {
+      const names = ["项目", "当前项目", "任务", task.title];
+      if (task.projectId === null) {
+        if (active) setWorkTrail(["任务", task.title]);
+        return;
+      }
+      if (active) setWorkTrail(names);
+      const project = await client.getProject(task.projectId);
+      if (!active) return;
+      setWorkTrail(["项目", project.title, "任务", task.title]);
+    }).catch(() => { if (active) setWorkTrail(["任务", "当前工作"]); });
+    return () => { active = false; };
+  }, [connection.mode, connection.client, currentWorkId]);
   const breadcrumb = (() => {
     if (path === "/today") return ["工作空间", "今日"];
     if (path === "/activity" || path === "/activities") return ["工作空间", "动态"];
-    if (path === "/agent") return ["工作空间", "Agent 聊天"];
+    if (path === "/agent") return workTrail.length > 0 ? [...workTrail] : ["工作空间", "近期工作"];
     if (/^\/artifact-versions\/[^/]+\/lineage$/u.test(path)) return ["产物版本", "来源"];
     if (path === "/projects") return ["工作空间", query.get("view") === "create" ? "新建项目" : "项目"];
     if (path === "/tasks") return query.get("view") === "create"
@@ -115,8 +138,18 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
     <div className="app-frame" style={frameStyle}>
       <aside className="app-sidebar">
         <div className="brand" title="示例品牌标识，最终产品显示名待确认">Workflow OS</div>
+        {connection.mode === "live" && connection.client && path === "/agent" &&
+          <RecentWorkRail client={connection.client} currentTaskId={currentWorkId} />}
         <nav className="navigation-list" aria-label="主导航">
           {primaryNavigation.map((item) => <NavLink key={item.label} to={item.to} end className={({ isActive }) => `navigation-item${isActive ? " navigation-item--active" : ""}`}>
+            {({ isActive }) => <><item.icon aria-hidden="true" /><span className="navigation-label">{item.label}</span>
+              {item.count && <span className="navigation-count" aria-label={`${item.label} ${item.count} 项`}>{item.count}</span>}
+              {isActive && <span className="visually-hidden">当前页</span>}
+            </>}
+          </NavLink>)}
+        </nav>
+        <nav className="navigation-list navigation-list--secondary" aria-label="次级导航">
+          {secondaryWorkNavigation.map((item) => <NavLink key={item.label} to={item.to} end className={({ isActive }) => `navigation-item${isActive ? " navigation-item--active" : ""}`}>
             {({ isActive }) => <><item.icon aria-hidden="true" /><span className="navigation-label">{item.label}</span>
               {item.count && <span className="navigation-count" aria-label={`${item.label} ${item.count} 项`}>{item.count}</span>}
               {isActive && <span className="visually-hidden">当前页</span>}
@@ -158,7 +191,7 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
     <CommandPalette open={commandOpen} onClose={onCommandClose} />
     <AppDialog open={navigationOpen} title="导航" variant="drawer" onClose={() => setNavigationOpen(false)}>
       <nav className="mobile-navigation-list" aria-label="完整导航">
-        {[...primaryNavigation, ...secondaryNavigation].map((item) => <NavLink key={item.label} to={item.to} className="mobile-navigation-item" onClick={() => setNavigationOpen(false)}>
+        {[...primaryNavigation, ...secondaryWorkNavigation, ...secondaryNavigation].map((item) => <NavLink key={item.label} to={item.to} className="mobile-navigation-item" onClick={() => setNavigationOpen(false)}>
           <item.icon aria-hidden="true" /><span>{item.label}</span>
         </NavLink>)}
       </nav>

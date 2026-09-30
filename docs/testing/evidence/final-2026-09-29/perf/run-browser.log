@@ -1,0 +1,31 @@
+M1 {"run":1,"domContentLoaded_ms":165.7,"firstContentfulPaint_ms":null,"loadEventEnd_ms":169.5,"jsTransferBytes":312315,"jsDecodedBytes":1190473,"clickToFeedback_ms":126,"navStartToInteractive_ms":401}
+M1 {"run":2,"domContentLoaded_ms":77.7,"firstContentfulPaint_ms":null,"loadEventEnd_ms":77.8,"jsTransferBytes":312315,"jsDecodedBytes":1190473,"clickToFeedback_ms":75,"navStartToInteractive_ms":209}
+M1 {"run":3,"domContentLoaded_ms":80.4,"firstContentfulPaint_ms":null,"loadEventEnd_ms":80.6,"jsTransferBytes":312315,"jsDecodedBytes":1190473,"clickToFeedback_ms":83,"navStartToInteractive_ms":215}
+M1 {"run":4,"domContentLoaded_ms":84.7,"firstContentfulPaint_ms":null,"loadEventEnd_ms":84.9,"jsTransferBytes":312315,"jsDecodedBytes":1190473,"clickToFeedback_ms":98,"navStartToInteractive_ms":235}
+M1 {"run":5,"domContentLoaded_ms":88.7,"firstContentfulPaint_ms":null,"loadEventEnd_ms":88.9,"jsTransferBytes":312315,"jsDecodedBytes":1190473,"clickToFeedback_ms":85,"navStartToInteractive_ms":237}
+M1 {"run":6,"domContentLoaded_ms":83.6,"firstContentfulPaint_ms":null,"loadEventEnd_ms":83.7,"jsTransferBytes":312315,"jsDecodedBytes":1190473,"clickToFeedback_ms":91,"navStartToInteractive_ms":230}
+M1 {"run":7,"domContentLoaded_ms":74.7,"firstContentfulPaint_ms":null,"loadEventEnd_ms":75,"jsTransferBytes":312315,"jsDecodedBytes":1190473,"clickToFeedback_ms":77,"navStartToInteractive_ms":208}
+CONNECT liveConnect_ms= 151
+M2 round 1 done
+M2 round 2 done
+M2 round 3 done
+M2 round 4 done
+M2 round 5 done
+M2 round 6 done
+M2 round 7 done
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+locator.click: Error: strict mode violation: getByRole('link', { name: '项目', exact: true }) resolved to 2 elements:
+    1) <a href="/projects" data-discover="true" class="navigation-item">…</a> aka getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '项目' })
+    2) <a href="/projects" data-discover="true">项目</a> aka getByTestId('settings-page').getByRole('link', { name: '项目' })
+
+Call log:
+[2m  - waiting for getByRole('link', { name: '项目', exact: true })[22m
+
+    at D:\Develop\Relay-Agent\.tmp-perf\perf-browser.mjs:104:61 {
+  log: [ "  - waiting for getByRole('link', { name: '项目', exact: true })" ]
+}
+
+Node.js v24.21.0

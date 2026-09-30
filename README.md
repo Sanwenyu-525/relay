@@ -212,7 +212,7 @@ P02 在 `apps/api` 上实现了 Project / Goal / Task / State 的应用用例与
 - 跨作用域 ID 按不可见处理（404）；未鉴权 401；错误为 `application/problem+json`，含 `code`/`request_id`/`retryable`/`retry_action`，不含堆栈、SQL、路径或凭据。
 - 本小节 P02/P03 阶段当时尚未实现 Review、控制与恢复等后续范围；Review 已由 P07 接续，控制与受控 Fake 恢复已由 P08 接续。Artifact 列表端点、孤儿核对报告和 OpenAPI 生成仍未实现。
 
-真实 PostgreSQL 集成测试使用项目内便携 PostgreSQL 18.6 自建一次性集群（动态回环端口、随机 `relay_api_test_*` 库名，结束必须 `pg_ctl stop` 并删除临时目录），不连接其他项目或用户生产库，也不依赖系统已安装的 PostgreSQL：
+真实 PostgreSQL 集成测试使用项目内便携 PostgreSQL 18.6 自建一次性集群（动态回环端口、随机 `relay_api_test_*` 库名，结束必须 `pg_ctl stop` 并删除临时目录），不连接其他项目或用户生产库，也不依赖系统已安装的 PostgreSQL。入口按当前 `test/integration/**/*.test.ts` 映射编译文件，避免已删除的临时验收源码留下的旧 JS 混入回归；缺少编译文件明确失败。显式 Mock 性能测试仍由 `run-m03-mock-benchmark.ps1` 选择当前 `.bench.ts` 产物，不加入默认测试集合：
 
 ```powershell
 Push-Location apps\api
@@ -224,8 +224,10 @@ Pop-Location
 
 覆盖（69 个集成用例 + 28 个单元用例，2026-09-20 实测通过，`node --test`）：配置缺失与非法值明确失败、未鉴权 401、错误 Host 与错误 Origin 拒绝、liveness 最小响应、数据库正常与不可用两种 readiness、停止后进程退出与端口释放；空库迁移成功且重复启动不重复执行、并发迁移在 advisory lock 上串行化、已应用迁移文件缺失或内容变化被拒绝、迁移失败时 DDL 与台账同事务回滚；延迟外键在 COMMIT 失败、跨 Workspace 引用被拒、NULL 与越界值不能绕过 CHECK、完成周期唯一、0002 的 Goal 对齐列与 CHECK、应用角色不能 DDL 且不能 UPDATE/DELETE 不可变表、多 Repository 同事务整体回滚、相同命令重放与异 payload 拒绝、bigint（> 2^53）往返无损；两个 CLI 入口的真实进程运行（重复迁移不重建、同目标重试返回 `replayed=true`）；P02 的真实 HTTP 路径：Project/Goal/Task 创建与查询、INBOX→READY→IN_PROGRESS→CANCELLED 显式状态迁移、非法迁移被拒、展示字段更新与 status 字段被拒、缺必需版本 422、命令重放与 `COMMAND_ID_REUSED`、两个客户端版本冲突（含并发 CASE，恰一个成功）、依赖环/自依赖/跨项目/跨 Workspace 引用被拒、BLOCKS 前置阻止开始、键集分页与非法游标、Inbox 无 Project 事项、Goal 继承/显式/显式空集与解除关联影响清单、Goal 并发解除的确定结果、State 类型化命令（拒绝整对象覆盖、5 个 action、重复集合写入被拒）、State 依赖版本；P03 的受管内容与人工完成：发布后落盘内容与 SHA-256/大小一致、受授权下载返回确切版本正文、不支持类型 415 与超限 413（按 UTF-8 字节判定，边界值可接受）、未知路径字段与路径遍历输入被拒、跨作用域与未鉴权不可见、旧版本不覆盖且新版本只递增、按固定 v1 完成后 v2 不被标为已验收、无产物要求允许空集合、声明的产物种类与必需人工项必须满足、完成后上传被拒且重开后须重新 start、重开新建验收版本并保留历史凭据、旧完成命令重放只返回历史回执、旧周期新命令返回 `ACCEPTANCE_STALE`、两个并发完成命令恰一个生效、完成事务在 Task/State 之间失败整笔回滚且原样重试收敛、版本登记失败留下可核对孤儿且 Task 不误完成、证据文件缺失或被篡改时拒绝完成（503 `EVIDENCE_UNAVAILABLE`）。其后的 schema readiness 真实 PG 覆盖另行验证空库、缺 `0003`、完整当前清单、未知未来迁移和摘要不匹配；应用角色仍不能直读台账，但可读受限兼容视图。测试库 owner 为 `relay_migrator`，应用连接使用 `relay_app`，不使用超级用户冒充应用角色。包装脚本见 [apps/api/scripts/run-integration.ps1](apps/api/scripts/run-integration.ps1)、[角色 bootstrap](apps/api/sql/bootstrap-roles.sql)、[V001 migration](apps/api/migrations/0001_v001_human_core.sql)、[0002 migration](apps/api/migrations/0002_p02_task_goal_alignment.sql) 与 [0003 migration](apps/api/migrations/0003_schema_readiness.sql)。
 
-尚未交付或尚未完成整体验证（不要当作已放行）：M03 生产恢复全场景、真实 Provider 连通和用户可见首字流式输出；真实 Git/CLI Gateway 适配与宿主外进程隔离、PDF 导入、孤儿核对报告与启动内容抽检；项目归档写命令；Python 工具层、Windows 安装包、备份恢复与 OpenAPI。OpenAI 兼容 ModelPort、Assist、首批 Skill/Pack、蓝图、低风险 Files/Web 和追溯已有代码及开发自检，不能据此宣称真实模型、真实桌面业务或 M04/M05 独立验收通过。M02 桌面基础已独立验收，但不能据此称完整 Windows 安装交付。本段实际覆盖与下一步见 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)。
+尚未交付或尚未完成整体验证（不要当作已放行）：M03 生产恢复全场景、真实 Provider 故障路径与 Windows 联测、首输出延迟验收（2026-09-29 隔离 DRAFT/HARD SEMANTIC/取消已定向通过，详见当前进度）；真实 Git/CLI Gateway 适配与宿主外进程隔离、PDF 导入、孤儿核对报告与启动内容抽检；项目归档写命令；Python 工具层、Windows 安装包、备份恢复与 OpenAPI。OpenAI 兼容 ModelPort、Assist、首批 Skill/Pack、蓝图、低风险 Files/Web 和追溯已有代码及开发自检，不能据此宣称真实模型、真实桌面业务或 M04/M05 独立验收通过。M02 桌面基础已独立验收，但不能据此称完整 Windows 安装交付。本段实际覆盖与下一步见 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)。
 
 ## workspace 与嵌套目录
+
+Git 保留源码、迁移、文档及验收证据；`docs/testing/evidence` 下的日志也纳入版本。`.tmp-*` 临时工具、构建/缓存、进程输出和本机环境配置由 `.gitignore` 排除，已有跟踪项仅解除跟踪，文件仍保留在本机。`.env.example` 与 `desktop.env.example` 配置模板继续保留。
 
 根 `pnpm-workspace.yaml` 只把 `apps/api` 纳入 workspace；`apps/workbench` 与 `experiments/*` 保留各自独立的 `package.json` 与 `pnpm-lock.yaml`，未纳入也不会被改动。需要知道的副作用：pnpm 会从上层目录发现 workspace 根，因此在那些子目录里执行 `pnpm install` 会解析到根 workspace（只安装根 workspace 的依赖）；`pnpm run <script>` 仍使用所在目录的 manifest。要在子目录按自身锁文件安装，使用 `pnpm install --ignore-workspace`（pnpm 9.15.9 实测可行）；`scripts/dev-stack.ps1` 已显式这样调用，前端依赖仍装在自己的目录。

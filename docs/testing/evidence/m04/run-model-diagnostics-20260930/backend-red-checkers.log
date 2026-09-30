@@ -1,0 +1,36 @@
+✔ markdown-structure-v1 only judges the required structure (1.1003ms)
+✔ citation-exists-v1 reports existence only and never claims support (0.7763ms)
+✔ fake-semantic-v1 distinguishes unsupported claims from uncertainty (0.1932ms)
+✔ human-evidence-v1 stays NOT_RUN so the worker cannot self-accept (0.133ms)
+✔ CHECKER_ERROR replaces the deterministic checkers with an ERROR result (0.1786ms)
+✔ the registry resolves by id and version and refuses unregistered pairs (0.0907ms)
+✔ semantic-model-v1 maps model verdicts and treats evaluation failures as ERROR (0.903ms)
+✖ semantic failures retain the six Provider categories without raw messages (1.4738ms)
+✔ semantic local failures and cancellation do not invent a Provider category (0.3289ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 8
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 102.7115
+
+✖ failing tests:
+
+test at apps\api\dist\test\unit\checkers.test.js:148:1
+✖ semantic failures retain the six Provider categories without raw messages (1.4738ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  'Error' !== 'AUTH'
+  
+      at TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/unit/checkers.test.js:165:16)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'Error',
+    expected: 'AUTH',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

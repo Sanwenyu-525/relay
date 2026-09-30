@@ -1,0 +1,43 @@
+# 真实外呼验证：VERIFY 死锁修复后（real-model-semantics-after-fix）
+
+- 日期：2026-09-29
+- 执行者：VERIFY 语义检查自死锁修复子 Agent
+- 路径：opt-in 集成 `apps/api/test/integration/real-model.integration.test.ts`，经 `apps/api/scripts/run-integration.ps1 -SkipBuild -TestFile real-model` 运行；RELAY_MODEL_* 六键由临时 runner（.tmp-verifyfix/run-real-model.cjs，用后删除）从 apps/api/.env 注入进程环境，值不打印、不落日志；一次性 PG18 集群（动态端口，用后 pg_ctl stop 并删除目录）。
+- 脱敏声明：本日志不含 RELAY_MODEL_API_KEY 与 RELAY_API_BEARER_TOKEN 值；对两份运行日志做过 `grep -cE "sk-[A-Za-z0-9]|RELAY_MODEL_API_KEY="` 均为 0 命中。Provider：openai-compatible / agnes-3.0-flash（配置名，非密钥）。
+
+## 1. 结论
+
+| 用例 | 修复前（model-task-chain.log） | 修复后第 1 轮 | 修复后第 2 轮（最终） |
+|---|---|---|---|
+| test 1 真实 DRAFT 至 WAITING_APPROVAL（完成门保持） | 通过 | 通过 15.5s | **通过 9.9s** |
+| test 2 HARD SEMANTIC 真实语义检查端到端（原死锁用例） | **挂起 >25 分钟（死锁）** | **通过 11.0s** | **通过 3.8s** |
+| test 3 真实语义调用在途时提交 CANCEL 意图 | （当时不存在） | 通过 7.9s | **通过 8.5s** |
+| test 4 真实语义调用在途中止（abort）+ CANCEL 意图 | （当时不存在） | 失败 4.2s（用例缺控制意图，见下） | **通过 6.4s** |
+| 套件 | 挂起 | 3/4 | **4/4 PASSED（status: PASSED，集群已清理）** |
+
+第 2 轮命令摘要：tests exit code 0 / business migration 0 / graph install 0 / postgres stop 0 / temporary cluster removed: True。
+
+## 2. 死锁消除判据
+
+- test 2 从"挂起 >25 分钟、pg_stat_activity 双连接互等、无 SEMANTIC_CHECK 账本行"变为 3.8–11.0s 内收敛 WAITING_APPROVAL。
+- 用例内部断言（通过即证据）：
+  - check_results 出现 checker_id='semantic-model-v1' 行，result='PASS'，evidence.fake=false，usage.input_tokens>0（真实 token 用量，非 Fake 模板）；
+  - Run 终态 WAITING_APPROVAL；completion_records=0（HUMAN 判据 NOT_RUN/AWAITING_HUMAN_EVIDENCE，完成门保持）。
+- 账本完整性：test 3/4 断言 SEMANTIC_CHECK 账本行结算为 COMPLETED / CANCELLED，无孤儿 STARTED；test 3/4 断言 check_results=0（被抢占/中止的验证不写检查结果）。
+
+## 3. 第 1 轮唯一失败的定性与修正
+
+- test 4 失败断言：`(await applySafeControl(app.db, runId))?.status` 期望 'APPLIED'，实际 undefined。
+- 定性：**用例场景缺陷，非产品代码缺陷**。该用例只 abort 了 AbortSignal、从未提交 CANCEL 控制意图；`applySafeControl` 无 PENDING 控制时返回 null（apps/api/src/application/control-requests.ts:124-125）。且按核心约束 6"控制意图必须持久化"，纯信号中止是 Worker 丢失（走 INVOCATION_LOST + 恢复），不得也不应把 Run 记成 CANCELLED——原断言若靠产品代码达成反而违反不变量。
+- 修正（最小增量，仅测试文件）：`waitForSemanticLedgerRow` 后先读 revisions、`requestRunControl(type:'CANCEL')` 持久化取消意图，再 `controller.abort()`；其余断言不变（INVOCATION_LOST、账本 CANCELLED 非 STARTED、check_results=0、fenceWorker 后 APPLIED、Run CANCELLED）。
+- 修正后第 2 轮 4/4 通过。
+
+## 4. 外呼总量与稳定性
+
+- 本修复会话真实 Provider 外呼共约 11 次（第 1 轮：DRAFT×4 + 语义×3；第 2 轮：DRAFT×4 + 语义×3 中止/完成混合），无失败重试循环、无挂起。
+- test 2 的 PASS 判定来自模型对固定小任务文案（含随机探针标记）的语义评估，用例文案不含项目资料。
+
+## 5. 运行环境与限制
+
+- 集群：一次性 relay_api_test_* 库，动态回环端口（本次 12155 等），postgres stop exit 0、临时目录 removed: True。
+- 限制：真实语义判定依赖 Provider 的非确定性输出；用例选择的结构性规则（「结论」二级小节 + 明确总结）使 PASS 判定稳定，但不声称模型语义判断绝对正确（checker 侧 fake:false 仅为真实检查器标识）。

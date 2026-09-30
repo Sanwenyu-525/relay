@@ -125,6 +125,28 @@ export interface ProjectViewConfigurationRow {
   readonly updated_at: Date;
 }
 
+export interface ProjectContinuationPointRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly project_id: string;
+  readonly name: string;
+  readonly note: string | null;
+  readonly state_phase_key: string;
+  readonly state_revision: bigint;
+  readonly next_action_task_id: string | null;
+  readonly captured_at: Date;
+}
+
+export interface ProjectContinuationPointRefRow {
+  readonly continuation_point_id: string;
+  readonly ref_kind: 'TASK' | 'ARTIFACT_VERSION';
+  readonly ref_id: string;
+  readonly ref_revision: bigint;
+  readonly ordinal: number;
+  readonly task_id: string | null;
+  readonly artifact_version_id: string | null;
+}
+
 export interface ProjectBlueprintProposalRow {
   readonly id: string;
   readonly workspace_id: string;
@@ -880,6 +902,7 @@ export interface AssistMessageRow {
   readonly intent: AssistIntent;
   readonly content: string | null;
   readonly error_code: string | null;
+  readonly provider_error_kind: import('../workflow/model-error-classification.js').ModelErrorCategory | null;
   readonly sources: JsonObject;
   readonly skill_snapshot: JsonObject | null;
   readonly skill_input: JsonObject | null;
@@ -1004,6 +1027,8 @@ export interface RelayDatabaseSchema {
   workspace_execution_authority: WorkspaceExecutionAuthorityRow;
   projects: ProjectRow;
   project_view_configurations: ProjectViewConfigurationRow;
+  project_continuation_points: ProjectContinuationPointRow;
+  project_continuation_point_refs: ProjectContinuationPointRefRow;
   project_blueprint_proposals: ProjectBlueprintProposalRow;
   goals: GoalRow;
   project_goals: ProjectGoalRow;

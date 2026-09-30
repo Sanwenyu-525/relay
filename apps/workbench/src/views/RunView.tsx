@@ -1,20 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { AlertTriangle, RotateCcw } from "lucide-react";
 import ResponsiveRail from "../components/ResponsiveRail";
 import RunSourcesPanel from "../components/RunSourcesPanel";
 import RunTracePanel from "../components/RunTracePanel";
+import RunControlPanel, { runLabels, stepLabels, stepStatusLabels } from "../components/RunControlPanel";
 import FileWriteDispositionPanel from "../components/FileWriteDispositionPanel";
-import { createCommandId, RelayApiError, RelayRunEventHttpError, RelayTransportError, type RelayControlRequest, type RelayControlType, type RelayContextBuild, type RelayContextManifestDetail, type RelayContextManifestSummary, type RelayReview, type RelayRun, type RelayRunDraftPreview, type RelayRunGatewayOperation, type RelayTaskDetail } from "../api/relayClient";
+import { RelayApiError, RelayRunEventHttpError, RelayTransportError, type RelayControlRequest, type RelayContextBuild, type RelayContextManifestDetail, type RelayContextManifestSummary, type RelayReview, type RelayRun, type RelayRunGatewayOperation, type RelayTaskDetail } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { executorLabels, taskStatusLabels } from "../lib/labels";
 import { liveClient, useRelayConnection } from "../lib/relayConnection";
+import { useRunDraftPreview } from "../lib/useRunDraftPreview";
 
-const controlLabels: Record<RelayControlType, string> = { PAUSE: "请求暂停 Run", CANCEL: "请求停止 Run", HANDOFF: "请求交接给人工", CANCEL_TASK: "请求取消任务" };
-const runLabels: Record<string, string> = { CREATED: "待启动", CONTEXT_BUILDING: "构建上下文", PLANNING: "规划中", RUNNING: "执行中", WAITING_APPROVAL: "等待人工判断", VERIFYING: "验证中", RETRYING: "修正中", PAUSED: "已暂停", COMPLETED: "已完成", FAILED: "失败", CANCELLED: "已停止" };
-const stepLabels: Record<string, string> = { BUILD_CONTEXT: "构建上下文", DRAFT: "生成草稿", PERSIST_CANDIDATE: "保存候选产物", VERIFY: "验证", COMPLETE: "提交完成" };
-const stepStatusLabels: Record<string, string> = { PENDING: "待执行", RUNNING: "执行中", SUCCEEDED: "已完成", FAILED: "失败", CANCELLED: "已取消", SKIPPED: "已跳过" };
-const controlPendingNotes: Record<RelayControlType, string> = { PAUSE: "Run 尚未暂停", CANCEL: "Run 尚未停止", HANDOFF: "尚未交接，人工编辑入口未开放", CANCEL_TASK: "任务尚未取消" };
 function sourceReadError(caught: unknown): string {
   if (caught instanceof RelayApiError && [403, 404].includes(caught.problem.status)) return "来源已不可读取或当前范围无权查看。旧片段已清除，请重新核对权限。";
   return describeLiveError(caught).message;
@@ -40,19 +37,15 @@ export default function RunView() {
   const [projectReadError, setProjectReadError] = useState<string | null>(null);
   const [reviews, setReviews] = useState<readonly RelayReview[]>([]);
   const [controlRecord, setControlRecord] = useState<RelayControlRequest | null>(null);
-  const [acceptedControl, setAcceptedControl] = useState<{ id: string; type: RelayControlType } | null>(null);
-  const acceptedControlRef = useRef(acceptedControl); acceptedControlRef.current = acceptedControl;
-  const [pendingCommand, setPendingCommand] = useState<{ id: string; kind: "control" | "resume"; type?: RelayControlType } | null>(null);
+  // 控制面板在同一次提交里先回传 ID 再触发重读；用 ref 承接，避免重读读到上一帧的 null。
+  const acceptedControlIdRef = useRef<string | null>(null);
+  const reportControlAccepted = useCallback((controlRequestId: string | null) => {
+    acceptedControlIdRef.current = controlRequestId;
+  }, []);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [eventStatus, setEventStatus] = useState<"connecting" | "connected" | "reconnecting" | "unauthorized" | null>(null);
-  const [draftPreview, setDraftPreview] = useState<RelayRunDraftPreview | null>(null);
-  const draftPreviewRef = useRef<RelayRunDraftPreview | null>(null);
-  const previewIdentity = useRef<string | null>(null);
   const [sourceBuild, setSourceBuild] = useState<RelayContextBuild | null>(null);
   const [sourceManifests, setSourceManifests] = useState<readonly RelayContextManifestSummary[]>([]);
   const sourceManifestsRef = useRef<readonly RelayContextManifestSummary[]>([]);
@@ -77,7 +70,8 @@ export default function RunView() {
   const draftStep = run?.steps.find((step) => step.id === run.currentStepId);
   const lastSucceededSteps = run?.steps.filter((step) => step.status === "SUCCEEDED") ?? [];
   const lastSettledStep = lastSucceededSteps.length ? lastSucceededSteps[lastSucceededSteps.length - 1] : null;
-  const handoffApplied = controlRecord !== null && controlRecord.type === "HANDOFF" && controlRecord.status === "APPLIED";
+  const failedReasons = [...new Set((run?.steps ?? []).map((step) => step.reason)
+    .filter((reason): reason is string => typeof reason === "string" && reason !== ""))];
   const inFlightGateway = gatewayOperations.filter((operation) => ["PREPARED", "DISPATCHING", "UNKNOWN"].includes(operation.status));
   const canReadDraft = live && run?.id === id && run.status === "RUNNING" && activeRun &&
     draftStep?.kind === "DRAFT" && draftStep.status === "RUNNING" &&
@@ -86,7 +80,8 @@ export default function RunView() {
     : projectArchivedAt === undefined || refreshing || loading || error !== null
       ? `Project 事实正在核对或读取失败，不能提交新的 Run 控制命令。${projectReadError ?? ""}`
       : projectArchivedAt !== null ? "项目已归档，不能提交新的 Run 控制命令。" : null;
-  const canControl = live && run?.id === id && activeRun && !terminal && projectWriteBlockedReason === null && run?.pendingControlRequest === null && pendingCommand === null && !submitting;
+  const draftPreview = useRunDraftPreview({ client: connection.client, runId: id, revision: run?.revision ?? "",
+    currentStepId: run?.currentStepId ?? null, enabled: canReadDraft, onSettled: () => { void load(false); } });
   const openReviews = reviews.filter((review) => review.status === "OPEN");
 
   async function selectSource(manifestId: string, runId = runRef.current?.id) {
@@ -153,18 +148,17 @@ export default function RunView() {
       if (version !== requestVersion.current) return;
       setRun(loadedRun); runRef.current = loadedRun; setTask(loadedTask); setReviews(loadedReviews); setProjectArchivedAt(archivedAt); setProjectReadError(projectFailure);
       if (includeSources) void loadSources(loadedRun.id);
-      const controlId = loadedRun.pendingControlRequest?.id ?? acceptedControlRef.current?.id;
+      const controlId = loadedRun.pendingControlRequest?.id ?? acceptedControlIdRef.current;
       if (controlId) { const loadedControl = await client.getControlRequest(loadedRun.id, controlId); if (version !== requestVersion.current) return; setControlRecord(loadedControl); }
       else setControlRecord(null);
     } catch (caught) { if (version === requestVersion.current) setError(describeLiveError(caught).message); }
     finally { if (version === requestVersion.current) { setLoading(false); setRefreshing(false); } }
   }
   useEffect(() => {
-    targetVersion.current++; requestVersion.current++; runRef.current = null; setRun(null); setTask(null); setProjectArchivedAt(undefined); setProjectReadError(null); setReviews([]); setControlRecord(null); setAcceptedControl(null); acceptedControlRef.current = null; setPendingCommand(null);
-    draftPreviewRef.current = null; previewIdentity.current = null; setDraftPreview(null);
+    targetVersion.current++; requestVersion.current++; runRef.current = null; setRun(null); setTask(null); setProjectArchivedAt(undefined); setProjectReadError(null); setReviews([]); setControlRecord(null); reportControlAccepted(null);
     gatewayRequestVersion.current++; setGatewayOpen(false); setGatewayOperations([]); setGatewayLoading(false); setGatewayError(null);
     setTraceOpen(false);
-    sourceRequestVersion.current++; sourceDetailVersion.current++; setSourceBuild(null); setSourceManifests([]); sourceManifestsRef.current = []; setSourceSelectedId(null); selectedSourceRef.current = null; setSourceDetail(null); setSourceLoading(false); setSourceDetailLoading(false); setSourceError(null); setSubmitting(false); setActionError(null); setActionMessage(null);
+    sourceRequestVersion.current++; sourceDetailVersion.current++; setSourceBuild(null); setSourceManifests([]); sourceManifestsRef.current = []; setSourceSelectedId(null); selectedSourceRef.current = null; setSourceDetail(null); setSourceLoading(false); setSourceDetailLoading(false); setSourceError(null);
     void load();
     return () => { targetVersion.current++; requestVersion.current++; sourceRequestVersion.current++; sourceDetailVersion.current++; gatewayRequestVersion.current++; };
   }, [id, connection.client]);
@@ -229,79 +223,6 @@ export default function RunView() {
     })();
     return () => { active = false; abort.abort(); window.clearInterval(interval); if (refreshTimer !== null) window.clearTimeout(refreshTimer); };
   }, [id, connection.client, run?.id]);
-  useEffect(() => {
-    draftPreviewRef.current = null; previewIdentity.current = null; setDraftPreview(null);
-    if (!canReadDraft || !connection.client) return;
-    const client = connection.client;
-    const scope = targetVersion.current;
-    let active = true;
-    let timer: number | undefined;
-    async function poll() {
-      let delay = 400;
-      try {
-        const next = await client.getRunDraftPreview(id);
-        if (!active || scope !== targetVersion.current || runRef.current?.id !== id || client !== liveClient()) return;
-        if (next.runStatus !== "RUNNING" || !next.previewAvailable) {
-          draftPreviewRef.current = null; previewIdentity.current = null; setDraftPreview(null);
-          if (next.runStatus === "COMPLETED" || next.runStatus === "FAILED" || next.runStatus === "CANCELLED") {
-            active = false; void load(false);
-          }
-        } else {
-          const identity = `${next.stepAttemptId}:${next.attemptClaimEpoch}:${next.modelCallId ?? "none"}`;
-          if (identity !== previewIdentity.current) {
-            const hadText = draftPreviewRef.current !== null;
-            draftPreviewRef.current = null; setDraftPreview(null); previewIdentity.current = identity;
-            if (hadText) { timer = window.setTimeout(() => { void poll(); }, 400); return; }
-          }
-          if (next.previewText === null) { draftPreviewRef.current = null; setDraftPreview(null); }
-          else if (draftPreviewRef.current === null ||
-            BigInt(next.previewRevision) >= BigInt(draftPreviewRef.current.previewRevision)) {
-            draftPreviewRef.current = next; setDraftPreview(next);
-          }
-        }
-      } catch (caught) {
-        if (!active || scope !== targetVersion.current) return;
-        draftPreviewRef.current = null; previewIdentity.current = null; setDraftPreview(null);
-        if (caught instanceof RelayApiError && (caught.problem.status === 404 || caught.problem.status === 403)) {
-          active = false; void load(false);
-        } else delay = 1000;
-      }
-      if (active) timer = window.setTimeout(() => { void poll(); }, delay);
-    }
-    void poll();
-    return () => { active = false; if (timer !== undefined) window.clearTimeout(timer); };
-  }, [canReadDraft, id, connection.client, run?.revision, run?.currentStepId]);
-  async function submitControl(type: RelayControlType) {
-    const client = liveClient();
-    if (!client || !run || !task || !canControl || (type === "PAUSE" && run.status === "PAUSED")) return;
-    const commandId = createCommandId(); const context = targetVersion.current;
-    setPendingCommand({ id: commandId, kind: "control", type }); setSubmitting(true); setActionError(null); setActionMessage(null);
-    try { const result = await client.requestRunControl({ runId: run.id, commandId, expectedTaskRevision: task.revision, expectedRunRevision: run.revision, type }); if (context !== targetVersion.current) return; if (result.taskId !== task.id) throw new RelayTransportError("控制回执的任务与当前 Run 不匹配。"); setPendingCommand(null); const accepted = { id: result.controlRequestId, type }; setAcceptedControl(accepted); acceptedControlRef.current = accepted; setActionMessage(`${controlLabels[type]}提交回执为 202 / PENDING；下方 Run 与控制请求状态是随后查询的当前事实。`); await load(); }
-    catch (caught) { if (context !== targetVersion.current) return; if (caught instanceof RelayTransportError) setActionError("响应丢失或无法核对，控制请求是否入库尚未确定。请查询原 command_id 回执，不能换 ID 再提交。"); else { setPendingCommand(null); setActionError(describeLiveError(caught).message); if (caught instanceof RelayApiError && ["REVISION_CONFLICT", "CONTROL_CONFLICT", "INVALID_TRANSITION", "RUN_TERMINAL", "UNKNOWN_ACTION_BLOCKED"].includes(caught.problem.code)) await load(); } }
-    finally { if (context === targetVersion.current) setSubmitting(false); }
-  }
-  async function resume() {
-    const client = liveClient(); if (!client || !run || !task || !canControl || run.status !== "PAUSED") return;
-    const commandId = createCommandId(); const context = targetVersion.current;
-    setPendingCommand({ id: commandId, kind: "resume" }); setSubmitting(true); setActionError(null); setActionMessage(null);
-    try { await client.resumeRun({ runId: run.id, commandId, expectedTaskRevision: task.revision, expectedRunRevision: run.revision }); if (context !== targetVersion.current) return; setPendingCommand(null); setActionMessage("恢复命令已受理（202）。已重新读取 Run；实际状态以服务端查询为准。"); await load(); }
-    catch (caught) { if (context !== targetVersion.current) return; if (caught instanceof RelayTransportError) setActionError("响应丢失或无法核对，恢复是否受理尚未确定。请查询原 command_id 回执，不能换 ID 再提交。"); else { setPendingCommand(null); setActionError(describeLiveError(caught).message); if (caught instanceof RelayApiError && ["REVISION_CONFLICT", "CONTROL_CONFLICT", "INVALID_TRANSITION", "UNKNOWN_ACTION_BLOCKED"].includes(caught.problem.code)) await load(); } }
-    finally { if (context === targetVersion.current) setSubmitting(false); }
-  }
-  async function checkReceipt() {
-    const pending = pendingCommand; const client = liveClient(); if (!pending || !client || submitting) return;
-    const context = targetVersion.current; setSubmitting(true);
-    try {
-      const receipt = await client.getCommandReceipt(pending.id); if (context !== targetVersion.current) return;
-      const result = receipt.result;
-      const matchesRun = receipt.commandId === pending.id && result.run_id === id;
-      const matchesCommand = pending.kind === "control" ? receipt.commandType === "RequestRunControl" && result.task_id === task?.id && result.type === pending.type && result.status === "PENDING" && typeof result.control_request_id === "string" && result.control_request_id.length > 0 : receipt.commandType === "ResumeRun" && typeof result.status === "string" && result.status.length > 0;
-      if (!matchesRun || !matchesCommand || typeof result.run_revision !== "string" || !/^\d+$/.test(result.run_revision)) { setActionError("原命令回执与当前 Run 或命令类型不匹配，结果仍未确定。请保留原 command_id 核对。"); return; }
-      if (pending.kind === "control") { const accepted = { id: result.control_request_id as string, type: pending.type as RelayControlType }; setAcceptedControl(accepted); acceptedControlRef.current = accepted; }
-      setPendingCommand(null); setActionError(null); setActionMessage("已找到原命令回执；正在核对 Run 与控制请求的最新状态。"); await load();
-    } catch (caught) { if (context === targetVersion.current) setActionError(caught instanceof RelayApiError && caught.problem.code === "COMMAND_NOT_FOUND" ? "暂未找到原命令回执，结果仍未确定。请稍后继续用同一个 command_id 核对。" : describeLiveError(caught).message); }
-    finally { if (context === targetVersion.current) setSubmitting(false); }
-  }
   if (loading) return <section className="page-state" aria-live="polite"><p className="eyebrow">Run</p><h1>正在读取执行记录</h1></section>;
   if (!live) return <section className="page-state" data-testid="run-fixture-gap"><p className="eyebrow">Run</p><h1>示例模式没有真实 Run</h1><p>连接本机 API 后才能读取步骤、未决请求和控制状态。示例数据不生成执行记录。</p><Link className="text-link" to="/tasks">返回任务列表</Link></section>;
   if (error) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">Run</p><h1>暂时无法读取执行记录</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
@@ -311,8 +232,8 @@ export default function RunView() {
     <section className="surface-panel" data-testid="run-gateway-operations"><h2>Gateway 动作历史</h2><p className="helper-text">按当前权限读取本次 Run 的动作历史；批准请求和实际写入状态分别核对。</p><button className="secondary-button" type="button" onClick={() => { if (gatewayOpen) { setGatewayOpen(false); gatewayRequestVersion.current++; } else setGatewayOpen(true); }}>{gatewayOpen ? "收起动作历史" : "查看动作历史"}</button>{gatewayOpen && <><button className="secondary-button" type="button" disabled={gatewayLoading} onClick={() => void loadGatewayOperations(run.id)}>刷新动作历史</button>{gatewayLoading && <p className="helper-text" role="status">正在读取动作历史。</p>}{gatewayError && <p className="action-error" role="alert">{gatewayError}</p>}{!gatewayLoading && !gatewayError && (gatewayOperations.length ? <ul className="run-list">{gatewayOperations.map((operation) => <li key={operation.id}><strong>{operation.actionType} · {operation.status}</strong><div>原 operation_id：{operation.id}</div><div>目标：{operation.normalizedTarget}</div><div>Invocation：{operation.invocationStatuses.length ? operation.invocationStatuses.join("、") : "尚未调用"}</div></li>)}</ul> : <p className="helper-text">本次 Run 暂无文件动作记录。</p>)}</>}</section>
     {gatewayOpen && connection.client && gatewayOperations.filter((operation) => ["APPLY_CHANGESET", "WRITE_FILE"].includes(operation.actionType)).map((operation) => <section className="surface-panel" key={operation.id} data-testid="run-file-write-operation"><h2>FILE_WRITE 原动作 · {operation.status}</h2><p className="helper-text">原 operation_id：{operation.id}。逐文件账本和当前文件状态分别读取；人工处置只结束旧 Run，不确认所有文件均已写入。</p><FileWriteDispositionPanel client={connection.client!} operationId={operation.id} runId={run.id} runRevision={run.revision} onFactsChanged={async () => { await load(); await loadGatewayOperations(run.id); }} /></section>)}
     {run.status === "PAUSED" && <section className="surface-panel" data-testid="run-paused-summary"><h2>已暂停摘要</h2><p className="helper-text">服务端事实：Run 已在安全边界内暂停（PAUSED）{run.waitReason ? ` · 等待原因：${run.waitReason}` : ""}。当前执行者仍为 {executorLabels[task.executor]}；暂停不自动转移执行权，人工确认不等于接手。</p><ul className="run-list"><li><strong>恢复点</strong> · {lastSettledStep ? `最后完成步骤：${stepLabels[lastSettledStep.kind] ?? lastSettledStep.kind}` : "尚无已完成步骤"} · 服务端 current_step_id：{run.currentStepId ?? "无"}。Resume 将重新检查契约、权限与资源后从服务端恢复点继续；恢复时原阻塞 Review 仍未解决会先返回等待判断，不提前继续执行。</li><li><strong>已保存产物</strong> · Run 级产物清单接口待接入；本 Run 已保存的候选产物版本请从 <Link className="text-link" to={`/tasks/${run.taskId}`}>任务详情</Link> 的产物区按确切版本核对，不在此页推断已保存内容。</li><li><strong>资源占用</strong> · 见「资源与租约」面板；已暂停不等于进程已停或资源已释放。</li></ul></section>}
-    {run.status === "FAILED" && <section className="surface-panel" data-testid="run-failed" role="status"><h2>执行失败</h2><p className="helper-text">Run 已按服务端结果进入失败终态；已保存的步骤证据、候选产物版本与动作账本保留，可通过下方步骤时间线、动作历史与 Run Trace 继续查看。</p><p className="helper-text">重试会创建新的 Run，不复用本 Run，也不改写本页历史；请从 <Link className="text-link" to={`/tasks/${run.taskId}`}>任务详情</Link> 重新委托。本页不提供重试或改成功按钮；存在未结清动作时先按上方核对流程处理。</p></section>}
-    <section className="surface-panel" data-testid="run-steps"><h2>步骤时间线与最近尝试</h2>{!run.steps.length ? <p className="helper-text">尚无步骤记录。</p> : <ol className="run-list">{run.steps.map((step) => <li key={step.id}><strong>{step.index + 1}. {stepLabels[step.kind] ?? step.kind}</strong> · {stepStatusLabels[step.status] ?? step.status}{step.id === run.currentStepId && <> · 当前步骤</>}<div className="helper-text">{step.startedAt ?? "未开始"} → {step.finishedAt ?? "未结束"}</div></li>)}</ol>}{draftStep && <p className="helper-text" data-testid="run-current-action">当前动作：{stepLabels[draftStep.kind] ?? draftStep.kind} · {stepStatusLabels[draftStep.status] ?? draftStep.status}{run.pendingControlRequest ? "；控制请求将在安全点处理，实际状态以服务端查询为准。" : "；状态以服务端查询为准。"}</p>}{!!run.recentAttempts.length && <><p className="helper-text">最近尝试</p><ul className="run-list">{run.recentAttempts.map((attempt) => <li key={attempt.id}>{stepLabels[attempt.stepKind] ?? attempt.stepKind} · 第 {attempt.number} 次 · {stepStatusLabels[attempt.status] ?? attempt.status}</li>)}</ul></>}</section>
+    {run.status === "FAILED" && <section className="surface-panel" data-testid="run-failed" role="status"><h2>执行失败</h2><p className="helper-text">Run 已按服务端结果进入失败终态；已保存的步骤证据、候选产物版本与动作账本保留，可通过下方步骤时间线、动作历史与 Run Trace 继续查看。</p>{failedReasons.length > 0 && <p className="helper-text" data-testid="run-failed-reasons">服务端给出的失败原因：{failedReasons.join("、")}。原因由步骤结果原样带出；模型端口可用性与账本证据见「模型连接」。</p>}<p className="helper-text">重试会创建新的 Run，不复用本 Run，也不改写本页历史；请从 <Link className="text-link" to={`/tasks/${run.taskId}`}>任务详情</Link> 重新委托。本页不提供重试或改成功按钮；存在未结清动作时先按上方核对流程处理。</p></section>}
+    <section className="surface-panel" data-testid="run-steps"><h2>步骤时间线与最近尝试</h2>{!run.steps.length ? <p className="helper-text">尚无步骤记录。</p> : <ol className="run-list">{run.steps.map((step) => <li key={step.id}><strong>{step.index + 1}. {stepLabels[step.kind] ?? step.kind}</strong> · {stepStatusLabels[step.status] ?? step.status}{step.id === run.currentStepId && <> · 当前步骤</>}{step.reason !== null && <> · 原因 {step.reason}</>}<div className="helper-text">{step.startedAt ?? "未开始"} → {step.finishedAt ?? "未结束"}</div></li>)}</ol>}{draftStep && <p className="helper-text" data-testid="run-current-action">当前动作：{stepLabels[draftStep.kind] ?? draftStep.kind} · {stepStatusLabels[draftStep.status] ?? draftStep.status}{run.pendingControlRequest ? "；控制请求将在安全点处理，实际状态以服务端查询为准。" : "；状态以服务端查询为准。"}</p>}{!!run.recentAttempts.length && <><p className="helper-text">最近尝试</p><ul className="run-list">{run.recentAttempts.map((attempt) => <li key={attempt.id}>{stepLabels[attempt.stepKind] ?? attempt.stepKind} · 第 {attempt.number} 次 · {stepStatusLabels[attempt.status] ?? attempt.status}</li>)}</ul></>}</section>
     {canReadDraft && draftPreview?.previewAvailable && draftPreview.previewText !== null && <section className="surface-panel" data-testid="run-draft-preview"><h2>生成中草稿</h2><p className="helper-text">Run DRAFT 当前轮次 · 预览 v{draftPreview.previewRevision} · 尚非受管产物、验证 PASS 或任务完成{draftPreview.previewTruncated ? " · 预览已截断" : ""}</p><pre className="run-draft-preview-text">{draftPreview.previewText}</pre></section>}
     <div className="run-actions"><button className="secondary-button" type="button" data-testid="run-trace-toggle" onClick={() => setTraceOpen((open) => !open)}>{traceOpen ? "收起完整 Run Trace" : "查看完整 Run Trace"}</button></div>
     {traceOpen && connection.client && <RunTracePanel client={connection.client} runId={run.id} taskId={task.id} runRevision={run.revision} />}
@@ -327,7 +248,7 @@ export default function RunView() {
         <div><dt>当前执行者</dt><dd>{executorLabels[task.executor]}</dd></div>
         {run.waitReason && <div><dt>等待原因</dt><dd>{run.waitReason}</dd></div>}
       </dl><p className="helper-text">本栏与主列引用同一服务端事实；Run、任务执行者与控制状态以重新查询为准。</p></section>
-    <section className="surface-panel" data-testid="run-control"><h2>控制请求</h2><p className="helper-text">控制提交回执表示 PENDING；安全点可能随后处理请求。Run、任务执行者与控制状态以重新查询为准。</p>{projectWriteBlockedReason && <p className="disabled-reason" data-testid="run-project-archive-reason">{projectWriteBlockedReason}</p>}{run.pendingControlRequest && <p className="receipt-message" role="status" data-testid="run-control-pending">{controlLabels[run.pendingControlRequest.type]}：{run.pendingControlRequest.status}。{controlPendingNotes[run.pendingControlRequest.type]}，等待安全点处理；当前执行者仍为 {executorLabels[task.executor]}。请求 {run.pendingControlRequest.id}。</p>}{controlRecord && <p className="helper-text" data-testid="run-control-status">控制请求 {controlRecord.id}：{controlRecord.status}{controlRecord.decidedAt && <> · 处理时间 {controlRecord.decidedAt}</>}</p>}{terminal && controlRecord?.status === "PENDING" && <p className="helper-text" data-testid="run-terminal-race" role="status">Run 已按服务端结果进入「{runLabels[run.status] ?? run.status}」终态；停止与完成发生竞争时以服务端查询结果为准，提交意图不改写事实。控制请求 {controlRecord.id} 的实际处理结果同样以服务端为准。</p>}{(handoffApplied || (task.executor === "HUMAN" && terminal)) && <p className="receipt-message" data-testid="run-handoff-edit" role="status">{handoffApplied ? "已交接，可编辑。" : "任务当前执行者为人工（服务端事实）；本 Run 已结束且只读。"}人工编辑与保存版本在 <Link className="text-link" to={`/tasks/${run.taskId}`}>任务详情</Link> 进行；接手完成前的历史产物与原 Run 保持可追溯。</p>}{actionError && <p className="action-error" role="alert">{actionError}</p>}{actionMessage && <p className="receipt-message" role="status">{actionMessage}</p>}{pendingCommand && <p className="helper-text">原 command_id：{pendingCommand.id}</p>}<div className="run-actions">{pendingCommand ? <button className="secondary-button" type="button" data-testid="run-check-receipt" disabled={submitting} onClick={() => void checkReceipt()}>核对原命令回执</button> : <>{run.status === "PAUSED" ? <button className="primary-button" type="button" data-testid="run-resume" disabled={!canControl} onClick={() => void resume()}>恢复 Run</button> : <button className="secondary-button" type="button" data-testid="run-control-PAUSE" disabled={!canControl} onClick={() => void submitControl("PAUSE")}>{controlLabels.PAUSE}</button>}<button className="secondary-button" type="button" data-testid="run-control-CANCEL" disabled={!canControl} onClick={() => void submitControl("CANCEL")}>{controlLabels.CANCEL}</button><button className="secondary-button" type="button" data-testid="run-control-HANDOFF" disabled={!canControl} onClick={() => void submitControl("HANDOFF")}>{controlLabels.HANDOFF}</button><button className="danger-button" type="button" data-testid="run-control-CANCEL_TASK" disabled={!canControl} onClick={() => void submitControl("CANCEL_TASK")}>{controlLabels.CANCEL_TASK}</button></>}<button className="secondary-button" type="button" data-testid="run-refresh" disabled={refreshing || submitting} onClick={() => void load()}>刷新状态</button></div></section>
+    <RunControlPanel state={{ run, task, controlRecord, activeRun, terminal, projectWriteBlockedReason }} onReload={() => load(false)} onControlAccepted={reportControlAccepted} taskHref={`/tasks/${run.taskId}`} />
     <section className="surface-panel" data-testid="run-resources"><h2>资源与租约</h2><p className="helper-text">Run 级资源占有与租约没有独立查询接口（待接入）；以下只按服务端已返回的 Run 终态、未结清动作与已读取的动作历史如实显示，不推断旧进程是否停止。</p><ul className="run-list"><li><strong>工作目录排他</strong> · {terminal && run.unresolvedOperationIds.length === 0 ? "Run 已终态且无未结清动作；占有释放以服务端完成/失败提交事实为准，本页不据此宣称外部进程已停止。" : "Run 未终态或存在未结清动作：不能宣称资源已释放；同一实际工作目录跨 Task 也必须保持排他保护。"}</li>{run.unresolvedOperationIds.length > 0 && <li><strong>未结清动作</strong> · 相关资源保持隔离，不发放新的冲突写入。</li>}{gatewayOpen && !gatewayLoading && !gatewayError && inFlightGateway.length > 0 && <li><strong>在途或未知动作</strong> · {inFlightGateway.length} 项（{inFlightGateway.map((operation) => operation.id).join("、")}）；DISPATCHING 既不能证明已执行也不能证明未执行。</li>}{run.status === "PAUSED" && <li><strong>已暂停</strong> · 资源可能仍被占有；只有无在途动作、无未知结果且有安全检查点时才可能释放，Resume 须重新获得资源并校验期间变化。</li>}<li><strong>租约</strong> · 租约过期只说明旧 Worker 不再被信任，不能推断旧子进程已经停止；不能仅凭租约到期启动新的冲突命令。</li></ul></section>
     </div></ResponsiveRail>
   </div></section>;

@@ -1,0 +1,49 @@
+**********************
+PowerShell transcript start
+Start time: 20260930122853
+Username: LAPTOP-RTUVXZ-G\ASUS
+RunAs User: LAPTOP-RTUVXZ-G\ASUS
+Configuration Name: 
+Machine: LAPTOP-RTUVXZ-G (Microsoft Windows NT 10.0.22631.0)
+Host Application: C:\Users\ASUS\.cache\codex-runtimes\codex-primary-runtime\dependencies\native\powershell\pwsh.dll -Command try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}
+& .research/runtime-cache/node-v24.21.0-win-x64/node.exe apps/api/node_modules/typescript/bin/tsc -p apps/api/tsconfig.json *> docs/testing/evidence/m04/run-model-diagnostics-20260930/backend-build.log; if ($LASTEXITCODE -ne 0) { Get-Content docs/testing/evidence/m04/run-model-diagnostics-20260930/backend-build.log; exit $LASTEXITCODE }; Start-Transcript -Path docs/testing/evidence/m04/run-model-diagnostics-20260930/backend-green-traceability.log; & apps/api/scripts/run-integration.ps1 -SkipBuild -TestFile traceability -UseCLocale; Stop-Transcript; Start-Transcript -Path docs/testing/evidence/m04/run-model-diagnostics-20260930/backend-green-preview.log; & apps/api/scripts/run-integration.ps1 -SkipBuild -TestFile run-draft-preview -UseCLocale; Stop-Transcript
+Process ID: 18260
+PSVersion: 7.6.5
+PSEdition: Core
+GitCommitId: 7.6.5
+OS: Microsoft Windows 10.0.22631
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.4
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+Transcript started, output file is docs/testing/evidence/m04/run-model-diagnostics-20260930/backend-green-preview.log
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-f7bc1116ec
+Current source integration suites: 1
+
+[timing] initdbMs=4892
+
+[timing] postgresStartMs=391
+
+
+
+Test database: relay_api_test_ebad14a8be27 on 127.0.0.1:8096 (roles relay_migrator / relay_app)
+
+[timing] businessMigrationMs=665
+
+
+
+--- integration summary ---
+tests exit code: 0
+build exit code: skipped
+business migration exit code: 0
+graph install exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: PASSED
+**********************
+PowerShell transcript end
+End time: 20260930122921
+**********************

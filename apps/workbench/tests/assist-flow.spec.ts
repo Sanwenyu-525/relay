@@ -33,6 +33,38 @@ function proposal(status: string) {
 afterEach(() => { resetRelayConnectionForTest(); vi.unstubAllGlobals(); });
 
 describe("M04 Assist 真实路由与命令", () => {
+  it("Provider 六类失败显示中文处理指引，历史与业务失败不猜类别，也不自动重试", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    const categories = ["AUTH", "RATE_LIMIT", "TIMEOUT", "STREAM_BROKEN", "PROTOCOL", "NETWORK"];
+    const messages = categories.map((category, index) => ({
+      ...message(`failed-${index}`, String(index + 1), "ASSISTANT", "FAILED", null),
+      error_code: "MODEL_FAILED", provider_error_kind: category }));
+    const historical = { ...message("historical", "7", "ASSISTANT", "FAILED", null), error_code: "MODEL_FAILED" };
+    const budget = { ...message("budget", "8", "ASSISTANT", "FAILED", null),
+      error_code: "MODEL_BUDGET_EXHAUSTED", provider_error_kind: null };
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (init?.method === "POST") throw new Error("失败展示不能触发重试");
+      if (path === `${prefix}/projects/${projectId}`) return response({ id: projectId, title: "测试项目",
+        project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
+      if (path === `${prefix}/assist-sessions`) return response({ items: [session()] });
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages`)
+        return response({ items: [...messages, historical, budget] });
+      if (path === `${prefix}/assist-proposals`) return response({ items: [] });
+      throw new Error(`unexpected request ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench(`/projects/${projectId}?skill=assist`);
+    const guides = view.wrapper.findAll("[data-testid='assist-provider-error']");
+    expect(guides).toHaveLength(6);
+    ["认证失败", "限流", "超时", "流中断", "响应结构异常", "网络不可达"].forEach((label, index) => {
+      expect(guides[index]!.text()).toContain(label);
+    });
+    expect(view.wrapper.text()).toContain("MODEL_FAILED");
+    expect(view.wrapper.text()).toContain("MODEL_BUDGET_EXHAUSTED");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    view.unmount();
+  });
   it("已归档 Project Assist 深链可读历史会话，但禁新会话、消息、取消和接受提案", async () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {

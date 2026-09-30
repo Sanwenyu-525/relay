@@ -14,6 +14,7 @@ import { advanceRunStep } from '../../src/application/run-steps.js';
 import { withTransaction } from '../../src/application/unit-of-work.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
+import { AssistLivePreviewPublisher } from '../../src/assist/live-preview.js';
 import { createDataRoot, expectProblem, startTestApi, withTimeout, workspacePath,
   type TestApi } from './api-harness.js';
 import { APP_DATABASE_URL, MIGRATIONS_DIRECTORY, MIGRATION_DATABASE_URL,
@@ -240,4 +241,36 @@ test('retiring a selected Knowledge source hides the in-flight draft without sou
   // Source revocation is a preview read fence; the underlying DRAFT follows its
   // existing business commit protocol and is not rewritten by this projection.
   assert.equal((await draft.completion).status, 'STEP_SUCCEEDED');
+});
+
+test('local DRAFT preview TypeErrors are isolated from Provider network diagnostics', async () => {
+  for (const method of ['push', 'flush'] as const) {
+    const f = await fixture();
+    const originalPush = AssistLivePreviewPublisher.prototype.push;
+    const originalFlush = AssistLivePreviewPublisher.prototype.flush;
+    AssistLivePreviewPublisher.prototype[method] = async () => {
+      throw new TypeError('TOP_SECRET_LOCAL_PREVIEW_PAYLOAD');
+    };
+    // Force flush failures through the post-generation catch, independently of push.
+    if (method === 'flush') AssistLivePreviewPublisher.prototype.push = async () => {};
+    try {
+      await assert.rejects(advanceRunStep(app.db, { runId: f.runId,
+        workerId: f.workerId, storage }), { name: 'RunDraftPreviewWriteError' });
+    } finally {
+      AssistLivePreviewPublisher.prototype.push = originalPush;
+      AssistLivePreviewPublisher.prototype.flush = originalFlush;
+    }
+    const rows = await sql<{ status: string; error_kind: string }>`select c.status,
+      c.error_kind from model_calls c join step_attempts a on a.id = c.step_attempt_id
+      join run_steps s on s.id = a.step_id where s.run_id = ${f.runId}`.execute(app.db);
+    assert.equal(rows.rows.length, 1);
+    assert.equal(rows.rows[0]?.status, 'FAILED');
+    assert.equal(rows.rows[0]?.error_kind, 'RunDraftPreviewWriteError');
+    const trace = await api.get(workspacePath(f.workspaceId, `/runs/${f.runId}/trace`));
+    assert.equal(trace.status, 200, trace.text);
+    assert.equal((trace.body as { model_calls: { provider_error_kind: string | null }[] })
+      .model_calls[0]?.provider_error_kind, null);
+    assert.equal(trace.text.includes('TOP_SECRET_LOCAL_PREVIEW_PAYLOAD'), false);
+    assert.equal(trace.text.includes('RunDraftPreviewWriteError'), false);
+  }
 });

@@ -1,0 +1,108 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-eb7bdafb9b
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-eb7bdafb9b/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-eb7bdafb9b^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 29244)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-eb7bdafb9b/cluster" "-h" "127.0.0.1" "-p" "3828"
+DO
+CREATE DATABASE
+Test database: relay_api_test_e8b00653ea52 on 127.0.0.1:3828 (roles relay_migrator / relay_app)
+{
+  "applied": [
+    "0001_v001_human_core",
+    "0002_p02_task_goal_alignment",
+    "0003_schema_readiness",
+    "0004_v002_runs",
+    "0005_v002_verification",
+    "0006_v002_reviews",
+    "0007_v003_recovery_control",
+    "0008_v003_gateway",
+    "0009_v004_information_rules",
+    "0010_v005_context_revision",
+    "0011_m03_run_dispatch",
+    "0012_m03_run_events",
+    "0013_m03_run_command_order"
+  ],
+  "already_applied": [],
+  "ledger_rows": 13
+}
+{"schema":"relay_graph_v1","ready":true}
+✔ the fixed Mock graph prepares ASK and only the approved RESUME executes its original operation (5527.704ms)
+✔ ASK business commit before interrupt checkpoint cannot strand START ahead of rapid approval (6459.597ms)
+✔ denied required Mock action terminates the Run without a tool effect or dangling approval wait (4655.9563ms)
+✖ old ACTION RESUME cannot wake the later human-criterion Review after its graph checkpoint (6108.943ms)
+✔ official Saver setup is migrator-only; missing or damaged graph schema blocks Worker before claim (4282.1587ms)
+✔ the one Run graph persists an empty-namespace Review interrupt, then resumes the original decision (4053.6606ms)
+✔ a saved Review interrupt with an unacknowledged START is replayed by the same command (4511.2052ms)
+✔ PAUSE and resume of a saved Review wait cannot strand the unacknowledged START before approval (6389.9584ms)
+✔ a claimed RESUME killed before its checkpoint reuses the one Review decision (5908.6367ms)
+✔ a real child exit after business commit but before graph checkpoint replays without a second effect (4483.0828ms)
+✔ lost invocation after a committed node cannot write its normal successor checkpoint (2163.6795ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 10
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 71867.7954
+
+✖ failing tests:
+
+test at dist\test\integration\run-graph.integration.test.js:283:1
+✖ old ACTION RESUME cannot wake the later human-criterion Review after its graph checkpoint (6108.943ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   command_status: 'PENDING',
+  -   command_status: 'DONE',
+      review_status: 'OPEN',
+      run_status: 'WAITING_APPROVAL'
+    }
+  
+      at TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/run-graph.integration.test.js:309:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { command_status: 'PENDING', review_status: 'OPEN', run_status: 'WAITING_APPROVAL' },
+    expected: { command_status: 'DONE', review_status: 'OPEN', run_status: 'WAITING_APPROVAL' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+waiting for server to shut down.... done
+server stopped
+--- integration summary ---
+tests exit code: 1
+build exit code: 0
+business migration exit code: 0
+graph install exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: FAILED

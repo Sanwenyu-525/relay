@@ -16,6 +16,12 @@ import {
   parseModelBaseUrl,
   type ModelFetchDependencies,
 } from './model-endpoint-policy.js';
+import {
+  MODEL_ERROR_CATEGORIES,
+  classifyProviderErrorOrProtocol,
+  categoryOfProviderStatus,
+  type ModelErrorCategory,
+} from './model-error-classification.js';
 
 /**
  * 模型端口连接验证（设计见 docs/testing/evidence/remediation-2026-09-28/model-verification-design.md）。
@@ -28,17 +34,11 @@ export const VERIFY_PROMPT = 'relay-verify-1';
 export const VERIFY_TIMEOUT_MS = 15_000;
 const VERIFY_MAX_OUTPUT_TOKENS = 16;
 
-export type ModelVerifyErrorCategory =
-  | 'AUTH'
-  | 'RATE_LIMIT'
-  | 'TIMEOUT'
-  | 'STREAM_BROKEN'
-  | 'PROTOCOL'
-  | 'NETWORK';
+// 分类词表的唯一来源在 model-error-classification；此处保留旧名，
+// 避免连接验证的公开响应契约与既有调用方改名。
+export type ModelVerifyErrorCategory = ModelErrorCategory;
 
-export const MODEL_VERIFY_ERROR_CATEGORIES: readonly ModelVerifyErrorCategory[] = [
-  'AUTH', 'RATE_LIMIT', 'TIMEOUT', 'STREAM_BROKEN', 'PROTOCOL', 'NETWORK',
-];
+export const MODEL_VERIFY_ERROR_CATEGORIES = MODEL_ERROR_CATEGORIES;
 
 export interface ModelVerifyResult {
   readonly ok: boolean;
@@ -106,42 +106,7 @@ export function resolveVerifyConfig(env: NodeJS.ProcessEnv): ModelPortConfig {
 }
 
 export function classifyVerifyError(error: unknown): ModelVerifyErrorCategory {
-  if (error instanceof ModelVerifyCallError) return error.category;
-  if (error instanceof Error) {
-    if (error.name === 'ModelTimeoutError' || error.name === 'TimeoutError' ||
-        error.name === 'AbortError') return 'TIMEOUT';
-    if (error.name === 'MODEL_STREAM_INCOMPLETE' ||
-        error.message.includes('MODEL_STREAM_INCOMPLETE') ||
-        error.message.includes('MODEL_SSE_LINE_TOO_LARGE')) return 'STREAM_BROKEN';
-    if (error.message.includes('MODEL_ENDPOINT_NOT_ALLOWED') ||
-        error.message.includes('MODEL_ENDPOINT_NOT_PUBLIC') ||
-        error.message.includes('MODEL_ENDPOINT_REDIRECTED')) return 'NETWORK';
-    const status = readHttpStatus(error);
-    if (status !== undefined) return categoryOfStatus(status);
-    if (error.name === 'TypeError' || error.message.includes('fetch failed') ||
-        error.message.includes('ECONNREFUSED') || error.message.includes('ENOTFOUND') ||
-        error.message.includes('ECONNRESET') || error.message.includes('ETIMEDOUT')) {
-      return 'NETWORK';
-    }
-  }
-  return 'PROTOCOL';
-}
-
-function categoryOfStatus(status: number): ModelVerifyErrorCategory {
-  if (status === 401 || status === 403) return 'AUTH';
-  if (status === 429) return 'RATE_LIMIT';
-  if (status === 400 || status === 404 || status === 422) return 'PROTOCOL';
-  if (status >= 500) return 'NETWORK';
-  return 'PROTOCOL';
-}
-
-function readHttpStatus(error: unknown): number | undefined {
-  if (typeof error !== 'object' || error === null) return undefined;
-  const candidate = error as { status?: unknown; statusCode?: unknown };
-  const value = typeof candidate.status === 'number' ? candidate.status
-    : typeof candidate.statusCode === 'number' ? candidate.statusCode : undefined;
-  return typeof value === 'number' && Number.isInteger(value) && value >= 100 && value < 600
-    ? value : undefined;
+  return classifyProviderErrorOrProtocol(error);
 }
 
 /**
@@ -180,7 +145,7 @@ export function createOpenAiCompatibleVerifyCall(
         throw error;
       }
       if (!response.ok) {
-        throw new ModelVerifyCallError(categoryOfStatus(response.status),
+        throw new ModelVerifyCallError(categoryOfProviderStatus(response.status),
           `verify call failed with HTTP ${response.status}`);
       }
       let payload: unknown;

@@ -83,6 +83,12 @@ import { advanceAiTextLocks, requireAiTextLocks } from './artifact-commands.js';
 const DEFAULT_LEASE_MS = 30_000;
 const MAX_PURE_GENERATION_ATTEMPTS = 2n;
 
+/** A local preview failure must not enter Provider transport classification. */
+class RunDraftPreviewWriteError extends Error {
+  override readonly name = 'RunDraftPreviewWriteError';
+  constructor() { super('Run draft preview write failed'); }
+}
+
 /** 修正回路重置的步骤：装配上下文 → 起草 → 落盘候选 → 验证，按固定顺序重跑。 */
 const CORRECTION_STEP_KINDS: readonly RunStepKind[] = [
   'BUILD_CONTEXT',
@@ -752,13 +758,17 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
                 if (!previewEnabled) return;
                 try { await preview.push(piece); }
                 catch (error) {
-                  if (!(error instanceof AssistPreviewOwnershipLostError)) throw error;
+                  if (!(error instanceof AssistPreviewOwnershipLostError)) {
+                    throw new RunDraftPreviewWriteError();
+                  }
                 }
               } });
             if (generated.kind !== 'CANCELLED' && previewEnabled) {
               try { await preview.flush(); }
               catch (error) {
-                if (!(error instanceof AssistPreviewOwnershipLostError)) throw error;
+                if (!(error instanceof AssistPreviewOwnershipLostError)) {
+                  throw new RunDraftPreviewWriteError();
+                }
               }
             }
             return generated;

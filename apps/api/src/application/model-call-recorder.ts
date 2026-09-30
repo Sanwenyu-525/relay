@@ -4,6 +4,7 @@ import type { DbExecutor } from '../infrastructure/database.js';
 import { ModelCallRepository, type ModelCallOrigin,
   type ModelCallSettlement } from '../model/model-call-repository.js';
 import type { ModelIdentity } from '../workflow/fake-model-port.js';
+import { classifyProviderError } from '../workflow/model-error-classification.js';
 
 /** The begin insert commits before invoking a Provider. A lost process leaves
  * STARTED as an unknown outcome and never silently invents zero usage. */
@@ -32,9 +33,13 @@ export async function recordModelInvocation<T>(db: DbExecutor, input: {
         (usage.outputTokens as number) >= 0))
       ? { inputTokens: usage.inputTokens as number | null,
         outputTokens: usage.outputTokens as number | null } : undefined;
-    await calls.settle(callId, { status: input.signal?.aborted === true ? 'CANCELLED' : 'FAILED',
-      errorKind: input.signal?.aborted === true ? null
-        : error instanceof Error ? error.name : 'UNKNOWN',
+    // Provider 传输层失败记统一分类（与连接验证同一词表，可聚合）；Relay 自身的
+    // 预算、工具拒绝、语义解析等失败不是 Provider 故障，保留错误名以便定位。
+    const aborted = input.signal?.aborted === true;
+    const providerCategory = aborted ? undefined : classifyProviderError(error);
+    await calls.settle(callId, { status: aborted ? 'CANCELLED' : 'FAILED',
+      errorKind: aborted ? null
+        : providerCategory ?? (error instanceof Error ? error.name : 'UNKNOWN'),
       ...(typeof evidence.providerRequestId === 'string'
         ? { providerRequestId: evidence.providerRequestId } : {}),
       ...(knownUsage === undefined ? {} : { usage: knownUsage }) });

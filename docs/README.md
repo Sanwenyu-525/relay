@@ -1,6 +1,6 @@
 # 文档入口与维护规范
 
-2026-09-29 协作体验改造导航：[工作台第 14 节](frontend/workbench-design.md#14-以目标协作为中心的工作台改造)拥有目标流程、入口与兼容关系；[设计系统第 5.1 节](frontend/design-system.md#51-协作工作区的视觉层级)拥有视觉层级；[验收第 16 节](testing/verification-plan.md#16-agent-协作主线验收提案)拥有未运行场景。用户要求本轮只改文档，具体布局仍 Proposed；旧图和逐页清单用于风格/能力覆盖，不冻结旧管理导航或宣称新体验已实现。
+2026-09-29 协作体验改造导航：[工作台第 14 节](frontend/workbench-design.md#14-以目标协作为中心的工作台改造)拥有目标流程、入口与兼容关系；[设计系统第 5.1 节](frontend/design-system.md#51-协作工作区的视觉层级)拥有视觉层级；[验收第 16 节](testing/verification-plan.md#16-agent-协作主线验收提案)拥有逐项运行状态。第 14 节结构已在 `/agent` 落地（开发自检），**真实 Windows 验收未完成**；Git 只读与交互终端因缺协议显式标为未接入。旧图和逐页清单继续用于风格/能力覆盖，不冻结旧管理导航。
 
 2026-09-28 后续规划导航：[V1 后续路线](requirements/post-v1-roadmap.md)拥有推荐范围、顺序与未决项；[领域模型第 11 节](architecture/domain-model.md#11-v1-后续协作的架构演进提案)维护责任与事务，[ADR-013](decisions/ADR-013-bounded-project-continuation.md)记录 Proposed 取舍，[验收第 14 节](testing/verification-plan.md#14-v1-后续长期协作验收提案)维护未运行规格，[N 工作包](../prompts/post-v1-collaboration.md)提供分包提示词。用户选择长期协作优先，具体方案仍为规划，未启动实现、不扩大 V1 goal。
 

@@ -1,0 +1,41 @@
+{
+  "acceptBottom": 903.6000022888184,
+  "context": "人机协作工作流研究进行中",
+  "dpr": 1.0000000149011612,
+  "fonts": [
+    {
+      "family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif",
+      "size": "20px",
+      "text": "人机协作工作流研究",
+      "weight": "600"
+    },
+    {
+      "family": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+      "size": "16px",
+      "text": "等待人工判断",
+      "weight": "600"
+    },
+    {
+      "family": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+      "size": "16px",
+      "text": "任务 / 验收",
+      "weight": "600"
+    },
+    {
+      "family": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+      "size": "16px",
+      "text": "证据：检查记录",
+      "weight": "600"
+    },
+    {
+      "family": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", SimSun, serif",
+      "size": "24px",
+      "text": "评价方案.md · v2 · 已保存版本",
+      "weight": "600"
+    }
+  ],
+  "height": 1010,
+  "reviewSummary": "产物版本 88888888-8888-4888-8888-888888888888验收版本2验收条件 IDc1",
+  "scrollWidth": 1487,
+  "width": 1487
+}

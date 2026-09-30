@@ -1,0 +1,71 @@
+# 模型验证真实外呼验收记录（model-verify-live）
+
+- 日期：2026-09-29（本地时间 CST；接口返回 verified_at 为 UTC）
+- 执行者：模型接入真实外呼验收子 Agent（授权范围：用户本轮明确放行真实 Provider 验证与真实任务链路）
+- 环境：临时 PG18 集群（127.0.0.1:55432，库 relay_mv_live，一次性 initdb + bootstrap-roles + 全部迁移 + install-graph + init:workspace，位于 .tmp-modelverify/，验收后停止并删除）；API 以 apps/api/.env 启动（dist/src/main.js，便携 Node 24），进程环境覆盖 RELAY_DB_URL / RELAY_DATA_ROOT 指向临时集群；RELAY_MODEL_* 六键来自 apps/api/.env（用户提供并授权）。
+- 脱敏声明：本日志不含 RELAY_MODEL_API_KEY 与 RELAY_API_BEARER_TOKEN 的任何值；Bearer 仅由测试进程从 .env 读取。
+
+## 1. 基线（验证前）
+
+GET /api/v1/workspaces/{workspace_id}/model-port → 200
+
+```json
+{"provider":"openai-compatible","configured":true,"model":"agnes-3.0-flash","base_url":"https://api.agnes-ai.cn/v1"}
+```
+
+GET /api/v1/workspaces/{workspace_id}/model-port/verification → 200
+
+```json
+{"current_config_fingerprint":"c71bbfef65746fd1d80af71af751972989911378160d8791080a4dd2336f9c4a","last":null,"matches_current_config":false,"worker_startup_validation":"OK"}
+```
+
+说明：worker_startup_validation=OK 仅表示 API 进程环境的模型配置完整（readModelPortConfig 通过），不代表 Worker 已被探测。
+
+## 2. 真实外呼验证（固定短文本 relay-verify-1，非流式，max_tokens=16，15s 超时）
+
+POST /api/v1/workspaces/{workspace_id}/model-port/verify → **200**
+
+```json
+{"ok":true,"latency_ms":872,"provider":"openai-compatible","model":"agnes-3.0-flash","config_fingerprint":"c71bbfef65746fd1d80af71af751972989911378160d8791080a4dd2336f9c4a","error_category":null,"verified_at":"2026-09-28T23:51:37.181Z"}
+```
+
+- curl TIME_TOTAL=0.882s；本地时间 2026-09-29 07:51:37 CST。
+- 结论：**连接验证通过（真实 Provider 外呼成功）**。
+
+## 3. 并发保护（首呼在途时快速第二次 POST）
+
+第二次 POST → **409**
+
+```json
+{"type":"/problems/model-verify-in-progress","title":"验证进行中","status":409,"detail":"本实例已有一项模型验证在执行，请等待其结束后再试。","code":"MODEL_VERIFY_IN_PROGRESS","retryable":true,"retry_action":"POLL_RESOURCE","request_id":"req-4b44fbe8-ca9c-4c04-a6b3-96cca7dc0c47"}
+```
+
+- 第二次响应耗时 0.003s（未发外呼，被 VerifyGate 拦截）。
+
+## 4. 验证后状态
+
+GET /api/v1/workspaces/{workspace_id}/model-port/verification → 200
+
+```json
+{"current_config_fingerprint":"c71bbfef65746fd1d80af71af751972989911378160d8791080a4dd2336f9c4a","last":{"ok":true,"latency_ms":null,"provider":"openai-compatible","model":"agnes-3.0-flash","config_fingerprint":"c71bbfef65746fd1d80af71af751972989911378160d8791080a4dd2336f9c4a","error_category":null,"verified_at":"2026-09-28T23:51:37.180Z"},"matches_current_config":true,"worker_startup_validation":"OK"}
+```
+
+- matches_current_config=true 符合预期；last.latency_ms=null 为已知限制（账本无延迟列，见 remediation-2026-09-28 记录剩余限制 3）。
+
+## 5. model_calls(kind='VERIFY') 账本
+
+```
+kind=VERIFY  provider=openai-compatible  model=agnes-3.0-flash
+status=COMPLETED  error_kind=NULL
+usage_input_tokens=79   usage_output_tokens=10
+provider_request_id 非空（已核存在，不记录值）
+started_at=2026-09-29 07:51:36.336968+08  settled_at=2026-09-29 07:51:37.180154+08  dur_ms≈843
+```
+
+账本耗时 843ms 与 POST 响应 latency_ms=872 一致（含服务侧少量开销差）。
+
+## 6. 外呼用量小结
+
+- 真实外呼次数：1 次（并发第二次被 409 拦截，无外呼）。
+- tokens：input=79，output=10。
+- 请求文本为服务端固定短文本 relay-verify-1，不含任何项目资料。

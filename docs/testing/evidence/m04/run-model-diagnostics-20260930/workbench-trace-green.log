@@ -1,0 +1,30 @@
+
+> relay-workbench-fixture@0.1.0 test
+> vitest run --reporter=verbose tests/runTrace.spec.ts
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./vite.config" without a file extension (vitest.config.ts:2:24). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.1 D:/Develop/Relay-Agent/apps/workbench
+
+ ✓ tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 AUTH 类别和处理指引，不将调用失败宣称为 Run 失败 226ms
+ ✓ tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 RATE_LIMIT 类别和处理指引，不将调用失败宣称为 Run 失败 169ms
+ ✓ tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 TIMEOUT 类别和处理指引，不将调用失败宣称为 Run 失败 172ms
+ ✓ tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 STREAM_BROKEN 类别和处理指引，不将调用失败宣称为 Run 失败 173ms
+ ✓ tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 PROTOCOL 类别和处理指引，不将调用失败宣称为 Run 失败 186ms
+ ✓ tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 NETWORK 类别和处理指引，不将调用失败宣称为 Run 失败 170ms
+ ✓ tests/runTrace.spec.ts > P15 Run Trace > 旧服务缺诊断字段时保留未知，不推断 Provider 故障 1ms
+ ✓ tests/runTrace.spec.ts > P15 Run Trace > 同一步骤不同调用与条件保留独立身份；取消和本地错误仍无 Provider 类别 1ms
+ ✓ tests/runTrace.spec.ts > P15 Run Trace > 拒绝非失败状态或词表外的 Provider 类别：{"status":"CANCELLED","provider_error_kind":"NETWORK"} 2ms
+ ✓ tests/runTrace.spec.ts > P15 Run Trace > 拒绝非失败状态或词表外的 Provider 类别：{"status":"COMPLETED","provider_error_kind":"AUTH"} 0ms
+ ✓ tests/runTrace.spec.ts > P15 Run Trace > 拒绝非失败状态或词表外的 Provider 类别：{"status":"STARTED","provider_error_kind":"TIMEOUT"} 0ms
+ ✓ tests/runTrace.spec.ts > P15 Run Trace > 拒绝非失败状态或词表外的 Provider 类别：{"status":"FAILED","provider_error_kind":"LOCAL_WRITE_ERROR"} 0ms
+ ✓ tests/runTrace.spec.ts > P15 Run Trace > 按需读真实证据并分别展示 Review、Gateway 和 Effect，不泄露不可用来源 165ms
+ ✓ tests/runTrace.spec.ts > P15 Run Trace > 刷新失去读取权限时清除旧 Trace 236ms
+
+ Test Files  1 passed (1)
+      Tests  14 passed (14)
+   Start at  12:24:49
+   Duration  6.05s (environment 26%, tests 25%, import 25%, transform 22%, setup 1%)
+

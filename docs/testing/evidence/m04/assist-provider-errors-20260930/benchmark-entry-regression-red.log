@@ -1,0 +1,11 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-f11ee9b8fd
+--- integration summary ---
+tests exit code: not run
+build exit code: skipped
+business migration exit code: not run
+graph install exit code: not run
+postgres start exit code: not started
+postgres stop exit code: not stopped
+temporary cluster removed: True
+failure: The property 'Count' cannot be found on this object. Verify that the property exists.
+status: FAILED

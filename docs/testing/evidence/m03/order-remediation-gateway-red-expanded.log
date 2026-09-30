@@ -1,0 +1,127 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-c68257f4f0
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-c68257f4f0/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-c68257f4f0^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 37708)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-c68257f4f0/cluster" "-h" "127.0.0.1" "-p" "7051"
+DO
+CREATE DATABASE
+Test database: relay_api_test_8c64a3cfef09 on 127.0.0.1:7051 (roles relay_migrator / relay_app)
+✔ P09 AUTO keeps Connection, Capability and Permission separate and records one invocation (623.6515ms)
+✔ P09 ASK releases old Worker; Review decision and new epoch admit only the original target (163.3855ms)
+✔ M03 denied or expired ACTION_APPROVAL cannot queue a Run RESUME (123.0621ms)
+✖ M03 PAUSE invalidates a deferred approved action before a later manual RESUME (73.3836ms)
+✖ M03 rejected approved claim leaves no Worker owner after expiry, Connection or Permission change (70.0202ms)
+✖ M03 revocation between approved claim and Admit releases a no-effect Worker for safe control (73.4919ms)
+✔ P09 USER_IMPORT has a real job source, ASK Review and no Run/claim identity (67.3686ms)
+✔ P09 revocation before Admit rejects, while Admit before revocation completes the already admitted effect (138.8276ms)
+✔ P09 overlapping roots across Projects occupy one physical directory until the first effect settles (202.4317ms)
+✔ P09 crashed Fake dispatch reconciles the same ID; tampering remains UNKNOWN and blocks new IDs (214.8274ms)
+✔ P09 database rejects crossed operation scope, Review pair, Invocation origin and claim token (245.5192ms)
+✔ P09 PREPARED Worker exit proves no dispatch; the same logical ID gets a new Invocation and epoch (79.7494ms)
+✔ P09 DISPATCHING with a missing target stays UNKNOWN; a different intent cannot bypass it (66.9301ms)
+✔ P09 pending control before Admit abandons PREPARED without a Fake effect (83.534ms)
+✔ P09 USER_IMPORT unresolved invocation blocks a new intent for the same job (66.2703ms)
+✔ P09 URL Permission matches path segments and concurrent Review decisions consume once (95.4652ms)
+✔ P09 HTTP config commands replay, isolate scope, and expose full Invocation history (1310.2554ms)
+✔ P10 Rule update after Gateway Admit preserves the old Invocation outcome and blocks new work (88.5196ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 15
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 14070.0259
+
+✖ failing tests:
+
+test at dist\test\integration\gateway.integration.test.js:174:1
+✖ M03 PAUSE invalidates a deferred approved action before a later manual RESUME (73.3836ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      'DENIED',
+  +   'PENDING',
+  -   'DONE',
+      'DECIDED'
+    ]
+  
+      at TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:208:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'DENIED', 'PENDING', 'DECIDED' ],
+    expected: [ 'DENIED', 'DONE', 'DECIDED' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at dist\test\integration\gateway.integration.test.js:230:1
+✖ M03 rejected approved claim leaves no Worker owner after expiry, Connection or Permission change (70.0202ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:247:9)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at dist\test\integration\gateway.integration.test.js:257:1
+✖ M03 revocation between approved claim and Admit releases a no-effect Worker for safe control (73.4919ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'worker-22d2515c-1f80-4800-aa65-4a614d2d224e'
+  - null
+  
+      at TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/gateway.integration.test.js:272:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'worker-22d2515c-1f80-4800-aa65-4a614d2d224e',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+waiting for server to shut down..... done
+server stopped
+--- integration summary ---
+tests exit code: 1
+build exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: FAILED

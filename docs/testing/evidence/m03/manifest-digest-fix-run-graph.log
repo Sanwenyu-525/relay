@@ -1,0 +1,109 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-f719345340
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-f719345340/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-f719345340^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 42772)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-f719345340/cluster" "-h" "127.0.0.1" "-p" "8269"
+DO
+CREATE DATABASE
+Test database: relay_api_test_1b5d6535711a on 127.0.0.1:8269 (roles relay_migrator / relay_app)
+{
+  "applied": [
+    "0001_v001_human_core",
+    "0002_p02_task_goal_alignment",
+    "0003_schema_readiness",
+    "0004_v002_runs",
+    "0005_v002_verification",
+    "0006_v002_reviews",
+    "0007_v003_recovery_control",
+    "0008_v003_gateway",
+    "0009_v004_information_rules",
+    "0010_v005_context_revision",
+    "0011_m03_run_dispatch",
+    "0012_m03_run_events",
+    "0013_m03_run_command_order"
+  ],
+  "already_applied": [],
+  "ledger_rows": 13
+}
+{"schema":"relay_graph_v1","ready":true}
+✔ the fixed Mock graph prepares ASK and only the approved RESUME executes its original operation (5730.3262ms)
+✔ ACTION approval status changes do not rebuild Context or rerun the successful Draft (4469.4337ms)
+✔ a changed Task input after the approved Mock effect cannot rerun Draft before publication (3647.9636ms)
+✔ a changed Task input during ASK wait denies the original operation before Fake write (3450.0117ms)
+✔ graph outer heartbeat cannot authorize an expired inner Gateway claim (3303.4133ms)
+✔ ASK business commit before interrupt checkpoint cannot strand START ahead of rapid approval (5950.559ms)
+✔ denied required Mock action terminates the Run without a tool effect or dangling approval wait (4217.3985ms)
+✔ old ACTION RESUME cannot wake the later human-criterion Review after its graph checkpoint (7629.7725ms)
+✔ a stopped RESUME reconciles the original Fake effect and can replay after approval expiry (6039.5699ms)
+✔ a stopped RESUME after Gateway Admit but before Fake write preserves UNKNOWN and the same operation (5660.9017ms)
+✔ revoked Permission after approval cannot dispatch the frozen Mock action (4420.0586ms)
+✔ a committed PAUSE wins over a pre-invocation Permission refusal under the outer claim fence (3375.9179ms)
+✔ frozen Mock approval withdrawal rolls back with its deferred outbox on failure (3393.1858ms)
+✔ stopped PREPARED Mock action replays the same operation after NOT_EXECUTED reconciliation (5247.1878ms)
+✔ PENDING control after PREPARED reconciliation prevents any replay of the Mock action (4268.871ms)
+✔ PAUSE after rapid action approval applies before any Mock effect (4694.2675ms)
+✔ CANCEL after rapid action approval applies before any Mock effect (4467.0964ms)
+✔ HANDOFF after rapid action approval applies before any Mock effect (4567.2978ms)
+✔ manual resume cannot revive a PAUSE-invalidated Mock approval or strand a RUNNING Run (3437.7413ms)
+✔ two independent Workers racing one approved RESUME create one Gateway invocation (4813.1034ms)
+✔ a Review rebound to another operation cannot wake the frozen action checkpoint (4413.8314ms)
+✔ a same-Run operation mismatch cannot approve a forged frozen Mock Review (3312.5924ms)
+✔ official Saver setup is migrator-only; missing or damaged graph schema blocks Worker before claim (4051.5983ms)
+✔ the one Run graph persists an empty-namespace Review interrupt, then resumes the original decision (3662.4765ms)
+✔ a saved Review interrupt with an unacknowledged START is replayed by the same command (4532.7252ms)
+✔ PAUSE and resume of a saved Review wait cannot strand the unacknowledged START before approval (5854.7842ms)
+✔ a claimed RESUME killed before its checkpoint reuses the one Review decision (5603.5124ms)
+✔ a real child exit after business commit but before graph checkpoint replays without a second effect (4651.1283ms)
+✔ lost invocation after a committed node cannot write its normal successor checkpoint (2051.6364ms)
+✔ G06 CANCEL aborts an in-flight Mock model only after durable control (4216.0375ms)
+✔ G06 CANCEL_TASK aborts an in-flight Mock model only after durable control (4436.1622ms)
+✔ G06 forced Worker termination needs close evidence and invents no user cancellation (4580.898ms)
+✔ G06 settled independent Workers close promptly while control polling is active (6163.2677ms)
+✔ a tampered persisted manifest field denies the frozen Mock action before any invocation (11356.0854ms)
+✔ G06 a control durable across settlement converges without a second delivery (2264.1867ms)
+✔ G06 completion-race leftover control is rejected and cannot rewrite a DONE Run (2591.2892ms)
+✔ a Review wait checkpointed by an older graph layout rebuilds and completes the original RESUME (3766.9192ms)
+✔ an approved Mock action checkpointed by an older graph layout replays its effect exactly once (3719.4094ms)
+ℹ tests 38
+ℹ suites 0
+ℹ pass 38
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 192892.9764
+waiting for server to shut down.... done
+server stopped
+--- integration summary ---
+tests exit code: 0
+build exit code: 0
+business migration exit code: 0
+graph install exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: PASSED

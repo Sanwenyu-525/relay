@@ -1,0 +1,20 @@
+
+> relay-workbench-fixture@0.1.0 test
+> vitest run --maxWorkers=2
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./vite.config" without a file extension (vitest.config.ts:2:24). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.1 D:/Develop/Relay-Agent/apps/workbench
+
+
+ Test Files  63 passed (63)
+      Tests  407 passed (407)
+   Start at  12:43:46
+   Duration  131.50s (environment 44%, tests 42%, import 11%, transform 2%, setup 1%)
+
+Environment  jsdom was created 63 times · 110.73s total, 44% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+

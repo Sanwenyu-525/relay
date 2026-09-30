@@ -1,0 +1,72 @@
+[
+  {
+    "route": "/today",
+    "title": "把今天留给重要的事",
+    "bodyFont": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+    "overflow": false,
+    "alerts": []
+  },
+  {
+    "route": "/projects",
+    "title": "项目",
+    "bodyFont": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+    "overflow": false,
+    "alerts": []
+  },
+  {
+    "route": "/tasks",
+    "title": "任务",
+    "bodyFont": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+    "overflow": false,
+    "alerts": []
+  },
+  {
+    "route": "/knowledge",
+    "title": "知识与长期信息",
+    "bodyFont": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+    "overflow": false,
+    "alerts": []
+  },
+  {
+    "route": "/activity",
+    "title": "动态",
+    "bodyFont": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+    "overflow": false,
+    "alerts": []
+  },
+  {
+    "route": "/reviews",
+    "title": "等待你的判断",
+    "bodyFont": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+    "overflow": false,
+    "alerts": []
+  },
+  {
+    "route": "/connections",
+    "title": "连接与权限",
+    "bodyFont": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+    "overflow": false,
+    "alerts": []
+  },
+  {
+    "route": "/settings",
+    "title": "设置",
+    "bodyFont": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+    "overflow": false,
+    "alerts": []
+  },
+  {
+    "route": "/projects?view=create",
+    "title": "开始一个长期项目",
+    "bodyFont": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+    "overflow": false,
+    "alerts": []
+  },
+  {
+    "route": "/tasks?view=create",
+    "title": "把想做的事，变成可完成的任务",
+    "bodyFont": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+    "overflow": false,
+    "alerts": []
+  }
+]

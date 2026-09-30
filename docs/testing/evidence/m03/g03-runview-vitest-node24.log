@@ -1,0 +1,13 @@
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./vite.config" without a file extension (vitest.config.ts:2:24). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.1 D:/Develop/Relay-Agent/apps/workbench
+
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  21:57:16
+   Duration  12.78s (environment 65%, tests 18%, import 10%, transform 6%, setup 1%)
+
+EXIT_CODE=0

@@ -9,7 +9,9 @@ import AssistSkillOutput from "../components/AssistSkillOutput";
 import AssistSourcePicker from "../components/AssistSourcePicker";
 import TaskContractProposalPreview from "../components/TaskContractProposalPreview";
 import { describeLiveError } from "../lib/liveErrors";
+import { modelErrorGuides } from "../lib/modelErrorGuides";
 import { liveClient, useRelayConnection } from "../lib/relayConnection";
+import "./AssistView.css";
 
 type AssistTarget = { readonly kind: "PROJECT" | "TASK"; readonly id: string; readonly title: string;
   readonly revision: string; readonly projectId: string | null; readonly executor: string | null;
@@ -81,6 +83,7 @@ export default function AssistView({ targetKind, targetId, preferredSessionId, o
   const [sessions, setSessions] = useState<readonly RelayAssistSession[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [selectedRefs, setSelectedRefs] = useState<readonly RelayAssistSourceRef[]>([]);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -194,9 +197,10 @@ export default function AssistView({ targetKind, targetId, preferredSessionId, o
   return <section className={standalone ? "skill-page agent-assist" : "skill-page"} data-testid="assist-target"><div className={standalone ? "agent-assist-heading" : undefined}><div><p className="eyebrow" title={id}>{kind === "PROJECT" ? "项目 Assist" : "任务 Assist"}{!standalone && ` · ${id}`}</p><h1>{target.title}</h1>{!standalone && <><p className="page-lede">当前目标修订 v{target.revision}{target.executor && <> · 当前执行者 {target.executor}</>}</p><p className="helper-text">消息固定写入当前会话；切换目标后重新读取。Assist 建议不会自动修改业务事实。</p></>}</div><Link className="text-link" to={kind === "PROJECT" ? `/projects/${id}` : `/tasks/${id}`}>返回{kind === "PROJECT" ? "项目" : "任务"}</Link></div>{loading && <p role="status">正在刷新目标与会话…</p>}{error && <p className="action-error" role="alert">{error}</p>}
     {projectWriteBlockedReason && <p className="disabled-reason" data-testid="assist-archive-reason">{projectWriteBlockedReason}</p>}
     <section className={standalone ? "agent-assist-session-bar" : "surface-panel"}>{!standalone && <h2>会话</h2>}<div className="form-actions">{!standalone && <label className="field"><span className="field-label">当前会话</span><select data-testid="assist-session-select" value={sessionId ?? ""} onChange={(event) => { setSessionId(event.target.value || null); setSelectedRefs([]); }}><option value="">选择会话</option>{sessions.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.status}</option>)}</select></label>}<button className="secondary-button" type="button" data-testid="assist-new-session" disabled={creating || pendingCreate !== null || projectWriteBlockedReason !== null} onClick={() => standalone && onRequestNewSession ? onRequestNewSession(() => void createSession()) : void createSession()}>{creating ? "正在创建" : "新建会话"}</button><button className="secondary-button" type="button" onClick={() => void loadTarget(sessionId ?? undefined)}>刷新会话</button></div>{!session && preferredSessionId === null && <p className="helper-text" data-testid="assist-new-session-prompt">目标已选。先点击“新建会话”，创建成功后再发送消息；如需继续已有会话，请从左侧选择。</p>}{!sessions.length && preferredSessionId !== null && <p className="helper-text">当前目标还没有会话，先新建会话再发送消息。</p>}{createError && <p className="action-error" role="alert">{createError}</p>}{pendingCreate && <><p className="helper-text">创建结果待核对，原 command_id：{pendingCreate.commandId}</p><button type="button" className="secondary-button" disabled={creating} onClick={() => void checkCreateReceipt()}>查询创建回执</button><button type="button" className="secondary-button" disabled={creating} onClick={() => void createSession(pendingCreate)}>以原命令重试</button></>}</section>
-    {session && <>{session.status === "ACTIVE" && (standalone ? <details className="agent-chat-sources"><summary>资料来源 · 已选 {selectedRefs.length}</summary><AssistSourcePicker key={`${connection.epoch}:${session.id}:${target.projectId ?? "none"}`} projectId={target.projectId} selectedRefs={selectedRefs} onChange={setSelectedRefs} /></details> : <AssistSourcePicker key={`${connection.epoch}:${session.id}:${target.projectId ?? "none"}`} projectId={target.projectId} selectedRefs={selectedRefs} onChange={setSelectedRefs} />)}
+    {session && <>{session.status === "ACTIVE" && (standalone ? <details className="agent-chat-sources" open={sourcesOpen}><summary>资料来源 · 已选 {selectedRefs.length}</summary><AssistSourcePicker key={`${connection.epoch}:${session.id}:${target.projectId ?? "none"}`} projectId={target.projectId} selectedRefs={selectedRefs} onChange={setSelectedRefs} /></details> : <AssistSourcePicker key={`${connection.epoch}:${session.id}:${target.projectId ?? "none"}`} projectId={target.projectId} selectedRefs={selectedRefs} onChange={setSelectedRefs} />)}
       <AssistSessionPanel key={`${connection.epoch}:${session.id}`} client={client} session={session} target={target} sources={selectedRefs}
         standalone={standalone} onNavigationStateChange={reportSessionNavigation}
+        sourcesOpen={sourcesOpen} onToggleSources={() => setSourcesOpen((open) => !open)}
         writeBlockedReason={projectWriteBlockedReason}
         refreshTarget={() => loadTarget(session.id)}
         clearSentSources={(sent) => setSelectedRefs((current) => JSON.stringify(current) === JSON.stringify(sent) ? [] : current)} /></>}
@@ -208,13 +212,37 @@ function canPreview(message: RelayAssistMessage): boolean {
     !message.cancelRequested && (message.status === "PENDING" || message.status === "RUNNING");
 }
 
+const messageStatusLabels: Record<RelayAssistMessage["status"], string> = {
+  PENDING: "等待生成", RUNNING: "正在生成", COMPLETED: "", FAILED: "生成失败", CANCELLED: "已取消"
+};
+
+function messageTime(value: string | null): string {
+  const at = value === null ? Number.NaN : Date.parse(value);
+  if (!Number.isFinite(at)) return "";
+  return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(at));
+}
+
+function messageDay(value: string | null): string | null {
+  const at = value === null ? Number.NaN : Date.parse(value);
+  if (!Number.isFinite(at)) return null;
+  return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" })
+    .format(new Date(at)).replaceAll("/", "-");
+}
+
 function AssistMessageRow({ client, target, message, preview, busy, pending, writeBlocked, onCancel }: { client: RelayApiClient;
   target: AssistTarget; message: RelayAssistMessage; busy: boolean; pending: boolean; writeBlocked: boolean;
   preview: RelayAssistLivePreview | null;
   onCancel: (id: string) => void }) {
-  return <li className="assist-message">
-    <strong>{message.role === "USER" ? "你" : "Assist"}</strong><span> · {message.status}
-      {message.cancelRequested && message.status === "RUNNING" ? "（正在取消）" : ""}</span>
+  const user = message.role === "USER";
+  return <article className="agent-message" data-role={message.role}>
+    <span className="agent-message-avatar" aria-hidden="true">{user ? "我" : "AI"}</span>
+    <div className="agent-message-body">
+    <p className="agent-message-meta"><span className="agent-message-role">{user ? "我" : "AI"}</span>
+      {messageTime(message.createdAt) !== "" && <time dateTime={message.createdAt ?? undefined}>{messageTime(message.createdAt)}</time>}
+      {/* 完成态不占位：正常完成不需要额外标注，未完成和失败必须显式说明。 */}
+      {messageStatusLabels[message.status] !== "" && <span className="agent-message-status">
+        {messageStatusLabels[message.status]}
+        {message.cancelRequested && message.status === "RUNNING" ? "（正在取消）" : ""}</span>}</p>
     {message.skill && <p className="helper-text">第一方 Skill {message.skill.id} v{message.skill.version}
       {message.skill.sha256 && <> · 定义摘要 {message.skill.sha256}</>}
       {message.skill.definitionAvailability === "HISTORICAL_ONLY" &&
@@ -228,6 +256,8 @@ function AssistMessageRow({ client, target, message, preview, busy, pending, wri
       <div data-testid={`assist-live-preview-${message.id}`}><p className="helper-text">生成中草稿 · 仅当前预览 v{preview.previewRevision}，不是完整消息或已接受产物{preview.previewTruncated ? " · 预览已截断" : ""}</p>
         <p className="assist-message-content">{preview.previewText}</p></div>}
     {message.errorCode && <p className="action-error">生成失败：{message.errorCode}</p>}
+    {message.status === "FAILED" && message.providerErrorKind !== null &&
+      <p className="helper-text" data-testid="assist-provider-error">模型服务：{modelErrorGuides[message.providerErrorKind]}</p>}
     {message.skill && message.role === "ASSISTANT" && message.status === "COMPLETED" &&
       (message.skill.outputAvailability !== "HISTORICAL_SNAPSHOT" || message.skillOutput === null) &&
       <p className="helper-text">Skill 输出当前不可读取；不会展示失效的历史正文或来源引用。</p>}
@@ -252,16 +282,18 @@ function AssistMessageRow({ client, target, message, preview, busy, pending, wri
     </ul></details>}
     {message.role === "ASSISTANT" && message.status === "COMPLETED" &&
       <p className="helper-text">用量：输入 {message.usage.inputTokens ?? "未知"}、输出 {message.usage.outputTokens ?? "未知"} tokens</p>}
-  </li>;
+    </div>
+  </article>;
 }
 
 function AssistSessionPanel({ client, session, target, sources, writeBlockedReason,
-  refreshTarget, clearSentSources, standalone, onNavigationStateChange }: { client: RelayApiClient;
+  refreshTarget, clearSentSources, standalone, onNavigationStateChange, sourcesOpen, onToggleSources }: { client: RelayApiClient;
   session: RelayAssistSession; target: AssistTarget; sources: readonly RelayAssistSourceRef[];
   writeBlockedReason: string | null;
   refreshTarget: () => Promise<void>;
   clearSentSources: (sent: readonly RelayAssistSourceRef[]) => void;
-  standalone: boolean; onNavigationStateChange: (state: AssistNavigationState) => void }) {
+  standalone: boolean; onNavigationStateChange: (state: AssistNavigationState) => void;
+  sourcesOpen: boolean; onToggleSources: () => void }) {
   const [messages, setMessages] = useState<readonly RelayAssistMessage[] | null>(null);
   const [previews, setPreviews] = useState<Readonly<Record<string, RelayAssistLivePreview>>>({});
   const [proposals, setProposals] = useState<readonly RelayAssistProposal[]>([]);
@@ -464,7 +496,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       (!source || current.id === source.skill?.id && current.version === source.skill.version));
   }
 
-  return <section className={standalone ? "surface-panel agent-chat-conversation" : "surface-panel"} data-testid="assist-session"><div className={standalone ? "agent-chat-conversation-heading" : undefined}><div><h2>{standalone ? `对话 · ${session.status}` : "消息与提案"}</h2>{standalone ? <details><summary>会话信息</summary><p className="helper-text">{session.title} · {session.id}</p></details> : <p className="helper-text">会话 {session.id} · {session.status}。生成与取消均以服务端状态为准。</p>}</div><button className="secondary-button" type="button" data-testid="assist-refresh" onClick={() => void refresh()}>{standalone ? "刷新消息" : "刷新消息与提案"}</button></div>
+  return <section className={standalone ? "surface-panel agent-chat-conversation" : "surface-panel"} data-testid="assist-session"><div className={standalone ? "agent-chat-conversation-heading" : undefined}><div><h2>{standalone ? "对话" : "消息与提案"}</h2>{standalone ? <details><summary>会话信息</summary><p className="helper-text">{session.title} · {session.status} · {session.id}</p></details> : <p className="helper-text">会话 {session.id} · {session.status}。生成与取消均以服务端状态为准。</p>}</div><button className="secondary-button" type="button" data-testid="assist-refresh" onClick={() => void refresh()}>{standalone ? "刷新" : "刷新消息与提案"}</button></div>
     <div ref={transcriptRef} className={standalone ? "agent-chat-transcript" : undefined}
       onScroll={(event) => {
         const element = event.currentTarget;
@@ -473,13 +505,22 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     {messages === null && !error && <p role="status">正在读取会话消息…</p>}
     {error && <p className="action-error" role="alert">{error} <button type="button" className="text-link" onClick={() => void refresh()}>重读</button></p>}
     {messages?.length === 0 && <p className="helper-text">还没有消息。</p>}
-    {!!messages?.length && <ol className="assist-message-list">{messages.map((message) =>
-      <AssistMessageRow key={message.id} client={client} target={target} message={message} busy={busy} pending={pending !== null}
+    {!!messages?.length && <ol className="agent-message-list">{messages.map((message, index) => {
+      const previous = index > 0 ? messages[index - 1] : undefined;
+      const day = messageDay(message.createdAt);
+      const newDay = day !== null && (previous === undefined || messageDay(previous.createdAt) !== day);
+      return <li key={message.id} className="agent-message-slot">
+        {newDay && <p className="agent-date-separator" role="separator" aria-label={`日期 ${day}`}><span>{day}</span></p>}
+        <AssistMessageRow client={client} target={target} message={message} busy={busy} pending={pending !== null}
         preview={canPreview(message) && writeBlockedReason === null ? previews[message.id] ?? null : null}
         writeBlocked={writeBlockedReason !== null}
-        onCancel={(id) => void runAction({ kind: "cancel", id, commandId: createCommandId() })} />)}</ol>}</div>
+        onCancel={(id) => void runAction({ kind: "cancel", id, commandId: createCommandId() })} />
+      </li>;
+    })}</ol>}</div>
     {session.status === "ACTIVE" && <form className={standalone ? "create-form agent-chat-composer" : "create-form"} onSubmit={send}>
-      <label className="field"><span className="field-label">本次消息</span><textarea data-testid="assist-draft"
+      {standalone && <p className="agent-chat-composer-heading">给这项工作补充要求</p>}
+      <label className="field"><span className={standalone ? "visually-hidden" : "field-label"}>本次消息</span><textarea data-testid="assist-draft"
+        placeholder={standalone ? "输入你的想法、修改意见或新的要求" : undefined}
         value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={32768} rows={standalone ? 2 : 4}
         disabled={pending !== null || busy} /></label>
       <details className={standalone ? "agent-chat-options" : "assist-options-expanded"} open={!standalone}><summary>发送选项 · {selectedSkill ? selectedSkill.title : intent === "DISCUSS" ? "普通讨论" : "提案"}</summary>
@@ -513,11 +554,23 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
         {session.projectId !== null && <option value="PROPOSE_TASK">提出任务定义</option>}
       </select></label>}
       <p className="helper-text">本次发送冻结已选的 {sources.length} 个资料版本。Assist 不能自行提交业务修改。</p></details>
-      <button className="primary-button" data-testid="assist-send" type="submit"
+      {standalone && <div className="agent-chat-composer-actions">
+        <span className="agent-chat-composer-tools">
+          <span className="agent-chat-tool agent-chat-tool--pending" aria-disabled="true"
+            title="附件上传尚未接入，不能发送未保存的本地文件">附件 · 待接入</span>
+          <button className="agent-chat-tool" type="button" data-testid="assist-open-sources"
+            aria-expanded={sourcesOpen} onClick={onToggleSources}>知识 · 已选 {sources.length}</button>
+          <span className="agent-chat-tool agent-chat-tool--pending" aria-disabled="true"
+            title="@ 引用尚未接入，不能凭文字猜测引用对象">@ 引用 · 待接入</span>
+        </span>
+        <button className="primary-button" data-testid="assist-send" type="submit"
+          disabled={!draft.trim() || pending !== null || busy || writeBlockedReason !== null || Boolean(selectedSkillKey && !selectedSkill) ||
+            Boolean(selectedSkill && (!selectedSkill.callSupported || selectedSkill.missingCapabilities.length > 0))}>{busy ? "正在提交" : "发送讨论"}</button>
+      </div>}
+      {!standalone && <button className="primary-button" data-testid="assist-send" type="submit"
         disabled={!draft.trim() || pending !== null || busy || writeBlockedReason !== null || Boolean(selectedSkillKey && !selectedSkill) ||
-          Boolean(selectedSkill && (!selectedSkill.callSupported || selectedSkill.missingCapabilities.length > 0))}>{busy ? "正在提交" : "发送消息"}</button>
-    </form>}
-    {actionError && <p className="action-error" role="alert">{actionError}</p>}{notice && <p className="receipt-message" role="status">{notice}</p>}{pending && <div className="assist-pending"><p className="helper-text">命令结果待核对，原 command_id：{pending.commandId}。先查回执；未找到时只能用原命令 ID 和原载荷重试。</p><button className="secondary-button" type="button" disabled={busy} onClick={() => void checkReceipt()}>查询原命令回执</button><button className="secondary-button" type="button" disabled={busy} onClick={() => void runAction(pending, true)}>以原命令重试</button></div>}
+          Boolean(selectedSkill && (!selectedSkill.callSupported || selectedSkill.missingCapabilities.length > 0))}>{busy ? "正在提交" : "发送消息"}</button>}
+    </form>}    {actionError && <p className="action-error" role="alert">{actionError}</p>}{notice && <p className="receipt-message" role="status">{notice}</p>}{pending && <div className="assist-pending"><p className="helper-text">命令结果待核对，原 command_id：{pending.commandId}。先查回执；未找到时只能用原命令 ID 和原载荷重试。</p><button className="secondary-button" type="button" disabled={busy} onClick={() => void checkReceipt()}>查询原命令回执</button><button className="secondary-button" type="button" disabled={busy} onClick={() => void runAction(pending, true)}>以原命令重试</button></div>}
     <details className={standalone ? "agent-chat-proposals" : "assist-options-expanded"} open={!standalone}><summary>Assist 提案 · {proposals.length}</summary><h3>Assist 提案</h3>{!proposals.length && <p className="helper-text">当前会话没有待确认提案；Skill 历史输出仍可只读查看。</p>}{proposals.map((proposal) =>
       "baseAcceptanceRevision" in proposal
         ? <TaskContractProposalPreview key={`${proposal.id}:${proposal.status}:${target.revision}`} client={client} proposal={proposal}

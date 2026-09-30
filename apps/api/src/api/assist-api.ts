@@ -7,6 +7,8 @@ import { listAssistMessages, listAssistProposals, listAssistSessions, readAssist
   readAssistSession, projectAssistSkillMessage, readAssistLivePreview }
   from '../application/assist-queries.js';
 import type { JsonObject } from '../infrastructure/json.js';
+import { MODEL_ERROR_CATEGORIES, type ModelErrorCategory }
+  from '../workflow/model-error-classification.js';
 import { toDecimalString } from '../shared/decimal.js';
 import { commandEnvelopeSchema } from './domain-schemas.js';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
@@ -41,6 +43,9 @@ const AssistMessageDto = Type.Object({
   id: uuid, session_id: uuid, seq: rev, role: Type.String(), status: Type.String(),
   intent: Type.String(), content: Type.Union([Type.String(), Type.Null()]),
   error_code: Type.Union([Type.String(), Type.Null()]),
+  provider_error_kind: Type.Union([
+    ...MODEL_ERROR_CATEGORIES.map((category) => Type.Literal(category)), Type.Null(),
+  ]),
   sources: Type.Array(Type.Object({}, { additionalProperties: true })),
   skill: Type.Union([Type.Object({}, { additionalProperties: true }), Type.Null()]),
   skill_input: Type.Union([Type.Object({}, { additionalProperties: true }), Type.Null()]),
@@ -120,6 +125,7 @@ function sessionDto(row: { id: string; workspace_id: string; project_id: string 
 
 function messageDto(row: { id: string; session_id: string; seq: bigint; role: string;
   status: string; intent: string; content: string | null; error_code: string | null;
+  provider_error_kind: ModelErrorCategory | null;
   sources: unknown; provider_request_id: string | null; usage_input_tokens: number | null;
   usage_output_tokens: number | null; cancel_requested: boolean; created_at: Date; updated_at: Date },
   projection: { skill: JsonObject | null; skill_input: JsonObject | null;
@@ -127,7 +133,8 @@ function messageDto(row: { id: string; session_id: string; seq: bigint; role: st
   return {
     id: row.id, session_id: row.session_id, seq: toDecimalString(row.seq), role: row.role,
     status: row.status, intent: row.intent, content: projection.content,
-    error_code: row.error_code, sources: projection.sources,
+    error_code: row.error_code, provider_error_kind: row.provider_error_kind,
+    sources: projection.sources,
     skill: projection.skill, skill_input: projection.skill_input,
     skill_output: projection.skill_output, provider_request_id: row.provider_request_id,
     usage: { input_tokens: row.usage_input_tokens, output_tokens: row.usage_output_tokens },
@@ -221,7 +228,9 @@ export function registerAssistRoutes(app: FastifyInstance, dependencies: RouteDe
     } }));
 
   app.get('/assist-sessions/:id/messages', { schema: { params: sessionItem,
-    querystring: messagesQuery } }, async (request, reply) => {
+    querystring: messagesQuery,
+    response: { 200: Type.Object({ items: Type.Array(AssistMessageDto) }, strict) },
+  } }, async (request, reply) => {
     try {
       const p = request.params as { workspace_id: string; id: string };
       const q = request.query as { limit?: string };

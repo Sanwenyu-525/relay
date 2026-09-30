@@ -129,8 +129,11 @@ test('migrate entry reports the applied migrations without repeating them', asyn
       '0041_collaboration_impact_checks',
       '0042_collaboration_attention',
       '0043_model_call_verify',
+      '0044_project_continuation_points',
+      '0045_continuation_point_ref_target_guard',
+      '0046_assist_provider_error_kind',
     ]);
-  assert.equal(payload.ledger_rows, 43);
+  assert.equal(payload.ledger_rows, 46);
 });
 
 test('migrate entry fails explicitly without a migration connection', async () => {

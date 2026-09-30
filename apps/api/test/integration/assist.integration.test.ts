@@ -5,6 +5,7 @@ import test, { after, before } from 'node:test';
 
 import { sql } from 'kysely';
 import type { JsonObject } from '../../src/infrastructure/json.js';
+import { AssistRepository } from '../../src/assist/assist-repository.js';
 
 import { acceptAssistProposal, cancelAssistMessage, createAssistSession,
   rejectAssistProposal, requestAssistMessage, assistPayloadHash }
@@ -23,7 +24,8 @@ import { DomainError } from '../../src/application/domain-error.js';
 import { recordModelInvocation } from '../../src/application/model-call-recorder.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { ModelCallRepository } from '../../src/model/model-call-repository.js';
-import { FakeModelPort } from '../../src/workflow/fake-model-port.js';
+import { FakeModelPort, type AssistModelPort } from '../../src/workflow/fake-model-port.js';
+import { ModelCallBudgetError } from '../../src/workflow/openai-compatible-model-port.js';
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
 import { createDataRoot, delay, expectProblem, startTestApi, workspacePath }
   from './api-harness.js';
@@ -88,14 +90,16 @@ async function readTaskRevision(taskId: string): Promise<string> {
 
 async function readMessage(messageId: string): Promise<{
   status: string; content: string | null; error_code: string | null;
+  provider_error_kind: string | null;
   cancel_requested: boolean; usage_input_tokens: number | null; usage_output_tokens: number | null;
-  sources: unknown; provider_request_id: string | null;
+  sources: unknown; provider_request_id: string | null; worker_id: string | null;
 }> {
   const row = await sql<{ status: string; content: string | null; error_code: string | null;
+    provider_error_kind: string | null;
     cancel_requested: boolean; usage_input_tokens: number | null; usage_output_tokens: number | null;
-    sources: unknown; provider_request_id: string | null }>`
-    select status, content, error_code, cancel_requested, usage_input_tokens,
-      usage_output_tokens, sources, provider_request_id
+    sources: unknown; provider_request_id: string | null; worker_id: string | null }>`
+    select status, content, error_code, provider_error_kind, cancel_requested, usage_input_tokens,
+      usage_output_tokens, sources, provider_request_id, worker_id
     from assist_messages where id = ${messageId}`.execute(app.db);
   return row.rows[0]!;
 }
@@ -328,6 +332,7 @@ test('schema-invalid proposal output fails the message and creates no proposal',
   const settled = await readMessage(requested.result.assistant_message_id);
   assert.equal(settled.status, 'FAILED');
   assert.equal(settled.error_code, 'OUTPUT_SCHEMA_INVALID');
+  assert.equal(settled.provider_error_kind, null);
   assert.ok(settled.content!.includes('broken'));
   const call = (await new ModelCallRepository(app.db)
     .listForAssistMessage(requested.result.assistant_message_id))[0]!;
@@ -347,6 +352,7 @@ test('a model exception records failed call with unknown usage', async () => {
   assert.equal(outcome?.status, 'FAILED');
   const message = await readMessage(requested.result.assistant_message_id);
   assert.equal(message.error_code, 'MODEL_FAILED');
+  assert.equal(message.provider_error_kind, null);
   assert.equal(message.usage_input_tokens, null);
   assert.equal(message.usage_output_tokens, null);
   const calls = await new ModelCallRepository(app.db)
@@ -355,6 +361,355 @@ test('a model exception records failed call with unknown usage', async () => {
   assert.equal(calls[0]!.status, 'FAILED');
   assert.equal(calls[0]!.error_kind, 'Error');
   assert.equal(calls[0]!.usage_input_tokens, null);
+});
+
+test('a failed generation keeps provider request identity and known usage on the message row', async () => {
+  const f = await fixture('READY');
+  const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+    commandId: randomUUID(), projectId: f.projectId, title: 'failed evidence' });
+  const requested = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+    sessionId: session.result.session_id, commandId: randomUUID(), content: '触发失败' });
+  // Provider 已经回过一次请求并产生了用量后才失败：证据必须跟着消息行落库，
+  // 不能只剩 errorCode，也不能补 0。
+  const evidencePort = {
+    identity: modelPort.identity,
+    assist: async () => { throw Object.assign(
+      new Error('MODEL_STREAM_INCOMPLETE: stream ended before [DONE]'),
+      { providerRequestId: 'req-evidence-1',
+        usage: { inputTokens: 120, outputTokens: 34 } }); }
+  };
+  const outcome = await runAssistGenerationTick(app.db, { workerId: 'assist-w1', storage,
+    modelPort: evidencePort as unknown as FakeModelPort, leaseMs: 30_000 });
+  assert.equal(outcome?.status, 'FAILED');
+  const message = await readMessage(requested.result.assistant_message_id);
+  assert.equal(message.error_code, 'MODEL_FAILED');
+  assert.equal(message.provider_error_kind, 'STREAM_BROKEN');
+  assert.equal(message.provider_request_id, 'req-evidence-1');
+  assert.equal(message.usage_input_tokens, 120);
+  assert.equal(message.usage_output_tokens, 34);
+  const calls = await new ModelCallRepository(app.db)
+    .listForAssistMessage(requested.result.assistant_message_id);
+  assert.equal(calls[0]!.provider_request_id, 'req-evidence-1');
+  assert.equal(calls[0]!.error_kind, 'STREAM_BROKEN');
+});
+
+test('a Relay owned failure keeps its own error identity instead of a provider category', async () => {
+  const f = await fixture('READY');
+  const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+    commandId: randomUUID(), projectId: f.projectId, title: 'relay owned failure' });
+  const requested = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+    sessionId: session.result.session_id, commandId: randomUUID(), content: '触发预算拒绝' });
+  const budgetPort = {
+    identity: modelPort.identity,
+    assist: async () => { throw new ModelCallBudgetError(); }
+  };
+  const outcome = await runAssistGenerationTick(app.db, { workerId: 'assist-w1', storage,
+    modelPort: budgetPort as unknown as FakeModelPort, leaseMs: 30_000 });
+  assert.equal(outcome?.status, 'FAILED');
+  assert.equal(outcome.errorCode, 'MODEL_BUDGET_EXHAUSTED');
+  assert.equal((await readMessage(requested.result.assistant_message_id)).provider_error_kind, null);
+  const calls = await new ModelCallRepository(app.db)
+    .listForAssistMessage(requested.result.assistant_message_id);
+  assert.equal(calls[0]!.error_kind, 'ModelCallBudgetError');
+});
+
+const providerFailureCases = [
+  { category: 'AUTH', error: Object.assign(new Error('provider rejected credentials'), { status: 401 }) },
+  { category: 'RATE_LIMIT', error: Object.assign(new Error('provider throttled'), { status: 429 }) },
+  { category: 'TIMEOUT', error: Object.assign(new Error('provider took too long'), { name: 'ModelTimeoutError' }) },
+  { category: 'STREAM_BROKEN', error: new Error('MODEL_STREAM_INCOMPLETE') },
+  { category: 'PROTOCOL', error: Object.assign(new Error('provider rejected request'), { status: 422 }) },
+  { category: 'NETWORK', error: new TypeError('fetch failed', { cause: Object.assign(new Error(), { code: 'ECONNRESET' }) }) },
+] as const;
+
+for (const { category, error } of providerFailureCases) {
+  test(`Provider ${category} is stored independently and projected without raw secrets`, async () => {
+    const f = await fixture('READY');
+    const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+      commandId: randomUUID(), projectId: f.projectId, title: '分类故障' });
+    const requested = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+      sessionId: session.result.session_id, commandId: randomUUID(), content: '受控故障' });
+    const secretMarker = 'test-only-secret-must-not-appear';
+    error.message += ` Authorization=Bearer ${secretMarker}`;
+    const failingPort: AssistModelPort = { identity: modelPort.identity,
+      assist: async () => { throw error; } };
+    const outcome = await runAssistGenerationTick(app.db, { workerId: 'assist-category',
+      storage, modelPort: failingPort, leaseMs: 30_000 });
+    assert.equal(outcome?.status, 'FAILED');
+    assert.equal(outcome.errorCode, 'MODEL_FAILED');
+    const message = await readMessage(requested.result.assistant_message_id);
+    assert.equal(message.provider_error_kind, category);
+    assert.equal(message.error_code, 'MODEL_FAILED');
+    assert.equal(message.content, null);
+    assert.equal(message.usage_input_tokens, null);
+    const calls = await new ModelCallRepository(app.db)
+      .listForAssistMessage(requested.result.assistant_message_id);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]!.status, 'FAILED');
+    assert.equal(calls[0]!.error_kind, category);
+    assert.equal(JSON.stringify(calls).includes(secretMarker), false);
+    const api = await startTestApi();
+    try {
+      const response = await api.get(`${workspacePath(f.workspaceId)}/assist-sessions/` +
+        `${session.result.session_id}/messages`);
+      assert.equal(response.status, 200);
+      const items = (response.body as { items: Array<{ id: string; provider_error_kind: string | null;
+        error_code: string | null }> }).items;
+      assert.equal(items.find((item) => item.id === requested.result.assistant_message_id)
+        ?.provider_error_kind, category);
+      assert.equal(items.find((item) => item.id === requested.result.user_message_id)
+        ?.provider_error_kind, null);
+      assert.equal(JSON.stringify(response.body).includes(secretMarker), false);
+      assert.equal(JSON.stringify(response.body).includes(error.message), false);
+    } finally { await api.stop(); }
+  });
+}
+
+test('local TypeError before invocation and after successful return has no Provider category', async () => {
+  for (const stage of ['BEFORE', 'AFTER'] as const) {
+    const f = await fixture('READY');
+    const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+      commandId: randomUUID(), projectId: f.projectId, title: `local ${stage}` });
+    const requested = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+      sessionId: session.result.session_id, commandId: randomUUID(), content: '本地异常' });
+    let invoked = false;
+    const localErrorPort: AssistModelPort = {
+      get identity() {
+        if (stage === 'BEFORE') throw new TypeError('local configuration failed');
+        return modelPort.identity;
+      },
+      assist: async () => {
+        invoked = true;
+        return { kind: 'CONTENT', providerRequestId: 'req-local-error',
+          usage: { inputTokens: 10, outputTokens: 5 },
+          get content(): string { throw new TypeError('local result processing failed'); } };
+      },
+    };
+    const outcome = await runAssistGenerationTick(app.db, { workerId: 'assist-local',
+      storage, modelPort: localErrorPort, leaseMs: 30_000 });
+    assert.equal(outcome?.status, 'FAILED');
+    assert.equal(outcome.errorCode, 'MODEL_FAILED', 'existing Relay error identity is preserved');
+    assert.equal((await readMessage(requested.result.assistant_message_id)).provider_error_kind, null);
+    assert.equal(invoked, stage === 'AFTER');
+    const calls = await new ModelCallRepository(app.db)
+      .listForAssistMessage(requested.result.assistant_message_id);
+    assert.equal(calls.length, stage === 'BEFORE' ? 0 : 1);
+    if (stage === 'AFTER') {
+      assert.equal(calls[0]!.status, 'COMPLETED');
+      assert.equal(calls[0]!.error_kind, null);
+    }
+  }
+});
+
+test('a local streaming preview write TypeError is distinct from Provider NETWORK in message and ledger', async () => {
+  const f = await fixture('READY');
+  const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+    commandId: randomUUID(), projectId: f.projectId, title: '本地预览写入故障' });
+  const requested = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+    sessionId: session.result.session_id, commandId: randomUUID(), content: '流式本地异常' });
+  const originalWrite = AssistRepository.prototype.writeLivePreview;
+  AssistRepository.prototype.writeLivePreview = async () => {
+    throw new TypeError('test-only-local-preview-secret');
+  };
+  const streamingPort: AssistModelPort = { identity: modelPort.identity,
+    assist: async (request) => {
+      await request.onTextDelta!('片段');
+      return { kind: 'CONTENT', content: '片段', providerRequestId: 'req-preview-local',
+        usage: { inputTokens: 1, outputTokens: 1 } };
+    } };
+  try {
+    const outcome = await runAssistGenerationTick(app.db, { workerId: 'assist-preview-error',
+      storage, modelPort: streamingPort, leaseMs: 30_000 });
+    assert.equal(outcome?.status, 'FAILED');
+    assert.equal(outcome.errorCode, 'MODEL_FAILED');
+    const message = await readMessage(requested.result.assistant_message_id);
+    const calls = await new ModelCallRepository(app.db)
+      .listForAssistMessage(requested.result.assistant_message_id);
+    assert.equal(calls[0]!.status, 'FAILED');
+    assert.deepEqual({ messageCategory: message.provider_error_kind,
+      callErrorKind: calls[0]!.error_kind }, { messageCategory: null,
+      callErrorKind: 'AssistPreviewWriteError' });
+    assert.equal(message.content, null);
+    assert.equal(JSON.stringify(calls).includes('test-only-local-preview-secret'), false);
+  } finally { AssistRepository.prototype.writeLivePreview = originalWrite; }
+});
+
+test('a rejected cancelled invocation retains evidence with no Provider failure classification', async () => {
+  const f = await fixture('READY');
+  const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+    commandId: randomUUID(), projectId: f.projectId, title: '取消异常' });
+  const requested = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+    sessionId: session.result.session_id, commandId: randomUUID(), content: '等待取消' });
+  const started = Promise.withResolvers<void>();
+  const abortPort: AssistModelPort = { identity: modelPort.identity,
+    assist: (request) => new Promise((_resolve, reject) => {
+      request.signal!.addEventListener('abort', () => reject(Object.assign(
+        new Error('cancelled Provider invocation'), { name: 'AbortError', status: 401,
+          providerRequestId: 'req-cancelled-error', usage: { inputTokens: 12, outputTokens: 3 } })),
+      { once: true });
+      started.resolve();
+    }) };
+  const running = runAssistGenerationTick(app.db, { workerId: 'assist-cancel-error',
+    storage, modelPort: abortPort, leaseMs: 30_000 });
+  await started.promise;
+  await cancelAssistMessage(app.db, { workspaceId: f.workspaceId,
+    messageId: requested.result.assistant_message_id, commandId: randomUUID() });
+  assert.equal((await running)?.status, 'CANCELLED');
+  const message = await readMessage(requested.result.assistant_message_id);
+  assert.equal(message.provider_error_kind, null);
+  assert.equal(message.error_code, null);
+  assert.equal(message.provider_request_id, 'req-cancelled-error');
+  assert.equal(message.usage_input_tokens, 12);
+  const calls = await new ModelCallRepository(app.db)
+    .listForAssistMessage(requested.result.assistant_message_id);
+  assert.equal(calls[0]!.status, 'CANCELLED');
+  assert.equal(calls[0]!.error_kind, null);
+});
+
+test('persisted cancel wins a Provider rejection before the cancel poll aborts the stream', async () => {
+  const f = await fixture('READY');
+  const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+    commandId: randomUUID(), projectId: f.projectId, title: '取消与失败竞争' });
+  const requested = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+    sessionId: session.result.session_id, commandId: randomUUID(), content: '失败前取消' });
+  const racingPort: AssistModelPort = { identity: modelPort.identity,
+    assist: async (request) => {
+      await cancelAssistMessage(app.db, { workspaceId: f.workspaceId,
+        messageId: requested.result.assistant_message_id, commandId: randomUUID() });
+      assert.equal(request.signal!.aborted, false, 'the persisted intent precedes polling');
+      throw Object.assign(new Error('provider throttled'), { status: 429 });
+    } };
+  const outcome = await runAssistGenerationTick(app.db, { workerId: 'assist-cancel-race',
+    storage, modelPort: racingPort, leaseMs: 30_000 });
+  assert.equal(outcome?.status, 'CANCELLED');
+  const message = await readMessage(requested.result.assistant_message_id);
+  assert.equal(message.status, 'CANCELLED');
+  assert.equal(message.error_code, null);
+  assert.equal(message.provider_error_kind, null);
+  const calls = await new ModelCallRepository(app.db)
+    .listForAssistMessage(requested.result.assistant_message_id);
+  assert.equal(calls[0]!.status, 'FAILED', 'the call failed before the AbortSignal reached it');
+  assert.equal(calls[0]!.error_kind, 'RATE_LIMIT');
+});
+
+test('persisted cancel wins a successful ordinary proposal before the cancel poll aborts', async () => {
+  for (const intent of ['PROPOSE_CANDIDATE', 'PROPOSE_TASK'] as const) {
+    const f = await fixture('IN_PROGRESS');
+    const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+      commandId: randomUUID(), taskId: f.taskId, title: `取消提案 ${intent}` });
+    const requested = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+      sessionId: session.result.session_id, commandId: randomUUID(), content: '取消前起草', intent });
+    const racingPort: AssistModelPort = { identity: modelPort.identity,
+      assist: async (request) => {
+        await cancelAssistMessage(app.db, { workspaceId: f.workspaceId,
+          messageId: requested.result.assistant_message_id, commandId: randomUUID() });
+        assert.equal(request.signal!.aborted, false, 'the persisted intent precedes polling');
+        return modelPort.assist(request);
+      } };
+    const outcome = await runAssistGenerationTick(app.db, { workerId: 'assist-proposal-cancel',
+      storage, modelPort: racingPort, leaseMs: 30_000 });
+    assert.equal(outcome?.status, 'CANCELLED');
+    assert.deepEqual(outcome.proposalIds, []);
+    const message = await readMessage(requested.result.assistant_message_id);
+    assert.equal(message.status, 'CANCELLED');
+    assert.equal(message.content, null);
+    assert.equal(message.provider_error_kind, null);
+    const proposals = await sql<{ count: string }>`select count(*)::text as count
+      from assist_proposals where message_id = ${requested.result.assistant_message_id}`.execute(app.db);
+    assert.equal(proposals.rows[0]!.count, '0');
+    const calls = await new ModelCallRepository(app.db)
+      .listForAssistMessage(requested.result.assistant_message_id);
+    assert.equal(calls[0]!.status, 'COMPLETED', 'the model returned before the AbortSignal reached it');
+    assert.equal(message.provider_request_id, calls[0]!.provider_request_id);
+    assert.equal(message.usage_input_tokens, calls[0]!.usage_input_tokens);
+  }
+});
+
+test('host abort without a persisted user cancel leaves the claim for lease recovery', async () => {
+  const f = await fixture('READY');
+  const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+    commandId: randomUUID(), projectId: f.projectId, title: '宿主停止' });
+  const requested = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+    sessionId: session.result.session_id, commandId: randomUUID(), content: '等待宿主停止' });
+  const started = Promise.withResolvers<void>();
+  const stop = new AbortController();
+  const abortPort: AssistModelPort = { identity: modelPort.identity,
+    assist: (request) => new Promise((_resolve, reject) => {
+      request.signal!.addEventListener('abort', () => reject(Object.assign(
+        new Error('host stopped'), { name: 'AbortError' })), { once: true });
+      started.resolve();
+    }) };
+  const running = runAssistGenerationTick(app.db, { workerId: 'assist-host-stopped',
+    storage, modelPort: abortPort, leaseMs: 30_000, signal: stop.signal });
+  await started.promise;
+  stop.abort();
+  assert.equal((await running)?.status, 'DISCARDED');
+  const message = await readMessage(requested.result.assistant_message_id);
+  assert.equal(message.status, 'RUNNING');
+  assert.equal(message.cancel_requested, false);
+  assert.equal(message.provider_error_kind, null);
+  const calls = await new ModelCallRepository(app.db)
+    .listForAssistMessage(requested.result.assistant_message_id);
+  assert.equal(calls[0]!.status, 'CANCELLED');
+  assert.equal(calls[0]!.error_kind, null);
+  await sql`update assist_messages set updated_at = now() - interval '1 minute'
+    where id = ${requested.result.assistant_message_id}`.execute(app.db);
+  assert.equal(await runAssistGenerationTick(app.db, { workerId: 'assist-recovery', storage,
+    modelPort, leaseMs: 30_000 }), undefined);
+  const recovered = await readMessage(requested.result.assistant_message_id);
+  assert.equal(recovered.error_code, 'LEASE_LOST');
+  assert.equal(recovered.provider_error_kind, null);
+});
+
+test('Provider classification cannot bypass a lost generation claim', async () => {
+  const f = await fixture('READY');
+  const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+    commandId: randomUUID(), projectId: f.projectId, title: '领取丢失' });
+  const requested = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+    sessionId: session.result.session_id, commandId: randomUUID(), content: '旧 Worker 故障' });
+  const losingPort: AssistModelPort = { identity: modelPort.identity,
+    assist: async () => {
+      await sql`update assist_messages set worker_id = 'replacement-worker'
+        where id = ${requested.result.assistant_message_id}`.execute(app.db);
+      throw Object.assign(new Error('provider rejected credentials'), { status: 401 });
+    } };
+  await runAssistGenerationTick(app.db, { workerId: 'assist-old', storage,
+    modelPort: losingPort, leaseMs: 30_000 });
+  const message = await readMessage(requested.result.assistant_message_id);
+  assert.equal(message.status, 'RUNNING');
+  assert.equal(message.worker_id, 'replacement-worker');
+  assert.equal(message.error_code, null);
+  assert.equal(message.provider_error_kind, null);
+  const calls = await new ModelCallRepository(app.db)
+    .listForAssistMessage(requested.result.assistant_message_id);
+  assert.equal(calls[0]!.error_kind, 'AUTH');
+  await sql`update assist_messages set updated_at = now() - interval '1 minute'
+    where id = ${requested.result.assistant_message_id}`.execute(app.db);
+  assert.equal(await runAssistGenerationTick(app.db, { workerId: 'assist-new', storage,
+    modelPort, leaseMs: 30_000 }), undefined);
+  assert.equal((await readMessage(requested.result.assistant_message_id)).error_code, 'LEASE_LOST');
+});
+
+test('PostgreSQL rejects unknown Provider kinds and kinds on every non-FAILED status', async () => {
+  const f = await fixture('READY');
+  const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+    commandId: randomUUID(), projectId: f.projectId, title: '分类约束' });
+  const requested = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+    sessionId: session.result.session_id, commandId: randomUUID(), content: '约束检查' });
+  const messageId = requested.result.assistant_message_id;
+  assert.equal((await readMessage(messageId)).provider_error_kind, null);
+  await sql`update assist_messages set status = 'FAILED', error_code = 'MODEL_FAILED',
+    provider_error_kind = 'AUTH' where id = ${messageId}`.execute(app.db);
+  await assert.rejects(sql`update assist_messages set provider_error_kind = 'UNKNOWN'
+    where id = ${messageId}`.execute(app.db), { code: '23514',
+    constraint: 'ck_assist_messages_provider_error_kind' });
+  for (const status of ['PENDING', 'RUNNING', 'COMPLETED', 'CANCELLED']) {
+    await assert.rejects(sql`update assist_messages set status = ${status},
+      content = ${status === 'COMPLETED' ? '已完成' : null}
+      where id = ${messageId}`.execute(app.db), { code: '23514',
+      constraint: 'ck_assist_messages_provider_error_kind_failed' });
+  }
+  assert.equal((await readMessage(messageId)).provider_error_kind, 'AUTH');
 });
 
 test('cancel persists the intent and converges a running generation to CANCELLED', async () => {
@@ -379,6 +734,7 @@ test('cancel persists the intent and converges a running generation to CANCELLED
   assert.equal(outcome?.status, 'CANCELLED');
   const settled = await readMessage(requested.result.assistant_message_id);
   assert.equal(settled.status, 'CANCELLED');
+  assert.equal(settled.provider_error_kind, null);
   assert.equal(settled.cancel_requested, true);
   assert.equal(settled.content, null);
   assert.equal(settled.usage_input_tokens, null);
@@ -396,6 +752,7 @@ test('cancel persists the intent and converges a running generation to CANCELLED
   const queuedCancel = await cancelAssistMessage(app.db, { workspaceId: f2.workspaceId,
     messageId: queued.result.assistant_message_id, commandId: randomUUID() });
   assert.equal(queuedCancel.result.status, 'CANCELLED');
+  assert.equal((await readMessage(queued.result.assistant_message_id)).provider_error_kind, null);
 });
 
 test('model invocation rows retain separate failed, successful and unknown outcomes', async () => {
@@ -460,6 +817,7 @@ test('expired lease converges a dead worker generation to LEASE_LOST', async () 
   const settled = await readMessage(requested.result.assistant_message_id);
   assert.equal(settled.status, 'FAILED');
   assert.equal(settled.error_code, 'LEASE_LOST');
+  assert.equal(settled.provider_error_kind, null);
 });
 
 test('base revision conflict expires the proposal instead of overwriting business facts', async () => {
@@ -799,6 +1157,7 @@ test('Skill scope, source revocation and malformed output fail without stale fal
     storage, modelPort, leaseMs: 30_000 });
   assert.equal(unavailable?.status, 'FAILED');
   assert.equal(unavailable.errorCode, 'SKILL_SOURCE_UNAVAILABLE');
+  assert.equal((await readMessage(requested.result.assistant_message_id)).provider_error_kind, null);
   assert.equal((await new ModelCallRepository(app.db)
     .listForAssistMessage(requested.result.assistant_message_id)).length, 0);
   const malformed = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
@@ -807,6 +1166,7 @@ test('Skill scope, source revocation and malformed output fail without stale fal
   const invalidOutput = await runAssistGenerationTick(app.db, { workerId: 'skill-w2',
     storage, modelPort, leaseMs: 30_000 });
   assert.equal(invalidOutput?.errorCode, 'OUTPUT_SCHEMA_INVALID');
+  assert.equal((await readMessage(malformed.result.assistant_message_id)).provider_error_kind, null);
   const settled = await sql<{ skill_output: unknown }>`select skill_output from assist_messages
     where id = ${malformed.result.assistant_message_id}`.execute(app.db);
   assert.equal(settled.rows[0]!.skill_output, null);
@@ -886,6 +1246,7 @@ test('Skill rejects combined source input over budget before any model invocatio
     storage, modelPort, leaseMs: 30_000 });
   assert.equal(outcome?.status, 'FAILED');
   assert.equal(outcome.errorCode, 'SKILL_INPUT_OVER_BUDGET');
+  assert.equal((await readMessage(requested.result.assistant_message_id)).provider_error_kind, null);
   assert.equal((await new ModelCallRepository(app.db)
     .listForAssistMessage(requested.result.assistant_message_id)).length, 0);
 });

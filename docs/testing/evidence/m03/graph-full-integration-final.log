@@ -1,0 +1,289 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-8895b1d3b4
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-8895b1d3b4/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-8895b1d3b4^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 29336)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-8895b1d3b4/cluster" "-h" "127.0.0.1" "-p" "11775"
+DO
+CREATE DATABASE
+Test database: relay_api_test_cdfaec3a055f on 127.0.0.1:11775 (roles relay_migrator / relay_app)
+{
+  "applied": [
+    "0001_v001_human_core",
+    "0002_p02_task_goal_alignment",
+    "0003_schema_readiness",
+    "0004_v002_runs",
+    "0005_v002_verification",
+    "0006_v002_reviews",
+    "0007_v003_recovery_control",
+    "0008_v003_gateway",
+    "0009_v004_information_rules",
+    "0010_v005_context_revision",
+    "0011_m03_run_dispatch",
+    "0012_m03_run_events",
+    "0013_m03_run_command_order"
+  ],
+  "already_applied": [],
+  "ledger_rows": 13
+}
+{"schema":"relay_graph_v1","ready":true}
+✔ creates a managed markdown version that is complete on disk and readable through the API (1166.0126ms)
+✔ rejects an unsupported media type with 415 and oversized content with 413 (67.7301ms)
+✔ rejects user-supplied paths, non-uuid ids and cross-scope artifact reads (56.4188ms)
+✔ appends a new immutable version without overwriting the previous one (64.3156ms)
+✔ completes a task against a fixed version and never marks the newer version as accepted (90.5647ms)
+✔ completes a task that requires no artifacts with an empty version set (20.7631ms)
+✔ requires declared outputs to be covered and required human criteria to be confirmed (89.9417ms)
+✔ reopens with a new acceptance revision, keeps history and blocks new uploads until started again (80.1382ms)
+✔ replaying an old completion command after reopen returns the historical receipt only (52.989ms)
+✔ keeps reopened completion history but removes only that cycle from the current State projection (94.6032ms)
+✔ lets only one of two concurrent completion commands win the cycle (107.3587ms)
+✔ serializes SET_NEXT_ACTION and reopen in Task → ProjectState order without a deadlock (1746.5464ms)
+✔ rolls the whole completion transaction back when the state delta fails and converges on retry (208.7555ms)
+✔ rolls the whole reopen transaction back when the State revision update fails and converges on replay (193.172ms)
+✔ leaves a reconcilable orphan content file when the version row cannot be registered (180.434ms)
+✔ refuses completion when the accepted evidence file is missing or tampered (95.2774ms)
+✔ delegates a READY project task and returns the documented 202 envelope (1411.4218ms)
+✔ refuses to delegate a Me Inbox task without a project (A08) (26.8123ms)
+✔ refuses to delegate a task that is not READY (14.2814ms)
+✔ refuses to delegate while a BLOCKS dependency is unfinished (33.4561ms)
+✔ lets exactly one of two concurrent delegations win and keeps a single live run (B01) (91.4972ms)
+✔ replays a delegation command and rejects a reused command_id with a different payload (49.4484ms)
+✔ refuses a second delegation while a live run exists (29.017ms)
+✔ refuses an unknown workflow version selector (15.0136ms)
+✔ refuses unsupported or malformed declared output requirements before creating a Run (41.9495ms)
+✔ re-delegates after a FAILED run with retry_of_run_id while the old run stays FAILED (B06) (170.2073ms)
+✔ rejects a retry_of_run_id that does not exist or belongs to another task (51.7996ms)
+✔ keeps runs invisible across workspaces (27.9029ms)
+✔ returns the initial state with its own revision and dependency versions (1247.9763ms)
+✔ rejects whole-object overwrites and unknown state fields (17.9935ms)
+✔ applies SET_PHASE with command replay and rejects a stale revision (26.9629ms)
+✔ accepts only the built-in phases of the project type and leaves rejected commands unrecorded (87.3925ms)
+✔ sets the next action only for tasks of the project and exposes its version (47.2184ms)
+✔ selects an artifact version through a typed action and refuses duplicates (48.7845ms)
+✔ adds a confirmed risk and resolves a blocker with typed actions (37.7574ms)
+✔ keeps in_progress and project goals in the dependency versions (36.7877ms)
+✔ lets exactly one concurrent state command win the same revision (87.8586ms)
+✔ requires the local bearer and hides state of other workspaces (16.1993ms)
+✔ creates a project with its state and returns the documented envelope (1168.0752ms)
+✔ creates an INBOX task with an immutable acceptance v1 and HUMAN execution (48.3115ms)
+✔ moves INBOX to READY to IN_PROGRESS only through explicit commands (40.1389ms)
+✔ refuses to mark a task ready without any required criterion (16.5496ms)
+✔ edits only presentation fields and rejects status or acceptance changes (18.9574ms)
+✔ replays a command with the same payload and rejects a reused command_id (15.9262ms)
+✔ rejects a stale revision and reports the current one (16.0192ms)
+✔ lets exactly one of two concurrent clients win the same revision (82.6062ms)
+✔ missing required revision input is rejected as a field error (21.6739ms)
+✔ handles a Me Inbox task without a project and refuses Delegate mode (30.8571ms)
+✔ rejects self dependencies, cycles, cross-project and cross-workspace references (49.3388ms)
+✔ blocks ready while a BLOCKS dependency is unfinished and allows it after removal (35.9716ms)
+✔ paginates project and inbox task lists with a bound cursor (29.89ms)
+✔ keeps cross-workspace resources invisible and requires the local bearer (19.1052ms)
+✔ links and unlinks project goals with explicit inheritance semantics (77.2432ms)
+✔ resolves concurrent goal changes deterministically (56.6672ms)
+✔ missing configuration fails explicitly with exit code 2 (712.6709ms)
+✔ illegal configuration fails explicitly with exit code 2 (620.8581ms)
+✔ serves the loopback boundary against a real PostgreSQL and exits on stop (1089.4712ms)
+✔ reports database unavailability while liveness stays alive (1016.1398ms)
+✔ migrate entry reports the applied migrations without repeating them (359.8258ms)
+✔ migrate entry fails explicitly without a migration connection (99.4352ms)
+✔ init-workspace entry creates the workspace with its authority row and replays retries (850.7927ms)
+✔ init-workspace entry refuses a retry that reuses command_id with a new target (318.2722ms)
+✔ init-workspace entry requires a name (330.3309ms)
+✔ P11 real Context selects scoped Chinese facts and records exact fragments; Fake draft stays usable (307.1115ms)
+✔ P11 fragment byte range never splits a UTF-8 character (42.8645ms)
+✔ P11 required Context over budget records a safe failure and no Manifest (37.5191ms)
+✔ P11 information update invalidates BUILD_CONTEXT and an in-flight build retries (148.5526ms)
+✔ P11 source change after published effect preserves VERIFY and completion gates (130.5833ms)
+✔ P11 optional input trims with an attributable reason and stays within estimated budget (39.2777ms)
+✔ P11 expired Memory is excluded on historical Manifest read (1340.7789ms)
+✔ P11 retired, superseded and cross-scope facts disappear from historical read and HTTP keeps 404 (1122.5913ms)
+✔ P11 ArtifactVersion Knowledge uses checked managed content and hides damaged source (60.8097ms)
+✔ desktop child uses dynamic strict boundary, private readiness, EOF stop and rotating token (2107.2964ms)
+✔ desktop child rejects absent workspace, incompatible schema and early pipe close (3966.6146ms)
+✔ P09 AUTO keeps Connection, Capability and Permission separate and records one invocation (354.0738ms)
+✔ P09 ASK releases old Worker; Review decision and new epoch admit only the original target (282.5925ms)
+✔ M03 denied or expired ACTION_APPROVAL cannot queue a Run RESUME (143.0815ms)
+✔ M03 PAUSE invalidates a deferred approved action before a later manual RESUME (89.918ms)
+✔ M03 rejected approved claim leaves no Worker owner after expiry, Connection or Permission change (245.0956ms)
+✔ M03 revocation between approved claim and Admit releases a no-effect Worker for safe control (90.0209ms)
+✔ M03 approval withdrawal rolls back operation, Run and control when outbox settlement fails (144.9812ms)
+✔ P09 USER_IMPORT has a real job source, ASK Review and no Run/claim identity (72.8073ms)
+✔ P09 revocation before Admit rejects, while Admit before revocation completes the already admitted effect (144.5517ms)
+✔ P09 overlapping roots across Projects occupy one physical directory until the first effect settles (190.5594ms)
+✔ P09 crashed Fake dispatch reconciles the same ID; tampering remains UNKNOWN and blocks new IDs (208.4106ms)
+✔ P09 database rejects crossed operation scope, Review pair, Invocation origin and claim token (210.8935ms)
+✔ P09 PREPARED Worker exit proves no dispatch; the same logical ID gets a new Invocation and epoch (76.8531ms)
+✔ P09 DISPATCHING with a missing target stays UNKNOWN; a different intent cannot bypass it (87.6101ms)
+✔ P09 pending control before Admit abandons PREPARED without a Fake effect (75.3366ms)
+✔ P09 USER_IMPORT unresolved invocation blocks a new intent for the same job (63.1866ms)
+✔ P09 URL Permission matches path segments and concurrent Review decisions consume once (88.6374ms)
+✔ P09 HTTP config commands replay, isolate scope, and expose full Invocation history (1294.3048ms)
+✔ P10 Rule update after Gateway Admit preserves the old Invocation outcome and blocks new work (78.2252ms)
+✔ P10 Knowledge/Memory immutable versions, explicit confirmation and Artifact promotion reuse (265.4796ms)
+✔ P10 Decision supersession keeps history and rejects a cycle (32.3853ms)
+✔ P10 HARD Rule freezes into Delegate; update fences the old Run at next step (52.4259ms)
+✔ P10 Rule change after managed effect preserves its outcome, then fences the next step (129.3852ms)
+✔ P10 Rule mutation and Delegate authority lock serialize both commit orders (58.244ms)
+✔ P10 upper HARD conflict and missing PRE_ACTION checker block Delegate (41.7368ms)
+✔ P10 bounded Chinese literal search is scoped, stable and exposed through HTTP (1134.4591ms)
+✔ applies V001 on an empty database and does not repeat it on a second run (1303.827ms)
+✔ rejects an applied migration whose file is missing or whose content changed (411.0363ms)
+✔ rejects a migration file that is not versioned by a 4-digit prefix (17.8878ms)
+✔ rolls back DDL, ledger row and digest together when a migration fails (564.8972ms)
+✔ waits for the migration advisory lock instead of running DDL concurrently (1289.663ms)
+✔ runs concurrent migrations on one database exactly once (847.8164ms)
+✔ uses real non-superuser roles for the migration and application connections (215.9773ms)
+✔ commits a task whose acceptance version is inserted later in the same transaction (141.0208ms)
+✔ fails the COMMIT when the task acceptance pointer has no matching version (6.7767ms)
+✔ fails the COMMIT when the completion pointer has no matching completion record (10.6096ms)
+✔ keeps exactly one completion per acceptance revision and records the human acceptance (13.2732ms)
+✔ rejects a completion record whose human acceptance belongs to another acceptance revision (6.8352ms)
+✔ rejects cross-workspace references with composite foreign keys (17.9398ms)
+✔ rejects NULL or invalid values that would otherwise bypass CHECK constraints (17.7494ms)
+✔ round-trips bigint revisions and epochs above 2^53 without precision loss (5.6035ms)
+✔ enforces the 0002 task goal alignment column and its constraints (8.2656ms)
+✔ gives the application role only the intended privileges (66.3063ms)
+✔ rolls back every module write in one transaction (21.8596ms)
+✔ replays a command with the same payload and rejects a different payload (6.7962ms)
+✔ is idempotent when two commands with the same command_id arrive concurrently (67.4169ms)
+✔ treats a concurrent command_id reuse with a different payload as a conflict (5.8469ms)
+✔ records the canonical payload hash and version with every receipt (4.9547ms)
+✔ P08 control is durable PENDING before the safe point; PAUSE/Resume keep Task and Run aligned (342.0625ms)
+✔ P08 conflicting controls reject unless explicitly superseded; terminal Run rejects a new intent (35.7423ms)
+✔ P08 control arriving before Fake publish dispatch prevents the effect (109.9117ms)
+✔ P08 control arriving after dispatch waits for the same Fake effect to settle (96.6183ms)
+✔ P08 a known pre-effect failure releases its claim, while an uncertain dispatched effect retains it (105.5546ms)
+✔ P08 scanner fences a stopped worker and retries a missing effect with the same operation_id (95.8748ms)
+✔ M03 effect reconciliation waits in Task→Run order before touching the effect row (218.8497ms)
+✔ P08 a crash after publish reconciles success without a second publish or artifact version (87.9092ms)
+✔ P08 a second crash after durable fence resumes reconciliation with the same operation_id (95.9424ms)
+✔ P08 a logged successful publish with missing or damaged content becomes UNKNOWN and blocks Handoff (172.0775ms)
+✔ P08 a verified published effect can finish a waiting Handoff while retaining the orphan target (78.0832ms)
+✔ P08 Handoff stores deterministic step and candidate references with or without a committed candidate (101.8864ms)
+✔ P08 tampered Fake effect remains UNKNOWN and blocks Handoff after worker fencing (81.7004ms)
+✔ P08 completion and control serialize: earlier control prevents completion, earlier completion rejects control (225.4936ms)
+✔ P08 an exited Worker process is fenced and a new Worker process reuses its operation_id (1092.3ms)
+✔ P08 HTTP exposes control receipt, Run projection, Resume and AI-owned Task cancel as 202 (1183.7035ms)
+✔ P08 a real API process restart preserves PENDING and the new process reads the safe outcome (2124.9166ms)
+✔ G02: fast approval cannot let the old START invocation execute COMPLETE (3848.8099ms)
+✔ M03 pending PAUSE, CANCEL and HANDOFF outrank an approved successor at the old START safe point (863.3274ms)
+✔ G04: restarted START after supervised crash cannot consume the approved continuation (4358.7221ms)
+✔ G04: a later Run command cannot overtake pending, claimed or blocked predecessor (36.9798ms)
+✔ G02: Review, RESUME, outbox and receipt roll back together on outbox failure (2905.46ms)
+✔ G02: resuming a paused Review wait creates no runnable RESUME command (1419.8725ms)
+✔ G01/G04: 202 contains the committed Run, immutable command, outbox and receipt; restart replays it (5255.9994ms)
+✔ an already aborted shutdown cannot claim or execute a pending command (1532.8537ms)
+✔ shutdown signalled from onClaim does not execute a step after the claim (41.151ms)
+✔ a replaced invocation cannot insert PREPARED after a delayed PERSIST claim (131.565ms)
+✔ a stale publisher cannot resolve DISPATCHING; recovery reconciles the same operation or leaves UNKNOWN (218.0784ms)
+✔ a stale retry cannot reconcile an existing DISPATCHING effect before recovery (127.196ms)
+✔ G05: expired live Worker cannot create a second invocation or write; observed exit requeues the same command (2844.1953ms)
+✔ G04/G05: two independent supervisor entries race for one durable command (2655.596ms)
+✔ G04: supervisor crash does not forge stop evidence or reclaim its former child (3245.7056ms)
+✔ supervisor sidecar echoes readiness nonce and Node version, then exits on stdin EOF (923.4927ms)
+✔ a bounded delivery never marks an unfinished Run command DONE (206.2005ms)
+✔ Delegate rollback removes Run, command, outbox, invocation and receipt together (32.6124ms)
+✔ desktop malformed or oversized private frames fail before any PostgreSQL connection or Worker spawn (5593.9655ms)
+✔ desktop startup emits private readiness before any claim and tags its Worker with launch ID (2633.8558ms)
+✔ desktop acknowledges empty old launches in input order before dispatch readiness (946.5227ms)
+✔ two desktop supervisors use one stopped launch claim once; old Worker cannot write after requeue (2766.3233ms)
+✔ a delayed old desktop Worker process cannot write after a new launch takes its command (4180.0307ms)
+✔ desktop stopped-launch recovery reconciles the same operation and blocks UNKNOWN (3680.6668ms)
+controlled old-launch backlog held 1204 ms without ack
+✔ a slow multi-claim launch has no early ack; a killed supervisor retries the same claims (5050.1912ms)
+✔ EOF during recovery emits no unfinished launch ack or final dispatch readiness (1398.275ms)
+✔ a recovery exception emits only prior launch progress and no final readiness (1021.6604ms)
+✔ desktop stdin EOF stops new claims and waits for the active child close (2370.2969ms)
+✔ Run events start at one, roll back without a gap, and are immutable to relay_app (1779.9975ms)
+✔ SSE enforces bearer, Host, Origin, Workspace and canonical cursor forms (63.7989ms)
+✔ Run lock serializes cross-transaction event seq in commit order (152.3034ms)
+✔ separate API stream replays Worker commits and reconnects after API restart (5006.396ms)
+✔ committed control intent and safe point emit contiguous refresh hints (114.1983ms)
+✔ SSE disconnect does not cancel a Run and reconnect fills only committed history (35.932ms)
+✔ a non-reading SSE peer cannot stall PG/GET and reconnects after a large durable backlog (381.7869ms)
+✔ official Saver setup is migrator-only; missing or damaged graph schema blocks Worker before claim (4470.1591ms)
+✔ the one Run graph persists an empty-namespace Review interrupt, then resumes the original decision (3849.5908ms)
+✔ a saved Review interrupt with an unacknowledged START is replayed by the same command (4649.2027ms)
+✔ PAUSE and resume of a saved Review wait cannot strand the unacknowledged START before approval (5979.3945ms)
+✔ a claimed RESUME killed before its checkpoint reuses the one Review decision (6019.9261ms)
+✔ a real child exit after business commit but before graph checkpoint replays without a second effect (4956.5626ms)
+✔ lost invocation after a committed node cannot write its normal successor checkpoint (2101.2895ms)
+✔ advances the fixed workflow through PERSIST_CANDIDATE and stops at VERIFYING (353.6813ms)
+✔ replays a stable attempt key without a second attempt or duplicate writes (58.1284ms)
+✔ fails the run after the second schema error and releases execution back to the human (64.2481ms)
+✔ rejects a late attempt result with a stale claim epoch and keeps the step position (B08) (92.8959ms)
+✔ a row-lock synchronized stale/current result race leaves the current claim available to commit (B08) (207.4879ms)
+✔ refuses to advance a run whose ownership epoch no longer matches the task (39.4601ms)
+✔ keeps liveness available but rejects readiness for an empty database (1609.7025ms)
+✔ rechecks database reachability when the schema check fails (626.266ms)
+✔ rejects readiness when the latest schema compatibility migration is missing (1868.2663ms)
+✔ reports database and schema as up only for the current migration manifest (1649.8978ms)
+✔ rejects an unknown future migration recorded by the database (1774.7785ms)
+✔ rejects a recorded migration whose SHA-256 no longer matches the release manifest (6813.7651ms)
+✔ verifies deterministically and completes the task in one short transaction (379.7173ms)
+✔ completion gate rejects unsupported or malformed frozen output requirements without writing completion facts (343.6073ms)
+✔ completion gate rejects a PASS whose exact verification targets do not cover the frozen Markdown requirement (161.7783ms)
+✔ C05: an existing citation cannot cover an unsupported claim (96.2726ms)
+✔ C06: a checker ERROR retries the check without new evidence and then stays unresolved (119.9361ms)
+✔ C07: a required PREFERENCE failure does not block PASS (89.7771ms)
+✔ C07: a required HARD failure is not covered by a passing semantic check (97.0729ms)
+✔ schedules a correction round that adds a new version of the same artifact (201.2728ms)
+✔ exhausting the correction budget stops at HUMAN and blocks completion (255.0709ms)
+✔ C04: a required human criterion keeps the run out of COMPLETED (108.2318ms)
+✔ C01: an acceptance change after PASS blocks completion of the old verification (93.3339ms)
+✔ a revoked PASS blocks completion while keeping the original result rows (92.2169ms)
+✔ deleting the required criterion after delegation cannot change the frozen plan (145.3744ms)
+✔ D04: completing after PASS adds no new version, session or draft attempt (106.7144ms)
+✔ D05: a failing completion transaction rolls back as a whole and converges on retry (257.5308ms)
+✔ D06: replaying an already completed run is terminal and writes nothing more (111.8468ms)
+✔ P07 C04/C09: Review ACCEPT creates an immutable successor PASS and preserves AI ownership until completion (135.6828ms)
+✔ P07 C02: a Review for the current candidate cannot authorize a later selected version (168.4178ms)
+✔ P07: REQUEST_CHANGES consumes one correction round and does not alter the old HUMAN session (159.9384ms)
+✔ P07: a bounded budget decision persists and VERIFY reads the new cap (259.2675ms)
+✔ P07 A02: State proposal accepts a typed command once and rejects a stale base revision (26.5877ms)
+✔ P07 A02: State proposal and typed State command serialize the same Task and State revision (26.16ms)
+✔ P07 C09: denied operation approval keeps the operation identity and does not dispatch a step (107.9158ms)
+✔ P07 HTTP: Inbox, detail and decision share the target hash and command receipt contract (2217.4056ms)
+ℹ tests 217
+ℹ suites 0
+ℹ pass 217
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 359765.6321
+waiting for server to shut down.... done
+server stopped
+--- integration summary ---
+tests exit code: 0
+build exit code: 0
+business migration exit code: 0
+graph install exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: PASSED

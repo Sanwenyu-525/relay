@@ -125,6 +125,10 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
         typeof (result.id ?? result.proposal_id) === 'string'
         ? `projects/${result.project_id}/blueprint-proposals/${result.id ?? result.proposal_id}`
         : undefined;
+    case 'CreateProjectContinuationPoint':
+      return typeof result.project_id === 'string' && typeof result.id === 'string'
+        ? `projects/${result.project_id}/continuation-points/${result.id}`
+        : undefined;
     case 'RequestAssistMessage':
       return typeof result.session_id === 'string' ? `assist-sessions/${result.session_id}` : undefined;
     case 'AcceptAssistProposal':

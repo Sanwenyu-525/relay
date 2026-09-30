@@ -1,0 +1,50 @@
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (../../docs/testing/evidence/overall-recheck-2026-09-28/title-refresh.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.1 D:/Develop/Relay-Agent/apps/workbench
+
+ ❯ ../../docs/testing/evidence/overall-recheck-2026-09-28/title-refresh.spec.ts (2 tests | 2 failed) 488ms
+   × refresh should reload next-action title after a task rename 273ms
+   × refresh should reload next-action title after a transient error 214ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../../docs/testing/evidence/overall-recheck-2026-09-28/title-refresh.spec.ts > refresh should reload next-action title after a task rename
+AssertionError: expected '审查项目通用规划旧下一步' to contain '修订后的下一步'
+
+Expected: "修订后的下一步"
+Received: "审查项目通用规划旧下一步"
+
+ ❯ ../../docs/testing/evidence/overall-recheck-2026-09-28/title-refresh.spec.ts:44:84
+     42|     await mounted.wrapper.get('[data-testid="projects-live-refresh"]')…
+     43|     await flush(40);
+     44|     expect(mounted.wrapper.get(`[data-testid="project-row-${projectId}…
+       |                                                                                    ^
+     45|     expect(reads).toBe(2);
+     46|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  ../../docs/testing/evidence/overall-recheck-2026-09-28/title-refresh.spec.ts > refresh should reload next-action title after a transient error
+AssertionError: expected '审查项目通用规划标题暂不可读' to contain '修订后的下一步'
+
+Expected: "修订后的下一步"
+Received: "审查项目通用规划标题暂不可读"
+
+ ❯ ../../docs/testing/evidence/overall-recheck-2026-09-28/title-refresh.spec.ts:44:84
+     42|     await mounted.wrapper.get('[data-testid="projects-live-refresh"]')…
+     43|     await flush(40);
+     44|     expect(mounted.wrapper.get(`[data-testid="project-row-${projectId}…
+       |                                                                                    ^
+     45|     expect(reads).toBe(2);
+     46|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  23:26:03
+   Duration  4.14s (import 35%, transform 27%, environment 24%, tests 12%, setup 2%)
+

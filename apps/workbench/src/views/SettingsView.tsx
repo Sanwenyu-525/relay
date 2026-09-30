@@ -5,6 +5,7 @@ import type { RelayModelPortStatus, RelayModelVerificationState,
   RelayModelVerifyResult } from "../api/relayClient";
 import PackCatalogPanel from "../components/PackCatalogPanel";
 import { describeLiveError } from "../lib/liveErrors";
+import { modelErrorGuides } from "../lib/modelErrorGuides";
 import { useRelayConnection } from "../lib/relayConnection";
 import "./SettingsView.css";
 
@@ -75,15 +76,6 @@ const verificationLabels: Record<ModelVerificationStateKind,
   }
 };
 
-const errorCategoryGuides: Record<string, string> = {
-  AUTH: "认证失败（401/403）：请核对 API Key 是否有效、是否有该模型权限。",
-  RATE_LIMIT: "限流（429）：请稍后重试，或核对配额与账户额度。",
-  TIMEOUT: "超时：请检查网络到端点的连通性，或调大 RELAY_MODEL_TIMEOUT_MS 后重启。",
-  STREAM_BROKEN: "流中断：端点协议兼容性异常，请核对 Provider 是否为 OpenAI 兼容接口。",
-  PROTOCOL: "响应结构异常或模型无效：请核对模型名称与端点是否匹配。",
-  NETWORK: "网络不可达：请核对服务端点域名/DNS/防火墙，确认端点可公开访问。"
-};
-
 interface StateRow {
   readonly key: string;
   readonly label: string;
@@ -152,7 +144,7 @@ function ServiceStateCard({ loading, error, status, verification, verifying, onV
       </div>)}
     </dl>
     {showGuide && last?.errorCategory != null && <p className="helper-text" data-testid="verify-error-guide">
-      <Info aria-hidden="true" />{errorCategoryGuides[last.errorCategory] ?? ""}</p>}
+      <Info aria-hidden="true" />{modelErrorGuides[last.errorCategory]}</p>}
     {onVerify !== null && <p className="settings-verify-actions">
       <button className="secondary-button" type="button" data-testid="verify-model-port"
         disabled={verifying} onClick={onVerify}>
@@ -199,7 +191,7 @@ function VerificationDetailCard({ verification, verifying }: {
             : "（与当前配置不一致：配置已变更，旧结果不再算已验证）"}</dd></div>
         {last.errorCategory !== null && <div><dt>错误分类</dt><dd>
           <span className="status-chip status-chip--danger">{last.errorCategory}</span>
-          {" "}{errorCategoryGuides[last.errorCategory] ?? ""}</dd></div>}
+          {" "}{modelErrorGuides[last.errorCategory]}</dd></div>}
       </dl>}
     {verifying && <p role="status">正在验证…</p>}
     <p className="helper-text">「连接验证通过」≠「真实任务执行成功」：验证只使用固定短文本，不读取项目资料，也不代表任何 Task/Run 结果。</p>

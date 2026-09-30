@@ -157,3 +157,39 @@
 
 文档影响检查：更新交互规则、当前进度与已有开发记录；本轮没有新增 HTTP API、数据库迁移、领域权限或框架依赖，不另建重复 ADR / API / 数据库规格。
 - 补充：延迟首次会话列表响应后先打开新建选择器，响应返回不会抢占新建界面，见 `list-race.json`。验收结束已通过真实窗口关闭按钮退出宿主，随后按会话标记停止并移除隔离 PostgreSQL 临时目录；标准开发服务保留。
+
+## 12. M04 Assist Provider 失败诊断（2026-09-30）
+
+本增量开始前，代码已有 Provider 六类账本归因和 `0046_assist_provider_error_kind` 迁移，但 Assist 消息结算、读取与界面尚未接通；同一次鉴权、限流、超时或断流只显示 `MODEL_FAILED`。本增量复用原分类器和 Assist Owner，将类别独立保存于消息行并经 GET 消息查询返回，原 Relay 错误码、模型请求身份及已知/未知用量继续保留。界面与设置页共用中文处理指引，不自动重试、不猜历史原因、不返回 Provider 原始异常文本。
+
+实现边界：只分类模型端口调用抛出的原异常；输入组装、账本操作及返回后的本地处理错误保持无 Provider 类别。预算、解析、来源失效、租约失败保持原 Relay 语义；取消与丢失 Worker 所有权按持久事实收敛，不将消息失败归因与 Run 或 Task 完成状态混用。数据库约束、接口兼容和交互分别归[物理设计](../database/physical-design-postgresql.md#53-0046-m04-assist-provider-失败类别2026-09-30)、[HTTP 契约 §10.25](../api/http-command-contract.md#1025-m04-assist-会话与类型化提案2026-09-25开发自检)、[工作台第 13 节](../frontend/workbench-design.md#13-交互反馈与业务状态绑定)。
+
+本轮同时修复三个实际反例：内部取消信号引发模型异常时此前记为 FAILED；取消已持久而轮询尚未中止时，失败结算或普通提案的成功返回此前仍可忽略取消；本地流预览写入 TypeError 此前在消息与账本都误报为 NETWORK。现在异常和普通提案的终态事务先锁原消息、重新核对领取身份与取消意图，取消时不创建提案；宿主退出无用户取消仍保留 RUNNING/原领取供租约恢复。预览写入失败使用安全、无 cause 的 Relay 本地错误类型，执行权丢失异常保留原类型，避免分类器沿本地 TypeError 误归因。
+
+执行者自检：[Assist 隔离 PG 45/45](../testing/evidence/m04/assist-provider-errors-20260930/api-assist-green.log)，零失败/跳过；API 编译、46 条迁移、Graph 安装、PG 启停及临时目录删除均通过。[原类别红灯](../testing/evidence/m04/assist-provider-errors-20260930/api-assist-red.log)、[内部取消红灯](../testing/evidence/m04/assist-provider-errors-20260930/api-assist-cancel-red.log)、[预览写入红灯](../testing/evidence/m04/assist-provider-errors-20260930/api-assist-preview-red.log)、[提案取消红灯](../testing/evidence/m04/assist-provider-errors-20260930/api-assist-proposal-cancel-red.log)保留原失败。只读评审确认字段、CAS、故障归因、取消竞态和旧服务兼容。协调侧[当前源码 PG 全量](../testing/evidence/m04/assist-provider-errors-20260930/api-pg-independent-source-full.log)实际运行 496 项：491 通过、0 失败、5 跳过；API 构建、46 条迁移、Graph 安装、PG 启停及临时目录删除均通过。4 项真实模型测试因本轮未配置真实外呼而跳过，1 项 Windows 无回执故障测试因未设置专用 `RELAY_FILE_IO_DEBUG_HELPER` 而跳过；不把它们记为已运行。41 个当前源码套件在回归结束时与[运行输入](../testing/evidence/m04/assist-provider-errors-20260930/integration-inputs.json)一致，API 源码在冻结后无变动。[API 单元](../testing/evidence/m04/assist-provider-errors-20260930/api-unit-independent.log)142/142 通过。前端视觉接续前的[全量](../testing/evidence/m04/assist-provider-errors-20260930/workbench-full.log)384/384 与[类型/生产构建](../testing/evidence/m04/assist-provider-errors-20260930/workbench-build.log)通过；随后浏览器发现的消息列表嵌套 li 已改为内层 article，[讨论回归](../testing/evidence/m04/assist-provider-errors-20260930/assist-dom-regression.log)7/7 通过，视觉改动后的最终前端结果另行补齐。
+
+协调侧全量首跑发现测试入口污染：[501 项首跑](../testing/evidence/m04/assist-provider-errors-20260930/api-pg-independent-full.log)为 494 通过、2 失败、5 跳过，两项失败均来自昨日已删除的临时 N01 源码留下的旧编译文件，而非当前 41 个源码套件。N01 原记录已明确删除临时源码；原日志和[旧 JS](../testing/evidence/m04/assist-provider-errors-20260930/historical-zz-accept-n01-r2.integration.test.js.txt)保留。本轮将 `run-integration.ps1` 改为按当前源码映射并检查编译文件，未删除或改写任何当前失败检查。现有 Mock benchmark 的显式 `.bench.ts` 入口继续保留，包装脚本不再复制临时测试别名；单文件选择在 PowerShell 5.1 的数组展开反例也已修复并保留[红灯](../testing/evidence/m04/assist-provider-errors-20260930/benchmark-entry-regression-red.log)。[benchmark 入口复验](../testing/evidence/m04/assist-provider-errors-20260930/benchmark-entry-regression.log)通过：1 项测试、8 个完成/2 个取消，迁移、Graph、PG 启停及清理通过。[单套件/名称筛选](../testing/evidence/m04/assist-provider-errors-20260930/integration-selection-regression.log)另验 2/2 通过。两条显式入口复验覆盖最终 benchmark 兼容修改；全量仍使用相同当前 41 个测试源码集合。这只是原入口的恢复正确性检查，不据此给出新的性能结论。
+
+该增量不包含 Run 失败类别上浮、真实 Provider 故障外呼、Windows WebView2 或安装包验收，不扩大 M04 总出口。未应用迁移到实际用户数据库，未改配置或替换桌面发布包。
+
+## 13. 协作页参考图接续与 Review 修复（2026-09-30）
+
+按已选「对话主轴 · 双页工作桌」参考完成浏览器视觉接续：目标和事实条归讨论主栏，文档独立阅读，版本信息按需展开，宽窗输入与判断按钮可达。进行中标签归项目行；复用已有字体、颜色和间距 token，判断区保留浅绿标题带及白正文。确切产物 UUID、验收修订/条件 ID、动作类型与实际目标继续常驻；没有为追求截图删业务入口或新增 token/依赖。
+
+复核发现三项业务问题：以 `reviews.length > 0` 判断 fallback 会永久禁用正常 Review；刷新期间旧请求仍可能提交；卸载 DOCUMENT 子树会丢反馈及响应丢失后待核对的原命令。现按当前 Task/Project/Review 归属、读取状态及 request epoch 控制可提交性，成功重读清旧错误，DOCUMENT 保持挂载且非当前视图显式隐藏。反例覆盖合法 null Project、挂起/失败刷新、跨目标请求、归档、视图切换及原回执核对；决定继续走原接口、revision、targetHash 和 command_id，零额外 POST。红灯与定向结果见[视觉 QA](../../design-qa.md)。
+
+协调侧独立验证：最终前端[全量 407/407](../testing/evidence/frontend-visual-fidelity-20260930/workbench-final-bounded-independent.log)（63 文件，`--maxWorkers=2`）与[类型/生产构建](../testing/evidence/frontend-visual-fidelity-20260930/workbench-final-build-independent.log)通过。此前默认高并发[405/407](../testing/evidence/frontend-visual-fidelity-20260930/workbench-final-independent.log)中的两项为既有 `tasks` 短等待及 `run-events` 突发读次数断言；同源码[定向复跑 19/19](../testing/evidence/frontend-visual-fidelity-20260930/workbench-timing-recheck.log)和上述完整限并发运行通过，保留失败日志，未删除检查、放宽断言或修改产品逻辑。构建仍有既有大 chunk/动态导入告警，不作为本轮新增修复范围。
+
+最新证据为[全图组合](../testing/evidence/frontend-visual-fidelity-20260930/comparison-final-full.png)、[局部组合](../testing/evidence/frontend-visual-fidelity-20260930/comparison-final-focused.png)及 QA 列出的 960×640、390×844 截图与滚动指标。协调侧另用 IAB 1487×1010、4174 前端与 8794 只读夹具核对正常判断可用、常驻身份及「检查→文档」后讨论/反馈草稿仍在；清除自建草稿，未提交写命令，控制台 warn/error 为零。夹具未提供 Trace/CheckPlan 路由，检查栏正确局部报错；Trace 真实 HTTP/PG 证据见下一节。`final result: passed` 仅限浏览器视觉及已测交互，不包括真实 Windows 标题栏、IME/DPI、业务全链或安装验收。
+
+## 14. M04 Run 模型调用诊断与本地错误归因（2026-09-30）
+
+在既有 Run Trace 增量投影调用用途、语义条件/检查尝试、Provider 请求身份和六类失败指引，保留原调用/Step Attempt/Manifest 身份及未知用量。仅 `FAILED` 且原账本类别命中封闭词表时返回指引；成功、取消、STARTED、本地故障和历史无分类保持 null，不输出任意错误名、异常正文或秘密。旧服务缺新增字段时客户端按未知兼容，非法类别/状态组合拒绝解析。API 为兼容响应增量，**Breaking Change: No**，无新增 migration。
+
+本轮只上浮调用历史，调用失败不等于 Run 失败；未改 Run/Attempt/语义检查重试、审批、控制及完成契约。`ModelSemanticChecker` 的调用失败复用共享分类器，取消信号优先；DRAFT 本地预览 push/最终 flush 异常用无正文/cause 的本地错误包装，避免进入 Provider 网络归因。读权限仍沿既有 Workspace、Attempt 查询与一致快照，不聚合或替换不同检查调用。
+
+独立评审进一步复现：SDK 构造非法 Header 的普通 `TypeError` 在 DNS/fetch 均为零时，仍被旧共享分类器无条件归为 NETWORK。删除仅凭异常类型归因的分支，保留 HTTP 状态、明确传输标记、timeout、stream、endpoint policy 与 cause 检查；无网络特征的 TypeError 保留本地身份。[红灯](../testing/evidence/m04/run-model-diagnostics-20260930/local-typeerror-red.log)为 15 项中 2 失败；修复后的[API 编译/全单元 144/144](../testing/evidence/m04/run-model-diagnostics-20260930/api-unit-final-independent.log)通过。只读评审重新使用实际端口构造本地 Header 错误，确认 DNS/fetch 为零、明确网络/超时/断流/协议分类保留、取消仍 CANCELLED，无新增 P0–P2。
+
+前端 [Trace 反例红灯](../testing/evidence/m04/run-model-diagnostics-20260930/workbench-trace-red.log)与[定向 14/14](../testing/evidence/m04/run-model-diagnostics-20260930/workbench-trace-green.log)保留；六类页面表达、混合调用/条件、旧服务和非法状态均纳入本轮最终 407 项全量。真实隔离 PostgreSQL/HTTP 的最终结果为 [Trace 6/6](../testing/evidence/m04/run-model-diagnostics-20260930/api-traceability-final-independent.log)、[DRAFT 预览 6/6](../testing/evidence/m04/run-model-diagnostics-20260930/api-run-draft-preview-final-independent.log)、[Assist 回归 45/45](../testing/evidence/m04/run-model-diagnostics-20260930/api-assist-final-independent.log)、[连接验证 8/8](../testing/evidence/m04/run-model-diagnostics-20260930/api-model-verify-final-independent.log)；各自 46 条迁移、Graph 安装、PG 启停及临时目录删除通过。[最终输入与结果摘要](../testing/evidence/m04/run-model-diagnostics-20260930/final-independent-results.json)限定冻结对象；执行者旧 hash 和修正前日志保留各自时点，不能替代本段最终结果。
+
+文档影响检查：更新已有 API 契约、工作台交互、设计系统、本记录、测试计划、视觉 QA 与唯一阶段主文档。需求、架构、ADR、数据库、README/启动、路线图及发布包无新语义变化，不新建重复主文档。此前 §12 的 PG 全量是当时源码的历史证据；本轮最终使用上述受影响套件定向复验，不声称再次运行整个 PG 全集。没有本轮真实 Provider 外呼、实际库迁移或 Windows/安装包复验，M04 总出口仍 IN_PROGRESS。

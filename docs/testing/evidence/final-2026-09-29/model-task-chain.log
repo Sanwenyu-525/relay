@@ -1,0 +1,59 @@
+# 真实任务链路验收记录（model-task-chain）
+
+- 日期：2026-09-29
+- 执行者：模型接入真实外呼验收子 Agent（用户本轮授权真实 Provider 任务链路）
+- 路径：opt-in 集成测试 `apps/api/test/integration/real-model.integration.test.ts`（RELAY_MODEL_* 六键经进程环境注入，值来自 apps/api/.env，不落日志）；隔离一次性 PG18 集群（随机端口/库名，用后删除）。
+- 脱敏声明：不含 RELAY_MODEL_API_KEY 与 RELAY_API_BEARER_TOKEN 值；候选正文为测试自建固定小任务文案（含随机探针标记），不含项目资料。
+
+## 1. 结论分项（与"连接验证"分开表述）
+
+| 项 | 结论 |
+|---|---|
+| 真实任务执行（Delegate→BUILD_CONTEXT→真实 DRAFT→验证门，至 WAITING_APPROVAL） | **通过**（test 1；候选为真实模型文本、非 Fake 模板、消耗显式选源） |
+| HARD SEMANTIC 规则的真实语义检查器链路（test 2） | **未通过：发现应用层自死锁缺陷**（真实模型专用路径，Mock 从未触发；详见第 4 节） |
+| 完成门保持 | 通过：completion_records=0（HUMAN 判据 NOT_RUN / AWAITING_HUMAN_EVIDENCE），模型返回未被当作 Task 完成 |
+
+## 2. Test 1「P12 the real model drafts from explicitly selected sources and passes the completion gate」
+
+- Run（task 真实模型候选）终态：**WAITING_APPROVAL**。
+- model_calls（kind=DRAFT，provider=openai-compatible，model=agnes-3.0-flash）：
+  - run1：usage_input_tokens=1023，usage_output_tokens=244，status=COMPLETED；
+  - run2（test 2 的 DRAFT，同为真实调用）：input=1046，output=302，status=COMPLETED。
+- 候选正文（step_attempts.result_ref，节选）：真实 Markdown（## 摘要 / ## 结论 / 参考资料），**包含测试预埋的独特探针标记「量子萤石协议-X7」与随机标记 `48b5d975`**，并以 `knowledge:<id>:v1` 引用显式选中来源——证明模型确实消费了显式选源，非确定性 Fake 模板（不含「本候选依据目标」）。
+- artifact_versions（source_ref like 'run:%'）= 1（唯一受管候选发布断言通过）。
+
+## 3. Test 2「P12 a HARD SEMANTIC rule is verified by the real semantic checker end to end」——挂起缺陷
+
+现象（挂起 >25 分钟后人工终止，取证后清理）：
+
+- run（task 语义检查候选）卡在 `VERIFYING`；node --test 进程 CPU=0 空转。
+- PG `pg_stat_activity`（同一测试进程的两个连接）：
+  - 会话 A：`idle in transaction`，wait_event=ClientRead，最后语句 `insert into check_results (...)`（HUMAN 判据行），事务未提交；
+  - 会话 B：`active`，`select id from runs where id = $1 for update`，wait_event_type=Lock / wait_event=transactionid——等待 A 的未提交事务释放 runs 行锁。
+- model_calls 无 SEMANTIC_CHECK 行：语义模型调用从未真正发起（其 STARTED 行在 A 的未提交事务 / B 的阻塞之后）。
+
+根因（代码定位，均为现有未提交基线代码）：
+
+1. `advanceRunStep` 的结果事务 `withTransaction`（`apps/api/src/application/run-steps.ts:473`）内 `lockTaskAndRun` 对 runs 行 `for update`（`src/run/run-repository.ts:132`）。
+2. `executeStep` 的 `case 'VERIFY'` 在**该事务内**调用 `verifyRun(repositories, ...)`（run-steps.ts:1040-1049）。
+3. `verifyRun` 对模型检查器调用 `recordModelInvocation(input.modelCallDb /* = 根连接池 */, ...)`（`src/application/verify-run.ts:125`）。
+4. `recordModelInvocation` → `ModelCallRepository.begin()` 在根池上**另开独立事务**（`src/model/model-call-repository.ts:61`），当 `identity.budget` 有定义时执行 `select id from runs where id=$1 for update`（model-call-repository.ts:91）→ 被外层事务的 runs 行锁阻塞。
+5. 外层事务等 node 下一条语句、node 等 `recordModelInvocation` 返回 → 同进程应用层自死锁；测试 `--test-timeout=0`，永久挂起。
+
+触发条件与为何 Mock 从未暴露：
+
+- `OpenAiCompatibleModelPort.identity` 携带 `budget`（`src/workflow/openai-compatible-model-port.ts:46`）；真实语义检查器注册时传入该 identity（`src/workflow/checkers.ts:279-283`）→ 走 budget 分支 → 死锁。
+- Fake/test-double 语义检查器的默认 identity **无 budget**（checkers.ts:214-216）→ begin() 不走 `for update` 分支 → Mock/离线路径永不触发。
+- DRAFT 未死锁的原因：DRAFT 的 `recordModelInvocation` 位于 **prepare 阶段**（`prepareExternalWork`，run-steps.ts:454 → 716），在结果事务之外执行；VERIFY 的模型记账却在结果事务之内——两条路径不对称。
+
+## 4. 处置
+
+- 挂起套件人工终止；其临时集群 pg_ctl stop 并删除目录（已确认端口释放、目录清除）。
+- 修复建议（须经协调方审查，本轮不动生产代码）：将 `verifyRun` 的模型检查器调用移出结果事务（对齐 DRAFT 的 prepare/execute 分离），或令 `ModelCallRepository.begin()` 复用外层事务执行器 / 去掉 budget 分支对 runs 行的二次 `for update`（改用已由外层事务持有的锁语义）。二者都属超出 30 行的结构性修改，不在本轮授权内。
+
+## 5. 定向重跑（test 1 单独）
+
+- 命令：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-integration.ps1 -TestFile real-model -TestNamePattern "drafts from explicitly selected sources"`
+- 结果：**1/1 PASSED**（ℹ tests 1 / pass 1 / fail 0 / skipped 0；business migration、graph install、postgres stop 全部 exit 0；temporary cluster removed: True）。
+- 说明：该重跑再次发起真实 DRAFT 外呼（约第 3、4 次真实调用），Run 到达 WAITING_APPROVAL、完成门保持，判定稳定复现。
+- 外呼总量小结：本次验收会话真实 Provider 外呼共 5 次（VERIFY 1 次 + 挂起运行内 DRAFT 2 次 + 重跑 DRAFT 2 次），全部 COMPLETED，无失败/重试循环。

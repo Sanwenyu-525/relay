@@ -1,0 +1,74 @@
+[
+  {
+    "path": "D:\\Develop\\Relay-Agent\\apps\\api\\src\\application\\trace-queries.ts",
+    "sha256": "b5663c5d51a2123e143b471db63a73f0c8faf7c6c0075ee17b2b207a32ca783a"
+  },
+  {
+    "path": "D:\\Develop\\Relay-Agent\\apps\\api\\src\\api\\trace-api.ts",
+    "sha256": "d4ae86d97c24283e6b9a27d244918735104778f6d0dd2d44038a9f531afc1568"
+  },
+  {
+    "path": "D:\\Develop\\Relay-Agent\\apps\\api\\src\\application\\run-steps.ts",
+    "sha256": "d114e4cf4cc436840ec44eaccae48dc7d65210aa1d6b76f2a028c64464cbc79a"
+  },
+  {
+    "path": "D:\\Develop\\Relay-Agent\\apps\\api\\src\\workflow\\checkers.ts",
+    "sha256": "67d9ee97da6415cc48c3747affedb2716affccb4b11a89f54d12241edcbc61e2"
+  },
+  {
+    "path": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\traceability.integration.test.ts",
+    "sha256": "fa9a0fd065efcf1c7de68af8eb606496d63a6c58b4dc34f44bf186c4017280ae"
+  },
+  {
+    "path": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\integration\\run-draft-preview.integration.test.ts",
+    "sha256": "1fb538098e58d4a3ac27b1fa98685d25daecdb5590f40f516814b5604d89242e"
+  },
+  {
+    "path": "D:\\Develop\\Relay-Agent\\apps\\api\\test\\unit\\checkers.test.ts",
+    "sha256": "a74fdd4fa9e1b1bd9cf4b4dd8f29d5bd66f8ceb63c65fb8da81f6f3a589f7b73"
+  },
+  {
+    "path": "D:\\Develop\\Relay-Agent\\docs\\testing\\evidence\\m04\\run-model-diagnostics-20260930\\backend-build.log",
+    "sha256": "e81d88329cce2137d395f232667326cfb092233ac023aac7ba3f6695231f2d54"
+  },
+  {
+    "path": "D:\\Develop\\Relay-Agent\\docs\\testing\\evidence\\m04\\run-model-diagnostics-20260930\\backend-green-preview.log",
+    "sha256": "47731d6ad4577e22a9b552f832720a605ef67cdb0e1dd67a269161e17f1e0b3d"
+  },
+  {
+    "path": "D:\\Develop\\Relay-Agent\\docs\\testing\\evidence\\m04\\run-model-diagnostics-20260930\\backend-green-traceability.log",
+    "sha256": "d80ca1465bb32f2ee54da3c5a9a279ef1ae07c9e83202ab335fbeb837f946ecf"
+  },
+  {
+    "path": "D:\\Develop\\Relay-Agent\\docs\\testing\\evidence\\m04\\run-model-diagnostics-20260930\\backend-red-build.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "D:\\Develop\\Relay-Agent\\docs\\testing\\evidence\\m04\\run-model-diagnostics-20260930\\backend-red-checkers.log",
+    "sha256": "de9232680e6bab8b182368150f715937e7db816afd3f6e4a95889aab3a9ba2eb"
+  },
+  {
+    "path": "D:\\Develop\\Relay-Agent\\docs\\testing\\evidence\\m04\\run-model-diagnostics-20260930\\backend-red-preview.log",
+    "sha256": "234ad67e11c365da9a32e0ebad936355a67dd57f771695759066f11f7076bc59"
+  },
+  {
+    "path": "D:\\Develop\\Relay-Agent\\docs\\testing\\evidence\\m04\\run-model-diagnostics-20260930\\backend-red-traceability-rerun.log",
+    "sha256": "1e40120a2d1d479df92543031f245a86fbe1ca84cc7a066ade306a1bf899a5f7"
+  },
+  {
+    "path": "D:\\Develop\\Relay-Agent\\docs\\testing\\evidence\\m04\\run-model-diagnostics-20260930\\backend-red-traceability-valid-fixture.log",
+    "sha256": "505d49ad464a249ef8a84af9d8b0edce8f949069c8aac575987f9f176eae71b4"
+  },
+  {
+    "path": "D:\\Develop\\Relay-Agent\\docs\\testing\\evidence\\m04\\run-model-diagnostics-20260930\\backend-red-traceability.log",
+    "sha256": "3628ca041920e38d8aa621560d5c71d196ce81d337aa448689928614c8013abe"
+  },
+  {
+    "path": "D:\\Develop\\Relay-Agent\\docs\\testing\\evidence\\m04\\run-model-diagnostics-20260930\\backend-results.json",
+    "sha256": "d389ae8c90c30d959bfcb6cf4152ba1748fa8a72c92a9fe54882fd64e8c1f936"
+  },
+  {
+    "path": "D:\\Develop\\Relay-Agent\\docs\\testing\\evidence\\m04\\run-model-diagnostics-20260930\\backend-unit.log",
+    "sha256": "89b278f3f0eaca9807cd5df0133ffca61c3f08224723478ad0d378e8dd9506f0"
+  }
+]

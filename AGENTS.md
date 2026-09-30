@@ -21,10 +21,13 @@ Workbench 与 Context Builder 分别面向用户和 Agent，消费同一事实�
 | 业务不变量与状态契约 | [契约包](contracts/README.md)，按任务读取 01–04 |
 | 架构、依赖与技术决策 | [领域模型](docs/architecture/domain-model.md)、[技术选型](docs/architecture/技术选型.md)、[ADR-010](docs/decisions/ADR-010-agent-stack-react-desktop.md) |
 | 开工前的复用原则 | [复用策略](docs/architecture/复用策略.md)、[ADR-005](docs/decisions/ADR-005-reuse-first.md) |
+| 上游 Agent 源码参考 | [研究记录 §1.1 本地源码对照清单](docs/research/p00-source-study.md#11-本地源码对照清单2026-09-20-核验)，缓存位于 `.research/upstream/<repo>` 与 `.research/vercel-ai` |
 | 实施工作包与验收出口 | [大模块工作包](prompts/stack-migration.md)、[测试计划](docs/testing/verification-plan.md) |
 | UI 变更 | 现有参考图、[工作台交互](docs/frontend/workbench-design.md)、[设计系统](docs/frontend/design-system.md)、[tokens](docs/frontend/design-tokens.json) |
 
 代码描述实际实现，契约描述目标约束，ADR 记录取舍，测试证据限定已验证范围。发生冲突先核对依据，不为迎合文档修改正确代码，也不默认批准代码偏离契约。Proposed 不等于 Accepted，Accepted 不等于已实现或已验收。task_plan、progress、findings 与早期 V1_ARCHITECTURE 是历史材料。
+
+查阅 `.research/upstream` 前先看清单里的检出方式：Codex、DeepSeek Harness、Pi、LangChain、LangGraph、Rig 为稀疏检出，找不到文件时用清单给出的 `git -C .research/upstream/<repo> sparse-checkout disable` 展开，不要因此以为上游没有该实现。
 
 ## 3. 核心约束
 

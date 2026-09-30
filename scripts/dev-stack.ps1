@@ -1,4 +1,4 @@
-﻿﻿# 开发用途：开发期前后端启停的唯一入口。
+﻿# 开发用途：开发期前后端启停的唯一入口。
 # - 默认并行启动 apps/api（Fastify API）与 apps/workbench（Vite fixture 预览），退出时按序停止两者。
 # - -FrontendOnly 只启动 apps/workbench：不需要 apps/api/.env、不构建后端、不启动 API，
 #   用于在没有任何后端配置时预览 fixture 页面。
@@ -8,13 +8,16 @@
 # - 后端使用 apps/api/dist/ 构建产物启动，脚本默认为其重新构建；需要预构建时用 -SkipBuild。
 # - API 以受管 stdin 启动：停止时先关闭 stdin 触发正常退出（RELAY_API_STOP_ON_STDIN_EOF=true），
 #   超时才强制结束进程树。
+# - 默认不启动 Worker：Assist 消息与 Run 步骤需要独立 Worker 领取，只有模型端口真实可用时
+#   才用 -WithWorker 启动（apps/api/.env 需配置 RELAY_MODEL_*，否则 Worker 只会领取 Fake 生成）。
 # - 这是开发期入口，不是 ADR-007 的桌面启动入口，也不代表前后端联调已经接通：workbench 仍是 fixture 预览，
 #   不调用 API。
 #
 # 用法：
 #   dev-stack.bat Preview
 #   dev-stack.bat -FrontendOnly
-#   powershell -ExecutionPolicy Bypass -File scripts/dev-stack.ps1 [-FrontendOnly] [-FrontendPort 5173] [-SkipInstall] [-SkipBuild]
+#   dev-stack.bat Preview -WithWorker
+#   powershell -ExecutionPolicy Bypass -File scripts/dev-stack.ps1 [-FrontendOnly] [-WithWorker] [-FrontendPort 5173] [-SkipInstall] [-SkipBuild]
 
 [CmdletBinding()]
 param(
@@ -26,6 +29,8 @@ param(
   [switch]$SkipInstall,
   # 跳过 apps/api 构建（dist/ 缺失时仍会失败）
   [switch]$SkipBuild,
+  # 启动独立 Worker（supervisor）：让 Assist 消息与 Run 步骤被真正领取并生成
+  [switch]$WithWorker,
   # 自检用：启动后 N 秒自动停止（0 表示一直运行到 Ctrl+C）
   [ValidateRange(0, 600)]
   [int]$SmokeSeconds = 0
@@ -44,6 +49,7 @@ $frontendRoot = Join-Path $workspaceRoot 'apps\workbench'
 $apiEnvFile = Join-Path $apiRoot '.env'
 $apiEnvExample = Join-Path $apiRoot '.env.example'
 $apiEntry = Join-Path $apiRoot 'dist\src\main.js'
+$workerEntry = Join-Path $apiRoot 'dist\src\worker\supervisor-main.js'
 $frontendEntry = Join-Path $frontendRoot 'node_modules\vite\bin\vite.js'
 $portableNodeRoot = Join-Path $workspaceRoot '.research\runtime-cache\node-v24.21.0-win-x64'
 $portableNode = Join-Path $portableNodeRoot 'node.exe'
@@ -568,6 +574,7 @@ if (-not (Test-Path -LiteralPath $frontendEntry)) {
 # --- 启动与停止 -------------------------------------------------------------
 
 $apiProcess = $null
+$workerProcess = $null
 $frontendProcess = $null
 $finalExitCode = 0
 $smokeDeadline = (Get-Date).AddSeconds([Math]::Max($SmokeSeconds, 1))
@@ -590,6 +597,21 @@ try {
       $finalExitCode = $apiProcess.ExitCode
     } else {
       Write-Host '[api] 20 秒内未就绪，请查看上面的输出。' -ForegroundColor Yellow
+    }
+
+    if ($WithWorker -and $finalExitCode -eq 0) {
+      if (-not (Test-Path -LiteralPath $workerEntry)) {
+        Fail-Preflight @("缺少构建产物：$workerEntry；请去掉 -SkipBuild 重新构建。")
+      }
+      $modelProvider = $envValues['RELAY_MODEL_PROVIDER']
+      if ([string]::IsNullOrWhiteSpace($modelProvider) -or $modelProvider -eq 'fake') {
+        Write-Host '[worker] apps/api/.env 未配置真实模型（RELAY_MODEL_PROVIDER=fake 或未设置），Worker 只会生成 Fake 结果。' -ForegroundColor Yellow
+      } else {
+        Write-Host "[worker] 模型端口：$modelProvider / $($envValues['RELAY_MODEL_NAME'])" -ForegroundColor Cyan
+      }
+      $workerProcess = Start-ManagedProcess -Name 'worker' -FilePath $nodeRuntime.Path `
+        -Arguments @('--env-file=.env', 'dist/src/worker/supervisor-main.js') -WorkingDirectory $apiRoot
+      Write-Host "[worker] 已启动（PID $($workerProcess.Id)）；Assist 与 Run 步骤由它领取生成。"
     }
   }
 
@@ -620,8 +642,10 @@ try {
     Write-Host '前端仍是示例数据，不调用 API；真实保存、执行与数据库写入尚未接入。' -ForegroundColor Yellow
     if ($FrontendOnly) {
       Write-Host '按 Ctrl+C 停止前端预览进程。'
+    } elseif ($WithWorker) {
+      Write-Host '按 Ctrl+C 停止三个进程（API 会先关闭 stdin 以正常退出，Worker 随后结束）。'
     } else {
-      Write-Host '按 Ctrl+C 停止两个进程（API 会先关闭 stdin 以正常退出）。'
+      Write-Host '按 Ctrl+C 停止两个进程（API 会先关闭 stdin 以正常退出）。未启动 Worker，Assist 消息不会被领取。'
     }
 
     Write-Host ''
@@ -640,6 +664,15 @@ try {
         break
       }
 
+      if ($null -ne $workerProcess -and $workerProcess.HasExited) {
+        Write-Host "[worker] 进程退出，退出码 $($workerProcess.ExitCode)" -ForegroundColor Red
+        $finalExitCode = $workerProcess.ExitCode
+        if ($finalExitCode -eq 0) {
+          $finalExitCode = $exitRuntime
+        }
+        break
+      }
+
       if ($frontendProcess.HasExited) {
         Write-Host "[ui] 进程退出，退出码 $($frontendProcess.ExitCode)" -ForegroundColor Red
         $finalExitCode = $frontendProcess.ExitCode
@@ -654,6 +687,7 @@ try {
   Write-Host ''
   Write-Host '正在停止…'
   Stop-ManagedProcess -Process $frontendProcess -Name 'ui'
+  Stop-ManagedProcess -Process $workerProcess -Name 'worker'
   Stop-ManagedProcess -Process $apiProcess -Name 'api' -CloseStdinFirst
   if ($FrontendOnly) {
     Write-Host '已停止前端预览进程。'

@@ -1,7 +1,7 @@
 import { createBrowserRouter, createMemoryRouter, Navigate, type RouteObject } from "react-router-dom";
 import App from "./App";
 import ActivityView from "./views/ActivityView";
-import AgentChatView from "./views/AgentChatView";
+import CollaborationView from "./views/CollaborationView";
 import ArtifactLineageView from "./views/ArtifactLineageView";
 import CompletionRecordView from "./views/CompletionRecordView";
 import KnowledgeView from "./views/KnowledgeView";
@@ -28,7 +28,7 @@ export const workbenchRoutes: RouteObject[] = [{
     { path: "today", element: <TodayView /> },
     { path: "inbox", element: <Navigate to="/tasks?tab=inbox" replace /> },
     { path: "activity", element: <ActivityView /> },
-    { path: "agent", element: <AgentChatView /> },
+    { path: "agent", element: <CollaborationView /> },
     { path: "activities", element: <ActivityView /> },
     { path: "artifact-versions/:id/lineage", element: <ArtifactLineageView /> },
     { path: "completion-records/:id", element: <CompletionRecordView /> },

@@ -1,0 +1,842 @@
+
+> relay-workbench-fixture@0.1.0 test
+> vitest run --reporter=verbose tests/runTrace.spec.ts
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./vite.config" without a file extension (vitest.config.ts:2:24). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.1 D:/Develop/Relay-Agent/apps/workbench
+
+ × tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 AUTH 类别和处理指引，不将调用失败宣称为 Run 失败 236ms
+   → expected 'Run Trace从实际 Step、Attempt、模型调用、Manife…' to contain '认证失败'
+ × tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 RATE_LIMIT 类别和处理指引，不将调用失败宣称为 Run 失败 179ms
+   → expected 'Run Trace从实际 Step、Attempt、模型调用、Manife…' to contain '限流'
+ × tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 TIMEOUT 类别和处理指引，不将调用失败宣称为 Run 失败 171ms
+   → expected 'Run Trace从实际 Step、Attempt、模型调用、Manife…' to contain '超时'
+ × tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 STREAM_BROKEN 类别和处理指引，不将调用失败宣称为 Run 失败 170ms
+   → expected 'Run Trace从实际 Step、Attempt、模型调用、Manife…' to contain '流中断'
+ × tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 PROTOCOL 类别和处理指引，不将调用失败宣称为 Run 失败 172ms
+   → expected 'Run Trace从实际 Step、Attempt、模型调用、Manife…' to contain '响应结构异常'
+ × tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 NETWORK 类别和处理指引，不将调用失败宣称为 Run 失败 170ms
+   → expected 'Run Trace从实际 Step、Attempt、模型调用、Manife…' to contain '网络不可达'
+ × tests/runTrace.spec.ts > P15 Run Trace > 旧服务缺诊断字段时保留未知，不推断 Provider 故障 4ms
+   → expected { …(13) } to match object { kind: null, criterionId: null, …(3) }
+(13 matching properties omitted from actual)
+ × tests/runTrace.spec.ts > P15 Run Trace > 拒绝非失败状态或词表外的 Provider 类别：{"status":"CANCELLED","provider_error_kind":"NETWORK"} 3ms
+   → promise resolved "{ …(12) }" instead of rejecting
+ × tests/runTrace.spec.ts > P15 Run Trace > 拒绝非失败状态或词表外的 Provider 类别：{"status":"COMPLETED","provider_error_kind":"AUTH"} 2ms
+   → promise resolved "{ …(12) }" instead of rejecting
+ × tests/runTrace.spec.ts > P15 Run Trace > 拒绝非失败状态或词表外的 Provider 类别：{"status":"STARTED","provider_error_kind":"TIMEOUT"} 1ms
+   → promise resolved "{ …(12) }" instead of rejecting
+ × tests/runTrace.spec.ts > P15 Run Trace > 拒绝非失败状态或词表外的 Provider 类别：{"status":"FAILED","provider_error_kind":"LOCAL_WRITE_ERROR"} 1ms
+   → promise resolved "{ …(12) }" instead of rejecting
+ ✓ tests/runTrace.spec.ts > P15 Run Trace > 按需读真实证据并分别展示 Review、Gateway 和 Effect，不泄露不可用来源 178ms
+ ✓ tests/runTrace.spec.ts > P15 Run Trace > 刷新失去读取权限时清除旧 Trace 235ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 11 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 AUTH 类别和处理指引，不将调用失败宣称为 Run 失败
+AssertionError: expected 'Run Trace从实际 Step、Attempt、模型调用、Manife…' to contain '认证失败'
+
+Expected: "认证失败"
+Received: "Run Trace从实际 Step、Attempt、模型调用、Manifest、验证、Review、Gateway 和 Run Effect 读取；批准、调用与效果分别核对。刷新证据Run 33333333-3333-4333-8333-333333333333 · 状态 RUNNING。下列“有结果引用”只说明证据指针存在，不代表结果成功。步骤与尝试 · 1 / 11. BUILD_CONTEXT · SUCCEEDEDStep 44444444-4444-4444-8444-444444444444 · revision v1 · 有结果引用（不代表成功） · 2026-09-26T00:00:00Z → 2026-09-26T00:00:00ZAttempt 55555555-5555-4555-8555-555555555555 · 第 1 次 · SUCCEEDED · claim epoch 1 · 有结果引用（不代表成功）模型调用元数据 · 1mock / mock-model · FAILEDCall 77777777-7777-4777-8777-777777777777 · Attempt 55555555-5555-4555-8555-555555555555 · Manifest 未关联输入 sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb · 读取 Operation 无 / Invocation 无Token 输入 未知 / 输出 未知 · 2026-09-26T00:00:00Z → 2026-09-26T00:00:00ZContext Manifest 与来源 · 1Manifest 88888888-8888-4888-8888-888888888888Step 44444444-4444-4444-8444-444444444444 · Builder 1 · sha256 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc · 2026-09-26T00:00:00ZKNOWLEDGE · SOURCE · UNTRUSTED · 来源当前不可用或无权读取；历史正文不以当前版本替代验证会话与检查 · 1COMPLETED · verdict PASSSession 99999999-9999-4999-8999-999999999999 · 验收 v1 · check plan dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd · 父 Session 无目标版本 66666666-6666-4666-8666-666666666666 · 内容 sha256 eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee条件 criterion-1 · PASS · INFO · 必需 · 2026-09-26T00:00:00ZReview 判断 · 1Review 决定只证明批准或拒绝等判断；动作效果见下面的 Gateway 和 Run Effect。ACTION_APPROVAL · DECIDEDReview bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb · Operation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Verification 无 · target hash ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff决定 APPROVE · 2026-09-26T00:00:00Z（不代表动作已执行）Gateway Operation 与 Invocation · 1FAKE_WRITE / WRITE_MARKER · UNKNOWNOperation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Step 44444444-4444-4444-8444-444444444444 · 参数 sha256 1111111111111111111111111111111111111111111111111111111111111111 · 无结果引用Invocation eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee · 第 1 次 · UNKNOWN · 无结果引用Run Effect · 1实际效果状态独立于 Review 决定与 Gateway Invocation；UNKNOWN 仍须核对原动作。UNKNOWNEffect operation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Step 44444444-4444-4444-8444-444444444444 · 参数 sha256 1111111111111111111111111111111111111111111111111111111111111111 · 无结果引用 · 2026-09-26T00:00:00Z → 未结清"
+
+ ❯ tests/runTrace.spec.ts:83:26
+     81|     const panel = mounted.wrapper.get('[data-testid="run-trace"]');
+     82|     expect(panel.text()).toContain(`状态 RUNNING`);
+     83|     expect(panel.text()).toContain(guide);
+       |                          ^
+     84|     expect(panel.text()).toContain(attemptId);
+     85|     expect(panel.text()).toContain("SEMANTIC_CHECK");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/11]⎯
+
+ FAIL  tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 RATE_LIMIT 类别和处理指引，不将调用失败宣称为 Run 失败
+AssertionError: expected 'Run Trace从实际 Step、Attempt、模型调用、Manife…' to contain '限流'
+
+Expected: "限流"
+Received: "Run Trace从实际 Step、Attempt、模型调用、Manifest、验证、Review、Gateway 和 Run Effect 读取；批准、调用与效果分别核对。刷新证据Run 33333333-3333-4333-8333-333333333333 · 状态 RUNNING。下列“有结果引用”只说明证据指针存在，不代表结果成功。步骤与尝试 · 1 / 11. BUILD_CONTEXT · SUCCEEDEDStep 44444444-4444-4444-8444-444444444444 · revision v1 · 有结果引用（不代表成功） · 2026-09-26T00:00:00Z → 2026-09-26T00:00:00ZAttempt 55555555-5555-4555-8555-555555555555 · 第 1 次 · SUCCEEDED · claim epoch 1 · 有结果引用（不代表成功）模型调用元数据 · 1mock / mock-model · FAILEDCall 77777777-7777-4777-8777-777777777777 · Attempt 55555555-5555-4555-8555-555555555555 · Manifest 未关联输入 sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb · 读取 Operation 无 / Invocation 无Token 输入 未知 / 输出 未知 · 2026-09-26T00:00:00Z → 2026-09-26T00:00:00ZContext Manifest 与来源 · 1Manifest 88888888-8888-4888-8888-888888888888Step 44444444-4444-4444-8444-444444444444 · Builder 1 · sha256 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc · 2026-09-26T00:00:00ZKNOWLEDGE · SOURCE · UNTRUSTED · 来源当前不可用或无权读取；历史正文不以当前版本替代验证会话与检查 · 1COMPLETED · verdict PASSSession 99999999-9999-4999-8999-999999999999 · 验收 v1 · check plan dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd · 父 Session 无目标版本 66666666-6666-4666-8666-666666666666 · 内容 sha256 eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee条件 criterion-1 · PASS · INFO · 必需 · 2026-09-26T00:00:00ZReview 判断 · 1Review 决定只证明批准或拒绝等判断；动作效果见下面的 Gateway 和 Run Effect。ACTION_APPROVAL · DECIDEDReview bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb · Operation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Verification 无 · target hash ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff决定 APPROVE · 2026-09-26T00:00:00Z（不代表动作已执行）Gateway Operation 与 Invocation · 1FAKE_WRITE / WRITE_MARKER · UNKNOWNOperation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Step 44444444-4444-4444-8444-444444444444 · 参数 sha256 1111111111111111111111111111111111111111111111111111111111111111 · 无结果引用Invocation eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee · 第 1 次 · UNKNOWN · 无结果引用Run Effect · 1实际效果状态独立于 Review 决定与 Gateway Invocation；UNKNOWN 仍须核对原动作。UNKNOWNEffect operation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Step 44444444-4444-4444-8444-444444444444 · 参数 sha256 1111111111111111111111111111111111111111111111111111111111111111 · 无结果引用 · 2026-09-26T00:00:00Z → 未结清"
+
+ ❯ tests/runTrace.spec.ts:83:26
+     81|     const panel = mounted.wrapper.get('[data-testid="run-trace"]');
+     82|     expect(panel.text()).toContain(`状态 RUNNING`);
+     83|     expect(panel.text()).toContain(guide);
+       |                          ^
+     84|     expect(panel.text()).toContain(attemptId);
+     85|     expect(panel.text()).toContain("SEMANTIC_CHECK");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/11]⎯
+
+ FAIL  tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 TIMEOUT 类别和处理指引，不将调用失败宣称为 Run 失败
+AssertionError: expected 'Run Trace从实际 Step、Attempt、模型调用、Manife…' to contain '超时'
+
+Expected: "超时"
+Received: "Run Trace从实际 Step、Attempt、模型调用、Manifest、验证、Review、Gateway 和 Run Effect 读取；批准、调用与效果分别核对。刷新证据Run 33333333-3333-4333-8333-333333333333 · 状态 RUNNING。下列“有结果引用”只说明证据指针存在，不代表结果成功。步骤与尝试 · 1 / 11. BUILD_CONTEXT · SUCCEEDEDStep 44444444-4444-4444-8444-444444444444 · revision v1 · 有结果引用（不代表成功） · 2026-09-26T00:00:00Z → 2026-09-26T00:00:00ZAttempt 55555555-5555-4555-8555-555555555555 · 第 1 次 · SUCCEEDED · claim epoch 1 · 有结果引用（不代表成功）模型调用元数据 · 1mock / mock-model · FAILEDCall 77777777-7777-4777-8777-777777777777 · Attempt 55555555-5555-4555-8555-555555555555 · Manifest 未关联输入 sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb · 读取 Operation 无 / Invocation 无Token 输入 未知 / 输出 未知 · 2026-09-26T00:00:00Z → 2026-09-26T00:00:00ZContext Manifest 与来源 · 1Manifest 88888888-8888-4888-8888-888888888888Step 44444444-4444-4444-8444-444444444444 · Builder 1 · sha256 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc · 2026-09-26T00:00:00ZKNOWLEDGE · SOURCE · UNTRUSTED · 来源当前不可用或无权读取；历史正文不以当前版本替代验证会话与检查 · 1COMPLETED · verdict PASSSession 99999999-9999-4999-8999-999999999999 · 验收 v1 · check plan dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd · 父 Session 无目标版本 66666666-6666-4666-8666-666666666666 · 内容 sha256 eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee条件 criterion-1 · PASS · INFO · 必需 · 2026-09-26T00:00:00ZReview 判断 · 1Review 决定只证明批准或拒绝等判断；动作效果见下面的 Gateway 和 Run Effect。ACTION_APPROVAL · DECIDEDReview bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb · Operation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Verification 无 · target hash ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff决定 APPROVE · 2026-09-26T00:00:00Z（不代表动作已执行）Gateway Operation 与 Invocation · 1FAKE_WRITE / WRITE_MARKER · UNKNOWNOperation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Step 44444444-4444-4444-8444-444444444444 · 参数 sha256 1111111111111111111111111111111111111111111111111111111111111111 · 无结果引用Invocation eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee · 第 1 次 · UNKNOWN · 无结果引用Run Effect · 1实际效果状态独立于 Review 决定与 Gateway Invocation；UNKNOWN 仍须核对原动作。UNKNOWNEffect operation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Step 44444444-4444-4444-8444-444444444444 · 参数 sha256 1111111111111111111111111111111111111111111111111111111111111111 · 无结果引用 · 2026-09-26T00:00:00Z → 未结清"
+
+ ❯ tests/runTrace.spec.ts:83:26
+     81|     const panel = mounted.wrapper.get('[data-testid="run-trace"]');
+     82|     expect(panel.text()).toContain(`状态 RUNNING`);
+     83|     expect(panel.text()).toContain(guide);
+       |                          ^
+     84|     expect(panel.text()).toContain(attemptId);
+     85|     expect(panel.text()).toContain("SEMANTIC_CHECK");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/11]⎯
+
+ FAIL  tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 STREAM_BROKEN 类别和处理指引，不将调用失败宣称为 Run 失败
+AssertionError: expected 'Run Trace从实际 Step、Attempt、模型调用、Manife…' to contain '流中断'
+
+Expected: "流中断"
+Received: "Run Trace从实际 Step、Attempt、模型调用、Manifest、验证、Review、Gateway 和 Run Effect 读取；批准、调用与效果分别核对。刷新证据Run 33333333-3333-4333-8333-333333333333 · 状态 RUNNING。下列“有结果引用”只说明证据指针存在，不代表结果成功。步骤与尝试 · 1 / 11. BUILD_CONTEXT · SUCCEEDEDStep 44444444-4444-4444-8444-444444444444 · revision v1 · 有结果引用（不代表成功） · 2026-09-26T00:00:00Z → 2026-09-26T00:00:00ZAttempt 55555555-5555-4555-8555-555555555555 · 第 1 次 · SUCCEEDED · claim epoch 1 · 有结果引用（不代表成功）模型调用元数据 · 1mock / mock-model · FAILEDCall 77777777-7777-4777-8777-777777777777 · Attempt 55555555-5555-4555-8555-555555555555 · Manifest 未关联输入 sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb · 读取 Operation 无 / Invocation 无Token 输入 未知 / 输出 未知 · 2026-09-26T00:00:00Z → 2026-09-26T00:00:00ZContext Manifest 与来源 · 1Manifest 88888888-8888-4888-8888-888888888888Step 44444444-4444-4444-8444-444444444444 · Builder 1 · sha256 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc · 2026-09-26T00:00:00ZKNOWLEDGE · SOURCE · UNTRUSTED · 来源当前不可用或无权读取；历史正文不以当前版本替代验证会话与检查 · 1COMPLETED · verdict PASSSession 99999999-9999-4999-8999-999999999999 · 验收 v1 · check plan dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd · 父 Session 无目标版本 66666666-6666-4666-8666-666666666666 · 内容 sha256 eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee条件 criterion-1 · PASS · INFO · 必需 · 2026-09-26T00:00:00ZReview 判断 · 1Review 决定只证明批准或拒绝等判断；动作效果见下面的 Gateway 和 Run Effect。ACTION_APPROVAL · DECIDEDReview bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb · Operation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Verification 无 · target hash ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff决定 APPROVE · 2026-09-26T00:00:00Z（不代表动作已执行）Gateway Operation 与 Invocation · 1FAKE_WRITE / WRITE_MARKER · UNKNOWNOperation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Step 44444444-4444-4444-8444-444444444444 · 参数 sha256 1111111111111111111111111111111111111111111111111111111111111111 · 无结果引用Invocation eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee · 第 1 次 · UNKNOWN · 无结果引用Run Effect · 1实际效果状态独立于 Review 决定与 Gateway Invocation；UNKNOWN 仍须核对原动作。UNKNOWNEffect operation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Step 44444444-4444-4444-8444-444444444444 · 参数 sha256 1111111111111111111111111111111111111111111111111111111111111111 · 无结果引用 · 2026-09-26T00:00:00Z → 未结清"
+
+ ❯ tests/runTrace.spec.ts:83:26
+     81|     const panel = mounted.wrapper.get('[data-testid="run-trace"]');
+     82|     expect(panel.text()).toContain(`状态 RUNNING`);
+     83|     expect(panel.text()).toContain(guide);
+       |                          ^
+     84|     expect(panel.text()).toContain(attemptId);
+     85|     expect(panel.text()).toContain("SEMANTIC_CHECK");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/11]⎯
+
+ FAIL  tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 PROTOCOL 类别和处理指引，不将调用失败宣称为 Run 失败
+AssertionError: expected 'Run Trace从实际 Step、Attempt、模型调用、Manife…' to contain '响应结构异常'
+
+Expected: "响应结构异常"
+Received: "Run Trace从实际 Step、Attempt、模型调用、Manifest、验证、Review、Gateway 和 Run Effect 读取；批准、调用与效果分别核对。刷新证据Run 33333333-3333-4333-8333-333333333333 · 状态 RUNNING。下列“有结果引用”只说明证据指针存在，不代表结果成功。步骤与尝试 · 1 / 11. BUILD_CONTEXT · SUCCEEDEDStep 44444444-4444-4444-8444-444444444444 · revision v1 · 有结果引用（不代表成功） · 2026-09-26T00:00:00Z → 2026-09-26T00:00:00ZAttempt 55555555-5555-4555-8555-555555555555 · 第 1 次 · SUCCEEDED · claim epoch 1 · 有结果引用（不代表成功）模型调用元数据 · 1mock / mock-model · FAILEDCall 77777777-7777-4777-8777-777777777777 · Attempt 55555555-5555-4555-8555-555555555555 · Manifest 未关联输入 sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb · 读取 Operation 无 / Invocation 无Token 输入 未知 / 输出 未知 · 2026-09-26T00:00:00Z → 2026-09-26T00:00:00ZContext Manifest 与来源 · 1Manifest 88888888-8888-4888-8888-888888888888Step 44444444-4444-4444-8444-444444444444 · Builder 1 · sha256 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc · 2026-09-26T00:00:00ZKNOWLEDGE · SOURCE · UNTRUSTED · 来源当前不可用或无权读取；历史正文不以当前版本替代验证会话与检查 · 1COMPLETED · verdict PASSSession 99999999-9999-4999-8999-999999999999 · 验收 v1 · check plan dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd · 父 Session 无目标版本 66666666-6666-4666-8666-666666666666 · 内容 sha256 eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee条件 criterion-1 · PASS · INFO · 必需 · 2026-09-26T00:00:00ZReview 判断 · 1Review 决定只证明批准或拒绝等判断；动作效果见下面的 Gateway 和 Run Effect。ACTION_APPROVAL · DECIDEDReview bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb · Operation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Verification 无 · target hash ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff决定 APPROVE · 2026-09-26T00:00:00Z（不代表动作已执行）Gateway Operation 与 Invocation · 1FAKE_WRITE / WRITE_MARKER · UNKNOWNOperation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Step 44444444-4444-4444-8444-444444444444 · 参数 sha256 1111111111111111111111111111111111111111111111111111111111111111 · 无结果引用Invocation eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee · 第 1 次 · UNKNOWN · 无结果引用Run Effect · 1实际效果状态独立于 Review 决定与 Gateway Invocation；UNKNOWN 仍须核对原动作。UNKNOWNEffect operation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Step 44444444-4444-4444-8444-444444444444 · 参数 sha256 1111111111111111111111111111111111111111111111111111111111111111 · 无结果引用 · 2026-09-26T00:00:00Z → 未结清"
+
+ ❯ tests/runTrace.spec.ts:83:26
+     81|     const panel = mounted.wrapper.get('[data-testid="run-trace"]');
+     82|     expect(panel.text()).toContain(`状态 RUNNING`);
+     83|     expect(panel.text()).toContain(guide);
+       |                          ^
+     84|     expect(panel.text()).toContain(attemptId);
+     85|     expect(panel.text()).toContain("SEMANTIC_CHECK");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/11]⎯
+
+ FAIL  tests/runTrace.spec.ts > P15 Run Trace > 确切历史模型调用显示 NETWORK 类别和处理指引，不将调用失败宣称为 Run 失败
+AssertionError: expected 'Run Trace从实际 Step、Attempt、模型调用、Manife…' to contain '网络不可达'
+
+Expected: "网络不可达"
+Received: "Run Trace从实际 Step、Attempt、模型调用、Manifest、验证、Review、Gateway 和 Run Effect 读取；批准、调用与效果分别核对。刷新证据Run 33333333-3333-4333-8333-333333333333 · 状态 RUNNING。下列“有结果引用”只说明证据指针存在，不代表结果成功。步骤与尝试 · 1 / 11. BUILD_CONTEXT · SUCCEEDEDStep 44444444-4444-4444-8444-444444444444 · revision v1 · 有结果引用（不代表成功） · 2026-09-26T00:00:00Z → 2026-09-26T00:00:00ZAttempt 55555555-5555-4555-8555-555555555555 · 第 1 次 · SUCCEEDED · claim epoch 1 · 有结果引用（不代表成功）模型调用元数据 · 1mock / mock-model · FAILEDCall 77777777-7777-4777-8777-777777777777 · Attempt 55555555-5555-4555-8555-555555555555 · Manifest 未关联输入 sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb · 读取 Operation 无 / Invocation 无Token 输入 未知 / 输出 未知 · 2026-09-26T00:00:00Z → 2026-09-26T00:00:00ZContext Manifest 与来源 · 1Manifest 88888888-8888-4888-8888-888888888888Step 44444444-4444-4444-8444-444444444444 · Builder 1 · sha256 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc · 2026-09-26T00:00:00ZKNOWLEDGE · SOURCE · UNTRUSTED · 来源当前不可用或无权读取；历史正文不以当前版本替代验证会话与检查 · 1COMPLETED · verdict PASSSession 99999999-9999-4999-8999-999999999999 · 验收 v1 · check plan dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd · 父 Session 无目标版本 66666666-6666-4666-8666-666666666666 · 内容 sha256 eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee条件 criterion-1 · PASS · INFO · 必需 · 2026-09-26T00:00:00ZReview 判断 · 1Review 决定只证明批准或拒绝等判断；动作效果见下面的 Gateway 和 Run Effect。ACTION_APPROVAL · DECIDEDReview bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb · Operation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Verification 无 · target hash ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff决定 APPROVE · 2026-09-26T00:00:00Z（不代表动作已执行）Gateway Operation 与 Invocation · 1FAKE_WRITE / WRITE_MARKER · UNKNOWNOperation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Step 44444444-4444-4444-8444-444444444444 · 参数 sha256 1111111111111111111111111111111111111111111111111111111111111111 · 无结果引用Invocation eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee · 第 1 次 · UNKNOWN · 无结果引用Run Effect · 1实际效果状态独立于 Review 决定与 Gateway Invocation；UNKNOWN 仍须核对原动作。UNKNOWNEffect operation cccccccc-cccc-4ccc-8ccc-cccccccccccc · Step 44444444-4444-4444-8444-444444444444 · 参数 sha256 1111111111111111111111111111111111111111111111111111111111111111 · 无结果引用 · 2026-09-26T00:00:00Z → 未结清"
+
+ ❯ tests/runTrace.spec.ts:83:26
+     81|     const panel = mounted.wrapper.get('[data-testid="run-trace"]');
+     82|     expect(panel.text()).toContain(`状态 RUNNING`);
+     83|     expect(panel.text()).toContain(guide);
+       |                          ^
+     84|     expect(panel.text()).toContain(attemptId);
+     85|     expect(panel.text()).toContain("SEMANTIC_CHECK");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/11]⎯
+
+ FAIL  tests/runTrace.spec.ts > P15 Run Trace > 旧服务缺诊断字段时保留未知，不推断 Provider 故障
+AssertionError: expected { …(13) } to match object { kind: null, criterionId: null, …(3) }
+(13 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "checkAttempt": null,
+-   "criterionId": null,
+-   "kind": null,
+-   "providerErrorKind": null,
+-   "providerRequestId": null,
++   "id": "77777777-7777-4777-8777-777777777777",
++   "inputSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
++   "inputTokens": 12,
++   "manifestId": null,
++   "model": "mock-model",
++   "outputTokens": 3,
++   "provider": "mock",
++   "readInvocationId": null,
++   "readOperationId": null,
++   "settledAt": "2026-09-26T00:00:00Z",
++   "startedAt": "2026-09-26T00:00:00Z",
++   "status": "SUCCEEDED",
++   "stepAttemptId": "55555555-5555-4555-8555-555555555555",
+  }
+
+ ❯ tests/runTrace.spec.ts:96:61
+     94|     const client = new RelayApiClient({ baseUrl, workspaceId, bearerTo…
+     95|     vi.stubGlobal("fetch", vi.fn(async () => response(trace())));
+     96|     expect((await client.getRunTrace(runId)).modelCalls[0]).toMatchObj…
+       |                                                             ^
+     97|       kind: null, criterionId: null, checkAttempt: null, providerError…
+     98|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/11]⎯
+
+ FAIL  tests/runTrace.spec.ts > P15 Run Trace > 拒绝非失败状态或词表外的 Provider 类别：{"status":"CANCELLED","provider_error_kind":"NETWORK"}
+AssertionError: promise resolved "{ …(12) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "attempts": [
++     {
++       "claimEpoch": "1",
++       "finishedAt": "2026-09-26T00:00:00Z",
++       "id": "55555555-5555-4555-8555-555555555555",
++       "number": "1",
++       "resultAvailable": true,
++       "startedAt": "2026-09-26T00:00:00Z",
++       "status": "SUCCEEDED",
++       "stepId": "44444444-4444-4444-8444-444444444444",
++     },
++   ],
++   "effects": [
++     {
++       "createdAt": "2026-09-26T00:00:00Z",
++       "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
++       "paramsSha256": "1111111111111111111111111111111111111111111111111111111111111111",
++       "resolvedAt": null,
++       "resultAvailable": false,
++       "status": "UNKNOWN",
++       "stepId": "44444444-4444-4444-8444-444444444444",
++     },
++   ],
++   "manifests": [
++     {
++       "builderVersion": "1",
++       "createdAt": "2026-09-26T00:00:00Z",
++       "id": "88888888-8888-4888-8888-888888888888",
++       "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
++       "sources": [
++         {
++           "availability": "UNAVAILABLE",
++           "kind": "KNOWLEDGE",
++           "role": "SOURCE",
++           "sha256": "hidden-hash",
++           "sourceRef": "hidden-source-id",
++           "sourceSha256": "hidden-source-hash",
++           "trust": "UNTRUSTED",
++           "version": "hidden-version",
++         },
++       ],
++       "stepId": "44444444-4444-4444-8444-444444444444",
++     },
++   ],
++   "modelCalls": [
++     {
++       "id": "77777777-7777-4777-8777-777777777777",
++       "inputSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
++       "inputTokens": 12,
++       "manifestId": null,
++       "model": "mock-model",
++       "outputTokens": 3,
++       "provider": "mock",
++       "readInvocationId": null,
++       "readOperationId": null,
++       "settledAt": "2026-09-26T00:00:00Z",
++       "startedAt": "2026-09-26T00:00:00Z",
++       "status": "CANCELLED",
++       "stepAttemptId": "55555555-5555-4555-8555-555555555555",
++     },
++   ],
++   "operations": [
++     {
++       "actionType": "WRITE_MARKER",
++       "capability": "FAKE_WRITE",
++       "createdAt": "2026-09-26T00:00:00Z",
++       "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
++       "invocations": [
++         {
++           "createdAt": "2026-09-26T00:00:00Z",
++           "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
++           "number": "1",
++           "resolvedAt": null,
++           "resultAvailable": false,
++           "status": "UNKNOWN",
++         },
++       ],
++       "paramsSha256": "1111111111111111111111111111111111111111111111111111111111111111",
++       "resultAvailable": false,
++       "status": "UNKNOWN",
++       "stepId": "44444444-4444-4444-8444-444444444444",
++       "updatedAt": "2026-09-26T00:00:00Z",
++     },
++   ],
++   "projectId": null,
++   "reviews": [
++     {
++       "createdAt": "2026-09-26T00:00:00Z",
++       "decidedAt": "2026-09-26T00:00:00Z",
++       "decision": {
++         "decidedAt": "2026-09-26T00:00:00Z",
++         "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
++         "value": "APPROVE",
++       },
++       "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
++       "kind": "ACTION_APPROVAL",
++       "operationId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
++       "status": "DECIDED",
++       "targetHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
++       "verificationSessionId": null,
++     },
++   ],
++   "runId": "33333333-3333-4333-8333-333333333333",
++   "status": "RUNNING",
++   "steps": [
++     {
++       "finishedAt": "2026-09-26T00:00:00Z",
++       "id": "44444444-4444-4444-8444-444444444444",
++       "index": 0,
++       "kind": "BUILD_CONTEXT",
++       "resultAvailable": true,
++       "revision": "1",
++       "startedAt": "2026-09-26T00:00:00Z",
++       "status": "SUCCEEDED",
++     },
++   ],
++   "taskId": "22222222-2222-4222-8222-222222222222",
++   "verifications": [
++     {
++       "acceptanceRevision": "1",
++       "checkPlanHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
++       "checks": [
++         {
++           "createdAt": "2026-09-26T00:00:00Z",
++           "criterionId": "criterion-1",
++           "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
++           "required": true,
++           "result": "PASS",
++           "severity": "INFO",
++         },
++       ],
++       "createdAt": "2026-09-26T00:00:00Z",
++       "finalizedAt": "2026-09-26T00:00:00Z",
++       "id": "99999999-9999-4999-8999-999999999999",
++       "parentSessionId": null,
++       "status": "COMPLETED",
++       "targets": [
++         {
++           "artifactVersionId": "66666666-6666-4666-8666-666666666666",
++           "contentSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
++         },
++       ],
++       "verdict": "PASS",
++     },
++   ],
+  }
+
+ ❯ tests/runTrace.spec.ts:111:44
+    109|     vi.stubGlobal("fetch", vi.fn(async () => response({ ...data,
+    110|       model_calls: [{ ...data.model_calls[0], ...fields }] })));
+    111|     await expect(client.getRunTrace(runId)).rejects.toThrow("Provider …
+       |                                            ^
+    112|   });
+    113|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/11]⎯
+
+ FAIL  tests/runTrace.spec.ts > P15 Run Trace > 拒绝非失败状态或词表外的 Provider 类别：{"status":"COMPLETED","provider_error_kind":"AUTH"}
+AssertionError: promise resolved "{ …(12) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "attempts": [
++     {
++       "claimEpoch": "1",
++       "finishedAt": "2026-09-26T00:00:00Z",
++       "id": "55555555-5555-4555-8555-555555555555",
++       "number": "1",
++       "resultAvailable": true,
++       "startedAt": "2026-09-26T00:00:00Z",
++       "status": "SUCCEEDED",
++       "stepId": "44444444-4444-4444-8444-444444444444",
++     },
++   ],
++   "effects": [
++     {
++       "createdAt": "2026-09-26T00:00:00Z",
++       "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
++       "paramsSha256": "1111111111111111111111111111111111111111111111111111111111111111",
++       "resolvedAt": null,
++       "resultAvailable": false,
++       "status": "UNKNOWN",
++       "stepId": "44444444-4444-4444-8444-444444444444",
++     },
++   ],
++   "manifests": [
++     {
++       "builderVersion": "1",
++       "createdAt": "2026-09-26T00:00:00Z",
++       "id": "88888888-8888-4888-8888-888888888888",
++       "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
++       "sources": [
++         {
++           "availability": "UNAVAILABLE",
++           "kind": "KNOWLEDGE",
++           "role": "SOURCE",
++           "sha256": "hidden-hash",
++           "sourceRef": "hidden-source-id",
++           "sourceSha256": "hidden-source-hash",
++           "trust": "UNTRUSTED",
++           "version": "hidden-version",
++         },
++       ],
++       "stepId": "44444444-4444-4444-8444-444444444444",
++     },
++   ],
++   "modelCalls": [
++     {
++       "id": "77777777-7777-4777-8777-777777777777",
++       "inputSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
++       "inputTokens": 12,
++       "manifestId": null,
++       "model": "mock-model",
++       "outputTokens": 3,
++       "provider": "mock",
++       "readInvocationId": null,
++       "readOperationId": null,
++       "settledAt": "2026-09-26T00:00:00Z",
++       "startedAt": "2026-09-26T00:00:00Z",
++       "status": "COMPLETED",
++       "stepAttemptId": "55555555-5555-4555-8555-555555555555",
++     },
++   ],
++   "operations": [
++     {
++       "actionType": "WRITE_MARKER",
++       "capability": "FAKE_WRITE",
++       "createdAt": "2026-09-26T00:00:00Z",
++       "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
++       "invocations": [
++         {
++           "createdAt": "2026-09-26T00:00:00Z",
++           "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
++           "number": "1",
++           "resolvedAt": null,
++           "resultAvailable": false,
++           "status": "UNKNOWN",
++         },
++       ],
++       "paramsSha256": "1111111111111111111111111111111111111111111111111111111111111111",
++       "resultAvailable": false,
++       "status": "UNKNOWN",
++       "stepId": "44444444-4444-4444-8444-444444444444",
++       "updatedAt": "2026-09-26T00:00:00Z",
++     },
++   ],
++   "projectId": null,
++   "reviews": [
++     {
++       "createdAt": "2026-09-26T00:00:00Z",
++       "decidedAt": "2026-09-26T00:00:00Z",
++       "decision": {
++         "decidedAt": "2026-09-26T00:00:00Z",
++         "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
++         "value": "APPROVE",
++       },
++       "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
++       "kind": "ACTION_APPROVAL",
++       "operationId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
++       "status": "DECIDED",
++       "targetHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
++       "verificationSessionId": null,
++     },
++   ],
++   "runId": "33333333-3333-4333-8333-333333333333",
++   "status": "RUNNING",
++   "steps": [
++     {
++       "finishedAt": "2026-09-26T00:00:00Z",
++       "id": "44444444-4444-4444-8444-444444444444",
++       "index": 0,
++       "kind": "BUILD_CONTEXT",
++       "resultAvailable": true,
++       "revision": "1",
++       "startedAt": "2026-09-26T00:00:00Z",
++       "status": "SUCCEEDED",
++     },
++   ],
++   "taskId": "22222222-2222-4222-8222-222222222222",
++   "verifications": [
++     {
++       "acceptanceRevision": "1",
++       "checkPlanHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
++       "checks": [
++         {
++           "createdAt": "2026-09-26T00:00:00Z",
++           "criterionId": "criterion-1",
++           "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
++           "required": true,
++           "result": "PASS",
++           "severity": "INFO",
++         },
++       ],
++       "createdAt": "2026-09-26T00:00:00Z",
++       "finalizedAt": "2026-09-26T00:00:00Z",
++       "id": "99999999-9999-4999-8999-999999999999",
++       "parentSessionId": null,
++       "status": "COMPLETED",
++       "targets": [
++         {
++           "artifactVersionId": "66666666-6666-4666-8666-666666666666",
++           "contentSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
++         },
++       ],
++       "verdict": "PASS",
++     },
++   ],
+  }
+
+ ❯ tests/runTrace.spec.ts:111:44
+    109|     vi.stubGlobal("fetch", vi.fn(async () => response({ ...data,
+    110|       model_calls: [{ ...data.model_calls[0], ...fields }] })));
+    111|     await expect(client.getRunTrace(runId)).rejects.toThrow("Provider …
+       |                                            ^
+    112|   });
+    113|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/11]⎯
+
+ FAIL  tests/runTrace.spec.ts > P15 Run Trace > 拒绝非失败状态或词表外的 Provider 类别：{"status":"STARTED","provider_error_kind":"TIMEOUT"}
+AssertionError: promise resolved "{ …(12) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "attempts": [
++     {
++       "claimEpoch": "1",
++       "finishedAt": "2026-09-26T00:00:00Z",
++       "id": "55555555-5555-4555-8555-555555555555",
++       "number": "1",
++       "resultAvailable": true,
++       "startedAt": "2026-09-26T00:00:00Z",
++       "status": "SUCCEEDED",
++       "stepId": "44444444-4444-4444-8444-444444444444",
++     },
++   ],
++   "effects": [
++     {
++       "createdAt": "2026-09-26T00:00:00Z",
++       "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
++       "paramsSha256": "1111111111111111111111111111111111111111111111111111111111111111",
++       "resolvedAt": null,
++       "resultAvailable": false,
++       "status": "UNKNOWN",
++       "stepId": "44444444-4444-4444-8444-444444444444",
++     },
++   ],
++   "manifests": [
++     {
++       "builderVersion": "1",
++       "createdAt": "2026-09-26T00:00:00Z",
++       "id": "88888888-8888-4888-8888-888888888888",
++       "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
++       "sources": [
++         {
++           "availability": "UNAVAILABLE",
++           "kind": "KNOWLEDGE",
++           "role": "SOURCE",
++           "sha256": "hidden-hash",
++           "sourceRef": "hidden-source-id",
++           "sourceSha256": "hidden-source-hash",
++           "trust": "UNTRUSTED",
++           "version": "hidden-version",
++         },
++       ],
++       "stepId": "44444444-4444-4444-8444-444444444444",
++     },
++   ],
++   "modelCalls": [
++     {
++       "id": "77777777-7777-4777-8777-777777777777",
++       "inputSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
++       "inputTokens": 12,
++       "manifestId": null,
++       "model": "mock-model",
++       "outputTokens": 3,
++       "provider": "mock",
++       "readInvocationId": null,
++       "readOperationId": null,
++       "settledAt": "2026-09-26T00:00:00Z",
++       "startedAt": "2026-09-26T00:00:00Z",
++       "status": "STARTED",
++       "stepAttemptId": "55555555-5555-4555-8555-555555555555",
++     },
++   ],
++   "operations": [
++     {
++       "actionType": "WRITE_MARKER",
++       "capability": "FAKE_WRITE",
++       "createdAt": "2026-09-26T00:00:00Z",
++       "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
++       "invocations": [
++         {
++           "createdAt": "2026-09-26T00:00:00Z",
++           "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
++           "number": "1",
++           "resolvedAt": null,
++           "resultAvailable": false,
++           "status": "UNKNOWN",
++         },
++       ],
++       "paramsSha256": "1111111111111111111111111111111111111111111111111111111111111111",
++       "resultAvailable": false,
++       "status": "UNKNOWN",
++       "stepId": "44444444-4444-4444-8444-444444444444",
++       "updatedAt": "2026-09-26T00:00:00Z",
++     },
++   ],
++   "projectId": null,
++   "reviews": [
++     {
++       "createdAt": "2026-09-26T00:00:00Z",
++       "decidedAt": "2026-09-26T00:00:00Z",
++       "decision": {
++         "decidedAt": "2026-09-26T00:00:00Z",
++         "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
++         "value": "APPROVE",
++       },
++       "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
++       "kind": "ACTION_APPROVAL",
++       "operationId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
++       "status": "DECIDED",
++       "targetHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
++       "verificationSessionId": null,
++     },
++   ],
++   "runId": "33333333-3333-4333-8333-333333333333",
++   "status": "RUNNING",
++   "steps": [
++     {
++       "finishedAt": "2026-09-26T00:00:00Z",
++       "id": "44444444-4444-4444-8444-444444444444",
++       "index": 0,
++       "kind": "BUILD_CONTEXT",
++       "resultAvailable": true,
++       "revision": "1",
++       "startedAt": "2026-09-26T00:00:00Z",
++       "status": "SUCCEEDED",
++     },
++   ],
++   "taskId": "22222222-2222-4222-8222-222222222222",
++   "verifications": [
++     {
++       "acceptanceRevision": "1",
++       "checkPlanHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
++       "checks": [
++         {
++           "createdAt": "2026-09-26T00:00:00Z",
++           "criterionId": "criterion-1",
++           "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
++           "required": true,
++           "result": "PASS",
++           "severity": "INFO",
++         },
++       ],
++       "createdAt": "2026-09-26T00:00:00Z",
++       "finalizedAt": "2026-09-26T00:00:00Z",
++       "id": "99999999-9999-4999-8999-999999999999",
++       "parentSessionId": null,
++       "status": "COMPLETED",
++       "targets": [
++         {
++           "artifactVersionId": "66666666-6666-4666-8666-666666666666",
++           "contentSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
++         },
++       ],
++       "verdict": "PASS",
++     },
++   ],
+  }
+
+ ❯ tests/runTrace.spec.ts:111:44
+    109|     vi.stubGlobal("fetch", vi.fn(async () => response({ ...data,
+    110|       model_calls: [{ ...data.model_calls[0], ...fields }] })));
+    111|     await expect(client.getRunTrace(runId)).rejects.toThrow("Provider …
+       |                                            ^
+    112|   });
+    113|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/11]⎯
+
+ FAIL  tests/runTrace.spec.ts > P15 Run Trace > 拒绝非失败状态或词表外的 Provider 类别：{"status":"FAILED","provider_error_kind":"LOCAL_WRITE_ERROR"}
+AssertionError: promise resolved "{ …(12) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "attempts": [
++     {
++       "claimEpoch": "1",
++       "finishedAt": "2026-09-26T00:00:00Z",
++       "id": "55555555-5555-4555-8555-555555555555",
++       "number": "1",
++       "resultAvailable": true,
++       "startedAt": "2026-09-26T00:00:00Z",
++       "status": "SUCCEEDED",
++       "stepId": "44444444-4444-4444-8444-444444444444",
++     },
++   ],
++   "effects": [
++     {
++       "createdAt": "2026-09-26T00:00:00Z",
++       "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
++       "paramsSha256": "1111111111111111111111111111111111111111111111111111111111111111",
++       "resolvedAt": null,
++       "resultAvailable": false,
++       "status": "UNKNOWN",
++       "stepId": "44444444-4444-4444-8444-444444444444",
++     },
++   ],
++   "manifests": [
++     {
++       "builderVersion": "1",
++       "createdAt": "2026-09-26T00:00:00Z",
++       "id": "88888888-8888-4888-8888-888888888888",
++       "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
++       "sources": [
++         {
++           "availability": "UNAVAILABLE",
++           "kind": "KNOWLEDGE",
++           "role": "SOURCE",
++           "sha256": "hidden-hash",
++           "sourceRef": "hidden-source-id",
++           "sourceSha256": "hidden-source-hash",
++           "trust": "UNTRUSTED",
++           "version": "hidden-version",
++         },
++       ],
++       "stepId": "44444444-4444-4444-8444-444444444444",
++     },
++   ],
++   "modelCalls": [
++     {
++       "id": "77777777-7777-4777-8777-777777777777",
++       "inputSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
++       "inputTokens": 12,
++       "manifestId": null,
++       "model": "mock-model",
++       "outputTokens": 3,
++       "provider": "mock",
++       "readInvocationId": null,
++       "readOperationId": null,
++       "settledAt": "2026-09-26T00:00:00Z",
++       "startedAt": "2026-09-26T00:00:00Z",
++       "status": "FAILED",
++       "stepAttemptId": "55555555-5555-4555-8555-555555555555",
++     },
++   ],
++   "operations": [
++     {
++       "actionType": "WRITE_MARKER",
++       "capability": "FAKE_WRITE",
++       "createdAt": "2026-09-26T00:00:00Z",
++       "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
++       "invocations": [
++         {
++           "createdAt": "2026-09-26T00:00:00Z",
++           "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
++           "number": "1",
++           "resolvedAt": null,
++           "resultAvailable": false,
++           "status": "UNKNOWN",
++         },
++       ],
++       "paramsSha256": "1111111111111111111111111111111111111111111111111111111111111111",
++       "resultAvailable": false,
++       "status": "UNKNOWN",
++       "stepId": "44444444-4444-4444-8444-444444444444",
++       "updatedAt": "2026-09-26T00:00:00Z",
++     },
++   ],
++   "projectId": null,
++   "reviews": [
++     {
++       "createdAt": "2026-09-26T00:00:00Z",
++       "decidedAt": "2026-09-26T00:00:00Z",
++       "decision": {
++         "decidedAt": "2026-09-26T00:00:00Z",
++         "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
++         "value": "APPROVE",
++       },
++       "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
++       "kind": "ACTION_APPROVAL",
++       "operationId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
++       "status": "DECIDED",
++       "targetHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
++       "verificationSessionId": null,
++     },
++   ],
++   "runId": "33333333-3333-4333-8333-333333333333",
++   "status": "RUNNING",
++   "steps": [
++     {
++       "finishedAt": "2026-09-26T00:00:00Z",
++       "id": "44444444-4444-4444-8444-444444444444",
++       "index": 0,
++       "kind": "BUILD_CONTEXT",
++       "resultAvailable": true,
++       "revision": "1",
++       "startedAt": "2026-09-26T00:00:00Z",
++       "status": "SUCCEEDED",
++     },
++   ],
++   "taskId": "22222222-2222-4222-8222-222222222222",
++   "verifications": [
++     {
++       "acceptanceRevision": "1",
++       "checkPlanHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
++       "checks": [
++         {
++           "createdAt": "2026-09-26T00:00:00Z",
++           "criterionId": "criterion-1",
++           "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
++           "required": true,
++           "result": "PASS",
++           "severity": "INFO",
++         },
++       ],
++       "createdAt": "2026-09-26T00:00:00Z",
++       "finalizedAt": "2026-09-26T00:00:00Z",
++       "id": "99999999-9999-4999-8999-999999999999",
++       "parentSessionId": null,
++       "status": "COMPLETED",
++       "targets": [
++         {
++           "artifactVersionId": "66666666-6666-4666-8666-666666666666",
++           "contentSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
++         },
++       ],
++       "verdict": "PASS",
++     },
++   ],
+  }
+
+ ❯ tests/runTrace.spec.ts:111:44
+    109|     vi.stubGlobal("fetch", vi.fn(async () => response({ ...data,
+    110|       model_calls: [{ ...data.model_calls[0], ...fields }] })));
+    111|     await expect(client.getRunTrace(runId)).rejects.toThrow("Provider …
+       |                                            ^
+    112|   });
+    113|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/11]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  11 failed | 2 passed (13)
+   Start at  12:15:42
+   Duration  6.44s (import 28%, environment 25%, tests 24%, transform 21%, setup 1%)
+

@@ -1,0 +1,67 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-32cd71704a
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-32cd71704a/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-32cd71704a^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 6872)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-32cd71704a/cluster" "-h" "127.0.0.1" "-p" "7747"
+DO
+CREATE DATABASE
+Test database: relay_api_test_4da5e3953efd on 127.0.0.1:7747 (roles relay_migrator / relay_app)
+✔ G01/G04: 202 contains the committed Run, immutable command, outbox and receipt; restart replays it (4606.2204ms)
+✔ an already aborted shutdown cannot claim or execute a pending command (654.6067ms)
+✔ shutdown signalled from onClaim does not execute a step after the claim (33.8433ms)
+✔ a replaced invocation cannot insert PREPARED after a delayed PERSIST claim (112.5944ms)
+✔ a stale publisher cannot resolve DISPATCHING; recovery reconciles the same operation or leaves UNKNOWN (186.3458ms)
+✔ a stale retry cannot reconcile an existing DISPATCHING effect before recovery (114.5475ms)
+✔ G05: expired live Worker cannot create a second invocation or write; observed exit requeues the same command (1386.0951ms)
+✔ G04/G05: two independent supervisor entries race for one durable command (1061.3619ms)
+✔ G04: supervisor crash does not forge stop evidence or reclaim its former child (1527.0061ms)
+✔ supervisor sidecar echoes readiness nonce and Node version, then exits on stdin EOF (509.4132ms)
+✔ a bounded delivery never marks an unfinished Run command DONE (49.8536ms)
+✔ Delegate rollback removes Run, command, outbox, invocation and receipt together (25.1679ms)
+✔ desktop malformed or oversized private frames fail before any PostgreSQL connection or Worker spawn (2290.5774ms)
+✔ desktop startup emits private readiness before any claim and tags its Worker with launch ID (982.4346ms)
+✔ two desktop supervisors use one stopped launch claim once; old Worker cannot write after requeue (1212.6579ms)
+✔ a delayed old desktop Worker process cannot write after a new launch takes its command (3438.7273ms)
+✔ desktop stopped-launch recovery reconciles the same operation and blocks UNKNOWN (1611.2167ms)
+✔ desktop stdin EOF stops new claims and waits for the active child close (1169.0067ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 34716.6358
+waiting for server to shut down.... done
+server stopped
+--- integration summary ---
+tests exit code: 0
+build exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: PASSED

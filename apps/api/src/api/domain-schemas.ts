@@ -668,6 +668,11 @@ export const WorkspaceGoalParamsSchema = Type.Object(
   strict,
 );
 
+export const WorkspaceContinuationPointParamsSchema = Type.Object(
+  { workspace_id: UuidSchema, project_id: UuidSchema, continuation_point_id: UuidSchema },
+  strict,
+);
+
 export const WorkspaceCommandParamsSchema = Type.Object(
   { workspace_id: UuidSchema, command_id: UuidSchema },
   strict,

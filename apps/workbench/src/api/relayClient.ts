@@ -91,6 +91,46 @@ export interface RelayViewConfiguration {
   readonly updatedAt: string;
 }
 
+export type RelayContinuationRefKind = "TASK" | "ARTIFACT_VERSION";
+export type RelayContinuationRefChange =
+  | "UNCHANGED" | "REVISED" | "CLOSED" | "MISSING" | "CURRENT" | "SUPERSEDED";
+
+export interface RelayContinuationRef {
+  readonly refKind: RelayContinuationRefKind;
+  readonly refId: string;
+  readonly capturedRevision: DecimalRevision;
+}
+
+export interface RelayContinuationPointSummary {
+  readonly id: string;
+  readonly projectId: string;
+  readonly name: string;
+  readonly note: string | null;
+  readonly capturedAt: string;
+  readonly capturedState: { readonly phaseKey: string; readonly revision: DecimalRevision;
+    readonly nextActionTaskId: string | null };
+  readonly refCount: number;
+}
+
+export interface RelayContinuationComparison {
+  readonly continuationPoint: RelayContinuationPointSummary;
+  readonly currentState: { readonly phaseKey: string; readonly revision: DecimalRevision;
+    readonly nextActionTaskId: string | null };
+  readonly facts: {
+    readonly stateRevisionChanged: boolean;
+    readonly phaseChanged: boolean;
+    readonly nextActionChanged: boolean;
+    readonly taskAdded: readonly { readonly taskId: string; readonly title: string;
+      readonly status: TaskStatus }[];
+    readonly artifactVersionAdded: readonly { readonly artifactVersionId: string;
+      readonly artifactId: string; readonly versionNumber: DecimalRevision }[];
+  };
+  readonly refChanges: readonly (RelayContinuationRef & { readonly change: RelayContinuationRefChange;
+    readonly currentRevision: DecimalRevision | null; readonly note: string | null })[];
+  /** 首片不生成解读；UI 不能用摘要顶替事实差异。 */
+  readonly interpretation: null;
+}
+
 export interface RelayTaskDependency {
   readonly taskId: string;
   readonly dependencyKind: string;
@@ -114,6 +154,8 @@ export interface RelayTaskSummary {
   readonly unresolvedBlockerIds: readonly string[];
   /** 服务端投影出的 UI 提示，不是客户端授权判断。 */
   readonly allowedActions: readonly string[];
+  /** 服务端维护的最近变更时间；null 表示本次响应没有该字段，排序时不会伪造时间。 */
+  readonly updatedAt: string | null;
 }
 
 export interface RelayTaskPage {
@@ -652,9 +694,12 @@ export interface RelayAssistMessage {
   readonly seq: DecimalRevision;
   readonly role: "USER" | "ASSISTANT";
   readonly status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
+  /** 服务端既有字段，用于对话流的日期分隔线与消息时间；缺失只影响展示，不影响消息内容。 */
+  readonly createdAt: string | null;
   readonly intent: string;
   readonly content: string | null;
   readonly errorCode: string | null;
+  readonly providerErrorKind: RelayModelVerifyErrorCategory | null;
   readonly sources: readonly { readonly sourceRef: string | null; readonly kind: string | null;
     readonly rootId: string | null; readonly version: string | null;
     readonly status: string; readonly reason: string | null }[];
@@ -765,6 +810,8 @@ export interface RelayRun {
     readonly status: string;
     readonly startedAt: string | null;
     readonly finishedAt: string | null;
+    /** 服务端 result_ref 里的失败原因（如 MODEL_BUDGET_EXHAUSTED）；没有则 null */
+    readonly reason: string | null;
   }[];
   readonly recentAttempts: readonly {
     readonly id: string;
@@ -802,6 +849,8 @@ export interface RelayRunTrace {
     readonly startedAt: string | null; readonly finishedAt: string | null }[];
   readonly modelCalls: readonly { readonly id: string; readonly stepAttemptId: string | null;
     readonly manifestId: string | null; readonly status: string; readonly provider: string; readonly model: string;
+    readonly kind: string | null; readonly criterionId: string | null; readonly checkAttempt: number | null;
+    readonly providerErrorKind: RelayModelVerifyErrorCategory | null; readonly providerRequestId: string | null;
     readonly inputSha256: string | null; readonly readOperationId: string | null;
     readonly readInvocationId: string | null; readonly inputTokens: number | null; readonly outputTokens: number | null;
     readonly startedAt: string; readonly settledAt: string | null }[];
@@ -1016,6 +1065,46 @@ export interface RelayRunGatewayOperation {
   readonly actionType: string;
   readonly normalizedTarget: string;
   readonly invocationStatuses: readonly string[];
+  /** 服务端已保存的原 Invocation 结果；stdout/stderr 只在这里出现，不由客户端推断。 */
+  readonly invocations: readonly RelayGatewayInvocationResult[];
+}
+
+export interface RelayGatewayInvocationResult {
+  /** 服务端未回传该字段时为 null；界面据此说明身份不可核对，而不是补一个假 ID。 */
+  readonly id: string | null;
+  readonly status: string;
+  readonly createdAt: string | null;
+  readonly resolvedAt: string | null;
+  /** 仅当服务端结果里确有该字段时存在；缺失表示这次调用没有命令输出。 */
+  readonly commandOutput: RelayCommandOutput | null;
+}
+
+export interface RelayCommandOutput {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number | null;
+  readonly outcome: string | null;
+  readonly truncated: boolean;
+  readonly durationMs: number | null;
+  /** 原 Invocation 身份，用于把输出绑定到确切一次调用，不换身份重试。 */
+  readonly invocationId: string | null;
+  readonly operationId: string | null;
+}
+
+function commandOutputFrom(value: unknown, invocationId: string | null, operationId: string | null): RelayCommandOutput | null {
+  if (!isRecord(value)) return null;
+  // 只有服务端真的回传了 stdout/stderr 才是命令输出；没有该字段的调用一律视为无输出。
+  if (typeof value.stdout !== "string" && typeof value.stderr !== "string") return null;
+  return {
+    stdout: typeof value.stdout === "string" ? value.stdout : "",
+    stderr: typeof value.stderr === "string" ? value.stderr : "",
+    exitCode: typeof value.exit_code === "number" ? value.exit_code : null,
+    outcome: typeof value.outcome === "string" ? value.outcome : null,
+    truncated: value.truncated === true,
+    durationMs: typeof value.duration_ms === "number" ? value.duration_ms : null,
+    invocationId,
+    operationId
+  };
 }
 
 export interface RelayFileWriteChangeSet {
@@ -1175,6 +1264,27 @@ export class RelayApiClient {
       method: "POST", body: JSON.stringify({ command_id: input.commandId,
         expected_revision: input.expectedRevision, kind: input.kind })
     }, 200));
+  }
+
+  async getContinuationPoints(projectId: string): Promise<readonly RelayContinuationPointSummary[]> {
+    return array(object(await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(projectId)}/continuation-points`)),
+    "continuation points"), "items", "continuation points").map(continuationPointSummaryFrom);
+  }
+
+  async captureContinuationPoint(input: { readonly projectId: string; readonly commandId: string;
+    readonly name: string; readonly note: string | null }): Promise<RelayCommandEnvelope> {
+    return commandEnvelopeFrom(await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(input.projectId)}/continuation-points`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId,
+        name: input.name, note: input.note })
+    }, 201));
+  }
+
+  async compareContinuationPoint(projectId: string, pointId: string): Promise<RelayContinuationComparison> {
+    return continuationComparisonFrom(await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(projectId)}/continuation-points/${encodeURIComponent(pointId)}` +
+      "/comparison")));
   }
 
   async getProjectGoals(projectId: string): Promise<readonly RelayProjectGoal[]> {
@@ -1931,11 +2041,21 @@ export class RelayApiClient {
     const body = await this.request(this.workspacePath(`/runs/${encodeURIComponent(runId)}/operations`));
     return directList(body, "Run operation list", (item) => {
       const row = object(item, "Run operation");
-      return { id: string(row, "id", "Run operation"), status: string(row, "status", "Run operation"),
+      const operationId = string(row, "id", "Run operation");
+      const invocations = array(row, "invocations", "Run operation").map((invocation) => {
+        const record = object(invocation, "Run invocation");
+        const invocationId = optionalString(record, "id");
+        return { id: invocationId, status: string(record, "status", "Run invocation"),
+          createdAt: optionalString(record, "created_at"),
+          resolvedAt: record.resolved_at === undefined || record.resolved_at === null
+            ? null : string(record, "resolved_at", "Run invocation"),
+          commandOutput: commandOutputFrom(record.result_ref, invocationId, operationId) };
+      });
+      return { id: operationId, status: string(row, "status", "Run operation"),
         actionType: string(row, "action_type", "Run operation"),
         normalizedTarget: string(row, "normalized_target", "Run operation"),
-        invocationStatuses: array(row, "invocations", "Run operation").map((invocation) =>
-          string(object(invocation, "Run invocation"), "status", "Run invocation")) };
+        invocationStatuses: invocations.map((invocation) => invocation.status),
+        invocations };
     });
   }
 
@@ -2724,7 +2844,8 @@ function runFrom(value: unknown): RelayRun {
         kind: string(step, "step_kind", "run.steps item"),
         status: string(step, "status", "run.steps item"),
         startedAt: nullableString(step, "started_at", "run.steps item"),
-        finishedAt: nullableString(step, "finished_at", "run.steps item")
+        finishedAt: nullableString(step, "finished_at", "run.steps item"),
+        reason: stepReasonByKind(record, string(step, "step_kind", "run.steps item"))
       };
     }),
     recentAttempts: array(record, "recent_attempts", "run").map((item) => {
@@ -2745,6 +2866,26 @@ function runFrom(value: unknown): RelayRun {
     },
     unresolvedOperationIds: stringArray(record, "unresolved_operation_ids", "run")
   };
+}
+
+/**
+ * 步骤失败原因：服务端 result_refs 按 step_kind 带出 result_ref.reason
+ * （MODEL_BUDGET_EXHAUSTED、CONTEXT_REQUIRED_OVER_BUDGET 等）。同一步骤可能有多次
+ * 尝试，取最后一条；服务端未给出 reason 时返回 null，不猜测。
+ */
+function stepReasonByKind(record: Record<string, unknown>, stepKind: string): string | null {
+  const refs = record.result_refs;
+  if (!Array.isArray(refs)) return null;
+  let reason: string | null = null;
+  for (const item of refs) {
+    if (typeof item !== "object" || item === null) continue;
+    const ref = item as { step_kind?: unknown; result_ref?: unknown };
+    if (ref.step_kind !== stepKind) continue;
+    if (typeof ref.result_ref !== "object" || ref.result_ref === null) continue;
+    const value = (ref.result_ref as { reason?: unknown }).reason;
+    if (typeof value === "string" && value !== "") reason = value;
+  }
+  return reason;
 }
 
 function availability(record: Record<string, unknown>, key: string, name: string): "AVAILABLE" | "UNAVAILABLE" {
@@ -2768,8 +2909,19 @@ function runTraceFrom(value: unknown): RelayRunTrace {
         claimEpoch: decimal(attempt, "claim_epoch", "trace attempt"), resultAvailable: boolean(attempt, "result_available", "trace attempt"),
         startedAt: nullableString(attempt, "started_at", "trace attempt"), finishedAt: nullableString(attempt, "finished_at", "trace attempt") }; }),
     modelCalls: array(row, "model_calls", "run trace").map((value) => { const call = object(value, "trace model call");
+      const status = string(call, "status", "trace model call");
+      const providerErrorKind = call.provider_error_kind ?? null;
+      if (providerErrorKind !== null && (status !== "FAILED" ||
+          providerErrorKind !== "AUTH" && providerErrorKind !== "RATE_LIMIT" &&
+          providerErrorKind !== "TIMEOUT" && providerErrorKind !== "STREAM_BROKEN" &&
+          providerErrorKind !== "PROTOCOL" && providerErrorKind !== "NETWORK")) {
+        throw new Error("Trace 模型调用 Provider 失败类别无效。");
+      }
       return { id: string(call, "id", "trace model call"), stepAttemptId: nullableString(call, "step_attempt_id", "trace model call"),
-        manifestId: nullableString(call, "manifest_id", "trace model call"), status: string(call, "status", "trace model call"),
+        manifestId: nullableString(call, "manifest_id", "trace model call"), status,
+        kind: optionalString(call, "kind"), criterionId: optionalString(call, "criterion_id"),
+        checkAttempt: call.check_attempt === undefined ? null : nullableInteger(call, "check_attempt", "trace model call"),
+        providerErrorKind, providerRequestId: optionalString(call, "provider_request_id"),
         provider: string(call, "provider", "trace model call"), model: string(call, "model", "trace model call"),
         inputSha256: nullableString(call, "input_sha256", "trace model call"),
         readOperationId: nullableString(call, "read_operation_id", "trace model call"),
@@ -2978,6 +3130,66 @@ export function viewConfigurationFrom(value: unknown): RelayViewConfiguration {
   };
 }
 
+function continuationStateFrom(value: unknown, name: string): { readonly phaseKey: string;
+  readonly revision: DecimalRevision; readonly nextActionTaskId: string | null } {
+  const record = object(value, name);
+  return { phaseKey: string(record, "phase_key", name),
+    revision: decimal(record, "revision", name),
+    nextActionTaskId: nullableString(record, "next_action_task_id", name) };
+}
+
+export function continuationPointSummaryFrom(value: unknown): RelayContinuationPointSummary {
+  const record = object(value, "continuation point");
+  return { id: string(record, "id", "continuation point"),
+    projectId: string(record, "project_id", "continuation point"),
+    name: string(record, "name", "continuation point"),
+    note: nullableString(record, "note", "continuation point"),
+    capturedAt: string(record, "captured_at", "continuation point"),
+    capturedState: continuationStateFrom(record["captured_state"], "continuation point.captured_state"),
+    refCount: integer(record, "ref_count", "continuation point") };
+}
+
+function continuationComparisonFrom(value: unknown): RelayContinuationComparison {
+  const record = object(value, "continuation comparison");
+  const facts = object(record["facts"], "continuation comparison.facts");
+  return {
+    continuationPoint: continuationPointSummaryFrom(record["continuation_point"]),
+    currentState: continuationStateFrom(record["current_state"], "continuation comparison.current_state"),
+    facts: {
+      stateRevisionChanged: boolean(facts, "state_revision_changed", "continuation comparison.facts"),
+      phaseChanged: boolean(facts, "phase_changed", "continuation comparison.facts"),
+      nextActionChanged: boolean(facts, "next_action_changed", "continuation comparison.facts"),
+      taskAdded: array(facts, "task_added", "continuation comparison.facts").map((item) => {
+        const task = object(item, "continuation comparison.facts.task_added");
+        return { taskId: string(task, "task_id", "continuation comparison.facts.task_added"),
+          title: string(task, "title", "continuation comparison.facts.task_added"),
+          status: string(task, "status", "continuation comparison.facts.task_added") as TaskStatus };
+      }),
+      artifactVersionAdded: array(facts, "artifact_version_added", "continuation comparison.facts")
+        .map((item) => {
+          const ref = object(item, "continuation comparison.facts.artifact_version_added");
+          return { artifactVersionId: string(ref, "artifact_version_id",
+              "continuation comparison.facts.artifact_version_added"),
+            artifactId: string(ref, "artifact_id", "continuation comparison.facts.artifact_version_added"),
+            versionNumber: decimal(ref, "version_number",
+              "continuation comparison.facts.artifact_version_added") };
+        })
+    },
+    refChanges: array(record, "ref_changes", "continuation comparison").map((item) => {
+      const ref = object(item, "continuation comparison.ref_changes");
+      return { refKind: string(ref, "ref_kind", "continuation comparison.ref_changes") as
+          RelayContinuationRefKind,
+        refId: string(ref, "ref_id", "continuation comparison.ref_changes"),
+        capturedRevision: decimal(ref, "captured_revision", "continuation comparison.ref_changes"),
+        change: string(ref, "change", "continuation comparison.ref_changes") as RelayContinuationRefChange,
+        currentRevision: ref["current_revision"] === null ? null
+          : decimal(ref, "current_revision", "continuation comparison.ref_changes"),
+        note: nullableString(ref, "note", "continuation comparison.ref_changes") };
+    }),
+    interpretation: null
+  };
+}
+
 function taskFrom(value: unknown): RelayTaskSummary {
   const record = object(value, "task");
   const executor = object(record.executor, "task.executor");
@@ -2994,7 +3206,8 @@ function taskFrom(value: unknown): RelayTaskSummary {
     waitingReason: nullableString(record, "waiting_reason", "task"),
     blockingTaskIds: stringArray(record, "blocking_task_ids", "task"),
     unresolvedBlockerIds: stringArray(record, "unresolved_blocker_ids", "task"),
-    allowedActions: stringArray(record, "allowed_actions", "task")
+    allowedActions: stringArray(record, "allowed_actions", "task"),
+    updatedAt: optionalString(record, "updated_at")
   };
 }
 
@@ -3597,6 +3810,13 @@ function assistMessageFrom(value: unknown): RelayAssistMessage {
     throw new Error("Assist 消息状态无法识别。");
   }
   const usage = object(row.usage, "assist message.usage");
+  const providerErrorKind = row.provider_error_kind ?? null;
+  if (providerErrorKind !== null && (status !== "FAILED" ||
+      providerErrorKind !== "AUTH" && providerErrorKind !== "RATE_LIMIT" &&
+      providerErrorKind !== "TIMEOUT" && providerErrorKind !== "STREAM_BROKEN" &&
+      providerErrorKind !== "PROTOCOL" && providerErrorKind !== "NETWORK")) {
+    throw new Error("Assist 消息 Provider 失败类别无效。");
+  }
   const skillRow = row.skill === null || row.skill === undefined ? null : object(row.skill, "assist skill");
   const skillTarget = skillRow?.target;
   const target: "PROJECT" | "TASK" | null = skillTarget === "PROJECT" || skillTarget === "TASK"
@@ -3620,9 +3840,11 @@ function assistMessageFrom(value: unknown): RelayAssistMessage {
   return { id: string(row, "id", "assist message"),
     sessionId: string(row, "session_id", "assist message"),
     seq: decimal(row, "seq", "assist message"), role, status,
+    createdAt: optionalString(row, "created_at"),
     intent: string(row, "intent", "assist message"),
     content: nullableString(row, "content", "assist message"),
     errorCode: nullableString(row, "error_code", "assist message"),
+    providerErrorKind,
     sources: array(row, "sources", "assist message").map((value) => {
       const source = object(value, "assist source");
       return { sourceRef: optionalString(source, "source_ref"),

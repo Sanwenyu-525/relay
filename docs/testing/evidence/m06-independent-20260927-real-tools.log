@@ -1,0 +1,181 @@
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-c683792096
+The files belonging to this database system will be owned by user "ASUS".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "Chinese (Simplified)_China.936".
+The default text search configuration will be set to "simple".
+
+Data page checksums are enabled.
+
+initdb: could not find suitable text search configuration for locale "Chinese (Simplified)_China.936"
+creating directory C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-c683792096/cluster ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Shanghai
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Develop^\Relay^-Agent^\^.research^\runtime^-cache^\postgresql^-18^.6^-2^\pgsql^\bin^\pg^_ctl^" -D ^"C^:^\Users^\ASUS^\AppData^\Local^\Temp^\relay^-api^-integration^-c683792096^\cluster^" -l logfile start
+
+waiting for server to start.... done
+server started
+pg_ctl: server is running (PID: 31208)
+D:/Develop/Relay-Agent/.research/runtime-cache/postgresql-18.6-2/pgsql/bin/postgres.exe "-D" "C:/Users/ASUS/AppData/Local/Temp/relay-api-integration-c683792096/cluster" "-h" "127.0.0.1" "-p" "9647"
+DO
+CREATE DATABASE
+Test database: relay_api_test_e1c7b10c4fb3 on 127.0.0.1:9647 (roles relay_migrator / relay_app)
+{
+  "applied": [
+    "0001_v001_human_core",
+    "0002_p02_task_goal_alignment",
+    "0003_schema_readiness",
+    "0004_v002_runs",
+    "0005_v002_verification",
+    "0006_v002_reviews",
+    "0007_v003_recovery_control",
+    "0008_v003_gateway",
+    "0009_v004_information_rules",
+    "0010_v005_context_revision",
+    "0011_m03_run_dispatch",
+    "0012_m03_run_events",
+    "0013_m03_run_command_order",
+    "0014_m04_file_read",
+    "0015_m04_assist",
+    "0016_m04_web_fetch",
+    "0017_m04_web_import",
+    "0018_m04_model_calls",
+    "0019_m04_draft_read_input",
+    "0020_m05_today_selections",
+    "0021_m05_activity_lineage",
+    "0022_m04_first_party_skills",
+    "0023_m04_task_skill_proposals",
+    "0024_m05_view_configuration",
+    "0025_m05_project_blueprints",
+    "0026_m04_model_call_budgets",
+    "0027_m05_workspace_lists",
+    "0028_m04_assist_live_preview",
+    "0029_m04_run_draft_live_preview",
+    "0030_m06_real_tools"
+  ],
+  "already_applied": [],
+  "ledger_rows": 30
+}
+{"schema":"relay_graph_v1","ready":true}
+✔ M06 FILE_WRITE APPLY_CHANGESET forces ASK, then writes real files after approval (400.807ms)
+✔ M06 FILE_WRITE baseline hash conflict leaves the existing file untouched (115.8679ms)
+✔ M06 FILE_WRITE rejects protected paths and root-escape at prepare (63.8587ms)
+✔ M06 FILE_WRITE crash after write reconciles SUCCEEDED; tampering reconciles UNKNOWN and blocks re-claim (207.973ms)
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+✔ M06 GIT_READ runs real git status with AUTO passthrough (494.8909ms)
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'feature.txt', LF will be replaced by CRLF the next time Git touches it
+✔ M06 GIT_WRITE rejects a wrong parent without creating a commit (546.2282ms)
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'feature.txt', LF will be replaced by CRLF the next time Git touches it
+✔ M06 GIT_WRITE commit requires approval then writes for real (751.1469ms)
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+✔ M06 GIT_WRITE rejects force-push and flag-injection refs at prepare (349.2275ms)
+✔ M06 CLI_RUN executes a real child process and records exit code and stdout (158.7182ms)
+✔ M06 CLI_RUN sanitizes the child environment (drops secret-bearing variables) (148.8893ms)
+✔ M06 CLI_RUN enforces the deadline as a timeout instead of hanging (2757.2005ms)
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'feature.txt', LF will be replaced by CRLF the next time Git touches it
+✔ M06 GIT_PUSH lands on the real remote then a crash reconciles SUCCEEDED via ls-remote (1083.8347ms)
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'feature.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'later.txt', LF will be replaced by CRLF the next time Git touches it
+✔ M06 GIT_PUSH whose remote does not match reconciles UNKNOWN and blocks a new claim (1446.5218ms)
+✔ M06 CLI_RUN timeout through the Gateway tears down the whole process tree (no orphaned grandchild) (3323.8141ms)
+✖ M06 FILE_WRITE rejects a protected path with a dot prefix at prepare (106.2825ms)
+✖ M06 FILE_WRITE cannot overwrite an existing file without a baseline hash (169.6666ms)
+✖ M06 CLI_RUN lost result after a real write remains UNKNOWN and keeps the resource quarantined (203.9444ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 14
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 13370.3353
+
+✖ failing tests:
+
+test at dist\test\integration\real-tools-gateway.integration.test.js:439:1
+✖ M06 FILE_WRITE rejects a protected path with a dot prefix at prepare (106.2825ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection: ./.env must be denied before approval
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/real-tools-gateway.integration.test.js:442:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at dist\test\integration\real-tools-gateway.integration.test.js:447:1
+✖ M06 FILE_WRITE cannot overwrite an existing file without a baseline hash (169.6666ms)
+  AssertionError [ERR_ASSERTION]: an approved MODIFY without a baseline cannot silently overwrite the file
+  + actual - expected
+  
+    {
+  +   content: 'overwrite\n',
+  +   status: 'SUCCEEDED'
+  -   content: 'original\n',
+  -   status: 'FAILED'
+    }
+  
+      at TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/real-tools-gateway.integration.test.js:466:12)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: { status: 'SUCCEEDED', content: 'overwrite\n' },
+    expected: { status: 'FAILED', content: 'original\n' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at dist\test\integration\real-tools-gateway.integration.test.js:468:1
+✖ M06 CLI_RUN lost result after a real write remains UNKNOWN and keeps the resource quarantined (203.9444ms)
+  AssertionError [ERR_ASSERTION]: a lost CLI result cannot prove no side effect or grant another writer
+  + actual - expected
+  
+    {
+  +   claim: 'RELEASED',
+  +   reclaim: 'CLAIMED',
+  +   reconciliation: 'FAILED'
+  -   claim: 'QUARANTINED',
+  -   reclaim: 'GATEWAY_OPERATION_UNRESOLVED',
+  -   reconciliation: 'UNKNOWN'
+    }
+  
+      at TestContext.<anonymous> (file:///D:/Develop/Relay-Agent/apps/api/dist/test/integration/real-tools-gateway.integration.test.js:498:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: { reconciliation: 'FAILED', claim: 'RELEASED', reclaim: 'CLAIMED' },
+    expected: { reconciliation: 'UNKNOWN', claim: 'QUARANTINED', reclaim: 'GATEWAY_OPERATION_UNRESOLVED' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+waiting for server to shut down..... done
+server stopped
+--- integration summary ---
+tests exit code: 1
+build exit code: 0
+business migration exit code: 0
+graph install exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: FAILED

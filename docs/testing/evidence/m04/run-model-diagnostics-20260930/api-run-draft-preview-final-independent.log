@@ -1,0 +1,48 @@
+**********************
+PowerShell transcript start
+Start time: 20260930124816
+Username: LAPTOP-RTUVXZ-G\ASUS
+RunAs User: LAPTOP-RTUVXZ-G\ASUS
+Configuration Name: 
+Machine: LAPTOP-RTUVXZ-G (Microsoft Windows NT 10.0.22631.0)
+Host Application: C:\Users\ASUS\.cache\codex-runtimes\codex-primary-runtime\dependencies\native\powershell\pwsh.dll -Command try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}
+foreach ($suiteName in @('traceability', 'run-draft-preview')) { Start-Transcript -Path "docs/testing/evidence/m04/run-model-diagnostics-20260930/api-$suiteName-final-independent.log" -Force | Out-Null; try { & ./apps/api/scripts/run-integration.ps1 -TestFile $suiteName -SkipBuild -UseCLocale; $suiteExit = $LASTEXITCODE } finally { Stop-Transcript | Out-Null }; if ($suiteExit -ne 0) { exit $suiteExit } }; exit 0
+Process ID: 16616
+PSVersion: 7.6.5
+PSEdition: Core
+GitCommitId: 7.6.5
+OS: Microsoft Windows 10.0.22631
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.4
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+Temporary cluster root: C:\Users\ASUS\AppData\Local\Temp\relay-api-integration-cf728c8fc0
+Current source integration suites: 1
+
+[timing] initdbMs=5170
+
+[timing] postgresStartMs=384
+
+
+
+Test database: relay_api_test_ff906427b31e on 127.0.0.1:8677 (roles relay_migrator / relay_app)
+
+[timing] businessMigrationMs=736
+
+
+
+--- integration summary ---
+tests exit code: 0
+build exit code: skipped
+business migration exit code: 0
+graph install exit code: 0
+postgres start exit code: 0
+postgres stop exit code: 0
+temporary cluster removed: True
+status: PASSED
+**********************
+PowerShell transcript end
+End time: 20260930124844
+**********************

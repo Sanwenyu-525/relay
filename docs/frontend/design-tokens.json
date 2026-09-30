@@ -12,7 +12,11 @@
       "../../thesis-review-original-20260919.png",
       "mockups/2026-09-19/today.png",
       "mockups/2026-09-19/project-overview.png",
-      "mockups/2026-09-19/development-workbench.png"
+      "mockups/2026-09-19/development-workbench.png",
+      "mockups/2026-09-28/today-window-v2.png",
+      "mockups/2026-09-29/collaboration-dialogue-window.png",
+      "mockups/2026-09-29/collaboration-development-tools.png",
+      "mockups/2026-09-29/component-states.png"
     ]
   },
   "tokens": {
@@ -412,6 +416,26 @@
       "$type": "dimension",
       "$value": "80rem"
     },
+    "layout.workspace.sideWidth": {
+      "$type": "dimension",
+      "$value": "34rem",
+      "$description": "协作工作区右栏（文档/检查/版本历史）。比通用 rail 宽，长文与 diff 需要独立阅读宽度；窄窗按 breakpoint.rail 收为单区切换。"
+    },
+    "layout.workspace.centerMin": {
+      "$type": "dimension",
+      "$value": "26rem",
+      "$description": "协作工作区中栏最小宽度。低于此值不再维持三列，改按断点切换单区。"
+    },
+    "layout.factbar.columns": {
+      "$type": "number",
+      "$value": 3,
+      "$description": "工作区事实条固定三格：当前需要什么、已形成什么、证据在哪。格数是布局常量，不是业务状态。"
+    },
+    "layout.factbar.cellMin": {
+      "$type": "dimension",
+      "$value": "9rem",
+      "$description": "事实条单格最小宽度；不足时整条换行，不压缩文字。"
+    },
     "layout.drawer.maxWidth": {
       "$type": "dimension",
       "$value": "25.5rem"
@@ -467,6 +491,11 @@
     "control.target.minimum": {
       "$type": "dimension",
       "$value": "1.5rem"
+    },
+    "control.avatar.size": {
+      "$type": "dimension",
+      "$value": "1.75rem",
+      "$description": "对话消息头像（我/AI）。文字标签不只靠颜色区分角色。"
     },
     "border.width": {
       "$type": "dimension",

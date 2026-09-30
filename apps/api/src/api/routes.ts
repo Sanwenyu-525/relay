@@ -13,6 +13,7 @@ import { registerCompletionRoutes } from './completion-api.js';
 import type { RouteDependencies } from './envelope.js';
 import { databaseUnavailable, problemBody, schemaUnavailable } from './problem.js';
 import { registerProjectRoutes } from './project-api.js';
+import { registerProjectContinuationRoutes } from './project-continuation-api.js';
 import { registerRunRoutes } from './run-api.js';
 import { registerGatewayRoutes } from './gateway-api.js';
 import { registerInformationRoutes } from './information-api.js';
@@ -113,6 +114,7 @@ export function registerRoutes(
       scope.addHook('onRequest', createBearerGuard(dependencies.config.bearerToken));
 
       registerProjectRoutes(scope, apiDependencies);
+      registerProjectContinuationRoutes(scope, apiDependencies);
       registerTaskRoutes(scope, apiDependencies);
       registerTodayRoutes(scope, apiDependencies);
       registerActivityRoutes(scope, apiDependencies);

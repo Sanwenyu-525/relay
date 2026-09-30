@@ -1,0 +1,71 @@
+# VERIFY 语义检查自死锁修复记录（verify-deadlock-fix）
+
+- 日期：2026-09-29
+- 执行者：VERIFY 语义检查自死锁修复子 Agent
+- 前置取证：docs/testing/evidence/final-2026-09-29/model-task-chain.log 第 4 节（真实模型路径 HARD SEMANTIC 在 VERIFY 步骤同进程自死锁，Run 卡 VERIFYING，pg_stat_activity 双连接互等）。
+- 方案：对齐 DRAFT 的 prepare/execute 分离——模型型语义检查的调用与记账移到结果事务之外；结果事务只写 check_results 并推进 Run 状态。未采用"begin() 复用外层事务执行器"（会把网络调用塞进长事务，违反核心约束 4）。
+
+## 1. 根因复核结论（已逐行核实）
+
+死锁链条（全部为修复前代码事实）：
+
+1. `advanceRunStep` 结果事务 `withTransaction`（apps/api/src/application/run-steps.ts:479 起）内 `lockTaskAndRun` 对 runs 行 `for update`（apps/api/src/application/lock-task-run.ts / run-repository.ts）。
+2. 结果事务内 `executeStep` case 'VERIFY' 调 `verifyRun`，verifyRun 对模型检查器在**事务内**调 `recordModelInvocation`（modelCallDb=根连接）。
+3. `ModelCallRepository.begin()` 在根池另开独立事务；当 `identity.budget !== undefined` 时执行 `select id from runs where id=$1 for update`（apps/api/src/model/model-call-repository.ts:89-95）→ 被外层结果事务持有的同一场 runs 行锁阻塞。
+4. 外层事务等 node 返回、node 等 begin() 返回 → 同进程自死锁。Mock 从未暴露：Fake 语义检查器 identity 无 budget（apps/api/src/workflow/checkers.ts:130-133），begin() 不走 for update 分支；真实 `OpenAiCompatibleModelPort.identity` 携带 budget。
+5. DRAFT 不死锁：其 recordModelInvocation 位于 prepareExternalWork（结果事务之外，run-steps.ts:460 调用、479 才进结果事务）。
+
+## 2. 修复 diff 逐文件说明（git diff --stat 目标文件，基线为本轮他人未提交修改）
+
+```
+apps/api/src/application/run-steps.ts              |  24 ++-
+apps/api/src/application/verify-run.ts             | 166 ++++++++++++++++++---
+apps/api/src/model/model-call-repository.ts        |  17 +++        （基线自带 VERIFY 探针改动，与本修复无关）
+apps/api/src/workflow/checkers.ts                  |  11 +-
+apps/api/src/workflow/openai-compatible-model-port.ts |  17 +--
+apps/api/test/integration/real-model.integration.test.ts | 139 ++++
+```
+
+### apps/api/src/application/run-steps.ts（对齐 DRAFT 的分离结构）
+- import 增加 `prepareSemanticChecks`、`PreparedSemanticCheck`。
+- `PreparedExternalWork` 增加 `semanticChecks?: ReadonlyMap<string, PreparedSemanticCheck>`。
+- `prepareExternalWork`（结果事务之前执行，run-steps.ts:460）的 VERIFY 分支：预加载候选版本字节后调用 `prepareSemanticChecks(db, { run, task, storage, stepAttemptId, fakeScenario, signal })`，在事务外完成模型调用与 model_calls 记账（附注释说明死锁原因）。
+- `advanceRunStep` 结果事务内 `executeStep` 传入 `precomputedChecks: prepared.semanticChecks`；`ExecuteStepInput` 增加 `precomputedChecks` 字段并透传给 `verifyRun`。
+- DRAFT 既有 prepare 阶段记账行为未改动。
+
+### apps/api/src/application/verify-run.ts（事务外预算 + 事务内只写结果）
+- 新增 `PreparedSemanticCheck`（RECORDED | BUDGET_EXHAUSTED）与模块注释（52-60 行）说明：budget 型 begin() 对 runs 行 for update，必须离开结果事务。
+- 新增 `semanticCheckSettlement(result, signal)`（63-73 行）：信号中止 → CANCELLED；检查器 ERROR → FAILED（error_kind，默认 CHECKER_ERROR）；其余 → COMPLETED。provider_request_id 与 usage 随行保存。
+- 新增 `prepareSemanticChecks(db, input)`（301-368 行）：
+  - 契约缺失 / checker 未注册 / 证据核对失败 → 返回空 Map，由事务内 verifyRun 按既有语义结算（invalidTransition / CHECKER_NOT_REGISTERED / EVIDENCE_UNAVAILABLE），不提前消耗模型调用；
+  - 仅对 `modelIdentity.budget !== undefined` 的检查器预算（338 行）；无 budget 的 Fake 检查器路径完全不变（仍在 verifyRun 事务内记账，begin() 无 for update，无死锁）；
+  - `recordModelInvocation`（根连接、无外层事务）→ begin() 预算并提交 STARTED → invoke（signal 透传）→ settle；`ModelScopeBudgetError` → BUDGET_EXHAUSTED，不抛断链。
+- `verifyRun`：模型检查器分支优先消费 `precomputedChecks`（150-158 行，evidence 附 model_call_id；BUDGET_EXHAUSTED 结算为 ERROR + reason=MODEL_BUDGET_EXHAUSTED）；无预计算时保留原事务内 `recordModelInvocation` 兜底（160-177 行）——该兜底只被无 budget 检查器命中，行为与修复前一致。
+- 检查器 ERROR ≠ FAIL ≠ PASS 语义不变：ERROR/FAIL/UNCERTAIN/PASS 的判定与 verdict 计算逻辑未改动。
+
+### apps/api/src/workflow/checkers.ts（取消信号管道）
+- `CheckInput` 增加 `signal?: AbortSignal`（27 行）；`ModelSemanticChecker.check` 把 signal 传给 `evaluate`（230-231 行）；`SemanticEvaluate` 签名追加 signal（264-265 行）；registry 注册真实检查器时透传 signal（284-285 行）。Fake 检查器不受影响。
+
+### apps/api/src/workflow/openai-compatible-model-port.ts（取消信号到达 Provider）
+- `evaluate(input, signal?)` 把 signal 传给 `complete(messages, signal, true)`（91-110 行），中断按调用方取消处理，与 generate 相同。
+
+### apps/api/src/model/model-call-repository.ts
+- 本修复未改动其锁语义；工作树 diff（+17）为基线自带的实例级 VERIFY 连通性探针分支与 latestVerify，与本修复无关。
+
+### apps/api/test/integration/real-model.integration.test.ts（+139；本轮子 Agent 增量为用例 4 的控制意图）
+- test 2：HARD SEMANTIC 真实语义检查端到端（修复前挂起死锁的用例）。
+- test 3：真实语义调用在途时提交 CANCEL 意图 → CONTROL_PENDING，账本 COMPLETED（真实发生的外呼按事实结算），无 check_results，Run 收敛 CANCELLED。
+- test 4：真实语义调用在途时提交 CANCEL 意图 + abort 信号 → INVOCATION_LOST，账本 CANCELLED（非孤儿 STARTED），无 check_results，fenceWorker 后 applySafeControl=APPLIED，Run 收敛 CANCELLED。
+  - 本轮最小修正（10 行级）：用例初版只 abort 信号、未提交控制意图，`applySafeControl` 无 PENDING 控制可应用（control-requests.ts:125 返回 null）导致断言失败。按约束 6"控制意图必须持久化"，取消必须先落 CANCEL 控制意图，纯信号中止只是 Worker 丢失、不得把 Run 记成 CANCELLED；修正为与生产语义一致：先 requestRunControl(CANCEL) 再 abort。
+
+## 3. 关键不变量核对
+
+- 必要业务事实与关键审计在短事务提交：模型外呼与 model_calls 记账在结果事务之外的独立短事务（begin 提交 STARTED、settle 短事务），结果事务只写 check_results/session/Run 状态。
+- 不产生孤儿 STARTED：recordModelInvocation 的 invoke 抛错路径与 settle 路径都结算（CANCELLED/FAILED/COMPLETED）。
+- 假检查器（无 budget）路径行为不变：prepareSemanticChecks 338 行跳过无 budget 检查器。
+- 取消语义对齐 DRAFT：signal 同时进入 invoke（Provider SDK 中断）与 settle 映射（semanticCheckSettlement）。
+
+## 4. 检查结果索引
+
+- 真实外呼集成：real-model-semantics-after-fix.log（4/4 通过）。
+- Mock 回归 / 单元 / 类型检查：regression.log。

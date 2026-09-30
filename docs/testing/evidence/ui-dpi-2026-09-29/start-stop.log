@@ -1,0 +1,40 @@
+# UI-DPI 取证桌面会话启动记录 2026-09-29
+- 启动方式: WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333 powershell -File scripts/test-desktop.ps1 Start
+- 启动耗时: 179s（含 PG 冷启动；无 schema 迁移报错，manifest 哈希与 session.json 一致，未触发重迁移）
+- 包校验: Package hashes verified. EXE SHA-256 6D3F80359336D7288FC8755E87D871E29C0EBB7E92E039DF889852FDEE6E8F87 / manifest SHA-256 0E04E6A919BCAF5E5B46039D5EF047017265F1B14B8234F8E1BFD3F462A85ADC（与 overall-acceptance-2026-09-28.md 5.3 一致）
+- 启动前事实: 6189/5173/8787 均无监听、无 postgres/relay 进程（与交接描述不符，如实记录；未单独手工拉起 PG）
+- 启动后进程: relay-desktop.exe PID 46024; node.exe(API) PID 41356; node.exe(supervisor) PID 50940; postgres.exe PID 49176 (127.0.0.1:6189)
+- 桌面窗口: 'Relay Agent' hwnd 857724 可见, 外框 1174x788; CDP 127.0.0.1:9333 LISTENING (PID 50524)
+- 桌面模型配置: .relay-test/desktop.env 无 RELAY_MODEL_* 键 → 模型未配置态（事实，取证如实记录）
+
+```
+Package hashes verified.
+waiting for server to start.... done
+server started
+Trial prepared. Workspace: f2d4679d-04e5-40f3-b015-2f3c9c78a3a9
+Data retained at: D:\Develop\Relay-Agent\.relay-test
+```
+
+## 第二次启动（复现 supervisor 失效链，2026-09-29 08:04–08:23）
+- 第一次会话（07:46 起）中经真实领域入口执行 delegate（mock FAKE_WRITE，任务 UI取证-20260929 委托任务T6）：202 → Run 8d19e398 CREATED→RUNNING。约 1 分钟后 supervisor（node）进程退出，桌面 `desktop_bootstrap` 开始返回 "desktop Worker supervisor is no longer running"。
+- 关窗（WM_CLOSE，窗口正常销毁）→ `test-desktop.ps1 Stop`（PG 正常停止）→ 重启（108s）→ supervisor 在启动协调（requeue 孤儿 Run 命令 08:15:51）后约 1 分钟再次退出。复现。
+- 诊断（.tmp-uidpi/worker-diagnose.sh、worker-error-detail.mjs）：
+  - 以桌面相同环境手动运行打包 worker（test-release/api/dist/src/worker/main.js --once）：worker_ready → worker_claimed（epoch 3）→ 无任何 step 输出即崩溃，stderr 仅 "worker_failed"，exit=1。
+  - worker main.ts 的 catch 只写 `worker_failed`，不输出错误 message/stack；桌面壳对 supervisor 使用 `Stdio::null`（apps/desktop/src-tauri/src/lib.rs:626），崩溃原因完全不可观测。
+  - 结构链：worker 单次非零退出 → supervisor 抛 'worker failed' 退出 → 桌面 supervisor_failed 置位 → desktop_bootstrap 永久失败 → 桌面 UI 任何重载显示"本机服务不可用"，无进程级自愈。
+- 当前 Run 事实（只读查库）：run 8d19e398 状态 RUNNING、worker_lease_until 过期/空、outbox 命令 620213a1 处于 CLAIMED（epoch 3，非桌面模式 worker id）——新 supervisor 启动协调不会把它 REQUEUED 给自己，预期重启后 supervisor 可存活。
+- 待重启后验证 supervisor 存活；Run 的 UI-18/19/20 状态按当前真实事实登记。
+
+## 第三次启动（正式取证会话，08:31–08:49）
+- 前次会话窗口经 WM_CLOSE 正常关闭 → Stop（PG 停止，数据保留）→ Start（152s）。进程：relay-desktop 24100 / API 42716（端口 3328）/ supervisor 19800。
+- supervisor 存活验证：启动 100 秒后 bootstrap OK（毒命令被第二次会话的诊断 worker 以非桌面模式 claim 隔离，协调不重排队）。
+- 本会话完成：33 状态矩阵 1280×800 交互轮 + 960×640 窄窗轮 + 125% 九页 PrintWindow + 真实 409 冲突（UI-26）+ 人工完成/重开（UI-27）+ PENDING 暂停请求（UI-18）。
+
+## 第四次启动（150% 注册表验证后，08:52 起）
+- 150% 程序化尝试（AppliedDPI=1440 / Win8DpiScaling+LogPixels=144 / 广播）均不改变系统有效 DPI（GetDpiForSystem 恒 120）；按任务指引重启桌面进程验证：新进程 GetDpiForWindow 仍 120 → 结论：本会话内无法程序化切 150%，如实报告并立即恢复原值（dpi-restore-verify.json：与原值一致）。
+- 第四会话进程：relay-desktop 52212 / API 48116（端口 9722）/ supervisor 34676（存活）；恢复后复验截图 restore-verify/ 两张正常。
+
+## 清理记录（待任务结束时补充）
+- 第四会话窗口 WM_CLOSE 正常关闭（IsWindow=False），test-desktop.ps1 Stop：PG 正常停止，数据保留。
+- 清理后核验：test-release 进程 0 个；无 relay-desktop 进程；6189/9333 无监听。
+- DPI 终态核验：AppliedDPI=120（125%）、Win8DpiScaling=0、LogPixels 不存在、GetDpiForSystem=120 —— 与原值一致（dpi-restore-verify.json）。
