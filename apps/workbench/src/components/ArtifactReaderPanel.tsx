@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import SafeMarkdown from "./SafeMarkdown";
 import type { RelayApiClient, RelayArtifactVersionSummary, RelayRunDraftPreview, RelayTaskArtifacts } from "../api/relayClient";
@@ -14,7 +14,7 @@ interface Reading {
  * 产物阅读区：只读呈现确切不可变版本、当前选用与本轮接受的差别，以及两份确切版本的比较。
  * 生成中草稿与已保存版本在这里明确分开；这里不新建版本、不改写业务事实。
  */
-export default function ArtifactReaderPanel({ client, taskId, projectId, selectedVersionId, draft, compact }: {
+export default function ArtifactReaderPanel({ client, taskId, projectId, selectedVersionId, draft, compact, paperFooter }: {
   client: RelayApiClient;
   taskId: string;
   projectId: string | null;
@@ -22,6 +22,7 @@ export default function ArtifactReaderPanel({ client, taskId, projectId, selecte
   /** Run DRAFT 的生成中草稿；与服务端保存的产物版本不是同一对象。 */
   draft: RelayRunDraftPreview | null;
   compact?: boolean;
+  paperFooter?: ReactNode;
 }) {
   const [artifacts, setArtifacts] = useState<RelayTaskArtifacts | null>(null);
   const [stateRefs, setStateRefs] = useState<readonly { artifactVersionId: string; versionNumber: string }[]>([]);
@@ -118,7 +119,14 @@ export default function ArtifactReaderPanel({ client, taskId, projectId, selecte
     }
   }
 
-  return <div className={compact ? "collab-reader" : "surface-panel"} data-testid="collab-artifact-reader">
+  const documentHeading = reading && <header className="artifact-doc-heading">
+    <div>
+      <h3>{reading.title} <span className="artifact-doc-version">· v{reading.version.versionNumber} · 已保存版本</span></h3>
+      <p className="helper-text">最后保存：{savedAt(reading.version.createdAt)}</p>
+    </div>
+    <Link className="text-link" to={`/tasks/${taskId}?tab=artifacts`}>在编辑器中打开 ↗</Link>
+  </header>;
+  const readerContent = <>
     {!compact && <h2>产物</h2>}
     {!compact && <p className="helper-text">“最新”来自版本列表，“当前选用”来自项目 State，“本轮接受”来自当前完成凭据；三者分别表达，不互相继承。</p>}
     {loading && <p className="helper-text" role="status">正在读取产物版本…</p>}
@@ -135,13 +143,7 @@ export default function ArtifactReaderPanel({ client, taskId, projectId, selecte
 
     {/* 文档头：文件名 · 版本 · 保存状态 · 最后保存时间；正文紧随其后。 */}
     {reading && <section className="artifact-doc" data-testid="collab-artifact-doc">
-      <header className="artifact-doc-heading">
-        <div>
-          <h3>{reading.title} <span className="artifact-doc-version">· v{reading.version.versionNumber} · 已保存版本</span></h3>
-          <p className="helper-text">最后保存：{savedAt(reading.version.createdAt)}</p>
-        </div>
-        <Link className="text-link" to={`/tasks/${taskId}?tab=artifacts`}>在编辑器中打开 ↗</Link>
-      </header>
+      {!compact && documentHeading}
       <div className="artifact-doc-body" data-testid="collab-reading"><SafeMarkdown source={reading.content} /></div>
     </section>}
 
@@ -190,5 +192,11 @@ export default function ArtifactReaderPanel({ client, taskId, projectId, selecte
     {readingError && <p className="action-error" role="alert" data-testid="collab-read-error">{readingError}</p>}
     {!reading && !compare && versions.length > 0 && active &&
       <p className="helper-text">正在读取当前版本正文；展开阅读不会改变当前选用、执行或接受。</p>}
+  </>;
+  return <div className={compact ? "collab-reader" : "surface-panel"} data-testid="collab-artifact-reader">
+    {compact ? <>{documentHeading}<div className="collab-document-paper">
+      <div className="collab-reader-scroll">{readerContent}</div>
+      {paperFooter}
+    </div></> : readerContent}
   </div>;
 }

@@ -1,5 +1,22 @@
 /* Relay 工作台样式：数值全部引用 design-tokens.json 生成的 CSS 变量（--relay-*）。 */
 
+/* 完整区域字形随应用分发，OFL 许可见 assets/fonts/OFL.txt；离线使用真实可变字重。 */
+@font-face {
+  font-family: "Relay Sans SC";
+  src: url("/src/assets/fonts/noto-sans-sc-variable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Relay Serif SC";
+  src: url("/src/assets/fonts/noto-serif-sc-variable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 200 900;
+  font-display: swap;
+}
+
 *,
 *::before,
 *::after {
@@ -419,7 +436,7 @@ svg {
 .brand {
   padding: 0 var(--relay-space-2) var(--relay-space-6);
   font-family: var(--relay-font-family-editorial);
-  font-size: var(--relay-font-size-reading);
+  font-size: var(--relay-font-size-section);
   font-weight: var(--relay-font-weight-semibold);
 }
 
@@ -504,12 +521,13 @@ svg {
   position: relative;
   display: flex;
   align-items: center;
-  gap: var(--relay-space-3);
-  min-height: var(--relay-control-nav-height);
+  gap: var(--relay-space-4);
+  min-height: var(--relay-space-12);
   padding: 0 var(--relay-space-3);
   border-radius: var(--relay-radius-control);
   color: var(--relay-color-text-secondary);
   text-decoration: none;
+  font-size: var(--relay-font-size-reading);
   transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
 }
 
@@ -1694,7 +1712,7 @@ svg {
 }
 
 .project-state-summary > strong {
-  font-size: var(--relay-font-size-row-title);
+  font-size: var(--relay-font-size-rowTitle);
   font-weight: var(--relay-font-weight-medium);
 }
 
@@ -1980,10 +1998,22 @@ svg {
   margin-top: var(--relay-space-3);
 }
 
-/* 知识/待审列表标题与今日页对齐，避免 3rem 展示型字号挤占首屏。 */
-.knowledge-page h1,
+.navigation-item > svg { width: var(--relay-font-size-section); height: var(--relay-font-size-section); }
+
+/* 全空间任务以宽表格为主；范围说明仍通过原抽屉入口可达。 */
+.task-list-page .page-layout { grid-template-columns: minmax(0, 1fr); }
+.task-list-page .desktop-rail { display: none; }
+.task-list-page .rail-trigger {
+  position: static;
+  order: 0;
+  display: inline-flex;
+  justify-self: start;
+  margin: 0 var(--relay-layout-main-padding) var(--relay-space-6);
+}
+
+/* 待审列表恢复普通页面的标题层级；今日保留 compactPage。 */
 .review-heading h1 {
-  font-size: var(--relay-font-size-compactPage);
+  font-size: var(--relay-font-size-page);
 }
 
 /* 窄窗：范围说明入口不占首屏整行，改为右上轻量按钮。 */
@@ -2533,6 +2563,15 @@ fieldset.field {
   .skill-page h1 {
     font-size: var(--relay-font-size-compactPage);
   }
+}
+
+@media (max-width: 40rem) {
+  .app-topbar { gap: var(--relay-space-2); }
+  .breadcrumbs { flex: 1; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
+  .breadcrumb-item:not(:last-child), .topbar-date { display: none; }
+  .breadcrumb-item:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .data-source-button { padding: var(--relay-space-1); }
+  .data-source-button > span { display: none; }
 }
 
 @media (max-width: 47.9375rem) {

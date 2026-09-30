@@ -1,6 +1,0 @@
-{"kind":"start","at_ms":1790261735542,"pid":22140,"role":"worker","rss_bytes":47091712,"cpu_delta_ms":0,"loop_p95_ms":0.000511,"loop_p99_ms":0.000511,"loop_max_ms":null}
-{"kind":"sample","at_ms":1790261736411,"pid":22140,"role":"worker","rss_bytes":172810240,"cpu_delta_ms":202,"loop_p95_ms":0.000511,"loop_p99_ms":0.000511,"loop_max_ms":null}
-{"kind":"sample","at_ms":1790261736669,"pid":22140,"role":"worker","rss_bytes":173350912,"cpu_delta_ms":32,"loop_p95_ms":20.070399,"loop_p99_ms":21.495807,"loop_max_ms":21.495807}
-{"kind":"sample","at_ms":1790261736934,"pid":22140,"role":"worker","rss_bytes":173887488,"cpu_delta_ms":15,"loop_p95_ms":19.513343,"loop_p99_ms":20.201471,"loop_max_ms":20.201471}
-{"kind":"sample","at_ms":1790261737186,"pid":22140,"role":"worker","rss_bytes":174063616,"cpu_delta_ms":15,"loop_p95_ms":16.171007,"loop_p99_ms":16.179199,"loop_max_ms":16.179199}
-{"kind":"exit","at_ms":1790261737293,"pid":22140,"role":"worker","rss_bytes":175730688,"cpu_delta_ms":16,"loop_p95_ms":11.829247,"loop_p99_ms":11.829247,"loop_max_ms":11.829247}

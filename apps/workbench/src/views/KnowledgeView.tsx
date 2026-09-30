@@ -99,6 +99,7 @@ export default function KnowledgeView() {
   const searchVersion = useRef(0);
 
   const [formOpen, setFormOpen] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
   const [guideOpen, setGuideOpen] = useState(false);
   const [revisionMode, setRevisionMode] = useState(false);
   const [knowledgeDraftBase, setKnowledgeDraftBase] = useState<{ id: string; revision: string; projectId: string | null } | null>(null);
@@ -131,6 +132,10 @@ export default function KnowledgeView() {
   const selectedDecision = kind === "DECISION" ? selected as RelayDecision | null : null;
   const selectedRule = kind === "RULE" ? selected as RelayRule | null : null;
   const currentNoun = kinds.find((item) => item.kind === kind)?.noun ?? "资料";
+
+  useEffect(() => {
+    if (formOpen) formRef.current?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+  }, [formOpen]);
 
   function rowTarget(row: InformationRow): WriteTarget | null {
     if ("scope" in row) {
@@ -502,26 +507,34 @@ export default function KnowledgeView() {
     }
   }
 
-  return <section className="knowledge-page">
-    <p className="eyebrow">{projectId ? "项目资料" : "工作空间资料"}</p>
+  const reading = selectedKnowledge !== null && client !== null;
+  const library = <section className="surface-panel knowledge-list">
+    {reading && projectId && <ProjectNav projectId={projectId} active="knowledge" />}
+    <nav className="knowledge-tabs" aria-label="资料类型">{kinds.map((item) =>
+      <button key={item.kind} type="button" className={`subnav-item${kind === item.kind ? " subnav-item--active" : ""}`}
+        aria-current={kind === item.kind ? "page" : undefined} disabled={pendingCommand !== null}
+        data-testid={`knowledge-tab-${item.kind}`} onClick={() => switchKind(item.kind)}>{item.label}</button>)}</nav>
+    <div className="section-heading-row"><h2>{currentNoun}</h2>
+      <button type="button" className="secondary-button" data-testid="knowledge-create" disabled={pendingCommand !== null} onClick={() => openForm(false)}>新建</button></div>
+    {!loading && rows.length === 0 && <p className="helper-text">当前范围还没有{currentNoun}。点击右上角「新建」添加第一条{currentNoun}。</p>}
+    {rows.map((row) => <button key={row.id} type="button" className={`knowledge-row${row.id === selectedId ? " knowledge-row--active" : ""}`}
+      disabled={pendingCommand !== null} onClick={() => selectRow(row.id)}><strong>{rowTitle(row)}</strong><small>{row.status} · 当前 v{row.currentVersion} · {rowScopeLabel(row)}</small></button>)}
+  </section>;
+
+  return <section className={`knowledge-page${reading ? " knowledge-page--reading" : ""}`}>
+    {!reading && <><p className="eyebrow">{projectId ? "项目资料" : "工作空间资料"}</p>
     <h1>知识与长期信息</h1>
     <p className="page-lede">资料、已确认记忆、决定和规则分别保存版本；搜索只查真实服务端事实。</p>
-    {projectId && <ProjectNav projectId={projectId} active="knowledge" />}
-    {projectId && live && client && <div className="knowledge-guide-toggle"><button type="button"
-      className="secondary-button" data-testid="knowledge-guide-toggle"
-      onClick={() => setGuideOpen((value) => !value)}>{guideOpen ? "返回资料列表" : "打开项目导读"}</button></div>}
-    {guideOpen && projectId && client && <ProjectKnowledgeGuide key={`${connection.epoch}:${projectId}`}
-      client={client} projectId={projectId} onOpen={(nextKind, nextId) => {
-        setGuideOpen(false); setKind(nextKind); setSelectedId(nextId); setSelected(null);
-        void load(nextKind, nextId);
-      }} />}
+    {projectId && <ProjectNav projectId={projectId} active="knowledge" />}</>}
 
     {!live ? <section className="surface-panel" data-testid="knowledge-fixture-gap">
       <h2>示例模式未接入资料</h2>
       <p>此处不生成虚构的资料、记忆、决定或规则。连接本机 API 后可读取和管理真实内容。</p>
     </section> : <>
+      <div className="knowledge-tools">
+      <details className="knowledge-search" open={query.trim() !== ""}>
+        <summary>搜索资料</summary>
       <section className="surface-panel" aria-label="资料搜索">
-        <h2>有界搜索</h2>
         <label className="field" htmlFor="knowledge-search"><span className="field-label">搜索词</span>
           <span className="field-hint">按当前范围搜索四类资料，支持中文短词；每页最多 20 条。</span>
           <input id="knowledge-search" value={query} onChange={(event) => setQuery(event.target.value)} data-testid="knowledge-search" type="search" maxLength={200} autoComplete="off" />
@@ -536,18 +549,28 @@ export default function KnowledgeView() {
         {nextCursor && <button type="button" className="secondary-button" data-testid="knowledge-more" disabled={searching}
           onClick={() => { void runSearch(searchVersion.current, query.trim(), nextCursor); }}>加载下一页</button>}
       </section>
+      </details>
 
-      {projectId && client && kind === "KNOWLEDGE" && <WebImportPanel
+      {reading && <details className="knowledge-library" data-testid="knowledge-library">
+        <summary>资料列表 · {rows.length}</summary>{library}
+      </details>}
+
+      {projectId && client && kind === "KNOWLEDGE" && <details className="knowledge-web-import"><summary>导入网页</summary><WebImportPanel
         key={`${connection.epoch}:${projectId}`} client={client} projectId={projectId}
         onOpenKnowledge={(knowledgeId) => {
           setSelectedId(knowledgeId); setFormOpen(false); setActionError(null);
           void load("KNOWLEDGE", knowledgeId);
+        }} /></details>}
+
+      {projectId && client && <button type="button" className="text-button" data-testid="knowledge-guide-toggle"
+        onClick={() => setGuideOpen((value) => !value)}>{guideOpen ? "关闭项目导读" : "打开项目导读"}</button>}
+      </div>
+      {guideOpen && projectId && client && <ProjectKnowledgeGuide key={`${connection.epoch}:${projectId}`}
+        client={client} projectId={projectId} onOpen={(nextKind, nextId) => {
+          setGuideOpen(false); setKind(nextKind); setSelectedId(nextId); setSelected(null);
+          void load(nextKind, nextId);
         }} />}
 
-      <nav className="knowledge-tabs" aria-label="资料类型">{kinds.map((item) =>
-        <button key={item.kind} type="button" className={`subnav-item${kind === item.kind ? " subnav-item--active" : ""}`}
-          aria-current={kind === item.kind ? "page" : undefined} disabled={pendingCommand !== null}
-          data-testid={`knowledge-tab-${item.kind}`} onClick={() => switchKind(item.kind)}>{item.label}</button>)}</nav>
       {error && <p className="action-error" role="alert">{error} <button type="button" className="text-button" onClick={() => { void load(); }}>重新读取</button></p>}
       {loading && <p role="status">正在读取资料…</p>}
       {refreshing && <p role="status">正在读取最新版本…</p>}
@@ -560,16 +583,17 @@ export default function KnowledgeView() {
       </div>}
 
       <div className="knowledge-columns">
-        <section className="surface-panel knowledge-list">
-          <div className="section-heading-row"><h2>{kinds.find((item) => item.kind === kind)?.label}</h2>
-            <button type="button" className="secondary-button" data-testid="knowledge-create" disabled={pendingCommand !== null} onClick={() => openForm(false)}>新建</button></div>
-          {!loading && rows.length === 0 && <p className="helper-text">当前范围还没有{currentNoun}。点击右上角「新建」添加第一条{currentNoun}。</p>}
-          {rows.map((row) => <button key={row.id} type="button" className={`knowledge-row${row.id === selectedId ? " knowledge-row--active" : ""}`}
-            disabled={pendingCommand !== null} onClick={() => selectRow(row.id)}><strong>{rowTitle(row)}</strong><small>{row.status} · 当前 v{row.currentVersion} · {rowScopeLabel(row)}</small></button>)}
-        </section>
+        {!reading && library}
 
         <div className="knowledge-detail">
-          {selected ? <section className="surface-panel">
+          {selected ? <section className={`surface-panel${reading ? " knowledge-reading-detail" : ""}`}>
+            {selectedKnowledge && client && <KnowledgeReader key={`${selectedKnowledge.id}:${selectedKnowledge.currentVersion}:${routeItem === selectedKnowledge.id ? routeVersion ?? "" : ""}`}
+              client={client} knowledge={selectedKnowledge} versions={knowledgeVersions}
+              initialVersion={routeItem === selectedKnowledge.id ? routeVersion : null}
+              onNewVersion={selected.status === "ACTIVE" && pendingCommand === null ? () => openForm(true) : undefined}
+              newVersionDisabled={writeBlockedReason !== null} />}
+            <details className={`knowledge-management${reading ? "" : " knowledge-management--expanded"}`} open={!reading}>
+            <summary>资料管理与范围</summary>
             <div className="section-heading-row"><h2>{rowTitle(selected)}</h2><span>{selected.status} · 修订 v{selected.revision}</span></div>
             <p className="helper-text">ID：{selected.id} · 当前版本 v{selected.currentVersion}</p>
             <p className="helper-text" data-testid="knowledge-detail-scope">范围：{"scope" in selected
@@ -587,7 +611,7 @@ export default function KnowledgeView() {
               <p className="helper-text">目标约束：{JSON.stringify(selectedRule.targetSpec)}</p></>}
 
             {selected.status === "ACTIVE" && pendingCommand === null && <div className="knowledge-actions">
-              {kind !== "DECISION" && <button type="button" className="secondary-button" data-testid="knowledge-new-version" disabled={writeBlockedReason !== null} onClick={() => openForm(true)}>追加新版本</button>}
+              {kind !== "DECISION" && !reading && <button type="button" className="secondary-button" data-testid="knowledge-new-version" disabled={writeBlockedReason !== null} onClick={() => openForm(true)}>追加新版本</button>}
               {kind === "KNOWLEDGE" && <button type="button" className="danger-button" disabled={writeBlockedReason !== null} onClick={() => { void retire(); }}>归档资料</button>}
               {(kind === "MEMORY" || kind === "RULE") && <button type="button" className="danger-button" disabled={writeBlockedReason !== null} onClick={() => { void retire(); }}>停用{kind === "MEMORY" ? "记忆" : "规则"}</button>}
             </div>}
@@ -597,16 +621,14 @@ export default function KnowledgeView() {
               <button type="button" className="secondary-button" data-testid="decision-supersede" disabled={writeBlockedReason !== null} onClick={() => { void supersede(); }}>记录替代关系</button>
             </>}
 
-            {selectedKnowledge && client && <KnowledgeReader key={`${selectedKnowledge.id}:${selectedKnowledge.currentVersion}:${routeItem === selectedKnowledge.id ? routeVersion ?? "" : ""}`}
-              client={client} knowledge={selectedKnowledge} versions={knowledgeVersions}
-              initialVersion={routeItem === selectedKnowledge.id ? routeVersion : null} />}
             {selectedMemory && <section className="knowledge-history"><h3>确认修订历史</h3><ol>{memoryRevisions.map((revision) =>
               <li key={revision.id}>v{revision.version} · {revision.title} · {revision.confirmedBy} 于 {revision.confirmedAt}<p>{revision.text}</p></li>)}</ol></section>}
             {selectedRule && <section className="knowledge-history"><h3>规则版本历史</h3><ol>{ruleVersions.map((version) =>
               <li key={`${version.ruleId}-${version.version}`}>v{version.version} · {version.strength} · {version.enforcement} · {version.ruleKey}<p>{version.statement}</p></li>)}</ol></section>}
+            </details>
           </section> : !loading && <section className="surface-panel"><p>选择一项资料查看详情与版本。</p></section>}
 
-          {formOpen && <form className="surface-panel knowledge-form" data-testid="knowledge-form" onSubmit={(event) => { void save(event); }}>
+          {formOpen && <form ref={formRef} className="surface-panel knowledge-form" data-testid="knowledge-form" onSubmit={(event) => { void save(event); }}>
             <h2>{revisionMode ? "追加新版本" : `新建${currentNoun}`}</h2>
             {revisionMode && <p className="helper-text">基于起草时修订 v{kind === "KNOWLEDGE" ? knowledgeDraftBase?.revision : selected?.revision} 提交；冲突时保留草稿，旧版本不会被覆盖。</p>}
             {(kind === "MEMORY" || (kind !== "RULE" && !revisionMode)) && <label className="field"><span className="field-label">标题</span>

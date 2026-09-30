@@ -1,0 +1,40 @@
+{
+  "description": "Full regional variable fonts converted to WOFF2 from existing OFL-licensed font files. No glyph subset; offline UI and document text remain supported.",
+  "licenseSource": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanssc/OFL.txt",
+  "fonts": [
+    {
+      "file": "noto-sans-sc-variable.woff2",
+      "family": "Noto Sans SC",
+      "version": "Version 2.04;241114210130;non-release",
+      "copyright": "© 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.",
+      "source": "https://github.com/notofonts/noto-cjk",
+      "sourceFile": "NotoSansSC-VF.ttf",
+      "sourceSha256": "763146584cf0710223441356b4395e279021b0806c196614377a7a0174ae074a",
+      "sha256": "15027a7dff8f15a7fd784930b5490e6801de2f63765863a1c74bd785865fbac4",
+      "weightAxis": [
+        [
+          100.0,
+          900.0
+        ]
+      ],
+      "bytes": 7782980
+    },
+    {
+      "file": "noto-serif-sc-variable.woff2",
+      "family": "Noto Serif SC",
+      "version": "Version 2.02;241114204558;non-release",
+      "copyright": "© 2017-2023 Adobe (http://www.adobe.com/).",
+      "source": "https://github.com/notofonts/noto-cjk",
+      "sourceFile": "NotoSerifSC-VF.ttf",
+      "sourceSha256": "a4aed9985a5916fbf6690456f8732a9fccd517938e353165d4142b4f11a39280",
+      "sha256": "bd0ad622b985668ec0a2f2b902cc5db66ddba155ef190bbd7f55192fccbcf745",
+      "weightAxis": [
+        [
+          200.0,
+          900.0
+        ]
+      ],
+      "bytes": 11022468
+    }
+  ]
+}

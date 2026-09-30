@@ -50,7 +50,11 @@ foreach ($directory in @($trial, $package, $cluster)) {
 }
 New-Item -ItemType Directory -Path $trial -Force | Out-Null
 # One launcher at a time; a crash releases the handle without deleting data.
-$lock = [IO.File]::Open((Join-Path $trial 'launcher.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+try {
+  $lock = [IO.File]::Open((Join-Path $trial 'launcher.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+} catch [IO.IOException] {
+  throw '已有测试启动器或桌面开发会话正在运行，请先在其终端按 Ctrl+C 停止，再操作测试环境。'
+}
 $savedEnvironment = @{}
 foreach ($key in @('RELAY_DB_URL', 'RELAY_MIGRATION_DB_URL', 'RELAY_DESKTOP_CONFIG_PATH', 'RELAY_DESKTOP_DATA_ROOT')) {
   $savedEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
@@ -116,6 +120,7 @@ try {
   foreach ($file in @($exe, $node, $pgCtl, $psql, (Join-Path $package 'desktop-build-manifest.json'))) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing input: $file. Run dev-stack.bat Build first." }
   }
+  if ($Action -eq 'DesktopDev') { Write-Host '正在校验已有测试包并准备数据库（不会重新打包），请稍候…' }
   $manifest = Get-Content -LiteralPath (Join-Path $package 'desktop-build-manifest.json') -Raw | ConvertFrom-Json
   if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ne $manifest.artifact_sha256) { throw 'Executable hash does not match the build manifest; rebuild.' }
   if ((Get-FileHash -LiteralPath $node -Algorithm SHA256).Hash -ne $manifest.resource_file_sha256.'node.exe') { throw 'Node hash mismatch; rebuild.' }
@@ -186,8 +191,6 @@ try {
   $env:RELAY_DESKTOP_DATA_ROOT = Join-Path $trial 'data'
   New-Item -ItemType Directory -Path $env:RELAY_DESKTOP_DATA_ROOT -Force | Out-Null
   if ($Action -eq 'DesktopDev') {
-    # Preparation is complete; release the launcher lock before the long-running dev session.
-    $lock.Dispose()
     Write-Host '测试数据库和配置已准备，正在启动桌面开发窗口（Ctrl+C 停止）…'
     & (Join-Path $root 'apps\desktop\scripts\dev-desktop.ps1') -ConfigPath $config -FrontendPort $FrontendPort
   } elseif (-not $SkipDesktop) {

@@ -1,0 +1,17 @@
+.run-detail-page .page-primary > .surface-panel:not([data-testid="run-unknown"]):not([data-testid="run-failed"]):not([data-testid="run-steps"]):not([data-testid="run-draft-preview"]) {
+  padding: var(--relay-space-6) 0;
+  border: 0;
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: 0;
+  background: transparent;
+}
+.run-detail-page .page-primary > [data-testid="run-steps"],
+.run-detail-page .page-primary > [data-testid="run-draft-preview"] {
+  padding: var(--relay-space-6);
+  border: 0;
+  border-radius: 0;
+  background: var(--relay-color-bg-surface);
+}
+.rail-content.run-detail-rail-content { gap: 0; }
+.run-detail-rail-content > .surface-panel { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.run-detail-rail-content > .surface-panel + .surface-panel { margin-top: var(--relay-space-6); padding-top: var(--relay-space-6); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }

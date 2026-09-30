@@ -22,7 +22,7 @@ Workbench 与 Context Builder 分别面向用户和 Agent，消费同一事实�
 | 架构、依赖与技术决策 | [领域模型](docs/architecture/domain-model.md)、[技术选型](docs/architecture/技术选型.md)、[ADR-010](docs/decisions/ADR-010-agent-stack-react-desktop.md) |
 | 开工前的复用原则 | [复用策略](docs/architecture/复用策略.md)、[ADR-005](docs/decisions/ADR-005-reuse-first.md) |
 | 上游 Agent 源码参考 | [研究记录 §1.1 本地源码对照清单](docs/research/p00-source-study.md#11-本地源码对照清单2026-09-20-核验)，缓存位于 `.research/upstream/<repo>` 与 `.research/vercel-ai` |
-| 实施工作包与验收出口 | [大模块工作包](prompts/stack-migration.md)、[测试计划](docs/testing/verification-plan.md) |
+| 实施工作包与验收出口 | [大模块工作包](prompts/stack-migration.md)、[测试计划](docs/testing/verification-plan.md)、[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表) |
 | UI 变更 | 现有参考图、[工作台交互](docs/frontend/workbench-design.md)、[设计系统](docs/frontend/design-system.md)、[tokens](docs/frontend/design-tokens.json) |
 
 代码描述实际实现，契约描述目标约束，ADR 记录取舍，测试证据限定已验证范围。发生冲突先核对依据，不为迎合文档修改正确代码，也不默认批准代码偏离契约。Proposed 不等于 Accepted，Accepted 不等于已实现或已验收。task_plan、progress、findings 与早期 V1_ARCHITECTURE 是历史材料。
@@ -74,8 +74,9 @@ Workbench 与 Context Builder 分别面向用户和 Agent，消费同一事实�
 
 - 结束前检查需求、架构、ADR、API、数据库、开发记录、测试、README、路线图、变更记录和已知问题，只更新受影响项，不为清单齐全新建空文档。
 - 重要决策记录背景、候选、选择、理由、代价、影响与状态；替代旧 ADR 时保留历史及接续关系。重大或反复出现的 Bug 记录根因、修复与验证，普通小改不新增 ADR 或开发日志。
-- API 变更注明 Breaking Change 与兼容策略；数据库变化关联 migration、兼容和回滚风险；当前阶段只更新 CODEX_NEXT_STEP，过程证据放已有开发或验收记录。
+- API 变更注明 Breaking Change 与兼容策略；数据库变化关联 migration、兼容和回滚风险；当前阶段只更新 CODEX_NEXT_STEP，功能验收结果归统一验收表，开发记录只保留必要设计与重大故障根因，不追加逐轮测试输出。
 - UI 业务交互归 workbench-design，视觉规则归 design-system，数值归 design-tokens.json；不复制第二套 token，图中无法确定的数值标为推荐/待验证。
+- 验收结果只在[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)维护；默认只读当前进度入口和验收表，需要定位具体问题时再按范围读取历史记录或原始日志。“验收证据”“保留历史”不要求每轮新建报告、保存全量日志或导出全仓 SHA 清单；普通验证更新受影响行并写简短结果即可。完整过程输出按[文档保留规则](docs/README.md#6-验收结果与原始输出保留)留在本机。此规则只收敛开发验收文档，不改变产品的 Artifact、运行账本、审计或恢复凭据。
 - 文档修改运行 `node scripts/check-docs.mjs`，并人工核对事实源、当前/历史边界与链接语义；不以文档测试替代运行时验证。
 
 完成时说明产出、实际验证、文档同步及剩余限制。设计须责任明确、场景闭合、待确认项可见并能映射验收；实现须具备必要类型、错误/Loading/日志，相关检查通过且文档一致。没有真实运行证据时不得宣称已交付运行能力。

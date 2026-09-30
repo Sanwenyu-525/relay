@@ -22,9 +22,9 @@
 | 检查 | 结果 | 证据 |
 |---|---|---|
 | API 类型检查 | 通过，含新增反例 | `node apps/api/node_modules/typescript/bin/tsc --noEmit -p apps/api/tsconfig.json` |
-| API 单元测试 | 103/103 | [日志](evidence/m06-independent-20260927-unit.log) |
-| 新增反例前全量真实 PG | 399 项：393 通过、4 失败、2 跳过 | [日志](evidence/m06-independent-20260927-full-pg.log) |
-| 新增反例后 real-tools 定向真实 PG | 17 项：原 14 项通过、新 3 项失败，无跳过 | [日志](evidence/m06-independent-20260927-real-tools.log) |
+| API 单元测试 | 103/103 | [日志](evidence/raw-output-20260930.zip#entry=docs%2Ftesting%2Fevidence%2Fm06-independent-20260927-unit.log) |
+| 新增反例前全量真实 PG | 399 项：393 通过、4 失败、2 跳过 | [日志](evidence/raw-output-20260930.zip#entry=docs%2Ftesting%2Fevidence%2Fm06-independent-20260927-full-pg.log) |
+| 新增反例后 real-tools 定向真实 PG | 17 项：原 14 项通过、新 3 项失败，无跳过 | [日志](evidence/raw-output-20260930.zip#entry=docs%2Ftesting%2Fevidence%2Fm06-independent-20260927-real-tools.log) |
 
 命令：`powershell -NoProfile -ExecutionPolicy Bypass -File apps/api/scripts/run-integration.ps1`；定向追加 `-TestFile real-tools-gateway`。两次构建、业务迁移、图安装、PG 启停退出码均为 0，临时集群均已删除。测试退出码均为 1，不能当作通过。
 

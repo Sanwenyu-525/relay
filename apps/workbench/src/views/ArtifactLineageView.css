@@ -12,7 +12,7 @@
 .lineage-parents small { display: block; margin-top: var(--relay-space-2); }
 .lineage-parents li p { margin-top: var(--relay-space-2); }
 .lineage-text { max-height: 32rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: var(--relay-space-4); background: var(--relay-color-bg-subtle); border: var(--relay-border-width) solid var(--relay-color-border-separator); }
-.lineage-diff { margin-top: var(--relay-space-5); }
+.lineage-diff { margin-top: var(--relay-space-4); }
 .lineage-diff-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--relay-space-4); }
 .lineage-diff-columns > div { min-width: 0; }
 .lineage-uses ul { padding: 0; list-style: none; }

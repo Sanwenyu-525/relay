@@ -46,21 +46,7 @@ export default function WorkspaceSidePanel({ client, task, run, draft, tab, onTa
 }) {
   // 文档子树保持挂载，切换视图不能丢失判断草稿或待核对的原命令。
   const toolsVisible = devToolsOpen && task.projectId !== null;
-  return <aside className="collab-side" aria-label={toolsVisible ? "文件与运行工具" : "产物与判断"} data-testid="collab-side" data-pane={toolsVisible ? "DEVTOOLS" : tab}>
-    {toolsVisible && <DevToolsPanel client={client} projectId={task.projectId!} taskId={task.id} run={run} onClose={onCloseDevTools} />}
-    <nav className="collab-side-tabs" aria-label="右栏视图" data-testid="collab-side-tabs" hidden={toolsVisible}>
-      {tabs.map(([key, label]) => <button key={key} type="button"
-        className={`collab-side-tab${tab === key ? " collab-side-tab--active" : ""}`}
-        aria-current={tab === key ? "true" : undefined} data-testid={`collab-side-tab-${key}`}
-        onClick={() => onTabChange(key)}>{label}</button>)}
-    </nav>
-
-    <div className="collab-side-body" data-testid="collab-panel-DOCUMENT" hidden={tab !== "DOCUMENT" || toolsVisible}>
-      <div className="collab-document-reading">
-      <ArtifactReaderPanel compact client={client} taskId={task.id} projectId={task.projectId}
-        selectedVersionId={null} draft={draft} />
-      </div>
-      {openReview === null
+  const judgment = openReview === null
         ? reviewError
           ? <p className="action-error" role="alert" data-testid="collab-judgment-error">{reviewError}</p>
           : <p className="helper-text" data-testid="collab-judgment-empty">当前工作没有待判断的 Review。判断入口只在真正需要人工决定时出现，不制造待办。</p>
@@ -73,10 +59,22 @@ export default function WorkspaceSidePanel({ client, task, run, draft, tab, onTa
                   {reviews.map((review, index) => <option key={review.id} value={index}>{review.kind} · {review.reason}</option>)}
                 </select></label>}
             </div>
-            <p className="helper-text">Review 只保存你的判断，不转移执行权；批准也不表示外部动作已经执行。</p>
+            <p className="helper-text">判断不会暂停执行或转移执行权。</p>
             <ReviewDecisionPanel live compact review={openReview} writeBlockedReason={reviewWriteBlockedReason}
               onRefresh={onRefresh} />
-          </section>}
+          </section>;
+  return <aside className="collab-side" aria-label={toolsVisible ? "文件与运行工具" : "产物与判断"} data-testid="collab-side" data-pane={toolsVisible ? "DEVTOOLS" : tab}>
+    {toolsVisible && <DevToolsPanel client={client} projectId={task.projectId!} taskId={task.id} run={run} onClose={onCloseDevTools} />}
+    <nav className="collab-side-tabs" aria-label="右栏视图" data-testid="collab-side-tabs" hidden={toolsVisible}>
+      {tabs.map(([key, label]) => <button key={key} type="button"
+        className={`collab-side-tab${tab === key ? " collab-side-tab--active" : ""}`}
+        aria-current={tab === key ? "true" : undefined} data-testid={`collab-side-tab-${key}`}
+        onClick={() => onTabChange(key)}>{label}</button>)}
+    </nav>
+
+    <div className="collab-side-body" data-testid="collab-panel-DOCUMENT" hidden={tab !== "DOCUMENT" || toolsVisible}>
+      <ArtifactReaderPanel compact client={client} taskId={task.id} projectId={task.projectId}
+        selectedVersionId={null} draft={draft} paperFooter={judgment} />
       <details className="collab-completion-details"><summary>检查与完成 · 独立确认</summary>
       <TaskCompletionPanel compact live onRefresh={onRefresh}
         target={{ taskId: task.id, taskStatus: task.status, taskRevision: task.revision,

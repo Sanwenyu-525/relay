@@ -237,7 +237,7 @@
 
 ## 6. 文档与最终交付
 
-优先更新既有主文档：启动方式变化更新 README/部署说明，UI 交互变化更新 workbench-design，视觉规则变化更新 design-system/tokens，API/数据库变化更新相应契约与迁移说明（API 标注 Breaking Change），过程证据更新相关开发/验收记录。只在 CODEX_NEXT_STEP 维护当前状态，保留历史证据，不把自检写成独立验收。执行 `node scripts/check-docs.mjs` 并核对事实与链接。
+优先更新既有主文档：启动方式变化更新 README/部署说明，UI 交互变化更新 workbench-design，视觉规则变化更新 design-system/tokens，API/数据库变化更新相应契约与迁移说明（API 标注 Breaking Change）。验收结果只更新既有[功能验收表](../docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)，重要根因写入相应开发记录；原始输出按[保留规则](../docs/README.md#6-验收结果与原始输出保留)留在本机，不为普通复跑新增报告或入库完整日志。只在 CODEX_NEXT_STEP 维护阶段状态，保留既有历史，不把自检写成独立验收。执行 `node scripts/check-docs.mjs` 并核对事实与链接。
 
 最终用中文报告：
 

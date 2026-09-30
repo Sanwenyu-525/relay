@@ -68,6 +68,7 @@ export interface ReviewDecisionPanelProps {
 export default function ReviewDecisionPanel({ live, review, writeBlockedReason, busy = false, onRefresh, compact }: ReviewDecisionPanelProps) {
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [retryBudget, setRetryBudget] = useState(() => {
     const limit = Number(review.evidence.limit);
     return Number.isInteger(limit) ? Math.min(6, limit + 1) : 3;
@@ -85,7 +86,7 @@ export default function ReviewDecisionPanel({ live, review, writeBlockedReason, 
     const client = liveClient();
     if (!client || !live || writeBlockedReason !== null || expired || !review.allowedDecisions.includes(decision) || pendingCommand || submitting) return;
     const note = feedback.trim();
-    if (decision === "REQUEST_CHANGES" && !note) { setActionError("请求修改时请说明需要调整的内容。"); return; }
+    if (decision === "REQUEST_CHANGES" && !note) { setFeedbackOpen(true); setActionError("请求修改时请说明需要调整的内容。"); return; }
     if (decision === "SET_RETRY_BUDGET" && (!Number.isInteger(retryBudget) || retryBudget < 1 || retryBudget > 6)) {
       setActionError("修正预算须为 1 到 6 之间的整数。"); return;
     }
@@ -135,6 +136,11 @@ export default function ReviewDecisionPanel({ live, review, writeBlockedReason, 
     } finally { setSubmitting(false); }
   }
 
+  const feedbackField = <label className="field" htmlFor={`review-feedback-${review.id}`}><span className="field-label">说明</span>
+    <span className="field-hint">请求修改时必填；其他决定可留空。</span>
+    <textarea id={`review-feedback-${review.id}`} value={feedback} onChange={(event) => setFeedback(event.target.value)} rows={compact ? 2 : 3}
+      disabled={!live || submitting || pendingCommand !== null || decisionBlockedReason !== null} /></label>;
+
   const facts = <>
     <section className="review-fact-section"><h3>绑定对象</h3><dl className="review-facts">{factRows(review.target)}<div><dt>请求目标摘要</dt><dd>{review.targetHash}</dd></div></dl></section>
     <section className="review-fact-section"><h3>判断依据</h3><dl className="review-facts">{factRows(review.evidence)}</dl></section>
@@ -160,10 +166,10 @@ export default function ReviewDecisionPanel({ live, review, writeBlockedReason, 
     {writeBlockedReason && <p className="disabled-reason" data-testid="review-project-archive-reason">{writeBlockedReason}</p>}
     {!writeBlockedReason && expired && <p className="disabled-reason" data-testid="review-expired-reason">{expiredReason}
       <button className="text-link" type="button" data-testid="review-expired-refresh" disabled={busy || submitting} onClick={() => void onRefresh()}>刷新核对最新状态</button></p>}
-    <label className="field" htmlFor={`review-feedback-${review.id}`}><span className="field-label">说明</span>
-      <span className="field-hint">请求修改时必填；其他决定可留空。</span>
-      <textarea id={`review-feedback-${review.id}`} value={feedback} onChange={(event) => setFeedback(event.target.value)} rows={compact ? 2 : 3}
-        disabled={!live || submitting || pendingCommand !== null || decisionBlockedReason !== null} /></label>
+    {compact ? <details className="review-feedback-details" open={feedbackOpen}
+      onToggle={(event) => setFeedbackOpen(event.currentTarget.open)} data-testid="review-feedback-details">
+      <summary>补充说明 · 请求修改时必填</summary>{feedbackField}
+    </details> : feedbackField}
     {review.allowedDecisions.includes("SET_RETRY_BUDGET") && <label className="field" htmlFor={`review-budget-${review.id}`}>
       <span className="field-label">新的修正预算</span><span className="field-hint">填写 1 到 6 次；服务端会重新核对当前已用次数。</span>
       <input id={`review-budget-${review.id}`} value={retryBudget} onChange={(event) => setRetryBudget(Number(event.target.value))}

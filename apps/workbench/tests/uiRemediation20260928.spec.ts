@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 describe("整改 2026-09-28 UI 共享问题", () => {
-  it("任务列表使用紧凑标题与筛选区，搜索框不残留行内双框补丁", async () => {
+  it("任务列表保留普通页面标题与紧凑筛选区，搜索框不残留行内双框补丁", async () => {
     activate();
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = String(input);
@@ -40,7 +40,7 @@ describe("整改 2026-09-28 UI 共享问题", () => {
     const mounted = await mountWorkbench("/tasks");
     unmount = mounted.unmount;
     const header = mounted.wrapper.get(".list-header");
-    expect(header.attributes("class")).toContain("list-header--compact");
+    expect(header.attributes("class")).not.toContain("list-header--compact");
     const toolbar = mounted.wrapper.get(".list-toolbar");
     expect(toolbar.attributes("class")).toContain("list-toolbar--compact");
     const search = mounted.wrapper.get('input[name="task-search"]');

@@ -183,6 +183,13 @@ describe("任务详情（UI-10）", () => {
     expect(text).toContain("执行模式");
     expect(text).toContain("验收版本");
     expect(mounted.wrapper.find('[data-testid="task-detail"]').exists()).toBe(true);
+    expect(mounted.wrapper.get(".task-detail-status").attributes("aria-labelledby")).toBe("task-detail-status-heading");
+    expect(mounted.wrapper.get("#task-detail-status-heading").text()).toBe("当前状态");
+    expect(mounted.wrapper.findAll(".task-detail-facts > div")).toHaveLength(5);
+    expect(mounted.wrapper.get(".task-detail-rail").text()).toContain("编辑入口");
+    expect(mounted.wrapper.get(".task-detail-rail").text()).toContain("前置依赖");
+    expect(mounted.wrapper.get(".page-primary").text()).toContain("验收标准");
+    expect(mounted.wrapper.get(".page-primary").text()).not.toContain("编辑入口");
 
     await mounted.wrapper.get('[data-testid="task-detail-tab-artifacts"]').trigger("click");
     await flush();

@@ -43,6 +43,7 @@ dev-stack.bat Build            # 构建最新桌面测试包到根目录 test-re
 dev-stack.bat Start            # 启动测试版，首次初始化，后续保留并复用数据
 dev-stack.bat Stop             # 先关闭桌面窗口，再停止专用测试数据库；不删除数据
 dev-stack.bat Status           # 查看目录、包进程数量和数据库运行状态
+dev-stack.bat DesktopDev       # 菜单 6：准备测试数据库后启动桌面开发窗口，前端热更新
 ```
 
 程序固定为 `test-release/relay-desktop.exe`，测试数据独立保存在 `.relay-test/`；两者均不纳入 Git。请通过 `dev-stack.bat Start` 启动，以准备数据库和配置；直接双击 EXE 不会自动准备该测试环境。这是本机目录测试包，不是安装器，也不承诺复制到其他电脑即可运行。实现及升级边界见[持久测试入口](docs/deployment/本机部署.md#持久桌面测试入口)。首次使用先 Build；更新代码后重新 Build，平时启动无需重打包。
@@ -70,7 +71,7 @@ dev-stack.bat -FrontendPort 5173 -SkipInstall -SkipBuild
 
 `dev-stack` 不启动独立 Mock Worker，也不安装 Graph checkpoint；浏览器页默认显示示例数据。试用固定 Mock Agent 请使用下方桌面隔离会话。Windows 桌面宿主位于 [apps/desktop](apps/desktop)，M02 的 React/桌面基础已独立验收。它加载同一份 React 工作台构建产物并监督真实 API 和 Mock Worker；M03 的固定 Mock 图已通过真实 Windows/PG 的 CRITERION Review/RESUME 与 ACTION_APPROVAL 局部联测，Mock 在途取消已完成开发自检，G01–G08 完整闭环尚未验收。安装、升级和卸载仍属 M07。
 
-修改前端界面时不必每次完整打包：`apps/desktop/scripts/dev-desktop.ps1` 启动 `tauri dev` 开发窗口——真实桌面窗口加载 Vite 开发服务器，前端改动经 HMR 数秒内生效，Rust 源码改动自动重编译并重启窗口，不生成安装包。加 `-Action start` 可后台启动（命令立即返回，runner 进程与日志记录在 `.relay-dev/dev-desktop/`），`-Action stop` 按 runner 进程树一键停止并清理 dev 版窗口与 Vite 残留，`-Action status` 查看运行状态；无参数时保持前台运行（Ctrl+C 停止）。`desktop_bootstrap` 私有协议在 dev 来源下的放行见 [UI 联通开发记录](docs/development/ui-live-integration-2026-09-28.md)。正式构建入口 `dev-stack.bat Build` 保持不变；开发窗口与打包版共用单实例互斥，不可同时运行。
+修改前端界面时不必每次完整打包：菜单 6 或 `dev-stack.bat DesktopDev` 先准备测试数据库和配置，再调用 `apps/desktop/scripts/dev-desktop.ps1` 启动 `tauri dev` 开发窗口——真实桌面窗口加载 Vite 开发服务器，前端改动经 HMR 数秒内生效，Rust 源码改动自动重编译并重启窗口，不生成安装包。首次仍需 Build 准备基础资源；日常开发不必先选 1，启动与停止边界见[持久测试入口](docs/deployment/本机部署.md#持久桌面测试入口)。直接运行 `dev-desktop.ps1` 时，加 `-Action start` 可后台启动（命令立即返回，runner 进程与日志记录在 `.relay-dev/dev-desktop/`），`-Action stop` 按 runner 进程树一键停止并清理 dev 版窗口与 Vite 残留，`-Action status` 查看运行状态；无参数时保持前台运行（Ctrl+C 停止），API 改动需加 `-RefreshApi` 重建暂存资源。`desktop_bootstrap` 私有协议在 dev 来源下的放行见 [UI 联通开发记录](docs/development/ui-live-integration-2026-09-28.md)。正式构建入口 `dev-stack.bat Build` 保持不变；开发窗口与打包版共用单实例互斥，不可同时运行。
 
 `apps/api` 提供存活/就绪检查、迁移、事务与命令回执、Project/Goal/Task/State、受管 Artifact、人工完成/重开、Mock Run、Verification/Review、持久控制、Gateway、长期信息/规则/搜索、Context、Assist/首批 Skill/蓝图以及 Today/Activity/Trace/Lineage。`apps/workbench` 默认渲染示例数据；浏览器可在页壳右上「数据来源」手工填入 API 地址、Workspace ID 与 `RELAY_API_BEARER_TOKEN`，只有 `/health/ready` 返回 200 才进入 live，刷新后回到示例模式。打包桌面从受信宿主内存取得本次连接并在重载时重新引导，无须在页面填写令牌；若本机 API 引导或就绪失败，桌面显示需重启应用的阻断页。live 模式可走人工闭环、Delegate/Review/Run 控制、资料和 URL 导入、Today、三套工作台、Assist/蓝图及确切证据追溯；「设置」页只读显示当前服务实例的模型端口状态（Mock/真实 Provider，密钥不读取不显示，配置仍归服务端环境变量，见 [HTTP 契约 §10.49](docs/api/http-command-contract.md#1049-模型端口只读状态2026-09-28开发自检)）；Assist 普通讨论与 Run DRAFT 可显示有界的生成中草稿，最终内容仍以已结算消息和产物为准。本地 `.md/.txt` 首次导入单独写入 Knowledge。凭据只保存在页面内存，不写 URL、localStorage、日志或源码。P09 Connection、受管目录和权限策略可在项目设置页操作；委托页可选择显式 Context 来源和可选 Mock 文件动作。真实项目与全空间任务列表已接通；后端 ArchiveProject 命令、关联写入栅栏、live 归档按钮及主要 live 写入口的归档门槛已有开发自检。PDF 导入与真实 Git/CLI 工具尚未交付。M03 完整闭环、真实 Provider、M04/M05 与安装交付的验收状态见 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)。
 
@@ -228,6 +229,6 @@ Pop-Location
 
 ## workspace 与嵌套目录
 
-Git 保留源码、迁移、文档及验收证据；`docs/testing/evidence` 下的日志也纳入版本。`.tmp-*` 临时工具、构建/缓存、进程输出和本机环境配置由 `.gitignore` 排除，已有跟踪项仅解除跟踪，文件仍保留在本机。`.env.example` 与 `desktop.env.example` 配置模板继续保留。
+Git 保留源码、迁移、文档、必要概要/截图/复跑脚本与历史原始输出压缩包。功能通过、未通过及未验收统一看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)；完整过程日志和批量摘要默认留在本机，保留规则见[文档维护规范](docs/README.md#6-验收结果与原始输出保留)。`.tmp-*` 临时工具、构建/缓存、进程输出和本机环境配置由 `.gitignore` 排除。本次原始输出移至忽略的本机目录，Git 删除项用于停止原始条目的版本保留；文件副本和压缩归档仍在。`.env.example` 与 `desktop.env.example` 配置模板继续保留。
 
 根 `pnpm-workspace.yaml` 只把 `apps/api` 纳入 workspace；`apps/workbench` 与 `experiments/*` 保留各自独立的 `package.json` 与 `pnpm-lock.yaml`，未纳入也不会被改动。需要知道的副作用：pnpm 会从上层目录发现 workspace 根，因此在那些子目录里执行 `pnpm install` 会解析到根 workspace（只安装根 workspace 的依赖）；`pnpm run <script>` 仍使用所在目录的 manifest。要在子目录按自身锁文件安装，使用 `pnpm install --ignore-workspace`（pnpm 9.15.9 实测可行）；`scripts/dev-stack.ps1` 已显式这样调用，前端依赖仍装在自己的目录。

@@ -1,0 +1,1347 @@
+{
+  "recorded_at": "2026-09-30T08:34:32.581834+00:00",
+  "capture_method": "IAB tab.screenshot({fullPage:false}); original JPEG bytes",
+  "note": "viewport, when present, is an observed CSS size; image_pixels records every original JPEG output without resizing. Some earlier DOM observations are archived rather than copied here. File modification time is not an asserted browser capture timestamp.",
+  "images": [
+    {
+      "dom_observation_available": false,
+      "file": "activity-1487x1010.jpg",
+      "image_pixels": [
+        1487,
+        1010
+      ],
+      "sha256": "2cf7c958de3ed1d925f6beb53058a02af7a9a97d4ca0f37be1283f5be285a780",
+      "file_modified_at": "2026-09-30T07:12:40.173064+00:00"
+    },
+    {
+      "name": "activity-task-scope-1487x1010",
+      "url": "http://127.0.0.1:4174/activity?task_id=33333333-3333-4333-8333-333333333333",
+      "headings": [
+        {
+          "size": "48px",
+          "text": "动态",
+          "top": 125,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "2026 年 9 月 27 日",
+          "top": 646.7999877929688,
+          "x": 256
+        }
+      ],
+      "overflow": false,
+      "title": "动态",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "activity-task-scope-1487x1010.jpg",
+      "image_pixels": [
+        1487,
+        1010
+      ],
+      "sha256": "3057f1279670ca52b0d1ddfcb12d1ed88bcda804ff43e07719299f1e2e0684d5",
+      "file_modified_at": "2026-09-30T07:25:01.851624+00:00"
+    },
+    {
+      "name": "artifact-lineage-1487x1010",
+      "url": "http://127.0.0.1:4174/artifact-versions/88888888-8888-4888-8888-888888888888/lineage",
+      "headings": [
+        {
+          "size": "32px",
+          "text": "来源追溯",
+          "top": 125,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "确切版本",
+          "top": 361.8000183105469,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "直接父来源 · 0",
+          "top": 709.4000244140625,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "正文与确切版本比较",
+          "top": 858,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "章节与段落原文锁定",
+          "top": 1054.5999755859375,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "手动检查修改影响",
+          "top": 1350.2000732421875,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "主动检查直接引用",
+          "top": 1731.2000732421875,
+          "x": 280.8000183105469
+        }
+      ],
+      "overflow": false,
+      "title": "来源追溯",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "artifact-lineage-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "d9765f5bd55545a848603d93f75942aa05942c8cb9508dcb8b603120e15a5356",
+      "file_modified_at": "2026-09-30T08:08:39.732964+00:00"
+    },
+    {
+      "name": "attention-1487x1010",
+      "url": "http://127.0.0.1:4174/tasks?tab=attention",
+      "headings": [
+        {
+          "size": "48px",
+          "text": "需要你查看的事项",
+          "top": 125,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "必须介入 · 0",
+          "top": 387.2000122070313,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "待判断 Review · 1",
+          "top": 556.7999877929688,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "当前 Run 待核对 · 0",
+          "top": 801.4000244140625,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "人工任务与受阻 Task · 1",
+          "top": 929,
+          "x": 280.8000183105469
+        }
+      ],
+      "overflow": false,
+      "title": "需要你查看的事项",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "attention-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "746a0500ae6150b15c43883dbc1679bf7e06a3e7791d6e67c601a782faa71d5a",
+      "file_modified_at": "2026-09-30T08:22:21.952662+00:00"
+    },
+    {
+      "name": "attention-390x844",
+      "url": "http://127.0.0.1:4174/tasks?tab=attention",
+      "headings": [
+        {
+          "size": "32px",
+          "text": "需要你查看的事项",
+          "top": 101,
+          "x": 16
+        },
+        {
+          "size": "24px",
+          "text": "必须介入 · 0",
+          "top": 518.2000122070312,
+          "x": 40.79999923706055
+        },
+        {
+          "size": "24px",
+          "text": "待判断 Review · 1",
+          "top": 729.7999877929688,
+          "x": 40.79999923706055
+        },
+        {
+          "size": "24px",
+          "text": "当前 Run 待核对 · 0",
+          "top": 1139.4000244140625,
+          "x": 40.79999923706055
+        },
+        {
+          "size": "24px",
+          "text": "人工任务与受阻 Task · 1",
+          "top": 1267,
+          "x": 40.79999923706055
+        }
+      ],
+      "overflow": false,
+      "title": "需要你查看的事项",
+      "viewport": [
+        390,
+        844
+      ],
+      "dom_observation_available": true,
+      "file": "attention-390x844.jpg",
+      "image_pixels": [
+        380,
+        822
+      ],
+      "sha256": "87bb54d836c727fd28d3b5e53b8056fcc4da98995595b5cbcb2df4e71c59d75d",
+      "file_modified_at": "2026-09-30T08:25:14.486021+00:00"
+    },
+    {
+      "name": "collaboration-1487x1010",
+      "url": "http://127.0.0.1:4174/agent?work=33333333-3333-4333-8333-333333333333",
+      "headings": [
+        {
+          "size": "18px",
+          "text": "近期工作",
+          "top": 92.75,
+          "x": 16
+        },
+        {
+          "size": "48px",
+          "text": "确定实验评价指标",
+          "top": 130,
+          "x": 248
+        },
+        {
+          "size": "16px",
+          "text": "本次显式选择的资料",
+          "top": 1042.5999755859375,
+          "x": 673.0750122070312
+        },
+        {
+          "size": "20px",
+          "text": "等待你的判断",
+          "top": 695.2000122070312,
+          "x": 936.2625122070312
+        },
+        {
+          "size": "16px",
+          "text": "检查与完成",
+          "top": 1003.2000122070312,
+          "x": 923.4625244140624
+        }
+      ],
+      "overflow": false,
+      "title": "确定实验评价指标",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "collaboration-1487x1010.jpg",
+      "image_pixels": [
+        1487,
+        1010
+      ],
+      "sha256": "8e7c5c9f7609aba7140c2013e5c89236ede40922152d9406ab82b4e0e1eb30ae",
+      "file_modified_at": "2026-09-30T07:37:26.224105+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "collaboration-discussion-390x844.jpg",
+      "image_pixels": [
+        390,
+        843
+      ],
+      "sha256": "0677c2a227d79aeaee9e601368293437ec0d3109957301eb2334f614047ecfea",
+      "file_modified_at": "2026-09-30T07:04:41.555301+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "collaboration-discussion-960x640.jpg",
+      "image_pixels": [
+        960,
+        640
+      ],
+      "sha256": "84ebc9a0a551152aaf4412e0b5db152cc411838d6fb76aca298e49bf65d9e19e",
+      "file_modified_at": "2026-09-30T07:04:24.094773+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "collaboration-document-960x640.jpg",
+      "image_pixels": [
+        960,
+        640
+      ],
+      "sha256": "6f84aace6631e37494cdb9e127047b708066e63b99db5856f04cfc1c8456b994",
+      "file_modified_at": "2026-09-30T07:04:40.824958+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "collaboration-expanded-1440x640.jpg",
+      "image_pixels": [
+        1440,
+        640
+      ],
+      "sha256": "fe9c3e398cdb6ac1f89aefc9d699bb355d29fd6b23a456b14ab545fe5b6bc987",
+      "file_modified_at": "2026-09-30T07:02:58.548374+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "collaboration-judgment-390x844.jpg",
+      "image_pixels": [
+        390,
+        843
+      ],
+      "sha256": "ba2d259ec01b93f33d3d1420eabbc5610f22e68ebd437ceb407d7b0acb90e6e3",
+      "file_modified_at": "2026-09-30T07:12:20.655515+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "collaboration-judgment-960x640.jpg",
+      "image_pixels": [
+        960,
+        640
+      ],
+      "sha256": "7a679aa07022a7b82f110294be3099166fe1ca8a9162ef790d94c5d684294d0a",
+      "file_modified_at": "2026-09-30T07:04:41.130313+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "connections-1487x1010.jpg",
+      "image_pixels": [
+        1487,
+        1010
+      ],
+      "sha256": "1984e3f6f584b1dc31b4ba17f9d44058e805c1c5140ce759bc515113b4e763dc",
+      "file_modified_at": "2026-09-30T07:13:13.433141+00:00"
+    },
+    {
+      "name": "inbox-1487x1010",
+      "url": "http://127.0.0.1:4174/tasks?tab=inbox",
+      "headings": [
+        {
+          "size": "48px",
+          "text": "任务收件箱",
+          "top": 104,
+          "x": 256
+        }
+      ],
+      "overflow": false,
+      "title": "任务收件箱",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "inbox-1487x1010.jpg",
+      "image_pixels": [
+        1487,
+        1010
+      ],
+      "sha256": "ea2eccccaa1be104228979e06be7be52c91984bb61eb8e63f9106aa68418a7c6",
+      "file_modified_at": "2026-09-30T07:49:52.436354+00:00"
+    },
+    {
+      "name": "knowledge-reading-1487x1010",
+      "url": "http://127.0.0.1:4174/knowledge",
+      "headings": [
+        {
+          "size": "24px",
+          "text": "资料",
+          "top": 348.8000183105469,
+          "x": 376.4624938964844
+        },
+        {
+          "size": "20px",
+          "text": "本文目录",
+          "top": 168,
+          "x": 256
+        },
+        {
+          "size": "48px",
+          "text": "协作与验收指南",
+          "top": 168,
+          "x": 496
+        },
+        {
+          "size": "24px",
+          "text": "来源与版本",
+          "top": 168,
+          "x": 1141.5999755859375
+        },
+        {
+          "size": "24px",
+          "text": "协作与验收指南",
+          "top": 1275.800048828125,
+          "x": 256
+        }
+      ],
+      "overflow": false,
+      "title": "协作与验收指南",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "knowledge-reading-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "94b3a623b0cd8e9e96e20e7fa88116b719f793f9e1c469bf0a062218c7f359dc",
+      "file_modified_at": "2026-09-30T07:25:15.875161+00:00"
+    },
+    {
+      "name": "knowledge-reading-390x844",
+      "url": "http://127.0.0.1:4174/knowledge",
+      "headings": [
+        {
+          "size": "24px",
+          "text": "资料",
+          "top": 332.8000183105469,
+          "x": 144.46250915527344
+        },
+        {
+          "size": "20px",
+          "text": "本文目录",
+          "top": 152,
+          "x": 24
+        },
+        {
+          "size": "32px",
+          "text": "协作与验收指南",
+          "top": 325.8000183105469,
+          "x": 24
+        },
+        {
+          "size": "24px",
+          "text": "来源与版本",
+          "top": 1767,
+          "x": 24
+        },
+        {
+          "size": "24px",
+          "text": "协作与验收指南",
+          "top": 2437.400146484375,
+          "x": 24
+        }
+      ],
+      "overflow": false,
+      "title": "协作与验收指南",
+      "viewport": [
+        390,
+        844
+      ],
+      "dom_observation_available": true,
+      "file": "knowledge-reading-390x844.jpg",
+      "image_pixels": [
+        380,
+        822
+      ],
+      "sha256": "469488bdc6f19c7c2264406a6a1230a8f49ed60a93bfd3cfdb6d84b79807a773",
+      "file_modified_at": "2026-09-30T07:26:48.929823+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "knowledge-v2-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "2076ac480ddaf0b5f5848bb6516ede166f734843c7d2110b2efc3a1e192d8428",
+      "file_modified_at": "2026-09-30T06:41:15.614256+00:00"
+    },
+    {
+      "name": "project-assist-1487x1010",
+      "url": "http://127.0.0.1:4174/projects/22222222-2222-4222-8222-222222222222?skill=assist",
+      "headings": [
+        {
+          "size": "48px",
+          "text": "人机协作工作流研究",
+          "top": 248.40000915527344,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "会话",
+          "top": 467.1000061035156,
+          "x": 280.8000183105469
+        }
+      ],
+      "overflow": false,
+      "title": "人机协作工作流研究",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "project-assist-1487x1010.jpg",
+      "image_pixels": [
+        1487,
+        1010
+      ],
+      "sha256": "d37b39ab50974dd0a8d86da2edbb3d3dfbbf8355541714851281e95e8faca6e1",
+      "file_modified_at": "2026-09-30T08:31:17.930867+00:00"
+    },
+    {
+      "name": "project-assist-390x844",
+      "url": "http://127.0.0.1:4174/projects/22222222-2222-4222-8222-222222222222?skill=assist",
+      "headings": [
+        {
+          "size": "32px",
+          "text": "人机协作工作流研究",
+          "top": 224.40000915527344,
+          "x": 16
+        },
+        {
+          "size": "24px",
+          "text": "会话",
+          "top": 444.1000061035156,
+          "x": 40.79999923706055
+        }
+      ],
+      "overflow": false,
+      "title": "人机协作工作流研究",
+      "viewport": [
+        390,
+        844
+      ],
+      "dom_observation_available": true,
+      "file": "project-assist-390x844.jpg",
+      "image_pixels": [
+        390,
+        843
+      ],
+      "sha256": "297020668cfe1d3fb60687380f7e35faa1872c2fcad9e264803058a0f8f4c333",
+      "file_modified_at": "2026-09-30T08:31:33.411665+00:00"
+    },
+    {
+      "name": "project-blueprint-1487x1010",
+      "url": "http://127.0.0.1:4174/projects/22222222-2222-4222-8222-222222222222?skill=blueprint",
+      "headings": [
+        {
+          "size": "48px",
+          "text": "项目蓝图",
+          "top": 248.40000915527344,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "通过 Skill 生成蓝图建议",
+          "top": 482.2000122070313,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "填写蓝图草稿",
+          "top": 1040.800048828125,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "服务端候选预览",
+          "top": 2216.400146484375,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "确认这次变化",
+          "top": 215.40000915527344,
+          "x": 1093.5999755859375
+        }
+      ],
+      "overflow": false,
+      "title": "项目蓝图",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "project-blueprint-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "29de22cd408683d643be2f4ebd3aee35d0d8e0ed1f3cc7a531cb9148b5ba434c",
+      "file_modified_at": "2026-09-30T08:03:59.237640+00:00"
+    },
+    {
+      "name": "project-connections-1487x1010",
+      "url": "http://127.0.0.1:4174/projects/22222222-2222-4222-8222-222222222222/connections",
+      "headings": [
+        {
+          "size": "48px",
+          "text": "连接与权限",
+          "top": 125,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "工作台默认视图",
+          "top": 370.8000183105469,
+          "x": 272.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "人机协作工作流研究",
+          "top": 371,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "连接",
+          "top": 504.6000061035156,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "受管资源",
+          "top": 1062,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "权限策略",
+          "top": 1458,
+          "x": 280.8000183105469
+        }
+      ],
+      "overflow": false,
+      "title": "连接与权限",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "project-connections-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "d547f36b12f6bb62f8b545c2bfbb7b6124a6510a407664e352f38ad050aa1c24",
+      "file_modified_at": "2026-09-30T08:17:22.999908+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "project-create-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "3801500a2fb28d3258152c1c6ad43bf07f2892a368857674ad3beeceed24700c",
+      "file_modified_at": "2026-09-30T07:13:30.242316+00:00"
+    },
+    {
+      "name": "project-decision-1487x1010",
+      "url": "http://127.0.0.1:4174/projects/22222222-2222-4222-8222-222222222222/knowledge",
+      "headings": [
+        {
+          "size": "48px",
+          "text": "知识与长期信息",
+          "top": 133,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "决定",
+          "top": 473.3999938964844,
+          "x": 280.8000183105469
+        }
+      ],
+      "overflow": false,
+      "title": "知识与长期信息",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "project-decision-1487x1010.jpg",
+      "image_pixels": [
+        1487,
+        1010
+      ],
+      "sha256": "916d22f9bd571c32c4f7b2449be88ba55c66088756d48cd66e95f4dc35fd87d3",
+      "file_modified_at": "2026-09-30T07:47:25.678262+00:00"
+    },
+    {
+      "name": "project-knowledge-1487x1010",
+      "url": "http://127.0.0.1:4174/projects/22222222-2222-4222-8222-222222222222/knowledge",
+      "headings": [
+        {
+          "size": "24px",
+          "text": "资料",
+          "top": 446.2000122070313,
+          "x": 376.4624938964844
+        },
+        {
+          "size": "24px",
+          "text": "导入公共网页",
+          "top": 180.8000030517578,
+          "x": 504.1875
+        },
+        {
+          "size": "20px",
+          "text": "本文目录",
+          "top": 168,
+          "x": 256
+        },
+        {
+          "size": "48px",
+          "text": "协作与验收指南",
+          "top": 168,
+          "x": 496
+        },
+        {
+          "size": "24px",
+          "text": "来源与版本",
+          "top": 168,
+          "x": 1141.5999755859375
+        },
+        {
+          "size": "24px",
+          "text": "协作与验收指南",
+          "top": 1275.800048828125,
+          "x": 256
+        }
+      ],
+      "overflow": false,
+      "title": "协作与验收指南",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "project-knowledge-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "5ec8532a4ef335e006f8d46da777805a64a0e3ccfc4fc66589b81c2c7cd36211",
+      "file_modified_at": "2026-09-30T07:42:47.138127+00:00"
+    },
+    {
+      "name": "project-memory-1487x1010",
+      "url": "http://127.0.0.1:4174/projects/22222222-2222-4222-8222-222222222222/knowledge",
+      "headings": [
+        {
+          "size": "48px",
+          "text": "知识与长期信息",
+          "top": 133,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "记忆",
+          "top": 473.3999938964844,
+          "x": 280.8000183105469
+        }
+      ],
+      "overflow": false,
+      "title": "知识与长期信息",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "project-memory-1487x1010.jpg",
+      "image_pixels": [
+        1487,
+        1010
+      ],
+      "sha256": "a5e4c61577c07de580de7d2011b93b676df81644cacbff7d26c4a178a25852da",
+      "file_modified_at": "2026-09-30T07:47:25.278152+00:00"
+    },
+    {
+      "name": "project-overview-1487x1010",
+      "url": "http://127.0.0.1:4174/projects/22222222-2222-4222-8222-222222222222",
+      "headings": [
+        {
+          "size": "48px",
+          "text": "人机协作工作流研究",
+          "top": 248.40000915527344,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "项目当前状态",
+          "top": 396.3999938964844,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "关键产物与决定",
+          "top": 666.2000122070312,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "State 指定的下一步",
+          "top": 215.40000915527344,
+          "x": 1104
+        },
+        {
+          "size": "24px",
+          "text": "需要你的判断",
+          "top": 631.4000244140625,
+          "x": 1104
+        }
+      ],
+      "overflow": false,
+      "title": "人机协作工作流研究",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "project-overview-1487x1010.jpg",
+      "image_pixels": [
+        1487,
+        1010
+      ],
+      "sha256": "880530bce20e6224fc2e4b763cbb6e7f4ebe4d2425340a104c6af3936b4cedb0",
+      "file_modified_at": "2026-09-30T08:30:19.673969+00:00"
+    },
+    {
+      "name": "project-resume-1487x1010",
+      "url": "http://127.0.0.1:4174/projects/22222222-2222-4222-8222-222222222222?skill=resume",
+      "headings": [
+        {
+          "size": "48px",
+          "text": "当前事实速览",
+          "top": 248.40000915527344,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "接续点",
+          "top": 486.3999938964844,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "项目目标",
+          "top": 899.6000366210938,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "State 指定的下一步",
+          "top": 1082.5999755859375,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "当前任务",
+          "top": 1194.2000732421875,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "State 当前完成引用",
+          "top": 1463.5999755859375,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "待判断",
+          "top": 1591.5999755859375,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "当前选用产物版本",
+          "top": 1752.2000732421875,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "项目 Decision",
+          "top": 215.40000915527344,
+          "x": 1093.5999755859375
+        }
+      ],
+      "overflow": false,
+      "title": "当前事实速览",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "project-resume-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "d1d246586fa2d14f2a02964b98f784fd18083ced8f152961f85ecfa6f5bae9d8",
+      "file_modified_at": "2026-09-30T08:05:33.743548+00:00"
+    },
+    {
+      "name": "project-rule-1487x1010",
+      "url": "http://127.0.0.1:4174/projects/22222222-2222-4222-8222-222222222222/knowledge",
+      "headings": [
+        {
+          "size": "48px",
+          "text": "知识与长期信息",
+          "top": 133,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "规则",
+          "top": 473.3999938964844,
+          "x": 280.8000183105469
+        }
+      ],
+      "overflow": false,
+      "title": "知识与长期信息",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "project-rule-1487x1010.jpg",
+      "image_pixels": [
+        1487,
+        1010
+      ],
+      "sha256": "f02c3c77b307642c5b69d24bdcc4505e49e5a7175b1d77c635e51c114c602002",
+      "file_modified_at": "2026-09-30T07:47:26.076256+00:00"
+    },
+    {
+      "name": "project-tasks-1487x1010",
+      "url": "http://127.0.0.1:4174/projects/22222222-2222-4222-8222-222222222222/tasks",
+      "headings": [
+        {
+          "size": "48px",
+          "text": "项目任务",
+          "top": 137,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "确定实验评价指标",
+          "top": 104,
+          "x": 1104
+        }
+      ],
+      "overflow": false,
+      "title": "项目任务",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "project-tasks-1487x1010.jpg",
+      "image_pixels": [
+        1487,
+        1010
+      ],
+      "sha256": "9deefaad22de209a85409e97b9432d4e9a1bce89da0fa4b454a555316bdfe56e",
+      "file_modified_at": "2026-09-30T07:41:30.886688+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "projects-1487x1010.jpg",
+      "image_pixels": [
+        1487,
+        1010
+      ],
+      "sha256": "89fca7be8ad4d12bfb0eea5a5ce72de6228a41d5fb28278b3cb244a3c288a990",
+      "file_modified_at": "2026-09-30T06:38:00.681188+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "reviews-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "3beb1b9c62aea469afd19475d22a2eb9b425c109dd0e3fac80cc3d8a0af57475",
+      "file_modified_at": "2026-09-30T07:13:13.041842+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "run-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "600788d94f19ea22426f79bd6aa4b09acdaa56976dda780e2d17390f7eddd96e",
+      "file_modified_at": "2026-09-30T07:16:07.076645+00:00"
+    },
+    {
+      "name": "search-1487x1010",
+      "url": "http://127.0.0.1:4174/knowledge",
+      "headings": [
+        {
+          "size": "24px",
+          "text": "资料",
+          "top": 348.8000183105469,
+          "x": 376.4624938964844
+        },
+        {
+          "size": "20px",
+          "text": "本文目录",
+          "top": 168,
+          "x": 256
+        },
+        {
+          "size": "48px",
+          "text": "协作与验收指南",
+          "top": 168,
+          "x": 496
+        },
+        {
+          "size": "24px",
+          "text": "来源与版本",
+          "top": 168,
+          "x": 1141.5999755859375
+        },
+        {
+          "size": "24px",
+          "text": "协作与验收指南",
+          "top": 1275.800048828125,
+          "x": 256
+        },
+        {
+          "size": "20px",
+          "text": "命令面板",
+          "top": 47.5,
+          "x": 474.3999938964844
+        }
+      ],
+      "overflow": false,
+      "title": "协作与验收指南",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "search-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "f78c9dfb9cb005d547edb8f5f5f0d418236110ab47f8cdddcda36673f1900054",
+      "file_modified_at": "2026-09-30T07:25:16.532238+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "settings-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "85903224b9a6fced4b5b28e8555d4386054f55b41e5d54bb2ea54e18bd705b03",
+      "file_modified_at": "2026-09-30T06:46:39.601937+00:00"
+    },
+    {
+      "name": "task-artifacts-1487x1010",
+      "url": "http://127.0.0.1:4174/tasks/33333333-3333-4333-8333-333333333333",
+      "headings": [
+        {
+          "size": "48px",
+          "text": "确定实验评价指标",
+          "top": 137,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "人工编辑与保存版本",
+          "top": 429.8000183105469,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "版本与接受",
+          "top": 1236,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "检查与完成",
+          "top": 1820.2000732421875,
+          "x": 280.8000183105469
+        }
+      ],
+      "overflow": false,
+      "title": "确定实验评价指标",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "task-artifacts-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "7e2bd11736f81893f8506111d5f96d114c05273449b00cd7ee669ecfd1150efa",
+      "file_modified_at": "2026-09-30T07:23:51.181808+00:00"
+    },
+    {
+      "name": "task-assist-1487x1010",
+      "url": "http://127.0.0.1:4174/tasks/33333333-3333-4333-8333-333333333333?skill=assist",
+      "headings": [
+        {
+          "size": "48px",
+          "text": "确定实验评价指标",
+          "top": 184.40000915527344,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "会话",
+          "top": 403.1000061035156,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "本次显式选择的资料",
+          "top": 625.1000366210938,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "消息与提案",
+          "top": 867.2999877929688,
+          "x": 280.8000183105469
+        }
+      ],
+      "overflow": false,
+      "title": "确定实验评价指标",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "task-assist-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "af16a896586e6a00ab0b055cdee40b3f3207ca86fb95f1e24db5e87c842b021e",
+      "file_modified_at": "2026-09-30T08:32:29.761929+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "task-create-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "021b3761518f756ae726be73ae0f2c9abf0f2f91a523e6634a29b530de11ab3c",
+      "file_modified_at": "2026-09-30T07:14:44.766203+00:00"
+    },
+    {
+      "name": "task-definition-1487x1010",
+      "url": "http://127.0.0.1:4174/tasks/33333333-3333-4333-8333-333333333333?skill=definition",
+      "headings": [
+        {
+          "size": "48px",
+          "text": "当前任务定义",
+          "top": 184.40000915527344,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "已接受的当前事实",
+          "top": 426.2000122070313,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "Skill 建议",
+          "top": 874.9000244140625,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "确切 Run / Verification 来源",
+          "top": 1072.4000244140625,
+          "x": 280.8000183105469
+        }
+      ],
+      "overflow": false,
+      "title": "当前任务定义",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "task-definition-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "a83f6edff259972fecf62d4a9f125da933bca8c93783d919eaac3880b3baa204",
+      "file_modified_at": "2026-09-30T07:24:22.469810+00:00"
+    },
+    {
+      "name": "task-detail-1487x1010",
+      "url": "http://127.0.0.1:4174/tasks/33333333-3333-4333-8333-333333333333",
+      "headings": [
+        {
+          "size": "48px",
+          "text": "确定实验评价指标",
+          "top": 137,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "验收依据",
+          "top": 429.8000183105469,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "验收标准",
+          "top": 1307.5999755859375,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "编辑入口",
+          "top": 104,
+          "x": 1093.5999755859375
+        },
+        {
+          "size": "24px",
+          "text": "前置依赖",
+          "top": 468.8000183105469,
+          "x": 1093.5999755859375
+        }
+      ],
+      "overflow": false,
+      "title": "确定实验评价指标",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "task-detail-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "075262cf223b099be7803ad76ceb0d37e93ae0eb3afa48ee57552f8c2dcbe4f5",
+      "file_modified_at": "2026-09-30T07:23:50.729536+00:00"
+    },
+    {
+      "name": "task-verification-1487x1010",
+      "url": "http://127.0.0.1:4174/tasks/33333333-3333-4333-8333-333333333333?skill=verification",
+      "headings": [
+        {
+          "size": "48px",
+          "text": "当前验收与验证来源",
+          "top": 184.40000915527344,
+          "x": 256
+        },
+        {
+          "size": "24px",
+          "text": "已接受的当前事实",
+          "top": 426.2000122070313,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "Skill 建议",
+          "top": 874.9000244140625,
+          "x": 280.8000183105469
+        },
+        {
+          "size": "24px",
+          "text": "确切 Run / Verification 来源",
+          "top": 1316,
+          "x": 280.8000183105469
+        }
+      ],
+      "overflow": false,
+      "title": "当前验收与验证来源",
+      "viewport": [
+        1487,
+        1010
+      ],
+      "dom_observation_available": true,
+      "file": "task-verification-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "62a7d05d561fea7de2ad6eff5a17236bb0884ffe9d7ce2d524207b7f20c52c6b",
+      "file_modified_at": "2026-09-30T07:24:49.095501+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "tasks-1487x1010.jpg",
+      "image_pixels": [
+        1487,
+        1010
+      ],
+      "sha256": "528a67272874a734cb2620dbe98fb0e1c41ad4bb0818ba0ea40a7adfa4bdeba7",
+      "file_modified_at": "2026-09-30T06:46:39.918072+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "today-1487x1010.jpg",
+      "image_pixels": [
+        1487,
+        1010
+      ],
+      "sha256": "98375c4d363d2f2c0eb5b211557b076104da4df0b26276f43ff2a8a6053a24a4",
+      "file_modified_at": "2026-09-30T06:36:05.321364+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "workbench-development-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "89c574ec8c8e0d16544810a010361b03a8173094b1c83f2ac9a53d84768315f1",
+      "file_modified_at": "2026-09-30T07:14:13.880121+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "workbench-general-1487x1010.jpg",
+      "image_pixels": [
+        1477,
+        1003
+      ],
+      "sha256": "9dc374322dcefd0cbd6f807d4f85d61ccf24e4bbee90a79ad787efc830b123c8",
+      "file_modified_at": "2026-09-30T07:14:02.399721+00:00"
+    },
+    {
+      "dom_observation_available": false,
+      "file": "workbench-thesis-1487x1010.jpg",
+      "image_pixels": [
+        1487,
+        1010
+      ],
+      "sha256": "fa908c726527c43dacc2327adb3631701f7312b661383b281e68ca49690b509a",
+      "file_modified_at": "2026-09-30T07:14:13.429462+00:00"
+    }
+  ],
+  "composites": [
+    {
+      "file": "page-overview.png",
+      "sha256": "3869e5fca87c63a6d8bf025f3dbc2704b67640b7665bfc4ee811da6c1b44df53"
+    },
+    {
+      "file": "collaboration-reference-final.png",
+      "sha256": "2007a393dc2a713a6f1e0aa1fa7eaaa85f27a78937cc227bf7ce6541bbc73d6c"
+    }
+  ]
+}

@@ -182,6 +182,28 @@ describe("协作工作区主路径", () => {
     view.unmount();
   });
 
+  it("紧凑判断收起说明；请求修改缺说明时展开且不提交新命令", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: Record<string, unknown>[] = [];
+    const read = router({});
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      if (init?.method === "POST") posts.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return read(input, init);
+    }));
+    const view = await mountWorkbench(`/agent?work=${taskId}`); await flush(80);
+    expect(view.wrapper.get('[data-testid="review-feedback-details"]').attributes("open")).toBeUndefined();
+    await view.wrapper.get('[data-testid="review-decision-REQUEST_CHANGES"]').trigger("click"); await flush();
+    expect(posts).toHaveLength(0);
+    expect(view.wrapper.get('[data-testid="review-feedback-details"]').attributes("open")).toBeDefined();
+    expect(view.wrapper.text()).toContain("请求修改时请说明需要调整的内容。");
+    await view.wrapper.get(`#review-feedback-${reviewId}`).setValue("补充计算口径");
+    await view.wrapper.get('[data-testid="collab-side-tab-CHECK"]').trigger("click");
+    await view.wrapper.get('[data-testid="collab-side-tab-DOCUMENT"]').trigger("click");
+    expect((view.wrapper.get(`#review-feedback-${reviewId}`).element as HTMLTextAreaElement).value).toBe("补充计算口径");
+    expect(view.wrapper.get('[data-testid="review-feedback-details"]').attributes("open")).toBeDefined();
+    view.unmount();
+  });
+
   it("Review 判定：核对成功后通过原决定接口提交确切身份", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     let decided = false;
@@ -362,7 +384,7 @@ describe("协作工作区主路径", () => {
     expect(view.wrapper.get('[data-testid="run-control"]').text()).toContain("控制提交回执表示 PENDING");
     // 判断卡内联在文档页签正文下方。
     expect(view.wrapper.get('[data-testid="collab-judgment"]').text()).toContain("等待你的判断");
-    expect(view.wrapper.get('[data-testid="collab-judgment"]').text()).toContain("Review 只保存你的判断，不转移执行权");
+    expect(view.wrapper.get('[data-testid="collab-judgment"]').text()).toContain("判断不会暂停执行或转移执行权");
     // 执行进展收在右栏检查页签，不再占据对话主区。
     expect(view.wrapper.find('[data-testid="collab-run-progress"]').exists()).toBe(false);
     await view.wrapper.get('[data-testid="collab-side-tab-CHECK"]').trigger("click");

@@ -1,9 +1,0 @@
-[
-  {
-    "route": "/tasks",
-    "title": "任务",
-    "bodyFont": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
-    "overflow": false,
-    "alerts": []
-  }
-]

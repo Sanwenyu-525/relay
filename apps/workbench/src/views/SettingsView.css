@@ -1,5 +1,8 @@
 .settings-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; padding: var(--relay-layout-main-padding); }
-.settings-page > h1 { margin-bottom: var(--relay-space-3); }
+.settings-page > h1 { margin-bottom: var(--relay-space-3); font-size: var(--relay-font-size-page); }
+@media (max-width: 60rem) {
+  .settings-page > h1 { font-size: var(--relay-font-size-compactPage); }
+}
 .settings-page .page-lede { margin-bottom: var(--relay-space-6); }
 .settings-card { margin-top: var(--relay-space-6); }
 .settings-definition-list { margin: var(--relay-space-4) 0 0; display: grid; gap: var(--relay-space-3); }

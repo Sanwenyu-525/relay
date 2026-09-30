@@ -273,7 +273,10 @@ export function ProjectConnectionsView() {
     <p className="page-lede">连接限定能力与目标；权限策略单独控制 AUTO、ASK、DENY。创建连接后仍默认拒绝。</p>
     <ProjectNav projectId={projectId} active="connections" />
     <p><Link className="inline-link" to={`/projects/${projectId}`}>返回原项目页</Link></p>
-    <ViewConfigurationPanel client={client} projectId={projectId} projectArchivedAt={projectArchivedAt} />
+    <details className="connections-view-configuration">
+      <summary>工作台默认视图与页面顺序</summary>
+      <ViewConfigurationPanel client={client} projectId={projectId} projectArchivedAt={projectArchivedAt} />
+    </details>
     {client === null ? <p className="warning-callout" role="status">当前为示例数据预览；没有真实连接或权限配置。请先连接本机 API。</p> : <>
       <div className="connections-title"><h2>{snapshot?.project.title ?? "当前项目"}</h2>
         <button className="secondary-button" type="button" onClick={() => { void refresh(client); }} disabled={loading || busy}>刷新服务端配置</button></div>

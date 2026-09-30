@@ -203,4 +203,46 @@ describe("项目 ViewConfiguration 前端", () => {
     expect(mounted.wrapper.text()).toContain("这只是临时浏览，尚未保存为默认视图");
     expect(fetchMock.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET")).toBe(true);
   });
+
+  it("工作台配置默认收起，展开与收起保留已挂载配置和原待决命令", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-bearer-token-0123456789abcdef" });
+    const posts: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if (path === viewPath && init?.method === "POST") {
+        posts.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        throw new TypeError("connection closed");
+      }
+      if (path.startsWith("/commands/")) return response(404, { code: "COMMAND_NOT_FOUND", detail: "not found" });
+      if (path === viewPath) return response(200, config("thesis", "4"));
+      if (path === `/projects/${projectId}`) return response(200, { id: projectId, title: "通用工作台",
+        project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
+      if (path === `/projects/${projectId}/state`) return response(200, { project_id: projectId, phase_key: "PLANNING",
+        revision: "1", next_action_task_id: null, selected_artifact_version_refs: [], completed_highlight_refs: [] });
+      if (path === `/tasks?project_id=${projectId}`) return response(200, { items: [], next_cursor: null });
+      throw new Error(`Unexpected ${path}`);
+    }));
+    const mounted = await mountWorkbench(`/projects/${projectId}/workbench/general`);
+    unmount = mounted.unmount;
+    await flush();
+    const disclosure = mounted.wrapper.get('[data-testid="workbench-view-configuration"]');
+    const panel = disclosure.get(".view-configuration-panel").element;
+    expect((disclosure.element as HTMLDetailsElement).open).toBe(false);
+    expect(disclosure.get("summary").text()).toBe("默认视图与页面配置");
+    expect(disclosure.text()).toContain("当前默认：论文 · 配置修订 v4");
+    expect(mounted.wrapper.get("#workbench-next").element?.closest("details")).toBeNull();
+    await disclosure.get("summary").trigger("click");
+    await disclosure.get('[data-testid="view-save-default"]').trigger("click");
+    await flush();
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({ expected_revision: "4", kind: "general" });
+    const pending = disclosure.get('[data-testid="view-pending"]').element;
+    await disclosure.get("summary").trigger("click");
+    await disclosure.get("summary").trigger("click");
+    expect(disclosure.get(".view-configuration-panel").element).toBe(panel);
+    expect(disclosure.get('[data-testid="view-pending"]').element).toBe(pending);
+    expect(disclosure.get('[data-testid="view-pending"]').text()).toContain(`原 command_id：${posts[0].command_id}`);
+    expect(disclosure.get('[data-testid="view-save-default"]').attributes("disabled")).toBeDefined();
+    expect(posts).toHaveLength(1);
+  });
 });

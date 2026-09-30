@@ -17,6 +17,8 @@ $node = Join-Path $workspaceRoot '.research\runtime-cache\node-v24.21.0-win-x64\
 $corepack = Join-Path (Split-Path -Parent $node) 'node_modules\corepack\dist\corepack.js'
 $vsDevCmd = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat'
 $workbenchRoot = Join-Path $appsRoot 'workbench'
+$fontLicenseSource = Join-Path $workbenchRoot 'public\licenses\NOTO-FONTS-LICENSE.txt'
+$fontLicenseDist = Join-Path $workbenchRoot 'dist\licenses\NOTO-FONTS-LICENSE.txt'
 $helperRoot = Join-Path $appsRoot 'file-io-helper'
 $helperExe = Join-Path $helperRoot 'target\release\relay-file-io-helper.exe'
 $cargoReleaseRoot = Join-Path $tauriRoot 'target\release'
@@ -46,11 +48,11 @@ function Invoke-Pnpm {
 
 function Get-BuildInputFingerprint {
   $inputs = @()
-  foreach ($directory in @('apps\api\src', 'apps\api\migrations', 'apps\workbench\src', 'apps\desktop\src-tauri\src', 'apps\desktop\scripts', 'apps\file-io-helper\src')) {
+  foreach ($directory in @('apps\api\src', 'apps\api\migrations', 'apps\workbench\src', 'apps\workbench\public\licenses', 'apps\desktop\src-tauri\src', 'apps\desktop\scripts', 'apps\file-io-helper\src')) {
     $inputs += @(Get-ChildItem -LiteralPath (Join-Path $workspaceRoot $directory) -Recurse -File)
   }
   foreach ($relative in @(
-    'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'apps\api\package.json', 'apps\api\tsconfig.json',
+    'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'docs\frontend\design-tokens.json', 'apps\api\package.json', 'apps\api\tsconfig.json',
     'apps\workbench\package.json', 'apps\workbench\pnpm-lock.yaml', 'apps\workbench\tsconfig.json',
     'apps\workbench\vite.config.ts', 'apps\workbench\index.html', 'apps\desktop\package.json',
     'apps\desktop\pnpm-lock.yaml', 'apps\desktop\pnpm-workspace.yaml',
@@ -77,6 +79,11 @@ if (-not $SkipInstall) {
 }
 Invoke-Pnpm $workspaceRoot @('--filter', '@relay-agent/api', 'build')
 Invoke-Pnpm $workbenchRoot @('build')
+if (-not (Test-Path -LiteralPath $fontLicenseDist -PathType Leaf) -or
+    (Get-FileHash -LiteralPath $fontLicenseDist -Algorithm SHA256).Hash -ne
+    (Get-FileHash -LiteralPath $fontLicenseSource -Algorithm SHA256).Hash) {
+  throw 'The frontend build did not preserve the distributed font license'
+}
 
 function Remove-GeneratedStage {
   param([string]$Stage)
@@ -130,7 +137,21 @@ New-Item -ItemType Directory -Path $resourceRoot -Force | Out-Null
 Remove-GeneratedStage $apiStage
 Remove-GeneratedStage $lockedStage
 Invoke-Pnpm $workspaceRoot @('--filter', '@relay-agent/api', 'deploy', '--prod', $lockedStage)
-Invoke-Pnpm $workspaceRoot @('--config.node-linker=hoisted', '--filter', '@relay-agent/api', 'deploy', '--prod', $apiStage)
+# pnpm 9 deploy disables lockfile reads with the hoisted linker. Install the
+# reviewed deploy files using the workspace lock instead, rebased to this stage.
+New-Item -ItemType Directory -Path $apiStage -Force | Out-Null
+foreach ($entry in @('dist', 'migrations', 'package.json')) {
+  Copy-Item -LiteralPath (Join-Path $lockedStage $entry) -Destination $apiStage -Recurse
+}
+$deployLockPath = Join-Path $apiStage 'pnpm-lock.yaml'
+$workspaceLockText = [IO.File]::ReadAllText((Join-Path $workspaceRoot 'pnpm-lock.yaml'))
+$apiImporterPattern = '(?m)^  \.: \{\}\r?\n\r?\n  apps/api:\r?$'
+if ([regex]::Matches($workspaceLockText, $apiImporterPattern).Count -ne 1) {
+  throw 'The workspace lock must have an empty root importer followed by apps/api'
+}
+[IO.File]::WriteAllText($deployLockPath, [regex]::Replace($workspaceLockText, $apiImporterPattern, '  .:'), (New-Object Text.UTF8Encoding($false)))
+Invoke-Pnpm $apiStage @('install', '--prod', '--frozen-lockfile', '--ignore-workspace', '--config.node-linker=hoisted')
+Remove-Item -LiteralPath $deployLockPath
 
 function Inspect-InstalledPackages {
   param([string]$Stage)
@@ -223,9 +244,10 @@ Copy-Item -LiteralPath $compiledExe -Destination $exe
 Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'node.exe') -Destination (Join-Path $releaseRoot 'node.exe')
 Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'relay-file-io-helper.exe') -Destination (Join-Path $releaseRoot 'relay-file-io-helper.exe')
 Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'api') -Destination $releaseRoot -Recurse
+Copy-Item -LiteralPath (Join-Path $workbenchRoot 'dist\licenses') -Destination $releaseRoot -Recurse
 
 $releaseEntries = @(Get-ChildItem -LiteralPath $releaseRoot -Force | Select-Object -ExpandProperty Name | Sort-Object)
-if (($releaseEntries -join '|') -ne (@('api', 'node.exe', 'relay-desktop.exe', 'relay-file-io-helper.exe') -join '|')) {
+if (($releaseEntries -join '|') -ne (@('api', 'licenses', 'node.exe', 'relay-desktop.exe', 'relay-file-io-helper.exe') -join '|')) {
   throw "Final release contains unexpected top-level entries: $($releaseEntries -join ', ')"
 }
 
@@ -271,10 +293,11 @@ $sourceHashes['desktop'] = Get-FileHashes $desktopRoot @('src-tauri\src', 'scrip
 )
 $sourceHashes['api'] = Get-FileHashes (Join-Path $appsRoot 'api') @('src', 'migrations') @('package.json', 'tsconfig.json')
 $sourceHashes['file_io_helper'] = Get-FileHashes $helperRoot @('src') @('Cargo.toml', 'Cargo.lock')
-$sourceHashes['workbench'] = Get-FileHashes $workbenchRoot @('src') @('package.json', 'pnpm-lock.yaml', 'vite.config.ts', 'tsconfig.json', 'index.html')
+$sourceHashes['workbench'] = Get-FileHashes $workbenchRoot @('src', 'public\licenses') @('package.json', 'pnpm-lock.yaml', 'vite.config.ts', 'tsconfig.json', 'index.html')
 $sourceHashes['workspace_lock'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'pnpm-lock.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
 $sourceHashes['workspace_manifest'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'pnpm-workspace.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
-$resourceHashes = Get-FileHashes $releaseRoot @('api') @('node.exe', 'relay-file-io-helper.exe')
+$sourceHashes['design_tokens'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'docs\frontend\design-tokens.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+$resourceHashes = Get-FileHashes $releaseRoot @('api', 'licenses') @('node.exe', 'relay-file-io-helper.exe')
 
 $manifest = [ordered]@{
   schema_version = 1
@@ -288,6 +311,9 @@ $manifest = [ordered]@{
   resource_file_sha256 = $resourceHashes
   resource_inventory = $releaseApiEntries
   forbidden_config_files = $releaseForbidden.Count
+}
+if ((Get-BuildInputFingerprint) -ne $buildInputFingerprint) {
+  throw 'Build input changed during resource publication; artifact manifest was not published'
 }
 $manifestPath = Join-Path $releaseRoot 'desktop-build-manifest.json'
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding utf8

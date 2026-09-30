@@ -1,0 +1,54 @@
+{
+  "ok": true,
+  "failures": [],
+  "source_files_verified": 389,
+  "source_group_counts": {
+    "desktop": 22,
+    "api": 235,
+    "file_io_helper": 4,
+    "workbench": 125
+  },
+  "resource_files_verified": 17177,
+  "links": 0,
+  "forbidden_config_files": 0,
+  "api_inventory": [
+    "dist",
+    "migrations",
+    "node_modules",
+    "package.json"
+  ],
+  "production_package_versions_verified": 89,
+  "openai_version": "7.23.0",
+  "workspace_lock_sha256": "d57670f94f7846e0355581bf1be9afc86c8d8f5af38af754a4378898ef43595c",
+  "manifest_sha256": "9106553de143c7c1f6594cef18e854d60ab4026c777386f39d55f52454a0f9de",
+  "executable_sha256": "8da257892a739b5ffeaeba30bd38336a22eb18e315ee08bfea91d5d8cf76069b",
+  "build_input_fingerprint_sha256": "98b75f30f83119f7d9ea30512ba0dd767ac30452f098d00440717baa94890433",
+  "design_tokens_sha256": "327c9d5387265693c651325dcfead88c6667c523b1dd951033e09bd0036eebc8",
+  "font_license_sha256": "a04ca3bce2e04d64b027af206e4ea2665b7968ff597ef1d8bef2a45866341c3a",
+  "font_license_copies_verified": 3,
+  "font_copyright_notices_verified": 2,
+  "font_bytes": [
+    {
+      "family": "Noto Sans SC",
+      "sha256": "15027a7dff8f15a7fd784930b5490e6801de2f63765863a1c74bd785865fbac4",
+      "dist_sha256": "15027a7dff8f15a7fd784930b5490e6801de2f63765863a1c74bd785865fbac4"
+    },
+    {
+      "family": "Noto Serif SC",
+      "sha256": "bd0ad622b985668ec0a2f2b902cc5db66ddba155ef190bbd7f55192fccbcf745",
+      "dist_sha256": "bd0ad622b985668ec0a2f2b902cc5db66ddba155ef190bbd7f55192fccbcf745"
+    }
+  ],
+  "final_workbench_source_sha256": {
+    "src/styles.css": "4172e65fc5875184e7f4187e92cc4a3aeeef160468cbf939ada9a9d5ce556536",
+    "src/views/TaskDetailView.css": "e90c11c27975e9b4583aa2c88792c1f4cf8fcf775ab5ae78280df13a5376dc3d",
+    "src/views/ActivityView.tsx": "da6b91a7db5f81c49052bf664b039dc825eb2e6aeff02e38b0c3f45e8c4f50c2",
+    "src/views/KnowledgeView.tsx": "0c8ed8ed263d22c6a97d5d47f46c803b59db0bac7ffaaa383adfcfae0abb0c7a",
+    "src/views/KnowledgeView.css": "6988509d835ca2598f9f5669ead5b19c4ed85c0a084b90da30a9bf1409691269",
+    "src/views/ConnectionsView.tsx": "24b5109cc9e67817924ef33e56a63cb07ead898a4057ad4fc7bbbbf11c043ba0",
+    "src/views/ConnectionsView.css": "4487d2f3b00abf5c40a66b5692c827a831e0357904b1a5f19d06a540825cde85",
+    "src/components/AttentionQueue.tsx": "a0d6c0aaf03a89da77d0bf7391ffbf6b72ddac3cde77a654f6ba32ffe21758f9",
+    "src/views/AssistView.tsx": "b04c7dc624f13c55270f204ffbbba04cb843401574369ffae21711ab0b396989",
+    "src/components/AppShell.tsx": "958a105bfd9ed1b849a34d19de9793b6a4f804a52748d49642e334385df0cb0b"
+  }
+}

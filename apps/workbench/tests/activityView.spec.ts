@@ -25,6 +25,57 @@ function activity(id: string, summary: string) { return { id, created_at: "2026-
   ] }; }
 
 describe("P15 Activity 只读追溯", () => {
+  it("从任务深链进入时展开已应用的范围，不将子范围呈现为全空间", async () => {
+    connect();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input).slice(root.length)).toBe(`/activities?task_id=${taskId}`);
+      return response({ items: [], next_cursor: null });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/activity?task_id=${taskId}`); unmount = mounted.unmount;
+    const disclosure = mounted.wrapper.get('[data-testid="activity-advanced-filter"]');
+    expect((disclosure.element as HTMLDetailsElement).open).toBe(true);
+    expect(disclosure.get("summary").text()).toContain("已应用范围");
+    expect((disclosure.findAll("input")[1]!.element as HTMLInputElement).value).toBe(taskId);
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("高级筛选默认收起且常驻，展开和草稿输入不会自动查询或改变执行方入口", async () => {
+    connect();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input).slice(root.length)).toBe("/activities");
+      return response({ items: [], next_cursor: null });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench("/activity"); unmount = mounted.unmount;
+    const disclosure = mounted.wrapper.get('[data-testid="activity-advanced-filter"]');
+    const form = disclosure.get("form").element;
+    const draft = disclosure.get("input").element;
+    expect((disclosure.element as HTMLDetailsElement).open).toBe(false);
+    expect(disclosure.get("summary").text()).toBe("按项目、任务与时间筛选");
+    const actors = mounted.wrapper.get('[role="group"][aria-label="按执行方筛选（仅已加载项）"]');
+    expect(actors.element?.closest("details")).toBeNull();
+    expect(actors.findAll("button").map((button) => button.text())).toEqual(["全部", "我", "AI", "系统"]);
+    const initialReads = fetchMock.mock.calls.length;
+    expect(initialReads).toBeGreaterThan(0);
+    await disclosure.get("summary").trigger("click");
+    await disclosure.get("input").setValue(projectId);
+    await disclosure.get("summary").trigger("click");
+    await disclosure.get("summary").trigger("click");
+    const scope = mounted.wrapper.get(".activity-filter-scope");
+    await scope.get("summary").trigger("click");
+    await scope.get("summary").trigger("click");
+    await flush();
+    expect(disclosure.get("form").element).toBe(form);
+    expect(disclosure.get("input").element).toBe(draft);
+    expect((draft as HTMLInputElement).value).toBe(projectId);
+    expect(scope.text()).toContain("服务端暂不支持按执行方分页筛选（待接入）");
+    expect(scope.text()).toContain("时间按本机时区输入，发送为 UTC");
+    expect(fetchMock).toHaveBeenCalledTimes(initialReads);
+    expect(mounted.router.currentRoute.value.path).toBe("/activity");
+    expect(mounted.router.currentRoute.value.query).toEqual({});
+  });
+
   it("fixture 不查 API；live 按服务端游标续页，安全摘要与确切引用可达", async () => {
     const fixtureFetch = vi.fn(); vi.stubGlobal("fetch", fixtureFetch);
     let mounted = await mountWorkbench("/activity"); unmount = mounted.unmount;

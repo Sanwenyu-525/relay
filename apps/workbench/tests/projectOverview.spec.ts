@@ -10,6 +10,7 @@ describe("项目总览（UI-02）", () => {
     unmount = mounted.unmount;
     const text = mounted.wrapper.text();
     expect(mounted.wrapper.find('[data-testid="project-overview-fixture"]').exists()).toBe(true);
+    expect(mounted.wrapper.get(".breadcrumbs").text()).toContain("总览");
     expect(text).toContain("项目当前状态");
     expect(text).toContain("状态 v");
     expect(text).toContain("研究可追溯");

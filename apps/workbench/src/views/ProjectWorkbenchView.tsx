@@ -249,9 +249,12 @@ export default function ProjectWorkbenchView() {
     <p className="eyebrow">{snapshot.title}</p><div className="workbench-heading"><div><h1>项目工作台</h1><p className="page-lede">{snapshot.source === "live" ? "同一项目事实的只读视图" : "示例数据预览"} · 项目类型：{typeLabel(snapshot.projectType)} · 当前阶段：{phaseLabel(snapshot.phaseKey)}</p></div><button className="secondary-button" type="button" onClick={() => setReloadKey((value) => value + 1)}><RotateCcw aria-hidden="true" />刷新事实</button></div>
     <ProjectNav projectId={id} active="workbench" />
     <nav className="subnav" aria-label="工作台视图">{kinds.map((item) => <Link key={item.kind} className={`subnav-item${item.kind === kind ? " subnav-item--active" : ""}`} aria-current={item.kind === kind ? "page" : undefined} to={`/projects/${id}/workbench/${item.kind}${snapshot.source === "fixture" && query.toString() ? `?${query.toString()}` : ""}`}>{item.label}</Link>)}</nav>
-    <p className="helper-text">上方切换仅供浏览。保存默认视图需明确提交；项目阶段仍由项目类型和服务端 State 决定，不会开始、暂停或改写任务与 Run。</p>
-    <ViewConfigurationPanel client={client} projectId={id} browseKind={kind}
-      projectArchivedAt={snapshot.archivedAt} />
+    <details className="workbench-view-configuration" data-testid="workbench-view-configuration">
+      <summary>默认视图与页面配置</summary>
+      <p className="helper-text">上方切换仅供浏览。保存默认视图需明确提交；项目阶段仍由项目类型和服务端 State 决定，不会开始、暂停或改写任务与 Run。</p>
+      <ViewConfigurationPanel client={client} projectId={id} browseKind={kind}
+        projectArchivedAt={snapshot.archivedAt} />
+    </details>
     {snapshot.source === "live" && kind !== "general" && <div className="workbench-page-note"><p className="helper-text">当前已读取 {snapshot.tasks.length} 条项目任务；{snapshot.nextCursor ? "还有后续页，下面的任务关联投影并非项目全量。" : "服务端未返回下一页游标。"}</p>{pageError && <p className="action-error" role="alert">{pageError}</p>}{snapshot.nextCursor && <button className="secondary-button" type="button" disabled={pageLoading} onClick={() => void loadMore()}>{pageLoading ? "正在读取下一页" : "继续加载任务"}</button>}</div>}
     {kind === "general" && <>
       <section className="workbench-section" aria-labelledby="workbench-next"><h2 id="workbench-next">项目下一步</h2>{snapshot.nextAction ? <div className="workbench-item"><strong>{snapshot.nextAction.title ?? "目标任务暂不可读取"}</strong>{snapshot.nextAction.id && <Link className="text-link" to={`/tasks/${snapshot.nextAction.id}`}>打开任务</Link>}</div> : <p>Project State 尚未指定下一步。任务列表可供人工选择；此处不自动生成建议。</p>}</section>

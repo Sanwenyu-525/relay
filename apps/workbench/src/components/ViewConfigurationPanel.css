@@ -1,8 +1,8 @@
-.view-configuration-panel { margin-top: var(--relay-space-5); padding: var(--relay-space-5); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-panel); }
+.view-configuration-panel { margin-top: var(--relay-space-4); padding: var(--relay-space-4); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-panel); }
 .view-configuration-panel h2 { margin-top: 0; }
 .view-configuration-panel code { overflow-wrap: anywhere; }
 .view-configuration-panel .field { max-width: 20rem; }
-.view-configuration-pages { padding-left: var(--relay-space-5); }
+.view-configuration-pages { padding-left: var(--relay-space-4); }
 .view-configuration-pages li { padding: var(--relay-space-2) 0; }
 .view-configuration-pages small { color: var(--relay-color-text-secondary); }
 .view-configuration-panel .warning-callout, .view-configuration-panel .action-error, .view-configuration-panel .success-callout { margin-top: var(--relay-space-4); }

@@ -421,15 +421,20 @@ export default function TodayView() {
   }
 
   return <section className="today-page">
+    <div className="today-body">
+      <div className="today-main">
     <p className="eyebrow">{longDate} · {weekday}</p>
     <h1>把今天留给重要的事</h1>
     <p className="page-lede">从上次停下的地方，继续推进。</p>
-    <p className="page-note">置顶和今日焦点帮助安排今天；受阻任务需先处理阻碍。<details className="today-arrange-note">
+    <div className="today-intro-note">
+      <p className="page-note">置顶和今日焦点帮助安排今天；受阻任务需先处理阻碍。</p>
+      <details className="today-arrange-note">
       <summary>安排说明</summary>
       <p>任务能否开始、如何排序由服务端按当前事实判定；置顶、延后和今日焦点只表达你的安排，不会绕过任务准入。等待中的任务里，已置顶的会单独列在「已置顶，待处理」。</p>
       <p>跨项目的人工待处理事项在 <Link to="/tasks?tab=attention">人工待处理</Link> 列表中查看。</p>
       {current && <p>当前选择版本 v{current.selectionRevision}。</p>}
-    </details></p>
+      </details>
+    </div>
     {client === null ? <div className="warning-callout" role="status">当前为示例数据预览，没有真实 Today 投影。<Link to="/projects">打开项目</Link> 或 <Link to="/tasks">打开任务</Link> 继续人工工作。</div> : <>
       <div className="today-query" data-testid="today-query">
         <label className="today-query__field"><span className="today-query__label">日期</span>
@@ -452,7 +457,7 @@ export default function TodayView() {
         </form>}
       </div>
       {readError && <p className="action-error" role="alert">读取失败：{readError}</p>}
-      {message && <div className="success-callout" role="status">{message}
+      {message && <div className="success-callout" role="status"><p>{message}</p>
         {lastReceiptId && <details className="today-receipt-note"><summary>核对信息</summary>
           <p>原 command_id：{lastReceiptId}</p></details>}</div>}
       {actionError && <p className="action-error" role="alert">{actionError}</p>}
@@ -463,8 +468,6 @@ export default function TodayView() {
         <button className="secondary-button" type="button" disabled={submitting} onClick={() => { void checkReceipt(); }}>查询原命令回执</button>
         {mayRetry && <button className="secondary-button" type="button" disabled={submitting} onClick={() => { void sendFrozen(pending, true); }}>用原 ID 和内容重试</button>}
       </div>}
-      <div className="today-body">
-        <div className="today-main">
           {loading && current === null && <p className="today-loading" role="status">正在读取今日安排…</p>}
           {current && <>
         <div className="today-focus" data-testid="today-focus">
@@ -533,8 +536,9 @@ export default function TodayView() {
             {renderGroup("其他等待", waitingOther.length, waitingOther, false)}
           </>}
           </>}
-        </div>
-        <aside className="today-rail" data-testid="today-rail" aria-label="今日页侧栏">
+    </>}
+      </div>
+      {client !== null && <aside className="today-rail" data-testid="today-rail" aria-label="今日页侧栏">
           <section className="today-rail__section" aria-label="等待你的判断">
             <h2>等待你的判断</h2>
             {reviewsState === "loading" && <p className="helper-text" role="status">正在读取待审状态…</p>}
@@ -554,8 +558,7 @@ export default function TodayView() {
             </ul>
           </section>
           <p className="today-rail__note">稍后处理的任务仍保留在任务列表。</p>
-        </aside>
-      </div>
-    </>}
+      </aside>}
+    </div>
   </section>;
 }

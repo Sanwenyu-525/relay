@@ -56,6 +56,7 @@ describe("M04 Assist 真实路由与命令", () => {
     vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench(`/projects/${projectId}?skill=assist`);
     const guides = view.wrapper.findAll("[data-testid='assist-provider-error']");
+    expect(view.wrapper.get(".breadcrumbs").text()).toContain("Assist");
     expect(guides).toHaveLength(6);
     ["认证失败", "限流", "超时", "流中断", "响应结构异常", "网络不可达"].forEach((label, index) => {
       expect(guides[index]!.text()).toContain(label);
@@ -105,6 +106,7 @@ describe("M04 Assist 真实路由与命令", () => {
       throw new Error(`unexpected request ${path}`);
     }); vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench(`/tasks/${otherTaskId}?skill=assist`);
+    expect(view.wrapper.get(".breadcrumbs").text()).toContain("Assist");
     expect(view.wrapper.get('[data-testid="assist-target"]').text()).toContain("历史任务");
     expect(view.wrapper.get('[data-testid="assist-archive-reason"]').text()).toContain("已归档");
     await view.wrapper.get('[data-testid="assist-new-session"]').trigger("click");

@@ -1,4 +1,5 @@
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { resolvedTokenValue } from "../lib/tokens";
 
 /**
  * 侧栏拖拽分隔条：只注入展示层宽度（--relay-sidebar-user-width），不承载业务事实。
@@ -7,7 +8,7 @@ import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
  */
 export const SIDEBAR_MIN_WIDTH_PX = 160;
 export const SIDEBAR_MAX_WIDTH_PX = 320;
-const SIDEBAR_DEFAULT_WIDTH_PX = 208; // 13rem，layout.sidebar.width 默认值，仅用于 aria-valuenow
+const SIDEBAR_DEFAULT_WIDTH_PX = Number.parseFloat(resolvedTokenValue("layout.sidebar.width")) * 16;
 const SIDEBAR_STEP_PX = 16;
 
 export function clampSidebarWidth(value: number): number {

@@ -154,6 +154,7 @@ export default function ActivityView() {
   const connection = useRelayConnection();
   const client = connection.mode === "live" ? connection.client : null;
   const active = filterFromSearch(location.search);
+  const hasActiveFilter = Object.values(active).some(Boolean);
   const filterKey = location.search;
   const [projectId, setProjectId] = useState(active.projectId ?? "");
   const [taskId, setTaskId] = useState(active.taskId ?? "");
@@ -247,6 +248,8 @@ export default function ActivityView() {
   return <section className="activity-page"><p className="eyebrow">工作空间</p><h1>动态</h1>
     <p className="page-lede">这里按时间记录项目里真实发生过的动作，可以按项目、任务、Run 或时间筛选，并直达相关对象。每一次改变都能找到依据。</p>
     {client === null ? <p className="warning-callout" role="status">当前是示例数据预览，没有真实 Activity 记录。<Link to="/projects">打开项目</Link> 继续人工工作。</p> : <>
+      <details className="activity-advanced-filter" data-testid="activity-advanced-filter" open={hasActiveFilter}>
+        <summary>按项目、任务与时间筛选{hasActiveFilter ? " · 已应用范围" : ""}</summary>
       <form className="surface-panel activity-filter" onSubmit={apply}>
         <label>Project ID<input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="可选 UUID" /></label>
         <label>Task ID<input value={taskId} onChange={(event) => setTaskId(event.target.value)} placeholder="可选 UUID" /></label>
@@ -257,6 +260,7 @@ export default function ActivityView() {
         <button className="secondary-button" type="button" disabled={loading} onClick={() => setReload((value) => value + 1)}>刷新当前范围</button>
         {formError && <p className="action-error" role="alert">{formError}</p>}
       </form>
+      </details>
       <div className="activity-toolbar">
         <div className="segmented" role="group" aria-label="按执行方筛选（仅已加载项）">
           {(["ALL", "HUMAN", "AI", "SYSTEM"] as const).map((option) => <button key={option} type="button"
@@ -264,7 +268,10 @@ export default function ActivityView() {
             aria-pressed={actorFilter === option} onClick={() => setActorFilter(option)}>
             {option === "ALL" ? "全部" : actorLabels[option]}</button>)}
         </div>
-        <p className="helper-text">时间按本机时区输入，发送为 UTC；每页由服务端最多返回 30 条，按时间与 ID 倒序。执行方筛选只作用于已加载的 {items.length} 条，服务端暂不支持按执行方分页筛选（待接入）。</p>
+        <details className="activity-filter-scope">
+          <summary>执行方仅筛选已加载的 {items.length} 条 · 范围说明</summary>
+          <p className="helper-text">时间按本机时区输入，发送为 UTC；每页由服务端最多返回 30 条，按时间与 ID 倒序。执行方筛选只作用于已加载的 {items.length} 条，服务端暂不支持按执行方分页筛选（待接入）。</p>
+        </details>
       </div>
       <div className="activity-layout">
         <div className="activity-main">

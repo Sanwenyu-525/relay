@@ -62,14 +62,17 @@ describe("项目内置工作台", () => {
     expect(mounted.wrapper.text()).toContain("示例数据预览");
     expect(mounted.wrapper.text()).toContain("项目类型：论文 · 当前阶段：文献研究");
     expect(mounted.wrapper.text()).toContain("确定实验评价指标");
+    expect((mounted.wrapper.get('[data-testid="workbench-view-configuration"]').element as HTMLDetailsElement).open).toBe(false);
     await mounted.wrapper.findAll('nav[aria-label="工作台视图"] a').find((link) => link.text() === "开发")!.trigger("click");
     await flush();
     expect(mounted.router.currentRoute.value.path).toBe("/projects/project-hci/workbench/development");
     expect(mounted.wrapper.text()).toContain("项目类型：论文 · 当前阶段：文献研究");
     expect(mounted.wrapper.text()).toContain("示例模式不创建真实 Run 或审批");
+    expect((mounted.wrapper.get('[data-testid="workbench-view-configuration"]').element as HTMLDetailsElement).open).toBe(false);
     await mounted.wrapper.findAll('nav[aria-label="工作台视图"] a').find((link) => link.text() === "论文")!.trigger("click");
     await flush();
     expect(mounted.wrapper.text()).toContain("文献综述");
+    expect((mounted.wrapper.get('[data-testid="workbench-view-configuration"]').element as HTMLDetailsElement).open).toBe(false);
     expect(mounted.wrapper.findAll('a[href="/projects/project-hci"]').some((link) => link.text() === "返回原项目页")).toBe(true);
   });
 

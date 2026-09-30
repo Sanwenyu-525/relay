@@ -23,7 +23,7 @@ function readStoredSidebarWidth(): number | null {
 }
 
 const skillPageNames: Record<string, string> = {
-  blueprint: "蓝图预览", resume: "继续项目", definition: "完善定义", verification: "验收方案"
+  overview: "总览", blueprint: "蓝图预览", resume: "继续项目", assist: "Assist", definition: "完善定义", verification: "验收方案"
 };
 
 export default function AppShell({ children, desktopStatus, commandOpen, onCommandOpen, onCommandClose }: {
@@ -118,13 +118,16 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
     const project = /^\/projects\/([^/]+)(?:\/(tasks|knowledge|connections))?$/u.exec(path);
     if (project) {
       const title = connection.mode === "live" ? null : fixtureAdapter.getProjectTitle(project[1] ?? "");
-      const suffix = project[2] === "tasks" ? "任务" : project[2] === "knowledge" ? "资料" : project[2] === "connections" ? "连接" : skillPageNames[query.get("skill") ?? ""] ?? skillPageNames.blueprint;
+      const requested = query.get("skill");
+      const skill = requested === "blueprint" || requested === "resume" || requested === "assist" ? requested : "overview";
+      const suffix = project[2] === "tasks" ? "任务" : project[2] === "knowledge" ? "资料" : project[2] === "connections" ? "连接" : skillPageNames[skill];
       return ["项目", title ?? "当前项目", suffix];
     }
     const task = /^\/tasks\/([^/]+)$/u.exec(path);
     if (task) {
       const title = connection.mode === "live" ? null : fixtureAdapter.getTaskTitle(task[1] ?? "");
-      const suffix = query.get("skill") ? skillPageNames[query.get("skill") ?? ""] ?? skillPageNames.definition : "任务详情";
+      const skill = query.get("skill");
+      const suffix = skill === "definition" || skill === "verification" || skill === "assist" ? skillPageNames[skill] : "任务详情";
       return ["任务", title ?? "当前任务", suffix];
     }
     return ["工作空间"];

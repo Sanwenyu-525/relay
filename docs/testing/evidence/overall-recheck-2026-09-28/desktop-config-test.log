@@ -1,8 +1,0 @@
-   Compiling relay-desktop v0.1.0 (D:\Develop\Relay-Agent\apps\desktop\src-tauri)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.82s
-     Running unittests src\lib.rs (apps\desktop\src-tauri\target\debug\deps\relay_desktop-551f1b5a61834b12.exe)
-error: test failed, to rerun pass `--lib`
-
-Caused by:
-  process didn't exit successfully: `D:\Develop\Relay-Agent\apps\desktop\src-tauri\target\debug\deps\relay_desktop-551f1b5a61834b12.exe desktop_config_accepts_runtime_and_model_keys_and_rejects_others` (exit code: 0xc0000139, STATUS_ENTRYPOINT_NOT_FOUND)
-note: test exited abnormally; to see the full output pass --no-capture to the harness.

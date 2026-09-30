@@ -1,9 +1,9 @@
 {
   "metadata": {
-    "version": "0.2.0",
+    "version": "0.2.1",
     "status": "Proposed",
     "theme": "light",
-    "updated": "2026-09-19",
+    "updated": "2026-09-30",
     "format": "Relay 文档用扁平 token 数据；不是 DTCG 兼容声明或已集成的主题包。",
     "basis": "原始论文验收页参考图与三张页面概念图；色值经采样归一，尺寸/状态/响应式为实现推荐。",
     "unit": "rem 按桌面 WebView 默认 16 CSS px 解释，保留字号缩放；window.content.* 的 number 单位为逻辑 DIP，不能当成物理像素或 rem。",
@@ -300,13 +300,13 @@
     },
     "font.family.ui": {
       "$type": "fontFamily",
-      "$value": "\"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
-      "$description": "图中无可确认字体名；这是本机优先候选，需桌面 WebView 排版验证。"
+      "$value": "\"Relay Sans SC\", \"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans SC\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+      "$description": "首选随应用分发的 OFL Noto Sans SC 可变字体，统一离线 UI 字形与字重；系统字体为加载失败时的回退。图中字体名称无法确认，真实 Windows 排版仍需验证。"
     },
     "font.family.editorial": {
       "$type": "fontFamily",
-      "$value": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", \"SimSun\", serif",
-      "$description": "延续宋体/明朝体方向；不自动下载网络字体，不宣称已获字体分发许可。"
+      "$value": "\"Relay Serif SC\", \"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", \"SimSun\", serif",
+      "$description": "标题与文章使用随应用分发的 OFL Noto Serif SC 可变字体；许可和来源见 workbench/src/assets/fonts，加载字体不访问网络。"
     },
     "font.family.code": {
       "$type": "fontFamily",
@@ -374,7 +374,7 @@
     },
     "layout.sidebar.width": {
       "$type": "dimension",
-      "$value": "13rem"
+      "$value": "13.5rem"
     },
     "layout.sidebar.compactWidth": {
       "$type": "dimension",

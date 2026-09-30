@@ -3,10 +3,13 @@
 .today-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; padding: var(--relay-layout-main-padding); }
 
 /* 主标题使用 compactPage：空态与窄窗不铺 display 尺寸，保留宋体标题气质（角色规则见 design-system）。 */
-.today-page > h1 { margin-bottom: var(--relay-space-2); font-size: var(--relay-font-size-compactPage); }
+.today-main > h1 { margin-bottom: var(--relay-space-2); font-size: var(--relay-font-size-compactPage); }
 .today-page .page-lede { margin-top: 0; margin-bottom: var(--relay-space-3); color: var(--relay-color-text-secondary); }
-.today-page .page-note { margin-bottom: var(--relay-space-6); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
-.today-arrange-note { margin-top: var(--relay-space-1); }
+.today-intro-note { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--relay-space-2);
+  margin-bottom: var(--relay-space-4); }
+.today-page .page-note { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+.today-arrange-note { font-size: var(--relay-font-size-meta); }
+.today-arrange-note[open] { flex-basis: 100%; }
 .today-arrange-note > summary { display: inline; cursor: pointer; color: var(--relay-color-text-secondary); }
 .today-arrange-note > summary:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 .today-arrange-note[open] > summary { margin-bottom: var(--relay-space-1); }
@@ -14,7 +17,7 @@
 
 /* 查询工具条：日期、时区与刷新同一行、同一控件高度，错误贴近字段。 */
 .today-query { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-4);
-  margin-bottom: var(--relay-space-6); }
+  margin-bottom: var(--relay-space-4); }
 .today-query__field, .today-query__timezone { display: flex; align-items: center; gap: var(--relay-space-2); }
 .today-query__label { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .today-query input { width: auto; min-width: 9.5rem; }
@@ -35,16 +38,22 @@
 .today-page .action-error { margin-top: var(--relay-space-3); }
 .today-page .warning-callout, .today-page .success-callout { margin-top: var(--relay-space-4); }
 .today-page .warning-callout button { margin: var(--relay-space-3) var(--relay-space-3) 0 0; }
-.today-page .success-callout { color: var(--relay-color-status-success-text); background: var(--relay-color-status-success-bg); padding: var(--relay-space-4); }
-.today-receipt-note { margin-top: var(--relay-space-2); font-size: var(--relay-font-size-meta); overflow-wrap: anywhere; }
+.today-page .success-callout { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--relay-space-2);
+  color: var(--relay-color-status-success-text); background: var(--relay-color-status-success-bg);
+  padding: var(--relay-space-2) var(--relay-space-3); font-size: var(--relay-font-size-meta); }
+.today-receipt-note { font-size: var(--relay-font-size-meta); overflow-wrap: anywhere; }
+.today-receipt-note[open] { flex-basis: 100%; }
 .today-receipt-note > summary { cursor: pointer; }
 .today-receipt-note p { margin-top: var(--relay-space-1); }
+.today-page [data-testid="today-pending"] { display: block; overflow-wrap: anywhere; }
 .today-loading { margin-top: var(--relay-space-6); color: var(--relay-color-text-secondary); }
 
-/* 主列 + 右判断栏：rail 断点按 design-system 第 5 节——80rem 起窄右区，90rem 起标准右区；
+/* 标题、查询与回执属于主列，右判断栏与日期从页面顶部对齐。
+   rail 断点按 design-system 第 5 节——80rem 起窄右区，90rem 起标准右区；
    窄于 80rem 时右区不常驻，保留「打开待审中心」横幅入口。 */
 .today-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--relay-space-8); align-items: start; }
 .today-main { min-width: 0; }
+.today-main:only-child { grid-column: 1 / -1; }
 .today-rail { display: none; }
 
 @media (min-width: 80rem) {

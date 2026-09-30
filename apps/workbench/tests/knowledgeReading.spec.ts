@@ -35,6 +35,47 @@ afterEach(() => {
 });
 
 describe("知识版本阅读", () => {
+  it("正文独立于资料导航和管理信息，展开导航保留编辑草稿与确切阅读标题", async () => {
+    activate();
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const url = String(input);
+      if (url === `${base}/knowledge`) return response(200, [knowledge()]);
+      if (url === `${base}/knowledge/${knowledgeId}`) return response(200, knowledge());
+      if (url === `${base}/knowledge/${knowledgeId}/versions`) return response(200, [version("2"), version("1")]);
+      if (url === `${base}/knowledge/${knowledgeId}/versions/1/content`) return response(200,
+        { ...content("1", "# 第一节\n所选历史版本的完整正文\n## 第二节\n继续阅读"), title: "所选历史版本标题" });
+      throw new Error(`unexpected request ${url}`);
+    }));
+    const mounted = await mountWorkbench(`/knowledge?kind=KNOWLEDGE&item=${knowledgeId}&version=1`);
+    unmount = mounted.unmount;
+    await flush();
+    const reader = mounted.wrapper.get('[data-testid="knowledge-reader"]');
+    expect(reader.get("h1").text()).toBe("所选历史版本标题");
+    expect(reader.get(".knowledge-reader__main").find('[aria-label="本文目录"]').exists()).toBe(false);
+    expect(reader.get(".knowledge-reader__outline").text()).toContain("第一节");
+    expect(reader.get('[aria-label="来源与版本"]').text()).toContain("v1 · 历史");
+    expect((mounted.wrapper.get('[data-testid="knowledge-library"]').element as HTMLDetailsElement).open).toBe(false);
+    expect((mounted.wrapper.get(".knowledge-search").element as HTMLDetailsElement).open).toBe(false);
+    expect((mounted.wrapper.get(".knowledge-management").element as HTMLDetailsElement).open).toBe(false);
+    const directory = reader.get('[aria-label="本文目录"]').findAll("button");
+    await directory[1].trigger("click");
+    expect(directory[1].attributes("aria-current")).toBe("location");
+    expect(document.activeElement?.textContent).toBe("第二节");
+
+    await mounted.wrapper.get('[data-testid="knowledge-new-version"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="knowledge-text"]').setValue("尚未保存的正文草稿");
+    const draft = mounted.wrapper.get('[data-testid="knowledge-text"]').element;
+    await mounted.wrapper.get(".knowledge-library > summary").trigger("click");
+    expect((mounted.wrapper.get('[data-testid="knowledge-library"]').element as HTMLDetailsElement).open).toBe(true);
+    await mounted.wrapper.get(".knowledge-library > summary").trigger("click");
+    await mounted.wrapper.get(".knowledge-search > summary").trigger("click");
+    await mounted.wrapper.get(".knowledge-management > summary").trigger("click");
+    await flush();
+    expect(mounted.wrapper.get('[data-testid="knowledge-text"]').element).toBe(draft);
+    expect((draft as HTMLTextAreaElement).value).toBe("尚未保存的正文草稿");
+    expect(reader.get("h1").text()).toBe("所选历史版本标题");
+  });
+
   it("搜索命中 v1 后仍打开确切 v1，不跟随当前 v2", async () => {
     activate();
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {

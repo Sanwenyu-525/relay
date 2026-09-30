@@ -94,10 +94,10 @@ export default function AttentionQueue({ client }: { readonly client: RelayApiCl
   const runItems = snapshot?.runs.filter(({ run }) => run.unresolvedOperationIds.length > 0 ||
     run.pendingControlRequest !== null) ?? [];
   const complete = snapshot !== null && snapshot.failures.length === 0 && snapshot.taskPagesComplete;
-  return <section className="skill-page" data-testid="attention-queue">
+  return <section className="skill-page page-primary" data-testid="attention-queue">
     <div className="list-header"><div><p className="eyebrow">跨项目人工待处理</p><h1>需要你查看的事项</h1>
       <p className="page-lede">按 Review、当前 Run 与 Task 的服务端事实分组。每组保留原读取顺序，分组不表示紧急程度或截止时间。</p></div>
-      <button className="secondary-button" type="button" disabled={loading} onClick={() => void load()}>刷新事实</button></div>
+      <button className="secondary-button" type="button" style={{ flexShrink: 0 }} disabled={loading} onClick={() => void load()}>刷新事实</button></div>
     <nav className="subnav" aria-label="任务范围"><Link className="subnav-item" to="/tasks">全部任务</Link>
       <Link className="subnav-item" to="/tasks?tab=inbox">未归属任务收件箱</Link>
       <Link className="subnav-item subnav-item--active" to="/tasks?tab=attention" aria-current="page">人工待处理</Link></nav>

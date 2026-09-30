@@ -1,0 +1,31 @@
+{
+  "ok": true,
+  "failures": [],
+  "source_files_verified": 387,
+  "source_group_counts": {
+    "desktop": 22,
+    "api": 235,
+    "file_io_helper": 4,
+    "workbench": 124
+  },
+  "resource_files_verified": 17176,
+  "links": 0,
+  "forbidden_config_files": 0,
+  "api_inventory": [
+    "dist",
+    "migrations",
+    "node_modules",
+    "package.json"
+  ],
+  "production_package_versions_verified": 89,
+  "openai_version": "7.23.0",
+  "workspace_lock_sha256": "d57670f94f7846e0355581bf1be9afc86c8d8f5af38af754a4378898ef43595c",
+  "manifest_sha256": "3cba77c583e10281888ca42116332a0f7ce964908c6591a9462f1293f6bd9577",
+  "executable_sha256": "3c9f47e0c644fcf2a5934ee23d8e403be3ed13eb868474f9ab2e80862a1a71b8",
+  "build_input_fingerprint_sha256": "5a6d4ecc07eade84140b46fa940d0ea832f623d4343d1e91d9f8704642e86dd8",
+  "final_workbench_source_sha256": {
+    "src/styles.css": "02eb3377da00705eb79e575c97a452d5fb1fa497ae3b61bfef75b220e1337f64",
+    "src/views/TaskDetailView.css": "e90c11c27975e9b4583aa2c88792c1f4cf8fcf775ab5ae78280df13a5376dc3d",
+    "src/views/ActivityView.tsx": "da6b91a7db5f81c49052bf664b039dc825eb2e6aeff02e38b0c3f45e8c4f50c2"
+  }
+}

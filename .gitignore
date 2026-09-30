@@ -12,9 +12,19 @@ dist/
 !.env.example
 !*.env.example
 *.log
-!/docs/testing/evidence/**/*.log
 test-results/
 playwright-report/
+
+# 原始验收过程输出默认留在本机；概要、截图、复跑脚本与历史压缩包保留
+/docs/testing/evidence/**/*.jsonl
+/docs/testing/evidence/**/*source-hashes.json
+/docs/testing/evidence/**/*build-manifest*.json
+/docs/testing/evidence/**/source-input*.json
+/docs/testing/evidence/**/pages.json
+/docs/testing/evidence/**/execution-inputs.json
+/docs/testing/evidence/**/raw.json
+/output/acceptance-raw/
+/output/evidence-maintenance-*/
 
 # 本机临时工具、缓存与覆盖率产物
 .tmp-*/
