@@ -4,6 +4,21 @@
 .agent-assist { display: flex; flex-direction: column; min-height: 0; gap: var(--relay-space-3); }
 .agent-assist-session-bar { flex: none; }
 
+/* 有会话时的会话选择收成一行摘要：只回答“正在看哪个会话”，切换入口按需展开，不独占一行高度。 */
+.agent-assist-session-switch > summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--relay-control-target-minimum);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-assist-session-switch > summary:hover { color: var(--relay-color-text-primary); }
+.agent-assist-session-switch[open] > summary { margin-bottom: var(--relay-space-2); }
+
 .agent-chat-conversation {
   position: relative;
   display: flex;
@@ -26,6 +41,9 @@
 
 /* 消息流自己滚动；目标、事实条和输入区留在视野内。 */
 .agent-chat-transcript-shell { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+/* 消息列与输入器共用同一条居中列，不铺满右侧区域；回到最新按钮随之对齐列边（Codex 参考）。 */
+.agent-chat-transcript-shell,
+.agent-chat-composer { width: 100%; max-width: var(--relay-layout-reading-maxWidth); margin-inline: auto; }
 .agent-chat-transcript {
   flex: 1;
   min-height: 0;
@@ -73,19 +91,22 @@
 .assist-message-content { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--relay-font-size-reading); line-height: var(--relay-font-lineHeight-ui); }
 /* Markdown 自带块级间距，不沿用纯文本的 pre-wrap，否则段落与列表之间会被多余空白撑开。 */
 .assist-message-markdown { white-space: normal; }
+/* 消息正文不是独立卡片：拍平 markdown-preview 自带的 surface 底与边框，
+   否则外层气泡去掉底色后仍会留下一块白卡。 */
+.assist-message-markdown .markdown-preview { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
 .assist-message-markdown .markdown-preview > :last-child { margin-bottom: 0; }
 /* 抵消消息体内既有 ul 规则，避免 Markdown 列表失去下边距后贴住后一段落。 */
 .assist-message-markdown .markdown-preview__list { margin: 0 0 var(--relay-space-2); }
 
 /* 两种角色都保留文字与头像，底色只帮助扫描。 */
+.agent-message[data-role="USER"] { flex-direction: row-reverse; }
 .agent-message[data-role="USER"] .agent-message-body {
-  flex: 0 1 85%; padding: var(--relay-space-3) var(--relay-space-4);
+  flex: 0 1 auto; max-width: 85%; padding: var(--relay-space-3) var(--relay-space-4);
   background: var(--relay-color-bg-subtle); border-radius: var(--relay-radius-control);
 }
+/* AI 回复不用气泡底色，长文阅读时保持页面底色，减少色块切割。 */
 .agent-message[data-role="ASSISTANT"] .agent-message-body {
   padding: var(--relay-space-3) var(--relay-space-4);
-  background: var(--relay-color-selection-bg);
-  border-radius: var(--relay-radius-control);
 }
 .agent-message[data-role="ASSISTANT"] .agent-message-avatar { background: var(--relay-color-action-primary); color: var(--relay-color-text-onAction); }
 
@@ -97,27 +118,46 @@
 .assist-proposal-summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .agent-message-body ul { margin: var(--relay-space-2) 0 0; padding-left: var(--relay-space-4); }
 
-/* 输入区：常驻底部，不随消息滚动；按钮不被末段遮挡。 */
+/* 输入区：常驻底部，不随消息滚动；按钮不被末段遮挡。
+   对齐 Codex 的单卡结构：一张圆角卡同时承载正文与底栏，中间一条细线分隔，卡内不再套第二个输入框。 */
 .agent-chat-composer {
   position: relative;
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: var(--relay-space-2);
-  margin: 0;
-  padding: var(--relay-space-2);
+  gap: 0;
+  padding: var(--relay-space-3);
   background: var(--relay-color-bg-surface);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-control);
 }
+/* 焦点环交给整张卡：卡内正文已无边框，再套一层轮廓会读成第二个输入框。 */
+.agent-chat-composer:has(textarea:focus-visible) { outline: var(--relay-focus-width) solid var(--relay-color-focus-ring); outline-offset: calc(-1 * var(--relay-focus-width)); }
 .agent-chat-message-form { display: contents; }
 .agent-chat-composer .field { display: grid; gap: var(--relay-space-1); margin: 0; }
-.agent-chat-composer textarea { min-height: var(--relay-space-12); padding: var(--relay-space-2) var(--relay-space-3); resize: vertical; font-size: var(--relay-font-size-body); background: transparent; }
-.agent-chat-composer-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--relay-space-2); flex-wrap: wrap; }
-.agent-chat-composer-actions .primary-button { display: inline-flex; align-items: center; gap: var(--relay-space-2); min-height: var(--relay-control-height); }
+/* 输入器不带自己的边框：焦点与边界都由整张卡承担，避免读成卡内第二个输入框。
+   选择器要比 .field textarea 更具体——styles.css 在视图 CSS 之后注入，同权重会输给它。 */
+.agent-chat-composer .field textarea { min-height: var(--relay-space-12); padding: var(--relay-space-1) 0 var(--relay-space-2); border: 0; border-radius: 0; resize: vertical; font-size: var(--relay-font-size-body); background: transparent; }
+.agent-chat-composer textarea:focus-visible { outline: none; }
+/* 底栏横贯整卡宽度，负外边距抵消卡内边距，让分隔线与卡片边框对齐。
+   资料、选项、命中率、圆环与发送键全部在圆角卡内，卡内不再套第二个输入框。 */
+.agent-chat-composer-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--relay-space-2); flex-wrap: wrap; margin-inline: calc(-1 * var(--relay-space-3)); padding: var(--relay-space-2) var(--relay-space-3); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.agent-chat-composer-actions .primary-button { display: inline-flex; align-items: center; justify-content: center; gap: var(--relay-space-2); min-height: var(--relay-control-height); }
 .agent-chat-composer-actions .primary-button svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
-.agent-chat-composer-tools { display: flex; align-items: center; gap: var(--relay-space-2); flex-wrap: wrap; }
-.agent-chat-send-hint { margin: 0; font-size: var(--relay-font-size-meta); }
+.agent-chat-composer-tools { display: flex; align-items: center; gap: var(--relay-space-2); flex-wrap: wrap; flex: 1; }
+/* 发送键只留图标：可访问名称与 title 仍说明当前动作，不靠四个字占宽度。 */
+.agent-chat-send { min-width: var(--relay-control-height); padding-inline: var(--relay-space-2); }
+/* 命中率在左、圆环在右，与发送键同属底栏右侧一组。 */
+.agent-chat-usage { display: inline-flex; align-items: center; gap: var(--relay-space-2); margin-left: auto; }
+.agent-chat-usage-text { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); }
+.agent-chat-context-meter { display: inline-flex; width: var(--relay-control-meter-size); height: var(--relay-control-meter-size); }
+.agent-chat-context-meter svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.agent-chat-context-meter circle { fill: none; stroke-width: var(--relay-control-meter-stroke); }
+/* 占用未知时不画进度弧：空轨道不能读成"占用 0%"。 */
+.agent-chat-context-meter-track { stroke: var(--relay-color-meter-track); }
+.agent-chat-context-meter-fill { stroke: var(--relay-color-meter-fill); stroke-linecap: round; }
+.agent-chat-context-meter[data-state="high"] .agent-chat-context-meter-fill { stroke: var(--relay-color-status-warning-text); }
+.agent-chat-context-meter[data-state="unknown"] .agent-chat-context-meter-fill { stroke: transparent; }
 .agent-chat-tool {
   display: inline-flex;
   align-items: center;
@@ -140,6 +180,9 @@ button.agent-chat-tool:hover { background: var(--relay-color-selection-hover); c
 .agent-chat-options > summary { display: flex; align-items: center; min-height: var(--relay-control-height); padding: 0 var(--relay-space-2); border-radius: var(--relay-radius-control); }
 .agent-chat-options > summary:hover { background: var(--relay-color-selection-hover); }
 .agent-chat-options > summary::before { content: "+"; margin-right: var(--relay-space-1); }
+/* 选项面板收成与「资料 N」并列的一枚 chip，标题直接说明当前请求意图。 */
+.agent-chat-tool { border: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.agent-chat-options > summary { border: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .agent-chat-options[open] > summary::before { content: "−"; }
 .agent-chat-options[open] { position: absolute; bottom: calc(100% + var(--relay-space-2)); inset-inline: 0; z-index: 4; max-height: min(60dvh, var(--relay-layout-workspace-sideWidth)); overflow-y: auto; padding: var(--relay-space-4); background: var(--relay-color-bg-surface); border: var(--relay-border-width) solid var(--relay-color-border-control); border-radius: var(--relay-radius-control); box-shadow: var(--relay-shadow-floating); }
 .agent-chat-options .field { display: grid; gap: var(--relay-space-2); margin-top: var(--relay-space-3); }
@@ -161,4 +204,8 @@ button.agent-chat-tool:hover { background: var(--relay-color-selection-hover); c
 
 @media (max-width: 64rem) {
   .agent-chat-composer-tools { gap: var(--relay-space-1); }
+}
+/* 中栏变窄时快捷键提示先收起：它只解释发送方式，不承担操作；资料与意图两枚 chip 保持常驻。 */
+@container collaboration (max-width: 34rem) {
+  .agent-chat-send-hint { display: none; }
 }

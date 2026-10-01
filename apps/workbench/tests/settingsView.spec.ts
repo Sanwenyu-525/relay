@@ -264,7 +264,7 @@ describe("设置页模型端口状态", () => {
 
 describe("验证六态解析", () => {
   const configured = { provider: "openai-compatible", configured: true,
-    model: "gpt-test", baseUrl: null } as const;
+    model: "gpt-test", baseUrl: null, maxCallTokens: null } as const;
   it("覆盖六态且互斥", () => {
     const cases: readonly { input: Parameters<typeof resolveVerificationState>[0];
       expected: ModelVerificationStateKind }[] = [
@@ -288,11 +288,11 @@ describe("验证六态解析", () => {
           matchesCurrentConfig: true, workerStartupValidation: "OK" },
         verifying: false },
         expected: "VERIFY_FAILED" },
-      { input: { status: { provider: "fake", configured: false, model: null, baseUrl: null },
-        verification: null, verifying: false },
+      { input: { status: { provider: "fake", configured: false, model: null, baseUrl: null,
+        maxCallTokens: null }, verification: null, verifying: false },
         expected: "UNCONFIGURED" },
-      { input: { status: { provider: "invalid", configured: false, model: null, baseUrl: null },
-        verification: null, verifying: false },
+      { input: { status: { provider: "invalid", configured: false, model: null, baseUrl: null,
+        maxCallTokens: null }, verification: null, verifying: false },
         expected: "UNAVAILABLE" },
     ];
     for (const entry of cases) {

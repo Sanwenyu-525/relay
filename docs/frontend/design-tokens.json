@@ -203,6 +203,15 @@
       "$type": "color",
       "$value": "{color.palette.forest}"
     },
+    "color.meter.track": {
+      "$type": "color",
+      "$value": "{color.palette.line}",
+      "$description": "上下文占用圆环的未占用轨道。"
+    },
+    "color.meter.fill": {
+      "$type": "color",
+      "$value": "{color.palette.forest}"
+    },
     "color.status.success.text": {
       "$type": "color",
       "$value": "{color.palette.forest}"
@@ -502,6 +511,15 @@
       "$value": "1.75rem",
       "$description": "对话消息头像（我/AI）。文字标签不只靠颜色区分角色。"
     },
+    "control.meter.size": {
+      "$type": "dimension",
+      "$value": "1.125rem",
+      "$description": "输入区上下文占用圆环直径。数值必须旁标可读文字，圆环本身不单独承载信息。"
+    },
+    "control.meter.stroke": {
+      "$type": "dimension",
+      "$value": "0.125rem"
+    },
     "border.width": {
       "$type": "dimension",
       "$value": "0.0625rem"
@@ -725,6 +743,16 @@
       "foreground": "color.border.control",
       "background": "color.bg.surface",
       "minimum": 3
+    },
+    {
+      "foreground": "color.meter.fill",
+      "background": "color.bg.canvas",
+      "minimum": 3
+    },
+    {
+      "foreground": "color.meter.track",
+      "background": "color.bg.surface",
+      "minimum": 1.2
     }
   ]
 }

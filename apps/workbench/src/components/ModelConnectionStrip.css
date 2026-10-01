@@ -1,5 +1,5 @@
 /* 紧凑连接条占工具带剩余宽度；展开正文不改变摘要与相邻按钮的位置。 */
-.collab-goal-toolbar:has(> .collab-model-details) { align-items: flex-start; }
+.page-head-more-panel:has(> .collab-model-details) { align-items: stretch; }
 .collab-model-details { flex: 1 1 0; min-width: 0; }
 .collab-model-details > summary {
   min-height: var(--relay-control-height);

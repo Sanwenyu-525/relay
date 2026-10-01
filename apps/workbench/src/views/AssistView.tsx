@@ -219,9 +219,16 @@ export default function AssistView({ targetKind, targetId, preferredSessionId, o
   }
   const sessionControls = <div className="form-actions"><label className="field"><span className="field-label">当前会话</span><select data-testid="assist-session-select" disabled={creating || sessionChangeBlocked} value={sessionId ?? ""} onChange={(event) => selectSession(event.target.value || null)}><option value="">选择会话</option>{sessions.map((item) => <option key={item.id} value={item.id}>{item.title}{item.status !== "ACTIVE" ? " · 已结束" : ""}</option>)}</select></label><button className={standalone && !session ? "primary-button" : "secondary-button"} type="button" data-testid="assist-new-session" disabled={creating || pendingCreate !== null || projectWriteBlockedReason !== null || sessionChangeBlocked} onClick={() => standalone && onRequestNewSession ? onRequestNewSession(() => void createSession()) : void createSession()}>{creating ? "正在创建" : "新建会话"}</button><button className="secondary-button" type="button" disabled={sessionChangeBlocked} onClick={() => void loadTarget(sessionId ?? undefined)}>刷新会话</button></div>;
   const sourcePicker = session?.status === "ACTIVE" ? <AssistSourcePicker key={`${connection.epoch}:${session.id}:${target.projectId ?? "none"}`} projectId={target.projectId} selectedRefs={selectedRefs} onChange={setSelectedRefs} /> : null;
+  // 有会话时收成一行摘要，给消息区让出高度；无会话仍按设计系统 5.1 展开说明与新建入口。
+  const sessionSwitcher = session && standalone
+    ? <details className="agent-assist-session-switch">
+      <summary title={session.title}>会话：{session.title}</summary>
+      {sessionControls}
+    </details>
+    : sessionControls;
   return <section className={embedded ? "embedded-assist" : standalone ? "skill-page agent-assist" : "skill-page page-primary"} data-testid="assist-target"><div className={standalone ? "agent-assist-heading" : undefined}><div>{embedded ? null : <><p className="eyebrow" title={id}>{kind === "PROJECT" ? "项目 Assist" : "任务 Assist"}{!standalone && ` · ${id}`}</p><h1>{target.title}</h1></>}{!standalone && !embedded && <><p className="page-lede">当前目标修订 v{target.revision}{target.executor && <> · 当前执行者 {target.executor}</>}</p><p className="helper-text">消息固定写入当前会话；切换目标后重新读取。Assist 建议不会自动修改业务事实。</p></>}</div>{!embedded && <Link className="text-link" to={kind === "PROJECT" ? `/projects/${id}` : `/tasks/${id}`}>返回{kind === "PROJECT" ? "项目" : "任务"}</Link>}</div>{loading && <p role="status">正在刷新目标与会话…</p>}{error && <p className="action-error" role="alert">{error}</p>}
     {projectWriteBlockedReason && <p className="disabled-reason" data-testid="assist-archive-reason">{projectWriteBlockedReason}</p>}
-    {!externalReadBlockedReason && !(embedded && session) && <section className={standalone ? `agent-assist-session-bar${!session ? " agent-assist-session-bar--empty" : ""}` : "surface-panel"}>{!standalone && <h2>会话</h2>}{standalone && !session && <div className="agent-session-welcome"><MessageSquareText aria-hidden="true" /><h2>开始讨论</h2></div>}{!session && preferredSessionId === null && <p className="helper-text" data-testid="assist-new-session-prompt">目标已选。可以新建会话，或在“当前会话”中返回已有讨论。</p>}{!sessions.length && preferredSessionId !== null && <p className="helper-text">当前目标还没有会话，先新建会话再发送消息。</p>}{sessionControls}</section>}
+    {!externalReadBlockedReason && !(embedded && session) && <section className={standalone ? `agent-assist-session-bar${!session ? " agent-assist-session-bar--empty" : ""}` : "surface-panel"}>{!standalone && <h2>会话</h2>}{standalone && !session && <div className="agent-session-welcome"><MessageSquareText aria-hidden="true" /><h2>开始讨论</h2></div>}{!session && preferredSessionId === null && <p className="helper-text" data-testid="assist-new-session-prompt">目标已选。可以新建会话，或在“当前会话”中返回已有讨论。</p>}{!sessions.length && preferredSessionId !== null && <p className="helper-text">当前目标还没有会话，先新建会话再发送消息。</p>}{sessionSwitcher}</section>}
     {createError && <p className="action-error" role="alert">{createError}</p>}{pendingCreate && <div className="agent-assist-session-status"><p className="helper-text">创建结果待核对，原 command_id：{pendingCreate.commandId}</p><button type="button" className="secondary-button" disabled={creating} onClick={() => void checkCreateReceipt()}>查询创建回执</button><button type="button" className="secondary-button" disabled={creating} onClick={() => void createSession(pendingCreate)}>以原命令重试</button></div>}
     {externalReadBlockedReason && selectedRefs.length > 0 && <button className="secondary-button" type="button" disabled={sessionNavigation.pending !== null} onClick={() => setSelectedRefs([])}>清空本次资料选择</button>}
     {session && <>{!externalReadBlockedReason && !standalone && !embedded && sourcePicker}
@@ -259,6 +266,34 @@ function messageDay(value: string | null): string | null {
   if (!Number.isFinite(at)) return null;
   return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" })
     .format(new Date(at)).replaceAll("/", "-");
+}
+
+/**
+ * 输入区底栏的用量指示：左文字是缓存命中率，右圆环是最近一次调用的上下文占用。
+ * 三种状态必须能区分：没有调用、Provider 未上报、以及有真实读数。缺数据时写"未采集"，
+ * 不把 null 画成 0%，也不拿配置值冒充实际用量。
+ */
+function ContextMeter({ ratio, hitRate, call, limit }: { ratio: number | null;
+  hitRate: number | null; call: RelayAssistMessage | null; limit: number | null }) {
+  const percent = ratio === null ? null : Math.round(ratio * 100);
+  const high = ratio !== null && ratio >= 0.8;
+  const meterText = call === null ? "尚无模型调用"
+    : ratio === null ? `输入 ${call.usage.inputTokens ?? "未知"} tokens · 占用不可算`
+      : `输入 ${call.usage.inputTokens} / ${limit} tokens（${percent}%）`;
+  const hitText = hitRate === null ? "缓存未采集" : `缓存命中 ${Math.round(hitRate * 100)}%`;
+  return <div className="agent-chat-usage">
+    <span className="agent-chat-usage-text" data-testid="assist-cache-hit">{hitText}</span>
+    <span className="agent-chat-context-meter" data-testid="assist-context-meter"
+      data-state={ratio === null ? "unknown" : high ? "high" : "normal"}
+      role="img" aria-label={`上下文占用 ${meterText}`} title={meterText}>
+      <svg viewBox="0 0 36 36" aria-hidden="true" focusable="false">
+        <circle className="agent-chat-context-meter-track" cx="18" cy="18" r="15" />
+        <circle className="agent-chat-context-meter-fill" cx="18" cy="18" r="15"
+          strokeDasharray={ratio === null ? undefined : `${(ratio * 94.25).toFixed(2)} 94.25`} />
+      </svg>
+      <span className="visually-hidden">{meterText}</span>
+    </span>
+  </div>;
 }
 
 function AssistMessageRow({ client, target, message, preview, previewError, onRetryPreview, busy, pending, writeBlocked, onCancel }: { client: RelayApiClient;
@@ -313,7 +348,7 @@ function AssistMessageRow({ client, target, message, preview, previewError, onRe
       {!message.cancelRequested && <button className="secondary-button" type="button" data-testid="assist-cancel"
         disabled={busy || pending || writeBlocked} onClick={() => onCancel(message.id)}>取消这条回复</button>}
     </>}
-    {message.sources.length > 0 && <details><summary>本次实际来源</summary><ul>
+    {message.sources.length > 0 && <details><summary>已读取 {message.sources.length} 份资料</summary><ul>
       {message.sources.map((source, index) => {
         const available = source.sourceRef !== null && (message.skill
           ? source.status === "AVAILABLE" : source.status !== "UNAVAILABLE");
@@ -366,6 +401,15 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   const [atLatest, setAtLatest] = useState(true);
   const previewSuccessAt = useRef<Record<string, string>>({});
   const skillPreferenceApplied = useRef(false);
+  const [callLimit, setCallLimit] = useState<number | null>(null);
+  useEffect(() => {
+    let active = true;
+    // 圆环分母只用于表达"这次调用占了多少预算"。读不到就留空，不拿别的数字顶替。
+    void client.getModelPortStatus().then((status) => {
+      if (active) setCallLimit(status.maxCallTokens);
+    }).catch(() => { if (active) setCallLimit(null); });
+    return () => { active = false; };
+  }, [client]);
   const discardDraft = useCallback(() => {
     if (pending || busy) return;
     setDraft(""); setSkillInputText(""); setSelectedSkillKey(""); setIntent("DISCUSS");
@@ -597,6 +641,18 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       </li>;
     })}</ol>}</>;
 
+  // 上下文占用与缓存命中率都取自最近一次有真实用量的 AI 回复。USER 消息没有模型
+  // 调用，用量恒为 null；Provider 未上报缓存时显示"未采集"，不显示 0%。
+  const lastCall = [...(messages ?? [])].reverse().find((message) =>
+    message.role === "ASSISTANT" && (message.usage.inputTokens !== null ||
+      message.usage.cacheReadTokens !== null || message.usage.cacheCreationTokens !== null)) ?? null;
+  const contextRatio = lastCall?.usage.inputTokens !== null && lastCall?.usage.inputTokens !== undefined &&
+    callLimit !== null && callLimit > 0
+    ? Math.min(1, lastCall.usage.inputTokens / callLimit) : null;
+  const cacheHitRate = lastCall !== null && lastCall.usage.cacheReadTokens !== null &&
+    lastCall.usage.inputTokens !== null && lastCall.usage.inputTokens > 0
+    ? lastCall.usage.cacheReadTokens / lastCall.usage.inputTokens : null;
+
   const visibleProposals = embedded ? proposals.filter((proposal) => preferredSkillId === "task-to-execution-contract"
     ? proposal.kind === "TASK_CONTRACT_CHANGE" : proposal.kind === "VERIFICATION_PLAN_CHANGE") : proposals;
   const featuredProposalId = visibleProposals.find((proposal) => proposal.status === "PENDING")?.id ?? visibleProposals[0]?.id;
@@ -661,7 +717,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
           event.preventDefault(); event.stopPropagation();
           onToggleSources(); event.currentTarget.querySelector<HTMLElement>("summary")?.focus({ preventScroll: true });
         }}
-        onToggle={(event) => { if (standalone && event.currentTarget.open !== sourcesOpen) onToggleSources(); }}><summary>{standalone ? "选项" : "发送选项"}{!standalone && <> · {selectedSkill ? selectedSkill.title : intent === "DISCUSS" ? "普通讨论" : "提案"}</>}</summary>
+        onToggle={(event) => { if (standalone && event.currentTarget.open !== sourcesOpen) onToggleSources(); }}><summary>{standalone ? <>{selectedSkill ? selectedSkill.title : intent === "DISCUSS" ? "普通讨论" : "提案"}</> : <>发送选项 · {selectedSkill ? selectedSkill.title : intent === "DISCUSS" ? "普通讨论" : "提案"}</>}</summary>
       {standalone && sourcePicker}
       <label className="field"><span className="field-label">生成方式</span><select data-testid="assist-skill"
         value={selectedSkillKey} onChange={(event) => { setSelectedSkillKey(event.target.value); setSkillInputText(""); }}
@@ -724,11 +780,12 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
           <button className="agent-chat-tool" type="button" data-testid="assist-open-sources"
             aria-expanded={sourcesOpen} onClick={onToggleSources}><BookOpen aria-hidden="true" />资料 {sources.length}</button>
           {sendOptions}
-          <span className="helper-text agent-chat-send-hint">Enter 发送，Shift + Enter 换行</span>
+          <ContextMeter ratio={contextRatio} hitRate={cacheHitRate} call={lastCall} limit={callLimit} />
         </div>
-        <button className="primary-button" data-testid="assist-send" type="submit" form={composerFormId}
+        <button className="primary-button agent-chat-send" data-testid="assist-send" type="submit" form={composerFormId}
+          aria-label={busy ? `正在提交 · ${sendLabel}` : sendLabel} title={sendLabel}
           disabled={!draft.trim() || pending !== null || busy || writeBlockedReason !== null || Boolean(selectedSkillKey && !selectedSkill) ||
-            Boolean(selectedSkill && (!selectedSkill.callSupported || selectedSkill.missingCapabilities.length > 0))}><Send aria-hidden="true" />{busy ? `正在提交 · ${sendLabel}` : sendLabel}</button>
+            Boolean(selectedSkill && (!selectedSkill.callSupported || selectedSkill.missingCapabilities.length > 0))}><Send aria-hidden="true" /></button>
       </div>}
       {!standalone && sendOptions}
     </div>}    {actionError && <p className="action-error" role="alert">{actionError}</p>}{notice && <p className="receipt-message" role="status">{notice}</p>}{pending && <div className="assist-pending"><p className="helper-text">命令结果待核对，原 command_id：{pending.commandId}。先查回执；未找到时只能用原命令 ID 和原载荷重试。</p><button className="secondary-button" type="button" disabled={busy} onClick={() => void checkReceipt()}>查询原命令回执</button><button className="secondary-button" type="button" disabled={busy} onClick={() => void runAction(pending, true)}>以原命令重试</button></div>}

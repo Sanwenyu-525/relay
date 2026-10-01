@@ -39,7 +39,7 @@ export default function CollaborationSplitter({ ratio, hidden, onRatioChange }: 
     onRatioChange(clampCollaborationChatRatio(ratio + (event.key === "ArrowLeft" ? -0.02 : 0.02)), true);
   }
 
-  return <button type="button" role="separator" className={`collab-splitter${dragging ? " collab-splitter--dragging" : ""}`}
+  return <button type="button" role="separator" className={`drag-separator collab-splitter${dragging ? " drag-separator--dragging" : ""}`}
     hidden={hidden} data-testid="collab-splitter" aria-label="调整对话与成果比例" aria-orientation="vertical"
     aria-valuemin={COLLABORATION_CHAT_RATIO_MIN * 100} aria-valuemax={COLLABORATION_CHAT_RATIO_MAX * 100}
     aria-valuenow={Math.round(ratio * 100)} aria-valuetext={`对话 ${Math.round(ratio * 100)}%，成果 ${Math.round((1 - ratio) * 100)}%`}

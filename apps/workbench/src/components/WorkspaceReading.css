@@ -4,7 +4,9 @@
 .collab-side .collab-side-body { padding: var(--relay-space-3); gap: var(--relay-space-1); }
 .collab-side .collab-reader { gap: var(--relay-space-1); }
 .collab-side .artifact-doc-heading { align-items: center; gap: var(--relay-space-1) var(--relay-space-2); }
-.collab-side .collab-reader .artifact-doc-heading h3 { font-size: var(--relay-font-size-body); }
+/* 文档名在成果区承担层级：字号升到区域标题，保存时间与体积进版本说明，不另占一行。 */
+.collab-side .collab-reader .artifact-doc-heading h3 { font-size: var(--relay-font-size-section); }
+.collab-side .artifact-doc-heading .helper-text { margin: 0; }
 .collab-side .artifact-doc-heading .text-link { font-size: var(--relay-font-size-meta); }
 .artifact-doc-actions { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--relay-space-2); }
 .collab-side .artifact-doc-heading { position: relative; }
@@ -12,9 +14,8 @@
 .collab-side .artifact-doc-actions > details[open] > summary { padding-bottom: var(--relay-space-2); }
 .collab-review-version-mismatch { flex: none; margin: 0; padding: var(--relay-space-2) var(--relay-space-3); font-size: var(--relay-font-size-meta); }
 .collab-review-version-mismatch > button { margin-left: var(--relay-space-2); }
-.collab-side .collab-judgment { padding: var(--relay-space-2) var(--relay-space-3); }
-.collab-side .collab-judgment-heading { gap: var(--relay-space-1) var(--relay-space-2); }
-.collab-side .collab-judgment-heading h2 { font-size: var(--relay-font-size-body); }
+.collab-side .collab-judgment-context { font-size: var(--relay-font-size-meta); }
+.collab-side .collab-judgment-context > summary { cursor: pointer; }
 .collab-side .review-bound-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--relay-space-2); }
 .collab-side .review-bound-summary h3 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .collab-side .review-bound-summary .review-facts { gap: 0 var(--relay-space-2); }
@@ -25,7 +26,6 @@
 .collab-side .review-details-row summary { cursor: pointer; font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); }
 .collab-side .review-actions { margin-top: var(--relay-space-1); }
 .collab-side .collab-judgment .review-actions > button { font-size: var(--relay-font-size-meta); white-space: nowrap; }
-.collab-side .collab-judgment-context { font-size: var(--relay-font-size-meta); }
 .collab-side .collab-judgment-heading .collab-review-picker { font-size: var(--relay-font-size-meta); min-width: 0; }
 .collab-side .collab-review-picker > summary { cursor: pointer; }
 .collab-side .collab-review-picker[open] { flex-basis: 100%; }

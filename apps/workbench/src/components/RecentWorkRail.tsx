@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, Plus, RotateCcw } from "lucide-react";
+import { ChevronDown, RotateCcw } from "lucide-react";
 import { RelayApiError, type RelayApiClient, type RelayProjectListItem, type RelayTaskSummary } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 
@@ -79,11 +79,13 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
 
   return <section className="recent-work" aria-label="近期工作" data-testid="recent-work">
     <div className="recent-work-heading">
-      <h2>最近的任务</h2>
+      {/* 已加载数量与后续页属于范围说明：与标题同排，不另占一行，但仍能直接读到。 */}
+      <h2 title="全部任务 · 按最近变更排序">近期的任务</h2>
+      {tasks.length > 0 && <p className="recent-work-count" data-testid="recent-work-scope"
+        title={loaded?.nextCursor ? "还有更早任务，可继续分页读取" : "已读到最后一页"}>已加载 {tasks.length} 项</p>}
       <button className="icon-button" type="button" aria-label="刷新近期工作" data-testid="recent-work-refresh"
         onClick={() => void load(null)}><RotateCcw aria-hidden="true" /></button>
     </div>
-    <p className="recent-work-scope" title="全部任务 · 按最近变更排序">已加载 {tasks.length} 项{loaded?.nextCursor ? " · 还有更早任务" : ""}</p>
     <div className="recent-work-scroll" role="region" aria-label="近期工作列表" tabIndex={0}>
       {loading && <p className="helper-text" role="status">正在读取…</p>}
       {error && <p className="action-error" role="alert" data-testid="recent-work-error">{error}</p>}
@@ -108,10 +110,8 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
       })}</ul></details>)}</div>
       {pagingError && <p className="action-error" role="alert">{pagingError}</p>}
       {loaded?.nextCursor && <button className="secondary-button" type="button" disabled={loadingMore}
-        data-testid="recent-work-more" onClick={() => void load(loaded.nextCursor)}>{loadingMore ? "正在读取" : "更早"}</button>}
+        title={`已加载 ${tasks.length} 项，继续读取更早任务`} data-testid="recent-work-more"
+        onClick={() => void load(loaded.nextCursor)}>{loadingMore ? "正在读取" : `更早的任务（已加载 ${tasks.length} 项）`}</button>}
     </div>
-    <button className="secondary-button" type="button" data-testid="recent-work-new" aria-label="开始一项工作"
-      onClick={() => { void navigate("/agent"); onOpen?.(); }}>
-      <Plus aria-hidden="true" />开始一项工作</button>
   </section>;
 }

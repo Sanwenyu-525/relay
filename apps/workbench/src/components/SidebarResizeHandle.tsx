@@ -48,7 +48,7 @@ export default function SidebarResizeHandle({ width, onWidthChange }: {
     else if (event.key === "ArrowRight") { event.preventDefault(); onWidthChange(clampSidebarWidth(current + SIDEBAR_STEP_PX), true); }
   }
 
-  return <button type="button" className={`sidebar-resize-handle${dragging ? " sidebar-resize-handle--dragging" : ""}`}
+  return <button type="button" className={`drag-separator sidebar-resize-handle${dragging ? " drag-separator--dragging" : ""}`}
     data-testid="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="调整侧边栏宽度"
     title="拖拽调整侧边栏宽度；双击复位" aria-valuemin={SIDEBAR_MIN_WIDTH_PX} aria-valuemax={SIDEBAR_MAX_WIDTH_PX}
     aria-valuenow={width ?? SIDEBAR_DEFAULT_WIDTH_PX}

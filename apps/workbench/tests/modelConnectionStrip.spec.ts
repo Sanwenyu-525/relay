@@ -66,7 +66,7 @@ describe("模型连接只读条", () => {
 
   it("未配置真实模型时明确说走 Mock、不外发内容", async () => {
     const view = await render(client({ status: { provider: "fake", configured: false,
-      model: null, baseUrl: null }, verification: null }));
+      model: null, baseUrl: null, maxCallTokens: null }, verification: null }));
     await flush();
     const text = view.wrapper.get('[data-testid="collab-model-connection"]').text();
     expect(text).toContain("未配置真实模型");
@@ -78,7 +78,7 @@ describe("模型连接只读条", () => {
   it("验证通过也要说明不等于真实任务执行成功", async () => {
     const view = await render(client({
       status: { provider: "openai-compatible", configured: true, model: "fixture-model",
-        baseUrl: "https://models.vendor.example/v1" },
+        baseUrl: "https://models.vendor.example/v1", maxCallTokens: null },
       verification: { currentConfigFingerprint: "fp-1", last: { ok: true, latencyMs: 700,
         provider: "openai-compatible", model: "fixture-model", configFingerprint: "fp-1",
         errorCategory: null, verifiedAt: "2026-09-29T05:00:00Z" },
@@ -94,7 +94,7 @@ describe("模型连接只读条", () => {
 
   it("配置残缺按不可读处理，不显示成已配置", async () => {
     const view = await render(client({ status: { provider: "invalid", configured: false,
-      model: null, baseUrl: null }, verification: null }));
+      model: null, baseUrl: null, maxCallTokens: null }, verification: null }));
     await flush();
     expect(view.wrapper.get('[data-testid="collab-model-connection"]').text())
       .toContain("模型端口状态不可读");
@@ -103,7 +103,7 @@ describe("模型连接只读条", () => {
 
   it("读取失败如实报错，不静默显示成未配置", async () => {
     const view = await render(client({ status: { provider: "fake", configured: false,
-      model: null, baseUrl: null }, verification: null, fail: true }));
+      model: null, baseUrl: null, maxCallTokens: null }, verification: null, fail: true }));
     await flush();
     const text = view.wrapper.get('[data-testid="collab-model-connection"]').text();
     expect(text).toContain("模型端口状态读取失败");

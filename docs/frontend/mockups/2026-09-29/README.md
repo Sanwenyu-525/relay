@@ -12,6 +12,15 @@
 
 业务规则唯一归[工作台第13节](../../workbench-design.md#13-交互反馈与业务状态绑定)，控件状态归[设计系统第6.1节](../../design-system.md#61-交互状态的统一表达2026-09-29)，数值只使用[现有 tokens](../../design-tokens.json)。对应[开发提示词](../../page-development-prompts.md)与[验收场景](../../../testing/verification-plan.md#15-交互状态与反馈验收)。
 
+## Agent 面板探索稿补录（2026-10-01）
+
+上表三张协作图之前还有两张中间稿，从 Codex 生成目录补录到 `exploration/`。它们带完整 agent 对话面板（正文 + 讨论流 + 输入器），但已被 18:54 的完整窗口稿取代，**不作为当前布局依据**；只在需要回顾 agent 面板方向时查看，不计入任何页面/状态数量。
+
+- `exploration/collaboration-agent-panel-artifact.png`（18:45）：产物正文 + 右侧 AI 评论与讨论流 + 发送讨论。
+- `exploration/collaboration-agent-panel-task.png`（18:47）：三栏，任务正文、近期工作、AI 对话与输入器。
+
+正式稿里带 agent 对话面板的只有上表三张协作图；其余页面的右栏是待审或判断面板，不是对话。
+
 ## 图像检查与文字校正
 
 已目视检查标题栏、状态差别、禁用原因与恢复入口。Image Gen 仍可能引入文案与布局偏差，开发必须以规范为准：

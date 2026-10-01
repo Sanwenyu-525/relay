@@ -356,6 +356,8 @@ export interface RelayModelPortStatus {
   readonly configured: boolean;
   readonly model: string | null;
   readonly baseUrl: string | null;
+  /** 单次调用 token 上限：上下文占用的分母。null 表示不可核对，不能据此算比例。 */
+  readonly maxCallTokens: number | null;
 }
 
 /** 验证错误分类：与设置页指引一一对应。 */
@@ -710,7 +712,9 @@ export interface RelayAssistMessage {
     readonly missingCapabilities: readonly string[] }) | null;
   readonly skillInput: Readonly<Record<string, unknown>> | null;
   readonly skillOutput: RelayAssistSkillOutput | null;
-  readonly usage: { readonly inputTokens: number | null; readonly outputTokens: number | null };
+  /** cache*Tokens 为 null 表示 Provider 未上报，不能读成 0。 */
+  readonly usage: { readonly inputTokens: number | null; readonly outputTokens: number | null;
+    readonly cacheReadTokens: number | null; readonly cacheCreationTokens: number | null };
   readonly cancelRequested: boolean;
 }
 
@@ -2511,7 +2515,8 @@ export class RelayApiClient {
     return { provider,
       configured: row.configured === true,
       model: row.model === null ? null : string(row, "model", "model-port"),
-      baseUrl: row.base_url === null ? null : string(row, "base_url", "model-port") };
+      baseUrl: row.base_url === null ? null : string(row, "base_url", "model-port"),
+      maxCallTokens: nullableInteger(row, "max_call_tokens", "model-port") };
   }
 
   /** 最近一次模型验证与当前配置指纹匹配情况。 */
@@ -3883,7 +3888,9 @@ function assistMessageFrom(value: unknown): RelayAssistMessage {
     skillOutput: row.skill_output === null || row.skill_output === undefined
       ? null : assistSkillOutputFrom(row.skill_output),
     usage: { inputTokens: nullableInteger(usage, "input_tokens", "assist usage"),
-      outputTokens: nullableInteger(usage, "output_tokens", "assist usage") },
+      outputTokens: nullableInteger(usage, "output_tokens", "assist usage"),
+      cacheReadTokens: nullableInteger(usage, "cache_read_tokens", "assist usage"),
+      cacheCreationTokens: nullableInteger(usage, "cache_creation_tokens", "assist usage") },
     cancelRequested: row.cancel_requested === true };
 }
 

@@ -141,6 +141,8 @@ window.content.initialWidth/initialHeight 与 minWidth/minHeight 为客户区逻
 
 双页布局按扣除用户侧栏后的工作区容器宽度判断；阈值组合现有 `layout.workspace.centerMin`、`layout.rail.narrowWidth` 和两栏 `space.6` 内边距，不新增数值 token。低于该组合宽度才改为讨论/文档/检查/历史单区切换；侧栏调宽也会触发重排。高度不足时讨论容器可纵向滚动，使新建、回执查询和原命令重试可达；窄布局滚动由实体容器承担，不能依赖 `display: contents` 的滚动。无会话时用左对齐的“开始讨论”说明及墨绿新建按钮，按内容高度排列，不铺满白色卡片；已有会话继续使用消息流和常驻输入。
 
+2026-10-01 会话区高度接续：对话列（消息区与输入器）按 `layout.reading.maxWidth` 居中，两侧留白，不铺满工作区；AI 正文在左、用户消息连头像在右并按内容收窄（上限 85%），角色由头像文字、角色名与位置表达，底色只留给用户消息。有会话时“当前会话 + 新建 + 刷新”收为一行摘要（`control.target.minimum` 高度、标题省略并保留悬停全名），切换入口按需展开，会话选择、新建与刷新仍保持同一高度；无会话时仍按上一条展开。页头与工作主列的行间距、上下留白收至 `space.1`/`space.2`，委托不可用原因仍常驻。回收高度以让消息区为准，`workbench-design.md` 的 1280×720 基准仍按聊天记录与成果正文各至少 240 CSS px 核对。
+
 同日真实空态/错误态纠偏：事实条采用既有 subtle 底色，右栏底色沿用暖白画布；只有正文、比较或生成中预览存在时保留阅读纸面。加载、读取失败和无版本按实际内容高度排列，版本身份与恢复入口相邻，暂无判断事项紧随其后，不被空白推到底部。委托配置默认收为一行入口，不可用原因常驻；提交中、失败及结果未知强制展开。顶栏通知用紧凑铃铛和文字可访问名称，权限、待处理与错误收进可关闭的弹层，不能以游离按钮覆盖目标标题。全部复用既有 token，未新增色值或依赖。
 
 2026-10-01 协作入口精修：未选择任务时，主区用小图标、UI 标题、简短说明与唯一主操作组织；按既有阅读尺度限制宽度，内容靠上排列，不随选择表单展开而整块垂直居中。右区补足内边距，以图标、细分隔线与「阅读产物 / 处理判断 / 确认完成」三段静态指引建立层级，不显示虚构结果或判断。任务选择表单单独限定间距与 UI 标题，加载、失败及无任务时保持明确禁用。窄窗回收说明栏，短窗口可滚到选择与取消操作；字号、颜色、间距和字体继续使用唯一 token 源。
@@ -149,7 +151,7 @@ window.content.initialWidth/initialHeight 与 minWidth/minHeight 为客户区逻
 
 本轮新增的 token 只有布局与控件尺寸：`layout.workspace.sideWidth`、`layout.workspace.centerMin`、`layout.factbar.columns`、`layout.factbar.cellMin`、`control.avatar.size`。没有新增色值、圆角、时长或动效曲线，也没有复制第二套数值；消息头像、日期分隔线、事实条三格和右栏页签全部复用既有 token。
 
-对话消息的视觉约定：角色同时由头像文字（我/AI）、角色名与底色表达，不只靠颜色；时间戳取服务端既有 `created_at`，缺失时不显示时间而不是编造；正常完成态不额外标注状态词，等待生成、正在生成、生成失败和已取消必须显式表达。
+对话消息的视觉约定：角色由头像文字（我/AI）、角色名与左右位置表达，不只靠颜色；只有用户消息保留气泡底色（`color.bg.subtle`），AI 回复保持页面底色、不加背景，避免长文被色块切割；AI 正文走 `markdown-preview`，该处必须连同 `background`、`border`、`border-radius`、`padding`、`margin` 一并拍平，否则共享 surface 底会留下白卡；时间戳取服务端既有 `created_at`，缺失时不显示时间而不是编造；正常完成态不额外标注状态词，等待生成、正在生成、生成失败和已取消必须显式表达。
 
 | 状态或区域 | 已选方向的呈现规则 |
 |---|---|
@@ -187,6 +189,7 @@ window.content.initialWidth/initialHeight 与 minWidth/minHeight 为客户区逻
 | DiffView | surface、code 字体、行号和增删背景 | 文件树与 diff 分区；局部滚动；仅接受隔离变化集不能表述成已写回/commit |
 | Dialog / Drawer / Menu | panel 圆角、floating 阴影仅浮层、相应 zIndex | 有标题/关闭按钮；模态焦点限制与返回触发点；Esc 不丢弃未保存输入 |
 | FeedbackRegion | 就地描述错误、空态、加载和待核对 | 保存/恢复重要反馈持续存在；toast 仅辅助，不能承载唯一证据或审批结果 |
+| DragSeparator | 全局 `.drag-separator`：透明常态、`col-resize`、`touch-action: none`，可见线由 `::after` 按 `focus.width` 居中画在中轴，hover/focus/dragging 才显示 `color.border.control` | 所有 `role="separator"` 的列宽拖拽条共用；使用方只提供定位上下文与命中区宽度（`control.target.minimum`），不再各自定义底色与线条 |
 
 M05 P14 三工作台当前布局（2026-09-30）沿用项目页壳、右判断区、路由链接与 `subnav` 激活线。General 以当前 Task 标题、目标、产物和真实步骤为主列，AI 辅助与资料进入右栏；Thesis 使用资料/草稿目录与确切版本正文的阅读桌；Development 主列使用产物版本目录、正文和 Run 列表，真实 Run 检查证据、Review 与 AI 辅助位于右栏。标题旁的 Project Type、State phase 与当前 Task 语义分开；目录选中同时按对象类型与 ID 判断，浏览版本不能表现为已接受。主区使用既有 `space.*` 留白、surface 与 `color.border.separator` 分组，状态仍有文字，Run/步骤中文标签保留原事实语义，原技术身份可查。分页、资料计数、来源失败与 Git diff/CLI 未接入均就地说明，不以空白或绿勾暗示完成。长版本/摘要可换行，窄窗口目录与正文纵向排列，右栏沿用抽屉；配置折叠后仍保留原表单与未决命令。局部样式只引用已有 token，不新增数值规范或动效；确切版本、来源选择和操作 Owner 见[工作台第 3 节](workbench-design.md#3-三套工作台)。
 
@@ -343,3 +346,21 @@ hover/focus 的颜色过渡用 motion.duration.fast；抽屉/面板用 panel；�
 聊天普通正文优先，提议摘要以状态、目标和可展开接受入口组织，不默认铺满 hash 与字段表。消息区与输入器有明确边界，返回最新不额外占一行。成果名称/版本、版本比较与编辑采用一条工具栏；版本浮层限定滚动空间。普通判断的对象、条件、影响与操作保持可见，依据与补充说明靠近按钮；多个判断通过就近选择区切换。阅读版本与判断绑定版本不一致时使用明确提示与返回入口，不靠短 ID 让用户自行推断。
 
 动作审批、未知结果、失权和未决命令仍采用完整可读的异常区域。Trace/执行输出用可展开分组保留全部记录，不能因收紧默认密度而隐藏 UNKNOWN。业务规则、存储键、恢复和键盘行为只归工作台第 17.6 节；实际环境与验证结果只归功能验收表，不把公开产品截图当 Relay 验收。
+
+### 9.2 共享页级原语（2026-10-01）
+
+改造前 `grep page-header` 为 0：16 个 view 各自内联标题块，8 个页面各自重声明页面外壳，同一层级在不同页面长得不一样。本节引入三个最小原语，只收敛结构与可访问性，不新增业务状态、执行权限或写入 Owner。
+
+| 原语 | 结构责任 | 字段可见性规则 | 验证出口 |
+|---|---|---|---|
+| [PageHeader](../../apps/workbench/src/components/PageHeader.tsx) | `title` / `status` / `meta` / `lede` / `actions` / `more` / `children`，各占固定层级；`more` 渲染为「更多操作」浮层，Escape 在 IME 组词期不触发，关闭后焦点回到 summary | 名称、状态、当前需要与**首屏动作**常驻；诊断、模式切换、工具与模型端口进 `more` | 展开 `more` 前后页头高度不变；深层动作仍有可访问名称；旧路由与深链接不变 |
+| [FactBar](../../apps/workbench/src/components/FactBar.tsx) | `cells[{label, value?, note?, action?}]`，按 `layout.factbar.cellMin` 自适应分列；格数由调用方按页面语义给 | 事实条是页头的**按需细节**：协作页默认收起，其余页面按对象决定是否常驻 | 不整块套卡片；不足整条换行不压缩文字；已加载范围说明与标题同排，不另占一行 |
+| [JudgmentBar](../../apps/workbench/src/components/JudgmentBar.tsx) | `title` / `head`（标题同行）/ `description` / `actions` / `details`；剩余属性透传到根元素，调用方因此可以继续用自己的作用域类与 `data-*` | 对象、条件、影响与动作常驻；产物版本 ID、`target_hash`、验收条件 ID 与来源深链进 `details` | 截断 UUID 不再出现在首屏；动作审批不使用紧凑形态；UNKNOWN、结果待核对与执行权事实不收进 `details` |
+
+三条硬约束：
+
+1. **折叠不是隐藏**。`more` 与 `details` 里的内容必须仍有可访问名称与可达路径；判断条、技术身份、原未决命令、权限拒绝与无法确认的执行结果不得只存在于展开区。
+2. **强制展开优先于省高度**。UNKNOWN、控制请求未结清、执行失败这三类出现时，协作页的 Run 控制移到页头常驻（`CollaborationView.tsx` 的 `runNeedsAttention`），不留在浮层里。
+3. **数值仍归唯一 tokens**。本轮没有新增色值、圆角、时长或动效；新增的只有 `.page-head*` / `.fact-bar*` / `.judgment-bar*` 三组类名和 `font.size.section` 在成果文档头上的复用。效果图中 1487×1058 的列宽与留白是生成图推算值，不写入数值源。
+
+协作成果区另有两条呈现约束：阅读区保留 `layout.workspace.centerMin` 下限，判断条 `position: sticky` 贴底（短窗口 `max-height: 40rem` 下改为正常流）。判断条高度因此不再挤压确切正文，两者都不靠像素调优维持。实际取样与限制只归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。

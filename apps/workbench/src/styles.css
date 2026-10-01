@@ -219,7 +219,6 @@ svg {
   height: var(--relay-control-nav-height);
   flex: none;
   background: var(--relay-color-bg-navigation);
-  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
 }
 
 .desktop-titlebar__drag {
@@ -424,23 +423,21 @@ svg {
   align-items: start;
 }
 
-/* 侧栏拖拽分隔条：≥64rem 显示；默认透明，悬停/拖拽/聚焦显示深控制线，落在原分隔线上。 */
-.sidebar-resize-handle {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: calc(var(--relay-sidebar-user-width, var(--relay-layout-sidebar-width)) - var(--relay-space-1));
-  width: var(--relay-space-2);
-  z-index: var(--relay-zIndex-sticky);
+/* 拖拽分隔条通用样式：所有 role="separator" 的列宽拖拽条共用同一交互与外观。
+   默认透明，悬停/拖拽/聚焦才显示深控制线，线由 ::after 居中画在命中区中轴上。
+   使用方需自行提供定位上下文（position 非 static）与命中区宽度。 */
+.drag-separator {
+  position: relative;
   padding: 0;
   border: none;
   background: transparent;
   cursor: col-resize;
   touch-action: none;
   user-select: none;
+  min-width: 0;
 }
 
-.sidebar-resize-handle::after {
+.drag-separator::after {
   content: "";
   position: absolute;
   top: 0;
@@ -450,10 +447,21 @@ svg {
   transform: translateX(-50%);
 }
 
-.sidebar-resize-handle:hover::after,
-.sidebar-resize-handle:focus-visible::after,
-.sidebar-resize-handle--dragging::after {
+.drag-separator:hover::after,
+.drag-separator:focus-visible::after,
+.drag-separator--dragging::after {
   background: var(--relay-color-border-control);
+}
+
+/* 侧栏拖拽分隔条：≥64rem 显示；命中区按 control.target.minimum 居中扩到 24px，
+   可见线仍由 .drag-separator 的 ::after 画在同一位置。 */
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--relay-sidebar-user-width, var(--relay-layout-sidebar-width)) - var(--relay-control-target-minimum) / 2);
+  width: var(--relay-control-target-minimum);
+  z-index: var(--relay-zIndex-sticky);
 }
 
 .app-sidebar {
@@ -522,11 +530,12 @@ svg {
   color: var(--relay-color-text-secondary);
 }
 .recent-work-heading h2 > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
-.recent-work-scope { margin: 0 0 var(--relay-space-2); color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); }
+/* 范围说明与刷新同排：占标题行的空白，不新增一行高度。 */
+.recent-work-count { flex: 1; margin: 0; color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); text-align: end; }
 .recent-work-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--relay-space-1); }
 .recent-work-group { margin-block: var(--relay-space-2) var(--relay-space-4); }
 .recent-work-group > summary {
-  display: flex; align-items: center; gap: var(--relay-space-1);
+  display: flex; align-items: flex-start; gap: var(--relay-space-1);
   list-style: none; cursor: pointer; padding: var(--relay-space-2) 0;
   border-radius: var(--relay-radius-control);
   font-size: var(--relay-font-size-meta); font-weight: var(--relay-font-weight-semibold);
@@ -535,7 +544,8 @@ svg {
 .recent-work-group > summary:hover { background: var(--relay-color-selection-hover); }
 .recent-work-group > summary:active { background: var(--relay-color-selection-bg); }
 .recent-work-group > summary::-webkit-details-marker { display: none; }
-.recent-work-group > summary > svg { width: var(--relay-font-size-meta); height: var(--relay-font-size-meta); }
+/* 标题折行时展开箭头仍跟首行居中对齐，不被两行标题压到中间。 */
+.recent-work-group > summary > svg { width: var(--relay-font-size-meta); height: var(--relay-font-size-meta); flex: none; margin-top: var(--relay-space-1); }
 .recent-work-group:not([open]) > summary > svg { transform: rotate(-90deg); }
 .recent-work-group > summary > span { overflow-wrap: anywhere; }
 .recent-work-group .recent-work-list { margin-left: var(--relay-space-6); border-left: var(--relay-border-width) solid var(--relay-color-border-separator); gap: 0; }
@@ -935,14 +945,14 @@ svg {
   min-width: 0;
 }
 
+/* 底部示例标识：占 .desktop-window 列末的正常流位置，避免浮层压住正文。 */
 .demo-notice {
-  position: fixed;
-  right: var(--relay-space-4);
-  bottom: var(--relay-space-3);
-  z-index: var(--relay-zIndex-sticky);
+  flex: none;
   margin: 0;
+  padding: var(--relay-space-2) var(--relay-space-4);
   color: var(--relay-color-text-muted);
   font-size: var(--relay-font-size-meta);
+  text-align: end;
   pointer-events: none;
 }
 
@@ -1121,6 +1131,103 @@ svg {
   align-items: center;
   gap: var(--relay-space-3);
 }
+
+/* 共享页头：名称、状态、元信息、目标句与常驻动作固定分层，次级动作走「更多操作」 */
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--relay-space-2) var(--relay-space-4);
+}
+.page-head-main {
+  display: grid;
+  gap: var(--relay-space-1);
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+.page-head-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--relay-space-2);
+}
+.page-head-title > :is(h1, h2) { margin: 0; }
+.page-head-meta { margin: 0; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+.page-head-lede { margin: 0; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-body); }
+.page-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  flex: none;
+}
+.page-head-more { position: relative; }
+.page-head-more > summary { list-style: none; cursor: pointer; }
+.page-head-more > summary::-webkit-details-marker { display: none; }
+/* 浮层是唯一用阴影的地方；面板不溢出页壳也不遮挡同层其他浮层。 */
+.page-head-more-panel {
+  position: absolute;
+  inset-block-start: calc(100% + var(--relay-space-2));
+  inset-inline-end: 0;
+  z-index: var(--relay-zIndex-popover);
+  display: grid;
+  gap: var(--relay-space-2);
+  min-width: 14rem;
+  max-width: min(100%, 24rem);
+  padding: var(--relay-space-3);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  box-shadow: var(--relay-shadow-floating);
+}
+
+/* 事实条：格宽由 token 下限决定，不足整条换行，不压缩文字 */
+.fact-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--relay-layout-factbar-cellMin), 1fr));
+  gap: var(--relay-space-2) var(--relay-space-4);
+  margin: var(--relay-space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.fact-bar li { display: grid; gap: var(--relay-space-1); align-content: start; min-width: 0; }
+.fact-bar-label {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+}
+.fact-bar-label svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); flex: none; }
+.fact-bar-value { font-size: var(--relay-font-size-body); overflow-wrap: anywhere; }
+.fact-bar-note { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); overflow-wrap: anywhere; }
+
+/* 判断条：对象、条件、影响与动作常驻；技术身份和完整依据在 details 里 */
+.judgment-bar {
+  display: grid;
+  gap: var(--relay-space-2);
+  padding: var(--relay-space-2) var(--relay-space-3);
+  background: var(--relay-color-bg-surface);
+  border-block-start: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+.judgment-bar--warning { border-inline-start: var(--relay-focus-width) solid var(--relay-color-status-warning-text); }
+.judgment-bar-main { display: grid; gap: var(--relay-space-1); min-width: 0; }
+.judgment-bar-head { display: flex; align-items: baseline; flex-wrap: wrap; justify-content: space-between; gap: var(--relay-space-1) var(--relay-space-3); }
+.judgment-bar-head-extra { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--relay-space-2); }
+.judgment-bar-title {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  margin: 0;
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-medium);
+  overflow-wrap: anywhere;
+}
+.judgment-bar-title svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); flex: none; color: var(--relay-color-status-warning-text); }
+.judgment-bar--neutral .judgment-bar-title svg { color: var(--relay-color-text-secondary); }
+.judgment-bar-description { margin: 0; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+.judgment-bar-actions { display: flex; flex-wrap: wrap; gap: var(--relay-space-2); }
+.judgment-bar-details { display: grid; gap: var(--relay-space-2); }
 
 /* 按钮 ------------------------------------------------------------------ */
 
@@ -2110,9 +2217,16 @@ svg {
 
 .list-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--relay-space-4);
+}
+
+/* 标题组占满剩余宽度并可收缩：宽屏不再被压成窄条，窄屏时主操作整体换到下一行。 */
+.list-header > :has(> h1) {
+  flex: 1 1 16rem;
+  min-width: 0;
 }
 
 .list-header h1 {
@@ -2328,10 +2442,11 @@ svg {
   text-align: left;
 }
 
+/* 末列是长句「下一步」，宽度不足会把中文切成孤字；故从首列匀出 0.5fr。 */
 .data-row--projects,
 .data-row--project-tasks {
   grid-template-columns:
-    minmax(0, 2.4fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr);
+    minmax(0, 1.9fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.9fr);
 }
 
 .data-row--tasks {

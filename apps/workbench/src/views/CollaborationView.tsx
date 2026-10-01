@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { CheckCheck, Clock3, FileText, MessageSquareText, Plus, Scale, UserRound } from "lucide-react";
+import { CheckCheck, FileText, MessageSquareText, Plus, Scale } from "lucide-react";
 import AppDialog from "../components/AppDialog";
 import AssistView, { type AssistNavigationState } from "./AssistView";
+import FactBar from "../components/FactBar";
 import ModelConnectionStrip from "../components/ModelConnectionStrip";
+import PageHeader from "../components/PageHeader";
 import RunControlPanel, { runLabels, stepLabels } from "../components/RunControlPanel";
 import TaskDelegatePanel from "../components/TaskDelegatePanel";
 import type { ReviewNavigationState } from "../components/ReviewDecisionPanel";
@@ -248,13 +250,33 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const terminal = run !== null && ["COMPLETED", "FAILED", "CANCELLED"].includes(run.status);
   const runFailureReasons = [...new Set((run?.steps ?? []).map((step) => step.reason)
     .filter((reason): reason is string => typeof reason === "string" && reason !== ""))];
-  const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
+const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
   const waitReason = run?.waitReason ?? task?.waitingReason ?? null;
+  // 这三类状态一旦收进「更多操作」就不再可发现，因此 Run 控制留在页头常驻。
+  const runNeedsAttention = (run?.unresolvedOperationIds.length ?? 0) > 0 || run?.pendingControlRequest != null || runFailureReasons.length > 0;
   const setLayoutMode = (mode: CollaborationLayoutMode) => {
     setLayout((current) => saveCollaborationLayoutPreferences({ ...current, mode }));
   };
   const refreshFacts = useCallback(() => { setReloadKey((value) => value + 1); void reloadAll(); void reloadRun(); void reloadReviews(); },
     [reloadAll, reloadRun, reloadReviews]);
+  const runControl = run !== null && task !== null
+    ? <RunControlPanel compact state={{ run, task, controlRecord, activeRun, terminal, projectWriteBlockedReason }} onReload={refreshFacts} />
+    : null;
+  // 事实条是页头的按需细节：首屏只留「当前需要什么」，完整事实进展开区。
+  const factCells = task === null ? [] : [
+    { label: "当前执行状态", value: run?.unresolvedOperationIds.length ? "外部结果待核对"
+      : reviews.length > 0 ? "等待人工判断"
+      : run === null ? "尚未启动 Run" : runLabels[run.status] ?? run.status,
+      note: run?.unresolvedOperationIds.length
+        ? `${run.unresolvedOperationIds.length} 项动作结果未知；沿原 operation_id 核对，不盲重试。`
+        : reviews.length > 0 ? `${reviews.length} 项待决定；等待判断不等于已暂停。`
+        : runFailureReasons.length > 0 ? `失败原因：${runFailureReasons.join("、")}`
+        : run === null ? `当前执行者：${executorLabels[task.executor]}`
+        : `Run ${run.id.slice(0, 8)}` },
+    { label: "任务 / 验收", note: `任务 v${task.revision} / 验收 v${task.acceptance.acceptanceRevision}` },
+    { label: "证据：检查记录", action: <button className="text-link" type="button" data-testid="collab-open-checks"
+      onClick={() => { setSideTab("CHECK"); setNarrowSideOpen(true); if (layout.mode === "chat") setLayoutMode("result"); }}>查看运行与检查详情 →</button> }
+  ];
 
   function requestTransition(proceed: () => void) {
     const state = navigationRef.current;
@@ -299,10 +321,46 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
       </section>}
 
 
-      {task !== null && <header className="collab-goal" data-testid="collab-goal">
-        <div className="collab-goal-main">
-          <div className="collab-goal-title"><h1>{task.title}</h1>
-            <span className="status-chip">{taskStatusLabels[task.status] ?? task.status}</span></div>
+{task !== null && <header className="collab-goal" data-testid="collab-goal">
+        <PageHeader title={task.title} testId="collab-page-head"
+          status={<span className="status-chip">{taskStatusLabels[task.status] ?? task.status}</span>}
+          meta={<span>项目：{projectTitle ?? (task.projectId === null ? "无项目" : "项目标题暂不可读取")}</span>}
+          lede={task.acceptance.objective ?? undefined}
+          actions={<>
+            {reviews.length > 0 && <button className="secondary-button" type="button" data-testid="collab-open-judgment"
+              onClick={() => {
+                setDevToolsOpen(false); setSideTab("DOCUMENT"); setNarrowSideOpen(true);
+                if (layout.mode === "chat") setLayoutMode("result");
+                window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-testid="collab-judgment"]')?.focus());
+              }}>查看待处理 {reviews.length}</button>}
+            {task.executorRunId === null && task.projectId !== null && <TaskDelegatePanel compact client={client}
+              task={{ id: task.id, projectId: task.projectId, status: task.status, executor: task.executor,
+                revision: task.revision, executorRunId: null, allowedActions: task.allowedActions }}
+              projectWriteBlockedReason={projectWriteBlockedReason} onDelegated={refreshFacts} />}
+          </>}
+          more={<>
+            <div className="collab-layout-modes" role="group" aria-label="协作工作区布局">
+              {([["split", "双栏"], ["chat", "对话"], ["result", "成果"]] as const).map(([mode, label]) =>
+                <button key={mode} className="secondary-button" type="button" data-testid={`collab-layout-${mode}`}
+                  aria-pressed={layout.mode === mode} onClick={() => setLayoutMode(mode)}>{label}</button>)}
+            </div>
+            {/* Run 控制只有一个 Owner：需要人工介入时移进页头常驻，否则留在这个默认收起的展开区。 */}
+            {!runNeedsAttention && <details className="collab-facts-disclosure">
+              <summary>任务与执行详情</summary>
+              {runControl}
+              <FactBar label="任务与执行事实" testId="collab-facts" cells={factCells} />
+              <p className="helper-text">控制提交回执表示 PENDING；等待安全点期间，Run 与任务执行者仍以重新查询的事实为准。</p>
+            </details>}
+            {task.projectId !== null && <button className="secondary-button collab-tools-toggle" type="button"
+              data-testid="collab-devtools-toggle" aria-expanded={devToolsOpen}
+              onClick={() => {
+                setDevToolsOpen((open) => !open);
+                if (!devToolsOpen) { setNarrowSideOpen(true); if (layout.mode === "chat") setLayoutMode("result"); }
+              }}>
+              {devToolsOpen ? "收起工具面板" : "文件与运行工具"}</button>}
+            <ModelConnectionStrip client={client} compact />
+          </>}
+        >
           <p className="collab-current-need" data-testid="collab-current-need">
             {run?.unresolvedOperationIds.length ? `${run.unresolvedOperationIds.length} 项外部动作结果待核对；沿原 operation_id 核对，不盲重试。`
               : run?.pendingControlRequest ? "已提交控制请求，等待安全点；请求受理不代表已停止或交接。"
@@ -311,65 +369,9 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
             {currentStep && <> · 当前步骤：{stepLabels[currentStep.kind] ?? currentStep.kind}</>}
             {waitReason && <> · 等待原因：{waitReason}</>}
           </p>
-        </div>
-        <div className="collab-goal-actions">
-          {reviews.length > 0 && <button className="secondary-button" type="button" data-testid="collab-open-judgment"
-            onClick={() => {
-              setDevToolsOpen(false); setSideTab("DOCUMENT"); setNarrowSideOpen(true);
-              if (layout.mode === "chat") setLayoutMode("result");
-              window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-testid="collab-judgment"]')?.focus());
-            }}>查看待处理 {reviews.length}</button>}
-          {task.executorRunId === null && task.projectId !== null && <TaskDelegatePanel compact client={client}
-            task={{ id: task.id, projectId: task.projectId, status: task.status, executor: task.executor,
-              revision: task.revision, executorRunId: null, allowedActions: task.allowedActions }}
-            projectWriteBlockedReason={projectWriteBlockedReason} onDelegated={refreshFacts} />}
-          <div className="collab-layout-modes" role="group" aria-label="协作工作区布局">
-            {([["split", "双栏"], ["chat", "对话"], ["result", "成果"]] as const).map(([mode, label]) =>
-              <button key={mode} className="secondary-button" type="button" data-testid={`collab-layout-${mode}`}
-                aria-pressed={layout.mode === mode} onClick={() => setLayoutMode(mode)}>{label}</button>)}
-          </div>
-        </div>
-
-        {/* 状态、模型端口与工具入口合并为一条工具带；控制与模型事实常驻可见，不各自占一行。 */}
-        <div className="collab-goal-toolbar">
-          <details className="collab-facts-disclosure">
-            <summary>任务与执行详情</summary>
-            <div className="collab-goal-context"><p className="eyebrow">项目：{projectTitle ?? (task.projectId === null ? "无项目" : "项目标题暂不可读取")}</p></div>
-            {task.acceptance.objective && <p className="page-lede">{task.acceptance.objective}</p>}
-          <ul className="collab-factbar" data-testid="collab-facts">
-            <li><span className="collab-factbar-label"><UserRound aria-hidden="true" />{run?.unresolvedOperationIds.length
-              ? "外部结果待核对"
-              : reviews.length > 0 ? "等待人工判断"
-              : run === null ? "尚未启动 Run" : runLabels[run.status] ?? run.status}</span>
-              <span className="collab-factbar-note">{run?.unresolvedOperationIds.length
-                ? `${run.unresolvedOperationIds.length} 项动作结果未知；沿原 operation_id 核对，不盲重试。`
-                : reviews.length > 0
-                ? `${reviews.length} 项待决定；等待判断不等于已暂停。`
-                : runFailureReasons.length > 0 ? `失败原因：${runFailureReasons.join("、")}`
-                : run === null ? `当前执行者：${executorLabels[task.executor]}`
-                : `Run ${run.id.slice(0, 8)}`}</span></li>
-            <li><span className="collab-factbar-label"><Clock3 aria-hidden="true" />任务 / 验收</span>
-              <span className="collab-factbar-note">任务 v{task.revision} / 验收 v{task.acceptance.acceptanceRevision} · 绑定确切版本</span></li>
-            <li><span className="collab-factbar-label"><FileText aria-hidden="true" />证据：检查记录</span>
-              <button className="text-link" type="button" data-testid="collab-open-checks"
-                onClick={() => { setSideTab("CHECK"); setNarrowSideOpen(true); if (layout.mode === "chat") setLayoutMode("result"); }}>查看运行与检查详情 →</button></li>
-          </ul>
-          <p className="helper-text">控制提交回执表示 PENDING；等待安全点期间，Run 与任务执行者仍以重新查询的事实为准。</p>
-          </details>
-          {run && <div className="collab-run-controls" data-testid="collab-run-disclosure">
-            <RunControlPanel compact state={{ run, task, controlRecord, activeRun, terminal, projectWriteBlockedReason }}
-              onReload={refreshFacts} />
-          </div>}
-          {task.projectId !== null && <button className="secondary-button collab-tools-toggle" type="button"
-            data-testid="collab-devtools-toggle" aria-expanded={devToolsOpen}
-            onClick={() => {
-              setDevToolsOpen((open) => !open);
-              if (!devToolsOpen) { setNarrowSideOpen(true); if (layout.mode === "chat") setLayoutMode("result"); }
-            }}>
-            {devToolsOpen ? "收起工具面板" : "文件与运行工具"}</button>}
-          <ModelConnectionStrip client={client} compact />
-
-        </div>
+          {/* UNKNOWN、控制请求与失败原因不折叠：这三类一旦收进「更多操作」就不再可发现。 */}
+          {runNeedsAttention && <div className="collab-run-controls" data-testid="collab-run-disclosure">{runControl}</div>}
+        </PageHeader>
       </header>}
       {task !== null && <div className="collab-notices">
         {loading && <p className="helper-text" role="status">正在更新任务事实，已显示的内容保持可见。</p>}

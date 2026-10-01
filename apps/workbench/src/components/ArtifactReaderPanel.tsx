@@ -178,10 +178,10 @@ export default function ArtifactReaderPanel({ client, taskId, projectId, selecte
         onClick={() => void openCompare()}>{compareLoading ? "正在读取比较版本" : "比较两份确切版本"}</button>
     </div>}
     </details>;
-  const documentHeading = document && <header className="artifact-doc-heading">
+const documentHeading = document && <header className="artifact-doc-heading">
     <div>
-      <h3>{document.title} <span className="artifact-doc-version" title={`最后保存：${savedAt(document.version.createdAt)}`}>· v{document.version.versionNumber} · {reading ? compact ? "已保存" : "已保存版本" : readingError ? "正文读取失败" : "正在读取正文"}</span></h3>
-      {!compact && <p className="helper-text">最后保存：{savedAt(document.version.createdAt)}</p>}
+      <h3>{document.title} <span className="artifact-doc-version" title={`最后保存：${savedAt(document.version.createdAt)} · ${document.version.size} 字节`}>· v{document.version.versionNumber} · {reading ? compact ? "已保存" : "已保存版本" : readingError ? "正文读取失败" : "正在读取正文"}</span></h3>
+      {!compact && <p className="helper-text">最后保存：{savedAt(document.version.createdAt)} · {document.version.size} 字节</p>}
     </div>
     <div className="artifact-doc-actions">{compact && versionControls}<Link className="text-link" to={`/tasks/${taskId}?tab=artifacts`}>{compact ? "编辑 ↗" : "在编辑器中打开 ↗"}</Link></div>
   </header>;

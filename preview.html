@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Relay Agent · 页面原型效果图</title>
+<style>
+  :root {
+    --paper: #faf9f6;
+    --surface: #ffffff;
+    --ink: #18211f;
+    --secondary: #4f5b55;
+    --muted: #5d6861;
+    --line: #e3e4df;
+    --forest: #285747;
+    --sage: #e7eee6;
+    --radius: 0.5rem;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 400 1rem/1.5 "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  }
+
+  header {
+    padding: 2rem 2.5rem 1.5rem;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .kicker {
+    margin: 0 0 0.25rem;
+    font-size: 0.875rem;
+    color: var(--forest);
+    letter-spacing: 0.08em;
+  }
+
+  h1 { margin: 0 0 0.75rem; font-size: 1.75rem; line-height: 1.25; font-weight: 600; }
+
+  .meta { margin: 0; color: var(--secondary); font-size: 0.875rem; }
+
+  .meta code {
+    font-family: "Cascadia Mono", Consolas, monospace;
+    font-size: 0.8125rem;
+    color: var(--ink);
+    background: var(--paper);
+    padding: 0.1rem 0.35rem;
+    border-radius: 0.1875rem;
+  }
+
+  .clock { font-family: "Cascadia Mono", Consolas, monospace; color: var(--forest); }
+
+  main { max-width: 80rem; margin: 0 auto; padding: 1.5rem 2.5rem 4rem; }
+
+  section { margin-bottom: 2.5rem; }
+
+  h2 { margin: 0 0 0.25rem; font-size: 1.25rem; font-weight: 600; }
+  h2 .count { color: var(--muted); font-weight: 400; font-size: 0.875rem; margin-left: 0.5rem; }
+
+  .hint { margin: 0 0 1rem; font-size: 0.875rem; color: var(--muted); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
+    gap: 1rem;
+    align-items: start;
+  }
+
+  figure {
+    margin: 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  figure button {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: var(--paper);
+    cursor: zoom-in;
+    line-height: 0;
+  }
+
+  figure img { display: block; width: 100%; height: auto; }
+
+  figcaption { padding: 0.75rem 0.875rem 0.875rem; }
+
+  .title { display: block; font-weight: 600; margin-bottom: 0.125rem; }
+  .desc { display: block; color: var(--secondary); font-size: 0.875rem; }
+
+  .shot-time {
+    display: inline-block;
+    margin-top: 0.5rem;
+    font-family: "Cascadia Mono", Consolas, monospace;
+    font-size: 0.8125rem;
+    color: var(--forest);
+    background: var(--sage);
+    border-radius: 9999px;
+    padding: 0.05rem 0.5rem;
+  }
+
+  .tag {
+    font-size: 0.75rem;
+    color: var(--forest);
+    border: 1px solid var(--sage);
+    border-radius: 0.1875rem;
+    padding: 0 0.3rem;
+    margin-left: 0.35rem;
+    vertical-align: 0.1rem;
+  }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 1.5rem 2.5rem 3rem;
+    color: var(--muted);
+    font-size: 0.875rem;
+    max-width: 80rem;
+    margin: 0 auto;
+  }
+
+  .lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: none;
+    background: rgb(24 33 31 / 0.97);
+    padding: 1.25rem;
+  }
+
+  .lightbox[data-open="true"] { display: flex; flex-direction: column; }
+
+  .stage {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .frame {
+    position: relative;
+    display: flex;
+    max-width: calc(100% - 6rem);
+    max-height: 100%;
+  }
+
+  .frame img {
+    max-width: 100%;
+    max-height: calc(100vh - 7.5rem);
+    width: auto;
+    object-fit: contain;
+    background: var(--surface);
+    border-radius: var(--radius);
+  }
+
+  .nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    display: grid;
+    place-items: center;
+    width: 2.5rem;
+    height: 4.5rem;
+    padding: 0;
+    color: var(--surface);
+    background: rgb(24 33 31 / 0.75);
+    border: 1px solid rgb(255 255 255 / 0.3);
+    border-radius: var(--radius);
+    cursor: pointer;
+  }
+
+  .nav:hover { background: rgb(24 33 31 / 0.95); }
+  .nav.prev { right: calc(100% + 0.5rem); }
+  .nav.next { left: calc(100% + 0.5rem); }
+
+  .lightbox-bar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    color: var(--surface);
+    font-size: 0.875rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .lightbox-bar .name { font-weight: 600; }
+  .lightbox-bar .spacer { flex: 1; }
+
+  .lightbox button {
+    font: inherit;
+    color: var(--surface);
+    background: transparent;
+    border: 1px solid rgb(255 255 255 / 0.35);
+    border-radius: var(--radius);
+    padding: 0.25rem 0.625rem;
+    cursor: pointer;
+  }
+
+  .lightbox button:hover { background: rgb(255 255 255 / 0.12); }
+
+  .lightbox img {
+    display: block;
+  }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+
+  .sort-btn {
+    font: inherit;
+    font-size: 0.875rem;
+    color: var(--forest);
+    background: var(--sage);
+    border: 1px solid var(--line);
+    border-radius: 9999px;
+    padding: 0.35rem 0.9rem;
+    cursor: pointer;
+  }
+
+  .sort-btn:hover { background: #dce7dc; }
+
+  .toolbar .hint { margin: 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <p class="kicker">PERSONAL WORKFLOW OS · RELAY AGENT</p>
+  <h1>页面原型效果图 · 55 张</h1>
+  <p class="meta">
+    来源：<code>docs/frontend/mockups/</code>
+    ｜生成时间：2026-09-19 08:14 – 2026-10-01 11:25
+    ｜共 <span id="count">0</span> 张，覆盖 5 个批次
+    ｜页面时间：<span class="clock" id="clock">--</span>
+  </p>
+  <div class="toolbar">
+    <button type="button" class="sort-btn" id="sortBtn">排序：时间正序 ↑</button>
+    <span class="hint">点击任意原型图放大；放大后用图片左右两侧的箭头或键盘 ← → 切换，Esc 关闭。</span>
+  </div>
+</header>
+
+<main id="gallery"></main>
+
+<footer>
+  点击任意原型图放大；放大后可用 ← → 切换、Esc 关闭。时间为图像文件写入时间。全部为静态设计概念与示例数据，不代表功能实现或运行验收；当前重做基准是 2026-10-01 的「工作主线」图。
+</footer>
+
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="原型图放大">
+  <div class="lightbox-bar">
+    <span class="name" id="lbName"></span>
+    <span id="lbTime"></span>
+    <span id="lbDesc"></span>
+    <span class="spacer"></span>
+    <span id="lbIndex"></span>
+    <button type="button" id="lbClose">关闭 Esc</button>
+  </div>
+  <div class="stage">
+    <div class="frame">
+      <button type="button" class="nav prev" id="lbPrev" aria-label="上一张" title="上一张">
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <img id="lbImg" alt="" />
+      <button type="button" class="nav next" id="lbNext" aria-label="下一张" title="下一张">
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const DIR = "docs/frontend/mockups/";
+
+  const GROUPS = [
+    {
+      title: "2026-09-19 · 基础页面与首批 Skill 交互",
+      hint: "32 张页面/状态效果图 + 4 张扩展交互 + 1 张原始参考，对应 33 个页面/状态开发单元；带 v2 的为修正版，旧稿一并保留。",
+      shots: [
+        { f: "2026-09-19/today.png", t: "22:01", n: "今日工作台", d: "/today，从上次停下的地方继续推进" },
+        { f: "2026-09-19/project-overview.png", t: "22:03", n: "项目总览", d: "下一步、关键产物与决定、需要你的判断" },
+        { f: "2026-09-19/development-workbench.png", t: "22:04", n: "开发工作台", d: "项目工作台的开发类型视图" },
+        { f: "2026-09-19/pages/projects.png", t: "22:13", n: "项目列表", d: "/projects，进行中 / 已归档与项目摘要" },
+        { f: "2026-09-19/pages/create-project.png", t: "22:17", n: "创建项目", d: "从最少的信息开始，未连接模型也能开工" },
+        { f: "2026-09-19/pages/tasks.png", t: "22:19", n: "全部任务", d: "/tasks，工作状态与执行模式分开表达" },
+        { f: "2026-09-19/pages/inbox.png", t: "22:23", n: "任务收件箱", d: "/inbox，先记下来再安排归属，不自动委托" },
+        { f: "2026-09-19/pages/project-tasks.png", t: "22:24", n: "项目任务", d: "依赖未确认时禁用开始，不绕过前置" },
+        { f: "2026-09-19/pages/task-detail.png", t: "22:26", n: "任务详情与验收标准", d: "/tasks/:id，验收标准与当前产物" },
+        { f: "2026-09-19/pages/artifact-editor.png", t: "22:35", n: "人工编辑与保存版本", d: "保存生成新版本，已有版本保持不变" },
+        { f: "2026-09-19/pages/general-workbench.png", t: "22:40", n: "通用工作台与 AI 辅助", d: "只读建议不夺取执行权、不改事实" },
+        { f: "2026-09-19/pages/thesis-workbench.png", t: "22:42", n: "论文资料与草稿工作台", d: "从资料到论证，引用核对与候选草稿" },
+        { f: "2026-09-19/pages/knowledge.png", t: "08:14", n: "全局知识库", d: "/knowledge，留下来源与当时的版本" },
+        { f: "2026-09-19/pages/knowledge-detail.png", t: "08:15", n: "资料详情与来源版本", d: "历史引用始终指向原版本" },
+        { f: "2026-09-19/pages/project-information.png", t: "08:16", n: "项目资料、记忆、决定与规则", d: "替代决定保留原决定与历史引用" },
+        { f: "2026-09-19/pages/activities.png", t: "08:17", n: "全局动态与追溯（初稿）", d: "/activities，检查通过 ≠ 任务完成" },
+        { f: "2026-09-19/pages/activities-v2.png", t: "11:01", n: "全局动态与追溯 v2", d: "选中事件与右侧详情一致", tag: "修正版" },
+        { f: "2026-09-19/pages/run-control.png", t: "08:19", n: "执行详情与暂停请求（初稿）", d: "/runs/:id，暂停 Run 不等于暂停 Task" },
+        { f: "2026-09-19/pages/run-control-v2.png", t: "11:08", n: "执行详情与暂停请求 v2", d: "暂停请求已持久化，在途动作待安全结束", tag: "修正版" },
+        { f: "2026-09-19/pages/run-paused.png", t: "10:41", n: "已暂停与安全接手", d: "/runs/:id PAUSED，接手完成后才可编辑" },
+        { f: "2026-09-19/pages/run-unknown.png", t: "10:43", n: "执行结果未确认（初稿）", d: "/runs/:id UNKNOWN，先核对不盲重试" },
+        { f: "2026-09-19/pages/run-unknown-v2.png", t: "11:24", n: "执行结果未确认 v2", d: "动作已发出、回执未保存的已知与未知", tag: "修正版" },
+        { f: "2026-09-19/pages/reviews.png", t: "10:44", n: "待审中心", d: "/reviews，每个请求对应一个明确决定" },
+        { f: "2026-09-19/pages/action-approval.png", t: "10:46", n: "特定 Git 动作批准", d: "/reviews/:id，批准范围精确到本次提交" },
+        { f: "2026-09-19/pages/connections.png", t: "10:51", n: "连接与执行权限", d: "连接状态、能力与授权分别管理" },
+        { f: "2026-09-19/pages/settings.png", t: "10:52", n: "设置与工作偏好", d: "显示与执行分开，切换工作台不改执行契约" },
+        { f: "2026-09-19/pages/search.png", t: "10:54", n: "全局搜索与快捷操作", d: "Ctrl+K 弹层，字面匹配不做语义冒充" },
+        { f: "2026-09-19/pages/version-conflict.png", t: "10:55", n: "版本冲突与草稿保留", d: "不强制覆盖、不静默合并" },
+        { f: "2026-09-19/pages/task-completed.png", t: "10:56", n: "完成凭据与产物来源", d: "/tasks/:id DONE，完成依据可追溯" },
+        { f: "2026-09-19/pages/delegate.png", t: "10:57", n: "AI 委托前确认（初稿）", d: "确认执行边界，生成结果仍需人工判断" },
+        { f: "2026-09-19/pages/delegate-v2.png", t: "11:10", n: "AI 委托前确认 v2", d: "委托前可开始，当前执行者仍是我", tag: "修正版" },
+        { f: "2026-09-19/pages/task-create.png", t: "10:59", n: "新建任务与执行准备（初稿）", d: "/tasks 新建流程，完成标准要可判断" },
+        { f: "2026-09-19/pages/task-create-v2.png", t: "11:15", n: "新建任务与执行准备 v2", d: "项目可选，不强制固定条数验收条件", tag: "修正版" },
+        { f: "2026-09-19/extensions/project-blueprint.png", t: "12:59", n: "项目蓝图预览", d: "新变更与后续配置分别展示，拒绝建议保留项目" },
+        { f: "2026-09-19/extensions/task-definition.png", t: "12:59", n: "完善任务定义", d: "接受定义与开始、委托分开" },
+        { f: "2026-09-19/extensions/verification-plan.png", t: "13:00", n: "生成验收方案", d: "缺检查器时说明禁用原因，不生成虚假通过" },
+        { f: "2026-09-19/extensions/project-resume.png", t: "13:02", n: "继续这个项目", d: "只读恢复摘要，保留来源与完成依据" }
+      ]
+    },
+    {
+      title: "2026-09-19 · 探索稿（未入库补录）",
+      hint: "从 Codex 生成目录补录的早期探索稿，不计入 33 个开发单元，不作为实现依据；其中深色与蓝色配色方向已被放弃。",
+      shots: [
+        { f: "2026-09-19/exploration/literature-review-warm.png", t: "21:01", n: "文献综述 · 暖白配色方向", d: "同一页的暖白/墨绿方向，右侧等待你的判断", tag: "探索稿" },
+        { f: "2026-09-19/exploration/literature-review-dark.png", t: "21:02", n: "文献综述 · 深色方向", d: "深色配色探索，已放弃", tag: "已放弃" },
+        { f: "2026-09-19/exploration/literature-review-blue.png", t: "21:04", n: "文献综述 · 冷蓝方向", d: "冷蓝配色探索，已放弃", tag: "已放弃" },
+        { f: "2026-09-19/exploration/run-unknown-overview.png", t: "11:23", day: "2026-09-20", n: "执行结果未确认 · 核对视角", d: "执行历史 + 核对可做与不可做", tag: "探索稿" },
+        { f: "2026-09-19/exploration/project-resume-overview.png", t: "13:01", day: "2026-09-20", n: "项目恢复 · 接着往前", d: "当前进展、需要留意、建议的下一步", tag: "探索稿" }
+      ]
+    },
+    {
+      title: "2026-09-27 · 知识库最新概念图",
+      hint: "补齐旧图未覆盖的导读、阅读与收录体验；不新增独立路由承诺。",
+      shots: [
+        { f: "2026-09-27/knowledge-project-guide.png", t: "10:16", n: "项目导读", d: "从目标、流程、决定和验收依据恢复理解" },
+        { f: "2026-09-27/knowledge-reading.png", t: "10:18", n: "专注阅读", d: "正文、文内目录、来源与历史版本" },
+        { f: "2026-09-27/knowledge-capture-review.png", t: "10:19", n: "知识收录确认", d: "核对内容、确切来源与目标范围后显式收录" }
+      ]
+    },
+    {
+      title: "2026-09-28 · 完整窗口与操作型标题栏",
+      hint: "补齐窗口外壳：左侧常用操作、中间拖动留白、右侧窗口控制。无 v2 后缀的为同日历史稿。",
+      shots: [
+        { f: "2026-09-28/today-window.png", t: "11:36", n: "今日工作台 · 完整窗口（历史稿）", d: "首次补齐完整窗口外壳" },
+        { f: "2026-09-28/knowledge-reading-window.png", t: "11:37", n: "知识阅读 · 完整窗口（历史稿）", d: "同上，历史稿" },
+        { f: "2026-09-28/thesis-review-window.png", t: "11:40", n: "论文验收 · 完整窗口（历史稿）", d: "同上，历史稿" },
+        { f: "2026-09-28/today-window-v2.png", t: "11:46", n: "今日工作台 · 操作型标题栏 v2", d: "左侧改为常用操作入口", tag: "当前参考" },
+        { f: "2026-09-28/knowledge-reading-window-v2.png", t: "11:49", n: "知识阅读 · 操作型标题栏 v2", d: "同一窗口层，正文需实际滚动", tag: "当前参考" },
+        { f: "2026-09-28/thesis-review-window-v2.png", t: "11:52", n: "论文验收 · 操作型标题栏 v2", d: "共享窗口层基准图", tag: "当前参考" }
+      ]
+    },
+    {
+      title: "2026-09-29 · 交互状态与反馈参考",
+      hint: "同一设计体系的不同场景说明板，不新增页面、路由或接口；各栏不是同时出现的四栏页面。",
+      shots: [
+        { f: "2026-09-29/component-states.png", t: "11:13", n: "常用控件状态", d: "默认、悬停、按下、焦点、禁用、提交中与字段错误" },
+        { f: "2026-09-29/acceptance-feedback.png", t: "11:15", n: "版本验收反馈", d: "指定版本接受、提交回执、结果待核对、完成与过期分支" },
+        { f: "2026-09-29/handoff-feedback.png", t: "11:16", n: "人工接手反馈", d: "请求受理、等待安全交接、确认执行权、外部动作待核对" },
+        { f: "2026-09-29/collaboration-dialogue-selected.png", t: "18:43", n: "协作对话 · 已选中文档", d: "双页工作桌方向，选中文档态" },
+        { f: "2026-09-29/collaboration-dialogue-window.png", t: "18:54", n: "协作对话 · 完整窗口", d: "对话主轴 + 右侧成果页" },
+        { f: "2026-09-29/collaboration-development-tools.png", t: "19:12", n: "协作 · 开发工具", d: "开发项目的工具面板协作视图" }
+      ]
+    },
+    {
+      title: "2026-09-29 · Agent 面板探索稿（未入库补录）",
+      hint: "55 张正式稿里只有协作三张带 agent 对话面板；这两张是被舍弃的中间稿，从 Codex 生成目录补录，仅作方向参考。",
+      shots: [
+        { f: "2026-09-29/exploration/collaboration-agent-panel-artifact.png", t: "18:45", n: "Agent 面板 · 产物 + 讨论", d: "正文在左，右侧 AI 评论与讨论流，底部发送讨论", tag: "探索稿" },
+        { f: "2026-09-29/exploration/collaboration-agent-panel-task.png", t: "18:47", n: "Agent 面板 · 任务 + 近期工作", d: "三栏：任务正文、近期工作、AI 对话与输入器", tag: "探索稿" }
+      ]
+    },
+    {
+      title: "2026-10-01 · 整套 UI 重做方向候选",
+      hint: "三张候选由用户选定其一作为重做基准；「工作主线」已选并已实施。",
+      shots: [
+        { f: "2026-10-01/work-first.png", t: "11:23", n: "工作主线", d: "以对话为主轴，第一稿；已选为整套重做基准", tag: "已选基准" },
+        { f: "2026-10-01/output-first.png", t: "11:25", n: "成果书桌", d: "以正文与比较为主轴，第二稿" },
+        { f: "2026-10-01/project-first.png", t: "11:25", n: "项目推进", d: "以项目下一步与工作目录为主轴，第三稿" }
+      ]
+    }
+  ];
+
+  const shots = [];
+  const gallery = document.getElementById("gallery");
+  const sortBtn = document.getElementById("sortBtn");
+  document.getElementById("count").textContent = GROUPS.reduce((n, g) => n + g.shots.length, 0);
+
+  const stamp = (shot) => (shot.day || shot.f.slice(0, 10)) + " " + shot.t;
+
+  function buildGallery(desc) {
+    shots.length = 0;
+    gallery.textContent = "";
+
+    const groups = desc ? GROUPS.slice().reverse() : GROUPS;
+    for (const group of groups) {
+      const section = document.createElement("section");
+      const h2 = document.createElement("h2");
+      h2.textContent = group.title;
+      const count = document.createElement("span");
+      count.className = "count";
+      count.textContent = group.shots.length + " 张";
+      h2.appendChild(count);
+      const hint = document.createElement("p");
+      hint.className = "hint";
+      hint.textContent = group.hint;
+      const grid = document.createElement("div");
+      grid.className = "grid";
+
+      const list = desc ? group.shots.slice().reverse() : group.shots;
+      for (const shot of list) {
+        const date = shot.day || shot.f.slice(0, 10);
+        const index = shots.push({ ...shot, date, group: group.title.split(" · ")[0] }) - 1;
+        const figure = document.createElement("figure");
+        figure.innerHTML =
+          '<button type="button"><img src="' + DIR + shot.f + '" alt="' + shot.n + '" loading="lazy" /></button>' +
+          '<figcaption><span class="title"></span><span class="desc"></span>' +
+          '<span class="shot-time">' + stamp(shot) + '</span></figcaption>';
+        const title = figure.querySelector(".title");
+        title.textContent = shot.n;
+        if (shot.tag) {
+          const tag = document.createElement("span");
+          tag.className = "tag";
+          tag.textContent = shot.tag;
+          title.appendChild(tag);
+        }
+        figure.querySelector(".desc").textContent = shot.d;
+        figure.querySelector("button").addEventListener("click", () => openLightbox(index));
+        grid.appendChild(figure);
+      }
+
+      section.append(h2, hint, grid);
+      gallery.appendChild(section);
+    }
+  }
+
+  let desc = false;
+  buildGallery(desc);
+
+  sortBtn.addEventListener("click", () => {
+    const showing = shots.length ? shots[current].f : null;
+    desc = !desc;
+    sortBtn.textContent = desc ? "排序：时间倒序 ↓" : "排序：时间正序 ↑";
+    buildGallery(desc);
+    if (showing && box.dataset.open) {
+      current = shots.findIndex((s) => s.f === showing);
+      render(current);
+    }
+  });
+
+  const box = document.getElementById("lightbox");
+  const lbImg = document.getElementById("lbImg");
+  const lbName = document.getElementById("lbName");
+  const lbTime = document.getElementById("lbTime");
+  const lbDesc = document.getElementById("lbDesc");
+  const lbIndex = document.getElementById("lbIndex");
+  let current = 0;
+
+  function render(index) {
+    current = (index + shots.length) % shots.length;
+    const shot = shots[current];
+    lbImg.src = DIR + shot.f;
+    lbImg.alt = shot.n;
+    lbName.textContent = shot.n;
+    lbTime.textContent = stamp(shot);
+    lbDesc.textContent = shot.group + " · " + shot.d;
+    lbIndex.textContent = current + 1 + " / " + shots.length;
+  }
+
+  function openLightbox(index) {
+    render(index);
+    box.dataset.open = "true";
+    document.body.style.overflow = "hidden";
+  }
+
+  function closeLightbox() {
+    delete box.dataset.open;
+    document.body.style.overflow = "";
+  }
+
+  document.getElementById("lbPrev").addEventListener("click", () => render(current - 1));
+  document.getElementById("lbNext").addEventListener("click", () => render(current + 1));
+  document.getElementById("lbClose").addEventListener("click", closeLightbox);
+  box.addEventListener("click", (event) => { if (event.target === box) closeLightbox(); });
+  document.addEventListener("keydown", (event) => {
+    if (!box.dataset.open) return;
+    if (event.key === "Escape") closeLightbox();
+    if (event.key === "ArrowLeft") render(current - 1);
+    if (event.key === "ArrowRight") render(current + 1);
+  });
+
+  const clock = document.getElementById("clock");
+  const tick = () => {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    clock.textContent = now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate()) +
+      " " + pad(now.getHours()) + ":" + pad(now.getMinutes()) + ":" + pad(now.getSeconds());
+  };
+  tick();
+  setInterval(tick, 1000);
+</script>
+
+</body>
+</html>

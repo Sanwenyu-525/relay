@@ -198,10 +198,9 @@ export default function ReviewDecisionPanel({ live, review, writeBlockedReason, 
 
   return <div className={`review-decision${compact ? " review-decision--compact" : ""}`} data-testid="review-decision" data-review-kind={review.kind}>
     <div className="review-bound-summary" data-testid="review-bound-summary"><h3>判断对象与条件</h3>
-      <p>{typeof review.target.artifact_version_id === "string"
-        ? compact ? <Link className="inline-link" to={`/artifact-versions/${review.target.artifact_version_id}/lineage`}
-          title={`产物版本 ${review.target.artifact_version_id}`}>确切版本 · {review.target.artifact_version_id.slice(0, 8)}…</Link>
-          : "所引用的确切产物版本" : reviewSummary(review)}</p>
+      {/* 紧凑形态不把截断的产物版本 ID 摆在首屏；确切身份进「查看依据与绑定对象」，深链一并保留。 */}
+      {!compact && <p>{typeof review.target.artifact_version_id === "string"
+        ? "所引用的确切产物版本" : reviewSummary(review)}</p>}
       <dl className="review-facts">{factRows(targetConditions)}</dl>
     </div>
     {compact ? <>{review.kind === "ACTION_APPROVAL" && facts}
@@ -212,7 +211,9 @@ export default function ReviewDecisionPanel({ live, review, writeBlockedReason, 
     {!writeBlockedReason && expired && <p className="disabled-reason" data-testid="review-expired-reason">{expiredReason}
       <button className="text-link" type="button" data-testid="review-expired-refresh" disabled={busy || submitting} onClick={() => void onRefresh()}>刷新核对最新状态</button></p>}
     {compact ? <div className="review-details-row">
-      <details className="review-evidence-details"><summary>查看依据与绑定对象</summary>{review.kind !== "ACTION_APPROVAL" && facts}<section className="review-fact-section"><h3>绑定对象</h3><dl className="review-facts">{factRows(review.target)}<div><dt>请求目标摘要</dt><dd>{review.targetHash}</dd></div></dl></section></details>
+      <details className="review-evidence-details"><summary>查看依据与绑定对象</summary>{review.kind !== "ACTION_APPROVAL" && facts}<section className="review-fact-section"><h3>绑定对象</h3><dl className="review-facts">{factRows(review.target)}<div><dt>请求目标摘要</dt><dd>{review.targetHash}</dd></div></dl></section>
+        {typeof review.target.artifact_version_id === "string" && <p><Link className="inline-link" to={`/artifact-versions/${review.target.artifact_version_id}/lineage`}
+          title={`产物版本 ${review.target.artifact_version_id}`}>查看产物版本的来源与历史</Link></p>}</details>
       <details className="review-feedback-details" open={feedbackOpen}
         onToggle={(event) => setFeedbackOpen(event.currentTarget.open)} data-testid="review-feedback-details">
         <summary>补充说明</summary>{feedbackField}

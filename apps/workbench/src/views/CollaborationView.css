@@ -11,12 +11,10 @@
 .collab-columns > [hidden], .collab-narrow-tabs[hidden] { display: none; }
 .collab-result-pane { display: flex; min-width: 0; min-height: 0; overflow: hidden; }
 .collab-result-pane > .collab-side { flex: 1; max-width: 100%; }
-.collab-splitter { border: 0; border-inline: var(--relay-border-width) solid transparent; padding: 0; background: transparent; cursor: col-resize; touch-action: none; min-width: 0; }
-.collab-splitter:hover, .collab-splitter--dragging { background: var(--relay-color-selection-bg); border-inline-color: var(--relay-color-border-separator); }
-.collab-splitter:focus-visible { outline-offset: calc(-1 * var(--relay-focus-width)); }
-.collab-center { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: var(--relay-space-3); gap: var(--relay-space-2); }
+
+.collab-center { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: var(--relay-space-2) var(--relay-space-3); gap: var(--relay-space-1); }
 .collab-center > * { flex: none; }
-.collab-center > .agent-assist { flex: 1; min-height: 0; gap: var(--relay-space-2); }
+.collab-center > .agent-assist { flex: 1; min-height: 0; gap: var(--relay-space-1); }
 .collab-center > .agent-assist > .agent-assist-heading { display: none; }
 .collab-center .agent-chat-conversation { flex: 1; min-height: 0; margin: 0; padding: 0; background: transparent; border: 0; }
 .collab-center .agent-chat-conversation-heading { display: none; }
@@ -31,49 +29,35 @@
 .agent-session-welcome svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); color: var(--relay-color-action-text); }
 .agent-session-welcome h2 { margin: 0; font-size: var(--relay-font-size-section); }
 
-.collab-goal { display: grid; flex: none; grid-template-columns: minmax(0, 1fr) auto; gap: var(--relay-space-1) var(--relay-space-2); padding: var(--relay-space-2) var(--relay-space-3); border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
-.collab-goal-main { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-1) var(--relay-space-2); min-width: 0; }
-.collab-goal-title { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-2); }
-.collab-current-need { flex: 1 1 auto; margin: 0; font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); overflow-wrap: anywhere; }
-.collab-goal h1 { margin: 0; font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-compactPage); overflow-wrap: anywhere; }
+/* 页头外壳：层级与留白归共享 .page-head，这里只留协作页特有的尺寸与控件密度。 */
+.collab-goal { flex: none; padding: var(--relay-space-2) var(--relay-space-3); border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.collab-goal .page-head-title > h1 { font-size: var(--relay-font-size-compactPage); overflow-wrap: anywhere; }
 .collab-goal .status-chip { background: var(--relay-color-selection-bg); color: var(--relay-color-selection-text); font-size: var(--relay-font-size-meta); }
-.collab-goal-context .eyebrow { margin: 0 0 var(--relay-space-2); font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-meta); font-weight: var(--relay-font-weight-regular); color: var(--relay-color-text-secondary); overflow-wrap: anywhere; }
-.collab-goal .page-lede { margin: 0; font-size: var(--relay-font-size-body); color: var(--relay-color-text-secondary); }
-.collab-goal-actions { display: flex; align-items: center; gap: var(--relay-space-1); flex-wrap: wrap; }
-.collab-layout-modes { display: flex; gap: var(--relay-space-1); }
-.collab-layout-modes > button { padding-inline: var(--relay-space-2); }
-.collab-layout-modes > button[aria-pressed="true"] { background: var(--relay-color-selection-bg); color: var(--relay-color-selection-text); border-color: var(--relay-color-action-primary); }
-.collab-goal-actions:empty { display: none; }
-.collab-goal-actions > button { min-height: var(--relay-control-height); font-size: var(--relay-font-size-meta); }
-.collab-goal-actions .collaboration-delegate { border: 0; padding: 0; min-width: 0; }
-.collab-goal:has(.collaboration-delegate-toggle[aria-expanded="true"]) .collab-goal-actions { grid-column: 1 / -1; }
+.collab-current-need { margin: 0; font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); overflow-wrap: anywhere; }
+.collab-goal .page-head-actions > button { min-height: var(--relay-control-height); font-size: var(--relay-font-size-meta); }
+.collab-goal .page-head-actions .collaboration-delegate { border: 0; padding: 0; min-width: 0; }
+/* 浮层可能比视口高，长内容在面板内滚动，不把页头或输入区推出可视范围。 */
+.collab-goal .page-head-more-panel { max-height: min(70vh, 30rem); overflow-y: auto; }
+.collab-goal .page-head-more-panel > button { min-height: var(--relay-control-height); font-size: var(--relay-font-size-meta); }
 .collaboration-delegate-toggle { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-2); min-height: var(--relay-control-height); padding: var(--relay-space-2) var(--relay-space-3); background: var(--relay-color-action-primary); color: var(--relay-color-text-onAction); border: var(--relay-border-width) solid var(--relay-color-action-primary); border-radius: var(--relay-radius-control); cursor: pointer; font: inherit; font-size: var(--relay-font-size-meta); }
 .collaboration-delegate-toggle svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
 .collaboration-delegate-toggle .helper-text { color: inherit; margin: 0; }
 .collaboration-delegate-toggle:disabled { cursor: default; }
-.collaboration-delegate > .disabled-reason { margin: var(--relay-space-2) 0; font-size: var(--relay-font-size-meta); }
+.collaboration-delegate > .disabled-reason { margin: var(--relay-space-1) 0; font-size: var(--relay-font-size-meta); }
 .collaboration-delegate > div:not([hidden]) { padding-top: var(--relay-space-3); }
-.collab-goal-toolbar { grid-column: 1 / -1; min-width: 0; }
+.collab-layout-modes { display: flex; gap: var(--relay-space-1); }
+.collab-layout-modes > button { padding-inline: var(--relay-space-2); }
+.collab-layout-modes > button[aria-pressed="true"] { background: var(--relay-color-selection-bg); color: var(--relay-color-selection-text); border-color: var(--relay-color-action-primary); }
+.collab-goal .page-head-more-panel .helper-text,
+.collab-goal .page-head-more-panel [data-testid="collab-model-connection"] { margin: 0; font-size: var(--relay-font-size-meta); }
 .collab-facts-disclosure { min-width: 0; }
-.collab-facts-disclosure[open] { flex: 1 1 100%; }
-.collab-main:has(.collab-facts-disclosure[open], .collab-model-details[open]) { overflow-y: auto; }
-.collab-main:has(.collab-facts-disclosure[open], .collab-model-details[open]) .collab-columns { flex: 1 0 var(--relay-layout-workspace-centerMin); }
-.collab-facts-disclosure > summary, .collab-run-disclosure > summary { cursor: pointer; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); overflow-wrap: anywhere; }
-.collab-factbar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--relay-space-3); margin: var(--relay-space-3) 0 0; padding: 0; list-style: none; }
-.collab-factbar li { display: grid; gap: var(--relay-space-1); min-width: 0; }
-.collab-factbar-label { display: flex; align-items: center; gap: var(--relay-space-1); font-size: var(--relay-font-size-meta); font-weight: var(--relay-font-weight-medium); }
-.collab-factbar-label svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
-.collab-factbar-note { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); overflow-wrap: anywhere; }
-.collab-factbar .text-link { justify-self: start; font-size: var(--relay-font-size-meta); }
-.collab-goal-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-1) var(--relay-space-2); }
+.collab-facts-disclosure > summary { cursor: pointer; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); overflow-wrap: anywhere; }
 .collab-run-controls { min-width: 0; }
 .collab-run-controls .collaboration-run-control { border: 0; padding: 0; }
 .collab-run-controls .collaboration-run-control > .helper-text:first-child { display: none; }
 .collab-run-controls .run-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-1); margin: 0; }
 .collab-run-controls .run-actions > button { min-height: var(--relay-control-height); padding: var(--relay-space-1) var(--relay-space-2); font-size: var(--relay-font-size-meta); }
 .collab-run-controls .collaboration-run-control > p { margin-block: var(--relay-space-1); }
-.collab-goal-toolbar .helper-text, .collab-goal-toolbar [data-testid="collab-model-connection"] { margin: 0; font-size: var(--relay-font-size-meta); }
-.collab-goal-toolbar .collab-tools-toggle { min-height: var(--relay-control-height); padding: var(--relay-space-1) var(--relay-space-2); font-size: var(--relay-font-size-meta); }
 .collab-notices { padding-inline: var(--relay-space-3); }
 .collab-notices:empty { display: none; }
 .collab-notices p { margin: 0; }
@@ -97,7 +81,8 @@
 .collab-reader .artifact-doc-heading .helper-text { margin: var(--relay-space-2) 0 0; }
 .collab-reader .artifact-doc-version { color: var(--relay-color-text-secondary); }
 .collab-document-paper { display: flex; flex: 1; flex-direction: column; min-height: 0; background: var(--relay-color-bg-surface); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-control); overflow: hidden; }
-.collab-reader-scroll { flex: 1; min-height: var(--relay-control-height-comfort); overflow-y: auto; scrollbar-gutter: stable; }
+/* 阅读区有下限：判断条再长也在自身内部滚动，不把确切正文压成几行。 */
+.collab-reader-scroll { flex: 1; min-height: var(--relay-layout-workspace-centerMin); overflow-y: auto; scrollbar-gutter: stable; }
 .collab-reader .artifact-doc-body { padding: 0; border: 0; overflow: visible; max-height: none; }
 .collab-reader .markdown-preview { margin: 0; padding: var(--relay-space-4); border: 0; font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-reading); line-height: var(--relay-font-lineHeight-reading); }
 .collab-reader .markdown-preview__heading { margin: var(--relay-space-4) 0 var(--relay-space-2); font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-section); }
@@ -112,9 +97,12 @@
 .collab-artifact-state .helper-text { margin: 0; }
 .collab-artifact-state .form-actions { margin: var(--relay-space-3) 0 0; }
 .collab-side-body:has(.collab-reader[data-has-content="false"]) { overflow-y: auto; }
+/* 阅读下限生效时整层改为自然高度滚动，末尾的检查与完成入口仍可到达。 */
+.collab-side-body:has(.collab-reader-scroll) { overflow-y: auto; }
 .collab-reader[data-has-content="false"], .collab-reader[data-has-content="false"] .collab-document-paper, .collab-reader[data-has-content="false"] .collab-reader-scroll { flex: none; min-height: 0; overflow: visible; }
 .collab-reader[data-has-content="false"] .collab-document-paper { border: 0; background: transparent; }
-.collab-judgment { flex: none; max-height: calc(100% - var(--relay-control-height-comfort)); overflow-y: auto; padding: var(--relay-space-3) var(--relay-space-4); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); background: var(--relay-color-bg-canvas); }
+/* 判断条外观归共享 .judgment-bar：贴着成果区底部，判断动作在长正文下仍可直接到达。 */
+.collab-judgment { flex: none; position: sticky; inset-block-end: 0; z-index: var(--relay-zIndex-sticky); }
 .collab-judgment-heading { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: var(--relay-space-2); }
 .collab-judgment-heading h2 { display: flex; align-items: center; gap: var(--relay-space-2); margin: 0; font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-body); }
 .collab-review-picker { min-width: 0; flex: 1; }
@@ -185,11 +173,9 @@
   .collab-center--empty { padding: var(--relay-space-3); }
   .collab-columns--empty .collab-side { display: none; }
   .collab-narrow-tabs:not([hidden]) { display: flex; flex: none; gap: var(--relay-space-2); margin: 0 var(--relay-space-3); }
-  .collab-goal { grid-template-columns: minmax(0, 1fr); }
-  .collab-goal-actions { align-items: center; }
-  .collab-factbar { grid-template-columns: minmax(0, 1fr); }
+.collab-goal .page-head-title > h1 { font-size: var(--relay-font-size-section); }
+  .collab-goal .fact-bar { grid-template-columns: minmax(0, 1fr); }
   .collab-side-tabs, .collab-side-body, .collab-review-shortcut { padding-inline: var(--relay-space-3); }
-  .collab-goal h1 { font-size: var(--relay-font-size-section); }
 }
 @media (max-height: 40rem) {
   /* 短窗口以主区域滚动承接长内容，不再把输入、判断、选项各压成小滚动框。 */
@@ -199,13 +185,16 @@
   .collab-center, .collab-side-body[data-testid="collab-panel-DOCUMENT"] { overflow-y: auto; }
   .collab-center > .agent-assist { flex: none; min-height: 0; }
   .collab-center .agent-chat-conversation { flex: none; min-height: 0; }
-  .collab-center .agent-chat-transcript { flex: none; height: var(--relay-layout-workspace-centerMin); min-height: var(--relay-layout-workspace-centerMin); }
+.collab-center .agent-chat-transcript { flex: none; height: var(--relay-layout-workspace-centerMin); min-height: var(--relay-layout-workspace-centerMin); }
+  /* 阅读下限在这里已经由整层滚动接管，正文与判断按自然高度排列。 */
   .collab-side-body > .collab-reader, .collab-document-paper, .collab-reader-scroll { flex: none; min-height: 0; overflow: visible; }
   .collab-reader .artifact-doc-body { overflow: visible; }
   .collab-completion-details[open] { flex: none; overflow: visible; }
+  /* 短窗口改由整层滚动承接，判断条不再吸附，避免压住正文。 */
+  .collab-judgment { position: static; }
   .collab-judgment { max-height: none; overflow: visible; }
-  .collab-center { padding-top: var(--relay-space-3); }
-  .collab-goal h1 { font-size: var(--relay-font-size-section); }
+.collab-center { padding-top: var(--relay-space-3); }
+  .collab-goal .page-head-title > h1 { font-size: var(--relay-font-size-section); }
   @container collaboration (max-width: calc(26rem + 20rem + 6rem)) {
     .collab-columns .collab-result-pane, .collab-columns .collab-side { flex: none; min-height: 0; overflow: visible; }
     .collab-columns .collab-side .collab-side-body[data-testid="collab-panel-DOCUMENT"] { flex: none; min-height: 0; overflow: visible; }

@@ -4,6 +4,7 @@ import { ExternalLink, Scale } from "lucide-react";
 import ArtifactReaderPanel from "./ArtifactReaderPanel";
 import ArtifactVersionCompare from "./ArtifactVersionCompare";
 import DevToolsPanel from "./DevToolsPanel";
+import JudgmentBar from "./JudgmentBar";
 import ReviewDecisionPanel, { reviewReasonText, type ReviewNavigationState } from "./ReviewDecisionPanel";
 import { runLabels, stepLabels, stepStatusLabels } from "./RunControlPanel";
 import RunTracePanel from "./RunTracePanel";
@@ -48,16 +49,23 @@ export default function WorkspaceSidePanel({ client, task, run, draft, tab, onTa
   onReviewNavigationStateChange: (state: ReviewNavigationState) => void;
   onRefresh: () => void;
 }) {
-  const tabId = useId();
+const tabId = useId();
   // 文档子树保持挂载，切换视图不能丢失判断草稿或待核对的原命令。
   const toolsVisible = devToolsOpen && task.projectId !== null;
-  const judgment = openReview === null
+  // 父级已核对验收版本与条件 ID 后才显示条件正文；版本对不上就退回请求原因，不展示可能过期的文字。
+  const criterionStatement = openReview !== null && openReview.target.acceptance_revision === task.acceptance.acceptanceRevision
+    ? task.acceptance.criteria.find((criterion) => criterion.criterionId === openReview.target.criterion_id)?.statement ?? null
+    : null;
+const judgment = openReview === null
         ? reviewError
           ? <p className="action-error" role="alert" data-testid="collab-judgment-error">{reviewError}</p>
           : <p className="helper-text" data-testid="collab-judgment-empty">暂无待判断事项。</p>
-        : <section className="collab-judgment" data-testid="collab-judgment" data-review-kind={openReview.kind} tabIndex={-1} aria-label="等待你的判断">
-            <div className="collab-judgment-heading">
-              <h2><Scale aria-hidden="true" />等待你的判断</h2>
+        : <JudgmentBar data-testid="collab-judgment" data-review-kind={openReview.kind} className="collab-judgment"
+            tabIndex={-1}
+            title={criterionStatement
+              ? <>等待你的判断：{criterionStatement}</>
+              : <>等待你的判断：{reviewReasonText(openReview.reason)}</>}
+            head={<>
               {reviews.length > 1 && <details className="collab-review-picker"><summary>{reviewKindLabels[openReview.kind]} · {reviews.length} 项</summary><label><span className="visually-hidden">选择请求</span>
                 <select data-testid="collab-review-select" value={String(reviewIndex)}
                   onChange={(event) => onReviewIndexChange(Number(event.target.value))}>
@@ -65,13 +73,12 @@ export default function WorkspaceSidePanel({ client, task, run, draft, tab, onTa
                 </select></label></details>}
               <details className="collab-judgment-context"><summary>执行权边界</summary>
                 <p className="helper-text">判断不会暂停执行或转移执行权。</p></details>
-            </div>
+            </>}>
             <ReviewDecisionPanel live compact review={openReview} writeBlockedReason={reviewWriteBlockedReason}
-              criterionStatement={openReview.target.acceptance_revision === task.acceptance.acceptanceRevision
-                ? task.acceptance.criteria.find((criterion) => criterion.criterionId === openReview.target.criterion_id)?.statement ?? null : null}
+              criterionStatement={criterionStatement}
               onNavigationStateChange={onReviewNavigationStateChange}
               onRefresh={onRefresh} />
-          </section>;
+          </JudgmentBar>;
   return <aside className="collab-side" aria-label={toolsVisible ? "文件与运行工具" : "产物与判断"} data-testid="collab-side" data-pane={toolsVisible ? "DEVTOOLS" : tab}>
     {toolsVisible && <DevToolsPanel client={client} projectId={task.projectId!} taskId={task.id} run={run} onClose={onCloseDevTools} />}
     <div className="collab-side-tabs" role="tablist" aria-label="成果、检查与历史" data-testid="collab-side-tabs" hidden={toolsVisible}

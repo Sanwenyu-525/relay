@@ -53,7 +53,7 @@ await page.close();
 const wide = await openAt(1512, 950, taskId);
 await wide.screenshot({ path: `${outDir}collab-11-dialogue-document-1512x950.png` });
 results.push(["三栏同时可见", await wide.getByTestId("collab-side").isVisible() && await wide.getByTestId("collab-center").isVisible()]);
-results.push(["事实条为一条三格", await wide.locator(".collab-factbar > li").count() === 3]);
+results.push(["事实条为一条三格", await wide.locator(".fact-bar > li").count() === 3]);
 results.push(["消息有头像与时间戳", await wide.locator(".agent-message-avatar").count() === 3]);
 results.push(["日期分隔线存在", await wide.locator(".agent-date-separator").count() === 1]);
 results.push(["输入区常驻且有工具条", await wide.locator(".agent-chat-composer-tools .agent-chat-tool").count() === 3]);
