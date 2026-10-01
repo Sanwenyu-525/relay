@@ -1,5 +1,7 @@
 # 文档入口与维护规范
 
+2026-10-01 文件夹与对话入口导航：用户已确认入口与直接执行的产品规则，本轮只修改文档。详细行为归[工作台 §18](frontend/workbench-design.md#18-文件夹入口与对话直接执行)，应用责任归[领域模型 §12](architecture/domain-model.md#12-文件夹入口与对话执行的应用边界)，取舍归[ADR-016](decisions/ADR-016-folder-first-conversation.md)，未运行场景归[测试计划 §17](testing/verification-plan.md#17-文件夹与对话直接执行验收规格)，后续执行入口为[实施提示词](../prompts/folder-first-conversation.md)。当前阶段和授权只在 CODEX_NEXT_STEP 维护。
+
 2026-10-01 整套 UI 重做导航：[Agent UI 研究审查](research/agent-ui-review-2026-10-01.md)记录本轮一手资料、源码和代表页面问题；[工作台第 17 节](frontend/workbench-design.md#17-整套-ui-重做提案2026-10-01)拥有完整页面/状态覆盖与回归路径；[设计系统第 9 节](frontend/design-system.md#9-整套重做的组件与布局提案2026-10-01)拥有共享组件提案。范围已获用户授权，具体视觉方向待选择，尚未实施；源码缓存更新归 P00，功能状态仍只归统一验收表。
 
 2026-09-29 协作体验改造导航：[工作台第 14 节](frontend/workbench-design.md#14-以目标协作为中心的工作台改造)拥有目标流程、入口与兼容关系；[设计系统第 5.1 节](frontend/design-system.md#51-协作工作区的视觉层级)拥有视觉层级；[验收第 16 节](testing/verification-plan.md#16-agent-协作主线验收提案)拥有场景规格，运行结果统一见[功能验收表](testing/overall-acceptance-2026-09-28.md#当前功能验收表)。第 14 节结构已在 `/agent` 落地（开发自检），**真实 Windows 验收未完成**；Git 只读与交互终端因缺协议显式标为未接入。旧图和逐页清单继续用于风格/能力覆盖，不冻结旧管理导航。
