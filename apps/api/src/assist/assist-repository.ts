@@ -148,6 +148,7 @@ export class AssistRepository {
     content: string | null; errorCode: string | null; providerRequestId: string | null;
     providerErrorKind?: AssistMessageRow['provider_error_kind'];
     usageInputTokens: number | null; usageOutputTokens: number | null;
+    usageCacheReadTokens?: number | null; usageCacheCreationTokens?: number | null;
     finalSources?: readonly JsonObject[] | undefined;
     skillOutput?: JsonObject | undefined }): Promise<boolean> {
     const sources = input.finalSources === undefined ? sql`` :
@@ -160,6 +161,8 @@ export class AssistRepository {
       provider_request_id = ${input.providerRequestId},
       usage_input_tokens = ${input.usageInputTokens},
       usage_output_tokens = ${input.usageOutputTokens},
+      usage_cache_read_tokens = ${input.usageCacheReadTokens ?? null},
+      usage_cache_creation_tokens = ${input.usageCacheCreationTokens ?? null},
       worker_id = ${input.workerId}, updated_at = now()${sources}${skillOutput}
       where id = ${input.messageId} and status = 'RUNNING' and worker_id = ${input.workerId}
       returning id`.execute(this.db)).rows.length > 0;

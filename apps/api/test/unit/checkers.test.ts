@@ -186,7 +186,8 @@ test('semantic-model-v1 maps model verdicts and treats evaluation failures as ER
     throw responseError;
   }).check({ ...base, content: '任意' });
   assert.equal(invalid.result, 'ERROR');
-  assert.deepEqual(invalid.evidence.usage, { input_tokens: 7, output_tokens: null });
+  assert.deepEqual(invalid.evidence.usage, { input_tokens: 7, output_tokens: null,
+    cache_read_tokens: null, cache_creation_tokens: null });
   assert.equal(invalid.evidence.provider_request_id, 'req-invalid');
 });
 

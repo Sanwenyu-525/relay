@@ -1191,6 +1191,8 @@ async function executeDraft(
           usage: {
             input_tokens: result.usage.inputTokens,
             output_tokens: result.usage.outputTokens,
+            cache_read_tokens: result.usage.cacheReadTokens ?? null,
+            cache_creation_tokens: result.usage.cacheCreationTokens ?? null,
           },
         },
       };

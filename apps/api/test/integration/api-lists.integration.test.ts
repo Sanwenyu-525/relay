@@ -42,6 +42,30 @@ async function createTask(workspaceId: string, projectId: string | null, title: 
   return result.task_id as string;
 }
 
+async function createGoal(workspaceId: string, title: string): Promise<string> {
+  const commandId = randomUUID();
+  const response = await api.post(workspacePath(workspaceId, '/goals'), {
+    command_id: commandId, title, description: `${title} 描述`,
+  });
+  return expectCommandAccepted(response, 201, commandId).goal_id as string;
+}
+
+async function readProjectRevision(workspaceId: string, projectId: string): Promise<string> {
+  const response = await api.get(workspacePath(workspaceId, `/projects/${projectId}`));
+  assert.equal(response.status, 200, response.text);
+  return (response.body as { revision: string }).revision;
+}
+
+async function linkGoal(workspaceId: string, projectId: string, goalId: string): Promise<string> {
+  const commandId = randomUUID();
+  const response = await api.post(workspacePath(workspaceId, `/projects/${projectId}/goal-links`), {
+    command_id: commandId, goal_id: goalId,
+    expected_revision: await readProjectRevision(workspaceId, projectId),
+  });
+  expectCommandAccepted(response, 200, commandId);
+  return goalId;
+}
+
 test('GET /projects pages exact ProjectState and archive facts without crossing Workspace', async () => {
   const workspaceId = await createWorkspace(app.db);
   const otherWorkspace = await createWorkspace(app.db);
@@ -178,5 +202,114 @@ test('GET /tasks?scope=all keeps legacy filters and computes blockers by each Pr
   expectProblem(await api.get(workspacePath(workspaceId, '/tasks')),
     422, 'REQUIRED_INPUT_MISSING');
   expectProblem(await api.get(workspacePath(randomUUID(), '/tasks?scope=all')),
+    404, 'RESOURCE_NOT_FOUND');
+});
+
+test('GET /goals pages Workspace 级 Goal 并按 status 过滤，不按 Project 收敛', async () => {
+  const workspaceId = await createWorkspace(app.db);
+  const otherWorkspace = await createWorkspace(app.db);
+  const first = await createGoal(workspaceId, 'first');
+  const archived = await createGoal(workspaceId, 'archived');
+  const last = await createGoal(workspaceId, 'last');
+  const foreign = await createGoal(otherWorkspace, 'foreign');
+
+  await sql`update goals set created_at = '2026-01-01T00:00:00.123456Z'::timestamptz
+    where id = ${first}`.execute(app.db);
+  await sql`update goals set status = 'ARCHIVED', created_at = '2026-01-01T00:00:00.123455Z'::timestamptz
+    where id = ${archived}`.execute(app.db);
+  await sql`update goals set created_at = '2026-01-01T00:00:00.123454Z'::timestamptz
+    where id = ${last}`.execute(app.db);
+
+  const active = await api.get(workspacePath(workspaceId, '/goals'));
+  assert.equal(active.status, 200, active.text);
+  const activeItems = (active.body as { items: { id: string; title: string;
+    status: string; description: string; revision: string }[]; next_cursor: string | null }).items;
+  assert.deepEqual(activeItems.map((item) => item.id), [first, last]);
+  assert.equal(activeItems[0]?.title, 'first');
+  assert.equal(activeItems[0]?.description, 'first 描述');
+  assert.equal(activeItems[0]?.status, 'ACTIVE');
+  assert.equal(activeItems[0]?.revision, '0');
+  assert.equal(active.body !== null ? (active.body as { next_cursor: string | null }).next_cursor : null,
+    null);
+
+  const archivedPage = await api.get(workspacePath(workspaceId, '/goals?status=archived'));
+  assert.equal(archivedPage.status, 200, archivedPage.text);
+  assert.deepEqual((archivedPage.body as { items: { id: string; status: string }[] }).items
+    .map((item) => item.id), [archived]);
+
+  const ids: string[] = [];
+  let cursor: string | null = null;
+  do {
+    const path = `/goals?status=all&limit=1${cursor === null ? '' : `&cursor=${cursor}`}`;
+    const response = await api.get(workspacePath(workspaceId, path));
+    assert.equal(response.status, 200, response.text);
+    const body = response.body as { items: { id: string }[]; next_cursor: string | null };
+    ids.push(...body.items.map((item) => item.id));
+    cursor = body.next_cursor;
+  } while (cursor !== null);
+  assert.deepEqual(ids, [first, archived, last]);
+  assert.ok(!ids.includes(foreign));
+
+  const boundPage = await api.get(workspacePath(workspaceId, '/goals?status=all&limit=1'));
+  const boundCursor = (boundPage.body as { next_cursor: string }).next_cursor;
+  expectProblem(await api.get(workspacePath(workspaceId,
+    `/goals?limit=1&cursor=${boundCursor}`)), 400, 'INVALID_CURSOR');
+  expectProblem(await api.get(workspacePath(otherWorkspace,
+    `/goals?status=all&limit=1&cursor=${boundCursor}`)), 400, 'INVALID_CURSOR');
+  expectProblem(await api.get(workspacePath(workspaceId,
+    '/goals?status=all&limit=101')), 422, 'VALIDATION_FAILED');
+  expectProblem(await api.get(workspacePath(workspaceId, '/goals?status=unknown')),
+    422, 'VALIDATION_FAILED');
+  expectProblem(await api.get(workspacePath(randomUUID(), '/goals')),
+    404, 'RESOURCE_NOT_FOUND');
+});
+
+test('GET /goals/{id}/projects 反向读出跨多个 Project 的关联，含归档 Project', async () => {
+  const workspaceId = await createWorkspace(app.db);
+  const otherWorkspace = await createWorkspace(app.db);
+  const goal = await createGoal(workspaceId, '跨文件夹目标');
+  const unlinked = await createGoal(workspaceId, '未关联目标');
+  const thesis = await createProject(workspaceId, '论文项目', 'THESIS');
+  const development = await createProject(workspaceId, '开发项目', 'DEVELOPMENT');
+  const foreignProject = await createProject(otherWorkspace, '外部项目');
+  const foreignGoal = await createGoal(otherWorkspace, '外部目标');
+
+  await sql`update projects set created_at = '2026-02-01T00:00:00.000001Z'::timestamptz
+    where id = ${thesis}`.execute(app.db);
+  await sql`update projects set created_at = '2026-02-01T00:00:00.000003Z'::timestamptz
+    where id = ${foreignProject}`.execute(app.db);
+
+  // 先建立关联，再归档：归档后的 Project 不能被写命令关联，但既有关联仍可被只读查询读出。
+  await linkGoal(workspaceId, thesis, goal);
+  await linkGoal(workspaceId, development, goal);
+  await linkGoal(otherWorkspace, foreignProject, foreignGoal);
+  await sql`update projects set archived_at = now(),
+      created_at = '2026-02-01T00:00:00.000002Z'::timestamptz
+    where id = ${development}`.execute(app.db);
+
+  const response = await api.get(workspacePath(workspaceId, `/goals/${goal}/projects`));
+  assert.equal(response.status, 200, response.text);
+  const items = (response.body as { items: { project_id: string; title: string;
+    project_type: string; archived_at: string | null; archive_status: string;
+    project_revision: string; linked_at: string }[] }).items;
+  assert.deepEqual(items.map((item) => item.project_id), [development, thesis]);
+  assert.equal(items[0]?.archive_status, 'ARCHIVED');
+  assert.notEqual(items[0]?.archived_at, null);
+  assert.equal(items[1]?.archive_status, 'ACTIVE');
+  assert.equal(items[1]?.archived_at, null);
+  assert.equal(items[1]?.title, '论文项目');
+  assert.equal(items[1]?.project_type, 'THESIS');
+  assert.ok(items.every((item) => item.project_revision !== '' && item.linked_at !== ''));
+  assert.ok(!items.some((item) => item.project_id === foreignProject));
+
+  const empty = await api.get(workspacePath(workspaceId, `/goals/${unlinked}/projects`));
+  assert.equal(empty.status, 200, empty.text);
+  assert.deepEqual((empty.body as { items: unknown[] }).items, []);
+
+  expectProblem(await api.get(workspacePath(otherWorkspace, `/goals/${goal}/projects`)),
+    404, 'RESOURCE_NOT_FOUND');
+  expectProblem(await api.get(workspacePath(workspaceId, `/goals/${randomUUID()}/projects`)),
+    404, 'RESOURCE_NOT_FOUND');
+  expectProblem(await api.get(workspacePath(randomUUID(), `/goals/${goal}/projects`)),
     404, 'RESOURCE_NOT_FOUND');
 });

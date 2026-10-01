@@ -60,7 +60,9 @@ export async function runModelPortVerification(
     const knownUsage = typeof usage === 'object' && usage !== null &&
       'inputTokens' in usage && 'outputTokens' in usage
       ? { inputTokens: (usage as ModelUsage).inputTokens,
-        outputTokens: (usage as ModelUsage).outputTokens }
+        outputTokens: (usage as ModelUsage).outputTokens,
+        cacheReadTokens: (usage as ModelUsage).cacheReadTokens ?? null,
+        cacheCreationTokens: (usage as ModelUsage).cacheCreationTokens ?? null }
       : undefined;
     await calls.settle(callId, {
       status: 'FAILED',

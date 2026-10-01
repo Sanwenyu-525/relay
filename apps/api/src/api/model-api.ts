@@ -20,6 +20,8 @@ const StatusSchema = Type.Object({
   configured: Type.Boolean(),
   model: Type.Union([Type.String(), Type.Null()]),
   base_url: Type.Union([Type.String(), Type.Null()]),
+  // 单次调用 token 上限，作为上下文占用的可核对分母；Fake 或配置残缺时为 null。
+  max_call_tokens: Type.Union([Type.Integer(), Type.Null()]),
 }, { additionalProperties: false });
 
 const ErrorCategorySchema = Type.Union(
@@ -106,7 +108,8 @@ export function registerModelRoutes(app: FastifyInstance, dependencies: RouteDep
         void p;
         const status = describeModelPortStatus(process.env);
         return { provider: status.provider, configured: status.configured,
-          model: status.model, base_url: status.baseUrl };
+          model: status.model, base_url: status.baseUrl,
+          max_call_tokens: status.maxCallTokens };
       } catch (error) { return sendReadError(reply, error, request.id); }
     });
 

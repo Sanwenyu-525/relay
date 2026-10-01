@@ -51,8 +51,11 @@ const AssistMessageDto = Type.Object({
   skill_input: Type.Union([Type.Object({}, { additionalProperties: true }), Type.Null()]),
   skill_output: Type.Union([Type.Object({}, { additionalProperties: true }), Type.Null()]),
   provider_request_id: Type.Union([Type.String(), Type.Null()]),
+  // cache_* 是 Provider 可选字段：null 表示未上报，不得读成"没有缓存"。
   usage: Type.Object({ input_tokens: Type.Union([Type.Integer(), Type.Null()]),
-    output_tokens: Type.Union([Type.Integer(), Type.Null()]) }, strict),
+    output_tokens: Type.Union([Type.Integer(), Type.Null()]),
+    cache_read_tokens: Type.Union([Type.Integer(), Type.Null()]),
+    cache_creation_tokens: Type.Union([Type.Integer(), Type.Null()]) }, strict),
   cancel_requested: Type.Boolean(),
   created_at: Type.String(), updated_at: Type.String(),
 }, strict);
@@ -127,7 +130,9 @@ function messageDto(row: { id: string; session_id: string; seq: bigint; role: st
   status: string; intent: string; content: string | null; error_code: string | null;
   provider_error_kind: ModelErrorCategory | null;
   sources: unknown; provider_request_id: string | null; usage_input_tokens: number | null;
-  usage_output_tokens: number | null; cancel_requested: boolean; created_at: Date; updated_at: Date },
+  usage_output_tokens: number | null; usage_cache_read_tokens: number | null;
+  usage_cache_creation_tokens: number | null; cancel_requested: boolean;
+  created_at: Date; updated_at: Date },
   projection: { skill: JsonObject | null; skill_input: JsonObject | null;
     skill_output: JsonObject | null; content: string | null; sources: unknown }) {
   return {
@@ -137,7 +142,9 @@ function messageDto(row: { id: string; session_id: string; seq: bigint; role: st
     sources: projection.sources,
     skill: projection.skill, skill_input: projection.skill_input,
     skill_output: projection.skill_output, provider_request_id: row.provider_request_id,
-    usage: { input_tokens: row.usage_input_tokens, output_tokens: row.usage_output_tokens },
+    usage: { input_tokens: row.usage_input_tokens, output_tokens: row.usage_output_tokens,
+      cache_read_tokens: row.usage_cache_read_tokens,
+      cache_creation_tokens: row.usage_cache_creation_tokens },
     cancel_requested: row.cancel_requested,
     created_at: row.created_at.toISOString(), updated_at: row.updated_at.toISOString(),
   };

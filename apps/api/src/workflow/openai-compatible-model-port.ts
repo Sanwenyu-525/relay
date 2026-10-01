@@ -154,7 +154,8 @@ ${input.content}`),
     const parts: string[] = [];
     let bytes = 0;
     let providerRequestId = '';
-    let usage: ModelUsage = { inputTokens: null, outputTokens: null };
+    let usage: ModelUsage = { inputTokens: null, outputTokens: null,
+    cacheReadTokens: null, cacheCreationTokens: null };
     try {
       const stream = await this.client.stream(messages, {
         signal,
@@ -166,10 +167,16 @@ ${input.content}`),
           providerRequestId = chunkRequestId;
         }
         const metadata = (chunk as unknown as { usage_metadata?: {
-          input_tokens?: unknown; output_tokens?: unknown } }).usage_metadata;
+          input_tokens?: unknown; output_tokens?: unknown;
+          input_token_details?: { cache_read?: unknown; cache_creation?: unknown } } }).usage_metadata;
         if (metadata !== undefined) {
+          // cache_read/cache_creation are optional Provider extras. A chunk that
+          // omits them must not erase a value an earlier chunk already reported.
+          const details = metadata.input_token_details;
           usage = { inputTokens: validUsage(metadata.input_tokens),
-            outputTokens: validUsage(metadata.output_tokens) };
+            outputTokens: validUsage(metadata.output_tokens),
+            cacheReadTokens: validUsage(details?.cache_read),
+            cacheCreationTokens: validUsage(details?.cache_creation) };
         }
         if ((chunk.tool_call_chunks?.length ?? 0) > 0 ||
             (chunk.tool_calls?.length ?? 0) > 0) {

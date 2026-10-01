@@ -21,7 +21,8 @@ const config: ModelPortConfig = {
 const publicLookup = async () => [{ address: '8.8.8.8', family: 4 }];
 
 function event(content: string | null, finishReason: string | null = null,
-  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }): string {
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number;
+    prompt_tokens_details?: { cached_tokens?: number } }): string {
   return `data: ${JSON.stringify({ id: 'chatcmpl-fixture',
     object: 'chat.completion.chunk', created: 1, model: 'fixture-model',
     choices: content === null ? [] : [{ index: 0, delta: { role: 'assistant', content },
@@ -61,18 +62,21 @@ function toolEvent(content = '',
       finish_reason: 'tool_calls' }], ...(usage === undefined ? {} : { usage }) })}\n\n`;
 }
 
+const nullUsage = { inputTokens: null, outputTokens: null,
+  cacheReadTokens: null, cacheCreationTokens: null };
+
 for (const scenario of [
   { name: 'same-chunk wire usage is not guessed', chunks: [toolEvent('must not publish',
     { prompt_tokens: 41, completion_tokens: 9, total_tokens: 50 })],
-  usage: { inputTokens: null, outputTokens: null }, deltas: [] },
+  usage: nullUsage, deltas: [] },
   { name: 'prior empty and usage frames', chunks: [event(''),
     event(null, null, { prompt_tokens: 43, completion_tokens: 8, total_tokens: 51 }), toolEvent()],
-  usage: { inputTokens: null, outputTokens: null }, deltas: [] },
+  usage: nullUsage, deltas: [] },
   { name: 'partial text before tool refusal', chunks: [event('partial synthetic reply'),
     event(null, null, { prompt_tokens: 43, completion_tokens: 8, total_tokens: 51 }), toolEvent()],
-  usage: { inputTokens: null, outputTokens: null }, deltas: ['partial synthetic reply'] },
+  usage: nullUsage, deltas: ['partial synthetic reply'] },
   { name: 'unknown usage stays null', chunks: [toolEvent()],
-  usage: { inputTokens: null, outputTokens: null }, deltas: [] },
+  usage: nullUsage, deltas: [] },
 ]) {
   test(`tool refusal preserves request metadata: ${scenario.name}`, async () => {
     let calls = 0;
@@ -126,7 +130,8 @@ for (const scenario of ['prior usage', 'same-chunk usage', 'empty request ID', '
       assert.equal(error.providerRequestId, scenario === 'empty request ID'
         ? undefined : 'chatcmpl-known-usage');
       assert.deepEqual(error.usage, scenario === 'prior usage' || scenario === 'same-chunk usage'
-        ? { inputTokens: 43, outputTokens: 8 } : { inputTokens: null, outputTokens: null });
+        ? { inputTokens: 43, outputTokens: 8, cacheReadTokens: null, cacheCreationTokens: null }
+        : { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheCreationTokens: null });
       assert.ok(!JSON.stringify(error).includes('synthetic.txt'));
       assert.ok(!JSON.stringify(error).includes('https://synthetic.invalid/image.png'));
       return true;
@@ -150,7 +155,8 @@ test('streamed fragments settle only after DONE and preserve optional usage', as
   assert.equal(result.kind, 'CONTENT');
   if (result.kind === 'CONTENT') {
     assert.equal(result.content, '# Hello\n\n## 摘要\n内容\n\n## 结论\n完成');
-    assert.deepEqual(result.usage, { inputTokens: 34, outputTokens: 19 });
+    assert.deepEqual(result.usage, { inputTokens: 34, outputTokens: 19,
+      cacheReadTokens: null, cacheCreationTokens: null });
     assert.equal(result.providerRequestId, 'chatcmpl-fixture');
   }
   assert.equal(calls, 1);
@@ -159,9 +165,37 @@ test('streamed fragments settle only after DONE and preserve optional usage', as
     turns: [{ role: 'user', content: 'ok' }] });
   assert.equal(assist.kind, 'CONTENT');
   if (assist.kind === 'CONTENT') {
-    assert.deepEqual(assist.usage, { inputTokens: null, outputTokens: null });
+    assert.deepEqual(assist.usage, { inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreationTokens: null });
   }
 });
+
+test('prompt cache tokens are carried through and absence stays unknown, not zero', async () => {
+  // Provider-reported cached tokens must survive the port; a Provider that omits the
+  // field must leave cache columns NULL so the UI can say "未采集" instead of 0%.
+  const cached = port(() => response([event('ok', 'stop'),
+    event(null, null, { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120,
+      prompt_tokens_details: { cached_tokens: 64 } }), 'data: [DONE]\n\n']));
+  const withCache = await cached.assist({ intent: 'DISCUSS', system: 'sys',
+    turns: [{ role: 'user', content: 'hi' }] });
+  assert.equal(withCache.kind, 'CONTENT');
+  if (withCache.kind === 'CONTENT') {
+    assert.deepEqual(withCache.usage, { inputTokens: 100, outputTokens: 20,
+      cacheReadTokens: 64, cacheCreationTokens: null });
+  }
+  const uncached = port(() => response([event('ok', 'stop'),
+    event(null, null, { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 }),
+    'data: [DONE]\n\n']));
+  const withoutCache = await uncached.assist({ intent: 'DISCUSS', system: 'sys',
+    turns: [{ role: 'user', content: 'hi' }] });
+  assert.equal(withoutCache.kind, 'CONTENT');
+  if (withoutCache.kind === 'CONTENT') {
+    assert.deepEqual(withoutCache.usage, { inputTokens: 100, outputTokens: 20,
+      cacheReadTokens: null, cacheCreationTokens: null });
+  }
+});
+
+
 
 test('plain DISCUSS publishes a text delta before DONE while structured Assist stays private', async () => {
   const encoder = new TextEncoder();
@@ -243,7 +277,8 @@ for (const scenario of assistResponseFormatCases) {
     assert.equal(calls, 1);
     assert.deepEqual(result, { kind: 'CONTENT', content: pieces.join(''),
       providerRequestId: 'chatcmpl-fixture',
-      usage: { inputTokens: 34, outputTokens: 19 } });
+      usage: { inputTokens: 34, outputTokens: 19,
+        cacheReadTokens: null, cacheCreationTokens: null } });
     assert.deepEqual(deltas, scenario.structured ? [] : pieces);
     assert.ok(requestBody);
     if (scenario.structured) {

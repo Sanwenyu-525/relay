@@ -6,7 +6,8 @@ import type { AssistMessageRow, AssistSessionRow, DecisionVersionRow, KnowledgeV
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
-import type { AssistIntent, AssistModelPort, AssistTurn } from '../workflow/fake-model-port.js';
+import type { AssistIntent, AssistModelPort, AssistTurn,
+  ModelUsage } from '../workflow/fake-model-port.js';
 import { assistPayloadHash } from './assist-commands.js';
 import { recordModelInvocation } from './model-call-recorder.js';
 import { ModelCallRepository, ModelScopeBudgetError } from '../model/model-call-repository.js';
@@ -445,7 +446,7 @@ async function settle(r: Repositories, message: AssistMessageRow, workerId: stri
   input: { status: 'COMPLETED' | 'FAILED' | 'CANCELLED'; errorCode: string | null;
     providerErrorKind?: ModelErrorCategory | null;
     content: string | null; providerRequestId: string | null;
-    usage: { inputTokens: number | null; outputTokens: number | null };
+    usage: ModelUsage;
     finalSources?: readonly JsonObject[]; skillOutput?: JsonObject }): Promise<boolean> {
   const session = await r.assist.readSession(message.session_id);
   if (session?.project_id !== null && session?.project_id !== undefined) {
@@ -456,6 +457,8 @@ async function settle(r: Repositories, message: AssistMessageRow, workerId: stri
     errorCode: input.errorCode, providerRequestId: input.providerRequestId,
     providerErrorKind: input.providerErrorKind ?? null,
     usageInputTokens: input.usage.inputTokens, usageOutputTokens: input.usage.outputTokens,
+    usageCacheReadTokens: input.usage.cacheReadTokens ?? null,
+    usageCacheCreationTokens: input.usage.cacheCreationTokens ?? null,
     ...(input.finalSources === undefined ? {} : { finalSources: input.finalSources }),
     ...(input.skillOutput === undefined ? {} : { skillOutput: input.skillOutput }),
   });
@@ -478,10 +481,11 @@ class AssistPreviewWriteError extends Error {
  */
 function modelErrorEvidence(error: unknown): {
   providerRequestId: string | null;
-  usage: { inputTokens: number | null; outputTokens: number | null };
+  usage: ModelUsage;
 } {
   const empty = { providerRequestId: null,
-    usage: { inputTokens: null, outputTokens: null } };
+    usage: { inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreationTokens: null } };
   if (typeof error !== 'object' || error === null) return empty;
   const evidence = error as { providerRequestId?: unknown; usage?: unknown };
   const usage = evidence.usage;
@@ -492,10 +496,14 @@ function modelErrorEvidence(error: unknown): {
   }
   const read = (value: unknown): number | null =>
     Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : null;
+  const details = 'cacheReadTokens' in usage || 'cacheCreationTokens' in usage
+    ? usage as { cacheReadTokens?: unknown; cacheCreationTokens?: unknown } : {};
   return {
     providerRequestId: typeof evidence.providerRequestId === 'string'
       ? evidence.providerRequestId : null,
-    usage: { inputTokens: read(usage.inputTokens), outputTokens: read(usage.outputTokens) },
+    usage: { inputTokens: read(usage.inputTokens), outputTokens: read(usage.outputTokens),
+      cacheReadTokens: 'cacheReadTokens' in details ? read(details.cacheReadTokens) : null,
+      cacheCreationTokens: 'cacheCreationTokens' in details ? read(details.cacheCreationTokens) : null },
   };
 }
 

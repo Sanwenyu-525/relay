@@ -25,14 +25,18 @@ export async function recordModelInvocation<T>(db: DbExecutor, input: {
     const evidence = typeof error === 'object' && error !== null
       ? error as { providerRequestId?: unknown; usage?: unknown } : {};
     const usage = evidence.usage;
-    const knownUsage = typeof usage === 'object' && usage !== null &&
-      'inputTokens' in usage && 'outputTokens' in usage &&
-      (usage.inputTokens === null || (Number.isSafeInteger(usage.inputTokens) &&
-        (usage.inputTokens as number) >= 0)) &&
-      (usage.outputTokens === null || (Number.isSafeInteger(usage.outputTokens) &&
-        (usage.outputTokens as number) >= 0))
-      ? { inputTokens: usage.inputTokens as number | null,
-        outputTokens: usage.outputTokens as number | null } : undefined;
+    const fields = typeof usage === 'object' && usage !== null
+      ? usage as { inputTokens?: unknown; outputTokens?: unknown;
+        cacheReadTokens?: unknown; cacheCreationTokens?: unknown } : {};
+    const knownUsage = 'inputTokens' in fields && 'outputTokens' in fields &&
+      (fields.inputTokens === null || (Number.isSafeInteger(fields.inputTokens) &&
+        (fields.inputTokens as number) >= 0)) &&
+      (fields.outputTokens === null || (Number.isSafeInteger(fields.outputTokens) &&
+        (fields.outputTokens as number) >= 0))
+      ? { inputTokens: fields.inputTokens as number | null,
+        outputTokens: fields.outputTokens as number | null,
+        cacheReadTokens: cacheToken(fields.cacheReadTokens),
+        cacheCreationTokens: cacheToken(fields.cacheCreationTokens) } : undefined;
     // Provider 传输层失败记统一分类（与连接验证同一词表，可聚合）；Relay 自身的
     // 预算、工具拒绝、语义解析等失败不是 Provider 故障，保留错误名以便定位。
     const aborted = input.signal?.aborted === true;
@@ -47,4 +51,9 @@ export async function recordModelInvocation<T>(db: DbExecutor, input: {
   }
   await calls.settle(callId, input.settle(result));
   return { callId, result };
+}
+
+/** Provider cache fields are optional extras; absent or malformed means unknown. */
+function cacheToken(value: unknown): number | null {
+  return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : null;
 }

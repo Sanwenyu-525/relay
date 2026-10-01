@@ -7,7 +7,7 @@
 | 资源 | 读取 | 写命令（均 POST，含 command_id） | 特殊校验 |
 |---|---|---|---|
 | Goal | /goals、/goals/{id} | /goals；/goals/{id}/revisions、/archive | revision；被引用归档保留历史 |
-| Project Goal | /projects/{id}/goals | /projects/{id}/goal-links、/goal-unlinks | 解除带影响清单和处理方式，锁下重新核对 |
+| Project Goal | /projects/{id}/goals；/goals/{id}/projects（反向读该目标涉及哪些项目） | /projects/{id}/goal-links、/goal-unlinks | 解除带影响清单和处理方式，锁下重新核对 |
 | Task 对齐 | Task 查询携带 alignment | /tasks/{id}/goal-alignment | mode=INHERIT/EXPLICIT、goal_ids；校验子集 |
 | Task 元数据 | Task 查询 | /tasks/{id}/planning-metadata | priority、due_local_date、timezone；不改验收 |
 | Task 交互模式 | Task 查询携带 mode | /tasks/{id}/interaction-mode | HUMAN 可选 ME/AI_ASSIST；DELEGATE_AI 只能由 Delegate 用例设置 |

@@ -10,6 +10,8 @@ import {
   unlinkProjectGoal,
 } from '../application/project-goal-links.js';
 import {
+  listGoals,
+  listGoalProjects,
   listProjectGoals,
   listProjects,
   readGoalById,
@@ -22,7 +24,10 @@ import {
   ArchiveProjectResultSchema,
   CreateProjectBodySchema,
   CreateProjectResultSchema,
+  GoalListSchema,
+  GoalProjectListSchema,
   GoalSchema,
+  GoalsListQuerySchema,
   LinkProjectGoalBodySchema,
   ProjectGoalLinkResultSchema,
   ProjectGoalListSchema,
@@ -36,7 +41,8 @@ import {
   WorkspaceProjectParamsSchema,
   commandEnvelopeSchema,
 } from './domain-schemas.js';
-import { decodeProjectListCursor, encodeProjectListCursor } from './cursor.js';
+import { decodeGoalListCursor, decodeProjectListCursor, encodeGoalListCursor,
+  encodeProjectListCursor } from './cursor.js';
 import { validationFailed } from '../application/domain-error.js';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
 
@@ -62,7 +68,7 @@ export function registerProjectRoutes(
       const params = request.params as { workspace_id: string };
       const query = request.query as Static<typeof ProjectsListQuerySchema>;
       const status = query.status ?? 'active';
-      const limit = resolveProjectListLimit(query.limit);
+      const limit = resolveListLimit(query.limit);
       await requireWorkspaceVisible(dependencies.database.executor, params.workspace_id);
       const result = await listProjects(dependencies.database.executor, {
         workspaceId: params.workspace_id, status, limit,
@@ -275,9 +281,64 @@ export function registerProjectRoutes(
       }
     },
   );
+
+  app.get('/goals', {
+    schema: {
+      params: WorkspaceParamsSchema,
+      querystring: GoalsListQuerySchema,
+      response: { 200: GoalListSchema },
+    },
+  }, async (request, reply) => {
+    try {
+      const params = request.params as { workspace_id: string };
+      const query = request.query as Static<typeof GoalsListQuerySchema>;
+      const status = query.status ?? 'active';
+      const limit = resolveListLimit(query.limit);
+      await requireWorkspaceVisible(dependencies.database.executor, params.workspace_id);
+      const result = await listGoals(dependencies.database.executor, {
+        workspaceId: params.workspace_id, status, limit,
+        before: query.cursor === undefined ? null
+          : decodeGoalListCursor(query.cursor, params.workspace_id, status),
+      });
+      return {
+        items: result.items,
+        next_cursor: result.next_cursor === null ? null
+          : encodeGoalListCursor(params.workspace_id, status, result.next_cursor),
+      };
+    } catch (error) {
+      return sendReadError(reply, error, request.id);
+    }
+  });
+
+  app.get(
+    '/goals/:goal_id/projects',
+    {
+      schema: {
+        params: WorkspaceGoalParamsSchema,
+        response: { 200: GoalProjectListSchema },
+      },
+    },
+    async (request, reply) => {
+      try {
+        const params = request.params as { workspace_id: string; goal_id: string };
+
+        await requireWorkspaceVisible(dependencies.database.executor, params.workspace_id);
+
+        return {
+          items: await listGoalProjects(
+            dependencies.database.executor,
+            params.workspace_id,
+            params.goal_id,
+          ),
+        };
+      } catch (error) {
+        return sendReadError(reply, error, request.id);
+      }
+    },
+  );
 }
 
-function resolveProjectListLimit(raw: string | undefined): number {
+function resolveListLimit(raw: string | undefined): number {
   if (raw === undefined) return 50;
   const value = Number.parseInt(raw, 10);
   if (!Number.isSafeInteger(value) || value < 1 || value > 100) {

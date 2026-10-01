@@ -25,6 +25,7 @@ import { recordModelInvocation } from './model-call-recorder.js';
 import { ModelScopeBudgetError, type ModelCallSettlement }
   from '../model/model-call-repository.js';
 import type { CheckOutcome } from '../workflow/checkers.js';
+import type { ModelUsage } from '../workflow/fake-model-port.js';
 
 /**
  * VERIFY 步骤（contracts/03-verification-and-approval.md 第 3–5 节、
@@ -276,15 +277,18 @@ function evidenceString(evidence: JsonObject, key: string): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-function evidenceUsage(evidence: JsonObject): { inputTokens: number | null;
-  outputTokens: number | null } {
+function evidenceUsage(evidence: JsonObject): ModelUsage {
   const usage = evidence.usage;
   if (typeof usage !== 'object' || usage === null || Array.isArray(usage)) {
-    return { inputTokens: null, outputTokens: null };
+    return { inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreationTokens: null };
   }
   const value = usage as JsonObject;
   return { inputTokens: typeof value.input_tokens === 'number' ? value.input_tokens : null,
-    outputTokens: typeof value.output_tokens === 'number' ? value.output_tokens : null };
+    outputTokens: typeof value.output_tokens === 'number' ? value.output_tokens : null,
+    cacheReadTokens: typeof value.cache_read_tokens === 'number' ? value.cache_read_tokens : null,
+    cacheCreationTokens: typeof value.cache_creation_tokens === 'number'
+      ? value.cache_creation_tokens : null };
 }
 
 /**

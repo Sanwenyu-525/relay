@@ -1,4 +1,5 @@
 import { invalidCursor } from '../application/domain-error.js';
+import type { GoalListStatus } from '../application/project-queries.js';
 import { isUuid } from '../application/revisions.js';
 
 /**
@@ -144,6 +145,20 @@ export function decodeProjectListCursor(
   raw: string, workspaceId: string, status: ProjectListStatus,
 ): ExactListCursor {
   return decodeExactCursor(raw, 1, { workspace_id: workspaceId, status });
+}
+
+export function encodeGoalListCursor(
+  workspaceId: string,
+  status: GoalListStatus,
+  cursor: ExactListCursor,
+): string {
+  return encodeExactCursor(1, { workspace_id: workspaceId, scope: 'goals', status }, cursor);
+}
+
+export function decodeGoalListCursor(
+  raw: string, workspaceId: string, status: GoalListStatus,
+): ExactListCursor {
+  return decodeExactCursor(raw, 1, { workspace_id: workspaceId, scope: 'goals', status });
 }
 
 function encodeExactCursor(

@@ -232,6 +232,8 @@ retryable 仅表示是否允许原样重试当前命令，不是承诺会成功�
 | POST /projects/{id}/goal-links | LinkProjectGoal | 200 | `expected_revision` 是 Project revision |
 | POST /projects/{id}/goal-unlinks | UnlinkProjectGoal | 200 | 需提交 `expected_impacted_task_ids`；锁下重核，不一致返回 409 GOAL_LINK_IN_USE 并附当前清单 |
 | POST /goals、GET /goals/{id} | CreateGoal / ReadGoal | 201 / 200 | Goal 是 Workspace 级事实，创建不隐式关联 Project |
+| GET /goals?status=… | — | 200 | Workspace 级列表，不按 Project 收敛；status=active（默认）/archived/all；limit 默认 50、最大 100；排序键 (created_at, id) 倒序，游标绑定过滤条件与 Workspace |
+| GET /goals/{id}/projects | — | 200 | 该 Goal 当前关联的 Project（含已归档，由 archive_status 表达）；只返回既有 Project 事实（`project_revision` 是 Project 自身修订），不派生状态、不写入 |
 | POST /tasks | CreateTask | 201 | 初始 INBOX + HUMAN + 验收 v1；`project_id` 可空（Me Inbox） |
 | GET /tasks/{id} | ReadTask | 200 | 见 10.2 |
 | GET /tasks?project_id=…｜inbox=true | ListTasks | 200 | 必须显式给出其一；`limit` 默认 50、最大 100 |

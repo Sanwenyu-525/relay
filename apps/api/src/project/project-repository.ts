@@ -75,6 +75,20 @@ export interface ProjectListRow extends ProjectRow {
   readonly cursor_created_at: string;
 }
 
+export interface GoalListRow extends GoalRow {
+  readonly cursor_created_at: string;
+}
+
+/** Goal → Project 的反向关联读；project_goals.goal_id 已有索引支撑该方向。 */
+export interface GoalProjectLinkRow {
+  readonly project_id: string;
+  readonly title: string;
+  readonly project_type: ProjectRow['project_type'];
+  readonly archived_at: Date | null;
+  readonly revision: bigint;
+  readonly linked_at: Date;
+}
+
 /** Stable, non-sensitive reasons returned when Project archival is unsafe. */
 export type ProjectArchiveBlockerReason =
   | 'TASK_ACTIVE'
@@ -425,6 +439,47 @@ export class ProjectRepository {
     return (await sql<GoalRow>`select id, workspace_id, title, description,
       status, revision, created_at, updated_at from goals where id = ${goalId}
       for share`.execute(this.db)).rows[0];
+  }
+
+  /** Workspace 范围的 Goal 键集分页；Goal 是 Workspace 级事实，不按 Project 过滤。 */
+  async listGoalsPage(input: {
+    readonly workspaceId: string;
+    readonly status: 'active' | 'archived' | 'all';
+    readonly limit: number;
+    readonly before: { readonly createdAt: string; readonly id: string } | null;
+  }): Promise<readonly GoalListRow[]> {
+    const statusFilter = input.status === 'all' ? sql``
+      : input.status === 'active' ? sql`and g.status = 'ACTIVE'`
+        : sql`and g.status = 'ARCHIVED'`;
+    const cursor = input.before === null ? sql``
+      : sql`and (g.created_at, g.id) < (${input.before.createdAt}::timestamptz, ${input.before.id}::uuid)`;
+    const result = await sql<GoalListRow>`
+      select g.id, g.workspace_id, g.title, g.description, g.status, g.revision,
+             g.created_at, g.updated_at,
+             to_char(g.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+               as cursor_created_at
+      from goals g
+      where g.workspace_id = ${input.workspaceId}
+        ${statusFilter}
+        ${cursor}
+      order by g.created_at desc, g.id desc
+      limit ${input.limit + 1}
+    `.execute(this.db);
+    return result.rows;
+  }
+
+  /** 列出该 Goal 当前关联的 Project；归档 Project 仍返回，由 archive_status 区分。 */
+  async listProjectLinksForGoal(goalId: string): Promise<readonly GoalProjectLinkRow[]> {
+    const result = await sql<GoalProjectLinkRow>`
+      select p.id as project_id, p.title, p.project_type, p.archived_at, p.revision,
+             pg.created_at as linked_at
+      from project_goals pg
+      join projects p on p.id = pg.project_id
+      where pg.goal_id = ${goalId}
+      order by p.created_at desc, p.id desc
+    `.execute(this.db);
+
+    return result.rows;
   }
 
   async listProjectGoalLinks(projectId: string): Promise<readonly ProjectGoalLinkRow[]> {

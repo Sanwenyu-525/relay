@@ -181,19 +181,24 @@ function extractProviderRequestId(payload: unknown): string {
 
 function extractUsage(payload: unknown): ModelUsage {
   if (typeof payload !== 'object' || payload === null) {
-    return { inputTokens: null, outputTokens: null };
+    return { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheCreationTokens: null };
   }
   const usage = (payload as { usage?: unknown }).usage;
   if (typeof usage !== 'object' || usage === null) {
-    return { inputTokens: null, outputTokens: null };
+    return { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheCreationTokens: null };
   }
   const prompt = (usage as { prompt_tokens?: unknown }).prompt_tokens;
   const completion = (usage as { completion_tokens?: unknown }).completion_tokens;
+  const details = (usage as { prompt_tokens_details?: unknown }).prompt_tokens_details;
+  const detail = typeof details === 'object' && details !== null
+    ? details as { cached_tokens?: unknown; cache_write_tokens?: unknown } : {};
+  const count = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
   return {
-    inputTokens: typeof prompt === 'number' && Number.isSafeInteger(prompt) && prompt >= 0
-      ? prompt : null,
-    outputTokens: typeof completion === 'number' && Number.isSafeInteger(completion) &&
-      completion >= 0 ? completion : null,
+    inputTokens: count(prompt),
+    outputTokens: count(completion),
+    cacheReadTokens: 'cached_tokens' in detail ? count(detail.cached_tokens) : null,
+    cacheCreationTokens: 'cache_write_tokens' in detail ? count(detail.cache_write_tokens) : null,
   };
 }
 

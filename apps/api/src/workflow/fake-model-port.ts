@@ -19,6 +19,9 @@ import {
 export interface ModelUsage {
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
+  /** Provider-reported prompt-cache tokens. null/absent = not reported, not zero. */
+  readonly cacheReadTokens?: number | null;
+  readonly cacheCreationTokens?: number | null;
 }
 
 export interface ModelIdentity {
@@ -197,10 +200,13 @@ export class FakeModelPort implements AssistModelPort {
     }
     const seed = seedOf(lastUser?.content ?? request.system);
     const providerRequestId = `fake-assist-${seed}`;
+    // Fake 无真实 Provider，不伪造缓存用量：显式 null 让 UI 显示"未采集"而非 0%。
     const usage: ModelUsage = {
       inputTokens: Math.max(1, Math.ceil((request.system.length +
         request.turns.reduce((sum, turn) => sum + turn.content.length, 0)) / 4)),
       outputTokens: 0,
+      cacheReadTokens: null,
+      cacheCreationTokens: null,
     };
     if (request.skill !== undefined) {
       const facts = request.skill.facts;
@@ -389,6 +395,8 @@ function usageOf(manifest: JsonObject, content: string): ModelUsage {
   return {
     inputTokens: Math.max(1, Math.ceil(inputLength / 4)),
     outputTokens: Math.max(1, Math.ceil(outputLength / 4)),
+    cacheReadTokens: null,
+    cacheCreationTokens: null,
   };
 }
 

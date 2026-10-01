@@ -109,19 +109,21 @@ export interface ModelPortStatus {
   readonly configured: boolean;
   readonly model: string | null;
   readonly baseUrl: string | null;
+  /** 单次调用 token 上限：UI 用作上下文占用的分母。null 表示不可核对。 */
+  readonly maxCallTokens: number | null;
 }
 
 export function describeModelPortStatus(env: NodeJS.ProcessEnv): ModelPortStatus {
   const provider = env.RELAY_MODEL_PROVIDER;
   if (provider === undefined || provider === '' || provider === 'fake') {
-    return { provider: 'fake', configured: false, model: null, baseUrl: null };
+    return { provider: 'fake', configured: false, model: null, baseUrl: null, maxCallTokens: null };
   }
   try {
     const config: ModelPortConfig = readModelPortConfig(env)!;
     return { provider: 'openai-compatible', configured: true, model: config.model,
-      baseUrl: config.baseUrl ?? null };
+      baseUrl: config.baseUrl ?? null, maxCallTokens: config.maxCallTokens };
   } catch {
-    return { provider: 'invalid', configured: false, model: null, baseUrl: null };
+    return { provider: 'invalid', configured: false, model: null, baseUrl: null, maxCallTokens: null };
   }
 }
 

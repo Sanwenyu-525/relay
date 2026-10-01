@@ -910,6 +910,8 @@ export interface AssistMessageRow {
   readonly provider_request_id: string | null;
   readonly usage_input_tokens: number | null;
   readonly usage_output_tokens: number | null;
+  readonly usage_cache_read_tokens: number | null;
+  readonly usage_cache_creation_tokens: number | null;
   readonly worker_id: string | null;
   readonly cancel_requested: boolean;
   readonly created_at: Date;
@@ -960,6 +962,8 @@ export interface ModelCallRow {
   readonly status: 'STARTED' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
   readonly usage_input_tokens: number | null;
   readonly usage_output_tokens: number | null;
+  readonly usage_cache_read_tokens: number | null;
+  readonly usage_cache_creation_tokens: number | null;
   readonly budget_reserved_tokens: number | null;
   readonly error_kind: string | null;
   readonly started_at: Date;

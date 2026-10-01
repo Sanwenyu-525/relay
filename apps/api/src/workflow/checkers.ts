@@ -234,7 +234,9 @@ export class ModelSemanticChecker implements Checker {
         result: verdict.verdict,
         evidence: { ...base, reason: verdict.reason,
           usage: { input_tokens: verdict.usage.inputTokens,
-            output_tokens: verdict.usage.outputTokens },
+            output_tokens: verdict.usage.outputTokens,
+            cache_read_tokens: verdict.usage.cacheReadTokens ?? null,
+            cache_creation_tokens: verdict.usage.cacheCreationTokens ?? null },
           provider_request_id: verdict.providerRequestId },
       };
     } catch (error) {
@@ -248,7 +250,9 @@ export class ModelSemanticChecker implements Checker {
             ?? (error instanceof Error ? error.name : 'UNKNOWN'),
           ...(response.usage === undefined ? {} : { usage: {
             input_tokens: response.usage.inputTokens,
-            output_tokens: response.usage.outputTokens } }),
+            output_tokens: response.usage.outputTokens,
+            cache_read_tokens: response.usage.cacheReadTokens ?? null,
+            cache_creation_tokens: response.usage.cacheCreationTokens ?? null } }),
           ...(response.providerRequestId === undefined ? {}
             : { provider_request_id: response.providerRequestId }) },
       };

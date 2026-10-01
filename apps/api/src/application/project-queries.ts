@@ -69,6 +69,20 @@ export interface ProjectGoalDto {
   readonly explicit_task_ids: readonly string[];
 }
 
+/** Goal → Project 的反向投影：只带既有 Project 事实，不在此派生第二套状态。 */
+export interface GoalProjectDto {
+  readonly project_id: string;
+  readonly title: string;
+  readonly project_type: ProjectType;
+  readonly archived_at: string | null;
+  readonly archive_status: 'ACTIVE' | 'ARCHIVED';
+  /** Project 自身的 revision；与 Goal 的 revision 是两回事，因此显式命名。 */
+  readonly project_revision: string;
+  readonly linked_at: string;
+}
+
+export type GoalListStatus = 'active' | 'archived' | 'all';
+
 export async function readProjectById(
   db: DbExecutor,
   workspaceId: string,
@@ -124,6 +138,72 @@ export async function listProjectGoals(
     explicit_task_ids: explicit
       .filter((row) => row.goal_id === link.goal_id)
       .map((row) => row.task_id),
+  }));
+}
+
+/**
+ * Workspace 级 Goal 列表。Goal 本来就不属于单个 Project，此前只能按 Project 反查，
+ * 跨多个 Project 的目标没有入口可列举；这里只读既有 Goal 行，不新建目标事实。
+ */
+export async function listGoals(
+  db: DbExecutor,
+  input: { readonly workspaceId: string; readonly status: GoalListStatus; readonly limit: number;
+    readonly before: { readonly createdAt: string; readonly id: string } | null },
+): Promise<{ readonly items: readonly GoalDto[];
+  readonly next_cursor: { readonly createdAt: string; readonly id: string } | null }> {
+  const repositories = createRepositories(db);
+
+  await requireWorkspace(repositories, input.workspaceId);
+
+  const rows = await repositories.projects.listGoalsPage(input);
+  const hasMore = rows.length > input.limit;
+  const page = hasMore ? rows.slice(0, input.limit) : rows;
+  const last = page.at(-1);
+
+  return {
+    items: page.map((row) => ({
+      id: row.id,
+      title: row.title,
+      description: row.description,
+      status: row.status,
+      revision: toDecimalString(row.revision),
+      created_at: row.created_at.toISOString(),
+      updated_at: row.updated_at.toISOString(),
+    })),
+    next_cursor: hasMore && last !== undefined
+      ? { createdAt: last.cursor_created_at, id: last.id } : null,
+  };
+}
+
+/**
+ * 该 Goal 当前关联哪些 Project。这是 project_goals 的反向读取，只返回既有 Project 事实；
+ * 归档 Project 仍在列，由 archive_status 表达，不在此推断目标是否仍可推进。
+ */
+export async function listGoalProjects(
+  db: DbExecutor,
+  workspaceId: string,
+  goalId: string,
+): Promise<readonly GoalProjectDto[]> {
+  const repositories = createRepositories(db);
+
+  await requireWorkspace(repositories, workspaceId);
+
+  const goal = await repositories.projects.readGoal(goalId);
+
+  if (goal === undefined || goal.workspace_id !== workspaceId) {
+    throw resourceNotFound('Goal');
+  }
+
+  const links = await repositories.projects.listProjectLinksForGoal(goal.id);
+
+  return links.map((link) => ({
+    project_id: link.project_id,
+    title: link.title,
+    project_type: link.project_type,
+    archived_at: link.archived_at?.toISOString() ?? null,
+    archive_status: link.archived_at === null ? 'ACTIVE' : 'ARCHIVED',
+    project_revision: toDecimalString(link.revision),
+    linked_at: link.linked_at.toISOString(),
   }));
 }
 

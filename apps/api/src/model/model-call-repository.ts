@@ -149,9 +149,13 @@ export class ModelCallRepository {
       ? null : input.providerRequestId;
     const usageInput = input.usage?.inputTokens ?? null;
     const usageOutput = input.usage?.outputTokens ?? null;
+    const cacheRead = input.usage?.cacheReadTokens ?? null;
+    const cacheCreation = input.usage?.cacheCreationTokens ?? null;
     const changed = await sql<{ id: string }>`update model_calls set
       status = ${input.status}, provider_request_id = ${requestId},
       usage_input_tokens = ${usageInput}, usage_output_tokens = ${usageOutput},
+      usage_cache_read_tokens = ${cacheRead},
+      usage_cache_creation_tokens = ${cacheCreation},
       error_kind = ${input.errorKind ?? null}, settled_at = clock_timestamp()
       where id = ${id} and status = 'STARTED' returning id`.execute(this.db);
     if (changed.rows.length !== 1) throw new Error('model call was already settled');

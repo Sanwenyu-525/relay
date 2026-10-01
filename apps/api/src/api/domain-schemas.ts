@@ -909,6 +909,44 @@ export const GoalSchema = Type.Object(
   strict,
 );
 
+export const GoalListSchema = Type.Object(
+  {
+    items: Type.Array(GoalSchema),
+    next_cursor: Type.Union([Type.String(), Type.Null()]),
+  },
+  strict,
+);
+
+export const GoalsListQuerySchema = Type.Object(
+  {
+    status: Type.Optional(Type.Union([
+      Type.Literal('active'), Type.Literal('archived'), Type.Literal('all'),
+    ])),
+    limit: Type.Optional(Type.String({ pattern: '^[0-9]{1,3}$' })),
+    cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+  },
+  strict,
+);
+
+/** Goal → Project 的反向关联读；字段取自既有 Project 事实，不含派生状态。 */
+export const GoalProjectSchema = Type.Object(
+  {
+    project_id: UuidSchema,
+    title: Type.String(),
+    project_type: Type.String(),
+    archived_at: Type.Union([TimestampSchema, Type.Null()]),
+    archive_status: Type.String(),
+    project_revision: DecimalSchema,
+    linked_at: TimestampSchema,
+  },
+  strict,
+);
+
+export const GoalProjectListSchema = Type.Object(
+  { items: Type.Array(GoalProjectSchema) },
+  strict,
+);
+
 export const ProjectGoalSchema = Type.Object(
   {
     goal_id: UuidSchema,

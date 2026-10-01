@@ -90,7 +90,8 @@ test('真实验证外呼是非流式固定短文本，且响应不含密钥', as
   });
   const success = await call.call({ config, prompt: VERIFY_PROMPT, timeoutMs: 1_000 });
   assert.equal(success.providerRequestId, 'chatcmpl-verify');
-  assert.deepEqual(success.usage, { inputTokens: 3, outputTokens: 1 });
+  assert.deepEqual(success.usage, { inputTokens: 3, outputTokens: 1,
+    cacheReadTokens: null, cacheCreationTokens: null });
   assert.equal(String(seen.url).endsWith('/chat/completions'), true);
   assert.equal(seen.auth, `Bearer ${config.apiKey}`);
   assert.deepEqual(seen.body, {
