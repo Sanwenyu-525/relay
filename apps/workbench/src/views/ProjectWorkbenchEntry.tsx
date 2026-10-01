@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
+import { useDisplayPreferences } from "../lib/displayPreferences";
 import type { RelayApiClient, RelayViewKind } from "../api/relayClient";
 
 /** 项目工作台入口只读取默认配置；浏览其他 kind 由显式路由完成。 */
@@ -9,6 +10,7 @@ export default function ProjectWorkbenchEntry() {
   const { id = "" } = useParams();
   const location = useLocation();
   const { client } = useRelayConnection();
+  const { defaultWorkbench } = useDisplayPreferences();
   const [selection, setSelection] = useState<{
     readonly projectId: string; readonly client: RelayApiClient | null; readonly kind: RelayViewKind
   } | null>(null);
@@ -21,13 +23,15 @@ export default function ProjectWorkbenchEntry() {
     setSelection(null); setError(null);
     if (client) void client.getViewConfiguration(id).then((config) => {
       if (config.projectId !== id) throw new Error("视图配置查询返回了其他项目的数据。");
-      if (request === scope.current) setSelection({ projectId: id, client, kind: config.kind });
+      // revision 0 是按项目类型生成的初始视图；人工保存后的项目配置始终优先。
+      const kind = config.revision === "0" && defaultWorkbench !== null ? defaultWorkbench : config.kind;
+      if (request === scope.current) setSelection({ projectId: id, client, kind });
     }).catch((caught: unknown) => {
       if (request === scope.current) setError(describeLiveError(caught).message);
     });
-    else setSelection({ projectId: id, client: null, kind: "general" });
+    else setSelection({ projectId: id, client: null, kind: defaultWorkbench ?? "general" });
     return () => { scope.current++; };
-  }, [client, id, reload]);
+  }, [client, id, reload, defaultWorkbench]);
 
   if (selection?.projectId === id && selection.client === client) {
     return <Navigate to={`/projects/${id}/workbench/${selection.kind}${location.search}`} replace />;

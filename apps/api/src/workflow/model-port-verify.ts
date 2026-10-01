@@ -1,5 +1,3 @@
-import { createHash, randomUUID } from 'node:crypto';
-
 import { ConfigError } from '../config/config.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { ModelCallRow } from '../infrastructure/database-schema.js';
@@ -226,79 +224,6 @@ export function createFakeVerifyCall(scenario: FakeVerifyScenario): VerifyCallPo
       }
     },
   };
-}
-
-export interface RunModelPortVerificationInput {
-  readonly db: DbExecutor;
-  readonly workspaceId: string;
-  readonly env: NodeJS.ProcessEnv;
-  readonly call: VerifyCallPort;
-  readonly now?: () => Date;
-}
-
-/**
- * 执行一次验证：读配置 → 短超时外呼 → 结果写 model_calls（kind='VERIFY'）。
- * 配置未就绪时抛 ModelVerifyConfigError（不外呼、不落库）。
- * 外呼失败也落库为 FAILED（error_kind=分类），再映射为 ok=false + error_category。
- */
-export async function runModelPortVerification(
-  input: RunModelPortVerificationInput,
-): Promise<ModelVerifyResult> {
-  const config = resolveVerifyConfig(input.env);
-  const configFingerprint = computeModelConfigFingerprint(config);
-  const now = input.now ?? (() => new Date());
-  const started = Date.now();
-  const inputHash = createHash('sha256').update(VERIFY_PROMPT, 'utf8').digest('hex');
-  const calls = new ModelCallRepository(input.db);
-  const callId = randomUUID();
-  await calls.begin(callId, { workspaceId: input.workspaceId, kind: 'VERIFY', inputHash },
-    { provider: config.provider, model: config.model, configFingerprint });
-  try {
-    const success = await input.call.call({
-      config, prompt: VERIFY_PROMPT, timeoutMs: VERIFY_TIMEOUT_MS,
-    });
-    await calls.settle(callId, {
-      status: 'COMPLETED',
-      providerRequestId: success.providerRequestId,
-      usage: success.usage,
-    });
-    return {
-      ok: true,
-      latency_ms: Date.now() - started,
-      provider: config.provider,
-      model: config.model,
-      config_fingerprint: configFingerprint,
-      error_category: null,
-      verified_at: now().toISOString(),
-    };
-  } catch (error) {
-    const category = classifyVerifyError(error);
-    const evidence = typeof error === 'object' && error !== null
-      ? error as { providerRequestId?: unknown; usage?: unknown } : {};
-    const usage = evidence.usage;
-    const knownUsage = typeof usage === 'object' && usage !== null &&
-      'inputTokens' in usage && 'outputTokens' in usage
-      ? { inputTokens: (usage as ModelUsage).inputTokens,
-        outputTokens: (usage as ModelUsage).outputTokens }
-      : undefined;
-    await calls.settle(callId, {
-      status: 'FAILED',
-      errorKind: category,
-      ...(typeof evidence.providerRequestId === 'string' &&
-        evidence.providerRequestId !== ''
-        ? { providerRequestId: evidence.providerRequestId } : {}),
-      ...(knownUsage === undefined ? {} : { usage: knownUsage }),
-    });
-    return {
-      ok: false,
-      latency_ms: Date.now() - started,
-      provider: config.provider,
-      model: config.model,
-      config_fingerprint: configFingerprint,
-      error_category: category,
-      verified_at: now().toISOString(),
-    };
-  }
 }
 
 export interface ModelVerificationState {

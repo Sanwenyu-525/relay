@@ -33,12 +33,13 @@ function trace() { return { run_id: runId, task_id: taskId, project_id: null, st
 function connect() { activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" }); }
 
 describe("P12 Task Skill live 当前事实", () => {
-  it("定义页只展示 Task/acceptance 当前事实和 Assist 入口，不读取 fixture 或提交提案", async () => {
+  it("定义页读取当前事实并嵌入同一任务的建议入口，打开页面不提交命令", async () => {
     connect(); const fixtureRead = vi.spyOn(fixtureAdapter, "loadTask"); const calls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(init?.method ?? "GET").toBe("GET"); const url = String(input);
       if (url.endsWith("/attention/interventions")) return response({ items: [] });
       calls.push(url);
+      if (url.startsWith(`${root}/assist-sessions?`)) return response({ items: [] });
       if (url === `${root}/tasks/${taskId}`) return response(task());
       throw new Error(`Unexpected ${url}`);
     }));
@@ -47,19 +48,22 @@ describe("P12 Task Skill live 当前事实", () => {
     expect(panel.text()).toContain("真实任务定义");
     expect(panel.text()).toContain("验收版本 v2 · 来源 CREATE");
     expect(panel.text()).toContain("引用可核对");
-    expect(panel.text()).toContain("当前没有针对这项已有任务、可在此确认的任务定义 Skill 提案");
+    expect(panel.text()).toContain("在本页建议与确认区生成任务定义提案");
+    expect(panel.find('[data-testid="assist-new-session"]').exists()).toBe(true);
     expect(panel.text()).toContain("当前验收预期产物类型：MARKDOWN_DOCUMENT");
     expect(panel.text()).toContain("未提供输入资料绑定");
     expect(panel.find(`a[href="/tasks/${taskId}?skill=assist"]`).exists()).toBe(true);
     expect(panel.find('[data-testid="definition-accept"]').exists()).toBe(false);
     expect(fixtureRead).not.toHaveBeenCalled();
-    expect(calls).toEqual([`${root}/tasks/${taskId}`]);
+    expect(calls.filter((url) => url === `${root}/tasks/${taskId}`)).toHaveLength(2);
+    expect(calls).toContain(`${root}/assist-sessions?task_id=${taskId}`);
   });
 
   it("验收页只引用当前验收与确切 Run Trace 的历史验证，未提供应用按钮", async () => {
     connect(); const calls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input); calls.push(url);
+      if (url.startsWith(`${root}/assist-sessions?`)) return response({ items: [] });
       if (url === `${root}/tasks/${taskId}`) return response(task(taskId, true));
       if (url === `${root}/tasks/${taskId}/check-plan-preview`) return response({ task_id: taskId,
         status: "AVAILABLE", admission_available: false, reason_codes: ["TASK_NOT_HUMAN_OWNED"],
@@ -76,8 +80,16 @@ describe("P12 Task Skill live 当前事实", () => {
     const mounted = await mountWorkbench(`/tasks/${taskId}?skill=verification`); unmount = mounted.unmount;
     const panel = mounted.wrapper.get('[data-testid="live-verification"]');
     expect(calls).toContain(`${root}/runs/${runId}/trace`);
-    expect(panel.text()).toContain("此页不直接接受建议");
+    expect(panel.text()).toContain("在本页建议与确认区生成验收方案");
     expect(panel.text()).toContain("TASK_NOT_HUMAN_OWNED");
+    const checkTable = panel.get(".task-check-plan-table");
+    expect(checkTable.findAll("thead th").map((cell) => cell.text())).toEqual(["检查项", "方式", "当前状态"]);
+    expect(checkTable.text()).toContain("引用可核对");
+    expect(checkTable.text()).toContain("人工判断");
+    expect(checkTable.text()).toContain("待人工检查");
+    expect(checkTable.text()).not.toContain("PASS");
+    expect(panel.get('[data-testid="task-check-plan-preview"] .metadata-row').text()).toContain("Task v4 · 验收 v2");
+    expect(panel.get(".task-check-plan-details").attributes("open")).toBeUndefined();
     expect(panel.text()).toContain("不是活动 Run 的冻结计划");
     expect(panel.text()).toContain("Verification Session 66666666-6666-4666-8666-666666666666");
     expect(panel.text()).toContain("CheckPlan hash");
@@ -105,6 +117,33 @@ describe("P12 Task Skill live 当前事实", () => {
     await panel.get("button").trigger("click"); await flush();
     expect(panel.text()).not.toContain("交付可核对结果");
     expect(panel.find('[data-testid="live-task-accepted-facts"]').exists()).toBe(false);
+  });
+
+  it("准入预览版本不一致时保留基线与重读提示，隐藏旧检查项", async () => {
+    connect();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method ?? "GET").toBe("GET"); const url = String(input);
+      if (url.endsWith("/attention/interventions")) return response({ items: [] });
+      if (url.startsWith(`${root}/assist-sessions?`)) return response({ items: [] });
+      if (url === `${root}/tasks/${taskId}`) return response(task());
+      if (url === `${root}/tasks/${taskId}/check-plan-preview`) return response({ task_id: taskId,
+        status: "AVAILABLE", admission_available: true, reason_codes: [],
+        sources: { task_revision: "4", acceptance_revision: "3", rule_revision: "1",
+          workflow_key: "markdown-deliverable", workflow_version: "1", rule_refs: [] },
+        check_plan: { policy_version: "verifier-policy-v1", workflow_key: "markdown-deliverable",
+          workflow_version: "1", entries: [{ criterion_id: "stale-preview", statement: "旧预览检查",
+            required: true, method: "CITATION_EXISTS", severity: "HARD", checker_id: "citation-v1",
+            checker_version: "1", target_spec: {} }] }, check_plan_sha256: "c".repeat(64),
+        frozen_run_plan: false, executed: false });
+      throw new Error(`Unexpected ${url}`);
+    }));
+    const mounted = await mountWorkbench(`/tasks/${taskId}?skill=verification`); unmount = mounted.unmount;
+    const preview = mounted.wrapper.get('[data-testid="task-check-plan-preview"]');
+    expect(preview.text()).toContain("Task v4 · 验收 v3");
+    expect(preview.text()).toContain("版本已变化，请刷新当前事实");
+    expect(preview.text()).toContain("当前不可据此准入");
+    expect(preview.find(".task-check-plan-table").exists()).toBe(false);
+    expect(preview.text()).not.toContain("旧预览检查");
   });
 
   it("切换任务后迟到的旧任务响应不能覆盖当前目标", async () => {

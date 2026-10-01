@@ -70,7 +70,7 @@
 .today-rail__section + .today-rail__section { margin-top: var(--relay-space-8); padding-top: var(--relay-space-8);
   border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .today-rail__count { display: flex; align-items: flex-start; gap: var(--relay-space-4); margin: var(--relay-space-4) 0 0; }
-.today-rail__number { flex: none; font-family: var(--relay-font-family-editorial); font-weight: var(--relay-font-weight-semibold);
+.today-rail__number { flex: none; font-family: var(--relay-font-family-ui); font-weight: var(--relay-font-weight-semibold);
   font-size: var(--relay-font-size-display); line-height: var(--relay-font-lineHeight-heading); color: var(--relay-color-text-primary); }
 .today-rail__count-copy { padding-top: var(--relay-space-2); color: var(--relay-color-text-secondary); }
 .today-rail__empty { margin: var(--relay-space-4) 0 0; color: var(--relay-color-text-secondary); }
@@ -92,7 +92,7 @@
 .today-focus__target { margin-top: var(--relay-space-3); }
 .today-focus__project { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .today-focus__title { margin-top: var(--relay-space-2); }
-.today-focus__title a { font-family: var(--relay-font-family-editorial); font-size: var(--relay-font-size-compactPage);
+.today-focus__title a { font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-compactPage);
   font-weight: var(--relay-font-weight-semibold); line-height: var(--relay-font-lineHeight-heading);
   color: var(--relay-color-text-primary); text-decoration: none; overflow-wrap: anywhere; }
 .today-focus__title a:hover { text-decoration: underline; text-underline-offset: 0.2em; }
@@ -125,7 +125,7 @@
 .today-task { padding: var(--relay-space-6) 0; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .today-task__heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--relay-space-3); }
 .today-task__heading-text { flex: 1 1 18rem; min-width: 0; }
-.today-task__title { font-family: var(--relay-font-family-editorial); font-size: var(--relay-font-size-rowTitle);
+.today-task__title { font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-rowTitle);
   font-weight: var(--relay-font-weight-semibold); color: var(--relay-color-text-primary);
   text-decoration: none; overflow-wrap: anywhere; }
 .today-task__title:hover { text-decoration: underline; text-underline-offset: 0.2em; }

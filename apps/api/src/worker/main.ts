@@ -13,6 +13,7 @@ import { readModelPortConfig } from '../workflow/model-port-config.js';
 import { RelayDatabase } from '../infrastructure/database.js';
 import { graphCheckpointsReady } from '../infrastructure/graph-checkpoints.js';
 import { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
+import { assertRestoreNotIsolated, RestoreIsolationError } from '../runtime/restore-isolation.js';
 import { ManagedContentStore } from '../storage/managed-content-store.js';
 import { runAssistGenerationTick } from '../application/assist-runner.js';
 import { runWebImportTick } from '../application/web-import-runner.js';
@@ -46,6 +47,7 @@ async function main(): Promise<void> {
       dataRoot === undefined || !validDataRoot) {
     throw new Error('worker configuration invalid');
   }
+  await assertRestoreNotIsolated(dataRoot);
   // A partially configured real model must fail the Worker before any delivery.
   validateModelPortConfig(process.env);
   const workerId = process.env.RELAY_WORKER_ID?.trim() || `worker:${randomUUID()}`;
@@ -175,11 +177,13 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (error) {
-  const configFailure = error instanceof Error &&
+  const configFailure = error instanceof RestoreIsolationError || error instanceof Error &&
     (error.message.includes('configuration') || error.message.includes('schema unavailable') ||
       error.message.endsWith(' invalid'));
   process.stderr.write(`${configFailure ? 'worker_configuration_failed' : 'worker_failed'}\n`);
-  if (error instanceof Error) {
+  if (error instanceof RestoreIsolationError) {
+    process.stderr.write(`${error.code}\n`);
+  } else if (error instanceof Error) {
     process.stderr.write(`${error.stack ?? `${error.name}: ${error.message}`}\n`);
   } else {
     try {

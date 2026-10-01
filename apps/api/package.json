@@ -32,7 +32,8 @@
     "@sinclair/typebox": "0.34.52",
     "fastify": "5.12.5",
     "kysely": "0.29.6",
-    "pg": "8.16.3"
+    "pg": "8.16.3",
+    "pg-connection-string": "2.14.0"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

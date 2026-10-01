@@ -11,7 +11,7 @@ import { pathToFileURL } from 'node:url';
 import { sql } from 'kysely';
 
 import { createWorkspace, expectCommandAccepted, startTestApi, workspacePath,
-  type TestApi } from './api-harness.js';
+  type HttpResponse, type TestApi } from './api-harness.js';
 import { APP_DATABASE_URL, openDatabase } from './integration-support.js';
 
 // This file is deliberately *.bench.ts, outside the default *.test.js integration suite.
@@ -201,6 +201,8 @@ test('M03 fixed Mock workload against independent API, supervisor, Worker and is
     let dbProbeBusy = false;
     let failure: string | null = null;
     let failedDuringRun = false;
+    let transportFinalization: { commands: number; done: number; idle: number;
+      applied_controls: number } | null = null;
     const priorNodeOptions = process.env.NODE_OPTIONS;
     const restoreNodeOptions = () => {
       if (priorNodeOptions === undefined) delete process.env.NODE_OPTIONS;
@@ -295,13 +297,13 @@ test('M03 fixed Mock workload against independent API, supervisor, Worker and is
       const deadline = Date.now() + DEADLINE_MS;
       while (Date.now() < deadline && samples.some((sample) => sample.observedTerminalAtMs === undefined)) {
         for (const sample of samples.filter((item) => item.observedTerminalAtMs === undefined)) {
-          const runView = await api.get(workspacePath(workspaceId, `/runs/${sample.runId}`));
+          const runView: HttpResponse = await api.get(workspacePath(workspaceId, `/runs/${sample.runId}`));
           assert.equal(runView.status, 200);
           const status = (runView.body as { status: string }).status;
           if (!['COMPLETED', 'CANCELLED', 'FAILED'].includes(status)) continue;
           sample.observedTerminalAtMs = Date.now();
           sample.finalRunStatus = status;
-          const taskView = await api.get(workspacePath(workspaceId, `/tasks/${sample.taskId}`));
+          const taskView: HttpResponse = await api.get(workspacePath(workspaceId, `/tasks/${sample.taskId}`));
           assert.equal(taskView.status, 200);
           sample.finalTaskStatus = (taskView.body as { status: string }).status;
         }
@@ -309,6 +311,35 @@ test('M03 fixed Mock workload against independent API, supervisor, Worker and is
       }
       assert.equal(samples.filter((sample) => sample.observedTerminalAtMs === undefined).length,
         0, 'some fixed Mock tasks did not converge before the deadline');
+
+      // Preserve the first terminal observations above; transport drain is a separate final condition.
+      const expectedFinalization = { commands: samples.length, done: samples.length,
+        idle: samples.length, applied_controls: CANCEL_COUNT };
+      const runIds = samples.map((sample) => sample.runId!);
+      const controlIds = samples.filter((sample) => sample.kind === 'cancel')
+        .map((sample) => sample.controlRequestId!);
+      while (Date.now() < deadline) {
+        const finalized = await sql<{ commands: number; done: number; idle: number;
+          applied_controls: number }>`
+          select count(*)::integer as commands,
+            count(*) filter (where o.status = 'DONE')::integer as done,
+            count(*) filter (where i.status = 'IDLE')::integer as idle,
+            count(*) filter (where request.status = 'APPLIED')::integer as applied_controls
+          from run_commands c join run_command_outbox o on o.command_id = c.id
+          join run_invocations i on i.run_id = c.run_id
+          left join run_control_requests request on request.run_id = c.run_id
+            and request.id in (${sql.join(controlIds)})
+          where c.kind = 'START' and c.run_id in (${sql.join(runIds)})
+        `.execute(db.db);
+        transportFinalization = finalized.rows[0] ?? null;
+        if (transportFinalization?.commands === expectedFinalization.commands &&
+            transportFinalization.done === expectedFinalization.done &&
+            transportFinalization.idle === expectedFinalization.idle &&
+            transportFinalization.applied_controls === expectedFinalization.applied_controls) break;
+        await sleep(POLL_MS);
+      }
+      assert.deepEqual(transportFinalization, expectedFinalization,
+        'fixed Mock commands, invocations and controls must settle before the original deadline');
 
       for (const sample of samples) {
         const facts = await sql<{ created_at: Date; terminal_at: Date | null;
@@ -342,6 +373,7 @@ test('M03 fixed Mock workload against independent API, supervisor, Worker and is
         sample.commandCreatedAtMs = command.rows[0].created_at.getTime();
         if (command.rows[0].claimed_at) sample.commandClaimedAtMs = command.rows[0].claimed_at.getTime();
         sample.commandStatus = command.rows[0].status;
+        assert.equal(sample.commandStatus, 'DONE', 'terminal Run transport must remain settled');
       }
 
       assert.equal(samples.filter((sample) => sample.kind === 'success' &&
@@ -382,6 +414,7 @@ test('M03 fixed Mock workload against independent API, supervisor, Worker and is
           model: 'FakeModelPort', criterion: 'MARKDOWN_STRUCTURE',
           gateway_action: 'none', approval: 'none' },
         runtime: { node: process.version, supervisor_exit: supervisorExit, api_exit: apiExit },
+        transport_finalization: transportFinalization,
         latency_ms: {
           delegate_202: quantiles(samples.flatMap((sample) => sample.delegateLatencyMs === undefined
             ? [] : [sample.delegateLatencyMs])),
@@ -419,6 +452,7 @@ test('M03 fixed Mock workload against independent API, supervisor, Worker and is
           'First output is DRAFT persisted, not a streamed first token; candidate is PERSIST_CANDIDATE finished.',
           'Run completion uses database timestamps; cancellation convergence ends at a 500 ms HTTP poll observation.',
           'Node tree RSS is sampled from instrumented child processes and omits PostgreSQL server memory.',
+          'Resource and database probes continue through final outbox and control settlement.',
           'The 250 ms Mock model delay is test-only and part of this fixed workload.',
         ],
         not_measured: ['first streamed token (FakeModelPort is not streamed)',

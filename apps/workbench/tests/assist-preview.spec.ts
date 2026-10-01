@@ -33,6 +33,37 @@ function connect() { activateRelayConnection({ baseUrl, workspaceId, bearerToken
 afterEach(() => { unmount?.(); unmount = null; resetRelayConnectionForTest(); vi.unstubAllGlobals(); });
 
 describe("M04 Assist DISCUSS 生成中草稿", () => {
+  it("预览传输失败显示独立读取错误与最近成功时间，显式重读恢复且不改变后台消息", async () => {
+    connect(); let failed = false; let previewCalls = 0;
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === `${prefix}/projects/${projectId}`) return response({ id: projectId, title: "项目",
+        project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
+      if (path === `${prefix}/assist-sessions`) return response({ items: [session()] });
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return response({ items: [message()] });
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages/${messageId}/live-preview`) {
+        previewCalls++; if (failed) throw new TypeError("preview connection lost");
+        return response(preview("最新预览正文"));
+      }
+      if (path === `${prefix}/assist-proposals`) return response({ items: [] });
+      if (path === `${prefix}/skill-definitions`) return response({ items: [] });
+      throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench(`/projects/${projectId}?skill=assist`); unmount = view.unmount;
+    expect(view.wrapper.text()).toContain("最新预览正文");
+    failed = true; await flush(450);
+    const error = view.wrapper.get(`[data-testid="assist-preview-error-${messageId}"]`);
+    expect(error.attributes("role")).toBe("alert"); expect(error.text()).toContain("最近成功读取");
+    expect(error.text()).toContain("后台回复状态仍以消息为准");
+    expect(view.wrapper.text()).toContain("正在生成"); expect(view.wrapper.text()).not.toContain("最新预览正文");
+    const stoppedAt = previewCalls; await flush(450); expect(previewCalls).toBe(stoppedAt);
+    failed = false; await error.get("button").trigger("click"); await flush();
+    expect(view.wrapper.find(`[data-testid="assist-preview-error-${messageId}"]`).exists()).toBe(false);
+    expect(view.wrapper.text()).toContain("最新预览正文"); expect(view.wrapper.text()).toContain("正在生成");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  });
+
   it("首片段前只显示等待，随后展示纯文本草稿；终态清草稿并重读完整消息", async () => {
     connect(); let finish = false; let previewCalls = 0;
     let releaseFirst: ((value: Response) => void) | null = null;

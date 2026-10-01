@@ -48,6 +48,7 @@ describe("N01 接续点面板", () => {
     await flush();
     expect(mounted.wrapper.text()).toContain("还没有保存过接续点");
     expect(mounted.wrapper.find('[data-testid="continuation-comparison"]').exists()).toBe(false);
+    expect(mounted.wrapper.get('.continuation-capture-form').attributes("open")).toBeUndefined();
     expect(mounted.wrapper.get('[data-testid="continuation-capture"]').attributes("disabled"))
       .toBeDefined();
     expect(methods.every((method) => method === "GET")).toBe(true);
@@ -132,6 +133,7 @@ describe("N01 接续点面板", () => {
     const pending = mounted.wrapper.get('[data-testid="continuation-pending"]').text();
     expect(pending).toContain(`原 command_id：${posts[0].command_id}`);
     expect(pending).toContain("核对完成前不会生成新命令");
+    expect(mounted.wrapper.get('.continuation-capture-form').attributes("open")).toBeDefined();
     expect(mounted.wrapper.get('[data-testid="continuation-capture"]').attributes("disabled"))
       .toBeDefined();
     await mounted.wrapper.findAll("button").find((button) => button.text() === "查询原命令回执")!

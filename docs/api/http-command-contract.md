@@ -162,6 +162,8 @@ UI 必须区分“暂停请求已提交”与“已暂停”、“批准已保�
 
 ## 7. 错误结构与重试语义
 
+2026-10-01 Windows 内容发布安全点：API请求/响应字段不变，Breaking Change: No。受管内容排他维护、缺失/旧原生助手或物理发布失败沿既有503 `STORAGE_UNAVAILABLE`；原回执重放不再写文件。没有公开内容冻结 HTTP 开关或导入 OS 证明的接口；CLI边界见[部署说明](../deployment/本机部署.md#windows-受管内容发布安全点)。失败不能换 command/operation ID绕过核对。
+
 采用 [RFC 9457 Problem Details](https://www.rfc-editor.org/rfc/rfc9457.html) 的 application/problem+json，并增加 code、request_id、command_id?、field_errors?、conflict?、retryable、retry_action。type 使用稳定 URI 引用，例如 `/problems/revision-conflict`；这些 URI 的说明纳入后续 OpenAPI。
 
 ```json
@@ -193,11 +195,14 @@ UI 必须区分“暂停请求已提交”与“已暂停”、“批准已保�
 | 413 / 415 | CONTENT_TOO_LARGE / UNSUPPORTED_MEDIA_TYPE | 调整受支持内容 |
 | 422 | VALIDATION_FAILED / REQUIRED_INPUT_MISSING | 合法 JSON 但字段/条件缺失；field_errors 指向字段 |
 | 503 | STORAGE_UNAVAILABLE / DATABASE_UNAVAILABLE / SCHEMA_UNAVAILABLE / EVIDENCE_UNAVAILABLE | 检查 command receipt；安全的原样重试，不生成新命令 |
+| 503 | MAINTENANCE_DRAINING / MAINTENANCE_UNAVAILABLE | 暂停新操作；保持输入和原命令，核对回执，待恢复准入或状态可确认后原样重试；不推断在途工作已停止 |
 | 500 | INTERNAL_ERROR | 不泄漏堆栈/SQL/凭据；提交结果不明时先查询回执 |
 
 retryable 仅表示是否允许原样重试当前命令，不是承诺会成功，也不授权重新执行外部动作。retry_action 取 NONE、REFRESH_AND_REDECIDE、POLL_RESOURCE、CHECK_RECEIPT_THEN_RETRY。依赖数据库不可用时回执查询也可能失败，客户端保留原 command_id 等待恢复。
 
 错误不包含隐私正文、宿主绝对路径、SQL、密钥或完整模型上下文。日志用 request_id/command_id/领域 ID 关联必要证据。
+
+2026-09-30 M07 新工作准入门：**Breaking Change: No。** 原请求、回执及读接口形状不变；新增上述两类 typed 503，`retry_action=CHECK_RECEIPT_THEN_RETRY`。数据库 DRAINING 拒绝首次业务命令（包括自定义 Assist/Blueprint 接受），旧同内容回执仍可读/重放、异内容仍为 `COMMAND_ID_REUSED`；固定停止/取消和有原停机证明的部分文件写入安全终结保留既有准入规则。`POST /model-port/verify` 的新探针预约同样受准入门约束，被拒时不写调用记录或外呼；已经预约的原探针可结算，查询验证状态不受挡。不是全部写入冻结，不新增 HTTP 维护开关，不改变 readiness 的 schema 含义。受信 CLI、锁序和未实现出口见[部署说明](../deployment/本机部署.md#draining-新工作准入门)。
 
 ## 8. 本机 API 的最低边界
 
@@ -539,6 +544,8 @@ Execute 为 SSRF 安全 GET（tool-adapters.md 第 3 节 + OWASP）：**每一�
 
 `0018_m04_model_calls` 将每次 DRAFT、SemanticChecker、Assist 的实际 Fake/真实模型调用独立登记：`call_id`、原 StepAttempt 或 AssistMessage、非敏感 Provider/模型标识、可得的 request id、状态与已知或未知 token 数。重入产生新行；进程失去结果时留下 STARTED，不当作成功或零费用。语义检查结果证据可带 `model_call_id`；该事实表目前只有内部数据库查询，没有新增公开 HTTP 端点，不改变 Run/Assist 业务状态机。真实 Provider 外呼未在本轮执行，本节仍属开发自检。
 
+2026-09-30 工具输出拒绝的证据保全修复（**Breaking Change: No**）：模型返回原生工具参数或非文本内容时仍由 Adapter 拒绝，不执行工具；已有 `provider_request_id` 与 `usage` 字段保留拒绝前实际观察到的请求 ID 和合法规范化用量，缺失 ID、未观察用量保持 null，不复制工具参数、原始响应或异常正文。`ModelToolOutputError` 属于能力边界，消息的 `provider_error_kind` 仍为 null。先收到正文再拒绝时，失败结算删除临时预览，原调用已记录的首文本/首预览时间保留。当前 SDK 的 SSE 用量在流结束时才形成规范化 chunk，提前拒绝不推算未消费的 wire 用量。字段、状态码、取消/重试/完成权限不变；实际范围见[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
 `0019_m04_draft_read_input` 为新 DRAFT 调用增加结构化输入 SHA-256 与原 `read_operation_id`/`read_invocation_id`（旧行保持 NULL）；操作历史的原正文不复制到计量表。FILE_READ/WEB_FETCH 成功证据按最多 16 KiB UTF-8 完整字符截取，并在 DRAFT 前按原 Manifest 估算口径计入预算；原正文 SHA-256、提取文本 SHA-256、实际片段 SHA-256 和 `UNTRUSTED_DATA` 标记随模型输入建立。额外元数据仍超预算则 DRAFT 以 `CONTEXT_REQUIRED_OVER_BUDGET` 失败且零模型调用。已结算类型化读取 `FAILED` 保留原操作和调用证据，Run 进入 FAILED、Task 释放回 READY；待处理控制意图仍先按安全点处理，`UNKNOWN` 仍需核对。**Breaking Change: No**：Delegate 参数、Run/Gateway HTTP DTO 与既有错误结构不变；本次改变的是新 Run 的内部动作顺序与模型输入。旧 DRAFT 已成功的 Run 保留旧顺序及原批准/操作身份。
 
 ### 10.29 M05/P13 Today 与个人选择（2026-09-26，后端开发自检）
@@ -561,6 +568,8 @@ Execute 为 SSRF 安全 GET（tool-adapters.md 第 3 节 + OWASP）：**每一�
 
 `GET /artifact-versions/{artifact_version_id}/lineage` 返回 `artifact_version_id,artifact_id,version_number,sha256,source_kind,content_availability,direct_parents[]`；直接父边含 `id,relation,parent_kind,parent_id,availability,created_at`。关系仅 `DERIVED_FROM/REVISED_FROM/GENERATED_BY/VERIFIED_BY/ACCEPTED_BY`，父种类依关系限 `ARTIFACT_VERSION/KNOWLEDGE_VERSION/RUN_STEP/VERIFICATION_SESSION/COMPLETION_RECORD`。源不可读、正文丢失或 hash 不符时保留边但 `availability=UNAVAILABLE,parent_id=null`，不拿当前版本代替历史来源。上述新接口已做真实 PostgreSQL 定向开发回归，尚未做 M05 独立或 Windows 桌面验收。
 
+2026-09-30 M04 首输出追溯增量（**Breaking Change: No**）：Run Trace 的 `model_calls[]` 追加可空 ISO 时间 `first_text_delta_at`、`first_preview_persisted_at`。前者是当前合法 DRAFT/普通无 Skill 的 Assist DISCUSS 首次非空文本回调的观察时间，后者是首个预览成功事务内的写入时间；同调用后续更新不覆盖，结算或清理预览也不清除。旧行、首文本前取消/失败和不提供文本预览的调用保持 null，不从旧正文或结束时间回填。`started_at` 仍表示账本受理，以上都不是实际 HTTP 发出、Provider 收包或窗口显示时间。旧客户端可忽略字段，新客户端对旧服务缺字段显示“未记录”；仅原 Owner 写入，不增加业务完成权限。实际通过范围见[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
 ### 10.31 M04/P12 第一方 Skill 与最小 Pack 第一段（2026-09-26，后端开发自检）
 
 **Breaking Change: No。** 在 `/api/v1/workspaces/{workspace_id}` 下新增只读 `GET /skill-definitions`、`GET /skill-definitions/{id}/versions/{version}`、`GET /packs`、`GET /packs/{id}/versions/{version}`。不存在的 Workspace 或未知版本返回 404 `RESOURCE_NOT_FOUND`。Skill 清单项含 `id,version,sha256,title,target,output_kind,availability,required_capabilities,missing_capabilities,dependencies,accept_supported`；详情另含冻结 `definition`。0022 当时首批三项均为 `1.0.0`：`task-to-execution-contract`/`TASK_DEFINITION_SUGGESTION`、`project-resume`/`PROJECT_RESUME`、`verification-plan`/`VERIFICATION_PLAN_SUGGESTION`。0023 新版本与可接受状态见 §10.32；首批无额外 Connector 能力要求，两项 capability 数组为空，不能据此断言当前模型 Provider 已配置。
@@ -582,6 +591,8 @@ Execute 为 SSRF 安全 GET（tool-adapters.md 第 3 节 + OWASP）：**每一�
 `POST /assist-proposals/{id}/accept` 对上述两种 kind 要求 `{command_id,expected_task_revision,expected_acceptance_revision,payload_hash}`，两版本为十进制字符串，摘要为 64 位小写 hex；缺失/形态错误为 422 `VALIDATION_FAILED`。同 `command_id` 同内容重放原回执，异内容沿原 `COMMAND_ID_REUSED`；另一 `command_id` 对已接受提案返回 409 `INVALID_TRANSITION`，不重复写验收。过期 Task/acceptance 基线为 409 `REVISION_CONFLICT` 并把提案置 `EXPIRED`；跨 Workspace 目标为 404 `RESOURCE_NOT_FOUND`；提案摘要/Skill 来源不一致或来源撤销为 409 `INVALID_TRANSITION`。只允许 HUMAN 拥有、非终态且无活动 Run/未结算或 UNKNOWN 动作的 Task 接受；否则 409 `EXECUTOR_CONFLICT`。接受在 Workspace authority SHARE → 来源复核 → Task 锁序下，经 Task Owner 新建 acceptance 版本、复制全部旧 criteria 加新增条件、撤销旧周期 Verification 适用性并过期该 Task 的 OPEN Review，与提案决策、审计及命令回执同事务。旧 ExecutionContract/Run/Review 仍保留历史身份，不被新版本改写。成功 `result` 含 `task_id,status,revision,previous_acceptance_revision,acceptance_revision,objective,required_output_spec,criteria,added_criterion_ids,proposal_id`，返回服务端实际合并版本；建议模式不会改 Task mode/执行权。
 
 `GET /tasks/{task_id}/check-plan-preview` 只读返回 `task_id,status:'AVAILABLE'|'UNAVAILABLE',admission_available,reason_codes,sources:{task_revision,acceptance_revision,rule_revision,workflow_key,workflow_version,rule_refs},check_plan,check_plan_sha256,frozen_run_plan:false,executed:false`。可重复读快照用当前验收、适用 Rule 与注册检查器生成准入预览；缺能力/规则冲突或当前 Task 不可 Delegate 显式给原因。`status=AVAILABLE` 仅表示计划可构造，须另看 `admission_available`；它不是活动 Run 已冻结或已执行的 CheckPlan，不是 PASS。Delegate 仍重新核对 Rule、权限与当前 revision 后冻结自己的 ExecutionContract。Blueprint、Pack 选择/应用、真实模型质量、独立与 Windows 桌面验收均不属于本节开发自检。
+
+2026-09-30 补齐 Skill 模型请求的 JSON mode：内部仍以 `DISCUSS` 表示 Skill 消息，模型适配器按冻结 Skill 身份启用 `response_format:{type:'json_object'}`，不再只按普通提案 intent 判断。**Breaking Change: No。** HTTP 输入/回执、Skill 版本、严格输出 schema 与原接受 Owner 不变；普通无 Skill 的 `DISCUSS` 继续流式首预览，Skill 不输出部分预览。JSON mode 不能代替 schema 校验，不合法输出仍以 `OUTPUT_SCHEMA_INVALID` 失败且不生成提案。验证结果只在[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)维护。
 
 ### 10.33 M05/P14 内置 ViewConfiguration Owner（2026-09-26，后端开发自检）
 

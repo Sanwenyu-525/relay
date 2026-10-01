@@ -1,0 +1,45 @@
+/* 成果和普通判断共用阅读空间；详细审批沿用整栏自然滚动。 */
+.collab-side .collab-side-tabs { min-height: var(--relay-control-height); padding-inline: var(--relay-space-4); gap: var(--relay-space-4); }
+.collab-side .collab-side-tab { padding-block: var(--relay-space-2); }
+.collab-side .collab-side-body { padding: var(--relay-space-3); gap: var(--relay-space-1); }
+.collab-side .collab-reader { gap: var(--relay-space-1); }
+.collab-side .artifact-doc-heading { align-items: center; gap: var(--relay-space-1) var(--relay-space-2); }
+.collab-side .collab-reader .artifact-doc-heading h3 { font-size: var(--relay-font-size-body); }
+.collab-side .artifact-doc-heading .text-link { font-size: var(--relay-font-size-meta); }
+.artifact-doc-actions { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--relay-space-2); }
+.collab-side .artifact-doc-heading { position: relative; }
+.collab-side .artifact-doc-actions > details[open] { position: absolute; z-index: var(--relay-zIndex-popover); inset: 0 0 auto; padding: var(--relay-space-3); background: var(--relay-color-bg-surface); border: var(--relay-border-width) solid var(--relay-color-border-control); border-radius: var(--relay-radius-control); max-height: min(60dvh, var(--relay-layout-workspace-sideWidth)); overflow-y: auto; }
+.collab-side .artifact-doc-actions > details[open] > summary { padding-bottom: var(--relay-space-2); }
+.collab-review-version-mismatch { flex: none; margin: 0; padding: var(--relay-space-2) var(--relay-space-3); font-size: var(--relay-font-size-meta); }
+.collab-review-version-mismatch > button { margin-left: var(--relay-space-2); }
+.collab-side .collab-judgment { padding: var(--relay-space-2) var(--relay-space-3); }
+.collab-side .collab-judgment-heading { gap: var(--relay-space-1) var(--relay-space-2); }
+.collab-side .collab-judgment-heading h2 { font-size: var(--relay-font-size-body); }
+.collab-side .review-bound-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--relay-space-2); }
+.collab-side .review-bound-summary h3 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.collab-side .review-bound-summary .review-facts { gap: 0 var(--relay-space-2); }
+.collab-side .review-details-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--relay-space-1) var(--relay-space-4); margin-top: var(--relay-space-1); }
+.collab-side .review-details-row > details { margin: 0; min-width: 0; }
+.collab-side .review-details-row > details[open] { flex-basis: 100%; }
+.collab-side .collab-judgment .review-decision--compact .review-impact-summary { margin-block: var(--relay-space-1); }
+.collab-side .review-details-row summary { cursor: pointer; font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); }
+.collab-side .review-actions { margin-top: var(--relay-space-1); }
+.collab-side .collab-judgment .review-actions > button { font-size: var(--relay-font-size-meta); white-space: nowrap; }
+.collab-side .collab-judgment-context { font-size: var(--relay-font-size-meta); }
+.collab-side .collab-judgment-heading .collab-review-picker { font-size: var(--relay-font-size-meta); min-width: 0; }
+.collab-side .collab-review-picker > summary { cursor: pointer; }
+.collab-side .collab-review-picker[open] { flex-basis: 100%; }
+.collab-side .collab-review-picker select { width: 100%; margin-block: var(--relay-space-1); }
+.collab-side .collab-judgment[data-review-kind="CRITERION"] .review-decision--compact { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--relay-space-1) var(--relay-space-2); margin-top: var(--relay-space-1); }
+.collab-side .collab-judgment[data-review-kind="CRITERION"] .review-decision--compact > * { grid-column: 1 / -1; }
+.collab-side .collab-judgment[data-review-kind="CRITERION"] .review-details-row { grid-column: 1; align-items: center; gap: var(--relay-space-2); margin: 0; }
+.collab-side .collab-judgment[data-review-kind="CRITERION"] .review-details-row > details { margin: 0; }
+.collab-side .collab-judgment[data-review-kind="CRITERION"] .review-actions { grid-column: 2; margin: 0; }
+.collab-side .collab-judgment[data-review-kind="CRITERION"] .review-details-row:has(details[open]),
+.collab-side .collab-judgment[data-review-kind="CRITERION"] .review-actions:has(button:nth-child(3)) { grid-column: 1 / -1; }
+@container collaboration (max-width: calc(26rem + 20rem + 6rem)) {
+  .collab-side .collab-judgment[data-review-kind="CRITERION"] .review-details-row,
+  .collab-side .collab-judgment[data-review-kind="CRITERION"] .review-actions { grid-column: 1 / -1; }
+}
+.collab-side .collab-completion-details { padding-inline: var(--relay-space-1); }
+.collab-side .collab-run-progress details > summary { cursor: pointer; font-size: var(--relay-font-size-meta); }

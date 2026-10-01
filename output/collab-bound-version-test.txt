@@ -1,0 +1,17 @@
+
+> relay-workbench-fixture@0.1.0 test
+> vitest run tests/collaborationWorkspace.spec.ts --reporter=dot
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./vite.config" without a file extension (vitest.config.ts:2:24). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.1 D:/Develop/Relay-Agent/apps/workbench
+
+········································
+
+ Test Files  1 passed (1)
+      Tests  40 passed (40)
+   Start at  12:11:31
+   Duration  21.41s (tests 78%, import 7%, environment 7%, transform 7%)
+

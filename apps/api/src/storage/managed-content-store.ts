@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { mkdir, open, readFile, rename, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
+import { publishWindowsContent, WindowsContentError } from './windows-content-publisher.js';
+
 /**
  * 受管内容存储（docs/database/physical-design-postgresql.md 第 7 节、
  * contracts/04-recovery-and-commit.md 第 6 节）。
@@ -130,6 +132,19 @@ export class ManagedContentStore {
     readonly content: Buffer;
   }): Promise<PublishedContent> {
     const storageRef = managedContentRef(input.artifactId, input.versionId);
+    if (process.platform === 'win32') {
+      try {
+        await publishWindowsContent({ dataRoot: this.dataRoot,
+          artifactId: requireStorageId(input.artifactId, 'artifact id'),
+          versionId: requireStorageId(input.versionId, 'version id'), content: input.content, storageRef });
+      } catch (error) {
+        if (error instanceof WindowsContentError && error.code === 'CONFLICT') {
+          throw new StorageConflictError(`immutable content already exists: ${storageRef}`);
+        }
+        throw new StorageUnavailableError('could not publish managed content');
+      }
+      return { storageRef, contentHash: contentHashOf(input.content), size: BigInt(input.content.byteLength) };
+    }
     const targetPath = resolveStoredContentPath(this.dataRoot, storageRef);
     const stagingPath = join(this.dataRoot, STAGING_DIRECTORY, `${input.versionId}.part`);
 

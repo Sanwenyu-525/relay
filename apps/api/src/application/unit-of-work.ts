@@ -25,9 +25,11 @@ import { FileWritePathRepository } from '../files/file-write-path-repository.js'
 import { TodayRepository } from '../today/today-repository.js';
 import { ViewRepository } from '../view/view-repository.js';
 import { BlueprintRepository } from '../blueprint/blueprint-repository.js';
+import { RuntimeAdmissionRepository } from '../runtime/runtime-admission-repository.js';
 
 /** 同一连接上的模块写入口集合。用例只能通过这里跨模块协作，不直接拼 SQL。 */
 export interface Repositories {
+  readonly admission: RuntimeAdmissionRepository;
   readonly activities: ActivityRecordRepository;
   readonly assist: AssistRepository;
   readonly artifacts: ArtifactRepository;
@@ -58,6 +60,7 @@ export interface Repositories {
 
 export function createRepositories(db: DbExecutor): Repositories {
   return {
+    admission: new RuntimeAdmissionRepository(db),
     activities: new ActivityRecordRepository(db),
     assist: new AssistRepository(db),
     artifacts: new ArtifactRepository(db),

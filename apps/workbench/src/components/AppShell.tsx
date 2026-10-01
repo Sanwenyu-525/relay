@@ -10,6 +10,7 @@ import SidebarResizeHandle, { clampSidebarWidth } from "./SidebarResizeHandle";
 import { dialogCount } from "../lib/dialogStack";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { useRelayConnection } from "../lib/relayConnection";
+import { useDisplayPreferences } from "../lib/displayPreferences";
 
 // 侧栏宽度是纯展示偏好，不是业务事实；localStorage 只保存这一个数值，读写失败时本次会话仍可调整。
 const SIDEBAR_WIDTH_STORAGE_KEY = "relay.workbench.sidebarWidthPx";
@@ -35,6 +36,7 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
 }) {
   const location = useLocation();
   const connection = useRelayConnection();
+  const { timeZone } = useDisplayPreferences();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState<number | null>(readStoredSidebarWidth);
@@ -61,54 +63,61 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
   }, [commandOpen, onCommandOpen]);
   useEffect(() => { onCommandClose(); }, [location.pathname, location.search]);
   const primaryNavigation = [
+    { label: "工作台", to: "/agent", icon: House, count: "" },
     { label: "项目", to: "/projects", icon: FolderKanban, count: "" },
-    { label: "全部任务", to: "/tasks", icon: ListChecks, count: "" },
-    { label: "知识", to: "/knowledge", icon: BookOpen, count: "" }
+    { label: "待处理", to: "/reviews", icon: Bell, count: connection.mode === "live" ? "" : String(chrome.pendingReviewCount) },
+    { label: "资料", to: "/knowledge", icon: BookOpen, count: "" }
   ];
   /** 次级入口保留路由可达性，收在折叠区，不与主要定位入口争夺首屏注意力。 */
   const secondaryWorkNavigation = [
     { label: "今日", to: "/today", icon: House, count: "" },
+    { label: "全部任务", to: "/tasks", icon: ListChecks, count: "" },
     { label: "动态", to: "/activity", icon: ListTree, count: "" },
-    { label: "待审", to: "/reviews", icon: Bell, count: connection.mode === "live" ? "" : String(chrome.pendingReviewCount) }
+    { label: "收件箱", to: "/inbox", icon: Inbox, count: "" }
   ];
   const query = new URLSearchParams(location.search);
   const path = location.pathname;
   const currentWorkId = path === "/agent" ? query.get("work") : null;
   const secondaryNavigation = [
-    { label: "连接", to: "/connections", icon: Link2 },
-    { label: "设置", to: "/settings", icon: Settings }
+    { label: "设置", to: "/settings", icon: Settings },
+    { label: "连接与同步", to: "/connections", icon: Link2 }
   ];
   // 面包屑只读确切 Project/Task 标题；读不到时回退到通用称谓，不用客户端缓存或推测标题。
-  const [workTrail, setWorkTrail] = useState<readonly string[]>([]);
+  const [workTrail, setWorkTrail] = useState<{ workId: string; epoch: number; labels: readonly string[] } | null>(null);
   useEffect(() => {
     const client = connection.mode === "live" ? connection.client : null;
-    if (!client || currentWorkId === null) { setWorkTrail([]); return; }
+    if (!client || currentWorkId === null) { setWorkTrail(null); return; }
+    const trailFor = (labels: readonly string[]) => ({ workId: currentWorkId, epoch: connection.epoch, labels });
     let active = true;
     void client.getTask(currentWorkId).then(async (task) => {
+      if (task.id !== currentWorkId) throw new Error("Task 身份与当前工作不匹配");
       const names = ["项目", "当前项目", "任务", task.title];
       if (task.projectId === null) {
-        if (active) setWorkTrail(["任务", task.title]);
+        if (active) setWorkTrail(trailFor(["任务", task.title]));
         return;
       }
-      if (active) setWorkTrail(names);
+      if (active) setWorkTrail(trailFor(names));
       const project = await client.getProject(task.projectId);
       if (!active) return;
-      setWorkTrail(["项目", project.title, "任务", task.title]);
-    }).catch(() => { if (active) setWorkTrail(["任务", "当前工作"]); });
+      if (project.id !== task.projectId) throw new Error("Project 身份与当前工作不匹配");
+      setWorkTrail(trailFor(["项目", project.title, "任务", task.title]));
+    }).catch(() => { if (active) setWorkTrail(trailFor(["任务", "当前工作"])); });
     return () => { active = false; };
-  }, [connection.mode, connection.client, currentWorkId]);
+  }, [connection.mode, connection.client, connection.epoch, currentWorkId]);
   const breadcrumb = (() => {
     if (path === "/today") return ["工作空间", "今日"];
     if (path === "/activity" || path === "/activities") return ["工作空间", "动态"];
-    if (path === "/agent") return workTrail.length > 0 ? [...workTrail] : ["工作空间", "近期工作"];
+    if (path === "/agent") return workTrail?.workId === currentWorkId && workTrail.epoch === connection.epoch
+      ? [...workTrail.labels] : ["工作空间", "近期工作"];
     if (/^\/artifact-versions\/[^/]+\/lineage$/u.test(path)) return ["产物版本", "来源"];
     if (path === "/projects") return ["工作空间", query.get("view") === "create" ? "新建项目" : "项目"];
     if (path === "/tasks") return query.get("view") === "create"
       ? ["工作空间", "新建任务与执行准备"]
       : query.get("tab") === "inbox" ? ["工作空间", "任务", "收件箱"] : ["工作空间", "任务"];
-    if (path === "/reviews") return ["工作空间", "待审"];
-    if (path === "/knowledge") return ["工作空间", "知识"];
-    if (path === "/connections" || path === "/settings/connections") return ["工作空间", "连接"];
+    if (path === "/reviews") return ["工作空间", "待处理"];
+    if (path === "/knowledge") return ["工作空间", "资料"];
+    if (path === "/settings") return ["工作空间", "设置"];
+    if (path === "/connections" || path === "/settings/connections") return ["工作空间", "连接与同步"];
     const workbench = /^\/projects\/([^/]+)\/workbench\/(general|thesis|development)$/u.exec(path);
     if (workbench) {
       const title = connection.mode === "live" ? null : fixtureAdapter.getProjectTitle(workbench[1] ?? "");
@@ -133,16 +142,13 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
     return ["工作空间"];
   })();
   const now = new Date();
-  const date = new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" }).format(now).replaceAll("/", "-");
-  const weekday = new Intl.DateTimeFormat("zh-CN", { weekday: "long" }).format(now);
+  const date = new Intl.DateTimeFormat("zh-CN", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now).replaceAll("/", "-");
+  const weekday = new Intl.DateTimeFormat("zh-CN", { timeZone, weekday: "long" }).format(now);
 
   return <>
     <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById("main-content")?.focus(); }}>跳到主要内容</a>
-    <div className="app-frame" style={frameStyle}>
+    <div className={`app-frame${path === "/agent" ? " app-frame--collaboration" : ""}`} style={frameStyle}>
       <aside className="app-sidebar">
-        <div className="brand" title="示例品牌标识，最终产品显示名待确认">Workflow OS</div>
-        {connection.mode === "live" && connection.client && path === "/agent" &&
-          <RecentWorkRail client={connection.client} currentTaskId={currentWorkId} />}
         <nav className="navigation-list" aria-label="主导航">
           {primaryNavigation.map((item) => <NavLink key={item.label} to={item.to} end className={({ isActive }) => `navigation-item${isActive ? " navigation-item--active" : ""}`}>
             {({ isActive }) => <><item.icon aria-hidden="true" /><span className="navigation-label">{item.label}</span>
@@ -151,6 +157,10 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
             </>}
           </NavLink>)}
         </nav>
+        {connection.mode === "live" && connection.client &&
+          <RecentWorkRail key={connection.epoch} client={connection.client} currentTaskId={currentWorkId} />}
+        <details className="navigation-extra" key={path} open={secondaryWorkNavigation.some((item) => item.to === path) || undefined}>
+        <summary>更多入口</summary>
         <nav className="navigation-list navigation-list--secondary" aria-label="次级导航">
           {secondaryWorkNavigation.map((item) => <NavLink key={item.label} to={item.to} end className={({ isActive }) => `navigation-item${isActive ? " navigation-item--active" : ""}`}>
             {({ isActive }) => <><item.icon aria-hidden="true" /><span className="navigation-label">{item.label}</span>
@@ -159,6 +169,7 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
             </>}
           </NavLink>)}
         </nav>
+        </details>
         <nav className="navigation-list navigation-list--bottom" aria-label="辅助导航">
           {secondaryNavigation.map((item) => <NavLink key={item.label} to={item.to} end className={({ isActive }) => `navigation-item${isActive ? " navigation-item--active" : ""}`}>
             <item.icon aria-hidden="true" /><span className="navigation-label">{item.label}</span>
@@ -169,18 +180,18 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
         <header className="app-topbar">
           <button className="mobile-menu-button icon-button" type="button" aria-label="打开导航" onClick={() => setNavigationOpen(true)}><Menu aria-hidden="true" /></button>
           <nav className="breadcrumbs" aria-label="面包屑">{breadcrumb.map((item, index) => <span key={`${index}-${item}`} className="breadcrumb-item">
-            {index > 0 && <span className="breadcrumb-separator" aria-hidden="true">›</span>}<span>{item}</span>
+            {index > 0 && <span className="breadcrumb-separator" aria-hidden="true">/</span>}<span>{item}</span>
           </span>)}</nav>
-          <time className="topbar-date">{date}　{weekday}</time>
+          <time className="topbar-date" dateTime={date} title={`界面时区：${timeZone}`}>{date}　{weekday}</time>
           <Link className="icon-button" to="/inbox" aria-label="打开任务收件箱" title="任务收件箱"
             data-testid="inbox-open"><Inbox aria-hidden="true" /></Link>
           <button className="icon-button app-topbar__command-open" type="button" aria-label="打开命令面板，快捷键 Ctrl+K" data-testid="command-open" onClick={onCommandOpen}><Search aria-hidden="true" /></button>
           <button className={`data-source-button${connection.mode === "live" ? " data-source-button--live" : ""}`} type="button" data-testid="relay-connection-open" aria-label={`数据来源：${dataSourceLabel}，打开连接设置`} onClick={() => setConnectionOpen(true)}>
-            <Link2 aria-hidden="true" /><span>{dataSourceLabel}</span>
+            <Link2 aria-hidden="true" /><span className="visually-hidden">{dataSourceLabel}</span>
           </button>
+          {connection.mode === "live" && connection.client && <InterventionNotifications
+            key={connection.epoch} client={connection.client} />}
         </header>
-        {connection.mode === "live" && connection.client && <InterventionNotifications
-          key={connection.epoch} client={connection.client} />}
         {desktopStatus === "connecting" && <p className="helper-text desktop-bootstrap-status" role="status">正在连接桌面本机服务…</p>}
         {desktopStatus === "error" && <p className="action-error desktop-bootstrap-status" role="alert" data-testid="desktop-bootstrap-error">桌面本机服务未就绪。当前仍为示例数据；请检查连接与服务状态。</p>}
         <main id="main-content" className="app-main" tabIndex={-1}>{children}</main>
@@ -193,11 +204,15 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
     <RelayConnectionDialog open={connectionOpen} onClose={() => setConnectionOpen(false)} />
     <CommandPalette open={commandOpen} onClose={onCommandClose} />
     <AppDialog open={navigationOpen} title="导航" variant="drawer" onClose={() => setNavigationOpen(false)}>
+      <div className="mobile-navigation">
+      {connection.mode === "live" && connection.client && <RecentWorkRail key={connection.epoch}
+        client={connection.client} currentTaskId={currentWorkId} onOpen={() => setNavigationOpen(false)} />}
       <nav className="mobile-navigation-list" aria-label="完整导航">
         {[...primaryNavigation, ...secondaryWorkNavigation, ...secondaryNavigation].map((item) => <NavLink key={item.label} to={item.to} className="mobile-navigation-item" onClick={() => setNavigationOpen(false)}>
           <item.icon aria-hidden="true" /><span>{item.label}</span>
         </NavLink>)}
       </nav>
+      </div>
     </AppDialog>
   </>;
 }

@@ -4,6 +4,9 @@ import type { RelayApiClient, RelayRunTrace, RelayTaskDetail } from "../api/rela
 import TaskCheckPlanPreview from "../components/TaskCheckPlanPreview";
 import { executorLabels, interactionModeLabels, taskStatusLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
+import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
+import AssistView, { type AssistNavigationState } from "./AssistView";
+import "./LiveTaskSkillFactsView.css";
 
 export default function LiveTaskSkillFactsView({ client, kind }: {
   client: RelayApiClient; kind: "definition" | "verification";
@@ -18,11 +21,26 @@ export default function LiveTaskSkillFactsView({ client, kind }: {
   const [projectArchivedAt, setProjectArchivedAt] = useState<string | null | undefined>(undefined);
   const [projectReadError, setProjectReadError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const [assistNavigation, setAssistNavigation] = useState<AssistNavigationState>({ dirty: false, pending: null });
+  const [proposalActionHost, setProposalActionHost] = useState<HTMLDivElement | null>(null);
   const requestVersion = useRef(0);
+  const factsRefreshVersion = useRef(0);
+  const targetScope = useRef<{ client: RelayApiClient; id: string } | null>(null);
+  const navigationRef = useRef(assistNavigation);
+  navigationRef.current = assistNavigation;
+  useEffect(() => {
+    const guard: DraftGuard = { hasUnsavedChanges: () => navigationRef.current.dirty || navigationRef.current.pending !== null,
+      pendingCommandId: () => navigationRef.current.pending?.commandId ?? null,
+      discard: () => { navigationRef.current = { dirty: false, pending: null }; } };
+    setDraftGuard(guard);
+    return () => clearDraftGuard(guard);
+  }, []);
 
   useEffect(() => {
     const request = ++requestVersion.current;
-    setTask(null); setTrace(null); setError(null); setTraceError(null); setProjectArchivedAt(undefined); setProjectReadError(null);
+    if (targetScope.current?.client !== client || targetScope.current.id !== id) setTask(null);
+    targetScope.current = { client, id };
+    setTrace(null); setError(null); setTraceError(null); setProjectArchivedAt(undefined); setProjectReadError(null);
     setLoading(true); setTraceLoading(false);
     void client.getTask(id).then(async (next) => {
       if (next.id !== id) throw new Error("返回的任务与当前页面不匹配。");
@@ -48,26 +66,53 @@ export default function LiveTaskSkillFactsView({ client, kind }: {
         if (request === requestVersion.current) setTraceLoading(false);
       }
     }).catch((caught: unknown) => {
-      if (request === requestVersion.current) setError(describeLiveError(caught).message);
+      if (request === requestVersion.current) { setError(describeLiveError(caught).message); }
     }).finally(() => { if (request === requestVersion.current) setLoading(false); });
     return () => { requestVersion.current++; };
   }, [client, id, reload]);
 
   const title = kind === "definition" ? "完善任务定义" : "生成验收方案";
-  return <section className="skill-page" data-testid={`live-${kind}`}>
+  const factsReadable = !loading && error === null;
+  async function refreshAcceptedFacts() {
+    const request = requestVersion.current;
+    const refresh = ++factsRefreshVersion.current;
+    try {
+      const current = await client.getTask(id);
+      if (current.id !== id) throw new Error("返回的任务与当前页面不匹配。");
+      if (request === requestVersion.current && refresh === factsRefreshVersion.current) { setTask(current); setError(null); }
+    } catch (caught) {
+      if (request === requestVersion.current && refresh === factsRefreshVersion.current) { setTrace(null); setError(describeLiveError(caught).message); }
+    }
+  }
+  return <section className="skill-page task-skill-facts" data-testid={`live-${kind}`}>
     <div className="page-layout"><div className="page-primary">
-    <p className="eyebrow">{title} · 当前事实</p><h1>{kind === "definition" ? "当前任务定义" : "当前验收与验证来源"}</h1>
-    <p className="page-lede">此页读取已保存的任务事实；可确认的 Skill 合并提案请在该任务的 Assist 会话中查看。</p>
-    <button className="secondary-button" type="button" disabled={loading || traceLoading} onClick={() => setReload((value) => value + 1)}>刷新当前事实</button>
+    <p className="eyebrow">{factsReadable && task ? task.title : title}</p><h1>{kind === "definition" ? "先说清楚，怎样才算完成" : "把验收依据列清楚"}</h1>
+    <p className="page-lede">先核对当前事实，再生成建议并确认本次变更。</p>
+    {task && factsReadable && <p className="metadata-row">任务状态：{taskStatusLabels[task.status]} ·
+      执行模式：{interactionModeLabels[task.mode]} · 当前执行者：{executorLabels[task.executor]} ·
+      Task v{task.revision} / 验收 v{task.acceptance.acceptanceRevision}</p>}
+    <button className="secondary-button" type="button" data-testid="task-skill-refresh" disabled={loading || traceLoading || assistNavigation.dirty || assistNavigation.pending !== null} onClick={() => setReload((value) => value + 1)}>刷新当前事实</button>
+    {(assistNavigation.dirty || assistNavigation.pending !== null) && <p className="helper-text">建议区有未发送输入或待核对命令，请先发送、清空输入或核对原命令回执，再刷新当前事实。</p>}
     {loading && <p role="status">正在读取任务与验收事实…</p>}
     {error && <p className="action-error" role="alert">{error}</p>}
-    {task && <>
+    {task && factsReadable && (kind === "definition"
+      ? <section className="task-skill-current-objective"><h2>当前任务目标</h2><blockquote>{task.acceptance.objective || "当前验收目标为空。"}</blockquote></section>
+      : <TaskCheckPlanPreview key={`${id}:${reload}:${task.revision}:${task.acceptance.acceptanceRevision}`} client={client} taskId={id}
+        taskRevision={task.revision} acceptanceRevision={task.acceptance.acceptanceRevision} />)}
+    {task && <AssistView key={`skill-assist:${id}`} targetKind="TASK" targetId={id} embedded
+      onNavigationStateChange={setAssistNavigation}
+      proposalActionHost={proposalActionHost}
+      externalReadBlockedReason={loading ? "正在核对当前任务事实，旧事实、资料与提案暂时隐藏；读取成功后才能发送新命令。"
+        : error ? "当前任务事实读取失败，旧事实、资料与提案已隐藏；请先核对原命令或清空未发送输入，再重新读取。" : null}
+      preferredSkillId={kind === "definition" ? "task-to-execution-contract" : "verification-plan"}
+      onTargetChanged={() => void refreshAcceptedFacts()} />}
+    {task && factsReadable && <>
       {task.projectId && <p className="helper-text" data-testid="task-skill-project-status">{projectReadError
         ? `Project 状态无法核对：${projectReadError}；本页仍可阅读已取得的 Task 事实。`
         : projectArchivedAt === undefined ? "正在核对所属 Project 的归档状态…"
           : projectArchivedAt !== null ? "项目已归档；这里只保留已接受事实和历史证据的阅读入口。"
             : "所属 Project 正在进行中。"}</p>}
-      <section className="surface-panel" data-testid="live-task-accepted-facts"><h2>已接受的当前事实</h2>
+      <details className="surface-panel" data-testid="live-task-accepted-facts"><summary>已接受的当前事实 · {task.title} · 任务 v{task.revision} / 验收 v{task.acceptance.acceptanceRevision}</summary>
         <p className="metadata-row"><strong>{task.title}</strong>
           <span aria-hidden="true"> · </span>任务 v{task.revision}
           <span aria-hidden="true"> · </span>{taskStatusLabels[task.status]}
@@ -89,16 +134,22 @@ export default function LiveTaskSkillFactsView({ client, kind }: {
                 task.acceptance.expectedOutputs.artifacts.join("、") : "未声明"}。当前 Task 单读未提供输入资料绑定；不从示例提案补造字段。`
           : "验收条件中的方式是当前 Task 事实，不等于已应用的 CheckPlan 或检查结果。"}</p>
         <Link className="text-link" to={`/tasks/${id}`}>打开任务详情</Link>
-      </section>
-      <section className="surface-panel" data-testid="live-task-skill-gap"><h2>Skill 建议</h2>
-        <p>{kind === "definition" ? "当前没有针对这项已有任务、可在此确认的任务定义 Skill 提案。"
-          : "此页不直接接受建议；如有服务端合并提案，请在该任务的 Assist 会话中确认。"}</p>
+      </details>
+    </>}
+    </div>
+      <aside className="review-rail task-skill-confirmation" data-testid="task-skill-confirmation" aria-label="确认与来源" hidden={!task || !factsReadable}>
+      <h2>{kind === "definition" ? "确认任务定义" : "先确认检查方式"}</h2>
+      <p className="page-lede">{kind === "definition" ? "核对任务目标、预期结果与验收条件。" : "核对每项检查方式，再确认服务端合并方案。"}</p>
+      <div ref={setProposalActionHost} className="task-skill-action-host" />
+      {task && factsReadable && <div className="rail-content">
+      <details className="surface-panel" data-testid="live-task-skill-gap"><summary>来源与建议</summary>
+        <p>{kind === "definition" ? "在本页建议与确认区生成任务定义提案，逐项核对目标、结果和验收条件。"
+          : "在本页建议与确认区生成验收方案，核对保留条件、新增检查和缺少的能力。"}</p>
+        <p className="helper-text">模型文字建议与可接受的服务端合并提案分别展示；接受前会重新核对 Task 与验收版本。</p>
         <p className="helper-text">Assist 可讨论当前任务；进入会话或发送消息不会修改任务、验收标准、检查方案或执行权。</p>
         <Link className="text-link" to={`/tasks/${id}?skill=assist`}>打开此任务的 Assist</Link>
-      </section>
-      {kind === "verification" && <TaskCheckPlanPreview key={`${id}:${reload}`} client={client} taskId={id}
-        taskRevision={task.revision} acceptanceRevision={task.acceptance.acceptanceRevision} />}
-      <section className="surface-panel" data-testid="live-task-verification-source"><h2>确切 Run / Verification 来源</h2>
+      </details>
+      <details className="surface-panel" data-testid="live-task-verification-source"><summary>确切 Run / Verification 来源</summary>
         {task.executorRunId ? <><p>当前 Task 指向 Run <Link className="inline-link" to={`/runs/${task.executorRunId}`}>{task.executorRunId}</Link>。</p>
           {traceLoading && <p role="status">正在读取该 Run 的验证证据…</p>}
           {traceError && <p className="action-error" role="alert">{traceError}</p>}
@@ -110,7 +161,9 @@ export default function LiveTaskSkillFactsView({ client, kind }: {
             : <p className="helper-text">该 Run 的 Trace 未记录验证会话。</p>)}
           <p className="helper-text">Run Trace 是历史证据；版本号或 PASS 不单独证明当前验收仍有效，也不表示任务已完成。</p></>
           : <p className="helper-text">当前 Task 没有指向 Run；本接口不提供历史 Run 列表，不能由任务状态推断曾运行过验证。</p>}
-      </section>
-    </>}</div></div>
+      </details>
+      </div>}
+      </aside>
+    </div>
   </section>;
 }

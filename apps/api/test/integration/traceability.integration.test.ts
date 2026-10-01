@@ -244,6 +244,8 @@ test('Trace exposes only failed Provider categories and preserves each model inv
     assert.equal(row.provider, identity.provider);
     assert.equal(row.model, identity.model);
     assert.equal(row.usage_output_tokens, null);
+    assert.equal((row as unknown as Record<string, unknown>).first_text_delta_at, null);
+    assert.equal((row as unknown as Record<string, unknown>).first_preview_persisted_at, null);
     assert.equal(row.usage_input_tokens, row.provider_request_id === 'request-0' ? 7 : null);
     assert.equal(Object.hasOwn(row, 'error_kind'), false);
     assert.equal(Object.hasOwn(row, 'config_fingerprint'), false);

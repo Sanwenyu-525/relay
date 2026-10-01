@@ -48,6 +48,27 @@ function state() { return { connections: [] as Record<string, unknown>[], polici
   archivedAt: null as string | null }; }
 
 describe("项目连接与 Permission 设置", () => {
+  it("连接入口按真实项目名称选择并保留分页，不要求复制项目 ID", async () => {
+    connect(); const data = state(); const nextId = "88888888-8888-4888-8888-888888888888";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if (init?.method === "POST") throw new Error("选择项目不提交命令");
+      if (path === "/projects?status=active") return response(200, { items: [{ id: projectId,
+        title: "论文项目", project_type: "THESIS", phase_key: "WRITING", revision: "2", state_revision: "1", next_action_task_id: null,
+        archive_status: "ACTIVE", archived_at: null, created_at: created, updated_at: created }], next_cursor: "page2" });
+      if (path === "/projects?status=active&cursor=page2") return response(200, { items: [{ id: nextId,
+        title: "开发项目", project_type: "DEVELOPMENT", phase_key: "BUILD", revision: "1", state_revision: "1", next_action_task_id: null,
+        archive_status: "ACTIVE", archived_at: null, created_at: created, updated_at: created }], next_cursor: null });
+      return baseGet(path, data) ?? response(200, { items: [], next_cursor: null });
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench("/connections"); unmount = mounted.unmount;
+    expect(mounted.wrapper.get(`a[href="/projects/${projectId}/connections"]`).text()).toBe("论文项目");
+    await mounted.wrapper.findAll("button").find((button) => button.text() === "继续加载项目")!.trigger("click"); await flush();
+    expect(mounted.wrapper.get(`a[href="/projects/${nextId}/connections"]`).text()).toBe("开发项目");
+    await mounted.wrapper.get(`a[href="/projects/${projectId}/connections"]`).trigger("click"); await flush();
+    expect(mounted.router.currentRoute.value.path).toBe(`/projects/${projectId}/connections`);
+    expect(fetchMock.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET")).toBe(true);
+  });
   it("归档项目深链只读连接和 View，禁止新的配置命令", async () => {
     connect(); const data = state(); data.archivedAt = created;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

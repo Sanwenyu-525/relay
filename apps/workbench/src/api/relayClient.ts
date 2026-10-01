@@ -853,7 +853,8 @@ export interface RelayRunTrace {
     readonly providerErrorKind: RelayModelVerifyErrorCategory | null; readonly providerRequestId: string | null;
     readonly inputSha256: string | null; readonly readOperationId: string | null;
     readonly readInvocationId: string | null; readonly inputTokens: number | null; readonly outputTokens: number | null;
-    readonly startedAt: string; readonly settledAt: string | null }[];
+    readonly startedAt: string; readonly settledAt: string | null;
+    readonly firstTextDeltaAt: string | null; readonly firstPreviewPersistedAt: string | null }[];
   readonly manifests: readonly { readonly id: string; readonly stepId: string | null;
     readonly builderVersion: string; readonly sha256: string; readonly createdAt: string;
     readonly sources: readonly { readonly kind: string; readonly sourceRef: string | null;
@@ -960,6 +961,17 @@ export interface RelayMockGatewayAction {
   readonly resourceId: string;
   readonly target: string;
   readonly content: string;
+}
+
+export interface RelayFileReadAction {
+  readonly connectionId: string;
+  readonly resourceId: string;
+  readonly relativeTarget: string;
+}
+
+export interface RelayWebFetchAction {
+  readonly connectionId: string;
+  readonly url: string;
 }
 
 export interface RelayGatewayConnection {
@@ -1834,6 +1846,8 @@ export class RelayApiClient {
     readonly commandId: string;
     readonly expectedTaskRevision: DecimalRevision;
     readonly mockGatewayAction?: RelayMockGatewayAction;
+    readonly fileReadAction?: RelayFileReadAction;
+    readonly webFetchAction?: RelayWebFetchAction;
     readonly contextSources?: readonly RelayAssistSourceRef[];
   }): Promise<RelayDelegateSubmission> {
     const body = await this.request(this.workspacePath(`/tasks/${encodeURIComponent(input.taskId)}/delegations`), {
@@ -1845,6 +1859,15 @@ export class RelayApiClient {
           resource_id: input.mockGatewayAction.resourceId,
           target: input.mockGatewayAction.target,
           content: input.mockGatewayAction.content
+        } }),
+        ...(input.fileReadAction === undefined ? {} : { file_read_action: {
+          connection_id: input.fileReadAction.connectionId,
+          resource_id: input.fileReadAction.resourceId,
+          relative_target: input.fileReadAction.relativeTarget
+        } }),
+        ...(input.webFetchAction === undefined ? {} : { web_fetch_action: {
+          connection_id: input.webFetchAction.connectionId,
+          url: input.webFetchAction.url
         } }) })
     }, 202);
     try {
@@ -2928,7 +2951,9 @@ function runTraceFrom(value: unknown): RelayRunTrace {
         readInvocationId: nullableString(call, "read_invocation_id", "trace model call"),
         inputTokens: nullableInteger(call, "usage_input_tokens", "trace model call"),
         outputTokens: nullableInteger(call, "usage_output_tokens", "trace model call"),
-        startedAt: string(call, "started_at", "trace model call"), settledAt: nullableString(call, "settled_at", "trace model call") }; }),
+        startedAt: string(call, "started_at", "trace model call"), settledAt: nullableString(call, "settled_at", "trace model call"),
+        firstTextDeltaAt: optionalString(call, "first_text_delta_at"),
+        firstPreviewPersistedAt: optionalString(call, "first_preview_persisted_at") }; }),
     manifests: array(row, "manifests", "run trace").map((value) => { const manifest = object(value, "trace manifest");
       return { id: string(manifest, "id", "trace manifest"), stepId: nullableString(manifest, "step_id", "trace manifest"),
         builderVersion: string(manifest, "builder_version", "trace manifest"), sha256: string(manifest, "sha256", "trace manifest"),

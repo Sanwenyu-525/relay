@@ -132,8 +132,9 @@ test('migrate entry reports the applied migrations without repeating them', asyn
       '0044_project_continuation_points',
       '0045_continuation_point_ref_target_guard',
       '0046_assist_provider_error_kind',
+      '0047_m04_model_call_first_output',
     ]);
-  assert.equal(payload.ledger_rows, 46);
+  assert.equal(payload.ledger_rows, 47);
 });
 
 test('migrate entry fails explicitly without a migration connection', async () => {

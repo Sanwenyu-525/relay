@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Info, RotateCcw, ShieldCheck } from "lucide-react";
 import type { RelayModelPortStatus, RelayModelVerificationState,
-  RelayModelVerifyResult } from "../api/relayClient";
+  RelayModelVerifyResult, RelayViewKind } from "../api/relayClient";
 import PackCatalogPanel from "../components/PackCatalogPanel";
 import { describeLiveError } from "../lib/liveErrors";
 import { modelErrorGuides } from "../lib/modelErrorGuides";
 import { useRelayConnection } from "../lib/relayConnection";
+import { saveDisplayPreferences, useDisplayPreferences } from "../lib/displayPreferences";
+import { handleTabListKeyDown } from "../lib/tabNavigation";
 import "./SettingsView.css";
 
 const providerLabels: Record<RelayModelPortStatus["provider"], string> = {
@@ -133,7 +135,7 @@ function ServiceStateCard({ loading, error, status, verification, verifying, onV
               ? "（诊断：API 进程环境未配置真实模型。）"
               : "") },
   ];
-  return <section className="surface-panel settings-card" data-testid="service-state">
+  return <section id="settings-model" className="surface-panel settings-card" data-testid="service-state">
     <h2>连接与模型状态</h2>
     <p className="helper-text">四个状态分别回答四个问题：连上了吗、配置了吗、验证过了吗、Worker 能执行吗。
       「连接验证通过」只表示固定短文本调用成功，不等于真实任务执行成功。</p>
@@ -198,6 +200,66 @@ function VerificationDetailCard({ verification, verifying }: {
   </section>;
 }
 
+const timeZoneOptions = [
+  ["Asia/Shanghai", "Asia/Shanghai（北京时间）"],
+  ["Asia/Hong_Kong", "Asia/Hong_Kong（香港时间）"],
+  ["Asia/Tokyo", "Asia/Tokyo（日本时间）"],
+  ["Europe/London", "Europe/London（伦敦时间）"],
+  ["America/New_York", "America/New_York（纽约时间）"],
+  ["America/Los_Angeles", "America/Los_Angeles（洛杉矶时间）"],
+  ["UTC", "UTC（协调世界时）"]
+] as const;
+
+function DisplayPreferencesCard() {
+  const preferences = useDisplayPreferences();
+  const [timeZone, setTimeZone] = useState(preferences.timeZone);
+  const [defaultWorkbench, setDefaultWorkbench] = useState<RelayViewKind>(preferences.defaultWorkbench ?? "general");
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const changed = () => { setSaved(false); setError(null); };
+
+  return <section id="settings-preferences" className="settings-basic" aria-labelledby="settings-basic-title">
+    <h2 id="settings-basic-title">基本设置</h2>
+    <p className="settings-basic-intro">设置时区、界面外观和默认工作台，定制你的工作环境。</p>
+    <form onSubmit={(event) => {
+      event.preventDefault(); setError(null); setSaved(false);
+      try { saveDisplayPreferences({ timeZone, defaultWorkbench }); setSaved(true); }
+      catch { setError("设置未保存：本设备存储不可写，请检查浏览器或应用的存储权限后重试。"); }
+    }}>
+      <div className="settings-field">
+        <label htmlFor="settings-timezone">界面时区</label>
+        <select id="settings-timezone" data-testid="settings-timezone" value={timeZone}
+          aria-describedby="settings-timezone-help" onChange={(event) => { setTimeZone(event.target.value); changed(); }}>
+          {!timeZoneOptions.some(([value]) => value === timeZone) && <option value={timeZone}>{timeZone}</option>}
+          {timeZoneOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+        <p id="settings-timezone-help" className="helper-text">用于顶栏日期显示，不改变已保存的稍后处理日期。</p>
+      </div>
+      <div className="settings-field">
+        <label htmlFor="settings-appearance">界面外观</label>
+        <select id="settings-appearance" value="light" disabled aria-describedby="settings-appearance-help">
+          <option value="light">浅色</option>
+        </select>
+        <p id="settings-appearance-help" className="helper-text">当前仅支持浅色主题。</p>
+      </div>
+      <div className="settings-field">
+        <label htmlFor="settings-default-workbench">默认工作台</label>
+        <select id="settings-default-workbench" data-testid="settings-default-workbench" value={defaultWorkbench}
+          aria-describedby="settings-workbench-help" onChange={(event) => { setDefaultWorkbench(event.target.value as RelayViewKind); changed(); }}>
+          <option value="general">通用</option><option value="thesis">论文</option><option value="development">开发</option>
+        </select>
+        <p id="settings-workbench-help" className="helper-text">打开项目工作台时使用；项目已保存的默认视图优先，可随时在工作台内切换。</p>
+      </div>
+      <div className="settings-save-actions">
+        <button type="submit" className="primary-button" data-testid="settings-save">保存设置</button>
+        {saved && <p role="status" className="settings-save-result">设置已保存，仅在本设备生效。</p>}
+        {error && <p role="alert" className="action-error">{error}</p>}
+      </div>
+      <p className="settings-device-note helper-text">显示偏好仅保存在本设备。</p>
+    </form>
+  </section>;
+}
+
 export default function SettingsView() {
   const connection = useRelayConnection();
   const client = connection.mode === "live" ? connection.client : null;
@@ -208,6 +270,7 @@ export default function SettingsView() {
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const requestVersion = useRef(0);
+  const [group, setGroup] = useState<"basic" | "model" | "execution" | "workbench">("basic");
 
   const refresh = useCallback(() => {
     const request = ++requestVersion.current;
@@ -253,13 +316,20 @@ export default function SettingsView() {
   };
 
   return <section className="settings-page" data-testid="settings-page">
-    <p className="eyebrow">工作空间</p>
-    <h1>设置</h1>
-    <p className="page-lede">这里汇总当前服务实例的只读状态；业务连接、权限与凭据仍在各自的页面管理。</p>
-    {client === null ? <>
+    <header className="settings-heading"><h1>设置</h1><p className="page-lede">本设备偏好与服务配置</p></header>
+    <div className="settings-layout">
+      <nav className="settings-navigation" role="tablist" aria-label="设置分组" onKeyDown={handleTabListKeyDown}>
+        {([['basic', '基本设置'], ['model', 'AI 设置'], ['execution', '执行策略'], ['workbench', '工作台']] as const)
+          .map(([value, label]) => <button key={value} type="button" data-testid={`settings-group-${value}`}
+            role="tab" id={`settings-tab-${value}`} aria-controls={`settings-panel-${value}`} aria-selected={group === value}
+            tabIndex={group === value ? 0 : -1} onClick={() => setGroup(value)}>{label}</button>)}
+      </nav>
+      <div className="settings-content">
+      <div role="tabpanel" id="settings-panel-basic" aria-labelledby="settings-tab-basic" hidden={group !== "basic"}><DisplayPreferencesCard /></div>
+      <div role="tabpanel" id="settings-panel-model" aria-labelledby="settings-tab-model" hidden={group !== "model"}>{client === null ? <>
       <div className="warning-callout" role="status">
       当前是示例数据预览，没有真实服务实例状态。<Link to="/projects">打开项目</Link>，或通过顶栏「数据来源」连接本机 API。</div>
-      <PackCatalogPanel /></> : <>
+      </> : <>
       {loading && <p role="status">正在读取服务实例配置状态…</p>}
       {error && <div className="action-error" role="alert"><p>读取失败：{error}</p>
         <button className="secondary-button" type="button"
@@ -272,7 +342,6 @@ export default function SettingsView() {
       {status && <ModelPortCard status={status} />}
       {status?.configured === true && <VerificationDetailCard verification={verification}
         verifying={verifying} />}
-      <PackCatalogPanel />
       <section className="surface-panel settings-card">
         <h2>相关入口</h2>
         <ul className="settings-links">
@@ -280,18 +349,24 @@ export default function SettingsView() {
           <li><Link to="/projects">项目</Link>：项目设置内可管理默认工作台视图与 Pack 清单。</li>
         </ul>
       </section>
-    </>}
-      <section className="surface-panel settings-card">
-        <h2>偏好与暂不可用项</h2>
-        <p className="helper-text">本页只呈现当前服务实例已定义、且可安全只读的事实。以下偏好尚无对应的服务端契约，明确标记为暂不可用，不提供假开关，也不新建万能 settings 保存接口。</p>
+    </>}</div>
+      <div role="tabpanel" id="settings-panel-workbench" aria-labelledby="settings-tab-workbench" hidden={group !== "workbench"}>{group === "workbench" && <div id="settings-packs"><PackCatalogPanel /></div>}</div>
+      <div role="tabpanel" id="settings-panel-execution" aria-labelledby="settings-tab-execution" hidden={group !== "execution"}><section className="surface-panel settings-card">
+        <h2>执行策略</h2>
+        <p className="helper-text">执行连接与权限按项目管理，通知偏好尚无写接口。</p>
         <dl className="settings-definition-list">
-          <div><dt>深色主题 / 主题切换</dt><dd><span className="status-chip status-chip--neutral">暂不可用</span> 当前设计系统只定义浅色实现，未决定深色主题，不提供切换开关。</dd></div>
           <div><dt>界面语言</dt><dd><span className="status-chip status-chip--neutral">暂不可用</span> 尚无语言偏好接口。</dd></div>
           <div><dt>通知偏好</dt><dd><span className="status-chip status-chip--neutral">暂不可用</span>
             人工介入提醒规则已确认（工作台 11.5）：仅提醒必须由用户介入的事项；Relay 运行期间应用内保留待处理标记，窗口外另发 Windows 通知；同一事项只提醒一次；短时间多个事项合并为一条通知。本页暂无写接口，不提供假开关。</dd></div>
-          <div><dt>工作空间级显示偏好持久化</dt><dd><span className="status-chip status-chip--neutral">暂不可用</span> 没有对应的写接口；项目级「默认工作台视图」在项目设置内按 ViewConfiguration 契约管理。</dd></div>
         </dl>
-        <p className="helper-text"><Info aria-hidden="true" />界面时区只在「今日」页作为显示核对，不改变 Later 的存储语义；切换通用/论文/开发视图只改展示，不改变活动 Run 的契约。两者均不在本页写入。</p>
-      </section>
+        <Link className="inline-link" to="/connections">查看连接与权限</Link>
+      </section></div>
+      <details className="settings-explanation"><summary>显示与执行说明</summary>
+        <p>切换工作台只改变展示，不改变活动任务的执行约定。</p>
+        <p>界面时区用于显示日期和时间，不会改写已保存的稍后处理日期。</p>
+        <p>AI 与执行权限在对应设置中单独管理。</p>
+      </details>
+      </div>
+    </div>
   </section>;
 }

@@ -20,20 +20,20 @@ describe("侧边栏拖拽调宽", () => {
     const mounted = await mountWorkbench("/today"); unmount = mounted.unmount;
     const handle = mounted.wrapper.get('[data-testid="sidebar-resize-handle"]');
     expect(handle.attributes("role")).toBe("separator");
-    expect(handle.attributes("aria-valuenow")).toBe("216");
+    expect(handle.attributes("aria-valuenow")).toBe("224");
     expect(frameStyleVar()).toBe("");
 
     await pressKey(handle.element!, "ArrowRight"); await flush();
-    expect(handle.attributes("aria-valuenow")).toBe("232");
-    expect(frameStyleVar()).toBe("232px");
-    expect(window.localStorage.getItem("relay.workbench.sidebarWidthPx")).toBe("232");
+    expect(handle.attributes("aria-valuenow")).toBe("240");
+    expect(frameStyleVar()).toBe("240px");
+    expect(window.localStorage.getItem("relay.workbench.sidebarWidthPx")).toBe("240");
 
     await pressKey(handle.element!, "ArrowLeft"); await pressKey(handle.element!, "ArrowLeft"); await flush();
-    expect(handle.attributes("aria-valuenow")).toBe("200");
-    expect(window.localStorage.getItem("relay.workbench.sidebarWidthPx")).toBe("200");
+    expect(handle.attributes("aria-valuenow")).toBe("208");
+    expect(window.localStorage.getItem("relay.workbench.sidebarWidthPx")).toBe("208");
 
     handle.element!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true })); await flush();
-    expect(handle.attributes("aria-valuenow")).toBe("216");
+    expect(handle.attributes("aria-valuenow")).toBe("224");
     expect(frameStyleVar()).toBe("");
     expect(window.localStorage.getItem("relay.workbench.sidebarWidthPx")).toBeNull();
   });

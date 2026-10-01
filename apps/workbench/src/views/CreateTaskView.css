@@ -1,0 +1,70 @@
+.task-project-manual {
+  padding-block: var(--relay-space-3);
+  border-block: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.task-project-manual > summary {
+  cursor: pointer;
+  color: var(--relay-color-text-muted);
+}
+
+.task-project-manual[open] > .field {
+  margin-top: var(--relay-space-3);
+}
+
+@media (min-width: 64rem) {
+  .create-task-page .create-form > .field {
+    display: grid;
+    grid-template-columns: calc(4 * var(--relay-space-8)) minmax(0, 1fr);
+    column-gap: var(--relay-space-4);
+    align-items: start;
+  }
+
+  .create-task-page .create-form > .field > .field-label {
+    grid-column: 1;
+    grid-row: 1;
+    padding-top: var(--relay-space-2);
+  }
+
+  .create-task-page .create-form > .field > input,
+  .create-task-page .create-form > .field > select,
+  .create-task-page .create-form > .field > textarea {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+  }
+
+  .create-task-page .create-form > .field > .field-hint,
+  .create-task-page .create-form > .field > .field-error,
+  .create-task-page .create-form > .field > .field-counter {
+    grid-column: 2;
+  }
+
+  .create-task-page .create-form > .field > .field-counter {
+    justify-self: end;
+  }
+
+  .create-task-page .create-form > fieldset.field {
+    display: block;
+    position: relative;
+    padding-inline-start: calc(4 * var(--relay-space-8) + var(--relay-space-4));
+  }
+
+  .create-task-page .create-form > fieldset.field > legend {
+    position: absolute;
+    inset-inline-start: 0;
+    top: 0;
+    width: calc(4 * var(--relay-space-8));
+  }
+
+  .create-task-page .choice-list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--relay-space-4);
+  }
+
+  .create-task-page fieldset.field > .field-hint {
+    display: block;
+    margin-top: var(--relay-space-2);
+  }
+}

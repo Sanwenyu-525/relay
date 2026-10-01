@@ -4,6 +4,7 @@ import type { JsonObject, JsonValue } from '../infrastructure/json.js';
 import { isPostgresError, POSTGRES_ERROR_CODES } from '../infrastructure/postgres-error.js';
 import { computePayloadHash } from '../receipt/payload-hash.js';
 import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
+import { isDrainControlCommand, readAdmission, requireNormalAdmission } from './maintenance-admission.js';
 
 /**
  * 命令回执与幂等执行基础。
@@ -72,6 +73,17 @@ export async function runIdempotentCommand<TResult extends CommandResult>(
         return resolveExistingReceipt<TResult>(existing, payloadHash);
       }
 
+      // Gate first, before all business row locks. Reread after waiting because
+      // the original request may have committed while maintenance held the gate.
+      const gate = await readAdmission(repositories, 'share');
+      const committedWhileWaiting = await repositories.receipts.findReceipt({
+        scopeKey: request.scopeKey, commandId: request.commandId,
+      });
+      if (committedWhileWaiting !== undefined) {
+        return resolveExistingReceipt<TResult>(committedWhileWaiting, payloadHash);
+      }
+      if (!isDrainControlCommand(request.commandType)) requireNormalAdmission(gate);
+
       const result = await request.execute(repositories);
       const receipt = await repositories.receipts.insertReceipt({
         scopeKey: request.scopeKey,
@@ -104,7 +116,7 @@ export async function runIdempotentCommand<TResult extends CommandResult>(
   }
 }
 
-function resolveExistingReceipt<TResult extends CommandResult>(
+export function resolveExistingReceipt<TResult extends CommandResult>(
   receipt: CommandReceiptRow,
   payloadHash: Buffer,
 ): CommandOutcome<TResult> {

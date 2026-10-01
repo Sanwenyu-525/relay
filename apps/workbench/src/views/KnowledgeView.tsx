@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import ProjectNav from "../components/ProjectNav";
+import AppDialog from "../components/AppDialog";
 import KnowledgeReader from "../components/KnowledgeReader";
+import SafeMarkdown from "../components/SafeMarkdown";
 import ProjectKnowledgeGuide from "../components/ProjectKnowledgeGuide";
 import WebImportPanel from "../components/WebImportPanel";
 import {
@@ -13,6 +15,8 @@ import {
 } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
+import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
+import { handleTabListKeyDown } from "../lib/tabNavigation";
 import "./KnowledgeView.css";
 
 type InformationRow = RelayKnowledge | RelayMemory | RelayDecision | RelayRule;
@@ -71,6 +75,10 @@ export default function KnowledgeView() {
   const client = connection.client;
   const live = connection.mode === "live";
   const [kind, setKind] = useState<RelayInformationKind>(routeKind);
+  const tabId = useId();
+  const tabListRef = useRef<HTMLElement>(null);
+  const libraryRef = useRef<HTMLDetailsElement>(null);
+  const focusKindAfterRead = useRef<RelayInformationKind | null>(null);
   const [rows, setRows] = useState<readonly InformationRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(routeItem);
   const [selected, setSelected] = useState<InformationRow | null>(null);
@@ -126,6 +134,32 @@ export default function KnowledgeView() {
   const [enforcement, setEnforcement] = useState<RelayRuleEnforcement>("HUMAN");
   const [method, setMethod] = useState("");
   const [targetSpec, setTargetSpec] = useState("");
+  const [draftTransition, setDraftTransition] = useState<(() => void) | null>(null);
+  const draftBaseline = useRef<string | null>(null);
+  const captureDraftBaseline = useRef(false);
+  const draftSignature = JSON.stringify([title, text, sourceKind, artifactVersionId, captureConfirmed,
+    mediaType, confirmed, expiresAt, choice, rationale, alternatives, costs, replacementId,
+    scope, scopeId, ruleKey, statement, strength, enforcement, method, targetSpec]);
+  const navigationState = useRef({ dirty: false, submitting });
+  navigationState.current = { dirty: live && draftBaseline.current !== null && draftBaseline.current !== draftSignature, submitting };
+  const draftGuard = useRef<DraftGuard>({
+    hasUnsavedChanges: () => navigationState.current.dirty || navigationState.current.submitting || pendingRef.current !== null,
+    pendingCommandId: () => pendingRef.current?.id ?? null,
+    discard: () => {
+      if (pendingRef.current !== null || navigationState.current.submitting) return;
+      navigationState.current.dirty = false; clearDraft(); setFormOpen(false);
+    }
+  });
+  useEffect(() => { setDraftGuard(draftGuard.current); return () => clearDraftGuard(draftGuard.current); }, []);
+  useEffect(() => {
+    if (captureDraftBaseline.current) { draftBaseline.current = draftSignature; captureDraftBaseline.current = false; }
+  }, [draftSignature, formOpen]);
+
+  function requestDraftTransition(proceed: () => void) {
+    if (pendingRef.current !== null || submitting) return;
+    if (navigationState.current.dirty) setDraftTransition(() => proceed);
+    else proceed();
+  }
 
   const selectedKnowledge = kind === "KNOWLEDGE" ? selected as RelayKnowledge | null : null;
   const selectedMemory = kind === "MEMORY" ? selected as RelayMemory | null : null;
@@ -185,6 +219,7 @@ export default function KnowledgeView() {
   }, [client, writeTargetKey, gateReload]);
 
   function clearDraft() {
+    draftBaseline.current = null; captureDraftBaseline.current = false;
     previewReadVersion.current++;
     setKnowledgeDraftBase(null);
     setTitle(""); setText(""); setSourceKind("NOTE"); setArtifactVersionId("");
@@ -243,6 +278,7 @@ export default function KnowledgeView() {
   useEffect(() => {
     contextVersion.current++;
     readVersion.current++;
+    focusKindAfterRead.current = null;
     pendingRef.current = null;
     setPendingCommand(null); setSubmitting(false); setKind(routeKind); setSelectedId(routeItem); setSelected(null); setRows([]);
     setActionError(null); setActionMessage(null); setFormOpen(false);
@@ -283,44 +319,59 @@ export default function KnowledgeView() {
 
   function switchKind(next: RelayInformationKind) {
     if (pendingRef.current !== null || kind === next) return;
-    setKind(next); setSelectedId(null); setSelected(null); setRows([]); setFormOpen(false);
-    setActionError(null); setActionMessage(null); clearDraft();
-    void load(next, null);
+    const focusedTab = tabListRef.current?.contains(document.activeElement) ?? false;
+    if (focusedTab && navigationState.current.dirty)
+      tabListRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus();
+    requestDraftTransition(() => {
+      if (focusedTab) focusKindAfterRead.current = next;
+      setKind(next); setSelectedId(null); setSelected(null); setRows([]); setFormOpen(false);
+      setActionError(null); setActionMessage(null); clearDraft();
+      void load(next, null);
+    });
   }
 
   function selectRow(idToSelect: string) {
     if (pendingRef.current !== null) return;
-    setSelectedId(idToSelect); setFormOpen(false); setActionError(null);
-    void load(kind, idToSelect);
+    requestDraftTransition(() => {
+      setSelectedId(idToSelect); setFormOpen(false); setActionError(null);
+      clearDraft();
+      void load(kind, idToSelect);
+    });
   }
 
   function openSearchItem(item: RelaySearchItem) {
     if (pendingRef.current !== null) return;
-    if (item.type === "KNOWLEDGE") {
-      setRouteQuery((current) => {
-        const next = new URLSearchParams(current);
-        next.set("kind", "KNOWLEDGE"); next.set("item", item.id); next.set("version", item.version);
-        return next;
-      });
-      return;
-    }
-    setKind(item.type); setSelected(null); setRows([]); setFormOpen(false); clearDraft();
-    setSelectedId(item.id);
-    void load(item.type, item.id);
+    requestDraftTransition(() => {
+      if (item.type === "KNOWLEDGE") {
+        setRouteQuery((current) => {
+          const next = new URLSearchParams(current);
+          next.set("kind", "KNOWLEDGE"); next.set("item", item.id); next.set("version", item.version);
+          return next;
+        });
+        return;
+      }
+      setKind(item.type); setSelected(null); setRows([]); setFormOpen(false); clearDraft();
+      setSelectedId(item.id);
+      void load(item.type, item.id);
+    });
   }
 
   function openForm(asRevision: boolean) {
     if (pendingRef.current !== null) return;
-    clearDraft(); setRevisionMode(asRevision); setFormOpen(true); setActionError(null);
-    if (asRevision && kind === "KNOWLEDGE" && selectedKnowledge !== null)
-      setKnowledgeDraftBase({ id: selectedKnowledge.id, revision: selectedKnowledge.revision,
-        projectId: selectedKnowledge.projectId });
-    if (asRevision && selectedMemory !== null) { setTitle(selectedMemory.title); setText(selectedMemory.text); }
-    if (asRevision && selectedRule !== null) {
-      setRuleKey(selectedRule.ruleKey); setStatement(selectedRule.statement);
-      setStrength(selectedRule.strength); setEnforcement(selectedRule.enforcement);
-      setMethod(selectedRule.method ?? ""); setTargetSpec(JSON.stringify(selectedRule.targetSpec, null, 2));
-    }
+    if (draftBaseline.current !== null && revisionMode === asRevision) { setFormOpen(true); return; }
+    requestDraftTransition(() => {
+      clearDraft(); setRevisionMode(asRevision); setFormOpen(true); setActionError(null);
+      captureDraftBaseline.current = true;
+      if (asRevision && kind === "KNOWLEDGE" && selectedKnowledge !== null)
+        setKnowledgeDraftBase({ id: selectedKnowledge.id, revision: selectedKnowledge.revision,
+          projectId: selectedKnowledge.projectId });
+      if (asRevision && selectedMemory !== null) { setTitle(selectedMemory.title); setText(selectedMemory.text); }
+      if (asRevision && selectedRule !== null) {
+        setRuleKey(selectedRule.ruleKey); setStatement(selectedRule.statement);
+        setStrength(selectedRule.strength); setEnforcement(selectedRule.enforcement);
+        setMethod(selectedRule.method ?? ""); setTargetSpec(JSON.stringify(selectedRule.targetSpec, null, 2));
+      }
+    });
   }
 
   async function readArtifactPreview() {
@@ -365,7 +416,7 @@ export default function KnowledgeView() {
       const resultId = envelope.commandId === command.id ? validResult(envelope.result, command) : null;
       if (resultId === null) throw new RelayTransportError("命令回执无法核对。");
       pendingRef.current = null; setPendingCommand(null); setSelectedId(resultId);
-      setActionMessage("命令已提交；正在读取服务端最新资料。"); setFormOpen(false);
+      setActionMessage("命令已提交；正在读取服务端最新资料。"); setFormOpen(false); clearDraft();
       await load(kind, resultId);
     } catch (caught) {
       if (context !== contextVersion.current) return;
@@ -495,7 +546,7 @@ export default function KnowledgeView() {
         setActionError("原命令回执类型或目标不匹配，结果仍未确定。请保留 command_id 核对。"); return;
       }
       pendingRef.current = null; setPendingCommand(null); setSelectedId(resultId); setActionError(null);
-      setActionMessage("已核对原命令回执；正在读取最新资料。"); setFormOpen(false);
+      setActionMessage("已核对原命令回执；正在读取最新资料。"); setFormOpen(false); clearDraft();
       await load(kind, resultId);
     } catch (caught) {
       if (context !== contextVersion.current) return;
@@ -508,30 +559,54 @@ export default function KnowledgeView() {
   }
 
   const reading = selectedKnowledge !== null && client !== null;
+  useEffect(() => {
+    if (focusKindAfterRead.current !== kind) return;
+    if (document.activeElement !== document.body && !tabListRef.current?.contains(document.activeElement)) {
+      focusKindAfterRead.current = null; return;
+    }
+    if (reading && libraryRef.current) libraryRef.current.open = true;
+    tabListRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus();
+    if (!loading && !refreshing) focusKindAfterRead.current = null;
+  }, [kind, reading, loading, refreshing]);
+  const capturing = formOpen && kind === "KNOWLEDGE";
+  const captureProjectId = revisionMode ? knowledgeDraftBase?.projectId : projectId;
+  const captureTargetLabel = revisionMode && knowledgeDraftBase === null ? "修订目标待重新核对"
+    : captureProjectId ? `项目 ${captureProjectId}` : "工作空间";
+  const artifactPreviewMatches = artifactPreview !== null && artifactPreview.id === artifactVersionId.trim();
+  const writeGateFeedback = writeBlockedReason && <p className="disabled-reason" data-testid="knowledge-project-write-blocked">{writeBlockedReason} <button type="button" className="text-button" onClick={() => setGateReload((value) => value + 1)}>重读项目状态</button></p>;
+  const pendingReceipt = pendingCommand && <div className="surface-panel" data-testid="knowledge-pending-receipt">
+    <h2>提交结果待核对</h2><p>原 command_id：{pendingCommand.id}。查询原命令回执前不再次提交。</p>
+    <button type="button" className="secondary-button" data-testid="knowledge-check-receipt" disabled={submitting} onClick={() => { void checkReceipt(); }}>核对原命令回执</button>
+  </div>;
+  const saveActions = <div className="knowledge-actions"><button type="submit" className="primary-button" data-testid="knowledge-save" disabled={submitting || pendingCommand !== null || writeBlockedReason !== null || (kind === "MEMORY" && !confirmed) || (capturing && sourceKind === "ARTIFACT_VERSION" && (!artifactPreviewMatches || !captureConfirmed))}>{submitting ? "正在提交" : capturing ? revisionMode ? "确认收录新版本" : "确认收录" : `保存${revisionMode ? "新版本" : ""}`}</button>
+    <button type="button" className="secondary-button" data-testid="knowledge-capture-cancel" disabled={pendingCommand !== null} onClick={() => setFormOpen(false)}>{capturing ? "暂不收录" : "取消"}</button></div>;
   const library = <section className="surface-panel knowledge-list">
     {reading && projectId && <ProjectNav projectId={projectId} active="knowledge" />}
-    <nav className="knowledge-tabs" aria-label="资料类型">{kinds.map((item) =>
+    <nav ref={tabListRef} className="knowledge-tabs" role="tablist" aria-label="资料类型" onKeyDown={handleTabListKeyDown}>{kinds.map((item) =>
       <button key={item.kind} type="button" className={`subnav-item${kind === item.kind ? " subnav-item--active" : ""}`}
-        aria-current={kind === item.kind ? "page" : undefined} disabled={pendingCommand !== null}
+        role="tab" id={`${tabId}-tab-${item.kind}`} aria-controls={`${tabId}-panel`} aria-selected={kind === item.kind}
+        tabIndex={kind === item.kind ? 0 : -1} disabled={pendingCommand !== null}
         data-testid={`knowledge-tab-${item.kind}`} onClick={() => switchKind(item.kind)}>{item.label}</button>)}</nav>
+    <div role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-tab-${kind}`} tabIndex={0}>
     <div className="section-heading-row"><h2>{currentNoun}</h2>
       <button type="button" className="secondary-button" data-testid="knowledge-create" disabled={pendingCommand !== null} onClick={() => openForm(false)}>新建</button></div>
     {!loading && rows.length === 0 && <p className="helper-text">当前范围还没有{currentNoun}。点击右上角「新建」添加第一条{currentNoun}。</p>}
     {rows.map((row) => <button key={row.id} type="button" className={`knowledge-row${row.id === selectedId ? " knowledge-row--active" : ""}`}
       disabled={pendingCommand !== null} onClick={() => selectRow(row.id)}><strong>{rowTitle(row)}</strong><small>{row.status} · 当前 v{row.currentVersion} · {rowScopeLabel(row)}</small></button>)}
+    </div>
   </section>;
 
-  return <section className={`knowledge-page${reading ? " knowledge-page--reading" : ""}`}>
-    {!reading && <><p className="eyebrow">{projectId ? "项目资料" : "工作空间资料"}</p>
-    <h1>知识与长期信息</h1>
-    <p className="page-lede">资料、已确认记忆、决定和规则分别保存版本；搜索只查真实服务端事实。</p>
+  return <section className={`knowledge-page${reading ? " knowledge-page--reading" : ""}${capturing ? " knowledge-page--capture" : ""}`}>
+    {!reading && !capturing && <><p className="eyebrow">{projectId ? "项目资料" : "工作空间资料"}</p>
+    <h1>资料</h1>
+    <p className="page-lede">资料、记忆、决定与规则</p>
     {projectId && <ProjectNav projectId={projectId} active="knowledge" />}</>}
 
     {!live ? <section className="surface-panel" data-testid="knowledge-fixture-gap">
       <h2>示例模式未接入资料</h2>
       <p>此处不生成虚构的资料、记忆、决定或规则。连接本机 API 后可读取和管理真实内容。</p>
     </section> : <>
-      <div className="knowledge-tools">
+      <div className="knowledge-tools" hidden={capturing}>
       <details className="knowledge-search" open={query.trim() !== ""}>
         <summary>搜索资料</summary>
       <section className="surface-panel" aria-label="资料搜索">
@@ -551,15 +626,18 @@ export default function KnowledgeView() {
       </section>
       </details>
 
-      {reading && <details className="knowledge-library" data-testid="knowledge-library">
+      {reading && <details ref={libraryRef} className="knowledge-library" data-testid="knowledge-library">
         <summary>资料列表 · {rows.length}</summary>{library}
       </details>}
 
       {projectId && client && kind === "KNOWLEDGE" && <details className="knowledge-web-import"><summary>导入网页</summary><WebImportPanel
         key={`${connection.epoch}:${projectId}`} client={client} projectId={projectId}
         onOpenKnowledge={(knowledgeId) => {
-          setSelectedId(knowledgeId); setFormOpen(false); setActionError(null);
-          void load("KNOWLEDGE", knowledgeId);
+          requestDraftTransition(() => {
+              setSelectedId(knowledgeId); setFormOpen(false); setActionError(null);
+              clearDraft();
+              void load("KNOWLEDGE", knowledgeId);
+          });
         }} /></details>}
 
       {projectId && client && <button type="button" className="text-button" data-testid="knowledge-guide-toggle"
@@ -567,51 +645,47 @@ export default function KnowledgeView() {
       </div>
       {guideOpen && projectId && client && <ProjectKnowledgeGuide key={`${connection.epoch}:${projectId}`}
         client={client} projectId={projectId} onOpen={(nextKind, nextId) => {
-          setGuideOpen(false); setKind(nextKind); setSelectedId(nextId); setSelected(null);
-          void load(nextKind, nextId);
+          requestDraftTransition(() => {
+              setGuideOpen(false); setKind(nextKind); setSelectedId(nextId); setSelected(null);
+              setFormOpen(false); clearDraft();
+              void load(nextKind, nextId);
+          });
         }} />}
 
       {error && <p className="action-error" role="alert">{error} <button type="button" className="text-button" onClick={() => { void load(); }}>重新读取</button></p>}
       {loading && <p role="status">正在读取资料…</p>}
       {refreshing && <p role="status">正在读取最新版本…</p>}
-      {actionError && <p className="action-error" role="alert">{actionError}</p>}
+      {actionError && !capturing && <p className="action-error" role="alert">{actionError}</p>}
       {actionMessage && <p className="receipt-message" role="status">{actionMessage}</p>}
-      {writeBlockedReason && <p className="disabled-reason" data-testid="knowledge-project-write-blocked">{writeBlockedReason} <button type="button" className="text-button" onClick={() => setGateReload((value) => value + 1)}>重读项目状态</button></p>}
-      {pendingCommand && <div className="surface-panel" data-testid="knowledge-pending-receipt">
-        <h2>提交结果待核对</h2><p>原 command_id：{pendingCommand.id}。查询原命令回执前不再次提交。</p>
-        <button type="button" className="secondary-button" data-testid="knowledge-check-receipt" disabled={submitting} onClick={() => { void checkReceipt(); }}>核对原命令回执</button>
-      </div>}
+      {!capturing && writeGateFeedback}
+      {!capturing && pendingReceipt}
 
       <div className="knowledge-columns">
         {!reading && library}
 
         <div className="knowledge-detail">
-          {selected ? <section className={`surface-panel${reading ? " knowledge-reading-detail" : ""}`}>
+          {selected ? <section className={`surface-panel${reading ? " knowledge-reading-detail" : ""}`} hidden={capturing}>
             {selectedKnowledge && client && <KnowledgeReader key={`${selectedKnowledge.id}:${selectedKnowledge.currentVersion}:${routeItem === selectedKnowledge.id ? routeVersion ?? "" : ""}`}
               client={client} knowledge={selectedKnowledge} versions={knowledgeVersions}
               initialVersion={routeItem === selectedKnowledge.id ? routeVersion : null}
               onNewVersion={selected.status === "ACTIVE" && pendingCommand === null ? () => openForm(true) : undefined}
               newVersionDisabled={writeBlockedReason !== null} />}
-            <details className={`knowledge-management${reading ? "" : " knowledge-management--expanded"}`} open={!reading}>
+            {!reading && <header className="knowledge-item-heading"><div><h2>{rowTitle(selected)}</h2><p className="helper-text">当前版本 v{selected.currentVersion} · {selected.status === "ACTIVE" ? "有效" : selected.status === "SUPERSEDED" ? "已被替代" : "已停用或归档"}</p></div>
+              {selected.status === "ACTIVE" && pendingCommand === null && kind !== "DECISION" && <button type="button" className="secondary-button" data-testid="knowledge-new-version" disabled={writeBlockedReason !== null} onClick={() => openForm(true)}>追加新版本</button>}</header>}
+            {selectedMemory && <article className="knowledge-fact-paper"><p className="knowledge-body">{selectedMemory.text}</p><p className="helper-text">明确确认：{selectedMemory.confirmedBy} · {selectedMemory.confirmedAt}{selectedMemory.expiresAt && <> · 到期 {selectedMemory.expiresAt}</>}</p></article>}
+            {selectedDecision && <article className="knowledge-fact-paper"><h3>做出的选择</h3><p className="knowledge-body">{selectedDecision.choice}</p><h3>依据</h3><p className="knowledge-body">{selectedDecision.rationale}</p><h3>备选与代价</h3><p>备选：{selectedDecision.alternatives.join("、") || "未记录"}</p><p>代价：{selectedDecision.costs.join("、") || "未记录"}</p>{selectedDecision.supersededById && <p data-testid="decision-supersession">已由决定 {selectedDecision.supersededById} 替代；旧决定保留可查。</p>}</article>}
+            {selectedRule && <article className="knowledge-fact-paper"><p className="knowledge-body">{selectedRule.statement}</p><p>{selectedRule.strength === "HARD" ? "硬约束" : "偏好"} · 执行检查：{selectedRule.enforcement}{selectedRule.method && <> · {selectedRule.method}</>}</p></article>}
+            <details className="knowledge-management">
             <summary>资料管理与范围</summary>
             <div className="section-heading-row"><h2>{rowTitle(selected)}</h2><span>{selected.status} · 修订 v{selected.revision}</span></div>
             <p className="helper-text">ID：{selected.id} · 当前版本 v{selected.currentVersion}</p>
             <p className="helper-text" data-testid="knowledge-detail-scope">范围：{"scope" in selected
               ? (selected.scope === "WORKSPACE" ? "工作空间" : `${selected.scope === "PROJECT" ? "项目" : "任务"} ${selected.scopeId}`)
               : selected.projectId ? `项目 ${selected.projectId}` : "工作空间"}</p>
-            {selectedMemory && <><p className="knowledge-body">{selectedMemory.text}</p>
-              <p className="helper-text">明确确认：{selectedMemory.confirmedBy} · {selectedMemory.confirmedAt}{selectedMemory.expiresAt && <> · 到期 {selectedMemory.expiresAt}</>}</p></>}
-            {selectedDecision && <><p className="knowledge-body">选择：{selectedDecision.choice}</p>
-              <p className="knowledge-body">依据：{selectedDecision.rationale}</p>
-              <p>备选：{selectedDecision.alternatives.join("、") || "未记录"}</p><p>代价：{selectedDecision.costs.join("、") || "未记录"}</p>
-              {selectedDecision.supersededById && <p data-testid="decision-supersession">已由决定 {selectedDecision.supersededById} 替代；旧决定保留可查。</p>}</>}
-            {selectedRule && <><p className="knowledge-body">{selectedRule.statement}</p>
-              <p>{selectedRule.strength} · {selectedRule.scope} / {selectedRule.scopeId} · {selectedRule.applicability}</p>
-              <p>执行检查：{selectedRule.enforcement}{selectedRule.method && <> · {selectedRule.method}</>}</p>
+            {selectedRule && <><p>{selectedRule.strength} · {selectedRule.scope} / {selectedRule.scopeId} · {selectedRule.applicability}</p>
               <p className="helper-text">目标约束：{JSON.stringify(selectedRule.targetSpec)}</p></>}
 
             {selected.status === "ACTIVE" && pendingCommand === null && <div className="knowledge-actions">
-              {kind !== "DECISION" && !reading && <button type="button" className="secondary-button" data-testid="knowledge-new-version" disabled={writeBlockedReason !== null} onClick={() => openForm(true)}>追加新版本</button>}
               {kind === "KNOWLEDGE" && <button type="button" className="danger-button" disabled={writeBlockedReason !== null} onClick={() => { void retire(); }}>归档资料</button>}
               {(kind === "MEMORY" || kind === "RULE") && <button type="button" className="danger-button" disabled={writeBlockedReason !== null} onClick={() => { void retire(); }}>停用{kind === "MEMORY" ? "记忆" : "规则"}</button>}
             </div>}
@@ -626,34 +700,26 @@ export default function KnowledgeView() {
             {selectedRule && <section className="knowledge-history"><h3>规则版本历史</h3><ol>{ruleVersions.map((version) =>
               <li key={`${version.ruleId}-${version.version}`}>v{version.version} · {version.strength} · {version.enforcement} · {version.ruleKey}<p>{version.statement}</p></li>)}</ol></section>}
             </details>
-          </section> : !loading && <section className="surface-panel"><p>选择一项资料查看详情与版本。</p></section>}
+          </section> : !loading && !capturing && <section className="surface-panel"><p>选择一项资料查看详情与版本。</p></section>}
 
-          {formOpen && <form ref={formRef} className="surface-panel knowledge-form" data-testid="knowledge-form" onSubmit={(event) => { void save(event); }}>
+          {formOpen && <form ref={formRef} className={`surface-panel knowledge-form${capturing ? " knowledge-form--capture" : ""}`} data-testid="knowledge-form" onSubmit={(event) => { void save(event); }}>
+            <div className="knowledge-form-main"><header className={capturing ? "knowledge-capture-heading" : undefined}>
+            {capturing && <><h1>把这次经验留下来</h1><p className="page-lede">先核对内容与来源，再决定是否收录。</p></>}
             <h2>{revisionMode ? "追加新版本" : `新建${currentNoun}`}</h2>
             {revisionMode && <p className="helper-text">基于起草时修订 v{kind === "KNOWLEDGE" ? knowledgeDraftBase?.revision : selected?.revision} 提交；冲突时保留草稿，旧版本不会被覆盖。</p>}
+            {capturing && <p className="knowledge-capture-draft-status">人工收录草稿 · 尚未保存</p>}
+            </header><div className={capturing ? "knowledge-capture-paper" : undefined}><div className={capturing ? "knowledge-capture-content" : undefined}>
+            {capturing && <h3>本次收录内容</h3>}
             {(kind === "MEMORY" || (kind !== "RULE" && !revisionMode)) && <label className="field"><span className="field-label">标题</span>
               <input value={title} onChange={(event) => setTitle(event.target.value)} data-testid="knowledge-title" required disabled={pendingCommand !== null} /></label>}
             {kind === "KNOWLEDGE" && <>
-               <label className="field"><span className="field-label">来源类型</span><select value={sourceKind} onChange={(event) => { previewReadVersion.current++; setSourceKind(event.target.value as Exclude<RelayKnowledgeSource, "WEB_PAGE">); setArtifactPreview(null); setCaptureConfirmed(false); if (event.target.value === "NOTE") setMediaType("text/plain"); }} disabled={pendingCommand !== null}>
-                <option value="NOTE">笔记（NOTE）</option><option value="MANAGED_TEXT">受管文本（MANAGED_TEXT）</option><option value="ARTIFACT_VERSION">产物版本（ARTIFACT_VERSION）</option></select></label>
-               {sourceKind === "ARTIFACT_VERSION" ? <><label className="field"><span className="field-label">产物版本 ID</span>
-                 <input value={artifactVersionId} onChange={(event) => { previewReadVersion.current++; setArtifactVersionId(event.target.value); setArtifactPreview(null); setCaptureConfirmed(false); }} data-testid="knowledge-artifact-id" disabled={pendingCommand !== null} /></label>
-                 <button type="button" className="secondary-button" disabled={pendingCommand !== null}
-                   onClick={() => { void readArtifactPreview(); }}>核对确切产物版本</button>
-                 {artifactPreviewError && <p className="action-error" role="alert">{artifactPreviewError}</p>}
-                 {artifactPreview?.id === artifactVersionId.trim() && <><pre className="knowledge-capture-preview">{artifactPreview.text}</pre>
-                   <label className="knowledge-check"><input type="checkbox" checked={captureConfirmed}
-                     onChange={(event) => setCaptureConfirmed(event.target.checked)} data-testid="knowledge-capture-confirmed" />我已核对正文、来源版本和目标范围；收录不修改原产物，也不代表通过验收。</label></>}
-               </>
-                 : <><label className="field"><span className="field-label">受管文本</span><textarea value={text} onChange={(event) => setText(event.target.value)} data-testid="knowledge-text" rows={6} disabled={pendingCommand !== null} /></label>
-                   <label className="field"><span className="field-label">媒体类型</span><select value={mediaType} onChange={(event) => setMediaType(event.target.value)} disabled={pendingCommand !== null}>
-                     <option value="text/plain">text/plain</option>{sourceKind === "MANAGED_TEXT" && <option value="text/markdown">text/markdown</option>}</select></label></>}
-               <section className="knowledge-capture-review" aria-label="保存前核对"><h3>保存前核对</h3>
-                 <p>归类：Knowledge · {sourceKind}；目标范围：{(revisionMode ? knowledgeDraftBase?.projectId : projectId) ? `项目 ${revisionMode ? knowledgeDraftBase?.projectId : projectId}` : "工作空间"}。</p>
-                 {sourceKind === "ARTIFACT_VERSION" ? <p>来源：确切产物版本 {artifactVersionId || "未填写"}。</p>
-                   : <p className="knowledge-body">正文预览：{text || "尚未填写"}</p>}
-                 <p className="helper-text">只有服务端命令成功并重读后才成为已收录版本；阅读和收录不授予 AI 使用权限。</p>
-               </section>
+              {revisionMode && <p className="knowledge-capture-title">{selectedKnowledge?.title ?? "当前资料"}</p>}
+              {sourceKind === "ARTIFACT_VERSION" ? <><h4>确切产物正文</h4>
+                {artifactPreviewMatches ? <div data-testid="knowledge-capture-body"><p className="helper-text">Markdown 阅读预览，可展开核对原文。</p><SafeMarkdown source={artifactPreview?.text ?? ""} />
+                  <details className="knowledge-capture-text-preview"><summary>查看原始正文</summary><pre className="knowledge-capture-preview">{artifactPreview?.text}</pre></details></div>
+                  : <p className="helper-text">先在“对照来源”中填写产物版本 ID 并读取正文，再核对本次收录内容。</p>}
+              </> : <><label className="field"><span className="field-label">受管文本</span><textarea value={text} onChange={(event) => setText(event.target.value)} data-testid="knowledge-text" rows={8} disabled={pendingCommand !== null} /></label>
+                <details className="knowledge-capture-text-preview"><summary>预览本次正文</summary><p className="knowledge-body">正文预览：{text || "尚未填写"}</p></details></>}
             </>}
             {kind === "MEMORY" && <>
               <label className="field"><span className="field-label">需要长期保留的事实</span><textarea value={text} onChange={(event) => setText(event.target.value)} data-testid="memory-text" rows={6} disabled={pendingCommand !== null} /></label>
@@ -682,11 +748,47 @@ export default function KnowledgeView() {
               <label className="field"><span className="field-label">目标约束 JSON（可选）</span><textarea value={targetSpec} onChange={(event) => setTargetSpec(event.target.value)} rows={3} disabled={pendingCommand !== null} /></label>
               <p className="field-hint">HARD 冲突或必需检查路径不可用时，服务端拒绝写入；不会把未检查的规则当作生效。</p>
             </>}
-            <div className="knowledge-actions"><button type="submit" className="primary-button" data-testid="knowledge-save" disabled={submitting || pendingCommand !== null || writeBlockedReason !== null || (kind === "MEMORY" && !confirmed)}>保存{revisionMode ? "新版本" : ""}</button>
-              <button type="button" className="secondary-button" disabled={pendingCommand !== null} onClick={() => setFormOpen(false)}>取消</button></div>
+            </div>{capturing && <section className="knowledge-capture-source" data-testid="knowledge-capture-source"><h3>对照来源</h3>
+              <label className="field"><span className="field-label">来源类型</span><select value={sourceKind} data-testid="knowledge-source-kind" onChange={(event) => { previewReadVersion.current++; setSourceKind(event.target.value as Exclude<RelayKnowledgeSource, "WEB_PAGE">); setArtifactPreview(null); setCaptureConfirmed(false); if (event.target.value === "NOTE") setMediaType("text/plain"); }} disabled={pendingCommand !== null}>
+                <option value="NOTE">笔记（NOTE）</option><option value="MANAGED_TEXT">受管文本（MANAGED_TEXT）</option><option value="ARTIFACT_VERSION">产物版本（ARTIFACT_VERSION）</option></select></label>
+              {sourceKind === "ARTIFACT_VERSION" ? <><label className="field"><span className="field-label">产物版本 ID</span>
+                <input value={artifactVersionId} onChange={(event) => { previewReadVersion.current++; setArtifactVersionId(event.target.value); setArtifactPreview(null); setCaptureConfirmed(false); }} data-testid="knowledge-artifact-id" disabled={pendingCommand !== null} /></label>
+                <button type="button" className="secondary-button" data-testid="knowledge-read-artifact" disabled={pendingCommand !== null}
+                  onClick={() => { void readArtifactPreview(); }}>核对确切产物版本</button>
+                {artifactPreviewError && <p className="action-error" role="alert">{artifactPreviewError}</p>}
+                <p className="helper-text">{artifactPreviewMatches ? "已读取此确切版本正文，请在本页核对。" : "当前来源正文尚未核对；输入版本 ID 不代表已读取。"}</p>
+              </> : <><p className="helper-text">{sourceKind === "NOTE" ? "本次手动输入的笔记，未关联外部原件。" : "本次手动输入的受管文本，按所选媒体类型保存。"}</p>
+                <label className="field"><span className="field-label">媒体类型</span><select value={mediaType} onChange={(event) => setMediaType(event.target.value)} disabled={pendingCommand !== null}>
+                  <option value="text/plain">text/plain</option>{sourceKind === "MANAGED_TEXT" && <option value="text/markdown">text/markdown</option>}</select></label></>}
+              <p className="helper-text">来源与正文按本次保存命令收录；不会从标题猜测来源或替换不可读的版本。</p>
+            </section>}</div></div>
+            {capturing ? <aside className="knowledge-capture-confirmation" data-testid="knowledge-capture-confirmation" aria-label="收录设置与确认">
+              <h2>收录设置</h2>
+              <section className="knowledge-capture-review" aria-label="保存前核对"><h3>保存前核对</h3>
+                <dl><div><dt>内容类型</dt><dd>资料 · Knowledge</dd></div>
+                  <div><dt>收录到</dt><dd>{captureTargetLabel}</dd></div>
+                  <div><dt>来源</dt><dd>{sourceKind === "ARTIFACT_VERSION" ? `确切产物版本 ${artifactVersionId || "未填写"}`
+                    : sourceKind === "NOTE" ? "本地笔记 · NOTE" : "受管文本 · MANAGED_TEXT"}</dd></div></dl>
+                <p className="helper-text">目标范围：{captureTargetLabel}。{revisionMode ? `追加到资料 ${knowledgeDraftBase?.id ?? "待核对"}；基于起草修订 v${knowledgeDraftBase?.revision ?? "待核对"}。` : "范围由当前入口确定。"}</p>
+              </section>
+              <p className="warning-callout">收录只保存这份资料，不修改原产物，也不代表任务验收通过。</p>
+              {sourceKind === "ARTIFACT_VERSION" && artifactPreviewMatches && <label className="knowledge-check"><input type="checkbox" checked={captureConfirmed}
+                disabled={pendingCommand !== null} onChange={(event) => setCaptureConfirmed(event.target.checked)} data-testid="knowledge-capture-confirmed" />我已核对正文、来源版本和目标范围；收录不修改原产物，也不代表通过验收。</label>}
+              {sourceKind === "ARTIFACT_VERSION" && !artifactPreviewMatches && <p className="helper-text">读取并核对确切产物正文后，才能确认收录。</p>}
+              {actionError && <p className="action-error" role="alert">{actionError}</p>}
+              {writeGateFeedback}{saveActions}{pendingReceipt}
+              <p className="knowledge-capture-permission-note">只有服务端命令成功并重读后才成为已收录版本；阅读和收录不授予 AI 使用权限。</p>
+            </aside> : saveActions}
           </form>}
         </div>
       </div>
     </>}
+    <AppDialog open={draftTransition !== null} title="保留未保存的资料" onClose={() => setDraftTransition(null)}>
+      <p>当前资料还有未保存的修改。继续编辑会保留正文；丢弃后再切换阅读对象。</p>
+      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => setDraftTransition(null)}>保留并继续编辑</button>
+        <button type="button" className="danger-button" data-testid="knowledge-discard-and-switch" onClick={() => {
+          const proceed = draftTransition; draftGuard.current.discard(); setDraftTransition(null); proceed?.();
+        }}>丢弃草稿并切换</button></div>
+    </AppDialog>
   </section>;
 }

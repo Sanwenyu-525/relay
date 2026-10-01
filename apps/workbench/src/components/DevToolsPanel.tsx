@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { FileText, GitBranch, Play, SquareTerminal, Terminal, X } from "lucide-react";
 import type { RelayApiClient, RelayManagedResource, RelayRun, RelayRunGatewayOperation } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import { handleTabListKeyDown } from "../lib/tabNavigation";
 import "./DevToolsPanel.css";
 
 type Tab = "FILES" | "GIT" | "TERMINAL" | "RUNS";
@@ -20,6 +21,7 @@ export default function DevToolsPanel({ client, projectId, taskId, run, onClose 
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("FILES");
+  const tabId = useId();
   const [drawerTab, setDrawerTab] = useState<"OUTPUT" | null>(null);
   const [resources, setResources] = useState<readonly RelayManagedResource[]>([]);
   const [resourceError, setResourceError] = useState<string | null>(null);
@@ -71,15 +73,17 @@ export default function DevToolsPanel({ client, projectId, taskId, run, onClose 
   return <section className="devtools" data-testid="devtools-panel" aria-label="文件与运行工具">
     <div className="devtools-pane">
       <header className="devtools-header">
-        <nav className="devtools-tabs" aria-label="工具面板">
+        <nav className="devtools-tabs" role="tablist" aria-label="工具面板" onKeyDown={handleTabListKeyDown}>
           {([["FILES", "文件", FileText], ["GIT", "变更", GitBranch], ["TERMINAL", "终端", SquareTerminal], ["RUNS", "运行记录", Play]] as const)
             .map(([key, label, Icon]) => <button key={key} type="button" data-testid={`devtools-tab-${key}`}
-              className={`devtools-tab${tab === key ? " devtools-tab--active" : ""}`} aria-current={tab === key ? "true" : undefined}
+              className={`devtools-tab${tab === key ? " devtools-tab--active" : ""}`}
+              role="tab" id={`${tabId}-tab-${key}`} aria-controls={`${tabId}-panel`} aria-selected={tab === key}
+              tabIndex={tab === key ? 0 : -1}
               onClick={() => setTab(key)}><Icon aria-hidden="true" />{label}</button>)}
         </nav>
       </header>
 
-      <div className="devtools-body">
+      <div className="devtools-body" role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-tab-${tab}`} tabIndex={0}>
         {tab === "FILES" && <section data-testid="devtools-files">
           <h3>受管目录</h3>
           <p className="helper-text">这里只列出该 Project 已登记的受管目录。目录浏览接口尚未接入（待接入），因此不推断本机任意路径可读。</p>
@@ -125,23 +129,23 @@ export default function DevToolsPanel({ client, projectId, taskId, run, onClose 
     <div className="devtools-drawer">
       <header className="devtools-drawer-header">
         <nav className="devtools-tabs devtools-tabs--drawer" aria-label="执行输出与交互终端">
-          <button type="button" data-testid="devtools-tab-OUTPUT"
+          <button type="button" data-testid="devtools-tab-OUTPUT" id={`${tabId}-output-toggle`}
             className={`devtools-tab${drawerTab === "OUTPUT" ? " devtools-tab--active" : ""}`}
-            aria-current={drawerTab === "OUTPUT" ? "true" : undefined}
+            aria-expanded={drawerTab === "OUTPUT"} aria-controls={`${tabId}-output`}
             onClick={() => setDrawerTab((current) => current === "OUTPUT" ? null : "OUTPUT")}><Terminal aria-hidden="true" />执行输出</button>
           <span className="devtools-drawer-pending" aria-disabled="true"><SquareTerminal aria-hidden="true" />交互终端 · 待设计</span>
         </nav>
         <button className="icon-button" type="button" aria-label="收起工具面板" data-testid="devtools-close" onClick={onClose}><X aria-hidden="true" /></button>
       </header>
 
-      {drawerTab === "OUTPUT" && <div className="devtools-drawer-body">
-        <section data-testid="devtools-output">
+      <div className="devtools-drawer-body" id={`${tabId}-output`} role="region" aria-labelledby={`${tabId}-output-toggle`} hidden={drawerTab !== "OUTPUT"}>
+        {drawerTab === "OUTPUT" && <section data-testid="devtools-output">
           <h3>执行输出</h3>
           {!run && <p className="helper-text">当前任务没有 AI Run，因此没有可归属的命令输出。这里不展示 Trace 或其他记录冒充 stdout。</p>}
           {run && operationError && <p className="action-error" role="alert" data-testid="devtools-output-error">{operationError}</p>}
           {run && !operationError && !hasOutput && <p className="helper-text" data-testid="devtools-output-empty">本次 Run 没有任何已保存的命令输出。打开面板不执行命令；缺少输出与输出为空都如实显示。</p>}
-          {run && operations.map((operation) => <article key={operation.id} className="devtools-operation">
-            <h4>{operation.actionType} · {operation.status}</h4>
+          {run && operations.map((operation) => <details key={operation.id} className="devtools-operation">
+            <summary>{operation.actionType} · {operation.status} · {operation.normalizedTarget} · {operation.invocations.length} 次调用</summary>
             <p className="helper-text">原 operation_id：<code className="hash-code">{operation.id}</code> · 目标 {operation.normalizedTarget} · 来源 Run <code className="hash-code">{run.id}</code></p>
             {operation.invocations.map((invocation) => <div key={invocation.id ?? invocation.status} className="devtools-invocation">
               <p className="helper-text">Invocation {invocation.id ?? "服务端未返回标识"} · 状态 {invocation.status}
@@ -159,9 +163,9 @@ export default function DevToolsPanel({ client, projectId, taskId, run, onClose 
                   {!invocation.commandOutput.stdout && !invocation.commandOutput.stderr && <p className="helper-text">命令没有产生标准输出或错误输出。</p>}
                 </div>}
             </div>)}
-          </article>)}
-        </section>
-      </div>}
+          </details>)}
+        </section>}
+      </div>
     </div>
   </section>;
 }

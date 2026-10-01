@@ -1216,6 +1216,7 @@ test('M06 change_set summary trusts guarded persisted file facts and row count',
 
 test('M06 GIT_READ runs real git status with AUTO passthrough', async () => {
   const f = await realFixture({ capabilities: ['GIT_READ'], capability: 'GIT_READ', actionType: 'GIT_STATUS', gitRepo: true });
+  await writeFile(join(f.root, 'README.md'), 'changed seed\n', 'utf8');
   await writeFile(join(f.root, 'new.md'), 'untracked\n', 'utf8');
   const origin = await claim(f);
   const op = randomUUID();
@@ -1225,10 +1226,62 @@ test('M06 GIT_READ runs real git status with AUTO passthrough', async () => {
   assert.equal(prepared.status, 'PREPARED', 'GIT_READ is approval-passthrough so AUTO admits directly');
   const result = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId: op, origin });
   assert.equal(result.status, 'SUCCEEDED');
-  const status = (result.result_ref as { status: { branch: string; headCommit: string | null; untracked: string[] } }).status;
+  const status = (result.result_ref as { status: { branch: string; headCommit: string | null;
+    staged: string[]; unstaged: string[]; untracked: string[] } }).status;
   assert.equal(status.branch, 'main');
   assert.ok(status.headCommit, 'the real repository HEAD commit is reported');
   assert.ok(status.untracked.includes('new.md'), 'real untracked file is surfaced');
+  assert.deepEqual(status.staged, []); assert.deepEqual(status.unstaged, ['README.md']);
+  await releaseGatewayWorker(app.db, { workspaceId: f.workspaceId, runId: f.runId, workerId: origin.workerId, workerEpoch: origin.workerEpoch });
+});
+
+test('M06 GIT_DIFF persists the exact patch and never executes the repository textconv program', async () => {
+  const f = await realFixture({ capabilities: ['GIT_READ'], capability: 'GIT_READ', actionType: 'GIT_DIFF', gitRepo: true });
+  await writeFile(join(f.root, '.gitattributes'), '*.md diff=probe\n');
+  git(f.root, ['add', '--', '.gitattributes']); git(f.root, ['commit', '-q', '-m', 'attributes']);
+  const marker = join(f.root, '.git', 'textconv-effect'), helper = join(f.root, '.git', 'textconv-probe.cjs');
+  await writeFile(helper, `const fs=require('node:fs'); fs.writeFileSync(${JSON.stringify(marker)},'executed'); process.stdout.write(fs.readFileSync(process.argv[2]));`);
+  git(f.root, ['config', 'diff.probe.textconv', `"${process.execPath.replaceAll('\\', '/')}" "${helper.replaceAll('\\', '/')}"`]);
+  await writeFile(join(f.root, 'README.md'), 'changed seed\n');
+  const patch = git(f.root, ['diff', '--no-ext-diff', '--no-textconv', '--no-color']);
+  const index = await readFile(join(f.root, '.git/index')), head = headSha(f.root);
+  const origin = await claim(f), operationId = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'GIT_DIFF', target: f.root, params: {} });
+  assert.equal(prepared.status, 'PREPARED');
+  const result = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId, origin });
+  assert.equal(result.status, 'SUCCEEDED'); assert.equal(result.result_ref?.diff, patch);
+  assert.equal(result.result_ref?.operation_id, operationId);
+  const saved = await readGatewayOperation(app.db, f.workspaceId, operationId);
+  assert.equal(saved.invocations.length, 1); assert.equal(saved.invocations[0]!.status, 'SUCCEEDED');
+  assert.equal(saved.invocations[0]!.result_ref?.diff, patch);
+  assert.equal(result.result_ref?.invocation_id, saved.invocations[0]!.id);
+  assert.deepEqual(await readFile(join(f.root, '.git/index')), index); assert.equal(headSha(f.root), head);
+  await assert.rejects(stat(marker), { code: 'ENOENT' });
+  await releaseGatewayWorker(app.db, { workspaceId: f.workspaceId, runId: f.runId, workerId: origin.workerId, workerEpoch: origin.workerEpoch });
+});
+
+test('M06 GIT_READ settles unsupported external filters as a known failure without running them', async () => {
+  const f = await realFixture({ capabilities: ['GIT_READ'], capability: 'GIT_READ', actionType: 'GIT_STATUS', gitRepo: true });
+  await writeFile(join(f.root, '.gitattributes'), '*.md filter=probe\n');
+  const marker = join(f.root, '.git', 'filter-effect'), helper = join(f.root, '.git', 'filter-probe.cjs');
+  await writeFile(helper, `const fs=require('node:fs'); fs.writeFileSync(${JSON.stringify(marker)},'executed'); process.stdin.pipe(process.stdout);`);
+  git(f.root, ['config', 'filter.probe.clean', `"${process.execPath.replaceAll('\\', '/')}" "${helper.replaceAll('\\', '/')}"`]);
+  await writeFile(join(f.root, 'README.md'), 'changed seed\n');
+  const index = await readFile(join(f.root, '.git/index')), head = headSha(f.root);
+  const origin = await claim(f), operationId = randomUUID();
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId, operationId,
+    intentKey: `intent-${randomUUID()}`, connectionId: f.connectionId, origin,
+    actionType: 'GIT_STATUS', target: f.root, params: {} });
+  assert.equal(prepared.status, 'PREPARED');
+  const result = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId, operationId, origin });
+  assert.equal(result.status, 'FAILED'); assert.equal(result.result_ref?.reason, 'GIT_ERROR');
+  assert.equal(result.result_ref?.error, 'GIT_READ_EXTERNAL_FILTER_UNSUPPORTED');
+  const saved = await readGatewayOperation(app.db, f.workspaceId, operationId);
+  assert.equal(saved.invocations.length, 1); assert.equal(saved.invocations[0]!.status, 'FAILED');
+  assert.deepEqual(await readFile(join(f.root, '.git/index')), index); assert.equal(headSha(f.root), head);
+  await assert.rejects(stat(marker), { code: 'ENOENT' });
   await releaseGatewayWorker(app.db, { workspaceId: f.workspaceId, runId: f.runId, workerId: origin.workerId, workerEpoch: origin.workerEpoch });
 });
 

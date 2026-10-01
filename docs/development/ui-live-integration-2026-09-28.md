@@ -1,6 +1,6 @@
 # UI 精修与真实前后端联通（2026-09-28，开发自检）
 
-状态：开发自检完成，未经协调侧独立验收。本轮由 `prompts/ui-live-integration-polish.md` 授权，包含 UI 精修、真实数据来源核查与 Tauri dev 开发链路；同日接续第 10 节"今日页截图专项整改"。M03–M07 模块门槛与真实 Provider 门槛不变。
+角色：按阶段保留 UI 实现取舍与重大故障根因。第 1–17 节描述各自历史时点；2026-10-01 用户选定工作主线后的整套重做见第 18 节。原 2026-09-28 任务由 `prompts/ui-live-integration-polish.md` 授权，包含 UI 精修、真实数据来源核查与 Tauri dev 开发链路；同日接续第 10 节"今日页截图专项整改"。当前阶段只看 [CODEX_NEXT_STEP](../../CODEX_NEXT_STEP.md)，当前实际成绩只维护[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)，不由历史分片推出 M03–M07 总出口完成。
 
 ## 1. 用户可用的启动入口（本轮结论）
 
@@ -182,6 +182,8 @@
 
 最新证据为[全图组合](../testing/evidence/frontend-visual-fidelity-20260930/comparison-final-full.png)、[局部组合](../testing/evidence/frontend-visual-fidelity-20260930/comparison-final-focused.png)及 QA 列出的 960×640、390×844 截图与滚动指标。协调侧另用 IAB 1487×1010、4174 前端与 8794 只读夹具核对正常判断可用、常驻身份及「检查→文档」后讨论/反馈草稿仍在；清除自建草稿，未提交写命令，控制台 warn/error 为零。夹具未提供 Trace/CheckPlan 路由，检查栏正确局部报错；Trace 真实 HTTP/PG 证据见下一节。`final result: passed` 仅限浏览器视觉及已测交互，不包括真实 Windows 标题栏、IME/DPI、业务全链或安装验收。
 
+同日用户提供真实任务截图后的空态/错误态修复：通知组件此前作为顶栏外的 flex 子项，高度被压缩而按钮溢出覆盖标题；现在以紧凑入口挂入顶栏，显式展开权限与待处理。产物组件此前以“没有正文”判定加载，并依赖每次重建的版本对象，失败后仍显示加载且重新发起 GET；共享完成错误文案又把只读 `EVIDENCE_UNAVAILABLE` 写成完成被拒绝。现在按稳定版本 ID 自动读取一次、区分请求中/失败/空态，读取错误使用局部中性文案，显式重读保留确切版本并沿原 request epoch 排除迟到响应。空文档与无会话按内容收缩，委托配置折叠保留输入，结果未知强制保留原命令核对。只改变 UI 与读取调度，API、数据库、不可变产物验证和完成条件未改；验证范围只归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
 ## 14. M04 Run 模型调用诊断与本地错误归因（2026-09-30）
 
 在既有 Run Trace 增量投影调用用途、语义条件/检查尝试、Provider 请求身份和六类失败指引，保留原调用/Step Attempt/Manifest 身份及未知用量。仅 `FAILED` 且原账本类别命中封闭词表时返回指引；成功、取消、STARTED、本地故障和历史无分类保持 null，不输出任意错误名、异常正文或秘密。旧服务缺新增字段时客户端按未知兼容，非法类别/状态组合拒绝解析。API 为兼容响应增量，**Breaking Change: No**，无新增 migration。
@@ -221,3 +223,45 @@
 协调侧另派只读独立校验，[资源与 EXE 校验](../testing/evidence/raw-output-20260930.zip#entry=final-visual-20260930%2Fdocs%2Ftesting%2Fevidence%2Ffrontend-visual-correction-20260930%2Fdesktop-package-independent.log) exit0；[全部源码输入审计](../testing/evidence/raw-output-20260930.zip#entry=final-visual-20260930%2Fdocs%2Ftesting%2Fevidence%2Ffrontend-visual-correction-20260930%2Fsource-input-independent.json)389/389 一致、遗漏/额外/审计期间变化均0。最终清单副本与 test-release 原文件字节一致，输入数包含唯一 token；该结论绑定上述 EXE 和清单哈希。
 
 文档影响检查：更新唯一阶段主文档、设计系统/唯一 token、工作台交互、视觉 QA、本记录及部署说明；测试证据归原有 evidence，不新增重复进度或 ADR。没有新需求、业务架构、API/数据库、启动命令或版本发布；README 菜单 6 的并发改动保留。完整特殊状态、真实 Provider/PG、Windows 与 M04–M07 总出口仍待对应验收，不沿用旧结果宣布通过。
+
+### 效果图验收后的交互修复
+
+三工作台补齐任务或资料目录、确切版本正文和同任务 AI 入口；设置的显示偏好由本设备存储持有，项目已保存的视图与显式路由仍优先。Task 定义与验收方案复用原 Assist Owner，在同页区分模型建议、服务端合并提案及明确接受；蓝图摘要与身份折叠沿用原接受载荷。读取来源不会自动成为 AI 输入，Development 的 Git diff/CLI 缺协议仍明确显示未接入，没有用静态内容模拟成功。
+
+独立复核发现 Task Skill 页的恢复缺陷：接受后的自动事实刷新可与新消息并行，迟到的读取失败清空 Task 后卸载 Assist，丢失新消息待核对命令的原 ID。仅禁用刷新按钮不足以覆盖已在途请求。修复将事实显示与会话挂载分开：同目标读取失败隐藏旧事实、来源、历史和提案并禁止新写，保留原会话的草稿与命令核对/原载荷重试；更换目标或连接仍按原作用域清理。待核对期间导航与关闭没有丢弃命令的入口，不能借刷新或换会话重新生成动作 ID。503 与失权 403 的迟到读取反例已纳入原 `taskSkillProposal.spec.ts`，首失败与必要复跑留在本机忽略目录，当前结果只归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。没有改 Task/Run 执行权、API 或数据库契约；浏览器与组件验证不代表最新 Windows/Provider/PG 全链已通过。
+
+## 17. M04 首输出持久追溯与真实 Windows 定向链（2026-09-30）
+
+此前首输出只能依赖当轮 harness 的内存计量，Mock 基准又以完整 DRAFT 结束时间代表已持久草稿，无法在重读 Trace 时辨认首个有效片段和首预览写入。追加 0047 到原 `model_calls`，由现有 Run/Assist Owner 一次性保存两项观察时间；不新建计量 Owner，不回填历史，不把结构化未校验 JSON 作为预览。Run 保持 Task/Project/Run→call 锁序，Assist 保持 Message→call；首预览计时写入失败时，该次预览事务一起回滚。实现与兼容/回退边界分别归[API 契约](../api/http-command-contract.md)、[数据库 §54](../database/physical-design-postgresql.md#54-0047-m04-首输出观察时间2026-09-30)，Trace 的呈现规则归[工作台交互](../frontend/workbench-design.md)。服务端回调和事务内写入时间都不能代表实际网络发送、提交返回或窗口可见时刻。
+
+Windows 验收复用原隔离会话与私有宿主生命周期 runner，新入口只复制用户已授权模型配置的白名单键；合成资料正文不混入任务目标，沿原 call/Manifest 与正文 hash 验证来源回显，再从真实 UI 过 Review 和唯一完成提交。普通 Assist 的历史回复、结构化提案、用户接受与命令重放分别核对；最终以标题栏自然退出和原进程树停止判断关闭，失败强制清理不能算通过。受控回归、真实 Provider 两次夹具语义失败及必要复跑、冻结包身份、单次时间与剩余出口只维护在[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。未修改生产 prompt，也没有把明确字面量的提案标题测试当成无提示历史检索；并行后续 UI 与安装交付不继承此包成绩。
+
+低风险读取补合成文件/本机网页与真实模型的 opt-in 组合，复用原冻结读意图、Gateway、图命令及 HUMAN 完成门；没有实现新的工具路由。真正的读 Adapter 由 Operation 的 Capability 分派，REAL/READ 注册属于 Capability，不能用 Connection 的历史默认标签替代；组合测试同时核对冻结连接与物理读取证据，防止只查标签即算真实调用。正文通过原读 Invocation 进入模型输入，输入 hash 须用原 Manifest 与读证据重建；模型输出原生 `tool_calls` 仍主动拒绝，这属于 Relay 能力边界，不应误报 Provider 故障。所测边界与首失败勘误归功能验收表。
+
+上述受控工具拒绝曾暴露请求 ID 丢失：每帧的工具检查早于元数据提取，`ModelToolOutputError` 又没有证据字段。修复将原安全元数据读取移至检查之前，在保留 timeout/abort 优先级后为该错误附上实际观察到的 ID/合法用量；非文本内容拒绝沿同一出口，空 ID 不写空字符串。原 Recorder 与 Assist Owner 已有失败保全入口，未新增 Owner、工具执行或原始响应日志。当前 SDK 的 wire usage 在流末才转换为规范化 chunk，不能把提前拒绝时的未知用量宣称已丢失或零计费；已知规范化用量的单元 seam 与错误封套 PG seam 分别标明受控边界。先正文后工具的失败清理保留原调用时间，预览删除，不发布部分正文或提案。回归成绩只维护在[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)，本修复不自动继承此前冻结 Windows 包的验收。
+
+首批三个既有 Skill 增加隔离合成数据的 opt-in 真实组合，沿原 HTTP/Assist/Task Owner 与冻结事实基线验证生成、接受、重放和只读边界，没有新增 Skill 定义、版本或业务写权限。残缺配置自检发现测试的静态导入会先执行 checkers 的生产启动校验，因而来不及跳过；只将相关测试依赖延迟至有效配置分支，保留生产拒绝残缺配置。生成失败的测试补安全错误类别与 metadata 是否已知的诊断，不保存输出正文或未知错误字符串。此前首轮任务契约生成失败只进行一次必要定向诊断复验，生产 prompt 与严格输出规则不变，不能把后续成功称为已修复或拼成单轮全绿。临时结构观察已移除，实际成绩与未定位风险归功能验收表。
+
+接续真实 Windows UI 组合再次观察到任务定义 Skill 的 `FAILED/OUTPUT_SCHEMA_INVALID`，原模型调用一次。该码在 `assist-runner` 的 `parseSkillOutput` 返回空时产生，早于提案合并；输出正文按原安全规则不保存，不能从历史账本还原具体拒绝字段。只读定位另确认一个可独立复现的请求缺口：Skill 消息不携带普通 intent，内部默认 DISCUSS，而真实模型适配器仅以非 DISCUSS 开启 JSON mode，三项 Skill 因而漏发 `response_format:{type:'json_object'}`。复用注入 fetch 的 SDK 单元接缝，先证明三项缺字段失败，再将 structured 条件补为非 DISCUSS 或存在确切 Skill；普通讨论仍提供首片段，Skill/提案不公开 raw 片段。原 prompt、Skill 定义/版本、严格 parser、提案 hash、双 revision 和写入 Owner 均保留。此修复证明请求格式缺口得到纠正，不能认定已定位历史输出的具体拒绝分支；JSON 对象仍需原字段和业务校验。回归与新确切包的实际结果仅见功能验收表。
+
+## 18. 工作主线整套 UI 重做与恢复 Owner 保护（2026-10-01）
+
+用户在[研究审查](../research/agent-ui-review-2026-10-01.md)后选择[工作主线图](../frontend/mockups/2026-10-01/work-first.png)，范围扩展为完整共享页壳、协作区和七类业务页面。继续复用 React、既有组件、唯一 tokens 和原路由/query，以工作台/项目/待处理/资料定位工作，名称、内容纸面与真实动作优先，技术身份可展开核对。页面标题与阅读正文统一使用本地 Sans/UI；Serif 和旧阶段素材保留。布局与交互规则分别归[设计系统第 9 节](../frontend/design-system.md#9-整套重做的组件与布局提案2026-10-01)和[工作台第 17 节](../frontend/workbench-design.md#17-整套-ui-重做提案2026-10-01)，此处只记录影响恢复正确性的根因。
+
+- **原命令 Owner 被导航卸载。** Review 待核对 ID 原先仅在子组件 state 中，路由/query 切换会卸载；协作按列表索引选择又可能在重排或读取失败时换成另一判断。复用 `ReviewDecisionPanel` 的唯一命令 Owner，按 Review ID 选择；选中项暂时移除或 Task 读取失败仍保留原组件和核对入口、拒绝新决定。`draftGuard` 从单一注册改为多个 Owner 共存，每个 Owner 只清理自己的注册；组合保护优先原未决命令，存在 pending 时不提供丢弃或换连接绕过。这个改动保护当前组件生命周期，不宣称已经新增跨窗口草稿恢复。
+- **旧会话回执核对绕过草稿保护。** 回执成功后先更新 Session state，再交给路由阻断，会提前重建 Assist Owner 并丢当前输入或待核对命令。修复把会话与路由切换一起放入组合导航保护；返回前核对原请求作用域，晚到结果不拉回旧 Task。回执仍沿原命令身份查询，不把 lookup 变成重新提交。
+- **阅读和上下文借用了其他版本或对象。** 显式 Review 版本缺失时回退最新产物、历史比较沿默认 head、旧 work 的晚到读取更新面包屑，都可能让界面展示与判断对象不同的事实。阅读器明确区分指定版本和默认阅读，缺失指定版本报告失败，比较沿实际阅读版本；`AppShell` 上下文绑定 workId 与连接 epoch，晚到响应在写入前校验作用域。验收条件文字由父级核对相同 acceptanceRevision 与 criterion_id 后传入纯显示 prop，详情保留真实 ID，无法核对时不补造条件文字。
+- **长判断挤压正文或裁掉动作。** 原纸面容器与固定判断区的滚动约束在短窗、展开依据及长 ACTION_APPROVAL 下互相挤压。普通判断条保留对象、主要条件/影响和动作，完整依据/说明按需展开；审批动作与风险不静默隐藏。长审批或展开详情时让整成果区域纵滚，短窄窗口采用自然高度；同页切换保持一份 Owner，不复制命令组件改善布局。
+- **键盘焦点卷走短窗外壳。** 展开导航后 Tab 到底部连接，外层 `overflow:hidden` 容器仍可被浏览器为焦点自动滚动，导致标题与整个布局错位。外层 `desktop-window`、`app-frame`、`app-content` 及协作外主区改用 `overflow:clip`，由导航/内容的指定内层承担滚动；不把固定壳层作为隐藏滚动容器。修复仍须在短窗与原生窗口检查真实聚焦可达性，不能仅凭没有滚动条断言不会滚动。
+
+近期任务沿真实游标去重并按 Project 分组，403 清理缓存；提议意图与非空候选可见；知识切类型/成果行先保护草稿；真页签复用统一方向键/Home/End 与 IME 过滤。新建任务优先真实项目名称，手动 ID 收入详情，依赖提示改为用户语言；API 载荷与显式归属不变。上述变化没有新增业务状态、判读模型、权限、API、数据库、框架或依赖，不需要新 ADR；服务端 allowed_actions、不可变版本、只读边界及业务命令 Owner 仍是事实入口。
+
+实际组件检查、只读浏览器样本与最终构建边界仅维护在[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)，完整原始输出留本机忽略目录。较早工作主线实施结束时，最后视觉 QA 和最终生产构建仍待协调侧确认，且没有真实 PG/Provider 业务提交或新桌面包；下述连续工作区接续不以组件/fixture 推断完整业务路径、33 页面/状态、Windows/IME/DPI/安装已通过。
+
+### 连续工作区与优化发布包检查接续
+
+用户随后授权按 Agent UI 对照计划直接实施连续工作区。分栏与折叠仅改变展示，保持 Assist、Review、Run 与工具命令 Owner 的挂载；本设备比例/模式使用独立偏好存储，默认比例来自唯一 token。成果阅读版本与判断版本不一致时显示明确提示，并提供返回确切判断版本的入口，判断绑定不随阅读改变。交互与视觉规则分别接续到工作台 §17.6、设计系统 §9.1；本次没有业务状态、HTTP、数据库或权限协议变化，Breaking Change: No。
+
+隔离桌面打包暴露旧能力门的误判：它要求 optimized EXE 保留完整 `maintenance_session_start/release` 输入比较字串，但本次实际二进制缺少这两串，而原生无效参数入口仍能返回完整维护错误帧。字串缺失符合编译优化可能将比较拆成指令的情况，不能直接认定维护能力缺失。检查改为先核对稳定输出标识以拒绝旧宿主，再以额外无效参数、空 stdin、有界超时验证唯一精确错误帧；非预期退出、输出、版本、nonce、多帧或超时均拒绝。无效参数在解析 session/data_root、获得互斥与停止 Job 之前返回，不发送有效 start 帧，不参与维护停机。检查脚本纳入构建输入指纹和发布清单来源摘要，恢复隔离与资源 hash 门保留，未修改原生/API 的业务入口。
+
+原始失败、最终测试、窗口可用高度与确切包身份只归功能验收表及本机输出；本接续不新增进度或成绩事实源。文档影响检查涉及交互、设计系统/唯一 token、研究接续、本记录、阶段入口和验收表；架构、ADR、API、数据库、启动命令及 README 定位不变，仓库没有 ROADMAP、CHANGELOG 或 KNOWN_ISSUES，未为清单补建文档。

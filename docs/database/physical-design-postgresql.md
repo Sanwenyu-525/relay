@@ -202,6 +202,8 @@ FK 引用侧按实际删除/查询需求补索引；不为每个字段建索引�
 
 ## 7. 内容存储、备份与数据保留
 
+2026-10-01 Windows 物理发布接续：ManagedContentStore 的路径、ref/hash/size与数据库版本模型不变，无新 migration。实际原生写者在 data_root 固定 `.relay-content-admission.lock` 上持共享锁完成发布，维护对同一真实 sentinel 排他；该文件不保存业务回执，不把文件锁冒充数据库/Saver 冻结。兼容、旧助手限制和外部资源边界见 [ADR-015](../decisions/ADR-015-managed-content-native-publication.md)与[部署说明](../deployment/本机部署.md#windows-受管内容发布安全点)。
+
 建议配置独立 data_root，内容路径使用内部 ID：staging/<upload-id> 与 artifacts/<artifact-id>/<version-id>/content.md。数据库只保存受管相对路径，禁止把用户提供的路径直接拼接到存储根。
 
 写入顺序：同文件系统暂存 → 完整写入并计算 hash/size → 按平台能力刷盘 → 发布到新的不可变版本目录且禁止覆盖 → 数据库登记版本。目录发布/刷盘的实际保证需 Windows 等目标平台验证；rename 不代表“任意断电下文件和 DB 原子”。
@@ -684,3 +686,19 @@ API 不需要 Saver；Worker 与 supervisor 在领取前只读核对业务 schem
 追加 [0046_assist_provider_error_kind.sql](../../apps/api/migrations/0046_assist_provider_error_kind.sql)：`assist_messages` 新增可空 `provider_error_kind text`，封闭词表为 `AUTH/RATE_LIMIT/TIMEOUT/STREAM_BROKEN/PROTOCOL/NETWORK`，另一 CHECK 仅允许 `FAILED` 消息带非空类别。该字段与原 Relay `error_code` 分开，避免将预算、取消、解析或本地处理失败归因给 Provider。Assist Owner 在原领取 Worker 身份的 CAS 结算中保存类别；查询只投影持久事实，不重算历史分类、不增加业务写入 Owner。
 
 旧行保持 NULL，迁移无回填、无新表/索引、无权限变化；旧客户端可忽略新增响应字段，新客户端兼容旧服务缺字段。迁移按既有摘要台账顺序应用，不改写 0015。没有自动 down migration；回退代码前需核对 schema 兼容门，删除该列会丢失已保存的诊断类别，不能删除历史消息来绕过约束。API Breaking Change: No，原请求与执行权契约不变。隔离 PostgreSQL 与接口验证结果见[开发记录](../development/ui-live-integration-2026-09-28.md#12-m04-assist-provider-失败诊断2026-09-30)。
+
+## 54. 0047 M04 首输出观察时间（2026-09-30）
+
+追加 [0047_m04_model_call_first_output.sql](../../apps/api/migrations/0047_m04_model_call_first_output.sql)：原 `model_calls` 新增 `first_text_delta_at`、`first_preview_persisted_at` 两个可空 `timestamptz`，无默认、无旧行回填，并追加两列的应用角色 UPDATE 权限。CHECK 限制首预览非空时必须已有首文本，且非 DRAFT/ASSIST 调用两列必须为空。不改写已应用的 0018，不增加事实表、索引或业务状态。
+
+首文本时间只接受当前合法 Owner 的首个非空文本回调；首预览时间与通过身份门禁的第一次预览写入在同一短事务内保存。Repository 按原 call_id 一次性写入，后续回调、预览清理与调用结算保留原值；旧 Worker、取消或失效身份不能补写。Run 保留 Task/Project/Run→call 的锁序，Assist 使用 Message→call，避免把计量锁反向带入业务事务。仅记录服务端观察，不以 `started_at` 冒充实际请求发送，也不以事务内时间冒充提交返回或 Windows 可见首字。无自动 down migration；旧应用可忽略新列，删除列会丢失首输出历史证据，回退先核对既有 schema 兼容门。API 为附加可空投影，Breaking Change: No。测试结果只在[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)维护。
+
+## 55. 0048 M07 数据库级新工作准入门（2026-09-30，源码实现）
+
+追加 [0048_m07_admission_gate.sql](../../apps/api/migrations/0048_m07_admission_gate.sql)，新表 `runtime_admission_gate` 以 `singleton=true` 为唯一主键，CHECK 固定单行键、mode `NORMAL/DRAINING` 和非负 bigint revision，迁移预置 NORMAL/0。`relay_app` 只获 SELECT 与 `UPDATE(mode,revision)`，无 INSERT/DELETE 或身份列更新权；不改写已有 migration、Workspace 或 Run 状态。运行期 SQL Owner 为 RuntimeAdmissionRepository，状态转换由维护应用用例协调。
+
+首次命令和新领取的 `FOR SHARE` 位于原业务锁之前；状态转换使用专用 `FOR UPDATE` 事务，CAS 与 scope `runtime:database-admission`、target `DATABASE` 的原命令回执同时提交。普通命令等待门锁后再查回执，避免把等待期间已提交的原结果误报维护拒绝；门锁等待最多5秒，不延长较短原期限，成功后恢复原期限，失败整笔回滚，不保留半变更。独立模型连接验证在同一准入短事务里预约原 `model_calls(kind=VERIFY)` 的 STARTED，网络与原调用结算位于事务之外；不增加第二套模型账本或改变 Run/Assist 预算。完整锁/兼容取舍见 [ADR-014](../decisions/ADR-014-database-maintenance-admission.md)，CLI 与限制见[部署说明](../deployment/本机部署.md#draining-新工作准入门)。
+
+迁移是追加表，旧数据无需转换；旧包不识别准入门，既有严格 schema 清单也不自动兼容未来 migration，升级需停旧进程并经原迁移入口。无自动 down migration；删除表或回退到不参与门的代码会撤销维护保证，不能当作恢复准入的方法。DRAINING 中原在途业务和图仍可写入，没有完整冻结或备份一致性保证。实际验证与未覆盖项只在[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)维护。
+
+2026-10-01 数据库连接维护接续无新migration/业务字段。受信运维会话暂时撤销数据库CONNECT ACL，修改前保存完整有效ACL及grant option；不可变凭据在独立运维目录，不存URL/密码。按原目标和ACL恢复，不用bootstrap重置既有权限；异常时撤销可能保留，漂移拒绝覆盖，不承诺自动回滚。具体兼容、角色和恢复限制归[部署设计](../deployment/本机部署.md#数据库连接维护与权限恢复)。

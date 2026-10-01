@@ -47,8 +47,7 @@ export default function DesktopTitleBar({ available, onSearch }: { available: bo
     return () => { active = false; unlisten.forEach((off) => off()); };
   }, [desktop]);
 
-  if (!desktop) return null;
-  const current = getCurrentWindow();
+  const current = desktop ? getCurrentWindow() : null;
   const run = async (action: () => Promise<void>) => {
     try {
       setError(false);
@@ -58,11 +57,12 @@ export default function DesktopTitleBar({ available, onSearch }: { available: bo
     }
   };
   const toggleMaximized = () => run(async () => {
+    if (!current) return;
     await current.toggleMaximize();
     setMaximized(await current.isMaximized());
   });
   const onDragMouseDown = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
+    if (!current || event.button !== 0) return;
     event.preventDefault();
     if (event.detail === 2) void toggleMaximized();
     else void run(() => current.startDragging());
@@ -74,20 +74,18 @@ export default function DesktopTitleBar({ available, onSearch }: { available: bo
     <div className="desktop-titlebar__actions" aria-label="常用操作">
       <button className="desktop-titlebar__action desktop-titlebar__action--icon" type="button" aria-label="后退" title="后退" data-testid="titlebar-back" disabled={!available || routeHistory.index === 0} onClick={() => void navigate(-1)}><ArrowLeft aria-hidden="true" /></button>
       <button className="desktop-titlebar__action desktop-titlebar__action--icon" type="button" aria-label="前进" title="前进" data-testid="titlebar-forward" disabled={!available || routeHistory.index >= routeHistory.keys.length - 1} onClick={() => void navigate(1)}><ArrowRight aria-hidden="true" /></button>
-      <span className="desktop-titlebar__separator" aria-hidden="true" />
-      <button className="desktop-titlebar__action" type="button" aria-label="搜索，快捷键 Ctrl+K" data-testid="titlebar-search" disabled={!available} onClick={onSearch}><Search aria-hidden="true" /><span className="desktop-titlebar__action-label">搜索</span><kbd>Ctrl K</kbd></button>
-      <span className="desktop-titlebar__separator" aria-hidden="true" />
-      <button className="desktop-titlebar__action" type="button" aria-label="新建任务" data-testid="titlebar-create-task" disabled={!available} onClick={() => void navigate(createTaskPath)}><Plus aria-hidden="true" /><span className="desktop-titlebar__action-label">新建任务</span></button>
+      <button className="desktop-titlebar__action desktop-titlebar__search" type="button" aria-label="搜索资料，快捷键 Ctrl+K" data-testid="titlebar-search" disabled={!available} onClick={onSearch}><Search aria-hidden="true" /><span className="desktop-titlebar__action-label">搜索资料…</span></button>
+      <button className="desktop-titlebar__action desktop-titlebar__create" type="button" aria-label="新建任务" data-testid="titlebar-create-task" disabled={!available} onClick={() => void navigate(createTaskPath)}><Plus aria-hidden="true" /><span className="desktop-titlebar__action-label">新建</span></button>
     </div>
     <div className="desktop-titlebar__drag" onMouseDown={onDragMouseDown}>
       {error && <span className="desktop-titlebar__error" role="alert">窗口操作失败</span>}
     </div>
-    <div className="desktop-titlebar__controls" aria-label="窗口控制">
+    {current && <div className="desktop-titlebar__controls" aria-label="窗口控制">
       <button className="desktop-titlebar__button" type="button" aria-label="最小化" onClick={() => void run(() => current.minimize())}><Minus aria-hidden="true" /></button>
       <button className="desktop-titlebar__button" type="button" aria-label={maximized ? "还原窗口" : "最大化"} onClick={() => void toggleMaximized()}>
         {maximized ? <Copy aria-hidden="true" /> : <Square aria-hidden="true" />}
       </button>
       <button className="desktop-titlebar__button desktop-titlebar__button--close" type="button" aria-label="关闭窗口" onClick={() => void run(() => current.close())}><X aria-hidden="true" /></button>
-    </div>
+    </div>}
   </div>;
 }

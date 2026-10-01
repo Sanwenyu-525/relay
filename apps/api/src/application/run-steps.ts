@@ -45,7 +45,7 @@ import { OpenAiCompatibleModelPort, ModelCallBudgetError, ModelSourcePolicyError
   from '../workflow/openai-compatible-model-port.js';
 import { recordModelInvocation } from './model-call-recorder.js';
 import { AssistLivePreviewPublisher, AssistPreviewOwnershipLostError } from '../assist/live-preview.js';
-import { publishRunDraftPreview } from './run-draft-preview.js';
+import { publishRunDraftPreview, recordRunDraftFirstTextDelta } from './run-draft-preview.js';
 import { ModelScopeBudgetError } from '../model/model-call-repository.js';
 import {
   ALL_EXECUTED_STEP_KINDS,
@@ -740,23 +740,33 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
           identity: currentPort.identity,
           ...(input.signal === undefined ? {} : { signal: input.signal }),
           invoke: async (callId) => {
+            const previewOwner = {
+              workspaceId: claim.run.workspace_id, runId: claim.run.id,
+              stepId: claim.step.id, attemptId: claim.attempt.id,
+              attemptClaimEpoch: claim.attempt.claim_epoch,
+              runWorkerEpoch: claim.workerEpoch, workerId: input.workerId,
+              ...(input.invocationEpoch === undefined ? {} :
+                { invocationEpoch: input.invocationEpoch }),
+              modelCallId: callId, manifestId: manifest.id, inputHash,
+            };
+            let textObserved = false;
             const preview = new AssistLivePreviewPublisher((text, truncated) =>
-              publishRunDraftPreview(db, {
-                workspaceId: claim.run.workspace_id, runId: claim.run.id,
-                stepId: claim.step.id, attemptId: claim.attempt.id,
-                attemptClaimEpoch: claim.attempt.claim_epoch,
-                runWorkerEpoch: claim.workerEpoch, workerId: input.workerId,
-                ...(input.invocationEpoch === undefined ? {} :
-                  { invocationEpoch: input.invocationEpoch }),
-                modelCallId: callId, manifestId: manifest.id, inputHash,
-                text, truncated,
-              }), () => { previewEnabled = false; });
+              publishRunDraftPreview(db, { ...previewOwner, text, truncated }),
+              () => { previewEnabled = false; });
             const generated = await currentPort.generate({ manifest: manifest.payload,
             outputSchema: CANDIDATE_OUTPUT_SCHEMA,
               ...(input.signal === undefined ? {} : { signal: input.signal }),
               onTextDelta: async (piece) => {
-                if (!previewEnabled) return;
-                try { await preview.push(piece); }
+                const observedAt = new Date();
+                if (piece === '' || !previewEnabled || input.signal?.aborted) return;
+                try {
+                  if (!textObserved) {
+                    textObserved = await recordRunDraftFirstTextDelta(db,
+                      { ...previewOwner, observedAt });
+                    if (!textObserved) { previewEnabled = false; return; }
+                  }
+                  await preview.push(piece);
+                }
                 catch (error) {
                   if (!(error instanceof AssistPreviewOwnershipLostError)) {
                     throw new RunDraftPreviewWriteError();

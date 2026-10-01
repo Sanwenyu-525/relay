@@ -3,7 +3,7 @@ import { Info, Link2, Unplug } from "lucide-react";
 import { RelayApiClient } from "../api/relayClient";
 import AppDialog from "./AppDialog";
 import { describeLiveError } from "../lib/liveErrors";
-import { hasUnsavedDraft } from "../lib/draftGuard";
+import { currentDraftGuard, hasUnsavedDraft } from "../lib/draftGuard";
 import { activateRelayConnection, relayConnection, useFixtureData, useRelayConnection } from "../lib/relayConnection";
 
 export default function RelayConnectionDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -16,6 +16,12 @@ export default function RelayConnectionDialog({ open, onClose }: { open: boolean
   const [success, setSuccess] = useState<string | null>(null);
   const requestVersion = useRef(0);
 
+  function connectionBlockedMessage(draftMessage: string): string {
+    return currentDraftGuard()?.pendingCommandId?.()
+      ? "原命令结果待核对，请先查询原命令回执，再切换数据来源。"
+      : draftMessage;
+  }
+
   function close(): void {
     requestVersion.current++;
     setChecking(false);
@@ -26,7 +32,7 @@ export default function RelayConnectionDialog({ open, onClose }: { open: boolean
   async function connect(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (checking || connection.mode === "live") return;
-    if (hasUnsavedDraft()) { setFailure("当前页面有未保存的草稿。请先保存或离开页面时选择丢弃，再切换数据来源。"); return; }
+    if (hasUnsavedDraft()) { setFailure(connectionBlockedMessage("当前页面有未保存的草稿。请先保存或离开页面时选择丢弃，再切换数据来源。")); return; }
     const request = ++requestVersion.current;
     const connectionEpoch = relayConnection.epoch;
     setFailure(null);
@@ -37,7 +43,7 @@ export default function RelayConnectionDialog({ open, onClose }: { open: boolean
       // Readiness is checked before changing mode; liveness alone is insufficient.
       await new RelayApiClient(input).getHealthReady();
       if (request !== requestVersion.current || connectionEpoch !== relayConnection.epoch) return;
-      if (hasUnsavedDraft()) { setFailure("检查期间出现未保存的草稿，数据来源未切换。请先处理草稿。"); return; }
+      if (hasUnsavedDraft()) { setFailure(connectionBlockedMessage("检查期间出现未保存的草稿，数据来源未切换。请先处理草稿。")); return; }
       activateRelayConnection(input);
       setBearerToken("");
       setSuccess("已连接：/health/ready 返回 200，数据库与 schema 均匹配。");
@@ -53,7 +59,7 @@ export default function RelayConnectionDialog({ open, onClose }: { open: boolean
   function disconnect(): void {
     requestVersion.current++;
     setChecking(false);
-    if (hasUnsavedDraft()) { setFailure("当前页面有未保存的草稿。请先保存或离开页面时选择丢弃，再切换数据来源。"); return; }
+    if (hasUnsavedDraft()) { setFailure(connectionBlockedMessage("当前页面有未保存的草稿。请先保存或离开页面时选择丢弃，再切换数据来源。")); return; }
     useFixtureData();
     setBearerToken("");
     setSuccess(null);
@@ -65,21 +71,21 @@ export default function RelayConnectionDialog({ open, onClose }: { open: boolean
     {connection.mode === "live"
       ? <p className="receipt-message" role="status" data-testid="relay-connection-state">已连接 {connection.baseUrl}</p>
       : <p className="helper-text" data-testid="relay-connection-state">当前：示例数据（fixture），不调用任何 API。</p>}
-    <form className="create-form" noValidate onSubmit={(event) => { void connect(event); }}>
+    <form className="create-form" noValidate aria-busy={checking || undefined} onSubmit={(event) => { void connect(event); }}>
       <label className="field"><span className="field-label">API 地址<span className="field-required" aria-hidden="true">*</span></span>
-        <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} name="relay-base-url" required autoComplete="off" />
+        <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} name="relay-base-url" required autoComplete="off" disabled={checking || connection.mode === "live"} />
         <span className="field-hint">只接受 http 或 https 的完整地址；本机 API 默认监听 http://127.0.0.1:8787。</span>
       </label>
       <label className="field"><span className="field-label">Workspace ID<span className="field-required" aria-hidden="true">*</span></span>
-        <input value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)} name="relay-workspace-id" required autoComplete="off" />
+        <input value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)} name="relay-workspace-id" required autoComplete="off" disabled={checking || connection.mode === "live"} />
         <span className="field-hint">由 apps/api 的 Workspace 初始化入口创建；未初始化时后端会按不可见处理。</span>
       </label>
       <label className="field"><span className="field-label">Bearer 令牌<span className="field-required" aria-hidden="true">*</span></span>
-        <input value={bearerToken} onChange={(event) => setBearerToken(event.target.value)} name="relay-bearer-token" type="password" required autoComplete="off" disabled={connection.mode === "live"} />
+        <input value={bearerToken} onChange={(event) => setBearerToken(event.target.value)} name="relay-bearer-token" type="password" required autoComplete="off" disabled={checking || connection.mode === "live"} />
         <span className="field-hint">令牌只保存在当前页面内存，不写入浏览器存储、URL 或日志，刷新即清除。</span>
       </label>
       <div className="form-actions">
-        <button className="primary-button" type="submit" data-testid="relay-connect" disabled={checking || connection.mode === "live"}>{checking ? "正在检查" : "连接并检查就绪"}</button>
+        <button className="primary-button" type="submit" data-testid="relay-connect" aria-busy={checking || undefined} disabled={checking || connection.mode === "live"}>{checking ? "正在检查" : "连接并检查就绪"}</button>
         {connection.mode === "live" && <button className="secondary-button" type="button" data-testid="relay-disconnect" onClick={disconnect}><Unplug aria-hidden="true" />断开并回到示例数据</button>}
         <button className="text-button" type="button" onClick={close}>关闭</button>
       </div>

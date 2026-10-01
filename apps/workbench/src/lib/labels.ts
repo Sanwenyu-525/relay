@@ -43,6 +43,7 @@ export const executorLabels: Record<ExecutorKind, string> = {
 
 /** 阶段词汇按 Project Type 分组，用户显式设置，系统不按任务数量自动跳阶段。 */
 export const phaseLabels: Record<string, string> = {
+  GENERAL: "通用阶段",
   PLANNING: "规划",
   EXECUTING: "执行",
   REVIEW: "评审",

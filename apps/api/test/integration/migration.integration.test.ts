@@ -6,6 +6,10 @@ import test from 'node:test';
 import { Client } from 'pg';
 import { sql } from 'kysely';
 
+import { withTransaction } from '../../src/application/unit-of-work.js';
+import { ModelCallRepository } from '../../src/model/model-call-repository.js';
+import { FakeModelPort } from '../../src/workflow/fake-model-port.js';
+
 import {
   MIGRATION_LOCK_NAMESPACE,
   MigrationDefinitionError,
@@ -102,6 +106,7 @@ const ALL_MIGRATIONS = [
   '0044_project_continuation_points',
   '0045_continuation_point_ref_target_guard',
   '0046_assist_provider_error_kind',
+  '0047_m04_model_call_first_output',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {
@@ -109,6 +114,48 @@ function delay(milliseconds: number): Promise<void> {
     setTimeout(resolveDelay, milliseconds);
   });
 }
+
+test('first-output migration leaves pre-existing settled calls NULL', async () => {
+  const database = await createTemporaryDatabase('first_output_legacy');
+  const directory = await createMigrationDirectoryFixture((files) => {
+    files.delete('0047_m04_model_call_first_output.sql');
+  });
+  const app = openDatabase(database.appUrl, 'relay-api-test-legacy-call');
+  try {
+    await runMigrations({ connectionString: database.migrationUrl, directory });
+    const workspaceId = randomUUID();
+    const sessionId = randomUUID();
+    const messageId = randomUUID();
+    await withTransaction(app.db, async (r) => {
+      await r.workspaces.insertWorkspace({ id: workspaceId, name: 'Legacy timing' });
+      await r.workspaces.insertAuthorityRow(workspaceId);
+      await r.assist.insertSession({ id: sessionId, workspaceId, projectId: null,
+        taskId: null, title: 'Legacy call' });
+      await r.assist.insertMessage({ id: messageId, sessionId, seq: 1n,
+        role: 'ASSISTANT', status: 'COMPLETED', intent: 'DISCUSS',
+        content: 'Historical response', sources: [] });
+    });
+    const calls = new ModelCallRepository(app.db);
+    const callId = randomUUID();
+    await calls.begin(callId, { workspaceId, kind: 'ASSIST', assistMessageId: messageId },
+      new FakeModelPort().identity);
+    await calls.settle(callId, { status: 'COMPLETED' });
+    const applied = await runMigrations({ connectionString: database.migrationUrl,
+      directory: MIGRATIONS_DIRECTORY });
+    assert.deepEqual(applied.applied, ['0047_m04_model_call_first_output']);
+    await calls.recordFirstTextDelta(callId, new Date());
+    await calls.recordFirstPreviewPersisted(callId);
+    const legacy = await calls.read(callId);
+    assert.ok(legacy);
+    assert.equal(legacy?.status, 'COMPLETED');
+    assert.equal(legacy.first_text_delta_at, null);
+    assert.equal(legacy.first_preview_persisted_at, null);
+  } finally {
+    await app.close();
+    await database.drop();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test('applies V001 on an empty database and does not repeat it on a second run', async () => {
   const database = await createTemporaryDatabase('fresh');
@@ -150,12 +197,17 @@ test('applies V001 on an empty database and does not repeat it on a second run',
       const probe = await sql`select 1 as ok from workspaces limit 1`.execute(app.db);
       assert.equal(probe.rows.length, 0);
       const modelCallPrivileges = (await sql<{ can_change_origin: boolean;
-        can_settle: boolean }>`select
+        can_settle: boolean; can_record_text: boolean; can_record_preview: boolean }>`select
           has_column_privilege(current_user, 'model_calls', 'step_attempt_id', 'UPDATE')
             as can_change_origin,
           has_column_privilege(current_user, 'model_calls', 'status', 'UPDATE')
-            as can_settle`.execute(app.db)).rows[0]!;
-      assert.deepEqual(modelCallPrivileges, { can_change_origin: false, can_settle: true });
+            as can_settle,
+          has_column_privilege(current_user, 'model_calls', 'first_text_delta_at', 'UPDATE')
+            as can_record_text,
+          has_column_privilege(current_user, 'model_calls', 'first_preview_persisted_at', 'UPDATE')
+            as can_record_preview`.execute(app.db)).rows[0]!;
+      assert.deepEqual(modelCallPrivileges, { can_change_origin: false, can_settle: true,
+        can_record_text: true, can_record_preview: true });
 
       await expectSqlState(
         '42501',

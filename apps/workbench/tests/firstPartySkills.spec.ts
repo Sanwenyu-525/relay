@@ -117,9 +117,11 @@ describe("M04 第一方 Skill 与 Pack", () => {
     await view.wrapper.get('[data-testid="assist-skill"]').setValue("task-to-execution-contract@1.0.0");
     await view.wrapper.get('[data-testid="assist-skill-input"]').setValue("完成说明");
     await view.wrapper.get('[data-testid="assist-draft"]').setValue("请建议任务定义");
+    expect(view.wrapper.get('[data-testid="assist-send"]').text()).toBe("运行 task-to-execution-contract");
     await view.wrapper.get('[data-testid="assist-send"]').trigger("click");
     await flush();
     expect(view.wrapper.text()).toContain("命令结果待核对");
+    expect(view.wrapper.get('[data-testid="assist-send"]').text()).toBe("运行 task-to-execution-contract");
     await view.wrapper.get(".assist-pending .secondary-button:last-child").trigger("click");
     await flush();
     expect(attempts).toHaveLength(2);
@@ -129,6 +131,8 @@ describe("M04 第一方 Skill 与 Pack", () => {
       skill_input: { desired_result: "完成说明" } });
     expect(attempts[0]).not.toHaveProperty("intent");
     expect(view.wrapper.get('[data-testid="assist-skill-output"]').text()).toContain("建议目标");
+    expect(view.wrapper.get(".assist-skill-summary > p").text()).toContain("建议");
+    expect(view.wrapper.get(".assist-skill-details").attributes("open")).toBeUndefined();
     expect(view.wrapper.get('[data-testid="assist-task-diff-status"]').text()).toContain("基线与当前 Task/验收版本一致");
     expect(view.wrapper.get('[data-testid="assist-skill-output"]').text()).toContain("当前验收：旧目标");
     expect(view.wrapper.get('[data-testid="assist-skill-output"]').text()).toContain("当前验收：MARKDOWN_DOCUMENT");
@@ -221,6 +225,7 @@ describe("M04 第一方 Skill 与 Pack", () => {
     })];
     await view.wrapper.get('[data-testid="assist-refresh"]').trigger("click"); await flush();
     expect(view.wrapper.get('[data-testid="assist-skill-output"]').text()).toContain("当前速览");
+    expect(view.wrapper.get('[data-testid="assist-skill-output"] .assist-skill-details').attributes("open")).toBeUndefined();
     expect(view.wrapper.get('[data-testid="assist-skill-output"]').text()).toContain("不是 Today 判定的合格 Task");
     expect(view.wrapper.find(`a[href="/tasks/${taskId}"]`).exists()).toBe(true);
     expect(view.wrapper.find(`a[href="/knowledge?kind=KNOWLEDGE&item=${sourceId}"]`).exists()).toBe(true);
@@ -339,6 +344,7 @@ describe("M04 第一方 Skill 与 Pack", () => {
       throw new Error(`unexpected request ${path}`);
     }));
     const view = await mountWorkbench("/settings");
+    await view.wrapper.get('[data-testid="settings-group-workbench"]').trigger("click");
     expect(view.wrapper.get('[data-testid="pack-catalog"]').text()).toContain("thesis-minimal");
     expect(view.wrapper.get('[data-testid="pack-catalog"]').text()).toContain("development-minimal");
     expect(view.wrapper.get('[data-testid="pack-catalog"]').findAll("article")[0]?.text()).toContain("v1.2.0");

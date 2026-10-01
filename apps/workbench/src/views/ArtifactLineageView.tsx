@@ -65,10 +65,11 @@ export default function ArtifactLineageView() {
       <button className="secondary-button" type="button" disabled={loading} onClick={() => setReload((value) => value + 1)}>刷新来源</button>
       {loading && <p role="status">正在读取版本 {id} 的来源关系…</p>}
       {error && <p className="action-error" role="alert">{error}</p>}
-      {lineage && <><section className="surface-panel lineage-summary"><h2>确切版本</h2>
-        <dl><div><dt>Version ID</dt><dd>{lineage.artifactVersionId}</dd></div><div><dt>Artifact ID</dt><dd>{lineage.artifactId}</dd></div>
+      {lineage && <><section className="surface-panel lineage-summary"><h2>确切版本 · v{lineage.versionNumber}</h2>
+        <p>{lineage.contentAvailability === "AVAILABLE" ? "历史正文当前可读取；正文接口仍单独鉴权。" : "历史正文不可用或无权读取，不以最新版替代。"}</p>
+        <details className="page-explanation"><summary>核对版本身份与内容指纹</summary><dl><div><dt>Version ID</dt><dd>{lineage.artifactVersionId}</dd></div><div><dt>Artifact ID</dt><dd>{lineage.artifactId}</dd></div>
           <div><dt>版本</dt><dd>v{lineage.versionNumber}</dd></div><div><dt>来源类型</dt><dd>{lineage.sourceKind}</dd></div>
-          <div><dt>内容 sha256</dt><dd>{lineage.sha256}</dd></div><div><dt>历史正文</dt><dd>{lineage.contentAvailability === "AVAILABLE" ? "当前可读取；正文仍须通过原内容接口单独鉴权" : "不可用或无权读取，不以最新版替代"}</dd></div></dl>
+          <div><dt>内容 sha256</dt><dd>{lineage.sha256}</dd></div><div><dt>历史正文</dt><dd>{lineage.contentAvailability === "AVAILABLE" ? "当前可读取；正文仍须通过原内容接口单独鉴权" : "不可用或无权读取，不以最新版替代"}</dd></div></dl></details>
       </section><section className="surface-panel lineage-parents"><h2>直接父来源 · {lineage.directParents.length}</h2>
         {lineage.directParents.length ? <ul>{lineage.directParents.map((edge) => <li key={edge.id}><strong>{relationLabels[edge.relation]} · {parentLabels[edge.parentKind]}</strong>
           <small>关系 ID {edge.id} · 记录时间 {edge.createdAt}</small>

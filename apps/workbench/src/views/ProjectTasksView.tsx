@@ -103,7 +103,8 @@ export default function ProjectTasksView() {
   const [unresolvedStart, setUnresolvedStart] = useState(false);
   const [startReceiptMissing, setStartReceiptMissing] = useState(false);
   const needle = search.trim().toLowerCase();
-  const tasks = (result?.tasks ?? []).filter((task) => !needle || task.title.toLowerCase().includes(needle));
+  const tasks = (result?.tasks ?? []).filter((task) => !needle ||
+    [task.title, taskStatusLabels[task.status], executorLabels[task.executor]].some((value) => value.toLowerCase().includes(needle)));
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
   const notes = result?.source === "live" ? liveDependencies : result?.dependencies ?? [];
   const selectedDependencies = selectedTask ? notes.filter((note) => selectedTask.dependencyIds.includes(note.id)) : [];

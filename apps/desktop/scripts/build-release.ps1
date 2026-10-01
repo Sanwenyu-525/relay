@@ -59,6 +59,7 @@ function Get-BuildInputFingerprint {
     'apps\desktop\src-tauri\Cargo.toml', 'apps\desktop\src-tauri\Cargo.lock',
     'apps\desktop\src-tauri\tauri.conf.json', 'apps\desktop\src-tauri\build.rs',
     'apps\desktop\src-tauri\capabilities\default.json', 'apps\desktop\src-tauri\icons\icon.ico',
+    'scripts\verify-desktop-maintenance-capability.mjs',
     'apps\file-io-helper\Cargo.toml', 'apps\file-io-helper\Cargo.lock'
   )) { $inputs += Get-Item -LiteralPath (Join-Path $workspaceRoot $relative) }
   $lines = foreach ($file in @($inputs | Sort-Object FullName)) {
@@ -297,10 +298,35 @@ $sourceHashes['workbench'] = Get-FileHashes $workbenchRoot @('src', 'public\lice
 $sourceHashes['workspace_lock'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'pnpm-lock.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
 $sourceHashes['workspace_manifest'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'pnpm-workspace.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
 $sourceHashes['design_tokens'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'docs\frontend\design-tokens.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+$sourceHashes['maintenance_capability_verifier'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'scripts\verify-desktop-maintenance-capability.mjs') -Algorithm SHA256).Hash.ToLowerInvariant()
 $resourceHashes = Get-FileHashes $releaseRoot @('api', 'licenses') @('node.exe', 'relay-file-io-helper.exe')
+
+# A legacy EXE can ignore --maintenance-session and open the normal desktop.
+# Check stable output markers and the invalid-argument CLI path, never a valid start/hold session.
+# Input-comparison strings can be compiled into instructions in optimized release binaries.
+$maintenanceBinaryText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($exe))
+& $node (Join-Path $workspaceRoot 'scripts\verify-desktop-maintenance-capability.mjs') $exe
+if ($LASTEXITCODE -ne 0) { throw 'Desktop binary maintenance session capability verification failed' }
+# Declare isolation only after checking the hash-bound native and Node startup artifacts.
+foreach ($literal in @('restore-isolation.json', 'RESTORE_ISOLATED', 'RESTORE_ISOLATION_UNAVAILABLE')) {
+  if (-not $maintenanceBinaryText.Contains($literal)) { throw 'Desktop binary does not contain restore isolation' }
+}
+$restoreIsolationModule = Join-Path $releaseRoot 'api\dist\src\runtime\restore-isolation.js'
+if (-not (Test-Path -LiteralPath $restoreIsolationModule -PathType Leaf)) { throw 'Restore isolation module missing' }
+$restoreIsolationText = Get-Content -LiteralPath $restoreIsolationModule -Raw
+foreach ($literal in @('restore-isolation.json', 'RESTORE_ISOLATED', 'RESTORE_ISOLATION_UNAVAILABLE')) {
+  if (-not $restoreIsolationText.Contains($literal)) { throw 'Restore isolation module protocol missing' }
+}
+foreach ($relative in @('api\dist\src\main.js', 'api\dist\src\worker\main.js', 'api\dist\src\worker\supervisor-main.js')) {
+  $restoreEntryText = Get-Content -LiteralPath (Join-Path $releaseRoot $relative) -Raw
+  if (-not $restoreEntryText.Contains('runtime/restore-isolation.js') -or
+      -not $restoreEntryText.Contains('await assertRestoreNotIsolated(')) { throw 'Restore isolation startup wiring missing' }
+}
 
 $manifest = [ordered]@{
   schema_version = 1
+  maintenance_session_protocol = 'relay-desktop-maintenance-v1'
+  restore_isolation_protocol = 'relay-restore-isolation-v1'
   built_at_utc = [DateTime]::UtcNow.ToString('o')
   node_version = (& $node --version)
   tauri_crate = '2.11.6'

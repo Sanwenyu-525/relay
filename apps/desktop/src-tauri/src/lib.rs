@@ -18,6 +18,9 @@ use uuid::Uuid;
 #[cfg(windows)]
 mod job_sidecar;
 #[cfg(windows)]
+mod maintenance_session;
+mod restore_isolation;
+#[cfg(windows)]
 use job_sidecar::{ManagedProcess, StoppedLaunch, arm_launch, recover_old_launches,
     remove_reconciled_launches};
 
@@ -254,17 +257,31 @@ unsafe impl Sync for SingleInstanceGuard {}
 
 #[cfg(windows)]
 fn acquire_single_instance() -> Result<SingleInstanceGuard, String> {
+    acquire_single_instance_named(SINGLE_INSTANCE_MUTEX, true).map_err(|error| match error {
+        SingleInstanceError::Busy => "Relay Agent is already open".to_owned(),
+        SingleInstanceError::Unavailable => "cannot create the desktop single-instance guard".to_owned(),
+    })
+}
+
+#[cfg(windows)]
+enum SingleInstanceError { Busy, Unavailable }
+
+#[cfg(windows)]
+fn acquire_single_instance_named(name: &str, foreground: bool)
+    -> Result<SingleInstanceGuard, SingleInstanceError> {
     unsafe {
-        let name = HSTRING::from(SINGLE_INSTANCE_MUTEX);
+        let name = HSTRING::from(name);
         let handle = CreateMutexW(None, false, &name)
-            .map_err(|_| "cannot create the desktop single-instance guard".to_owned())?;
+            .map_err(|_| SingleInstanceError::Unavailable)?;
         if GetLastError() == ERROR_ALREADY_EXISTS {
-            let title = HSTRING::from(WINDOW_TITLE);
-            if let Ok(window) = FindWindowW(None, &title) {
-                let _ = SetForegroundWindow(window);
+            if foreground {
+                let title = HSTRING::from(WINDOW_TITLE);
+                if let Ok(window) = FindWindowW(None, &title) {
+                    let _ = SetForegroundWindow(window);
+                }
             }
             let _ = CloseHandle(handle);
-            return Err("Relay Agent is already open".into());
+            return Err(SingleInstanceError::Busy);
         }
         Ok(SingleInstanceGuard { handle })
     }
@@ -625,6 +642,7 @@ struct SupervisorSpawnContext {
 #[cfg(windows)]
 fn spawn_supervisor(context: &SupervisorSpawnContext)
     -> Result<(ManagedProcess, Arc<AtomicBool>), String> {
+    restore_isolation::assert_not_restore_isolated(&context.data_root)?;
     let stopped_launches = job_sidecar::recover_supervisor_restart_launches(
         &context.data_root, &context.api_launch_id)?;
     let launch = job_sidecar::arm_launch(&context.data_root)?;
@@ -772,6 +790,7 @@ fn start_api(app: &tauri::AppHandle, single_instance: SingleInstanceGuard) -> Re
         None => app.path().app_data_dir()
             .map_err(|_| "cannot locate the desktop data directory".to_owned())?.join("data"),
     };
+    restore_isolation::assert_not_restore_isolated(&data_root)?;
     fs::create_dir_all(&data_root).map_err(|_| "cannot create the desktop data directory".to_owned())?;
     let stopped_launches = recover_old_launches(&data_root)?;
     if stopped_launches.len() > STOPPED_LAUNCH_LIMIT {
@@ -838,6 +857,7 @@ fn start_api(app: &tauri::AppHandle) -> Result<RuntimeState, String> {
         .map_err(|_| "cannot locate the bundled API".to_owned())?;
     if !node.is_file() || !entry.is_file() { return Err("the release directory is incomplete".into()); }
     let data_root = app.path().app_data_dir().map_err(|_| "cannot locate desktop data")?.join("data");
+    restore_isolation::assert_not_restore_isolated(&data_root)?;
     fs::create_dir_all(&data_root).map_err(|_| "cannot create desktop data directory")?;
     let nonce = Uuid::new_v4().simple().to_string();
     let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
@@ -970,6 +990,18 @@ fn show_error(message: &str) {
 }
 
 pub fn run() {
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    if args.iter().any(|argument| argument == "--maintenance-session") {
+        #[cfg(windows)]
+        {
+            std::process::exit(maintenance_session::run(args.len() == 1));
+        }
+        #[cfg(not(windows))]
+        {
+            eprintln!("{{\"type\":\"maintenance_error\",\"version\":1,\"nonce\":null,\"code\":\"MAINTENANCE_SESSION_UNSUPPORTED\"}}");
+            std::process::exit(1);
+        }
+    }
     #[cfg(windows)]
     let single_instance = acquire_single_instance().unwrap_or_else(|error| {
         eprintln!("Relay Agent: {error}");

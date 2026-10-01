@@ -89,13 +89,19 @@ describe("项目内置工作台", () => {
       else if (path === "/tasks?project_id=" + projectId + "&cursor=cursor-two") body = { items: [task("task-b", "整理引用", "READY")], next_cursor: null };
       else if (path === "/tasks/task-next") body = { ...task("task-next", "核对论文下一步", "READY"),
         acceptance: { acceptance_revision: "1", objective: "核对", source: "HUMAN", criteria: [] }, dependencies: [] };
+      else if (path === "/tasks/task-a") body = { ...task("task-a", "撰写草稿", "IN_PROGRESS", "run-a"),
+        acceptance: { acceptance_revision: "1", objective: "撰写可复核的真实草稿", source: "HUMAN", criteria: [] }, dependencies: [] };
       else if (path === "/artifacts/artifact-a") body = artifact();
-      else if (path === `/knowledge?project_id=${projectId}`) body = [{ id: "knowledge-a", project_id: projectId,
+      else if (path === `/knowledge?project_id=${projectId}`) body = [{ id: "version-a", project_id: projectId,
         title: "研究资料", status: "ACTIVE", revision: "1", current_version: "1",
         created_at: "2026-09-26T00:00:00.000Z", updated_at: "2026-09-26T00:00:00.000Z" }];
-      else if (path === "/knowledge/knowledge-a/versions") body = [{ id: "knowledge-version-a", knowledge_id: "knowledge-a", version: "1",
+      else if (path === "/knowledge/version-a/versions") body = [{ id: "knowledge-version-a", knowledge_id: "version-a", version: "1",
         source_kind: "NOTE", media_type: "text/plain", content_sha256: "sha-knowledge", availability: "AVAILABLE",
         excerpt: "来源摘录", source_refs: { citation: "paper:7" }, created_at: "2026-09-26T00:00:00.000Z" }];
+      else if (path === "/knowledge/version-a/versions/1/content") body = { id: "knowledge-version-a", knowledge_id: "version-a", version: "1",
+        source_kind: "NOTE", media_type: "text/plain", content_sha256: "sha-knowledge", availability: "AVAILABLE", source_refs: { citation: "paper:7" },
+        title: "研究资料", project_id: projectId, current_version: "1", source_uri: null, content_status: "FULL", content: "完整资料正文，用于核对引用。", created_at: "2026-09-26T00:00:00.000Z" };
+      else if (path === "/artifact-versions/version-a/content") body = "# 已保存研究草稿\n确切产物第一版正文。";
       else if (path === "/tasks/task-a/artifacts") body = { items: [artifact()], current_accepted_version_ids: [] };
       else if (path === "/tasks/task-next/artifacts") body = { items: [], current_accepted_version_ids: [] };
       else if (path === `/projects/${projectId}/connections`) body = [{ id: "connection-a", status: "ACTIVE", capabilities: ["WEB_FETCH"], allowed_host: "example.org" }];
@@ -112,7 +118,7 @@ describe("项目内置工作台", () => {
         pending_control_request: null, unresolved_operation_ids: [] };
       else throw new Error(`Unexpected GET ${url}`);
       expect(init?.method ?? "GET").toBe("GET");
-      return { ok: true, status: 200, json: async () => body } as Response;
+      return { ok: true, status: 200, json: async () => body, text: async () => String(body) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountWorkbench(`/projects/${projectId}/workbench/general`);
@@ -120,16 +126,36 @@ describe("项目内置工作台", () => {
     expect(mounted.wrapper.text()).toContain("核对论文下一步");
     expect(mounted.wrapper.text()).toContain("研究草稿");
     expect(mounted.wrapper.text()).toContain("当前已读取 1 条；还有后续页");
+    expect(mounted.wrapper.get(".workbench-rail-context").text()).toContain("任务：核对论文下一步");
+    expect(mounted.wrapper.get('.workbench-assist-entry a').attributes("href")).toBe("/tasks/task-next?skill=assist");
     await mounted.wrapper.findAll("button").find((button) => button.text() === "继续加载任务")!.trigger("click");
     await flush();
     expect(mounted.wrapper.text()).toContain("整理引用");
     expect(mounted.wrapper.text()).toContain("当前已读取 2 条；服务端未返回下一页游标");
+    await mounted.wrapper.findAll(".workbench-task-choice").find((button) => button.text() === "撰写草稿")!.trigger("click");
+    await flush();
+    expect(mounted.wrapper.get("h1").text()).toBe("撰写草稿");
+    expect(mounted.wrapper.get(".workbench-next-context").text()).toContain("当前浏览任务撰写草稿");
+    expect(mounted.wrapper.get(".workbench-next-context").text()).toContain("项目下一步：核对论文下一步");
+    expect(mounted.wrapper.get('.workbench-next-context a[href="/tasks/task-a"]').exists()).toBe(true);
+    expect(mounted.wrapper.get(".workbench-rail-context").text()).toContain("任务：撰写草稿");
+    expect(mounted.wrapper.get('.workbench-assist-entry a').attributes("href")).toBe("/tasks/task-a?skill=assist");
 
     await mounted.router.push(`/projects/${projectId}/workbench/thesis`);
     await flush();
     expect(mounted.wrapper.text()).toContain("研究资料");
     expect(mounted.wrapper.text()).toContain("paper:7");
     expect(mounted.wrapper.text()).toContain("研究草稿");
+    expect(mounted.wrapper.get('[data-testid="workbench-document-body"]').text()).toContain("确切产物第一版正文");
+    expect(mounted.wrapper.get('.workbench-paper-footer').text()).toContain("归属任务：撰写草稿");
+    await mounted.wrapper.findAll(".workbench-source-choice").find((button) => button.text().includes("研究资料"))!.trigger("click");
+    await flush();
+    expect(mounted.wrapper.get('[data-testid="workbench-document-body"]').text()).toBe("完整资料正文，用于核对引用。");
+    const draftChoice = mounted.wrapper.findAll(".workbench-source-choice").find((button) => button.text().includes("研究草稿"))!;
+    expect(draftChoice.attributes("aria-pressed")).toBe("false");
+    expect(draftChoice.attributes("class")).not.toContain("workbench-source-choice--active");
+    const knowledgeChoice = mounted.wrapper.findAll(".workbench-source-choice").find((button) => button.text().includes("研究资料"))!;
+    expect(knowledgeChoice.attributes("aria-pressed")).toBe("true");
 
     await mounted.router.push(`/projects/${projectId}/workbench/development`);
     await flush();

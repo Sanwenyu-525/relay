@@ -27,7 +27,8 @@ const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const expectedExeSha = process.argv[2];
 const expectedMigrationSha = process.argv[3];
 const expectedManifestSha = process.argv[4];
-const gatewayUnknownScenario = process.argv[5] === '--gateway-unknown';
+const repeatedUnknownRestarts = process.argv[5] === '--gateway-unknown-restarts';
+const gatewayUnknownScenario = process.argv[5] === '--gateway-unknown' || repeatedUnknownRestarts;
 const migration = join(releaseRoot, 'api', 'migrations', '0013_m03_run_command_order.sql');
 const manifestPath = join(releaseRoot, 'desktop-build-manifest.json');
 const packageInputs = [exe, node, manifestPath, migration,
@@ -42,11 +43,11 @@ const packageInputs = [exe, node, manifestPath, migration,
 
 assert.equal(process.version, 'v24.21.0', 'use the pinned portable Node 24.21.0');
 assert.match(expectedExeSha ?? '', /^[0-9a-f]{64}$/u,
-  'usage: node m03-action-approval-webview.mjs <frozen-EXE-SHA256> <frozen-0013-SHA256> <frozen-manifest-SHA256> [--gateway-unknown]');
+  'usage: node m03-action-approval-webview.mjs <frozen-EXE-SHA256> <frozen-0013-SHA256> <frozen-manifest-SHA256> [--gateway-unknown | --gateway-unknown-restarts]');
 assert.match(expectedMigrationSha ?? '', /^[0-9a-f]{64}$/u);
 assert.match(expectedManifestSha ?? '', /^[0-9a-f]{64}$/u);
 assert.ok(process.argv[5] === undefined || gatewayUnknownScenario,
-  'the only optional scenario is --gateway-unknown');
+  'the optional scenario must be --gateway-unknown or --gateway-unknown-restarts');
 for (const path of [psql, ...packageInputs]) {
   assert.ok(existsSync(path), `missing packaged test input: ${path}`);
 }
@@ -186,7 +187,7 @@ function startGatewayUnknownFaultWorker() {
   env.RELAY_WORKER_POLL_MS = '20';
   env.RELAY_WORKER_TEST_EXIT_AFTER_GATEWAY_ADMIT = 'true';
   const child = spawn(node, [join(releaseRoot, 'api', 'dist', 'src', 'worker', 'main.js')],
-    { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
@@ -195,7 +196,8 @@ function startGatewayUnknownFaultWorker() {
   const closed = new Promise((done) => {
     child.once('close', (code, signal) => done({ code, signal }));
   });
-  state.faultWorker = { child, workerId, output: () => output, closed };
+  state.faultWorker = { child, workerId, output: () => output, closed, error: null };
+  child.once('error', (error) => { state.faultWorker.error = error; });
   return state.faultWorker;
 }
 
@@ -228,7 +230,12 @@ async function startHost(label, configPath = state.marker.config_path) {
   state.marker.desktop_pid = host.pid;
   writeFileSync(join(state.root, 'session.json'), JSON.stringify(state.marker), 'utf8');
   const browser = await waitFor(async () => {
-    if (host.exitCode !== null) throw new Error(`packaged desktop exited ${host.exitCode}`);
+    if (host.exitCode !== null) {
+      const diagnostic = readFileSync(logPath, 'utf8').split(/\r?\n/u)
+        .filter((line) => /panic|error|failed|timeout|readiness|recovery/iu.test(line))
+        .join('\n').replace(/[0-9a-f]{32,}/giu, '[redacted]').slice(-6000);
+      throw new Error(`packaged desktop ${label} exited ${host.exitCode}\n${diagnostic}`);
+    }
     try { return await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 1000 }); }
     catch { return null; }
   }, 180_000, 'visible packaged WebView2 CDP endpoint');
@@ -521,6 +528,12 @@ async function cleanup() {
   if (state.faultWorker?.child.exitCode === null) {
     state.faultWorker.child.kill('SIGTERM');
   }
+  if (state.faultWorker) {
+    const closed = await Promise.race([state.faultWorker.closed,
+      sleep(10_000).then(() => { throw new Error('isolated Gateway fault Worker did not close'); })]);
+    assert.ok(closed.code !== null || closed.signal !== null,
+      'isolated Gateway fault Worker stop is unverified');
+  }
   await state.browser?.close().catch(() => undefined);
   state.browser = null;
   if (state.host?.pid && state.host.exitCode === null) {
@@ -626,21 +639,34 @@ async function runChain() {
   assert.equal(task.status, 'READY');
   const gateway = await configureAskGateway(first.bootstrap, projectId);
   const content = 'M03 approved Fake marker';
-  // The WebView creates the Project/Task; the fixed Mock action is configured only by
-  // this authorized same-Workspace HTTP Delegate. Workbench has no action form.
-  const delegateBody = { command_id: randomUUID(), expected_task_revision: task.revision,
-    mock_gateway_action: { connection_id: gateway.connectionId,
-      resource_id: gateway.resourceId, target: gateway.target, content } };
+  await first.page.getByTestId('task-created-open-detail').click();
+  await first.page.getByTestId('task-detail-tab-runs').click();
+  await first.page.getByTestId('task-mock-action-toggle').check();
+  await expect(first.page.getByTestId('task-mock-connection')).toHaveValue(gateway.connectionId);
+  await expect(first.page.getByTestId('task-mock-resource')).toHaveValue(gateway.resourceId);
+  await first.page.getByTestId('task-mock-target').fill(gateway.target);
+  await first.page.getByTestId('task-mock-content').pressSequentially(content);
+  await expect(first.page.getByTestId('task-mock-content')).toHaveValue(content);
+  await expect(first.page.getByTestId('task-mock-content')).toBeFocused();
+  await expect(first.page.getByTestId('task-delegate')).toBeEnabled();
+  let delegateBody;
   let runId;
   let activeWorker;
   await startWorkerLatch();
   try {
-    const delegated = await post(first.bootstrap, `/tasks/${taskId}/delegations`, delegateBody, 202);
-    runId = delegated.result.run_id;
+    await first.page.getByTestId('task-delegate').click();
+    await expect(first.page).toHaveURL(/\/runs\/[0-9a-f-]{36}$/u);
+    runId = /\/runs\/([0-9a-f-]{36})$/u.exec(new URL(first.page.url()).pathname)?.[1];
     assert.match(runId ?? '', uuid);
-    assert.equal(delegated.result.task_id, taskId);
+    assert.ok(ledger.delegate, 'WebView did not submit the Mock action Delegate');
+    assert.equal(ledger.delegate.path, `/tasks/${taskId}/delegations`);
+    delegateBody = ledger.delegate.body;
+    assert.deepEqual(delegateBody.mock_gateway_action, {
+      connection_id: gateway.connectionId, resource_id: gateway.resourceId,
+      target: gateway.target, content });
     const replay = await post(first.bootstrap, `/tasks/${taskId}/delegations`, delegateBody, 202);
-    assert.deepEqual(replay, delegated, 'Delegate same-command replay changed the Run');
+    assert.equal(replay.result.run_id, runId, 'Delegate same-command replay changed the Run');
+    assert.equal(replay.result.task_id, taskId);
     activeWorker = await waitFor(async () => {
       const snapshot = await processSnapshot(state.host.pid);
       if (!snapshot.worker) return null;
@@ -678,7 +704,7 @@ async function runChain() {
     headers: { authorization: `Bearer ${first.bootstrap.bearerToken}`,
       origin: 'http://tauri.localhost' }, signal: AbortSignal.timeout(5000),
   })).status, 404, 'Run was visible through another Workspace');
-  console.log(`webview_created project_id=${projectId} task_id=${taskId} api_delegate_run_id=${runId} frozen_operation_id=${operationId}`);
+  console.log(`webview_created project_id=${projectId} task_id=${taskId} webview_delegate_run_id=${runId} frozen_operation_id=${operationId}`);
 
   await first.page.goto(`http://tauri.localhost/runs/${runId}`);
   await expect(first.page.getByTestId('run-detail')).toBeVisible();
@@ -748,6 +774,21 @@ async function runChain() {
   await expect(reopened.page.getByTestId('review-inbox')).toContainText(operationId);
   await expect(reopened.page.getByTestId('review-decision-APPROVE')).toBeEnabled();
   const faultWorker = gatewayUnknownScenario ? startGatewayUnknownFaultWorker() : null;
+  if (faultWorker) {
+    await waitFor(() => {
+      if (faultWorker.error || faultWorker.child.exitCode !== null) {
+        throw new Error('isolated Gateway fault Worker exited before readiness');
+      }
+      return faultWorker.output().includes('"type":"worker_ready"');
+    },
+      15_000, 'isolated Gateway fault Worker readiness');
+    const identity = JSON.parse(await powerShell(`$p=Get-CimInstance Win32_Process -Filter "ProcessId = ${faultWorker.child.pid}"; ` +
+      `if ($null -eq $p) { throw 'isolated Gateway fault Worker missing' }; ` +
+      `@{ pid=[int]$p.ProcessId; created=([datetime]$p.CreationDate).ToUniversalTime().ToString('o'); ` +
+      `executable=[string]$p.ExecutablePath } | ConvertTo-Json -Compress`));
+    assert.equal(resolve(identity.executable.replace(/^\\\\\?\\/u, '')).toLowerCase(), resolve(node).toLowerCase());
+    state.identities.push(identity);
+  }
   await reopened.page.getByTestId('review-decision-APPROVE').click();
   await waitFor(() => reopenedLedger.decision !== null, 10_000, 'WebView ACTION_APPROVAL decision POST');
   const approval = reopenedLedger.decision;
@@ -780,9 +821,13 @@ async function runChain() {
     // fault Worker is a harness process, so the harness repeats the supervisor's
     // stopped-claim sequence with the packaged application entries.
     const stoppedWorkerId = await sql(`select worker_id from run_invocations where run_id='${runId}'`);
-    const stoppedEpoch = await sql(`select epoch from run_invocations where run_id='${runId}'`);
-    const invocationId = await sql(`select id from run_invocations where run_id='${runId}'`);
     assert.equal(stoppedWorkerId, faultWorker.workerId, `fault Worker lost the claim race: ${faultWorker.output()}`);
+    const gatewayInvocation = JSON.parse(await sql(`select json_build_object(` +
+      `'id',id,'worker_id',worker_id,'worker_epoch',worker_epoch::text,'status',status)::text ` +
+      `from invocation_attempts where operation_id='${operationId}'`));
+    assert.match(gatewayInvocation.id, uuid);
+    assert.equal(gatewayInvocation.worker_id, stoppedWorkerId);
+    assert.equal(gatewayInvocation.status, 'DISPATCHING');
     const requireApi = createRequire(join(releaseRoot, 'api', 'package.json'));
     const loadPackaged = (relative) =>
       import(pathToFileURL(join(releaseRoot, 'api', 'dist', 'src', relative)).href);
@@ -800,8 +845,8 @@ async function runChain() {
         stoppedEvidence: 'harness: gateway fault worker closed after admit',
         storage: new ManagedContentStore(state.marker.data_root) });
       const reconciled = await reconcileGatewayInvocation(database.executor, {
-        workspaceId: reopened.bootstrap.workspaceId, operationId, invocationId,
-        stoppedWorkerId, stoppedWorkerEpoch: BigInt(stoppedEpoch), oldProcessStopped: true });
+        workspaceId: reopened.bootstrap.workspaceId, operationId, invocationId: gatewayInvocation.id,
+        stoppedWorkerId, stoppedWorkerEpoch: BigInt(gatewayInvocation.worker_epoch), oldProcessStopped: true });
       assert.equal(reconciled.status, 'UNKNOWN');
     } finally {
       await database.close();
@@ -809,6 +854,10 @@ async function runChain() {
     const unknown = await gatewayState(runId);
     assert.deepEqual(unknown, { operation_id: operationId, status: 'UNKNOWN',
       invocation_count: 1, invocation_status: 'UNKNOWN' });
+    const quarantinedClaimId = await sql(`select c.id from resource_claims c ` +
+      `join invocation_attempts i on i.resource_claim_id=c.id ` +
+      `where i.id='${gatewayInvocation.id}' and c.status='QUARANTINED'`);
+    assert.match(quarantinedClaimId, uuid, 'UNKNOWN must retain its quarantined resource claim');
     assert.equal(existsSync(gateway.target), false, 'Admit-only crash wrote the Fake target');
     assert.deepEqual(await effectState(runId), [], 'a second Run effect was dispatched');
     assert.deepEqual(await artifactState(taskId, runId), []);
@@ -816,45 +865,56 @@ async function runChain() {
     assert.ok(faultHostSnapshot);
     await stopHost(faultHostSnapshot);
 
-    const observer = await startHost('unknown-observer');
-    await assertRuntimeRoleSeparation();
-    assert.notEqual(observer.bootstrap.bearerToken, reopened.bootstrap.bearerToken);
-    const observerLedger = watchWebView(observer.page, observer.bootstrap);
-    const run = await get(observer.bootstrap, `/runs/${runId}`);
-    assert.deepEqual(run.unresolved_operation_ids, [operationId]);
-    await observer.page.goto(`http://tauri.localhost/runs/${runId}`);
-    const warning = observer.page.getByTestId('run-unknown');
-    await expect(warning).toContainText(operationId);
-    await expect(warning).toContainText('不得盲重试');
-    await observer.page.getByTestId('run-refresh').click();
-    await expect(warning).toContainText(operationId);
-    assert.deepEqual((await get(observer.bootstrap, `/runs/${runId}`)).unresolved_operation_ids,
-      [operationId]);
-    const operation = await get(observer.bootstrap, `/operations/${operationId}`);
-    assert.equal(operation.status, 'UNKNOWN');
-    assert.equal(operation.invocations.length, 1);
-    assert.equal(operation.invocations[0].status, 'UNKNOWN');
-    assert.deepEqual(await gatewayState(runId), unknown,
-      'the restarted supervisor retried or replaced the original Gateway invocation');
-    assert.equal(existsSync(gateway.target), false, 'restart wrote a Fake target for UNKNOWN');
-    assert.deepEqual(await artifactState(taskId, runId), []);
-    assert.deepEqual(await completionState(taskId), []);
-    assert.equal((await processSnapshot(state.host.pid)).worker, null,
-      'UNKNOWN started another Worker after host recovery');
-    for (const item of [ledger, reopenedLedger, observerLedger]) {
-      assert.equal(item.controlPosts, 0);
-      assert.equal(item.tokenInUrl, false);
-      assert.equal(item.unauthorizedRequest, false);
-    }
-    assert.equal(await observer.page.evaluate((token) =>
-      [...Object.entries(localStorage), ...Object.entries(sessionStorage)]
-        .every(([key, value]) => !key.includes(token) && !value.includes(token)),
-    observer.bootstrap.bearerToken), true, 'WebView storage retained its bearer');
-    for (const logPath of state.hostLogs) {
-      const log = readFileSync(logPath, 'utf8');
-      assert.ok(![first.bootstrap.bearerToken, reopened.bootstrap.bearerToken,
-        observer.bootstrap.bearerToken].some((token) => log.includes(token)),
-      'host log retained a bearer');
+    const observerTokens = [first.bootstrap.bearerToken, reopened.bootstrap.bearerToken];
+    const restartCount = repeatedUnknownRestarts ? 3 : 1;
+    for (let restart = 1; restart <= restartCount; restart++) {
+      const observer = await startHost(`unknown-observer-${restart}`);
+      await assertRuntimeRoleSeparation();
+      assert.ok(!observerTokens.includes(observer.bootstrap.bearerToken), 'restart reused a bearer');
+      observerTokens.push(observer.bootstrap.bearerToken);
+      const observerLedger = watchWebView(observer.page, observer.bootstrap);
+      const run = await get(observer.bootstrap, `/runs/${runId}`);
+      assert.deepEqual(run.unresolved_operation_ids, [operationId]);
+      await observer.page.goto(`http://tauri.localhost/runs/${runId}`);
+      const warning = observer.page.getByTestId('run-unknown');
+      await expect(warning).toContainText(operationId);
+      await expect(warning).toContainText('不得盲重试');
+      const controlsDrawer = observer.page.getByTestId('rail-trigger');
+      if (await controlsDrawer.isVisible()) await controlsDrawer.click();
+      await observer.page.locator('[data-testid="run-refresh"]:visible').click();
+      await expect(warning).toContainText(operationId);
+      assert.deepEqual((await get(observer.bootstrap, `/runs/${runId}`)).unresolved_operation_ids,
+        [operationId]);
+      const operation = await get(observer.bootstrap, `/operations/${operationId}`);
+      assert.equal(operation.status, 'UNKNOWN');
+      assert.equal(operation.invocations.length, 1);
+      assert.equal(operation.invocations[0].id, gatewayInvocation.id, 'restart replaced the original Invocation');
+      assert.equal(operation.invocations[0].status, 'UNKNOWN');
+      assert.deepEqual(await gatewayState(runId), unknown,
+        'the restarted supervisor retried or replaced the original Gateway invocation');
+      assert.equal(await sql(`select status from resource_claims where id='${quarantinedClaimId}'`),
+        'QUARANTINED', 'restart released the unresolved resource claim');
+      assert.equal(existsSync(gateway.target), false, 'restart wrote a Fake target for UNKNOWN');
+      assert.deepEqual(await artifactState(taskId, runId), []);
+      assert.deepEqual(await completionState(taskId), []);
+      assert.equal((await processSnapshot(state.host.pid)).worker, null,
+        'UNKNOWN started another Worker after host recovery');
+      for (const item of [ledger, reopenedLedger, observerLedger]) {
+        assert.equal(item.controlPosts, 0);
+        assert.equal(item.tokenInUrl, false);
+        assert.equal(item.unauthorizedRequest, false);
+      }
+      assert.equal(await observer.page.evaluate((token) =>
+        [...Object.entries(localStorage), ...Object.entries(sessionStorage)]
+          .every(([key, value]) => !key.includes(token) && !value.includes(token)),
+      observer.bootstrap.bearerToken), true, 'WebView storage retained its bearer');
+      for (const logPath of state.hostLogs) {
+        const log = readFileSync(logPath, 'utf8');
+        assert.ok(!observerTokens.some((token) => log.includes(token)),
+        'host log retained a bearer');
+      }
+      console.log(`unknown_restart=${restart}/${restartCount} bootstrap=ready original_invocation=UNKNOWN original_claim=QUARANTINED target_absent=true artifacts=0 completions=0 worker_absent=true`);
+      if (restart < restartCount) await stopHost();
     }
     console.log(`gateway_unknown_webview operation_id=${operationId} invocations=1 target_absent=true original_run_visible=true`);
     return;
@@ -989,7 +1049,7 @@ async function runChain() {
   }
   console.log(`action_review_resume commands=START:1:DONE,RESUME:2:DONE,RESUME:3:DONE before_seq=${beforeSeq} mid_seq=${midSeq} final_seq=${finalSeq} completion_records=1 artifact_versions=1 gateway_invocations=1`);
   console.log(`graph_thread=${runId} checkpoints=${beforeGraph.checkpoints}->${midGraph.checkpoints}->${finalGraph.checkpoints} interrupts=${beforeGraph.interrupts}->${midGraph.interrupts}->${finalGraph.interrupts} independent_worker_id=${activeWorker.claim.worker_id}`);
-  console.log('webview_created_project_task=true api_config_and_delegate=true webview_approved_and_accepted=true bearer_isolated=true runtime_migrator_sessions=0');
+  console.log('webview_created_project_task=true api_gateway_config=true webview_action_config_and_delegate=true webview_approved_and_accepted=true bearer_isolated=true runtime_migrator_sessions=0');
 }
 
 let failure;
@@ -1013,5 +1073,6 @@ for (const [path, before] of frozenPackage) {
 }
 if (failure) throw failure;
 console.log(gatewayUnknownScenario
-  ? 'M03_GATEWAY_UNKNOWN_WEBVIEW_REAL_PG=PASS'
+  ? (repeatedUnknownRestarts ? 'M03_GATEWAY_UNKNOWN_REPEATED_RESTART_REAL_PG=PASS'
+    : 'M03_GATEWAY_UNKNOWN_WEBVIEW_REAL_PG=PASS')
   : 'M03_ACTION_APPROVAL_WEBVIEW_REAL_PG=PASS');

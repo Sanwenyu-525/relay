@@ -1,28 +1,41 @@
 /**
  * 局部导航（如 skill 查询切换）不触发路由离开守卫，
- * 因此未保存草稿由当前页面注册到全局注册表，供页壳在切换前询问。
+ * 同页讨论、编辑与判断可以同时存在，各自注册保护，供页壳统一检查。
  */
 export interface DraftGuard {
   hasUnsavedChanges: () => boolean;
   discard: () => void;
+  pendingCommandId?: () => string | null;
 }
 
-let activeGuard: DraftGuard | null = null;
+const guards = new Set<DraftGuard>();
+const combinedGuard: DraftGuard = {
+  hasUnsavedChanges: () => [...guards].some((guard) => guard.hasUnsavedChanges() || guard.pendingCommandId?.() != null),
+  discard: () => {
+    if (combinedGuard.pendingCommandId?.()) return;
+    for (const guard of guards) guard.discard();
+  },
+  pendingCommandId: () => {
+    for (const guard of guards) {
+      const commandId = guard.pendingCommandId?.();
+      if (commandId) return commandId;
+    }
+    return null;
+  }
+};
 
 export function setDraftGuard(guard: DraftGuard): void {
-  activeGuard = guard;
+  guards.add(guard);
 }
 
 export function clearDraftGuard(guard: DraftGuard): void {
-  if (activeGuard === guard) {
-    activeGuard = null;
-  }
+  guards.delete(guard);
 }
 
 export function currentDraftGuard(): DraftGuard | null {
-  return activeGuard;
+  return guards.size > 0 ? combinedGuard : null;
 }
 
 export function hasUnsavedDraft(): boolean {
-  return activeGuard?.hasUnsavedChanges() ?? false;
+  return guards.size > 0 && combinedGuard.hasUnsavedChanges();
 }

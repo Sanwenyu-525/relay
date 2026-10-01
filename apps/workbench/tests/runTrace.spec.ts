@@ -94,7 +94,8 @@ describe("P15 Run Trace", () => {
     const client = new RelayApiClient({ baseUrl, workspaceId, bearerToken: "test-token" });
     vi.stubGlobal("fetch", vi.fn(async () => response(trace())));
     expect((await client.getRunTrace(runId)).modelCalls[0]).toMatchObject({
-      kind: null, criterionId: null, checkAttempt: null, providerErrorKind: null, providerRequestId: null
+      kind: null, criterionId: null, checkAttempt: null, providerErrorKind: null, providerRequestId: null,
+      firstTextDeltaAt: null, firstPreviewPersistedAt: null
     });
   });
 
@@ -103,7 +104,8 @@ describe("P15 Run Trace", () => {
     const data = trace();
     const calls = [
       { ...data.model_calls[0], status: "FAILED", kind: "SEMANTIC_CHECK", criterion_id: "first",
-        check_attempt: 1, provider_error_kind: "AUTH", provider_request_id: "request-first" },
+        check_attempt: 1, provider_error_kind: "AUTH", provider_request_id: "request-first",
+        first_text_delta_at: at, first_preview_persisted_at: "2026-09-26T00:00:01Z" },
       { ...data.model_calls[0], id: "other-call", status: "CANCELLED", kind: "SEMANTIC_CHECK", criterion_id: "second",
         check_attempt: 2, provider_error_kind: null, provider_request_id: "request-second" },
       { ...data.model_calls[0], id: "local-call", status: "FAILED", provider_error_kind: null }
@@ -111,7 +113,8 @@ describe("P15 Run Trace", () => {
     vi.stubGlobal("fetch", vi.fn(async () => response({ ...data, model_calls: calls })));
     expect((await client.getRunTrace(runId)).modelCalls).toMatchObject([
       { id: calls[0]!.id, stepAttemptId: attemptId, criterionId: "first", checkAttempt: 1,
-        providerErrorKind: "AUTH", providerRequestId: "request-first" },
+        providerErrorKind: "AUTH", providerRequestId: "request-first",
+        firstTextDeltaAt: at, firstPreviewPersistedAt: "2026-09-26T00:00:01Z" },
       { id: "other-call", stepAttemptId: attemptId, criterionId: "second", checkAttempt: 2,
         providerErrorKind: null, providerRequestId: "request-second" },
       { id: "local-call", status: "FAILED", providerErrorKind: null }

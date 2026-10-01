@@ -120,15 +120,22 @@ try {
   foreach ($file in @($exe, $node, $pgCtl, $psql, (Join-Path $package 'desktop-build-manifest.json'))) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing input: $file. Run dev-stack.bat Build first." }
   }
-  if ($Action -eq 'DesktopDev') { Write-Host '正在校验已有测试包并准备数据库（不会重新打包），请稍候…' }
-  $manifest = Get-Content -LiteralPath (Join-Path $package 'desktop-build-manifest.json') -Raw | ConvertFrom-Json
-  if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ne $manifest.artifact_sha256) { throw 'Executable hash does not match the build manifest; rebuild.' }
-  if ((Get-FileHash -LiteralPath $node -Algorithm SHA256).Hash -ne $manifest.resource_file_sha256.'node.exe') { throw 'Node hash mismatch; rebuild.' }
-  Invoke-Checked $node @((Join-Path $PSScriptRoot 'verify-desktop-package.mjs'), $package)
+  if ($Action -eq 'DesktopDev') { Write-Host '正在连接开发数据库…' }
+  $manifestHash = (Get-FileHash -LiteralPath (Join-Path $package 'desktop-build-manifest.json') -Algorithm SHA256).Hash
+  $state = $null
   if (Test-Path -LiteralPath $statePath) {
     $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
     if ($state.cluster_path -ne $cluster -or $state.schema_version -ne 1) { throw 'Trial marker does not match this directory.' }
-  } else {
+  }
+  # Daily development reuses the initialized database; package launches retain full verification.
+  if ($Action -ne 'DesktopDev' -or $null -eq $state -or -not $state.ready -or $state.manifest_hash -ne $manifestHash) {
+    Write-Host '正在校验测试包资源…'
+    $manifest = Get-Content -LiteralPath (Join-Path $package 'desktop-build-manifest.json') -Raw | ConvertFrom-Json
+    if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ne $manifest.artifact_sha256) { throw 'Executable hash does not match the build manifest; rebuild.' }
+    if ((Get-FileHash -LiteralPath $node -Algorithm SHA256).Hash -ne $manifest.resource_file_sha256.'node.exe') { throw 'Node hash mismatch; rebuild.' }
+    Invoke-Checked $node @((Join-Path $PSScriptRoot 'verify-desktop-package.mjs'), $package)
+  }
+  if ($null -eq $state) {
     if (Test-Path -LiteralPath $cluster) { throw 'Cluster exists without its marker. Preserve it and inspect before retrying.' }
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     $listener.Start()
@@ -138,10 +145,14 @@ try {
     Save-State
   }
   if (-not (Test-Path -LiteralPath (Join-Path $cluster 'PG_VERSION'))) {
+    Write-Host '首次使用：正在初始化开发数据库…'
     Invoke-Checked (Join-Path $pgBin 'initdb.exe') @('-D', $cluster, '-U', 'relay_api_admin', '-A', 'trust', '--encoding=UTF8', '--locale=C')
   }
   if ((Get-PgStatus) -ne 0) {
+    Write-Host '正在启动本机数据库…'
     Invoke-Checked $pgCtl @('start', '-D', $cluster, '-l', (Join-Path $trial 'postgres.log'), '-o', "-h 127.0.0.1 -p $($state.port)", '-w', '-t', '30')
+  } elseif ($Action -eq 'DesktopDev') {
+    Write-Host '数据库已在运行，直接复用。'
   }
   $adminUrl = "postgresql://relay_api_admin@127.0.0.1:$($state.port)/postgres"
   if (-not $state.ready) {
@@ -149,8 +160,8 @@ try {
     $exists = Invoke-Checked $psql @($adminUrl, '-w', '-tAc', "SELECT 1 FROM pg_database WHERE datname='relay_trial'")
     if (($exists -join '').Trim() -ne '1') { Invoke-Checked $psql @($adminUrl, '-w', '-v', 'ON_ERROR_STOP=1', '-c', 'CREATE DATABASE relay_trial OWNER relay_migrator') }
   }
-  $manifestHash = (Get-FileHash -LiteralPath (Join-Path $package 'desktop-build-manifest.json') -Algorithm SHA256).Hash
   if ($state.manifest_hash -ne $manifestHash) {
+    Write-Host '正在初始化或升级数据库结构…'
     if ($state.ready) {
       $backup = Join-Path $trial ('before-upgrade-' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '.dump')
       Invoke-Checked (Join-Path $pgBin 'pg_dump.exe') @("postgresql://relay_api_admin@127.0.0.1:$($state.port)/relay_trial", '-w', '-Fc', '-f', $backup)
@@ -191,7 +202,7 @@ try {
   $env:RELAY_DESKTOP_DATA_ROOT = Join-Path $trial 'data'
   New-Item -ItemType Directory -Path $env:RELAY_DESKTOP_DATA_ROOT -Force | Out-Null
   if ($Action -eq 'DesktopDev') {
-    Write-Host '测试数据库和配置已准备，正在启动桌面开发窗口（Ctrl+C 停止）…'
+    Write-Host '正在打开桌面开发窗口（Ctrl+C 停止）…'
     & (Join-Path $root 'apps\desktop\scripts\dev-desktop.ps1') -ConfigPath $config -FrontendPort $FrontendPort
   } elseif (-not $SkipDesktop) {
     $desktop = Start-Process -FilePath $exe -PassThru

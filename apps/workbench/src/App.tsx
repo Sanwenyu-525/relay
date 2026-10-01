@@ -87,11 +87,13 @@ export default function App() {
   }, []);
 
   function discardAndContinue(): void {
+    if (currentDraftGuard()?.pendingCommandId?.()) return;
     currentDraftGuard()?.discard();
     blocker.proceed?.();
   }
 
   async function discardAndClose(): Promise<void> {
+    if (currentDraftGuard()?.pendingCommandId?.()) return;
     currentDraftGuard()?.discard();
     allowClose.current = true;
     setCloseDialogOpen(false);
@@ -112,23 +114,24 @@ export default function App() {
   }
 
   const preserveCreateTask = location.pathname === "/tasks" && new URLSearchParams(location.search).get("view") === "create";
-  return <div className={isTauri() ? "desktop-window" : undefined}>
+  const pendingCommandId = currentDraftGuard()?.pendingCommandId?.() ?? null;
+  return <div className="desktop-window">
     <DesktopTitleBar available onSearch={() => setCommandOpen(true)} />
     <AppShell desktopStatus={desktopStatus} commandOpen={commandOpen} onCommandOpen={() => setCommandOpen(true)} onCommandClose={() => setCommandOpen(false)}>
       <div key={`${preserveCreateTask ? "create-task" : connection.epoch}:${location.pathname}${location.search}`}><Outlet /></div>
     </AppShell>
-    <AppDialog open={blocker.state === "blocked"} title="保留未保存的修改" onClose={() => blocker.reset?.()}>
-      <p>即将离开的页面还有未保存的修改。你可以继续编辑，或丢弃草稿后离开。</p>
+    <AppDialog open={blocker.state === "blocked"} title={pendingCommandId ? "命令结果待核对" : "保留未保存的修改"} onClose={() => blocker.reset?.()}>
+      <p>{pendingCommandId ? `原命令 ${pendingCommandId} 的结果仍待核对，请留在当前建议区查询回执。` : "即将离开的页面还有未保存的修改。你可以继续编辑，或丢弃草稿后离开。"}</p>
       <div className="dialog-actions">
         <button className="secondary-button" type="button" onClick={() => blocker.reset?.()}>保留并继续编辑</button>
-        <button className="danger-button" type="button" data-testid="discard-draft-leave" onClick={discardAndContinue}>丢弃草稿并离开</button>
+        {!pendingCommandId && <button className="danger-button" type="button" data-testid="discard-draft-leave" onClick={discardAndContinue}>丢弃草稿并离开</button>}
       </div>
     </AppDialog>
-    <AppDialog open={closeDialogOpen} title="保留未保存的修改" onClose={() => setCloseDialogOpen(false)}>
-      <p>窗口里还有未保存的修改。你可以继续编辑，或丢弃草稿并关闭窗口。</p>
+    <AppDialog open={closeDialogOpen} title={pendingCommandId ? "命令结果待核对" : "保留未保存的修改"} onClose={() => setCloseDialogOpen(false)}>
+      <p>{pendingCommandId ? `原命令 ${pendingCommandId} 的结果仍待核对，请先查询回执再关闭窗口。` : "窗口里还有未保存的修改。你可以继续编辑，或丢弃草稿并关闭窗口。"}</p>
       <div className="dialog-actions">
         <button className="secondary-button" type="button" onClick={() => setCloseDialogOpen(false)}>保留并继续编辑</button>
-        <button className="danger-button" type="button" onClick={() => void discardAndClose()}>丢弃草稿并关闭</button>
+        {!pendingCommandId && <button className="danger-button" type="button" onClick={() => void discardAndClose()}>丢弃草稿并关闭</button>}
       </div>
     </AppDialog>
   </div>;

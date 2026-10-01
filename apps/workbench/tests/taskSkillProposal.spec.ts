@@ -81,7 +81,110 @@ function connect() { activateRelayConnection({ baseUrl, workspaceId, bearerToken
 afterEach(() => { resetRelayConnectionForTest(); vi.unstubAllGlobals(); });
 
 describe("P12 Task Skill 合并提案", () => {
-  it("展示服务端保留/新增合并结果；双确认后用冻结 CAS/hash 接受，回执不明按原命令查询并重试", async () => {
+  it.each([503, 403])("迟到的事实读取 %s 隐藏旧内容但保留新消息原命令与载荷", async (status) => {
+    connect(); let accepted = false; let acceptedReads = 0;
+    let finishFacts!: (value: Response) => void;
+    const lateFacts = new Promise<Response>((resolve) => { finishFacts = resolve; });
+    let recovering = false;
+    let finishReload!: (value: Response) => void;
+    const lateReload = new Promise<Response>((resolve) => { finishReload = resolve; });
+    const sends: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === `${prefix}/tasks/${taskId}`) {
+        if (recovering) return lateReload;
+        if (accepted && ++acceptedReads === 2) return lateFacts;
+        return response(accepted ? task("3", "2") : task());
+      }
+      if (path === `${prefix}/projects/${projectId}`) return response({ id: projectId, title: "当前项目", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
+      if (path === `${prefix}/assist-sessions`) return response({ items: [session()] });
+      if (path === `${prefix}/skill-definitions`) return response({ items: [currentSkill("TASK_CONTRACT_CHANGE")] });
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages` && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        sends.push(body);
+        if (sends.length === 1) throw new Error("response lost");
+        return response({ command_id: body.command_id, committed_at: "2026-09-26T00:00:00Z",
+          result: { session_id: sessionId, user_message_id: "77777777-7777-4777-8777-777777777777",
+            assistant_message_id: "88888888-8888-4888-8888-888888888888", status: "PENDING" } }, 202);
+      }
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return response({ items: [sourceMessage("TASK_CONTRACT_CHANGE")] });
+      if (path === `${prefix}/assist-proposals`) return response({ items: [proposal("TASK_CONTRACT_CHANGE", accepted ? "ACCEPTED" : "PENDING")] });
+      if (path === `${prefix}/assist-proposals/${proposalId}/accept` && init?.method === "POST") {
+        accepted = true;
+        return response({ command_id: JSON.parse(String(init.body)).command_id,
+          committed_at: "2026-09-26T00:00:00Z", result: result() });
+      }
+      if (path.startsWith(`${prefix}/commands/`)) return response({ code: "RESOURCE_NOT_FOUND", detail: "receipt absent" }, 404);
+      throw new Error(`unexpected request ${path}`);
+    }));
+    const view = await mountWorkbench(`/tasks/${taskId}?skill=definition`);
+    try {
+      await view.wrapper.get('[data-testid="task-proposal-actions"] button.primary-button').trigger("click");
+      await view.wrapper.get('[data-testid="task-skill-accept"]').trigger("click"); await flush();
+      expect(acceptedReads).toBeGreaterThanOrEqual(2);
+      await view.wrapper.get('[data-testid="assist-draft"]').setValue("继续补充要求");
+      await view.wrapper.get("form.agent-chat-message-form").trigger("submit"); await flush();
+      expect(view.wrapper.get(".assist-pending").text()).toContain(String(sends[0].command_id));
+      finishFacts(response({ code: status === 403 ? "FORBIDDEN" : "SERVICE_UNAVAILABLE", detail: "Task read failed" }, status));
+      await flush();
+      expect(view.wrapper.find('[data-testid="assist-session"]').exists()).toBe(true);
+      expect(view.wrapper.get(".assist-pending").text()).toContain(String(sends[0].command_id));
+      expect(view.wrapper.find('[data-testid="live-task-accepted-facts"]').exists()).toBe(false);
+      expect(view.wrapper.find('[data-testid="task-skill-proposal"]').exists()).toBe(false);
+      expect(view.wrapper.find(".embedded-assist-history").exists()).toBe(false);
+      expect(view.wrapper.find(".embedded-assist-sources").exists()).toBe(false);
+      expect(view.wrapper.text()).not.toContain("合并后的目标");
+      expect(view.wrapper.get('[data-testid="assist-send"]').attributes("disabled")).toBe("");
+      await view.wrapper.get(".assist-pending .secondary-button:first-of-type").trigger("click"); await flush();
+      expect(view.wrapper.find(".assist-pending").exists()).toBe(true);
+      await view.wrapper.get(".assist-pending .secondary-button:last-child").trigger("click"); await flush();
+      expect(sends).toHaveLength(2);
+      expect(sends[1]).toEqual(sends[0]);
+      expect(view.wrapper.find(".assist-pending").exists()).toBe(false);
+      await view.wrapper.get('[data-testid="assist-draft"]').setValue("尚未核对的新要求");
+      expect(view.wrapper.get('[data-testid="assist-send"]').attributes("disabled")).toBe("");
+      await view.wrapper.get('[data-testid="assist-draft"]').setValue("");
+      recovering = true;
+      await view.wrapper.get('[data-testid="task-skill-refresh"]').trigger("click"); await flush();
+      await view.wrapper.get('[data-testid="assist-draft"]').setValue("重读期间的新要求");
+      expect(view.wrapper.find('[data-testid="live-task-accepted-facts"]').exists()).toBe(false);
+      expect(view.wrapper.find('[data-testid="task-skill-proposal"]').exists()).toBe(false);
+      expect(view.wrapper.find(".embedded-assist-sources").exists()).toBe(false);
+      expect(view.wrapper.get('[data-testid="assist-send"]').attributes("disabled")).toBe("");
+      await view.wrapper.get("form.agent-chat-message-form").trigger("submit"); await flush();
+      expect(sends).toHaveLength(2);
+      recovering = false; finishReload(response(task("3", "2"))); await flush();
+      expect(view.wrapper.get('[data-testid="live-task-accepted-facts"]').text()).toContain("任务 v3");
+      expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value).toBe("重读期间的新要求");
+    } finally { view.unmount(); }
+  });
+
+  it("AI 持有执行权时保留提案供核对，禁止接受写入", async () => {
+    connect(); let postCount = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (init?.method === "POST") postCount++;
+      if (path === `${prefix}/tasks/${taskId}`) return response({ ...task(), status: "IN_PROGRESS",
+        executor: { kind: "AI", run_id: "77777777-7777-4777-8777-777777777777", ownership_epoch: "1" } });
+      if (path === `${prefix}/projects/${projectId}`) return response({ id: projectId, title: "当前项目", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
+      if (path === `${prefix}/assist-sessions`) return response({ items: [session()] });
+      if (path === `${prefix}/skill-definitions`) return response({ items: [currentSkill("TASK_CONTRACT_CHANGE")] });
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return response({ items: [sourceMessage("TASK_CONTRACT_CHANGE")] });
+      if (path === `${prefix}/assist-proposals`) return response({ items: [proposal()] });
+      throw new Error(`unexpected request ${path}`);
+    }));
+    const view = await mountWorkbench(`/tasks/${taskId}?skill=definition`);
+    const card = view.wrapper.get('[data-testid="task-skill-proposal"]');
+    expect(view.wrapper.get('[data-testid="task-proposal-actions"]').text()).toContain("当前由 AI 持有执行权");
+    expect(card.text()).toContain("合并后的目标");
+    expect(view.wrapper.get('[data-testid="task-proposal-actions"] button.primary-button').attributes("disabled")).toBe("");
+    await view.wrapper.get('[data-testid="task-proposal-actions"] button.primary-button').trigger("click"); await flush();
+    expect(view.wrapper.find('[data-testid="task-skill-accept"]').exists()).toBe(false);
+    expect(postCount).toBe(0);
+    view.unmount();
+  });
+
+  it.each(["assist", "definition"])("%s 页展示服务端合并结果；双确认以冻结 CAS/hash 接受，回执不明沿原命令恢复", async (pageKind) => {
     connect(); let accepted = false; const bodies: Record<string, unknown>[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
@@ -102,8 +205,30 @@ describe("P12 Task Skill 合并提案", () => {
       if (path.startsWith(`${prefix}/commands/`)) return response({ code: "RESOURCE_NOT_FOUND", detail: "receipt absent" }, 404);
       throw new Error(`unexpected request ${path}`);
     }));
-    const view = await mountWorkbench(`/tasks/${taskId}?skill=assist`);
+    const view = await mountWorkbench(`/tasks/${taskId}?skill=${pageKind}`);
+    if (pageKind === "definition") {
+      const skillSelect = view.wrapper.get('[data-testid="assist-skill"]').element;
+      if (!(skillSelect instanceof HTMLSelectElement)) throw new Error("Skill selector is not a select");
+      expect(skillSelect.value).toBe("task-to-execution-contract@1.1.0");
+      expect(view.wrapper.findAll("h1")).toHaveLength(1);
+      await view.wrapper.get('[data-testid="assist-draft"]').setValue("尚未发送的修改意见");
+      const draftElement = view.wrapper.get('[data-testid="assist-draft"]').element;
+      await view.wrapper.get(".embedded-assist-history > summary").trigger("click");
+      await view.wrapper.get(".embedded-assist-history > summary").trigger("click");
+      await view.wrapper.get(".embedded-assist-sources > summary").trigger("click");
+      await view.wrapper.get(".embedded-assist-sources > summary").trigger("click");
+      expect(view.wrapper.get('[data-testid="assist-draft"]').element).toBe(draftElement);
+      expect(view.wrapper.get('[data-testid="task-skill-refresh"]').attributes("disabled")).toBe("");
+      await view.wrapper.get('[data-testid="task-skill-refresh"]').trigger("click"); await flush();
+      expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value).toBe("尚未发送的修改意见");
+      await view.wrapper.get('[data-testid="assist-draft"]').setValue("");
+    }
     const card = view.wrapper.get('[data-testid="task-skill-proposal"]');
+    expect(view.wrapper.findAll('[data-testid="task-proposal-actions"]')).toHaveLength(1);
+    if (pageKind === "definition") {
+      expect(card.find('[data-testid="task-proposal-actions"]').exists()).toBe(false);
+      expect(view.wrapper.get('[data-testid="task-skill-confirmation"]').find('[data-testid="task-proposal-actions"]').exists()).toBe(true);
+    }
     expect(card.text()).toContain("当前：旧目标");
     expect(card.text()).toContain("合并后：合并后的目标");
     expect(card.text()).toContain("旧说明 →可复核报告");
@@ -111,11 +236,25 @@ describe("P12 Task Skill 合并提案", () => {
     expect(card.text()).toContain("保留的必需条件");
     expect(card.text()).toContain("服务端追加条件");
     expect(card.text()).toContain("建议模式 DELEGATE；本次接受只变更验收契约");
-    expect(card.find('[data-testid="task-skill-accept"]').exists()).toBe(false);
-    await card.get("button.primary-button").trigger("click");
-    await card.get('[data-testid="task-skill-accept"]').trigger("click"); await flush();
+    expect(view.wrapper.find('[data-testid="task-skill-accept"]').exists()).toBe(false);
+    await view.wrapper.get('[data-testid="task-proposal-actions"] button.primary-button').trigger("click");
+    await view.wrapper.get('[data-testid="task-skill-accept"]').trigger("click"); await flush();
     expect(view.wrapper.text()).toContain("命令结果待核对");
     expect(bodies).toHaveLength(1);
+    if (pageKind === "definition") {
+      expect(view.wrapper.get('[data-testid="task-skill-refresh"]').attributes("disabled")).toBe("");
+      await view.wrapper.get('[data-testid="task-skill-refresh"]').trigger("click"); await flush();
+      expect(view.wrapper.text()).toContain("命令结果待核对");
+      expect(bodies).toHaveLength(1);
+      expect(view.wrapper.get('[data-testid="assist-session-select"]').attributes("disabled")).toBe("");
+      await view.router.push("/settings"); await flush();
+      expect(document.querySelector('[role="dialog"]')?.textContent).toContain("命令结果待核对");
+      expect(document.querySelector('[data-testid="discard-draft-leave"]')).toBeNull();
+      const keep = [...document.querySelectorAll("button")].find((button) => button.textContent === "保留并继续编辑");
+      if (!keep) throw new Error("missing keep-current-session action");
+      keep.dispatchEvent(new MouseEvent("click", { bubbles: true })); await flush();
+      expect(view.wrapper.get('.assist-pending').text()).toContain(String(bodies[0].command_id));
+    }
     expect(bodies[0]).toMatchObject({ expected_task_revision: "2", expected_acceptance_revision: "1",
       payload_hash: hash });
     await view.wrapper.get(".assist-pending .secondary-button:first-of-type").trigger("click"); await flush();
@@ -125,10 +264,11 @@ describe("P12 Task Skill 合并提案", () => {
     expect(bodies[1]).toEqual(bodies[0]);
     expect(view.wrapper.text()).toContain("提案已接受；Task v3 / 验收 v2");
     expect(view.wrapper.get('[data-testid="task-skill-proposal"]').text()).toContain("ACCEPTED");
+    if (pageKind === "definition") expect(view.wrapper.get('[data-testid="live-task-accepted-facts"]').text()).toContain("任务 v3");
     view.unmount();
   });
 
-  it("409 后保留原提案与服务端合并内容，禁止旧基线再次确认", async () => {
+  it.each(["assist", "verification"])("%s 页 409 后保留原提案与服务端合并内容，禁止旧基线再次确认", async (pageKind) => {
     connect(); let stale = false;
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
@@ -151,10 +291,14 @@ describe("P12 Task Skill 合并提案", () => {
       }
       throw new Error(`unexpected request ${path}`);
     }));
-    const view = await mountWorkbench(`/tasks/${taskId}?skill=assist`);
-    const card = view.wrapper.get('[data-testid="task-skill-proposal"]');
-    await card.get("button.primary-button").trigger("click");
-    await card.get('[data-testid="task-skill-accept"]').trigger("click"); await flush();
+    const view = await mountWorkbench(`/tasks/${taskId}?skill=${pageKind}`);
+    if (pageKind === "verification") {
+      const skillSelect = view.wrapper.get('[data-testid="assist-skill"]').element;
+      if (!(skillSelect instanceof HTMLSelectElement)) throw new Error("Skill selector is not a select");
+      expect(skillSelect.value).toBe("verification-plan@1.1.0");
+    }
+    await view.wrapper.get('[data-testid="task-proposal-actions"] button.primary-button').trigger("click");
+    await view.wrapper.get('[data-testid="task-skill-accept"]').trigger("click"); await flush();
     expect(view.wrapper.text()).toContain("原提案仍保留供核对");
     expect(view.wrapper.text()).toContain("请重新生成提案");
     expect(view.wrapper.get('[data-testid="task-skill-proposal"]').text()).toContain("EXPIRED");
@@ -182,9 +326,8 @@ describe("P12 Task Skill 合并提案", () => {
       throw new Error(`unexpected request ${path}`);
     }));
     const view = await mountWorkbench(`/tasks/${taskId}?skill=assist`);
-    const card = view.wrapper.get('[data-testid="task-skill-proposal"]');
-    await card.get("button.primary-button").trigger("click");
-    await card.get('[data-testid="task-skill-accept"]').trigger("click"); await flush();
+    await view.wrapper.get('[data-testid="task-proposal-actions"] button.primary-button').trigger("click");
+    await view.wrapper.get('[data-testid="task-skill-accept"]').trigger("click"); await flush();
     expect(view.wrapper.text()).toContain("命令结果待核对");
     await view.wrapper.get(".assist-pending .secondary-button:first-of-type").trigger("click"); await flush();
     expect(postCount).toBe(1);

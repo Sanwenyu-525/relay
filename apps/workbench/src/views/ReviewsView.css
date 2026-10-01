@@ -1,8 +1,65 @@
-/* 待审使用普通页面标题，窄窗使用紧凑标题。 */
-/* 权重压过 migrated-scoped.css 的同名选择器（组件 CSS 在其后注入时仍需更高特指）。 */
-.review-page .review-heading h1 {
-  font-size: var(--relay-font-size-page);
+/* 请求列表与右侧判断区按既有待审参考图组织；所有数值复用唯一 token。 */
+.app-main .review-page { padding: 0; }
+.review-page .review-columns { grid-template-columns: minmax(0, 1fr) var(--relay-layout-rail-width); gap: 0; margin: 0; }
+.review-primary, .review-page .review-detail { min-width: 0; padding: var(--relay-layout-main-padding); }
+.review-page .review-detail { border-left: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.review-page .review-heading { align-items: start; gap: var(--relay-space-4); }
+.review-page .review-heading h1 { margin: 0 0 var(--relay-space-4); font-size: var(--relay-font-size-page); }
+.review-page .review-heading > button { flex: none; }
+.review-page .review-list { padding: 0; border: 0; margin-top: var(--relay-layout-section-gap); }
+.review-filters { display: flex; flex-wrap: wrap; gap: var(--relay-space-6); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); margin-bottom: var(--relay-space-6); padding-top: var(--relay-space-4); }
+.review-filters > button { display: flex; align-items: center; gap: var(--relay-space-2); min-height: var(--relay-control-height); border: 0; border-bottom: var(--relay-border-width) solid transparent; background: transparent; padding: 0; color: var(--relay-color-text-secondary); cursor: pointer; }
+.review-filters > button[aria-pressed="true"] { color: var(--relay-color-action-primary); border-bottom-color: var(--relay-color-action-primary); font-weight: var(--relay-font-weight-semibold); }
+.review-list-columns, .review-page .review-list-item { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 0.8fr) minmax(0, 1.2fr) minmax(0, 0.8fr) auto; gap: var(--relay-space-3); align-items: center; }
+.review-list-columns { padding: var(--relay-space-3) var(--relay-space-4); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+.review-page .review-list-item { padding: var(--relay-space-4); border: var(--relay-border-width) solid transparent; border-bottom-color: var(--relay-color-border-separator); border-radius: var(--relay-radius-control); }
+.review-page .review-list-item--selected { border-color: var(--relay-color-action-primary); }
+.review-page .review-list-item > strong { min-width: 0; font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-rowTitle); font-weight: var(--relay-font-weight-semibold); overflow-wrap: anywhere; }
+.review-page .review-list-item small { display: block; margin-top: var(--relay-space-2); font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-meta); font-weight: var(--relay-font-weight-regular); }
+.review-kind, .review-page .review-list-item time { font-size: var(--relay-font-size-meta); }
+.review-project { min-width: 0; overflow-wrap: anywhere; }
+.review-project code { font-size: var(--relay-font-size-meta); }
+.review-list-note { margin-top: var(--relay-space-4); }
+.review-page .review-detail-heading { align-items: center; }
+.review-page .review-detail-heading h2 { margin: 0; }
+.review-reason { margin: var(--relay-space-4) 0 var(--relay-space-6); font-size: var(--relay-font-size-reading); }
+.review-request-facts { margin: 0 0 var(--relay-space-4); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.review-request-facts > div { padding-top: var(--relay-space-4); }
+.review-request-facts dt { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+.review-request-facts dd { margin: var(--relay-space-2) 0 0; overflow-wrap: anywhere; }
+.review-page .review-bound-summary > p { font-size: var(--relay-font-size-meta); overflow-wrap: anywhere; }
+.review-page .review-facts > div { grid-template-columns: 1fr; gap: var(--relay-space-1); }
+.review-page .review-actions { flex-direction: column; }
+.review-page .review-actions > button { width: 100%; }
+.review-page .review-evidence-details, .review-page .review-feedback-details { margin: var(--relay-space-4) 0; }
+.review-page .review-evidence-details > summary, .review-page .review-feedback-details > summary { cursor: pointer; }
+.review-reading { margin-top: var(--relay-space-6); padding-top: var(--relay-space-4); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); min-width: 0; }
+.review-reading > h2 { margin: 0 0 var(--relay-space-4); }
+.review-reading > .surface-panel { margin: 0; padding: var(--relay-space-6); background: var(--relay-color-bg-surface); border-radius: var(--relay-radius-control); }
+.review-reading .artifact-doc-body { font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-reading); line-height: var(--relay-font-lineHeight-reading); }
+.review-reading .markdown-preview { margin: var(--relay-space-4) 0 0; padding: 0; border: 0; background: transparent; font: inherit; }
+.review-reading .version-row { flex-wrap: wrap; }
+.review-reading .collab-compare-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--relay-space-4); }
+.review-request-identity { margin: var(--relay-space-4) 0; overflow-wrap: anywhere; }
+.review-request-identity > summary { cursor: pointer; color: var(--relay-color-text-secondary); }
+@media (max-width: 79.9375rem) {
+  .review-page .review-columns { grid-template-columns: minmax(0, 1fr) var(--relay-layout-rail-narrowWidth); }
+  .review-primary, .review-page .review-detail { padding: var(--relay-layout-main-compactPadding); }
+  .review-list-columns, .review-page .review-list-item { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; }
+  .review-list-columns > :nth-child(3), .review-list-columns > :nth-child(4) { display: none; }
+  .review-page .review-list-item .review-project, .review-page .review-list-item time { grid-row: 2; }
+  .review-page .review-list-item .status-chip { grid-column: 3; grid-row: 1; }
+}
+@media (max-width: 63.9375rem) {
+  .review-page .review-columns { grid-template-columns: 1fr; }
+  .review-page .review-detail { border-left: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 }
 @media (max-width: 60rem) {
   .review-page .review-heading h1 { font-size: var(--relay-font-size-compactPage); }
+}
+@media (max-width: 47.9375rem) {
+  .review-primary, .review-page .review-detail { padding: var(--relay-layout-main-smallPadding); }
+  .review-page .review-list-item { gap: var(--relay-space-2); }
+  .review-page .review-list-item > strong { font-size: var(--relay-font-size-body); }
+  .review-page .review-heading { flex-wrap: wrap; }
 }

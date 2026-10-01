@@ -7,6 +7,7 @@ import { DomainError } from './domain-error.js';
 import { dispatchGatewayAction, prepareGatewayAction, type GatewayOrigin } from './gateway-actions.js';
 import { withTransaction, type Repositories } from './unit-of-work.js';
 import { lockWritableProjectInWorkspace } from './guards.js';
+import { readAdmission } from './maintenance-admission.js';
 
 const TEXT_OCTET_LIMIT = 262144;
 
@@ -38,6 +39,7 @@ export async function runWebImportTick(db: DbExecutor, input: {
   // Phase A: prepare new jobs and RUNNING jobs left without an operation by a
   // crash after the status change. No network work happens in the claim txn.
   const claimed = await withTransaction(db, async (repositories) => {
+    if ((await readAdmission(repositories, 'share')).mode !== 'NORMAL') return [];
     const jobs = await repositories.gateway.claimImportJobsNeedingPrepare(input.maxJobs ?? 10);
     const claimedJobs: ImportJobRow[] = [];
     for (const job of jobs) {

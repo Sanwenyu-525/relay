@@ -174,6 +174,27 @@ function activate(): void {
 }
 
 describe("任务详情（UI-10）", () => {
+  it("真实任务可以进入对应协作工作区，导航不提交业务命令", async () => {
+    activate();
+    const { calls } = stubFetch(async (url, method) => {
+      if (method === "GET" && url === taskUrl) return jsonResponse(200, taskDetailBody({}));
+      if (method === "GET" && url === stateUrl) return jsonResponse(200, projectStateBody());
+      if (method === "GET" && url === `${taskUrl}/artifacts`) return jsonResponse(200, taskArtifactsBody());
+      if (method === "GET") return jsonResponse(200, { items: [], next_cursor: null });
+      throw new Error(`unexpected request: ${method} ${url}`);
+    });
+    const mounted = await mountWorkbench(`/tasks/${TASK_ID}`);
+    unmount = mounted.unmount;
+
+    await mounted.wrapper.get('[data-testid="task-open-collaboration"]').trigger("click");
+    await flush();
+
+    expect(mounted.router.currentRoute.value).toEqual({ path: "/agent", query: { work: TASK_ID } });
+    expect(mounted.wrapper.find('[data-testid="task-detail"]').exists()).toBe(false);
+    expect(mounted.wrapper.get('[data-testid="collab-goal"] h1').text()).toBe("真实任务");
+    expect(calls.filter((call) => call.method !== "GET")).toHaveLength(0);
+  });
+
   it("fixture：展示任务当前状态（状态、模式、执行者分离）与示例验收条件，产物页签不提供写入", async () => {
     const mounted = await mountWorkbench("/tasks/task-evaluation-metrics");
     unmount = mounted.unmount;
@@ -196,6 +217,8 @@ describe("任务详情（UI-10）", () => {
 
     expect(mounted.wrapper.get('[data-testid="artifact-fixture-gap"]').text()).toContain("示例数据没有产物事实");
     expect(mounted.wrapper.find('[data-testid="artifact-save"]').exists()).toBe(false);
+    expect(mounted.wrapper.find(".task-detail-rail").exists()).toBe(false);
+    expect(mounted.wrapper.get('[data-testid="task-detail"]').attributes("class")).toContain("task-detail-page--full-width");
   });
 
   it("fixture：没有示例事实的任务不显示别人的内容", async () => {
@@ -215,6 +238,29 @@ describe("任务详情（UI-10）", () => {
 });
 
 describe("产物与完成闭环（UI-11，live）", () => {
+  it("切换任务与产物阅读页签保留同一编辑草稿和完成命令 Owner", async () => {
+    activate();
+    const { calls } = stubFetch(async (url, method) => {
+      if (method === "GET" && url === taskUrl) return jsonResponse(200, taskDetailBody({}));
+      if (method === "GET" && url === stateUrl) return jsonResponse(200, projectStateBody());
+      if (method === "GET" && url === `${taskUrl}/artifacts`) return jsonResponse(200, taskArtifactsBody());
+      if (method === "GET") return jsonResponse(200, { items: [], next_cursor: null });
+      throw new Error(`unexpected request: ${method} ${url}`);
+    });
+    const mounted = await mountWorkbench(`/tasks/${TASK_ID}?tab=artifacts`); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="artifact-mode-edit"]').trigger("click");
+    const editor = mounted.wrapper.get("#artifact-content");
+    const completion = mounted.wrapper.get('[data-testid="task-completion"]');
+    await editor.setValue("尚未保存的本轮正文");
+    await mounted.wrapper.get('[data-testid="task-detail-tab-overview"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="task-detail-tab-artifacts"]').trigger("click");
+    expect(mounted.wrapper.get("#artifact-content").element).toBe(editor.element);
+    expect((editor.element as HTMLTextAreaElement).value).toBe("尚未保存的本轮正文");
+    expect(mounted.wrapper.get('[data-testid="task-completion"]').element).toBe(completion.element);
+    await mounted.wrapper.get('[data-testid="artifact-mode-preview"]').trigger("click");
+    expect(mounted.wrapper.get('[data-testid="artifact-draft-preview"]').text()).toContain("尚未保存的本轮正文");
+    expect(calls.filter((call) => call.method !== "GET")).toHaveLength(0);
+  });
   it("保存版本用任务 revision 与 text/markdown，选择版本走 Project State，完成带上必需条件与版本", async () => {
     activate();
     let taskRevision = "2";
@@ -472,7 +518,14 @@ describe("产物与完成闭环（UI-11，live）", () => {
     await mounted.wrapper.get('textarea[name="artifact-content"]').setValue("A");
     await mounted.wrapper.get('[data-testid="artifact-save"]').trigger("click");
     expect(resolveSave).toBeDefined();
+    const completionElement = mounted.wrapper.get('[data-testid="task-completion"]').element;
     await mounted.wrapper.get('textarea[name="artifact-content"]').setValue("B");
+    await mounted.wrapper.get('[data-testid="artifact-mode-preview"]').trigger("click");
+    expect(mounted.wrapper.get('[data-testid="artifact-draft-preview"]').text()).toBe("B");
+    expect(mounted.wrapper.get('[data-testid="artifact-save-pending"]').text()).toContain(saveCommandId);
+    expect(mounted.wrapper.findAll('[data-testid="task-completion"]')).toHaveLength(1);
+    expect(mounted.wrapper.get('[data-testid="task-completion"]').element).toBe(completionElement);
+    await mounted.wrapper.get('[data-testid="artifact-mode-edit"]').trigger("click");
     expect(mounted.wrapper.get('[data-testid="artifact-save"]').attributes("disabled")).toBeDefined();
     resolveSave!(jsonResponse(201, envelope(saveCommandId, {
       task_id: TASK_ID, artifact_id: ARTIFACT_ID, artifact_revision: "0",
@@ -482,6 +535,7 @@ describe("产物与完成闭环（UI-11，live）", () => {
     await flush(80);
     expect(mounted.wrapper.get('textarea[name="artifact-content"]').element).toHaveProperty("value", "B");
     expect(mounted.wrapper.get('[data-testid="artifact-save-receipt"]').text()).toContain("当前草稿仍未保存");
+    expect(mounted.wrapper.get('[data-testid="artifact-draft-status"]').text()).toContain("草稿未保存");
     expect((mounted.wrapper.get(`[data-testid="artifact-version-${VERSION_ID}"]`).element as HTMLInputElement).checked).toBe(false);
   });
 
@@ -510,6 +564,8 @@ describe("产物与完成闭环（UI-11，live）", () => {
     await mounted.wrapper.get('[data-testid="task-detail-tab-artifacts"]').trigger("click");
     await flush();
     await mounted.wrapper.get('textarea[name="artifact-content"]').setValue("未保存的草稿");
+    await mounted.wrapper.get('[data-testid="criterion-c1"]').setValue(true);
+    await mounted.wrapper.get('[data-testid="criterion-c2"]').setValue(true);
     expect(mounted.wrapper.get('[data-testid="artifact-save"]').attributes("disabled")).toBeDefined();
     expect(mounted.wrapper.get('[data-testid="task-complete"]').attributes("disabled")).toBeDefined();
     expect(calls.filter((call) => call.method === "POST" && call.url === `${taskUrl}/artifacts`)).toHaveLength(0);
@@ -521,6 +577,106 @@ describe("产物与完成闭环（UI-11，live）", () => {
     await mounted.wrapper.get('[data-testid="artifact-save"]').trigger("click");
     await flush();
     expect(calls.filter((call) => call.method === "POST" && call.url === `${taskUrl}/artifacts`)).toHaveLength(1);
+  });
+
+  it("保存后的任务刷新失败保留草稿与同一命令 Owner，核实前禁写，重试不丢回执", async () => {
+    activate();
+    let created = false;
+    let taskReadable = true;
+    const { calls } = stubFetch(async (url, method, body) => {
+      if (method === "GET" && url === taskUrl) return taskReadable
+        ? jsonResponse(200, taskDetailBody({ revision: created ? "3" : "2" }))
+        : jsonResponse(503, { code: "DATABASE_UNAVAILABLE", detail: "task refresh failed" });
+      if (method === "GET" && url === stateUrl) return jsonResponse(200, projectStateBody());
+      if (method === "GET" && url === `${taskUrl}/artifacts`) return jsonResponse(200, taskArtifactsBody(
+        created ? [{ id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "8" }] : []));
+      if (method === "GET" && url.endsWith(`/artifact-versions/${VERSION_ID}/content`)) return { ok: true, status: 200, text: async () => "# 本轮成果" } as Response;
+      if (method === "POST" && url === `${taskUrl}/artifacts`) {
+        created = true; taskReadable = false;
+        return jsonResponse(201, envelope(String(body.command_id), { task_id: TASK_ID, artifact_id: ARTIFACT_ID,
+          artifact_revision: "0", version_id: VERSION_ID, version_number: "1", media_type: "text/markdown",
+          sha256: "a".repeat(64), size: "8", task_revision: "3" }));
+      }
+      throw new Error(`unexpected request: ${method} ${url}`);
+    });
+    const mounted = await mountWorkbench(`/tasks/${TASK_ID}?tab=artifacts`); unmount = mounted.unmount;
+    await flush();
+    const completionElement = mounted.wrapper.get('[data-testid="task-completion"]').element;
+    await mounted.wrapper.get('textarea[name="artifact-content"]').setValue("# 本轮成果");
+    await mounted.wrapper.get('[data-testid="criterion-c1"]').setValue(true);
+    await mounted.wrapper.get('[data-testid="criterion-c2"]').setValue(true);
+    await mounted.wrapper.get('[data-testid="artifact-save"]').trigger("click"); await flush(80);
+    expect(mounted.wrapper.get('[data-testid="task-refresh-error"]').text()).toContain("刷新任务事实失败");
+    expect(mounted.wrapper.get('[data-testid="artifact-save-receipt"]').text()).toContain("已创建产物");
+    expect(mounted.wrapper.get('textarea[name="artifact-content"]').element).toHaveProperty("value", "# 本轮成果");
+    expect(mounted.wrapper.get('[data-testid="task-completion"]').element).toBe(completionElement);
+    expect(mounted.wrapper.get('[data-testid="task-complete"]').attributes("disabled")).toBeDefined();
+    expect(mounted.wrapper.get('[data-testid="artifact-save"]').attributes("disabled")).toBeDefined();
+    await mounted.wrapper.get('[data-testid="task-complete"]').trigger("click");
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
+    taskReadable = true;
+    await mounted.wrapper.get('[data-testid="task-refresh-retry"]').trigger("click"); await flush();
+    expect(mounted.wrapper.find('[data-testid="task-refresh-error"]').exists()).toBe(false);
+    expect(mounted.wrapper.get('[data-testid="task-completion"]').element).toBe(completionElement);
+    expect(mounted.wrapper.get('[data-testid="artifact-save-receipt"]').text()).toContain("已创建产物");
+    expect(mounted.wrapper.get('[data-testid="task-complete"]').attributes("disabled")).toBeUndefined();
+  });
+
+  it("Task 刷新先403后503仍锁存失权态，成功单读前不恢复旧来源，用户 B 与 Owner 始终保留", async () => {
+    activate();
+    let taskReadStatus = 200;
+    let created = false;
+    let commandId = "";
+    let resolveSave: ((body: Response) => void) | undefined;
+    const { calls } = stubFetch(async (url, method, body) => {
+      if (method === "GET" && url === taskUrl) {
+        if (taskReadStatus !== 200) return jsonResponse(taskReadStatus, {
+          code: taskReadStatus === 403 ? "FORBIDDEN" : "DATABASE_UNAVAILABLE", detail: "PRIVATE_DENIAL_METADATA"
+        });
+        const task = taskDetailBody({ revision: created ? "3" : "2" });
+        task.title = "PRIVATE_TASK_TITLE";
+        (task.acceptance as Record<string, unknown>).objective = "PRIVATE_TASK_OBJECTIVE";
+        return jsonResponse(200, task);
+      }
+      if (method === "GET" && url === stateUrl) return jsonResponse(200, projectStateBody());
+      if (method === "GET" && url === `${taskUrl}/artifacts`) return jsonResponse(200, taskArtifactsBody(
+        created ? [{ id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "1" }] : []));
+      if (method === "GET" && url.endsWith(`/artifact-versions/${VERSION_ID}/content`)) return { ok: true, status: 200, text: async () => "A" } as Response;
+      if (method === "POST" && url === `${taskUrl}/artifacts`) {
+        commandId = String(body.command_id);
+        return new Promise<Response>((resolve) => { resolveSave = resolve; });
+      }
+      throw new Error(`unexpected request: ${method} ${url}`);
+    });
+    const mounted = await mountWorkbench(`/tasks/${TASK_ID}?tab=artifacts`); unmount = mounted.unmount; await flush();
+    const completionElement = mounted.wrapper.get('[data-testid="task-completion"]').element;
+    await mounted.wrapper.get('textarea[name="artifact-content"]').setValue("A");
+    await mounted.wrapper.get('[data-testid="artifact-save"]').trigger("click");
+    await mounted.wrapper.get('textarea[name="artifact-content"]').setValue("用户 B");
+    created = true; taskReadStatus = 403;
+    resolveSave!(jsonResponse(201, envelope(commandId, { task_id: TASK_ID, artifact_id: ARTIFACT_ID,
+      artifact_revision: "0", version_id: VERSION_ID, version_number: "1", media_type: "text/markdown",
+      sha256: "a".repeat(64), size: "1", task_revision: "3" })));
+    await flush(80);
+    expect(mounted.wrapper.get('[data-testid="artifact-source-unavailable"]').exists()).toBe(true);
+    const artifactReads = calls.filter((call) => call.method === "GET" && call.url === `${taskUrl}/artifacts`).length;
+    taskReadStatus = 503;
+    await mounted.wrapper.get('[data-testid="task-refresh-retry"]').trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="artifact-source-unavailable"]').exists()).toBe(true);
+    expect(mounted.wrapper.text()).not.toContain("PRIVATE_TASK_TITLE");
+    expect(mounted.wrapper.text()).not.toContain("PRIVATE_TASK_OBJECTIVE");
+    expect(mounted.wrapper.text()).not.toContain("PRIVATE_DENIAL_METADATA");
+    expect(mounted.wrapper.get('textarea[name="artifact-content"]').element).toHaveProperty("value", "用户 B");
+    expect(mounted.wrapper.get('[data-testid="task-completion"]').element).toBe(completionElement);
+    expect(mounted.wrapper.get('[data-testid="artifact-save"]').attributes("disabled")).toBeDefined();
+    expect(calls.filter((call) => call.method === "GET" && call.url === `${taskUrl}/artifacts`)).toHaveLength(artifactReads);
+    taskReadStatus = 200;
+    await mounted.wrapper.get('[data-testid="task-refresh-retry"]').trigger("click"); await flush();
+    expect(mounted.wrapper.find('[data-testid="artifact-source-unavailable"]').exists()).toBe(false);
+    expect(mounted.wrapper.text()).toContain("PRIVATE_TASK_TITLE");
+    expect(mounted.wrapper.get('textarea[name="artifact-content"]').element).toHaveProperty("value", "用户 B");
+    expect(mounted.wrapper.get('[data-testid="task-completion"]').element).toBe(completionElement);
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
   });
 
   it("两个 Artifact 各有 v1 时按 version ID 区分选择、当前选用与本轮接受", async () => {
@@ -747,10 +903,154 @@ describe("产物与完成闭环（UI-11，live）", () => {
   });
 });
 
+describe("产物正文工作区", () => {
+  const props = { taskId: TASK_ID, projectId: PROJECT_ID, taskStatus: "IN_PROGRESS" as const,
+    taskRevision: "2", acceptanceRevision: "1", criteria: [],
+    allowedActions: ["SAVE_ARTIFACT_VERSION", "COMPLETE"], writeBlockedReason: null, onRefresh: vi.fn() };
+
+  it("默认读取声明的 latest 确切正文，版本阅读与接受分开，命令面板只在右区渲染一次", async () => {
+    activate();
+    const unordered = taskArtifactsBody([
+      { id: VERSION_TWO_ID, number: "2", hash: "b".repeat(64), size: "18" },
+      { id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "12" }
+    ], "1");
+    (unordered.items as Record<string, unknown>[])[0]!.latest_version_id = VERSION_TWO_ID;
+    const { calls } = stubFetch(async (url, method) => {
+      if (url === stateUrl) return jsonResponse(200, projectStateBody());
+      if (url === `${taskUrl}/artifacts`) return jsonResponse(200, unordered);
+      if (url.endsWith(`/artifact-versions/${VERSION_TWO_ID}/content`)) return { ok: true, status: 200, text: async () => "# 确切第二版\n\n当前保存的正文" } as Response;
+      if (url.endsWith(`/artifact-versions/${VERSION_ID}/content`)) return { ok: true, status: 200, text: async () => "# 确切第一版" } as Response;
+      throw new Error(`unexpected request: ${method} ${url}`);
+    });
+    const mounted = await mountReact(createElement(MemoryRouter, {}, createElement(ArtifactPanel, props)));
+    unmount = mounted.unmount; await flush();
+    expect(mounted.wrapper.get('[data-testid="artifact-saved-content"]').text()).toContain("确切第二版");
+    expect(mounted.wrapper.get(`[data-testid="artifact-read-${VERSION_TWO_ID}"]`).attributes("aria-current")).toBe("true");
+    expect(mounted.wrapper.findAll('[data-testid="task-completion"]')).toHaveLength(1);
+    expect(mounted.wrapper.get('[data-testid="artifact-action-rail"] [data-testid="task-completion"]').exists()).toBe(true);
+    expect(mounted.wrapper.get('[data-testid="artifact-action-rail"] [data-testid="artifact-save"]').exists()).toBe(true);
+    await mounted.wrapper.get(`[data-testid="artifact-read-${VERSION_ID}"]`).trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="artifact-saved-content"]').text()).toContain("确切第一版");
+    expect((mounted.wrapper.get(`[data-testid="artifact-version-${VERSION_ID}"]`).element as HTMLInputElement).checked).toBe(false);
+    expect(calls.every((call) => call.method === "GET")).toBe(true);
+  });
+
+  it("切换阅读版本后旧正文的迟到响应不能覆盖新版本", async () => {
+    activate();
+    let resolveOld: ((body: Response) => void) | undefined;
+    stubFetch(async (url, method) => {
+      if (url === stateUrl) return jsonResponse(200, projectStateBody());
+      if (url === `${taskUrl}/artifacts`) return jsonResponse(200, taskArtifactsBody([
+        { id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "12" },
+        { id: VERSION_TWO_ID, number: "2", hash: "b".repeat(64), size: "18" }
+      ], "1"));
+      if (url.endsWith(`/artifact-versions/${VERSION_TWO_ID}/content`)) return new Promise<Response>((resolve) => { resolveOld = resolve; });
+      if (url.endsWith(`/artifact-versions/${VERSION_ID}/content`)) return { ok: true, status: 200, text: async () => "# 正在读第一版" } as Response;
+      throw new Error(`unexpected request: ${method} ${url}`);
+    });
+    const mounted = await mountReact(createElement(MemoryRouter, {}, createElement(ArtifactPanel, props)));
+    unmount = mounted.unmount; await flush();
+    expect(resolveOld).toBeDefined();
+    expect(mounted.wrapper.get('[data-testid="artifact-content-loading"]').text()).toContain("v2");
+    await mounted.wrapper.get(`[data-testid="artifact-read-${VERSION_ID}"]`).trigger("click"); await flush();
+    resolveOld!({ ok: true, status: 200, text: async () => "# 迟到第二版" } as Response); await flush();
+    expect(mounted.wrapper.get('[data-testid="artifact-saved-content"]').text()).toContain("正在读第一版");
+    expect(mounted.wrapper.text()).not.toContain("迟到第二版");
+  });
+
+  it("不可用正文显示同版重试，不泄露错误 detail 或替换为其他版本", async () => {
+    activate();
+    let readable = false;
+    const { calls } = stubFetch(async (url, method) => {
+      if (url === stateUrl) return jsonResponse(200, projectStateBody());
+      if (url === `${taskUrl}/artifacts`) return jsonResponse(200, taskArtifactsBody([
+        { id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "12" }
+      ]));
+      if (url.endsWith(`/artifact-versions/${VERSION_ID}/content`)) return readable
+        ? { ok: true, status: 200, text: async () => "# 重试后确切正文" } as Response
+        : jsonResponse(404, { code: "NOT_FOUND", detail: "PRIVATE_SOURCE_METADATA" });
+      throw new Error(`unexpected request: ${method} ${url}`);
+    });
+    const mounted = await mountReact(createElement(MemoryRouter, {}, createElement(ArtifactPanel, props)));
+    unmount = mounted.unmount; await flush();
+    expect(mounted.wrapper.get('[data-testid="artifact-content-error"]').text()).toContain("不会用其他版本替代");
+    expect(mounted.wrapper.text()).not.toContain("PRIVATE_SOURCE_METADATA");
+    expect(mounted.wrapper.find('[data-testid="artifact-saved-content"]').exists()).toBe(false);
+    readable = true;
+    await mounted.wrapper.get('[data-testid="artifact-content-retry"]').trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="artifact-saved-content"]').text()).toContain("重试后确切正文");
+    expect(calls.filter((call) => call.url.includes("/artifact-versions/")).map((call) => call.url))
+      .toEqual(Array(2).fill(`${BASE_URL}/api/v1/workspaces/${WORKSPACE_ID}/artifact-versions/${VERSION_ID}/content`));
+    expect(calls.every((call) => call.method === "GET")).toBe(true);
+  });
+
+  it.each([403, 404])("产物列表刷新返回 %s 时隐藏旧来源事实，保留未保存 B 和原保存 A 的命令", async (status) => {
+    activate();
+    let unavailable = false;
+    let commandId = "";
+    const listed = taskArtifactsBody([{ id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "12" }]);
+    (listed.items as Record<string, unknown>[])[0]!.title = "PRIVATE_ARTIFACT_TITLE";
+    stubFetch(async (url, method, body) => {
+      if (url === stateUrl) return jsonResponse(200, projectStateBody());
+      if (url === `${taskUrl}/artifacts`) return unavailable
+        ? jsonResponse(status, { code: "NOT_FOUND", detail: "PRIVATE_DENIAL_METADATA" }) : jsonResponse(200, listed);
+      if (url.endsWith(`/artifact-versions/${VERSION_ID}/content`)) return { ok: true, status: 200, text: async () => "# PRIVATE_SERVER_BODY" } as Response;
+      if (method === "POST" && url === `${artifactsUrl}/${ARTIFACT_ID}/versions`) {
+        commandId = String(body.command_id); throw new TypeError("response lost");
+      }
+      throw new Error(`unexpected request: ${method} ${url}`);
+    });
+    const render = (taskRevision: string) => createElement(MemoryRouter, {}, createElement(ArtifactPanel, { ...props, taskRevision }));
+    const mounted = await mountReact(render("2")); unmount = mounted.unmount; await flush();
+    await mounted.wrapper.get('[data-testid="artifact-mode-edit"]').trigger("click");
+    await mounted.wrapper.get('textarea[name="artifact-content"]').setValue("用户草稿 A");
+    await mounted.wrapper.get('[data-testid="artifact-save"]').trigger("click"); await flush();
+    await mounted.wrapper.get('textarea[name="artifact-content"]').setValue("用户未保存 B");
+    const completionElement = mounted.wrapper.get('[data-testid="task-completion"]').element;
+    unavailable = true;
+    await mounted.rerender(render("3")); await flush();
+    expect(mounted.wrapper.get('[data-testid="artifact-source-unavailable"]').text()).toContain("来源暂不可读");
+    expect(mounted.wrapper.get('textarea[name="artifact-content"]').element).toHaveProperty("value", "用户未保存 B");
+    expect(mounted.wrapper.get('[data-testid="artifact-save-pending"]').text()).toContain(commandId);
+    expect(mounted.wrapper.get('[data-testid="task-completion"]').element).toBe(completionElement);
+    expect(mounted.wrapper.text()).not.toContain("PRIVATE_ARTIFACT_TITLE");
+    expect(mounted.wrapper.text()).not.toContain("PRIVATE_SERVER_BODY");
+    expect(mounted.wrapper.text()).not.toContain("PRIVATE_DENIAL_METADATA");
+    expect(mounted.wrapper.text()).not.toContain(VERSION_ID);
+    expect(mounted.wrapper.get('[data-testid="artifact-save"]').attributes("disabled")).toBeDefined();
+    expect(mounted.wrapper.find('[data-testid="artifact-save-receipt-query"]').exists()).toBe(true);
+  });
+
+  it("Task 失权会隐藏尚未改动的服务端修订正文，恢复读取也不会自动填回草稿", async () => {
+    activate();
+    const listed = taskArtifactsBody([{ id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "12" }]);
+    (listed.items as Record<string, unknown>[])[0]!.title = "PRIVATE_ARTIFACT_TITLE";
+    stubFetch(async (url, method) => {
+      if (url === stateUrl) return jsonResponse(200, projectStateBody());
+      if (url === `${taskUrl}/artifacts`) return jsonResponse(200, listed);
+      if (url === `${artifactsUrl}/${ARTIFACT_ID}`) return jsonResponse(200, (listed.items as Record<string, unknown>[])[0]);
+      if (url.endsWith(`/artifact-versions/${VERSION_ID}/content`)) return { ok: true, status: 200, text: async () => "# PRIVATE_SERVER_BODY" } as Response;
+      throw new Error(`unexpected request: ${method} ${url}`);
+    });
+    const render = (sourceUnavailable: boolean) => createElement(MemoryRouter, {}, createElement(ArtifactPanel, { ...props, sourceUnavailable }));
+    const mounted = await mountReact(render(false)); unmount = mounted.unmount; await flush();
+    await mounted.wrapper.get('[data-testid="artifact-load-latest-draft"]').trigger("click"); await flush();
+    expect(mounted.wrapper.get('textarea[name="artifact-content"]').element).toHaveProperty("value", "# PRIVATE_SERVER_BODY");
+    await mounted.rerender(render(true)); await flush();
+    expect(mounted.wrapper.get('textarea[name="artifact-content"]').element).toHaveProperty("value", "");
+    expect(mounted.wrapper.text()).not.toContain("PRIVATE_SERVER_BODY");
+    expect(mounted.wrapper.text()).not.toContain("PRIVATE_ARTIFACT_TITLE");
+    expect(mounted.wrapper.text()).not.toContain(VERSION_ID);
+    await mounted.rerender(render(false)); await flush();
+    expect(mounted.wrapper.get('textarea[name="artifact-content"]').element).toHaveProperty("value", "");
+  });
+});
+
 describe("人工产物版本修订", () => {
   it("载入 v1 后外部生成 v2，刷新不会悄悄改用 v2 的 CAS；显式确认才可保稿续写", async () => {
     activateRelayConnection({ baseUrl: BASE_URL, workspaceId: WORKSPACE_ID, bearerToken: TOKEN });
     let externalAdvanced = false;
+    let currentBodyReadable = false;
     const { calls } = stubFetch(async (url, method, body) => {
       if (method === "GET" && url === stateUrl) return jsonResponse(200, projectStateBody());
       if (method === "GET" && url === taskUrl) return jsonResponse(200, taskDetailBody({ revision: externalAdvanced ? "3" : "2" }));
@@ -765,6 +1065,9 @@ describe("人工产物版本修订", () => {
         ] : [{ id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "8" }], externalAdvanced ? "1" : "0").items as unknown[])[0]);
       if (method === "GET" && url === `${BASE_URL}/api/v1/workspaces/${WORKSPACE_ID}/artifact-versions/${VERSION_ID}/content`)
         return { ok: true, status: 200, text: async () => "# 原正文" } as Response;
+      if (method === "GET" && url === `${BASE_URL}/api/v1/workspaces/${WORKSPACE_ID}/artifact-versions/${VERSION_TWO_ID}/content`)
+        return currentBodyReadable ? { ok: true, status: 200, text: async () => "# 当前第二版正文" } as Response
+          : jsonResponse(404, { code: "NOT_FOUND", detail: "PRIVATE_SOURCE_METADATA" });
       if (method === "POST" && url === `${artifactsUrl}/${ARTIFACT_ID}/versions`)
         return body.expected_artifact_revision === "0"
           ? jsonResponse(409, { code: "REVISION_CONFLICT", detail: "Artifact revision 已变化" })
@@ -789,6 +1092,14 @@ describe("人工产物版本修订", () => {
       .toMatchObject({ expected_artifact_revision: "0", expected_task_revision: "2" });
     expect(mounted.wrapper.get('textarea[name="artifact-content"]').element).toHaveProperty("value", "# v1 上的人工草稿");
     expect(mounted.wrapper.get('[data-testid="artifact-save"]').attributes("disabled")).toBeDefined();
+    expect(mounted.wrapper.get('[data-testid="artifact-conflict-comparison"]').text()).toContain("我的草稿 · 基于 v1");
+    expect(mounted.wrapper.get('[data-testid="artifact-conflict-current"]').text()).toContain("当前版本 · v2");
+    expect(mounted.wrapper.get('[data-testid="artifact-conflict-content-error"]').text()).toContain("当前正文读取失败");
+    expect(mounted.wrapper.text()).not.toContain("PRIVATE_SOURCE_METADATA");
+    currentBodyReadable = true;
+    await mounted.wrapper.get('[data-testid="artifact-conflict-content-retry"]').trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="artifact-conflict-current"]').text()).toContain("当前第二版正文");
+    expect(mounted.wrapper.get('textarea[name="artifact-content"]').element).toHaveProperty("value", "# v1 上的人工草稿");
     expect(mounted.wrapper.get('[data-testid="artifact-confirm-new-base"]').exists()).toBe(true);
     await mounted.wrapper.get('[data-testid="artifact-confirm-new-base"]').trigger("click"); await flush();
     expect(mounted.wrapper.text()).toContain("确认时版本又发生变化");
@@ -833,6 +1144,7 @@ describe("人工产物版本修订", () => {
     });
     const mounted = await mountWorkbench(`/tasks/${TASK_ID}`); unmount = mounted.unmount;
     await mounted.wrapper.get('[data-testid="task-detail-tab-artifacts"]').trigger("click"); await flush();
+    await mounted.wrapper.get('[data-testid="artifact-mode-edit"]').trigger("click");
     await mounted.wrapper.get('textarea[name="artifact-content"]').setValue("未保存草稿");
     expect(mounted.wrapper.get('[data-testid="artifact-load-latest-draft"]').attributes("disabled")).toBeDefined();
     expect(mounted.wrapper.get('textarea[name="artifact-content"]').element).toHaveProperty("value", "未保存草稿");

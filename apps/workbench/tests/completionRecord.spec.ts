@@ -44,6 +44,8 @@ describe("P15 完成凭据详情", () => {
     }));
     mounted = await mountWorkbench(`/completion-records/${completionId}`); unmount = mounted.unmount;
     expect(mounted.wrapper.text()).toContain("历史凭据；当前任务已不指向此凭据");
+    expect(mounted.wrapper.get("h1").text()).toBe("历史完成依据");
+    expect(mounted.wrapper.text()).not.toContain("这项工作已完成");
     expect(mounted.wrapper.text()).toContain("旧版目标：保存实验记录");
     expect(mounted.wrapper.text()).toContain("旧版条件");
     expect(mounted.wrapper.text()).toContain("当时核对通过");
@@ -65,6 +67,7 @@ describe("P15 完成凭据详情", () => {
         artifact_id: "secret-artifact", version_number: "4", sha256: "secret-sha" }] })));
     const mounted = await mountWorkbench(`/completion-records/${completionId}`); unmount = mounted.unmount;
     expect(mounted.wrapper.text()).toContain("历史验收内容不可用");
+    expect(mounted.wrapper.get("h1").text()).toBe("这项工作已完成");
     expect(mounted.wrapper.text()).toContain("验证会话不可用");
     expect(mounted.wrapper.text()).toContain("产物版本不可用");
     expect(mounted.wrapper.text()).not.toContain("secret-");
@@ -109,6 +112,7 @@ describe("P15 完成凭据详情", () => {
     expect(mounted.wrapper.text()).not.toContain("旧版目标：保存实验记录");
     await mounted.wrapper.findAll("button").find((button) => button.text() === "重读凭据")!.trigger("click"); await flush();
     expect(mounted.wrapper.text()).toContain("当前不可读取或无权查看");
+    expect(mounted.wrapper.get("h1").text()).toBe("完成凭据");
     expect(mounted.wrapper.text()).not.toContain("新凭据目标");
   });
 });

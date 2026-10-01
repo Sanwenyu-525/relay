@@ -16,14 +16,20 @@ export interface GitExecResult {
   readonly stderr: string;
 }
 
-/** Base safe git invocation. Disables external diffs and unquoted paths. */
+/** Bounded Git invocation; read calls apply additional restrictions below. */
 export async function runSafeGit(
   args: readonly string[],
   options: GitExecOptions,
 ): Promise<GitExecResult> {
+  return executeGit(args, options, false);
+}
+
+async function executeGit(args: readonly string[], options: GitExecOptions, readOnly: boolean): Promise<GitExecResult> {
   const safeBaseArgs = [
     '-c', 'core.quotePath=false',
     '-c', 'diff.external=false',
+    ...(readOnly ? ['--no-pager', '--no-optional-locks', '-c', 'core.fsmonitor=false',
+      '-c', 'diff.autoRefreshIndex=false'] : []),
   ];
   const fullArgs = [...safeBaseArgs, ...args];
   try {
@@ -45,14 +51,28 @@ export async function runSafeGit(
         GIT_CONFIG_NOSYSTEM: '1',
       },
     });
-    return { exitCode: 0, stdout: stdout.trim(), stderr: stderr.trim() };
+    return { exitCode: 0, stdout: readOnly ? stdout : stdout.trim(), stderr: stderr.trim() };
   } catch (error: any) {
     return {
-      exitCode: typeof error.code === 'number' ? error.code : 1,
-      stdout: (error.stdout ?? '').toString().trim(),
+      exitCode: typeof error.code === 'number' ? error.code : readOnly ? -1 : 1,
+      stdout: readOnly ? (error.stdout ?? '').toString() : (error.stdout ?? '').toString().trim(),
       stderr: (error.stderr ?? (error.message || '')).toString().trim(),
     };
   }
+}
+
+async function runReadOnlyGit(args: readonly string[], options: GitExecOptions): Promise<GitExecResult> {
+  // Status/diff can run clean filters even with external diff and textconv disabled.
+  // Refuse them rather than silently bypassing a repository's content transformation.
+  const filters = await executeGit(['config', '--null', '--get-regexp', '^filter\\..*\\.(clean|process)$'], options, true);
+  if (filters.exitCode !== 0 && (filters.exitCode !== 1 || filters.stdout !== '' || filters.stderr !== '')) {
+    throw new Error('GIT_READ_CONFIG_UNAVAILABLE');
+  }
+  if (filters.stdout.split('\0').some(record => {
+    const separator = record.indexOf('\n');
+    return separator >= 0 && record.slice(separator + 1).trim() !== '';
+  })) throw new Error('GIT_READ_EXTERNAL_FILTER_UNSUPPORTED');
+  return executeGit(args, options, true);
 }
 
 export interface GitStatusResult {
@@ -64,13 +84,13 @@ export interface GitStatusResult {
 }
 
 export async function gitGetStatus(options: GitExecOptions): Promise<GitStatusResult> {
-  const branchRes = await runSafeGit(['rev-parse', '--abbrev-ref', 'HEAD'], options);
-  const branch = branchRes.exitCode === 0 ? branchRes.stdout : 'HEAD';
+  const branchRes = await runReadOnlyGit(['symbolic-ref', '--quiet', '--short', 'HEAD'], options);
+  const branch = branchRes.exitCode === 0 ? branchRes.stdout.trim() : 'HEAD';
 
-  const headRes = await runSafeGit(['rev-parse', 'HEAD'], options);
-  const headCommit = headRes.exitCode === 0 ? headRes.stdout : null;
+  const headRes = await runReadOnlyGit(['rev-parse', 'HEAD'], options);
+  const headCommit = headRes.exitCode === 0 ? headRes.stdout.trim() : null;
 
-  const statusRes = await runSafeGit(['status', '--porcelain=v1'], options);
+  const statusRes = await runReadOnlyGit(['status', '--porcelain=v1', '-z', '--ignore-submodules=dirty'], options);
   if (statusRes.exitCode !== 0) {
     throw new Error(`Git status failed: ${statusRes.stderr}`);
   }
@@ -79,11 +99,17 @@ export async function gitGetStatus(options: GitExecOptions): Promise<GitStatusRe
   const unstaged: string[] = [];
   const untracked: string[] = [];
 
-  const lines = statusRes.stdout.split('\n').filter((l) => l.trim() !== '');
-  for (const line of lines) {
+  const records = statusRes.stdout.split('\0');
+  for (let index = 0; index < records.length; index++) {
+    const line = records[index]!;
+    if (line === '') continue;
+    if (line.length < 4 || line[2] !== ' ') throw new Error('GIT_READ_STATUS_INVALID');
     const indexStatus = line[0];
     const workTreeStatus = line[1];
-    const path = line.slice(3).trim();
+    const path = line.slice(3);
+    if (indexStatus === 'R' || indexStatus === 'C' || workTreeStatus === 'R' || workTreeStatus === 'C') {
+      if (!records[++index]) throw new Error('GIT_READ_STATUS_INVALID'); // -z emits destination, then original path.
+    }
 
     if (indexStatus === '?' && workTreeStatus === '?') {
       untracked.push(path);
@@ -100,10 +126,10 @@ export async function gitGetDiff(
   options: GitExecOptions,
   params?: { cached?: boolean; path?: string },
 ): Promise<string> {
-  const args = ['diff', '--no-ext-diff'];
+  const args = ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--ignore-submodules=dirty', '--submodule=short'];
   if (params?.cached) args.push('--cached');
   if (params?.path) args.push('--', params.path);
-  const res = await runSafeGit(args, options);
+  const res = await runReadOnlyGit(args, options);
   if (res.exitCode !== 0) throw new Error(`Git diff failed: ${res.stderr}`);
   return res.stdout;
 }
@@ -112,9 +138,9 @@ export async function gitGetLog(
   options: GitExecOptions,
   maxCount = 10,
 ): Promise<Array<{ commit: string; author: string; date: string; message: string }>> {
-  const res = await runSafeGit(
+  const res = await executeGit(
     ['log', `-n${maxCount}`, '--format=%H%x1f%an%x1f%ad%x1f%s'],
-    options,
+    options, true,
   );
   if (res.exitCode !== 0) throw new Error(`Git log failed: ${res.stderr}`);
   if (!res.stdout) return [];

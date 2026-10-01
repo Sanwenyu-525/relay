@@ -159,7 +159,7 @@ G06 在 `runOneCommand` 增加对持久 `PENDING` 控制的定时观察，向固
 
 本轮直接开发自检又跑了完整隔离 PG [251/251](../testing/evidence/raw-output-20260930.zip#entry=docs%2Ftesting%2Fevidence%2Fm03%2Findependent-g03-g06-full-pg.log)、React 组件 [134/134](../testing/evidence/raw-output-20260930.zip#entry=docs%2Ftesting%2Fevidence%2Fm03%2Findependent-g03-react-full-vitest.log)和 Chromium [21/21](../testing/evidence/raw-output-20260930.zip#entry=docs%2Ftesting%2Fevidence%2Fm03%2Findependent-g03-react-browser.log)。固定 Mock 负载脚本复用临时 PG、真实角色与 Saver 安装，8 个 `MARKDOWN_STRUCTURE` Run 完成、2 个控制取消收敛，4 路 Delegate、测试专用模型等待 250 ms；[原始 JSON 与摘要](../testing/evidence/m03/mock-bench-20260924-225511-ad4f1b7c/summary.json)保留请求、领取、首个已持久草稿、完成、取消、CPU/RSS 与 DB 采样。样本不足以推断 P95/P99 稳态容量，FakeModelPort 不产生真实首 token 或 Provider 成本。首次运行因 PowerShell 5.1 将 `initdb` 的非致命 stderr 合并输出当作异常而中止；包装脚本改为按子进程退出码判定，[重跑日志](../testing/evidence/raw-output-20260930.zip#entry=docs%2Ftesting%2Fevidence%2Fm03%2Fmock-benchmark-console-retry.log)通过。
 
-Windows 发布脚本首次在编译期间检测到 `icon.ico` 输入哈希变化，拒绝发布清单与替换旧 release；不推断该变化来源。以当前稳定输入重跑后构建成功，新 EXE SHA-256 `521b65e08c5dbdaaaf8aa3962bad6cf8d2fbd1e548efd85c3a6b00635c0adbca`，资源文件 13205 项、未发现配置凭据文件；[重跑日志](../testing/evidence/raw-output-20260930.zip#entry=docs%2Ftesting%2Fevidence%2Fm03%2Fmock-g03-g06-build-release-retry.log)与[清单](../../apps/desktop/release/desktop-build-manifest.json)记录精确输入。已用此包启动隔离桌面试用会话；这只是开发包，不代表 G01–G08 总验收或安装交付。
+Windows 发布脚本首次在编译期间检测到 `icon.ico` 输入哈希变化，拒绝发布清单与替换旧 release；不推断该变化来源。以当前稳定输入重跑后构建成功，新 EXE SHA-256 `521b65e08c5dbdaaaf8aa3962bad6cf8d2fbd1e548efd85c3a6b00635c0adbca`，资源文件 13205 项、未发现配置凭据文件；[重跑日志](../testing/evidence/raw-output-20260930.zip#entry=docs%2Ftesting%2Fevidence%2Fm03%2Fmock-g03-g06-build-release-retry.log)与`apps/desktop/release/desktop-build-manifest.json`（当时的本机构建路径，不作为历史证据链接）记录精确输入。已用此包启动隔离桌面试用会话；这只是开发包，不代表 G01–G08 总验收或安装交付。
 
 ## Mock 文件动作的 React 委托与历史入口（开发自检）
 
@@ -168,6 +168,12 @@ Windows 发布脚本首次在编译期间检测到 `icon.ico` 输入哈希变化
 前端定向开发自检：`pnpm --dir apps/workbench typecheck` 退出 0，`pnpm --dir apps/workbench exec vitest run tests/delegate-task.spec.ts tests/run.spec.ts` 14/14 通过。新增组件断言覆盖普通委托不带动作字段、可选动作冻结原请求以及 Run 动作历史按需读取；这些不是 Windows 或 M03 G01–G08 正式验收。
 
 随后 `pnpm --dir apps/workbench test` 全量 136/136、`pnpm --dir apps/workbench build` 与文档检查退出 0。用户确认旧试用窗口已结束后，旧隔离会话通过匹配 session 路径和进程身份关闭并清理（PG 停止 0、临时根删除 True）；新桌面包[构建日志](../testing/evidence/raw-output-20260930.zip#entry=docs%2Ftesting%2Fevidence%2Fm03%2Fmock-action-ui-build-release.log)退出 0，EXE SHA-256 `ad4a40cd08502c3a5013f081acc08bce0bed4bfb671991f91609979f52086a25`，资源哈希 13205 项、禁带配置 0 项。新的隔离 PG/Graph 桌面试用会话已打开，启动输出见[日志](../testing/evidence/raw-output-20260930.zip#entry=docs%2Ftesting%2Fevidence%2Fm03%2Fmock-action-ui-trial-start.log)。这里只记录打包和启动事实，没有执行本次新增 UI 的真实窗口业务验收；M03 仍为 IN_PROGRESS。
+
+2026-09-30 连续编辑失焦根因：`TaskDelegatePanel` 在父组件内定义 `MockActionOptions` 并把它作为 React 组件渲染；每次输入更新都会创建新组件类型，导致输入节点重建、焦点丢失。改为调用同作用域的普通 JSX 渲染函数，保留字段与冻结提交语义；组件反例核对目标和内容输入更新后仍聚焦原 DOM 节点。Windows 脚本改用真实配置 UI 连续键入及原 Delegate 命令核对；实际验收范围只看[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。公开 API 与数据库没有变化。
+
+同日收紧固定 Mock 基准的停止条件：初测只等待 Run 终态，监督器停止前尚未观测两条排队取消命令出队。基准保留原 Run 终态采样时刻与延迟定义，再在原截止时刻内等待全部 START outbox `DONE`、Invocation `IDLE`、取消控制 `APPLIED`，严格断言后才停止并采最终事实；没有修改生产调度或放宽阈值。该负载的两条取消是排队 `CANCEL_TASK`，不能代替在途模型 abort；成绩只在统一验收表维护。
+
+同日 Windows 验收脚本的观察修正：125% DPI 下 Run 控制位于折叠侧栏，刷新先通过真实侧栏入口展开、再点击可见按钮，不强制点击隐藏元素。正常关闭的首个观察器尝试包装 `__TAURI_INTERNALS__.invoke`，但包内 Tauri 2.11.6 `scripts/core.js` 以未设置 writable/configurable 的 `Object.defineProperty` 注入，赋值未安装观察器；改为点击前订阅只读 page close 事件，仍要求一次页面关闭、自然宿主退出 0/无 signal 及已记录进程身份停止，不使用清理步骤伪造通过。UNKNOWN 启动失败现能输出脱敏宿主错误摘要，另增加原 UNKNOWN/QUARANTINED 身份连续快速重启反例；早先一次退出 101 缺少诊断，根因仍未确定。当前结论只在统一验收表维护，公开 API、数据库与生产窗口权限均未改变。
 
 ## 2026-09-29 桌面 Assist 派发补漏
 

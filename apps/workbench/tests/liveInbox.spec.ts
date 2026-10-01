@@ -10,6 +10,7 @@ const taskId2 = "33333333-3333-4333-8333-333333333333";
 const taskId3 = "55555555-5555-4555-8555-555555555555";
 const path = `${baseUrl}/api/v1/workspaces/${workspaceId}/tasks?inbox=true`;
 const allPath = `${baseUrl}/api/v1/workspaces/${workspaceId}/tasks?scope=all`;
+const projectsPath = `${baseUrl}/api/v1/workspaces/${workspaceId}/projects?status=active`;
 let unmount: (() => void) | null = null;
 
 afterEach(() => {
@@ -21,6 +22,12 @@ function connect(id = workspaceId) {
 }
 function response(status: number, body: unknown): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
+}
+function recentWorkResponse(url: string): Response | null {
+  return [workspaceId, otherWorkspaceId].some((id) =>
+    url === `${baseUrl}/api/v1/workspaces/${id}/tasks?scope=all` ||
+    url === `${baseUrl}/api/v1/workspaces/${id}/projects?status=active`)
+    ? response(200, { items: [], next_cursor: null }) : null;
 }
 function task(id: string, title: string, status = "INBOX", projectId: string | null = null,
   mode = "ME", executorKind = "HUMAN") {
@@ -35,6 +42,7 @@ describe("live 任务收件箱", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
+      const recent = recentWorkResponse(url); if (recent) return recent;
       expect(url).toBe(path);
       return response(200, { items: [task(taskId1, "直达任务")], next_cursor: null });
     });
@@ -43,7 +51,8 @@ describe("live 任务收件箱", () => {
     expect(mounted.router.currentRoute.value.path).toBe("/tasks");
     expect(mounted.router.currentRoute.value.query.tab).toBe("inbox");
     expect(mounted.wrapper.get(`[data-testid="task-row-${taskId1}"]`).text()).toContain("直达任务");
-    expect(fetchMock.mock.calls.filter(([input]) => String(input) === path)).toHaveLength(1);
+    expect(fetchMock.mock.calls.map(([input]) => String(input)).filter((url) => !url.endsWith("/attention/interventions")))
+      .toEqual([allPath, projectsPath, path]);
   });
 
   it("按真实游标追加页，状态、模式和标题只筛选已加载任务且计数准确", async () => {
@@ -52,7 +61,8 @@ describe("live 任务收件箱", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
-      if (url.includes("/tasks?")) urls.push(url);
+      urls.push(url);
+      const recent = recentWorkResponse(url); if (recent) return recent;
       if (url === path) return response(200, { items: [
         task(taskId1, "整理资料"), task(taskId2, "讨论提纲", "READY")], next_cursor: "opaque+2" });
       if (url === `${path}&cursor=opaque%2B2`) return response(200, {
@@ -60,7 +70,7 @@ describe("live 任务收件箱", () => {
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/tasks?tab=inbox"); unmount = mounted.unmount;
-    expect(urls).toEqual([path]);
+    expect(urls).toEqual([allPath, projectsPath, path]);
     expect(mounted.wrapper.get('[data-testid="inbox-count"]').text())
       .toContain("已加载 2 项 · 当前筛选显示 2 项 · 仍有后续页");
     expect(mounted.wrapper.get(`[data-testid="task-row-${taskId1}"]`).text()).toContain("未归属项目");
@@ -76,7 +86,7 @@ describe("live 任务收件箱", () => {
     expect(mounted.wrapper.get('[data-testid="inbox-count"]').text()).toContain("当前筛选显示 1 项");
     await mounted.wrapper.get('[data-testid="inbox-load-more"]').trigger("click");
     await flush(40);
-    expect(urls).toEqual([path, `${path}&cursor=opaque%2B2`]);
+    expect(urls).toEqual([allPath, projectsPath, path, `${path}&cursor=opaque%2B2`]);
     expect(mounted.wrapper.get('[data-testid="inbox-count"]').text())
       .toContain("已加载 3 项 · 当前筛选显示 1 项 · 已到列表末页");
     expect(mounted.wrapper.find('[data-testid="inbox-load-more"]').exists()).toBe(false);
@@ -87,16 +97,21 @@ describe("live 任务收件箱", () => {
   it("刷新遇到失权清空旧条目，允许重新读取", async () => {
     connect();
     let authorized = true;
-    vi.stubGlobal("fetch", vi.fn(async () => authorized
-      ? response(200, { items: [task(taskId1, "旧的已读任务")], next_cursor: null })
-      : response(403, { code: "FORBIDDEN", detail: "收件箱不可读" })));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
+      const recent = recentWorkResponse(url); if (recent) return recent;
+      if (url !== path) throw new Error(`unexpected ${url}`);
+      return authorized ? response(200, { items: [task(taskId1, "旧的已读任务")], next_cursor: null })
+        : response(403, { code: "FORBIDDEN", detail: "收件箱不可读" });
+    }));
     const mounted = await mountWorkbench("/tasks?tab=inbox"); unmount = mounted.unmount;
     expect(mounted.wrapper.find(`[data-testid="task-row-${taskId1}"]`).exists()).toBe(true);
     authorized = false;
     await mounted.wrapper.get('[data-testid="inbox-refresh"]').trigger("click");
     await flush(40);
     expect(mounted.wrapper.find(`[data-testid="task-row-${taskId1}"]`).exists()).toBe(false);
-    expect(mounted.wrapper.get('[role="alert"]').text()).toContain("收件箱不可读");
+    expect(mounted.wrapper.get('#main-content [role="alert"]').text()).toContain("收件箱不可读");
     expect(mounted.wrapper.find('[data-testid="inbox-count"]').exists()).toBe(false);
   });
 
@@ -107,10 +122,11 @@ describe("live 任务收件箱", () => {
     let inboxReads = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
+      const recent = recentWorkResponse(url); if (recent) return recent;
       if (url === path) return ++inboxReads === 1
         ? response(200, { items: [task(taskId1, "旧空间任务")], next_cursor: null }) : oldRequest;
-      if (url === allPath) return response(200, { items: [], next_cursor: null });
-      if (url.includes(otherWorkspaceId)) return response(200, {
+      if (url === `${baseUrl}/api/v1/workspaces/${otherWorkspaceId}/tasks?inbox=true`) return response(200, {
         items: [task(taskId2, "新空间任务")], next_cursor: null });
       throw new Error(`unexpected ${url}`);
     }));
@@ -135,11 +151,16 @@ describe("live 任务收件箱", () => {
 
   it("拒绝混入有 Project 或非人工模式的错误列表响应", async () => {
     connect();
-    vi.stubGlobal("fetch", vi.fn(async () => response(200, { items: [
-      task(taskId1, "不应显示", "INBOX", "66666666-6666-4666-8666-666666666666")],
-      next_cursor: null })));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
+      const recent = recentWorkResponse(url); if (recent) return recent;
+      if (url !== path) throw new Error(`unexpected ${url}`);
+      return response(200, { items: [
+        task(taskId1, "不应显示", "INBOX", "66666666-6666-4666-8666-666666666666")], next_cursor: null });
+    }));
     const mounted = await mountWorkbench("/tasks?tab=inbox"); unmount = mounted.unmount;
     expect(mounted.wrapper.find(`[data-testid="task-row-${taskId1}"]`).exists()).toBe(false);
-    expect(mounted.wrapper.get('[role="alert"]').text()).toContain("非未归属人工任务");
+    expect(mounted.wrapper.get('#main-content [role="alert"]').text()).toContain("非未归属人工任务");
   });
 });

@@ -39,8 +39,8 @@ export class ModelScopeArchivedError extends Error {
 export class ModelCallRepository {
   constructor(private readonly db: DbExecutor) {}
 
-  async read(id: string, share = false): Promise<ModelCallRow | undefined> {
-    const lock = share ? sql`for share` : sql``;
+  async read(id: string, share: boolean | 'update' = false): Promise<ModelCallRow | undefined> {
+    const lock = share === 'update' ? sql`for update` : share ? sql`for share` : sql``;
     return (await sql<ModelCallRow>`select * from model_calls where id = ${id} ${lock}`
       .execute(this.db)).rows[0];
   }
@@ -122,6 +122,13 @@ export class ModelCallRepository {
     });
   }
 
+  /** Application owns the VERIFY admission transaction; never open a nested one. */
+  async beginVerifyInTransaction(id: string,
+    origin: Pick<ModelCallOrigin, 'workspaceId' | 'inputHash'>,
+    identity: ModelIdentity): Promise<void> {
+    await this.insert(this.db, id, { ...origin, kind: 'VERIFY' }, identity);
+  }
+
   private async insert(db: DbExecutor, id: string, origin: ModelCallOrigin,
     identity: ModelIdentity): Promise<void> {
     await sql`insert into model_calls (id, workspace_id, kind, step_attempt_id,
@@ -148,6 +155,20 @@ export class ModelCallRepository {
       error_kind = ${input.errorKind ?? null}, settled_at = clock_timestamp()
       where id = ${id} and status = 'STARTED' returning id`.execute(this.db);
     if (changed.rows.length !== 1) throw new Error('model call was already settled');
+  }
+
+  /** Callers lock and verify the current business claim before these CAS writes. */
+  async recordFirstTextDelta(id: string, observedAt: Date): Promise<void> {
+    await sql`update model_calls set first_text_delta_at = ${observedAt}
+      where id = ${id} and kind in ('DRAFT', 'ASSIST') and status = 'STARTED'
+        and first_text_delta_at is null`.execute(this.db);
+  }
+
+  async recordFirstPreviewPersisted(id: string): Promise<void> {
+    await sql`update model_calls set first_preview_persisted_at = clock_timestamp()
+      where id = ${id} and kind in ('DRAFT', 'ASSIST') and status = 'STARTED'
+        and first_text_delta_at is not null and first_preview_persisted_at is null`
+      .execute(this.db);
   }
 
   async listForStepAttempt(stepAttemptId: string): Promise<readonly ModelCallRow[]> {

@@ -1,6 +1,7 @@
+import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { flush, mountWorkbench } from "./mountApp";
+import { DomWrapper, flush, mountWorkbench } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -61,6 +62,124 @@ afterEach(() => {
 });
 
 describe("P10 information workbench", () => {
+  it("资料类型页签关联同页正文，方向键首尾循环且忽略输入法合成", async () => {
+    activate();
+    const fetchMock = vi.fn(async (_input: string, _init?: RequestInit) => response(200, [])); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench("/knowledge"); unmount = mounted.unmount;
+    const tabs = mounted.wrapper.get(".knowledge-tabs");
+    expect(tabs.attributes("role")).toBe("tablist");
+    const current = () => mounted.wrapper.get('.knowledge-tabs [aria-selected="true"]');
+    const press = async (key: string, properties: KeyboardEventInit = {}) => {
+      await act(async () => current().element?.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...properties })));
+      await flush();
+    };
+    await act(async () => (current().element as HTMLButtonElement).focus());
+    for (const properties of [{ isComposing: true }, { keyCode: 229 }]) {
+      await press("ArrowRight", properties);
+      expect(current().attributes("data-testid")).toBe("knowledge-tab-KNOWLEDGE");
+    }
+    for (const [key, expected] of [["ArrowLeft", "RULE"], ["ArrowRight", "KNOWLEDGE"], ["End", "RULE"], ["Home", "KNOWLEDGE"], ["ArrowRight", "MEMORY"]]) {
+      await press(key!);
+      const selected = current();
+      expect(selected.attributes("data-testid")).toBe(`knowledge-tab-${expected}`);
+      expect(document.activeElement).toBe(selected.element);
+      expect(selected.attributes("role")).toBe("tab");
+      expect(selected.attributes("tabindex")).toBe("0");
+      expect(tabs.findAll('[tabindex="0"]')).toHaveLength(1);
+      const panel = document.getElementById(selected.attributes("aria-controls")!);
+      expect(panel?.getAttribute("role")).toBe("tabpanel");
+      expect(panel?.getAttribute("aria-labelledby")).toBe(selected.attributes("id"));
+    }
+    expect(fetchMock.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET")).toBe(true);
+  });
+
+  it("从资料阅读切换类型后保留选中页签焦点，迟到列表不覆盖新类型", async () => {
+    activate();
+    let releaseMemory: ((value: Response) => void) | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      if (input === `${base}/knowledge`) return response(200, [knowledge()]);
+      if (input === `${base}/knowledge/${knowledgeId}`) return response(200, knowledge());
+      if (input === `${base}/knowledge/${knowledgeId}/versions`) return response(200, []);
+      if (input === `${base}/memories`) return new Promise<Response>((resolve) => { releaseMemory = resolve; });
+      if (input === `${base}/decisions`) return response(200, []);
+      throw new Error(`unexpected request ${input}`);
+    }));
+    const mounted = await mountWorkbench("/knowledge"); unmount = mounted.unmount;
+    await act(async () => {
+      (mounted.wrapper.get('[data-testid="knowledge-library"]').element as HTMLDetailsElement).open = true;
+      const first = mounted.wrapper.get('[data-testid="knowledge-tab-KNOWLEDGE"]').element as HTMLButtonElement;
+      first.focus(); first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    });
+    await flush();
+    const memoryTab = mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]');
+    expect(memoryTab.attributes("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(memoryTab.element);
+    await act(async () => memoryTab.element?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })));
+    await flush();
+    expect(mounted.wrapper.get('[data-testid="knowledge-tab-DECISION"]').attributes("aria-selected")).toBe("true");
+    expect(releaseMemory).not.toBeNull();
+    releaseMemory!(response(200, [memory()])); await flush();
+    expect(mounted.wrapper.text()).not.toContain("需要留存的事实");
+    expect(mounted.wrapper.get('[data-testid="knowledge-tab-DECISION"]').attributes("aria-selected")).toBe("true");
+    await act(async () => (document.activeElement as HTMLButtonElement).dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true })));
+    await flush();
+    const knowledgeTab = mounted.wrapper.get('[data-testid="knowledge-tab-KNOWLEDGE"]');
+    expect(knowledgeTab.attributes("aria-selected")).toBe("true"); expect(document.activeElement).toBe(knowledgeTab.element);
+    expect((mounted.wrapper.get('[data-testid="knowledge-library"]').element as HTMLDetailsElement).open).toBe(true);
+  });
+
+  it("键盘切换资料类型仍先保护草稿，保留草稿后焦点回到原页签", async () => {
+    activate();
+    const fetchMock = vi.fn(async (_input: string, init?: RequestInit) => {
+      if (init?.method === "POST") throw new Error("切换类型不应提交资料");
+      return response(200, []);
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench("/knowledge?kind=MEMORY"); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="knowledge-create"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="memory-text"]').setValue("未保存的事实");
+    const current = mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]').element as HTMLButtonElement;
+    await act(async () => { current.focus(); current.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })); });
+    const dialog = new DomWrapper(document.querySelector('[role="dialog"]'));
+    expect(dialog.text()).toContain("保留未保存的资料");
+    expect(current.getAttribute("aria-selected")).toBe("true");
+    await dialog.findAll("button").find((button) => button.text() === "保留并继续编辑")!.trigger("click");
+    expect(document.activeElement).toBe(current);
+    expect((mounted.wrapper.get('[data-testid="memory-text"]').element as HTMLTextAreaElement).value).toBe("未保存的事实");
+    await act(async () => current.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })));
+    await new DomWrapper(document.querySelector('[data-testid="knowledge-discard-and-switch"]')).trigger("click"); await flush();
+    const next = mounted.wrapper.get('[data-testid="knowledge-tab-DECISION"]');
+    expect(next.attributes("aria-selected")).toBe("true"); expect(document.activeElement).toBe(next.element);
+    expect(mounted.wrapper.find('[data-testid="knowledge-form"]').exists()).toBe(false);
+    expect(fetchMock.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET")).toBe(true);
+  });
+
+  it("切换资料类型和路由前保护未保存正文，明确丢弃后才能切换", async () => {
+    activate();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") throw new Error("切换类型不应提交资料");
+      return response(200, []);
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench("/knowledge"); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="knowledge-create"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="knowledge-title"]').setValue("尚未保存的资料");
+    await mounted.wrapper.get('[data-testid="knowledge-text"]').setValue("需要保留的正文");
+    const draft = mounted.wrapper.get('[data-testid="knowledge-text"]').element;
+    await mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]').trigger("click");
+    const dialog = new DomWrapper(document.querySelector('[role="dialog"]'));
+    expect(dialog.text()).toContain("保留未保存的资料");
+    await dialog.findAll("button").find((button) => button.text() === "保留并继续编辑")!.trigger("click");
+    expect(mounted.wrapper.get('[data-testid="knowledge-text"]').element).toBe(draft);
+    expect((draft as HTMLTextAreaElement).value).toBe("需要保留的正文");
+    await mounted.router.push("/projects"); await flush();
+    expect(mounted.router.currentRoute.value.path).toBe("/knowledge");
+    const routeDialog = new DomWrapper(document.querySelector('[role="dialog"]'));
+    await routeDialog.findAll("button").find((button) => button.text() === "保留并继续编辑")!.trigger("click");
+    await mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]').trigger("click");
+    await new DomWrapper(document.querySelector('[data-testid="knowledge-discard-and-switch"]')).trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]').attributes("aria-selected")).toBe("true");
+    expect(mounted.wrapper.find('[data-testid="knowledge-form"]').exists()).toBe(false);
+    expect(fetchMock.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET")).toBe(true);
+  });
   it("示例模式只说明未接入，不伪造资料或写入按钮", async () => {
     const mounted = await mountWorkbench("/knowledge");
     unmount = mounted.unmount;
@@ -187,6 +306,11 @@ describe("P10 information workbench", () => {
     await mounted.wrapper.get('[data-testid="knowledge-save"]').trigger("submit");
     await flush();
     expect(mounted.wrapper.get('[data-testid="knowledge-pending-receipt"]').text()).toContain(commandId);
+    const originalTab = mounted.wrapper.get('[data-testid="knowledge-tab-KNOWLEDGE"]');
+    expect(mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]').attributes("disabled")).toBeDefined();
+    await act(async () => originalTab.element?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })));
+    expect(originalTab.attributes("aria-selected")).toBe("true");
+    expect(postCount).toBe(1);
     await mounted.wrapper.get('[data-testid="knowledge-check-receipt"]').trigger("click");
     await flush(60);
     expect(postCount).toBe(1);

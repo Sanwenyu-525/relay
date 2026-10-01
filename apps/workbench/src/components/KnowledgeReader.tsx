@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import type { RelayApiClient, RelayKnowledge, RelayKnowledgeVersion,
   RelayKnowledgeVersionContent } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import { formatReadableDateTime, useDisplayPreferences } from "../lib/displayPreferences";
 import SafeMarkdown from "./SafeMarkdown";
 
 interface Props {
@@ -28,6 +29,7 @@ export default function KnowledgeReader({ client, knowledge, versions, initialVe
   const [headings, setHeadings] = useState<readonly string[]>([]);
   const [activeHeading, setActiveHeading] = useState(0);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const { timeZone } = useDisplayPreferences();
 
   useEffect(() => {
     setActiveHeading(0);
@@ -87,7 +89,8 @@ export default function KnowledgeReader({ client, knowledge, versions, initialVe
             {!selected && <option value={version}>v{version} · 指定版本（列表未包含）</option>}
             {versions.map((item) =>
               <option key={item.id} value={item.version}>v{item.version}{item.version === knowledge.currentVersion ? " · 当前版本" : " · 历史版本"}</option>)}</select></label>
-        {selected && <span className="helper-text">保存于 {selected.createdAt}</span>}
+        {selected && <span className="helper-text">保存于 <time dateTime={selected.createdAt}
+          title={timeZone}>{formatReadableDateTime(selected.createdAt, timeZone)}</time></span>}
       </div>
       {loading && <p role="status">正在读取 v{version} 的确切正文…</p>}
       {error && <p className="action-error" role="alert">v{version} 正文读取失败：{error} <button type="button"
@@ -112,7 +115,7 @@ export default function KnowledgeReader({ client, knowledge, versions, initialVe
       <h2>来源与版本</h2>
       {content ? <><dl><dt>来源类型</dt><dd>{sourceLabels[content.sourceKind] ?? content.sourceKind}</dd>
         <dt>范围</dt><dd>{content.projectId ? `项目 ${content.projectId}` : "工作空间"}</dd>
-        <dt>保存时间</dt><dd>{content.createdAt}</dd>
+        <dt>保存时间</dt><dd><time dateTime={content.createdAt} title={timeZone}>{formatReadableDateTime(content.createdAt, timeZone)}</time></dd>
         <dt>所选版本</dt><dd>v{content.version}{content.version === content.currentVersion ? " · 当前" : " · 历史"}</dd></dl>
       {typeof artifactVersionId === "string" && <p><Link to={`/artifact-versions/${encodeURIComponent(artifactVersionId)}/lineage`}>查看确切产物版本来源</Link></p>}
       {typeof sourceUri === "string" && /^https?:\/\//iu.test(sourceUri) && <p><a href={sourceUri} target="_blank" rel="noopener noreferrer">打开当前网页原件</a><small>原件可能已变化；阅读的是保存时快照。</small></p>}

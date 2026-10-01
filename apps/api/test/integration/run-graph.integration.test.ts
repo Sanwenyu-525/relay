@@ -30,6 +30,7 @@ import type { JsonObject, JsonValue } from '../../src/infrastructure/json.js';
 import type { DbExecutor } from '../../src/infrastructure/database.js';
 import { graphCheckpointsReady, installGraphCheckpoints } from '../../src/infrastructure/graph-checkpoints.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
+import { canonicalizeJson } from '../../src/receipt/payload-hash.js';
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
 import { CANDIDATE_OUTPUT_SCHEMA } from '../../src/workflow/markdown-deliverable.js';
 import { extractWebText } from '../../src/web/web-fetch.js';
@@ -1894,14 +1895,24 @@ type ManifestTamper = (f: Fixture, migrationDb: DbExecutor, runId: string) => Pr
 
 async function rewriteManifestPayload(f: Fixture, migrationDb: DbExecutor, runId: string,
   mutate: (payload: WritableJsonObject) => void): Promise<void> {
-  const row = await sql<{ payload: JsonObject }>`
-    select payload from context_manifests where run_id = ${runId}
+  const row = await sql<{ payload: JsonObject; manifest_hash: Buffer; frozen_hash: string }>`
+    select m.payload, m.manifest_hash, s.result_ref->>'manifest_hash' as frozen_hash
+    from context_manifests m join run_steps s on s.run_id = m.run_id
+      and s.step_kind = 'BUILD_CONTEXT' where m.run_id = ${runId}
   `.execute(f.app.db);
   assert.equal(row.rows.length, 1);
+  const expected = row.rows[0]!.manifest_hash;
+  assert.equal(row.rows[0]!.frozen_hash, expected.toString('hex'));
+  assert.ok(createHash('sha256').update(canonicalizeJson(row.rows[0]!.payload)).digest().equals(expected));
   const payload = JSON.parse(JSON.stringify(row.rows[0]!.payload)) as WritableJsonObject;
   mutate(payload);
-  await sql`update context_manifests set payload = ${JSON.stringify(payload)}::jsonb
-    where run_id = ${runId}`.execute(migrationDb);
+  const changed = await sql<{ payload: JsonObject; manifest_hash: Buffer }>`
+    update context_manifests set payload = ${JSON.stringify(payload)}::jsonb
+    where run_id = ${runId} returning payload, manifest_hash
+  `.execute(migrationDb);
+  assert.ok(changed.rows[0]!.manifest_hash.equals(expected), 'tamper must retain the stored hash');
+  assert.equal(createHash('sha256').update(canonicalizeJson(changed.rows[0]!.payload))
+    .digest().equals(expected), false, 'tamper must change the actual payload digest');
 }
 
 /** Item-by-item tampering of the persisted manifest plus its read paths; the
@@ -2019,6 +2030,35 @@ const MANIFEST_CORRUPTIONS: ReadonlyArray<readonly [string, ManifestTamper]> = [
       projectSource.content = '{"id":"tampered"}';
     });
   }],
+  ['task source content tampered', async (f, migrationDb, runId) => {
+    await rewriteManifestPayload(f, migrationDb, runId, (payload) => {
+      const taskSource = (payload.sources as WritableJsonObject[])
+        .find((source) => source.kind === 'TASK');
+      assert.ok(taskSource);
+      taskSource.content = '{"id":"tampered"}';
+    });
+  }],
+  ['self-consistent manifest replacement keeps a stale frozen reference', async (f, migrationDb, runId) => {
+    await rewriteManifestPayload(f, migrationDb, runId, (payload) => {
+      payload.template_version = 'tampered';
+    });
+    const changed = await sql<{ payload: JsonObject; manifest_hash: Buffer }>`
+      select payload, manifest_hash from context_manifests where run_id = ${runId}
+    `.execute(f.app.db);
+    const digest = createHash('sha256').update(canonicalizeJson(changed.rows[0]!.payload)).digest();
+    const replaced = await sql<{ payload: JsonObject; manifest_hash: Buffer }>`
+      update context_manifests set manifest_hash = ${digest}
+      where run_id = ${runId} returning payload, manifest_hash
+    `.execute(migrationDb);
+    assert.ok(createHash('sha256').update(canonicalizeJson(replaced.rows[0]!.payload))
+      .digest().equals(replaced.rows[0]!.manifest_hash));
+    const frozen = await sql<{ hash: string }>`
+      select result_ref->>'manifest_hash' as hash from run_steps
+      where run_id = ${runId} and step_kind = 'BUILD_CONTEXT'
+    `.execute(f.app.db);
+    assert.equal(frozen.rows[0]!.hash, changed.rows[0]!.manifest_hash.toString('hex'));
+    assert.notEqual(frozen.rows[0]!.hash, digest.toString('hex'));
+  }],
 ];
 
 async function expectDeniedBeforeInvocation(f: Fixture, action: Awaited<ReturnType<typeof delegatedGatewayRun>>,
@@ -2067,13 +2107,15 @@ test('a tampered persisted manifest field denies the frozen Mock action before a
   }
 });
 
-test('G06 a control durable across settlement converges without a second delivery', async () => {
+test('G06 a durable control before aborted settlement deterministically takes LOST and converges', async () => {
   const f = await fixture(true);
   let captured: ClaimedRunCommand | undefined;
+  const controller = new AbortController();
   try {
     const runId = await delegatedRun(f);
     const delivered = await runOneCommand(f.app.db, {
       workerId: `worker:${randomUUID()}`, dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl,
+      signal: controller.signal,
       onClaim: async (claim) => { captured = claim; },
       afterGraph: async () => {
         const run = await f.api.get(workspacePath(f.workspaceId, `/runs/${runId}`));
@@ -2088,28 +2130,29 @@ test('G06 a control durable across settlement converges without a second deliver
           expected_run_revision: (run.body as { revision: string }).revision, type: 'CANCEL',
         }), 202, commandId);
         assert.equal(requested.status, 'PENDING');
+        controller.abort();
       },
     });
-    if (delivered?.outcome === 'LOST') {
-      // The control poll observed the durable control before settlement; the
-      // supervisor would reconcile the aborted in-process claim the same way.
-      assert.ok(captured);
-      await recoverStoppedWorker(f.app.db, { runId, stoppedWorkerId: captured.workerId,
-        stoppedEvidence: 'test: control poll abort during settlement race',
-        storage: new ManagedContentStore(f.api.dataRoot) });
-      await withTransaction(f.app.db, async (repositories) => {
-        await repositories.runs.lockRun(runId);
-        await repositories.dispatch.lockInvocation(runId);
-        await repositories.dispatch.lockOutbox(captured!.commandId);
-        await repositories.dispatch.requeueStoppedClaim(runId, captured!.workerId,
-          captured!.epoch, captured!.commandId, 'test: control poll abort during settlement race');
-      });
-      const resumed = await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
-        dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl });
-      assert.ok(resumed, 'requeued delivery must consume the CONTROL_PENDING claim');
-    } else {
-      assert.equal(delivered?.outcome, 'DONE');
-    }
+    assert.equal(delivered?.outcome, 'LOST');
+    assert.ok(captured);
+    await recoverStoppedWorker(f.app.db, { runId, stoppedWorkerId: captured.workerId,
+      stoppedEvidence: 'test: invocation returned after durable control and explicit abort',
+      storage: new ManagedContentStore(f.api.dataRoot) });
+    await withTransaction(f.app.db, async (repositories) => {
+      await repositories.runs.lockRun(runId);
+      await repositories.dispatch.lockInvocation(runId);
+      await repositories.dispatch.lockOutbox(captured!.commandId);
+      await repositories.dispatch.requeueStoppedClaim(runId, captured!.workerId,
+        captured!.epoch, captured!.commandId, 'test: invocation returned after explicit abort');
+    });
+    // Match the supervisor's stopped-claim recovery: control reaches its safe
+    // point after requeue, before a new invocation can observe PENDING again.
+    assert.equal((await applySafeControl(f.app.db, runId))?.status, 'APPLIED');
+    assert.equal(await runOneCommand(f.app.db, { workerId: `worker:${randomUUID()}`,
+      dataRoot: f.api.dataRoot, checkpointUrl: f.database.appUrl }), undefined);
+    const outbox = await sql<{ status: string }>`select status from run_command_outbox
+      where command_id = ${captured.commandId}`.execute(f.app.db);
+    assert.equal(outbox.rows[0]?.status, 'DONE', 'terminal scan settles the requeued transport without executing');
     const controls = await sql<{ status: string }>`
       select status from run_control_requests where run_id = ${runId}
     `.execute(f.app.db);
@@ -2130,7 +2173,202 @@ test('G06 a control durable across settlement converges without a second deliver
   } finally { await f.close(); }
 });
 
-test('G06 completion-race leftover control is rejected and cannot rewrite a DONE Run', async () => {
+test('G06 durable cancellation before COMPLETE commit wins and the independent delivery settles DONE', async () => {
+  const f = await fixture(true);
+  let child: ReturnType<typeof spawn> | undefined;
+  let closed: Promise<number | null> | undefined;
+  try {
+    const action = await delegatedGatewayRun(f);
+    assert.equal((await workerOnce(f)).code, 0);
+    await decideAction(f, action.operationId, 'APPROVE');
+    assert.equal((await workerOnce(f)).code, 0);
+    const marker = await readFile(action.target, 'utf8');
+    assert.match(marker, new RegExp(action.operationId, 'u'));
+    await approveValidationReview(f, action.runId);
+    const attemptsBefore = await readRunAttempts(f.app.db, action.runId);
+    assert.equal(attemptsBefore.filter((row) => row.step_kind === 'COMPLETE').length, 0);
+
+    const workerId = `worker:${randomUUID()}`;
+    child = spawn(process.execPath, [resolve(dirname(fileURLToPath(import.meta.url)),
+      'run-control-race-child.js')], {
+      env: { ...process.env, RELAY_G06_DATABASE_URL: f.database.appUrl,
+        RELAY_G06_DATA_ROOT: f.api.dataRoot, RELAY_G06_RUN_ID: action.runId,
+        RELAY_G06_WORKER_ID: workerId },
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    });
+    let output = '';
+    child.stdout!.setEncoding('utf8');
+    child.stderr!.setEncoding('utf8');
+    child.stdout!.on('data', (chunk: string) => { output += chunk; });
+    child.stderr!.on('data', (chunk: string) => { output += chunk; });
+    closed = new Promise<number | null>((done, fail) => {
+      child!.once('error', fail);
+      child!.once('close', done);
+    });
+    const beforeCommit = new Promise<void>((done) => {
+      child!.once('message', (message) => {
+        assert.equal((message as { type: string }).type, 'complete_before_commit');
+        done();
+      });
+    });
+    await withTimeout(Promise.race([beforeCommit, closed.then((code) => {
+      throw new Error(`G06 Worker exited before COMPLETE barrier: ${code}; ${output}`);
+    })]), 10_000, 'independent Worker before COMPLETE commit');
+    const run = await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`));
+    const task = await f.api.get(workspacePath(f.workspaceId, `/tasks/${action.taskId}`));
+    const commandId = randomUUID();
+    const body = { command_id: commandId,
+      expected_task_revision: (task.body as { revision: string }).revision,
+      expected_run_revision: (run.body as { revision: string }).revision, type: 'CANCEL' };
+    const requested = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId,
+      `/runs/${action.runId}/control-requests`), body), 202, commandId);
+    assert.equal(requested.status, 'PENDING');
+    assert.equal((await applySafeControl(f.app.db, action.runId))?.status, 'PENDING',
+      'durable cancellation cannot release the active independent invocation');
+    const replay = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId,
+      `/runs/${action.runId}/control-requests`), body), 202, commandId);
+    assert.equal(replay.control_request_id, requested.control_request_id);
+    child.send('release');
+    assert.equal(await withTimeout(closed, 10_000, 'cancel-first Worker close'), 0, output);
+    assert.match(output, /"step_status":"CONTROL_PENDING","outcome":"DONE"/u);
+
+    const control = await sql<{ id: string; status: string; decided: boolean }>`
+      select id, status, decided_at is not null as decided from run_control_requests
+      where run_id = ${action.runId}`.execute(f.app.db);
+    assert.deepEqual(control.rows, [{ id: requested.control_request_id, status: 'APPLIED', decided: true }]);
+    const finalRun = await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`));
+    const finalTask = await f.api.get(workspacePath(f.workspaceId, `/tasks/${action.taskId}`));
+    assert.equal((finalRun.body as { status: string }).status, 'CANCELLED');
+    assert.equal((finalTask.body as { status: string }).status, 'READY');
+    const attemptsAfter = await readRunAttempts(f.app.db, action.runId);
+    assert.deepEqual(attemptsAfter.filter((row) => row.step_kind !== 'COMPLETE'), attemptsBefore);
+    assert.deepEqual(attemptsAfter.filter((row) => row.step_kind === 'COMPLETE')
+      .map((row) => [row.attempt_number, row.status]), [[1n, 'FAILED']]);
+    const completionAttempt = await sql<{ evidence: { reason: string } }>`
+      select a.evidence from step_attempts a join run_steps s on s.id = a.step_id
+      where s.run_id = ${action.runId} and s.step_kind = 'COMPLETE'`.execute(f.app.db);
+    assert.equal(completionAttempt.rows[0]?.evidence.reason, 'CONTROL_PREEMPTED');
+    const counts = await sql<{ completions: bigint; versions: bigint; invocations: bigint; status: string }>`
+      select (select count(*) from completion_records where task_id = ${action.taskId}) as completions,
+        (select count(*) from artifact_versions where source_ref like ${`run:${action.runId}/%`}) as versions,
+        (select count(*) from invocation_attempts where operation_id = o.id) as invocations,
+        o.status from logical_operations o where o.id = ${action.operationId}`.execute(f.app.db);
+    assert.deepEqual(counts.rows[0], { completions: 0n, versions: 1n, invocations: 1n, status: 'SUCCEEDED' });
+    assert.equal(await readFile(action.target, 'utf8'), marker);
+    assert.equal((await advanceRunStep(f.app.db, { runId: action.runId, workerId,
+      storage: new ManagedContentStore(f.api.dataRoot) })).status, 'RUN_TERMINAL');
+    const retry = await workerOnce(f);
+    assert.equal(retry.code, 0, retry.output);
+    assert.doesNotMatch(retry.output, /"type":"worker_claimed"/u);
+    assert.deepEqual(await readRunAttempts(f.app.db, action.runId), attemptsAfter);
+    const invocation = await sql<{ status: string; worker_id: string | null }>`
+      select status, worker_id from run_invocations where run_id = ${action.runId}`.execute(f.app.db);
+    assert.deepEqual(invocation.rows[0], { status: 'IDLE', worker_id: null });
+  } finally {
+    child?.kill('SIGTERM');
+    if (closed !== undefined) await Promise.allSettled([closed]);
+    await f.close();
+  }
+});
+
+test('G06 COMPLETE holding the commit locks wins against a concurrent cancellation API request', async () => {
+  const f = await fixture(true);
+  const gate = new Client({ connectionString: f.database.adminUrl });
+  let delivery: ReturnType<typeof workerOnce> | undefined;
+  let requested: ReturnType<TestApi['post']> | undefined;
+  try {
+    await gate.connect();
+    const action = await delegatedGatewayRun(f);
+    assert.equal((await workerOnce(f)).code, 0);
+    await decideAction(f, action.operationId, 'APPROVE');
+    assert.equal((await workerOnce(f)).code, 0);
+    const marker = await readFile(action.target, 'utf8');
+    assert.match(marker, new RegExp(action.operationId, 'u'));
+    await approveValidationReview(f, action.runId);
+    const attemptsBefore = await readRunAttempts(f.app.db, action.runId);
+    const run = await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`));
+    const task = await f.api.get(workspacePath(f.workspaceId, `/tasks/${action.taskId}`));
+    const lockKey = BigInt(`0x${randomUUID().replaceAll('-', '').slice(0, 12)}`).toString();
+    // Isolated database fault point: block only this Run's actual completion
+    // INSERT, after the production Worker acquired its final Task/Run locks.
+    await gate.query(`create function relay_g06_complete_barrier() returns trigger
+      language plpgsql as $body$ begin
+        if new.run_id = '${action.runId}'::uuid then
+          perform pg_advisory_xact_lock(${lockKey}::bigint);
+        end if;
+        return new;
+      end $body$`);
+    await gate.query(`create trigger relay_g06_complete_barrier before insert on completion_records
+      for each row execute function relay_g06_complete_barrier()`);
+    await gate.query('select pg_advisory_lock($1::bigint)', [lockKey]);
+    const gatePid = (await gate.query<{ pid: number }>('select pg_backend_pid() as pid')).rows[0]!.pid;
+    const waitBlockedBy = async (blocker: number, table: string): Promise<number> => {
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const waiting = await gate.query<{ pid: number }>(`select pid from pg_stat_activity
+          where datname = current_database() and $1 = any(pg_blocking_pids(pid))
+            and query like $2`, [blocker, `%${table}%`]);
+        if (waiting.rows[0] !== undefined) return waiting.rows[0].pid;
+        await delay(10);
+      }
+      throw new Error(`G06 ${table} transaction never waited on its expected blocker`);
+    };
+    delivery = workerOnce(f);
+    const completePid = await waitBlockedBy(gatePid, 'completion_records');
+    // COMPLETE already holds Task/Run in its final short transaction. The API
+    // now competes for that same Task row; observe its lock wait before release.
+    const commandId = randomUUID();
+    const body = { command_id: commandId,
+      expected_task_revision: (task.body as { revision: string }).revision,
+      expected_run_revision: (run.body as { revision: string }).revision, type: 'CANCEL' };
+    requested = f.api.post(workspacePath(f.workspaceId, `/runs/${action.runId}/control-requests`), body);
+    const controlPid = await waitBlockedBy(completePid, 'tasks');
+    assert.notEqual(controlPid, completePid);
+    assert.equal((await gate.query<{ unlocked: boolean }>(
+      'select pg_advisory_unlock($1::bigint) as unlocked', [lockKey])).rows[0]?.unlocked, true);
+    const completed = await delivery;
+    assert.equal(completed.code, 0, completed.output);
+    assert.match(completed.output, /"outcome":"DONE"/u);
+    const rejected = await requested;
+    assert.equal(rejected.status, 409, rejected.text);
+    assert.equal((rejected.body as { code: string }).code, 'RUN_TERMINAL');
+    const replay = await f.api.post(workspacePath(f.workspaceId,
+      `/runs/${action.runId}/control-requests`), body);
+    assert.equal(replay.status, 409, replay.text);
+    assert.equal((replay.body as { code: string }).code, 'RUN_TERMINAL');
+    const controls = await sql<{ count: bigint }>`select count(*) as count
+      from run_control_requests where run_id = ${action.runId}`.execute(f.app.db);
+    assert.equal(controls.rows[0]?.count, 0n, 'the losing request cannot create a PENDING control');
+    assert.equal(await applySafeControl(f.app.db, action.runId), null);
+    const finalRun = await f.api.get(workspacePath(f.workspaceId, `/runs/${action.runId}`));
+    const finalTask = await f.api.get(workspacePath(f.workspaceId, `/tasks/${action.taskId}`));
+    assert.equal((finalRun.body as { status: string }).status, 'COMPLETED');
+    assert.equal((finalTask.body as { status: string }).status, 'DONE');
+    const attemptsAfter = await readRunAttempts(f.app.db, action.runId);
+    assert.deepEqual(attemptsAfter.filter((row) => row.step_kind !== 'COMPLETE'), attemptsBefore);
+    assert.deepEqual(attemptsAfter.filter((row) => row.step_kind === 'COMPLETE')
+      .map((row) => [row.attempt_number, row.status]), [[1n, 'SUCCEEDED']]);
+    const counts = await sql<{ completions: bigint; versions: bigint; invocations: bigint; status: string }>`
+      select (select count(*) from completion_records where task_id = ${action.taskId}) as completions,
+        (select count(*) from artifact_versions where source_ref like ${`run:${action.runId}/%`}) as versions,
+        (select count(*) from invocation_attempts where operation_id = o.id) as invocations,
+        o.status from logical_operations o where o.id = ${action.operationId}`.execute(f.app.db);
+    assert.deepEqual(counts.rows[0], { completions: 1n, versions: 1n, invocations: 1n, status: 'SUCCEEDED' });
+    assert.equal(await readFile(action.target, 'utf8'), marker);
+    assert.equal((await advanceRunStep(f.app.db, { runId: action.runId, workerId: `worker:${randomUUID()}`,
+      storage: new ManagedContentStore(f.api.dataRoot) })).status, 'RUN_TERMINAL');
+    const retry = await workerOnce(f);
+    assert.equal(retry.code, 0, retry.output);
+    assert.doesNotMatch(retry.output, /"type":"worker_claimed"/u);
+    assert.deepEqual(await readRunAttempts(f.app.db, action.runId), attemptsAfter);
+  } finally {
+    await gate.end();
+    await Promise.allSettled([delivery, requested]);
+    await f.close();
+  }
+});
+
+test('G06 a reconstructed leftover control is rejected and cannot rewrite a DONE Run', async () => {
   const f = await fixture(true);
   try {
     const action = await delegatedGatewayRun(f);
@@ -2151,10 +2389,8 @@ test('G06 completion-race leftover control is rejected and cannot rewrite a DONE
     const taskBefore = await f.api.get(workspacePath(f.workspaceId, `/tasks/${action.taskId}`));
     assert.equal((taskBefore.body as { status: string }).status, 'DONE');
 
-    // A cancel that became durable after the last control poll but before the
-    // COMPLETE business commit leaves exactly this state: DONE facts plus a
-    // PENDING control. The API rejects the same request against a terminal Run,
-    // so the leftover row is reconstructed directly with the repository entry.
+    // A recovery fixture checks an abnormal terminal/PENDING combination.
+    // Real request/COMPLETE serialization is covered by the two races above.
     const runRow = await sql<{ task_id: string; workspace_id: string }>`
       select task_id, workspace_id from runs where id = ${action.runId}
     `.execute(f.app.db);

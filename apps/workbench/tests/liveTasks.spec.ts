@@ -8,6 +8,7 @@ const workspaceId = "11111111-1111-4111-8111-111111111111";
 const projectId = "22222222-2222-4222-8222-222222222222";
 const taskId = "33333333-3333-4333-8333-333333333333";
 const tasksUrl = `${baseUrl}/api/v1/workspaces/${workspaceId}/tasks`;
+const projectsUrl = `${baseUrl}/api/v1/workspaces/${workspaceId}/projects?status=active`;
 let unmount: (() => void) | null = null;
 
 afterEach(() => {
@@ -22,11 +23,13 @@ function activate(): void {
 }
 
 describe("live 任务入口", () => {
-  it("全部只请求 scope=all、收件箱只请求 inbox=true，并保留真实 ID 入口", async () => {
+  it("近期工作独立读取，任务主区按 scope=all/inbox=true 切换且保留真实 ID 入口", async () => {
     activate();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).endsWith("/attention/interventions")) return { ok: true, status: 200,
         json: async () => ({ items: [] }) } as Response;
+      if (String(input) === projectsUrl) return { ok: true, status: 200,
+        json: async () => ({ items: [], next_cursor: null }) } as Response;
       if (String(input) === `${tasksUrl}?inbox=true` || String(input) === `${tasksUrl}?scope=all`) return { ok: true, status: 200,
         json: async () => ({ items: [], next_cursor: null }) } as Response;
       throw new TypeError("offline");
@@ -38,9 +41,10 @@ describe("live 任务入口", () => {
     expect(mounted.wrapper.text()).not.toContain("确定实验评价指标");
     expect(fixtureAdapter.getCallCount("listTasks")).toBe(0);
     expect(fixtureAdapter.getCallCount("loadTaskOptions")).toBe(0);
-    const taskCalls = () => vi.mocked(fetch).mock.calls.map(([input]) => String(input))
-      .filter((url) => url.startsWith(tasksUrl));
-    expect(taskCalls()).toEqual([`${tasksUrl}?scope=all`]);
+    const requestedUrls = () => vi.mocked(fetch).mock.calls.map(([input]) => String(input))
+      .filter((url) => !url.endsWith("/attention/interventions"));
+    // 一次来自全局近期工作，一次来自当前全部任务页。
+    expect(requestedUrls()).toEqual([`${tasksUrl}?scope=all`, projectsUrl, `${tasksUrl}?scope=all`]);
 
     await mounted.wrapper.get('[data-testid="tasks-tab-inbox"]').trigger("click");
     await flush();
@@ -48,7 +52,8 @@ describe("live 任务入口", () => {
     expect(mounted.wrapper.text()).not.toContain("完善文献综述");
     expect(fixtureAdapter.getCallCount("listTasks")).toBe(0);
     expect(fixtureAdapter.getCallCount("loadTaskOptions")).toBe(0);
-    expect(taskCalls()).toEqual([`${tasksUrl}?scope=all`, `${tasksUrl}?inbox=true`]);
+    expect(requestedUrls()).toEqual([`${tasksUrl}?scope=all`, projectsUrl,
+      `${tasksUrl}?scope=all`, `${tasksUrl}?inbox=true`]);
 
     await mounted.router.push("/tasks");
     await flush();
@@ -63,6 +68,7 @@ describe("live 任务入口", () => {
     await mounted.wrapper.get('[data-testid="tasks-live-open-task"]').trigger("click");
     await flush();
     expect(mounted.router.currentRoute.value.path).toBe(`/tasks/${taskId}`);
+    expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
   });
 
   it("真实创建回执返回任务入口后不混入示例列表", async () => {
@@ -70,6 +76,8 @@ describe("live 任务入口", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).endsWith("/attention/interventions")) return { ok: true, status: 200,
         json: async () => ({ items: [] }) } as Response;
+      if (String(input) === projectsUrl) return { ok: true, status: 200,
+        json: async () => ({ items: [], next_cursor: null }) } as Response;
       if (String(input) === `${tasksUrl}?scope=all`) return { ok: true, status: 200,
         json: async () => ({ items: [], next_cursor: null }) } as Response;
       expect(String(input)).toBe(tasksUrl);
@@ -85,6 +93,8 @@ describe("live 任务入口", () => {
     vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountWorkbench("/tasks?view=create");
     unmount = mounted.unmount;
+    expect(fetchMock.mock.calls.map(([input]) => String(input)).filter((url) => !url.endsWith("/attention/interventions")))
+      .toEqual([`${tasksUrl}?scope=all`, projectsUrl]);
 
     await mounted.wrapper.get('input[name="task-title"]').setValue("本次真实任务");
     await mounted.wrapper.get('input[name="task-expected-result"]').setValue("真实结果");
@@ -102,7 +112,8 @@ describe("live 任务入口", () => {
     expect(fixtureAdapter.getCallCount("listTasks")).toBe(0);
     expect(fixtureAdapter.getCallCount("loadTaskOptions")).toBe(0);
     expect(fixtureAdapter.getCallCount("createTask")).toBe(0);
-    expect(fetchMock.mock.calls.filter(([input]) => !String(input).endsWith("/attention/interventions")))
-      .toHaveLength(2);
+    expect(fetchMock.mock.calls.map(([input]) => String(input)).filter((url) => !url.endsWith("/attention/interventions")))
+      .toEqual([`${tasksUrl}?scope=all`, projectsUrl, tasksUrl, `${tasksUrl}?scope=all`]);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 });

@@ -1,8 +1,8 @@
 # Relay / Personal Workflow OS
 
-> 2026-09-26 当前接续：M01 技术适配与 M02 React/桌面基础已独立验收；M03 固定 Mock 图的 Windows/PG 基础闭环通过，完整 G01–G08 仍未验收。M04 的 OpenAI 兼容模型端口、Context/Assist/Skill/Blueprint 与低风险读取，M05 的 Today/工作台/追溯及部分全局入口已开发自检；未外呼真实 Provider，也未做 M04/M05 独立验收。阶段与剩余缺口只看 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)。取舍见 [ADR-010](docs/decisions/ADR-010-agent-stack-react-desktop.md)，工作包见 [M01–M07](prompts/stack-migration.md)。
+> 当前阶段、授权与下一步只看 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)，已验证范围与剩余出口只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)。取舍见 [ADR-010](docs/decisions/ADR-010-agent-stack-react-desktop.md)，工作包见 [M01–M07](prompts/stack-migration.md)。
 
-面向长期项目的人与 AI 协作工作系统，交付目标为 Windows 可安装应用，具有独立窗口和启动入口。仓库包含产品设计、业务契约、研究实验、UI 视觉规范、Fastify/Kysely/PostgreSQL 后端、React 工作台与 Tauri 桌面宿主。显式连接本机 API 后可走人工路径——创建项目 → 创建任务（含 ready）→ 开始 → 任务详情 → 保存 Markdown 产物版本 → 选择接受版本 → 完成 → 重开（[前端预览记录第 9、10 节](docs/development/前端预览实施与验收.md#10-ui-10-任务详情与-ui-11-产物编辑2026-09-21)），也可在待审页处理 Review、在 Run 页查看控制和追溯、在资料页管理 Knowledge/Memory/Decision/Rule。当前还提供 Mock Runtime、Context、Assist/首批 Skill 与蓝图、Today 和三套内置工作台的开发实现；真实 Provider 连通、真实 Git/CLI 工具、完整恢复及 Windows 安装交付未完成验证。后端接口见 [HTTP 契约第 10 节](docs/api/http-command-contract.md)，阶段及独立验收边界见 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)。本项目与 AI Manga Drama Studio 独立。
+面向长期项目的人与 AI 协作工作系统，交付目标为 Windows 可安装应用，具有独立窗口和启动入口。仓库包含产品设计、业务契约、研究实验、UI 视觉规范、Fastify/Kysely/PostgreSQL 后端、React 工作台与 Tauri 桌面宿主。显式连接本机 API 后可走人工路径——创建项目 → 创建任务（含 ready）→ 开始 → 任务详情 → 保存 Markdown 产物版本 → 选择接受版本 → 完成 → 重开（[前端预览记录第 9、10 节](docs/development/前端预览实施与验收.md#10-ui-10-任务详情与-ui-11-产物编辑2026-09-21)），也可在待审页处理 Review、在 Run 页查看控制和追溯、在资料页管理 Knowledge/Memory/Decision/Rule。仓库还提供 Mock Runtime、模型端口、Context、Assist/首批 Skill 与蓝图、Today、内置工作台及文件/Git/CLI 的实现；实现与验收边界由上述功能验收表限定。后端接口见 [HTTP 契约第 10 节](docs/api/http-command-contract.md)。本项目与 AI Manga Drama Studio 独立。
 
 当前工作区为 D:/Develop/Relay-Agent。阶段、已有证据、缺口及下一步统一见 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)；旧迁入路径与变更经过见[交付审计](docs/development/design-audit.md)，不作为当前启动位置。
 
@@ -43,12 +43,24 @@ dev-stack.bat Build            # 构建最新桌面测试包到根目录 test-re
 dev-stack.bat Start            # 启动测试版，首次初始化，后续保留并复用数据
 dev-stack.bat Stop             # 先关闭桌面窗口，再停止专用测试数据库；不删除数据
 dev-stack.bat Status           # 查看目录、包进程数量和数据库运行状态
-dev-stack.bat DesktopDev       # 菜单 6：准备测试数据库后启动桌面开发窗口，前端热更新
+dev-stack.bat DesktopDev       # 菜单 6：复用开发数据库并打开桌面窗口，前端热更新
 ```
 
 程序固定为 `test-release/relay-desktop.exe`，测试数据独立保存在 `.relay-test/`；两者均不纳入 Git。请通过 `dev-stack.bat Start` 启动，以准备数据库和配置；直接双击 EXE 不会自动准备该测试环境。这是本机目录测试包，不是安装器，也不承诺复制到其他电脑即可运行。实现及升级边界见[持久测试入口](docs/deployment/本机部署.md#持久桌面测试入口)。首次使用先 Build；更新代码后重新 Build，平时启动无需重打包。
 
 发布包的配置、Node/WebView2 和数据库只读诊断见[部署诊断入口](docs/deployment/本机部署.md#发布包只读诊断)；诊断通过不代表安装或业务总验收通过。
+
+M07 新增受信本机 `maintenance.js status / begin-drain / resume-admission`，由当前 `RELAY_DB_URL` 的数据库级持久门停止新命令与领取；`hold-desktop-stop --package-root <绝对目录> --data-root <绝对目录>` 提供当前 Windows 会话的原宿主 Job 停机及持续持锁。DRAINING 和桌面停机仍不能单独证明完整备份安全；迁移、参数、旧包限制及未实现出口见[维护说明](docs/deployment/本机部署.md#4-备份恢复)，实际验证只看功能验收表。
+
+Windows `content-freeze.js hold-content-freeze --data-root <绝对目录>` 提供实际受管内容发布者的排他安全点，需当前原生文件助手；它不冻结PG或外部工具。解除只释放自身锁，原UNKNOWN继续按原身份核对，使用说明同上述维护入口。
+
+`database-connect-fence.js hold-database-connect-fence / recover-database-connect-fence --journal-file <绝对路径>` 使用独立 `RELAY_MIGRATION_DB_URL`，在DRAINING下持原DDL锁、保存原ACL并阻止新应用连接；旧/启动连接或prepared事务存在时拒绝。异常后用原凭据显式恢复，不自动恢复准入或Run；备份协调器将其与原宿主停机、内容锁组合，命令与权限边界见[部署说明](docs/deployment/本机部署.md#数据库连接维护与权限恢复)。
+
+上述维护连接、备份双角色/应用维护池与恢复目标连接使用显式URL目标，host/user/database必填，缺省项不再由对应PG环境补齐（运维兼容性变化）；具体端口、密码、TLS/options规则归部署说明，普通API配置入口不由此改变。
+
+`backup.js create-backup` 已组合三类存活维护会话、原在途身份核对、PG18完整custom归档、受管文件与原包历史定义；正常释放后才写成功标记，仍保持DRAINING。`restore.js restore-isolated` 将完整备份还原到预建空新库和新data_root，核对原包/目标包、历史状态与正文，保留CONNECT和启动标记隔离；核对通过也不启动或重发旧动作。`node scripts/verify-desktop-package.mjs <包目录> --require-restore-isolation`可诊断目标包能力。仅支持受信本机Windows/标准PG18角色；明确放行、确切新发布包与安装总验收仍未交付。命令及限制见[部署说明](docs/deployment/本机部署.md#完整备份与隔离恢复)。
+
+`restore-check.js restore-check-isolated --data-root <绝对目录> --runtime-package-root <绝对目录>` 对已还原非空目标做业务只读维护核对，使用目标 `RELAY_MIGRATION_DB_URL`；首次可能创建内容锁sentinel，始终保留隔离。目标包还须具备完整且确切版本的生产依赖，包内Node加载它们并进行有限离线调用；持锁后另用确切包助手只读观察最多128个已登记受管根的原生身份。报告区分依赖、根身份与数据库事实投影/清单文件核对，不补登记或修改外部内容。它不授激活权，原备份/原包仅声明stored绑定；全部历史兼容、完整外部身份及后续放行仍待闭合。命令与限额归[部署说明](docs/deployment/本机部署.md#完整备份与隔离恢复)。
 
 开发期浏览器预览仍可同时启动 `apps/api` 的 Fastify API 与 `apps/workbench`：
 
@@ -69,11 +81,11 @@ dev-stack.bat -FrontendPort 5173 -SkipInstall -SkipBuild
 
 用便携 Node 直接起前后端等价于 Preview 的两个进程（修改代码时常用）：`cd apps/api && sleep infinity | <便携node> --env-file=.env dist/src/main.js`（stdin 保持打开，Ctrl+C 或关管道即正常退出）；前端 `cd apps/workbench && <便携node> node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort`。迁移/图安装/工作空间初始化在 `apps/api/dist/src/cli/`（migrate / install-graph / init-workspace，迁移与图安装需 `RELAY_MIGRATION_DB_URL`）。若数据库未启动，`Preview` 能拉起 API 但 `/health/ready` 返回 503 `DATABASE_UNAVAILABLE`，live 连接会失败——这是明确的环境反馈而非脚本故障。
 
-`dev-stack` 不启动独立 Mock Worker，也不安装 Graph checkpoint；浏览器页默认显示示例数据。试用固定 Mock Agent 请使用下方桌面隔离会话。Windows 桌面宿主位于 [apps/desktop](apps/desktop)，M02 的 React/桌面基础已独立验收。它加载同一份 React 工作台构建产物并监督真实 API 和 Mock Worker；M03 的固定 Mock 图已通过真实 Windows/PG 的 CRITERION Review/RESUME 与 ACTION_APPROVAL 局部联测，Mock 在途取消已完成开发自检，G01–G08 完整闭环尚未验收。安装、升级和卸载仍属 M07。
+`dev-stack` 不启动独立 Mock Worker，也不安装 Graph checkpoint；浏览器页默认显示示例数据。试用固定 Mock Agent 请使用下方桌面隔离会话。Windows 桌面宿主位于 [apps/desktop](apps/desktop)，加载同一份 React 工作台构建产物并监督真实 API 和独立 Worker。固定 Mock 图支持 CRITERION Review/RESUME、ACTION_APPROVAL、持久取消与恢复；确切包的通过范围和剩余限制统一见[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)。安装、升级和卸载仍属 M07。
 
-修改前端界面时不必每次完整打包：菜单 6 或 `dev-stack.bat DesktopDev` 先准备测试数据库和配置，再调用 `apps/desktop/scripts/dev-desktop.ps1` 启动 `tauri dev` 开发窗口——真实桌面窗口加载 Vite 开发服务器，前端改动经 HMR 数秒内生效，Rust 源码改动自动重编译并重启窗口，不生成安装包。首次仍需 Build 准备基础资源；日常开发不必先选 1，启动与停止边界见[持久测试入口](docs/deployment/本机部署.md#持久桌面测试入口)。直接运行 `dev-desktop.ps1` 时，加 `-Action start` 可后台启动（命令立即返回，runner 进程与日志记录在 `.relay-dev/dev-desktop/`），`-Action stop` 按 runner 进程树一键停止并清理 dev 版窗口与 Vite 残留，`-Action status` 查看运行状态；无参数时保持前台运行（Ctrl+C 停止），API 改动需加 `-RefreshApi` 重建暂存资源。`desktop_bootstrap` 私有协议在 dev 来源下的放行见 [UI 联通开发记录](docs/development/ui-live-integration-2026-09-28.md)。正式构建入口 `dev-stack.bat Build` 保持不变；开发窗口与打包版共用单实例互斥，不可同时运行。
+修改前端界面时不必每次完整打包：菜单 6 或 `dev-stack.bat DesktopDev` 复用已有测试数据库和配置，数据库未运行时自动启动，再调用 `apps/desktop/scripts/dev-desktop.ps1` 启动 `tauri dev` 开发窗口——真实桌面窗口加载 Vite 开发服务器，前端改动经 HMR 数秒内生效，Rust 源码改动自动重编译并重启窗口，不生成安装包。首次仍需 Build 准备基础资源；测试环境首次初始化或测试包更新时执行完整资源校验及必要初始化/升级，同包已初始化的日常开发跳过大清单解析和全量资源校验，菜单 1 启动测试版仍每次完整校验。日常开发不必先选 1，启动与停止边界见[持久测试入口](docs/deployment/本机部署.md#持久桌面测试入口)。直接运行 `dev-desktop.ps1` 时，加 `-Action start` 可后台启动（命令立即返回，runner 进程与日志记录在 `.relay-dev/dev-desktop/`），`-Action stop` 按 runner 进程树一键停止并清理 dev 版窗口与 Vite 残留，`-Action status` 查看运行状态；无参数时保持前台运行（Ctrl+C 停止），API 改动需加 `-RefreshApi` 重建暂存资源。`desktop_bootstrap` 私有协议在 dev 来源下的放行见 [UI 联通开发记录](docs/development/ui-live-integration-2026-09-28.md)。正式构建入口 `dev-stack.bat Build` 保持不变；开发窗口与打包版共用单实例互斥，不可同时运行。
 
-`apps/api` 提供存活/就绪检查、迁移、事务与命令回执、Project/Goal/Task/State、受管 Artifact、人工完成/重开、Mock Run、Verification/Review、持久控制、Gateway、长期信息/规则/搜索、Context、Assist/首批 Skill/蓝图以及 Today/Activity/Trace/Lineage。`apps/workbench` 默认渲染示例数据；浏览器可在页壳右上「数据来源」手工填入 API 地址、Workspace ID 与 `RELAY_API_BEARER_TOKEN`，只有 `/health/ready` 返回 200 才进入 live，刷新后回到示例模式。打包桌面从受信宿主内存取得本次连接并在重载时重新引导，无须在页面填写令牌；若本机 API 引导或就绪失败，桌面显示需重启应用的阻断页。live 模式可走人工闭环、Delegate/Review/Run 控制、资料和 URL 导入、Today、三套工作台、Assist/蓝图及确切证据追溯；「设置」页只读显示当前服务实例的模型端口状态（Mock/真实 Provider，密钥不读取不显示，配置仍归服务端环境变量，见 [HTTP 契约 §10.49](docs/api/http-command-contract.md#1049-模型端口只读状态2026-09-28开发自检)）；Assist 普通讨论与 Run DRAFT 可显示有界的生成中草稿，最终内容仍以已结算消息和产物为准。本地 `.md/.txt` 首次导入单独写入 Knowledge。凭据只保存在页面内存，不写 URL、localStorage、日志或源码。P09 Connection、受管目录和权限策略可在项目设置页操作；委托页可选择显式 Context 来源和可选 Mock 文件动作。真实项目与全空间任务列表已接通；后端 ArchiveProject 命令、关联写入栅栏、live 归档按钮及主要 live 写入口的归档门槛已有开发自检。PDF 导入与真实 Git/CLI 工具尚未交付。M03 完整闭环、真实 Provider、M04/M05 与安装交付的验收状态见 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)。
+`apps/api` 提供存活/就绪检查、迁移、事务与命令回执、Project/Goal/Task/State、受管 Artifact、人工完成/重开、Mock Run、Verification/Review、持久控制、Gateway、长期信息/规则/搜索、Context、Assist/首批 Skill/蓝图以及 Today/Activity/Trace/Lineage。`apps/workbench` 默认渲染示例数据；浏览器可在页壳右上「数据来源」手工填入 API 地址、Workspace ID 与 `RELAY_API_BEARER_TOKEN`，只有 `/health/ready` 返回 200 才进入 live，刷新后回到示例模式。打包桌面从受信宿主内存取得本次连接并在重载时重新引导，无须在页面填写令牌；若本机 API 引导或就绪失败，桌面显示需重启应用的阻断页。live 模式可走人工闭环、Delegate/Review/Run 控制、资料和 URL 导入、Today、三套工作台、Assist/蓝图及确切证据追溯；「设置」页只读显示当前服务实例的模型端口状态（Mock/真实 Provider，密钥不读取不显示，配置仍归服务端环境变量，见 [HTTP 契约 §10.49](docs/api/http-command-contract.md#1049-模型端口只读状态2026-09-28开发自检)）；Assist 普通讨论与 Run DRAFT 可显示有界的生成中草稿，最终内容仍以已结算消息和产物为准。本地 `.md/.txt` 首次导入单独写入 Knowledge。凭据只保存在页面内存，不写 URL、localStorage、日志或源码。P09 Connection、受管目录和权限策略可在项目设置页操作；委托页可选择显式 Context 来源，并按需附加一次受管文件读取、网页读取或 Mock 文件动作；三种动作互斥，默认不附加，连接、目录和权限仍由服务端核对。真实项目与全空间任务列表已接通；后端 ArchiveProject 命令、关联写入栅栏、live 归档按钮及主要 live 写入口的归档门槛已有开发自检。PDF 导入与真实 Git/CLI 工具尚未交付。M03 完整闭环、真实 Provider、M04/M05 与安装交付的验收状态见 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)。
 
 ## Windows 桌面开发包（M02）
 
@@ -135,7 +147,10 @@ Push-Location apps\api
 & "$runtime\node.exe" $corepack pnpm@9.15.9 install --frozen-lockfile --registry=https://registry.npmjs.org
 & "$runtime\node.exe" $corepack pnpm@9.15.9 run typecheck    # tsc --noEmit，strict
 & "$runtime\node.exe" $corepack pnpm@9.15.9 run build        # tsc → apps/api/dist
-& "$runtime\node.exe" $corepack pnpm@9.15.9 run test         # 单元测试（配置校验、命令摘要规范化）；不需要数据库
+# Windows 单元测试包含真实受管内容发布；助手缺失时不回退到 Node 写文件
+cargo build --locked --target x86_64-pc-windows-msvc --manifest-path ..\file-io-helper\Cargo.toml
+$env:RELAY_FILE_IO_HELPER = (Resolve-Path ..\file-io-helper\target\x86_64-pc-windows-msvc\debug\relay-file-io-helper.exe).Path
+& "$runtime\node.exe" $corepack pnpm@9.15.9 run test         # 不需要数据库
 Pop-Location
 ```
 
@@ -165,7 +180,7 @@ Push-Location apps\api
 Pop-Location
 ```
 
-监督器读取 `RELAY_DB_URL` 与已存在的绝对路径 `RELAY_DATA_ROOT`，在任何领取或 spawn 前只读核对业务与 Saver schema；缺失或损坏时以配置错误退出。非桌面 `--once` 供隔离验证；桌面模式先验证私有启动帧、逐旧 launch 核对并按序发 ack 与最终 `dispatch_ready`，随后才轮询，详情见[部署设计](docs/deployment/本机部署.md)。收到 SIGINT/SIGTERM 或桌面 stdin EOF 后停止新领取并等待子 Worker 退出；正常退出码 0，配置/schema 错误为 2，其余故障为 1。旧进程停机不由租约过期推定，UNKNOWN 保持原身份隔离。现有桌面 supervisor 组合已做局部独立复验，新图版 Windows 组合仍待验证；真实 Provider 仍关闭。
+监督器读取 `RELAY_DB_URL` 与已存在的绝对路径 `RELAY_DATA_ROOT`，在任何领取或 spawn 前只读核对业务与 Saver schema；缺失或损坏时以配置错误退出。非桌面 `--once` 供隔离验证；桌面模式先验证私有启动帧、逐旧 launch 核对并按序发 ack 与最终 `dispatch_ready`，随后才轮询，详情见[部署设计](docs/deployment/本机部署.md)。收到 SIGINT/SIGTERM 或桌面 stdin EOF 后停止新领取并等待子 Worker 退出；正常退出码 0，配置/schema 错误为 2，其余故障为 1。旧进程停机不由租约过期推定，UNKNOWN 保持原身份隔离。Windows 组合与真实 Provider 的当前授权、确切包通过范围和剩余出口分别以 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md) 和[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)为准。
 
 必须显式给出、否则以退出码 2 结束的键：`RELAY_API_BIND_HOST`（只接受 127.0.0.1 或 ::1）、`RELAY_API_PORT`、`RELAY_API_ALLOWED_ORIGINS`（显式 origin 列表，拒绝 `*` 与 `null`）、`RELAY_API_BEARER_TOKEN`（至少 32 字符，占位符被拒）、`RELAY_DB_URL`、`RELAY_DB_POOL_MAX`、`RELAY_DB_CONNECT_TIMEOUT_MS`、`RELAY_DATA_ROOT`（绝对路径、必须已存在、必须在源码仓库之外）、`RELAY_LOG_LEVEL`、`RELAY_API_STOP_ON_STDIN_EOF`；没有任何静默默认值。
 

@@ -9,7 +9,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const execFileAsync = promisify(execFile);
 const desktopRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -26,6 +26,9 @@ const sessionName = /^relay-m02-acceptance-[0-9a-f]{32}$/iu;
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const expectedExeSha = process.argv[2];
 const expectedMigrationSha = process.argv[3];
+const inflightCancel = process.argv.slice(4).includes('--inflight-cancel');
+const artifactLifecycle = process.argv.slice(4).includes('--artifact-lifecycle');
+assert.ok(!(inflightCancel && artifactLifecycle), 'select one optional WebView scenario');
 const migration = join(releaseRoot, 'api', 'migrations', '0013_m03_run_command_order.sql');
 const manifestPath = join(releaseRoot, 'desktop-build-manifest.json');
 const packageInputs = [exe, node, manifestPath, migration,
@@ -33,10 +36,14 @@ const packageInputs = [exe, node, manifestPath, migration,
   join(releaseRoot, 'api', 'dist', 'src', 'worker', 'supervisor-main.js'),
   join(releaseRoot, 'api', 'dist', 'src', 'worker', 'main.js'),
   join(releaseRoot, 'api', 'dist', 'src', 'cli', 'install-graph.js')];
+if (inflightCancel) packageInputs.push(
+  join(releaseRoot, 'api', 'dist', 'src', 'worker', 'run-command.js'),
+  join(releaseRoot, 'api', 'dist', 'src', 'worker', 'run-graph.js'),
+  join(releaseRoot, 'api', 'dist', 'src', 'application', 'recover-run.js'));
 
 assert.equal(process.version, 'v24.21.0', 'use the pinned portable Node 24.21.0');
 assert.match(expectedExeSha ?? '', /^[0-9a-f]{64}$/u,
-  'usage: node m03-review-resume-webview.mjs <frozen-EXE-SHA256> <frozen-0013-SHA256>');
+  'usage: node m03-review-resume-webview.mjs <frozen-EXE-SHA256> <frozen-0013-SHA256> [--inflight-cancel|--artifact-lifecycle]');
 assert.match(expectedMigrationSha ?? '', /^[0-9a-f]{64}$/u);
 for (const path of [psql, ...packageInputs]) {
   assert.ok(existsSync(path), `missing packaged test input: ${path}`);
@@ -54,7 +61,7 @@ for (const key of Object.keys(powerShellEnv)) {
 }
 const preexisting = new Set(readdirSync(tmpdir()).filter((name) => sessionName.test(name)));
 const state = { root: null, marker: null, host: null, browser: null, page: null,
-  identities: [], hostLogs: [], latch: null, latchBackendPid: null, cleaned: false };
+  identities: [], hostLogs: [], latch: null, latchBackendPid: null, testWorker: null, cleaned: false };
 
 async function powerShell(command) {
   const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', command],
@@ -202,7 +209,7 @@ async function startHost(label) {
 
 function watchWebView(page, bootstrap) {
   const base = `${bootstrap.baseUrl}/api/v1/workspaces/${bootstrap.workspaceId}`;
-  const ledger = { delegate: null, decision: null, events: [], runGets: 0,
+  const ledger = { delegate: null, decision: null, control: null, events: [], runGets: 0,
     controlPosts: 0, tokenInUrl: false, unauthorizedRequest: false };
   page.on('request', (request) => {
     const url = request.url();
@@ -224,6 +231,10 @@ function watchWebView(page, bootstrap) {
     if (request.method() === 'GET' && /\/runs\/[0-9a-f-]{36}$/iu.test(parsed.pathname)) ledger.runGets++;
     if (request.method() === 'POST' && /\/runs\/[0-9a-f-]{36}\/(?:control-requests|resume)$/iu.test(parsed.pathname)) {
       ledger.controlPosts++;
+      if (parsed.pathname.endsWith('/control-requests')) ledger.control = {
+        path: parsed.pathname.slice(`/api/v1/workspaces/${bootstrap.workspaceId}`.length),
+        body: JSON.parse(request.postData()),
+      };
     }
     if (request.method() === 'GET' && /\/runs\/[0-9a-f-]{36}\/events$/iu.test(parsed.pathname)) {
       ledger.events.push({ after: parsed.searchParams.get('after'), bearer: true, status: null });
@@ -427,8 +438,131 @@ async function stopHost(snapshot = null) {
   console.log('host_api_supervisor_stopped=true active_worker_if_any_stopped=true');
 }
 
+async function startControlledWorker() {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (/^(?:NODE_|RELAY_)/iu.test(key)) delete env[key];
+  }
+  env.NODE_ENV = 'test';
+  env.RELAY_DB_URL = `postgresql://relay_app@127.0.0.1:${state.marker.postgres_port}/relay_m02_acceptance`;
+  env.RELAY_DATA_ROOT = state.marker.data_root;
+  env.RELAY_WORKER_ID = `worker:webview-cancel:${randomUUID()}`;
+  const sourceRoot = join(releaseRoot, 'api', 'dist', 'src');
+  const moduleUrl = (relative) => JSON.stringify(pathToFileURL(join(sourceRoot, relative)).href);
+  // This isolated harness gates one production delivery on the UI's committed
+  // Delegate. It does not inject test configuration into the desktop host.
+  const code = `
+    import assert from 'node:assert/strict';
+    import { RelayDatabase } from ${moduleUrl('infrastructure/database.js')};
+    import { SchemaReadinessChecker } from ${moduleUrl('infrastructure/schema-readiness.js')};
+    import { graphCheckpointsReady } from ${moduleUrl('infrastructure/graph-checkpoints.js')};
+    import { runOneCommand } from ${moduleUrl('worker/run-command.js')};
+    const db = new RelayDatabase({ databaseUrl: process.env.RELAY_DB_URL,
+      databasePoolMax: 4, databaseConnectTimeoutMs: 5000 }, () => process.exitCode = 1);
+    const send = (message) => new Promise((done, fail) => process.send(message,
+      (error) => error ? fail(error) : done()));
+    let stage = 'readiness';
+    try {
+      const ready = await db.checkReadiness(new SchemaReadinessChecker(
+        ${JSON.stringify(join(releaseRoot, 'api', 'migrations'))}));
+      assert.deepEqual(ready, { database: 'up', schema: 'up' });
+      assert.equal(await graphCheckpointsReady(db.executor, process.env.RELAY_DB_URL), true);
+      stage = 'waiting_delegate';
+      const start = new Promise((done) => process.once('message', done));
+      await send({ type: 'worker_ready', worker_id: process.env.RELAY_WORKER_ID });
+      const request = await start;
+      assert.equal(request.type, 'execute');
+      stage = 'delivery';
+      const result = await runOneCommand(db.executor, {
+        workerId: process.env.RELAY_WORKER_ID, dataRoot: process.env.RELAY_DATA_ROOT,
+        checkpointUrl: process.env.RELAY_DB_URL, fakeModelDelayMs: 60000,
+        onClaim: async (claim) => {
+          assert.equal(claim.runId, request.runId);
+          await send({ type: 'worker_claimed', run_id: claim.runId,
+            command_id: claim.commandId, worker_id: claim.workerId, epoch: claim.epoch.toString() });
+        },
+      });
+      assert.equal(result?.runId, request.runId, 'the harness did not own the UI Delegate claim');
+      await send({ type: 'worker_settled', ...result });
+    } catch (error) {
+      const name = typeof error?.name === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(error.name)
+        ? error.name : 'Error';
+      const code = typeof error?.code === 'string' && error.code.length <= 64 &&
+        /^(?:ERR_[A-Z0-9_]+|E[A-Z]+|[0-9A-Z]{5})$/u.test(error.code) ? error.code : null;
+      process.stderr.write(JSON.stringify({ type: 'isolated_worker_failed', stage,
+        error_name: name, error_code: code }) + '\\n');
+      process.exitCode = 1;
+    } finally {
+      await db.close();
+      process.disconnect();
+    }
+  `;
+  const child = spawn(node, ['--input-type=module', '--eval', code], {
+    cwd: releaseRoot, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+  });
+  const worker = { child, id: env.RELAY_WORKER_ID, messages: [], output: '', closed: null, error: null };
+  state.testWorker = worker;
+  child.once('close', (exitCode, signal) => {
+    worker.closed = { exitCode, signal };
+  });
+  child.once('error', (error) => { worker.error = error; });
+  child.on('message', (message) => worker.messages.push(message));
+  for (const stream of [child.stdout, child.stderr]) stream.on('data', (chunk) => {
+    worker.output += chunk.toString();
+  });
+  await waitFor(() => {
+    if (worker.error || worker.closed) throw new Error('isolated Worker exited before readiness');
+    return worker.messages.find((message) => message.type === 'worker_ready');
+  }, 20_000, 'isolated packaged delivery Worker readiness');
+  const identity = JSON.parse(await powerShell(`$p=Get-CimInstance Win32_Process -Filter "ProcessId = ${child.pid}"; ` +
+    `if ($null -eq $p) { throw 'isolated Worker missing' }; ` +
+    `@{ pid=[int]$p.ProcessId; created=([datetime]$p.CreationDate).ToUniversalTime().ToString('o'); ` +
+    `executable=[string]$p.ExecutablePath } | ConvertTo-Json -Compress`));
+  assert.equal(resolve(identity.executable.replace(/^\\\\\?\\/u, '')).toLowerCase(), resolve(node).toLowerCase());
+  state.identities.push(identity);
+  console.log(`isolated_worker_ready=true pid=${child.pid} worker_id=${worker.id} fake_model_delay_ms=60000`);
+  return worker;
+}
+
+async function recoverControlledWorker(runId, claim) {
+  assert.ok(state.testWorker.closed, 'recovery requires the actual child close event');
+  const module = (relative) => import(pathToFileURL(join(releaseRoot, 'api', 'dist', 'src', relative)).href);
+  const { RelayDatabase } = await module('infrastructure/database.js');
+  const { ManagedContentStore } = await module('storage/managed-content-store.js');
+  const { recoverStoppedWorker } = await module('application/recover-run.js');
+  const { withTransaction } = await module('application/unit-of-work.js');
+  const { applySafeControl } = await module('application/control-requests.js');
+  const db = new RelayDatabase({
+    databaseUrl: `postgresql://relay_app@127.0.0.1:${state.marker.postgres_port}/relay_m02_acceptance`,
+    databasePoolMax: 4, databaseConnectTimeoutMs: 5000,
+  }, () => { throw new Error('isolated recovery database failed'); });
+  const evidence = `webview-harness-child-close:pid=${state.testWorker.child.pid};code=0;observed=${new Date().toISOString()}`;
+  try {
+    const recovered = await recoverStoppedWorker(db.executor, { runId,
+      stoppedWorkerId: state.testWorker.id, stoppedEvidence: evidence,
+      storage: new ManagedContentStore(state.marker.data_root) });
+    assert.equal(recovered.fenced, true);
+    assert.deepEqual(recovered.unresolved_operation_ids, []);
+    await withTransaction(db.executor, async (repositories) => {
+      await repositories.runs.lockRun(runId);
+      const current = await repositories.dispatch.lockInvocation(runId);
+      assert.equal(current.worker_id, state.testWorker.id);
+      assert.equal(current.epoch.toString(), claim.epoch);
+      assert.equal(current.command_id, claim.command_id);
+      await repositories.dispatch.lockOutbox(claim.command_id);
+      await repositories.dispatch.requeueStoppedClaim(runId, state.testWorker.id,
+        BigInt(claim.epoch), claim.command_id, evidence);
+    });
+    await applySafeControl(db.executor, runId);
+  } finally { await db.close(); }
+}
+
 async function cleanup() {
   await stopWorkerLatch();
+  if (state.testWorker && !state.testWorker.closed) {
+    state.testWorker.child.kill();
+    await waitFor(() => state.testWorker.closed, 10_000, 'isolated Worker close before PG cleanup');
+  }
   await state.browser?.close().catch(() => undefined);
   state.browser = null;
   if (state.host?.pid && state.host.exitCode === null) {
@@ -457,6 +591,300 @@ async function cleanup() {
   console.log('postgres_stop_exit=0 temporary_root_removed=True');
 }
 
+async function runInflightCancel(first, ledger, projectId, taskId) {
+  const worker = await startControlledWorker();
+  const delegateResponse = first.page.waitForResponse((response) =>
+    response.request().method() === 'POST' &&
+    new URL(response.url()).pathname.endsWith(`/tasks/${taskId}/delegations`),
+  { timeout: 15_000 }).then(async (response) => {
+    assert.equal(response.status(), 202);
+    const receipt = await response.json();
+    assert.match(receipt.result.run_id, uuid);
+    worker.child.send({ type: 'execute', runId: receipt.result.run_id });
+    return receipt;
+  });
+  await first.page.getByTestId('task-delegate').click();
+  const delegated = await delegateResponse;
+  const runId = delegated.result.run_id;
+  await expect(first.page).toHaveURL(new RegExp(`/runs/${runId}$`, 'u'));
+  assert.equal(ledger.delegate.path, `/tasks/${taskId}/delegations`);
+  assert.equal(ledger.delegate.body.command_id, delegated.command_id);
+  const claim = await waitFor(() => {
+    if (worker.closed) throw new Error('isolated Worker closed before acquiring the UI Delegate');
+    return worker.messages.find((message) => message.type === 'worker_claimed');
+  }, 15_000, 'original UI Delegate claimed by the controlled Worker');
+  assert.equal(claim.run_id, runId);
+  assert.equal(claim.worker_id, worker.id);
+  assert.equal(claim.epoch, '1');
+  await waitFor(() => worker.output.includes('"type":"mock_model_started"'),
+    15_000, 'in-flight Mock model inside the controlled packaged delivery');
+  const storedClaim = JSON.parse(await sql(`select json_build_object('status',status,` +
+    `'worker_id',worker_id,'command_id',command_id,'epoch',epoch::text)::text ` +
+    `from run_invocations where run_id='${runId}'`));
+  assert.deepEqual(storedClaim, { status: 'ACTIVE', worker_id: worker.id,
+    command_id: claim.command_id, epoch: claim.epoch });
+  assert.equal(await sql(`select source_command_id from run_commands ` +
+    `where id='${claim.command_id}' and run_id='${runId}'`), delegated.command_id,
+  'the active claim did not bind the original UI Delegate command');
+  assert.equal(await getRunStatusFromPg(runId), 'RUNNING');
+  assert.equal(await sql(`select count(*) from run_control_requests where run_id='${runId}'`), '0');
+  const controlsDrawer = first.page.getByTestId('rail-trigger');
+  if (await controlsDrawer.isVisible()) await controlsDrawer.click();
+  await first.page.locator('[data-testid="run-refresh"]:visible').click();
+  await expect(first.page.locator('[data-testid="run-control-CANCEL"]:visible')).toBeEnabled();
+  const controlResponse = first.page.waitForResponse((response) =>
+    response.request().method() === 'POST' &&
+    new URL(response.url()).pathname.endsWith(`/runs/${runId}/control-requests`),
+  { timeout: 15_000 });
+  await first.page.locator('[data-testid="run-control-CANCEL"]:visible').click();
+  const response = await controlResponse;
+  assert.equal(response.status(), 202);
+  const accepted = await response.json();
+  assert.equal(ledger.control.body.type, 'CANCEL');
+  assert.equal(ledger.control.body.command_id, accepted.command_id);
+  assert.equal(accepted.result.status, 'PENDING');
+  const controlId = accepted.result.control_request_id;
+  assert.match(controlId, uuid);
+  assert.equal(await sql(`select type || ':' || status from run_control_requests ` +
+    `where id='${controlId}' and run_id='${runId}'`), 'CANCEL:PENDING');
+  const receipt = await get(first.bootstrap, `/commands/${accepted.command_id}`);
+  assert.equal(receipt.command_type, 'RequestRunControl');
+  assert.equal(receipt.result.control_request_id, controlId);
+  console.log(`ui_cancel_durable=true command_id=${accepted.command_id} control_id=${controlId} status=PENDING`);
+  await waitFor(() => worker.closed, 15_000, 'model abort and natural controlled Worker close');
+  assert.deepEqual(worker.closed, { exitCode: 0, signal: null });
+  assert.equal(worker.messages.find((message) => message.type === 'worker_settled')?.outcome, 'LOST');
+  assert.equal((worker.output.match(/"type":"mock_model_started"/gu) ?? []).length, 1);
+  assert.equal((worker.output.match(/"type":"mock_model_cancelled"/gu) ?? []).length, 1);
+  assert.equal(await getRunStatusFromPg(runId), 'RUNNING',
+    'a pending UI intent declared terminal state before stop-evidence recovery');
+  console.log(`mock_model_started=true mock_model_cancelled=true worker_close_code=0 worker_id=${worker.id}`);
+  await recoverControlledWorker(runId, claim);
+  await waitFor(async () => (await get(first.bootstrap, `/runs/${runId}`)).status === 'CANCELLED',
+    15_000, 'Run cancellation after close-evidence recovery');
+  assert.equal((await get(first.bootstrap, `/tasks/${taskId}`)).status, 'READY',
+    'CANCEL stops the Run and releases the Task; only CANCEL_TASK cancels the Task');
+  assert.equal(await sql(`select status from run_control_requests where id='${controlId}'`), 'APPLIED');
+  assert.equal(await sql(`select status from run_invocations where run_id='${runId}'`), 'IDLE');
+  const stopProof = await sql(`select fact_refs->>'stopped_evidence' from activity_records ` +
+    `where run_id='${runId}' and event_type='RUN_WORKER_FENCED' order by created_at desc limit 1`);
+  assert.ok(stopProof.includes(`webview-harness-child-close:pid=${worker.child.pid};code=0;`));
+  assert.equal(await sql(`select a.status || ':' || (a.evidence->>'reason') ` +
+    `from step_attempts a join run_steps s on s.id=a.step_id ` +
+    `where s.run_id='${runId}' and s.step_kind='DRAFT'`),
+  'FAILED:CONTROL_PREEMPTED_AFTER_WORKER_STOP');
+  await first.page.locator('[data-testid="run-refresh"]:visible').click();
+  await expect(first.page.getByTestId('run-detail')).toContainText('已停止');
+  await first.page.reload();
+  await expect(first.page.getByTestId('run-detail')).toContainText('已停止');
+  if (await controlsDrawer.isVisible()) await controlsDrawer.click();
+  await expect(first.page.locator('[data-testid="run-control-CANCEL"]:visible')).toBeDisabled();
+  assert.equal((await get(first.bootstrap, `/runs/${runId}`)).status, 'CANCELLED');
+  assert.equal((await get(first.bootstrap, `/tasks/${taskId}`)).status, 'READY');
+  assert.deepEqual(await artifactState(taskId, runId), []);
+  assert.equal(await sql(`select count(*) from artifacts where task_id='${taskId}'`), '0');
+  assert.deepEqual(await completionState(taskId), []);
+  assert.equal(ledger.controlPosts, 1, 'refresh/navigation sent another control command');
+  assert.equal(ledger.tokenInUrl, false);
+  assert.equal(ledger.unauthorizedRequest, false);
+  assert.ok(!worker.output.includes(first.bootstrap.bearerToken));
+  await processSnapshot(state.host.pid);
+  console.log(`webview_create_delegate_cancel project_id=${projectId} task_id=${taskId} run_id=${runId} ` +
+    `control=APPLIED run=CANCELLED task=READY refresh_terminal=true artifact_versions=0 completion_records=0`);
+  console.log(`controlled_packaged_delivery=true host_test_injection=false worker_claim_epoch=${claim.epoch} ` +
+    `run_event_seq=${await eventSeq(runId)} packaged_manifest_sha256=${sha(manifestPath)}`);
+}
+
+async function runArtifactLifecycle(first, ledger, projectId, taskId) {
+  const { page, bootstrap } = first;
+  const task = await get(bootstrap, `/tasks/${taskId}`);
+  assert.equal(task.status, 'READY');
+  const started = await post(bootstrap, `/tasks/${taskId}/start`, {
+    command_id: randomUUID(), expected_revision: task.revision,
+  }, 200);
+  assert.equal(started.result.status, 'IN_PROGRESS');
+  await processSnapshot(state.host.pid);
+
+  const writes = [];
+  async function submitUi(testId, path, status, commandType) {
+    const responsePending = page.waitForResponse((response) => response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === `/api/v1/workspaces/${bootstrap.workspaceId}${path}`);
+    await expect(page.getByTestId(testId)).toBeEnabled();
+    await page.getByTestId(testId).click();
+    const response = await responsePending;
+    assert.equal(response.status(), status, `${commandType} UI command failed`);
+    const request = response.request().postDataJSON();
+    const envelope = await response.json();
+    assert.match(request.command_id, uuid);
+    assert.equal(envelope.command_id, request.command_id);
+    const receipt = await get(bootstrap, `/commands/${request.command_id}`);
+    assert.equal(receipt.command_type, commandType);
+    assert.deepEqual(receipt.result, envelope.result);
+    writes.push({ commandId: request.command_id, body: request });
+    return envelope.result;
+  }
+  async function content(versionId) {
+    const response = await fetch(`${bootstrap.baseUrl}/api/v1/workspaces/${bootstrap.workspaceId}` +
+      `/artifact-versions/${versionId}/content`, { headers: {
+      authorization: `Bearer ${bootstrap.bearerToken}`, origin: 'http://tauri.localhost',
+    }, signal: AbortSignal.timeout(5000) });
+    assert.equal(response.status, 200);
+    return response.text();
+  }
+
+  await page.goto(`http://tauri.localhost/tasks/${taskId}?tab=artifacts`);
+  await expect(page.getByTestId('artifact-editor')).toBeVisible();
+  const firstContent = '# Windows 人工产物 v1\n\n保留第一版自检结论。';
+  const secondContent = '# Windows 人工产物 v2\n\n刷新后续写同一产物，第一版保持不变。';
+  await page.locator('textarea[name="artifact-content"]').fill(firstContent);
+  const v1 = await submitUi('artifact-save', `/tasks/${taskId}/artifacts`, 201, 'CreateArtifactWithVersion');
+  assert.equal(v1.task_id, taskId);
+  assert.equal(v1.version_number, '1');
+  assert.equal(v1.sha256, createHash('sha256').update(firstContent).digest('hex'));
+  assert.match(v1.artifact_id, uuid);
+  assert.match(v1.version_id, uuid);
+  await expect(page.getByTestId('artifact-save-receipt')).toContainText('v1');
+  const firstHistory = await get(bootstrap, `/tasks/${taskId}/artifacts`);
+  assert.equal(firstHistory.items.length, 1);
+  assert.equal(firstHistory.items[0].version_count, 1);
+  assert.deepEqual(firstHistory.current_accepted_version_ids, []);
+  await page.reload();
+  await expect(page.getByTestId('relay-connection-open')).toContainText('已连接本机 API');
+  await expect(page.getByTestId(`artifact-version-${v1.version_id}`)).toBeVisible();
+  await expect(page.locator('input[name="artifact-version"]:checked')).toHaveCount(0);
+  await expect(page.getByTestId('artifact-load-latest-draft')).toBeEnabled();
+  await page.getByTestId('artifact-load-latest-draft').click();
+  await expect(page.locator('textarea[name="artifact-content"]')).toHaveValue(firstContent);
+  await page.locator('textarea[name="artifact-content"]').fill(secondContent);
+  const v2 = await submitUi('artifact-save', `/artifacts/${v1.artifact_id}/versions`, 201, 'SubmitHumanArtifactVersion');
+  assert.equal(v2.artifact_id, v1.artifact_id, 'refresh created another Artifact instead of appending a version');
+  assert.equal(v2.version_number, '2');
+  assert.notEqual(v2.version_id, v1.version_id);
+  assert.equal(v2.sha256, createHash('sha256').update(secondContent).digest('hex'));
+  await expect(page.getByTestId('artifact-save-receipt')).toContainText('v2');
+  const history = await get(bootstrap, `/tasks/${taskId}/artifacts`);
+  assert.equal(history.items.length, 1);
+  assert.equal(history.items[0].version_count, 2);
+  assert.equal(history.items[0].latest_version_id, v2.version_id);
+  assert.deepEqual(history.items[0].versions[0], firstHistory.items[0].versions[0]);
+  assert.deepEqual(history.current_accepted_version_ids, []);
+  assert.equal(await content(v1.version_id), firstContent);
+  assert.equal(await content(v2.version_id), secondContent);
+
+  await page.reload();
+  await expect(page.getByTestId(`artifact-version-${v2.version_id}`)).toBeVisible();
+  await expect(page.locator('input[name="artifact-version"]:checked')).toHaveCount(0);
+  await page.getByTestId(`artifact-version-${v2.version_id}`).check();
+  await submitUi('artifact-select-version', `/projects/${projectId}/state-commands`, 200, 'SetProjectState');
+  await expect(page.getByText('项目 State 已选用 v2', { exact: false })).toBeVisible();
+  assert.deepEqual((await get(bootstrap, `/projects/${projectId}/state`)).selected_artifact_version_refs
+    .map((ref) => ref.artifact_version_id), [v2.version_id]);
+  await page.getByTestId(`artifact-version-${v1.version_id}`).check();
+  const criteria = page.locator('[data-testid^="criterion-"]');
+  assert.equal(await criteria.count(), 1);
+  await criteria.check();
+  const completed = await submitUi('task-complete', `/tasks/${taskId}/complete`, 200, 'CompleteHumanTask');
+  assert.equal(completed.status, 'DONE');
+  assert.deepEqual(completed.artifact_version_ids, [v1.version_id]);
+  assert.deepEqual(writes.at(-1).body.artifact_version_ids, [v1.version_id]);
+  await expect(page.getByTestId('task-complete-receipt')).toContainText('已完成本轮');
+  await page.reload();
+  const row = (versionId) => page.getByTestId(`artifact-version-${versionId}`).locator('xpath=ancestor::li');
+  await expect(row(v1.version_id)).toContainText('本轮接受');
+  await expect(row(v2.version_id)).toContainText('最新');
+  await expect(row(v2.version_id)).toContainText('当前选用');
+  await expect(row(v2.version_id)).not.toContainText('本轮接受');
+  await expect(page.getByTestId('artifact-save')).toBeDisabled();
+  assert.equal((await get(bootstrap, `/tasks/${taskId}`)).current_completion_id, completed.completion_id);
+  assert.deepEqual((await get(bootstrap, `/tasks/${taskId}/artifacts`)).current_accepted_version_ids, [v1.version_id]);
+  const evidence = await get(bootstrap, `/completion-records/${completed.completion_id}`);
+  assert.equal(evidence.basis_kind, 'HUMAN');
+  assert.equal(evidence.is_current, true);
+  assert.deepEqual(evidence.artifact_versions.map((version) => version.artifact_version_id), [v1.version_id]);
+  assert.equal(evidence.artifact_versions[0].sha256, v1.sha256);
+  await page.locator('input[name="reopen-reason"]').fill('核对同包恢复后的新一轮验收');
+  const reopened = await submitUi('task-reopen-submit', `/tasks/${taskId}/reopen`, 200, 'ReopenTask');
+  assert.equal(reopened.status, 'READY');
+  assert.equal(reopened.previous_completion_id, completed.completion_id);
+  assert.equal(reopened.acceptance_revision, (BigInt(completed.acceptance_revision) + 1n).toString());
+  await expect(page.getByTestId('task-reopen-receipt')).toContainText('已重开');
+  assert.equal(new Set(writes.map((write) => write.commandId)).size, 5);
+  assert.equal(ledger.delegate, null);
+  assert.equal(ledger.tokenInUrl, false);
+  assert.equal(ledger.unauthorizedRequest, false);
+  await stopHost(await processSnapshot(state.host.pid));
+  const restored = await startHost('artifact-restored');
+  const restoredLedger = watchWebView(restored.page, restored.bootstrap);
+  await restored.page.goto(`http://tauri.localhost/tasks/${taskId}?tab=artifacts`);
+  await expect(restored.page.getByTestId(`artifact-version-${v2.version_id}`)).toBeVisible();
+  await expect(restored.page.getByTestId(`artifact-version-${v1.version_id}`).locator('xpath=ancestor::li'))
+    .not.toContainText('本轮接受');
+  await expect(restored.page.getByTestId(`artifact-version-${v2.version_id}`).locator('xpath=ancestor::li'))
+    .toContainText('当前选用');
+  await expect(restored.page.locator('input[name="artifact-version"]:checked')).toHaveCount(0);
+  await expect(restored.page.locator('[data-testid^="criterion-"]:checked')).toHaveCount(0);
+  const restoredTask = await get(restored.bootstrap, `/tasks/${taskId}`);
+  assert.equal(restoredTask.status, 'READY');
+  assert.equal(restoredTask.current_completion_id, null);
+  assert.equal(restoredTask.acceptance_revision, reopened.acceptance_revision);
+  const restoredHistory = await get(restored.bootstrap, `/tasks/${taskId}/artifacts`);
+  assert.deepEqual(restoredHistory.items[0].versions, history.items[0].versions);
+  assert.equal(restoredHistory.items.length, 1);
+  assert.deepEqual(restoredHistory.current_accepted_version_ids, []);
+  const historicalEvidence = await get(restored.bootstrap, `/completion-records/${completed.completion_id}`);
+  assert.deepEqual(historicalEvidence, { ...evidence, is_current: false });
+  const completions = await completionState(taskId);
+  assert.equal(completions.length, 1);
+  assert.equal(completions[0].id, completed.completion_id);
+  assert.equal(completions[0].run_id, null);
+  assert.equal(await sql(`select count(*) from runs where task_id='${taskId}'`), '0');
+  assert.equal(restoredLedger.tokenInUrl, false);
+  assert.equal(restoredLedger.unauthorizedRequest, false);
+  for (const logPath of state.hostLogs) {
+    const log = readFileSync(logPath, 'utf8');
+    assert.ok(!log.includes(bootstrap.bearerToken) && !log.includes(restored.bootstrap.bearerToken));
+  }
+  const drawer = restored.page.locator('.dialog-panel--drawer:visible');
+  if (await drawer.count()) await drawer.getByRole('button', { name: '关闭面板', exact: true }).click();
+  await expect(restored.page.getByRole('dialog')).toHaveCount(0);
+  await expect(restored.page.locator('textarea[name="artifact-content"]')).toHaveValue('');
+  const closingTree = await processSnapshot(state.host.pid);
+  let pageCloseEvents = 0;
+  const pageErrors = [];
+  restored.page.on('close', () => { pageCloseEvents++; });
+  restored.page.on('pageerror', (error) => {
+    pageErrors.push(String(error).replace(/(?:https?|postgresql):\/\/\S+/giu, '[redacted-url]')
+      .replace(/[0-9a-f]{32,}/giu, '[redacted-id]').slice(0, 600));
+  });
+  let clickFailure;
+  try {
+    await restored.page.getByTestId('desktop-titlebar').getByRole('button', { name: '关闭窗口', exact: true }).click();
+  } catch (error) { clickFailure = error; }
+  try {
+    await waitFor(() => state.host.exitCode !== null && restored.page.isClosed(),
+      15_000, 'titlebar close to stop the packaged host naturally');
+  } catch (error) {
+    const windowFailed = !restored.page.isClosed() &&
+      await restored.page.locator('.desktop-titlebar__error:visible').count() > 0;
+    throw new Error(`${error.message}; titlebar_failure=${windowFailed}; page_errors=${pageErrors.join(' | ') || 'none'}`);
+  }
+  assert.equal(state.host.exitCode, 0, 'normal titlebar close returned a nonzero host exit');
+  assert.equal(state.host.signalCode, null, 'normal close was replaced by process termination');
+  assert.equal(pageCloseEvents, 1, 'the UI close did not close exactly one packaged WebView');
+  assert.equal(restored.page.isClosed(), true);
+  if (clickFailure) assert.equal(restored.page.isClosed(), true, 'titlebar click failed before the window closed');
+  await waitFor(async () => {
+    try { await assertStopped(closingTree); return true; } catch { return false; }
+  }, 10_000, 'normal titlebar close to stop the API/supervisor/Worker tree');
+  state.browser = null;
+  state.page = null;
+  console.log('titlebar_ui_close=true host_natural_exit=0 recorded_process_tree_stopped=true unsaved_draft=false');
+  console.log(`artifact_id=${v1.artifact_id} versions=2 v1=${v1.version_id} v2=${v2.version_id} ` +
+    `selected=v2 accepted=v1 completion_id=${completed.completion_id} task=READY ` +
+    `acceptance_revision=${reopened.acceptance_revision} current_completion=null historical_completion_retained=true ` +
+    'packaged_restart=true ui_commands=5 synthetic_input=true');
+}
+
 async function runChain() {
   await startSession();
   const first = await startHost('initial');
@@ -481,8 +909,16 @@ async function runChain() {
   const taskId = await first.page.getByTestId('task-created-open-detail').innerText();
   assert.match(taskId, uuid);
   await first.page.getByTestId('task-created-open-detail').click();
+  if (artifactLifecycle) {
+    await runArtifactLifecycle(first, ledger, projectId, taskId);
+    return;
+  }
   await first.page.getByTestId('task-detail-tab-runs').click();
   await expect(first.page.getByTestId('task-delegate')).toBeEnabled();
+  if (inflightCancel) {
+    await runInflightCancel(first, ledger, projectId, taskId);
+    return;
+  }
   let runId;
   let activeWorker;
   await startWorkerLatch();
@@ -682,9 +1118,26 @@ async function getRunStatusFromPg(runId) {
   return sql(`select status from runs where id='${runId}'`);
 }
 
+// Reuse the same isolated package/session lifecycle for the M04 real-model chain.
+// Importing this module validates the frozen inputs but never starts a desktop.
+export { state, workspaceRoot, releaseRoot, frozenPackage, sha, sql, waitFor,
+  startSession, startHost, watchWebView, post, get, assertRuntimeRoleSeparation,
+  processSnapshot, assertStopped, stopHost, expect, uuid };
+
+export async function runDesktopAcceptance(chain, passLabel, secrets = []) {
 let failure;
-try { await runChain(); }
-catch (error) { failure = error; }
+try { await chain(); }
+catch (error) {
+  failure = error;
+  for (const logPath of state.hostLogs) {
+    let diagnostic = readFileSync(logPath, 'utf8').split(/\r?\n/u)
+      .filter((line) => /panic|error|failed|timeout|readiness|recovery/iu.test(line)).join('\n')
+      .replace(/(?:https?|postgresql):\/\/\S+/giu, '[redacted-url]')
+      .replace(/[0-9a-f]{32,}/giu, '[redacted-id]').slice(-6000);
+    for (const secret of secrets) if (secret) diagnostic = diagnostic.split(secret).join('[redacted-secret]');
+    if (diagnostic) console.log(`host_failure_diagnostic=${basename(logPath)}\n${diagnostic}`);
+  }
+}
 try { await cleanup(); }
 catch (error) {
   console.log(`cleanup_unverified=true session_root=${state.root ?? 'unknown'}`);
@@ -702,4 +1155,10 @@ for (const [path, before] of frozenPackage) {
   }
 }
 if (failure) throw failure;
-console.log('M03_REVIEW_RESUME_WEBVIEW_REAL_PG=PASS');
+console.log(passLabel);
+}
+
+if (resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await runDesktopAcceptance(runChain, artifactLifecycle ? 'M03_ARTIFACT_LIFECYCLE_WEBVIEW_REAL_PG=PASS' :
+    inflightCancel ? 'M03_INFLIGHT_CANCEL_WEBVIEW_REAL_PG=PASS' : 'M03_REVIEW_RESUME_WEBVIEW_REAL_PG=PASS');
+}

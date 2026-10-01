@@ -1,12 +1,17 @@
 import { useMemo } from "react";
 import SafeInline, { type InlineSegment } from "./SafeInline";
+import "./SafeMarkdown.css";
+
+type TableAlignment = "left" | "center" | "right";
+type TableRow = readonly (readonly InlineSegment[])[];
 
 /** Minimal safe Markdown: no HTML injection; only HTTP(S) links become anchors. */
 type Block =
   | { readonly kind: "heading"; readonly level: number; readonly segments: readonly InlineSegment[] }
   | { readonly kind: "paragraph"; readonly segments: readonly InlineSegment[] }
   | { readonly kind: "code"; readonly text: string }
-  | { readonly kind: "list"; readonly ordered: boolean; readonly items: readonly (readonly InlineSegment[])[] };
+  | { readonly kind: "list"; readonly ordered: boolean; readonly items: readonly (readonly InlineSegment[])[] }
+  | { readonly kind: "table"; readonly header: TableRow; readonly alignment: readonly TableAlignment[]; readonly rows: readonly TableRow[] };
 
 function parseToken(token: string): InlineSegment {
   if (token.startsWith("**")) return { kind: "strong", text: token.slice(2, -2) };
@@ -34,6 +39,57 @@ function parseInline(text: string): readonly InlineSegment[] {
   }
   if (cursor < text.length) segments.push({ kind: "text", text: text.slice(cursor) });
   return segments;
+}
+
+/** Pipes inside supported inline code and escaped pipes remain part of the cell. */
+function tableCells(line: string): readonly string[] | null {
+  const text = line.trim();
+  const cells: string[] = [];
+  let cell = "";
+  let firstPipe = -1;
+  let lastPipe = -1;
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index];
+    if (character === "\\" && (text[index + 1] === "|" || text[index + 1] === "\\")) {
+      cell += text[index + 1] === "|" ? "|" : "\\\\";
+      index++;
+    } else if (character === "`" && text.indexOf("`", index + 1) > index + 1) {
+      const end = text.indexOf("`", index + 1);
+      cell += text.slice(index, end + 1);
+      index = end;
+    } else if (character === "|") {
+      if (firstPipe === -1) firstPipe = index;
+      lastPipe = index;
+      cells.push(cell.trim()); cell = "";
+    } else cell += character;
+  }
+  if (firstPipe === -1) return null;
+  cells.push(cell.trim());
+  if (firstPipe === 0) cells.shift();
+  if (lastPipe === text.length - 1) cells.pop();
+  return cells;
+}
+
+function tableBlock(lines: readonly string[], start: number): { block: Block; next: number } | null {
+  const header = tableCells(lines[start] ?? "");
+  const separator = tableCells(lines[start + 1] ?? "");
+  if (!header?.length || !separator || separator.length !== header.length || !header.some((cell) => cell !== "") ||
+    !separator.every((cell) => /^:?-{3,}:?$/u.test(cell))) return null;
+  const alignment: TableAlignment[] = separator.map((cell) => cell.startsWith(":") && cell.endsWith(":")
+    ? "center" : cell.endsWith(":") ? "right" : "left");
+  const rows: TableRow[] = [];
+  let next = start + 2;
+  while (next < lines.length) {
+    const line = lines[next] ?? "";
+    if (line.trim() === "" || /^(#{1,4})\s+/u.test(line) || line.trimStart().startsWith("```")) break;
+    const cells = tableCells(line);
+    if (!cells) break;
+    // Keep malformed rows as source text instead of dropping or inventing cells.
+    if (cells.length !== header.length) return null;
+    rows.push(cells.map(parseInline));
+    next++;
+  }
+  return { block: { kind: "table", header: header.map(parseInline), alignment, rows }, next };
 }
 
 function parseBlocks(source: string): readonly Block[] {
@@ -68,10 +124,13 @@ function parseBlocks(source: string): readonly Block[] {
       result.push({ kind: "list", ordered, items });
       continue;
     }
+    const table = tableBlock(lines, index);
+    if (table) { result.push(table.block); index = table.next; continue; }
     const paragraph: string[] = [];
     while (index < lines.length) {
       const candidate = lines[index] ?? "";
       if (candidate.trim() === "" || /^(#{1,4})\s+/u.test(candidate) || candidate.trimStart().startsWith("```")) break;
+      if (paragraph.length > 0 && tableBlock(lines, index)) break;
       paragraph.push(candidate);
       index++;
     }
@@ -87,6 +146,14 @@ export default function SafeMarkdown({ source }: { source: string }) {
       ? <h3 key={index} className="markdown-preview__heading"><SafeInline segments={block.segments} /></h3>
       : <h4 key={index} className="markdown-preview__subheading"><SafeInline segments={block.segments} /></h4>;
     if (block.kind === "code") return <pre key={index} className="markdown-preview__code"><code>{block.text}</code></pre>;
+    if (block.kind === "table") return <div key={index} className="markdown-preview__table-scroll"
+      role="region" aria-label="Markdown 表格，较宽时可横向滚动" tabIndex={0}>
+      <table className="markdown-preview__table"><thead><tr>{block.header.map((cell, column) =>
+        <th key={column} scope="col" style={{ textAlign: block.alignment[column] }}><SafeInline segments={cell} /></th>)}</tr></thead>
+        <tbody>{block.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, column) =>
+          <td key={column} style={{ textAlign: block.alignment[column] }}><SafeInline segments={cell} /></td>)}</tr>)}</tbody>
+      </table>
+    </div>;
     if (block.kind === "list") {
       const items = block.items.map((item, itemIndex) => <li key={itemIndex}><SafeInline segments={item} /></li>);
       return block.ordered ? <ol key={index} className="markdown-preview__list">{items}</ol> : <ul key={index} className="markdown-preview__list">{items}</ul>;

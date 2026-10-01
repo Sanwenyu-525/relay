@@ -1,6 +1,9 @@
+import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import TaskDelegatePanel, { type DelegateTarget } from "../src/components/TaskDelegatePanel";
+import { RelayApiClient } from "../src/api/relayClient";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { flush, mountWorkbench } from "./mountApp";
+import { flush, mountReact, mountWorkbench } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -80,6 +83,8 @@ describe("M03 首片 Task Delegate", () => {
     await flush(50);
     expect(posted).toMatchObject({ expected_task_revision: "2" });
     expect(posted).not.toHaveProperty("mock_gateway_action");
+    expect(posted).not.toHaveProperty("file_read_action");
+    expect(posted).not.toHaveProperty("web_fetch_action");
     expect(typeof (posted as Record<string, unknown> | null)?.command_id).toBe("string");
     expect(mounted.router.currentRoute.value.path).toBe(`/runs/${runId}`);
     expect(mounted.wrapper.get('[data-testid="run-detail"]').text()).toContain("待委托任务");
@@ -141,8 +146,14 @@ describe("M03 首片 Task Delegate", () => {
     await mounted.wrapper.get('[data-testid="task-mock-action-toggle"]').setValue(true);
     await flush();
     expect(mounted.wrapper.get('[data-testid="task-mock-connection"]').findAll("option")).toHaveLength(2);
-    await mounted.wrapper.get('[data-testid="task-mock-target"]').setValue(target);
-    await mounted.wrapper.get('[data-testid="task-mock-content"]').setValue("Mock marker");
+    const targetField = mounted.wrapper.get('[data-testid="task-mock-target"]');
+    (targetField.element as HTMLInputElement).focus();
+    await targetField.setValue(target);
+    expect(document.activeElement).toBe(targetField.element);
+    const contentField = mounted.wrapper.get('[data-testid="task-mock-content"]');
+    (contentField.element as HTMLTextAreaElement).focus();
+    await contentField.setValue("Mock marker");
+    expect(document.activeElement).toBe(contentField.element);
     await mounted.wrapper.get('[data-testid="task-delegate"]').trigger("click");
     await flush(50);
     expect(posted).toMatchObject({ expected_task_revision: "2", mock_gateway_action: {
@@ -247,5 +258,299 @@ describe("M03 首片 Task Delegate", () => {
     expect(mounted.wrapper.get('[data-testid="task-delegate"]').attributes("disabled")).toBeDefined();
     await mounted.wrapper.get('[data-testid="task-delegate"]').trigger("click");
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  });
+});
+
+const fileConnectionId = "55555555-5555-4555-8555-555555555555";
+const webConnectionId = "66666666-6666-4666-8666-666666666666";
+const resourceId = "77777777-7777-4777-8777-777777777777";
+const otherResourceId = "88888888-8888-4888-8888-888888888888";
+const otherProjectId = "99999999-9999-4999-8999-999999999999";
+
+function readConnections() {
+  return [
+    { id: fileConnectionId, status: "ACTIVE", capabilities: ["FILE_READ", "FAKE_WRITE"], allowed_host: null },
+    { id: webConnectionId, status: "ACTIVE", capabilities: ["WEB_FETCH"], allowed_host: "localhost" },
+    { id: "disabled-connection", status: "DISABLED", capabilities: ["FILE_READ", "WEB_FETCH"], allowed_host: null },
+    { id: "wrong-capability", status: "ACTIVE", capabilities: ["FAKE_PUBLIC_READ"], allowed_host: null }
+  ];
+}
+
+function readResources(project = projectId) {
+  return [resourceId, otherResourceId].map((id) => ({ id, project_id: project,
+    canonical_root: id === resourceId ? "C:\\relay-read" : "C:\\relay-read-other",
+    status: "ACTIVE", revision: "1", resource_epoch: "2" }));
+}
+
+function readConfig(url: string): Response | null {
+  if (url === `${prefix}/projects/${projectId}/connections`) return response(200, readConnections());
+  if (url === `${prefix}/projects/${projectId}/managed-resources`) return response(200, readResources());
+  return null;
+}
+
+async function mountDelegate() {
+  activate();
+  const client = new RelayApiClient({ baseUrl, workspaceId, bearerToken: "test-token" });
+  let target: DelegateTarget = { id: taskId, projectId, status: "READY", executor: "HUMAN", revision: "2",
+    executorRunId: null, allowedActions: ["START"] };
+  const onDelegated = vi.fn();
+  const render = () => createElement(TaskDelegatePanel, { client, task: target, projectWriteBlockedReason: null, onDelegated });
+  const mounted = await mountReact(render()); unmount = mounted.unmount;
+  return { ...mounted, onDelegated, setTarget: async (patch: Partial<DelegateTarget>) => {
+    target = { ...target, ...patch }; await mounted.rerender(render());
+  } };
+}
+
+describe("M04 Delegate 可选真实读取", () => {
+  it("文件读取仅冻结确切 connection/resource/relative_target，保留原委托版本", async () => {
+    let posted: Record<string, unknown> | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `${taskUrl}/delegations` && init?.method === "POST") {
+        posted = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return response(202, { command_id: posted.command_id, committed_at: "2026-09-30T00:00:00Z", result: result() });
+      }
+      return readConfig(url) ?? Promise.reject(new Error(`unexpected request: ${url}`));
+    }));
+    const mounted = await mountDelegate();
+    expect((mounted.wrapper.get('[data-testid="task-read-kind"]').element as HTMLSelectElement).value).toBe("NONE");
+    await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("FILE_READ"); await flush();
+    expect(mounted.wrapper.get('[data-testid="task-read-connection"]').findAll("option")).toHaveLength(2);
+    expect(mounted.wrapper.get('[data-testid="task-read-resource"]').findAll("option")).toHaveLength(3);
+    await mounted.wrapper.get('[data-testid="task-read-relative-target"]').setValue(" notes/明确资料.md ");
+    await mounted.wrapper.get('[data-testid="task-delegate"]').trigger("click"); await flush();
+    expect(posted).toEqual({ command_id: expect.any(String), expected_task_revision: "2",
+      file_read_action: { connection_id: fileConnectionId, resource_id: resourceId, relative_target: "notes/明确资料.md" } });
+    expect(mounted.onDelegated).toHaveBeenCalledWith(runId);
+  });
+
+  it("网页读取仅冻结所选 WEB_FETCH 连接和 URL，允许明示 localhost 的隔离连接且不读目录", async () => {
+    let posted: Record<string, unknown> | null = null;
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `${taskUrl}/delegations` && init?.method === "POST") {
+        posted = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return response(202, { command_id: posted.command_id, committed_at: "2026-09-30T00:00:00Z", result: result() });
+      }
+      return readConfig(url) ?? Promise.reject(new Error(`unexpected request: ${url}`));
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountDelegate();
+    await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("WEB_FETCH"); await flush();
+    expect(mounted.wrapper.get('[data-testid="task-read-connection"]').text()).toContain("localhost");
+    expect(mounted.wrapper.find('[data-testid="task-read-resource"]').exists()).toBe(false);
+    await mounted.wrapper.get('[data-testid="task-read-url"]').setValue(" http://localhost:8765/source?q=relay ");
+    await mounted.wrapper.get('[data-testid="task-delegate"]').trigger("click"); await flush();
+    expect(posted).toEqual({ command_id: expect.any(String), expected_task_revision: "2",
+      web_fetch_action: { connection_id: webConnectionId, url: "http://localhost:8765/source?q=relay" } });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/managed-resources"))).toBe(false);
+  });
+
+  it("文件目标空值、绝对路径和上级逃逸均禁止委托，合法相对文件可提交", async () => {
+    const fetchMock = vi.fn(async (input: string) => readConfig(String(input)) ?? Promise.reject(new Error("must not delegate")));
+    vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountDelegate();
+    await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("FILE_READ"); await flush();
+    for (const value of ["", "../secret.txt", "notes/../../secret.txt", "notes\\..\\secret.txt", "C:\\secret.txt", "C:secret.txt", "/secret.txt", "\\\\host\\share\\secret.txt", ".", "notes/"]) {
+      await mounted.wrapper.get('[data-testid="task-read-relative-target"]').setValue(value);
+      expect(mounted.wrapper.get('[data-testid="task-delegate"]').attributes("disabled")).toBeDefined();
+      expect(mounted.wrapper.get('[data-testid="task-read-blocked"]').text()).not.toBe("");
+      await mounted.wrapper.get('[data-testid="task-delegate"]').trigger("click");
+    }
+    expect(fetchMock.mock.calls).toHaveLength(2);
+    await mounted.wrapper.get('[data-testid="task-read-relative-target"]').setValue("资料\\source.md");
+    expect(mounted.wrapper.get('[data-testid="task-delegate"]').attributes("disabled")).toBeUndefined();
+  });
+
+  it("网页目标拒绝非法 URL、非 http(s)、凭据和 fragment，不发委托", async () => {
+    const fetchMock = vi.fn(async (input: string) => readConfig(String(input)) ?? Promise.reject(new Error("must not delegate")));
+    vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountDelegate();
+    await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("WEB_FETCH"); await flush();
+    for (const value of ["", "not a url", "file:///secret.txt", "ftp://example.org/source", "http:example.org", "https://user:password@example.org/source", "https://example.org/source#part", "https://example.org/source#"]) {
+      await mounted.wrapper.get('[data-testid="task-read-url"]').setValue(value);
+      expect(mounted.wrapper.get('[data-testid="task-delegate"]').attributes("disabled")).toBeDefined();
+      await mounted.wrapper.get('[data-testid="task-delegate"]').trigger("click");
+    }
+    expect(fetchMock.mock.calls).toHaveLength(1);
+    await mounted.wrapper.get('[data-testid="task-read-url"]').setValue("https://example.org/source?q=资料");
+    expect(mounted.wrapper.get('[data-testid="task-delegate"]').attributes("disabled")).toBeUndefined();
+  });
+
+  it("真实读取与 Mock 双向互斥，切换种类清空旧目标且不暗留委托载荷", async () => {
+    let posted: Record<string, unknown> | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST") {
+        posted = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return response(202, { command_id: posted.command_id, committed_at: "2026-09-30T00:00:00Z", result: result() });
+      }
+      return readConfig(url) ?? Promise.reject(new Error(`unexpected request: ${url}`));
+    }));
+    const mounted = await mountDelegate();
+    await mounted.wrapper.get('[data-testid="task-mock-action-toggle"]').setValue(true); await flush();
+    await mounted.wrapper.get('[data-testid="task-mock-target"]').setValue("C:\\relay-read\\old.txt");
+    await mounted.wrapper.get('[data-testid="task-mock-content"]').setValue("old Mock");
+    await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("FILE_READ"); await flush();
+    expect((mounted.wrapper.get('[data-testid="task-mock-action-toggle"]').element as HTMLInputElement).checked).toBe(false);
+    await mounted.wrapper.get('[data-testid="task-read-relative-target"]').setValue("old.md");
+    await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("WEB_FETCH"); await flush();
+    expect((mounted.wrapper.get('[data-testid="task-read-url"]').element as HTMLInputElement).value).toBe("");
+    await mounted.wrapper.get('[data-testid="task-read-url"]').setValue("http://localhost/source");
+    await mounted.wrapper.get('[data-testid="task-mock-action-toggle"]').setValue(true); await flush();
+    expect((mounted.wrapper.get('[data-testid="task-read-kind"]').element as HTMLSelectElement).value).toBe("NONE");
+    expect((mounted.wrapper.get('[data-testid="task-mock-target"]').element as HTMLInputElement).value).toBe("");
+    expect((mounted.wrapper.get('[data-testid="task-mock-content"]').element as HTMLTextAreaElement).value).toBe("");
+    await mounted.wrapper.get('[data-testid="task-mock-target"]').setValue("C:\\relay-read\\new.txt");
+    await mounted.wrapper.get('[data-testid="task-mock-content"]').setValue("new Mock");
+    await mounted.wrapper.get('[data-testid="task-delegate"]').trigger("click"); await flush();
+    expect(posted).toEqual({ command_id: expect.any(String), expected_task_revision: "2", mock_gateway_action: {
+      connection_id: fileConnectionId, resource_id: resourceId, target: "C:\\relay-read\\new.txt", content: "new Mock" } });
+  });
+
+  it("关闭读取后提交不带任何旧读字段", async () => {
+    let posted: Record<string, unknown> | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        posted = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return response(202, { command_id: posted.command_id, committed_at: "2026-09-30T00:00:00Z", result: result() });
+      }
+      return readConfig(String(input)) ?? Promise.reject(new Error("unexpected request"));
+    }));
+    const mounted = await mountDelegate();
+    await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("FILE_READ"); await flush();
+    await mounted.wrapper.get('[data-testid="task-read-relative-target"]').setValue("old.md");
+    await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("NONE");
+    await mounted.wrapper.get('[data-testid="task-delegate"]').trigger("click"); await flush();
+    expect(posted).toEqual({ command_id: expect.any(String), expected_task_revision: "2" });
+  });
+
+  it("配置加载中与失败时禁止提交，显式重读后才采用当前配置", async () => {
+    let rejectConfig: ((reason: unknown) => void) | null = null;
+    let connectionReads = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      if (String(input).endsWith("/connections") && connectionReads++ === 0) {
+        return new Promise<Response>((_resolve, reject) => { rejectConfig = reject; });
+      }
+      return readConfig(String(input)) ?? Promise.reject(new Error("must not delegate"));
+    }));
+    const mounted = await mountDelegate();
+    await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("FILE_READ");
+    expect(mounted.wrapper.get('[data-testid="task-read-blocked"]').text()).toContain("正在读取");
+    expect(mounted.wrapper.get('[data-testid="task-delegate"]').attributes("disabled")).toBeDefined();
+    rejectConfig!(new TypeError("configuration unavailable")); await flush();
+    expect(mounted.wrapper.get('[data-testid="task-read-blocked"]').text()).toContain("无法读取");
+    expect(mounted.wrapper.get('[data-testid="task-delegate"]').attributes("disabled")).toBeDefined();
+    await mounted.wrapper.get('[data-testid="task-read-reload"]').trigger("click"); await flush();
+    expect(connectionReads).toBe(2);
+    await mounted.wrapper.get('[data-testid="task-read-relative-target"]').setValue("source.md");
+    expect(mounted.wrapper.get('[data-testid="task-delegate"]').attributes("disabled")).toBeUndefined();
+    await mounted.wrapper.get('[data-testid="task-read-reload"]').trigger("click"); await flush();
+    expect((mounted.wrapper.get('[data-testid="task-read-relative-target"]').element as HTMLInputElement).value).toBe("");
+    expect(mounted.wrapper.get('[data-testid="task-delegate"]').attributes("disabled")).toBeDefined();
+  });
+
+  it.each(["connection", "resource"])("没有 ACTIVE 所需能力或本项目 ACTIVE 目录时禁止文件委托：%s", async (missing) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const url = String(input);
+      if (url.endsWith("/connections")) return response(200, missing === "connection" ? readConnections().slice(1) : readConnections());
+      if (url.endsWith("/managed-resources")) return response(200, missing === "resource"
+        ? [{ ...readResources()[0], status: "DISABLED" }, ...readResources(otherProjectId)] : readResources());
+      throw new Error("must not delegate");
+    }));
+    const mounted = await mountDelegate();
+    await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("FILE_READ"); await flush();
+    await mounted.wrapper.get('[data-testid="task-read-relative-target"]').setValue("source.md");
+    expect(mounted.wrapper.get('[data-testid="task-read-blocked"]').text()).toContain(missing === "connection" ? "文件读取连接" : "受管目录");
+    expect(mounted.wrapper.get('[data-testid="task-delegate"]').attributes("disabled")).toBeDefined();
+  });
+
+  it("变更连接或目录会清空旧目标，连接变更须重新选目录", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      if (String(input).endsWith("/connections")) return response(200, [...readConnections(),
+        { id: "another-file-connection", status: "ACTIVE", capabilities: ["FILE_READ"], allowed_host: null }]);
+      return readConfig(String(input)) ?? Promise.reject(new Error("unexpected request"));
+    }));
+    const mounted = await mountDelegate();
+    await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("FILE_READ"); await flush();
+    await mounted.wrapper.get('[data-testid="task-read-relative-target"]').setValue("source.md");
+    await mounted.wrapper.get('[data-testid="task-read-resource"]').setValue(otherResourceId);
+    expect((mounted.wrapper.get('[data-testid="task-read-relative-target"]').element as HTMLInputElement).value).toBe("");
+    await mounted.wrapper.get('[data-testid="task-read-relative-target"]').setValue("other.md");
+    await mounted.wrapper.get('[data-testid="task-read-connection"]').setValue("another-file-connection");
+    expect((mounted.wrapper.get('[data-testid="task-read-resource"]').element as HTMLSelectElement).value).toBe("");
+    expect((mounted.wrapper.get('[data-testid="task-read-relative-target"]').element as HTMLInputElement).value).toBe("");
+    expect(mounted.wrapper.get('[data-testid="task-delegate"]').attributes("disabled")).toBeDefined();
+  });
+
+  it.each(["task", "project"])("切换 %s 清空读取输入，迟到的旧配置不污染新目标", async (changed) => {
+    let releaseOld: ((value: Response) => void) | null = null;
+    let firstRead = true;
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const url = String(input);
+      if (url.endsWith("/connections")) {
+        if (firstRead) { firstRead = false; return new Promise<Response>((resolve) => { releaseOld = resolve; }); }
+        return response(200, [{ id: "current-connection", status: "ACTIVE", capabilities: ["FILE_READ"], allowed_host: null }]);
+      }
+      if (url.endsWith("/managed-resources")) return response(200, readResources(changed === "project" && !url.includes(`/projects/${projectId}/`) ? otherProjectId : projectId));
+      throw new Error("unexpected request");
+    }));
+    const mounted = await mountDelegate();
+    await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("FILE_READ");
+    await mounted.wrapper.get('[data-testid="task-read-relative-target"]').setValue("old.md");
+    await mounted.setTarget(changed === "task" ? { id: "new-task" } : { projectId: otherProjectId }); await flush();
+    expect((mounted.wrapper.get('[data-testid="task-read-kind"]').element as HTMLSelectElement).value).toBe("NONE");
+    await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("FILE_READ"); await flush();
+    expect((mounted.wrapper.get('[data-testid="task-read-relative-target"]').element as HTMLInputElement).value).toBe("");
+    releaseOld!(response(200, readConnections())); await flush();
+    expect(mounted.wrapper.get('[data-testid="task-read-connection"]').text()).toContain("current-connection");
+    expect(mounted.wrapper.get('[data-testid="task-read-connection"]').text()).not.toContain(fileConnectionId);
+  });
+
+  it("读取种类切换后的旧响应不能覆盖新 WEB_FETCH 配置", async () => {
+    let releaseOld: ((value: Response) => void) | null = null;
+    let reads = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      if (String(input).endsWith("/connections") && reads++ === 0) return new Promise<Response>((resolve) => { releaseOld = resolve; });
+      return readConfig(String(input)) ?? Promise.reject(new Error("unexpected request"));
+    }));
+    const mounted = await mountDelegate();
+    await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("FILE_READ");
+    await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("WEB_FETCH"); await flush();
+    await mounted.wrapper.get('[data-testid="task-read-url"]').setValue("http://localhost/current");
+    releaseOld!(response(200, readConnections().slice(0, 1))); await flush();
+    expect((mounted.wrapper.get('[data-testid="task-read-connection"]').element as HTMLSelectElement).value).toBe(webConnectionId);
+    expect((mounted.wrapper.get('[data-testid="task-read-url"]').element as HTMLInputElement).value).toBe("http://localhost/current");
+  });
+
+  it("读取委托结果 UNKNOWN 冻结原 command_id 与配置，只查询原回执", async () => {
+    let posted: Record<string, unknown> | null = null;
+    let posts = 0;
+    const receiptIds: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST") { posts++; posted = JSON.parse(String(init.body)); throw new TypeError("response lost"); }
+      if (url.includes("/commands/")) {
+        receiptIds.push(url.split("/commands/")[1]);
+        return response(404, { code: "COMMAND_NOT_FOUND", detail: "pending" });
+      }
+      return readConfig(url) ?? Promise.reject(new Error(`unexpected request: ${url}`));
+    }));
+    const mounted = await mountDelegate();
+    await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("FILE_READ"); await flush();
+    await mounted.wrapper.get('[data-testid="task-read-relative-target"]').setValue("source.md");
+    await mounted.wrapper.get('[data-testid="task-delegate"]').trigger("click"); await flush();
+    for (const selector of ["task-read-kind", "task-read-connection", "task-read-resource", "task-read-relative-target", "task-read-reload", "task-mock-action-toggle"]) {
+      expect(mounted.wrapper.get(`[data-testid="${selector}"]`).attributes("disabled")).toBeDefined();
+    }
+    expect(mounted.wrapper.find('[data-testid="task-delegate"]').exists()).toBe(false);
+    const original = posted as Record<string, unknown> | null;
+    expect(mounted.wrapper.get('[data-testid="delegate-command-id"]').text()).toContain(String(original?.command_id));
+    await mounted.wrapper.get('[data-testid="task-read-reload"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="task-mock-action-toggle"]').setValue(true);
+    await mounted.wrapper.get('[data-testid="delegate-check-receipt"]').trigger("click"); await flush();
+    await mounted.wrapper.get('[data-testid="delegate-check-receipt"]').trigger("click"); await flush();
+    expect(posts).toBe(1); expect(receiptIds).toEqual([original?.command_id, original?.command_id]);
+    expect(original?.file_read_action).toEqual({ connection_id: fileConnectionId, resource_id: resourceId, relative_target: "source.md" });
+    expect((mounted.wrapper.get('[data-testid="task-read-relative-target"]').element as HTMLInputElement).value).toBe("source.md");
   });
 });

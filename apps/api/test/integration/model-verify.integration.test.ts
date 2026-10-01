@@ -7,10 +7,10 @@ import {
   createOpenAiCompatibleVerifyCall,
   ModelVerifyConfigError,
   readModelVerificationState,
-  runModelPortVerification,
   verifyResultFromRow,
   type FakeVerifyScenario,
 } from '../../src/workflow/model-port-verify.js';
+import { runModelPortVerification } from '../../src/application/model-port-verification.js';
 import { ModelCallRepository } from '../../src/model/model-call-repository.js';
 import { createWorkspace, expectProblem, startTestApi, workspacePath, type TestApi }
   from './api-harness.js';

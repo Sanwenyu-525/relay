@@ -267,6 +267,21 @@ export function createFirstPartyRegistry(dependencies = DEPENDENCIES,
 
 export const FIRST_PARTY_REGISTRY = createFirstPartyRegistry();
 
+export interface FirstPartyRegistryArchive {
+  readonly skills: readonly FrozenSkill[];
+  readonly packs: readonly { readonly definition: PackDefinition;
+    readonly sha256: string; readonly members: readonly FrozenSkill[] }[];
+}
+
+/** Export this package's complete definitions, including retired versions, without mutable aliases. */
+export function exportFirstPartyRegistryArchive(): FirstPartyRegistryArchive {
+  return structuredClone({ skills: FIRST_PARTY_REGISTRY.skills,
+    packs: PACKS.map((definition) => ({ definition,
+      sha256: FIRST_PARTY_REGISTRY.pack(definition.id, definition.version)!.sha256,
+      members: definition.members.map((member) =>
+        FIRST_PARTY_REGISTRY.skill(member.id, member.version)!) })) });
+}
+
 /** A frozen v1.0 verification output remains readable but has no new-call/apply contract. */
 export function isCallableSkill(skill: FrozenSkill): boolean {
   return !(skill.id === 'verification-plan' && skill.version === '1.0.0');

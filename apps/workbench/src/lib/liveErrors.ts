@@ -5,6 +5,7 @@ export type LiveErrorKind =
   | "origin"
   | "database"
   | "schema"
+  | "maintenance"
   | "conflict"
   | "reused"
   | "validation"
@@ -60,6 +61,18 @@ export function describeLiveError(caught: unknown): LiveActionError {
           ...base,
           kind: "schema",
           message: "数据库可连接但 schema 不兼容：请先在 apps/api 运行迁移入口，再重试。"
+        };
+      case "MAINTENANCE_DRAINING":
+        return {
+          ...base,
+          kind: "maintenance",
+          message: "应用正在维护，暂不接受新的操作。你仍可查看已有内容，并请求取消已开始的工作。"
+        };
+      case "MAINTENANCE_UNAVAILABLE":
+        return {
+          ...base,
+          kind: "maintenance",
+          message: "暂时无法确认维护状态，新的操作不可用。请核对服务状态后再试。"
         };
       case "REVISION_CONFLICT":
         return {

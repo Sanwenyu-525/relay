@@ -13,3 +13,6 @@
 .command-palette-actions > button:disabled { color: var(--relay-color-disabled-text); cursor: default; }
 .command-palette-project { margin-top: var(--relay-space-6); padding-top: var(--relay-space-4); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .command-palette-project .secondary-button { margin-top: var(--relay-space-4); }
+@media (max-width: 60rem) {
+  .command-palette-results { max-height: none; overflow-y: visible; }
+}

@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { useNavigate } from "react-router-dom";
+import { Bell, BellRing } from "lucide-react";
 import { type RelayApiClient, type RelayInterventionItem } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 
@@ -14,6 +15,16 @@ export default function InterventionNotifications({ client }:
   const [error, setError] = useState<string | null>(null);
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">(
     typeof Notification === "undefined" ? "unsupported" : Notification.permission);
+  const disclosure = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && disclosure.current && !disclosure.current.contains(event.target)) {
+        disclosure.current.open = false;
+      }
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, []);
   useEffect(() => {
     let active = true;
     let checking = false;
@@ -75,12 +86,34 @@ export default function InterventionNotifications({ client }:
     catch (caught) { setError(describeLiveError(caught).message); }
   }
 
-  return <div className="intervention-notifications" data-testid="intervention-notifications">
-    {items.length > 0 && <a href="/tasks?tab=attention" onClick={(event) => {
-      event.preventDefault(); navigate("/tasks?tab=attention");
-    }}>需人工介入 {items.length} 项</a>}
-    {isTauri() && permission === "default" && <button type="button" className="secondary-button"
-      onClick={() => void enableNotifications()}>开启 Windows 通知</button>}
-    {error && <span role="status">人工介入状态暂不可刷新：{error}</span>}
-  </div>;
+  const label = `${items.length > 0 ? `通知与待处理，需人工介入 ${items.length} 项` : "通知与待处理"}${error ? "，状态读取暂不可用" : ""}`;
+  const permissionLabel = permission === "granted" ? "已允许 Windows 通知"
+    : permission === "denied" ? "Windows 通知已被阻止；应用内待处理列表仍可使用。"
+    : permission === "unsupported" ? "当前环境不支持 Windows 通知。" : "Windows 通知尚未开启";
+  return <details ref={disclosure} className="intervention-notifications" data-testid="intervention-notifications"
+    onKeyDown={(event) => {
+      if (event.key !== "Escape" || !event.currentTarget.open) return;
+      event.preventDefault(); event.currentTarget.open = false;
+      event.currentTarget.querySelector("summary")?.focus();
+    }}>
+    <summary className={`icon-button intervention-notifications-trigger${error ? " intervention-notifications-trigger--error" : ""}`}
+      data-testid="intervention-notifications-open" aria-label={label} title={label}>
+      <Bell aria-hidden="true" />
+      {items.length > 0 && <span className="intervention-notifications-count" aria-hidden="true">{items.length}</span>}
+    </summary>
+    <div className="intervention-notifications-panel">
+      <a className="text-link" href="/tasks?tab=attention" onClick={(event) => {
+        event.preventDefault(); if (disclosure.current) disclosure.current.open = false;
+        navigate("/tasks?tab=attention");
+      }}>{items.length > 0 ? `需人工介入 ${items.length} 项` : "打开人工待处理列表"}</a>
+      {isTauri() && <div className="intervention-notifications-permission">
+        <p>{permissionLabel}</p>
+        {permission === "default" && <button type="button" className="icon-button"
+          aria-label="开启 Windows 通知" title="开启 Windows 通知" onClick={() => void enableNotifications()}>
+          <BellRing aria-hidden="true" />
+        </button>}
+      </div>}
+      {error && <p className="action-error" role="status">人工介入状态暂不可刷新：{error}</p>}
+    </div>
+  </details>;
 }

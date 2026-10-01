@@ -12,7 +12,7 @@ import { checkAssistContent, checkRequiredText, normalizeText } from '../shared/
 import type { ContextSourceRef } from '../workflow/execution-contract.js';
 import { httpCommandScopeKey } from './actor.js';
 import { applyArtifactCreation, prepareArtifactCreation } from './artifact-commands.js';
-import { runIdempotentCommand, CommandIdReusedError, type CommandOutcome } from './command.js';
+import { runIdempotentCommand, CommandIdReusedError, resolveExistingReceipt, type CommandOutcome } from './command.js';
 import { applyTaskCreation, prepareTaskCreation, type CreateTaskCriterionInput } from './create-task.js';
 import {
   invalidTransition,
@@ -25,6 +25,7 @@ import { createRepositories, type Repositories } from './unit-of-work.js';
 import { applyTaskSkillContractChange } from './task-contract-commands.js';
 import { skillOutputHash } from '../skills/skill-proposal.js';
 import { requireRevision } from './revisions.js';
+import { readAdmission, requireNormalAdmission } from './maintenance-admission.js';
 
 /**
  * Assist 命令（M04/P12，runtime-context.md 第 5 节）：
@@ -363,6 +364,13 @@ export async function acceptAssistProposal(
         committedAt: existing.created_at };
     }
 
+    const gate = await readAdmission(repositories, 'share');
+    const committedWhileWaiting = await repositories.receipts.findReceipt({ scopeKey,
+      commandId: input.commandId });
+    if (committedWhileWaiting !== undefined) {
+      return resolveExistingReceipt<AcceptAssistProposalResult>(committedWhileWaiting, payloadHash);
+    }
+    requireNormalAdmission(gate);
     const proposal = await repositories.assist.readProposal(input.proposalId, true);
     if (proposal === undefined || proposal.workspace_id !== input.workspaceId) {
       throw resourceNotFound('Assist proposal');

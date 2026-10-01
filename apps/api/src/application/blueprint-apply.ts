@@ -12,7 +12,7 @@ import { loadSkillBasisInSnapshot } from '../skills/skill-basis.js';
 import { skillOutputHash } from '../skills/skill-proposal.js';
 import { resolveViewTemplate } from '../view/builtin-view.js';
 import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
-import { CommandIdReusedError, runIdempotentCommand,
+import { CommandIdReusedError, runIdempotentCommand, resolveExistingReceipt,
   type CommandOutcome } from './command.js';
 import { applyTaskCreation, prepareTaskCreation } from './create-task.js';
 import { DomainError, invalidTransition, resourceNotFound,
@@ -23,6 +23,7 @@ import { normalizeStateAction } from './state-action.js';
 import { applyAction } from './state-commands.js';
 import { createRepositories } from './unit-of-work.js';
 import { loadAssistSourceContent } from './assist-runner.js';
+import { readAdmission, requireNormalAdmission } from './maintenance-admission.js';
 
 function object(value: JsonValue | undefined): JsonObject | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -66,6 +67,13 @@ export async function applyBlueprintProposal(db: DbExecutor, input: {
       return { result: existingReceipt.result_ref as JsonObject,
         replayed: true, committedAt: existingReceipt.created_at };
     }
+    const gate = await readAdmission(r, 'share');
+    const committedWhileWaiting = await r.receipts.findReceipt({ scopeKey,
+      commandId: input.commandId });
+    if (committedWhileWaiting !== undefined) {
+      return resolveExistingReceipt<JsonObject>(committedWhileWaiting, payloadHash);
+    }
+    requireNormalAdmission(gate);
     const proposal = await r.blueprints.read(input.proposalId, true);
     if (proposal?.workspace_id !== input.workspaceId ||
         proposal.project_id !== input.projectId) throw resourceNotFound('Blueprint proposal');

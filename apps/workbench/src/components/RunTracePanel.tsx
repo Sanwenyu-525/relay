@@ -34,21 +34,24 @@ export default function RunTracePanel({ client, runId, taskId, runRevision }: {
     {loading && <p role="status">正在读取 Run Trace…</p>}
     {error && <p className="action-error" role="alert">{error}</p>}
     {trace && <div className="run-trace-groups"><p className="helper-text">Run {trace.runId} · 状态 {trace.status}。下列“有结果引用”只说明证据指针存在，不代表结果成功。</p>
-      <section><h3>步骤与尝试 · {trace.steps.length} / {trace.attempts.length}</h3>
+      {(trace.operations.some((operation) => operation.status === "UNKNOWN") || trace.effects.some((effect) => effect.status === "UNKNOWN")) &&
+        <p className="warning-callout" role="status">存在 UNKNOWN 结果，展开 Gateway / Run Effect 核对原动作；批准与调用不代表效果成功。</p>}
+      <details className="run-trace-group"><summary>步骤与尝试 · {trace.steps.length} / {trace.attempts.length}</summary>
         {trace.steps.length ? <ol>{trace.steps.map((step) => <li key={step.id}><strong>{step.index + 1}. {step.kind} · {step.status}</strong>
           <small>Step {step.id} · revision v{step.revision} · {resultRef(step.resultAvailable)} · {step.startedAt ?? "未开始"} → {step.finishedAt ?? "未结束"}</small>
           {trace.attempts.filter((attempt) => attempt.stepId === step.id).map((attempt) => <p key={attempt.id}>Attempt {attempt.id} · 第 {attempt.number} 次 · {attempt.status} · claim epoch {attempt.claimEpoch} · {resultRef(attempt.resultAvailable)}</p>)}</li>)}</ol>
-          : <p className="helper-text">尚无 Step 记录。</p>}</section>
-      <section><h3>模型调用元数据 · {trace.modelCalls.length}</h3>
+          : <p className="helper-text">尚无 Step 记录。</p>}</details>
+      <details className="run-trace-group"><summary>模型调用元数据 · {trace.modelCalls.length}</summary>
         {trace.modelCalls.length ? <ul>{trace.modelCalls.map((call) => <li key={call.id}><strong>{call.provider} / {call.model} · {call.status}</strong>
           <small>Call {call.id} · Attempt {call.stepAttemptId ?? "未关联"} · Manifest {call.manifestId ?? "未关联"}</small>
           {call.kind !== null && <small>用途 {call.kind}{call.criterionId !== null && <> · 验收条件 {call.criterionId}</>}{call.checkAttempt !== null && <> · 检查尝试 {call.checkAttempt}</>}</small>}
           {call.providerRequestId !== null && <small>Provider 请求 {call.providerRequestId}</small>}
+          <small>首文本回调 {call.firstTextDeltaAt ?? "未记录"} · 首预览写入 {call.firstPreviewPersistedAt ?? "未记录"}（服务端观察时间）</small>
           {call.providerErrorKind !== null && <p className="warning-callout" data-testid={`trace-model-error-${call.id}`}>模型调用失败 · {modelErrorGuides[call.providerErrorKind]} 调用失败不等于 Run 失败，当前执行状态以 Run 事实为准。</p>}
           <small>输入 sha256 {call.inputSha256 ?? "无"} · 读取 Operation {call.readOperationId ?? "无"} / Invocation {call.readInvocationId ?? "无"}</small>
           <small>Token 输入 {call.inputTokens ?? "未知"} / 输出 {call.outputTokens ?? "未知"} · {call.startedAt} → {call.settledAt ?? "未结清"}</small></li>)}</ul>
-          : <p className="helper-text">本次 Run 没有模型调用记录。</p>}</section>
-      <section><h3>Context Manifest 与来源 · {trace.manifests.length}</h3>
+          : <p className="helper-text">本次 Run 没有模型调用记录。</p>}</details>
+      <details className="run-trace-group"><summary>Context Manifest 与来源 · {trace.manifests.length}</summary>
         {trace.manifests.length ? <ul>{trace.manifests.map((manifest) => <li key={manifest.id}><strong>Manifest {manifest.id}</strong>
           <small>Step {manifest.stepId ?? "无"} · Builder {manifest.builderVersion} · sha256 {manifest.sha256} · {manifest.createdAt}</small>
           {manifest.sources.length ? <ul>{manifest.sources.map((source, index) => <li key={`${manifest.id}:${index}`}>
@@ -56,29 +59,29 @@ export default function RunTracePanel({ client, runId, taskId, runRevision }: {
               ? <>来源 {source.sourceRef} · 版本 {source.version ?? "无"} · sha256 {source.sha256 ?? "无"} · 源 sha256 {source.sourceSha256 ?? "无"}</>
               : "来源当前不可用或无权读取；历史正文不以当前版本替代"}</li>)}</ul>
             : <p>此 Manifest 未返回来源。</p>}</li>)}</ul>
-          : <p className="helper-text">本次 Run 没有 Manifest 记录。</p>}</section>
-      <section><h3>验证会话与检查 · {trace.verifications.length}</h3>
+          : <p className="helper-text">本次 Run 没有 Manifest 记录。</p>}</details>
+      <details className="run-trace-group"><summary>验证会话与检查 · {trace.verifications.length}</summary>
         {trace.verifications.length ? <ul>{trace.verifications.map((session) => <li key={session.id}><strong>{session.status} · verdict {session.verdict ?? "尚无"}</strong>
           <small>Session {session.id} · 验收 v{session.acceptanceRevision} · check plan {session.checkPlanHash} · 父 Session {session.parentSessionId ?? "无"}</small>
           {session.targets.map((target) => <p key={target.artifactVersionId}>目标版本 <Link className="inline-link" to={`/artifact-versions/${target.artifactVersionId}/lineage`}>{target.artifactVersionId}</Link> · 内容 sha256 {target.contentSha256}</p>)}
           {session.checks.length ? <ul>{session.checks.map((check) => <li key={check.id}>条件 {check.criterionId} · {check.result} · {check.severity} · {check.required ? "必需" : "可选"} · {check.createdAt}</li>)}</ul>
             : <p>没有检查结果。</p>}</li>)}</ul>
-          : <p className="helper-text">本次 Run 没有验证会话。</p>}</section>
-      <section><h3>Review 判断 · {trace.reviews.length}</h3><p className="helper-text">Review 决定只证明批准或拒绝等判断；动作效果见下面的 Gateway 和 Run Effect。</p>
+          : <p className="helper-text">本次 Run 没有验证会话。</p>}</details>
+      <details className="run-trace-group"><summary>Review 判断 · {trace.reviews.length}</summary><p className="helper-text">Review 决定只证明批准或拒绝等判断；动作效果见下面的 Gateway 和 Run Effect。</p>
         {trace.reviews.length ? <ul>{trace.reviews.map((review) => <li key={review.id}><Link className="inline-link" to={`/reviews?id=${review.id}`}>{review.kind} · {review.status}</Link>
           <small>Review {review.id} · Operation {review.operationId ?? "无"} · Verification {review.verificationSessionId ?? "无"} · target hash {review.targetHash}</small>
           <p>{review.decision ? `决定 ${review.decision.value} · ${review.decision.decidedAt}（不代表动作已执行）` : "尚无决定"}</p></li>)}</ul>
-          : <p className="helper-text">本次 Run 没有 Review 记录。</p>}</section>
-      <section><h3>Gateway Operation 与 Invocation · {trace.operations.length}</h3>
+          : <p className="helper-text">本次 Run 没有 Review 记录。</p>}</details>
+      <details className="run-trace-group"><summary>Gateway Operation 与 Invocation · {trace.operations.length}</summary>
         {trace.operations.length ? <ul>{trace.operations.map((operation) => <li key={operation.id}><strong>{operation.capability} / {operation.actionType} · {operation.status}</strong>
           <small>Operation {operation.id} · Step {operation.stepId ?? "无"} · 参数 sha256 {operation.paramsSha256} · {resultRef(operation.resultAvailable)}</small>
           {operation.invocations.length ? <ul>{operation.invocations.map((invocation) => <li key={invocation.id}>Invocation {invocation.id} · 第 {invocation.number} 次 · {invocation.status} · {resultRef(invocation.resultAvailable)}</li>)}</ul>
             : <p>尚无 Invocation。</p>}</li>)}</ul>
-          : <p className="helper-text">本次 Run 没有 Gateway Operation。</p>}</section>
-      <section><h3>Run Effect · {trace.effects.length}</h3><p className="helper-text">实际效果状态独立于 Review 决定与 Gateway Invocation；UNKNOWN 仍须核对原动作。</p>
+          : <p className="helper-text">本次 Run 没有 Gateway Operation。</p>}</details>
+      <details className="run-trace-group"><summary>Run Effect · {trace.effects.length}</summary><p className="helper-text">实际效果状态独立于 Review 决定与 Gateway Invocation；UNKNOWN 仍须核对原动作。</p>
         {trace.effects.length ? <ul>{trace.effects.map((effect) => <li key={effect.id}><strong>{effect.status}</strong>
           <small>Effect operation {effect.id} · Step {effect.stepId} · 参数 sha256 {effect.paramsSha256} · {resultRef(effect.resultAvailable)} · {effect.createdAt} → {effect.resolvedAt ?? "未结清"}</small></li>)}</ul>
-          : <p className="helper-text">本次 Run 没有 Run Effect 记录。</p>}</section>
+          : <p className="helper-text">本次 Run 没有 Run Effect 记录。</p>}</details>
     </div>}
   </section>;
 }

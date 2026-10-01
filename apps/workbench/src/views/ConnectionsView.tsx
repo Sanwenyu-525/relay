@@ -4,7 +4,7 @@ import {
   createCommandId, RelayApiError, RelayTransportError,
   type RelayApiClient, type RelayCommandEnvelope, type RelayGatewayCapability,
   type RelayGatewayConnectionSettings, type RelayGatewayDecision, type RelayGatewayPolicy,
-  type RelayGatewayPolicyVersion, type RelayManagedResource, type RelayProject
+  type RelayGatewayPolicyVersion, type RelayManagedResource, type RelayProject, type RelayProjectListItem
 } from "../api/relayClient";
 import ProjectNav from "../components/ProjectNav";
 import ViewConfigurationPanel from "../components/ViewConfigurationPanel";
@@ -66,16 +66,44 @@ export default function ConnectionsView() {
   const navigate = useNavigate();
   const connection = useRelayConnection();
   const [projectId, setProjectId] = useState("");
+  const client = connection.client;
+  const [projects, setProjects] = useState<readonly RelayProjectListItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const projectRequest = useRef(0);
+  async function loadProjects(cursor: string | null = null) {
+    if (!client) return;
+    const request = ++projectRequest.current; setLoading(true); setError(null);
+    try {
+      const page = await client.getProjectsPage("active", cursor);
+      if (request !== projectRequest.current) return;
+      setProjects((current) => cursor === null ? page.items : [...current, ...page.items.filter((item) => !current.some((row) => row.id === item.id))]);
+      setNextCursor(page.nextCursor);
+    } catch (caught) { if (request === projectRequest.current) setError(describeLiveError(caught).message); }
+    finally { if (request === projectRequest.current) setLoading(false); }
+  }
+  useEffect(() => {
+    setProjects([]); setNextCursor(null); setProjectId(""); setError(null); setLoading(false);
+    void loadProjects();
+    return () => { projectRequest.current++; };
+  }, [client, connection.epoch]);
   return <section className="connections-page">
     <p className="eyebrow">项目设置</p><h1>连接与权限</h1>
-    <p className="page-lede">连接绑定能力和目标边界；权限策略另行授权。默认拒绝，不会因创建连接自动放行。</p>
+    <p className="page-lede">选择项目，管理连接、受管目录与权限。</p>
     {connection.mode === "fixture" && <p className="warning-callout" role="status">当前为示例数据；连接设置只在显式连接本机 API 后可用。</p>}
-    <form className="surface-panel connections-entry" onSubmit={(event) => { event.preventDefault(); if (projectId.trim()) navigate(`/projects/${encodeURIComponent(projectId.trim())}/connections`); }}>
+    {client && <section className="surface-panel connections-project-picker" aria-label="选择项目"><div className="section-heading-row"><h2>项目</h2><button type="button" className="secondary-button" disabled={loading} onClick={() => void loadProjects()}>刷新</button></div>
+      {loading && <p className="helper-text" role="status">正在读取项目…</p>}{error && <p className="action-error" role="alert">{error}</p>}
+      {!loading && !error && projects.length === 0 && <p className="helper-text">当前没有进行中项目。<Link to="/projects">打开项目列表</Link></p>}
+      <ul className="connections-list">{projects.map((project) => <li key={project.id}><Link className="text-link" to={`/projects/${project.id}/connections`}>{project.title}</Link><span className="helper-text">v{project.revision}</span></li>)}</ul>
+      {nextCursor && <button type="button" className="secondary-button" disabled={loading} onClick={() => void loadProjects(nextCursor)}>继续加载项目</button>}
+    </section>}
+    <details className="connections-known-project" open={client === null}><summary>按已知项目 ID 打开</summary><form className="surface-panel connections-entry" onSubmit={(event) => { event.preventDefault(); if (projectId.trim()) navigate(`/projects/${encodeURIComponent(projectId.trim())}/connections`); }}>
       <h2>打开项目连接设置</h2>
       <p className="helper-text">可从项目列表打开项目后进入连接设置，或输入已知的 Project ID。</p>
       <label className="field"><span className="field-label">项目 ID</span><input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="项目的 UUID" data-testid="connections-project-id" /></label>
       <button className="primary-button" type="submit" disabled={!projectId.trim()}>打开连接设置</button>
-    </form>
+    </form></details>
     <Link className="inline-link" to="/projects">返回项目入口</Link>
   </section>;
 }
@@ -280,7 +308,7 @@ export function ProjectConnectionsView() {
     {client === null ? <p className="warning-callout" role="status">当前为示例数据预览；没有真实连接或权限配置。请先连接本机 API。</p> : <>
       <div className="connections-title"><h2>{snapshot?.project.title ?? "当前项目"}</h2>
         <button className="secondary-button" type="button" onClick={() => { void refresh(client); }} disabled={loading || busy}>刷新服务端配置</button></div>
-      <p className="helper-text">Project ID：<code className="hash-code">{projectId}</code></p>
+      <details className="connections-identity"><summary>项目身份与配置范围</summary><p className="helper-text">Project ID：<code className="hash-code">{projectId}</code></p><p className="helper-text">连接绑定能力和目标边界；权限策略另行授权。默认拒绝，不会因创建连接自动放行。</p></details>
       {loading && <p role="status">正在读取项目连接、受管资源与权限版本…</p>}
       {error && <p className="action-error" role="alert">{error}</p>}
       {writeBlockedReason && <p className="disabled-reason" data-testid="connections-archive-reason">{writeBlockedReason}</p>}
@@ -311,13 +339,13 @@ export function ProjectConnectionsView() {
             </div>
           </li>; })}</ul>}
           <p className="field-hint">「只读健康核对」只重新读取服务端连接配置，不触发任何写入或外部动作；主机/目录真实可达性探针当前无只读接口，标记为待接入。</p>
-          <form className="connections-form" onSubmit={submitConnection}>
-            <h3>创建连接</h3><label className="field"><span className="field-label">Capability</span><select value={connectionCapability} disabled={busy} onChange={(event) => setConnectionCapability(event.target.value as RelayGatewayCapability)} data-testid="connection-capability">
+          <details className="connections-create" open={snapshot.connections.length === 0}><summary>新建连接</summary><form className="connections-form" onSubmit={submitConnection}>
+            <h3>创建连接</h3><label className="field"><span className="field-label">能力</span><select value={connectionCapability} disabled={busy} onChange={(event) => setConnectionCapability(event.target.value as RelayGatewayCapability)} data-testid="connection-capability">
               {capabilities.map((capability) => <option key={capability} value={capability}>{capability}</option>)}</select></label>
             {connectionCapability === "WEB_FETCH" && <label className="field"><span className="field-label">允许主机</span><input value={connectionHost} onChange={(event) => setConnectionHost(event.target.value)} disabled={busy} required placeholder="example.org" data-testid="connection-host" /><span className="field-hint">只填 DNS 主机，不含 scheme、端口和路径；本页不启用私有地址例外。</span></label>}
             {connectionCapability === "FILE_READ" && <label className="field"><span className="field-label">连接目录</span><input value={connectionRoot} onChange={(event) => setConnectionRoot(event.target.value)} disabled={busy} required placeholder="本机已有绝对目录" data-testid="connection-root" /><span className="field-hint">服务端要求现存目录；提交后查询接口不读回原目录。</span></label>}
             <button className="primary-button" type="submit" disabled={busy || writeBlockedReason !== null}>创建连接</button>
-          </form>
+          </form></details>
         </section>
 
         <section className="surface-panel"><h2>受管资源</h2><p className="helper-text">本列表最多读取服务端前 100 条，没有下一页。下列目录是文件读取 / 写入类策略可引用的独立受管资源，不等于文件读取连接自身的目录。</p>
@@ -327,9 +355,9 @@ export function ProjectConnectionsView() {
               id: createCommandId(), type: "DisableManagedResource", resultKey: "resource_id", targetId: item.id, expectedStatus: "DISABLED",
               label: "受管资源停用", send: (api, commandId) => api.disableManagedResource({ projectId, resourceId: item.id,
                 expectedRevision: item.revision, commandId }) }); }}>停用资源</button>}</li>)}</ul>}
-          <form className="connections-form" onSubmit={submitResource}><h3>登记受管目录</h3>
+          <details className="connections-create" open={snapshot.resources.length === 0}><summary>登记受管目录</summary><form className="connections-form" onSubmit={submitResource}><h3>登记受管目录</h3>
             <label className="field"><span className="field-label">本机已有绝对目录</span><input value={resourceRoot} onChange={(event) => setResourceRoot(event.target.value)} disabled={busy} required data-testid="resource-root" /></label>
-            <button className="secondary-button" type="submit" disabled={busy || writeBlockedReason !== null}>登记受管资源</button></form>
+            <button className="secondary-button" type="submit" disabled={busy || writeBlockedReason !== null}>登记受管资源</button></form></details>
         </section>
 
         <section className="surface-panel"><h2>权限策略</h2>
@@ -357,11 +385,11 @@ export function ProjectConnectionsView() {
                   expectedRevision: policy.revision, commandId }) }); }}>撤销</button>}
             </div></li>;
           })}</ul>}
-          <form className="connections-form" onSubmit={submitPolicy} data-testid="policy-form"><h3>{selectedPolicy ? `修订策略 ${selectedPolicy.policy.id}` : "新建策略"}</h3>
+          <details className="connections-create" open={selectedPolicy !== null || snapshot.policies.length === 0}><summary>{selectedPolicy ? "修订权限策略" : "新建权限策略"}</summary><form className="connections-form" onSubmit={submitPolicy} data-testid="policy-form"><h3>{selectedPolicy ? `修订策略 ${selectedPolicy.policy.id}` : "新建策略"}</h3>
             {selectedPolicy && <p className="helper-text">基于 rev {selectedPolicy.policy.revision} 追加不可变版本；旧版本仍可查看。</p>}
             <label className="field"><span className="field-label">策略</span><select value={policyId} disabled={busy} onChange={(event) => { setPolicyId(event.target.value); setPolicyResourceId(""); }} data-testid="policy-select">
               <option value="">新建策略</option>{snapshot.policies.filter(({ policy }) => policy.status === "ACTIVE").map(({ policy }) => <option key={policy.id} value={policy.id}>{policy.id}</option>)}</select></label>
-            <label className="field"><span className="field-label">Capability</span><select value={policyCapability} disabled={busy} onChange={(event) => { setPolicyCapability(event.target.value as RelayGatewayCapability); setPolicyResourceId(""); }} data-testid="policy-capability">
+            <label className="field"><span className="field-label">能力</span><select value={policyCapability} disabled={busy} onChange={(event) => { setPolicyCapability(event.target.value as RelayGatewayCapability); setPolicyResourceId(""); }} data-testid="policy-capability">
               {capabilities.map((capability) => <option key={capability} value={capability}>{capability}</option>)}</select></label>
             {policyCapability === "WEB_FETCH" && <label className="field"><span className="field-label">策略主机</span><input value={policyHost} onChange={(event) => setPolicyHost(event.target.value)} disabled={busy} required placeholder="example.org" data-testid="policy-host" /></label>}
             {isFileCapability(policyCapability) && <label className="field"><span className="field-label">受管资源</span><select value={policyResourceId} onChange={(event) => setPolicyResourceId(event.target.value)} disabled={busy} required data-testid="policy-resource">
@@ -371,7 +399,7 @@ export function ProjectConnectionsView() {
             <label className="field"><span className="field-label">最大载荷字节</span><input type="number" min="0" max="262144" step="1" value={maxPayloadBytes} onChange={(event) => setMaxPayloadBytes(event.target.value)} disabled={busy} required data-testid="policy-max-bytes" /><span className="field-hint">当前只读动作的空参数编码为 2 字节；上限由服务端校验。</span></label>
             <div className="connections-actions"><button className="primary-button" type="submit" disabled={busy || writeBlockedReason !== null || (isFileCapability(policyCapability) && activeResources.length === 0)} data-testid="policy-save">{selectedPolicy ? "提交策略新版本" : "明确创建策略"}</button>
               {selectedPolicy && <button className="secondary-button" type="button" disabled={busy} onClick={() => { setPolicyId(""); setPolicyDecision("DENY"); setPolicyResourceId(""); }}>取消修订</button>}</div>
-          </form>
+          </form></details>
         </section>
       </>}
     </>}

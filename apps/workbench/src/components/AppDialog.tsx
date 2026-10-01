@@ -23,10 +23,22 @@ export default function AppDialog({ open, title, variant = "dialog", initialFocu
     const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     pushDialog(token.current);
     const focusable = () => Array.from(panel.current?.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    ) ?? []).filter((item) => !item.hasAttribute("hidden"));
+      'button, a[href], input, textarea, select, summary, [tabindex]'
+    ) ?? []).filter((item) => {
+      if (item.tabIndex < 0 || item.matches(':disabled, input[type="hidden"]')) return false;
+      for (let ancestor: HTMLElement | null = item; ancestor; ancestor = ancestor.parentElement) {
+        if (ancestor.hidden || ancestor.hasAttribute("inert")) return false;
+        const style = getComputedStyle(ancestor);
+        if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return false;
+        if (ancestor.tagName === "DETAILS" && !ancestor.hasAttribute("open")) {
+          const summary = Array.from(ancestor.children).find((child) => child.tagName === "SUMMARY");
+          if (!summary?.contains(item)) return false;
+        }
+      }
+      return true;
+    });
     const onKeydown = (event: KeyboardEvent) => {
-      if (!isTopDialog(token.current)) return;
+      if (!isTopDialog(token.current) || event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
       if (event.key === "Escape") {
         event.preventDefault();
         closeRef.current();
@@ -37,6 +49,9 @@ export default function AppDialog({ open, title, variant = "dialog", initialFocu
       if (elements.length === 0) {
         event.preventDefault();
         panel.current?.focus();
+      } else if (!elements.includes(document.activeElement as HTMLElement)) {
+        event.preventDefault();
+        (event.shiftKey ? elements.at(-1) : elements[0])?.focus();
       } else if (event.shiftKey && document.activeElement === elements[0]) {
         event.preventDefault();
         elements.at(-1)?.focus();
@@ -46,23 +61,30 @@ export default function AppDialog({ open, title, variant = "dialog", initialFocu
       }
     };
     document.addEventListener("keydown", onKeydown);
-    requestAnimationFrame(() => ((initialFocusSelector ? panel.current?.querySelector<HTMLElement>(initialFocusSelector) : null) ?? focusable()[0] ?? panel.current)?.focus());
+    const focusFrame = requestAnimationFrame(() => {
+      if (!isTopDialog(token.current)) return;
+      const elements = focusable();
+      const requested = initialFocusSelector ? panel.current?.querySelector<HTMLElement>(initialFocusSelector) : null;
+      (requested && elements.includes(requested) ? requested : elements[0] ?? panel.current)?.focus();
+    });
     return () => {
+      cancelAnimationFrame(focusFrame);
+      const wasTop = isTopDialog(token.current);
       popDialog(token.current);
       document.removeEventListener("keydown", onKeydown);
-      if (returnFocus?.isConnected) returnFocus.focus();
+      if (wasTop && returnFocus?.isConnected) returnFocus.focus();
     };
   }, [open, initialFocusSelector]);
 
   if (!open) return null;
   return createPortal(
     <div className="dialog-backdrop" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
+      if (event.target === event.currentTarget && isTopDialog(token.current)) closeRef.current();
     }}>
       <section ref={panel} className={`dialog-panel dialog-panel--${variant}`} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}>
         <header className="dialog-header">
           <h2>{title}</h2>
-          <button className="icon-button" type="button" aria-label="关闭面板" onClick={onClose}><X aria-hidden="true" /></button>
+          <button className="icon-button" type="button" aria-label="关闭面板" onClick={() => { if (isTopDialog(token.current)) closeRef.current(); }}><X aria-hidden="true" /></button>
         </header>
         <div className="dialog-content">{children}</div>
       </section>

@@ -1,18 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Clock3, FileText, MessageSquareText, Plus, UserRound } from "lucide-react";
+import { CheckCheck, Clock3, FileText, MessageSquareText, Plus, Scale, UserRound } from "lucide-react";
 import AppDialog from "../components/AppDialog";
 import AssistView, { type AssistNavigationState } from "./AssistView";
 import ModelConnectionStrip from "../components/ModelConnectionStrip";
-import RunControlPanel, { runLabels } from "../components/RunControlPanel";
+import RunControlPanel, { runLabels, stepLabels } from "../components/RunControlPanel";
 import TaskDelegatePanel from "../components/TaskDelegatePanel";
+import type { ReviewNavigationState } from "../components/ReviewDecisionPanel";
 import WorkspaceSidePanel from "../components/WorkspaceSidePanel";
+import CollaborationSplitter from "../components/CollaborationSplitter";
 import type { RelayApiClient, RelayControlRequest, RelayReview, RelayRun, RelayTaskDetail } from "../api/relayClient";
-import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
+import { clearDraftGuard, currentDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { describeLiveError } from "../lib/liveErrors";
 import { executorLabels, taskStatusLabels } from "../lib/labels";
 import { useRelayConnection } from "../lib/relayConnection";
 import { useRunDraftPreview } from "../lib/useRunDraftPreview";
+import { readCollaborationLayoutPreferences, saveCollaborationLayoutPreferences,
+  type CollaborationLayoutMode } from "../lib/collaborationLayoutPreferences";
 import "./CollaborationView.css";
 
 const cleanNavigation: AssistNavigationState = { dirty: false, pending: null };
@@ -60,16 +64,18 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const [run, setRun] = useState<RelayRun | null>(null);
   const [controlRecord, setControlRecord] = useState<RelayControlRequest | null>(null);
   const [reviews, setReviews] = useState<readonly RelayReview[]>([]);
+  const [retainedReview, setRetainedReview] = useState<RelayReview | null>(null);
   const [reviewsLoading, setReviewsLoading] = useState(false);
-  const [reviewIndex, setReviewIndex] = useState(0);
+  const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [sideTab, setSideTab] = useState<"DOCUMENT" | "CHECK" | "HISTORY">("DOCUMENT");
+  const [layout, setLayout] = useState(readCollaborationLayoutPreferences);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [narrowSideOpen, setNarrowSideOpen] = useState(false);
-  const [transition, setTransition] = useState<{ kind: "dirty" | "pending"; proceed: () => void } | null>(null);
+  const [transition, setTransition] = useState<{ kind: "dirty" | "pending"; proceed: () => void; commandId: string | null } | null>(null);
   const [recoveries, setRecoveries] = useState<readonly RecoveryRecord[]>(() => readRecovery(client));
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [checkingId, setCheckingId] = useState<string | null>(null);
@@ -78,6 +84,8 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const runRequest = useRef(0);
   const reviewRequest = useRef(0);
   const navigationRef = useRef<AssistNavigationState>(cleanNavigation);
+  const reviewNavigationRef = useRef<ReviewNavigationState | null>(null);
+  const reviewRef = useRef<RelayReview | null>(null);
   const workIdRef = useRef(workId);
   workIdRef.current = workId;
   const taskRef = useRef(task);
@@ -100,10 +108,14 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
         ? current : [...current, { ...state.pending!, targetKind: "TASK", targetId }]);
     }
   }, [updateRecoveries]);
+  const reportReviewNavigation = useCallback((state: ReviewNavigationState) => {
+    reviewNavigationRef.current = state;
+  }, []);
   useEffect(() => {
     const guard: DraftGuard = {
       hasUnsavedChanges: () => navigationRef.current.dirty || navigationRef.current.pending !== null,
-      discard: () => { navigationRef.current = cleanNavigation; }
+      pendingCommandId: () => navigationRef.current.pending?.commandId ?? null,
+      discard: () => { navigationRef.current.discard?.(); navigationRef.current = cleanNavigation; }
     };
     setDraftGuard(guard);
     return () => clearDraftGuard(guard);
@@ -121,7 +133,9 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
       setTask(loaded);
     } catch (caught) {
       if (version !== taskRequest.current) return;
-      setTask(null); setRun(null); setReviews([]); setControlRecord(null);
+      // 已挂载的判断 Owner 保留原命令；失败事实关闭新写入，不能用刷新错误卸载回执核对入口。
+      if (taskRef.current?.id !== targetId) { setTask(null); setReviews([]); setRetainedReview(null); }
+      setRun(null); setControlRecord(null);
       setError(describeLiveError(caught).message);
     } finally { if (version === taskRequest.current) setLoading(false); }
   }, [client]);
@@ -158,7 +172,15 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
     try {
       const all = await client.getReviews();
       if (reviewRequest.current !== version || taskRef.current?.id !== current.id) return;
-      setReviews(all.filter((review) => review.taskId === current.id));
+      const scoped = all.filter((review) => review.taskId === current.id);
+      const previous = reviewRef.current;
+      const navigation = reviewNavigationRef.current;
+      const protectedReview = previous && previous.id === navigation?.reviewId && (navigation.dirty || navigation.pendingCommandId)
+        ? previous : null;
+      setReviews(scoped);
+      setRetainedReview(protectedReview && !scoped.some((review) => review.id === protectedReview.id) ? protectedReview : null);
+      setSelectedReviewId((selected) => scoped.some((review) => review.id === selected) ? selected
+        : protectedReview?.id ?? scoped[0]?.id ?? null);
       setReviewError(null);
     } catch (caught) {
       if (reviewRequest.current === version) setReviewError(describeLiveError(caught).message);
@@ -169,7 +191,8 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
 
   useEffect(() => {
     taskRequest.current++; runRequest.current++; reviewRequest.current++;
-    setTask(null); setRun(null); setControlRecord(null); setReviews([]); setReviewIndex(0); setReviewsLoading(false);
+    setTask(null); setRun(null); setControlRecord(null); setReviews([]); setRetainedReview(null); setSelectedReviewId(null); setReviewsLoading(false);
+    reviewNavigationRef.current = null; reviewRef.current = null;
     setProjectTitle(null); setProjectArchivedAt(undefined); setProjectReadError(null);
     setError(null); setRunError(null); setReviewError(null);
     setSessionId(undefined); setNarrowSideOpen(false);
@@ -203,46 +226,62 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const draft = useRunDraftPreview({ client, runId: run?.id ?? "", revision: run?.revision ?? "",
     currentStepId: run?.currentStepId ?? null, enabled: canReadDraft, onSettled: () => { void reloadRun(); } });
 
-  const projectWriteBlockedReason = task === null || task.projectId === null ? null
-    : loading || error !== null || projectArchivedAt === undefined
+  const projectWriteBlockedReason = loading || error !== null ? "任务事实正在核对或读取失败，不能提交新的任务命令。"
+    : task === null || task.projectId === null ? null
+    : projectArchivedAt === undefined
       ? `Project 事实正在核对或读取失败，不能提交新的任务命令。${projectReadError ?? ""}`
       : projectArchivedAt !== null ? "项目已归档，不能提交新的任务命令。" : null;
-  const openReview = reviews[Math.min(reviewIndex, Math.max(reviews.length - 1, 0))] ?? null;
+  const visibleReviews = retainedReview ? [...reviews, retainedReview] : reviews;
+  const reviewIndex = visibleReviews.findIndex((review) => review.id === selectedReviewId);
+  const openReview = visibleReviews[reviewIndex] ?? null;
+  reviewRef.current = openReview;
   const reviewWriteBlockedReason = openReview === null ? null
     : loading || error !== null || task === null || task.id !== workId
       ? "本工作区的 Review 判断需要先核对当前任务事实。"
       : projectWriteBlockedReason
         ?? (reviewsLoading ? "Review 正在核对，不能使用旧请求提交判断。"
           : reviewError !== null ? `Review 读取失败，不能使用旧请求提交判断：${reviewError}`
+          : retainedReview?.id === openReview.id ? "原判断请求未出现在最新列表中，已保留说明与原命令核对入口；不能按旧请求提交新决定。"
           : openReview.taskId !== task.id || openReview.projectId !== task.projectId
             ? "Review 归属与当前任务或项目不匹配，不能提交判断。" : null);
   const activeRun = run !== null && task !== null && task.executor === "AI" && task.executorRunId === run.id;
   const terminal = run !== null && ["COMPLETED", "FAILED", "CANCELLED"].includes(run.status);
   const runFailureReasons = [...new Set((run?.steps ?? []).map((step) => step.reason)
     .filter((reason): reason is string => typeof reason === "string" && reason !== ""))];
+  const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
+  const waitReason = run?.waitReason ?? task?.waitingReason ?? null;
+  const setLayoutMode = (mode: CollaborationLayoutMode) => {
+    setLayout((current) => saveCollaborationLayoutPreferences({ ...current, mode }));
+  };
   const refreshFacts = useCallback(() => { setReloadKey((value) => value + 1); void reloadAll(); void reloadRun(); void reloadReviews(); },
     [reloadAll, reloadRun, reloadReviews]);
 
   function requestTransition(proceed: () => void) {
     const state = navigationRef.current;
-    if (state.pending) setTransition({ kind: "pending", proceed });
-    else if (state.dirty) setTransition({ kind: "dirty", proceed });
+    const guard = currentDraftGuard();
+    const commandId = guard?.pendingCommandId?.() ?? state.pending?.commandId ?? null;
+    if (commandId) setTransition({ kind: "pending", proceed, commandId });
+    else if (guard?.hasUnsavedChanges() || state.dirty) setTransition({ kind: "dirty", proceed, commandId: null });
     else proceed();
   }
 
   async function checkRecovery(record: RecoveryRecord) {
+    const version = taskRequest.current; const currentWorkId = workIdRef.current;
     setCheckingId(record.commandId); setRecoveryError(null);
     try {
       const receipt = await client.getCommandReceipt(record.commandId);
+      if (version !== taskRequest.current || currentWorkId !== workIdRef.current) return;
       if (receipt.commandId !== record.commandId || receipt.commandType !== record.commandType ||
         record.commandType === "RequestAssistMessage" && receipt.result.session_id !== record.sessionId) {
         throw new Error("原命令回执与记录的身份不匹配。");
       }
       updateRecoveries((current) => current.filter((item) => item.commandId !== record.commandId));
-      setSessionId(record.sessionId);
-      setSearch({ work: record.targetId });
+      requestTransition(() => {
+        setSessionId(record.sessionId); setSearch({ work: record.targetId });
+      });
     } catch (caught) {
-      setRecoveryError(`${describeLiveError(caught).message} 原载荷未保存，不能换命令 ID 重试；请继续核对服务端结果。`);
+      if (version === taskRequest.current && currentWorkId === workIdRef.current)
+        setRecoveryError(`${describeLiveError(caught).message} 原载荷未保存，不能换命令 ID 重试；请继续核对服务端结果。`);
     } finally { setCheckingId(null); }
   }
 
@@ -260,108 +299,164 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
       </section>}
 
 
-      <div className="collab-columns" data-pane={sideTab} data-narrow-side={narrowSideOpen ? "open" : "closed"}>
-        {task === null
-          ? <>
-              <section className="collab-center" aria-label="工作主区" data-testid="collab-center">
-                <div className="collab-empty" data-testid="collab-empty">
-                  <MessageSquareText aria-hidden="true" />
-                  <h1>这次想推进什么</h1>
-                  <p>从左栏「近期工作」选一项可以恢复同一目标、实际进展、确切产物与待判断项；也可以先选定一个确切任务再开始讨论。打开这个页面不会新建任务、不会调用模型。</p>
-                  <TargetPicker client={client} onOpen={(next) => requestTransition(() => { setSessionId(next.sessionId); setSearch({ work: next.taskId }); setSideTab("DOCUMENT"); })} />
-                  {workId !== null && error && <p className="action-error" role="alert" data-testid="collab-task-error">{error}</p>}
-                </div>
-              </section>
-              <aside className="collab-side" aria-label="产物与判断" data-testid="collab-side">
-                <div className="collab-side-empty" data-testid="collab-side-empty">
-                  <h2>产物</h2>
-                  <p className="helper-text">选定工作后，这里显示确切产物版本、正文与版本比较。生成中的草稿会标为未保存，不冒充已保存版本。</p>
-                  <h2>判断</h2>
-                  <p className="helper-text">只有验证或动作准入确实需要人工决定时，这里才出现请求；不会为了填满页面制造待办。</p>
-                  <h2>完成</h2>
-                  <p className="helper-text">完成是一次独立确认：对照确切产物与验收条件提交，模型回复结束、检查通过和批准动作都不等于任务完成。</p>
-                </div>
-              </aside>
-            </>
-          : <>
-            <section className="collab-center" aria-label="工作主区" data-testid="collab-center">
       {task !== null && <header className="collab-goal" data-testid="collab-goal">
         <div className="collab-goal-main">
-          <div className="collab-goal-context"><p className="eyebrow">{projectTitle ?? (task.projectId === null ? "无项目" : "项目标题暂不可读取")}</p>
+          <div className="collab-goal-title"><h1>{task.title}</h1>
             <span className="status-chip">{taskStatusLabels[task.status] ?? task.status}</span></div>
-          <div className="collab-goal-title"><h1>{task.title}</h1></div>
-          {task.acceptance.objective && <p className="page-lede">{task.acceptance.objective}</p>}
+          <p className="collab-current-need" data-testid="collab-current-need">
+            {run?.unresolvedOperationIds.length ? `${run.unresolvedOperationIds.length} 项外部动作结果待核对；沿原 operation_id 核对，不盲重试。`
+              : run?.pendingControlRequest ? "已提交控制请求，等待安全点；请求受理不代表已停止或交接。"
+              : reviews.length > 0 ? `${reviews.length} 项等待人工判断；等待判断不等于已暂停。`
+              : run === null ? `当前执行者：${executorLabels[task.executor]}` : runLabels[run.status] ?? run.status}
+            {currentStep && <> · 当前步骤：{stepLabels[currentStep.kind] ?? currentStep.kind}</>}
+            {waitReason && <> · 等待原因：{waitReason}</>}
+          </p>
         </div>
-        <ul className="collab-factbar" data-testid="collab-facts">
-          <li><span className="collab-factbar-label"><UserRound aria-hidden="true" />{run?.unresolvedOperationIds.length
-            ? "外部结果待核对"
-            : reviews.length > 0 ? "等待人工判断"
-            : run === null ? "尚未启动 Run" : runLabels[run.status] ?? run.status}</span>
-            <span className="collab-factbar-note">{run?.unresolvedOperationIds.length
-              ? `${run.unresolvedOperationIds.length} 项动作结果未知；沿原 operation_id 核对，不盲重试。`
-              : reviews.length > 0
-              ? `${reviews.length} 项待决定；等待判断不等于已暂停。`
-              : runFailureReasons.length > 0 ? `失败原因：${runFailureReasons.join("、")}`
-              : run === null ? `当前执行者：${executorLabels[task.executor]}`
-              : `Run ${run.id.slice(0, 8)}`}</span></li>
-          <li><span className="collab-factbar-label"><Clock3 aria-hidden="true" />任务 / 验收</span>
-            <span className="collab-factbar-note">任务 v{task.revision} / 验收 v{task.acceptance.acceptanceRevision} · 绑定确切版本</span></li>
-          <li><span className="collab-factbar-label"><FileText aria-hidden="true" />证据：检查记录</span>
-            <button className="text-link" type="button" data-testid="collab-open-checks"
-              onClick={() => { setSideTab("CHECK"); setNarrowSideOpen(true); }}>查看运行与检查详情 →</button></li>
-        </ul>
+        <div className="collab-goal-actions">
+          {reviews.length > 0 && <button className="secondary-button" type="button" data-testid="collab-open-judgment"
+            onClick={() => {
+              setDevToolsOpen(false); setSideTab("DOCUMENT"); setNarrowSideOpen(true);
+              if (layout.mode === "chat") setLayoutMode("result");
+              window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-testid="collab-judgment"]')?.focus());
+            }}>查看待处理 {reviews.length}</button>}
+          {task.executorRunId === null && task.projectId !== null && <TaskDelegatePanel compact client={client}
+            task={{ id: task.id, projectId: task.projectId, status: task.status, executor: task.executor,
+              revision: task.revision, executorRunId: null, allowedActions: task.allowedActions }}
+            projectWriteBlockedReason={projectWriteBlockedReason} onDelegated={refreshFacts} />}
+          <div className="collab-layout-modes" role="group" aria-label="协作工作区布局">
+            {([["split", "双栏"], ["chat", "对话"], ["result", "成果"]] as const).map(([mode, label]) =>
+              <button key={mode} className="secondary-button" type="button" data-testid={`collab-layout-${mode}`}
+                aria-pressed={layout.mode === mode} onClick={() => setLayoutMode(mode)}>{label}</button>)}
+          </div>
+        </div>
+
         {/* 状态、模型端口与工具入口合并为一条工具带；控制与模型事实常驻可见，不各自占一行。 */}
         <div className="collab-goal-toolbar">
-          {run && <details className="collab-run-disclosure" data-testid="collab-run-disclosure"
-            open={run.pendingControlRequest !== null || run.unresolvedOperationIds.length > 0 || run.status === "FAILED"}>
-            <summary>执行控制 · {runLabels[run.status] ?? run.status}
-              {run.pendingControlRequest !== null ? " · 已提交控制请求，等待安全点" : ""}
-              {run.unresolvedOperationIds.length > 0 ? " · 有未结清动作" : ""}</summary>
+          <details className="collab-facts-disclosure">
+            <summary>任务与执行详情</summary>
+            <div className="collab-goal-context"><p className="eyebrow">项目：{projectTitle ?? (task.projectId === null ? "无项目" : "项目标题暂不可读取")}</p></div>
+            {task.acceptance.objective && <p className="page-lede">{task.acceptance.objective}</p>}
+          <ul className="collab-factbar" data-testid="collab-facts">
+            <li><span className="collab-factbar-label"><UserRound aria-hidden="true" />{run?.unresolvedOperationIds.length
+              ? "外部结果待核对"
+              : reviews.length > 0 ? "等待人工判断"
+              : run === null ? "尚未启动 Run" : runLabels[run.status] ?? run.status}</span>
+              <span className="collab-factbar-note">{run?.unresolvedOperationIds.length
+                ? `${run.unresolvedOperationIds.length} 项动作结果未知；沿原 operation_id 核对，不盲重试。`
+                : reviews.length > 0
+                ? `${reviews.length} 项待决定；等待判断不等于已暂停。`
+                : runFailureReasons.length > 0 ? `失败原因：${runFailureReasons.join("、")}`
+                : run === null ? `当前执行者：${executorLabels[task.executor]}`
+                : `Run ${run.id.slice(0, 8)}`}</span></li>
+            <li><span className="collab-factbar-label"><Clock3 aria-hidden="true" />任务 / 验收</span>
+              <span className="collab-factbar-note">任务 v{task.revision} / 验收 v{task.acceptance.acceptanceRevision} · 绑定确切版本</span></li>
+            <li><span className="collab-factbar-label"><FileText aria-hidden="true" />证据：检查记录</span>
+              <button className="text-link" type="button" data-testid="collab-open-checks"
+                onClick={() => { setSideTab("CHECK"); setNarrowSideOpen(true); if (layout.mode === "chat") setLayoutMode("result"); }}>查看运行与检查详情 →</button></li>
+          </ul>
+          <p className="helper-text">控制提交回执表示 PENDING；等待安全点期间，Run 与任务执行者仍以重新查询的事实为准。</p>
+          </details>
+          {run && <div className="collab-run-controls" data-testid="collab-run-disclosure">
             <RunControlPanel compact state={{ run, task, controlRecord, activeRun, terminal, projectWriteBlockedReason }}
               onReload={refreshFacts} />
-          </details>}
+          </div>}
           {task.projectId !== null && <button className="secondary-button collab-tools-toggle" type="button"
             data-testid="collab-devtools-toggle" aria-expanded={devToolsOpen}
-            onClick={() => setDevToolsOpen((open) => !open)}>
+            onClick={() => {
+              setDevToolsOpen((open) => !open);
+              if (!devToolsOpen) { setNarrowSideOpen(true); if (layout.mode === "chat") setLayoutMode("result"); }
+            }}>
             {devToolsOpen ? "收起工具面板" : "文件与运行工具"}</button>}
           <ModelConnectionStrip client={client} compact />
+
         </div>
       </header>}
       {task !== null && <div className="collab-notices">
         {loading && <p className="helper-text" role="status">正在更新任务事实，已显示的内容保持可见。</p>}
+        {error && <p className="action-error" role="alert" data-testid="collab-task-error">{error} 任务事实尚未重新核对，不能提交新的判断或任务命令。</p>}
         {runError && <p className="action-error" role="alert" data-testid="collab-run-error">{runError} 已保存的产物与判断仍可继续阅读。</p>}
         {projectWriteBlockedReason && <p className="disabled-reason" data-testid="collab-project-archive-reason">{projectWriteBlockedReason}</p>}
       </div>}
 
-              <nav className="collab-narrow-tabs" aria-label="工作区视图">
-                <button type="button" className={`collab-side-tab${!narrowSideOpen ? " collab-side-tab--active" : ""}`}
-                  data-testid="collab-narrow-DISCUSSION" aria-pressed={!narrowSideOpen} onClick={() => { setDevToolsOpen(false); setNarrowSideOpen(false); }}>讨论</button>
-                {([ ["DOCUMENT", "文档"], ["CHECK", "检查"], ["HISTORY", "版本历史"] ] as const).map(([key, label]) =>
-                  <button key={key} type="button" className={`collab-side-tab${narrowSideOpen && sideTab === key ? " collab-side-tab--active" : ""}`}
-                    data-testid={`collab-narrow-${key}`} aria-pressed={narrowSideOpen && sideTab === key}
-                    onClick={() => { setDevToolsOpen(false); setSideTab(key); setNarrowSideOpen(true); }}>{label}</button>)}
-              </nav>
-              {task.executorRunId === null && task.projectId !== null && <TaskDelegatePanel compact client={client}
-                task={{ id: task.id, projectId: task.projectId, status: task.status, executor: task.executor,
-                  revision: task.revision, executorRunId: null, allowedActions: task.allowedActions }}
-                projectWriteBlockedReason={projectWriteBlockedReason} onDelegated={refreshFacts} />}
+      {task !== null && <div className="collab-narrow-tabs" aria-label="工作区视图" hidden={layout.mode !== "split"}>
+        <button type="button" className={`collab-side-tab${!narrowSideOpen ? " collab-side-tab--active" : ""}`}
+          data-testid="collab-narrow-DISCUSSION" aria-pressed={!narrowSideOpen} onClick={() => setNarrowSideOpen(false)}>讨论</button>
+        <button type="button" className={`collab-side-tab${narrowSideOpen ? " collab-side-tab--active" : ""}`}
+          data-testid="collab-narrow-DOCUMENT" aria-pressed={narrowSideOpen} onClick={() => setNarrowSideOpen(true)}>成果与判断</button>
+      </div>}
 
+      <div className={`collab-columns${task === null ? " collab-columns--empty" : ""}`} data-pane={sideTab}
+        data-layout-mode={task === null ? "split" : layout.mode} data-narrow-side={narrowSideOpen ? "open" : "closed"}
+        style={{ "--relay-collab-chat-column": `${layout.chatRatio}fr`, "--relay-collab-result-column": `${1 - layout.chatRatio}fr` } as CSSProperties}>
+        {task === null
+          ? <>
+              <section className="collab-center collab-center--empty" aria-label="工作主区" data-testid="collab-center">
+                <div className="collab-empty" data-testid="collab-empty">
+                  <div className="collab-empty-mark"><MessageSquareText aria-hidden="true" /></div>
+                  <p className="eyebrow">协作工作区</p>
+                  <h1>这次想推进什么</h1>
+                  <p className="collab-empty-lede">从左侧「近期工作」继续，或选择一个任务开始讨论。目标、进展与成果会回到同一张工作桌。</p>
+                  <TargetPicker client={client} onOpen={(next) => requestTransition(() => { setSessionId(next.sessionId); setSearch({ work: next.taskId }); setSideTab("DOCUMENT"); })} />
+                  <p className="collab-empty-note helper-text">打开工作区后，再分别确认讨论或委托。</p>
+                  {workId !== null && loading && <p className="helper-text" role="status">正在恢复这项工作…</p>}
+                  {workId !== null && error && <p className="action-error" role="alert" data-testid="collab-task-error">{error}</p>}
+                </div>
+              </section>
+              <aside className="collab-side collab-side--intro" aria-label="产物与判断" data-testid="collab-side">
+                <div className="collab-side-empty" data-testid="collab-side-empty">
+                  <header className="collab-intro-heading">
+                    <p className="eyebrow">产物与判断</p>
+                    <h2>讨论之外，成果也在这里</h2>
+                    <p className="helper-text">选定任务后，沿着确切版本查看与确认。</p>
+                  </header>
+                  <div className="collab-intro-item"><FileText aria-hidden="true" /><div>
+                    <h3>阅读产物</h3>
+                    <p>查看已保存版本的正文与修改。生成中的草稿会单独标记。</p>
+                  </div></div>
+                  <div className="collab-intro-item"><Scale aria-hidden="true" /><div>
+                    <h3>处理判断</h3>
+                    <p>需要你决定时，对照版本与依据，接受或提出修改意见。</p>
+                  </div></div>
+                  <div className="collab-intro-item"><CheckCheck aria-hidden="true" /><div>
+                    <h3>确认完成</h3>
+                    <p>对照产物与验收条件独立确认，回复结束不等于任务完成。</p>
+                  </div></div>
+                </div>
+              </aside>
+            </>
+          : <>
+            <section className="collab-center" aria-label="工作主区" data-testid="collab-center" hidden={layout.mode === "result"}>
               <AssistView key={`${task.id}:${sessionId === undefined ? "auto" : sessionId}`}
                 targetKind="TASK" targetId={task.id}
                 preferredSessionId={sessionId} standalone
+                externalWriteBlockedReason={projectWriteBlockedReason}
                 onNavigationStateChange={reportNavigation}
                 onRequestNewSession={requestTransition}
+                onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
                 onSessionCreated={(created) => setSessionId(created)} />
             </section>
 
+            <CollaborationSplitter ratio={layout.chatRatio} hidden={layout.mode !== "split"}
+              onRatioChange={(chatRatio, commit) => setLayout((current) => {
+                const next = { ...current, chatRatio };
+                return commit ? saveCollaborationLayoutPreferences(next) : next;
+              })} />
+            <div className="collab-result-pane" hidden={layout.mode === "chat"}>
             <WorkspaceSidePanel client={client} task={task} run={run} draft={draft}
               tab={sideTab} onTabChange={setSideTab}
               devToolsOpen={devToolsOpen} onCloseDevTools={() => setDevToolsOpen(false)}
-              reviews={reviews} reviewIndex={reviewIndex} onReviewIndexChange={setReviewIndex}
+              reviews={visibleReviews} reviewIndex={reviewIndex} onReviewIndexChange={(next) => {
+                const selected = visibleReviews[next];
+                if (selected && selected.id !== selectedReviewId) requestTransition(() => {
+                  setSelectedReviewId(selected.id); setRetainedReview(null);
+                });
+              }}
               openReview={openReview} reviewError={reviewError}
               reviewWriteBlockedReason={reviewWriteBlockedReason}
               projectWriteBlockedReason={projectWriteBlockedReason}
+              onReviewNavigationStateChange={reportReviewNavigation}
               onRefresh={refreshFacts} />
+            </div>
           </>}
       </div>
     </div>
@@ -369,12 +464,17 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
     <AppDialog open={transition !== null} title={transition?.kind === "pending" ? "命令结果待核对" : "未发送的内容"}
       onClose={() => setTransition(null)}>
       <p>{transition?.kind === "pending"
-        ? `原命令 ${navigationRef.current.pending?.commandId ?? ""} 的结果仍待核对。请留在当前会话查询回执；不会以新命令重试。`
-        : "当前会话有未发送的消息或已选资料。切换后这些内容会丢失。"}</p>
+        ? `原命令 ${transition.commandId ?? ""} 的结果仍待核对。请留在当前工作区查询回执；不会以新命令重试。`
+        : "当前工作区有未发送的消息、已选资料或判断说明。切换前请确认是否丢弃这些内容。"}</p>
       <div className="form-actions">
-        <button className="secondary-button" type="button" onClick={() => setTransition(null)}>留在当前会话</button>
+        <button className="secondary-button" type="button" onClick={() => setTransition(null)}>留在当前工作区</button>
         {transition?.kind === "dirty" && <button className="primary-button" type="button" data-testid="collab-discard-draft"
-          onClick={() => { const proceed = transition.proceed; setTransition(null); navigationRef.current = cleanNavigation; proceed(); }}>丢弃并继续</button>}
+          onClick={() => {
+            const commandId = currentDraftGuard()?.pendingCommandId?.() ?? navigationRef.current.pending?.commandId ?? null;
+            if (commandId) { setTransition({ ...transition, kind: "pending", commandId }); return; }
+            const proceed = transition.proceed;
+            currentDraftGuard()?.discard(); setTransition(null); proceed();
+          }}>丢弃并继续</button>}
       </div>
     </AppDialog>
   </section>;
@@ -406,23 +506,23 @@ function TargetPicker({ client, onOpen }: {  client: RelayApiClient;
 
   if (!open) return <button className="primary-button" type="button" data-testid="collab-pick-target" onClick={() => setOpen(true)}>
     <Plus aria-hidden="true" />选择要推进的任务</button>;
-  return <section className="collab-picker surface-panel" data-testid="collab-target-picker">
-    <h2>先确认归属</h2>
-    <p className="helper-text">新目标必须归属于一个确切任务后才发送；这里只读取列表，不创建任务。</p>
+  return <section className="collab-picker" data-testid="collab-target-picker">
+    <h2>选择要推进的任务</h2>
+    <p className="helper-text">讨论会留在这项任务中，方便下次继续。</p>
     {loading && <p className="helper-text" role="status">正在读取任务…</p>}
     {error && <p className="action-error" role="alert">{error}</p>}
     {!loading && !error && tasks.length === 0 && <p className="helper-text">当前工作空间还没有任务。
       <Link className="text-link" to="/tasks?view=create">前往新建任务</Link></p>}
     <label className="field"><span className="field-label">任务</span>
-      <select data-testid="collab-target-select" value={selected} onChange={(event) => setSelected(event.target.value)}>
-        <option value="">请选择</option>
+      <select data-testid="collab-target-select" value={selected} disabled={loading || error !== null || tasks.length === 0}
+        onChange={(event) => setSelected(event.target.value)}>
+        <option value="">{loading ? "正在读取任务…" : "请选择任务"}</option>
         {tasks.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
       </select></label>
     <div className="form-actions">
-      <button className="primary-button" type="button" data-testid="collab-target-open" disabled={!selected || loading}
+      <button className="primary-button" type="button" data-testid="collab-target-open" disabled={!selected || loading || error !== null}
         onClick={() => { if (selected) onOpen({ taskId: selected, sessionId: undefined }); }}>打开这项工作</button>
       <button className="secondary-button" type="button" onClick={() => setOpen(false)}>取消</button>
     </div>
-    <p className="helper-text">讨论、委托、批准与完成是四个独立动作；聊天里的“开始”不构成委托授权。</p>
   </section>;
 }

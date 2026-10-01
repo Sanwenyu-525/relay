@@ -6,7 +6,7 @@
   flex-direction: column;
   max-height: 40vh;
   border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
-  background: var(--relay-color-bg-surface);
+  background: var(--relay-color-bg-canvas);
 }
 .devtools-pane { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
 .devtools-header { flex: none; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
@@ -57,9 +57,10 @@
   overflow-wrap: anywhere;
 }
 .devtools-output pre.devtools-stderr { border-color: var(--relay-color-status-danger-text); }
+.devtools-operation > summary { cursor: pointer; font-weight: var(--relay-font-weight-medium); overflow-wrap: anywhere; }
 
 /* 底部抽屉：命令输出来自服务端保存的真实结果，交互终端仍是待设计声明。 */
-.devtools-drawer { flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--relay-color-bg-surface); }
+.devtools-drawer { flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--relay-color-bg-canvas); }
 .devtools-drawer-header {
   display: flex;
   align-items: stretch;

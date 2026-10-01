@@ -424,10 +424,9 @@ export default function TodayView() {
     <div className="today-body">
       <div className="today-main">
     <p className="eyebrow">{longDate} · {weekday}</p>
-    <h1>把今天留给重要的事</h1>
+    <h1>今天</h1>
     <p className="page-lede">从上次停下的地方，继续推进。</p>
     <div className="today-intro-note">
-      <p className="page-note">置顶和今日焦点帮助安排今天；受阻任务需先处理阻碍。</p>
       <details className="today-arrange-note">
       <summary>安排说明</summary>
       <p>任务能否开始、如何排序由服务端按当前事实判定；置顶、延后和今日焦点只表达你的安排，不会绕过任务准入。等待中的任务里，已置顶的会单独列在「已置顶，待处理」。</p>
@@ -517,7 +516,7 @@ export default function TodayView() {
         <aside className="today-review-entry" data-testid="today-review-entry">
           <div className="today-review-entry__copy">
             <h2>待审与人工判断</h2>
-            <p>需要人工验收、动作批准或决定的事项集中在待审中心逐项处理。今日页只帮你安排任务，不在此完成判断，也不会改变待审状态。</p>
+            <p>人工验收、动作批准与决定，逐项打开待审中心处理。</p>
           </div>
           <Link className="secondary-button" to="/reviews">打开待审中心</Link>
         </aside>
@@ -549,14 +548,14 @@ export default function TodayView() {
               : <p className="today-rail__empty">当前没有等待你判断的事项。</p>)}
             <Link className="today-rail__link" to="/reviews">查看待审中心<span aria-hidden="true"> →</span></Link>
           </section>
-          <section className="today-rail__section" aria-label="推荐依据">
-            <h2>推荐依据</h2>
+          <details className="today-rail__section today-arrange-note" aria-label="推荐依据">
+            <summary>推荐依据</summary>
             <ul className="today-rail__basis">
               <li>今日焦点由你在任务里手动设置</li>
               <li>「可开始」由服务端按依赖与阻塞判定</li>
               <li>排序建议不会自动修改任务计划</li>
             </ul>
-          </section>
+          </details>
           <p className="today-rail__note">稍后处理的任务仍保留在任务列表。</p>
       </aside>}
     </div>

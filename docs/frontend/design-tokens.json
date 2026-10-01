@@ -1,11 +1,11 @@
 {
   "metadata": {
-    "version": "0.2.1",
+    "version": "0.3.0",
     "status": "Proposed",
     "theme": "light",
-    "updated": "2026-09-30",
+    "updated": "2026-10-01",
     "format": "Relay 文档用扁平 token 数据；不是 DTCG 兼容声明或已集成的主题包。",
-    "basis": "原始论文验收页参考图与三张页面概念图；色值经采样归一，尺寸/状态/响应式为实现推荐。",
+    "basis": "2026-10-01 用户选定工作主线图作为当前重做基准；历史参考保留。色值为归一推荐，尺寸/响应式待实际页面与 Windows 验证。",
     "unit": "rem 按桌面 WebView 默认 16 CSS px 解释，保留字号缩放；window.content.* 的 number 单位为逻辑 DIP，不能当成物理像素或 rem。",
     "sourceDocument": "design-system.md",
     "sources": [
@@ -16,7 +16,8 @@
       "mockups/2026-09-28/today-window-v2.png",
       "mockups/2026-09-29/collaboration-dialogue-window.png",
       "mockups/2026-09-29/collaboration-development-tools.png",
-      "mockups/2026-09-29/component-states.png"
+      "mockups/2026-09-29/component-states.png",
+      "mockups/2026-10-01/work-first.png"
     ]
   },
   "tokens": {
@@ -42,12 +43,12 @@
     },
     "color.palette.paper": {
       "$type": "color",
-      "$value": "#FAF8F3",
+      "$value": "#FAF9F6",
       "$description": "依据四张参考图归一的推荐色，并非原始设计源文件精确值。"
     },
     "color.palette.sidebar": {
       "$type": "color",
-      "$value": "#F2EEE7",
+      "$value": "#F4F3EF",
       "$description": "依据四张参考图归一的推荐色，并非原始设计源文件精确值。"
     },
     "color.palette.surface": {
@@ -72,7 +73,7 @@
     },
     "color.palette.line": {
       "$type": "color",
-      "$value": "#DDDCD4",
+      "$value": "#E3E4DF",
       "$description": "依据四张参考图归一的推荐色，并非原始设计源文件精确值。"
     },
     "color.palette.control": {
@@ -306,7 +307,7 @@
     "font.family.editorial": {
       "$type": "fontFamily",
       "$value": "\"Relay Serif SC\", \"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", \"SimSun\", serif",
-      "$description": "标题与文章使用随应用分发的 OFL Noto Serif SC 可变字体；许可和来源见 workbench/src/assets/fonts，加载字体不访问网络。"
+      "$description": "为历史排版与既有阅读消费者保留随应用分发的 OFL Noto Serif SC；工作主线接续采用 ui 字体统一标题。许可和来源见 workbench/src/assets/fonts，加载不访问网络。"
     },
     "font.family.code": {
       "$type": "fontFamily",
@@ -334,7 +335,7 @@
     },
     "font.size.page": {
       "$type": "dimension",
-      "$value": "3rem"
+      "$value": "{font.size.compactPage}"
     },
     "font.size.display": {
       "$type": "dimension",
@@ -342,7 +343,7 @@
     },
     "font.size.compactPage": {
       "$type": "dimension",
-      "$value": "2rem"
+      "$value": "1.75rem"
     },
     "font.weight.regular": {
       "$type": "fontWeight",
@@ -374,7 +375,11 @@
     },
     "layout.sidebar.width": {
       "$type": "dimension",
-      "$value": "13.5rem"
+      "$value": "14rem"
+    },
+    "layout.collaboration.chatRatio": {
+      "$type": "number",
+      "$value": 0.52
     },
     "layout.sidebar.compactWidth": {
       "$type": "dimension",
@@ -382,7 +387,7 @@
     },
     "layout.header.height": {
       "$type": "dimension",
-      "$value": "4rem"
+      "$value": "3.5rem"
     },
     "layout.rail.width": {
       "$type": "dimension",
@@ -394,7 +399,7 @@
     },
     "layout.main.padding": {
       "$type": "dimension",
-      "$value": "{space.10}"
+      "$value": "{space.6}"
     },
     "layout.main.compactPadding": {
       "$type": "dimension",
@@ -406,7 +411,7 @@
     },
     "layout.section.gap": {
       "$type": "dimension",
-      "$value": "{space.12}"
+      "$value": "{space.6}"
     },
     "layout.reading.maxWidth": {
       "$type": "dimension",
@@ -419,12 +424,12 @@
     "layout.workspace.sideWidth": {
       "$type": "dimension",
       "$value": "34rem",
-      "$description": "协作工作区右栏（文档/检查/版本历史）。比通用 rail 宽，长文与 diff 需要独立阅读宽度；窄窗按 breakpoint.rail 收为单区切换。"
+      "$description": "协作工作区文档正文的阅读高度参考尺度；双页右栏宽度由可用容器空间与 layout.rail.narrowWidth 决定，窄容器切为单区。保留原尺寸供文档阅读消费者使用。"
     },
     "layout.workspace.centerMin": {
       "$type": "dimension",
       "$value": "26rem",
-      "$description": "协作工作区中栏最小宽度。低于此值不再维持三列，改按断点切换单区。"
+      "$description": "协作工作区中栏参考最小宽度，与 layout.rail.narrowWidth 和两栏内边距共同组成双页重排阈值；按实际容器空间判断。"
     },
     "layout.factbar.columns": {
       "$type": "number",

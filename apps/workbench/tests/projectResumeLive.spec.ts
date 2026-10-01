@@ -8,13 +8,118 @@ const projectId = "22222222-2222-4222-8222-222222222222";
 const completionId = "77777777-7777-4777-8777-777777777777";
 const root = `${baseUrl}/api/v1/workspaces/${workspaceId}`;
 let unmount: (() => void) | null = null;
-afterEach(() => { unmount?.(); unmount = null; resetRelayConnectionForTest(); vi.unstubAllGlobals(); });
+afterEach(() => { unmount?.(); unmount = null; resetRelayConnectionForTest(); vi.restoreAllMocks(); sessionStorage.clear(); vi.unstubAllGlobals(); });
 function response(body: unknown): Response { return { ok: true, status: 200, json: async () => body } as Response; }
 function task(id: string, project = projectId) { return { id, project_id: project, title: `任务 ${id}`, status: "READY", mode: "ME", revision: "2",
   executor: { kind: "HUMAN", run_id: null }, current_completion_id: null, waiting_reason: null,
   blocking_task_ids: [], unresolved_blocker_ids: [], allowed_actions: [] }; }
 
 describe("项目恢复页 live 当前事实", () => {
+  it("父事实403后隐藏接续点与迟到对比，503不复活旧事实，恢复后重读集合", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-bearer-token-0123456789abcdef" });
+    let projectReads = 0, compareReads = 0, pointReads = 0;
+    const delayed: { resolve?: (value: Response) => void } = {};
+    const pointPath = `/projects/${projectId}/continuation-points`;
+    const point = { id: "point-a", project_id: projectId, name: "旧接续点名称", note: "旧私有备注", captured_at: "2026-09-29T00:00:00Z",
+      captured_state: { phase_key: "GENERAL", revision: "1", next_action_task_id: null }, ref_count: 1 };
+    const comparison = { continuation_point: point, current_state: point.captured_state,
+      facts: { state_revision_changed: false, phase_changed: false, next_action_changed: false,
+        task_added: [{ task_id: "private-task", title: "旧私有任务标题", status: "READY" }], artifact_version_added: [] }, ref_changes: [], interpretation: null };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method ?? "GET").toBe("GET");
+      const path = String(input).slice(root.length);
+      if (path === `/projects/${projectId}`) {
+        projectReads++;
+        if (projectReads === 2 || projectReads === 3) return { ok: false, status: projectReads === 2 ? 403 : 503,
+          json: async () => ({ code: projectReads === 2 ? "FORBIDDEN" : "SERVICE_UNAVAILABLE", detail: "project unavailable" }) } as Response;
+        return response({ id: projectId, title: "恢复项目", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
+      }
+      if (path === `/projects/${projectId}/state`) return response({ project_id: projectId, phase_key: "GENERAL", revision: "1",
+        next_action_task_id: null, selected_artifact_version_refs: [], completed_highlight_refs: [] });
+      if (path === `/projects/${projectId}/goals`) return response({ items: [] });
+      if (path === `/tasks?project_id=${projectId}` || path === "/reviews?status=OPEN") return response({ items: [], next_cursor: null });
+      if (path === `/decisions?project_id=${projectId}`) return response([]);
+      if (path === pointPath) { pointReads++; return response({ items: [{ ...point, name: pointReads === 1 ? point.name : "重读后接续点" }] }); }
+      if (path === `${pointPath}/point-a/comparison`) {
+        compareReads++; return compareReads === 2 ? new Promise<Response>((resolve) => { delayed.resolve = resolve; }) : response(comparison);
+      }
+      throw new Error(`Unexpected ${path}`);
+    }));
+    const mounted = await mountWorkbench(`/projects/${projectId}?skill=resume`); unmount = mounted.unmount;
+    const owner = mounted.wrapper.get('[data-testid="continuation-panel"]').element;
+    await mounted.wrapper.get('[data-testid="continuation-name"]').setValue("本地草稿名称");
+    await mounted.wrapper.get('[data-testid="continuation-open"]').trigger("click"); await flush();
+    expect(mounted.wrapper.text()).toContain("旧私有任务标题");
+    await mounted.wrapper.get('[data-testid="continuation-open"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="project-resume-refresh"]').trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="continuation-panel"]').element).toBe(owner);
+    expect(mounted.wrapper.find('[data-testid="continuation-open"]').exists()).toBe(false);
+    expect(mounted.wrapper.text()).not.toContain("旧私有备注");
+    expect(mounted.wrapper.text()).not.toContain("旧私有任务标题");
+    await mounted.wrapper.findAll("button").find((button) => button.text() === "重新读取")!.trigger("click"); await flush();
+    expect(mounted.wrapper.text()).not.toContain("旧接续点名称");
+    expect(pointReads).toBe(1);
+    await mounted.wrapper.findAll("button").find((button) => button.text() === "重新读取")!.trigger("click"); await flush();
+    expect(mounted.wrapper.text()).toContain("重读后接续点");
+    expect(mounted.wrapper.get('[data-testid="continuation-panel"]').element).toBe(owner);
+    expect((mounted.wrapper.get('[data-testid="continuation-name"]').element as HTMLInputElement).value).toBe("本地草稿名称");
+    expect(pointReads).toBe(2);
+    expect(mounted.wrapper.find('[data-testid="continuation-comparison"]').exists()).toBe(false);
+    expect(mounted.wrapper.get('[data-testid="continuation-capture"]').attributes("disabled")).toBeUndefined();
+    expect(mounted.wrapper.get('[data-testid="continuation-name"]').attributes("disabled")).toBeUndefined();
+    delayed.resolve?.(response(comparison)); await flush();
+    expect(mounted.wrapper.text()).not.toContain("旧私有任务标题");
+    expect(mounted.wrapper.find('[data-testid="continuation-comparison"]').exists()).toBe(false);
+  });
+
+  it("存储不可用时父刷新与失败仍保留接续点草稿及原未决命令", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-bearer-token-0123456789abcdef" });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("storage unavailable"); });
+    const posts: Record<string, unknown>[] = [];
+    let projectReads = 0;
+    const delayed: { resolve?: (value: Response) => void } = {};
+    const project = { id: projectId, title: "恢复项目", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if (path === `/projects/${projectId}`) {
+        projectReads++;
+        return projectReads === 2 ? new Promise<Response>((resolve) => { delayed.resolve = resolve; }) : response(project);
+      }
+      if (path === `/projects/${projectId}/state`) return response({ project_id: projectId, phase_key: "GENERAL", revision: "1",
+        next_action_task_id: null, selected_artifact_version_refs: [], completed_highlight_refs: [] });
+      if (path === `/projects/${projectId}/goals`) return response({ items: [] });
+      if (path === `/tasks?project_id=${projectId}` || path === "/reviews?status=OPEN") return response({ items: [], next_cursor: null });
+      if (path === `/decisions?project_id=${projectId}`) return response([]);
+      if (path === `/projects/${projectId}/continuation-points`) {
+        if (init?.method === "POST") { posts.push(JSON.parse(String(init.body)) as Record<string, unknown>); throw new TypeError("response lost"); }
+        return response({ items: [] });
+      }
+      if (path.startsWith("/commands/")) return { ok: false, status: 404, json: async () => ({ code: "COMMAND_NOT_FOUND", detail: "not found" }) } as Response;
+      throw new Error(`Unexpected ${path}`);
+    }));
+    const mounted = await mountWorkbench(`/projects/${projectId}?skill=resume`); unmount = mounted.unmount;
+    const owner = mounted.wrapper.get('[data-testid="continuation-panel"]').element;
+    await mounted.wrapper.get('[data-testid="continuation-name"]').setValue("收工前");
+    await mounted.wrapper.get('[data-testid="continuation-note"]').setValue("先核对原结果");
+    await mounted.wrapper.get('[data-testid="continuation-capture"]').trigger("click"); await flush();
+    expect(posts).toHaveLength(1);
+    const originalId = posts[0]?.command_id;
+    await mounted.wrapper.get('[data-testid="project-resume-refresh"]').trigger("click"); await flush();
+    expect(mounted.wrapper.text()).toContain("正在读取当前项目事实");
+    expect(mounted.wrapper.get('[data-testid="continuation-panel"]').element).toBe(owner);
+    expect(mounted.wrapper.get('[data-testid="continuation-pending"]').text()).toContain(String(originalId));
+    expect((mounted.wrapper.get('[data-testid="continuation-name"]').element as HTMLInputElement).value).toBe("收工前");
+    expect((mounted.wrapper.get('[data-testid="continuation-note"]').element as HTMLInputElement).value).toBe("先核对原结果");
+    delayed.resolve?.({ ok: false, status: 503, json: async () => ({ code: "SERVICE_UNAVAILABLE", detail: "temporarily unavailable" }) } as Response); await flush();
+    expect(mounted.wrapper.text()).toContain("暂时无法读取当前事实");
+    expect(mounted.wrapper.get('[data-testid="continuation-panel"]').element).toBe(owner);
+    expect(mounted.wrapper.get('[data-testid="continuation-capture"]').attributes("disabled")).toBeDefined();
+    await mounted.wrapper.findAll("button").find((button) => button.text() === "重新读取")!.trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="continuation-panel"]').element).toBe(owner);
+    expect(mounted.wrapper.get('[data-testid="continuation-pending"]').text()).toContain(String(originalId));
+    expect(posts).toHaveLength(1);
+  });
+
   it("只读 Project/State/Task/Review/Artifact/Decision，下一步不在首分页时按 ID 单读", async () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-bearer-token-0123456789abcdef" });
     const paths: string[] = [];

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowRight, RotateCcw } from "lucide-react";
+import { ArrowRight, ClipboardCheck, Flag, Monitor, RotateCcw } from "lucide-react";
 import { blueprintApplyResultFrom, blueprintProposalFrom,
   type RelayBlueprintApplyResult, type RelayBlueprintDraft,
   type RelayBlueprintNextAction, type RelayBlueprintProposal,
@@ -462,7 +462,7 @@ export default function LiveBlueprintView() {
   return <section className="skill-page live-blueprint"><div className="page-layout">
     <div className="page-primary">
       <p className="eyebrow">{facts.project.title}</p><h1>项目蓝图</h1>
-      <p className="page-lede">人工草稿先生成不可变候选，再核对服务端 Diff 并显式应用。蓝图意图不会自动成为已确认 Goal。</p>
+      <p className="page-lede">核对下一步、任务与工作台，再确认本次变化。</p>
       <p className="metadata-row">项目类型：{projectTypeLabels[facts.project.projectType as ProjectType] ?? facts.project.projectType}
         <span aria-hidden="true"> · </span> 当前阶段：{phaseLabel(facts.state.phaseKey)}
         <span aria-hidden="true"> · </span> Project v{facts.project.revision} / State v{facts.state.revision} / View v{facts.view.revision}</p>
@@ -473,6 +473,71 @@ export default function LiveBlueprintView() {
       {error && <p className="action-error" role="alert">{error}</p>}
       {writeBlockedReason && <p className="disabled-reason" data-testid="blueprint-archive-reason">{writeBlockedReason}</p>}
       {message && <p className="success-callout" role="status">{message}</p>}
+      {proposal?.contentAvailability === "AVAILABLE" && proposal.baseline && proposal.diff ? <>
+        <section className="surface-panel live-blueprint-preview" aria-label="服务端蓝图候选">
+          <h2>本次蓝图变更</h2>
+          <p className="metadata-row">{statusLabel(proposal.status)}{proposal.stale && " · 基线已失效"} ·
+            基于 Project v{proposal.baseline.projectRevision} / State v{proposal.baseline.stateRevision} / View v{proposal.baseline.viewRevision}</p>
+          <details className="live-blueprint-provenance"><summary>候选身份与来源</summary>
+          <p>候选 <code className="hash-code">{proposal.id}</code> · {statusLabel(proposal.status)}</p>
+          <p className="helper-text">来源：{proposal.origin === "USER_DRAFT" ? "人工草稿 USER_DRAFT" : "Skill 提案"}
+            {proposal.source.pack ? <> · Pack {proposal.source.pack.id} v{proposal.source.pack.version} · SHA-256 <code className="hash-code">{proposal.source.pack.sha256}</code></> : " · 未选择 Pack"}</p>
+          {proposal.skillMessageId && <p className="helper-text">来源 Assist 消息：<code className="hash-code">{proposal.skillMessageId}</code></p>}
+          {proposal.source.skill && <p className="helper-text">Skill {proposal.source.skill.id} v{proposal.source.skill.version} ·
+            定义 SHA-256 <code className="hash-code">{proposal.source.skill.sha256}</code> ·
+            输出 SHA-256 <code className="hash-code">{proposal.source.skillOutputSha256}</code> ·
+            事实 SHA-256 <code className="hash-code">{proposal.source.basisFactsSha256}</code></p>}
+          <p className="helper-text">候选 SHA-256：<code className="hash-code">{proposal.candidateSha256}</code></p>
+          <p className="helper-text">基线：Project v{proposal.baseline.projectRevision} / State v{proposal.baseline.stateRevision}
+            / View v{proposal.baseline.viewRevision}。当前事实变化后须重新生成候选。</p>
+          {proposal.supersedesProposalId && <p className="helper-text">替代旧候选：<code className="hash-code">{proposal.supersedesProposalId}</code></p>}
+          </details>
+          {dirty && <p className="warning-callout">草稿已修改，当前预览仍是服务端保存的旧候选；请生成新候选后再应用。</p>}
+          {proposal.stale && <p className="warning-callout">服务端判定候选已失效。保留草稿，按当前事实重新生成候选。</p>}
+          <div className="blueprint-diff" aria-label="当前基线与建议差异">
+            <div className="diff-heading"><span aria-hidden="true" /><strong>候选基线</strong><strong>候选建议</strong></div>
+            <div className="diff-row"><span className="diff-icon"><Flag aria-hidden="true" /></span><span><strong>Goal 关联</strong>
+              <small>{proposal.diff.goalLink.beforeGoalIds.join("、") || "无"}</small></span>
+              <span className="diff-arrow-cell" aria-hidden="true"><ArrowRight /></span>
+              <span className="suggested-value">{proposal.diff.goalLink.addGoalId ?? "不新增关联"}</span></div>
+            <div className="diff-row"><span className="diff-icon"><ClipboardCheck aria-hidden="true" /></span><span><strong>项目阶段</strong>
+              <small>{phaseLabel(proposal.diff.state.phase.before ?? proposal.baseline.phaseKey)}</small></span>
+              <span className="diff-arrow-cell" aria-hidden="true"><ArrowRight /></span>
+              <span className="suggested-value">{proposal.diff.state.phase.after ? phaseLabel(proposal.diff.state.phase.after) : "保持当前"}</span></div>
+            <div className="diff-row"><span className="diff-icon"><ArrowRight aria-hidden="true" /></span><span><strong>下一步</strong>
+              <small>{facts.tasks.find((task) => task.id === proposal.diff!.state.nextAction.beforeTaskId)?.title ?? proposal.diff.state.nextAction.beforeTaskId ?? "未指定"}</small></span>
+              <span className="diff-arrow-cell" aria-hidden="true"><ArrowRight /></span>
+              <span className="suggested-value">{nextActionText(proposal.diff.state.nextAction.after)}</span></div>
+            <div className="diff-row"><span className="diff-icon"><Monitor aria-hidden="true" /></span><span><strong>默认工作台</strong>
+              <small>{kindLabel(proposal.diff.viewConfiguration.before.kind)}</small></span>
+              <span className="diff-arrow-cell" aria-hidden="true"><ArrowRight /></span>
+              <span className="suggested-value">{kindLabel(proposal.diff.viewConfiguration.after.kind)}
+                {proposal.diff.viewConfiguration.changed ? "（将变更）" : "（保持）"}</span></div>
+          </div>
+          <h3>本次新增任务</h3>
+          {proposal.diff.newTasks.length ? <ul className="live-blueprint-list">{proposal.diff.newTasks.map((task) =>
+            <li key={task.local_key}><strong>{task.title}</strong><small>{task.objective}</small>
+              <small>{task.local_key} · {task.mode} / {task.executorKind} / {task.status}</small></li>)}</ul> :
+            <p>候选不新增任务。</p>}
+          <h3>服务端视图模板</h3>
+          <p>基线：{templatePages(proposal.diff.viewConfiguration.before)}</p>
+          <p>建议：{templatePages(proposal.diff.viewConfiguration.after)}</p>
+          <p className="helper-text">建议模板 v{proposal.diff.viewConfiguration.after.templateVersion} · SHA-256 <code className="hash-code">{proposal.diff.viewConfiguration.after.templateSha256}</code></p>
+        </section>
+        <section className="surface-panel live-blueprint-followups"><h2>后续配置建议</h2>
+          <p className="helper-text">以下来自服务端候选，需在各自入口单独确认，不随本次蓝图应用。</p>
+          {proposal.followUpSuggestions.length ? <ul className="live-blueprint-list">
+            {proposal.followUpSuggestions.map((item, index) => <li key={`${item.kind}:${index}`}>
+              <strong>{item.kind}</strong><small>{item.summary}</small></li>)}</ul> : <p>没有后续配置建议。</p>}
+        </section>
+      </> : proposal ? <section className="surface-panel live-blueprint-preview" data-testid="blueprint-source-unavailable">
+        <h2>服务端候选暂不可读</h2>
+        <p>候选 <code className="hash-code">{proposal.id}</code> · {statusLabel(proposal.status)}。来源不可用；候选正文、基线与 Diff 已清除，不能应用。</p>
+        <p className="helper-text">候选 SHA-256：<code className="hash-code">{proposal.candidateSha256}</code></p>
+        {proposal.source.skillOutputSha256 && <p className="helper-text">来源输出 SHA-256：
+          <code className="hash-code">{proposal.source.skillOutputSha256}</code></p>}
+      </section> : <section className="surface-panel live-blueprint-preview"><h2>服务端候选预览</h2>
+        <p>当前项目没有可读取的蓝图候选。提交下方人工草稿后，才会显示服务端基线、Diff 与候选摘要。</p></section>}
       <BlueprintSkillGenerator client={client} projectId={id} goals={facts.goals} packs={facts.packs}
         disabled={busy || pending !== null || loading || dirty || writeBlockedReason !== null}
         newWritesBlocked={writeBlockedReason !== null}
@@ -480,6 +545,7 @@ export default function LiveBlueprintView() {
         onProposalFound={(proposalId) => void load(client, scope.current, proposalId, false)} />
       <form className="surface-panel live-blueprint-form" data-testid="live-blueprint-form" onSubmit={(event) => void preview(event)}>
         <h2>{proposal ? "编辑并生成新候选" : "填写蓝图草稿"}</h2>
+        <p className="helper-text">人工草稿先生成不可变候选，再核对服务端 Diff 并显式应用。蓝图意图不会自动成为已确认 Goal。</p>
         <p className="helper-text">来源将登记为 USER_DRAFT（人工草稿）；不会调用模型，也不会因为选择 Pack 而获得工具权限。</p>
         {fromCreate && <p className="helper-text">首次创建时填写的项目目标已恢复为待预览意图；尚未生成候选或确认 Goal。</p>}
         <fieldset disabled={busy || generationBusy || pending !== null || writeBlockedReason !== null}>
@@ -563,71 +629,16 @@ export default function LiveBlueprintView() {
             {dirty && <button className="text-button" type="button" onClick={resetDraft}>放弃草稿修改</button>}</div>
         </fieldset>
       </form>
-      {proposal?.contentAvailability === "AVAILABLE" && proposal.baseline && proposal.diff ? <>
-        <section className="surface-panel live-blueprint-preview" aria-label="服务端蓝图候选">
-          <h2>服务端候选与 Diff</h2>
-          <p>候选 <code className="hash-code">{proposal.id}</code> · {statusLabel(proposal.status)}{proposal.stale && " · 基线已失效"}</p>
-          <p className="helper-text">来源：{proposal.origin === "USER_DRAFT" ? "人工草稿 USER_DRAFT" : "Skill 提案"}
-            {proposal.source.pack ? <> · Pack {proposal.source.pack.id} v{proposal.source.pack.version} · SHA-256 <code className="hash-code">{proposal.source.pack.sha256}</code></> : " · 未选择 Pack"}</p>
-          {proposal.skillMessageId && <p className="helper-text">来源 Assist 消息：<code className="hash-code">{proposal.skillMessageId}</code></p>}
-          {proposal.source.skill && <p className="helper-text">Skill {proposal.source.skill.id} v{proposal.source.skill.version} ·
-            定义 SHA-256 <code className="hash-code">{proposal.source.skill.sha256}</code> ·
-            输出 SHA-256 <code className="hash-code">{proposal.source.skillOutputSha256}</code> ·
-            事实 SHA-256 <code className="hash-code">{proposal.source.basisFactsSha256}</code></p>}
-          <p className="helper-text">候选 SHA-256：<code className="hash-code">{proposal.candidateSha256}</code></p>
-          <p className="helper-text">基线：Project v{proposal.baseline.projectRevision} / State v{proposal.baseline.stateRevision}
-            / View v{proposal.baseline.viewRevision}。当前事实变化后须重新生成候选。</p>
-          {proposal.supersedesProposalId && <p className="helper-text">替代旧候选：<code className="hash-code">{proposal.supersedesProposalId}</code></p>}
-          {dirty && <p className="warning-callout">草稿已修改，当前预览仍是服务端保存的旧候选；请生成新候选后再应用。</p>}
-          {proposal.stale && <p className="warning-callout">服务端判定候选已失效。保留草稿，按当前事实重新生成候选。</p>}
-          <div className="blueprint-diff" aria-label="当前基线与建议差异">
-            <div className="diff-heading"><span aria-hidden="true" /><strong>候选基线</strong><strong>候选建议</strong></div>
-            <div className="diff-row"><span aria-hidden="true" /><span><strong>Goal 关联</strong>
-              <small>{proposal.diff.goalLink.beforeGoalIds.join("、") || "无"}</small></span>
-              <span className="diff-arrow-cell" aria-hidden="true"><ArrowRight /></span>
-              <span className="suggested-value">{proposal.diff.goalLink.addGoalId ?? "不新增关联"}</span></div>
-            <div className="diff-row"><span aria-hidden="true" /><span><strong>项目阶段</strong>
-              <small>{phaseLabel(proposal.diff.state.phase.before ?? proposal.baseline.phaseKey)}</small></span>
-              <span className="diff-arrow-cell" aria-hidden="true"><ArrowRight /></span>
-              <span className="suggested-value">{proposal.diff.state.phase.after ? phaseLabel(proposal.diff.state.phase.after) : "保持当前"}</span></div>
-            <div className="diff-row"><span aria-hidden="true" /><span><strong>下一步</strong>
-              <small>{proposal.diff.state.nextAction.beforeTaskId ?? "未指定"}</small></span>
-              <span className="diff-arrow-cell" aria-hidden="true"><ArrowRight /></span>
-              <span className="suggested-value">{nextActionText(proposal.diff.state.nextAction.after)}</span></div>
-            <div className="diff-row"><span aria-hidden="true" /><span><strong>默认工作台</strong>
-              <small>{kindLabel(proposal.diff.viewConfiguration.before.kind)}</small></span>
-              <span className="diff-arrow-cell" aria-hidden="true"><ArrowRight /></span>
-              <span className="suggested-value">{kindLabel(proposal.diff.viewConfiguration.after.kind)}
-                {proposal.diff.viewConfiguration.changed ? "（将变更）" : "（保持）"}</span></div>
-          </div>
-          <h3>本次新增任务</h3>
-          {proposal.diff.newTasks.length ? <ul className="live-blueprint-list">{proposal.diff.newTasks.map((task) =>
-            <li key={task.local_key}><strong>{task.title}</strong><small>{task.objective}</small>
-              <small>{task.local_key} · {task.mode} / {task.executorKind} / {task.status}</small></li>)}</ul> :
-            <p>候选不新增任务。</p>}
-          <h3>服务端视图模板</h3>
-          <p>基线：{templatePages(proposal.diff.viewConfiguration.before)}</p>
-          <p>建议：{templatePages(proposal.diff.viewConfiguration.after)}</p>
-          <p className="helper-text">建议模板 v{proposal.diff.viewConfiguration.after.templateVersion} · SHA-256 <code className="hash-code">{proposal.diff.viewConfiguration.after.templateSha256}</code></p>
-        </section>
-        <section className="surface-panel live-blueprint-followups"><h2>后续配置建议</h2>
-          <p className="helper-text">以下来自服务端候选，需在各自入口单独确认，不随本次蓝图应用。</p>
-          {proposal.followUpSuggestions.length ? <ul className="live-blueprint-list">
-            {proposal.followUpSuggestions.map((item, index) => <li key={`${item.kind}:${index}`}>
-              <strong>{item.kind}</strong><small>{item.summary}</small></li>)}</ul> : <p>没有后续配置建议。</p>}
-        </section>
-      </> : proposal ? <section className="surface-panel live-blueprint-preview" data-testid="blueprint-source-unavailable">
-        <h2>服务端候选暂不可读</h2>
-        <p>候选 <code className="hash-code">{proposal.id}</code> · {statusLabel(proposal.status)}。来源不可用；候选正文、基线与 Diff 已清除，不能应用。</p>
-        <p className="helper-text">候选 SHA-256：<code className="hash-code">{proposal.candidateSha256}</code></p>
-        {proposal.source.skillOutputSha256 && <p className="helper-text">来源输出 SHA-256：
-          <code className="hash-code">{proposal.source.skillOutputSha256}</code></p>}
-      </section> : <section className="surface-panel live-blueprint-preview"><h2>服务端候选预览</h2>
-        <p>当前项目没有可读取的蓝图候选。提交上方人工草稿后，才会显示服务端基线、Diff 与候选摘要。</p></section>}
     </div>
     <ResponsiveRail label="查看蓝图确认区" title="蓝图确认"><div className="rail-content">
       <h2>确认这次变化</h2>
       {proposal ? <><p className="rail-intro">{statusLabel(proposal.status)} · {proposal.origin === "USER_DRAFT" ? "人工草稿" : "Skill 来源"}</p>
+        {proposal.contentAvailability === "AVAILABLE" && proposal.diff && <div className="summary-card">
+          <p><ClipboardCheck aria-hidden="true" /><strong>{proposal.diff.newTasks.length} 项新任务</strong></p>
+          <p><ArrowRight aria-hidden="true" /><strong>{nextActionText(proposal.diff.state.nextAction.after)}</strong></p>
+          <p><Monitor aria-hidden="true" /><strong>{kindLabel(proposal.diff.viewConfiguration.after.kind)}工作台</strong></p>
+          <p className="helper-text">新任务进入收件箱，由我执行；应用蓝图不会开始任务。</p>
+        </div>}
         <p className="helper-text">应用绑定候选 ID、SHA-256 与 Project/State/View 三项基线修订。</p>
         <button className="primary-button primary-button--wide" type="button" data-testid="live-blueprint-apply"
           disabled={!eligibleApply} onClick={() => void send({ action: "apply", id: createCommandId(),

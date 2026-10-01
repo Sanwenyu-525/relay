@@ -61,17 +61,16 @@ try {
     }
   }
 
-  # Windows resource registration captures the root's native File ID. Keep the
-  # source integration suites runnable without a pre-existing desktop package.
-  $needsFileIoHelper = $TestFile -eq '' -or $TestFile -in @(
-    'gateway', 'real-tools-gateway', 'run-graph', 'm06-stop-proof')
-  if ($needsFileIoHelper -and [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
+  # Both resource registration and managed-content publication use native I/O.
+  # Any suite may publish content indirectly; avoid a drifting basename list.
+  # An explicitly supplied helper remains the exact artifact under test.
+  if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
       [string]::IsNullOrWhiteSpace($env:RELAY_FILE_IO_HELPER)) {
     $cargo = (Get-Command cargo -ErrorAction Stop).Source
     $helperManifest = Join-Path $workspaceRoot 'apps\file-io-helper\Cargo.toml'
-    & $cargo build --locked --manifest-path $helperManifest
+    & $cargo build --locked --target x86_64-pc-windows-msvc --manifest-path $helperManifest
     if ($LASTEXITCODE -ne 0) { throw "Native file I/O helper build failed with exit code $LASTEXITCODE" }
-    $sourceHelper = Join-Path $workspaceRoot 'apps\file-io-helper\target\debug\relay-file-io-helper.exe'
+    $sourceHelper = Join-Path $workspaceRoot 'apps\file-io-helper\target\x86_64-pc-windows-msvc\debug\relay-file-io-helper.exe'
     if (-not (Test-Path -LiteralPath $sourceHelper -PathType Leaf)) {
       throw "Native file I/O helper was not produced: $sourceHelper"
     }
@@ -132,7 +131,8 @@ try {
   # Do not pipe pg_ctl start: postgres inherits the pipe write handle and PowerShell would
   # wait for an EOF that never arrives.
   $pgWatch = [System.Diagnostics.Stopwatch]::StartNew()
-  & $pgCtlExe 'start' '-D' $dataDirectory '-l' $serverLog '-o' "-h 127.0.0.1 -p $port" '-w' '-t' '30'
+  # Maintenance must also detect a real prepared transaction after its client disconnects.
+  & $pgCtlExe 'start' '-D' $dataDirectory '-l' $serverLog '-o' "-h 127.0.0.1 -p $port -c max_prepared_transactions=2" '-w' '-t' '30'
   $postgresStartExitCode = $LASTEXITCODE
   if ($postgresStartExitCode -ne 0) {
     throw "pg_ctl start failed with exit code $postgresStartExitCode; inspect $serverLog"

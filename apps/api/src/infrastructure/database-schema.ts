@@ -963,6 +963,8 @@ export interface ModelCallRow {
   readonly budget_reserved_tokens: number | null;
   readonly error_kind: string | null;
   readonly started_at: Date;
+  readonly first_text_delta_at: Date | null;
+  readonly first_preview_persisted_at: Date | null;
   readonly settled_at: Date | null;
 }
 
@@ -990,7 +992,14 @@ export interface AssistProposalRow {
 }
 
 /** Kysely 的表名映射；Repository 使用显式 SQL，因此这里主要用于结果类型与后续查询构建。 */
+export interface RuntimeAdmissionGateRow {
+  readonly singleton: boolean;
+  readonly mode: 'NORMAL' | 'DRAINING';
+  readonly revision: bigint;
+}
+
 export interface RelayDatabaseSchema {
+  runtime_admission_gate: RuntimeAdmissionGateRow;
   model_calls: ModelCallRow;
   assist_sessions: AssistSessionRow;
   assist_messages: AssistMessageRow;

@@ -53,9 +53,11 @@ function confirmedPoint(envelope: RelayCommandEnvelope, command: PendingCapture,
   };
 }
 
-export default function ContinuationPointPanel({ client, projectId }: {
+export default function ContinuationPointPanel({ client, projectId, captureBlockedReason = null, factsReadable = true }: {
   readonly client: RelayApiClient;
   readonly projectId: string;
+  readonly captureBlockedReason?: string | null;
+  readonly factsReadable?: boolean;
 }) {
   const [points, setPoints] = useState<readonly RelayContinuationPointSummary[]>([]);
   const [comparison, setComparison] = useState<RelayContinuationComparison | null>(null);
@@ -64,32 +66,41 @@ export default function ContinuationPointPanel({ client, projectId }: {
   const [pending, setPending] = useState<PendingCapture | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [comparisonBusy, setComparisonBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const scope = useRef(0);
+  const factReadVersion = useRef(0);
+  const readable = useRef(factsReadable);
+  readable.current = factsReadable;
   const key = pendingKey(client, projectId);
 
   async function load(activeClient: RelayApiClient, request: number) {
+    if (!readable.current) return;
+    const factRequest = ++factReadVersion.current;
+    setComparisonBusy(false);
     setLoading(true);
     try {
       const next = await activeClient.getContinuationPoints(projectId);
-      if (request !== scope.current) return;
+      if (request !== scope.current || factRequest !== factReadVersion.current || !readable.current) return;
       setPoints(next);
       setError((current) => current ?? (next.length ? null : null));
     } catch (caught) {
-      if (request === scope.current) setError(describeLiveError(caught).message);
-    } finally { if (request === scope.current) setLoading(false); }
+      if (request === scope.current && factRequest === factReadVersion.current && readable.current) setError(describeLiveError(caught).message);
+    } finally { if (request === scope.current && factRequest === factReadVersion.current) setLoading(false); }
   }
 
   async function open(pointId: string) {
+    if (!readable.current || busy || comparisonBusy || loading) return;
     const request = scope.current;
-    setComparison(null); setBusy(true); setError(null);
+    const factRequest = ++factReadVersion.current;
+    setComparison(null); setComparisonBusy(true); setError(null);
     try {
       const next = await client.compareContinuationPoint(projectId, pointId);
-      if (request === scope.current) setComparison(next);
+      if (request === scope.current && factRequest === factReadVersion.current && readable.current) setComparison(next);
     } catch (caught) {
-      if (request === scope.current) setError(describeLiveError(caught).message);
-    } finally { if (request === scope.current) setBusy(false); }
+      if (request === scope.current && factRequest === factReadVersion.current && readable.current) setError(describeLiveError(caught).message);
+    } finally { if (request === scope.current && factRequest === factReadVersion.current) setComparisonBusy(false); }
   }
 
   async function checkReceipt(command: PendingCapture) {
@@ -138,36 +149,46 @@ export default function ContinuationPointPanel({ client, projectId }: {
   }
 
   useEffect(() => {
-    const request = ++scope.current;
+    scope.current++;
     setPoints([]); setComparison(null);
     setError(null); setMessage(null);
     const restored = readPending(key);
     setPending(restored);
-    void load(client, request).then(() => {
-      if (request === scope.current && restored) void checkReceipt(restored);
-    });
+    if (restored) void checkReceipt(restored);
     return () => { scope.current++; };
   }, [client, projectId, key]);
+
+  useEffect(() => {
+    factReadVersion.current++;
+    setComparisonBusy(false);
+    setPoints([]); setComparison(null);
+    if (factsReadable) void load(client, scope.current);
+    else setLoading(false);
+    return () => { factReadVersion.current++; };
+  }, [client, projectId, factsReadable]);
 
   const trimmedName = name.trim();
   const blockedReason = busy || loading ? "正在核对当前事实。" :
     pending !== null ? "上一次保存结果尚未核对，不能提交新命令。" :
-      trimmedName === "" ? "接续点名称不能为空。" : null;
+      captureBlockedReason ?? (trimmedName === "" ? "接续点名称不能为空。" : null);
 
   return <section className="resume-section" aria-label="项目接续点" data-testid="continuation-panel">
     <h2>接续点</h2>
     <p className="helper-text">接续点由你显式保存：它记录当时的 Project State 版本、未决任务与当前选用成果版本，不复制正文，也不会因为打开本页而改变当前事实。保存不停止正在执行的 Run。</p>
     {loading && <p role="status">正在读取已保存的接续点…</p>}
-    {!loading && points.length === 0 && pending === null &&
+    {!factsReadable && <p className="helper-text">项目事实尚未读取确认，已隐藏接续点及对比。草稿与原命令回执仍保留。</p>}
+    {factsReadable && !loading && points.length === 0 && pending === null &&
       <p className="helper-text">还没有保存过接续点；本页不会用“当前事实”冒充“上次看到的样子”。</p>}
-    {points.length > 0 && <ul className="run-list">{points.map((point) => <li key={point.id}>
+    {factsReadable && points.length > 0 && <ul className="run-list">{points.map((point) => <li key={point.id}>
       <button className="inline-link" type="button" data-testid="continuation-open"
+        disabled={busy || loading || comparisonBusy}
         onClick={() => void open(point.id)}>{point.name}</button>
       <small>保存于 <time dateTime={point.capturedAt}>{new Date(point.capturedAt).toLocaleString("zh-CN")}</time>
         · 捕获 State v{point.capturedState.revision}（{point.capturedState.phaseKey}）· {point.refCount} 项引用
         {point.note ? ` · ${point.note}` : ""}</small>
     </li>)}</ul>}
-    {comparison && <div data-testid="continuation-comparison">
+    {factsReadable && comparisonBusy && <p role="status">正在读取接续点对比…</p>}
+    {factsReadable && comparison && <div data-testid="continuation-comparison">
       <h3>与当前事实的差异</h3>
       <p className="helper-text">捕获于 <time dateTime={comparison.continuationPoint.capturedAt}>{new Date(comparison.continuationPoint.capturedAt).toLocaleString("zh-CN")}</time>；当前 State v{comparison.currentState.revision}（{comparison.currentState.phaseKey}）。以下都是可核对的事实差异，本版不生成解读。</p>
       <ul className="run-list">
@@ -192,6 +213,7 @@ export default function ContinuationPointPanel({ client, projectId }: {
         <ul className="run-list">{comparison.facts.artifactVersionAdded.map((ref) => <li key={ref.artifactVersionId}>
           成果 {ref.artifactId} · v{ref.versionNumber}<small>版本 {ref.artifactVersionId}</small></li>)}</ul></>}
     </div>}
+    <details open={pending !== null || error !== null} className="continuation-capture-form"><summary>保存新的接续点</summary>
     <label className="field"><span className="field-label">接续点名称</span>
       <input data-testid="continuation-name" value={name} maxLength={120} disabled={busy}
         onChange={(event) => setName(event.target.value)} placeholder="例如：写方法前" /></label>
@@ -204,6 +226,7 @@ export default function ContinuationPointPanel({ client, projectId }: {
         note: note.trim() === "" ? null : note.trim() })}>
       {busy ? "正在核对" : "保存当前接续点"}</button>
     {blockedReason && <p className="disabled-reason">{blockedReason}</p>}
+    </details>
     {error && <p className="action-error" role="alert">{error}</p>}
     {message && <p className="success-callout" role="status">{message}</p>}
     {pending && <div className="warning-callout" data-testid="continuation-pending">

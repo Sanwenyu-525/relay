@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import type { RelayApiClient, RelayModelPortStatus, RelayModelVerificationState } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { resolveVerificationState, type ModelVerificationStateKind } from "../views/SettingsView";
+import "./ModelConnectionStrip.css";
 
 /**
  * 当前服务实例的模型端口只读条。回答「这个实例到底会不会调真实模型」，

@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { AIMessageChunk } from '@langchain/core/messages';
+import { ChatOpenAI } from '@langchain/openai';
 
+import { FIRST_PARTY_REGISTRY } from '../../src/skills/first-party-registry.js';
+import type { AssistRequest } from '../../src/workflow/fake-model-port.js';
 import { CANDIDATE_OUTPUT_SCHEMA } from '../../src/workflow/markdown-deliverable.js';
 import { OpenAiCompatibleModelPort, ModelCallBudgetError, ModelOutputBudgetError,
   ModelTimeoutError,
-  ModelSourcePolicyError, SemanticResponseError }
+  ModelSourcePolicyError, ModelToolOutputError, SemanticResponseError }
   from '../../src/workflow/openai-compatible-model-port.js';
 import type { ModelPortConfig } from '../../src/workflow/model-port-config.js';
 
@@ -44,6 +48,90 @@ function port(handler: (input: Parameters<typeof fetch>[0], init?: RequestInit) 
   return new OpenAiCompatibleModelPort({ ...config, ...overrides }, {
     lookup: publicLookup,
     fetch: async (input, init) => handler(input, init),
+  });
+}
+
+function toolEvent(content = '',
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }): string {
+  return `data: ${JSON.stringify({ id: 'chatcmpl-tool-fixture',
+    object: 'chat.completion.chunk', created: 1, model: 'fixture-model',
+    choices: [{ index: 0, delta: { role: 'assistant', content,
+      tool_calls: [{ index: 0, id: 'fixture-tool', type: 'function',
+        function: { name: 'write_file', arguments: '{"path":"synthetic.txt"}' } }] },
+      finish_reason: 'tool_calls' }], ...(usage === undefined ? {} : { usage }) })}\n\n`;
+}
+
+for (const scenario of [
+  { name: 'same-chunk wire usage is not guessed', chunks: [toolEvent('must not publish',
+    { prompt_tokens: 41, completion_tokens: 9, total_tokens: 50 })],
+  usage: { inputTokens: null, outputTokens: null }, deltas: [] },
+  { name: 'prior empty and usage frames', chunks: [event(''),
+    event(null, null, { prompt_tokens: 43, completion_tokens: 8, total_tokens: 51 }), toolEvent()],
+  usage: { inputTokens: null, outputTokens: null }, deltas: [] },
+  { name: 'partial text before tool refusal', chunks: [event('partial synthetic reply'),
+    event(null, null, { prompt_tokens: 43, completion_tokens: 8, total_tokens: 51 }), toolEvent()],
+  usage: { inputTokens: null, outputTokens: null }, deltas: ['partial synthetic reply'] },
+  { name: 'unknown usage stays null', chunks: [toolEvent()],
+  usage: { inputTokens: null, outputTokens: null }, deltas: [] },
+]) {
+  test(`tool refusal preserves request metadata: ${scenario.name}`, async () => {
+    let calls = 0;
+    const model = port(() => {
+      calls += 1;
+      return response([...scenario.chunks, 'data: [DONE]\n\n']);
+    });
+    const deltas: string[] = [];
+    await assert.rejects(() => model.assist({ intent: 'DISCUSS', system: 'synthetic only',
+      turns: [{ role: 'user', content: 'reply' }],
+      onTextDelta: async (text) => { deltas.push(text); } }), (error) => {
+      assert.ok(error instanceof ModelToolOutputError);
+      assert.ok('providerRequestId' in error && 'usage' in error);
+      assert.equal(error.providerRequestId, 'chatcmpl-tool-fixture');
+      assert.deepEqual(error.usage, scenario.usage);
+      assert.ok(!JSON.stringify(error).includes('synthetic.txt'), 'tool arguments entered error evidence');
+      return true;
+    });
+    assert.deepEqual(deltas, scenario.deltas);
+    assert.equal(calls, 1);
+  });
+}
+
+for (const scenario of ['prior usage', 'same-chunk usage', 'empty request ID', 'non-text content'] as const) {
+  test(`tool refusal retains normalized SDK metadata: ${scenario}`, async (t) => {
+    // Explicit SDK chunk seam: current SSE conversion emits usage only at stream end.
+    // This checks metadata already observed, not unread wire usage or real billing.
+    t.mock.method(ChatOpenAI.prototype, 'stream', async () => (async function* () {
+      if (scenario === 'prior usage') {
+        yield Object.assign(new AIMessageChunk({ content: '', id: 'chatcmpl-known-usage' }), {
+          usage_metadata: { input_tokens: 43, output_tokens: 8, total_tokens: 51 } });
+      }
+      if (scenario === 'non-text content') {
+        yield new AIMessageChunk({ id: 'chatcmpl-known-usage',
+          content: [{ type: 'image_url', image_url: { url: 'https://synthetic.invalid/image.png' } }] });
+        return;
+      }
+      const tool = new AIMessageChunk({ content: 'must not publish',
+        id: scenario === 'empty request ID' ? '' : 'chatcmpl-known-usage',
+        tool_call_chunks: [{ name: 'write_file', args: '{"path":"synthetic.txt"}',
+          id: 'fixture-tool', index: 0, type: 'tool_call_chunk' }] });
+      yield scenario === 'same-chunk usage' ? Object.assign(tool, {
+        usage_metadata: { input_tokens: 43, output_tokens: 8, total_tokens: 51 } }) : tool;
+    })());
+    const model = port(() => { throw new Error('controlled SDK chunks must not call transport'); });
+    const deltas: string[] = [];
+    await assert.rejects(() => model.assist({ intent: 'DISCUSS', system: 'synthetic',
+      turns: [{ role: 'user', content: 'reply' }],
+      onTextDelta: async (text) => { deltas.push(text); } }), (error) => {
+      assert.ok(error instanceof ModelToolOutputError);
+      assert.equal(error.providerRequestId, scenario === 'empty request ID'
+        ? undefined : 'chatcmpl-known-usage');
+      assert.deepEqual(error.usage, scenario === 'prior usage' || scenario === 'same-chunk usage'
+        ? { inputTokens: 43, outputTokens: 8 } : { inputTokens: null, outputTokens: null });
+      assert.ok(!JSON.stringify(error).includes('synthetic.txt'));
+      assert.ok(!JSON.stringify(error).includes('https://synthetic.invalid/image.png'));
+      return true;
+    });
+    assert.deepEqual(deltas, []);
   });
 }
 
@@ -115,6 +203,56 @@ test('plain DISCUSS publishes a text delta before DONE while structured Assist s
     onTextDelta: async () => { structuredDelta = true; } });
   assert.equal(structuredDelta, false);
 });
+
+const assistResponseFormatCases: readonly {
+  readonly name: string; readonly intent: AssistRequest['intent'];
+  readonly skill?: AssistRequest['skill']; readonly structured: boolean;
+}[] = [
+  { name: 'ordinary DISCUSS', intent: 'DISCUSS', structured: false },
+  ...([
+    ['task-to-execution-contract', '1.1.0'],
+    ['verification-plan', '1.1.0'],
+    ['project-resume', '1.0.0'],
+  ] as const).map(([id, version]) => {
+    const frozen = FIRST_PARTY_REGISTRY.skill(id, version)!;
+    return { name: `${frozen.id}@${frozen.version}`, intent: 'DISCUSS' as const,
+      skill: { id: frozen.id, version: frozen.version, facts: { synthetic: true } },
+      structured: true };
+  }),
+  { name: 'PROPOSE_TASK', intent: 'PROPOSE_TASK', structured: true },
+];
+
+for (const scenario of assistResponseFormatCases) {
+  test(`Assist response format: ${scenario.name}`, async () => {
+    let calls = 0;
+    let requestBody: Record<string, unknown> | undefined;
+    const pieces = scenario.structured ? ['{"summary":', '"synthetic"}']
+      : ['synthetic ', 'reply'];
+    const model = port((_input, init) => {
+      calls += 1;
+      assert.equal(typeof init?.body, 'string');
+      requestBody = JSON.parse(init!.body as string) as Record<string, unknown>;
+      return response([event(pieces[0]!), event(pieces[1]!, 'stop'),
+        event(null, null, { prompt_tokens: 34, completion_tokens: 19, total_tokens: 53 }),
+        'data: [DONE]\n\n']);
+    });
+    const deltas: string[] = [];
+    const result = await model.assist({ intent: scenario.intent,
+      system: 'synthetic only', turns: [{ role: 'user', content: 'reply' }],
+      skill: scenario.skill, onTextDelta: async (text) => { deltas.push(text); } });
+    assert.equal(calls, 1);
+    assert.deepEqual(result, { kind: 'CONTENT', content: pieces.join(''),
+      providerRequestId: 'chatcmpl-fixture',
+      usage: { inputTokens: 34, outputTokens: 19 } });
+    assert.deepEqual(deltas, scenario.structured ? [] : pieces);
+    assert.ok(requestBody);
+    if (scenario.structured) {
+      assert.deepEqual(requestBody.response_format, { type: 'json_object' });
+    } else {
+      assert.equal(Object.hasOwn(requestBody, 'response_format'), false);
+    }
+  });
+}
 
 test('DRAFT publishes Markdown fragments before DONE but settles only the complete response', async () => {
   const encoder = new TextEncoder();

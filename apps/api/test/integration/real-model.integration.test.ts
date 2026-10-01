@@ -3,13 +3,13 @@
 // the standard regression never spends tokens or hits the network.
 // The API key stays in the environment; nothing here prints or stores it.
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import test, { after, before } from 'node:test';
 
 import { sql } from 'kysely';
 
-import { buildRunContext } from '../../src/application/context-builder.js';
+import { buildRunContext, type ContextSource } from '../../src/application/context-builder.js';
 import { delegateTask } from '../../src/application/delegate-task.js';
 import { createKnowledge, createRule } from '../../src/application/information-commands.js';
 import { advanceRunStep } from '../../src/application/run-steps.js';
@@ -49,20 +49,22 @@ test('P12 the real model drafts from explicitly selected sources and passes the 
         status: 'READY', mode: 'ME', acceptanceRevision: 1n, executorKind: 'HUMAN',
         ownershipEpoch: 0n, currentCompletionId: null });
       await r.tasks.insertAcceptanceVersion({ taskId, acceptanceRevision: 1n,
-        objective: '依据显式选中的资料形成一篇简短 Markdown 候选',
+        objective: '依据显式选中的资料形成一篇简短 Markdown 候选，并在结论中原样回显探针资料的完整唯一标记，不得改写或省略',
         requiredOutputSpec: {}, source: 'CREATE' });
       await r.tasks.insertCriterion({ taskId, acceptanceRevision: 1n, criterionId: 'human',
         statement: '人工验收', required: true, method: 'HUMAN', targetSpec: {} });
     });
     // 显式选源是真实外发边界：资料正文带独特词，供端到端断言模型确实消费了该来源。
-    const distinctive = `量子萤石协议-X7：探针资料正文中唯一的独特标记 ${randomUUID().slice(0, 8)}`;
+    const distinctive = `RELAY-M04-SOURCE-${randomUUID()}`;
     const knowledge = await createKnowledge(app.db, { workspaceId, projectId,
       commandId: randomUUID(), title: '真实模型探针资料',
       source: { sourceKind: 'NOTE', text: distinctive } });
+    const knowledgeVersion = knowledge.result.version ?? '1';
+    const sourceHash = createHash('sha256').update(distinctive, 'utf8').digest('hex');
     const delegated = await delegateTask(app.db, { workspaceId, taskId,
       commandId: randomUUID(), expectedTaskRevision: '0',
       contextSources: [{ kind: 'KNOWLEDGE', root_id: knowledge.result.knowledge_id!,
-        version: knowledge.result.version ?? '1' }] });
+        version: knowledgeVersion }] });
     const runId = delegated.result.run_id;
 
     const workerId = `real-model-${randomUUID()}`;
@@ -80,19 +82,32 @@ test('P12 the real model drafts from explicitly selected sources and passes the 
     const manifest = await buildRunContext(app.db, { run, task: await getTask(taskId), storage });
     assert.equal(manifest.kind, 'READY');
     if (manifest.kind !== 'READY') return;
-    const sources = manifest.payload.sources as readonly { selection_reason?: string }[];
-    assert.equal(sources.filter((source) => source.selection_reason === 'EXPLICIT_SELECTION').length, 1,
+    const sources = manifest.payload.sources as readonly ContextSource[];
+    const explicitSources = sources.filter((source) => source.selection_reason === 'EXPLICIT_SELECTION');
+    assert.equal(explicitSources.length, 1,
       'the frozen explicit selection is the only relevant source outbound');
+    const selected = explicitSources[0]!;
+    assert.equal(selected.source_ref, `knowledge:${knowledge.result.knowledge_id!}:v${knowledgeVersion}`);
+    assert.equal(selected.version, knowledgeVersion);
+    assert.equal(selected.content, distinctive);
+    assert.equal(selected.sha256, sourceHash);
+    assert.equal(selected.source_sha256, sourceHash);
 
     const draft = await sql<{ content: string; usage: { input_tokens: number; output_tokens: number };
-      request_id: string | null }>`
+      request_id: string | null; sources: readonly ContextSource[] }>`
       select a.result_ref->>'content' as content,
              a.result_ref->'usage' as usage,
-             a.result_ref->>'provider_request_id' as request_id
+             a.result_ref->>'provider_request_id' as request_id,
+             m.payload->'sources' as sources
       from step_attempts a join run_steps s on s.id = a.step_id
+      join model_calls c on c.step_attempt_id = a.id and c.kind = 'DRAFT'
+      join context_manifests m on m.id = c.manifest_id and m.run_id = s.run_id
       where s.run_id = ${runId} and s.step_kind = 'DRAFT' and a.status = 'SUCCEEDED'
       order by a.attempt_number desc limit 1`.execute(app.db);
     assert.ok(draft.rows[0]);
+    assert.deepEqual(draft.rows[0]!.sources.filter(
+      (source) => source.selection_reason === 'EXPLICIT_SELECTION'), explicitSources,
+      'the original DRAFT model call retains the same selected source version and content hashes');
     assert.ok((draft.rows[0]!.usage?.input_tokens ?? 0) > 0,
       'the real model reports a nonzero input token usage');
     const candidate = await sql<{ count: string }>`
@@ -100,6 +115,7 @@ test('P12 the real model drafts from explicitly selected sources and passes the 
     assert.equal(String(candidate.rows[0]?.count), '1', 'exactly one managed candidate is published');
     const draftContent = draft.rows[0]!.content;
     assert.ok(!draftContent.includes('本候选依据目标'), 'the output is not the deterministic Fake template');
+    assert.ok(draftContent.includes(distinctive), 'the real candidate echoes the unique selected-source marker verbatim');
     assert.equal(String((await sql<{ count: bigint }>`
       select count(*) as count from completion_records where task_id = ${taskId}`.execute(app.db)).rows[0]?.count), '0',
       'the HUMAN criterion keeps completion gated');

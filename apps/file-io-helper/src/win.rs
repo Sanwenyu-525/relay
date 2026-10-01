@@ -1,4 +1,5 @@
 use super::*;
+pub(super) mod content;
 use std::ffi::c_void;
 use std::mem::{size_of, zeroed};
 use std::os::windows::ffi::OsStrExt;

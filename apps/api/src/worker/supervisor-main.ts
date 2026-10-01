@@ -10,6 +10,7 @@ import { validateDatabaseUrl } from '../config/config.js';
 import { RelayDatabase } from '../infrastructure/database.js';
 import { graphCheckpointsReady } from '../infrastructure/graph-checkpoints.js';
 import { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
+import { assertRestoreNotIsolated, RestoreIsolationError } from '../runtime/restore-isolation.js';
 import { createRepositories } from '../application/unit-of-work.js';
 import { applySafeControl } from '../application/control-requests.js';
 import { recoverStoppedDesktopLaunch, runSupervisedWorkerOnce,
@@ -165,6 +166,7 @@ async function main(): Promise<void> {
       dataRoot === undefined || !validDataRoot) {
     throw new Error('supervisor configuration invalid');
   }
+  await assertRestoreNotIsolated(dataRoot);
   const testHoldAfterGatewayEffectMs = await readAcceptanceFileWriteHoldMs(dataRoot, desktopFrame);
   const workerLeaseMs = Number(process.env.RELAY_WORKER_LEASE_MS ?? '30000');
   if (!Number.isInteger(workerLeaseMs) || workerLeaseMs < 100 || workerLeaseMs > 600_000) {
@@ -302,8 +304,9 @@ try {
   await main();
 } catch (error) {
   process.stdin.pause();
-  const configFailure = error instanceof Error &&
+  const configFailure = error instanceof RestoreIsolationError || error instanceof Error &&
     (error.message.includes('configuration') || error.message.includes('schema unavailable'));
   process.stderr.write(`${configFailure ? 'supervisor_configuration_failed' : 'supervisor_failed'}\n`);
+  if (error instanceof RestoreIsolationError) process.stderr.write(`${error.code}\n`);
   process.exitCode = configFailure ? 2 : 1;
 }

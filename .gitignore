@@ -25,6 +25,8 @@ playwright-report/
 /docs/testing/evidence/**/raw.json
 /output/acceptance-raw/
 /output/evidence-maintenance-*/
+# 同类本机验收编译输出落在子包时同样不进入仓库
+/apps/api/output/acceptance-raw/
 
 # 本机临时工具、缓存与覆盖率产物
 .tmp-*/

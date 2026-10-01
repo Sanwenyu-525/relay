@@ -28,41 +28,64 @@ export interface RunDraftPreviewDto {
   readonly preview_available: boolean;
 }
 
-/** One short transaction per throttled prefix. The Run claim is the serializing point. */
-export async function publishRunDraftPreview(db: DbExecutor, input: {
+interface RunDraftPreviewOwner {
   readonly workspaceId: string; readonly runId: string; readonly stepId: string;
   readonly attemptId: string; readonly attemptClaimEpoch: bigint;
   readonly runWorkerEpoch: bigint; readonly workerId: string;
   readonly invocationEpoch?: bigint | undefined;
   readonly modelCallId: string; readonly manifestId: string;
-  readonly inputHash: string; readonly text: string; readonly truncated: boolean;
-}): Promise<boolean> {
+  readonly inputHash: string;
+}
+
+async function lockCurrentDraftOwner(transaction: DbExecutor, input: RunDraftPreviewOwner) {
+  const r = createRepositories(transaction);
+  const { task, run } = await lockTaskAndRun(r, input.runId, input.workspaceId);
+  if (run.status !== 'RUNNING' || run.current_step_id !== input.stepId ||
+      run.worker_id !== input.workerId || run.worker_epoch !== input.runWorkerEpoch ||
+      run.worker_lease_until === null || run.worker_lease_until.getTime() <= Date.now() ||
+      task.executor_run_id !== run.id || task.ownership_epoch !== run.ownership_epoch ||
+      await r.recovery.findPendingControl(run.id)) return undefined;
+  if (input.invocationEpoch !== undefined &&
+      !(await r.dispatch.hasCurrentInvocation(run.id, input.workerId,
+        input.invocationEpoch))) return undefined;
+  const step = await r.runs.readStep(input.stepId);
+  const attempt = await r.runs.readAttempt(input.attemptId);
+  if (step?.run_id !== run.id || step.step_kind !== 'DRAFT' ||
+      step.status !== 'RUNNING' || attempt?.step_id !== step.id ||
+      attempt.status !== 'RUNNING' || attempt.worker_id !== input.workerId ||
+      attempt.claim_epoch !== input.attemptClaimEpoch ||
+      attempt.lease_until === null || attempt.lease_until.getTime() <= Date.now()) return undefined;
+  const calls = new ModelCallRepository(transaction);
+  const call = await calls.read(input.modelCallId, 'update');
+  if (call?.workspace_id !== input.workspaceId || call.kind !== 'DRAFT' ||
+      call.step_attempt_id !== attempt.id || call.manifest_id !== input.manifestId ||
+      call.input_sha256 !== input.inputHash || call.status !== 'STARTED') return undefined;
+  return { r, run, attempt, call, calls };
+}
+
+export async function recordRunDraftFirstTextDelta(db: DbExecutor,
+  input: RunDraftPreviewOwner & { readonly observedAt: Date }): Promise<boolean> {
   return db.transaction().execute(async (transaction) => {
-    const r = createRepositories(transaction);
-    const { task, run } = await lockTaskAndRun(r, input.runId, input.workspaceId);
-    if (run.status !== 'RUNNING' || run.current_step_id !== input.stepId ||
-        run.worker_id !== input.workerId || run.worker_epoch !== input.runWorkerEpoch ||
-        run.worker_lease_until === null || run.worker_lease_until.getTime() <= Date.now() ||
-        task.executor_run_id !== run.id || task.ownership_epoch !== run.ownership_epoch ||
-        await r.recovery.findPendingControl(run.id)) return false;
-    if (input.invocationEpoch !== undefined &&
-        !(await r.dispatch.hasCurrentInvocation(run.id, input.workerId,
-          input.invocationEpoch))) return false;
-    const step = await r.runs.readStep(input.stepId);
-    const attempt = await r.runs.readAttempt(input.attemptId);
-    if (step?.run_id !== run.id || step.step_kind !== 'DRAFT' ||
-        step.status !== 'RUNNING' || attempt?.step_id !== step.id ||
-        attempt.status !== 'RUNNING' || attempt.worker_id !== input.workerId ||
-        attempt.claim_epoch !== input.attemptClaimEpoch ||
-        attempt.lease_until === null || attempt.lease_until.getTime() <= Date.now()) return false;
-    const call = await new ModelCallRepository(transaction).read(input.modelCallId, true);
-    if (call?.workspace_id !== input.workspaceId || call.kind !== 'DRAFT' ||
-        call.step_attempt_id !== attempt.id || call.manifest_id !== input.manifestId ||
-        call.input_sha256 !== input.inputHash || call.status !== 'STARTED') return false;
+    const owner = await lockCurrentDraftOwner(transaction, input);
+    if (owner === undefined) return false;
+    await owner.calls.recordFirstTextDelta(owner.call.id, input.observedAt);
+    return true;
+  });
+}
+
+/** One short transaction per throttled prefix. The Run claim is the serializing point. */
+export async function publishRunDraftPreview(db: DbExecutor,
+  input: RunDraftPreviewOwner & { readonly text: string;
+    readonly truncated: boolean }): Promise<boolean> {
+  return db.transaction().execute(async (transaction) => {
+    const owner = await lockCurrentDraftOwner(transaction, input);
+    if (owner === undefined) return false;
+    const { r, run, attempt, call, calls } = owner;
     await r.runs.writeDraftPreview({ runId: run.id, attemptId: attempt.id,
       attemptClaimEpoch: attempt.claim_epoch, runWorkerEpoch: run.worker_epoch,
       workerId: input.workerId, invocationEpoch: input.invocationEpoch ?? null,
       modelCallId: call.id, text: input.text, truncated: input.truncated });
+    if (input.text !== '') await calls.recordFirstPreviewPersisted(call.id);
     return true;
   });
 }

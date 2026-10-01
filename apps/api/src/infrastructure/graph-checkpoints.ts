@@ -7,7 +7,7 @@ import type { DbExecutor } from './database.js';
 // Root StateGraph invocations use checkpoint_ns="" in LangGraph 1.4.17.
 // A new graph contract therefore gets a new physical schema, not a namespace.
 export const GRAPH_CHECKPOINT_SCHEMA = 'relay_graph_v1';
-const GRAPH_INSTALL_LOCK = 'relay:graph-checkpoints:v1';
+export const GRAPH_INSTALL_LOCK = 'relay:graph-checkpoints:v1';
 const EXPECTED_MIGRATIONS = [0, 1, 2, 3, 4] as const;
 
 /** Only the trusted migration process calls the official Saver setup. */

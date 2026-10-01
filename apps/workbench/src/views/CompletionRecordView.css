@@ -1,12 +1,29 @@
-.completion-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; padding: var(--relay-layout-main-padding); }
+.completion-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; }
+.app-main .completion-page { padding: 0; }
+.completion-back { display: inline-block; margin-bottom: var(--relay-space-6); }
 .completion-page > h1 { margin-bottom: var(--relay-space-3); }
 .completion-page .page-lede { margin-bottom: var(--relay-space-6); }
 .completion-page > button { margin-bottom: var(--relay-space-4); }
 .completion-section { margin-top: var(--relay-space-6); overflow-wrap: anywhere; }
+.completion-page .completion-section.surface-panel { background: transparent; border: 0; border-radius: 0; padding: var(--relay-space-6) 0 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.completion-summary { margin-top: var(--relay-space-6); }
+.completion-summary .completion-facts { background: var(--relay-color-bg-surface); padding: var(--relay-space-2) var(--relay-space-4); }
+.completion-summary .completion-facts > div { padding: var(--relay-space-2) 0; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.completion-summary .completion-facts > div:last-child { border-bottom: 0; }
+.completion-actions { display: grid; gap: var(--relay-space-4); margin-top: 0; }
+.completion-actions h2, .completion-actions p { margin: 0; }
+.dialog-panel--drawer .completion-actions > h2 { display: none; }
+.completion-actions > .primary-button, .completion-actions > .secondary-button { width: 100%; text-align: center; }
+.completion-identity { border-top: var(--relay-border-width) solid var(--relay-color-border-separator); padding-top: var(--relay-space-4); }
+.completion-identity > summary { cursor: pointer; }
+.completion-technical > summary { cursor: pointer; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+.completion-technical > p { margin-top: var(--relay-space-2); }
+.completion-identity .completion-facts > div { grid-template-columns: 1fr; gap: var(--relay-space-1); }
 .completion-facts { display: grid; gap: var(--relay-space-3); }
 .completion-facts div { display: grid; grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr); gap: var(--relay-space-3); }
 .completion-facts dt, .completion-list small { color: var(--relay-color-text-secondary); }
 .completion-facts dd { margin: 0; }
+.completion-version-ref { display: block; }
 .completion-list { margin: var(--relay-space-4) 0 0; padding: 0; list-style: none; }
 .completion-list li { display: grid; gap: var(--relay-space-2); padding: var(--relay-space-4) 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
-@media (max-width: 700px) { .completion-page { padding: var(--relay-layout-main-smallPadding); } .completion-facts div { grid-template-columns: 1fr; } }
+@media (max-width: 47.9375rem) { .completion-facts div { grid-template-columns: 1fr; } }

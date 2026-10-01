@@ -5,6 +5,7 @@
 .agent-assist-session-bar { flex: none; }
 
 .agent-chat-conversation {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -24,10 +25,12 @@
 .agent-chat-conversation-heading .helper-text { margin: var(--relay-space-1) 0 0; }
 
 /* 消息流自己滚动；目标、事实条和输入区留在视野内。 */
+.agent-chat-transcript-shell { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .agent-chat-transcript {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: var(--relay-space-2) 0;
   scrollbar-gutter: stable;
 }
@@ -60,14 +63,25 @@
   font-size: var(--relay-font-size-meta);
   font-weight: var(--relay-font-weight-medium);
 }
+.agent-message-avatar svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
 .agent-message-body { display: grid; gap: var(--relay-space-2); min-width: 0; flex: 1; }
+.agent-message-body > * { min-width: 0; max-width: 100%; }
 .agent-message-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--relay-space-2); margin: 0; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .agent-message-role { font-weight: var(--relay-font-weight-medium); color: var(--relay-color-text-primary); }
 /* 角色不只靠颜色区分：头像文字与角色名同时表达。 */
 .agent-message-status { color: var(--relay-color-text-muted); }
 .assist-message-content { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--relay-font-size-reading); line-height: var(--relay-font-lineHeight-ui); }
+/* Markdown 自带块级间距，不沿用纯文本的 pre-wrap，否则段落与列表之间会被多余空白撑开。 */
+.assist-message-markdown { white-space: normal; }
+.assist-message-markdown .markdown-preview > :last-child { margin-bottom: 0; }
+/* 抵消消息体内既有 ul 规则，避免 Markdown 列表失去下边距后贴住后一段落。 */
+.assist-message-markdown .markdown-preview__list { margin: 0 0 var(--relay-space-2); }
 
-/* AI 消息用浅底色区分，人工消息保持纸面底色。 */
+/* 两种角色都保留文字与头像，底色只帮助扫描。 */
+.agent-message[data-role="USER"] .agent-message-body {
+  flex: 0 1 85%; padding: var(--relay-space-3) var(--relay-space-4);
+  background: var(--relay-color-bg-subtle); border-radius: var(--relay-radius-control);
+}
 .agent-message[data-role="ASSISTANT"] .agent-message-body {
   padding: var(--relay-space-3) var(--relay-space-4);
   background: var(--relay-color-selection-bg);
@@ -76,25 +90,34 @@
 .agent-message[data-role="ASSISTANT"] .agent-message-avatar { background: var(--relay-color-action-primary); color: var(--relay-color-text-onAction); }
 
 .agent-message-body details { font-size: var(--relay-font-size-meta); }
+.assist-skill-summary h4 { margin: 0; font-size: var(--relay-font-size-body); }
+.assist-skill-summary > p { margin: var(--relay-space-2) 0; }
+.assist-skill-details > summary, .agent-chat-proposal-details > summary { cursor: pointer; color: var(--relay-color-action-primary); font-size: var(--relay-font-size-body); }
+.assist-skill-details[open] > summary, .agent-chat-proposal-details[open] > summary { margin-bottom: var(--relay-space-3); }
+.assist-proposal-summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .agent-message-body ul { margin: var(--relay-space-2) 0 0; padding-left: var(--relay-space-4); }
 
 /* 输入区：常驻底部，不随消息滚动；按钮不被末段遮挡。 */
 .agent-chat-composer {
+  position: relative;
   flex: none;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: var(--relay-space-2);
   margin: 0;
-  padding: var(--relay-space-3);
+  padding: var(--relay-space-2);
   background: var(--relay-color-bg-surface);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-control);
 }
-.agent-chat-composer-heading { margin: 0; font-weight: var(--relay-font-weight-medium); }
 .agent-chat-message-form { display: contents; }
-.agent-chat-composer .field { display: grid; gap: var(--relay-space-1); }
-.agent-chat-composer textarea { min-height: 3.5rem; resize: vertical; }
-.agent-chat-composer-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--relay-space-3); flex-wrap: wrap; }
-.agent-chat-composer-tools { display: flex; align-items: center; gap: var(--relay-space-3); flex-wrap: wrap; }
+.agent-chat-composer .field { display: grid; gap: var(--relay-space-1); margin: 0; }
+.agent-chat-composer textarea { min-height: var(--relay-space-12); padding: var(--relay-space-2) var(--relay-space-3); resize: vertical; font-size: var(--relay-font-size-body); background: transparent; }
+.agent-chat-composer-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--relay-space-2); flex-wrap: wrap; }
+.agent-chat-composer-actions .primary-button { display: inline-flex; align-items: center; gap: var(--relay-space-2); min-height: var(--relay-control-height); }
+.agent-chat-composer-actions .primary-button svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+.agent-chat-composer-tools { display: flex; align-items: center; gap: var(--relay-space-2); flex-wrap: wrap; }
+.agent-chat-send-hint { margin: 0; font-size: var(--relay-font-size-meta); }
 .agent-chat-tool {
   display: inline-flex;
   align-items: center;
@@ -114,11 +137,28 @@ button.agent-chat-tool:hover { background: var(--relay-color-selection-hover); c
 .agent-chat-tool--pending { color: var(--relay-color-text-muted); cursor: not-allowed; }
 
 .agent-chat-options, .agent-chat-proposals { font-size: var(--relay-font-size-meta); }
+.agent-chat-options > summary { display: flex; align-items: center; min-height: var(--relay-control-height); padding: 0 var(--relay-space-2); border-radius: var(--relay-radius-control); }
+.agent-chat-options > summary:hover { background: var(--relay-color-selection-hover); }
+.agent-chat-options > summary::before { content: "+"; margin-right: var(--relay-space-1); }
+.agent-chat-options[open] > summary::before { content: "−"; }
+.agent-chat-options[open] { position: absolute; bottom: calc(100% + var(--relay-space-2)); inset-inline: 0; z-index: 4; max-height: min(60dvh, var(--relay-layout-workspace-sideWidth)); overflow-y: auto; padding: var(--relay-space-4); background: var(--relay-color-bg-surface); border: var(--relay-border-width) solid var(--relay-color-border-control); border-radius: var(--relay-radius-control); box-shadow: var(--relay-shadow-floating); }
+.agent-chat-options .field { display: grid; gap: var(--relay-space-2); margin-top: var(--relay-space-3); }
+.agent-chat-proposals { margin-top: var(--relay-space-4); }
+.agent-chat-proposals .assist-proposal-payload { max-height: none; overflow: visible; }
+.agent-chat-proposal-card { margin-top: var(--relay-space-3); font-size: var(--relay-font-size-body); }
+.agent-chat-proposal-card > .task-proposal-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--relay-space-2); }
+.agent-chat-proposal-card > .task-proposal-heading h4 { margin: 0; font-size: var(--relay-font-size-body); }
+.agent-chat-proposal-card > .task-proposal-heading .task-proposal-state { flex: none; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+.agent-chat-proposal-card > .task-proposal-heading .task-proposal-state[data-status="PENDING"] { color: var(--relay-color-status-warning-text); }
+.agent-chat-proposal-card > p { margin-block: var(--relay-space-2); }
+.agent-chat-proposal-details .assist-proposal { padding: 0; border: 0; background: transparent; }
+.agent-chat-latest { position: absolute; bottom: var(--relay-space-2); right: var(--relay-space-4); display: inline-flex; gap: var(--relay-space-2); align-items: center; min-height: var(--relay-control-height); font-size: var(--relay-font-size-meta); background: var(--relay-color-bg-surface); box-shadow: var(--relay-shadow-floating); z-index: 1; }
+.agent-chat-latest svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+.assist-preview-error p { margin: 0 0 var(--relay-space-2); }
 .agent-chat-options summary, .agent-chat-proposals summary { cursor: pointer; color: var(--relay-color-text-secondary); }
 .agent-pending { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-3); }
 .agent-pending p { margin: 0; }
 
 @media (max-width: 64rem) {
-  .agent-chat-composer-actions { flex-direction: column; align-items: stretch; }
-  .agent-chat-composer-actions .primary-button { width: 100%; }
+  .agent-chat-composer-tools { gap: var(--relay-space-1); }
 }

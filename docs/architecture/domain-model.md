@@ -168,6 +168,14 @@ ResolveReview 通过请求类型映射到固定应用用例，禁止通用“执
 
 这些约束需要真实数据库集成与故障注入验证。仅单元测试、进程内锁或 UI 禁用按钮均不足以证明成立。
 
+维护排空使用数据库级持久准入门，位于首次业务命令及新领取的业务锁之前；维护变更与原命令回执同事务，旧回执和停止控制保留。该门不改 Task/Run 的执行权，DRAINING 仍允许原在途结算和图写入，不能证明可备份的静止快照。取舍与范围见 [ADR-014](../decisions/ADR-014-database-maintenance-admission.md)，运行说明见[部署设计](../deployment/本机部署.md#4-备份恢复)。
+
+Windows 原宿主停机由同一桌面 EXE 的私有维护入口复用原 ARMED/Job Owner，并持当前登录会话的旧单实例 guard；Node 只持活的私有协议会话，不导入任意停机证明。它不承担业务恢复或数据库状态写入，失锁不能继续作为维护授权。独立写者、内容发布和 Saver 的安全点仍是备份协调职责；见[M07 边界记录](../development/m07-backup-recovery.md)。
+
+Windows 受管内容的物理发布由既有原生文件助手持共享锁并执行完整 IO，维护排他与实际写者互斥；ManagedContentStore 仍是应用的存储入口，版本/事务 Owner 不变。缺助手不回退 Node IO，公开错误沿既有存储错误契约。该锁不覆盖外部工具或 PG/Saver，取舍与兼容见 [ADR-015](../decisions/ADR-015-managed-content-native-publication.md)。
+
+数据库连接维护由受信运维CLI的独立migrator会话持原DDL锁，修改前保留原ACL凭据，并拒绝未知旧连接、启动连接及prepared事务。它只操作数据库权限元数据、只读DRAINING，不写Task/Run或替代Application的业务Owner；恢复原权限不自动恢复执行。完整备份协调仍需结合存活停机/内容会话及原效果核对；取舍见 [ADR-014](../decisions/ADR-014-database-maintenance-admission.md#2026-10-01-接续决定独立数据库连接维护会话)。
+
 ## 8. 首条纵向路径
 
 选择“围绕项目资料形成一份有来源的 Markdown 研究摘要”作为设计贯通示例，不额外承诺新产品范围。

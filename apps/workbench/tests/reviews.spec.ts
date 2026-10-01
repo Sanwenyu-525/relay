@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { flush, mountWorkbench } from "./mountApp";
+import { DomWrapper, flush, mountWorkbench } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -46,6 +46,148 @@ function activate(): void {
 }
 
 describe("P07 Review Inbox", () => {
+  it("读取请求旁的确切历史正文，不以最新版替代，也不提交决定", async () => {
+    activate(); const item = review(); const reads: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST") throw new Error("阅读不应写入判断");
+      if (url === `${reviewUrl}?status=OPEN`) return response(200, { items: [item] });
+      if (url === `${reviewUrl}/${reviewId}`) return response(200, item);
+      if (url.endsWith(`/tasks/${item.task_id}/artifacts`)) return response(200, {
+        current_accepted_version_ids: [], items: [{ id: "artifact-1", task_id: item.task_id,
+          title: "判断对象.md", revision: "3", latest_version_id: "latest-version", version_count: 2,
+          versions: [{ artifact_version_id: "latest-version", version_number: "3", media_type: "text/markdown", sha256: "b".repeat(64), size: "10", source_kind: "HUMAN", created_at: item.created_at },
+            { artifact_version_id: item.target.artifact_version_id, version_number: "2", media_type: "text/markdown", sha256: "c".repeat(64), size: "10", source_kind: "HUMAN", created_at: item.created_at }] }]
+      });
+      if (url.endsWith(`/artifact-versions/${item.target.artifact_version_id}/content`)) {
+        reads.push(item.target.artifact_version_id);
+        return { ok: true, status: 200, text: async () => "## 所引用的历史结论\n必须依据这一版判断。" } as Response;
+      }
+      if (url.endsWith("/content")) throw new Error("不能读取最新版本代替请求目标");
+      return response(200, { items: [], next_cursor: null });
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/reviews?id=${reviewId}`); unmount = mounted.unmount; await flush();
+    expect(mounted.wrapper.get('[data-testid="review-bound-reader"]').text()).toContain("必须依据这一版判断");
+    expect(mounted.wrapper.get('[data-testid="review-bound-reader"] .artifact-doc-heading').text()).toContain("v2");
+    expect(reads).toEqual([item.target.artifact_version_id]);
+    expect(fetchMock.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET")).toBe(true);
+  });
+
+  it("待审响应丢失后切换查询被拦截，确认原回执前保留原命令 ID", async () => {
+    activate(); let commandId = ""; let posts = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `${reviewUrl}?status=OPEN`) return response(200, { items: [review()] });
+      if (url === `${reviewUrl}/${reviewId}`) return response(200, review());
+      if (url === `${reviewUrl}/${reviewId}/decisions` && init?.method === "POST") {
+        posts++; commandId = String((JSON.parse(String(init.body)) as Record<string, unknown>).command_id);
+        throw new TypeError("response lost");
+      }
+      if (url.endsWith(`/commands/${commandId}`)) return response(200, {
+        command_id: commandId, command_type: "ResolveReview", committed_at: review().created_at,
+        result: { review_id: reviewId, decision_id: "decision-1", decision: "ACCEPT", revision: "2" }
+      });
+      if (url.endsWith("/artifacts")) return response(200, { items: [], current_accepted_version_ids: [] });
+      return response(200, { items: [], next_cursor: null });
+    }));
+    const mounted = await mountWorkbench(`/reviews?id=${reviewId}`); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').trigger("click"); await flush();
+    await mounted.router.push(`/reviews?id=88888888-8888-4888-8888-888888888888`); await flush();
+    expect(mounted.router.currentRoute.value.query.id).toBe(reviewId);
+    const dialog = new DomWrapper(document.querySelector('[role="dialog"]'));
+    expect(dialog.text()).toContain(commandId);
+    expect(mounted.wrapper.find('[data-testid="discard-draft-leave"]').exists()).toBe(false);
+    await dialog.findAll("button").find((button) => button.text() === "保留并继续编辑")!.trigger("click");
+    await mounted.wrapper.get('[data-testid="relay-connection-open"]').trigger("click");
+    const connectionDialog = new DomWrapper(document.body);
+    await connectionDialog.get('[data-testid="relay-disconnect"]').trigger("click");
+    expect(connectionDialog.get('[data-testid="relay-connection-error"]').text()).toContain("先查询原命令回执");
+    expect(connectionDialog.get('[data-testid="relay-connection-error"]').text()).not.toContain("丢弃");
+    await connectionDialog.findAll('[role="dialog"] button').find((button) => button.text() === "关闭")!.trigger("click");
+    expect(mounted.wrapper.get('[data-testid="review-check-receipt"]').exists()).toBe(true);
+    await mounted.wrapper.get('[data-testid="review-check-receipt"]').trigger("click"); await flush();
+    expect(posts).toBe(1);
+    expect(mounted.wrapper.text()).toContain("已核对原命令回执");
+  });
+  it.each(["bound", "other-task", "other-version", "unavailable"])("请求名称只来自绑定版本，不用最新版或其他任务替换（%s）", async (source) => {
+    activate();
+    const item = review();
+    const taskId = item.task_id;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST") throw new Error("读取请求名称不应提交业务命令");
+      if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
+      if (url.endsWith("/tasks?scope=all") || url.endsWith("/projects?status=active")) return response(200, { items: [], next_cursor: null });
+      if (url === `${reviewUrl}?status=OPEN`) return response(200, { items: [item] });
+      if (url === `${reviewUrl}/${reviewId}`) return response(200, item);
+      if (url.endsWith(`/tasks/${taskId}/artifacts`)) return source === "unavailable" ? response(403, { code: "FORBIDDEN", detail: "名称不可读取" })
+        : response(200, { current_accepted_version_ids: [], items: [{ id: "artifact-1", task_id: source === "other-task" ? "other-task" : taskId,
+          title: "评价方案.md", revision: "3", latest_version_id: "latest-version", version_count: 2,
+          versions: [{ artifact_version_id: "latest-version", version_number: "3", media_type: "text/markdown", sha256: "b".repeat(64), size: "10", source_kind: "HUMAN", created_at: item.created_at },
+            { artifact_version_id: source === "other-version" ? "another-version" : item.target.artifact_version_id, version_number: "2", media_type: "text/markdown", sha256: "c".repeat(64), size: "10", source_kind: "HUMAN", created_at: item.created_at }] }] });
+      throw new Error(`unexpected ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench("/reviews"); unmount = mounted.unmount;
+    const row = mounted.wrapper.get(".review-list-item");
+    if (source === "bound") expect(row.text()).toContain("评价方案.md v2");
+    else expect(row.text()).not.toContain("评价方案.md");
+    expect(row.text()).not.toContain("评价方案.md v3");
+    expect(mounted.wrapper.get(".review-detail").text()).toContain(item.target.artifact_version_id);
+    expect(fetchMock.mock.calls.filter((call) => (call[1] as RequestInit | undefined)?.method === "POST")).toHaveLength(0);
+  });
+
+  it("筛选请求类型只改变列表，原未决决定仍可核对且不重复提交", async () => {
+    activate();
+    const item = review();
+    const approval = { ...item, id: "approval-review", kind: "ACTION_APPROVAL", reason: "本地提交需要批准", target: { normalized_target: "repo/main" } };
+    let commandId = "";
+    let posts = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
+      if (url.endsWith("/tasks?scope=all") || url.endsWith("/projects?status=active")) return response(200, { items: [], next_cursor: null });
+      if (url === `${reviewUrl}?status=OPEN`) return response(200, { items: [item, approval] });
+      if (url === `${reviewUrl}/${reviewId}`) return response(200, item);
+      if (url.endsWith(`/tasks/${item.task_id}/artifacts`)) return response(200, { items: [], current_accepted_version_ids: [] });
+      if (url === `${reviewUrl}/${reviewId}/decisions` && init?.method === "POST") {
+        posts++; commandId = String((JSON.parse(String(init.body)) as Record<string, unknown>).command_id); throw new TypeError("response lost");
+      }
+      if (url.endsWith(`/commands/${commandId}`)) return response(200, { command_id: commandId, command_type: "ResolveReview", committed_at: item.created_at,
+        result: { review_id: reviewId, decision_id: "decision-1", decision: "ACCEPT", revision: "2" } });
+      throw new Error(`unexpected ${url}`);
+    }));
+    const mounted = await mountWorkbench("/reviews"); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').trigger("click"); await flush();
+    await mounted.wrapper.get('[data-testid="review-filter-ACTION_APPROVAL"]').trigger("click"); await flush();
+    expect(mounted.wrapper.get(".review-list-item").text()).toContain("本地提交需要批准");
+    expect(mounted.wrapper.get('[data-testid="review-check-receipt"]').exists()).toBe(true);
+    await mounted.wrapper.get('[data-testid="review-check-receipt"]').trigger("click"); await flush();
+    expect(mounted.wrapper.text()).toContain("已核对原命令回执");
+    expect(posts).toBe(1);
+  });
+
+  it("无项目请求刷新失败时禁用新决定，不能按旧详情继续提交", async () => {
+    activate();
+    let denied = false;
+    let posts = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST") { posts++; throw new Error("旧请求不得提交"); }
+      if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
+      if (url.endsWith("/tasks?scope=all") || url.endsWith("/projects?status=active")) return response(200, { items: [], next_cursor: null });
+      if (url === `${reviewUrl}?status=OPEN`) return denied ? response(403, { code: "FORBIDDEN", detail: "请求不可读取" }) : response(200, { items: [review()] });
+      if (url === `${reviewUrl}/${reviewId}`) return response(200, review());
+      if (url.endsWith("/artifacts")) return response(200, { items: [], current_accepted_version_ids: [] });
+      throw new Error(`unexpected ${url}`);
+    }));
+    const mounted = await mountWorkbench("/reviews"); unmount = mounted.unmount;
+    denied = true; await mounted.wrapper.get(".review-heading button").trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').attributes("disabled")).toBeDefined();
+    await mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').trigger("click"); await flush();
+    expect(posts).toBe(0);
+  });
+
   it("示例模式展示只读请求，不提供可提交决定", async () => {
     const mounted = await mountWorkbench("/reviews");
     unmount = mounted.unmount;

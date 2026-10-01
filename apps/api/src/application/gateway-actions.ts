@@ -38,6 +38,7 @@ import {
 } from '../git/git-adapter.js';
 import { executeCliCommand, reconcileCliExecution } from '../cli-worker/cli-adapter.js';
 import { getAdapterDescriptor } from '../gateway/adapter-metadata.js';
+import { readAdmission, requireNormalAdmission } from './maintenance-admission.js';
 
 /** Test-only narrowing of WEB_FETCH budgets (production dispatch passes none). */
 type DispatchWebFetchLimits = Partial<WebFetchLimits>;
@@ -703,6 +704,7 @@ export async function claimRunForGateway(db: DbExecutor, input: {
 }): Promise<{ readonly worker_epoch: string }> {
   if (!input.workerId) throw validationFailed([{ field: 'worker_id', message: 'must not be empty' }]);
   return withTransaction(db, async (repositories) => {
+    if (input.delivery === undefined) requireNormalAdmission(await readAdmission(repositories, 'share'));
     const authority = await repositories.workspaces.lockAuthority(input.workspaceId, 'share');
     if (authority === undefined) throw resourceNotFound('Workspace authority');
     const { task, run } = await lockTaskAndRun(repositories, input.runId, input.workspaceId);
@@ -765,6 +767,7 @@ export async function claimGatewayWorker(db: DbExecutor, input: {
     throw resourceNotFound('Gateway operation');
   }
   return withTransaction(db, async (repositories) => {
+    if (input.delivery === undefined) requireNormalAdmission(await readAdmission(repositories, 'share'));
     const authority = await repositories.workspaces.lockAuthority(input.workspaceId, 'share');
     if (authority === undefined) throw resourceNotFound('Workspace authority');
     const { task, run } = await lockTaskAndRun(repositories, located.run_id!, input.workspaceId);

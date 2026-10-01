@@ -1,6 +1,7 @@
+import { reviewReasonText } from "../components/ReviewDecisionPanel";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
-import { ArrowRight, CircleCheck, CircleDashed, FileText } from "lucide-react";
+import { ArrowRight, CircleCheck, CircleDashed, FileText, RotateCcw } from "lucide-react";
 import AssistView from "./AssistView";
 import BlueprintView from "./BlueprintView";
 import ProjectResumeView from "./ProjectResumeView";
@@ -9,7 +10,7 @@ import type { RelayProjectGoal } from "../api/blueprintDtos";
 import type { RelayApiClient, RelayDecision, RelayProject, RelayProjectState, RelayReview, RelayTaskSummary } from "../api/relayClient";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { fixtureModeFromQuery } from "../lib/fixtureMode";
-import { executorLabels, interactionModeLabels, phaseLabel, projectTypeLabels, taskStatusLabels } from "../lib/labels";
+import { executorLabels, interactionModeLabels, phaseLabel, projectTypeLabels, reviewKindLabels, taskStatusLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import type { ProjectSnapshot, ProjectSummary, SourceReference } from "../types";
@@ -95,10 +96,18 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
   const type = project.projectType in projectTypeLabels ? projectTypeLabels[project.projectType as ProjectType] : project.projectType;
   const activeGoals = goals?.filter((goal) => goal.status === "ACTIVE") ?? null;
   return <section className="skill-page project-overview" data-testid="project-overview-live"><div className="page-layout"><div className="page-primary">
-    <p className="eyebrow">项目</p><h1>{project.title}</h1>
+    <header className="list-header"><div><p className="eyebrow">{type} · {phaseLabel(state.phaseKey)}</p><h1>{project.title}</h1></div>
+      <button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}><RotateCcw aria-hidden="true" />刷新</button></header>
     <p className="page-lede">{activeGoals && activeGoals.length ? activeGoals.map((goal) => goal.title).join("；") : `${type}项目 · ${phaseLabel(state.phaseKey)}`}</p>
     {project.archivedAt !== null && <p className="warning-callout" role="status">项目已归档，本页只读；不能再提交新的写命令。</p>}
-    <section className="resume-section"><h2>项目当前状态</h2>
+    {goals === null && <p className="warning-callout" role="alert">Goal 关系本次读取失败，目标范围待核对。</p>}
+    <section className="resume-section project-next-step"><h2>下一步</h2>
+      {state.nextActionTaskId === null ? <p className="helper-text">Project State 尚未指定下一步 Task。</p>
+        : nextAction ? <><h3>{nextAction.title}</h3><p className="metadata-row">{taskStatusLabels[nextAction.status]} · {interactionModeLabels[nextAction.mode]} · {executorLabels[nextAction.executor]}</p>
+          <Link className="primary-button" to={`/tasks/${nextAction.id}`}>继续任务<ArrowRight aria-hidden="true" /></Link></>
+          : <p className="warning-callout">{facts.nextActionFailed ? `State 引用 Task ${state.nextActionTaskId}，本次单读失败；不以其他任务替代。` : "State 引用的下一步当前不可确认。"}</p>}
+    </section>
+    <details className="resume-section project-state-details"><summary>项目当前状态 · {phaseLabel(state.phaseKey)} · v{state.revision}</summary>
       <p className="metadata-row">State revision v{state.revision}<span aria-hidden="true"> · </span>{type}<span aria-hidden="true"> · </span>Project v{project.revision}</p>
       <p className="disabled-reason"><CircleDashed aria-hidden="true" />State 的确认人与确认时间、以及「已确认 / 仍需明确」清单字段服务端尚未提供（待接入）；本页只呈现 revision、阶段、下一步、选用产物与 Decision 等真实事实，不推断状态由任务数量决定。</p>
       <dl className="rail-definition-list">
@@ -106,38 +115,26 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
         <div><dt>当前目标</dt><dd>{goals === null ? <span className="warning-callout">Goal 关系本次读取失败，目标范围待核对。</span>
           : activeGoals && activeGoals.length ? activeGoals.map((goal) => goal.title).join("；") : "当前没有关联 Goal；不据此推断项目没有目标。"}</dd></div>
       </dl>
-    </section>
+    </details>
     <section className="resume-section"><h2>关键产物与决定</h2>
-      <p className="helper-text">产物只列 State 当前选用的版本引用，不代表最新版本；决定来自项目 Decision 查询。</p>
+      <p className="helper-text">项目当前选用的确切版本与已记录决定。</p>
       {artifacts.length ? <ul className="run-list">{artifacts.map((artifact) => <li key={artifact.versionId}>
         {artifact.title ? <><strong>{artifact.title}</strong> · v{artifact.version}{artifact.taskId && <> · <Link className="inline-link" to={`/tasks/${artifact.taskId}?tab=artifacts`}>打开任务产物</Link> · <Link className="inline-link" to={`/artifact-versions/${artifact.versionId}/lineage`}>查看来源</Link></>}</>
           : <>版本 <code className="hash-code">{artifact.versionId}</code> · v{artifact.version}（产物详情当前不可读取）</>}
-        <small>来源 {artifact.sourceRef}</small></li>)}</ul> : <p className="helper-text">State 当前没有选用的产物版本。</p>}
+        <details><summary>版本来源</summary><small>版本 ID：{artifact.versionId} · 来源 {artifact.sourceRef}</small></details></li>)}</ul> : <p className="helper-text">State 当前没有选用的产物版本。</p>}
       {decisions === null ? <p className="warning-callout">Decision 本次读取失败，决定清单待核对。</p>
         : decisions.length ? <ul className="run-list">{decisions.slice(0, 5).map((decision) => <li key={decision.id}><strong>{decision.title}</strong> · {decision.status} · v{decision.currentVersion}<small><Link className="inline-link" to={`/projects/${id}/knowledge?kind=DECISION&item=${decision.id}`}>查看依据</Link> · 更新于 {new Date(decision.updatedAt).toLocaleDateString("zh-CN")}</small></li>)}</ul>
           : <p className="helper-text">本次查询未返回项目 Decision。</p>}
     </section>
-    <p className="list-footer-note">项目状态来自人工确认的 State；AI 提案不会自动改写 State，摘要可追溯到对应版本。</p>
-  </div><ResponsiveRail label="查看下一步与待判断" title="下一步">
+    <details className="page-explanation"><summary>状态与版本说明</summary><p className="helper-text">项目状态来自人工确认的 State；AI 提案不会自动改写 State，摘要可追溯到对应版本。产物只列 State 当前选用的版本引用，不代表最新版本；决定来自项目 Decision 查询。</p></details>
+  </div><ResponsiveRail label="查看待判断与项目入口" title="待判断与入口">
     <div className="rail-content">
-      <h2>State 指定的下一步</h2>
-      {state.nextActionTaskId === null ? <p className="helper-text">Project State 尚未指定下一步 Task。</p>
-        : nextAction ? <><p><Link className="inline-link" to={`/tasks/${nextAction.id}`}>{nextAction.title}</Link></p>
-          <dl className="rail-definition-list">
-            <div><dt>任务状态</dt><dd>{taskStatusLabels[nextAction.status]}</dd></div>
-            <div><dt>执行模式</dt><dd>{interactionModeLabels[nextAction.mode]}</dd></div>
-            <div><dt>当前执行者</dt><dd>{executorLabels[nextAction.executor]}</dd></div>
-          </dl>
-          <Link className="primary-button primary-button--wide" to={`/tasks/${nextAction.id}`}>继续任务<ArrowRight aria-hidden="true" /></Link>
-          <p className="disabled-reason"><CircleDashed aria-hidden="true" />「继续任务」只打开任务详情，不会在此开始、恢复或改写执行。</p></>
-          : <p className="warning-callout">{facts.nextActionFailed ? `State 引用 Task ${state.nextActionTaskId}，本次单读失败；不以其他任务替代。` : "State 引用的下一步当前不可确认。"}</p>}
-      <hr />
       <h2>需要你的判断</h2>
-      <p className="helper-text">来源：当前 OPEN Review 查询；不据此推断其他任务或历史判断。</p>
       {reviews === null ? <p className="warning-callout">Review 本次读取失败，待处理项未知。</p>
-        : reviews.length ? <ul className="run-list">{reviews.slice(0, 5).map((review) => <li key={review.id}><Link className="inline-link" to={`/reviews?id=${review.id}`}>{review.kind} · {review.reason}</Link><small>Review v{review.revision}</small></li>)}</ul>
+        : reviews.length ? <ul className="run-list">{reviews.slice(0, 5).map((review) => <li key={review.id}><Link className="inline-link" to={`/reviews?id=${review.id}`}>{reviewKindLabels[review.kind]} · {reviewReasonText(review.reason)}</Link><small>请求 v{review.revision}</small></li>)}</ul>
           : <p className="helper-text">本次 OPEN Review 查询未返回本项目待判断项。</p>}
       {reviews !== null && reviews.length > 5 && <p className="helper-text">只显示前 5 项；其余请到待审页面查看。</p>}
+      <section className="rail-section"><h3>项目入口</h3><Link className="secondary-button secondary-button--wide" to={`/projects/${id}/tasks`}>项目任务</Link><Link className="secondary-button secondary-button--wide" to={`/projects/${id}/knowledge`}>项目资料</Link><Link className="secondary-button secondary-button--wide" to={`/projects/${id}/workbench`}>项目工作台</Link></section>
     </div>
   </ResponsiveRail></div></section>;
 }

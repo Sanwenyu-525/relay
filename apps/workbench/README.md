@@ -2,6 +2,8 @@
 
 本目录是 React 19 + TypeScript + Vite 8 工作台：项目和任务、人工产物闭环、资料、待审、Run 查询与控制、四项 Skill 预览沿用原工作台路由和视觉。浏览器默认使用内存 fixture；只有显式连接本机 API 后才写真实 PostgreSQL。Vue 原件及逐页迁移关系见 [M02 开发记录](../../docs/development/m02-react-migration.md)。
 
+默认首页为 `/projects`；左栏「协作」或窄屏导航抽屉可进入 `/agent`。真实任务详情的「进入协作工作区」携带当前任务 ID，直接恢复对应工作；打开入口不自动创建会话、任务、运行或调用模型。
+
 浏览器页壳右上「数据来源」可输入 API 地址、Workspace ID 与 Bearer 令牌，`/health/ready` 返回 200 后进入 live；凭据仅存于本页内存，刷新回到 fixture。切换连接会重新读取当前路由，未保存草稿会阻止切换。Tauri 窗口通过受信 `desktop_bootstrap` 取同样三字段，失败时显示阻断页，不把示例数据冒充 live。M02 的真实 Windows 基础见[独立验收](../../docs/testing/m02-independent-acceptance.md)；M03 Mock 完整闭环和 M07 安装交付仍按各自出口验收。
 
 ## 依赖与命令

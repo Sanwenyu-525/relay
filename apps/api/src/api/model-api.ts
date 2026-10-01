@@ -6,10 +6,10 @@ import {
   ModelVerifyConfigError,
   createOpenAiCompatibleVerifyCall,
   readModelVerificationState,
-  runModelPortVerification,
   type ModelVerifyResult,
   type VerifyCallPort,
 } from '../workflow/model-port-verify.js';
+import { runModelPortVerification } from '../application/model-port-verification.js';
 import { UuidSchema } from './domain-schemas.js';
 import { ProblemError, type ProblemDetails } from './problem.js';
 import { sendReadError, sendProblem, type RouteDependencies } from './envelope.js';

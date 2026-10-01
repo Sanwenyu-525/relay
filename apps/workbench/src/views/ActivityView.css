@@ -19,7 +19,7 @@
 .activity-aside { min-width: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); padding-top: var(--relay-space-4); }
 .activity-groups { margin-top: var(--relay-space-6); }
 .activity-group + .activity-group { margin-top: var(--relay-space-8); }
-.activity-day { font-family: var(--relay-font-family-editorial); font-size: var(--relay-font-size-section); font-weight: var(--relay-font-weight-medium); margin: 0 0 var(--relay-space-2); }
+.activity-day { font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-section); font-weight: var(--relay-font-weight-medium); margin: 0 0 var(--relay-space-2); }
 .activity-list { padding: 0; margin: 0; list-style: none; }
 .activity-row { padding: var(--relay-space-6) 0; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); overflow-wrap: anywhere; }
 .activity-row--selected { background: var(--relay-color-selection-bg); box-shadow: inset var(--relay-focus-width) 0 0 var(--relay-color-action-primary); padding-left: var(--relay-space-4); margin-left: calc(-1 * var(--relay-space-4)); }

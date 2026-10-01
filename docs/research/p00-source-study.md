@@ -23,10 +23,12 @@
 
 用户要求克隆源码以便对照、参考。本次复用已有七个仓库，新增克隆 pg-boss 和 Vercel AI SDK；已核对九个仓库的 origin、HEAD、检出范围和工作树状态，工作树均无未提交变更。下列路径均相对项目根目录 `D:/Develop/Relay-Agent`，位于 `.gitignore` 排除的 `.research/` 中。
 
+此标题保留首批核验日期和既有锚点；DeepSeek 缓存于 2026-10-01 更新，清单该行及 §1.2 记录当前快照，其余行仍是首批核验结果。
+
 | 项目 | 本地目录 | 核验提交 / 版本依据 | 工作树范围 | 对照用途 |
 |---|---|---|---|---|
 | Codex | `.research/upstream/codex` | `78245b47af2a`；首批锁文件 | 稀疏检出 | 会话、轮次事件、审批和中断 |
-| DeepSeek Harness | `.research/upstream/deepseek-harness` | `ddefc45fbc7f`；首批锁文件 | 稀疏检出 | 插件生命周期、Agent/driver 分离和工具准入 |
+| DeepSeek Harness | `.research/upstream/deepseek-harness` | `639ed015397290b3745d163aafe02ffee4aa3f84`；2026-10-01 fetch 的 `origin/master`，`dsh-v0.2.0-rc.2` | 稀疏检出；另展开六个 UI 包，见 §1.2 | 插件生命周期、Agent/driver 分离、工具准入、输入/审批/布局组件 |
 | Pi | `.research/upstream/pi` | `36b60d2e8985`；首批锁文件 | 稀疏检出 | Agent loop、消息转换、取消和工具钩子 |
 | LangChain | `.research/upstream/langchain` | `eba445b7563d`；首批锁文件 | 稀疏检出 | Agent factory、middleware 和人工决策 |
 | LangGraph | `.research/upstream/langgraph` | `aa742fb31e282`；首批锁文件 | 稀疏检出 | checkpoint、中断和重放恢复 |
@@ -35,7 +37,7 @@
 | pg-boss | `.research/upstream/pg-boss` | `4e05af1eeaad3a645b16e3dd6c389fb4610ee0e9`；本次克隆时默认分支 HEAD | 完整检出 | PostgreSQL 队列、领取与唤醒机制，待研究 |
 | Vercel AI SDK | `.research/vercel-ai` | `08ae5ad05bc12`；`ai@7.0.107`，实验锁文件 | 完整检出 | 模型流、工具 schema、审批和取消边界 |
 
-首批六项的完整提交及 origin 以本节上方的 [upstream-lock.json](upstream-lock.json) 为准；Vercel AI SDK 以 [AI SDK 实验锁文件](../../experiments/ai-sdk-p00/upstream-lock.json)为准，克隆命令见[实验说明](../../experiments/ai-sdk-p00/README.md)。新增清单来源为 [Kysely](https://github.com/kysely-org/kysely.git) 和 [pg-boss](https://github.com/timgit/pg-boss.git)。pg-boss 的提交仅记录本次源码快照，尚未开展源码研究或运行验证，不代表已选为生产依赖。
+首批六项的历史完整提交及 origin 以本节上方的 [upstream-lock.json](upstream-lock.json) 为准；DeepSeek 当前缓存以 §1.2 的更新快照为准，首批锁文件和下文 P00/P07/P09 的固定提交证据保持历史基准。Vercel AI SDK 以 [AI SDK 实验锁文件](../../experiments/ai-sdk-p00/upstream-lock.json)为准，克隆命令见[实验说明](../../experiments/ai-sdk-p00/README.md)。新增清单来源为 [Kysely](https://github.com/kysely-org/kysely.git) 和 [pg-boss](https://github.com/timgit/pg-boss.git)。pg-boss 的提交仅记录本次源码快照，尚未开展源码研究或运行验证，不代表已选为生产依赖。
 
 九个仓库均为浅克隆，未取得完整 Git 历史。“完整检出”仅指当前提交的工作树文件；首批六项仍只展开选定目录，需要查阅其余源码时可在确认工作树干净后展开，例如：
 
@@ -46,6 +48,22 @@ git -C .research/upstream/codex sparse-checkout disable
 ```
 
 展开不改变 HEAD；其他稀疏仓库可替换上述目录。对照既有研究时保留记录的提交，避免直接 `git pull` 改变证据基准；研究新版本时另行记录提交与差异。本次只准备和核验源码，没有安装上游依赖、执行构建或运行上游完整测试，既有实验结论保持原有范围。第三方仓库内的 AGENTS 等文件属于研究材料，不作为 Relay 的协作指令。
+
+### 1.2 DeepSeek Harness 更新快照与 UI 对照（2026-10-01）
+
+按用户要求更新现有研究缓存，origin 仍为 `https://github.com/deepseek-ai/deepseek-harness.git`。更新前 `master`/`origin/master` 与干净工作树对应 `ddefc45fbc7f8e46dd73185e68295696d1297887`；本轮 fetch 后，核验旧 HEAD 为新 HEAD 祖先，再以 `merge --ff-only origin/master` 更新至 `639ed015397290b3745d163aafe02ffee4aa3f84`。提交时间为 `2026-09-29T17:21:31+08:00`，提交说明为 `release: dsh@0.2.0-rc.2` 对应的合并提交；GitHub 官方提交 API 与本地 HEAD 一致，工作树仍干净。直连 fetch 两次失败后，本轮命令临时使用本机系统代理，未改变 remote 或持久网络配置。
+
+保留原稀疏检出，补充展开 `packages/client/{ui-layout,ui-conversation,ui-approval,ui-chat,ui-primitives,ui-theme}`，方便查阅 UI 源码；缓存仍为浅克隆。以下均为该固定 SHA 的源码事实：上游提供 Web UI，并由 Electron 承载桌面应用（[架构说明](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/docs/architecture.md#desktop-application)），不能把输出展示组件 `TerminalBlock` 当作完整终端模拟器，或把 Web 界面称作 TUI。
+
+| 对照问题 | 当前源码机制与固定提交依据 | 本轮差异 / Relay 可参考边界 |
+|---|---|---|
+| 输入响应与确认 | [提交](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/client/ui-conversation/src/client/service.ts#L275-L295)先建立本地 submission 回显、让出一帧，再以同一 `requestId` 发送；[Chat](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/client/ui-chat/src/client/chat/ChatView.tsx#L183-L208)按 `rpcId` 隐去已观察到的本地回显，队列不混入正文 | 当前分离即时反馈、待确认与权威记录。对比旧 HEAD，输入 attempt 新增 `MessageSubmission` 携带。Relay 可参考显示交接，不能把回显当作 Task/Run 已创建或业务提交成功 |
+| 忙碌时发送与停止 | [提交策略](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/client/ui-conversation/src/client/input/submission-policy.ts#L18-L38)让 Enter 与发送按钮使用同一 Queue/Steer 策略；[停止序列](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/client/ui-conversation/src/client/stop-sequence.ts#L33-L50)绑定 Session、turn、generation 和焦点区域 | 这些控制机制在旧版本已存在，不能当作本轮新增。当前偏好源改为 `ConfigForm` 并明确释放订阅。Relay 的暂停/取消仍须经过持久控制意图和安全状态确认 |
+| 审批竞争、键盘与输入法 | [ApprovalPanel](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/client/ui-approval/src/client/ApprovalPanel.tsx#L27-L64)同步锁定一次回答，检查 `answerable`/组件存活，处理 Enter/Escape 与 IME；`aria-busy` 和按钮禁用反馈等待状态 | 旧 HEAD 没有同步 `waiting` 锁、生命周期检查及此键盘/IME 仲裁。本轮可确认这些新增防护。Relay 可参考交互；批准有效期、权限撤销、动作身份仍由本项目 Owner 负责 |
+| 三栏可用宽度 | [columns](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/client/ui-layout/src/client/columns.ts#L10-L58)规定中心最小宽度，并先缩右栏、空间不足时关闭右栏；[AppFrame](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/client/ui-layout/src/client/AppFrame.tsx#L160-L173)处理窄窗侧栏 | 几何算法不是本轮新增。可参考空间优先级和单一布局计算；具体尺寸不能直接覆盖 Relay 设计 tokens |
+| 组件与阅读位置 | [Menu](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/client/ui-primitives/src/Menu.tsx#L333-L403)统一键盘遍历、关闭和焦点归还；[滚动控制](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/client/ui-chat/src/client/chat/use-scroll-follow.ts#L87-L124)区分读者移动与程序跟随 | 可参考共享组件行为与独立滚动 Owner，保留用户阅读位置。源码存在不等于本项目已实现，也不证明上游在 Relay 的 Windows/WebView2 环境验收通过 |
+
+本轮仅更新缓存和阅读/对比源码，未安装依赖、构建或运行上游测试，未调用 Provider；没有将 Harness 或其插件平台整合进 Relay。后续 UI 改动应把上述机制映射到现有 workbench-design、design-system 和设计 tokens，再以真实页面与业务路径验证。
 
 ## 2. 机制采用表
 

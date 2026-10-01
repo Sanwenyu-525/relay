@@ -76,6 +76,8 @@ Schema readiness 使用真实 PostgreSQL + 应用角色 HTTP 测试：`/health/l
 - C：控制/恢复/Gateway/资源互斥与关键故障点通过，才能接真实执行。
 - D：真实模型、Context、长期信息、Today、三套工作台与审计；首批 Skill、最小第一方 Pack、基础 Eval 与轻量来源视图按第 8–9 节验收；模型失败路径同样通过。
 - E：四类适配器在受信边界内真实验证；禁用的承诺功能计为未完成，不静默缩小 V1。
+
+Git读取另覆[机器协议/扩展边界](../../apps/api/test/unit/git-adapter.test.ts)：真实暂存/未暂存列、空格/中文路径与NUL重命名、unborn/detached、完整patch尾换行、textconv/external diff/fsmonitor程序不运行且index不变；clean/process拒绝，实际无匹配与配置/启动/取消故障分开。submodule仅核对gitlink commit，不进入nested工作树，未覆盖内容不得称全树干净。[Gateway原集合](../../apps/api/test/integration/real-tools-gateway.integration.test.ts)保留真实回执operation/invocation身份和已知FAILED，原写入审批/commit/push/UNKNOWN与CLI进程树仍回归。结果只归功能验收表；本规格不代表HTTP/UI协议或支持外部filter仓库的完整出口。
 - F：OpenAPI/实现一致、安装/升级/备份还原演练、全部 required 场景证据齐全；研究实验另行报告。
 
 每份报告写 commit、依赖/DB 版本、运行命令、通过/失败/跳过原因与证据路径。失败或未运行仍是未完成；不要以测试数量取代对应不变量证明。
@@ -148,6 +150,38 @@ P00 先做隔离最小桌面 Spike：随包 Vue、Node API 与 Fake Worker，从
 
 Windows 进程树终止、孤儿检测、支持版本、签名与杀毒软件影响均须实际记录。未测平台不宣称支持，未签名测试包不宣称正式签名发布。截图或 Vite 开发服务器成功不能替代安装产物证据。
 
+M07 维护准入首片按 [ADR-014](../decisions/ADR-014-database-maintenance-admission.md) 验证数据库级 NORMAL/DRAINING：真实 PG 独立连接覆盖 SHARE/UPDATE 两种提交顺序、等待后回执重读、原命令重放/异载荷冲突、CAS/锁超时整事务回滚；跨 Workspace 同门，普通命令与两类自定义接受拒绝时零业务效果/回执。新 Run/Assist/Web 与无原 delivery 的 Gateway 领取保持原待处理身份；已取得原领取的结算、发布和 Saver 不误挡。新 VERIFY 预约被拒时零调用记录/外呼，已经预约的原探针可结算，Run/Assist 原计量预算回归。停止/取消、原停机证明恢复和 UNKNOWN/PARTIAL 安全终结沿原门禁；正常 GET/SSE、readiness 和旧回执可读。CLI 重启持久、缺状态行/权限失败关闭、应用角色不能 INSERT/DELETE/改身份列，错误输出不含配置明细；中文维护拒绝不覆盖响应丢失核对规则。DRAINING 不等于 FROZEN，完整快照静止、备份/还原和旧二进制升级分别另验，实际结果只写功能验收表。
+
+维护原宿主停机另验真实 Windows Job 与私有管道：旧包缺能力声明在执行前拒绝；已有 guard 忙时零 READY，真实 API/Worker/孙进程整组停止且原 ARMED 保留；READY 期间第二入口仍忙，原 nonce release 与 EOF 释放，坏记录/版本/字段/过界或部分帧拒绝。Node 握手后收到协议错误即持续失效，RELEASED 后非法帧加退出0也不能输出释放成功；CLI 尾随/重复/过界输入拒绝成功，错误路径释放自身 guard，不使用或输出 DB/模型凭据。真实进程句柄与 Job 检查必须独立于响应 JSON；debug EXE/native-test-package 组合不当作完整包、GUI、跨登录会话或数据库静止证明。
+
+Windows 受管内容安全点按 [ADR-015](../decisions/ADR-015-managed-content-native-publication.md)另验：实际原生共享发布阻挡排他，排他期间各 ManagedContentStore 调用零part/目标；共享/排他helper退出后 OS锁确实释放。真实写part后、rename前强杀原helper，不得由Node继续发布；保留原证据，新版本正常发布。不可覆盖、字节/hash/256KiB、根/祖先junction及多链接sentinel、缺helper失败关闭回归。真实PG人工提交在冻结时零版本/审计/回执，解除后按原命令重试及旧回执重放；原Run发布失败保留原effect/operation的UNKNOWN，解除后核对不得换ID。CLI准确输入/EOF正常释放、尾随/超界输入拒绝成功、协议失效不因exit0变正常。完整数据库/Saver冻结、旧二进制停机及备份/恢复另验，不继承本片成绩。
+
+本库权限/DDL组合先用原角色机制探针验证：CONNECT撤销COMMIT后原app连接仍能实写、新连接拒绝，而migrator原/新连接及完整dump可用；持原两把会话advisory锁跨COMMIT后，观察两个原DDL入口真实锁等待，显式释放才结束。控制app成员继承及grant-option漂移，bootstrap不收敛，预检/有效权限复核须拒绝；原有效ACL刷盘后故障断开维护连接，已提交撤销继续保留，并依据原ACL恢复。dump/空库restore机制不代替完整角色预检、残余连接/prepared transaction拒绝、持锁生命周期与备份/恢复协调CLI，后者另验；结果仍仅写功能验收表。
+
+生产数据库连接维护另以[实际入口集成测试](../../apps/api/test/integration/database-connect-fence.integration.test.ts)验证：真实Application切DRAINING并关池；原grant option与完整有效ACL精确恢复、不重写凭据；新app42501而受信migrator dump可用；两个原DDL入口跨COMMIT阻塞，锁忙有界且不泄部分锁。NORMAL、旧空闲app/Saver/migrator、权限/成员/额外CONNECT漂移和真实PREPARE后断连均拒绝。授权后启动窗口使用唯一application_name、未登记datid及目标对象锁观测；普通角色看不到其他用户类型也不能漏检。文件已存在/链接/损坏/目标错配拒绝，撤销前的外部ACL变更不被补偿覆盖；解除与显式恢复遇ACL漂移均拒绝。验证实际CLI的release/EOF、尾随/超界输入、READY前坏帧、强杀及已验证backend断连，撤销持久与原凭据幂等恢复，不输出凭据或误报released。管理员仅控制临时库生命周期/故障；测试用prepared槽不修改用户PG。整体备份协调、新包Windows和恢复放行另验。
+
+维护连接回归覆盖备份attest/应用Pool、源fence hold/recover及新空目标隔离：合成PGHOST/PORT/USER/DATABASE/PASSWORD/SSLMODE/OPTIONS/CLIENT_ENCODING不改变显式目标及缺省会话设置；密码缺省不回退pgpass，缺省端口固定5432。实际Client/Pool无网络参数对比显式远程/TLS/options与旧ssl=no-verify，未知SSL字符串拒绝，query不能替换构造器/内部连接/时间预算或再解析connectionString。真实PG仅在产品调用期间改环境，观察前恢复，核对源完整ACL恢复/原journal不变及目标42501/关闭后仍隔离；显式只读options必须仍拒权限写入。真实备份组合保留Job、全归档与故障断言，native guard忙不能算成功或被绕过。TLS字段对比不声明真实TLS握手/证书验收，旧冻结结果不覆盖新连接代码。
+
+备份文件与原包内部入口另验：原样保留已引用/orphan正文、staging与ARMED，证据目录不进入活动启动路径；未知条目/非空未受管缓存、目标占用、原生链接/ADS、预算超界、目录/字节漂移及持锁断言失效均拒绝且不删原文件。固定系统元数据进程只读JSON路径，不继承DB/Provider环境。包资源与实际清单一一对应，协议/Node版本正确，EXE及所有资源hash一致；旧包缺导出拒绝，归档完整历史Skill/Pack正文和依赖需能重建原hash，同ID/version的原包定义不被协调应用新版覆盖。导出后改包、缺成员/正文、重复身份、错误hash和超时/输出超界拒绝。小资源fixture不证明完整发布包、数据库静止或恢复可启动。
+
+[完整备份组合](../../apps/api/test/integration/backup.integration.test.ts)另验真实原生Job停止及持续guard、原包helper内容锁、独立migrator连接门同时存活，DB引用与复制hash一致，业务/Graph完整归档可在随机空库读取核对；正常释放后才有complete标记且保持DRAINING。正文不一致、无原停止证明的过期Worker或独立旧连接拒绝；不改原身份、不杀陌生进程。实际CLI在CONNECT撤销COMMIT后强杀，留partial/原ACL凭据、无成功输出，显式原ACL恢复幂等，父管道EOF后native确实退出。协议错误早于owned close也应等待close后拒绝。历史人工关闭另用[真实Owner回归](../../apps/api/test/integration/backup-history.integration.test.ts)核对PARTIAL/NO_RECEIPT原UNKNOWN保留，精确处置+stop proof+RELEASED claim才排除当前写者，缺任一证据仍拒绝。取得fence前真实准入revision变化或同名私有空库替换时，初始/最终目标与原准入动作须精确相符，漂移不得生成成功标记。PG归档另验真实regular fd、8表逐行对照、占用/失锁/在途Abort；子进程退出不自动等于PG backend消失。确切发布包、恢复隔离/兼容/放行与安装总验收另验，成绩只写功能验收表。
+
+恢复启动隔离另验[Node真实入口](../../apps/api/test/unit/restore-isolation.test.ts)与[Rust宿主入口](../../apps/desktop/src-tauri/src/restore_isolation.rs)：标记为空/损坏/伪造成功JSON/目录/链接均拒，元数据错误及文件祖先不误作缺失；无标记首次安装与目录别名保持可用。普通/桌面API、Worker、普通/桌面监督器在数据库连接、监听、ready、旧launch核销前拒绝，固定错误不泄露正文；桌面API拒绝后自然退出。Rust监督器在源ARMED消费、新Job目录与spawn前拒绝，原bytes/条目数不变；实际链接类型与权限不足的未覆盖分支分别说明。包诊断另验缺协议/旧协议、未摘要绑定的模块、任一个Node入口脱线或旧EXE，即使hash更新自洽仍拒作目标运行包；保留旧包历史诊断。标记不代表在线停机、目标CONNECT隔离或产品restore，空库还原/失败保隔离/原UNKNOWN与Graph正文核对另验，不把内部fixture当完整发布包。
+
+新空库还原另验[目标隔离入口](../../apps/api/test/integration/restore-database-isolation.integration.test.ts)、[PG完整还原](../../apps/api/test/integration/restore-postgres.integration.test.ts)及[实际备份到还原组合](../../apps/api/test/integration/restore.integration.test.ts)。目标须为不同源身份、标准角色/PG18且无用户对象、额外schema/setting/extension、残余/启动连接或prepared事务；初始及权限COMMIT前后复核，失锁/断连/ACL或原凭据漂移拒绝，成功/取消/close不恢复CONNECT。包含系统schema的用户对象、原本机CIDR地址、与旧源journal互斥回归；旧源fence仍恢复原ACL。
+
+[源根只读保护](../../apps/api/test/unit/restore-source-root.test.ts)使用真实助手核对完整File ID；原根、现存子目录、大小写别名及同卷搬迁的源祖先须拒绝，原ARMED/目录条目不变；合法异根不创建条目。非法ID、真实junction/缺父、错误或缺工具、环境helper/Node注入及取消均拒，子进程不继承凭据或任意环境工具。产品组合对原/搬迁源根验证拒绝发生在任何目录或CONNECT变更之前；源删除重建/跨卷移动后的选址仍属于可信运维前提，不以历史ID断言完整源路径隔离。末段另在真实PG连接和pin凭据都已关闭后换向restore目录，要求原根无新增verified且不报告成功，不能把未注入的EPERM当作该反例通过。
+
+归档固定原hash/TOC/PG18工具、裸dbname及最小环境，完整单事务保留原Owner/ACL。核对public/Graph每表逐行、原UNKNOWN operation/run/step/attempt/dispatch_count、确切正文/孤儿与历史定义；不能因还原调用模型或重派发。错元数据/hash/tool/TOC、非空冲突、真实catalog锁阻塞后的Abort回滚均拒绝，PGbackend退出单独观察。组合中新根发布前已有刷盘标记，源staging/ARMED仅进入evidence；已占根不覆，篡改正文/自洽重hash但缺迁移或revision错配在修改目标前拒绝。真实CLI在CONNECT撤销后强杀须留标记/专用journal，无verified或成功输出，原数据/原ACL不变。成功也保持隔离，核对凭据不授予启动；确切发布包、激活/配置切换、旧包升级与Windows安装仍另验，实际成绩仅归功能验收表。
+
+M07非空恢复维护核对规格归[专用会话集成](../../apps/api/test/integration/restore-check-database-isolation.integration.test.ts)、[材料单元](../../apps/api/test/unit/restore-materials.test.ts)及[实际备份/还原组合](../../apps/api/test/integration/restore.integration.test.ts)。既有journal只读pin/原字节与File ID、实际目标六字段、完整fenced ACL、精确DRAINING revision、两把锁/残余或启动连接/prepared事务均须匹配；取消、断连、失锁、ACL/准入/材料漂移拒绝，不写ACL/准入/journal，关闭实际完成后才宣告closed。受控状态连接另覆合法URL省略端口/密码时不继承合成PG环境，纯参数反例不得访问其他实例，真实SQL只读拒绝零行UPDATE。
+
+[目标包离线依赖探针](../../apps/api/test/unit/restore-runtime-probe.test.ts)另验普通完整生产依赖及包内Node：10项直接依赖声明须为确切版本，实际metadata/ESM入口与每个传递ESM/CJS加载文件绑定资源hash，不借祖先node_modules。真实内存调用覆盖参数解析、Client/Pool与Saver/模型构造、Kysely SQL编译、TypeBox与Fastify inject、LangGraph本地图和JSON解析；不连接PG、不监听或调用模型。反例覆盖缺文件/绑定、版本或hash漂移、错误行为、非法声明/UTF8、中文跨stdin帧、外部解析及独立DNS/子进程/Worker入口；真实挂起、超输出和取消必须在自己的child实际close后拒绝。实际维护函数和CLI使用完整普通生产依赖目录，分别断言有限报告的Node/metadata/直接入口绑定，同时保留全表/UNKNOWN/材料与隔离断言。仅证明PACKAGED_DEPENDENCIES_OFFLINE_ONLY；真实数据库Saver、模型/工具及全部历史执行兼容仍待验，历史source包核验不新增此探针要求。
+
+受管资源根身份观察另验真实Windows普通私有根：存量原生File ID匹配、同路径替换后ID不同、同卷搬迁的新路径/旧路径、大小写别名、合法null基线及链接/祖先junction拒绝。报告仅为MATCH、NO_STORED_ID、ID_MISMATCH或UNAVAILABLE；粗ROOT_UNAVAILABLE不推断路径缺失。固定目标包助手不带managed-content参数，核对其SHA及普通文件身份，环境限五项OS变量；128根上限、30秒合作预算和单次10秒预算、输入/输出上限、取消与故障均检查actual child close。持锁前后及末段包/材料复核保留，观测绑定此次选定状态SHA与资源Owner字段/revision/epoch，不补写资源ID。实际PG组合的源夹具经既有登记Owner创建三种私有根，null仅在初始fixture中设置合法存量字段，并在备份快照前完成；函数及CLI报告须一致，根正文与目录项（无新sentinel）、所有数据库行/UNKNOWN/ACL/准入/材料均保持。加强before夹具后重跑完整八项，不继承历史成绩；有限根身份不证明外部内容、全外部资源、配置或唯一Owner，不清除EXTERNAL_RESOURCE_LIVE_IDENTITY pending或授激活。
+
+材料覆盖六文件跨绑定、严格UTF8/预算、wrong version/operation/目标、凭据多字段、重hash不能改ARMED路由、same-byte leaf替换与真实junction/hardlink/ADS。产品组合使用真实备份与隔离还原后运行维护函数及实际CLI，原备份路径移走仍仅声明stored binding；public/Graph全表原行、正文/evidence、原UNKNOWN身份/dispatch_count、六材料字节及源数据不变，目标app仍42501、普通启动仍拒绝、无活动ARMED。首次允许创建锁sentinel，再次核对保持其身份；篡改标记/正文拒绝且不放行。输出限定SELECTED投影/NOT_GRANTED、native/PG实际关闭后报告，不把全表测试比对等同生产核对全历史内容。完整兼容、外部身份、激活和安装另验；实际成绩仅归功能验收表。
+
 ## 8. Relay Skill 与蓝图应用验收
 
 2026-09-20，待执行的补充规格。依据 [Skill 专题](../architecture/relay-skills.md)，在 D 阶段验证 F24；不修改既有 37 项编号，也不把新增场景称为已通过。V1.5 Page Schema 与第三方包不纳入 V1 实现测试。
@@ -167,6 +201,8 @@ Windows 进程树终止、孤儿检测、支持版本、签名与杀毒软件影
 P12/P14 实施报告必须附真实 schema/OpenAPI/迁移版本与上述证据。输出大小上限、历史定义存储及锁落点尚待冻结；文档链接/token 检查只能证明静态文档通过，不能替代本表。
 
 ### 首批闭环 Skill 的补充场景
+
+三项既有 Skill 的真实模型 opt-in 组合见 `real-model-skills.integration.test.ts`：仅有效显式模型配置启用，缺失/Fake/残缺配置须全部跳过，不启动 API 或外呼。使用隔离合成项目，经 HTTP 冻结 Skill id/version/SHA 与事实基线，由原 Assist Owner 生成；待接受前 Task/验收/Project State 不变。任务契约及验收方案按原 payload hash、Task/验收双 revision 人工接受，同原命令重放只产生一次业务效果，旧必需条件、其他产物约束及执行权保留，不创建 Run、PASS 或完成。恢复摘要只引用当前事实与 revision，比较基线为空、零提案、只读。每项沿原唯一真实 call 核对配置指纹、request ID、实际用量及输出 hash；严格 schema 失败须保留首轮分母与失败，不拼成单轮全绿。实际结论只见[功能验收表](overall-acceptance-2026-09-28.md#当前功能验收表)，本组合不替代 Skill UI、长期质量或 Windows 验收。
 
 依据[首批目录](../architecture/relay-skills.md#7-首批闭环能力与后续目录)，以下均待执行。首批四项在 D 阶段交付；修复、交接、状态提交复用 B/C 阶段核心测试再回归，不能推迟既有核心安全出口。
 
@@ -274,9 +310,13 @@ M02 按旧→新路由/组件/真实交互覆盖表验收全部 React 迁移。�
 
 M04 在 M03 独立验收后才启用真实 Provider；记录模型/配置、实际来源选择、工具/结构化输出能力、用量与未知用量、错误和取消。至少一个实际获授权 Provider 的真实闭环是模块必要出口；历史两 Provider 对照要求保持单列，不用一次成功宣称全部协议兼容。缺凭据为未验证，不能以 Mock 顶替。
 
-2026-09-29 晚间已取得的真实闭环证据（用户授权：两个实例都接、真实外发只在隔离库、SOFT SEMANTIC 维持 Fake）：`apps/api/scripts/run-integration.ps1 -TestFile real-model` 在临时 PostgreSQL 集群 **4/4 PASSED** —— 真实 DRAFT 消费显式选中的知识来源（正文含随机独特标记，断言证明模型确实读到该来源）并通过完成门、HARD SEMANTIC 由真实语义检查器端到端判定、生成中提交取消意图收敛为 `CANCELLED` 且账本结清、中途 abort 账本 `CANCELLED` 且不写检查结果；同一测试在分类与证据保全改动后复跑仍 4/4。固定探针 `POST /model-port/verify` 真实通过：`openai-compatible` / `agnes-3.0-flash` / 759ms，账本行含真实 `provider_request_id`、79/11 tokens，`matches_current_config=true`。**这满足"至少一个真实闭环"的模块出口，不等于 M04 独立验收**：仍缺用户可见首输出延迟的完整链路实测、真实 Provider 失败路径（401/429/超时/断流）的端到端取证（当前只有账本分类与单元覆盖）、Provider 质量评估、两 Provider 对照，以及真实 Windows 会话。2026-09-30 已将六类 Provider 失败经 `assist_messages.provider_error_kind` 上浮到 Assist 消息与中文指引；新增隔离 PG/HTTP 反例覆盖六类、词表/状态约束、取消及迟到失败、普通提案的取消竞争、宿主停机、旧 Worker、本地预览写入与生成前后处理异常。运行证据见[本轮记录](../development/ui-live-integration-2026-09-28.md#12-m04-assist-provider-失败诊断2026-09-30)。同日接续已通过原 Run Trace 投影六类调用诊断（用途、确切条件/检查尝试、原请求身份），并隔离本地预览和 SDK Header TypeError，未改 Run/Attempt/重试或完成状态；最终 API 单元144/144，受影响隔离PG/HTTP为Trace6/6、DRAFT预览6/6、Assist45/45、连接验证8/8，前端407/407与构建通过。反例与确切输入见[Run诊断记录](../development/ui-live-integration-2026-09-28.md#14-m04-run-模型调用诊断与本地错误归因2026-09-30)。真实 Provider 故障外呼仍未完成；受控端口反例不替代真实服务/Windows 验收。
+2026-09-29 的历史真实模型用例覆盖显式选源 DRAFT 与完成门、HARD SEMANTIC、生成中取消及中途 abort；当时只检查选源 Manifest 和非 Fake 候选，没有断言候选原样回显随机标记。后续强化该证据须沿原 call_id 核对实际持久 Manifest、来源确切版本、完整正文 hash，再检查候选回显资料中的唯一标记，不能将新增断言追溯算入旧成绩。当前成绩与真实 Windows 定向闭环统一见[功能验收表](overall-acceptance-2026-09-28.md#当前功能验收表)；用户授权的真实外发仍限隔离数据，SOFT SEMANTIC 维持 Fake。Provider 失败必须区别实际服务故障、受控 SDK/本地 HTTP 与 Fake 反例；诊断设计见[Assist 失败记录](../development/ui-live-integration-2026-09-28.md#12-m04-assist-provider-失败诊断2026-09-30)和[Run 诊断记录](../development/ui-live-integration-2026-09-28.md#14-m04-run-模型调用诊断与本地错误归因2026-09-30)。一次真实成功不替代能力/质量、工具组合或完整 Windows 状态矩阵。
 
 M04 FILE_READ/WEB_FETCH 模型输入切片的定向自测还需分别核对：AUTO 在 DRAFT 前取得原 `SUCCEEDED` Invocation，模型调用记录的 `input_sha256` 与原 operation/invocation 身份可重建；ASK 等待时零 DRAFT Attempt/模型调用，原 Review 的 RESUME 仅执行一次；读取后、图 checkpoint 前崩溃沿原动作核对并复用成功证据；默认 DENY/撤权/Context 失效、控制意图或 UNKNOWN 均不把正文交模型。文件超限与网页非 2xx 等类型化 `FAILED` 应保留原 Invocation/operation 失败证据、停止 DRAFT 模型调用，并将 Run 及 Task 安全收敛。长 UTF-8 文本既要按完整字符限 16 KiB，也须计入 Manifest 总预算和输出预留，超预算时缩小读片段或停止 DRAFT，不能绕开预算。升级前已成功 DRAFT 且原读 Review 待续的 Run 应保持原 DRAFT/operation 绑定、不重做模型。Mock/隔离 PostgreSQL 定向通过仍不替代真实 Provider、Windows 会话或 M04 独立验收。
+
+真实读源组合仅使用临时合成文件和自有 HTTP 服务；本机网页的 `allow_private` 必须在该隔离 Connection 显式声明，不修改生产默认 SSRF 门禁。沿 HTTP Delegate、原图命令和人工 Review 完成入口，验证原读 Operation/Invocation 唯一、模型调用绑定的实际 Manifest 与可重建输入 hash、候选原样回显正文中的唯一标记及用量，接受前零完成、之后唯一完成。标准回归缺真实模型配置应跳过，不自动花费模型调用。
+
+模型原生工具参数的能力拒绝由[受控 SDK/PG 矩阵](../../apps/api/test/integration/model-provider-faults.integration.test.ts)构造合法 SSE `delta.tool_calls` 分片，经过真实 Adapter 和 Assist Owner；应以 `ModelToolOutputError` 结清原调用、Provider 类别为空，且无 Gateway 动作、回复正文、提案或残留预览。它不是 Provider `PROTOCOL`，也不证明原生工具执行已接入。拒绝时保留此前确实观察到的请求 ID/合法用量，不携带原生工具参数、正文或原始响应；未知值保持 null。当前 SDK 在流结束时才发规范化用量，拒绝前未读到的 wire usage 不能算已观察；已知用量分支用公开 SDK stream 的受控 chunk 和错误封套落库分别验证。首文本/预览发生后再遇工具拒绝，应删除暂存但保留原调用的观察时间；空 ID 不写为空字符串。不得由这些拒绝测试推断真实服务行为或计费为零。
 
 M05/P15 后端定向回归覆盖：0021 对 Workspace 初始化、Goal 创建及清空 Focus 的历史审计归属回填，孤立行使迁移整体回滚；Activity 按 Workspace/Project/Task/Run 和时间过滤、`(created_at,id)` 游标续页、跨域 ID 隐藏、命令重放不新增审计、业务回滚不留事件、自由字段/凭据不出 DTO；Trace 只展示原 Step/Attempt/模型调用/Manifest/验证/Review/Gateway/效果证据，当前来源权限变化后失效，不泄露原正文或越权引用，批准和效果状态保持分离；Lineage 的自环、跨域、版本环及错误 typed 关系由数据库拒绝，重复写只留一条，源缺失时保留不可用状态而不替换历史父版本。对应真实隔离 PostgreSQL 自动化仅证明开发切片，M05 独立与 Windows 工作台验收另行执行。
 
@@ -290,9 +330,13 @@ M04 Assist `DISCUSS` 临时草稿的开发自检使用 `assist-live-preview.inte
 
 M04 Run DRAFT 临时草稿的开发自检使用 `run-draft-preview.integration.test.ts` 的隔离真实 PostgreSQL、受控 Fake 生成与独立 API 进程：DRAFT 完整候选提交前可读首批 Markdown，重读保持 Attempt/claim/model call/revision 身份；尚未生成 Artifact；跨 Workspace 和错误 Bearer 拒绝；成功结算删除草稿。fence 旧 Worker 后迟到写入被拒，新领取只能以新 claim/model call 发布。待处理控制、Task Context 变化或已选 Knowledge 退役时，读取立即遮蔽前缀且不回显来源 ID。实际 AUTO FILE_READ/WEB_FETCH 图链在 DRAFT 模型 STARTED 时分别证明原读证据仍可授权预览，FILE_READ Policy 随后撤销时 GET 即时隐藏；读动作先将 Run 置 RUNNING 的情况现在由原 Run CAS 把 current_step_id 推进 DRAFT。共用 `AssistLivePreviewPublisher` 的单元测试覆盖 16 KiB UTF-8 安全截取及节流；端口受控 SSE 单测覆盖完整输出前 DRAFT 片段回调。定向结果为预览 PG/HTTP 5/5、实际读链补测 2/2、撤权 1/1、Run Steps 8/8、完整 Run Graph 53/53、相关单测 7/7；项目 Node24 类型检查/构建、29 个迁移、Graph 安装、PG 启停与临时目录清理、文档检查通过。首轮新增来源测试 3/4 是把只读遮蔽误断言为业务 STALE_RESULT 的测试错误，修正后 4/4；首轮 Graph 47/53 的 6 个读链失败已由上述 Run 位置修复并复跑 53/53。真实 Provider 网络首字延迟、桌面流畅度、独立验收仍待运行；Run SSE 仍仅是事实提示，文字预览走单独 GET。
 
+0047 首输出计时的回归检查原 `model_calls`：首个非空回调才记录 `first_text_delta_at`，同原调用首次合法预览写入与 `first_preview_persisted_at` 在同一事务；后续片段不覆盖，清预览后保留，旧行不回填。空帧、首字前取消/失败、控制请求、旧 Worker 与错误 call 身份不得补写；Run Trace 的真实 HTTP 响应保留可空字段，旧客户端兼容。普通 Assist 的最终 flush 顺序保持原语义。Windows [定向脚本](../../apps/desktop/tests/m04-real-model-webview.mjs)只将此前授权项目配置的模型白名单键复制到新隔离会话，以合成资料来源标记和普通 Assist 两轮历史取证，不复制业务数据库配置。绑定原 DRAFT call/Manifest/来源版本与正文 hash，人工接受前零完成记录，之后唯一完成记录；第三轮以明确字面量提出类型化任务，待接受不得写业务，UI 接受与同原命令重放应返回同回执，只新增 HUMAN/INBOX Task 而不委托。该第三轮不代替第二轮不重供标记的历史检索反例。窗口正文进入视口并经动画帧观察的点击延迟与上述服务端时间分别报告；标题栏自然退出及原进程树、PG、临时目录均须清理。实际结果见[功能验收表](overall-acceptance-2026-09-28.md#当前功能验收表)，脚本存在不代表已经通过。
+
 性能分别报告 Mock 自身开销与真实模型端到端指标。固定任务、输入/输出规模、工具行为、并发、权限、检查点和持久化语义，报告接受/排队/首输出/完成 P50/P95/P99、成功吞吐、重试、取消收敛、事件循环、CPU/RSS、数据库/分发等待及每成功任务的调用/token 成本；样本不足和未知值明确说明。不得靠降低成功率、关闭 checkpoint 或取消准入来制造改善。
 
 M07 按 V1 范围 F01–F22/F24、A01–D11 和 G01–G08 汇总，所有必需能力及真实桌面安装出口通过才能完成总目标。P22 研究和 V1.5 保持可选，不扩大默认 goal。未来执行中的凭据/环境阻塞可允许独立工作继续，但不能将受阻模块标记 ACCEPTED。
+
+M04 Skill/读取 UI 的 Windows 定向入口为 [`m04-real-read-skill-webview.mjs`](../../apps/desktop/tests/m04-real-read-skill-webview.mjs)，显式输入确切 EXE、0013、manifest、0047 摘要与已授权原项目模型配置路径，可按 `read`、`skills` 或 `all` 选择固定场景；`skills` 可再传一个确切 Skill ID 单项定位，不覆盖或删除此前失败。合成项目、目录、连接和策略由 HTTP Owner 准备，Delegate、读取审批、三个 Skill 生成、两个任务提案接受及 CRITERION 接受均走真实 WebView2 控件与原请求；独立 Worker 执行，SQL 仅观察原事实。文件 ASK 等待期必须零 Invocation/模型调用，网页 AUTO 不制造审批；唯一来源标记仅在物理正文，沿原读取证据重建原 DRAFT 输入 hash。最终 Artifact 实际 bytes/SHA 与候选、Review、Verification 和 Completion 必须绑定同一版本，HUMAN 检查引用原界面决定。三个 Skill 复用上文冻结定义、事实基线、双 revision 与只读约束，两类任务提案新增条件须为必需 HUMAN；严格失败即停止并保留原失败，不换 schema 或暗重试。核对原配置未改变、标题栏自然关闭、原进程树、HTTP 来源 listener、PG 与临时根清理；UI 自动化接受只证明命令路径和完成门，回复质量及真人交互体验单独验收。实际成绩仍只写功能验收表。
 
 ## 11. AI 并行开发体验验证提案
 
@@ -418,6 +462,8 @@ N00 先确定任务集与基线，再在对比运行前冻结阈值、样本数�
 
 ## 16. Agent 协作主线验收提案
 
+本节先保留 2026-09-29/30 方向 1 的历史设计与当时运行边界；其中“本轮”指原记录时点，不代表工作主线重做后的当前成绩。2026-10-01 的补充规格见第 16.1 节，当前结果只维护[功能验收表](overall-acceptance-2026-09-28.md#当前功能验收表)。
+
 2026-09-29，用户已选方向 1「对话主轴 · 双页工作桌」并授权实施。来源为[工作台第 14 节](../frontend/workbench-design.md#14-以目标协作为中心的工作台改造)和[视觉层级](../frontend/design-system.md#51-协作工作区的视觉层级)，视觉参考使用[完整窗口修订图](../frontend/mockups/2026-09-29/collaboration-dialogue-window.png)。
 
 **本轮已运行的范围（开发自检，非 Windows 验收）**：`/agent` 端到端路径在真实本机 API 与真实数据上以浏览器核对通过 50 项（`apps/workbench/scripts/collab-live-check.mjs`，证据见[协作工作区证据](evidence/collaboration-workspace-2026-09-29/)），并由 `apps/workbench/tests/collaborationWorkspace.spec.ts` 覆盖状态反例。**AGUX-08、AGUX-10 的真实 Windows 窗口与 DPI 项本轮未运行**；AGUX-11 的 Git、AGUX-12 的交互终端因缺协议未接入，不得据此判定通过。AGUX 各项的具体结论：
@@ -426,7 +472,7 @@ N00 先确定任务集与基线，再在对比运行前冻结阈值、样本数�
 |---|---|---|
 | AGUX-01 | 首次进入无需理解模块目录即可找到表达目标或人工工作的入口；打开页面不产生业务对象或模型调用；新目标发送前可辨识并确认归属 | 浏览器核对通过（重新进入 0 个写请求；先选任务才可发送）；Windows 入口未验 |
 | AGUX-02 | 从近期工作恢复同一 Project/Task、实际进展、产物和待判断项；无变化基线不制造"上次之后"的比较，失权清除内容 | 浏览器核对通过（范围与排序写明、显示读取时点、无比较基线）；失权反例由组件测试覆盖 |
-| AGUX-03 | 同一工作完成讨论、明确范围、显式委托、查看进展、判断、验收；用户无需手动往返多个管理页 | 布局与入口已合并；真实 Provider 侧已取得证据：真实 DRAFT 消费显式选源并过完成门、HARD SEMANTIC 真实判定、取消与中途 abort 收敛（隔离库 4/4），Run 失败原因与模型连接状态已在界面可见；**完整 Delegate→Run→Review→完成全链仍未在真实 Provider 下端到端跑通** |
+| AGUX-03 | 同一工作完成讨论、明确范围、显式委托、查看进展、判断、验收；用户无需手动往返多个管理页 | 原 2026-09-29 浏览器范围不含真实 Windows 完整链。2026-09-30 接续的定向真实 Provider＋Windows 结果及限制只看[功能验收表](overall-acceptance-2026-09-28.md#当前功能验收表)，不将独立 Assist/任务子页的通过算作 `/agent` 所有交互已闭合 |
 | AGUX-04 | 执行中能阅读产物和访问停止/暂停；草稿与不可变版本分开，控制请求中、已暂停与可编辑不混同 | 组件测试覆盖（PENDING/PAUSED/HANDOFF 三态分别表达、草稿与版本分开）；真实执行中未验 |
 | AGUX-05 | 判断显示确切对象、影响、版本和证据；条件改变后失效；完成绑定确切产物和验收 | 2026-09-30 浏览器核对正常判断可用及确切对象常驻；组件反例覆盖刷新挂起/失败、Task/Project不匹配、合法null Project、归档、页签切换保留反馈及响应丢失原命令，原接口原revision/targetHash提交；最终前端全量407/407。真实API判断提交与Windows未验 |
 | AGUX-06 | 执行失败、普通查询失败与外部 UNKNOWN 可区分；保留可读成果 | 组件测试覆盖（局部失败不渲染为无数据、UNKNOWN 沿原 operation_id 核对） |
@@ -454,3 +500,22 @@ N00 先确定任务集与基线，再在对比运行前冻结阈值、样本数�
 检查记录分别标明“设计提案”“用户已选方向”“代码实现”“开发自检”“真实 Windows 验收”；方向选择及图片修订只能更新前两项。无新 API/schema 变更，缺接口项先记录设计/接入工作，不能用 fixture 消除阻塞。
 
 体验对照使用相同任务、数据与初始状态，记录完成核心路径的页面切换、重复录入、找到下一步的耗时及误判状态的次数。目标是减少寻找与重复操作，同时保留必要确认；不得通过删除审批、验收或人工路径改善数字。量化阈值和参与人数待基线采集后确定，不伪造“提升百分比”。设计稿只能验证所画信息层级；完整体验仍需实现后的端到端与真实 Windows 证据。
+
+### 16.1 工作主线整套重做的补充规格（2026-10-01）
+
+用户选择[工作主线图](../frontend/mockups/2026-10-01/work-first.png)后，七类页面已采用共享壳层与阅读纸面；本表只定义验收期望，已跑组件/浏览器样本及剩余出口归唯一功能验收表。页面/状态覆盖和四条完整回归路径归[工作台第 17 节](../frontend/workbench-design.md#17-整套-ui-重做提案2026-10-01)，不得用几张样本截图将全部 33 页面/状态或完整路径判为通过。
+
+| 编号 | 触发与必须成立的反例 | 证据层与边界 |
+|---|---|---|
+| WUX-01 | 至少九条 Task、多 Project 与多个游标页；续页按 ID 去重并按 Project 分组，导航/底部入口可达；403 后清除受限缓存，后续503不恢复旧事实 | 组件游标/错误反例＋真实只读页面；固定前八条和加载页不冒充完整列表 |
+| WUX-02 | Task A→B 或断开重连时让 A 的读取晚到；面包屑与页面仅展示当前 workId/连接 epoch，读失败不沿用旧对象名称 | 受控晚到组件反例＋实际路由；新连接不能复用旧作用域 |
+| WUX-03 | 同 Task 两个 Session 来回切换，非空 Markdown/Task 候选可见；讨论/提议/Skill 标签与原载荷一致；预览读失败与模型失败分开 | 组件载荷/候选反例＋真实 API/数据库完整接受链；只读 fixture 不证明提交或持久化 |
+| WUX-04 | Assist 与 Review 同时有草稿或原未决命令；切 work/Review/连接、关闭和旧会话 record lookup 均受组合保护；pending 时拒绝丢弃，每个 Owner cleanup 不移除另一注册 | 组件导航与原回执故障点＋真实原命令核对；旧回执晚到不更新新路由，不生成新 ID 绕过 |
+| WUX-05 | Review 列表重排、所选项移除或 Task 读取失败；保留原决定 Owner 和原命令入口，禁新决定，成功核对后才能结束 pending；反馈不串新 Review | 组件刷新/读取反例＋真实判断回执；接受 Review 不变成 Task 完成 |
+| WUX-06 | 绑定历史产物 v2、最新为v3；正文与比较对象确为v2，v2缺失明确失败；条件文字仅在 acceptanceRevision 与 criterion_id 同时匹配时显示，技术ID可展开核对 | 组件确切版本/缺失/比较反例＋真实 API版本与判断绑定；不能用latest替代 |
+| WUX-07 | 知识编辑后切 kind、成果行、搜索命中或导入入口；确认前保留原输入；取消收录可继续，保存失败/冲突保留草稿，pending只核对原命令 | 组件本地切换＋真实版本/冲突写入；浏览阅读不自动选入 Context |
+| WUX-08 | 同页水平页签用方向键/Home/End、跳过禁用项，IME组合期不触发切换；设置宽窄均横向，Task/成果及协作页签切换不卸载草稿或命令Owner | 组件事件/DOM语义＋真实键盘/中文IME；模拟isComposing或keyCode229不能代替原生IME验收 |
+| WUX-09 | 长Skill表格、输入选项、普通判断详情与长ACTION_APPROVAL；宽/窄/短窗口可读正文、条件/影响、真实风险及末尾动作，展开依据时整成果区域可纵滚；展开导航后Tab到末尾连接不会卷走固定外壳；浏览器只有真实业务快捷入口 | 实际浏览器1487/960/390及480px短窗样本＋Windows实际客户区/DPI；不靠裁切、隐藏风险或复制Owner通过 |
+| WUX-10 | 项目→Task→产物、新建任务及连接设置错误/只读状态；名称/当前目标优先、技术身份仍可查，项目picker与手动ID沿原载荷/显式归属，数据来源切换受pending保护 | 组件载荷/错误/readonly＋四条真实业务回归；最终构建与确切桌面包/安装另验 |
+
+浏览器验证记录具体视口、所见状态、fixture或真实API、是否写入及图片真实格式，不能把生成图像素尺寸当作DPI或CSS客户区。最新生产构建、真实Windows窗口、125%/150% DPI、原生IME与安装矩阵分别绑定最终源码/包；旧EXE和原方向图不自动继承。API、数据库、依赖和判读模型未因本轮呈现变化而修改，原领域、数据库及恢复出口继续保留。

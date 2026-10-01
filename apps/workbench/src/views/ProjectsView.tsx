@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowRight, Archive, Info, RotateCcw, Search } from "lucide-react";
+import { ArrowRight, Archive, ChevronRight, Info, RotateCcw, Search } from "lucide-react";
 import { createCommandId, projectArchiveResultFrom, RelayApiError, RelayTransportError,
   type RelayApiClient, type RelayCommandEnvelope, type RelayProject,
   type RelayProjectArchiveResult, type RelayProjectListItem } from "../api/relayClient";
@@ -185,7 +185,7 @@ export default function ProjectsView() {
       </div>
       {refreshing && <p className="helper-text" role="status">正在更新项目列表，已显示的内容保持可见。</p>}
       {visibleProjects.length === 0 ? <div className="page-state"><p>{search.trim() ? `当前范围没有匹配“${search.trim()}”的项目。` : archivedTab ? "还没有已归档的项目；归档后仍会保留历史事实。" : "还没有进行中的项目。"}</p>{!archivedTab && !search.trim() ? <button className="primary-button" type="button" onClick={() => navigate("/projects?view=create")}>新建项目</button> : <button className="secondary-button" type="button" onClick={() => setSearch("")}>清除搜索</button>}</div> :
-        <div className="table-scroll"><div className="data-table"><div className="data-row data-row--head data-row--projects" aria-hidden="true"><span className="data-cell">项目</span><span className="data-cell">类型</span><span className="data-cell">当前阶段</span><span className="data-cell">下一步</span></div><ul className="data-list">{visibleProjects.map((project) => <li key={project.id}><button className={`data-row data-row--projects data-row--interactive${project.id === selectedId ? " data-row--selected" : ""}`} type="button" aria-current={project.id === selectedId ? "true" : undefined} data-testid={`project-row-${project.id}`} onClick={() => selectProject(project)}><span className="data-cell"><strong>{project.title}</strong><small>{project.goal}</small></span><span className="data-cell data-cell--meta">{projectTypeLabels[project.projectType]}</span><span className="data-cell data-cell--meta">{phaseLabel(project.phase)}</span><span className="data-cell data-cell--meta">{project.nextAction ?? "尚未明确"}</span></button></li>)}</ul></div></div>}
+        <div className="table-scroll"><div className="data-table"><div className="data-row data-row--head data-row--projects" aria-hidden="true"><span className="data-cell">项目</span><span className="data-cell">类型</span><span className="data-cell">当前阶段</span><span className="data-cell">下一步</span></div><ul className="data-list">{visibleProjects.map((project) => <li key={project.id}><button className={`data-row data-row--projects data-row--interactive${project.id === selectedId ? " data-row--selected" : ""}`} type="button" aria-current={project.id === selectedId ? "true" : undefined} data-testid={`project-row-${project.id}`} onClick={() => selectProject(project)}><span className="data-cell"><strong>{project.title}</strong><small>{project.goal}</small></span><span className="data-cell data-cell--meta">{projectTypeLabels[project.projectType]}</span><span className="data-cell data-cell--meta">{phaseLabel(project.phase)}</span><span className="data-cell data-cell--meta data-cell--next-action"><span>{project.nextAction ?? "尚未明确"}</span><ChevronRight aria-hidden="true" size={16} /></span></button></li>)}</ul></div></div>}
       <p className="list-footer-note"><Info aria-hidden="true" />项目阶段由你显式设置，系统不按任务完成数量自动跳阶段；列表中的下一步来自项目状态。</p>
     </div>
     <ResponsiveRail label="查看项目摘要" title={selected?.title ?? "项目摘要"}><div className="rail-content"><p className="rail-heading">项目摘要</p>{selected && <p className="rail-project-name">{selected.title}</p>}{selected ? <><p className="rail-intro">{selected.summary}</p><section className="project-state-summary" aria-label="项目当前状态"><span>当前阶段</span><strong>{phaseLabel(selected.phase)}</strong><small>状态修订 v{selected.stateRevision} · 待审 {selected.pendingReviewCount} 项</small></section><section className="rail-section"><h3>明确目标</h3><p>{selected.goal}</p></section>
@@ -377,7 +377,7 @@ function LiveProjectsListView({ client, archived, onCreate }: {
       : taskTitles[project.nextActionTaskId] ?? "标题暂不可读";
   return <section className="skill-page" data-testid="projects-live-list"><div className="page-layout">
     <div className="page-primary">
-      <div className="list-header"><div><h1>项目</h1><p className="page-lede">连接本机 API 后，按当前归档范围读取真实项目；列表、下一步与计数只显示服务端已返回的事实。</p></div>
+      <div className="list-header"><div><h1>项目</h1><p className="page-lede">每一个长期目标，都有可继续的下一步。</p></div>
         <button className="primary-button" type="button" data-testid="project-create-open" onClick={onCreate}>新建项目</button></div>
       <div className="subnav-row">
         <nav className="subnav" aria-label="项目范围"><Link className={`subnav-item${archived ? "" : " subnav-item--active"}`}
@@ -410,32 +410,33 @@ function LiveProjectsListView({ client, archived, onCreate }: {
                 onClick={() => setSelectedId(project.id)}><span className="data-cell"><strong>{project.title}</strong></span>
                 <span className="data-cell data-cell--meta">{projectTypeLabels[project.projectType as ProjectType] ?? project.projectType}</span>
                 <span className="data-cell data-cell--meta">{phaseLabel(project.phaseKey)}</span>
-                <span className="data-cell data-cell--meta">{nextLabel(project)}</span></button></li>)}</ul></div></div>}
+                <span className="data-cell data-cell--meta data-cell--next-action"><span>{nextLabel(project)}</span><ChevronRight aria-hidden="true" size={16} /></span></button></li>)}</ul></div></div>}
           {nextCursor && <button className="secondary-button" type="button" data-testid="projects-live-load-more"
             disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>{loadingMore ? "正在加载" : "加载更多"}</button>}
         </>}
-      <p className="list-footer-note"><Info aria-hidden="true" />下一步来自项目状态，显示对应任务的标题；任务的确切 ID、修订与打开入口在选中项目后的右侧摘要中。</p>
+      <details className="page-explanation"><summary>列表范围与状态来源</summary><p className="helper-text">下一步来自项目状态，显示对应任务的标题；任务的确切 ID、修订与打开入口在选中项目后的右侧摘要中。</p></details>
     </div><ResponsiveRail label="查看项目摘要" title={selected?.title ?? "项目摘要"}><div className="rail-content">
-      <p className="rail-heading">项目摘要</p>{selected && <p className="rail-project-name">{selected.title}</p>}{selected ? <><p className="rail-intro">Project ID：{selected.id}</p>
+      <p className="rail-heading">项目摘要</p>{selected && <p className="rail-project-name">{selected.title}</p>}{selected ? <>
         <section className="project-state-summary" aria-label="项目当前状态"><span>项目阶段</span>
           <strong>{phaseLabel(selected.phaseKey)}</strong><small>Project v{selected.revision} · State v{selected.stateRevision}</small></section>
         <section className="rail-section"><h3>下一步</h3><p>{selected.nextActionTaskId
           ? <Link className="inline-link" to={`/tasks/${selected.nextActionTaskId}`}>
             {taskTitles[selected.nextActionTaskId] ?? "打开任务"}</Link>
           : "尚未明确"}</p>
-          {selected.nextActionTaskId && <small>任务 ID：{selected.nextActionTaskId}</small>}</section>
+          </section>
         <Link className="primary-button primary-button--wide" data-testid="project-open" to={`/projects/${selected.id}`}>打开项目<ArrowRight aria-hidden="true" /></Link>
         {!archived && <><button className="secondary-button secondary-button--wide" type="button" data-testid="project-archive"
           disabled={checkingArchive || archiveBusy || pendingArchive !== null || loading || loadingMore || error !== null ||
             selected.archiveStatus !== "ACTIVE" || selected.archivedAt !== null}
           onClick={() => void prepareArchive(selected)}><Archive aria-hidden="true" />{checkingArchive ? "正在核对 Project" : "归档项目"}</button>
-          <p className="helper-text">归档前会单读当前 Project 并再次要求确认；服务端会检查未结清任务、运行与外部效果。归档保留历史事实。</p></>}</> :
+          <p className="helper-text">归档需再次确认，历史事实仍可读取。</p></>}
+          <details className="page-explanation"><summary>项目与任务身份</summary><p className="helper-text hash-code">Project ID：{selected.id}</p><p className="helper-text">原始阶段键：{selected.phaseKey}</p>{selected.nextActionTaskId && <p className="helper-text">任务 ID：{selected.nextActionTaskId}</p>}<p className="helper-text">归档前会单读当前 Project；服务端会检查未结清任务、运行与外部效果。</p></details></> :
         <p className="rail-intro">选择已加载项目查看确切 ID、阶段和修订。</p>}
-      <form className="create-form" noValidate onSubmit={(event) => { event.preventDefault();
+      <details className="page-explanation"><summary>按已知项目 ID 打开</summary><form className="create-form" noValidate onSubmit={(event) => { event.preventDefault();
         if (knownId.trim()) navigate(`/projects/${encodeURIComponent(knownId.trim())}/tasks`);
       }}><label className="field"><span className="field-label">用项目 ID 打开任务</span><input value={knownId}
         onChange={(event) => setKnownId(event.target.value)} name="live-project-id" autoComplete="off" placeholder="Project UUID" /></label>
-        <button className="secondary-button" type="submit" data-testid="projects-live-open" disabled={!knownId.trim()}>打开项目任务</button></form>
+        <button className="secondary-button" type="submit" data-testid="projects-live-open" disabled={!knownId.trim()}>打开项目任务</button></form></details>
     </div></ResponsiveRail>
   </div>
   <AppDialog open={confirmProject !== null} title="确认归档项目" initialFocusSelector='[data-testid="project-archive-cancel"]'

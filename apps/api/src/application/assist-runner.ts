@@ -9,7 +9,7 @@ import type { ManagedContentStore } from '../storage/managed-content-store.js';
 import type { AssistIntent, AssistModelPort, AssistTurn } from '../workflow/fake-model-port.js';
 import { assistPayloadHash } from './assist-commands.js';
 import { recordModelInvocation } from './model-call-recorder.js';
-import { ModelScopeBudgetError } from '../model/model-call-repository.js';
+import { ModelCallRepository, ModelScopeBudgetError } from '../model/model-call-repository.js';
 import { ModelCallBudgetError } from '../workflow/openai-compatible-model-port.js';
 import { classifyProviderError, type ModelErrorCategory }
   from '../workflow/model-error-classification.js';
@@ -22,6 +22,7 @@ import { buildTaskSkillProposal, skillOutputHash } from '../skills/skill-proposa
 import { prepareSkillBlueprintProposal } from './blueprint-proposals.js';
 import { DomainError } from './domain-error.js';
 import { lockWritableProjectInWorkspace } from './guards.js';
+import { readAdmission } from './maintenance-admission.js';
 import { AssistLivePreviewPublisher, AssistPreviewOwnershipLostError }
   from '../assist/live-preview.js';
 
@@ -71,6 +72,7 @@ export async function runAssistGenerationTick(db: DbExecutor,
   await r.assist.failExpiredLeases(new Date(Date.now() - options.leaseMs));
 
   const message = await withTransaction(db, async (tx) => {
+    if ((await readAdmission(tx, 'share')).mode !== 'NORMAL') return undefined;
     const claimed = await tx.assist.claimNextPendingMessage(options.workerId);
     if (claimed === undefined) return undefined;
     const session = await tx.assist.readSession(claimed.session_id);
@@ -143,15 +145,19 @@ export async function runAssistGenerationTick(db: DbExecutor,
       throw new SkillBasisUnavailable('SKILL_INPUT_OVER_BUDGET');
     }
     let previewOwnershipLost = false;
-    const preview = message.intent === 'DISCUSS' && skill === null
-      ? new AssistLivePreviewPublisher((text, truncated) =>
-        r.assist.writeLivePreview(message.id, options.workerId, text, truncated),
-      () => { previewOwnershipLost = true; controller.abort(); }) : null;
+    let preview!: AssistLivePreviewPublisher | null;
     const recorded = await recordModelInvocation(db, {
       origin: { workspaceId: session.workspace_id, kind: 'ASSIST', assistMessageId: message.id },
       identity: options.modelPort.identity,
       signal: controller.signal,
-      invoke: async () => {
+      invoke: async (callId) => {
+        const previewOwner = { workspaceId: session.workspace_id, messageId: message.id,
+          workerId: options.workerId, callId };
+        let textObserved = false;
+        const ownershipLost = () => { previewOwnershipLost = true; controller.abort(); };
+        preview = message.intent === 'DISCUSS' && skill === null
+          ? new AssistLivePreviewPublisher((text, truncated) =>
+            publishAssistPreview(db, previewOwner, text, truncated), ownershipLost) : null;
         try {
           return await options.modelPort.assist({
             intent: message.intent as AssistIntent,
@@ -164,7 +170,22 @@ export async function runAssistGenerationTick(db: DbExecutor,
             signal: controller.signal,
             ...(message.intent === 'DISCUSS' && skill === null ? {
               onTextDelta: async (piece: string) => {
-                try { await preview!.push(piece); }
+                const observedAt = new Date();
+                if (piece === '') return;
+                try {
+                  if (controller.signal.aborted) {
+                    ownershipLost();
+                    throw new AssistPreviewOwnershipLostError();
+                  }
+                  if (!textObserved) {
+                    textObserved = await recordAssistFirstText(db, previewOwner, observedAt);
+                    if (!textObserved) {
+                      ownershipLost();
+                      throw new AssistPreviewOwnershipLostError();
+                    }
+                  }
+                  await preview!.push(piece);
+                }
                 catch (error) {
                   if (error instanceof AssistPreviewOwnershipLostError) throw error;
                   throw new AssistPreviewWriteError();
@@ -372,6 +393,52 @@ export async function runAssistGenerationTick(db: DbExecutor,
     clearInterval(heartbeat);
     options.signal?.removeEventListener('abort', onOuterAbort);
   }
+}
+
+interface AssistPreviewOwner {
+  readonly workspaceId: string; readonly messageId: string;
+  readonly workerId: string; readonly callId: string;
+}
+
+/** Preserve Message -> model call lock order for both observation and preview. */
+async function lockAssistPreviewCall(db: DbExecutor, input: AssistPreviewOwner) {
+  const r = createRepositories(db);
+  const message = await r.assist.readMessage(input.messageId, true);
+  if (message?.role !== 'ASSISTANT' || message.intent !== 'DISCUSS' ||
+      message.skill_snapshot !== null || message.status !== 'RUNNING' ||
+      message.worker_id !== input.workerId || message.cancel_requested) return undefined;
+  const calls = new ModelCallRepository(db);
+  const call = await calls.read(input.callId, 'update');
+  if (call?.workspace_id !== input.workspaceId || call.kind !== 'ASSIST' ||
+      call.assist_message_id !== message.id ||
+      call.status !== 'STARTED' && call.status !== 'COMPLETED') return undefined;
+  return { r, calls, call };
+}
+
+async function recordAssistFirstText(db: DbExecutor, input: AssistPreviewOwner,
+  observedAt: Date): Promise<boolean> {
+  return db.transaction().execute(async (transaction) => {
+    const owner = await lockAssistPreviewCall(transaction, input);
+    if (owner === undefined || owner.call.status !== 'STARTED') return false;
+    await owner.calls.recordFirstTextDelta(owner.call.id, observedAt);
+    return true;
+  });
+}
+
+async function publishAssistPreview(db: DbExecutor, input: AssistPreviewOwner,
+  text: string, truncated: boolean): Promise<boolean> {
+  return db.transaction().execute(async (transaction) => {
+    const owner = await lockAssistPreviewCall(transaction, input);
+    if (owner === undefined) return false;
+    const wrote = await owner.r.assist.writeLivePreview(input.messageId,
+      input.workerId, text, truncated);
+    // The existing final flush runs after model settlement. It may refresh the
+    // prefix, but cannot invent a first-persisted time for that completed call.
+    if (wrote && text !== '' && owner.call.status === 'STARTED') {
+      await owner.calls.recordFirstPreviewPersisted(owner.call.id);
+    }
+    return wrote;
+  });
 }
 
 async function settle(r: Repositories, message: AssistMessageRow, workerId: string,

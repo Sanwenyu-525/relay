@@ -16,3 +16,8 @@
 .live-blueprint .live-blueprint-history { list-style: none; margin: 0; padding: 0; }
 .live-blueprint .live-blueprint-history li { margin: var(--relay-space-2) 0; overflow-wrap: anywhere; }
 .live-blueprint .rail-content > .secondary-button, .live-blueprint .rail-content > .primary-button { margin-top: var(--relay-space-3); }
+.live-blueprint .live-blueprint-preview { border: 0; border-radius: 0; }
+.live-blueprint .live-blueprint-provenance { margin: var(--relay-space-3) 0; }
+.live-blueprint .live-blueprint-provenance summary { cursor: pointer; color: var(--relay-color-text-secondary); }
+.live-blueprint .live-blueprint-followups { padding: var(--relay-space-6) 0; border: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: 0; background: transparent; }
+.live-blueprint .diff-icon > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }

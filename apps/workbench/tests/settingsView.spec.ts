@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { act } from "react";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { resolveVerificationState, type ModelVerificationStateKind }
   from "../src/views/SettingsView";
@@ -33,16 +34,39 @@ function lastBody(overrides: Record<string, unknown> = {}) {
   };
 }
 
+async function mountModelSettings() {
+  const mounted = await mountWorkbench("/settings");
+  await mounted.wrapper.get('[data-testid="settings-group-model"]').trigger("click");
+  return mounted;
+}
+
 describe("设置页模型端口状态", () => {
+  it("方向键和 Home 切换页签时保留未保存的基本设置", async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
+    const field = mounted.wrapper.get('[data-testid="settings-timezone"]');
+    await field.setValue("UTC");
+    const basic = mounted.wrapper.get('[data-testid="settings-group-basic"]');
+    const model = mounted.wrapper.get('[data-testid="settings-group-model"]');
+    (basic.element as HTMLButtonElement).focus();
+    await act(async () => { basic.element!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })); });
+    expect(model.attributes("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(model.element);
+    await act(async () => { model.element!.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })); });
+    expect(basic.attributes("aria-selected")).toBe("true");
+    expect(mounted.wrapper.get('[data-testid="settings-timezone"]').element).toBe(field.element);
+    expect((field.element as HTMLSelectElement).value).toBe("UTC");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
   it("fixture 模式明确无真实服务实例状态，不发起请求", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
+    const mounted = await mountModelSettings(); unmount = mounted.unmount;
     expect(mounted.wrapper.text()).toContain("没有真实服务实例状态");
-    expect(mounted.wrapper.text()).toContain("偏好与暂不可用项");
-    expect(mounted.wrapper.text()).toContain("暂不可用");
-    expect(mounted.wrapper.text()).toContain("深色主题");
-    expect(mounted.wrapper.text()).toContain("不改变 Later 的存储语义");
+    await mounted.wrapper.get('[data-testid="settings-group-basic"]').trigger("click");
+    expect(mounted.wrapper.text()).toContain("当前仅支持浅色主题");
+    expect(mounted.wrapper.get("#settings-appearance").attributes("disabled")).toBeDefined();
+    expect(mounted.wrapper.text()).toContain("不改变已保存的稍后处理日期");
     expect(mounted.wrapper.findAll("button").some((button) => /深色|主题切换|切换主题/.test(button.text()))).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -57,7 +81,7 @@ describe("设置页模型端口状态", () => {
         current_config_fingerprint: null, worker_startup_validation: "NOT_CONFIGURED" }));
       throw new Error(`Unexpected ${url}`);
     }));
-    const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
+    const mounted = await mountModelSettings(); unmount = mounted.unmount;
     const panel = mounted.wrapper.get('[data-testid="model-port-status"]');
     expect(panel.text()).toContain("Mock 模型端口");
     expect(panel.text()).toContain("不读取、不显示、也不修改任何密钥");
@@ -89,7 +113,7 @@ describe("设置页模型端口状态", () => {
       }
       throw new Error(`Unexpected ${url}`);
     }));
-    const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
+    const mounted = await mountModelSettings(); unmount = mounted.unmount;
     const panel = mounted.wrapper.get('[data-testid="model-port-status"]');
     expect(panel.text()).toContain("真实 Provider（OpenAI 兼容）");
     expect(panel.text()).toContain("gpt-test");
@@ -125,7 +149,7 @@ describe("设置页模型端口状态", () => {
       }));
       throw new Error(`Unexpected ${url}`);
     }));
-    const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
+    const mounted = await mountModelSettings(); unmount = mounted.unmount;
     const states = mounted.wrapper.get('[data-testid="service-state"]');
     expect(states.text()).toContain("验证失败");
     expect(mounted.wrapper.get('[data-testid="verify-error-guide"]').text())
@@ -146,7 +170,7 @@ describe("设置页模型端口状态", () => {
       }));
       throw new Error(`Unexpected ${url}`);
     }));
-    const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
+    const mounted = await mountModelSettings(); unmount = mounted.unmount;
     const states = mounted.wrapper.get('[data-testid="service-state"]');
     expect(states.text()).toContain("已配置未验证");
     expect(states.text()).toContain("配置变更后旧验证结果自动失效");
@@ -165,7 +189,7 @@ describe("设置页模型端口状态", () => {
         current_config_fingerprint: null, worker_startup_validation: "FAILED" }));
       throw new Error(`Unexpected ${url}`);
     }));
-    const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
+    const mounted = await mountModelSettings(); unmount = mounted.unmount;
     expect(mounted.wrapper.get('[data-testid="service-state"]').text()).toContain("当前不可用");
   });
 
@@ -180,6 +204,7 @@ describe("设置页模型端口状态", () => {
       throw new Error(`Unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="settings-group-execution"]').trigger("click");
     const text = mounted.wrapper.text();
     expect(text).not.toContain("策略与调度尚未冻结");
     expect(text).toContain("仅提醒必须由用户介入的事项");
@@ -197,7 +222,7 @@ describe("设置页模型端口状态", () => {
       if (url === `${root}/model-port/verification`) return response(verificationBody());
       throw new Error(`Unexpected ${url}`);
     }));
-    const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
+    const mounted = await mountModelSettings(); unmount = mounted.unmount;
     const panel = mounted.wrapper.get('[data-testid="model-port-status"]');
     expect(panel.text()).toContain("真实 Provider（OpenAI 兼容）");
     expect(panel.text()).toContain("gpt-test");
@@ -222,9 +247,9 @@ describe("设置页模型端口状态", () => {
       }
       throw new Error(`Unexpected ${url}`);
     }));
-    const first = await mountWorkbench("/settings"); first.unmount();
+    const first = await mountModelSettings(); first.unmount();
     healthy = false;
-    const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
+    const mounted = await mountModelSettings(); unmount = mounted.unmount;
     expect(mounted.wrapper.text()).toContain("读取失败");
     expect(mounted.wrapper.find('[data-testid="model-port-status"]').exists()).toBe(false);
     healthy = true;

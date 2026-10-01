@@ -10,6 +10,9 @@ import { runAssistGenerationTick } from '../../src/application/assist-runner.js'
 import { createKnowledge } from '../../src/application/information-commands.js';
 import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
+import { ModelCallRepository } from '../../src/model/model-call-repository.js';
+import { AssistRepository } from '../../src/assist/assist-repository.js';
+import { AssistLivePreviewPublisher } from '../../src/assist/live-preview.js';
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
 import type { AssistModelPort, AssistRequest, AssistResult }
   from '../../src/workflow/fake-model-port.js';
@@ -64,6 +67,13 @@ function path(f: Awaited<ReturnType<typeof fixture>>, messageId: string): string
     `/assist-sessions/${f.sessionId}/messages/${messageId}/live-preview`);
 }
 
+async function firstTimes(messageId: string) {
+  const calls = await new ModelCallRepository(app.db).listForAssistMessage(messageId);
+  assert.equal(calls.length, 1);
+  return { call: calls[0]!, times: [calls[0]!.first_text_delta_at?.toISOString() ?? null,
+    calls[0]!.first_preview_persisted_at?.toISOString() ?? null] };
+}
+
 function gatedPort(first: string, second: string) {
   let release!: () => void;
   let published!: () => void;
@@ -99,8 +109,16 @@ test('a separate API process reads the first DISCUSS increment before full settl
   const model = gatedPort('首批文本🙂', '，后续内容');
   const generation = runAssistGenerationTick(app.db, { workerId: 'preview-worker',
     storage, modelPort: model.port, leaseMs: 30_000 });
+  let initialTimes!: (string | null)[];
   try {
     await model.firstPublished;
+    const first = await firstTimes(messageId);
+    assert.ok(first.times.every((time) => time !== null));
+    initialTimes = first.times;
+    const calls = new ModelCallRepository(app.db);
+    await calls.recordFirstTextDelta(first.call.id, new Date(Date.now() + 60_000));
+    await calls.recordFirstPreviewPersisted(first.call.id);
+    assert.deepEqual((await firstTimes(messageId)).times, initialTimes);
     const live = await api.get(path(f, messageId));
     assert.equal(live.status, 200, live.text);
     const snapshot = live.body as Preview;
@@ -126,6 +144,7 @@ test('a separate API process reads the first DISCUSS increment before full settl
       authorization: 'Bearer wrong' } })).status, 401);
   } finally { model.release(); }
   assert.equal((await generation)?.status, 'COMPLETED');
+  assert.deepEqual((await firstTimes(messageId)).times, initialTimes);
   const finalPreview = await api.get(path(f, messageId));
   assert.deepEqual(finalPreview.body, { session_id: f.sessionId, message_id: messageId,
     status: 'COMPLETED', preview_revision: '0', preview_text: null,
@@ -147,8 +166,11 @@ test('cancel hides the temporary text and terminal settlement removes it', async
   const model = gatedPort('将取消的草稿', '不会展示');
   const generation = runAssistGenerationTick(app.db, { workerId: 'cancel-preview',
     storage, modelPort: model.port, leaseMs: 30_000 });
+  let initialTimes!: (string | null)[];
   try {
     await model.firstPublished;
+    initialTimes = (await firstTimes(messageId)).times;
+    assert.ok(initialTimes.every((time) => time !== null));
     const cancelled = await api.post(workspacePath(f.workspaceId,
       `/assist-messages/${messageId}/cancel`), { command_id: randomUUID() });
     assert.equal(cancelled.status, 200, cancelled.text);
@@ -157,6 +179,7 @@ test('cancel hides the temporary text and terminal settlement removes it', async
     assert.equal(hidden.preview_text, null);
   } finally { model.release(); }
   assert.equal((await generation)?.status, 'CANCELLED');
+  assert.deepEqual((await firstTimes(messageId)).times, initialTimes);
   const final = (await api.get(path(f, messageId))).body as Preview;
   assert.equal(final.status, 'CANCELLED');
   assert.equal(final.preview_text, null);
@@ -246,12 +269,107 @@ test('structured proposals never expose raw JSON through the preview endpoint', 
   const result = await runAssistGenerationTick(app.db, { workerId: 'proposal-no-preview',
     storage, modelPort: new FakeModelPort(), leaseMs: 30_000 });
   assert.equal(result?.status, 'COMPLETED');
+  assert.deepEqual((await firstTimes(messageId)).times, [null, null]);
   const final = (await api.get(path(f, messageId))).body as Preview;
   assert.equal(final.preview_available, false);
   assert.equal(final.preview_text, null);
   const rows = await sql<{ count: string }>`select count(*)::text as count
     from assist_message_previews where message_id = ${messageId}`.execute(app.db);
   assert.equal(rows.rows[0]?.count, '0');
+});
+
+test('before-first-text failure, cancel and expired Worker cannot invent output times', async () => {
+  for (const scenario of ['failure', 'cancel', 'expired'] as const) {
+    const f = await fixture();
+    const messageId = await request(f);
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const proceed = new Promise<void>((resolve) => { release = resolve; });
+    const modelPort: AssistModelPort = {
+      identity: new FakeModelPort().identity,
+      async assist(input) {
+        await input.onTextDelta?.('');
+        entered();
+        await proceed;
+        if (scenario === 'failure') throw new Error('controlled failure before text');
+        await input.onTextDelta?.('late text after losing the claim');
+        return { kind: 'CONTENT', content: 'late text', providerRequestId: 'late-preview',
+          usage: { inputTokens: null, outputTokens: null } };
+      },
+    };
+    const generation = runAssistGenerationTick(app.db, { workerId: `before-${scenario}`,
+      storage, modelPort, leaseMs: 30_000 });
+    try {
+      await started;
+      assert.deepEqual((await firstTimes(messageId)).times, [null, null]);
+      if (scenario === 'cancel') {
+        assert.equal((await api.post(workspacePath(f.workspaceId,
+          `/assist-messages/${messageId}/cancel`), { command_id: randomUUID() })).status, 200);
+      } else if (scenario === 'expired') {
+        assert.ok((await createRepositories(app.db).assist.failExpiredLeases(
+          new Date(Date.now() + 60_000))).includes(messageId));
+      }
+    } finally { release(); }
+    const result = await generation;
+    assert.equal(result?.status, scenario === 'failure' ? 'FAILED' :
+      scenario === 'cancel' ? 'CANCELLED' : 'DISCARDED');
+    assert.deepEqual((await firstTimes(messageId)).times, [null, null]);
+    assert.equal(((await api.get(path(f, messageId))).body as Preview).preview_text, null);
+  }
+});
+
+test('post-settlement flush preserves times and a timing write failure rolls back its preview', async () => {
+  for (const scenario of ['flush', 'failure'] as const) {
+    const f = await fixture();
+    const messageId = await request(f);
+    const originalInterval = AssistLivePreviewPublisher.MIN_FLUSH_MS;
+    const originalWrite = AssistRepository.prototype.writeLivePreview;
+    const originalTime = ModelCallRepository.prototype.recordFirstPreviewPersisted;
+    let completedWrites = 0;
+    // Force the second fragment to buffer until the runner's existing final
+    // flush. This controls scheduling; it is not a performance threshold.
+    Object.defineProperty(AssistLivePreviewPublisher, 'MIN_FLUSH_MS', { value: Infinity });
+    AssistRepository.prototype.writeLivePreview = async function (...args) {
+      if ((await firstTimes(messageId)).call.status === 'COMPLETED') completedWrites += 1;
+      return originalWrite.apply(this, args);
+    };
+    if (scenario === 'failure') {
+      ModelCallRepository.prototype.recordFirstPreviewPersisted = async () => {
+        throw new TypeError('TOP_SECRET_TIMING_FAILURE');
+      };
+    }
+    const modelPort: AssistModelPort = {
+      identity: new FakeModelPort().identity,
+      async assist(input) {
+        await input.onTextDelta?.('first');
+        await input.onTextDelta?.(' tail');
+        return { kind: 'CONTENT', content: 'first tail', providerRequestId: 'buffered-preview',
+          usage: { inputTokens: 1, outputTokens: 2 } };
+      },
+    };
+    try {
+      const result = await runAssistGenerationTick(app.db, { workerId: `timing-${scenario}`,
+        storage, modelPort, leaseMs: 30_000 });
+      assert.equal(result?.status, scenario === 'flush' ? 'COMPLETED' : 'FAILED');
+      const recorded = await firstTimes(messageId);
+      assert.ok(recorded.call.first_text_delta_at);
+      if (scenario === 'flush') {
+        assert.equal(completedWrites, 1);
+        assert.ok(recorded.call.first_preview_persisted_at);
+        assert.equal(recorded.call.status, 'COMPLETED');
+      } else {
+        assert.equal(recorded.call.status, 'FAILED');
+        assert.equal(recorded.call.first_preview_persisted_at, null);
+      }
+      assert.equal((await sql`select message_id from assist_message_previews
+        where message_id = ${messageId}`.execute(app.db)).rows.length, 0);
+    } finally {
+      Object.defineProperty(AssistLivePreviewPublisher, 'MIN_FLUSH_MS', { value: originalInterval });
+      AssistRepository.prototype.writeLivePreview = originalWrite;
+      ModelCallRepository.prototype.recordFirstPreviewPersisted = originalTime;
+    }
+  }
 });
 
 test('expired generation lease clears an in-flight preview before a stale Worker can publish again', async () => {

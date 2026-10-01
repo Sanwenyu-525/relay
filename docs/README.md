@@ -1,5 +1,7 @@
 # 文档入口与维护规范
 
+2026-10-01 整套 UI 重做导航：[Agent UI 研究审查](research/agent-ui-review-2026-10-01.md)记录本轮一手资料、源码和代表页面问题；[工作台第 17 节](frontend/workbench-design.md#17-整套-ui-重做提案2026-10-01)拥有完整页面/状态覆盖与回归路径；[设计系统第 9 节](frontend/design-system.md#9-整套重做的组件与布局提案2026-10-01)拥有共享组件提案。范围已获用户授权，具体视觉方向待选择，尚未实施；源码缓存更新归 P00，功能状态仍只归统一验收表。
+
 2026-09-29 协作体验改造导航：[工作台第 14 节](frontend/workbench-design.md#14-以目标协作为中心的工作台改造)拥有目标流程、入口与兼容关系；[设计系统第 5.1 节](frontend/design-system.md#51-协作工作区的视觉层级)拥有视觉层级；[验收第 16 节](testing/verification-plan.md#16-agent-协作主线验收提案)拥有场景规格，运行结果统一见[功能验收表](testing/overall-acceptance-2026-09-28.md#当前功能验收表)。第 14 节结构已在 `/agent` 落地（开发自检），**真实 Windows 验收未完成**；Git 只读与交互终端因缺协议显式标为未接入。旧图和逐页清单继续用于风格/能力覆盖，不冻结旧管理导航。
 
 2026-09-28 后续规划导航：[V1 后续路线](requirements/post-v1-roadmap.md)拥有推荐范围、顺序与未决项；[领域模型第 11 节](architecture/domain-model.md#11-v1-后续协作的架构演进提案)维护责任与事务，[ADR-013](decisions/ADR-013-bounded-project-continuation.md)记录 Proposed 取舍，[验收第 14 节](testing/verification-plan.md#14-v1-后续长期协作验收提案)维护未运行规格，[N 工作包](../prompts/post-v1-collaboration.md)提供分包提示词。用户选择长期协作优先，具体方案仍为规划，未启动实现、不扩大 V1 goal。
@@ -43,6 +45,7 @@
 | 前后端独立验收证据 | [2026-09-21 验收](testing/frontend-backend-acceptance-2026-09-21.md) | 当前已实现范围的复跑、补充反例与问题；不替代阶段主文档 |
 | 独立修复与调整任务 | [验收修复提示词](../prompts/remediation/README.md) | 与原开发提示词分开；以各 R 记录的执行与证据边界为准 |
 | 部署、身份与运维 | [本机部署](deployment/本机部署.md) | 当前为设计；实际启动命令在有工程后写根 README |
+| 维护/备份边界与协议故障根因 | [M07 开发记录](development/m07-backup-recovery.md) | 保存 Owner、重要取舍及可复现故障；实际成绩和模块状态仍归上述唯一入口 |
 | 研究证据 | [P00 研究记录](research/p00-source-study.md) | 固定来源、运行结果、限制；不替代生产能力证明 |
 | 开发/文档变更的原因 | [设计交付审计](development/design-audit.md) | 按时间追加记录，不承担最新状态表 |
 | 25–27 日产品补充实施证据 | [25 日恢复与成果](development/product-supplement-2026-09-25.md)、[26 日人工待处理与验收](development/product-supplement-2026-09-26.md)、[27 日知识阅读与收录](development/product-supplement-2026-09-27.md) | 条目映射、实际代码、自检与协调复核边界；当前进度仍归 CODEX_NEXT_STEP |
@@ -68,7 +71,7 @@
 
 ## 3. 决策与历史
 
-当前决策集合：[ADR-001](decisions/ADR-001-domain-boundaries.md)、[ADR-004](decisions/ADR-004-user-import-origin.md)、[ADR-005](decisions/ADR-005-reuse-first.md)、[ADR-006](decisions/ADR-006-typescript-first.md)、[ADR-007](decisions/ADR-007-windows-desktop.md)、[ADR-008](decisions/ADR-008-declarative-skills.md)、[ADR-009](decisions/ADR-009-rule-revision-fence.md)、[ADR-010](decisions/ADR-010-agent-stack-react-desktop.md)、[ADR-011](decisions/ADR-011-project-archive-serialization.md)、[ADR-012](decisions/ADR-012-windows-file-io-handle-boundary.md)。分别以各文件状态为准；此列表不统一批准它们。[ADR-002](decisions/ADR-002-postgresql-jdbc.md)保留早期持久化技术提案，[ADR-003](decisions/ADR-003-browser-workbench.md)保留已被 Windows 桌面要求替代的浏览器提案。
+当前决策集合：[ADR-001](decisions/ADR-001-domain-boundaries.md)、[ADR-004](decisions/ADR-004-user-import-origin.md)、[ADR-005](decisions/ADR-005-reuse-first.md)、[ADR-006](decisions/ADR-006-typescript-first.md)、[ADR-007](decisions/ADR-007-windows-desktop.md)、[ADR-008](decisions/ADR-008-declarative-skills.md)、[ADR-009](decisions/ADR-009-rule-revision-fence.md)、[ADR-010](decisions/ADR-010-agent-stack-react-desktop.md)、[ADR-011](decisions/ADR-011-project-archive-serialization.md)、[ADR-012](decisions/ADR-012-windows-file-io-handle-boundary.md)、[ADR-014](decisions/ADR-014-database-maintenance-admission.md)、[ADR-015](decisions/ADR-015-managed-content-native-publication.md)。分别以各文件状态为准；此列表不统一批准它们。[ADR-002](decisions/ADR-002-postgresql-jdbc.md)保留早期持久化技术提案，[ADR-003](decisions/ADR-003-browser-workbench.md)保留已被 Windows 桌面要求替代的浏览器提案；ADR-013 的 Proposed 后续协作范围见上方专用导航。
 
 2026-09-20 新增 [ADR-008](decisions/ADR-008-declarative-skills.md)：声明式 Skill 与蓝图应用，技术方案状态 Proposed；同日用户确认纳入评审后的首批闭环方向，目录统一见 Skill 专题。V1.5 AI Schema 生成的范围前移仍待确认，详见范围矩阵。
 

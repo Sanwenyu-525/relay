@@ -2,6 +2,7 @@ import type { DbExecutor } from '../infrastructure/database.js';
 import { applySafeControl } from './control-requests.js';
 import { lockWritableProjectInWorkspace } from './guards.js';
 import { createRepositories, withTransaction } from './unit-of-work.js';
+import { readAdmission } from './maintenance-admission.js';
 
 export interface ClaimedRunCommand {
   readonly commandId: string;
@@ -22,6 +23,7 @@ export async function claimNextRunCommand(db: DbExecutor, workerId: string,
   const candidates = await createRepositories(db).dispatch.listPending(32);
   for (const candidate of candidates) {
     const claimed = await withTransaction(db, async (repositories) => {
+      if ((await readAdmission(repositories, 'share')).mode !== 'NORMAL') return undefined;
       const located = await repositories.runs.readRun(candidate.run_id);
       if (located !== undefined && !['COMPLETED', 'FAILED', 'CANCELLED'].includes(located.status)) {
         const task = await repositories.tasks.readTask(located.task_id);

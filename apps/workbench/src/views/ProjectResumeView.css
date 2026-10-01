@@ -1,0 +1,11 @@
+.live-resume__basis { margin: var(--relay-space-3) 0; color: var(--relay-color-text-secondary); }
+.live-resume__basis summary, .continuation-capture-form summary { cursor: pointer; padding: var(--relay-space-2) 0; }
+.live-resume .run-list { list-style: none; padding: 0; margin: var(--relay-space-4) 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.live-resume .run-list > li { padding: var(--relay-space-4) 0; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); overflow-wrap: anywhere; }
+.live-resume .run-list > li small { display: block; margin-top: var(--relay-space-2); color: var(--relay-color-text-muted); }
+.live-resume .continuation-capture-form { margin-top: var(--relay-space-4); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.live-resume__continuation { padding: 0 var(--relay-layout-main-padding) var(--relay-layout-main-padding); }
+.live-resume__continuation > .resume-section { max-width: var(--relay-layout-reading-maxWidth); }
+@media (max-width: 60rem) {
+  .live-resume__continuation { padding: 0 var(--relay-layout-main-compactPadding) var(--relay-layout-main-compactPadding); }
+}

@@ -126,7 +126,7 @@ ${input.content}`),
     ];
     try {
       const response = await this.complete(messages, request.signal,
-        request.intent !== 'DISCUSS', request.intent === 'DISCUSS' &&
+        request.intent !== 'DISCUSS' || request.skill !== undefined, request.intent === 'DISCUSS' &&
           request.skill === undefined ? request.onTextDelta : undefined);
       if (request.signal?.aborted === true) return { kind: 'CANCELLED',
         providerRequestId: response.providerRequestId, usage: response.usage };
@@ -161,15 +161,6 @@ ${input.content}`),
         ...(structured ? { response_format: { type: 'json_object' as const } } : {}),
       });
       for await (const chunk of stream) {
-        if ((chunk.tool_call_chunks?.length ?? 0) > 0 ||
-            (chunk.tool_calls?.length ?? 0) > 0) {
-          throw new ModelToolOutputError();
-        }
-        const piece = textContent(chunk.content);
-        bytes += Buffer.byteLength(piece, 'utf8');
-        if (bytes > maxBytes) throw new ModelOutputBudgetError(providerRequestId, usage);
-        parts.push(piece);
-        if (piece !== '' && onTextDelta !== undefined) await onTextDelta(piece);
         const chunkRequestId = chunk.id ?? chunk.response_metadata?.id;
         if (typeof chunkRequestId === 'string' && chunkRequestId !== '') {
           providerRequestId = chunkRequestId;
@@ -180,6 +171,15 @@ ${input.content}`),
           usage = { inputTokens: validUsage(metadata.input_tokens),
             outputTokens: validUsage(metadata.output_tokens) };
         }
+        if ((chunk.tool_call_chunks?.length ?? 0) > 0 ||
+            (chunk.tool_calls?.length ?? 0) > 0) {
+          throw new ModelToolOutputError();
+        }
+        const piece = textContent(chunk.content);
+        bytes += Buffer.byteLength(piece, 'utf8');
+        if (bytes > maxBytes) throw new ModelOutputBudgetError(providerRequestId, usage);
+        parts.push(piece);
+        if (piece !== '' && onTextDelta !== undefined) await onTextDelta(piece);
         if (chunk.response_metadata?.finish_reason === 'length') {
           throw new ModelOutputBudgetError(providerRequestId, usage);
         }
@@ -198,6 +198,9 @@ ${input.content}`),
       }
       if (userSignal?.aborted === true || ModelAbortError.isInstance(error) ||
           isAbortByName(error)) throw error;
+      if (error instanceof ModelToolOutputError) {
+        throw new ModelToolOutputError(providerRequestId || undefined, usage);
+      }
       throw error;
     }
   }
@@ -300,7 +303,9 @@ export class ModelTimeoutError extends Error {
 
 export class ModelToolOutputError extends Error {
   override readonly name = 'ModelToolOutputError';
-  constructor() { super('model returned an unsupported tool or content block'); }
+  constructor(readonly providerRequestId?: string, readonly usage?: ModelUsage) {
+    super('model returned an unsupported tool or content block');
+  }
 }
 
 /** A response arrived and may be billable even though its verdict was invalid.

@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Clock3, FileText, Plus, RotateCcw } from "lucide-react";
-import type { RelayApiClient, RelayProjectListItem, RelayTaskSummary } from "../api/relayClient";
+import { ChevronDown, Plus, RotateCcw } from "lucide-react";
+import { RelayApiError, type RelayApiClient, type RelayProjectListItem, type RelayTaskSummary } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
-
-const PAGE_SIZE = 8;
 
 interface Loaded {
   readonly tasks: readonly RelayTaskSummary[];
@@ -18,9 +16,10 @@ interface Loaded {
  * 排序是服务端 updated_at 倒序。选中态由 URL（/agent?work=）承担，因此深链接和刷新都能恢复同一工作。
  * 这里不读 Assist 会话列表冒充全部工作，也不自动绑定最新 Run。
  */
-export default function RecentWorkRail({ client, currentTaskId }: {
+export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
   client: RelayApiClient;
   currentTaskId: string | null;
+  onOpen?: () => void;
 }) {
   const navigate = useNavigate();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -32,7 +31,7 @@ export default function RecentWorkRail({ client, currentTaskId }: {
 
   const load = useCallback(async (cursor: string | null) => {
     const version = ++request.current;
-    if (cursor === null) { setLoading(true); setError(null); } else setLoadingMore(true);
+    if (cursor === null) { setLoaded(null); setLoading(true); setError(null); } else setLoadingMore(true);
     setPagingError(null);
     try {
       const [page, projects] = await Promise.all([
@@ -48,14 +47,17 @@ export default function RecentWorkRail({ client, currentTaskId }: {
         return b.updatedAt.localeCompare(a.updatedAt);
       });
       setLoaded((current) => ({
-        tasks: cursor === null ? sorted : [...(current?.tasks ?? []), ...sorted],
+        tasks: cursor === null ? sorted : [...new Map([...(current?.tasks ?? []), ...sorted].map((task) => [task.id, task])).values()],
         projectTitles: cursor === null ? titles : new Map([...(current?.projectTitles ?? []), ...titles]),
         nextCursor: page.nextCursor, loadedAt: new Date().toISOString()
       }));
     } catch (caught) {
       if (version !== request.current) return;
-      if (cursor === null) setError(describeLiveError(caught).message);
-      else setPagingError(describeLiveError(caught).message);
+      const described = describeLiveError(caught);
+      const message = described.kind === "transport" ? "近期工作暂时无法读取，请刷新重试。" : described.message;
+      if (cursor === null || caught instanceof RelayApiError && [401, 403, 404].includes(caught.problem.status)) {
+        setLoaded(null); setError(message);
+      } else setPagingError(message);
     } finally {
       if (version === request.current) { setLoading(false); setLoadingMore(false); }
     }
@@ -67,40 +69,49 @@ export default function RecentWorkRail({ client, currentTaskId }: {
   }, [load]);
 
   const tasks = loaded?.tasks ?? [];
-  const visible = tasks.slice(0, PAGE_SIZE);
-  const open = (taskId: string) => { void navigate(`/agent?work=${encodeURIComponent(taskId)}`); };
+  const groups = new Map<string | null, RelayTaskSummary[]>();
+  for (const task of tasks) {
+    const group = groups.get(task.projectId) ?? [];
+    group.push(task);
+    groups.set(task.projectId, group);
+  }
+  const open = (taskId: string) => { void navigate(`/agent?work=${encodeURIComponent(taskId)}`); onOpen?.(); };
 
   return <section className="recent-work" aria-label="近期工作" data-testid="recent-work">
     <div className="recent-work-heading">
-      <h2><Clock3 aria-hidden="true" />近期工作</h2>
+      <h2>最近的任务</h2>
       <button className="icon-button" type="button" aria-label="刷新近期工作" data-testid="recent-work-refresh"
         onClick={() => void load(null)}><RotateCcw aria-hidden="true" /></button>
     </div>
-    <p className="recent-work-scope">全部任务 · 按最近变更排序</p>
-    {loading && <p className="helper-text" role="status">正在读取…</p>}
-    {error && <p className="action-error" role="alert" data-testid="recent-work-error">{error}</p>}
-    {!loading && !error && tasks.length === 0 &&
-      <p className="helper-text">当前工作空间还没有任务。</p>}
-    <ul className="recent-work-list" data-testid="recent-work-list">{visible.map((task) => {
-      const project = task.projectId === null ? null : loaded?.projectTitles.get(task.projectId) ?? null;
-      const active = currentTaskId === task.id;
-      return <li key={task.id}><button type="button"
-        className={`recent-work-item${active ? " recent-work-item--active" : ""}`}
-        aria-label={`${task.title} · ${project ?? (task.projectId === null ? "无项目" : "项目标题暂不可读取")}`}
-        data-testid={`recent-work-${task.id}`} aria-current={active ? "true" : undefined}
-        onClick={() => open(task.id)}>
-        <span className="recent-work-icon" aria-hidden="true"><FileText /></span>
-        <span className="recent-work-copy">
-          <span className="recent-work-title">{task.title}</span>
-          <span className="recent-work-project">{project ?? (task.projectId === null ? "无项目" : "项目标题暂不可读取")}</span>
-        </span>
-      </button></li>;
-    })}</ul>
-    {pagingError && <p className="action-error" role="alert">{pagingError}</p>}
-    {loaded?.nextCursor && <button className="secondary-button" type="button" disabled={loadingMore}
-      data-testid="recent-work-more" onClick={() => void load(loaded.nextCursor)}>{loadingMore ? "正在读取" : "更早"}</button>}
+    <p className="recent-work-scope" title="全部任务 · 按最近变更排序">已加载 {tasks.length} 项{loaded?.nextCursor ? " · 还有更早任务" : ""}</p>
+    <div className="recent-work-scroll" role="region" aria-label="近期工作列表" tabIndex={0}>
+      {loading && <p className="helper-text" role="status">正在读取…</p>}
+      {error && <p className="action-error" role="alert" data-testid="recent-work-error">{error}</p>}
+      {!loading && !error && tasks.length === 0 &&
+        <p className="helper-text">当前工作空间还没有任务。</p>}
+      <div data-testid="recent-work-list">{[...groups].map(([projectId, groupTasks]) => <details
+        className="recent-work-group" open key={`${projectId ?? "unassigned"}:${groupTasks.some((task) => task.id === currentTaskId) ? currentTaskId : ""}`}>
+        <summary><ChevronDown aria-hidden="true" /><span>{projectId === null ? "未归入项目" : loaded?.projectTitles.get(projectId) ?? "项目标题暂不可读取"}</span></summary>
+        <ul className="recent-work-list">{groupTasks.map((task) => {
+        const project = task.projectId === null ? null : loaded?.projectTitles.get(task.projectId) ?? null;
+        const label = `${task.title} · ${project ?? (task.projectId === null ? "无项目" : "项目标题暂不可读取")}`;
+        const active = currentTaskId === task.id;
+        return <li key={task.id}><button type="button"
+          className={`recent-work-item${active ? " recent-work-item--active" : ""}`}
+          aria-label={label} title={label}
+          data-testid={`recent-work-${task.id}`} aria-current={active ? "true" : undefined}
+          onClick={() => open(task.id)}>
+          <span className="recent-work-copy">
+            <span className="recent-work-title">{task.title}</span>
+          </span>
+        </button></li>;
+      })}</ul></details>)}</div>
+      {pagingError && <p className="action-error" role="alert">{pagingError}</p>}
+      {loaded?.nextCursor && <button className="secondary-button" type="button" disabled={loadingMore}
+        data-testid="recent-work-more" onClick={() => void load(loaded.nextCursor)}>{loadingMore ? "正在读取" : "更早"}</button>}
+    </div>
     <button className="secondary-button" type="button" data-testid="recent-work-new" aria-label="开始一项工作"
-      onClick={() => { void navigate("/agent"); }}>
+      onClick={() => { void navigate("/agent"); onOpen?.(); }}>
       <Plus aria-hidden="true" />开始一项工作</button>
   </section>;
 }

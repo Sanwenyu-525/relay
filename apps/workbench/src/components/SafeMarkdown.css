@@ -1,0 +1,26 @@
+.markdown-preview { min-width: 0; max-width: 100%; }
+.markdown-preview__table-scroll {
+  max-width: 100%;
+  min-width: 0;
+  margin: var(--relay-space-4) 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+.markdown-preview__table {
+  width: 100%;
+  border-collapse: collapse;
+  font: inherit;
+  line-height: var(--relay-font-lineHeight-ui);
+}
+.markdown-preview__table th,
+.markdown-preview__table td {
+  min-width: calc(6 * var(--relay-font-size-body));
+  padding: var(--relay-space-3) var(--relay-space-4);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.markdown-preview__table th {
+  font-weight: var(--relay-font-weight-semibold);
+  background: var(--relay-color-bg-subtle);
+}

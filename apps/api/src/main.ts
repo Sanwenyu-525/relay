@@ -9,6 +9,7 @@ import { createServer } from './api/server.js';
 import { ConfigError, findRepositoryRoot, loadConfig, type ApiConfig } from './config/config.js';
 import { RelayDatabase } from './infrastructure/database.js';
 import { SchemaReadinessChecker } from './infrastructure/schema-readiness.js';
+import { assertRestoreNotIsolated, RestoreIsolationError } from './runtime/restore-isolation.js';
 import {
   desktopWorkspaceId,
   probeDesktopBoundary,
@@ -114,7 +115,17 @@ async function main(): Promise<void> {
       ...loadConfig(env, findRepositoryRoot(), { desktop: desktopChild }),
       desktopMode: desktopChild,
     };
+    await assertRestoreNotIsolated(config.dataRoot);
   } catch (error) {
+    if (error instanceof RestoreIsolationError) {
+      if (desktopChild) {
+        writeDesktopEvent({ type: 'desktop_error', nonce: desktopFrame?.nonce ?? '', code: error.code });
+        process.stdin.destroy();
+      }
+      process.stderr.write(`${error.code}\n`);
+      process.exitCode = CONFIG_FAILURE_EXIT_CODE;
+      return;
+    }
     if (desktopChild) {
       writeDesktopEvent({
         type: 'desktop_error', nonce: desktopFrame?.nonce ?? '',

@@ -95,7 +95,7 @@ async function freePort() {
 async function startDisposableSession() {
   // The disposable PostgreSQL child may keep the launcher pipe open after its marker.
   const launcher = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-    join(scripts, 'start-acceptance-session.ps1'), '-SkipDesktop'],
+    join(scripts, 'start-acceptance-session.ps1'), '-SkipDesktop', '-InstallGraph'],
   { cwd: desktopRoot, env: powerShellEnv, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   const root = await new Promise((done, fail) => {
     let output = '';

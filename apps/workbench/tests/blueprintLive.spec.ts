@@ -200,7 +200,7 @@ describe("真实项目蓝图", () => {
     }); vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountWorkbench(`/projects/${projectId}?skill=blueprint`); unmount = mounted.unmount;
     expect(mounted.wrapper.get('[data-testid="blueprint-archive-reason"]').text()).toContain("已归档");
-    expect(mounted.wrapper.text()).toContain("服务端候选与 Diff");
+    expect(mounted.wrapper.text()).toContain("本次蓝图变更");
     expect(mounted.wrapper.get('[data-testid="blueprint-skill-generator"] fieldset').attributes("disabled")).toBeDefined();
     for (const id of ["blueprint-preview", "live-blueprint-apply", "live-blueprint-reject"]) {
       expect(mounted.wrapper.get(`[data-testid="${id}"]`).attributes("disabled")).toBeDefined();
@@ -219,11 +219,11 @@ describe("真实项目蓝图", () => {
       throw new Error(`Unexpected write ${path}`);
     }));
     const mounted = await mountWorkbench(`/projects/${projectId}?skill=blueprint`); unmount = mounted.unmount;
-    expect(mounted.wrapper.text()).toContain("服务端候选与 Diff");
+    expect(mounted.wrapper.text()).toContain("本次蓝图变更");
     forbidden = true;
     await mounted.wrapper.findAll("button").find((button) => button.text().includes("刷新事实与候选"))!.trigger("click");
     await flush();
-    expect(mounted.wrapper.text()).not.toContain("服务端候选与 Diff");
+    expect(mounted.wrapper.text()).not.toContain("本次蓝图变更");
     expect(mounted.wrapper.find('[data-testid="live-blueprint-apply"]').exists()).toBe(false);
     expect(mounted.wrapper.text()).toContain("Project access revoked");
   });
@@ -268,7 +268,7 @@ describe("真实项目蓝图", () => {
       expected_view_revision: "1", draft: draft() });
     expect(posts[0].body).not.toHaveProperty("supersedes_proposal_id");
     expect(mounted.wrapper.text()).toContain("人工草稿 USER_DRAFT");
-    expect(mounted.wrapper.text()).toContain("服务端候选与 Diff");
+    expect(mounted.wrapper.text()).toContain("本次蓝图变更");
     expect(mounted.wrapper.text()).toContain("资料 (knowledge, 显示)");
     expect(mounted.wrapper.text()).toContain("以下来自服务端候选，需在各自入口单独确认");
     expect(mounted.wrapper.get('[data-testid="live-blueprint-apply"]').attributes("disabled")).toBeUndefined();
@@ -421,7 +421,7 @@ describe("真实项目蓝图", () => {
       .toContain("来源不可用");
     expect(mounted.wrapper.text()).not.toContain("梳理交付路径");
     expect(mounted.wrapper.text()).not.toContain("整理需求");
-    expect(mounted.wrapper.text()).not.toContain("服务端候选与 Diff");
+    expect(mounted.wrapper.text()).not.toContain("本次蓝图变更");
     expect(mounted.wrapper.get('[data-testid="live-blueprint-apply"]').attributes("disabled")).toBeDefined();
     expect(mounted.wrapper.get('[data-testid="live-blueprint-reject"]').attributes("disabled")).toBeDefined();
   });
@@ -455,7 +455,7 @@ describe("真实项目蓝图", () => {
     expect(server.posts.some((item) => item.path === basePath)).toBe(false);
     expect(mounted.wrapper.text()).toContain(`来源 Assist 消息：${messageId}`);
     expect(mounted.wrapper.text()).toContain(`候选 ${proposalId}`);
-    expect(mounted.wrapper.text()).toContain("服务端候选与 Diff");
+    expect(mounted.wrapper.text()).toContain("本次蓝图变更");
     expect(mounted.wrapper.text()).toContain("尚未应用");
   });
 

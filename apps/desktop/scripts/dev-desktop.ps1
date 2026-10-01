@@ -39,6 +39,21 @@ $pidFile = Join-Path $stateDir 'runner.pid'
 $logOut = Join-Path $stateDir 'runner.out.log'
 $logErr = Join-Path $stateDir 'runner.err.log'
 
+function Assert-DesktopAvailable {
+  $existing = @(Get-Process -Name 'relay-desktop' -ErrorAction SilentlyContinue)
+  if ($existing.Count) {
+    throw ('Relay 桌面进程已存在（PID ' + (($existing | Select-Object -ExpandProperty Id) -join ', ') + '）。请关闭现有窗口；若正在备份或恢复，请等待维护会话结束。未启动第二个实例。')
+  }
+  $guard = $null
+  try {
+    if ([Threading.Mutex]::TryOpenExisting('Local\RelayAgentDesktopSingleInstance', [ref]$guard)) {
+      throw 'Relay 单实例锁正被已有窗口或维护会话占用。请关闭现有窗口或等待维护结束；未启动第二个实例。'
+    }
+  } finally {
+    if ($guard) { $guard.Dispose() }
+  }
+}
+
 # 后台管理模式：PID 记录 + 日志集中在 .relay-dev\dev-desktop\；前台流程保持原样。
 if ($Action -eq 'start') {
   if (Test-Path $pidFile) {
@@ -52,9 +67,7 @@ if ($Action -eq 'start') {
     }
     Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
   }
-  if (Get-Process relay-desktop -ErrorAction SilentlyContinue) {
-    throw '检测到 relay-desktop 正在运行（dev 或打包版）；单实例互斥，请先关闭再 -Action start。'
-  }
+  Assert-DesktopAvailable
   New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
   $runnerArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath,
     '-RunForeground', '-FrontendPort', "$FrontendPort")
@@ -135,9 +148,14 @@ function Invoke-Pnpm {
   Push-Location $Directory
   try {
     & $node $corepack 'pnpm@9.15.9' @Arguments
+    if ($LASTEXITCODE -eq 23 -and ($Arguments -join ' ') -eq 'exec tauri dev') {
+      throw 'Relay 单实例锁检查未通过（退出码 23）。请查看上方宿主原因；若提示已有实例，请关闭已有窗口或等待维护会话结束后重试；现有数据已保留。'
+    }
     if ($LASTEXITCODE -ne 0) { throw "pnpm $($Arguments -join ' ') exited $LASTEXITCODE" }
   } finally { Pop-Location }
 }
+
+Assert-DesktopAvailable
 
 foreach ($path in @($node, $corepack, (Join-Path $tauriRoot 'tauri.conf.json'))) {
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing input: $path" }

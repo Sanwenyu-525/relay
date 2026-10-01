@@ -1,6 +1,6 @@
 import { describe, expect, it, afterEach } from "vitest";
 import { setFixtureLatency } from "../src/fixtures/fixtureAdapter";
-import { dialogLabels, dialogText, flush, mountWorkbench, pressEscape } from "./mountApp";
+import { DomWrapper, dialogLabels, dialogText, flush, mountWorkbench, pressEscape } from "./mountApp";
 
 let unmount: (() => void) | null = null;
 
@@ -10,6 +10,57 @@ afterEach(() => {
 });
 
 describe("局部导航与浮层行为", () => {
+  it("默认项目首页可通过主导航进入协作并显示选中态", async () => {
+    const mounted = await mountWorkbench("/");
+    unmount = mounted.unmount;
+    expect(mounted.router.currentRoute.value.path).toBe("/projects");
+
+    const navigation = mounted.wrapper.get('nav[aria-label="主导航"]');
+    const collaboration = navigation.get('a[href="/agent"]');
+    expect(collaboration.text()).toBe("工作台");
+    expect(collaboration.attributes("aria-current")).toBeUndefined();
+    const link = collaboration.element as HTMLAnchorElement;
+    expect(link.tabIndex).toBe(0);
+    link.focus();
+    expect(document.activeElement).toBe(link);
+
+    await collaboration.trigger("click");
+    await flush();
+    expect(mounted.router.currentRoute.value.path).toBe("/agent");
+    expect(mounted.wrapper.find('[data-testid="collab-fixture-gap"]').exists()).toBe(true);
+    expect(collaboration.attributes("aria-current")).toBe("page");
+    expect(link.classList.contains("navigation-item--active")).toBe(true);
+    expect(navigation.get('a[href="/projects"]').attributes("aria-current")).toBeUndefined();
+  });
+
+  it("移动导航抽屉可进入协作，关闭后重开仍标记当前页", async () => {
+    const mounted = await mountWorkbench("/projects");
+    unmount = mounted.unmount;
+    const trigger = mounted.wrapper.get('button[aria-label="打开导航"]');
+    await trigger.trigger("click");
+    await flush();
+
+    const collaboration = new DomWrapper(document.querySelector('nav[aria-label="完整导航"]')).get('a[href="/agent"]');
+    expect(collaboration.text()).toBe("工作台");
+    expect(collaboration.attributes("aria-current")).toBeUndefined();
+    const link = collaboration.element as HTMLAnchorElement;
+    expect(link.tabIndex).toBe(0);
+    link.focus();
+    expect(document.activeElement).toBe(link);
+
+    await collaboration.trigger("click");
+    await flush();
+    expect(mounted.router.currentRoute.value.path).toBe("/agent");
+    expect(mounted.wrapper.find('[data-testid="collab-fixture-gap"]').exists()).toBe(true);
+    expect(dialogLabels()).toHaveLength(0);
+
+    await trigger.trigger("click");
+    await flush();
+    const navigation = new DomWrapper(document.querySelector('nav[aria-label="完整导航"]'));
+    expect(navigation.get('a[href="/agent"]').attributes("aria-current")).toBe("page");
+    expect(navigation.get('a[href="/projects"]').attributes("aria-current")).toBeUndefined();
+  });
+
   it("直接链接与浏览器返回都能到达四个状态", async () => {
     const mounted = await mountWorkbench("/projects/project-hci?skill=resume");
     unmount = mounted.unmount;

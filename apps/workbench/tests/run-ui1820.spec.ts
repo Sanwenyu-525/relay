@@ -88,7 +88,7 @@ describe("UI-18/19/20 Run 状态补全", () => {
     expect(pending).toContain("Run 尚未暂停");
     expect(pending).toContain("当前执行者仍为 AI");
     const steps = mounted.wrapper.get('[data-testid="run-steps"]').text();
-    expect(steps).toContain("2026-09-23T00:00:00.000Z → 2026-09-23T00:00:05.000Z");
+    expect(steps).toContain("2026-09-23 08:00:00 → 2026-09-23 08:00:05");
     expect(mounted.wrapper.get('[data-testid="run-current-action"]').text()).toContain("当前动作：生成草稿 · 执行中");
     expect(mounted.wrapper.get('[data-testid="run-current-action"]').text()).toContain("控制请求将在安全点处理");
     const resources = mounted.wrapper.get('[data-testid="run-resources"]').text();

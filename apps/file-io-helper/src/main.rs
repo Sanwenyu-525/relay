@@ -246,6 +246,9 @@ fn run(request: Request) -> Result<Value, Failure> {
 }
 
 fn main() {
+    if std::env::args_os().skip(1).any(|arg| arg == "--managed-content") {
+        std::process::exit(content_protocol::main());
+    }
     let mut input = Vec::new();
     let response = match io::stdin()
         .lock()
@@ -272,3 +275,4 @@ fn main() {
 
 #[cfg(windows)]
 mod win;
+mod content_protocol;
