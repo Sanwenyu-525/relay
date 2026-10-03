@@ -33,8 +33,8 @@ import { requireCurrentRuleSnapshot } from './rule-fence.js';
 import { applySafeControl } from './control-requests.js';
 import type { RunAdvance } from '../run/run-repository.js';
 import { type FakeScenario } from '../workflow/context-fixture.js';
-import { readFileReadAction, readMockActionOperationId,
-  readWebFetchAction } from '../workflow/execution-contract.js';
+import { readFrozenRunActions } from '../workflow/execution-contract.js';
+import { readPendingFrozenRunAction } from './frozen-run-actions.js';
 import { attachReadEvidenceWithinBudget, draftInputHash, loadRunReadEvidence,
   ReadInputBudgetError } from './run-read-evidence.js';
 import { buildRunContext, type BuiltContext } from './context-builder.js';
@@ -285,27 +285,33 @@ export async function advanceRunStep(
     const draft = steps.find((candidate) => candidate.step_kind === 'DRAFT');
     const contract = await repositories.runs.readContract(run.id);
     const frozen = contract?.frozen_snapshot;
-    const readAction = frozen === undefined ? undefined :
-      readFileReadAction(frozen) ?? readWebFetchAction(frozen);
-    const actionOperationId = frozen === undefined ? undefined :
-      readMockActionOperationId(frozen);
-    let gatewayActionSucceeded = false;
-    const needsGatewayAction = actionOperationId !== undefined && published?.status !== 'SUCCEEDED' &&
-      // Existing Runs prepared their read after DRAFT. Preserve their completed
-      // draft and Review identity; only pending drafts take the new read-first path.
-      (draft?.status === 'SUCCEEDED' || (readAction !== undefined && built?.status === 'SUCCEEDED'));
+    const pendingAction = await readPendingFrozenRunAction(repositories, run.id);
+    const readAction = pendingAction !== undefined &&
+      (pendingAction.action.kind === 'READ' || pendingAction.action.kind === 'WEB')
+      ? pendingAction.action
+      : frozen === undefined ? undefined : readFrozenRunActions(frozen).read;
+    // 全部冻结动作都已 SUCCEEDED：本轮不再要求任何 Gateway 动作，直接推进候选产物。
+    const gatewayActionSucceeded = pendingAction?.allSettled === true;
+    const pendingIsRead = readAction !== undefined && readAction.operation_id === pendingAction?.actionId;
+    // 读动作可在 DRAFT 之前发生；写与检查必须等 DRAFT 已成功，且仍在候选产物发布之前。
+    const needsGatewayAction = pendingAction !== undefined && !gatewayActionSucceeded &&
+      published?.status !== 'SUCCEEDED' &&
+      (pendingIsRead
+        ? draft?.status === 'SUCCEEDED' || built?.status === 'SUCCEEDED'
+        : draft?.status === 'SUCCEEDED');
     let pendingReadAction = false;
     if (needsGatewayAction) {
-      const operation = await repositories.gateway.readOperation(actionOperationId);
-      const matchingStep = readAction === undefined
-        ? operation?.step_id === draft?.id
-        : operation?.step_id === built?.id ||
+      const actionOperationId = pendingAction!.actionId;
+      const operation = pendingAction!.operation;
+      const matchingStep = pendingIsRead
+        ? operation?.step_id === built?.id ||
           // Legacy reads were bound to DRAFT. A correction may reset that
           // step, but the successful read must keep its old action identity.
           (operation?.step_id === draft?.id &&
-            (draft?.status === 'SUCCEEDED' || operation?.status === 'SUCCEEDED'));
+            (draft?.status === 'SUCCEEDED' || operation?.status === 'SUCCEEDED'))
+        : operation?.step_id === draft?.id;
       if (operation !== undefined && (operation.run_id !== run.id || !matchingStep)) {
-        throw invalidTransition('Mock Gateway 操作身份与冻结 Run 不匹配。');
+        throw invalidTransition('Gateway 操作身份与冻结 Run 不匹配。');
       }
       if (operation?.status === 'UNKNOWN' || operation?.status === 'DISPATCHING') {
         return { status: 'ACTION_UNKNOWN', run_id: run.id, operation_id: actionOperationId };
@@ -313,10 +319,8 @@ export async function advanceRunStep(
       if (operation?.status === 'DENIED' || operation?.status === 'FAILED') {
         return { status: 'GATEWAY_ACTION_DENIED', run_id: run.id, operation_id: actionOperationId };
       }
-      gatewayActionSucceeded = operation?.status === 'SUCCEEDED';
-      pendingReadAction = readAction !== undefined && draft?.status !== 'SUCCEEDED' &&
-        !gatewayActionSucceeded;
-      if (!gatewayActionSucceeded && !pendingReadAction) {
+      pendingReadAction = pendingIsRead && draft?.status !== 'SUCCEEDED';
+      if (!pendingReadAction) {
         return { status: 'GATEWAY_ACTION_REQUIRED', run_id: run.id, operation_id: actionOperationId };
       }
     }
@@ -353,7 +357,7 @@ export async function advanceRunStep(
           status: 'RUNNING', currentStepId: built!.id });
       }
       return { status: 'GATEWAY_ACTION_REQUIRED', run_id: run.id,
-        operation_id: actionOperationId! };
+        operation_id: pendingAction!.actionId };
     }
     const step = steps.find((candidate) => candidate.status !== 'SUCCEEDED');
 

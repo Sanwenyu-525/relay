@@ -74,10 +74,16 @@ export interface DelegateTaskInput {
   readonly webFetchAction?: {
     readonly connection_id: string; readonly url: string;
   } | undefined;
-  /** 可选固定文件写意图；与其他三种 Gateway 意图互斥。 */
+  /** 可选固定文件写意图；可与 cliRunAction 组成「先改文件、再跑一次检查」链。 */
   readonly fileWriteAction?: {
     readonly connection_id: string; readonly resource_id: string;
     readonly changes: readonly FileWriteChangeIntent[];
+  } | undefined;
+  /** 可选固定受控命令意图；与 fileWriteAction 组合时在文件落盘之后执行。 */
+  readonly cliRunAction?: {
+    readonly connection_id: string; readonly resource_id: string;
+    readonly executable: string; readonly args: readonly string[];
+    readonly max_output_bytes?: number;
   } | undefined;
   /** 仅用于真实 PG barrier 测试；不属于 HTTP 请求或命令摘要。 */
   readonly hooks?: {
@@ -207,11 +213,20 @@ export async function delegateTask(
       const { allRules: allApplicableRules, criteria: ruleCriteria } =
         await loadRulePlanBasis(repositories, input.workspaceId, task.project_id, task.id);
 
-      const frozenIntents = [input.mockGatewayAction, input.fileReadAction,
-        input.webFetchAction, input.fileWriteAction]
+      // 一个 Run 最多冻结一个读取动作，以及一个写入链：Fake 标记、受控文件变更、
+      // 受控命令检查三选一，或「文件变更 + 一次检查命令」。Fake 标记不能与真实写入并存。
+      const readIntents = [input.fileReadAction, input.webFetchAction]
         .filter((intent) => intent !== undefined);
-      if (frozenIntents.length > 1) {
-        throw invalidTransition('四种 Gateway action 只能冻结其一。',
+      if (readIntents.length > 1) {
+        throw invalidTransition('读取类 Gateway action 只能冻结其一。', { taskId: task.id });
+      }
+      const writeIntents = [input.mockGatewayAction, input.fileWriteAction, input.cliRunAction]
+        .filter((intent) => intent !== undefined);
+      const marker = input.mockGatewayAction !== undefined;
+      const chain = (input.fileWriteAction !== undefined ? 1 : 0) + (input.cliRunAction !== undefined ? 1 : 0);
+      if (writeIntents.length > 2 || (marker && chain > 0) || (!marker && chain !== writeIntents.length) ||
+          (readIntents.length > 0 && writeIntents.length > 0)) {
+        throw invalidTransition('Gateway action 只能冻结「一个读取动作」，或「标记 / 文件变更 / 检查命令」其一，或「文件变更 + 检查命令」。',
           { taskId: task.id });
       }
       if (input.fileWriteAction !== undefined) {
@@ -252,6 +267,22 @@ export async function delegateTask(
           }
           try { requireFrozenBaseline(change); requireMatchingTarget(change); }
           catch { throw invalidTransition('file_write_action.changes 的冻结摘要无效。', { taskId: task.id }); }
+        }
+      }
+      if (input.cliRunAction !== undefined) {
+        const resource = await repositories.gateway.readResource(input.cliRunAction.resource_id);
+        if (resource?.workspace_id !== input.workspaceId || resource.project_id !== task.project_id) {
+          throw invalidTransition('cli_run_action.resource_id 不属于当前 Task 的 Project。',
+            { taskId: task.id });
+        }
+        const cli = input.cliRunAction;
+        if (typeof cli.executable !== 'string' || cli.executable.trim() === '' ||
+            cli.executable.includes('\u0000') || !Array.isArray(cli.args) || cli.args.length === 0 ||
+            cli.args.some((arg) => typeof arg !== 'string' || arg.includes('\u0000')) ||
+            (cli.max_output_bytes !== undefined &&
+              (!Number.isInteger(cli.max_output_bytes) || cli.max_output_bytes < 0 ||
+                cli.max_output_bytes > 1048576))) {
+          throw invalidTransition('cli_run_action 只接受一个可执行文件与参数数组。', { taskId: task.id });
         }
       }
       if (input.webFetchAction !== undefined) {
@@ -309,6 +340,15 @@ export async function delegateTask(
           connection_id: input.fileWriteAction.connection_id,
           resource_id: input.fileWriteAction.resource_id,
           changes: input.fileWriteAction.changes,
+        } }),
+        ...(input.cliRunAction === undefined ? {} : { cliRunAction: {
+          operation_id: randomUUID(), intent_key: 'cli-run-v1' as const,
+          connection_id: input.cliRunAction.connection_id,
+          resource_id: input.cliRunAction.resource_id,
+          executable: input.cliRunAction.executable,
+          args: [...input.cliRunAction.args],
+          ...(input.cliRunAction.max_output_bytes === undefined ? {} :
+            { max_output_bytes: input.cliRunAction.max_output_bytes }),
         } }),
         ...(contextSources === undefined || contextSources.length === 0 ? {} :
           { contextSources }),

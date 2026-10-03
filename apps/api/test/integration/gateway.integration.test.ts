@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rm, rmdir, symlink, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rm, rmdir, symlink, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test, { after, before } from 'node:test';
 
@@ -949,6 +949,70 @@ test('P10 Rule update after Gateway Admit preserves the old Invocation outcome a
   await assert.rejects(claimRunForGateway(app.db, { workspaceId: f.workspaceId,
     runId: f.runId, workerId: `worker-${randomUUID()}` }),
   (error: unknown) => code(error) === 'RULE_SNAPSHOT_STALE');
+});
+
+test('root-bound Capability connections bind one filesystem boundary over HTTP and refuse mixed boundaries', async () => {
+  const f = await runFixture();
+  const api = await startTestApi();
+  try {
+    const connections = workspacePath(f.workspaceId, `/projects/${f.projectId}/connections`);
+    const root = join(dataRoot, `git-root-${randomUUID()}`);
+    await mkdir(root, { recursive: true });
+    for (const capability of ['GIT_READ', 'CLI_RUN'] as const) {
+      const commandId = randomUUID();
+      const created = expectCommandAccepted(await api.post(connections,
+        { command_id: commandId, capabilities: [capability], root_path: root }), 201, commandId);
+      const listed = await api.get(connections);
+      assert.equal(listed.status, 200);
+      assert.ok((listed.body as { id: string; capabilities: string[] }[]).some(
+        (row) => row.id === created.connection_id && row.capabilities.includes(capability)));
+      // The connection query never publishes the bound directory.
+      const detail = await api.get(`${connections}/${created.connection_id}`);
+      assert.equal((detail.body as { allowed_host: string | null }).allowed_host, null);
+      assert.equal(detail.text.includes('root_path'), false);
+      // One REAL connection binds exactly one boundary: a host may not be mixed in.
+      expectProblem(await api.post(connections,
+        { command_id: randomUUID(), capabilities: ['GIT_WRITE'], root_path: root, allowed_host: 'example.org' }),
+      422, 'VALIDATION_FAILED');
+      expectProblem(await api.post(connections,
+        { command_id: randomUUID(), capabilities: ['GIT_READ', 'WEB_FETCH'], root_path: root }),
+      422, 'VALIDATION_FAILED');
+      expectProblem(await api.post(connections, { command_id: randomUUID(), capabilities: ['GIT_READ'] }),
+      422, 'VALIDATION_FAILED');
+      expectProblem(await api.post(connections,
+        { command_id: randomUUID(), capabilities: ['GIT_READ'], root_path: join(root, 'missing') }),
+      422, 'VALIDATION_FAILED');
+    }
+    // Fake capabilities keep the empty P09 config: no directory, no host.
+    const fakeCommandId = randomUUID();
+    expectCommandAccepted(await api.post(connections,
+      { command_id: fakeCommandId, capabilities: ['FAKE_WRITE'] }), 201, fakeCommandId);
+    expectProblem(await api.post(connections,
+      { command_id: randomUUID(), capabilities: ['FAKE_WRITE'], root_path: root }), 422, 'VALIDATION_FAILED');
+
+    // A GIT_READ policy is scoped by managed resource, never by an arbitrary prefix.
+    const resourceCommand = randomUUID();
+    const resource = expectCommandAccepted(await api.post(workspacePath(f.workspaceId,
+      `/projects/${f.projectId}/managed-resources`),
+    { command_id: resourceCommand, root_path: root }), 201, resourceCommand);
+    const policies = workspacePath(f.workspaceId, `/projects/${f.projectId}/permission-policies`);
+    const policyCommand = randomUUID();
+    const policy = expectCommandAccepted(await api.post(policies, { command_id: policyCommand,
+      capability: 'GIT_READ', resource_id: resource.resource_id, decision: 'ASK', max_payload_bytes: 0 }),
+    201, policyCommand);
+    const versions = await api.get(`${policies}/${policy.policy_id}/versions`);
+    assert.equal(versions.status, 200);
+    const version = (versions.body as { version: string; capability: string; action_type: string;
+      target_prefix: string; decision: string }[])[0]!;
+    assert.equal(version.capability, 'GIT_READ');
+    assert.equal(version.action_type, 'GIT_STATUS');
+    assert.equal(version.decision, 'ASK');
+    assert.equal(await realpath(version.target_prefix), await realpath(root));
+    expectProblem(await api.post(policies, { command_id: randomUUID(),
+      capability: 'GIT_READ', resource_id: null, decision: 'ASK', max_payload_bytes: 0 }),
+    422, 'VALIDATION_FAILED');
+    await rm(root, { recursive: true, force: true });
+  } finally { await api.stop(); }
 });
 
 interface FileReadFixture {

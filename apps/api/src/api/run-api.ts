@@ -64,6 +64,7 @@ export function registerRunRoutes(app: FastifyInstance, dependencies: RouteDepen
           fileReadAction: body.file_read_action,
           webFetchAction: body.web_fetch_action,
           fileWriteAction: body.file_write_action,
+          cliRunAction: body.cli_run_action,
           contextSources: body.context_sources,
         });
 

@@ -207,4 +207,66 @@ export class InformationRepository {
     await sql`update ${sql.table(ROOTS[kind])} set status = ${status},
       revision = revision + 1, updated_at = now() where id = ${id}`.execute(this.db);
   }
+
+  // N03 整理候选：只保存来源成果版本与建议归类，接受与否由既有知识命令决定。
+  async insertCurationCandidate(input: { id: string; workspaceId: string; projectId: string;
+    sourceArtifactId: string; sourceArtifactVersionId: string;
+    sourceArtifactRevision: bigint; suggestedTitle: string;
+    suggestedKnowledgeId: string | null }): Promise<CurationCandidateRow> {
+    const result = await sql<CurationCandidateRow>`insert into knowledge_curation_candidates
+      (id, workspace_id, project_id, source_artifact_id, source_artifact_version_id,
+        source_artifact_revision, suggested_title, suggested_knowledge_id)
+      values (${input.id}, ${input.workspaceId}, ${input.projectId}, ${input.sourceArtifactId},
+        ${input.sourceArtifactVersionId}, ${input.sourceArtifactRevision},
+        ${input.suggestedTitle}, ${input.suggestedKnowledgeId}) returning *`.execute(this.db);
+    return result.rows[0]!;
+  }
+
+  async readCurationCandidate(id: string, lock = false):
+    Promise<CurationCandidateRow | undefined> {
+    const suffix = lock ? sql`for update` : sql``;
+    return (await sql<CurationCandidateRow>`select * from knowledge_curation_candidates
+      where id = ${id} ${suffix}`.execute(this.db)).rows[0];
+  }
+
+  async listCurationCandidates(workspaceId: string, projectId: string, limit: number):
+    Promise<readonly CurationCandidateRow[]> {
+    return (await sql<CurationCandidateRow>`select * from knowledge_curation_candidates
+      where workspace_id = ${workspaceId} and project_id = ${projectId}
+      order by created_at desc, id desc limit ${limit}`.execute(this.db)).rows;
+  }
+
+  /** 一次性绑定接受结果；已被接受或已拒绝的候选不会被覆盖。 */
+  async markCurationAccepted(id: string, knowledgeId: string, knowledgeVersionId: string):
+    Promise<boolean> {
+    const result = await sql`update knowledge_curation_candidates
+      set accepted_knowledge_id = ${knowledgeId},
+        accepted_knowledge_version_id = ${knowledgeVersionId}, decided_at = now()
+      where id = ${id} and accepted_knowledge_version_id is null
+        and rejected_at is null`.execute(this.db);
+    return (result.numAffectedRows ?? 0n) === 1n;
+  }
+
+  async markCurationRejected(id: string): Promise<boolean> {
+    const result = await sql`update knowledge_curation_candidates set rejected_at = now()
+      where id = ${id} and accepted_knowledge_version_id is null and rejected_at is null`
+      .execute(this.db);
+    return (result.numAffectedRows ?? 0n) === 1n;
+  }
+}
+
+export interface CurationCandidateRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly project_id: string;
+  readonly source_artifact_id: string;
+  readonly source_artifact_version_id: string;
+  readonly source_artifact_revision: bigint;
+  readonly suggested_title: string;
+  readonly suggested_knowledge_id: string | null;
+  readonly accepted_knowledge_id: string | null;
+  readonly accepted_knowledge_version_id: string | null;
+  readonly created_at: Date;
+  readonly decided_at: Date | null;
+  readonly rejected_at: Date | null;
 }

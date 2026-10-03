@@ -18,7 +18,7 @@ import { lockWritableProjectInWorkspace } from './guards.js';
 import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
 import { requireCurrentRuleSnapshot } from './rule-fence.js';
 import { hasCurrentRunContext } from './context-fence.js';
-import { readMockActionOperationId } from '../workflow/execution-contract.js';
+import { readFrozenActionOperationIds } from '../workflow/execution-contract.js';
 import { readWebFetchConfig, webFetchExecute, type WebFetchLimits } from '../web/web-fetch.js';
 import {
   executeFileChangeset, reconcileFileChangeset, canonicalRelativePath,
@@ -883,9 +883,9 @@ async function admitGatewayInvocation(db: DbExecutor, input: DispatchGatewayInpu
         throw gatewayDenied('GATEWAY_OPERATION_UNRESOLVED', '该 Run 的其他动作仍未安全核对。');
       }
       const contract = await repositories.runs.readContract(run.id);
-      const frozenAction = contract === undefined ? undefined :
-        readMockActionOperationId(contract.frozen_snapshot);
-      if (frozenAction === located.id &&
+      const frozenActionIds = contract === undefined ? [] :
+        readFrozenActionOperationIds(contract.frozen_snapshot);
+      if (frozenActionIds.includes(located.id) &&
           !(await hasCurrentRunContext(repositories, run, task, authority))) {
         throw gatewayDenied('GATEWAY_CONTEXT_STALE', 'Run 的 Context 来源已变化，原动作不得准入。');
       }

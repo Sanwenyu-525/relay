@@ -93,9 +93,21 @@ export type AssistResult =
   | { readonly kind: 'CANCELLED'; readonly providerRequestId?: string;
       readonly usage?: ModelUsage };
 
+/**
+ * 用户请求解释（工作台 §18.2）：端口只把原请求整理成候选 JSON，
+ * 授权来源、准入与验收有效性仍由应用层的确定性规则判定。
+ */
+export interface ConversationInterpretationRequest {
+  readonly system: string;
+  readonly userContent: string;
+  readonly signal?: AbortSignal | undefined;
+}
+
 export interface AssistModelPort {
   readonly identity: ModelIdentity;
   assist(request: AssistRequest): Promise<AssistResult>;
+  /** 缺省实现视为「没有请求解释能力」，由应用层给出 typed failure，不静默降级为讨论。 */
+  interpret?(request: ConversationInterpretationRequest): Promise<AssistResult>;
 }
 
 /** 缺资料时声明缺失的输入名（供 DRAFT 记录证据；P05 不尝试补齐）。 */
@@ -292,6 +304,32 @@ export class FakeModelPort implements AssistModelPort {
     const raw = trigger.includes('FAKE_ASSIST_BAD_JSON')
       ? '{"summary":"broken" "proposal":'
       : JSON.stringify(body);
+    return { kind: 'CONTENT', content: raw, providerRequestId,
+      usage: { ...usage, outputTokens: Math.max(1, Math.ceil(raw.length / 4)) } };
+  }
+
+  /** 确定性请求解释：只回候选 JSON。触发串 `FAKE_INTERPRET_DISCUSS` /
+   * `FAKE_INTERPRET_CLARIFY` / `FAKE_INTERPRET_BAD_JSON` 只服务测试断言。 */
+  async interpret(request: ConversationInterpretationRequest): Promise<AssistResult> {
+    const content = request.userContent;
+    const providerRequestId = `fake-interpret-${seedOf(content).slice(0, 16)}`;
+    const usage: ModelUsage = { inputTokens: Math.max(1,
+      Math.ceil((request.system.length + content.length) / 4)), outputTokens: 0,
+    cacheReadTokens: null, cacheCreationTokens: null };
+    if (request.signal?.aborted === true) return { kind: 'CANCELLED' };
+    let body: JsonObject;
+    if (content.includes('FAKE_INTERPRET_DISCUSS')) {
+      body = { decision: 'DISCUSS' };
+    } else if (content.includes('FAKE_INTERPRET_CLARIFY')) {
+      body = { decision: 'CLARIFY', questions: ['这次要改的是哪个文件或哪段功能？'] };
+    } else {
+      body = { decision: 'PREPARE', task: { title: content.slice(0, 60),
+        objective: content.slice(0, 400),
+        criteria: [{ statement: '存在可核对的交付说明。', required: true, method: 'HUMAN' }],
+        expected_outputs: { kind: 'MARKDOWN_DOCUMENT' },
+        file_changes: [] } };
+    }
+    const raw = content.includes('FAKE_INTERPRET_BAD_JSON') ? '{"decision":' : JSON.stringify(body);
     return { kind: 'CONTENT', content: raw, providerRequestId,
       usage: { ...usage, outputTokens: Math.max(1, Math.ceil(raw.length / 4)) } };
   }

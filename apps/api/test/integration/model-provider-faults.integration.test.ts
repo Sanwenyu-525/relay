@@ -98,9 +98,10 @@ async function closeSockets(): Promise<void> {
 
 for (const scenario of [
   { name: 'known request and usage', requestId: 'chatcmpl-controlled-known',
-    usage: { inputTokens: 43, outputTokens: 8 } },
+    usage: { inputTokens: 43, outputTokens: 8, cacheReadTokens: 30, cacheCreationTokens: 5 } },
   { name: 'unknown request and usage', requestId: undefined,
-    usage: { inputTokens: null, outputTokens: null } },
+    usage: { inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreationTokens: null } },
 ]) {
   test(`controlled tool refusal envelope persists ${scenario.name}`, async () => {
     assert.ok(api);
@@ -139,6 +140,8 @@ for (const scenario of [
     assert.equal(settled[0]!.provider_request_id, scenario.requestId ?? null);
     assert.equal(settled[0]!.usage_input_tokens, scenario.usage.inputTokens);
     assert.equal(settled[0]!.usage_output_tokens, scenario.usage.outputTokens);
+    assert.equal(settled[0]!.usage_cache_read_tokens, scenario.usage.cacheReadTokens);
+    assert.equal(settled[0]!.usage_cache_creation_tokens, scenario.usage.cacheCreationTokens);
     const message = await new AssistRepository(app.db).readMessage(messageId);
     assert.ok(message);
     assert.equal(message.provider_error_kind, null);
@@ -146,6 +149,8 @@ for (const scenario of [
     assert.equal(message.provider_request_id, settled[0]!.provider_request_id);
     assert.equal(message.usage_input_tokens, settled[0]!.usage_input_tokens);
     assert.equal(message.usage_output_tokens, settled[0]!.usage_output_tokens);
+    assert.equal(message.usage_cache_read_tokens, settled[0]!.usage_cache_read_tokens);
+    assert.equal(message.usage_cache_creation_tokens, settled[0]!.usage_cache_creation_tokens);
     const facts = await sql<{ proposals: number; previews: number; actions: number }>`select
       (select count(*)::integer from assist_proposals where message_id=${messageId}) as proposals,
       (select count(*)::integer from assist_message_previews where message_id=${messageId}) as previews,
@@ -157,12 +162,15 @@ for (const scenario of [
     assert.equal(response.status, 200);
     const projected = (response.body as { items: { id: string; provider_request_id: string | null;
       provider_error_kind: string | null; content: string | null;
-      usage: { input_tokens: number | null; output_tokens: number | null } }[] }).items
+      usage: { input_tokens: number | null; output_tokens: number | null;
+        cache_read_tokens: number | null; cache_creation_tokens: number | null } }[] }).items
       .find((item) => item.id === messageId);
     assert.ok(projected);
     assert.equal(projected.provider_request_id, scenario.requestId ?? null);
     assert.deepEqual(projected.usage, { input_tokens: scenario.usage.inputTokens,
-      output_tokens: scenario.usage.outputTokens });
+      output_tokens: scenario.usage.outputTokens,
+      cache_read_tokens: scenario.usage.cacheReadTokens,
+      cache_creation_tokens: scenario.usage.cacheCreationTokens });
     assert.equal(projected.provider_error_kind, null);
     assert.equal(projected.content, null);
   });
@@ -314,7 +322,8 @@ for (const category of ['AUTH', 'RATE_LIMIT', 'TIMEOUT', 'STREAM_BROKEN', 'PROTO
         assert.equal(projected.content, null);
         if (toolRefusal) {
           assert.equal(projected.provider_request_id, settled[0]!.provider_request_id);
-          assert.deepEqual(projected.usage, { input_tokens: null, output_tokens: null });
+          assert.deepEqual(projected.usage, { input_tokens: null, output_tokens: null,
+            cache_read_tokens: null, cache_creation_tokens: null });
         }
         const serialized = JSON.stringify({ message, settled, body: response.body },
           (_key, value: unknown) => typeof value === 'bigint' ? value.toString() : value);

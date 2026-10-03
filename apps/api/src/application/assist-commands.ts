@@ -378,6 +378,16 @@ export async function acceptAssistProposal(
     if (proposal.project_id !== null) {
       await lockWritableProjectInWorkspace(repositories, input.workspaceId, proposal.project_id);
     }
+    // 取得候选锁后再查一次同 scope/command 的回执：上面的两次查询都发生在加锁之前，
+    // 两个同 command_id、同内容的并发请求都会通过它们，然后一起等这里这把锁。
+    // 胜出的请求已经连同业务效果和回执提交，输的一方必须沿原回执重放，
+    // 不能按“提案已被接受”拒绝成 409——那是同一次操作的两个视角，不是一次新决定。
+    // 摘要不同仍由 resolveExistingReceipt 抛 CommandIdReusedError，与首次路径一致。
+    const committedWhileLocking = await repositories.receipts.findReceipt({ scopeKey,
+      commandId: input.commandId });
+    if (committedWhileLocking !== undefined) {
+      return resolveExistingReceipt<AcceptAssistProposalResult>(committedWhileLocking, payloadHash);
+    }
     if (proposal.status === 'ACCEPTED') {
       throw invalidTransition('提案已被接受，不能再次接受。', { proposalId: proposal.id });
     }

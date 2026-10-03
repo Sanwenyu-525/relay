@@ -11,7 +11,7 @@ import type { DbExecutor } from '../infrastructure/database.js';
 import { GRAPH_CHECKPOINT_SCHEMA } from '../infrastructure/graph-checkpoints.js';
 import { ManagedContentStore } from '../storage/managed-content-store.js';
 import { createRepositories, withTransaction } from '../application/unit-of-work.js';
-import { readMockActionOperationId } from '../workflow/execution-contract.js';
+import { readFrozenActionOperationIds } from '../workflow/execution-contract.js';
 import { executeMockGatewayStep, type MockGatewayStepResult } from './mock-gateway-action.js';
 
 const RunGraphState = Annotation.Root({
@@ -274,9 +274,9 @@ async function validReviewResume(db: DbExecutor, claim: ClaimedRunCommand,
   if ((reviewKind === 'ACTION_APPROVAL') !== (interruptedOperationId !== '')) return false;
   if (interruptedOperationId !== '') {
     const contract = await createRepositories(db).runs.readContract(claim.runId);
-    const frozenOperationId = contract === undefined ? undefined :
-      readMockActionOperationId(contract.frozen_snapshot);
-    if (frozenOperationId !== interruptedOperationId) return false;
+    const frozenOperationIds = contract === undefined ? [] :
+      readFrozenActionOperationIds(contract.frozen_snapshot);
+    if (!frozenOperationIds.includes(interruptedOperationId)) return false;
   }
   const rows = await sql<{ exists: boolean }>`
     select exists(select 1 from run_commands c

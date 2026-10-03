@@ -881,6 +881,37 @@ export type AssistProposalStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRE
 export type AssistProposalKind = 'CANDIDATE_MARKDOWN' | 'TASK_DEFINITION' |
   'TASK_CONTRACT_CHANGE' | 'VERIFICATION_PLAN_CHANGE';
 
+export type ConversationDecision = 'DISCUSS' | 'CLARIFY' | 'PREPARE';
+export type ConversationCandidateStatus = 'PENDING' | 'READY' | 'INVALID' | 'UNAVAILABLE';
+export type ConversationExecutionStatus = 'INTERPRETING' | 'DISCUSSED' | 'CLARIFY' |
+  'READY' | 'TASK_PREPARED' | 'DELEGATED' | 'FAILED';
+
+/** 0050：一条原用户消息对应一条执行请求；模型整理出的候选先落库，再由确定性规则分发领域命令。 */
+export interface ConversationExecutionRequestRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly project_id: string;
+  readonly session_id: string;
+  readonly source_message_id: string;
+  readonly resource_id: string;
+  readonly command_id: string;
+  readonly root_path: string;
+  readonly base_content_sha256: Buffer;
+  readonly decision: ConversationDecision;
+  readonly candidate_status: ConversationCandidateStatus;
+  readonly clarification: JsonObject | null;
+  readonly candidate: JsonObject | null;
+  readonly status: ConversationExecutionStatus;
+  readonly task_id: string | null;
+  readonly task_command_id: string | null;
+  readonly ready_command_id: string | null;
+  readonly delegate_command_id: string | null;
+  readonly run_id: string | null;
+  readonly revision: bigint;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
+
 export interface AssistSessionRow {
   readonly id: string;
   readonly workspace_id: string;
@@ -1010,6 +1041,7 @@ export interface RelayDatabaseSchema {
   assist_message_previews: AssistMessagePreviewRow;
   run_draft_previews: RunDraftPreviewRow;
   assist_proposals: AssistProposalRow;
+  conversation_execution_requests: ConversationExecutionRequestRow;
   knowledge_items: KnowledgeItemRow;
   knowledge_versions: KnowledgeVersionRow;
   memory_items: MemoryItemRow;

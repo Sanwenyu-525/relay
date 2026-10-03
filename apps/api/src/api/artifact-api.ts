@@ -10,6 +10,8 @@ import { listArtifactTextLocks, lockArtifactText, unlockArtifactText } from '../
 import { applyArtifactImpactCandidate, readArtifactImpactCandidate,
   readArtifactImpactCheck, startArtifactImpactCandidate,
   startArtifactImpactCheck } from '../application/artifact-impact-checks.js';
+import { createCombinationCheck, createImpactCandidateGroup, readCombinationCheck,
+  readImpactCandidateGroup } from '../application/artifact-impact-groups.js';
 import {
   ArtifactSchema,
   ArtifactVersionResultSchema,
@@ -69,6 +71,44 @@ const ImpactCandidateSchema = Type.Object({ id: UuidSchema, impact_check_id: Uui
   error_code: Type.Union([Type.String(), Type.Null()]),
   markdown: Type.Union([Type.String(), Type.Null()]), stale: Type.Boolean(),
   applied_version_id: Type.Union([UuidSchema, Type.Null()]),
+}, { additionalProperties: false });
+const ImpactGroupBodySchema = Type.Object({ command_id: UuidSchema,
+  target_version_ids: Type.Array(UuidSchema, { minItems: 1, maxItems: 10, uniqueItems: true }),
+}, { additionalProperties: false });
+const ImpactGroupItemSchema = Type.Object({ ordinal: Type.Integer({ minimum: 0 }),
+  target_artifact_id: UuidSchema, target_version_id: UuidSchema, relation: Type.String(),
+  speculative: Type.Boolean(), availability: Type.String(), analysed: Type.Boolean(),
+  target_artifact_revision: Type.String(), target_is_current_version: Type.Boolean(),
+  candidate_id: Type.Union([UuidSchema, Type.Null()]),
+  candidate_status: Type.Union([Type.String(), Type.Null()]),
+  candidate_error_code: Type.Union([Type.String(), Type.Null()]),
+  candidate_stale: Type.Boolean(),
+  applied_version_id: Type.Union([UuidSchema, Type.Null()]),
+}, { additionalProperties: false });
+const ImpactGroupSchema = Type.Object({ id: UuidSchema, impact_check_id: UuidSchema,
+  source_artifact_id: UuidSchema, source_before_version_id: UuidSchema,
+  source_after_version_id: UuidSchema, source_artifact_revision: Type.String(),
+  created_at: Type.String(), stale: Type.Boolean(),
+  items: Type.Array(ImpactGroupItemSchema),
+  summary: Type.Object({ total: Type.Integer(), applied: Type.Integer(),
+    with_candidate: Type.Integer(), without_candidate: Type.Integer(),
+    stale_candidates: Type.Integer(), unavailable: Type.Integer() }, { additionalProperties: false }),
+  unanalysed_scope: Type.Array(Type.String()),
+  combination_check_ids: Type.Array(UuidSchema),
+}, { additionalProperties: false });
+const CombinationCheckBodySchema = Type.Object({ command_id: UuidSchema,
+  artifact_version_ids: Type.Array(UuidSchema, { minItems: 1, maxItems: 20, uniqueItems: true }),
+}, { additionalProperties: false });
+const CombinationCheckItemSchema = Type.Object({ ordinal: Type.Integer({ minimum: 0 }),
+  artifact_id: UuidSchema, artifact_version_id: UuidSchema,
+  is_current_version: Type.Boolean(), readable: Type.Boolean(),
+  verification_session_id: Type.Union([UuidSchema, Type.Null()]),
+  verification_status: Type.Union([Type.String(), Type.Null()]),
+}, { additionalProperties: false });
+const CombinationCheckSchema = Type.Object({ id: UuidSchema, group_id: UuidSchema,
+  task_id: UuidSchema, acceptance_revision: Type.String(), created_at: Type.String(),
+  overall_result: Type.Literal('NONE'), overall_note: Type.String(), stale: Type.Boolean(),
+  gaps: Type.Array(Type.String()), items: Type.Array(CombinationCheckItemSchema),
 }, { additionalProperties: false });
 
 /**
@@ -146,6 +186,54 @@ export function registerArtifactRoutes(
         commandId: body.command_id, expectedTargetRevision: body.expected_target_revision });
       return { outcome, result: outcome.result };
     } }));
+  app.post('/impact-checks/:impact_check_id/candidate-groups', {
+    schema: { params: Type.Object({ workspace_id: UuidSchema,
+      impact_check_id: UuidSchema }, { additionalProperties: false }),
+      body: ImpactGroupBodySchema,
+      response: { 201: commandEnvelopeSchema(Type.Object({ group_id: UuidSchema,
+        item_count: Type.String() }, { additionalProperties: false })) } },
+  }, createCommandHandler(dependencies, { commandType: 'CreateImpactCandidateGroup',
+    bodySchema: ImpactGroupBodySchema, execute: async ({ executor, body, params }) => {
+      const outcome = await createImpactCandidateGroup(executor, {
+        workspaceId: params.workspace_id ?? '', checkId: params.impact_check_id ?? '',
+        targetVersionIds: body.target_version_ids, commandId: body.command_id });
+      return { outcome, result: outcome.result };
+    } }));
+  app.get('/impact-candidate-groups/:group_id', {
+    schema: { params: Type.Object({ workspace_id: UuidSchema, group_id: UuidSchema },
+      { additionalProperties: false }),
+      response: { 200: ImpactGroupSchema } },
+  }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string; group_id: string };
+      return await readImpactCandidateGroup(dependencies.database.executor, p.workspace_id,
+        p.group_id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+  app.post('/impact-candidate-groups/:group_id/combination-checks', {
+    schema: { params: Type.Object({ workspace_id: UuidSchema, group_id: UuidSchema },
+      { additionalProperties: false }),
+      body: CombinationCheckBodySchema,
+      response: { 201: commandEnvelopeSchema(Type.Object({ combination_check_id: UuidSchema,
+        item_count: Type.String(), gap_count: Type.String() }, { additionalProperties: false })) } },
+  }, createCommandHandler(dependencies, { commandType: 'CreateArtifactCombinationCheck',
+    bodySchema: CombinationCheckBodySchema, execute: async ({ executor, body, params }) => {
+      const outcome = await createCombinationCheck(executor, dependencies.storage, {
+        workspaceId: params.workspace_id ?? '', groupId: params.group_id ?? '',
+        artifactVersionIds: body.artifact_version_ids, commandId: body.command_id });
+      return { outcome, result: outcome.result };
+    } }));
+  app.get('/combination-checks/:combination_check_id', {
+    schema: { params: Type.Object({ workspace_id: UuidSchema,
+      combination_check_id: UuidSchema }, { additionalProperties: false }),
+      response: { 200: CombinationCheckSchema } },
+  }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string; combination_check_id: string };
+      return await readCombinationCheck(dependencies.database.executor, p.workspace_id,
+        p.combination_check_id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
   app.get('/artifacts/:artifact_id/text-locks', {
     schema: { params: WorkspaceArtifactParamsSchema,
       response: { 200: Type.Object({ artifact_id: UuidSchema,

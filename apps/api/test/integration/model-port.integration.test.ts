@@ -50,7 +50,8 @@ test('真实 Provider 配置经 HTTP 只读可见且不含密钥', async () => {
     const response = await api.get(workspacePath(workspaceId, '/model-port'));
     assert.equal(response.status, 200);
     assert.deepEqual(response.body, { provider: 'openai-compatible', configured: true,
-      model: 'gpt-integration', base_url: 'https://api.example.com/v1' });
+      model: 'gpt-integration', base_url: 'https://api.example.com/v1',
+      max_call_tokens: 65_536 });
     assert.equal(JSON.stringify(response.body).includes(apiKey), false);
 
     const malformed = await api.request('GET', '/api/v1/workspaces/not-a-uuid/model-port');
@@ -65,7 +66,7 @@ test('未配置模型环境时报告 Mock 端口', async () => {
     const response = await api.get(workspacePath(workspaceId, '/model-port'));
     assert.equal(response.status, 200);
     assert.deepEqual(response.body, { provider: 'fake', configured: false,
-      model: null, base_url: null });
+      model: null, base_url: null, max_call_tokens: null });
   } finally { await api.stop(); }
 });
 

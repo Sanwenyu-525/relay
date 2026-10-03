@@ -82,6 +82,16 @@ export async function applyBlueprintProposal(db: DbExecutor, input: {
           proposal.source) !== proposal.candidate_sha256) {
       throw invalidTransition('蓝图候选摘要与本次确认不一致。');
     }
+    // 取得候选锁后再查一次同 scope/command 的回执：前两次查询都发生在加锁之前，
+    // 两个同 command_id、同内容的并发请求都会通过，然后一起等这里这把锁。
+    // 胜出的请求已连同业务效果和回执提交，输的一方必须沿原回执重放；
+    // 直接走下面的 ACCEPTED 分支会再插一条同 command_id 回执并撞唯一约束，
+    // 那样只会得到 500 而不是原业务结果。摘要不同仍抛 CommandIdReusedError。
+    const committedWhileLocking = await r.receipts.findReceipt({ scopeKey,
+      commandId: input.commandId });
+    if (committedWhileLocking !== undefined) {
+      return resolveExistingReceipt<JsonObject>(committedWhileLocking, payloadHash);
+    }
     if (proposal.status === 'ACCEPTED') {
       const result = object(proposal.decision?.result);
       if (result === null) throw invalidTransition('蓝图应用记录不可核对。');

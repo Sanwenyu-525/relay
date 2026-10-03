@@ -2,8 +2,10 @@
 /**
  * N00 使用基线测量。只读现有 HTTP API，不写业务表、不新增端点、不落数据库。
  *
- * 时间口径全部来自 /runs/:run_id/trace 已持久化的事实；Trace 没有的段（命令受理、
- * 首字时间、人工理解成本）一律记为不可得，不用相邻时间戳顶替。
+ * 时间口径全部来自 /runs/:run_id/trace 已持久化的事实；首文本与首预览写入按 0047
+ * 由生成 Owner 记录的两个字段分别引用，不合并成「首内容」。Trace 没有的段（命令受理、
+ * 实际 HTTP 发出、Provider 收包、用户屏幕可见时刻、人工理解成本）一律记为不可得，
+ * 不用相邻时间戳顶替。
  */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -81,6 +83,10 @@ function measureRun(trace) {
 
   const claimAt = minTime(attempts, (row) => row.started_at);
   const firstCallAt = minTime(calls, (row) => row.started_at);
+  // 0047 已由生成 Owner 持久化这两个时间；旧行、未提供文本预览的调用与非 DRAFT/ASSIST
+  // 调用按约束保持 null。这里只按定义引用，不把它们合并成「首内容」，也不回填。
+  const firstTextAt = minTime(calls, (row) => row.first_text_delta_at);
+  const firstPreviewAt = minTime(calls, (row) => row.first_preview_persisted_at);
   const persistAt = maxTime(steps.filter((step) => step.result_available), (step) => step.finished_at);
   const decidedReviews = reviews.filter((review) => review.decision !== null);
   const humanWaitMs = decidedReviews.length === 0 ? null : Math.max(
@@ -98,7 +104,11 @@ function measureRun(trace) {
     status: trace.status,
     execution: {
       claim_to_first_model_call_ms: round(span(claimAt, firstCallAt)),
+      claim_to_first_text_delta_ms: round(span(claimAt, firstTextAt)),
+      claim_to_first_preview_persisted_ms: round(span(claimAt, firstPreviewAt)),
       claim_to_persisted_ms: round(span(claimAt, persistAt)),
+      calls_without_first_text_delta: calls.length - calls.filter((call) =>
+        typeof call.first_text_delta_at === 'string' && call.first_text_delta_at !== '').length,
       steps_total: steps.length,
       steps_with_result: steps.filter((step) => step.result_available).length,
       attempts_total: attempts.length,
@@ -135,7 +145,8 @@ function measureRun(trace) {
     // Trace 未持久化这些时间点，用相邻时间戳代替会把排队/首字说成别的东西。
     not_derivable: {
       accept_to_claim_ms: '命令受理时间未在 Trace 暴露',
-      first_token_ms: '首字时间未持久化',
+      provider_receive_ms: '实际 HTTP 发出与 Provider 收包时间未持久化',
+      screen_visible_ms: '首预览写入不等于用户屏幕可见时刻',
       handoff_reading: '人工理解成本须由使用者记录',
     },
   };
@@ -165,6 +176,11 @@ function aggregate(runs) {
     runs: runs.length,
     claim_to_first_model_call_ms_max: Math.max(-1, ...runs.map((row) =>
       row.execution.claim_to_first_model_call_ms ?? -1)),
+    claim_to_first_text_delta_ms_max: Math.max(-1, ...runs.map((row) =>
+      row.execution.claim_to_first_text_delta_ms ?? -1)),
+    claim_to_first_preview_persisted_ms_max: Math.max(-1, ...runs.map((row) =>
+      row.execution.claim_to_first_preview_persisted_ms ?? -1)),
+    calls_without_first_text_delta_total: pick((row) => row.execution.calls_without_first_text_delta) ?? 0,
     claim_to_persisted_ms_max: Math.max(-1, ...runs.map((row) =>
       row.execution.claim_to_persisted_ms ?? -1)),
     claim_to_persisted_ms_total: pick((row) => row.execution.claim_to_persisted_ms),
@@ -222,18 +238,23 @@ function renderReport(summary) {
     '',
     '## 口径',
     '',
-    '- 执行段时间来自 `/api/v1/workspaces/:workspace_id/runs/:run_id/trace` 已持久化的时间戳：领取=最早 attempt 开始，首内容=最早模型调用开始（不是首字），落库=最后一个带结果步骤完成。',
-    '- 命令受理到领取、首字时间、人工理解成本在 Trace 中不存在，列为不可得，需人工记录，不用相邻时间戳顶替。',
-    '- Mock 与真实 Provider 不合并统计；用量缺失按未知计数，不按 0 计。',
+    '- 执行段时间来自 `/api/v1/workspaces/:workspace_id/runs/:run_id/trace` 已持久化的时间戳：领取=最早 attempt 开始，首调用=最早模型调用开始，首文本=最早 `first_text_delta_at`，首预览写入=最早 `first_preview_persisted_at`，落库=最后一个带结果步骤完成。',
+    '- 首文本是生成 Owner 观察到的首次非空文本回调；首预览写入是首个预览成功事务内的写入时间。两者按各自定义分别报告，不合并成一个「首内容」，也都不等于用户屏幕可见时刻。',
+    '- 命令受理到领取、实际 HTTP 发出与 Provider 收包、人工理解成本在 Trace 中不存在，列为不可得，需人工记录，不用相邻时间戳顶替。',
+    '- Mock 与真实 Provider 不合并统计；用量缺失按未知计数，不按 0 计。无首文本记录的调用按未知计入分母，不从结束时间回填。',
     '',
     '## 路径汇总',
     '',
-    '| 路径 | 状态 | Provider | Run 数 | 领取→首调用(max) | 领取→落库(max) | 重试 | UNKNOWN 调用 | 未知用量调用 | 人工返工 |',
-    '|---|---|---|---|---|---|---|---|---|---|',
+    '| 路径 | 状态 | Provider | Run 数 | 领取→首调用(max) | 领取→首文本(max) | 领取→首预览写入(max) | 领取→落库(max) | 无首文本调用 | 重试 | UNKNOWN 调用 | 未知用量调用 | 人工返工 |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|',
   ];
   for (const path of summary.paths) {
     lines.push(`| ${path.title} | ${path.status} | ${path.provider_class} | ${path.aggregate.runs} | ` +
-      `${ms(path.aggregate.claim_to_first_model_call_ms_max)} | ${ms(path.aggregate.claim_to_persisted_ms_max)} | ` +
+      `${ms(path.aggregate.claim_to_first_model_call_ms_max)} | ` +
+      `${ms(path.aggregate.claim_to_first_text_delta_ms_max)} | ` +
+      `${ms(path.aggregate.claim_to_first_preview_persisted_ms_max)} | ` +
+      `${ms(path.aggregate.claim_to_persisted_ms_max)} | ` +
+      `${path.aggregate.calls_without_first_text_delta_total} | ` +
       `${path.aggregate.attempts_retried_total} | ${path.aggregate.invocations_unknown_total} | ` +
       `${path.aggregate.calls_with_unknown_usage_total} | ${path.observations.rework_count ?? '未记'} |`);
   }
@@ -302,9 +323,11 @@ async function main() {
     workspace_id: workspaceId,
     paths,
     limitations: [
-      '受理反馈段与人工理解成本无法从 Trace 得出，只反映任务集里的人工记录。',
+      '受理反馈段、实际 HTTP 发出、Provider 收包与用户屏幕可见时刻无法从 Trace 得出；首预览写入只说明事务已提交。',
+      '人工理解成本只能反映任务集里的人工记录，不由本脚本推断。',
       'Mock 与真实 Provider 分开统计；本报告不把任一方当作另一方的替代。',
       '样本量小的路径只能当起点，不能当作产品整体时延结论。',
+      '旧记录与不提供文本预览的调用没有首文本时间，按未知计入分母，不回填。',
       '本报告不含正文、产物内容或任何凭据。',
     ],
   };

@@ -48,6 +48,7 @@ export interface FreezeExecutionContractInput {
   readonly fileReadAction?: FileReadActionIntent | undefined;
   readonly webFetchAction?: WebFetchActionIntent | undefined;
   readonly fileWriteAction?: FileWriteActionIntent | undefined;
+  readonly cliRunAction?: CliRunActionIntent | undefined;
   readonly contextSources?: readonly ContextSourceRef[] | undefined;
 }
 
@@ -155,6 +156,109 @@ export function readMockActionOperationId(snapshot: JsonObject): string | undefi
     readFileWriteAction(snapshot)?.operation_id;
 }
 
+/**
+ * A bounded, real command execution frozen before a Worker can prepare it.
+ * It runs through the same Gateway admission and the same per-action approval as a
+ * file write; the executable is resolved by the CLI adapter, never by a shell string.
+ */
+export interface CliRunActionIntent {
+  readonly operation_id: string;
+  readonly intent_key: 'cli-run-v1';
+  readonly connection_id: string;
+  readonly resource_id: string;
+  readonly executable: string;
+  readonly args: readonly string[];
+  readonly max_output_bytes?: number;
+}
+
+export function readCliRunAction(snapshot: JsonObject): CliRunActionIntent | undefined {
+  const value = snapshot.cli_run_action;
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('frozen CLI run action is invalid');
+  }
+  const action = value as JsonObject;
+  if (typeof action.operation_id !== 'string' || action.intent_key !== 'cli-run-v1' ||
+      typeof action.connection_id !== 'string' || typeof action.resource_id !== 'string' ||
+      typeof action.executable !== 'string' || action.executable.trim() === '' ||
+      action.executable.includes('\u0000') || !Array.isArray(action.args) ||
+      action.args.length === 0 || !action.args.every((item) => typeof item === 'string') ||
+      action.args.some((item) => item.includes('\u0000')) ||
+      (action.max_output_bytes !== undefined &&
+        (typeof action.max_output_bytes !== 'number' || !Number.isInteger(action.max_output_bytes) ||
+          action.max_output_bytes < 0 || action.max_output_bytes > 1048576))) {
+    throw new Error('frozen CLI run action is invalid');
+  }
+  return action as unknown as CliRunActionIntent;
+}
+
+/** kind 同时区分读取组（READ/WEB，绑定 BUILD_CONTEXT）与写入组（其余，绑定 DRAFT）。 */
+export type FrozenReadAction =
+  | ({ readonly kind: 'READ' } & FileReadActionIntent)
+  | ({ readonly kind: 'WEB' } & WebFetchActionIntent);
+
+export type FrozenWriteAction =
+  | ({ readonly kind: 'WRITE' } & MockGatewayActionIntent)
+  | ({ kind: 'FILE_WRITE' } & FileWriteActionIntent)
+  | ({ kind: 'CLI' } & CliRunActionIntent);
+
+export type FrozenRunAction = FrozenReadAction | FrozenWriteAction;
+
+export type FrozenRunActions = {
+  readonly read?: FrozenReadAction | undefined;
+  /** 写入链：真实场景是「文件变更 + 一次检查命令」；Fake 标记独占一项。 */
+  readonly writes: readonly FrozenWriteAction[];
+};
+
+/**
+ * Validates the frozen action set once, for every reader.
+ *
+ * A Run may read before its DRAFT and then, still before the candidate is published,
+ * write the files and run one bounded check command. The Fake marker write stays
+ * exclusive because it is a Mock capability, not a real project effect.
+ */
+export function readFrozenRunActions(snapshot: JsonObject): FrozenRunActions {
+  const fileRead = readFileReadAction(snapshot);
+  const web = readWebFetchAction(snapshot);
+  if (fileRead !== undefined && web !== undefined) {
+    throw new Error('frozen contract carries more than one read action');
+  }
+  const marker = readMockGatewayAction(snapshot);
+  const fileWrite = readFileWriteAction(snapshot);
+  const cliRun = readCliRunAction(snapshot);
+  if (marker !== undefined && (fileWrite !== undefined || cliRun !== undefined)) {
+    throw new Error('frozen Mock marker write cannot be combined with a real write or check');
+  }
+  if (marker !== undefined && (fileRead !== undefined || web !== undefined)) {
+    throw new Error('frozen Mock marker write cannot be combined with a read');
+  }
+  const read = fileRead !== undefined ? { kind: 'READ', ...fileRead } as const
+    : web !== undefined ? { kind: 'WEB', ...web } as const : undefined;
+  const writes: readonly FrozenWriteAction[] = marker !== undefined
+    ? [{ kind: 'WRITE', ...marker }]
+    : fileWrite !== undefined
+      ? [{ kind: 'FILE_WRITE', ...fileWrite },
+        ...(cliRun === undefined ? [] : [{ kind: 'CLI', ...cliRun } as const])]
+      : cliRun === undefined ? [] : [{ kind: 'CLI', ...cliRun }];
+  return { read, writes };
+}
+
+/**
+ * Frozen operation identities in execution order: a read first, then the write or check.
+ * A repeated delivery replays the same identities; it never creates a second operation.
+ */
+export function readFrozenActionOperationIds(snapshot: JsonObject): readonly string[] {
+  const { read, writes } = readFrozenRunActions(snapshot);
+  return [read?.operation_id, ...writes.map((write) => write.operation_id)]
+    .filter((id): id is string => id !== undefined);
+}
+
+/** The single frozen action a Run contract still has to settle, in execution order. */
+export function readFrozenActionOperationId(snapshot: JsonObject,
+  settled: ReadonlySet<string>): string | undefined {
+  return readFrozenActionOperationIds(snapshot).find((id) => !settled.has(id));
+}
+
 /** 用户在 Delegate 时显式选中的长期信息来源；版本随 Run 冻结，不可变。 */
 export interface ContextSourceRef {
   readonly kind: 'KNOWLEDGE' | 'MEMORY' | 'DECISION';
@@ -249,6 +353,8 @@ export function freezeExecutionContract(
     ...(input.webFetchAction === undefined ? {} : { web_fetch_action: { ...input.webFetchAction } }),
     ...(input.fileWriteAction === undefined ? {} : { file_write_action: { ...input.fileWriteAction,
       changes: input.fileWriteAction.changes.map((change) => ({ ...change })) } }),
+    ...(input.cliRunAction === undefined ? {} : { cli_run_action: { ...input.cliRunAction,
+      args: [...input.cliRunAction.args] } }),
     ...(input.contextSources === undefined || input.contextSources.length === 0 ? {} :
       { context_sources: input.contextSources.map((source) => ({ ...source })) }),
   };

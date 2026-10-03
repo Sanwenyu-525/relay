@@ -21,6 +21,9 @@ import { MODEL_ERROR_CATEGORIES } from '../../src/workflow/model-error-classific
 import { computeModelConfigFingerprint, describeModelPortStatus, readModelPortConfig }
   from '../../src/workflow/model-port-config.js';
 import { OpenAiCompatibleModelPort } from '../../src/workflow/openai-compatible-model-port.js';
+import { createGoal } from '../../src/application/create-goal.js';
+import { createProject } from '../../src/application/create-project.js';
+import { setViewConfiguration } from '../../src/application/view-configuration-commands.js';
 import { createWorkspace, expectCommandAccepted, startTestApi, workspacePath,
   type TestApi } from './api-harness.js';
 import { APP_DATABASE_URL, MIGRATIONS_DIRECTORY, MIGRATION_DATABASE_URL, openDatabase }
@@ -117,6 +120,29 @@ async function fixture(): Promise<Fixture> {
   return { workspaceId, projectId, taskId };
 }
 
+async function blueprintFixture(): Promise<Fixture> {
+  const workspaceId = await createWorkspace(app.db);
+  const created = await createProject(app.db, { workspaceId, commandId: randomUUID(),
+    title: 'Synthetic lunar greenhouse blueprint', projectType: 'GENERAL' });
+  const projectId = created.result.project_id;
+  const taskId = randomUUID();
+  await withTransaction(app.db, async (r) => {
+    await r.tasks.insertTask({ id: taskId, workspaceId, projectId,
+      title: 'Synthetic greenhouse briefing', status: 'READY', mode: 'ME',
+      acceptanceRevision: 1n, executorKind: 'HUMAN', ownershipEpoch: 0n,
+      currentCompletionId: null });
+    await r.tasks.insertAcceptanceVersion({ taskId, acceptanceRevision: 1n,
+      objective: 'Write a Markdown briefing for a fictional lunar greenhouse.',
+      requiredOutputSpec: { artifacts: ['MARKDOWN_DOCUMENT'],
+        description: 'Original synthetic briefing', retention: { policy: 'keep-original' } },
+      source: 'CREATE' });
+    await r.tasks.insertCriterion({ taskId, acceptanceRevision: 1n,
+      criterionId: 'human', statement: 'Human confirms that the briefing is explicitly fictional',
+      required: true, method: 'HUMAN', targetSpec: {} });
+  });
+  return { workspaceId, projectId, taskId };
+}
+
 async function businessSnapshot(f: Fixture): Promise<JsonObject> {
   const result = await sql<{ snapshot: JsonObject }>`select jsonb_build_object(
     'project', (select to_jsonb(p) from projects p where p.id = ${f.projectId}),
@@ -148,7 +174,8 @@ async function assertNoExecution(f: Fixture): Promise<void> {
     verifications: '0', checks: '0', state_completions: '0' });
 }
 
-async function generate(f: Fixture, skill: FrozenSkill, content: string): Promise<{
+async function generate(f: Fixture, skill: FrozenSkill, content: string,
+  skillInput?: JsonObject): Promise<{
   messageId: string; sessionId: string; output: JsonObject; proposalIds: readonly string[];
   call: ModelCallRow;
 }> {
@@ -158,7 +185,10 @@ async function generate(f: Fixture, skill: FrozenSkill, content: string): Promis
   const modelPort = new OpenAiCompatibleModelPort(config);
   const registryDto = await get(f, '/skill-definitions/' + skill.id + '/versions/' + skill.version);
   assert.equal(registryDto.call_supported, true);
-  assert.equal(registryDto.accept_supported, skill.definition.target === 'TASK');
+  // 首批可接受的两条路径：TASK Skill 走 AcceptAssistProposal，蓝图走 ApplyProjectBlueprint；
+  // project-resume 是只读摘要，没有接受入口。不要把「非 TASK」一律当成不可接受。
+  assert.equal(registryDto.accept_supported,
+    skill.definition.target === 'TASK' || skill.id === 'goal-to-project-blueprint');
   for (const [key, value] of Object.entries(frozenSkillIdentity(skill))) {
     assert.deepEqual(registryDto[key], value);
   }
@@ -167,10 +197,12 @@ async function generate(f: Fixture, skill: FrozenSkill, content: string): Promis
     title: 'Synthetic real Skill ' + skill.id,
   }, 201);
   const sessionId = session.session_id as string;
+  // 基线必须按同一份 skill_input 重算，否则比较的是另一个作用域的事实集。
   const basis = await loadSkillBasis(app.db, f.workspaceId, f.projectId,
-    skill.definition.target === 'TASK' ? f.taskId : null, skill);
+    skill.definition.target === 'TASK' ? f.taskId : null, skill, skillInput ?? null);
   const request = await command(f, '/assist-sessions/' + sessionId + '/messages', {
     content, skill_ref: { id: skill.id, version: skill.version }, source_refs: [],
+    ...(skillInput === undefined ? {} : { skill_input: skillInput }),
   }, 202);
   const messageId = request.assistant_message_id as string;
   const outcome = await assistRunner.runAssistGenerationTick(app.db, {
@@ -216,7 +248,8 @@ async function generate(f: Fixture, skill: FrozenSkill, content: string): Promis
   assert.equal(identity.output_availability, 'HISTORICAL_SNAPSHOT');
   const output = object(message.skill_output);
   assert.equal(output.kind, skill.definition.output_kind);
-  assert.equal(output.status, skill.definition.target === 'TASK' ? 'SUGGESTED' : 'READ_ONLY');
+  // 只读摘要（project-resume）之外的两项都产出待确认建议；蓝图经 ApplyProjectBlueprint 接受。
+  assert.equal(output.status, skill.id === 'project-resume' ? 'READ_ONLY' : 'SUGGESTED');
   assert.equal(output.target_kind, skill.definition.target);
   assert.equal(output.target_id, skill.definition.target === 'TASK' ? f.taskId : f.projectId);
   assert.deepEqual(output.baseline, basis.baseline);
@@ -244,9 +277,14 @@ async function generate(f: Fixture, skill: FrozenSkill, content: string): Promis
   assert.ok(call.usage_input_tokens !== null && call.usage_input_tokens > 0);
   assert.ok(call.usage_output_tokens !== null && call.usage_output_tokens > 0);
   assert.deepEqual(message.usage, { input_tokens: call.usage_input_tokens,
-    output_tokens: call.usage_output_tokens });
+    output_tokens: call.usage_output_tokens,
+    cache_read_tokens: call.usage_cache_read_tokens,
+    cache_creation_tokens: call.usage_cache_creation_tokens });
   assert.equal(raw.usage_input_tokens, call.usage_input_tokens);
   assert.equal(raw.usage_output_tokens, call.usage_output_tokens);
+  // 缓存用量按 Provider 原样透传：报了就有值，没报就保持 null，不补 0。
+  assert.equal(raw.usage_cache_read_tokens, call.usage_cache_read_tokens);
+  assert.equal(raw.usage_cache_creation_tokens, call.usage_cache_creation_tokens);
   assert.ok(call.settled_at !== null && call.settled_at >= call.started_at);
   return { messageId, sessionId, output, proposalIds: outcome.proposalIds, call };
 }
@@ -415,5 +453,183 @@ test('M04 real project-resume@1.0.0 references fresh facts and remains read-only
       skill_sha256: skill.sha256, call_id: generated.call.id,
       config_fingerprint: generated.call.config_fingerprint, output_sha256: skillProposal.skillOutputHash(generated.output),
       task_revision: '1', read_only: true, comparison_baseline: null, proposals: 0,
+      runs: 0, completions: 0, checks: 0 }));
+  });
+
+test('M04 real goal-to-project-blueprint@1.0.0 freezes source and applies only on explicit human confirm',
+  { skip: !modelReady && 'valid RELAY_MODEL_* configuration not ready', timeout: 240_000 }, async () => {
+    assert.ok(api);
+    // 蓝图 Skill 的作用域要求项目已有内置 View 行；只有生产建项目命令会种下它，
+    // 所以这里用该命令另建一个项目，而不是在共享 fixture 上补写视图行。
+    const f = await blueprintFixture();
+    const skill = FIRST_PARTY_REGISTRY.skill('goal-to-project-blueprint', '1.0.0')!;
+    const pack = FIRST_PARTY_REGISTRY.pack('development-minimal', '1.3.0')!;
+    assert.equal(pack.availability, 'AVAILABLE');
+    // 生成前先存在一个 ACTIVE Goal：蓝图只能关联它，不得凭空创建 Goal。
+    const goal = await createGoal(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(),
+      title: 'Synthetic lunar greenhouse programme', description: '' });
+    const goalId = goal.result.goal_id as string;
+    // 蓝图 Skill 的作用域要求项目已有内置 View 配置；这里走既有设置命令，不手写视图行。
+    const view = await setViewConfiguration(app.db, { workspaceId: f.workspaceId,
+      projectId: f.projectId, commandId: randomUUID(), expectedRevision: '0', kind: 'general' });
+    const viewRevision = view.result.revision;
+    assert.equal(viewRevision, '1');
+    const before = await businessSnapshot(f);
+    const generated = await generate(f, skill,
+      '请为这个虚构项目提出项目蓝图：最多三个待办 Task，全部是人工执行的 INBOX 任务，'
+      + '并把工作台设为 general。next_action 指向其中一个新建任务的 local_key。'
+      + '不要建立 Goal，不要提出 Rule、Workflow 或权限建议。',
+      { desired_outcome: '形成一份虚构月球温室项目的下一步计划',
+        goal_id: goalId, pack_ref: { id: 'development-minimal', version: '1.3.0' } });
+    const payload = object(generated.output.payload);
+    assert.equal(payload.effective_blueprint, false);
+    assert.equal(generated.output.status, 'SUGGESTED');
+
+    // 生成只写候选：项目事实、Task、验收、State 一个字节都不能变。
+    assert.deepEqual(await businessSnapshot(f), before, 'blueprint generation cannot change business facts');
+    await assertNoExecution(f);
+    assert.equal(generated.proposalIds.length, 1);
+    const proposalId = generated.proposalIds[0]!;
+
+    // 选择 Pack 只是固定候选来源：不授权、不建连接、不建策略、不启动 Run。
+    // 能力按连接归属统计，不能直接数全局 gateway_capabilities——同一测试库还有别的分片。
+    const authorization = await sql<{ policies: string; connections: string;
+      capabilities: string; runs: string; goals: string }>`select
+      (select count(*)::text from gateway_permission_policies
+        where project_id = ${f.projectId}) as policies,
+      (select count(*)::text from gateway_connections where project_id = ${f.projectId}) as connections,
+      (select count(*)::text from gateway_connection_capabilities c
+        join gateway_connections k on k.id = c.connection_id
+        where k.project_id = ${f.projectId}) as capabilities,
+      (select count(*)::text from runs where workspace_id = ${f.workspaceId}) as runs,
+      (select count(*)::text from goals where workspace_id = ${f.workspaceId}) as goals`
+      .execute(app.db);
+    assert.deepEqual(authorization.rows[0], { policies: '0', connections: '0',
+      capabilities: '0', runs: '0', goals: '1' });
+
+    const stored = await sql<{ origin: string; skill_message_id: string;
+      status: string; candidate_sha256: string;
+      source: { pack: { id: string; version: string; sha256: string };
+        skill: { id: string; version: string; sha256: string };
+        skill_output_sha256: string } }>`
+      select origin, skill_message_id, status, candidate_sha256, source
+      from project_blueprint_proposals where id = ${proposalId}`.execute(app.db);
+    const row = stored.rows[0]!;
+    assert.equal(row.origin, 'SKILL');
+    assert.equal(row.skill_message_id, generated.messageId);
+    assert.equal(row.status, 'PENDING');
+    assert.equal(row.source.pack.id, 'development-minimal');
+    assert.equal(row.source.pack.version, '1.3.0');
+    assert.equal(row.source.pack.sha256, pack.sha256);
+    assert.equal(row.source.skill.id, skill.id);
+    assert.equal(row.source.skill.version, skill.version);
+    assert.equal(row.source.skill.sha256, skill.sha256);
+    assert.equal(row.source.skill_output_sha256,
+      skillProposal.skillOutputHash(generated.output));
+
+    // 候选形态受注册与数量上限约束，且只建议 HUMAN/ME/INBOX。
+    const draft = object(object(payload.draft));
+    const draftTasks = records(draft.tasks);
+    assert.ok(draftTasks.length >= 1 && draftTasks.length <= 5);
+    for (const task of draftTasks) {
+      assert.equal(typeof task.local_key, 'string');
+      assert.equal(typeof task.title, 'string');
+      assert.equal(typeof task.objective, 'string');
+    }
+    assert.ok(['general', 'thesis', 'development'].includes(String(draft.view_kind)));
+
+    // 预览与差异走只读投影，不调用动作、不写事实。
+    const path = workspacePath(f.workspaceId, '/projects/' + f.projectId +
+      '/blueprint-proposals/' + proposalId);
+    const preview = await get(f, '/projects/' + f.projectId + '/blueprint-proposals/' + proposalId);
+    assert.equal(preview.status, 'PENDING');
+    assert.equal(preview.stale, false);
+    const diff = object(preview.diff);
+    assert.equal(records(diff.new_tasks).length, draftTasks.length);
+    assert.deepEqual(await businessSnapshot(f), before, 'preview cannot change business facts');
+    await assertNoExecution(f);
+
+    // 未确认前不得有任何业务效果。
+    const commandId = randomUUID();
+    const applyBody = { command_id: commandId, candidate_sha256: row.candidate_sha256,
+      expected_project_revision: '0', expected_state_revision: '0',
+      expected_view_revision: viewRevision };
+    const staleConfirm = await api.post(workspacePath(f.workspaceId,
+      '/projects/' + f.projectId + '/blueprint-proposals/' + proposalId + '/apply'),
+    { ...applyBody, command_id: randomUUID(), expected_state_revision: '9' });
+    assert.equal(staleConfirm.status, 409);
+    assert.deepEqual(await businessSnapshot(f), before,
+      'a rejected confirm cannot leave partial blueprint effects');
+
+    const applied = expectCommandAccepted(await api.post(path + '/apply', applyBody), 200, commandId) as {
+      project_revision: string; state_revision: string; view_revision: string;
+      goal_ids: string[]; task_id_map: { local_key: string; task_id: string }[];
+      next_action_task_id: string; view_configuration: { kind: string } };
+    assert.deepEqual(applied.goal_ids, [goalId], 'only the explicitly referenced Goal is linked');
+    assert.equal(applied.task_id_map.length, draftTasks.length);
+    assert.equal(applied.next_action_task_id, applied.task_id_map[0]!.task_id);
+    const createdTaskIds = applied.task_id_map.map((entry) => entry.task_id);
+    const createdTasks = await sql<{ title: string; status: string; mode: string;
+      executor_kind: string }>`select t.title, t.status, t.mode, t.executor_kind
+      from tasks t where t.project_id = ${f.projectId}
+        and t.id in (${sql.join(createdTaskIds.map((id) => sql`${id}`))})`
+      .execute(app.db);
+    assert.equal(createdTasks.rows.length, draftTasks.length);
+    assert.ok(createdTasks.rows.every((task) => task.status === 'INBOX' &&
+      task.mode === 'ME' && task.executor_kind === 'HUMAN'),
+    'a blueprint may only create human INBOX tasks; it never delegates or marks work ready');
+
+    // 应用后仍不启动任何执行，也不因为选了 Pack 就授权。
+    await assertNoExecution(f);
+    const afterApply = await businessSnapshot(f);
+    assert.notDeepEqual(afterApply, before);
+    const proposalsAfter = await sql<{ status: string }>`select status
+      from project_blueprint_proposals where id = ${proposalId}`.execute(app.db);
+    assert.equal(proposalsAfter.rows[0]!.status, 'ACCEPTED');
+    const stillNoPolicy = await sql<{ count: string }>`select count(*)::text as count
+      from gateway_permission_policies where project_id = ${f.projectId}`.execute(app.db);
+    assert.equal(stillNoPolicy.rows[0]!.count, '0');
+
+    // 重放同一命令只读回执，不产生第二组效果。
+    const replay = await api.post(path + '/apply', applyBody);
+    assert.deepEqual(expectCommandAccepted(replay, 200, commandId), applied);
+    assert.equal(replay.headers['command-replayed'], 'true');
+    assert.deepEqual(await businessSnapshot(f), afterApply, 'replay cannot reapply the blueprint');
+    const audit = await sql<{ receipts: string; applied: string }>`select
+      (select count(*)::text from command_receipts where command_id = ${commandId}) as receipts,
+      (select count(*)::text from activity_records where command_id = ${commandId}
+        and event_type = 'PROJECT_BLUEPRINT_APPLIED') as applied`.execute(app.db);
+    assert.deepEqual(audit.rows[0], { receipts: '1', applied: '1' });
+
+    // 取消：生成中的消息可持久化取消意图，且取消不产生候选。
+    const cancelSession = await command(f, '/assist-sessions', { project_id: f.projectId,
+      title: 'Synthetic cancel' }, 201);
+    const cancelMessage = await command(f, '/assist-sessions/' + cancelSession.session_id +
+      '/messages', { content: '再生成一份蓝图', skill_ref: { id: skill.id, version: skill.version },
+        source_refs: [], skill_input: { goal_id: goalId } }, 202);
+    // 取消是同步收敛的持久化意图：回执 200 且状态已是 CANCELLED，不进入生成。
+    const cancelled = await command(f, '/assist-messages/' +
+      String(cancelMessage.assistant_message_id) + '/cancel', {}, 200);
+    assert.equal(cancelled.status, 'CANCELLED');
+    const cancelOutcome = await assistRunner.runAssistGenerationTick(app.db, {
+      workerId: 'real-skill-cancel-' + randomUUID(),
+      storage: new ManagedContentStore(api.dataRoot), modelPort: new OpenAiCompatibleModelPort(
+        readModelPortConfig(process.env)!), leaseMs: 30_000 });
+    assert.notEqual(cancelOutcome?.status, 'COMPLETED');
+    const cancelCandidates = await sql<{ count: string }>`select count(*)::text as count
+      from project_blueprint_proposals where workspace_id = ${f.workspaceId}
+        and id <> ${proposalId}`.execute(app.db);
+    assert.equal(cancelCandidates.rows[0]!.count, '0',
+      'a cancelled generation must not leave a blueprint candidate');
+    assert.deepEqual(await businessSnapshot(f), afterApply,
+      'cancellation cannot change business facts');
+
+    console.log('real_skill_evidence ' + JSON.stringify({ skill: skill.id, version: skill.version,
+      skill_sha256: skill.sha256, call_id: generated.call.id,
+      config_fingerprint: generated.call.config_fingerprint,
+      output_sha256: skillProposal.skillOutputHash(generated.output),
+      candidate_sha256: row.candidate_sha256, pack: pack.id + '@' + pack.version,
+      pack_sha256: pack.sha256, goal_ids: applied.goal_ids, tasks: applied.task_id_map.length,
+      apply_command_id: commandId, replay_effects: 1, policies_after: 0,
       runs: 0, completions: 0, checks: 0 }));
   });

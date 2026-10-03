@@ -10,7 +10,7 @@ import { DomainError, invalidTransition, resourceNotFound, revisionConflict } fr
 import { lockTaskAndRun } from './lock-task-run.js';
 import { requireRevision } from './revisions.js';
 import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
-import { readMockActionOperationId } from '../workflow/execution-contract.js';
+import { readFrozenActionOperationIds } from '../workflow/execution-contract.js';
 
 export interface ControlRequestDto {
   readonly id: string;
@@ -235,11 +235,12 @@ export async function resumeRun(db: DbExecutor, input: {
         throw invalidTransition('旧 Worker 执行槽尚未释放，暂不能恢复。');
       }
       const contract = await repositories.runs.readContract(run.id);
-      const frozenActionOperationId = contract === undefined ? undefined :
-        readMockActionOperationId(contract.frozen_snapshot);
-      const operation = frozenActionOperationId === undefined ? undefined :
-        await repositories.gateway.readOperation(frozenActionOperationId);
-      if (operation !== undefined && ['DENIED', 'FAILED', 'UNKNOWN', 'DISPATCHING'].includes(operation.status)) {
+      const frozenActionOperationIds = contract === undefined ? [] :
+        readFrozenActionOperationIds(contract.frozen_snapshot);
+      const operations = (await Promise.all(frozenActionOperationIds
+        .map((id) => repositories.gateway.readOperation(id))));
+      if (operations.some((operation) => operation !== undefined &&
+        ['DENIED', 'FAILED', 'UNKNOWN', 'DISPATCHING'].includes(operation.status))) {
         throw invalidTransition('原 Run 的必需动作已被拒绝或尚未核对；请取消旧 Run 后重新委派。');
       }
       const status = run.resume_phase === 'WAITING_APPROVAL' ? 'WAITING_APPROVAL' : run.resume_phase ?? 'CONTEXT_BUILDING';

@@ -107,6 +107,10 @@ const ALL_MIGRATIONS = [
   '0045_continuation_point_ref_target_guard',
   '0046_assist_provider_error_kind',
   '0047_m04_model_call_first_output',
+  '0048_m07_admission_gate',
+  '0049_m04_model_call_cache_usage',
+  '0050_n02_impact_candidate_groups', '0051_conversation_execution_requests',
+  '0052_n03_project_knowledge_guide', '0053_n03_knowledge_curation_candidates',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {
@@ -118,7 +122,15 @@ function delay(milliseconds: number): Promise<void> {
 test('first-output migration leaves pre-existing settled calls NULL', async () => {
   const database = await createTemporaryDatabase('first_output_legacy');
   const directory = await createMigrationDirectoryFixture((files) => {
+    // 这三条都要缺席：第一轮之后 assist_messages/model_calls 还没有缓存列，
+    // 而本测试要在第二轮写入历史调用行，再验证它们补列后仍保持 NULL。
     files.delete('0047_m04_model_call_first_output.sql');
+    files.delete('0048_m07_admission_gate.sql');
+    files.delete('0049_m04_model_call_cache_usage.sql');
+    files.delete('0050_n02_impact_candidate_groups.sql');
+    files.delete('0051_conversation_execution_requests.sql');
+    files.delete('0052_n03_project_knowledge_guide.sql');
+    files.delete('0053_n03_knowledge_curation_candidates.sql');
   });
   const app = openDatabase(database.appUrl, 'relay-api-test-legacy-call');
   try {
@@ -139,10 +151,15 @@ test('first-output migration leaves pre-existing settled calls NULL', async () =
     const callId = randomUUID();
     await calls.begin(callId, { workspaceId, kind: 'ASSIST', assistMessageId: messageId },
       new FakeModelPort().identity);
-    await calls.settle(callId, { status: 'COMPLETED' });
+    // 补列前按旧结构结算，历史行没有缓存用量。
+    await sql`update model_calls set status = 'COMPLETED', settled_at = clock_timestamp()
+      where id = ${callId}`.execute(app.db);
     const applied = await runMigrations({ connectionString: database.migrationUrl,
       directory: MIGRATIONS_DIRECTORY });
-    assert.deepEqual(applied.applied, ['0047_m04_model_call_first_output']);
+    assert.deepEqual(applied.applied, ['0047_m04_model_call_first_output',
+      '0048_m07_admission_gate', '0049_m04_model_call_cache_usage',
+      '0050_n02_impact_candidate_groups', '0051_conversation_execution_requests',
+      '0052_n03_project_knowledge_guide', '0053_n03_knowledge_curation_candidates']);
     await calls.recordFirstTextDelta(callId, new Date());
     await calls.recordFirstPreviewPersisted(callId);
     const legacy = await calls.read(callId);
@@ -150,6 +167,9 @@ test('first-output migration leaves pre-existing settled calls NULL', async () =
     assert.equal(legacy?.status, 'COMPLETED');
     assert.equal(legacy.first_text_delta_at, null);
     assert.equal(legacy.first_preview_persisted_at, null);
+    // 历史调用从未上报缓存：补列后必须保持未知，而不是回填 0。
+    assert.equal(legacy.usage_cache_read_tokens, null);
+    assert.equal(legacy.usage_cache_creation_tokens, null);
   } finally {
     await app.close();
     await database.drop();

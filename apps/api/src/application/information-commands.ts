@@ -4,10 +4,10 @@ import type { DbExecutor } from '../infrastructure/database.js';
 import type { DecisionRow, InformationRootRow, RuleRow, RuleVersionRow }
   from '../infrastructure/database-schema.js';
 import type { JsonObject } from '../infrastructure/json.js';
-import { canonicalizeJson } from '../receipt/payload-hash.js';
+import { canonicalizeJson, computePayloadHash } from '../receipt/payload-hash.js';
 import { toDecimalString } from '../shared/decimal.js';
 import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
-import { runIdempotentCommand } from './command.js';
+import { resolveExistingReceipt, runIdempotentCommand, type CommandOutcome } from './command.js';
 import { DomainError, invalidTransition, resourceNotFound, revisionConflict,
   validationFailed } from './domain-error.js';
 import { requireRevision } from './revisions.js';
@@ -150,6 +150,94 @@ export async function addKnowledgeVersion(db: DbExecutor, input: ScopeInput & {
       const version = item.current_version + 1n;
       await r.information.insertKnowledgeVersion({ id: randomUUID(), workspaceId: input.workspaceId,
         knowledgeId: item.id, projectId: item.project_id, version,
+        sourceKind: source.kind, mediaType: source.mediaType,
+        text: source.text, hash: source.hash, artifactId: source.artifactId,
+        artifactVersionId: source.artifactVersionId, sourceUri: null, sourceRefs: source.refs });
+      await r.information.setRootVersion('knowledge', item.id, version);
+      await r.workspaces.bumpContextRevision(input.workspaceId);
+      return { knowledge_id: item.id, revision: toDecimalString(item.revision + 1n),
+        version: toDecimalString(version), status: 'ACTIVE' };
+    } });
+}
+
+/**
+ * 事务内版本：供组合用例在同一事务里复用本模块的命令语义。
+ * 与命令版共用同一 execute 主体，但不自己开事务、也不自己写回执——回执由调用方在
+ * 同一事务里写它自己那一条。这保证「写事实 + 绑定归属」要么都提交、要么都回滚，
+ * 不留无归属的孤立版本，也不会为同一 command_id 写两行回执。
+ */
+async function inTransaction<TResult extends Result>(
+  repositories: Repositories, scopeKey: string,
+  request: { readonly commandType: string; readonly commandId: string;
+    readonly target: JsonObject; readonly body: JsonObject;
+    readonly execute: (r: Repositories) => Promise<TResult> },
+): Promise<TResult> {
+  const payloadHash = computePayloadHash({ commandType: request.commandType,
+    target: request.target, body: request.body });
+  const existing = await repositories.receipts.findReceipt({ scopeKey,
+    commandId: request.commandId });
+  if (existing !== undefined) return resolveExistingReceipt<TResult>(existing, payloadHash).result;
+  // 不在这里写回执：调用方在同一事务里写自己那一条，避免同一 command_id 写两行。
+  return request.execute(repositories);
+}
+
+export async function createKnowledgeInTransaction(repositories: Repositories,
+  input: ScopeInput & { projectId: string | null; title: string; source: KnowledgeSource;
+    commandId: string }) {
+  const title = textValue(input.title, 'title');
+  return inTransaction<Result>(repositories, httpCommandScopeKey(input.workspaceId), {
+    commandType: 'CreateKnowledge', commandId: input.commandId,
+    target: { project_id: input.projectId },
+    body: { title, source: input.source as unknown as JsonObject },
+    execute: async (r) => {
+      await ruleAuthority(r, input.workspaceId);
+      await projectScope(r, input.workspaceId, input.projectId);
+      const source = await knowledgeSource(r, input.workspaceId, input.projectId, input.source);
+      if (source.artifactVersionId !== null) {
+        const existing = await r.information.readPromotedArtifact(input.workspaceId,
+          source.artifactVersionId);
+        if (existing !== undefined) {
+          if (existing.project_id !== input.projectId) throw resourceNotFound('ArtifactVersion');
+          return { knowledge_id: existing.knowledge_id,
+            revision: toDecimalString(existing.revision),
+            version: toDecimalString(existing.version), status: existing.status };
+        }
+      }
+      const id = randomUUID();
+      await r.information.insertKnowledgeRoot(id, input.workspaceId, input.projectId, title);
+      await r.information.insertKnowledgeVersion({ id: randomUUID(), workspaceId: input.workspaceId,
+        knowledgeId: id, projectId: input.projectId, version: 1n,
+        sourceKind: source.kind, mediaType: source.mediaType,
+        text: source.text, hash: source.hash, artifactId: source.artifactId,
+        artifactVersionId: source.artifactVersionId, sourceUri: null, sourceRefs: source.refs });
+      await r.workspaces.bumpContextRevision(input.workspaceId);
+      return { knowledge_id: id, revision: '0', version: '1', status: 'ACTIVE' };
+    } });
+}
+
+export async function addKnowledgeVersionInTransaction(repositories: Repositories,
+  input: ScopeInput & { knowledgeId: string; expectedRevision: string;
+    source: KnowledgeSource; commandId: string }) {
+  const expected = requireRevision(input.expectedRevision, 'expected_revision');
+  return inTransaction<Result>(repositories, httpCommandScopeKey(input.workspaceId), {
+    commandType: 'AddKnowledgeVersion', commandId: input.commandId,
+    target: { knowledge_id: input.knowledgeId },
+    body: { expected_revision: input.expectedRevision,
+      source: input.source as unknown as JsonObject },
+    execute: async (r) => {
+      await ruleAuthority(r, input.workspaceId);
+      const item = await root<InformationRootRow>(r, 'knowledge', input.workspaceId,
+        input.knowledgeId);
+      sameRevision('knowledge', item.revision, expected);
+      if (item.status !== 'ACTIVE') throw invalidTransition('Knowledge 已归档。');
+      const source = await knowledgeSource(r, input.workspaceId, item.project_id, input.source);
+      if (source.artifactVersionId !== null &&
+          await r.information.readPromotedArtifact(input.workspaceId, source.artifactVersionId)) {
+        throw invalidTransition('该 ArtifactVersion 已被提升为 Knowledge。');
+      }
+      const version = item.current_version + 1n;
+      await r.information.insertKnowledgeVersion({ id: randomUUID(),
+        workspaceId: input.workspaceId, knowledgeId: item.id, projectId: item.project_id, version,
         sourceKind: source.kind, mediaType: source.mediaType,
         text: source.text, hash: source.hash, artifactId: source.artifactId,
         artifactVersionId: source.artifactVersionId, sourceUri: null, sourceRefs: source.refs });

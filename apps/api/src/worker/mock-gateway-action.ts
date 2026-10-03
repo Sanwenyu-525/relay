@@ -9,40 +9,15 @@ import {
 import type { ClaimedRunCommand } from '../application/run-dispatch.js';
 import { DomainError, resourceNotFound } from '../application/domain-error.js';
 import { applySafeControl } from '../application/control-requests.js';
+import { readPendingFrozenRunAction } from '../application/frozen-run-actions.js';
 import { createRepositories } from '../application/unit-of-work.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
-import { readFileReadAction, readFileWriteAction, readMockGatewayAction, readWebFetchAction,
-  type FileReadActionIntent, type FileWriteActionIntent, type MockGatewayActionIntent,
-  type WebFetchActionIntent } from '../workflow/execution-contract.js';
 
 export interface MockGatewayStepResult {
   readonly status: 'PREPARED' | 'WAITING' | 'SUCCEEDED' | 'UNKNOWN' | 'DENIED';
   readonly operationId: string;
   readonly reviewId?: string;
-}
-
-/** One frozen Mock intent per Run contract: a Fake marker write, a real bounded
- * file read or a real bounded public web read. All run through Gateway admission. */
-type MockIntent =
-  | ({ readonly kind: 'WRITE' } & MockGatewayActionIntent)
-  | ({ readonly kind: 'FILE_WRITE' } & FileWriteActionIntent)
-  | ({ readonly kind: 'READ' } & FileReadActionIntent)
-  | ({ readonly kind: 'WEB' } & WebFetchActionIntent);
-
-function readFrozenIntent(snapshot: Parameters<typeof readMockGatewayAction>[0]): MockIntent | undefined {
-  const write = readMockGatewayAction(snapshot);
-  const read = readFileReadAction(snapshot);
-  const web = readWebFetchAction(snapshot);
-  const fileWrite = readFileWriteAction(snapshot);
-  if ([write, read, web, fileWrite].filter((intent) => intent !== undefined).length > 1) {
-    throw new Error('frozen contract carries more than one Mock intent');
-  }
-  if (write !== undefined) return { kind: 'WRITE', ...write };
-  if (read !== undefined) return { kind: 'READ', ...read };
-  if (web !== undefined) return { kind: 'WEB', ...web };
-  if (fileWrite !== undefined) return { kind: 'FILE_WRITE', ...fileWrite };
-  return undefined;
 }
 
 async function approvedResume(db: DbExecutor, claim: ClaimedRunCommand,
@@ -75,21 +50,21 @@ export async function executeMockGatewayStep(db: DbExecutor, input: {
   const { claim } = input;
   if (input.signal.aborted) throw new Error('Mock Gateway delivery aborted');
   const repositories = createRepositories(db);
-  const contract = await repositories.runs.readContract(claim.runId);
-  const action = contract === undefined ? undefined : readFrozenIntent(contract.frozen_snapshot);
-  if (action === undefined) throw new Error('Mock Gateway action has no frozen intent');
-  let operation = await repositories.gateway.readOperation(action.operation_id);
+  const pending = await readPendingFrozenRunAction(repositories, claim.runId);
+  if (pending === undefined) throw new Error('Mock Gateway action has no frozen intent');
+  const action = pending.action;
+  let operation = pending.operation;
   const draft = await repositories.runs.readStepByKind(claim.runId, 'DRAFT');
   const built = await repositories.runs.readStepByKind(claim.runId, 'BUILD_CONTEXT');
+  const writeGroup = action.kind === 'WRITE' || action.kind === 'FILE_WRITE' || action.kind === 'CLI';
   // Existing Runs bound their read to DRAFT. A pending read in a new Run is
   // bound to BUILD_CONTEXT so its result is available before model generation.
   const step = operation === undefined
-    ? (action.kind === 'WRITE' || action.kind === 'FILE_WRITE' || draft?.status === 'SUCCEEDED' ? draft : built)
+    ? (writeGroup || draft?.status === 'SUCCEEDED' ? draft : built)
     : operation.step_id === draft?.id ? draft : operation.step_id === built?.id ? built : undefined;
   if (step?.status !== 'SUCCEEDED' ||
-      ((action.kind === 'WRITE' || action.kind === 'FILE_WRITE') && step.step_kind !== 'DRAFT') ||
-      (action.kind !== 'WRITE' && action.kind !== 'FILE_WRITE' &&
-        step.step_kind === 'DRAFT' && draft?.status !== 'SUCCEEDED')) {
+      (writeGroup && step.step_kind !== 'DRAFT') ||
+      (!writeGroup && step.step_kind === 'DRAFT' && draft?.status !== 'SUCCEEDED')) {
     throw new Error('Mock Gateway action has no completed owner step');
   }
   const delivery = { commandId: claim.commandId, invocationEpoch: claim.epoch };
@@ -106,7 +81,7 @@ export async function executeMockGatewayStep(db: DbExecutor, input: {
         ? ['GATEWAY_TARGET_DENIED', 'RESOURCE_NOT_FOUND'] as const : []),
       ...(action.kind === 'WEB'
         ? ['GATEWAY_TARGET_DENIED'] as const : []),
-      ...(action.kind === 'FILE_WRITE'
+      ...(action.kind === 'FILE_WRITE' || action.kind === 'CLI'
         ? ['GATEWAY_TARGET_DENIED', 'RESOURCE_NOT_FOUND'] as const : []),
     ]).has(error.code);
     if (authorizationRefusal) {
@@ -185,6 +160,20 @@ export async function executeMockGatewayStep(db: DbExecutor, input: {
           intentKey: action.intent_key, connectionId: action.connection_id,
           origin, actionType: 'APPLY_CHANGESET', target: resource.canonical_root,
           params: { changes: action.changes as unknown as JsonObject[] },
+        });
+      } else if (action.kind === 'CLI') {
+        const run = await repositories.runs.readRun(claim.runId);
+        const task = run === undefined ? undefined : await repositories.tasks.readTask(run.task_id);
+        const resource = await repositories.gateway.readResource(action.resource_id);
+        if (resource?.workspace_id !== claim.workspaceId || resource.project_id !== task?.project_id) {
+          return deniedBeforeInvocation(resourceNotFound('Command resource'));
+        }
+        prepared = await prepareGatewayAction(db, {
+          workspaceId: claim.workspaceId, operationId: action.operation_id,
+          intentKey: action.intent_key, connectionId: action.connection_id,
+          origin, actionType: 'CLI_RUN', target: resource.canonical_root,
+          params: { executable: action.executable, args: [...action.args],
+            ...(action.max_output_bytes === undefined ? {} : { max_output_bytes: action.max_output_bytes }) },
         });
       } else {
         prepared = await prepareGatewayAction(db, {

@@ -24,7 +24,8 @@ import { DomainError } from '../../src/application/domain-error.js';
 import { recordModelInvocation } from '../../src/application/model-call-recorder.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { ModelCallRepository } from '../../src/model/model-call-repository.js';
-import { FakeModelPort, type AssistModelPort } from '../../src/workflow/fake-model-port.js';
+import { FakeModelPort, type AssistModelPort, type AssistRequest } from '../../src/workflow/fake-model-port.js';
+import { RELAY_AGENT_CORE_PROMPT } from '../../src/workflow/agent-system-prompt.js';
 import { ModelCallBudgetError } from '../../src/workflow/openai-compatible-model-port.js';
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
 import { createDataRoot, delay, expectProblem, startTestApi, workspacePath }
@@ -91,15 +92,18 @@ async function readTaskRevision(taskId: string): Promise<string> {
 async function readMessage(messageId: string): Promise<{
   status: string; content: string | null; error_code: string | null;
   provider_error_kind: string | null;
-  cancel_requested: boolean; usage_input_tokens: number | null; usage_output_tokens: number | null;
-  sources: unknown; provider_request_id: string | null; worker_id: string | null;
+cancel_requested: boolean; usage_input_tokens: number | null; usage_output_tokens: number | null;
+    usage_cache_read_tokens: number | null; usage_cache_creation_tokens: number | null;
+    sources: unknown; provider_request_id: string | null; worker_id: string | null;
 }> {
   const row = await sql<{ status: string; content: string | null; error_code: string | null;
     provider_error_kind: string | null;
     cancel_requested: boolean; usage_input_tokens: number | null; usage_output_tokens: number | null;
+    usage_cache_read_tokens: number | null; usage_cache_creation_tokens: number | null;
     sources: unknown; provider_request_id: string | null; worker_id: string | null }>`
     select status, content, error_code, provider_error_kind, cancel_requested, usage_input_tokens,
-      usage_output_tokens, sources, provider_request_id, worker_id
+      usage_output_tokens, usage_cache_read_tokens, usage_cache_creation_tokens,
+      sources, provider_request_id, worker_id
     from assist_messages where id = ${messageId}`.execute(app.db);
   return row.rows[0]!;
 }
@@ -185,10 +189,20 @@ test('DISCUSS generation completes deterministically and records usage and sourc
   const pending = await readMessage(requested.result.assistant_message_id);
   assert.equal(pending.status, 'PENDING');
 
+  const generatedRequests: AssistRequest[] = [];
+  const capturingPort: AssistModelPort = { identity: modelPort.identity,
+    assist: async (request) => { generatedRequests.push(request); return modelPort.assist(request); } };
   const outcome = await runAssistGenerationTick(app.db, { workerId: 'assist-w1', storage,
-    modelPort, leaseMs: 30_000 });
+    modelPort: capturingPort, leaseMs: 30_000 });
   assert.equal(outcome?.messageId, requested.result.assistant_message_id);
   assert.equal(outcome.status, 'COMPLETED');
+  assert.equal(generatedRequests.length, 1);
+  const generated = generatedRequests[0]!;
+  assert.ok(generated.system.includes(RELAY_AGENT_CORE_PROMPT));
+  assert.match(generated.system, /不启动 Delegate/u);
+  assert.match(generated.system, /直接以 Markdown 回复用户/u);
+  assert.ok(!generated.system.includes('删除全部数据'));
+  assert.ok(generated.turns.some((turn) => turn.content.includes('删除全部数据')));
   const settled = await readMessage(requested.result.assistant_message_id);
   assert.equal(settled.status, 'COMPLETED');
   assert.ok(settled.content!.startsWith('（Fake Assist）已收到：请总结当前背景'));
@@ -371,12 +385,13 @@ test('a failed generation keeps provider request identity and known usage on the
     sessionId: session.result.session_id, commandId: randomUUID(), content: '触发失败' });
   // Provider 已经回过一次请求并产生了用量后才失败：证据必须跟着消息行落库，
   // 不能只剩 errorCode，也不能补 0。
-  const evidencePort = {
+const evidencePort = {
     identity: modelPort.identity,
     assist: async () => { throw Object.assign(
       new Error('MODEL_STREAM_INCOMPLETE: stream ended before [DONE]'),
       { providerRequestId: 'req-evidence-1',
-        usage: { inputTokens: 120, outputTokens: 34 } }); }
+        usage: { inputTokens: 120, outputTokens: 34,
+          cacheReadTokens: 96, cacheCreationTokens: 8 } }); }
   };
   const outcome = await runAssistGenerationTick(app.db, { workerId: 'assist-w1', storage,
     modelPort: evidencePort as unknown as FakeModelPort, leaseMs: 30_000 });
@@ -387,10 +402,14 @@ test('a failed generation keeps provider request identity and known usage on the
   assert.equal(message.provider_request_id, 'req-evidence-1');
   assert.equal(message.usage_input_tokens, 120);
   assert.equal(message.usage_output_tokens, 34);
+  assert.equal(message.usage_cache_read_tokens, 96);
+  assert.equal(message.usage_cache_creation_tokens, 8);
   const calls = await new ModelCallRepository(app.db)
     .listForAssistMessage(requested.result.assistant_message_id);
   assert.equal(calls[0]!.provider_request_id, 'req-evidence-1');
   assert.equal(calls[0]!.error_kind, 'STREAM_BROKEN');
+  assert.equal(calls[0]!.usage_cache_read_tokens, 96);
+  assert.equal(calls[0]!.usage_cache_creation_tokens, 8);
 });
 
 test('a Relay owned failure keeps its own error identity instead of a provider category', async () => {
@@ -906,11 +925,15 @@ test('assist HTTP surface: session, 202 message, status polling and proposal acc
       .result.assistant_message_id;
 
     const pendingList = await api.get(`${base}/assist-sessions/${sessionId}/messages`);
-    const pendingItems = (pendingList.body as { items: { status: string;
-      usage: { input_tokens: number | null; output_tokens: number | null } }[] }).items;
+    const pendingItems = (pendingList.body as { items: { role: string; status: string;
+      usage: { input_tokens: number | null; output_tokens: number | null;
+        cache_read_tokens: number | null; cache_creation_tokens: number | null } }[] }).items;
     assert.equal(pendingItems[pendingItems.length - 1]!.status, 'PENDING');
     assert.deepEqual(pendingItems[pendingItems.length - 1]!.usage,
-      { input_tokens: null, output_tokens: null });
+      { input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_creation_tokens: null });
+    // USER 消息从不是一次模型调用，缓存列必须保持 null 而不是 0。
+    assert.deepEqual(pendingItems[0]!.usage,
+      { input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_creation_tokens: null });
 
     const tick = await runAssistGenerationTick(app.db, { workerId: 'assist-http', storage,
       modelPort, leaseMs: 30_000 });
@@ -1031,9 +1054,20 @@ test('Skill Assist freezes version, replays once and settles typed suggestion wi
   assert.equal(before.rows[0]!.skill_input.desired_result, '可复核的 Markdown');
   assert.equal(before.rows[0]!.skill_output, null);
   const taskRevision = await readTaskRevision(f.taskId);
+  const generatedRequests: AssistRequest[] = [];
+  const capturingPort: AssistModelPort = { identity: modelPort.identity,
+    assist: async (request) => { generatedRequests.push(request); return modelPort.assist(request); } };
   const tick = await runAssistGenerationTick(app.db, { workerId: 'skill-w1', storage,
-    modelPort, leaseMs: 30_000 });
+    modelPort: capturingPort, leaseMs: 30_000 });
   assert.equal(tick?.status, 'COMPLETED');
+  assert.equal(generatedRequests.length, 1);
+  const generated = generatedRequests[0]!;
+  assert.ok(generated.system.includes(RELAY_AGENT_CORE_PROMPT));
+  assert.ok(generated.system.includes(
+    FIRST_PARTY_REGISTRY.skill('task-to-execution-contract', '1.0.0')!.definition.instructions));
+  assert.match(generated.system, /严格输出一个 JSON 对象/u);
+  assert.match(generated.system, /不创建 Run/u);
+  assert.ok(!generated.system.includes('可复核的 Markdown'));
   assert.equal(tick.proposalIds.length, 1);
   const output = await sql<{ status: string; skill_output: { kind: string;
     status: string; target_id: string; baseline: { task_revision: string };

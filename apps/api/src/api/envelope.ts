@@ -38,7 +38,8 @@ export function successStatusOf(commandType: string): 200 | 201 | 202 {
   if (commandType === 'StartArtifactImpactCheck' ||
       commandType === 'StartArtifactImpactCandidate' ||
       commandType === 'DelegateTask' || commandType === 'RequestRunControl' ||
-      commandType === 'ResumeRun' || commandType === 'RequestAssistMessage') {
+      commandType === 'ResumeRun' || commandType === 'RequestAssistMessage' ||
+      commandType === 'InterpretConversationMessage') {
     return 202;
   }
 
@@ -129,11 +130,34 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
       return typeof result.project_id === 'string' && typeof result.id === 'string'
         ? `projects/${result.project_id}/continuation-points/${result.id}`
         : undefined;
+    case 'SaveProjectKnowledgeGuide':
+      return typeof result.project_id === 'string'
+        ? `projects/${result.project_id}/knowledge-guide`
+        : undefined;
+    case 'CreateImpactCandidateGroup':
+      return typeof result.group_id === 'string'
+        ? `impact-candidate-groups/${result.group_id}`
+        : undefined;
+    case 'CreateArtifactCombinationCheck':
+      return typeof result.combination_check_id === 'string'
+        ? `combination-checks/${result.combination_check_id}`
+        : undefined;
     case 'RequestAssistMessage':
       return typeof result.session_id === 'string' ? `assist-sessions/${result.session_id}` : undefined;
     case 'AcceptAssistProposal':
     case 'RejectAssistProposal':
       return typeof result.proposal_id === 'string' ? `assist-proposals/${result.proposal_id}` : undefined;
+    case 'OpenWorkingDirectory': {
+      const association = result.association;
+      return typeof association === 'object' && association !== null &&
+        typeof (association as { project_id?: unknown }).project_id === 'string' &&
+        typeof (association as { resource_id?: unknown }).resource_id === 'string'
+        ? `projects/${(association as { project_id: string }).project_id}/managed-resources/${(association as { resource_id: string }).resource_id}`
+        : undefined;
+    }
+    case 'InterpretConversationMessage':
+      return typeof result.request_id === 'string'
+        ? `conversation-execution-requests/${result.request_id}` : undefined;
     default:
       return undefined;
   }

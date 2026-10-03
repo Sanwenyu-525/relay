@@ -118,7 +118,7 @@ export interface SendOptions {
 
 export function sendRequest(
   port: number,
-  method: 'GET' | 'POST' | 'PATCH' | 'OPTIONS',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'OPTIONS',
   path: string,
   options: SendOptions = {},
 ): Promise<HttpResponse> {
@@ -416,12 +416,13 @@ export interface TestApi {
   readonly dataRoot: string;
   readonly running: RunningApi;
   request(
-    method: 'GET' | 'POST' | 'PATCH',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH',
     path: string,
     options?: SendOptions,
   ): Promise<HttpResponse>;
   get(path: string, options?: SendOptions): Promise<HttpResponse>;
   post(path: string, body: unknown, options?: SendOptions): Promise<HttpResponse>;
+  put(path: string, body: unknown, options?: SendOptions): Promise<HttpResponse>;
   patch(path: string, body: unknown, options?: SendOptions): Promise<HttpResponse>;
   stop(): Promise<number | null>;
 }
@@ -461,6 +462,7 @@ export async function startTestApi(options: { databaseUrl?: string;
     request,
     get: (path, options) => request('GET', path, options),
     post: (path, body, options) => request('POST', path, { ...options, body }),
+    put: (path, body, options) => request('PUT', path, { ...options, body }),
     patch: (path, body, options) => request('PATCH', path, { ...options, body }),
     stop: async () => {
       const exitCode = await stopApi(running);

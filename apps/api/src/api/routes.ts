@@ -14,6 +14,7 @@ import type { RouteDependencies } from './envelope.js';
 import { databaseUnavailable, problemBody, schemaUnavailable } from './problem.js';
 import { registerProjectRoutes } from './project-api.js';
 import { registerProjectContinuationRoutes } from './project-continuation-api.js';
+import { registerProjectKnowledgeGuideRoutes } from './project-knowledge-guide-api.js';
 import { registerRunRoutes } from './run-api.js';
 import { registerGatewayRoutes } from './gateway-api.js';
 import { registerInformationRoutes } from './information-api.js';
@@ -27,6 +28,8 @@ import { registerTraceRoutes } from './trace-api.js';
 import { registerLineageRoutes } from './lineage-api.js';
 import { registerFirstPartySkillRoutes } from './first-party-skills-api.js';
 import { registerViewConfigurationRoutes } from './view-configuration-api.js';
+import { registerWorkingDirectoryRoutes } from './working-directory-api.js';
+import { registerConversationExecutionRoutes } from './conversation-execution-api.js';
 import { registerBlueprintRoutes } from './blueprint-api.js';
 import { registerModelRoutes } from './model-api.js';
 
@@ -115,6 +118,7 @@ export function registerRoutes(
 
       registerProjectRoutes(scope, apiDependencies);
       registerProjectContinuationRoutes(scope, apiDependencies);
+registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
       registerTaskRoutes(scope, apiDependencies);
       registerTodayRoutes(scope, apiDependencies);
       registerActivityRoutes(scope, apiDependencies);
@@ -134,6 +138,8 @@ export function registerRoutes(
       registerInformationRoutes(scope, apiDependencies);
       registerReviewRoutes(scope, apiDependencies);
       registerAssistRoutes(scope, apiDependencies);
+      registerWorkingDirectoryRoutes(scope, apiDependencies);
+      registerConversationExecutionRoutes(scope, apiDependencies);
       registerCommandRoutes(scope, apiDependencies);
     },
     { prefix: API_PREFIX },

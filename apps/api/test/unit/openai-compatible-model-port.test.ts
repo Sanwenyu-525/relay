@@ -328,7 +328,8 @@ test('semantic JSON is exact and invalid complete responses keep usage evidence'
     'data: [DONE]\n\n']));
   assert.deepEqual(await valid.evaluate({ statement: '有摘要', content: '有摘要' }), {
     verdict: 'PASS', reason: '成立', providerRequestId: 'chatcmpl-fixture',
-    usage: { inputTokens: 10, outputTokens: 7 },
+    usage: { inputTokens: 10, outputTokens: 7,
+      cacheReadTokens: null, cacheCreationTokens: null },
   });
   const invalid = port(() => response([event('prefix {"verdict":"PASS","reason":"x"}', 'stop'),
     event(null, null, { prompt_tokens: 10, completion_tokens: 7, total_tokens: 17 }),

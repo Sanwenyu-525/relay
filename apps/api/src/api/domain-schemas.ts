@@ -479,6 +479,13 @@ export const DelegateTaskBodySchema = Type.Object(
         targetSha256: Type.Optional(Type.String({ pattern: '^[0-9a-fA-F]{64}$' })),
       }, strict), { minItems: 1, maxItems: 16 }),
     }, strict)),
+    cli_run_action: Type.Optional(Type.Object({
+      connection_id: UuidSchema,
+      resource_id: UuidSchema,
+      executable: Type.String({ minLength: 1, maxLength: 256 }),
+      args: Type.Array(Type.String({ minLength: 0, maxLength: 1024 }), { minItems: 1, maxItems: 32 }),
+      max_output_bytes: Type.Optional(Type.Integer({ minimum: 0, maximum: 1048576 })),
+    }, strict)),
     context_sources: Type.Optional(Type.Array(Type.Object({
       kind: Type.Union([Type.Literal('KNOWLEDGE'), Type.Literal('MEMORY'), Type.Literal('DECISION')]),
       root_id: UuidSchema,

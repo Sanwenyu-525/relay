@@ -5,7 +5,7 @@ import type { CheckResultRow, ImportJobRow, LogicalOperationRow, ProjectStateRow
 import type { JsonObject } from '../infrastructure/json.js';
 import { toDecimalString } from '../shared/decimal.js';
 import { buildCheckPlan, planFromFrozenSnapshot } from '../workflow/check-plan.js';
-import { readMockActionOperationId } from '../workflow/execution-contract.js';
+import { readFrozenActionOperationIds } from '../workflow/execution-contract.js';
 import { computeVerdict, DEFAULT_CORRECTION_BUDGET } from '../workflow/verdict.js';
 import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
 import { runIdempotentCommand, type CommandOutcome } from './command.js';
@@ -127,10 +127,9 @@ export async function resolveReview(db: DbExecutor, input: ResolveReviewInput): 
         if (current === undefined) throw new Error('reviewed Run disappeared');
         const frozen = review.kind === 'ACTION_APPROVAL'
           ? await repositories.runs.readContract(run.id) : undefined;
-        const frozenActionOperationId = frozen === undefined ? undefined :
-          readMockActionOperationId(frozen.frozen_snapshot);
         const actionApproved = review.kind === 'ACTION_APPROVAL' && input.decision === 'APPROVE' &&
-          frozenActionOperationId === review.operation_id;
+          frozen !== undefined && review.operation_id !== null &&
+          readFrozenActionOperationIds(frozen.frozen_snapshot).includes(review.operation_id);
         const runnable = run.status === 'WAITING_APPROVAL' &&
           !['WAITING_APPROVAL', 'PAUSED', 'COMPLETED', 'FAILED', 'CANCELLED'].includes(current.status);
         if (actionApproved || runnable) {
@@ -198,15 +197,18 @@ async function resolveRunReview(repositories: Repositories, input: {
   if (review.kind === 'ACTION_APPROVAL') {
     if (run.status !== 'WAITING_APPROVAL' || target.operation_id !== review.operation_id) throw invalidTransition('操作审批的原 Run 或操作身份已失效。');
     if (decision !== 'APPROVE' && decision !== 'DENY') throw invalidTransition('操作批准只接受 APPROVE 或 DENY。');
-    const frozenActionOperationId = readMockActionOperationId(contract.frozen_snapshot);
-    if (frozenActionOperationId !== undefined && frozenActionOperationId !== review.operation_id) {
-      throw invalidTransition('操作审批与冻结的 Mock 动作身份不匹配。');
+    const frozenActionOperationIds = readFrozenActionOperationIds(contract.frozen_snapshot);
+    // 契约声明了冻结动作时，审批必须对应其中之一；没有冻结动作的 Run 仍按通用端口处理。
+    if (frozenActionOperationIds.length > 0 &&
+        (review.operation_id === null || !frozenActionOperationIds.includes(review.operation_id))) {
+      throw invalidTransition('操作审批与冻结的 Run 动作身份不匹配。');
     }
     // P07's generic Review port can reserve an operation ID before Gateway has
-    // created a row. Only the required fixed Mock action has terminal DENY semantics.
-    const operation = frozenActionOperationId === undefined || review.operation_id === null ? undefined :
+    // created a row. Only a required frozen action has terminal DENY semantics.
+    const operation = review.operation_id === null ? undefined :
       await repositories.gateway.lockOperation(review.operation_id);
-    if (frozenActionOperationId !== undefined && (operation?.run_id !== run.id ||
+    if (frozenActionOperationIds.length > 0 && operation !== undefined &&
+        (operation.run_id !== run.id ||
         operation.status !== 'WAITING_APPROVAL' || operation.id !== target.operation_id)) {
       throw invalidTransition('操作审批的原动作已失效。');
     }

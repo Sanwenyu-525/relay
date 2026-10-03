@@ -3,9 +3,10 @@ import test from 'node:test';
 import { describeModelPortStatus } from '../../src/workflow/model-port-config.js';
 
 test('未设置或 fake 时报告 Mock 端口，不暴露任何配置内容', () => {
-  assert.deepEqual(describeModelPortStatus({}), { provider: 'fake', configured: false, model: null, baseUrl: null });
-  assert.deepEqual(describeModelPortStatus({ RELAY_MODEL_PROVIDER: 'fake' }),
-    { provider: 'fake', configured: false, model: null, baseUrl: null });
+  const mock = { provider: 'fake', configured: false, model: null, baseUrl: null,
+    maxCallTokens: null };
+  assert.deepEqual(describeModelPortStatus({}), mock);
+  assert.deepEqual(describeModelPortStatus({ RELAY_MODEL_PROVIDER: 'fake' }), mock);
 });
 
 test('完整真实配置报告 provider/model/base_url，密钥不出现在任何字段', () => {
@@ -19,7 +20,14 @@ test('完整真实配置报告 provider/model/base_url，密钥不出现在任�
   assert.equal(status.configured, true);
   assert.equal(status.model, 'gpt-test');
   assert.equal(status.baseUrl, 'https://api.example.com/v1');
+  // 单次调用上限是对外可见的上下文分母；密钥仍不得出现在任何字段。
+  assert.equal(status.maxCallTokens, 65_536);
   assert.equal(JSON.stringify(status).includes('sk-secret'), false);
+});
+
+test('配置残缺时 maxCallTokens 为 null，不能拿默认值当真实上限', () => {
+  const status = describeModelPortStatus({ RELAY_MODEL_PROVIDER: 'openai-compatible' });
+  assert.equal(status.maxCallTokens, null);
 });
 
 test('未自定义 base_url 时为 null（使用内置默认端点）', () => {
