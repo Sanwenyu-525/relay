@@ -1,0 +1,62 @@
+[
+  {
+    "slug": "knowledge",
+    "brief": "当前真实入口为 /knowledge；保留资料、记忆、决定、规则四类页签，新建、对象列表、当前状态/版本/范围和选中对象内容。资料搜索按当前范围查询四类当前有效对象，支持中文短词与游标续页，不承诺语义搜索或推荐。全局页不应画项目专属网页导入。示例模式当前没有虚构资料库。",
+    "sources": ["apps/workbench/src/views/KnowledgeView.tsx:33", "apps/workbench/src/views/KnowledgeView.tsx:585", "apps/workbench/src/views/KnowledgeView.tsx:600"]
+  },
+  {
+    "slug": "knowledge-detail",
+    "brief": "这是 /knowledge 或项目资料页的 kind/item/version 深链阅读状态，并非新建独立路由。保留可读完整正文、Markdown 目录、当前/历史版本选择、保存时间、来源类型与范围、不可变版本历史、编辑为新版本。网页正文是保存快照，打开当前原件与阅读快照分开；PARTIAL、正文读失败和来源不可用须明确，不能以其他版本或摘要冒充全文。",
+    "sources": ["apps/workbench/src/components/KnowledgeReader.tsx:80", "apps/workbench/src/components/KnowledgeReader.tsx:95", "apps/workbench/src/components/KnowledgeReader.tsx:114"]
+  },
+  {
+    "slug": "project-information",
+    "brief": "真实入口 /projects/:id/knowledge；保留项目内总览/工作台/任务/资料/连接导航与资料/记忆/决定/规则四类页签。资料有新版本、归档、网页导入、项目导读；记忆显示明确确认人与时间、修订历史且可停用；决定展示选择/依据/备选/代价并可记录替代决定ID；规则展示硬约束或偏好、范围与执行方式且可停用。AI推断不能画成已确认记忆；归档/权限拒绝和原命令待核对可见。",
+    "sources": ["apps/workbench/src/views/KnowledgeView.tsx:633", "apps/workbench/src/views/KnowledgeView.tsx:675", "apps/workbench/src/views/KnowledgeView.tsx:678"]
+  },
+  {
+    "slug": "reviews",
+    "brief": "真实入口 /reviews?id=；保留全部及实际存在类型的计数筛选、请求事项/类型/项目/时间/状态列表、所选请求原因与证据/影响。当前有人工验收、修正预算、检查器重试、动作批准、项目状态提案五种类型。人工验收提供接受这项判断/请求修改（修改需说明）；修正预算有1到6次数值与设置修正预算；检查器重试提供重新运行检查。其余动作仅按服务端allowedDecisions显示。读时绑定确切产物正文、版本来源；过期/失权/归档/结果待核对不能仍显示可提交。",
+    "sources": ["apps/workbench/src/lib/labels.ts:9", "apps/workbench/src/views/ReviewsView.tsx:104", "apps/workbench/src/views/ReviewsView.tsx:125", "apps/workbench/src/components/ReviewDecisionPanel.tsx:222"]
+  },
+  {
+    "slug": "thesis-acceptance",
+    "brief": "论文产物判断使用现有 CRITERION Review 与确切版本阅读，不是额外论文专用审批路由。正文占主要空间；常驻产物名称/版本、验收版本/条件、判断依据与影响、接受这项判断/请求修改及按需说明。请求修改需填写说明；完整对象ID/摘要与来源可按需展开。接受仅保存该对象的判断，不能画自动PASS、任务已完成或执行权已转移；阅读另一版不得悄悄改Review目标。",
+    "sources": ["apps/workbench/src/views/ReviewsView.tsx:125", "apps/workbench/src/components/ReviewDecisionPanel.tsx:119", "apps/workbench/src/components/ReviewDecisionPanel.tsx:199", "docs/frontend/workbench-design.md:749"]
+  },
+  {
+    "slug": "action-approval",
+    "brief": "真实 ACTION_APPROVAL 复用 /reviews 与ReviewDecisionPanel；完整展示服务端给出的实际动作类型、规范化目标、证据/风险、可能影响及绑定身份，提供批准这项动作/拒绝这项请求。可用FILE_WRITE受管变化集审批代表当前接入链；若保留旧图Git commit样例，必须限定为已存在Review的动作事实，不能据此宣称开发工作台已有Git写入口或任意Shell。批准仅针对确切动作/内容版本，不自动授权push、覆盖撤销权限或代表执行成功。",
+    "sources": ["apps/workbench/src/components/ReviewDecisionPanel.tsx:182", "apps/workbench/src/components/ReviewDecisionPanel.tsx:230", "apps/workbench/src/components/ReviewDecisionPanel.tsx:237", "apps/workbench/src/views/ProjectWorkbenchView.tsx:397"]
+  },
+  {
+    "slug": "run-control",
+    "brief": "真实入口 /runs/:id；执行中保留Run状态、Task状态/执行者与各自修订、步骤时间线/最近尝试、当前动作、事件连接状态、未决Review、可读时生成中草稿、动作历史/Trace、模型连接、资源与租约说明。合法控制为请求暂停Run/停止Run/交接给人工/取消任务、刷新；请求受理202/PENDING须显示仍等待安全点，不把Run画成已暂停。历史Run或COMPLETED终态只读，控制禁用；Run完成与Task业务完成分别核对。",
+    "sources": ["apps/workbench/src/views/RunView.tsx:237", "apps/workbench/src/views/RunView.tsx:243", "apps/workbench/src/components/RunControlPanel.tsx:145", "apps/workbench/src/components/RunControlPanel.tsx:156"]
+  },
+  {
+    "slug": "run-paused",
+    "brief": "使用同一 /runs/:id 的PAUSED状态。保留已暂停摘要、最后完成步骤/current_step_id恢复点、任务执行者、等待原因、步骤证据与原Review、恢复Run/停止/请求交接/取消任务和刷新。暂停不转移执行权，也不证明进程已停或资源释放；接手须控制结果为APPLIED后才提示可到任务产物编辑。Run级已保存产物清单和资源/租约独立查询接口尚未接入，产物应链接任务详情核对，不画虚构资源仪表或已释放绿勾。",
+    "sources": ["apps/workbench/src/views/RunView.tsx:241", "apps/workbench/src/views/RunView.tsx:267", "apps/workbench/src/components/RunControlPanel.tsx:152", "apps/workbench/src/components/RunControlPanel.tsx:158"]
+  },
+  {
+    "slug": "run-unknown",
+    "brief": "同一Run页面常驻外部结果待核对警示，保留原operation_id及已知/未知边界、打开动作历史（只读）/查看Run Trace证据。当前FILE_WRITE链可刷新逐文件账本与当前观察、查看冻结计划文本差异；PARTIAL或无回执情况下，只有服务端准入后才可明确确认保留当前文件及候选残留并结束旧Run，不能据此认定全部写入成功。旧图的通用核对Git结果按钮不属于当前此页入口；不能画换ID重试、强制成功、自动清理残留或盲目重新执行。",
+    "sources": ["apps/workbench/src/views/RunView.tsx:238", "apps/workbench/src/views/RunView.tsx:240", "apps/workbench/src/components/FileWriteDispositionPanel.tsx:177", "apps/workbench/src/components/FileWriteDispositionPanel.tsx:200"]
+  },
+  {
+    "slug": "artifact-editor",
+    "brief": "真实入口为 /tasks/:id?tab=artifacts 的产物区。保留任务概览/产物/执行记录页签、名称/阅读版本、最新/当前选用/本轮接受分别标记、已保存正文/编辑/预览切换、未保存状态、从最新人工版本起草修订、保存新版本、来源与差异。进行中的人工任务且服务端投影SAVE_ARTIFACT_VERSION时可保存，DONE先重开，AI持权先安全接手。旧图常驻取消编辑按钮当前没有对应控件，不新增；本页另保留确切版本选用及检查与完成入口，保存不继承旧验收凭据。",
+    "sources": ["apps/workbench/src/components/ArtifactPanel.tsx:381", "apps/workbench/src/components/ArtifactPanel.tsx:405", "apps/workbench/src/components/ArtifactPanel.tsx:428", "apps/workbench/src/components/ArtifactPanel.tsx:445"]
+  },
+  {
+    "slug": "version-conflict",
+    "brief": "这是任务产物编辑的409/草稿基线变化状态，不是独立路由。常驻冲突警示与草稿保留；并列我的草稿（原基线、未保存）和当前确切已保存版本；当前正文读取失败单独报错，不能用旧正文代替。保存暂停，提供确认以当前版本为基线（保留草稿）与查看版本历史与差异，明确确认不会自动合并正文。保留编辑输入和原保存命令待核对入口；不画强制覆盖或自动合并。",
+    "sources": ["apps/workbench/src/components/ArtifactPanel.tsx:389", "apps/workbench/src/components/ArtifactPanel.tsx:391", "apps/workbench/src/components/ArtifactPanel.tsx:434", "apps/workbench/src/components/ArtifactPanel.tsx:443"]
+  },
+  {
+    "slug": "task-completed",
+    "brief": "真实完成凭据入口 /completion-records/:id；保留完成依据（人工接受/自动验证）、本轮接受的确切产物版本、当时验收版本/条件、提交时间、当前完成周期或历史凭据、人工接受与Verification证据、来源历史、重读和关联任务入口。当前Task DONE与Run COMPLETED不能混为一个结论；任务重开建立新验收周期，旧凭据不改写。无真实凭据时不能用fixture制造完成记录；重开按钮属于任务产物完成区，需原因且不自动开始执行。",
+    "sources": ["apps/workbench/src/views/CompletionRecordView.tsx:45", "apps/workbench/src/views/CompletionRecordView.tsx:52", "apps/workbench/src/views/CompletionRecordView.tsx:61", "apps/workbench/src/components/TaskCompletionPanel.tsx:173"]
+  }
+]

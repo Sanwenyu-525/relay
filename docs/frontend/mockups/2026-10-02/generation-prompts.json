@@ -1,0 +1,749 @@
+{
+  "status": "STATIC_IMAGES_COMPLETE",
+  "scope": "37 static page/state images based on current production functions; no product code changes",
+  "currentDate": "2026-10-02",
+  "reference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-10-02/conversation-workspace-selected.png",
+  "commonPrompt": "Generate one highly polished, realistic Chinese desktop UI EFFECT IMAGE for Relay / Personal Workflow OS, a human-AI long-term project collaboration application. Direction is already selected. The FIRST reference image is the chosen visual direction: retain its compact Codex-like icon rail, project-grouped recent Task column, warm white reading surfaces, quiet forest-green accents and restrained thin separators. The SECOND reference image only demonstrates FULL navigation inventory; do NOT copy its old oversized headings or spacing. Current production functionality in the PAGE BRIEF overrides any old mock or screenshot. This is visual design, not a claim of runtime verification.\nFull landscape desktop screen about1920x1020, edge-to-edge, no perspective or device bezel. Slim native title strip with back/forward, search and '+ 新建'. Shared shell: about100px icon-and-label rail plus280-320px project-grouped recent tasks. Important: ALL ten existing navigation destinations remain visible and readable in the icon rail: 工作台、项目、待处理、资料; then a small 更多入口 grouping with 今日、全部任务、动态、收件箱 ALWAYS EXPANDED; bottom 设置、连接与同步. The selected earlier mock omitted folded destinations: this new full set must restore them, not silently drop routes. Highlight the appropriate current destination. Recent tasks are real Project/Task navigation, not a separate global chat product. Recent column has Relay, search项目或任务, grouped近期任务, task labels. No fake '+新对话' instead of existing new action.\nPalette paper#FAF9F6, sidebar#F4F3EF, surface#FFFFFF, ink#18211F, secondary#4F5B55, separator#E3E4DF, forest#285747, selected sage#E7EEE6. Chinese UI sans (Microsoft YaHei/Noto Sans SC), no serif hero. Compact single main context header, title20-24px, metadata14px, readable body16-18px. Useful content begins near the top, not below a tall header. Keep first lines, controls and footer actions in-frame; no overlays obscuring content. Readable restrained forms/tables/documents, whitespace and dividers, no nested cards, no gradients, no decorative illustrations or fake analytics.\nGLOBAL pages do not show unrelated project tabs. Project-scoped pages retain compact project navigation 总览、工作台、任务、资料、连接 where appropriate, and their actual inner tabs supplied in the PAGE BRIEF. These are distinct navigation levels, don't substitute one for the other. Page layout must suit lists/forms/reading/review/control, not turn every page into chat. Full useful source content and current actions matter more than copying old mock structure.\nUse consistent Chinese mock project 科研协作系统 and meaningful mock tasks 数据分析方案、整理文献综述、回归验证, with tiny 示例 indicator and 2026-10-02 星期五. Retain domain truth: Task state, Run state and execution owner distinct; immutable exact artifact versions; judgment not completion; pause request not paused; UNKNOWN needs original-action reconciliation not blind retry. Disabled/unimplemented abilities show concise 不可用 reason, never fake success. Pending approvals/stop requests/conflicts/read-only/archived restrictions stay visible, not buried in collapsed detail. Exact IDs may be compact context details for ordinary cases. One screen per image, no montage, no alternatives or outside-UI design annotations.\nStrict functional fidelity: show ONLY the actions and page tabs given in PAGE BRIEF. Never add sharing, favorite, arbitrary start-new-run, fake Edit Project Goal, shell or permission controls to fill space. Keep global recent-task sidebar separate from the workbench own task/material directory inside the main area. Preserve any named workbench type switch and object inner tabs prominently; compact does not mean omit them.",
+  "pages": [
+    {
+      "id": "UI-01",
+      "name": "今日工作台",
+      "slug": "today",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/today.png",
+      "brief": "今天\n更多入口·今日\n/today\n保留页签:\n筛选:日期；查询时区（可展开调整）\n内容:今日焦点：所属项目、任务标题、状态、优先级、截止；可开始或继续、已置顶待处理、其他等待三组任务；等待你的判断与待审中心入口；推荐依据和安排说明\n可用动作:刷新、应用或取消时区调整；打开任务；符合资格时入口文案为开始任务或继续任务；按 allowedActions 置顶或取消置顶、设为今日焦点、取消延后；保存延后日期和时区、保存任务优先级和截止计划；清除今日焦点；空态新建任务或查看全部任务\n边界:开始/继续入口导航到任务详情，不直接宣布执行成功；焦点与置顶不改变准入。；示例模式没有真实 Today 投影；提交结果不明时保留原命令，先查回执。",
+      "file": "today.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/views/TodayView.tsx"
+      ],
+      "width": 1720,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0fab5-c73b-7713-92da-71aa98a3df54\\exec-c2700cc6-294c-4e28-bef3-dc56df8a3865.png",
+        "inspection": "10入口可见；READY人工/进行中人工/阻塞人工按钮已区分；焦点、计划、待审与三组保留。仅静态自查。",
+        "log": "global-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-02",
+      "name": "项目总览",
+      "slug": "project-overview",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/project-overview.png",
+      "brief": "项目总览，项目科研协作系统。紧凑项目导航总览/工作台/任务/资料/连接；当前总览内页签总览/蓝图预览/继续项目/Assist，以及打开项目工作台按钮。展示目标“支持项目中断后的可靠恢复”、当前阶段与 State 修订 v8、下一步任务“整理文献综述”、选用产物“研究问题 v2”和“方案摘要 v3”、两条当前 Decision、待判断事项与来源入口。目标、State和来源分别明确；继续项目仅跳转接续页，不启动Run。主内容为清晰项目事实面板，不能编造确认人和确认时间。",
+      "file": "project-overview.png",
+      "status": "GENERATED",
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:/Users/ASUS/.codex/generated_images/01a0faa7-688f-7260-8681-1d327cc55e09/exec-8861994b-e912-4a76-8d44-3707d0152e77.png",
+        "inspection": "全十个导航可见，项目两层页签及State/目标/产物/Decision保留；静态方案，文案以实现为准。",
+        "log": "root-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-03",
+      "name": "开发工作台",
+      "slug": "development-workbench",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/development-workbench.png",
+      "brief": "开发工作台；项目导航总览/工作台/任务/资料/连接，工作台类型通用/论文/开发选开发、刷新、默认视图设置入口。任务目录和产物版本目录左侧，中央可读版本正文“恢复流程设计 v2”，确切产物标题与版本；右侧Run状态/步骤/运行证据/待审以及同任务Assist入口。阅读与AI显式选源分离，Task进行中/当前执行者我/当前无活动Run。当前Git diff、受控测试、Coding CLI尚未接入：只保留清楚禁用的能力入口并写尚未接入，不画成功diff/测试终端。连接能力与权限是可访问入口，不能虚构授权。",
+      "file": "development-workbench.png",
+      "status": "GENERATED",
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-6d64bc64-1276-4efa-81c1-d14334ef80cd.png",
+        "inspection": "修订版保留十个导航、工作台类型切换及未接入能力；没有虚构成功测试或新Run。图中文字与目录组织为视觉建议，最终实施需校准。",
+        "log": "root-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-04",
+      "name": "论文产物验收",
+      "slug": "thesis-acceptance",
+      "oldReference": "D:/Develop/Relay-Agent/thesis-review-original-20260919.png",
+      "brief": "论文产物判断使用现有 CRITERION Review 与确切版本阅读，不是额外论文专用审批路由。正文占主要空间；常驻产物名称/版本、验收版本/条件、判断依据与影响、接受这项判断/请求修改及按需说明。请求修改需填写说明；完整对象ID/摘要与来源可按需展开。接受仅保存该对象的判断，不能画自动PASS、任务已完成或执行权已转移；阅读另一版不得悄悄改Review目标。",
+      "file": "thesis-acceptance.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/views/ReviewsView.tsx:125",
+        "apps/workbench/src/components/ReviewDecisionPanel.tsx:119",
+        "apps/workbench/src/components/ReviewDecisionPanel.tsx:199",
+        "docs/frontend/workbench-design.md:749"
+      ],
+      "width": 1720,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-e93589ac-ffa0-41f4-8c26-3d2f6ea26697.png",
+        "inspection": "已视看：十项导航全部可见；阅读首段、确切产物v3与验收v2、AI执行者及等待人工判断分开；接受/请求修改、仅修改必填说明。去除无关项目页签及虚构PDF分页。静态设计，无运行验收。",
+        "log": "review-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-05",
+      "name": "项目列表",
+      "slug": "projects",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/projects.png",
+      "brief": "全局项目列表，无项目专属导航。进行中/已归档切换，搜索已加载项目、刷新、加载更多，新建项目主按钮。4行项目科研协作系统/论文研究/个人知识整理/桌面迭代，每行类型、目标摘要、下一步、更新日期，打开、归档动作。项目目标意图尚未成为Goal时不要写已确认。采用紧凑表格或整齐行列，主内容第一屏可读。",
+      "file": "projects.png",
+      "status": "GENERATED",
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-4c8100bf-aff0-43e8-9745-d3c4970911eb.png",
+        "inspection": "已查看生成图，作为功能布局提案，未做运行验收。",
+        "log": "root-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-06",
+      "name": "创建项目",
+      "slug": "create-project",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/create-project.png",
+      "brief": "当前真实创建项目流程，属于全局。紧凑步骤项目意图→初始资料→确认保存。名称“科研协作系统”、类型通用/论文/开发、目标意图多行文本、初始资料选择、Pack目录选择/说明。保存项目/暂存/返回等真实分步流程；短说明“目标意图不会自动成为已确认Goal，创建不会开始执行”。没有必需模型，没有新增任意工作目录或权限表单。大面积可读表单，右侧仅简短当前范围说明。",
+      "file": "create-project.png",
+      "status": "GENERATED",
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-7c545b6d-4af0-4762-b325-ea680bab6ea4.png",
+        "inspection": "已查看生成图；静态表单保留创建步骤与目标意图边界。",
+        "log": "root-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-07",
+      "name": "全部任务",
+      "slug": "tasks",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/tasks.png",
+      "brief": "全部任务\n更多入口·全部任务\n/tasks\n保留页签:全部/收件箱/人工待处理\n筛选:项目：全部、未归属项目、已加载项目；状态：待整理、可开始、进行中、待人工验收、阻塞、已完成、已取消；执行模式：人工执行、AI 辅助、AI 委托；按任务名称搜索\n内容:任务、项目、工作状态、执行模式、当前执行者五列；任务修订、等待或阻塞原因、已加载与当前显示数量、分页范围说明\n可用动作:新建任务 /tasks?view=create；刷新、重读、清除筛选、继续加载；整行打开任务详情；按明确项目 ID 或任务 ID 打开对象\n边界:live 筛选仅作用于已加载页，不能当作全量检索。；创建页登记标题、预期结果、验收条件、可选项目与依赖；保存或暂存待整理不会启动 Run，live 创建页不直接委托 AI。",
+      "file": "tasks.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/views/TasksView.tsx",
+        "apps/workbench/src/lib/labels.ts",
+        "apps/workbench/src/views/CreateTaskView.tsx"
+      ],
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0fab5-c73b-7713-92da-71aa98a3df54\\exec-875de6c0-ef46-4765-881d-420eab457504.png",
+        "inspection": "五列、任务范围三页签、已加载筛选、续页与ID导航保留，无行内执行按钮。任务修订示例含小数排版，作为静态示例细节，后续建议改为整数修订。",
+        "log": "global-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-08",
+      "name": "任务收件箱",
+      "slug": "inbox",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/inbox.png",
+      "brief": "任务收件箱\n更多入口·收件箱\n顶栏收件箱\n/inbox 重定向至 /tasks?tab=inbox\n保留页签:全部/收件箱/人工待处理\n筛选:任务状态；执行模式；搜索已加载任务；live 不显示项目筛选\n内容:未归属项目的人工任务；沿用任务列表五列、修订和等待原因；已加载数量、筛选数量、分页或空态\n可用动作:新建任务、刷新收件箱、继续加载、清除筛选；打开任务详情；切换全部任务或人工待处理\n边界:收件箱不是通知列表或 Review 列表。；未归属项目只登记人工事项，不自动创建项目，不具备 AI 执行作用域。",
+      "file": "inbox.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/router.tsx",
+        "apps/workbench/src/views/TasksView.tsx"
+      ],
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0fab5-c73b-7713-92da-71aa98a3df54\\exec-afe530a9-c9c7-48f2-b756-ed5d93105c8e.png",
+        "inspection": "静态自查：完整十入口与近期任务列；收件箱内容均为人工持权、未归属项目事项；三页签、状态/模式/搜索筛选、五列表格、清除筛选、新建与刷新可见。修订示例位于行尾属排版差异。仅效果图，不代表运行验收。",
+        "log": "global-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-09",
+      "name": "项目任务",
+      "slug": "project-tasks",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/project-tasks.png",
+      "brief": "项目科研协作系统的任务列表，保留总览/工作台/任务/资料/连接，任务页激活。搜索、新建任务、刷新；列任务标题、状态、执行者、模式、依赖，4行含可开始/等待依赖/进行中/待整理。选中“整理文献综述”旁侧显示目标、条件、当前执行者我；服务端允许时提供开始，等待依赖任务显示不可开始及原因。不因选中或置顶自动执行，不把Task状态写成Run状态。",
+      "file": "project-tasks.png",
+      "status": "GENERATED",
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-2175f9b6-b500-4593-af98-06ec3a9eadfd.png",
+        "inspection": "修订版：READY人工持权无活动Run，移除暂停动作和多入口选中；选中/开始动作区分。",
+        "log": "root-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-10",
+      "name": "任务详情与验收标准",
+      "slug": "task-detail",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/task-detail.png",
+      "brief": "任务“整理文献综述”的详情，主内页签概览/产物/执行记录，另保留完善定义/验收方案/Assist入口。紧凑任务状态可开始、执行模式人工、当前执行者我、任务修订v4、验收版本v2；可读目标、3条本任务验收条件、前置依赖、产物“文献综述 v3”、运行历史与完成凭据入口。合法委托AI按钮只表示进入准备，与直接开始人工任务分开。侧边摘要显示当前没有活动Run。不要虚构已完成。",
+      "file": "task-detail.png",
+      "status": "GENERATED",
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-5a4e0357-eab7-4640-8818-a01367e6f078.png",
+        "inspection": "已目视，任务状态/人工模式/执行者与当前无Run区分；页签及条件版本保留。",
+        "log": "root-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-11",
+      "name": "人工编辑与保存版本",
+      "slug": "artifact-editor",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/artifact-editor.png",
+      "brief": "真实入口为 /tasks/:id?tab=artifacts 的产物区。保留任务概览/产物/执行记录页签、名称/阅读版本、最新/当前选用/本轮接受分别标记、已保存正文/编辑/预览切换、未保存状态、从最新人工版本起草修订、保存新版本、来源与差异。进行中的人工任务且服务端投影SAVE_ARTIFACT_VERSION时可保存，DONE先重开，AI持权先安全接手。旧图常驻取消编辑按钮当前没有对应控件，不新增；本页另保留确切版本选用及检查与完成入口，保存不继承旧验收凭据。",
+      "file": "artifact-editor.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/components/ArtifactPanel.tsx:381",
+        "apps/workbench/src/components/ArtifactPanel.tsx:405",
+        "apps/workbench/src/components/ArtifactPanel.tsx:428",
+        "apps/workbench/src/components/ArtifactPanel.tsx:445"
+      ],
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-669581ba-f71f-40bf-bc07-fc52ae46e895.png",
+        "inspection": "已视看：进行中/人工/无活动Run、三任务页签、v4最新/v3选用/本轮未接受、未保存草稿、保存v5/版本选用/检查完成均保留；富文本工具条已去除。十个导航图标存在，项目与资料文字标签漏绘，经内置edit多次仍未修复，需实施时校准，非像素完美。静态设计，无运行验收。",
+        "log": "review-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-12",
+      "name": "通用工作台与 AI 辅助",
+      "slug": "general-workbench",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/general-workbench.png",
+      "brief": "通用工作台。项目导航总览/工作台/任务/资料/连接、类型切换通用/论文/开发及刷新/默认视图。左侧当前浏览任务目录，中央任务目标/验收/执行概览与确切产物“研究问题 v2”可读正文；右侧项目下一步“整理文献综述”、State选用产物和完成引用、资料及同任务Assist入口。当前浏览任务不等于项目下一步；阅读未自动成为AI选源。版面宽敞，少量可读正文而非泛用聊天dashboard。",
+      "file": "general-workbench.png",
+      "status": "GENERATED",
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-9d73b1ed-6a29-4142-8dbb-f4d6052c5581.png",
+        "inspection": "修订版改为正文阅读；移除虚构进度/预计完成，人工持权与无活动Run明确。",
+        "log": "root-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-13",
+      "name": "论文资料与草稿工作台",
+      "slug": "thesis-workbench",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/thesis-workbench.png",
+      "brief": "论文工作台。项目导航与通用/论文/开发类型切换，论文选中；刷新/默认视图配置。左侧资料与草稿版本目录，中间大面积阅读文献综述v3及标题/确切版本/正文；右侧同任务Assist候选与请求“帮我检查这一段的论证”，底部完整输入/显式资料选择。当前阅读文档不自动成为AI选源，资料选择0用简短标签显示。候选带未保存标识和保存为新版本动作，不能写已接受/已验收。阅读为主，聊天只辅助。",
+      "file": "thesis-workbench.png",
+      "status": "GENERATED",
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-4ff8da97-fbb9-4a45-a4ce-2ec38ae0b61c.png",
+        "inspection": "已目视；论文阅读面与未保存候选、显式资料选择区分；静态正文为示例。",
+        "log": "root-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-14",
+      "name": "全局知识库",
+      "slug": "knowledge",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/knowledge.png",
+      "brief": "当前真实入口为 /knowledge；保留资料、记忆、决定、规则四类页签，新建、对象列表、当前状态/版本/范围和选中对象内容。资料搜索按当前范围查询四类当前有效对象，支持中文短词与游标续页，不承诺语义搜索或推荐。全局页不应画项目专属网页导入。示例模式当前没有虚构资料库。",
+      "file": "knowledge.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/views/KnowledgeView.tsx:33",
+        "apps/workbench/src/views/KnowledgeView.tsx:585",
+        "apps/workbench/src/views/KnowledgeView.tsx:600"
+      ],
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-b260bf3e-7340-4322-9611-9adbf9feb9f9.png",
+        "inspection": "已视看：全局范围、资料/记忆/决定/规则、当前版本/状态/范围列表、正文与编辑新版本；无项目页签/网页导入/语义推荐。十项导航均存在，全部任务字距局部偏挤。示例静态数据，无运行验收。",
+        "log": "review-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-15",
+      "name": "资料详情与来源版本",
+      "slug": "knowledge-detail",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/knowledge-detail.png",
+      "brief": "这是 /knowledge 或项目资料页的 kind/item/version 深链阅读状态，并非新建独立路由。保留可读完整正文、Markdown 目录、当前/历史版本选择、保存时间、来源类型与范围、不可变版本历史、编辑为新版本。网页正文是保存快照，打开当前原件与阅读快照分开；PARTIAL、正文读失败和来源不可用须明确，不能以其他版本或摘要冒充全文。",
+      "file": "knowledge-detail.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/components/KnowledgeReader.tsx:80",
+        "apps/workbench/src/components/KnowledgeReader.tsx:95",
+        "apps/workbench/src/components/KnowledgeReader.tsx:114"
+      ],
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-b72cc4eb-c9b3-4b9b-ad27-29bdee94a7e1.png",
+        "inspection": "已视看：全局资料深链、v3当前PARTIAL、已保存快照与当前原件分开、目录首段与历史v2/v1、编辑新版本；无PDF分页。导航十个图标均存在，待处理文字漏绘、全部任务局部字距偏挤，已内置edit纠正漏掉资料入口与错误项目breadcrumb。静态设计，无运行验收。",
+        "log": "review-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-16",
+      "name": "项目资料、记忆、决定与规则",
+      "slug": "project-information",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/project-information.png",
+      "brief": "真实入口 /projects/:id/knowledge；保留项目内总览/工作台/任务/资料/连接导航与资料/记忆/决定/规则四类页签。资料有新版本、归档、网页导入、项目导读；记忆显示明确确认人与时间、修订历史且可停用；决定展示选择/依据/备选/代价并可记录替代决定ID；规则展示硬约束或偏好、范围与执行方式且可停用。AI推断不能画成已确认记忆；归档/权限拒绝和原命令待核对可见。",
+      "file": "project-information.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/views/KnowledgeView.tsx:633",
+        "apps/workbench/src/views/KnowledgeView.tsx:675",
+        "apps/workbench/src/views/KnowledgeView.tsx:678"
+      ],
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-9c9686d0-6a44-4c9f-89e9-87fe6eee3563.png",
+        "inspection": "已视看：十项导航、项目五导航与资料四类页签、网页导入/项目导读/新建、资料列表/快照首段/不可变版本/保存新版本/归档。PARTIAL明显；生成器虚构正常资料的待核对命令已去除。静态设计，无运行验收。",
+        "log": "review-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-17",
+      "name": "全局动态与追溯",
+      "slug": "activities",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/activities-v2.png",
+      "brief": "动态\n更多入口·动态\n/activity\n/activities（同组件）\n保留页签:\n筛选:可展开的 Project ID、Task ID、Run ID、起止时间；执行方：全部、人工、AI、系统（仅已加载项）\n内容:按日期分组的事件时间、执行方、事件类型、摘要、关联对象；所选事件依据侧栏：事件类型、发生时间、执行方、原 command_id、Activity ID、关联对象\n可用动作:应用筛选、刷新当前范围、继续加载；查看依据；打开有真实路由的关联对象\n边界:服务端每页最多 30 条；本页数量不是历史总数，执行方尚不支持服务端分页筛选。；只呈现已记录摘要与引用，不展示模型原始推理；示例模式没有真实 Activity 记录。",
+      "file": "activities.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/views/ActivityView.tsx"
+      ],
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0fab5-c73b-7713-92da-71aa98a3df54\\exec-11e42e5f-d3b7-43a3-b450-838c63aa435b.png",
+        "inspection": "静态自查：十入口与近期列完整；无项目页签；日期分组四条事件、执行方过滤、ID与时间范围、依据侧栏、原command_id、Activity ID、关联任务可见。批准保存与委托接受未画为动作执行或任务完成，验证绑定v3；本页数量与示例边界可见。ID筛选控件画为下拉外观，实施时依据生产输入方式校准。未运行验收。",
+        "log": "global-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-18",
+      "name": "执行详情与暂停请求",
+      "slug": "run-control",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/run-control-v2.png",
+      "brief": "真实入口 /runs/:id；执行中保留Run状态、Task状态/执行者与各自修订、步骤时间线/最近尝试、当前动作、事件连接状态、未决Review、可读时生成中草稿、动作历史/Trace、模型连接、资源与租约说明。合法控制为请求暂停Run/停止Run/交接给人工/取消任务、刷新；请求受理202/PENDING须显示仍等待安全点，不把Run画成已暂停。历史Run或COMPLETED终态只读，控制禁用；Run完成与Task业务完成分别核对。",
+      "file": "run-control.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/views/RunView.tsx:237",
+        "apps/workbench/src/views/RunView.tsx:243",
+        "apps/workbench/src/components/RunControlPanel.tsx:145",
+        "apps/workbench/src/components/RunControlPanel.tsx:156"
+      ],
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-76542096-26dc-4cd3-9e09-368e1334317f.png",
+        "inspection": "已视看并修正：Task进行中/ownerAI/Run RUNNING分开；PENDING暂停尚未生效，全部控制变更按钮禁用，仅刷新可用。当前FILE_WRITE无可读DRAFT；原operation_id/动作历史/Trace/任务产物保留。资源查询待接入，不宣称释放。局部修订数值及全部任务字距待实施校准。静态设计，无运行验收。",
+        "log": "review-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-19",
+      "name": "已暂停与安全接手",
+      "slug": "run-paused",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/run-paused.png",
+      "brief": "使用同一 /runs/:id 的PAUSED状态。保留已暂停摘要、最后完成步骤/current_step_id恢复点、任务执行者、等待原因、步骤证据与原Review、恢复Run/停止/请求交接/取消任务和刷新。暂停不转移执行权，也不证明进程已停或资源释放；接手须控制结果为APPLIED后才提示可到任务产物编辑。Run级已保存产物清单和资源/租约独立查询接口尚未接入，产物应链接任务详情核对，不画虚构资源仪表或已释放绿勾。",
+      "file": "run-paused.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/views/RunView.tsx:241",
+        "apps/workbench/src/views/RunView.tsx:267",
+        "apps/workbench/src/components/RunControlPanel.tsx:152",
+        "apps/workbench/src/components/RunControlPanel.tsx:158"
+      ],
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-f174de8c-66ac-4589-9ffe-e7ba2273ff90.png",
+        "inspection": "已视看并修正真实步骤名称：构建上下文/生成草稿/保存候选产物/验证；PAUSED与AI持权分开，最后完成点/当前恢复点、未决Review、恢复/停止/请求交接/取消/刷新保留。未解决Review恢复后先等待；无资源释放宣称或虚构Run产物清单。十项导航完整。静态设计，无运行验收。",
+        "log": "review-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-20",
+      "name": "执行结果未确认与恢复核对",
+      "slug": "run-unknown",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/run-unknown-v2.png",
+      "brief": "同一Run页面常驻外部结果待核对警示，保留原operation_id及已知/未知边界、打开动作历史（只读）/查看Run Trace证据。当前FILE_WRITE链可刷新逐文件账本与当前观察、查看冻结计划文本差异；PARTIAL或无回执情况下，只有服务端准入后才可明确确认保留当前文件及候选残留并结束旧Run，不能据此认定全部写入成功。旧图的通用核对Git结果按钮不属于当前此页入口；不能画换ID重试、强制成功、自动清理残留或盲目重新执行。",
+      "file": "run-unknown.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/views/RunView.tsx:238",
+        "apps/workbench/src/views/RunView.tsx:240",
+        "apps/workbench/src/components/FileWriteDispositionPanel.tsx:177",
+        "apps/workbench/src/components/FileWriteDispositionPanel.tsx:200"
+      ],
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-c8a43736-5547-4a9d-a4e4-836b83073117.png",
+        "inspection": "已视看并修正：Run RUNNING与原动作UNKNOWN分开；原operation/invocation、账本与当前观察、只读动作历史/Trace/逐文件刷新/冻结计划差异。差异为冻结计划前后文本，不冒充当前磁盘对比；处置缺可信停机证明/运行中步骤，未画准入前按钮/盲重试/强制成功。十项导航完整；底部处置说明有少量文案偏差，主警示已明确不代表全部写入成功。静态设计，无运行验收。",
+        "log": "review-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-21",
+      "name": "待审中心",
+      "slug": "reviews",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/reviews.png",
+      "brief": "真实入口 /reviews?id=；保留全部及实际存在类型的计数筛选、请求事项/类型/项目/时间/状态列表、所选请求原因与证据/影响。当前有人工验收、修正预算、检查器重试、动作批准、项目状态提案五种类型。人工验收提供接受这项判断/请求修改（修改需说明）；修正预算有1到6次数值与设置修正预算；检查器重试提供重新运行检查。其余动作仅按服务端allowedDecisions显示。读时绑定确切产物正文、版本来源；过期/失权/归档/结果待核对不能仍显示可提交。",
+      "file": "reviews.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/lib/labels.ts:9",
+        "apps/workbench/src/views/ReviewsView.tsx:104",
+        "apps/workbench/src/views/ReviewsView.tsx:125",
+        "apps/workbench/src/components/ReviewDecisionPanel.tsx:222"
+      ],
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-6c530eab-794f-4501-93bc-8c5964b6dc3e.png",
+        "inspection": "修订版：工作空间全局Review，没有项目页签；确切v3/v2及待人工判断，去除伪质检通过。",
+        "log": "root-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-22",
+      "name": "特定 Git 动作批准",
+      "slug": "action-approval",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/action-approval.png",
+      "brief": "真实 ACTION_APPROVAL 复用 /reviews 与ReviewDecisionPanel；完整展示服务端给出的实际动作类型、规范化目标、证据/风险、可能影响及绑定身份，提供批准这项动作/拒绝这项请求。可用FILE_WRITE受管变化集审批代表当前接入链；若保留旧图Git commit样例，必须限定为已存在Review的动作事实，不能据此宣称开发工作台已有Git写入口或任意Shell。批准仅针对确切动作/内容版本，不自动授权push、覆盖撤销权限或代表执行成功。",
+      "file": "action-approval.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/components/ReviewDecisionPanel.tsx:182",
+        "apps/workbench/src/components/ReviewDecisionPanel.tsx:230",
+        "apps/workbench/src/components/ReviewDecisionPanel.tsx:237",
+        "apps/workbench/src/views/ProjectWorkbenchView.tsx:397"
+      ],
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-c3b7fec6-97d9-45c6-b1b8-848b65719d21.png",
+        "inspection": "已视看：ACTION_APPROVAL待处理、Task进行中/ownerAI/Run等待人工判断；绑定原operation、冻结变化集、目标/内容指纹、项目TaskRun与两文件变更正文、批准/拒绝。去掉无依据权限有效绿章；批准只针对确切动作，不执行成功/授予额外权限。十导航图标存在，项目/待处理标签仍漏绘，记录待实施校准。静态设计，无运行验收。",
+        "log": "review-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-23",
+      "name": "连接与执行权限",
+      "slug": "connections",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/connections.png",
+      "brief": "连接与权限（全局入口）\n辅助导航·连接与同步\n/connections\n/settings/connections（同组件）\n保留页签:\n筛选:进行中项目列表；按明确已知的项目 ID 打开\n内容:项目名称、修订、加载状态、后续页；手动项目 ID 入口\n可用动作:刷新项目、继续加载项目、打开项目连接设置、返回项目入口\n边界:导航名为连接与同步，但当前全局页面实际只提供项目级连接与权限入口，没有独立同步操作或同步进度。；示例模式没有真实连接配置；创建连接不会自动授权。",
+      "file": "connections.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/views/ConnectionsView.tsx"
+      ],
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0fab5-c73b-7713-92da-71aa98a3df54\\exec-a05d0d5e-3fc9-4425-9f29-73ceaf4d29f7.png",
+        "inspection": "静态自查：全局连接与同步只呈现进行中项目列表、整数修订、刷新/续页、已知项目ID、项目连接设置和返回项目入口；无同步按钮、进度、全局权限开关或伪造连接成功。十入口与近期列完整。",
+        "log": "global-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-24",
+      "name": "设置与工作偏好",
+      "slug": "settings",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/settings.png",
+      "brief": "设置\n辅助导航·设置\n/settings\n保留页签:基本设置/AI 设置/执行策略/工作台\n筛选:\n内容:基本设置：界面时区、仅浅色外观、通用/论文/开发默认工作台；AI 设置：本机服务连接、模型配置、模型验证、Worker 可执行四个独立状态；当前端口、模型名、端点、最近验证；执行策略：项目级连接权限入口；语言与通知偏好暂不可用；工作台：内置 Pack 当前组合、成员协议与摘要、历史版本只读清单\n可用动作:保存本设备显示偏好；重读模型状态、用固定短文本验证连接；查看连接权限或项目入口；展开 Pack 清单与历史、失败时重读\n边界:显示偏好保存在本设备，不修改项目或服务配置；浅色外观选择禁用，不画主题切换。；模型配置来自服务端环境变量；本页不读取、显示或修改密钥。验证连接会发生固定短文本调用，但通过不等于任务执行成功。；Worker 可执行性未探测；API 环境诊断不能画成 Worker 已执行。语言和通知没有写接口，不画可用开关。",
+      "file": "settings.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/views/SettingsView.tsx",
+        "apps/workbench/src/components/PackCatalogPanel.tsx"
+      ],
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0fab5-c73b-7713-92da-71aa98a3df54\\exec-7ceaf2e8-3cb7-492f-bfdf-bd33474fc048.png",
+        "inspection": "静态自查：四页签保留，AI设置主屏呈现四个独立诊断状态；Worker明确未探测且无成功色；固定短文本验证与任务执行分离；配置只读无密钥；浅色锁定、语言/通知不可用、Pack只读可见。其他分组以摘要展示，基本设置的保存按钮需切页后在实施中补足，不把摘要当同时生效的页。",
+        "log": "global-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-25",
+      "name": "全局搜索与快捷操作",
+      "slug": "search",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/search.png",
+      "brief": "命令面板与资料搜索\n桌面标题栏搜索资料、顶栏搜索按钮、Ctrl+K / ⌘K\nAppDialog 弹窗，没有独立 /search 页面路由\n保留页签:\n筛选:关键词（最多 200 字符）；工作空间或仅当前项目作用域；固定搜索 Knowledge、Memory、Decision、Rule 四类\n内容:结果标题、类型、版本、状态、摘要、来源引用和作用域；前往：新建项目/任务、收件箱、当前项目、当前任务委托/Review/Run、动态；已知项目 ID 核对入口\n可用动作:↑↓ 选择、Enter 或点击打开确切资料；继续加载每页最多 20 条结果；Esc 关闭；导航到现有创建表单和对象页；核对并打开明确 Project ID\n边界:字面关键词匹配，不是语义检索；没有项目/任务全局搜索结果，示例模式不伪造真实结果。；导航不提交业务命令；委托需真实 READY、人工执行权、项目、无当前 Run 和 START 提示，进入任务页再确认。",
+      "file": "search.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/components/CommandPalette.tsx",
+        "apps/workbench/src/components/AppShell.tsx",
+        "apps/workbench/src/components/DesktopTitleBar.tsx"
+      ],
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0fab5-c73b-7713-92da-71aa98a3df54\\exec-4c5d0482-379d-429e-8415-91f5f6e6e0eb.png",
+        "inspection": "静态自查：命令面板AppDialog形式；四类资料、作用域、字面匹配、确切版本/来源/状态、设计示例、续页20条、键盘说明、现有页导航、已知项目ID可见。未将任务/项目作为搜索结果；当前委托禁用且导航不提交命令。",
+        "log": "global-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-26",
+      "name": "版本冲突与草稿保留",
+      "slug": "version-conflict",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/version-conflict.png",
+      "brief": "这是任务产物编辑的409/草稿基线变化状态，不是独立路由。常驻冲突警示与草稿保留；并列我的草稿（原基线、未保存）和当前确切已保存版本；当前正文读取失败单独报错，不能用旧正文代替。保存暂停，提供确认以当前版本为基线（保留草稿）与查看版本历史与差异，明确确认不会自动合并正文。保留编辑输入和原保存命令待核对入口；不画强制覆盖或自动合并。",
+      "file": "version-conflict.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/components/ArtifactPanel.tsx:389",
+        "apps/workbench/src/components/ArtifactPanel.tsx:391",
+        "apps/workbench/src/components/ArtifactPanel.tsx:434",
+        "apps/workbench/src/components/ArtifactPanel.tsx:443"
+      ],
+      "width": 1720,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-9070c8ac-9ffa-4bd6-bc87-5b97ff0d54b3.png",
+        "inspection": "修订版：移除未接入富文本工具栏，保留Markdown编辑/预览与禁用保存；409草稿和确切v4基线不自动合并。",
+        "log": "root-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-27",
+      "name": "完成凭据与产物来源",
+      "slug": "task-completed",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/task-completed.png",
+      "brief": "真实完成凭据入口 /completion-records/:id；保留完成依据（人工接受/自动验证）、本轮接受的确切产物版本、当时验收版本/条件、提交时间、当前完成周期或历史凭据、人工接受与Verification证据、来源历史、重读和关联任务入口。当前Task DONE与Run COMPLETED不能混为一个结论；任务重开建立新验收周期，旧凭据不改写。无真实凭据时不能用fixture制造完成记录；重开按钮属于任务产物完成区，需原因且不自动开始执行。",
+      "file": "task-completed.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/views/CompletionRecordView.tsx:45",
+        "apps/workbench/src/views/CompletionRecordView.tsx:52",
+        "apps/workbench/src/views/CompletionRecordView.tsx:61",
+        "apps/workbench/src/components/TaskCompletionPanel.tsx:173"
+      ],
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-18d7842d-ca26-4c0c-8dbc-0187ccccbb8a.png",
+        "inspection": "已目视。完成凭据绑定确切版本和本轮条件，人工接受与Run终态区分，示例不算验收。",
+        "log": "root-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-28",
+      "name": "AI 委托前确认",
+      "slug": "delegate",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/delegate-v2.png",
+      "brief": "委托 AI 执行\n任务详情·执行页签 /tasks/:id?tab=runs\n协作工作台中同一 TaskDelegatePanel 的紧凑执行设置\n保留页签:\n筛选:冻结本次资料来源；可选读取：不附加、受管文件、网页；按能力选择有效连接；可选 Mock 文件动作：连接、受管目录、目标完整路径、固定内容\n内容:当前任务状态、执行权与明确禁用原因；受管文件：连接、独立受管目录、相对文件路径；网页：连接与 URL；原命令 ID、提交或待核对错误\n可用动作:选择资料、配置可选读取或 Mock 动作、重读配置；明确点击委托 AI 执行；结果不明时仅核对原命令回执；返回的 Run ID 用于进入真实运行状态核对\n边界:仅 READY、人工执行权、所属项目、START 准入提示且项目可写时可委托；存在当前 Run 时不提供新委托配置。；一次可选读取只读一个目标；连接与受管目录分别选择，权限和目标匹配由运行时再核对。；聊天讨论不授权执行；202 只表示创建 Run 并授予执行权，不代表产物或动作成功。；Mock 写入需已登记连接、目录和权限；批准回执也不等于文件已写入。",
+      "file": "delegate.png",
+      "status": "GENERATED",
+      "sources": [
+        "apps/workbench/src/components/TaskDelegatePanel.tsx",
+        "apps/workbench/src/views/TaskDetailView.tsx",
+        "apps/workbench/src/views/CollaborationView.tsx"
+      ],
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0fab5-c73b-7713-92da-71aa98a3df54\\exec-1e8f5706-fc58-42b6-ba92-92ade1e444da.png",
+        "inspection": "静态自查：当前任务READY/人工执行权/无当前Run/START准入分离；概览、产物、执行记录保留；资料冻结精确版本，读取连接/受管目录/相对路径分离；Mock可选且未开启；显式委托、原回执核对原则、202非成功、审批非写入均可见。近期列其他任务的模式/状态示例应在实施时对照事实校准；当前任务语义正确。",
+        "log": "global-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-29",
+      "name": "新建任务与执行准备",
+      "slug": "task-create",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/pages/task-create-v2.png",
+      "brief": "新建任务，全局或项目内明确当前范围。名称、所属项目（可选）、预期结果、可编辑验收条件、开始方式、前置依赖；保存任务/暂存待整理分别明确。条件数量不是固定三项；保存不会自动启动Run，live创建不直接委托AI。当前从收件箱进入时默认未归属项目且人工事项。右栏简短完成标准示例，不能替代本任务要求。",
+      "file": "task-create.png",
+      "status": "GENERATED",
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0fab5-c73b-7713-92da-71aa98a3df54\\exec-c5b006a0-7ab7-486c-926d-3696e6322bbd.png",
+        "inspection": "静态自查：全局范围与可选项目明确；名称、预期结果、可编辑两条验收条件、人工/AI辅助/禁用委托、前置依赖、保存/暂存/返回齐全；保存不自动启动Run；右栏示例不限制验收数量或替代要求；收件箱默认人工未归属说明可见。",
+        "log": "global-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-30",
+      "name": "项目蓝图预览",
+      "slug": "project-blueprint",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/extensions/project-blueprint.png",
+      "brief": "项目蓝图预览。保留项目总览/蓝图预览/继续项目/Assist内页签和打开项目工作台。候选基线State v8、候选未应用标签。中央当前→建议Diff包括Goal关联、阶段、下一步、默认工作台，建议新任务列表；这次会改变什么与后续配置建议分开。人工草稿/资料/内嵌建议入口，最近候选和实际应用结果入口。底部主要动作应用候选、暂不采用，基线一致才可点；短说明应用不自动开始任务。不要使用永久禁用的fixture应用按钮，不编造确认人。",
+      "file": "project-blueprint.png",
+      "status": "GENERATED",
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-42d4ef81-e9a2-4a9d-9d39-1f3fe7d69e51.png",
+        "inspection": "独立复核后修订：仅关联现有Goal，候选不设置计划日期，新增任务人工待整理；默认类型通用→论文。",
+        "log": "root-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-31",
+      "name": "完善任务定义",
+      "slug": "task-definition",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/extensions/task-definition.png",
+      "brief": "完善任务定义。内页签任务详情/完善定义/验收方案/Assist可达，完善定义激活。当前状态待整理、Task修订v4/验收v2，当前目标与已接受事实；内嵌建议/资料/消息支持。当前定义与服务端合并提案并排，包含预期结果、验收条件、新增与保留内容，提案待确认/基线v4。底部确认采用提案/暂不采用，来源及Run证据入口。接受定义不会启动任务或改变执行权。避免只画静态建议卡而没有确认区域。",
+      "file": "task-definition.png",
+      "status": "GENERATED",
+      "width": 1720,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-81a327fd-55dd-443e-8a4a-e2f81dff6329.png",
+        "inspection": "已目视。当前事实与待确认提案区分，版本/条件/确认区保留；采纳不授执行权。",
+        "log": "root-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-32",
+      "name": "验收蓝图与检查计划",
+      "slug": "verification-plan",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/extensions/verification-plan.png",
+      "brief": "任务验收方案。内页签完善定义/验收方案/Assist，验收方案激活。当前读时派生检查方案标签“只读预览 · 不是冻结运行计划”，任务v4/验收v2。检查表包含验收条件、检查方式、必需性、未运行/待人工、缺能力原因。清楚显示一项尚无可用检查器。内嵌方案建议、保留条件与新增检查、服务端合并确认区，来源和确切Run/Verification入口。检查本身未运行不能PASS；不是旧版可以直接接受冻结计划的Skill。",
+      "file": "verification-plan.png",
+      "status": "GENERATED",
+      "width": 1720,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-52ca77d6-2038-49d6-aa04-aeeeed8e068b.png",
+        "inspection": "已目视。只读派生检查与条件合并提案区分，未运行/待人工/缺能力不画通过。",
+        "log": "root-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-33",
+      "name": "继续这个项目",
+      "slug": "project-resume",
+      "oldReference": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-09-19/extensions/project-resume.png",
+      "brief": "继续项目。项目总览/蓝图预览/继续项目/Assist内页签选继续项目、打开工作台入口。主区当前State修订v8、阶段、项目下一步、产物/Decision来源、缺口和待判断；接续点列表/选择与保存接续点。已选明确基线State v7时显示对应两条差异，标明比较基线；无基线不能画差异结论。完成依据入口清楚。继续项目/打开下一步只导航或保存接续点，不自动恢复Run，不自动宣布完成。",
+      "file": "project-resume.png",
+      "status": "GENERATED",
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-7ae8363a-f39f-4cea-b912-84f5bcbcad8e.png",
+        "inspection": "已目视。明确接续比较基线与当前State；保存/导航不自动恢复执行。",
+        "log": "root-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-34",
+      "name": "人工待处理汇总",
+      "slug": "attention-queue",
+      "entry": "tasks?tab=attention",
+      "brief": "需要你查看的事项\n任务页签·人工待处理\n/tasks?tab=attention\n页签:全部任务/未归属任务收件箱/人工待处理\n内容:必须介入、待判断 Review、当前 Run 待核对、人工任务与受阻 Task 四组；当前读取时间、Task/Run/Review 身份与修订、等待原因、未决 Operation 或控制请求；未完整读取、失败与后续页提示\n动作:刷新事实；Task 每次最多读取 10 页后继续读取后续页；打开原介入、Review、Run 或 Task 处理入口\n边界:只汇总开放 Review、已读取工作空间任务及其当前 Run；不覆盖已脱离 Task 指针的历史 Run。；分组保留读取顺序，不代表紧急程度；不在队列批准、控制、重试或改变任务，范围不完整时不能宣称没有待办。；示例模式仅显示无法读取真实汇总的说明。",
+      "sources": [
+        "apps/workbench/src/views/TasksView.tsx",
+        "apps/workbench/src/components/AttentionQueue.tsx"
+      ],
+      "file": "attention-queue.png",
+      "status": "GENERATED",
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0fab5-c73b-7713-92da-71aa98a3df54\\exec-de8c33aa-086c-434d-ad01-5311ae995fc3.png",
+        "inspection": "静态自查：四分组、原读取顺序语义、部分读取警示、时间示例、续页10页、Task/Run/Review及版本、未决Operation和PENDING控制请求齐全；只有原处理入口，无批准/控制/重试；静态设计示例明确未查真实事实；历史Run范围限制可见。父代理已确认采用真实页型设计示例而非fixture空态。",
+        "log": "global-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-35",
+      "name": "项目连接与权限",
+      "slug": "project-connections",
+      "entry": "projects/:id/connections",
+      "brief": "项目连接与权限\n项目内·连接\n/projects/:id/connections\n页签:总览/工作台/任务/资料/连接\n内容:连接能力、状态、版本；受管目录状态、修订、epoch 与 Windows 文件写入身份绑定提示；权限策略有效版本、AUTO/ASK/DENY、目标范围、载荷上限、已读取历史版本；可展开的项目工作台默认视图与页面顺序\n动作:刷新配置、只读健康核对、创建或停用连接、登记或停用受管目录；创建或修订策略不可变版本、撤销策略、查看历史版本；选择通用/论文/开发默认工作台并保存；结果不明时查询原回执\n边界:连接本身不是授权；没有匹配有效策略时默认 DENY，仍需连接和目标边界匹配。；只读健康核对只重读服务端配置，主机/目录真实可达性探针待接入；不能画成已连通测试。；创建表单能力为 WEB_FETCH、FILE_READ、FAKE_WRITE、FAKE_PUBLIC_READ；不添加任意 Shell 或真实写入能力。；连接、资源、策略列表最多前 100 条无下一页；归档或事实不可读时阻止新配置写入。",
+      "sources": [
+        "apps/workbench/src/views/ConnectionsView.tsx",
+        "apps/workbench/src/components/ProjectNav.tsx",
+        "apps/workbench/src/components/ViewConfigurationPanel.tsx"
+      ],
+      "file": "project-connections.png",
+      "status": "GENERATED",
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0fab5-c73b-7713-92da-71aa98a3df54\\exec-db88e9a9-0f23-4cf5-9606-4298e9105653.png",
+        "inspection": "静态自查：项目导航保留；连接能力、独立受管资源与权限策略分区；状态/版本、资源revision/epoch/Windows身份提示、ASK目标与载荷、历史只读、默认DENY、只读重读未探测可达性可见；能力限四种无Shell；列表100条无下一页。补核ViewConfigurationPanel后编辑纠正页面顺序：服务端模板只读、不提供逐页编辑；只保存默认类型。",
+        "log": "global-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-36",
+      "name": "产物版本来源",
+      "slug": "artifact-lineage",
+      "entry": "artifact-versions/:id/lineage",
+      "brief": "/artifact-versions/:id/lineage，来源追溯。确切版本/可读性/源种类/SHA按需详情；主要区直接父来源关系列表，不能画完整因果图。正文读取+确切历史版本比较；章节/段落原文锁定（最新版本可新增，人工仍可修订；刷新/解除/选择粒度与原文/锁定）。检查已登记直接引用只主动读直接关系；手动检查修改影响选旧来源、勾选允许正文分析目标、检查影响，明确引用与AI推测/未分析范围分开。已接入目标修改候选、审查应用为新版本、候选组、组合检查单；组合单不整体PASS。主显来源列表+v2→v3正文比较，右侧锁定和手动影响待检查表单，其余按需展开；不得自动检查或宣称无间接影响。",
+      "sources": [
+        "apps/workbench/src/views/ArtifactLineageView.tsx",
+        "apps/workbench/src/components/ArtifactVersionCompare.tsx",
+        "apps/workbench/src/components/ArtifactTextLocksPanel.tsx",
+        "apps/workbench/src/components/ArtifactImpactCheckPanel.tsx"
+      ],
+      "file": "artifact-lineage.png",
+      "status": "GENERATED",
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-048d8743-aff1-4b92-b3ed-16e4d75b4e25.png",
+        "inspection": "修订版：同一产物旧版→当前版，显式勾选确切直接引用目标的正文分析授权，移除虚构内容类别选项。",
+        "log": "root-generation-results.json"
+      }
+    },
+    {
+      "id": "UI-37",
+      "name": "项目 Assist",
+      "slug": "project-assist",
+      "entry": "projects/:id?skill=assist",
+      "brief": "/projects/:id?skill=assist，项目内总览/蓝图预览/继续项目/Assist保留；紧凑项目标题与目标修订，当前会话选择/新建/刷新。显式资料仅当前获准的ACTIVE Knowledge/Memory/Decision版本（最多10份），可查找/选择/移除，发送冻结版本但不授额外权限。普通Assist意图为讨论/提出任务定义（项目页无Markdown候选），第一方Skill仅匹配PROJECT的project-resume，输出为只读项目速览与来源/下一步建议。消息显示用户/Relay、生成/取消状态；可发消息、刷新、取消在途回复；任务定义提案显式查看/接受，模型输出不自动改Project State或启动Run。结果不明先查原回执。",
+      "sources": [
+        "apps/workbench/src/views/AssistView.tsx"
+      ],
+      "file": "project-assist.png",
+      "status": "GENERATED",
+      "width": 1721,
+      "height": 914,
+      "generation": {
+        "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0fab5-c73b-7713-92da-71aa98a3df54\\exec-693aa485-7fdf-4079-b81c-cd43bd42e85c.png",
+        "inspection": "静态自查：项目Skill四页签、打开工作台/返回项目、会话选择/新建/刷新、宽消息与独立输入器齐全；资料仅Knowledge/Memory/Decision，ACTIVE确切v3、最多10与冻结权限提示；普通Assist/project-resume只读说明、讨论/提出任务定义意图，无Markdown候选；任务定义提案PENDING与基线、验收、显式接受可见，不自动改项目状态或启动Run。发送选项旁纸夹图标仅装饰，应在实施时替换为符合发送选项的标准图标，不能实现额外文件上传。",
+        "log": "global-generation-results.json"
+      }
+    }
+  ],
+  "navigationReference": "C:/Users/ASUS/AppData/Local/Temp/codex-clipboard-2d784360-2f76-418e-b850-d09e055c2fc0.png",
+  "grounding": {
+    "source": "apps/workbench/src current React components and API-backed view branches",
+    "checkedOn": "2026-10-02",
+    "scope": "Design proposal only; current functionality preserved; no runtime acceptance",
+    "navigation": [
+      "工作台",
+      "项目",
+      "待处理",
+      "资料",
+      "今日",
+      "全部任务",
+      "动态",
+      "收件箱",
+      "设置",
+      "连接与同步"
+    ]
+  },
+  "completedAt": "2026-10-02T09:36:25.669Z",
+  "runtimeValidation": "NOT_RUN",
+  "logs": [
+    "root-generation-results.json",
+    "review-generation-results.json",
+    "global-generation-results.json"
+  ],
+  "knownLimitations": [
+    "部分生成文字或导航标签、字号及控件布局需在后续实施时校准；详见各生成日志",
+    "截图不验证 hover、键盘、滚动、IME、DPI、真实写入、执行及恢复"
+  ]
+}

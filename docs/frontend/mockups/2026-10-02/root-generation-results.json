@@ -1,0 +1,137 @@
+[
+  {
+    "slug": "project-overview",
+    "file": "project-overview.png",
+    "status": "GENERATED",
+    "source": "C:/Users/ASUS/.codex/generated_images/01a0faa7-688f-7260-8681-1d327cc55e09/exec-8861994b-e912-4a76-8d44-3707d0152e77.png",
+    "inspection": "全十个导航可见，项目两层页签及State/目标/产物/Decision保留；静态方案，文案以实现为准。"
+  },
+  {
+    "slug": "development-workbench",
+    "file": "development-workbench.png",
+    "status": "GENERATED",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-6d64bc64-1276-4efa-81c1-d14334ef80cd.png",
+    "inspection": "修订版保留十个导航、工作台类型切换及未接入能力；没有虚构成功测试或新Run。图中文字与目录组织为视觉建议，最终实施需校准。",
+    "revisionPrompt": "Edit the first attached development-workbench mockup to correct exact missing current functionality while preserving its quiet warm white/green visual quality. Other references: second is selected visual direction, third shows all navigation. Output one coherent Chinese desktop UI screen. Restore the outer global project-grouped 近期任务 column like second reference; workbench-specific 任务目录/产物版本 belong inside MAIN content, not replacing recent global rail. Keep all10global destinations including expanded今日/全部任务/动态/收件箱. At top of MAIN beneath a truly compact project header keep project tabs 总览/工作台/任务/资料/连接, then an obvious workbench TYPE switch 通用 / 论文 / 开发 (开发 selected), right controls 刷新 and 默认视图. These functional controls MUST be readable. Main shows left version directory, large readable recovery design document and right narrow Run/待审/运行证据 summary plus同任务Assist入口. Current Task进行中、当前执行者我、当前无活动Run. REMOVE the invented 启动新运行 button, 分享 and unrelated 工具连接类别 rows代码仓库/数据源/计算资源. Only connection-capabilities/permission link 连接与权限→ is warranted here. Keep exact disabled ability rows Git diff 尚未接入、受控测试 尚未接入、Coding CLI 尚未接入, never successful diff/terminal. A small explicit source hint 阅读未自动成为AI选源. Title恢复流程设计 v2, selected versionv2, document readable. Do not add arbitrary new actions or tabs. This is a STATIC design 示例, not executed features. Complete frame no clipping, no huge hero, no card nest."
+  },
+  {
+    "slug": "projects",
+    "file": "projects.png",
+    "status": "GENERATED",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-4c8100bf-aff0-43e8-9745-d3c4970911eb.png",
+    "inspection": "已查看生成图，作为功能布局提案，未做运行验收。"
+  },
+  {
+    "slug": "create-project",
+    "file": "create-project.png",
+    "status": "GENERATED",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-7c545b6d-4af0-4762-b325-ea680bab6ea4.png",
+    "inspection": "已查看生成图；静态表单保留创建步骤与目标意图边界。"
+  },
+  {
+    "slug": "task-detail",
+    "file": "task-detail.png",
+    "status": "GENERATED",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-5a4e0357-eab7-4640-8818-a01367e6f078.png",
+    "inspection": "已目视，任务状态/人工模式/执行者与当前无Run区分；页签及条件版本保留。"
+  },
+  {
+    "slug": "thesis-workbench",
+    "file": "thesis-workbench.png",
+    "status": "GENERATED",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-4ff8da97-fbb9-4a45-a4ce-2ec38ae0b61c.png",
+    "inspection": "已目视；论文阅读面与未保存候选、显式资料选择区分；静态正文为示例。"
+  },
+  {
+    "slug": "task-definition",
+    "file": "task-definition.png",
+    "status": "GENERATED",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-81a327fd-55dd-443e-8a4a-e2f81dff6329.png",
+    "inspection": "已目视。当前事实与待确认提案区分，版本/条件/确认区保留；采纳不授执行权。",
+    "references": [
+      "task-detail.png",
+      "conversation-workspace-selected.png"
+    ]
+  },
+  {
+    "slug": "verification-plan",
+    "file": "verification-plan.png",
+    "status": "GENERATED",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-52ca77d6-2038-49d6-aa04-aeeeed8e068b.png",
+    "inspection": "已目视。只读派生检查与条件合并提案区分，未运行/待人工/缺能力不画通过。",
+    "references": [
+      "task-definition.png",
+      "conversation-workspace-selected.png"
+    ]
+  },
+  {
+    "slug": "project-resume",
+    "file": "project-resume.png",
+    "status": "GENERATED",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-7ae8363a-f39f-4cea-b912-84f5bcbcad8e.png",
+    "inspection": "已目视。明确接续比较基线与当前State；保存/导航不自动恢复执行。",
+    "references": [
+      "project-overview.png",
+      "conversation-workspace-selected.png"
+    ]
+  },
+  {
+    "slug": "project-tasks",
+    "file": "project-tasks.png",
+    "status": "GENERATED",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-2175f9b6-b500-4593-af98-06ec3a9eadfd.png",
+    "revisionPrompt": "Correct the FIRST attached project-task-list static mockup. Keep its warm white/forest green design and layout, all ten navigation destinations and visible project tabs总览/工作台/任务/资料/连接. Functional corrections REQUIRED: global only项目 selected (remove工作台 and今日 selection marks). Selected 整理文献综述 is Task可开始, mode人工执行, owner我, 当前无活动Run. Update matching row and detail panel consistently. Four rows should be 数据分析方案 可开始 我 人工执行 无; 整理文献综述 可开始 我 人工执行 无; 回归验证 等待依赖 我 人工执行 数据分析方案; 撰写研究报告 待整理 我 人工执行 回归验证. No 未分配 executor because these are owned human mock tasks. Remove ALL requestpause or recovery buttons; no Run exists. Bottom selected-task action ONLY 开始人工任务, secondary 查看任务详情; selection itself doesn't start task. Change detail summary 当前没有活动Run，点击开始前仍核对任务条件. Preserve goal/criteria/readableartifactversion and 新建任务/刷新/search. Do not add other controls. One complete screen, no new route/capability, tiny示例 flag.",
+    "inspection": "修订版：READY人工持权无活动Run，移除暂停动作和多入口选中；选中/开始动作区分。"
+  },
+  {
+    "slug": "general-workbench",
+    "file": "general-workbench.png",
+    "status": "GENERATED",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-9d73b1ed-6a29-4142-8dbb-f4d6052c5581.png",
+    "revisionPrompt": "Edit FIRST image通用工作台, preserving its full ten-entry global rail, recent Task column, compact project navigation, 通用/论文/开发 switch(通用selected),刷新/默认视图. Functional corrections: the current task 数据分析方案 is人工执行, executionowner我, Task进行中, 当前无活动Run. REMOVE invented four-step progress timeline, Run进行中 row, Assistant executor and estimatedcompletion. These are not current facts. MAIN CONTENT must be a reading workspace, NOT a card dashboard: preserve narrow main taskdirectory onleft; give CENTER mostspace to a single large white paper titled研究问题 v2, 当前选用/确切版本v2, readable Chinese paragraphs sections研究背景/核心问题/研究范围 as in second reference reading emphasis. Above document one compact strip currenttask数据分析方案·人工执行·我·无活动Run. Move concise goal and three acceptancecriteria to RIGHT narrow contextalongside 项目下一步 整理文献综述 (distinct from browsing task), selected artifactversion source and完成引用入口. State currently selected artifactv2 is NOT latest/verifiedautomatically; sample尚无本轮完成凭据. Only justified actions查看完整内容/核对来源/进入同任务Assist. Do not add share, arbitraryRun start/pause or fake success. Keep sourcevisibility hint阅读不自动成为AI选源. No hugecardnest, no dataanalytics. Complete one coherent Chinese staticeffectimage, 示例.",
+    "inspection": "修订版改为正文阅读；移除虚构进度/预计完成，人工持权与无活动Run明确。"
+  },
+  {
+    "slug": "task-completed",
+    "file": "task-completed.png",
+    "status": "GENERATED",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-18d7842d-ca26-4c0c-8dbc-0187ccccbb8a.png",
+    "inspection": "已目视。完成凭据绑定确切版本和本轮条件，人工接受与Run终态区分，示例不算验收。",
+    "references": [
+      "task-detail.png",
+      "conversation-workspace-selected.png"
+    ]
+  },
+  {
+    "slug": "artifact-lineage",
+    "file": "artifact-lineage.png",
+    "status": "GENERATED",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-048d8743-aff1-4b92-b3ed-16e4d75b4e25.png",
+    "revisionPrompt": "Precisely correct the RIGHT 手动检查修改影响 form in the attached source-lineage mockup, keeping all other layout/design. Actual functionality compares an older version of THIS same artifact with its current version. Replace 选择旧来源 dropdown with label变化前来源版本, value文献综述 v2; add concise变化后来源：文献综述 v3. The checkboxes select exact DIRECTLY REFERENCING TARGET ARTIFACT VERSIONS for model body-analysis consent, NOT categories/parts of the document. REMOVE the fictional options全文内容/引用内容/章节结构/术语与定义. Replace with two checkboxrows: 允许模型分析 数据分析方案 v2 (selected), 允许模型分析 实验设计 v1 (unselected). Explanation 勾选的目标正文摘录才送入本次分析；未勾选项仍列为明确引用. Button检查影响 remains, state尚未检查, note未登记或间接下游不在本轮范围. No automatic analysis or falsely granular permissions. Keep直接父来源 list, v2→v3 comparison,原文锁定 panel and全十入口 complete. One complete Chinese static screen, 示例.",
+    "inspection": "修订版：同一产物旧版→当前版，显式勾选确切直接引用目标的正文分析授权，移除虚构内容类别选项。"
+  },
+  {
+    "slug": "reviews",
+    "file": "reviews.png",
+    "status": "GENERATED",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-6c530eab-794f-4501-93bc-8c5964b6dc3e.png",
+    "revisionPrompt": "Correct the attached Review mockup into the CURRENT GLOBAL /reviews page. Preserve its warm-white/forest-green visual and three-part request-list/readable-document/judgment layout. REQUIRED scopecorrection: main title等待你的判断·5, global destination待处理 selected; remove项目selected and all projectbreadcrumbs/projecttabs 总览/工作台/任务/资料/连接/审核与判断. The page serves workspace-wide requests, not a project-only route. Project names remain as each request's metadata, noprojectheader. Filters全部5/人工验收1/修正预算1/检查器重试1/动作批准1/项目状态提案1; five listrows consistent. Selected review文献综述v3·验收v2·待判断. Document CENTER title文献综述v3 and readable body titled文献综述 with研究背景/相关研究/方法比较, remove wrongly copied研究思路、方法与预期结果摘要. Right panel remove fabricated automaticqualitycheckerpass/暂无问题 claims; show证据与来源:绑定产物文献综述v3,验收版本v2,三条条件待人工判断,本次判断尚未保存,核对版本来源 link. Why需要你:本项需要人工判断该确切版本是否符合绑定条件. Effect text接受仅保存这项判断，不直接完成任务，也不转移执行权. Buttons接受这项判断/请求修改 remain; changes说明 required and empty means请求修改 disabled. Refresh/关联任务 onlyotheractions. Tiny静态设计示例. Completeframe, alltennavigation destinations.",
+    "inspection": "修订版：工作空间全局Review，没有项目页签；确切v3/v2及待人工判断，去除伪质检通过。"
+  },
+  {
+    "slug": "project-blueprint",
+    "file": "project-blueprint.png",
+    "status": "GENERATED",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-42d4ef81-e9a2-4a9d-9d39-1f3fe7d69e51.png",
+    "revisionPrompt": "Make TWO exact functional corrections to the attached Chinese project-blueprint mockup; preserve every other layout/visual element and all navigation. 1) Diff row currently项目目标(Goal) must represent ASSOCIATION WITH AN EXISTING Goal, not rewriting Goal content. Rename row目标关联. Current cell 已关联 Goal：人机科研协作. Suggested cell 关联现有 Goal：可靠中断恢复. Change说明仅改变目标关联，不改写Goal正文. Do NOT show editable Goal prose or newly-createdGoal capability. Also in 本次会改变什么 change 更新项目目标 to 调整已有Goal关联. 2) Suggested new tasks are fixed人工INBOX (user label待整理). Remove planned-start dates from the candidate table: rename计划开始 column初始状态; all three values待整理. Keep初始执行者我（人工）. Dates and executor planning can only appear in 后续配置建议, not applydiff. Footer statement新任务先保存为待整理，由我执行；应用蓝图不会自动开始任务 remains in quiet secondarytext not alarmingred ifpossible. Preservecandidate待确认·未应用, currentStatev8, 通用→论文workbenchtypes, 应用候选/暂不采用. No arbitrarynewcontrols. Complete one staticeffectscreen.",
+    "inspection": "独立复核后修订：仅关联现有Goal，候选不设置计划日期，新增任务人工待整理；默认类型通用→论文。"
+  },
+  {
+    "slug": "version-conflict",
+    "file": "version-conflict.png",
+    "status": "GENERATED",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faa7-688f-7260-8681-1d327cc55e09\\exec-9070c8ac-9ffa-4bd6-bc87-5b97ff0d54b3.png",
+    "revisionPrompt": "Precisely edit the attached version-conflict mockup. Keep the correct409warning, draftbasedv3/currentserverv4 sidebyside, humanowner我/noactiveRun, ten globaldestinations, tasktabs and confirm-baseline/history buttons. Remove fictional rich-text format toolbar (B/I/list/link/code/dropdown) entirely: current artifactediting is plainMarkdown, not a rich editor. Replace that strip with the existing modes 已保存正文 / 编辑 / 预览, 编辑 selected, plus a clearly disabled 保存新版本 action. Preserve all drafttext. Header metadata currently产物IDv3 is wrong: replace with 阅读版本v4. No othernewactions, no automaticmerge/forcedoverwrite/discard, no newpermission. Tinytext确认新基线仅更新基线，草稿正文不会自动合并 remains. One coherent Chinese static effectscreen, completeframe.",
+    "inspection": "修订版：移除未接入富文本工具栏，保留Markdown编辑/预览与禁用保存；409草稿和确切v4基线不自动合并。"
+  }
+]

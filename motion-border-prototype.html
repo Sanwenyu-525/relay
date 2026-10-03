@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="zh-CN" class="motion-on">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>输入区动效边框原型（独立演示，未接入项目）</title>
+<style>
+@property --a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@property --sweep-a { syntax: '<number>'; inherits: false; initial-value: 0; }
+
+:root {
+  --paper: #FAF9F6;
+  --surface: #FFFFFF;
+  --sidebar: #F4F3EF;
+  --ink: #18211F;
+  --secondary: #4F5B55;
+  --muted: #5D6861;
+  --line: #E3E4DF;
+  --control: #8E8A80;
+  --forest: #285747;
+  --sage: #E7EEE6;
+  --amber: #795519;
+  --amber-soft: #F5EBD7;
+  --red: #9B3535;
+  --red-soft: #F8EAE7;
+  --disabled: #E8E5DD;
+  --radius-control: 0.5rem;
+  --radius-badge: 0.1875rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --font-ui: "Relay Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  --font-code: "Cascadia Mono", Consolas, monospace;
+  --dur-fast: 120ms;
+  --dur-panel: 180ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --glow-band: 3px;
+  --glow-strength: 60%;
+  --glow-peak: rgb(255 255 255 / 0.92);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.page { max-width: 72rem; margin: 0 auto; padding: var(--space-8) var(--space-6) var(--space-16, 4rem); }
+
+h1 { font-size: 1.75rem; font-weight: 600; line-height: 1.25; margin: 0 0 var(--space-2); }
+h2 { font-size: 1.25rem; font-weight: 600; margin: var(--space-8) 0 var(--space-3); }
+h3 { font-size: 1rem; font-weight: 600; margin: 0 0 var(--space-1); }
+p { margin: 0 0 var(--space-2); }
+
+.note {
+  background: var(--sidebar);
+  border-radius: var(--radius-control);
+  padding: var(--space-3) var(--space-4);
+  color: var(--secondary);
+  font-size: 0.875rem;
+}
+.note code { font-family: var(--font-code); font-size: 0.8125rem; color: var(--ink); }
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border-radius: var(--radius-control);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.toolbar label { display: inline-flex; gap: var(--space-2); align-items: center; font-size: 0.875rem; }
+.toolbar .hint { color: var(--muted); font-size: 0.8125rem; }
+
+.chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-4); }
+.chip {
+  font: inherit;
+  font-size: 0.875rem;
+  padding: var(--space-1) var(--space-3);
+  min-height: 1.5rem;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--sidebar);
+  color: var(--secondary);
+  cursor: pointer;
+}
+.chip:hover { background: var(--sage); color: var(--forest); }
+.chip[aria-pressed="true"] { background: var(--forest); color: var(--surface); }
+.chip:focus-visible { outline: 2px solid var(--forest); outline-offset: 2px; }
+
+.stage {
+  background: var(--surface);
+  border-radius: var(--radius-control);
+  box-shadow: inset 0 0 0 1px var(--line);
+  padding: var(--space-6);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 1.75rem;
+  font-size: 0.875rem;
+  color: var(--secondary);
+}
+.status-line .dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--control);
+  flex: none;
+}
+.status-line .stage-name { color: var(--ink); font-weight: 500; }
+.status-line .count { color: var(--muted); }
+.status-line .spacer { flex: 1 1 auto; }
+
+.link-btn, .stop-btn {
+  font: inherit;
+  font-size: 0.875rem;
+  min-height: 1.5rem;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-badge);
+  border: 0;
+  background: transparent;
+  color: var(--forest);
+  cursor: pointer;
+}
+.link-btn:hover, .stop-btn:hover { background: var(--sage); }
+.link-btn:focus-visible, .stop-btn:focus-visible { outline: 2px solid var(--forest); outline-offset: 2px; }
+.stop-btn { border: 1px solid var(--line); color: var(--secondary); }
+.stop-btn:hover { background: var(--sidebar); }
+
+.frame {
+  --frame-line: var(--line);
+  --glow-a: 0;
+  position: relative;
+  margin: calc(var(--glow-band) * -1);
+  padding: var(--glow-band);
+  border-radius: var(--radius-control);
+  background-color: var(--frame-line);
+  background-image:
+    conic-gradient(from var(--a),
+      transparent 0deg,
+      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.3), transparent) 8deg,
+      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a)), transparent) 30deg,
+      color-mix(in srgb, var(--glow-peak) calc(var(--glow-a) * 80%), transparent) 48deg,
+      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.62), transparent) 90deg,
+      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.32), transparent) 140deg,
+      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.12), transparent) 190deg,
+      transparent 240deg);
+}
+.frame .body {
+  position: relative;
+  background: var(--surface);
+  border-radius: calc(var(--radius-control) - var(--glow-band));
+  padding: var(--space-3);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.composer textarea {
+  width: 100%;
+  min-height: 4.5rem;
+  resize: none;
+  border: 0;
+  padding: var(--space-1) 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+}
+.composer textarea:focus { outline: none; }
+.composer textarea::placeholder { color: var(--muted); }
+
+.composer-tools { display: flex; align-items: center; gap: var(--space-3); font-size: 0.8125rem; color: var(--muted); }
+.meter { display: inline-flex; align-items: center; gap: var(--space-1); }
+.meter-ring {
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: 9999px;
+  border: 0.125rem solid var(--line);
+  display: inline-grid;
+  place-items: center;
+  font-size: 0.5625rem;
+  color: var(--ink);
+}
+.send {
+  margin-left: auto;
+  font: inherit;
+  font-size: 0.875rem;
+  min-height: 2rem;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--forest);
+  color: var(--surface);
+  cursor: pointer;
+}
+.send:hover { background: #204B3C; }
+.send:focus-visible { outline: 2px solid var(--forest); outline-offset: 2px; }
+
+.state-running .frame {
+  --glow-a: 1;
+  animation: spin 4s linear infinite;
+}
+.state-queued .frame { --frame-line: var(--control); }
+.state-awaiting .frame { --frame-line: color-mix(in srgb, var(--amber) 30%, var(--line)); }
+.state-pausing .frame { --frame-line: var(--control); }
+.state-paused .frame { --frame-line: color-mix(in srgb, var(--control) 45%, var(--line)); }
+.state-stopped .frame { --frame-line: var(--line); }
+.state-done .frame { --frame-line: color-mix(in srgb, var(--forest) 35%, var(--line)); }
+.state-failed .frame { --frame-line: color-mix(in srgb, var(--red) 60%, var(--line)); }
+.state-failed .status-line .dot { background: var(--red); }
+.state-offline .frame { --frame-line: color-mix(in srgb, var(--amber) 45%, var(--line)); }
+.state-offline .status-line .dot { background: var(--amber); }
+.state-unknown .frame { --frame-line: var(--amber); }
+.state-unknown .status-line .dot { background: var(--amber); }
+
+.state-running .status-line .dot { background: var(--forest); }
+.state-awaiting .status-line .dot,
+.state-pausing .status-line .dot { background: var(--amber); }
+.state-done .status-line .dot { background: var(--forest); }
+
+@keyframes spin { to { --a: 360deg; } }
+@keyframes spin-rev { to { --a: -360deg; } }
+
+.grid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+.card {
+  background: var(--surface);
+  border-radius: var(--radius-control);
+  box-shadow: inset 0 0 0 1px var(--line);
+  padding: var(--space-4);
+  display: grid;
+  gap: var(--space-3);
+}
+.card .frame .body { padding: var(--space-2); min-height: 4rem; align-content: center; }
+.card .desc {
+  font-family: var(--font-code);
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--secondary);
+  margin: 0;
+}
+.tag {
+  display: inline-block;
+  font-family: var(--font-code);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-badge);
+  background: var(--sidebar);
+  color: var(--secondary);
+  vertical-align: 0.15em;
+}
+.tag.pick { background: var(--sage); color: var(--forest); }
+
+.frame.v-flow {
+  --glow-a: 1;
+  animation: spin 4s linear infinite;
+}
+.frame.v-twin {
+  --glow-a: 1;
+  animation: spin-rev 7s linear infinite;
+  background-image:
+    conic-gradient(from var(--a),
+      transparent 0deg,
+      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.35), transparent) 6deg,
+      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a)), transparent) 14deg,
+      color-mix(in srgb, var(--glow-peak) calc(var(--glow-a) * 70%), transparent) 24deg,
+      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.5), transparent) 60deg,
+      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.18), transparent) 105deg,
+      transparent 140deg,
+      transparent 180deg,
+      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.35), transparent) 186deg,
+      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a)), transparent) 194deg,
+      color-mix(in srgb, var(--glow-peak) calc(var(--glow-a) * 70%), transparent) 204deg,
+      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.5), transparent) 240deg,
+      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.18), transparent) 285deg,
+      transparent 320deg);
+}
+.frame.v-sweep {
+  animation: sweep 6s var(--ease) infinite;
+  background-image:
+    conic-gradient(from 0deg,
+      transparent 0deg,
+      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--sweep-a) * 0.4), transparent) 6deg,
+      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--sweep-a)), transparent) 18deg,
+      color-mix(in srgb, var(--glow-peak) calc(var(--sweep-a) * 75%), transparent) 30deg,
+      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--sweep-a) * 0.45), transparent) 66deg,
+      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--sweep-a) * 0.15), transparent) 105deg,
+      transparent 140deg);
+}
+@keyframes sweep {
+  0%, 3%    { --sweep-a: 0; }
+  9%        { --sweep-a: 1; }
+  38%       { --sweep-a: 1; }
+  52%, 100% { --sweep-a: 0; }
+}
+.frame.v-still { --frame-line: var(--control); }
+
+html:not(.motion-on) .frame {
+  animation: none !important;
+  --glow-a: 0 !important;
+  --sweep-a: 0 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .frame {
+    animation: none !important;
+    --glow-a: 0 !important;
+    --sweep-a: 0 !important;
+  }
+  .stop-btn, .link-btn, .chip, .send { transition: none; }
+}
+
+.todo { font-size: 0.875rem; color: var(--secondary); }
+.todo li { margin-bottom: var(--space-1); }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <h1>输入区动效边框原型</h1>
+  <p class="note">
+    独立原型，<strong>未接入项目</strong>，页面内数据均为演示数据，不代表任何真实运行状态。颜色、间距、圆角、边框宽度取自
+    <code>docs/frontend/design-tokens.json</code>（v0.3.0 Proposed）。光带宽度 <code>--glow-band: 3px</code>、强度
+    <code>--glow-strength: 60%</code>、周期 <code>4s / 6s / 7s</code> 均为试验值，未写回 token。规则依据
+    <code>docs/frontend/workbench-design.md §6.1</code> 与 <code>docs/frontend/design-system.md §7.1</code>。
+  </p>
+
+  <div class="toolbar">
+    <label><input type="checkbox" id="motionToggle" checked> 运行提示动效</label>
+    <span class="hint">关闭动效只改变展示，不发送暂停或取消命令，也不隐藏状态文字、查看进度与停止入口。系统开启「减少动态效果」时同样禁用。</span>
+  </div>
+
+  <h2>一、状态演示（方案 A：单段光带沿整圈流动）</h2>
+  <div class="chips" id="chips" role="group" aria-label="切换演示状态"></div>
+
+  <div class="stage" id="stage">
+    <div class="status-line" role="status" aria-live="polite">
+      <span class="dot" aria-hidden="true"></span>
+      <span class="stage-name" id="stageName"></span>
+      <span class="count" id="stageCount"></span>
+      <span class="spacer"></span>
+      <span id="stageActions"></span>
+    </div>
+
+    <div class="frame">
+      <div class="body composer">
+        <textarea id="draft" placeholder="补充说明或下一步指令…"></textarea>
+        <div class="composer-tools">
+          <span>Relay Sans SC · 默认</span>
+          <span class="meter">
+            <span class="meter-ring" aria-hidden="true">8%</span>
+            <span>上下文占用</span>
+          </span>
+          <button class="send" type="button">发送</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>二、方案并排</h2>
+  <div class="grid">
+
+    <div class="card">
+      <h3>A 单段光带沿整圈流动 <span class="tag pick">选定</span></h3>
+      <div class="frame v-flow">
+        <div class="body">正在执行</div>
+      </div>
+      <p class="desc">band 3px / core 30° / tail 240° / peak 80% / 4s 顺时针</p>
+    </div>
+
+    <div class="card">
+      <h3>B 双段对称光点</h3>
+      <div class="frame v-twin">
+        <div class="body">正在执行</div>
+      </div>
+      <p class="desc">band 3px / 2×core 14° / tail 140° / peak 70% / 7s 逆时针</p>
+    </div>
+
+    <div class="card">
+      <h3>C 顶部单次横扫</h3>
+      <div class="frame v-sweep">
+        <div class="body">正在执行</div>
+      </div>
+      <p class="desc">band 3px / core 18° / tail 140° / 6s 周期可见约 2.6s</p>
+    </div>
+
+    <div class="card">
+      <h3>D 静态弱强调（基线）</h3>
+      <div class="frame v-still">
+        <div class="body">排队中</div>
+      </div>
+      <p class="desc">无动画 / line = control 灰 / 用于排队、正在停止、已暂停</p>
+    </div>
+
+  </div>
+
+  <h2>三、待验证项（本页无法证明）</h2>
+  <ul class="todo">
+    <li>光带速度、强度、停止时机是否干扰输入与阅读，需在真实桌面窗口长时间使用判断。</li>
+    <li>Windows WebView 实际缩放与 125%–150% DPI 下的 3px 光带表现。</li>
+    <li>键盘焦点（<code>focus-visible</code>）与光带并存时的对比度。</li>
+    <li>屏幕阅读器只应读到状态文字，不应读出装饰光带；阶段变化才播报。</li>
+    <li>系统「减少动态效果」与本页开关两条路径的表现一致。</li>
+    <li>切到 Task B 后 Task A 的迟到事件不会让 B 的输入区发光（需接入真实 Run 后验证）。</li>
+  </ul>
+
+</div>
+
+<script>
+const STATES = [
+  { key: 'idle', name: '空闲', count: '', actions: [], note: '无绑定 Run' },
+  { key: 'queued', name: '排队中', count: '队列第 1 位（演示）', actions: ['查看进度', '取消排队'], note: '静态弱强调，不播放执行动效' },
+  { key: 'running', name: '正在读取文件', count: '已找到 6 个候选（演示）', actions: ['查看进度', '停止'], note: '柔和光带持续流动' },
+  { key: 'awaiting', name: '产物已生成，等待验收', count: '版本 v3（演示）', actions: ['打开 Review'], note: '停止流动' },
+  { key: 'pausing', name: '正在停止，等待安全结束', count: '1 个动作在途（演示）', actions: ['查看在途动作'], note: '停止流动，保留静态提示' },
+  { key: 'paused', name: '已暂停', count: '可继续（演示）', actions: ['继续'], note: '静态边框' },
+  { key: 'stopped', name: '已停止', count: '保留已产生结果（演示）', actions: ['查看结果'], note: '普通静态边框' },
+  { key: 'done', name: '任务已完成', count: '业务完成事实成立（演示）', actions: ['查看提交'], note: '光带平滑淡出' },
+  { key: 'failed', name: '已确认失败', count: '退出码 1（演示）', actions: ['查看原因', '安全重试'], note: '静态错误边框' },
+  { key: 'offline', name: '连接中断，正在核对运行状态', count: '最后确认于 14:26（演示）', actions: ['重新连接'], note: '静态，不推断任务已停止' },
+  { key: 'unknown', name: '执行结果待核对', count: '外部动作 UNKNOWN（演示）', actions: ['核对结果'], note: '静态警示，不直接重试' },
+];
+
+const chipsEl = document.getElementById('chips');
+const stageEl = document.getElementById('stage');
+const nameEl = document.getElementById('stageName');
+const countEl = document.getElementById('stageCount');
+const actionsEl = document.getElementById('stageActions');
+
+const buttons = STATES.map((s) => {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'chip';
+  b.textContent = s.name;
+  b.setAttribute('aria-pressed', 'false');
+  b.title = s.note;
+  b.addEventListener('click', () => select(s.key));
+  chipsEl.appendChild(b);
+  return b;
+});
+
+function select(key) {
+  const s = STATES.find((x) => x.key === key);
+  stageEl.className = 'stage state-' + s.key;
+  nameEl.textContent = s.name;
+  countEl.textContent = s.count;
+  actionsEl.replaceChildren();
+  for (const label of s.actions) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = label === '停止' || label === '取消排队' ? 'stop-btn' : 'link-btn';
+    b.textContent = label;
+    actionsEl.appendChild(b);
+  }
+  buttons.forEach((btn, i) => btn.setAttribute('aria-pressed', String(STATES[i].key === key)));
+}
+
+document.getElementById('motionToggle').addEventListener('change', (e) => {
+  document.documentElement.classList.toggle('motion-on', e.target.checked);
+});
+
+select('running');
+</script>
+</body>
+</html>

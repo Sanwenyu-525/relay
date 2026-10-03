@@ -1,0 +1,148 @@
+{
+  "checked_on": "2026-10-02",
+  "purpose": "为静态效果图提供当前全局功能事实；不作为实现、运行或验收结论。",
+  "basis": "只读核对 apps/workbench/src 当前生产组件；旧截图只作视觉参考。",
+  "runtime_verification": "未运行浏览器、API、模型或执行器。",
+  "shared_navigation": {
+    "source": "apps/workbench/src/components/AppShell.tsx",
+    "primary": ["工作台 /agent", "项目 /projects", "待处理 /reviews", "资料 /knowledge"],
+    "more_entries": ["今日 /today", "全部任务 /tasks", "动态 /activity", "收件箱 /inbox"],
+    "bottom_entries": ["设置 /settings", "连接与同步 /connections"],
+    "topbar": ["面包屑", "日期", "任务收件箱", "命令面板", "数据来源", "live 模式的人工介入提醒"],
+    "boundaries": ["示例与 live 状态必须区分；生图中的名称、条数和时间只能作为示例。", "连接、配置、批准、执行结果和任务完成是不同事实，不得合并成成功状态。"]
+  },
+  "pages": [
+    {
+      "id": "today",
+      "title": "今天",
+      "entry": ["更多入口·今日", "/today"],
+      "sources": ["apps/workbench/src/views/TodayView.tsx"],
+      "tabs": [],
+      "filters": ["日期", "查询时区（可展开调整）"],
+      "content": ["今日焦点：所属项目、任务标题、状态、优先级、截止", "可开始或继续、已置顶待处理、其他等待三组任务", "等待你的判断与待审中心入口；推荐依据和安排说明"],
+      "actions": ["刷新、应用或取消时区调整", "打开任务；符合资格时入口文案为开始任务或继续任务", "按 allowedActions 置顶或取消置顶、设为今日焦点、取消延后；保存延后日期和时区、保存任务优先级和截止计划", "清除今日焦点；空态新建任务或查看全部任务"],
+      "boundaries": ["开始/继续入口导航到任务详情，不直接宣布执行成功；焦点与置顶不改变准入。", "示例模式没有真实 Today 投影；提交结果不明时保留原命令，先查回执。"]
+    },
+    {
+      "id": "tasks",
+      "title": "全部任务",
+      "entry": ["更多入口·全部任务", "/tasks"],
+      "sources": ["apps/workbench/src/views/TasksView.tsx", "apps/workbench/src/lib/labels.ts", "apps/workbench/src/views/CreateTaskView.tsx"],
+      "tabs": ["全部", "收件箱", "人工待处理"],
+      "filters": ["项目：全部、未归属项目、已加载项目", "状态：待整理、可开始、进行中、待人工验收、阻塞、已完成、已取消", "执行模式：人工执行、AI 辅助、AI 委托", "按任务名称搜索"],
+      "content": ["任务、项目、工作状态、执行模式、当前执行者五列", "任务修订、等待或阻塞原因、已加载与当前显示数量、分页范围说明"],
+      "actions": ["新建任务 /tasks?view=create", "刷新、重读、清除筛选、继续加载", "整行打开任务详情；按明确项目 ID 或任务 ID 打开对象"],
+      "boundaries": ["live 筛选仅作用于已加载页，不能当作全量检索。", "创建页登记标题、预期结果、验收条件、可选项目与依赖；保存或暂存待整理不会启动 Run，live 创建页不直接委托 AI。"]
+    },
+    {
+      "id": "inbox",
+      "title": "任务收件箱",
+      "entry": ["更多入口·收件箱", "顶栏收件箱", "/inbox 重定向至 /tasks?tab=inbox"],
+      "sources": ["apps/workbench/src/router.tsx", "apps/workbench/src/views/TasksView.tsx"],
+      "tabs": ["全部", "收件箱", "人工待处理"],
+      "filters": ["任务状态", "执行模式", "搜索已加载任务；live 不显示项目筛选"],
+      "content": ["未归属项目的人工任务；沿用任务列表五列、修订和等待原因", "已加载数量、筛选数量、分页或空态"],
+      "actions": ["新建任务、刷新收件箱、继续加载、清除筛选", "打开任务详情；切换全部任务或人工待处理"],
+      "boundaries": ["收件箱不是通知列表或 Review 列表。", "未归属项目只登记人工事项，不自动创建项目，不具备 AI 执行作用域。"]
+    },
+    {
+      "id": "activity",
+      "title": "动态",
+      "entry": ["更多入口·动态", "/activity", "/activities（同组件）"],
+      "sources": ["apps/workbench/src/views/ActivityView.tsx"],
+      "tabs": [],
+      "filters": ["可展开的 Project ID、Task ID、Run ID、起止时间", "执行方：全部、人工、AI、系统（仅已加载项）"],
+      "content": ["按日期分组的事件时间、执行方、事件类型、摘要、关联对象", "所选事件依据侧栏：事件类型、发生时间、执行方、原 command_id、Activity ID、关联对象"],
+      "actions": ["应用筛选、刷新当前范围、继续加载", "查看依据；打开有真实路由的关联对象"],
+      "boundaries": ["服务端每页最多 30 条；本页数量不是历史总数，执行方尚不支持服务端分页筛选。", "只呈现已记录摘要与引用，不展示模型原始推理；示例模式没有真实 Activity 记录。"]
+    },
+    {
+      "id": "reviews",
+      "title": "等待你的判断",
+      "entry": ["主导航·待处理", "/reviews", "/reviews?id=<reviewId>"],
+      "sources": ["apps/workbench/src/views/ReviewsView.tsx", "apps/workbench/src/components/ReviewDecisionPanel.tsx", "apps/workbench/src/lib/labels.ts"],
+      "tabs": [],
+      "filters": ["全部与当前列表存在的请求类型：人工验收、修正预算、检查器重试、动作批准、项目状态提案"],
+      "content": ["请求事项、类型、所属项目、请求时间、当前状态", "所选请求的判断对象、为何需要你、证据、可能影响、绑定版本与有效期；有确切产物版本时可阅读正文"],
+      "actions": ["刷新、选择请求、查看关联任务与产物、核对版本来源", "只按 allowedDecisions 显示接受判断、请求修改、设置修正预算、重新运行检查、批准动作或拒绝请求", "填写修改说明或修正预算；提交结果不明时核对原命令回执"],
+      "boundaries": ["示例请求只读；过期、项目归档或事实不可读时阻止新决定。", "逐项判断，不批量批准；批准或接受不等于动作已执行、任务已完成或执行权转移。"]
+    },
+    {
+      "id": "attention-queue",
+      "title": "需要你查看的事项",
+      "entry": ["任务页签·人工待处理", "/tasks?tab=attention"],
+      "sources": ["apps/workbench/src/views/TasksView.tsx", "apps/workbench/src/components/AttentionQueue.tsx"],
+      "tabs": ["全部任务", "未归属任务收件箱", "人工待处理"],
+      "filters": [],
+      "content": ["必须介入、待判断 Review、当前 Run 待核对、人工任务与受阻 Task 四组", "当前读取时间、Task/Run/Review 身份与修订、等待原因、未决 Operation 或控制请求", "未完整读取、失败与后续页提示"],
+      "actions": ["刷新事实；Task 每次最多读取 10 页后继续读取后续页", "打开原介入、Review、Run 或 Task 处理入口"],
+      "boundaries": ["只汇总开放 Review、已读取工作空间任务及其当前 Run；不覆盖已脱离 Task 指针的历史 Run。", "分组保留读取顺序，不代表紧急程度；不在队列批准、控制、重试或改变任务，范围不完整时不能宣称没有待办。", "示例模式仅显示无法读取真实汇总的说明。"]
+    },
+    {
+      "id": "connections",
+      "title": "连接与权限（全局入口）",
+      "entry": ["辅助导航·连接与同步", "/connections", "/settings/connections（同组件）"],
+      "sources": ["apps/workbench/src/views/ConnectionsView.tsx"],
+      "tabs": [],
+      "filters": ["进行中项目列表；按明确已知的项目 ID 打开"],
+      "content": ["项目名称、修订、加载状态、后续页；手动项目 ID 入口"],
+      "actions": ["刷新项目、继续加载项目、打开项目连接设置、返回项目入口"],
+      "boundaries": ["导航名为连接与同步，但当前全局页面实际只提供项目级连接与权限入口，没有独立同步操作或同步进度。", "示例模式没有真实连接配置；创建连接不会自动授权。"]
+    },
+    {
+      "id": "project-connections",
+      "title": "项目连接与权限",
+      "entry": ["项目内·连接", "/projects/:id/connections"],
+      "sources": ["apps/workbench/src/views/ConnectionsView.tsx", "apps/workbench/src/components/ProjectNav.tsx", "apps/workbench/src/components/ViewConfigurationPanel.tsx"],
+      "tabs": ["总览", "工作台", "任务", "资料", "连接"],
+      "filters": ["配置表单选择能力、有效连接、受管资源或现有策略；无独立列表筛选"],
+      "content": ["连接能力、状态、版本；受管目录状态、修订、epoch 与 Windows 文件写入身份绑定提示", "权限策略有效版本、AUTO/ASK/DENY、目标范围、载荷上限、已读取历史版本", "可展开的项目工作台默认视图与页面顺序"],
+      "actions": ["刷新配置、只读健康核对、创建或停用连接、登记或停用受管目录", "创建或修订策略不可变版本、撤销策略、查看历史版本", "选择通用/论文/开发默认工作台并保存；结果不明时查询原回执"],
+      "boundaries": ["连接本身不是授权；没有匹配有效策略时默认 DENY，仍需连接和目标边界匹配。", "只读健康核对只重读服务端配置，主机/目录真实可达性探针待接入；不能画成已连通测试。", "创建表单能力为 WEB_FETCH、FILE_READ、FAKE_WRITE、FAKE_PUBLIC_READ；不添加任意 Shell 或真实写入能力。", "连接、资源、策略列表最多前 100 条无下一页；归档或事实不可读时阻止新配置写入。"]
+    },
+    {
+      "id": "project-information",
+      "title": "项目信息（当前由项目总览呈现）",
+      "entry": ["/projects/:id", "没有独立的项目信息路由或信息编辑页"],
+      "sources": ["apps/workbench/src/router.tsx", "apps/workbench/src/views/ProjectSkillView.tsx"],
+      "tabs": ["总览", "蓝图预览", "继续项目", "Assist"],
+      "filters": [],
+      "content": ["项目名称、类型、阶段、Project/State 修订与关联的 ACTIVE Goal", "State 指定下一步 Task、确切选用产物版本、已记录 Decision、待判断 Review", "确认人、确认时间与已确认/仍需明确清单尚无服务端字段"],
+      "actions": ["刷新、打开下一步任务、打开项目工作台/任务/资料", "查看产物来源、确切版本或 Decision 依据、打开 Review"],
+      "boundaries": ["信息来自当前 Project/State 查询；不是独立信息维护表单，不臆造编辑姓名、成员、标签或任意项目元数据动作。", "产物是 State 当前选用版本，不替换成最新版；决定和 Review 最多先展示前 5 项；不可读时明确未知。"]
+    },
+    {
+      "id": "settings",
+      "title": "设置",
+      "entry": ["辅助导航·设置", "/settings"],
+      "sources": ["apps/workbench/src/views/SettingsView.tsx", "apps/workbench/src/components/PackCatalogPanel.tsx"],
+      "tabs": ["基本设置", "AI 设置", "执行策略", "工作台"],
+      "filters": [],
+      "content": ["基本设置：界面时区、仅浅色外观、通用/论文/开发默认工作台", "AI 设置：本机服务连接、模型配置、模型验证、Worker 可执行四个独立状态；当前端口、模型名、端点、最近验证", "执行策略：项目级连接权限入口；语言与通知偏好暂不可用", "工作台：内置 Pack 当前组合、成员协议与摘要、历史版本只读清单"],
+      "actions": ["保存本设备显示偏好", "重读模型状态、用固定短文本验证连接；查看连接权限或项目入口", "展开 Pack 清单与历史、失败时重读"],
+      "boundaries": ["显示偏好保存在本设备，不修改项目或服务配置；浅色外观选择禁用，不画主题切换。", "模型配置来自服务端环境变量；本页不读取、显示或修改密钥。验证连接会发生固定短文本调用，但通过不等于任务执行成功。", "Worker 可执行性未探测；API 环境诊断不能画成 Worker 已执行。语言和通知没有写接口，不画可用开关。"]
+    },
+    {
+      "id": "search",
+      "title": "命令面板与资料搜索",
+      "entry": ["桌面标题栏搜索资料、顶栏搜索按钮、Ctrl+K / ⌘K", "AppDialog 弹窗，没有独立 /search 页面路由"],
+      "sources": ["apps/workbench/src/components/CommandPalette.tsx", "apps/workbench/src/components/AppShell.tsx", "apps/workbench/src/components/DesktopTitleBar.tsx"],
+      "tabs": [],
+      "filters": ["关键词（最多 200 字符）", "工作空间或仅当前项目作用域；固定搜索 Knowledge、Memory、Decision、Rule 四类"],
+      "content": ["结果标题、类型、版本、状态、摘要、来源引用和作用域", "前往：新建项目/任务、收件箱、当前项目、当前任务委托/Review/Run、动态；已知项目 ID 核对入口"],
+      "actions": ["↑↓ 选择、Enter 或点击打开确切资料；继续加载每页最多 20 条结果；Esc 关闭", "导航到现有创建表单和对象页；核对并打开明确 Project ID"],
+      "boundaries": ["字面关键词匹配，不是语义检索；没有项目/任务全局搜索结果，示例模式不伪造真实结果。", "导航不提交业务命令；委托需真实 READY、人工执行权、项目、无当前 Run 和 START 提示，进入任务页再确认。"]
+    },
+    {
+      "id": "delegate",
+      "title": "委托 AI 执行",
+      "entry": ["任务详情·执行页签 /tasks/:id?tab=runs", "协作工作台中同一 TaskDelegatePanel 的紧凑执行设置"],
+      "sources": ["apps/workbench/src/components/TaskDelegatePanel.tsx", "apps/workbench/src/views/TaskDetailView.tsx", "apps/workbench/src/views/CollaborationView.tsx"],
+      "tabs": [],
+      "filters": ["冻结本次资料来源", "可选读取：不附加、受管文件、网页；按能力选择有效连接", "可选 Mock 文件动作：连接、受管目录、目标完整路径、固定内容"],
+      "content": ["当前任务状态、执行权与明确禁用原因", "受管文件：连接、独立受管目录、相对文件路径；网页：连接与 URL", "原命令 ID、提交或待核对错误"],
+      "actions": ["选择资料、配置可选读取或 Mock 动作、重读配置", "明确点击委托 AI 执行；结果不明时仅核对原命令回执", "返回的 Run ID 用于进入真实运行状态核对"],
+      "boundaries": ["仅 READY、人工执行权、所属项目、START 准入提示且项目可写时可委托；存在当前 Run 时不提供新委托配置。", "一次可选读取只读一个目标；连接与受管目录分别选择，权限和目标匹配由运行时再核对。", "聊天讨论不授权执行；202 只表示创建 Run 并授予执行权，不代表产物或动作成功。", "Mock 写入需已登记连接、目录和权限；批准回执也不等于文件已写入。"]
+    }
+  ]
+}

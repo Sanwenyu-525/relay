@@ -1,0 +1,56 @@
+[
+  {
+    "slug": "thesis-acceptance",
+    "file": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-10-02/thesis-acceptance.png",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-e93589ac-ffa0-41f4-8c26-3d2f6ea26697.png",
+    "inspection": "已视看：十项导航全部可见；阅读首段、确切产物v3与验收v2、AI执行者及等待人工判断分开；接受/请求修改、仅修改必填说明。去除无关项目页签及虚构PDF分页。静态设计，无运行验收。"
+  },
+  {
+    "slug": "artifact-editor",
+    "file": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-10-02/artifact-editor.png",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-669581ba-f71f-40bf-bc07-fc52ae46e895.png",
+    "inspection": "已视看：进行中/人工/无活动Run、三任务页签、v4最新/v3选用/本轮未接受、未保存草稿、保存v5/版本选用/检查完成均保留；富文本工具条已去除。十个导航图标存在，项目与资料文字标签漏绘，经内置edit多次仍未修复，需实施时校准，非像素完美。静态设计，无运行验收。"
+  },
+  {
+    "slug": "knowledge",
+    "file": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-10-02/knowledge.png",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-b260bf3e-7340-4322-9611-9adbf9feb9f9.png",
+    "inspection": "已视看：全局范围、资料/记忆/决定/规则、当前版本/状态/范围列表、正文与编辑新版本；无项目页签/网页导入/语义推荐。十项导航均存在，全部任务字距局部偏挤。示例静态数据，无运行验收。"
+  },
+  {
+    "slug": "knowledge-detail",
+    "file": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-10-02/knowledge-detail.png",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-b72cc4eb-c9b3-4b9b-ad27-29bdee94a7e1.png",
+    "inspection": "已视看：全局资料深链、v3当前PARTIAL、已保存快照与当前原件分开、目录首段与历史v2/v1、编辑新版本；无PDF分页。导航十个图标均存在，待处理文字漏绘、全部任务局部字距偏挤，已内置edit纠正漏掉资料入口与错误项目breadcrumb。静态设计，无运行验收。"
+  },
+  {
+    "slug": "project-information",
+    "file": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-10-02/project-information.png",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-9c9686d0-6a44-4c9f-89e9-87fe6eee3563.png",
+    "inspection": "已视看：十项导航、项目五导航与资料四类页签、网页导入/项目导读/新建、资料列表/快照首段/不可变版本/保存新版本/归档。PARTIAL明显；生成器虚构正常资料的待核对命令已去除。静态设计，无运行验收。"
+  },
+  {
+    "slug": "run-control",
+    "file": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-10-02/run-control.png",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-76542096-26dc-4cd3-9e09-368e1334317f.png",
+    "inspection": "已视看并修正：Task进行中/ownerAI/Run RUNNING分开；PENDING暂停尚未生效，全部控制变更按钮禁用，仅刷新可用。当前FILE_WRITE无可读DRAFT；原operation_id/动作历史/Trace/任务产物保留。资源查询待接入，不宣称释放。局部修订数值及全部任务字距待实施校准。静态设计，无运行验收。"
+  },
+  {
+    "slug": "run-paused",
+    "file": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-10-02/run-paused.png",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-f174de8c-66ac-4589-9ffe-e7ba2273ff90.png",
+    "inspection": "已视看并修正真实步骤名称：构建上下文/生成草稿/保存候选产物/验证；PAUSED与AI持权分开，最后完成点/当前恢复点、未决Review、恢复/停止/请求交接/取消/刷新保留。未解决Review恢复后先等待；无资源释放宣称或虚构Run产物清单。十项导航完整。静态设计，无运行验收。"
+  },
+  {
+    "slug": "run-unknown",
+    "file": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-10-02/run-unknown.png",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-c8a43736-5547-4a9d-a4e4-836b83073117.png",
+    "inspection": "已视看并修正：Run RUNNING与原动作UNKNOWN分开；原operation/invocation、账本与当前观察、只读动作历史/Trace/逐文件刷新/冻结计划差异。差异为冻结计划前后文本，不冒充当前磁盘对比；处置缺可信停机证明/运行中步骤，未画准入前按钮/盲重试/强制成功。十项导航完整；底部处置说明有少量文案偏差，主警示已明确不代表全部写入成功。静态设计，无运行验收。"
+  },
+  {
+    "slug": "action-approval",
+    "file": "D:/Develop/Relay-Agent/docs/frontend/mockups/2026-10-02/action-approval.png",
+    "source": "C:\\Users\\ASUS\\.codex\\generated_images\\01a0faab-5f2f-7b03-9b57-a7cb1f5128a2\\exec-c3b7fec6-97d9-45c6-b1b8-848b65719d21.png",
+    "inspection": "已视看：ACTION_APPROVAL待处理、Task进行中/ownerAI/Run等待人工判断；绑定原operation、冻结变化集、目标/内容指纹、项目TaskRun与两文件变更正文、批准/拒绝。去掉无依据权限有效绿章；批准只针对确切动作，不执行成功/授予额外权限。十导航图标存在，项目/待处理标签仍漏绘，记录待实施校准。静态设计，无运行验收。"
+  }
+]

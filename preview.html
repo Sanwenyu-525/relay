@@ -230,30 +230,59 @@
 
   .sort-btn:hover { background: #dce7dc; }
 
+  .sort-btn:disabled { color: var(--muted); background: var(--paper); cursor: default; }
+
+  figure { position: relative; }
+
+  figure.hidden { display: none; }
+
+  figure.marked { outline: 2px solid var(--forest); outline-offset: -2px; }
+
+  .pick {
+    position: absolute;
+    left: 0.4rem;
+    bottom: 0.4rem;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.1rem 0.35rem;
+    font-size: 0.75rem;
+    color: var(--secondary);
+    background: rgb(255 255 255 / 0.9);
+    border: 1px solid var(--line);
+    border-radius: 9999px;
+    cursor: pointer;
+  }
+
   .toolbar .hint { margin: 0; }
+
 </style>
 </head>
 <body>
 
 <header>
   <p class="kicker">PERSONAL WORKFLOW OS · RELAY AGENT</p>
-  <h1>页面原型效果图 · 55 张</h1>
+  <h1>页面原型效果图 · <span id="titleCount">100</span> 张</h1>
   <p class="meta">
     来源：<code>docs/frontend/mockups/</code>
-    ｜生成时间：2026-09-19 08:14 – 2026-10-01 11:25
-    ｜共 <span id="count">0</span> 张，覆盖 5 个批次
+    ｜生成时间：2026-09-19 08:14 – 2026-10-02 17:36
+    ｜共 <span id="count">0</span> 张
     ｜页面时间：<span class="clock" id="clock">--</span>
   </p>
   <div class="toolbar">
     <button type="button" class="sort-btn" id="sortBtn">排序：时间正序 ↑</button>
-    <span class="hint">点击任意原型图放大；放大后用图片左右两侧的箭头或键盘 ← → 切换，Esc 关闭。</span>
+    <button type="button" class="sort-btn" id="syncBtn">重新扫描图片</button>
+    <button type="button" class="sort-btn" id="hideBtn" disabled>隐藏所选 (0)</button>
+    <button type="button" class="sort-btn" id="unhideBtn">恢复全部</button>
+    <span class="hint">点击任意原型图放大；放大后用图片左右两侧的箭头或键盘 ← → 切换，Esc 关闭。新增图片后先运行 <code>node scripts/preview-gallery.mjs</code>，再点「重新扫描图片」。勾选左下角复选框可批量把图从本页移除，只改浏览器本地记录，不动磁盘文件。</span>
   </div>
 </header>
 
 <main id="gallery"></main>
 
 <footer>
-  点击任意原型图放大；放大后可用 ← → 切换、Esc 关闭。时间为图像文件写入时间。全部为静态设计概念与示例数据，不代表功能实现或运行验收；当前重做基准是 2026-10-01 的「工作主线」图。
+  点击任意原型图放大；放大后可用 ← → 切换、Esc 关闭。时间为图像文件写入时间。效果图是静态设计概念与示例数据，不代表功能实现或运行验收；2026-10-02 已选「会话工作区」为本轮视觉方向。2026-10-01「工作主线」保留为既有产品实现基准。
 </footer>
 
 <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="原型图放大">
@@ -278,10 +307,11 @@
   </div>
 </div>
 
+<script src="preview-manifest.js"></script>
 <script>
   const DIR = "docs/frontend/mockups/";
 
-  const GROUPS = [
+  const BASE_GROUPS = [
     {
       title: "2026-09-19 · 基础页面与首批 Skill 交互",
       hint: "32 张页面/状态效果图 + 4 张扩展交互 + 1 张原始参考，对应 33 个页面/状态开发单元；带 v2 的为修正版，旧稿一并保留。",
@@ -385,15 +415,87 @@
         { f: "2026-10-01/output-first.png", t: "11:25", n: "成果书桌", d: "以正文与比较为主轴，第二稿" },
         { f: "2026-10-01/project-first.png", t: "11:25", n: "项目推进", d: "以项目下一步与工作目录为主轴，第三稿" }
       ]
+    },
+    {
+      title: "2026-10-02 · 方案 2 全站功能效果图（37 页）",
+      hint: "37 张页面/状态图 + 1 张选定方向；按当前路由和生产功能生成，今日/全部任务/动态/收件箱全部保留。本轮不改产品代码。",
+      shots: [
+        { f: "2026-10-02/conversation-workspace-selected.png", t: "11:37", n: "会话工作区 · 轻侧栏", d: "用户已选方向；原选稿保留，配套页按当前完整导航延展", tag: "已选方向" },
+        { f: "2026-10-02/today.png", t: "16:23", n: "今日工作台", d: "UI-01 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/project-overview.png", t: "16:07", n: "项目总览", d: "UI-02 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/development-workbench.png", t: "16:15", n: "开发工作台", d: "UI-03 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/thesis-acceptance.png", t: "16:21", n: "论文产物验收", d: "UI-04 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/projects.png", t: "16:16", n: "项目列表", d: "UI-05 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/create-project.png", t: "16:20", n: "创建项目", d: "UI-06 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/tasks.png", t: "16:26", n: "全部任务", d: "UI-07 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/inbox.png", t: "16:33", n: "任务收件箱", d: "UI-08 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/project-tasks.png", t: "16:57", n: "项目任务", d: "UI-09 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/task-detail.png", t: "16:27", n: "任务详情与验收标准", d: "UI-10 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/artifact-editor.png", t: "16:29", n: "人工编辑与保存版本", d: "UI-11 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/general-workbench.png", t: "16:59", n: "通用工作台与 AI 辅助", d: "UI-12 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/thesis-workbench.png", t: "16:34", n: "论文资料与草稿工作台", d: "UI-13 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/knowledge.png", t: "16:33", n: "全局知识库", d: "UI-14 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/knowledge-detail.png", t: "16:39", n: "资料详情与来源版本", d: "UI-15 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/project-information.png", t: "16:53", n: "项目资料、记忆、决定与规则", d: "UI-16 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/activities.png", t: "16:39", n: "全局动态与追溯", d: "UI-17 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/run-control.png", t: "16:58", n: "执行详情与暂停请求", d: "UI-18 · 依据当前功能的静态设计；未做运行验收", tag: "状态图" },
+        { f: "2026-10-02/run-paused.png", t: "17:04", n: "已暂停与安全接手", d: "UI-19 · 依据当前功能的静态设计；未做运行验收", tag: "状态图" },
+        { f: "2026-10-02/run-unknown.png", t: "17:11", n: "执行结果未确认与恢复核对", d: "UI-20 · 依据当前功能的静态设计；未做运行验收", tag: "状态图" },
+        { f: "2026-10-02/reviews.png", t: "17:25", n: "待审中心", d: "UI-21 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/action-approval.png", t: "17:16", n: "特定 Git 动作批准", d: "UI-22 · 依据当前功能的静态设计；未做运行验收", tag: "状态图" },
+        { f: "2026-10-02/connections.png", t: "16:43", n: "连接与执行权限", d: "UI-23 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/settings.png", t: "16:46", n: "设置与工作偏好", d: "UI-24 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/search.png", t: "16:53", n: "全局搜索与快捷操作", d: "UI-25 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/version-conflict.png", t: "17:33", n: "版本冲突与草稿保留", d: "UI-26 · 依据当前功能的静态设计；未做运行验收", tag: "状态图" },
+        { f: "2026-10-02/task-completed.png", t: "17:06", n: "完成凭据与产物来源", d: "UI-27 · 依据当前功能的静态设计；未做运行验收", tag: "状态图" },
+        { f: "2026-10-02/delegate.png", t: "16:56", n: "AI 委托前确认", d: "UI-28 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/task-create.png", t: "17:00", n: "新建任务与执行准备", d: "UI-29 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/project-blueprint.png", t: "17:28", n: "项目蓝图预览", d: "UI-30 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/task-definition.png", t: "16:41", n: "完善任务定义", d: "UI-31 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/verification-plan.png", t: "16:45", n: "验收蓝图与检查计划", d: "UI-32 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/project-resume.png", t: "16:51", n: "继续这个项目", d: "UI-33 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/attention-queue.png", t: "17:02", n: "人工待处理汇总", d: "UI-34 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/project-connections.png", t: "17:09", n: "项目连接与权限", d: "UI-35 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/artifact-lineage.png", t: "17:13", n: "产物版本来源", d: "UI-36 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" },
+        { f: "2026-10-02/project-assist.png", t: "17:12", n: "项目 Assist", d: "UI-37 · 依据当前功能的静态设计；未做运行验收", tag: "页面图" }
+      ]
     }
   ];
+
+  const GROUPS = [].concat(BASE_GROUPS, window.PREVIEW_EXTRA_GROUPS || []);
 
   const shots = [];
   const gallery = document.getElementById("gallery");
   const sortBtn = document.getElementById("sortBtn");
-  document.getElementById("count").textContent = GROUPS.reduce((n, g) => n + g.shots.length, 0);
+  const imageCount = GROUPS.reduce((n, g) => n + g.shots.length, 0);
+  document.getElementById("count").textContent = imageCount;
+  document.getElementById("titleCount").textContent = imageCount;
 
   const stamp = (shot) => (shot.day || shot.f.slice(0, 10)) + " " + shot.t;
+
+const HIDE_KEY = "preview-hidden";
+  const hidden = new Set(JSON.parse(localStorage.getItem(HIDE_KEY) || "[]"));
+  const hideBtn = document.getElementById("hideBtn");
+
+  function updateHideBtn() {
+    const marked = gallery.querySelectorAll("figure.marked").length;
+    hideBtn.textContent = "隐藏所选 (" + marked + ")";
+    hideBtn.disabled = marked === 0;
+  }
+
+  hideBtn.addEventListener("click", () => {
+    for (const figure of gallery.querySelectorAll("figure.marked")) hidden.add(figure.dataset.src);
+    localStorage.setItem(HIDE_KEY, JSON.stringify([...hidden]));
+    buildGallery(desc);
+    updateHideBtn();
+  });
+
+  document.getElementById("unhideBtn").addEventListener("click", () => {
+    hidden.clear();
+    localStorage.removeItem(HIDE_KEY);
+    buildGallery(desc);
+    updateHideBtn();
+  });
 
   function buildGallery(desc) {
     shots.length = 0;
@@ -406,7 +508,6 @@
       h2.textContent = group.title;
       const count = document.createElement("span");
       count.className = "count";
-      count.textContent = group.shots.length + " 张";
       h2.appendChild(count);
       const hint = document.createElement("p");
       hint.className = "hint";
@@ -415,14 +516,17 @@
       grid.className = "grid";
 
       const list = desc ? group.shots.slice().reverse() : group.shots;
-      for (const shot of list) {
+      const nodes = [];
+      for (const entry of list) {
+        const shot = { ...entry, src: entry.src || (group.prefix ? entry.f : DIR + entry.f) };
         const date = shot.day || shot.f.slice(0, 10);
         const index = shots.push({ ...shot, date, group: group.title.split(" · ")[0] }) - 1;
         const figure = document.createElement("figure");
         figure.innerHTML =
-          '<button type="button"><img src="' + DIR + shot.f + '" alt="' + shot.n + '" loading="lazy" /></button>' +
+          '<button type="button"><img src="' + shot.src + '" alt="' + shot.n + '" loading="lazy" /></button>' +
           '<figcaption><span class="title"></span><span class="desc"></span>' +
-          '<span class="shot-time">' + stamp(shot) + '</span></figcaption>';
+          '<span class="shot-time">' + stamp(shot) + '</span></figcaption>' +
+          '<label class="pick"><input type="checkbox" />移除</label>';
         const title = figure.querySelector(".title");
         title.textContent = shot.n;
         if (shot.tag) {
@@ -432,28 +536,46 @@
           title.appendChild(tag);
         }
         figure.querySelector(".desc").textContent = shot.d;
+        figure.dataset.src = shot.src;
         figure.querySelector("button").addEventListener("click", () => openLightbox(index));
+        const pick = figure.querySelector("input");
+        pick.addEventListener("change", () => {
+          figure.classList.toggle("marked", pick.checked);
+          updateHideBtn();
+        });
+        if (hidden.has(shot.src)) {
+          figure.classList.add("hidden");
+          pick.checked = true;
+        }
+        nodes.push(figure);
         grid.appendChild(figure);
       }
+      count.textContent = nodes.filter((node) => !node.classList.contains("hidden")).length + " 张";
 
       section.append(h2, hint, grid);
       gallery.appendChild(section);
     }
+    const visible = gallery.querySelectorAll("figure:not(.hidden)").length;
+    document.getElementById("count").textContent = visible;
+    document.getElementById("titleCount").textContent = visible;
   }
 
   let desc = false;
   buildGallery(desc);
+  updateHideBtn();
 
   sortBtn.addEventListener("click", () => {
-    const showing = shots.length ? shots[current].f : null;
+    const showing = shots.length ? shots[current].src : null;
     desc = !desc;
     sortBtn.textContent = desc ? "排序：时间倒序 ↓" : "排序：时间正序 ↑";
     buildGallery(desc);
     if (showing && box.dataset.open) {
-      current = shots.findIndex((s) => s.f === showing);
+      current = shots.findIndex((s) => s.src === showing);
       render(current);
     }
   });
+
+  document.getElementById("syncBtn").addEventListener("click", () => location.reload());
 
   const box = document.getElementById("lightbox");
   const lbImg = document.getElementById("lbImg");
@@ -464,14 +586,17 @@
   let current = 0;
 
   function render(index) {
-    current = (index + shots.length) % shots.length;
+    let i = index;
+    for (let n = 0; n < shots.length && hidden.has(shots[(i + shots.length) % shots.length].src); n++) i++;
+    current = (i + shots.length) % shots.length;
     const shot = shots[current];
-    lbImg.src = DIR + shot.f;
+    lbImg.src = shot.src;
     lbImg.alt = shot.n;
     lbName.textContent = shot.n;
     lbTime.textContent = stamp(shot);
     lbDesc.textContent = shot.group + " · " + shot.d;
-    lbIndex.textContent = current + 1 + " / " + shots.length;
+    const visible = shots.filter((entry) => !hidden.has(entry.src)).length;
+    lbIndex.textContent = shots.slice(0, current).filter((entry) => !hidden.has(entry.src)).length + " / " + visible;
   }
 
   function openLightbox(index) {
