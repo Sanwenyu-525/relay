@@ -2,11 +2,13 @@
 
 ## 状态与日期
 
-Proposed，2026-09-20。依据为用户本轮提供的 Skill Layer 建议；本记录整理推荐取舍，不将粘贴建议中的全部分期与技术细节自动视为 Accepted。未实现，未替代既有 ADR。
+Proposed，2026-09-20。依据为用户本轮提供的 Skill Layer 建议；本记录整理推荐取舍，不将粘贴建议中的全部分期与技术细节自动视为 Accepted。当日尚未实现，未替代既有 ADR。
 
 同日后续：用户在闭环 Skill 评审后明确要求“加进去”，确认纳入首批优先级与核心/Skill 职责边界。技术方案整体仍 Proposed；该确认不自动接受所有未来 Pack、V1.5 Schema 前移或具体持久化设计。
 
 同日扩展评审后，用户明确要求修改文档并补充必要内容：将 Pack、Profile、Recipe、Proposal、Adapter、Eval 和 Trigger 归并为同一扩展模型。方向纳入当前设计；具体注册格式、持久化字段和未来功能实现仍待冻结。
+
+2026-10-02 状态边界核对：上述“尚未实现/待冻结”描述的是提出设计时的状态。第一方 Skill、最小 Pack 与蓝图的实际实现边界以[扩展专题](../architecture/relay-skills.md)和[HTTP 契约 §10.31–10.34](../api/http-command-contract.md)为准，实际运行结论只见[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。首批实现不自动接受通用 Pack 配置应用、第三方插件或其余后续候选，也不将本 ADR 整体改为 Accepted。
 
 ## 背景
 

@@ -553,6 +553,8 @@ API 不需要 Saver；Worker 与 supervisor 在领取前只读核对业务 schem
 
 0018 同时移除 `assist_messages.usage_input_tokens`/`usage_output_tokens` 的 0 缺省和 NOT NULL；历史 USER 行及双 0 行因无法分辨“已知精确零”和“未知”，保守回填为 `NULL`，已有正数保留。Assist API 同名 `usage` 字段的子值因此可为 `null`，客户端应按未知展示；迁移不改写已应用的 0015 文件或 SHA。无自动 down migration，回退依赖备份与理解 nullable 用量的新应用版本。真实 PostgreSQL 开发回归覆盖三条调用路径及失败、取消、崩溃遗留状态；未进行 M04 独立验收或真实 Provider 外呼。
 
+追加迁移 [0049_m04_model_call_cache_usage.sql](../../apps/api/migrations/0049_m04_model_call_cache_usage.sql) 给 `model_calls` 与 `assist_messages` 各加可空 `usage_cache_read_tokens`/`usage_cache_creation_tokens`（CHECK `>= 0`）。语义与 0018 一致：`NULL` 是“Provider 未上报”，不是“缓存为零”，因此**不做任何回填**——历史行保持 NULL 才是诚实的未知。两处守卫：`model_calls` 上 CHECK 要求两者之和不超过 `usage_input_tokens`（Provider 口径不一致时不落库自相矛盾）；`assist_messages` 上 CHECK 要求 `role <> 'USER'` 时缓存列才可非空，因为 USER 行从不是一次模型调用。列权限沿用各自现状：`model_calls` 是列白名单式 UPDATE（0049 追加两个列名），`assist_messages` 在 0015 已有表级 UPDATE，无需追加 GRANT。真实 PostgreSQL 回归覆盖「补列前后历史调用行为 NULL」与错误信封三层（`model_calls` → `assist_messages` → HTTP DTO）一致性；未进行 M04 独立验收。
+
 ## 32. 0020 Today 用户选择与 Task 调度元数据（2026-09-26 M05 开发自检）
 
 追加迁移 [0020_m05_today_selections.sql](../../apps/api/migrations/0020_m05_today_selections.sql) 给 `tasks` 加可空 `priority`、成对 `due_local_date date`/`due_timezone`；旧 Task 行保持 NULL，更新只递增 Task revision，不触及 acceptance_revision。`today_selection_states` 每 Workspace 一行保存全局选择 revision，首次命令惰性建立并锁行；`task_selections` 以 Task 为主键，存 Pin、成对 Later 日期/时区及最后写入的选择 revision，双清除删除行；`focus_selections` 以 Workspace + 本地日期为主键，保存时区与三选一的 Goal/Project/Task 目标，复合外键阻止跨 Workspace ID。Focus 清除删除该日行；同日换时区须通过原全局选择 revision 显式写入。
@@ -702,3 +704,54 @@ API 不需要 Saver；Worker 与 supervisor 在领取前只读核对业务 schem
 迁移是追加表，旧数据无需转换；旧包不识别准入门，既有严格 schema 清单也不自动兼容未来 migration，升级需停旧进程并经原迁移入口。无自动 down migration；删除表或回退到不参与门的代码会撤销维护保证，不能当作恢复准入的方法。DRAINING 中原在途业务和图仍可写入，没有完整冻结或备份一致性保证。实际验证与未覆盖项只在[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)维护。
 
 2026-10-01 数据库连接维护接续无新migration/业务字段。受信运维会话暂时撤销数据库CONNECT ACL，修改前保存完整有效ACL及grant option；不可变凭据在独立运维目录，不存URL/密码。按原目标和ACL恢复，不用bootstrap重置既有权限；异常时撤销可能保留，漂移拒绝覆盖，不承诺自动回滚。具体兼容、角色和恢复限制归[部署设计](../deployment/本机部署.md#数据库连接维护与权限恢复)。
+
+## 58. 0052/0053 N03 项目知识导读与整理候选（2026-10-02）
+
+追加 [0052_n03_project_knowledge_guide.sql](../../apps/api/migrations/0052_n03_project_knowledge_guide.sql) 与 [0053_n03_knowledge_curation_candidates.sql](../../apps/api/migrations/0053_n03_knowledge_curation_candidates.sql)，三张新表，不改写 `0009` 的 Information 表或 `0041` 的影响检查表。
+
+`project_knowledge_guides` 以 `UNIQUE(project_id)` 保证一个 Project 一份导读，`revision` 供 CAS；应用角色只有 `SELECT/INSERT` 与 `UPDATE(revision, updated_at)`。`project_knowledge_guide_entries` 的 `(guide_id, ordinal)` 主键承担人工顺序，`UNIQUE(guide_id, ref_kind, target_id)` 拒绝重复，`target_id` 是 `coalesce(knowledge_id, decision_id, rule_id, artifact_version_id)` 的 STORED 生成列——**唯一约束里的 NULL 互不相等，直接对四个可空列建 UNIQUE 会漏掉重复项**，生成列是这里唯一可靠的去重方式。四类目标各一个可空外键，`ref_kind` 与「恰好一个目标列非空」由 CHECK 用 `IS NOT NULL` 强制：这是刻意吸取 `0044` 的教训（该迁移把 CHECK 写成 `target = ref_id`，NULL 时求值为 NULL 而非 FALSE，PostgreSQL 只在 FALSE 时拒绝，脏行因此可落库，只能由 `0045` 追加修正）。`ck_guide_entry_pin` 要求只有 `KNOWLEDGE` 能 `PINNED` 且必须给出 `pinned_version_id`，`CURRENT` 则必须为空，因此「固定历史引用」与「跟随当前导航」在数据库层就无法混淆。
+
+条目表对 `relay_app` 给 `SELECT, INSERT, DELETE`：编辑导读就是替换整份清单，条目是可替换的导航引用。它们指向的知识版本、决定、规则与成果版本仍按原契约不可变——DELETE 权限不触及被引用对象。
+
+**外键不保证 `pinned_version_id` 属于同一条知识**——跨表一致性 CHECK 做不到，由应用层在建导读时复核（`requireReferenceInScope`）。实测用应用角色直插一条指向另一条知识版本的 `PINNED` 行**会被数据库接受**；读端因此返回 `MISSING`/`CROSS_SCOPE` 而不是解析到错误版本。API 路径无绕过，但不要误以为库级已保证。
+
+`knowledge_curation_candidates` 保存来源成果版本与建议归类，`suggested_knowledge_id` 仅在标题字面完全相同时才指向既有条目，否则为空表示建议新建。`ck_curation_decision` 把未决／已接受／已拒绝写成互斥分支，`ck_curation_accepted_pair` 保证两个接受列同时有值或同时为空，避免「有版本但无知识」这类半写状态。应用角色有 `SELECT, INSERT` 与仅限四个决定列的 `UPDATE`，不能改来源或建议标题。
+
+上限（导读 200 项、单次候选 10 项、列表 20 条）在 API schema 层拒绝，数据库不设项数 CHECK。外键只保证被引用对象存在，不保证同项目——跨项目与跨 Workspace 引用由应用层在建导读、建候选、接受三处各自复核，读取端再复核一次作用域；这是与 `0041` 相同形状的纵深依赖，不是数据库级隔离。
+
+**接受候选必须单事务**：「锁候选行 → 复核 accepted/rejected → 写知识版本 → 绑定候选 → 写回执」全在一个事务里。若像首轮实现那样让知识版本在内层命令的独立事务先提交、再在另一个事务绑定候选，则拒绝与接受并发时会出现「用户已拒绝、却留下一个在候选审计链上无归属的孤立知识版本」。为此 `information-commands.ts` 增加了 `createKnowledgeInTransaction` / `addKnowledgeVersionInTransaction`：它们复用同一 execute 主体但不自己开事务、也不自己写回执（否则同一 `command_id` 会写两行回执），回执由组合用例在同一事务写入。
+
+三张表对旧数据无需转换，没有回填、没有触发器、没有改写已应用迁移。没有自动 down migration；回退代码前需停旧进程并经原迁移入口，删表会丢失人工编排顺序与候选决定记录，不能靠删表绕过兼容性核对。API Breaking Change: No，Information 与 Artifact 的形状与状态机均未改变。真实 Windows 阅读与 PV03/PV08 未做；实际成绩只在[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)维护。
+
+## 56. 0050 N02 跨成果候选组与组合检查（2026-10-02）
+
+追加 [0050_n02_impact_candidate_groups.sql](../../apps/api/migrations/0050_n02_impact_candidate_groups.sql)，四张新表，不改动 0041 的 `artifact_impact_checks` 与 `artifact_impact_candidates`：
+
+- `artifact_impact_candidate_groups`：`workspace_id`、`impact_check_id` 外键、`source_artifact_id` 与 `source_before/after_version_id` 外键、`source_artifact_revision`，CHECK 只要求 before≠after。它只保存组的来源基线，不复制成果正文。
+- `artifact_impact_candidate_group_items`：`(group_id, ordinal)` 主键承担用户顺序，`UNIQUE(group_id, target_version_id)` 拒绝重复目标，`target_artifact_id`/`target_version_id` 为真实外键，因此组不能引用不存在的版本，`relation` 非空 CHECK，`speculative` 标记该目标是否来自 AI 推测。
+- `artifact_combination_checks`：`group_id` 与 `task_id` 外键、`acceptance_revision`、`gaps jsonb`（CHECK 为数组）。**没有整体结论列**——整体不可判是类型语义，存一个常量列只会伪装成可写事实。
+- `artifact_combination_check_items`：`(combination_check_id, ordinal)` 主键、`UNIQUE(combination_check_id, artifact_version_id)`、`content_hash` 32 字节 CHECK、`is_current_version`/`readable` 快照，以及可空 `verification_session_id` 外键与封闭词表 `verification_status IN ('OPEN','PASS','RETRY','HUMAN')`（对齐 `verification_sessions.status`）。可空而非 NOT NULL，因为「该确切版本在当前验收修订下没有验证会话」是需要如实保存的缺口。
+
+四张表对 `relay_app` 只给 `SELECT, INSERT`；没有 UPDATE/DELETE 权限，应用角色不能改写已保存的范围或覆盖缺口，这与「接续点/候选组不是可编辑的第二份成果状态」一致。上限 1–10 项与 1–20 项在 API schema 层拒绝，数据库不设项数 CHECK。旧行无需转换，没有回填、没有触发器、没有改写已应用迁移。
+
+应用角色持有 INSERT 即可构造跨 Project 的组或组合检查（外键只保证版本存在，不保证同项目）；因此应用层在建组与建检查单时按 `workspace_id` 复核来源与每个目标版本的当前作用域，跨 Workspace 读取一律 404。这是与 `0041` 相同形状的纵深依赖，不是数据库级隔离。
+
+没有自动 down migration；回退代码前需停旧进程并经原迁移入口。删除这四张表会丢失已保存的审阅范围与缺口记录，不能靠删表绕过兼容性核对。API Breaking Change: No，Artifact/Task/Verification/Assist 的形状与状态机均未改变。真实 Windows 差异审阅与 PV08 体验记录未做；实际成绩只在[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)维护。
+
+---
+
+## 57. 0051 M07 文件夹入口与对话执行请求（2026-10-02，源码实现）
+
+追加 [0051_conversation_execution_requests.sql](../../apps/api/migrations/0051_conversation_execution_requests.sql)：`conversation_execution_requests`。一条原用户消息对应一条执行请求；模型整理出的候选、阶段事实与关联的真实 Task/Run 都在这张表里，业务侧不保存第二份状态。
+
+- `source_message_id` 与 `(workspace_id, command_id)` 各带一条 `UNIQUE`：同一条原消息或同一个命令身份重放都命中同一条请求，不会产生第二个意图。
+- 阶段命令身份 `task_command_id` / `ready_command_id` / `delegate_command_id` **在请求创建时就固定**：恢复时按原 `command_id` 重放既有回执，不因重试生成第二个 Task 或 Run。
+- `base_content_sha256 bytea`（`length = 32`）固定原消息内容基准；`root_path` 与 `resource_id` 固定这次请求的作用目录，不靠会话推断。
+- `decision` 闭合为 `DISCUSS | CLARIFY | PREPARE`，`candidate_status` 为 `PENDING | READY | INVALID | UNAVAILAILABLE`，`status` 为 `INTERPRETING | DISCUSSED | CLARIFY | READY | TASK_PREPARED | DELEGATED | FAILED`。CHECK 保证进入 `TASK_PREPARED` / `DELEGATED` 时必带 `task_id` 与 `task_command_id`，进入 `DELEGATED` 时必带 `delegate_command_id` 与 `run_id`，且 `CLARIFY` 判定不能落在准备或委派阶段。
+- 授权来源永远是 `source_message_id` 指向的那条原用户消息。模型只解释候选，`candidate` / `clarification` 是候选与澄清，不是授权、验收或完成凭据。
+- 索引：`(session_id, created_at DESC, id)` 供会话内回读；`task_id` 部分索引供任务追溯。
+- `relay_app` 获得 `SELECT, INSERT, UPDATE`；不新增 DELETE。写入只经过 [ConversationExecutionRepository](../../apps/api/src/assist/conversation-execution-repository.ts)，候选只能从 `PENDING` 结算一次，阶段只能向前 CAS。
+
+运行语义：解释（原消息 → 候选）与执行（候选 → Task/READY/Delegate）是两个命令。模型调用在事务外，候选先落库；Task 事实与 `TASK_PREPARED` 在同一短事务提交，READY 与 Delegate 各自是既有命令并各自留回执。跨命令的部分成功按阶段如实显示，不伪称原子。UNKNOWN 沿原 operation 核对，重放只读已保存的候选，不重付模型整理成本。
+
+兼容与回滚：无自动 down migration；删除该表会使文件夹入口与对话执行请求失去持久来源，且历史请求无法重放。回退必须先停用新的写入路径。**API Breaking Change: No**（新增端点，既有 Task/Run/Review/Assist 状态不变）。实际验证与未覆盖项只在[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)维护。

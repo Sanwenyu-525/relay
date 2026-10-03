@@ -65,15 +65,18 @@ token 文件使用本项目简单扁平结构：metadata 保存版本/状态/来
 
 | 角色 | 尺寸 / 行高 token | 字体 / 字重 | 用法 |
 |---|---|---|---|
-| 今日主标题 | font.size.compactPage / font.lineHeight.heading | ui / semibold | 仅一个顶级主标题，允许换行；2026-09-28 按用户反馈从 display 调整为 compactPage——空态与窄窗不再铺展示型尺寸，宽窗如需更大另行评估，不无条件恢复 display |
-| 普通页面标题 | font.size.page / heading | ui / semibold | 项目名、验收标题、变更审查标题 |
+| 普通页面标题 | font.size.page / heading | ui / semibold | 每页唯一主标题：项目名、验收标题、变更审查标题、待审与知识页标题 |
 | 窄屏页面标题 | font.size.compactPage / heading | ui / semibold | 不把整页缩放来容纳桌面标题 |
-| 区域标题 | font.size.section / heading | ui / semibold | 今日焦点、项目状态、等待判断；零数量的分组标题收为一行提示，不以区域标题占位 |
+| 区域标题 | font.size.section / heading | ui / semibold | 今日焦点、项目状态、右栏标题、等待判断；零数量的分组标题收为一行提示，不以区域标题占位 |
 | 行标题 | font.size.rowTitle / ui | ui / medium | 任务/产物名称，长名换行 |
 | 控件与业务正文 | font.size.body / ui | ui / regular 或 medium | 按钮、导航、状态、字段；文本输入与下拉继承 UI 字体，不落回浏览器默认字体 |
 | 辅助信息 | font.size.meta / ui | ui / regular | 时间、来源、版本；不能承担长正文 |
 | 长文阅读 | font.size.reading / reading | ui / regular | 论文/Markdown 阅读内容；编辑输入保持清晰 |
 | 代码与 diff | font.size.meta / code | code / regular | 保留等宽与可复制文本；不使用图片充当代码 |
+
+2026-10-01 字号决定：用户对 `preview.html` 中 55 张效果图逐页比对后，选择「放大字号但保留 Sans」。`font.size.page` 由 `compactPage`(1.75rem) 放开为 **2.5rem**，`font.size.section` 由 1.5rem 提到 **1.75rem**；`font.size.display`(3.5rem) 保留为历史值但页面主标题不再使用。这**推翻了 2026-09-28 「今日主标题从 display 收到 compactPage」**的单页特例：今日页与其它普通页面现在同为 `font.size.page`，窄窗一起降级。
+
+降级只在一处发生：`styles.css` 的 `@media (max-width: 40rem)` 统一把 `.page-primary h1` 与 `.skill-page h1` 降到 `compactPage`，各视图不再各自硬编码。实测 8 个普通路由在 1280 宽一律 40px / 28px，390 宽一律 28px，无横向溢出。`2026-09-19` 逐页图里的衬线大标题**不采纳**：`font.family.editorial` 保留给历史参考，所有 UI 标题继续用 `font.family.ui`。
 
 图中字体不可反推出精确 font-family。2026-09-30 实现使用本地自托管的 Noto Sans SC / Noto Serif SC 可变 WOFF2，分别以 `Relay Sans SC` / `Relay Serif SC` CSS 名称优先进入唯一 token 字体栈，后续保留系统回退。字体保留完整原字库，未做字符子集化；两文件合计约 18.8 MB，用离线包体积换取各机器中文排版的一致性。原始版权、来源、版本及转换前后哈希见[字体来源记录](../../apps/workbench/src/assets/fonts/provenance.json)，完整 [SIL OFL 1.1](../../apps/workbench/src/assets/fonts/OFL.txt) 随源码保存，生产分发同时携带完整许可与两份版权声明。工作主线图接续采用本地 Noto Sans SC 统一交互、所有 UI 标题与阅读正文；Serif 资源与历史参考保留，代码和 diff 继续使用 code 字体。此前生产字体身份核对不自动代表本轮最终构建；Windows WebView2 字形、IME 和 DPI 效果仍需实际窗口复验。
 
@@ -190,6 +193,9 @@ window.content.initialWidth/initialHeight 与 minWidth/minHeight 为客户区逻
 | Dialog / Drawer / Menu | panel 圆角、floating 阴影仅浮层、相应 zIndex | 有标题/关闭按钮；模态焦点限制与返回触发点；Esc 不丢弃未保存输入 |
 | FeedbackRegion | 就地描述错误、空态、加载和待核对 | 保存/恢复重要反馈持续存在；toast 仅辅助，不能承载唯一证据或审批结果 |
 | DragSeparator | 全局 `.drag-separator`：透明常态、`col-resize`、`touch-action: none`，可见线由 `::after` 按 `focus.width` 居中画在中轴，hover/focus/dragging 才显示 `color.border.control` | 所有 `role="separator"` 的列宽拖拽条共用；使用方只提供定位上下文与命中区宽度（`control.target.minimum`），不再各自定义底色与线条 |
+| ContextMeter | `.agent-chat-context-meter`：`control.meter.size` 直径、`control.meter.stroke` 描边，轨道 `color.meter.track`、进度 `color.meter.fill`；`data-state="high"` 时进度改 `color.status.warning.text` | 输入区底栏的上下文占用圆环。`data-state="unknown"` 时不画进度弧——空轨道不能读成「占用 0%」。圆环不单独承载信息：必须有 `role="img"` 的 `aria-label` 与 `title` 旁标绝对 token 数；占用比例旁同时给缓存命中率文字（`color.text.muted`），两者都不能只靠弧长或颜色表达 |
+| SourceSummary | `.assist-source-summary`：`bg.subtle` 底、`separator` 边框、`radius.control`；summary 用 `control.icon.size` 图标 + meta 字号，展开时 summary 下沿补一条分隔线 | AI 消息正文的紧邻下一块，回答「这次生成读了什么」。放在正文之后而不是消息末尾，保持「说了什么 → 读了什么」的阅读顺序。逐条来源状态用正文色，不用状态底色冒充已确认事实 |
+| CandidateCard | `.assist-candidate-card`：`bg.surface` 底、`separator` 边框、`radius.control`；标题用 meta 字号 medium，图标用 `color.action.text` | AI 消息内说明「这条回复产出了哪份候选」。只作指引，不含接受入口——正文与接受仍在提案区；`payloadAvailable=false` 时只显示身份与状态，不用本地缓存补出候选内容 |
 
 M05 P14 三工作台当前布局（2026-09-30）沿用项目页壳、右判断区、路由链接与 `subnav` 激活线。General 以当前 Task 标题、目标、产物和真实步骤为主列，AI 辅助与资料进入右栏；Thesis 使用资料/草稿目录与确切版本正文的阅读桌；Development 主列使用产物版本目录、正文和 Run 列表，真实 Run 检查证据、Review 与 AI 辅助位于右栏。标题旁的 Project Type、State phase 与当前 Task 语义分开；目录选中同时按对象类型与 ID 判断，浏览版本不能表现为已接受。主区使用既有 `space.*` 留白、surface 与 `color.border.separator` 分组，状态仍有文字，Run/步骤中文标签保留原事实语义，原技术身份可查。分页、资料计数、来源失败与 Git diff/CLI 未接入均就地说明，不以空白或绿勾暗示完成。长版本/摘要可换行，窄窗口目录与正文纵向排列，右栏沿用抽屉；配置折叠后仍保留原表单与未决命令。局部样式只引用已有 token，不新增数值规范或动效；确切版本、来源选择和操作 Owner 见[工作台第 3 节](workbench-design.md#3-三套工作台)。
 
@@ -355,7 +361,7 @@ hover/focus 的颜色过渡用 motion.duration.fast；抽屉/面板用 panel；�
 |---|---|---|---|
 | [PageHeader](../../apps/workbench/src/components/PageHeader.tsx) | `title` / `status` / `meta` / `lede` / `actions` / `more` / `children`，各占固定层级；`more` 渲染为「更多操作」浮层，Escape 在 IME 组词期不触发，关闭后焦点回到 summary | 名称、状态、当前需要与**首屏动作**常驻；诊断、模式切换、工具与模型端口进 `more` | 展开 `more` 前后页头高度不变；深层动作仍有可访问名称；旧路由与深链接不变 |
 | [FactBar](../../apps/workbench/src/components/FactBar.tsx) | `cells[{label, value?, note?, action?}]`，按 `layout.factbar.cellMin` 自适应分列；格数由调用方按页面语义给 | 事实条是页头的**按需细节**：协作页默认收起，其余页面按对象决定是否常驻 | 不整块套卡片；不足整条换行不压缩文字；已加载范围说明与标题同排，不另占一行 |
-| [JudgmentBar](../../apps/workbench/src/components/JudgmentBar.tsx) | `title` / `head`（标题同行）/ `description` / `actions` / `details`；剩余属性透传到根元素，调用方因此可以继续用自己的作用域类与 `data-*` | 对象、条件、影响与动作常驻；产物版本 ID、`target_hash`、验收条件 ID 与来源深链进 `details` | 截断 UUID 不再出现在首屏；动作审批不使用紧凑形态；UNKNOWN、结果待核对与执行权事实不收进 `details` |
+| [JudgmentBar](../../apps/workbench/src/components/JudgmentBar.tsx) | `title` / `head`（标题同行）/ `description` / `actions` / `details`；剩余属性透传到根元素，调用方因此可以继续用自己的作用域类与 `data-*`。外观：`bg.surface` 底、`radius.control` 四角圆角、整圈 `separator` 边框；`--warning` 把边框整体换成 `status.warning.text` | 对象、条件、影响与动作常驻；产物版本 ID、`target_hash`、验收条件 ID 与来源深链进 `details`。作为独立圆角卡排在所读纸面之外，不贴在纸面内层——那会盖住正文最后一行 | 截断 UUID 不再出现在首屏；动作审批不使用紧凑形态；UNKNOWN、结果待核对与执行权事实不收进 `details` |
 
 三条硬约束：
 
@@ -364,3 +370,32 @@ hover/focus 的颜色过渡用 motion.duration.fast；抽屉/面板用 panel；�
 3. **数值仍归唯一 tokens**。本轮没有新增色值、圆角、时长或动效；新增的只有 `.page-head*` / `.fact-bar*` / `.judgment-bar*` 三组类名和 `font.size.section` 在成果文档头上的复用。效果图中 1487×1058 的列宽与留白是生成图推算值，不写入数值源。
 
 协作成果区另有两条呈现约束：阅读区保留 `layout.workspace.centerMin` 下限，判断条 `position: sticky` 贴底（短窗口 `max-height: 40rem` 下改为正常流）。判断条高度因此不再挤压确切正文，两者都不靠像素调优维持。实际取样与限制只归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
+### 9.3 聊天页方案 2 与共享壳适配（2026-10-02，效果图）
+
+用户反馈任务说明与重复标题占用聊天区上方空间，并选择[会话工作区方案 2](mockups/2026-10-02/conversation-workspace-selected.png)。用户随后明确只生成其他页面效果图、不改代码。该图是本轮整套静态效果图的视觉目标；2026-10-01 工作主线仍是现有产品实现基准。效果图不代表全站已经迁移或通过 Windows 验收。
+
+采用细图标导航栏、按项目分组的近期工作栏、紧凑对象上下文和独立底部输入区。聊天标题与状态同行，完整名称及任务说明从可键盘打开的详情查看；消息从完整首段开始，正文和输入不重叠。沿用现有暖白、森林绿、Sans 字体与唯一 tokens；图中比例和紧凑标题尺度属于原型推荐，不据此修改普通页面的 `font.size.page`。
+
+共享导航和上下文适配会影响所有路由；各页内容按用途组织，不能复制聊天布局。页型、必须可见的异常及交互出口统一归[工作台 §17.8](workbench-design.md#178-聊天优先效果图与全站适配范围2026-10-02)。依据当前路由与生产组件扩展为 37 个页面/状态单元；不启动全站生产实施。「更多入口」中的今日、全部任务、动态、收件箱在本轮图中展示为展开，不能因旧截图折叠而删去。项目导航与资料、任务、工作台的内层页签各自保留。
+
+[现有预览入口](../../preview.html)保留历史效果图，并收录本轮选稿与配套图片。图中文字、状态和日期均为示例，不修改唯一数值源或产品功能验收结论。
+
+#### 9.3.1 方案 2 生产接入（2026-10-02）
+
+用户随后把 2026-10-02 的效果图作为开发指令下发，全站迁移已实施。本节只记录**实际落地的视觉与组件规则**；业务交互、必须可见的异常与恢复边界仍归[工作台 §17.8](workbench-design.md#178-聊天优先效果图与全站适配范围2026-10-02)与 §17.12。**Breaking Change：No**，路由、查询语义、`data-testid`、命令 Owner、API 与数据库不变。
+
+| 组件责任 | 落地规则 | 验证出口 |
+|---|---|---|
+| 共享壳两列 | 图标导航栏（`layout.navigation.railWidth`，图标在上、文字在下，允许「连接与同步」这类长名称折行）与近期工作栏（`layout.sidebar.width`，可拖拽）职责分离；`.app-frame` 为三列网格，拖拽分隔条画在两列之间 | 实测 1487×1058 与 1280×720 两列均为 88px / 224px，分隔条中心落在列边界 ±14px 内；≤63.9375rem 两列收起、导航与近期工作由抽屉承担 |
+| 图标导航栏文字 | 保留可见文字而不是纯图标：中文名称在 5.5rem 宽度下折行也比只剩悬停提示可用；`aria-current` 与「当前页」隐藏文本不变 | 既有 `navigation`、`sidebarResize`、`workBreadcrumbScope` 断言未改写 |
+| 近期工作宽度偏好 | 沿用 `relay.workbench.sidebarWidthPx` 同一键与 160–320px 同一钳制区间，归属从「组合侧栏」改为「近期工作栏」；旧值对新单栏仍然成立，不迁移也不清空 | `sidebarResize` 默认 224px、步进 16px、双击复位断言保持不变 |
+| 近期工作栏头部 | 「Relay」+「新对话」两个元素。新对话只是回到 `/agent` 那条既有路径，会话草稿与目录入口仍由协作页持有，不新建第二套会话状态 | 浏览器实测 Tab/Enter 路径 |
+| 共享页头层级 | `PageHeader` 自带标题字号（`font.size.page`；`h2` 用 `font.size.section`）。此前该原语没有声明字号，`h1` 落回浏览器默认 2em，同一原语在不同页面看起来不一样 | 八个普通路由 1280px 一律 40px、`/projects` 按既定紧凑值 28px；390px 一律 28px；各宽度无横向溢出 |
+| 页头标题即对象入口 | `PageHeader` 新增可选 `titleHref`：标题成为指向确切对象页的链接。`title` 属性只服务悬停，键盘与辅助技术拿不到被省略号截断的完整名称 | 浏览器实测 Tab 聚焦标题链接、Enter 进入 `/tasks/:id` |
+| 紧凑页头 | 协作页、项目列表、技能页各自覆写标题字号；§17.6 的聊天页头不再常驻验收目标，改由「任务与执行详情」展开区承载，展开不推高页头。两种页头分支（`runNeedsAttention` 与否）都渲染它，折叠不是隐藏 | 页头 1487×1058 与 1280×720 均为 77px（接入前 105px）；1280×720 聊天记录 340px、成果阅读区 416px，均在 §17.6 的 240px 下限之上 |
+| 待处理三列 | `/reviews` 在存在可读确切产物版本时为「请求列表 / 判断对象 / 判断详情」三列，判断对象单独成列而不是埋在列表下方；没有可读版本时退回两列，不留空列 | 组件断言三列是 `.review-columns` 的直接子节点 |
+| 阅读页头 | 资料详情页把正文状态（全文／仅部分正文／不可用／格式不支持／读取失败）提升为标题旁的状态芯片，原件与「编辑为新版本」进入首屏动作；保存时间仍在版本工具条，来源与历史版本仍在右栏 | `knowledgeReading`、`readingPresentation`、`knowledge`、`knowledgeCaptureLayout` 断言未改写 |
+| 不做的事 | 图中侧栏「搜索项目或任务」不实现（当前没有全量检索接口，命令面板只检索四类资料）；图中示例计数、日期与按钮位置不写入代码；不因统一外观给每个页面强加 `FactBar` | 见 §17.8 的图片偏差校准 |
+
+字体与比例仍需真实 Windows 窗口验证；本轮没有以图片拟合覆盖唯一 tokens。实际运行成绩与未覆盖出口只归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。

@@ -30,6 +30,7 @@
 | 当前阶段、阻塞、下一步 | [CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md) | 历史研究日志不另写一份当前进度 |
 | 业务不变量 | [契约包](../contracts/README.md) | 01–04 分别拥有事实、执行、验证、恢复；其他文档引用 |
 | 当前架构与模块职责 | [领域模型](architecture/domain-model.md) | 架构主入口；运行/信息/工具专题补充实现边界 |
+| 产品 Agent 提示词与输入协议设计 | [Agent 提示词设计](architecture/agent-prompt-design.md)、[运行公共核心](../apps/api/src/workflow/agent-system-prompt.ts) | 设计文件不被运行程序加载；已接入核心由源码唯一维护，目标剩余增量与已实现入口分开；编码任务入口仍为根目录 prompts |
 | 共享知识来源与长期信息 | [信息与计划](architecture/information-planning.md#11-人和-ai-共用知识来源) | 人与 AI 同源的版本、原件及收录边界；阅读交互归工作台第 12 节，产品定义归 Master Spec 第 33/90 节 |
 | 扩展组合、Skill 与蓝图协议 | [Relay 扩展模型](architecture/relay-skills.md) | Pack/Profile/Recipe/Proposal 复用既有模块，设计仍 Proposed；API/存储字段和 Eval 规格各归所属文档 |
 | 主栈、可选依赖与冻结门槛 | [技术选型](architecture/技术选型.md) | 不在 README、提示词或 UI 文档复制版本表 |
@@ -38,7 +39,7 @@
 | 数据库物理约束 | [物理设计](database/physical-design-postgresql.md) | DDL 片段不是已执行 migration；未来以实际 migration 核验 |
 | API 命令与错误 | [HTTP 契约](api/http-command-contract.md) | 模块补充见 [module-api](api/module-api.md)，同一字段只在所属接口定义 |
 | 页面结构与业务交互 | [工作台交互](frontend/workbench-design.md) | 路由、命令、状态与权限，不拥有 token 色值 |
-| 页面效果图与开发输入 | [页面开发提示词](frontend/page-development-prompts.md)、[效果图目录](frontend/mockups/2026-09-19/README.md)、[最新知识库图](frontend/mockups/2026-09-27/README.md) | 原批次32张生成图与1张原始参考，另补充3张知识库图；仍为33个页面/状态单元，不代表实现或新增路由 |
+| 页面效果图与开发输入 | [方案 2 执行提示词](../prompts/ui-option-2-pages.md)、[本轮效果图](frontend/mockups/2026-10-02/README.md)、[逐页历史输入](frontend/page-development-prompts.md) | 本轮选定聊天图与37张页面/状态图；原批次与知识库补图由逐页入口链接保留。图片和提示词不代表实现、验收或新增路由 |
 | UI 视觉、组件与适配 | [设计系统](frontend/design-system.md) | 基于现有图；组件外观与可访问性交互，不重定义业务状态 |
 | UI 数值与语义别名 | [design-tokens.json](frontend/design-tokens.json) | 数值唯一来源；图片、提示词和 Markdown 不另维护可冲突数值表 |
 | 前端预览实现与验收 | [前端预览记录](development/前端预览实施与验收.md) | 按批次记录已实现交互、自测证据与待验证项；不是桌面验收 |

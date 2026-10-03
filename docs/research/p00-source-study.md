@@ -23,21 +23,23 @@
 
 用户要求克隆源码以便对照、参考。本次复用已有七个仓库，新增克隆 pg-boss 和 Vercel AI SDK；已核对九个仓库的 origin、HEAD、检出范围和工作树状态，工作树均无未提交变更。下列路径均相对项目根目录 `D:/Develop/Relay-Agent`，位于 `.gitignore` 排除的 `.research/` 中。
 
-此标题保留首批核验日期和既有锚点；DeepSeek 缓存于 2026-10-01 更新，清单该行及 §1.2 记录当前快照，其余行仍是首批核验结果。
+此标题保留首批核验日期和既有锚点；DeepSeek 缓存于 2026-10-01 更新，清单该行及 §1.2 记录当前快照。2026-10-02 又对其余落后仓库执行 `fetch` 与 `merge --ff-only`（先核对工作树干净，未改 remote、未改稀疏检出范围），清单“核验提交”列改为记录当前缓存提交，原提交作为历史锚点保留；Vercel AI SDK 只补取 `origin/main` 作为远程引用，未移动 HEAD，理由见本节末。
 
 | 项目 | 本地目录 | 核验提交 / 版本依据 | 工作树范围 | 对照用途 |
 |---|---|---|---|---|
-| Codex | `.research/upstream/codex` | `78245b47af2a`；首批锁文件 | 稀疏检出 | 会话、轮次事件、审批和中断 |
+| Codex | `.research/upstream/codex` | `e7ea5f4a8658`；原 `78245b47af2a`（首批锁文件） | 稀疏检出 | 会话、轮次事件、审批和中断 |
 | DeepSeek Harness | `.research/upstream/deepseek-harness` | `639ed015397290b3745d163aafe02ffee4aa3f84`；2026-10-01 fetch 的 `origin/master`，`dsh-v0.2.0-rc.2` | 稀疏检出；另展开六个 UI 包，见 §1.2 | 插件生命周期、Agent/driver 分离、工具准入、输入/审批/布局组件 |
-| Pi | `.research/upstream/pi` | `36b60d2e8985`；首批锁文件 | 稀疏检出 | Agent loop、消息转换、取消和工具钩子 |
-| LangChain | `.research/upstream/langchain` | `eba445b7563d`；首批锁文件 | 稀疏检出 | Agent factory、middleware 和人工决策 |
-| LangGraph | `.research/upstream/langgraph` | `aa742fb31e282`；首批锁文件 | 稀疏检出 | checkpoint、中断和重放恢复 |
-| Rig | `.research/upstream/rig` | `2d16c1b25f67`；首批锁文件 | 稀疏检出 | Rust AgentRunner、状态与 I/O 分离 |
-| Kysely | `.research/upstream/kysely` | `2fefd4c848cc3129281fac0632d2376c7a723ee4`；0.29.6 | 完整检出 | SQL、事务和 Migrator 锁处理 |
-| pg-boss | `.research/upstream/pg-boss` | `4e05af1eeaad3a645b16e3dd6c389fb4610ee0e9`；本次克隆时默认分支 HEAD | 完整检出 | PostgreSQL 队列、领取与唤醒机制，待研究 |
+| Pi | `.research/upstream/pi` | `7fbbd5f4a1d9`；`pi-agent-core` 1.0.0；原 `36b60d2e8985` | 稀疏检出 | Agent loop、消息转换、取消和工具钩子 |
+| LangChain | `.research/upstream/langchain` | `ff46bb478bbf`；原 `eba445b7563d`（首批锁文件） | 稀疏检出 | Agent factory、middleware 和人工决策 |
+| LangGraph | `.research/upstream/langgraph` | `157a06dda988`；原 `aa742fb31e282`（首批锁文件） | 稀疏检出 | checkpoint、中断和重放恢复 |
+| Rig | `.research/upstream/rig` | `acdcf34e5ade`；原 `2d16c1b25f67`（首批锁文件） | 稀疏检出 | Rust AgentRunner、状态与 I/O 分离 |
+| Kysely | `.research/upstream/kysely` | `996eae17fe32`；0.29.6；原 `2fefd4c848cc` | 完整检出 | SQL、事务和 Migrator 锁处理 |
+| pg-boss | `.research/upstream/pg-boss` | `8bbcf5815357`；12.35.1；原 `4e05af1eeaad` | 完整检出 | PostgreSQL 队列、领取与唤醒机制，待研究 |
 | Vercel AI SDK | `.research/vercel-ai` | `08ae5ad05bc12`；`ai@7.0.107`，实验锁文件 | 完整检出 | 模型流、工具 schema、审批和取消边界 |
 
 首批六项的历史完整提交及 origin 以本节上方的 [upstream-lock.json](upstream-lock.json) 为准；DeepSeek 当前缓存以 §1.2 的更新快照为准，首批锁文件和下文 P00/P07/P09 的固定提交证据保持历史基准。Vercel AI SDK 以 [AI SDK 实验锁文件](../../experiments/ai-sdk-p00/upstream-lock.json)为准，克隆命令见[实验说明](../../experiments/ai-sdk-p00/README.md)。新增清单来源为 [Kysely](https://github.com/kysely-org/kysely.git) 和 [pg-boss](https://github.com/timgit/pg-boss.git)。pg-boss 的提交仅记录本次源码快照，尚未开展源码研究或运行验证，不代表已选为生产依赖。
+
+`.research/vercel-ai` 的 fetch refspec 固定为 tag `ai@7.0.107`，HEAD 即该 tag 提交，而实验锁文件记录了同一提交与逐文件 sha256；移动 HEAD 会使实验证据基准失效，因此 2026-10-02 只补取 `origin/main`（`5b8e63bad820`，`ai` 7.0.127）作为远程引用。是否把实验推进到新版本属于实验范围，未在本轮决定。2026-10-02 七个 ff-only 更新同样只更换缓存提交，没有安装上游依赖、构建或运行上游测试；新旧机制差异的研究快照尚未写入本文件。
 
 九个仓库均为浅克隆，未取得完整 Git 历史。“完整检出”仅指当前提交的工作树文件；首批六项仍只展开选定目录，需要查阅其余源码时可在确认工作树干净后展开，例如：
 

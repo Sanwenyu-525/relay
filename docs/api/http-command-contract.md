@@ -30,6 +30,13 @@ HTTP 状态的使用依据 [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.htm
 
 相同 ID、相同内容返回原成功回执和原 HTTP 成功码，即使当前 revision 已变化；不会重复执行。相同 ID、不同内容返回 409 COMMAND_ID_REUSED。并发首次请求由唯一约束与业务锁裁决，失败事务回滚后读取胜出回执。
 
+**已实现约定（2026-10-02 F24 复验补记）：回执查询必须覆盖「取得候选行锁之后」这个位置。** 只在加锁前查一次是不够的：两个同 ID、同内容的并发请求都会通过那一次查询，然后一起等 `select ... for update`；胜出者连同业务效果和回执提交后，输的一方若不再查一次，就会把同一次操作的第二个视角误判成一次新决定。受影响的两个命令都改为在候选行锁到手后立即重查同 scope/command 的回执，存在则沿 `resolveExistingReceipt` 返回原结果（`command-replayed: true`）：
+
+- `POST /assist-proposals/{id}/accept` 的 Task Skill 路径：此前输的一方读到已 `ACCEPTED` 的提案，返回 409 `INVALID_TRANSITION`；
+- `POST /projects/{project_id}/blueprint-proposals/{id}/apply`：此前输的一方走 `ACCEPTED` 分支再插一条同 `command_id` 回执，撞唯一约束，返回 500 `INTERNAL_ERROR`。
+
+摘要不同仍由同一入口抛 `COMMAND_ID_REUSED`，幂等重放不放宽异内容；维护准入、来源、执行权、版本与摘要校验都在该位置之前完成，不因重查而跳过。反例见 `f24-proposal-idempotency.integration.test.ts`（真实 PG + HTTP，用受控行锁确认两个请求都已进入等待后再放行）。
+
 此设计使用 body 中的 expected_revision / expected_task_revision / expected_run_revision，不混用 If-Match。缺失必需版本返回 422，版本不匹配返回 409 REVISION_CONFLICT。首次失败而没有业务提交的请求不写成功回执；修正内容必须换 command_id。提交结果不确定时先查询回执或原样重试，不能自动换 ID。
 
 成功响应统一为：
@@ -550,6 +557,18 @@ Execute 为 SSRF 安全 GET（tool-adapters.md 第 3 节 + OWASP）：**每一�
 
 `0019_m04_draft_read_input` 为新 DRAFT 调用增加结构化输入 SHA-256 与原 `read_operation_id`/`read_invocation_id`（旧行保持 NULL）；操作历史的原正文不复制到计量表。FILE_READ/WEB_FETCH 成功证据按最多 16 KiB UTF-8 完整字符截取，并在 DRAFT 前按原 Manifest 估算口径计入预算；原正文 SHA-256、提取文本 SHA-256、实际片段 SHA-256 和 `UNTRUSTED_DATA` 标记随模型输入建立。额外元数据仍超预算则 DRAFT 以 `CONTEXT_REQUIRED_OVER_BUDGET` 失败且零模型调用。已结算类型化读取 `FAILED` 保留原操作和调用证据，Run 进入 FAILED、Task 释放回 READY；待处理控制意图仍先按安全点处理，`UNKNOWN` 仍需核对。**Breaking Change: No**：Delegate 参数、Run/Gateway HTTP DTO 与既有错误结构不变；本次改变的是新 Run 的内部动作顺序与模型输入。旧 DRAFT 已成功的 Run 保留旧顺序及原批准/操作身份。
 
+### 10.30 缓存用量与上下文占用分母（2026-10-02，开发自检）
+
+**Breaking Change: Yes（Assist 消息 `usage` 与 `/model-port` 响应新增字段）。** `GET /assist-sessions/{id}/messages?limit` 的 `usage` 从 `{input_tokens,output_tokens}` 扩为 `{input_tokens,output_tokens,cache_read_tokens,cache_creation_tokens}`，新增两项各为非负整数或 `null`。`null` 表示 Provider 未上报该字段，**不表示精确 0**——「没有缓存命中」与「Provider 没报」在协议上不可区分，UI 必须显示「未采集」而非 `0%`。按原两字段 schema 严格解析的客户端会因未知字段报错；本仓客户端已把这两项按可选字段处理（缺失等同 `null`），旧服务端无需升级。
+
+数据来源：`openai-compatible` 端口读取 Provider 的 `usage.prompt_tokens_details.cached_tokens` / `cache_write_tokens`（SDK 归一化为 `usage_metadata.input_token_details.cache_read` / `.cache_creation`），经既有 `validUsage()` 校验后原样落库。数据库关联 `0049_m04_model_call_cache_usage`：`model_calls` 与 `assist_messages` 各加两个可空列，历史行保持 `null`（迁移不回填，因为无法区分真实零与未知）；`USER` 消息由 CHECK 约束强制恒为 `null`——它从不是一次模型调用。检查约束保证 `cache_read + cache_creation ≤ input_tokens`，避免 Provider 口径不一致时落库自相矛盾。Fake 端口显式给 `null`：离线确定性模式不伪造计费事实。
+
+一处已知边界：LangChain SDK 的 `_streamResponseChunks` 用单个变量累积 usage，并在流结束时**只 yield 一次** usage chunk。若 Provider 把 `prompt_tokens_details` 与 token 数分开发送，SDK 层会用后到的裸 usage 覆盖，缓存读数丢失为 `null`。这是 SDK 行为，端口层无法补救；表现是「少报」而非「虚报」。
+
+`GET /model-port` 响应新增可空 `max_call_tokens`（整数或 `null`），即 `RELAY_MODEL_MAX_CALL_TOKENS`，供 UI 作为上下文占用的分母。`provider='fake'` 或配置残缺时为 `null`，客户端须据此显示「占用不可算」而不是回退到某个默认上限。这是**当前配置值**而非历史快照：配置变更后用它解释旧调用会失真，因此 UI 只把它用于「最近一次调用」的即时读数并旁标绝对 token 数，不作为可追溯的历史事实存储。
+
+此 DTO 仍不提供计费总额、金额或成本单价。上下文预算的既有 `ESTIMATED_UTF8_BYTES_DIV_3` 口径不变；圆环显示的是 Provider 报告的**输入 token** 与单次上限之比，不是模型上下文窗口占用率。
+
 ### 10.29 M05/P13 Today 与个人选择（2026-09-26，后端开发自检）
 
 **Breaking Change: No。** `POST /tasks/{task_id}/planning-metadata` 接受 `{command_id,expected_revision,priority,due_local_date,timezone}`；三个元数据字段必给，可分别用 `null` 清空，但日期/时区必须同空或同有。priority 为 `LOW/NORMAL/HIGH/null`，日期为真实 `YYYY-MM-DD`，时区为有效 IANA 名称。返回 200 原命令回执 `result={task_id,status,revision}`；Task 单读/列表增加 `priority,due_local_date,timezone`，元数据更新只推进 Task revision，不改变 acceptance_revision。历史 Task 的新字段为 NULL。
@@ -709,6 +728,8 @@ Delegate 校验资源属于当前 Workspace/Task Project，并在创建 Run 前�
 
 **Breaking Change: No。** 新增 `GET /api/v1/workspaces/{workspace_id}/model-port`：返回当前服务实例的模型端口状态 `{ provider: fake|openai-compatible|invalid, configured, model, base_url }`。配置来自进程环境变量（`RELAY_MODEL_PROVIDER` 等），`RELAY_MODEL_API_KEY` 永不返回、不出现在任何响应字段；`base_url` 已由端点策略保证为含公开 https 主机、无凭据/query/fragment 的完整地址。`provider=fake` 表示实例未配置真实模型（委托与 Assist 使用 Mock 模型端口，当前阶段既定门槛）；`invalid` 表示真实 Provider 配置残缺（生产进程本会拒绝启动，此状态供显式读取场景）。状态是实例级只读事实，不依赖 Workspace 数据；沿用 Bearer 边界，未授权 401，`workspace_id` 非 UUID 422。无写命令。验证：真实 PG/HTTP 集成 2 项（真实配置脱敏可见、未配置报 Mock）与单测 4 项。
 
+2026-10-02 增量（**Breaking Change: Yes，响应新增 `max_call_tokens`**）：同一响应增加可空 `max_call_tokens`，即 `RELAY_MODEL_MAX_CALL_TOKENS`，作为 UI 上下文占用圆环的分母；`fake` 与 `invalid` 为 `null`。其余字段、状态码与脱敏边界不变，详见 §10.30。
+
 ### 10.50 模型连接验证与最近验证状态（2026-09-29，整改实现）
 
 **Breaking Change: No。** 新增两个实例级端点，响应永不包含密钥或原始响应头。
@@ -745,3 +766,67 @@ Project 拥有接续点身份与说明；其他对象只保存捕获时的确切
 **升级风险（0045）**：若某库在 0044 期间已被写入不满足 `IS NOT NULL` 的引用行（当时应用角色自己就能写脏行），应用 0045 会因新增约束校验失败而**显式失败**，不会静默删行。该库需人工核对 `project_continuation_point_refs` 后再升级；V1 尚未在任何发布包中应用 0044，实际受影响库应为空。0044 本身已应用，内容摘要不得再改——包括注释。
 
 验证：真实 PG/HTTP 集成 4 项（捕获→重放→变化比较不产生第二套状态；跨作用域/非法输入/归档拒绝；成果版本引用的 `CURRENT`/`SUPERSEDED` 与新旧并存；应用角色插入 NULL 脏引用被 CHECK 拒绝）、迁移 8 项与 CLI 迁移台账 45 行、API 单测 136 项。接续点集成连续 3 次运行全绿。独立验收过程与两轮结论见 [N01 验收记录](../testing/n01-independent-acceptance.md)。真实 Windows 人工路径未做。
+
+### 10.52 N02 跨成果候选组与组合检查单（2026-10-02，开发自检）
+
+**Breaking Change: No。** 迁移 `0050_n02_impact_candidate_groups` 只新增 `artifact_impact_candidate_groups`、`artifact_impact_candidate_group_items`、`artifact_combination_checks` 与 `artifact_combination_check_items` 四张表，不改动既有表、列、索引或约束。以下四个端点均为新增路径，沿用 `/api/v1/workspaces/{workspace_id}` 前缀与 Bearer/Workspace 边界。Artifact、Task、Verification 与 Assist 的形状和状态机均未改变。
+
+候选组只回答「哪几个确切目标被放在一起看」：Application 协调，Artifact 仍是版本与锁的唯一 Owner。组**不保存成果正文、不调用模型、不产生候选、不推进任何 revision、不授予执行权**，也不承诺跨多个成果的全有或全无。逐项应用继续走既有 `POST /impact-candidates/{candidate_id}/apply`，组只旁读该命令的回执。组合检查单是覆盖快照，不是 Verification 会话：它没有整体结论列，也不新增 `verification_sessions` 行。
+
+| 端点 | 行为 |
+|---|---|
+| POST /api/v1/workspaces/{workspace_id}/impact-checks/{impact_check_id}/candidate-groups | 201；接收 `command_id` 与 `target_version_ids`（1–10 项、不重复）。每项必须逐项来自该检查已登记的直接引用，否则 409 `INVALID_TRANSITION`；空数组、重复项或超限在 schema 层 422。来源成果修订已变化或变化后版本不再最新时 409。相同 `command_id` 同内容返回原回执（`Command-Replayed: true`） |
+| GET /api/v1/workspaces/{workspace_id}/impact-candidate-groups/{group_id} | 组与逐项当前状态：`relation`、`speculative`、`availability`、`analysed`、`target_artifact_revision`、`target_is_current_version`、`candidate_id`/`candidate_status`/`candidate_error_code`/`candidate_stale`、`applied_version_id`，以及 `summary`（`total`/`applied`/`with_candidate`/`without_candidate`/`stale_candidates`/`unavailable`）、沿用检查本身的 `unanalysed_scope` 与 `combination_check_ids`。跨 Workspace 一律 404 |
+| POST /api/v1/workspaces/{workspace_id}/impact-candidate-groups/{group_id}/combination-checks | 201；接收 `command_id` 与 `artifact_version_ids`（1–20 项、不重复）。每项必须落在该组的来源 after 版本或目标版本范围内，否则 409；所选版本跨 Task 时 409——跨 Task 的整体判断仍归原验收流程。返回 `combination_check_id`、`item_count`、`gap_count` |
+| GET /api/v1/workspaces/{workspace_id}/combination-checks/{combination_check_id} | 覆盖快照：`overall_result` 恒为 `NONE`，`overall_note` 固定说明这不是整体验收结论；逐项给出 `is_current_version`、`readable`、`verification_session_id`、`verification_status`，外加 `gaps[]` 与 `stale`（验收修订或任一版本身份已变化）。跨 Workspace 一律 404 |
+
+`gap` 只记录**当时可计算**的缺口，不用推断补齐：正文不可读、已不是当前版本、在该 Task 当前验收修订下没有单项验证会话、单项验证状态不是 `PASS`、验证适用性已被撤销、组内某条登记引用在当前事实中不存在，以及检查本身范围被截断或超上限。「登记引用不存在」按检查实际登记的父版本（**变化前版本**）复核 `artifact_lineage_edges`，与 `startArtifactImpactCheck` 取边口径一致；核变化后版本会把每条正常登记的引用误报为不存在。单项验证会话按 `task_id + acceptance_revision` 过滤并另行核对适用性撤销，因此多个单项 `PASS` 也不能被折算成组合通过。
+
+**客户端约定**：`overall_result` 不是 `NONE` 的响应必须被前端拒绝，不渲染为整体结论；`gaps` 为空只表示本单未发现缺口，不表示组合已通过。候选组可以收下 AI 推测项并标 `speculative`，但推测项的确认门槛在候选生成命令上强制，进组不构成确认。首片不含候选间依赖联动、不完整选择的拒绝、组级回滚与外部格式来源。
+
+验证：真实 PG/HTTP 集成 3 项（建组→重放不产生第二个组→逐项应用后部分成功如实呈现且 Task 修订只推进一次；未登记目标/重复目标/来源变化后再建组/跨作用域读取被拒；组合检查绑定确切版本集合、正常路径不产生「登记引用不存在」缺口、该边确实消失时缺口出现、并逐项列出无验证会话的缺口）。迁移与 CLI 台账基线随目录当前 51 行（`cli.integration.test.ts` 的迁移清单此前停在 0047/47 行、已落后于实际库，本轮更正；该显式清单是「CLI 不重复应用已落地迁移」的回归断言本身，每新增一个迁移都需同步）。真实 Windows 差异审阅与 PV08 体验记录未做。首轮独立验收结论为 CHANGES_REQUESTED，唯一阻塞项（登记引用缺口核错父版本造成每项假缺口）与两项 P3 已修复并复跑，独立复验结论见[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
+### 10.53 N03 项目知识导读编排与整理候选（2026-10-02，开发自检）
+
+**Breaking Change: No。** 迁移 `0052_n03_project_knowledge_guide` 新增 `project_knowledge_guides` 与 `project_knowledge_guide_entries` 两张表；`0053_n03_knowledge_curation_candidates` 新增 `knowledge_curation_candidates` 一张表。均不改写既有表、列、索引或约束。以下七个端点均为新增路径，沿用 `/api/v1/workspaces/{workspace_id}` 前缀与 Bearer/Workspace 边界。Knowledge、Decision、Rule、Artifact 的形状与状态机均未改变。
+
+导读由 Project 拥有；条目只保存确切引用与人工标签，**不复制正文，也不维护第二份当前状态或 revision**。知识、决定、规则、成果版本四类目标各用一个可空外键列，`ref_kind` 与「恰好一个目标列非空」由 CHECK 强制——用 `IS NOT NULL` 判定而非等值比较，正是为了避免 `0044` 曾出现的「NULL 求值为 NULL 而非 FALSE，脏行可落库」陷阱。`PINNED` 钉住确切知识版本，`CURRENT` 只作导航、读取时解析到当前版本；两者必须能分辨，因此只有 `KNOWLEDGE` 允许 `PINNED` 且必须给出 `pinned_version_id`。
+
+整理候选只由**用户主动请求**产生，是「可能重复」的人工提示与建议归类，不是模型判断：它不自动合并、不自动删除、不改写任何 Rule / Decision，也不因相似度自行产生知识版本。相似提示只按标题字面（完全相同或去空白后公共前缀 ≥4 字）给出并附理由，**前缀阈值只是启发式，不是相似度结论**。接受复用既有 `AddKnowledgeVersion` / `CreateKnowledge`，因此新版本照样不可变、照样要人工验收。
+
+| 端点 | 行为 |
+|---|---|
+| GET /api/v1/workspaces/{workspace_id}/projects/{project_id}/knowledge-guide | `{ project_id, exists, revision, entry_count, entries, gaps }`。逐条给出 `ref_kind`、`reference_mode`、`target_id`、`label`、`title`、`resolved_version_id`、`resolved_version_number`、`target_status`、`is_current`、`resolution`（`AVAILABLE`/`ARCHIVED`/`SUPERSEDED`/`STALE`/`CROSS_SCOPE`/`MISSING`）与中文 `note`。固定引用解析不到时为 `MISSING`，**不静默换成当前版本**；项目不存在或跨 Workspace 一律 404 |
+| PUT .../projects/{project_id}/knowledge-guide | 200；接收 `command_id`、`expected_revision` 与 `entries`（0–200 项）。整份替换式保存（编辑导读就是替换清单），故条目可 DELETE，但它们指向的知识版本/决定/规则/成果版本仍不可变。每项必须且只能提供与 `ref_kind` 对应的一个 ID；同一对象不得重复；`label` 1–200 字。跨项目引用、`PINNED` 缺版本或版本不属于该知识、`CURRENT` 却带版本、非知识类型 `PINNED` 一律 409 `INVALID_TRANSITION`；schema 层错 422。**取得 Project 行锁后会再查一次原回执**，因此同 `command_id` 的顺序重放与并发都返回原回执（`Command-Replayed: true`）且只推进一次修订；仅在修订确实被**别的**命令改动时才 409 `REVISION_CONFLICT`。返回 `revision` 与 `entry_count` |
+| POST .../projects/{project_id}/knowledge-curation-candidates | 201；接收 `command_id` 与 `sources`（1–10 项，各含 `artifact_version_id` 与可选 `suggested_title`）。只接受本项目成果版本，否则 409。返回 `candidate_ids`；此刻**不产生任何知识版本** |
+| GET .../projects/{project_id}/knowledge-curation-candidates | `{ items }`，按创建时间倒序、最多 20 条。每项含来源成果版本号、`suggested_title`、`suggested_knowledge_id`（**仅本项目**知识中字面完全相同者；工作空间级知识不会被建议为收录目标）、`similar[]`（含 `reason`）、`status`（`PROPOSED`/`ACCEPTED`/`REJECTED`/`STALE`）、接受结果、`rejected_at` 与 `stale_reason`。**终态优先于缺口**：已接受或已拒绝的候选 `stale_reason` 恒为 `null`。先复核 Project 作用域，跨 Workspace 404 |
+| POST .../projects/{project_id}/knowledge-curation-candidates/{candidate_id}/accept | 200；接收 `command_id`。**不是独立命令，但满足契约第 2 节的幂等语义**：「锁候选 → 复核 → 写知识版本 → 绑定候选 → 写回执」全部在**同一个事务**内完成。命令不可嵌套，因此复用既有 `CreateKnowledge` / `AddKnowledgeVersion` 的 execute 主体（新增 `*InTransaction` 变体，不再自开事务、不再自写回执），由本端点写自己那一条回执。返回 `candidate_id`、`knowledge_id`、`knowledge_version_id`、`knowledge_revision` 与 `mode`（`CREATED`/`NEW_VERSION`）。同 `command_id` 同内容重放或并发都返回原回执并带 `Command-Replayed: true`，不会产生第二个知识版本；来源成果已变化、已接受或已拒绝均 409；跨 Workspace 404 |
+| POST .../projects/{project_id}/knowledge-curation-candidates/{candidate_id}/reject | 200；返回 `{ candidate_id, status: 'REJECTED' }`。已接受的候选 409；拒绝后不能再接受 |
+
+`POST .../accept` 不套 `createCommandHandler`，因为命令不可嵌套；它自己写一条 `command_type` 为 `AcceptKnowledgeCurationCandidate` 的回执，因此查询回执请用该 `command_id` 查这一类型，而不是内层知识命令的类型。**这是与其它命令不同的实现方式，不是幂等语义上的例外。**
+
+**已知限制**：`resolution: MISSING` 在当前 API 下**实际不可达**——`AddKnowledgeVersion` 拒绝已归档知识，且 `knowledge_versions` 有外键保护无法删除，因此钉住的确切版本不会消失。该分支为纵深防御，不是常规业务路径，不得据此宣称已具备「来源消失后的恢复」。
+
+验证：真实 PG/HTTP 集成 5 项（导读 `PINNED` 与 `CURRENT` 可分辨、知识新增版本后 `PINNED` 仍解析到钉住版本并标 `STALE`、`CURRENT` 跟随当前、保存不改写被引用对象也不新增知识版本、旧修订 409 与同命令重放；错配目标/重复条目/跨 `PINNED` 组合/跨项目引用 409 与五种脏行被 CHECK 拒绝；跨 Workspace 读写 404、被替代的决定标 `SUPERSEDED` 且不静默换成新决定；候选只提示不合并且提示后既有知识版本数不变、接受后版本 +1 且旧版本不被覆盖、已接受/已拒绝/来源变化后均不能再接受、跨项目成果不能提候选、**拒绝后读取报 `REJECTED` 且 `stale_reason` 为空**、**工作空间级同名知识不作为建议归入目标**；**接受与拒绝并发 3 轮只能得到一个结论，被拒候选不留孤立知识版本；同 `command_id` 顺序重放与并发接受都返回原回执且只产生一个知识版本；同 `command_id` 并发保存导读只推进一次修订**）。迁移与 CLI 台账基线补至 53 行。前端已接入：知识页「项目知识导读」开关内为编排视图，成果版本谱系页底部为整理候选面板，交互见[工作台交互第 12.4 节](../frontend/workbench-design.md#124-项目知识导读n03-形态2026-10-02规划已确认前后端均已接入)。真实 Windows 阅读与 PV03/PV08 体验记录仍未做，**没有使用收益结论**。
+
+首轮独立验收结论为 CHANGES_REQUESTED，发现 1 个 P1（接受不锁候选行，与拒绝并发时被拒候选仍产生知识版本且该版本在候选审计链上无归属）与 4 个 P2（拒绝态在读取模型中丢失、接受与保存的同 `command_id` 并发/重放不返回原回执、工作空间级同名知识造成永久死路），均已修复并由上述并发与终态用例覆盖。独立复验结论见[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
+### 10.53 文件夹入口与对话执行请求（2026-10-02，源码实现）
+
+**Breaking Change: No**（新增端点与一个可选的委托字段）。迁移 `0051_conversation_execution_requests` 只追加 `conversation_execution_requests` 一张表；Task、Run、Review、Assist、Gateway 的既有状态与路由不变。`POST /tasks/{task_id}/delegations` 新增**可选** `cli_run_action`，不传时行为与迁移前完全一致。
+
+`POST /working-directories/open` 是写命令（可能建立最小 Project 与受管资源），因此**页面读取不得调用它**；`command_id` 回执在目录此后被移动或删除时仍按原结果重放。
+
+`InterpretConversationMessage` 与 `ApplyConversationExecution` 是两个命令：模型调用发生在事务外，候选先落库；第二步按请求行上固定的三个阶段命令身份调用既有 `CreateTask` / `MarkTaskReady` / `DelegateTask`，重放只重放原回执，不会产生第二个 Task 或 Run。**模型只解释，授权来源永远是请求里的 `source_message_id` 指向的那条原用户消息。**
+
+| 端点 | 行为 |
+|---|---|
+| POST /api/v1/workspaces/{workspace_id}/working-directories/open | 200。需要 `command_id`、`root_path`（1–1024），可选 `project_id`。`status` 为 `READY` / `AMBIGUOUS` / `NOT_READY`；`AMBIGUOUS` 表示同一实际目录关联了多个项目，需再带 `project_id` 选一次；`NOT_READY` 带稳定 `reason`（`MULTIPLE_PROJECTS` / `PROJECT_ARCHIVED` / `RESOURCE_DISABLED` / `OVERLAPPING_OTHER_PROJECT`）。`write_readiness` 只是**只读**投影现有连接与权限，不创建连接、不放宽权限。已有重叠受管根时不会新开项目造出第二个写 Owner。不存在或不是目录 422。 |
+| POST /api/v1/workspaces/{workspace_id}/assist-sessions/{session_id}/execution-requests | 202。需要 `command_id`、`source_message_id`（该会话内一条已完成的 USER 消息）、`resource_id`（同项目 ACTIVE 受管资源）。返回 `decision`、`status`、`candidate_status`、`questions` 与候选摘要。原消息不属于该会话、非 USER 消息、未完成、会话未绑定 Project 或资源不可用时 409。同一原消息或同一 `command_id` 重放返回同一条请求，不重付模型整理成本。 |
+| POST /api/v1/workspaces/{workspace_id}/conversation-execution-requests/{request_id}/applications | 200。按固定的阶段命令身份建立真实 Task → READY → Delegate。候选不是 `READY`、受管资源不可用、或项目缺少绑定该目录的 `FILE_WRITE` / `CLI_RUN` 连接时 409 并给出具体原因；本端点**不创建连接、不放宽权限**。重复调用返回同一个 `task_id` 与 `run_id`。 |
+| GET /api/v1/workspaces/{workspace_id}/conversation-execution-requests?session_id= | `{ items: 会话内最近的执行请求摘要[] }`，只读，不创建对象、不外呼。 |
+| GET /api/v1/workspaces/{workspace_id}/conversation-execution-requests/{request_id} | 单条执行请求投影；不属于该 Workspace 时 404。 |
+
+`cli_run_action` 只接受一个 `executable` 与 1–32 个字符串 `args`（可选 `max_output_bytes` ≤ 1 MiB），永远经 `shell: false` 的 CLI adapter 执行。它可与 `file_write_action` 组成「先改文件、再跑一次检查」的链；与 `mock_gateway_action`、`file_read_action`、`web_fetch_action` 混用一律 409。`FILE_WRITE` 与 `CLI_RUN` 都不是 `approvalPassthrough` 能力，因此每一次真实动作仍单独产生一条 `ACTION_APPROVAL` Review。
+
+验证覆盖见[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。本节不含本轮运行结果。

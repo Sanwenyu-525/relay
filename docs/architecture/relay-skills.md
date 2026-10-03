@@ -6,6 +6,8 @@
 
 本次后端事实：`goal-to-project-blueprint@1.0.0` 通过 Project Assist 生成严格 JSON 建议，生成时重读当前 Project/State/Task、显式选择的同 Workspace ACTIVE Goal、内置 View；`thesis-minimal`/`development-minimal@1.3.0` 固定引用该 Skill 与已交付的三项第一方 Skill。旧 Skill/Pack 版本定义与摘要保留。蓝图 `USER_DRAFT` 和 `SKILL` 走同一不可变候选、服务端 Diff、摘要确认和单事务 Apply：Goal 只关联已有目标，新 Task 仅 HUMAN/ME/INBOX，State 使用类型化阶段与 Next Action，View 只切固定 kind；后续 Rule/Workflow/Permission 建议不在本次事务中生效。当前实现没有项目级 Pack 绑定或自动授权。详见 [HTTP 契约 §10.33–10.34](../api/http-command-contract.md)。
 
+2026-10-02 F24 接续的两点实测边界。其一，接受与 Apply 的并发幂等已按 [HTTP 契约第 2 节](../api/http-command-contract.md#2-命令身份并发与回执)补齐：候选行锁之后必须重查同 `command_id` 回执，否则同一次操作的第二个视角会被误判成新决定（Assist 侧 409 `INVALID_TRANSITION`、蓝图侧 500 `INTERNAL_ERROR`）。其二，**首批 Skill 的真实 Provider 完成率不是 100%，且四项表现不同**：同一固定配置下 `goal-to-project-blueprint@1.0.0` 的蓝图候选生成在 7 次真实调用中 7 次满足严格输出契约，而 `task-to-execution-contract@1.1.0` 在 10 次真实调用中 7 次通过、3 次以 `OUTPUT_SCHEMA_INVALID` 收敛（Provider 调用本身 `COMPLETED`、用量与 request ID 齐全，失败发生在本地严格解析阶段且不留业务效果）。因此「首批四 Skill 已交付」不等于「稳定可重复」；具体拒绝字段仍未定位，不在此声称已修复，也不把单轮全绿当作稳定性结论。成绩只见[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
 ## 1. 定义与最小范围
 
 Relay Skill 是面向特定工作意图、可复用、可版本化、具有明确输入输出契约的 Agent 能力包。它组合 Instructions、Context Profile、Workflow Binding、Capability Requirements、Output Schema、Verification，以及可选 Workbench 模板；不是单独的 Runtime 或新的业务事实层。

@@ -8,6 +8,8 @@
 
 句柄级边界的候选、代价和 Windows 竞争反例见 [ADR-012](../decisions/ADR-012-windows-file-io-handle-boundary.md)（Proposed）；当前没有把方案当作已实现保护。
 
+2026-10-02 root-bound 能力配置可达性：`FILE_READ`/`FILE_WRITE`/`GIT_READ`/`GIT_WRITE`/`CLI_RUN` 一直是 `resolveConnectionConfig` 认定的 root-bound 能力，但工作台连接与权限页此前只提供 `WEB_FETCH`/`FILE_READ`/`FAKE_WRITE`/`FAKE_PUBLIC_READ`，因此这四种能力只能由 HTTP 或运维 CLI 建立。现 UI 按同一 `rootBoundCaps` 词表展示全部 8 项，root-bound 必填绝对目录、Fake 不绑定边界，策略侧除 `WEB_FETCH`/`FAKE_PUBLIC_READ` 外必须绑定 ACTIVE 受管资源；一条真实连接只绑定一个边界的 422 拒绝由服务端保留。真实 PG 集成反例覆盖 `GIT_READ`/`CLI_RUN` 连接创建、查询不回显目录、混入主机/混入 `WEB_FETCH`/缺目录/目录不存在，以及 `GIT_READ` 策略按受管资源前缀落 `GIT_STATUS`。这只闭合**配置**入口：`prepareGatewayAction` 当前只接受 `RUN` 与 `USER_IMPORT` 两种 origin，且非 RUN 只放行 `FAKE_PUBLIC_READ`/`WEB_FETCH`，所以人工触发的 Git 状态/diff、暂存、提交、推送与受控 CLI 仍无公开入口；补齐它需要新增 origin 词表迁移与对应准入/派发/核对分支，属 M06 未完成出口，本轮不实施也不因此放行 M06。
+
 Windows 路径语法补强已在 `validateSafeRelativePath` 拒绝 ADS 冒号、保留设备名（含 COM/LPT 上标数字）、禁用字符与控制字符及尾随空格/点；变化集、Delegate 和单文件 `WRITE_FILE` 的 Prepare 共用该校验。此处只阻断确定性的路径别名，不能消除已登记根、父目录或目标在检查与 I/O 之间被替换的竞争。
 
 2026-09-27 验收退回项修复增量：M06 真实工具原 14 项 PG 用例独立复跑通过，但新增 3 项反例失败并整体退回。三项 P1 已按下述修复并完成开发自检——CLI 在 `DISPATCHING` 丢失结果（含缺 PID）时保守判 `UNKNOWN` 且隔离资源，不再误作 `STOPPED/FAILED` 释放资源；`APPLY_CHANGESET` 的 `MODIFY`/`DELETE` 强制有效冻结基线并在落盘前无条件比对，人工批准不可替代；受保护路径改为「先按规范化后的根内相对路径再判定」，`./.env`、`src/../.env`、`foo/../.git/config`、Windows 反斜杠与大小写等价形式均在 prepare 拒绝。定向 real-tools 隔离 PG 复跑 21/21 全绿（含 3 项原反例转绿与 4 项边界反例），Gateway 28/28、恢复 17/17、CLI 5/5、单测 107/107 与类型检查通过。**当时 M06 仍为 IN_PROGRESS，三项 P1 待协调 Agent 独立复验；本日后续结果见上方当前边界**；下文各节的保护与恢复描述据此更新为已成立边界。根因、修复出口与验收日志见 [M06 独立验收](../testing/m06-independent-acceptance.md)。
@@ -30,7 +32,31 @@ Prepare 持久化原 Operation；RUN 的 Worker/Task/Run 与 USER_IMPORT 的 Job
 
 P09 初版当时没有真实网络请求或 Git/CLI 执行；后续 M04/M06 已分别加入受控 WEB_FETCH、Git 和 CLI 适配器，具体边界见下文。当前仍没有进程沙箱或生产 Worker 管理器。`reconcileGatewayInvocation` 是内部端口，调用方须给出与旧 Worker ID/epoch 对应的停机依据；公开 HTTP 只提供配置命令及脱敏的 Operation/Invocation 历史查询，不提供强制成功或绕行准入的入口。链接/重定向、目录变化、子进程和可核对效果须按真实工具分别验证，不从 Fake 测试推断这些边界已通过。
 
+### 1.2 本次任务范围内的工具授权（2026-10-03）
+
+状态：用户已确认交互规则，具体准入协议待设计、代码未接入。Relay 内部工具循环采用本次任务范围授权：有效权限及已确认范围内的文件搜索、读取、Git status/diff 自动进行；普通文件编辑和已配置检查命令可以连续执行。删除文件、Git 提交/推送与扩大任务范围须再次确认；系统禁止项仍为 DENY。范围授权不由模型生成或工具正文授予。
+
+范围授权与单动作 ACTION_APPROVAL 分开：前者用于限定本次任务可 AUTO 执行的动作，后者仍按[契约 03](../../contracts/03-verification-and-approval.md#6-approval-的精确授权对象)绑定确切动作及参数，不用一次 Review 批准覆盖未来未知动作。每次执行仍复核当前权限、作用域、文件基线、资源互斥与取消状态；权限撤销、基线冲突和 UNKNOWN 继续阻止后续不满足准入的动作。
+
+与当前实现的差异：`gateway-actions.ts` 的 prepare/admit 会把不支持 approval passthrough 的适配器 AUTO 降为 ASK，文件写入与 CLI 尚不能按上述规则自动连续执行。实施时须同时调整准备与执行前复核，并保留旧单动作审批的绑定与恢复语义。范围授权的持久字段、版本、有效期及撤销协议待冻结；本次只确认规则，不修改现有权限或执行状态。
+
+### 1.3 首批内部工具范围（2026-10-03）
+
+状态：用户已确认首批范围，模型工具循环及完整出口待实现。首批目标是完整本地开发闭环：目录浏览、文件名/路径查找、内容搜索、文件读取、新建/编辑/删除、文件修改差异、Git status/diff/log，以及已配置的测试和构建检查。删除仍按 §1.2 再次确认，并继续受既有禁止项约束；非 Git 目录也应提供基于实际基线和修改结果的文件差异，不要求先建立 Git 仓库。
+
+接入复用现有 FILE_READ、FILE_WRITE/APPLY_CHANGESET、GIT_READ 与 CLI_RUN 适配器及 Run/Gateway 入口；目录浏览与搜索能力、模型连续调用及 Git 只读触发链须补齐。检查只使用已配置的检查命令，首批不开放任意 Shell。工具名称、输入输出及持久化协议在实施前冻结，不能把本段能力名称直接当作已发布 API 或新增持久枚举。
+
+Git 暂存、提交和推送不进入本轮新增模型工具集，后续再接入；已有 GIT_WRITE 底层适配器与历史动作保留。首批按「查找/读取 → 修改 → 查看差异 → 检查 → 根据实际结果继续修正」闭合，不以模型自报完成代替原验证与业务完成入口。
+
 ## 2. Files
+
+2026-10-03 用户确认默认修改位置：Relay 内部工具循环直接在用户打开并登记为受管资源的原目录执行文件修改。编辑前记录实际读取基线并在写入前复核，保留用户及其他执行者的已有改动；发现基线变化时停止覆盖并处理冲突。原目录修改继续受任务范围授权、资源互斥及逐文件执行证据约束。
+
+此规则替代此前优先隔离副本/worktree 的默认建议。隔离执行保留为后续可选方向，首批接入不要求自动创建副本或 worktree；Git 和非 Git 目录均采用上述默认位置。此次只确认目标交互与默认流程，不代表新的工具循环已实现。
+
+2026-10-03 用户确认基线冲突处理：在能够确定原修改尚未产生副作用时，保留用户的新改动，重新读取文件并生成新的变化集；能够明确区分且互不冲突的修改可在原授权范围内自动适配一次。修改相互冲突、无法判断影响或再次发生冲突时停止并展示差异，等待用户确认。新变化集绑定新的读取基线，旧意图及冲突证据保留；不能仅将旧目标内容配上新的基线摘要来覆盖用户修改，单动作审批也不能继承给内容或参数已变化的新动作。
+
+上述自动适配只处理已确定没有写入的基线冲突。部分写入、缺回执或 UNKNOWN 仍先按原 Operation/Invocation 核对，不创建新动作绕过未决效果或资源隔离。此项为已确认目标规则，当前固定动作链尚无自动重新读取与适配循环。
 
 READ_MANAGED_VERSION 读取不可变资料；READ_WORKSPACE_FILE 只对已连接根读取并记录 hash。WRITE_CANDIDATE 始终发布新受管版本；APPLY_CHANGESET 才是工作目录写操作。
 
@@ -70,7 +96,7 @@ V1 不承诺对系统外编辑器的绝对并发隔离。对受管存储可控�
 
 只对显式登记仓库/隔离副本使用可信 git executable 和结构化参数。读取 status/diff/log 禁用外部 diff/textconv 等非必要执行路径；受信配置需考虑 hooks、filter、credential helper 等真实可执行因素。Git 只读命令名称不代表任意仓库配置都无副作用。
 
-开发候选优先放隔离 worktree，并记录原仓库身份、基线 commit、分支和 worktree；Git worktree 有共享仓库元数据，仍需对应资源锁，不是安全沙箱。[Git worktree 文档](https://git-scm.com/docs/git-worktree)
+默认修改位置按 [Files 的原目录规则](#2-files)执行，原先优先隔离 worktree 的建议已于 2026-10-03 调整。隔离 worktree 保留为后续可选方向；接入时仍须记录原仓库身份、基线 commit、分支和 worktree，并保护共享仓库元数据对应的资源锁。Git worktree 不是安全沙箱。[Git worktree 文档](https://git-scm.com/docs/git-worktree)
 
 | 能力 | 默认策略 | 审批/证据 |
 |---|---|---|

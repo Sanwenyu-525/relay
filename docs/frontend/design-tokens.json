@@ -1,9 +1,9 @@
 {
   "metadata": {
-    "version": "0.3.0",
+    "version": "0.4.0",
     "status": "Proposed",
     "theme": "light",
-    "updated": "2026-10-01",
+    "updated": "2026-10-02",
     "format": "Relay 文档用扁平 token 数据；不是 DTCG 兼容声明或已集成的主题包。",
     "basis": "2026-10-01 用户选定工作主线图作为当前重做基准；历史参考保留。色值为归一推荐，尺寸/响应式待实际页面与 Windows 验证。",
     "unit": "rem 按桌面 WebView 默认 16 CSS px 解释，保留字号缩放；window.content.* 的 number 单位为逻辑 DIP，不能当成物理像素或 rem。",
@@ -17,7 +17,8 @@
       "mockups/2026-09-29/collaboration-dialogue-window.png",
       "mockups/2026-09-29/collaboration-development-tools.png",
       "mockups/2026-09-29/component-states.png",
-      "mockups/2026-10-01/work-first.png"
+      "mockups/2026-10-01/work-first.png",
+      "mockups/2026-10-02/conversation-workspace-selected.png"
     ]
   },
   "tokens": {
@@ -340,19 +341,23 @@
     },
     "font.size.section": {
       "$type": "dimension",
-      "$value": "1.5rem"
+      "$value": "1.75rem",
+      "$description": "区域标题与右栏标题；2026-10-01 由 1.5rem 上调，对齐工作主线图里右栏标题与正文、导航的层级差。正文仍用 body/reading，不随本值放大"
     },
     "font.size.page": {
       "$type": "dimension",
-      "$value": "{font.size.compactPage}"
+      "$value": "2.5rem",
+      "$description": "普通页面主标题；2026-10-01 由 compactPage(1.75rem) 放开，理由是 1.75rem 让首屏标题不起眼、与工作主线图的层级不符。窄窗统一降到 compactPage，规则见 design-system 第 4 节，不逐页硬编码"
     },
     "font.size.display": {
       "$type": "dimension",
-      "$value": "3.5rem"
+      "$value": "3.5rem",
+      "$description": "保留的历史展示型尺寸；2026-10-01 起页面主标题不再使用它，空态与窄窗尤其不用"
     },
     "font.size.compactPage": {
       "$type": "dimension",
-      "$value": "1.75rem"
+      "$value": "1.75rem",
+      "$description": "窄窗与紧凑位置的页面标题，以及普通页面主标题在 max-width:40rem 时的回落值"
     },
     "font.weight.regular": {
       "$type": "fontWeight",
@@ -382,9 +387,15 @@
       "$type": "number",
       "$value": 1.6
     },
+    "layout.navigation.railWidth": {
+      "$type": "dimension",
+      "$value": "5.5rem",
+      "$description": "全局图标导航栏列宽。2026-10-02 共享壳栏位分离时新增：导航只承担定位，近期工作改由 layout.sidebar.width 承担。栏宽取自方案 2 选定稿的图标+文字竖排比例，未按图片物理像素硬编码。"
+    },
     "layout.sidebar.width": {
       "$type": "dimension",
-      "$value": "14rem"
+      "$value": "14rem",
+      "$description": "近期工作栏默认列宽，也是可拖拽列的上限内基准（SidebarResizeHandle 从本 token 推导默认值）。2026-10-02 起不再包含主导航。"
     },
     "layout.collaboration.chatRatio": {
       "$type": "number",
