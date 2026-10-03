@@ -148,6 +148,9 @@ function Invoke-Pnpm {
   Push-Location $Directory
   try {
     & $node $corepack 'pnpm@9.15.9' @Arguments
+    # 用户按 Ctrl+C 时控制台向整个进程组广播 CTRL_C_EVENT，tauri/cargo 以 STATUS_CONTROL_C_EXIT 结束。
+    # 这是预期内的停止方式（finally 仍会收尾），不能当成工具失败抛错。
+    if ($LASTEXITCODE -eq -1073741510) { return }
     if ($LASTEXITCODE -eq 23 -and ($Arguments -join ' ') -eq 'exec tauri dev') {
       throw 'Relay 单实例锁检查未通过（退出码 23）。请查看上方宿主原因；若提示已有实例，请关闭已有窗口或等待维护会话结束后重试；现有数据已保留。'
     }

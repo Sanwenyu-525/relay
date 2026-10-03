@@ -14,10 +14,23 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1') -Force -ErrorAction Stop
 $root = Split-Path -Parent $PSScriptRoot
-if ($Action -eq 'Menu' -and ($FrontendOnly -or $PSBoundParameters.ContainsKey('FrontendPort') -or $SkipBuild -or $SkipInstall -or $SmokeSeconds)) {
+$interactive = $Action -eq 'Menu'
+if ($interactive -and ($FrontendOnly -or $PSBoundParameters.ContainsKey('FrontendPort') -or $SkipBuild -or $SkipInstall -or $SmokeSeconds)) {
+  $interactive = $false
   $Action = 'Preview'
 }
-if ($Action -eq 'Menu') {
+if ($interactive) {
+  # Ctrl+C 只结束当前动作并回到菜单，而不是关掉启动器：屏蔽 PowerShell 自身的终止处理，
+  # Ctrl+C 仍会送达 tauri/cargo/Vite 等子进程，由它们各自清理，finally 照常执行。
+  # handler 里只能做纯 .NET 赋值：控制事件线程没有 runspace，放 cmdlet 会抛异常并连带终止本进程。
+  $null = [Console]::add_CancelKeyPress([ConsoleCancelEventHandler] {
+    param($sender, $event)
+    $event.Cancel = $true
+  })
+}
+do {
+# 交互模式每轮都重新显示菜单：不能用 $Action 判断，它仍是上一次选中的动作。
+if ($interactive) {
   Write-Host "Relay 桌面测试版`n1. 启动测试版`n2. 打包最新测试版`n3. 停止测试环境（保留数据）`n4. 查看状态和目录`n5. 浏览器开发预览`n6. 桌面开发窗口（热更新，无需重新打包）`n0. 退出"
   switch (Read-Host '请选择') {
     '1' { $Action = 'Start' }
@@ -27,11 +40,14 @@ if ($Action -eq 'Menu') {
     '5' { $Action = 'Preview' }
     '6' { $Action = 'DesktopDev' }
     '0' { return }
-    default { throw 'Unknown selection' }
+    default { Write-Host '无效选项，请重新选择。' }
   }
+  # switch 里不能用 continue（它只跳出 switch），所以在外面判断是否需要重新提示。
+  if ($Action -eq 'Menu') { continue }
 }
 if ($Action -eq 'Preview') {
   & (Join-Path $PSScriptRoot 'dev-stack.ps1') -FrontendOnly:$FrontendOnly -FrontendPort $FrontendPort -SkipInstall:$SkipInstall -SkipBuild:$SkipBuild -SmokeSeconds $SmokeSeconds
+  if ($interactive) { continue }
   return
 }
 $package = Join-Path $root 'test-release'
@@ -53,7 +69,10 @@ New-Item -ItemType Directory -Path $trial -Force | Out-Null
 try {
   $lock = [IO.File]::Open((Join-Path $trial 'launcher.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
 } catch [IO.IOException] {
-  throw '已有测试启动器或桌面开发会话正在运行，请先在其终端按 Ctrl+C 停止，再操作测试环境。'
+  $busy = '已有测试启动器或桌面开发会话正在运行，请先在其终端按 Ctrl+C 停止，再操作测试环境。'
+  if (-not $interactive) { throw $busy }
+  Write-Host $busy
+  continue
 }
 $savedEnvironment = @{}
 foreach ($key in @('RELAY_DB_URL', 'RELAY_MIGRATION_DB_URL', 'RELAY_DESKTOP_CONFIG_PATH', 'RELAY_DESKTOP_DATA_ROOT')) {
@@ -87,6 +106,7 @@ try {
     if (@(Get-TrialProcesses).Count) { throw 'Close the desktop window before rebuilding.' }
     & (Join-Path $root 'apps\desktop\scripts\build-release.ps1') -TestPackage -SkipInstall:$SkipInstall
     Write-Host "测试包已生成：$package"
+    if ($interactive) { continue }
     return
   }
   if ($Action -eq 'Status') {
@@ -99,6 +119,7 @@ try {
     Write-Host "Package processes: $(@(Get-TrialProcesses).Count)"
     if (Test-Path -LiteralPath $statePath) { Write-Host "PostgreSQL running: $((Get-PgStatus) -eq 0)" }
     else { Write-Host 'Trial has not been initialized.' }
+    if ($interactive) { continue }
     return
   }
   if ($Action -eq 'Stop') {
@@ -107,6 +128,7 @@ try {
       if ((Get-PgStatus) -eq 0) { Invoke-Checked $pgCtl @('stop', '-D', $cluster, '-m', 'fast', '-w', '-t', '30') }
     }
     Write-Host "测试环境已停止，数据已保留：$trial"
+    if ($interactive) { continue }
     return
   }
   if ($Action -eq 'DesktopDev' -and (Get-Process -Name 'relay-desktop' -ErrorAction SilentlyContinue)) {
@@ -115,6 +137,7 @@ try {
   if (@(Get-TrialProcesses).Count) {
     if ($Action -eq 'DesktopDev') { throw '测试包进程仍在运行，请先关闭测试版，再启动桌面开发窗口。' }
     Write-Host 'The trial is already running. Use its existing window.'
+    if ($interactive) { continue }
     return
   }
   foreach ($file in @($exe, $node, $pgCtl, $psql, (Join-Path $package 'desktop-build-manifest.json'))) {
@@ -212,8 +235,11 @@ try {
   Write-Host "Trial prepared. Workspace: $($state.workspace_id)`nData retained at: $trial"
 } catch {
   Write-Host 'Trial data has been preserved. If PostgreSQL started, use dev-stack.bat Stop after closing the desktop.'
-  throw
+  if (-not $interactive) { throw }
+  Write-Host "操作失败：$($_.Exception.Message)"
+  Write-Host '已返回菜单。'
 } finally {
   foreach ($key in $savedEnvironment.Keys) { [Environment]::SetEnvironmentVariable($key, $savedEnvironment[$key], 'Process') }
   $lock.Dispose()
 }
+} while ($interactive)

@@ -244,6 +244,20 @@ fn desktop_bootstrap(window: WebviewWindow, state: tauri::State<'_, RuntimeState
     })
 }
 
+/// 宿主只负责选出目录，不解析、不登记、不写任何业务事实。
+/// 取消选择返回 `Ok(None)`，由调用方保留草稿，不当作失败。
+#[tauri::command]
+async fn select_working_directory(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    tauri_plugin_dialog::DialogExt::dialog(&app).file().pick_folder(move |picked| {
+        let _ = sender.send(picked);
+    });
+    let picked = receiver.recv().map_err(|error| error.to_string())?;
+    picked.map(|path| path.into_path().map(|value| value.to_string_lossy().into_owned()))
+        .transpose()
+        .map_err(|error| error.to_string())
+}
+
 #[cfg(windows)]
 struct SingleInstanceGuard { handle: HANDLE }
 #[cfg(windows)]
@@ -1008,6 +1022,7 @@ pub fn run() {
         std::process::exit(SINGLE_INSTANCE_EXIT_CODE);
     });
     let result = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             let state = start_api(app.handle(), #[cfg(windows)] single_instance)?;
             app.manage(state);
@@ -1016,7 +1031,7 @@ pub fn run() {
             create_window(&handle, &state)?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_bootstrap])
+        .invoke_handler(tauri::generate_handler![desktop_bootstrap, select_working_directory])
         .on_window_event(|window, event| {
             if window.label() == "main" && matches!(event, WindowEvent::Destroyed) {
                 window.state::<RuntimeState>().stop();
