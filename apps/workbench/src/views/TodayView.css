@@ -3,7 +3,7 @@
 .today-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; padding: var(--relay-layout-main-padding); }
 
 /* 主标题使用 compactPage：空态与窄窗不铺 display 尺寸，保留宋体标题气质（角色规则见 design-system）。 */
-.today-main > h1 { margin-bottom: var(--relay-space-2); font-size: var(--relay-font-size-compactPage); }
+.today-main > h1 { margin-bottom: var(--relay-space-2); font-size: var(--relay-font-size-page); }
 .today-page .page-lede { margin-top: 0; margin-bottom: var(--relay-space-3); color: var(--relay-color-text-secondary); }
 .today-intro-note { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--relay-space-2);
   margin-bottom: var(--relay-space-4); }
@@ -162,6 +162,7 @@
 
 @media (max-width: 700px) {
   .today-page { padding: var(--relay-layout-main-smallPadding); }
+  .today-main > h1 { font-size: var(--relay-font-size-compactPage); }
   .today-query { align-items: stretch; flex-direction: column; gap: var(--relay-space-3); }
   .today-task__forms form { width: 100%; }
 }

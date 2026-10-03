@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { RelayApiError, type RelayCompletionEvidence } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import ResponsiveRail from "../components/ResponsiveRail";
+import PageHeader from "../components/PageHeader";
 import { useRelayConnection } from "../lib/relayConnection";
 import { useDisplayPreferences } from "../lib/displayPreferences";
 import "./CompletionRecordView.css";
@@ -42,8 +43,9 @@ export default function CompletionRecordView() {
       timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
     }).format(date);
   }
-  return <section className="completion-page" data-testid="completion-record"><div className="page-layout"><div className="page-primary"><Link className="text-link completion-back" to="/tasks">返回任务列表</Link><h1>{evidence === null ? "完成凭据" : evidence.isCurrent ? "这项工作已完成" : "历史完成依据"}</h1>
-    <p className="page-lede">按这一次完成提交时的验收版本与证据读取；重开后旧凭据仍是历史记录，不用当前最新版替代。</p>
+  return <section className="completion-page" data-testid="completion-record"><div className="page-layout"><div className="page-primary"><Link className="text-link completion-back" to="/tasks">返回任务列表</Link><PageHeader testId="completion-page-head"
+    title={evidence === null ? "完成凭据" : evidence.isCurrent ? "这项工作已完成" : "历史完成依据"}
+    lede="按这一次完成提交时的验收版本与证据读取；重开后旧凭据仍是历史记录，不用当前最新版替代。" />
     {client === null ? <p className="warning-callout" role="status">示例数据没有真实完成凭据。<Link to="/tasks">返回任务</Link></p> : <>
       <button className="secondary-button" type="button" onClick={() => { setLoaded(null); setFailure(null); setReload((value) => value + 1); }}>重读凭据</button>
       {!evidence && !error && <p role="status">正在读取完成凭据…</p>}

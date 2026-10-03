@@ -1,6 +1,6 @@
 .settings-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; padding: var(--relay-layout-main-padding); }
 .settings-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--relay-space-3) var(--relay-space-6); margin-bottom: var(--relay-space-6); }
-.settings-heading > h1 { margin: 0; font-size: var(--relay-font-size-compactPage); }
+.settings-heading > h1 { margin: 0; font-size: var(--relay-font-size-page); }
 .settings-heading > .page-lede { margin: 0; font-size: var(--relay-font-size-body); }
 .settings-card { margin-top: var(--relay-space-6); }
 .settings-layout { display: grid; gap: var(--relay-space-6); }
@@ -50,5 +50,6 @@
 @media (max-width: 700px) {
   .settings-page { padding: var(--relay-layout-main-smallPadding); }
   .settings-page > h1 { font-size: var(--relay-font-size-compactPage); }
+  .settings-heading > h1 { font-size: var(--relay-font-size-compactPage); }
   .settings-definition-list > div { grid-template-columns: 1fr; gap: var(--relay-space-1); }
 }

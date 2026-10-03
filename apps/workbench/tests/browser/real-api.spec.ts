@@ -37,9 +37,15 @@ test("真实 API 人工闭环：创建项目与任务、启动、版本、当前
   expect(taskId).toBeTruthy();
 
   await page.getByRole("button", { name: "返回任务入口" }).click();
-  await page.locator(".app-sidebar").getByRole("link", { name: "项目" }).click();
-  await page.locator('input[name="live-project-id"]').fill(projectId!);
-  await page.getByTestId("projects-live-open").click();
+  // 2026-10-02 共享壳栏位分离后主导航在图标导航栏，不再是合并的 .app-sidebar。
+  await page.locator(".app-navrail").getByRole("link", { name: "项目" }).click();
+  // 按已知 Project ID 打开是右栏里默认收起的次级入口（项目列表优先按名称选择，技术 ID 保留在详情里），
+  // 这里显式展开它，顺带证明该折叠入口在真实 API 下可达。
+  const openById = page.locator(".rail-content details.page-explanation",
+    { has: page.locator('input[name="live-project-id"]') });
+  await openById.locator("summary").click();
+  await openById.locator('input[name="live-project-id"]').fill(projectId!);
+  await openById.getByTestId("projects-live-open").click();
   await expect(page.getByTestId("project-task-start")).toBeEnabled();
   await page.getByTestId("project-task-start").click();
   await expect(page.getByText("已开始：", { exact: false })).toBeVisible();
@@ -47,6 +53,9 @@ test("真实 API 人工闭环：创建项目与任务、启动、版本、当前
   await expect(page.getByTestId("task-detail")).toContainText("M02 真实人工任务");
 
   await page.getByTestId("task-detail-tab-artifacts").click();
+  // 还没有产物版本时正文区默认落在「编辑」；一旦存在已保存版本就默认展示「已保存正文」，
+  // 编辑器要显式切过去。两次保存都显式切换，不依赖默认页签。
+  await page.getByRole("tab", { name: "编辑" }).click();
   await page.locator('textarea[name="artifact-content"]').fill("# 真实自检\n\n产物包含自检结论。");
   await page.getByTestId("artifact-save").click();
   await expect(page.getByTestId("artifact-save-receipt")).toContainText("v1");
@@ -54,6 +63,7 @@ test("真实 API 人工闭环：创建项目与任务、启动、版本、当前
   await connect(page);
   await page.getByTestId("task-detail-tab-artifacts").click();
   await expect(page.locator('input[name="artifact-version"]')).toHaveCount(1);
+  await page.getByRole("tab", { name: "编辑" }).click();
   await page.locator('textarea[name="artifact-content"]').fill("# 第二版\n\n刷新后仍续写同一个产物。");
   await page.getByTestId("artifact-save").click();
   await expect(page.getByTestId("artifact-save-receipt")).toContainText("v2");
@@ -73,6 +83,8 @@ test("真实 API 人工闭环：创建项目与任务、启动、版本、当前
   await page.reload();
   await connect(page);
   await page.getByTestId("task-detail-tab-artifacts").click();
+  // 版本与接受选择默认收在「版本详情与接受选择」里；选用、接受与完成都从那里发起，先显式展开。
+  await page.getByTestId("artifact-versions").locator("summary").click();
   await expect(page.getByTestId(`artifact-version-${firstVersionId}`)).toBeVisible();
   await expect(page.getByTestId(`artifact-version-${secondVersionId}`)).toBeVisible();
   await expect(page.locator('input[name="artifact-version"]:checked')).toHaveCount(0);
@@ -86,6 +98,7 @@ test("真实 API 人工闭环：创建项目与任务、启动、版本、当前
   await page.reload();
   await connect(page);
   await page.getByTestId("task-detail-tab-artifacts").click();
+  await page.getByTestId("artifact-versions").locator("summary").click();
   await expect(page.getByTestId(`artifact-version-${firstVersionId}`).locator("xpath=ancestor::li")).toContainText("本轮接受");
   await expect(page.getByTestId(`artifact-version-${secondVersionId}`).locator("xpath=ancestor::li")).toContainText("当前选用");
   await expect(page.getByTestId(`artifact-version-${secondVersionId}`).locator("xpath=ancestor::li")).not.toContainText("本轮接受");
@@ -95,6 +108,7 @@ test("真实 API 人工闭环：创建项目与任务、启动、版本、当前
   await page.reload();
   await connect(page);
   await page.getByTestId("task-detail-tab-artifacts").click();
+  await page.getByTestId("artifact-versions").locator("summary").click();
   await expect(page.getByTestId(`artifact-version-${firstVersionId}`).locator("xpath=ancestor::li")).not.toContainText("本轮接受");
   console.log("real API browser human path: refresh preserves artifact history and separates selected/accepted pointers PASSED");
 });

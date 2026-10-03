@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Info, RotateCcw } from "lucide-react";
 import ReviewDecisionPanel, { isReviewExpired, reviewReasonText } from "../components/ReviewDecisionPanel";
 import ArtifactReaderPanel from "../components/ArtifactReaderPanel";
+import PageHeader from "../components/PageHeader";
 import { RelayTransportError, type RelayReview } from "../api/relayClient";
 import { reviewKindLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
@@ -101,7 +102,10 @@ export default function ReviewsView() {
 
   return <section className="review-page" data-testid="review-inbox"><div className="review-columns">
     <div className="review-primary">
-      <header className="review-heading"><div><h1>等待你的判断</h1><p className="page-lede">{loading ? "正在核对请求" : `${reviews.length} 项请求 · 查看对象与依据后逐项处理`}</p></div><button className="secondary-button" type="button" disabled={loading || refreshing} onClick={() => void load()}><RotateCcw aria-hidden="true" />{refreshing ? "正在更新" : "刷新"}</button></header>
+      <PageHeader title="等待你的判断" testId="review-page-head"
+        meta={loading ? "正在核对请求" : `${reviews.length} 项请求 · 查看对象与依据后逐项处理`}
+        actions={<button className="secondary-button" type="button" data-testid="review-refresh" disabled={loading || refreshing}
+          onClick={() => void load()}><RotateCcw aria-hidden="true" />{refreshing ? "正在更新" : "刷新"}</button>} />
       {!live && <p className="warning-callout">当前为只读示例。连接本机 API 后可处理真实 Review 请求。</p>}
       {error && <p className="action-error" role="alert">{error}</p>}
       <section className="review-list" aria-label="待审请求">
@@ -122,11 +126,12 @@ export default function ReviewsView() {
           </button>)}
         </>}
       </section>
-      {live && connection.client && selected?.taskId && typeof selected.target.artifact_version_id === "string" && !error && !loading && !refreshing && (selectedId === null || selected.id === selectedId) &&
-        <section className="review-reading" aria-label="阅读判断对象" data-testid="review-bound-reader"><h2>判断对象</h2>
-          <ArtifactReaderPanel key={`${connection.epoch}:${selected.id}:${selected.revision}`} client={connection.client} taskId={selected.taskId} projectId={selected.projectId}
-            selectedVersionId={selected.target.artifact_version_id} draft={null} /></section>}
     </div>
+    {/* 判断对象是待处理页的主体：确切正文单独成列，不埋在列表下方被挤出首屏。 */}
+    {live && connection.client && selected?.taskId && typeof selected.target.artifact_version_id === "string" && !error && !loading && !refreshing && (selectedId === null || selected.id === selectedId) &&
+      <section className="review-reading" aria-label="阅读判断对象" data-testid="review-bound-reader"><h2>判断对象</h2>
+        <ArtifactReaderPanel key={`${connection.epoch}:${selected.id}:${selected.revision}`} client={connection.client} taskId={selected.taskId} projectId={selected.projectId}
+          selectedVersionId={selected.target.artifact_version_id} draft={null} /></section>}
     {selected && (selectedId === null || selected.id === selectedId) ? <article className="review-detail" aria-label="所选待审请求详情">
       <div className="review-detail-heading"><h2>为何需要你</h2><span className={`status-chip status-chip--${selected.status === "OPEN" && !isReviewExpired(selected) ? "warning" : "neutral"}`}>{status(selected)}</span></div>
       <p className="review-reason">{reviewReasonText(selected.reason)}</p>

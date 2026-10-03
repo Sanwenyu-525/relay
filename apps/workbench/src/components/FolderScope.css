@@ -1,0 +1,100 @@
+/* 文件夹入口与对话内执行摘要。数值仍来自 design-tokens.json，这里只做结构与排版。 */
+
+.folder-scope {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-3);
+  margin-block: var(--relay-space-4);
+}
+
+.folder-scope-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--relay-space-2);
+}
+
+.folder-scope-recents ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-1);
+}
+
+.folder-scope-recents li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--relay-space-2);
+}
+
+.folder-scope-ambiguous {
+  border: 1px solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  padding: var(--relay-space-3);
+}
+
+.folder-scope-ambiguous ul {
+  list-style: none;
+  margin: var(--relay-space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-2);
+}
+
+.folder-scope-ambiguous li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--relay-space-2);
+}
+
+.folder-scope-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-2);
+  padding: var(--relay-space-3);
+  border-bottom: 1px solid var(--relay-color-border-separator);
+}
+
+.folder-scope-bar > p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--relay-space-2);
+  margin: 0;
+}
+
+.execution-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-2);
+  margin: var(--relay-space-2) 0;
+  padding: var(--relay-space-3);
+  border: 1px solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+}
+
+.execution-summary--prepare {
+  border-color: var(--relay-color-palette-forest);
+}
+
+.execution-summary--clarify {
+  border-color: var(--relay-color-palette-amber);
+}
+
+.execution-summary-stage {
+  margin: 0;
+  font-weight: 600;
+}
+
+.execution-summary-title,
+.execution-summary-question {
+  margin: 0;
+}
+
+.execution-summary > p {
+  margin: 0;
+}

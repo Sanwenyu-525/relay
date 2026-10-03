@@ -111,3 +111,102 @@ test("协作工作区与效果图对齐取样", async ({ page }) => {
   writeFileSync(`${outRoot}/ui-align-layout.json`, JSON.stringify(measurements, null, 2));
   console.log(JSON.stringify(measurements, null, 2));
 });
+
+// 六类普通页面的标题字号：只读示例模式，无连接、无业务写入。
+// 量的是「实际渲染出来的 px」而不是 CSS 里的 token 名，避免改 token 后各处降级不一致。
+test("普通页面标题与区域标题字号取样", async ({ page }) => {
+  const routes = ["/today", "/projects", "/tasks", "/knowledge", "/reviews", "/settings", "/connections", "/activity"];
+  const rows: Record<string, unknown>[] = [];
+  mkdirSync(`${outRoot}/ordinary-1280x720`, { recursive: true });
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 720 });
+    for (const route of routes) {
+      await page.goto(route, { waitUntil: "domcontentloaded" });
+      await page.waitForTimeout(700);
+      const row = await page.evaluate(() => {
+        const px = (selector: string) => {
+          const element = document.querySelector(selector);
+          return element ? getComputedStyle(element).fontSize : null;
+        };
+        return {
+          h1: px("h1"),
+          section: px("h2"),
+          rootScrollWidth: document.documentElement.scrollWidth,
+          viewportWidth: window.innerWidth
+        };
+      });
+      rows.push({ route, width, ...row });
+      if (width === 1280) {
+        await page.screenshot({ path: `${outRoot}/ordinary-1280x720/${route.replace(/\//g, "") || "root"}.png` });
+      }
+    }
+  }
+  writeFileSync(`${outRoot}/ui-align-ordinary-type.json`, JSON.stringify(rows, null, 2));
+  for (const row of rows) {
+    console.log(`${row.width}px  ${row.route}  h1=${row.h1}  h2=${row.section}  scrollW=${row.rootScrollWidth}/${row.viewportWidth}`);
+  }
+});
+
+// 共享壳栏位分离与聊天任务头：只用真实 Tab/Enter 路径，不直接调用组件方法。
+// 记录两列实际栏宽、近期工作选中态、完整名称入口的可达性，以及窄窗是否退回抽屉。
+test("共享壳两列与完整名称键盘入口取样", async ({ page }) => {
+  const rows: Record<string, unknown>[] = [];
+  mkdirSync(`${outRoot}/shell-columns`, { recursive: true });
+  for (const viewport of [{ name: "1487x1058", width: 1487, height: 1058 }, { name: "1280x720", width: 1280, height: 720 }]) {
+    await open(page, viewport.width, viewport.height);
+    await page.screenshot({ path: `${outRoot}/shell-columns/${viewport.name}.png` });
+    rows.push({ viewport: viewport.name, ...(await page.evaluate(() => {
+      const width = (selector: string) => {
+        const element = document.querySelector(selector);
+        return element ? Math.round(element.getBoundingClientRect().width) : null;
+      };
+      const handle = document.querySelector('[data-testid="sidebar-resize-handle"]') as HTMLElement | null;
+      return {
+        navRail: width(".app-navrail"),
+        contextRail: width(".app-context-rail"),
+        content: width(".app-content"),
+        railVisible: getComputedStyle(document.querySelector(".app-navrail")!).display !== "none",
+        resizeHandleLeft: handle ? Math.round(handle.getBoundingClientRect().left) : null,
+        activeRecentWork: document.querySelector(".recent-work-item--active")?.textContent ?? null,
+        // 拖拽分隔条必须落在两列之间，而不是页面最左或内容中间。
+        handleOnRailEdge: handle
+          ? Math.abs(handle.getBoundingClientRect().left + handle.getBoundingClientRect().width / 2
+            - (document.querySelector(".app-navrail")!.getBoundingClientRect().width
+              + document.querySelector(".app-context-rail")!.getBoundingClientRect().width)) < 14
+          : null,
+        rootScrollWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth
+      };
+    })) });
+  }
+
+  // 完整名称：Tab 能走到标题链接并显示焦点，Enter 进入确切任务页。
+  await open(page, 1280, 720);
+  await page.getByTestId("collab-page-head-title-link").focus();
+  const focused = await page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
+  const linkName = await page.getByTestId("collab-page-head-title-link").evaluate((node) => ({
+    text: node.textContent, href: node.getAttribute("href")
+  }));
+  await page.keyboard.press("Enter");
+  await page.waitForURL(/\/tasks\//, { timeout: 15_000 });
+  const landed = new URL(page.url()).pathname;
+  rows.push({ keyboardNameEntry: { focused, ...linkName, landed } });
+
+  // 窄窗：两列收起，导航与近期工作改由抽屉承担。
+  await open(page, 960, 640);
+  rows.push({ narrow: await page.evaluate(() => ({
+    navRail: getComputedStyle(document.querySelector(".app-navrail")!).display,
+    contextRail: getComputedStyle(document.querySelector(".app-context-rail")!).display,
+    rootScrollWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth
+  })) });
+  await page.getByLabel("打开导航").click();
+  await page.waitForTimeout(300);
+  rows.push({ narrowDrawer: await page.evaluate(() => ({
+    completeNav: document.querySelectorAll('nav[aria-label="完整导航"] a').length,
+    recentWork: document.querySelectorAll('[data-testid^="recent-work-"]').length
+  })) });
+
+  writeFileSync(`${outRoot}/ui-align-shell.json`, JSON.stringify(rows, null, 2));
+  console.log(JSON.stringify(rows, null, 2));
+});

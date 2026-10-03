@@ -4,6 +4,7 @@ import type { RelayApiClient, RelayKnowledge, RelayKnowledgeVersion,
   RelayKnowledgeVersionContent } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { formatReadableDateTime, useDisplayPreferences } from "../lib/displayPreferences";
+import PageHeader from "./PageHeader";
 import SafeMarkdown from "./SafeMarkdown";
 
 interface Props {
@@ -18,6 +19,12 @@ interface Props {
 const sourceLabels: Readonly<Record<string, string>> = {
   NOTE: "本地笔记", MANAGED_TEXT: "已保存文本", ARTIFACT_VERSION: "产物版本引用",
   WEB_PAGE: "已保存网页快照",
+};
+
+/** 正文状态是阅读页的第一事实：不能只藏在来源栏，也不能因为折叠而看不见。 */
+const contentStatusLabels: Readonly<Record<string, string>> = {
+  FULL: "全文", PARTIAL: "仅部分正文", UNAVAILABLE: "正文不可用",
+  UNSUPPORTED: "格式不支持", READ_FAILED: "读取失败"
 };
 
 export default function KnowledgeReader({ client, knowledge, versions, initialVersion, onNewVersion, newVersionDisabled }: Props) {
@@ -78,10 +85,22 @@ export default function KnowledgeReader({ client, knowledge, versions, initialVe
       </nav>
     </aside>}
     <div className="knowledge-reader__main">
-      <header className="knowledge-reader__heading">
-        <h1>{content?.title ?? knowledge.title}</h1>
-        <p>{sourceLabels[content?.sourceKind ?? selected?.sourceKind ?? ""] ?? "资料"} · {knowledge.projectId ? "项目资料" : "工作空间"}</p>
-      </header>
+      {/* 阅读页头：名称、确切版本与状态同行，来源与保存时间一行；原件与编辑入口是本页首屏动作。
+          正文状态不可折叠——PARTIAL / 读取失败必须常驻，不能只留在来源栏。 */}
+      <PageHeader title={content?.title ?? knowledge.title} testId="knowledge-reader-head"
+        status={content ? <span className={`status-chip${content.contentStatus === "FULL" ? "" : " status-chip--warning"}`}>
+          {contentStatusLabels[content.contentStatus] ?? content.contentStatus}</span> : null}
+        meta={<>{content ? (sourceLabels[content.sourceKind] ?? content.sourceKind) : sourceLabels[selected?.sourceKind ?? ""] ?? "资料"}
+          {" · "}{knowledge.projectId ? "项目资料" : "工作空间"}
+          {content && <>{" · "}v{content.version}{content.version === content.currentVersion ? "（当前版本）" : "（历史版本）"}</>}
+        </>}
+        actions={<>
+          {typeof sourceUri === "string" && /^https?:\/\//iu.test(sourceUri)
+            && <a className="secondary-button" href={sourceUri} target="_blank" rel="noopener noreferrer"
+              data-testid="knowledge-open-source">打开当前原件</a>}
+          {onNewVersion && <button type="button" className="primary-button knowledge-reader__edit" data-testid="knowledge-new-version"
+            disabled={newVersionDisabled} onClick={onNewVersion}>编辑为新版本</button>}
+        </>} />
       <div className="knowledge-reader__toolbar">
         <label className="field" htmlFor="knowledge-reader-version"><span className="visually-hidden">阅读版本</span>
           <select id="knowledge-reader-version" value={version} data-testid="knowledge-reader-version"
@@ -118,7 +137,6 @@ export default function KnowledgeReader({ client, knowledge, versions, initialVe
         <dt>保存时间</dt><dd><time dateTime={content.createdAt} title={timeZone}>{formatReadableDateTime(content.createdAt, timeZone)}</time></dd>
         <dt>所选版本</dt><dd>v{content.version}{content.version === content.currentVersion ? " · 当前" : " · 历史"}</dd></dl>
       {typeof artifactVersionId === "string" && <p><Link to={`/artifact-versions/${encodeURIComponent(artifactVersionId)}/lineage`}>查看确切产物版本来源</Link></p>}
-      {typeof sourceUri === "string" && /^https?:\/\//iu.test(sourceUri) && <p><a href={sourceUri} target="_blank" rel="noopener noreferrer">打开当前网页原件</a><small>原件可能已变化；阅读的是保存时快照。</small></p>}
       </> : <p className="helper-text">{loading ? "正在读取所选版本的来源…" : "所选版本的正文来源尚不可用。"}</p>}
       <section className="knowledge-reader__version-note"><h3>版本说明</h3>
         <p>历史引用始终指向原版本；编辑会保存为新版本，不会更新已有引用。</p>
@@ -127,8 +145,6 @@ export default function KnowledgeReader({ client, knowledge, versions, initialVe
         <li key={item.id}><button type="button" className="text-button" onClick={() => setVersion(item.version)}
           aria-current={item.version === version ? "true" : undefined}>v{item.version} · {sourceLabels[item.sourceKind] ?? item.sourceKind}</button>
           <p>{item.excerpt ?? "该版本引用受管产物，无内联摘录。"}</p></li>)}</ol></details>
-      {onNewVersion && <button type="button" className="primary-button knowledge-reader__edit" data-testid="knowledge-new-version"
-        disabled={newVersionDisabled} onClick={onNewVersion}>编辑为新版本</button>}
       <p className="helper-text">阅读不会将正文发送给 AI；使用范围由现有选源与权限决定。</p>
     </aside>
   </section>;

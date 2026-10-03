@@ -6,6 +6,7 @@ import AssistView from "./AssistView";
 import BlueprintView from "./BlueprintView";
 import ProjectResumeView from "./ProjectResumeView";
 import ResponsiveRail from "../components/ResponsiveRail";
+import PageHeader from "../components/PageHeader";
 import type { RelayProjectGoal } from "../api/blueprintDtos";
 import type { RelayApiClient, RelayDecision, RelayProject, RelayProjectState, RelayReview, RelayTaskSummary } from "../api/relayClient";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
@@ -96,9 +97,9 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
   const type = project.projectType in projectTypeLabels ? projectTypeLabels[project.projectType as ProjectType] : project.projectType;
   const activeGoals = goals?.filter((goal) => goal.status === "ACTIVE") ?? null;
   return <section className="skill-page project-overview" data-testid="project-overview-live"><div className="page-layout"><div className="page-primary">
-    <header className="list-header"><div><p className="eyebrow">{type} · {phaseLabel(state.phaseKey)}</p><h1>{project.title}</h1></div>
-      <button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}><RotateCcw aria-hidden="true" />刷新</button></header>
-    <p className="page-lede">{activeGoals && activeGoals.length ? activeGoals.map((goal) => goal.title).join("；") : `${type}项目 · ${phaseLabel(state.phaseKey)}`}</p>
+    <PageHeader testId="project-overview-page-head" title={project.title} meta={`${type} · ${phaseLabel(state.phaseKey)}`}
+      lede={activeGoals && activeGoals.length ? activeGoals.map((goal) => goal.title).join("；") : `${type}项目 · ${phaseLabel(state.phaseKey)}`}
+      actions={<button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}><RotateCcw aria-hidden="true" />刷新</button>} />
     {project.archivedAt !== null && <p className="warning-callout" role="status">项目已归档，本页只读；不能再提交新的写命令。</p>}
     {goals === null && <p className="warning-callout" role="alert">Goal 关系本次读取失败，目标范围待核对。</p>}
     <section className="resume-section project-next-step"><h2>下一步</h2>
@@ -168,8 +169,7 @@ function FixtureProjectOverview() {
   const typeLabel = summary.projectType in projectTypeLabels ? projectTypeLabels[summary.projectType as ProjectType] : summary.projectType;
   const phaseText = phaseLabel(summary.phase);
   return <section className="skill-page project-overview" data-testid="project-overview-fixture"><div className="page-layout"><div className="page-primary">
-    <p className="eyebrow">项目 · 示例数据</p><h1>{summary.title}</h1>
-    <p className="page-lede">{summary.goal}</p>
+    <PageHeader testId="project-overview-page-head" title={summary.title} meta="项目 · 示例数据" lede={summary.goal} />
     <section className="resume-section"><h2>项目当前状态</h2>
       <p className="metadata-row">状态 v{summary.stateRevision}<span aria-hidden="true"> · </span>{typeLabel}<span aria-hidden="true"> · </span>阶段：{phaseText}</p>
       <p className="disabled-reason"><CircleDashed aria-hidden="true" />示例视图：确认人、确认时间与「已确认 / 仍需明确」清单为设计概念，服务端接口待接入。</p>

@@ -17,5 +17,12 @@
 .lineage-diff-columns > div { min-width: 0; }
 .lineage-uses ul { padding: 0; list-style: none; }
 .lineage-uses li { padding: var(--relay-space-3) 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.knowledge-curation__propose { display: flex; flex-wrap: wrap; align-items: end; gap: var(--relay-space-4); margin: var(--relay-space-4) 0; }
+.knowledge-curation__propose label { display: grid; gap: var(--relay-space-2); min-width: 0; }
+.knowledge-curation__list { padding: 0; list-style: none; }
+.knowledge-curation__list li { padding: var(--relay-space-4) 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); overflow-wrap: anywhere; }
+.knowledge-curation__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--relay-space-2); }
+.knowledge-curation__status { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); }
+.knowledge-curation__actions { display: flex; flex-wrap: wrap; gap: var(--relay-space-3); margin-top: var(--relay-space-3); }
 @media (max-width: 700px) { .lineage-page { padding: var(--relay-layout-main-smallPadding); } .lineage-summary dl div { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .lineage-diff-columns { grid-template-columns: 1fr; } }

@@ -344,6 +344,103 @@ export interface RelayArtifactImpactCandidate {
   readonly stale: boolean; readonly appliedVersionId: string | null;
 }
 
+/** N02：组只旁读既有候选回执，逐项应用仍走 applyArtifactImpactCandidate。 */
+export interface RelayImpactCandidateGroupItem {
+  readonly ordinal: number;
+  readonly targetArtifactId: string; readonly targetVersionId: string;
+  readonly relation: string; readonly speculative: boolean;
+  readonly availability: string; readonly analysed: boolean;
+  readonly targetArtifactRevision: DecimalRevision;
+  readonly targetIsCurrentVersion: boolean;
+  readonly candidateId: string | null; readonly candidateStatus: string | null;
+  readonly candidateErrorCode: string | null; readonly candidateStale: boolean;
+  readonly appliedVersionId: string | null;
+}
+
+export interface RelayImpactCandidateGroup {
+  readonly id: string; readonly impactCheckId: string;
+  readonly sourceArtifactId: string;
+  readonly sourceBeforeVersionId: string; readonly sourceAfterVersionId: string;
+  readonly sourceArtifactRevision: DecimalRevision; readonly createdAt: string;
+  readonly stale: boolean;
+  readonly items: readonly RelayImpactCandidateGroupItem[];
+  readonly summary: { readonly total: number; readonly applied: number;
+    readonly withCandidate: number; readonly withoutCandidate: number;
+    readonly staleCandidates: number; readonly unavailable: number };
+  readonly unanalysedScope: readonly string[];
+  readonly combinationCheckIds: readonly string[];
+}
+
+/** N03 项目知识导读只存确切引用与人工标签，不复制正文，也不维护第二份 revision。 */
+export interface RelayKnowledgeGuideEntry {
+  readonly ordinal: number;
+  readonly refKind: "KNOWLEDGE" | "DECISION" | "RULE" | "ARTIFACT_VERSION";
+  readonly referenceMode: "PINNED" | "CURRENT";
+  readonly targetId: string;
+  readonly label: string | null;
+  readonly title: string | null;
+  readonly resolvedVersionId: string | null;
+  readonly resolvedVersionNumber: DecimalRevision | null;
+  readonly targetStatus: string;
+  readonly isCurrent: boolean;
+  readonly resolution: "AVAILABLE" | "ARCHIVED" | "SUPERSEDED" | "STALE" | "CROSS_SCOPE" | "MISSING";
+  readonly note: string;
+}
+
+export interface RelayProjectKnowledgeGuide {
+  readonly projectId: string;
+  /** 从未保存过导读时为 false，此时 entries 为空且 revision 为 "0"。 */
+  readonly exists: boolean;
+  readonly revision: DecimalRevision;
+  readonly entryCount: number;
+  readonly entries: readonly RelayKnowledgeGuideEntry[];
+  readonly gaps: readonly string[];
+}
+
+/** 字段名与 API schema 一致（snake_case，schema 禁止 additionalProperties）。 */
+export interface RelayKnowledgeGuideEntryInput {
+  readonly ref_kind: RelayKnowledgeGuideEntry["refKind"];
+  readonly reference_mode: RelayKnowledgeGuideEntry["referenceMode"];
+  readonly knowledge_id?: string;
+  readonly decision_id?: string;
+  readonly rule_id?: string;
+  readonly artifact_version_id?: string;
+  readonly pinned_version_id?: string;
+  readonly label?: string;
+}
+
+/** N03 整理候选只提示不合并；终态优先于缺口。 */
+export interface RelayKnowledgeCurationCandidate {
+  readonly id: string;
+  readonly projectId: string;
+  readonly sourceArtifactVersionId: string;
+  readonly sourceArtifactId: string;
+  readonly sourceVersionNumber: string;
+  readonly sourceTitle: string;
+  readonly suggestedTitle: string;
+  readonly suggestedKnowledgeId: string | null;
+  readonly suggestedKnowledgeTitle: string | null;
+  readonly similar: readonly { readonly knowledgeId: string; readonly title: string;
+    readonly status: string; readonly reason: string }[];
+  readonly status: "PROPOSED" | "ACCEPTED" | "REJECTED" | "STALE";
+  readonly acceptedKnowledgeId: string | null;
+  readonly acceptedKnowledgeVersionId: string | null;
+  readonly staleReason: string | null;
+  readonly rejectedAt: string | null;
+}
+
+/** 组合检查是覆盖快照：没有整体结论，单项事实不相加。 */
+export interface RelayCombinationCheck {
+  readonly id: string; readonly groupId: string; readonly taskId: string;
+  readonly acceptanceRevision: DecimalRevision; readonly createdAt: string;
+  readonly overallResult: "NONE"; readonly overallNote: string;
+  readonly stale: boolean; readonly gaps: readonly string[];
+  readonly items: readonly { readonly ordinal: number; readonly artifactId: string;
+    readonly artifactVersionId: string; readonly isCurrentVersion: boolean;
+    readonly readable: boolean; readonly verificationSessionId: string | null;
+    readonly verificationStatus: string | null }[];
+}
+
 export interface RelayInterventionItem {
   readonly itemKey: string; readonly changeKey: string;
   readonly kind: "REVIEW" | "LOCK_CONFLICT" | "RUN_FAILED" | "UNKNOWN";
@@ -641,6 +738,54 @@ export interface RelayAssistSession {
   readonly status: string;
   readonly revision: DecimalRevision;
   readonly updatedAt: string;
+}
+
+/** 文件夹入口的结果：目录是当前工作目录，不是新 Workspace，也不隐含任何权限。 */
+export interface RelayWorkingDirectoryCandidate {
+  readonly projectId: string;
+  readonly projectTitle: string;
+  readonly projectArchived: boolean;
+  readonly resourceId: string;
+  readonly resourceStatus: string;
+  readonly fileWriteIdentityBound: boolean;
+}
+
+export interface RelayWorkingDirectory {
+  readonly canonicalRoot: string;
+  readonly displayName: string;
+  readonly status: "READY" | "AMBIGUOUS" | "NOT_READY";
+  readonly reason: string | null;
+  readonly association: RelayWorkingDirectoryCandidate | null;
+  readonly createdProject: boolean;
+  readonly createdResource: boolean;
+  readonly candidates: readonly RelayWorkingDirectoryCandidate[];
+  readonly writeReadiness: { readonly status: string; readonly detail: string };
+}
+
+/** 对话里的执行请求：原消息身份、模型整理出的候选摘要与阶段事实。 */
+export interface RelayConversationExecution {
+  readonly requestId: string;
+  readonly sessionId: string;
+  readonly sourceMessageId: string;
+  readonly decision: string;
+  readonly resourceId?: string;
+  readonly status: string;
+  readonly candidateStatus: string;
+  readonly rootPath: string;
+  readonly questions: readonly string[];
+  readonly title?: string | null;
+  readonly objective?: string | null;
+  readonly taskId: string | null;
+  readonly runId: string | null;
+  readonly revision: DecimalRevision;
+}
+
+export interface RelayConversationExecutionStage {
+  readonly requestId: string;
+  readonly status: string;
+  readonly taskId: string | null;
+  readonly runId: string | null;
+  readonly revision: DecimalRevision;
 }
 
 export interface RelaySkillDefinition {
@@ -985,7 +1130,8 @@ export interface RelayGatewayConnection {
   readonly allowedHost: string | null;
 }
 
-export type RelayGatewayCapability = "FAKE_WRITE" | "FAKE_PUBLIC_READ" | "FILE_READ" | "WEB_FETCH";
+export type RelayGatewayCapability =
+  "FAKE_WRITE" | "FAKE_PUBLIC_READ" | "FILE_READ" | "FILE_WRITE" | "WEB_FETCH" | "GIT_READ" | "GIT_WRITE" | "CLI_RUN";
 export type RelayGatewayDecision = "DENY" | "ASK" | "AUTO";
 export interface RelayGatewayConnectionSettings extends RelayGatewayConnection {
   readonly projectId: string;
@@ -1804,6 +1950,51 @@ export class RelayApiClient {
     return array(body, "items", "assist proposals").map(assistProposalFrom);
   }
 
+  /** 文件夹入口：可能建立最小 Project 与受管资源，因此是写命令；页面读取不得调用它。 */
+  async openWorkingDirectory(input: { commandId: string; rootPath: string;
+    projectId?: string | null }): Promise<RelayWorkingDirectory> {
+    const envelope = commandEnvelopeFrom(await this.request(
+      this.workspacePath("/working-directories/open"), { method: "POST", body: JSON.stringify({
+        command_id: input.commandId, root_path: input.rootPath,
+        project_id: input.projectId ?? null }) }, 200));
+    if (envelope.commandId !== input.commandId) {
+      throw new RelayTransportError("打开文件夹的命令回执无法对应，请查询原 command_id。");
+    }
+    return workingDirectoryFrom(envelope.result);
+  }
+
+  /** 明确执行请求：原消息 → 已保存候选。模型调用在服务端事务外，命令本身可安全重放。 */
+  async interpretConversationMessage(input: { sessionId: string; sourceMessageId: string;
+    resourceId: string; commandId: string }): Promise<RelayConversationExecution> {
+    const envelope = commandEnvelopeFrom(await this.request(
+      this.workspacePath(`/assist-sessions/${encodeURIComponent(input.sessionId)}/execution-requests`),
+      { method: "POST", body: JSON.stringify({ command_id: input.commandId,
+        source_message_id: input.sourceMessageId, resource_id: input.resourceId }) }, 202));
+    if (envelope.commandId !== input.commandId) {
+      throw new RelayTransportError("执行请求的命令回执无法对应，请查询原 command_id。");
+    }
+    return conversationExecutionFrom(envelope.result);
+  }
+
+  /** 候选 → Task/READY/Delegate。按请求行上固定的命令身份重放，不会产生第二个 Task/Run。 */
+  async applyConversationExecution(requestId: string): Promise<RelayConversationExecutionStage> {
+    const result = object(await this.request(
+      this.workspacePath(`/conversation-execution-requests/${encodeURIComponent(requestId)}/applications`),
+      { method: "POST", body: JSON.stringify({}) }, 200), "conversation execution result");
+    return { requestId: string(result, "request_id", "conversation execution result"),
+      status: string(result, "status", "conversation execution result"),
+      taskId: nullableString(result, "task_id", "conversation execution result"),
+      runId: nullableString(result, "run_id", "conversation execution result"),
+      revision: decimal(result, "revision", "conversation execution result") };
+  }
+
+  async getConversationExecutionRequests(sessionId: string): Promise<readonly RelayConversationExecution[]> {
+    const query = new URLSearchParams({ session_id: sessionId });
+    const body = object(await this.request(
+      `${this.workspacePath("/conversation-execution-requests")}?${query}`), "conversation execution requests");
+    return array(body, "items", "conversation execution requests").map(conversationExecutionSummaryFrom);
+  }
+
   async acceptAssistProposal(proposalId: string, commandId: string, taskContract?: {
     expectedTaskRevision: DecimalRevision; expectedAcceptanceRevision: DecimalRevision;
     payloadHash: string }): Promise<RelayCommandEnvelope> {
@@ -2500,6 +2691,99 @@ export class RelayApiClient {
     return impactCandidateFrom(await this.request(this.workspacePath(`/impact-candidates/${encodeURIComponent(id)}`)));
   }
 
+  /** N02：组只关联已登记目标，不调用模型；响应不明按原 command_id 核对。 */
+  async createImpactCandidateGroup(input: { readonly checkId: string;
+    readonly targetVersionIds: readonly string[]; readonly commandId: string }): Promise<string> {
+    const row = object(commandEnvelopeFrom(await this.request(this.workspacePath(`/impact-checks/${encodeURIComponent(input.checkId)}/candidate-groups`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId,
+        target_version_ids: input.targetVersionIds }) })).result, "impact group request");
+    return string(row, "group_id", "impact group request");
+  }
+
+  async getImpactCandidateGroup(id: string): Promise<RelayImpactCandidateGroup> {
+    return impactCandidateGroupFrom(await this.request(this.workspacePath(`/impact-candidate-groups/${encodeURIComponent(id)}`)));
+  }
+
+  async createCombinationCheck(input: { readonly groupId: string;
+    readonly artifactVersionIds: readonly string[]; readonly commandId: string }): Promise<string> {
+    const row = object(commandEnvelopeFrom(await this.request(this.workspacePath(`/impact-candidate-groups/${encodeURIComponent(input.groupId)}/combination-checks`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId,
+        artifact_version_ids: input.artifactVersionIds }) })).result, "combination check request");
+    return string(row, "combination_check_id", "combination check request");
+  }
+
+  async getCombinationCheck(id: string): Promise<RelayCombinationCheck> {
+    return combinationCheckFrom(await this.request(this.workspacePath(`/combination-checks/${encodeURIComponent(id)}`)));
+  }
+
+  /** N03 导读是 Project 拥有的编排，不属于 Context 自动注入范围。 */
+  async getProjectKnowledgeGuide(projectId: string): Promise<RelayProjectKnowledgeGuide> {
+    return knowledgeGuideFrom(await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(projectId)}/knowledge-guide`)));
+  }
+
+  /** 整份替换式保存：编辑导读就是替换清单，条目可删但被引用对象不可变。 */
+  async saveProjectKnowledgeGuide(input: { readonly projectId: string;
+    readonly expectedRevision: DecimalRevision; readonly entries: readonly RelayKnowledgeGuideEntryInput[];
+    readonly commandId: string }): Promise<{ readonly revision: DecimalRevision;
+      readonly entryCount: number }> {
+    const result = object(commandEnvelopeFrom(await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(input.projectId)}/knowledge-guide`), {
+      method: "PUT", body: JSON.stringify({ command_id: input.commandId,
+        expected_revision: input.expectedRevision,
+        entries: input.entries.map((entry) => ({ ...entry })) }) })).result,
+    "knowledge guide request");
+    return { revision: decimal(result, "revision", "knowledge guide request"),
+      entryCount: integer(result, "entry_count", "knowledge guide request") };
+  }
+
+  /** 只由用户主动请求产生；不接受任何自动或后台触发。 */
+  async createKnowledgeCurationCandidates(input: { readonly projectId: string;
+    readonly sources: readonly { readonly artifactVersionId: string; readonly suggestedTitle?: string }[];
+    readonly commandId: string }): Promise<readonly RelayKnowledgeCurationCandidate[]> {
+    const result = object(commandEnvelopeFrom(await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(input.projectId)}/knowledge-curation-candidates`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId,
+        sources: input.sources.map((source) => ({ artifact_version_id: source.artifactVersionId,
+          ...(source.suggestedTitle === undefined ? {} : { suggested_title: source.suggestedTitle }) })) }) })).result,
+    "curation candidate request");
+    return array(result, "items", "curation candidate request").map(knowledgeCurationCandidateFrom);
+  }
+
+  async listKnowledgeCurationCandidates(projectId: string):
+  Promise<readonly RelayKnowledgeCurationCandidate[]> {
+    const result = object(await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(projectId)}/knowledge-curation-candidates`)), "curation candidates");
+    return array(result, "items", "curation candidates").map(knowledgeCurationCandidateFrom);
+  }
+
+  /** 接受不是独立命令，但满足契约幂等语义：同 command_id 重放或并发都返回原回执。 */
+  async acceptKnowledgeCurationCandidate(input: { readonly projectId: string;
+    readonly candidateId: string; readonly commandId: string }): Promise<{ readonly candidateId: string;
+      readonly knowledgeId: string; readonly knowledgeVersionId: string;
+      readonly knowledgeRevision: DecimalRevision; readonly mode: "CREATED" | "NEW_VERSION" }> {
+    const result = object(commandEnvelopeFrom(await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(input.projectId)}/knowledge-curation-candidates/${encodeURIComponent(input.candidateId)}/accept`),
+    { method: "POST", body: JSON.stringify({ command_id: input.commandId }) })).result,
+    "accept curation request");
+    return { candidateId: string(result, "candidate_id", "accept curation request"),
+      knowledgeId: string(result, "knowledge_id", "accept curation request"),
+      knowledgeVersionId: string(result, "knowledge_version_id", "accept curation request"),
+      knowledgeRevision: decimal(result, "knowledge_revision", "accept curation request"),
+      mode: string(result, "mode", "accept curation request") as "CREATED" | "NEW_VERSION" };
+  }
+
+  async rejectKnowledgeCurationCandidate(input: { readonly projectId: string;
+    readonly candidateId: string; readonly commandId: string }): Promise<{ readonly candidateId: string;
+      readonly status: "REJECTED" }> {
+    const result = object(commandEnvelopeFrom(await this.request(this.workspacePath(
+      `/projects/${encodeURIComponent(input.projectId)}/knowledge-curation-candidates/${encodeURIComponent(input.candidateId)}/reject`),
+    { method: "POST", body: JSON.stringify({ command_id: input.commandId }) })).result,
+    "reject curation request");
+    return { candidateId: string(result, "candidate_id", "reject curation request"),
+      status: string(result, "status", "reject curation request") as "REJECTED" };
+  }
+
   async getInterventions(): Promise<readonly RelayInterventionItem[]> {
     const row = object(await this.request(this.workspacePath('/attention/interventions')), "interventions");
     return array(row, "items", "interventions").map(interventionFrom);
@@ -2516,7 +2800,8 @@ export class RelayApiClient {
       configured: row.configured === true,
       model: row.model === null ? null : string(row, "model", "model-port"),
       baseUrl: row.base_url === null ? null : string(row, "base_url", "model-port"),
-      maxCallTokens: nullableInteger(row, "max_call_tokens", "model-port") };
+      // max_call_tokens 是可选新增字段：缺失等同"不可核对"，不能当作 0 或默认值。
+      maxCallTokens: nullableOptionalInteger(row, "max_call_tokens", "model-port") };
   }
 
   /** 最近一次模型验证与当前配置指纹匹配情况。 */
@@ -3584,6 +3869,129 @@ function impactCheckFrom(value: unknown): RelayArtifactImpactCheck {
     stale: boolean(row, "stale", "impact check") };
 }
 
+function knowledgeGuideFrom(value: unknown): RelayProjectKnowledgeGuide {
+  const row = object(value, "project knowledge guide");
+  return { projectId: string(row, "project_id", "project knowledge guide"),
+    exists: boolean(row, "exists", "project knowledge guide"),
+    revision: decimal(row, "revision", "project knowledge guide"),
+    entryCount: integer(row, "entry_count", "project knowledge guide"),
+    entries: array(row, "entries", "project knowledge guide").map((value) => {
+      const entry = object(value, "knowledge guide entry");
+      return { ordinal: integer(entry, "ordinal", "knowledge guide entry"),
+        refKind: string(entry, "ref_kind", "knowledge guide entry") as RelayKnowledgeGuideEntry["refKind"],
+        referenceMode: string(entry, "reference_mode", "knowledge guide entry") as RelayKnowledgeGuideEntry["referenceMode"],
+        targetId: string(entry, "target_id", "knowledge guide entry"),
+        label: nullableString(entry, "label", "knowledge guide entry"),
+        title: nullableString(entry, "title", "knowledge guide entry"),
+        resolvedVersionId: nullableString(entry, "resolved_version_id", "knowledge guide entry"),
+        resolvedVersionNumber: entry.resolved_version_number === null ? null
+          : decimal(entry, "resolved_version_number", "knowledge guide entry"),
+        targetStatus: string(entry, "target_status", "knowledge guide entry"),
+        isCurrent: boolean(entry, "is_current", "knowledge guide entry"),
+        resolution: string(entry, "resolution", "knowledge guide entry") as RelayKnowledgeGuideEntry["resolution"],
+        note: string(entry, "note", "knowledge guide entry") };
+    }),
+    gaps: stringArray(row, "gaps", "project knowledge guide") };
+}
+
+function knowledgeCurationCandidateFrom(value: unknown): RelayKnowledgeCurationCandidate {
+  const row = object(value, "knowledge curation candidate");
+  return { id: string(row, "id", "knowledge curation candidate"),
+    projectId: string(row, "project_id", "knowledge curation candidate"),
+    sourceArtifactVersionId: string(row, "source_artifact_version_id", "knowledge curation candidate"),
+    sourceArtifactId: string(row, "source_artifact_id", "knowledge curation candidate"),
+    sourceVersionNumber: string(row, "source_version_number", "knowledge curation candidate"),
+    sourceTitle: string(row, "source_title", "knowledge curation candidate"),
+    suggestedTitle: string(row, "suggested_title", "knowledge curation candidate"),
+    suggestedKnowledgeId: nullableString(row, "suggested_knowledge_id", "knowledge curation candidate"),
+    suggestedKnowledgeTitle: nullableString(row, "suggested_knowledge_title", "knowledge curation candidate"),
+    similar: array(row, "similar", "knowledge curation candidate").map((value) => {
+      const similar = object(value, "curation similar");
+      return { knowledgeId: string(similar, "knowledge_id", "curation similar"),
+        title: string(similar, "title", "curation similar"),
+        status: string(similar, "status", "curation similar"),
+        reason: string(similar, "reason", "curation similar") };
+    }),
+    status: string(row, "status", "knowledge curation candidate") as RelayKnowledgeCurationCandidate["status"],
+    acceptedKnowledgeId: nullableString(row, "accepted_knowledge_id", "knowledge curation candidate"),
+    acceptedKnowledgeVersionId: nullableString(row, "accepted_knowledge_version_id", "knowledge curation candidate"),
+    staleReason: nullableString(row, "stale_reason", "knowledge curation candidate"),
+    rejectedAt: nullableString(row, "rejected_at", "knowledge curation candidate") };
+}
+
+function impactCandidateGroupFrom(value: unknown): RelayImpactCandidateGroup {
+  const row = object(value, "impact candidate group");
+  const summary = object(row.summary, "impact group summary");
+  return { id: string(row, "id", "impact candidate group"),
+    impactCheckId: string(row, "impact_check_id", "impact candidate group"),
+    sourceArtifactId: string(row, "source_artifact_id", "impact candidate group"),
+    sourceBeforeVersionId: string(row, "source_before_version_id", "impact candidate group"),
+    sourceAfterVersionId: string(row, "source_after_version_id", "impact candidate group"),
+    sourceArtifactRevision: decimal(row, "source_artifact_revision", "impact candidate group"),
+    createdAt: string(row, "created_at", "impact candidate group"),
+    stale: boolean(row, "stale", "impact candidate group"),
+    items: array(row, "items", "impact candidate group").map((value) => {
+      const item = object(value, "impact group item");
+      return { ordinal: integer(item, "ordinal", "impact group item"),
+        targetArtifactId: string(item, "target_artifact_id", "impact group item"),
+        targetVersionId: string(item, "target_version_id", "impact group item"),
+        relation: string(item, "relation", "impact group item"),
+        speculative: boolean(item, "speculative", "impact group item"),
+        availability: string(item, "availability", "impact group item"),
+        analysed: boolean(item, "analysed", "impact group item"),
+        targetArtifactRevision: decimal(item, "target_artifact_revision", "impact group item"),
+        targetIsCurrentVersion: boolean(item, "target_is_current_version", "impact group item"),
+        candidateId: item.candidate_id === null ? null
+          : string(item, "candidate_id", "impact group item"),
+        candidateStatus: item.candidate_status === null ? null
+          : string(item, "candidate_status", "impact group item"),
+        candidateErrorCode: item.candidate_error_code === null ? null
+          : string(item, "candidate_error_code", "impact group item"),
+        candidateStale: boolean(item, "candidate_stale", "impact group item"),
+        appliedVersionId: item.applied_version_id === null ? null
+          : string(item, "applied_version_id", "impact group item") };
+    }),
+    summary: { total: integer(summary, "total", "impact group summary"),
+      applied: integer(summary, "applied", "impact group summary"),
+      withCandidate: integer(summary, "with_candidate", "impact group summary"),
+      withoutCandidate: integer(summary, "without_candidate", "impact group summary"),
+      staleCandidates: integer(summary, "stale_candidates", "impact group summary"),
+      unavailable: integer(summary, "unavailable", "impact group summary") },
+    unanalysedScope: stringArray(row, "unanalysed_scope", "impact candidate group"),
+    combinationCheckIds: array(row, "combination_check_ids", "impact candidate group")
+      .map((value) => {
+        if (typeof value !== "string") throw new Error("组合检查标识无效。");
+        return value;
+      }) };
+}
+
+function combinationCheckFrom(value: unknown): RelayCombinationCheck {
+  const row = object(value, "combination check");
+  if (string(row, "overall_result", "combination check") !== "NONE")
+    throw new Error("组合检查不应给出整体结论。");
+  return { id: string(row, "id", "combination check"),
+    groupId: string(row, "group_id", "combination check"),
+    taskId: string(row, "task_id", "combination check"),
+    acceptanceRevision: decimal(row, "acceptance_revision", "combination check"),
+    createdAt: string(row, "created_at", "combination check"),
+    overallResult: "NONE",
+    overallNote: string(row, "overall_note", "combination check"),
+    stale: boolean(row, "stale", "combination check"),
+    gaps: stringArray(row, "gaps", "combination check"),
+    items: array(row, "items", "combination check").map((value) => {
+      const item = object(value, "combination check item");
+      return { ordinal: integer(item, "ordinal", "combination check item"),
+        artifactId: string(item, "artifact_id", "combination check item"),
+        artifactVersionId: string(item, "artifact_version_id", "combination check item"),
+        isCurrentVersion: boolean(item, "is_current_version", "combination check item"),
+        readable: boolean(item, "readable", "combination check item"),
+        verificationSessionId: item.verification_session_id === null ? null
+          : string(item, "verification_session_id", "combination check item"),
+        verificationStatus: item.verification_status === null ? null
+          : string(item, "verification_status", "combination check item") };
+    }) };
+}
+
 function impactCandidateFrom(value: unknown): RelayArtifactImpactCandidate {
   const row = object(value, "impact candidate");
   const status = string(row, "status", "impact candidate");
@@ -3889,8 +4297,10 @@ function assistMessageFrom(value: unknown): RelayAssistMessage {
       ? null : assistSkillOutputFrom(row.skill_output),
     usage: { inputTokens: nullableInteger(usage, "input_tokens", "assist usage"),
       outputTokens: nullableInteger(usage, "output_tokens", "assist usage"),
-      cacheReadTokens: nullableInteger(usage, "cache_read_tokens", "assist usage"),
-      cacheCreationTokens: nullableInteger(usage, "cache_creation_tokens", "assist usage") },
+      // cache_* 是 Provider 可选上报项：旧服务端没有这两个字段时按"未上报"处理，
+      // 不能因为缺字段就判定整个响应非法。
+      cacheReadTokens: nullableOptionalInteger(usage, "cache_read_tokens", "assist usage"),
+      cacheCreationTokens: nullableOptionalInteger(usage, "cache_creation_tokens", "assist usage") },
     cancelRequested: row.cancel_requested === true };
 }
 
@@ -4122,8 +4532,74 @@ function ruleVersionFrom(value: unknown): RelayRuleVersion {
   };
 }
 
-function searchItemFrom(value: unknown): RelaySearchItem {
-  const row = object(value, "search item");
+function workingDirectoryCandidateFrom(value: unknown): RelayWorkingDirectoryCandidate {
+  const row = object(value, "working directory candidate");
+  return { projectId: string(row, "project_id", "working directory candidate"),
+    projectTitle: string(row, "project_title", "working directory candidate"),
+    projectArchived: boolean(row, "project_archived", "working directory candidate"),
+    resourceId: string(row, "resource_id", "working directory candidate"),
+    resourceStatus: string(row, "resource_status", "working directory candidate"),
+    fileWriteIdentityBound: boolean(row, "file_write_identity_bound", "working directory candidate") };
+}
+
+function workingDirectoryFrom(value: unknown): RelayWorkingDirectory {
+  const row = object(value, "working directory");
+  const status = string(row, "status", "working directory");
+  if (status !== "READY" && status !== "AMBIGUOUS" && status !== "NOT_READY") {
+    throw new Error("working directory.status 无法识别");
+  }
+  const readiness = object(row.write_readiness, "working directory write readiness");
+  const association = row.association === null || row.association === undefined
+    ? null : workingDirectoryCandidateFrom(row.association);
+  return { canonicalRoot: string(row, "canonical_root", "working directory"),
+    displayName: string(row, "display_name", "working directory"), status,
+    reason: nullableString(row, "reason", "working directory"), association,
+    createdProject: boolean(row, "created_project", "working directory"),
+    createdResource: boolean(row, "created_resource", "working directory"),
+    candidates: array(row, "candidates", "working directory").map(workingDirectoryCandidateFrom),
+    writeReadiness: { status: string(readiness, "status", "working directory write readiness"),
+      detail: string(readiness, "detail", "working directory write readiness") } };
+}
+
+function conversationExecutionFrom(value: unknown): RelayConversationExecution {
+  const row = object(value, "conversation execution");
+  const decision = string(row, "decision", "conversation execution");
+  if (decision !== "DISCUSS" && decision !== "CLARIFY" && decision !== "PREPARE") {
+    throw new Error("conversation execution.decision 无法识别");
+  }
+  const candidate = row.candidate === null || row.candidate === undefined
+    ? null : object(row.candidate, "conversation execution candidate");
+  return { requestId: string(row, "request_id", "conversation execution"),
+    sessionId: string(row, "session_id", "conversation execution"),
+    sourceMessageId: string(row, "source_message_id", "conversation execution"),
+    resourceId: string(row, "resource_id", "conversation execution"),
+    rootPath: string(row, "root_path", "conversation execution"), decision,
+    status: string(row, "status", "conversation execution"),
+    candidateStatus: string(row, "candidate_status", "conversation execution"),
+    questions: stringArray(row, "questions", "conversation execution"),
+    title: candidate === null ? null : optionalString(candidate, "title"),
+    objective: candidate === null ? null : optionalString(candidate, "objective"),
+    taskId: nullableString(row, "task_id", "conversation execution"),
+    runId: nullableString(row, "run_id", "conversation execution"),
+    revision: decimal(row, "revision", "conversation execution") };
+}
+
+function conversationExecutionSummaryFrom(value: unknown): RelayConversationExecution {
+  const row = object(value, "conversation execution");
+  return { requestId: string(row, "request_id", "conversation execution"),
+    sessionId: string(row, "session_id", "conversation execution"),
+    sourceMessageId: string(row, "source_message_id", "conversation execution"),
+    decision: string(row, "decision", "conversation execution"),
+    status: string(row, "status", "conversation execution"),
+    candidateStatus: string(row, "candidate_status", "conversation execution"),
+    rootPath: string(row, "root_path", "conversation execution"),
+    questions: stringArray(row, "questions", "conversation execution"),
+    taskId: nullableString(row, "task_id", "conversation execution"),
+    runId: nullableString(row, "run_id", "conversation execution"),
+    revision: decimal(row, "revision", "conversation execution") };
+}
+
+function searchItemFrom(value: unknown): RelaySearchItem {  const row = object(value, "search item");
   const type = string(row, "type", "search item");
   if (!["KNOWLEDGE", "MEMORY", "DECISION", "RULE"].includes(type)) throw new Error("search item.type 响应格式无效。");
   return {
@@ -4220,6 +4696,12 @@ function integer(record: Record<string, unknown>, key: string, name: string): nu
 
 function nullableInteger(record: Record<string, unknown>, key: string, name: string): number | null {
   return record[key] === null ? null : integer(record, key, name);
+}
+
+/** Provider 可选上报字段：缺失与显式 null 同义，都表示"未上报"而非 0。 */
+function nullableOptionalInteger(record: Record<string, unknown>, key: string, name: string): number | null {
+  if (record[key] === undefined || record[key] === null) return null;
+  return integer(record, key, name);
 }
 
 function stringArray(record: Record<string, unknown>, key: string, name: string): readonly string[] {

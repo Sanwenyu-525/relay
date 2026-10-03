@@ -4,6 +4,7 @@ import { Info, RotateCcw, ShieldCheck } from "lucide-react";
 import type { RelayModelPortStatus, RelayModelVerificationState,
   RelayModelVerifyResult, RelayViewKind } from "../api/relayClient";
 import PackCatalogPanel from "../components/PackCatalogPanel";
+import PageHeader from "../components/PageHeader";
 import { describeLiveError } from "../lib/liveErrors";
 import { modelErrorGuides } from "../lib/modelErrorGuides";
 import { useRelayConnection } from "../lib/relayConnection";
@@ -315,8 +316,8 @@ export default function SettingsView() {
     });
   };
 
-  return <section className="settings-page" data-testid="settings-page">
-    <header className="settings-heading"><h1>设置</h1><p className="page-lede">本设备偏好与服务配置</p></header>
+return <section className="settings-page" data-testid="settings-page">
+    <PageHeader testId="settings-page-head" title="设置" lede="本设备偏好与服务配置" />
     <div className="settings-layout">
       <nav className="settings-navigation" role="tablist" aria-label="设置分组" onKeyDown={handleTabListKeyDown}>
         {([['basic', '基本设置'], ['model', 'AI 设置'], ['execution', '执行策略'], ['workbench', '工作台']] as const)

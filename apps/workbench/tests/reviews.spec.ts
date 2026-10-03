@@ -73,6 +73,41 @@ describe("P07 Review Inbox", () => {
     expect(fetchMock.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET")).toBe(true);
   });
 
+  it("待处理页型：共享页头 + 列表 / 确切正文 / 判断三列，正文不埋在列表下方", async () => {
+    activate();
+    const item = review();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `${reviewUrl}?status=OPEN`) return response(200, { items: [item] });
+      if (url === `${reviewUrl}/${reviewId}`) return response(200, item);
+      if (url.endsWith("/artifacts")) return response(200, { items: [{
+        task_id: item.task_id, project_id: item.project_id, title: "判断对象.md", revision: "3",
+        latest_version_id: "latest-version", version_count: 2,
+        versions: [{ artifact_version_id: item.target.artifact_version_id, version_number: "2", media_type: "text/markdown", sha256: "c".repeat(64), size: "10", source_kind: "HUMAN", created_at: item.created_at }] }] });
+      if (url.endsWith(`/artifact-versions/${item.target.artifact_version_id}/content`)) {
+        return { ok: true, status: 200, text: async () => "确切正文" } as Response;
+      }
+      if (url.endsWith("/content")) throw new Error("不能读取最新版本代替请求目标");
+      return response(200, { items: [], next_cursor: null });
+    }));
+    const mounted = await mountWorkbench(`/reviews?id=${reviewId}`); unmount = mounted.unmount; await flush();
+
+    // 共享页头：名称 + 范围说明 + 首屏动作，不再是页面自带的内联标题块。
+    const head = mounted.wrapper.get('[data-testid="review-page-head"]');
+    expect(head.get("h1").text()).toBe("等待你的判断");
+    expect(head.get(".page-head-meta").text()).toContain("1 项请求");
+    expect(head.get('[data-testid="review-refresh"]').exists()).toBe(true);
+
+    // 三列是 .review-columns 的直接子节点，正文列与列表列、判断列同级。
+    const columnsElement = mounted.wrapper.get(".review-columns").element;
+    if (!columnsElement) throw new Error("待处理页缺少 .review-columns");
+    const columns = Array.from(columnsElement.children).map((node) => (node as HTMLElement).className);
+    expect(columns).toContain("review-primary");
+    expect(columns).toContain("review-reading");
+    expect(columns).toContain("review-detail");
+    mounted.unmount(); unmount = null;
+  });
+
   it("待审响应丢失后切换查询被拦截，确认原回执前保留原命令 ID", async () => {
     activate(); let commandId = ""; let posts = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -182,7 +217,7 @@ describe("P07 Review Inbox", () => {
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/reviews"); unmount = mounted.unmount;
-    denied = true; await mounted.wrapper.get(".review-heading button").trigger("click"); await flush();
+    denied = true; await mounted.wrapper.get('[data-testid="review-refresh"]').trigger("click"); await flush();
     expect(mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').attributes("disabled")).toBeDefined();
     await mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').trigger("click"); await flush();
     expect(posts).toBe(0);
@@ -383,7 +418,7 @@ describe("P07 Review Inbox", () => {
     await flush(); await mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').trigger("click"); await flush();
     expect(mounted.wrapper.get('[data-testid="review-check-receipt"]').exists()).toBe(true);
     archived = true;
-    await mounted.wrapper.get('.review-heading button').trigger("click"); await flush();
+    await mounted.wrapper.get('[data-testid="review-refresh"]').trigger("click"); await flush();
     expect(mounted.wrapper.get('[data-testid="review-check-receipt"]').attributes("disabled")).toBeUndefined();
     await mounted.wrapper.get('[data-testid="review-check-receipt"]').trigger("click"); await flush();
     expect(posts).toBe(1);

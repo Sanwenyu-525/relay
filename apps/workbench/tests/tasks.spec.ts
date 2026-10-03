@@ -7,6 +7,8 @@ let unmount: (() => void) | null = null;
 afterEach(() => {
   unmount?.();
   unmount = null;
+  // 夹具延迟是模块级状态：不在这里复位就会漏给同文件后续用例。
+  setFixtureLatency(0);
 });
 
 describe("全部任务", () => {
@@ -81,8 +83,8 @@ describe("全部任务", () => {
 
     setFixtureLatency(60);
     await mounted.wrapper.get('select[name="task-filter-status"]').setValue("WAITING");
-    await flush(10);
-
+    // 刷新标记由本次筛选变更同步置位。这里不推进任何定时器：早先的 flush(10) 是拿真实
+    // setTimeout 和 60ms 夹具延迟赛跑，机器繁忙时 10ms 窗口会错过刷新态而偶发误判。
     expect(mounted.wrapper.find('[data-testid="tasks-refreshing"]').exists()).toBe(true);
     expect(mounted.wrapper.text()).toContain("修复任务恢复逻辑");
     expect(mounted.wrapper.text()).not.toContain("正在读取任务列表");

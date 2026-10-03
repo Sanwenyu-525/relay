@@ -222,6 +222,62 @@ describe("项目连接与 Permission 设置", () => {
     expect(mounted.wrapper.text()).toContain("查看已读取版本（1，最多最近 100 条）");
   });
 
+  it("CLI_RUN 连接与策略只绑定受管目录：能力可选中、目录必填、策略不出现主机字段", async () => {
+    connect(); const data = state(); const rootPath = "D:\\Workspace\\source";
+    data.resources = [{ id: resourceId, project_id: projectId, canonical_root: "D:\\Workspace\\managed", status: "ACTIVE", revision: "1", resource_epoch: "1" }];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if ((init?.method ?? "GET") === "GET") return baseGet(path, data) ?? response(404, {});
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (path === `/projects/${projectId}/connections`) {
+        expect(body).toMatchObject({ capabilities: ["CLI_RUN"], root_path: rootPath });
+        expect(body).not.toHaveProperty("allowed_host");
+        data.connections = [{ id: connectionId, project_id: projectId, status: "ACTIVE", version: "1", capabilities: ["CLI_RUN"], allowed_host: null, created_at: created }];
+        return response(201, receipt(String(body.command_id), { project_id: projectId, connection_id: connectionId, version: "1", status: "ACTIVE" }));
+      }
+      if (path === `/projects/${projectId}/permission-policies`) {
+        expect(body).toMatchObject({ capability: "CLI_RUN", resource_id: resourceId, decision: "ASK", max_payload_bytes: 2 });
+        expect(body).not.toHaveProperty("host");
+        data.policies = [{ id: policyId, project_id: projectId, status: "ACTIVE", active_version: "1", revision: "1", created_at: created }];
+        data.versions = [{ version: "1", capability: "CLI_RUN", action_type: "CLI_RUN", target_prefix: "D:\\Workspace\\managed", decision: "ASK", max_payload_bytes: 2, created_at: created }];
+        return response(201, receipt(String(body.command_id), { project_id: projectId, policy_id: policyId, revision: "1", version: "1", status: "ACTIVE" }));
+      }
+      throw new Error(`Unexpected POST ${path}`);
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+    const connectionOptions = mounted.wrapper.get('[data-testid="connection-capability"]')
+      .findAll("option").map((option) => option.attributes("value"));
+    expect(connectionOptions).toEqual(["WEB_FETCH", "FILE_READ", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN", "FAKE_WRITE", "FAKE_PUBLIC_READ"]);
+    await mounted.wrapper.get('[data-testid="connection-capability"]').setValue("CLI_RUN");
+    await mounted.wrapper.get(".connections-form").trigger("submit"); await flush();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    await mounted.wrapper.get('[data-testid="connection-root"]').setValue(rootPath);
+    await mounted.wrapper.get(".connections-form").trigger("submit"); await flush();
+    expect(mounted.wrapper.text()).toContain("CLI_RUN");
+    await mounted.wrapper.get('[data-testid="policy-capability"]').setValue("CLI_RUN");
+    expect(mounted.wrapper.find('[data-testid="policy-host"]').exists()).toBe(false);
+    await mounted.wrapper.get('[data-testid="policy-resource"]').setValue(resourceId);
+    await mounted.wrapper.get('[data-testid="policy-decision"]').setValue("ASK");
+    await mounted.wrapper.get('[data-testid="policy-form"]').trigger("submit"); await flush();
+    expect(mounted.wrapper.text()).toContain("CLI_RUN · ASK");
+  });
+
+  it("FAKE 能力不绑定任何边界：连接与策略都不出现目录或主机输入", async () => {
+    connect(); const data = state();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if ((init?.method ?? "GET") === "GET") return baseGet(path, data) ?? response(404, {});
+      throw new Error(`Unexpected write ${path}`);
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="connection-capability"]').setValue("FAKE_PUBLIC_READ");
+    expect(mounted.wrapper.find('[data-testid="connection-root"]').exists()).toBe(false);
+    expect(mounted.wrapper.find('[data-testid="connection-host"]').exists()).toBe(false);
+    await mounted.wrapper.get('[data-testid="policy-capability"]').setValue("FAKE_PUBLIC_READ");
+    expect(mounted.wrapper.find('[data-testid="policy-host"]').exists()).toBe(false);
+    expect(mounted.wrapper.find('[data-testid="policy-resource"]').exists()).toBe(false);
+  });
+
   it("WEB_FETCH 策略主机与连接主机不同时只陈列事实，不宣称已获准入", async () => {
     connect(); const data = state();
     data.connections = [{ id: connectionId, project_id: projectId, status: "ACTIVE", version: "1", capabilities: ["WEB_FETCH"], allowed_host: "example.org", created_at: created }];

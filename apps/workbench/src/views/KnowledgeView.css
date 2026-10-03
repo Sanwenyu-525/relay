@@ -22,10 +22,20 @@
 .knowledge-import-restore .field { flex: 1 1 16rem; }
 .knowledge-guide-toggle { margin: var(--relay-space-4) 0; }
 .knowledge-guide { margin: var(--relay-space-4) 0; }
-.knowledge-guide__steps { display: grid; gap: var(--relay-space-4); padding-left: var(--relay-space-6); }
-.knowledge-guide__steps li { overflow-wrap: anywhere; }
-.knowledge-guide__steps h3 { margin-bottom: var(--relay-space-2); }
-.knowledge-guide__steps small { display: block; color: var(--relay-color-text-muted); }
+.knowledge-guide__entries { display: grid; gap: var(--relay-space-4); padding-left: var(--relay-space-6); }
+.knowledge-guide__entries li { overflow-wrap: anywhere; }
+.knowledge-guide__entry-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--relay-space-2); }
+.knowledge-guide__kind { padding: 0 var(--relay-space-2); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-control); color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); }
+.knowledge-guide__status { color: var(--relay-color-status-warning-text); font-size: var(--relay-font-size-meta); }
+.knowledge-guide__entry-controls { display: flex; flex-wrap: wrap; align-items: end; gap: var(--relay-space-4); margin-top: var(--relay-space-2); }
+.knowledge-guide__entry-controls label { display: grid; gap: var(--relay-space-2); min-width: 0; }
+.knowledge-guide__entry-controls input[type="text"] { min-width: 12rem; }
+.knowledge-guide__pin { grid-auto-flow: column; align-items: center; gap: var(--relay-space-2); }
+.knowledge-guide__moves { display: flex; gap: var(--relay-space-2); margin-inline-start: auto; }
+.knowledge-guide__warning { margin: var(--relay-space-2) 0 0; padding-left: var(--relay-space-3); border-left: var(--relay-focus-width) solid var(--relay-color-status-warning-text); color: var(--relay-color-text-muted); }
+.knowledge-guide__gaps { margin-top: var(--relay-space-4); }
+.knowledge-guide__add, .knowledge-guide__save { display: flex; flex-wrap: wrap; align-items: end; gap: var(--relay-space-4); margin-top: var(--relay-space-4); }
+.knowledge-guide__add label { display: grid; gap: var(--relay-space-2); min-width: 0; }
 .knowledge-capture-preview { max-height: 20rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: var(--relay-space-4); border: var(--relay-border-width) solid var(--relay-color-border-separator); font: inherit; }
 .knowledge-capture-review { margin-top: var(--relay-space-4); padding: var(--relay-space-4); border-left: var(--relay-focus-width) solid var(--relay-color-action-primary); background: var(--relay-color-selection-bg); }
 .knowledge-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-4); margin-bottom: var(--relay-space-6); }
@@ -47,8 +57,10 @@
 .knowledge-reader--no-toc { grid-template-columns: minmax(0, 1fr) minmax(0, var(--relay-layout-rail-narrowWidth)); }
 .knowledge-reader__outline, .knowledge-reader__main, .knowledge-reader__source { min-width: 0; }
 .knowledge-reader__outline { border-right: var(--relay-border-width) solid var(--relay-color-border-separator); padding-right: var(--relay-space-4); }
-.knowledge-reader__heading h1 { margin: 0 0 var(--relay-space-2); font-size: var(--relay-font-size-page); font-family: var(--relay-font-family-ui); line-height: var(--relay-font-lineHeight-heading); overflow-wrap: anywhere; }
-.knowledge-reader__heading p { margin: 0; color: var(--relay-color-text-secondary); }
+/* 阅读页头复用共享 .page-head；这里只把它压回阅读纸面的密度，不另立一套标题层级。 */
+.knowledge-reader__main > .page-head { margin-bottom: var(--relay-space-2); }
+.knowledge-reader__main > .page-head .page-head-title > h1 { font-size: var(--relay-font-size-rowTitle); }
+.knowledge-reader__main > .page-head .page-head-meta { font-size: var(--relay-font-size-meta); }
 .knowledge-reader__toolbar { display: flex; flex-wrap: wrap; gap: var(--relay-space-3); align-items: center; justify-content: space-between; margin: var(--relay-space-4) 0; padding-bottom: var(--relay-space-4); border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .knowledge-reader__toolbar .field { margin: 0; min-width: 0; }
 .knowledge-reader__toolbar select { color: var(--relay-color-action-text); border-color: var(--relay-color-action-primary); }

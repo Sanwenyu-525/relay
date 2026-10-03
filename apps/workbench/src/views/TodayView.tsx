@@ -8,6 +8,7 @@ import {
 import { describeLiveError } from "../lib/liveErrors";
 import { reviewKindLabels, taskStatusLabels } from "../lib/labels";
 import { useRelayConnection } from "../lib/relayConnection";
+import PageHeader from "../components/PageHeader";
 import "./TodayView.css";
 
 type TodayCommand = (
@@ -423,9 +424,8 @@ export default function TodayView() {
   return <section className="today-page">
     <div className="today-body">
       <div className="today-main">
-    <p className="eyebrow">{longDate} · {weekday}</p>
-    <h1>今天</h1>
-    <p className="page-lede">从上次停下的地方，继续推进。</p>
+    <PageHeader testId="today-page-head" title="今天" meta={`${longDate} · ${weekday}`}
+      lede="从上次停下的地方，继续推进。" />
     <div className="today-intro-note">
       <details className="today-arrange-note">
       <summary>安排说明</summary>

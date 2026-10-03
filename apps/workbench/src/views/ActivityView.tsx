@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { RelayApiError, type RelayActivityFilter, type RelayActivityItem, type RelayActivityRefKind } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
+import PageHeader from "../components/PageHeader";
 import "./ActivityView.css";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -245,8 +246,9 @@ export default function ActivityView() {
   }, [visibleItems]);
   const selected = selectedId !== null ? items.find((item) => item.id === selectedId) ?? null : null;
 
-  return <section className="activity-page"><p className="eyebrow">工作空间</p><h1>动态</h1>
-    <p className="page-lede">这里按时间记录项目里真实发生过的动作，可以按项目、任务、Run 或时间筛选，并直达相关对象。每一次改变都能找到依据。</p>
+  return <section className="activity-page">
+    <PageHeader testId="activity-page-head" title="动态" meta="工作空间"
+      lede="这里按时间记录项目里真实发生过的动作，可以按项目、任务、Run 或时间筛选，并直达相关对象。每一次改变都能找到依据。" />
     {client === null ? <p className="warning-callout" role="status">当前是示例数据预览，没有真实 Activity 记录。<Link to="/projects">打开项目</Link> 继续人工工作。</p> : <>
       <details className="activity-advanced-filter" data-testid="activity-advanced-filter" open={hasActiveFilter}>
         <summary>按项目、任务与时间筛选{hasActiveFilter ? " · 已应用范围" : ""}</summary>

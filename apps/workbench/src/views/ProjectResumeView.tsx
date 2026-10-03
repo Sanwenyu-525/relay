@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { CheckCircle2, ChevronRight, Circle, CircleEllipsis, FileText, Info, RotateCcw, TriangleAlert } from "lucide-react";
 import ResponsiveRail from "../components/ResponsiveRail";
+import PageHeader from "../components/PageHeader";
 import ContinuationPointPanel from "../components/ContinuationPointPanel";
 import SourceDetailDialog from "../components/SourceDetailDialog";
 import type { RelayApiClient, RelayDecision, RelayProject, RelayProjectState, RelayReview, RelayTaskSummary } from "../api/relayClient";
@@ -94,8 +95,8 @@ function LiveProjectResumeView({ id, client }: { id: string; client: RelayApiCli
   const type = project.projectType in projectTypeLabels
     ? projectTypeLabels[project.projectType as ProjectType] : project.projectType;
   return <><section className="skill-page live-resume" data-testid="project-resume-live"><div className="page-layout"><div className="page-primary">
-    <p className="eyebrow">{project.title}</p><h1>从这里，接着往前。</h1>
-    <p className="page-lede">当前事实速览 · {type} · {phaseLabel(state.phaseKey)} · State v{state.revision}</p>
+    <PageHeader testId="project-resume-page-head" title="从这里，接着往前。" meta={project.title}
+    lede={`当前事实速览 · ${type} · ${phaseLabel(state.phaseKey)} · State v${state.revision}`} />
     <details className="live-resume__basis"><summary>读取范围与依据</summary>
     <p className="helper-text">项目 ID：{project.id}</p>
     <p className="metadata-row">本次查询于 <time dateTime={snapshot.queriedAt}>{new Date(snapshot.queriedAt).toLocaleString("zh-CN")}</time> 完成；各来源可能在查询期间变化，非原子项目快照。</p>
@@ -181,7 +182,9 @@ function FixtureProjectResumeView() {
   if (loading) return <section className="page-state" aria-live="polite"><p className="eyebrow">继续这个项目</p><h1>正在读取项目上下文</h1><p>读取只读摘要不会开始或恢复执行，也不会改变当前执行者。</p></section>;
   if (error && !project) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">继续这个项目</p><h1>暂时无法显示恢复摘要</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
   if (!project || !resume) return <section className="page-state"><p className="eyebrow">继续这个项目</p><h1>尚未提供项目恢复摘要示例</h1><p>这个路由对象没有对应的 Skill fixture，页面不会回退读取其他项目的历史或下一步。</p></section>;
-  return <section className="skill-page"><div className="page-layout"><div className="page-primary"><p className="eyebrow">{project.name}</p><h1>从这里，接着往前。</h1><p className="metadata-row">只读摘要 <span aria-hidden="true">·</span> 更新于 {resume.updatedAt}</p>{error && <p className="action-error" role="alert">{error}</p>}
+  return <section className="skill-page"><div className="page-layout"><div className="page-primary"><PageHeader testId="project-resume-page-head" title="从这里，接着往前。" meta={project.name}>
+    <p className="metadata-row">只读摘要 <span aria-hidden="true">·</span> 更新于 {resume.updatedAt}</p>
+  </PageHeader>{error && <p className="action-error" role="alert">{error}</p>}
     <section className="resume-section" aria-labelledby="progress-heading"><h2 id="progress-heading">当前进展</h2><div className="progress-list">{resume.progress.map((item) => { const Icon = item.state === "completed" ? CheckCircle2 : item.state === "review" ? CircleEllipsis : Circle; return <div key={item.id} className={`progress-row progress-row--${item.state}`}><Icon aria-hidden="true" /><strong>{item.state === "completed" ? "已完成" : item.state === "review" ? "待你判断" : "可开始"}</strong><span>{item.label}</span><button className="inline-link" type="button" onClick={() => openTarget(item.target)}>{item.action}<ChevronRight aria-hidden="true" /></button></div>; })}</div></section>
     <section className="resume-section" aria-labelledby="risk-heading"><h2 id="risk-heading">需要留意</h2>{resume.risks.map((risk) => <div key={risk.text} className="warning-callout" role="status"><TriangleAlert aria-hidden="true" /><p>{risk.text}</p><button className="inline-link" type="button" onClick={() => showSource(risk.sourceId)}>查看来源<ChevronRight aria-hidden="true" /></button></div>)}</section>
     <section className="resume-section" aria-labelledby="next-heading"><h2 id="next-heading">建议的下一步</h2><div className="suggestion-list">{resume.suggestions.map((suggestion, index) => <button key={suggestion.id} className="resume-suggestion" type="button" onClick={() => openTarget(suggestion.target)}><span className="suggestion-index">{String(index + 1).padStart(2, "0")}</span><strong>{suggestion.text}</strong><small>{suggestion.basis}</small><ChevronRight aria-hidden="true" /></button>)}</div><p className="helper-text">以上为建议，尚未执行；摘要不会开始或恢复执行。</p></section>

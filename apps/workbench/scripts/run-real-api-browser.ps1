@@ -21,6 +21,9 @@ $migrateEntry = Join-Path $apiRoot 'dist\src\cli\migrate.js'
 $installGraphEntry = Join-Path $apiRoot 'dist\src\cli\install-graph.js'
 $workspaceEntry = Join-Path $apiRoot 'dist\src\cli\init-workspace.js'
 $rolesFile = Join-Path $apiRoot 'sql\bootstrap-roles.sql'
+$helperManifest = Join-Path $repoRoot 'apps\file-io-helper\Cargo.toml'
+$helperExe = Join-Path $repoRoot 'apps\file-io-helper\target\x86_64-pc-windows-msvc\debug\relay-file-io-helper.exe'
+$tscEntryApi = Join-Path $apiRoot 'node_modules\typescript\bin\tsc'
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("relay-m02-browser-$([guid]::NewGuid().ToString('N').Substring(0, 10))")
 $cluster = Join-Path $temporaryRoot 'cluster'
 $dataRoot = Join-Path $temporaryRoot 'artifacts'
@@ -70,6 +73,26 @@ try {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required tool or build output is missing: $path" }
   }
   New-Item -ItemType Directory -Path $temporaryRoot, $dataRoot -Force | Out-Null
+
+  # Artifact bodies are published to managed storage through the native file I/O helper named by
+  # RELAY_FILE_IO_HELPER. Without it every save fails honestly as "content was not fully published
+  # to managed storage", so the real write path is never reached and this acceptance proves nothing.
+  if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
+      [string]::IsNullOrWhiteSpace($env:RELAY_FILE_IO_HELPER)) {
+    $cargo = (Get-Command cargo -ErrorAction Stop).Source
+    & $cargo build --locked --target x86_64-pc-windows-msvc --manifest-path $helperManifest
+    if ($LASTEXITCODE -ne 0) { throw "Native file I/O helper build failed with exit code $LASTEXITCODE" }
+    if (-not (Test-Path -LiteralPath $helperExe -PathType Leaf)) { throw "Native file I/O helper was not produced: $helperExe" }
+    $env:RELAY_FILE_IO_HELPER = $helperExe
+  }
+
+  # The API dist must match the current source, otherwise this acceptance reports on a stale build.
+  Push-Location $apiRoot
+  try {
+    & $nodeExe $tscEntryApi '-p' 'tsconfig.json'
+    if ($LASTEXITCODE -ne 0) { throw "API build failed with exit code $LASTEXITCODE" }
+  } finally { Pop-Location }
+
   $pgPort = Free-Port
   $apiPort = Free-Port
   $uiPort = Free-Port
@@ -109,6 +132,7 @@ try {
   Wait-Http -Url "http://127.0.0.1:$apiPort/health/live"
 
   Remove-Item Env:RELAY_API_BEARER_TOKEN
+  Write-Host "M02 real browser: file I/O helper in use"
   $uiProcess = Start-Process -FilePath $nodeExe -ArgumentList @($viteEntry, '--host', '127.0.0.1', '--port', "$uiPort", '--strictPort') -WorkingDirectory $workbenchRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $temporaryRoot 'vite.out') -RedirectStandardError (Join-Path $temporaryRoot 'vite.err')
   Wait-Http -Url "http://127.0.0.1:$uiPort/"
 

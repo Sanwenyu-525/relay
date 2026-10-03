@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import ProjectNav from "../components/ProjectNav";
+import PageHeader from "../components/PageHeader";
 import AppDialog from "../components/AppDialog";
 import KnowledgeReader from "../components/KnowledgeReader";
 import SafeMarkdown from "../components/SafeMarkdown";
@@ -597,9 +598,8 @@ export default function KnowledgeView() {
   </section>;
 
   return <section className={`knowledge-page${reading ? " knowledge-page--reading" : ""}${capturing ? " knowledge-page--capture" : ""}`}>
-    {!reading && !capturing && <><p className="eyebrow">{projectId ? "项目资料" : "工作空间资料"}</p>
-    <h1>资料</h1>
-    <p className="page-lede">资料、记忆、决定与规则</p>
+    {!reading && !capturing && <><PageHeader testId="knowledge-page-head" title="资料"
+      meta={projectId ? "项目资料" : "工作空间资料"} lede="资料、记忆、决定与规则" />
     {projectId && <ProjectNav projectId={projectId} active="knowledge" />}</>}
 
     {!live ? <section className="surface-panel" data-testid="knowledge-fixture-gap">
@@ -704,7 +704,8 @@ export default function KnowledgeView() {
 
           {formOpen && <form ref={formRef} className={`surface-panel knowledge-form${capturing ? " knowledge-form--capture" : ""}`} data-testid="knowledge-form" onSubmit={(event) => { void save(event); }}>
             <div className="knowledge-form-main"><header className={capturing ? "knowledge-capture-heading" : undefined}>
-            {capturing && <><h1>把这次经验留下来</h1><p className="page-lede">先核对内容与来源，再决定是否收录。</p></>}
+            {capturing && <><PageHeader testId="knowledge-capture-page-head" title="把这次经验留下来"
+    lede="先核对内容与来源，再决定是否收录。" /></>}
             <h2>{revisionMode ? "追加新版本" : `新建${currentNoun}`}</h2>
             {revisionMode && <p className="helper-text">基于起草时修订 v{kind === "KNOWLEDGE" ? knowledgeDraftBase?.revision : selected?.revision} 提交；冲突时保留草稿，旧版本不会被覆盖。</p>}
             {capturing && <p className="knowledge-capture-draft-status">人工收录草稿 · 尚未保存</p>}

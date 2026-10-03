@@ -10,8 +10,11 @@ test.describe("桌面视口", () => {
 
   test("浏览器预览不显示桌面窗口控制", async ({ page }) => {
     await page.goto(blueprint);
-    await expect(page.getByTestId("desktop-titlebar")).toHaveCount(0);
+    // 工作台 §17.4：浏览器显示前进/后退/搜索/新建这些业务入口，窗口控制只由桌面宿主提供。
+    // 因此断言的是「没有窗口控制」，而不是「整条标题栏都不渲染」。
+    await expect(page.locator(".desktop-titlebar__controls")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "关闭窗口" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "最小化" })).toHaveCount(0);
   });
 
   test("四个状态都渲染真实中文 DOM 且无整页横向滚动", async ({ page }) => {
@@ -111,7 +114,9 @@ test.describe("小窗口", () => {
 
   test("左导航转为抽屉，主要内容单列可达", async ({ page }) => {
     await page.goto(blueprint);
-    await expect(page.locator(".app-sidebar")).toBeHidden();
+    // 2026-10-02 共享壳拆成图标导航栏 + 近期工作栏两列，窄窗两列都收起，由抽屉承担。
+    await expect(page.locator(".app-navrail")).toBeHidden();
+    await expect(page.locator(".app-context-rail")).toBeHidden();
     await page.getByRole("button", { name: "打开导航" }).click();
     await expect(page.locator('[role="dialog"]')).toHaveAttribute("aria-label", "导航");
     await page.keyboard.press("Escape");
@@ -204,7 +209,8 @@ test("桌面标题栏偏移下的辅助链接不遮挡窗口控制", async ({ pa
   const link = page.locator(".skip-link");
   await expect(link).toBeFocused();
   const linkBox = await link.boundingBox();
-  const barBox = await page.locator(".desktop-titlebar").boundingBox();
+  // 本用例自己 prepend 了一条模拟标题栏，页面上因此有两条 .desktop-titlebar；量的是注入的那条。
+  const barBox = await page.locator(".desktop-titlebar").first().boundingBox();
   const controlBox = await page.locator(".desktop-titlebar__controls").boundingBox();
   expect(linkBox).not.toBeNull();
   expect(barBox).not.toBeNull();
@@ -254,8 +260,11 @@ test.describe("项目与任务列表", () => {
     await page.goto(projects);
     await page.getByTestId("project-row-project-knowledge").click();
 
-    await expect(page.locator(".rail-content > h2")).toHaveText("个人知识整理");
-    await expect(page.locator(".project-summary-kicker")).toHaveText("当前项目");
+    // 工作台 §17.9：项目列表试点保留右侧摘要栏结构不变。栏标题是分区名「项目摘要」，
+    // 当前对象由紧随其后的项目名承担——原先断言的 .project-summary-kicker 已不在当前结构中。
+    await expect(page.locator(".rail-content > h2")).toHaveText("项目摘要");
+    await expect(page.locator(".rail-project-name")).toHaveText("个人知识整理");
+    await expect(page.locator(".rail-intro")).not.toBeEmpty();
     await expect(page.locator(".project-state-summary")).toContainText("当前阶段");
     await expect(page.locator(".project-state-summary")).toContainText("执行");
     await expect(page.locator(".project-state-summary")).toContainText("状态修订 v2 · 待审 0 项");

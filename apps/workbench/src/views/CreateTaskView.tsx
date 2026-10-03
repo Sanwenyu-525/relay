@@ -3,6 +3,7 @@ import { dialogCount } from "../lib/dialogStack";
 import { Link, useSearchParams } from "react-router-dom";
 import { Check, Info } from "lucide-react";
 import ResponsiveRail from "../components/ResponsiveRail";
+import PageHeader from "../components/PageHeader";
 import { createCommandId, RelayApiError, RelayTransportError, taskCreationFrom, taskMutationFrom, type RelayApiClient, type RelayProjectListItem, type RelayTaskCreation } from "../api/relayClient";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
@@ -358,7 +359,9 @@ export default function CreateTaskView({ inboxScope, onCancel }: { inboxScope: b
   const formFrozen = submitting || pendingStep.current !== null;
   const field = (key: keyof FieldErrors, label: string, value: string, set: (value: string) => void, multiline = false) => <label className={`field${fieldErrors[key] ? " field--invalid" : ""}`}><span className="field-label">{label}<span className="field-required" aria-hidden="true">*</span></span>{multiline ? <textarea value={value} onChange={(event) => { set(event.target.value); clearField(key); }} name="task-acceptance" rows={4} required disabled={formFrozen} maxLength={criteriaLimit} aria-invalid={fieldErrors[key] ? "true" : undefined} aria-describedby={fieldErrors[key] ? "task-acceptance-error" : "task-acceptance-hint"} /> : <input value={value} onChange={(event) => { set(event.target.value); clearField(key); }} name={key === "title" ? "task-title" : "task-expected-result"} required disabled={formFrozen} aria-invalid={fieldErrors[key] ? "true" : undefined} aria-describedby={fieldErrors[key] ? `${key === "title" ? "task-title" : "task-result"}-error` : `${key === "title" ? "task-title" : "task-result"}-hint`} />}{fieldErrors[key] ? <span id={key === "acceptanceCriteria" ? "task-acceptance-error" : `${key === "title" ? "task-title" : "task-result"}-error`} className="field-error" role="alert"><Info aria-hidden="true" />{fieldErrors[key]}</span> : <span id={key === "acceptanceCriteria" ? "task-acceptance-hint" : `${key === "title" ? "task-title" : "task-result"}-hint`} className="field-hint">{key === "title" ? "用简洁明确的语言描述这项任务要完成的工作。" : key === "expectedResult" ? "说明这项任务完成后应得到的具体成果或交付物。" : "每行一条，写下明确、可判断的验收条件；检查通过不等于任务完成。"}</span>}{key === "acceptanceCriteria" && <span className="field-counter">{value.length} / {criteriaLimit}</span>}</label>;
 
-  return <div className="page-layout create-task-page"><div className="page-primary"><p className="eyebrow">新建任务与执行准备</p><p className="page-lede">清晰定义任务目标、预期结果与验收标准，为后续执行做好准备。</p><h1>把想做的事，变成可完成的任务</h1>
+  return <div className="page-layout create-task-page"><div className="page-primary"><PageHeader testId="create-task-page-head"
+    title="把想做的事，变成可完成的任务" meta="新建任务与执行准备"
+    lede="清晰定义任务目标、预期结果与验收标准，为后续执行做好准备。" />
     {createdTaskId === null ? <form ref={form} className="create-form" noValidate aria-busy={submitting || undefined} onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); void submit("ready"); }}>
       {field("title", "任务名称", draft.title, (value) => updateDraft({ title: value }))}
       {live && connection.client && <LiveProjectPicker key={connection.epoch} client={connection.client}

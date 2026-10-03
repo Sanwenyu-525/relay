@@ -31,7 +31,10 @@
 
 /* 页头外壳：层级与留白归共享 .page-head，这里只留协作页特有的尺寸与控件密度。 */
 .collab-goal { flex: none; padding: var(--relay-space-2) var(--relay-space-3); border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
-.collab-goal .page-head-title > h1 { font-size: var(--relay-font-size-compactPage); overflow-wrap: anywhere; }
+/* 任务名与状态同行：长任务名先省略，不把状态挤到下一行，也不推高上下文。
+   6rem 是本地可读下限，窄窗时整块换行而不是把标题压成一条线。 */
+.collab-goal .page-head-title > h1 { flex: 0 1 auto; min-width: 6rem; font-size: var(--relay-font-size-compactPage); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collab-goal .page-head-title > .status-chip { flex: none; }
 .collab-goal .status-chip { background: var(--relay-color-selection-bg); color: var(--relay-color-selection-text); font-size: var(--relay-font-size-meta); }
 .collab-current-need { margin: 0; font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); overflow-wrap: anywhere; }
 .collab-goal .page-head-actions > button { min-height: var(--relay-control-height); font-size: var(--relay-font-size-meta); }
@@ -52,6 +55,9 @@
 .collab-goal .page-head-more-panel [data-testid="collab-model-connection"] { margin: 0; font-size: var(--relay-font-size-meta); }
 .collab-facts-disclosure { min-width: 0; }
 .collab-facts-disclosure > summary { cursor: pointer; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); overflow-wrap: anywhere; }
+/* 验收目标：与事实条同一密度，作为「任务与执行详情」里的第一行事实。 */
+.collab-task-objective { margin: var(--relay-space-2) 0 0; font-size: var(--relay-font-size-meta); color: var(--relay-color-text-primary); overflow-wrap: anywhere; }
+.collab-task-objective-label { display: inline-block; margin-inline-end: var(--relay-space-2); padding: 0 var(--relay-space-2); border-radius: var(--relay-radius-badge); background: var(--relay-color-bg-subtle); color: var(--relay-color-text-secondary); }
 .collab-run-controls { min-width: 0; }
 .collab-run-controls .collaboration-run-control { border: 0; padding: 0; }
 .collab-run-controls .collaboration-run-control > .helper-text:first-child { display: none; }
@@ -70,6 +76,8 @@
 .collab-side-tab { padding: var(--relay-space-3) var(--relay-space-2); background: transparent; border: 0; border-bottom: var(--relay-focus-width) solid transparent; font: inherit; color: var(--relay-color-text-secondary); cursor: pointer; }
 .collab-side-tab:hover { color: var(--relay-color-action-text); }
 .collab-side-tab--active { color: var(--relay-color-selection-text); border-bottom-color: var(--relay-color-action-primary); font-weight: var(--relay-font-weight-medium); }
+/* 右栏内容区用 canvas 底，与页面同色：加圆角不会产生可见边界，因此这里不加。
+   需要圆角的独立块（判断条、文档纸面）各自声明。 */
 .collab-side-body { display: flex; flex: 1; flex-direction: column; gap: var(--relay-space-2); min-height: 0; min-width: 0; padding: var(--relay-space-3); overflow-y: auto; background: var(--relay-color-bg-canvas); }
 .collab-side-body > * { flex: none; }
 .collab-side-body[data-testid="collab-panel-DOCUMENT"] { overflow: hidden; }
@@ -84,6 +92,8 @@
 /* 阅读区有下限：判断条再长也在自身内部滚动，不把确切正文压成几行。 */
 .collab-reader-scroll { flex: 1; min-height: var(--relay-layout-workspace-centerMin); overflow-y: auto; scrollbar-gutter: stable; }
 .collab-reader .artifact-doc-body { padding: 0; border: 0; overflow: visible; max-height: none; }
+/* 判断条在文档纸面之外，与纸面留出间距读成两块独立区域。 */
+.collab-reader-outside { flex: none; }
 .collab-reader .markdown-preview { margin: 0; padding: var(--relay-space-4); border: 0; font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-reading); line-height: var(--relay-font-lineHeight-reading); }
 .collab-reader .markdown-preview__heading { margin: var(--relay-space-4) 0 var(--relay-space-2); font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-section); }
 .collab-reader .markdown-preview__heading:first-child { margin-top: 0; }
@@ -147,7 +157,7 @@
 .collab-empty-mark { display: grid; place-items: center; width: var(--relay-space-12); height: var(--relay-space-12); margin-bottom: var(--relay-space-6); background: var(--relay-color-selection-bg); color: var(--relay-color-action-text); border-radius: var(--relay-radius-panel); }
 .collab-empty-mark svg { width: var(--relay-space-6); height: var(--relay-space-6); }
 .collab-empty .eyebrow { margin: 0 0 var(--relay-space-2); font-size: var(--relay-font-size-meta); }
-.collab-empty h1 { margin: 0; font-size: var(--relay-font-size-compactPage); }
+.collab-empty h1 { margin: 0; font-size: var(--relay-font-size-page); }
 .collab-empty-lede { color: var(--relay-color-text-secondary); line-height: var(--relay-font-lineHeight-reading); margin: var(--relay-space-4) 0 var(--relay-space-6); }
 .collab-empty-note { margin-top: var(--relay-space-4); }
 .collab-picker { display: grid; gap: var(--relay-space-4); padding: var(--relay-space-4); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-control); background: var(--relay-color-bg-surface); }

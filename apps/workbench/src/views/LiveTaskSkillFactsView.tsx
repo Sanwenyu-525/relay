@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { RelayApiClient, RelayRunTrace, RelayTaskDetail } from "../api/relayClient";
 import TaskCheckPlanPreview from "../components/TaskCheckPlanPreview";
+import PageHeader from "../components/PageHeader";
 import { executorLabels, interactionModeLabels, taskStatusLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
@@ -86,8 +87,9 @@ export default function LiveTaskSkillFactsView({ client, kind }: {
   }
   return <section className="skill-page task-skill-facts" data-testid={`live-${kind}`}>
     <div className="page-layout"><div className="page-primary">
-    <p className="eyebrow">{factsReadable && task ? task.title : title}</p><h1>{kind === "definition" ? "先说清楚，怎样才算完成" : "把验收依据列清楚"}</h1>
-    <p className="page-lede">先核对当前事实，再生成建议并确认本次变更。</p>
+<PageHeader testId={`live-${kind}-page-head`} meta={factsReadable && task ? task.title : title}
+      title={kind === "definition" ? "先说清楚，怎样才算完成" : "把验收依据列清楚"}
+      lede="先核对当前事实，再生成建议并确认本次变更。" />
     {task && factsReadable && <p className="metadata-row">任务状态：{taskStatusLabels[task.status]} ·
       执行模式：{interactionModeLabels[task.mode]} · 当前执行者：{executorLabels[task.executor]} ·
       Task v{task.revision} / 验收 v{task.acceptance.acceptanceRevision}</p>}

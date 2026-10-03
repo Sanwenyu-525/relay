@@ -39,8 +39,9 @@ describe("整改 2026-09-28 UI 共享问题", () => {
     }));
     const mounted = await mountWorkbench("/tasks");
     unmount = mounted.unmount;
-    const header = mounted.wrapper.get(".list-header");
-    expect(header.attributes("class")).not.toContain("list-header--compact");
+    // 页面标题走共享页头原语（不再是页面自带的内联标题块），筛选区仍保持紧凑一行的旧结论。
+    const header = mounted.wrapper.get('[data-testid="tasks-page-head"]');
+    expect(header.get("h1").text()).toBe("任务");
     const toolbar = mounted.wrapper.get(".list-toolbar");
     expect(toolbar.attributes("class")).toContain("list-toolbar--compact");
     const search = mounted.wrapper.get('input[name="task-search"]');

@@ -7,6 +7,7 @@ import type {
   RelayReview, RelayRun, RelayTaskSummary
 } from "../api/relayClient";
 import ProjectNav from "../components/ProjectNav";
+import PageHeader from "../components/PageHeader";
 import ViewConfigurationPanel from "../components/ViewConfigurationPanel";
 import ResponsiveRail from "../components/ResponsiveRail";
 import StatusChip from "../components/StatusChip";
@@ -350,10 +351,12 @@ export default function ProjectWorkbenchView() {
       <nav className="subnav" aria-label="工作台视图">{kinds.map((item) => <Link key={item.kind} className={`subnav-item${item.kind === kind ? " subnav-item--active" : ""}`} aria-current={item.kind === kind ? "page" : undefined} to={`/projects/${id}/workbench/${item.kind}${snapshot.source === "fixture" && query.toString() ? `?${query.toString()}` : ""}`}>{item.label}</Link>)}</nav>
       <button className="workbench-refresh" type="button" aria-label="刷新事实" onClick={() => setReloadKey((value) => value + 1)}><RotateCcw aria-hidden="true" /></button>
     </div>
-    <div className="workbench-heading"><div><h1>{kind === "general" ? focusedTitle : kind === "thesis" ? "从资料到论证" : "审查本轮变更"}</h1>
-      <p className="workbench-subtitle">{kind === "general" ? snapshot.fixtureGoal ?? "围绕当前任务，核对目标、产物与下一步。" : kind === "thesis" ? "为下一版草稿选择可追溯的依据。" : "核对确切产物版本与运行证据，再到原任务处理。"}</p>
+    <PageHeader testId="workbench-page-head"
+      title={kind === "general" ? focusedTitle : kind === "thesis" ? "从资料到论证" : "审查本轮变更"}
+      meta={snapshot.title}
+      lede={kind === "general" ? snapshot.fixtureGoal ?? "围绕当前任务，核对目标、产物与下一步。" : kind === "thesis" ? "为下一版草稿选择可追溯的依据。" : "核对确切产物版本与运行证据，再到原任务处理。"}>
       <p className="workbench-scope-note">{snapshot.source === "live" ? "只读工作视图" : "示例数据预览"} · 项目类型：{typeLabel(snapshot.projectType)} · 当前阶段：{phaseLabel(snapshot.phaseKey)}</p>
-    </div></div>
+    </PageHeader>
     {kind === "general" && <>
       <div className="workbench-next-context"><span id="workbench-next">{snapshot.nextAction?.id === focusedTaskId && selectedTaskId === null ? "项目下一步" : "当前浏览任务"}</span>
         <span>{focusedTitle}{focusedTaskId && <Link className="text-link" to={`/tasks/${focusedTaskId}`}>打开任务</Link>}</span>

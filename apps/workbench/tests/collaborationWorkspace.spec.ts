@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
@@ -115,16 +116,12 @@ function router(routes: Routes) {
     if (path === `${prefix}/projects/${projectId}/managed-resources`) return json([{ id: "res-1", project_id: projectId,
       canonical_root: "D:\\repo", status: "ACTIVE", revision: "1", resource_epoch: "0", file_write_identity_bound: true }]);
     if (path.startsWith(`${prefix}/projects/${projectId}/connections`)) return json([]);
-    if (path === `${prefix}/model-port`) return json({ provider: "openai-compatible", configured: true,
-      model: "gpt-4.1-mini", base_url: null });
-    if (path === `${prefix}/model-port/verification`) return json({ current_config_fingerprint: null,
-      last: null, matches_current_config: false, worker_startup_validation: "NOT_CONFIGURED" });
-    if (path.startsWith(`${prefix}/search`)) return json({ items: [], next_cursor: null });
-    if (path === `${prefix}/model-port`) return routes.modelPort?.() ?? json({ provider: "fake",
-      configured: false, model: null, base_url: null });
+    if (path === `${prefix}/model-port`) return routes.modelPort?.() ?? json({ provider: "openai-compatible",
+      configured: true, model: "gpt-4.1-mini", base_url: null, max_call_tokens: 65_536 });
     if (path === `${prefix}/model-port/verification`) return routes.modelVerification?.() ?? json({
       current_config_fingerprint: null, last: null, matches_current_config: false,
       worker_startup_validation: "NOT_CONFIGURED" });
+    if (path.startsWith(`${prefix}/search`)) return json({ items: [], next_cursor: null });
     throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
   });
 }
@@ -372,10 +369,14 @@ describe("协作工作区主路径", () => {
       try {
         await view.wrapper.get('[data-testid="assist-intent"]').setValue(intent);
         await view.wrapper.get('[data-testid="assist-draft"]').setValue("请补充计算口径");
-        expect(view.wrapper.get('[data-testid="assist-send"]').text()).toBe(label);
-        await view.wrapper.get('[data-testid="assist-send"]').trigger("click"); await flush();
+        // 发送键只留图标，意图与动作说明由可访问名称与 title 承担。
+        const send = view.wrapper.get(".agent-chat-composer [data-testid='assist-send']");
+        expect(send.attributes("aria-label")).toBe(label);
+        expect(send.attributes("title")).toBe(label);
+        await send.trigger("click"); await flush();
         expect(posts[0]).toMatchObject({ intent, content: "请补充计算口径", source_refs: [] });
-        expect(view.wrapper.get('[data-testid="assist-send"]').text()).toBe(label);
+        expect(view.wrapper.get(".agent-chat-composer [data-testid='assist-send']")
+          .attributes("aria-label")).toBe(label);
         expect(view.wrapper.get('[data-testid="assist-session-select"]').attributes("disabled")).toBeDefined();
         await view.wrapper.get(".assist-pending").findAll("button")[1]!.trigger("click"); await flush();
         expect(posts).toHaveLength(2); expect(posts[1]).toEqual(posts[0]);
@@ -529,6 +530,113 @@ describe("协作工作区主路径", () => {
       expect(options.get("#assist-source-query").element).toBe(queryOwner);
       expect(queryOwner.value).toBe("保留检索词");
       expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    } finally { view.unmount(); }
+  });
+
+  for (const scenario of [
+    { name: "有真实读数时给出命中率与占用圆环", maxCallTokens: 1_000,
+      usage: { input_tokens: 800, output_tokens: 200, cache_read_tokens: 600, cache_creation_tokens: 100 },
+      hit: "缓存命中 75%", state: "high", aria: "80%" },
+    { name: "Provider 未上报缓存时说明未采集，不显示成 0%", maxCallTokens: 1_000,
+      usage: { input_tokens: 500, output_tokens: 20, cache_read_tokens: null, cache_creation_tokens: null },
+      hit: "缓存未采集", state: "normal", aria: "50%" },
+    { name: "读不到单次上限时不画占用弧，说明不可算", maxCallTokens: null,
+      usage: { input_tokens: 500, output_tokens: 20, cache_read_tokens: 250, cache_creation_tokens: null },
+      hit: "缓存命中 50%", state: "unknown", aria: "占用不可算" },
+    { name: "还没有模型调用时如实说明", maxCallTokens: 1_000,
+      usage: { input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_creation_tokens: null },
+      hit: "缓存未采集", state: "unknown", aria: "尚无模型调用" },
+  ]) {
+    it(`输入区底栏：${scenario.name}`, async () => {
+      activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+      const read = router({ modelPort: () => response({ provider: "openai-compatible", configured: true,
+        model: "gpt-4.1-mini", base_url: null, max_call_tokens: scenario.maxCallTokens }) });
+      vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+        if (new URL(String(input)).pathname === `${prefix}/assist-sessions/${sessionId}/messages`) {
+          return response({ items: [
+            { id: "user-usage", session_id: sessionId, seq: "1", role: "USER", status: "COMPLETED",
+              intent: "DISCUSS", content: "帮我看看资料", error_code: null, sources: [],
+              usage: { input_tokens: null, output_tokens: null, cache_read_tokens: null,
+                cache_creation_tokens: null }, cancel_requested: false },
+            { id: "assistant-usage", session_id: sessionId, seq: "2", role: "ASSISTANT", status: "COMPLETED",
+              intent: "DISCUSS", content: "好的", error_code: null, sources: [], usage: scenario.usage,
+              cancel_requested: false }] });
+        }
+        return read(input, init);
+      }));
+      const view = await mountWorkbench(`/agent?work=${taskId}`);
+      try {
+        const send = view.wrapper.get(".agent-chat-composer [data-testid='assist-send']");
+        // 发送键只留图标，可访问名称仍说明动作。
+        expect(send.text()).toBe("");
+        expect(send.attributes("aria-label")).toBe("发送讨论");
+        expect(view.wrapper.find(".agent-chat-send-hint").exists()).toBe(false);
+        // 资料、选项、命中率、圆环与发送键同属圆角卡内的底栏。
+        const card = view.wrapper.get(".agent-chat-composer");
+        expect(card.find('[data-testid="assist-open-sources"]').exists()).toBe(true);
+        expect(card.find('[data-testid="assist-cache-hit"]').exists()).toBe(true);
+        expect(card.find('[data-testid="assist-context-meter"]').exists()).toBe(true);
+        expect(view.wrapper.get('[data-testid="assist-cache-hit"]').text()).toBe(scenario.hit);
+        const meter = view.wrapper.get('[data-testid="assist-context-meter"]');
+        expect(meter.attributes("data-state")).toBe(scenario.state);
+        expect(meter.attributes("aria-label")).toContain(scenario.aria);
+      } finally { view.unmount(); }
+    });
+  }
+
+  it("判断条是纸面之外的独立圆角卡", () => {
+    // jsdom 不加载样式表，因此直接核对规则本身。
+    // 圆角加在 canvas 同色容器上不产生可见边界；判断条才是那块真正可读的卡。
+    const css = readFileSync(`${process.cwd()}/src/styles.css`, "utf8");
+    const bar = css.match(/\.judgment-bar\s*\{[^}]*\}/u)?.[0] ?? "";
+    expect(bar).toMatch(/border-radius:\s*var\(--relay-radius-control\)/u);
+    // warning 变体用整圈边框，不再是单侧色条配直角。
+    const warning = css.match(/\.judgment-bar--warning\s*\{[^}]*\}/u)?.[0] ?? "";
+    expect(warning).toMatch(/border-color:/u);
+    expect(warning).not.toMatch(/border-inline-start:/u);
+  });
+
+  it("判断条不在文档纸面内部，避免盖住正文最后一行", () => {
+    const source = readFileSync(`${process.cwd()}/src/components/ArtifactReaderPanel.tsx`, "utf8");
+    const paperBlock = source.match(/<div className="collab-document-paper">([\s\S]*?)<\/div>/u)?.[1] ?? "";
+    expect(paperBlock).not.toContain("{paperFooter}");
+    expect(source).toContain('className="collab-reader-outside"');
+  });
+
+  it("AI 消息内按正文、来源条、候选卡的顺序回答读了什么与产出什么", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const read = router({ messages: () => response({ items: [
+      { id: "user-turn", session_id: sessionId, seq: "1", role: "USER", status: "COMPLETED",
+        intent: "DISCUSS", content: "补充评价指标", error_code: null, sources: [],
+        usage: { input_tokens: null, output_tokens: null }, cancel_requested: false },
+      { id: "ai-turn", session_id: sessionId, seq: "2", role: "ASSISTANT", status: "COMPLETED",
+        intent: "PROPOSE_CANDIDATE", content: "已整理三项指标。", error_code: null,
+        sources: [{ kind: "KNOWLEDGE", root_id: "k1", version: "1",
+          source_ref: "研究问题清单 v1", status: "AVAILABLE", reason: null }],
+        usage: { input_tokens: null, output_tokens: null }, cancel_requested: false }] }),
+    proposals: () => response({ items: [{ id: "cand-1", session_id: sessionId, message_id: "ai-turn",
+      kind: "CANDIDATE_MARKDOWN", target_type: "TASK", target_id: taskId, base_revision: "2",
+      payload_hash: "f".repeat(64), payload_available: true, status: "PENDING",
+      payload: { title: "评价方案.md", media_type: "text/markdown", markdown: "# 草稿" } }] }) });
+    vi.stubGlobal("fetch", read);
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      const row = view.wrapper.get('.agent-message[data-role="ASSISTANT"]');
+      // 正文 → 来源条 → 候选卡，同一条回复内按阅读顺序排列。
+      const children = Array.from((row.element as HTMLElement).querySelector(".agent-message-body")!.children);
+      const order = children.map((el) => el.className);
+      const sourceIndex = order.findIndex((name) => name.includes("assist-source-summary"));
+      const candidateIndex = order.findIndex((name) => name.includes("assist-candidate-card"));
+      expect(order.some((name) => name.includes("assist-message-markdown"))).toBe(true);
+      expect(sourceIndex).toBeGreaterThan(order.findIndex((name) => name.includes("assist-message-markdown")));
+      expect(candidateIndex).toBeGreaterThan(sourceIndex);
+      expect(row.get(".assist-source-summary").text()).toContain("已读取 1 份资料");
+      expect(row.get(".assist-source-summary").text()).toContain("生成候选完成");
+      const card = row.get(".assist-candidate-card");
+      expect(card.text()).toContain("评价方案.md · 候选");
+      expect(card.text()).toContain("待确认");
+      // 候选卡只作指引：正文与接受入口仍在提案区，不在此处重复。
+      expect(card.find("button").exists()).toBe(false);
     } finally { view.unmount(); }
   });
 
@@ -995,7 +1103,8 @@ describe("协作工作区主路径", () => {
     vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench("/agent");
     await flush(60);
-    expect(view.wrapper.get('[data-testid="collab-empty"]').text()).toContain("这次想推进什么");
+    // 空工作区的默认入口是打开文件夹（§18.1），不是直接挑任务。
+    expect(view.wrapper.get('[data-testid="collab-empty"]').text()).toContain("打开文件夹就能开始对话");
     expect(view.wrapper.get('[data-testid="recent-work"]').text()).toContain("还没有任务");
     // 范围与排序常驻可见，避免用户把会话列表误当作全部工作。
     expect(view.wrapper.get('[data-testid="recent-work"] [title="全部任务 · 按最近变更排序"]').exists()).toBe(true);
@@ -1048,6 +1157,29 @@ describe("协作工作区主路径", () => {
     expect(view.wrapper.get('[data-testid="collab-run-progress"]').text()).toContain("生成草稿");
     expect(view.wrapper.get('[data-testid="run-control"]').text()).toContain("控制提交回执表示 PENDING");
     expect(posts).toHaveLength(0);
+    view.unmount();
+  });
+
+  it("聊天任务头：长任务名有键盘可达的完整名称入口，验收目标按需展开且不占首屏", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const fetchMock = router({});
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => fetchMock(input, init)));
+    const view = await mountWorkbench("/agent");
+    await flush(60);
+    await view.wrapper.get(`[data-testid="recent-work-${taskId}"]`).trigger("click");
+    await flush(80);
+
+    const header = view.wrapper.get('[data-testid="collab-goal"]');
+    // 截断的标题必须有一个真实链接指向确切任务页：title 属性只服务悬停，键盘与辅助技术拿不到完整名称。
+    const nameLink = header.get('[data-testid="collab-page-head-title-link"]');
+    expect(nameLink.text()).toBe("确定实验评价指标");
+    expect(nameLink.attributes("href")).toBe(`/tasks/${taskId}`);
+    expect((nameLink.element as HTMLAnchorElement).tabIndex).toBe(0);
+    // 验收目标从首屏移进按需展开区，但两种页头分支都必须渲染它，折叠不是隐藏。
+    expect(header.find(".page-head-lede").exists()).toBe(false);
+    expect(header.get('[data-testid="collab-task-objective"]').text()).toContain("补齐基线、评价方法与可复核的验收依据。");
+    // 页头首屏只剩名称、状态与当前需要。
+    expect(header.get('[data-testid="collab-current-need"]').text()).toContain("人机协作工作流研究");
     view.unmount();
   });
 

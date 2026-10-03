@@ -228,8 +228,9 @@ describe("知识版本阅读", () => {
       .toBe("我的未保存草稿");
   });
 
-  it("项目导读只显示现有事实，没有资料时列出缺口", async () => {
+it("项目导读只读服务端编排，未保存时显示空态且不自行推导", async () => {
     activate();
+    let guideReads = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = String(input);
       if (url === `${base}/projects/${projectId}`) return response(200,
@@ -238,16 +239,23 @@ describe("知识版本阅读", () => {
           url === `${base}/decisions?project_id=${projectId}` ||
           url === `${base}/rules?project_id=${projectId}`) return response(200, []);
       if (url === `${base}/projects/${projectId}/goals`) return response(200, { items: [] });
+      if (url === `${base}/tasks?project_id=${projectId}`)
+        return response(200, { items: [], next_cursor: null });
+      if (url === `${base}/projects/${projectId}/knowledge-guide`) {
+        guideReads += 1;
+        return response(200, { project_id: projectId, exists: false, revision: "0",
+          entry_count: 0, entries: [], gaps: ["尚未编排任何条目"] });
+      }
       throw new Error(`unexpected request ${url}`);
     }));
     const mounted = await mountWorkbench(`/projects/${projectId}/knowledge`); unmount = mounted.unmount;
     await mounted.wrapper.get('[data-testid="knowledge-guide-toggle"]').trigger("click");
-    await flush();
+    for (let attempt = 0; attempt < 20 && guideReads === 0; attempt += 1) { await flush(40); }
     const guide = mounted.wrapper.get('[data-testid="project-knowledge-guide"]').text();
-    expect(guide).toContain("尚无已关联的有效目标");
-    expect(guide).toContain("尚无项目决定");
-    expect(guide).toContain("尚无项目资料");
-    expect(guide).not.toContain("验收通过");
+    expect(guide).toContain("尚未保存过编排");
+    expect(guide).toContain("尚未编排任何条目");
+    expect(guide).toContain("全部加入");
+    expect(mounted.wrapper.findAll(".knowledge-guide__entries li")).toHaveLength(0);
   });
 
   it("收录须核对确切产物版本；旧预览迟到不能进入新的来源草稿", async () => {

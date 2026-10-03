@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
-import { Bell, BookOpen, FolderKanban, House, Inbox, Link2, ListChecks, ListTree, Menu, Search, Settings } from "lucide-react";
+import { Bell, BookOpen, FolderKanban, House, Inbox, Link2, ListChecks, ListTree, Menu, MessageSquarePlus, Search, Settings } from "lucide-react";
 import AppDialog from "./AppDialog";
 import CommandPalette from "./CommandPalette";
 import RelayConnectionDialog from "./RelayConnectionDialog";
@@ -12,7 +12,9 @@ import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { useRelayConnection } from "../lib/relayConnection";
 import { useDisplayPreferences } from "../lib/displayPreferences";
 
-// 侧栏宽度是纯展示偏好，不是业务事实；localStorage 只保存这一个数值，读写失败时本次会话仍可调整。
+// 可拖拽列宽是纯展示偏好，不是业务事实；localStorage 只保存这一个数值，读写失败时本次会话仍可调整。
+// 2026-10-02 共享壳栏位分离后，这个键归属「近期工作」栏；沿用同一键与同一钳制区间，
+// 旧组合侧栏留下的 160–320px 宽度对新的单栏仍然成立，不需要迁移或清空。
 const SIDEBAR_WIDTH_STORAGE_KEY = "relay.workbench.sidebarWidthPx";
 function readStoredSidebarWidth(): number | null {
   try {
@@ -146,9 +148,9 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
   const weekday = new Intl.DateTimeFormat("zh-CN", { timeZone, weekday: "long" }).format(now);
 
   return <>
-    <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById("main-content")?.focus(); }}>跳到主要内容</a>
     <div className={`app-frame${path === "/agent" ? " app-frame--collaboration" : ""}`} style={frameStyle}>
-      <aside className="app-sidebar">
+      {/* 2026-10-02 共享壳栏位分离：图标导航只承担定位，近期工作与主导航各有各的滚动 Owner 和宽度偏好。 */}
+      <aside className="app-navrail" aria-label="应用导航">
         <nav className="navigation-list" aria-label="主导航">
           {primaryNavigation.map((item) => <NavLink key={item.label} to={item.to} end className={({ isActive }) => `navigation-item${isActive ? " navigation-item--active" : ""}`}>
             {({ isActive }) => <><item.icon aria-hidden="true" /><span className="navigation-label">{item.label}</span>
@@ -157,8 +159,6 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
             </>}
           </NavLink>)}
         </nav>
-        {connection.mode === "live" && connection.client &&
-          <RecentWorkRail key={connection.epoch} client={connection.client} currentTaskId={currentWorkId} />}
         <details className="navigation-extra" key={path} open={secondaryWorkNavigation.some((item) => item.to === path) || undefined}>
         <summary>更多入口</summary>
         <nav className="navigation-list navigation-list--secondary" aria-label="次级导航">
@@ -175,6 +175,17 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
             <item.icon aria-hidden="true" /><span className="navigation-label">{item.label}</span>
           </NavLink>)}
         </nav>
+      </aside>
+      <aside className="app-context-rail" aria-label="近期工作上下文" data-testid="app-context-rail">
+        <div className="context-rail-head">
+          <p className="context-rail-brand">Relay</p>
+          {/* 新对话仍由协作页持有会话草稿与目录入口，这里只回到那条既有路径，不新建第二套会话状态。 */}
+          <Link className="secondary-button context-rail-new" to="/agent" data-testid="context-new-conversation"
+            aria-label="新对话" title="新对话"><MessageSquarePlus aria-hidden="true" /><span>新对话</span></Link>
+        </div>
+        {connection.mode === "live" && connection.client
+          ? <RecentWorkRail key={connection.epoch} client={connection.client} currentTaskId={currentWorkId} />
+          : <p className="helper-text context-rail-placeholder">示例数据没有真实近期工作；连接本机 API 后这里按项目分组显示。</p>}
       </aside>
       <div className="app-content">
         <header className="app-topbar">

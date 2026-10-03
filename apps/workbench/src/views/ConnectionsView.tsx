@@ -7,13 +7,20 @@ import {
   type RelayGatewayPolicyVersion, type RelayManagedResource, type RelayProject, type RelayProjectListItem
 } from "../api/relayClient";
 import ProjectNav from "../components/ProjectNav";
+import PageHeader from "../components/PageHeader";
 import ViewConfigurationPanel from "../components/ViewConfigurationPanel";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import "./ConnectionsView.css";
 
-const capabilities: readonly RelayGatewayCapability[] = ["WEB_FETCH", "FILE_READ", "FAKE_WRITE", "FAKE_PUBLIC_READ"];
-const isFileCapability = (capability: RelayGatewayCapability) => capability === "FILE_READ" || capability === "FAKE_WRITE";
+const capabilities: readonly RelayGatewayCapability[] =
+  ["WEB_FETCH", "FILE_READ", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN", "FAKE_WRITE", "FAKE_PUBLIC_READ"];
+/** 服务端 rootBoundCaps：这类 Connection 必须绑定一个绝对根目录，Fake 能力不绑定任何边界。 */
+const rootBoundCapabilities: readonly RelayGatewayCapability[] =
+  ["FILE_READ", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN"];
+/** 除公共读取外的策略都按受管资源目录限定目标前缀（服务端 policyScope）。 */
+const isFileCapability = (capability: RelayGatewayCapability) =>
+  capability !== "WEB_FETCH" && capability !== "FAKE_PUBLIC_READ";
 const connectionStatusText = (status: string): string => status === "ACTIVE" ? "已连接（尚未授权）"
   : status === "DISABLED" ? "已停用（失效）" : status === "REVOKED" ? "已撤销" : `未连接（${status}）`;
 
@@ -89,8 +96,8 @@ export default function ConnectionsView() {
     return () => { projectRequest.current++; };
   }, [client, connection.epoch]);
   return <section className="connections-page">
-    <p className="eyebrow">项目设置</p><h1>连接与权限</h1>
-    <p className="page-lede">选择项目，管理连接、受管目录与权限。</p>
+    <PageHeader testId="connections-page-head" title="连接与权限" meta="项目设置"
+      lede="选择项目，管理连接、受管目录与权限。" />
     {connection.mode === "fixture" && <p className="warning-callout" role="status">当前为示例数据；连接设置只在显式连接本机 API 后可用。</p>}
     {client && <section className="surface-panel connections-project-picker" aria-label="选择项目"><div className="section-heading-row"><h2>项目</h2><button type="button" className="secondary-button" disabled={loading} onClick={() => void loadProjects()}>刷新</button></div>
       {loading && <p className="helper-text" role="status">正在读取项目…</p>}{error && <p className="action-error" role="alert">{error}</p>}
@@ -257,10 +264,10 @@ export function ProjectConnectionsView() {
     const capability = connectionCapability;
     const rootPath = connectionRoot.trim();
     const allowedHost = connectionHost.trim();
-    if ((capability === "FILE_READ" && !rootPath) || (capability === "WEB_FETCH" && !allowedHost)) return;
+    if ((rootBoundCapabilities.includes(capability) && !rootPath) || (capability === "WEB_FETCH" && !allowedHost)) return;
     const command: PendingCommand = { id: createCommandId(), type: "CreateGatewayConnection", resultKey: "connection_id", targetId: null, expectedStatus: "ACTIVE",
       label: "连接创建", send: (api, commandId) => api.createGatewayConnection({ projectId, commandId, capability,
-        ...(capability === "FILE_READ" ? { rootPath } : {}), ...(capability === "WEB_FETCH" ? { allowedHost } : {}) }) };
+        ...(rootBoundCapabilities.includes(capability) ? { rootPath } : {}), ...(capability === "WEB_FETCH" ? { allowedHost } : {}) }) };
     void sendCommand(command);
   }
 
@@ -297,8 +304,8 @@ export function ProjectConnectionsView() {
   const activeResources = snapshot?.resources.filter((item) => item.status === "ACTIVE") ?? [];
   const busy = submitting || pending !== null;
   return <section className="connections-page">
-    <p className="eyebrow">项目设置</p><h1>连接与权限</h1>
-    <p className="page-lede">连接限定能力与目标；权限策略单独控制 AUTO、ASK、DENY。创建连接后仍默认拒绝。</p>
+    <PageHeader testId="project-connections-page-head" title="连接与权限" meta="项目设置"
+      lede="连接限定能力与目标；权限策略单独控制 AUTO、ASK、DENY。创建连接后仍默认拒绝。" />
     <ProjectNav projectId={projectId} active="connections" />
     <p><Link className="inline-link" to={`/projects/${projectId}`}>返回原项目页</Link></p>
     <details className="connections-view-configuration">
@@ -327,7 +334,7 @@ export function ProjectConnectionsView() {
             return <li key={item.id}>
             <div><strong>{item.capabilities.join(" · ")}</strong><small>{connectionStatusText(item.status)} · {item.status} · v{item.version} · {item.id}</small>
               {item.capabilities.includes("WEB_FETCH") && <small>允许主机：{item.allowedHost ?? "未由接口公开"}</small>}
-              {item.capabilities.includes("FILE_READ") && <small>连接目录未由此接口公开；下方受管资源目录是独立配置，不推定同根。</small>}
+              {item.capabilities.some((capability) => rootBoundCapabilities.includes(capability as RelayGatewayCapability)) && <small>连接目录未由此接口公开；下方受管资源目录是独立配置，不推定同根。</small>}
               {healthState?.result && <small className="connection-health" role="status">{healthState.result}</small>}
               {healthState?.error && <small className="action-error" role="alert">健康核对失败：{healthState.error}</small>}</div>
             <div className="connections-actions">
@@ -343,7 +350,7 @@ export function ProjectConnectionsView() {
             <h3>创建连接</h3><label className="field"><span className="field-label">能力</span><select value={connectionCapability} disabled={busy} onChange={(event) => setConnectionCapability(event.target.value as RelayGatewayCapability)} data-testid="connection-capability">
               {capabilities.map((capability) => <option key={capability} value={capability}>{capability}</option>)}</select></label>
             {connectionCapability === "WEB_FETCH" && <label className="field"><span className="field-label">允许主机</span><input value={connectionHost} onChange={(event) => setConnectionHost(event.target.value)} disabled={busy} required placeholder="example.org" data-testid="connection-host" /><span className="field-hint">只填 DNS 主机，不含 scheme、端口和路径；本页不启用私有地址例外。</span></label>}
-            {connectionCapability === "FILE_READ" && <label className="field"><span className="field-label">连接目录</span><input value={connectionRoot} onChange={(event) => setConnectionRoot(event.target.value)} disabled={busy} required placeholder="本机已有绝对目录" data-testid="connection-root" /><span className="field-hint">服务端要求现存目录；提交后查询接口不读回原目录。</span></label>}
+            {rootBoundCapabilities.includes(connectionCapability) && <label className="field"><span className="field-label">连接目录</span><input value={connectionRoot} onChange={(event) => setConnectionRoot(event.target.value)} disabled={busy} required placeholder="本机已有绝对目录" data-testid="connection-root" /><span className="field-hint">服务端要求现存目录；提交后查询接口不读回原目录。</span></label>}
             <button className="primary-button" type="submit" disabled={busy || writeBlockedReason !== null}>创建连接</button>
           </form></details>
         </section>

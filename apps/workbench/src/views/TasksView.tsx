@@ -4,6 +4,7 @@ import { Info, Plus, RotateCcw, Search } from "lucide-react";
 import type { RelayApiClient, RelayTaskSummary } from "../api/relayClient";
 import ResponsiveRail from "../components/ResponsiveRail";
 import AttentionQueue from "../components/AttentionQueue";
+import PageHeader from "../components/PageHeader";
 import StatusChip from "../components/StatusChip";
 import CreateTaskView from "./CreateTaskView";
 import { fixtureAdapter, type TaskListQuery } from "../fixtures/fixtureAdapter";
@@ -74,7 +75,9 @@ export default function TasksView() {
   if (loading) return <section className="page-state" aria-live="polite"><p className="eyebrow">任务</p><h1>正在读取任务列表</h1><p>示例数据正在加载，页面尚未提交任何变更。</p></section>;
   if (error) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">任务</p><h1>暂时无法显示任务</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
   return <section className="skill-page task-list-page"><div className="page-layout"><div className="page-primary">
-    <div className="list-header"><div><h1>{scope === "inbox" ? "任务收件箱" : "任务"}</h1><p className="page-lede">{scope === "inbox" ? "未归属项目的人工任务先放这里，之后再整理进项目。" : "把目标拆成可执行的任务；完成依据是产物与验收。"}</p></div><button className="primary-button" type="button" data-testid="task-create-open" onClick={openCreate}><Plus aria-hidden="true" />新建任务</button></div>
+    <PageHeader testId="tasks-page-head" title={scope === "inbox" ? "任务收件箱" : "任务"}
+      lede={scope === "inbox" ? "未归属项目的人工任务先放这里，之后再整理进项目。" : "把目标拆成可执行的任务；完成依据是产物与验收。"}
+      actions={<button className="primary-button" type="button" data-testid="task-create-open" onClick={openCreate}><Plus aria-hidden="true" />新建任务</button>} />
     <nav className="subnav" aria-label="任务范围"><Link className={`subnav-item${scope === "all" ? " subnav-item--active" : ""}`} to="/tasks" data-testid="tasks-tab-all" aria-current={scope === "all" ? "page" : undefined}>全部</Link><Link className={`subnav-item${scope === "inbox" ? " subnav-item--active" : ""}`} to="/tasks?tab=inbox" data-testid="tasks-tab-inbox" aria-current={scope === "inbox" ? "page" : undefined}>收件箱</Link><Link className="subnav-item" to="/tasks?tab=attention">人工待处理</Link></nav>
     <div className="list-toolbar list-toolbar--compact"><label className="filter-field">项目<select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)} name="task-filter-project" disabled={scope === "inbox"}><option value="all">全部</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}<option value="inbox">未归属项目</option></select></label><label className="filter-field">状态<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as TaskStatus | "all")} name="task-filter-status"><option value="all">全部</option>{statusOptions.map((status) => <option key={status} value={status}>{taskStatusLabels[status]}</option>)}</select></label><label className="filter-field">执行模式<select value={modeFilter} onChange={(event) => setModeFilter(event.target.value as InteractionMode | "all")} name="task-filter-mode"><option value="all">全部</option>{modeOptions.map((item) => <option key={item} value={item}>{interactionModeLabels[item]}</option>)}</select></label><label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">按任务名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="task-search" placeholder="搜索任务" /></label></div>
     {refreshing && <p className="helper-text" role="status" data-testid="tasks-refreshing">正在按当前筛选更新列表，已显示的内容保持可见。</p>}
@@ -156,10 +159,11 @@ function LiveTaskListView({ client, scope, onCreate }: {
   const hasFilters = projectFilter !== "all" || statusFilter !== "all" || modeFilter !== "all" || needle !== "";
   return <section className="skill-page task-list-page" data-testid={scope === "inbox" ? "tasks-live-inbox" : "tasks-live-all"}><div className="page-layout">
     <div className="page-primary">
-      <div className="list-header"><div><h1>{scope === "inbox" ? "任务收件箱" : "任务"}</h1><p className="page-lede">{scope === "inbox"
-        ? "未归属项目的人工任务先集中在这里。"
-        : "整个工作空间的任务；筛选只作用于已加载的页。"}</p></div>
-        <button className="primary-button" type="button" data-testid="task-create-open" onClick={onCreate}><Plus aria-hidden="true" />新建任务</button></div>
+      <PageHeader testId="tasks-page-head" title={scope === "inbox" ? "任务收件箱" : "任务"}
+        lede={scope === "inbox"
+          ? "未归属项目的人工任务先集中在这里。"
+          : "整个工作空间的任务；筛选只作用于已加载的页。"}
+        actions={<button className="primary-button" type="button" data-testid="task-create-open" onClick={onCreate}><Plus aria-hidden="true" />新建任务</button>} />
       <nav className="subnav" aria-label="任务范围"><Link className={`subnav-item${scope === "all" ? " subnav-item--active" : ""}`}
         to="/tasks" data-testid="tasks-tab-all" aria-current={scope === "all" ? "page" : undefined}>全部</Link>
         <Link className={`subnav-item${scope === "inbox" ? " subnav-item--active" : ""}`} to="/tasks?tab=inbox"

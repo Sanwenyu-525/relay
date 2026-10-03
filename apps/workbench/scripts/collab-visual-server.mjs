@@ -6,7 +6,8 @@ import { pageBodies, todayBody, searchBody } from "./visual-page-fixtures.mjs";
 const port = Number(process.argv[2] ?? 8794);
 const pages = process.argv.includes("--pages") ? pageBodies() : bodies;
 createServer((request, response) => {
-  if (request.headers.origin === "http://127.0.0.1:4174" || request.headers.origin === "http://127.0.0.1:4175") {
+  // 夹具服务只读、可信本地；放行任意 loopback origin 以便从任意本地 vite 端口取证。
+  if (/^http:\/\/127\.0\.0\.1:\d+$/u.test(request.headers.origin ?? "")) {
     response.setHeader("Access-Control-Allow-Origin", request.headers.origin);
   }
   response.setHeader("Vary", "Origin");

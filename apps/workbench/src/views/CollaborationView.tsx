@@ -7,14 +7,17 @@ import FactBar from "../components/FactBar";
 import ModelConnectionStrip from "../components/ModelConnectionStrip";
 import PageHeader from "../components/PageHeader";
 import RunControlPanel, { runLabels, stepLabels } from "../components/RunControlPanel";
-import TaskDelegatePanel from "../components/TaskDelegatePanel";
+import TaskDelegatePanel, { delegateBlockedReasonFor, type DelegateTarget } from "../components/TaskDelegatePanel";
 import type { ReviewNavigationState } from "../components/ReviewDecisionPanel";
 import WorkspaceSidePanel from "../components/WorkspaceSidePanel";
 import CollaborationSplitter from "../components/CollaborationSplitter";
-import type { RelayApiClient, RelayControlRequest, RelayReview, RelayRun, RelayTaskDetail } from "../api/relayClient";
+import { createCommandId, type RelayApiClient, type RelayControlRequest, type RelayReview,
+  type RelayRun, type RelayTaskDetail, type RelayWorkingDirectory } from "../api/relayClient";
+import FolderScope, { rememberOpened } from "../components/FolderScope";
 import { clearDraftGuard, currentDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { describeLiveError } from "../lib/liveErrors";
 import { executorLabels, taskStatusLabels } from "../lib/labels";
+import { readRecentWorkingDirectories, type RecentWorkingDirectory } from "../lib/recentWorkingDirectories";
 import { useRelayConnection } from "../lib/relayConnection";
 import { useRunDraftPreview } from "../lib/useRunDraftPreview";
 import { readCollaborationLayoutPreferences, saveCollaborationLayoutPreferences,
@@ -82,6 +85,11 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [checkingId, setCheckingId] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // 文件夹作用域：目录是当前工作目录，不是新 Workspace。空目录时保持未打开状态。
+  const [folder, setFolder] = useState<RelayWorkingDirectory | null>(null);
+  const [folderError, setFolderError] = useState<string | null>(null);
+  const [folderBusy, setFolderBusy] = useState(false);
+  const [recents, setRecents] = useState<readonly RecentWorkingDirectory[]>(() => readRecentWorkingDirectories());
   const taskRequest = useRef(0);
   const runRequest = useRef(0);
   const reviewRequest = useRef(0);
@@ -277,6 +285,41 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     { label: "证据：检查记录", action: <button className="text-link" type="button" data-testid="collab-open-checks"
       onClick={() => { setSideTab("CHECK"); setNarrowSideOpen(true); if (layout.mode === "chat") setLayoutMode("result"); }}>查看运行与检查详情 →</button> }
   ];
+  // 验收目标属于任务说明：按选定稿收进按需展开区，不再占首屏一行。两种页头分支都渲染它，
+  // 因此「展开不推高页头」的同时不会因为 Run 需要介入而让它从页面消失。
+  const taskObjective = task?.acceptance.objective
+    ? <p className="collab-task-objective" data-testid="collab-task-objective">
+      <span className="collab-task-objective-label">验收目标</span>{task.acceptance.objective}</p>
+    : null;
+
+  // 委托面板按选定稿收进「更多操作」；准入判定仍只有一份，禁用原因留在页头常驻。
+  const delegateTarget: DelegateTarget | null = task !== null && task.executorRunId === null && task.projectId !== null
+    ? { id: task.id, projectId: task.projectId, status: task.status, executor: task.executor,
+        revision: task.revision, executorRunId: null, allowedActions: task.allowedActions }
+    : null;
+  const delegateBlockedReason = delegateTarget === null ? null
+    : delegateBlockedReasonFor(delegateTarget, projectWriteBlockedReason);
+
+  const folderProjectId = folder?.status === "READY" ? folder.association?.projectId ?? null : null;
+  const folderState = { directory: folder, recents, busy: folderBusy };
+  function startFolderConversation() {
+    requestTransition(() => { setSessionId(null); setSearch({}); });
+  }
+  // 真实任务建立后把工作台切到那个 Task：执行摘要、Run 控制与判断入口仍是原来的 Owner。
+  function openExecutionTask(taskId: string) {
+    requestTransition(() => { setFolder(null); setSearch({ work: taskId }); });
+  }
+  async function openFolder(rootPath: string, projectId?: string | null) {
+    setFolderBusy(true); setFolderError(null);
+    try {
+      const directory = await client.openWorkingDirectory({ commandId: createCommandId(), rootPath,
+        ...(projectId === undefined ? {} : { projectId }) });
+      setFolder(directory);
+      setRecents((current) => rememberOpened(directory, current));
+    } catch (caught) {
+      setFolderError(describeLiveError(caught).message);
+    } finally { setFolderBusy(false); }
+  }
 
   function requestTransition(proceed: () => void) {
     const state = navigationRef.current;
@@ -322,10 +365,8 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
 
 
 {task !== null && <header className="collab-goal" data-testid="collab-goal">
-        <PageHeader title={task.title} testId="collab-page-head"
+        <PageHeader title={task.title} testId="collab-page-head" titleHref={`/tasks/${task.id}`}
           status={<span className="status-chip">{taskStatusLabels[task.status] ?? task.status}</span>}
-          meta={<span>项目：{projectTitle ?? (task.projectId === null ? "无项目" : "项目标题暂不可读取")}</span>}
-          lede={task.acceptance.objective ?? undefined}
           actions={<>
             {reviews.length > 0 && <button className="secondary-button" type="button" data-testid="collab-open-judgment"
               onClick={() => {
@@ -333,12 +374,10 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                 if (layout.mode === "chat") setLayoutMode("result");
                 window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-testid="collab-judgment"]')?.focus());
               }}>查看待处理 {reviews.length}</button>}
-            {task.executorRunId === null && task.projectId !== null && <TaskDelegatePanel compact client={client}
-              task={{ id: task.id, projectId: task.projectId, status: task.status, executor: task.executor,
-                revision: task.revision, executorRunId: null, allowedActions: task.allowedActions }}
-              projectWriteBlockedReason={projectWriteBlockedReason} onDelegated={refreshFacts} />}
           </>}
           more={<>
+            {delegateTarget !== null && <TaskDelegatePanel compact client={client} task={delegateTarget}
+              projectWriteBlockedReason={projectWriteBlockedReason} onDelegated={refreshFacts} />}
             <div className="collab-layout-modes" role="group" aria-label="协作工作区布局">
               {([["split", "双栏"], ["chat", "对话"], ["result", "成果"]] as const).map(([mode, label]) =>
                 <button key={mode} className="secondary-button" type="button" data-testid={`collab-layout-${mode}`}
@@ -347,6 +386,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
             {/* Run 控制只有一个 Owner：需要人工介入时移进页头常驻，否则留在这个默认收起的展开区。 */}
             {!runNeedsAttention && <details className="collab-facts-disclosure">
               <summary>任务与执行详情</summary>
+              {taskObjective}
               {runControl}
               <FactBar label="任务与执行事实" testId="collab-facts" cells={factCells} />
               <p className="helper-text">控制提交回执表示 PENDING；等待安全点期间，Run 与任务执行者仍以重新查询的事实为准。</p>
@@ -362,6 +402,9 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
           </>}
         >
           <p className="collab-current-need" data-testid="collab-current-need">
+            {/* 项目归属与「当前需要什么」同行，不再单独占一行 meta。 */}
+            <span>项目：{projectTitle ?? (task.projectId === null ? "无项目" : "项目标题暂不可读取")}</span>
+            <span aria-hidden="true"> · </span>
             {run?.unresolvedOperationIds.length ? `${run.unresolvedOperationIds.length} 项外部动作结果待核对；沿原 operation_id 核对，不盲重试。`
               : run?.pendingControlRequest ? "已提交控制请求，等待安全点；请求受理不代表已停止或交接。"
               : reviews.length > 0 ? `${reviews.length} 项等待人工判断；等待判断不等于已暂停。`
@@ -369,8 +412,14 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
             {currentStep && <> · 当前步骤：{stepLabels[currentStep.kind] ?? currentStep.kind}</>}
             {waitReason && <> · 等待原因：{waitReason}</>}
           </p>
-          {/* UNKNOWN、控制请求与失败原因不折叠：这三类一旦收进「更多操作」就不再可发现。 */}
-          {runNeedsAttention && <div className="collab-run-controls" data-testid="collab-run-disclosure">{runControl}</div>}
+          {/* 委托面板收进「更多操作」，但准入被拒的原因必须留在首屏：折叠不是隐藏。 */}
+          {delegateBlockedReason !== null && <p className="disabled-reason collab-delegate-blocked" data-testid="collab-delegate-blocked">{delegateBlockedReason}</p>}
+          {/* UNKNOWN、控制请求与失败原因不折叠：这三类一旦收进「更多操作」就不再可发现。
+              事实条同步移出展开区，否则「无法确认的执行结果」只剩展开后才可见。 */}
+          {runNeedsAttention && <div className="collab-run-controls" data-testid="collab-run-disclosure">
+            {taskObjective}
+            {runControl}
+            <FactBar label="任务与执行事实" testId="collab-facts" cells={factCells} /></div>}
         </PageHeader>
       </header>}
       {task !== null && <div className="collab-notices">
@@ -391,15 +440,16 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
         data-layout-mode={task === null ? "split" : layout.mode} data-narrow-side={narrowSideOpen ? "open" : "closed"}
         style={{ "--relay-collab-chat-column": `${layout.chatRatio}fr`, "--relay-collab-result-column": `${1 - layout.chatRatio}fr` } as CSSProperties}>
         {task === null
-          ? <>
+          ? folder === null
+            ? <>
               <section className="collab-center collab-center--empty" aria-label="工作主区" data-testid="collab-center">
                 <div className="collab-empty" data-testid="collab-empty">
                   <div className="collab-empty-mark"><MessageSquareText aria-hidden="true" /></div>
-                  <p className="eyebrow">协作工作区</p>
-                  <h1>这次想推进什么</h1>
-                  <p className="collab-empty-lede">从左侧「近期工作」继续，或选择一个任务开始讨论。目标、进展与成果会回到同一张工作桌。</p>
+                  <PageHeader testId="collab-empty-page-head" title="打开文件夹就能开始对话" meta="协作工作区"
+                    lede="选中一个本机目录后直接输入；只是讨论不会创建任务，明确说「帮我改这个」才会进入真实执行。" />
+                  <FolderScope state={folderState} onOpen={(rootPath, projectId) => void openFolder(rootPath, projectId)}
+                    onNewConversation={startFolderConversation} />
                   <TargetPicker client={client} onOpen={(next) => requestTransition(() => { setSessionId(next.sessionId); setSearch({ work: next.taskId }); setSideTab("DOCUMENT"); })} />
-                  <p className="collab-empty-note helper-text">打开工作区后，再分别确认讨论或委托。</p>
                   {workId !== null && loading && <p className="helper-text" role="status">正在恢复这项工作…</p>}
                   {workId !== null && error && <p className="action-error" role="alert" data-testid="collab-task-error">{error}</p>}
                 </div>
@@ -425,6 +475,31 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                   </div></div>
                 </div>
               </aside>
+            </>
+            : <>
+              <section className="collab-center" aria-label="工作主区" data-testid="collab-center">
+                <div className="folder-scope-bar" data-testid="folder-scope-bar">
+                  <p><strong>{folder.displayName}</strong><span className="helper-text">{folder.canonicalRoot}</span></p>
+                  {folder.association !== null && <p className="helper-text" data-testid="folder-scope-project">
+                    项目：{folder.association.projectTitle}
+                    {folder.createdProject && "（本次新建的最小项目；目录名不是项目目标）"}</p>}
+                  {folder.status === "NOT_READY" && <p className="disabled-reason" role="status" data-testid="folder-scope-not-ready">目录尚未就绪：{folder.reason ?? "UNKNOWN"}。仍可普通讨论，但不能对项目文件执行写操作。</p>}
+                  {folderError && <p className="action-error" role="alert" data-testid="folder-error">{folderError}</p>}
+                  <div className="form-actions">
+                    <FolderScope state={folderState} onOpen={(rootPath, projectId) => void openFolder(rootPath, projectId)}
+                      onNewConversation={startFolderConversation} />
+                  </div>
+                </div>
+                {folderProjectId !== null && <AssistView key={`folder:${folderProjectId}:${sessionId === undefined ? "auto" : sessionId}`}
+                  targetKind="PROJECT" targetId={folderProjectId}
+                  preferredSessionId={sessionId} standalone deferSessionCreation
+                  executionScope={folder}
+                  onNavigationStateChange={reportNavigation}
+                  onRequestNewSession={requestTransition}
+                  onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
+                  onSessionCreated={(created) => setSessionId(created)}
+                  onExecutionPrepared={(taskId) => void openExecutionTask(taskId)} />}
+              </section>
             </>
           : <>
             <section className="collab-center" aria-label="工作主区" data-testid="collab-center" hidden={layout.mode === "result"}>

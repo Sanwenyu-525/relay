@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { RelayApiError, type RelayArtifactDirectUses, type RelayArtifactLineage } from "../api/relayClient";
 import ArtifactVersionCompare from "../components/ArtifactVersionCompare";
+import PageHeader from "../components/PageHeader";
 import ArtifactTextLocksPanel from "../components/ArtifactTextLocksPanel";
 import ArtifactImpactCheckPanel from "../components/ArtifactImpactCheckPanel";
+import KnowledgeCurationPanel from "../components/KnowledgeCurationPanel";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import "./ArtifactLineageView.css";
@@ -59,8 +61,9 @@ export default function ArtifactLineageView() {
     finally { if (request === usesRequest.current) setUsesLoading(false); }
   }
 
-  return <section className="lineage-page" data-testid="artifact-lineage"><p className="eyebrow">产物来源</p><h1>来源追溯</h1>
-    <p className="page-lede">这里展示这个版本在服务端确认过的直接来源；完整因果关系与正文仍以原版本和 Run 证据为准。</p>
+  return <section className="lineage-page" data-testid="artifact-lineage"><PageHeader testId="lineage-page-head"
+    title="来源追溯" meta="产物来源"
+    lede="这里展示这个版本在服务端确认过的直接来源；完整因果关系与正文仍以原版本和 Run 证据为准。" />
     {client === null ? <p className="warning-callout" role="status">示例数据没有真实产物来源关系。<Link to="/tasks">返回任务</Link></p> : <>
       <button className="secondary-button" type="button" disabled={loading} onClick={() => setReload((value) => value + 1)}>刷新来源</button>
       {loading && <p role="status">正在读取版本 {id} 的来源关系…</p>}
@@ -84,6 +87,9 @@ export default function ArtifactLineageView() {
         <ArtifactVersionCompare key={lineage.artifactVersionId} client={client} lineage={lineage} />
         <ArtifactTextLocksPanel key={`locks-${lineage.artifactVersionId}`} client={client} lineage={lineage} />
         <ArtifactImpactCheckPanel key={`impact-${lineage.artifactVersionId}`} client={client} lineage={lineage} />
+        <KnowledgeCurationPanel key={`curation-${lineage.artifactVersionId}`} client={client}
+          artifactId={lineage.artifactId} artifactVersionId={lineage.artifactVersionId}
+          versionNumber={lineage.versionNumber} />
         <section className="surface-panel lineage-uses" data-testid="artifact-direct-uses"><h2>主动检查直接引用</h2>
           <p className="helper-text">只检查服务端已登记、直接指向版本 {lineage.artifactVersionId} 的派生或修订关系。未登记关系、间接下游和语义影响仍未分析。</p>
           <button className="secondary-button" type="button" disabled={usesLoading} onClick={() => void checkDirectUses()}>{usesLoading ? "正在检查" : "检查已登记直接引用"}</button>

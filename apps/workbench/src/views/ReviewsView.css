@@ -1,11 +1,12 @@
 /* 请求列表与右侧判断区按既有待审参考图组织；所有数值复用唯一 token。 */
 .app-main .review-page { padding: 0; }
 .review-page .review-columns { grid-template-columns: minmax(0, 1fr) var(--relay-layout-rail-width); gap: 0; margin: 0; }
+/* 2026-10-02 待处理页型：列表 / 确切正文 / 判断三列。判断对象单独成列，正文不被列表挤出首屏。
+   没有可读的确切产物版本时退回两列，不留空列。 */
+.review-page .review-columns:has(> .review-reading) { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr) var(--relay-layout-rail-width); }
 .review-primary, .review-page .review-detail { min-width: 0; padding: var(--relay-layout-main-padding); }
 .review-page .review-detail { border-left: var(--relay-border-width) solid var(--relay-color-border-separator); }
-.review-page .review-heading { align-items: start; gap: var(--relay-space-4); }
-.review-page .review-heading h1 { margin: 0 0 var(--relay-space-4); font-size: var(--relay-font-size-page); }
-.review-page .review-heading > button { flex: none; }
+.review-page .review-primary > .page-head { margin-bottom: var(--relay-space-2); }
 .review-page .review-list { padding: 0; border: 0; margin-top: var(--relay-layout-section-gap); }
 .review-filters { display: flex; flex-wrap: wrap; gap: var(--relay-space-6); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); margin-bottom: var(--relay-space-6); padding-top: var(--relay-space-4); }
 .review-filters > button { display: flex; align-items: center; gap: var(--relay-space-2); min-height: var(--relay-control-height); border: 0; border-bottom: var(--relay-border-width) solid transparent; background: transparent; padding: 0; color: var(--relay-color-text-secondary); cursor: pointer; }
@@ -33,8 +34,8 @@
 .review-page .review-actions > button { width: 100%; }
 .review-page .review-evidence-details, .review-page .review-feedback-details { margin: var(--relay-space-4) 0; }
 .review-page .review-evidence-details > summary, .review-page .review-feedback-details > summary { cursor: pointer; }
-.review-reading { margin-top: var(--relay-space-6); padding-top: var(--relay-space-4); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); min-width: 0; }
-.review-reading > h2 { margin: 0 0 var(--relay-space-4); }
+.review-reading { min-width: 0; padding: var(--relay-layout-main-padding); border-left: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.review-reading > h2 { margin: 0 0 var(--relay-space-4); font-size: var(--relay-font-size-section); }
 .review-reading > .surface-panel { margin: 0; padding: var(--relay-space-6); background: var(--relay-color-bg-surface); border-radius: var(--relay-radius-control); }
 .review-reading .artifact-doc-body { font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-reading); line-height: var(--relay-font-lineHeight-reading); }
 .review-reading .markdown-preview { margin: var(--relay-space-4) 0 0; padding: 0; border: 0; background: transparent; font: inherit; }
@@ -44,7 +45,12 @@
 .review-request-identity > summary { cursor: pointer; color: var(--relay-color-text-secondary); }
 @media (max-width: 79.9375rem) {
   .review-page .review-columns { grid-template-columns: minmax(0, 1fr) var(--relay-layout-rail-narrowWidth); }
-  .review-primary, .review-page .review-detail { padding: var(--relay-layout-main-compactPadding); }
+  /* 两列放不下三栏：判断对象回到主列顶部，紧跟请求列表，顺序仍是列表 → 正文 → 判断。 */
+  .review-page .review-columns:has(> .review-reading) { grid-template-columns: minmax(0, 1fr) var(--relay-layout-rail-narrowWidth); }
+  .review-page .review-columns:has(> .review-reading) > .review-primary { grid-column: 1; grid-row: 1; }
+  .review-page .review-columns:has(> .review-reading) > .review-reading { grid-column: 1; grid-row: 2; border-left: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+  .review-page .review-columns:has(> .review-reading) > .review-detail { grid-column: 2; grid-row: 1 / span 2; }
+  .review-primary, .review-page .review-detail, .review-reading { padding: var(--relay-layout-main-compactPadding); }
   .review-list-columns, .review-page .review-list-item { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; }
   .review-list-columns > :nth-child(3), .review-list-columns > :nth-child(4) { display: none; }
   .review-page .review-list-item .review-project, .review-page .review-list-item time { grid-row: 2; }
@@ -53,13 +59,14 @@
 @media (max-width: 63.9375rem) {
   .review-page .review-columns { grid-template-columns: 1fr; }
   .review-page .review-detail { border-left: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+  .review-page .review-columns:has(> .review-reading) > .review-reading { grid-column: 1; grid-row: auto; }
+  .review-page .review-columns:has(> .review-reading) > .review-detail { grid-column: 1; grid-row: auto; }
 }
 @media (max-width: 60rem) {
-  .review-page .review-heading h1 { font-size: var(--relay-font-size-compactPage); }
+  .review-page .review-primary > .page-head .page-head-title > h1 { font-size: var(--relay-font-size-compactPage); }
 }
 @media (max-width: 47.9375rem) {
-  .review-primary, .review-page .review-detail { padding: var(--relay-layout-main-smallPadding); }
+  .review-primary, .review-page .review-detail, .review-reading { padding: var(--relay-layout-main-smallPadding); }
   .review-page .review-list-item { gap: var(--relay-space-2); }
   .review-page .review-list-item > strong { font-size: var(--relay-font-size-body); }
-  .review-page .review-heading { flex-wrap: wrap; }
 }

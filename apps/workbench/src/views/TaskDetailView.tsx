@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Info, RotateCcw } from "lucide-react";
 import ArtifactPanel from "../components/ArtifactPanel";
+import PageHeader from "../components/PageHeader";
 import TaskAcceptanceEvidence from "../components/TaskAcceptanceEvidence";
 import TaskDelegatePanel from "../components/TaskDelegatePanel";
 import StatusChip from "../components/StatusChip";
@@ -101,14 +102,17 @@ export default function TaskDetailView() {
   if (loadedTarget.current !== targetKey || loading) return <section className="page-state" aria-live="polite"><p className="eyebrow">任务详情</p><h1>正在读取任务</h1><p>{live ? "正在从本机 API 读取真实任务事实。" : "示例数据正在加载。"}</p></section>;
   if (error && !result) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">任务详情</p><h1>暂时无法读取这个任务</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
   if (!result) return <section className="page-state"><p className="eyebrow">任务详情</p><h1>{live ? "服务端没有返回这个任务" : "示例数据没有这个任务"}</h1><p>{live ? "跨作用域或已删除的任务按不可见处理；页面不会据此创建任务。" : "示例数据里只有“确定实验评价指标”这一个任务，其他任务不显示示例内容。"}</p><Link className="text-link" to="/tasks">返回任务列表</Link></section>;
-  const TaskHeading = tab === "artifacts" ? "h2" : "h1";
-  const taskFacts = <>{taskUnavailable ? <><p className="eyebrow">任务</p><TaskHeading>任务暂不可读</TaskHeading></> : <><p className="eyebrow">{live ? "任务" : "示例任务"}</p><TaskHeading>{result.task.title}</TaskHeading>{result.objective && <p className="page-lede">{result.objective}</p>}{refreshing && <p className="helper-text" role="status">正在更新任务事实，已显示的内容保持可见。</p>}{projectWriteBlockedReason && <p className="disabled-reason" data-testid="task-project-archive-reason">{projectWriteBlockedReason}</p>}
+  const taskFacts = <>{taskUnavailable ? <p className="disabled-reason">任务来源暂不可读；本页不显示缓存或推断的任务事实。</p> : <>{refreshing && <p className="helper-text" role="status">正在更新任务事实，已显示的内容保持可见。</p>}{projectWriteBlockedReason && <p className="disabled-reason" data-testid="task-project-archive-reason">{projectWriteBlockedReason}</p>}
     <section className="task-detail-status" aria-labelledby="task-detail-status-heading"><h3 id="task-detail-status-heading" className="visually-hidden">当前状态</h3><dl className="rail-definition-list task-detail-facts"><div><dt>工作状态</dt><dd><StatusChip status={result.task.status} /></dd></div><div><dt>执行模式</dt><dd>{interactionModeLabels[result.task.mode]}</dd></div><div><dt>当前执行者</dt><dd>{executorLabels[result.task.executor]}</dd></div><div><dt>任务修订</dt><dd>v{result.task.revision}</dd></div><div><dt>验收版本</dt><dd>v{result.task.acceptanceRevision}</dd></div></dl>{result.source === "live" && result.task.currentCompletionId && <Link className="inline-link" to={`/completion-records/${result.task.currentCompletionId}`}>查看当前完成凭据</Link>}</section>
     {result.source === "live" && <div className="form-actions"><Link className="secondary-button" data-testid="task-open-collaboration" to={`/agent?work=${encodeURIComponent(result.task.id)}`}>进入协作工作区</Link></div>}
     </>}</>;
+  // 任务标题只在页头位置渲染一次；产物页签把同一批事实收进按需展开区，标题由 summary 承担，不重复一个 h1。
+  const taskTitleBlock = taskUnavailable ? null
+    : <PageHeader testId="task-detail-page-head" title={result.task.title} meta={live ? "任务" : "示例任务"}
+      lede={result.objective ?? undefined} />;
   const taskReadError = error && <div className="warning-callout" role="alert" data-testid="task-refresh-error"><p>刷新任务事实失败：{error} 草稿与原命令反馈仍保留，核对成功前不能提交新的命令。</p><button className="secondary-button" type="button" data-testid="task-refresh-retry" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取任务</button></div>;
   const taskTabs = <nav className="skill-tabs" role="tablist" aria-label="任务详情页签" onKeyDown={handleTabListKeyDown}>{tabs.map((item) => <button key={item.key} className={`skill-tab${tab === item.key ? " skill-tab--active" : ""}`} type="button" role="tab" id={`task-detail-tab-${item.key}`} aria-controls="task-detail-content" aria-selected={tab === item.key} tabIndex={tab === item.key ? 0 : -1} data-testid={`task-detail-tab-${item.key}`} onClick={() => { setTab(item.key); if (item.key === "artifacts") setArtifactVisited(true); }}>{item.label}</button>)}</nav>;
-  const taskHeader = tab === "artifacts" ? <>{taskReadError}<details className="artifact-task-context"><summary>{taskUnavailable ? "任务来源暂不可读" : `任务：${result.task.title} · ${taskStatusLabels[result.task.status]} · 验收 v${result.task.acceptanceRevision}`}</summary>{taskFacts}</details></> : <>{taskFacts}{taskReadError}</>;
+  const taskHeader = tab === "artifacts" ? <>{taskReadError}<details className="artifact-task-context"><summary>{taskUnavailable ? "任务来源暂不可读" : `任务：${result.task.title} · ${taskStatusLabels[result.task.status]} · 验收 v${result.task.acceptanceRevision}`}</summary>{taskFacts}</details></> : <>{taskTitleBlock}{taskFacts}{taskReadError}</>;
   return <section className={`skill-page task-detail-page${tab !== "overview" ? " task-detail-page--full-width" : ""}${tab === "artifacts" ? " task-detail-page--artifact" : ""}`} data-testid="task-detail"><div className="page-layout"><div className="page-primary">{tab !== "artifacts" && taskHeader}{taskTabs}<div role="tabpanel" id="task-detail-content" aria-labelledby={`task-detail-tab-${tab}`} tabIndex={0}>
     {tab === "runs" && !taskUnavailable && result.source === "live" && connection.client && !result.task.runId &&
       <TaskDelegatePanel client={connection.client} task={{ id: result.task.id, projectId: result.task.projectId,

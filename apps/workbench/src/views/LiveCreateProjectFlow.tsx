@@ -4,6 +4,7 @@ import { Info, Upload } from "lucide-react";
 import { createCommandId, projectCreationFrom, RelayApiError,
   type RelayApiClient, type RelayCommandEnvelope } from "../api/relayClient";
 import PackCatalogPanel from "../components/PackCatalogPanel";
+import PageHeader from "../components/PageHeader";
 import ResponsiveRail from "../components/ResponsiveRail";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { readInitialBlueprintIntent, saveInitialBlueprintIntent } from "../lib/initialBlueprintIntent";
@@ -297,8 +298,8 @@ export default function LiveCreateProjectFlow({ client, onCancel }: {
   const goalReady = !flow.goal.trim() || Boolean(flow.projectId &&
     readInitialBlueprintIntent(client, flow.projectId) === flow.goal.trim());
   return <div className="page-layout"><div className="page-primary">
-    <h1>开始一个长期项目</h1>
-    <p className="page-lede">先创建项目，再单独登记初始资料并预览蓝图意图。</p>
+    <PageHeader testId="create-project-page-head" title="开始一个长期项目"
+      lede="先创建项目，再单独登记初始资料并预览蓝图意图。" />
     <div className="warning-callout" role="status">创建命令（CreateProject）只保存名称与类型。填写的目标会暂存为待预览的蓝图意图，不会自动创建 Goal、调用模型或应用蓝图；可选文本资料在项目创建成功后用独立的 Knowledge 命令登记。</div>
     <form className="create-form" noValidate onSubmit={(event) => void submit(event)}>
       <label className="field"><span className="field-label">项目名称<span className="field-required" aria-hidden="true">*</span></span>

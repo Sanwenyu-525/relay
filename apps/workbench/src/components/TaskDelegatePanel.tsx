@@ -19,6 +19,18 @@ export interface DelegateTarget {
 
 type ReadKind = "NONE" | "FILE_READ" | "WEB_FETCH";
 
+/**
+ * 委托准入的唯一判定。页头常驻的禁用原因与面板内按钮共用这一份，不各算一套，
+ * 否则会出现「按钮说不可用、页头说可用」这种自相矛盾的状态。
+ */
+export function delegateBlockedReasonFor(target: DelegateTarget, projectWriteBlockedReason: string | null): string | null {
+  return projectWriteBlockedReason ? projectWriteBlockedReason
+    : target.status !== "READY" ? "只有 READY 的任务可委托。"
+    : target.executor !== "HUMAN" ? "当前执行权不属于人工，不能重复委托。"
+    : target.projectId === null ? "没有所属项目，缺少 AI 执行作用域。"
+    : !target.allowedActions.includes("START") ? "当前前置条件不允许开始任务，请刷新核对。" : null;
+}
+
 function readTargetError(kind: ReadKind, target: string): string | null {
   const value = target.trim();
   if (kind === "FILE_READ") {
@@ -123,11 +135,7 @@ export default function TaskDelegatePanel({ client, task, projectWriteBlockedRea
     return () => { active = false; };
   }, [readKind, targetKey, client, readConfigEpoch]);
 
-  const delegateBlockedReason = projectWriteBlockedReason ? projectWriteBlockedReason
-    : task.status !== "READY" ? "只有 READY 的任务可委托。"
-    : task.executor !== "HUMAN" ? "当前执行权不属于人工，不能重复委托。"
-    : task.projectId === null ? "没有所属项目，缺少 AI 执行作用域。"
-    : !task.allowedActions.includes("START") ? "当前前置条件不允许开始任务，请刷新核对。" : null;
+  const delegateBlockedReason = delegateBlockedReasonFor(task, projectWriteBlockedReason);
   const mockActionBlockedReason = !mockActionEnabled ? null
     : mockConfigLoading ? "正在读取项目动作配置。"
     : mockConfigError ? `动作配置无法读取：${mockConfigError}`

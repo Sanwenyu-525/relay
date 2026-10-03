@@ -82,7 +82,7 @@ describe("26 日人工待处理汇总", () => {
     await flush();
     expect(mounted.wrapper.find('[data-testid="attention-review-review-1"]').exists()).toBe(true);
     open = false; fail = true;
-    await mounted.wrapper.get('[data-testid="attention-queue"] .list-header button').trigger("click");
+    await mounted.wrapper.get('[data-testid="attention-refresh"]').trigger("click");
     await flush();
     expect(mounted.wrapper.find('[data-testid="attention-review-review-1"]').exists()).toBe(false);
     expect(mounted.wrapper.get('[data-testid="attention-incomplete"]').text()).toContain("Review 不可读");

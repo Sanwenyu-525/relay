@@ -358,11 +358,11 @@ svg {
   overflow: clip;
 }
 
-.desktop-window .app-sidebar {
+.desktop-window .app-navrail,
+.desktop-window .app-context-rail {
   position: static;
   top: auto;
   height: 100%;
-  overflow: hidden;
 }
 
 .desktop-titlebar__search,
@@ -417,8 +417,12 @@ svg {
 .app-frame {
   position: relative;
   display: grid;
-  /* 用户拖拽宽度（--relay-sidebar-user-width）只覆盖基础列；≤63.9375rem 的断点用显式列宽覆盖，不受影响。 */
-  grid-template-columns: var(--relay-sidebar-user-width, var(--relay-layout-sidebar-width)) minmax(0, 1fr);
+  /* 2026-10-02 共享壳栏位分离：图标导航栏（固定宽度）+ 近期工作栏（可拖拽）+ 页面主体。
+     用户拖拽宽度（--relay-sidebar-user-width）只覆盖近期工作栏；≤63.9375rem 的断点用显式列宽覆盖，不受影响。 */
+  grid-template-columns:
+    var(--relay-layout-navigation-railWidth)
+    var(--relay-sidebar-user-width, var(--relay-layout-sidebar-width))
+    minmax(0, 1fr);
   min-height: 100vh;
   align-items: start;
 }
@@ -453,28 +457,77 @@ svg {
   background: var(--relay-color-border-control);
 }
 
-/* 侧栏拖拽分隔条：≥64rem 显示；命中区按 control.target.minimum 居中扩到 24px，
-   可见线仍由 .drag-separator 的 ::after 画在同一位置。 */
+/* 近期工作栏拖拽分隔条：画在图标导航栏与近期工作栏之间；≥64rem 显示，
+   命中区按 control.target.minimum 居中扩到 24px，可见线由 .drag-separator 的 ::after 画在同一位置。 */
 .sidebar-resize-handle {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(var(--relay-sidebar-user-width, var(--relay-layout-sidebar-width)) - var(--relay-control-target-minimum) / 2);
+  left: calc(
+    var(--relay-layout-navigation-railWidth) +
+    var(--relay-sidebar-user-width, var(--relay-layout-sidebar-width)) -
+    var(--relay-control-target-minimum) / 2
+  );
   width: var(--relay-control-target-minimum);
   z-index: var(--relay-zIndex-sticky);
 }
 
-.app-sidebar {
+/* 图标导航栏：只承担定位。窄栏用图标 + 竖排文字，不横向挤压文字或把名称压成一条线。 */
+.app-navrail {
   position: sticky;
   top: 0;
   display: flex;
   flex-direction: column;
   height: 100vh;
   min-width: 0;
+  overflow-y: auto;
   overflow-x: hidden;
-  padding: var(--relay-space-6) var(--relay-space-3) var(--relay-space-3);
+  padding: var(--relay-space-4) var(--relay-space-1) var(--relay-space-3);
   background: var(--relay-color-bg-navigation);
   border-right: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+/* 近期工作栏：项目/任务上下文，与导航职责分离；可拖拽列宽与滚动 Owner 都在这里。 */
+.app-context-rail {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-width: 0;
+  overflow: hidden;
+  padding: var(--relay-space-4) var(--relay-space-2) var(--relay-space-2);
+  background: var(--relay-color-bg-canvas);
+  border-right: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.desktop-window .app-navrail,
+.desktop-window .app-context-rail { height: 100%; }
+
+.context-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-2);
+  flex: none;
+  padding-bottom: var(--relay-space-3);
+}
+
+.context-rail-brand {
+  margin: 0;
+  font-family: var(--relay-font-family-ui);
+  font-size: var(--relay-font-size-rowTitle);
+  font-weight: var(--relay-font-weight-semibold);
+  color: var(--relay-color-text-primary);
+}
+
+.context-rail-new { flex: none; padding-inline: var(--relay-space-2); }
+.context-rail-new > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+
+.context-rail-placeholder {
+  margin: 0;
+  padding: var(--relay-space-3) var(--relay-space-2);
+  overflow-wrap: anywhere;
 }
 
 .brand {
@@ -496,13 +549,8 @@ svg {
   border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
 }
 
-/* 全局左栏的「近期工作」分组：效果图 2026-09-29 的单栏结构。
-   范围与排序常驻可见（业务要求写明），详细说明进入 title，不占首屏。 */
-.app-sidebar:has(.recent-work) { height: 100dvh; min-height: 0; overflow: hidden; }
-.desktop-window .app-sidebar:has(.recent-work) { height: 100%; }
-.app-sidebar:has(.recent-work) > .brand,
-.app-sidebar:has(.recent-work) > .navigation-list { flex: none; }
-.app-sidebar:has(.recent-work) .navigation-item { min-height: var(--relay-control-height); font-size: var(--relay-font-size-body); }
+/* 近期工作分组：按项目折叠、去重、沿服务端游标续页。范围与排序常驻可见（业务要求写明），
+   详细说明进入 title，不占首屏。基础规则服务两处宿主：宽屏的近期工作栏与窄屏的导航抽屉。 */
 .recent-work {
   display: flex;
   flex: 1;
@@ -511,10 +559,10 @@ svg {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  margin-top: var(--relay-space-4);
-  padding-top: var(--relay-space-4);
-  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
 }
+
+/* 2026-10-02 共享壳栏位分离：列表高度与滚动 Owner 由近期工作栏自己持有。 */
+.app-context-rail .recent-work { padding-top: var(--relay-space-2); }
 .recent-work > :not(.recent-work-scroll) { flex: none; }
 .recent-work-scroll { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
 /* 错误里的 URL 和 ID 不能撑破侧栏：长标识允许断行，不产生整页横向滚动。 */
@@ -552,6 +600,8 @@ svg {
 .navigation-extra { flex: none; margin-block: var(--relay-space-2); }
 .navigation-extra > summary { padding: var(--relay-space-2) var(--relay-space-3); font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); cursor: pointer; }
 .navigation-extra .navigation-list--secondary { margin: 0; padding: 0; border: 0; }
+.app-navrail .navigation-extra > summary { padding-inline: var(--relay-space-1); text-align: center; }
+.app-navrail .navigation-list--secondary { padding-top: var(--relay-space-2); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .recent-work-item {
   width: 100%;
   display: flex;
@@ -596,18 +646,54 @@ svg {
 
 /* 低矮窗口改由整条导航承担滚动，展开更多入口后底部操作仍可到达。 */
 @media (max-height: 44rem) {
-  .app-sidebar:has(.recent-work) { overflow-y: auto; padding-top: var(--relay-space-2); padding-bottom: var(--relay-space-2); }
-  .app-sidebar:has(.recent-work) .brand { padding-bottom: var(--relay-space-2); }
-  .app-sidebar:has(.recent-work) .navigation-item { min-height: var(--relay-space-8); }
-  .app-sidebar:has(.recent-work) .navigation-list--secondary { margin-top: var(--relay-space-2); padding-top: var(--relay-space-2); }
-  .app-sidebar .recent-work { flex: none; overflow: visible; margin-top: var(--relay-space-2); padding-top: var(--relay-space-2); }
-  .app-sidebar .recent-work-scroll { flex: none; overflow: visible; }
+  .app-navrail { padding-block: var(--relay-space-2); }
+  .app-navrail .navigation-item { min-height: var(--relay-space-8); }
+  .app-navrail .navigation-list--secondary { margin-top: var(--relay-space-2); padding-top: var(--relay-space-2); }
+  .app-context-rail { overflow-y: auto; }
+  .app-context-rail .recent-work { flex: none; overflow: visible; }
+  .app-context-rail .recent-work-scroll { flex: none; overflow: visible; }
 }
 
 .navigation-list--bottom {
   margin-top: auto;
   padding-top: var(--relay-space-2);
   border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+/* 图标导航栏：图标在上、文字在下，竖排是窄栏里保证中文名称完整可读的方式。 */
+.app-navrail .navigation-item {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--relay-space-1);
+  min-height: var(--relay-space-12);
+  padding: var(--relay-space-2) var(--relay-space-1);
+  text-align: center;
+}
+
+.app-navrail .navigation-item > svg {
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+}
+
+.app-navrail .navigation-label {
+  flex: none;
+  max-width: 100%;
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  /* 窄栏里「连接与同步」这类较长名称允许折行，不横向撑破图标栏。 */
+  overflow-wrap: anywhere;
+}
+
+.app-navrail .navigation-count {
+  position: absolute;
+  top: var(--relay-space-1);
+  right: var(--relay-space-1);
+  min-width: auto;
+  height: auto;
+  padding: 0 var(--relay-space-1);
+  font-size: var(--relay-font-size-meta);
+  line-height: 1;
 }
 
 .navigation-item {
@@ -1153,6 +1239,13 @@ svg {
   gap: var(--relay-space-2);
 }
 .page-head-title > :is(h1, h2) { margin: 0; }
+/* 共享页头自带页面标题层级：此前没有声明字号，h1 落回浏览器默认 2em，
+   同一原语在不同页面看起来不一样。紧凑页头（聊天、项目列表）各自覆写。 */
+.page-head-title > h1 { font-size: var(--relay-font-size-page); }
+.page-head-title > h2 { font-size: var(--relay-font-size-section); }
+/* 标题即对象入口：颜色与正文一致，不额外引入一个「链接蓝」，焦点线仍用全局 focus 规则。 */
+.page-head-title-link { color: inherit; text-decoration: none; }
+.page-head-title-link:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 .page-head-meta { margin: 0; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .page-head-lede { margin: 0; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-body); }
 .page-head-actions {
@@ -1181,6 +1274,11 @@ svg {
   box-shadow: var(--relay-shadow-floating);
 }
 
+/* 项目列表页是 §17.8 列表页型的首个生产试点：标题走 compactPage 层级，
+   目标句降为 meta 尺寸，主操作不再随宽屏放大。数值仍归 tokens。 */
+.projects-page .page-head-title > h1 { font-size: var(--relay-font-size-compactPage); }
+.projects-page .page-head-lede { font-size: var(--relay-font-size-meta); }
+
 /* 事实条：格宽由 token 下限决定，不足整条换行，不压缩文字 */
 .fact-bar {
   display: grid;
@@ -1202,15 +1300,18 @@ svg {
 .fact-bar-value { font-size: var(--relay-font-size-body); overflow-wrap: anywhere; }
 .fact-bar-note { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); overflow-wrap: anywhere; }
 
-/* 判断条：对象、条件、影响与动作常驻；技术身份和完整依据在 details 里 */
+/* 判断条：对象、条件、影响与动作常驻；技术身份和完整依据在 details 里。
+   读作贴在纸面下方的一张独立圆角卡；直角会读成纸面的延伸而不是一块可操作区域。
+   warning 变体用整圈边框表达待办状态，不靠单侧色条暗示。 */
 .judgment-bar {
   display: grid;
   gap: var(--relay-space-2);
   padding: var(--relay-space-2) var(--relay-space-3);
   background: var(--relay-color-bg-surface);
-  border-block-start: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
 }
-.judgment-bar--warning { border-inline-start: var(--relay-focus-width) solid var(--relay-color-status-warning-text); }
+.judgment-bar--warning { border-color: var(--relay-color-status-warning-text); }
 .judgment-bar-main { display: grid; gap: var(--relay-space-1); min-width: 0; }
 .judgment-bar-head { display: flex; align-items: baseline; flex-wrap: wrap; justify-content: space-between; gap: var(--relay-space-1) var(--relay-space-3); }
 .judgment-bar-head-extra { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--relay-space-2); }
@@ -2319,11 +2420,6 @@ svg {
   margin: 0 var(--relay-layout-main-padding) var(--relay-space-6);
 }
 
-/* 待审列表恢复普通页面的标题层级；今日保留 compactPage。 */
-.review-heading h1 {
-  font-size: var(--relay-font-size-page);
-}
-
 /* 窄窗：范围说明入口不占首屏整行，改为右上轻量按钮。 */
 @media (max-width: 79.9375rem) {
   .page-layout {
@@ -2845,15 +2941,11 @@ fieldset.field {
     display: none;
   }
 
-  .app-sidebar {
+  /* 窄窗沿用既有收纳：两列外壳整体收起，导航与近期工作由移动抽屉承担。 */
+  .app-navrail,
+  .app-context-rail {
     display: none;
   }
-
-  .app-sidebar .recent-work-copy, .app-sidebar .recent-work-scope { display: none; }
-  .app-sidebar .recent-work-heading h2 { font-size: 0; gap: 0; }
-  .app-sidebar .recent-work-heading > button { display: none; }
-  .app-sidebar .recent-work-item { justify-content: center; padding: var(--relay-space-2) 0; }
-  .app-sidebar [data-testid="recent-work-new"] { font-size: 0; padding: 0; min-height: var(--relay-control-height); }
 
   .brand {
     padding: 0 0 var(--relay-space-4);
@@ -2913,7 +3005,8 @@ fieldset.field {
   }
 
   .page-primary h1,
-  .skill-page h1 {
+  .skill-page h1,
+  .page-head-title > h1 {
     font-size: var(--relay-font-size-compactPage);
   }
 }
@@ -2930,10 +3023,6 @@ fieldset.field {
 @media (max-width: 47.9375rem) {
   .app-frame {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .app-sidebar {
-    display: none;
   }
 
   .app-topbar {

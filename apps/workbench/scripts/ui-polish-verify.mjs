@@ -42,7 +42,8 @@ async function collectMetrics(page, label) {
     const h1 = document.querySelector("h1");
     const nav = document.querySelector(".navigation-label");
     const dateInput = document.querySelector('.today-query input[type="date"]');
-    const eyebrow = document.querySelector(".eyebrow");
+    // 2026-10-02 起普通页头的次级事实走共享原语 .page-head-meta；.eyebrow 只剩 page-state 等状态块。
+    const eyebrow = document.querySelector(".page-head-meta, .eyebrow");
     const rectOf = (el) => { if (!el) return null; const r = el.getBoundingClientRect();
       return { top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left),
         width: Math.round(r.width), height: Math.round(r.height) }; };

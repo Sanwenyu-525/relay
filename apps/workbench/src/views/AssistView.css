@@ -118,6 +118,22 @@
 .assist-proposal-summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .agent-message-body ul { margin: var(--relay-space-2) 0 0; padding-left: var(--relay-space-4); }
 
+/* 已读取资料条：紧跟正文的一张窄卡，回答"这次生成读了什么"。
+   展开后的逐条来源状态仍用正文色，不用状态底色冒充已确认事实。 */
+.assist-source-summary { border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-control); background: var(--relay-color-bg-subtle); }
+.assist-source-summary > summary { display: flex; align-items: center; gap: var(--relay-space-2); padding: var(--relay-space-2) var(--relay-space-3); cursor: pointer; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+.assist-source-summary > summary svg { flex: none; width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+.assist-source-summary[open] > summary { border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.assist-source-summary ul { margin: 0; padding: var(--relay-space-2) var(--relay-space-3) var(--relay-space-2) var(--relay-space-6); }
+
+/* 文档候选卡：说明这条回复产出了哪份候选，正文与接受入口仍在提案区。 */
+.assist-candidate-card { display: flex; align-items: center; gap: var(--relay-space-2); padding: var(--relay-space-2) var(--relay-space-3); background: var(--relay-color-bg-surface); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-control); }
+.assist-candidate-card > svg { flex: none; width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); color: var(--relay-color-action-text); }
+.assist-candidate-copy { flex: 1; min-width: 0; display: grid; gap: var(--relay-space-1); }
+.assist-candidate-copy p { margin: 0; }
+.assist-candidate-title { overflow-wrap: anywhere; font-size: var(--relay-font-size-meta); font-weight: var(--relay-font-weight-medium); }
+.assist-candidate-card > .helper-text { flex: none; }
+
 /* 输入区：常驻底部，不随消息滚动；按钮不被末段遮挡。
    对齐 Codex 的单卡结构：一张圆角卡同时承载正文与底栏，中间一条细线分隔，卡内不再套第二个输入框。 */
 .agent-chat-composer {

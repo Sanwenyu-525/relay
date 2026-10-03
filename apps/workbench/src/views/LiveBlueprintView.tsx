@@ -11,6 +11,7 @@ import { createCommandId, RelayApiError, RelayTransportError,
   type RelayProject, type RelayProjectState, type RelayTaskSummary,
   type RelayViewConfiguration, type RelayViewKind } from "../api/relayClient";
 import ResponsiveRail from "../components/ResponsiveRail";
+import PageHeader from "../components/PageHeader";
 import BlueprintSkillGenerator from "./BlueprintSkillGenerator";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { clearInitialBlueprintIntent, readInitialBlueprintIntent,
@@ -461,8 +462,8 @@ export default function LiveBlueprintView() {
 
   return <section className="skill-page live-blueprint"><div className="page-layout">
     <div className="page-primary">
-      <p className="eyebrow">{facts.project.title}</p><h1>项目蓝图</h1>
-      <p className="page-lede">核对下一步、任务与工作台，再确认本次变化。</p>
+      <PageHeader testId="live-blueprint-page-head" title="项目蓝图" meta={facts.project.title}
+      lede="核对下一步、任务与工作台，再确认本次变化。" />
       <p className="metadata-row">项目类型：{projectTypeLabels[facts.project.projectType as ProjectType] ?? facts.project.projectType}
         <span aria-hidden="true"> · </span> 当前阶段：{phaseLabel(facts.state.phaseKey)}
         <span aria-hidden="true"> · </span> Project v{facts.project.revision} / State v{facts.state.revision} / View v{facts.view.revision}</p>

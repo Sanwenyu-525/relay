@@ -116,6 +116,9 @@ export default function App() {
   const preserveCreateTask = location.pathname === "/tasks" && new URLSearchParams(location.search).get("view") === "create";
   const pendingCommandId = currentDraftGuard()?.pendingCommandId?.() ?? null;
   return <div className="desktop-window">
+    {/* 跳转链接由窗口框架持有并排在标题栏之前：它 position:fixed，视觉位置不变，
+        但必须是第一个 Tab 站位，否则键盘用户先落在标题栏按钮上（WCAG 2.4.1）。 */}
+    <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById("main-content")?.focus(); }}>跳到主要内容</a>
     <DesktopTitleBar available onSearch={() => setCommandOpen(true)} />
     <AppShell desktopStatus={desktopStatus} commandOpen={commandOpen} onCommandOpen={() => setCommandOpen(true)} onCommandClose={() => setCommandOpen(false)}>
       <div key={`${preserveCreateTask ? "create-task" : connection.epoch}:${location.pathname}${location.search}`}><Outlet /></div>

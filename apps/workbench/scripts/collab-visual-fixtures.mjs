@@ -68,15 +68,33 @@ const docBody = `# 评价方案
 | 结构完整率 | 存在小节 / 应有小节 | 自动检查 |
 `;
 
+const sources = [
+  { kind: "KNOWLEDGE", root_id: "k1", version: "3", source_ref: "研究问题与数据条件清单 v3",
+    status: "AVAILABLE", reason: null },
+  { kind: "MEMORY", root_id: "m1", version: "1", source_ref: "历次评审共识记录 v1",
+    status: "AVAILABLE", reason: null },
+  { kind: "DECISION", root_id: "d1", version: "2", source_ref: "指标口径决议 v2",
+    status: "AVAILABLE", reason: null }
+];
+
+const candidateProposal = {
+  id: "proposal-candidate", session_id: sessionId, message_id: "m2", kind: "CANDIDATE_MARKDOWN",
+  target_type: "TASK", target_id: taskId, base_revision: "2", payload_hash: "e".repeat(64),
+  payload_available: true, status: "PENDING",
+  payload: { title: "评价方案.md", media_type: "text/markdown", markdown: "# 评价方案\n\n草稿正文。" }
+};
+
 const messages = {
   items: [
     { id: "m1", session_id: sessionId, seq: "1", role: "USER", status: "COMPLETED", created_at: "2026-09-29T02:15:00Z",
       intent: "DISCUSS", content: "请根据我们已有的研究问题与数据条件，补充实验评价指标。\n需要同时包含基线设置、评价方法和可复用的验收依据。",
       error_code: null, sources: [], usage: { input_tokens: null, output_tokens: null }, cancel_requested: false, skill: null, skill_input: null, skill_output: null },
     { id: "m2", session_id: sessionId, seq: "2", role: "ASSISTANT", status: "COMPLETED", created_at: "2026-09-29T03:42:00Z",
-      intent: "DISCUSS",
+      intent: "PROPOSE_CANDIDATE",
       content: "我已完成《评价方案.md》的 v2 版本，补充了基线方法、评价指标定义与计算方式，并给出可复核的验收依据。重点更新：\n1. 明确了人类独立执行、AI 独立生成与人机协作三类对照基线；\n2. 补充了任务完成质量、效率与一致性等核心指标的定义；\n3. 增加了数据来源、抽样方法与检查清单，便于复核与复现。",
-      error_code: null, sources: [], usage: { input_tokens: 1840, output_tokens: 620 }, cancel_requested: false, skill: null, skill_input: null, skill_output: null },
+      error_code: null, sources,
+      usage: { input_tokens: 1840, output_tokens: 620, cache_read_tokens: 1530, cache_creation_tokens: 120 },
+      cancel_requested: false, skill: null, skill_input: null, skill_output: null },
     { id: "m3", session_id: sessionId, seq: "3", role: "USER", status: "COMPLETED", created_at: "2026-09-29T03:58:00Z",
       intent: "DISCUSS", content: "整体结构清晰。请在“可复核指标”下补充每个指标的具体计算口径和示例，并保持与数据来源的一致性。",
       error_code: null, sources: [], usage: { input_tokens: null, output_tokens: null }, cancel_requested: false, skill: null, skill_input: null, skill_output: null }
@@ -116,9 +134,9 @@ const bodies = new Map([
   [`${prefix}/assist-sessions`, { items: [{ id: sessionId, workspace_id: workspaceId, project_id: projectId,
     task_id: taskId, title: "关于确定实验评价指标", status: "ACTIVE", revision: "1", updated_at: "2026-09-29T03:40:00Z" }] }],
   [`${prefix}/assist-sessions/${sessionId}/messages`, messages],
-  [`${prefix}/assist-proposals`, { items: [] }],
+  [`${prefix}/assist-proposals`, { items: [candidateProposal] }],
   [`${prefix}/skill-definitions`, { items: [] }],
-  [`${prefix}/model-port`, { provider: "openai-compatible", configured: true, model: "gpt-4.1-mini", base_url: null }],
+  [`${prefix}/model-port`, { provider: "openai-compatible", configured: true, model: "gpt-4.1-mini", base_url: null, max_call_tokens: 16_384 }],
   [`${prefix}/model-port/verification`, { current_config_fingerprint: null, last: null,
     matches_current_config: false, worker_startup_validation: "NOT_CONFIGURED" }],
   [`${prefix}/projects/${projectId}/managed-resources`, [{ id: "res-1", project_id: projectId,
