@@ -1,12 +1,14 @@
 import { ModelAbortError } from '@langchain/core/errors';
-import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, AIMessageChunk, HumanMessage, SystemMessage, ToolMessage,
+  type BaseMessage } from '@langchain/core/messages';
 import { ChatOpenAI } from '@langchain/openai';
 
 import type { JsonObject, JsonValue } from '../infrastructure/json.js';
 import { CANDIDATE_OUTPUT_SCHEMA } from './markdown-deliverable.js';
 import { withRelayAgentCore } from './agent-system-prompt.js';
 import type { AssistModelPort, AssistRequest, AssistResult, ConversationInterpretationRequest,
-  ModelPort, ModelRequest, ModelResult, ModelIdentity, ModelUsage } from './fake-model-port.js';
+  ModelPort, ModelRequest, ModelResult, ModelIdentity, ModelToolCall, ModelToolSpec,
+  ModelToolTurn, ModelUsage } from './fake-model-port.js';
 import type { ModelPortConfig } from './model-port-config.js';
 import { computeModelConfigFingerprint } from './model-port-config.js';
 import { DEFAULT_MODEL_BASE_URL, guardedModelFetch, parseModelBaseUrl,
@@ -76,12 +78,18 @@ export class OpenAiCompatibleModelPort implements ModelPort, AssistModelPort {
     const messages: BaseMessage[] = [
       new SystemMessage(DRAFT_SYSTEM_PROMPT),
       new HumanMessage(renderDraftUserPrompt(request.manifest)),
+      ...renderToolTurns(request.toolTurns ?? []),
     ];
     try {
       const response = await this.complete(messages, request.signal, false,
-        request.onTextDelta);
+        request.onTextDelta, request.tools);
       if (request.signal?.aborted === true) return { kind: 'CANCELLED',
         providerRequestId: response.providerRequestId, usage: response.usage };
+      if (response.toolCalls !== undefined) {
+        if (response.text !== '') throw new ModelToolOutputError(response.providerRequestId || undefined);
+        return { kind: 'TOOL_CALLS', calls: response.toolCalls,
+          providerRequestId: response.providerRequestId, usage: response.usage };
+      }
       return { kind: 'CONTENT', content: response.text,
         providerRequestId: response.providerRequestId, usage: response.usage };
     } catch (error) {
@@ -160,7 +168,9 @@ ${input.content}`),
     }
   }
 
-  private async complete(messages: BaseMessage[], userSignal?: AbortSignal,    structured = false, onTextDelta?: (text: string) => Promise<void>): Promise<{ text: string; providerRequestId: string;
+  private async complete(messages: BaseMessage[], userSignal?: AbortSignal,    structured = false, onTextDelta?: (text: string) => Promise<void>,
+    tools?: readonly ModelToolSpec[]): Promise<{ text: string; toolCalls?: readonly ModelToolCall[];
+      providerRequestId: string;
       usage: ModelUsage }> {
     const estimatedInputTokens = Math.ceil(Buffer.byteLength(messages.map((message) =>
       typeof message.content === 'string' ? message.content :
@@ -175,10 +185,19 @@ ${input.content}`),
     const parts: string[] = [];
     let bytes = 0;
     let providerRequestId = '';
+    let toolText = '';
+    // Streaming tool arguments arrive as partial chunks; they are accumulated exactly
+    // like text and only parsed after the provider finished. A half-sent argument
+    // therefore never reaches dispatch.
+    let accumulated: AIMessageChunk | undefined;
     let usage: ModelUsage = { inputTokens: null, outputTokens: null,
     cacheReadTokens: null, cacheCreationTokens: null };
     try {
-      const stream = await this.client.stream(messages, {
+      const runnable = tools === undefined || tools.length === 0 ? this.client
+        : this.client.bindTools(tools.map((tool) => ({ type: 'function' as const,
+          function: { name: tool.name, description: tool.description,
+            parameters: tool.parameters } })));
+      const stream = await runnable.stream(messages, {
         signal,
         ...(structured ? { response_format: { type: 'json_object' as const } } : {}),
       });
@@ -199,9 +218,13 @@ ${input.content}`),
             cacheReadTokens: validUsage(details?.cache_read),
             cacheCreationTokens: validUsage(details?.cache_creation) };
         }
-        if ((chunk.tool_call_chunks?.length ?? 0) > 0 ||
-            (chunk.tool_calls?.length ?? 0) > 0) {
-          throw new ModelToolOutputError();
+        accumulated = accumulated === undefined ? chunk : accumulated.concat(chunk);
+        if ((chunk.tool_call_chunks?.length ?? 0) > 0 || (chunk.tool_calls?.length ?? 0) > 0) {
+          toolText = collectToolText(accumulated ?? chunk);
+          if (Buffer.byteLength(toolText, 'utf8') > maxBytes) {
+            throw new ModelOutputBudgetError(providerRequestId, usage);
+          }
+          continue;
         }
         const piece = textContent(chunk.content);
         bytes += Buffer.byteLength(piece, 'utf8');
@@ -219,7 +242,10 @@ ${input.content}`),
             usage.outputTokens > this.config.maxOutputTokens)) {
         throw new ModelCallBudgetError(providerRequestId, usage);
       }
-      return { text: parts.join(''), providerRequestId, usage };
+      const toolCalls = accumulated === undefined || toolText === '' ? undefined
+        : parseToolCalls(accumulated, toolText, tools ?? []);
+      return toolCalls === undefined ? { text: parts.join(''), providerRequestId, usage }
+        : { text: parts.join(''), toolCalls, providerRequestId, usage };
     } catch (error) {
       if (timeoutSignal.aborted && userSignal?.aborted !== true) {
         throw new ModelTimeoutError();
@@ -233,6 +259,61 @@ ${input.content}`),
     }
   }
 
+}
+
+/** 把历史工具轮次还原成 assistant(tool_calls) + tool(result) 消息序列。
+ * 结果正文只是数据；下一轮提示词已声明工具输出不是指令。 */
+export function renderToolTurns(turns: readonly ModelToolTurn[]): BaseMessage[] {
+  const messages: BaseMessage[] = [];
+  for (const turn of turns) {
+    messages.push(new AIMessage({ content: '', tool_calls: turn.calls.map((call) => ({
+      id: call.providerToolCallId, name: call.name, args: call.arguments as never,
+    })) }));
+    for (const result of turn.results) {
+      messages.push(new ToolMessage({ content: result.content, tool_call_id: result.providerToolCallId,
+        name: result.name, status: result.isError ? 'error' : 'success' }));
+    }
+  }
+  return messages;
+}
+
+/** 累积后的工具调用参数原文；只用于解析，不写日志也不进入 Context。 */
+function collectToolText(accumulated: AIMessageChunk): string {
+  const chunks = accumulated.tool_call_chunks ?? [];
+  if (chunks.length === 0) return '';
+  return chunks.map((chunk) => chunk.args ?? '').join('');
+}
+
+/**
+ * 解析累积后的完整工具请求。
+ *
+ * 参数不是合法 JSON 对象、工具名不在本次声明内、或模型同时给了正文和工具请求，
+ * 一律按不支持的输出拒绝：半截或未声明的工具不能进入派发路径。
+ */
+function parseToolCalls(accumulated: AIMessageChunk, toolText: string,
+  tools: readonly ModelToolSpec[]): readonly ModelToolCall[] {
+  const declared = new Map(tools.map((tool) => [tool.name, tool]));
+  const raw = accumulated.tool_calls ?? [];
+  const calls: ModelToolCall[] = [];
+  for (const [index, call] of raw.entries()) {
+    if (typeof call.name !== 'string' || call.name === '' || declared.has(call.name) === false) {
+      throw new ModelToolOutputError();
+    }
+    const slice = (accumulated.tool_call_chunks ?? [])
+      .filter((chunk) => chunk.index === index)
+      .map((chunk) => chunk.args ?? '').join('');
+    const text = slice === '' ? toolText : slice;
+    let parsed: unknown;
+    try { parsed = JSON.parse(text); }
+    catch { throw new ModelToolOutputError(); }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new ModelToolOutputError();
+    }
+    calls.push({ providerToolCallId: typeof call.id === 'string' && call.id !== ''
+      ? call.id : `tool-${index}`, name: call.name, arguments: parsed as JsonObject });
+  }
+  if (calls.length === 0) throw new ModelToolOutputError();
+  return calls;
 }
 
 /** 资料分段进入独立数据块并标注不可信；不把来源正文拼进系统提示。 */

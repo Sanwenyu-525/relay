@@ -100,20 +100,32 @@ export async function runIdempotentCommand<TResult extends CommandResult>(
       };
     });
   } catch (error) {
-    if (isPostgresError(error, POSTGRES_ERROR_CODES.uniqueViolation)) {
-      // 事务已回滚，不能在失败上下文继续读；用新连接读胜出回执再决定是幂等重放还是冲突。
-      const winner = await createRepositories(db).receipts.findReceipt({
-        scopeKey: request.scopeKey,
-        commandId: request.commandId,
-      });
-
-      if (winner !== undefined) {
-        return resolveExistingReceipt<TResult>(winner, payloadHash);
-      }
-    }
-
-    throw error;
+    return resolveReceiptAfterUniqueViolation<TResult>(db, error, request.scopeKey,
+      request.commandId, payloadHash);
   }
+}
+
+/**
+ * 回执唯一约束冲突后的统一处理，供 `runIdempotentCommand` 与自定义事务入口共用。
+ *
+ * 冲突意味着本事务已经完整回滚（业务效果、审计、状态变更都不存在），所以只能用
+ * **新的正常事务上下文**读一次胜出回执，再按原请求摘要决定结果：
+ *   - 摘要相同 → 同一次操作的另一个视角，返回原成功回执；
+ *   - 摘要不同 → 抛 `CommandIdReusedError`（HTTP 409 COMMAND_ID_REUSED）；
+ *   - 不是唯一约束冲突，或读不到可核对的回执 → 原样抛出，不伪造成功。
+ *
+ * 候选行锁只能串行同一候选；同一 scope 下**不同**候选的两个请求会各自越过回执查询，
+ * 最后才在这里相遇——这正是跨候选命令冲突必须走这条路径的原因。
+ */
+export async function resolveReceiptAfterUniqueViolation<TResult extends CommandResult>(
+  db: DbExecutor, error: unknown, scopeKey: string, commandId: string,
+  payloadHash: Buffer,
+): Promise<CommandOutcome<TResult>> {
+  if (!isPostgresError(error, POSTGRES_ERROR_CODES.uniqueViolation)) throw error;
+  const winner = await createRepositories(db).receipts.findReceipt({ scopeKey, commandId });
+
+  if (winner === undefined) throw error;
+  return resolveExistingReceipt<TResult>(winner, payloadHash);
 }
 
 export function resolveExistingReceipt<TResult extends CommandResult>(

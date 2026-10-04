@@ -39,6 +39,16 @@ export const ADAPTER_DESCRIPTORS: Readonly<Record<GatewayCapability, AdapterDesc
     approvalPassthrough: false, // Writing files requires explicit review approval or strict ASK
     sandboxed: false, // No OS sandbox on Windows desktop
   },
+  FILE_QUERY: {
+    capabilityKey: 'FILE_QUERY',
+    adapterId: 'file-query-v1',
+    version: '1.0.0',
+    effectKind: 'READ',
+    resumable: true, // Bounded directory/path/content queries can be safely re-read
+    cancellable: true,
+    approvalPassthrough: true, // Read-only queries have no external effect to review
+    sandboxed: false,
+  },
   WEB_FETCH: {
     capabilityKey: 'WEB_FETCH',
     adapterId: 'web-fetch-v1',

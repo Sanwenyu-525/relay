@@ -12,7 +12,8 @@ import { checkAssistContent, checkRequiredText, normalizeText } from '../shared/
 import type { ContextSourceRef } from '../workflow/execution-contract.js';
 import { httpCommandScopeKey } from './actor.js';
 import { applyArtifactCreation, prepareArtifactCreation } from './artifact-commands.js';
-import { runIdempotentCommand, CommandIdReusedError, resolveExistingReceipt, type CommandOutcome } from './command.js';
+import { runIdempotentCommand, CommandIdReusedError, resolveExistingReceipt,
+  resolveReceiptAfterUniqueViolation, type CommandOutcome } from './command.js';
 import { applyTaskCreation, prepareTaskCreation, type CreateTaskCriterionInput } from './create-task.js';
 import {
   invalidTransition,
@@ -352,8 +353,14 @@ export async function acceptAssistProposal(
   });
 
   let expiredWith: unknown;
-  const committed = await db.transaction().execute(async (trx) => {
-    const repositories = createRepositories(trx);
+  // 同一 scope 下不同候选的两个接受请求互不串行，会各自越过回执重查，直到写同一条
+  // 命令回执时才相遇。候选锁串行不了这种情况，所以回执唯一冲突必须翻译成与通用
+  // 幂等路径一致的结果：同摘要重放原回执，异摘要 409 COMMAND_ID_REUSED。
+  let committed: { result: AcceptAssistProposalResult; replayed: boolean;
+    committedAt: Date } | null;
+  try {
+    committed = await db.transaction().execute(async (trx) => {
+      const repositories = createRepositories(trx);
     const existing = await repositories.receipts.findReceipt({ scopeKey,
       commandId: input.commandId });
     if (existing !== undefined) {
@@ -440,7 +447,11 @@ export async function acceptAssistProposal(
       payloadHash, result,
     });
     return { result, replayed: false, committedAt: receipt.created_at };
-  });
+    });
+  } catch (error) {
+    return resolveReceiptAfterUniqueViolation<AcceptAssistProposalResult>(db, error,
+      scopeKey, input.commandId, payloadHash);
+  }
   if (expiredWith !== undefined) throw expiredWith;
   if (committed === null) {
     throw new Error('assist proposal accept ended without an outcome');

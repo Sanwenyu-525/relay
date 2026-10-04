@@ -486,6 +486,18 @@ export const DelegateTaskBodySchema = Type.Object(
       args: Type.Array(Type.String({ minLength: 0, maxLength: 1024 }), { minItems: 1, maxItems: 32 }),
       max_output_bytes: Type.Optional(Type.Integer({ minimum: 0, maximum: 1048576 })),
     }, strict)),
+    tool_loop_action: Type.Optional(Type.Object({
+      resource_id: UuidSchema,
+      connections: Type.Object({
+        FILE_QUERY: Type.Optional(UuidSchema),
+        FILE_READ: Type.Optional(UuidSchema),
+        GIT_READ: Type.Optional(UuidSchema),
+      }, strict),
+      allowed_tools: Type.Array(Type.String({ minLength: 1, maxLength: 64 }),
+        { minItems: 1, maxItems: 32 }),
+      max_rounds: Type.Integer({ minimum: 1, maximum: 12 }),
+      max_tool_calls: Type.Integer({ minimum: 1, maximum: 48 }),
+    }, strict)),
     context_sources: Type.Optional(Type.Array(Type.Object({
       kind: Type.Union([Type.Literal('KNOWLEDGE'), Type.Literal('MEMORY'), Type.Literal('DECISION')]),
       root_id: UuidSchema,

@@ -62,7 +62,8 @@ export async function createGatewayConnectionCommand(db: DbExecutor, input: {
 async function resolveConnectionConfig(capabilities: readonly GatewayCapability[],
   rootPath: string | undefined, allowedHost: string | undefined,
   allowPrivate: boolean | undefined): Promise<JsonObject | undefined> {
-  const rootBoundCaps: GatewayCapability[] = ['FILE_READ', 'FILE_WRITE', 'GIT_READ', 'GIT_WRITE', 'CLI_RUN'];
+  const rootBoundCaps: GatewayCapability[] =
+    ['FILE_READ', 'FILE_QUERY', 'FILE_WRITE', 'GIT_READ', 'GIT_WRITE', 'CLI_RUN'];
   const hasRootBound = capabilities.some((c) => rootBoundCaps.includes(c));
   const hasWebFetch = capabilities.includes('WEB_FETCH');
   if (hasRootBound && hasWebFetch) {

@@ -349,6 +349,7 @@ export type GatewayCapability =
   | 'FAKE_WRITE'
   | 'FAKE_PUBLIC_READ'
   | 'FILE_READ'
+  | 'FILE_QUERY'
   | 'WEB_FETCH'
   | 'FILE_WRITE'
   | 'GIT_READ'
@@ -473,6 +474,25 @@ export interface FileWritePathIdentityRow {
   readonly action_type: 'WRITE_FILE' | 'APPLY_CHANGESET';
   readonly root_path: string; readonly root_id: string;
   readonly captures: JsonObject[]; readonly created_at: Date;
+}
+
+/** 0054：一次模型工具请求与一个 Gateway 逻辑动作之间的持久对应。
+ * 行 id 就是该动作的 logical_operations.id，因此重放沿用同一身份，
+ * Provider 的 tool_call_id 只承担轮内配对。REJECTED 行未派发，不连 Operation。 */
+export type RunToolCallStatus =
+  | 'REQUESTED' | 'PREPARED' | 'WAITING_APPROVAL' | 'SETTLED' | 'REJECTED' | 'ABANDONED';
+export interface RunToolCallRow {
+  readonly id: string;
+  readonly workspace_id: string; readonly project_id: string; readonly run_id: string;
+  readonly step_id: string; readonly step_attempt_id: string; readonly model_call_id: string;
+  readonly round: number; readonly ordinal: number;
+  readonly provider_tool_call_id: string; readonly tool_name: string;
+  readonly arguments: JsonObject; readonly arguments_sha256: string;
+  readonly status: RunToolCallStatus;
+  readonly operation_id: string | null;
+  readonly result_ref: JsonObject | null;
+  readonly revision: bigint;
+  readonly created_at: Date; readonly updated_at: Date;
 }
 
 /** 0031：一次 FILE_WRITE 执行（APPLY_CHANGESET/WRITE_FILE）的逐文件证据账本头。
@@ -1067,6 +1087,7 @@ export interface RelayDatabaseSchema {
   approval_reservations: { readonly review_id: string; readonly operation_id: string; readonly reserved_at: Date };
   invocation_approval_bindings: { readonly invocation_id: string; readonly review_id: string; readonly operation_id: string };
   change_sets: ChangeSetRow;
+  run_tool_calls: RunToolCallRow;
   change_set_files: ChangeSetFileRow;
   workspaces: WorkspaceRow;
   workspace_execution_authority: WorkspaceExecutionAuthorityRow;

@@ -139,6 +139,7 @@ test('migrate entry reports the applied migrations without repeating them', asyn
       '0051_conversation_execution_requests',
       '0052_n03_project_knowledge_guide',
       '0053_n03_knowledge_curation_candidates',
+      '0054_m04_agent_tool_loop',
     ]);
   assert.equal(payload.ledger_rows, 53);
 });

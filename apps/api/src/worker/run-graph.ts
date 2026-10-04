@@ -13,6 +13,7 @@ import { ManagedContentStore } from '../storage/managed-content-store.js';
 import { createRepositories, withTransaction } from '../application/unit-of-work.js';
 import { readFrozenActionOperationIds } from '../workflow/execution-contract.js';
 import { executeMockGatewayStep, type MockGatewayStepResult } from './mock-gateway-action.js';
+import { executeToolLoopStep } from './tool-loop-action.js';
 
 const RunGraphState = Annotation.Root({
   runId: Annotation<string>(),
@@ -21,6 +22,10 @@ const RunGraphState = Annotation.Root({
   operationId: Annotation<string>(),
   reviewId: Annotation<string>(),
   reviewKind: Annotation<string>(),
+  // 模型工具循环里当前要派发的请求行。其余通道不足以表达「哪一个请求还没走完」。
+  toolCallId: Annotation<string>(),
+  // awaitAction 醒来后要回到哪个节点：固定动作链的 gatewayAction，或工具循环的 toolLoopAction。
+  awaitTarget: Annotation<string>(),
   // Bumped on every graph layout change. A head without the current version is
   // a checkpoint from an older build; it is rebuilt from business facts before
   // any resume is interpreted against it.
@@ -34,7 +39,7 @@ const RunGraphState = Annotation.Root({
 const REPEAT = new Set(['RETRYABLE', 'REPLAYED', 'CORRECTION_SCHEDULED']);
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 
-export const GRAPH_LAYOUT_VERSION = 1;
+export const GRAPH_LAYOUT_VERSION = 2;
 
 export class RunGraphInvocationLost extends Error {
   override readonly name = 'RunGraphInvocationLost';
@@ -109,8 +114,30 @@ export async function executeClaimedRunGraph(db: DbExecutor, input: {
             waiting ? 'WAITING_WITHOUT_VALIDATION_REVIEW' : result.status,
           runStatus: result.status === 'STEP_SUCCEEDED' ? result.run_status : '',
           operationId: result.status === 'GATEWAY_ACTION_REQUIRED' ? result.operation_id : '',
+          toolCallId: result.status === 'TOOL_LOOP_ACTION_REQUIRED' ? result.tool_call_id : '',
           reviewId: openReview?.id ?? '', reviewKind: openReview?.kind ?? '',
         };
+      })
+      .addNode('toolLoopAction', async (state) => {
+        if (input.signal.aborted || state.toolCallId === '') throw new RunGraphInvocationLost();
+        const run = await createRepositories(db).runs.readRun(state.runId);
+        const result = await executeToolLoopStep(db, { claim: input.claim, leaseMs: input.leaseMs,
+          signal: input.signal, toolCallId: state.toolCallId,
+          delivery: { commandId: input.claim.commandId, invocationEpoch: input.claim.epoch },
+          deadline: run?.worker_lease_until ?? null });
+        if (input.signal.aborted ||
+            !(await createRepositories(db).dispatch.hasCurrentCommandInvocation(
+              state.runId, input.claim.commandId, input.claim.workerId, input.claim.epoch))) {
+          throw new RunGraphInvocationLost();
+        }
+        return { operationId: result.operationId ?? '',
+          reviewId: result.status === 'WAITING' ? result.reviewId ?? '' : '',
+          reviewKind: result.status === 'WAITING' ? 'ACTION_APPROVAL' : '',
+          toolCallId: result.status === 'WAITING' ? state.toolCallId : '',
+          awaitTarget: 'toolLoop',
+          lastStatus: result.status === 'WAITING' ? 'GATEWAY_WAITING' :
+            result.status === 'UNKNOWN' ? 'ACTION_UNKNOWN' :
+              result.status === 'SUCCEEDED' ? 'GATEWAY_SUCCEEDED' : 'GATEWAY_ACTION_DENIED' };
       })
       .addNode('gatewayAction', async (state) => {
         if (input.signal.aborted) throw new RunGraphInvocationLost();
@@ -135,6 +162,7 @@ export async function executeClaimedRunGraph(db: DbExecutor, input: {
         return { operationId: result.operationId,
           reviewId: result.status === 'WAITING' ? result.reviewId ?? '' : '',
           reviewKind: result.status === 'WAITING' ? 'ACTION_APPROVAL' : '',
+          awaitTarget: 'gateway',
           lastStatus: result.status === 'WAITING' ? 'GATEWAY_WAITING' :
             result.status === 'SUCCEEDED' ? 'GATEWAY_SUCCEEDED' :
               result.status === 'UNKNOWN' ? 'ACTION_UNKNOWN' : 'GATEWAY_ACTION_DENIED' };
@@ -156,7 +184,8 @@ export async function executeClaimedRunGraph(db: DbExecutor, input: {
       .addNode('awaitAction', (state) => {
         const resumed: unknown = interrupt({ run_id: state.runId,
           reason: 'ACTION_APPROVAL', operation_id: state.operationId,
-          review_id: state.reviewId });
+          review_id: state.reviewId, target: state.awaitTarget,
+          ...(state.awaitTarget === 'toolLoop' ? { tool_call_id: state.toolCallId } : {}) });
         if (typeof resumed !== 'object' || resumed === null ||
             !('command_id' in resumed) || resumed.command_id !== input.claim.commandId ||
             !('review_decision_id' in resumed) ||
@@ -171,6 +200,7 @@ export async function executeClaimedRunGraph(db: DbExecutor, input: {
       .addConditionalEdges('advance', (state) => {
         if (state.lastStatus === 'WAITING_REVIEW') return 'awaitCommand';
         if (state.lastStatus === 'GATEWAY_ACTION_REQUIRED') return 'gatewayAction';
+        if (state.lastStatus === 'TOOL_LOOP_ACTION_REQUIRED') return 'toolLoopAction';
         if (REPEAT.has(state.lastStatus) || state.lastStatus === 'STEP_SUCCEEDED') {
           if (TERMINAL.has(state.runStatus)) return END;
           return steps >= input.maxSteps ? END : 'advance';
@@ -183,7 +213,15 @@ export async function executeClaimedRunGraph(db: DbExecutor, input: {
         if (state.lastStatus === 'GATEWAY_SUCCEEDED') return 'advance';
         return END;
       })
-      .addEdge('awaitAction', 'gatewayAction')
+      .addConditionalEdges('awaitAction', (state) =>
+        state.awaitTarget === 'toolLoop' ? 'toolLoopAction' : 'gatewayAction')
+      // 工具请求派发后回到 advance：未决请求还在时 advance 再次交回本节点，
+      // 全部结算后才继续同一个 DRAFT Attempt 的下一轮模型调用。
+      .addConditionalEdges('toolLoopAction', (state) => {
+        if (state.lastStatus === 'GATEWAY_WAITING') return 'awaitAction';
+        if (state.lastStatus === 'GATEWAY_SUCCEEDED') return 'advance';
+        return END;
+      })
       .compile({ checkpointer: saver });
     const config = { configurable: { thread_id: input.claim.runId }, durability: 'sync' as const,
       recursionLimit: Math.max(10, input.maxSteps * 2 + 8), signal: input.signal };
@@ -200,6 +238,7 @@ export async function executeClaimedRunGraph(db: DbExecutor, input: {
       await recordGraphLayoutRebuild(db, input.claim.runId, snapshot.values.layoutVersion);
       await graph.invoke({ runId: input.claim.runId, lastStatus: '', runStatus: '',
         operationId: '', reviewId: '', reviewKind: '',
+        toolCallId: '', awaitTarget: '',
         layoutVersion: GRAPH_LAYOUT_VERSION, rebuildLayout: true }, config);
       if (input.signal.aborted) throw new RunGraphInvocationLost();
       snapshot = await graph.getState(config);
@@ -232,6 +271,7 @@ export async function executeClaimedRunGraph(db: DbExecutor, input: {
     } else {
       await graph.invoke({ runId: input.claim.runId, lastStatus: '', runStatus: '',
         operationId: '', reviewId: '', reviewKind: '',
+        toolCallId: '', awaitTarget: '',
         layoutVersion: GRAPH_LAYOUT_VERSION, rebuildLayout: false }, config);
     }
     if (input.signal.aborted) throw new RunGraphInvocationLost();
@@ -276,7 +316,10 @@ async function validReviewResume(db: DbExecutor, claim: ClaimedRunCommand,
     const contract = await createRepositories(db).runs.readContract(claim.runId);
     const frozenOperationIds = contract === undefined ? [] :
       readFrozenActionOperationIds(contract.frozen_snapshot);
-    if (!frozenOperationIds.includes(interruptedOperationId)) return false;
+    if (frozenOperationIds.includes(interruptedOperationId)) return true;
+    // 工具循环的动作身份不是 Delegate 冻结的，而是模型请求落库时产生的行 id。
+    // 这里回到该行确认它确实属于本 Run：批准不能被一个无关 Operation 复用。
+    return isToolLoopOperation(db, claim.runId, interruptedOperationId);
   }
   const rows = await sql<{ exists: boolean }>`
     select exists(select 1 from run_commands c
@@ -295,6 +338,14 @@ async function validReviewResume(db: DbExecutor, claim: ClaimedRunCommand,
             and (o.status = 'SUCCEEDED' or r.expires_at is null
               or r.expires_at > clock_timestamp())))
         and r.target_hash = d.target_hash) as exists
+  `.execute(db);
+  return rows.rows[0]?.exists === true;
+}
+
+async function isToolLoopOperation(db: DbExecutor, runId: string, operationId: string): Promise<boolean> {
+  const rows = await sql<{ exists: boolean }>`
+    select exists(select 1 from run_tool_calls
+      where run_id = ${runId} and operation_id = ${operationId}) as exists
   `.execute(db);
   return rows.rows[0]?.exists === true;
 }

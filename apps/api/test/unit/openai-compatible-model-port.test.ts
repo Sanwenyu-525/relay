@@ -4,6 +4,7 @@ import { AIMessageChunk } from '@langchain/core/messages';
 import { ChatOpenAI } from '@langchain/openai';
 
 import { FIRST_PARTY_REGISTRY } from '../../src/skills/first-party-registry.js';
+import type { JsonObject } from '../../src/infrastructure/json.js';
 import type { AssistRequest } from '../../src/workflow/fake-model-port.js';
 import { CANDIDATE_OUTPUT_SCHEMA } from '../../src/workflow/markdown-deliverable.js';
 import { OpenAiCompatibleModelPort, ModelCallBudgetError, ModelOutputBudgetError,
@@ -65,16 +66,23 @@ function toolEvent(content = '',
 const nullUsage = { inputTokens: null, outputTokens: null,
   cacheReadTokens: null, cacheCreationTokens: null };
 
+// 没有声明任何工具的入口（Assist/Skill/语义检查）仍然拒绝工具请求。拒绝是完整的：
+// Provider request id 与它真实上报的用量一起留在错误证据里，未上报的保持 null 而不是补零。
+// 这里不再断言「工具请求那一帧里的 wire usage 会被丢弃」——端口读完整个流才判定，
+// 因此 Provider 在工具帧之后上报的用量同样被保全。
 for (const scenario of [
-  { name: 'same-chunk wire usage is not guessed', chunks: [toolEvent('must not publish',
+  { name: 'usage reported after the tool chunk', chunks: [toolEvent('must not publish',
     { prompt_tokens: 41, completion_tokens: 9, total_tokens: 50 })],
-  usage: nullUsage, deltas: [] },
+  usage: { inputTokens: 41, outputTokens: 9, cacheReadTokens: null, cacheCreationTokens: null },
+    deltas: [] },
   { name: 'prior empty and usage frames', chunks: [event(''),
     event(null, null, { prompt_tokens: 43, completion_tokens: 8, total_tokens: 51 }), toolEvent()],
-  usage: nullUsage, deltas: [] },
+  usage: { inputTokens: 43, outputTokens: 8, cacheReadTokens: null, cacheCreationTokens: null },
+    deltas: [] },
   { name: 'partial text before tool refusal', chunks: [event('partial synthetic reply'),
     event(null, null, { prompt_tokens: 43, completion_tokens: 8, total_tokens: 51 }), toolEvent()],
-  usage: nullUsage, deltas: ['partial synthetic reply'] },
+  usage: { inputTokens: 43, outputTokens: 8, cacheReadTokens: null, cacheCreationTokens: null },
+    deltas: ['partial synthetic reply'] },
   { name: 'unknown usage stays null', chunks: [toolEvent()],
   usage: nullUsage, deltas: [] },
 ]) {
@@ -99,6 +107,62 @@ for (const scenario of [
     assert.equal(calls, 1);
   });
 }
+
+/** 声明了工具的 DRAFT 端口：完整且已声明的请求成为 TOOL_CALLS；
+ * 半截参数、未声明工具名与「正文 + 工具」并存一律拒绝，不进入派发路径。 */
+const DRAFT_TOOLS = [{ name: 'search_text', description: '搜索受管根内的文本',
+  parameters: { type: 'object', properties: { query: { type: 'string' } },
+    required: ['query'], additionalProperties: false } }] as const;
+
+function toolChunk(name: string, args: string, id = 'fixture-tool'): string {
+  return `data: ${JSON.stringify({ id: 'chatcmpl-tool-fixture',
+    object: 'chat.completion.chunk', created: 1, model: 'fixture-model',
+    choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id, type: 'function',
+      function: { name, arguments: args } }] }, finish_reason: 'tool_calls' }] })}\n\n`;
+}
+
+function draftManifest(): JsonObject {
+  return { task: { title: '工具循环协议' }, contract: { objective: '验证工具请求协议' } };
+}
+
+test('a complete declared tool request becomes TOOL_CALLS with its provider id', async () => {
+  const model = port(() => response([toolChunk('search_text', '{"query":"Relay"}'),
+    'data: [DONE]\n\n']));
+  const result = await model.generate({ manifest: draftManifest(),
+    outputSchema: CANDIDATE_OUTPUT_SCHEMA, tools: DRAFT_TOOLS });
+  assert.equal(result.kind, 'TOOL_CALLS');
+  if (result.kind !== 'TOOL_CALLS') return;
+  assert.equal(result.providerRequestId, 'chatcmpl-tool-fixture');
+  assert.deepEqual(result.calls, [{ providerToolCallId: 'fixture-tool',
+    name: 'search_text', arguments: { query: 'Relay' } }]);
+});
+
+for (const scenario of [
+  { name: 'half-sent arguments', chunks: [toolChunk('search_text', '{"query":"Rel')] },
+  { name: 'arguments are not an object', chunks: [toolChunk('search_text', '"Relay"')] },
+  { name: 'undeclared tool name', chunks: [toolChunk('apply_changeset', '{}')] },
+  { name: 'missing tool name', chunks: [toolChunk('', '{}')] },
+]) {
+  test(`an incomplete tool request is refused before dispatch: ${scenario.name}`, async () => {
+    const model = port(() => response([...scenario.chunks, 'data: [DONE]\n\n']));
+    await assert.rejects(() => model.generate({ manifest: draftManifest(),
+      outputSchema: CANDIDATE_OUTPUT_SCHEMA, tools: DRAFT_TOOLS }),
+    (error: unknown) => {
+      assert.ok(error instanceof ModelToolOutputError);
+      assert.equal(error.providerRequestId, 'chatcmpl-tool-fixture');
+      assert.ok(!JSON.stringify(error).includes('Rel'), 'partial arguments entered error evidence');
+      return true;
+    });
+  });
+}
+
+test('text published beside a tool request is not a settled reply', async () => {
+  const model = port(() => response([event('已修改三个文件'),
+    toolChunk('search_text', '{"query":"x"}'), 'data: [DONE]\n\n']));
+  await assert.rejects(() => model.generate({ manifest: draftManifest(),
+    outputSchema: CANDIDATE_OUTPUT_SCHEMA, tools: DRAFT_TOOLS }),
+  (error: unknown) => error instanceof ModelToolOutputError);
+});
 
 for (const scenario of ['prior usage', 'same-chunk usage', 'empty request ID', 'non-text content'] as const) {
   test(`tool refusal retains normalized SDK metadata: ${scenario}`, async (t) => {

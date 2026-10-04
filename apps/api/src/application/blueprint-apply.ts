@@ -13,7 +13,7 @@ import { skillOutputHash } from '../skills/skill-proposal.js';
 import { resolveViewTemplate } from '../view/builtin-view.js';
 import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
 import { CommandIdReusedError, runIdempotentCommand, resolveExistingReceipt,
-  type CommandOutcome } from './command.js';
+  resolveReceiptAfterUniqueViolation, type CommandOutcome } from './command.js';
 import { applyTaskCreation, prepareTaskCreation } from './create-task.js';
 import { DomainError, invalidTransition, resourceNotFound,
   revisionConflict, validationFailed } from './domain-error.js';
@@ -56,7 +56,12 @@ export async function applyBlueprintProposal(db: DbExecutor, input: {
       expected_state_revision: toDecimalString(expectedState),
       expected_view_revision: toDecimalString(expectedView) } });
   let expiredWith: DomainError | null = null;
-  const committed = await db.transaction().execute(async (trx) => {
+  // 同一 scope 下不同项目/候选的两个 Apply 互不串行，会各自越过回执重查，直到写同一条
+  // 命令回执时才相遇。候选锁串行不了这种情况，所以回执唯一冲突必须翻译成与通用幂等
+  // 路径一致的结果：同摘要重放原回执，异摘要 409 COMMAND_ID_REUSED。
+  let committed: { result: JsonObject; replayed: boolean; committedAt: Date } | null;
+  try {
+    committed = await db.transaction().execute(async (trx) => {
     const r = createRepositories(trx);
     const existingReceipt = await r.receipts.findReceipt({ scopeKey,
       commandId: input.commandId });
@@ -361,7 +366,11 @@ export async function applyBlueprintProposal(db: DbExecutor, input: {
       commandId: input.commandId, commandType: 'ApplyProjectBlueprint',
       payloadHash, result });
     return { result, replayed: false, committedAt: receipt.created_at };
-  });
+    });
+  } catch (error) {
+    return resolveReceiptAfterUniqueViolation<JsonObject>(db, error, scopeKey,
+      input.commandId, payloadHash);
+  }
   if (expiredWith !== null) throw expiredWith;
   if (committed === null) throw new Error('blueprint apply ended without outcome');
   return committed;

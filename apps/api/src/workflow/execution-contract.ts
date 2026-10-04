@@ -49,7 +49,62 @@ export interface FreezeExecutionContractInput {
   readonly webFetchAction?: WebFetchActionIntent | undefined;
   readonly fileWriteAction?: FileWriteActionIntent | undefined;
   readonly cliRunAction?: CliRunActionIntent | undefined;
+  readonly toolLoopAction?: ToolLoopActionIntent | undefined;
   readonly contextSources?: readonly ContextSourceRef[] | undefined;
+}
+
+/**
+ * 冻结信封：模型在本 Run 内可以自主请求的工具上界。
+ *
+ * 它不是授权。resource 必须在 Task 的 Project 下 ACTIVE，connections 必须是该项目绑定
+ * 该 resource 的 ACTIVE 连接，allowed_tools 只能是首批词表内的名字；每次真实准入仍由
+ * Gateway 按当前 Permission 判定。信封不含 operation_id——每次工具调用的动作身份在
+ * 落库时产生（见 runtime-context.md §2.3）。
+ */
+export interface ToolLoopActionIntent {
+  readonly intent_key: 'tool-loop-v1';
+  readonly resource_id: string;
+  readonly connections: Readonly<Record<string, string>>;
+  readonly allowed_tools: readonly string[];
+  readonly max_rounds: number;
+  readonly max_tool_calls: number;
+}
+
+/** 首批工具循环的循环预算上限；Delegate 只接受不超过这些值的请求。 */
+export const TOOL_LOOP_MAX_ROUNDS = 12;
+export const TOOL_LOOP_MAX_TOOL_CALLS = 48;
+const TOOL_LOOP_CAPABILITIES: readonly string[] = ['FILE_QUERY', 'FILE_READ', 'GIT_READ'];
+
+export function readToolLoopAction(snapshot: JsonObject): ToolLoopActionIntent | undefined {
+  const value = snapshot.tool_loop_action;
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('frozen tool loop action is invalid');
+  }
+  const action = value as JsonObject;
+  const connections = action.connections;
+  if (action.intent_key !== 'tool-loop-v1' || typeof action.resource_id !== 'string' ||
+      action.resource_id === '' || typeof connections !== 'object' || connections === null ||
+      Array.isArray(connections) || !Array.isArray(action.allowed_tools) ||
+      action.allowed_tools.length === 0 ||
+      action.allowed_tools.some((name) => typeof name !== 'string' || name === '') ||
+      !Number.isInteger(action.max_rounds) || (action.max_rounds as number) < 1 ||
+      (action.max_rounds as number) > TOOL_LOOP_MAX_ROUNDS ||
+      !Number.isInteger(action.max_tool_calls) || (action.max_tool_calls as number) < 1 ||
+      (action.max_tool_calls as number) > TOOL_LOOP_MAX_TOOL_CALLS) {
+    throw new Error('frozen tool loop action is invalid');
+  }
+  const resolved: Record<string, string> = {};
+  for (const [capability, connectionId] of Object.entries(connections as JsonObject)) {
+    if (!TOOL_LOOP_CAPABILITIES.includes(capability) || typeof connectionId !== 'string' ||
+        connectionId === '') {
+      throw new Error('frozen tool loop action is invalid');
+    }
+    resolved[capability] = connectionId;
+  }
+  return { intent_key: 'tool-loop-v1', resource_id: action.resource_id,
+    connections: resolved, allowed_tools: action.allowed_tools as readonly string[],
+    max_rounds: action.max_rounds as number, max_tool_calls: action.max_tool_calls as number };
 }
 
 /** The optional fixed Mock tool intent is frozen before a Worker can prepare it. */
@@ -223,6 +278,11 @@ export function readFrozenRunActions(snapshot: JsonObject): FrozenRunActions {
   if (fileRead !== undefined && web !== undefined) {
     throw new Error('frozen contract carries more than one read action');
   }
+  if (readToolLoopAction(snapshot) !== undefined && (fileRead !== undefined || web !== undefined)) {
+    // 固定读取与自主工具循环都会在同一 Run 内读取；两者并存会让「这次读取证据是谁」
+    // 变得不确定，因此只允许其一。
+    throw new Error('frozen tool loop cannot be combined with a fixed read action');
+  }
   const marker = readMockGatewayAction(snapshot);
   const fileWrite = readFileWriteAction(snapshot);
   const cliRun = readCliRunAction(snapshot);
@@ -355,6 +415,9 @@ export function freezeExecutionContract(
       changes: input.fileWriteAction.changes.map((change) => ({ ...change })) } }),
     ...(input.cliRunAction === undefined ? {} : { cli_run_action: { ...input.cliRunAction,
       args: [...input.cliRunAction.args] } }),
+...(input.toolLoopAction === undefined ? {} : { tool_loop_action: { ...input.toolLoopAction,
+      connections: { ...input.toolLoopAction.connections },
+      allowed_tools: [...input.toolLoopAction.allowed_tools] } }),
     ...(input.contextSources === undefined || input.contextSources.length === 0 ? {} :
       { context_sources: input.contextSources.map((source) => ({ ...source })) }),
   };

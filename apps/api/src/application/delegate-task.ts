@@ -24,7 +24,12 @@ import {
   WORKFLOW_VERSION,
   WORKFLOW_STEPS,
 } from '../workflow/markdown-deliverable.js';
-import { freezeExecutionContract, readContextSources } from '../workflow/execution-contract.js';
+import { freezeExecutionContract, readContextSources, TOOL_LOOP_MAX_ROUNDS,
+  TOOL_LOOP_MAX_TOOL_CALLS } from '../workflow/execution-contract.js';
+import { readInternalTool } from '../workflow/tool-catalog.js';
+
+/** 首批工具循环只读三类能力；写入与检查在后续片按同一张表扩进来。 */
+const TOOL_LOOP_CAPABILITIES: readonly string[] = ['FILE_QUERY', 'FILE_READ', 'GIT_READ'];
 import type { ContextSourceRef } from '../workflow/execution-contract.js';
 import { loadRulePlanBasis } from './rule-plan-basis.js';
 import { canonicalRelativePath, requireFrozenBaseline,
@@ -84,6 +89,14 @@ export interface DelegateTaskInput {
     readonly connection_id: string; readonly resource_id: string;
     readonly executable: string; readonly args: readonly string[];
     readonly max_output_bytes?: number;
+  } | undefined;
+  /** 可选工具循环信封：模型在本 Run 内可自主请求的工具上界。与固定读取意图互斥。 */
+  readonly toolLoopAction?: {
+    readonly resource_id: string;
+    readonly connections: Readonly<Record<string, string>>;
+    readonly allowed_tools: readonly string[];
+    readonly max_rounds: number;
+    readonly max_tool_calls: number;
   } | undefined;
   /** 仅用于真实 PG barrier 测试；不属于 HTTP 请求或命令摘要。 */
   readonly hooks?: {
@@ -229,6 +242,45 @@ export async function delegateTask(
         throw invalidTransition('Gateway action 只能冻结「一个读取动作」，或「标记 / 文件变更 / 检查命令」其一，或「文件变更 + 检查命令」。',
           { taskId: task.id });
       }
+      if (input.toolLoopAction !== undefined) {
+        // 信封是模型自主调用的上界，不是授权：工具名、连接与受管资源都在冻结期核对。
+        if (readIntents.length > 0) {
+          throw invalidTransition('tool_loop_action 不能与固定读取动作同时冻结。', { taskId: task.id });
+        }
+        const loop = input.toolLoopAction;
+        const resource = await repositories.gateway.readResource(loop.resource_id);
+        if (resource?.workspace_id !== input.workspaceId || resource.project_id !== task.project_id ||
+            resource.status !== 'ACTIVE') {
+          throw invalidTransition('tool_loop_action.resource_id 不属于当前 Task 的 Project 或已停用。',
+            { taskId: task.id });
+        }
+        const capabilities = new Set<string>();
+        for (const [capability, connectionId] of Object.entries(loop.connections)) {
+          if (!TOOL_LOOP_CAPABILITIES.includes(capability) || typeof connectionId !== 'string' ||
+              connectionId === '') {
+            throw invalidTransition(`tool_loop_action.connections 含未知能力：${capability}`,
+              { taskId: task.id });
+          }
+          capabilities.add(capability);
+          const connection = await repositories.gateway.readConnection(connectionId);
+          if (connection?.workspace_id !== input.workspaceId || connection.project_id !== task.project_id ||
+              connection.status !== 'ACTIVE' ||
+              !(await repositories.gateway.hasConnectionCapability(connectionId, capability as never))) {
+            throw invalidTransition(`tool_loop_action 的 ${capability} 连接不可用或不属于当前 Project。`,
+              { taskId: task.id });
+          }
+        }
+        const definitions = loop.allowed_tools.map((name) => readInternalTool(name));
+        if (definitions.some((entry) => entry === undefined) ||
+            definitions.some((entry) => !capabilities.has(entry!.capability))) {
+          throw invalidTransition('tool_loop_action.allowed_tools 含未知工具或缺少对应连接。',
+            { taskId: task.id });
+        }
+        if (loop.max_rounds < 1 || loop.max_rounds > TOOL_LOOP_MAX_ROUNDS ||
+            loop.max_tool_calls < 1 || loop.max_tool_calls > TOOL_LOOP_MAX_TOOL_CALLS) {
+          throw invalidTransition('tool_loop_action 的循环预算超出允许上限。', { taskId: task.id });
+        }
+      }
       if (input.fileWriteAction !== undefined) {
         const resource = await repositories.gateway.readResource(input.fileWriteAction.resource_id);
         if (resource?.workspace_id !== input.workspaceId || resource.project_id !== task.project_id) {
@@ -349,6 +401,14 @@ export async function delegateTask(
           args: [...input.cliRunAction.args],
           ...(input.cliRunAction.max_output_bytes === undefined ? {} :
             { max_output_bytes: input.cliRunAction.max_output_bytes }),
+        } }),
+        ...(input.toolLoopAction === undefined ? {} : { toolLoopAction: {
+          intent_key: 'tool-loop-v1' as const,
+          resource_id: input.toolLoopAction.resource_id,
+          connections: { ...input.toolLoopAction.connections },
+          allowed_tools: [...input.toolLoopAction.allowed_tools],
+          max_rounds: input.toolLoopAction.max_rounds,
+          max_tool_calls: input.toolLoopAction.max_tool_calls,
         } }),
         ...(contextSources === undefined || contextSources.length === 0 ? {} :
           { contextSources }),

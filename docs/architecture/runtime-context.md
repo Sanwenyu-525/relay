@@ -68,7 +68,23 @@ Development 的 `change-and-verify-v1` 目标流程：确认本次任务范围 �
 
 每片自检与必要独立复核通过后再进入依赖片；实际成绩只写统一功能验收表。此节是规格和推荐顺序，文档检查通过不代表运行时工具能力通过。
 
-完整执行输入见[内部文件与 Git 工具循环实施提示词](../../prompts/agent-native-tools.md)。2026-10-03 用户选择只生成提示词，本轮未启动代码实施；用户另行下发后按其范围执行。
+完整执行输入见[内部文件与 Git 工具循环实施提示词](../../prompts/agent-native-tools.md)。2026-10-03 用户选择只生成提示词；用户随后实际下发该提示词，实施按本节顺序推进。
+
+### 2.3 内部工具循环的对象、身份与恢复（2026-10-03 实施设计）
+
+本节是按当前源码核定的最小实现设计，Owner 与取舍归本节，能力范围归[工具适配器 §1.3](tool-adapters.md#13-首批内部工具范围2026-10-03)。
+
+**循环位置。** 工具循环是固定 Workflow 的 DRAFT 步骤内部行为，不新增 Run 步骤、不新增第二套状态机：模型返回工具请求 → 同一 DRAFT Attempt 落库 → Gateway 准入执行 → 结果回传 → 下一轮模型调用。`BUILD_CONTEXT`、`PERSIST_CANDIDATE`、`VERIFY`、`COMPLETE` 与既有固定动作链不变；没有冻结工具信封的 Run 走原单次生成路径。
+
+**冻结信封 `tool_loop_action`。** Delegate 时可选冻结 `{ intent_key:'tool-loop-v1', resource_id, connections, allowed_tools, max_rounds, max_tool_calls }`。它是模型可自主调用的**上界**，不是授权：resource 必须在 Task 的 Project 下 ACTIVE，每个 connection 必须是该项目绑定该 resource 的 ACTIVE 连接，`allowed_tools` 只能是首批词表。信封不含 `operation_id`——每次工具调用的动作身份在落库时产生，见下。`max_rounds`/`max_tool_calls` 是循环自身预算，不替代 `model_calls` 的调用与 token 预算。
+
+**身份。** 新表 `run_tool_calls` 是一次「模型工具请求 ↔ 一个 Gateway 逻辑动作」的持久对应，行 id 直接作为该动作的 `logical_operations.id`。因此：Provider 的 `tool_call_id` 只是本轮内的关联标签，不承担跨 Run/轮次唯一性；同一已落库请求的重放沿用同一行与同一 operation_id，`prepareGatewayAction` 的既有幂等分支返回原记录；断流、半截 JSON、非法 schema、未知工具、超预算与取消在落库前即拒绝，不产生 Operation。
+
+**轮次与恢复。** 行上带 `round` 与 `step_attempt_id`。恢复时按 `(round, ordinal)` 重建模型消息：assistant 工具请求来自行的 `arguments`，tool 结果来自该行 `operation_id` 对应 Operation 的 `result_ref` 投影。因此不需要保存完整对话正文、私有思考链或凭据。已 SUCCEEDED/FAILED 的读取结果恢复时直接复用原证据，不重跑模型生成同一写动作。
+
+**状态与图路由。** 行状态 `REQUESTED → (PREPARED | WAITING_APPROVAL) → SETTLED`，另有 `REJECTED`（未派发，携带类型化原因）与 `ABANDONED`。`advanceRunStep` 在领取步骤 Attempt **之前**检查本 Run 的未决工具调用：有未决行时返回 `TOOL_LOOP_ACTION_REQUIRED` 并交出 `tool_call_id`，由 `worker/run-graph.ts` 的 `toolAction` 节点执行 prepare/dispatch/结算；ASK 走既有 `awaitAction` interrupt。这样 Gateway 的 `WAITING_APPROVAL`（会释放 Worker claim、把 Run 置为 WAITING_APPROVAL）不会被步骤结算事务覆盖，与现有固定动作链的 `gatewayAction` 节点同一形状。`REQUESTED` 行不需要资源 claim；`FILE_QUERY`/`FILE_READ`/`GIT_READ` 的 claim 由 `prepareGatewayAction` 在准入事务内建立并在结算时释放。
+
+**不做的事。** 不新增 Gateway origin 词表（仍只有 `RUN`/`USER_IMPORT`）；不引入通用工具转发 HTTP API；不开放任意 Shell；不建第二套模型调用账本；不让模型最终回复推进 Task/Run 状态。
 
 ## 3. Context Builder 管道
 

@@ -194,7 +194,7 @@ M07非空恢复维护核对规格归[专用会话集成](../../apps/api/test/int
 | 预览与分别接受 | 预览零业务写入；显示配置应用不启用 Rules、不改活动 Run contract；后续 Rule 接受仍触发原失效协议 | UI + 真实 API；A01、A05、C01–C03 |
 | 修改与过期 | 改候选/选中项后旧 hash 不可接受；State/View/Goal/资料/规则变化使旧提案拒绝；切页迟到结果不落新项目 | HTTP + PG 竞争；A02、C08 |
 | 原子应用 | 在新 Task、State、View 与回执写入之间注入失败，所有效果均回滚；Next Action 引用正确创建的 Task | 真实 PG 故障注入；D05 |
-| 并发与重放 | 相同/不同 command_id 竞争同提案只应用一次；同 command_id 同内容的并发请求在原事务提交后返回原成功回执，不能因已 ACCEPTED 误报 409 或重复插回执报 500；人工编辑/归档与接受竞争不丢更新；响应丢失查回执不重复创建任务 | 真实 HTTP + 两 DB 连接 + barrier，明确确认两个请求均已等候候选行锁后放行；分别覆盖 Task Skill 接受与 Blueprint Apply，并检查业务效果、回执和审计只提交一次；D06 |
+| 并发与重放 | 相同/不同 command_id 竞争同提案只应用一次；同 command_id 同内容的并发请求在原事务提交后返回原成功回执，不能因已 ACCEPTED 误报 409 或重复插回执报 500；同工作空间同 command_id 跨候选/跨 Project（不同请求摘要）竞争，胜出成功、另一请求返回 409 COMMAND_ID_REUSED 且事务完整回滚，不得返回 500；人工编辑/归档与接受竞争不丢更新；响应丢失查回执不重复创建任务 | 真实 HTTP + 两 DB 连接 + barrier；同候选确认两请求均等候候选锁，跨候选以不同业务行锁确认两请求已越过锁后回执查询再放行；分别覆盖 Task Skill 接受与 Blueprint Apply，核对业务效果、回执、审计与失败候选均无额外提交；D06 |
 | 版本与追溯 | v1 应用后发布 v2 不改旧项目/Run；同标签不同内容拒绝；旧定义缺失或禁用明确报错；来源可追溯到候选、Manifest 与效果 | 注册表/存储集成；A03、C08 |
 | 验证与执行边界 | 结构通过不算 Task PASS；Worker 不能改有效 CheckPlan；Skill 升级不绕过原 UNKNOWN 核对 | Verification/恢复 Fake；C06、C07、D01–D03 |
 

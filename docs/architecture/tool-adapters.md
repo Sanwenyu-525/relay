@@ -48,6 +48,16 @@ P09 初版当时没有真实网络请求或 Git/CLI 执行；后续 M04/M06 已�
 
 Git 暂存、提交和推送不进入本轮新增模型工具集，后续再接入；已有 GIT_WRITE 底层适配器与历史动作保留。首批按「查找/读取 → 修改 → 查看差异 → 检查 → 根据实际结果继续修正」闭合，不以模型自报完成代替原验证与业务完成入口。
 
+### 1.4 FILE_QUERY：目录浏览、路径查找与内容搜索（2026-10-03 实施）
+
+模型可自主调用的三类文件查询共用一个只读能力 `FILE_QUERY`（`REAL`/`READ`，适配器 `file-query-v1`），逻辑动作分别是 `LIST_DIRECTORY`、`FIND_PATHS`、`SEARCH_TEXT`。合成一个能力而不是三个，是因为三者共享同一套根边界、同一份权限前缀判定和同一种有界结果形状；Gateway 的 `capability_key` 决定适配器，`action_type` 决定查询形态，这是既有 `FILE_READ`/`GIT_READ` 已有的分层。
+
+查询目标是被冻结的**目录**而非文件：`normalized_target` 是受管根内某个现存目录的 realpath，`params.relative_path` 是根内相对子目录（缺省即根自身）。三个动作都返回有界结果、相对路径与定位信息，并显式带 `truncated` 与 `limit` 标记；截断不冒充完整证据。默认跳过受保护内容与构建产物（与 `isProtectedPath` 同一词表加 `node_modules`/构建目录），不做全仓扫描后把全文塞给模型。
+
+恢复沿用只读动作的既有形状：`PREPARED` 保持 `NOT_EXECUTED`，在途丢失按安全重读结算，读取失败记类型化 `FAILED` 而不是「干净」。因为查询无副作用，reconcile 不产生 `UNKNOWN`。
+
+`FILE_QUERY` 的 `approval_passthrough` 为 true，因此策略 AUTO 即 AUTO；策略 ASK 仍创建绑定确切目录与参数的 ACTION_APPROVAL。这与 `FILE_WRITE`/`CLI_RUN` 的非穿透降级是不同事实，不因本节改写任何既有适配器声明。
+
 ## 2. Files
 
 2026-10-03 用户确认默认修改位置：Relay 内部工具循环直接在用户打开并登记为受管资源的原目录执行文件修改。编辑前记录实际读取基线并在写入前复核，保留用户及其他执行者的已有改动；发现基线变化时停止覆盖并处理冲突。原目录修改继续受任务范围授权、资源互斥及逐文件执行证据约束。

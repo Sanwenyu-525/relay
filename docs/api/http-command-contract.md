@@ -37,6 +37,14 @@ HTTP 状态的使用依据 [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.htm
 
 摘要不同仍由同一入口抛 `COMMAND_ID_REUSED`，幂等重放不放宽异内容；维护准入、来源、执行权、版本与摘要校验都在该位置之前完成，不因重查而跳过。反例见 `f24-proposal-idempotency.integration.test.ts`（真实 PG + HTTP，用受控行锁确认两个请求都已进入等待后再放行）。
 
+**同 scope 下不同候选的命令冲突（2026-10-03 补记）。** 候选行锁只能串行**同一候选**；同一工作空间里用同一个 `command_id` 去接受两个**不同**候选时，两个请求各自锁各自的行、各自越过上面那次回执重查，直到写同一条命令回执时才相遇。谁先插入谁提交，后到者拿到唯一约束冲突。这不是业务失败，必须翻译成与通用幂等路径一致的结果，而不是 500：
+
+- 自定义事务入口（含 `POST /assist-proposals/{id}/accept` 与 `POST /projects/{project_id}/blueprint-proposals/{id}/apply`）捕获唯一约束冲突后，用 `resolveReceiptAfterUniqueViolation` 在**新的正常事务上下文**读一次胜出回执：摘要相同返回原成功回执，摘要不同抛 `COMMAND_ID_REUSED`（409），读不到可核对回执则原样抛出原错误。
+- 冲突事务已经完整回滚，所以失败候选仍为 `PENDING`，其 Task/项目验收、State、View 与任务数量都不变，也没有额外审计；胜出方只有一条回执与一次业务效果。
+- 该处理只在唯一约束冲突时生效，不捕获其他异常，也不放宽首次执行的维护准入、作用域、来源、执行权、版本、摘要与单事务约束。
+
+反例同样在 `f24-proposal-idempotency.integration.test.ts`：用 `lock table command_receipts in exclusive mode` 把两个请求精确停在插入回执处（该锁与回执查询所需的 ACCESS SHARE 兼容，所以两个请求会先跑完所有读取），确认两个会话都已排队后再放行；断言与到达顺序无关，一律以胜出回执和数据库里的终态判断谁赢。
+
 此设计使用 body 中的 expected_revision / expected_task_revision / expected_run_revision，不混用 If-Match。缺失必需版本返回 422，版本不匹配返回 409 REVISION_CONFLICT。首次失败而没有业务提交的请求不写成功回执；修正内容必须换 command_id。提交结果不确定时先查询回执或原样重试，不能自动换 ID。
 
 成功响应统一为：

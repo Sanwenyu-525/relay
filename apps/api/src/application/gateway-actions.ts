@@ -27,6 +27,7 @@ import {
   type FileChange, type FileChangeOutcome, type FileReconciliationCheck,
 } from '../files/file-changeset.js';
 import type { ChangeSetLedgerFile, ChangeSetLedgerHeader } from '../files/change-set-repository.js';
+import { assertQueryDirectoryInsideRoot, executeFileQuery, reconcileFileQuery } from '../files/file-query.js';
 import type { ChangeSetFileStatus, ChangeSetStatus } from '../infrastructure/database-schema.js';
 import {
   captureWindowsFilePaths, executeWindowsFileChangeset, inspectWindowsFileRoot,
@@ -54,6 +55,9 @@ export type GatewayActionType =
   | 'WRITE_MARKER'
   | 'READ_PUBLIC'
   | 'READ_FILE'
+  | 'LIST_DIRECTORY'
+  | 'FIND_PATHS'
+  | 'SEARCH_TEXT'
   | 'WEB_FETCH'
   | 'WRITE_FILE'
   | 'APPLY_CHANGESET'
@@ -104,6 +108,9 @@ function gatewayDenied(code: string, detail: string, retryable = false): DomainE
 function capabilityFor(action: GatewayActionType): GatewayCapability {
   if (action === 'WRITE_MARKER') return 'FAKE_WRITE';
   if (action === 'READ_FILE') return 'FILE_READ';
+  if (action === 'LIST_DIRECTORY' || action === 'FIND_PATHS' || action === 'SEARCH_TEXT') {
+    return 'FILE_QUERY';
+  }
   if (action === 'WEB_FETCH') return 'WEB_FETCH';
   if (action === 'WRITE_FILE' || action === 'APPLY_CHANGESET') return 'FILE_WRITE';
   if (action === 'GIT_STATUS' || action === 'GIT_DIFF' || action === 'GIT_LOG') return 'GIT_READ';
@@ -126,6 +133,14 @@ function containsPath(root: string, target: string): boolean {
   const normalizedTarget = process.platform === 'win32' ? target.toLowerCase() : target;
   const part = relative(normalizedRoot, normalizedTarget);
   return part !== '' && part !== '..' && !part.startsWith(`..${sep}`) && !isAbsolute(part);
+}
+
+/** 目录查询的目标可以是受管根本身，因此这里允许「等于根」；文件读写仍用严格包含。 */
+function containsDirectory(root: string, target: string): boolean {
+  const normalizedRoot = process.platform === 'win32' ? root.toLowerCase() : root;
+  const normalizedTarget = process.platform === 'win32' ? target.toLowerCase() : target;
+  const part = relative(normalizedRoot, normalizedTarget);
+  return part === '' || (part !== '..' && !part.startsWith(`..${sep}`) && !isAbsolute(part));
 }
 
 async function normalizedWriteTarget(target: string, root: string): Promise<string> {
@@ -162,6 +177,36 @@ async function normalizedReadTarget(target: string, root: string): Promise<strin
     throw gatewayDenied('GATEWAY_TARGET_DENIED', '目标文件不存在或无法安全规范化。');
   }
   if (!containsPath(root, canonical)) throw gatewayDenied('GATEWAY_TARGET_DENIED', '目标经链接逃逸出已登记资源根。');
+  return canonical;
+}
+
+/** FILE_QUERY 冻结的是查询目录而非文件：目录必须已存在、是真实目录、且经 realpath
+ * 之后仍在受管根内。相对子目录参数随后再按 canonicalRelativePath 归一，
+ * 使 '..'、别名与反斜杠形式不能把查询挪到根外或受保护路径。 */
+async function normalizedQueryDirectory(target: string, root: string,
+  relativePath: string | undefined): Promise<string> {
+  if (!isAbsolute(target)) throw validationFailed([{ field: 'target', message: 'must be absolute' }]);
+  const resolved = resolve(target);
+  if (!containsDirectory(root, resolved)) throw gatewayDenied('GATEWAY_TARGET_DENIED', '目标不在已登记资源根内。');
+  let canonical: string;
+  try {
+    canonical = await realpath(resolved);
+    const entry = await lstat(resolved);
+    if (entry.isSymbolicLink() || !entry.isDirectory()) {
+      throw gatewayDenied('GATEWAY_TARGET_DENIED', '查询目标不是普通目录或经链接重定向。');
+    }
+  } catch (error) {
+    if (error instanceof DomainError) throw error;
+    throw gatewayDenied('GATEWAY_TARGET_DENIED', '查询目录不存在或无法安全规范化。');
+  }
+  if (!containsDirectory(root, canonical)) throw gatewayDenied('GATEWAY_TARGET_DENIED', '目标经链接逃逸出已登记资源根。');
+  if (relativePath !== undefined && relativePath !== '') {
+    let rel: string;
+    try { rel = canonicalRelativePath(root, resolve(canonical, relativePath)); }
+    catch (error) { throw gatewayDenied('GATEWAY_TARGET_DENIED', (error as Error).message); }
+    try { assertQueryDirectoryInsideRoot(root, resolve(canonical, rel)); }
+    catch (error) { throw gatewayDenied('GATEWAY_TARGET_DENIED', (error as Error).message); }
+  }
   return canonical;
 }
 
@@ -375,7 +420,7 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
   if (!input.intentKey) throw validationFailed([{ field: 'intent_key', message: 'must not be empty' }]);
   const capability = capabilityFor(input.actionType);
   const allowedRunCaps: GatewayCapability[] = [
-    'FAKE_WRITE', 'FILE_READ', 'WEB_FETCH', 'FILE_WRITE', 'GIT_READ', 'GIT_WRITE', 'CLI_RUN',
+    'FAKE_WRITE', 'FILE_READ', 'FILE_QUERY', 'WEB_FETCH', 'FILE_WRITE', 'GIT_READ', 'GIT_WRITE', 'CLI_RUN',
   ];
   if (input.origin.kind === 'RUN' ? !allowedRunCaps.includes(capability)
     : !['FAKE_PUBLIC_READ', 'WEB_FETCH'].includes(capability)) {
@@ -397,6 +442,28 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
       target = normalizedWebTarget(input.target);
     } else if (input.actionType === 'READ_FILE') {
       target = await normalizedReadTarget(input.target, resourceBefore!.canonical_root);
+    } else if (input.actionType === 'LIST_DIRECTORY' || input.actionType === 'FIND_PATHS' ||
+        input.actionType === 'SEARCH_TEXT') {
+      const relativePath = input.params.relative_path;
+      if (relativePath !== undefined && typeof relativePath !== 'string') {
+        throw validationFailed([{ field: 'params.relative_path', message: 'must be a string' }]);
+      }
+      if (input.params.limit !== undefined &&
+          (!Number.isInteger(input.params.limit) || (input.params.limit as number) <= 0)) {
+        throw validationFailed([{ field: 'params.limit', message: 'must be a positive integer' }]);
+      }
+      if (input.actionType === 'SEARCH_TEXT' && typeof input.params.query !== 'string') {
+        throw validationFailed([{ field: 'params.query', message: 'search_text requires a query string' }]);
+      }
+      if (input.actionType === 'FIND_PATHS' && typeof input.params.pattern !== 'string') {
+        throw validationFailed([{ field: 'params.pattern', message: 'find_paths requires a pattern string' }]);
+      }
+      if (input.actionType === 'LIST_DIRECTORY' &&
+          (input.params.query !== undefined || input.params.pattern !== undefined)) {
+        throw validationFailed([{ field: 'params', message: 'list_directory takes no query or pattern' }]);
+      }
+      target = await normalizedQueryDirectory(input.target, resourceBefore!.canonical_root,
+        relativePath as string | undefined);
     } else if (input.actionType === 'WRITE_FILE') {
       target = await normalizedWriteTarget(input.target, resourceBefore!.canonical_root);
       const rel = relative(resourceBefore!.canonical_root, target);
@@ -1322,6 +1389,12 @@ export async function dispatchGatewayAction(db: DbExecutor, input: DispatchGatew
     await input.hooks?.afterFakeEffect?.();
     return settleGatewayInvocation(db, admitted, read.outcome, read.result, input.origin);
   }
+  if (admitted.operation.capability_key === 'FILE_QUERY') {
+    const query = await fileQueryExecute(admitted.operation, admitted.invocation, input.signal,
+      input.deadline ?? null);
+    await input.hooks?.afterFakeEffect?.();
+    return settleGatewayInvocation(db, admitted, query.outcome, query.result, input.origin);
+  }
   if (admitted.operation.capability_key === 'WEB_FETCH') {
     const fetch = await webFetchExecute(admitted.operation, admitted.invocation,
       { ...(input.signal === undefined ? {} : { signal: input.signal }),
@@ -1572,7 +1645,40 @@ async function fileReadExecute(op: LogicalOperationRow, invocation: InvocationAt
     content: bytes.toString('utf8'), invocation_id: invocation.id, operation_id: op.id } };
 }
 
-function codeOf(error: unknown): string | undefined {
+async function fileQueryExecute(op: LogicalOperationRow, invocation: InvocationAttemptRow,
+  signal?: AbortSignal, deadline?: Date | null): Promise<{
+  outcome: 'SUCCEEDED' | 'FAILED'; result: JsonObject;
+}> {
+  if (signal?.aborted) throw new Error('Gateway dispatch aborted before file query');
+  if (deadline !== undefined && deadline !== null && deadline.getTime() <= Date.now()) {
+    return { outcome: 'FAILED', result: { reason: 'GATEWAY_DEADLINE_EXCEEDED', target: op.normalized_target } };
+  }
+  // The frozen directory is pinned by realpath at prepare; re-verify before use so a
+  // swapped link cannot retarget the query after admission.
+  let current: string;
+  try {
+    current = await realpath(op.normalized_target);
+  } catch (error) {
+    return { outcome: 'FAILED', result: { reason: 'FILE_QUERY_ROOT_UNAVAILABLE', target: op.normalized_target,
+      error_code: (error as NodeJS.ErrnoException).code ?? 'UNKNOWN' } };
+  }
+  if (current !== op.normalized_target) {
+    return { outcome: 'FAILED', result: { reason: 'GATEWAY_TARGET_CHANGED',
+      target: op.normalized_target, actual: current } };
+  }
+  const executed = await executeFileQuery({ kind: op.action_type as 'LIST_DIRECTORY' | 'FIND_PATHS' | 'SEARCH_TEXT',
+    directory: op.normalized_target,
+    relativePath: typeof op.params.relative_path === 'string' ? op.params.relative_path : undefined,
+    query: (typeof op.params.query === 'string' ? op.params.query
+      : typeof op.params.pattern === 'string' ? op.params.pattern : undefined),
+    limit: typeof op.params.limit === 'number' ? op.params.limit : undefined,
+    signal });
+  return { outcome: executed.outcome,
+    result: { ...executed.result, target: op.normalized_target, action_type: op.action_type,
+      invocation_id: invocation.id, operation_id: op.id } };
+}
+
+export function codeOf(error: unknown): string | undefined {
   return error instanceof DomainError ? error.code : undefined;
 }
 
@@ -1670,7 +1776,7 @@ export async function failGraphActionAfterInvocation(db: DbExecutor, input: {
       input.delivery.commandId, input.workerId, input.delivery.invocationEpoch))) return 'STALE';
     const operation = await repositories.gateway.lockOperation(input.operationId);
     if (operation?.origin !== 'RUN' || operation.run_id !== run.id ||
-        !['FILE_READ', 'WEB_FETCH', 'FILE_WRITE'].includes(operation.capability_key) ||
+        !['FILE_READ', 'FILE_QUERY', 'WEB_FETCH', 'FILE_WRITE'].includes(operation.capability_key) ||
         operation.status !== 'FAILED') return 'STALE';
     const invocation = await repositories.gateway.lastInvocation(operation.id);
     if (invocation?.status !== 'FAILED' ||
@@ -1777,6 +1883,14 @@ export async function reconcileGatewayInvocation(db: DbExecutor, input: {
   if (op.capability_key === 'FILE_READ') {
     readOutcome = invocation.status === 'PREPARED' ? undefined
       : await fileReadExecute(op, invocation);
+  } else if (op.capability_key === 'FILE_QUERY') {
+    // Bounded read-only query: safe re-read of the same frozen input, never a blind re-execution.
+    if (invocation.status === 'PREPARED') {
+      toolReconciliation = { status: 'NOT_EXECUTED', result: { reason: 'PREPARED_NOT_EXECUTED' } };
+    } else {
+      const recheck = await reconcileFileQuery(op);
+      toolReconciliation = { status: recheck.status, result: recheck.result };
+    }
   } else if (op.capability_key === 'WEB_FETCH') {
     readOutcome = invocation.status === 'PREPARED' ? undefined
       : await webFetchExecute(op, invocation);

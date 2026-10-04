@@ -42,10 +42,45 @@ export type ModelResult =
       readonly providerRequestId: string;
       readonly usage: ModelUsage;
     }
+  /** 一次完整、可解析的工具请求。断流或半截参数绝不产生这个结果。 */
+  | {
+      readonly kind: 'TOOL_CALLS';
+      readonly calls: readonly ModelToolCall[];
+      readonly providerRequestId: string;
+      readonly usage: ModelUsage;
+    }
   | { readonly kind: 'SCHEMA_INVALID'; readonly reason: string; readonly raw: string }
   | { readonly kind: 'MISSING_MATERIAL'; readonly missing: readonly string[] }
   | { readonly kind: 'CANCELLED'; readonly providerRequestId?: string;
       readonly usage?: ModelUsage };
+
+/** 工具的对外声明。name 与 parameters 是冻结协议，不是模型可以自选的动作。 */
+export interface ModelToolSpec {
+  readonly name: string;
+  readonly description: string;
+  readonly parameters: JsonObject;
+}
+
+/** 一个已通过 schema 校验的完整工具请求。arguments 始终是对象，不接受字符串原文。 */
+export interface ModelToolCall {
+  /** Provider 侧标签。只在本次响应内用于配对，不承担跨 Run/轮次唯一性。 */
+  readonly providerToolCallId: string;
+  readonly name: string;
+  readonly arguments: JsonObject;
+}
+
+/** 已结算的一轮工具交互，用于把结果回传给模型并从持久化事实重建。 */
+export interface ModelToolTurn {
+  readonly calls: readonly ModelToolCall[];
+  readonly results: readonly ModelToolTurnResult[];
+}
+
+export interface ModelToolTurnResult {
+  readonly providerToolCallId: string;
+  readonly name: string;
+  readonly content: string;
+  readonly isError: boolean;
+}
 
 export interface ModelRequest {
   readonly manifest: JsonObject;
@@ -53,6 +88,10 @@ export interface ModelRequest {
   readonly signal?: AbortSignal | undefined;
   /** Uncommitted Markdown text only; validation and business settlement stay separate. */
   readonly onTextDelta?: ((text: string) => Promise<void>) | undefined;
+  /** 缺省表示本次不允许任何工具请求：既有 DRAFT/Assist/语义检查行为不变。 */
+  readonly tools?: readonly ModelToolSpec[] | undefined;
+  /** 已经结算的历史轮次，按顺序原样回传；恢复时由持久化的工具调用与结果重建。 */
+  readonly toolTurns?: readonly ModelToolTurn[] | undefined;
 }
 
 export interface ModelPort {
@@ -159,6 +198,12 @@ export class FakeModelPort implements AssistModelPort {
     const objective =
       readNestedString(request.manifest, ['contract', 'objective']) ?? '未提供目标';
     const correctionRound = readCorrectionRound(request.manifest);
+
+    // 冻结的工具脚本按轮次确定性推进：请求里已有的历史轮次决定这次发第几轮，
+    // 脚本耗尽后回到普通生成。这样测试可以断言「模型真的按工具结果走完了序列」，
+    // 而不是拿到一份预制答案。
+    const scripted = scriptedToolRound(request);
+    if (scripted !== undefined) return scripted;
 
     switch (scenario) {
       case 'SCHEMA_INVALID':
@@ -343,6 +388,35 @@ async function contentResult(request: ModelRequest, content: string): Promise<Mo
     providerRequestId: providerRequestIdOf(request),
     usage: usageOf(request.manifest, content),
   };
+}
+
+interface ScriptedToolRound {
+  readonly name: string;
+  readonly arguments: JsonObject;
+}
+
+/**
+ * Manifest 上的 `tool_script` 是测试专用的冻结脚本：`[{ name, arguments }, ...]`，
+ * 每个元素是一轮里要发出的一个工具请求。返回本轮应发出的请求；脚本已耗尽返回 undefined。
+ * 真实端口不解释这个字段，生产 Mock 路径不会包含它。
+ */
+function scriptedToolRound(request: ModelRequest): ModelResult | undefined {
+  const script = readNestedValue(request.manifest, ['tool_script']);
+  if (!Array.isArray(script)) return undefined;
+  const consumed = request.toolTurns?.length ?? 0;
+  const round = script[consumed];
+  if (!Array.isArray(round) || round.length === 0) return undefined;
+  const calls: ModelToolCall[] = [];
+  for (const [ordinal, item] of round.entries()) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) return undefined;
+    const entry = item as JsonObject;
+    if (typeof entry.name !== 'string' || typeof entry.arguments !== 'object' ||
+        entry.arguments === null || Array.isArray(entry.arguments)) return undefined;
+    calls.push({ providerToolCallId: `fake-tool-${consumed}-${ordinal}`,
+      name: entry.name, arguments: entry.arguments as JsonObject });
+  }
+  return { kind: 'TOOL_CALLS', calls, providerRequestId: `fake-tools-${consumed}`,
+    usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null, cacheCreationTokens: null } };
 }
 
 function seedOf(text: string): string {

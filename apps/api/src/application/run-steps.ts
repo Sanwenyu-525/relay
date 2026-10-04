@@ -61,6 +61,11 @@ import {
   type PreparedSemanticCheck,
 } from './verify-run.js';
 import { advanceAiTextLocks, requireAiTextLocks } from './artifact-commands.js';
+import { RunToolCallRepository } from '../run/run-tool-call-repository.js';
+import { buildToolTurns, operationIdsOf, persistToolRound, resolveToolLoopPlan }
+  from './tool-loop.js';
+import type { RunToolCallRow } from '../infrastructure/database-schema.js';
+import type { ModelToolTurn } from '../workflow/fake-model-port.js';
 
 /**
  * 内部应用端口 AdvanceStep（docs/api/http-command-contract.md 第 5 节）。
@@ -113,6 +118,9 @@ export interface AdvanceRunStepInput {
   readonly fakeScenario?: FakeScenario | undefined;
   /** 仅测试注入：使独立 Worker 的 Mock 模型保持在途。 */
   readonly fakeModelDelayMs?: number | undefined;
+  /** 仅测试注入：FakeModelPort 逐轮发出的工具请求脚本；生产路径不包含它。 */
+  readonly fakeToolScript?: readonly { readonly name: string;
+    readonly arguments: JsonObject }[][] | undefined;
   /** 仅测试注入：Context token 上限。 */
   readonly contextBudgetTokens?: number | undefined;
   readonly signal?: AbortSignal | undefined;
@@ -137,6 +145,9 @@ export type AdvanceRunStepResult =
   | { readonly status: 'CONTROL_PENDING'; readonly run_id: string }
   | { readonly status: 'ACTION_UNKNOWN'; readonly run_id: string; readonly operation_id: string }
   | { readonly status: 'GATEWAY_ACTION_REQUIRED'; readonly run_id: string; readonly operation_id: string }
+  /** 模型工具循环有一个未决调用要派发；步骤 Attempt 保持原状，由图节点处理后回到 advance。 */
+  | { readonly status: 'TOOL_LOOP_ACTION_REQUIRED'; readonly run_id: string;
+      readonly tool_call_id: string }
   | { readonly status: 'GATEWAY_ACTION_DENIED'; readonly run_id: string; readonly operation_id: string }
   | { readonly status: 'REPLAYED'; readonly step_kind: RunStepKind; readonly result_ref: JsonObject | null }
   | { readonly status: 'STALE_RESULT'; readonly step_kind: RunStepKind }
@@ -324,6 +335,13 @@ export async function advanceRunStep(
         return { status: 'GATEWAY_ACTION_REQUIRED', run_id: run.id, operation_id: actionOperationId };
       }
     }
+    // 模型工具循环的未决调用在领取步骤 Attempt 之前交回图节点：Gateway 的 ASK 会释放
+    // Worker claim 并把 Run 置为 WAITING_APPROVAL，那不能发生在步骤结算事务里。
+    const pendingToolCall = (await new RunToolCallRepository(db).listPending(run.id))[0];
+    if (pendingToolCall !== undefined) {
+      return { status: 'TOOL_LOOP_ACTION_REQUIRED', run_id: run.id,
+        tool_call_id: pendingToolCall.id };
+    }
     if (built?.status === 'SUCCEEDED') {
       const hash = readString(built.result_ref, 'manifest_hash');
       const manifest = hash === undefined ? undefined : await repositories.runs.readContextManifestByHash(
@@ -468,7 +486,9 @@ export async function advanceRunStep(
   try {
   await input.hooks?.afterClaim?.();
   const prepared = await prepareExternalWork(db, input, claim);
-  if (prepared.kind === 'UNKNOWN') {
+  if (prepared.kind !== 'READY') {
+    // UNKNOWN 与工具派发都不在本次提交里结算。两者都先释放 Worker claim：
+    // 下一次 Gateway 动作必须按既有 RUN 领取协议重新领取，不能沿用步骤的 claim。
     const current = await withTransaction(db, async (repositories) => {
       const { run } = await lockTaskAndRun(repositories, input.runId);
       if (input.invocationEpoch !== undefined &&
@@ -481,7 +501,12 @@ export async function advanceRunStep(
       return true;
     });
     if (!current) return { status: 'INVOCATION_LOST', run_id: claim.run.id };
-    return { status: 'ACTION_UNKNOWN', run_id: claim.run.id, operation_id: prepared.operationId };
+    if (prepared.kind === 'UNKNOWN') {
+      return { status: 'ACTION_UNKNOWN', run_id: claim.run.id, operation_id: prepared.operationId };
+    }
+    // 步骤 Attempt 保持 RUNNING：工具派发由图节点完成，之后回到这里续跑同一 Attempt。
+    return { status: 'TOOL_LOOP_ACTION_REQUIRED', run_id: claim.run.id,
+      tool_call_id: prepared.toolCallId };
   }
   await input.hooks?.beforeCommit?.();
   if (input.signal?.aborted) throw new StaleInvocationError('worker stopped before step commit');
@@ -670,6 +695,8 @@ interface PreparedPersist {
 
 type PreparedExternalWork =
   | { readonly kind: 'UNKNOWN'; readonly operationId: string }
+  /** 模型请求了工具：本步骤 Attempt 保持 RUNNING，交出 Worker，由图节点派发后回到这里续跑。 */
+  | { readonly kind: 'TOOL_DISPATCH_REQUIRED'; readonly toolCallId: string }
   | { readonly kind: 'READY'; readonly storage: ManagedContentStore;
       readonly modelPort: ModelPort; readonly persist?: PreparedPersist;
       readonly context?: BuiltContext;
@@ -708,6 +735,7 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
   let context: BuiltContext | undefined;
   let semanticChecks: ReadonlyMap<string, PreparedSemanticCheck> | undefined;
   let preflightFailure: Extract<StepExecution, { readonly outcome: 'FAILED' }> | undefined;
+  let toolDispatch: { readonly toolCallId: string } | undefined;
   const reads = new Map<string, { hashHex: string; size: bigint; result: ContentReadResult }>();
 
   if (claim.step.step_kind === 'BUILD_CONTEXT') {
@@ -715,6 +743,7 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
     context = await buildRunContext(db, { run: claim.run, task: claim.task, storage: input.storage,
       externalModel: modelConfig !== undefined,
       ...(input.fakeScenario === undefined ? {} : { fakeScenario: input.fakeScenario }),
+      ...(input.fakeToolScript === undefined ? {} : { fakeToolScript: input.fakeToolScript }),
       ...(input.contextBudgetTokens === undefined ? {} : { budgetTokens: input.contextBudgetTokens }),
       ...(correction === undefined ? {} : { correction }) });
   }
@@ -730,6 +759,13 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
     if (manifest !== undefined) {
       const currentPort = modelPort;
       const readEvidence = await loadRunReadEvidence(repositories, claim.run.id);
+      const toolRepository = new RunToolCallRepository(db);
+      const toolPlan = await resolveToolLoopPlan(db, claim.run.id, claim.run.workspace_id);
+      const toolRows = toolPlan === undefined ? [] : await toolRepository.listByAttempt(claim.attempt.id);
+      // 每一次模型调用仍是一行 model_calls。工具轮次的历史从已落库的行重建，
+      // 因此恢复与正常推进走同一条路径，不依赖进程内存里的对话。
+      const round = toolRows.length === 0 ? 0
+        : Math.max(...toolRows.map((row) => row.round)) + 1;
       const inputHash = draftInputHash(manifest.payload, CANDIDATE_OUTPUT_SCHEMA);
       let previewEnabled = true;
       try {
@@ -757,8 +793,10 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
             const preview = new AssistLivePreviewPublisher((text, truncated) =>
               publishRunDraftPreview(db, { ...previewOwner, text, truncated }),
               () => { previewEnabled = false; });
+            const toolTurns = toolPlan === undefined ? [] : await loadSettledToolTurns(db, toolRows);
             const generated = await currentPort.generate({ manifest: manifest.payload,
             outputSchema: CANDIDATE_OUTPUT_SCHEMA,
+              ...(toolPlan === undefined ? {} : { tools: toolPlan.specs, toolTurns }),
               ...(input.signal === undefined ? {} : { signal: input.signal }),
               onTextDelta: async (piece) => {
                 const observedAt = new Date();
@@ -787,15 +825,32 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
             }
             return generated;
           },
-          settle: (result) => result.kind === 'CANCELLED'
-            ? { status: 'CANCELLED', providerRequestId: result.providerRequestId ?? null,
-              ...(result.usage === undefined ? {} : { usage: result.usage }) }
-            : result.kind === 'CONTENT'
-              ? { status: 'COMPLETED', providerRequestId: result.providerRequestId,
-                usage: result.usage }
-              : { status: 'COMPLETED' },
+          settle: (result) => {
+            if (result.kind === 'CANCELLED') {
+              return { status: 'CANCELLED', providerRequestId: result.providerRequestId ?? null,
+                ...(result.usage === undefined ? {} : { usage: result.usage }) };
+            }
+            // Provider request id 与已知用量对所有非取消结果都保留；缺失的保持 null 而不是补零。
+            if (result.kind === 'CONTENT' || result.kind === 'TOOL_CALLS') {
+              return { status: 'COMPLETED', providerRequestId: result.providerRequestId,
+                usage: result.usage };
+            }
+            return { status: 'COMPLETED' };
+          },
         });
         modelPort = { identity: currentPort.identity, generate: async () => recorded.result };
+        if (toolPlan !== undefined && recorded.result.kind === 'TOOL_CALLS') {
+          // 工具请求先落库再交给图节点派发：行 id 就是后续动作身份，重放不会产生第二次动作。
+          const persisted = await persistToolRound(db, {
+            workspaceId: claim.run.workspace_id, projectId: toolPlan.projectId,
+            runId: claim.run.id, stepId: claim.step.id, stepAttemptId: claim.attempt.id,
+            modelCallId: recorded.callId, round, calls: recorded.result.calls, plan: toolPlan,
+            remainingCalls: toolPlan.intent.max_tool_calls -
+              await toolRepository.countByRun(claim.run.id),
+            cancelled: input.signal?.aborted === true });
+          const dispatchable = persisted.rows.find((row) => row.status === 'REQUESTED');
+          if (dispatchable !== undefined) toolDispatch = { toolCallId: dispatchable.id };
+        }
       } catch (error) {
         if (error instanceof ModelSourcePolicyError) {
           preflightFailure = { outcome: 'FAILED', reason: 'MODEL_SOURCE_SELECTION_REQUIRED',
@@ -868,12 +923,32 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
     }
   }
 
+  if (toolDispatch !== undefined) return { kind: 'TOOL_DISPATCH_REQUIRED', ...toolDispatch };
+
   return { kind: 'READY', modelPort,
     storage: new PreloadedContentStore(input.storage.dataRoot, reads),
     ...(persist === undefined ? {} : { persist }),
     ...(context === undefined ? {} : { context }),
     ...(semanticChecks === undefined ? {} : { semanticChecks }),
     ...(preflightFailure === undefined ? {} : { preflightFailure }) };
+}
+
+/**
+ * 从已落库的工具行重建模型需要的轮次消息。
+ *
+ * 工具结果取自该行对应 Operation 的 result_ref，而不是重新执行动作：成功读取的证据
+ * 在恢复后仍是同一份。UNKNOWN 的动作不会出现在这里——它还没结算，模型不会拿到编造的结果。
+ */
+async function loadSettledToolTurns(db: DbExecutor,
+  rows: readonly RunToolCallRow[]): Promise<readonly ModelToolTurn[]> {
+  const results = new Map<string, JsonObject>();
+  for (const operationId of operationIdsOf(rows)) {
+    const operation = await createRepositories(db).gateway.readOperation(operationId);
+    if (operation?.result_ref !== null && operation?.result_ref !== undefined) {
+      results.set(operationId, operation.result_ref);
+    }
+  }
+  return buildToolTurns(rows, results);
 }
 
 async function preloadVersion(repositories: Repositories, storage: ManagedContentStore, versionId: string,

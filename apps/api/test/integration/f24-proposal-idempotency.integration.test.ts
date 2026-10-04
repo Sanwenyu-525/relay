@@ -20,6 +20,8 @@ import test, { after, before } from 'node:test';
 import { sql } from 'kysely';
 import { Client } from 'pg';
 
+import type { JsonObject } from '../../src/infrastructure/json.js';
+
 import { createAssistSession, requestAssistMessage }
   from '../../src/application/assist-commands.js';
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
@@ -48,24 +50,43 @@ before(async () => {
 after(async () => { await app.close(); await rm(dataRoot, { recursive: true, force: true }); });
 
 /**
- * 受控候选锁：先占住候选行，再让调用方的请求排队，最后显式放行。
- * `waitedFor` 轮询 pg_stat_activity，确认确实有 expected 个 relay-api 会话
- * 被本连接的 pid 挡住——这比 sleep 确定，也比 sleep 更能证明竞争真的发生在锁上。
+ * 受控锁：测试自己占住一把锁，让调用方的请求排队，最后显式放行。
+ *
+ * 两种用法对应两类竞争点：
+ *   - 候选行锁（`holdCandidateRow`）：串行化**同一候选**的两个请求，用来验证
+ *     「拿到候选锁之后必须重查回执」；
+ *   - 回执表排他锁（`holdReceiptInsert`）：**不同候选**的两个请求互不串行，
+ *     只能停在写同一条命令回执上。EXCLUSIVE 与 INSERT 所需的 ROW EXCLUSIVE 冲突，
+ *     但与回执查询所需的 ACCESS SHARE 兼容，所以两个请求会完整跑完所有读取
+ *     （含候选锁后的回执重查）才停在插入处——正是要复现的冲突点。
  */
-class CandidateLock {
+class ControlledLock {
   private constructor(private readonly client: Client,
-    private readonly backendPid: number) {}
+    private readonly backendPid: number, private readonly label: string) {}
 
-  static async hold(table: 'assist_proposals' | 'project_blueprint_proposals',
-    id: string): Promise<CandidateLock> {
-    const client = new Client({ connectionString: APP_DATABASE_URL,
-      application_name: 'relay-api-test-f24-blocker' });
+  private static async session(connectionString: string, label: string,
+    hold: (client: Client) => Promise<void>): Promise<ControlledLock> {
+    const client = new Client({ connectionString,
+      application_name: `relay-api-test-f24-${label}` });
     await client.connect();
     const pid = (await client.query<{ pid: number }>('select pg_backend_pid() as pid'))
       .rows[0]!.pid;
     await client.query('begin');
-    await client.query(`select id from ${table} where id = $1 for update`, [id]);
-    return new CandidateLock(client, pid);
+    await hold(client);
+    return new ControlledLock(client, pid, label);
+  }
+
+  /** 迁移角色是表 owner，只有它能对 command_receipts 取表级排他锁。 */
+  static holdReceiptInsert(): Promise<ControlledLock> {
+    return ControlledLock.session(MIGRATION_DATABASE_URL, 'receipt-barrier',
+      async (client) => { await client.query('lock table command_receipts in exclusive mode'); });
+  }
+
+  static holdCandidateRow(table: 'assist_proposals' | 'project_blueprint_proposals',
+    id: string): Promise<ControlledLock> {
+    return ControlledLock.session(APP_DATABASE_URL, 'candidate-barrier',
+      async (client) => { await client.query(
+        `select id from ${table} where id = $1 for update`, [id]); });
   }
 
   /**
@@ -102,7 +123,7 @@ class CandidateLock {
         pg_blocking_pids(pid) as blocking, left(query, 80) as query
       from pg_stat_activity where datname = current_database()
         and pid <> pg_backend_pid() order by pid`.execute(app.db);
-    assert.fail(`expected ${expected} API sessions queued behind candidate lock pid ` +
+    assert.fail(`expected ${expected} API sessions queued behind ${this.label} pid ` +
       `${this.backendPid}; observed ${JSON.stringify(observed.rows)}`);
   }
 
@@ -147,6 +168,22 @@ async function taskFixture(status: 'READY' | 'IN_PROGRESS' = 'READY'):
   return { workspaceId, projectId, taskId };
 }
 
+/** 同一工作空间下的第二个任务，用于制造同 command_id、不同目标的竞争。 */
+async function secondTask(workspaceId: string, projectId: string, title: string):
+  Promise<string> {
+  const taskId = randomUUID();
+  await withTransaction(app.db, async (r) => {
+    await r.tasks.insertTask({ id: taskId, workspaceId, projectId, title,
+      status: 'READY', mode: 'ME', acceptanceRevision: 1n, executorKind: 'HUMAN',
+      ownershipEpoch: 0n, currentCompletionId: null });
+    await r.tasks.insertAcceptanceVersion({ taskId, acceptanceRevision: 1n,
+      objective: `形成可核对产物 ${title}`, requiredOutputSpec: {}, source: 'CREATE' });
+    await r.tasks.insertCriterion({ taskId, acceptanceRevision: 1n, criterionId: 'human',
+      statement: `人工验收 ${title}`, required: true, method: 'HUMAN', targetSpec: {} });
+  });
+  return taskId;
+}
+
 async function generateTaskSkillProposal(f: { workspaceId: string; taskId: string }):
   Promise<{ id: string; payloadHash: string; taskRevision: string;
     acceptanceRevision: string }> {
@@ -176,6 +213,56 @@ async function receiptCount(scopeKey: string, commandId: string): Promise<number
   return row.rows[0]?.count ?? 0;
 }
 
+interface TaskAcceptanceFacts {
+  readonly acceptances: number;
+  readonly criteria: readonly { acceptance_revision: string; criterion_id: string;
+    statement: string; required: boolean; method: string }[];
+}
+
+async function taskAcceptanceSnapshot(taskIds: readonly string[]):
+  Promise<Map<string, TaskAcceptanceFacts>> {
+  const rows = await sql<{ task_id: string; acceptance_revision: string;
+    criterion_id: string | null; statement: string | null; required: boolean | null;
+    method: string | null; acceptance_count: number }>`
+    select a.task_id, a.acceptance_revision::text as acceptance_revision,
+      c.criterion_id, c.statement, c.required, c.method,
+      (select count(*)::int from task_acceptances x where x.task_id = a.task_id) as acceptance_count
+    from task_acceptances a left join acceptance_criteria c
+      on c.task_id = a.task_id and c.acceptance_revision = a.acceptance_revision
+    where a.task_id in (${sql.join(taskIds.map((id) => sql`${id}`))})
+    order by a.task_id, a.acceptance_revision, c.criterion_id`.execute(app.db);
+  const grouped = new Map<string, TaskAcceptanceFacts>();
+  for (const taskId of taskIds) {
+    const own = rows.rows.filter((row) => row.task_id === taskId);
+    grouped.set(taskId, { acceptances: own[0]?.acceptance_count ?? 0,
+      criteria: own.filter((row) => row.criterion_id !== null)
+        .map((row) => ({ acceptance_revision: row.acceptance_revision,
+          criterion_id: row.criterion_id!, statement: row.statement!,
+          required: row.required!, method: row.method! })) });
+  }
+  return grouped;
+}
+
+interface BlueprintFacts {
+  readonly state_revision: string;
+  readonly view_revision: string;
+  readonly tasks: number;
+}
+
+async function blueprintSnapshot(projectIds: readonly string[]):
+  Promise<Map<string, BlueprintFacts>> {
+  const rows = await sql<{ project_id: string; state_revision: string;
+    view_revision: string | null; tasks: number }>`
+    select s.project_id, s.revision::text as state_revision,
+      v.revision::text as view_revision,
+      (select count(*)::int from tasks t where t.project_id = s.project_id) as tasks
+    from project_states s left join project_view_configurations v on v.project_id = s.project_id
+    where s.project_id in (${sql.join(projectIds.map((id) => sql`${id}`))})`.execute(app.db);
+  return new Map(rows.rows.map((row) => [row.project_id,
+    { state_revision: row.state_revision, view_revision: row.view_revision ?? '0',
+      tasks: row.tasks }]));
+}
+
 test('concurrent Accept of one Task Skill proposal with the same command_id replays the first receipt', async () => {
   const f = await taskFixture();
   const proposal = await generateTaskSkillProposal(f);
@@ -185,7 +272,7 @@ test('concurrent Accept of one Task Skill proposal with the same command_id repl
   const body = { command_id: commandId, expected_task_revision: proposal.taskRevision,
     expected_acceptance_revision: proposal.acceptanceRevision,
     payload_hash: proposal.payloadHash };
-  const blocker = await CandidateLock.hold('assist_proposals', proposal.id);
+  const blocker = await ControlledLock.holdCandidateRow('assist_proposals', proposal.id);
   try {
     const first = api.post(path, body);
     const second = api.post(path, body);
@@ -221,7 +308,7 @@ test('concurrent Accept with one command_id but different content is rejected as
   const api = await startTestApi();
   const path = `${workspacePath(f.workspaceId)}/assist-proposals/${proposal.id}/accept`;
   const commandId = randomUUID();
-  const blocker = await CandidateLock.hold('assist_proposals', proposal.id);
+  const blocker = await ControlledLock.holdCandidateRow('assist_proposals', proposal.id);
   try {
     const same = { command_id: commandId, expected_task_revision: proposal.taskRevision,
       expected_acceptance_revision: proposal.acceptanceRevision,
@@ -263,7 +350,7 @@ test('concurrent Apply of one Blueprint with the same command_id replays the fir
     const body = { command_id: commandId, candidate_sha256: created.candidate_sha256,
       expected_project_revision: '0', expected_state_revision: '0',
       expected_view_revision: '0' };
-    const blocker = await CandidateLock.hold('project_blueprint_proposals', created.id);
+    const blocker = await ControlledLock.holdCandidateRow('project_blueprint_proposals', created.id);
     try {
       const first = api.post(applyPath, body);
       const second = api.post(applyPath, body);
@@ -317,7 +404,7 @@ test('concurrent Apply with one command_id but different baseline is rejected as
     const body = { command_id: commandId, candidate_sha256: created.candidate_sha256,
       expected_project_revision: '0', expected_state_revision: '0',
       expected_view_revision: '0' };
-    const blocker = await CandidateLock.hold('project_blueprint_proposals', created.id);
+    const blocker = await ControlledLock.holdCandidateRow('project_blueprint_proposals', created.id);
     try {
       const first = api.post(applyPath, body);
       const second = api.post(applyPath, { ...body, expected_state_revision: '7' });
@@ -356,7 +443,7 @@ test('different command_ids competing on one Blueprint keep the existing protoco
     const base = { candidate_sha256: created.candidate_sha256,
       expected_project_revision: '0', expected_state_revision: '0',
       expected_view_revision: '0' };
-    const blocker = await CandidateLock.hold('project_blueprint_proposals', created.id);
+    const blocker = await ControlledLock.holdCandidateRow('project_blueprint_proposals', created.id);
     try {
       const one = api.post(applyPath, { ...base, command_id: first });
       const two = api.post(applyPath, { ...base, command_id: second });
@@ -380,5 +467,142 @@ test('different command_ids competing on one Blueprint keep the existing protoco
         and project_id = ${projectId}`.execute(app.db);
       assert.equal(applied.rows[0]!.count, 1);
     } finally { await blocker.discard(); }
+  } finally { await api.stop(); }
+});
+
+test('cross-candidate Accept: one command_id on two different Task Skill proposals reuses the winning receipt', async () => {
+  const f = await taskFixture();
+  const otherTaskId = await secondTask(f.workspaceId, f.projectId, 'F24 任务 B');
+  const first = await generateTaskSkillProposal(f);
+  const second = await generateTaskSkillProposal({ workspaceId: f.workspaceId, taskId: otherTaskId });
+  assert.notEqual(first.id, second.id);
+  assert.notEqual(first.payloadHash, second.payloadHash,
+    'two candidates must differ in request digest for this to be a real conflict');
+  const before = await taskAcceptanceSnapshot([f.taskId, otherTaskId]);
+  const api = await startTestApi();
+  const commandId = randomUUID();
+  const bodyFor = (proposal: { id: string; taskRevision: string;
+    acceptanceRevision: string; payloadHash: string }) => ({
+    command_id: commandId, expected_task_revision: proposal.taskRevision,
+    expected_acceptance_revision: proposal.acceptanceRevision,
+    payload_hash: proposal.payloadHash });
+  try {
+    const barrier = await ControlledLock.holdReceiptInsert();
+    try {
+      const one = api.post(`${workspacePath(f.workspaceId)}/assist-proposals/${first.id}/accept`,
+        bodyFor(first));
+      const two = api.post(`${workspacePath(f.workspaceId)}/assist-proposals/${second.id}/accept`,
+        bodyFor(second));
+      // 两个候选互不串行，都会跑完所有读取（含候选锁后的回执重查），只停在写同一条回执上。
+      await barrier.waitForBlockedWaiters(2);
+      await barrier.release();
+      const responses = await Promise.all([one, two]);
+      const winner = responses.find((response) => response.status === 200);
+      const loser = responses.find((response) => response.status !== 200);
+      // 修复前这里是 200 + 500 INTERNAL_ERROR（唯一约束冲突未被翻译成命令冲突）。
+      assert.ok(winner, `expected one 200, got ${responses.map((r) => r.status).join('/')}`);
+      assert.ok(loser, `expected one failure, got ${responses.map((r) => r.status).join('/')}`);
+      expectProblem(loser!, 409, 'COMMAND_ID_REUSED');
+      const winnerBody = winner.body as { command_id: string; result: JsonObject };
+      assert.equal(winnerBody.command_id, commandId);
+      assert.equal(await receiptCount(`workspace:${f.workspaceId}:user:local`, commandId), 1);
+
+      // 以胜出回执判断谁赢了，不假定请求到达顺序。
+      const decided = await sql<{ id: string; status: string; task_id: string | null;
+        decision: { command_id: string } | null }>`
+        select id, status, target_id as task_id, decision from assist_proposals
+        where id in (${sql.join([first.id, second.id].map((id) => sql`${id}`))})
+        order by id`.execute(app.db);
+      const accepted = decided.rows.filter((row) => row.status === 'ACCEPTED');
+      const pending = decided.rows.filter((row) => row.status === 'PENDING');
+      assert.equal(accepted.length, 1, 'exactly one candidate is accepted');
+      assert.equal(pending.length, 1, 'the losing candidate stays PENDING');
+      assert.equal(accepted[0]!.decision?.command_id, commandId);
+      assert.equal(pending[0]!.id, accepted[0]!.id === first.id ? second.id : first.id);
+      const winnerTaskId = accepted[0]!.task_id!;
+      assert.equal(winnerTaskId, winnerBody.result.proposal_id === first.id ? f.taskId : otherTaskId);
+
+      // 失败方的验收/条件一个字节都不能变。
+      const after = await taskAcceptanceSnapshot([f.taskId, otherTaskId]);
+      const loserTaskId = winnerTaskId === f.taskId ? otherTaskId : f.taskId;
+      assert.equal(after.get(winnerTaskId)!.acceptances, 2,
+        'the winning task advances acceptance exactly once');
+      assert.deepEqual(after.get(loserTaskId), before.get(loserTaskId),
+        'the losing task keeps its original acceptance and criteria');
+      const audits = await sql<{ count: number }>`select count(*)::int as count
+        from activity_records where command_id = ${commandId}
+        and event_type = 'TASK_ACCEPTANCE_CHANGED'`.execute(app.db);
+      assert.equal(audits.rows[0]!.count, 1, 'one acceptance audit for the winning command');
+    } finally { await barrier.discard(); }
+  } finally { await api.stop(); }
+});
+
+test('cross-candidate Apply: one command_id on two Blueprint proposals returns 200 and 409 COMMAND_ID_REUSED', async () => {
+  const workspaceId = await createWorkspace(app.db);
+  const goal = await createGoal(app.db, { workspaceId, commandId: randomUUID(),
+    title: '完成研究', description: '' });
+  const first = await createProject(app.db, { workspaceId, commandId: randomUUID(),
+    title: 'F24 蓝图甲', projectType: 'THESIS' });
+  const second = await createProject(app.db, { workspaceId, commandId: randomUUID(),
+    title: 'F24 蓝图乙', projectType: 'THESIS' });
+  const api = await startTestApi();
+  const commandId = randomUUID();
+  try {
+    const candidates = await Promise.all([first, second].map(async (project) => {
+      const path = `${workspacePath(workspaceId)}/projects/${project.result.project_id}/blueprint-proposals`;
+      const createCommandId = randomUUID();
+      const created = expectCommandAccepted(await api.post(path, { command_id: createCommandId,
+        expected_project_revision: '0', expected_state_revision: '0',
+        expected_view_revision: '0', draft: newDraft(goal.result.goal_id) }), 201,
+      createCommandId) as { id: string; candidate_sha256: string };
+      return { projectId: project.result.project_id, path, ...created };
+    }));
+    assert.notEqual(candidates[0]!.id, candidates[1]!.id);
+    // 两个候选的 draft 可以相同（candidate_sha256 只覆盖候选本身），真正决定命令摘要
+    //不同的是 target 里的 project_id 与 proposal_id——所以冲突来自目标不同，不是内容不同。
+    const before = await blueprintSnapshot(candidates.map((entry) => entry.projectId));
+    const barrier = await ControlledLock.holdReceiptInsert();
+    try {
+      const requests = candidates.map((candidate) => api.post(`${candidate.path}/${candidate.id}/apply`, {
+        command_id: commandId, candidate_sha256: candidate.candidate_sha256,
+        expected_project_revision: '0', expected_state_revision: '0',
+        expected_view_revision: '0' }));
+      await barrier.waitForBlockedWaiters(2);
+      await barrier.release();
+      const responses = await Promise.all(requests);
+      const winner = responses.find((response) => response.status === 200);
+      const loser = responses.find((response) => response.status !== 200);
+      assert.ok(winner, `expected one 200, got ${responses.map((r) => r.status).join('/')}`);
+      assert.ok(loser, `expected one failure, got ${responses.map((r) => r.status).join('/')}`);
+      expectProblem(loser!, 409, 'COMMAND_ID_REUSED');
+      assert.equal(await receiptCount(`workspace:${workspaceId}:user:local`, commandId), 1);
+      const statuses = await sql<{ id: string; status: string }>`
+        select id, status from project_blueprint_proposals
+        where id in (${sql.join(candidates.map((candidate) => sql`${candidate.id}`))})
+        order by id`.execute(app.db);
+      const accepted = statuses.rows.filter((row) => row.status === 'ACCEPTED');
+      assert.equal(accepted.length, 1, 'exactly one candidate is applied');
+      assert.equal(statuses.rows.filter((row) => row.status === 'PENDING').length, 1,
+        'the losing candidate stays PENDING');
+      // 以数据库里的胜出候选判断哪个项目赢了，不假定请求到达顺序。
+      const winnerProjectId = candidates.find((candidate) =>
+        candidate.id === accepted[0]!.id)!.projectId;
+      const loserProjectId = candidates.find((candidate) =>
+        candidate.projectId !== winnerProjectId)!.projectId;
+      const winnerResult = (winner.body as { result: { task_id_map: unknown[] } }).result;
+      assert.equal(winnerResult.task_id_map.length, 2);
+
+      // 胜出项目前进一版，失败项目 State/View/Task 数量全部不变。
+      const after = await blueprintSnapshot(candidates.map((entry) => entry.projectId));
+      assert.equal(after.get(winnerProjectId)!.state_revision, '2');
+      assert.equal(after.get(winnerProjectId)!.view_revision, '1');
+      assert.equal(after.get(winnerProjectId)!.tasks, 2);
+      assert.deepEqual(after.get(loserProjectId), before.get(loserProjectId),
+        'the losing blueprint leaves State, View and Task count untouched');
+      const audits = await sql<{ count: number }>`select count(*)::int as count
+        from activity_records where command_id = ${commandId}
+        and event_type = 'PROJECT_BLUEPRINT_APPLIED'`.execute(app.db);
+      assert.equal(audits.rows[0]!.count, 1, 'one blueprint audit for the winning command');
+    } finally { await barrier.discard(); }
   } finally { await api.stop(); }
 });
