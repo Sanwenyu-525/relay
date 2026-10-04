@@ -154,6 +154,38 @@ describe("文件夹入口与对话直接执行", () => {
     } finally { view.unmount(); }
   });
 
+  it("目录落在另一个受管根之内时给出真实原因并允许选定作用域", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    const fetchMock = router({ open: (body) => response({
+      command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z",
+      result: readyDirectory({ status: "NOT_READY", reason: "OVERLAPPING_OTHER_PROJECT",
+        association: null, candidates: [{ project_id: otherProjectId, project_title: "另一个项目",
+          project_archived: false, resource_id: "res-other", resource_status: "ACTIVE",
+          file_write_identity_bound: true }],
+        write_readiness: { status: "RESOURCE_BUSY",
+          detail: "这个目录落在另一个已受管根之内或包含它；先选定作用域，不会另建第二个写 Owner。" } }),
+      links: { resource: "" } }, 200) }, posts);
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench("/agent");
+    try {
+      await view.wrapper.get('[data-testid="folder-manual-root"]').setValue(root);
+      await flush();
+      await view.wrapper.get('[data-testid="folder-open-manual"]').trigger("click");
+      await flush();
+      await flush();
+      // 原因码本身不是解释：用户必须知道这个目录为什么不能写、接下来该做什么。
+      const reason = view.wrapper.get('[data-testid="folder-not-ready"]').text();
+      expect(reason).toContain("另一个已受管根");
+      expect(reason).not.toContain("UNKNOWN");
+      // 服务端返回了候选，界面就必须给出选择入口，否则用户就此卡死。
+      expect(view.wrapper.get('[data-testid="folder-ambiguous"]').exists()).toBe(true);
+      await view.wrapper.get(`[data-testid="collab-folder-candidate-${otherProjectId}"]`).trigger("click");
+      await flush();
+      expect((posts[1]?.body as { project_id?: string }).project_id).toBe(otherProjectId);
+    } finally { view.unmount(); }
+  });
+
   it("同一目录关联多个项目时要求一次显式选择，不替用户猜作用域", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const posts: { path: string; body: unknown }[] = [];

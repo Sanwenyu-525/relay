@@ -32,6 +32,14 @@ export default function FolderScope({ state, onOpen, onNewConversation }: {
     } catch (caught) { setPickerError(describeLiveError(caught).message); }
   }
 
+  // 候选作用域在两种状态下都必须可选：AMBIGUOUS（同一目录多个项目）与
+  // OVERLAPPING_OTHER_PROJECT（目录落在别的已受管根之内）。后者原先被漏掉：
+  // 服务端返回了 candidates，界面却只显示一句「不就绪」，用户就此卡死。
+  // 括号不可省：&& 的优先级高于 ||，漏掉就会让右半支在没有 null 保护时读 directory.status。
+const needsScopeChoice = directory !== null && directory.candidates.length > 0 &&
+    (directory.status === "AMBIGUOUS" ||
+      (directory.status === "NOT_READY" && directory.reason === "OVERLAPPING_OTHER_PROJECT"));
+
   return <div className="folder-scope" data-testid="folder-scope">
     <div className="folder-scope-actions">
       <button className="primary-button" type="button" data-testid="collab-open-folder"
@@ -57,9 +65,11 @@ export default function FolderScope({ state, onOpen, onNewConversation }: {
       </li>)}</ul>
     </section>}
 
-    {directory?.status === "AMBIGUOUS" && <section className="folder-scope-ambiguous"
+    {needsScopeChoice && directory !== null && <section className="folder-scope-ambiguous"
       data-testid="folder-ambiguous" role="group" aria-label="同一目录关联的项目">
-      <p>这个实际目录已经关联了多个项目。先选定一个作用域再继续，不会另建第二个写 Owner。</p>
+      <p>{directory.status === "AMBIGUOUS"
+        ? "这个实际目录已经关联了多个项目。先选定一个作用域再继续，不会另建第二个写 Owner。"
+        : "这个目录已经落在另一个项目的受管根之内。先选定作用域再继续，不会另建第二个写 Owner。"}</p>
       <ul>{directory.candidates.map((candidate) => <li key={candidate.projectId}>
         <button className="secondary-button" type="button" disabled={busy}
           data-testid={`collab-folder-candidate-${candidate.projectId}`}
@@ -82,6 +92,10 @@ function notReadyReason(directory: RelayWorkingDirectory): string {
     case "PROJECT_ARCHIVED": return "这个目录关联的项目已归档。归档项目不会自动解档，也不能靠新建关联绕过。";
     case "RESOURCE_DISABLED": return "这个实际目录的受管资源已停用。需要先在受管资源中恢复，执行准入才会重新开放。";
     case "MULTIPLE_PROJECTS": return "同一实际目录关联了多个项目，请先选定作用域。";
+    case "OVERLAPPING_OTHER_PROJECT":
+      // 这个原因码最容易被当成故障：目录本身有效，只是落在别人已经受管的根之内。
+      // 不解释清楚，用户只会看到「不就绪」然后不知道该选哪个项目。
+      return "这个目录落在另一个已受管根之内或包含它。先选定作用域，不会另建第二个写 Owner。";
     default: return "目录尚未就绪；当前可以继续普通讨论，但不能对项目文件执行写操作。";
   }
 }
