@@ -8,7 +8,7 @@ import { bindAssistSessionProject, createAssistSession, requestAssistMessage } f
 import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import type { DbExecutor } from '../../src/infrastructure/database.js';
-import { createDataRoot } from './api-harness.js';
+import { createDataRoot, startTestApi, workspacePath } from './api-harness.js';
 import { APP_DATABASE_URL, MIGRATIONS_DIRECTORY, MIGRATION_DATABASE_URL, openDatabase } from
   './integration-support.js';
 
@@ -178,4 +178,44 @@ test('project_id 为空串按校验失败拒绝', async () => {
     () => bindAssistSessionProject(app.db, { workspaceId, sessionId,
       commandId: randomUUID(), projectId: '' }),
     (error: { code?: string }) => error.code === 'VALIDATION_FAILED');
+});
+
+test('绑定端点经 HTTP 归入会话并返回确切修订', async () => {
+  const workspaceId = await workspace('bind-http');
+  const projectId = await project(workspaceId, '目标项目');
+  const sessionId = await unassigned(workspaceId, '先聊聊');
+  const api = await startTestApi();
+  try {
+    const response = await api.post(`${workspacePath(workspaceId)}/assist-sessions/` +
+      `${sessionId}/binding`, { command_id: randomUUID(), project_id: projectId });
+    assert.equal(response.status, 200);
+    const body = response.body as { result: { project_id: string; revision: string } };
+    assert.equal(body.result.project_id, projectId);
+    assert.equal((await readSession(sessionId)).project_id, projectId);
+    assert.equal((await readSession(sessionId)).revision, BigInt(body.result.revision));
+  } finally { await api.stop(); }
+});
+
+test('绑定端点缺少 project_id 返回 422', async () => {
+  const workspaceId = await workspace('bind-http-missing');
+  const sessionId = await unassigned(workspaceId, '缺项目号');
+  const api = await startTestApi();
+  try {
+    const response = await api.post(`${workspacePath(workspaceId)}/assist-sessions/` +
+      `${sessionId}/binding`, { command_id: randomUUID() });
+    assert.equal(response.status, 422);
+  } finally { await api.stop(); }
+});
+
+test('绑定端点对已归属会话返回 409', async () => {
+  const workspaceId = await workspace('bind-http-conflict');
+  const projectId = await project(workspaceId, '第一个项目');
+  const created = await createAssistSession(app.db, { workspaceId, commandId: randomUUID(),
+    projectId, title: '已有归属' });
+  const api = await startTestApi();
+  try {
+    const response = await api.post(`${workspacePath(workspaceId)}/assist-sessions/` +
+      `${created.result.session_id}/binding`, { command_id: randomUUID(), project_id: projectId });
+    assert.equal(response.status, 409);
+  } finally { await api.stop(); }
 });

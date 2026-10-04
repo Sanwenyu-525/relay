@@ -119,6 +119,8 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
       return 'today';
     case 'CreateAssistSession':
       return typeof result.session_id === 'string' ? `assist-sessions/${result.session_id}` : undefined;
+    case 'BindAssistSessionProject':
+      return typeof result.session_id === 'string' ? `assist-sessions/${result.session_id}` : undefined;
     case 'CreateProjectBlueprintProposal':
     case 'ApplyProjectBlueprint':
     case 'RejectProjectBlueprint':

@@ -1,7 +1,7 @@
 import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 
-import { acceptAssistProposal, cancelAssistMessage, createAssistSession,
+import { acceptAssistProposal, bindAssistSessionProject, cancelAssistMessage, createAssistSession,
   rejectAssistProposal, requestAssistMessage } from '../application/assist-commands.js';
 import { listAssistMessages, listAssistProposals, listAssistSessions, readAssistProposal,
   readAssistSession, projectAssistSkillMessage, readAssistLivePreview }
@@ -89,6 +89,14 @@ const createSessionBody = Type.Object({
 }, strict);
 const sessionsQuery = Type.Object({
   project_id: Type.Optional(uuid), task_id: Type.Optional(uuid),
+}, strict);
+/**
+ * 绑定只接受确切的项目：resource_id 不在这里，因为目录就绪属于执行准入，
+ * 把它并进归属命令会让未就绪原因被吞掉。
+ */
+const bindSessionBody = Type.Object({ command_id: uuid, project_id: uuid }, strict);
+const BindSessionResult = Type.Object({
+  session_id: uuid, project_id: uuid, revision: rev,
 }, strict);
 const messagesQuery = Type.Object({ limit: Type.Optional(Type.String({ pattern: '^(?:[1-9]|[1-9][0-9]{1,2}|200)$' })) }, strict);
 const sourceRef = Type.Object({
@@ -187,6 +195,18 @@ export function registerAssistRoutes(app: FastifyInstance, dependencies: RouteDe
         ...(body.task_id === undefined ? {} : { taskId: body.task_id }),
         title: body.title,
       });
+      return { outcome, result: outcome.result };
+    } }));
+
+  // 绑定更新既有会话，不新建资源：按 successStatusOf 的规则返回 200 而非 201。
+app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: bindSessionBody,
+    response: { 200: commandEnvelopeSchema(BindSessionResult) } } },
+  createCommandHandler(dependencies, { commandType: 'BindAssistSessionProject',
+    bodySchema: bindSessionBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await bindAssistSessionProject(executor, {
+        workspaceId: params.workspace_id ?? '', sessionId: params.id ?? '',
+        commandId: body.command_id, projectId: body.project_id });
       return { outcome, result: outcome.result };
     } }));
 
