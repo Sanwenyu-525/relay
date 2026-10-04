@@ -120,7 +120,7 @@ body: { command_id, project_id }
 - `target` 为 `null` 时不渲染「正在核对对话目标与会话」，直接渲染消息流与输入区。
 - `projectWriteBlockedReason`：无项目时不因归档或项目事实失败而阻断 —— 用户还没有项目，只有目录执行准入一条限制。
 - `firstComposer` 条件（`:415`）在 target-less 下同样成立：`deferSessionCreation && session === null`。
-- 会话标题（`:285`）：target 存在时保持 `关于${target.title}`；target-less 时取首条消息前 30 字并去掉换行。首条为空的情形不会走到建会话（`sendFirst` 在 `content === ""` 时直接 return，`:419`），因此不设「未发送」兜底文案。
+- 会话标题（`:285`）：target 存在时保持 `关于${target.title}`；target-less 时取首条消息前 30 字并去掉换行。**首条为空时用固定标题 `新讨论`** —— `assist-new-session`（`:450`）直连 `createSession()`，绕过 `sendFirst` 的空内容早退，这条路径上 `content` 确实可能为空；空标题会被 `0015_m04_assist.sql:11` 的 `CHECK (title <> '')` 拒绝。
 - `onSessionCreated` 后协作页切到该会话，`folder` 状态不受影响。
 
 ### 4.5 侧栏「未归属的讨论」分组
