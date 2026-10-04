@@ -116,6 +116,73 @@ export interface AssistSourceRefInput {
   readonly version: string;
 }
 
+export type BindAssistSessionProjectResult = {
+  readonly session_id: string;
+  readonly project_id: string;
+  readonly revision: string;
+};
+
+export interface BindAssistSessionProjectInput {
+  readonly workspaceId: string;
+  readonly sessionId: string;
+  readonly commandId: string;
+  readonly projectId: string;
+}
+
+/**
+ * 把工作空间级会话归入项目（工作台 §18.1）。
+ *
+ * 归属与执行准入是两件事：这里只改 project_id，目录是否就绪仍由执行准备单独判定。
+ * 因此归档项目必须先拒绝、且不为此新建项目 —— 绑定不是绕过目录冲突的后门。
+ */
+export async function bindAssistSessionProject(
+  db: DbExecutor,
+  input: BindAssistSessionProjectInput,
+): Promise<CommandOutcome<BindAssistSessionProjectResult>> {
+  if (input.projectId.trim() === '') {
+    throw validationFailed([{ field: 'project_id', message: 'must be a uuid' }]);
+  }
+  return runIdempotentCommand<BindAssistSessionProjectResult>(db, {
+    scopeKey: httpCommandScopeKey(input.workspaceId),
+    commandId: input.commandId,
+    commandType: 'BindAssistSessionProject',
+    target: { session_id: input.sessionId },
+    body: { project_id: input.projectId },
+    execute: async (repositories) => {
+      // 行锁先于归属判定：并发绑定同一会话时，后到者必须读到已改的 project_id 并被拒。
+      const session = await repositories.assist.readSession(input.sessionId, true);
+      if (session === undefined || session.workspace_id !== input.workspaceId) {
+        throw resourceNotFound('Assist session');
+      }
+      if (session.project_id !== null) {
+        throw invalidTransition('这段讨论已经归属于某项目，不能改写归属。');
+      }
+      if (session.status !== 'ACTIVE') {
+        throw invalidTransition('会话已归档，不能归入项目。');
+      }
+      const project = await repositories.projects.readProject(input.projectId);
+      if (project === undefined || project.workspace_id !== input.workspaceId) {
+        throw resourceNotFound('Project');
+      }
+      // 归档检查必须在加锁之前：归档项目不得因为一次绑定获得写锁。
+      if (project.archived_at !== null) {
+        throw invalidTransition('项目已归档，不能归入；不会为此新建项目。');
+      }
+      await lockWritableProjectInWorkspace(repositories, input.workspaceId, input.projectId);
+      if (await repositories.assist.hasInflightMessages(input.sessionId)) {
+        throw invalidTransition('这段讨论还有消息在途，等它结束再归入项目。');
+      }
+      await repositories.assist.bindSessionProject(input.sessionId, input.projectId);
+      const updated = await repositories.assist.readSession(input.sessionId);
+      if (updated === undefined || updated.project_id === null) {
+        throw new Error('assist session row vanished within its binding transaction');
+      }
+      return { session_id: updated.id, project_id: updated.project_id,
+        revision: toDecimalString(updated.revision) };
+    },
+  });
+}
+
 export interface RequestAssistMessageInput {
   readonly workspaceId: string;
   readonly sessionId: string;

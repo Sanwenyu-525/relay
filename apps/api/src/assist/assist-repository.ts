@@ -40,6 +40,23 @@ export class AssistRepository {
       updated_at = now() where id = ${id}`.execute(this.db);
   }
 
+  /**
+   * 在途消息未结束时改归属，会让回复落到与发送时不同的作用域，因此绑定必须先拒绝。
+   * 状态取值与 AssistView 的消息状态一致：只有真正在途的两种状态挡住归属变更。
+   */
+  async hasInflightMessages(sessionId: string): Promise<boolean> {
+    const rows = await sql<{ present: boolean }>`select exists(
+      select 1 from assist_messages where session_id = ${sessionId}
+      and status in ('PENDING', 'RUNNING')) as present`.execute(this.db);
+    return rows.rows[0]?.present === true;
+  }
+
+  /** 绑定只改归属，不碰 task_id：会话仍可讨论，但执行准入另由目录决定。 */
+  async bindSessionProject(id: string, projectId: string): Promise<void> {
+    await sql`update assist_sessions set project_id = ${projectId}, revision = revision + 1,
+      updated_at = now() where id = ${id}`.execute(this.db);
+  }
+
   /** 消息序号在会话行锁下分配，保证 (session_id, seq) 严格递增且无并发空洞。 */
   async nextMessageSeq(sessionId: string): Promise<bigint> {
     const row = await sql<{ seq: bigint }>`select coalesce(max(seq), 0) + 1 as seq
