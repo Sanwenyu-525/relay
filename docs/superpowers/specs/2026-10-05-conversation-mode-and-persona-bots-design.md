@@ -51,7 +51,11 @@ B 档要读真实文件，但现有工具账本绑定 Run，Run 属于 Task，�
 | 2. 会话级只读工具轮次 | 新增会话级工具账本，请求挂 session；准入复用 Gateway 只读与连接权限；不产生 `scope_grant` / `ACTION_APPROVAL` | **采纳** |
 | 3. B 档不给文件工具 | 只读已选资料版本 | **否决**。放弃用户明确要的 `find_paths`/`read_file`，退回纯聊天 |
 
-**方案 2 的硬约束**：B 档工具轮次与 Run 是**两种不同的执行身份**。任何一边都不得填对方的 id 冒充，也不得沿用「不得填假 Operation 或直接塞 `result_ref`」之外的任何捷径（`AGENTS.md` §3.5、契约 01–04）。B 档不得产生 `tasks`、`runs`、`run_scope_grants`、`gateway_operations` 任何一行，由集成测试用 SQL 计数断言。
+**方案 2 的硬约束**：B 档工具轮次与 Run 是**两种不同的执行身份**。任何一边都不得填对方的 id 冒充，也不得沿用「不得填假 Operation 或直接塞 `result_ref`」之外的任何捷径（`AGENTS.md` §3.5、契约 01–04）。
+
+**B 档的只读动作仍走 Gateway**，因此新增第四种 origin `ASSIST_BOT`（无 task/run/step/import_job，自带 project 与受管资源），照 `0058` 的 `USER_ACTION` 形状放宽四条 CHECK，并只放行只读动作。绕开 Gateway 直调 file/git adapter 会造出第二条准入路径，违反「Permission/Gateway 控制动作准入」，因此不采用。代价是一条迁移与一个 origin 词表项。
+
+B 档**不**产生：`tasks`、`runs`、`run_scope_grants`、`run_tool_calls`、Review/CompletionRecord、`ACTION_APPROVAL`。B 档**会**产生只读 `logical_operations` 与 `invocation_attempts` 行，其 `capability_key` 必须落在只读集内。
 
 ## 4. 对象、Owner 与持久化形状
 
@@ -79,8 +83,10 @@ B 档要读真实文件，但现有工具账本绑定 Run，Run 属于 Task，�
 | `tool_name` / `arguments` | 逐字节透传 |
 | `status` | `REQUESTED` / `SETTLED` / `REJECTED` / `ABANDONED` / `UNKNOWN` |
 | `result_ref` / `result_digest` | 结果引用与摘要 |
-| `stop_requested_at` | 持久化停止意图 |
+| `operation_id` | 对应的只读 Gateway Operation |
 | 时间戳 | 请求、结算 |
+
+停止意图**不**新增列：沿用 `assist_messages.cancel_requested` 与既有 200ms 轮询、Worker 身份 CAS 结算（`assist-runner.ts` 既有机制）。不造第二个停止通道。
 
 ### 4.2 扩展 `assist_sessions`（迁移新增列，不改已应用迁移）
 
@@ -173,8 +179,9 @@ A 档标签**不得**写「可派发子 Agent」——ADR-017 的子 Agent 至�
 
 ### 9.2 真实 PG / HTTP 核心反例
 - B 档一轮真实只读调用走通 `find_paths → read_file`，**磁盘逐字节未变**
-- B 档请求 `apply_changeset` → 拒绝、不写盘、**不连任何 Gateway Operation**
-- 一轮结束后 SQL 断言 `tasks` / `runs` / `run_scope_grants` / `gateway_operations` 计数**全为 0**
+- B 档请求 `apply_changeset` → 类型化拒绝、不写盘、**不连任何 Gateway Operation**（该请求在落 `session_tool_calls` 时即被拒）
+- 一轮结束后 SQL 断言 `tasks` / `runs` / `run_scope_grants` / `run_tool_calls` / 审批相关表计数**全为 0**，且 `logical_operations` 中本会话产生的行 `origin = 'ASSIST_BOT'`、`capability_key ∈ {FILE_READ, FILE_QUERY, GIT_READ}`
+- 反例：把某条 `session_tool_calls` 的 `operation_id` 指向一个 `origin='RUN'` 的既有 Operation → 读取投影必须拒绝返回，不允许跨身份冒用
 - 同 `command_id` 同载荷重放返回原对象；异载荷拒绝
 - `(session_id, message_id, round)` 并发唯一；第二条在途 409
 - 建 bot：revision CAS、重名拒绝、归档后既有会话发消息被拒
