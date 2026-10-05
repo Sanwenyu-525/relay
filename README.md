@@ -12,6 +12,8 @@ P10 开发自检：后端真实 PostgreSQL 全量 158/158、P10 定向 7/7、Gat
 
 ## 阅读入口
 
+[功能地图](docs/feature-map/README.md)按模块关联功能、代码、文档、提示词和验收依据。运行 `npm run feature-map:live` 后打开 [本地实时地图](http://127.0.0.1:4318)，页面可选择检查间隔（默认约 2 秒）或手动刷新；`npm run feature-map` 可生成离线快照。进度和验收仍引用原有唯一事实源。
+
 25–27 日产品补充的执行入口见[三日工作包](prompts/README.md#产品补充的执行映射)。当前代码中的人工待处理入口为 `/tasks?tab=attention`，原 `/tasks?tab=inbox` 仍用于未归属项目的人工任务；产物来源页可查看确切正文、版本比较和已登记直接引用。知识库支持按版本阅读保存的 Markdown/纯文本、查看来源、项目事实导读和显式收录核对。相关实现范围与证据见[工作台交互第 10–12 节](docs/frontend/workbench-design.md#10-成果共创与变化守护探索)，当前进度仍归 CODEX_NEXT_STEP。
 
 1. [AGENTS.md](AGENTS.md)：协作规则与项目边界。

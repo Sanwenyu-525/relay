@@ -1,5 +1,22 @@
 # 工作台视觉纠偏与复验 · 2026-09-30
 
+## 2026-10-05 新建对话对齐已有对话（当前视觉切片）
+
+source visual truth：用户附件 `C:/Users/ASUS/AppData/Local/Temp/codex-clipboard-cb164abe-4588-49d4-8b1f-87deebd6ae08.png`。
+implementation screenshot：`output/playwright/new-conversation-aligned-2048.png`。源图 2545×1440，归一为 2048×1159 后只裁去 Windows 任务栏；浏览器 CSS 视口及实现截图均为 2048×1112（1:1），不以额外缩放拟合控件。近期栏通过已有键盘调整至参考比例，仅为比较偏好，不修改默认 token。
+
+state：源图是已有任务会话，新页面是无任务、无消息的空态；仅对齐共享页壳和输入器。任务标题、历史消息、项目列表与桌面窗口按钮属于状态/宿主差异，未编造进空态。全景并排 `output/playwright/new-conversation-reference-comparison.png`、输入器近景并排 `output/playwright/new-conversation-composer-comparison.png` 已实际打开比较，左右分别为源图与实现。
+
+findings 与 comparison history：此前首条输入器以侧栏宽度居中、底栏只有快捷键，构成 P1 布局差异；现移除专用宽度和整体居中规则，让欢迎语占剩余区域，输入器沿用阅读宽度与底部常驻布局，并补齐真实可用边界下的工具栏。复采后没有剩余 P0/P1/P2 视觉问题。
+
+五项视觉核对：字体/字号/行高、间距/圆角/对齐、背景/边框/语义色均沿用已有会话与唯一 tokens；没有新增位图或替换品牌资产，沿用原图标；输入占位与工具栏文案一致，欢迎语和首条资料禁用说明是空态所需内容。窄窗允许工具栏换行，短窗沿用既有自然高度，输入与按钮可达。
+
+实际交互与检查成绩只维护在[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「新对话直接起步」行。浏览器为 IAB + loopback 合成 API；无数据库、Provider 或真实 Windows 验收。本节不升级下方历史包/页面结论。
+
+implementation checklist：宽度、底部位置、工具栏及发送前后连续性已核对。follow-up polish：本片未留下 P3；真实 Windows/IME/DPI 仍由功能验收表列为未验收。
+
+final result: passed
+
 当前结论：已实施共享与逐页纠偏，以下已测浏览器范围通过。完整特殊状态矩阵、真实 Windows/IME/DPI 与用户视觉接受仍未由本报告证明。
 
 ## 2026-10-01 协作工作区结构对齐（接续下方 09-30 记录）

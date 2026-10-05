@@ -1,6 +1,6 @@
 # 功能验收汇总与历史记录
 
-更新：2026-10-03。角色：唯一功能验收结果汇总。阶段与模块进度归 [CODEX_NEXT_STEP](../../CODEX_NEXT_STEP.md)，验收规格归[测试计划](verification-plan.md)。各行通过结论仅覆盖注明的运行时点、环境和版本；本轮工作主线 UI、此前重点整改与旧目录包证据分别绑定，其他历史成绩没有因此重新验收。
+更新：2026-10-05。角色：唯一功能验收结果汇总。阶段与模块进度归 [CODEX_NEXT_STEP](../../CODEX_NEXT_STEP.md)，验收规格归[测试计划](verification-plan.md)。各行通过结论仅覆盖注明的运行时点、环境和版本；本轮工作主线 UI、此前重点整改与旧目录包证据分别绑定，其他历史成绩没有因此重新验收。
 
 ## 当前功能验收表
 
@@ -8,11 +8,30 @@
 
 | 功能 | 结论 | 已验证范围与依据 | 剩余项 |
 |---|---|---|---|
+| 传统 Agent 检查失败后的自主修正（2026-10-05） | 已通过本片后端工程与定向真实 Provider 出口；指定模型只读独立复核通过；真实 Windows 未验收 | 基准为当前未提交的检查回传、Gateway claim、Worker 分类与图路由切片；规格见[§20.9](verification-plan.md#209-传统-agent-检查失败后的自主修正2026-10-05)。先 RED 复现普通 exit1 被标成功、失败检查隔离目录阻挡修正，修复后固定 Node 24.21.0：真实 PG `tool-loop` **36/36**、生产 LangGraph＋Fake 模型 `agent-check-graph` **1/1**、既有 `run-graph` **61 通过/1 跳过/0 失败**、真实工具 `real-tools-gateway` **54/54**；全部 wrapper exit0，临时 PG/目录清理通过。真实 Provider＋生产 `runOneCommand`/LangGraph＋真实目录修复探针 **1/1**：原已授权 `openai-compatible / agnes-3.0-flash`，任务未提供检查 ID、路径或修复值，实际 `run_check(1) → find_paths → read_file → apply_changeset → run_check(0)`，6 次模型调用均 COMPLETED、request id及非零用量齐全；源随机标记、用户文件和根外检查脚本保留，SHA/写账本对应。官方 Saver 保存失败→读取后继与 HUMAN Review，Artifact 实际摘要对应；再次 START 投递与工具回放无新增模型调用、Operation、Invocation、检查点或磁盘变更。最终仍停在 HUMAN 完成门，无 CompletionRecord。`gpt-6.1-sol` 作为指定审查模型独立只读核对修复源码、生产图探针及完成日志，恢复误报的发现已修复复验；最终组合复核未发现本片新增阻断，复核未自行重跑测试。早前应用步骤交替驱动样本只证明模型修正；当前组合结论以这次实际生产图探针及其检查点/重放断言为依据，限于已配置检查与合成目录。原始输出保留在本机 `output/acceptance-raw/agent-check-20261005`。 | Windows 会话/IME/DPI、脚本/构建配置正文信任摘要、Job/脱离子进程树、检查证据对产物版本的通用绑定仍缺；单次真实调用不证明稳定性/质量。全 API 单元在注入 native helper、串行正式环境下复验 **413 项：412 通过/1 跳过/0 失败**；首次执行有 8 项助手缺失与 1 项 API 启动超时，不据此确定启动超时根因，保留首次失败。M04–M07 与 N 阶段不升级。 |
+| 新对话直接起步（2026-10-05 接续） | 已通过（当前前端工程与限定独立复验）；真实 Windows 未验收 | 接续用户在聊天 `01a10a5c-81d0-7c21-8b61-5656bc905b3e` 选择的「直接看到输入框，文件夹按需选择」。`AppShell` 明确新入口、协作页空白单列与两个默认收起入口、Assist 首条延迟创建及无项目普通讨论均已接入。规则归[工作台 §18.1.1](../frontend/workbench-design.md#1811-新对话直接起步2026-10-05-接续实施)，规格归[测试计划 §17.1](verification-plan.md#171-新对话直接起步2026-10-05)。**根因与修复**：①协作页挂载重置 `sessionId` 覆盖显式新意图，导致恢复旧会话，现按入口意图初始化；②无 target 不渲染消息面板，现以真实 null 目标允许 DISCUSS，列表按 project/task 双 null 隔离；③无目录时解释函数早退，未清已确认的 pending/draft，现送达后先结算过程；④面板先读空列表、首条后提交而不刷新，现由已确认首条命令触发原面板重读；⑤旧执行候选可跨会话，现核对原命令/client/session/source/resource 并按当前 session 筛选；⑥查回执后新建，迟到原消息响应可清空新草稿，现成功响应和解释入口都须仍持有原 pending 命令。后三类均有先 RED 后 GREEN 的受控顺序反例。**实际验证**：Fixed Node 24.21.0 最终全前端 **89 文件 730/730**；`gpt-6.1-sol` 只读独立复验新入口与文件夹两文件 **27/27**、未发现本片剩余 P1/P2；前端 `tsc --noEmit`、Vite 生产构建、`check-docs` 均 exit0；真实 Chromium 既有 `uiOption2FirstSession.spec.ts` **16/16**，本机新入口 smoke 在 **1280×720、960×720、390×844** 均输入可见、水平溢出 0、运行错误 0，宽窗验证草稿保留、合成 IME 事件不发送、首条一次创建与两轮 DISCUSS、成功后再次新对话不发额外命令。**边界**：以上浏览器 API 为明确的模拟响应，无数据库/Provider 外呼；窄窗先在宽视口连接再缩窄，未覆盖窄窗连接入口。**过程中修正**：诊断脚本 `zz-occlusion-probe` 两处共用的回调类型从 HTMLElement 改为其真实输入 Element，解除既有类型错误，未改诊断断言；目录改为收起后，旧浏览器夹具需先展开选择、再收起才检查默认单滚动区，首轮 15/16 的夹具失败已复跑 16/16。最后一条迟到响应缺陷使首轮全量 729/730，修复后最终 730/730，未删失败断言。**本次视觉对齐（2026-10-05）**：按用户已有对话截图，首条输入器改为共享阅读宽度和底部位置，初始高度/占位/资料与讨论方式/缓存圆环/圆发送键沿用已有样式；目录与接续已有任务移至主区顶部。定向 `newConversationEntry`、`folderFirstConversation`、`collaborationWorkspace`、`assist-flow` **4 文件 112/112**，前端类型及 Vite 生产构建 exit0。IAB + 8798 loopback 合成 API：2048×1112 的首条发送前后输入器 x/y/宽/高差均为 **0**；1280×720、960×720、390×844、1280×480 输入和按钮可达、根横向溢出 0，普通讨论说明可展开，未发送草稿的离开保护保留；控制台无 error。全景与输入器近景实际并排比较，记录见根 `design-qa.md`。指定 `gpt-6.1-sol` 只读源码复核未发现本片阻塞项，但未独立运行测试；本次未重建桌面包，不升级旧整体或 Windows 成绩。**Breaking Change：No**，无服务端 API、迁移或业务权限变化 | 普通讨论开始后再选目录并绑定同一会话的前端链未接，不能宣称同一上下文已连续转归项目；真实 Windows 窗口、原生目录选择/中文 IME、DPI/内容缩放、真实 Provider 回复与重启人工路径未做；未重建 Windows 包或进行安装/升级/卸载。本片不改变 M04–M07 或 N 阶段总出口。此前 Git/验收条件 UI 源码保留并纳入组件回归，其独立与真实窗口验收仍单列未做 |
+| M06 人工触发的受管 Git 只读入口（2026-10-05） | 部分通过（工程自检与真实 PG/HTTP 出口）；前端源码已接；崩溃恢复与独立验收未做 | 迁移 `0058_m06_user_action_origin.sql` 新增第三种 origin `USER_ACTION`，**只放宽三条 CHECK**，不改表结构、不新增表/列/函数、不回填；`git-user-action.ts` 协调 prepare →（按判定）dispatch → 投影，`git-read-projection.ts` 有界化（`GIT_STATUS` 条目上限 200、`GIT_DIFF` 字节上限 256 KiB、UTF-8 边界安全截断），与 `file-query.ts` 同口径显式带 `truncated`。契约归[§10.57](../api/http-command-contract.md#1057-人工触发的受管-git-只读2026-10-05-源码实现)，物理设计归[第 61 节](../database/physical-design-postgresql.md)，规格归[§20.7](verification-plan.md#207-人工触发的受管-git-只读2026-10-05-实施)。**只读免审批的依据是读代码得出**：`GIT_READ.approvalPassthrough: true`，故 `effectiveDecision` 不把 AUTO 降级为 ASK；**前提是策略 AUTO 而非「只读就免审」**，ASK 仍建 `ACTION_APPROVAL`、确认后须用同一 `command_id` 再次投递才读取。人工动作无 Run 因此无 `run_scope_grants` 豁免（`evaluateScopeGrant` 在 `run === undefined` 时返回 undefined）——未放松任何既有栅栏。幂等锚点是**确定性 `logical_operations.id`**（`uq_logical_operation_run_intent` 在 `run_id IS NULL` 时因 NULL 互异不提供任何唯一性），`limit` 刻意不进身份。**Fixed Node 24.21.0 实际结果**：API `tsc --noEmit` exit 0；全 API 单元 **412 项 411 通过 / 0 失败 / 1 跳过**；真实 PG/真实 git/真实 HTTP `git-user-action` **15/15 PASSED**（exit 0、临时集群删除 True）、`gateway` **29/29**、`real-tools-gateway` **54/54**、`migration` **10/10**、`cli` **5/5**、`recovery` **17/17**、`run-graph` 62（1 跳过）、`tool-loop` **33/33**、`folder-first-conversation` **6/6**、`api-state` **10/10**、`api` **4/19**、`web-fetch` **5**、`m06-stop-proof` **15**、`maintenance-admission` **6**、`schema-readiness` **5**、`project-archive-gate` **5**，均 exit 0。**RED→GREEN**：迁移约束逐条退回「只有两种 origin」时 **14 例 4 通过 10 失败 / status FAILED**，恢复后 14/14。**执行中发现并修掉的两处自身缺陷**：①`gitExecute` 曾把 `reason` 从 `GIT_ERROR` 改成类型化原因，致 `real-tools-gateway:1279` 变红——改为**附加** `failure_kind` 字段、`reason` 不变，套件恢复 54/54 且未触碰该文件；②`policyScope` 原把 `GIT_READ` 硬编码为 `GIT_STATUS`，致 `GIT_DIFF` 无任何权限路径——改为按 capability 的动作词表 + 可选 `action_type`，缺省行为逐字不变（`gateway` 与 `real-tools-gateway` 回归证明）。**顺带修复的他人遗留红**：`cli.integration.test.ts` 迁移清单停在 `0056`（缺 `0057`），本切片前即为红，补齐后恢复 5/5 | **未做且不得据此声称通过**：**`USER_ACTION` 的崩溃后自动恢复驱动**（`reconcileGatewayInvocation` 分支已就位、`GIT_READ` 在 `safeReread` 内，但**无任何调度器调用**，停在 `DISPATCHING`/`UNKNOWN` 的调用永久未决，如实返回 `UNRESOLVED` 要求人工核对、**不盲重试**）——这是 M06 剩余出口；**前端的独立与真实窗口验收**（同日接续源码已有 `GitReadPanel` 与 Git 页签，组件自检纳入本轮全量回归；不把读取失败显示为干净，API/PG 历史证据不代替前端验收）；并发双投递的真实 HTTP 竞争用例；Windows junction/hardlink 根替换竞争（与 `FILE_READ`/`FILE_QUERY` 同一未闭合限制）；人工触发的目录浏览（`FILE_QUERY`）、暂存/提交/推送、受控 CLI **仍无公开入口**；真实 Windows 窗口、中文 IME、DPI；安装、升级、卸载；独立验收（指定 `gpt-6.1-sol`）未做。**已知代价**：只读不建 claim（`resource_claims` 强制绑定 task/run），排他改由 prepare/admit 的 `listOccupiedResources()` 判定，挡住「读取先于写入开始」但**挡不住反向**——一次已派发的只读不与随后开始的写动作互斥。`GIT_DIFF` 需在策略显式放行，未放行则 409（正确的失败关闭）。独立复核未做，M06 模块状态不变 |
+| 创建后人工补验收条件（2026-10-05） | 部分通过（服务端出口已闭合并有真实 PG 证据）；**前端源码已接，真实窗口与独立验收仍缺** | 新增 `ReviseTaskAcceptance`（`POST /tasks/{task_id}/acceptance`，200，资源链接 `tasks/{task_id}`），闭合 `CODEX_NEXT_STEP`「下一优先切片」第 ② 项的服务端部分：此前轻量 Task 的验收条件只能靠 AI 提案接受或 Skill 提案补齐。契约归[§10.58](../api/http-command-contract.md#1058-创建后人工补验收条件2026-10-05-源码实现)，规格归[§20.8](verification-plan.md#208-创建后人工补验收条件2026-10-05-实施)。**硬约束**：同 `command_id` 同载荷原回执 + `Command-Replayed`、异载荷 409；Task revision 与验收版本双 CAS；新不可变版本、历史不原地改写；AI 占有执行权/有活动 Run/有未结算或 UNKNOWN 动作/终态 → `EXECUTOR_CONFLICT`（终态须先 `ReopenTask`）；同短事务内撤销验证适用性（`ACCEPTANCE_CONTRACT_CHANGED`）、`OPEN` Review 置 `EXPIRED`、写 `TASK_ACCEPTANCE_CHANGED` 审计与回执，旧 session 行与旧版本保留。**只允许收紧或持平**：既有 required criterion 必须逐字节保留（删除/改写/降级 → 409 + `conflict.criterion_ids`），新版本无任何 required → 422。`source` 复用 `CONTRACT_CHANGE`、来源差异由 `fact_refs.change_source` 区分，**因此不需要新迁移**。**Fixed Node 24.21.0 实际结果**：API `tsc --noEmit` 与 `tsc -p` 均 exit 0；全 API 单元 **412 项 411 通过 / 0 失败 / 1 跳过**；单元 **25/25**（四组反向撤销逐个中和守卫，红的恰为对应用例：必需条件保留 5 例、至少一条必需 1 例、上下限/重复/target_spec/空 objective 5 例、method 白名单 1 例）；真实 PG + 真实 HTTP **9/9 PASSED**（exit 0、临时集群删除 True）；回归 `task-lightweight-fence` **1/1**、`api-tasks` **16/16**、`api` **4/4**、`assist` **45/45**、`folder-first-conversation` **6/6**。**执行中发现并修掉的自身缺陷**：`applyContractChangeRevision` 返回 `undefined` 时原报 `REVISION_CONFLICT` 且 `expected == actual`（误导），改为 `EXECUTOR_CONFLICT` 并如实说明 SQL 侧条件不再成立。**执行者如实报告的两次集成未全绿**（7/9、8/9）是其自身断言写错（`conflict` 为 snake_case、守卫顺序），非实现缺口，第三次 9/9。**`task-lightweight-fence` 未被破坏的三重核对**：未改 `MarkTaskReady`/`checkMovable`/`loadTaskReadiness`/`task-repository.ts`，新命令完全复用既有 READY 前置、**没有为让新入口可用而放宽任何栅栏**；该套件实跑 1/1；同形状轻量 Task 上互补断言——零 criterion INBOX Task 的 `allowed_actions` 无 `MARK_READY`，补一条 required 后 `MARK_READY` 出现且成功 | **未做且不得据此声称通过**：**前端独立与真实窗口验收**——同日接续源码已有任务详情的 `TaskAcceptanceEditPanel` 与客户端命令，组件自检纳入本轮全量回归；原服务端证据不代替 UI 验收；`hasChecker` 守卫分支无反例（四个 `CriterionMethod` 全部映射到已注册 checker，今天无法从公开请求触发）；本入口不做 Rule 准入检查（有意与 Task Skill 路径不同），带不可执行 HARD Rule 的 Project 会到 Delegate 时才被拒；未跑全部集成套件（只跑与本切片改动文件相关的），不能声称全绿；真实 Windows 窗口、IME、DPI、安装升级卸载；独立验收未做。**待用户决定的产品口径**：目前全仓**没有**能放宽已确认必需条件的公开入口；若产品需要放宽，正确出口是 `ReopenTask` 进新周期后在无必需条件的新版本上重建，而这与 `MarkTaskReady` 的前置冲突，规则待定。**技术债**：两个 wire schema 暂放 `task-api.ts`，未并入 `domain-schemas.ts`（该文件开工前 40 分钟被并行 Agent 改动未提交，按共享工作区纪律暂缓；空闲后应迁回，这不是设计归属） |
+| 有界多 Agent 与自动主子会话 | 未接入；未验收 | 2026-10-05 仅接续已确认规则的文档与[实施提示词](../../prompts/bounded-multi-agent.md)，取舍归[ADR-017](../decisions/ADR-017-bounded-multi-agent-conversations.md)；`node scripts/check-docs.mjs` exit0，仅为文档检查，没有本增量代码或运行测试成绩。**同日用户决定先只闭合单 Agent 依赖门、不启动 A/B/C**，该门的三条控制/恢复复核已交付（见上一行） | 提示词第 32 行的依赖门还剩**用户在运行中的主会话里确认工具轨迹真实可见**一项（bearer token 只在宿主内存，无法从外部复验桌面实例）。A/B/C 三片另需：工程协议核定、`gpt-6.1-sol` 指定的独立验收（当前账号不可用，用户 2026-10-01 已选保持指定模型、等待恢复，不切换）、共享工作区里并行 Agent 正在写同一批文件。MA-01–MA-22 均为[未运行规格](verification-plan.md#21-有界多-agent-与自动会话验收规格)，M/N 原出口保留 |
+| 单 Agent 依赖门：写路径的停止、预算与重启复核（2026-10-05） | 已通过（工程自检与回归）；独立复核与真实 Windows 人工路径未做 | [专项提示词](../../prompts/bounded-multi-agent.md)第 32 行要求多 Agent 开工前先闭合「用户在现有主会话看见真实过程」并复核停止、预算耗尽与重启读取。核实源码后确认：工具轨迹呈现**已在位**（`GET /runs/{run_id}/tool-calls`、`RunToolTrajectoryPanel.tsx`、`relayClient.ts:2355`、迁移 `0057`），提示词该处前提已过时；真正缺的是三条控制/恢复路径在**写工具**上的证据——既有三个预算用例只用 `list_directory`，`TL-09`（断点恢复重建模型消息）只存在于文件头注释，停止 × 写路径无任何用例。规格归[验证计划 §20.6](verification-plan.md#206-写路径的停止预算与重启复核2026-10-05-实施)，工程责任归[运行架构 §2.3](../architecture/runtime-context.md)。**发现并修复的真实缺陷（SW-01，RED→GREEN）**：Gateway 的准备与派发两处本来就拒绝待处理控制意图（暂停期间一个字节不写），但 `claimRunForGateway` 在 `executeToolLoopStep` 的 try 之外、其 `GATEWAY_RUN_NOT_READY` 也不在类型化拒绝词表内，于是暂停期间派发写工具抛出**未分类异常**——Worker 分不清「用户按了暂停」和「工具坏了」，一次人为停止被报成执行失败。修复：该码单独映射为类型化状态 `STOPPED`，`run-graph.ts` 记 `CONTROL_PENDING`（落到图 `END`，不推进下一轮，把停止交回原控制出口）；被挡住时 `run_tool_calls` 行**保持 `REQUESTED`** 而非落 `REJECTED`/`ABANDONED`——行 id 即动作身份，销毁请求会让模型重新派生一次写入并产生第二个 Operation。**SW-02/SW-03 首次运行即通过**，属覆盖补齐而非修复。**Fixed Node 24.21.0 实际结果**：API `tsc -p` exit0；全 API 单元 **378 项 377 通过 / 0 失败 / 1 跳过**（跳过为 opt-in 真实模型）；真实 PG `tool-loop` **33/33**（原 30 + 新 3，均 exit0、临时集群删除 True）、`run-graph` **62 项 61 通过 / 0 失败 / 1 跳过**（1 例平台相关）；前端组件首条命令恢复相关三 spec（`assist-flow`/`folderFirstConversation`/`collaborationWorkspace`）**99/99** | **未做且不得据此声称通过**：独立复核（指定 `gpt-6.1-sol`）本轮不可用，未以自检替代；真实 Windows 窗口内由用户从文件夹会话发起的人工路径、原生目录选择、中文 IME 与 DPI；停止与**完成**竞争下的写冲突、并发 Delegate 与过期 Worker 在写工具上的冲突覆盖、检查输出截断与取消的可辨性、Windows 自启动进程树停机证据；**取消（而非暂停）后遗留的 `REQUESTED` 行归属**由原恢复/核对路径处理，本轮未做。多 Agent 的 A/B/C 三片**本轮未启动**，MA-01–MA-22 仍全为未运行规格；M04–M07 与 N 阶段出口不变 |
+| 目标/任务轻量起步与状态接续（2026-10-04） | 部分通过（**Goal 轻量创建、Goal↔Project 关联、Task 轻量起步三项入口已实施并复验**；默认入口未切换、状态接续与多轮来源整理仍未做） | 产品核心归[总纲 §0.8](../../Personal_Workflow_OS_Master_Spec.md#08-状态驱动与轻量起步)，交互归[工作台 §18.7](../frontend/workbench-design.md#187-目标与任务的轻量起步)，未运行出口为 LC-01–LC-07。**实现一（Goal 轻量创建）**：`createGoal` 接既有 `POST /goals`；`/projects?view=goal`，标题由输入首行**确定性派生且可就地改写**，说明保存用户原话；**创建不隐式关联任何 Project**，不代填项目、不建 Task、不触碰权限；响应丢失按原 `command_id` 核对。**实现二（Goal↔Project 关联）**：`linkProjectGoal` 接既有 `POST /projects/{id}/goal-links`；关联面板在创建成功页，**关联是独立命令、需明确选定项目**；`expected_revision` 取列表那份 Project 修订由服务端 CAS，**冲突时重新读取并要求再次确认**；重复关联的 `INVALID_TRANSITION`（409）按明确拒绝呈现、**不进「结果不明」回执路径**；载荷只有 `command_id`/`expected_revision`/`goal_id`。**实现三（Task 轻量起步）**：在既有 `CreateTaskView` 内新增 `?light=1` 轻量路径（**复用同一套提交/回执/重试机器，不新建视图、不新增端点或命令**）；一句表达即派生标题与预期结果，**固定以「暂存待整理」提交**，不带验收条件也**不尝试** `MarkTaskReady`；复用既有草稿保护；完整表单保留为详细编辑入口。**实际结果（Fixed Node 24.21.0）**：`createGoalEntry.spec.ts` **6/6**（反向撤销入口后 6/6 失败）、`goalProjectLink.spec.ts` **5/5**（反向移除面板后 5/5 失败）、`taskLightweightEntry.spec.ts` **6/6**（反向关闭轻量分支后 6/6 失败），三次还原均按 SHA-256 校验逐字节一致；全量前端 **84 文件 657/657**；前端 `tsc --noEmit` 与生产构建 exit0；真实 PG `api-lists` **4/4**、`api-state` **10/10**、新增 `task-lightweight-fence` **1/1 PASSED**；`check-docs` exit0 | **本行的三项入口都还只是并列入口，默认入口未切换**：`新建任务` 仍直达完整表单（改成默认轻量需重指向 10 个 spec 的 56 处断言，且部分文件正被并行 Agent 修改，故未在本轮做——**这是与 §18.7「不先要求填写整套字段」的已知差距，待独立验收后再定**）。**Task 轻量起步的已知约束**：当前**没有公开 HTTP 入口在创建后补验收条件**，唯一推进 `acceptance_revision` 并新增 criterion 的命令是 `AcceptAssistProposal`（须经对话提案接受），因此轻量 Task 要变成 READY 必须先在会话里接受一条补齐完成条件的提案。状态接续、建 Task 后普通会话接回执行准备链、可修订完成条件仍未做。真实模型多轮、Windows 窗口内输入/焦点/滚动、LC-01–LC-07 全链未跑，不证明用户操作数减少或持续目标推进已交付。浏览器套件失败为 `R02` 偶发与并行 Agent 在途的转录区吸顶工作（见下），非本切片。**收尾时 `apps/api` 的 `tsc --noEmit` 曾为红**（并行 Agent 未跟踪文件导入尚不存在的模块），本切片只新增集成测试、未改 `apps/api` 生产代码。M04–M07 总出口不变 |
+| 本地功能地图与资料导航（2026-10-04） | 已通过（本机导航、索引与更新范围）；下载交互待验 | [地图说明](../feature-map/README.md)、[关联目录](../feature-map/catalog.json)与 Node 内置模块实现：20 模块、162 功能、472 关联文件；阶段和验收动态读取原事实源，代码存在不继承验收。Node 24.21.0 定向测试 **8/8**、目录检查 exit0，覆盖当前表解析、异常列、文件增删、扫描失败恢复、越界/环境文件拒绝、只读 HTTP 与 Host/Origin 边界。指定 gpt-6.1-sol 只读复核发现的 Git 状态不可用误报与展开状态丢失已修复并定向复验。真实 Codex 浏览器通过中文搜索、功能详情的代码/文档/提示词/测试/剩余项、开发/运行时提示词筛选、验收结论筛选；合成资料新增自动出现、修改手动刷新、删除移除，搜索/筛选/弹窗/展开记录与 summary 焦点保留。1403×956 与 960×640 所检页面无文档横向溢出，临时文件已删除、尺寸覆盖已恢复 | 浏览器已点击 JSON 导出但下载事件未回传，未确认落盘；内嵌离线快照与 data.json 由脚本生成，不冒充离线浏览器操作验收。新增功能语义需人工登记关联目录，自动扫描只发现资料。服务停止后不自动更新；不覆盖产品业务、真实 Provider、Windows 安装或 M04–M07 总验收 |
+| 内部文件/Git 工具循环 B 片：范围授权与已配置检查（2026-10-04） | 部分通过（A/B 片开发自检与回归通过）；C 片与产品入口未接入 | **本轮实现**：`0056_m04_run_scope_grants` 新表（随 Delegate 事务落库、边界列不可改写、应用角色只授予撤销列 UPDATE、`DELETE` 被约束排除、`allowed_actions` 为封闭词表）；`evaluateScopeGrant` 作为唯一准入判定并在 `prepareGatewayAction` 与 `dispatchGatewayAction` 两处调用同一函数；`scope_grant` 进入命令摘要；工具词表新增 `apply_changeset`（`APPLY_CHANGESET`）、`read_change_set`（`READ_CHANGE_SET`，只读账本）、`run_check`（`CLI_RUN`，只按 `check_id` 点名冻结清单）；HTTP 契约新增 §10.55。**2026-10-04 续（循环终止 + 一次冲突适配）**：`prepareExternalWork` 的 DRAFT 工具分支改为「本轮无可派发项就在同一次准备内再问一次模型」，可修正拒绝（参数非法/未知工具/越界）回传类型化原因后继续，终止类拒绝（轮次或调用预算耗尽、冲突适配停止）先给一次收尾轮、仍无可派发项则由提交事务把 Run 停在 `WAITING_APPROVAL`（`wait_reason` 取本次准备第一个终止类拒绝：预算 → `REPEATED_FAILURE`，冲突 → `HUMAN_TOOL`），Task 转 `WAITING` 但 `executor_run_id`/`ownership_epoch` 不变；新增 `decideToolAdaptation` 作为适配的唯一判定并在 `persistToolRound` 落 `adaptation_of`/`adapted_path`。**Fixed Node 24.21.0 实际结果**：API `tsc -p` 与 `tsc --noEmit` 均 exit0；全 API 单元 **359 项 358 通过 / 0 失败 / 1 跳过**（跳过为 opt-in 真实模型）；真实 PG 集成 `tool-loop` **25/25**（A 片 11 + B 片 7 + 终止与适配 2 + 本轮写冲突 5）、`run-graph` **61 通过 / 0 失败**（1 例平台相关跳过）、`run-dispatch` **27/27**、`run-steps` **8/8**、`recovery` **17/17**、`gateway` **29/29**、`real-tools-gateway` **54/54**、`api-delegations` **12/12**、`run-draft-preview` **8/8**、`folder-first-conversation` **5/5**，全部 exit0、临时集群删除 True；`node scripts/check-docs.mjs` exit0。**复跑口径更正**：`RELAY_FILE_IO_HELPER` 必须是**绝对路径**；本轮第一次批量复跑给了相对路径，导致 4 个套件报 `spawn …relay-file-io-helper.exe ENOENT`——那是调用口径错误而非产品缺陷，不设该变量让脚本自行构建并设绝对路径后全部恢复。**新增覆盖**：无授权不写且磁盘未动、授权内普通编辑落盘并由变化集账本记录实测摘要、未配置 `check_id` 按 `TOOL_CHECK_NOT_CONFIGURED` 拒绝且无 Operation 无子进程、已配置检查真实执行并回传退出码与输出、删除在授权内仍落 `WAITING_APPROVAL`、撤权与过期后停止自动执行、基线冲突保留用户改动、越界变更拒绝不写盘、预算用尽后停在类型化等待点且 `HANDOFF` 仍可请求、原样重试与「新基线+旧目标」被拒、合法适配带来源且落盘同时含用户与模型改动、同条冲突第二次落 `HUMAN_TOOL` 停下。**2026-10-04 续（写工具并发与冲突覆盖）**：新增 5 例——同一写请求重复投递只产生一个 Operation 且磁盘不被二次改写；两个 Project 注册同一物理目录时第二个 Run 的过期基线必须冲突并保留第一个 Run 已落盘的内容（冲突结算 `FAILED` + `SOME_CHANGES_FAILED_OR_CONFLICTED`，行仍为 `SETTLED`，「已结算」不等于「成功」）；删除落 `WAITING_APPROVAL` 后撤销范围授权，已排出的单动作批准仍然生效并执行（两个对象互不撤销）；检查程序摘要与授权时冻结值不符时退回单动作审批；基线冲突回执给出实测当前摘要且变化集账本记录实测内容而非模型声明的目标。**本轮修的判定缺陷**：`TOOL_ADAPTATION_STALE_BASELINE` 的拒绝详情原本不含回执实测值，模型无法知道该用哪个摘要，只能反复盲猜把一次可修正的冲突拖成终止；现把实测值与本次值一并写入详情。**自检发现并修复的缺陷**：`0056` 误按 `(workspace_id, run_id)` 引用 `runs` 导致整条 FK 失败（改为单列引用 `runs (id)`）；`RunScopeGrantRepository` 未进 `createRepositories` 使授权写入落在事务外连接上，看不到同一事务里的 Run 行；`CLI_RUN` 授权动作名与实际动作类型不匹配导致已配置检查永远退回 ASK；prepare 阶段未实测程序摘要使「配置已变」判定恒真；`ToolRequestRejected` 未走 `REFUSED` 出口使非法 `check_id` 抛未知异常；迁移测试的历史夹具未排除依赖 `0054` 的 `0056`；**预算耗尽原先完全没有终止条件**——所有请求被拒后直接进入候选生成，模型端口回放工具请求落到 `UNEXPECTED_MODEL_RESULT`，真实原因被掩盖成终态 FAILED（真实缺陷，先复现为 `RUN_FAILED` 再修）。 | **C 片未接入**：协作页的工具进度、参数/结果展开、文件列表与差异、Git 只读与检查结果呈现，以及替换 `DevToolsPanel` 的「Git 变更 / 交互终端 · 未接入」占位均未做。**产品入口已于 2026-10-04 按用户选定的方案 B 接入**：`tool_loop_action` 不再只能由 `POST /runs` 显式 body 提供——文件夹首条对话在 Apply 时冻结工具循环信封加本次任务范围授权，解释只产出目标与范围，正文由 Run 内模型读过真实文件后决定。**未接入的是 C 片呈现**：协作页看不到逐步工具轨迹，解释候选的确认文案也尚未改写（仍是「按这个执行」，会让人误以为在确认具体内容）。写工具在并发 Delegate、过期 Worker、停止与完成竞争下的冲突覆盖尚未补（跨 Project 同物理目录与重复提交已补）；检查输出截断、超时与取消的可辨性、Windows 自启动进程树停机证据未验。模型端口的前置文本在整轮被拒时仍会流式发布（为保住工具无关入口的流式体验而接受的取舍，由调用层不提交草稿兜底）。**停在等待点的 Run 不会出现在「待处理」列表**——`listInterventionItems` 只投影 `runs.status = 'FAILED'`，没有 Review 的 `WAITING_APPROVAL` 运行只能从 Task/Run 状态与 `wait_reason` 看到；补齐需要新增待处理种类与对应 UI，本轮未做，因此不能称「AI 停下时用户一定会被提醒」。真实 Provider 的 tool calling 兼容与质量、真实 Windows 窗口与安装未验；gpt-6.1-sol 指定的独立复核本轮仍不可用，自检不替代独立验收。M04–M07 总出口与 V1 总交付状态不变 |
+| 读写主链与写能力开关（2026-10-05） | **读写闭环已通过**（真实 Provider + 真实磁盘 1/1，真实 PG/磁盘 6/6）；协作页轨迹呈现与真实 Windows 人工路径未验 | **先定位到的三处阻塞**（均已修，各配 RED→GREEN 反例）：①提示词与能力错位——声明了 `apply_changeset` 的 DRAFT 仍固定写「工具只读，不修改任何文件」，模型按提示不取证；改为按本次实际授予的能力生成提示词（只读集保持只读，含编辑则改为「先用读取工具读到真实内容再提出变更」并声明删除与越界不在授权内）。②写能力开关依赖提前猜文件名——只按 `candidate.file_changes` 非空授予，而解释模型没有目录访问，拿不准路径是常态，于是「目录里那个解析函数修一下」永远拿不到写工具；候选新增与路径无关的布尔 `writes_files`，判定收敛在单一纯函数 `wantsConversationFileWrite`（`writes_files === true || file_changes.length > 0`，缺省按文件变更推导，旧请求体行为不变）。③只读准备里的恒真判断 `if (wantsWrite || true)` 无条件要求 `FILE_WRITE` 连接，只读请求被一条用不上的能力挡住且报错指向错误项；已移除，纯只读任务改为不落 `allowed_actions` 为空的范围授权（`cardinality >= 1` 是有意的非空约束）。**真实 Provider 实测发现并修掉的第四处（最致命）**：`apply_changeset` 词表只声明 `items: { type: 'object' }`，模型无从得知修改必须带 64 位基线摘要；同时 `validateToolArguments` 只处理标量，把 `changes` 数组从规范化结果里丢掉，必填检查随即报「缺少必填参数」。修这两处之前真实模型连续 4 次 `apply_changeset` **全部 `REJECTED`**；修之后同场景 `find_paths → read_file → apply_changeset` 三步全 `SETTLED`。词表现逐项声明 `path`/`action`/`content`/`baselineSha256`（与 `normalizeToolChanges` 同名），校验器只对数组做形状检查、逐项语义仍归原函数。**Fixed Node 24.21.0 实际结果**：API `tsc --noEmit` 与 `tsc -p` exit0；全 API 单元 **378 项 377 通过 / 0 失败 / 1 跳过**（跳过为 opt-in 真实模型）；真实 PG 集成 `folder-first-conversation` **6/6**、`tool-loop` **30/30**、`gateway` **29/29**，均 exit0、临时集群删除 True；**`real-model-tool-loop` 写入场景 1/1 PASSED**：目标里不含目标路径（只说「src 目录里」），真实模型自行 `find_paths`/`read_file` 定位后 `apply_changeset` 落盘，磁盘内容含要求的新串**且**保留它读到的原标记串，用户既有的无关文件逐字节未变，再次推进同一 Run 不产生第二次写入。规格见[验证计划 §20.4](verification-plan.md#204-读写主链与写能力开关2026-10-05-实施) | **未覆盖，不得据此声称通过**：协作页工具轨迹呈现（端点与客户端已就位，渲染层未接，规格见[§20.5](verification-plan.md#205-c-片工具轨迹呈现2026-10-04-设计)）；真实 Windows 窗口内由用户从文件夹会话发出请求的人工路径、原生目录选择、中文 IME 与 DPI；删除审批的界面呈现；检查失败后模型据真实输出自我修正这一段主链（只验证了检查可执行）；**停止、预算耗尽与重启读取在写路径上的复核已于同日补齐（见[「单 Agent 依赖门」行](verification-plan.md#206-写路径的停止预算与重启复核2026-10-05-实施)）**；Provider 侧稳定性——本轮多次撞该免费额度的 429，单次通过不等于稳定；删除、扩大范围、Git 提交/推送仍不自动放行。独立复核（指定 `gpt-6.1-sol`）本轮不可用，未以自检替代。M04–M07 总出口不变 |
+| 内部文件/Git 工具循环 A 片（2026-10-04 修复复验） | A 片开发自检通过并修复独立验收的 7 项发现；B/C 未接入 | **本轮修复**：并行 Agent 的首轮独立验收（2026-10-03，见上节）报出 3 项 P1、4 项 P2，本轮全部修复并各配回归反例。P1：`0054` 重述 `ck_logical_operation_resource` 时漏掉 `WEB_FETCH` 两个分支与 `FILE_WRITE`（导致既有文件写与网页读在下一次写入时违反约束，run-graph 9 例失败）；`file-query` 内容搜索读取前缺根边界与保护路径复核（枚举后把子目录换成 junction 可读出根外正文）；已批准的工具动作不再排 RESUME 且恢复时无条件继续等待（批准后永久停在 `WAITING_APPROVAL`）。P2：合法 `src` 子目录被绝对路径喂进相对校验器而拒绝；调用额度只数被拒请求、单轮可越过上限；`max_rounds` 从未执行；真实端口绑定工具后仍用「本次不调用工具」的职责提示。另修 `validReviewResume` 曾把冻结检查写成捷径（被改绑到别的 Operation 的 Review 会唤醒检查点）。**Fixed Node 24.21.0 实际结果**：API `tsc --noEmit` exit0；全 API 单元 **351/351**（1 例平台相关跳过）；真实 PG 集成 `tool-loop` **11/11**、`run-graph` **61/61**、`gateway` **29/29**、`real-tools-gateway` **54/54**、`run-dispatch` **27/27**、`recovery` **17/17**、`api-delegations` **12/12**、`migration` **9/9**、`run-steps` **8/8**、`cli` **5/5**、`folder-first-conversation` **5/5**，均 exit0，临时集群删除 True；`node scripts/check-docs.mjs` 通过。**新增覆盖**：单轮额度不越界、`max_rounds=1` 只结算第 0 轮、批准后携真实 RESUME 命令恢复执行、子目录替换为 junction 后越界正文不进入结果、非 Git 目录返回类型化失败而不显示「干净」、已暂存/未暂存/未跟踪三类 Git 状态各自可见、撤权与未知工具/非法参数不产生 Operation、重复投递复用原 Operation。**验证口径限制**：验证时并行 Agent 的在途迁移 `0055_m05_message_queue.sql` 因缺少文件末尾换行会让整条迁移链失败，本轮以可逆方式临时移开该文件完成上述套件并按 SHA-256 校验原样恢复，未改动其内容 | B/C 片未接入：写/检查类工具、本次任务范围授权、删除 ASK、一次无副作用冲突适配、非 Git 差异呈现、协作页工具进度与入口均未做；真实 Provider 的 tool calling 兼容与质量未外呼验证；真实 Windows 窗口内中文 IME/DPI 与安装未验；gpt-6.1-sol 指定的独立复核在本轮不可用，自检与并行 Agent 的独立验收不互相替代。M04–M07 总出口与 V1 总交付状态不变 |
+| 协作页工具轨迹呈现（C 片，2026-10-05） | 部分通过（工程自检与回归通过）；真实浏览器、Windows 与独立复核未做 | 新增只读投影 `GET /runs/{run_id}/tool-calls`（`apps/api/src/application/run-tool-call-projection.ts`）：按 `(round, ordinal)` 升序分组，`arguments` 与 `result_ref` **逐字节透传**（行里的 `result_ref` 就是模型当时实际消费的那一份，见 `run-tool-call-repository.ts:123-137`），不新增摘要字段。迁移 `0057_m04_run_tool_call_events`：`ck_run_events_kind` 完整重述六个原取值并追加 `TOOL_CALL_CHANGED`，`relay_append_run_event()` 只加 `run_tool_calls` 分支（锁序与 `max(seq)+1` 逐字不动），两个触发器 WHEN 只看 `status`/`operation_id`/`result_ref`（不含 `revision`），无需新 GRANT。响应 schema 用仓库通行的 `Type.Union([Type.Literal])`——`Type.String({ enum })` 在 `Value.Check` 下不生效，已由反向断言证伪。前端两层：聊天区在 `execution.sourceMessageId` 对应的 **user** 消息下一行摘要（**只算 `SETTLED`**），右栏 `DevToolsPanel` 新增「轨迹」页签。两处共用 `useRunToolCalls` 单一读取入口（游标续读、同批提示合并一次读取、流不可用时降级并显示上次读取时间）。**2026-10-05 复核修复轮**（另一模型的全新上下文复核，非项目定义的独立验收）：修 3 项 Critical——摘要把 `REJECTED`/`ABANDONED` 计入「进行中」而非失败、对应断言因夹具缺 REJECTED 行而掩盖该缺陷；折叠态实际不渲染 head/tail 预览却在文案宣称已显示，且 `headTailCap` 在行数不超过上限时头尾重叠产生重复内容；死代码 spread。修 9 项 Important——变化集/文件差异链接指向 API 路径而非前端路由（落兜底页）且条件过宽；展开区缺退出码与耗时；SSE 游标被丢弃、恒从 0 起且无重连（挂载即重播整段历史）；`runId` 变 `null` 时 loading 永久卡住；审批四态未实现且无 Review 入口（为此给 `ReviewSchema` 只增可空 `operation_id`）；`wait_reason` 直接暴露内部枚举；`AssistView` 取到的是同一原消息**最早**一次执行（服务端按新→旧返回）；摘要只读一次永不刷新；集成侧 TC-03 是条件式空跑。**Fixed Node 24.21.0 实际结果**：真实 PG `tool-loop` **33/33**、`migration` **10/10**、`run-graph` **61/61**、`folder-first-conversation` **6/6**，均 exit 0、临时集群删除 True；API 单元 **378 项 377 通过 / 0 失败 / 1 跳过**（跳过为 opt-in 真实模型）；前端组件本切片相关 **87/87**；两端 `tsc` 与前端生产构建 exit 0（前端 typecheck 现被并行 Agent 在途的 `tests/browser/uiOption2FirstSession.spec.ts:551` 未使用变量阻断，非本切片）；`node scripts/check-docs.mjs` exit 0。**全量组件套件当前为红**：`folderFirstConversation.spec.ts` 5 例与 `run-events.spec.ts` 1 例失败，失败选择器（`assist-first-draft`、`folder-manual-root`）与用例名（A1/A2/B/C/D）均属并行 Agent 正在实施的 `ui-option-2-first-session` 四类整改，`AssistView.tsx` 在本轮验证期间（08:19）被其改写；**未触碰其任何文件，不据此声称本切片全量绿** | **未做且不得据此声称通过**：真实 Chromium 浏览器点击、真实 API+PG 人工闭环、真实 Windows 窗口内中文 IME / DPI / 内容缩放、安装 / 升级 / 卸载；HTTP 层（`no-store`、404 problem 体、真实请求）无自动化 harness，只由 schema 一致性测试间接覆盖；`DevToolsPanel` 的 FILES / GIT 页签「未接入」占位**保留**——用户可主动触发的目录浏览与 Git 只读入口本轮未做；轨迹的变化集与差异只给动作身份与核对去处，**没有可点的差异视图**。**独立复核缺口**：指定的 `gpt-6.1-sol` 在当前账号不可用（48 个可用模型中无此项），本轮复核由另一模型完成，**不构成**项目定义的独立验收出口。M04–M07 与 V1 总出口不变 |
+
+| 真实 Provider 工具循环首次跑通（2026-10-04） | 已通过（真实 Provider 定向验证）；预览清空、preamble 持久化与产品入口未做 | **先修阻塞项**：`0055_m05_message_queue.sql` 末两条 `GRANT ... ON <index>` 是无效 SQL，PostgreSQL 报 `"..." is an index`（索引权限跟随所属表，不能单独 GRANT），该迁移 100% 失败并挡住全部集成套件；删除这两行后迁移链恢复（`0015` 的表级 `GRANT SELECT ... ON assist_messages` 已覆盖，新索引自动继承）。并行 Agent 此前把同一文件诊断为「缺末尾换行」并临时移开，其验收行的该口径已过时。**根因缺陷**：真实 Provider 会边输出正文边调工具，`openai-compatible-model-port.ts` 把该形态判为 `ModelToolOutputError`，使工具循环整体不可用；改为对已声明工具的入口返回 `TOOL_CALLS` 并携带 `preamble`，候选正文仍只来自无工具请求的那一轮。未声明工具的 Assist/Skill/语义检查拒绝语义不变（携带工具请求的那个 chunk 自身文本仍不作为增量发布）。**Fixed Node 24.21.0 实际结果**：API `tsc --noEmit` exit0；全 API 单元 **353 项 352 通过 / 0 失败 / 1 跳过**（跳过为 opt-in 真实模型）；真实 PG 集成 `tool-loop` **18/18**、`run-draft-preview` **8/8**、`assist` **45/45**、`model-port` **2/2**，均 exit0、临时集群删除 True；`real-model-tool-loop` **1/1 PASSED**：模型自主发出 `list_directory`×2、`read_file`×3、`search_text`×1 共 6 次工具调用且全部 `SETTLED`，5 次真实模型往返全部 `COMPLETED`、5 个互不相同的 provider request id 与非零真实 token 用量，候选正文原样回显了只存在于合成目录磁盘的 marker。修复前同一场景即以 `ModelToolOutputError` 失败 | **本行只交付片 0，未交付片 1/2**：产品入口仍未接（`tool_loop_action` 唯一来源是 `POST /runs` 手填 body，`conversation-execution.ts` 未冻结该信封，用户无法触发）；`preamble` 未持久化也未在下一轮回放（需 migration，`run_tool_calls` 与 `model_calls` 均无空闲 JSON 列）；工具轮次的 live preview 清空未实现——实测经 `advanceRunStep` 的普通 DRAFT 轮次同样不写预览行（`recordAttemptOutcome` 会删除），故该项与既有 delete-on-settle 设计纠缠，未在本轮改动；**预算耗尽的代码级终止已于同日补齐**（落 `WAITING_APPROVAL` + `REPEATED_FAILURE`，见「内部文件/Git 工具循环 B 片」行）；B/C 片、协作页呈现、真实 Windows 窗口与安装未验；独立复核（gpt-6.1-sol）本轮不可用。M04–M07 总出口不变 |
+| 内部文件/Git 工具循环 A 片独立验收（2026-10-03） | 未通过（3 项 P1、4 项 P2）；B/C 未接入 | 当前源码验收，九个专项源码文件在检查前后摘要一致。固定 Node 24.21.0：API `tsc --noEmit` exit0；定向 `file-query` / `tool-loop` / `openai-compatible-model-port` 单元 **44/44**；正式 `tool-loop` 真实 PG＋Fake 模型集成 **8/8**。追加真实 PG 检查 **6 项失败**：既有 `WEB_FETCH`、`FILE_WRITE` 各一条在准备动作时报 `23514 ck_logical_operation_resource`；同轮调用上限 1 实际结算 2 次；轮数上限 1 实际结算第 0、1 两轮；合法 `src` 子目录搜索被 `Path must be relative` 拒绝；确切 Review 已 `DECIDED/APPROVE` 后携原 decision 恢复仍返回 `WAITING`。各 PG wrapper 正常停机、临时集群删除 True。Windows 合成目录查询反例另 **1 项失败**：目录枚举后将子目录替换成 junction，`searchText` 返回受管根外合成正文。原始输出与隔离探针留本机忽略目录 `output/acceptance-raw/native-tools-20261003-review/`；未改生产源码或正式测试 | **P1**：`0054` 重建约束漏保留 `FILE_WRITE` 与 `WEB_FETCH`（17–22 行；含此类历史行的升级风险为源码推导，未另跑带业务数据升级）；`file-query.ts:174–179` 读取最终 realpath 时缺根边界及保护路径复核；`review-decisions.ts:130–139` 未为动态动作排 RESUME，`tool-loop-action.ts:98–101` 无条件继续等待。**P2**：`gateway-actions.ts:205` 将绝对路径传入相对路径校验器；`tool-loop.ts:179` 没消费已接受调用的额度；`run-steps.ts:767–799` 未执行 `max_rounds`；`openai-compatible-model-port.ts:35,79` 绑定工具仍使用禁止调用工具的职责提示（仅源码确认，真实 Provider 未外呼）。修复后复跑上述反例及原正式回归；当前七项工具仅只读，写入/删除/检查、任务范围授权与冲突适配、协作页工具入口仍待接入；真实 Provider、Windows 产品闭环与安装未验收，M04–M07 状态不变 |
+| 会话内可折叠执行计划（2026-10-03） | 未接入 | 本轮只读核对与文档补充：已有固定 RunStep/Trace，不等同自由计划工具；[推荐设计](../architecture/runtime-context.md#24-会话执行计划的归属与持久更新推荐设计)及[实施提示词](../../prompts/conversation-execution-plan.md)已提供，未运行本功能测试 | 持久内部计划工具、原结果回送、快照/幂等与恢复、会话折叠/依据呈现及[EP-01–EP-12](verification-plan.md#19-会话执行计划验收规格)均待实施验证；不继承其他工具或旧包成绩 |
+| 方案 2 整改后独立复核（2026-10-03） | 未通过（恢复与作用域仍有缺口）；**四类缺口已于 2026-10-04 修复并自检复验，独立验收仍缺** | 普通 Link 草稿保护、原消息重试、首条解释 POST 和待审版本提醒的四项浏览器回归通过；本次受影响组件151/151、前端类型/构建、API类型及真实API/PG基础闭环通过。动态会话与恢复故障新增5项反例失败，结论归[§10.9](#109-整改后的独立复验2026-10-03)；**四类缺口的修复与复验见[§10.9.1](#1091-四类缺口的修复与复验2026-10-04)**：首条过程整体提升为协作页持有的 `FirstMessageOwner`（命令身份、在途阶段、首条原文、解释结果同一份事实），换目录改走既有守卫，解释绑定命令产生时的原资源，同一原消息只解释一次，创建回执恢复续发原首条。五项反例逐条反向撤销后确认 5/5 失败，还原后该文件 13/13、受影响 8 文件 124/124、全量组件 79 文件 **620/620**、真实 Chromium **38/38**、两端类型检查与生产构建 exit0、`check-docs` exit0 | 独立验收（指定 `gpt-6.1-sol`）本轮不可用，未以自检替代；五项反例的真实 API/PG 故障恢复与文件副作用、真实 Windows 窗口内观察、原生目录选择、中文 IME、系统 DPI 与内容缩放、关闭重开、安装/升级/卸载均未跑；既有 `R02` 偶发（本轮连跑 5 次复现 2 次，判归 `App.tsx` 应用级守卫，与本轮改动无关）与 `apps/api` 备份还原注册表 4 例 `BACKUP_PACKAGE_INVALID` 未处理；**本轮收尾的全量前端红灯来自并行 Agent 在途的转录区吸顶工作，非本切片**，隔离复核 7 spec 58/58；完整 37 项业务验收仍未闭合 |
 | 产品 Agent 公共提示词运行接入（2026-10-03） | 已通过（源码/工程接线）；真实模型质量未验收 | 用户明确授权后新增 [公共核心 1.0.0](../../apps/api/src/workflow/agent-system-prompt.ts)，Assist 对话/提案、第一方 Skill、DRAFT、原请求解释实际引用；原 Markdown/JSON schema、Gateway/Run/完成 Owner 保留，语义检查独立。DRAFT 的 CANONICAL＋五类事实/约束白名单与外部数据标签已区分；解释明确缺现有文件内容时澄清。固定 Node 24.21.0：`tsc -p apps/api/tsconfig.json` exit0；定向四文件 **31/31**，包含受控 SDK transport 的真实消息/JSON/预算拒绝断言；设置原 `RELAY_FILE_IO_HELPER` 后 `node --test apps/api/dist/test/unit/**/*.test.js` 全 API **325/325**、exit0。`run-integration.ps1 -SkipBuild -TestFile assist -UseCLocale` **45/45**、文件夹对话同入口 `-TestFile folder-first-conversation` **5/5**，均 exit0，53 migration/Graph/PG 启停与临时根清理通过；对话/Skill/解释实际请求、来源隔离、无业务写入与原身份重放有新增断言。指定 gpt-6.1-sol 只读独立代码复核无阻塞；完整单元输出留本机忽略目录 `output/acceptance-raw/agent-prompts-20261003/api-unit.log` | 工程测试使用受控 transport/Fake，不证明真实模型意图判断、提问节奏或质量；文件夹 Fake 强制 PREPARE 不证明新缺内容规则能正确 CLARIFY。未外呼真实 Provider、未重启当前桌面/服务、未重建冻结包；已有窗口不会自动加载新编译代码。公共核心版本在源码，调用账本完整提示词摘要/动态读取准备/工具循环/连续授权仍待接入与验收。设计文档只链接源码正文，**Breaking Change：No**，M04–M07 总出口不变 |
-| F24 第一方 Skill / Blueprint / Pack 接续复验（2026-10-02 修复轮） | 部分通过（两处幂等缺陷已修并复验；蓝图真实模型已定向通过；真实 Windows 未跑，稳定性未闭合） | **修复与复验**：两处缺陷的根因都是「同 `command_id` 的并发请求都在**加候选锁之前**查过回执，输的一方拿到锁后不再重查」。修法统一为取得候选行锁后立即重查同 scope/command 回执、存在则沿 `resolveExistingReceipt` 返回原结果；未用捕获异常伪造成功，也未放宽异内容的 `COMMAND_ID_REUSED`，维护准入/来源/执行权/版本/摘要校验都在该位置之前完成。**新增正式回归** [f24-proposal-idempotency](../../apps/api/test/integration/f24-proposal-idempotency.integration.test.ts)（真实 PG + HTTP）：测试自己 `for update` 占住候选行，用 `pg_stat_activity` 沿阻塞链（后到者排在先到者之后，不能只数直接被本连接挡住的会话）确认两个 API 会话都已排队后才 `commit` 放行，轮询上限压在 4 秒——产品的维护准入会把事务内 `lock_timeout` 设成 5s，等锁更久会变成 lock_timeout 错误而不是等待。**先跑红**：修复前 Assist Task Skill 返回 200＋**409 INVALID_TRANSITION**、蓝图 Apply 返回 200＋**500 INTERNAL_ERROR**，与独立验收报告逐字一致；**修后 5/5 PASSED**、exit0：同命令同内容两个 200、业务效果与回执各一次（验收只前进一版 / Task 只两条 / 蓝图审计 1 条 / 回执 1 条）、同命令异内容 200＋409 `COMMAND_ID_REUSED` 且只留胜出那一次效果、不同命令竞争保持既有协议（各自回执、后到者按已接受候选重放、效果只一次）。**第四项蓝图的真实模型定向测试**（本轮新增，不继承旧包前三项成绩）：[real-model-skills](../../apps/api/test/integration/real-model-skills.integration.test.ts) 用已有授权配置与合成项目跑 `goal-to-project-blueprint@1.0.0`，**4/4 PASSED**、唯一 Provider 尝试 `COMPLETED`、非零用量与 request ID 齐全。断言生成只写候选（业务快照逐字节不变、零 Run/产物/完成/检查）、候选 `origin=SKILL` 且冻结 Skill 与 `development-minimal@1.3.0` 的 id/version/sha256、只建议 1–5 个 HUMAN/ME/INBOX Task 与内置 view kind、只读预览与 Diff 不写事实、**基线不符的确认 409 且不留部分效果**、显式 Apply 后 Goal 只关联已存在目标、Task 全为 INBOX/ME/HUMAN 且无一被委托、重放同命令只读回执而审计仍各 1 条、**选择 Pack 后策略/连接/能力仍为 0**、取消持久化后不产生候选且业务事实不变。为让蓝图可测，测试用生产建项目命令另建项目——内置 View 行只有该命令会种下，共享 fixture 上补写视图行会绕过真实前置。受影响回归：`project-blueprint` **5/5**、`assist` **45/45**、API 单元（固定 Node 24.21.0 + `RELAY_FILE_IO_HELPER`）**325/325**、全前端 **79 文件 607/607**、两端 `tsc --noEmit` 与 `check-docs.mjs` exit0 | **真实 Windows 未跑**：本轮未重建发布包（`lib.rs`/`Cargo.toml` 正被并行修改，重建会产生与现有安装不一致的身份），本会话也没有原生窗口控制手段，因此「当前确切包」的生成/预览/差异/显式接受/取消与恢复，以及真人质量判断**均未验**。**稳定性未闭合**：同一固定配置下 `task-to-execution-contract@1.1.0` 真实调用 **10 次中 7 次通过、3 次 `OUTPUT_SCHEMA_INVALID`**（Provider 侧 `COMPLETED`、用量与 request ID 齐全，失败在本地严格解析、不留业务效果），被拒字段仍未定位，不称已修复；蓝图候选生成 **7 次真实调用 7 次满足严格契约**。四项 Skill 的重复次数与质量评分标准本轮**未冻结**，故只有契约合规性有证据，语义质量与可读性无评分。`assist-proposals` 的非 Task Skill 旧接受路径未新增并发反例（本轮只覆盖被报告的两条路径）。独立验收仍待指定 `gpt-6.1-sol`（当前账号不支持，未静默降级）。本行不推进 M04–M07 总出口，也不前移通用 Pack 配置应用、Page Schema、Importer、自动 Trigger 或第三方插件 |
+| F24 第一方 Skill / Blueprint / Pack 接续复验（2026-10-03 跨候选修复轮） | 部分通过（本轮幂等修复已独立验收；真实模型质量与 Windows 待验） | **本轮关闭的 P2**：同一工作空间内同一个 `command_id` 同时接受两个**不同**候选（不同 Project/Task、不同候选、不同请求摘要），此前两个请求各自锁各自的行、各自越过回执重查，直到写同一条命令回执时才相遇，后到者拿到唯一约束冲突并返回 **500 INTERNAL_ERROR**；应返回 **200＋409 COMMAND_ID_REUSED**。根因与同候选那两处不同：候选锁只串行同一候选，且这两个入口是自定义事务，缺 `runIdempotentCommand` 已有的「唯一冲突后读胜出回执」处理。**修法沿用通用路径**：把该处理从 `runIdempotentCommand` 抽成 `resolveReceiptAfterUniqueViolation`（`command.ts`），两个自定义事务入口各自 `catch` 后调用——冲突事务已完整回滚，所以在**新的正常事务上下文**读一次胜出回执，摘要相同返回原成功回执、摘要不同抛 `COMMAND_ID_REUSED`、读不到可核对回执则原样抛出原错误；只在唯一约束冲突时生效，不捕获其他异常，也不伪造成功。**新增正式回归两条**（并入 [f24-proposal-idempotency](../../apps/api/test/integration/f24-proposal-idempotency.integration.test.ts)，真实 PG + HTTP）：用迁移角色 `lock table command_receipts in exclusive mode` 把两个请求**精确停在插入回执处**——该锁与回执查询所需的 ACCESS SHARE 兼容，所以两个请求会先完整跑完所有读取（含候选锁后的回执重查），再用 `pg_stat_activity` 阻塞链确认两个 API 会话都已排队后放行，不靠 sleep。断言与到达顺序无关，一律以胜出回执和数据库终态判断谁赢：一个 200、一个 409 `COMMAND_ID_REUSED`、回执恰好 1 条、验收/蓝图审计各 1 条、失败候选仍 `PENDING`、失败方的 Task 验收与条件或项目 State/View/任务数量逐字段不变。**修复方自检历史**：修前两条反例稳定复现 200＋500；修后正式 F24 **7/7**（原有 5 条保留）、Assist 45/45、Blueprint 5/5、API 全单元 325/325、类型检查 exit0。此前 Skill/公共提示词单元 11/11 保留为修复方自检口径，不能据此算作 11 项仓库正式单元。**2026-10-03 本轮独立复验通过**：未参与修复的验收 Agent 显式使用 `gpt-6.1-sol`，固定 Node **24.21.0**；真实 PG + HTTP：F24 **7/7**、Assist **45/45**、Blueprint **5/5**，均 exit0，三套均完成 **54 migration（含 0054）** 与 Graph readiness、正常停止 PG、临时集群删除 True，另核对三处临时根均已不存在。正式相关单元 **9/9**；独立 TEMP helper 边界探针 **2/2**（非唯一冲突不查询并原样抛出、唯一冲突无胜出回执时查询一次并原样抛出；不计作仓库正式单元）。API 与前端 `tsc --noEmit` 均 exit0，主代理前端 10 文件 **67/67**。受验基准含提交 `20a9254a552e…` 上的未提交修复与依赖，**51 项相关输入前后无漂移、46 个受验 JS 前后内存 emit 与 dist 一致、54 迁移聚合摘要稳定**；本次同候选与跨候选两组幂等缺陷在上述工程范围关闭 | **F24 整体仍部分通过**：本轮未外呼真实 Provider、未重建发布包、未操作 Windows。既有真实模型结果（`task-to-execution-contract@1.1.0` 10 次 7 通过 / 3 次 `OUTPUT_SCHEMA_INVALID`，蓝图 7/7；失败具体字段未定位）属于旧提示词证据，**不继承为 2026-10-03 公共核心 1.0.0 接入后的质量结论**。四项 Skill 的质量案例/评分/重复次数/预算尚未冻结，当前提示词的真实模型质量与当前 Windows 包完整用户链分别待验。非 Task Skill 的旧接受路径仍无新增并发反例。本次没有复跑全 API 单元，325/325 保留为修复方自检历史。M04–M07 总出口不推进，不前移通用 Pack 配置应用或后续候选 |
 | root-bound 能力配置入口（2026-10-02） | 已通过（配置入口范围）；Git/CLI 动作仍未接入 | **发现的缺陷**：连接与权限页的 capability 列表只有 `WEB_FETCH`/`FILE_READ`/`FAKE_WRITE`/`FAKE_PUBLIC_READ`，用户无法为本项目创建 `FILE_WRITE`/`GIT_READ`/`GIT_WRITE`/`CLI_RUN` 连接——而 2026-10-01 的文件夹入口对话执行在缺 `FILE_WRITE`/`CLI_RUN` 连接时按服务端 409 拒绝该目录，等于该能力无法从产品内配置。服务端 `resolveConnectionConfig` 早已把这 5 项认作 `rootBoundCaps`，HTTP schema 也早已接受，是前端词表落后。改 `relayClient.ts` 的 `RelayGatewayCapability` 为 8 项，`ConnectionsView` 按同一 `rootBoundCaps` 展示：root-bound 必填目录且只提交 `root_path`，`WEB_FETCH` 只提交 `allowed_host`，Fake 不提交边界；策略侧除 `WEB_FETCH`/`FAKE_PUBLIC_READ` 外必须选 ACTIVE 受管资源（顺带把原来只判断 `FILE_READ` 的 `isFileCapability` 改成与 `policyScope` 一致的「除公共读取外都要资源」）。**新增真实 PG 集成反例**（`gateway.integration.test.ts`）：`GIT_READ`/`CLI_RUN` 连接经 HTTP 建连接、查询与详情都不回显目录、混入 `allowed_host`／混入 `WEB_FETCH`／缺目录／目录不存在四种 422、`FAKE_WRITE` 带目录 422、`GIT_READ` 策略按受管资源落 `GIT_STATUS` 前缀且 `resource_id: null` 422。`run-integration.ps1 -TestFile gateway -UseCLocale` **29/29 PASSED**、exit0（build/迁移/Graph/PG 启停均 0、临时集群删除 True）；前端 `connectionsSettings` **13/13**、全前端 **78 文件 597/597**、两端 `tsc --noEmit` exit0；`check-docs.mjs` exit0 | **本行只闭合配置入口，不闭合 M06**：Git/CLI 动作触发协议仍无公开入口——`prepareGatewayAction` 只接受 `RUN`/`USER_IMPORT` 两种 origin，非 RUN 只放行 `FAKE_PUBLIC_READ`/`WEB_FETCH`，因此协作页工具面板「Git 变更」「交互终端」继续只声明限制、不提供可点按钮（Git 补齐需新增 origin 词表 migration 与准入/派发/核对分支；交互终端的受管 cwd、人工执行身份、进程生命周期、审计与断连恢复协议**仍为 Proposed，不在本次范围**）。未做真实 Windows、真实仓库动作与 M06 独立验收；本次单元/集成基线使用 `.research/runtime-cache` 里固定的 Node **v24.21.0**，而 PATH 上的默认 `node` 是 v22.22.3——用默认 node 跑 `npm test` 会因 `verifyBackupPackage` 的 `/^v24\./` 断言产生 12 例假失败，加上缺 `RELAY_FILE_IO_HELPER` 时另有 10 例；固定 Node 24 + 该 helper 变量下 API 单元 **320/320、0 失败、exit0**。这是复跑口径问题，未改 `package.json` 的 `test` 脚本 |
 
 | N03 项目知识整理后端首片（2026-10-02） | 部分通过（工程自检；独立验收 P1/P2 已修复复跑） | 新增迁移 `0052_n03_project_knowledge_guide`（`project_knowledge_guides`、`project_knowledge_guide_entries`）与 `0053_n03_knowledge_curation_candidates`（`knowledge_curation_candidates`），`apps/api/src/application/project-knowledge-guide.ts`、`knowledge-curation.ts`、`apps/api/src/project/knowledge-guide-repository.ts`、`apps/api/src/api/project-knowledge-guide-api.ts`（7 个端点）、`information-repository.ts` 新增 5 个方法、`unit-of-work.ts` 新增 `knowledgeGuides`、`api-harness.ts` 新增 `put`。导读只存确切引用与人工标签，**不复制正文、不维护第二份 revision**；四类目标各一可空外键，`ref_kind` 与「恰好一个目标列非空」由 CHECK 用 `IS NOT NULL` 强制（刻意避开 `0044` 的 NULL 求值陷阱），去重靠 STORED 生成列 `target_id`（唯一约束里 NULL 互不相等，直接建 UNIQUE 会漏重复）。整理候选只由用户主动请求产生，只提示不合并，接受复用既有 `CreateKnowledge`/`AddKnowledgeVersion`。真实 PG/HTTP 集成 **5/5 PASSED**（首轮 + 连续 2 次复跑共 3 轮全绿），API `tsc --noEmit` exit0，`check-docs.mjs` exit0（117 Markdown、2500 链接、1557 锚点、137 token、31 对比度） | **首轮独立验收结论 CHANGES_REQUESTED**：1 个 P1（接受不锁候选行，与拒绝并发时被拒候选仍产生知识版本且该版本在候选审计链上无归属，真实 PG 3/3 复现）与 4 个 P2（拒绝态在读取模型中丢失导致工作台已确认规则无法实现；接受与保存的同 `command_id` 并发/重放不返回原回执，违反契约第 2 节；同标题的工作空间级知识使候选永久卡在「可建议、不可接受」）。**全部已修复**：接受改为「锁候选 → 复核 → 写知识版本 → 绑定候选 → 写回执」单事务（为此在 `information-commands.ts` 增加 `*InTransaction` 变体，不自开事务也不自写回执）；`status` 增加 `REJECTED` 与 `rejected_at`，终态优先于缺口；两处在取得 Project 行锁后重查回执；`buildSimilar` 排除工作空间级知识。修复后新增并发用例：接受/拒绝竞态 3 轮只能得到一个结论且被拒候选不留孤立版本、同 `command_id` 顺序重放与并发接受都返回原回执且只产生一个知识版本、同 `command_id` 并发保存导读只推进一次修订。**2026-10-02 前端已接入**：知识页「项目知识导读」开关内为服务端编排视图（`ProjectKnowledgeGuide.tsx` 重写），成果版本谱系页底部为整理候选面板（新增 `KnowledgeCurationPanel.tsx`），`relayClient.ts` 新增 6 个方法与 DTO，新增 `tests/projectKnowledgeGuide.spec.ts` 10 项全通过；workbench 全量 607 项中 606 通过。旧版客户端聚合导读按确认结论整体替换，因此**项目目标与流程说明占位文案不再出现在导读内**（N03 四类引用目标无 GOAL），并清掉随之失效的 `knowledge-guide__steps` 样式。**未在真实 Windows 应用内阅读，无 PV03/PV08 体验记录，没有使用收益结论。**`MISSING` 分支在当前 API 下不可达（`AddKnowledgeVersion` 拒绝归档知识、外键阻止删版本），已作为纵深防御登记。另有未修的 P3：条目不暴露被引用对象的适用范围（TASK 级规则读出 `title: null` 但不标明属哪个任务）、接受信封 `committed_at` 取响应时刻而非回执时刻、重复拒绝静默返回 200、`CROSS_SCOPE` 条目仍回传他项目标题 |
+| 消息队列顺序确定性（2026-10-04，方案 A） | **未验收**（实现完成，验证被并行 Agent 的编译错误阻塞） | **上游对照**：`.research/upstream` 四套已核对——codex `thread/queue/*`（`thread_queue_processor.rs:77` add、`:186` start 且 `queued_submission_id=None` 即队首；测试 `thread_queue.rs:775` `queue_start_without_id_starts_the_head_when_idle`；容量上限 100、硬拒绝第 101 条 `:328`；reorder 必须提交完整排列）、pi `durable`（`inbox.ts:58` `applyBoundary` 取 `indexes.slice(0,1)` 后 `sort((a,b)=>a-b)`；`submissions.ts:141` `admitSubmission` 幂等+背压；`docs/spec.md:2190`「deterministic by item ID」）、deepseek-harness（`inbox.ts:105` `claim` → `mutate('next-turn',0,1,…)`；`agent.ts:252` `while (await this.turn()) {}` 派发循环；`cancel(cause,{keepInbox})` 默认清空）、pi `agent`/vercel-ai `harness`/langgraph/rig（**无**队列序，只有 steer/interrupt）。**改动**：`0055_m05_message_queue.sql`（`uq_assist_messages_session_created_at_id` UNIQUE `(session_id,created_at,id)` WHERE status IN PENDING/RUNNING；`ix_assist_messages_session_pending_fifo`）+ `assist-repository.ts:128` `order by m.created_at, m.id` → `order by m.session_id, m.created_at, m.id`。**前端**：`AssistView.tsx` 新增 `waitingQueue`/`runningMessage` 只读投影（位置取 `seq`，不在客户端另建排队状态）、`assist-queue` 折叠面板（序号+原文摘要+逐条取消，走既有 `runAction({kind:"cancel"})` 与 `setCancelRequested`）、`AssistView.css` 队列样式；**未新增 HTTP 端点、未新增 API、未改权限与命令 Owner，Breaking Change：No** | **验证被阻塞，不得声称通过**：`apps/workbench` 全量 71 个 suite 报 `[PARSE_ERROR] Expected } but found {`，位置 `src/components/DesktopTitleBar.tsx:109`——该文件**不是本轮改动**，是并行 Agent 3 分钟前仍在写入的未完成编辑（把 `return <div className="desktop-titlebar">` 改成 Fragment `<>` 后第 108 行 `</div>` 少一个 `}`），按共享工作区约束未覆盖、未回退。仅有的可归因成绩：定向 `folderFirstConversation` + `assist-flow` **15/15 通过**、`collaborationWorkspace`+`assist-preview`+`assist-target` **72/73**（唯一失败是 `command-open` 这个 testid 在 `src` 中已完全不存在、只存在于测试里，判定为并行 Agent 改标题栏所致，与队列无关，已用 `git worktree` HEAD 复核）、`AssistView.tsx` 单文件严格模式编译无错、`CODEX_NEXT_STEP` M05 行已改 ACCEPTED。**未做**：真实 PG 迁移落地与 FIFO 顺序集成反例、并发 claim 回归、真实 Windows/IME/DPI、队列面板浏览器用例。**方案 A 范围只含消息层可见性**：不含执行链自动串接、不含新增执行授权，因此 §0.6 连续工作授权、N06「有限连续委托」与 `workbench-design.md:245`「未实现排队时不展示承诺」均**未**修改，保持原状 |
+
 | Trace 500：桌面库停在 0048 而代码需要 0049+（2026-10-02） | 已修复并复验（工程范围） | 准备 N00 基线时发现 `GET /api/v1/workspaces/{ws}/runs/{run_id}/trace` 对**所有** run 返回 500。根因：桌面 dev 使用的 `relay_trial` 库只迁移到 **0048**（台账 48 行，末条 `0048_m07_admission_gate`），而 `a4409b1` 已让 trace 响应 schema 要求 `usage_cache_read_tokens`（0049 新增的可空列，迁移明确不回填）。`trace-queries.ts` 用 `selectAll()`，列不存在时该字段为 `undefined` 而非 `null`，`fast-json-stringify` 抛 `"usage_cache_read_tokens" is required!`，Fastify 记 `unhandled_request_error` 并返回 500。schema 本身写的是 `Type.Union([Type.Integer(), Type.Null()])`，**不是** schema 声明问题，而是库落后于代码。`information_schema` 核对：迁移前 `model_calls` 上 `usage_cache_*` 列数为 0，`first_text_delta_at`/`first_preview_persisted_at`(0047) 与 `runtime_admission_gate`(0048) 均在 | 经用户确认后显式执行迁移：先 `pg_dump -Fc` 取 `.relay-test/before-n00-trace-fix-20261002-151146.dump`（403,383 字节），再用 `RELAY_MIGRATION_DB_URL=postgresql://relay_migrator@127.0.0.1:6189/relay_trial` 跑 `node apps/api/dist/src/cli/migrate.js`，`applied` 恰为 `0049_m04_model_call_cache_usage`、`0050_n02_impact_candidate_groups`、`0051_conversation_execution_requests`；台账 48→**51**，立即复跑 `applied: []`（幂等，未重复应用），`usage_cache_*` 列数 0→**2**。三条均为只追加迁移，无 down migration，未改写任何已应用迁移、列或索引 | 属 **M04 范围**的库/代码不一致，不是 N00/N02 缺陷，本轮只是为取基线而修。**该 500 同时影响用户桌面窗口的 Run 轨迹面板**（同一库、同一代码路径）；因桌面 dev 的 bearer token 只在宿主内存生成、无法从外部调用，**未能直接复验桌面实例**，请自行打开一个 Run 的轨迹面板确认。修复只保证 Trace 可读，不代表 M04 总出口闭合，也不解除任何 M 阶段验收。为取基线另起了一个只读 API 实例（端口 3613，指向同一 `relay_trial`，token 随机生成、仅存于本机 temp 目录、不入库），用完应关闭；它不跑迁移（`main.ts` 只做 `SchemaReadinessChecker`），已在验证后保留待基线使用。N00 基线本身仍未测——`n00-task-set.json` 三条路径的 `runs`/`observations` 仍为空 |
 | N00–N02 后续长期协作首轮（2026-10-02） | 部分通过（N01/N02 工程自检通过；N02 独立验收 CHANGES_REQUESTED 的唯一阻塞项已修复复跑；N00 基线未测） | **N00**：`apps/api/scripts/n00-baseline.mjs` 此前把「首字时间」列为不可持久化，与事实不符——Trace 自 0047 起已暴露 `first_text_delta_at`/`first_preview_persisted_at`。已按各自定义分别接入报告（领取→首文本、领取→首预览写入、无首文本调用计数），不再合并成「首内容」；仍不可得的受理反馈、实际 HTTP 发出、Provider 收包与屏幕可见时刻照旧标为未知。`node --check` 通过。**N01**：[独立验收记录](n01-independent-acceptance.md) 的 P1（`project-continuation.integration.test.ts:190-199` 成果版本断言按 `ref_kind` 取首条、随 UUID 排序在 v1/v2 间摇摆）已改为按 `ref_id` 断言；当前源码 `run-integration.ps1 -TestFile project-continuation` **连续 3 次 4/4 全绿**（build/迁移/graph 安装/PG 启停/临时集群清理均 exit0）。P3-1「提交结果恒待核对时本会话无退出路径」已作为已知规格缺口登记在[工作台 §15](../frontend/workbench-design.md#15-项目接续点n012026-09-29-开发自检)。**N02**：新增迁移 `0050_n02_impact_candidate_groups`（四张新表，只给应用角色 SELECT/INSERT）、`apps/api/src/application/artifact-impact-groups.ts`、四个新端点与 `ArtifactImpactCheckPanel` 的组/组合检查单视图。**首轮独立验收结论 CHANGES_REQUESTED**（验收者未参与实现，真实 PG/HTTP 共 4 次全绿）：唯一阻塞项为 P2「组合检查单的『登记引用在当前事实中不存在』缺口核错 lineage 父版本——用了变化后版本，而登记的直接引用是变化前版本的下游，导致正常路径每项都产生假缺口」。已改为按 `source_before_version_id` 复核，并新增两条断言：正常路径 `gaps` 不含该条、该边确实消失时缺口出现（后者用迁移连接删除登记边；**应用角色对 `artifact_lineage_edges` 只有 INSERT/SELECT，实测 DELETE 返回 42501**，这正是应有的栅栏）。同时补 P3：建组时先取来源成果行锁再复核基线（与 `startArtifactImpactCheck` 同序）；[工作台 §10.2](../frontend/workbench-design.md#102-跨成果候选组与组合检查单n02-首片2026-10-02-开发自检)与[契约 §10.52](../api/http-command-contract.md#1052-n02-跨成果候选组与组合检查单2026-10-02开发自检)按实际语义收紧推测项与缺口措辞。修复后 `run-integration.ps1 -TestFile artifact-impact-groups` **3/3 PASSED**（build/迁移/graph 安装/PG 启停/临时集群清理均 exit0）。既有反例覆盖：未登记目标 409、重复/空目标 422、来源变化后再建组 409、跨作用域读取 404、跨 Task 与组外版本 409、`overall_result` 在类型/API/客户端三层都无法变成整体 PASS、同一 Task 但验收修订不同的 PASS 会话不被采用（改为「在验收修订 N 下没有单项验证会话」）、撤销适用性产生失效缺口、来源变化后旧组不能再生成或应用候选。workbench `tsc --noEmit` exit0，`tests/impactCandidateGroup.spec.ts` **3/3**（部分成功显示、组合检查单显示整体无结论与缺口、拒绝服务端给出整体结论的响应）。API `tsc --noEmit` exit0。文档检查 exit0（115 Markdown、2356 链接、1528 锚点、136 token、31 对比度） | **N00 基线本身未测**：`n00-task-set.json` 三条路径的 `runs` 与 `observations` 仍为空，必须由用户按真实使用填写后才能产出基线；未测前不得声称省时或体验改善。**N01/N02 均未做真实 Windows 人工路径**，PV01/PV02/PV08 未运行；组合检查单与候选组视图的原生观感、缺口文案在真实窗口中的可读性未验证。N02 未覆盖候选间依赖联动、不完整选择的拒绝、组级回滚、外部格式来源；组视图内没有逐项生成/应用入口（按钮在同面板既有区块，一次处理一项），PV02 正向路径功能可达但不成组。**删除/失权反例不可达**：全仓 `apps/api/src/api/*.ts` 无成果删除入口，权限只有 Bearer + `workspace_id` 一层，无逐成果授权，故组读不存在「失权后仍读到受限内容」的可达路径。已知未修的 P3（不阻塞）：组合检查为算一个布尔量在事务内整份读入最多 20 份正文；上限常量 10/20 在 TypeBox schema 与应用层各写一份。工程自检不解除 M01–M07 出口，也不改变真实 Provider 与安装交付状态。**同批全仓红项归属**（数字随工作区移动，以复跑时为准）：`apps/api` 单测的失败全部是 `StorageUnavailableError: could not publish managed content` 与 native helper／维护准入门相关——本机 `RELAY_FILE_IO_HELPER` 未设置且 `apps/file-io-helper/target/.../file-io-helper.exe` 不存在，**设置该变量后 API 单测 320/320 全绿**，属环境缺件而非代码。前端全量失败集中在 `collaborationWorkspace.spec.ts`，该文件及其 `FolderScope.tsx`／`recentWorkingDirectories.ts`／`desktopHost.ts`／`ExecutionSummary.tsx` 属并行 Agent 的文件夹入口切片，隔离复跑仍红，不属本轮；`tasks.spec.ts`、`run-events.spec.ts` 隔离复跑通过，属共享负载下的时序波动。`cli.integration.test.ts` 的显式迁移清单此前停在 0047/47 行、**在本轮之前就已落后于实际库**，本轮补齐；并行 Agent 随后新增 `0051_conversation_execution_requests`，该清单再次需要同步（目录现为 51 行），这是共享清单的固有维护点，不是 N02 逻辑缺陷 |
 ---|
@@ -440,9 +459,9 @@ esolvedTasks 请求前永久标记；改为结束后写入 + 刷新整批失效 
 |---|---|---|
 | 真实 PG 迁移 `0051_conversation_execution_requests` | 通过 | `migration.integration.test.ts` 9/9；迁移在临时 PostgreSQL 18.6 上从零应用、并发只应用一次、失败回滚 DDL 与账本。`0050_n02_impact_candidate_groups` 是并行 Agent 的同号 migration，未改动。 |
 | 目录身份、复用、重放与歧义（真实 PG） | 通过 | `folder-first-conversation.integration.test.ts` 第 1–4 例：首次建立最小 Project + 受管资源、再次打开复用同一 `project_id`/`resource_id`、目录被删除后按原 `command_id` 重放、大小写别名不产生第二个写 Owner、嵌套根要求显式选定作用域、无效目录 422、多项目返回 `AMBIGUOUS` 并可显式选择。 |
-| 对话执行链（真实 PG） | 通过 | 同文件第 5 例：`DISCUSS` 不创建 Task；`PREPARE` 候选先落库，同一原消息再提交不产生第二条请求也不重付模型成本；缺 `FILE_WRITE` 连接时 409 并给出具体原因；补齐连接与权限后建立真实 Task 并 Delegate 出带 `file-write-v1` + `cli-run-v1` 冻结意图的 Run；重复 Apply 返回同一 `task_id`/`run_id`。 |
-| 真实受控文件修改与检查命令（真实 PG + 真实磁盘 + 真实子进程） | 通过 | 同文件第 5 例后半：未批准前 `answer.txt` 内容保持 `before`；`ACTION_APPROVAL` 批准后先落盘为 `after`；再经独立一次审批执行 `CLI_RUN`，`logical_operations.result_ref.outcome = SUCCEEDED`。两次批准都不产生外部副作用（`external_effect_executed = false`）。 |
-| 候选与冻结动作的确定性规则（单元） | 通过 | `conversation-execution.test.ts` 6/6：不可判断的验收条件、目录外/绝对路径/超量变更、非受支持输出、解析失败与非法字段都退回聚焦澄清；Fake 标记不得与真实写入并存；冻结检查命令必须是可执行文件加参数数组。 |
+| 对话执行链（真实 PG） | 通过 | 同文件第 5 例：`DISCUSS` 不创建 Task；`PREPARE` 候选先落库，同一原消息再提交不产生第二条请求也不重付模型成本；缺连接时 409 并给出**第一项缺失能力**的具体原因；补齐连接与权限后建立真实 Task 并 Delegate 出 Run；重复 Apply 返回同一 `task_id`/`run_id`。**2026-10-04 方案 B**：该 Run 冻结的是 `tool_loop_action`（读集 + `apply_changeset`/`read_change_set`/`run_check`）与 `scope_grant`（`APPLY_CHANGESET` + `CLI_RUN`），不再有 `file_write_action`/`cli_run_action`；授权含一份 `check-1` 冻结检查与实测程序摘要。缺连接时先报 `FILE_QUERY`。 |
+| 真实受控文件修改与检查命令（真实 PG + 真实磁盘 + 真实子进程） | 通过 | **2026-10-04 方案 B 改为工具循环真实链**：Run 内模型先 `read_file` 读到磁盘上的真实 `before`，再 `apply_changeset`（带实测基线）落盘为 `after`，再 `run_check` 按 `check_id` 真实执行；三行工具账本全 `SETTLED`，读到的内容断言包含 `before` 而不是预制答案。**2026-10-02 的固定链证据（未批准前内容保持 `before`、两次独立 `ACTION_APPROVAL`、`result_ref.outcome = SUCCEEDED`）绑定当时的源码基准，不继承为现行实现的能力**。 |
+| 候选与冻结动作的确定性规则（单元） | 通过 | `conversation-execution.test.ts` 7/7：不可判断的验收条件、目录外/绝对路径/大小写重复/超量变更、非受支持输出、解析失败与非法字段都退回聚焦澄清；**带 `content` 的 `file_changes` 被拒**（正文由执行时决定）；Fake 标记不得与真实写入并存；冻结检查命令必须是可执行文件加参数数组。 |
 | API 单元回归 | 通过 | `apps/api` 单元 320/320。需先设置 `RELAY_FILE_IO_HELPER`（原生文件 I/O helper），否则 `managed-content-*` 相关 8 例因环境缺失失败，与本功能无关。 |
 | 关键真实 PG 套件回归 | 通过 | 逐个独立运行 `run-graph`、`run-steps`、`run-dispatch`、`api-delegations`、`gateway`、`real-tools-gateway`、`collaboration-controls`、`recovery`、`verification`、`assist`、`migration`、`folder-first-conversation` 均 `status: PASSED`。**全量 57 个集成套件未在一次运行内跑完**（进程被工具超时中止，临时集群已用 `pg_ctl` 干净关闭并删除）。 |
 | 组件回归 | 通过 | `apps/workbench` 78 文件 593/593，含新增 `folderFirstConversation.spec.ts` 4/4。中途曾出现 5 例 `collaborationWorkspace.spec.ts` 失败（断言 `collab-facts` 在 Run 需要注意时仍可见），**已在本轮开始前于 HEAD 复现**（把 `CollaborationView.tsx`/`AssistView.tsx` 还原到 HEAD 后同样失败），属 §17.7 折叠事实条与既有断言不一致，本轮未修复；最终全绿是并行 Agent 随后修好该断言后的状态，本功能本身未触碰那条断言。 |
@@ -452,6 +471,7 @@ esolvedTasks 请求前永久标记；改为结束后写入 + 刷新整批失效 
 
 **已知限制（不构成通过）**
 
+0. **2026-10-04 方案 B 的未覆盖项**（用户已选定该形态，见本节对话执行链两行）：C 片协作页呈现未接入——用户确认后只能从 Task/Run 看到「已受理」与最终成果，看不到逐步工具轨迹、参数与结果展开；`DevToolsPanel` 的「Git 变更 / 交互终端 · 未接入」占位因此**不能**替换。解释候选的确认文案尚未按[工作台 §18.4.1](../frontend/workbench-design.md#1841-文件改动由执行时的真实读取决定2026-10-04方案-b)改写，仍是「按这个执行」，会让人误以为在确认具体内容。真实 Provider 的 tool calling 质量、真实 Windows 窗口、IME/DPI 与安装未验。
 1. 目录登记命令 `OpenWorkingDirectory` 在会话未绑定 Project 时不能建立关联，因此「无目录普通讨论、需要项目资源时再补作用域」只在组件层保留输入，未实现同页补作用域后的续发。
 2. 一次执行请求的 `expected_outputs.kind` 目前只支持 `MARKDOWN_DOCUMENT`（与固定工作流一致）；需要其他产物种类时退回聚焦澄清。
 3. 会话内多任务的完整恢复矩阵（FC-06/07/09）与真实 Windows 取证（FC-10）未验证。
@@ -572,6 +592,338 @@ esolvedTasks 请求前永久标记；改为结束后写入 + 刷新整批失效 
 
 ### 10.6 结论
 
+以下保留接续实施轮的成绩；当前源码独立复核新增的失败与结论见 §10.7，不能仅凭以下自检通过放行。
+
 - **已通过**：共享壳与聊天区、37 项页面/状态的接入回归、类型检查、生产构建、组件回归（606/607）、浏览器套件（24/24）、只读视觉与键盘取样、**真实 API/PG 人工闭环**、桌面包重建与完整性验证、真实窗口创建与 DPI 单点取样。
 - **保持未验收**：Windows 窗口渲染观察、原生目录选择、真实中文 IME、DPI 多点对比与内容缩放、关闭重开恢复、安装/升级/卸载、完整 37 项的逐页人工业务验收、性能与屏幕阅读器实测。
 - 结论绑定本节记录的文件基准；未把旧成绩、旧包或旧图升级为整体交付。
+
+### 10.7 当前源码的独立复核（2026-10-03）
+
+用户再次要求实际验收。基准为 HEAD `20a9254a552e0656ceadedda94c994483251bdf3`，受验开始时生产源码没有未提交改动，既有未跟踪原型目录未触碰。本轮主 Agent 运行类型、构建、全量回归、真实浏览器与隔离 API/PG；指定 `gpt-6.1-sol` 独立审查并运行四项反例，主 Agent 读取原日志和观察并复核。**结论：CHANGES_REQUESTED，尚未修复；本验收任务未修改生产代码或正式测试。**
+
+收尾时其他并行任务开始修改 Gateway、File Query、新增 `0054_m04_agent_tool_loop.sql` 及其文档，未覆盖或回退。此时 `apps/workbench/src` 与正式测试无未提交差异；本轮前端结论仍绑定受验源码，真实 API/PG 的53迁移成绩绑定运行时点，不覆盖后来的0054与工具循环增量。
+
+| 检查 | 本轮实际结果与范围 |
+|---|---|
+| 类型与构建 | 固定 Node 24.21.0，`apps/workbench` 的 `npm run typecheck`、`npm run build` 均 exit0；构建仍有大 chunk 与静态/动态混用导入警告，不作为这四项缺陷的原因 |
+| 既有全量组件回归 | `npm test -- --maxWorkers=1` **79 文件、607/607、exit0**，457.52s。首轮默认并发与类型/构建同时运行为 492 通过/115 失败，主要见超时与 overlapping act 级联；定向单 worker 24/24、随后同基准完整单 worker 通过。没有修改正式断言或超时，不把首轮 115 条当成 115 个独立产品缺陷；并发运行的时序稳定性仍未闭合 |
+| 既有浏览器场景 | Chromium headless，单 worker，在隔离 Vite 4196 上 **23/24**。唯一 Run SSE 失败因夹具硬编码 `access-control-allow-origin: http://127.0.0.1:4173`；核对既有 4173 的进程命令确为本工作区 Vite 后，原用例、原断言在 4173 **1/1 通过**。本轮全部 24 个场景已验证，未将两个端口写成一次完整 24/24 运行 |
+| 真实 API/PG 人工闭环 | 直接运行 `apps/workbench/scripts/run-real-api-browser.ps1`，**1/1、exit0**；本次当前 API 编译、53 条迁移、Graph 安装及工作空间初始化后，创建项目/任务、启动、保存 v1/v2、选用、完成、重开通过。最终 `playwright=0 pg_stop=0 temporary_removed=True`。首轮外层日志重定向使 pg_ctl 输出句柄卡住，尚未跑业务；准确关闭该次私有集群后脚本失败退出并清理，直接重跑通过，没有停止用户库 |
+| 浏览器布局取样 | 只读夹具 + 当前生产组件，1721×914、1280×720、960×640、390×844 的根 `scrollWidth` 均等于视口宽；宽窗导航 88px、近期栏 224px，前两个视口聊天页头 77px，窄窗两栏收起。项目、任务、待审、知识、今日、连接、设置七个有效路由未发现根横向溢出。此为布局取样，不是 37 项完整业务验收 |
+| 新增缺陷反例 | 四项期望行为测试均 **FAIL**，无测试超时/act 级联；前三项另在真实 Chromium 页面复现，待审版本项为完整 `/reviews` 的 jsdom 页面运行。反例保存在本机忽略目录，没有混入原 607 项或修改正式测试让成绩变绿 |
+
+**当前阻断项**
+
+| 优先级 | 缺陷、根因与复现 |
+|---|---|
+| P1 | **首条消息响应丢失，原命令无法核对。** `AssistView.tsx:194–204` 先清建会话 pending 并调用 `loadTarget` 增加请求版本，首条消息 command_id 只存局部；catch 因版本变化返回。组件夹具模拟服务端已接受消息后丢响应，观察原 pending=null、无命令 ID/回执入口/错误，仍能离页；Chromium 中建会话成功后中断消息响应，同样无原 ID、恢复按钮或 alert。后者只证明客户端网络失败处理，不证明真实数据库已提交 |
+| P2 | **首条未发送草稿没有离页保护。** `AssistView.tsx:126–130` 未将 `firstDraft` 纳入 dirty/discard。组件与 Chromium：打开无会话目录，输入后点击主导航“项目”，无对话框离开，返回同目录草稿为空。这是普通 Link 导航缺陷，与 §10.5 的浏览器 POP 历史反例分开 |
+| P2 | **首条明确执行输入跳过执行解释。** `AssistView.tsx:199–200` 只发送消息，未复用普通发送的 `requestExecution(sent.userMessageId)`（约 644 行）。组件与 Chromium 的首条消息均发出，但 execution-requests POST=0、无摘要；组件同目录同会话普通发送正控制 POST=1且摘要存在。未调用真实模型或建立 Task/Run |
+| P2 | **待审阅读另一版缺少判断绑定错配提醒。** `ReviewsView.tsx:133–134` 使用非紧凑 reader，`ArtifactReaderPanel.tsx:232–241` 只在 compact 分支展示警示。完整待审页面成功读取绑定 v1 后切读 v2，Review 身份保持不变，判断仍绑定 v1，但警示不存在、返回按钮为0，POST=0。当前绑定没有被错误修改；缺陷是阅读/判断版本差异不可见 |
+
+前三项浏览器取证首轮临时夹具把建会话返回为200，而真实客户端要求201，导致两个探针未进入目标路径；修正临时夹具后均到达首条消息路径并复现。另三次误用 `/memory`、`/decisions`、`/rules` 的样本落到 Unsupported 页，不纳入上述七个有效路由。保留这些辅助探针失误，不记为产品失败或通过。
+
+原日志、临时反例、结构化观察与截图留本机 `output/acceptance-raw/ui-option2-independent-20261003/`，包括 `component-tests-single-worker.log`、`browser-tests.log`、`browser-4173.log`、`first-session-run.log`、`review-version-run.log`、`browser-probes.json` 与修正后的 `browser-probes-first-session.json`。本轮只更新本表与当前下一步，并交付独立[整改提示词](../../prompts/remediation/ui-option-2-first-session.md)，原开发提示词保留。
+
+**未覆盖**：真实 Windows 窗口内观察、原生目录选择、真实中文 IME、系统 DPI 多点与独立内容缩放、窗口重启恢复、安装/升级/卸载、真实 Provider 质量与完整 37 项逐页业务验收。§10.4 的旧窗口创建/包身份证据保留，未升级为本轮当前源码的完整桌面通过；没有重建包或改变 M04–M07/N 阶段出口。
+
+### 10.8 四项整改的实现、自检与复验（2026-10-03）
+
+本节保留实施轮的修复与自检成绩；用户再次要求验收后，动态会话、在途响应与换目录的新增反例仍失败，当前独立结论见§10.9。现有断言通过不等于首条恢复出口完整闭合。
+
+范围：按[整改提示词](../../prompts/remediation/ui-option-2-first-session.md)修复 §10.7 的四项阻断。基准为 `20a9254a552e0656ceadedda94c994483251bdf3` 加本轮改动；**未改路由、命令 Owner、HTTP 契约、数据库与权限，未新增业务 API 或 migration**；保留已实施的共享壳、`PageHeader`、`titleHref`、设置真实保存、模型验证六态与配置指纹、八类能力与 root-bound 配置。**Breaking Change：No**。服务端协议未变动，因此不需要补真实 PG 集成。
+
+先落回归再改实现：四个反例在修复前均按预期失败（P1 `assist-first-pending` 不存在、P2 无守卫对话框、P3 `source_message_id` 为 undefined、P4 非紧凑形态无 `collab-review-version-mismatch`）。
+
+| 缺陷 | 修复 | 关键约束的落点 |
+|---|---|---|
+| P1 首条消息响应丢失后原命令无法恢复 | `AssistView` 新增 `PendingFirstMessage`（`sessionId`/`commandId`/`content`/`reason`），在发送前固定命令身份；传输失败不再被推断为业务失败，改为保留原命令与真实原因，并给出「查询首条回执」与「按原命令重试」。首条发送与同 ID 重试共用一条发送路径；回执只按原 `command_id` 查询并校验 `command_type` 与 `session_id`；防双击用同步 ref 闸；连接已换时不猜结果 | 该状态**上移到 `CollaborationView`**：文件夹入口的 `AssistView` 以会话为 key，建会话成功后必然重新挂载，本地 state 会连同未决命令一起丢失。父级持有后新实例立即重新投影，守卫与两个恢复出口在重挂载后仍可达 |
+| P2 首条未发送草稿离页丢失 | `firstDraft` 纳入既有 `dirty`/`discard` 投影，与已选资料同一份保护 | 未新增第二套对话框：上层 `combinedGuard.discard()` 在存在未决命令时本就拒绝放弃，首条消息未决命令也走同一投影 |
+| P3 首条明确执行输入跳过执行解释 | 首条发送成功后按**消息回执里的真实 `user_message_id`** 与确切目录 `resource_id` 走既有 `execution-requests` 链；核对成功后才解释，回执未确定时不猜 `source_message_id` | 解释结果交给会话面板既有 `initialExecution` 承载，摘要与「按这个执行」仍由原 Owner 渲染与执行，没有第二套确认门；前端不做关键词判断，也不自动建立 Task |
+| P4 待审页阅读其他版本无错配提醒 | `ArtifactReaderPanel` 把错配提醒提取为单一节点，compact 纸面与完整待审页的非紧凑正文两种形态都渲染 | 提醒显示正在阅读版本与判断绑定版本并提供「返回判断版本」；只重读确切绑定版本，不改 Review、审批目标或命令载荷，也不为显示提示切换页面布局 |
+
+| 检查 | 环境与基准 | 结果 |
+|---|---|---|
+| `npm run typecheck` / `npm run build` | `apps/workbench` 当前未提交源码 | 通过 / 通过（CSS 212.66 kB、JS 1337.25 kB） |
+| 定向 React 回归 | `folderFirstConversation` / `artifactReader` / `reviews` / `collaborationWorkspace` / `assist-*` / `knowledgeReading` / `taskDetail` / `draftGuardCoexistence` | 11 文件 **157/157 通过** |
+| 全量组件回归 | 固定 Node 24.21.0，`npm test -- --maxWorkers=1` | 79 文件 **612/612 通过**，exit0，340.48s（基线 607，本轮 +5 条反例） |
+| 既有浏览器场景 + 四项真实点击 | Chromium headless，本工作区 Vite 固定 4173（该端口此前只有遗留 socket、无 LISTENING，已核对确属本项目后自行拉起） | 新增 4 条 **4/4 通过**；全量 28 项在同批通过过一次，本轮末次复跑出现 1 例既有 `R02` 失败，单独连跑 4 次为 3 通过 / 1 失败，属 §10.5 已登记的 POP 偶发，非本轮改动（该用例走任务创建页草稿守卫，与文件夹首条链无交集），R02 断言未放宽 |
+| 真实 API/PG 人工闭环 | `run-real-api-browser.ps1`，一次性 PG 18.6 + 真实 API | 本轮**先 1/1 通过**（`playwright=0 pg_stop=0 temporary_removed=True`），**末次复跑未能执行**：`apps/api` 当前编译失败于并行 Agent 未提交的 `src/worker/tool-loop-action.ts:164`（`GatewayOperationStatus` 含 `FAILED`，不能赋给 `WAITING_APPROVAL \| PREPARED`）。该文件不由本轮产生，本轮改动只在 `apps/workbench`，无法在不触碰他人进行中改动的前提下复跑 |
+
+**四项反例的双层覆盖**：Vitest 组件回归（`folderFirstConversation.spec.ts` 四条、`artifactReader.spec.ts` 一条）与真实 Chromium 点击（新增 `tests/browser/uiOption2FirstSession.spec.ts` 四条）均覆盖草稿保留/放弃、响应丢失后的同 ID 重试与回执核对、首条与普通发送都走执行解释且纯讨论不建任务、Review v1→v2→返回 v1 且绑定与业务 POST 不随阅读改变。首条发送与同 ID 重试共用一条发送路径，命令 ID 与载荷在发送前固定；防双击用同步 ref 闸而不是 `setCreating`（同一 tick 内状态尚未生效，靠它防不住重建或重发）；连接已换时不猜结果，保留未决命令与原因。「已提交但响应丢失」在两处都明确标注为**受控故障**（组件夹具抛传输错误 / 浏览器 `route.abort`），不冒充服务端真实失败。
+
+**本轮未覆盖**
+
+1. 真实 API/PG 的文件夹入口首条会话链**未**单跑一条端到端，且末次真实 API 复跑被上述并行编译错误阻断；现有真实闭环只覆盖项目/任务/产物/选用/完成/重开。四项修复的客户端行为由组件与真实浏览器两层覆盖，真实写入路径未因此改变。
+2. 首条消息同 ID 重试与回执核对只有夹具与浏览器证据，**未**在真实 PG 上验证服务端对同一 `command_id` 的幂等重放。
+3. §10.7 首轮并发运行 115 条失败的时序稳定性仍未闭合；本轮按提示词固定 `--maxWorkers=1`。
+4. §10.5 的浏览器返回 POP 偶发（本轮实测 4 次中 1 次失败）与 `apps/api` 备份还原注册表 4 例 `BACKUP_PACKAGE_INVALID` 仍未修复，不属本轮范围。
+5. §10.4 与 §10.7 的 Windows 窗口内观察、原生目录选择、真实中文 IME、系统 DPI 多点与独立内容缩放、窗口重启恢复、安装/升级/卸载仍未验收，本轮未重建桌面包、未改变 M04–M07 与 N 阶段出口。
+
+### 10.9 整改后的独立复验（2026-10-03）
+
+范围：用户再次要求验收，对§10.8未提交的 UI 修复独立复核。基准为 HEAD `20a9254a552e0656ceadedda94c994483251bdf3` 加 `AssistView`、`CollaborationView`、`ArtifactReaderPanel` 及相关正式回归的当前修改。主 Agent 运行工程、组件、Chromium和隔离API/PG；指定 `gpt-6.1-sol` 子代理独立审查并运行换目录/创建回执反例，主 Agent 读取实际观察与日志。受验11项源码、测试、配置的运行前后SHA256无变化。本次没有修改生产代码或正式测试，保留其他任务的后端工具循环改动。
+
+**结论：CHANGES_REQUESTED。** 普通Link首条草稿保护、消息丢响应后的原ID/原载荷重试、首条执行解释POST及非紧凑Review版本提醒已有通过证据；首条完整恢复与摘要显示仍不通过。
+
+| 检查 | 本次独立结果与限制 |
+|---|---|
+| 前端类型与生产构建 | 固定Node24.21.0，`npm run typecheck`、`npm run build`均exit0；CSS212.66kB、JS1337.25kB。未重建桌面包 |
+| 受影响组件回归 | 9文件**151/151、exit0**，单worker：`folderFirstConversation`、`artifactReader`、`reviews`、`collaborationWorkspace`、`assist-flow`、`assist-preview`、`knowledgeReading`、`taskDetail`、`draftGuardCoexistence`。§10.8的612/612保留为实施者自检，本次未再跑全量；已有新增故障反例失败，未扩大成无关全仓验收 |
+| 四项正式浏览器场景 | 将原`uiOption2FirstSession.spec.ts`夹具与四个原断言复制到本机独立脚本，只改模块导入路径和输出位置；真实Chromium、4173、本次独占Vite，**4/4通过**。与下述新增摘要/竞态反例在同批执行，没有降低原断言 |
+| 首条摘要与回执竞态 | 真实Chromium两个新增期望行为反例均**FAIL**：PREPARE请求已发但摘要不存在；同一消息回执与迟到响应触发两次解释。竞态探针首轮误用按钮testid，未进入故障点；按实际`assist-first-receipt`修正临时脚本后单独复跑，实得两个不同解释command_id。首轮辅助超时不算产品失败 |
+| 换目录与创建回执恢复 | 指定子代理用正式React/Router与受控fetch，单worker，3项期望行为反例均**FAIL**（709/1027/1022ms，无超时或act级联）。动态会话列表和125ms响应延迟确保实际发生重挂载，未用永久空会话夹具掩盖问题 |
+| API类型与真实基础闭环 | 当前API `tsc --noEmit` exit0，§10.8所述编译阻断本次没有复现。直接运行既有`run-real-api-browser.ps1`：一次性PG18.6、54条业务迁移、Graph安装、真实API/Vite/Chromium；项目→任务→启动→产物v1/v2→选用→完成→重开**1/1通过**，`playwright=0 pg_stop=0 temporary_removed=True`。只证明该人工闭环在运行时基准通过，不证明新增工具循环总出口、文件夹首条故障恢复或真实Provider质量 |
+
+**仍需整改的四类缺口（五项实际失败反例）**
+
+| 优先级 | 复现、根因与边界 |
+|---|---|
+| P1 | **换目录绕过保护，未决消息使用新资源解释。** `CollaborationView.tsx:315–324`直接打开/替换目录，没有走既有转换守卫。反例1：原草稿dirty=true，换到另一项目目录无对话框、原文清空。反例2：原消息command_id与确切回执保持，但换目录后向原session的execution-requests发`resource_id=res-2`，原为res-1；`AssistView.tsx:215–220`从当前executionScope取资源。这仅证明客户端错误载荷，未验证真实后端接受，更不证明文件副作用 |
+| P2 | **首条解释成功后的摘要没有进入当前会话。** 浏览器：建会话1次、解释POST1次、无alert，`execution-summary`数量0。`AssistView.tsx:237`的onSessionCreated令`CollaborationView.tsx:496`按session重挂载，解释结果随后写旧实例firstExecution；会话面板约571行只初始化一次initialExecution。正式P3只查POST与来源，未查摘要可见，因而仍能通过 |
+| P2 | **原消息在途时，回执核对与迟到响应重复解释。** 浏览器受控夹具保留原消息响应，重挂载后“查询首条回执”已启用；正确回执核对成功后释放原响应，同一msg-1/res-1实际产生2次execution-requests，解释command_id不同。`creating`/`sendingFirst`仍属于旧实例，新实例没有共享忙碌状态，两条成功路径均生成新解释ID。只证明重复客户端调用，未建立两个真实Task或执行文件动作 |
+| P2 | **创建回执恢复吞掉首条内容。** 组件夹具先接受创建命令、125ms后丢响应；查询原CreateAssistSession回执成功后正常会话出现，但首条输入卸载、普通输入为空、messages POST=0、pending清空。`AssistView.tsx:295–306`只恢复会话并重挂载，没有交接首条原载荷与后续发送阶段 |
+
+本机必要原始输出在`output/acceptance-raw/ui-option2-recheck-20261003-192920/`：`source-before.json`/`source-after.json`、类型/构建/定向组件日志、`browser-independent.log`、`browser-race-rerun.log`及两个浏览器观察JSON/截图、`agent-folder-run.log`与三个组件观察JSON。未为每次验收新建受控报告；本节是唯一结果入口，当前整改输入更新至[提示词第6节](../../prompts/remediation/ui-option-2-first-session.md#6-整改后独立复验的接续任务2026-10-03)。隔离PG临时根已清理，本次独占Vite在收尾停止；用户既有服务未操作。
+
+未关闭：五项反例的真实API/PG故障恢复、窗口内观察、原生目录选择、真实中文IME、系统DPI与内容缩放、关闭重开、安装/升级/卸载、37项完整业务验收及既有POP偶发。没有外呼Provider、没有重打桌面包，M/N阶段总出口不变。
+
+### 10.9.1 四类缺口的修复与复验（2026-10-04）
+
+范围：上表四类缺口（五项反例）的实现方自检与修复后复验。基准为 HEAD `20a9254` 加本节所列文件的当前未提交内容。**这是修复方自检，不替代独立验收**；受控故障夹具（响应丢失、响应延迟）不证明真实后端接受或文件副作用。
+
+**共同根因**：首条消息过程被拆散在会随「协作页按会话 key 重新挂载 AssistView」而卸载的组件局部 state 里——`pendingFirstMessage` 已在上一轮提到协作页，但 `firstExecution`、`firstDraft`、`creating`/`sendingFirst` 与创建命令携带的首条原文仍各自留在实例内。命令身份、在途阶段与解释结果因此不是同一份事实，迟到回调与重挂载后的新实例会各自推进一次。
+
+**实现（最小改动，只动协作页与 AssistView）**
+
+| 缺口 | 处理 |
+|---|---|
+| A 换目录绕过保护 | `CollaborationView` 新增 `requestFolderTransition`，两处 `FolderScope` 的 `onOpen` 统一经既有 `requestTransition`；守卫先于 `OpenWorkingDirectory`，不在决定前发目录命令 |
+| A 原资源绑定 | `PendingFirstMessage` 增加 `resourceId`，在命令产生时固定；`interpretFirstMessage` 只用该值，不再从当前 `executionScope` 取 |
+| B 摘要交接 | 首条过程整体提升为协作页持有的 `FirstMessageOwner`（`draft`/`pending`/`busy`/`interpreted`/`execution` + 同步 `read()`）；会话面板新增按 `request_id` 接手的 effect，使解释结果在面板挂载之后到达也能渲染 |
+| C 重复解释 | 在途闸与「已解释」声明都落在同一 Owner 上：同一 `command_id` 只解释一次；迟到失败仅在 pending 仍指向同一命令时才写回，不复活已清空状态 |
+| D 创建恢复吞首条 | `PendingCreate` 携带 `firstContent` 与 `resourceId`；`checkCreateReceipt` 恢复会话后按原载荷续发同一条首条过程 |
+
+顺带删掉 `AssistView` 里一个被后一个 effect 完全覆盖的重复导航状态投影（同一 `onNavigationStateChange` 被调用两次，后者总是胜出）。
+
+**验证（Fixed Node 24.21.0）**
+
+- 五项反例先落为正式回归（`folderFirstConversation.spec.ts` 新增 describe「整改后独立复验的接续反例」），并**逐条反向撤销五处修复后确认 5/5 失败**（A1 弹窗标题为 `undefined`、D 的 messages POST 为 0 条），还原后按 SHA-256 校验两个源文件与修复版逐字节一致。
+- 修复后该文件 **13/13**；受影响 8 文件 **124/124**；全量组件 **79 文件 620/620**（较修复前 613 增加 5 项新反例与 2 项修正）。
+- 前端 `tsc --noEmit` exit0；生产构建 exit0；API `tsc --noEmit` exit0。
+- 真实 Chromium 浏览器套件 **38/38**、exit0。
+- `node scripts/check-docs.mjs` exit0（124 Markdown、2767 链接、1666 锚点、139 token、31 对比度）。
+
+**未覆盖**：五项反例的真实 API/PG 故障恢复与文件副作用、真实 Windows 窗口内观察、原生目录选择、中文 IME、系统 DPI 与内容缩放、关闭重开、安装/升级/卸载均未跑，仍保持未验收；独立验收（指定 `gpt-6.1-sol`）本轮不可用，未以自检替代。既有 `apps/api` 备份还原注册表 4 例 `BACKUP_PACKAGE_INVALID` 未处理。未外呼 Provider、未重建桌面包，M/N 阶段总出口不变。
+
+**并行 Agent 在途改动导致的当轮红灯（如实记录，未覆盖、未回退）**：本轮收尾复跑时，另一 Agent 正在同一工作区实现转录区吸顶（新增 `src/lib/assistTranscriptPin.ts`、`tests/assistTranscriptPin.spec.ts`，并改 `AppShell.tsx`、`AssistView.tsx`、`AssistView.css`、`collaborationWorkspace.spec.ts`，最后一次写入 22:32–23:04）。全量组件因此在 79→80 文件、621→630 用例之间波动，出现 2–5 例失败，**全部集中在该吸顶工作**（`assistTranscriptPin.spec.ts` 的「部分露出也算还在视野里」与 `collaborationWorkspace.spec.ts` 的三条吸顶断言）。按共享工作区约束本轮未覆盖、未回退、未修改这些文件。**隔离复核**：排除该 Agent 正在写的 `collaborationWorkspace.spec.ts` 后，本切片涉及的 7 个 spec **58/58 通过**；`folderFirstConversation.spec.ts` 单独 **13/13**。本轮五处修复在该 Agent 改完后的源码中仍全部在位（已逐处核对 `FirstMessageOwner`、`pending.resourceId`、`adoptedRequestId`、`interpreted` 声明、`firstContent` 续发与 `requestFolderTransition`）。当前全量红灯属对方在途工作，不构成本轮结论。
+
+**同一在途工作随后影响浏览器套件**：Goal 轻量入口切片收尾时，真实 Chromium 连跑 3 次为 36–37 通过 / 1–2 失败，失败恒为 `uiOption2FirstSession.spec.ts:380`「复制是纯客户端剪贴板动作」——`locator.click` 在 `assist-copy-a-0` 上等待 *visible, enabled and stable* 直至 30s 超时。该 Agent 新增的 `.agent-message-slot[data-pinned="true"] { position: sticky }`（`AssistView.css:70`）使消息槽在滚动容器内吸附，元素停在吸附边界时不再满足 Playwright 的 stable 判定。本切片不修改转录区、`assist-copy` 按钮或该 CSS；按共享工作区约束未覆盖、未回退、未放宽断言。此前同一轮还复现过 `R02` 偶发（见上）。两项均判归对方在途工作。
+
+**浏览器套件的 `R02` 偶发（本轮复现，与本轮改动无关）**：真实 Chromium 全量连跑 5 次为 3 次 38/38、2 次 37/38，唯一失败恒为 `workbench.spec.ts:145` 的 `R02：创建页草稿会拦截侧栏和浏览器返回`。该用例全程只在 `/tasks?view=create`，其两个对话框文案由 `App.tsx:126/130/133` 的应用级 `useBlocker` 提供；`CollaborationView` 只挂在 `router.tsx:31` 的 `/agent`，本轮改动的 `AssistView`/`CollaborationView` 在该用例中从不渲染。断言未放宽，与 §10.5、§10.9 登记的同一既有时序不稳定一致。
+
+### 10.9 页面原型结构对齐（2026-10-03）
+
+用户以「页面原型 vs 实际截图」提出 7 处差异并要求对齐。**原型是静态图，只用来定结构与层级，不用来抄像素**：所有宽度都是 rem token，跟随根字号与用户缩放；回归断言的是相对关系（卡片上限 > 消息列上限、上限单位是 rem），不是某个绝对距离。**Breaking Change：No**（未改路由、命令 Owner、HTTP 契约、数据库与权限），但**改了两处既有设计决定**，见下表「与旧规则的冲突」。
+
+| # | 差异 | 处理 | 与旧规则的冲突 |
+|---|---|---|---|
+| 2 | 消息列被卡在 800px，宽窗时两侧各空约 440px | `layout.reading.maxWidth` 由 `50rem` 放宽到 `60rem` | 无。数值仍只在 `design-tokens.json` 一处 |
+| 3 | 输入卡与消息列被同一条规则绑成同宽 | 同日按用户要求**保持同宽并合并为单一 token**：`layout.reading.maxWidth` 60→72rem，删除当日新增的 `layout.composer.maxWidth`。消息流改为铺满中栏（滚动容器 full-bleed），阅读 measure 由居中的 `.agent-message-list` 收窄 | 与原型「卡片比消息列宽」不同，是用户后续明确指示；滚动容器 full-bleed + 内容列居中取自 deepseek-harness `ChatView.module.css:54-63` |
+| 4a | `/agent` 多一行面包屑 | `/agent` 不再渲染面包屑；连带删除因此变成只写的 `workTrail` state 与其取数 effect（每次进工作台多两次无用读取） | **与 §17.7 冲突**：面包屑原是项目/任务上下文的常驻来源。现改由页头 `collab-current-need` 那行承载，标题的 `titleHref` 仍是返回确切任务的入口 |
+| 4b | 页头多一行「只有 READY 的任务可委托」 | 移除该常驻行 | **与 §17.7 冲突**：原文要求委托准入被拒的原因必须留在首屏。现由「更多操作」内的 `TaskDelegatePanel` 就地显示，原因不再丢失但不再常驻 |
+| 5 | 底部整宽「消息已排队」提示条 | **未删除**：`notice` 是 7 处命令回执共用机制，直接删会连带砍掉「受托已受理」「原命令被拒绝」等反馈。改为渲染在输入器这一列内，不再横贯工作区 | 与原型不一致，属有意保留 |
+| 1 | 左栏无搜索框 | 复用全局 `.search-field` 原语新增搜索框，**只筛已加载范围**，并同时显示「已加载 N 项」与无匹配说明，不假装是全量搜索 | 无。未新增服务端搜索 |
+| 6 | 对话下方「未读取资料 + 复制/赞/踩」 | **只做复制**：生产代码没有 `未读` 领域概念，赞/跌也没有写路径，照原型画就是假入口。复制是纯客户端剪贴板，挂在每条已完成 AI 回复上，不落库 | 另两项按用户决定推迟 |
+| 7 | 疑似双滚动条 | **实测不是缺陷**：`.collab-center` 内真正溢出的纵向滚动容器只有 `.agent-chat-transcript` 一个，断言已固化为回归 | 无 |
+
+**改动清单**：`AssistView.css`、`styles.css`、`AssistView.tsx`、`CollaborationView.tsx`、`AppShell.tsx`、`RecentWorkRail.tsx`、`design-tokens.json`；测试 `uiOption2FirstSession.spec.ts`（新增 6 条真实 Chromium 结构用例）、`collaborationWorkspace.spec.ts`、`workBreadcrumbScope.spec.ts`。
+
+| 检查 | 结果 |
+|---|---|
+| `npm run typecheck` | exit0 |
+| `npm run build` | 通过（JS 1337.90 kB / gzip 365.14 kB） |
+| 全量组件回归（Node 24.21.0，`--maxWorkers=1`） | 79 文件 **612/612 通过**，378.71s |
+| 真实 Chromium 结构对齐用例 | 新增 6 条 **6/6 通过** |
+| 真实 Chromium 全量套件 | 34 项中 33 通过 |
+
+**`R02` 偶发与归因**：全量浏览器套件唯一失败是既有 `R02`（创建页草稿拦截浏览器返回，`workbench.spec.ts:157`），属 §10.5 已登记项。为避免把锅甩给本轮，用 `git worktree` 在 HEAD `20a9254` 上单独复跑该用例 4 次：**HEAD 3 失败 / 1 通过**，与本轮工作树的 3 失败 / 1 通过一致，且该用例全程只在 `/tasks?view=create`，不渲染本轮任何改动。判定为既有时序不稳定，与本轮无关；断言未放宽。
+
+**本轮未覆盖**
+
+1. 窄窗、200% 内容缩放与真实 Windows 窗口内的观感未取样；宽度是 rem token，但各断点下的实际观感仍需真实窗口确认。
+2. 「未读资料」与「赞/跌」未实现，需要新增领域状态与写路径，超出本轮范围。
+3. 左栏搜索只覆盖已加载页；跨项目全量搜索需要新增服务端查询，未做。
+4. §10.5 的 `R02` 偶发、`apps/api` 备份还原注册表 4 例 `BACKUP_PACKAGE_INVALID`、并行 Agent 未提交的 `tool-loop-action.ts` 编译错误均未处理。
+
+**输入区二次调整（2026-10-03，按参考图）**
+
+| # | 差异 | 处理 | 依据与限制 |
+|---|---|---|---|
+| 宽度 | 消息列与输入器不同宽 | 两者合并为同一 `layout.reading.maxWidth`（72rem），当日新增的 `layout.composer.maxWidth` 已删除 | 宽度必须一致，否则滚动条会贴着其中一侧 |
+| 资料/讨论 | 带边框的方盒、无展开指示 | 改无边框 chip + 右侧 chevron（打开时旋转 180°），两枚 chip 之间一条竖分隔线；去掉 `+ / −` 前缀符号 | `deepseek-harness` `InputBar.module.css:337-358` 同为无边框 + 右侧 chevron，但它用 `gap: 12px` **不用**分隔线；分隔线按参考图保留，属有意偏离上游 |
+| 拖拽调高 | 分隔线删了但仍能拖 textarea 改高度 | `resize: none` | vercel-ai `chat-input.tsx:47-48` 聊天输入器同样 `resize-none`；deepseek-harness 用 contenteditable + CSS 封顶，也无拖拽把手。四个检出均无自定义 resize 把手实现 |
+| 回到最新 | 带文字、带底色、靠右 | 只有图标，透明背景、无边框、无阴影，水平居中 | deepseek-harness `ChatView.tsx:287-298` 同为 icon-only + `aria-label`，但它是**实心**圆按钮靠右；此处按要求改为透明居中 |
+| 发送键尺寸 | 比常规按钮小一号 | 改为「圆心与卡片圆角圆心重合」：边长 `calc(2 × radius.control)` = 16px，完整落在卡内 | 见下方几何说明 |
+| 滚动条 | 聊天区内出现滚动条 | 消息流改为铺满中栏的滚动容器（full-bleed），阅读列居中收窄 | deepseek-harness `ChatView.module.css:54-63`「the scroller itself stays full-bleed」；vercel-ai 无此做法 |
+
+**发送键几何（已实装，含一处未做到的约束）**
+
+圆角圆心只由卡片外框与 `radius.control`（8px）决定，**与卡内边距无关**，恒在卡片外框内 8px 处。要让键的圆心落在该点且不越界，键的边长上限就是 `2 × 8 = 16px`——这就是「改变形状大小去适配」的唯一无越界解，已按此实现：键绝对定位在卡片右下角，边长 `calc(2 * var(--relay-radius-control))`，圆角同值，因而与卡片圆角同心。
+
+1. **16px 的 painted 尺寸低于可点击目标下限。** 用 `::after` 把命中区扩到 `control.target.minimum`（24px），符合 WCAG 2.5.8「达标看命中区」。回归同时断言 painted 尺寸 = 2×radius、圆心偏差 ≤1px、命中区 ≥ 下限。
+2. **「该行所有元素做相同的垂直位移」未能实现，是几何硬约束。** 圆角圆心恒在底边内 8px 处；任何高于 16px 的元素若以它为竖直中心必然越过卡片底边。资料/讨论 chip 为 40px（`control.height`），做不到与 16px 的键同位移而不越界。因此保留 `align-items: center` 的同行居中，未强行位移。若必须同位移，只能把 chip 压到 ≤16px（低于可点击目标下限）或放大卡片圆角——两者都已被用户当前指示排除。
+
+**本轮新增真实 Chromium 回归（4 条）**：输入区无横线 + `resize: none` + 发送键同心与命中区；资料/讨论无边框 chip + chevron + 竖分隔线；回到最新无文字/透明/水平居中（偏差 ≤1px）；消息列与输入器同宽 + 滚动容器铺满中栏 + 阅读列在内容盒内居中。
+
+**本批验证**：typecheck exit0；build 通过；真实 Chromium 对齐用例 **14/14**；浏览器全量 **38/38**（`R02` 本次通过，该用例仍是 §10.5 登记的偶发项）。全量组件回归结果见本节后续记录。
+
+**仍未覆盖**：窄窗/200% 缩放/真实 Windows 窗口观感；命中区扩展在真实指针与触屏下的手感；跨项目全量搜索；未读资料与赞跌；`apps/api` 备份还原注册表 4 例 `BACKUP_PACKAGE_INVALID`；并行 Agent 未提交的 `tool-loop-action.ts` 编译错误。
+
+### 10.10 输入区三次调整（2026-10-04，按参考图与 Codex 输入框）
+
+**输入区三次调整（2026-10-04，按参考图与 Codex 输入框）**
+
+| # | 差异 | 处理 | 依据与限制 |
+|---|---|---|---|
+| 左右头像 | 每条消息左侧/右侧有头像 | **删除头像元素与相关样式** | 角色已由「我 / AI」标签与气泡位置区分，头像只是重复占位并挤窄正文列 |
+| 「消息已排队」 | 每次发送后底部提示「消息已排队；回复状态以服务端消息为准。」 | **删除这条 notice** | 它只复述已提交的 202 回执，不携带新事实；消息的 PENDING/RUNNING 状态已在消息行说明。**其余 notice 保留**（取消意图、提案接受回执、原命令回执），它们各自说明不同结果，仍渲染在输入器列内 |
+| 发送键尺寸 | 16px 太小 | 键放大到 **32px**：新增 `radius.composer = 1rem`，输入器卡片改用它，键边长 `calc(2 × radius.composer)` | 键要与卡片圆角同心且不越界，边长上限就是 `2 × radius`；8px 圆角只容得下 16px 的键，所以圆角必须同步放大 |
+| 发送键形状 | 方形 | 改为**正圆**（`radius.round`），直径 `2 × radius.composer` | 直径等于 2×radius 的圆，圆心落在卡片圆角圆心上时与下边、右边**同时内切**，正好穿过圆角弧两端——「圆心重合」在这里是精确相切而非近似。形状参考 Codex 的圆形发送键，配色与版式仍用本项目 token |
+| 底栏左侧行高 | 与键不同高 | `.agent-chat-composer-tools` 及其 chip 取 `min-height: calc(2 × var(--relay-radius-composer))`，与键**由同一个 token 推导** | 32px 已高于 `control.target.minimum`（24px），可点击目标不再依赖 `::after` 扩展 |
+
+**「该行所有元素做相同垂直位移」这条仍未实现，且现在是明确放弃而不是遗漏**：圆角圆心恒在卡片外框内 `radius.composer` 处；任何高于 `2 × radius.composer`（32px）的行内元素若以它为竖直中心必然越过卡片底边。底栏左侧 chip 高度已取到与键相同的 32px，此时整行以同一中心对齐；若再把它下移到圆角圆心，32px 的行会跨过底边 16px。因此保留 `align-items: center` 的同行居中。
+
+**本批新增/调整的真实 Chromium 回归**：消息行无头像 + 发送后无「消息已排队」（1 条）；发送键同心、正圆、放大到 32px、底栏左侧行高与键一致（并入原同心用例）；原「命令回执落在输入器列」用例**已删除**——发送路径不再产生任何 notice，前置动作无法触发提示，保留即空断言。**已知覆盖缺口**：其余三类 notice（取消、提案回执、原命令回执）仍渲染在输入器列内，但当前浏览器夹具无法可靠触发，其版式不再有自动化断言。
+
+**本批验证**：typecheck exit0；生产构建通过；真实 Chromium 对齐用例 **14/14**；浏览器全量 **38/38**；全量组件回归（Node 24.21.0 单 worker）见本节记录。
+
+**底栏底部对齐修复（2026-10-04）**：用户截图指出「输入框底部没有对齐」。原因是底栏那一行仍压在卡片 `padding-bottom`（12px）与自身 `padding-bottom` 里，而绝对定位的发送键 `bottom: 0` 是相对卡片 padding box——两行底边因此差 20px，视觉上左侧 chip 明显浮在按键上方。修法：底栏 `margin-bottom: calc(-1 * var(--relay-space-3))` 抵消卡内下边距、`padding-bottom` 归零，使整行底边与键底边同在卡片内缘；两者同为 `2 × radius.composer` 高，竖直中心自然重合。回归断言底栏与按键的竖直中心偏差 ≤1px。
+
+**过程中发现并修掉一个自己引入的真实缺陷**：首次打补丁时把三行说明文字插在上一段注释的 `*/` 之后，成了注释块外的裸文本，CSS 解析器随即丢弃紧随其后的整条 `.agent-chat-composer-actions` 规则——表现是底栏所有 padding/margin 计算值全为 `0px`。是靠浏览器实测（computed style 全 0）定位的，不是靠读代码猜的。已修正注释块并加了一次「注释块外不得有裸中文行」的静态校验。教训：用脚本改 CSS 时，插入位置必须落在注释块内部，改完要回读确认解析结果，不能只看 diff。
+
+**本轮最终验证（2026-10-04）**：typecheck exit0；生产构建通过；全量组件回归（Node 24.21.0 单 worker）79 文件 **612/612**；真实 Chromium 对齐用例 **14/14**；浏览器全量 **38/38**。`node scripts/check-docs.mjs` exit 0。唯一仍未闭合的是本节记录的 notice 版式覆盖缺口，与并行 Agent 未提交的 `apps/api` 编译错误。
+
+### 10.11 多轮上下文核对与重复消息复读（2026-10-04，只记录不改代码）
+
+**用户报告的现象**：协作页同一会话连发三条内容相同的「你好」，AI 三次回复逐字相同，且输入 token 只从 1947 涨到 1985，用户据此怀疑「Agent 没有上下文」。
+
+**核对结论：上下文正常，重复回复是模型行为。** 取证方式为直接读运行中的真实库（本机 `relay_trial`，`assist_sessions.title` 含 `1790646373833` 的会话，共 20 条消息），不是靠读代码推断。输入 token 增量与「新加入的那一轮」逐轮精确对应：
+
+| assistant seq | 本轮用户输入 | 输入 token | 增量 |
+|---|---|---|---|
+| 12 | 你好 | 1808 | — |
+| 14 | 你现在能改文件吗 | 1831 | +23 = 该用户句约 10 + 上轮回复 9 + 角色开销 |
+| 16 | 你好 | 1947 | +116 = 「你好」2 + seq 14 那条 106 token 长回复 + 开销 |
+| 18 | 你好 | 1966 | +19 = 「你好」2 + 上轮回复 9 + 开销 |
+| 20 | 你好 | 1985 | +19 = 同上 |
+
+若历史未发送，同一输入的三次调用 token 数应完全相同（增量恒为 0）。代码路径与之一致：`assist-commands.ts` 分配 USER `seq` / ASSISTANT `seq+1`；`listCompletedHistory` 取 `seq <= assistantSeq AND status='COMPLETED'`（`assist-repository.ts:104`），配对的用户消息必然在内；`openai-compatible-model-port.ts:150` 将 `turns` 逐条映射为 Human/AIMessage 原样发出。**注意排除一个误读**：seq 2 的首条回复里出现「继续讨论 UI 取证相关」，那句来自 scope 头的 Project 标题「UI取证-20260929 空项目B」，**不是**历史，不能当作上下文已送达的证据。
+
+**复读的真实成因**（模型侧，非上下文缺失）：`temperature: 0` 贪心解码（`openai-compatible-model-port.ts:78`）+ 末轮结构同构——历史中已存在「你好 → 你好！有什么需要我协助的吗？」，当前末句又是「你好」，复制上一轮即最高概率延续。反证：seq 10 的「你好」因上一轮问的是别的问题，回复明显不同；seq 12 是**首次**连续「你好」就已塌成通用问候。
+
+**已知能力缺口（用户选择本轮只记录、不改代码）**：提示词未告知模型「用户可能重复发送同一条消息」，代码也没有去重或提示，该模型在此情形只会复读。后续若要处理，最小改动是在 `systemPromptFor('DISCUSS')` 增加一条约束（不逐字复读上一条，改为指出重复并追问真实意图），不改路由/命令 Owner/HTTP 契约/数据库，无 Breaking Change。**本项未修改任何代码，未跑任何测试，不构成任何功能通过或修复结论。**
+
+### 10.12 缓存命中率与上下文占用的诚实舍入（2026-10-04）
+
+**改动范围**：仅 `apps/workbench/src/views/AssistView.tsx` 的 `ContextMeter` 展示层，新增模块级纯函数 `formatUsagePercent`，并为两处百分比各加一条回归。**未改** API、数据库、Provider 适配、命令 Owner、权限与 `data-testid`；`design-tokens.json` 未新增数值（只改算法不改视觉）。**Breaking Change：No。**
+
+**修复的两个缺陷**（均先写测试确认在旧实现下失败）：
+
+| 缺陷 | 旧行为 | 新行为 |
+|---|---|---|
+| 部分命中被四舍五入成满命中 | `input=1000, cache_read=996` 显示「缓存命中 100%」——把 4 个 token 未命中读成完美命中，方向最坏 | 显示「缓存命中 99.6%」 |
+| 上报超出分母未钳制 | `cache_read=1200 > input=1000` 显示「缓存命中 120%」 | 钳到「缓存命中 100%」 |
+
+**分母口径经源码核对后确认不变**：Relay 两条 Provider 路径（`model-port-verify.ts:198` 读 `usage.prompt_tokens`；`openai-compatible-model-port.ts:232` 读 `usage_metadata.input_tokens`）都是 OpenAI 兼容语义，`input_tokens` 已含 cached 部分；迁移 `0049` 的 `ck_model_calls_cache_within_input` 约束 `cache_read + cache_creation <= input_tokens` 与之一致。**因此未采用 deepseek-harness 的三桶求和公式**——该式成立是因为 DeepSeek 原生 API 的 cache 与 input 互斥，语义相反，照抄会算错。只借鉴其「不让部分命中显示成 100%」的意图并简化为整数阈值舍入。上游对照归[研究 §1.4](../research/p00-source-study.md)，规则归[工作台 §18.6](../frontend/workbench-design.md)。
+
+**验证**：算法正确性另以穷举核对（分母 1–2000、分子 0–分母−1，共 2,001,000 组合）：`value < limit` 时输出 `100` 的次数为 **0**，最大值 `99.9`；`value >= limit` 恒为 `100`。四条既有场景（`75%`/`未采集`×2/`尚无模型调用`）结果不变，作为回归保护未改。工程出口：两端 `tsc --noEmit` exit 0、生产构建 exit 0、组件回归 **79 文件 615/615**、`node scripts/check-docs.mjs` exit 0。
+
+**过程中修掉的两处他人未提交缺陷**（非本轮设计范围，但阻塞全部验证，且修复意图无歧义）：`AssistView.tsx` 的 props **类型**声明了 `firstMessageOwner`/`firstMessageProcess`、函数体也读取它们，但**解构模式漏绑**导致 `ReferenceError` 使整个组件无法渲染；`pendingFirstMessage`/`onPendingFirstMessageChange` 反之——解构已绑、类型未声明。`firstMessageOwner` 经 `git show HEAD` 确认在 HEAD 中不存在，属并行 Agent 未提交的重构缺口。本轮只补这两组绑定与其类型声明，未改其重构逻辑。
+
+**覆盖缺口（如实记录）**：未跑真实 Windows 窗口观察、浏览器验证与真实 Provider 读数；`9999/10000` 一类两位小数读数（显示 `99.9`）无组件断言覆盖，仅由穷举核对覆盖「不出现假 100%」这一不变量。**本项不改变 M04–M07 与 N 阶段任何状态。**
+
+**同项追加：N00 基线脚本扩缓存命中率测量（2026-10-04）**。只扩 `apps/api/scripts/n00-baseline.mjs` 的既有聚合，**未新增端点、表、迁移或页面**（Trace 响应 `trace-api.ts:34-35` 本就返回两个缓存字段，脚本此前取到未用）。新增：路径级 `cache_hit_percent_total`、`cache_read/creation/basis_input_tokens`、`cache_reported/unknown_calls`，以及按 `started_at` 排列的 `cache_by_call` 逐调用序列（用于定位前缀失效断点）；报告新增「缓存命中率」小节。**口径**：`null` 表示 Provider 未上报，报告显示「未采集」，绝不按 0% 计。`node --check` exit0。
+
+**真实库核对（本机 `relay_trial` 的 `model_calls`）**：15 次调用、18394 输入 token、`usage_cache_read_tokens` **上报数为 0** ——朴素算法会输出 0%，真实情况是该 Provider 从未上报缓存字段，新口径输出「未采集」。这正是必须区分 null 与 0 的实证。另以三组合成数据核对聚合逻辑：前缀稳定（60%）、前缀每轮失效（0%）、混合上报（分母只算 2 次已上报调用得 4000 而非 5000，命中率 50%）。
+
+**本项未产出任何真实命中率基线**：`n00-task-set.json` 三条路径的 `runs` 仍为空，且本机无稳定的真实 Provider 多轮长会话——命中率只在多轮带长前缀时才有意义。因此**不得声称命中率已提升或已测得**。上游机制对照与口径依据归[研究 §1.4](../research/p00-source-study.md)与 §1.5。
+
+### 10.13 用户消息在视野外时吸顶（2026-10-04）
+
+**需求**：AI 回复很长时，让人知道眼下这段正文是从哪条原始消息来的。**规则与视觉约束**归[工作台 §18.6.1](../frontend/workbench-design.md#1863-已回退用户消息吸顶2026-10-04-实施同日回退)。**改动**：新增 `apps/workbench/src/lib/assistTranscriptPin.ts`（纯判定函数）、`AssistView.tsx` 的 `pinnedUserMessageId` state 与 `syncPinnedUserMessage`、`AssistView.css` 一条 `.agent-message-slot[data-pinned="true"]` sticky 规则。**未改**路由、命令 Owner、HTTP 契约、数据库、权限、`data-testid` 与既有 `assist-latest`；`design-tokens.json` 无新增数值（只复用 `color.bg.canvas`）。**Breaking Change：No。**
+
+**首版实现有两个真实缺陷，均由用户截图与真实 Chromium 用例暴露，不是靠读代码发现：**
+
+| 缺陷 | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| 长消息被遮挡 | 吸顶行的不透明底色盖住上方那条还露在视野里的用户消息 | 初版只判「顶边越过上沿」取最后一条。长用户消息顶边早越过，而它**下面**那条越得更彻底，于是选中下面那条，正好盖住长消息剩余部分 | 判定改为「视野里没有任何用户消息」——用户自己看得见的那条就不提示，也就不会被遮挡 |
+| 吸顶凭空出现在半空 | 最新那条还在视口下方 1019px 时被吸到上沿 | 「视野里没有用户消息」成立，但候选顶边尚未到达上沿，sticky 只能按住已该滚出的行 | 增加第二条：候选顶边必须已越过上沿 |
+
+**第三条修正是 Chromium 用例量出来的 `offset = 1019px` 逼出来的**，不是推测：`position: sticky` 生效后被钉行顶边恒等于容器上沿，即它永远「可见」；若把它算进「视野里还有用户消息」，每次滚动都会取消吸顶、下一帧又吸上，**来回抖动**。因此可见性判定必须排除当前被钉的那条（纯函数第三参 `ignoreIndex`）。
+
+**验证（本轮实际跑出的结果）**：判定规则纯函数 `assistTranscriptPin.spec.ts` **7/7**，含长消息遮挡、压线、容器偏移与空列表；组件回归 `collaborationWorkspace.spec.ts` **71/71**（新增 4 例：视野内不显示/视野外吸顶、长消息不遮挡、AI 行永不被选中、隐藏布局不重算），几何按文档坐标 + `scrollTop` 推算以保证滚动自洽；受影响三文件 **87/87**；两端 `tsc --noEmit` 对本轮文件无错；`node scripts/check-docs.mjs` exit 0。全量组件回归 **81 文件 637/638**，唯一失败 `run-events.spec.ts > 断线以已消费 seq 补历史` 单跑 **5/5 通过**、全量稳定失败，`git diff --name-only` 确认本轮未触及 `run-events.spec.ts` 与 `RunView`，判为并发下既有不稳定，**未因此放宽断言**。
+
+**未覆盖出口（如实记录，不声称通过）**：
+- **真实 Chromium 几何验证被既有布局缺陷阻塞**：`.collab-center` 的转录容器当前被压到 **16px 高**（`.collab-center` 实测 672px，而 `scrollHeight` 1616px）。`styles.css` 正被并行 Agent 大幅改动（45 增 21 删），该压缩当时无法在不动他人未提交工作的前提下归因修复。两条浏览器用例因此**显式 `test.skip` 并附原因**，不是假通过。吸顶的真实 sticky 几何与不透明底色遮挡效果**尚未取得浏览器证据**。该布局缺陷已于同日定位并修掉，见 [§10.15](#1015-转录容器-16px-视口缺陷已修2026-10-05)；吸顶功能本身随后按 §10.14 整体回退。
+- 该浏览器套件另有 1 例既有失败「复制是纯客户端剪贴板动作」：已用 `git stash` 移除本轮 `AssistView` 改动后复跑**照样失败**，确认与本轮无关。
+- 未跑真实 Windows 窗口观察、真实 Provider 会话、原生 IME、DPI 与内容缩放。真实窗口下的观感与长消息体验未验。
+- 并行 Agent 的未提交文件（`CreateGoalView.tsx`、`createGoalEntry.spec.ts`、`zz-debug.spec.ts`）当前使 `tsc --noEmit` 报 6 处错误，均不在本轮文件内，按共享工作区约束未覆盖。
+
+**本项不改变 M04–M07 与 N 阶段任何状态。**
+
+**同项追加：人工反馈后的两处修正（2026-10-04）**。用户在真实窗口试用后指出两点：①「我 / 时间」那两个字样被推得很右、不跟消息走；②生成中三点动效消失。
+
+| 反馈 | 根因 | 修法 |
+|---|---|---|
+| 「我 / 时间」不在右侧 | 用户消息是 `row-reverse` 的右对齐气泡，meta 是气泡第一个子元素、落在气泡内侧；消息短时那两个字停在离右缘很远的位置 | meta 相对整行绝对定位右对齐；脱离文档流后用 `::before` 补回等高一行防止正文上移。气泡宽度与右对齐不变 |
+| 三点动效消失 | **不是动效被禁用**，是三点根本没渲染：渲染条件含 `content === null` 且排除「preview 可读」，preview 一到达条件就为假，流式输出期间唯一的活体信号整段消失，只剩静态草稿文字 | 三点改为 `RUNNING`/`PENDING` 期间一直显示，与有无正文、预览无关；取消中不显示 |
+
+**本轮验证**：新用例在**回退实现后确认失败**（`expected false to be true`，preview 到达后三点消失），恢复修复版后 `assist-preview.spec.ts` **7/7**。
+
+### 10.15 转录容器 16px 视口缺陷已修（2026-10-05）
+
+**用户报告的现象**：输入框上方与消息区之间有一条读不到文字的空白带，最新回复看不全。§10.13 与 §10.14 两次记为「被既有布局缺陷阻塞、无法在不动他人未提交工作的前提下归因修复」的那个缺陷，本轮已定位并修复。
+
+**取证方式**：用真实 Chromium 夹具逐层量 `getBoundingClientRect` 与 `getComputedStyle`，不是读代码推断。缺陷态下 `.collab-center` 高 672px，`.agent-chat-transcript` 只有 **16px**（正好一行文字高），`scrollHeight` 3322px，最新一条 995px 高的回复只有 8px 落在滚动窗口内。
+
+**根因（三处，缺一不可）**：
+
+| # | 元素 | 实测 | 机制 |
+|---|---|---|---|
+| 1 | `.agent-assist` | `flex: 1`（`flex-basis: 0`） | `basis:0` 时该项不按内容参与收缩，同列目录范围条占 424–478px 也不肯让出高度，整列只剩 174px |
+| 2 | `.assist-queue` 空态 | `min-height: 4.5rem`（72px）、`visibility: hidden` | 原本为「0↔1 时转录区高度不跳动」预留的**不可见占位**，于是每一条会话都在输入器上方永久留出一条 72px 空白带 |
+| 3 | `.execution-summary` | `flex: 0 1 auto` + 默认 `min-height: auto` | flex 项目默认拒绝缩到内容以下，267px 的摘要反过来把转录区压没 |
+
+三处都作用在「这一列里唯一可伸缩的转录区」上，所以它被挤成一条缝；**没有任何元素绘制在文字之上**，视觉上的「遮挡」是高度没分配给文字。
+
+**改动**：`AssistView.css`（转录区 `flex: 1 1 auto` + 阅读下限、空队列不占位）、`CollaborationView.css`（`.agent-assist` basis 改 `auto`）、`FolderScope.css`（执行摘要 `min-height: 0`）。**Breaking Change：No**（纯展示层，未改路由、命令 Owner、HTTP 契约、数据库、权限与 `design-tokens.json`）。规则归[工作台 §18.6.0](../frontend/workbench-design.md#1860-消息区高度不再被同列区块挤没2026-10-05)。
+
+**新增回归 1 条**（`uiOption2FirstSession.spec.ts`「空队列占位不占高度，消息区不被输入器上方的空白挤掉」）：空队列占位零高度、消息区与输入器之间无任何不可见占位、消息区高度守住绝对下限 96px 且占中栏 >15%、滚动位置已跟随最新。**先写断言并确认它在缺陷实现下失败**（`queueHeight` 实收 72、`transcriptHeight` 实收 16），再改实现。
+
+**一处断言口径修正**：「对话区只有一个纵向滚动容器」原先扫描 `.collab-center` 全部后代，修复后目录范围条展开时会自己滚动（`max-height: 40%`，实测内容 485px）而被计入。它是消息区上方的**上下文入口**，不是对话区的一部分，断言改为排除 `.folder-scope-bar` / `.collab-existing-work` 子树；对话区内部仍只允许消息流一个滚动 Owner，断言未放宽到「一个也没有」。
+
+**本轮验证（实际跑出）**：`tsc --noEmit` exit 0；全量组件回归 **89 文件 730/730 通过**；真实 Chromium `uiOption2FirstSession.spec.ts` **16/16 通过**；`node scripts/check-docs.mjs` exit 0。
+
+**如实记录的覆盖缺口**：
+
+- 未跑真实 Windows 窗口观察、系统 DPI 与内容缩放（200%）、中文 IME。缺陷态与修复态的几何证据均来自真实 Chromium 1280×720 与 2000×1140 两个视口，真实窗口观感仍待验证。
+- `run-events.spec.ts > 断线以已消费 seq 补历史` 在全量跑批中偶发失败、单跑 4 次全通过；§10.13/§10.14 已登记为并发下既有不稳定，本轮连跑全量 3 次均 730/730，**未因此放宽任何断言**。
+- 目录范围条展开时的内部滚动是新增的第二个滚动容器。它只在用户主动展开上下文面板时存在，收起时对话区仍是唯一滚动 Owner；是否改为完全折叠以彻底消除双滚动条，属产品决定，本轮未做。
+
+**本项不改变 M04–M07 与 N 阶段任何状态。**
+
+### 10.14 吸顶已回退、「我 / 时间」贴右缘两次返工（2026-10-05）
+
+**吸顶部分已按用户要求整体回退**：删除 `src/lib/assistTranscriptPin.ts` 与 `tests/assistTranscriptPin.spec.ts`、`AssistView` 的 `pinnedUserMessageId` state / `pinnedUserMessageIdRef` / `setPinnedUserMessageId` / `syncPinnedUserMessage` / `userMessageIds`、`AssistView.css` 的 `.agent-message-slot[data-pinned="true"]` 规则、`<li>` 上的 `data-pinned` 属性、`collaborationWorkspace.spec.ts` 中 4 条吸顶用例与几何桩、2 条吸顶浏览器用例，以及并行 Agent 为该功能新建的 `tests/assistStickyPinSync.spec.ts`（功能已回退，其配套测试必然失败，属本次回退范围）。**未回退**的是同日单独提出并确认的「我 / 时间」贴整行右缘与三点常显两项，规则归[工作台 §18.6.1](../frontend/workbench-design.md#1861-用户消息的我-时间贴整行右缘2026-10-04)与 [§18.6.2](../frontend/workbench-design.md#1862-三点是这条还在跑的持续信号2026-10-04)，回退原因归[§18.6.3](../frontend/workbench-design.md#1863-已回退用户消息吸顶2026-10-04-实施同日回退)。
+
+**回退原因（如实记录）**：该功能在实现期连续暴露三个真实缺陷（长用户消息被遮挡、候选未到上沿被拽到半空、sticky 生效后被钉行自身「永远可见」导致吸顶/取消来回抖动），修完仍引入 `setState` 自我触发的无限循环（`Maximum update depth exceeded`），需改用 ref 绕开；同时浏览器几何验证长期被既有布局缺陷阻塞（转录容器视口 16px，该缺陷已于同日修掉，见 §10.15），只能靠人工观察。
+
+**「我 / 时间」贴右缘的返工（2026-10-05）**：用户用真实截图指出 meta 绝对定位后**「我 / 时间」压在第一行正文上**。新增 Chromium 几何断言量到实际重叠 **13px**，确认不是观感问题。最终方案为「meta 留在文档流 + 横向负外边距贴边」。方向全部靠实测纠正，右缘偏差依次为 **32px → 16px → 16px → 0**，分别对应四个被忽略的约束：`row-reverse` 下负外边距方向相反、`right` 的内边距、`justify-content` 对单行 `flex-wrap` 容器无效、`.agent-message-body > *` 的 `max-width: 100%` 抵消负外边距。
+
+**断言自身也修过一处**：曾把「贴右缘」绑死在 `<time>` 与「我」上，而夹具消息可无 `created_at`，量的是错对象、报出 16px 假象。改为断言 **meta 最后一个可见子元素** 的右缘，并同时覆盖「正文起点不低于 meta 盒底」。
+
+**最终验证**：全量组件 **85 文件 668/668 通过**（多于回退前，含并行 Agent 同期补入的用例）、两端 `tsc --noEmit` exit 0、真实 Chromium `uiOption2FirstSession.spec.ts` **15/15 通过**、`check-docs` exit 0。**仍未覆盖**：真实 Windows 窗口观察、原生 IME、DPI 与内容缩放；转录容器 16px 视口的既有布局缺陷当时未修，已于同日修掉（见 §10.15）。
+
+**本项不改变 M04–M07 与 N 阶段任何状态。**

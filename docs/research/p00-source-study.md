@@ -67,6 +67,72 @@ git -C .research/upstream/codex sparse-checkout disable
 
 本轮仅更新缓存和阅读/对比源码，未安装依赖、构建或运行上游测试，未调用 Provider；没有将 Harness 或其插件平台整合进 Relay。后续 UI 改动应把上述机制映射到现有 workbench-design、design-system 和设计 tokens，再以真实页面与业务路径验证。
 
+### 1.3 会话执行计划机制对照（2026-10-03）
+
+本轮依据官方公开源码与文档进行只读比较，未安装、构建或运行这些 Agent。固定源码提交限定本次结论；在线文档和 main 链接只是读取时点的依据，不作为 Relay 已锁定的依赖版本。OpenCode 此次为在线查阅，未新增本地克隆；Codex 沿用 §1.1 的研究缓存。
+
+| 对象 | 核验机制与一手来源 | Relay 采用与差异 |
+|---|---|---|
+| OpenCode，`907b3bc518fa48e90e8ec24dd327d13eee71c36c` | [`todowrite`](https://github.com/anomalyco/opencode/blob/907b3bc518fa48e90e8ec24dd327d13eee71c36c/packages/opencode/src/tool/todo.ts)提交整份 `{content,status,priority}` 列表；[Todo Service](https://github.com/anomalyco/opencode/blob/907b3bc518fa48e90e8ec24dd327d13eee71c36c/packages/opencode/src/session/todo.ts#L29-L50)在事务内删除会话旧行、按顺序重建，再发布 `todo.updated`；列表按会话与位置定位 | 借鉴原子快照和事件驱动展示。Relay 的步骤若要关联证据，使用稳定身份与计划 revision，不用位置或文案定位；参数和状态枚举须严格校验 |
+| OpenCode 的会话底部 UI | [`SessionTodoDock`](https://github.com/anomalyco/opencode/blob/907b3bc518fa48e90e8ec24dd327d13eee71c36c/packages/app/src/pages/session/composer/session-todo-dock.tsx)计算 completed/total，折叠时优先显示 in_progress、其次 pending；点击切换折叠，复选框只读 | 借鉴输入区附近的紧凑计划及只读状态。工具更新、折叠偏好和正式完成保持不同职责；实际视觉仍消费 Relay 的设计系统与 tokens |
+| Codex，`e7ea5f4a8658ebe49e879be933effed2340fa276` | [`PlanHandler`](https://github.com/openai/codex/blob/e7ea5f4a8658ebe49e879be933effed2340fa276/codex-rs/core/src/tools/handlers/plan.rs)解析 `update_plan`，发 `EventMsg::PlanUpdate`；[应用服务](https://github.com/openai/codex/blob/e7ea5f4a8658ebe49e879be933effed2340fa276/codex-rs/app-server/src/bespoke_event_handling.rs)转换为轮次计划通知。该清单工具与 Plan mode 分离 | 借鉴内部元数据工具和专用展示事件。该即时通知不能单独证明跨进程恢复；Relay 仍须持久保存计划、调用结果及幂等身份 |
+| Claude Agent SDK | [旧 TodoWrite 类型](https://code.claude.com/docs/en/agent-sdk/typescript#todowrite)维护整表；[进度追踪](https://code.claude.com/docs/en/agent-sdk/todo-tracking)公开 TaskCreate/TaskUpdate 等逐项工具及工具调用/结果关联；[任务列表说明](https://code.claude.com/docs/en/interactive-mode#task-list)说明跨压缩保留和命名列表。内部事务与锁实现没有本次公开源码依据 | 借鉴稳定项身份和调用结果配对；首片不引入多 Agent 分工、依赖调度或共享任务列表。上游 Task 名称不替代 Relay 的正式 Task；后台任务通知也不是清单完成证据 |
+| LangChain / Deep Agents | [`todoListMiddleware`](https://github.com/langchain-ai/langchainjs/blob/main/libs/langchain/src/agents/middleware/todoListMiddleware.ts)提供 `write_todos`，用 `Command` 更新图状态并回送 ToolMessage，拒绝同轮并行多次全量写；[持久化说明](https://docs.langchain.com/oss/javascript/langgraph/persistence)区分内存与持久 checkpointer | 借鉴 schema、串行更新与状态回送，不为一个清单切换 Agent factory。LangGraph 继续是唯一通用编排器，图状态不成为计划与业务事实的另一个写入 Owner |
+
+上述清单更新路径主要接受模型提交的步骤状态，不自行检查文件、测试或验收条件。Relay 的产品要求及分期归[总纲 §0.7](../../Personal_Workflow_OS_Master_Spec.md#07-会话内可折叠执行计划2026-10-03推荐设计)，实际 Owner、证据与恢复归[运行架构 §2.4](../architecture/runtime-context.md#24-会话执行计划的归属与持久更新推荐设计)。可折叠 UI、工具名或模块数量不构成论文创新证据；错误完成率、遗漏率、恢复及人工核对耗时仅为可选评价变量，正式实验须另行冻结对照与统计协议。
+
+### 1.4 缓存命中率呈现对照（2026-10-04）
+
+只读核对两个固定提交的源码，未安装、构建或运行。Codex 为 `blob:none` 部分克隆，本轮按 §1.1 的检出方式展开稀疏检出（`.research/upstream/codex` 现为全量），仅本条命令临时使用本机系统代理，未改 remote 或持久网络配置。
+
+| 对象 | 核验机制与一手来源 | Relay 采用与差异 |
+|---|---|---|
+| DeepSeek Harness，`639ed015397290b3745d163aafe02ffee4aa3f84` | [`token-format.ts`](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/client/ui-chat/src/client/chat/token-format.ts)的 `formatCacheHitPercent` 用整数倍增阈值与二分查找求精确进位单位，注释明确「不让部分命中四舍五入成 100%」；[`StatsPills.tsx`](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/client/ui-chat/src/client/chat/StatsPills.tsx)的分母是 `uncachedInput + cacheRead + cacheWrite` 三个互斥桶之和；[`translate.ts`](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/llm/llm-deepseek/src/translate.ts)把 `cache_read_input_tokens` / `cache_creation_input_tokens` 翻译为内部桶；`token-meter` 校验三桶与 `totalTokens` 不矛盾 | 借鉴「不让部分命中显示成 100%」的意图，**不照抄分母**：DSH 三桶求和成立是因为 DeepSeek 原生 API 的 cache 与 input 互斥，Relay 是 OpenAI 兼容语义（`input_tokens` 已含 cached），照抄会算错。采纳整数阈值舍入并简化为一处纯函数；DSH 的 `compact`/`detailed` 两档性能用量偏好不引入。规则归[工作台 §18.6](../frontend/workbench-design.md) |
+| DeepSeek Harness 前缀稳定性 | [`system-prompt/README.zh.md`](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/core/system-prompt/README.zh.md)说明首个变化 token 起前缀复用失效，并明确「不保证提供方共享缓存或实际命中率」；`agent-loop/tests/request-cache.e2e.ts` 以 `cacheReadTokens > 0` 做真实复用回归 | 采纳「比率是展示层派生态、不冒充已确认事实」的定位。Relay 的 `NULL` 与 0 必须可区分（迁移 `0049` 已如此约束），与 AGENTS.md 的可追溯要求一致 |
+| Codex，`e7ea5f4a8658ebe49e879be933effed2340fa276` | [`protocol.rs`](https://github.com/openai/codex/blob/e7ea5f4a8658ebe49e879be933effed2340fa276/codex-rs/protocol/src/protocol.rs)的 `TokenUsage` 只有 `input_tokens` / `cached_input_tokens` / `cache_write_input_tokens` 等计数；[`sse/responses.rs`](https://github.com/openai/codex/blob/e7ea5f4a8658ebe49e879be933effed2340fa276/codex-rs/codex-api/src/sse/responses.rs)从 `input_tokens_details.cached_tokens` 取值；TUI [`thread_usage.rs`](https://github.com/openai/codex/blob/e7ea5f4a8658ebe49e879be933effed2340fa276/codex-rs/tui/src/status/thread_usage.rs)展示为 `12.3K input (8.1K cached)` 括号形式 | **无任何比率计算**，只有计数与减法。Codex 在此机制上无参考价值，不引入括号式计数替代百分比 |
+
+Codex 的 `prompt_cache_key`（如 guardian-v2 按 `guardian-v2:{thread_id}` 构造）是缓存路由键，与命中率呈现无关。两者共同点是都把 Provider 报告的原始字段留存为事实源，比率只作为展示派生。
+
+### 1.5 缓存命中率测量口径（2026-10-04）
+
+在 §1.4 的机制对照基础上确定 Relay 自身的测量口径。数据来源是 Trace 已持久化的 `model_calls.usage_cache_read_tokens` / `usage_cache_creation_tokens`（迁移 `0049`），Trace 响应已包含这两个字段（`trace-api.ts:34-35`），**不新增端点、表或迁移**。
+
+| 口径项 | 取法 | 理由 |
+|---|---|---|
+| 分子 | 已上报调用的 `usage_cache_read_tokens` 合计 | 直接取 Provider 报告值，不推算 |
+| 分母 | **同一批已上报调用**的 `usage_input_tokens` 合计 | OpenAI 兼容语义下 `input_tokens` 已含 cached 部分（迁移 `0049` 的 CHECK 约束与此一致）；混入未上报的调用会让分子分母口径不一致 |
+| 未上报 | 单独计 `cache_unknown_calls`，不进分子也不进分母 | NULL 是「Provider 没有报告这个字段」，不是「没命中缓存」；当 0 计会把不支持缓存的 Provider 算成命中率 0% |
+| 全部未上报 | 命中率报 `null`，报告显示「未采集」 | 与前端 `AssistView` 的「缓存未采集」同一语义 |
+| Mock 与真实 Provider | 分开统计，不合并 | `fake-model-port.ts` 全部返回 `cacheReadTokens: null`，混入会把基线算成假的 0% |
+| 逐调用序列 | 按 `started_at` 排列输出每次调用的命中率 | 聚合数字看不出前缀在哪一轮失效；断崖位置才是定位依据 |
+
+**本机真实库实测（`relay_trial`，`model_calls`）**：15 次调用、18394 输入 token、`usage_cache_read_tokens` **上报数为 0**。即朴素算法 `Σcache_read / Σinput` 会输出 **0%**，而真实情况是**该 Provider 从未上报缓存字段**。新口径输出「未采集」。这是本次扩脚本的主要动因，也说明为什么 `0049` 的注释坚持 NULL 与 0 必须可区分。
+
+未做：真实 Provider 多轮长会话的命中率基线（当前无稳定多轮会话，`n00-task-set.json` 三条路径的 `runs` 仍为空）；前缀分块阈值测量；压缩时机对前缀的影响测量。**本节不构成任何命中率提升结论**，规则归[工作台 §18.6](../frontend/workbench-design.md)，成绩归[验收表 §10.12](../testing/overall-acceptance-2026-09-28.md)。
+
+### 1.6 工具调用呈现与刷新机制对照（2026-10-04）
+
+C 片开工前的只读对照，为「协作页如何呈现模型实际做了什么」提供上游依据。只读源码，未安装依赖、未构建、未运行上游测试、未调用 Provider。Codex 为 `.research/upstream/codex` 的全量工作树，DeepSeek 为 §1.2 记录的稀疏范围，AI SDK 为 §1.1 固定的 `ai@7.0.107`。
+
+**本节更正一处既有提法**：§1.3 对照的是 OpenCode、Codex、Claude Agent SDK 与 LangChain，不含 DeepSeek Harness；该节及全文出现的 `claim` 指 Relay 自己 recovery 实验的 claim epoch（如 §7「跨进程审批与 UNKNOWN 局部恢复实验」），与 DeepSeek Harness 的同名机制无关。本节单独核对 DSH 的 `claim`，结论见下表「持久 Inbox 认领」行。
+
+| 对照问题 | 当前源码机制与固定提交依据 | Relay 采用与差异 |
+|---|---|---|
+| 推送粒度 | Codex 对每个工具项发两条通知 `ItemStartedEvent` / `ItemCompletedEvent`（`codex-rs/protocol/src/protocol.rs:1939-1960`），app-server 映射为 `item/started`、`item/completed`（`app-server-protocol/src/protocol/common.rs:1968-1995`）；DeepSeek 把 `tool/call` 与 `tool/result` 作为**持久** Session 事件落库，`callId` 配对、结果事件用 `surfaceOp: 'append'` 与 `sourceEventSeqs: [callSeq]` 回指调用（`packages/core/session/src/types.ts:356-385`、`packages/core/agent-loop/src/tool-calls.ts:282-289`）；AI SDK 是消息流内的 7 态判别联合（`packages/ai/src/ui/ui-messages.ts:284-401`） | 两家上游的共同形态是「工具事件本身是持久记录 + 逐项推送」，不是轮询。Relay 的 `run_tool_calls` 已是持久账本，缺的是刷新事件来源而非推送机制。**采纳**：为 `run_tool_calls` 增加 Run 刷新事件（物理设计归第 60 节），前端按提示重读只读投影；不引入轮询。AI SDK 的消息流 part 不采纳，见本节末表 |
+| 传输与过载 | Codex 无 SSE，走 JSON-RPC 通知；入站通道容量 128，满时对请求回 `OVERLOADED_ERROR_CODE`、**通知直接丢弃**（`app-server-transport/src/transport/mod.rs:211-260`）。DeepSeek 用 WebSocket mux 上的 `follow()` 流，**普通转发通知不重放**，靠 `page()` 补洞（`docs/subsystems/web-client.md:81-85`） | 两者都存在丢通知的现实。Relay 的 SSE 已按 `after` / `Last-Event-ID` 游标可补（`run-events-api.ts:18-32`），且投影本身是幂等只读，因此丢一条提示最坏是晚一拍刷新，不需要轮询兜底 |
+| 折叠与截断 | Codex 折叠态只给命令 ≤2 行 + 输出 3 个**屏幕行**预览，省略号带计数 `… +N lines`（`tui/src/exec_cell/render.rs:304-311`、`tui/src/tool_output.rs:19-20`），折叠预算按屏幕行而非逻辑行计算以防超长行撑爆视口（`exec_cell/render.rs:666-758`）；展开态是命令全文、输出全文、退出码与耗时（`tui/src/exec_cell/transcript.rs:16-70`）。DeepSeek 把 head+tail 切分抽成纯函数 `headTailCap` 供 Terminal 与 Diff 共用（`packages/client/ui-primitives/src/head-tail-cap.ts:13-27`、`TerminalBlock.tsx:10-11`），展开按钮文案与 aria 都带隐藏行数（`head-tail-cap.ts:4-10`），读与搜索结果携带显式 `truncated`/`total`，注释写明「UI 绝不能把被截断的结果呈现为完整」（`packages/core/tools/src/presentation.ts:223-231`） | **采纳**：折叠态必须给出可量化的省略计数并保留尾部（错误通常在尾部），展开态给参数全文、结果全文、退出码与耗时；被截断的结果不得呈现为完整。这与 Relay 既有 `projectToolResult` 写出的 `{ truncated, omitted_bytes }` 是同一要求（`apps/api/src/application/tool-loop.ts:492-498`） |
+| 读与写的呈现分组 | Codex 协议上读文件、列目录、搜索与写命令**同属** `exec_command`、同一条 `CommandExecution` item 路径，但呈现分开：连续成功的只读调用聚成 `Exploring` / `Explored` 组并合并为 `Read a, b, c`，失败数单列在组头 ` · N failed`，写命令是单条 `Ran`（`tui/src/exec_cell/render.rs:313-448`、`244-260`） | **采纳**：聊天区摘要按类别聚合读操作、失败数单列，不用逐条罗列。Relay 额外拥有上游没有的显式工具类别（`tool-catalog.ts` 的封闭词表），因此分组不依赖命令文本解析 |
+| 未结算项的呈现 | Codex 进行中的执行是活动 cell，流式输出写有界缓冲（1 MiB / 50 行 / 单行 head-tail，`tui/src/exec_cell/live_output.rs:5-17`）而不写入历史，结束后由定稿输出替换预览（`tui/src/exec_cell/model.rs:20-64`）。DeepSeek 的 `PreparingToolCall` 没有 `argsRaw`（参数尚不可得，`packages/client/ui-conversation/src/client/contract/records.ts:274-283`），且所属 step/turn 关闭后仍无持久 `tool/call` 的块**什么都不渲染**（`packages/client/ui-chat/src/client/conversation-nodes/tool.ts:41-49, 190`）。AI SDK 用 `input-streaming` + `DeepPartial` 表达参数未完整（`ui-messages.ts:299`） | **部分不采纳**：Relay 的参数在落库前已通过 schema 校验（`tool-loop.ts:76`），`REQUESTED` 行就带完整 `arguments`，没有上游那个「参数还在流里」的缺口。但「未结算不算发生过」采纳：`REQUESTED` / `PREPARED` 不进摘要计数，只有 `SETTLED` 才算已读已写 |
+| 轮次级改动清单 | Codex 协议确有 `turn/diff/updated`，但由 `TurnDiffTracker` 从 `apply_patch` 的已提交增量重建、不重读工作区，且有 100ms 超时预算，超时退化为粗粒度 diff（`codex-rs/core/src/turn_diff_tracker.rs:15-17`）；TUI 收到后只 `debug!` 不渲染（`tui/src/chatwidget/protocol_requests.rs:168-171`），用户看到的「改了哪些文件」只是多个 `FileChange` item 的累积。DeepSeek 有真正的轮次级 changed-files 卡片，但内容是 Host 服务按需计算、**只对存活会话提供**，文档明写「Host 重启后重开的会话对更早的轮次没有 changed-files 卡片」（`docs/subsystems/deliverables.md:111-138`） | **两家最弱处都不可照搬**：前者不是权威变更记录，后者重启即丢。Relay 的改动清单从既有持久 `logical_operations` + 变化集账本 + `file-write-diff` 派生，不新增轮次 diff 概念 |
+| 审批与工具调用的关联 | Codex 的审批候选由服务端 `available_decisions` 下发，客户端只映射文案、不自行增删选项（`tui/src/bottom_pane/approval_overlay.rs:832-918`），`ReviewDecision` 默认值为 `Denied`（`protocol.rs:4196-4202`）；审批请求携带**未脱敏**原文，只有历史经 `redact_secrets`（`app-server/src/bespoke_event_handling.rs:713-715`）；等待审批且缺 `approval_id` 时先合成一条 `item/started` 让 UI 有可显示项（`bespoke_event_handling.rs:754-772`）。DeepSeek 的 `ApprovalRequest` **刻意不带工具参数**、只给 `callId`，注释写明是让回答方把提示挂到已流式送出的那次调用上，而不是渲染可能漂移的第二份副本（`docs/subsystems/approval.md:53, 56-81`）；结论词汇表封闭且 fail-closed，只有 `allowed-once` 是授权（`approval.md:21, 28`） | **采纳**：轨迹行按 `operation_id` 指向既有 `ACTION_APPROVAL` Review，不重渲染第二份参数；审批候选只由服务端给；默认拒绝。**不采纳** Codex v2 把 `TimedOut` 并入 `Decline` 的粗化（`app-server-protocol/src/protocol/v2/item.rs:81-84`）——那抹掉了人工拒绝与自动超时的区分，Relay 的等待批准 / 已批准 / 被拒 / 已取消四态必须分显 |
+| 展示投影与审计记录 | Codex 的 `ThreadItem` 二次投影会丢字段（`sandbox_type` 与 `model_context` 标 `#[serde(skip)]`，`command` 从 `Vec<String>` 压成 `String`，`items.rs:245-253`、`v2/item.rs:308`）；DeepSeek 刻意让 `presentationMeta` 只存可重放的结构化 JSON，禁止存 React props 或已选卡片（`docs/cookbook/adding-a-tool.md:48, 97`） | **采纳**：展示层从持久账本现算，投影不落库、不成为第二套事实。Relay 的 `result_ref` 即模型当时实际消费的有界内容（`run-tool-call-repository.ts:123-137`），界面读它即可与模型逐字节对账 |
+| 持久 Inbox 认领（非 UI 刷新） | DeepSeek 的 `claim` 是把排队的人类消息认领进运行中 Turn，事件为 `agent/inbox/spliced`，其 Definition 的 `publication` 明确为 `'none'`，即不驱动视图发布（`packages/client/ui-chat/src/client/conversation-nodes/inbox.ts:33-41, 126`）。Codex 的 `thread/queue/changed` 同样是**用户消息排队**通知而非事件投递保证，靠每线程锁串行并以 10 秒周期轮询 SQLite 发现跨进程变更（`codex-rs/ext/queue/src/service.rs:70, 89-120`） | 两者都与工具呈现无关，且依赖「单进程单会话、无并发 Worker」的前提。Relay 的 Task 排他与 Worker 并发语义不同，无可对应物；仅记录以免再次误引 |
+| 输入回显与权威记录 | DeepSeek 先建立本地 submission 回显、`await nextPaint()` 让出一帧，再以**同一 `requestId`** 发送；`observedInputs` 收集已被观察到的 `source.rpcId` 并据此隐去待定回显，回显渲染在 transcript 之后的独立 keyed 列表（`packages/client/ui-conversation/src/client/service.ts:271-293`、`ui-chat/src/client/chat/ChatView.tsx:38-55, 78-94`） | 与 Relay §18.5「同一原消息只解释一次、迟到失败不复活已清空 pending」同向。轨迹摘要同守此界：只依据已结算行，不依据本地乐观状态 |
+
+**明确不采用**：AI SDK 的 tool part 作为账本——它没有独立生命周期或 Owner，归约器**原地改字段** `part.state = options.state`（`packages/ai/src/ui/process-ui-message-stream.ts:230-244`），`reset-step` 删除当前 step 的全部 part（同文件 `896-911`），状态只在内存（`ui/chat.ts:583-589`），`reconnectToStream` 重连的是服务端当前仍活着的流、204 即放弃（`http-chat-transport.ts:262-272`）；更关键的是同一代码库存在两套互相矛盾的「完成」口径——`lastAssistantMessageIsCompleteWithToolCalls` 忽略 `output-denied`（`last-assistant-message-is-complete-with-tool-calls.ts:31-38`），而 `convertToModelMessages` 的 `ignoreIncompleteToolCalls` 保留它（`convert-to-model-messages.ts:62-74`），且两者都把 `output-error` 视为完成。这一层失败与成功不可区分，与 Relay「验证器故障不能算通过」直接冲突。另不采用 Codex 的进程内 `ApprovalStore`（会话创建时 `Mutex::new` 初始化、不落盘，`codex-rs/core/src/session/session.rs:1741`），重启即失效的批量授权不能当作可恢复授权；不采用 DeepSeek 的 `ToolCallView` 卡片词汇表（其 Web Client 自身并不消费，`packages/core/tools/src/presentation.ts:42-46` 与 `docs/cookbook/adding-a-tool.md:95`），引入它等于新增一套与 Relay 产物版本模型无关的「卡片意图」词汇。
+
+Relay 的采纳规则与本批次验收规格分别归[工作台 §18.8](../frontend/workbench-design.md)与[测试计划 §20.4](../testing/verification-plan.md)；物理设计归[第 60 节](../database/physical-design-postgresql.md)。本节不含本轮运行结果。
+
 ## 2. 机制采用表
 
 | 本项目问题 | 借鉴依据 | 本项目采用方式 | 不照搬的部分 | 验证依据 |

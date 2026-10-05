@@ -561,7 +561,7 @@ Execute 为 SSRF 安全 GET（tool-adapters.md 第 3 节 + OWASP）：**每一�
 
 `0018_m04_model_calls` 将每次 DRAFT、SemanticChecker、Assist 的实际 Fake/真实模型调用独立登记：`call_id`、原 StepAttempt 或 AssistMessage、非敏感 Provider/模型标识、可得的 request id、状态与已知或未知 token 数。重入产生新行；进程失去结果时留下 STARTED，不当作成功或零费用。语义检查结果证据可带 `model_call_id`；该事实表目前只有内部数据库查询，没有新增公开 HTTP 端点，不改变 Run/Assist 业务状态机。真实 Provider 外呼未在本轮执行，本节仍属开发自检。
 
-2026-09-30 工具输出拒绝的证据保全修复（**Breaking Change: No**）：模型返回原生工具参数或非文本内容时仍由 Adapter 拒绝，不执行工具；已有 `provider_request_id` 与 `usage` 字段保留拒绝前实际观察到的请求 ID 和合法规范化用量，缺失 ID、未观察用量保持 null，不复制工具参数、原始响应或异常正文。`ModelToolOutputError` 属于能力边界，消息的 `provider_error_kind` 仍为 null。先收到正文再拒绝时，失败结算删除临时预览，原调用已记录的首文本/首预览时间保留。当前 SDK 的 SSE 用量在流结束时才形成规范化 chunk，提前拒绝不推算未消费的 wire 用量。字段、状态码、取消/重试/完成权限不变；实际范围见[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+2026-09-30 工具输出拒绝的证据保全修复（**Breaking Change: No**）：模型返回原生工具参数或非文本内容时仍由 Adapter 拒绝，不执行工具；已有 `provider_request_id` 与 `usage` 字段保留拒绝前实际观察到的请求 ID 和合法规范化用量，缺失 ID、未观察用量保持 null，不复制工具参数、原始响应或异常正文。`ModelToolOutputError` 属于能力边界，消息的 `provider_error_kind` 仍为 null。先收到正文再拒绝时，失败结算删除临时预览，原调用已记录的首文本/首预览时间保留。当前 SDK 的 SSE 用量在流结束时才形成规范化 chunk，提前拒绝不推算未消费的 wire 用量。字段、状态码、取消/重试/完成权限不变；实际范围见[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。该拒绝语义适用于**不声明工具的入口**（Assist、Skill、语义检查）。2026-10-04 起，已声明工具的 DRAFT 入口对「正文与工具并存」不再拒绝，改为返回 `TOOL_CALLS` 并把该正文作为 `preamble` 交给结算方，理由与未持久化的边界见[运行架构 §2.3](../architecture/runtime-context.md#23-内部工具循环的对象身份与恢复2026-10-03-实施设计)。HTTP 契约、字段与状态码均不变。
 
 `0019_m04_draft_read_input` 为新 DRAFT 调用增加结构化输入 SHA-256 与原 `read_operation_id`/`read_invocation_id`（旧行保持 NULL）；操作历史的原正文不复制到计量表。FILE_READ/WEB_FETCH 成功证据按最多 16 KiB UTF-8 完整字符截取，并在 DRAFT 前按原 Manifest 估算口径计入预算；原正文 SHA-256、提取文本 SHA-256、实际片段 SHA-256 和 `UNTRUSTED_DATA` 标记随模型输入建立。额外元数据仍超预算则 DRAFT 以 `CONTEXT_REQUIRED_OVER_BUDGET` 失败且零模型调用。已结算类型化读取 `FAILED` 保留原操作和调用证据，Run 进入 FAILED、Task 释放回 READY；待处理控制意图仍先按安全点处理，`UNKNOWN` 仍需核对。**Breaking Change: No**：Delegate 参数、Run/Gateway HTTP DTO 与既有错误结构不变；本次改变的是新 Run 的内部动作顺序与模型输入。旧 DRAFT 已成功的 Run 保留旧顺序及原批准/操作身份。
 
@@ -831,10 +831,148 @@ Project 拥有接续点身份与说明；其他对象只保存捕获时的确切
 |---|---|
 | POST /api/v1/workspaces/{workspace_id}/working-directories/open | 200。需要 `command_id`、`root_path`（1–1024），可选 `project_id`。`status` 为 `READY` / `AMBIGUOUS` / `NOT_READY`；`AMBIGUOUS` 表示同一实际目录关联了多个项目，需再带 `project_id` 选一次；`NOT_READY` 带稳定 `reason`（`MULTIPLE_PROJECTS` / `PROJECT_ARCHIVED` / `RESOURCE_DISABLED` / `OVERLAPPING_OTHER_PROJECT`）。`write_readiness` 只是**只读**投影现有连接与权限，不创建连接、不放宽权限。已有重叠受管根时不会新开项目造出第二个写 Owner。不存在或不是目录 422。 |
 | POST /api/v1/workspaces/{workspace_id}/assist-sessions/{session_id}/execution-requests | 202。需要 `command_id`、`source_message_id`（该会话内一条已完成的 USER 消息）、`resource_id`（同项目 ACTIVE 受管资源）。返回 `decision`、`status`、`candidate_status`、`questions` 与候选摘要。原消息不属于该会话、非 USER 消息、未完成、会话未绑定 Project 或资源不可用时 409。同一原消息或同一 `command_id` 重放返回同一条请求，不重付模型整理成本。 |
-| POST /api/v1/workspaces/{workspace_id}/conversation-execution-requests/{request_id}/applications | 200。按固定的阶段命令身份建立真实 Task → READY → Delegate。候选不是 `READY`、受管资源不可用、或项目缺少绑定该目录的 `FILE_WRITE` / `CLI_RUN` 连接时 409 并给出具体原因；本端点**不创建连接、不放宽权限**。重复调用返回同一个 `task_id` 与 `run_id`。 |
+| POST /api/v1/workspaces/{workspace_id}/conversation-execution-requests/{request_id}/applications | 200。按固定的阶段命令身份建立真实 Task → READY → Delegate。候选不是 `READY`、受管资源不可用、或项目缺少绑定该目录的 `FILE_QUERY` / `FILE_READ` / `FILE_WRITE` / `CLI_RUN` 连接时 409 并给出**第一项缺失能力**的具体原因；本端点**不创建连接、不放宽权限**。重复调用返回同一个 `task_id` 与 `run_id`。 |
 | GET /api/v1/workspaces/{workspace_id}/conversation-execution-requests?session_id= | `{ items: 会话内最近的执行请求摘要[] }`，只读，不创建对象、不外呼。 |
 | GET /api/v1/workspaces/{workspace_id}/conversation-execution-requests/{request_id} | 单条执行请求投影；不属于该 Workspace 时 404。 |
 
-`cli_run_action` 只接受一个 `executable` 与 1–32 个字符串 `args`（可选 `max_output_bytes` ≤ 1 MiB），永远经 `shell: false` 的 CLI adapter 执行。它可与 `file_write_action` 组成「先改文件、再跑一次检查」的链；与 `mock_gateway_action`、`file_read_action`、`web_fetch_action` 混用一律 409。`FILE_WRITE` 与 `CLI_RUN` 都不是 `approvalPassthrough` 能力，因此每一次真实动作仍单独产生一条 `ACTION_APPROVAL` Review。
+**2026-10-04 改为冻结工具循环信封（用户选定方案 B）。** 解释阶段只产出**目标与范围**，`file_changes` 的每一项只有 `path` 与 `action`；带 `content` 会被确定性拒绝（`候选 INVALID`），因为解释模型没有任何目录访问，正文只能是编造。Delegate 时冻结 `tool_loop_action` 与 `scope_grant`，不再冻结 `file_write_action` / `cli_run_action`：
+
+- 工具词表按「本次真正要用、且本项目确实配了连接」生成：读集 `list_directory` / `find_paths` / `search_text` / `read_file` 必备；本次要写文件才加 `apply_changeset` + `read_change_set`；声明了检查才加 `run_check`；本项目配了 `GIT_READ` 连接才加 `git_status` / `git_diff` / `git_log`。少给一个工具就是少一条能力边界，因此不预先塞满词表。
+- **2026-10-04 补齐写能力开关**：候选 `task` 新增可选布尔 `writes_files`（用户是否明确要求改动这个目录里的文件）。写能力按 `writes_files === true || file_changes.length > 0` 判定，不再要求解释模型先猜出文件名——它没有任何目录访问，拿不准路径是常态。字段缺省按「列出了文件变更」推导，旧请求体继续得到同一判定，因此**请求与响应结构、字段语义均为 No Breaking Change**；只读盘点声明 `writes_files: false` 时不会获得写能力。
+- `scope_grant` 放行 `APPLY_CHANGESET`（本次要写文件时）与 `CLI_RUN`（声明了检查时）。**删除永远不在授权动作里**；扩大范围同样要再确认。**纯只读任务不产生 `scope_grant`**（`run_scope_grants.allowed_actions` 有 `cardinality >= 1` 的有意非空约束，空授权改为不落这条事实），对应的 `allowed_tools` 只有读集、`connections` 不含 `FILE_WRITE`。
+- 缺连接时报出**第一项缺失能力**：`FILE_QUERY` → `FILE_READ` → `FILE_WRITE` → `CLI_RUN` 按实际需要解析。只读准备此前无条件要求 `FILE_WRITE`（恒真判断），已移除；只读请求不再被一条用不上的写能力挡住。
+- 检查按候选给的 `executable` / `args` 冻结成清单项 `check-1`，并**实测**该程序的内容摘要。相对路径按受管根解析；解析不到真实文件就 409，不给一个没有摘要的授权。模型只能按 `check_id` 点名这份清单。
+- 循环预算固定 `max_rounds: 6` / `max_tool_calls: 12`。
+- 其余语义不变：模型只解释，授权来源永远是 `source_message_id` 指向的那条原用户消息；`FILE_WRITE` 与 `CLI_RUN` 都不是 `approvalPassthrough` 能力，每一次真实动作仍单独产生绑定确切目标与参数的 `ACTION_APPROVAL` Review。
+
+`cli_run_action` 的端点契约本身不变（仍接受一个 `executable` 与 1–32 个字符串 `args`，可选 `max_output_bytes` ≤ 1 MiB，永远经 `shell: false` 的 CLI adapter 执行）；只是文件夹入口不再走这条链。与 `mock_gateway_action`、`file_read_action`、`web_fetch_action` 混用一律 409 的规则也不变。
+
+验证覆盖见[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。本节不含本轮运行结果。
+
+### 10.56 Run 工具调用只读投影（2026-10-04 设计，2026-10-05 源码实现）
+
+**Breaking Change: No**。新增一个只读 GET 端点，不改任何已有路由、请求体、响应体或状态语义。配套迁移 `0057` 只增加 Run 刷新事件的来源，不改 `run_tool_calls` 表结构（物理设计归[第 60 节](../database/physical-design-postgresql.md)）。
+
+`ReviewSchema` 同期新增一个可空字段 `operation_id`（`ACTION_APPROVAL` 绑定的确切动作身份，其它 kind 为 `null`）。这是**只增不改**：既有响应多一个可能为 `null` 的字段，消费者按缺失即 `null` 处理。工具轨迹按它把审批挂到对应那次工具调用上，而不是靠时间或文案猜测。
+
+`GET /runs/{run_id}/tool-calls`
+
+协作页用它呈现「模型这一轮实际做了什么」，交互规则归[工作台 §18.8](../frontend/workbench-design.md#188-工具轨迹的呈现2026-10-04c-片设计)。它是纯只读投影：不创建、不修改任何状态，不新增权限、审批或控制意图。
+
+| 字段 | 约束 |
+|---|---|
+| `run_id` / `run_status` / `wait_reason` | Run 事实投影；`wait_reason` 缺省为 `null`，预算耗尽等终止类原因在此显示 |
+| `rounds[].round` / `model_call_id` | 0 起轮次，产生该轮请求的那次真实模型调用 |
+| `calls[].id` | 工具调用行身份，同时也是该行的 `logical_operations.id`（未派发行除外）。前端以它作 React key 与折叠态身份，不用数组下标 |
+| `calls[].tool_name` | 封闭词表内的工具名，取自 `tool-catalog.ts`；未登记的名字不会出现在响应里（落库前即被拒） |
+| `calls[].provider_tool_call_id` | Provider 的轮内关联标签。它**不是**唯一性来源（跨 Run/轮次可能重名），前端不得用它作 key |
+| `calls[].created_at` / `updated_at` | 行写入与最后推进时间，ISO 8601。用于「这次调用花了多久」的诚实呈现：缺 `updated_at` 时不显示耗时 |
+| `calls[].ordinal` | 轮内 0 起序号。响应一律按 `(round, ordinal)` 升序，前端不需再排序 |
+| `calls[].status` | 封闭词表，与迁移 `0054` 的 CHECK 一致：`REQUESTED` / `PREPARED` / `WAITING_APPROVAL` / `SETTLED` / `REJECTED` / `ABANDONED` |
+| `calls[].arguments` / `arguments_sha256` | **原样返回**已落库并通过 schema 校验的参数与其摘要，不做二次规范化或脱敏 |
+| `calls[].result_ref` | **原样返回**该行持久化的结果投影。这与模型当时实际消费的是同一份内容（`run-tool-call-repository.ts:123-137` 写明结果投影由调用方从 Operation 的 `result_ref` 截取后写入），因此界面与模型可逐字节对账。`null` 与 `{}` 不可混淆 |
+| `calls[].operation_id` | 已派发行指向真实 Operation，未派发行保持 `null`。审批与差异按此身份挂接，不另造引用 |
+| `calls[].adaptation_of` / `adapted_path` | 一次自动适配的来源；非适配行为保持 `null` |
+
+边界与不变量：
+
+- **不分页**。单 Run 的工具请求行数受冻结信封约束（`tool_loop_action.max_tool_calls` 上限 48，见 `domain-schemas.ts`），不存在需要翻页的规模。
+- **空 `rounds` 是事实而非失败**：该 Run 没有工具请求，200 返回空数组，不返回 404。
+- Run 不存在或跨作用域与其他不可见 ID 一律 404，与既有只读端点一致。
+- 响应只含受管根内相对路径，不含宿主绝对路径、密钥或可写实体。**但工具结果正文原样透传**：命令自身打印的 stdout/stderr 可能含宿主绝对路径，这与既有 `GET /runs/{run_id}/operations` 的执行输出口径一致（受管根本来就在 `GET /projects/{project_id}/managed-resources` 里以 `canonicalRoot` 明示）。
+- `REJECTED` 行必有 `result_ref.reason` 与 `.detail`（迁移 `0054` 的 CHECK 已强制），前端据此显示类型化原因而不是猜测。
+- **不新增任何审批**：处于 `WAITING_APPROVAL` 的行只提供指向既有 `ACTION_APPROVAL` Review 的 `operation_id`。批准、暂停、取消仍走既有 Run 控制端点。
+
+刷新：本端点是幂等读取，配合新增的 `run_tool_calls` Run 刷新事件使用——事件只做提示，客户端按提示重读本投影；断线重连按 `GET /runs/{run_id}/events` 的既有游标补读。**不需要轮询**。
+
+本节不含本轮运行结果；验收规格归[测试计划 §20.4](../testing/verification-plan.md)。
+
+### 10.54 模型工具循环信封与只读文件查询（2026-10-03，源码实现）
+
+**Breaking Change: No**（一个可选的委托字段、一个新只读能力、一张新表）。迁移 `0054_m04_agent_tool_loop` 追加 `FILE_QUERY` 能力行、放宽 `ck_logical_operation_resource` 以容纳它（逐条保留 `0030` 的既有分支），并新建 `run_tool_calls`。既有端点、路由与状态不变。
+
+`POST /tasks/{task_id}/delegations` 新增**可选** `tool_loop_action`：
+
+| 字段 | 约束 |
+|---|---|
+| `resource_id` | 必须是本 Task 所属 Project 下的 ACTIVE 受管资源，否则 409 |
+| `connections` | `FILE_QUERY` / `FILE_READ` / `GIT_READ` 各自可选一个连接；每个必须是本 Project 的 ACTIVE 连接且已具备对应能力，否则 409 |
+| `allowed_tools` | 1–32 个首批工具名；未知工具名、或某工具缺少对应连接时 409 |
+| `max_rounds` | 1–12，默认由服务端按 6 使用；`max_tool_calls` 1–48 |
+
+与 `file_read_action` / `web_fetch_action` 互斥（409）：固定读取与自主循环都会在同一 Run 内读取，两者并存会让「这次读取证据是谁」不确定。信封是**上界不是授权**：每次动作仍按当前 Permission 判定，`ASK` 仍产生绑定确切目录与参数的 `ACTION_APPROVAL`。
+
+`FILE_QUERY` 是第三个 `REAL` 只读能力（`REAL`/`READ`，`approvalPassthrough: true`），逻辑动作 `LIST_DIRECTORY` / `FIND_PATHS` / `SEARCH_TEXT` 共用它。连接配置页因此按同一 `rootBoundCaps` 词表多出这一项。
+
+工具调用的可追溯身份不在 HTTP 契约里，而在 `run_tool_calls`：该行 id 直接作为 `logical_operations.id`，因此同一请求重放永远回到同一个 Operation。行的 `status` 为 `REQUESTED` / `PREPARED` / `WAITING_APPROVAL` / `SETTLED` / `REJECTED` / `ABANDONED`；`REJECTED` 与 `ABANDONED` 行不连 Operation。本轮没有新增工具执行 HTTP 路由——工具由 Run 内部驱动，不接受外部直接派发。
+
+`POST /projects/{project_id}/connections` 的 `capabilities` 现在接受 `FILE_QUERY`，行为与其它 root-bound 能力一致（必填 `root_path`、一条连接只绑一个边界）。
+
+### 10.57 人工触发的受管 Git 只读（2026-10-05 源码实现）
+
+**Breaking Change: No**。新增一个只读投影端点与第三种 Gateway origin，不改任何已有路由、请求体、响应体或状态语义。配套迁移 `0058_m06_user_action_origin.sql` 只放宽三条 CHECK（物理设计归[第 61 节](../database/physical-design-postgresql.md)）。
+
+`POST /api/v1/workspaces/{workspace_id}/projects/{project_id}/managed-resources/{resource_id}/git-read`
+
+请求：`{ command_id, connection_id, action_type: 'GIT_STATUS' | 'GIT_DIFF', path?, cached?, limit? }`。`path` 是**受管根内相对路径**，不接受绝对路径或 `..`；反斜杠穿越与绝对路径按 `GATEWAY_TARGET_DENIED` 拒绝，未知 `resource_id` 按 `RESOURCE_NOT_FOUND`。解析不到按 409/422 拒绝，不猜。`GIT_STATUS` 不接受 `path`/`cached`（422）。`limit` 是展示上限（`GIT_STATUS` 条目数 / `GIT_DIFF` 字节数），**不进冻结参数**——它是展示上限，进 params 会改动 `params_hash` 并虚增 `max_payload_bytes`。
+
+回执 `result` 两形态：
+
+- **settled**：`{ state: 'SUCCEEDED' | 'FAILED', action_type, operation_id, invocation_id, result }`。`result` 为状态投影（`branch`/`head_commit`/`staged`/`unstaged`/`untracked`/`limit`/`truncated`/`totals`）、差异投影（`diff`/`limit_bytes`/`truncated`/`returned_bytes`/`omitted_bytes`），或**失败投影** `{ reason, detail? }`——失败绝不返回空列表，非 Git 目录结算为 `FAILED` 且响应不含 `staged`/`unstaged`/`untracked` 任何一项。
+- **pending**：`{ state: 'WAITING_APPROVAL' | 'UNRESOLVED', action_type, operation_id, review_id, reason }`，**不带任何结果字段**。确认前 `Invocation` 数为 0。
+
+策略 AUTO 直通；ASK 返回 `WAITING_APPROVAL` 与 `review_id`，经既有 `ResolveReview` 确认后**用同一 `command_id` 再次投递**才读取、且只读一次；DENY 409 `GATEWAY_PERMISSION_DENIED`。**客户端必须保留并复用原 `command_id`**，否则会产生第二次读取（新 Operation）。
+
+同一 `command_id` 同内容重放返回原回执并附 `Command-Replayed: true`（同一 `operation_id`，`invocation_attempts` 恰好 1 行）；换内容重放 409 `COMMAND_ID_REUSED`。**未结算时不写回执**，因此确认后同一 `command_id` 仍可推进。回执是两段短事务（真实 `git` 子进程按契约不进事务），「补写回执前崩溃」的窗口由确定性 Operation ID 兜底：该窗口内 `command_id` 层面的同内容重放不成立，下次投递返回同一次落库结果。
+
+未结算状态的恢复：`USER_ACTION` 的 `DISPATCHING`/`UNKNOWN` 调用**没有自动恢复驱动**，须先人工核对，不盲重试（契约：租约过期不代表旧进程已停止）。
+
+### 10.58 创建后人工补验收条件（2026-10-05 源码实现）
+
+**Breaking Change: No**。新增路由与命令，既有命令语义不变。轻量起步建的 Task 是零 criterion、停在 `INBOX`，此前补验收条件只能靠 AI 提案接受或 Skill 提案；本节闭合服务端出口，**前端入口仍未接入**。
+
+`POST /api/v1/workspaces/{workspace_id}/tasks/{task_id}/acceptance`，`command_type = ReviseTaskAcceptance`，成功码 200，资源链接 `tasks/{task_id}`。
+
+请求含 `command_id`、`expected_revision`（Task revision CAS）、`expected_acceptance_revision`（当前验收版本 CAS）、可选 `objective`（省略即沿用当前版本）、`criteria`（1–30 条，新版本的完整集合，每条含 `criterion_id?`、`statement`、`required?`、`method?`、`target_spec?`），`additionalProperties: false`。结果返回 `previous_acceptance_revision`、`acceptance_revision`、`objective`、`required_output_spec`、`criteria`、`added_criterion_ids`。
+
+| 情形 | 结果 |
+|---|---|
+| 同 `command_id` 同载荷重放 | 原回执 + `Command-Replayed: true` |
+| 同 `command_id` 异载荷 | 409 `COMMAND_ID_REUSED` |
+| 旧 Task revision | `REVISION_CONFLICT`，`conflict.entity_type = TASK` |
+| 旧验收版本 | `REVISION_CONFLICT`，`conflict.entity_type = TASK_ACCEPTANCE` |
+| AI 占有执行权、有活动 Run、有未结算或 UNKNOWN 动作、或状态已是终态 | `EXECUTOR_CONFLICT`（终态须先 `ReopenTask`） |
+| 删除/改写/降级既有 **required** criterion | 409 `INVALID_TRANSITION`，`conflict.criterion_ids` 指出是哪几条 |
+| 新版本无任何 required criterion | 422 `VALIDATION_FAILED`，`field = criteria` |
+
+写入新不可变验收版本（`source = CONTRACT_CHANGE`，来源差异由 `fact_refs.change_source = HUMAN_COMMAND` 区分，故不需要新迁移）与 criteria，历史版本不原地改写；同一短事务内撤销当前验收周期上的验证适用性（`reason = ACCEPTANCE_CONTRACT_CHANGED`，`source_ref = task_acceptance_revision:<新版本>`）、把该 Task 的 `OPEN` Review 置 `EXPIRED`、写 `TASK_ACCEPTANCE_CHANGED` 审计与命令回执。旧 session 行与旧验收版本**保留不改写**。无模型/网络/CLI/人工等待进入事务。
+
+**只允许收紧或持平**：既有 required criterion 必须逐字节保留（ID/statement/required/method/target_spec），可选 criterion 可改写、加严或丢弃。`required_output_spec` 逐字节沿用，不在本入口改写。全仓**没有**能放宽已确认必需条件的公开入口——需要放宽时的正确出口是 `ReopenTask` 进新周期后在无必需条件的新版本上重建，而这与 `MarkTaskReady` 的前置条件冲突，规则待定；本入口按 `task-lightweight-fence` 的「不得靠放宽验收完成依据来省步骤」实现，与既有 Task Skill 路径方向一致。
+
+本入口与 Task Skill 路径的**有意差别**（已写进代码注释，两条路径规则不同只在各自注释说明，不合并）：①不调用 `loadRulePlanBasis`（Rule 准入在 Delegate 冻结时判定）；②可选 criterion 允许改写/丢弃。
+
+复用说明：本命令的两个 wire schema 暂放在 `apps/api/src/api/task-api.ts`（该文件开工前 40 分钟被并行 Agent 改动且未提交，按共享工作区纪律暂缓并入 `domain-schemas.ts`）。这是技术债，不是设计归属——`domain-schemas.ts` 空闲后应迁回。
+
+### 10.55 工具循环信封扩展写入能力与本次任务范围授权（2026-10-04，源已实施）
+
+**Breaking Change: No**。`tool_loop_action` 新增两个可选能力键，`connections` 现在还接受 `FILE_WRITE` / `CLI_RUN`；新增可选字段 `scope_grant`。新增迁移 `0056_m04_run_scope_grants`。不改已有字段语义，旧请求体继续按原样工作。
+
+`connections` 里的 `FILE_WRITE` / `CLI_RUN` 只是**上界**：信封说明「模型可以请求这类动作」，不代表放行。没有对应范围授权时，这些动作仍然退回落单动作 `ACTION_APPROVAL`，与本节之前的行为完全一致。信封中未列出对应连接的写工具或检查工具，在 Delegate 时按未知工具 409。
+
+`POST /tasks/{task_id}/delegations` 新增**可选** `scope_grant`：
+
+| 字段 | 约束 |
+|---|---|
+| `resource_id` | 必须与同一请求 `tool_loop_action.resource_id` 相同，否则 409；授权只能收窄信封，不能扩大 |
+| `allowed_actions` | 1–4 项，只接受 `WRITE_FILE` / `APPLY_CHANGESET` / `CLI_RUN`。`DELETE` 与 Git 写入不在词表内，传了按 400 |
+| `checks` | 已配置检查的冻结清单，每项含 `id` / `executable` / `args` / `executable_sha256`（64 位小写十六进制）/ 可选 `max_output_bytes`。`id` 不得重复或为空 |
+| `expires_at` | 可选到期时间；过期后即使 Run 仍在执行也不再放行自动动作 |
+| `survives_run_terminal` | 可选，默认 false：授权属于「本次任务」，不跨 Run 继承 |
+
+缺失 `tool_loop_action` 而单独传 `scope_grant` 按 409：`allowed_actions` 含 `WRITE_FILE`/`APPLY_CHANGESET` 但信封没有 `FILE_WRITE` 连接按 409；含 `CLI_RUN` 但没有 `CLI_RUN` 连接或 `checks` 为空按 409。
+
+授权随 Run 在同一事务提交，边界写入后不可改写，只有撤销可推进；应用角色只被授予撤销列的 UPDATE。授权进入命令摘要，因此同一个 `commandId` 不能换一个更宽的授权重放。
+
+`allowed_actions` 里的动作名是**授权口径**，`CLI_RUN` 统一代表「本次任务范围内已配置的检查」：模型只能按 `check_id` 点名，`executable` 与 `args` 来自冻结清单，工具正文里不出现任何可执行内容。
 
 验证覆盖见[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。本节不含本轮运行结果。

@@ -8,7 +8,19 @@
 
 句柄级边界的候选、代价和 Windows 竞争反例见 [ADR-012](../decisions/ADR-012-windows-file-io-handle-boundary.md)（Proposed）；当前没有把方案当作已实现保护。
 
-2026-10-02 root-bound 能力配置可达性：`FILE_READ`/`FILE_WRITE`/`GIT_READ`/`GIT_WRITE`/`CLI_RUN` 一直是 `resolveConnectionConfig` 认定的 root-bound 能力，但工作台连接与权限页此前只提供 `WEB_FETCH`/`FILE_READ`/`FAKE_WRITE`/`FAKE_PUBLIC_READ`，因此这四种能力只能由 HTTP 或运维 CLI 建立。现 UI 按同一 `rootBoundCaps` 词表展示全部 8 项，root-bound 必填绝对目录、Fake 不绑定边界，策略侧除 `WEB_FETCH`/`FAKE_PUBLIC_READ` 外必须绑定 ACTIVE 受管资源；一条真实连接只绑定一个边界的 422 拒绝由服务端保留。真实 PG 集成反例覆盖 `GIT_READ`/`CLI_RUN` 连接创建、查询不回显目录、混入主机/混入 `WEB_FETCH`/缺目录/目录不存在，以及 `GIT_READ` 策略按受管资源前缀落 `GIT_STATUS`。这只闭合**配置**入口：`prepareGatewayAction` 当前只接受 `RUN` 与 `USER_IMPORT` 两种 origin，且非 RUN 只放行 `FAKE_PUBLIC_READ`/`WEB_FETCH`，所以人工触发的 Git 状态/diff、暂存、提交、推送与受控 CLI 仍无公开入口；补齐它需要新增 origin 词表迁移与对应准入/派发/核对分支，属 M06 未完成出口，本轮不实施也不因此放行 M06。
+2026-10-02 root-bound 能力配置可达性：`FILE_READ`/`FILE_WRITE`/`GIT_READ`/`GIT_WRITE`/`CLI_RUN` 一直是 `resolveConnectionConfig` 认定的 root-bound 能力，但工作台连接与权限页此前只提供 `WEB_FETCH`/`FILE_READ`/`FAKE_WRITE`/`FAKE_PUBLIC_READ`，因此这四种能力只能由 HTTP 或运维 CLI 建立。现 UI 按同一 `rootBoundCaps` 词表展示全部 8 项，root-bound 必填绝对目录、Fake 不绑定边界，策略侧除 `WEB_FETCH`/`FAKE_PUBLIC_READ` 外必须绑定 ACTIVE 受管资源；一条真实连接只绑定一个边界的 422 拒绝由服务端保留。真实 PG 集成反例覆盖 `GIT_READ`/`CLI_RUN` 连接创建、查询不回显目录、混入主机/混入 `WEB_FETCH`/缺目录/目录不存在，以及 `GIT_READ` 策略按受管资源前缀落 `GIT_STATUS`。这只闭合**配置**入口：当时 `prepareGatewayAction` 只接受 `RUN` 与 `USER_IMPORT` 两种 origin，且非 RUN 只放行 `FAKE_PUBLIC_READ`/`WEB_FETCH`，所以人工触发的 Git 状态/diff、暂存、提交、推送与受控 CLI 无公开入口。
+
+2026-10-05 人工触发 Git 只读入口已补齐：迁移 `0058_m06_user_action_origin.sql` 新增第三种 origin `USER_ACTION`，**只放宽三条 CHECK**，不改表结构、不新增表/列/函数、不回填、不改任何已应用迁移。`git-user-action.ts` 协调 prepare →（按判定）dispatch → 投影，`git-read-projection.ts` 做有界化（`GIT_STATUS` 路径条目上限 200、`GIT_DIFF` 正文字节上限 256 KiB、UTF-8 边界安全截断），与 `files/file-query.ts` 同口径显式带 `truncated`/`limit`。`USER_ACTION` 词表**只放行 `GIT_READ`**；人工触发的目录浏览（`FILE_QUERY`）、暂存、提交、推送与受控 CLI 仍无公开入口。
+
+该切片的三条取舍必须一并记住：
+
+1. **只读动作不建资源 claim。** `resource_claims` 强制绑定 `task_id`/`run_id`/`worker_*`，人工动作没有这些，在不新增可空列的前提下无法建 claim。因此资源排他改由 prepare 与 admit 两处按 `listOccupiedResources()` 拒绝在途目录（`RESOURCE_OCCUPIED`，retryable）——同一口径的另一种表达，不是更弱的检查。**代价**：一次已派发的只读不与随后开始的写动作互斥，可能把一次在途写入读成「干净」；挡住的是「读取先于写入开始」这个方向。
+2. **人工主体落在 `activity_records`**（`MANAGED_GIT_READ_REQUESTED`），在 prepare 的同一事务内写入，不留「动作已存在但查不到谁触发」的不可追溯状态。迁移只放宽 CHECK、不加列，所以 `USER_ACTION` 词表里没有 actor 列位。
+3. **幂等锚点是确定性 `logical_operations.id`**（sha256(workspace+project+resource+action+path+cached) → uuid 形态），因为 `uq_logical_operation_run_intent` 在 `run_id IS NULL` 时因 NULL 互异而**不提供任何唯一性**。`limit` 刻意不进身份——它是展示上限，进 params 会改动 `params_hash` 并虚增 `max_payload_bytes`。
+
+只读免 `ACTION_APPROVAL` 栅栏的**前提是策略 AUTO，不是「只读就免审」**：`GIT_READ.approvalPassthrough: true`，故 `effectiveDecision` 不把它从 AUTO 降级为 ASK；策略 ASK 仍创建绑定确切目录与参数的 `ACTION_APPROVAL`，确认后需用同一 `command_id` 再次投递才读取。人工动作没有 Run，因此没有 `run_scope_grants` 豁免（`evaluateScopeGrant` 在 `run === undefined` 时返回 undefined，`scopeCovered` 恒 false）——没有放松任何既有栅栏。
+
+**`USER_ACTION` 的崩溃后自动恢复驱动尚未接入**：`reconcileGatewayInvocation` 已加 USER_ACTION 分支（锁受管资源），`GIT_READ` 本就在 `safeReread` 内，但没有任何恢复调度器会自动调用它。停在 `DISPATCHING`/`UNKNOWN` 的调用会如实返回 `UNRESOLVED` 并要求先人工核对，**不盲重试**。属 M06 剩余出口，本切片不因此放行 M06。路径检查到 I/O 之间仍有替换窗口（Windows junction/hardlink），与 `FILE_READ`/`FILE_QUERY` 同一未闭合限制。
 
 Windows 路径语法补强已在 `validateSafeRelativePath` 拒绝 ADS 冒号、保留设备名（含 COM/LPT 上标数字）、禁用字符与控制字符及尾随空格/点；变化集、Delegate 和单文件 `WRITE_FILE` 的 Prepare 共用该校验。此处只阻断确定性的路径别名，不能消除已登记根、父目录或目标在检查与 I/O 之间被替换的竞争。
 
@@ -34,15 +46,21 @@ P09 初版当时没有真实网络请求或 Git/CLI 执行；后续 M04/M06 已�
 
 ### 1.2 本次任务范围内的工具授权（2026-10-03）
 
-状态：用户已确认交互规则，具体准入协议待设计、代码未接入。Relay 内部工具循环采用本次任务范围授权：有效权限及已确认范围内的文件搜索、读取、Git status/diff 自动进行；普通文件编辑和已配置检查命令可以连续执行。删除文件、Git 提交/推送与扩大任务范围须再次确认；系统禁止项仍为 DENY。范围授权不由模型生成或工具正文授予。
+状态：用户已确认交互规则，准入协议已实现（2026-10-04）。Relay 内部工具循环采用本次任务范围授权：有效权限及已确认范围内的文件搜索、读取、Git status/diff 自动进行；普通文件编辑和已配置检查命令可以连续执行。删除文件、Git 提交/推送与扩大任务范围须再次确认；系统禁止项仍为 DENY。范围授权不由模型生成或工具正文授予。
 
 范围授权与单动作 ACTION_APPROVAL 分开：前者用于限定本次任务可 AUTO 执行的动作，后者仍按[契约 03](../../contracts/03-verification-and-approval.md#6-approval-的精确授权对象)绑定确切动作及参数，不用一次 Review 批准覆盖未来未知动作。每次执行仍复核当前权限、作用域、文件基线、资源互斥与取消状态；权限撤销、基线冲突和 UNKNOWN 继续阻止后续不满足准入的动作。
 
-与当前实现的差异：`gateway-actions.ts` 的 prepare/admit 会把不支持 approval passthrough 的适配器 AUTO 降为 ASK，文件写入与 CLI 尚不能按上述规则自动连续执行。实施时须同时调整准备与执行前复核，并保留旧单动作审批的绑定与恢复语义。范围授权的持久字段、版本、有效期及撤销协议待冻结；本次只确认规则，不修改现有权限或执行状态。
+持久协议（`run_scope_grants`，迁移 `0056`）：授权在 Delegate 事务里与 Run 同批落库，因此不存在「Run 已存在但授权漏写」的中间态，也没有脱离 Run 的孤儿授权。边界列（`version`、`root_identity`、`allowed_actions`、`checks`、`boundary_digest`）写入后不可改写，应用角色只被授予撤销列的 UPDATE；`uq_run_scope_grants_run` 保证一个 Run 至多一份授权。授权进入命令摘要，同一个 `commandId` 不能换一个更宽的授权重放。
+
+`allowed_actions` 首批只接受 `WRITE_FILE`、`APPLY_CHANGESET`、`CLI_RUN`。检查统一记作 `CLI_RUN` 而不是 `RUN_TEST`/`RUN_BUILD`：工具循环里模型只能按 `check_id` 点名冻结清单中的某一次检查，「测什么/构建什么」的粒度由那份清单决定，不由动作名决定。`DELETE` 不在集合内，且 `ck_run_scope_grants_no_delete` 显式禁止它出现；即使 `APPLY_CHANGESET` 已放行，含删除的声明仍退回单动作确认（`SCOPE_GRANT_DELETE_REQUIRES_APPROVAL`）。校验为「授权只能收窄信封」：`resource_id` 必须与 `tool_loop_action` 同一个受管资源，放行的每个动作都要求信封里已冻结对应能力连接，放行检查命令时必须至少配置一个检查。
+
+失效与撤销：已撤销、已过期、Run 已终止（除非显式 `survives_run_terminal`）、根身份已变、动作不在集合内、检查程序摘要已变——任一条成立都不放行，回落到既有 Permission 判定。`evaluateScopeGrant` 是唯一判定入口，`prepareGatewayAction` 与 `dispatchGatewayAction` 调用的是同一个函数，因此准备与执行前复核必然一致；两处都重新判定而不是信任对方的结论，因为撤销、过期与脚本改动都可能发生在两次调用之间。全局 `approval_passthrough` 不改：`FILE_WRITE`/`CLI_RUN` 仍是非穿透适配器，AUTO 降级为 ASK 的既有行为只在本次 Run 的有效授权下被局部豁免。
+
+已配置检查的可信依据来自两处摘要比对：授权时冻结一份 `executable_sha256`，prepare 与 dispatch 各实测一份。实测缺失或与冻结值不同即判定「配置已变」（`SCOPE_GRANT_CHECK_CHANGED`），退回人工确认，而不是拿旧摘要继续放行。模型只能提交 `check_id`；真实程序与参数由冻结清单展开成 Gateway 的结构化参数，工具正文里不出现任何可执行内容。
 
 ### 1.3 首批内部工具范围（2026-10-03）
 
-状态：用户已确认首批范围，模型工具循环及完整出口待实现。首批目标是完整本地开发闭环：目录浏览、文件名/路径查找、内容搜索、文件读取、新建/编辑/删除、文件修改差异、Git status/diff/log，以及已配置的测试和构建检查。删除仍按 §1.2 再次确认，并继续受既有禁止项约束；非 Git 目录也应提供基于实际基线和修改结果的文件差异，不要求先建立 Git 仓库。
+状态：用户已确认首批范围，读类已实施（2026-10-04 见 §1.4、§1.5），写与检查已实施（见 §1.6）。首批目标是完整本地开发闭环：目录浏览、文件名/路径查找、内容搜索、文件读取、新建/编辑/删除、文件修改差异、Git status/diff/log，以及已配置的测试和构建检查。删除仍按 §1.2 再次确认，并继续受既有禁止项约束；非 Git 目录也应提供基于实际基线和修改结果的文件差异，不要求先建立 Git 仓库。
 
 接入复用现有 FILE_READ、FILE_WRITE/APPLY_CHANGESET、GIT_READ 与 CLI_RUN 适配器及 Run/Gateway 入口；目录浏览与搜索能力、模型连续调用及 Git 只读触发链须补齐。检查只使用已配置的检查命令，首批不开放任意 Shell。工具名称、输入输出及持久化协议在实施前冻结，不能把本段能力名称直接当作已发布 API 或新增持久枚举。
 
@@ -58,6 +76,36 @@ Git 暂存、提交和推送不进入本轮新增模型工具集，后续再接�
 
 `FILE_QUERY` 的 `approval_passthrough` 为 true，因此策略 AUTO 即 AUTO；策略 ASK 仍创建绑定确切目录与参数的 ACTION_APPROVAL。这与 `FILE_WRITE`/`CLI_RUN` 的非穿透降级是不同事实，不因本节改写任何既有适配器声明。
 
+### 1.5 范围授权与准备/执行前一致校验（2026-10-04 实施）
+
+授权判定收口在 `application/run-scope-grant.ts` 的 `evaluateScopeGrant`，判定依据只有持久化的授权行与当前实际事实（资源规范身份、Run 状态、检查程序实测摘要、变化集是否含删除）。模型说了什么、UI 传了什么、工具正文写了什么都不参与判定，因此不存在「模型自行扩大范围」这条路径。
+
+一致校验同时落在 prepare 与 admit 两处，缺任一处都会留下真实漏洞：只在 prepare 判定的动作，可以被「准备之后撤销授权再派发」绕过；只在 admit 判定的动作，会在 Review 文案里显示成无需批准、实际却要人工判断。两侧调用同一个函数、同样的输入结构，差异只在 admit 多带一次实测摘要。
+
+写工具的基线校验与授权判定是两件事，不能互相替代：授权决定「这类动作可不可以自动执行」，`executeFileChangeset` 的冻结基线比对决定「这一次声明的内容是不是仍然基于用户看到的文件」。用户在模型读取之后改了同一个文件时，授权照样覆盖 `APPLY_CHANGESET`，但落盘前基线比对会失败，用户的改动保留，冲突如实回到模型。
+
+### 1.6 写、差异与检查工具（2026-10-04 实施）
+
+`apply_changeset` 复用既有 `FILE_WRITE` 能力与 `APPLY_CHANGESET` 动作，一次 1–8 项 `CREATE`/`MODIFY`/`DELETE`。声明比通用 JSON Schema 更严格：修改与删除必须带实际读取到的 64 位基线摘要，新建不接受基线、删除不接受内容，单文件内容上限 64 KiB。校验在派发之前就以类型化原因回到模型，不留半可信的动作。
+
+词表里的 `changes` 必须把**变更项字段**逐个声明出来（`path`/`action`/`content`/`baselineSha256`，`required` 只含 `path` 与 `action`），不能只写 `items: { type: 'object' }`。声明是模型唯一能看到的写入契约：写 `items: { type: 'object' }` 时模型无从得知修改必须带 64 位基线摘要，会按自己的理解提交参数并被确定性拒绝。相应地，`validateToolArguments` 必须处理 `type: 'array'` 属性——只处理标量的校验器会把 `changes` 从规范化结果里丢掉，随后的必填检查随即报「缺少必填参数」，使每一次真实写请求都不可用。数组只做形状检查（必须是数组、每项必须是对象），逐项语义仍由 `normalizeToolChanges` 判定，两层职责不合并。2026-10-04 真实 Provider 定向验证实测：修这两处之前模型连续 4 次 `apply_changeset` 全部 `REJECTED`，修之后 `find_paths → search_text → read_file → apply_changeset` 四步全 `SETTLED`。
+
+`read_change_set`（动作 `READ_CHANGE_SET`，同属 `FILE_WRITE` 能力）只读账本、不碰磁盘：基线与目标摘要来自 prepare 冻结的输入，实际摘要来自执行账本，因此「计划差异 / 已应用差异 / 当前磁盘」三者的来源保持可辨。它只能读本 Run 自己的文件变更证据，否则按 `GATEWAY_TARGET_DENIED` 拒绝。
+
+`run_check`（动作 `CLI_RUN`）只能按 `check_id` 点名冻结清单中的检查。`resolveToolCheck` 在 prepare 与 dispatch 各解析一次：清单里没有该 id 就按 `TOOL_CHECK_NOT_CONFIGURED` 拒绝，且不留下 Operation、不启动任何子进程。`ToolRequestRejected` 与准入拒绝走同一条出口（`REFUSED` → 行落 `REJECTED`），因此 Worker 不会因为一个非法 `check_id` 抛出未知异常。
+
+2026-10-05 补齐检查后的修正：工具声明列出本 Run 的合法冻结检查 ID，普通非零退出回传错误标志和原输出；取得明确正常关闭回执的 `run_check` 可以释放 claim 并让原 DRAFT 继续读取和修正。每次复检都是新工具请求/Operation，原失败回执保留，不重放原失败进程，不把 exit 0 自动写成验收 PASS。取消、超时、失权与 UNKNOWN 不进入自动修正，规则归[运行架构 §2.3](runtime-context.md#23-内部工具循环的对象身份与恢复2026-10-03-实施设计)。**Breaking Change: No（HTTP 形状、动作状态、授权与审批契约不变）**；新增的 `CHECK_FAILED` 是内部 Worker 分类。
+
+当前信任边界仍有缺口：`executable_sha256` 只检查程序入口；`node.exe + args[check.mjs]` 不会复核脚本正文摘要。不能声称脚本/构建配置变化已完整栅栏，也不能把单进程检查出口当作 Windows Job Object 或脱离进程树的安全证明。定向修复探针把检查脚本放在受管根外并核对字节不变；产品的通用脚本信任与检查证据对产物版本的适用性另需闭合。
+
+变化集证据读取没有外部效果，因此 reconcile 按同一冻结引用安全重读一次即可（`SAFE_RE_READ`），不需要 `UNKNOWN` 隔离。这与 `FILE_WRITE` 落盘路径的核对要求不同。
+
+信封能力清单已包含 `FILE_WRITE` 与 `CLI_RUN`：信封是模型自主调用的**上界**，说明「模型可以请求」，不代表放行——没有对应范围授权时这些动作仍然退回落单动作审批。
+
+一次基线冲突后的自动适配由 `decideToolAdaptation` 判定，只回答「这一次请求是不是对某个已结算冲突的合法重新适配」，不执行写入也不猜测模型意图。合法要同时满足四件事：针对的确实是一个已结算的真实冲突（不是模型自称）；基线等于冲突回执里实测到的当前摘要（证明真的重新读取过）；目标内容与被拒那次不同（挡住「新基线 + 旧目标全文」的冒充适配）；一次只针对一个明确冲突的路径，且只适配原始请求。任一条不满足就返回类型化停止原因，请求不连 Operation、不产生副作用。`TOOL_ADAPTATION_STALE_BASELINE` 的拒绝详情带上回执实测值，因为不给这个值模型只能反复盲猜同一个摘要，把一次可修正的冲突拖成终止。
+
+目标在冲突后已不存在（`TOOL_ADAPTATION_TARGET_MISSING`）时同样停下：文件是否继续由用户决定，不由系统推断。
+
 ## 2. Files
 
 2026-10-03 用户确认默认修改位置：Relay 内部工具循环直接在用户打开并登记为受管资源的原目录执行文件修改。编辑前记录实际读取基线并在写入前复核，保留用户及其他执行者的已有改动；发现基线变化时停止覆盖并处理冲突。原目录修改继续受任务范围授权、资源互斥及逐文件执行证据约束。
@@ -66,7 +114,15 @@ Git 暂存、提交和推送不进入本轮新增模型工具集，后续再接�
 
 2026-10-03 用户确认基线冲突处理：在能够确定原修改尚未产生副作用时，保留用户的新改动，重新读取文件并生成新的变化集；能够明确区分且互不冲突的修改可在原授权范围内自动适配一次。修改相互冲突、无法判断影响或再次发生冲突时停止并展示差异，等待用户确认。新变化集绑定新的读取基线，旧意图及冲突证据保留；不能仅将旧目标内容配上新的基线摘要来覆盖用户修改，单动作审批也不能继承给内容或参数已变化的新动作。
 
-上述自动适配只处理已确定没有写入的基线冲突。部分写入、缺回执或 UNKNOWN 仍先按原 Operation/Invocation 核对，不创建新动作绕过未决效果或资源隔离。此项为已确认目标规则，当前固定动作链尚无自动重新读取与适配循环。
+上述自动适配只处理已确定没有写入的基线冲突。部分写入、缺回执或 UNKNOWN 仍先按原 Operation/Invocation 核对，不创建新动作绕过未决效果或资源隔离。
+
+2026-10-04 已在模型工具循环中实现这一次适配（`apply_changeset`）。「合法适配」按可核对的三件事判定，不采信模型自称：针对的确实是变化集逐文件结果里已结算的 `CONFLICT`；一次只针对一个路径；提交的 `baselineSha256` 等于该冲突回执的实测 `actualBaselineSha256`（证明真的重读过），且目标内容与被拒那次不同（挡住「新基线 + 旧目标全文」）。不满足时按类型化原因拒绝且不连 Operation、不写盘：`TOOL_ADAPTATION_STALE_BASELINE`、`TOOL_ADAPTATION_CONTENT_UNCHANGED`、`TOOL_ADAPTATION_AMBIGUOUS`（一次涉及多个冲突路径）、`TOOL_ADAPTATION_TARGET_MISSING`（冲突后目标已消失）。同一条冲突第二次冲突落 `TOOL_ADAPTATION_REQUIRES_HUMAN`，按循环终止规则停下并把差异留给用户，不再自动改写。合法适配在 `run_tool_calls.adaptation_of`/`adapted_path` 指回原始请求与那一个路径，因此恢复后仍可追溯来源；新行是新动作身份，不继承旧的单动作审批。深度限制（适配过的行不再作为新的适配来源、原始请求只被适配一次）由应用层判定实现，`0056` 的 CHECK 只保证两列同在同缺。出口与未覆盖项见[测试计划 §20.3](../testing/verification-plan.md)。
+
+2026-10-04 用户选定方案 B：文件夹首条对话的明确执行请求不再冻结预制的 `file_write_action` / `cli_run_action`，改为冻结工具循环信封加本次任务范围授权。理由是解释阶段没有任何目录访问，给不出可信正文，而原提示词自己就要求「缺少实际内容就 CLARIFY」——最常见的「帮我改一下这个文件」因此反复被追问。现在解释只产出目标与范围，正文由 Run 内的模型在读过真实文件之后决定，基线因此总是真实的。这不放松任何栅栏：范围授权只放行本次受管目录内的 `APPLY_CHANGESET` 与那份已配置检查（删除永远不在其中），每一次真实动作仍单独产生绑定确切目标与参数的 `ACTION_APPROVAL` Review。代价是用户确认的对象从「精确内容」变为「目标 + 范围」，交互语义归[工作台 §18.4.1](../frontend/workbench-design.md#1841-文件改动由执行时的真实读取决定2026-10-04方案-b)。
+
+2026-10-04 补齐方案 B 的写能力开关缺口（用户提示词「先跑通读文件、改代码」第 2 项）。写工具此前只按「解释候选列出了非空 `file_changes`」授予，而解释模型恰恰没有目录访问、拿不准文件名是常态——于是「目录里那个把字符串转数字的解析函数修一下」这类明确修改请求永远拿不到写工具，主链在设计上就走不通。现在解释候选多一个与路径无关的布尔 `writes_files`（用户是否明确要求改动这个目录里的文件），写能力按 `writes_files === true || file_changes.length > 0` 判定并收敛在单一纯函数 `wantsConversationFileWrite`；缺省值按「列出了文件变更」推导，因此既有调用方不改也得到同一个判定。`file_changes` 降级为辅助定位信息，不再是唯一开关；只读盘点与讨论声明 `writes_files: false` 就得不到写权，因此「不因为补齐缺口而扩大授权」。
+
+同时移除一处恒真判断：只读准备此前无条件 `requireConnection(FILE_WRITE)`，等于每次只读请求都被一条用不上的写能力挡住，报出的原因还指向错误的缺失项。现在 `FILE_WRITE` 连接只在本次确实授予写工具时解析；缺哪项能力就报哪一项。纯只读任务不再落一条 `allowed_actions` 为空的范围授权——`run_scope_grants` 的 `cardinality(allowed_actions) >= 1` 是有意的非空约束，空授权改为不产生该事实。范围授权、ACTION_APPROVAL 与 `approval_passthrough` 边界都不变。
 
 READ_MANAGED_VERSION 读取不可变资料；READ_WORKSPACE_FILE 只对已连接根读取并记录 hash。WRITE_CANDIDATE 始终发布新受管版本；APPLY_CHANGESET 才是工作目录写操作。
 

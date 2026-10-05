@@ -755,3 +755,82 @@ API 不需要 Saver；Worker 与 supervisor 在领取前只读核对业务 schem
 运行语义：解释（原消息 → 候选）与执行（候选 → Task/READY/Delegate）是两个命令。模型调用在事务外，候选先落库；Task 事实与 `TASK_PREPARED` 在同一短事务提交，READY 与 Delegate 各自是既有命令并各自留回执。跨命令的部分成功按阶段如实显示，不伪称原子。UNKNOWN 沿原 operation 核对，重放只读已保存的候选，不重付模型整理成本。
 
 兼容与回滚：无自动 down migration；删除该表会使文件夹入口与对话执行请求失去持久来源，且历史请求无法重放。回退必须先停用新的写入路径。**API Breaking Change: No**（新增端点，既有 Task/Run/Review/Assist 状态不变）。实际验证与未覆盖项只在[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)维护。
+
+## 58. 0054 M04 模型工具循环与 FILE_QUERY（2026-10-03，源码实现）
+
+追加 [0054_m04_agent_tool_loop.sql](../../apps/api/migrations/0054_m04_agent_tool_loop.sql)：`FILE_QUERY` 能力行、放宽后的 `ck_logical_operation_resource`、新表 `run_tool_calls`。`run_tool_calls` 是 `apps/api/src/run/run-tool-call-repository.ts` 的唯一 SQL Owner。
+
+**能力登记。** `FILE_QUERY` 是 `REAL`/`READ`，逻辑动作 `LIST_DIRECTORY` / `FIND_PATHS` / `SEARCH_TEXT` 共用。`ck_logical_operation_resource` 被完整重述而不是就地追加：`0030` 的每一条分支（含 `WEB_FETCH` 的 RUN 无资源与 `USER_IMPORT` 两种形态）都保留，只把 `FILE_QUERY` 并入「`RUN` 且绑定受管资源」那一支。漏掉任何一条都会让历史动作在下一次写入时违反约束——本轮开发自检中该疏漏曾使 `run-graph` 的 9 个文件写用例失败，已按此修正。
+
+**`run_tool_calls` 的不变量。**
+
+- **行 id 即动作身份。** 该行 id 直接作为对应 `logical_operations.id`（外键 `fk_run_tool_calls_operation`）。Provider 的 `tool_call_id` 只承担轮内配对，跨 Run/轮次可以重名而不产生唯一性冲突。
+- **落库即冻结。** `provider_tool_call_id`、`tool_name`、`arguments` 与 `arguments_sha256` 写入后不可改写：应用角色只有 `SELECT, INSERT`，`UPDATE` 被限制在 `(status, operation_id, result_ref, revision, updated_at)`。恢复核对因此总能看到模型实际请求了什么。
+- **位置唯一。** `(step_attempt_id, round, ordinal)` 唯一：重放同一轮请求不会插入第二行。
+- **派发与身份绑定同一次提交。** `ck_run_tool_calls_operation_binding` 要求 `REQUESTED`/`REJECTED` 必须没有 `operation_id`，其余状态必须有——已连上 Operation 的行必须与该 Operation 同属本次调用。
+- **未派发必须留原因。** `ck_run_tool_calls_rejected_reason` 要求 `REJECTED` 行的 `result_ref` 同时带 `reason` 与 `detail`，不能只留一个状态字。
+- **状态集合。** `REQUESTED` → (`PREPARED` | `WAITING_APPROVAL`) → `SETTLED`，另有 `REJECTED`（未派发，携带类型化原因）与 `ABANDONED`（恢复核对或人工处置之后）。`SETTLED` 行是唯一被模型下一轮读到的结果来源。
+
+**锁顺序。** 工具派发沿用既有 authority → Task → Run → 资源注册表 → 资源 claim 顺序，`claimRunForGateway` / `claimGatewayWorker` / `prepareGatewayAction` / `dispatchGatewayAction` 均未改动。`run_tool_calls` 的写入不进入 Run/Task 的提交事务：轮次落库在 `advanceRunStep` 的事务外准备阶段，状态推进各占一个短事务，因此不扩大锁集合。
+
+**迁移不改历史。** `0054` 只新增，不回填：旧 Run 的冻结快照没有 `tool_loop_action`，`readToolLoopAction` 对缺失键返回 `undefined`，因此旧 Run 走原单次生成路径，不因本次迁移改变行为。
+
+运行职责与循环规则归[运行架构 §2.3](../architecture/runtime-context.md)，能力范围归[工具适配器 §1.4](../architecture/tool-adapters.md)，HTTP 面归[命令契约 §10.54](../api/http-command-contract.md)。
+
+## 59. 0056 M04 本次任务范围授权与一次自动适配留痕（2026-10-04，源码实现）
+
+追加 [0056_m04_run_scope_grants.sql](../../apps/api/migrations/0056_m04_run_scope_grants.sql)：新表 `run_scope_grants`，以及 `run_tool_calls` 上的一次自动适配留痕列。`run_scope_grants` 是 `apps/api/src/application/run-scope-grant.ts` 的唯一 SQL Owner。
+
+**`run_scope_grants` 的不变量。**
+
+- **一个 Run 至多一份授权。** `uq_run_scope_grants_run` 保证。授权在 Delegate 事务里与 Run 同批落库，因此不存在「Run 已存在但授权漏写」的中间态，也没有脱离 Run 的孤儿授权；`fk_run_scope_grants_run` 按既有惯例单列引用 `runs (id)`，而不是引用尚不存在的 `runs (workspace_id, id)` 唯一键。
+- **边界写入后不可改写。** 应用角色只有 `SELECT, INSERT`，`UPDATE` 被限制在 `(revoked_at, revoked_reason, revision, updated_at)`。授权边界从签发起就是冻结的，撤销只改变「是否仍适用」，不改变「授权了什么」。
+- **动作词表是封闭的。** `ck_run_scope_grants_actions` 要求非空且 `<= {WRITE_FILE, APPLY_CHANGESET, CLI_RUN}`；`ck_run_scope_grants_no_delete` 显式禁止 `DELETE` 出现，防止删除被一次授权带走。检查统一记作 `CLI_RUN`：粒度由冻结的 `checks` 清单决定，不由动作名决定。
+- **根身份是物理事实。** `root_identity` 存冻结时的规范根身份；路径相同但目录已被整体替换时原授权不再适用，因为那已经不是当初被授权的那一个目录。
+- **撤销必须说明原因。** `ck_run_scope_grants_revocation` 要求未撤销时不得留下撤销原因、已撤销时必须留下非空原因，便于审计「为什么不再放行」。
+- **边界摘要可核对。** `boundary_digest` 是资源、根身份、动作集合与检查清单的规范摘要，用于核对「模型请求没有超出授权」；`ck_run_scope_grants_digest` 约束其形状。
+
+**一次自动适配的留痕。** `run_tool_calls` 追加 `adaptation_of`（自引用）与 `adapted_path`。`ck_run_tool_calls_adaptation` 只要求两列同现同缺且路径非空——**它不保证深度**：数据库层没有禁止「对已适配的行再适配」。「只适配一次」由应用层判定（`decideToolAdaptation` 拒绝 `adaptation_of` 指向已适配行的请求），不得据此声称数据库层已强制；需要该保证时由应用层测试兜住，而不是靠这条 CHECK。留下这一对列而不是只留计数，是为了让「这次写入是对哪一次基线冲突的重新适配」在恢复核对时仍然可查，且新读取的基线与新意图有对应关系，不覆写旧记录。
+
+**迁移不改历史。** `0056` 只新增并放宽（`run_tool_calls` 的列可空），不回填：既有 Run 没有授权行，`evaluateScopeGrant` 返回 `SCOPE_GRANT_ABSENT`，与本轮之前「文件写入一律 ASK」的行为一致。
+
+授权语义归[工具适配器 §1.2](../architecture/tool-adapters.md)，HTTP 面归[命令契约 §10.55](../api/http-command-contract.md)。
+
+## 60. 0057 M04 工具调用的 Run 刷新事件（2026-10-04 设计，2026-10-05 源码实现）
+
+追加 `0057_m04_run_tool_call_events.sql`。**只增加刷新事件的来源，不改 `run_tool_calls` 表结构、不新增业务表、不改任何 CHECK 以外的业务约束。** 依据是[研究 §1.6](../research/p00-source-study.md#16-工具调用呈现与刷新机制对照2026-10-04)：Codex 对每个工具项发 `item/started` / `item/completed`，DeepSeek 把 `tool/call` 与 `tool/result` 作为持久事件推送——两家都是「事件本身持久化 + 逐项提示」，不是轮询。
+
+**为什么是补事件而不是加轮询。** `run_tool_calls` 已经是持久账本，缺的是「它变了」这一信号。`0012` 的 `relay_append_run_event()` 用封闭 `CASE` 分派事件来源，遇到未登记的表直接 `RAISE EXCEPTION`（`0012_m03_run_events.sql:44-46`），因此必须显式登记，否则工具调用行的任何写入都会失败。
+
+三条改动：
+
+- `ck_run_events_kind` 增加 `TOOL_CALL_CHANGED`。既有 6 个取值不变，CHECK 只能放宽不能替换。
+- `CREATE OR REPLACE FUNCTION relay_append_run_event()` 增加一个分支：`run_tool_calls` 的 `run_id` 就在行上，不需要像 `step_attempts` 那样回查 `run_steps`。锁序不变——函数体仍先 `SELECT ... FROM runs WHERE id = event_run_id FOR UPDATE` 再取 `max(seq)+1`，与其他 6 个来源完全一致。
+- 两个 `AFTER INSERT` / `AFTER UPDATE` 触发器，`WHEN` 条件与既有写法同构，只在 `status`、`operation_id`、`result_ref` 三列 `IS DISTINCT FROM` 时触发。**不含 `revision`**：这三个列的变化已覆盖全部状态推进，纳入 `revision` 只会为同一次推进多发一条提示。
+
+**不需要新增 GRANT。** 触发器函数默认 `SECURITY INVOKER`，以调用者即应用角色 `relay_app` 身份执行；`0012` 已授予 `relay_app` 对 `run_events` 的 `SELECT, INSERT`（第 99 行），`0054` 已授予对 `run_tool_calls` 的读写。
+
+**兼容与回滚。** 迁移只放宽 CHECK 并新增触发器，**不回填**：既有 Run 的历史不会补发提示，客户端在流打开时本就读取权威快照（`0012` 首部注释），语义不变。回滚按相反顺序执行：删两个触发器、恢复函数原定义、恢复原 CHECK 约束；期间已写入的 `TOOL_CALL_CHANGED` 行可保留不影响读取，也可随约束一并清理——前端不依赖该 kind 的存在。迁移链顺序在 `0056` 之后。
+
+**已知取舍。** 一次工具轮次内的多个请求各自推进状态会产生多条提示，前端按提示重读幂等投影即可，不做合并。若后续实测提示量成为问题，再评估合并策略——本轮不预造。
+
+## 61. 0058 M06 人工动作的 Gateway 来源（2026-10-05 源码实现）
+
+追加 `0058_m06_user_action_origin.sql`。**只放宽三条 CHECK，不改表结构、不新增表/列/函数/索引、不回填、不改任何已应用迁移。** 契约归[命令契约 §10.57](../api/http-command-contract.md#1057-人工触发的受管-git-只读2026-10-05-源码实现)，能力边界归[工具适配器 §1](../architecture/tool-adapters.md)。
+
+三条改动：
+
+- `ck_logical_operation_origin` 追加一支 `origin = 'USER_ACTION' AND task_id IS NULL AND run_id IS NULL AND step_id IS NULL AND import_job_id IS NULL`。
+- `ck_logical_operation_resource` 完整重述 `0054` 的六支后追加 `capability_key = 'GIT_READ' AND origin = 'USER_ACTION' AND resource_id IS NOT NULL`。`USER_ACTION` **只放行 `GIT_READ`**——`GIT_WRITE`、`CLI_RUN`、`FILE_WRITE` 在该 origin 下一律被拒（真实 PG 行级反例以 `23514` 确认）。
+- `ck_invocation_run_identity` 完整重述 `0016` 的三支后追加 `origin = 'USER_ACTION' AND resource_id IS NOT NULL AND ownership_epoch / worker_id / worker_epoch / resource_claim_id / claim_token / claim_epoch 全为 NULL`。人工动作没有 worker 与租约，因此带 `worker_id` 或 claim 的 Invocation 形态被 CHECK 直接拒绝。
+
+三点必须一并记住，否则会误读这张表：
+
+1. **只读动作不建 claim。** `resource_claims` 强制绑定 `task_id`/`run_id`/`worker_*`（`0008`），人工动作没有这些，在不新增可空列的前提下**无法**建 claim。因此资源排他改由 `prepareGatewayAction` 的 prepare 与 admit 两处按 `listOccupiedResources()` 判定在途目录（`RESOURCE_OCCUPIED`）。代价是一次已派发的只读不与随后开始的写动作互斥。
+2. **`uq_logical_operation_run_intent` 在 `run_id IS NULL` 时不提供任何唯一性。** PostgreSQL 的 NULL 在唯一索引中互异，因此 `USER_ACTION` 行的 intent 唯一约束形同虚设。幂等锚点只能是**应用生成的确定性 `logical_operations.id`**（sha256(workspace+project+resource+action+path+cached) → uuid 形态），不能依赖 intent 唯一键。
+3. **人工主体没有列位。** 迁移只放宽 CHECK、不加列，所以 `USER_ACTION` 词表里没有 actor 列；留痕走 `activity_records`（`MANAGED_GIT_READ_REQUESTED`），在 prepare 的同一事务内写入。
+
+**兼容与回滚。** 三条 CHECK 只能放宽不能替换，既有 `RUN` 与 `USER_IMPORT` 行的判定逐字不变，`uq_logical_operation_origin` / `uq_logical_operation_run_resource` / `fk_invocation_operation_*` 外键均不需改动即可接受新取值。迁移**不回填**：既有行不变。回滚按相反顺序 `DROP CONSTRAINT` 并恢复三条 CHECK 原定义，期间已写入的 `USER_ACTION` 行会被原 CHECK 拒绝，需先清理或导出——客户端不依赖该 origin 的存在。迁移链顺序在 `0057` 之后。
+
+HTTP 面归[命令契约 §10.56](../api/http-command-contract.md)，交互规则归[工作台 §18.8](../frontend/workbench-design.md)。
+

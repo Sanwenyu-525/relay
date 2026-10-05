@@ -4,6 +4,10 @@
 
 此目录独立于 P00–P22 开发提示词和 UI 逐页开发提示词。R 编号只标识本次修复任务，不新增开发阶段、不批准未实现功能，也不自动证明真实联调或桌面交付。
 
+2026-10-03 专项入口：[方案 2 首条会话与待审版本整改](ui-option-2-first-session.md)。本次实际验收结果归[统一验收表 §10.7](../../docs/testing/overall-acceptance-2026-09-28.md#107-当前源码的独立复核2026-10-03)，提示词独立交付、尚未执行；不属于下表历史 R01–R05。当前子代理模型遵循最新 AGENTS 的 `gpt-6.1-sol`，下方旧模型路由说明仅保留历史，不作为当前派发指令。
+
+2026-10-04 专项入口：[C 片实施：协作页工具轨迹呈现](tool-trajectory-presentation.md)。对应 `prompts/agent-native-tools.md` 五节的 C 片，**尚未执行**；设计规则归[工作台 §18.8](../../docs/frontend/workbench-design.md#188-工具轨迹的呈现2026-10-04c-片设计)，端面归[命令契约 §10.56](../../docs/api/http-command-contract.md)，物理设计归[第 60 节](../../docs/database/physical-design-postgresql.md)，验收规格归[测试计划 §20.4](../../docs/testing/verification-plan.md)，上游依据归[研究 §1.6](../../docs/research/p00-source-study.md#16-工具调用呈现与刷新机制对照2026-10-04)。它同样不属于下表历史 R01–R05。
+
 | 顺序 | 可直接交给执行者的提示词 | 范围 |
 |---|---|---|
 | R01 | [后端当前事实与阶段校验](R01-backend-correctness.md) | 已执行：BE-01、BE-02；真实 PG+HTTP 73/73 |

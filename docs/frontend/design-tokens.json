@@ -435,7 +435,8 @@
     },
     "layout.reading.maxWidth": {
       "$type": "dimension",
-      "$value": "50rem"
+      "$value": "72rem",
+      "$description": "对话消息列与输入器共用的宽度上限。2026-10-03 由 60rem 放宽并与原 layout.composer.maxWidth 合并：两者必须一致，否则滚动条会贴着其中一侧。用 rem 而非 px，跟随根字号与用户缩放。"
     },
     "layout.content.maxWidth": {
       "$type": "dimension",
@@ -497,6 +498,11 @@
       "$type": "dimension",
       "$value": "2.75rem"
     },
+    "control.height.compact": {
+      "$type": "dimension",
+      "$value": "2rem",
+      "$description": "紧凑图标按钮（如对话输入器的发送键）的高度与最小宽度。比 control.height 小一号，但仍高于 control.target.minimum，键盘与指针目标不缩水。"
+    },
     "control.icon.size": {
       "$type": "dimension",
       "$value": "1.25rem"
@@ -555,6 +561,11 @@
       "$type": "dimension",
       "$value": "0.1875rem"
     },
+    "radius.composer": {
+      "$type": "dimension",
+      "$value": "1rem",
+      "$description": "对话输入器卡片的圆角。2026-10-04 由 radius.control 独立出来并放大：发送键要与卡片圆角同心且不越界，边长上限就是 2×radius，8px 圆角只容得下 16px 的键。底栏左侧那一行的高度与此键一致。"
+    },
     "radius.round": {
       "$type": "dimension",
       "$value": "9999px"
@@ -599,6 +610,12 @@
       "$type": "cubicBezier",
       "$value": "cubic-bezier(0.2, 0, 0, 1)"
     },
+    "motion.loop.calm": {
+      "$type": "duration",
+      "$value": "6s",
+      "$description": "运行期局部光点沿边移动一周。Level 2 低干扰执行反馈，比一次性时长长一个数量级，因为它是循环而非过渡。"
+    },
+    
     "shadow.surface": {
       "$type": "shadow",
       "$value": "none"

@@ -310,3 +310,13 @@ Documentation Impact Check：更新需求入口、产品总纲、架构/扩展�
 Documentation Impact Check：更新产品总纲、V1 范围、交互、设计系统、测试计划、文档地图、提示词入口/逐页/M 工作包/goal、CODEX_NEXT_STEP 和本记录，共 12 份既有 Markdown。没有修改产品代码、配置、token、API、数据库、依赖或业务 Owner；API Breaking Change: No，无需新 migration 或架构 ADR。根 README 的安装与运行方式、既有路线/问题记录未受影响，不新建重复文档。M01–M07 状态和历史验收证据保留，新提案不自动扩大开发授权。
 
 验证：`node scripts/check-docs.mjs` 通过（Markdown 106 个、链接 1840 个、标题锚点 1364 个、设计令牌 126 个、对比度 29 条）。相对开工前快照核对 12 份 Markdown，新增行无尾随空白，代码围栏奇偶性不变，33 个 UI 单元保留；人工核对被替换规则、新旧结构、待定项和历史证据边界。功能、模型、数据库、窗口及安装验收本轮均未运行；本次不是视觉截图审计或运行能力交付。
+
+## 26. 传统 Agent 检查与修正闭环（2026-10-05）
+
+用户要求继续推进传统 Agent。定位「检查失败后依据真实输出修正」时，单元反例确认普通 CLI 非零退出没有 `reason`，工具回放只看 `reason`/SETTLED，错误地标为成功；真实 PG 反例又确认失败检查的 claim 被隔离，后续读取报 `RESOURCE_OCCUPIED`。生产图仍把所有 FAILED 当准入拒绝而结束，所以此前手动交替驱动的成功不足以证明调度闭环。冻结检查 ID 也没有进入模型可见声明，只在授权库中存在。
+
+修复职责保持原 Owner：工具回放识别真实 `outcome: FAILED`；Gateway 仅对同 Run、确切 Operation/Invocation、正常子进程非零关闭的 `run_check` 释放 claim；Worker 明确返回 `CHECK_FAILED`，LangGraph 返回原 DRAFT；工具声明从同 Run 冻结授权列出合法检查 ID。保留检查已产生的文件、原失败回执和每次复检新动作身份，不作自动回滚、不覆盖人工接受门。
+
+独立复核进一步发现恢复捷径把已 SETTLED 的超时/拒绝一律视为成功，以及 UNKNOWN 在判断前先被 SETTLED。已改按权威 Operation、原 Invocation 和 claim 重建结果；UNKNOWN 保持未决，旧错误 SETTLED 行在领取步骤前被权威未决动作挡住。防回归由真实子进程的失权与超时结算反例、生产图检查点与重放计数承担。
+
+受影响文件为 `application/tool-loop.ts`、`gateway-actions.ts`、`run-steps.ts`、`run/run-tool-call-repository.ts`、`cli-worker/cli-adapter.ts`、`worker/tool-loop-action.ts`、`run-graph.ts` 与测试透传入口 `run-command.ts`；未新增依赖、数据库列或 migration。HTTP 形状及既有动作状态不变，Breaking Change: No。当前明确保留的风险：参数指向的脚本正文尚无独立信任摘要、Windows Job/脱离子进程树未闭合、通用产物版本与检查证据绑定未实现。实际成绩及证据性质只维护在[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)，规格归[测试计划 §20.9](../testing/verification-plan.md#209-传统-agent-检查失败后的自主修正2026-10-05)。

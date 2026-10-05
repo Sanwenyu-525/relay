@@ -6,6 +6,8 @@
 
 ## 1. 本轮结论与边界
 
+2026-10-05 有界协作设计接续：主子会话仍由 Assist 原入口保存，原主 Run 拥有内部委派，Task 执行权和完成用例不转交给子 Agent。新增责任、持久身份、预算与恢复统一归[运行架构 §2.5](runtime-context.md#25-有界子-agent-的委派与会话关联)，取舍归[ADR-017](../decisions/ADR-017-bounded-multi-agent-conversations.md)。产品规则已确认，工程协议待核定；本轮只补文档。
+
 采用模块化单体、单一业务事务数据库。Project、Task、Run 分开建模，通过 ID 关联；应用用例协调必要的跨聚合短事务。聚合是保护不变量的写入边界，不要求“一次事务只能修改一个聚合”，也不要求一个逻辑模块对应一个服务或构建工程。
 
 Windows 桌面宿主与本机服务边界见 [ADR-007](../decisions/ADR-007-windows-desktop.md)：壳管理窗口、启动和生命周期，领域命令仍经已鉴权 HTTP 进入应用用例；renderer 和壳均不成为第二业务 Owner。

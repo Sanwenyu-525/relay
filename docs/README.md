@@ -1,5 +1,11 @@
 # 文档入口与维护规范
 
+2026-10-05 有界协作文档接续：[总纲 §0.9](../Personal_Workflow_OS_Master_Spec.md#09-有界多-agent-与自动会话)拥有已确认产品规则，[范围补充](requirements/v1-scope.md#有界多-agent-与自动会话补充)拥有首版边界，[运行架构 §2.5](architecture/runtime-context.md#25-有界子-agent-的委派与会话关联)拥有委派/预算/来源/恢复，[工作台 §23](frontend/workbench-design.md#23-主子会话与有界协作)拥有交互，[ADR-017](decisions/ADR-017-bounded-multi-agent-conversations.md)记录取舍，[测试计划 §21](testing/verification-plan.md#21-有界多-agent-与自动会话验收规格)拥有未运行场景；[专项提示词](../prompts/bounded-multi-agent.md)为另行获授权后的执行入口。本轮仅文档，工程协议待核定，不启动代码开发。
+
+[功能地图](feature-map/README.md)提供模块 → 功能 → 代码/文档/提示词/测试/验收的资料导航，支持本机实时更新与离线快照。它只维护关系目录，不拥有第二份阶段或验收状态；新增文件自动提示待归类，新增功能的语义由对应开发任务同步登记。
+
+2026-10-03 会话执行计划导航：[产品总纲 §0.7](../Personal_Workflow_OS_Master_Spec.md#07-会话内可折叠执行计划2026-10-03推荐设计)拥有推荐范围，[研究 §1.3](research/p00-source-study.md#13-会话执行计划机制对照2026-10-03)记录官方机制与采用差异，[运行架构 §2.4](architecture/runtime-context.md#24-会话执行计划的归属与持久更新推荐设计)拥有工程归属与恢复，[工作台 §22](frontend/workbench-design.md#22-会话内可折叠执行计划推荐设计)拥有交互，[测试计划 §19](testing/verification-plan.md#19-会话执行计划验收规格)拥有未运行规格；[专项提示词](../prompts/conversation-execution-plan.md)为后续执行入口。本轮只维护文档与提示词。
+
 2026-10-01 文件夹与对话入口导航：用户已确认入口与直接执行的产品规则，本轮只修改文档。详细行为归[工作台 §18](frontend/workbench-design.md#18-文件夹入口与对话直接执行)，应用责任归[领域模型 §12](architecture/domain-model.md#12-文件夹入口与对话执行的应用边界)，取舍归[ADR-016](decisions/ADR-016-folder-first-conversation.md)，未运行场景归[测试计划 §17](testing/verification-plan.md#17-文件夹与对话直接执行验收规格)，后续执行入口为[实施提示词](../prompts/folder-first-conversation.md)。当前阶段和授权只在 CODEX_NEXT_STEP 维护。
 
 2026-10-01 整套 UI 重做导航：[Agent UI 研究审查](research/agent-ui-review-2026-10-01.md)记录本轮一手资料、源码和代表页面问题；[工作台第 17 节](frontend/workbench-design.md#17-整套-ui-重做提案2026-10-01)拥有完整页面/状态覆盖与回归路径；[设计系统第 9 节](frontend/design-system.md#9-整套重做的组件与布局提案2026-10-01)拥有共享组件提案。范围已获用户授权，具体视觉方向待选择，尚未实施；源码缓存更新归 P00，功能状态仍只归统一验收表。
@@ -8,7 +14,7 @@
 
 2026-09-28 后续规划导航：[V1 后续路线](requirements/post-v1-roadmap.md)拥有推荐范围、顺序与未决项；[领域模型第 11 节](architecture/domain-model.md#11-v1-后续协作的架构演进提案)维护责任与事务，[ADR-013](decisions/ADR-013-bounded-project-continuation.md)记录 Proposed 取舍，[验收第 14 节](testing/verification-plan.md#14-v1-后续长期协作验收提案)维护未运行规格，[N 工作包](../prompts/post-v1-collaboration.md)提供分包提示词。用户选择长期协作优先，具体方案仍为规划，未启动实现、不扩大 V1 goal。
 
-当前改造导航（2026-09-24）：[ADR-010](decisions/ADR-010-agent-stack-react-desktop.md)记录技术取舍与用户决定；[技术选型](architecture/技术选型.md)维护目标组合；[CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md)独占当前模块状态；[大模块提示词](../prompts/stack-migration.md)维护工作包；[验收门槛](testing/verification-plan.md#10-技术栈改造的大模块验收)维护出口；[goal 提示词](../prompts/goal-stack-migration.md)是长期执行入口；[M01 开发记录](development/m01-stack-baseline.md)保存基线和适配证据。原始 [Agent Stack 附件](../Agent_Stack_Integration.md)作为来源保留，已适配项以 ADR-010 为准，不重复维护第二份技术真相。
+当前改造导航（2026-09-24，2026-10-04 接续总入口）：[ADR-010](decisions/ADR-010-agent-stack-react-desktop.md)记录技术取舍与用户决定；[技术选型](architecture/技术选型.md)维护目标组合；[CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md)独占当前模块状态；[大模块提示词](../prompts/stack-migration.md)维护工作包；[验收门槛](testing/verification-plan.md#10-技术栈改造的大模块验收)维护出口；[整体开发总提示词](../prompts/goal-stack-migration.md)接续 V1 收尾与 Windows 完整交付，goal 只在用户明确要求时使用；[M01 开发记录](development/m01-stack-baseline.md)保存基线和适配证据。原始 [Agent Stack 附件](../Agent_Stack_Integration.md)作为来源保留，已适配项以 ADR-010 为准，不重复维护第二份技术真相。
 
 角色：当前文档地图与维护规则。更新：2026-09-21。
 

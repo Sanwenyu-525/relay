@@ -542,6 +542,38 @@ N00 先确定任务集与基线，再在对比运行前冻结阈值、样本数�
 
 2026-10-02 起本节部分进入实现并有证据：服务端与组件层的 FC-01–FC-05、FC-08、FC-11 已覆盖（`folder-first-conversation.integration.test.ts` 真实 PG 5 例含真实审批后的文件落盘与真实 CLI 子进程、`conversation-execution.test.ts` 单元 6 例、`folderFirstConversation.spec.ts` 组件 4 例）。**FC-06、FC-07、FC-09、FC-10 仍未验证**，尤其真实 Windows 原生目录选择/取消/重启、中文 IME 与 DPI 取证完全未做；`collaborationWorkspace.spec.ts` 有 5 例在 HEAD 即失败（`collab-facts` 在 Run 需要注意时被折叠），不属于本功能但也不得据此声称组件全绿。实际结果只在[功能验收表](overall-acceptance-2026-09-28.md#当前功能验收表)维护。
 
+### 17.1 轻量创建与状态接续
+
+2026-10-04，用户确认产品原则，以下为**未运行规格**；本轮的源码与示例入口检查不算真实模型/Windows 使用验收。依据[总纲 §0.8](../../Personal_Workflow_OS_Master_Spec.md#08-状态驱动与轻量起步)与[工作台 §18.7](../frontend/workbench-design.md#187-目标与任务的轻量起步)，细化 FC-04/05/07/09/11，保留原权限与完成门槛。
+
+| 编号 | 场景与必须成立的行为 | 必要证据 |
+|---|---|---|
+| LC-01 | 一句明确结果即可从主入口开始整理，不要求先填整套 Task/Goal 表单或转多个管理页；已有项目/目录/约束不用重填，无模型时保留可用人工路径与原输入 | 正式组件＋真实 API/PG 创建与就绪分层；真实 Windows 输入/焦点/滚动 |
+| LC-02 | 明确创建 Goal 的请求保存真实 Goal 并正确关联；项目目标文本/蓝图意图不冒充 Goal；纯讨论或模型推测不落确认事实，不因打开目录虚构目标 | 原 Goal/Project 命令回执与真实 PG 关联；多作用域、讨论/执行及模糊目标反例 |
+| LC-03 | 复用已有 Goal/State/Task 与必要对话来源，上一轮回答不重复追问；只补实质缺项，不捏造期限、完成条件或授权；候选可修订且绑定输入/状态基准 | 确切 Context/消息来源＋结构校验；多轮模型反例与基线变化/失权反例 |
+| LC-04 | 对话生成的完成条件确实可判断；正式创建、READY、Delegate、审批、Verification 与完成分别满足原约束，轻量入口不能提前成功或绕过准入 | 领域/真实 PG/受控 Adapter 反例；确切产物、验收版本与 CompletionRecord |
+| LC-05 | 建立 Task 后在原会话补充、查询或继续仍保持目标与作用域；新范围不静默修改在途 Run，不重建重复任务或默认启动后台/跨任务链 | 同会话多轮组件＋真实 API/Worker/状态关联；范围变化、控制与未决动作反例 |
+| LC-06 | 双击、响应丢失、迟到响应、换目录、重启复用原 Goal/Task/Run 与回执；返回后看清已完成/阻塞/下一步及理由，旧摘要不覆写新状态或复活权限 | 原身份真实 PG 幂等与恢复故障点；当前状态重读、失权/版本变化及 Windows 重开 |
+| LC-07 | 记录明确请求起步到首个有用反馈的耗时、用户填写/重复输入/确认/必要澄清及管理页切换；分别说明真实缺口与无谓步骤，不靠省审批取得改善 | 固定当前路径与对照路径、样本/模型/权限/来源说明；实际操作记录，阈值与质量口径评价前核定 |
+
+实际结果只写统一验收表。首条创建、单次模型成功、示例表单截图或源码分支存在不证明持续目标推进；完整主路径与 Windows 分别验证，不放宽 M04–M07 总出口。
+
+### 17.1 新对话直接起步（2026-10-05）
+
+用户选定直接输入、目录按需选择。以下场景绑定当前入口源码；成绩统一归功能验收表，不以受控 API 响应替代真实服务或 Windows 验收。
+
+| 场景 | 必须成立 | 检查入口 |
+|---|---|---|
+| 明确新对话与重复点击 | 真正空白输入，不恢复旧会话、不创建空会话；Task/Run 不因导航停止 | `newConversationEntry.spec.ts` |
+| 未选目录的普通讨论 | 首条一次创建、一次发送；历史与后续回复可读，发送意图为 DISCUSS；Task 专属会话不混入 | 同上 |
+| 草稿与未决命令 | 留在当前页保持原文；创建/发送响应丢失沿原回执恢复，未核对时不得丢弃离开 | 同上及既有文件夹反例 |
+| 首条提交晚于空读取 | 会话先读到空列表，首条提交成功后自动重读，显示原文与回复 | `newConversationEntry.spec.ts` 受控 POST barrier |
+| 回执先于迟到原响应 | 查回执成功后新建并输入草稿，迟到原响应不得清空新草稿或重解释 | 同上 |
+| 执行候选跨会话 | 已完成和迟到的解释结果均不能变成其他会话的 Apply 候选 | `folderFirstConversation.spec.ts` |
+| 浏览器实际布局与点击 | 1280/960/390 宽度输入区可见，无水平溢出；目录收起/展开、草稿保护、IME 事件与两轮普通讨论正确 | 本机 `output/playwright/new-conversation-smoke.py`，受控 API；既有 Chromium `uiOption2FirstSession.spec.ts` |
+
+普通讨论开始后绑定目录以保留同一会话上下文、真实 Provider 回复、Windows 原生目录选择/中文 IME/DPI 仍为后续出口，不计入以上通过结论。本片无 HTTP、数据库或业务权限变化。
+
 ## 18. Agent 提示词与输入协议评价（目标设计）
 
 2026-10-03，**目标规格 Proposed / 真实模型行为评价未运行**。依据[产品总纲 §0.6](../../Personal_Workflow_OS_Master_Spec.md#06-agent-协作行为2026-10-03已确认设计)的已确认行为与[提示词设计](../architecture/agent-prompt-design.md)。用户随后授权现有入口接入，工程回归结果只在[功能验收表](overall-acceptance-2026-09-28.md#当前功能验收表)维护。以下同时检查模型行为和实际动作边界；提示词反例、Fake、真实 PG、真实 Provider 与 Windows 分层报告，入口传参检查不等于模型语义行为已通过。
@@ -564,3 +596,226 @@ N00 先确定任务集与基线，再在对比运行前冻结阈值、样本数�
 工程 Gate 与模型质量分别评价。权限、Owner、版本、幂等、停止、UNKNOWN 和完成 Gate 用确定性自动化检查；相关核心回归不得删除。模型侧固定代表性正常/含混/对抗用例、输入来源与模型/模板版本，多次运行评估意图误判、无谓确认、来源与状态真实性、产物质量、首输出/完成时延和可得用量。样本量及质量阈值实施前冻结，不将一条顺利对话算稳定通过，也不以模型自己评分代替独立人工复核。
 
 实际结果仍只更新[功能验收表](overall-acceptance-2026-09-28.md#当前功能验收表)受影响项；模板分层通过不自动代表有界工具循环、连续执行或 Windows 体验通过。
+
+## 19. 会话执行计划验收规格
+
+2026-10-03，**推荐设计 / 未运行规格**。本轮只维护文档与实施提示词，不启动代码开发。范围归[总纲 §0.7](../../Personal_Workflow_OS_Master_Spec.md#07-会话内可折叠执行计划2026-10-03推荐设计)，工程归[运行架构 §2.4](../architecture/runtime-context.md#24-会话执行计划的归属与持久更新推荐设计)，UI 归[工作台 §22](../frontend/workbench-design.md#22-会话内可折叠执行计划推荐设计)。现有固定 RunStep/Trace、工具循环或文档检查的成绩不自动覆盖下表。
+
+| 编号 | 场景及必须成立的反例 | 必要证据 |
+|---|---|---|
+| EP-01 | 有界多步骤 Run 的模型请求计划工具，Application 提交真实计划并回送对应结果；纯讨论不建 Task/Run，计划更新不制造 Gateway Operation、文件 Connection 或资源 claim | Fake 模型的完整工具序列＋真实 PG/HTTP 计划与调用关联；后续工具轮次确实消费原结果 |
+| EP-02 | 非法状态、额外字段、重复项身份/new_item_key、新旧项形态混用、多项 in_progress、半截参数及超限列表被拒绝；模型填写 Run/Worker 身份不能越权 | 严格 schema/协议反例＋应用拒绝；不得只在 UI 限制或只增加工具名称 |
+| EP-03 | 首次 revision 0 创建为1；同请求同载荷重投返回原回执与新项身份映射且 revision 不重复递增；同身份异载荷、并发创建/旧 revision 明确冲突；计划、回执与刷新依据同事务 | 真实 PG 并发/CAS 与保存后回执前故障点；检查原身份、快照和事件，不只检查列表最终存在 |
+| EP-04 | 过期 Worker/Attempt/epoch、终态及已提交停止请求拒绝新更新；历史成功回执查询不能改写新执行者的计划 | 真实 PG 的迟到更新、控制竞争与权属回归；锁顺序和租约依据可核对 |
+| EP-05 | 计划提交后中断、重启或恢复按原身份复用项与结果，不重建计划或重放已经发生的文件动作；外部 UNKNOWN 保持原核对路径 | 新进程＋持久 PG/Fake Adapter 故障注入；比对项身份、revision、调用次数与实际效果 |
+| EP-06 | 所有项被标记 completed，但检查未运行、FAIL/ERROR、Review 未接受或完成 Gate 拒绝时，Task/Run 不因此成功；展开和勾选展示不写业务状态 | 真实应用完成 Gate 反例＋组件/浏览器状态；Worker 自评不能替代独立验证 |
+| EP-07 | 步骤重排、改名、插入、拆分与取消仍保留正确来源和稳定身份；直接遗漏旧项被拒绝，显式取消保留原因；同名两项的依据不串联，取消项不藏成完成 | 真实 PG 的计划修订/引用查询＋组件计数及历史呈现 |
+| EP-08 | 引用不存在、跨 Run/Workspace、越权或类型错配被拒绝；失败/UNKNOWN 依据不显示为验证通过；已有版本关系过期或缺失可见 | 真实 PG/HTTP 归属与读取权限反例＋确切结果/版本；失权不泄露正文、名称或数量 |
+| EP-09 | 同会话多个 Run、切会话/Task/连接及旧读取晚到时展示确切当前计划，错误不沿用另一对象 | 受控晚到组件反例＋真实关联查询与页面路由；不拿“最新一条”猜当前对象 |
+| EP-10 | 首次快照后、订阅前发生唯一一次更新仍能读到新 revision；重复 SSE hint、断线、seq 缺口与重连通过衔接或订阅就绪后二次读取恢复；旧 revision 不倒退，读取和重开不自动执行 | 受控读取/订阅窗口反例＋真实 HTTP/SSE 与新客户端恢复；事件只是刷新提示 |
+| EP-11 | 折叠/展开只读；Loading、错误、等待审批、停止与 UNKNOWN 可达；长列表和短/窄窗不遮挡输入、控制或抢焦点 | 组件/真实浏览器＋匹配源码的 Windows 窗口、键盘、中文 IME 与 DPI；模拟输入不代替原生验证 |
+| EP-12 | 实际“计划 → 读取 → 更新计划 → 修改/检查 → 展示依据”保持原调用身份和预算；首片不重做工具循环或将清单当调度器；无计划旧 Run 继续正常运行 | 可控模型＋真实 PG/磁盘/原 Gateway 回归；确切 Windows 包及真实 Provider 用合成材料另列范围，不以单次演示证明稳定能力 |
+
+实施提示词按后端持久闭环与会话呈现分两片；自检、独立验收、修复复验通过后再进入依赖片。真实 Provider 只在已有有效授权、配置与合成测试材料范围内调用，缺条件标明未运行；本规格不扩大用户项目材料外发范围或替代内部工具循环/M04–M07 的未完成出口。
+
+可选效果评价可记录错误完成声明、步骤遗漏、重启后恢复和人工核对耗时，先冻结可比任务、基线与判定方式；这些不是本次已运行结果或新增论文结论。实际工程与运行结果只维护在[功能验收表](overall-acceptance-2026-09-28.md#当前功能验收表)，不为普通复跑新建报告或全量日志台账。
+
+## 20. 模型内部工具循环验收规格
+
+2026-10-03。对象、身份与恢复规则归[运行架构 §2.3](../architecture/runtime-context.md)，能力范围归[工具适配器 §1.3](../architecture/tool-adapters.md) 与 [§1.4](../architecture/tool-adapters.md)，物理设计归[第 58 节](../database/physical-design-postgresql.md)。本表是验收规格；**实际运行结果只写[统一功能验收表](overall-acceptance-2026-09-28.md#当前功能验收表)**，测试文档不代替自动化测试。
+
+| 编号 | 场景及必须成立的反例 | 必要证据 |
+|---|---|---|
+| TL-01 | 受控 Fake 模型发出真实的「查找 → 读取 → Git diff → 回复」序列，每次工具调用落到自己的动作身份上，读到的是合成目录与测试仓库的真实内容，不是预制答案 | 真实 PG 集成：逐轮 `model_calls`、逐行 `run_tool_calls`、`logical_operations` 与实际文件/仓库内容三方比对 |
+| TL-02 | 完整且已声明的请求成为 `TOOL_CALLS`；半截 JSON、参数不是对象、未声明工具名、缺工具名、正文与工具并存，全部在派发前被拒且不产生 Operation | 协议单元反例（真实 SSE 帧与累积 chunk 两种形态）＋真实 PG 的 `REJECTED` 行与「`readOperation` 返回空」 |
+| TL-03 | 中文 UTF-8 路径与正文正确往返；有界结果带 `limit`/`truncated`，截断不冒充完整证据；受保护内容与构建产物不出现在结果里，被跳过计入 `skipped` | 查询适配器单元：真实临时目录、真实 junction、真实二进制文件 |
+| TL-04 | 同一已落库请求重复投递返回原记录，不产生第二个 Operation，也不重跑模型生成同一个动作 | 真实 PG 重复派用前后 Operation 计数不变 |
+| TL-05 | 撤权、连接失效、目标越界与受保护路径被拒；准备阶段被拒落 `REJECTED`（不连 Operation），派发准入阶段被拒落 `SETTLED` 并保留 Operation 身份 | 真实 PG 的权限撤销与 ASK/DENY 两条反例；比对行状态、Operation 状态与类型化原因 |
+| TL-06 | `ASK` 策略下工具调用停在绑定确切目录与参数的 `ACTION_APPROVAL`；未批准前没有 Invocation、没有资源 claim，Run 进入 `WAITING_APPROVAL` 且 Worker 已释放 | 真实 PG：Review 的 `operation_id`/`target_hash`、`invocation_attempts` 为空、Run 与 Task 状态 |
+| TL-07 | 循环预算耗尽后不再派发，模型收到类型化原因并自行收尾；不自动增加额度 | 真实 PG：`max_tool_calls` 边界＋`TOOL_LOOP_BUDGET_EXHAUSTED` |
+| TL-08 | Git 覆盖有/无 HEAD、已暂存/未暂存/未跟踪、非 Git 目录与读取失败；非 Git 目录返回类型化失败，**不显示为「干净」** | 真实一次性仓库（`git init` + 提交 + 三种状态）＋非 Git 目录；断言三类路径各自出现 |
+| TL-09 | 断点恢复从已落库行重建模型消息：assistant 工具请求取自行的 `arguments`，tool 结果取自该 Operation 的 `result_ref`；成功读取的证据复用，不重跑模型 | 真实 PG 的崩溃/重启恢复；比对模型调用次数、轮次与结果内容 |
+| TL-10 | 已结算结果缺失时回传类型化错误，不向模型提供编造的工具输出；仍在 `REQUESTED`/`PREPARED`/`WAITING_APPROVAL` 的轮次不被当作已结算历史重放 | 投影单元反例 |
+| TL-11 | 没有冻结信封的 Run 完全走原单次生成路径；`file_read_action`/`web_fetch_action` 与信封并存被拒 | 既有固定生成回归＋信封互斥的真实 PG 反例 |
+| TL-12 | 一个被改绑到别的 Operation 的 Review 不能唤醒工具循环的检查点 | 真实 PG：把 Review 的 `operation_id` 改指另一个 Operation 后，Resume 必须被拒且不新增检查点 |
+
+### 20.2 B 片：范围授权、普通修改与已配置检查（2026-10-04 实施）
+
+出口是 `apps/api/test/integration/tool-loop.integration.test.ts` 的 SC-* 用例，跑真实 PostgreSQL、真实磁盘与真实子进程。
+
+| 编号 | 场景 | 判定 | 出口 |
+|---|---|---|---|
+| SC-01 | 没有签发授权时模型请求写入 | 停在 `WAITING_APPROVAL`、磁盘一个字节未动、行连 Operation | SC 用例 `without a scope grant...` |
+| SC-02 | 授权内普通编辑连续执行 | 落盘内容正确、Operation `SUCCEEDED`、变化集账本记录**实测**落盘摘要与冻结基线 | SC 用例 `inside the granted scope...` |
+| SC-03 | 未配置的 `check_id` | 按 `TOOL_CHECK_NOT_CONFIGURED` 落 `REJECTED`、无 Operation、无子进程 | SC 用例 `a configured check runs...` |
+| SC-04 | 授权内已配置检查真实执行 | 真实子进程退出码与输出如实回传；Operation 参数只含冻结清单展开的可执行程序与参数 | 同上 |
+| SC-05 | 授权内删除 | 仍回落单动作审批，文件保留 | SC 用例 `a delete inside the granted scope...` |
+| SC-06 | 授权被撤销 / 已过期 | 自动执行停止，回到等待确认，磁盘未动 | SC 用例 `a revoked or expired grant...` |
+| SC-07 | 基线冲突 | 用户改动原样保留，动作不以 `SUCCEEDED` 结算 | SC 用例 `a stale baseline keeps...` |
+| SC-08 | 变更越过受管根 | 落 `REJECTED` 且无 Operation，不写盘 | SC 用例 `a changeset that reaches outside...` |
+| SC-09 | 授权只能收窄信封 | 资源不同 / 缺对应能力连接 / 放行检查但未配置检查，均在 Delegate 拒绝 | `delegate-task` 单元与 `api-delegations` |
+| SC-10 | 授权不可被工具正文扩大 | `scope_grant` 进入命令摘要；`allowed_actions` 为封闭词表且 `DELETE` 被约束禁止 | `0056` 约束 + 命令摘要断言 |
+| SC-11 | 写动作重复投递 | 同一请求重复投递只产生一个 Operation，磁盘内容不被二次改写 | SC 用例 `a repeated delivery of the same write request...` |
+| SC-12 | 跨 Project 共享同一物理目录 | 第二个 Run 的过期基线必须冲突，保留第一个 Run 已落盘的内容；冲突结算为 `FAILED` 且带原因 | SC 用例 `two Projects sharing one physical directory...` |
+| SC-13 | 单动作批准与范围授权是两个对象 | 删除落 `WAITING_APPROVAL` 后撤销授权，已排出的批准仍然生效并执行 | SC 用例 `a single-action approval survives a scope grant revocation...` |
+| SC-14 | 检查程序在授权之后被改动 | 冻结摘要与实测不符时退回单动作审批，不自动执行，也不启动子进程 | SC 用例 `a check whose program changed after the grant...` |
+| SC-15 | 基线冲突的回执可用性 | 回执给出实测到的当前摘要，账本记录实测内容而非模型声明的目标，磁盘未被覆盖 | SC 用例 `a conflict receipt reports the observed baseline...` |
+
+尚未覆盖、不得据此声称通过：写工具在并发 Delegate、过期 Worker 与停止与完成竞争下的冲突覆盖；检查输出截断与取消的可辨性；Windows 自启动进程树停机证据；真实 Provider 的 tool calling 兼容；协作页呈现（C 片）。一次自动适配的判定与端到端口径见[§20.3](#203-循环终止条件与一次冲突适配2026-10-04-实施)。
+
+### 20.3 循环终止条件与一次冲突适配（2026-10-04 实施）
+
+出口是同一个集成文件的 SC-* 用例与 `apps/api/test/unit/tool-loop.test.ts` 的纯判定用例。终止规则与适配准入的产品语义归[运行架构 §2.3](../architecture/runtime-context.md#23-内部工具循环的对象身份与恢复2026-10-03-实施设计)与[工具适配器 §1.2](../architecture/tool-adapters.md)。
+
+| 编号 | 场景 | 判定 | 出口 |
+|---|---|---|---|
+| TL-13 | 模型在预算用尽后仍只要工具 | 先给一次收尾轮；收尾轮仍无可派发项时 Run 落 `WAITING_APPROVAL` + `REPEATED_FAILURE`、DRAFT Attempt 以 `TOOL_LOOP_BUDGET_EXHAUSTED` 失败，且**不是** `UNEXPECTED_MODEL_RESULT` | SC 用例 `a model that keeps asking for tools past the budget...` |
+| TL-14 | 预算等待点不是死路 | Run 未终态、Task 为 `WAITING` 但 `executor_run_id`/`ownership_epoch` 不变；`HANDOFF` 控制请求被接受 | 同上 |
+| TL-15 | 冲突后原样重试 | `TOOL_ADAPTATION_STALE_BASELINE` 拒绝，无 Operation、不写盘 | SC 用例 `a conflict is adapted once...` |
+| TL-16 | 新基线 + 旧目标全文 | `TOOL_ADAPTATION_CONTENT_UNCHANGED` 拒绝（冒充适配） | 同上 |
+| TL-17 | 合法的一次适配 | 行落 `adaptation_of` 指向原始请求、`adapted_path` 为那一个冲突路径；落盘内容同时含用户改动与模型改动 | 同上 |
+| TL-18 | 同一条冲突再次冲突 | `TOOL_ADAPTATION_REQUIRES_HUMAN`，Run 落 `WAITING_APPROVAL` + `HUMAN_TOOL`、Task 仍由该 Run 执行 | 同上 |
+| TL-19 | 适配判定的边界 | 一次只适配一个路径（多路径 → `TOOL_ADAPTATION_AMBIGUOUS`）；冲突目标已消失 → `TOOL_ADAPTATION_TARGET_MISSING`；无关路径与无冲突时按普通请求通过 | `tool-loop` 单元 6 例 |
+
+尚未覆盖、不得据此声称通过：并发 Delegate、过期 Worker、停止与完成竞争在**写工具**上的冲突覆盖；检查输出截断与取消的可辨性；Windows 自启动进程树停机证据；真实 Provider 的 tool calling 兼容与质量；协作页呈现（C 片）；产品入口。跨 Project 共享同一物理目录的写冲突、写动作重复投递、单动作批准与范围授权互不撤销、检查程序在授权后漂移，分别由 §20.2 的 SC-11–SC-15 覆盖。另需注意 `0056` 为 `adaptation_of`/`adapted_path` 建立的是列与「同在同缺」约束，深度限制由应用层判定实现（见 TL-19），不得据此声称数据库层已强制。
+
+### 20.4 读写主链与写能力开关（2026-10-05 实施）
+
+用户提示词「先跑通读文件、改代码」要求先闭合这条主链。出口分三组：解释候选与提示词的单元反例、真实 PG/真实磁盘的授权形状与真实落盘、以及**真实 Provider + 真实磁盘目录**的定向验证。产品语义归[工具适配器 §1.6](../architecture/tool-adapters.md#16-写差异与检查工具2026-10-04-实施)，提示词与能力一致性归[提示词设计 §2](../architecture/agent-prompt-design.md)。
+
+| 编号 | 场景 | 判定 | 出口 |
+|---|---|---|---|
+| RW-01 | 提示词与实际能力一致（只读集） | 声明读集时系统提示明确「工具只读，不修改任何文件」，且不含任何请求修改的措辞 | `agent-runtime-prompts` 单元 |
+| RW-02 | 提示词与实际能力一致（含编辑） | 声明 `apply_changeset` 时不再出现「只读」，改为「先用读取工具读到真实内容再提出变更」，并声明删除与越界不在授权内 | 同上 |
+| RW-03 | 声明要改文件但说不出路径 | `writes_files: true` + 空 `file_changes` 通过校验，`wantsConversationFileWrite` 为 true | `conversation-execution` 单元 |
+| RW-04 | 只读请求不因新字段获得写权 | `writes_files: false` 判定为 false；旧请求体（只给 `file_changes`）判定为 true，缺省推导不改既有行为 | 同上 |
+| RW-05 | 变更数组不被通用校验器丢掉 | `validateToolArguments` 保留 `changes` 数组并逐项确认是对象；非数组按 `TOOL_ARGUMENT_INVALID` 拒 | `tool-loop` 单元 |
+| RW-06 | 写工具声明讲清变更项字段 | 词表 `changes.items.properties` 恰为 `path`/`action`/`content`/`baselineSha256`，与 `normalizeToolChanges` 校验的字段同名 | 同上 |
+| RW-07 | 只读请求真的能进入执行 | 只有 `FILE_QUERY`+`FILE_READ` 连接时 Delegate 成功；`allowed_tools` 只有读集、`connections` 不含 `FILE_WRITE`、**不产生** `scope_grant` | `folder-first-conversation` 集成 |
+| RW-08 | 不给文件名的修改请求 | `writes_files: true` + 空 `file_changes` 仍授予 `apply_changeset` + `APPLY_CHANGESET`，授权面只含这一个动作 | 同上 |
+| RW-09 | 真实磁盘闭环 | 模型 `search_text` 定位到真实文件 → `read_file` 读到真实内容 → `apply_changeset` 落盘；断言磁盘内容确由该次写入产生，用户既有的无关文件逐字节未变 | 同上 |
+| RW-10 | 真实 Provider 自主改写 | 目标里不含目标路径（只说「src 目录里」），真实模型自行 `find_paths`/`read_file` 定位后 `apply_changeset` 全部 `SETTLED`；落盘内容含要求的新串**且**保留它读到的原标记串 | `real-model-tool-loop` 集成（`RELAY_MODEL_*` 未配置时跳过） |
+| RW-11 | 真实 Provider 下的重复投递 | 再次推进同一 Run 不产生第二次写入，磁盘内容逐字节不变 | 同上 |
+
+RW-07–RW-09 使用 Fake 模型 + 真实工具与真实磁盘，证明的是授权形状与业务链；RW-10–RW-11 才是「模型自主定位并实际改写代码」的唯一证据。两者不可互相替代：Fake 模型能证明落盘规则，不能证明模型会用工具。
+
+尚未覆盖、不得据此声称通过：协作页的工具轨迹呈现（[§20.5](#205-c-片工具轨迹呈现2026-10-04-设计) 设计，出口仍未跑）；真实 Windows 窗口内由用户从文件夹会话发出请求的人工路径与原生目录选择；删除审批在界面上的呈现；检查命令失败后由模型据真实输出自我修正这一段主链（本轮只验证检查可执行，失败反馈修正未单独取证）；**停止、预算耗尽与重启读取在写路径上的复核已于 2026-10-05 补齐，见 [§20.6](#206-写路径的停止预算与重启复核2026-10-05-实施)**；RW-10/RW-11 的 Provider 侧稳定性（免费额度下会撞 429，单次通过不等于稳定）。
+
+### 20.5 C 片：工具轨迹呈现（2026-10-04 设计）
+
+出口分四组：后端投影单元、真实 PG 的「跑完工具循环后读投影」集成、前端组件回归、真实浏览器点击。产品语义归[工作台 §18.8](../frontend/workbench-design.md#188-工具轨迹的呈现2026-10-04c-片设计)，端点归[命令契约 §10.56](../api/http-command-contract.md)，物理设计归[第 60 节](../database/physical-design-postgresql.md)。读写主链本身的出口见 §20.4。
+
+| 编号 | 场景 | 判定 |
+|---|---|---|
+| TC-01 | 投影按 `(round, ordinal)` 升序 | 响应顺序稳定，前端不需再排序；同一 `(attempt, round, ordinal)` 不出现两行 |
+| TC-02 | 六态原样映射 | `REQUESTED` / `PREPARED` / `WAITING_APPROVAL` / `SETTLED` / `REJECTED` / `ABANDONED` 各一行，状态词不折叠、不合并；与迁移 `0054` 的 CHECK 一致 |
+| TC-03 | 结果即模型所读 | 投影的 `result_ref` 与 `projectToolResult` 喂给模型的字节一致（含 `{ truncated, omitted_bytes }` 后缀），不是重新序列化的另一份 |
+| TC-04 | `null` 与 `{}` 不可混淆 | 未派发行的 `operation_id` 为 `null`；`result_ref` 为 `null` 与空对象分别可辨 |
+| TC-05 | 空与失败分开 | 无工具请求的 Run 返回 200 + 空 `rounds`；不可见或跨作用域 Run 返回 404，不返回空数组冒充「没有工具」 |
+| TC-06 | 拒绝原因可读 | `REJECTED` 行必有 `reason` 与 `detail`，投影不吞掉类型化原因 |
+| TC-07 | 刷新事件恰好一条 | 工具行每次状态推进产生**恰好一条** `TOOL_CALL_CHANGED`，`seq` 与既有事件连续；仅 `revision` 变化不额外发事件 |
+| TC-08 | 历史不被回填 | 迁移前后既有 Run 的 `run_events` 行不变；流打开时客户端读权威快照的既有行为不受影响 |
+| TC-09 | 摘要在途不虚报 | 存在 `REQUESTED` / `PREPARED` 行时聊天摘要不计入「读了/改了 N」；`SETTLED` 后才计入 |
+| TC-10 | 折叠给出省略计数 | 折叠态显示「省略 N 行」且 N 与展开后的实际行数一致；被截断结果显示 `truncated` / `omitted_bytes`，不呈现为完整 |
+| TC-11 | 审批四态分显 | 等待批准 / 已批准 / 被拒 / 已取消各自有独立文案；不粗化成「已结束」；批准对象是 `operation_id` 指向的既有 Review，轨迹不自己渲染第二份参数 |
+| TC-12 | 状态矩阵 | Loading、读取失败、失权、无结果、预算耗尽（`wait_reason`）、删除待批准、断线重读各有文案；断线重读后不复活已清除的旧行 |
+| TC-13 | 占位不被假数据替换 | FILES / GIT 页签仍显示「未接入」；轨迹内的 Git 结果标注来源为本次模型调用，不提供可点按钮 |
+| TC-14 | 轨迹只读 | 轨迹区不出现批准 / 暂停 / 取消 / 重试按钮；控制请求仍走既有 Run 控制端点 |
+
+尚未覆盖、不得据此声称通过：真实 Windows 窗口内的中文 IME、DPI 与内容缩放；安装、升级、卸载；真实 Provider 的 tool calling 质量与人工观感（Fake 模型 + 真实工具只证明工具与业务链）；检查输出截断在界面上的可辨性（后端已有 `truncated` 标记，渲染层另计）。C 片通过不改变 M04–M07 与 V1 总出口，也不解除 §20.2、§20.3 各自列出的未覆盖项。
+
+### 20.6 写路径的停止、预算与重启复核（2026-10-05 实施）
+
+[专项提示词](../../prompts/bounded-multi-agent.md)的单 Agent 依赖门要求先复核「停止、预算耗尽与重启读取」在**写路径**上是否成立：既有证据全部来自只读工具或固定动作链，写入的控制与恢复路径此前无出口。规格归[运行架构 §2.3](../architecture/runtime-context.md)，实际结果只归[功能验收表](overall-acceptance-2026-09-28.md#当前功能验收表)。出口是 `apps/api/test/integration/tool-loop.integration.test.ts`，跑真实 PostgreSQL 与真实磁盘。
+
+| 编号 | 场景及必须成立的反例 | 判定 | 出口 |
+|---|---|---|---|
+| SW-01 | 待处理暂停意图期间派发写请求 | 类型化结果 `STOPPED`（不是未分类异常、不是 DENIED）；磁盘逐字节未动；无任何 Operation；请求行保持 `REQUESTED` 且 `operation_id` 为 null，恢复后仍是同一动作身份 | 用例 `a pending user pause blocks a requested write before it reaches the disk` |
+| SW-02 | 同一轮内第二个写请求越过调用预算 | 该行 `REJECTED` + `TOOL_LOOP_BUDGET_EXHAUSTED` + `operation_id` 为 null；预算内的第一次照常落盘，预算外的目标文件逐字节未变；变化集账本只记一条 | 用例 `a write request past the call budget is rejected without an Operation or a disk byte` |
+| SW-03 | 写入结算后重启再推进 | 脚本不再提供那一次写入，循环仍从已落库行接续并落定 DRAFT；`run_tool_calls` 只有第 0 轮一行（同 id、同 `operation_id`）；Run 只有 1 个 Operation、变化集账本仍 1 条；磁盘逐字节未变；重启后读取投影仍如实呈现 `SETTLED` 与该 `operation_id` | 用例 `a settled write is not re-executed after a restart and the loop resumes from the row` |
+
+SW-03 的判据是行数与轮次：若历史没有从已落库行重建，Fake 模型会从第 0 轮再要一次写入，`run_tool_calls` 就会多出第 1 轮的一行。这同时把规格表 `TL-09`（断点恢复从已落库行重建模型消息）从「只存在于文件头注释」变成有集成出口的项。
+
+尚未覆盖、不得据此声称通过：停止与**完成**竞争下的写冲突（§20.2/§20.3 各自列出的那一项）、并发 Delegate 与过期 Worker 在写工具上的冲突覆盖、检查输出截断与取消的可辨性、Windows 自启动进程树停机证据、取消（而非暂停）后遗留的 `REQUESTED` 行归属、真实 Windows 窗口内由用户发起的人工路径。
+
+### 20.7 人工触发的受管 Git 只读（2026-10-05 实施）
+
+补 M06 的动作触发协议缺口：`prepareGatewayAction` 此前只接受 `RUN`/`USER_IMPORT` 两种 origin，人工触发的 Git 状态/diff 没有公开入口。规则归[工具适配器 §1](../architecture/tool-adapters.md)，契约归[命令契约 §10.57](../api/http-command-contract.md#1057-人工触发的受管-git-只读2026-10-05-源码实现)，物理设计归[第 61 节](../database/physical-design-postgresql.md)。出口是 `apps/api/test/integration/git-user-action.integration.test.ts`，跑真实 PostgreSQL、真实 `git` 与真实 HTTP。
+
+| 编号 | 场景及必须成立的反例 | 判定 |
+|---|---|---|
+| GU-01 | 受管根内读取 | 真实 `git init` 仓库读到 `branch`、`head_commit`、`untracked`；`GIT_DIFF` 读到真实差异正文 |
+| GU-02 | 根外与路径穿越 | `../`、反斜杠穿越、绝对路径 → `GATEWAY_TARGET_DENIED`；未知 `resource_id` → `RESOURCE_NOT_FOUND`；同用例末尾用合法相对路径证明不是「一律拒绝」 |
+| GU-03 | 缺 `GIT_READ` 连接 | 只有 `FILE_READ` 连接的 Project → `GATEWAY_CONNECTION_DENIED`，且 `USER_ACTION` 行数前后不变（拒绝不留假事实） |
+| GU-04 | 策略 AUTO / ASK / DENY | AUTO 直通并结算；ASK 建 `ACTION_APPROVAL`、确认前 `Invocation` 数为 0 且响应无 `result` 字段，`ResolveReview` 后**同一 `command_id`** 再次投递才读取且只读一次；DENY → `GATEWAY_PERMISSION_DENIED` |
+| GU-05 | 重复投递只读一次 | 同 `command_id` 两次 → `replayed=true`、同一 `operation_id`、`invocation_attempts` 恰好 1 行；「回执未写下即崩溃」后重投返回同一次落库结果 |
+| GU-06 | 非 Git 目录不得显示为干净 | 结算 `FAILED`、`failure_kind = GIT_REPOSITORY_UNAVAILABLE`，响应中**不含** `staged`/`unstaged`/`untracked` 任何一项 |
+| GU-07 | 三条 CHECK 的行级守卫 | 直写 `logical_operations` / `invocation_attempts`：挂 `task_id`/`run_id` → `23514`；`GIT_WRITE`/`CLI_RUN`/`FILE_WRITE` → `23514`；`resource_id IS NULL` → `23514`；Invocation 带 `worker_id` 或 claim → `23514`；合法形态写入成功 |
+
+尚未覆盖、不得据此声称通过：`USER_ACTION` 的**崩溃后自动恢复驱动**（`reconcileGatewayInvocation` 分支已就位但无调度器调用，停在 `DISPATCHING`/`UNKNOWN` 的调用永久未决、须人工核对、不盲重试）；并发双投递的**真实 HTTP 竞争**用例（代码路径与集成断言存在，但未写专门的并发 HTTP 用例）；Windows junction/hardlink 根替换竞争（与 `FILE_READ`/`FILE_QUERY` 同一未闭合限制）；真实 Windows 窗口、中文 IME、DPI；前端接入；安装、升级、卸载。独立验收未做。GU-01–GU-07 通过不改变 M06 模块状态，也不放行 Git 写侧、目录浏览或受控 CLI。
+
+### 20.8 创建后人工补验收条件（2026-10-05 实施）
+
+补「轻量起步建的 Task 无公开入口补验收条件」的服务端缺口：此前只能靠 AI 提案接受或 Skill 提案补齐。契约归[命令契约 §10.58](../api/http-command-contract.md#1058-创建后人工补验收条件2026-10-05-源码实现)。出口是 `apps/api/test/integration/task-acceptance-command.integration.test.ts`（真实 PG + 真实 HTTP）与 `apps/api/test/unit/task-acceptance-command.test.ts`。
+
+| 编号 | 场景及必须成立的反例 | 判定 |
+|---|---|---|
+| TA-01 | 幂等 | 同 `command_id` 同载荷 → 原回执 + `Command-Replayed: true`；异载荷 → 409 `COMMAND_ID_REUSED` |
+| TA-02 | 双 revision CAS | 旧 Task revision 与旧验收版本分别 `REVISION_CONFLICT`，`conflict.entity_type` 为 `TASK` / `TASK_ACCEPTANCE`；并发一胜一败且败者为 `REVISION_CONFLICT` |
+| TA-03 | 历史版本不可改写 | 写入新不可变版本，旧 `acceptance_criteria` 行逐字节不变 |
+| TA-04 | 旧周期证据失效 | 同短事务内验证适用性写 `ACCEPTANCE_CONTRACT_CHANGED` + `source_ref = task_acceptance_revision:<新版本>`、该 Task 的 `OPEN` Review 置 `EXPIRED`、旧 session 行保留 |
+| TA-05 | 只收紧规则 | 删除/改写/降级既有 required criterion → 409 `INVALID_TRANSITION` + `conflict.criterion_ids`；新版本无任何 required → 422 `VALIDATION_FAILED`；可选 criterion 可改写或丢弃 |
+| TA-06 | 执行权与终态闸门 | AI 占有执行权、有活动 Run、有未结算或 UNKNOWN 动作、状态已是终态 → `EXECUTOR_CONFLICT`（终态须先 `ReopenTask`） |
+| TA-07 | 短事务单写 | 验收版本、criteria、Task 指针、验证撤销、Review 过期、审计、回执全在同一 `withTransaction` 内；无模型/网络/CLI/人工等待进入事务 |
+
+尚未覆盖、不得据此声称通过：**前端入口**（用户在界面上仍点不到，产品缺口未闭合）；`hasChecker` 守卫分支无反例（四个 `CriterionMethod` 全部映射到已注册 checker，今天无法从公开请求触发，该分支未被覆盖）；本入口不做 Rule 准入检查（有意与 Task Skill 路径不同），带不可执行 HARD Rule 的 Project 会到 Delegate 时才被拒；真实 Windows 窗口、IME、DPI、安装升级卸载。独立验收未做。
+
+「轻量起步」切片另有一项**与本节相邻但独立**的发现：`taskLightweightEntry.spec.ts` 的响应丢失用例曾是 `if/else` 条件式断言、两条分支都过，「Task 轻量入口走手动核对」这一事实当时无回归保护。2026-10-05 按用户决定保持现状差异化并补紧断言（锁住「未发生自动核对」与「保留原 `command_id`、`pendingStep` 未清」两组可观察事实），该口径是否统一仍待用户决定。
+
+### 20.9 传统 Agent 检查失败后的自主修正（2026-10-05）
+
+复用原 DRAFT、Gateway、范围授权、LangGraph 与人工完成门。规则归[运行架构 §2.3](../architecture/runtime-context.md#23-内部工具循环的对象身份与恢复2026-10-03-实施设计)，实际成绩只归功能验收表。
+
+| 编号 | 必须成立的场景 | 出口 |
+|---|---|---|
+| CR-01 | 正常非零检查不带 reason，仍回传 `isError: true` 与逐字实际输出；成功复检为 false | `tool-loop.test.ts` 普通失败回放反例 |
+| CR-02 | 真实子进程首次退出 1 → 读真实文件 → 按真实基线修改 → 同一冻结检查退出 0；用户无关文件、检查脚本不变；重放无新增效果；最终仍等待 HUMAN | `tool-loop.integration.test.ts` 真实检查修正用例 |
+| CR-03 | 生产图收到失败检查后保存 `TOOL_CHECK_FAILED`，实际返回 advance 完成修正，持久化 Artifact、保留 OPEN HUMAN Review；原失败 claim RELEASED | `agent-check-graph.integration.test.ts`，真实 PG 与官方 Saver |
+| CR-04 | 检查 ID 来自同 Run 冻结清单，任务不提供 ID 或修复值；生产 `runOneCommand` 领取目标 Run，真实 Provider 据失败输出中的随机值读取、修改、复检；官方 Saver 保存失败后继与 HUMAN 门，基线/实际 SHA、request id/用量、重放计数可核对 | `real-model-tool-loop.integration.test.ts` opt-in 修复探针；默认未配置时跳过 |
+| CR-05 | 失权后的真实检查结果为 UNKNOWN，工具行保持 PREPARED，不进入模型历史；旧 SETTLED＋UNKNOWN 同样被权威 Operation 阻挡 | `tool-loop.integration.test.ts` 未知结果与旧数据反例 |
+| CR-06 | 超时结算后重放仍是 FAILED，原 claim QUARANTINED，不新增 Invocation、不因 SETTLED 走成功路由 | 同上超时回放反例 |
+
+CR-02 使用可控 Fake 工具序列验证机制，CR-03 使用生产 LangGraph＋Fake 模型，CR-04 使用真实 Provider＋生产调度图；三者分别报告，已配置检查的合成目录样本不代表真实 Windows 会话或任意用户项目通过。真实 Provider 只使用已授权配置及合成材料，不重试 RETRYABLE、不提高预算；是否实际通过只见功能验收表。脚本正文信任摘要、Windows Job 管理、检查证据对受验产物的通用版本绑定、真实窗口/IME/DPI 与安装仍待覆盖。
+
+## 21. 有界多 Agent 与自动会话验收规格
+
+2026-10-05，**已确认产品规则 / 待核定工程设计 / 未运行规格**。本轮只补文档和实施提示词。范围归[总纲 §0.9](../../Personal_Workflow_OS_Master_Spec.md#09-有界多-agent-与自动会话)，Owner/恢复归[运行架构 §2.5](../architecture/runtime-context.md#25-有界子-agent-的委派与会话关联)，交互归[工作台 §23](../frontend/workbench-design.md#23-主子会话与有界协作)。本表不表示测试已写或已通过。
+
+| 编号 | 场景及必须成立的反例 | 必要证据 |
+|---|---|---|
+| MA-01 | 明确独立新需求创建主会话，同需求补充留原会话，模糊输入先澄清；纯建会话不创建 Task/Run，不调用 Apply/Delegate | 严格解释/命令反例＋真实 PG/HTTP；保留真实用户消息来源 |
+| MA-02 | 同原消息/命令同载荷并发或响应丢失只建一次主/子会话、委派及实际 Task/Run；异载荷拒绝，重开查询原回执不生成新身份 | 真实 PG 并发/唯一性＋创建保存后回执前故障点 |
+| MA-03 | 子会话关联确切项目、主会话、主 Run 和原委派；跨 Workspace/项目/执行、伪造父身份、孤立子关系被拒；旧普通会话保持可读且不虚构父子 | 真实 PG/HTTP 归属、权限、旧数据与旧深链兼容反例 |
+| MA-04 | 角色配置可复用，每次委派冻结配置/来源版本和独立上下文；后续配置/历史修改不污染在途输入，不复用上一委派记忆 | 真实持久快照及模型收到的输入，来源失效另作反例 |
+| MA-05 | 主模型实际派发调查、收到反馈、实施、再派独立审查并汇总；子不另占 Task 执行权或直接完成业务 | 可控模型＋真实 PG/工具；核对调用、反馈和父推进关联，预填结果不算执行 |
+| MA-06 | 两个独立子任务真正同时在途，第三个不得启动；子再次委派被拒；父等待不占满子槽，子结算与父等待竞态能唤醒一次 | barrier 控制的真实 PG/Worker 并发，槽/claim/唤醒依据可核对 |
+| MA-07 | 主子调用共享原 Run 总预算，主汇总额度保留；并发预留不可超发，已知用量据实，STARTED/未知用量保守占用，超额不外呼 | 真实 PG 预算竞争＋模型调用次数/实际用量账本，不能仅检查串行计数 |
+| MA-08 | 子文件写、CLI、Git 写、改权限和递归委派均拒绝；父写权限不传为子能力，撤权/隔离在实际只读调用前有效 | 严格 schema＋真实 Gateway 准入反例；无实际文件/进程副作用 |
+| MA-09 | 原 Run、委派、Attempt、claim/epoch 与 revision 共同限制结算；过期 Worker/终态迟到结果不能覆盖当前汇总或唤醒父执行 | 真实 PG 的重复 claim/迟到结果/CAS；已发生调用用量仍留账 |
+| MA-10 | 用户直接补充子会话持久保存并一次同步主来源；重复投递不复制或形成消息循环，主/子文本不伪装为 USER 授权 | 真实 PG/HTTP 投递/消费回执＋组件来源；结果不含虚假执行授权 |
+| MA-11 | 在途补充仅在安全点用于后续尝试；已结束会话收新消息不复活旧 Run；超范围重派仍检查原授权，影响必要审查基线的补充使旧反馈待复核 | 可控模型输入快照＋真实 PG/HTTP；准确排队/已消费/待决定呈现 |
+| MA-12 | 审查等待相关改动形成并绑定确切未提交内容/版本；读取期间漂移、修复或验收条件变化时旧意见不能覆盖新基线 | 真实磁盘/PG 的摘要与适用性反例＋复审关系，不仅核对 Git HEAD |
+| MA-13 | 已确认失败最多一次修正重试，原委派和失败关系保留且计总预算；调查继续失败由主接续，必要审查继续失败暂停交付 | 失败注入＋调用次数/输入修正/必要性冻结，主自审不能填独立依据 |
+| MA-14 | 未知调用先按原身份核对，外部 UNKNOWN 不换 Adapter/ID 绕过；模型 STARTED 不被补成 FAILED、零用量或无成本成功 | 调用启动后结果落库前故障点＋持久账本/核对出口 |
+| MA-15 | 父暂停/取消/交接立即阻止新委派及新子调用；在途安全处理前仍显示停止中；子完成/汇总/正式完成竞争不能穿过控制 | 真实 PG＋可控挂起调用/barrier＋停止证据与原完成 Gate 回归 |
+| MA-16 | 单个子任务取消不取消父需求，也不触发自动修正重试；必要子审查取消仍保留交付缺口，失效父授权拒绝新补充执行 | 真实 PG 控制/授权反例＋组件状态 |
+| MA-17 | 子结果保存未投递、投递未消费、主汇总保存回执丢失各处崩溃后沿原关系接续一次；重读不自动 Resume，不重复已完成模型/工具效果 | 新进程＋真实 PG/Fake Adapter 故障点，核对原身份、调用计数及结果 |
+| MA-18 | 子声明完成或主汇总成功，但验证缺失/FAIL/ERROR、Review 未接受、版本不适用或完成 Gate 拒绝时，Task/Run 不成功；即使其他 Gate 满足，已冻结必要审查仍缺失/失败/取消/过期/归属不符或阻塞未解时，Application 拒绝完成提交，主模型不能删改必要标记绕过 | 原业务完成事务/验证回归＋确切 Artifact/条件/约束/委派/反馈基线关系；处理或豁免核对原授权与决定来源 |
+| MA-19 | 项目→主→子投影默认折叠但待人工提示可见；Task 管理/旧 URL/分页可达，切会话晚到结果不串联，失权不泄露内容/名称/数量 | 真实关联查询＋受控组件/浏览器状态与范围反例 |
+| MA-20 | 首次读取/订阅窗口内唯一更新、重复 hint、断线/seq 缺口与重连仍读到当前 revision；旧快照不倒退，展开/阅读不发写命令 | 真实 HTTP/SSE＋受控更新窗口，保持原消息/Run Owner |
+| MA-21 | 创建/发送未决命令、草稿、目录切换守卫与恢复来源保留；Loading/失败/预算/必要审查/停止中/UNKNOWN 均可达 | 组件/浏览器故障反例＋确切 Windows 包下真实 API/PG 人工路径 |
+| MA-22 | 实际两个只读子执行、直接补充、停止/重启与审查回主可操作；中文 IME、键盘、短窄窗和 DPI 不遮挡输入/风险；Provider 实际调用和用量另验 | 匹配源码的 Windows 包；真实 Provider 仅已授权配置＋合成材料定向，分层列限制 |
+
+实施顺序归[专项提示词](../../prompts/bounded-multi-agent.md)：先核对单 Agent 相关依赖，再按 A 持久协议、B 真实子执行/预算/控制恢复、C 会话 UI 与真实窗口出口推进；每片自检、独立验收、修复复验后才进入依赖片。旧单 Agent、工具循环、审批/UNKNOWN、业务完成和旧 checkpoint 的受影响回归必须保留。各层实际结果只更新[功能验收表](overall-acceptance-2026-09-28.md#当前功能验收表)，不以文档检查或 A 片数据库通过宣称子执行能力已交付。
+
+效果评价：实施时冻结代表性软件需求、单 Agent/人工转述基线、相同验收要求与协调动作计数规则，记录用户实际转述、分派和催办次数，以及必要澄清、失败处置、耗时、调用用量/成本和审查遗漏。主要比较人工协调动作，不能用子会话数替代；报告任务差异、样本量和未测项，未冻结阈值不宣称整体效果通过。效果测量与工程 Gate 分开，不自动启动论文实验或外发用户项目材料。
