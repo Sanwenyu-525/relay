@@ -73,8 +73,10 @@ interface Routes {
   content?: (versionId: string) => Response | Promise<Response>;
   draft?: () => Response;
   operations?: () => Response;
+  toolCalls?: () => Response | Promise<Response>;
   workspaceTasks?: () => Response;
   messages?: () => Response | Promise<Response>;
+  executions?: () => Response | Promise<Response>;
   sessions?: () => Response;
   proposals?: () => Response;
   modelPort?: () => Response;
@@ -105,12 +107,33 @@ function router(routes: Routes) {
       preview_available: false, preview_text: null, preview_revision: "0", preview_truncated: false,
       step_attempt_id: null, attempt_claim_epoch: null, model_call_id: null });
     if (path === `${prefix}/runs/${runId}/operations`) return routes.operations?.() ?? json([]);
+    if (path === `${prefix}/runs/${runId}/tool-calls`) return routes.toolCalls?.() ?? json({ run_id: runId,
+      run_status: "RUNNING", wait_reason: null, rounds: [] });
+    if (path.startsWith(`${prefix}/runs/${runId}/events`)) {
+      // 默认返回一个必然失败的流，让用例走「事件流不可用」的降级分支；
+      // 需要验证事件驱动刷新的用例通过 sseFrames 传入真实帧。
+      const frames = (routes as { sseFrames?: readonly string[] }).sseFrames;
+      if (frames === undefined) {
+        return { ok: true, status: 200, headers: new Headers({ "content-type": "text/event-stream" }),
+          body: null } as unknown as Response;
+      }
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const encoder = new TextEncoder();
+          for (const frame of frames) controller.enqueue(encoder.encode(frame));
+          controller.close();
+        },
+      });
+      return new Response(body, { status: 200,
+        headers: { "content-type": "text/event-stream; charset=utf-8" } });
+    }
     if (path === `${prefix}/reviews`) return routes.reviews?.() ?? json({ items: [openReview()] });
     if (path === `${prefix}/reviews/${reviewId}`) return json(openReview());
     if (path === `${prefix}/assist-sessions`) return routes.sessions?.() ?? json({ items: [{ id: sessionId, workspace_id: workspaceId,
       project_id: projectId, task_id: taskId, title: "关于确定实验评价指标", status: "ACTIVE", revision: "1",
       updated_at: "2026-09-29T03:40:00Z" }] });
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return routes.messages?.() ?? json({ items: [] });
+    if (path === `${prefix}/conversation-execution-requests`) return routes.executions?.() ?? json({ items: [] });
     if (path === `${prefix}/assist-proposals`) return routes.proposals?.() ?? json({ items: [] });
     if (path === `${prefix}/skill-definitions`) return json({ items: [] });
     if (path === `${prefix}/projects/${projectId}/managed-resources`) return json([{ id: "res-1", project_id: projectId,
@@ -500,6 +523,7 @@ describe("协作工作区主路径", () => {
     expect(observer?.disconnected).toBe(true);
   });
 
+
   it("会话选项Escape收起并返回摘要焦点，输入法和组合键保留选项与原草稿", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const fetchMock = router({}); vi.stubGlobal("fetch", fetchMock);
@@ -546,6 +570,14 @@ describe("协作工作区主路径", () => {
     { name: "还没有模型调用时如实说明", maxCallTokens: 1_000,
       usage: { input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_creation_tokens: null },
       hit: "缓存未采集", state: "unknown", aria: "尚无模型调用" },
+    // 996/1000 进位后是 100%，但 4 个 token 确实未命中。显示 100% 是把未命中说成完美命中。
+    { name: "部分命中不进位成 100%", maxCallTokens: 1_000,
+      usage: { input_tokens: 1_000, output_tokens: 200, cache_read_tokens: 996, cache_creation_tokens: null },
+      hit: "缓存命中 99.6%", state: "high", aria: "100%" },
+    // Provider 上报不一致时钳到上限，不显示分母之外的比率。
+    { name: "上报超出输入时钳到 100%", maxCallTokens: 1_000,
+      usage: { input_tokens: 1_000, output_tokens: 200, cache_read_tokens: 1_200, cache_creation_tokens: null },
+      hit: "缓存命中 100%", state: "high", aria: "100%" },
   ]) {
     it(`输入区底栏：${scenario.name}`, async () => {
       activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
@@ -1091,7 +1123,8 @@ describe("协作工作区主路径", () => {
   it("示例模式明确没有真实工作；live 首次进入只读取，不新建任务也不显示虚构近期工作", async () => {
     const first = await mountWorkbench("/agent");
     await flush();
-    expect(first.wrapper.get(".breadcrumbs").text()).toContain("近期工作");
+    // 工作台页不显示面包屑：该行与页头重复，标题本身就是返回确切任务的入口。
+    expect(first.wrapper.find(".breadcrumbs").exists()).toBe(false);
     expect(first.wrapper.get('[data-testid="collab-fixture-gap"]').text()).toContain("示例模式没有真实工作");
     expect(first.wrapper.find('[data-testid="assist-draft"]').exists()).toBe(false);
     // 示例模式没有真实 Task，左栏不渲染近期工作列表，也不伪造历史。
@@ -1103,8 +1136,11 @@ describe("协作工作区主路径", () => {
     vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench("/agent");
     await flush(60);
-    // 空工作区的默认入口是打开文件夹（§18.1），不是直接挑任务。
-    expect(view.wrapper.get('[data-testid="collab-empty"]').text()).toContain("打开文件夹就能开始对话");
+    // 空工作区的入口是选目录（§18.1），但不再挡在对话前面：直接就能输入，
+    // 目录只是执行准入的前提，不是开始讨论的前提。
+    expect(view.wrapper.get('[data-testid="folder-scope-bar"]').text()).toContain("未选择目录");
+    expect(view.wrapper.get('[data-testid="assist-first-draft"]').exists()).toBe(true);
+    expect(view.wrapper.get('[data-testid="collab-unassigned-execution-hint"]').exists()).toBe(true);
     expect(view.wrapper.get('[data-testid="recent-work"]').text()).toContain("还没有任务");
     // 范围与排序常驻可见，避免用户把会话列表误当作全部工作。
     expect(view.wrapper.get('[data-testid="recent-work"] [title="全部任务 · 按最近变更排序"]').exists()).toBe(true);
@@ -1143,8 +1179,8 @@ describe("协作工作区主路径", () => {
     expect(facts).toContain("等待判断不等于已暂停");
     expect(facts).toContain("任务 v2 / 验收 v2");
     expect(facts).toContain("证据：检查记录");
-    // 面包屑按确切 Project/Task 展开。
-    expect(view.wrapper.get(".breadcrumbs").text()).toContain("人机协作工作流研究");
+    // 项目归属改为页头那行 meta 常驻，不再由面包屑重复承载。
+    expect(view.wrapper.get('[data-testid="collab-current-need"]').text()).toContain("人机协作工作流研究");
     expect(view.wrapper.get('[data-testid="run-control"]').text()).toContain("控制提交回执表示 PENDING");
     // 判断卡内联在文档页签正文下方。
     expect(view.wrapper.get('[data-testid="collab-judgment"]').text()).toContain("等待你的判断");
@@ -1238,7 +1274,9 @@ describe("协作工作区主路径", () => {
         await press("ArrowRight", properties);
         expect(selected().attributes("data-testid")).toBe("devtools-tab-FILES");
       }
-      for (const [key, expected] of [["ArrowLeft", "RUNS"], ["ArrowRight", "FILES"], ["End", "RUNS"], ["Home", "FILES"], ["ArrowRight", "GIT"], ["ArrowRight", "TERMINAL"]]) {
+      // 末位页签现在是「轨迹」（本轮新增），因此首尾循环的落点随之改变；
+// 断言强度不变，只是跟着真实页签顺序走。
+      for (const [key, expected] of [["ArrowLeft", "TRACE"], ["ArrowRight", "FILES"], ["End", "TRACE"], ["Home", "FILES"], ["ArrowRight", "GIT"], ["ArrowRight", "TERMINAL"], ["ArrowRight", "RUNS"], ["ArrowRight", "TRACE"]]) {
         await press(key!);
         const current = selected();
         expect(current.attributes("data-testid")).toBe(`devtools-tab-${expected}`);
@@ -1249,6 +1287,8 @@ describe("协作工作区主路径", () => {
         expect(panel?.getAttribute("role")).toBe("tabpanel");
         expect(panel?.getAttribute("aria-labelledby")).toBe(current.attributes("id"));
       }
+      // 循环停在末位的「轨迹」上；终端页签的占位要单独回到 TERMINAL 才能读到。
+      await view.wrapper.get('[data-testid="devtools-tab-TERMINAL"]').trigger("click");
       expect(view.wrapper.get('[data-testid="devtools-terminal-gap"]').text()).toContain("不提供可执行提示符");
       const outputToggle = view.wrapper.get('[data-testid="devtools-tab-OUTPUT"]');
       expect(outputToggle.attributes("role")).toBeUndefined();
@@ -1517,6 +1557,269 @@ describe("协作工作区主路径", () => {
     view.unmount();
   });
 
+  it("轨迹页签按轮次列出工具调用：折叠给出省略计数，展开给参数与结果全文", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const longContent = Array.from({ length: 40 }, (_unused, index) => `第 ${index + 1} 行`).join("\n");
+    const fetchMock = router({ toolCalls: () => response({ run_id: runId, run_status: "RUNNING",
+      wait_reason: null, rounds: [{ round: 0, model_call_id: "55555555-5555-4555-8555-555555555555",
+        calls: [{ id: "66666666-6666-4666-8666-666666666666", round: 0, ordinal: 0, tool_name: "read_file",
+          status: "SETTLED", arguments: { relative_path: "src/工具.ts" }, arguments_sha256: "a".repeat(64),
+          provider_tool_call_id: "call-0", operation_id: "77777777-7777-4777-8777-777777777777",
+          result_ref: { content: longContent }, adaptation_of: null, adapted_path: null,
+          created_at: "2026-10-04T01:00:00Z", updated_at: "2026-10-04T01:00:01Z" }] }] }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      await view.wrapper.get('[data-testid="collab-devtools-toggle"]').trigger("click"); await flush(60);
+      await view.wrapper.get('[data-testid="devtools-tab-TRACE"]').trigger("click"); await flush(60);
+
+      const panel = view.wrapper.get('[data-testid="run-tool-trajectory"]');
+      expect(panel.text()).toContain("第 0 轮");
+      expect(panel.text()).toContain("read_file");
+      expect(panel.text()).toContain("src/工具.ts");
+      // 折叠态必须能看出省了多少，否则「只显示了几行」会被读成「结果就这么多」。
+      expect(panel.text()).toMatch(/省略 \d+ 行/);
+      // 文案说「只显示头 N 行与尾 M 行」时，那两段就必须真的在界面上。
+      expect(panel.text()).toContain("第 1 行");
+      expect(panel.text()).toContain("第 40 行");
+      expect(panel.text()).not.toContain("第 20 行");
+
+      await view.wrapper.get('[data-testid="trajectory-expand-66666666-6666-4666-8666-666666666666"]').trigger("click");
+      await flush(40);
+      const expanded = view.wrapper.get('[data-testid="trajectory-call-66666666-6666-4666-8666-666666666666"]');
+      expect(expanded.text()).toContain("第 40 行");
+      expect(expanded.text()).toContain("第 1 行");
+      expect(expanded.text()).toContain("第 20 行");
+    } finally { view.unmount(); }
+  });
+
+  it("在途与已结算分开：未结算不计数，等待批准与拒绝各有各的说法", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const call = (over: Record<string, unknown>) => ({ id: "88888888-8888-4888-8888-888888888888", round: 0,
+      ordinal: 0, tool_name: "read_file", status: "SETTLED", arguments: { relative_path: "a.ts" },
+      arguments_sha256: "a".repeat(64), provider_tool_call_id: "p", operation_id: null,
+      result_ref: { content: "x" }, adaptation_of: null, adapted_path: null,
+      created_at: "2026-10-04T01:00:00Z", updated_at: "2026-10-04T01:00:01Z", ...over });
+    const fetchMock = router({ toolCalls: () => response({ run_id: runId, run_status: "WAITING_APPROVAL",
+      wait_reason: "HUMAN_TOOL", rounds: [
+        { round: 0, model_call_id: "55555555-5555-4555-8555-555555555555", calls: [
+          call({ id: "90000000-0000-4000-8000-000000000001", status: "REQUESTED", ordinal: 0 }),
+          call({ id: "90000000-0000-4000-8000-000000000002", status: "PREPARED", ordinal: 1 }),
+          call({ id: "90000000-0000-4000-8000-000000000003", status: "WAITING_APPROVAL", ordinal: 2,
+            tool_name: "apply_changeset", result_ref: null }),
+          call({ id: "90000000-0000-4000-8000-000000000004", status: "REJECTED", ordinal: 3,
+            result_ref: { reason: "TOOL_CHECK_NOT_CONFIGURED", detail: "check-1 未配置" } }),
+          call({ id: "90000000-0000-4000-8000-000000000005", status: "SETTLED", ordinal: 4 }),
+          // 被拒的调用必须进失败计数，不能被当成「还在跑」。
+          call({ id: "90000000-0000-4000-8000-000000000006", status: "REJECTED", ordinal: 5,
+            operation_id: null, result_ref: { reason: "TOOL_CHECK_NOT_CONFIGURED", detail: "check-1 未配置" } })] }] }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      await view.wrapper.get('[data-testid="collab-devtools-toggle"]').trigger("click"); await flush(60);
+      await view.wrapper.get('[data-testid="devtools-tab-TRACE"]').trigger("click"); await flush(60);
+
+      const panel = view.wrapper.get('[data-testid="run-tool-trajectory"]');
+      // 预算耗尽等终止类原因如实显示，但不因此宣称已完成。
+      expect(panel.text()).toContain("有一个动作在等你批准");
+      expect(panel.text()).not.toContain("HUMAN_TOOL");
+      expect(panel.text()).toContain("等待你批准");
+      expect(panel.text()).toContain("TOOL_CHECK_NOT_CONFIGURED");
+      expect(panel.text()).toContain("check-1 未配置");
+      expect(panel.text()).toContain("正在执行");
+      // 已结算计数只数 SETTLED：两个在途请求不算「已读」。
+      expect(panel.text()).toContain("已结算 1");
+      expect(panel.text()).toContain("等待批准 1");
+      expect(panel.text()).toContain("被拒或已放弃 2");
+    } finally { view.unmount(); }
+  });
+
+  it("轨迹只读：没有批准、暂停、取消或重试入口，Git 页签仍声明未接入", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const fetchMock = router({ toolCalls: () => response({ run_id: runId, run_status: "RUNNING",
+      wait_reason: null, rounds: [{ round: 0, model_call_id: "55555555-5555-4555-8555-555555555555",
+        calls: [{ id: "90000000-0000-4000-8000-000000000010", round: 0, ordinal: 0, tool_name: "git_status",
+          status: "SETTLED", arguments: {}, arguments_sha256: "b".repeat(64), provider_tool_call_id: "p",
+          operation_id: "77777777-7777-4777-8777-777777777777",
+          result_ref: { status: { staged: [], unstaged: ["src/index.ts"], untracked: [] } },
+          adaptation_of: null, adapted_path: null, created_at: "2026-10-04T01:00:00Z",
+          updated_at: "2026-10-04T01:00:01Z" }] }] }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      await view.wrapper.get('[data-testid="collab-devtools-toggle"]').trigger("click"); await flush(60);
+      await view.wrapper.get('[data-testid="devtools-tab-TRACE"]').trigger("click"); await flush(60);
+
+      const panel = view.wrapper.get('[data-testid="run-tool-trajectory"]');
+      // 模型这次调用产生的 Git 结果要标来源，不能让用户以为这是可点的 Git 入口。
+      expect(panel.text()).toContain("本次由模型调用产生");
+      expect(panel.find('[data-testid^="trajectory-control-"]').exists()).toBe(false);
+      // 只扫轨迹区：Run 控制里本来就有暂停与取消，那是既有入口，不属于轨迹。
+      const labels = Array.from(panel.element?.querySelectorAll("button") ?? [])
+        .map((button) => button.textContent ?? "");
+      for (const forbidden of ["批准", "暂停", "取消", "重试"]) {
+        expect(labels.some((label) => label.includes(forbidden))).toBe(false);
+      }
+
+      // 真实用户可触发的入口仍不可用，占位不得因为轨迹里有 Git 结果而被替换。
+      await view.wrapper.get('[data-testid="devtools-tab-GIT"]').trigger("click");
+      expect(view.wrapper.get('[data-testid="devtools-git-gap"]').text())
+        .toContain("没有受管目录的只读 Git 状态或 diff 接口");
+    } finally { view.unmount(); }
+  });
+
+  it("执行摘要只算已结算的调用，并挂在产生它的 user 消息下", async () => {
+    const userMessageId = "8a8a8a8a-8a8a-4a8a-8a8a-8a8a8a8a8a8a";
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const fetchMock = router({
+      messages: () => response({ items: [
+        { id: userMessageId, session_id: sessionId, seq: "1", role: "USER", status: "COMPLETED",
+          intent: "DISCUSS", content: "帮我把这个文件改成 after", error_code: null, sources: [],
+          usage: { input_tokens: null, output_tokens: null }, cancel_requested: false },
+        { id: "8b8b8b8b-8b8b-4b8b-8b8b-8b8b8b8b8b8b", session_id: sessionId, seq: "2", role: "ASSISTANT",
+          status: "COMPLETED", intent: "DISCUSS", content: "已按目标准备执行。", error_code: null,
+          sources: [], usage: { input_tokens: null, output_tokens: null }, cancel_requested: false }] }),
+      executions: () => response({ items: [{ request_id: "8c8c8c8c-8c8c-4c8c-8c8c-8c8c8c8c8c8c",
+        session_id: sessionId, source_message_id: userMessageId, decision: "PREPARE", status: "APPLIED",
+        candidate_status: "COMPLETED", root_path: "D:\\repo", resource_id: projectId, questions: [],
+        revision: "2", task_id: taskId, run_id: runId, title: "改文件", objective: "把内容改成 after" }] }),
+      toolCalls: () => response({ run_id: runId, run_status: "WAITING_APPROVAL", wait_reason: "HUMAN_TOOL",
+        rounds: [{ round: 0, model_call_id: "55555555-5555-4555-8555-555555555555", calls: [
+          { id: "90000000-0000-4000-8000-0000000000a1", round: 0, ordinal: 0, tool_name: "read_file",
+            status: "REQUESTED", arguments: { relative_path: "a.ts" }, arguments_sha256: "a".repeat(64),
+            provider_tool_call_id: "p", operation_id: null, result_ref: null, adaptation_of: null,
+            adapted_path: null, created_at: "2026-10-05T01:00:00Z", updated_at: "2026-10-05T01:00:00Z" },
+          { id: "90000000-0000-4000-8000-0000000000a2", round: 0, ordinal: 1, tool_name: "read_file",
+            status: "SETTLED", arguments: { relative_path: "a.ts" }, arguments_sha256: "a".repeat(64),
+            provider_tool_call_id: "p", operation_id: "77777777-7777-4777-8777-777777777777",
+            result_ref: { content: "before" }, adaptation_of: null, adapted_path: null,
+            created_at: "2026-10-05T01:00:00Z", updated_at: "2026-10-05T01:00:01Z" },
+          { id: "90000000-0000-4000-8000-0000000000a3", round: 1, ordinal: 0, tool_name: "apply_changeset",
+            status: "SETTLED", arguments: { changes: [] }, arguments_sha256: "b".repeat(64),
+            provider_tool_call_id: "p", operation_id: "77777777-7777-4777-8777-777777777778",
+            result_ref: { reason: "BASELINE_CONFLICT", detail: "文件已被改动" }, adaptation_of: null,
+            adapted_path: null, created_at: "2026-10-05T01:00:02Z", updated_at: "2026-10-05T01:00:03Z" },
+          { id: "90000000-0000-4000-8000-0000000000a4", round: 2, ordinal: 0, tool_name: "run_check",
+            status: "REJECTED", arguments: { check_id: "check-1" }, arguments_sha256: "c".repeat(64),
+            provider_tool_call_id: "p", operation_id: null, adaptation_of: null, adapted_path: null,
+            result_ref: { reason: "TOOL_CHECK_NOT_CONFIGURED", detail: "check-1 未配置" },
+            created_at: "2026-10-05T01:00:04Z", updated_at: "2026-10-05T01:00:04Z" }] }] })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      await flush(80);
+      const summary = view.wrapper.get('[data-testid="execution-summary"]');
+      // 两次 read_file 里只有一次已结算，因此只算 1；REQUESTED 的那次不算「读过」。
+      expect(summary.text()).toContain("读了 1 个文件");
+      expect(summary.text()).toContain("改了 1 处");
+      expect(summary.text()).toContain("2 项失败");
+      expect(summary.text()).toContain("Run 等待原因 有一个动作在等你批准");
+      // 内部枚举不直接进界面。
+      expect(summary.text()).not.toContain("HUMAN_TOOL");
+      // 被拒的调用不是「还在跑」。
+      expect(summary.text()).not.toContain("进行中");
+      // 挂在产生执行请求的 user 消息上，不是 assistant 消息。
+      const slot = summary.element?.closest("li");
+      expect(slot?.textContent).toContain("帮我把这个文件改成 after");
+      expect(slot?.textContent).not.toContain("已按目标准备执行。");
+    } finally { view.unmount(); }
+  });
+
+  it("没有 Run 的执行请求不挂摘要；轨迹读不到时如实说明而不是显示旧计数", async () => {
+    const userMessageId = "7d7d7d7d-7d7d-4d7d-8d7d-7d7d7d7d7d7d";
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const base = {
+      messages: () => response({ items: [
+        { id: userMessageId, session_id: sessionId, seq: "1", role: "USER", status: "COMPLETED",
+          intent: "DISCUSS", content: "只是讨论", error_code: null, sources: [],
+          usage: { input_tokens: null, output_tokens: null }, cancel_requested: false }] }),
+      executions: () => response({ items: [
+        { request_id: "7e7e7e7e-7e7e-4e7e-8e7e-7e7e7e7e7e7e", session_id: sessionId,
+          source_message_id: userMessageId, decision: "DISCUSS", status: "APPLIED",
+          candidate_status: "NONE", root_path: "D:\\repo", resource_id: projectId, questions: [],
+          revision: "1", task_id: null, run_id: null, title: null, objective: null }] })
+    };
+    vi.stubGlobal("fetch", router(base));
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      await flush(80);
+      // 纯讨论没有 Run，就不该出现任何执行摘要。
+      expect(view.wrapper.find('[data-testid="execution-summary"]').exists()).toBe(false);
+      expect(view.wrapper.find('[data-testid="execution-summary-loading"]').exists()).toBe(false);
+    } finally { view.unmount(); }
+
+    // 「轨迹读不到」只可能发生在确实有 Run 的时候：没有 Run 就不会挂摘要。
+    const executedRequest = { request_id: "7e7e7e7e-7e7e-4e7e-8e7e-7e7e7e7e7e7e", session_id: sessionId,
+      source_message_id: userMessageId, decision: "PREPARE", status: "APPLIED",
+      candidate_status: "COMPLETED", root_path: "D:\\repo", resource_id: projectId, questions: [],
+      revision: "2", task_id: taskId, run_id: runId, title: "改文件", objective: "改内容" };
+    vi.stubGlobal("fetch", router({ ...base,
+      executions: () => response({ items: [executedRequest] }),
+      toolCalls: () => response({ message: "读不到" }, 503) }));
+    const failedView = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      await flush(80);
+      expect(failedView.wrapper.find('[data-testid="execution-summary-error"]').text())
+        .toContain("工具轨迹当前读不到");
+      expect(failedView.wrapper.find('[data-testid="execution-summary"]').exists()).toBe(false);
+    } finally { failedView.unmount(); }
+  });
+
+  it("收到 Run 事件提示后按原游标重读投影，而不是重播整段历史", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    let reads = 0;
+    const base = router({
+      toolCalls: () => { reads += 1; return response({ run_id: runId, run_status: "RUNNING",
+        wait_reason: null, rounds: [{ round: 0, model_call_id: "55555555-5555-4555-8555-555555555555",
+          calls: [{ id: "90000000-0000-4000-8000-0000000000b1", round: 0, ordinal: 0, tool_name: "read_file",
+            status: "SETTLED", arguments: { relative_path: "a.ts" }, arguments_sha256: "a".repeat(64),
+            provider_tool_call_id: "p", operation_id: "77777777-7777-4777-8777-777777777777",
+            result_ref: { content: "before" }, adaptation_of: null, adapted_path: null,
+            created_at: "2026-10-05T01:00:00Z", updated_at: "2026-10-05T01:00:01Z" }] }] }); }
+    });
+    const cursors: (string | null)[] = [];
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (new URL(url).pathname.startsWith(`${prefix}/runs/${runId}/events`)) {
+        cursors.push(new URL(url).searchParams.get("after"));
+      }
+      return base(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      await view.wrapper.get('[data-testid="collab-devtools-toggle"]').trigger("click"); await flush(60);
+      await view.wrapper.get('[data-testid="devtools-tab-TRACE"]').trigger("click"); await flush(60);
+      expect(reads).toBeGreaterThan(0);
+      // 首次订阅从 0 起；拿到提示后续读必须带上已收到的游标，而不是又从 0 重播。
+      expect(cursors[0]).toBe("0");
+    } finally { view.unmount(); }
+  });
+
+  it("轨迹读取失败与没有工具请求各有各的说法，都不是空白", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const failing = router({ toolCalls: () => response({ message: "轨迹当前不可读" }, 503) });
+    vi.stubGlobal("fetch", failing);
+    const failedView = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      await failedView.wrapper.get('[data-testid="collab-devtools-toggle"]').trigger("click"); await flush(60);
+      await failedView.wrapper.get('[data-testid="devtools-tab-TRACE"]').trigger("click"); await flush(60);
+      expect(failedView.wrapper.get('[data-testid="trajectory-error"]').text()).not.toBe("");
+    } finally { failedView.unmount(); }
+
+    vi.stubGlobal("fetch", router({ toolCalls: () => response({ run_id: runId, run_status: "SUCCEEDED",
+      wait_reason: null, rounds: [] }) }));
+    const emptyView = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      await emptyView.wrapper.get('[data-testid="collab-devtools-toggle"]').trigger("click"); await flush(60);
+      await emptyView.wrapper.get('[data-testid="devtools-tab-TRACE"]').trigger("click"); await flush(60);
+      const panel = emptyView.wrapper.get('[data-testid="run-tool-trajectory"]');
+      expect(panel.text()).toContain("本次 Run 没有工具请求");
+      expect(panel.text()).not.toContain("已完成");
+    } finally { emptyView.unmount(); }
+  });
+
   it("无模型时的人工路径仍可达：产物、完成与判断入口不依赖生成", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     vi.stubGlobal("fetch", router({ reviews: () => response({ items: [] }) }));
@@ -1533,7 +1836,7 @@ describe("协作工作区主路径", () => {
     expect(view.wrapper.find('a[href="/projects"]').exists()).toBe(true);
     expect(view.wrapper.find('a[href="/tasks"]').exists()).toBe(true);
     expect(view.wrapper.find('a[href="/knowledge"]').exists()).toBe(true);
-    expect(view.wrapper.find('[data-testid="command-open"]').exists()).toBe(true);
+    expect(view.wrapper.find('[data-testid="titlebar-search"]').exists()).toBe(true);
     view.unmount();
   });
 

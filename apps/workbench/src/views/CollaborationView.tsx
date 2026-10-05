@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { CheckCheck, FileText, MessageSquareText, Plus, Scale } from "lucide-react";
+import { CheckCheck, FileText, Plus, Scale } from "lucide-react";
 import AppDialog from "../components/AppDialog";
-import AssistView, { type AssistNavigationState } from "./AssistView";
+import AssistView, { type AssistNavigationState, type FirstMessageOwner, type FirstMessageProcess } from "./AssistView";
 import FactBar from "../components/FactBar";
 import ModelConnectionStrip from "../components/ModelConnectionStrip";
 import PageHeader from "../components/PageHeader";
 import RunControlPanel, { runLabels, stepLabels } from "../components/RunControlPanel";
-import TaskDelegatePanel, { delegateBlockedReasonFor, type DelegateTarget } from "../components/TaskDelegatePanel";
+import TaskDelegatePanel, { type DelegateTarget } from "../components/TaskDelegatePanel";
 import type { ReviewNavigationState } from "../components/ReviewDecisionPanel";
 import WorkspaceSidePanel from "../components/WorkspaceSidePanel";
 import CollaborationSplitter from "../components/CollaborationSplitter";
@@ -61,6 +61,16 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const [search, setSearch] = useSearchParams();
   const workId = search.get("work");
   const [sessionId, setSessionId] = useState<string | null | undefined>(undefined);
+  // 首条消息的完整过程住在协作页：文件夹入口的 AssistView 会按会话切换重新挂载，
+  // 命令身份、在途阶段、首条原文与解释结果都不能随它卸载。迟到响应与回执核对
+  // 可能跨越同一次重挂载，因此 busy 与「已解释」也必须是同一份共享事实。
+  const [firstMessage, setFirstMessage] = useState<FirstMessageProcess>({
+    draft: "", pending: null, busy: false, interpreted: null, execution: null });
+  const firstMessageRef = useRef(firstMessage); firstMessageRef.current = firstMessage;
+  const firstMessageOwner = useMemo<FirstMessageOwner>(() => ({
+    read: () => firstMessageRef.current,
+    write: (next) => { firstMessageRef.current = next; setFirstMessage(next); },
+  }), []);
   // undefined = 未指定会话（沿用该任务最近会话）；null = 用户显式要求新建会话。
   const [task, setTask] = useState<RelayTaskDetail | null>(null);
   const [projectTitle, setProjectTitle] = useState<string | null>(null);
@@ -297,9 +307,6 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     ? { id: task.id, projectId: task.projectId, status: task.status, executor: task.executor,
         revision: task.revision, executorRunId: null, allowedActions: task.allowedActions }
     : null;
-  const delegateBlockedReason = delegateTarget === null ? null
-    : delegateBlockedReasonFor(delegateTarget, projectWriteBlockedReason);
-
   const folderProjectId = folder?.status === "READY" ? folder.association?.projectId ?? null : null;
   const folderState = { directory: folder, recents, busy: folderBusy };
   function startFolderConversation() {
@@ -309,6 +316,15 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
   function openExecutionTask(taskId: string) {
     requestTransition(() => { setFolder(null); setSearch({ work: taskId }); });
   }
+  function requestTransition(proceed: () => void) {
+    const state = navigationRef.current;
+    const guard = currentDraftGuard();
+    const commandId = guard?.pendingCommandId?.() ?? state.pending?.commandId ?? null;
+    if (commandId) setTransition({ kind: "pending", proceed, commandId });
+    else if (guard?.hasUnsavedChanges() || state.dirty) setTransition({ kind: "dirty", proceed, commandId: null });
+    else proceed();
+  }
+
   async function openFolder(rootPath: string, projectId?: string | null) {
     setFolderBusy(true); setFolderError(null);
     try {
@@ -321,13 +337,13 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     } finally { setFolderBusy(false); }
   }
 
-  function requestTransition(proceed: () => void) {
-    const state = navigationRef.current;
-    const guard = currentDraftGuard();
-    const commandId = guard?.pendingCommandId?.() ?? state.pending?.commandId ?? null;
-    if (commandId) setTransition({ kind: "pending", proceed, commandId });
-    else if (guard?.hasUnsavedChanges() || state.dirty) setTransition({ kind: "dirty", proceed, commandId: null });
-    else proceed();
+  /**
+   * 换目录与选会话、切任务共用同一条守卫：未发送草稿要先明确保留或放弃，
+   * 未决消息在核对前不得换目录。守卫必须先于 OpenWorkingDirectory，
+   * 不能先登记新作用域再询问，也不能由「仅选择或取消」吞掉原文。
+   */
+  function requestFolderTransition(rootPath: string, projectId?: string | null) {
+    requestTransition(() => { void openFolder(rootPath, projectId); });
   }
 
   async function checkRecovery(record: RecoveryRecord) {
@@ -412,8 +428,6 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
             {currentStep && <> · 当前步骤：{stepLabels[currentStep.kind] ?? currentStep.kind}</>}
             {waitReason && <> · 等待原因：{waitReason}</>}
           </p>
-          {/* 委托面板收进「更多操作」，但准入被拒的原因必须留在首屏：折叠不是隐藏。 */}
-          {delegateBlockedReason !== null && <p className="disabled-reason collab-delegate-blocked" data-testid="collab-delegate-blocked">{delegateBlockedReason}</p>}
           {/* UNKNOWN、控制请求与失败原因不折叠：这三类一旦收进「更多操作」就不再可发现。
               事实条同步移出展开区，否则「无法确认的执行结果」只剩展开后才可见。 */}
           {runNeedsAttention && <div className="collab-run-controls" data-testid="collab-run-disclosure">
@@ -439,20 +453,51 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
       <div className={`collab-columns${task === null ? " collab-columns--empty" : ""}`} data-pane={sideTab}
         data-layout-mode={task === null ? "split" : layout.mode} data-narrow-side={narrowSideOpen ? "open" : "closed"}
         style={{ "--relay-collab-chat-column": `${layout.chatRatio}fr`, "--relay-collab-result-column": `${1 - layout.chatRatio}fr` } as CSSProperties}>
-        {task === null
-          ? folder === null
-            ? <>
-              <section className="collab-center collab-center--empty" aria-label="工作主区" data-testid="collab-center">
-                <div className="collab-empty" data-testid="collab-empty">
-                  <div className="collab-empty-mark"><MessageSquareText aria-hidden="true" /></div>
-                  <PageHeader testId="collab-empty-page-head" title="打开文件夹就能开始对话" meta="协作工作区"
-                    lede="选中一个本机目录后直接输入；只是讨论不会创建任务，明确说「帮我改这个」才会进入真实执行。" />
-                  <FolderScope state={folderState} onOpen={(rootPath, projectId) => void openFolder(rootPath, projectId)}
-                    onNewConversation={startFolderConversation} />
-                  <TargetPicker client={client} onOpen={(next) => requestTransition(() => { setSessionId(next.sessionId); setSearch({ work: next.taskId }); setSideTab("DOCUMENT"); })} />
-                  {workId !== null && loading && <p className="helper-text" role="status">正在恢复这项工作…</p>}
-                  {workId !== null && error && <p className="action-error" role="alert" data-testid="collab-task-error">{error}</p>}
+{task === null
+          ? <>
+              <section className="collab-center" aria-label="工作主区" data-testid="collab-center">
+                {/* 作用域行：目录是执行准入的前提，不是发送选项，因此固定在输入区上方。
+                    没打开目录时它只提供入口 —— 讨论本身不需要先选目录。 */}
+                <div className="folder-scope-bar" data-testid="folder-scope-bar">
+                  {folder === null
+                    ? <p><strong>未选择目录</strong><span className="helper-text">先讨论也可以；选目录后才能对项目文件执行写操作</span></p>
+                    : <>
+                      <p><strong>{folder.displayName}</strong><span className="helper-text">{folder.canonicalRoot}</span></p>
+                      {folder.association !== null && <p className="helper-text" data-testid="folder-scope-project">
+                        项目：{folder.association.projectTitle}
+                        {folder.createdProject && "（本次新建的最小项目；目录名不是项目目标）"}</p>}
+                      {folder.status === "NOT_READY" && <p className="disabled-reason" role="status" data-testid="folder-scope-not-ready">目录尚未就绪：{folder.reason ?? "UNKNOWN"}。仍可普通讨论，但不能对项目文件执行写操作。</p>}
+                    </>}
+                  {folderError && <p className="action-error" role="alert" data-testid="folder-error">{folderError}</p>}
+                  <div className="form-actions">
+                    <FolderScope state={folderState} onOpen={requestFolderTransition}
+                      onNewConversation={startFolderConversation} />
+                  </div>
                 </div>
+                {/* 0051 的 project_id NOT NULL 让未归属会话无法发起执行请求，
+                    因此界面必须先说明下一步，而不是让用户拿到一条数据库约束错误。 */}
+                {folderProjectId === null && <p className="disabled-reason" role="status"
+                  data-testid="collab-unassigned-execution-hint">
+                  这段讨论还没有归入项目，不能进入执行。先选目录并把它归入项目。</p>}
+                {folderProjectId === null
+                  ? <AssistView key={`unassigned:${sessionId === undefined ? "auto" : sessionId}`}
+                    workspaceLevel deferSessionCreation
+                    preferredSessionId={sessionId} standalone
+                    onNavigationStateChange={reportNavigation}
+                    onRequestNewSession={requestTransition}
+                    onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
+                    onSessionCreated={(created) => setSessionId(created)}
+                    firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage} />
+                  : <AssistView key={`folder:${folderProjectId}:${sessionId === undefined ? "auto" : sessionId}`}
+                    targetKind="PROJECT" targetId={folderProjectId}
+                    preferredSessionId={sessionId} standalone deferSessionCreation
+                    executionScope={folder}
+                    onNavigationStateChange={reportNavigation}
+                    onRequestNewSession={requestTransition}
+                    onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
+                    onSessionCreated={(created) => setSessionId(created)}
+                    onExecutionPrepared={(taskId) => void openExecutionTask(taskId)}
+                    firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage} />}
               </section>
               <aside className="collab-side collab-side--intro" aria-label="产物与判断" data-testid="collab-side">
                 <div className="collab-side-empty" data-testid="collab-side-empty">
@@ -474,32 +519,10 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                     <p>对照产物与验收条件独立确认，回复结束不等于任务完成。</p>
                   </div></div>
                 </div>
+                  {/* 讨论已有任务仍是独立入口：文件夹入口不取代它。 */}
+                  <TargetPicker client={client} onOpen={(next) => requestTransition(() => {
+                    setSessionId(next.sessionId); setSearch({ work: next.taskId }); setSideTab("DOCUMENT"); })} />
               </aside>
-            </>
-            : <>
-              <section className="collab-center" aria-label="工作主区" data-testid="collab-center">
-                <div className="folder-scope-bar" data-testid="folder-scope-bar">
-                  <p><strong>{folder.displayName}</strong><span className="helper-text">{folder.canonicalRoot}</span></p>
-                  {folder.association !== null && <p className="helper-text" data-testid="folder-scope-project">
-                    项目：{folder.association.projectTitle}
-                    {folder.createdProject && "（本次新建的最小项目；目录名不是项目目标）"}</p>}
-                  {folder.status === "NOT_READY" && <p className="disabled-reason" role="status" data-testid="folder-scope-not-ready">目录尚未就绪：{folder.reason ?? "UNKNOWN"}。仍可普通讨论，但不能对项目文件执行写操作。</p>}
-                  {folderError && <p className="action-error" role="alert" data-testid="folder-error">{folderError}</p>}
-                  <div className="form-actions">
-                    <FolderScope state={folderState} onOpen={(rootPath, projectId) => void openFolder(rootPath, projectId)}
-                      onNewConversation={startFolderConversation} />
-                  </div>
-                </div>
-                {folderProjectId !== null && <AssistView key={`folder:${folderProjectId}:${sessionId === undefined ? "auto" : sessionId}`}
-                  targetKind="PROJECT" targetId={folderProjectId}
-                  preferredSessionId={sessionId} standalone deferSessionCreation
-                  executionScope={folder}
-                  onNavigationStateChange={reportNavigation}
-                  onRequestNewSession={requestTransition}
-                  onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
-                  onSessionCreated={(created) => setSessionId(created)}
-                  onExecutionPrepared={(taskId) => void openExecutionTask(taskId)} />}
-              </section>
             </>
           : <>
             <section className="collab-center" aria-label="工作主区" data-testid="collab-center" hidden={layout.mode === "result"}>

@@ -48,6 +48,10 @@ interface Routes {
   open?: (body: Record<string, unknown>) => Response;
   messages?: () => Response;
   sessions?: () => Response;
+  /** 受控故障：POST 消息在服务端已提交后丢响应。传数字则只丢前 n 次。 */
+  loseMessageResponse?: boolean | number;
+  /** GET /commands/:id —— 只按原 command_id 返回回执。 */
+  receipt?: (commandId: string) => Response;
 }
 
 function router(routes: Routes, posts: { path: string; body: unknown }[]) {
@@ -67,10 +71,17 @@ function router(routes: Routes, posts: { path: string; body: unknown }[]) {
           task_id: null, title: "关于MyProject", status: "ACTIVE", revision: "1",
           created_at: "2026-10-02T00:00:00Z", updated_at: "2026-10-02T00:00:00Z" },
         links: { resource: "" } }, 201);
-      if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return json({ command_id: body.command_id,
-        committed_at: "2026-10-02T00:00:00Z",
-        result: { session_id: sessionId, user_message_id: "msg-1", assistant_message_id: "msg-2" },
-        links: { resource: "" } }, 202);
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages`) {
+        const lose = routes.loseMessageResponse === true
+          ? true : typeof routes.loseMessageResponse === "number" && routes.loseMessageResponse > 0;
+        if (lose) {
+          if (typeof routes.loseMessageResponse === "number") routes.loseMessageResponse -= 1;
+          throw new TypeError("response lost after commit");
+        }
+        return json({ command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z",
+          result: { session_id: sessionId, user_message_id: "msg-1", assistant_message_id: "msg-2" },
+          links: { resource: "" } }, 202);
+      }
       if (path === `${prefix}/assist-sessions/${sessionId}/execution-requests`) return json({
         command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z", result: execution(),
         links: { resource: "" } }, 202);
@@ -79,6 +90,10 @@ function router(routes: Routes, posts: { path: string; body: unknown }[]) {
         result: { request_id: requestId, status: "DELEGATED", task_id: taskId, run_id: runId, revision: "3" },
         links: { resource: "" } }, 200);
       throw new Error(`unexpected POST ${path}`);
+    }
+    const receipt = /\/commands\/([^/]+)$/u.exec(path);
+    if (receipt) {
+      return routes.receipt?.(receipt[1]!) ?? json({ code: "NOT_FOUND", detail: "命令回执不存在" }, 404);
     }
     if (path === `${prefix}/projects/${projectId}`) return json(project());
     if (path === `${prefix}/projects/${projectId}/state`) return json({ project_id: projectId, revision: "1",
@@ -121,7 +136,10 @@ describe("文件夹入口与对话直接执行", () => {
     const view = await mountWorkbench("/agent");
     try {
       expect(view.wrapper.get('[data-testid="folder-scope"]').exists()).toBe(true);
-      expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(false);
+      // 页面读取本身不发任何写命令：打开目录之前不登记任何东西。
+      // 作用域行一直在，只是没有目录可显示 —— 它就是选目录的入口所在。
+      expect(view.wrapper.get('[data-testid="folder-scope-bar"]').exists()).toBe(true);
+      expect(view.wrapper.get('[data-testid="folder-scope-bar"]').text()).toContain("未选择目录");
       // 非桌面宿主没有原生选择器：必须给出可用的手动路径，而不是一个死按钮。
       expect(view.wrapper.get('[data-testid="folder-manual-root"]').exists()).toBe(true);
       expect(posts.length).toBe(0);
@@ -154,7 +172,7 @@ describe("文件夹入口与对话直接执行", () => {
     } finally { view.unmount(); }
   });
 
-  it("目录落在另一个受管根之内时给出真实原因并允许选定作用域", async () => {
+  it("目录落在另一个受管根之内时说明真实原因，不只丢一个原因码", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const posts: { path: string; body: unknown }[] = [];
     const fetchMock = router({ open: (body) => response({
@@ -163,8 +181,7 @@ describe("文件夹入口与对话直接执行", () => {
         association: null, candidates: [{ project_id: otherProjectId, project_title: "另一个项目",
           project_archived: false, resource_id: "res-other", resource_status: "ACTIVE",
           file_write_identity_bound: true }],
-        write_readiness: { status: "RESOURCE_BUSY",
-          detail: "这个目录落在另一个已受管根之内或包含它；先选定作用域，不会另建第二个写 Owner。" } }),
+        write_readiness: { status: "RESOURCE_BUSY", detail: "这个目录落在另一个已受管根之内或包含它。" } }),
       links: { resource: "" } }, 200) }, posts);
     vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench("/agent");
@@ -174,15 +191,35 @@ describe("文件夹入口与对话直接执行", () => {
       await view.wrapper.get('[data-testid="folder-open-manual"]').trigger("click");
       await flush();
       await flush();
-      // 原因码本身不是解释：用户必须知道这个目录为什么不能写、接下来该做什么。
       const reason = view.wrapper.get('[data-testid="folder-not-ready"]').text();
+      // 原因码本身不是解释：用户必须知道这个目录为什么不能写、接下来该做什么。
       expect(reason).toContain("另一个已受管根");
       expect(reason).not.toContain("UNKNOWN");
-      // 服务端返回了候选，界面就必须给出选择入口，否则用户就此卡死。
       expect(view.wrapper.get('[data-testid="folder-ambiguous"]').exists()).toBe(true);
-      await view.wrapper.get(`[data-testid="collab-folder-candidate-${otherProjectId}"]`).trigger("click");
+    } finally { view.unmount(); }
+  });
+
+  it("没打开目录时中栏就是可输入的对话，而不是只有两个按钮", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    const fetchMock = router({}, posts); vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench("/agent");
+    try {
+      // 用户不必先选目录才能说话：工作空间级会话（project_id 为空）就能讨论。
+      expect(view.wrapper.get('[data-testid="assist-first-draft"]').exists()).toBe(true);
+      expect(view.wrapper.get('[data-testid="folder-scope"]').exists()).toBe(true);
+      // 未归属时不得给出执行入口：0051 的 project_id NOT NULL 会让请求必然失败。
+      expect(view.wrapper.find('[data-testid="execution-start"]').exists()).toBe(false);
+      expect(view.wrapper.get('[data-testid="collab-unassigned-execution-hint"]').text())
+        .toContain("归入项目");
+
+      await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("还没选目录，先聊聊");
       await flush();
-      expect((posts[1]?.body as { project_id?: string }).project_id).toBe(otherProjectId);
+      await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+      await flush();
+      const create = posts.find((post) => post.path === `${prefix}/assist-sessions`)?.body as
+        { project_id?: string | null };
+      expect(create.project_id).toBeNull();
     } finally { view.unmount(); }
   });
 
@@ -206,9 +243,9 @@ describe("文件夹入口与对话直接执行", () => {
       await flush();
       await flush();
       expect(view.wrapper.get('[data-testid="folder-ambiguous"]').exists()).toBe(true);
-      // 作用域未定前不进入对话，也不进入任何写路径。
-      expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(false);
-      expect(view.wrapper.find('[data-testid="assist-draft"]').exists()).toBe(false);
+      // 作用域未定只是不能写文件，讨论仍然可用：这里只登记了目录，没有别的写命令。
+      expect(view.wrapper.get('[data-testid="assist-first-draft"]').exists()).toBe(true);
+      expect(view.wrapper.get('[data-testid="collab-unassigned-execution-hint"]').exists()).toBe(true);
       expect(posts.length).toBe(1);
 
       await view.wrapper.get(`[data-testid="collab-folder-candidate-${otherProjectId}"]`).trigger("click");
@@ -248,6 +285,12 @@ describe("文件夹入口与对话直接执行", () => {
       expect(view.wrapper.get('[data-testid="execution-summary-title"]').text()).toContain("改写 answer.txt");
       expect(summary.text()).toContain(root);
       expect(summary.text()).toContain("开始执行不代表已完成");
+      // 此刻还没有任何具体正文：确认文案不得暗示「你正在确认一份写好的改动」。
+      // 工作台 §18.4.1 的规则，方案 B 下正文由 Run 内模型读过真实文件后决定。
+      const startLabel = view.wrapper.get('[data-testid="execution-start"]').text();
+      expect(startLabel).not.toContain("按这个执行");
+      expect(startLabel).toContain("按这个目标执行");
+      expect(summary.text()).toContain("文件内容会在执行时读取后决定");
       const requested = posts.find((post) => post.path.endsWith("/execution-requests"))?.body as
         { source_message_id?: string; resource_id?: string };
       expect(requested.source_message_id).toBe("msg-1");
@@ -298,5 +341,484 @@ describe("文件夹入口与对话直接执行", () => {
       expect(view.wrapper.get('[data-testid="execution-clarify"]').text()).toContain("哪个文件");
       expect(view.wrapper.find('[data-testid="execution-start"]').exists()).toBe(false);
     } finally { view.unmount(); }
+  });
+
+  // 以下三条是 2026-10-03 独立验收的反例：首条发送的未决命令、草稿保护与执行解释。
+  // 「已提交但响应丢失」由受控故障模拟，明确不是服务端真实失败。
+
+  async function openFolderAndType(view: { wrapper: { get(s: string): { setValue(v: string): Promise<void>;
+    trigger(e: string): Promise<void> } } }, text: string) {
+    await view.wrapper.get('[data-testid="folder-manual-root"]').setValue(root);
+    await flush();
+    await view.wrapper.get('[data-testid="folder-open-manual"]').trigger("click");
+    await flush();
+    await flush();
+    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue(text);
+    await flush();
+  }
+
+  it("反例 P1：建会话成功但首条消息响应丢失时保留原命令与原载荷，可按原 ID 核对", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    const fetchMock = router({
+      loseMessageResponse: true,
+      receipt: (commandId) => response({ command_id: commandId, command_type: "RequestAssistMessage",
+        committed_at: "2026-10-02T00:00:05Z",
+        result: { session_id: sessionId, user_message_id: "msg-1", assistant_message_id: "msg-2" } })
+    }, posts);
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench("/agent");
+    try {
+      await openFolderAndType(view, "帮我把这个文件的内容改成 after");
+      await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+      await flush();
+      await flush();
+
+      const messagePost = posts.find((post) => post.path.endsWith("/messages"));
+      const commandId = (messagePost?.body as { command_id?: string }).command_id;
+      expect(commandId).toMatch(/^[0-9a-f-]{36}$/u);
+
+      // 部分成功事实必须可见：会话已建、消息待核对，且带原 command_id 的回执入口可达。
+      const pending = view.wrapper.get('[data-testid="assist-first-pending"]');
+      expect(pending.text()).toContain(commandId!);
+      expect(pending.text()).toContain("会话已创建");
+      expect(pending.text()).toContain("消息结果待核对");
+      expect(view.wrapper.get('[data-testid="assist-first-receipt"]').exists()).toBe(true);
+      // 未核对前不得把传输失败说成业务失败，也不得宣称已完成。
+      expect(view.wrapper.text()).not.toContain("已完成");
+
+      // 用户继续修改输入后，核对与重试仍按原载荷、原 ID 走。
+      await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("后来改写的别的内容");
+      await flush();
+      await view.wrapper.get('[data-testid="assist-first-receipt"]').trigger("click");
+      await flush();
+      await flush();
+
+      expect(posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(1);
+      const retried = posts.filter((post) => post.path.endsWith("/messages"));
+      expect(retried.every((post) => (post.body as { command_id?: string }).command_id === commandId)).toBe(true);
+      expect((retried[retried.length - 1]?.body as { content?: string }).content)
+        .toBe("帮我把这个文件的内容改成 after");
+      expect(view.wrapper.find('[data-testid="assist-first-pending"]').exists()).toBe(false);
+    } finally { view.unmount(); }
+  });
+
+  it("反例 P1：同 ID 重试按原载荷恢复，且回执与原命令不匹配时不冒充已完成", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    // 只丢第一次响应：重试时服务端接受同一条命令并返回真实 user_message_id。
+    const fetchMock = router({ loseMessageResponse: 1 }, posts);
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench("/agent");
+    try {
+      await openFolderAndType(view, "帮我把这个文件的内容改成 after");
+      await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+      await flush();
+      await flush();
+
+      const commandId = (posts.find((post) => post.path.endsWith("/messages"))?.body as { command_id?: string }).command_id;
+      expect(view.wrapper.get('[data-testid="assist-first-retry"]').exists()).toBe(true);
+
+      // 用户此后改写了输入；重试仍必须走原命令 ID 与原载荷。
+      await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("后来改写的别的内容");
+      await flush();
+      await view.wrapper.get('[data-testid="assist-first-retry"]').trigger("click");
+      await flush();
+      await flush();
+
+      expect(posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(1);
+      const messages = posts.filter((post) => post.path.endsWith("/messages"));
+      expect(messages).toHaveLength(2);
+      expect(messages.every((post) => (post.body as { command_id?: string }).command_id === commandId)).toBe(true);
+      expect((messages[1]?.body as { content?: string }).content).toBe("帮我把这个文件的内容改成 after");
+      // 重试成功即完成解释，未决状态清空，且没有多余的会话创建。
+      expect(view.wrapper.find('[data-testid="assist-first-pending"]').exists()).toBe(false);
+    } finally { view.unmount(); }
+
+    // 回执与原命令不匹配时必须停在未决状态，不猜结果、不宣称已完成。
+    const posts2: { path: string; body: unknown }[] = [];
+    vi.stubGlobal("fetch", router({ loseMessageResponse: true }, posts2));
+    const other = await mountWorkbench("/agent");
+    try {
+      await openFolderAndType(other, "帮我把这个文件的内容改成 after");
+      await other.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+      await flush();
+      await flush();
+      const otherCommandId = (posts2.find((post) => post.path.endsWith("/messages"))?.body as { command_id?: string }).command_id;
+      // 回执声称属于别的会话：不得当作本条消息已送达。
+      vi.stubGlobal("fetch", router({ receipt: () => response({ command_id: otherCommandId,
+        command_type: "RequestAssistMessage", committed_at: "2026-10-02T00:00:05Z",
+        result: { session_id: "00000000-0000-4000-8000-000000000000", user_message_id: "msg-x" } }) }, posts2));
+      await other.wrapper.get('[data-testid="assist-first-receipt"]').trigger("click");
+      await flush();
+      await flush();
+
+      expect(other.wrapper.find('[data-testid="assist-first-pending"]').exists()).toBe(true);
+      expect(other.wrapper.text()).not.toContain("已完成");
+    } finally { other.unmount(); }
+  });
+
+  it("反例 P2：首条草稿未发送时离页被拦截，保留后原文仍在，显式放弃才清除", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    vi.stubGlobal("fetch", router({}, posts));
+    const view = await mountWorkbench("/agent");
+    try {
+      await openFolderAndType(view, "还没发送的首条草稿");
+      await view.wrapper.get('nav[aria-label="主导航"]').get('[href="/projects"]').trigger("click");
+      await flush();
+
+      const dialog = document.querySelector('[role="dialog"]');
+      expect(dialog?.getAttribute("aria-label")).toBe("保留未保存的修改");
+      const keep = Array.from(document.querySelectorAll("button"))
+        .find((button) => button.textContent?.includes("保留并继续编辑"));
+      keep?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flush();
+      expect(view.router.currentRoute.value.path).toBe("/agent");
+      expect((view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement).value)
+        .toBe("还没发送的首条草稿");
+      // 草稿保护不发任何业务命令，也不能用自动发送代替。
+      expect(posts.some((post) => post.path.endsWith("/messages"))).toBe(false);
+
+      await view.wrapper.get('nav[aria-label="主导航"]').get('[href="/projects"]').trigger("click");
+      await flush();
+      const discard = Array.from(document.querySelectorAll("button"))
+        .find((button) => button.textContent?.includes("丢弃草稿并离开"));
+      discard?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flush(80);
+      expect(view.router.currentRoute.value.path).toBe("/projects");
+      expect(posts.some((post) => post.path === `${prefix}/assist-sessions`)).toBe(false);
+    } finally { view.unmount(); }
+  });
+
+  it("反例 P3：首条明确执行输入同样走执行解释，纯讨论不进入执行链", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    vi.stubGlobal("fetch", router({}, posts));
+    const view = await mountWorkbench("/agent");
+    try {
+      await openFolderAndType(view, "帮我把这个文件的内容改成 after");
+      await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+      await flush();
+      await flush();
+
+      // 解释依据必须是消息回执里的真实 user message id 与确切目录资源，不能由前端关键词判断。
+      const requested = posts.find((post) => post.path.endsWith("/execution-requests"))?.body as
+        { source_message_id?: string; resource_id?: string } | undefined;
+      expect(requested?.source_message_id).toBe("msg-1");
+      expect(requested?.resource_id).toBe("res-1");
+      // 解释仍由服务端决定；候选就绪也只是等待人工确认，不因首条发送自动建立 Task。
+      expect(posts.some((post) => post.path.includes("/applications"))).toBe(false);
+    } finally { view.unmount(); }
+
+    // 纯讨论同样走解释链（与普通发送一致），但服务端判定 DISCUSS，不建立任务。
+    const discussPosts: { path: string; body: unknown }[] = [];
+    const discussMock = router({}, discussPosts);
+    const original = discussMock.getMockImplementation()!;
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/execution-requests") && init?.method === "POST") {
+        const body = JSON.parse(String(init.body ?? "{}")) as { command_id: string };
+        discussPosts.push({ path, body });
+        return response({ command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z",
+          result: execution({ decision: "DISCUSS", status: "DISCUSSED", candidate_status: "UNAVAILABLE",
+            candidate: null, questions: [] }), links: { resource: "" } }, 202);
+      }
+      return original(input, init);
+    }));
+    const discuss = await mountWorkbench("/agent");
+    try {
+      await openFolderAndType(discuss, "先讨论一下这个目录");
+      await discuss.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+      await flush();
+      await flush();
+      expect(discussPosts.some((post) => post.path.endsWith("/execution-requests"))).toBe(true);
+      expect(discussPosts.some((post) => post.path.includes("/applications"))).toBe(false);
+    } finally { discuss.unmount(); }
+  });
+
+  /**
+   * 整改提示词第 6 节的四项接续任务（五项实际失败反例）。
+   * 共同点是首条过程跨越「协作页按会话 key 重新挂载 AssistView」这一次重挂载：
+   * 只有命令身份、在途阶段、首条原文与解释结果同属一个 Owner，事实才不会留在旧实例。
+   */
+  describe("整改后独立复验的接续反例", () => {
+    /**
+     * 会话列表在创建前必须为空、创建后才返回确切会话：
+     * 否则首条输入区根本不会渲染，下面的重挂载也不会真的发生。
+     */
+    function createdSessions(created: { value: boolean }): () => Response {
+      return () => response({ items: created.value ? [{ id: sessionId, workspace_id: workspaceId,
+        project_id: projectId, task_id: null, title: "关于MyProject", status: "ACTIVE", revision: "1",
+        created_at: "2026-10-02T00:00:00Z", updated_at: "2026-10-02T00:00:00Z" }] : [] });
+    }
+
+    it("反例 A1：换目录必须先经过未保存保护，保留后原文不丢；未决消息时不得换目录", async () => {
+      activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+      const posts: { path: string; body: unknown }[] = [];
+      vi.stubGlobal("fetch", router({}, posts));
+      const view = await mountWorkbench("/agent");
+      try {
+        await openFolderAndType(view, "还没发送的首条草稿");
+        const opened = posts.filter((post) => post.path.endsWith("/working-directories/open")).length;
+        // 直接请求换到另一个目录：必须先弹保护，且在用户决定前不得发出 OpenWorkingDirectory。
+        await view.wrapper.get('[data-testid="folder-manual-root"]').setValue("D:\\Develop\\OtherProject");
+        await flush();
+        await view.wrapper.get('[data-testid="folder-open-manual"]').trigger("click");
+        await flush();
+
+        expect(document.querySelector('[role="dialog"]')?.getAttribute("aria-label")).toBe("未发送的内容");
+        expect(posts.filter((post) => post.path.endsWith("/working-directories/open"))).toHaveLength(opened);
+
+        const keep = Array.from(document.querySelectorAll("button"))
+          .find((button) => button.textContent?.trim() === "留在当前工作区");
+        keep?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await flush(80);
+        // 保留即不换目录，原文完整；目录命令不因「仅选择」被重复发出。
+        expect((view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement).value)
+          .toBe("还没发送的首条草稿");
+        expect(posts.filter((post) => post.path.endsWith("/working-directories/open"))).toHaveLength(opened);
+      } finally { view.unmount(); }
+
+      // 未决消息时换目录：守卫按「原命令待核对」处理，不允许静默换作用域。
+      const pendingPosts: { path: string; body: unknown }[] = [];
+      vi.stubGlobal("fetch", router({ loseMessageResponse: true }, pendingPosts));
+      const pending = await mountWorkbench("/agent");
+      try {
+        await openFolderAndType(pending, "帮我把这个文件的内容改成 after");
+        await pending.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+        await flush();
+        await flush();
+        const before = pendingPosts.filter((post) => post.path.endsWith("/working-directories/open")).length;
+
+        await pending.wrapper.get('[data-testid="folder-manual-root"]').setValue("D:\\Develop\\OtherProject");
+        await flush();
+        await pending.wrapper.get('[data-testid="folder-open-manual"]').trigger("click");
+        await flush();
+
+        expect(document.querySelector('[role="dialog"]')?.getAttribute("aria-label")).toBe("命令结果待核对");
+        expect(pendingPosts.filter((post) => post.path.endsWith("/working-directories/open"))).toHaveLength(before);
+      } finally { pending.unmount(); }
+    });
+
+    it("反例 A2：未决消息的解释绑定原资源，换目录后不改用新资源", async () => {
+      activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+      const posts: { path: string; body: unknown }[] = [];
+      // 首条消息响应丢失；回执可查。目录作用域在解释前换成 res-2。
+      const created = { value: false };
+      const fetchMock = router({
+        sessions: createdSessions(created),
+        loseMessageResponse: true,
+        receipt: (commandId) => response({ command_id: commandId, command_type: "RequestAssistMessage",
+          committed_at: "2026-10-02T00:00:05Z",
+          result: { session_id: sessionId, user_message_id: "msg-1", assistant_message_id: "msg-2" } }),
+      }, posts);
+      const original = fetchMock.getMockImplementation()!;
+      let scopeResourceId = "res-1";
+      vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname;
+        if (init?.method === "POST" && path.endsWith("/working-directories/open")) {
+          const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+          posts.push({ path, body });
+          return response({ command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z",
+            result: readyDirectory({ association: { project_id: projectId, project_title: "OtherProject",
+              project_archived: false, resource_id: scopeResourceId, resource_status: "ACTIVE",
+              file_write_identity_bound: true }, display_name: "OtherProject" }),
+            links: { resource: "" } }, 200);
+        }
+        if (init?.method === "POST" && path === `${prefix}/assist-sessions`) {
+          const result = await original(input, init);
+          created.value = true;
+          return result;
+        }
+        return original(input, init);
+      }));
+      const view = await mountWorkbench("/agent");
+      try {
+        await openFolderAndType(view, "帮我把这个文件的内容改成 after");
+        await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+        await flush();
+        await flush();
+        const messageCommandId = (posts.find((post) => post.path.endsWith("/messages"))?.body as
+          { command_id?: string }).command_id;
+        expect(view.wrapper.get('[data-testid="assist-first-pending"]').exists()).toBe(true);
+
+        // 未决消息时换目录被守卫拦住：作用域不变，也就无从把解释指向别的资源。
+        scopeResourceId = "res-2";
+        const opened = posts.filter((post) => post.path.endsWith("/working-directories/open")).length;
+        await view.wrapper.get('[data-testid="folder-manual-root"]').setValue("D:\\Develop\\OtherProject");
+        await flush();
+        await view.wrapper.get('[data-testid="folder-open-manual"]').trigger("click");
+        await flush();
+        expect(document.querySelector('[role="dialog"]')?.getAttribute("aria-label")).toBe("命令结果待核对");
+        expect(posts.filter((post) => post.path.endsWith("/working-directories/open"))).toHaveLength(opened);
+        const stay = Array.from(document.querySelectorAll("button"))
+          .find((button) => button.textContent?.trim() === "留在当前工作区");
+        stay?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await flush(80);
+
+        // 核对成功后解释必须用该命令产生时绑定的 res-1，而不是任何当前作用域取值。
+        await view.wrapper.get('[data-testid="assist-first-receipt"]').trigger("click");
+        await flush();
+        await flush();
+
+        const requested = posts.find((post) => post.path.endsWith("/execution-requests"))?.body as
+          { resource_id?: string } | undefined;
+        expect(requested?.resource_id).toBe("res-1");
+        expect(posts.filter((post) => post.path.endsWith("/messages")))
+          .toEqual(expect.arrayContaining([expect.objectContaining({ body: expect.objectContaining(
+            { command_id: messageCommandId }) })]));
+      } finally { view.unmount(); }
+    });
+
+    it("反例 B：首条解释成功后摘要交接到重挂载后的当前会话", async () => {
+      activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+      const posts: { path: string; body: unknown }[] = [];
+      // 动态会话列表：创建后返回确切会话，触发真实的按会话重挂载。
+      const created = { value: false };
+      const fetchMock = router({ sessions: createdSessions(created) }, posts);
+      const original = fetchMock.getMockImplementation()!;
+      vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname;
+        if (init?.method === "POST" && path === `${prefix}/assist-sessions`) {
+          const result = await original(input, init);
+          created.value = true;
+          return result;
+        }
+        // 解释响应延迟，让重挂载先发生，摘要必须仍落在当前实例。
+        if (init?.method === "POST" && path.endsWith("/execution-requests")) {
+          await new Promise((resolve) => setTimeout(resolve, 60));
+        }
+        return original(input, init);
+      }));
+      const view = await mountWorkbench("/agent");
+      try {
+        await openFolderAndType(view, "帮我把这个文件的内容改成 after");
+        await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+        await flush();
+        await flush(120);
+
+        expect(posts.filter((post) => post.path.endsWith("/execution-requests"))).toHaveLength(1);
+        // 建会话只发生一次；解释只发生一次。
+        expect(posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(1);
+        // PREPARE 摘要必须出现在当前会话面板，而不是只断言 POST 数量。
+        expect(view.wrapper.find('[data-testid="execution-summary"]').exists()).toBe(true);
+        expect(view.wrapper.text()).toContain("改写 answer.txt");
+        // 解释只是候选，仍须人工确认，不自动建立 Task。
+        expect(posts.some((post) => post.path.includes("/applications"))).toBe(false);
+      } finally { view.unmount(); }
+    });
+
+    it("反例 C：先核对回执再收到原响应，同一原消息只解释一次；迟到失败不复活已清空的 pending", async () => {
+      activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+      const posts: { path: string; body: unknown }[] = [];
+      let releaseOriginal: (() => void) | null = null;
+      const releaseLate: { run: () => void } = { run: () => { releaseOriginal?.(); } };
+      const created = { value: false };
+      const fetchMock = router({
+        sessions: createdSessions(created),
+        receipt: (commandId) => response({ command_id: commandId, command_type: "RequestAssistMessage",
+          committed_at: "2026-10-02T00:00:05Z",
+          result: { session_id: sessionId, user_message_id: "msg-1", assistant_message_id: "msg-2" } }),
+      }, posts);
+      const original = fetchMock.getMockImplementation()!;
+      vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname;
+        // 受控故障：原消息请求已提交但响应被扣住，先让回执核对完成。
+        if (init?.method === "POST" && path.includes("/assist-sessions/") && path.endsWith("/messages")) {
+          const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+          posts.push({ path, body });
+          await new Promise<void>((resolve) => { releaseOriginal = resolve; });
+          return response({ command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z",
+            result: { session_id: sessionId, user_message_id: "msg-1", assistant_message_id: "msg-2" },
+            links: { resource: "" } }, 202);
+        }
+        if (init?.method === "POST" && path === `${prefix}/assist-sessions`) {
+          const result = await original(input, init);
+          created.value = true;
+          return result;
+        }
+        return original(input, init);
+      }));
+      const view = await mountWorkbench("/agent");
+      try {
+        await openFolderAndType(view, "帮我把这个文件的内容改成 after");
+        await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+        await flush();
+        await flush();
+
+        // 原响应仍在途：新实例必须已经能从共享 Owner 看到这条未决命令。
+        expect(view.wrapper.get('[data-testid="assist-first-pending"]').exists()).toBe(true);
+        await view.wrapper.get('[data-testid="assist-first-receipt"]').trigger("click");
+        await flush();
+        await flush();
+        const afterCheck = posts.filter((post) => post.path.endsWith("/execution-requests")).length;
+        expect(afterCheck).toBe(1);
+
+        // 现在放行迟到响应：不得第二次解释，也不得复活已清空的 pending。
+        releaseLate.run();
+        await flush(120);
+        await flush();
+
+        expect(posts.filter((post) => post.path.endsWith("/execution-requests"))).toHaveLength(afterCheck);
+        expect(view.wrapper.find('[data-testid="assist-first-pending"]').exists()).toBe(false);
+      } finally { view.unmount(); }
+    });
+
+    it("反例 D：创建响应丢失后按原回执恢复确切会话，并续发原首条载荷", async () => {
+      activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+      const posts: { path: string; body: unknown }[] = [];
+      let createCommandIdSeen: string | null = null;
+      const created = { value: false };
+      const fetchMock = router({ sessions: createdSessions(created) }, posts);
+      const original = fetchMock.getMockImplementation()!;
+      vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname;
+        // 受控故障：创建命令已在服务端提交，但响应丢失。
+        if (init?.method === "POST" && path === `${prefix}/assist-sessions` && createCommandIdSeen === null) {
+          const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+          posts.push({ path, body });
+          createCommandIdSeen = String(body.command_id);
+          throw new TypeError("response lost after commit");
+        }
+        if (path.endsWith(`/commands/${createCommandIdSeen}`)) {
+          // 会话确已在服务端存在：从这一刻起动态列表才返回它。
+          created.value = true;
+          return response({ command_id: createCommandIdSeen, command_type: "CreateAssistSession",
+            committed_at: "2026-10-02T00:00:05Z",
+            result: { session_id: sessionId, workspace_id: workspaceId, project_id: projectId,
+              task_id: null, title: "关于MyProject", status: "ACTIVE", revision: "1",
+              created_at: "2026-10-02T00:00:00Z", updated_at: "2026-10-02T00:00:00Z" } });
+        }
+        return original(input, init);
+      }));
+      const view = await mountWorkbench("/agent");
+      try {
+        await openFolderAndType(view, "帮我把这个文件的内容改成 after");
+        await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+        await flush();
+        await flush();
+
+        // 创建未决且首条尚未发出：不得凭空出现空白普通会话。
+        expect(createCommandIdSeen).toMatch(/^[0-9a-f-]{36}$/u);
+        expect(posts.some((post) => post.path.endsWith("/messages"))).toBe(false);
+        const checkCreate = Array.from(document.querySelectorAll("button"))
+          .find((button) => button.textContent?.trim() === "查询创建回执");
+        expect(checkCreate).toBeDefined();
+
+        checkCreate?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await flush();
+        await flush(120);
+
+        // 恢复后必须续发原首条原文：不重建会话、不混入后来输入、不换命令身份。
+        const messages = posts.filter((post) => post.path.endsWith("/messages"));
+        expect(messages).toHaveLength(1);
+        expect((messages[0]?.body as { content?: string }).content).toBe("帮我把这个文件的内容改成 after");
+        expect(posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(1);
+        expect(posts.filter((post) => post.path.endsWith("/execution-requests"))).toHaveLength(1);
+        expect(view.wrapper.find('[data-testid="assist-first-pending"]').exists()).toBe(false);
+      } finally { view.unmount(); }
+    });
   });
 });
