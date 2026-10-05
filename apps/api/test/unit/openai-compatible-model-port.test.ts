@@ -82,6 +82,8 @@ for (const scenario of [
   { name: 'partial text before tool refusal', chunks: [event('partial synthetic reply'),
     event(null, null, { prompt_tokens: 43, completion_tokens: 8, total_tokens: 51 }), toolEvent()],
   usage: { inputTokens: 43, outputTokens: 8, cacheReadTokens: null, cacheCreationTokens: null },
+    // 前置文本照常逐块发布（流式体验不能为了这一种被拒绝的结局而整体延后），
+    // 整轮的丢弃由调用层负责：被拒绝的模型调用不会提交任何草稿。
     deltas: ['partial synthetic reply'] },
   { name: 'unknown usage stays null', chunks: [toolEvent()],
   usage: nullUsage, deltas: [] },
@@ -156,12 +158,32 @@ for (const scenario of [
   });
 }
 
-test('text published beside a tool request is not a settled reply', async () => {
-  const model = port(() => response([event('已修改三个文件'),
+test('text beside a tool request stays preamble and never settles as the reply', async () => {
+  // 真实 Provider 会边输出正文边调工具。整轮失败会让工具循环不可用，因此文本只作为
+  // 该轮的前置说明交给结算方处理，候选正文仍只来自没有工具请求的那一轮。
+  const deltas: string[] = [];
+  const model = port(() => response([event('我先查一下'), event('已修改三个文件'),
     toolChunk('search_text', '{"query":"x"}'), 'data: [DONE]\n\n']));
-  await assert.rejects(() => model.generate({ manifest: draftManifest(),
-    outputSchema: CANDIDATE_OUTPUT_SCHEMA, tools: DRAFT_TOOLS }),
-  (error: unknown) => error instanceof ModelToolOutputError);
+  const result = await model.generate({ manifest: draftManifest(),
+    outputSchema: CANDIDATE_OUTPUT_SCHEMA, tools: DRAFT_TOOLS,
+    onTextDelta: async (text) => { deltas.push(text); } });
+  assert.equal(result.kind, 'TOOL_CALLS');
+  if (result.kind !== 'TOOL_CALLS') return;
+  assert.equal(result.preamble, '我先查一下已修改三个文件');
+  assert.deepEqual(result.calls, [{ providerToolCallId: 'fixture-tool',
+    name: 'search_text', arguments: { query: 'x' } }]);
+  // 流式预览保留：文本增量照常发布，由结算方在结算为工具请求时清空该轮预览。
+  assert.equal(deltas.join(''), '我先查一下已修改三个文件');
+});
+
+test('a tool request without any text leaves the preamble empty', async () => {
+  const model = port(() => response([toolChunk('search_text', '{"query":"x"}'),
+    'data: [DONE]\n\n']));
+  const result = await model.generate({ manifest: draftManifest(),
+    outputSchema: CANDIDATE_OUTPUT_SCHEMA, tools: DRAFT_TOOLS });
+  assert.equal(result.kind, 'TOOL_CALLS');
+  if (result.kind !== 'TOOL_CALLS') return;
+  assert.equal(result.preamble, '');
 });
 
 for (const scenario of ['prior usage', 'same-chunk usage', 'empty request ID', 'non-text content'] as const) {

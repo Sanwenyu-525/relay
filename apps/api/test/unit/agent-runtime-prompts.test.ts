@@ -4,6 +4,7 @@ import test from 'node:test';
 import { INTERPRETATION_SYSTEM_PROMPT } from '../../src/application/conversation-execution.js';
 import { RELAY_AGENT_CORE_PROMPT } from '../../src/workflow/agent-system-prompt.js';
 import { CANDIDATE_OUTPUT_SCHEMA } from '../../src/workflow/markdown-deliverable.js';
+import { declaredToolSpecs } from '../../src/workflow/tool-catalog.js';
 import { ModelCallBudgetError, OpenAiCompatibleModelPort }
   from '../../src/workflow/openai-compatible-model-port.js';
 
@@ -71,11 +72,38 @@ test('request interpretation keeps the original request separate and retains JSO
   assert.ok(request.messages[0]!.content.includes(RELAY_AGENT_CORE_PROMPT));
   assert.match(request.messages[0]!.content, /本次只解释原用户意图/u);
   assert.match(request.messages[0]!.content, /DISCUSS.*CLARIFY.*PREPARE/u);
-  assert.match(request.messages[0]!.content, /缺少实际内容就用 CLARIFY/u);
+  // 方案 B（2026-10-04）：解释阶段没有目录访问，正文交给 Run 内的工具循环，
+  // 因此不再要求「缺少实际内容就 CLARIFY」，也不允许它编造正文。
+  assert.match(request.messages[0]!.content, /只写 path 与 action，不要写 content/u);
+  assert.match(request.messages[0]!.content, /不要因为「还没读过文件」而 CLARIFY/u);
   assert.ok(!request.messages[0]!.content.includes(original));
   assert.equal(request.messages[1]!.content, original);
   assert.deepEqual(request.response_format, { type: 'json_object' });
   assert.equal(request.tools, undefined);
+});
+
+test('只读工具集：提示词明确本次不修改任何文件', async () => {
+  const requests: WireRequest[] = [];
+  const model = fixtureModel('# 候选\n\n## 摘要\n说明\n\n## 结论\n待审阅', requests);
+  await model.generate({ outputSchema: CANDIDATE_OUTPUT_SCHEMA, manifest: {},
+    tools: declaredToolSpecs(['list_directory', 'find_paths', 'search_text', 'read_file']) });
+  const system = requests[0]!.messages[0]!.content;
+  assert.match(system, /工具只读，不修改任何文件/u);
+  assert.ok(!/请求修改/u.test(system));
+});
+
+test('授予编辑能力时提示词不再声称只读，而是要求先读后改并声明删除不在授权内', async () => {
+  const requests: WireRequest[] = [];
+  const model = fixtureModel('# 候选\n\n## 摘要\n说明\n\n## 结论\n待审阅', requests);
+  await model.generate({ outputSchema: CANDIDATE_OUTPUT_SCHEMA, manifest: {},
+    tools: declaredToolSpecs(['list_directory', 'find_paths', 'search_text', 'read_file',
+      'apply_changeset', 'read_change_set']) });
+  const system = requests[0]!.messages[0]!.content;
+  // 提示词必须与本次实际冻结的能力一致：既不能还说「工具只读」，也不能
+  // 把「本次获准编辑」说成「模型可以自行决定写什么」。
+  assert.ok(!system.includes('工具只读，不修改任何文件'));
+  assert.match(system, /先用读取工具读到真实内容/u);
+  assert.match(system, /删除文件不在本次授权内/u);
 });
 
 test('semantic checking keeps an independent narrow prompt and treats the candidate as data', async () => {

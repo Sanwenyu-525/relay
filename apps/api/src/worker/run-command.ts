@@ -7,6 +7,7 @@ import {
 import { createRepositories } from '../application/unit-of-work.js';
 import { executeClaimedRunGraph, RunGraphInvocationLost } from './run-graph.js';
 import type { MockGatewayStepResult } from './mock-gateway-action.js';
+import type { FakeToolScript } from '../workflow/fake-model-port.js';
 
 const MAX_GRAPH_STEPS_PER_DELIVERY = 32;
 const CONTROL_POLL_MS = 100;
@@ -23,6 +24,8 @@ export async function runOneCommand(db: DbExecutor, input: {
   leaseMs?: number; signal?: AbortSignal;
   maxSteps?: number;
   fakeModelDelayMs?: number;
+  /** Test-only scripted model; production callers leave this absent. */
+  fakeToolScript?: FakeToolScript;
   onClaim?: (claim: ClaimedRunCommand) => Promise<void>;
   afterStep?: (step: AdvanceRunStepResult, claim: ClaimedRunCommand) => Promise<void>;
   afterGraph?: (claim: ClaimedRunCommand) => Promise<void>;
@@ -83,6 +86,7 @@ export async function runOneCommand(db: DbExecutor, input: {
         leaseMs, maxSteps: input.maxSteps ?? MAX_GRAPH_STEPS_PER_DELIVERY,
         signal: controller.signal,
         ...(input.fakeModelDelayMs === undefined ? {} : { fakeModelDelayMs: input.fakeModelDelayMs }),
+        ...(input.fakeToolScript === undefined ? {} : { fakeToolScript: input.fakeToolScript }),
         ...(input.afterStep === undefined ? {} : { afterStep: input.afterStep }),
         ...(input.afterGatewayPrepared === undefined ? {} : {
           afterGatewayPrepared: input.afterGatewayPrepared,

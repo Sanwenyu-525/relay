@@ -1,5 +1,5 @@
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 import type { JsonObject, JsonValue } from '../infrastructure/json.js';
 import { isProtectedPath } from './file-changeset.js';
@@ -34,6 +34,12 @@ export interface FileQueryInput {
   readonly kind: FileQueryKind;
   /** 已冻结并 realpath 过的查询目录；调用方负责证明它在受管根内。 */
   readonly directory: string;
+  /**
+   * 冻结时的受管根，必填。内容搜索在读取每个文件前按它复核 realpath 之后的真实路径：
+   * 目录项枚举与文件读取之间存在替换窗口，只检查枚举时的名字不足以保证不越界。
+   * 必填而不是可选，是为了不存在「调用方忘了传，于是悄悄少一层边界检查」这种形态。
+   */
+  readonly root: string;
   /** 根内相对子目录；缺省或空串表示查询目录自身。 */
   readonly relativePath?: string | undefined;
   /** FIND_PATHS 的路径子串；SEARCH_TEXT 的字面查询串。 */
@@ -167,11 +173,24 @@ export async function searchText(input: FileQueryInput): Promise<FileQueryResult
   const matches: JsonValue[] = [];
   let stopped = false;
   let binarySkipped = 0;
+  let escaped = 0;
   const walked = await walkFiles(input.directory, input.signal, async (file) => {
     if (matches.length >= limit) { stopped = true; return false; }
+    let resolved: string;
+    try { resolved = await realpath(file.absolutePath); }
+    catch { return true; }
+    // 真正读取之前按根边界与保护路径复核。枚举目录项的名字不能证明文件本身还在根内：
+    // 子目录可能在枚举之后被换成 junction 或链接，从而把正文引到受管根之外。
+    if (!insideRoot(input.root, resolved)) {
+      escaped += 1;
+      return true;
+    }
+    if (isProtectedPath(relativePosix(input.root, resolved))) {
+      escaped += 1;
+      return true;
+    }
     let content: string;
     try {
-      const resolved = await realpath(file.absolutePath);
       const stats = await stat(resolved);
       if (!stats.isFile() || stats.size > FILE_QUERY_MAX_SEARCH_BYTES) return true;
       const bytes = await readFile(resolved, { signal: input.signal });
@@ -188,7 +207,19 @@ export async function searchText(input: FileQueryInput): Promise<FileQueryResult
   });
   return { outcome: 'SUCCEEDED', result: { query: needle, matches, count: matches.length,
     limit, truncated: stopped || walked.stopped, visited_entries: walked.visited,
-    binary_skipped: binarySkipped } };
+    binary_skipped: binarySkipped, skipped_escaped: escaped } };
+}
+
+/** 受管根边界判定：允许根自身，其余必须是根内的真实后代。 */
+function insideRoot(root: string, target: string): boolean {
+  const normalizedRoot = process.platform === 'win32' ? root.toLowerCase() : root;
+  const normalizedTarget = process.platform === 'win32' ? target.toLowerCase() : target;
+  const part = relative(normalizedRoot, normalizedTarget);
+  return part === '' || (part !== '..' && !part.startsWith(`..${sep}`) && !isAbsolute(part));
+}
+
+function relativePosix(root: string, target: string): string {
+  return relative(root, target).replaceAll('\\', '/');
 }
 
 /** 统一入口：只按调用方已冻结的 kind 分派，不接受模型自带的动作名。 */
@@ -207,12 +238,14 @@ export async function reconcileFileQuery(op: {
   readonly normalized_target: string;
   readonly action_type: string;
   readonly params: JsonObject;
-}): Promise<{ readonly status: 'SUCCEEDED' | 'NOT_EXECUTED'; readonly result: JsonObject }> {
+}, managedRoot: string): Promise<{ readonly status: 'SUCCEEDED' | 'NOT_EXECUTED';
+  readonly result: JsonObject }> {
   const rerun = await executeFileQuery({
     kind: op.action_type as FileQueryKind,
     directory: op.normalized_target,
-    relativePath: typeof op.params.relative_path === 'string' ? op.params.relative_path : '',
-    query: typeof op.params.query === 'string' ? op.params.query : undefined,
+    root: managedRoot,
+    query: typeof op.params.query === 'string' ? op.params.query
+      : typeof op.params.pattern === 'string' ? op.params.pattern : undefined,
     limit: typeof op.params.limit === 'number' ? op.params.limit : undefined,
   });
   return { status: rerun.outcome === 'SUCCEEDED' ? 'SUCCEEDED' : 'NOT_EXECUTED',

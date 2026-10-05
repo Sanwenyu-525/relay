@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { delegateTask } from '../application/delegate-task.js';
 import { readRunById } from '../application/run-queries.js';
 import { readRunDraftPreview } from '../application/run-draft-preview.js';
+import { readRunToolCalls } from '../application/run-tool-call-projection.js';
 import { applySafeControl, readControlRequest, requestRunControl, resumeRun } from '../application/control-requests.js';
 import {
   DelegateTaskBodySchema,
@@ -14,6 +15,7 @@ import {
   RunControlRequestSchema,
   RunResumeBodySchema,
   RunResumeResultSchema,
+  RunToolCallsSchema,
   WorkspaceRunControlParamsSchema,
   WorkspaceRunParamsSchema,
   WorkspaceTaskParamsSchema,
@@ -66,6 +68,20 @@ export function registerRunRoutes(app: FastifyInstance, dependencies: RouteDepen
           fileWriteAction: body.file_write_action,
           cliRunAction: body.cli_run_action,
           toolLoopAction: body.tool_loop_action,
+          // 授权边界、已配置检查程序与到期时间都来自请求正文，逐字段重建为冻结形态。
+          scopeGrant: body.scope_grant === undefined ? undefined : {
+            resource_id: body.scope_grant.resource_id,
+            allowed_actions: [...body.scope_grant.allowed_actions],
+            checks: body.scope_grant.checks.map((check) => ({
+              id: check.id, executable: check.executable, args: [...check.args],
+              executable_sha256: check.executable_sha256,
+              ...(check.max_output_bytes === undefined ? {} :
+                { max_output_bytes: check.max_output_bytes }) })),
+            ...(body.scope_grant.expires_at === undefined ? {} :
+              { expires_at: body.scope_grant.expires_at }),
+            ...(body.scope_grant.survives_run_terminal === undefined ? {} :
+              { survives_run_terminal: body.scope_grant.survives_run_terminal }),
+          },
           contextSources: body.context_sources,
         });
 
@@ -101,6 +117,16 @@ export function registerRunRoutes(app: FastifyInstance, dependencies: RouteDepen
       const params = request.params as { workspace_id: string; run_id: string };
       return await readRunDraftPreview(dependencies.database.executor,
         dependencies.storage, params.workspace_id, params.run_id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
+  app.get('/runs/:run_id/tool-calls', {
+    schema: { params: WorkspaceRunParamsSchema, response: { 200: RunToolCallsSchema } },
+  }, async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    try {
+      const params = request.params as { workspace_id: string; run_id: string };
+      return await readRunToolCalls(dependencies.database.executor, params.workspace_id, params.run_id);
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
 

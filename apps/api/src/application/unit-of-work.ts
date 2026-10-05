@@ -11,6 +11,7 @@ import { ContinuationPointRepository } from '../project/continuation-point-repos
 import { KnowledgeGuideRepository } from '../project/knowledge-guide-repository.js';
 import { CommandReceiptRepository } from '../receipt/command-receipt-repository.js';
 import { RunRepository } from '../run/run-repository.js';
+import { RunToolCallRepository } from '../run/run-tool-call-repository.js';
 import { RecoveryRepository } from '../run/recovery-repository.js';
 import { RunDispatchRepository } from '../run/run-dispatch-repository.js';
 import { ReviewRepository } from '../review/review-repository.js';
@@ -28,6 +29,7 @@ import { TodayRepository } from '../today/today-repository.js';
 import { ViewRepository } from '../view/view-repository.js';
 import { BlueprintRepository } from '../blueprint/blueprint-repository.js';
 import { RuntimeAdmissionRepository } from '../runtime/runtime-admission-repository.js';
+import { RunScopeGrantRepository } from './run-scope-grant.js';
 
 /** 同一连接上的模块写入口集合。用例只能通过这里跨模块协作，不直接拼 SQL。 */
 export interface Repositories {
@@ -44,6 +46,9 @@ export interface Repositories {
   readonly knowledgeGuides: KnowledgeGuideRepository;
   readonly receipts: CommandReceiptRepository;
   readonly runs: RunRepository;
+  readonly toolCalls: RunToolCallRepository;
+  /** 本次任务范围授权。与其他仓库一样绑定到调用方的事务执行器。 */
+  readonly scopeGrants: RunScopeGrantRepository;
   readonly recovery: RecoveryRepository;
   readonly dispatch: RunDispatchRepository;
   readonly reviews: ReviewRepository;
@@ -77,6 +82,8 @@ export function createRepositories(db: DbExecutor): Repositories {
     knowledgeGuides: new KnowledgeGuideRepository(db),
     receipts: new CommandReceiptRepository(db),
     runs: new RunRepository(db),
+    toolCalls: new RunToolCallRepository(db),
+    scopeGrants: new RunScopeGrantRepository(db),
     recovery: new RecoveryRepository(db),
     dispatch: new RunDispatchRepository(db),
     reviews: new ReviewRepository(db),

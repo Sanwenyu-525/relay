@@ -97,6 +97,23 @@ function measureRun(trace) {
     call.usage_input_tokens === null || call.usage_output_tokens === null);
   const providers = [...new Set(calls.map((call) => call.provider))].sort();
 
+  // 缓存读数与用量读数同样分「未上报」与「上报为零」。NULL 是 Provider 没有报告这个字段，
+  // 不是「没有命中缓存」；把它当 0 会把不支持缓存的 Provider 算成命中率 0%。
+  const cacheReportedCalls = calls.filter((call) =>
+    typeof call.usage_cache_read_tokens === 'number');
+  const cacheUnknownCalls = calls.length - cacheReportedCalls.length;
+  const cacheReadTokens = cacheReportedCalls.reduce(
+    (sum, row) => sum + (row.usage_cache_read_tokens ?? 0), 0);
+  const cacheCreationTokens = cacheReportedCalls.reduce(
+    (sum, row) => sum + (row.usage_cache_creation_tokens ?? 0), 0);
+  // 分母只累加上报了缓存字段的调用：OpenAI 兼容语义下 usage_input_tokens 已包含 cached 部分，
+  // 混入未上报的调用会让分母与分子口径不一致。
+  const cacheBasisInputTokens = cacheReportedCalls.reduce(
+    (sum, row) => sum + (row.usage_input_tokens ?? 0), 0);
+  const cacheHitRate = cacheBasisInputTokens > 0
+    ? round((cacheReadTokens / cacheBasisInputTokens) * 100)
+    : null;
+
   return {
     run_id: trace.run_id,
     task_id: trace.task_id,
@@ -141,7 +158,25 @@ function measureRun(trace) {
       usage_input_tokens: calls.reduce((sum, row) => sum + (row.usage_input_tokens ?? 0), 0),
       usage_output_tokens: calls.reduce((sum, row) => sum + (row.usage_output_tokens ?? 0), 0),
       calls_with_unknown_usage: usageUnknownCalls.length,
+      cache_reported_calls: cacheReportedCalls.length,
+      cache_unknown_calls: cacheUnknownCalls,
+      cache_read_tokens: cacheReadTokens,
+      cache_creation_tokens: cacheCreationTokens,
+      cache_basis_input_tokens: cacheBasisInputTokens,
+      cache_hit_percent: cacheHitRate,
     },
+    // 逐调用读数按开始时间排列：前缀一旦失效，命中率会在某处断崖，
+    // 聚合数字看不出断点在哪一轮。
+    cache_by_call: cacheReportedCalls.map((row) => ({
+      model_call_id: row.id,
+      started_at: row.started_at,
+      input_tokens: row.usage_input_tokens,
+      cache_read_tokens: row.usage_cache_read_tokens,
+      cache_creation_tokens: row.usage_cache_creation_tokens,
+      cache_hit_percent: typeof row.usage_input_tokens === 'number' && row.usage_input_tokens > 0
+        ? round((row.usage_cache_read_tokens / row.usage_input_tokens) * 100)
+        : null,
+    })),
     // Trace 未持久化这些时间点，用相邻时间戳代替会把排队/首字说成别的东西。
     not_derivable: {
       accept_to_claim_ms: '命令受理时间未在 Trace 暴露',
@@ -193,6 +228,13 @@ function aggregate(runs) {
     calls_with_unknown_usage_total: pick((row) => row.model.calls_with_unknown_usage) ?? 0,
     usage_input_tokens_total: pick((row) => row.model.usage_input_tokens) ?? 0,
     usage_output_tokens_total: pick((row) => row.model.usage_output_tokens) ?? 0,
+    cache_reported_calls_total: pick((row) => row.model.cache_reported_calls) ?? 0,
+    cache_unknown_calls_total: pick((row) => row.model.cache_unknown_calls) ?? 0,
+    cache_read_tokens_total: pick((row) => row.model.cache_read_tokens) ?? 0,
+    cache_creation_tokens_total: pick((row) => row.model.cache_creation_tokens) ?? 0,
+    cache_basis_input_tokens_total: pick((row) => row.model.cache_basis_input_tokens) ?? 0,
+    // 分母为 0 时是 null 而不是 0：Provider 从未上报缓存字段时不能读成「命中率 0%」。
+    cache_hit_percent_total: pick((row) => row.model.cache_hit_percent),
   };
 }
 
@@ -214,6 +256,10 @@ function listProblems(path) {
   }
   if (path.aggregate.calls_with_unknown_usage_total > 0) {
     problems.push(`${path.aggregate.calls_with_unknown_usage_total} 次模型调用没有可核验用量`);
+  }
+  if (path.aggregate.cache_unknown_calls_total > 0) {
+    problems.push(
+      `${path.aggregate.cache_unknown_calls_total} 次模型调用未上报缓存字段，缓存命中率不含这部分`);
   }
   if (path.aggregate.attempts_retried_total > 0) {
     problems.push(`发生 ${path.aggregate.attempts_retried_total} 次步骤重试`);
@@ -242,6 +288,7 @@ function renderReport(summary) {
     '- 首文本是生成 Owner 观察到的首次非空文本回调；首预览写入是首个预览成功事务内的写入时间。两者按各自定义分别报告，不合并成一个「首内容」，也都不等于用户屏幕可见时刻。',
     '- 命令受理到领取、实际 HTTP 发出与 Provider 收包、人工理解成本在 Trace 中不存在，列为不可得，需人工记录，不用相邻时间戳顶替。',
     '- Mock 与真实 Provider 不合并统计；用量缺失按未知计数，不按 0 计。无首文本记录的调用按未知计入分母，不从结束时间回填。',
+    '- 缓存命中率 = 上报了缓存字段的调用中 `usage_cache_read_tokens` 合计 ÷ 同一批调用的 `usage_input_tokens` 合计。分母只含已上报的调用，因为 OpenAI 兼容语义下 `input_tokens` 已包含 cached 部分。未上报缓存字段的调用单独计数，不按 0 计入分子或分母；一条都没上报时命中率显示「未采集」。',
     '',
     '## 路径汇总',
     '',
@@ -257,6 +304,28 @@ function renderReport(summary) {
       `${path.aggregate.calls_without_first_text_delta_total} | ` +
       `${path.aggregate.attempts_retried_total} | ${path.aggregate.invocations_unknown_total} | ` +
       `${path.aggregate.calls_with_unknown_usage_total} | ${path.observations.rework_count ?? '未记'} |`);
+  }
+  lines.push('', '## 缓存命中率', '',
+    '| 路径 | 命中率 | 缓存读 tokens | 缓存写 tokens | 分母(输入 tokens) | 上报调用 | 未上报调用 |',
+    '|---|---|---|---|---|---|---|');
+  for (const path of summary.paths) {
+    lines.push(`| ${path.title} | ${percent(path.aggregate.cache_hit_percent_total)} | ` +
+      `${path.aggregate.cache_read_tokens_total} | ${path.aggregate.cache_creation_tokens_total} | ` +
+      `${path.aggregate.cache_basis_input_tokens_total} | ` +
+      `${path.aggregate.cache_reported_calls_total} | ${path.aggregate.cache_unknown_calls_total} |`);
+  }
+  lines.push('', '逐调用读数（按开始时间排列，用于定位前缀失效的断点）：', '');
+  for (const path of summary.paths) {
+    for (const run of path.runs) {
+      if ((run.cache_by_call ?? []).length === 0) continue;
+      lines.push(`- ${path.title} · run ${run.run_id}：`, '',
+        '  | 开始时间 | 输入 tokens | 缓存读 | 缓存写 | 命中率 |',
+        '  |---|---|---|---|---|');
+      for (const call of run.cache_by_call) {
+        lines.push(`  | ${call.started_at} | ${call.input_tokens} | ${call.cache_read_tokens} | ` +
+          `${call.cache_creation_tokens} | ${percent(call.cache_hit_percent)} |`);
+      }
+    }
   }
   lines.push('', '## 优先问题清单', '');
   const problems = summary.paths.flatMap((path) =>
@@ -274,6 +343,8 @@ function renderReport(summary) {
 }
 
 const ms = (value) => (value === null || value === undefined || value < 0 ? '不可得' : `${value} ms`);
+// 分母为 0 表示 Provider 从未上报缓存字段，读作「未采集」而不是 0%。
+const percent = (value) => (value === null || value === undefined ? '未采集' : `${value}%`);
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));

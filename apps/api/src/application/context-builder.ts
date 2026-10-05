@@ -12,6 +12,7 @@ import { DEFAULT_FAKE_SCENARIO } from '../workflow/context-fixture.js';
 import { searchInformation } from './information-queries.js';
 import { createRepositories } from './unit-of-work.js';
 import { readContextSources } from '../workflow/execution-contract.js';
+import type { FakeToolScript } from '../workflow/fake-model-port.js';
 
 export const CONTEXT_BUILDER_VERSION = 'context-builder-v1';
 export const CONTEXT_TEMPLATE_VERSION = 'markdown-draft-v1';
@@ -56,8 +57,7 @@ export async function buildRunContext(db: DbExecutor, input: { readonly run: Run
   readonly fakeScenario?: FakeScenario; readonly correction?: ContextCorrectionInput;
   readonly budgetTokens?: number; readonly externalModel?: boolean;
   /** 仅测试注入：FakeModelPort 按此脚本逐轮发出真实工具请求。生产路径不包含它。 */
-  readonly fakeToolScript?: readonly { readonly name: string;
-    readonly arguments: JsonObject }[][] }): Promise<BuiltContext> {
+  readonly fakeToolScript?: FakeToolScript }): Promise<BuiltContext> {
   const r = createRepositories(db);
   const contract = await r.runs.readContract(input.run.id);
   const project = input.task.project_id === null ? undefined :

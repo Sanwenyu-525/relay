@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 
-import { buildToolTurns, gatewayParamsFor, MAX_TOOL_RESULT_BYTES, projectToolResult,
-  ToolRequestRejected, toolTargetFor, validateToolArguments,
+import { buildToolTurns, decideToolAdaptation, gatewayParamsFor, MAX_TOOL_RESULT_BYTES,
+  projectToolResult, ToolRequestRejected, toolTargetFor, validateToolArguments,
   type ToolLoopPlan } from '../../src/application/tool-loop.js';
 import { FakeModelPort } from '../../src/workflow/fake-model-port.js';
 import { CANDIDATE_OUTPUT_SCHEMA } from '../../src/workflow/markdown-deliverable.js';
@@ -13,6 +13,33 @@ import type { RunToolCallRow } from '../../src/infrastructure/database-schema.js
 
 const searchSpec = declaredToolSpecs(['search_text'])[0]!;
 const gitDiffSpec = declaredToolSpecs(['git_diff'])[0]!;
+const changesetSpec = declaredToolSpecs(['apply_changeset'])[0]!;
+
+test('变更数组按词表声明的形状放行，不会因为校验器不认数组而被当成缺失必填参数', () => {
+  // 反例：apply_changeset 的唯一参数是数组。校验器若只处理标量，规范化后 changes 会被
+  // 丢掉，必填检查随即报「缺少必填参数」——真实模型每次写请求都会被确定性拒绝，
+  // 读写主链就此不可用。
+  const changes = [{ action: 'MODIFY', path: 'src/a.ts', baselineSha256: 'b'.repeat(64),
+    content: 'export const a = 1;\n' }];
+  const validated = validateToolArguments(changesetSpec, { changes });
+  assert.deepEqual((validated as { changes?: unknown }).changes, changes);
+  assert.throws(() => validateToolArguments(changesetSpec, { changes: 'src/a.ts' }),
+    (error: unknown) => (error as ToolRequestRejected).reason === 'TOOL_ARGUMENT_INVALID');
+});
+
+test('写工具的声明把变更项字段讲清楚，模型才知道修改必须带真实基线摘要', () => {
+  const propertiesOf = changesetSpec.parameters.properties as
+    Record<string, { items?: { properties?: Record<string, { type?: string }> } }>;
+  const item = propertiesOf.changes;
+  assert.equal(typeof item, 'object');
+  const properties = (item as { items?: { properties?: Record<string, { type?: string }> } })
+    .items?.properties ?? {};
+  // 这些字段名就是 normalizeToolChanges 逐项校验的那一套：声明与校验必须同名。
+  assert.deepEqual(Object.keys(properties).sort(), ['action', 'baselineSha256', 'content', 'path']);
+  assert.equal(properties.path?.type, 'string');
+  assert.equal(properties.baselineSha256?.type, 'string');
+  assert.equal(properties.content?.type, 'string');
+});
 
 function plan(allowed: readonly string[], root = join('D:', 'work')): ToolLoopPlan {
   return { intent: { intent_key: 'tool-loop-v1', resource_id: 'r1', connections: {
@@ -66,14 +93,16 @@ test('the target and the Gateway parameters come from the frozen envelope, not t
 
 test('the catalog is a closed list: every entry maps to a declared Gateway action', () => {
   const names = INTERNAL_TOOL_DEFINITIONS.map((entry) => entry.name);
-  assert.deepEqual(names, ['list_directory', 'find_paths', 'search_text', 'read_file',
+  assert.deepEqual(names, ['apply_changeset', 'read_change_set', 'run_check',
+    'list_directory', 'find_paths', 'search_text', 'read_file',
     'git_status', 'git_diff', 'git_log']);
   for (const entry of INTERNAL_TOOL_DEFINITIONS) {
     assert.equal(readInternalTool(entry.name), entry);
     assert.equal(entry.spec.name, entry.name);
     assert.equal(entry.spec.parameters.additionalProperties, false);
   }
-  assert.equal(readInternalTool('apply_changeset'), undefined);
+  assert.equal(readInternalTool('apply_change_set'), undefined);
+  assert.equal(readInternalTool('delete_file'), undefined);
   assert.equal(readInternalTool('run_bash'), undefined);
 });
 
@@ -100,7 +129,8 @@ function row(overrides: Partial<RunToolCallRow> & Pick<RunToolCallRow, 'round' |
     workspace_id: 'w', project_id: 'p', run_id: 'r', step_id: 's', step_attempt_id: 'a',
     model_call_id: 'm', provider_tool_call_id: `provider-${overrides.round}-${overrides.ordinal}`,
     tool_name: 'search_text', arguments: { query: 'Relay' },
-    arguments_sha256: '0'.repeat(64), operation_id: null, result_ref: null, revision: 1n,
+    arguments_sha256: '0'.repeat(64), operation_id: null, result_ref: null,
+    adaptation_of: null, adapted_path: null, revision: 1n,
     created_at: new Date(0), updated_at: new Date(0), ...overrides };
 }
 
@@ -126,6 +156,102 @@ test('a settled operation whose result is gone is reported as an error to the mo
   assert.equal(turns[0]!.results[0]!.isError, true);
   assert.deepEqual(JSON.parse(turns[0]!.results[0]!.content),
     { ok: false, reason: 'TOOL_RESULT_MISSING' });
+});
+
+test('a failed configured check is replayed as an error with its actual output', () => {
+  const check = row({ round: 0, ordinal: 0, status: 'SETTLED',
+    tool_name: 'run_check', arguments: { check_id: 'tests' }, operation_id: 'check-1' });
+  // A normal nonzero CLI exit has no reason field. Settlement records receipt availability,
+  // so SETTLED alone cannot tell the model whether the actual check passed.
+  const failed: JsonObject = { outcome: 'FAILED', exitCode: 1,
+    stdout: '1 failing test', stderr: 'expected 2, received 1', truncated: false };
+  const turns = buildToolTurns([check], new Map([['check-1', failed]]));
+  assert.equal(turns[0]!.results[0]!.isError, true);
+  assert.deepEqual(JSON.parse(turns[0]!.results[0]!.content), failed);
+
+  const passed: JsonObject = { outcome: 'SUCCEEDED', exitCode: 0,
+    stdout: 'all tests passed', stderr: '', truncated: false };
+  const repaired = buildToolTurns([check], new Map([['check-1', passed]]));
+  assert.equal(repaired[0]!.results[0]!.isError, false);
+  assert.deepEqual(JSON.parse(repaired[0]!.results[0]!.content), passed);
+});
+
+const STALE = 'a'.repeat(64);
+const CURRENT = 'b'.repeat(64);
+
+function changesetRow(id: string, overrides: Partial<RunToolCallRow> = {}): RunToolCallRow {
+  return row({ id, round: Number(id.replace(/\D/g, '')) || 0, ordinal: 0, status: 'SETTLED',
+    tool_name: 'apply_changeset',
+    arguments: { changes: [{ path: 'src/index.ts', action: 'MODIFY',
+      baselineSha256: STALE, content: '旧目标\n' }] }, ...overrides });
+}
+
+function conflicted(overrides: Partial<RunToolCallRow> = {}): RunToolCallRow {
+  return changesetRow('row-0-0', { result_ref: { reason: 'SOME_CHANGES_FAILED_OR_CONFLICTED',
+    changes: [{ path: 'src/index.ts', action: 'MODIFY', status: 'CONFLICT',
+      baselineSha256: STALE, actualBaselineSha256: CURRENT }] }, ...overrides });
+}
+
+const reread = { changes: [{ path: 'src/index.ts', action: 'MODIFY', baselineSha256: CURRENT,
+  content: '保留用户改动后的新目标\n' }] };
+
+test('a conflict adaptation is bound to its origin, its re-read baseline and new content', () => {
+  const decision = decideToolAdaptation({ prior: [conflicted()], changes: reread.changes });
+  assert.deepEqual(decision, { kind: 'ADAPT', of: 'row-0-0', path: 'src/index.ts' });
+});
+
+test('a blind retry of the same stale baseline is refused, not treated as an adaptation', () => {
+  const decision = decideToolAdaptation({ prior: [conflicted()], changes: [
+    { path: 'src/index.ts', action: 'MODIFY', baselineSha256: STALE, content: '旧目标\n' }] });
+  assert.equal(decision.kind, 'STOP');
+  assert.equal(decision.kind === 'STOP' ? decision.reason : '', 'TOOL_ADAPTATION_STALE_BASELINE');
+});
+
+test('a new baseline with the old target text is refused as a disguised replay', () => {
+  const decision = decideToolAdaptation({ prior: [conflicted()], changes: [
+    { path: 'src/index.ts', action: 'MODIFY', baselineSha256: CURRENT, content: '旧目标\n' }] });
+  assert.equal(decision.kind === 'STOP' ? decision.reason : '', 'TOOL_ADAPTATION_CONTENT_UNCHANGED');
+});
+
+test('only one adaptation is allowed, and an adapted request is never adapted again', () => {
+  const adapted = changesetRow('row-1-0', { adaptation_of: 'row-0-0',
+    adapted_path: 'src/index.ts',
+    result_ref: { reason: 'SOME_CHANGES_FAILED_OR_CONFLICTED',
+      changes: [{ path: 'src/index.ts', action: 'MODIFY', status: 'CONFLICT',
+        baselineSha256: CURRENT, actualBaselineSha256: 'c'.repeat(64) }] } });
+  // 原始请求已被适配过一次：再次要求适配必须停下来交给用户。
+  const exhausted = decideToolAdaptation({ prior: [conflicted(), adapted], changes: [
+    { path: 'src/index.ts', action: 'MODIFY', baselineSha256: 'c'.repeat(64),
+      content: '第三次\n' }] });
+  assert.equal(exhausted.kind === 'STOP' ? exhausted.reason : '', 'TOOL_ADAPTATION_REQUIRES_HUMAN');
+  // 已经被适配过的那一行自己也不能再成为新的适配来源（深度限制）。
+  const depth = decideToolAdaptation({ prior: [adapted], changes: [
+    { path: 'src/index.ts', action: 'MODIFY', baselineSha256: 'c'.repeat(64),
+      content: '第四次\n' }] });
+  assert.equal(depth.kind === 'STOP' ? depth.reason : '', 'TOOL_ADAPTATION_REQUIRES_HUMAN');
+});
+
+test('an adaptation that touches several conflicted paths at once is not clearly separable', () => {
+  const twoPaths = conflicted({ result_ref: { reason: 'SOME_CHANGES_FAILED_OR_CONFLICTED',
+    changes: [{ path: 'src/index.ts', action: 'MODIFY', status: 'CONFLICT',
+      baselineSha256: STALE, actualBaselineSha256: CURRENT },
+    { path: 'README.md', action: 'MODIFY', status: 'CONFLICT',
+      baselineSha256: STALE, actualBaselineSha256: CURRENT }] } });
+  const decision = decideToolAdaptation({ prior: [twoPaths], changes: [
+    { path: 'src/index.ts', action: 'MODIFY', baselineSha256: CURRENT, content: '一\n' },
+    { path: 'README.md', action: 'MODIFY', baselineSha256: CURRENT, content: '二\n' }] });
+  assert.equal(decision.kind === 'STOP' ? decision.reason : '', 'TOOL_ADAPTATION_AMBIGUOUS');
+});
+
+test('a vanished conflict target and an unrelated path are both refused or passed through', () => {
+  const vanished = conflicted({ result_ref: { reason: 'SOME_CHANGES_FAILED_OR_CONFLICTED',
+    changes: [{ path: 'src/index.ts', action: 'DELETE', status: 'CONFLICT',
+      baselineSha256: STALE, actualBaselineSha256: null }] } });
+  assert.equal(decideToolAdaptation({ prior: [vanished], changes: reread.changes }).kind, 'STOP');
+  // 与冲突无关的路径仍是普通请求：没有冲突就没有适配问题。
+  assert.equal(decideToolAdaptation({ prior: [conflicted()], changes: [
+    { path: 'docs/new.md', action: 'CREATE', content: '# 新\n' }] }).kind, 'PLAIN');
+  assert.equal(decideToolAdaptation({ prior: [], changes: reread.changes }).kind, 'PLAIN');
 });
 
 test('the deterministic Fake model walks its scripted rounds and then answers', async () => {

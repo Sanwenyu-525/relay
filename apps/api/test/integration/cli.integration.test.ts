@@ -139,9 +139,10 @@ test('migrate entry reports the applied migrations without repeating them', asyn
       '0051_conversation_execution_requests',
       '0052_n03_project_knowledge_guide',
       '0053_n03_knowledge_curation_candidates',
-      '0054_m04_agent_tool_loop',
+      '0054_m04_agent_tool_loop', '0055_m05_message_queue', '0056_m04_run_scope_grants',
+      '0057_m04_run_tool_call_events', '0058_m06_user_action_origin',
     ]);
-  assert.equal(payload.ledger_rows, 53);
+  assert.equal(payload.ledger_rows, 58);
 });
 
 test('migrate entry fails explicitly without a migration connection', async () => {

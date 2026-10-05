@@ -65,7 +65,7 @@ import { RunToolCallRepository } from '../run/run-tool-call-repository.js';
 import { buildToolTurns, operationIdsOf, persistToolRound, resolveToolLoopPlan }
   from './tool-loop.js';
 import type { RunToolCallRow } from '../infrastructure/database-schema.js';
-import type { ModelToolTurn } from '../workflow/fake-model-port.js';
+import type { FakeToolScript, ModelToolTurn } from '../workflow/fake-model-port.js';
 
 /**
  * 内部应用端口 AdvanceStep（docs/api/http-command-contract.md 第 5 节）。
@@ -119,8 +119,7 @@ export interface AdvanceRunStepInput {
   /** 仅测试注入：使独立 Worker 的 Mock 模型保持在途。 */
   readonly fakeModelDelayMs?: number | undefined;
   /** 仅测试注入：FakeModelPort 逐轮发出的工具请求脚本；生产路径不包含它。 */
-  readonly fakeToolScript?: readonly { readonly name: string;
-    readonly arguments: JsonObject }[][] | undefined;
+  readonly fakeToolScript?: FakeToolScript | undefined;
   /** 仅测试注入：Context token 上限。 */
   readonly contextBudgetTokens?: number | undefined;
   readonly signal?: AbortSignal | undefined;
@@ -182,6 +181,17 @@ export type AdvanceRunStepResult =
       readonly status: 'RUN_FAILED';
       readonly step_kind: RunStepKind;
       readonly reason: string;
+      readonly task_status: TaskStatus;
+    }
+  /**
+   * 预算耗尽：AI 需要用户决定是否给新预算、接手或停止（契约 02 第 3 节）。
+   * 这不是执行失败——步骤失败原因与 Run 等待原因分别记录，执行权仍归 AI。
+   */
+  | {
+      readonly status: 'BUDGET_EXHAUSTED';
+      readonly step_kind: RunStepKind;
+      readonly reason: string;
+      readonly run_status: RunStatus;
       readonly task_status: TaskStatus;
     };
 
@@ -341,6 +351,13 @@ export async function advanceRunStep(
     if (pendingToolCall !== undefined) {
       return { status: 'TOOL_LOOP_ACTION_REQUIRED', run_id: run.id,
         tool_call_id: pendingToolCall.id };
+    }
+    // Compatibility: older builds could mark an UNKNOWN tool row SETTLED. Check
+    // authoritative operations before attempting to reclaim or generate a new draft.
+    for (const operation of await repositories.gateway.listUnresolvedRunOperations(run.id)) {
+      if (await repositories.toolCalls.readByOperation(run.id, operation.id) !== undefined) {
+        return { status: 'ACTION_UNKNOWN', run_id: run.id, operation_id: operation.id };
+      }
     }
     if (built?.status === 'SUCCEEDED') {
       const hash = readString(built.result_ref, 'manifest_hash');
@@ -546,6 +563,12 @@ export async function advanceRunStep(
     }
     if (input.signal?.aborted) throw new StaleInvocationError('worker stopped before step result');
     let runRow = run;
+    if (prepared.toolLoopStop !== undefined) {
+      // 停止点不进入 executeStep：模型端口回放的仍是工具请求，让它跑一遍只会得到
+      // UNEXPECTED_MODEL_RESULT，把真实原因掩盖成「模型返回了意外结果」。
+      return await parkRunForToolLoopStop(repositories, {
+        run, runRow, task, step, runningStep, attempt, stop: prepared.toolLoopStop });
+    }
     const execution = prepared.preflightFailure ?? await executeStep(repositories, {
       stepKind: step.step_kind, run, task, step, attemptNumber: attempt.attempt_number,
       stepAttemptId: attempt.id, modelCallDb: db,
@@ -693,6 +716,44 @@ interface PreparedPersist {
   readonly published: PublishedContent;
 }
 
+/**
+ * 工具循环停在等待点的实测事实。
+ *
+ * 只记录真实结算出来的数字与真实的拒绝原因：模型「还想继续」这件事本身不是事实，
+ * 因此不作为停止理由写进来——判据是这一轮没有任何请求可以派发，且全部拒绝都表示
+ * 「再试一次也不会不同」。
+ */
+interface ToolLoopStop {
+  readonly reason: 'TOOL_LOOP_BUDGET_EXHAUSTED' | 'TOOL_ADAPTATION_REQUIRES_HUMAN';
+  readonly wait_reason: 'REPEATED_FAILURE' | 'HUMAN_TOOL';
+  readonly rounds_used: number;
+  readonly max_rounds: number;
+  readonly calls_used: number;
+  readonly max_tool_calls: number;
+  readonly rejected: number;
+  readonly rejections: readonly string[];
+}
+
+/**
+ * 「再试一次也不会不同」的拒绝原因。
+ *
+ * 预算类原因意味着模型已经没有任何可执行空间；冲突适配类原因按产品规则必须停下来让
+ * 用户看差异。参数非法、未知工具、越界路径这些是**可修正**的：模型需要再取一轮反馈
+ * 才能改对，把它们当成终止条件会让一次笔误直接烧掉整个 Run。
+ */
+const TERMINAL_TOOL_REJECTIONS: ReadonlySet<string> = new Set([
+  'TOOL_LOOP_ROUNDS_EXHAUSTED', 'TOOL_LOOP_BUDGET_EXHAUSTED',
+  'TOOL_ADAPTATION_REQUIRES_HUMAN', 'TOOL_ADAPTATION_AMBIGUOUS',
+  'TOOL_ADAPTATION_TARGET_MISSING',
+]);
+
+function toolLoopStopFor(reason: string,
+  detail: Omit<ToolLoopStop, 'reason' | 'wait_reason'>): ToolLoopStop {
+  return reason === 'TOOL_ADAPTATION_REQUIRES_HUMAN'
+    ? { ...detail, reason: 'TOOL_ADAPTATION_REQUIRES_HUMAN', wait_reason: 'HUMAN_TOOL' }
+    : { ...detail, reason: 'TOOL_LOOP_BUDGET_EXHAUSTED', wait_reason: 'REPEATED_FAILURE' };
+}
+
 type PreparedExternalWork =
   | { readonly kind: 'UNKNOWN'; readonly operationId: string }
   /** 模型请求了工具：本步骤 Attempt 保持 RUNNING，交出 Worker，由图节点派发后回到这里续跑。 */
@@ -701,7 +762,8 @@ type PreparedExternalWork =
       readonly modelPort: ModelPort; readonly persist?: PreparedPersist;
       readonly context?: BuiltContext;
       readonly semanticChecks?: ReadonlyMap<string, PreparedSemanticCheck>;
-      readonly preflightFailure?: Extract<StepExecution, { readonly outcome: 'FAILED' }> };
+      readonly preflightFailure?: Extract<StepExecution, { readonly outcome: 'FAILED' }>;
+      readonly toolLoopStop?: ToolLoopStop };
 
 /** 事务外只读受管内容；提交事务只能消费已核对的字节，不再执行文件 I/O。 */
 class PreloadedContentStore extends ManagedContentStore {
@@ -736,6 +798,7 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
   let semanticChecks: ReadonlyMap<string, PreparedSemanticCheck> | undefined;
   let preflightFailure: Extract<StepExecution, { readonly outcome: 'FAILED' }> | undefined;
   let toolDispatch: { readonly toolCallId: string } | undefined;
+  let toolLoopStop: ToolLoopStop | undefined;
   const reads = new Map<string, { hashHex: string; size: bigint; result: ContentReadResult }>();
 
   if (claim.step.step_kind === 'BUILD_CONTEXT') {
@@ -761,95 +824,136 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
       const readEvidence = await loadRunReadEvidence(repositories, claim.run.id);
       const toolRepository = new RunToolCallRepository(db);
       const toolPlan = await resolveToolLoopPlan(db, claim.run.id, claim.run.workspace_id);
-      const toolRows = toolPlan === undefined ? [] : await toolRepository.listByAttempt(claim.attempt.id);
-      // 每一次模型调用仍是一行 model_calls。工具轮次的历史从已落库的行重建，
-      // 因此恢复与正常推进走同一条路径，不依赖进程内存里的对话。
-      const round = toolRows.length === 0 ? 0
-        : Math.max(...toolRows.map((row) => row.round)) + 1;
+      let toolRows = toolPlan === undefined ? [] : await toolRepository.listByAttempt(claim.attempt.id);
       const inputHash = draftInputHash(manifest.payload, CANDIDATE_OUTPUT_SCHEMA);
       let previewEnabled = true;
       try {
-        const recorded = await recordModelInvocation(db, {
-          origin: { workspaceId: claim.run.workspace_id, kind: 'DRAFT',
-            stepAttemptId: claim.attempt.id, manifestId: manifest.id,
-            inputHash,
-            ...(readEvidence === undefined ? {} : {
-              readOperationId: readEvidence.operationId,
-              readInvocationId: readEvidence.invocationId,
-            }) },
-          identity: currentPort.identity,
-          ...(input.signal === undefined ? {} : { signal: input.signal }),
-          invoke: async (callId) => {
-            const previewOwner = {
-              workspaceId: claim.run.workspace_id, runId: claim.run.id,
-              stepId: claim.step.id, attemptId: claim.attempt.id,
-              attemptClaimEpoch: claim.attempt.claim_epoch,
-              runWorkerEpoch: claim.workerEpoch, workerId: input.workerId,
-              ...(input.invocationEpoch === undefined ? {} :
-                { invocationEpoch: input.invocationEpoch }),
-              modelCallId: callId, manifestId: manifest.id, inputHash,
-            };
-            let textObserved = false;
-            const preview = new AssistLivePreviewPublisher((text, truncated) =>
-              publishRunDraftPreview(db, { ...previewOwner, text, truncated }),
-              () => { previewEnabled = false; });
-            const toolTurns = toolPlan === undefined ? [] : await loadSettledToolTurns(db, toolRows);
-            const generated = await currentPort.generate({ manifest: manifest.payload,
-            outputSchema: CANDIDATE_OUTPUT_SCHEMA,
-              ...(toolPlan === undefined ? {} : { tools: toolPlan.specs, toolTurns }),
-              ...(input.signal === undefined ? {} : { signal: input.signal }),
-              onTextDelta: async (piece) => {
-                const observedAt = new Date();
-                if (piece === '' || !previewEnabled || input.signal?.aborted) return;
-                try {
-                  if (!textObserved) {
-                    textObserved = await recordRunDraftFirstTextDelta(db,
-                      { ...previewOwner, observedAt });
-                    if (!textObserved) { previewEnabled = false; return; }
+        // 每一轮「无可派发请求」都在同一次 prepare 内再问一次模型：可修正的拒绝要把
+        // 类型化原因回传，收尾轮则给模型用已有结果作答的机会。硬上界取信封的轮次预算
+        // 再加一次收尾——超过它 persistToolRound 只会产生终止类拒绝。
+        // 每一次模型调用仍是一行 model_calls；工具轮次的历史从已落库的行重建，
+        // 因此恢复与正常推进走同一条路径，不依赖进程内存里的对话。
+        const maxTurns = (toolPlan?.intent.max_rounds ?? 0) + 2;
+        // 终止原因取本次 prepare 里**第一个**终止类拒绝，而不是最后一次：模型的意图会变，
+        // 但「它为什么开始收尾」是那一次真实拒绝决定的。
+        let firstTerminal: string | undefined;
+        let terminalRejections: string[] = [];
+        let lastRound = 0;
+        let lastUsedCalls = 0;
+        let lastAccepted = 0;
+        for (let turn = 0; turn < maxTurns; turn += 1) {
+          const round = toolRows.length === 0 ? 0
+            : Math.max(...toolRows.map((row) => row.round)) + 1;
+          const recorded = await recordModelInvocation(db, {
+            origin: { workspaceId: claim.run.workspace_id, kind: 'DRAFT',
+              stepAttemptId: claim.attempt.id, manifestId: manifest.id,
+              inputHash,
+              ...(readEvidence === undefined ? {} : {
+                readOperationId: readEvidence.operationId,
+                readInvocationId: readEvidence.invocationId,
+              }) },
+            identity: currentPort.identity,
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
+            invoke: async (callId) => {
+              const previewOwner = {
+                workspaceId: claim.run.workspace_id, runId: claim.run.id,
+                stepId: claim.step.id, attemptId: claim.attempt.id,
+                attemptClaimEpoch: claim.attempt.claim_epoch,
+                runWorkerEpoch: claim.workerEpoch, workerId: input.workerId,
+                ...(input.invocationEpoch === undefined ? {} :
+                  { invocationEpoch: input.invocationEpoch }),
+                modelCallId: callId, manifestId: manifest.id, inputHash,
+              };
+              let textObserved = false;
+              const preview = new AssistLivePreviewPublisher((text, truncated) =>
+                publishRunDraftPreview(db, { ...previewOwner, text, truncated }),
+                () => { previewEnabled = false; });
+              const toolTurns = toolPlan === undefined ? [] : await loadSettledToolTurns(db, toolRows);
+              const generated = await currentPort.generate({ manifest: manifest.payload,
+              outputSchema: CANDIDATE_OUTPUT_SCHEMA,
+                ...(toolPlan === undefined ? {} : { tools: toolPlan.specs, toolTurns }),
+                ...(input.signal === undefined ? {} : { signal: input.signal }),
+                onTextDelta: async (piece) => {
+                  const observedAt = new Date();
+                  if (piece === '' || !previewEnabled || input.signal?.aborted) return;
+                  try {
+                    if (!textObserved) {
+                      textObserved = await recordRunDraftFirstTextDelta(db,
+                        { ...previewOwner, observedAt });
+                      if (!textObserved) { previewEnabled = false; return; }
+                    }
+                    await preview.push(piece);
                   }
-                  await preview.push(piece);
-                }
+                  catch (error) {
+                    if (!(error instanceof AssistPreviewOwnershipLostError)) {
+                      throw new RunDraftPreviewWriteError();
+                    }
+                  }
+                } });
+              if (generated.kind !== 'CANCELLED' && previewEnabled) {
+                try { await preview.flush(); }
                 catch (error) {
                   if (!(error instanceof AssistPreviewOwnershipLostError)) {
                     throw new RunDraftPreviewWriteError();
                   }
                 }
-              } });
-            if (generated.kind !== 'CANCELLED' && previewEnabled) {
-              try { await preview.flush(); }
-              catch (error) {
-                if (!(error instanceof AssistPreviewOwnershipLostError)) {
-                  throw new RunDraftPreviewWriteError();
-                }
               }
+              return generated;
+            },
+            settle: (result) => {
+              if (result.kind === 'CANCELLED') {
+                return { status: 'CANCELLED', providerRequestId: result.providerRequestId ?? null,
+                  ...(result.usage === undefined ? {} : { usage: result.usage }) };
+              }
+              // Provider request id 与已知用量对所有非取消结果都保留；缺失的保持 null 而不是补零。
+              if (result.kind === 'CONTENT' || result.kind === 'TOOL_CALLS') {
+                return { status: 'COMPLETED', providerRequestId: result.providerRequestId,
+                  usage: result.usage };
+              }
+              return { status: 'COMPLETED' };
+            },
+          });
+          modelPort = { identity: currentPort.identity, generate: async () => recorded.result };
+          if (toolPlan !== undefined && recorded.result.kind === 'TOOL_CALLS') {
+            // 工具请求先落库再交给图节点派发：行 id 就是后续动作身份，重放不会产生第二次动作。
+            const usedCalls = await toolRepository.countByRun(claim.run.id);
+            const persisted = await persistToolRound(db, {
+              workspaceId: claim.run.workspace_id, projectId: toolPlan.projectId,
+              runId: claim.run.id, stepId: claim.step.id, stepAttemptId: claim.attempt.id,
+              modelCallId: recorded.callId, round, calls: recorded.result.calls, plan: toolPlan,
+              usedCalls,
+              cancelled: input.signal?.aborted === true });
+            const dispatchable = persisted.rows.find((row) => row.status === 'REQUESTED');
+            if (dispatchable !== undefined) {
+              toolDispatch = { toolCallId: dispatchable.id };
+              break;
             }
-            return generated;
-          },
-          settle: (result) => {
-            if (result.kind === 'CANCELLED') {
-              return { status: 'CANCELLED', providerRequestId: result.providerRequestId ?? null,
-                ...(result.usage === undefined ? {} : { usage: result.usage }) };
+            if (persisted.rejected === 0) break;
+            // 本轮没有任何请求可以派发，且全部带类型化原因：刷新后才知道拒绝的是什么。
+            toolRows = await toolRepository.listByAttempt(claim.attempt.id);
+            const rejections = toolRows.filter((row) => row.round === round).map((row) =>
+              typeof row.result_ref?.reason === 'string' ? row.result_ref.reason
+                : 'TOOL_REQUEST_REJECTED');
+            lastRound = round;
+            lastUsedCalls = usedCalls;
+            lastAccepted = persisted.rows.length - persisted.rejected;
+            if (!rejections.every((reason) => TERMINAL_TOOL_REJECTIONS.has(reason))) {
+              // 可修正的拒绝：把类型化原因回传，让模型自己改对，而不是替它判定失败。
+              continue;
             }
-            // Provider request id 与已知用量对所有非取消结果都保留；缺失的保持 null 而不是补零。
-            if (result.kind === 'CONTENT' || result.kind === 'TOOL_CALLS') {
-              return { status: 'COMPLETED', providerRequestId: result.providerRequestId,
-                usage: result.usage };
-            }
-            return { status: 'COMPLETED' };
-          },
-        });
-        modelPort = { identity: currentPort.identity, generate: async () => recorded.result };
-        if (toolPlan !== undefined && recorded.result.kind === 'TOOL_CALLS') {
-          // 工具请求先落库再交给图节点派发：行 id 就是后续动作身份，重放不会产生第二次动作。
-          const persisted = await persistToolRound(db, {
-            workspaceId: claim.run.workspace_id, projectId: toolPlan.projectId,
-            runId: claim.run.id, stepId: claim.step.id, stepAttemptId: claim.attempt.id,
-            modelCallId: recorded.callId, round, calls: recorded.result.calls, plan: toolPlan,
-            remainingCalls: toolPlan.intent.max_tool_calls -
-              await toolRepository.countByRun(claim.run.id),
-            cancelled: input.signal?.aborted === true });
-          const dispatchable = persisted.rows.find((row) => row.status === 'REQUESTED');
-          if (dispatchable !== undefined) toolDispatch = { toolCallId: dispatchable.id };
+            firstTerminal ??= rejections[0];
+            terminalRejections = [...terminalRejections, ...rejections];
+            if (turn === 0) continue;
+            toolLoopStop = toolLoopStopFor(firstTerminal ?? 'TOOL_LOOP_BUDGET_EXHAUSTED', {
+              rounds_used: lastRound + 1,
+              max_rounds: toolPlan.intent.max_rounds,
+              calls_used: lastUsedCalls + lastAccepted,
+              max_tool_calls: toolPlan.intent.max_tool_calls,
+              rejected: terminalRejections.length, rejections: terminalRejections });
+            break;
+          } else {
+            break;
+          }
         }
       } catch (error) {
         if (error instanceof ModelSourcePolicyError) {
@@ -930,7 +1034,8 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
     ...(persist === undefined ? {} : { persist }),
     ...(context === undefined ? {} : { context }),
     ...(semanticChecks === undefined ? {} : { semanticChecks }),
-    ...(preflightFailure === undefined ? {} : { preflightFailure }) };
+    ...(preflightFailure === undefined ? {} : { preflightFailure }),
+    ...(toolLoopStop === undefined ? {} : { toolLoopStop }) };
 }
 
 /**
@@ -1606,6 +1711,94 @@ async function scheduleCorrection(
     run_status: runRow.status,
     session_id: sessionId,
     correction_round: toDecimalString(round),
+  };
+}
+
+/**
+ * 工具循环停在等待点：预算耗尽或冲突需要人工，把决定权交回用户（契约 02 第 3 节）。
+ *
+ * 三件事必须同时成立，缺一件就退化成「AI 悄悄重试到死」或「记成执行失败」：
+ * 步骤 Attempt 以类型化原因失败（真实原因可追溯）；Run 进入等待并带对应等待原因；
+ * Task 转 WAITING 但执行权仍归 AI，用户可选择新预算、接手或停止。
+ *
+ * 这里刻意不创建 Review：工具循环预算冻结在 Run 契约信封里，「给同一个 Run 加预算」与冻结
+ * 信封冲突；RETRY_BUDGET 决定分支又强绑验证 session 与产物版本，复用会造出假关联。
+ * 「新预算」只能由新委托（新 Run 带更大信封）实现，因此不需要一个没有真实决定的等待项。
+ */
+async function parkRunForToolLoopStop(
+  repositories: Repositories,
+  input: {
+    readonly run: RunRow;
+    readonly runRow: RunRow;
+    readonly task: { readonly id: string; readonly revision: bigint; readonly project_id: string | null };
+    readonly step: RunStepRow;
+    readonly runningStep: RunStepRow;
+    readonly attempt: StepAttemptRow;
+    readonly stop: ToolLoopStop;
+  },
+): Promise<AdvanceRunStepResult> {
+  const evidence: JsonObject = { reason: input.stop.reason,
+    rounds_used: String(input.stop.rounds_used), max_rounds: input.stop.max_rounds,
+    calls_used: input.stop.calls_used, max_tool_calls: input.stop.max_tool_calls,
+    rejected: input.stop.rejected, rejections: [...input.stop.rejections] };
+  const recorded = await repositories.runs.recordAttemptOutcome({
+    attemptId: input.attempt.id,
+    expectedClaimEpoch: input.attempt.claim_epoch,
+    status: 'FAILED',
+    resultRef: evidence,
+    evidence: { reason: input.stop.reason },
+  });
+  if (recorded === undefined) return { status: 'STALE_RESULT', step_kind: input.step.step_kind };
+  const failedStep = await repositories.runs.advanceStep({
+    stepId: input.step.id,
+    expectedRevision: input.runningStep.revision,
+    status: 'FAILED',
+    resultRef: evidence,
+  });
+  if (failedStep === undefined) {
+    throw new Error('run step failure CAS failed while holding the run lock');
+  }
+  const parked = await advanceOrThrow(repositories, {
+    runId: input.run.id,
+    expectedRevision: input.runRow.revision,
+    status: 'WAITING_APPROVAL',
+    currentStepId: input.step.id,
+    waitReason: input.stop.wait_reason,
+    resumePhase: 'RUNNING',
+  });
+  let taskStatus: TaskStatus = 'WAITING';
+  // 等待不转移执行权：Task 变 WAITING，但 executor_run_id 与 ownership_epoch 不动。
+  // 已经是等待态时不重复改写，只按当前事实返回。
+  const currentTask = await repositories.tasks.readTask(input.task.id);
+  if (currentTask?.status === 'IN_PROGRESS') {
+    const waiting = await repositories.tasks.applyTaskStatus({ taskId: currentTask.id,
+      expectedRevision: currentTask.revision, fromStatus: 'IN_PROGRESS', toStatus: 'WAITING' });
+    if (waiting === undefined) throw new Error('tool loop wait Task CAS failed');
+  } else if (currentTask !== undefined) {
+    taskStatus = currentTask.status;
+  }
+  await repositories.activities.insertActivityRecord({
+    id: randomUUID(),
+    workspaceId: input.run.workspace_id,
+    runId: input.run.id,
+    actorKind: 'SYSTEM',
+    actorRef: `run:${input.run.id}`,
+    commandId: null,
+    projectId: input.task.project_id,
+    taskId: input.task.id,
+    eventType: 'RUN_WAITING_TOOL_LOOP',
+    factRefs: { run_id: input.run.id, step_kind: input.step.step_kind,
+      reason: input.stop.reason, wait_reason: input.stop.wait_reason,
+      attempt_number: toDecimalString(input.attempt.attempt_number),
+      rounds_used: String(input.stop.rounds_used), max_rounds: input.stop.max_rounds,
+      calls_used: input.stop.calls_used, max_tool_calls: input.stop.max_tool_calls },
+  });
+  return {
+    status: 'BUDGET_EXHAUSTED',
+    step_kind: input.step.step_kind,
+    reason: input.stop.reason,
+    run_status: parked.status,
+    task_status: taskStatus,
   };
 }
 

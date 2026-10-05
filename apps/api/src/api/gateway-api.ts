@@ -34,6 +34,7 @@ const operationParams = Type.Object({ workspace_id: uuid, operation_id: uuid }, 
 const capability = Type.Union([
   Type.Literal('FAKE_WRITE'),
   Type.Literal('FAKE_PUBLIC_READ'),
+  Type.Literal('FILE_QUERY'),
   Type.Literal('FILE_READ'),
   Type.Literal('WEB_FETCH'),
   Type.Literal('FILE_WRITE'),
@@ -50,13 +51,19 @@ const createConnectionBody = Type.Object({ command_id: uuid,
   allowed_host: Type.Optional(Type.String({ minLength: 1, maxLength: 253 })),
   allow_private: Type.Optional(Type.Boolean()) }, strict);
 const disableBody = Type.Object({ command_id: uuid, expected_version: revision }, strict);
+/** Optional explicit action_type for a capability. Absent keeps the existing per-capability
+ * default (GIT_READ -> GIT_STATUS etc.), so existing callers and existing policies are unchanged.
+ * Required to permit a second action of the same capability, e.g. GIT_DIFF. */
+const policyActionType = Type.Optional(Type.String({ minLength: 1, maxLength: 64 }));
 const createPolicyBody = Type.Object({ command_id: uuid, capability,
   resource_id: Type.Union([uuid, Type.Null()]), decision,
   max_payload_bytes: Type.Integer({ minimum: 0, maximum: 262144 }),
+  action_type: policyActionType,
   host: Type.Optional(Type.String({ minLength: 1, maxLength: 253 })) }, strict);
 const versionPolicyBody = Type.Object({ command_id: uuid, expected_revision: revision, capability,
   resource_id: Type.Union([uuid, Type.Null()]), decision,
   max_payload_bytes: Type.Integer({ minimum: 0, maximum: 262144 }),
+  action_type: policyActionType,
   host: Type.Optional(Type.String({ minLength: 1, maxLength: 253 })) }, strict);
 const revokeBody = Type.Object({ command_id: uuid, expected_revision: revision }, strict);
 const createResourceBody = Type.Object({ command_id: uuid, root_path: Type.String({ minLength: 1 }) }, strict);
@@ -118,6 +125,7 @@ export function registerGatewayRoutes(app: FastifyInstance, dependencies: RouteD
       const outcome = await createGatewayPolicyCommand(executor, { workspaceId: params.workspace_id ?? '',
         projectId: params.project_id ?? '', commandId: body.command_id, capability: body.capability,
         resourceId: body.resource_id, decision: body.decision, maxPayloadBytes: body.max_payload_bytes,
+        ...(body.action_type === undefined ? {} : { actionType: body.action_type }),
         ...(body.host === undefined ? {} : { host: body.host }) });
       return { outcome, result: outcome.result };
     } }));
@@ -140,6 +148,7 @@ export function registerGatewayRoutes(app: FastifyInstance, dependencies: RouteD
         projectId: params.project_id ?? '', policyId: params.policy_id ?? '', commandId: body.command_id,
         expectedRevision: body.expected_revision, capability: body.capability,
         resourceId: body.resource_id, decision: body.decision, maxPayloadBytes: body.max_payload_bytes,
+        ...(body.action_type === undefined ? {} : { actionType: body.action_type }),
         ...(body.host === undefined ? {} : { host: body.host }) });
       return { outcome, result: outcome.result };
     } }));

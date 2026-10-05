@@ -14,6 +14,9 @@ import type { ModelToolSpec } from './fake-model-port.js';
  */
 
 export type InternalToolName =
+  | 'apply_changeset'
+  | 'read_change_set'
+  | 'run_check'
   | 'list_directory'
   | 'find_paths'
   | 'search_text'
@@ -45,6 +48,31 @@ function definition(name: InternalToolName, actionType: GatewayActionType,
 }
 
 export const INTERNAL_TOOL_DEFINITIONS: readonly InternalToolDefinition[] = [
+  definition('apply_changeset', 'APPLY_CHANGESET', 'FILE_WRITE',
+    '在受管根内新建、修改或删除文件。修改与删除必须带实际读取到的基线摘要，' +
+    '落盘前会再次比对；基线变化时保留用户的新改动而不覆盖。删除始终需要单独确认。',
+    { changes: { type: 'array', description: '1 到 8 项文件变更。',
+      items: { type: 'object', additionalProperties: false,
+        properties: {
+          path: { type: 'string', description: '受管根内的相对文件路径。' },
+          action: { type: 'string', enum: ['CREATE', 'MODIFY', 'DELETE'],
+            description: 'CREATE 新建（目标必须不存在）、MODIFY 修改、DELETE 删除。' },
+          content: { type: 'string',
+            description: '新建或修改后的完整文件内容；DELETE 不给这一项。' },
+          baselineSha256: { type: 'string',
+            description: 'MODIFY/DELETE 必填：read_file 读到的那份内容对应的 64 位 SHA-256；' +
+              'CREATE 不给这一项。' },
+        },
+        required: ['path', 'action'] } } }, ['changes']),
+  definition('read_change_set', 'READ_CHANGE_SET', 'FILE_WRITE',
+    '读取某一次已冻结文件变更的基线、目标与实际结果摘要，以及受保护路径与越界拒绝原因。' +
+    '用于在不重新读盘的情况下核对「究竟改了什么」。',
+    { operation_id: { type: 'string', description: '此前 apply_changeset 返回的 operation_id。' } },
+    ['operation_id']),
+  definition('run_check', 'CLI_RUN', 'CLI_RUN',
+    '运行本次任务范围内已配置的一次检查（测试或构建）。只能按 check_id 点名已配置命令，' +
+    '不能提交任意命令字符串。输出有上限，超时或被取消会如实记录。',
+    { check_id: { type: 'string', description: '已配置检查的标识。' } }, ['check_id']),
   definition('list_directory', 'LIST_DIRECTORY', 'FILE_QUERY',
     '列出受管根内某个目录的一层条目。返回有界的相对路径、类型与大小，截断时显式标记。',
     { relative_path: RELATIVE_PATH_PROPERTY, limit: { type: 'integer', minimum: 1 } }, []),

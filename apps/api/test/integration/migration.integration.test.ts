@@ -111,6 +111,8 @@ const ALL_MIGRATIONS = [
   '0049_m04_model_call_cache_usage',
   '0050_n02_impact_candidate_groups', '0051_conversation_execution_requests',
   '0052_n03_project_knowledge_guide', '0053_n03_knowledge_curation_candidates',
+  '0054_m04_agent_tool_loop', '0055_m05_message_queue', '0056_m04_run_scope_grants',
+  '0057_m04_run_tool_call_events', '0058_m06_user_action_origin',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {
@@ -131,6 +133,16 @@ test('first-output migration leaves pre-existing settled calls NULL', async () =
     files.delete('0051_conversation_execution_requests.sql');
     files.delete('0052_n03_project_knowledge_guide.sql');
     files.delete('0053_n03_knowledge_curation_candidates.sql');
+    files.delete('0054_m04_agent_tool_loop.sql');
+    // 0056 依赖 0054 建出的 run_tool_calls，0055 属于后续消息队列批次：
+    // 这一轮只重放「缓存列之前」的历史事实，两者都不该出现。0057 登记 run_tool_calls
+    // 为事件来源，同样依赖 0054 建出的这张表，必须与 0054 一起缺席。
+    files.delete('0055_m05_message_queue.sql');
+    files.delete('0056_m04_run_scope_grants.sql');
+    files.delete('0057_m04_run_tool_call_events.sql');
+    // 0058 只放宽三条 CHECK，但它重述的既有分支来自 0054/0016；与 0054 一起缺席才能保持
+    // 「历史迁移目录」这一夹具的前提自洽。
+    files.delete('0058_m06_user_action_origin.sql');
   });
   const app = openDatabase(database.appUrl, 'relay-api-test-legacy-call');
   try {
@@ -159,7 +171,9 @@ test('first-output migration leaves pre-existing settled calls NULL', async () =
     assert.deepEqual(applied.applied, ['0047_m04_model_call_first_output',
       '0048_m07_admission_gate', '0049_m04_model_call_cache_usage',
       '0050_n02_impact_candidate_groups', '0051_conversation_execution_requests',
-      '0052_n03_project_knowledge_guide', '0053_n03_knowledge_curation_candidates']);
+      '0052_n03_project_knowledge_guide', '0053_n03_knowledge_curation_candidates',
+    '0054_m04_agent_tool_loop', '0055_m05_message_queue', '0056_m04_run_scope_grants',
+      '0057_m04_run_tool_call_events', '0058_m06_user_action_origin']);
     await calls.recordFirstTextDelta(callId, new Date());
     await calls.recordFirstPreviewPersisted(callId);
     const legacy = await calls.read(callId);
@@ -259,6 +273,63 @@ test('applies V001 on an empty database and does not repeat it on a second run',
     assert.equal(repeated.ledgerRows, ALL_MIGRATIONS.length);
   } finally {
     await database.drop();
+  }
+});
+
+test('0057 registers run tool calls as a Run event source without backfilling history', async () => {
+  await runMigrations({
+    connectionString: MIGRATION_DATABASE_URL,
+    directory: MIGRATIONS_DIRECTORY,
+  });
+
+  const migration = openDatabase(MIGRATION_DATABASE_URL, 'relay-api-test-tool-call-events');
+
+  try {
+    // 触发器确实建在 run_tool_calls 上，且只登记 INSERT 与 UPDATE 两件事。
+    const triggers = await sql<{ tgname: string; definition: string }>`
+      select tgname, pg_get_triggerdef(oid) as definition
+      from pg_trigger
+      where tgrelid = 'public.run_tool_calls'::regclass and not tgisinternal
+      order by tgname
+    `.execute(migration.db);
+    assert.deepEqual(triggers.rows.map((row) => row.tgname),
+      ['tr_run_events_tool_call_insert', 'tr_run_events_tool_call_update']);
+
+    // WHEN 只看状态推进的三列。revision 每次推进都会变，纳入它会让同一次推进多发一条提示。
+    // INSERT 触发器没有 WHEN（写入即新事实），因此只对 UPDATE 触发器断言。
+    const updateTrigger = triggers.rows.find((row) => row.tgname === 'tr_run_events_tool_call_update');
+    assert.ok(updateTrigger, 'the UPDATE trigger must exist');
+    assert.match(updateTrigger.definition, /relay_append_run_event\(\)/u);
+    // pg_get_triggerdef 会把标识符小写化，比较时忽略大小写。
+    assert.match(updateTrigger.definition, /status IS DISTINCT FROM new\.status/iu);
+    assert.match(updateTrigger.definition, /operation_id IS DISTINCT FROM new\.operation_id/iu);
+    assert.match(updateTrigger.definition, /result_ref IS DISTINCT FROM new\.result_ref/iu);
+    assert.doesNotMatch(updateTrigger.definition, /revision/iu);
+
+    // CHECK 只能放宽：六个原取值必须逐字保留，否则历史行下一次写入就会违反约束
+    // （0054 重述 ck_logical_operation_resource 时漏掉分支造成 9 例失败，同一类教训）。
+    const check = await sql<{ definition: string }>`
+      select pg_get_constraintdef(oid) as definition
+      from pg_constraint
+      where conname = 'ck_run_events_kind' and conrelid = 'public.run_events'::regclass
+    `.execute(migration.db);
+    const definition = check.rows[0]?.definition ?? '';
+    for (const kind of ['RUN_CHANGED', 'STEP_CHANGED', 'ATTEMPT_CHANGED', 'REVIEW_CHANGED',
+      'CONTROL_CHANGED', 'EFFECT_CHANGED', 'TOOL_CALL_CHANGED']) {
+      assert.ok(definition.includes(`'${kind}'`), `ck_run_events_kind must keep ${kind}`);
+    }
+
+    // 函数必须认识这张表：0012 的 CASE 遇到未登记来源直接 RAISE EXCEPTION，
+    // 漏掉分支会让工具调用行的每一次写入都失败。
+    const fn = await sql<{ definition: string }>`
+      select pg_get_functiondef('public.relay_append_run_event()'::regprocedure) as definition
+    `.execute(migration.db);
+    assert.match(fn.rows[0]?.definition ?? '', /run_tool_calls/u);
+    assert.match(fn.rows[0]?.definition ?? '', /TOOL_CALL_CHANGED/u);
+    // 锁序不能动：事件序号在 Run 行锁下取 max(seq)+1。
+    assert.match(fn.rows[0]?.definition ?? '', /FOR UPDATE/u);
+  } finally {
+    await migration.close();
   }
 });
 

@@ -320,7 +320,7 @@ function normalizeCriteria(
 }
 
 /** 受约束参数快照必须有界：不接受把大对象塞进命令体（物理设计第 1 节：限制由入口验证）。 */
-function checkJsonSpec(value: JsonObject, field: string): FieldError | undefined {
+export function checkJsonSpec(value: JsonObject, field: string): FieldError | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return { field, message: 'must be a JSON object' };
   }

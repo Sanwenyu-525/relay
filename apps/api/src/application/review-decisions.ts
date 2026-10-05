@@ -66,6 +66,8 @@ export async function resolveReview(db: DbExecutor, input: ResolveReviewInput): 
       let task: TaskRow | undefined;
       let stateTarget: LockedStateReviewTarget | undefined;
       let importTarget: { readonly job: ImportJobRow; readonly operation: LogicalOperationRow } | undefined;
+      /** 0058 USER_ACTION: 没有 ImportJob，确认对象就是动作本身。 */
+      let userActionTarget: LogicalOperationRow | undefined;
       if (located.run_id !== null) {
         task = located.task_id === null ? undefined : await repositories.tasks.lockTask(located.task_id);
         if (task === undefined || task.workspace_id !== input.workspaceId) throw resourceNotFound('Task');
@@ -75,13 +77,20 @@ export async function resolveReview(db: DbExecutor, input: ResolveReviewInput): 
         stateTarget = await lockStateReviewTarget(repositories, located);
       } else if (located.kind === 'ACTION_APPROVAL' && located.operation_id !== null) {
         const operation = await repositories.gateway.readOperation(located.operation_id);
-        if (operation?.origin !== 'USER_IMPORT' || operation.import_job_id === null ||
-            operation.workspace_id !== input.workspaceId) throw invalidTransition('Review 没有可处理的用户导入操作。');
-        const job = await repositories.gateway.lockImportJob(operation.import_job_id);
-        if (job?.workspace_id !== input.workspaceId || job.project_id !== operation.project_id) {
-          throw resourceNotFound('Import job');
+        if (operation?.workspace_id !== input.workspaceId) throw resourceNotFound('Gateway operation');
+        if (operation.origin === 'USER_IMPORT' && operation.import_job_id !== null) {
+          const job = await repositories.gateway.lockImportJob(operation.import_job_id);
+          if (job?.workspace_id !== input.workspaceId || job.project_id !== operation.project_id) {
+            throw resourceNotFound('Import job');
+          }
+          importTarget = { job, operation };
+        } else if (operation.origin === 'USER_ACTION') {
+          // 0058: 人工触发的只读动作。确认只落人工判断；真实读取由同一 command_id 的再次
+          // 投递驱动，不在决定事务里启动 git 子进程。
+          userActionTarget = operation;
+        } else {
+          throw invalidTransition('Review 没有可处理的用户导入或人工动作。');
         }
-        importTarget = { job, operation };
       }
 
       if (located.project_id !== null) {
@@ -103,6 +112,8 @@ export async function resolveReview(db: DbExecutor, input: ResolveReviewInput): 
         ? await resolveRunReview(repositories, { review, run, task, decision: input.decision, decisionId, retryBudget, feedback })
         : importTarget !== undefined
           ? await resolveImportActionReview(repositories, review, importTarget, input.decision)
+        : userActionTarget !== undefined
+          ? await resolveUserActionReview(repositories, review, userActionTarget, input.decision)
         : await resolveStateReview(repositories, review, input.decision, stateTarget);
 
       if (run !== undefined && task?.status === 'WAITING' &&
@@ -128,8 +139,12 @@ export async function resolveReview(db: DbExecutor, input: ResolveReviewInput): 
         const frozen = review.kind === 'ACTION_APPROVAL'
           ? await repositories.runs.readContract(run.id) : undefined;
         const actionApproved = review.kind === 'ACTION_APPROVAL' && input.decision === 'APPROVE' &&
-          frozen !== undefined && review.operation_id !== null &&
-          readFrozenActionOperationIds(frozen.frozen_snapshot).includes(review.operation_id);
+          review.operation_id !== null &&
+          ((frozen !== undefined &&
+            readFrozenActionOperationIds(frozen.frozen_snapshot).includes(review.operation_id)) ||
+           // 模型工具动作的身份不是 Delegate 冻结的，而是请求落库时产生的行 id。
+           // 不认这一支会让已批准的查询停在 WAITING_APPROVAL，再也醒不过来。
+           await repositories.toolCalls.countByOperation(run.id, review.operation_id) > 0);
         const runnable = run.status === 'WAITING_APPROVAL' &&
           !['WAITING_APPROVAL', 'PAUSED', 'COMPLETED', 'FAILED', 'CANCELLED'].includes(current.status);
         if (actionApproved || runnable) {
@@ -174,6 +189,34 @@ async function resolveImportActionReview(repositories: Repositories, review: Rev
     await repositories.gateway.setImportJobStatus(target.job.id, 'FAILED', 'HUMAN_DENIED');
   }
   return { action_authorized: decision === 'APPROVE', operation_id: op.id, external_effect_executed: false };
+}
+
+/**
+ * 0058: 人工触发的只读动作确认。
+ *
+ * 逐字段复核动作绑定与 `resolveImportActionReview` 同口径：批准不能被继承到参数或目标已变化的
+ * 新动作上。APPROVE 只保存人工判断——真实读取不在这个事务里发生，因此不存在「已批准即已执行」。
+ */
+async function resolveUserActionReview(repositories: Repositories, review: ReviewRequestRow,
+  operation: LogicalOperationRow, decision: ReviewDecision): Promise<JsonObject> {
+  const op = await repositories.gateway.lockOperation(operation.id);
+  if (op?.origin !== 'USER_ACTION' || op.status !== 'WAITING_APPROVAL' ||
+      op.resource_id === null || review.operation_id !== op.id ||
+      review.target.operation_id !== op.id || review.target.import_job_id !== op.import_job_id ||
+      review.target.normalized_target !== op.normalized_target ||
+      review.target.params_hash !== op.params_hash.toString('hex') ||
+      review.target.connection_id !== op.connection_id ||
+      review.target.connection_version !== op.connection_version.toString() ||
+      review.target.policy_id !== op.policy_id ||
+      review.target.policy_version !== op.policy_version.toString()) {
+    throw invalidTransition('人工动作 Review 的动作绑定已失效。');
+  }
+  if (decision !== 'APPROVE' && decision !== 'DENY') throw invalidTransition('操作批准只接受 APPROVE 或 DENY。');
+  if (decision === 'DENY') {
+    await repositories.gateway.setOperationStatus(op.id, 'DENIED', { reason: 'HUMAN_DENIED' });
+  }
+  return { action_authorized: decision === 'APPROVE', operation_id: op.id,
+    external_effect_executed: false };
 }
 
 async function resolveRunReview(repositories: Repositories, input: {

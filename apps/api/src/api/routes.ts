@@ -17,6 +17,7 @@ import { registerProjectContinuationRoutes } from './project-continuation-api.js
 import { registerProjectKnowledgeGuideRoutes } from './project-knowledge-guide-api.js';
 import { registerRunRoutes } from './run-api.js';
 import { registerGatewayRoutes } from './gateway-api.js';
+import { registerGitUserActionRoutes } from './git-user-action-api.js';
 import { registerInformationRoutes } from './information-api.js';
 import { registerReviewRoutes } from './review-api.js';
 import { LivenessSchema, ReadinessNotReadySchema, ReadinessReadySchema } from './schemas.js';
@@ -135,6 +136,7 @@ registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
       registerRunRoutes(scope, apiDependencies);
       registerContextRoutes(scope, apiDependencies);
       registerGatewayRoutes(scope, apiDependencies);
+      registerGitUserActionRoutes(scope, apiDependencies);
       registerInformationRoutes(scope, apiDependencies);
       registerReviewRoutes(scope, apiDependencies);
       registerAssistRoutes(scope, apiDependencies);

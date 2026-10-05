@@ -109,6 +109,7 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
     case 'StartHumanTask':
     case 'CancelTask':
     case 'SetTaskGoalAlignment':
+    case 'ReviseTaskAcceptance':
     case 'AddTaskDependency':
     case 'RemoveTaskDependency':
     case 'CompleteHumanTask':

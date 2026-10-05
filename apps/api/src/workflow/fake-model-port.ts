@@ -46,6 +46,11 @@ export type ModelResult =
   | {
       readonly kind: 'TOOL_CALLS';
       readonly calls: readonly ModelToolCall[];
+      /**
+       * 该轮伴随工具请求一起输出的正文，作为前置说明交给结算方处理。
+       * 它不是候选正文：候选只能来自没有工具请求的那一轮。空串表示模型没有说话。
+       */
+      readonly preamble: string;
       readonly providerRequestId: string;
       readonly usage: ModelUsage;
     }
@@ -69,7 +74,23 @@ export interface ModelToolCall {
   readonly arguments: JsonObject;
 }
 
-/** 已结算的一轮工具交互，用于把结果回传给模型并从持久化事实重建。 */
+/** FakeModelPort 逐轮发出的单个工具请求。仅测试注入，生产路径不包含它。 */
+export interface FakeToolScriptCall {
+  readonly name: string;
+  readonly arguments: JsonObject;
+}
+
+/**
+ * 一轮脚本：本次要发出的工具请求数组。
+ *
+ * Fake 脚本只覆盖「纯工具请求」的形态；边输出正文边调工具由真实端口单测覆盖。
+ */
+export type FakeToolScriptRound = readonly FakeToolScriptCall[];
+
+/** FakeModelPort 的冻结工具脚本；轮次序号由已结算的历史轮次决定。 */
+export type FakeToolScript = readonly FakeToolScriptRound[];
+
+/** 已结算的一轮工具交互，用于把结果回传给模型和从持久化事实重建。 */
 export interface ModelToolTurn {
   readonly calls: readonly ModelToolCall[];
   readonly results: readonly ModelToolTurnResult[];
@@ -202,7 +223,7 @@ export class FakeModelPort implements AssistModelPort {
     // 冻结的工具脚本按轮次确定性推进：请求里已有的历史轮次决定这次发第几轮，
     // 脚本耗尽后回到普通生成。这样测试可以断言「模型真的按工具结果走完了序列」，
     // 而不是拿到一份预制答案。
-    const scripted = scriptedToolRound(request);
+    const scripted = await scriptedToolRound(request);
     if (scripted !== undefined) return scripted;
 
     switch (scenario) {
@@ -400,7 +421,7 @@ interface ScriptedToolRound {
  * 每个元素是一轮里要发出的一个工具请求。返回本轮应发出的请求；脚本已耗尽返回 undefined。
  * 真实端口不解释这个字段，生产 Mock 路径不会包含它。
  */
-function scriptedToolRound(request: ModelRequest): ModelResult | undefined {
+async function scriptedToolRound(request: ModelRequest): Promise<ModelResult | undefined> {
   const script = readNestedValue(request.manifest, ['tool_script']);
   if (!Array.isArray(script)) return undefined;
   const consumed = request.toolTurns?.length ?? 0;
@@ -415,7 +436,9 @@ function scriptedToolRound(request: ModelRequest): ModelResult | undefined {
     calls.push({ providerToolCallId: `fake-tool-${consumed}-${ordinal}`,
       name: entry.name, arguments: entry.arguments as JsonObject });
   }
-  return { kind: 'TOOL_CALLS', calls, providerRequestId: `fake-tools-${consumed}`,
+  // Fake 脚本不模拟边说话边调工具；真实形态由 OpenAiCompatibleModelPort 的单测覆盖。
+  return { kind: 'TOOL_CALLS', calls, preamble: '',
+    providerRequestId: `fake-tools-${consumed}`,
     usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null, cacheCreationTokens: null } };
 }
 

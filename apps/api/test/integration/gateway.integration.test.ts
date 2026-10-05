@@ -25,7 +25,7 @@ import { advanceRunStep } from '../../src/application/run-steps.js';
 import { withTransaction } from '../../src/application/unit-of-work.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
-import { createDataRoot, expectCommandAccepted, expectProblem, startTestApi, workspacePath } from './api-harness.js';
+import { createDataRoot, createWorkspace, expectCommandAccepted, expectProblem, startTestApi, workspacePath } from './api-harness.js';
 import { APP_DATABASE_URL, MIGRATIONS_DIRECTORY, MIGRATION_DATABASE_URL, expectSqlState, openDatabase } from './integration-support.js';
 
 const app = openDatabase(APP_DATABASE_URL, 'relay-api-test-p09-gateway');
@@ -1012,6 +1012,68 @@ test('root-bound Capability connections bind one filesystem boundary over HTTP a
       capability: 'GIT_READ', resource_id: null, decision: 'ASK', max_payload_bytes: 0 }),
     422, 'VALIDATION_FAILED');
     await rm(root, { recursive: true, force: true });
+  } finally { await api.stop(); }
+});
+
+test('FILE_QUERY connection and all directory-query policy actions can be configured over HTTP', async () => {
+  const workspaceId = await createWorkspace(app.db);
+  const api = await startTestApi();
+  try {
+    const projectCommand = randomUUID();
+    const project = expectCommandAccepted(await api.post(workspacePath(workspaceId, '/projects'),
+      { command_id: projectCommand, title: 'HTTP directory query', project_type: 'DEVELOPMENT' }),
+    201, projectCommand);
+    const prefix = workspacePath(workspaceId, `/projects/${project.project_id}`);
+    const root = join(dataRoot, `query-http-${randomUUID()}`);
+    await mkdir(root);
+    const resourceCommand = randomUUID();
+    const resource = expectCommandAccepted(await api.post(`${prefix}/managed-resources`,
+      { command_id: resourceCommand, root_path: root }), 201, resourceCommand);
+    const connectionCommand = randomUUID();
+    const connection = expectCommandAccepted(await api.post(`${prefix}/connections`,
+      { command_id: connectionCommand, capabilities: ['FILE_QUERY'], root_path: root }),
+    201, connectionCommand);
+    const connections = await api.get(`${prefix}/connections`);
+    assert.equal(connections.status, 200);
+    assert.deepEqual((connections.body as { id: string; capabilities: string[] }[])
+      .find((row) => row.id === connection.connection_id)?.capabilities, ['FILE_QUERY']);
+
+    let lastPolicy: { policyId: string; revision: string } | undefined;
+    for (const actionType of ['LIST_DIRECTORY', 'FIND_PATHS', 'SEARCH_TEXT']) {
+      const createCommand = randomUUID();
+      const body = { capability: 'FILE_QUERY', action_type: actionType,
+        resource_id: resource.resource_id, decision: 'AUTO', max_payload_bytes: 262144 };
+      const policy = expectCommandAccepted(await api.post(`${prefix}/permission-policies`,
+        { command_id: createCommand, ...body }), 201, createCommand);
+      const versionCommand = randomUUID();
+      const version = expectCommandAccepted(await api.post(`${prefix}/permission-policies/${policy.policy_id}/versions`,
+        { command_id: versionCommand, expected_revision: policy.revision, ...body, decision: 'ASK' }),
+      200, versionCommand);
+      const versions = await api.get(`${prefix}/permission-policies/${policy.policy_id}/versions`);
+      assert.equal(versions.status, 200);
+      const rows = versions.body as { version: string; capability: string; action_type: string;
+        target_prefix: string; decision: string }[];
+      assert.deepEqual(rows.map((row) => [row.version, row.capability, row.action_type, row.decision])
+        .sort((left, right) => Number(left[0]) - Number(right[0])),
+      [['1', 'FILE_QUERY', actionType, 'AUTO'], ['2', 'FILE_QUERY', actionType, 'ASK']]);
+      for (const row of rows) assert.equal(await realpath(row.target_prefix), await realpath(root));
+      lastPolicy = { policyId: policy.policy_id as string, revision: version.revision as string };
+    }
+    assert.ok(lastPolicy !== undefined);
+    const policyPath = `${prefix}/permission-policies`;
+    const versionPath = `${policyPath}/${lastPolicy.policyId}/versions`;
+    const beforePolicies = await api.get(policyPath);
+    const beforeVersions = await api.get(versionPath);
+    assert.equal((beforePolicies.body as unknown[]).length, 3);
+    // READ_FILE is a real action, but it cannot be granted under FILE_QUERY.
+    const invalid = { capability: 'FILE_QUERY', action_type: 'READ_FILE',
+      resource_id: resource.resource_id, decision: 'AUTO', max_payload_bytes: 262144 };
+    expectProblem(await api.post(policyPath, { command_id: randomUUID(), ...invalid }),
+      422, 'VALIDATION_FAILED');
+    expectProblem(await api.post(versionPath, { command_id: randomUUID(),
+      expected_revision: lastPolicy.revision, ...invalid }), 422, 'VALIDATION_FAILED');
+    assert.deepEqual((await api.get(policyPath)).body, beforePolicies.body);
+    assert.deepEqual((await api.get(versionPath)).body, beforeVersions.body);
   } finally { await api.stop(); }
 });
 

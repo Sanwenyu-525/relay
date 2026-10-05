@@ -142,7 +142,7 @@ export class AssistRepository {
         join assist_sessions s on s.id = m.session_id
         left join projects p on p.id = s.project_id
         where m.status = 'PENDING' and (s.project_id is null or p.archived_at is null)
-        order by m.created_at, m.id limit 1 for update of m skip locked)
+        order by m.session_id, m.created_at, m.id limit 1 for update of m skip locked)
       returning *`.execute(this.db)).rows[0];
   }
 

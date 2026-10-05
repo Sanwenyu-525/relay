@@ -19,6 +19,7 @@ import {
   setTaskGoalAlignment,
   startHumanTask,
 } from '../application/task-commands.js';
+import { reviseTaskAcceptance } from '../application/task-contract-commands.js';
 import { listTasks, readTaskById } from '../application/task-queries.js';
 import { readTaskCheckPlanPreview } from '../application/check-plan-preview.js';
 import { decodeTaskListCursor, decodeWorkspaceTaskListCursor,
@@ -29,7 +30,9 @@ import {
   CancelTaskPendingResultSchema,
   CreateTaskBodySchema,
   CreateTaskResultSchema,
+  DecimalSchema,
   EditTaskPresentationBodySchema,
+  OpenObjectSchema,
   TaskCommandResultSchema,
   TaskDependencyBodySchema,
   TaskGoalAlignmentBodySchema,
@@ -39,6 +42,7 @@ import {
   TaskRevisionBodySchema,
   TaskSchema,
   TasksListQuerySchema,
+  UuidSchema,
   WorkspaceParamsSchema,
   WorkspaceTaskParamsSchema,
   commandEnvelopeSchema,
@@ -47,6 +51,68 @@ import { createCommandHandler, sendReadError, type RouteDependencies } from './e
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
+
+const strict = { additionalProperties: false } as const;
+
+/**
+ * ReviseTaskAcceptance 的 wire schema。
+ *
+ * 暂时定义在本文件而不是 domain-schemas.ts：后者正被并行 Agent 编辑（本次开工前 40 分钟内
+ * 有改动），为避免覆盖他人未提交内容而不去动它。取值与形状与 domain-schemas.ts 的既有条目一致，
+ * 待该文件空闲后应整体迁入并在 domain-schemas.ts 只保留一份定义。
+ */
+export const ReviseTaskAcceptanceBodySchema = Type.Object(
+  {
+    command_id: UuidSchema,
+    /** Task revision CAS。 */
+    expected_revision: DecimalSchema,
+    /** 当前验收版本 CAS：命令只补当前周期，不允许在旧版本上继续写。 */
+    expected_acceptance_revision: DecimalSchema,
+    /** 省略表示沿用当前验收版本的 objective。 */
+    objective: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })),
+    /** 新验收版本的完整 criterion 集合；至少一条，且必须原样保留既有必需条件。 */
+    criteria: Type.Array(
+      Type.Object(
+        {
+          criterion_id: Type.Optional(Type.String({ maxLength: 64 })),
+          statement: Type.String({ minLength: 1, maxLength: 500 }),
+          required: Type.Optional(Type.Boolean()),
+          method: Type.Optional(Type.String({ maxLength: 32 })),
+          target_spec: Type.Optional(OpenObjectSchema),
+        },
+        strict,
+      ),
+      { minItems: 1, maxItems: 30 },
+    ),
+  },
+  strict,
+);
+
+export const ReviseTaskAcceptanceResultSchema = Type.Object(
+  {
+    task_id: UuidSchema,
+    status: Type.String(),
+    revision: DecimalSchema,
+    previous_acceptance_revision: DecimalSchema,
+    acceptance_revision: DecimalSchema,
+    objective: Type.String(),
+    required_output_spec: OpenObjectSchema,
+    criteria: Type.Array(
+      Type.Object(
+        {
+          criterion_id: Type.String(),
+          statement: Type.String(),
+          required: Type.Boolean(),
+          method: Type.String(),
+          target_spec: OpenObjectSchema,
+        },
+        strict,
+      ),
+    ),
+    added_criterion_ids: Type.Array(Type.String()),
+  },
+  strict,
+);
 
 type TasksListQuery = Static<typeof TasksListQuerySchema>;
 
@@ -240,6 +306,40 @@ export function registerTaskRoutes(app: FastifyInstance, dependencies: RouteDepe
           taskId: params.task_id ?? '',
           commandId: body.command_id,
           expectedRevision: body.expected_revision,
+        });
+
+        return { outcome, result: outcome.result };
+      },
+    }),
+  );
+
+  app.post(
+    '/tasks/:task_id/acceptance',
+    {
+      schema: {
+        params: WorkspaceTaskParamsSchema,
+        body: ReviseTaskAcceptanceBodySchema,
+        response: { 200: commandEnvelopeSchema(ReviseTaskAcceptanceResultSchema) },
+      },
+    },
+    createCommandHandler(dependencies, {
+      commandType: 'ReviseTaskAcceptance',
+      bodySchema: ReviseTaskAcceptanceBodySchema,
+      execute: async ({ executor, body, params }) => {
+        const outcome = await reviseTaskAcceptance(executor, {
+          workspaceId: params.workspace_id ?? '',
+          taskId: params.task_id ?? '',
+          commandId: body.command_id,
+          expectedRevision: body.expected_revision,
+          expectedAcceptanceRevision: body.expected_acceptance_revision,
+          objective: body.objective,
+          criteria: body.criteria.map((criterion) => ({
+            criterionId: criterion.criterion_id,
+            statement: criterion.statement,
+            required: criterion.required,
+            method: criterion.method,
+            targetSpec: criterion.target_spec as JsonObject | undefined,
+          })),
         });
 
         return { outcome, result: outcome.result };

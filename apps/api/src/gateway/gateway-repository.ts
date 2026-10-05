@@ -312,6 +312,13 @@ export class GatewayRepository {
     return (await sql<LogicalOperationRow>`select * from logical_operations where id = ${id} for update`.execute(this.db)).rows[0];
   }
 
+  /** 0058: USER_ACTION has no run/step/import_job, so findOperationByIntent cannot
+   * address it (its run_id IS NULL branch also matches USER_IMPORT rows). */
+  async findUserActionOperation(intentKey: string): Promise<LogicalOperationRow | undefined> {
+    return (await sql<LogicalOperationRow>`select * from logical_operations
+      where origin = 'USER_ACTION' and intent_key = ${intentKey}`.execute(this.db)).rows[0];
+  }
+
   async findOperationByIntent(input: { runId?: string; stepId?: string; importJobId?: string; intentKey: string }): Promise<LogicalOperationRow | undefined> {
     const result = input.importJobId === undefined
       ? await sql<LogicalOperationRow>`select * from logical_operations where run_id = ${input.runId ?? null}

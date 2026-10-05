@@ -492,11 +492,31 @@ export const DelegateTaskBodySchema = Type.Object(
         FILE_QUERY: Type.Optional(UuidSchema),
         FILE_READ: Type.Optional(UuidSchema),
         GIT_READ: Type.Optional(UuidSchema),
+        FILE_WRITE: Type.Optional(UuidSchema),
+        CLI_RUN: Type.Optional(UuidSchema),
       }, strict),
       allowed_tools: Type.Array(Type.String({ minLength: 1, maxLength: 64 }),
         { minItems: 1, maxItems: 32 }),
       max_rounds: Type.Integer({ minimum: 1, maximum: 12 }),
       max_tool_calls: Type.Integer({ minimum: 1, maximum: 48 }),
+    }, strict)),
+    // 本次任务范围授权。只接受普通写入与已配置检查：删除与 Git 写入永远单独确认。
+    // 授权只能收窄 tool_loop_action 已冻结的受管资源与连接，不能扩大。
+    scope_grant: Type.Optional(Type.Object({
+      resource_id: UuidSchema,
+      allowed_actions: Type.Array(
+        Type.Union([Type.Literal('WRITE_FILE'), Type.Literal('APPLY_CHANGESET'),
+          Type.Literal('CLI_RUN')]),
+        { minItems: 1, maxItems: 4 }),
+      checks: Type.Array(Type.Object({
+        id: Type.String({ minLength: 1, maxLength: 64 }),
+        executable: Type.String({ minLength: 1, maxLength: 1024 }),
+        args: Type.Array(Type.String({ maxLength: 4096 }), { maxItems: 64 }),
+        max_output_bytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 1048576 })),
+        executable_sha256: Type.String({ pattern: '^[0-9a-f]{64}$' }),
+      }, strict), { maxItems: 32 }),
+      expires_at: Type.Optional(Type.String({ format: 'date-time' })),
+      survives_run_terminal: Type.Optional(Type.Boolean()),
     }, strict)),
     context_sources: Type.Optional(Type.Array(Type.Object({
       kind: Type.Union([Type.Literal('KNOWLEDGE'), Type.Literal('MEMORY'), Type.Literal('DECISION')]),
@@ -645,6 +665,49 @@ export const RunSchema = Type.Object(
 /* 查询 schema                                                                 */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Run 工具调用只读投影（docs/api/http-command-contract.md §10.56）。
+ * arguments 与 result_ref 是开放对象：内容由具体工具决定，投影不新增解释字段。
+ */
+// 封闭词表用 Type.Union([Type.Literal(...)]) 表达，与本文件其余 schema 一致；
+// Type.String({ enum }) 在 Value.Check 下不生效，无法用同一套工具校验投影与响应是否一致。
+const RunToolCallStatusSchema = Type.Union(['REQUESTED', 'PREPARED', 'WAITING_APPROVAL',
+  'SETTLED', 'REJECTED', 'ABANDONED'].map((status) => Type.Literal(status)));
+
+const RunToolCallSchema = Type.Object(
+  {
+    id: UuidSchema,
+    round: Type.Integer({ minimum: 0 }),
+    ordinal: Type.Integer({ minimum: 0 }),
+    tool_name: Type.String(),
+    status: RunToolCallStatusSchema,
+    arguments: Type.Object({}, { additionalProperties: true }),
+    arguments_sha256: Type.String({ pattern: '^[0-9a-f]{64}$' }),
+    provider_tool_call_id: Type.String(),
+    operation_id: Type.Union([UuidSchema, Type.Null()]),
+    result_ref: Type.Union([Type.Object({}, { additionalProperties: true }), Type.Null()]),
+    adaptation_of: Type.Union([UuidSchema, Type.Null()]),
+    adapted_path: Type.Union([Type.String(), Type.Null()]),
+    created_at: TimestampSchema,
+    updated_at: TimestampSchema,
+  },
+  strict,
+);
+
+export const RunToolCallsSchema = Type.Object(
+  {
+    run_id: UuidSchema,
+    run_status: Type.String(),
+    wait_reason: Type.Union([Type.String(), Type.Null()]),
+    rounds: Type.Array(Type.Object({
+      round: Type.Integer({ minimum: 0 }),
+      model_call_id: UuidSchema,
+      calls: Type.Array(RunToolCallSchema),
+    }, strict)),
+  },
+  strict,
+);
+
 export const TasksListQuerySchema = Type.Object(
   {
     project_id: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
@@ -767,6 +830,8 @@ export const ReviewSchema = Type.Object(
     project_id: Type.Union([UuidSchema, Type.Null()]),
     task_id: Type.Union([UuidSchema, Type.Null()]),
     run_id: Type.Union([UuidSchema, Type.Null()]),
+    // ACTION_APPROVAL 绑定的是确切动作身份；工具轨迹按它把审批挂到对应那次调用上。
+    operation_id: Type.Union([UuidSchema, Type.Null()]),
     reason: Type.String(),
     target_hash: Type.String({ pattern: '^[0-9a-f]{64}$' }),
     target: OpenObjectSchema,

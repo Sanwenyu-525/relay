@@ -14,6 +14,8 @@ export interface ReviewDto {
   readonly project_id: string | null;
   readonly task_id: string | null;
   readonly run_id: string | null;
+  /** ACTION_APPROVAL 绑定的确切动作身份；其它 kind 为 null。消费方据此把审批挂到工具调用行。 */
+  readonly operation_id: string | null;
   readonly reason: string;
   readonly target_hash: string;
   readonly target: JsonObject;
@@ -34,6 +36,7 @@ export function reviewDto(row: ReviewRequestRow, expired = false): ReviewDto {
     project_id: row.project_id,
     task_id: row.task_id,
     run_id: row.run_id,
+    operation_id: row.kind === 'ACTION_APPROVAL' ? row.operation_id : null,
     reason: row.reason,
     target_hash: row.target_hash.toString('hex'),
     target: row.target,

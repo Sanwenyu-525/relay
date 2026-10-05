@@ -12,6 +12,7 @@ import { GRAPH_CHECKPOINT_SCHEMA } from '../infrastructure/graph-checkpoints.js'
 import { ManagedContentStore } from '../storage/managed-content-store.js';
 import { createRepositories, withTransaction } from '../application/unit-of-work.js';
 import { readFrozenActionOperationIds } from '../workflow/execution-contract.js';
+import type { FakeToolScript } from '../workflow/fake-model-port.js';
 import { executeMockGatewayStep, type MockGatewayStepResult } from './mock-gateway-action.js';
 import { executeToolLoopStep } from './tool-loop-action.js';
 
@@ -75,6 +76,8 @@ export async function executeClaimedRunGraph(db: DbExecutor, input: {
   maxSteps: number;
   signal: AbortSignal;
   fakeModelDelayMs?: number;
+  /** Test-only scripted model, using the production graph and Gateway nodes. */
+  fakeToolScript?: FakeToolScript;
   afterStep?: (step: AdvanceRunStepResult, claim: ClaimedRunCommand) => Promise<void>;
   afterGatewayPrepared?: (result: MockGatewayStepResult, claim: ClaimedRunCommand) => Promise<void>;
   afterGatewayAdmit?: (claim: ClaimedRunCommand) => Promise<void>;
@@ -92,6 +95,7 @@ export async function executeClaimedRunGraph(db: DbExecutor, input: {
           storage: new ManagedContentStore(input.dataRoot),
           leaseMs: input.leaseMs, signal: input.signal,
           ...(input.fakeModelDelayMs === undefined ? {} : { fakeModelDelayMs: input.fakeModelDelayMs }),
+          ...(input.fakeToolScript === undefined ? {} : { fakeToolScript: input.fakeToolScript }),
         });
         steps += 1;
         await input.afterStep?.(result, input.claim);
@@ -137,7 +141,9 @@ export async function executeClaimedRunGraph(db: DbExecutor, input: {
           awaitTarget: 'toolLoop',
           lastStatus: result.status === 'WAITING' ? 'GATEWAY_WAITING' :
             result.status === 'UNKNOWN' ? 'ACTION_UNKNOWN' :
-              result.status === 'SUCCEEDED' ? 'GATEWAY_SUCCEEDED' : 'GATEWAY_ACTION_DENIED' };
+              result.status === 'STOPPED' ? 'CONTROL_PENDING' :
+                result.status === 'CHECK_FAILED' ? 'TOOL_CHECK_FAILED' :
+                result.status === 'SUCCEEDED' ? 'GATEWAY_SUCCEEDED' : 'GATEWAY_ACTION_DENIED' };
       })
       .addNode('gatewayAction', async (state) => {
         if (input.signal.aborted) throw new RunGraphInvocationLost();
@@ -219,6 +225,7 @@ export async function executeClaimedRunGraph(db: DbExecutor, input: {
       // 全部结算后才继续同一个 DRAFT Attempt 的下一轮模型调用。
       .addConditionalEdges('toolLoopAction', (state) => {
         if (state.lastStatus === 'GATEWAY_WAITING') return 'awaitAction';
+        if (state.lastStatus === 'TOOL_CHECK_FAILED') return 'advance';
         if (state.lastStatus === 'GATEWAY_SUCCEEDED') return 'advance';
         return END;
       })
@@ -313,13 +320,14 @@ async function validReviewResume(db: DbExecutor, claim: ClaimedRunCommand,
   }
   if ((reviewKind === 'ACTION_APPROVAL') !== (interruptedOperationId !== '')) return false;
   if (interruptedOperationId !== '') {
+    // 这里是闸门而不是捷径：即使动作身份合法，下面那条把 Review 绑定到「确切这个
+    // Operation」的 SQL 仍必须执行。否则一个被改绑到别的动作的 Review 会唤醒检查点。
     const contract = await createRepositories(db).runs.readContract(claim.runId);
     const frozenOperationIds = contract === undefined ? [] :
       readFrozenActionOperationIds(contract.frozen_snapshot);
-    if (frozenOperationIds.includes(interruptedOperationId)) return true;
     // 工具循环的动作身份不是 Delegate 冻结的，而是模型请求落库时产生的行 id。
-    // 这里回到该行确认它确实属于本 Run：批准不能被一个无关 Operation 复用。
-    return isToolLoopOperation(db, claim.runId, interruptedOperationId);
+    if (!frozenOperationIds.includes(interruptedOperationId) &&
+        !(await isToolLoopOperation(db, claim.runId, interruptedOperationId))) return false;
   }
   const rows = await sql<{ exists: boolean }>`
     select exists(select 1 from run_commands c

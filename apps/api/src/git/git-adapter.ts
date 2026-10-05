@@ -134,6 +134,18 @@ export async function gitGetDiff(
   return res.stdout;
 }
 
+/**
+ * Whether Git still tracks a path inside the repository.
+ *
+ * 人工 diff 的相对路径按受管根解析后，可能指向一个已被删除但仍受版本控制的文件——对这类路径
+ * `git diff` 有真实含义，而工作区里已经没有该条目。只按「文件是否存在」判定会把这种合法查询
+ * 误拒为解析失败，因此这里用一次只读 `ls-files --error-unmatch` 判定，而不是猜。
+ */
+export async function gitTracksPath(options: GitExecOptions, relativePath: string): Promise<boolean> {
+  const res = await runReadOnlyGit(['ls-files', '--error-unmatch', '--', relativePath], options);
+  return res.exitCode === 0;
+}
+
 export async function gitGetLog(
   options: GitExecOptions,
   maxCount = 10,

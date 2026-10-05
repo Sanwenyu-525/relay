@@ -24,6 +24,12 @@ export interface CliExecutionResult {
   readonly reason?: string | undefined;
 }
 
+/** Normal child close with a known failing exit, rather than interruption or lost output. */
+export function isNormalCliFailure(result: JsonObject | null): boolean {
+  return result?.outcome === 'FAILED' && typeof result.exitCode === 'number' &&
+    Number.isInteger(result.exitCode) && result.exitCode > 0 && result.reason === undefined;
+}
+
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const DEFAULT_MAX_OUTPUT_BYTES = 4 * 1024 * 1024; // 4 MiB
 

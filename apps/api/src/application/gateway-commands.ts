@@ -146,8 +146,8 @@ export async function disableGatewayConnectionCommand(db: DbExecutor, input: {
 }
 
 async function policyScope(repositories: Repositories, workspaceId: string, projectId: string,
-  capability: GatewayCapability, resourceId: string | null, host: string | undefined):
-  Promise<{ actionType: string; targetPrefix: string }> {
+  capability: GatewayCapability, resourceId: string | null, host: string | undefined,
+  actionType?: string | undefined): Promise<{ actionType: string; targetPrefix: string }> {
   if (capability === 'FAKE_PUBLIC_READ') {
     if (resourceId !== null) throw validationFailed([{ field: 'resource_id', message: 'public read has no resource' }]);
     return { actionType: 'READ_PUBLIC', targetPrefix: 'https://public.example/' };
@@ -162,18 +162,50 @@ async function policyScope(repositories: Repositories, workspaceId: string, proj
   if (resource?.workspace_id !== workspaceId || resource.project_id !== projectId || resource.status !== 'ACTIVE') {
     throw resourceNotFound('Managed resource');
   }
-  if (capability === 'FILE_READ') return { actionType: 'READ_FILE', targetPrefix: resource.canonical_root };
-  if (capability === 'FILE_WRITE') return { actionType: 'APPLY_CHANGESET', targetPrefix: resource.canonical_root };
-  if (capability === 'GIT_READ') return { actionType: 'GIT_STATUS', targetPrefix: resource.canonical_root };
-  if (capability === 'GIT_WRITE') return { actionType: 'GIT_COMMIT', targetPrefix: resource.canonical_root };
-  if (capability === 'CLI_RUN') return { actionType: 'CLI_RUN', targetPrefix: resource.canonical_root };
-  return { actionType: 'WRITE_MARKER', targetPrefix: resource.canonical_root };
+  // 同一 capability 下不同 action_type 是**不同**的权限事实（读 diff 与读状态不是同一授权）。
+  // 缺省仍取既有的单一默认动作，因此既有调用方与历史策略的判定不变。
+  const derived = defaultActionTypeOf(capability);
+  if (actionType !== undefined && actionType !== derived) {
+    if (!SUPPORTED_POLICY_ACTIONS[capability].includes(actionType)) {
+      throw validationFailed([{ field: 'action_type',
+        message: `unsupported action for ${capability}: ${SUPPORTED_POLICY_ACTIONS[capability].join(', ')}` }]);
+    }
+    return { actionType, targetPrefix: resource.canonical_root };
+  }
+  return { actionType: derived, targetPrefix: resource.canonical_root };
+}
+
+/** 每个 capability 在 Permission 词表里可出现的 action_type。缺省动作见 defaultActionTypeOf。 */
+const SUPPORTED_POLICY_ACTIONS: Record<GatewayCapability, readonly string[]> = {
+  FAKE_WRITE: ['WRITE_MARKER'],
+  FAKE_PUBLIC_READ: ['READ_PUBLIC'],
+  FILE_READ: ['READ_FILE'],
+  FILE_QUERY: ['LIST_DIRECTORY', 'FIND_PATHS', 'SEARCH_TEXT'],
+  WEB_FETCH: ['WEB_FETCH'],
+  FILE_WRITE: ['WRITE_FILE', 'APPLY_CHANGESET', 'READ_CHANGE_SET'],
+  GIT_READ: ['GIT_STATUS', 'GIT_DIFF', 'GIT_LOG'],
+  GIT_WRITE: ['GIT_STAGE', 'GIT_COMMIT', 'GIT_PUSH'],
+  CLI_RUN: ['CLI_RUN', 'RUN_BUILD', 'RUN_TEST'],
+};
+
+function defaultActionTypeOf(capability: GatewayCapability): string {
+  if (capability === 'FAKE_PUBLIC_READ') return 'READ_PUBLIC';
+  if (capability === 'WEB_FETCH') return 'WEB_FETCH';
+  if (capability === 'FILE_READ') return 'READ_FILE';
+  if (capability === 'FILE_QUERY') return 'LIST_DIRECTORY';
+  if (capability === 'FILE_WRITE') return 'APPLY_CHANGESET';
+  if (capability === 'GIT_READ') return 'GIT_STATUS';
+  if (capability === 'GIT_WRITE') return 'GIT_COMMIT';
+  if (capability === 'CLI_RUN') return 'CLI_RUN';
+  return 'WRITE_MARKER';
 }
 
 export async function createGatewayPolicyCommand(db: DbExecutor, input: {
   workspaceId: string; projectId: string; commandId: string; capability: GatewayCapability;
   resourceId: string | null; decision: GatewayDecision; maxPayloadBytes: number;
   host?: string | undefined;
+  /** 可选：显式指定该 capability 下的 action_type（如 GIT_DIFF）。缺省沿用既有默认动作。 */
+  actionType?: string | undefined;
 }): Promise<CommandOutcome<IdResult>> {
   if (!Number.isInteger(input.maxPayloadBytes) || input.maxPayloadBytes < 0 || input.maxPayloadBytes > 262144) {
     throw validationFailed([{ field: 'max_payload_bytes', message: 'must be from 0 to 262144' }]);
@@ -182,12 +214,13 @@ export async function createGatewayPolicyCommand(db: DbExecutor, input: {
     commandId: input.commandId, commandType: 'CreateGatewayPolicy',
     target: { project_id: input.projectId }, body: { capability: input.capability,
       resource_id: input.resourceId, decision: input.decision, max_payload_bytes: input.maxPayloadBytes,
-      ...(input.host === undefined ? {} : { host: input.host.toLowerCase() }) },
+      ...(input.host === undefined ? {} : { host: input.host.toLowerCase() }),
+      ...(input.actionType === undefined ? {} : { action_type: input.actionType }) },
     execute: async (repositories) => {
       await authorityWrite(repositories, input.workspaceId);
       await projectVisible(repositories, input.workspaceId, input.projectId);
       const scope = await policyScope(repositories, input.workspaceId, input.projectId,
-        input.capability, input.resourceId, input.host);
+        input.capability, input.resourceId, input.host, input.actionType);
       const policy = await repositories.gateway.insertPolicy({ id: randomUUID(), workspaceId: input.workspaceId,
         projectId: input.projectId, capability: input.capability, actionType: scope.actionType,
         targetPrefix: scope.targetPrefix, decision: input.decision, maxPayloadBytes: input.maxPayloadBytes });
@@ -201,6 +234,8 @@ export async function addGatewayPolicyVersionCommand(db: DbExecutor, input: {
   workspaceId: string; projectId: string; policyId: string; commandId: string; expectedRevision: string;
   capability: GatewayCapability; resourceId: string | null;
   decision: GatewayDecision; maxPayloadBytes: number; host?: string | undefined;
+  /** Optional explicit action_type; absent keeps the existing per-capability default. */
+  actionType?: string | undefined;
 }): Promise<CommandOutcome<IdResult>> {
   const expected = requireRevision(input.expectedRevision, 'expected_revision');
   return runIdempotentCommand(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
@@ -208,7 +243,8 @@ export async function addGatewayPolicyVersionCommand(db: DbExecutor, input: {
     target: { project_id: input.projectId, policy_id: input.policyId },
     body: { expected_revision: toDecimalString(expected), capability: input.capability,
       resource_id: input.resourceId, decision: input.decision, max_payload_bytes: input.maxPayloadBytes,
-      ...(input.host === undefined ? {} : { host: input.host.toLowerCase() }) },
+      ...(input.host === undefined ? {} : { host: input.host.toLowerCase() }),
+      ...(input.actionType === undefined ? {} : { action_type: input.actionType }) },
     execute: async (repositories) => {
       await authorityWrite(repositories, input.workspaceId);
       const policy = await repositories.gateway.readPolicy(input.policyId);
@@ -217,7 +253,7 @@ export async function addGatewayPolicyVersionCommand(db: DbExecutor, input: {
       if (policy.revision !== expected) throw revisionConflict({ entityType: 'PERMISSION_POLICY',
         expectedRevision: toDecimalString(expected), actualRevision: toDecimalString(policy.revision) });
       const scope = await policyScope(repositories, input.workspaceId, input.projectId,
-        input.capability, input.resourceId, input.host);
+        input.capability, input.resourceId, input.host, input.actionType);
       const version = (await repositories.gateway.latestPolicyVersion(policy.id)) + 1n;
       await repositories.gateway.insertPolicyVersion({ policyId: policy.id, version,
         capability: input.capability, actionType: scope.actionType, targetPrefix: scope.targetPrefix,

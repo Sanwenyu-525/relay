@@ -14,11 +14,17 @@
 INSERT INTO gateway_capabilities VALUES ('FILE_QUERY', 'REAL', 'READ');
 
 ALTER TABLE logical_operations DROP CONSTRAINT ck_logical_operation_resource;
+-- 完整保留 0030 的既有分支（含 WEB_FETCH 的 RUN 无资源与 USER_IMPORT 两种形态），
+-- 只把 FILE_QUERY 并入「RUN 且绑定受管资源」那一支。漏掉任何一支都会让历史动作在
+-- 下一次写入时违反约束，因此这里逐条重述而不是就地追加。
 ALTER TABLE logical_operations ADD CONSTRAINT ck_logical_operation_resource CHECK (
   (capability_key = 'FAKE_WRITE' AND origin = 'RUN' AND resource_id IS NOT NULL)
   OR (capability_key = 'FAKE_PUBLIC_READ' AND origin = 'USER_IMPORT' AND resource_id IS NULL)
+  OR (capability_key = 'WEB_FETCH' AND origin = 'RUN' AND resource_id IS NULL)
+  OR (capability_key = 'WEB_FETCH' AND origin = 'USER_IMPORT' AND resource_id IS NULL)
   OR (capability_key IN ('FILE_READ', 'FILE_QUERY') AND origin = 'RUN' AND resource_id IS NOT NULL)
-  OR (capability_key IN ('GIT_READ', 'GIT_WRITE', 'CLI_RUN') AND origin = 'RUN' AND resource_id IS NOT NULL)
+  OR (capability_key IN ('FILE_WRITE', 'GIT_READ', 'GIT_WRITE', 'CLI_RUN')
+    AND origin = 'RUN' AND resource_id IS NOT NULL)
 );
 
 CREATE TABLE run_tool_calls (

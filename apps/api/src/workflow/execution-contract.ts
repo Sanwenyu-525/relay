@@ -73,7 +73,10 @@ export interface ToolLoopActionIntent {
 /** 首批工具循环的循环预算上限；Delegate 只接受不超过这些值的请求。 */
 export const TOOL_LOOP_MAX_ROUNDS = 12;
 export const TOOL_LOOP_MAX_TOOL_CALLS = 48;
-const TOOL_LOOP_CAPABILITIES: readonly string[] = ['FILE_QUERY', 'FILE_READ', 'GIT_READ'];
+// 与 delegate-task 的同名清单保持一致：信封允许写入与受控命令，但那只说明「模型可以
+// 请求」，不代表放行——准入仍由当前 Permission 与本次范围授权决定。
+const TOOL_LOOP_CAPABILITIES: readonly string[] =
+  ['FILE_QUERY', 'FILE_READ', 'GIT_READ', 'FILE_WRITE', 'CLI_RUN'];
 
 export function readToolLoopAction(snapshot: JsonObject): ToolLoopActionIntent | undefined {
   const value = snapshot.tool_loop_action;

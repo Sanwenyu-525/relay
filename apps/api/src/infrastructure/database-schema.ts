@@ -401,9 +401,13 @@ export interface ImportJobRow {
   readonly error: string | null; readonly knowledge_version_id: string | null;
   readonly revision: bigint; readonly created_at: Date;
 }
+/** 0058：人工在已登记受管资源上直接触发的受控动作来源。它没有 run/task/step/import_job，
+ * 但必须绑定受管资源与能力；词表只放行 GIT_READ，写入与 CLI 仍只有 RUN。 */
+export type GatewayOriginKey = 'RUN' | 'USER_IMPORT' | 'USER_ACTION';
+
 export interface LogicalOperationRow {
   readonly id: string; readonly workspace_id: string; readonly project_id: string;
-  readonly origin: 'RUN' | 'USER_IMPORT'; readonly task_id: string | null;
+  readonly origin: GatewayOriginKey; readonly task_id: string | null;
   readonly run_id: string | null;
   readonly step_id: string | null; readonly import_job_id: string | null;
   readonly intent_key: string; readonly connection_id: string;
@@ -417,7 +421,7 @@ export interface LogicalOperationRow {
 }
 export interface InvocationAttemptRow {
   readonly id: string; readonly operation_id: string; readonly attempt_number: bigint;
-  readonly origin: 'RUN' | 'USER_IMPORT'; readonly task_id: string | null;
+  readonly origin: GatewayOriginKey; readonly task_id: string | null;
   readonly run_id: string | null; readonly resource_id: string | null;
   readonly status: InvocationStatus; readonly authority_revision: bigint;
   readonly connection_version: bigint; readonly connection_config: JsonObject;
@@ -481,6 +485,24 @@ export interface FileWritePathIdentityRow {
  * Provider 的 tool_call_id 只承担轮内配对。REJECTED 行未派发，不连 Operation。 */
 export type RunToolCallStatus =
   | 'REQUESTED' | 'PREPARED' | 'WAITING_APPROVAL' | 'SETTLED' | 'REJECTED' | 'ABANDONED';
+/** 0056：本次任务范围授权。边界列写入后不可改写，只有撤销可推进；
+ * 删除与 Git 写入不在 allowed_actions 内，因此永远仍走单动作确认。 */
+export interface RunScopeGrantRow {
+  readonly id: string;
+  readonly workspace_id: string; readonly project_id: string;
+  readonly run_id: string; readonly task_id: string; readonly resource_id: string;
+  readonly version: bigint;
+  readonly root_identity: string;
+  readonly allowed_actions: string[];
+  readonly checks: JsonObject[];
+  readonly boundary_digest: string;
+  readonly issued_at: Date; readonly expires_at: Date | null;
+  readonly revoked_at: Date | null; readonly revoked_reason: string | null;
+  readonly survives_run_terminal: boolean;
+  readonly revision: bigint;
+  readonly updated_at: Date;
+}
+
 export interface RunToolCallRow {
   readonly id: string;
   readonly workspace_id: string; readonly project_id: string; readonly run_id: string;
@@ -491,6 +513,9 @@ export interface RunToolCallRow {
   readonly status: RunToolCallStatus;
   readonly operation_id: string | null;
   readonly result_ref: JsonObject | null;
+  /** 0056：本行是对哪一次基线冲突的重新适配；只能适配原始请求，不能链式适配。 */
+  readonly adaptation_of: string | null;
+  readonly adapted_path: string | null;
   readonly revision: bigint;
   readonly created_at: Date; readonly updated_at: Date;
 }
@@ -1088,6 +1113,7 @@ export interface RelayDatabaseSchema {
   invocation_approval_bindings: { readonly invocation_id: string; readonly review_id: string; readonly operation_id: string };
   change_sets: ChangeSetRow;
   run_tool_calls: RunToolCallRow;
+  run_scope_grants: RunScopeGrantRow;
   change_set_files: ChangeSetFileRow;
   workspaces: WorkspaceRow;
   workspace_execution_authority: WorkspaceExecutionAuthorityRow;

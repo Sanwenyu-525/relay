@@ -29,12 +29,17 @@ import { freezeExecutionContract, readContextSources, TOOL_LOOP_MAX_ROUNDS,
 import { readInternalTool } from '../workflow/tool-catalog.js';
 
 /** 首批工具循环只读三类能力；写入与检查在后续片按同一张表扩进来。 */
-const TOOL_LOOP_CAPABILITIES: readonly string[] = ['FILE_QUERY', 'FILE_READ', 'GIT_READ'];
+// 写入与受控命令也在信封允许的能力之内：信封是模型自主调用的上界，不是授权。
+// 没有对应范围授权时，这些动作仍然退回落单动作审批（Gateway 的既有降级）。
+const TOOL_LOOP_CAPABILITIES: readonly string[] =
+  ['FILE_QUERY', 'FILE_READ', 'GIT_READ', 'FILE_WRITE', 'CLI_RUN'];
 import type { ContextSourceRef } from '../workflow/execution-contract.js';
 import { loadRulePlanBasis } from './rule-plan-basis.js';
 import { canonicalRelativePath, requireFrozenBaseline,
   requireMatchingTarget } from '../files/file-changeset.js';
 import type { FileWriteChangeIntent } from '../workflow/execution-contract.js';
+import { SCOPE_GRANT_ACTIONS, SCOPE_GRANT_ACTION_CAPABILITIES,
+  type FrozenCheck } from './run-scope-grant.js';
 
 /**
  * DelegateTask：把一个 READY 的人工 Task 原子地交给一个新建的 AI Run
@@ -97,6 +102,20 @@ export interface DelegateTaskInput {
     readonly allowed_tools: readonly string[];
     readonly max_rounds: number;
     readonly max_tool_calls: number;
+  } | undefined;
+  /**
+   * 本次任务范围授权（用户显式授予；随 Run 同批落库）。
+   *
+   * 与单动作 ACTION_APPROVAL 是两个对象：授权只回答「本次 Run 内这类动作是否可 AUTO」，
+   * 删除与 Git 写入永远不在其中。一次授权不能跨 Run 继承，也不能超出 tool_loop_action
+   * 已冻结的受管资源与连接范围。
+   */
+  readonly scopeGrant?: {
+    readonly resource_id: string;
+    readonly allowed_actions: readonly string[];
+    readonly checks: readonly FrozenCheck[];
+    readonly expires_at?: string | undefined;
+    readonly survives_run_terminal?: boolean | undefined;
   } | undefined;
   /** 仅用于真实 PG barrier 测试；不属于 HTTP 请求或命令摘要。 */
   readonly hooks?: {
@@ -226,6 +245,11 @@ export async function delegateTask(
       const { allRules: allApplicableRules, criteria: ruleCriteria } =
         await loadRulePlanBasis(repositories, input.workspaceId, task.project_id, task.id);
 
+      // 授权只能依附工具循环信封：没有信封就没有模型自主调用的动作，授权无处生效。
+      if (input.scopeGrant !== undefined && input.toolLoopAction === undefined) {
+        throw invalidTransition('scope_grant 必须与 tool_loop_action 同时提供。', { taskId: task.id });
+      }
+
       // 一个 Run 最多冻结一个读取动作，以及一个写入链：Fake 标记、受控文件变更、
       // 受控命令检查三选一，或「文件变更 + 一次检查命令」。Fake 标记不能与真实写入并存。
       const readIntents = [input.fileReadAction, input.webFetchAction]
@@ -279,6 +303,44 @@ export async function delegateTask(
         if (loop.max_rounds < 1 || loop.max_rounds > TOOL_LOOP_MAX_ROUNDS ||
             loop.max_tool_calls < 1 || loop.max_tool_calls > TOOL_LOOP_MAX_TOOL_CALLS) {
           throw invalidTransition('tool_loop_action 的循环预算超出允许上限。', { taskId: task.id });
+        }
+        if (input.scopeGrant !== undefined) {
+          // 授权只能收窄信封，不能扩大：资源必须与信封同一个，能力连接也必须已冻结。
+          if (input.scopeGrant.resource_id !== loop.resource_id) {
+            throw invalidTransition('scope_grant.resource_id 必须与 tool_loop_action 同一个受管资源。',
+              { taskId: task.id });
+          }
+          const requested = new Set<string>(input.scopeGrant.allowed_actions);
+          if (requested.size === 0 || [...requested].some((action) => !SCOPE_GRANT_ACTIONS.includes(action))) {
+            throw invalidTransition(
+              `scope_grant.allowed_actions 只能取 ${SCOPE_GRANT_ACTIONS.join(' / ')} 的非空子集。`,
+              { taskId: task.id });
+          }
+          for (const action of requested) {
+            const capability = SCOPE_GRANT_ACTION_CAPABILITIES[action];
+            if (capability === undefined || !capabilities.has(capability)) {
+              throw invalidTransition(`scope_grant 放行 ${action} 需要信封里同时冻结 ${capability} 连接。`,
+                { taskId: task.id });
+            }
+          }
+          const ids = new Set<string>();
+          for (const check of input.scopeGrant.checks) {
+            if (check.id === '' || ids.has(check.id) || check.executable === '' ||
+                !/^[0-9a-f]{64}$/.test(check.executable_sha256) ||
+                check.max_output_bytes !== undefined &&
+                  (check.max_output_bytes < 1 || check.max_output_bytes > 1048576)) {
+              throw invalidTransition(`scope_grant 的已配置检查 ${check.id || '(空)'} 不合法。`,
+                { taskId: task.id });
+            }
+            ids.add(check.id);
+          }
+          if (requested.has('CLI_RUN')) {
+            if (!capabilities.has('CLI_RUN')) throw invalidTransition(
+              'scope_grant 放行检查命令需要信封里同时冻结 CLI_RUN 连接。', { taskId: task.id });
+            if (ids.size === 0) {
+              throw invalidTransition('scope_grant 放行检查命令时必须至少配置一个检查。', { taskId: task.id });
+            }
+          }
         }
       }
       if (input.fileWriteAction !== undefined) {
@@ -410,6 +472,19 @@ export async function delegateTask(
           max_rounds: input.toolLoopAction.max_rounds,
           max_tool_calls: input.toolLoopAction.max_tool_calls,
         } }),
+        // 授权边界进入命令摘要：同一个 commandId 不能换一个更宽的授权重放。
+        ...(input.scopeGrant === undefined ? {} : { scopeGrant: {
+          intent_key: 'scope-grant-v1' as const,
+          resource_id: input.scopeGrant.resource_id,
+          allowed_actions: [...input.scopeGrant.allowed_actions],
+          checks: input.scopeGrant.checks.map((check) => ({
+            id: check.id, executable: check.executable, args: [...check.args],
+            executable_sha256: check.executable_sha256,
+            ...(check.max_output_bytes === undefined ? {} :
+              { max_output_bytes: check.max_output_bytes }) })),
+          expires_at: input.scopeGrant.expires_at ?? null,
+          survives_run_terminal: input.scopeGrant.survives_run_terminal ?? false,
+        } }),
         ...(contextSources === undefined || contextSources.length === 0 ? {} :
           { contextSources }),
       });
@@ -447,6 +522,23 @@ export async function delegateTask(
             stepKind,
           })),
         );
+
+        // 授权与 Run 同批提交：不会出现「Run 已存在但授权漏写」的中间态，
+        // 也不会留下没有 Run 的孤儿授权。
+        if (input.scopeGrant !== undefined) {
+          const granted = await repositories.gateway.readResource(input.scopeGrant.resource_id);
+          await repositories.scopeGrants.insert({
+            workspaceId: input.workspaceId, projectId: task.project_id, runId, taskId: task.id,
+            resourceId: input.scopeGrant.resource_id,
+            canonicalRoot: granted?.canonical_root ?? '',
+            allowedActions: input.scopeGrant.allowed_actions,
+            checks: input.scopeGrant.checks,
+            ...(input.scopeGrant.expires_at === undefined ? {} :
+              { expiresAt: new Date(input.scopeGrant.expires_at) }),
+            ...(input.scopeGrant.survives_run_terminal === undefined ? {} :
+              { survivesRunTerminal: input.scopeGrant.survives_run_terminal }),
+          });
+        }
       } catch (error) {
         // uq_run_live_task 兜底：并发 Delegate 竞争同一 Task 时唯一约束裁决，失败事务回滚后按业务冲突处理。
         if (isPostgresError(error, POSTGRES_ERROR_CODES.uniqueViolation)) {

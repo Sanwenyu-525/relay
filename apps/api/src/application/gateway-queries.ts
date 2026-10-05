@@ -117,7 +117,7 @@ function invocationDto(row: InvocationAttemptRow): GatewayInvocationDto {
     resolved_at: row.resolved_at?.toISOString() ?? null, result_ref: row.result_ref };
 }
 export interface GatewayOperationDto {
-  readonly id: string; readonly origin: 'RUN' | 'USER_IMPORT';
+  readonly id: string; readonly origin: 'RUN' | 'USER_IMPORT' | 'USER_ACTION';
   readonly project_id: string; readonly run_id: string | null; readonly step_id: string | null;
   readonly import_job_id: string | null; readonly status: string; readonly action_type: string;
   readonly normalized_target: string; readonly params_hash: string;
