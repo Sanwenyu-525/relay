@@ -1,4 +1,4 @@
-import { act, createElement } from "react";
+import { act, createElement, type ReactElement } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import AssistView from "../src/views/AssistView";
@@ -9,6 +9,7 @@ const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const projectId = "22222222-2222-4222-8222-222222222222";
 const taskId = "33333333-3333-4333-8333-333333333333";
+const sessionId = "66666666-6666-4666-8666-666666666666";
 const prefix = `${baseUrl}/api/v1/workspaces/${workspaceId}`;
 
 function response(body: unknown): Response {
@@ -38,6 +39,19 @@ afterEach(() => {
   resetRelayConnectionForTest();
   vi.unstubAllGlobals();
 });
+
+/** 与协作页文件夹入口一致：没有 target，只有工作空间级会话可谈。 */
+async function mountedUnassignedAssist(props: Record<string, unknown> = {}) {
+  // AssistView 的 props 全部可选且带默认值，TS 会把 createElement 落到 DOM 的
+  // Attributes 重载上；这里显式标注组件类型，让 props 按实际传入检查。
+  const Unassigned = AssistView as unknown as (p: Record<string, unknown>) => ReactElement;
+  const router = createMemoryRouter([
+    { path: "/agent", element: createElement(Unassigned, { standalone: true,
+      deferSessionCreation: true, workspaceLevel: true, ...props }) }
+  ], { initialEntries: ["/agent"] });
+  const mounted = await mountReact(createElement(RouterProvider, { router }));
+  return { wrapper: Object.assign(mounted.wrapper, { unmount: mounted.unmount }) };
+}
 
 describe("P12 Assist 目标固定", () => {
   it("切换 Project 到 Task 后迟到的旧目标响应不能落到新目标", async () => {
@@ -81,6 +95,75 @@ describe("P12 Assist 目标固定", () => {
     await flush(20);
     expect(wrapper.get('[data-testid="assist-fixture-gap"]').text()).toContain("示例模式没有真实会话");
     expect(wrapper.text()).not.toContain("新任务目标");
+    wrapper.unmount();
+  });
+});
+
+describe("工作空间级会话", () => {
+  it("没有项目与目录时仍渲染首条输入区，不停在目标占位", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+        posts.push({ path: new URL(url).pathname, body });
+        if (new URL(url).pathname.endsWith("/assist-sessions")) return {
+          ok: true, status: 201, json: async () => ({ command_id: body.command_id,
+            committed_at: "2026-10-05T00:00:00Z",
+            result: { session_id: sessionId, workspace_id: workspaceId, project_id: null,
+              task_id: null, title: "先聊聊这个目录", status: "ACTIVE", revision: "1",
+              created_at: "2026-10-05T00:00:00Z", updated_at: "2026-10-05T00:00:00Z" } }) } as Response;
+        throw new Error(`unexpected POST ${url}`);
+      }
+      if (url.startsWith(`${prefix}/assist-sessions`)) return response({ items: [] });
+      throw new Error(`unexpected request ${url}`);
+    }));
+    const { wrapper } = await mountedUnassignedAssist();
+    await flush(20);
+    expect(wrapper.text()).not.toContain("正在核对对话目标与会话");
+    expect(wrapper.get('[data-testid="assist-first-draft"]').exists()).toBe(true);
+    // 标题只能来自这条消息本身：没有 target，也就没有 target.title。
+    await wrapper.get('[data-testid="assist-first-draft"]').setValue("先聊聊这个目录要怎么改");
+    await flush(20);
+    await wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+    await flush(20);
+    const create = posts.find((post) => post.path.endsWith("/assist-sessions"));
+    expect(create?.body.project_id).toBeNull();
+    expect(create?.body.title).toBe("先聊聊这个目录要怎么改");
+    wrapper.unmount();
+  });
+
+  it("草稿为空时点新建会话不会因 target 为空而抛错，标题不为空", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+        posts.push({ path: new URL(url).pathname, body });
+        if (new URL(url).pathname.endsWith("/assist-sessions")) return {
+          ok: true, status: 201, json: async () => ({ command_id: body.command_id,
+            committed_at: "2026-10-05T00:00:00Z",
+            result: { session_id: sessionId, workspace_id: workspaceId, project_id: null,
+              task_id: null, title: "新讨论", status: "ACTIVE", revision: "1",
+              created_at: "2026-10-05T00:00:00Z", updated_at: "2026-10-05T00:00:00Z" } }) } as Response;
+        throw new Error(`unexpected POST ${url}`);
+      }
+      if (url.startsWith(`${prefix}/assist-sessions`)) return response({ items: [] });
+      throw new Error(`unexpected request ${url}`);
+    }));
+    // deferSessionCreation=false 才会渲染会话栏，那条「新建会话」按钮直连 createSession()，
+    // 绕过 sendFirst 的空内容早退 —— 草稿为空时 target.title 真的会被取到。
+    const { wrapper } = await mountedUnassignedAssist({ deferSessionCreation: false,
+      preferredSessionId: null });
+    await flush(20);
+    await wrapper.get('[data-testid="assist-new-session"]').trigger("click");
+    await flush(20);
+    const create = posts.find((post) => post.path.endsWith("/assist-sessions"));
+    // CHECK (title <> '') 会拒绝空标题：命令必须发得出去，且带得出非空标题。
+    expect(create?.body.title).toBe("新讨论");
+    expect(create?.body.project_id).toBeNull();
     wrapper.unmount();
   });
 });

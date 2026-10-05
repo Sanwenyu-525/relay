@@ -762,6 +762,41 @@ export interface RelayWorkingDirectory {
   readonly writeReadiness: { readonly status: string; readonly detail: string };
 }
 
+/** 一次 Run 的工具调用轨迹（GET /runs/{id}/tool-calls）。
+ *  arguments 与 resultRef 是服务端原样透出的有界内容，不是这里整理过的摘要：
+ * 界面展示的必须与模型当时读到的是同一份，才能对账。 */
+export type RelayToolCallStatus = "REQUESTED" | "PREPARED" | "WAITING_APPROVAL" | "SETTLED" | "REJECTED" | "ABANDONED";
+
+export interface RelayRunToolCall {
+  /** 行身份，同时是该行 logical_operations 的 id（未派发行除外）。用作 React key。 */
+  readonly id: string;
+  readonly round: number;
+  readonly ordinal: number;
+  readonly toolName: string;
+  readonly status: RelayToolCallStatus;
+  readonly args: Readonly<Record<string, unknown>>;
+  readonly argsSha256: string;
+  /** Provider 的轮内标签，跨 Run 可重名，因此不得用作 key。 */
+  readonly providerToolCallId: string;
+  readonly operationId: string | null;
+  readonly adaptationOf: string | null;
+  readonly adaptedPath: string | null;
+  readonly resultRef: Readonly<Record<string, unknown>> | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface RelayRunToolCalls {
+  readonly runId: string;
+  readonly runStatus: string;
+  readonly waitReason: string | null;
+  readonly rounds: readonly {
+    readonly round: number;
+    readonly modelCallId: string;
+    readonly calls: readonly RelayRunToolCall[];
+  }[];
+}
+
 /** 对话里的执行请求：原消息身份、模型整理出的候选摘要与阶段事实。 */
 export interface RelayConversationExecution {
   readonly requestId: string;
@@ -920,6 +955,8 @@ export interface RelayReview {
   readonly projectId: string | null;
   readonly taskId: string | null;
   readonly runId: string | null;
+  /** ACTION_APPROVAL 绑定的动作身份；工具轨迹按它把审批挂到对应那次调用，不另造引用。 */
+  readonly operationId: string | null;
   readonly reason: string;
   readonly targetHash: string;
   readonly target: Readonly<Record<string, unknown>>;
@@ -1341,6 +1378,22 @@ export interface RelayProjectCreation {
   readonly stateRevision: DecimalRevision;
 }
 
+/** LinkProjectGoal 的 200 结果：goal_ids 是关联后的完整集合，revision 是新的 Project 修订。 */
+export interface RelayProjectGoalLink {
+  readonly projectId: string;
+  readonly revision: DecimalRevision;
+  readonly goalIds: readonly string[];
+}
+
+/** CreateGoal 的 201 结果：Goal 是 Workspace 级事实，创建时状态为 ACTIVE。 */
+export interface RelayGoalCreation {
+  readonly goalId: string;
+  readonly status: string;
+  readonly revision: DecimalRevision;
+  /** 回执本身不带标题；成功页用它显示关联对象，仍以原输入为准。 */
+  readonly title: string;
+}
+
 /** CreateTask 的 201 结果：新任务一律 INBOX + HUMAN，验收版本从 v1 开始。 */
 export interface RelayTaskCreation {
   readonly taskId: string;
@@ -1617,6 +1670,50 @@ export class RelayApiClient {
     return projectCreationFrom(commandEnvelopeFrom(body).result);
   }
 
+  /**
+   * CreateGoal：Goal 是 Workspace 级事实，只保存标题与说明。
+   * 与 Project 的关联是独立命令（LinkProjectGoal），这里刻意不隐式关联任何 Project，
+   * 也不由前端代填项目——作用域与关联仍归各自 Owner。
+   */
+  async createGoal(input: {
+    readonly commandId: string;
+    readonly title: string;
+    readonly description: string;
+  }): Promise<RelayGoalCreation> {
+    const body = await this.request(this.workspacePath("/goals"), {
+      method: "POST",
+      body: JSON.stringify({
+        command_id: input.commandId,
+        title: input.title,
+        description: input.description
+      })
+    });
+    return goalCreationFrom(commandEnvelopeFrom(body).result);
+  }
+
+  /**
+   * LinkProjectGoal：把 Goal 关联到 Project。与 CreateGoal 是两个命令——
+   * 创建 Goal 不隐式关联任何 Project，关联必须由用户明确发起。
+   * expectedRevision 是 Project 当前修订：服务端按它做 CAS，修订变化时返回冲突而不是覆盖。
+   */
+  async linkProjectGoal(input: {
+    readonly projectId: string;
+    readonly commandId: string;
+    readonly expectedRevision: DecimalRevision;
+    readonly goalId: string;
+  }): Promise<RelayProjectGoalLink> {
+    const body = await this.request(
+      this.workspacePath(`/projects/${encodeURIComponent(input.projectId)}/goal-links`), {
+        method: "POST",
+        body: JSON.stringify({
+          command_id: input.commandId,
+          expected_revision: input.expectedRevision,
+          goal_id: input.goalId
+        })
+      });
+    return projectGoalLinkFrom(commandEnvelopeFrom(body).result);
+  }
+
   async createTask(input: {
     readonly commandId: string;
     readonly projectId: string | null;
@@ -1860,7 +1957,7 @@ export class RelayApiClient {
     };
   }
 
-  async getAssistSessions(target: { projectId?: string; taskId?: string }): Promise<readonly RelayAssistSession[]> {
+  async getAssistSessions(target: { projectId?: string; taskId?: string } = {}): Promise<readonly RelayAssistSession[]> {
     const query = new URLSearchParams();
     if (target.projectId) query.set("project_id", target.projectId);
     if (target.taskId) query.set("task_id", target.taskId);
@@ -2253,6 +2350,11 @@ export class RelayApiClient {
 
   async getRunTrace(runId: string): Promise<RelayRunTrace> {
     return runTraceFrom(await this.request(this.workspacePath(`/runs/${encodeURIComponent(runId)}/trace`)));
+  }
+
+  async getRunToolCalls(runId: string): Promise<RelayRunToolCalls> {
+    return runToolCallsFrom(await this.request(
+      this.workspacePath(`/runs/${encodeURIComponent(runId)}/tool-calls`)));
   }
 
   async getRunGatewayOperations(runId: string): Promise<readonly RelayRunGatewayOperation[]> {
@@ -3056,8 +3158,7 @@ function requiredText(value: string, name: string): string {
 
 function reviewFrom(value: unknown): RelayReview {
   const record = object(value, "review");
-  const kind = string(record, "kind", "review");
-  const kinds: readonly RelayReviewKind[] = ["CRITERION", "RETRY_BUDGET", "CHECKER_RETRY", "ACTION_APPROVAL", "STATE_PROPOSAL"];
+  const kind = string(record, "kind", "review");  const kinds: readonly RelayReviewKind[] = ["CRITERION", "RETRY_BUDGET", "CHECKER_RETRY", "ACTION_APPROVAL", "STATE_PROPOSAL"];
   if (!kinds.includes(kind as RelayReviewKind)) {
     throw new Error("review.kind 包含未知类型。");
   }
@@ -3074,6 +3175,9 @@ function reviewFrom(value: unknown): RelayReview {
     projectId: nullableString(record, "project_id", "review"),
     taskId: nullableString(record, "task_id", "review"),
     runId: nullableString(record, "run_id", "review"),
+    // 旧服务与既有夹具可能没有这个字段：缺失与 null 同义，都是「这次审批不绑定动作」。
+    operationId: record.operation_id === undefined || record.operation_id === null
+      ? null : string(record, "operation_id", "review"),
     reason: string(record, "reason", "review"),
     targetHash: string(record, "target_hash", "review"),
     target: object(record.target, "review.target"),
@@ -3685,6 +3789,30 @@ export function projectCreationFrom(result: Readonly<Record<string, unknown>>): 
     phaseKey: string(result, "phase_key", "command result"),
     stateRevision: decimal(result, "state_revision", "command result")
   };
+}
+
+/**
+ * CreateGoal 的回执 result 与首次响应共用解析：传输失败后按同一 command_id 查回执，
+ * 才能判断这条 Goal 是否已提交，避免换 ID 重建出第二个 Goal。
+ */
+export function goalCreationFrom(result: Readonly<Record<string, unknown>>): RelayGoalCreation {
+  return {
+    goalId: string(result, "goal_id", "command result"),
+    status: string(result, "status", "command result"),
+    revision: decimal(result, "revision", "command result"),
+    // 服务端回执刻意不含标题（Goal 单读才有）；这里留空串，由调用方按原输入补上，
+    // 避免为了显示而多发一次读取或把标题写进回执解析。
+    title: ""
+  };
+}
+
+export function projectGoalLinkFrom(result: Readonly<Record<string, unknown>>): RelayProjectGoalLink {
+  const goalIds = result.goal_ids;
+  if (!Array.isArray(goalIds) || goalIds.some((id) => typeof id !== "string")) {
+    throw new Error("command result.goal_ids 响应格式无效。");
+  }
+  return { projectId: string(result, "project_id", "command result"),
+    revision: decimal(result, "revision", "command result"), goalIds: goalIds as string[] };
 }
 
 export function taskCreationFrom(result: Readonly<Record<string, unknown>>): RelayTaskCreation {
@@ -4559,6 +4687,49 @@ function workingDirectoryFrom(value: unknown): RelayWorkingDirectory {
     candidates: array(row, "candidates", "working directory").map(workingDirectoryCandidateFrom),
     writeReadiness: { status: string(readiness, "status", "working directory write readiness"),
       detail: string(readiness, "detail", "working directory write readiness") } };
+}
+
+const RELAY_TOOL_CALL_STATUSES = ["REQUESTED", "PREPARED", "WAITING_APPROVAL", "SETTLED",
+  "REJECTED", "ABANDONED"] as const;
+
+function toolCallStatus(value: unknown): RelayToolCallStatus {
+  // 封闭词表：把没见过的状态当成合法会让界面显示一个用户无法理解的死路。
+  if (typeof value !== "string" || !(RELAY_TOOL_CALL_STATUSES as readonly string[]).includes(value)) {
+    throw new Error("工具调用状态无效。");
+  }
+  return value as RelayToolCallStatus;
+}
+
+function toolCallFrom(value: unknown): RelayRunToolCall {
+  const row = object(value, "Run tool call");
+  return { id: string(row, "id", "Run tool call"),
+    round: integer(row, "round", "Run tool call"), ordinal: integer(row, "ordinal", "Run tool call"),
+    toolName: string(row, "tool_name", "Run tool call"),
+    status: toolCallStatus(row.status),
+    args: object(row.arguments, "Run tool call arguments"),
+    argsSha256: string(row, "arguments_sha256", "Run tool call"),
+    providerToolCallId: string(row, "provider_tool_call_id", "Run tool call"),
+    operationId: nullableString(row, "operation_id", "Run tool call"),
+    adaptationOf: nullableString(row, "adaptation_of", "Run tool call"),
+    adaptedPath: nullableString(row, "adapted_path", "Run tool call"),
+    resultRef: row.result_ref === null || row.result_ref === undefined
+      ? null : object(row.result_ref, "Run tool call result"),
+    createdAt: string(row, "created_at", "Run tool call"),
+    updatedAt: string(row, "updated_at", "Run tool call") };
+}
+
+function runToolCallsFrom(value: unknown): RelayRunToolCalls {
+  const row = object(value, "Run tool calls");
+  return { runId: string(row, "run_id", "Run tool calls"),
+    runStatus: string(row, "run_status", "Run tool calls"),
+    waitReason: nullableString(row, "wait_reason", "Run tool calls"),
+    // 顺序直接信任服务端：客户端重排会掩盖服务端顺序错误，也会让「最新一轮」难以核对。
+    rounds: array(row, "rounds", "Run tool calls").map((entry) => {
+      const round = object(entry, "Run tool call round");
+      return { round: integer(round, "round", "Run tool call round"),
+        modelCallId: string(round, "model_call_id", "Run tool call round"),
+        calls: array(round, "calls", "Run tool call round").map(toolCallFrom) };
+    }) };
 }
 
 function conversationExecutionFrom(value: unknown): RelayConversationExecution {
