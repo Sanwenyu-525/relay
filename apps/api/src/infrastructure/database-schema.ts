@@ -957,6 +957,23 @@ export interface ConversationExecutionRequestRow {
   readonly updated_at: Date;
 }
 
+/** 0059：会话建立时冻结的一种身份。既有会话按 'AGENT' 读出，不虚构 bot 关系。 */
+export type ConversationMode = 'AGENT' | 'BOT';
+
+/** 0059：bot 配置。配置文本存在这里，能力不在这里——能力来自连接与 Gateway 准入。 */
+export interface BotProfileRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly name: string;
+  readonly role_description: string;
+  readonly tone: string | null;
+  readonly read_scope: JsonObject;
+  readonly revision: bigint;
+  readonly status: 'ACTIVE' | 'ARCHIVED';
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
+
 export interface AssistSessionRow {
   readonly id: string;
   readonly workspace_id: string;
@@ -964,6 +981,14 @@ export interface AssistSessionRow {
   readonly task_id: string | null;
   readonly title: string;
   readonly status: AssistSessionStatus;
+  /** 冻结：会话建立后不改写。切模式等于换会话。 */
+  readonly conversation_mode: ConversationMode;
+  readonly bot_profile_id: string | null;
+  /** 建会话时 bot 的修订。bot 之后被改写不影响既有会话的冻结快照。 */
+  readonly bot_profile_revision: bigint | null;
+  readonly bot_role_snapshot: JsonObject | null;
+  /** 「一次性问答」开关：false 时该轮不作为可续读历史。 */
+  readonly remember: boolean;
   readonly revision: bigint;
   readonly created_at: Date;
   readonly updated_at: Date;

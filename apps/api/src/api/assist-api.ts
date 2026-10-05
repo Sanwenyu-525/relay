@@ -7,6 +7,7 @@ import { listAssistMessages, listAssistProposals, listAssistSessions, readAssist
   readAssistSession, projectAssistSkillMessage, readAssistLivePreview }
   from '../application/assist-queries.js';
 import type { JsonObject } from '../infrastructure/json.js';
+import type { ConversationMode } from '../infrastructure/database-schema.js';
 import { MODEL_ERROR_CATEGORIES, type ModelErrorCategory }
   from '../workflow/model-error-classification.js';
 import { toDecimalString } from '../shared/decimal.js';
@@ -29,6 +30,14 @@ const AssistSessionDto = Type.Object({
   project_id: Type.Union([uuid, Type.Null()]),
   task_id: Type.Union([uuid, Type.Null()]),
   title: Type.String(), status: Type.String(), revision: rev,
+  /** 冻结的会话身份：'AGENT' 是既有普通会话，'BOT' 是人设 bot 会话。 */
+  conversation_mode: Type.Union([Type.Literal('AGENT'), Type.Literal('BOT')]),
+  bot_profile_id: Type.Union([uuid, Type.Null()]),
+  /** 建会话时冻结的 bot 修订；AGENT 会话恒为 null。 */
+  bot_profile_revision: Type.Union([rev, Type.Null()]),
+  /** 冻结的人设文本：只含文本，不含任何能力或连接信息。 */
+  bot_role: Type.Union([Type.Object({}, { additionalProperties: true }), Type.Null()]),
+  remember: Type.Boolean(),
   created_at: Type.String(), updated_at: Type.String(),
 }, strict);
 /** 命令回执里的会话结果（resource 以 session_id 命名，与命令契约一致）。 */
@@ -37,6 +46,10 @@ const AssistSessionResult = Type.Object({
   project_id: Type.Union([uuid, Type.Null()]),
   task_id: Type.Union([uuid, Type.Null()]),
   title: Type.String(), status: Type.String(), revision: rev,
+  conversation_mode: Type.Union([Type.Literal('AGENT'), Type.Literal('BOT')]),
+  bot_profile_id: Type.Union([uuid, Type.Null()]),
+  bot_profile_revision: Type.Union([rev, Type.Null()]),
+  remember: Type.Boolean(),
   created_at: Type.String(), updated_at: Type.String(),
 }, strict);
 const AssistMessageDto = Type.Object({
@@ -86,6 +99,12 @@ const createSessionBody = Type.Object({
   project_id: Type.Optional(Type.Union([uuid, Type.Null()])),
   task_id: Type.Optional(Type.Union([uuid, Type.Null()])),
   title: Type.String({ minLength: 1, maxLength: 200 }),
+  /**
+   * 会话身份在建立时冻结，之后不改写：不传即 'AGENT'，既有客户端不受影响。
+   * Breaking Change：Yes（语义）——同一 command_id 换模式重放按异载荷拒绝。
+   */
+  conversation_mode: Type.Optional(Type.Union([Type.Literal('AGENT'), Type.Literal('BOT')])),
+  bot_profile_id: Type.Optional(uuid),
 }, strict);
 const sessionsQuery = Type.Object({
   project_id: Type.Optional(uuid), task_id: Type.Optional(uuid),
@@ -125,11 +144,20 @@ const proposalAcceptBody = Type.Object({ command_id: uuid,
 
 function sessionDto(row: { id: string; workspace_id: string; project_id: string | null;
   task_id: string | null; title: string; status: string; revision: bigint;
-  created_at: Date; updated_at: Date }) {
+  conversation_mode: ConversationMode; bot_profile_id: string | null;
+  bot_profile_revision: bigint | null; bot_role_snapshot: JsonObject | null;
+  remember: boolean; created_at: Date; updated_at: Date }) {
   return {
     id: row.id, workspace_id: row.workspace_id, project_id: row.project_id,
     task_id: row.task_id, title: row.title, status: row.status,
     revision: toDecimalString(row.revision),
+    conversation_mode: row.conversation_mode,
+    bot_profile_id: row.bot_profile_id,
+    bot_profile_revision: row.bot_profile_revision === null ? null
+      : toDecimalString(row.bot_profile_revision),
+    // 人设快照逐字返回：客户端显示的就是这条会话建立时的人设，不读当前 bot。
+    bot_role: row.bot_role_snapshot,
+    remember: row.remember,
     created_at: row.created_at.toISOString(), updated_at: row.updated_at.toISOString(),
   };
 }
@@ -194,6 +222,8 @@ export function registerAssistRoutes(app: FastifyInstance, dependencies: RouteDe
         ...(body.project_id === undefined ? {} : { projectId: body.project_id }),
         ...(body.task_id === undefined ? {} : { taskId: body.task_id }),
         title: body.title,
+        ...(body.conversation_mode === undefined ? {} : { conversationMode: body.conversation_mode }),
+        ...(body.bot_profile_id === undefined ? {} : { botProfileId: body.bot_profile_id }),
       });
       return { outcome, result: outcome.result };
     } }));

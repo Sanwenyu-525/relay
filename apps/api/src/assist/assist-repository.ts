@@ -13,11 +13,26 @@ import type { JsonObject } from '../infrastructure/json.js';
 export class AssistRepository {
   constructor(private readonly db: DbExecutor) {}
 
+  /**
+   * 建会话时冻结身份：模式与人设快照在同一事务内写入，因此不存在「会话已建立但身份漏写」
+   * 的中间态。AGENT 会话的四个 bot 列必须全为 null，BOT 会话必须全有值——
+   * 由 0059 的 CHECK 兜底，这里只保证写入形状与调用方意图一致。
+   */
   async insertSession(input: { id: string; workspaceId: string; projectId: string | null;
-    taskId: string | null; title: string }): Promise<void> {
-    await sql`insert into assist_sessions (id, workspace_id, project_id, task_id, title)
+    taskId: string | null; title: string;
+    conversationMode?: 'AGENT' | 'BOT' | undefined;
+    botProfileId?: string | null | undefined;
+    botProfileRevision?: bigint | null | undefined;
+    botRoleSnapshot?: JsonObject | null | undefined }): Promise<void> {
+    const mode = input.conversationMode ?? 'AGENT';
+    await sql`insert into assist_sessions (id, workspace_id, project_id, task_id, title,
+      conversation_mode, bot_profile_id, bot_profile_revision, bot_role_snapshot)
       values (${input.id}, ${input.workspaceId}, ${input.projectId}, ${input.taskId},
-      ${input.title})`.execute(this.db);
+      ${input.title}, ${mode},
+      ${mode === 'BOT' ? input.botProfileId ?? null : null},
+      ${mode === 'BOT' ? input.botProfileRevision ?? null : null},
+      ${mode === 'BOT' && input.botRoleSnapshot !== undefined && input.botRoleSnapshot !== null
+        ? JSON.stringify(input.botRoleSnapshot) : null}::jsonb)`.execute(this.db);
   }
 
   async readSession(id: string, lock = false): Promise<AssistSessionRow | undefined> {
