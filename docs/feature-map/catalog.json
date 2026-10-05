@@ -1,0 +1,4204 @@
+{
+  "version": 1,
+  "modules": [
+    {
+      "id": "projects-goals-state",
+      "name": "项目、目标与当前状态",
+      "description": "组织项目事实、目标关联与显式状态，保留同一业务写入入口。",
+      "stageIds": [
+        "M02",
+        "M05"
+      ],
+      "features": [
+        {
+          "id": "workspace-initialization",
+          "name": "工作空间初始化",
+          "description": "建立本机工作空间及后续命令使用的作用域。",
+          "code": [
+            "apps/api/src/application/initialize-workspace.ts",
+            "apps/api/src/workspace/workspace-repository.ts"
+          ],
+          "docs": [
+            "docs/architecture/domain-model.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api.integration.test.ts"
+          ],
+          "acceptance": [
+            "人工项目/任务/产物/完成与重开"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "project-create-read",
+          "name": "项目建立与概览",
+          "description": "建立项目并读取类型、阶段、状态和任务摘要。",
+          "code": [
+            "apps/api/src/application/create-project.ts",
+            "apps/api/src/application/project-queries.ts",
+            "apps/workbench/src/views/ProjectsView.tsx"
+          ],
+          "docs": [
+            "docs/architecture/domain-model.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md",
+            "prompts/ui-option-2-pages.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api-lists.integration.test.ts",
+            "apps/workbench/tests/projects.spec.ts"
+          ],
+          "acceptance": [
+            "人工项目/任务/产物/完成与重开"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "project-stage-state",
+          "name": "阶段与显式项目状态",
+          "description": "通过带修订的状态命令修改阶段和状态，保留业务依据。",
+          "code": [
+            "apps/api/src/application/state-commands.ts",
+            "apps/api/src/application/state-queries.ts",
+            "apps/api/src/project/project-phase.ts"
+          ],
+          "docs": [
+            "docs/architecture/domain-model.md",
+            "contracts/01-facts-and-ownership.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api-state.integration.test.ts"
+          ],
+          "acceptance": [
+            "人工项目/任务/产物/完成与重开"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "goal-create-list",
+          "name": "工作空间目标列表",
+          "description": "建立目标并提供跨项目的工作空间级目标查询。",
+          "code": [
+            "apps/api/src/application/create-goal.ts",
+            "apps/api/src/api/project-api.ts",
+            "apps/api/src/project/project-repository.ts"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api-lists.integration.test.ts"
+          ],
+          "acceptance": [
+            "Goal 工作空间级列表与跨项目反向读（2026-10-01）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "project-goal-link",
+          "name": "项目与目标关联",
+          "description": "关联或解除项目目标，保留目标作用域和在用约束。",
+          "code": [
+            "apps/api/src/application/project-goal-links.ts",
+            "apps/api/src/api/project-api.ts"
+          ],
+          "docs": [
+            "contracts/01-facts-and-ownership.md",
+            "docs/architecture/information-planning.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api.integration.test.ts"
+          ],
+          "acceptance": [
+            "人工项目/任务/产物/完成与重开"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "project-archive-fence",
+          "name": "归档与关联写入栅栏",
+          "description": "归档项目时核对活动执行并阻止后续关联写入。",
+          "code": [
+            "apps/api/src/application/archive-project.ts",
+            "apps/api/src/application/guards.ts",
+            "apps/api/src/project/project-repository.ts"
+          ],
+          "docs": [
+            "docs/architecture/domain-model.md",
+            "docs/decisions/ADR-011-project-archive-serialization.md"
+          ],
+          "prompts": [
+            "prompts/stack-migration.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api-tasks.integration.test.ts",
+            "apps/api/test/integration/collaboration-controls.integration.test.ts"
+          ],
+          "acceptance": [
+            "项目归档与关联写入栅栏"
+          ],
+          "intent": "current"
+        }
+      ]
+    },
+    {
+      "id": "task-contracts",
+      "name": "任务与执行契约",
+      "description": "管理任务需求、验收版本、依赖、执行模式与准入条件。",
+      "stageIds": [
+        "M02",
+        "M03",
+        "M04",
+        "M05"
+      ],
+      "features": [
+        {
+          "id": "task-create-edit",
+          "name": "任务建立与展示编辑",
+          "description": "建立任务，并通过修订检查修改标题、说明和展示信息。",
+          "code": [
+            "apps/api/src/application/create-task.ts",
+            "apps/api/src/application/task-commands.ts",
+            "apps/workbench/src/views/CreateTaskView.tsx"
+          ],
+          "docs": [
+            "docs/architecture/domain-model.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md",
+            "prompts/ui-option-2-pages.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api-tasks.integration.test.ts",
+            "apps/workbench/tests/liveCreate.spec.ts"
+          ],
+          "acceptance": [
+            "人工项目/任务/产物/完成与重开"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "task-ready-validation",
+          "name": "就绪检查与 READY",
+          "description": "核对期望结果、验收条件和依赖后显式转为 READY。",
+          "code": [
+            "apps/api/src/application/task-readiness.ts",
+            "apps/api/src/application/task-commands.ts",
+            "apps/workbench/src/views/TaskDefinitionView.tsx"
+          ],
+          "docs": [
+            "contracts/02-state-and-execution.md",
+            "contracts/03-verification-and-approval.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md",
+            "prompts/B-workflow-verification.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api-tasks.integration.test.ts",
+            "apps/workbench/tests/definition.spec.ts"
+          ],
+          "acceptance": [
+            "人工项目/任务/产物/完成与重开"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "task-human-start-cancel",
+          "name": "人工执行与任务取消",
+          "description": "通过原 Task Owner 开始人工执行或取消任务。",
+          "code": [
+            "apps/api/src/application/task-commands.ts",
+            "apps/workbench/src/views/TaskDetailView.tsx"
+          ],
+          "docs": [
+            "contracts/02-state-and-execution.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api-tasks.integration.test.ts",
+            "apps/workbench/tests/taskDetail.spec.ts"
+          ],
+          "acceptance": [
+            "人工项目/任务/产物/完成与重开"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "task-goal-alignment",
+          "name": "任务目标继承与显式对齐",
+          "description": "支持默认项目目标继承和显式任务目标对齐。",
+          "code": [
+            "apps/api/src/application/task-commands.ts",
+            "apps/api/src/task/task-repository.ts"
+          ],
+          "docs": [
+            "contracts/01-facts-and-ownership.md",
+            "docs/architecture/information-planning.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api-tasks.integration.test.ts"
+          ],
+          "acceptance": [
+            "人工项目/任务/产物/完成与重开"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "task-dependency",
+          "name": "任务依赖与环检测",
+          "description": "登记或移除 BLOCKS/INFORMS 依赖，并拒绝循环和越界引用。",
+          "code": [
+            "apps/api/src/application/task-commands.ts",
+            "apps/api/src/task/task-repository.ts"
+          ],
+          "docs": [
+            "docs/architecture/domain-model.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api-tasks.integration.test.ts"
+          ],
+          "acceptance": [
+            "人工项目/任务/产物/完成与重开"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "task-planning-metadata",
+          "name": "优先级与截止日期",
+          "description": "保存任务计划元数据，供列表、Today 和后续计划读取。",
+          "code": [
+            "apps/api/src/application/task-commands.ts",
+            "apps/workbench/src/views/TaskDetailView.tsx"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md",
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/today.integration.test.ts",
+            "apps/workbench/tests/tasks.spec.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "task-delegate-contract",
+          "name": "委托与冻结执行契约",
+          "description": "Delegate 绑定验收、输入、预算和动作边界后建立真实 Run。",
+          "code": [
+            "apps/api/src/application/delegate-task.ts",
+            "apps/api/src/workflow/execution-contract.ts",
+            "apps/workbench/src/components/TaskDelegatePanel.tsx"
+          ],
+          "docs": [
+            "contracts/02-state-and-execution.md",
+            "docs/architecture/runtime-context.md"
+          ],
+          "prompts": [
+            "prompts/B-workflow-verification.md",
+            "prompts/stack-migration.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api-delegations.integration.test.ts",
+            "apps/api/test/unit/execution-contract.test.ts",
+            "apps/workbench/tests/delegate-task.spec.ts"
+          ],
+          "acceptance": [
+            "Mock Delegate→Review→完成/重启恢复",
+            "Mock 文件动作输入与原委托载荷"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "task-skill-contract-apply",
+          "name": "接受任务契约建议",
+          "description": "人工接受 Skill 候选时校验原 Task 和验收版本，再经领域命令变更契约。",
+          "code": [
+            "apps/api/src/application/task-contract-commands.ts",
+            "apps/api/src/application/assist-commands.ts",
+            "apps/workbench/src/components/TaskContractProposalPreview.tsx"
+          ],
+          "docs": [
+            "docs/architecture/relay-skills.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/f24-proposal-idempotency.integration.test.ts",
+            "apps/workbench/tests/taskSkillProposal.spec.ts"
+          ],
+          "acceptance": [
+            "F24 第一方 Skill / Blueprint / Pack 接续复验（2026-10-03 跨候选修复轮）"
+          ],
+          "intent": "current"
+        }
+      ]
+    },
+    {
+      "id": "artifacts-versions",
+      "name": "成果与不可变版本",
+      "description": "保存确切成果版本、人工续写、阅读及选用依据。",
+      "stageIds": [
+        "M02",
+        "M03",
+        "M05",
+        "M06"
+      ],
+      "features": [
+        {
+          "id": "artifact-create-version",
+          "name": "建立成果与首版",
+          "description": "通过应用入口建立成果及首个不可变正文版本。",
+          "code": [
+            "apps/api/src/application/artifact-commands.ts",
+            "apps/api/src/artifact/artifact-repository.ts",
+            "apps/workbench/src/components/ArtifactPanel.tsx"
+          ],
+          "docs": [
+            "contracts/01-facts-and-ownership.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api-artifacts.integration.test.ts"
+          ],
+          "acceptance": [
+            "人工项目/任务/产物/完成与重开"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "artifact-human-successor",
+          "name": "人工编辑与续版",
+          "description": "人工修改产生新版本并保留父版本和原版本正文。",
+          "code": [
+            "apps/api/src/application/artifact-commands.ts",
+            "apps/workbench/src/components/ArtifactPanel.tsx"
+          ],
+          "docs": [
+            "contracts/01-facts-and-ownership.md",
+            "contracts/04-recovery-and-commit.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md",
+            "prompts/product-supplement-2026-09-25.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api-artifacts.integration.test.ts",
+            "apps/workbench/tests/taskDetail.spec.ts"
+          ],
+          "acceptance": [
+            "Windows 产物续版、接受、重开与关闭"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "artifact-exact-content",
+          "name": "确切版本完整阅读",
+          "description": "按版本读取完整正文及保存依据，明确内容缺失或不可用。",
+          "code": [
+            "apps/api/src/application/artifact-queries.ts",
+            "apps/workbench/src/components/ArtifactReaderPanel.tsx",
+            "apps/workbench/src/components/SafeMarkdown.tsx"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/ui-option-2-pages.md",
+            "prompts/product-supplement-2026-09-27.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api-artifacts.integration.test.ts",
+            "apps/workbench/tests/artifactReader.spec.ts"
+          ],
+          "acceptance": [
+            "Windows 产物续版、接受、重开与关闭",
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "artifact-version-compare",
+          "name": "成果版本差异",
+          "description": "比较两个确切版本，支持审阅变化后再决定选用。",
+          "code": [
+            "apps/workbench/src/components/ArtifactVersionCompare.tsx",
+            "apps/api/src/application/artifact-queries.ts"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/product-supplement-2026-09-25.md",
+            "prompts/ui-option-2-pages.md"
+          ],
+          "tests": [
+            "apps/workbench/tests/artifactReader.spec.ts",
+            "apps/workbench/tests/readingPresentation.spec.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "artifact-text-locks",
+          "name": "章节与段落原文锁定",
+          "description": "保存稳定原文锁定范围，并在 AI 续版时核对锁定内容。",
+          "code": [
+            "apps/api/src/application/artifact-text-locks.ts",
+            "apps/api/src/artifact/markdown-locks.ts",
+            "apps/workbench/src/components/ArtifactTextLocksPanel.tsx"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/collaboration-controls-2026-09-28.md",
+            "prompts/product-supplement-2026-09-25.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/collaboration-controls.integration.test.ts",
+            "apps/api/test/unit/markdown-locks.test.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "artifact-managed-publication",
+          "name": "受管正文发布",
+          "description": "通过原生文件 I/O 边界发布正文和校验摘要，处理排他安全点。",
+          "code": [
+            "apps/api/src/storage/managed-content-store.ts",
+            "apps/api/src/storage/windows-content-publisher.ts",
+            "apps/api/src/files/windows-file-io.ts"
+          ],
+          "docs": [
+            "docs/database/physical-design-postgresql.md",
+            "docs/decisions/ADR-015-managed-content-native-publication.md"
+          ],
+          "prompts": [
+            "prompts/stack-migration.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/content-freeze.integration.test.ts",
+            "apps/api/test/unit/managed-content-store.test.ts"
+          ],
+          "acceptance": [
+            "M07 Windows 实际受管内容发布与排他安全点"
+          ],
+          "intent": "current"
+        }
+      ]
+    },
+    {
+      "id": "verification-acceptance",
+      "name": "验证与验收依据",
+      "description": "围绕确切产物、验收修订和约束执行检查并保存证据。",
+      "stageIds": [
+        "M03",
+        "M04",
+        "M05"
+      ],
+      "features": [
+        {
+          "id": "acceptance-check-plan",
+          "name": "验收条件与检查计划",
+          "description": "把条件映射到注册检查器，保留必需条件和未覆盖项。",
+          "code": [
+            "apps/api/src/workflow/check-plan.ts",
+            "apps/api/src/application/check-plan-preview.ts",
+            "apps/workbench/src/components/TaskCheckPlanPreview.tsx"
+          ],
+          "docs": [
+            "contracts/03-verification-and-approval.md",
+            "docs/architecture/runtime-context.md"
+          ],
+          "prompts": [
+            "prompts/B-workflow-verification.md",
+            "prompts/product-supplement-2026-09-26.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/check-plan.test.ts",
+            "apps/api/test/integration/verification.integration.test.ts",
+            "apps/workbench/tests/verification.spec.ts"
+          ],
+          "acceptance": [
+            "Mock Delegate→Review→完成/重启恢复"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "hard-checkers",
+          "name": "确定性硬检查",
+          "description": "运行注册 Hard 检查器，返回明确的通过、失败或不可运行结果。",
+          "code": [
+            "apps/api/src/workflow/checkers.ts",
+            "apps/api/src/application/verify-run.ts"
+          ],
+          "docs": [
+            "contracts/03-verification-and-approval.md",
+            "docs/architecture/runtime-context.md"
+          ],
+          "prompts": [
+            "prompts/B-workflow-verification.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/checkers.test.ts",
+            "apps/api/test/integration/verification.integration.test.ts"
+          ],
+          "acceptance": [
+            "Mock Delegate→Review→完成/重启恢复"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "rule-revision-fence",
+          "name": "规则解析与修订栅栏",
+          "description": "解析适用规则并在执行及完成前核对规则修订和来源。",
+          "code": [
+            "apps/api/src/application/rule-fence.ts",
+            "apps/api/src/application/rule-plan-basis.ts",
+            "apps/api/src/application/information-commands.ts"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/decisions/ADR-009-rule-revision-fence.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/verification.integration.test.ts",
+            "apps/api/test/integration/information.integration.test.ts"
+          ],
+          "acceptance": [
+            "Mock Delegate→Review→完成/重启恢复",
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "semantic-verification",
+          "name": "语义检查与证据结算",
+          "description": "语义检查使用独立模型调用，拒绝把检查器故障计为通过。",
+          "code": [
+            "apps/api/src/application/verify-run.ts",
+            "apps/api/src/workflow/openai-compatible-model-port.ts"
+          ],
+          "docs": [
+            "contracts/03-verification-and-approval.md",
+            "docs/architecture/runtime-context.md"
+          ],
+          "prompts": [
+            "prompts/B-workflow-verification.md",
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/real-model.integration.test.ts",
+            "apps/api/test/unit/verify-run.test.ts"
+          ],
+          "acceptance": [
+            "真实 DRAFT、HARD SEMANTIC、取消/abort"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "human-acceptance-evidence",
+          "name": "人工验收依据",
+          "description": "展示人工确认需要的成果、条件、检查和未运行证据。",
+          "code": [
+            "apps/workbench/src/components/TaskAcceptanceEvidence.tsx",
+            "apps/api/src/application/completion-evidence-queries.ts"
+          ],
+          "docs": [
+            "contracts/03-verification-and-approval.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/product-supplement-2026-09-26.md"
+          ],
+          "tests": [
+            "apps/workbench/tests/verification.spec.ts",
+            "apps/workbench/tests/productSupplement26.spec.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "verification-current-binding",
+          "name": "验收版本与过期判定",
+          "description": "验证会话绑定确切产物、验收修订及规则，变化后重新核对适用性。",
+          "code": [
+            "apps/api/src/application/verify-run.ts",
+            "apps/api/src/verification/verification-repository.ts",
+            "apps/api/src/workflow/verdict.ts"
+          ],
+          "docs": [
+            "contracts/03-verification-and-approval.md",
+            "contracts/04-recovery-and-commit.md"
+          ],
+          "prompts": [
+            "prompts/B-workflow-verification.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/verification.integration.test.ts",
+            "apps/api/test/unit/verdict.test.ts"
+          ],
+          "acceptance": [
+            "Mock 完整并发、取消、UNKNOWN 可靠性"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "verification-correction-rounds",
+          "name": "纠正轮次与预算",
+          "description": "按当前验证失败依据建立有限纠正轮次并保存尝试关系。",
+          "code": [
+            "apps/api/src/application/verify-run.ts",
+            "apps/api/src/application/run-steps.ts"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "contracts/03-verification-and-approval.md"
+          ],
+          "prompts": [
+            "prompts/B-workflow-verification.md",
+            "prompts/stack-migration.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/run-steps.integration.test.ts",
+            "apps/api/test/unit/verify-run.test.ts"
+          ],
+          "acceptance": [
+            "Mock Delegate→Review→完成/重启恢复"
+          ],
+          "intent": "current"
+        }
+      ]
+    },
+    {
+      "id": "reviews-completion",
+      "name": "人工判断与业务完成",
+      "description": "保存明确人工决定，并由应用事务提交业务完成与重开。",
+      "stageIds": [
+        "M02",
+        "M03",
+        "M05"
+      ],
+      "features": [
+        {
+          "id": "review-inbox",
+          "name": "人工待处理收件箱",
+          "description": "列出确切 Review 目标、原因和可用处理动作。",
+          "code": [
+            "apps/api/src/application/review-queries.ts",
+            "apps/workbench/src/views/ReviewsView.tsx",
+            "apps/workbench/src/components/AttentionQueue.tsx"
+          ],
+          "docs": [
+            "contracts/03-verification-and-approval.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/B-workflow-verification.md",
+            "prompts/product-supplement-2026-09-26.md"
+          ],
+          "tests": [
+            "apps/workbench/tests/reviews.spec.ts",
+            "apps/workbench/tests/liveInbox.spec.ts"
+          ],
+          "acceptance": [
+            "Mock Delegate→Review→完成/重启恢复",
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "review-resolve",
+          "name": "接受、拒绝与修改要求",
+          "description": "人工决定绑定目标摘要和当前版本，通过原 Review 命令保存。",
+          "code": [
+            "apps/api/src/application/review-decisions.ts",
+            "apps/workbench/src/components/ReviewDecisionPanel.tsx"
+          ],
+          "docs": [
+            "contracts/03-verification-and-approval.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/B-workflow-verification.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/verification.integration.test.ts",
+            "apps/workbench/tests/reviews.spec.ts"
+          ],
+          "acceptance": [
+            "Mock Delegate→Review→完成/重启恢复"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "review-action-budget-state",
+          "name": "动作审批、预算与状态提议",
+          "description": "分别保存动作准入、追加预算和项目状态提议的人工判断。",
+          "code": [
+            "apps/api/src/application/request-review.ts",
+            "apps/api/src/application/review-decisions.ts",
+            "apps/api/src/review/review-repository.ts"
+          ],
+          "docs": [
+            "contracts/03-verification-and-approval.md",
+            "contracts/04-recovery-and-commit.md"
+          ],
+          "prompts": [
+            "prompts/B-workflow-verification.md",
+            "prompts/C-recovery-gateway.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/gateway.integration.test.ts",
+            "apps/api/test/integration/verification.integration.test.ts"
+          ],
+          "acceptance": [
+            "Mock Delegate→Review→完成/重启恢复",
+            "文件/Git/CLI 与 UNKNOWN/PARTIAL 人工处置"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "review-reading-version-warning",
+          "name": "阅读与判断版本错配提醒",
+          "description": "阅读其他版本时显示判断仍绑定的确切版本并提供返回入口。",
+          "code": [
+            "apps/workbench/src/components/ArtifactReaderPanel.tsx",
+            "apps/workbench/src/views/ReviewsView.tsx"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/remediation/ui-option-2-first-session.md"
+          ],
+          "tests": [
+            "apps/workbench/tests/artifactReader.spec.ts",
+            "apps/workbench/tests/reviews.spec.ts",
+            "apps/workbench/tests/browser/uiOption2FirstSession.spec.ts"
+          ],
+          "acceptance": [
+            "方案 2 整改后独立复核（2026-10-03）"
+          ],
+          "intent": "current",
+          "note": "关联当前整改后独立复核；初轮失败与修复自检仍保留在验收文档第 10.7/10.8 节，当前运行范围与剩余缺口以当前表及第 10.9 节为准。"
+        },
+        {
+          "id": "human-task-completion",
+          "name": "人工任务完成",
+          "description": "核对选用成果、验收依据和当前执行权后短事务提交完成。",
+          "code": [
+            "apps/api/src/application/completion-commands.ts",
+            "apps/workbench/src/components/TaskCompletionPanel.tsx"
+          ],
+          "docs": [
+            "contracts/04-recovery-and-commit.md",
+            "contracts/03-verification-and-approval.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api-artifacts.integration.test.ts",
+            "apps/workbench/tests/completionRecord.spec.ts"
+          ],
+          "acceptance": [
+            "人工项目/任务/产物/完成与重开",
+            "Windows 产物续版、接受、重开与关闭"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "run-business-completion",
+          "name": "Run 业务完成门",
+          "description": "Run 输出经 Verification、Review 和最终核对后由应用用例提交任务完成。",
+          "code": [
+            "apps/api/src/application/complete-run.ts",
+            "apps/api/src/completion/completion-repository.ts"
+          ],
+          "docs": [
+            "contracts/04-recovery-and-commit.md",
+            "contracts/02-state-and-execution.md"
+          ],
+          "prompts": [
+            "prompts/B-workflow-verification.md",
+            "prompts/C-recovery-gateway.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/verification.integration.test.ts",
+            "apps/api/test/integration/run-graph.integration.test.ts"
+          ],
+          "acceptance": [
+            "Mock Delegate→Review→完成/重启恢复",
+            "Mock 完整并发、取消、UNKNOWN 可靠性"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "completion-record-reopen",
+          "name": "完成记录与任务重开",
+          "description": "读取完成时的确切依据，重开保留历史并更新当前业务事实。",
+          "code": [
+            "apps/api/src/application/completion-evidence-queries.ts",
+            "apps/api/src/application/completion-commands.ts",
+            "apps/workbench/src/views/CompletionRecordView.tsx"
+          ],
+          "docs": [
+            "contracts/01-facts-and-ownership.md",
+            "contracts/04-recovery-and-commit.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api-artifacts.integration.test.ts",
+            "apps/workbench/tests/completionRecord.spec.ts"
+          ],
+          "acceptance": [
+            "人工项目/任务/产物/完成与重开",
+            "Windows 产物续版、接受、重开与关闭"
+          ],
+          "intent": "current"
+        }
+      ]
+    },
+    {
+      "id": "execution-controls-recovery",
+      "name": "执行控制与恢复",
+      "description": "持久化暂停、取消、交接意图，核对旧执行和未决动作后恢复。",
+      "stageIds": [
+        "M03",
+        "M06"
+      ],
+      "features": [
+        {
+          "id": "run-pause-safe-point",
+          "name": "暂停请求与安全点",
+          "description": "持久化暂停意图，只有安全点应用后才显示已暂停。",
+          "code": [
+            "apps/api/src/application/control-requests.ts",
+            "apps/workbench/src/components/RunControlPanel.tsx"
+          ],
+          "docs": [
+            "contracts/02-state-and-execution.md",
+            "contracts/04-recovery-and-commit.md"
+          ],
+          "prompts": [
+            "prompts/C-recovery-gateway.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/recovery.integration.test.ts",
+            "apps/workbench/tests/controlInteractions.spec.ts"
+          ],
+          "acceptance": [
+            "Mock 完整并发、取消、UNKNOWN 可靠性"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "run-resume-recheck",
+          "name": "继续执行与重新核验",
+          "description": "继续时重新检查当前任务、验收与 Run 基线。",
+          "code": [
+            "apps/api/src/application/control-requests.ts",
+            "apps/api/src/application/run-dispatch.ts"
+          ],
+          "docs": [
+            "contracts/02-state-and-execution.md",
+            "contracts/04-recovery-and-commit.md"
+          ],
+          "prompts": [
+            "prompts/C-recovery-gateway.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/recovery.integration.test.ts",
+            "apps/api/test/integration/run-dispatch.integration.test.ts"
+          ],
+          "acceptance": [
+            "Mock 完整并发、取消、UNKNOWN 可靠性"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "run-cancel-abort",
+          "name": "取消与在途调用中止",
+          "description": "取消意图驱动模型或适配器 abort，保留未决效果而非推断成功停止。",
+          "code": [
+            "apps/api/src/application/control-requests.ts",
+            "apps/api/src/worker/run-command.ts",
+            "apps/api/src/cli-worker/process-tree.ts"
+          ],
+          "docs": [
+            "contracts/04-recovery-and-commit.md",
+            "docs/architecture/tool-adapters.md"
+          ],
+          "prompts": [
+            "prompts/C-recovery-gateway.md",
+            "prompts/E-real-adapters.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/recovery.integration.test.ts",
+            "apps/api/test/integration/real-model.integration.test.ts",
+            "apps/workbench/tests/controlInteractions.spec.ts"
+          ],
+          "acceptance": [
+            "Mock 完整并发、取消、UNKNOWN 可靠性",
+            "真实 DRAFT、HARD SEMANTIC、取消/abort"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "run-handoff-authority",
+          "name": "人工接手与执行权",
+          "description": "在途动作安全处理后转移执行权，Review 判断保持独立。",
+          "code": [
+            "apps/api/src/application/control-requests.ts",
+            "apps/api/src/run/run-repository.ts",
+            "apps/workbench/src/components/RunControlPanel.tsx"
+          ],
+          "docs": [
+            "contracts/02-state-and-execution.md",
+            "contracts/04-recovery-and-commit.md"
+          ],
+          "prompts": [
+            "prompts/C-recovery-gateway.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/recovery.integration.test.ts",
+            "apps/workbench/tests/controlInteractions.spec.ts"
+          ],
+          "acceptance": [
+            "Mock 完整并发、取消、UNKNOWN 可靠性"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "worker-crash-recovery",
+          "name": "过期 Worker 与崩溃恢复",
+          "description": "扫描恢复候选，证明原 Worker 停止后处理旧 epoch 和检查点。",
+          "code": [
+            "apps/api/src/application/recover-run.ts",
+            "apps/api/src/run/recovery-repository.ts",
+            "apps/api/src/worker/supervisor.ts"
+          ],
+          "docs": [
+            "contracts/04-recovery-and-commit.md",
+            "docs/architecture/runtime-context.md"
+          ],
+          "prompts": [
+            "prompts/C-recovery-gateway.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/recovery.integration.test.ts",
+            "apps/api/test/integration/run-command-order.integration.test.ts"
+          ],
+          "acceptance": [
+            "Mock 完整并发、取消、UNKNOWN 可靠性"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "unknown-reconciliation",
+          "name": "UNKNOWN 原身份核对",
+          "description": "沿原 operation/invocation/action 身份核对效果，阻止盲重发和换 Adapter。",
+          "code": [
+            "apps/api/src/application/gateway-actions.ts",
+            "apps/api/src/run/recovery-repository.ts",
+            "apps/workbench/src/views/RunView.tsx"
+          ],
+          "docs": [
+            "contracts/04-recovery-and-commit.md",
+            "docs/architecture/tool-adapters.md"
+          ],
+          "prompts": [
+            "prompts/C-recovery-gateway.md",
+            "prompts/E-real-adapters.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/recovery.integration.test.ts",
+            "apps/api/test/integration/real-tools-gateway.integration.test.ts"
+          ],
+          "acceptance": [
+            "Mock 完整并发、取消、UNKNOWN 可靠性",
+            "文件/Git/CLI 与 UNKNOWN/PARTIAL 人工处置"
+          ],
+          "intent": "current"
+        }
+      ]
+    },
+    {
+      "id": "runtime-orchestration",
+      "name": "Runtime 与图编排",
+      "description": "由 Workflow 管理 Run，以 PG 命令和 LangGraph 驱动持久执行。",
+      "stageIds": [
+        "M01",
+        "M03",
+        "M04"
+      ],
+      "features": [
+        {
+          "id": "run-lifecycle-steps",
+          "name": "Run、Step 与 Attempt",
+          "description": "建立并推进 Run 步骤，记录每次尝试及失败归属。",
+          "code": [
+            "apps/api/src/application/run-steps.ts",
+            "apps/api/src/run/run-repository.ts"
+          ],
+          "docs": [
+            "contracts/02-state-and-execution.md",
+            "docs/architecture/runtime-context.md"
+          ],
+          "prompts": [
+            "prompts/B-workflow-verification.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/run-steps.integration.test.ts"
+          ],
+          "acceptance": [
+            "Mock Delegate→Review→完成/重启恢复"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "postgres-command-dispatch",
+          "name": "PG 持久命令领取",
+          "description": "从持久 Run command 领取、续租、结算，保留 delivery 和 epoch。",
+          "code": [
+            "apps/api/src/application/run-dispatch.ts",
+            "apps/api/src/run/run-dispatch-repository.ts",
+            "apps/api/src/worker/run-command.ts"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/database/physical-design-postgresql.md"
+          ],
+          "prompts": [
+            "prompts/stack-migration.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/run-dispatch.integration.test.ts",
+            "apps/api/test/integration/run-command-order.integration.test.ts"
+          ],
+          "acceptance": [
+            "Mock 完整并发、取消、UNKNOWN 可靠性"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "langgraph-checkpoint",
+          "name": "LangGraph 检查点与中断",
+          "description": "通用图编排使用持久检查点，在人工等待和重启时按原上下文恢复。",
+          "code": [
+            "apps/api/src/worker/run-graph.ts",
+            "apps/api/src/infrastructure/graph-checkpoints.ts",
+            "apps/api/src/cli/install-graph.ts"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/decisions/ADR-010-agent-stack-react-desktop.md"
+          ],
+          "prompts": [
+            "prompts/stack-migration.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/run-graph.integration.test.ts"
+          ],
+          "acceptance": [
+            "Mock 完整并发、取消、UNKNOWN 可靠性"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "run-draft-preview",
+          "name": "流式草稿预览持久化",
+          "description": "流式内容写入预览并与最终不可变成果分开呈现。",
+          "code": [
+            "apps/api/src/application/run-draft-preview.ts",
+            "apps/workbench/src/components/ArtifactPanel.tsx",
+            "apps/workbench/src/lib/useRunDraftPreview.ts"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/api/http-command-contract.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/run-draft-preview.integration.test.ts",
+            "apps/workbench/tests/run-draft-preview.spec.ts"
+          ],
+          "acceptance": [
+            "M04 真实 Provider 与 Windows 协作定向闭环",
+            "M04 原调用首文本与首预览持久计时"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "run-sse-events",
+          "name": "SSE 提示与权威快照",
+          "description": "持久事件通过 SSE 提示页面重读权威状态，支持同页断线重连。",
+          "code": [
+            "apps/api/src/api/run-events-api.ts",
+            "apps/api/src/run/run-event-repository.ts",
+            "apps/workbench/src/api/runEvents.ts"
+          ],
+          "docs": [
+            "docs/api/http-command-contract.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/stack-migration.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/run-events.integration.test.ts",
+            "apps/workbench/tests/run-events.spec.ts"
+          ],
+          "acceptance": [
+            "Windows 同页 SSE 断线重连"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "internal-read-tool-loop",
+          "name": "内部只读工具循环",
+          "description": "模型可请求冻结词表内的查询工具，结果落库后进入下一轮模型输入。",
+          "code": [
+            "apps/api/src/application/tool-loop.ts",
+            "apps/api/src/worker/tool-loop-action.ts",
+            "apps/api/src/workflow/tool-catalog.ts",
+            "apps/api/src/run/run-tool-call-repository.ts"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/architecture/tool-adapters.md"
+          ],
+          "prompts": [
+            "prompts/agent-native-tools.md",
+            "apps/api/src/workflow/tool-catalog.ts"
+          ],
+          "tests": [
+            "apps/api/test/integration/tool-loop.integration.test.ts",
+            "apps/api/test/unit/tool-loop.test.ts"
+          ],
+          "acceptance": [
+            "内部文件/Git 工具循环 A 片独立验收（2026-10-03）"
+          ],
+          "intent": "current",
+          "note": "已有 A 片源码与独立验收记录；当前缺口及 B/C 接入范围动态引用当前验收表，不从适配器存在推断后续片通过。"
+        },
+        {
+          "id": "tool-loop-write-check",
+          "name": "内部修改与检查工具循环",
+          "description": "后续片把有范围的文件修改和检查动作纳入同一持久循环与授权边界。",
+          "code": [],
+          "docs": [
+            "docs/architecture/tool-adapters.md",
+            "docs/architecture/runtime-context.md"
+          ],
+          "prompts": [
+            "prompts/agent-native-tools.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "planned",
+          "note": "当前工具词表仅有目录、路径、文本、文件和 Git 只读项；修改/检查循环不能由已有适配器存在推断已接入。"
+        },
+        {
+          "id": "conversation-execution-plan-persistence",
+          "name": "会话执行计划持久更新",
+          "description": "规划有界内部计划工具、稳定步骤身份、revision 与原调用幂等，计划不取得任务完成权。",
+          "code": [],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/architecture/agent-prompt-design.md",
+            "docs/testing/verification-plan.md"
+          ],
+          "prompts": [
+            "prompts/conversation-execution-plan.md"
+          ],
+          "tests": [],
+          "acceptance": [
+            "会话内可折叠执行计划（2026-10-03）"
+          ],
+          "intent": "planned",
+          "note": "当前为专项设计与提示词；固定 RunStep 和进行中的只读工具循环不能替代动态执行计划。"
+        }
+      ]
+    },
+    {
+      "id": "gateway-permissions",
+      "name": "连接、权限与资源准入",
+      "description": "把连接能力、版本化权限、受管资源与动作身份分别管理。",
+      "stageIds": [
+        "M03",
+        "M04",
+        "M06"
+      ],
+      "features": [
+        {
+          "id": "gateway-connection-capabilities",
+          "name": "工具连接与能力配置",
+          "description": "建立工具连接，按 capability 配置目录或公共网页边界。",
+          "code": [
+            "apps/api/src/application/gateway-commands.ts",
+            "apps/api/src/application/gateway-configuration.ts",
+            "apps/workbench/src/views/ConnectionsView.tsx"
+          ],
+          "docs": [
+            "docs/architecture/tool-adapters.md",
+            "docs/api/http-command-contract.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/C-recovery-gateway.md",
+            "prompts/E-real-adapters.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/gateway.integration.test.ts",
+            "apps/workbench/tests/connectionsSettings.spec.ts"
+          ],
+          "acceptance": [
+            "root-bound 能力配置入口（2026-10-02）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "gateway-policy-version",
+          "name": "权限策略版本与撤销",
+          "description": "新增权限版本或撤销策略，准入复核当前授权而非继承旧批准。",
+          "code": [
+            "apps/api/src/application/gateway-commands.ts",
+            "apps/api/src/application/gateway-configuration.ts"
+          ],
+          "docs": [
+            "contracts/04-recovery-and-commit.md",
+            "docs/architecture/tool-adapters.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/C-recovery-gateway.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/gateway.integration.test.ts"
+          ],
+          "acceptance": [
+            "Mock 完整并发、取消、UNKNOWN 可靠性",
+            "root-bound 能力配置入口（2026-10-02）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "managed-resource-identity",
+          "name": "受管目录物理身份",
+          "description": "登记受管资源并检测规范路径、物理身份和重叠根。",
+          "code": [
+            "apps/api/src/application/gateway-configuration.ts",
+            "apps/api/src/files/windows-file-io.ts"
+          ],
+          "docs": [
+            "docs/architecture/tool-adapters.md",
+            "docs/decisions/ADR-012-windows-file-io-handle-boundary.md"
+          ],
+          "prompts": [
+            "prompts/C-recovery-gateway.md",
+            "prompts/folder-first-conversation.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/gateway.integration.test.ts",
+            "apps/api/test/integration/folder-first-conversation.integration.test.ts"
+          ],
+          "acceptance": [
+            "root-bound 能力配置入口（2026-10-02）",
+            "文件/Git/CLI 与 UNKNOWN/PARTIAL 人工处置"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "gateway-action-prepare",
+          "name": "动作准备与审批准入",
+          "description": "逻辑动作准备时校验来源、连接、参数、权限和确切批准目标。",
+          "code": [
+            "apps/api/src/application/gateway-actions.ts",
+            "apps/api/src/application/request-review.ts"
+          ],
+          "docs": [
+            "contracts/04-recovery-and-commit.md",
+            "docs/architecture/tool-adapters.md"
+          ],
+          "prompts": [
+            "prompts/C-recovery-gateway.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/gateway.integration.test.ts",
+            "apps/api/test/integration/real-tools-gateway.integration.test.ts"
+          ],
+          "acceptance": [
+            "Mock 完整并发、取消、UNKNOWN 可靠性",
+            "文件/Git/CLI 与 UNKNOWN/PARTIAL 人工处置"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "gateway-action-ledger",
+          "name": "动作、调用与回执账本",
+          "description": "分开记录 Operation、Invocation 和结果回执，维持原动作身份。",
+          "code": [
+            "apps/api/src/gateway/gateway-repository.ts",
+            "apps/api/src/application/gateway-queries.ts",
+            "apps/api/src/application/gateway-actions.ts"
+          ],
+          "docs": [
+            "contracts/04-recovery-and-commit.md",
+            "docs/database/physical-design-postgresql.md"
+          ],
+          "prompts": [
+            "prompts/C-recovery-gateway.md",
+            "prompts/E-real-adapters.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/real-tools-gateway.integration.test.ts"
+          ],
+          "acceptance": [
+            "文件/Git/CLI 与 UNKNOWN/PARTIAL 人工处置"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "task-resource-exclusion",
+          "name": "任务与目录双重排他",
+          "description": "同时保护活动 Task 和实际工作目录，旧租约过期不等于旧进程停止。",
+          "code": [
+            "apps/api/src/application/lock-task-run.ts",
+            "apps/api/src/application/gateway-actions.ts",
+            "apps/api/src/gateway/gateway-repository.ts"
+          ],
+          "docs": [
+            "contracts/02-state-and-execution.md",
+            "contracts/04-recovery-and-commit.md",
+            "docs/architecture/tool-adapters.md"
+          ],
+          "prompts": [
+            "prompts/C-recovery-gateway.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/gateway.integration.test.ts",
+            "apps/api/test/integration/recovery.integration.test.ts"
+          ],
+          "acceptance": [
+            "Mock 完整并发、取消、UNKNOWN 可靠性"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "gateway-frozen-diff-approval",
+          "name": "冻结文件差异审批",
+          "description": "文件动作的审批显示确切差异及摘要，变动后拒绝沿用旧批准。",
+          "code": [
+            "apps/api/src/application/gateway-queries.ts",
+            "apps/workbench/src/components/FileWriteFrozenDiffPanel.tsx",
+            "apps/api/src/files/file-write-diff-repository.ts"
+          ],
+          "docs": [
+            "docs/architecture/tool-adapters.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/E-real-adapters.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/real-tools-gateway.integration.test.ts",
+            "apps/workbench/tests/run-file-write-disposition.spec.ts"
+          ],
+          "acceptance": [
+            "文件/Git/CLI 与 UNKNOWN/PARTIAL 人工处置"
+          ],
+          "intent": "current"
+        }
+      ]
+    },
+    {
+      "id": "files-web-git-cli",
+      "name": "文件、网页、Git 与 CLI",
+      "description": "通过适配器执行真实读取、变化集和受控本地命令。",
+      "stageIds": [
+        "M04",
+        "M06"
+      ],
+      "features": [
+        {
+          "id": "managed-file-read",
+          "name": "受管文件读取",
+          "description": "读取受管根内文本文件并保存可追溯的读取来源。",
+          "code": [
+            "apps/api/src/application/gateway-actions.ts",
+            "apps/api/src/files/windows-file-io.ts",
+            "apps/workbench/src/components/TaskDelegatePanel.tsx"
+          ],
+          "docs": [
+            "docs/architecture/tool-adapters.md",
+            "docs/architecture/runtime-context.md"
+          ],
+          "prompts": [
+            "prompts/E-real-adapters.md",
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/real-model-read-sources.integration.test.ts",
+            "apps/workbench/tests/delegate-task.spec.ts"
+          ],
+          "acceptance": [
+            "M04 文件/网页读取委托 UI",
+            "M04 Files/Web→真实模型→人工完成"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "managed-file-query",
+          "name": "目录、路径与正文查询",
+          "description": "按有界遍历提供目录列表、路径查找和字面文本搜索。",
+          "code": [
+            "apps/api/src/files/file-query.ts",
+            "apps/api/src/workflow/tool-catalog.ts"
+          ],
+          "docs": [
+            "docs/architecture/tool-adapters.md"
+          ],
+          "prompts": [
+            "prompts/agent-native-tools.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/file-query.test.ts",
+            "apps/api/test/integration/tool-loop.integration.test.ts"
+          ],
+          "acceptance": [],
+          "intent": "current",
+          "note": "并行新增源码处于实施接续中；关联不表示独立验收，动态状态应以当前验收表和工作区为准。"
+        },
+        {
+          "id": "file-changeset-write",
+          "name": "文件变化集与应用",
+          "description": "保存隔离变化集，核验边界后通过真实文件 I/O 显式应用。",
+          "code": [
+            "apps/api/src/files/file-changeset.ts",
+            "apps/api/src/files/change-set-repository.ts",
+            "apps/api/src/files/windows-file-io.ts"
+          ],
+          "docs": [
+            "docs/architecture/tool-adapters.md",
+            "docs/database/physical-design-postgresql.md"
+          ],
+          "prompts": [
+            "prompts/E-real-adapters.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/file-changeset.test.ts",
+            "apps/api/test/integration/real-tools-gateway.integration.test.ts"
+          ],
+          "acceptance": [
+            "文件/Git/CLI 与 UNKNOWN/PARTIAL 人工处置"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "file-partial-disposition",
+          "name": "PARTIAL 与无回执人工处置",
+          "description": "提供处置预览和停止证明，人工关闭不抹去 UNKNOWN 历史。",
+          "code": [
+            "apps/api/src/application/file-write-disposition.ts",
+            "apps/workbench/src/components/FileWriteDispositionPanel.tsx",
+            "apps/api/src/files/file-write-stop-proof-repository.ts"
+          ],
+          "docs": [
+            "contracts/04-recovery-and-commit.md",
+            "docs/architecture/tool-adapters.md"
+          ],
+          "prompts": [
+            "prompts/E-real-adapters.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/m06-stop-proof.integration.test.ts",
+            "apps/workbench/tests/run-file-write-disposition.spec.ts"
+          ],
+          "acceptance": [
+            "文件/Git/CLI 与 UNKNOWN/PARTIAL 人工处置"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "web-source-import",
+          "name": "公共网页获取与导入",
+          "description": "受限公共网页获取经 Gateway 保存正文和来源，收录需显式决定。",
+          "code": [
+            "apps/api/src/web/web-fetch.ts",
+            "apps/api/src/application/web-import-commands.ts",
+            "apps/api/src/application/web-import-runner.ts",
+            "apps/workbench/src/components/WebImportPanel.tsx"
+          ],
+          "docs": [
+            "docs/architecture/tool-adapters.md",
+            "docs/architecture/information-planning.md"
+          ],
+          "prompts": [
+            "prompts/E-real-adapters.md",
+            "prompts/product-supplement-2026-09-27.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/web-fetch.integration.test.ts",
+            "apps/workbench/tests/web-import.spec.ts"
+          ],
+          "acceptance": [
+            "M04 Files/Web→真实模型→人工完成",
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "git-read-adapter",
+          "name": "Git 状态、差异与日志适配器",
+          "description": "提供受管仓库的只读状态、差异和提交日志。",
+          "code": [
+            "apps/api/src/git/git-adapter.ts",
+            "apps/api/src/workflow/tool-catalog.ts"
+          ],
+          "docs": [
+            "docs/architecture/tool-adapters.md"
+          ],
+          "prompts": [
+            "prompts/E-real-adapters.md",
+            "prompts/agent-native-tools.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/git-adapter.test.ts",
+            "apps/api/test/integration/tool-loop.integration.test.ts"
+          ],
+          "acceptance": [
+            "文件/Git/CLI 与 UNKNOWN/PARTIAL 人工处置"
+          ],
+          "intent": "current",
+          "note": "适配器与进行中的内部只读词表关联；协作 UI 的公开操作入口另列为规划。"
+        },
+        {
+          "id": "git-write-adapter",
+          "name": "Git 暂存、提交与推送",
+          "description": "受控 Git 写入经审批、回执及原身份核对处理外部副作用。",
+          "code": [
+            "apps/api/src/git/git-adapter.ts",
+            "apps/api/src/application/gateway-actions.ts"
+          ],
+          "docs": [
+            "docs/architecture/tool-adapters.md",
+            "contracts/04-recovery-and-commit.md"
+          ],
+          "prompts": [
+            "prompts/E-real-adapters.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/git-adapter.test.ts",
+            "apps/api/test/integration/real-tools-gateway.integration.test.ts"
+          ],
+          "acceptance": [
+            "文件/Git/CLI 与 UNKNOWN/PARTIAL 人工处置"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "controlled-cli-adapter",
+          "name": "受信构建和检查 CLI",
+          "description": "按可执行文件和参数数组运行受信命令，保留取消、进程树和回执。",
+          "code": [
+            "apps/api/src/cli-worker/cli-adapter.ts",
+            "apps/api/src/cli-worker/process-tree.ts",
+            "apps/api/src/application/gateway-actions.ts"
+          ],
+          "docs": [
+            "docs/architecture/tool-adapters.md"
+          ],
+          "prompts": [
+            "prompts/E-real-adapters.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/cli-adapter.test.ts",
+            "apps/api/test/integration/cli.integration.test.ts",
+            "apps/api/test/integration/real-tools-gateway.integration.test.ts"
+          ],
+          "acceptance": [
+            "文件/Git/CLI 与 UNKNOWN/PARTIAL 人工处置"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "git-collaboration-ui",
+          "name": "协作页 Git 操作入口",
+          "description": "规划从协作页读取状态和差异并可回到具体变更。",
+          "code": [],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/architecture/tool-adapters.md"
+          ],
+          "prompts": [
+            "prompts/agent-native-tools.md",
+            "prompts/E-real-adapters.md"
+          ],
+          "tests": [],
+          "acceptance": [
+            "Git 状态/diff 的协作 UI"
+          ],
+          "intent": "planned",
+          "note": "面板当前展示能力限制；公开动作触发协议不能由配置入口推断完成。"
+        },
+        {
+          "id": "interactive-terminal",
+          "name": "交互终端",
+          "description": "规划受管 cwd、人工执行身份、进程生命周期与断连恢复。",
+          "code": [],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/architecture/tool-adapters.md"
+          ],
+          "prompts": [
+            "prompts/E-real-adapters.md"
+          ],
+          "tests": [],
+          "acceptance": [
+            "交互终端 / PDF 导入"
+          ],
+          "intent": "planned",
+          "note": "受控 CLI 适配器不能替代交互终端协议。"
+        }
+      ]
+    },
+    {
+      "id": "context-sources",
+      "name": "Context 与来源依据",
+      "description": "将当前事实、用户选定资料和确切版本组成可核对的模型输入。",
+      "stageIds": [
+        "M04",
+        "M05"
+      ],
+      "features": [
+        {
+          "id": "context-authoritative-facts",
+          "name": "权威事实 Context",
+          "description": "从 Task、Project、Goal、State 和验收事实构造当前运行上下文。",
+          "code": [
+            "apps/api/src/application/context-builder.ts",
+            "apps/api/src/workflow/context-fixture.ts"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "contracts/01-facts-and-ownership.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/context.integration.test.ts"
+          ],
+          "acceptance": [
+            "M04 Files/Web→真实模型→人工完成"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "context-knowledge-retrieval",
+          "name": "资料与知识引用",
+          "description": "把选定知识、记忆、决定及来源版本纳入输入，保留适用范围。",
+          "code": [
+            "apps/api/src/application/context-builder.ts",
+            "apps/api/src/application/assist-runner.ts",
+            "apps/workbench/src/components/AssistSourcePicker.tsx"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/architecture/information-planning.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md",
+            "prompts/product-supplement-2026-09-27.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/context.integration.test.ts",
+            "apps/workbench/tests/assist-source-picker.spec.ts"
+          ],
+          "acceptance": [
+            "M04 Files/Web→真实模型→人工完成",
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "context-mandatory-rules",
+          "name": "强制规则与输入隔离",
+          "description": "强制约束优先入 Context，外部正文以数据标签隔离。",
+          "code": [
+            "apps/api/src/application/context-builder.ts",
+            "apps/api/src/application/rule-fence.ts",
+            "apps/api/src/workflow/agent-system-prompt.ts"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/architecture/agent-prompt-design.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md",
+            "apps/api/src/workflow/agent-system-prompt.ts"
+          ],
+          "tests": [
+            "apps/api/test/integration/context.integration.test.ts",
+            "apps/api/test/unit/agent-runtime-prompts.test.ts"
+          ],
+          "acceptance": [
+            "产品 Agent 公共提示词运行接入（2026-10-03）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "context-manifest",
+          "name": "Context Manifest 与来源查看",
+          "description": "保存输入构成、版本和摘要，用户与 Agent 可跳到同一事实源。",
+          "code": [
+            "apps/api/src/application/context-queries.ts",
+            "apps/api/src/api/context-api.ts",
+            "apps/workbench/src/components/RunSourcesPanel.tsx"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/api/http-command-contract.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/context.integration.test.ts",
+            "apps/workbench/tests/run-sources.spec.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage",
+            "M04 Files/Web→真实模型→人工完成"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "context-staleness-fence",
+          "name": "Context 过期与重建",
+          "description": "Task、输入或规则变化后核对原 Manifest，避免复用过期准备。",
+          "code": [
+            "apps/api/src/application/context-fence.ts",
+            "apps/api/src/application/context-builder.ts",
+            "apps/api/src/application/run-steps.ts"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "contracts/04-recovery-and-commit.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/context.integration.test.ts",
+            "apps/api/test/integration/run-steps.integration.test.ts"
+          ],
+          "acceptance": [
+            "Mock 完整并发、取消、UNKNOWN 可靠性"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "context-read-results",
+          "name": "工具读取结果入模",
+          "description": "文件与网页读取结果作为有来源的输入进入真实 DRAFT。",
+          "code": [
+            "apps/api/src/application/run-read-evidence.ts",
+            "apps/api/src/application/context-builder.ts",
+            "apps/api/src/workflow/openai-compatible-model-port.ts"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/architecture/tool-adapters.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md",
+            "prompts/E-real-adapters.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/real-model-read-sources.integration.test.ts",
+            "apps/api/test/unit/openai-read-prompt.test.ts"
+          ],
+          "acceptance": [
+            "M04 Files/Web→真实模型→人工完成"
+          ],
+          "intent": "current"
+        }
+      ]
+    },
+    {
+      "id": "model-connections-calls",
+      "name": "模型连接与调用诊断",
+      "description": "管理 Provider 配置、能力验证、流式调用、预算及错误证据。",
+      "stageIds": [
+        "M04"
+      ],
+      "features": [
+        {
+          "id": "model-config-preservation",
+          "name": "模型配置保存与保留",
+          "description": "保存模型端点、模型名和能力配置，切换或验证不丢原配置。",
+          "code": [
+            "apps/api/src/workflow/model-port-config.ts",
+            "apps/workbench/src/views/ConnectionsView.tsx",
+            "apps/workbench/src/components/ModelConnectionStrip.tsx"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/api/http-command-contract.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/model-port.integration.test.ts",
+            "apps/api/test/unit/model-port-config.test.ts",
+            "apps/workbench/tests/modelConnectionStrip.spec.ts"
+          ],
+          "acceptance": [
+            "模型连接验证与配置保留"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "model-connection-verification",
+          "name": "连接与能力验证",
+          "description": "通过独立验证调用核对模型可用性及声明能力。",
+          "code": [
+            "apps/api/src/application/model-port-verification.ts",
+            "apps/api/src/workflow/model-port-verify.ts"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/model-verify.integration.test.ts",
+            "apps/api/test/unit/model-port-verify.test.ts"
+          ],
+          "acceptance": [
+            "模型连接验证与配置保留"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "provider-stream-schema",
+          "name": "真实 Provider 流式与结构化输出",
+          "description": "模型端口处理流式文本和 JSON schema 输出，专用语义检查继续独立。",
+          "code": [
+            "apps/api/src/workflow/openai-compatible-model-port.ts",
+            "apps/api/src/workflow/markdown-deliverable.ts"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/architecture/agent-prompt-design.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md",
+            "apps/api/src/workflow/openai-compatible-model-port.ts"
+          ],
+          "tests": [
+            "apps/api/test/integration/real-model.integration.test.ts",
+            "apps/api/test/unit/openai-compatible-model-port.test.ts"
+          ],
+          "acceptance": [
+            "真实 DRAFT、HARD SEMANTIC、取消/abort",
+            "M04 真实 Provider 与 Windows 协作定向闭环"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "model-budget-reservation",
+          "name": "调用预算与用量",
+          "description": "调用前保留预算，记录可信 token 和缓存用量并处理未知结算。",
+          "code": [
+            "apps/api/src/application/model-call-recorder.ts",
+            "apps/api/src/model/model-call-repository.ts"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/database/physical-design-postgresql.md"
+          ],
+          "prompts": [
+            "prompts/B-workflow-verification.md",
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/model-call-budget.integration.test.ts"
+          ],
+          "acceptance": [
+            "Assist/Run 调用诊断与取消归因"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "model-call-error-diagnostics",
+          "name": "错误分类与取消归因",
+          "description": "记录连接、限流、断流、schema 失败和取消的类型化诊断。",
+          "code": [
+            "apps/api/src/workflow/model-error-classification.ts",
+            "apps/api/src/application/trace-queries.ts",
+            "apps/workbench/src/lib/modelErrorGuides.ts"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/model-provider-faults.integration.test.ts",
+            "apps/api/test/unit/model-error-classification.test.ts",
+            "apps/workbench/tests/assistProviderErrorClient.spec.ts"
+          ],
+          "acceptance": [
+            "Assist/Run 调用诊断与取消归因",
+            "Provider 六类错误的真实故障矩阵"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "model-first-output-timing",
+          "name": "首文本与首预览计时",
+          "description": "分别保存原模型调用的首文本时间和首预览持久时间。",
+          "code": [
+            "apps/api/src/application/model-call-recorder.ts",
+            "apps/api/src/application/run-draft-preview.ts",
+            "apps/api/src/application/trace-queries.ts"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/stack-migration.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/run-draft-preview.integration.test.ts",
+            "apps/api/test/integration/traceability.integration.test.ts"
+          ],
+          "acceptance": [
+            "M04 原调用首文本与首预览持久计时"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "provider-tool-capability-refusal",
+          "name": "未支持工具能力拒绝",
+          "description": "未具备对应执行路径时拒绝原生工具参数并保留调用证据。",
+          "code": [
+            "apps/api/src/workflow/openai-compatible-model-port.ts",
+            "apps/api/src/application/model-call-recorder.ts"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/architecture/agent-prompt-design.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/openai-compatible-model-port.test.ts",
+            "apps/api/test/integration/model-provider-faults.integration.test.ts"
+          ],
+          "acceptance": [
+            "M04 模型原生工具参数的能力拒绝与证据保全"
+          ],
+          "intent": "current"
+        }
+      ]
+    },
+    {
+      "id": "skills-packs-agent-prompts",
+      "name": "Skill、Pack 与运行提示词",
+      "description": "管理第一方声明式能力、固定版本及产品 Agent 的实际提示词来源。",
+      "stageIds": [
+        "M04",
+        "M05"
+      ],
+      "features": [
+        {
+          "id": "first-party-skill-registry",
+          "name": "第一方 Skill 目录与版本",
+          "description": "读取固定 Skill 版本、输入输出 schema、依赖及可调用性。",
+          "code": [
+            "apps/api/src/skills/first-party-registry.ts",
+            "apps/api/src/api/first-party-skills-api.ts"
+          ],
+          "docs": [
+            "docs/architecture/relay-skills.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/first-party-skills.test.ts",
+            "apps/workbench/tests/firstPartySkills.spec.ts"
+          ],
+          "acceptance": [
+            "F24 第一方 Skill / Blueprint / Pack 接续复验（2026-10-03 跨候选修复轮）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "task-definition-skill",
+          "name": "任务定义 Skill",
+          "description": "根据当前 Task 和验收版本生成可审阅的契约建议。",
+          "code": [
+            "apps/api/src/skills/first-party-registry.ts",
+            "apps/api/src/skills/skill-output.ts",
+            "apps/workbench/src/views/TaskSkillView.tsx"
+          ],
+          "docs": [
+            "docs/architecture/relay-skills.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md",
+            "apps/api/src/skills/first-party-registry.ts"
+          ],
+          "tests": [
+            "apps/api/test/integration/real-model-skills.integration.test.ts",
+            "apps/workbench/tests/taskSkillLive.spec.ts"
+          ],
+          "acceptance": [
+            "M04 首批三个 Skill 的真实模型组合",
+            "F24 第一方 Skill / Blueprint / Pack 接续复验（2026-10-03 跨候选修复轮）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "project-resume-skill",
+          "name": "项目恢复 Skill",
+          "description": "从当前权威引用概述现状、风险与下一步，并说明比较基线是否存在。",
+          "code": [
+            "apps/api/src/skills/first-party-registry.ts",
+            "apps/workbench/src/views/ProjectResumeView.tsx",
+            "apps/api/src/application/assist-runner.ts"
+          ],
+          "docs": [
+            "docs/architecture/relay-skills.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md",
+            "apps/api/src/skills/first-party-registry.ts"
+          ],
+          "tests": [
+            "apps/api/test/integration/real-model-skills.integration.test.ts",
+            "apps/workbench/tests/projectResumeLive.spec.ts"
+          ],
+          "acceptance": [
+            "M04 首批三个 Skill 的真实模型组合",
+            "F24 第一方 Skill / Blueprint / Pack 接续复验（2026-10-03 跨候选修复轮）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "check-plan-skill",
+          "name": "验收方案 Skill",
+          "description": "建议新增检查映射，建议本身不构成 CheckPlan 或 PASS。",
+          "code": [
+            "apps/api/src/skills/first-party-registry.ts",
+            "apps/workbench/src/views/VerificationPlanView.tsx",
+            "apps/workbench/src/components/TaskCheckPlanPreview.tsx"
+          ],
+          "docs": [
+            "docs/architecture/relay-skills.md",
+            "contracts/03-verification-and-approval.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md",
+            "apps/api/src/skills/first-party-registry.ts"
+          ],
+          "tests": [
+            "apps/api/test/integration/real-model-skills.integration.test.ts",
+            "apps/workbench/tests/taskSkillProposal.spec.ts"
+          ],
+          "acceptance": [
+            "M04 首批三个 Skill 的真实模型组合",
+            "F24 第一方 Skill / Blueprint / Pack 接续复验（2026-10-03 跨候选修复轮）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "project-blueprint-skill",
+          "name": "项目蓝图 Skill",
+          "description": "按当前 Project、目标和任务生成有限项目蓝图候选。",
+          "code": [
+            "apps/api/src/skills/first-party-registry.ts",
+            "apps/workbench/src/views/BlueprintSkillGenerator.tsx",
+            "apps/api/src/application/blueprint-proposals.ts"
+          ],
+          "docs": [
+            "docs/architecture/relay-skills.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md",
+            "apps/api/src/skills/first-party-registry.ts"
+          ],
+          "tests": [
+            "apps/api/test/integration/project-blueprint.integration.test.ts",
+            "apps/workbench/tests/blueprintLive.spec.ts"
+          ],
+          "acceptance": [
+            "F24 第一方 Skill / Blueprint / Pack 接续复验（2026-10-03 跨候选修复轮）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "thesis-development-pack",
+          "name": "Thesis 与 Development Pack",
+          "description": "展示最小 Pack 的固定能力组合和依赖，不以 Pack 授予额外权限。",
+          "code": [
+            "apps/api/src/skills/first-party-registry.ts",
+            "apps/workbench/src/components/PackCatalogPanel.tsx"
+          ],
+          "docs": [
+            "docs/architecture/relay-skills.md",
+            "docs/decisions/ADR-008-declarative-skills.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/first-party-skills.test.ts",
+            "apps/workbench/tests/firstPartySkills.spec.ts"
+          ],
+          "acceptance": [
+            "F24 第一方 Skill / Blueprint / Pack 接续复验（2026-10-03 跨候选修复轮）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "skill-source-output-binding",
+          "name": "Skill 输入与输出版本绑定",
+          "description": "冻结输入来源和 Skill 身份，严格校验输出并保留候选基线。",
+          "code": [
+            "apps/api/src/skills/skill-basis.ts",
+            "apps/api/src/skills/skill-output.ts",
+            "apps/api/src/skills/skill-proposal.ts"
+          ],
+          "docs": [
+            "docs/architecture/relay-skills.md",
+            "docs/architecture/agent-prompt-design.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/first-party-skills.test.ts",
+            "apps/api/test/integration/assist.integration.test.ts"
+          ],
+          "acceptance": [
+            "F24 第一方 Skill / Blueprint / Pack 接续复验（2026-10-03 跨候选修复轮）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "agent-public-core-prompt",
+          "name": "公共 Agent 核心提示词",
+          "description": "运行源码统一维护公共协作、事实、权限和完成边界并接入现有入口。",
+          "code": [
+            "apps/api/src/workflow/agent-system-prompt.ts",
+            "apps/api/src/application/assist-runner.ts",
+            "apps/api/src/application/conversation-execution.ts",
+            "apps/api/src/workflow/openai-compatible-model-port.ts"
+          ],
+          "docs": [
+            "docs/architecture/agent-prompt-design.md",
+            "docs/architecture/runtime-context.md"
+          ],
+          "prompts": [
+            "apps/api/src/workflow/agent-system-prompt.ts",
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/agent-runtime-prompts.test.ts",
+            "apps/api/test/integration/assist.integration.test.ts"
+          ],
+          "acceptance": [
+            "产品 Agent 公共提示词运行接入（2026-10-03）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "agent-specialized-prompts",
+          "name": "专用输出与模式提示词",
+          "description": "公共核心组合 Assist、Skill、DRAFT 和请求解释的专用输出要求。",
+          "code": [
+            "apps/api/src/application/assist-runner.ts",
+            "apps/api/src/application/conversation-execution.ts",
+            "apps/api/src/skills/first-party-registry.ts",
+            "apps/api/src/workflow/openai-compatible-model-port.ts"
+          ],
+          "docs": [
+            "docs/architecture/agent-prompt-design.md"
+          ],
+          "prompts": [
+            "apps/api/src/workflow/agent-system-prompt.ts",
+            "apps/api/src/application/assist-runner.ts",
+            "apps/api/src/application/conversation-execution.ts",
+            "apps/api/src/skills/first-party-registry.ts",
+            "apps/api/src/workflow/openai-compatible-model-port.ts"
+          ],
+          "tests": [
+            "apps/api/test/unit/agent-runtime-prompts.test.ts"
+          ],
+          "acceptance": [
+            "产品 Agent 公共提示词运行接入（2026-10-03）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "skill-quality-evaluation",
+          "name": "Skill 质量与重复评价",
+          "description": "冻结质量案例、评分、次数和预算后评价四项 Skill 的语义质量。",
+          "code": [],
+          "docs": [
+            "docs/architecture/relay-skills.md",
+            "docs/testing/verification-plan.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md",
+            "prompts/stack-migration.md"
+          ],
+          "tests": [],
+          "acceptance": [
+            "F24 第一方 Skill / Blueprint / Pack 接续复验（2026-10-03 跨候选修复轮）"
+          ],
+          "intent": "planned",
+          "note": "契约合规与定向真实模型记录不能替代尚未冻结的质量评价。"
+        }
+      ]
+    },
+    {
+      "id": "assist-conversation-proposals",
+      "name": "对话、提案与蓝图",
+      "description": "从协作消息形成可审阅候选，显式接受后复用原 Task 和领域入口。",
+      "stageIds": [
+        "M04",
+        "M05",
+        "M06"
+      ],
+      "features": [
+        {
+          "id": "assist-session-messages",
+          "name": "协作会话与消息",
+          "description": "创建会话、发送消息和读取历史，Session 与业务 Task 保持分离。",
+          "code": [
+            "apps/api/src/application/assist-commands.ts",
+            "apps/api/src/application/assist-queries.ts",
+            "apps/workbench/src/views/AssistView.tsx"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/frontend/workbench-design.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md",
+            "prompts/ui-option-2-pages.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/assist.integration.test.ts",
+            "apps/workbench/tests/assist-flow.spec.ts"
+          ],
+          "acceptance": [
+            "Agent 聊天发送、导航保护与 Mock 回复"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "assist-preview-cancel",
+          "name": "对话预览与取消",
+          "description": "生成中提供持久预览及取消入口，失败保留类型化原因。",
+          "code": [
+            "apps/api/src/application/assist-runner.ts",
+            "apps/api/src/assist/live-preview.ts",
+            "apps/workbench/src/views/AssistView.tsx"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/assist-live-preview.integration.test.ts",
+            "apps/workbench/tests/assist-preview.spec.ts"
+          ],
+          "acceptance": [
+            "Agent 聊天发送、导航保护与 Mock 回复",
+            "Assist/Run 调用诊断与取消归因"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "assist-source-selection",
+          "name": "对话资料选择",
+          "description": "用户显式选择确切来源，生成前重新核对来源可用性。",
+          "code": [
+            "apps/workbench/src/components/AssistSourcePicker.tsx",
+            "apps/api/src/application/assist-runner.ts"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/architecture/runtime-context.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md",
+            "prompts/product-supplement-2026-09-27.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/assist.integration.test.ts",
+            "apps/workbench/tests/assist-source-picker.spec.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "assist-proposal-decisions",
+          "name": "提案差异与接受拒绝",
+          "description": "候选可预览、接受或拒绝；接受按当前事实与命令身份校验。",
+          "code": [
+            "apps/api/src/application/assist-commands.ts",
+            "apps/workbench/src/components/AssistSkillOutput.tsx",
+            "apps/workbench/src/components/TaskDefinitionDiff.tsx"
+          ],
+          "docs": [
+            "docs/architecture/runtime-context.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/assist.integration.test.ts",
+            "apps/api/test/integration/f24-proposal-idempotency.integration.test.ts",
+            "apps/workbench/tests/taskSkillProposal.spec.ts"
+          ],
+          "acceptance": [
+            "F24 第一方 Skill / Blueprint / Pack 接续复验（2026-10-03 跨候选修复轮）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "blueprint-apply-atomic",
+          "name": "蓝图审阅与原事务应用",
+          "description": "按基线审阅任务、State 和 View 候选，应用复用现有领域写入口。",
+          "code": [
+            "apps/api/src/application/blueprint-apply.ts",
+            "apps/api/src/application/blueprint-proposals.ts",
+            "apps/workbench/src/views/LiveBlueprintView.tsx"
+          ],
+          "docs": [
+            "docs/architecture/relay-skills.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/project-blueprint.integration.test.ts",
+            "apps/api/test/integration/f24-proposal-idempotency.integration.test.ts",
+            "apps/workbench/tests/blueprintLive.spec.ts"
+          ],
+          "acceptance": [
+            "F24 第一方 Skill / Blueprint / Pack 接续复验（2026-10-03 跨候选修复轮）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "folder-open-scope",
+          "name": "打开文件夹与项目复用",
+          "description": "按路径和物理身份复用或建立最小 Project、受管资源并处理歧义。",
+          "code": [
+            "apps/api/src/application/open-working-directory.ts",
+            "apps/api/src/api/working-directory-api.ts",
+            "apps/workbench/src/components/FolderScope.tsx"
+          ],
+          "docs": [
+            "docs/architecture/domain-model.md",
+            "docs/frontend/workbench-design.md",
+            "docs/decisions/ADR-016-folder-first-conversation.md"
+          ],
+          "prompts": [
+            "prompts/folder-first-conversation.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/folder-first-conversation.integration.test.ts",
+            "apps/workbench/tests/folderFirstConversation.spec.ts"
+          ],
+          "acceptance": [],
+          "intent": "current",
+          "note": "原生目录选择、重启、IME 和 DPI 属独立桌面验证出口。"
+        },
+        {
+          "id": "conversation-request-interpretation",
+          "name": "讨论、澄清与执行解释",
+          "description": "对确切原消息生成 DISCUSS/CLARIFY/PREPARE 结果，前端不按关键词判定。",
+          "code": [
+            "apps/api/src/application/conversation-execution.ts",
+            "apps/api/src/api/conversation-execution-api.ts",
+            "apps/workbench/src/components/ExecutionSummary.tsx"
+          ],
+          "docs": [
+            "docs/architecture/agent-prompt-design.md",
+            "docs/architecture/domain-model.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/folder-first-conversation.md",
+            "apps/api/src/application/conversation-execution.ts"
+          ],
+          "tests": [
+            "apps/api/test/unit/conversation-execution.test.ts",
+            "apps/api/test/integration/folder-first-conversation.integration.test.ts"
+          ],
+          "acceptance": [
+            "产品 Agent 公共提示词运行接入（2026-10-03）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "conversation-apply-execution",
+          "name": "对话候选进入真实执行",
+          "description": "人工接受执行摘要后，经原 Task、READY、Delegate 建立 Run。",
+          "code": [
+            "apps/api/src/application/conversation-execution.ts",
+            "apps/api/src/application/delegate-task.ts",
+            "apps/workbench/src/components/ExecutionSummary.tsx"
+          ],
+          "docs": [
+            "docs/architecture/domain-model.md",
+            "docs/api/http-command-contract.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/folder-first-conversation.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/folder-first-conversation.integration.test.ts",
+            "apps/workbench/tests/folderFirstConversation.spec.ts"
+          ],
+          "acceptance": [],
+          "intent": "current",
+          "note": "对话入口的工程关联不代表完整文件夹用户链或 Windows 验收。"
+        },
+        {
+          "id": "first-message-receipt-recovery",
+          "name": "首条消息原回执恢复",
+          "description": "建会话重挂载后保留原消息 command_id，按原回执查询或重试。",
+          "code": [
+            "apps/workbench/src/views/AssistView.tsx",
+            "apps/workbench/src/views/CollaborationView.tsx"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/remediation/ui-option-2-first-session.md"
+          ],
+          "tests": [
+            "apps/workbench/tests/folderFirstConversation.spec.ts",
+            "apps/workbench/tests/browser/uiOption2FirstSession.spec.ts"
+          ],
+          "acceptance": [
+            "方案 2 整改后独立复核（2026-10-03）"
+          ],
+          "intent": "current",
+          "note": "关联当前整改后独立复核；初轮失败与修复自检仍保留在验收文档第 10.7/10.8 节，当前运行范围与剩余缺口以当前表及第 10.9 节为准。"
+        },
+        {
+          "id": "assist-draft-navigation-guard",
+          "name": "对话草稿与导航保护",
+          "description": "未发送草稿和未决命令进入共享离页守卫，避免导航丢失。",
+          "code": [
+            "apps/workbench/src/views/AssistView.tsx",
+            "apps/workbench/src/views/CollaborationView.tsx",
+            "apps/workbench/src/lib/draftGuard.ts"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/ui-option-2-pages.md",
+            "prompts/remediation/ui-option-2-first-session.md"
+          ],
+          "tests": [
+            "apps/workbench/tests/draftGuardCoexistence.spec.ts",
+            "apps/workbench/tests/folderFirstConversation.spec.ts"
+          ],
+          "acceptance": [
+            "Agent 聊天发送、导航保护与 Mock 回复",
+            "方案 2 整改后独立复核（2026-10-03）"
+          ],
+          "intent": "current",
+          "note": "关联当前整改后独立复核；初轮失败与修复自检仍保留在验收文档第 10.7/10.8 节，当前运行范围与剩余缺口以当前表及第 10.9 节为准。"
+        }
+      ]
+    },
+    {
+      "id": "workbench-navigation-today",
+      "name": "工作台、导航与今日",
+      "description": "把当前工作、判断、资料和运行依据组织为连续工作区。",
+      "stageIds": [
+        "M02",
+        "M05"
+      ],
+      "features": [
+        {
+          "id": "shared-shell-navigation",
+          "name": "共享页壳与主导航",
+          "description": "工作台、项目、待处理、资料共享页壳，保持旧路由和 query 语义。",
+          "code": [
+            "apps/workbench/src/components/AppShell.tsx",
+            "apps/workbench/src/router.tsx",
+            "apps/workbench/src/views/CollaborationView.tsx"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/frontend/design-system.md"
+          ],
+          "prompts": [
+            "prompts/ui-option-2-pages.md"
+          ],
+          "tests": [
+            "apps/workbench/tests/navigation.spec.ts",
+            "apps/workbench/tests/workBreadcrumbScope.spec.ts"
+          ],
+          "acceptance": [
+            "协作工作区的导航与任务入口",
+            "整套 UI 重做与交互覆盖（2026-10-01）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "general-thesis-development-workbenches",
+          "name": "三套项目工作台",
+          "description": "General、Thesis、Development 投影同一事实源和原命令 Owner。",
+          "code": [
+            "apps/workbench/src/views/ProjectWorkbenchView.tsx",
+            "apps/workbench/src/views/ProjectWorkbenchEntry.tsx",
+            "apps/api/src/view/builtin-view.ts"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/frontend/design-system.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md",
+            "prompts/ui-option-2-pages.md"
+          ],
+          "tests": [
+            "apps/workbench/tests/projectWorkbench.spec.ts",
+            "apps/workbench/tests/workbenchReadingPanels.spec.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "today-pin-later-focus",
+          "name": "今日、固定、稍后与专注",
+          "description": "按确定性规则投影 Today，持久保存 Pin/Later 和 Focus 选择。",
+          "code": [
+            "apps/api/src/application/today-commands.ts",
+            "apps/api/src/application/today-queries.ts",
+            "apps/workbench/src/views/TodayView.tsx"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/today.integration.test.ts",
+            "apps/workbench/tests/todayView.spec.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "attention-intervention-notifications",
+          "name": "必须介入与系统通知",
+          "description": "按未决事项形成待处理并持久去重，系统通知不改变业务判断。",
+          "code": [
+            "apps/api/src/application/attention-notifications.ts",
+            "apps/workbench/src/components/InterventionNotifications.tsx",
+            "apps/workbench/src/components/AttentionQueue.tsx"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/collaboration-controls-2026-09-28.md",
+            "prompts/product-supplement-2026-09-26.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/collaboration-controls.integration.test.ts",
+            "apps/workbench/tests/interventionNotifications.spec.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "recent-work-project-grouping",
+          "name": "近期工作与续页",
+          "description": "近期工作去重、按项目分组并保留真实分页。",
+          "code": [
+            "apps/workbench/src/components/RecentWorkRail.tsx",
+            "apps/workbench/src/views/CollaborationView.tsx"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/ui-option-2-pages.md"
+          ],
+          "tests": [
+            "apps/workbench/tests/recentWorkPagination.spec.ts"
+          ],
+          "acceptance": [
+            "连续协作工作区与七类页面层级（2026-10-01 接续）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "command-palette",
+          "name": "搜索与命令导航",
+          "description": "全局搜索和新建入口以明确作用域导航到现有功能。",
+          "code": [
+            "apps/workbench/src/components/CommandPalette.tsx",
+            "apps/workbench/src/components/DesktopTitleBar.tsx"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/frontend/design-system.md"
+          ],
+          "prompts": [
+            "prompts/ui-option-2-pages.md"
+          ],
+          "tests": [
+            "apps/workbench/tests/commandPalette.spec.ts",
+            "apps/workbench/tests/desktop-titlebar.spec.ts"
+          ],
+          "acceptance": [
+            "整套 UI 重做与交互覆盖（2026-10-01）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "splitter-focus-layout",
+          "name": "可调分栏与专注模式",
+          "description": "调整聊天、成果和资料栏宽度，保存本设备展示偏好。",
+          "code": [
+            "apps/workbench/src/components/CollaborationSplitter.tsx",
+            "apps/workbench/src/lib/collaborationLayoutPreferences.ts",
+            "apps/workbench/src/views/CollaborationView.tsx"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/frontend/design-system.md"
+          ],
+          "prompts": [
+            "prompts/ui-option-2-pages.md"
+          ],
+          "tests": [
+            "apps/workbench/tests/collaborationLayoutPreferences.spec.ts",
+            "apps/workbench/tests/collaborationWorkspace.spec.ts"
+          ],
+          "acceptance": [
+            "连续协作工作区与七类页面层级（2026-10-01 接续）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "reading-paper-markdown",
+          "name": "阅读纸面与可读时间",
+          "description": "成果和知识采用完整正文阅读，呈现设备时区时间及原始时间依据。",
+          "code": [
+            "apps/workbench/src/components/ArtifactReaderPanel.tsx",
+            "apps/workbench/src/components/KnowledgeReader.tsx",
+            "apps/workbench/src/components/SafeMarkdown.tsx",
+            "apps/workbench/src/lib/displayPreferences.ts"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/frontend/design-system.md"
+          ],
+          "prompts": [
+            "prompts/ui-option-2-pages.md"
+          ],
+          "tests": [
+            "apps/workbench/tests/readingPresentation.spec.ts",
+            "apps/workbench/tests/displayPreferences.spec.ts",
+            "apps/workbench/tests/safeMarkdown.spec.ts"
+          ],
+          "acceptance": [
+            "连续协作工作区与七类页面层级（2026-10-01 接续）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "view-configuration",
+          "name": "工作台展示配置",
+          "description": "编辑内置 View 配置，展示配置不改变活动执行契约或权限。",
+          "code": [
+            "apps/api/src/application/view-configuration-commands.ts",
+            "apps/workbench/src/components/ViewConfigurationPanel.tsx"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/view-configuration.integration.test.ts",
+            "apps/workbench/tests/viewConfiguration.spec.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "shared-accessibility-controls",
+          "name": "全局控件与键盘交互",
+          "description": "共享表单、弹层、页签和跳转链接遵循统一交互规则。",
+          "code": [
+            "apps/workbench/src/components/AppDialog.tsx",
+            "apps/workbench/src/components/PageHeader.tsx",
+            "apps/workbench/src/lib/tabNavigation.ts",
+            "apps/workbench/src/App.tsx"
+          ],
+          "docs": [
+            "docs/frontend/design-system.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/ui-option-2-pages.md"
+          ],
+          "tests": [
+            "apps/workbench/tests/appDialogInteractions.spec.ts",
+            "apps/workbench/tests/browser/workbench.spec.ts"
+          ],
+          "acceptance": [
+            "全局控件与交互基线、最大化修复（2026-10-01）",
+            "全页面视觉/故障状态覆盖"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "conversation-execution-plan-presentation",
+          "name": "会话可折叠计划与步骤依据",
+          "description": "规划在原会话显示持久步骤、当前项、真实 Run 状态和确切执行依据。",
+          "code": [],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/architecture/runtime-context.md",
+            "docs/testing/verification-plan.md"
+          ],
+          "prompts": [
+            "prompts/conversation-execution-plan.md"
+          ],
+          "tests": [],
+          "acceptance": [
+            "会话内可折叠执行计划（2026-10-03）"
+          ],
+          "intent": "planned",
+          "note": "计划步骤全勾选不代表验证通过或业务完成；重开仅恢复阅读，不自动继续执行。"
+        }
+      ]
+    },
+    {
+      "id": "knowledge-information",
+      "name": "共享知识与长期信息",
+      "description": "管理知识、记忆、决定、规则及同源阅读和显式收录。",
+      "stageIds": [
+        "M04",
+        "M05",
+        "N03"
+      ],
+      "features": [
+        {
+          "id": "knowledge-versioning",
+          "name": "知识建立与不可变版本",
+          "description": "建立知识和后续正文版本，保留项目作用域和来源关系。",
+          "code": [
+            "apps/api/src/application/information-commands.ts",
+            "apps/api/src/information/information-repository.ts"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md",
+            "prompts/product-supplement-2026-09-27.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/information.integration.test.ts",
+            "apps/api/test/integration/knowledge-reading.integration.test.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "knowledge-full-reading",
+          "name": "知识正文、来源与历史",
+          "description": "无需模型即可阅读完整正文、来源原件和版本历史。",
+          "code": [
+            "apps/api/src/application/information-queries.ts",
+            "apps/workbench/src/components/KnowledgeReader.tsx",
+            "apps/workbench/src/views/KnowledgeView.tsx"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/product-supplement-2026-09-27.md",
+            "prompts/ui-option-2-pages.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/knowledge-reading.integration.test.ts",
+            "apps/workbench/tests/knowledgeReading.spec.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "knowledge-explicit-capture",
+          "name": "成果显式收录知识",
+          "description": "收录复用确切成果引用和原写命令，收录不自动代表验证或模型许可。",
+          "code": [
+            "apps/api/src/application/information-commands.ts",
+            "apps/workbench/src/views/KnowledgeView.tsx"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/product-supplement-2026-09-27.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/knowledge-reading.integration.test.ts",
+            "apps/workbench/tests/knowledgeCaptureLayout.spec.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "memory-revisions",
+          "name": "记忆与修订",
+          "description": "保存长期记忆及修订，保持当前可用事实和历史来源分离。",
+          "code": [
+            "apps/api/src/application/information-commands.ts",
+            "apps/api/src/information/information-repository.ts"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/information.integration.test.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "decision-supersession",
+          "name": "决定与替代关系",
+          "description": "保存决定并显式替代旧决定，历史来源继续可追溯。",
+          "code": [
+            "apps/api/src/application/information-commands.ts",
+            "apps/api/src/information/information-repository.ts"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "contracts/01-facts-and-ownership.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/information.integration.test.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "rule-lifecycle",
+          "name": "规则版本与退役",
+          "description": "新增规则版本或退役规则，明确适用范围和强度。",
+          "code": [
+            "apps/api/src/application/information-commands.ts",
+            "apps/api/src/application/information-queries.ts"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/information.integration.test.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "information-search",
+          "name": "基础资料搜索",
+          "description": "按作用域对知识、记忆、决定及规则提供中文文本搜索。",
+          "code": [
+            "apps/api/src/application/information-queries.ts",
+            "apps/api/src/api/information-api.ts",
+            "apps/workbench/src/views/KnowledgeView.tsx"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/information.integration.test.ts",
+            "apps/workbench/tests/knowledge.spec.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "project-knowledge-guide",
+          "name": "项目知识导读编排",
+          "description": "人工编排四类确切来源引用和标签，不复制正文或维护第二份 revision。",
+          "code": [
+            "apps/api/src/application/project-knowledge-guide.ts",
+            "apps/api/src/project/knowledge-guide-repository.ts",
+            "apps/workbench/src/components/ProjectKnowledgeGuide.tsx"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/frontend/workbench-design.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/post-v1-collaboration.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/project-knowledge-guide.integration.test.ts",
+            "apps/workbench/tests/projectKnowledgeGuide.spec.ts"
+          ],
+          "acceptance": [
+            "N03 项目知识整理后端首片（2026-10-02）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "knowledge-curation-candidates",
+          "name": "知识整理候选",
+          "description": "主动整理生成可接受或拒绝的候选，相似项只提示，接受复用知识写入口。",
+          "code": [
+            "apps/api/src/application/knowledge-curation.ts",
+            "apps/workbench/src/components/KnowledgeCurationPanel.tsx"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/frontend/workbench-design.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/post-v1-collaboration.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/project-knowledge-guide.integration.test.ts",
+            "apps/workbench/tests/projectKnowledgeGuide.spec.ts"
+          ],
+          "acceptance": [
+            "N03 项目知识整理后端首片（2026-10-02）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "pdf-knowledge-import",
+          "name": "PDF 正文导入与定位",
+          "description": "根据真实资料样本核定正文提取、页码和扫描件边界后接入。",
+          "code": [],
+          "docs": [
+            "docs/requirements/post-v1-roadmap.md",
+            "docs/frontend/workbench-design.md",
+            "docs/architecture/tool-adapters.md"
+          ],
+          "prompts": [
+            "prompts/post-v1-collaboration.md",
+            "prompts/E-real-adapters.md"
+          ],
+          "tests": [],
+          "acceptance": [
+            "交互终端 / PDF 导入"
+          ],
+          "intent": "planned",
+          "note": "PDF、OCR、Office 和语义检索的范围须分别确认，当前网页导入不覆盖 PDF。"
+        }
+      ]
+    },
+    {
+      "id": "trace-lineage-impact",
+      "name": "追溯、谱系与变化影响",
+      "description": "展示业务审计、调用轨迹和有界成果关系，形成可核对的修改候选。",
+      "stageIds": [
+        "M05",
+        "N02"
+      ],
+      "features": [
+        {
+          "id": "activity-audit",
+          "name": "业务活动与审计",
+          "description": "按项目和任务查询关键业务活动并定位相关事实。",
+          "code": [
+            "apps/api/src/application/activity-queries.ts",
+            "apps/api/src/audit/activity-record-repository.ts",
+            "apps/workbench/src/views/ActivityView.tsx"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/traceability.integration.test.ts",
+            "apps/workbench/tests/activityView.spec.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "run-trace-diagnostics",
+          "name": "执行 Trace 与调用诊断",
+          "description": "展示步骤、尝试、模型调用、用量和时间依据。",
+          "code": [
+            "apps/api/src/application/trace-queries.ts",
+            "apps/api/src/api/trace-api.ts",
+            "apps/workbench/src/components/RunTracePanel.tsx"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/architecture/runtime-context.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/traceability.integration.test.ts",
+            "apps/workbench/tests/runTrace.spec.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage",
+            "Trace 500：桌面库停在 0048 而代码需要 0049+（2026-10-02）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "artifact-lineage",
+          "name": "成果版本谱系",
+          "description": "读取确切成果版本之间的登记关系与来源。",
+          "code": [
+            "apps/api/src/application/lineage-queries.ts",
+            "apps/api/src/artifact/lineage-repository.ts",
+            "apps/workbench/src/views/ArtifactLineageView.tsx"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md",
+            "prompts/product-supplement-2026-09-25.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/traceability.integration.test.ts",
+            "apps/workbench/tests/artifactLineage.spec.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "artifact-direct-uses",
+          "name": "直接引用与覆盖边界",
+          "description": "读取已登记直接下游引用，明确图完整性和未知范围。",
+          "code": [
+            "apps/api/src/application/lineage-queries.ts",
+            "apps/api/src/artifact/lineage-repository.ts"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/product-supplement-2026-09-25.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/artifact-direct-uses.integration.test.ts",
+            "apps/workbench/tests/artifactDirectUsesClient.spec.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "manual-impact-check",
+          "name": "手动变化影响检查",
+          "description": "用户从确切前后版本发起影响检查，登记关系与推测关系分列。",
+          "code": [
+            "apps/api/src/application/artifact-impact-checks.ts",
+            "apps/workbench/src/components/ArtifactImpactCheckPanel.tsx"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/collaboration-controls-2026-09-28.md",
+            "prompts/product-supplement-2026-09-25.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/collaboration-controls.integration.test.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "impact-candidate-apply",
+          "name": "逐项影响修改候选",
+          "description": "展示目标基线与锁定范围，过期候选不得沿用原决定应用。",
+          "code": [
+            "apps/api/src/application/artifact-impact-checks.ts",
+            "apps/workbench/src/components/ArtifactImpactCheckPanel.tsx"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/collaboration-controls-2026-09-28.md",
+            "prompts/post-v1-collaboration.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/collaboration-controls.integration.test.ts"
+          ],
+          "acceptance": [
+            "Today/三套工作台/知识/Trace/Lineage"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "impact-candidate-group",
+          "name": "跨成果候选组",
+          "description": "把同一来源变化的有限候选和逐项处理结果关联，明确部分成功。",
+          "code": [
+            "apps/api/src/application/artifact-impact-groups.ts",
+            "apps/api/src/artifact/impact-repository.ts",
+            "apps/workbench/src/components/ArtifactImpactCheckPanel.tsx"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/post-v1-collaboration.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/artifact-impact-groups.integration.test.ts",
+            "apps/workbench/tests/impactCandidateGroup.spec.ts"
+          ],
+          "acceptance": [
+            "N00–N02 后续长期协作首轮（2026-10-02）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "combination-check-list",
+          "name": "组合版本检查单",
+          "description": "核对选定版本与登记关系、单项验证和缺口，整体结果保持无结论。",
+          "code": [
+            "apps/api/src/application/artifact-impact-groups.ts",
+            "apps/workbench/src/components/ArtifactImpactCheckPanel.tsx"
+          ],
+          "docs": [
+            "contracts/03-verification-and-approval.md",
+            "docs/frontend/workbench-design.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/post-v1-collaboration.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/artifact-impact-groups.integration.test.ts",
+            "apps/workbench/tests/impactCandidateGroup.spec.ts"
+          ],
+          "acceptance": [
+            "N00–N02 后续长期协作首轮（2026-10-02）"
+          ],
+          "intent": "current",
+          "note": "候选依赖联动、不完整选择拒绝与组级回滚仍为后续范围，单项 PASS 不相加为整体 PASS。"
+        }
+      ]
+    },
+    {
+      "id": "long-term-collaboration",
+      "name": "长期协作与有限接续",
+      "description": "在现有事实源上保存接续基线，并规划有限计划、提醒和任务链。",
+      "stageIds": [
+        "N00",
+        "N01",
+        "N04",
+        "N05",
+        "N06",
+        "N07"
+      ],
+      "features": [
+        {
+          "id": "usage-baseline",
+          "name": "真实使用基线",
+          "description": "采集固定真实任务集的延迟、成本和返工依据，区分未知指标。",
+          "code": [
+            "apps/api/scripts/n00-baseline.mjs",
+            "apps/api/scripts/n00-task-set.json"
+          ],
+          "docs": [
+            "docs/requirements/post-v1-roadmap.md",
+            "docs/testing/verification-plan.md"
+          ],
+          "prompts": [
+            "prompts/post-v1-collaboration.md"
+          ],
+          "tests": [],
+          "acceptance": [
+            "N00–N02 后续长期协作首轮（2026-10-02）"
+          ],
+          "intent": "current",
+          "note": "测量工具与固定任务集关联；未填写真实 runs 和 observations 不产生使用收益结论。"
+        },
+        {
+          "id": "continuation-point-capture",
+          "name": "保存命名接续点",
+          "description": "显式捕获一致项目、任务、选用成果和知识规则版本引用及未决事项。",
+          "code": [
+            "apps/api/src/application/project-continuation-points.ts",
+            "apps/api/src/project/continuation-point-repository.ts",
+            "apps/workbench/src/components/ContinuationPointPanel.tsx"
+          ],
+          "docs": [
+            "docs/architecture/domain-model.md",
+            "docs/frontend/workbench-design.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/post-v1-collaboration.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/project-continuation.integration.test.ts",
+            "apps/workbench/tests/continuationPoint.spec.ts"
+          ],
+          "acceptance": [
+            "N00–N02 后续长期协作首轮（2026-10-02）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "continuation-point-compare",
+          "name": "接续点事实比较",
+          "description": "比较明确接续点和当前事实，缺失来源与事实差异独立呈现。",
+          "code": [
+            "apps/api/src/application/project-continuation-points.ts",
+            "apps/workbench/src/components/ContinuationPointPanel.tsx"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/api/http-command-contract.md"
+          ],
+          "prompts": [
+            "prompts/post-v1-collaboration.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/project-continuation.integration.test.ts",
+            "apps/workbench/tests/continuationPoint.spec.ts"
+          ],
+          "acceptance": [
+            "N00–N02 后续长期协作首轮（2026-10-02）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "folder-return-continuation-card",
+          "name": "隔日目录接续卡",
+          "description": "规划重开目录时展示未决事项、最近成果和显式基线，不自动接手。",
+          "code": [],
+          "docs": [
+            "docs/requirements/post-v1-roadmap.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/post-v1-collaboration.md",
+            "prompts/folder-first-conversation.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "planned",
+          "note": "默认呈现增量不能从接续点保存/比较入口推断完成。"
+        },
+        {
+          "id": "next-work-capacity-plan",
+          "name": "下一段工作计划",
+          "description": "按用户本次可用时长、目标和依赖生成可逐项接受的小计划。",
+          "code": [],
+          "docs": [
+            "docs/requirements/post-v1-roadmap.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/post-v1-collaboration.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "planned",
+          "note": "N04 的容量、估时及候选协议待核定；接受计划不自动 Delegate。"
+        },
+        {
+          "id": "one-time-project-reminder",
+          "name": "一次性继续项目提醒",
+          "description": "绑定项目与绝对时刻，持久去重并处理错过后的单次待处理。",
+          "code": [],
+          "docs": [
+            "docs/requirements/post-v1-roadmap.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/post-v1-collaboration.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "planned",
+          "note": "N05 仅应用运行期间触发，不调用模型或自动执行任务链。"
+        },
+        {
+          "id": "bounded-serial-delegation",
+          "name": "有限串行任务链",
+          "description": "显式授权的任务集合在预算、有效期和停止条件内串行准入。",
+          "code": [],
+          "docs": [
+            "docs/requirements/post-v1-roadmap.md",
+            "docs/architecture/domain-model.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/post-v1-collaboration.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "planned",
+          "note": "N06 重启须人工继续；到期通过原控制入口安全暂停，UNKNOWN 沿原身份核对。"
+        },
+        {
+          "id": "declarative-personal-config",
+          "name": "声明式个人配置",
+          "description": "从重复使用需求选择有限 Skill/Profile 参数，预览差异并 Eval 后启用固定版本。",
+          "code": [],
+          "docs": [
+            "docs/requirements/post-v1-roadmap.md",
+            "docs/architecture/relay-skills.md"
+          ],
+          "prompts": [
+            "prompts/post-v1-collaboration.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "planned",
+          "note": "N07 需真实重复需求；不加入脚本、SQL 或动态代码插件。"
+        }
+      ]
+    },
+    {
+      "id": "windows-desktop-maintenance",
+      "name": "Windows 桌面与维护",
+      "description": "维护独立窗口、确切发布身份、备份及隔离恢复的本机交付边界。",
+      "stageIds": [
+        "M02",
+        "M07"
+      ],
+      "features": [
+        {
+          "id": "windows-host-bootstrap",
+          "name": "独立窗口与宿主引导",
+          "description": "Tauri 宿主管理本机子进程、私有引导和 readiness。",
+          "code": [
+            "apps/desktop/src-tauri/src/lib.rs",
+            "apps/api/src/desktop/child.ts",
+            "apps/api/src/worker/supervisor.ts"
+          ],
+          "docs": [
+            "docs/deployment/本机部署.md",
+            "docs/decisions/ADR-007-windows-desktop.md"
+          ],
+          "prompts": [
+            "prompts/stack-migration.md",
+            "prompts/F-release-research.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/desktop-child.integration.test.ts",
+            "apps/workbench/tests/desktop-bootstrap.spec.ts"
+          ],
+          "acceptance": [
+            "菜单 6 桌面开发启动"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "desktop-dev-single-instance",
+          "name": "开发启动与单实例",
+          "description": "开发入口复用持久库并检查单实例，明确提示重复启动退出。",
+          "code": [
+            "apps/desktop/scripts/dev-desktop.ps1",
+            "scripts/desktop-dev.ps1",
+            "apps/desktop/src-tauri/src/job_sidecar.rs"
+          ],
+          "docs": [
+            "docs/deployment/本机部署.md"
+          ],
+          "prompts": [
+            "prompts/stack-migration.md"
+          ],
+          "tests": [
+            "scripts/test-desktop-dev-guard.test.ps1"
+          ],
+          "acceptance": [
+            "菜单 6 桌面开发启动"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "desktop-native-folder-dialog",
+          "name": "原生目录选择",
+          "description": "宿主提供 Windows 目录选择命令并把选择结果交回原目录用例。",
+          "code": [
+            "apps/desktop/src-tauri/src/lib.rs",
+            "apps/workbench/src/lib/desktopHost.ts"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design.md",
+            "docs/deployment/本机部署.md"
+          ],
+          "prompts": [
+            "prompts/folder-first-conversation.md"
+          ],
+          "tests": [
+            "apps/workbench/tests/folderFirstConversation.spec.ts"
+          ],
+          "acceptance": [],
+          "intent": "current",
+          "note": "原生取消、重启、中文 IME 与 DPI 需确切桌面环境验证。"
+        },
+        {
+          "id": "desktop-package-identity",
+          "name": "发布包哈希与能力诊断",
+          "description": "构建包清单绑定二进制、资源和能力，诊断拒绝不匹配包。",
+          "code": [
+            "apps/desktop/scripts/build-release.ps1",
+            "scripts/verify-desktop-package.mjs",
+            "scripts/verify-desktop-maintenance-capability.mjs"
+          ],
+          "docs": [
+            "docs/deployment/本机部署.md"
+          ],
+          "prompts": [
+            "prompts/F-release-research.md"
+          ],
+          "tests": [
+            "scripts/test-desktop-package.test.mjs"
+          ],
+          "acceptance": [
+            "M07恢复目标启动前隔离与包能力诊断"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "database-maintenance-admission",
+          "name": "数据库维护准入与排空",
+          "description": "NORMAL/DRAINING 等持久准入状态控制新工作，并兼容原在途排空。",
+          "code": [
+            "apps/api/src/application/maintenance-admission.ts",
+            "apps/api/src/application/runtime-maintenance.ts",
+            "apps/api/src/runtime/runtime-admission-repository.ts"
+          ],
+          "docs": [
+            "docs/deployment/本机部署.md",
+            "docs/decisions/ADR-014-database-maintenance-admission.md"
+          ],
+          "prompts": [
+            "prompts/F-release-research.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/maintenance-admission.integration.test.ts"
+          ],
+          "acceptance": [
+            "M07 数据库维护准入与原工作排空兼容"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "native-host-stop-lock",
+          "name": "原宿主停止与持续持锁",
+          "description": "当前 Windows 会话核对原宿主身份并保持原生维护锁。",
+          "code": [
+            "apps/api/src/runtime/desktop-maintenance-session.ts",
+            "apps/desktop/src-tauri/src/maintenance_session.rs"
+          ],
+          "docs": [
+            "docs/deployment/本机部署.md",
+            "contracts/04-recovery-and-commit.md"
+          ],
+          "prompts": [
+            "prompts/F-release-research.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/desktop-maintenance-session.test.ts"
+          ],
+          "acceptance": [
+            "M07 当前 Windows 会话原宿主停机与持续持锁"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "database-connect-fence",
+          "name": "数据库连接隔离与 ACL 恢复",
+          "description": "维护会话持有 CONNECT/DDL 边界，按原凭据显式恢复源 ACL。",
+          "code": [
+            "apps/api/src/runtime/database-connect-fence.ts",
+            "apps/api/src/cli/database-connect-fence.ts"
+          ],
+          "docs": [
+            "docs/deployment/本机部署.md",
+            "contracts/04-recovery-and-commit.md"
+          ],
+          "prompts": [
+            "prompts/F-release-research.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/database-connect-fence.integration.test.ts"
+          ],
+          "acceptance": [
+            "M07 生产数据库连接维护与原ACL恢复"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "complete-backup",
+          "name": "完整备份与历史身份",
+          "description": "组合原执行排空、受管清单、完整 PG 归档及原包历史定义。",
+          "code": [
+            "apps/api/src/runtime/backup.ts",
+            "apps/api/src/runtime/backup-files.ts",
+            "apps/api/src/runtime/backup-package.ts",
+            "apps/api/src/runtime/backup-postgres.ts",
+            "apps/api/src/cli/backup.ts"
+          ],
+          "docs": [
+            "docs/deployment/本机部署.md",
+            "docs/development/m07-backup-recovery.md"
+          ],
+          "prompts": [
+            "prompts/F-release-research.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/backup.integration.test.ts",
+            "apps/api/test/integration/backup-postgres.integration.test.ts",
+            "apps/api/test/integration/backup-history.integration.test.ts"
+          ],
+          "acceptance": [
+            "M07完整备份协调与历史未决身份",
+            "M07 受管文件清单与原包历史定义保留",
+            "M07 PostgreSQL完整归档机制"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "restore-launch-isolation",
+          "name": "恢复目标启动前隔离",
+          "description": "Node 和宿主启动入口在连接或核销历史记录前拒绝隔离标记目标。",
+          "code": [
+            "apps/api/src/runtime/restore-isolation.ts",
+            "apps/desktop/src-tauri/src/restore_isolation.rs"
+          ],
+          "docs": [
+            "docs/deployment/本机部署.md"
+          ],
+          "prompts": [
+            "prompts/F-release-research.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/restore-isolation.test.ts"
+          ],
+          "acceptance": [
+            "M07恢复目标启动前隔离与包能力诊断"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "isolated-database-restore",
+          "name": "新空库与数据根还原",
+          "description": "把归档还原到新空库和新数据根，原 UNKNOWN 身份与隔离标记保留。",
+          "code": [
+            "apps/api/src/runtime/restore.ts",
+            "apps/api/src/runtime/restore-database-isolation.ts",
+            "apps/api/src/runtime/restore-files.ts",
+            "apps/api/src/cli/restore.ts"
+          ],
+          "docs": [
+            "docs/deployment/本机部署.md",
+            "docs/development/m07-backup-recovery.md"
+          ],
+          "prompts": [
+            "prompts/F-release-research.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/restore.integration.test.ts",
+            "apps/api/test/integration/restore-database-isolation.integration.test.ts"
+          ],
+          "acceptance": [
+            "M07新空库与新数据根隔离还原"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "restore-readonly-check",
+          "name": "非空目标只读维护核对",
+          "description": "读取严格恢复材料和状态投影，只报告已核范围，不自动授予激活。",
+          "code": [
+            "apps/api/src/runtime/restore-check.ts",
+            "apps/api/src/runtime/restore-materials.ts",
+            "apps/api/src/cli/restore-check.ts"
+          ],
+          "docs": [
+            "docs/deployment/本机部署.md",
+            "docs/development/m07-backup-recovery.md"
+          ],
+          "prompts": [
+            "prompts/F-release-research.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/restore-check-database-isolation.integration.test.ts",
+            "apps/api/test/integration/restore.integration.test.ts"
+          ],
+          "acceptance": [
+            "M07非空恢复目标的业务只读维护核对"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "maintenance-connection-isolation",
+          "name": "维护连接参数隔离",
+          "description": "维护连接显式构造目标、凭据和 TLS/options，避免继承进程 PG 环境。",
+          "code": [
+            "apps/api/src/runtime/maintenance-connection.ts"
+          ],
+          "docs": [
+            "docs/deployment/本机部署.md",
+            "docs/development/m07-backup-recovery.md"
+          ],
+          "prompts": [
+            "prompts/F-release-research.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/maintenance-connection.test.ts",
+            "apps/api/test/integration/database-connect-fence.integration.test.ts"
+          ],
+          "acceptance": [
+            "M07维护数据库连接参数隔离"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "restore-package-root-observation",
+          "name": "目标依赖与资源根观察",
+          "description": "离线加载有限依赖并只读观察受管根身份，待核项分别保留。",
+          "code": [
+            "apps/api/src/runtime/restore-runtime-probe.ts",
+            "apps/api/src/runtime/restore-resource-roots.ts"
+          ],
+          "docs": [
+            "docs/deployment/本机部署.md",
+            "docs/development/m07-backup-recovery.md"
+          ],
+          "prompts": [
+            "prompts/F-release-research.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/restore-runtime-probe.test.ts",
+            "apps/api/test/unit/restore-resource-roots.test.ts"
+          ],
+          "acceptance": [
+            "M07目标包离线依赖加载与有限调用",
+            "M07受管资源根身份有限观察"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "restore-explicit-activation",
+          "name": "恢复目标明确放行",
+          "description": "后续核对历史兼容、外部身份和唯一 Owner 后显式配置切换与放行。",
+          "code": [],
+          "docs": [
+            "docs/deployment/本机部署.md",
+            "docs/decisions/ADR-014-database-maintenance-admission.md"
+          ],
+          "prompts": [
+            "prompts/F-release-research.md"
+          ],
+          "tests": [],
+          "acceptance": [
+            "Windows 安装/升级/卸载/备份恢复及 V1 总交付"
+          ],
+          "intent": "planned",
+          "note": "只读维护报告和有限探针不授予未来激活。"
+        },
+        {
+          "id": "windows-install-dpi-ime",
+          "name": "安装、升级、卸载与中文适配",
+          "description": "在确切发布包和真实 Windows 环境完成安装矩阵、IME 与 DPI 验证。",
+          "code": [],
+          "docs": [
+            "docs/deployment/本机部署.md",
+            "docs/testing/verification-plan.md"
+          ],
+          "prompts": [
+            "prompts/F-release-research.md",
+            "prompts/ui-option-2-pages.md"
+          ],
+          "tests": [
+            "scripts/test-desktop.ps1"
+          ],
+          "acceptance": [
+            "Windows 安装/升级/卸载/备份恢复及 V1 总交付",
+            "Windows DPI/IME 与最新 UI"
+          ],
+          "intent": "planned",
+          "note": "构建成功、窗口存活和目录测试包不替代完整安装交付。"
+        }
+      ]
+    },
+    {
+      "id": "api-database-foundation",
+      "name": "API 与数据库基础",
+      "description": "提供统一边界、幂等回执、迁移和真实事务基础。",
+      "stageIds": [
+        "M01",
+        "M03",
+        "M07"
+      ],
+      "features": [
+        {
+          "id": "http-command-errors",
+          "name": "HTTP 命令与错误信封",
+          "description": "请求经过统一边界和 schema，返回可核对的领域错误与结果。",
+          "code": [
+            "apps/api/src/api/boundary.ts",
+            "apps/api/src/api/envelope.ts",
+            "apps/api/src/api/problem.ts",
+            "apps/api/src/api/routes.ts"
+          ],
+          "docs": [
+            "docs/api/http-command-contract.md",
+            "docs/api/module-api.md"
+          ],
+          "prompts": [
+            "prompts/00-foundation.md",
+            "prompts/F-release-research.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api.integration.test.ts"
+          ],
+          "acceptance": [],
+          "intent": "current"
+        },
+        {
+          "id": "command-idempotency-receipts",
+          "name": "命令幂等与原回执",
+          "description": "命令摘要绑定 command_id，唯一冲突后读取胜出回执或拒绝异内容重用。",
+          "code": [
+            "apps/api/src/application/command.ts",
+            "apps/api/src/receipt/command-receipt-repository.ts",
+            "apps/api/src/receipt/payload-hash.ts"
+          ],
+          "docs": [
+            "docs/api/http-command-contract.md",
+            "contracts/04-recovery-and-commit.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md",
+            "prompts/stack-migration.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/f24-proposal-idempotency.integration.test.ts",
+            "apps/api/test/unit/payload-hash.test.ts"
+          ],
+          "acceptance": [
+            "F24 第一方 Skill / Blueprint / Pack 接续复验（2026-10-03 跨候选修复轮）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "business-unit-of-work",
+          "name": "短事务与统一写 Owner",
+          "description": "Application 用例统一协调 Repository 与关键审计的短事务。",
+          "code": [
+            "apps/api/src/application/unit-of-work.ts",
+            "apps/api/src/infrastructure/database.ts"
+          ],
+          "docs": [
+            "docs/architecture/domain-model.md",
+            "contracts/01-facts-and-ownership.md",
+            "contracts/04-recovery-and-commit.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md",
+            "prompts/00-foundation.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/persistence.integration.test.ts"
+          ],
+          "acceptance": [
+            "人工项目/任务/产物/完成与重开"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "database-migrations-readiness",
+          "name": "迁移与 schema readiness",
+          "description": "追加并核验 migration 台账，启动前检测库结构是否符合当前代码。",
+          "code": [
+            "apps/api/src/infrastructure/migration-runner.ts",
+            "apps/api/src/infrastructure/schema-readiness.ts",
+            "apps/api/src/cli/migrate.ts"
+          ],
+          "docs": [
+            "docs/database/physical-design-postgresql.md",
+            "docs/deployment/本机部署.md"
+          ],
+          "prompts": [
+            "prompts/00-foundation.md",
+            "prompts/stack-migration.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/migration.integration.test.ts",
+            "apps/api/test/integration/schema-readiness.integration.test.ts"
+          ],
+          "acceptance": [],
+          "intent": "current"
+        },
+        {
+          "id": "workspace-api-identity",
+          "name": "本机 API 身份与作用域",
+          "description": "Bearer 和 workspace 边界限制业务读取及命令作用域。",
+          "code": [
+            "apps/api/src/api/server.ts",
+            "apps/api/src/api/boundary.ts",
+            "apps/api/src/application/guards.ts",
+            "apps/workbench/src/lib/relayConnection.ts"
+          ],
+          "docs": [
+            "docs/api/http-command-contract.md",
+            "docs/deployment/本机部署.md"
+          ],
+          "prompts": [
+            "prompts/00-foundation.md",
+            "prompts/F-release-research.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api.integration.test.ts",
+            "apps/workbench/tests/connection-switch.spec.ts"
+          ],
+          "acceptance": [],
+          "intent": "current"
+        },
+        {
+          "id": "cursor-revision-compatibility",
+          "name": "分页与大整数修订兼容",
+          "description": "游标分页和十进制修订串保证前后端读取一致。",
+          "code": [
+            "apps/api/src/api/cursor.ts",
+            "apps/api/src/application/revisions.ts",
+            "apps/workbench/src/lib/decimalRevision.ts"
+          ],
+          "docs": [
+            "docs/api/http-command-contract.md",
+            "docs/database/physical-design-postgresql.md"
+          ],
+          "prompts": [
+            "prompts/00-foundation.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/cursor.test.ts",
+            "apps/workbench/tests/decimalRevision.spec.ts"
+          ],
+          "acceptance": [],
+          "intent": "current"
+        }
+      ]
+    },
+    {
+      "id": "research-evaluation",
+      "name": "研究、复用与评价",
+      "description": "保留一手源码、适配实验和可重跑评价，限定研究证据的适用范围。",
+      "stageIds": [
+        "M01",
+        "N00"
+      ],
+      "features": [
+        {
+          "id": "upstream-mechanism-study",
+          "name": "上游机制与采用表",
+          "description": "按固定提交研究成熟机制，记录直接依赖、适配或参考的差异。",
+          "code": [
+            "docs/research/upstream-lock.json"
+          ],
+          "docs": [
+            "docs/research/p00-source-study.md",
+            "docs/architecture/复用策略.md",
+            "docs/decisions/ADR-005-reuse-first.md"
+          ],
+          "prompts": [
+            "prompts/00-foundation.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "research"
+        },
+        {
+          "id": "stack-adapter-probes",
+          "name": "主栈兼容与适配探针",
+          "description": "用独立实验核对 React、Tauri、Fastify、PG 和 LangGraph 的组合出口。",
+          "code": [
+            "experiments/m01-stack-adapter/package.json",
+            "experiments/typescript-p00/src/run-real-pg.ts"
+          ],
+          "docs": [
+            "experiments/m01-stack-adapter/README.md",
+            "experiments/typescript-p00/README.md",
+            "docs/testing/m01-independent-acceptance.md"
+          ],
+          "prompts": [
+            "prompts/00-foundation.md",
+            "prompts/stack-migration.md"
+          ],
+          "tests": [
+            "experiments/typescript-p00/scripts/run-real-pg.ps1"
+          ],
+          "acceptance": [],
+          "intent": "research"
+        },
+        {
+          "id": "recovery-fault-experiments",
+          "name": "恢复与故障机制实验",
+          "description": "实验验证进程、检查点和持久请求机制，区分研究与产品恢复语义。",
+          "code": [
+            "experiments/recovery-p00/src/run-recovery.ts",
+            "experiments/langgraph-poc/workflow.py"
+          ],
+          "docs": [
+            "experiments/recovery-p00/README.md",
+            "docs/research/p00-source-study.md"
+          ],
+          "prompts": [
+            "prompts/00-foundation.md"
+          ],
+          "tests": [
+            "experiments/langgraph-poc/test_workflow.py"
+          ],
+          "acceptance": [],
+          "intent": "research"
+        },
+        {
+          "id": "ux-stack-performance",
+          "name": "体验与栈性能评价",
+          "description": "比较排队、首输出、完成时间、内存和成本，依据实际瓶颈选择方案。",
+          "code": [
+            "experiments/run_benchmarks.py",
+            "apps/api/test/integration/m03-mock-benchmark.bench.ts"
+          ],
+          "docs": [
+            "experiments/README.md",
+            "docs/research/评价协议.md",
+            "docs/research/p00-source-study.md"
+          ],
+          "prompts": [
+            "prompts/00-foundation.md",
+            "prompts/F-release-research.md"
+          ],
+          "tests": [
+            "experiments/runtime-bench/pi.test.mjs"
+          ],
+          "acceptance": [
+            "冷启动/反馈与首输出延迟"
+          ],
+          "intent": "research",
+          "note": "Mock 和独立实验数据不代表当前真实 Provider 或 Windows 使用收益。"
+        },
+        {
+          "id": "agent-ui-primary-source-review",
+          "name": "Agent UI 一手资料与原型",
+          "description": "用上游源码和代表页面审查协作主线与视觉取舍。",
+          "code": [
+            "experiments/conversation-workspace-prototype/src/App.jsx"
+          ],
+          "docs": [
+            "docs/research/agent-ui-review-2026-10-01.md",
+            "experiments/conversation-workspace-prototype/README.md"
+          ],
+          "prompts": [
+            "prompts/ui-option-2-pages.md"
+          ],
+          "tests": [
+            "experiments/conversation-workspace-prototype/tests/sites-worker.test.mjs"
+          ],
+          "acceptance": [],
+          "intent": "research",
+          "note": "原型与静态参考图不代表生产页面或运行能力。"
+        },
+        {
+          "id": "thesis-evaluation-protocol",
+          "name": "论文评价协议",
+          "description": "按研究问题设计可复核对照、指标与限制，平台功能数不作贡献证明。",
+          "code": [
+            "experiments/run_benchmarks.py"
+          ],
+          "docs": [
+            "docs/research/评价协议.md",
+            "docs/research/p00-source-study.md"
+          ],
+          "prompts": [
+            "prompts/F-release-research.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "research"
+        }
+      ]
+    }
+  ]
+}

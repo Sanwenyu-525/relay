@@ -51,14 +51,20 @@ function firstLine(file) {
 const slash = (value) => value.split(sep).join("/").toLowerCase();
 
 async function codexShots() {
-  const sessions = join(CODEX, "sessions");
+  // 会话跑完会被移进 archived_sessions，两处都要扫，否则收不到已归档会话的图。
   const images = join(CODEX, "generated_images");
-  if (!existsSync(sessions) || !existsSync(images)) return [];
+  if (!existsSync(images)) return [];
   const mine = new Set();
-  for (const file of walk(sessions, SESSION)) {
+  const rollouts = [join(CODEX, "sessions"), join(CODEX, "archived_sessions")]
+    .filter(existsSync)
+    .flatMap((dir) => walk(dir, SESSION));
+  for (const file of rollouts) {
     try {
       const meta = JSON.parse(await firstLine(file)).payload;
-      if (meta?.session_id && slash(String(meta.cwd ?? "")) === slash(ROOT)) mine.add(meta.session_id);
+      // 分叉会话的 session_id 记的是父会话，图片目录却按 id 命名，两个都要收。
+      if (slash(String(meta?.cwd ?? "")) === slash(ROOT)) {
+        for (const id of [meta.session_id, meta.id]) if (id) mine.add(id);
+      }
     } catch { /* 会话文件损坏或格式变化，跳过 */ }
   }
   const found = [];

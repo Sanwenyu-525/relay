@@ -38,6 +38,9 @@ coverage/
 # preview.html 的原型图自动收录清单，可由 node scripts/preview-gallery.mjs 重新生成
 /preview-manifest.js
 
+# 功能地图的本机快照，由 scripts/feature-map.mjs 从现有事实源生成
+/output/feature-map/
+
 # 效果图打包件，与同目录原图重复，不进入仓库
 /docs/frontend/mockups/**/*.zip
 
@@ -55,3 +58,5 @@ coverage/
 
 # 本机开发数据库（PostgreSQL 5432/relay_dev，供 dev-stack Preview 与 apps/api/.env 直连）
 /.relay-dev/
+
+.superpowers/

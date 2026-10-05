@@ -41,9 +41,10 @@ await page.waitForResponse(r=>r.url().includes(`/assist-sessions/${sessions[0].i
 const afterHistoryRefresh=await position();
 await page.getByTestId('assist-draft').fill('滚动跟随独立验收');
 await page.getByTestId('assist-send').click();
-await page.getByTestId('assist-cancel').last().waitFor();
+// 排队回复走队列面板的逐条取消；输入栏停止键只覆盖那条 RUNNING。
+await page.getByTestId('assist-queue-item-1').waitFor();
 const afterSend=await position();
-await page.getByTestId('assist-cancel').last().click();
+await page.getByTestId('assist-queue-cancel-1').click();
 await page.getByText('消息已由服务端确认取消。',{exact:true}).waitFor();
 const report={initial,afterHistoryRefresh,afterSend,errors};
 writeFileSync(`${out}/scroll.json`,JSON.stringify(report,null,2));console.log(JSON.stringify(report));await browser.close();

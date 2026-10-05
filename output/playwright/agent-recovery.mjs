@@ -50,7 +50,8 @@ await page.unroute(messageUrl);
 await page.getByTestId('assist-session').getByRole('button',{name:'查询原命令回执',exact:true}).click();
 await page.getByText('原命令回执已核对；正在读取服务端状态。',{exact:true}).waitFor();
 const receipt=await api(`/commands/${lostCommand}`);
-await page.getByTestId('assist-cancel').last().click();
+// 回执核对后这条已转为 RUNNING，输入栏主键此时是停止形态。
+await page.getByTestId('assist-stop').last().click();
 await page.getByText('消息已由服务端确认取消。',{exact:true}).waitFor();
 await page.route(messageUrl,route=>route.abort('failed'));
 await page.getByTestId('assist-refresh').click();

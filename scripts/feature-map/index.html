@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Relay · 功能地图</title>
+  <style>/* DESIGN_TOKENS */
+/* MAP_CSS */</style>
+</head>
+<body>
+  <a class="skip" href="#content">跳到功能列表</a>
+  <header class="masthead">
+    <div class="identity"><span class="brand-mark" aria-hidden="true">R</span><div><strong>Relay</strong><span>Personal Workflow OS</span></div></div>
+    <div class="sync"><span id="sync-state" role="status">正在读取地图…</span><label class="cadence">检查间隔<select id="cadence"><option value="2000">每 2 秒</option><option value="5000">每 5 秒</option><option value="15000">每 15 秒</option><option value="60000">每 1 分钟</option><option value="300000">每 5 分钟</option><option value="1800000">每 30 分钟</option><option value="3600000">每 1 小时</option><option value="7200000">每 2 小时</option><option value="18000000">每 5 小时</option><option value="0">手动</option></select></label><button id="refresh" type="button">刷新</button><button id="download" type="button">导出 JSON</button></div>
+  </header>
+  <section class="intro">
+    <div><p class="eyebrow">PROJECT EXPLORER / 项目导航</p><h1>功能地图<span id="feature-count"></span></h1><p class="subtitle">从模块找到功能，从功能找到代码、设计、执行提示词与验收依据。</p></div>
+    <div class="source-nav" id="source-nav"></div>
+  </section>
+  <section id="stats" class="stats" aria-label="索引统计"></section>
+  <div id="error" class="notice error" role="alert" hidden></div>
+  <p class="notice boundary">代码栏显示关联文件的存在与变化；验收栏引用原记录的范围。新增代码不会自动变成“验收通过”。</p>
+  <nav id="tabs" class="tabs" aria-label="地图视图">
+    <button type="button" data-tab="map" aria-pressed="true">模块与功能</button>
+    <button type="button" data-tab="acceptance" aria-pressed="false">验收记录</button>
+    <button type="button" data-tab="prompts" aria-pressed="false">提示词库</button>
+    <button type="button" data-tab="resources" aria-pressed="false">资料索引</button>
+  </nav>
+  <div class="workspace">
+    <aside aria-label="模块导航"><div class="aside-title">项目模块<button id="all-modules" type="button">全部</button></div><nav id="modules" aria-label="选择模块"></nav><div class="aside-note">阶段来自 CODEX_NEXT_STEP；<br>验收来自统一功能验收表。<br>此地图仅维护资料关联。</div></aside>
+    <main id="content" tabindex="-1">
+      <div class="toolbar"><label class="search"><span>搜索</span><input id="search" type="search" placeholder="功能、文件、提示词或关键字" autocomplete="off"></label><div id="filters" class="filters" role="group" aria-label="筛选"></div></div>
+      <div id="results-label" class="results-label" role="status"></div>
+      <div id="results"></div>
+    </main>
+  </div>
+  <footer><span id="snapshot-time"></span><span>本地只读资料地图 · 文件关联不代表完整实现</span></footer>
+  <dialog id="detail" aria-labelledby="detail-title"><div class="dialog-head"><div><p id="detail-module" class="eyebrow"></p><h2 id="detail-title"></h2></div><button id="close-detail" type="button" aria-label="关闭功能详情">关闭 ×</button></div><div id="detail-body"></div></dialog>
+  <script>/* MAP_DATA */
+/* MAP_CLIENT */</script>
+</body>
+</html>

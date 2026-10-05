@@ -3,12 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>输入区动效边框原型（独立演示，未接入项目）</title>
+<title>Agent 状态视觉反馈系统 · 输入区动效三候选（独立原型）</title>
 <style>
-@property --a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
-@property --sweep-a { syntax: '<number>'; inherits: false; initial-value: 0; }
-
+/* ==========================================================================
+   0. Motion Token（唯一来源，全页不写裸时长）
+   ========================================================================== */
 :root {
+  --motion-duration-fast: 120ms;
+  --motion-duration-base: 180ms;
+  --motion-duration-emphasis: 420ms;
+  --motion-loop-calm: 6s;
+  --motion-loop-slow: 9s;
+  --motion-loop-queue: 4.5s;
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-enter: cubic-bezier(0, 0, 0, 1);
+  --ease-exit: cubic-bezier(0.3, 0, 1, 1);
+
+  /* 颜色 / 间距沿用 docs/frontend/design-tokens.json v0.4.0 Proposed */
   --paper: #FAF9F6;
   --surface: #FFFFFF;
   --sidebar: #F4F3EF;
@@ -18,12 +30,11 @@
   --line: #E3E4DF;
   --control: #8E8A80;
   --forest: #285747;
+  --forest-hover: #204B3C;
   --sage: #E7EEE6;
   --amber: #795519;
   --amber-soft: #F5EBD7;
   --red: #9B3535;
-  --red-soft: #F8EAE7;
-  --disabled: #E8E5DD;
   --radius-control: 0.5rem;
   --radius-badge: 0.1875rem;
   --space-1: 0.25rem;
@@ -34,13 +45,17 @@
   --space-8: 2rem;
   --font-ui: "Relay Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
   --font-code: "Cascadia Mono", Consolas, monospace;
-  --dur-fast: 120ms;
-  --dur-panel: 180ms;
-  --ease: cubic-bezier(0.2, 0, 0, 1);
-  --glow-band: 3px;
-  --glow-strength: 60%;
-  --glow-peak: rgb(255 255 255 / 0.92);
+
+  /* 状态语义色，四个 tone，不新增第五种 */
+  --tone-idle: var(--control);
+  --tone-active: var(--forest);
+  --tone-need: var(--amber);
+  --tone-fail: var(--red);
 }
+html[data-tone="idle"]     { --tone: var(--tone-idle); }
+html[data-tone="active"]   { --tone: var(--tone-active); }
+html[data-tone="need"]     { --tone: var(--tone-need); }
+html[data-tone="fail"]     { --tone: var(--tone-fail); }
 
 * { box-sizing: border-box; }
 
@@ -51,14 +66,15 @@ body {
   font-family: var(--font-ui);
   font-size: 1rem;
   line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
-.page { max-width: 72rem; margin: 0 auto; padding: var(--space-8) var(--space-6) var(--space-16, 4rem); }
-
-h1 { font-size: 1.75rem; font-weight: 600; line-height: 1.25; margin: 0 0 var(--space-2); }
-h2 { font-size: 1.25rem; font-weight: 600; margin: var(--space-8) 0 var(--space-3); }
+.page { max-width: 78rem; margin: 0 auto; padding: var(--space-8) var(--space-6) 4rem; }
+h1 { font-size: 1.625rem; font-weight: 600; line-height: 1.25; margin: 0 0 var(--space-2); }
+h2 { font-size: 1.125rem; font-weight: 600; margin: var(--space-8) 0 var(--space-3); }
 h3 { font-size: 1rem; font-weight: 600; margin: 0 0 var(--space-1); }
 p { margin: 0 0 var(--space-2); }
+code { font-family: var(--font-code); font-size: 0.8125rem; }
 
 .note {
   background: var(--sidebar);
@@ -67,419 +83,761 @@ p { margin: 0 0 var(--space-2); }
   color: var(--secondary);
   font-size: 0.875rem;
 }
-.note code { font-family: var(--font-code); font-size: 0.8125rem; color: var(--ink); }
+.note code { color: var(--ink); }
 
+/* ---------- 控件 ---------- */
 .toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-4);
-  align-items: center;
-  margin: var(--space-4) 0;
-  padding: var(--space-3) var(--space-4);
-  background: var(--surface);
-  border-radius: var(--radius-control);
+  display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: center;
+  margin: var(--space-4) 0; padding: var(--space-3) var(--space-4);
+  background: var(--surface); border-radius: var(--radius-control);
   box-shadow: inset 0 0 0 1px var(--line);
 }
-.toolbar label { display: inline-flex; gap: var(--space-2); align-items: center; font-size: 0.875rem; }
-.toolbar .hint { color: var(--muted); font-size: 0.8125rem; }
+.toolbar label {
+  display: inline-flex; gap: var(--space-2); align-items: center;
+  font-size: 0.875rem; cursor: pointer; user-select: none;
+}
+.btn {
+  font: inherit; font-size: 0.8125rem; font-weight: 500;
+  min-height: 1.75rem; padding: 0 var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--forest) 30%, var(--line));
+  border-radius: var(--radius-control); background: var(--sage); color: var(--forest);
+  cursor: pointer; transition: background var(--motion-duration-fast) var(--ease-standard);
+}
+.btn:hover { background: #DCE7DC; border-color: var(--forest); }
+.btn:focus-visible { outline: 2px solid var(--forest); outline-offset: 2px; }
+.hint { color: var(--muted); font-size: 0.8125rem; }
 
 .chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-4); }
 .chip {
-  font: inherit;
-  font-size: 0.875rem;
-  padding: var(--space-1) var(--space-3);
-  min-height: 1.5rem;
-  border: 0;
-  border-radius: 9999px;
-  background: var(--sidebar);
-  color: var(--secondary);
-  cursor: pointer;
+  font: inherit; font-size: 0.875rem; padding: var(--space-1) var(--space-3);
+  min-height: 1.75rem; border: 1px solid transparent; border-radius: 9999px;
+  background: var(--sidebar); color: var(--secondary); cursor: pointer;
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  transition: background var(--motion-duration-fast) var(--ease-standard);
 }
 .chip:hover { background: var(--sage); color: var(--forest); }
 .chip[aria-pressed="true"] { background: var(--forest); color: var(--surface); }
 .chip:focus-visible { outline: 2px solid var(--forest); outline-offset: 2px; }
+.chip .lv {
+  font-family: var(--font-code); font-size: 0.6875rem;
+  padding: 0 var(--space-1); border-radius: var(--radius-badge);
+  background: color-mix(in srgb, var(--control) 22%, transparent); color: inherit;
+}
 
-.stage {
-  background: var(--surface);
-  border-radius: var(--radius-control);
+/* ==========================================================================
+   1. 候选容器
+   ========================================================================== */
+.grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); }
+.card {
+  background: var(--surface); border-radius: var(--radius-control);
   box-shadow: inset 0 0 0 1px var(--line);
-  padding: var(--space-6);
-  display: grid;
-  gap: var(--space-3);
+  padding: var(--space-4); display: grid; gap: var(--space-3);
+  align-content: start;
 }
-
-.status-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
-  min-height: 1.75rem;
-  font-size: 0.875rem;
-  color: var(--secondary);
+.card > header { display: grid; gap: var(--space-1); }
+.tag {
+  display: inline-block; font-family: var(--font-code); font-size: 0.625rem;
+  letter-spacing: 0.06em; padding: 0 var(--space-1); border-radius: var(--radius-badge);
+  background: var(--sidebar); color: var(--secondary); vertical-align: 0.15em;
 }
-.status-line .dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 9999px;
-  background: var(--control);
-  flex: none;
-}
-.status-line .stage-name { color: var(--ink); font-weight: 500; }
-.status-line .count { color: var(--muted); }
-.status-line .spacer { flex: 1 1 auto; }
-
-.link-btn, .stop-btn {
-  font: inherit;
-  font-size: 0.875rem;
-  min-height: 1.5rem;
-  padding: 0 var(--space-2);
+.desc { font-family: var(--font-code); font-size: 0.75rem; line-height: 1.6; color: var(--secondary); margin: 0; }
+.now {
+  font-family: var(--font-code); font-size: 0.75rem; line-height: 1.6; margin: 0;
+  min-height: 3.6rem;                    /* 固定三行，状态切换不推动卡片布局 */
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-badge);
-  border: 0;
-  background: transparent;
-  color: var(--forest);
-  cursor: pointer;
+  background: var(--sage); color: var(--forest);
 }
-.link-btn:hover, .stop-btn:hover { background: var(--sage); }
-.link-btn:focus-visible, .stop-btn:focus-visible { outline: 2px solid var(--forest); outline-offset: 2px; }
-.stop-btn { border: 1px solid var(--line); color: var(--secondary); }
-.stop-btn:hover { background: var(--sidebar); }
 
-.frame {
-  --frame-line: var(--line);
-  --glow-a: 0;
+/* ---------- 状态指示器（三候选共用同一结构，只换动效层） ---------- */
+.indicator {
+  display: flex; align-items: center; gap: var(--space-2);
+  height: 1.75rem;                 /* 固定高度：状态切换不改布局 */
+  font-size: 0.8125rem; color: var(--secondary);
+  overflow: hidden;
+}
+.indicator .glyph {
+  width: 1rem; height: 1rem; flex: none; display: inline-grid; place-items: center;
+  color: var(--tone);
+}
+.indicator .glyph svg { display: block; }
+.indicator .label { color: var(--ink); font-weight: 500; white-space: nowrap; }
+.indicator .meta { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.indicator .spacer { flex: 1 1 auto; }
+.indicator .lv {
+  font-family: var(--font-code); font-size: 0.6875rem; flex: none;
+  padding: 0 var(--space-1); border-radius: var(--radius-badge);
+  background: var(--sidebar); color: var(--muted);
+}
+
+/* ---------- 输入框（三候选结构完全一致，只有边框层不同） ---------- */
+.composer {
   position: relative;
-  margin: calc(var(--glow-band) * -1);
-  padding: var(--glow-band);
+  border: 1px solid var(--line);
   border-radius: var(--radius-control);
-  background-color: var(--frame-line);
-  background-image:
-    conic-gradient(from var(--a),
-      transparent 0deg,
-      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.3), transparent) 8deg,
-      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a)), transparent) 30deg,
-      color-mix(in srgb, var(--glow-peak) calc(var(--glow-a) * 80%), transparent) 48deg,
-      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.62), transparent) 90deg,
-      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.32), transparent) 140deg,
-      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.12), transparent) 190deg,
-      transparent 240deg);
-}
-.frame .body {
-  position: relative;
   background: var(--surface);
-  border-radius: calc(var(--radius-control) - var(--glow-band));
+  min-height: 6.5rem;
   padding: var(--space-3);
-  display: grid;
-  gap: var(--space-3);
+  display: grid; gap: var(--space-2); align-content: start;
+  transition: border-color var(--motion-duration-base) var(--ease-standard);
 }
-
+.composer:focus-within { border-color: color-mix(in srgb, var(--forest) 45%, var(--line)); }
 .composer textarea {
-  width: 100%;
-  min-height: 4.5rem;
-  resize: none;
-  border: 0;
-  padding: var(--space-1) 0;
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
+  width: 100%; min-height: 3.25rem; resize: none;
+  border: 0; padding: 0; background: transparent; color: var(--ink); font: inherit;
+  line-height: 1.5;
 }
 .composer textarea:focus { outline: none; }
 .composer textarea::placeholder { color: var(--muted); }
-
-.composer-tools { display: flex; align-items: center; gap: var(--space-3); font-size: 0.8125rem; color: var(--muted); }
-.meter { display: inline-flex; align-items: center; gap: var(--space-1); }
-.meter-ring {
-  width: 1.125rem;
-  height: 1.125rem;
-  border-radius: 9999px;
-  border: 0.125rem solid var(--line);
-  display: inline-grid;
-  place-items: center;
-  font-size: 0.5625rem;
-  color: var(--ink);
+.composer-bar {
+  display: flex; align-items: center; gap: var(--space-3);
+  height: 1.5rem; font-size: 0.75rem; color: var(--muted);
 }
+/* 静态状态角标：动效表达不了的状态靠它区分。始终占位，只切 visibility，不推动布局。 */
+.mark {
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  height: 1.25rem; padding: 0 var(--space-2); flex: none;
+  white-space: nowrap;                  /* 文案长短不换行，不推动卡片布局 */
+  border-radius: var(--radius-badge);
+  font-family: var(--font-code); font-size: 0.6875rem;
+  background: color-mix(in srgb, var(--tone) 14%, transparent);
+  color: var(--tone);
+  visibility: hidden;
+}
+.mark[data-on="true"] { visibility: visible; }
+.mark svg { display: block; flex: none; }
+/* 暂停：虚线边框，运动停止的第二重信号 */
+html[data-state="paused"] .cand-a .composer,
+html[data-state="paused"] .cand-b .composer,
+html[data-state="paused"] .cand-c .composer { border-style: dashed; }
 .send {
-  margin-left: auto;
-  font: inherit;
-  font-size: 0.875rem;
-  min-height: 2rem;
-  padding: 0 var(--space-4);
-  border: 0;
-  border-radius: var(--radius-control);
-  background: var(--forest);
-  color: var(--surface);
-  cursor: pointer;
+  margin-left: auto; font: inherit; font-size: 0.75rem; font-weight: 500;
+  min-height: 1.5rem; padding: 0 var(--space-3);
+  border: 0; border-radius: var(--radius-control);
+  background: var(--forest); color: var(--surface); cursor: pointer;
 }
-.send:hover { background: #204B3C; }
 .send:focus-visible { outline: 2px solid var(--forest); outline-offset: 2px; }
 
-.state-running .frame {
-  --glow-a: 1;
-  animation: spin 4s linear infinite;
-}
-.state-queued .frame { --frame-line: var(--control); }
-.state-awaiting .frame { --frame-line: color-mix(in srgb, var(--amber) 30%, var(--line)); }
-.state-pausing .frame { --frame-line: var(--control); }
-.state-paused .frame { --frame-line: color-mix(in srgb, var(--control) 45%, var(--line)); }
-.state-stopped .frame { --frame-line: var(--line); }
-.state-done .frame { --frame-line: color-mix(in srgb, var(--forest) 35%, var(--line)); }
-.state-failed .frame { --frame-line: color-mix(in srgb, var(--red) 60%, var(--line)); }
-.state-failed .status-line .dot { background: var(--red); }
-.state-offline .frame { --frame-line: color-mix(in srgb, var(--amber) 45%, var(--line)); }
-.state-offline .status-line .dot { background: var(--amber); }
-.state-unknown .frame { --frame-line: var(--amber); }
-.state-unknown .status-line .dot { background: var(--amber); }
+/* 强调层：一次性，绝不循环。所有候选共用同一条 keyframes。 */
+.emphasis { position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; opacity: 0; }
+.emphasis--tone { box-shadow: 0 0 0 1px var(--tone); }
+.emphasis--soft { box-shadow: 0 0 0 4px color-mix(in srgb, var(--tone) 20%, transparent); }
+.is-emphasized .emphasis--tone { animation: emphasis-ring var(--motion-duration-emphasis) var(--ease-standard); }
+.is-emphasized .emphasis--soft { animation: emphasis-halo var(--motion-duration-emphasis) var(--ease-enter); }
 
-.state-running .status-line .dot { background: var(--forest); }
-.state-awaiting .status-line .dot,
-.state-pausing .status-line .dot { background: var(--amber); }
-.state-done .status-line .dot { background: var(--forest); }
+@keyframes emphasis-ring {
+  0%   { opacity: 0; }
+  22%  { opacity: 0.9; }
+  100% { opacity: 0; }
+}
+@keyframes emphasis-halo {
+  0%   { opacity: 0; transform: scale(0.985); }
+  25%  { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.004); }
+}
 
-@keyframes spin { to { --a: 360deg; } }
-@keyframes spin-rev { to { --a: -360deg; } }
+/* ==========================================================================
+   2. 候选 A：静默基线（零循环）
+   状态只由 指示器图标 + 文字 + 1px 边框色 表达，运行期完全静止。
+   ========================================================================== */
+.cand-a .composer { border-color: color-mix(in srgb, var(--tone) 34%, var(--line)); }
+.cand-a .composer[data-need="true"] { border-color: color-mix(in srgb, var(--tone) 62%, var(--line)); }
 
-.grid {
-  display: grid;
-  gap: var(--space-4);
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+/* ==========================================================================
+   3. 候选 B：局部光点（单点沿上边移动，不做整圈流光、不加弥散光晕）
+   ========================================================================== */
+.cand-b .composer { overflow: hidden; }
+.cand-b .composer,
+.cand-c .composer { border-color: color-mix(in srgb, var(--tone) 34%, var(--line)); }
+.spark {
+  position: absolute; top: 0; left: 0; height: 2px; width: 18%;
+  border-radius: 0 2px 2px 0;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--tone) 72%, transparent), transparent);
+  opacity: 0; pointer-events: none;
 }
-.card {
-  background: var(--surface);
-  border-radius: var(--radius-control);
-  box-shadow: inset 0 0 0 1px var(--line);
-  padding: var(--space-4);
-  display: grid;
-  gap: var(--space-3);
+html[data-state="planning"] .cand-b .spark,
+html[data-state="running"]  .cand-b .spark,
+html[data-state="paused"]   .cand-b .spark { opacity: 1; animation: spark-run var(--motion-loop-calm) linear infinite; }
+html[data-state="running"]  .cand-b .spark { animation-duration: calc(var(--motion-loop-calm) * 0.75); }
+@keyframes spark-run {
+  from { transform: translateX(-30%); }
+  to   { transform: translateX(640%); }
 }
-.card .frame .body { padding: var(--space-2); min-height: 4rem; align-content: center; }
-.card .desc {
-  font-family: var(--font-code);
-  font-size: 0.75rem;
-  line-height: 1.6;
-  color: var(--secondary);
-  margin: 0;
-}
-.tag {
-  display: inline-block;
-  font-family: var(--font-code);
-  font-size: 0.625rem;
-  letter-spacing: 0.08em;
-  padding: 0 var(--space-1);
-  border-radius: var(--radius-badge);
-  background: var(--sidebar);
-  color: var(--secondary);
-  vertical-align: 0.15em;
-}
-.tag.pick { background: var(--sage); color: var(--forest); }
 
-.frame.v-flow {
-  --glow-a: 1;
-  animation: spin 4s linear infinite;
+/* Level 1 悬停：不再横穿，停在中间做 ±2px 极慢晃动，语义是「悬而未决，没有目的地」 */
+html[data-state="waiting_external"] .cand-b .spark {
+  left: 50%; margin-left: -9%;          /* 18% 宽居中，避免切换时从边缘跳回 */
+  opacity: 0.7;
+  animation: spark-hover var(--motion-loop-calm) var(--ease-standard) infinite alternate;
 }
-.frame.v-twin {
-  --glow-a: 1;
-  animation: spin-rev 7s linear infinite;
-  background-image:
-    conic-gradient(from var(--a),
-      transparent 0deg,
-      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.35), transparent) 6deg,
-      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a)), transparent) 14deg,
-      color-mix(in srgb, var(--glow-peak) calc(var(--glow-a) * 70%), transparent) 24deg,
-      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.5), transparent) 60deg,
-      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.18), transparent) 105deg,
-      transparent 140deg,
-      transparent 180deg,
-      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.35), transparent) 186deg,
-      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a)), transparent) 194deg,
-      color-mix(in srgb, var(--glow-peak) calc(var(--glow-a) * 70%), transparent) 204deg,
-      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.5), transparent) 240deg,
-      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--glow-a) * 0.18), transparent) 285deg,
-      transparent 320deg);
+@keyframes spark-hover {
+  from { transform: translateX(-2px); }
+  to   { transform: translateX(2px); }
 }
-.frame.v-sweep {
-  animation: sweep 6s var(--ease) infinite;
-  background-image:
-    conic-gradient(from 0deg,
-      transparent 0deg,
-      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--sweep-a) * 0.4), transparent) 6deg,
-      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--sweep-a)), transparent) 18deg,
-      color-mix(in srgb, var(--glow-peak) calc(var(--sweep-a) * 75%), transparent) 30deg,
-      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--sweep-a) * 0.45), transparent) 66deg,
-      color-mix(in srgb, var(--forest) calc(var(--glow-strength) * var(--sweep-a) * 0.15), transparent) 105deg,
-      transparent 140deg);
-}
-@keyframes sweep {
-  0%, 3%    { --sweep-a: 0; }
-  9%        { --sweep-a: 1; }
-  38%       { --sweep-a: 1; }
-  52%, 100% { --sweep-a: 0; }
-}
-.frame.v-still { --frame-line: var(--control); }
 
-html:not(.motion-on) .frame {
-  animation: none !important;
-  --glow-a: 0 !important;
-  --sweep-a: 0 !important;
+/* ==========================================================================
+   4. 候选 C：底部细基线（内缩 2px 基线 + 低对比往复段）
+   ========================================================================== */
+.cand-c .composer { padding-bottom: calc(var(--space-3) + 2px); }
+.track {
+  position: absolute; left: 10%; right: 10%; bottom: 1px; height: 2px;
+  border-radius: 2px; background: color-mix(in srgb, var(--line) 70%, transparent);
+  opacity: 0; pointer-events: none;
 }
+.track-seg {
+  position: absolute; inset: 0 auto 0 0; width: 26%; border-radius: 2px;
+  background: color-mix(in srgb, var(--tone) 55%, transparent);
+}
+html[data-state="planning"] .cand-c .track,
+html[data-state="running"]  .cand-c .track,
+html[data-state="paused"]   .cand-c .track { opacity: 1; }
+html[data-state="planning"] .cand-c .track-seg,
+html[data-state="running"]  .cand-c .track-seg,
+html[data-state="paused"]   .cand-c .track-seg { animation: track-slide var(--motion-loop-slow) var(--ease-standard) infinite alternate; }
+html[data-state="running"]  .cand-c .track-seg { animation-duration: calc(var(--motion-loop-slow) * 0.78); }
+@keyframes track-slide {
+  from { transform: translateX(0); }
+  to   { transform: translateX(238%); }
+}
+
+/* Level 1 排队：静态小圆点 + 4.5s 极慢透明度脉冲，不位移（§三.3） */
+.queue-dot {
+  position: absolute; left: 50%; bottom: 1px; margin-left: -3px;
+  width: 6px; height: 6px; border-radius: 9999px;
+  background: color-mix(in srgb, var(--tone) 50%, transparent);
+  opacity: 0; pointer-events: none;
+}
+html[data-state="queued"] .cand-c .queue-dot {
+  opacity: 0.75;
+  animation: queue-pulse var(--motion-loop-queue) var(--ease-standard) infinite alternate;
+}
+@keyframes queue-pulse {
+  from { opacity: 0.3; }
+  to   { opacity: 0.8; }
+}
+
+/* Level 1 悬停：基线段停在中间，同样只做 ±2px 晃动，与 running 的往复区分 */
+html[data-state="waiting_external"] .cand-c .track,
+html[data-state="waiting_external"] .cand-c .queue-dot { opacity: 1; }
+html[data-state="waiting_external"] .cand-c .track-seg {
+  left: 37%; width: 26%;                  /* 居中，替代往复段的左端锚点 */
+  animation: spark-hover var(--motion-loop-calm) var(--ease-standard) infinite alternate;
+}
+
+/* ==========================================================================
+   5. Paused / Resume 直觉隐喻：运动冻结 + 一次性启动
+   仅冻结「运行期专属」动效；排队、外部等待的慢脉冲不冻结。
+   ========================================================================== */
+html[data-state="paused"] .cand-b .spark,
+html[data-state="paused"] .cand-c .track-seg { animation-play-state: paused; opacity: 0.55; }
+html[data-state="paused"] .indicator .glyph { opacity: 0.75; }
+
+/* 恢复动效挂在伪元素上，避免替换宿主的循环 animation 导致运动被永久停掉 */
+.cand-b .spark::after,
+.cand-c .track-seg::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  background: var(--tone); opacity: 0; pointer-events: none;
+}
+.is-resuming .spark::after,
+.is-resuming .track-seg::after { animation: resume-kick var(--motion-duration-emphasis) var(--ease-enter); }
+@keyframes resume-kick {
+  0%   { opacity: 0; }
+  40%  { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+
+/* ==========================================================================
+   6. 后台降频 / 失焦暂停 / 减少动态效果
+   ========================================================================== */
+html.page-hidden .spark,
+html.page-hidden .track-seg,
+html.page-hidden .queue-dot { animation-play-state: paused; }
+
+html.motion-off .spark,
+html.motion-off .track-seg,
+html.motion-off .queue-dot,
+html.reduce-motion .spark,
+html.reduce-motion .track-seg,
+html.reduce-motion .queue-dot { animation: none !important; opacity: 0 !important; }
+html.motion-off .emphasis,
+html.reduce-motion .emphasis { animation: none !important; opacity: 0 !important; }
+html.motion-off .indicator .glyph,
+html.reduce-motion .indicator .glyph { opacity: 1 !important; }
+html.motion-off .chip,
+html.reduce-motion .chip,
+html.motion-off .btn,
+html.reduce-motion .btn,
+html.motion-off .composer,
+html.reduce-motion .composer { transition: none !important; }
 
 @media (prefers-reduced-motion: reduce) {
-  .frame {
-    animation: none !important;
-    --glow-a: 0 !important;
-    --sweep-a: 0 !important;
-  }
-  .stop-btn, .link-btn, .chip, .send { transition: none; }
+  .spark, .track-seg, .queue-dot, .emphasis, .chip, .btn, .composer { animation: none !important; transition: none !important; }
+  .spark, .track-seg, .queue-dot { opacity: 0 !important; }
 }
 
-.todo { font-size: 0.875rem; color: var(--secondary); }
-.todo li { margin-bottom: var(--space-1); }
+/* ==========================================================================
+   7. 快捷操作图标状态（静态角标，运行期才有一个 1.125rem 小弧）
+   ========================================================================== */
+.qa-row { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.qa {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  font: inherit; font-size: 0.8125rem; color: var(--secondary);
+  background: var(--surface); border: 0; border-radius: var(--radius-control);
+  box-shadow: inset 0 0 0 1px var(--line);
+  min-height: 2.25rem; padding: 0 var(--space-3); position: relative;
+}
+.qa .box { width: 1.125rem; height: 1.125rem; flex: none; position: relative; display: inline-grid; place-items: center; }
+.qa .box svg { display: block; color: var(--muted); }
+.qa[data-s="running"] .box svg { animation: qa-spin var(--motion-loop-slow) linear infinite; }
+.qa[data-s="success"] .box svg { color: var(--tone-active); }
+.qa[data-s="error"] .box svg { color: var(--tone-fail); }
+.qa[data-s="need"] .box svg { color: var(--tone-need); }
+.qa .badge {
+  position: absolute; top: -0.25rem; right: -0.375rem;
+  min-width: 0.875rem; height: 0.875rem; border-radius: 9999px;
+  font-family: var(--font-code); font-size: 0.625rem; line-height: 0.875rem;
+  text-align: center; color: var(--surface); background: var(--control);
+}
+.qa[data-s="success"] .badge { background: var(--tone-active); }
+.qa[data-s="error"] .badge { background: var(--tone-fail); }
+.qa[data-s="need"] .badge { background: var(--tone-need); }
+.qa[data-s="idle"] .badge,
+.qa[data-s="running"] .badge { display: none; }
+@keyframes qa-spin { to { transform: rotate(360deg); } }
+html.motion-off .qa[data-s="running"] .box svg,
+html.reduce-motion .qa[data-s="running"] .box svg { animation: none !important; }
+
+/* ==========================================================================
+   8. 状态映射总表 + 验收清单
+   ========================================================================== */
+.table-wrap { overflow-x: auto; box-shadow: inset 0 0 0 1px var(--line); border-radius: var(--radius-control); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.8125rem; }
+th, td { text-align: left; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+td.k { font-family: var(--font-code); color: var(--secondary); white-space: nowrap; }
+.check li { margin-bottom: var(--space-1); font-size: 0.875rem; color: var(--secondary); }
+.readout {
+  font-family: var(--font-code); font-size: 0.75rem; color: var(--muted);
+  margin-top: var(--space-2);
+}
+.readout b { color: var(--forest); font-weight: 600; }
+.readout b.bad { color: var(--red); }
 </style>
 </head>
 <body>
 <div class="page">
 
-  <h1>输入区动效边框原型</h1>
+  <h1>Agent 状态视觉反馈系统 · 输入区动效三候选</h1>
   <p class="note">
-    独立原型，<strong>未接入项目</strong>，页面内数据均为演示数据，不代表任何真实运行状态。颜色、间距、圆角、边框宽度取自
-    <code>docs/frontend/design-tokens.json</code>（v0.3.0 Proposed）。光带宽度 <code>--glow-band: 3px</code>、强度
-    <code>--glow-strength: 60%</code>、周期 <code>4s / 6s / 7s</code> 均为试验值，未写回 token。规则依据
-    <code>docs/frontend/workbench-design.md §6.1</code> 与 <code>docs/frontend/design-system.md §7.1</code>。
+    独立原型，<strong>未接入项目</strong>。页面内状态与文案均为演示数据，不代表任何真实 Run / Task 事实。
+    颜色、间距、圆角取自 <code>docs/frontend/design-tokens.json</code>（v0.4.0 Proposed）；
+    <code>design-system.md §7.1</code> 与 <code>workbench-design.md §6.1</code> 是规则依据。
+    本轮把动效从「整圈流光 + 弥散光晕」收缩为 <strong>低干扰状态表达</strong>：全部时长与缓动只来自
+    <code>--motion-*</code> token，运行期动效降为 Level 1–2，Level 3 只做一次性强调且不循环。
+    三个候选共用同一套 <code>StateVisualConfig</code>，差异只在输入框边框层的表达方式。
   </p>
 
   <div class="toolbar">
-    <label><input type="checkbox" id="motionToggle" checked> 运行提示动效</label>
-    <span class="hint">关闭动效只改变展示，不发送暂停或取消命令，也不隐藏状态文字、查看进度与停止入口。系统开启「减少动态效果」时同样禁用。</span>
+    <label><input type="checkbox" id="motionToggle" checked> 允许动效</label>
+    <label><input type="checkbox" id="reducedToggle"> 模拟系统「减少动态效果」</label>
+    <label><input type="checkbox" id="hiddenToggle"> 模拟窗口失焦 / 后台</label>
+    <button class="btn" type="button" id="playBtn">▶ 播放状态流转</button>
+    <span class="hint">关闭动效只改展示，不发送暂停或取消命令，不隐藏状态文字与操作入口；输入框在任何状态下都可编辑。</span>
   </div>
 
-  <h2>一、状态演示（方案 A：单段光带沿整圈流动）</h2>
+  <h2>一、状态切换（11 个状态统一走同一份映射）</h2>
   <div class="chips" id="chips" role="group" aria-label="切换演示状态"></div>
 
-  <div class="stage" id="stage">
-    <div class="status-line" role="status" aria-live="polite">
-      <span class="dot" aria-hidden="true"></span>
-      <span class="stage-name" id="stageName"></span>
-      <span class="count" id="stageCount"></span>
-      <span class="spacer"></span>
-      <span id="stageActions"></span>
-    </div>
+  <h2>二、输入区动效三候选</h2>
+  <div class="grid" id="grid">
 
-    <div class="frame">
-      <div class="body composer">
-        <textarea id="draft" placeholder="补充说明或下一步指令…"></textarea>
-        <div class="composer-tools">
-          <span>Relay Sans SC · 默认</span>
-          <span class="meter">
-            <span class="meter-ring" aria-hidden="true">8%</span>
-            <span>上下文占用</span>
-          </span>
-          <button class="send" type="button">发送</button>
-        </div>
+    <section class="card cand-a">
+      <header>
+        <h3>A 静默基线 <span class="tag">零循环</span></h3>
+        <p class="desc">边框只换 1px 静态色；运行期完全不动，靠指示器图标 + 文字 + 边框色三通道表达。Level 0–3 全部静态，唯一动作是进入 need / success / error 时的一次性描边强调。</p>
+        <p class="now" data-now></p>
+      </header>
+      <div class="indicator"></div>
+      <div class="composer">
+        <div class="emphasis emphasis--tone"></div>
+        <div class="emphasis emphasis--soft"></div>
+        <textarea placeholder="输入消息……" rows="2"></textarea>
+        <div class="composer-bar"><span class="mark" data-mark></span><span>上下文 8%</span><button class="send" type="button">发送</button></div>
       </div>
-    </div>
-  </div>
+      <p class="desc">代价：长时间执行时「仍在工作」的感知最弱，需要用户看指示器文字。</p>
+    </section>
 
-  <h2>二、方案并排</h2>
-  <div class="grid">
-
-    <div class="card">
-      <h3>A 单段光带沿整圈流动 <span class="tag pick">选定</span></h3>
-      <div class="frame v-flow">
-        <div class="body">正在执行</div>
+    <section class="card cand-b">
+      <header>
+        <h3>B 局部光点 <span class="tag">Level 2 · 单点</span></h3>
+        <p class="desc">上边一条 18% 宽的 2px 光点。不做整圈流光，不加 blur 光晕，只用 transform。</p>
+        <p class="now" data-now></p>
+      </header>
+      <div class="indicator"></div>
+      <div class="composer">
+        <div class="emphasis emphasis--tone"></div>
+        <div class="emphasis emphasis--soft"></div>
+        <div class="spark" aria-hidden="true"></div>
+        <textarea placeholder="输入消息……" rows="2"></textarea>
+        <div class="composer-bar"><span class="mark" data-mark></span><span>上下文 8%</span><button class="send" type="button">发送</button></div>
       </div>
-      <p class="desc">band 3px / core 30° / tail 240° / peak 80% / 4s 顺时针</p>
-    </div>
+      <p class="desc">代价：光点经过输入文字上方 2px，需要确认不干扰首行阅读。</p>
+    </section>
 
-    <div class="card">
-      <h3>B 双段对称光点</h3>
-      <div class="frame v-twin">
-        <div class="body">正在执行</div>
+    <section class="card cand-c">
+      <header>
+        <h3>C 底部细基线 <span class="tag">Level 2 · 往复</span></h3>
+        <p class="desc">内缩基线上 26% 宽的低对比段。基线不接触边框，四角不可见，避免「进度条被误读为可拖动进度」。</p>
+        <p class="now" data-now></p>
+      </header>
+      <div class="indicator"></div>
+      <div class="composer">
+        <div class="emphasis emphasis--tone"></div>
+        <div class="emphasis emphasis--soft"></div>
+        <div class="track" aria-hidden="true"><div class="track-seg"></div></div>
+        <div class="queue-dot" aria-hidden="true"></div>
+        <textarea placeholder="输入消息……" rows="2"></textarea>
+        <div class="composer-bar"><span class="mark" data-mark></span><span>上下文 8%</span><button class="send" type="button">发送</button></div>
       </div>
-      <p class="desc">band 3px / 2×core 14° / tail 140° / peak 70% / 7s 逆时针</p>
-    </div>
-
-    <div class="card">
-      <h3>C 顶部单次横扫</h3>
-      <div class="frame v-sweep">
-        <div class="body">正在执行</div>
-      </div>
-      <p class="desc">band 3px / core 18° / tail 140° / 6s 周期可见约 2.6s</p>
-    </div>
-
-    <div class="card">
-      <h3>D 静态弱强调（基线）</h3>
-      <div class="frame v-still">
-        <div class="body">排队中</div>
-      </div>
-      <p class="desc">无动画 / line = control 灰 / 用于排队、正在停止、已暂停</p>
-    </div>
+      <p class="desc">代价：与输入区底部分隔线重合，需要确认在 Windows 缩放下不显脏。</p>
+    </section>
 
   </div>
+  <p class="readout">布局位移检测（切换状态时输入框高度变化）：<b id="shiftReadout">0px</b></p>
 
-  <h2>三、待验证项（本页无法证明）</h2>
-  <ul class="todo">
-    <li>光带速度、强度、停止时机是否干扰输入与阅读，需在真实桌面窗口长时间使用判断。</li>
-    <li>Windows WebView 实际缩放与 125%–150% DPI 下的 3px 光带表现。</li>
-    <li>键盘焦点（<code>focus-visible</code>）与光带并存时的对比度。</li>
-    <li>屏幕阅读器只应读到状态文字，不应读出装饰光带；阶段变化才播报。</li>
-    <li>系统「减少动态效果」与本页开关两条路径的表现一致。</li>
-    <li>切到 Task B 后 Task A 的迟到事件不会让 B 的输入区发光（需接入真实 Run 后验证）。</li>
+  <h2>三、快捷操作图标状态</h2>
+  <div class="qa-row">
+    <button class="qa" type="button" data-s="idle"><span class="box" data-icon="check"></span>代码检查<span class="badge"></span></button>
+    <button class="qa" type="button" data-s="running"><span class="box" data-icon="loader"></span>运行测试<span class="badge"></span></button>
+    <button class="qa" type="button" data-s="success"><span class="box" data-icon="check"></span>生成文档<span class="badge">✓</span></button>
+    <button class="qa" type="button" data-s="error"><span class="box" data-icon="alert"></span>提交代码<span class="badge">!</span></button>
+    <button class="qa" type="button" data-s="need"><span class="box" data-icon="help"></span>继续任务<span class="badge">?</span></button>
+  </div>
+  <p class="desc">运行中 = 图标自身缓慢旋转（无额外文字）；终态 = 图标变色 + 静态角标；需要人工 = 问号角标。图标区域高度固定，角标不推动布局。</p>
+
+  <h2>四、状态 → 视觉映射总表（三候选共用）</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>业务状态</th><th>Motion Level</th><th>指示器</th><th>边框 / 基线</th><th>输入框</th><th>一次性强调</th></tr></thead>
+      <tbody id="mapBody"></tbody>
+    </table>
+  </div>
+
+  <h2>五、验收自查（本页可直接验证的项）</h2>
+  <ul class="check">
+    <li>执行中三个输入框均可点击、输入、选择、复制；无 disabled，无遮罩层。</li>
+    <li>不看文字时，A 靠指示器图标形状 + 边框色，B 靠上边光点，C 靠底部基线段，可区分 running / paused / need / success / error。</li>
+    <li>同一时刻只有一个候选的运行期循环动效处于 Level 2；快捷操作区仅运行中那一个旋转。</li>
+    <li>进入 success / error / need 后，所有循环动效立即停止（emphasis 为 forwards 一次性，不循环）。</li>
+    <li>waiting_user 三候选同时出现琥珀边框 + 指示器问号图标 + placeholder 变更，三通道同时变化。</li>
+    <li>切换状态时输入框高度不变（见上方位移检测读数）。</li>
+    <li>勾选「减少动态效果」后循环动效消失，但图标、文字、边框色、角标仍能区分全部状态。</li>
+  </ul>
+
+  <h2>六、待验证项（本页无法证明）</h2>
+  <ul class="check">
+    <li>长时间 running 下 4.5s / 7s 周期是否仍产生视觉疲劳，需真实桌面窗口连续使用 30 分钟以上判断。</li>
+    <li>Windows WebView 在 125%–150% DPI 下 2px 光点与基线的实际观感。</li>
+    <li>键盘 focus-visible 描边与运行期光点/基线并存的对比度是否达标。</li>
+    <li>光点经过输入首行文字上方时，Windows 透明合成层是否产生文字边缘抖动。</li>
+    <li>真实接入后：Task A 的迟到事件不得点亮 Task B 的输入区；后台 SSE 断流时状态不得停在 running。</li>
+    <li>屏幕阅读器只播报状态文字，不读出装饰动效；装饰层必须保持 aria-hidden。</li>
   </ul>
 
 </div>
 
 <script>
-const STATES = [
-  { key: 'idle', name: '空闲', count: '', actions: [], note: '无绑定 Run' },
-  { key: 'queued', name: '排队中', count: '队列第 1 位（演示）', actions: ['查看进度', '取消排队'], note: '静态弱强调，不播放执行动效' },
-  { key: 'running', name: '正在读取文件', count: '已找到 6 个候选（演示）', actions: ['查看进度', '停止'], note: '柔和光带持续流动' },
-  { key: 'awaiting', name: '产物已生成，等待验收', count: '版本 v3（演示）', actions: ['打开 Review'], note: '停止流动' },
-  { key: 'pausing', name: '正在停止，等待安全结束', count: '1 个动作在途（演示）', actions: ['查看在途动作'], note: '停止流动，保留静态提示' },
-  { key: 'paused', name: '已暂停', count: '可继续（演示）', actions: ['继续'], note: '静态边框' },
-  { key: 'stopped', name: '已停止', count: '保留已产生结果（演示）', actions: ['查看结果'], note: '普通静态边框' },
-  { key: 'done', name: '任务已完成', count: '业务完成事实成立（演示）', actions: ['查看提交'], note: '光带平滑淡出' },
-  { key: 'failed', name: '已确认失败', count: '退出码 1（演示）', actions: ['查看原因', '安全重试'], note: '静态错误边框' },
-  { key: 'offline', name: '连接中断，正在核对运行状态', count: '最后确认于 14:26（演示）', actions: ['重新连接'], note: '静态，不推断任务已停止' },
-  { key: 'unknown', name: '执行结果待核对', count: '外部动作 UNKNOWN（演示）', actions: ['核对结果'], note: '静态警示，不直接重试' },
-];
+/* ==========================================================================
+   StateVisualConfig —— 唯一映射来源。
+   组件不允许自行判断 running；一切从这张表读。
+   level: 0 静态 / 1 极弱 / 2 低干扰执行 / 3 一次性强调
+   ========================================================================== */
+const GLYPHS = {
+  idle:     '<circle cx="8" cy="8" r="5.4"/>',
+  queued:   '<circle cx="8" cy="8" r="5.4" stroke-dasharray="2.4 2.2"/>',
+  planning: '<path d="M8 2.6 9.6 6.4 13.4 8 9.6 9.6 8 13.4 6.4 9.6 2.6 8 6.4 6.4Z"/>',
+  running:  '<path d="M5.4 3.4 12.6 8l-7.2 4.6Z"/>',
+  waiting_external: '<circle cx="8" cy="8" r="5.4"/><path d="M8 5v3.2l2.2 1.4"/>',
+  waiting_user: '<path d="M5.9 5.9a2.2 2.2 0 1 1 3 2.1v1.1"/><circle cx="8.6" cy="11" r=".7" fill="currentColor" stroke="none"/>',
+  paused:   '<path d="M6 4.4v7.2M10 4.4v7.2"/>',
+  success:  '<path d="M3.6 8.4 6.8 11.6 12.6 4.9"/>',
+  partial_success: '<circle cx="8" cy="8" r="5.4" stroke-dasharray="17 34" transform="rotate(-90 8 8)"/>',
+  error:    '<path d="M8 4.4v4.2"/><circle cx="8" cy="11.2" r=".7" fill="currentColor" stroke="none"/>',
+  cancelled:'<path d="M4.4 4.4 11.6 11.6M11.6 4.4 4.4 11.6"/>'
+};
 
+const STATE_VISUALS = {
+  idle: {
+    label: '空闲', level: 0, tone: 'idle', glyph: 'idle',
+    meta: '等待你的下一条消息', border: '静态 1px', baseline: '不显示',
+    input: '可输入', emphasis: false, placeholder: null
+  },
+  queued: {
+    label: '排队中', level: 1, tone: 'idle', glyph: 'queued',
+    meta: '已接收，排在第 1 位', border: '静态 1px', baseline: 'C 底部静态点 4.5s 透明度脉冲',
+    input: '可输入', emphasis: false, placeholder: null
+  },
+  planning: {
+    label: '规划中', level: 2, tone: 'active', glyph: 'planning',
+    meta: '正在拆分步骤', border: 'B 上边光点 / C 基线段', baseline: '6s · 9s 单向 / 往复',
+    input: '可输入', emphasis: false, placeholder: null
+  },
+  running: {
+    label: '执行中', level: 2, tone: 'active', glyph: 'running',
+    meta: '正在读取文件与调用工具', border: 'B 上边光点 / C 基线段', baseline: '4.5s · 7s 单向 / 往复',
+    input: '可输入', emphasis: false, placeholder: null
+  },
+  waiting_external: {
+    label: '等待外部结果', level: 1, tone: 'active', glyph: 'waiting_external',
+    meta: '等待终端 / MCP / 网络返回', border: '静态 1px', baseline: 'B/C 停在中间 ±2px 晃动 6s',
+    input: '可输入', emphasis: false, placeholder: null
+  },
+  waiting_user: {
+    label: '等待你处理', level: 3, tone: 'need', glyph: 'waiting_user',
+    meta: '需要你确认或选择', border: '琥珀 1px 加强', baseline: '不显示',
+    input: '可输入 · placeholder 变更', emphasis: true,
+    placeholder: 'Agent 正在等待你的回答……'
+  },
+  paused: {
+    label: '已暂停', level: 0, tone: 'idle', glyph: 'paused',
+    meta: '上下文保留，可继续执行', border: '静态 1px', baseline: '运动冻结，保留位置',
+    input: '可输入', emphasis: false, placeholder: null
+  },
+  success: {
+    label: '已完成', level: 3, tone: 'active', glyph: 'success',
+    meta: '业务完成事实成立', border: '静态 1px', baseline: '停止',
+    input: '可输入', emphasis: true, placeholder: null
+  },
+  partial_success: {
+    label: '部分完成', level: 3, tone: 'need', glyph: 'partial_success',
+    meta: '仍有未完成内容待处理', border: '静态 1px', baseline: '停止',
+    input: '可输入', emphasis: true, placeholder: null
+  },
+  error: {
+    label: '执行失败', level: 3, tone: 'fail', glyph: 'error',
+    meta: '需要查看原因', border: '静态 1px', baseline: '停止',
+    input: '可输入', emphasis: true, placeholder: null
+  },
+  cancelled: {
+    label: '已取消', level: 0, tone: 'idle', glyph: 'cancelled',
+    meta: '你主动取消了这次执行', border: '静态 1px', baseline: '不显示',
+    input: '可输入', emphasis: false, placeholder: null
+  }
+};
+
+const ORDER = ['idle', 'queued', 'planning', 'running', 'waiting_external', 'waiting_user', 'paused', 'success', 'partial_success', 'error', 'cancelled'];
+const EMPHASIS_STATES = new Set(['waiting_user', 'success', 'partial_success', 'error']);
+
+/* 动效表达不了的状态：靠输入框内的静态角标区分，避免 7 个状态看起来一样。
+   planning / running / waiting_external 由运动本身区分，不需要角标。 */
+const MARK_STATES = new Set(['queued', 'waiting_user', 'paused', 'success', 'partial_success', 'error', 'cancelled']);
+
+/* 每个候选在每个状态下的实际表现：从 CSS 实现反推的文案，避免静态说明与实现脱节 */
+const CANDIDATE_NOW = {
+  a: {
+    idle: '边框 --line，零动效，无角标',
+    queued: '边框灰 + 虚圈角标「排队中」',
+    planning: '边框浅绿，零动效',
+    running: '边框绿，零动效',
+    waiting_external: '边框浅绿，零动效',
+    waiting_user: '琥珀边框 + 问号角标「等待你处理」',
+    paused: '虚线边框 + 双竖条角标「已暂停」',
+    success: '绿边框 + 对勾角标「已完成」',
+    partial_success: '琥珀边框 + 半环角标「部分完成」',
+    error: '红边框 + 感叹号角标「执行失败」',
+    cancelled: '边框 --line + 叉号角标「已取消」'
+  },
+  b: {
+    idle: '光点不显示，无角标',
+    queued: '光点不显示 + 虚圈角标「排队中」',
+    planning: '光点单向横穿 6s',
+    running: '光点单向横穿 4.5s',
+    waiting_external: '光点停在中间 ±2px 晃动 6s',
+    waiting_user: '光点消失 + 琥珀边框 + 问号角标',
+    paused: '光点冻结 + 虚线边框 + 双竖条角标',
+    success: '光点消失 + 绿边框 + 对勾角标',
+    partial_success: '光点消失 + 琥珀边框 + 半环角标',
+    error: '光点消失 + 红边框 + 感叹号角标',
+    cancelled: '光点不显示 + 叉号角标「已取消」'
+  },
+  c: {
+    idle: '基线不显示，无角标',
+    queued: '居中静态点脉冲 4.5s + 虚圈角标',
+    planning: '基线段往复 9s',
+    running: '基线段往复 7s',
+    waiting_external: '基线段停在中间 ±2px 晃动 6s',
+    waiting_user: '基线消失 + 琥珀边框 + 问号角标',
+    paused: '基线段冻结 + 虚线边框 + 双竖条角标',
+    success: '基线消失 + 绿边框 + 对勾角标',
+    partial_success: '基线消失 + 琥珀边框 + 半环角标',
+    error: '基线消失 + 红边框 + 感叹号角标',
+    cancelled: '基线不显示 + 叉号角标「已取消」'
+  }
+};
+
+const root = document.documentElement;
 const chipsEl = document.getElementById('chips');
-const stageEl = document.getElementById('stage');
-const nameEl = document.getElementById('stageName');
-const countEl = document.getElementById('stageCount');
-const actionsEl = document.getElementById('stageActions');
+const shiftEl = document.getElementById('shiftReadout');
+let current = 'running';
+let simTimer = null;
+const baseHeight = new Map();
 
-const buttons = STATES.map((s) => {
+/* ---------- 渲染：状态 → 指示器 / 边框 / placeholder / 强调 ---------- */
+function renderIndicator(host, cfg) {
+  const glyph = `<span class="glyph" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${GLYPHS[cfg.glyph]}</svg></span>`;
+  host.innerHTML = `${glyph}<span class="label">${cfg.label}</span><span class="meta">${cfg.meta}</span>` +
+    `<span class="spacer"></span><span class="lv">L${cfg.level}</span>`;
+  host.setAttribute('aria-label', `Agent 状态：${cfg.label}`);
+}
+
+function applyState(key, opts = {}) {
+  const cfg = STATE_VISUALS[key];
+  const prev = current;
+  current = key;
+
+  root.dataset.state = key;
+  root.dataset.tone = cfg.tone;
+
+  document.querySelectorAll('.indicator').forEach((el) => renderIndicator(el, cfg));
+  document.querySelectorAll('[data-now]').forEach((el) => {
+    const cand = el.closest('.card').className.match(/cand-(\w)/)[1];
+    el.textContent = `当前：${CANDIDATE_NOW[cand][key]}`;
+  });
+  const need = key === 'waiting_user';
+  const mark = MARK_STATES.has(key);
+  document.querySelectorAll('.composer').forEach((el) => {
+    el.dataset.need = String(need);
+    const m = el.querySelector('[data-mark]');
+    if (m) {
+      m.dataset.on = String(mark);
+      m.innerHTML = mark
+        ? `<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${GLYPHS[cfg.glyph]}</svg>${cfg.label}`
+        : '';
+    }
+    const ta = el.querySelector('textarea');
+    if (ta) ta.placeholder = cfg.placeholder || '输入消息……';
+    el.classList.remove('is-emphasized');
+    if (EMPHASIS_STATES.has(key)) {
+      void el.offsetWidth;                       // 强制重排以重放一次性 keyframes
+      el.classList.add('is-emphasized');
+    }
+  });
+
+  // Paused → Resume：一次性启动，之后回到常态循环
+  document.querySelectorAll('.composer').forEach((el) => {
+    el.classList.remove('is-resuming');
+    if (prev === 'paused' && (key === 'running' || key === 'planning')) {
+      void el.offsetWidth;
+      el.classList.add('is-resuming');
+    }
+  });
+
+  chipsEl.querySelectorAll('.chip').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.key === key)));
+
+  requestAnimationFrame(reportShift);
+  if (!opts.fromSim) stopSimulation();
+}
+
+/* ---------- 布局位移自检：三个候选都要稳定 ---------- */
+function reportShift() {
+  const deltas = [...document.querySelectorAll('.composer')].map((el) => {
+    const id = el.closest('.card').className.match(/cand-(\w)/)[1].toUpperCase();
+    if (!baseHeight.has(id)) baseHeight.set(id, el.offsetHeight);
+    return { id, d: el.offsetHeight - baseHeight.get(id) };
+  });
+  const bad = deltas.filter((x) => x.d !== 0);
+  shiftEl.textContent = bad.length === 0
+    ? deltas.map((x) => `${x.id} 0px`).join(' · ')
+    : bad.map((x) => `${x.id} ${x.d > 0 ? '+' : ''}${x.d}px`).join(' · ');
+  shiftEl.className = bad.length === 0 ? '' : 'bad';
+}
+
+/* ---------- 状态流转演示 ---------- */
+function stopSimulation() {
+  if (!simTimer) return;
+  clearTimeout(simTimer);
+  simTimer = null;
+  document.getElementById('playBtn').textContent = '▶ 播放状态流转';
+}
+
+function startSimulation() {
+  stopSimulation();
+  document.getElementById('playBtn').textContent = '⏹ 停止演示';
+  const script = [
+    ['idle', 700],
+    ['queued', 1400],
+    ['planning', 2200],
+    ['running', 3200],
+    ['waiting_external', 2600],
+    ['running', 2400],
+    ['waiting_user', 3200],
+    ['running', 2000],
+    ['paused', 2400],
+    ['running', 1600],
+    ['partial_success', 2400],
+    ['success', 2400],
+    ['error', 2400],
+    ['idle', 0]
+  ];
+  let i = 0;
+  const tick = () => {
+    if (i >= script.length) { stopSimulation(); return; }
+    const [key, ms] = script[i++];
+    applyState(key, { fromSim: true });
+    simTimer = ms > 0 ? setTimeout(tick, ms) : null;
+    if (ms === 0) stopSimulation();
+  };
+  tick();
+}
+
+/* ---------- 初始化 ---------- */
+ORDER.forEach((key) => {
+  const cfg = STATE_VISUALS[key];
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'chip';
-  b.textContent = s.name;
+  b.dataset.key = key;
   b.setAttribute('aria-pressed', 'false');
-  b.title = s.note;
-  b.addEventListener('click', () => select(s.key));
+  b.innerHTML = `${cfg.label}<span class="lv">L${cfg.level}</span>`;
+  b.addEventListener('click', () => applyState(key));
   chipsEl.appendChild(b);
-  return b;
 });
 
-function select(key) {
-  const s = STATES.find((x) => x.key === key);
-  stageEl.className = 'stage state-' + s.key;
-  nameEl.textContent = s.name;
-  countEl.textContent = s.count;
-  actionsEl.replaceChildren();
-  for (const label of s.actions) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = label === '停止' || label === '取消排队' ? 'stop-btn' : 'link-btn';
-    b.textContent = label;
-    actionsEl.appendChild(b);
-  }
-  buttons.forEach((btn, i) => btn.setAttribute('aria-pressed', String(STATES[i].key === key)));
-}
+const mapBody = document.getElementById('mapBody');
+ORDER.forEach((key) => {
+  const c = STATE_VISUALS[key];
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td class="k">${key}</td><td class="k">L${c.level}</td><td>${c.glyph} · ${c.label}</td><td>${c.border}</td><td>${c.baseline}</td><td>${c.emphasis ? '一次性（不循环）' : '—'}</td>`;
+  mapBody.appendChild(tr);
+});
+
+const QA_ICONS = {
+  check: '<path d="M3.6 8.4 6.8 11.6 12.6 4.9"/>',
+  loader: '<path d="M8 1.8a6.2 6.2 0 1 1-6.2 6.2"/>',
+  alert: '<path d="M8 2.4v5"/><circle cx="8" cy="10.6" r=".8" fill="currentColor" stroke="none"/>',
+  help: '<path d="M5.9 5.9a2.2 2.2 0 1 1 3 2.1v1.1"/><circle cx="8.6" cy="11" r=".7" fill="currentColor" stroke="none"/>'
+};
+document.querySelectorAll('.qa .box').forEach((el) => {
+  const d = QA_ICONS[el.dataset.icon];
+  el.innerHTML = `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+});
 
 document.getElementById('motionToggle').addEventListener('change', (e) => {
-  document.documentElement.classList.toggle('motion-on', e.target.checked);
+  root.classList.toggle('motion-off', !e.target.checked);
+});
+document.getElementById('reducedToggle').addEventListener('change', (e) => {
+  root.classList.toggle('reduce-motion', e.target.checked);
+});
+document.getElementById('hiddenToggle').addEventListener('change', (e) => {
+  root.classList.toggle('page-hidden', e.target.checked);
+});
+document.getElementById('playBtn').addEventListener('click', () => {
+  if (simTimer) stopSimulation(); else startSimulation();
 });
 
-select('running');
+applyState('running');
+requestAnimationFrame(reportShift);
 </script>
 </body>
 </html>

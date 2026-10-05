@@ -12,6 +12,10 @@
     "start": "pnpm --filter @relay-agent/api run start",
     "test": "pnpm --filter @relay-agent/api run test",
     "test:integration": "pnpm --filter @relay-agent/api run test:integration",
-    "check:docs": "node scripts/check-docs.mjs"
+    "check:docs": "node scripts/check-docs.mjs",
+    "feature-map": "node scripts/feature-map.mjs",
+    "feature-map:live": "node scripts/feature-map.mjs --serve",
+    "feature-map:check": "node scripts/feature-map.mjs --check",
+    "test:feature-map": "node --test scripts/feature-map.test.mjs"
   }
 }

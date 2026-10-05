@@ -34,11 +34,12 @@ await page.getByTestId('assist-draft').waitFor();
 const content = `浏览器验收发送 ${Date.now()}`;
 await page.getByTestId('assist-draft').fill(content);
 await page.getByTestId('assist-send').click();
-await page.getByTestId('assist-cancel').last().waitFor();
+// 排队回复走队列面板的逐条取消；输入栏停止键只覆盖那条 RUNNING。
+await page.getByTestId('assist-queue-item-1').waitFor();
 const queued = (await api(`/assist-sessions/${sessions[0].id}/messages`)).items;
 const queuedReply = queued.find(m=>m.role==='ASSISTANT' && m.status==='PENDING');
 if(!queuedReply) throw new Error('No persisted PENDING reply');
-await page.getByTestId('assist-cancel').last().click();
+await page.getByTestId('assist-queue-cancel-1').click();
 await page.getByText('消息已由服务端确认取消。',{exact:true}).waitFor();
 const cancelled = (await api(`/assist-sessions/${sessions[0].id}/messages`)).items.find(m=>m.id===queuedReply.id);
 if(cancelled.status!=='CANCELLED')throw new Error('Cancel not persisted');
