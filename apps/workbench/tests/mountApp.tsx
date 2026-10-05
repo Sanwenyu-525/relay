@@ -16,12 +16,15 @@ export class DomWrapper {
     return found;
   }
   findAll(selector: string): DomWrapper[] { return Array.from(this.element?.querySelectorAll(selector) ?? []).map((element) => new DomWrapper(element)); }
-  async trigger(eventName: string): Promise<void> {
+  async trigger(eventName: string, init?: { key?: string }): Promise<void> {
     if (!this.element) throw new Error("Cannot trigger missing DOM element");
     const target = this.element;
     await act(async () => {
       if (eventName === "click") target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
       else if (eventName === "submit") target.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      // 键盘事件必须是 KeyboardEvent：普通 Event 没有 key，键盘处理器读到的会是 undefined。
+      else if (eventName.startsWith("key"))
+        target.dispatchEvent(new KeyboardEvent(eventName, { bubbles: true, cancelable: true, key: init?.key ?? "" }));
       else target.dispatchEvent(new Event(eventName, { bubbles: true, cancelable: true }));
     });
   }

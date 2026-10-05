@@ -14,10 +14,20 @@ import { useRelayConnection } from "../lib/relayConnection";
 import "./ConnectionsView.css";
 
 const capabilities: readonly RelayGatewayCapability[] =
-  ["WEB_FETCH", "FILE_READ", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN", "FAKE_WRITE", "FAKE_PUBLIC_READ"];
+  ["WEB_FETCH", "FILE_READ", "FILE_QUERY", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN", "FAKE_WRITE", "FAKE_PUBLIC_READ"];
 /** 服务端 rootBoundCaps：这类 Connection 必须绑定一个绝对根目录，Fake 能力不绑定任何边界。 */
 const rootBoundCapabilities: readonly RelayGatewayCapability[] =
-  ["FILE_READ", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN"];
+  ["FILE_READ", "FILE_QUERY", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN"];
+/** 当前 Gateway 动作契约；提交后仍由服务端核对能力与动作的对应关系。 */
+const policyActions: Record<RelayGatewayCapability, readonly string[]> = {
+  WEB_FETCH: ["WEB_FETCH"], FILE_READ: ["READ_FILE"],
+  FILE_QUERY: ["LIST_DIRECTORY", "FIND_PATHS", "SEARCH_TEXT"],
+  FILE_WRITE: ["APPLY_CHANGESET", "READ_CHANGE_SET", "WRITE_FILE"],
+  GIT_READ: ["GIT_STATUS", "GIT_DIFF", "GIT_LOG"],
+  GIT_WRITE: ["GIT_STAGE", "GIT_COMMIT", "GIT_PUSH"],
+  CLI_RUN: ["CLI_RUN", "RUN_BUILD", "RUN_TEST"],
+  FAKE_WRITE: ["WRITE_MARKER"], FAKE_PUBLIC_READ: ["READ_PUBLIC"],
+};
 /** 除公共读取外的策略都按受管资源目录限定目标前缀（服务端 policyScope）。 */
 const isFileCapability = (capability: RelayGatewayCapability) =>
   capability !== "WEB_FETCH" && capability !== "FAKE_PUBLIC_READ";
@@ -140,6 +150,7 @@ export function ProjectConnectionsView() {
   const [resourceRoot, setResourceRoot] = useState("");
   const [policyId, setPolicyId] = useState("");
   const [policyCapability, setPolicyCapability] = useState<RelayGatewayCapability>("WEB_FETCH");
+  const [policyActionType, setPolicyActionType] = useState("");
   const [policyDecision, setPolicyDecision] = useState<RelayGatewayDecision>("DENY");
   const [policyHost, setPolicyHost] = useState("");
   const [policyResourceId, setPolicyResourceId] = useState("");
@@ -184,7 +195,7 @@ export function ProjectConnectionsView() {
   useEffect(() => {
     const request = ++scope.current;
     pendingRef.current = null; setPending(null); setMayRetry(false); setSnapshot(null);
-    setActionError(null); setFailedCommandId(null); setMessage(null); setPolicyId(""); setHealth({});
+    setActionError(null); setFailedCommandId(null); setMessage(null); setPolicyId(""); setPolicyActionType(""); setHealth({});
     if (client !== null) void refresh(client, request);
     return () => { scope.current++; pendingRef.current = null; };
   }, [client, projectId, connection.epoch]);
@@ -283,21 +294,36 @@ export function ProjectConnectionsView() {
     event.preventDefault();
     const selected = snapshot?.policies.find(({ policy }) => policy.id === policyId)?.policy ?? null;
     const capability = policyCapability;
+    const actionType = policyActionType;
     const decision = policyDecision;
     const host = policyHost.trim();
     const resourceId = isFileCapability(capability) ? policyResourceId : null;
     const bytes = Number(maxPayloadBytes);
     if ((capability === "WEB_FETCH" && !host) || (isFileCapability(capability) && !resourceId) ||
       !Number.isInteger(bytes) || bytes < 0 || bytes > 262144 ||
+      (actionType !== "" && !policyActions[capability].includes(actionType)) ||
       (resourceId !== null && !snapshot?.resources.some((item) => item.id === resourceId && item.status === "ACTIVE"))) return;
     const input = { projectId, capability, resourceId, decision, maxPayloadBytes: bytes,
-      ...(capability === "WEB_FETCH" ? { host } : {}) };
+      ...(capability === "WEB_FETCH" ? { host } : {}), ...(actionType === "" ? {} : { actionType }) };
     void sendCommand(selected === null
       ? { id: createCommandId(), type: "CreateGatewayPolicy", resultKey: "policy_id", targetId: null, expectedStatus: "ACTIVE",
         label: "权限策略创建", send: (api, commandId) => api.createGatewayPolicy({ ...input, commandId }) }
       : { id: createCommandId(), type: "AddGatewayPolicyVersion", resultKey: "policy_id", targetId: selected.id, expectedStatus: "ACTIVE",
         label: "权限策略修订", send: (api, commandId) => api.addGatewayPolicyVersion({ ...input,
           policyId: selected.id, expectedRevision: selected.revision, commandId }) });
+  }
+
+  function selectPolicy(id: string) {
+    setPolicyId(id); setPolicyResourceId(""); setPolicyActionType("");
+    const row = snapshot?.policies.find(({ policy }) => policy.id === id);
+    const active = row?.versions.find((version) => version.version === row.policy.activeVersion);
+    if (active && capabilities.includes(active.capability as RelayGatewayCapability)) {
+      setPolicyCapability(active.capability as RelayGatewayCapability);
+      setPolicyActionType(active.actionType);
+      setPolicyDecision(active.decision as RelayGatewayDecision);
+      setMaxPayloadBytes(String(active.maxPayloadBytes));
+      setPolicyHost(active.capability === "WEB_FETCH" ? active.targetPrefix : "");
+    } else if (id === "") setPolicyDecision("DENY");
   }
 
   const selectedPolicy = snapshot?.policies.find(({ policy }) => policy.id === policyId) ?? null;
@@ -377,15 +403,7 @@ export function ProjectConnectionsView() {
               {policy.activeVersion && !active && <small>当前版本详情尚未读到，不推断授权。</small>}
               <details><summary>查看已读取版本（{versions.length}，最多最近 100 条）</summary><ol>{versions.map((version) => <li key={version.version}>v{version.version} · {version.capability} · {version.decision} · {version.targetPrefix} · {version.maxPayloadBytes} bytes</li>)}</ol></details>
             </div><div className="connections-actions">
-              {policy.status === "ACTIVE" && <button className="secondary-button" type="button" disabled={busy} onClick={() => {
-                setPolicyId(policy.id); setPolicyResourceId("");
-                if (active && capabilities.includes(active.capability as RelayGatewayCapability)) {
-                  setPolicyCapability(active.capability as RelayGatewayCapability);
-                  setPolicyDecision(active.decision as RelayGatewayDecision);
-                  setMaxPayloadBytes(String(active.maxPayloadBytes));
-                  setPolicyHost(active.capability === "WEB_FETCH" ? active.targetPrefix : "");
-                }
-              }}>修订</button>}
+              {policy.status === "ACTIVE" && <button className="secondary-button" type="button" disabled={busy} onClick={() => selectPolicy(policy.id)}>修订</button>}
               {policy.status === "ACTIVE" && <button className="danger-button" type="button" disabled={busy || writeBlockedReason !== null} onClick={() => { void sendCommand({
                 id: createCommandId(), type: "RevokeGatewayPolicy", resultKey: "policy_id", targetId: policy.id, expectedStatus: "REVOKED",
                 label: "权限策略撤销", send: (api, commandId) => api.revokeGatewayPolicy({ projectId, policyId: policy.id,
@@ -394,10 +412,12 @@ export function ProjectConnectionsView() {
           })}</ul>}
           <details className="connections-create" open={selectedPolicy !== null || snapshot.policies.length === 0}><summary>{selectedPolicy ? "修订权限策略" : "新建权限策略"}</summary><form className="connections-form" onSubmit={submitPolicy} data-testid="policy-form"><h3>{selectedPolicy ? `修订策略 ${selectedPolicy.policy.id}` : "新建策略"}</h3>
             {selectedPolicy && <p className="helper-text">基于 rev {selectedPolicy.policy.revision} 追加不可变版本；旧版本仍可查看。</p>}
-            <label className="field"><span className="field-label">策略</span><select value={policyId} disabled={busy} onChange={(event) => { setPolicyId(event.target.value); setPolicyResourceId(""); }} data-testid="policy-select">
+            <label className="field"><span className="field-label">策略</span><select value={policyId} disabled={busy} onChange={(event) => selectPolicy(event.target.value)} data-testid="policy-select">
               <option value="">新建策略</option>{snapshot.policies.filter(({ policy }) => policy.status === "ACTIVE").map(({ policy }) => <option key={policy.id} value={policy.id}>{policy.id}</option>)}</select></label>
-            <label className="field"><span className="field-label">能力</span><select value={policyCapability} disabled={busy} onChange={(event) => { setPolicyCapability(event.target.value as RelayGatewayCapability); setPolicyResourceId(""); }} data-testid="policy-capability">
+            <label className="field"><span className="field-label">能力</span><select value={policyCapability} disabled={busy} onChange={(event) => { setPolicyCapability(event.target.value as RelayGatewayCapability); setPolicyActionType(""); setPolicyResourceId(""); }} data-testid="policy-capability">
               {capabilities.map((capability) => <option key={capability} value={capability}>{capability}</option>)}</select></label>
+            <label className="field"><span className="field-label">动作</span><select value={policyActionType} onChange={(event) => setPolicyActionType(event.target.value)} disabled={busy} data-testid="policy-action">
+              <option value="">使用能力默认动作</option>{policyActions[policyCapability].map((action) => <option key={action} value={action}>{action}</option>)}</select><span className="field-hint">策略只匹配这一项动作。目录检索的列出、查找和搜索须分别配置。</span></label>
             {policyCapability === "WEB_FETCH" && <label className="field"><span className="field-label">策略主机</span><input value={policyHost} onChange={(event) => setPolicyHost(event.target.value)} disabled={busy} required placeholder="example.org" data-testid="policy-host" /></label>}
             {isFileCapability(policyCapability) && <label className="field"><span className="field-label">受管资源</span><select value={policyResourceId} onChange={(event) => setPolicyResourceId(event.target.value)} disabled={busy} required data-testid="policy-resource">
               <option value="">明确选择一个有效资源</option>{activeResources.map((item) => <option key={item.id} value={item.id}>{item.canonicalRoot} · {item.id}</option>)}</select><span className="field-hint">版本接口不提供 resource_id；修订时须重新明确选择，不从目录字符串猜测。</span></label>}
@@ -405,7 +425,7 @@ export function ProjectConnectionsView() {
               <option value="DENY">DENY · 拒绝（默认）</option><option value="ASK">ASK · 每次请求审批</option><option value="AUTO">AUTO · 匹配时自动准入</option></select></label>
             <label className="field"><span className="field-label">最大载荷字节</span><input type="number" min="0" max="262144" step="1" value={maxPayloadBytes} onChange={(event) => setMaxPayloadBytes(event.target.value)} disabled={busy} required data-testid="policy-max-bytes" /><span className="field-hint">当前只读动作的空参数编码为 2 字节；上限由服务端校验。</span></label>
             <div className="connections-actions"><button className="primary-button" type="submit" disabled={busy || writeBlockedReason !== null || (isFileCapability(policyCapability) && activeResources.length === 0)} data-testid="policy-save">{selectedPolicy ? "提交策略新版本" : "明确创建策略"}</button>
-              {selectedPolicy && <button className="secondary-button" type="button" disabled={busy} onClick={() => { setPolicyId(""); setPolicyDecision("DENY"); setPolicyResourceId(""); }}>取消修订</button>}</div>
+              {selectedPolicy && <button className="secondary-button" type="button" disabled={busy} onClick={() => selectPolicy("")}>取消修订</button>}</div>
           </form></details>
         </section>
       </>}

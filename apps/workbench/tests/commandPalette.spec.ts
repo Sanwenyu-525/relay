@@ -1,4 +1,4 @@
-import { act } from "react";
+﻿import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { DomWrapper, flush, mountWorkbench } from "./mountApp";
@@ -39,7 +39,7 @@ describe("Ctrl+K 全局命令面板", () => {
   it("fixture 模式有键盘焦点、Tab 循环和 Escape 焦点返回，不发真实请求", async () => {
     const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountWorkbench("/projects"); unmount = mounted.unmount;
-    const trigger = mounted.wrapper.get('[data-testid="command-open"]').element as HTMLElement;
+    const trigger = mounted.wrapper.get('[data-testid="titlebar-search"]').element as HTMLElement;
     trigger.focus(); await key("k", { ctrlKey: true }); await flush();
     expect(palette().textContent).toContain("当前为示例数据");
     expect(document.activeElement).toBe(palette().querySelector('[data-testid="command-search"]'));
@@ -56,7 +56,7 @@ describe("Ctrl+K 全局命令面板", () => {
   it("收件箱快捷命令复用 /inbox 别名，动态说明与已接入的 Activity 一致", async () => {
     const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountWorkbench("/today"); unmount = mounted.unmount;
-    await mounted.wrapper.get('[data-testid="command-open"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="titlebar-search"]').trigger("click");
     expect(palette().textContent).toContain("查看示例动态");
     const inbox = Array.from(palette().querySelectorAll<HTMLButtonElement>(".command-palette-actions button"))
       .find((button) => button.textContent?.includes("打开收件箱"));
@@ -79,7 +79,7 @@ describe("Ctrl+K 全局命令面板", () => {
       throw new Error(`Unexpected ${path}`);
     }));
     const mounted = await mountWorkbench("/projects"); unmount = mounted.unmount;
-    await mounted.wrapper.get('[data-testid="command-open"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="titlebar-search"]').trigger("click");
     await new DomWrapper(palette().querySelector('[data-testid="command-search"]')).setValue("研究"); await flush(350);
     expect(palette().textContent).toContain("研究资料");
     expect(palette().textContent).toContain("来源：knowledge:source-3");
@@ -103,7 +103,7 @@ describe("Ctrl+K 全局命令面板", () => {
       throw new Error(`Unexpected ${path}`);
     }));
     const mounted = await mountWorkbench("/projects"); unmount = mounted.unmount;
-    await mounted.wrapper.get('[data-testid="command-open"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="titlebar-search"]').trigger("click");
     const search = palette().querySelector('[data-testid="command-search"]')!;
     await new DomWrapper(search).setValue("资料"); await flush(350);
     const rows = Array.from(palette().querySelectorAll<HTMLElement>("[data-result-index]"));
@@ -128,13 +128,13 @@ describe("Ctrl+K 全局命令面板", () => {
       throw new Error(`Unexpected ${path}`);
     }); vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountWorkbench("/projects"); unmount = mounted.unmount;
-    await mounted.wrapper.get('[data-testid="command-open"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="titlebar-search"]').trigger("click");
     await new DomWrapper(palette().querySelector('[data-testid="command-project-id"]')).setValue(projectId);
     await new DomWrapper(palette().querySelector(".command-palette-project")).trigger("submit"); await flush();
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith(`/projects/${projectId}`))).toBe(true);
     expect(mounted.router.currentRoute.value.path).toBe(`/projects/${projectId}`);
     expect(fetchMock.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET")).toBe(true);
-    await mounted.wrapper.get('[data-testid="command-open"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="titlebar-search"]').trigger("click");
     await new DomWrapper(Array.from(palette().querySelectorAll(".command-palette-actions button")).find((item) => item.textContent?.includes("新建项目"))!).trigger("click"); await flush();
     expect(mounted.router.currentRoute.value.path).toBe("/projects");
     expect(mounted.router.currentRoute.value.query.view).toBe("create");
@@ -156,7 +156,7 @@ describe("Ctrl+K 全局命令面板", () => {
       throw new Error(`Unexpected ${path}`);
     }));
     const mounted = await mountWorkbench(`/tasks/${taskId}`); unmount = mounted.unmount;
-    await mounted.wrapper.get('[data-testid="command-open"]').trigger("click"); await flush();
+    await mounted.wrapper.get('[data-testid="titlebar-search"]').trigger("click"); await flush();
     const buttons = Array.from(palette().querySelectorAll<HTMLButtonElement>(".command-palette-actions button"));
     expect(palette().textContent).toContain("真实任务");
     expect(buttons.find((item) => item.textContent?.includes("委托当前任务"))?.disabled).toBe(false);
@@ -185,7 +185,7 @@ describe("Ctrl+K 全局命令面板", () => {
       throw new Error(`Unexpected ${path}`);
     }));
     const mounted = await mountWorkbench(`/tasks/${taskId}`); unmount = mounted.unmount;
-    await mounted.wrapper.get('[data-testid="command-open"]').trigger("click"); await flush();
+    await mounted.wrapper.get('[data-testid="titlebar-search"]').trigger("click"); await flush();
     const delegate = Array.from(palette().querySelectorAll<HTMLButtonElement>(".command-palette-actions button")).find((item) => item.textContent?.includes("委托当前任务"))!;
     expect(delegate.disabled).toBe(true);
     await key("Escape");

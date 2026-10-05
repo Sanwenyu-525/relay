@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, RotateCcw } from "lucide-react";
+import { ChevronDown, RotateCcw, Search } from "lucide-react";
 import { RelayApiError, type RelayApiClient, type RelayProjectListItem, type RelayTaskSummary } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 
@@ -27,6 +27,7 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pagingError, setPagingError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const request = useRef(0);
 
   const load = useCallback(async (cursor: string | null) => {
@@ -69,8 +70,14 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
   }, [load]);
 
   const tasks = loaded?.tasks ?? [];
+  // 只在已加载范围内筛，不替服务端承诺全量搜索：命中数与已加载数必须同时可读。
+  const needle = query.trim().toLowerCase();
+  const visibleTasks = needle === ""
+    ? tasks
+    : tasks.filter((task) => `${task.title} ${loaded?.projectTitles.get(task.projectId ?? "") ?? ""}`
+      .toLowerCase().includes(needle));
   const groups = new Map<string | null, RelayTaskSummary[]>();
-  for (const task of tasks) {
+  for (const task of visibleTasks) {
     const group = groups.get(task.projectId) ?? [];
     group.push(task);
     groups.set(task.projectId, group);
@@ -78,6 +85,12 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
   const open = (taskId: string) => { void navigate(`/agent?work=${encodeURIComponent(taskId)}`); onOpen?.(); };
 
   return <section className="recent-work" aria-label="近期工作" data-testid="recent-work">
+    <label className="search-field recent-work-search">
+      <Search aria-hidden="true" />
+      <span className="visually-hidden">在已加载的近期任务中搜索</span>
+      <input type="search" value={query} placeholder="搜索已加载的项目或任务…"
+        data-testid="recent-work-search" onChange={(event) => setQuery(event.target.value)} />
+    </label>
     <div className="recent-work-heading">
       {/* 已加载数量与后续页属于范围说明：与标题同排，不另占一行，但仍能直接读到。 */}
       <h2 title="全部任务 · 按最近变更排序">近期的任务</h2>
@@ -91,6 +104,8 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
       {error && <p className="action-error" role="alert" data-testid="recent-work-error">{error}</p>}
       {!loading && !error && tasks.length === 0 &&
         <p className="helper-text">当前工作空间还没有任务。</p>}
+      {!loading && !error && tasks.length > 0 && visibleTasks.length === 0 &&
+        <p className="helper-text" data-testid="recent-work-no-match">已加载的 {tasks.length} 项里没有匹配项；搜索只覆盖已加载范围，可继续读取更早任务。</p>}
       <div data-testid="recent-work-list">{[...groups].map(([projectId, groupTasks]) => <details
         className="recent-work-group" open key={`${projectId ?? "unassigned"}:${groupTasks.some((task) => task.id === currentTaskId) ? currentTaskId : ""}`}>
         <summary><ChevronDown aria-hidden="true" /><span>{projectId === null ? "未归入项目" : loaded?.projectTitles.get(projectId) ?? "项目标题暂不可读取"}</span></summary>

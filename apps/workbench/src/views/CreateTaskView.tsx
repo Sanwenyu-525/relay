@@ -97,12 +97,23 @@ function LiveProjectPicker({ client, selectedId, disabled, onSelect }: {
 export default function CreateTaskView({ inboxScope, onCancel }: { inboxScope: boolean; onCancel: () => void }) {
   const [query] = useSearchParams();
   const mode = fixtureModeFromQuery(query);
+  /**
+   * 轻量起步（工作台 §18.7、LC-01/LC-04）：先用一句话说明要完成什么，
+   * 标题与预期结果由这段话确定性派生，验收条件与执行方式都不是这一步的前置。
+   *
+   * 这一步固定以 `inbox` 意图提交，因此**永远不会**尝试 MarkTaskReady：
+   * 服务端对「没有必需 criterion」的 Task 另有 READY 栅栏（task-readiness
+   * 的 REQUIRED_CRITERION_MISSING），轻量入口不靠放宽它来省步骤。
+   */
+  const lightweight = query.get("light") === "1";
   const connection = useRelayConnection();
   const live = connection.mode === "live";
   const liveScope = connection.client ? clientScope(connection.client) : null;
   const routeProjectScope = useRef(liveScope);
   const routeProjectId = routeProjectScope.current === liveScope ? query.get("project") ?? "" : "";
   const emptyDraft: CreateTaskDraft = { title: "", projectId: routeProjectId || null, expectedResult: "", acceptanceCriteria: "", startIntent: "ME", dependencyId: null };
+  /** 轻量起步只多这一项：用户是否自己改过标题。改过之后就不再被输入派生覆盖。 */
+  const [titleTouched, setTitleTouched] = useState(false);
   const baselineDraft = useRef(emptyDraft);
   baselineDraft.current = emptyDraft;
   const [draft, setDraft] = useState<CreateTaskDraft>(emptyDraft);
@@ -206,6 +217,21 @@ export default function CreateTaskView({ inboxScope, onCancel }: { inboxScope: b
     focusInvalidField.current = Object.keys(errors).length > 0;
     return Object.keys(errors).length === 0;
   }
+
+  /**
+   * 轻量起步的草稿更新：一次输入同时派生标题与预期结果。
+   * 标题默认取首个非空行（限制在服务端长度内），预期结果保存完整原话；
+   * 两者都只是整理结果，用户改写标题后不再被输入覆盖。
+   */
+  function updateLightweightIntent(value: string) {
+    if (submitting || pendingStep.current !== null) return;
+    const firstLine = value.split(/\r?\n/u).map((line) => line.trim()).find((line) => line !== "") ?? "";
+    const patch: Partial<CreateTaskDraft> = { expectedResult: value.trim().slice(0, 2000) };
+    if (!titleTouched) patch.title = firstLine.slice(0, 200);
+    updateDraft(patch);
+  }
+  const lightweightTitle = titleTouched ? draft.title : draft.expectedResult.split(/\r?\n/u)
+    .map((line) => line.trim()).find((line) => line !== "")?.slice(0, 200) ?? "";
   function handleLiveFailure(caught: unknown) {
     const described = describeLiveError(caught);
     const step = pendingStep.current?.step ?? null;
@@ -362,7 +388,40 @@ export default function CreateTaskView({ inboxScope, onCancel }: { inboxScope: b
   return <div className="page-layout create-task-page"><div className="page-primary"><PageHeader testId="create-task-page-head"
     title="把想做的事，变成可完成的任务" meta="新建任务与执行准备"
     lede="清晰定义任务目标、预期结果与验收标准，为后续执行做好准备。" />
-    {createdTaskId === null ? <form ref={form} className="create-form" noValidate aria-busy={submitting || undefined} onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); void submit("ready"); }}>
+    {createdTaskId === null ? lightweight ? <form ref={form} className="create-form" noValidate aria-busy={submitting || undefined} data-testid="task-lightweight-form" onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); void submit("inbox"); }}>
+      <label className={`field${fieldErrors.expectedResult ? " field--invalid" : ""}`}>
+        <span className="field-label">这次要完成什么<span className="field-required" aria-hidden="true">*</span></span>
+        <textarea value={draft.expectedResult} onChange={(event) => { updateLightweightIntent(event.target.value); clearField("expectedResult"); }}
+          name="task-intent" rows={4} required disabled={formFrozen} maxLength={2000} data-testid="task-lightweight-intent"
+          aria-invalid={fieldErrors.expectedResult ? "true" : undefined}
+          aria-describedby={fieldErrors.expectedResult ? "task-intent-error" : "task-intent-hint"}
+          placeholder="例如：把毕业论文的实验部分跑通并整理出可提交的初稿" />
+        {fieldErrors.expectedResult ? <span id="task-intent-error" className="field-error" role="alert"><Info aria-hidden="true" />{fieldErrors.expectedResult}</span>
+          : <span id="task-intent-hint" className="field-hint">用一句话说明要完成的事。标题与预期结果会从这段话整理出来，你可以改标题。</span>}
+      </label>
+      <label className={`field${fieldErrors.title ? " field--invalid" : ""}`}>
+        <span className="field-label">标题（可改）</span>
+        <input value={lightweightTitle} name="task-title" data-testid="task-lightweight-title" maxLength={200} required
+          disabled={formFrozen} onChange={(event) => { setTitleTouched(true); updateDraft({ title: event.target.value }); clearField("title"); }}
+          aria-invalid={fieldErrors.title ? "true" : undefined} />
+        {fieldErrors.title ? <span className="field-error" role="alert"><Info aria-hidden="true" />{fieldErrors.title}</span>
+          : <span className="field-hint">默认取你输入的首行；改写后不再被输入覆盖。</span>}
+      </label>
+      <p className="helper-text" data-testid="task-lightweight-scope"><Info aria-hidden="true" />
+        保存只会把它登记为「待整理」。验收标准、执行方式和依赖都不是这一步的前置：
+        没有可判断的完成条件时，系统不会把它变成「可开始」，也不会启动任何执行。</p>
+      <div className="form-actions">
+        <button className="primary-button" type="submit" data-testid="task-lightweight-save" aria-busy={submitting || undefined} disabled={formFrozen}>{submitting ? "正在保存" : "保存为待整理"}</button>
+        {/* 与 TasksView.openCreate 保持一致：从收件箱进入轻量入口后改用完整表单，不丢 tab=inbox。 */}
+        <Link className="text-button" to={`/tasks?view=create${inboxScope ? "&tab=inbox" : ""}`} data-testid="task-lightweight-full">改用完整表单</Link>
+        <button className="text-button" type="button" disabled={formFrozen} onClick={onCancel}>返回列表</button>
+      </div>
+      {receipt && <p className="receipt-message" role="status">{receipt}</p>}{readyBlockedReason && <p className="warning-callout" role="status" data-testid="task-ready-blocked"><Info aria-hidden="true" />{readyBlockedReason}</p>}{actionError && <p className="action-error" role="alert">{actionError.message}</p>}
+      {live && pendingStep.current && <p className="helper-text" data-testid="task-create-command-id">原 command ID：{pendingStep.current.commandId}</p>}
+      {(actionError?.kind === "timeout" || actionError?.kind === "transport" || live && actionError?.kind === "not-submitted") && <button className="secondary-button" type="button" data-testid="task-create-receipt" disabled={submitting} onClick={() => void lookupReceipt()}>查询本次回执</button>}
+      {mayRetryCreate && pendingStep.current?.step === "create" && liveScope === pendingStep.current.scope && <button className="secondary-button" type="button" data-testid="task-create-retry" disabled={submitting} onClick={() => void retryCreate()}>用原 ID 和载荷重试创建</button>}
+      {actionError?.kind === "transport" && <p className="helper-text">这一步结果不确定时先查回执，不要换 command ID 重新提交。</p>}
+    </form> : <form ref={form} className="create-form" noValidate aria-busy={submitting || undefined} onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); void submit("ready"); }}>
       {field("title", "任务名称", draft.title, (value) => updateDraft({ title: value }))}
       {live && connection.client && <LiveProjectPicker key={connection.epoch} client={connection.client}
         selectedId={projectId} disabled={formFrozen} onSelect={(id) => { setProjectId(id); void refreshLiveCandidates(id); }} />}

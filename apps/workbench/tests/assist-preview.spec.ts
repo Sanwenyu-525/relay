@@ -33,6 +33,38 @@ function connect() { activateRelayConnection({ baseUrl, workspaceId, bearerToken
 afterEach(() => { unmount?.(); unmount = null; resetRelayConnectionForTest(); vi.unstubAllGlobals(); });
 
 describe("M04 Assist DISCUSS 生成中草稿", () => {
+  it("live preview 到达后三点继续显示，终态才消失", async () => {
+    connect(); let status = "RUNNING"; let text: string | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const path = new URL(String(input)).pathname;
+      if (path === `${prefix}/projects/${projectId}`) return response({ id: projectId, title: "项目",
+        project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
+      if (path === `${prefix}/assist-sessions`) return response({ items: [session()] });
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages`)
+        return response({ items: [message(messageId, status)] });
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages/${messageId}/live-preview`)
+        return response(preview(text, status));
+      if (path === `${prefix}/assist-proposals`) return response({ items: [] });
+      if (path === `${prefix}/skill-definitions`) return response({ items: [] });
+      throw new Error(`unexpected request ${path}`);
+    }));
+    const view = await mountWorkbench(`/projects/${projectId}?skill=assist`); unmount = view.unmount;
+    const dots = () => view.wrapper.find(`.assist-inflight-dots`).exists();
+
+    // 首字未到：三点显示。
+    expect(dots()).toBe(true);
+    // 预览文本到达：三点必须仍在。此前实现一收到 preview 就整段消失，
+    // 流式输出期间只剩一行静态草稿文字，那个唯一的活体信号整段不见。
+    text = "已经写了一段正文，但这条回复还没结束。";
+    await flush(450);
+    expect(view.wrapper.find(`[data-testid="assist-live-preview-${messageId}"]`).exists()).toBe(true);
+    expect(dots()).toBe(true);
+    // 终态：三点消失，草稿清空。
+    status = "COMPLETED"; text = null;
+    await flush(450);
+    expect(dots()).toBe(false);
+  });
+
   it("预览传输失败显示独立读取错误与最近成功时间，显式重读恢复且不改变后台消息", async () => {
     connect(); let failed = false; let previewCalls = 0;
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {

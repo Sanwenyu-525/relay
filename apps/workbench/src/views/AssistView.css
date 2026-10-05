@@ -3,6 +3,9 @@
 
 .agent-assist { display: flex; flex-direction: column; min-height: 0; gap: var(--relay-space-3); }
 .agent-assist-session-bar { flex: none; }
+.collab-center .agent-chat-start { gap: var(--relay-space-3); }
+.agent-chat-start .agent-assist-session-welcome { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; overflow-y: auto; }
+.agent-chat-start .agent-assist-session-welcome h1 { margin: 0; font-size: var(--relay-font-size-page); }
 
 /* 有会话时的会话选择收成一行摘要：只回答“正在看哪个会话”，切换入口按需展开，不独占一行高度。 */
 .agent-assist-session-switch > summary {
@@ -40,10 +43,21 @@
 .agent-chat-conversation-heading .helper-text { margin: var(--relay-space-1) 0 0; }
 
 /* 消息流自己滚动；目标、事实条和输入区留在视野内。 */
-.agent-chat-transcript-shell { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
-/* 消息列与输入器共用同一条居中列，不铺满右侧区域；回到最新按钮随之对齐列边（Codex 参考）。 */
-.agent-chat-transcript-shell,
-.agent-chat-composer { width: 100%; max-width: var(--relay-layout-reading-maxWidth); margin-inline: auto; }
+/* 消息区是这一列的滚动 Owner，必须先拿到高度，不能被同列其他区块挤成一条缝。
+   flex-basis 用 auto（按内容计）并保留一个阅读下限：只写 flex:1 时兄弟区块
+   （执行摘要在实测里占 267px）会把剩余空间全部吃掉，转录区被压到 16px，
+   最新回复只剩 8px 露在滚动窗口内——输入器上方看上去就遮住了一块文字。
+   这里的下限让转录区先保住可读高度，溢出内容仍由它自己滚动。 */
+.agent-chat-transcript-shell {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: min(18rem, 40%);
+}
+/* 消息流本身铺满中栏：滚动条贴着中栏右缘，不再压在居中的消息列旁边。
+   真正的阅读 measure 交给里面的 .agent-message-list 居中收窄，
+   滚动容器 full-bleed、内容列居中，是 deepseek-harness ChatView 的同一做法。 */
 .agent-chat-transcript {
   flex: 1;
   min-height: 0;
@@ -52,7 +66,13 @@
   padding: var(--relay-space-2) 0;
   scrollbar-gutter: stable;
 }
-.agent-message-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--relay-space-4); }
+/* 消息列与输入器共用同一条宽度上限：两者必须一致，否则滚动条会贴着其中一侧。 */
+.agent-chat-composer { width: 100%; max-width: var(--relay-layout-reading-maxWidth); margin-inline: auto; }
+/* 复制是纯客户端动作，图标按钮贴左对齐正文，不占满整列。 */
+.agent-message-copy { justify-self: start; }
+.agent-message-copy svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+
+.agent-message-list { list-style: none; margin: 0 auto; padding: 0; display: grid; gap: var(--relay-space-4); width: 100%; max-width: var(--relay-layout-reading-maxWidth); }
 .agent-message-slot { display: grid; gap: var(--relay-space-3); }
 
 /* 日期分隔线：跨栏细线 + 居中日期，不新增色值。 */
@@ -85,9 +105,45 @@
 .agent-message-body { display: grid; gap: var(--relay-space-2); min-width: 0; flex: 1; }
 .agent-message-body > * { min-width: 0; max-width: 100%; }
 .agent-message-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--relay-space-2); margin: 0; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+/* 「我 / 时间」贴整行右缘，不跟气泡宽度走：用户消息是 row-reverse 的右对齐气泡，
+   meta 原本是 body 的第一个子元素、落在气泡内侧，窄消息时那两个字会停在离右缘
+   很远的位置，读起来像挂在半空。把 meta 移出气泡的宽度约束、直接相对整行右对齐：
+   气泡宽度、正文列与 row-reverse 的右对齐都不变，只改 meta 自己的定位。
+   position: static 让它脱离气泡的 flex 排布，右缘由 inset 唯一决定。 */
+.agent-message[data-role="USER"] { position: relative; }
+/* meta 保持在文档流内（绝对定位会让它脱离文档流、正文上移填补空位而叠在一起，
+   实测重叠 13px；::before 按 line-height 补高又依赖「line-height 等于 meta 盒高」
+   这个并不成立的假设）。改为让它在气泡内横向撑到整行右缘：
+   负外边距把右边界推出气泡的 padding 盒，因此只是「右移贴边」，
+   纵向位置与文档流都不变。
+   必须同时排除上面 `.agent-message-body > *` 的 max-width:100%——那条约束会把
+   负外边距抵消掉，实测右缘仍差 16px。
+   负外边距一路吃满气泡的横向 padding，这里只减、不加回等量 padding：
+   否则盒子贴住了边、文字却还差一个内边距（实测同样差 16px）。 */
+.agent-message[data-role="USER"] .agent-message-meta {
+  max-width: none;
+  margin-right: calc(-1 * var(--relay-space-4));
+  /* meta 是 flex-wrap 容器：justify-content 只在换行后的多行之间生效，
+     单行时仍按 flex-start 排。所以右对齐要用首个 flex 子项的 margin-left:auto，
+     不能只写 justify-content:flex-end（实测那样「我」仍差 16px）。 */
+  justify-content: flex-end;
+}
+.agent-message[data-role="USER"] .agent-message-meta > :first-child { margin-left: auto; }
 .agent-message-role { font-weight: var(--relay-font-weight-medium); color: var(--relay-color-text-primary); }
 /* 角色不只靠颜色区分：头像文字与角色名同时表达。 */
 .agent-message-status { color: var(--relay-color-text-muted); }
+/* 首字到达前的在途提示：三点占正文起始位，有正文即消失，不额外撑高消息。
+   停止入口不在消息里，在输入栏主按钮上（见 .agent-chat-send）。 */
+.assist-inflight-dots { display: inline-flex; align-items: center; gap: var(--relay-space-1); margin: 0; height: var(--relay-font-lineHeight-ui); }
+.assist-inflight-dots > i { width: var(--relay-space-1); height: var(--relay-space-1); border-radius: var(--relay-radius-round); background: var(--relay-color-border-control); animation: assist-inflight-pulse 1.3s var(--relay-motion-easing-standard) infinite; }
+.assist-inflight-dots > i:nth-child(2) { animation-delay: 180ms; }
+.assist-inflight-dots > i:nth-child(3) { animation-delay: 360ms; }
+@keyframes assist-inflight-pulse {
+  0%, 100% { opacity: 0.25; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-2px); }
+}
+/* 关掉动效不隐藏状态：三点静止，meta 行的「正在生成」文字始终在。 */
+@media (prefers-reduced-motion: reduce) { .assist-inflight-dots > i { animation: none; opacity: 0.6; } }
 .assist-message-content { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--relay-font-size-reading); line-height: var(--relay-font-lineHeight-ui); }
 /* Markdown 自带块级间距，不沿用纯文本的 pre-wrap，否则段落与列表之间会被多余空白撑开。 */
 .assist-message-markdown { white-space: normal; }
@@ -98,8 +154,7 @@
 /* 抵消消息体内既有 ul 规则，避免 Markdown 列表失去下边距后贴住后一段落。 */
 .assist-message-markdown .markdown-preview__list { margin: 0 0 var(--relay-space-2); }
 
-/* 两种角色都保留文字与头像，底色只帮助扫描。 */
-.agent-message[data-role="USER"] { flex-direction: row-reverse; }
+/* 两种角色都保留文字与头像，底色只帮助扫描。 */.agent-message[data-role="USER"] { flex-direction: row-reverse; }
 .agent-message[data-role="USER"] .agent-message-body {
   flex: 0 1 auto; max-width: 85%; padding: var(--relay-space-3) var(--relay-space-4);
   background: var(--relay-color-bg-subtle); border-radius: var(--relay-radius-control);
@@ -135,7 +190,9 @@
 .assist-candidate-card > .helper-text { flex: none; }
 
 /* 输入区：常驻底部，不随消息滚动；按钮不被末段遮挡。
-   对齐 Codex 的单卡结构：一张圆角卡同时承载正文与底栏，中间一条细线分隔，卡内不再套第二个输入框。 */
+   对齐 Codex 的单卡结构：一张圆角卡同时承载正文与底栏，中间一条细线分隔，卡内不再套第二个输入框。
+   data-inflight 只在存在在途回复时为 true，驱动上边那条局部光点（见本文件下方）。
+   光点只在独立对话卡与嵌入式子页两种形态下绘制，不推广到普通输入框。 */
 .agent-chat-composer {
   position: relative;
   flex: none;
@@ -145,24 +202,91 @@
   padding: var(--relay-space-3);
   background: var(--relay-color-bg-surface);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
-  border-radius: var(--relay-radius-control);
+  border-radius: var(--relay-radius-composer);
+}
+
+/* 在途反馈：上边一条 18% 宽、2px 高的光点沿上边单向移动（原候选 B）。
+   不做整圈流光，不加 blur 光晕，只动 transform，不重绘输入区内容。
+   两种输入器形态都承载：独立对话卡的 .agent-chat-composer 与嵌入式子页的
+   .create-form。后者原本不是定位上下文，绝对定位的光点会跑到更外层，这里补上。 */
+.create-form[data-inflight] { position: relative; }
+.agent-chat-composer[data-inflight="true"],
+.create-form[data-inflight="true"] { overflow: hidden; }
+.agent-chat-composer-spark {
+  position: absolute; top: 0; left: 0; height: var(--relay-border-width) * 2; width: 18%;
+  border-radius: 0 var(--relay-border-width) var(--relay-border-width) 0;
+  background: linear-gradient(90deg, transparent,
+    color-mix(in srgb, var(--relay-color-action-primary) 72%, transparent), transparent);
+  opacity: 0; pointer-events: none;
+}
+.agent-chat-composer[data-inflight="true"] .agent-chat-composer-spark,
+.create-form[data-inflight="true"] .agent-chat-composer-spark {
+  opacity: 1;
+  animation: agent-chat-spark-run var(--relay-motion-loop-calm) linear infinite;
+}
+@keyframes agent-chat-spark-run {
+  from { transform: translateX(-30%); }
+  to   { transform: translateX(640%); }
+}
+
+/* 装饰层默认不绘制，只在途时显示；不给 transition——在途切换与淡入若都带过渡，
+   两段动画叠在一起比单纯状态切换更闪。显式声明 none 以免继承别处的过渡。
+   关动效时保留 display:none（不只把时长压到 0），否则光点会停在起点
+   被读成一个固定亮条。关动效只改展示：不发送取消或暂停命令，
+   也不隐藏状态文字与停止入口。 */
+.agent-chat-composer-spark { display: none; transition: none; }
+html[data-motion="on"] .agent-chat-composer[data-inflight="true"] .agent-chat-composer-spark,
+html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-spark { display: block; }
+@media (prefers-reduced-motion: reduce) {
+  .agent-chat-composer-spark { display: none; }
 }
 /* 焦点环交给整张卡：卡内正文已无边框，再套一层轮廓会读成第二个输入框。 */
 .agent-chat-composer:has(textarea:focus-visible) { outline: var(--relay-focus-width) solid var(--relay-color-focus-ring); outline-offset: calc(-1 * var(--relay-focus-width)); }
 .agent-chat-message-form { display: contents; }
 .agent-chat-composer .field { display: grid; gap: var(--relay-space-1); margin: 0; }
 /* 输入器不带自己的边框：焦点与边界都由整张卡承担，避免读成卡内第二个输入框。
+   不允许拖拽改变高度：高度只随内容增长，避免拖出与消息区不一致的任意尺寸。
    选择器要比 .field textarea 更具体——styles.css 在视图 CSS 之后注入，同权重会输给它。 */
-.agent-chat-composer .field textarea { min-height: var(--relay-space-12); padding: var(--relay-space-1) 0 var(--relay-space-2); border: 0; border-radius: 0; resize: vertical; font-size: var(--relay-font-size-body); background: transparent; }
+.agent-chat-composer .field textarea { min-height: var(--relay-space-12); padding: var(--relay-space-1) 0 var(--relay-space-2); border: 0; border-radius: 0; resize: none; font-size: var(--relay-font-size-body); background: transparent; }
 .agent-chat-composer textarea:focus-visible { outline: none; }
 /* 底栏横贯整卡宽度，负外边距抵消卡内边距，让分隔线与卡片边框对齐。
    资料、选项、命中率、圆环与发送键全部在圆角卡内，卡内不再套第二个输入框。 */
-.agent-chat-composer-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--relay-space-2); flex-wrap: wrap; margin-inline: calc(-1 * var(--relay-space-3)); padding: var(--relay-space-2) var(--relay-space-3); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+/* 输入区与正文之间不再画分隔线：卡片边框已经分开两者，横线只是噪声。
+   发送键移出文档流贴在右下角，底栏右侧留出它那一格，命中区扩展不被相邻控件盖住。
+   底栏整体下移一个卡内下边距：键的 bottom:0 相对卡片的 padding box，
+   而这一行原本还压在 padding-bottom 里，两边因此差了一个卡内下边距加行内下内边距。
+   抵消后整行底边与键底边同在卡片内缘；两者同为 2×radius.composer 高，竖直中心自然重合。 */
+.agent-chat-composer-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--relay-space-2); flex-wrap: wrap; margin-inline: calc(-1 * var(--relay-space-3)); margin-bottom: calc(-1 * var(--relay-space-3)); padding: var(--relay-space-2) calc(2 * var(--relay-radius-composer) + var(--relay-space-2)) 0 var(--relay-space-3); }
+/* 底栏左侧那一行与发送键同高：键边长是 2×radius.composer，这一行就取同一个值，
+   两边高度由同一个 token 推导，不再各写一个数字。 */
+.agent-chat-composer-tools,
+.agent-chat-composer-tools > .agent-chat-tool,
+.agent-chat-composer-tools > .agent-chat-options > summary { min-height: calc(2 * var(--relay-radius-composer)); }
 .agent-chat-composer-actions .primary-button { display: inline-flex; align-items: center; justify-content: center; gap: var(--relay-space-2); min-height: var(--relay-control-height); }
 .agent-chat-composer-actions .primary-button svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
 .agent-chat-composer-tools { display: flex; align-items: center; gap: var(--relay-space-2); flex-wrap: wrap; flex: 1; }
 /* 发送键只留图标：可访问名称与 title 仍说明当前动作，不靠四个字占宽度。 */
-.agent-chat-send { min-width: var(--relay-control-height); padding-inline: var(--relay-space-2); }
+/* 形状与尺寸贴着卡片圆角走：边长正好等于圆角直径，圆心因此与圆角圆心重合，
+   且完整落在卡内不越界。圆角圆心只由卡片外框与 radius 决定，与卡内边距无关，
+   因此这个位置不随 padding 漂移。
+   painted 尺寸只有 2×radius，小于可点击目标下限——命中区用 ::after 补到
+   control.target.minimum，这是 WCAG 2.5.8 的标准做法：达标看命中区，不看绘制尺寸。 */
+.agent-chat-composer-actions .agent-chat-send {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  min-width: 0;
+  min-height: 0;
+  width: calc(2 * var(--relay-radius-composer));
+  height: calc(2 * var(--relay-radius-composer));
+  padding: 0;
+  /* 正圆：直径正好等于 2×radius.composer，圆心落在卡片圆角圆心上时，
+     与卡片下边和右边同时内切，正好穿过圆角弧的两个端点——「圆心重合」在这里
+     是精确相切而不是近似。形状参考 Codex 的圆形发送键，配色与版式仍用本项目 token。 */
+  border-radius: var(--relay-radius-round);
+}
+/* 键边长 2×radius.composer = 2rem，已高于 control.target.minimum，命中区不需要额外扩展。 */
+.agent-chat-composer-actions .agent-chat-send svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
 /* 命中率在左、圆环在右，与发送键同属底栏右侧一组。 */
 .agent-chat-usage { display: inline-flex; align-items: center; gap: var(--relay-space-2); margin-left: auto; }
 .agent-chat-usage-text { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); }
@@ -193,13 +317,14 @@ button.agent-chat-tool:hover { background: var(--relay-color-selection-hover); c
 .agent-chat-tool--pending { color: var(--relay-color-text-muted); cursor: not-allowed; }
 
 .agent-chat-options, .agent-chat-proposals { font-size: var(--relay-font-size-meta); }
-.agent-chat-options > summary { display: flex; align-items: center; min-height: var(--relay-control-height); padding: 0 var(--relay-space-2); border-radius: var(--relay-radius-control); }
+/* 选项面板收成与「资料 N」并列的一枚 chip，标题直接说明当前请求意图。
+   chip 一律无边框、chevron 在右（deepseek-harness InputBar 同款：borderless + 右侧 chevron）。 */
+.agent-chat-options > summary { display: flex; align-items: center; gap: var(--relay-space-1); min-height: var(--relay-control-height); padding: 0 var(--relay-space-2); border: 0; border-radius: var(--relay-radius-control); }
 .agent-chat-options > summary:hover { background: var(--relay-color-selection-hover); }
-.agent-chat-options > summary::before { content: "+"; margin-right: var(--relay-space-1); }
-/* 选项面板收成与「资料 N」并列的一枚 chip，标题直接说明当前请求意图。 */
-.agent-chat-tool { border: var(--relay-border-width) solid var(--relay-color-border-separator); }
-.agent-chat-options > summary { border: var(--relay-border-width) solid var(--relay-color-border-separator); }
-.agent-chat-options[open] > summary::before { content: "−"; }
+/* 两枚 chip 之间一条竖分隔线，靠 chip 自身左边框实现，不额外插元素。 */
+.agent-chat-composer-tools > .agent-chat-options { margin-left: var(--relay-space-2); padding-left: var(--relay-space-3); border-left: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: 0; }
+.agent-chat-chip-chevron { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); margin-left: var(--relay-space-1); transition: rotate var(--relay-motion-duration-fast) var(--relay-motion-easing-standard); }
+.agent-chat-options[open] .agent-chat-chip-chevron { rotate: 180deg; }
 .agent-chat-options[open] { position: absolute; bottom: calc(100% + var(--relay-space-2)); inset-inline: 0; z-index: 4; max-height: min(60dvh, var(--relay-layout-workspace-sideWidth)); overflow-y: auto; padding: var(--relay-space-4); background: var(--relay-color-bg-surface); border: var(--relay-border-width) solid var(--relay-color-border-control); border-radius: var(--relay-radius-control); box-shadow: var(--relay-shadow-floating); }
 .agent-chat-options .field { display: grid; gap: var(--relay-space-2); margin-top: var(--relay-space-3); }
 .agent-chat-proposals { margin-top: var(--relay-space-4); }
@@ -211,12 +336,36 @@ button.agent-chat-tool:hover { background: var(--relay-color-selection-hover); c
 .agent-chat-proposal-card > .task-proposal-heading .task-proposal-state[data-status="PENDING"] { color: var(--relay-color-status-warning-text); }
 .agent-chat-proposal-card > p { margin-block: var(--relay-space-2); }
 .agent-chat-proposal-details .assist-proposal { padding: 0; border: 0; background: transparent; }
-.agent-chat-latest { position: absolute; bottom: var(--relay-space-2); right: var(--relay-space-4); display: inline-flex; gap: var(--relay-space-2); align-items: center; min-height: var(--relay-control-height); font-size: var(--relay-font-size-meta); background: var(--relay-color-bg-surface); box-shadow: var(--relay-shadow-floating); z-index: 1; }
+/* 回到最新：只有图标、无背景、无边框，水平居中浮在消息列底缘之上。
+   不占布局高度（height:0 + 负 margin），因此不会把输入区顶开。 */
+.agent-chat-latest { position: absolute; bottom: var(--relay-space-2); inset-inline: 0; margin-inline: auto; display: inline-flex; align-items: center; justify-content: center; width: var(--relay-control-height-compact); min-height: var(--relay-control-height-compact); padding: 0; background: transparent; border: 0; box-shadow: none; color: var(--relay-color-text-secondary); z-index: 1; }
+.agent-chat-latest:hover { background: transparent; color: var(--relay-color-text-primary); }
 .agent-chat-latest svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
 .assist-preview-error p { margin: 0 0 var(--relay-space-2); }
 .agent-chat-options summary, .agent-chat-proposals summary { cursor: pointer; color: var(--relay-color-text-secondary); }
 .agent-pending { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-3); }
 .agent-pending p { margin: 0; }
+
+/* 等待队列：默认折叠，只占一行摘要。位置来自服务端 seq 的只读投影，不是客户端另建的排队状态。 */
+.assist-queue { width: 100%; max-width: var(--relay-layout-reading-maxWidth); margin-inline: auto; padding: var(--relay-space-3); background: var(--relay-color-bg-surface); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-control); }
+/* 队列面板：内容高度由自身文字决定。
+   这里不再给空态保留 4.5rem 占位。原来那块不可见占位是为了「0↔1 时转录区高度不跳动」，
+   但它把代价落在了这一列里唯一可伸缩的转录区上：每一条会话都在输入器上方永久留出
+   72px 空白带，转录区被挤到只剩十几像素（实测 720px 窗口下 16px），最新回复读不到，
+   看上去就是输入器上方遮住了一块文字。转录区是滚动 Owner，队列出现时压缩它 4.5rem
+   只会改变滚动窗口大小，不隐藏任何已渲染内容——这正是「跳动」原本要避免的，
+   因此这里不再预留高度。 */
+.assist-queue[data-empty="true"] { display: none; }
+
+/* 常驻区块而非折叠控件：队列在提交瞬间出现、最后一条离开时消失，
+   details 的 summary 与展开箭头会跟着一起闪现。标题不再可点击。 */
+.assist-queue-summary { margin: 0; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); font-weight: var(--relay-font-weight-medium); }
+.assist-queue > p.helper-text { margin-block: var(--relay-space-2); }
+.assist-queue-list { display: grid; gap: var(--relay-space-2); margin: 0; padding: 0; list-style: none; }
+.assist-queue-list > li { display: flex; align-items: baseline; gap: var(--relay-space-2); flex-wrap: wrap; }
+.assist-queue-position { flex: none; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+/* 原文可能被截断，所以单行省略而不是换行撑高折叠体；完整原文仍在转录区里。 */
+.assist-queue-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 64rem) {
   .agent-chat-composer-tools { gap: var(--relay-space-1); }

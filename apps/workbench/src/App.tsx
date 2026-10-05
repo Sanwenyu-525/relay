@@ -102,7 +102,7 @@ export default function App() {
   }
 
   if (desktopStatus !== "idle") {
-    return <div className="desktop-window"><DesktopTitleBar available={false} onSearch={() => setCommandOpen(true)} /><main className="page-state" data-testid={desktopStatus === "error" ? "desktop-service-unavailable" : "desktop-service-connecting"} role="status">
+    return <div className="desktop-window"><DesktopTitleBar available={false} /><main className="page-state" data-testid={desktopStatus === "error" ? "desktop-service-unavailable" : "desktop-service-connecting"} role="status">
       {desktopStatus === "error" ? <>
         <h1>本机服务不可用</h1>
         <p>无法连接桌面工作空间。请关闭并重新启动 Relay Agent；如果问题持续，请检查 PostgreSQL 和桌面配置。</p>
@@ -119,7 +119,7 @@ export default function App() {
     {/* 跳转链接由窗口框架持有并排在标题栏之前：它 position:fixed，视觉位置不变，
         但必须是第一个 Tab 站位，否则键盘用户先落在标题栏按钮上（WCAG 2.4.1）。 */}
     <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById("main-content")?.focus(); }}>跳到主要内容</a>
-    <DesktopTitleBar available onSearch={() => setCommandOpen(true)} />
+    <DesktopTitleBar available />
     <AppShell desktopStatus={desktopStatus} commandOpen={commandOpen} onCommandOpen={() => setCommandOpen(true)} onCommandClose={() => setCommandOpen(false)}>
       <div key={`${preserveCreateTask ? "create-task" : connection.epoch}:${location.pathname}${location.search}`}><Outlet /></div>
     </AppShell>

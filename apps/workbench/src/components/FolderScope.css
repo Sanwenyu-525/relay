@@ -71,6 +71,11 @@
   display: flex;
   flex-direction: column;
   gap: var(--relay-space-2);
+  /* 摘要与消息区同在 .collab-center 这一列，压缩权必须低于消息区：
+     flex 项目默认 min-height:auto 会拒绝缩到内容以下，于是实测 267px 的摘要
+     反过来把转录区压没。min-height:0 让它先让出高度，且不新增滚动容器。 */
+  flex: 0 1 auto;
+  min-height: 0;
   margin: var(--relay-space-2) 0;
   padding: var(--relay-space-3);
   border: 1px solid var(--relay-color-border-separator);

@@ -49,6 +49,29 @@ describe("确切产物阅读与比较", () => {
     expect(reads).toEqual(["v2", "v1", "v2"]);
   });
 
+  it("完整待审页（非紧凑）阅读其他版本时同样给出错配提醒与返回入口", async () => {
+    const reads: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `${root}/tasks/task/artifacts`) return response(200, artifacts());
+      const version = /artifact-versions\/(v[123])\/content$/u.exec(url)?.[1];
+      if (version) { reads.push(version); return response(200, `${version} 的正文`); }
+      throw new Error(`unexpected ${url}`);
+    }));
+    // /reviews 用非紧凑形态承载「判断对象」；错配提醒必须覆盖这个实际阅读模式。
+    const wrapper = await mountReader("v2", false);
+    expect(wrapper.find('[data-testid="collab-review-version-mismatch"]').exists()).toBe(false);
+    await wrapper.get('[data-testid="collab-read-v1"]').trigger("click"); await flush();
+    const warning = wrapper.get('[data-testid="collab-review-version-mismatch"]');
+    expect(warning.text()).toContain("正在阅读 v1");
+    expect(warning.text()).toContain("当前判断仍绑定「实验记录.md」v2");
+    // 返回入口只重读确切绑定版本，不改任何绑定或写命令。
+    await warning.get("button").trigger("click"); await flush();
+    expect(wrapper.find('[data-testid="collab-review-version-mismatch"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="collab-reading"]').text()).toContain("v2 的正文");
+    expect(reads).toEqual(["v2", "v1", "v2"]);
+  });
+
   it("版本面板Escape收起并归还焦点，组合输入不关闭", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) =>
       response(200, String(input).endsWith("/artifacts") ? artifacts() : "确切正文")));

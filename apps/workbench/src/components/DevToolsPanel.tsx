@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { FileText, GitBranch, Play, SquareTerminal, Terminal, X } from "lucide-react";
+import { FileText, GitBranch, ListTree, Play, SquareTerminal, Terminal, X } from "lucide-react";
+import RunToolTrajectoryPanel from "./RunToolTrajectoryPanel";
+import GitReadPanel from "./GitReadPanel";
 import type { RelayApiClient, RelayManagedResource, RelayRun, RelayRunGatewayOperation } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { handleTabListKeyDown } from "../lib/tabNavigation";
 import "./DevToolsPanel.css";
 
-type Tab = "FILES" | "GIT" | "TERMINAL" | "RUNS";
+type Tab = "FILES" | "GIT" | "TERMINAL" | "RUNS" | "TRACE";
 
 /**
  * 开发工具面板：只承载当前项目/任务的只读事实，不拥有业务状态。
- * 面板打开不执行任何命令，关闭只隐藏；切换项目不会把旧面板重绑到新目录。
+ * 面板打开不执行命令，Git 读取由明确点击触发；关闭只隐藏，旧请求不会重绑到新目录。
  * 右栏页签只列只读工具，命令输出来自底部抽屉，两处互不冒充。
  */
 export default function DevToolsPanel({ client, projectId, taskId, run, onClose }: {
@@ -28,44 +30,45 @@ export default function DevToolsPanel({ client, projectId, taskId, run, onClose 
   const [operations, setOperations] = useState<readonly RelayRunGatewayOperation[]>([]);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const request = useRef(0);
+  const resourceRequest = useRef(0);
+  const operationRequest = useRef(0);
   const scope = `${projectId}:${taskId}`;
 
   const loadResources = useCallback(async () => {
-    const version = ++request.current;
+    const version = ++resourceRequest.current;
     setLoading(true); setResourceError(null);
     try {
       const loaded = await client.getManagedResources(projectId);
-      if (version !== request.current) return;
+      if (version !== resourceRequest.current) return;
       setResources(loaded);
     } catch (caught) {
-      if (version !== request.current) return;
+      if (version !== resourceRequest.current) return;
       setResources([]); setResourceError(describeLiveError(caught).message);
-    } finally { if (version === request.current) setLoading(false); }
+    } finally { if (version === resourceRequest.current) setLoading(false); }
   }, [client, projectId]);
 
   const loadOperations = useCallback(async () => {
     if (!run) { setOperations([]); setOperationError(null); return; }
-    const version = ++request.current;
+    const version = ++operationRequest.current;
     setOperationError(null);
     try {
       const loaded = await client.getRunGatewayOperations(run.id);
-      if (version !== request.current) return;
+      if (version !== operationRequest.current) return;
       setOperations(loaded);
     } catch (caught) {
-      if (version !== request.current) return;
+      if (version !== operationRequest.current) return;
       setOperations([]); setOperationError(describeLiveError(caught).message);
     }
   }, [client, run]);
 
   useEffect(() => {
-    request.current++;
+    resourceRequest.current++; operationRequest.current++;
     setResources([]); setOperations([]); setResourceError(null); setOperationError(null);
     setTab("FILES"); setDrawerTab(null);
-    return () => { request.current++; };
+    return () => { resourceRequest.current++; operationRequest.current++; };
   }, [scope]);
 
-  useEffect(() => { void loadResources(); }, [loadResources]);
+  useEffect(() => { void loadResources(); }, [loadResources, scope]);
   useEffect(() => { if (drawerTab === "OUTPUT") void loadOperations(); }, [drawerTab, loadOperations]);
 
   const hasOutput = operations.some((operation) => operation.invocations.some((item) => item.commandOutput !== null));
@@ -74,7 +77,7 @@ export default function DevToolsPanel({ client, projectId, taskId, run, onClose 
     <div className="devtools-pane">
       <header className="devtools-header">
         <nav className="devtools-tabs" role="tablist" aria-label="工具面板" onKeyDown={handleTabListKeyDown}>
-          {([["FILES", "文件", FileText], ["GIT", "变更", GitBranch], ["TERMINAL", "终端", SquareTerminal], ["RUNS", "运行记录", Play]] as const)
+          {([["FILES", "文件", FileText], ["GIT", "变更", GitBranch], ["TERMINAL", "终端", SquareTerminal], ["RUNS", "运行记录", Play], ["TRACE", "轨迹", ListTree]] as const)
             .map(([key, label, Icon]) => <button key={key} type="button" data-testid={`devtools-tab-${key}`}
               className={`devtools-tab${tab === key ? " devtools-tab--active" : ""}`}
               role="tab" id={`${tabId}-tab-${key}`} aria-controls={`${tabId}-panel`} aria-selected={tab === key}
@@ -99,14 +102,8 @@ export default function DevToolsPanel({ client, projectId, taskId, run, onClose 
           <Link className="text-link" to={`/tasks/${taskId}?tab=artifacts`}>打开任务产物版本</Link>
         </section>}
 
-        {tab === "GIT" && <section data-testid="devtools-git">
-          <h3>Git 变更 · 未接入</h3>
-          <p className="warning-callout" role="status" data-testid="devtools-git-gap">
-            当前没有受管目录的只读 Git 状态或 diff 接口，因此这里不显示分支、暂存/未暂存/未跟踪文件或差异。
-          </p>
-          <p className="helper-text">非 Git 目录与读取失败都不得显示为“干净”；接受、暂存、提交、推送是四个不同动作，暂存与提交也尚未接入。接入前本面板只声明限制，不提供可点按钮。</p>
-          <p className="helper-text">接入要求与边界见《工作台与前端交互设计》第 14.9 节；本页只声明限制，不提供可点按钮。</p>
-        </section>}
+        <div hidden={tab !== "GIT"}><GitReadPanel key={`${scope}:${client.baseUrl}:${client.workspaceId}`} client={client}
+          projectId={projectId} resources={resources} resourceLoading={loading} resourceError={resourceError} /></div>
 
         {tab === "TERMINAL" && <section data-testid="devtools-terminal">
           <h3>交互终端 · 未接入</h3>
@@ -115,6 +112,8 @@ export default function DevToolsPanel({ client, projectId, taskId, run, onClose 
           </p>
           <p className="helper-text">人工打开终端不授予 Agent 权限，也不能绕过在途写入与接手保护；缺少协议前不提供可执行入口。<Terminal aria-hidden="true" /></p>
         </section>}
+
+        {tab === "TRACE" && <RunToolTrajectoryPanel client={client} run={run} />}
 
         {tab === "RUNS" && <section data-testid="devtools-runs">
           <h3>运行记录</h3>

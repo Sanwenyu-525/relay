@@ -58,6 +58,12 @@
 }
 .devtools-output pre.devtools-stderr { border-color: var(--relay-color-status-danger-text); }
 .devtools-operation > summary { cursor: pointer; font-weight: var(--relay-font-weight-medium); overflow-wrap: anywhere; }
+.git-read-fields { display: grid; gap: var(--relay-space-2); }
+.git-read-fields .field { min-width: 0; }
+.git-read-fields select, .git-read-fields input:not([type="checkbox"]) { width: 100%; min-width: 0; }
+.git-read-cached { display: flex; align-items: center; gap: var(--relay-space-2); font-size: var(--relay-font-size-meta); }
+.git-read-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-2); margin: var(--relay-space-2) 0; }
+.git-read-status-result h4 { margin: var(--relay-space-2) 0; font-size: var(--relay-font-size-meta); }
 
 /* 底部抽屉：命令输出来自服务端保存的真实结果，交互终端仍是待设计声明。 */
 .devtools-drawer { flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--relay-color-bg-canvas); }

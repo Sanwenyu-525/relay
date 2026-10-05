@@ -1168,7 +1168,7 @@ export interface RelayGatewayConnection {
 }
 
 export type RelayGatewayCapability =
-  "FAKE_WRITE" | "FAKE_PUBLIC_READ" | "FILE_READ" | "FILE_WRITE" | "WEB_FETCH" | "GIT_READ" | "GIT_WRITE" | "CLI_RUN";
+  "FAKE_WRITE" | "FAKE_PUBLIC_READ" | "FILE_READ" | "FILE_QUERY" | "FILE_WRITE" | "WEB_FETCH" | "GIT_READ" | "GIT_WRITE" | "CLI_RUN";
 export type RelayGatewayDecision = "DENY" | "ASK" | "AUTO";
 export interface RelayGatewayConnectionSettings extends RelayGatewayConnection {
   readonly projectId: string;
@@ -1220,6 +1220,94 @@ function managedResourceFrom(value: unknown): RelayManagedResource {
     revision: decimal(row, "revision", "managed resource"),
     resourceEpoch: decimal(row, "resource_epoch", "managed resource"),
     fileWriteIdentityBound: row.file_write_identity_bound === true };
+}
+
+export type RelayGitReadAction = "GIT_STATUS" | "GIT_DIFF";
+export interface RelayManagedGitReadInput {
+  readonly projectId: string;
+  readonly resourceId: string;
+  readonly connectionId: string;
+  readonly commandId: string;
+  readonly actionType: RelayGitReadAction;
+  readonly relativePath?: string;
+  readonly cached?: boolean;
+  readonly limit?: number;
+}
+export interface RelayGitStatusResult {
+  readonly kind: "STATUS";
+  readonly branch: string;
+  readonly headCommit: string | null;
+  readonly staged: readonly string[];
+  readonly unstaged: readonly string[];
+  readonly untracked: readonly string[];
+  readonly limit: number;
+  readonly truncated: boolean;
+  readonly totals: { readonly staged: number; readonly unstaged: number; readonly untracked: number };
+}
+export interface RelayGitDiffResult {
+  readonly kind: "DIFF";
+  readonly diff: string;
+  readonly limitBytes: number;
+  readonly truncated: boolean;
+  readonly returnedBytes: number;
+  readonly omittedBytes: number;
+}
+export type RelayManagedGitReadOutcome = {
+  readonly state: "WAITING_APPROVAL" | "UNRESOLVED";
+  readonly actionType: RelayGitReadAction;
+  readonly operationId: string;
+  readonly reviewId: string | null;
+  readonly reason: string;
+} | {
+  readonly state: "SUCCEEDED" | "FAILED";
+  readonly actionType: RelayGitReadAction;
+  readonly operationId: string;
+  readonly invocationId: string | null;
+  readonly result: RelayGitStatusResult | RelayGitDiffResult |
+    { readonly kind: "FAILURE"; readonly reason: string; readonly detail: string | null };
+};
+export interface RelayManagedGitReadResponse {
+  readonly commandId: string;
+  readonly committedAt: string;
+  readonly outcome: RelayManagedGitReadOutcome;
+}
+
+/** 首次响应与原命令回执共用；缺结果、失败、未决都不能补成空列表。 */
+export function managedGitReadOutcomeFrom(value: unknown, expectedAction: RelayGitReadAction): RelayManagedGitReadOutcome {
+  const row = object(value, "git-read");
+  const actionType = string(row, "action_type", "git-read");
+  if (actionType !== expectedAction) throw new Error("Git 读取结果与原动作不符。");
+  const operationId = string(row, "operation_id", "git-read");
+  if (row.state === "WAITING_APPROVAL" || row.state === "UNRESOLVED") {
+    if (row.result !== undefined) throw new Error("未决 Git 读取不能携带已结算结果。");
+    return { state: row.state, actionType, operationId,
+      reviewId: nullableString(row, "review_id", "git-read"), reason: string(row, "reason", "git-read") };
+  }
+  if (row.state !== "SUCCEEDED" && row.state !== "FAILED") throw new Error("Git 读取状态无效。");
+  const result = object(row.result, "git-read.result");
+  const settled = { state: row.state, actionType, operationId,
+    invocationId: nullableString(row, "invocation_id", "git-read") } as const;
+  if (result.reason !== undefined) return { ...settled,
+    result: { kind: "FAILURE", reason: string(result, "reason", "git-read.result"),
+      detail: result.detail === undefined ? null : string(result, "detail", "git-read.result") } };
+  if (row.state === "FAILED") throw new Error("失败的 Git 读取缺少失败原因。");
+  const count = (source: Record<string, unknown>, key: string): number => {
+    const value = integer(source, key, "git-read.result");
+    if (value < 0) throw new Error("Git 读取计数不能为负数。");
+    return value;
+  };
+  if (actionType === "GIT_STATUS") {
+    const totals = object(result.totals, "git-read.result.totals");
+    return { ...settled, result: { kind: "STATUS", branch: string(result, "branch", "git-read.result"),
+      headCommit: nullableString(result, "head_commit", "git-read.result"),
+      staged: stringArray(result, "staged", "git-read.result"), unstaged: stringArray(result, "unstaged", "git-read.result"),
+      untracked: stringArray(result, "untracked", "git-read.result"), limit: count(result, "limit"),
+      truncated: boolean(result, "truncated", "git-read.result"),
+      totals: { staged: count(totals, "staged"), unstaged: count(totals, "unstaged"), untracked: count(totals, "untracked") } } };
+  }
+  return { ...settled, result: { kind: "DIFF", diff: string(result, "diff", "git-read.result"),
+    limitBytes: count(result, "limit_bytes"), truncated: boolean(result, "truncated", "git-read.result"),
+    returnedBytes: count(result, "returned_bytes"), omittedBytes: count(result, "omitted_bytes") } };
 }
 
 export type RelayMockGatewayConnection = RelayGatewayConnection;
@@ -1409,6 +1497,20 @@ export interface RelayTaskMutation {
   readonly taskId: string;
   readonly status: TaskStatus;
   readonly revision: DecimalRevision;
+}
+
+export interface RelayTaskAcceptanceRevisionInput {
+  readonly taskId: string;
+  readonly commandId: string;
+  readonly expectedRevision: DecimalRevision;
+  readonly expectedAcceptanceRevision: DecimalRevision;
+  readonly criteria: readonly { readonly criterionId?: string; readonly statement: string;
+    readonly required: boolean; readonly method: string; readonly targetSpec: Readonly<Record<string, unknown>> }[];
+}
+
+export interface RelayTaskAcceptanceRevision extends RelayTaskMutation {
+  readonly previousAcceptanceRevision: DecimalRevision;
+  readonly acceptanceRevision: DecimalRevision;
 }
 
 /**
@@ -1735,6 +1837,19 @@ export class RelayApiClient {
       })
     });
     return taskCreationFrom(commandEnvelopeFrom(body).result);
+  }
+
+  async reviseTaskAcceptance(input: RelayTaskAcceptanceRevisionInput): Promise<RelayTaskAcceptanceRevision> {
+    const body = await this.informationCommand(`/tasks/${encodeURIComponent(input.taskId)}/acceptance`, {
+      command_id: input.commandId, expected_revision: input.expectedRevision,
+      expected_acceptance_revision: input.expectedAcceptanceRevision,
+      criteria: input.criteria.map(criterion => ({
+        ...(criterion.criterionId === undefined ? {} : { criterion_id: criterion.criterionId }),
+        statement: criterion.statement, required: criterion.required, method: criterion.method,
+        target_spec: criterion.targetSpec
+      }))
+    }, 200);
+    return taskAcceptanceRevisionFrom(body.result);
   }
 
   async markTaskReady(input: {
@@ -2236,21 +2351,23 @@ export class RelayApiClient {
 
   async createGatewayPolicy(input: { projectId: string; commandId: string;
     capability: RelayGatewayCapability; resourceId: string | null; decision: RelayGatewayDecision;
-    maxPayloadBytes: number; host?: string }): Promise<RelayCommandEnvelope> {
+    maxPayloadBytes: number; host?: string; actionType?: string }): Promise<RelayCommandEnvelope> {
     return commandEnvelopeFrom(await this.request(this.workspacePath(`/projects/${encodeURIComponent(input.projectId)}/permission-policies`), {
       method: "POST", body: JSON.stringify({ command_id: input.commandId, capability: input.capability,
         resource_id: input.resourceId, decision: input.decision, max_payload_bytes: input.maxPayloadBytes,
-        ...(input.host === undefined ? {} : { host: input.host }) })
+        ...(input.host === undefined ? {} : { host: input.host }),
+        ...(input.actionType === undefined ? {} : { action_type: input.actionType }) })
     }, 201));
   }
 
   async addGatewayPolicyVersion(input: { projectId: string; policyId: string; commandId: string;
     expectedRevision: DecimalRevision; capability: RelayGatewayCapability; resourceId: string | null;
-    decision: RelayGatewayDecision; maxPayloadBytes: number; host?: string }): Promise<RelayCommandEnvelope> {
+    decision: RelayGatewayDecision; maxPayloadBytes: number; host?: string; actionType?: string }): Promise<RelayCommandEnvelope> {
     return commandEnvelopeFrom(await this.request(this.workspacePath(`/projects/${encodeURIComponent(input.projectId)}/permission-policies/${encodeURIComponent(input.policyId)}/versions`), {
       method: "POST", body: JSON.stringify({ command_id: input.commandId, expected_revision: input.expectedRevision,
         capability: input.capability, resource_id: input.resourceId, decision: input.decision,
-        max_payload_bytes: input.maxPayloadBytes, ...(input.host === undefined ? {} : { host: input.host }) })
+        max_payload_bytes: input.maxPayloadBytes, ...(input.host === undefined ? {} : { host: input.host }),
+        ...(input.actionType === undefined ? {} : { action_type: input.actionType }) })
     }, 200));
   }
 
@@ -2268,6 +2385,21 @@ export class RelayApiClient {
 
   async getManagedResource(projectId: string, resourceId: string): Promise<RelayManagedResource> {
     return managedResourceFrom(await this.request(this.workspacePath(`/projects/${encodeURIComponent(projectId)}/managed-resources/${encodeURIComponent(resourceId)}`)));
+  }
+
+  async readManagedGitState(input: RelayManagedGitReadInput): Promise<RelayManagedGitReadResponse> {
+    const body = await this.request(this.workspacePath(`/projects/${encodeURIComponent(input.projectId)}/managed-resources/${encodeURIComponent(input.resourceId)}/git-read`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId, connection_id: input.connectionId,
+        action_type: input.actionType, ...(input.relativePath === undefined ? {} : { path: input.relativePath }),
+        ...(input.cached === undefined ? {} : { cached: input.cached }),
+        ...(input.limit === undefined ? {} : { limit: input.limit }) })
+    }, 200);
+    try {
+      const envelope = commandEnvelopeFrom(body);
+      if (envelope.commandId !== input.commandId) throw new Error("Git 读取回执与原 command_id 不符。");
+      return { commandId: envelope.commandId, committedAt: envelope.committedAt,
+        outcome: managedGitReadOutcomeFrom(envelope.result, input.actionType) };
+    } catch { throw new RelayTransportError("Git 读取响应无法核对，请查询原 command_id 回执。"); }
   }
 
   async createManagedResource(input: { projectId: string; commandId: string;
@@ -3930,6 +4062,14 @@ function completionEvidenceFrom(value: unknown): RelayCompletionEvidence {
           sha256: nullableString(version, "sha256", "completion artifact version") };
     })
   };
+}
+
+export function taskAcceptanceRevisionFrom(result: Readonly<Record<string, unknown>>): RelayTaskAcceptanceRevision {
+  return { taskId: string(result, "task_id", "acceptance revision"),
+    status: taskStatus(result, "status", "acceptance revision"),
+    revision: decimal(result, "revision", "acceptance revision"),
+    previousAcceptanceRevision: decimal(result, "previous_acceptance_revision", "acceptance revision"),
+    acceptanceRevision: decimal(result, "acceptance_revision", "acceptance revision") };
 }
 
 export function reopenFrom(result: Readonly<Record<string, unknown>>): RelayReopen {

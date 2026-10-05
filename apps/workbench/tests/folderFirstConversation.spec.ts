@@ -554,6 +554,36 @@ describe("文件夹入口与对话直接执行", () => {
         created_at: "2026-10-02T00:00:00Z", updated_at: "2026-10-02T00:00:00Z" }] : [] });
     }
 
+    it.each([false, true])("切换会话不沿用首条执行候选（解释迟到：%s）", async (delayed) => {
+      activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+      const posts: { path: string; body: unknown }[] = [];
+      const secondSessionId = "88888888-8888-4888-8888-888888888888";
+      let created = false; let release!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      const fetchMock = router({ sessions: () => response({ items: created ? [sessionId, secondSessionId].map(id => ({
+        id, workspace_id: workspaceId, project_id: projectId, task_id: null,
+        title: id === sessionId ? "原会话" : "其他会话", status: "ACTIVE", revision: "1",
+        created_at: "2026-10-05T00:00:00Z", updated_at: "2026-10-05T00:00:00Z" })) : [] }) }, posts);
+      const original = fetchMock.getMockImplementation()!;
+      vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname;
+        if (init?.method === "POST" && path === `${prefix}/assist-sessions`) created = true;
+        if (delayed && init?.method === "POST" && path.endsWith("/execution-requests")) await gate;
+        return original(input, init);
+      }));
+      const view = await mountWorkbench("/agent");
+      try {
+        await openFolderAndType(view, "帮我把这个文件的内容改成 after");
+        await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click"); await flush(); await flush();
+        if (!delayed) expect(view.wrapper.find('[data-testid="execution-start"]').exists()).toBe(true);
+        await view.wrapper.get('[data-testid="assist-session-select"]').setValue(secondSessionId); await flush();
+        release(); await flush(); await flush();
+        expect(view.wrapper.find('[data-testid="execution-start"]').exists()).toBe(false);
+        expect(view.wrapper.text()).not.toContain("改写 answer.txt");
+        expect(posts.some(post => post.path.includes("/applications"))).toBe(false);
+      } finally { release(); view.unmount(); }
+    });
+
     it("反例 A1：换目录必须先经过未保存保护，保留后原文不丢；未决消息时不得换目录", async () => {
       activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
       const posts: { path: string; body: unknown }[] = [];

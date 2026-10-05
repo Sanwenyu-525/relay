@@ -1248,7 +1248,8 @@ describe("协作工作区主路径", () => {
     expect(view.wrapper.get('[data-testid="devtools-files"]').text()).toContain("D:\\repo");
     expect(view.wrapper.get('[data-testid="devtools-files"]').text()).toContain("受管产物是任务产物版本，工作目录文件是受管目录下的普通文件；两者来源不同，不混成同一版本。");
     await view.wrapper.get('[data-testid="devtools-tab-GIT"]').trigger("click");
-    expect(view.wrapper.get('[data-testid="devtools-git-gap"]').text()).toContain("没有受管目录的只读 Git 状态或 diff 接口");
+    expect(view.wrapper.get('[data-testid="git-read-idle"]').text()).toContain("尚未读取所选目录");
+    expect(view.wrapper.get('[data-testid="git-read-status"]').attributes("disabled")).toBeDefined();
     expect(view.wrapper.get('[data-testid="devtools-git"]').text()).toContain("非 Git 目录与读取失败都不得显示为“干净”");
     expect(view.wrapper.find('[data-testid="devtools-terminal-gap"]').exists()).toBe(false);
     await view.wrapper.get('[data-testid="devtools-tab-TERMINAL"]').trigger("click");
@@ -1634,7 +1635,7 @@ describe("协作工作区主路径", () => {
     } finally { view.unmount(); }
   });
 
-  it("轨迹只读：没有批准、暂停、取消或重试入口，Git 页签仍声明未接入", async () => {
+  it("轨迹只读：没有批准、暂停、取消或重试入口；人工 Git 必须另外明确触发", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const fetchMock = router({ toolCalls: () => response({ run_id: runId, run_status: "RUNNING",
       wait_reason: null, rounds: [{ round: 0, model_call_id: "55555555-5555-4555-8555-555555555555",
@@ -1661,10 +1662,10 @@ describe("协作工作区主路径", () => {
         expect(labels.some((label) => label.includes(forbidden))).toBe(false);
       }
 
-      // 真实用户可触发的入口仍不可用，占位不得因为轨迹里有 Git 结果而被替换。
+      // 模型调用的结果不能变成人工面板的读取结果；打开页签也不派发 Git 命令。
       await view.wrapper.get('[data-testid="devtools-tab-GIT"]').trigger("click");
-      expect(view.wrapper.get('[data-testid="devtools-git-gap"]').text())
-        .toContain("没有受管目录的只读 Git 状态或 diff 接口");
+      expect(view.wrapper.get('[data-testid="git-read-idle"]').text()).toContain("尚未读取所选目录");
+      expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith("/git-read") && init?.method === "POST")).toBe(false);
     } finally { view.unmount(); }
   });
 

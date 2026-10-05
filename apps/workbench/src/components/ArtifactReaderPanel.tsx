@@ -227,17 +227,22 @@ const documentHeading = document && <header className="artifact-doc-heading">
     </section>}
 
   </>;
+// 确切版本错配提醒必须覆盖两种阅读形态：协作成果区的 compact 纸面，和完整待审页的非紧凑正文。
+  // 只在 compact 里提示会让待审页出现「正文已是 v2、判断仍绑 v1」却没有任何警示。
+  const versionMismatch = selectedVersionId !== null && active && requestedVersion &&
+    requestedVersion.version.artifactVersionId !== selectedVersionId
+    ? <p className="collab-review-version-mismatch warning-callout" role="status" data-testid="collab-review-version-mismatch">
+      正在阅读 v{requestedVersion.version.versionNumber}；当前判断仍绑定「{active.title}」v{active.version.versionNumber}。
+      <button className="text-button" type="button" onClick={() => void open(active)}>返回判断版本</button>
+    </p>
+    : null;
   return <div className={compact ? "collab-reader" : "surface-panel"} data-testid="collab-artifact-reader"
     data-document-state={documentState} data-has-content={hasContent}>
     {compact ? <>{documentHeading}{!documentHeading && versionControls}<div className="collab-document-paper">
 {/* 判断条是纸面之外的独立卡：贴在内层会盖住正文最后一行，读起来像纸面的延续。 */}
       <div className="collab-reader-scroll">{readerContent}</div>
-      {selectedVersionId !== null && active && requestedVersion && requestedVersion.version.artifactVersionId !== selectedVersionId &&
-        <p className="collab-review-version-mismatch warning-callout" role="status" data-testid="collab-review-version-mismatch">
-          正在阅读 v{requestedVersion.version.versionNumber}；当前判断仍绑定「{active.title}」v{active.version.versionNumber}。
-          <button className="text-button" type="button" onClick={() => void open(active)}>返回判断版本</button>
-        </p>}
+      {versionMismatch}
     </div>{paperFooter !== undefined && <div className="collab-reader-outside">{paperFooter}</div>}
-    </> : readerContent}
+    </> : <>{versionMismatch}{readerContent}</>}
   </div>;
 }

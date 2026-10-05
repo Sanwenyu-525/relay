@@ -7,6 +7,7 @@ import { createCommandId, projectArchiveResultFrom, RelayApiError, RelayTranspor
 import AppDialog from "../components/AppDialog";
 import PageHeader from "../components/PageHeader";
 import ResponsiveRail from "../components/ResponsiveRail";
+import CreateGoalView from "./CreateGoalView";
 import CreateProjectView from "./CreateProjectView";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { fixtureModeFromQuery } from "../lib/fixtureMode";
@@ -84,6 +85,8 @@ export default function ProjectsView() {
   const [query] = useSearchParams();
   const mode = fixtureModeFromQuery(query);
   const creating = query.get("view") === "create";
+  // Goal 是 Workspace 级事实，轻量入口独立于「新建项目」表单：不用先建项目再重复抄目标。
+  const goalView = query.get("view") === "goal";
   const archivedTab = query.get("archived") === "1";
   const connection = useRelayConnection();
   const live = connection.mode === "live";
@@ -168,6 +171,12 @@ export default function ProjectsView() {
     }
   }
 
+  if (goalView) return live && connection.client
+    ? <CreateGoalView client={connection.client} onCancel={() => navigate("/projects")} />
+    // 示例模式没有真实 Goal：如实说明，不生成假目标冒充已保存事实。
+    : <section className="page-state" data-testid="goal-fixture-gap"><p className="eyebrow">目标</p>
+      <h1>示例模式不能保存目标</h1><p>Goal 是工作空间级事实，需要连接本机 API 才能创建。示例模式不生成目标、任务或执行记录。</p></section>;
+
   if (creating) return <section className="skill-page"><CreateProjectView onCancel={() => navigate("/projects")} /></section>;
 
   if (live && connection.client) return <LiveProjectsListView
@@ -180,7 +189,8 @@ export default function ProjectsView() {
   return <section className="skill-page projects-page"><div className="page-layout">
     <div className="page-primary">
       <PageHeader title="项目" testId="projects-page-head" lede="每一个长期目标，都有可继续的下一步。"
-        actions={<button className="primary-button" type="button" data-testid="project-create-open" onClick={() => navigate("/projects?view=create")}>新建项目</button>} />
+        actions={<><Link className="secondary-button" data-testid="goal-create-open" to="/projects?view=goal">记录目标</Link>
+          <button className="primary-button" type="button" data-testid="project-create-open" onClick={() => navigate("/projects?view=create")}>新建项目</button></>} />
       <div className="subnav-row">
         <nav className="subnav" aria-label="项目范围"><Link className={`subnav-item${archivedTab ? "" : " subnav-item--active"}`} to="/projects" data-testid="projects-tab-active" aria-current={archivedTab ? undefined : "page"}>进行中 ({activeProjects.length})</Link><Link className={`subnav-item${archivedTab ? " subnav-item--active" : ""}`} to="/projects?archived=1" data-testid="projects-tab-archived" aria-current={archivedTab ? "page" : undefined}>已归档 ({archivedProjects.length})</Link></nav>
         <div className="list-toolbar list-toolbar--compact"><label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">按项目名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="project-search" placeholder="搜索项目" style={searchInputStyle} /></label></div>
@@ -380,7 +390,8 @@ function LiveProjectsListView({ client, archived, onCreate }: {
   return <section className="skill-page projects-page" data-testid="projects-live-list"><div className="page-layout">
     <div className="page-primary">
       <PageHeader title="项目" testId="projects-page-head" lede="每一个长期目标，都有可继续的下一步。"
-        actions={<button className="primary-button" type="button" data-testid="project-create-open" onClick={onCreate}>新建项目</button>} />
+        actions={<><Link className="secondary-button" data-testid="goal-create-open" to="/projects?view=goal">记录目标</Link>
+          <button className="primary-button" type="button" data-testid="project-create-open" onClick={onCreate}>新建项目</button></>} />
       <div className="subnav-row">
         <nav className="subnav" aria-label="项目范围"><Link className={`subnav-item${archived ? "" : " subnav-item--active"}`}
           to="/projects" data-testid="projects-tab-active" aria-current={archived ? undefined : "page"}>进行中</Link>

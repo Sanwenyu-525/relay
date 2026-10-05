@@ -233,49 +233,15 @@ svg {
   cursor: default;
 }
 
-.desktop-titlebar__actions {
+.workbench-actions {
   display: flex;
   flex: none;
   align-items: center;
-  padding-left: var(--relay-space-4);
-  gap: var(--relay-space-2);
+  gap: var(--relay-space-1);
 }
-
-.desktop-titlebar__action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--relay-space-2);
-  height: 100%;
-  padding: 0 var(--relay-space-2);
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  font-size: var(--relay-font-size-meta);
-  white-space: nowrap;
-}
-
-.desktop-titlebar__action--icon {
-  width: var(--relay-control-height-comfort);
-  padding: 0;
-}
-
-.desktop-titlebar__action:hover:not(:disabled) {
-  background: var(--relay-color-selection-hover);
-}
-
-.desktop-titlebar__action:disabled {
-  color: var(--relay-color-disabled-text);
-}
-
-.desktop-titlebar__action svg {
+.workbench-actions .icon-button svg {
   width: var(--relay-control-icon-size);
   height: var(--relay-control-icon-size);
-}
-
-.desktop-titlebar__action kbd {
-  color: var(--relay-color-text-secondary);
-  font: inherit;
 }
 
 .desktop-titlebar__separator {
@@ -287,6 +253,25 @@ svg {
 .desktop-titlebar__error {
   margin-left: var(--relay-space-4);
   color: var(--relay-color-status-danger-text);
+}
+
+.desktop-titlebar__cluster {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--relay-space-2);
+  padding-right: var(--relay-space-2);
+}
+
+.desktop-titlebar__date {
+  font-size: var(--relay-font-size-meta);
+  color: var(--relay-color-text-muted);
+  white-space: nowrap;
+}
+
+.desktop-titlebar__cluster .icon-button,
+.desktop-titlebar__cluster .data-source-button {
+  flex: none;
 }
 
 .desktop-titlebar__controls {
@@ -319,23 +304,6 @@ svg {
   height: var(--relay-font-size-meta);
 }
 
-@media (max-width: 700px) {
-  .desktop-titlebar__action kbd {
-    display: none;
-  }
-}
-
-@media (max-width: 520px) {
-  .desktop-titlebar__action-label {
-    display: none;
-  }
-
-  .desktop-titlebar__action:not(.desktop-titlebar__action--icon) {
-    width: var(--relay-control-height-comfort);
-    padding: 0;
-  }
-}
-
 /* 桌面态：外壳铺满视口且自身不滚动，只有主内容区滚动，避免窗口右缘出现网页式根滚动条。 */
 .desktop-window {
   display: flex;
@@ -365,17 +333,6 @@ svg {
   height: 100%;
 }
 
-.desktop-titlebar__search,
-.desktop-titlebar__create {
-  height: var(--relay-control-height);
-  border: var(--relay-border-width) solid var(--relay-color-border-separator);
-  border-radius: var(--relay-radius-control);
-  padding-inline: var(--relay-space-3);
-  background: var(--relay-color-bg-surface);
-}
-.desktop-titlebar__search { color: var(--relay-color-text-secondary); }
-.desktop-titlebar__create { border-color: var(--relay-color-border-control); }
-
 .desktop-window .app-content {
   display: flex;
   flex-direction: column;
@@ -396,10 +353,6 @@ svg {
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
-}
-
-.desktop-window .app-topbar__command-open {
-  display: none;
 }
 
 /* 仅供辅助技术读取的标签；可见标签仍由界面文字提供。 */
@@ -521,7 +474,7 @@ svg {
   color: var(--relay-color-text-primary);
 }
 
-.context-rail-new { flex: none; padding-inline: var(--relay-space-2); }
+.context-rail-new { flex: none; color: var(--relay-color-text-secondary); }
 .context-rail-new > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
 
 .context-rail-placeholder {
@@ -543,9 +496,10 @@ svg {
   gap: var(--relay-space-1);
 }
 
+/* 图标栏内的次级入口组（今日、全部任务、动态、收件箱）：常驻显示，只用一条细分隔线与主导航分组。 */
 .navigation-list--secondary {
   margin-top: var(--relay-space-4);
-  padding-top: var(--relay-space-3);
+  padding-top: var(--relay-space-2);
   border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
 }
 
@@ -567,6 +521,8 @@ svg {
 .recent-work-scroll { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
 /* 错误里的 URL 和 ID 不能撑破侧栏：长标识允许断行，不产生整页横向滚动。 */
 .recent-work .action-error, .recent-work .helper-text { overflow-wrap: anywhere; }
+/* 近期工作栏内的搜索沿用全局 .search-field 原语，只在此处收敛它在窄栏里的基准。 */
+.recent-work-search { flex: none; min-width: 0; width: 100%; }
 .recent-work-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--relay-space-2); }
 .recent-work-heading h2 {
   display: flex;
@@ -597,11 +553,6 @@ svg {
 .recent-work-group:not([open]) > summary > svg { transform: rotate(-90deg); }
 .recent-work-group > summary > span { overflow-wrap: anywhere; }
 .recent-work-group .recent-work-list { margin-left: var(--relay-space-6); border-left: var(--relay-border-width) solid var(--relay-color-border-separator); gap: 0; }
-.navigation-extra { flex: none; margin-block: var(--relay-space-2); }
-.navigation-extra > summary { padding: var(--relay-space-2) var(--relay-space-3); font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); cursor: pointer; }
-.navigation-extra .navigation-list--secondary { margin: 0; padding: 0; border: 0; }
-.app-navrail .navigation-extra > summary { padding-inline: var(--relay-space-1); text-align: center; }
-.app-navrail .navigation-list--secondary { padding-top: var(--relay-space-2); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .recent-work-item {
   width: 100%;
   display: flex;
@@ -644,10 +595,9 @@ svg {
 .mobile-navigation .recent-work { flex: none; overflow: visible; }
 .mobile-navigation .recent-work-scroll { flex: none; overflow: visible; }
 
-/* 低矮窗口改由整条导航承担滚动，展开更多入口后底部操作仍可到达。 */
-@media (max-height: 44rem) {
+/* 低矮窗口：近期工作栏放开内部滚动承接，导航栏自身也承担滚动（单行高度覆盖见下方 navrail 段）。 */
+@media (max-height: 50rem) {
   .app-navrail { padding-block: var(--relay-space-2); }
-  .app-navrail .navigation-item { min-height: var(--relay-space-8); }
   .app-navrail .navigation-list--secondary { margin-top: var(--relay-space-2); padding-top: var(--relay-space-2); }
   .app-context-rail { overflow-y: auto; }
   .app-context-rail .recent-work { flex: none; overflow: visible; }
@@ -694,6 +644,15 @@ svg {
   padding: 0 var(--relay-space-1);
   font-size: var(--relay-font-size-meta);
   line-height: 1;
+}
+
+/* 短窗口收紧竖排入口的单行高度：必须放在 .app-navrail .navigation-item 之后，同特异度下靠后生效。
+   十个入口全部常驻后，50rem（约 800px，覆盖常见 720px 视口）以内底部设置与连接与同步无需滚动即可到达。 */
+@media (max-height: 50rem) {
+  .app-navrail .navigation-item {
+    min-height: var(--relay-space-8);
+    padding-block: var(--relay-space-1);
+  }
 }
 
 .navigation-item {
@@ -759,8 +718,8 @@ svg {
   display: flex;
   align-items: center;
   gap: var(--relay-space-3);
-  min-height: var(--relay-layout-header-height);
-  padding: 0 var(--relay-layout-main-padding);
+  min-height: var(--relay-control-height-comfort);
+  padding: 0 var(--relay-space-3);
   background: var(--relay-color-bg-canvas);
   border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
 }
@@ -865,14 +824,11 @@ svg {
 .intervention-notifications-permission { display: flex; align-items: center; gap: var(--relay-space-2); }
 .intervention-notifications-permission p { flex: 1; min-width: 0; }
 .intervention-notifications-permission .icon-button { flex: none; }
-.app-topbar:has(.intervention-notifications) > .icon-button,
-.app-topbar:has(.intervention-notifications) > .data-source-button { flex: none; }
-.app-topbar:has(.intervention-notifications) .breadcrumbs { flex: 1; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
-.app-topbar:has(.intervention-notifications) .breadcrumb-item:last-child { min-width: 0; }
-.app-topbar:has(.intervention-notifications) .breadcrumb-item:last-child > span:last-child { overflow: hidden; text-overflow: ellipsis; }
-@media (max-width: 63.9375rem) {
-  .app-topbar:has(.intervention-notifications) .topbar-date { display: none; }
-}
+/* 2026-10-04：通知与连接入口已移入共享标题带，顶栏不再有它们；
+   面包屑改为独占整行并自行截断，避免空出右侧大片空白。 */
+.app-topbar .breadcrumbs { flex: 1; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
+.app-topbar .breadcrumb-item { min-width: 0; }
+.app-topbar .breadcrumb-item:last-child > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 
 /* 任务详情：验收条件列表、产物版本与 Markdown 编辑/预览（UI-10/UI-11）。 */
 

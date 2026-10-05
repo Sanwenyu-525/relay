@@ -21,7 +21,7 @@ const response = (id: string, title: string) => new Response(JSON.stringify({
   allowed_actions: [], acceptance: { acceptance_revision: "1", objective: "阅读", source: "CREATE", criteria: [] }, dependencies: []
 }), { status: 200 });
 
-it("工作标题绑定当前目标，慢读和旧目标迟到响应不能冒充新工作", async () => {
+it("工作台页不渲染面包屑；旧目标的迟到响应不能冒充当前工作", async () => {
   let resolveB: (value: Response) => void = () => undefined;
   const pendingB = new Promise<Response>((resolve) => { resolveB = resolve; });
   vi.stubGlobal("fetch", vi.fn(async (input: string) => {
@@ -41,14 +41,13 @@ it("工作标题绑定当前目标，慢读和旧目标迟到响应不能冒充�
   cleanup = () => { act(() => root.unmount()); router.dispose(); host.remove(); };
   await act(async () => root.render(createElement(RouterProvider, { router })));
   await flush();
-  const trail = () => host.querySelector('nav[aria-label="面包屑"]')?.textContent;
-  expect(trail()).toContain("原工作 A");
+  // 面包屑不再渲染：项目/任务归属由协作页头那行承载，不在这里重复。
+  expect(host.querySelector('nav[aria-label="面包屑"]')).toBeNull();
   await act(async () => { await router.navigate(`/agent?work=${b}`); });
-  expect(trail()).not.toContain("原工作 A");
+  expect(host.textContent).not.toContain("原工作 A");
   await act(async () => { await router.navigate(`/agent?work=${c}`); });
   await flush();
-  expect(trail()).toContain("当前工作 C");
+  // 旧目标的迟到响应不得让壳层出现任何冒充当前工作的标题。
   resolveB(response(b, "迟到工作 B")); await flush();
-  expect(trail()).toContain("当前工作 C");
-  expect(trail()).not.toContain("迟到工作 B");
+  expect(host.textContent).not.toContain("迟到工作 B");
 });

@@ -1,16 +1,21 @@
-import { createElement, act } from "react";
+import { createElement, act, Fragment } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import InterventionNotifications from "../src/components/InterventionNotifications";
 import AttentionQueue from "../src/components/AttentionQueue";
 import AppShell from "../src/components/AppShell";
+import DesktopTitleBar from "../src/components/DesktopTitleBar";
 import type { RelayApiClient, RelayInterventionItem } from "../src/api/relayClient";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { flush, mountReact } from "./mountApp";
 
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true }));
 const windowCalls = vi.hoisted(() => ({ isFocused: vi.fn(async () => false),
-  show: vi.fn(async () => {}), unminimize: vi.fn(async () => {}), setFocus: vi.fn(async () => {}) }));
+  show: vi.fn(async () => {}), unminimize: vi.fn(async () => {}), setFocus: vi.fn(async () => {}),
+  onResized: vi.fn(async () => () => undefined), onFocusChanged: vi.fn(async () => () => undefined),
+  isMaximized: vi.fn(async () => false), startDragging: vi.fn(async () => undefined),
+  toggleMaximize: vi.fn(async () => undefined), minimize: vi.fn(async () => undefined),
+  close: vi.fn(async () => undefined) }));
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => windowCalls }));
 
 const item: RelayInterventionItem = { itemKey: "review:one", changeKey: "0",
@@ -87,14 +92,17 @@ describe("人工介入提醒聚合", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ items: [] }), {
       status: 200, headers: { "Content-Type": "application/json" }
     })));
-    const mounted = await mountReact(createElement(MemoryRouter, {}, createElement(AppShell, {
-      desktopStatus: "idle", commandOpen: false, onCommandOpen: vi.fn(), onCommandClose: vi.fn(),
-      children: createElement("h1", {}, "当前工作")
-    })));
+    const mounted = await mountReact(createElement(MemoryRouter, {}, createElement(Fragment, null,
+      createElement(DesktopTitleBar, { available: true }),
+      createElement(AppShell, {
+        desktopStatus: "idle", commandOpen: false, onCommandOpen: vi.fn(), onCommandClose: vi.fn(),
+        children: createElement("h1", {}, "当前工作")
+      }))));
     try {
       await flush();
-      expect(mounted.wrapper.get('.app-topbar [data-testid="intervention-notifications"]').exists()).toBe(true);
-      expect(mounted.wrapper.find('.app-content > [data-testid="intervention-notifications"]').exists()).toBe(false);
+      // 2026-10-04：通知入口与窗口控制同处共享标题带，主内容内不再挂第二个入口。
+      expect(mounted.wrapper.get('.desktop-titlebar [data-testid="intervention-notifications"]').exists()).toBe(true);
+      expect(mounted.wrapper.find('.app-content [data-testid="intervention-notifications"]').exists()).toBe(false);
       expect(mounted.wrapper.find('.intervention-notifications-panel [role="status"]').exists()).toBe(false);
       expect(mounted.wrapper.get("main h1").text()).toBe("当前工作");
     } finally { mounted.unmount(); }

@@ -6,7 +6,18 @@
 .collab-page, .collab-main { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
 .collab-main { container-name: collaboration; container-type: inline-size; }
 .collab-columns { display: grid; flex: 1; grid-template-columns: minmax(0, var(--relay-collab-chat-column)) var(--relay-space-2) minmax(0, var(--relay-collab-result-column)); min-height: 0; overflow: hidden; }
-.collab-columns--empty { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.collab-columns--empty { grid-template-columns: minmax(0, 1fr); }
+.collab-columns--empty .folder-scope-bar { flex: none; }
+.folder-scope-bar > summary, .collab-existing-work > summary {
+  cursor: pointer; padding-block: var(--relay-space-2); font-size: var(--relay-font-size-meta);
+  color: var(--relay-color-text-secondary);
+}
+/* 目录范围条展开时自己滚动：实测内容 485px，中栏 672px。
+   不设上限它就把下面的对话整列挤没（转录区只剩 124px，一屏读不到几条）。
+   它因此是同列的一个额外滚动容器，只在用户主动展开目录入口时存在。 */
+.folder-scope-bar[open] { max-height: 40%; overflow-y: auto; }
+.collab-existing-work { flex: none; }
+.collab-existing-work[open] { max-height: 40%; overflow-y: auto; }
 .collab-columns[data-layout-mode="chat"], .collab-columns[data-layout-mode="result"] { grid-template-columns: minmax(0, 1fr); }
 .collab-columns > [hidden], .collab-narrow-tabs[hidden] { display: none; }
 .collab-result-pane { display: flex; min-width: 0; min-height: 0; overflow: hidden; }
@@ -14,7 +25,10 @@
 
 .collab-center { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: var(--relay-space-2) var(--relay-space-3); gap: var(--relay-space-1); }
 .collab-center > * { flex: none; }
-.collab-center > .agent-assist { flex: 1; min-height: 0; gap: var(--relay-space-1); }
+/* 消息区是中栏的主轴，basis 用 auto：flex-basis:0（flex:1）时这一项
+   不按内容参与收缩，目录范围条实测占 424px 也不肯让出高度，整列只剩 174px，
+   转录区被压到 16px——正好一行文字高，看上去就是输入器上方遮住了一块文字。 */
+.collab-center > .agent-assist { flex: 1 1 auto; min-height: 0; gap: var(--relay-space-1); }
 .collab-center > .agent-assist > .agent-assist-heading { display: none; }
 .collab-center .agent-chat-conversation { flex: 1; min-height: 0; margin: 0; padding: 0; background: transparent; border: 0; }
 .collab-center .agent-chat-conversation-heading { display: none; }

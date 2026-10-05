@@ -1,31 +1,20 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useLocation, useNavigate, useNavigationType } from "react-router-dom";
-import { ArrowLeft, ArrowRight, Copy, Minus, Plus, Search, Square, X } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Copy, Inbox, Link2, Minus, Square, X } from "lucide-react";
+import InterventionNotifications from "./InterventionNotifications";
+import RelayConnectionDialog from "./RelayConnectionDialog";
+import { useDisplayPreferences } from "../lib/displayPreferences";
+import { useRelayConnection } from "../lib/relayConnection";
 
-export default function DesktopTitleBar({ available, onSearch }: { available: boolean; onSearch: () => void }) {
+export default function DesktopTitleBar({ available }: { available: boolean }) {
   const desktop = isTauri();
-  const location = useLocation();
-  const navigate = useNavigate();
-  const navigationType = useNavigationType();
-  const [routeHistory, setRouteHistory] = useState(() => ({ keys: [location.key], index: 0 }));
+  const connection = useRelayConnection();
+  const { timeZone } = useDisplayPreferences();
   const [maximized, setMaximized] = useState(false);
   const [error, setError] = useState(false);
-
-  useEffect(() => {
-    setRouteHistory((current) => {
-      const known = current.keys.indexOf(location.key);
-      if (navigationType === "POP") return known < 0 ? { keys: [location.key], index: 0 } : { ...current, index: known };
-      if (navigationType === "REPLACE") {
-        const keys = [...current.keys];
-        keys[current.index] = location.key;
-        return { keys, index: current.index };
-      }
-      const keys = [...current.keys.slice(0, current.index + 1), location.key];
-      return { keys, index: keys.length - 1 };
-    });
-  }, [location.key, navigationType]);
+  const [connectionOpen, setConnectionOpen] = useState(false);
 
   useEffect(() => {
     if (!desktop) return;
@@ -67,25 +56,37 @@ export default function DesktopTitleBar({ available, onSearch }: { available: bo
     if (event.detail === 2) void toggleMaximized();
     else void run(() => current.startDragging());
   };
-  const project = /^\/projects\/([^/]+)(?:\/|$)/u.exec(location.pathname);
-  const createTaskPath = project ? `/tasks?view=create&project=${encodeURIComponent(decodeURIComponent(project[1]!))}` : "/tasks?view=create";
+  // 常用状态与入口与窗口控制同处一条标题带：应用顶栏不再重复承载日期、收件箱与通知。
+  const now = new Date();
+  const date = new Intl.DateTimeFormat("zh-CN", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now).replaceAll("/", "-");
+  const weekday = new Intl.DateTimeFormat("zh-CN", { timeZone, weekday: "long" }).format(now);
+  const dataSourceLabel = connection.mode === "live" ? "已连接本机 API" : "示例数据";
 
-  return <div className="desktop-titlebar" data-testid="desktop-titlebar">
-    <div className="desktop-titlebar__actions" aria-label="常用操作">
-      <button className="desktop-titlebar__action desktop-titlebar__action--icon" type="button" aria-label="后退" title="后退" data-testid="titlebar-back" disabled={!available || routeHistory.index === 0} onClick={() => void navigate(-1)}><ArrowLeft aria-hidden="true" /></button>
-      <button className="desktop-titlebar__action desktop-titlebar__action--icon" type="button" aria-label="前进" title="前进" data-testid="titlebar-forward" disabled={!available || routeHistory.index >= routeHistory.keys.length - 1} onClick={() => void navigate(1)}><ArrowRight aria-hidden="true" /></button>
-      <button className="desktop-titlebar__action desktop-titlebar__search" type="button" aria-label="搜索资料，快捷键 Ctrl+K" data-testid="titlebar-search" disabled={!available} onClick={onSearch}><Search aria-hidden="true" /><span className="desktop-titlebar__action-label">搜索资料…</span></button>
-      <button className="desktop-titlebar__action desktop-titlebar__create" type="button" aria-label="新建任务" data-testid="titlebar-create-task" disabled={!available} onClick={() => void navigate(createTaskPath)}><Plus aria-hidden="true" /><span className="desktop-titlebar__action-label">新建</span></button>
+  return <>
+    <div className="desktop-titlebar" data-testid="desktop-titlebar">
+      <div className="desktop-titlebar__drag" onMouseDown={onDragMouseDown}>
+        {error && <span className="desktop-titlebar__error" role="alert">窗口操作失败</span>}
+      </div>
+      {/* 连接中与服务失败页只保留真实窗口控制：数据来源与通知此时没有可核对的事实，不显示。 */}
+      {available && <div className="desktop-titlebar__cluster">
+        <time className="desktop-titlebar__date" dateTime={date} title={`界面时区：${timeZone}`}>{date}　{weekday}</time>
+        <Link className="icon-button" to="/inbox" aria-label="打开任务收件箱" title="任务收件箱"
+          data-testid="inbox-open"><Inbox aria-hidden="true" /></Link>
+        <button className={`data-source-button${connection.mode === "live" ? " data-source-button--live" : ""}`} type="button"
+          data-testid="relay-connection-open" aria-label={`数据来源：${dataSourceLabel}，打开连接设置`} onClick={() => setConnectionOpen(true)}>
+          <Link2 aria-hidden="true" /><span className="visually-hidden">{dataSourceLabel}</span>
+        </button>
+        {connection.mode === "live" && connection.client && <InterventionNotifications
+          key={connection.epoch} client={connection.client} />}
+      </div>}
+      {current && <div className="desktop-titlebar__controls" aria-label="窗口控制">
+        <button className="desktop-titlebar__button" type="button" aria-label="最小化" title="最小化" onClick={() => void run(() => current.minimize())}><Minus aria-hidden="true" /></button>
+        <button className="desktop-titlebar__button" type="button" aria-label={maximized ? "还原窗口" : "最大化"} onClick={() => void toggleMaximized()}>
+          {maximized ? <Copy aria-hidden="true" /> : <Square aria-hidden="true" />}
+        </button>
+        <button className="desktop-titlebar__button desktop-titlebar__button--close" type="button" aria-label="关闭窗口" onClick={() => void run(() => current.close())}><X aria-hidden="true" /></button>
+      </div>}
     </div>
-    <div className="desktop-titlebar__drag" onMouseDown={onDragMouseDown}>
-      {error && <span className="desktop-titlebar__error" role="alert">窗口操作失败</span>}
-    </div>
-    {current && <div className="desktop-titlebar__controls" aria-label="窗口控制">
-      <button className="desktop-titlebar__button" type="button" aria-label="最小化" onClick={() => void run(() => current.minimize())}><Minus aria-hidden="true" /></button>
-      <button className="desktop-titlebar__button" type="button" aria-label={maximized ? "还原窗口" : "最大化"} onClick={() => void toggleMaximized()}>
-        {maximized ? <Copy aria-hidden="true" /> : <Square aria-hidden="true" />}
-      </button>
-      <button className="desktop-titlebar__button desktop-titlebar__button--close" type="button" aria-label="关闭窗口" onClick={() => void run(() => current.close())}><X aria-hidden="true" /></button>
-    </div>}
-  </div>;
+    <RelayConnectionDialog open={connectionOpen} onClose={() => setConnectionOpen(false)} />
+  </>;
 }

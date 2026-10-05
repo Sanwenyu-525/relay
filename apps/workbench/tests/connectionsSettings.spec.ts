@@ -48,6 +48,90 @@ function state() { return { connections: [] as Record<string, unknown>[], polici
   archivedAt: null as string | null }; }
 
 describe("项目连接与 Permission 设置", () => {
+  it("目录检索连接可从页面配置且仍不自动授权", async () => {
+    connect(); const data = state(); const rootPath = "D:\\Workspace\\query";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if ((init?.method ?? "GET") === "GET") return baseGet(path, data) ?? response(404, {});
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(path).toBe(`/projects/${projectId}/connections`);
+      expect(body).toMatchObject({ capabilities: ["FILE_QUERY"], root_path: rootPath });
+      expect(body).not.toHaveProperty("allowed_host");
+      data.connections = [{ id: connectionId, project_id: projectId, status: "ACTIVE", version: "1",
+        capabilities: ["FILE_QUERY"], allowed_host: null, created_at: created }];
+      return response(201, receipt(String(body.command_id), { project_id: projectId,
+        connection_id: connectionId, version: "1", status: "ACTIVE" }));
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+    expect(mounted.wrapper.find('[data-testid="connection-capability"] option[value="FILE_QUERY"]').exists()).toBe(true);
+    await mounted.wrapper.get('[data-testid="connection-capability"]').setValue("FILE_QUERY");
+    await mounted.wrapper.get('[data-testid="connection-root"]').setValue(rootPath);
+    await mounted.wrapper.get(".connections-form").trigger("submit"); await flush();
+    expect(mounted.wrapper.text()).toContain("连接创建已由服务端回执和最新项目查询确认");
+    expect(mounted.wrapper.text()).toContain("本项目没有权限策略，当前默认 DENY");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
+  it("查询策略明确选择动作并在修订中保留，切换能力后清除旧动作", async () => {
+    connect(); const data = state();
+    data.resources = [{ id: resourceId, project_id: projectId, canonical_root: "D:\\Workspace\\query",
+      status: "ACTIVE", revision: "1", resource_epoch: "1" }];
+    const writes: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if ((init?.method ?? "GET") === "GET") return baseGet(path, data) ?? response(404, {});
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>; writes.push(body);
+      const version = path.endsWith("/versions") ? "2" : "1";
+      expect(body).toMatchObject({ capability: "FILE_QUERY", resource_id: resourceId, decision: "ASK",
+        action_type: version === "1" ? "SEARCH_TEXT" : "FIND_PATHS" });
+      if (version === "2") expect(body.expected_revision).toBe("1");
+      data.policies = [{ id: policyId, project_id: projectId, status: "ACTIVE", active_version: version,
+        revision: version, created_at: created }];
+      data.versions.push({ version, capability: "FILE_QUERY", action_type: body.action_type,
+        target_prefix: "D:\\Workspace\\query", decision: "ASK", max_payload_bytes: 2, created_at: created });
+      return response(version === "1" ? 201 : 200, receipt(String(body.command_id), {
+        project_id: projectId, policy_id: policyId, revision: version, version, status: "ACTIVE" }));
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="policy-capability"]').setValue("FILE_QUERY");
+    await mounted.wrapper.get('[data-testid="policy-action"]').setValue("SEARCH_TEXT");
+    await mounted.wrapper.get('[data-testid="policy-resource"]').setValue(resourceId);
+    await mounted.wrapper.get('[data-testid="policy-decision"]').setValue("ASK");
+    await mounted.wrapper.get('[data-testid="policy-form"]').trigger("submit"); await flush();
+    await mounted.wrapper.findAll("button").find((button) => button.text() === "修订")!.trigger("click");
+    expect(mounted.wrapper.get('[data-testid="policy-action"]').element).toHaveProperty("value", "SEARCH_TEXT");
+    await mounted.wrapper.get('[data-testid="policy-action"]').setValue("FIND_PATHS");
+    await mounted.wrapper.get('[data-testid="policy-resource"]').setValue(resourceId);
+    await mounted.wrapper.get('[data-testid="policy-form"]').trigger("submit"); await flush();
+    expect(writes).toHaveLength(2);
+    await mounted.wrapper.get('[data-testid="policy-capability"]').setValue("CLI_RUN");
+    expect(mounted.wrapper.get('[data-testid="policy-action"]').element).toHaveProperty("value", "");
+    expect(mounted.wrapper.find('[data-testid="policy-action"] option[value="SEARCH_TEXT"]').exists()).toBe(false);
+  });
+
+  it("策略下拉切换载入所选动作，选择新建不继承旧动作", async () => {
+    connect(); const data = state(); const secondPolicyId = "66666666-6666-4666-8666-666666666666";
+    data.policies = [policyId, secondPolicyId].map((id) => ({ id, project_id: projectId,
+      status: "ACTIVE", active_version: "1", revision: "1", created_at: created }));
+    data.versions = [{ version: "1", capability: "FILE_QUERY", action_type: "SEARCH_TEXT",
+      target_prefix: "D:\\Workspace\\query", decision: "ASK", max_payload_bytes: 2, created_at: created }];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method ?? "GET").toBe("GET");
+      const path = String(input).slice(root.length);
+      if (path === `/projects/${projectId}/permission-policies/${secondPolicyId}/versions`) {
+        return response(200, [{ ...data.versions[0], action_type: "FIND_PATHS", decision: "DENY" }]);
+      }
+      return baseGet(path, data) ?? response(404, {});
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+    await mounted.wrapper.findAll("button").find((button) => button.text() === "修订")!.trigger("click");
+    await mounted.wrapper.get('[data-testid="policy-select"]').setValue(secondPolicyId);
+    expect(mounted.wrapper.get('[data-testid="policy-action"]').element).toHaveProperty("value", "FIND_PATHS");
+    expect(mounted.wrapper.get('[data-testid="policy-decision"]').element).toHaveProperty("value", "DENY");
+    await mounted.wrapper.get('[data-testid="policy-select"]').setValue("");
+    expect(mounted.wrapper.get('[data-testid="policy-action"]').element).toHaveProperty("value", "");
+  });
+
   it("连接入口按真实项目名称选择并保留分页，不要求复制项目 ID", async () => {
     connect(); const data = state(); const nextId = "88888888-8888-4888-8888-888888888888";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -247,7 +331,7 @@ describe("项目连接与 Permission 设置", () => {
     const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
     const connectionOptions = mounted.wrapper.get('[data-testid="connection-capability"]')
       .findAll("option").map((option) => option.attributes("value"));
-    expect(connectionOptions).toEqual(["WEB_FETCH", "FILE_READ", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN", "FAKE_WRITE", "FAKE_PUBLIC_READ"]);
+    expect(connectionOptions).toEqual(["WEB_FETCH", "FILE_READ", "FILE_QUERY", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN", "FAKE_WRITE", "FAKE_PUBLIC_READ"]);
     await mounted.wrapper.get('[data-testid="connection-capability"]').setValue("CLI_RUN");
     await mounted.wrapper.get(".connections-form").trigger("submit"); await flush();
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);

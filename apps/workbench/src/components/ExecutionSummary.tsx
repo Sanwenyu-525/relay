@@ -42,12 +42,12 @@ export default function ExecutionSummary({ execution, busy, onApply, onOpenTask,
       <div className="form-actions">
         {request.status === "READY" && <button className="primary-button" type="button"
           data-testid="execution-start" disabled={busy} onClick={() => onApply(request.requestId)}>
-          {busy ? "正在建立任务" : "按这个执行"}</button>}
+          {busy ? "正在建立任务" : "按这个目标执行"}</button>}
         {request.taskId !== null && <button className="secondary-button" type="button"
           data-testid="execution-open-task" onClick={() => onOpenTask(request.taskId as string)}>
           查看任务 {request.taskId.slice(0, 8)}</button>}
       </div>
-      <p className="helper-text">开始执行不代表已完成：写入文件与运行检查仍会各自请求一次批准。</p>
+      <p className="helper-text">现在确认的是目标与范围，不是已经写好的新正文：文件内容会在执行时读取后决定。开始执行不代表已完成——写入文件与运行检查仍会各自请求一次批准。</p>
     </>}
     {request.decision === "CLARIFY" && <p className="execution-summary-question"
       data-testid="execution-clarify">{request.questions[0] ?? "这次要处理的具体内容是什么？"}</p>}

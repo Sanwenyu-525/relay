@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { CheckCheck, FileText, Plus, Scale } from "lucide-react";
+import { Plus } from "lucide-react";
 import AppDialog from "../components/AppDialog";
 import AssistView, { type AssistNavigationState, type FirstMessageOwner, type FirstMessageProcess } from "./AssistView";
 import FactBar from "../components/FactBar";
@@ -60,7 +60,8 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   // 选中的工作由 URL ?work={taskId} 承担，左栏、面包屑和深链接因此指向同一个确切任务。
   const [search, setSearch] = useSearchParams();
   const workId = search.get("work");
-  const [sessionId, setSessionId] = useState<string | null | undefined>(undefined);
+  const newConversationKey = search.get("new");
+  const [sessionId, setSessionId] = useState<string | null | undefined>(() => search.has("new") ? null : undefined);
   // 首条消息的完整过程住在协作页：文件夹入口的 AssistView 会按会话切换重新挂载，
   // 命令身份、在途阶段、首条原文与解释结果都不能随它卸载。迟到响应与回执核对
   // 可能跨越同一次重挂载，因此 busy 与「已解释」也必须是同一份共享事实。
@@ -215,10 +216,12 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
     reviewNavigationRef.current = null; reviewRef.current = null;
     setProjectTitle(null); setProjectArchivedAt(undefined); setProjectReadError(null);
     setError(null); setRunError(null); setReviewError(null);
-    setSessionId(undefined); setNarrowSideOpen(false);
+    setSessionId(newConversationKey !== null ? null : undefined); setNarrowSideOpen(false);
+    if (newConversationKey !== null) firstMessageOwner.write({
+      draft: "", pending: null, busy: false, interpreted: null, execution: null });
     void reloadAll();
     return () => { taskRequest.current++; runRequest.current++; reviewRequest.current++; };
-  }, [workId, reloadAll]);
+  }, [workId, newConversationKey, reloadAll, firstMessageOwner]);
 
   useEffect(() => { void reloadRun(); void reloadReviews(); },
     // 任务事实到达后才认得它的 Run 与待判断项；换任务、换执行权或手动刷新都重新读取。
@@ -310,7 +313,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
   const folderProjectId = folder?.status === "READY" ? folder.association?.projectId ?? null : null;
   const folderState = { directory: folder, recents, busy: folderBusy };
   function startFolderConversation() {
-    requestTransition(() => { setSessionId(null); setSearch({}); });
+    requestTransition(() => { setSessionId(null); setSearch({ new: createCommandId() }); });
   }
   // 真实任务建立后把工作台切到那个 Task：执行摘要、Run 控制与判断入口仍是原来的 Owner。
   function openExecutionTask(taskId: string) {
@@ -458,7 +461,9 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
               <section className="collab-center" aria-label="工作主区" data-testid="collab-center">
                 {/* 作用域行：目录是执行准入的前提，不是发送选项，因此固定在输入区上方。
                     没打开目录时它只提供入口 —— 讨论本身不需要先选目录。 */}
-                <div className="folder-scope-bar" data-testid="folder-scope-bar">
+                <details className="folder-scope-bar" data-testid="folder-scope-bar">
+                  <summary data-testid="folder-scope-options">{folder?.displayName ?? "选择文件夹（可选）"}
+                    {folder && <span className="helper-text"> · 更换或查看范围</span>}</summary>
                   {folder === null
                     ? <p><strong>未选择目录</strong><span className="helper-text">先讨论也可以；选目录后才能对项目文件执行写操作</span></p>
                     : <>
@@ -473,14 +478,19 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                     <FolderScope state={folderState} onOpen={requestFolderTransition}
                       onNewConversation={startFolderConversation} />
                   </div>
-                </div>
                 {/* 0051 的 project_id NOT NULL 让未归属会话无法发起执行请求，
                     因此界面必须先说明下一步，而不是让用户拿到一条数据库约束错误。 */}
                 {folderProjectId === null && <p className="disabled-reason" role="status"
                   data-testid="collab-unassigned-execution-hint">
                   这段讨论还没有归入项目，不能进入执行。先选目录并把它归入项目。</p>}
+                </details>
+                <details className="collab-existing-work" data-testid="collab-existing-work">
+                  <summary>接续已有任务</summary>
+                  <TargetPicker client={client} onOpen={(next) => requestTransition(() => {
+                    setSessionId(next.sessionId); setSearch({ work: next.taskId }); setSideTab("DOCUMENT"); })} />
+                </details>
                 {folderProjectId === null
-                  ? <AssistView key={`unassigned:${sessionId === undefined ? "auto" : sessionId}`}
+                  ? <AssistView key={`unassigned:${newConversationKey ?? ""}:${sessionId === undefined ? "auto" : sessionId}`}
                     workspaceLevel deferSessionCreation
                     preferredSessionId={sessionId} standalone
                     onNavigationStateChange={reportNavigation}
@@ -488,7 +498,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                     onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
                     onSessionCreated={(created) => setSessionId(created)}
                     firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage} />
-                  : <AssistView key={`folder:${folderProjectId}:${sessionId === undefined ? "auto" : sessionId}`}
+                  : <AssistView key={`folder:${folderProjectId}:${newConversationKey ?? ""}:${sessionId === undefined ? "auto" : sessionId}`}
                     targetKind="PROJECT" targetId={folderProjectId}
                     preferredSessionId={sessionId} standalone deferSessionCreation
                     executionScope={folder}
@@ -499,30 +509,6 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                     onExecutionPrepared={(taskId) => void openExecutionTask(taskId)}
                     firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage} />}
               </section>
-              <aside className="collab-side collab-side--intro" aria-label="产物与判断" data-testid="collab-side">
-                <div className="collab-side-empty" data-testid="collab-side-empty">
-                  <header className="collab-intro-heading">
-                    <p className="eyebrow">产物与判断</p>
-                    <h2>讨论之外，成果也在这里</h2>
-                    <p className="helper-text">选定任务后，沿着确切版本查看与确认。</p>
-                  </header>
-                  <div className="collab-intro-item"><FileText aria-hidden="true" /><div>
-                    <h3>阅读产物</h3>
-                    <p>查看已保存版本的正文与修改。生成中的草稿会单独标记。</p>
-                  </div></div>
-                  <div className="collab-intro-item"><Scale aria-hidden="true" /><div>
-                    <h3>处理判断</h3>
-                    <p>需要你决定时，对照版本与依据，接受或提出修改意见。</p>
-                  </div></div>
-                  <div className="collab-intro-item"><CheckCheck aria-hidden="true" /><div>
-                    <h3>确认完成</h3>
-                    <p>对照产物与验收条件独立确认，回复结束不等于任务完成。</p>
-                  </div></div>
-                </div>
-                  {/* 讨论已有任务仍是独立入口：文件夹入口不取代它。 */}
-                  <TargetPicker client={client} onOpen={(next) => requestTransition(() => {
-                    setSessionId(next.sessionId); setSearch({ work: next.taskId }); setSideTab("DOCUMENT"); })} />
-              </aside>
             </>
           : <>
             <section className="collab-center" aria-label="工作主区" data-testid="collab-center" hidden={layout.mode === "result"}>

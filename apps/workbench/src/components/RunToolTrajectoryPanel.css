@@ -1,0 +1,29 @@
+/* 工具轨迹：右栏只读呈现。只用既有 token，不新增数值源。 */
+
+.trajectory { display: flex; flex-direction: column; gap: var(--relay-space-3); }
+.trajectory-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--relay-space-3); }
+.trajectory-heading h3 { margin: 0 0 var(--relay-space-2); font-size: var(--relay-font-size-rowTitle); }
+.trajectory-round { display: flex; flex-direction: column; gap: var(--relay-space-2); }
+.trajectory-round h4 { margin: 0; font-size: var(--relay-font-size-section); }
+.trajectory-call {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-2);
+  padding: var(--relay-space-2) var(--relay-space-3);
+  background: var(--relay-color-bg-subtle);
+  border-radius: var(--relay-radius-control);
+}
+.trajectory-call-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-2); margin: 0; }
+.trajectory-status { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+.trajectory-status[data-status="WAITING_APPROVAL"],
+.trajectory-status[data-status="REJECTED"] { color: var(--relay-color-text-warning); }
+.trajectory-call pre {
+  max-height: 18rem;
+  overflow: auto;
+  margin: 0;
+  padding: var(--relay-space-2);
+  background: var(--relay-color-bg-canvas);
+  border-radius: var(--relay-radius-control);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

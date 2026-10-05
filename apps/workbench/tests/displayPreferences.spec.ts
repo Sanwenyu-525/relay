@@ -1,4 +1,4 @@
-import { createElement } from "react";
+﻿import { createElement } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DISPLAY_PREFERENCES_STORAGE_KEY, saveDisplayPreferences } from "../src/lib/displayPreferences";
@@ -20,26 +20,26 @@ describe("本设备显示偏好", () => {
     vi.setSystemTime(new Date("2026-09-30T18:30:00Z"));
     const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
     let mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
-    expect(mounted.wrapper.get(".topbar-date").text()).toContain("2026-10-01");
-    expect(mounted.wrapper.get(".topbar-date").text()).toContain("星期四");
+    expect(mounted.wrapper.get(".desktop-titlebar__date").text()).toContain("2026-10-01");
+    expect(mounted.wrapper.get(".desktop-titlebar__date").text()).toContain("星期四");
     expect(mounted.wrapper.get("#settings-appearance").attributes("disabled")).toBeDefined();
     await mounted.wrapper.get('[data-testid="settings-timezone"]').setValue("UTC");
     await mounted.wrapper.get('[data-testid="settings-default-workbench"]').setValue("development");
     await mounted.wrapper.get('[data-testid="settings-group-model"]').trigger("click");
     await mounted.wrapper.get('[data-testid="settings-group-basic"]').trigger("click");
     expect((mounted.wrapper.get('[data-testid="settings-timezone"]').element as HTMLSelectElement).value).toBe("UTC");
-    expect(mounted.wrapper.get(".topbar-date").text()).toContain("2026-10-01");
+    expect(mounted.wrapper.get(".desktop-titlebar__date").text()).toContain("2026-10-01");
     expect(localStorage.getItem(DISPLAY_PREFERENCES_STORAGE_KEY)).toBeNull();
     await mounted.wrapper.get(".settings-basic form").trigger("submit");
-    expect(mounted.wrapper.get(".topbar-date").text()).toContain("2026-09-30");
-    expect(mounted.wrapper.get(".topbar-date").text()).toContain("星期三");
-    expect(mounted.wrapper.get(".topbar-date").attributes("title")).toBe("界面时区：UTC");
+    expect(mounted.wrapper.get(".desktop-titlebar__date").text()).toContain("2026-09-30");
+    expect(mounted.wrapper.get(".desktop-titlebar__date").text()).toContain("星期三");
+    expect(mounted.wrapper.get(".desktop-titlebar__date").attributes("title")).toBe("界面时区：UTC");
     expect(mounted.wrapper.get('[role="status"]').text()).toBe("设置已保存，仅在本设备生效。");
     mounted.unmount(); unmount = null;
     mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
     expect((mounted.wrapper.get('[data-testid="settings-timezone"]').element as HTMLSelectElement).value).toBe("UTC");
     expect((mounted.wrapper.get('[data-testid="settings-default-workbench"]').element as HTMLSelectElement).value).toBe("development");
-    expect(mounted.wrapper.get(".topbar-date").text()).toContain("2026-09-30");
+    expect(mounted.wrapper.get(".desktop-titlebar__date").text()).toContain("2026-09-30");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -50,11 +50,11 @@ describe("本设备显示偏好", () => {
     await mounted.wrapper.get(".settings-basic form").trigger("submit");
     expect(mounted.wrapper.get('[role="alert"]').text()).toContain("设置未保存");
     expect(localStorage.getItem(DISPLAY_PREFERENCES_STORAGE_KEY)).toBeNull();
-    expect(mounted.wrapper.get(".topbar-date").attributes("title")).toBe("界面时区：Asia/Shanghai");
+    expect(mounted.wrapper.get(".desktop-titlebar__date").attributes("title")).toBe("界面时区：Asia/Shanghai");
     write.mockRestore();
     await mounted.wrapper.get(".settings-basic form").trigger("submit");
     expect(mounted.wrapper.find('[role="alert"]').exists()).toBe(false);
-    expect(mounted.wrapper.get(".topbar-date").attributes("title")).toBe("界面时区：UTC");
+    expect(mounted.wrapper.get(".desktop-titlebar__date").attributes("title")).toBe("界面时区：UTC");
   });
 
   it("损坏或无效的本地值回落到安全默认，不能产生无效路由或日期", async () => {
