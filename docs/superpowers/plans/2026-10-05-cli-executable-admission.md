@@ -120,38 +120,65 @@ git commit -m "feat(api): add pure executable admission decision"
 
 **Files:**
 - Modify: `apps/api/src/application/gateway-commands.ts:32`（`createGatewayConnectionCommand` 签名）、`:62`（`resolveConnectionConfig`）
-- Test: `apps/api/test/unit/gateway-commands.test.ts`（既有文件，追加用例）
+- Modify: `apps/api/src/api/gateway-api.ts:48`（`createConnectionBody` 加 `allowed_executables`，`:85` 处理函数透传）
+- Modify: `apps/api/src/application/gateway-queries.ts:19`（`GatewayConnectionDto` 加 `allowed_executables`，`connectionDto` 填充）
+- Test: `apps/api/test/unit/gateway-exec-allowlist.test.ts`（**新建**——仓库没有 `gateway-commands.test.ts`）
 
 **Interfaces:**
 - Consumes: Task 1 的 `isWithinRoot`（本任务只用 `realpath` + 形状校验，不调用准入判定）。
-- Produces: `createGatewayConnectionCommand` 新增可选入参 `allowedExecutables?: readonly string[] | undefined`；`resolveConnectionConfig` 在 `hasRootBound && capabilities.includes('CLI_RUN')` 时把它写成 `config.allowed_executables`，其他能力携带该参数 → `validationFailed`。
+- Produces:
+  ```ts
+  export const ALLOWED_EXECUTABLES_MAX = 32;                       // gateway-commands.ts
+  export async function resolveAllowedExecutables(
+    capabilities: readonly GatewayCapability[],
+    entries: readonly string[] | undefined): Promise<readonly string[] | undefined>;
+  ```
+  `createGatewayConnectionCommand` 新增可选入参 `allowedExecutables`；`resolveConnectionConfig` 在 `hasRootBound` 分支把它写成 `config.allowed_executables`，未配置时**不落该键**。
+
+- [ ] **Step 0: 范围补正（本任务必须含 HTTP，否则功能不可用）**
+
+计划的初稿只写了命令层，这是错的：**连接创建只经 HTTP**（`gateway-api.ts:87` 是唯一产品路径），不加 HTTP 字段则用户根本无法配置；且 HTTP 刻意不返回原始 `config`（见 `web-fetch.integration.test.ts:452`），所以不补读取投影就是**盲授权**——写进去读不回来。故本任务含三处：命令层校验、HTTP 请求体、连接读取 DTO。GET 端点未声明 response schema，DTO 直接流出，无需改 schema。
 
 - [ ] **Step 1: 写失败测试**
 
-追加到既有单元文件：
-1. `['CLI_RUN']` + `rootPath` + `allowedExecutables: ['<根内 check.ps1 的绝对路径>']` → `config` 含 `allowed_executables: [realpath 后的值]`。
-2. `['CLI_RUN']` 不传 `allowedExecutables` → `config` 只有 `root_path`，无 `allowed_executables` 键（**不写空数组**，避免既有行语义漂移）。
-3. `['FILE_WRITE']` + `allowedExecutables` → 抛 `validationFailed`，`field === 'allowed_executables'`。
-4. `['CLI_RUN','WEB_FETCH']` + `allowedExecutables` → 抛既有 `validationFailed`（边界互斥优先，错误信息仍是原来那条）。
-5. 清单里给了一个不存在的路径 → `validationFailed`，`field === 'allowed_executables'`；清单超过 32 项 → 同字段拒绝。
-6. 清单里给了一个目录而非文件 → `validationFailed`。
+`apps/api/test/unit/gateway-exec-allowlist.test.ts`，11 例，直接打 `resolveAllowedExecutables`（该函数导出是为了让校验逻辑不必经数据库即可测）：
+1. 清单项按 **realpath** 存回——用户读到的是真正生效的那份。
+2. 未传（`undefined`）→ 返回 `undefined`，既有连接行的 config 形状逐字不变。**不写空数组。**
+3. `[]` → 拒。**空清单是没有意义的配置，存下来会让人以为「配过了」**；与 `undefined` 语义不同，必须显式区分。
+4. `['FILE_WRITE']` + 清单 → 拒，`fieldErrors[0].field === 'allowed_executables'`。挂到别的能力上会让人误以为那项能力也受这份约束。
+5. 相对路径 → 拒。这里没有受管根可依。
+6. 不存在的路径 → 拒，**不信任到首次运行**。
+7. 目录 → 拒（可执行项必须是可运行文件）。
+8. 空白字符串 → 拒，不进 `realpath`。
+9. 33 项 → **一次拒掉，不截断**。
+10. 根内脚本可显式列入，且同一文件经 `tools/../x.ps1` 两种写法折叠为一项。**Review Focus 第 5 条。**
+11. 根内 + 根外可在同一清单中共存。
+
+**断言写法**：`fieldErrors[0].field`——`DomainError` 实例上的属性名是 `fieldErrors`，只有 HTTP 序列化后才变 `field_errors`。用 `assert.deepEqual` / 显式 `assert.equal` 都行，**不要写 `assert.rejects(promise)` 不带校验函数**，那会在拒绝时假通过。
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Expected: 新增 6 例中至少 1、3、5、6 FAIL（2 可能因当前忽略该参数而「意外通过」，需在测试里显式断言键不存在，否则是空断言）。
+```
+& .research\runtime-cache\node-v24.21.0-win-x64\node.exe apps/api/node_modules/typescript/bin/tsc -p apps/api/tsconfig.json
+```
+Expected: `TSC_EXIT=1`，且只有 `TS2305: Module '.../gateway-commands.js' has no exported member 'resolveAllowedExecutables'`。
+若出现别的错误，说明有在途并行改动，如实记录但不要去修。
 
 - [ ] **Step 3: 实现**
 
-`createGatewayConnectionCommand` 加 `allowedExecutables?: readonly string[] | undefined`，透传给 `resolveConnectionConfig`。在 `resolveConnectionConfig` 的 `hasRootBound` 分支里：`capabilities.includes('CLI_RUN')` 时逐项校验——非空数组、长度 ≤32、每项 `isAbsolute`、经 `realpath` 后存在且 `isFile()`——然后写入 `allowed_executables`。`!includes('CLI_RUN')` 且传了该参数 → `validationFailed`。既有 `return { root_path: ... }` 改为展开附加键，**既有分支逐字不变**。
+命令层加 `resolveAllowedExecutables` 与 `ALLOWED_EXECUTABLES_MAX`；`resolveConnectionConfig` 的 `hasRootBound` 分支在写 `root_path` 的同时附加清单键。**两个原本直接 `return` 的分支（无边界、WEB_FETCH）也必须调用一次**——否则 `['WEB_FETCH'] + 清单` 会被静默丢弃，变成谁也读不到的死配置。
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Expected: 全部 PASS，含既有 `gateway-commands` 用例无回归。
+单元定向，然后全量单元（**必须设 `RELAY_FILE_IO_HELPER` 绝对路径**，否则 `content-freeze`/`managed-content-store` 会假红 8 例），再跑真实 PG `gateway`、`web-fetch`、`tool-loop`。
+
+Expected（**已实跑**）：定向 11/11 exit 0；全量单元 440 / 439 通过 / 0 失败 / 1 跳过 exit 0；`gateway` 30/30、`web-fetch` 19/19、`tool-loop` 36/36，均 exit 0。
 
 - [ ] **Step 5: 提交**
 
+只提交本任务的四个文件——工作区常有并行 Agent 的 `bot-profile-*`、`assist-*`、新迁移，**不得一并 add**：
 ```
-git add apps/api/src/application/gateway-commands.ts apps/api/test/unit/gateway-commands.test.ts
+git add apps/api/src/application/gateway-commands.ts apps/api/src/application/gateway-queries.ts apps/api/src/api/gateway-api.ts apps/api/test/unit/gateway-exec-allowlist.test.ts
 git commit -m "feat(api): allow configured executables on CLI_RUN connections"
 ```
 

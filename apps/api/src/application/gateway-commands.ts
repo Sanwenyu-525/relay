@@ -32,6 +32,7 @@ async function projectVisible(repositories: Repositories, workspaceId: string, p
 export async function createGatewayConnectionCommand(db: DbExecutor, input: {
   workspaceId: string; projectId: string; commandId: string; capabilities: readonly GatewayCapability[];
   rootPath?: string | undefined; allowedHost?: string | undefined; allowPrivate?: boolean | undefined;
+  allowedExecutables?: readonly string[] | undefined;
 }): Promise<CommandOutcome<IdResult>> {
   if (input.capabilities.length === 0 || new Set(input.capabilities).size !== input.capabilities.length) {
     throw validationFailed([{ field: 'capabilities', message: 'must be a nonempty unique list' }]);
@@ -40,7 +41,7 @@ export async function createGatewayConnectionCommand(db: DbExecutor, input: {
   // directory, WEB_FETCH one allowed host; other capabilities keep the empty
   // P09 config (no credentials stored).
   const config = await resolveConnectionConfig(input.capabilities, input.rootPath,
-    input.allowedHost, input.allowPrivate);
+    input.allowedHost, input.allowPrivate, input.allowedExecutables);
   return runIdempotentCommand(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
     commandId: input.commandId, commandType: 'CreateGatewayConnection',
     target: { project_id: input.projectId },
@@ -61,7 +62,8 @@ export async function createGatewayConnectionCommand(db: DbExecutor, input: {
 
 async function resolveConnectionConfig(capabilities: readonly GatewayCapability[],
   rootPath: string | undefined, allowedHost: string | undefined,
-  allowPrivate: boolean | undefined): Promise<JsonObject | undefined> {
+  allowPrivate: boolean | undefined, allowedExecutables: readonly string[] | undefined,
+): Promise<JsonObject | undefined> {
   const rootBoundCaps: GatewayCapability[] =
     ['FILE_READ', 'FILE_QUERY', 'FILE_WRITE', 'GIT_READ', 'GIT_WRITE', 'CLI_RUN'];
   const hasRootBound = capabilities.some((c) => rootBoundCaps.includes(c));
@@ -75,6 +77,9 @@ async function resolveConnectionConfig(capabilities: readonly GatewayCapability[
       throw validationFailed([{ field: 'root_path',
         message: 'only filesystem/WEB_FETCH connections bind a boundary' }]);
     }
+    // 没有 root-bound 能力就不可能挂得上 CLI_RUN，清单必须在此拒掉，
+    // 否则会变成一个谁也读不到、谁也生效不了的死配置。
+    await resolveAllowedExecutables(capabilities, allowedExecutables);
     return undefined;
   }
   if (rootPath !== undefined && allowedHost !== undefined) {
@@ -97,11 +102,16 @@ async function resolveConnectionConfig(capabilities: readonly GatewayCapability[
     if (!stats.isDirectory()) {
       throw validationFailed([{ field: 'root_path', message: 'root path must be an existing directory' }]);
     }
-    return { root_path: await realpath(rootPath) };
+    const executables = await resolveAllowedExecutables(capabilities, allowedExecutables);
+    return { root_path: await realpath(rootPath),
+      // 未配置时不落这个键：既有连接行的 config 形状必须逐字不变。
+      ...(executables === undefined ? {} : { allowed_executables: [...executables] }) };
   }
   if (rootPath !== undefined) {
     throw validationFailed([{ field: 'root_path', message: 'only filesystem connections bind a root' }]);
   }
+  // WEB_FETCH 分支没有 CLI_RUN 可用，清单在此拒掉而不是静默丢弃。
+  await resolveAllowedExecutables(capabilities, allowedExecutables);
   // Only an explicit opt-IN is storable; allow_private=false is the default and
   // must not appear in the config (the SQL shape guard only accepts true).
   return { allowed_host: requireValidHost(allowedHost),
@@ -120,6 +130,55 @@ function requireValidHost(host: string | undefined): string {
     throw validationFailed([{ field: 'allowed_host', message: 'must be a DNS hostname without scheme, path or port' }]);
   }
   return normalized;
+}
+
+/** 允许清单的条目上限；与检查的冻结清单一样按可枚举、可核对的口径设上限。 */
+export const ALLOWED_EXECUTABLES_MAX = 32;
+
+/**
+ * CLI_RUN 连接上的可执行文件允许清单（plans/2026-10-05-cli-executable-admission.md）。
+ *
+ * 模型只**提出**一次检查的入口。根内脚本不需要配置；根外入口（包管理器、解释器、
+ * 系统工具）必须由用户在这里点名，否则准入判定会拒绝。清单是用户授权的一部分，
+ * 所以每一项都要在写入前实测存在且是可运行文件，并按 realpath 规范化存储——
+ * 用户回读到的就是真正生效的那一份。
+ *
+ * 未配置（undefined）与配了空清单语义不同：空清单是一个没有意义的配置，
+ * 存下来只会让人以为「配过了」，所以直接拒绝。
+ */
+export async function resolveAllowedExecutables(capabilities: readonly GatewayCapability[],
+  entries: readonly string[] | undefined): Promise<readonly string[] | undefined> {
+  if (entries === undefined) return undefined;
+  const refuse = (message: string) => validationFailed([{ field: 'allowed_executables', message }]);
+  // 清单只对 CLI_RUN 有意义；挂到别的能力上会让人误以为那项能力也受这份约束。
+  if (!capabilities.includes('CLI_RUN')) {
+    throw refuse('allowed_executables is only meaningful for a CLI_RUN connection');
+  }
+  if (entries.length === 0) throw refuse('allowed_executables must name at least one executable');
+  if (entries.length > ALLOWED_EXECUTABLES_MAX) {
+    throw refuse(`allowed_executables must name at most ${ALLOWED_EXECUTABLES_MAX} executables`);
+  }
+  const seen = new Set<string>();
+  const resolved: string[] = [];
+  for (const entry of entries) {
+    const trimmed = entry.trim();
+    if (trimmed === '') throw refuse('allowed_executables entries must be non-empty paths');
+    if (!isAbsolute(trimmed)) throw refuse(`allowed_executables entry must be an absolute path: ${trimmed}`);
+    let real: string;
+    try {
+      real = await realpath(trimmed);
+    } catch {
+      throw refuse(`allowed_executables entry does not exist: ${trimmed}`);
+    }
+    const stats = await stat(real);
+    if (!stats.isFile()) throw refuse(`allowed_executables entry must be a file: ${trimmed}`);
+    // Windows 上同一个文件的大小写写法必须折叠成一项，否则清单回读会多出重复行。
+    const key = process.platform === 'win32' ? real.toLowerCase() : real;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    resolved.push(real);
+  }
+  return resolved;
 }
 
 export async function disableGatewayConnectionCommand(db: DbExecutor, input: {

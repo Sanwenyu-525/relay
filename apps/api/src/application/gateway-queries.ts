@@ -20,14 +20,22 @@ export interface GatewayConnectionDto {
   readonly id: string; readonly project_id: string; readonly status: string;
   readonly version: string; readonly capabilities: readonly string[];
   readonly allowed_host: string | null; readonly created_at: string;
+  /**
+   * 根外可执行入口的允许清单，与 `allowed_host` 同一口径：只在真正生效的那项能力上暴露，
+   * 且给的是规范化后真正生效的那份。写进去却读不回来等于让用户盲授权。
+   */
+  readonly allowed_executables: readonly string[] | null;
 }
 async function connectionDto(repositories: Repositories, row: GatewayConnectionRow): Promise<GatewayConnectionDto> {
   const capabilities = await repositories.gateway.listConnectionCapabilities(row.id);
+  const executables = capabilities.includes('CLI_RUN') && Array.isArray(row.config.allowed_executables)
+    ? row.config.allowed_executables.filter((entry): entry is string => typeof entry === 'string') : null;
   return { id: row.id, project_id: row.project_id, status: row.status,
     version: toDecimalString(row.version),
     capabilities,
     allowed_host: capabilities.includes('WEB_FETCH') &&
       typeof row.config.allowed_host === 'string' ? row.config.allowed_host : null,
+    allowed_executables: executables === null || executables.length === 0 ? null : executables,
     created_at: row.created_at.toISOString() };
 }
 export async function listGatewayConnections(db: DbExecutor, workspaceId: string, projectId: string): Promise<readonly GatewayConnectionDto[]> {

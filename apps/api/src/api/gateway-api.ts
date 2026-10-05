@@ -49,6 +49,9 @@ const createConnectionBody = Type.Object({ command_id: uuid,
   capabilities: Type.Array(capability, { minItems: 1, maxItems: 6, uniqueItems: true }),
   root_path: Type.Optional(Type.String({ minLength: 1, maxLength: 1024 })),
   allowed_host: Type.Optional(Type.String({ minLength: 1, maxLength: 253 })),
+  /** CLI_RUN 专用：根外可执行入口的允许清单。未配置时根内脚本不需要出现在这里。 */
+  allowed_executables: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 1024 }),
+    { minItems: 1, maxItems: 32, uniqueItems: true })),
   allow_private: Type.Optional(Type.Boolean()) }, strict);
 const disableBody = Type.Object({ command_id: uuid, expected_version: revision }, strict);
 /** Optional explicit action_type for a capability. Absent keeps the existing per-capability
@@ -88,6 +91,8 @@ export function registerGatewayRoutes(app: FastifyInstance, dependencies: RouteD
         projectId: params.project_id ?? '', commandId: body.command_id, capabilities: body.capabilities,
         rootPath: body.root_path,
         ...(body.allowed_host === undefined ? {} : { allowedHost: body.allowed_host }),
+        ...(body.allowed_executables === undefined ? {} :
+          { allowedExecutables: body.allowed_executables }),
         ...(body.allow_private === undefined ? {} : { allowPrivate: body.allow_private }) });
       return { outcome, result: outcome.result };
     } }));
