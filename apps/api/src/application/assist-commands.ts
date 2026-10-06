@@ -103,7 +103,7 @@ export async function createAssistSession(
       }
       // 人设快照在同一次准备里冻结：助手之后被改写或归档都不改变这条会话的身份。
       const profile = conversationMode === 'ASSISTANT'
-        ? await requireSessionAssistantProfile(repositories, input.workspaceId, input.assistantProfileId)
+        ? await requireAssistantProfileForNewSession(repositories, input.workspaceId, input.assistantProfileId)
         : null;
       const sessionId = randomUUID();
       await repositories.assist.insertSession({
@@ -134,12 +134,29 @@ export async function createAssistSession(
  * 事务内读 助手：跨 workspace 与已归档都在这里被拒。
  * 归档的 助手建不出新会话——快照冻结的是文本，冻结不了「这条依据是否仍然有效」。
  */
-async function requireSessionAssistantProfile(repositories: Repositories, workspaceId: string,
-  assistantProfileId: string | undefined): Promise<AssistantProfileRow> {
+async function requireAssistantProfileForNewSession(repositories: Repositories,
+  workspaceId: string, assistantProfileId: string | undefined): Promise<AssistantProfileRow> {
   if (assistantProfileId === undefined || assistantProfileId === '') {
-    throw validationFailed([{ field: 'assistant_profile_id', message: '人设会话必须选择一个 助手' }]);
+    throw validationFailed([{ field: 'assistant_profile_id', message: '人设会话必须选择一个助手' }]);
   }
   return requireActiveAssistantProfile(repositories.assistantProfiles, workspaceId, assistantProfileId);
+}
+
+/**
+ * 发送前的助手存活判定。
+ *
+ * 归档只推进「是否仍适用」，不改写配置文本；因此既有会话里的冻结人设快照还在，
+ * 但依据已经撤销——这里按会话上的 assistant_profile_id 重新判定一次，而不是相信快照。
+ * 跨 workspace 读不到同样在这里被拒。
+ */
+async function requireLiveAssistantProfile(repositories: Repositories,
+  session: AssistSessionRow): Promise<void> {
+  if (session.assistant_profile_id === null) {
+    throw invalidTransition('这条会话的人设已经不存在，请换一个助手。',
+      { sessionId: session.id });
+  }
+  await requireActiveAssistantProfile(repositories.assistantProfiles, session.workspace_id,
+    session.assistant_profile_id);
 }
 
 export type RequestAssistMessageResult = {
@@ -275,6 +292,27 @@ export async function requestAssistMessage(
       }
       if (session.status !== 'ACTIVE') {
         throw invalidTransition('会话已归档，不能再发送消息。', { sessionId: session.id });
+      }
+      // 0060: 助手会话的准入收紧。它是只读会话，因此三件事在这里被明确挡住：
+      //   * 不排队——上一条还在回答时再发一条会被拒，而不是变成看不见的队列；
+      //   * 不调 Skill、不提提案——这两者在助手档没有意义，且提案会带出写入路径；
+      //   * 助手归档后既有会话冻结——快照冻结的是文本，冻结不了「这条依据是否仍有效」。
+      if (session.conversation_mode === 'ASSISTANT') {
+        if (input.skillRef !== undefined) {
+          throw invalidTransition('助手会话不调用 Skill；请在普通会话里发起。',
+            { sessionId: session.id });
+        }
+        if (intent !== 'DISCUSS') {
+          throw invalidTransition('助手会话只做只读回答，不生成提案。',
+            { sessionId: session.id });
+        }
+        // 终态原因排在在途原因之前：助手已归档时告诉用户「等上一条结束」是误导，
+        // 因为等下去这条消息也永远不会变得可发。
+        await requireLiveAssistantProfile(repositories, session);
+        if (await repositories.assist.hasInflightMessages(session.id)) {
+          throw invalidTransition('这段对话正在回答上一条，请等它结束再发。',
+            { sessionId: session.id });
+        }
       }
       // 提案意图绑定对应作用域：候选 Markdown 需要明确目标 Task；任务定义需要明确 Project。
       if (intent === 'PROPOSE_CANDIDATE' && session.task_id === null) {
