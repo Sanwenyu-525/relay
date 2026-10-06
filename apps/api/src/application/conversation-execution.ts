@@ -9,6 +9,7 @@ import type {
 import type { JsonObject, JsonValue } from '../infrastructure/json.js';
 import { toDecimalString } from '../shared/decimal.js';
 import { canonicalRelativePath } from '../files/file-changeset.js';
+import { evaluateExecutableAdmission } from './cli-executable-admission.js';
 import { FakeModelPort, type AssistModelPort, type AssistResult,
   type ConversationInterpretationRequest } from '../workflow/fake-model-port.js';
 import { readModelPortConfig } from '../workflow/model-port-config.js';
@@ -430,6 +431,9 @@ export function readInterpretation(generated: AssistResult): InterpretationOutco
     return { decision: 'DISCUSS', candidateStatus: 'UNAVAILABLE', status: 'DISCUSSED',
       candidate: null, clarification: null };
   }
+  // 解释入口不声明工具，因此收到工具请求是协议违例：退回一个聚焦澄清，
+  // 而不是把 preamble 当成解释结果。
+  if (generated.kind === 'TOOL_CALLS') return clarify(DEFAULT_CLARIFICATION);
   const parsed = parseInterpretation(generated.content);
   if (parsed === undefined) return clarify(DEFAULT_CLARIFICATION);
   if (parsed.decision === 'DISCUSS') {
@@ -624,14 +628,16 @@ async function planToolLoop(db: DbExecutor, input: {
     allowedActions.push('APPLY_CHANGESET');
   }
   if (candidate.check !== undefined) {
-    connections.CLI_RUN = await requireConnection(db, row, 'CLI_RUN');
+    const cliRun = await requireConnectionWithConfig(db, row, 'CLI_RUN');
+    connections.CLI_RUN = cliRun.connectionId;
     allowedTools.push('run_check');
     allowedActions.push('CLI_RUN');
-    checks.push(await freezeConversationCheck(input.canonicalRoot, candidate.check));
+    checks.push(await freezeConversationCheck(input.canonicalRoot, candidate.check,
+      cliRun.allowedExecutables));
   }
   const gitRead = await findConnection(db, row, 'GIT_READ');
   if (gitRead !== undefined) {
-    connections.GIT_READ = gitRead;
+    connections.GIT_READ = gitRead.connectionId;
     allowedTools.push('git_status', 'git_diff', 'git_log');
   }
   return {
@@ -649,9 +655,15 @@ async function planToolLoop(db: DbExecutor, input: {
  *
  * 模型只能按 check_id 点名这份清单，提交不了任意命令字符串。摘要必须实测——它是
  * 「配置没变」的判据；解析不出真实文件就明确失败，不给一个没有摘要的授权。
+ *
+ * 准入在摘要之后判定：解释模型只是**提出**一个入口，它没有文件系统访问权限，
+ * 所以它提出的路径不构成授权。根内脚本不需要额外配置；根外入口（包管理器、
+ * 解释器、系统工具）必须由用户在该 CLI_RUN 连接的 `allowed_executables` 上点名，
+ * 否则这里就明确失败。不能先落授权再执行，那等于把模型输出升级成授权。
  */
 async function freezeConversationCheck(canonicalRoot: string,
-  check: { readonly executable: string; readonly args: readonly string[] }): Promise<FrozenCheck> {
+  check: { readonly executable: string; readonly args: readonly string[] },
+  allowedExecutables: readonly string[] | undefined): Promise<FrozenCheck> {
   const absolute = resolveCheckExecutable(canonicalRoot, check.executable);
   let executableSha256: string;
   try {
@@ -659,6 +671,13 @@ async function freezeConversationCheck(canonicalRoot: string,
   } catch (error) {
     throw invalidTransition(`无法冻结检查程序 ${check.executable} 的内容摘要：` +
       `${(error as NodeJS.ErrnoException).code ?? 'READ_FAILED'}；请给出目录内可读的真实程序路径。`);
+  }
+  const admission = evaluateExecutableAdmission({ canonicalRoot, frozenExecutable: absolute,
+    allowedExecutables });
+  if (!admission.covered) {
+    throw invalidTransition(`检查程序 ${check.executable} 不在受管目录内，也不在该 CLI_RUN 连接的` +
+      ` allowed_executables 允许清单里（${admission.reason}）。请把它改成目录内的脚本，` +
+      '或先在该连接上显式点名这个可执行文件再执行。');
   }
   return { id: CONVERSATION_CHECK_ID, executable: absolute, args: [...check.args],
     executable_sha256: executableSha256 };
@@ -681,18 +700,44 @@ async function requireConnection(db: DbExecutor, row: ConversationExecutionReque
   if (found === undefined) {
     throw invalidTransition(`本项目还没有绑定该目录的 ${capability} 连接；请在同页补齐后再执行。`);
   }
-  return found;
+  return found.connectionId;
+}
+
+/** 只复用现有绑定，同时带回该连接的 config：准入判定要用它那份允许清单。 */
+async function requireConnectionWithConfig(db: DbExecutor, row: ConversationExecutionRequestRow,
+  capability: GatewayCapability): Promise<{ readonly connectionId: string;
+    readonly allowedExecutables: readonly string[] | undefined }> {
+  const found = await findConnection(db, row, capability);
+  if (found === undefined) {
+    throw invalidTransition(`本项目还没有绑定该目录的 ${capability} 连接；请在同页补齐后再执行。`);
+  }
+  return { connectionId: found.connectionId, allowedExecutables: readAllowedExecutables(found.config) };
+}
+
+/**
+ * 读出连接 config 上的可执行入口允许清单。
+ *
+ * 只接受**非空字符串数组**：`config` 是 JSONB，任何历史写入或手工改动都可能塞进
+ * 别的形状，把它们当成允许清单等于凭空授权。形状不对一律当作「未配置」，
+ * 由准入判定去拒，而不是在这里放宽。
+ */
+function readAllowedExecutables(config: JsonObject): readonly string[] | undefined {
+  const raw = config.allowed_executables;
+  if (!Array.isArray(raw)) return undefined;
+  const entries = raw.filter((entry): entry is string => typeof entry === 'string' && entry !== '');
+  return entries.length === raw.length && entries.length > 0 ? entries : undefined;
 }
 
 /** 可选能力：没有配置就不冻结对应工具，而不是伪造一个连接或放宽权限。 */
 async function findConnection(db: DbExecutor, row: ConversationExecutionRequestRow,
-  capability: GatewayCapability): Promise<string | undefined> {
+  capability: GatewayCapability): Promise<{ readonly connectionId: string;
+    readonly config: JsonObject } | undefined> {
   const repositories = createRepositories(db);
   const connections = await repositories.gateway.listConnections(row.workspace_id, row.project_id);
   for (const connection of connections) {
     if (connection.status !== 'ACTIVE') continue;
     if ((await repositories.gateway.listConnectionCapabilities(connection.id)).includes(capability)) {
-      return connection.id;
+      return { connectionId: connection.id, config: connection.config };
     }
   }
   return undefined;

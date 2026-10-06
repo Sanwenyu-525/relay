@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { randomUUID } from 'node:crypto';
 
-import type { AssistProposalRow, AssistSessionRow, BotProfileRow,
+import type { AssistProposalRow, AssistSessionRow, AssistantProfileRow,
   ConversationMode } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
@@ -12,7 +12,7 @@ import { availableFrozenSkill, FIRST_PARTY_REGISTRY, frozenSkillSnapshot, isCall
 import { checkAssistContent, checkRequiredText, normalizeText } from '../shared/text.js';
 import type { ContextSourceRef } from '../workflow/execution-contract.js';
 import { httpCommandScopeKey } from './actor.js';
-import { frozenRoleSnapshot, requireActiveBotProfile } from './bot-profile-commands.js';
+import { frozenRoleSnapshot, requireActiveAssistantProfile } from './assistant-profile-commands.js';
 import { applyArtifactCreation, prepareArtifactCreation } from './artifact-commands.js';
 import { runIdempotentCommand, CommandIdReusedError, resolveExistingReceipt,
   resolveReceiptAfterUniqueViolation, type CommandOutcome } from './command.js';
@@ -48,8 +48,8 @@ export type CreateAssistSessionResult = {
   readonly title: string;
   readonly status: string;
   readonly conversation_mode: ConversationMode;
-  readonly bot_profile_id: string | null;
-  readonly bot_profile_revision: string | null;
+  readonly assistant_profile_id: string | null;
+  readonly assistant_profile_revision: string | null;
   readonly remember: boolean;
   readonly revision: string;
   readonly created_at: string;
@@ -64,8 +64,8 @@ export interface CreateAssistSessionInput {
   readonly title: string;
   /** 缺省即 'AGENT'；既有调用方不传时语义不变。 */
   readonly conversationMode?: ConversationMode | undefined;
-  /** conversationMode='BOT' 时必填。归档或跨 workspace 的 bot 建不出会话。 */
-  readonly botProfileId?: string | undefined;
+  /** conversationMode='ASSISTANT' 时必填。归档或跨 workspace 的 助手 建不出会话。 */
+  readonly assistantProfileId?: string | undefined;
 }
 
 export async function createAssistSession(
@@ -85,7 +85,7 @@ export async function createAssistSession(
     // 模式进命令体：同一个 command_id 换模式重放必须被当成异载荷拒绝，
     // 否则「先按普通会话建、再按人设建」会拿到同一条会话。
     body: { project_id: input.projectId ?? null, task_id: input.taskId ?? null, title,
-      conversation_mode: conversationMode, bot_profile_id: input.botProfileId ?? null },
+      conversation_mode: conversationMode, assistant_profile_id: input.assistantProfileId ?? null },
     execute: async (repositories) => {
       let projectId = input.projectId ?? null;
       const taskId = input.taskId ?? null;
@@ -101,16 +101,16 @@ export async function createAssistSession(
       if (projectId !== null) {
         await lockWritableProjectInWorkspace(repositories, input.workspaceId, projectId);
       }
-      // 人设快照在同一次准备里冻结：bot 之后被改写或归档都不改变这条会话的身份。
-      const profile = conversationMode === 'BOT'
-        ? await requireSessionBotProfile(repositories, input.workspaceId, input.botProfileId)
+      // 人设快照在同一次准备里冻结：助手之后被改写或归档都不改变这条会话的身份。
+      const profile = conversationMode === 'ASSISTANT'
+        ? await requireSessionAssistantProfile(repositories, input.workspaceId, input.assistantProfileId)
         : null;
       const sessionId = randomUUID();
       await repositories.assist.insertSession({
         id: sessionId, workspaceId: input.workspaceId, projectId, taskId, title,
         conversationMode,
-        ...(profile === null ? {} : { botProfileId: profile.id,
-          botProfileRevision: profile.revision, botRoleSnapshot: frozenRoleSnapshot(profile) }),
+        ...(profile === null ? {} : { assistantProfileId: profile.id,
+          assistantProfileRevision: profile.revision, assistantRoleSnapshot: frozenRoleSnapshot(profile) }),
       });
       const created = await repositories.assist.readSession(sessionId);
       if (created === undefined) {
@@ -119,9 +119,9 @@ export async function createAssistSession(
       return { session_id: created.id, workspace_id: created.workspace_id,
         project_id: created.project_id, task_id: created.task_id, title: created.title,
         status: created.status, conversation_mode: created.conversation_mode,
-        bot_profile_id: created.bot_profile_id,
-        bot_profile_revision: created.bot_profile_revision === null ? null
-          : toDecimalString(created.bot_profile_revision),
+        assistant_profile_id: created.assistant_profile_id,
+        assistant_profile_revision: created.assistant_profile_revision === null ? null
+          : toDecimalString(created.assistant_profile_revision),
         remember: created.remember,
         revision: toDecimalString(created.revision),
         created_at: created.created_at.toISOString(),
@@ -131,15 +131,15 @@ export async function createAssistSession(
 }
 
 /**
- * 事务内读 bot：跨 workspace 与已归档都在这里被拒。
- * 归档的 bot 建不出新会话——快照冻结的是文本，冻结不了「这条依据是否仍然有效」。
+ * 事务内读 助手：跨 workspace 与已归档都在这里被拒。
+ * 归档的 助手建不出新会话——快照冻结的是文本，冻结不了「这条依据是否仍然有效」。
  */
-async function requireSessionBotProfile(repositories: Repositories, workspaceId: string,
-  botProfileId: string | undefined): Promise<BotProfileRow> {
-  if (botProfileId === undefined || botProfileId === '') {
-    throw validationFailed([{ field: 'bot_profile_id', message: '人设会话必须选择一个 bot' }]);
+async function requireSessionAssistantProfile(repositories: Repositories, workspaceId: string,
+  assistantProfileId: string | undefined): Promise<AssistantProfileRow> {
+  if (assistantProfileId === undefined || assistantProfileId === '') {
+    throw validationFailed([{ field: 'assistant_profile_id', message: '人设会话必须选择一个 助手' }]);
   }
-  return requireActiveBotProfile(repositories.botProfiles, workspaceId, botProfileId);
+  return requireActiveAssistantProfile(repositories.assistantProfiles, workspaceId, assistantProfileId);
 }
 
 export type RequestAssistMessageResult = {

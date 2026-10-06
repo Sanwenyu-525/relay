@@ -1,7 +1,7 @@
 import type { DbExecutor } from '../infrastructure/database.js';
 import { ActivityRecordRepository } from '../audit/activity-record-repository.js';
 import { AssistRepository } from '../assist/assist-repository.js';
-import { BotProfileRepository } from '../assist/bot-profile-repository.js';
+import { AssistantProfileRepository } from '../assist/assistant-profile-repository.js';
 import { ConversationExecutionRepository } from '../assist/conversation-execution-repository.js';
 import { ArtifactRepository } from '../artifact/artifact-repository.js';
 import { ImpactRepository } from '../artifact/impact-repository.js';
@@ -37,8 +37,8 @@ export interface Repositories {
   readonly admission: RuntimeAdmissionRepository;
   readonly activities: ActivityRecordRepository;
   readonly assist: AssistRepository;
-  /** 人设 bot 配置的独占写入口。配置文本在这里，能力不在这里。 */
-  readonly botProfiles: BotProfileRepository;
+  /** 人设 助手配置的独占写入口。配置文本在这里，能力不在这里。 */
+  readonly assistantProfiles: AssistantProfileRepository;
   readonly conversationExecutions: ConversationExecutionRepository;
   readonly artifacts: ArtifactRepository;
   readonly impacts: ImpactRepository;
@@ -75,7 +75,7 @@ export function createRepositories(db: DbExecutor): Repositories {
     admission: new RuntimeAdmissionRepository(db),
     activities: new ActivityRecordRepository(db),
     assist: new AssistRepository(db),
-    botProfiles: new BotProfileRepository(db),
+    assistantProfiles: new AssistantProfileRepository(db),
     conversationExecutions: new ConversationExecutionRepository(db),
     artifacts: new ArtifactRepository(db),
     impacts: new ImpactRepository(db),

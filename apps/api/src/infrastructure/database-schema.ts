@@ -403,7 +403,8 @@ export interface ImportJobRow {
 }
 /** 0058：人工在已登记受管资源上直接触发的受控动作来源。它没有 run/task/step/import_job，
  * 但必须绑定受管资源与能力；词表只放行 GIT_READ，写入与 CLI 仍只有 RUN。 */
-export type GatewayOriginKey = 'RUN' | 'USER_IMPORT' | 'USER_ACTION';
+/** 0060 追加 ASSISTANT_READ：人设会话的只读动作，与 RUN / USER_IMPORT / USER_ACTION 并列。 */
+export type GatewayOriginKey = 'RUN' | 'USER_IMPORT' | 'USER_ACTION' | 'ASSISTANT_READ';
 
 export interface LogicalOperationRow {
   readonly id: string; readonly workspace_id: string; readonly project_id: string;
@@ -501,6 +502,26 @@ export interface RunScopeGrantRow {
   readonly survives_run_terminal: boolean;
   readonly revision: bigint;
   readonly updated_at: Date;
+}
+
+/** 0060：人设会话的工具事实。没有 Run、Step 或 Attempt，只有会话与消息身份。 */
+export interface SessionToolCallRow {
+  readonly id: string;
+  readonly session_id: string;
+  readonly message_id: string;
+  readonly round: number;
+  readonly ordinal: number;
+  readonly tool_name: string;
+  readonly arguments: JsonObject;
+  readonly arguments_sha256: string;
+  readonly provider_tool_call_id: string | null;
+  readonly operation_id: string | null;
+  readonly status: 'REQUESTED' | 'SETTLED' | 'REJECTED' | 'ABANDONED' | 'UNKNOWN';
+  readonly rejection_reason: string | null;
+  readonly rejection_detail: string | null;
+  readonly result_digest: string | null;
+  readonly requested_at: Date;
+  readonly settled_at: Date | null;
 }
 
 export interface RunToolCallRow {
@@ -957,11 +978,11 @@ export interface ConversationExecutionRequestRow {
   readonly updated_at: Date;
 }
 
-/** 0059：会话建立时冻结的一种身份。既有会话按 'AGENT' 读出，不虚构 bot 关系。 */
-export type ConversationMode = 'AGENT' | 'BOT';
+/** 0059：会话建立时冻结的一种身份。既有会话按 'AGENT' 读出，不虚构 助手 关系。 */
+export type ConversationMode = 'AGENT' | 'ASSISTANT';
 
-/** 0059：bot 配置。配置文本存在这里，能力不在这里——能力来自连接与 Gateway 准入。 */
-export interface BotProfileRow {
+/** 0059：助手配置。配置文本存在这里，能力不在这里——能力来自连接与 Gateway 准入。 */
+export interface AssistantProfileRow {
   readonly id: string;
   readonly workspace_id: string;
   readonly name: string;
@@ -983,10 +1004,10 @@ export interface AssistSessionRow {
   readonly status: AssistSessionStatus;
   /** 冻结：会话建立后不改写。切模式等于换会话。 */
   readonly conversation_mode: ConversationMode;
-  readonly bot_profile_id: string | null;
-  /** 建会话时 bot 的修订。bot 之后被改写不影响既有会话的冻结快照。 */
-  readonly bot_profile_revision: bigint | null;
-  readonly bot_role_snapshot: JsonObject | null;
+  readonly assistant_profile_id: string | null;
+  /** 建会话时 助手的修订。助手之后被改写不影响既有会话的冻结快照。 */
+  readonly assistant_profile_revision: bigint | null;
+  readonly assistant_role_snapshot: JsonObject | null;
   /** 「一次性问答」开关：false 时该轮不作为可续读历史。 */
   readonly remember: boolean;
   readonly revision: bigint;

@@ -141,12 +141,30 @@ export interface AssistRequest {
   readonly signal?: AbortSignal | undefined;
   /** Only ordinary DISCUSS may expose these uncommitted text increments. */
   readonly onTextDelta?: ((text: string) => Promise<void>) | undefined;
+  /**
+   * 缺省表示本次不允许任何工具请求：既有 A 档 DISCUSS 与提案行为不变。
+   * 只有 B 档人设会话会传入只读词表。
+   */
+  readonly tools?: readonly ModelToolSpec[] | undefined;
+  /** 已经结算的历史工具轮次，按顺序原样回传。 */
+  readonly toolTurns?: readonly ModelToolTurn[] | undefined;
 }
 
 export type AssistResult =
   | {
       readonly kind: 'CONTENT';
       readonly content: string;
+      readonly providerRequestId: string;
+      readonly usage: ModelUsage;
+    }
+  /**
+   * 一次完整、可解析的工具请求。断流或半截参数绝不产生这个结果。
+   * 边输出正文边调工具的形态由真实端口承载，`preamble` 是那一轮伴随的正文。
+   */
+  | {
+      readonly kind: 'TOOL_CALLS';
+      readonly calls: readonly ModelToolCall[];
+      readonly preamble: string;
       readonly providerRequestId: string;
       readonly usage: ModelUsage;
     }
@@ -263,6 +281,12 @@ export class FakeModelPort implements AssistModelPort {
    * 应用层 schema 校验的 JSON。`FAKE_ASSIST_*` 触发串只服务测试断言。 */
   async assist(request: AssistRequest): Promise<AssistResult> {
     const lastUser = [...request.turns].reverse().find((turn) => turn.role === 'user');
+    // B 档只读轮次：声明了工具时按冻结脚本逐轮发出请求，脚本耗尽后回到普通回复。
+    // 触发串只服务测试断言，真实端口不解释它。
+    if (request.tools !== undefined && request.tools.length > 0) {
+      const scripted = scriptedAssistToolRound(request);
+      if (scripted !== undefined) return scripted;
+    }
     // Skill 在原始用户轮次后另附一段权威事实；测试触发串仍取原始用户轮次。
     const trigger = request.skill === undefined ? lastUser?.content ?? '' :
       request.turns.filter((turn) => turn.role === 'user').at(-2)?.content ?? '';
@@ -444,6 +468,44 @@ async function scriptedToolRound(request: ModelRequest): Promise<ModelResult | u
 
 function seedOf(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/**
+ * Assist 侧的冻结工具脚本：从首条用户消息里的 `FAKE_ASSIST_TOOLS <json>` 读出
+ * `[[{name,arguments}], ...]`，按已结算的历史轮次推进。
+ *
+ * 与 generate 侧的 manifest 脚本同形，刻意放在消息里而不是给端口另加一个参数：
+ * Assist 端口的请求形状由应用层冻结，测试注入不改变它。脚本里的工具名必须在
+ * 本次声明的词表内——不声明的工具不会被 Fake 发出来冒充模型越权。
+ */
+function scriptedAssistToolRound(request: AssistRequest): AssistResult | undefined {
+  const lastUser = [...request.turns].reverse().find((turn) => turn.role === 'user');
+  const trigger = lastUser?.content ?? '';
+  const marker = 'FAKE_ASSIST_TOOLS ';
+  const start = trigger.indexOf(marker);
+  if (start < 0) return undefined;
+  const raw = (trigger.slice(start + marker.length).split('\n')[0] ?? '').trim();
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { return undefined; }
+  if (!Array.isArray(parsed)) return undefined;
+  const consumed = request.toolTurns?.length ?? 0;
+  const round = parsed[consumed];
+  if (!Array.isArray(round) || round.length === 0) return undefined;
+  const declared = new Map((request.tools ?? []).map((spec) => [spec.name, spec]));
+  const calls: ModelToolCall[] = [];
+  for (const [ordinal, item] of round.entries()) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) return undefined;
+    const entry = item as JsonObject;
+    if (typeof entry.name !== 'string' || !declared.has(entry.name)) return undefined;
+    const args = entry.arguments;
+    calls.push({ providerToolCallId: `fake-assist-tool-${consumed}-${ordinal}`,
+      name: entry.name,
+      arguments: typeof args === 'object' && args !== null && !Array.isArray(args)
+        ? args as JsonObject : {} });
+  }
+  return { kind: 'TOOL_CALLS', calls, preamble: '',
+    providerRequestId: `fake-assist-tools-${consumed}`,
+    usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null, cacheCreationTokens: null } };
 }
 
 function readScenario(manifest: JsonObject): FakeScenario {

@@ -55,7 +55,12 @@ export type GatewayOrigin =
   /** 0058: 人工在已登记受管资源上直接触发的受控动作。没有 run/task/step/import_job，
    * 因此必须自带 Project 与受管资源；人工主体由 `audit` 在同一事务写入活动记录
    * （USER_ACTION 词表里没有 actor 列，见迁移 0058 注释）。 */
-  | { readonly kind: 'USER_ACTION'; readonly projectId: string; readonly resourceId: string };
+  | { readonly kind: 'USER_ACTION'; readonly projectId: string; readonly resourceId: string }
+  /** 0060：人设助手 会话的只读工具轮次。它既没有 Run 也没有 Task，
+   * 因此与 USER_ACTION 同样自带 Project 与受管资源；会话与消息身份用来核对
+   * 「这条只读动作确实属于这条会话的这一次回答」，也让两种执行身份无法互相冒充。 */
+  | { readonly kind: 'ASSISTANT_READ'; readonly projectId: string; readonly resourceId: string;
+      readonly sessionId: string; readonly messageId: string };
 
 export type GatewayActionType =
   | 'WRITE_MARKER'
@@ -112,6 +117,16 @@ const TERMINAL_RUN_STATUSES: readonly string[] = ['COMPLETED', 'FAILED', 'CANCEL
  */
 const USER_ACTION_ALLOWED_ACTIONS: readonly GatewayActionType[] = ['GIT_STATUS', 'GIT_DIFF'];
 
+/**
+ * 0060: ASSISTANT_READ 只放行只读能力。
+ *
+ * 词表按 capability 而不是逐条动作列举，因为这三种能力下只存在只读动作；
+ * 写能力（FILE_WRITE / GIT_WRITE / CLI_RUN）与 WEB_FETCH 一律不在此词表内——
+ * B 档是「可读不可写」，写入口继续只有 RUN。
+ */
+const ASSISTANT_READ_ALLOWED_CAPABILITIES: readonly GatewayCapability[] =
+  ['FILE_READ', 'FILE_QUERY', 'GIT_READ'];
+
 export function originAllows(
   origin: GatewayOrigin, actionType: GatewayActionType, capability: GatewayCapability,
 ): boolean {
@@ -120,13 +135,18 @@ export function originAllows(
   ];
   if (origin.kind === 'RUN') return allowedRunCaps.includes(capability);
   if (origin.kind === 'USER_IMPORT') return ['FAKE_PUBLIC_READ', 'WEB_FETCH'].includes(capability);
+  if (origin.kind === 'ASSISTANT_READ') return ASSISTANT_READ_ALLOWED_CAPABILITIES.includes(capability);
   return capability === 'GIT_READ' && USER_ACTION_ALLOWED_ACTIONS.includes(actionType);
 }
 
 function originDenialDetail(kind: GatewayOrigin['kind']): string {
-  return kind === 'USER_ACTION'
-    ? 'USER_ACTION 仅允许受管资源上的 Git 只读查询。'
-    : 'RUN 仅允许受管工具调用，USER_IMPORT 仅允许公共网络导入，USER_ACTION 仅允许受管资源上的 Git 只读。';
+  if (kind === 'USER_ACTION') {
+    return 'USER_ACTION 仅允许受管资源上的 Git 只读查询。';
+  }
+  if (kind === 'ASSISTANT_READ') {
+    return 'ASSISTANT_READ 仅允许受管资源上的只读查询：人设会话不改文件、不建任务、不派子 Agent。';
+  }
+  return 'RUN 仅允许受管工具调用，USER_IMPORT 仅允许公共网络导入，USER_ACTION 仅允许受管资源上的 Git 只读。';
 }
 
 /**
@@ -165,7 +185,8 @@ function gatewayDenied(code: string, detail: string, retryable = false): DomainE
     title: 'Gateway 拒绝执行', detail, retryable, retryAction: retryable ? 'POLL_RESOURCE' : 'REFRESH_AND_REDECIDE' });
 }
 
-function capabilityFor(action: GatewayActionType): GatewayCapability {
+/** 动作到能力的映射是 Gateway 的准入口径；B 档只读轮次复用它，不另立一份。 */
+export function capabilityFor(action: GatewayActionType): GatewayCapability {
   if (action === 'WRITE_MARKER') return 'FAKE_WRITE';
   if (action === 'READ_FILE') return 'FILE_READ';
   // 变化集证据与文件写在同一个能力下：读的是同一份账本，不是另一种效果。
@@ -568,12 +589,17 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
     : undefined;
   if (input.origin.kind !== 'USER_IMPORT' && !webFetch &&
       (resourceBefore === undefined || resourceBefore.workspace_id !== input.workspaceId ||
-        (input.origin.kind === 'USER_ACTION' && resourceBefore.project_id !== input.origin.projectId))) {
+        (input.origin.kind !== 'RUN' && resourceBefore.project_id !== input.origin.projectId))) {
     throw resourceNotFound('Managed resource');
   }
 
+  // 受管根已就绪的来源共用同一套目标规范化。
+  // 0060: ASSISTANT_READ 与 RUN 同形地解析只读目标——写分支对它是死代码，因为
+  // originAllows 已在上面按只读能力词表拒掉 FILE_WRITE / GIT_WRITE / CLI_RUN。
+  // 落进 else（公共读取）分支会让目录浏览去校验 HTTPS URL，那不是「更严」而是读错了地方。
+  const managedRootOrigin = input.origin.kind === 'RUN' || input.origin.kind === 'ASSISTANT_READ';
   let target: string;
-  if (input.origin.kind === 'RUN') {
+  if (managedRootOrigin) {
     if (webFetch) {
       target = normalizedWebTarget(input.target);
     } else if (input.actionType === 'READ_FILE') {
@@ -1097,7 +1123,12 @@ function originMatches(op: LogicalOperationRow, origin: GatewayOrigin): boolean 
       op.resource_id === (origin.resourceId ?? null);
   }
   if (origin.kind === 'USER_IMPORT') return op.origin === 'USER_IMPORT' && op.import_job_id === origin.importJobId;
-  // 0058: 人工动作没有 Run/ImportJob 可比，受管资源与 Project 就是它的完整归属。
+  // 0058/0060: 人工动作与人设会话的只读动作都没有 Run/ImportJob 可比，
+  // 受管资源与 Project 就是它们在 Operation 上的完整归属。
+  // 会话与消息身份不在 Operation 上——它由 session_tool_calls 那一行绑定，
+  // 由 attachOperation 核对；两种执行身份因此无法互相冒充。
+  if (origin.kind === 'ASSISTANT_READ') return op.origin === 'ASSISTANT_READ' &&
+    op.resource_id === origin.resourceId && op.project_id === origin.projectId;
   return op.origin === 'USER_ACTION' && op.resource_id === origin.resourceId &&
     op.project_id === origin.projectId;
 }
@@ -1201,6 +1232,24 @@ async function admitGatewayInvocation(db: DbExecutor, input: DispatchGatewayInpu
       if ((await repositories.gateway.listUnresolvedImportOperations(job.id)).some((row) => row.id !== located.id)) {
         throw gatewayDenied('GATEWAY_OPERATION_UNRESOLVED', '导入的其他动作仍未核对。');
       }
+    } else if (input.origin.kind === 'ASSISTANT_READ') {
+      // 0060: 与 prepare 同一锁序与同一资源判定，并保留「在途目录」拒绝——
+      // 一次未完成的写入不得被只读会话读成干净状态。
+      // 目标不要求等于受管根本身：READ_FILE 的目标是根内文件，目录查询的目标是根或根内子目录，
+      // 只有 GIT_* 才等于根。prepare 已把路径归一，这里再确认它仍落在**同一个**受管根内。
+      await lockWritableProjectInWorkspace(repositories, input.workspaceId, input.origin.projectId);
+      resource = await repositories.gateway.lockResource(input.origin.resourceId);
+      if (resource?.workspace_id !== input.workspaceId || resource.project_id !== located.project_id ||
+          resource.project_id !== input.origin.projectId || resource.status !== 'ACTIVE') {
+        throw resourceNotFound('Managed resource');
+      }
+      const insideRoot = located.capability_key === 'FILE_QUERY'
+        ? containsDirectory(resource.canonical_root, located.normalized_target)
+        : located.capability_key === 'FILE_READ'
+          ? containsPath(resource.canonical_root, located.normalized_target)
+          : located.normalized_target === resource.canonical_root;
+      if (!insideRoot) throw resourceNotFound('Managed resource');
+      await assertResourceNotOccupied(repositories, resource);
     } else {
       // 0058: 与 prepare 同一锁序与同一判定。执行前重新确认资源仍是 ACTIVE 且身份未变，
       // 并再次拒绝在途目录——读取不得把一次未完成的写入读成干净状态。
@@ -1318,8 +1367,8 @@ async function fakeExecute(op: LogicalOperationRow, invocation: InvocationAttemp
 async function hasCurrentGatewayEffectLease(db: DbExecutor, admitted: AdmittedInvocation,
   origin: GatewayOrigin): Promise<boolean> {
   if (origin.kind === 'USER_IMPORT') return true;
-  if (origin.kind === 'USER_ACTION') {
-    // 0058: 没有 Worker lease 与资源 claim 可核，栅栏落在「本次调用身份仍是 DISPATCHING」
+  if (origin.kind === 'USER_ACTION' || origin.kind === 'ASSISTANT_READ') {
+    // 0058/0060: 没有 Worker lease 与资源 claim 可核，栅栏落在「本次调用身份仍是 DISPATCHING」
     // 这一条上——它挡住的是并发重复投递，而不是冒充另一个执行者。
     return (await createRepositories(db).gateway.readInvocation(admitted.invocation.id))?.status === 'DISPATCHING';
   }

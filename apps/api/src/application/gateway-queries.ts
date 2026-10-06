@@ -1,8 +1,8 @@
 import type { DbExecutor } from '../infrastructure/database.js';
 import { basename, dirname, relative } from 'node:path';
 import type {
-  ChangeSetFileRow, ChangeSetRow, GatewayConnectionRow, GatewayPermissionPolicyRow, GatewayPermissionVersionRow,
-  InvocationAttemptRow, LogicalOperationRow, ManagedResourceRow,
+  ChangeSetFileRow, ChangeSetRow, GatewayConnectionRow, GatewayOriginKey, GatewayPermissionPolicyRow,
+  GatewayPermissionVersionRow, InvocationAttemptRow, LogicalOperationRow, ManagedResourceRow,
 } from '../infrastructure/database-schema.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import { toDecimalString } from '../shared/decimal.js';
@@ -125,7 +125,7 @@ function invocationDto(row: InvocationAttemptRow): GatewayInvocationDto {
     resolved_at: row.resolved_at?.toISOString() ?? null, result_ref: row.result_ref };
 }
 export interface GatewayOperationDto {
-  readonly id: string; readonly origin: 'RUN' | 'USER_IMPORT' | 'USER_ACTION';
+  readonly id: string; readonly origin: GatewayOriginKey;
   readonly project_id: string; readonly run_id: string | null; readonly step_id: string | null;
   readonly import_job_id: string | null; readonly status: string; readonly action_type: string;
   readonly normalized_target: string; readonly params_hash: string;

@@ -15,6 +15,8 @@ import { ModelCallBudgetError } from '../workflow/openai-compatible-model-port.j
 import { withRelayAgentCore } from '../workflow/agent-system-prompt.js';
 import { classifyProviderError, type ModelErrorCategory }
   from '../workflow/model-error-classification.js';
+import { INTERNAL_TOOL_DEFINITIONS, type InternalToolName } from '../workflow/tool-catalog.js';
+import { assistantToolNames, runAssistantReadonlyRounds } from './assistant-readonly-round.js';
 import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
 import { availableFrozenSkill, isCallableSkill,
   type FrozenSkill } from '../skills/first-party-registry.js';
@@ -111,6 +113,12 @@ export async function runAssistGenerationTick(db: DbExecutor,
         content: null, providerRequestId: null, usage: { inputTokens: null, outputTokens: null } });
       return { messageId: message.id, sessionId: message.session_id, status: 'FAILED',
         errorCode: 'SESSION_MISSING', proposalIds: [] };
+    }
+
+    // B 档人设助手会话走只读工具轮次：领取身份、心跳租约、取消轮询与 Worker CAS 结算
+    // 都是同一条既有机制，这里只换掉「模型拿到什么词表」与「结果落到哪张账本」。
+    if (session.conversation_mode === 'ASSISTANT') {
+      return runAssistantReadonlyGeneration(db, { message, session, options, controller });
     }
 
     const skill = message.skill_snapshot === null ? null :
@@ -216,6 +224,17 @@ export async function runAssistGenerationTick(db: DbExecutor,
     if (previewOwnershipLost) throw new AssistPreviewOwnershipLostError();
 
     if (result.kind === 'CONTENT') await preview?.flush();
+
+    // A 档从不向模型声明工具，因此收到工具请求是协议违例而不是「顺便读了什么」。
+    // 按类型化失败收敛，绝不把 preamble 当候选正文，也绝不静默丢掉这次请求。
+    if (result.kind === 'TOOL_CALLS') {
+      await settleInTransaction(db, message, options.workerId, { status: 'FAILED',
+        errorCode: 'TOOL_CALLS_WITHOUT_DECLARED_TOOLS', content: null,
+        providerRequestId: result.providerRequestId, usage: result.usage,
+        finalSources: input.sourceRecords });
+      return { messageId: message.id, sessionId: session.id, status: 'FAILED',
+        errorCode: 'TOOL_CALLS_WITHOUT_DECLARED_TOOLS', proposalIds: [] };
+    }
 
     if (result.kind === 'CANCELLED') {
       if (options.signal?.aborted && !(await r.assist.isCancelRequested(message.id))) {
@@ -400,6 +419,71 @@ export async function runAssistGenerationTick(db: DbExecutor,
 interface AssistPreviewOwner {
   readonly workspaceId: string; readonly messageId: string;
   readonly workerId: string; readonly callId: string;
+}
+
+/**
+ * B 档的一次生成：只读工具轮次 + 既有结算。
+ *
+ * 与 A 档共用领取身份、心跳、取消轮询与 `settleGeneration` 的 Worker CAS；
+ * 差别只有三处：词表是只读子集、工具事实落 session_tool_calls、结果只能落成
+ * COMPLETED / FAILED / CANCELLED。B 档永远不产生提案、Task 或审批。
+ */
+async function runAssistantReadonlyGeneration(db: DbExecutor, context: {
+  readonly message: AssistMessageRow;
+  readonly session: AssistSessionRow;
+  readonly options: AssistGenerationOptions;
+  readonly controller: AbortController;
+}): Promise<AssistGenerationOutcome> {
+  const { message, session, options, controller } = context;
+  const outcome = await runAssistantReadonlyRounds(db, { session, message,
+    availableTools: await assistantAvailableTools(db, session), modelPort: options.modelPort,
+    signal: controller.signal });
+  if (outcome.kind === 'CONTENT') {
+    const settled = await settleInTransaction(db, message, options.workerId, {
+      status: 'COMPLETED', errorCode: null, content: outcome.content,
+      providerRequestId: outcome.providerRequestIds.at(-1) ?? null, usage: outcome.usage });
+    return { messageId: message.id, sessionId: session.id,
+      status: settled ? 'COMPLETED' : 'DISCARDED', errorCode: null, proposalIds: [] };
+  }
+  if (outcome.kind === 'CANCELLED') {
+    const settled = await settleInTransaction(db, message, options.workerId, { status: 'CANCELLED',
+      errorCode: null, content: null, providerRequestId: outcome.providerRequestId,
+      usage: outcome.usage });
+    return { messageId: message.id, sessionId: session.id,
+      status: settled ? 'CANCELLED' : 'DISCARDED', errorCode: null, proposalIds: [] };
+  }
+  await settleInTransaction(db, message, options.workerId, { status: 'FAILED',
+    errorCode: outcome.errorCode, content: null,
+    providerRequestId: outcome.providerRequestIds.at(-1) ?? null, usage: outcome.usage });
+  return { messageId: message.id, sessionId: session.id, status: 'FAILED',
+    errorCode: outcome.errorCode, proposalIds: [] };
+}
+
+/**
+ * 本轮可用的只读工具：按**当前**连接与权限算出来，不是从人设快照读。
+ *
+ * 连接被删或停用后下一轮就少一个工具——这是「快照冻结文本不冻结能力」的落点。
+ * 没有 FILE_QUERY / FILE_READ 连接时词表为空，模型只能凭已读内容回答。
+ */
+async function assistantAvailableTools(db: DbExecutor,
+  session: AssistSessionRow): Promise<readonly InternalToolName[]> {
+  if (session.project_id === null) return [];
+  const gateway = createRepositories(db).gateway;
+  const resources = (await gateway.listResources())
+    .filter((resource) => resource.workspace_id === session.workspace_id &&
+      resource.project_id === session.project_id);
+  if (resources.length === 0) return [];
+  const capabilities = new Set<string>();
+  for (const connection of await gateway.listConnections(session.workspace_id, session.project_id)) {
+    if (connection.status !== 'ACTIVE') continue;
+    for (const capability of await gateway.listConnectionCapabilities(connection.id)) {
+      capabilities.add(capability);
+    }
+  }
+  // 与 tool-catalog 的 capability 字段同一份口径：词表里每个工具各自声明它要什么能力。
+  return assistantToolNames(INTERNAL_TOOL_DEFINITIONS
+    .filter((definition) => capabilities.has(definition.capability))
+    .map((definition) => definition.name));
 }
 
 /** Preserve Message -> model call lock order for both observation and preview. */

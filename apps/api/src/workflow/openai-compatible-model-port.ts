@@ -165,13 +165,21 @@ ${input.content}`),
       ...request.turns.map((turn) => turn.role === 'user'
         ? new HumanMessage(turn.content)
         : new AIMessage(turn.content)),
+      ...renderToolTurns(request.toolTurns ?? []),
     ];
+    const tools = request.tools ?? [];
     try {
       const response = await this.complete(messages, request.signal,
-        request.intent !== 'DISCUSS' || request.skill !== undefined, request.intent === 'DISCUSS' &&
-          request.skill === undefined ? request.onTextDelta : undefined);
+        request.intent !== 'DISCUSS' || request.skill !== undefined,
+        request.intent === 'DISCUSS' && request.skill === undefined
+          ? request.onTextDelta : undefined, tools);
       if (request.signal?.aborted === true) return { kind: 'CANCELLED',
         providerRequestId: response.providerRequestId, usage: response.usage };
+      // 已声明工具时模型可能这一轮就发出请求：它不是正文，正文只来自没有工具请求的那一轮。
+      if (response.toolCalls !== undefined && response.toolCalls.length > 0) {
+        return { kind: 'TOOL_CALLS', calls: response.toolCalls, preamble: response.text,
+          providerRequestId: response.providerRequestId, usage: response.usage };
+      }
       return { kind: 'CONTENT', content: response.text,
         providerRequestId: response.providerRequestId, usage: response.usage };
     } catch (error) {

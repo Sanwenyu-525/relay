@@ -2,22 +2,22 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { frozenRoleSnapshot, personaDisplayLabel, validateReadScope } from
-  '../../src/application/bot-profile-commands.js';
-import type { BotProfileRow } from '../../src/infrastructure/database-schema.js';
+  '../../src/application/assistant-profile-commands.js';
+import type { AssistantProfileRow } from '../../src/infrastructure/database-schema.js';
 import type { JsonObject } from '../../src/infrastructure/json.js';
 
 /**
- * 人设 bot 配置的纯判定单元。
+ * 人设 助手配置的纯判定单元。
  *
  * 只覆盖不依赖数据库的判定：冻结快照的字段形状、消息行标签、以及
  * 「read_scope 只能缩小受管根范围」这条唯一实现点。
  * 幂等回执、revision CAS、归档与并发在
- * test/integration/persona-bot-session.integration.test.ts 用真实 PostgreSQL 验证。
+ * test/integration/assistant-readonly-session.integration.test.ts 用真实 PostgreSQL 验证。
  */
 
-function profile(overrides: Partial<BotProfileRow> = {}): BotProfileRow {
+function profile(overrides: Partial<AssistantProfileRow> = {}): AssistantProfileRow {
   return {
-    id: 'bot-1',
+    id: '助手-1',
     workspace_id: 'ws-1',
     name: '审读',
     role_description: '只读复核这份改动',
@@ -46,17 +46,17 @@ test('冻结快照只含四个文本字段，不含任何授权信息', () => {
   assert.equal('permissions' in snapshot, false);
 });
 
-test('冻结快照不跟随 bot 之后的改写', () => {
+test('冻结快照不跟随 助手之后的改写', () => {
   const before = frozenRoleSnapshot(profile());
   const after = frozenRoleSnapshot(profile({ role_description: '改过的人设', revision: 9n }));
   assert.equal(before.role_description, '只读复核这份改动');
   assert.equal(after.role_description, '改过的人设');
 });
 
-test('消息标签用冻结修订，而不是 bot 当前修订', () => {
+test('消息标签用冻结修订，而不是 助手 当前修订', () => {
   assert.equal(personaDisplayLabel(frozenRoleSnapshot(profile()), 3n), '审读 · 人设 v3');
   // 缺名字的快照仍要能显示，不允许渲染成空白标签。
-  assert.equal(personaDisplayLabel({}, 1n), '未命名 bot · 人设 v1');
+  assert.equal(personaDisplayLabel({}, 1n), '未命名 助手 · 人设 v1');
 });
 
 test('read_scope 缺省是整根可读', () => {
