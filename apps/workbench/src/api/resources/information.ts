@@ -1,7 +1,7 @@
 import type { DecimalRevision } from "../../types";
 import { RelayTransportError } from "../core/errors";
 import { RelayHttp } from "../core/http";
-import { array, decimal, directList, integer, nullableOptionalInteger, nullableString, object, string } from "../core/primitives";
+import { array, decimal, directList, integer, nullableOptionalInteger, nullableString, object, string, stringArray } from "../core/primitives";
 import { decisionFrom, interventionFrom, knowledgeCurationCandidateFrom, knowledgeFrom, knowledgeGuideFrom, knowledgeVersionContentFrom, knowledgeVersionFrom, memoryFrom, memoryRevisionFrom, modelVerifyResultFrom, ruleFrom, ruleVersionFrom, searchItemFrom } from "../parse/information";
 import { commandEnvelopeFrom } from "../parse/projects";
 import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryRevision, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "../dtos/information";
@@ -198,15 +198,20 @@ export async function saveProjectKnowledgeGuide(http: RelayHttp, input: { readon
     entryCount: Number(entryCount) };
 }
 
-/** 只由用户主动请求产生；不接受任何自动或后台触发。 */
-export async function createKnowledgeCurationCandidates(http: RelayHttp, input: { readonly projectId: string; readonly sources: readonly { readonly artifactVersionId: string; readonly suggestedTitle?: string }[]; readonly commandId: string }): Promise<readonly RelayKnowledgeCurationCandidate[]> {
+/**
+ * 只由用户主动请求产生；不接受任何自动或后台触发。
+ *
+ * 命令回执只带候选 ID（`{ project_id, candidate_ids }`），不回整对象——新候选的正文由
+ * 随后的列表读取提供。按 `items` 解析会必然抛 `RelayContractError`，调用方也只用条数。
+ */
+export async function createKnowledgeCurationCandidates(http: RelayHttp, input: { readonly projectId: string; readonly sources: readonly { readonly artifactVersionId: string; readonly suggestedTitle?: string }[]; readonly commandId: string }): Promise<readonly string[]> {
   const result = object(commandEnvelopeFrom(await http.request(http.workspacePath(
     `/projects/${encodeURIComponent(input.projectId)}/knowledge-curation-candidates`), {
     method: "POST", body: JSON.stringify({ command_id: input.commandId,
       sources: input.sources.map((source) => ({ artifact_version_id: source.artifactVersionId,
         ...(source.suggestedTitle === undefined ? {} : { suggested_title: source.suggestedTitle }) })) }) })).result,
   "curation candidate request");
-  return array(result, "items", "curation candidate request").map(knowledgeCurationCandidateFrom);
+  return stringArray(result, "candidate_ids", "curation candidate request");
 }
 
 export async function listKnowledgeCurationCandidates(http: RelayHttp, projectId: string): Promise<readonly RelayKnowledgeCurationCandidate[]> {

@@ -118,7 +118,9 @@ function stubFetch(options: Stub = {}): void {
     if (method === "PUT" && url === `${scope}/projects/${projectId}/knowledge-guide`)
       return options.save?.(body ?? {}) ?? envelope({ revision: "2", entry_count: 2 });
     if (method === "POST" && url === `${scope}/projects/${projectId}/knowledge-curation-candidates`)
-      return options.propose?.() ?? envelope({ items: [candidate()], candidate_count: "1" });
+      // 服务端命令回执只回候选 ID，不回整对象；这里必须按真实契约造响应，
+      // 否则夹具会掩盖「客户端读 items」这类跨层契约破裂。
+      return options.propose?.() ?? envelope({ project_id: projectId, candidate_ids: [candidateId] });
     if (method === "POST" && url.endsWith(`/knowledge-curation-candidates/${candidateId}/accept`))
       return options.accept?.() ?? envelope({ candidate_id: candidateId, knowledge_id: knowledgeId,
         knowledge_version_id: knowledgeVersionId, knowledge_revision: "1", mode: "CREATED" });

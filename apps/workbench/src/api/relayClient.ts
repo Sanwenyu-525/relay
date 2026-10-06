@@ -631,8 +631,8 @@ export class RelayApiClient {
     return informationApi.saveProjectKnowledgeGuide(this.#http, input);
   }
 
-  /** 只由用户主动请求产生；不接受任何自动或后台触发。 */
-  async createKnowledgeCurationCandidates(input: { readonly projectId: string; readonly sources: readonly { readonly artifactVersionId: string; readonly suggestedTitle?: string }[]; readonly commandId: string }): Promise<readonly RelayKnowledgeCurationCandidate[]> {
+  /** 只由用户主动请求产生；不接受任何自动或后台触发。回执只有候选 ID，正文由列表读取提供。 */
+  async createKnowledgeCurationCandidates(input: { readonly projectId: string; readonly sources: readonly { readonly artifactVersionId: string; readonly suggestedTitle?: string }[]; readonly commandId: string }): Promise<readonly string[]> {
     return informationApi.createKnowledgeCurationCandidates(this.#http, input);
   }
 
