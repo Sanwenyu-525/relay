@@ -316,6 +316,24 @@ button.agent-chat-tool:hover { background: var(--relay-color-selection-hover); c
 /* 无接口的能力明确标待接入并不可点击，不用外观假装可用。 */
 .agent-chat-tool--pending { color: var(--relay-color-text-muted); cursor: not-allowed; }
 
+/* 会话模式：两枚 chip 形态的 radio（工作台 §25）。
+   与「资料 N」「发送选项」同一枚 chip 的视觉语言，控件本身是原生 radio，
+   键盘方向键与读屏行为因此不另写一套。禁用落在 fieldset 上。 */
+.agent-chat-mode { display: inline-flex; align-items: center; gap: var(--relay-space-1); flex-wrap: wrap; }
+.agent-chat-mode-picker { display: inline-flex; align-items: center; gap: var(--relay-space-1); margin: 0; padding: 0; border: 0; }
+.agent-chat-mode-option { display: inline-flex; align-items: center; gap: var(--relay-space-1); min-height: var(--relay-control-height); padding: 0 var(--relay-space-2); border-radius: var(--relay-radius-control); color: var(--relay-color-text-secondary); font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-meta); cursor: pointer; }
+.agent-chat-mode-option:hover { background: var(--relay-color-selection-hover); color: var(--relay-color-text-primary); }
+.agent-chat-mode-option input { accent-color: var(--relay-color-accent); margin: 0; }
+.agent-chat-mode-picker:disabled .agent-chat-mode-option { color: var(--relay-color-text-muted); cursor: not-allowed; }
+.agent-chat-mode-picker:disabled .agent-chat-mode-option:hover { background: none; color: var(--relay-color-text-muted); }
+.agent-chat-mode > .disabled-reason { flex-basis: 100%; margin: 0; font-size: var(--relay-font-size-meta); }
+.agent-chat-assistant { display: inline-flex; align-items: center; gap: var(--relay-space-2); flex-wrap: wrap; }
+.agent-chat-assistant .agent-chat-assistant-picker { margin: 0; }
+.agent-chat-assistant > .helper-text, .agent-chat-assistant > .action-error { flex-basis: 100%; margin: 0; font-size: var(--relay-font-size-meta); }
+.agent-chat-assistant-create > summary { display: inline-flex; align-items: center; min-height: var(--relay-control-height); padding: 0 var(--relay-space-2); border-radius: var(--relay-radius-control); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); cursor: pointer; }
+.agent-chat-assistant-create > summary:hover { background: var(--relay-color-selection-hover); }
+.agent-chat-assistant-create .create-form { display: flex; flex-direction: column; gap: var(--relay-space-2); padding: var(--relay-space-2) 0; }
+
 .agent-chat-options, .agent-chat-proposals { font-size: var(--relay-font-size-meta); }
 /* 选项面板收成与「资料 N」并列的一枚 chip，标题直接说明当前请求意图。
    chip 一律无边框、chevron 在右（deepseek-harness InputBar 同款：borderless + 右侧 chevron）。 */

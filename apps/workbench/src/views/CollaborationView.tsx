@@ -12,7 +12,7 @@ import type { ReviewNavigationState } from "../components/ReviewDecisionPanel";
 import WorkspaceSidePanel from "../components/WorkspaceSidePanel";
 import CollaborationSplitter from "../components/CollaborationSplitter";
 import { createCommandId, type RelayApiClient, type RelayControlRequest, type RelayReview,
-  type RelayRun, type RelayTaskDetail, type RelayWorkingDirectory } from "../api/relayClient";
+  type RelayConversationMode, type RelayRun, type RelayTaskDetail, type RelayWorkingDirectory } from "../api/relayClient";
 import FolderScope, { rememberOpened } from "../components/FolderScope";
 import { clearDraftGuard, currentDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { describeLiveError } from "../lib/liveErrors";
@@ -97,6 +97,13 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const [checkingId, setCheckingId] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   // 文件夹作用域：目录是当前工作目录，不是新 Workspace。空目录时保持未打开状态。
+  /**
+   * 目标会话身份（工作台 §25、ADR-018）。住在这里而不是 URL：
+   * App 按 pathname+search 给路由出口重新挂载，工作目录又是本页的组件状态，
+   * 把身份写进查询串会连工作目录一起丢。默认普通档，既有行为不变。
+   */
+  const [conversationTarget, setConversationTarget] = useState<
+    { mode: RelayConversationMode; assistantProfileId: string | null }>({ mode: "AGENT", assistantProfileId: null });
   const [folder, setFolder] = useState<RelayWorkingDirectory | null>(null);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [folderBusy, setFolderBusy] = useState(false);
@@ -497,7 +504,8 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                     onRequestNewSession={requestTransition}
                     onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
                     onSessionCreated={(created) => setSessionId(created)}
-                    firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage} />
+                    firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage}
+                    conversationTarget={conversationTarget} onConversationTargetChange={setConversationTarget} />
                   : <AssistView key={`folder:${folderProjectId}:${newConversationKey ?? ""}:${sessionId === undefined ? "auto" : sessionId}`}
                     targetKind="PROJECT" targetId={folderProjectId}
                     preferredSessionId={sessionId} standalone deferSessionCreation
@@ -507,6 +515,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                     onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
                     onSessionCreated={(created) => setSessionId(created)}
                     onExecutionPrepared={(taskId) => void openExecutionTask(taskId)}
+                    conversationTarget={conversationTarget} onConversationTargetChange={setConversationTarget}
                     firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage} />}
               </section>
             </>
