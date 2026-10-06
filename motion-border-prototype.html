@@ -35,6 +35,14 @@
   --amber: #795519;
   --amber-soft: #F5EBD7;
   --red: #9B3535;
+  /* 结构层新增 token：只新增层级，不改任何既有色值 */
+  --shadow-shell: 0 12px 40px rgba(24, 33, 31, .12);
+  --shadow-card:  0 1px 2px rgba(24, 33, 31, .05);
+  --shadow-pop:   0 8px 24px rgba(24, 33, 31, .10);
+  --titlebar-h:   2.25rem;
+  --sidebar-w:    13rem;
+  --hairline:     1px solid var(--line);
+
   --radius-control: 0.5rem;
   --radius-badge: 0.1875rem;
   --space-1: 0.25rem;
@@ -61,41 +69,148 @@ html[data-tone="fail"]     { --tone: var(--tone-fail); }
 
 body {
   margin: 0;
-  background: var(--paper);
+  background: var(--sidebar);
   color: var(--ink);
   font-family: var(--font-ui);
   font-size: 1rem;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+  padding: var(--space-6);
 }
 
-.page { max-width: 78rem; margin: 0 auto; padding: var(--space-8) var(--space-6) 4rem; }
-h1 { font-size: 1.625rem; font-weight: 600; line-height: 1.25; margin: 0 0 var(--space-2); }
-h2 { font-size: 1.125rem; font-weight: 600; margin: var(--space-8) 0 var(--space-3); }
+/* ==========================================================================
+   0.5 应用外壳：把原型呈现为它所模拟的真实 workbench
+   ========================================================================== */
+.shell {
+  max-width: 84rem;
+  margin: 0 auto;
+  background: var(--paper);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-shell);
+  overflow: hidden;
+}
+.titlebar {
+  display: flex; align-items: center; gap: var(--space-3);
+  height: var(--titlebar-h);
+  padding: 0 var(--space-3) 0 var(--space-4);
+  background: var(--surface);
+  border-bottom: var(--hairline);
+  user-select: none;
+}
+.titlebar .marks { display: flex; gap: 0.4375rem; flex: none; }
+.titlebar .marks i { width: 0.6875rem; height: 0.6875rem; border-radius: 9999px; display: block; }
+.titlebar .marks i:nth-child(1) { background: color-mix(in srgb, var(--red) 42%, var(--line)); }
+.titlebar .marks i:nth-child(2) { background: color-mix(in srgb, var(--amber) 38%, var(--line)); }
+.titlebar .marks i:nth-child(3) { background: color-mix(in srgb, var(--forest) 34%, var(--line)); }
+.titlebar .win-title {
+  flex: 1 1 auto; text-align: center;
+  font-size: 0.8125rem; font-weight: 500; color: var(--secondary);
+}
+.titlebar .win-title .crumb { color: var(--muted); font-weight: 400; }
+.titlebar .win-ctl { display: flex; gap: 0.125rem; flex: none; }
+.titlebar .win-ctl span {
+  width: 1.75rem; height: 1.5rem; border-radius: var(--radius-badge);
+  display: grid; place-items: center;
+  color: var(--muted); font-size: 0.6875rem; line-height: 1;
+}
+
+.shell-body { display: flex; align-items: stretch; min-height: 34rem; }
+
+/* 侧边导航：结构示意，不绑定任何交互 */
+.sidenav {
+  width: var(--sidebar-w); flex: none;
+  background: var(--sidebar);
+  border-right: var(--hairline);
+  padding: var(--space-4) var(--space-3);
+  display: flex; flex-direction: column; gap: var(--space-4);
+}
+.sidenav .nav-group { display: grid; gap: var(--space-1); }
+.sidenav .nav-cap {
+  font-family: var(--font-code); font-size: 0.625rem;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--control);
+  padding: 0 var(--space-2) var(--space-1);
+}
+.sidenav .nav-item {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 0 var(--space-2); min-height: 1.875rem;
+  border-radius: var(--radius-badge);
+  font-size: 0.8125rem; color: var(--secondary);
+}
+.sidenav .nav-item .dot { width: 0.375rem; height: 0.375rem; border-radius: 9999px; background: var(--control); flex: none; }
+.sidenav .nav-item .dot.on { background: var(--forest); }
+.sidenav .nav-item .dot.warn { background: var(--amber); }
+.sidenav .nav-item.is-current { background: var(--surface); color: var(--ink); font-weight: 500; }
+.sidenav .nav-spacer { flex: 1 1 auto; }
+.sidenav .nav-user {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2); border-radius: var(--radius-badge);
+  background: var(--surface); box-shadow: var(--hairline);
+}
+.sidenav .nav-user .avatar {
+  width: 1.375rem; height: 1.375rem; border-radius: 9999px; flex: none;
+  background: color-mix(in srgb, var(--forest) 22%, var(--surface));
+  color: var(--forest); font-size: 0.6875rem; font-weight: 600;
+  display: grid; place-items: center;
+}
+.sidenav .nav-user .who { display: grid; min-width: 0; }
+.sidenav .nav-user .who b { font-size: 0.8125rem; font-weight: 600; }
+.sidenav .nav-user .who span { font-size: 0.6875rem; color: var(--muted); }
+
+.stage { flex: 1 1 auto; min-width: 0; padding: var(--space-6); }
+
+@media (max-width: 62rem) {
+  .sidenav { display: none; }
+}
+
+h1 {
+  font-size: 2.25rem; font-weight: 650; line-height: 1.15;
+  letter-spacing: -0.022em; margin: 0 0 var(--space-2);
+}
+.subtitle {
+  font-size: 0.9375rem; color: var(--muted); margin: 0 0 var(--space-5);
+  max-width: 58rem; text-wrap: pretty;
+}
+h2 {
+  display: flex; align-items: baseline; gap: var(--space-3);
+  font-size: 1.0625rem; font-weight: 600;
+  margin: var(--space-8) 0 var(--space-4);
+}
+h2::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--line); align-self: center; }
+h2 .sec-num {
+  font-family: var(--font-code); font-size: 0.6875rem; font-weight: 400;
+  letter-spacing: 0.12em; color: var(--control); flex: none;
+}
 h3 { font-size: 1rem; font-weight: 600; margin: 0 0 var(--space-1); }
 p { margin: 0 0 var(--space-2); }
 code { font-family: var(--font-code); font-size: 0.8125rem; }
 
 .note {
-  background: var(--sidebar);
-  border-radius: var(--radius-control);
+  background: var(--surface);
+  border-left: 2px solid color-mix(in srgb, var(--forest) 34%, var(--line));
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
   padding: var(--space-3) var(--space-4);
   color: var(--secondary);
   font-size: 0.875rem;
+  max-width: 62rem;
 }
 .note code { color: var(--ink); }
 
-/* ---------- 控件 ---------- */
-.toolbar {
-  display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: center;
-  margin: var(--space-4) 0; padding: var(--space-3) var(--space-4);
-  background: var(--surface); border-radius: var(--radius-control);
-  box-shadow: inset 0 0 0 1px var(--line);
+/* ---------- 控件：统一语言，同高同圆角同 focus，差异靠 tone 不靠造型 ---------- */
+.controlbar {
+  display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-4);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-card), var(--hairline);
 }
-.toolbar label {
+.controlbar label {
   display: inline-flex; gap: var(--space-2); align-items: center;
-  font-size: 0.875rem; cursor: pointer; user-select: none;
+  min-height: 1.75rem;
+  font-size: 0.875rem; color: var(--secondary); cursor: pointer; user-select: none;
 }
+.controlbar label input { accent-color: var(--forest); width: 0.875rem; height: 0.875rem; margin: 0; }
 .btn {
   font: inherit; font-size: 0.8125rem; font-weight: 500;
   min-height: 1.75rem; padding: 0 var(--space-3);
@@ -104,20 +219,30 @@ code { font-family: var(--font-code); font-size: 0.8125rem; }
   cursor: pointer; transition: background var(--motion-duration-fast) var(--ease-standard);
 }
 .btn:hover { background: #DCE7DC; border-color: var(--forest); }
-.btn:focus-visible { outline: 2px solid var(--forest); outline-offset: 2px; }
-.hint { color: var(--muted); font-size: 0.8125rem; }
+.btn:focus-visible,
+.chip:focus-visible,
+.qa:focus-visible { outline: 2px solid var(--forest); outline-offset: 2px; }
+.hint { color: var(--muted); font-size: 0.8125rem; flex: 1 1 16rem; }
 
-.chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-4); }
+.chips {
+  display: flex; flex-wrap: wrap; gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
 .chip {
-  font: inherit; font-size: 0.875rem; padding: var(--space-1) var(--space-3);
-  min-height: 1.75rem; border: 1px solid transparent; border-radius: 9999px;
-  background: var(--sidebar); color: var(--secondary); cursor: pointer;
+  font: inherit; font-size: 0.875rem; padding: 0 var(--space-3);
+  min-height: 1.75rem; border: 1px solid transparent; border-radius: var(--radius-control);
+  background: var(--surface); color: var(--secondary); cursor: pointer;
+  box-shadow: var(--hairline);
   display: inline-flex; align-items: center; gap: var(--space-2);
   transition: background var(--motion-duration-fast) var(--ease-standard);
 }
 .chip:hover { background: var(--sage); color: var(--forest); }
-.chip[aria-pressed="true"] { background: var(--forest); color: var(--surface); }
-.chip:focus-visible { outline: 2px solid var(--forest); outline-offset: 2px; }
+.chip[aria-pressed="true"] {
+  background: var(--forest); color: var(--surface); box-shadow: none;
+}
+.chip[aria-pressed="true"] .lv {
+  background: color-mix(in srgb, var(--surface) 24%, transparent); color: inherit;
+}
 .chip .lv {
   font-family: var(--font-code); font-size: 0.6875rem;
   padding: 0 var(--space-1); border-radius: var(--radius-badge);
@@ -127,27 +252,72 @@ code { font-family: var(--font-code); font-size: 0.8125rem; }
 /* ==========================================================================
    1. 候选容器
    ========================================================================== */
-.grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); }
+.grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(21rem, 1fr)); }
 .card {
   background: var(--surface); border-radius: var(--radius-control);
-  box-shadow: inset 0 0 0 1px var(--line);
-  padding: var(--space-4); display: grid; gap: var(--space-3);
+  box-shadow: var(--shadow-card), var(--hairline);
+  padding: var(--space-4);
+  display: grid; gap: var(--space-3);
   align-content: start;
 }
-.card > header { display: grid; gap: var(--space-1); }
+
+/* ---------- 候选身份：第一眼可辨，且容器处理暗示各自的动效策略 ---------- */
+.card > header { display: grid; gap: var(--space-3); }
+.cand-id { display: flex; align-items: flex-start; gap: var(--space-3); }
+.cand-letter {
+  font-size: 3.75rem; font-weight: 700; line-height: 0.82;
+  letter-spacing: -0.04em; flex: none;
+  color: var(--line);
+  font-variant-numeric: lining-nums;
+}
+.cand-b .cand-letter { color: color-mix(in srgb, var(--forest) 26%, var(--surface)); }
+.cand-c .cand-letter { color: color-mix(in srgb, var(--amber) 26%, var(--surface)); }
+.cand-meta { display: grid; gap: var(--space-1); padding-top: 0.375rem; }
+.cand-meta h3 { margin: 0; font-size: 1.0625rem; letter-spacing: -0.01em; }
 .tag {
-  display: inline-block; font-family: var(--font-code); font-size: 0.625rem;
+  justify-self: start;
+  font-family: var(--font-code); font-size: 0.625rem;
   letter-spacing: 0.06em; padding: 0 var(--space-1); border-radius: var(--radius-badge);
-  background: var(--sidebar); color: var(--secondary); vertical-align: 0.15em;
+  background: var(--sidebar); color: var(--secondary);
 }
-.desc { font-family: var(--font-code); font-size: 0.75rem; line-height: 1.6; color: var(--secondary); margin: 0; }
+
+/* B：底部 2px 森林基线，呼应「上边光点沿边行进」 */
+.cand-b { border-bottom: 2px solid color-mix(in srgb, var(--forest) 55%, var(--line)); }
+/* C：内缩双层描边，呼应「基线不接触边框，四角不可见」 */
+.cand-c { box-shadow: var(--shadow-card), inset 0 0 0 1px var(--line), inset 0 0 0 4px var(--surface), inset 0 0 0 5px var(--line); }
+/* D/E/F 同属光点族：字母色统一为森林色系，用 tag 与容器处理区分机制，不靠颜色区分 */
+.cand-d .cand-letter,
+.cand-e .cand-letter,
+.cand-f .cand-letter { color: color-mix(in srgb, var(--forest) 26%, var(--surface)); }
+/* F：环形轨道，容器内侧多一圈底色轨道，光点在其上环绕 */
+.cand-f { box-shadow: var(--shadow-card), var(--hairline), inset 0 0 0 1px color-mix(in srgb, var(--tone) 12%, var(--line)); }
+
+.desc { font-size: 0.8125rem; line-height: 1.65; color: var(--secondary); margin: 0; }
+/* 三个候选的描述行数不等（A 最长 4 行）会导致输入框横向错开，
+   固定四行高度保证并排可比——对齐优先于紧凑 */
+.card > header .desc { min-height: 6.6em; }
+
+/* 「当前」读数是每个候选此刻唯一的差异说明，提到卡片最显眼位置 */
 .now {
-  font-family: var(--font-code); font-size: 0.75rem; line-height: 1.6; margin: 0;
-  min-height: 3.6rem;                    /* 固定三行，状态切换不推动卡片布局 */
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-badge);
-  background: var(--sage); color: var(--forest);
+  display: flex; align-items: baseline; gap: var(--space-2);
+  font-family: var(--font-code); font-size: 0.75rem; line-height: 1.5; margin: 0;
+  min-height: 2.25rem;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border-left: 2px solid var(--forest);
+  background: var(--sidebar);
+  color: var(--ink);
 }
+.now::before {
+  content: "CURRENT"; flex: none;
+  font-size: 0.5625rem; letter-spacing: 0.14em; color: var(--control);
+}
+
+.tradeoff {
+  margin: 0; padding-top: var(--space-3);
+  border-top: var(--hairline);
+  font-size: 0.8125rem; line-height: 1.6; color: var(--muted);
+}
+.tradeoff b { color: var(--secondary); font-weight: 600; }
 
 /* ---------- 状态指示器（三候选共用同一结构，只换动效层） ---------- */
 .indicator {
@@ -209,7 +379,10 @@ code { font-family: var(--font-code); font-size: 0.8125rem; }
 /* 暂停：虚线边框，运动停止的第二重信号 */
 html[data-state="paused"] .cand-a .composer,
 html[data-state="paused"] .cand-b .composer,
-html[data-state="paused"] .cand-c .composer { border-style: dashed; }
+html[data-state="paused"] .cand-c .composer,
+html[data-state="paused"] .cand-d .composer,
+html[data-state="paused"] .cand-e .composer,
+html[data-state="paused"] .cand-f .composer { border-style: dashed; }
 .send {
   margin-left: auto; font: inherit; font-size: 0.75rem; font-weight: 500;
   min-height: 1.5rem; padding: 0 var(--space-3);
@@ -237,11 +410,27 @@ html[data-state="paused"] .cand-c .composer { border-style: dashed; }
 }
 
 /* ==========================================================================
-   2. 候选 A：静默基线（零循环）
-   状态只由 指示器图标 + 文字 + 1px 边框色 表达，运行期完全静止。
+   2. 候选 A：边框呼吸（零位移，零方向 · 非光点族）
+   载体是整条 1px 边框。运行期只在两个色阶之间往复，
+   不横穿、不抖动、不缩放——「边界本身在注意」而不是「有东西在动」。
    ========================================================================== */
 .cand-a .composer { border-color: color-mix(in srgb, var(--tone) 34%, var(--line)); }
 .cand-a .composer[data-need="true"] { border-color: color-mix(in srgb, var(--tone) 62%, var(--line)); }
+
+@keyframes border-breathe {
+  from { border-color: color-mix(in srgb, var(--tone) 30%, var(--line)); }
+  to   { border-color: color-mix(in srgb, var(--tone) 58%, var(--line)); }
+}
+html[data-state="planning"] .cand-a .composer {
+  animation: border-breathe var(--motion-loop-calm) var(--ease-standard) infinite alternate;
+}
+html[data-state="running"] .cand-a .composer {
+  animation: border-breathe calc(var(--motion-loop-calm) * .75) var(--ease-standard) infinite alternate;
+}
+/* 等待外部：停在中间色阶，完全静止——语义是「不忙了，但还没有结论」 */
+html[data-state="waiting_external"] .cand-a .composer {
+  animation: none; border-color: color-mix(in srgb, var(--tone) 44%, var(--line));
+}
 
 /* ==========================================================================
    3. 候选 B：局部光点（单点沿上边移动，不做整圈流光、不加弥散光晕）
@@ -276,70 +465,171 @@ html[data-state="waiting_external"] .cand-b .spark {
 }
 
 /* ==========================================================================
-   4. 候选 C：底部细基线（内缩 2px 基线 + 低对比往复段）
+   4. 候选 C：底部三点序列（离散顺序，不是一条会移动的线）
+   三点总长度恒定、只换明暗相位，因此读起来是「信号 / 步骤推进」，
+   不会被误读成可拖动的进度条。
    ========================================================================== */
 .cand-c .composer { padding-bottom: calc(var(--space-3) + 2px); }
-.track {
-  position: absolute; left: 10%; right: 10%; bottom: 1px; height: 2px;
-  border-radius: 2px; background: color-mix(in srgb, var(--line) 70%, transparent);
+.seq {
+  position: absolute; left: 50%; bottom: 3px; margin-left: -1.3125rem;
+  width: 2.625rem; display: flex; align-items: center;
+  justify-content: space-between;
   opacity: 0; pointer-events: none;
 }
-.track-seg {
-  position: absolute; inset: 0 auto 0 0; width: 26%; border-radius: 2px;
-  background: color-mix(in srgb, var(--tone) 55%, transparent);
-}
-html[data-state="planning"] .cand-c .track,
-html[data-state="running"]  .cand-c .track,
-html[data-state="paused"]   .cand-c .track { opacity: 1; }
-html[data-state="planning"] .cand-c .track-seg,
-html[data-state="running"]  .cand-c .track-seg,
-html[data-state="paused"]   .cand-c .track-seg { animation: track-slide var(--motion-loop-slow) var(--ease-standard) infinite alternate; }
-html[data-state="running"]  .cand-c .track-seg { animation-duration: calc(var(--motion-loop-slow) * 0.78); }
-@keyframes track-slide {
-  from { transform: translateX(0); }
-  to   { transform: translateX(238%); }
+.seq i {
+  width: 5px; height: 5px; border-radius: 9999px; flex: none;
+  background: var(--tone); opacity: 0.42;
 }
 
-/* Level 1 排队：静态小圆点 + 4.5s 极慢透明度脉冲，不位移（§三.3） */
-.queue-dot {
-  position: absolute; left: 50%; bottom: 1px; margin-left: -3px;
-  width: 6px; height: 6px; border-radius: 9999px;
-  background: color-mix(in srgb, var(--tone) 50%, transparent);
-  opacity: 0; pointer-events: none;
+/* 三点各自跑同一条脉冲曲线，相位错开 1/3 个周期 → 读作从左到右依次点亮。
+   关键：最暗态不能太低，否则静止截图里三点等于消失。 */
+@keyframes seq-pulse { 0%, 100% { opacity: 0.42; } 42% { opacity: 1; } }
+
+html[data-state="planning"] .cand-c .seq,
+html[data-state="running"]  .cand-c .seq,
+html[data-state="paused"]   .cand-c .seq { opacity: 1; }
+html[data-state="planning"] .cand-c .seq i,
+html[data-state="running"]  .cand-c .seq i,
+html[data-state="paused"]   .cand-c .seq i {
+  animation: seq-pulse var(--motion-loop-calm) var(--ease-standard) infinite;
 }
-html[data-state="queued"] .cand-c .queue-dot {
-  opacity: 0.75;
+html[data-state="running"] .cand-c .seq i { animation-duration: calc(var(--motion-loop-calm) * 0.75); }
+.seq i:nth-child(1) { animation-delay: 0s; }
+.seq i:nth-child(2) { animation-delay: calc(var(--motion-loop-calm) * -0.25); }
+.seq i:nth-child(3) { animation-delay: calc(var(--motion-loop-calm) * -0.5); }
+
+/* Level 1 排队：三点全部静默，改为「中点单亮」+ 4.5s 极慢透明度脉冲（§三.3） */
+html[data-state="queued"] .cand-c .seq { opacity: 1; }
+html[data-state="queued"] .cand-c .seq i { animation: none; opacity: 0.16; }
+html[data-state="queued"] .cand-c .seq i:nth-child(2) {
+  opacity: 0.8;
   animation: queue-pulse var(--motion-loop-queue) var(--ease-standard) infinite alternate;
 }
-@keyframes queue-pulse {
-  from { opacity: 0.3; }
-  to   { opacity: 0.8; }
+@keyframes queue-pulse { from { opacity: 0.3; } to { opacity: 0.8; } }
+
+/* Level 1 悬停：三点等亮且完全静止——语义是「等外部，既不推进也不空闲」 */
+html[data-state="waiting_external"] .cand-c .seq { opacity: 1; }
+html[data-state="waiting_external"] .cand-c .seq i { animation: none; opacity: 0.34; }
+
+/* ==========================================================================
+   4.5 候选 D / E / F：局部光点家族（同视觉语汇，异载体与异机制）
+   D = 左边框竖向穿行；E = 左上角 90° 弧；F = 内侧矩形环绕。
+   三者都与 B 共用「局部光点」质感，靠位置与路径区分，不靠颜色区分。
+   ========================================================================== */
+.cand-d .composer,
+.cand-e .composer,
+.cand-f .composer { overflow: hidden; }
+.cand-d .composer,
+.cand-e .composer,
+.cand-f .composer { border-color: color-mix(in srgb, var(--tone) 34%, var(--line)); }
+
+/* ---------- D：左边框竖向光点（把 B 旋转 90°） ---------- */
+.vspark {
+  position: absolute; left: 0; top: 0; width: 2px; height: 20%;
+  border-radius: 0 2px 2px 0;
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--tone) 72%, transparent), transparent);
+  opacity: 0; pointer-events: none;
+}
+html[data-state="planning"] .cand-d .vspark,
+html[data-state="running"]  .cand-d .vspark,
+html[data-state="paused"]   .cand-d .vspark { opacity: 1; animation: vspark-run var(--motion-loop-calm) linear infinite; }
+html[data-state="running"]  .cand-d .vspark { animation-duration: calc(var(--motion-loop-calm) * 0.75); }
+@keyframes vspark-run {
+  from { transform: translateY(-30%); }
+  to   { transform: translateY(400%); }
+}
+html[data-state="waiting_external"] .cand-d .vspark {
+  left: 0; top: 40%; margin-top: -10%;
+  opacity: 0.7;
+  animation: vspark-hover var(--motion-loop-calm) var(--ease-standard) infinite alternate;
+}
+@keyframes vspark-hover {
+  from { transform: translateY(-2px); }
+  to   { transform: translateY(2px); }
 }
 
-/* Level 1 悬停：基线段停在中间，同样只做 ±2px 晃动，与 running 的往复区分 */
-html[data-state="waiting_external"] .cand-c .track,
-html[data-state="waiting_external"] .cand-c .queue-dot { opacity: 1; }
-html[data-state="waiting_external"] .cand-c .track-seg {
-  left: 37%; width: 26%;                  /* 居中，替代往复段的左端锚点 */
-  animation: spark-hover var(--motion-loop-calm) var(--ease-standard) infinite alternate;
+/* ---------- E：左上角 90° 弧光点（只走一个角，不进入其余三边） ---------- */
+/* 圆角 path 只有两段：水平直线 + 一段 90° 圆弧。周长 = 2r + (pi/2)r */
+.corner-arc { position: absolute; left: 0; top: 0; pointer-events: none; opacity: 0; overflow: visible; }
+.corner-arc path {
+  fill: none; stroke: var(--tone); stroke-width: 2; stroke-linecap: round;
+}
+html[data-state="planning"] .cand-e .corner-arc,
+html[data-state="running"]  .cand-e .corner-arc,
+html[data-state="paused"]   .cand-e .corner-arc { opacity: 1; animation: arc-run var(--motion-loop-calm) linear infinite; }
+html[data-state="running"]  .cand-e .corner-arc { animation-duration: calc(var(--motion-loop-calm) * 0.75); }
+/* 角弧光点自身是一段固定 90° 弧，用 dashoffset 让它沿弧滑出再滑入，边界始终贴住圆角 */
+@keyframes arc-run {
+  from { stroke-dashoffset: var(--arc-p); }
+  to   { stroke-dashoffset: 0; }
+}
+html[data-state="waiting_external"] .cand-e .corner-arc { opacity: 0.6; animation: none; }
+
+/* ---------- F：环绕全框的局部光点 ----------
+   用 SVG 圆角矩形的 stroke-dashoffset 沿真实周长行进，段长固定。
+   不用 rotate 拼接四边：那样段会漂出轨道，且圆角处会出现错位。 */
+/* viewBox 与实际像素尺寸必须 1:1，否则 dashoffset 的行进距离与视觉周长不一致，
+   光点会「跑得比框快」或「跑不满一圈」。fitOrbit 会把 svg 尺寸锁到轨道尺寸。 */
+.orbit {
+  position: absolute; pointer-events: none;
+  opacity: 0; overflow: visible;
+}
+/* 环形轨道底衬：让光点跑在一个可见轨道上，而不是贴着边框内侧凭空移动 */
+.cand-f .composer::after {
+  content: ""; position: absolute; inset: 3px;
+  border-radius: calc(var(--radius-control) - 3px);
+  border: 1px solid color-mix(in srgb, var(--tone) 16%, transparent);
+  pointer-events: none;
+}
+.orbit rect {
+  fill: none;
+  stroke: var(--tone);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+html[data-state="planning"] .cand-f .orbit,
+html[data-state="running"]  .cand-f .orbit,
+html[data-state="paused"]   .cand-f .orbit { opacity: 1; }
+html[data-state="planning"] .cand-f .orbit rect,
+html[data-state="running"]  .cand-f .orbit rect,
+html[data-state="paused"]   .cand-f .orbit rect {
+  animation: orbit-run var(--motion-loop-slow) linear infinite;
+}
+html[data-state="running"] .cand-f .orbit rect { animation-duration: calc(var(--motion-loop-slow) * 0.78); }
+@keyframes orbit-run {
+  from { stroke-dashoffset: var(--orbit-p); }
+  to   { stroke-dashoffset: 0; }
+}
+/* Level 1 悬停：光点停在顶边中段，不运动——与 running 的整圈环绕区分 */
+html[data-state="waiting_external"] .cand-f .orbit { opacity: 1; }
+html[data-state="waiting_external"] .cand-f .orbit rect {
+  animation: none; stroke-dashoffset: calc(var(--orbit-p) * 0.5);
 }
 
 /* ==========================================================================
    5. Paused / Resume 直觉隐喻：运动冻结 + 一次性启动
    仅冻结「运行期专属」动效；排队、外部等待的慢脉冲不冻结。
    ========================================================================== */
-html[data-state="paused"] .cand-b .spark,
-html[data-state="paused"] .cand-c .track-seg { animation-play-state: paused; opacity: 0.55; }
+html[data-state="paused"] .cand-b .spark { animation-play-state: paused; opacity: 0.55; }
+html[data-state="paused"] .cand-c .seq i { animation-play-state: paused; }
+html[data-state="paused"] .cand-d .vspark,
+html[data-state="paused"] .cand-e .corner-arc path { animation-play-state: paused; }
+html[data-state="paused"] .cand-f .orbit rect { animation-play-state: paused; }
 html[data-state="paused"] .indicator .glyph { opacity: 0.75; }
 
 /* 恢复动效挂在伪元素上，避免替换宿主的循环 animation 导致运动被永久停掉 */
 .cand-b .spark::after,
-.cand-c .track-seg::after {
+.cand-c .seq::after {
   content: ""; position: absolute; inset: 0; border-radius: inherit;
   background: var(--tone); opacity: 0; pointer-events: none;
 }
 .is-resuming .spark::after,
-.is-resuming .track-seg::after { animation: resume-kick var(--motion-duration-emphasis) var(--ease-enter); }
+.is-resuming .seq::after,
+.is-resuming .vspark::after { animation: resume-kick var(--motion-duration-emphasis) var(--ease-enter); }
+.cand-d .vspark::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  background: var(--tone); opacity: 0; pointer-events: none;
+}
 @keyframes resume-kick {
   0%   { opacity: 0; }
   40%  { opacity: 0.85; }
@@ -348,17 +638,29 @@ html[data-state="paused"] .indicator .glyph { opacity: 0.75; }
 
 /* ==========================================================================
    6. 后台降频 / 失焦暂停 / 减少动态效果
+   关掉动效后必须仍有静态通道区分全部状态：
+   A = 边框色 + 虚线（paused），B = 上边光点消失但边框色保留，C = 三点消失但边框色保留。
    ========================================================================== */
+/* 每个候选的动效宿主不同：A 挂在 .composer，B/C/D/E/F 挂在各自的动效元素上，都要降频 */
 html.page-hidden .spark,
-html.page-hidden .track-seg,
-html.page-hidden .queue-dot { animation-play-state: paused; }
+html.page-hidden .seq i,
+html.page-hidden .vspark,
+html.page-hidden .corner-arc path,
+html.page-hidden .orbit rect,
+html.page-hidden .cand-a .composer { animation-play-state: paused !important; }
 
 html.motion-off .spark,
-html.motion-off .track-seg,
-html.motion-off .queue-dot,
+html.motion-off .seq,
+html.motion-off .vspark,
+html.motion-off .corner-arc,
+html.motion-off .orbit,
 html.reduce-motion .spark,
-html.reduce-motion .track-seg,
-html.reduce-motion .queue-dot { animation: none !important; opacity: 0 !important; }
+html.reduce-motion .seq,
+html.reduce-motion .vspark,
+html.reduce-motion .corner-arc,
+html.reduce-motion .orbit { animation: none !important; opacity: 0 !important; }
+html.motion-off .cand-a .composer,
+html.reduce-motion .cand-a .composer { animation: none !important; }
 html.motion-off .emphasis,
 html.reduce-motion .emphasis { animation: none !important; opacity: 0 !important; }
 html.motion-off .indicator .glyph,
@@ -371,21 +673,23 @@ html.motion-off .composer,
 html.reduce-motion .composer { transition: none !important; }
 
 @media (prefers-reduced-motion: reduce) {
-  .spark, .track-seg, .queue-dot, .emphasis, .chip, .btn, .composer { animation: none !important; transition: none !important; }
-  .spark, .track-seg, .queue-dot { opacity: 0 !important; }
+  .spark, .seq, .seq i, .vspark, .corner-arc, .orbit, .corner-arc path, .orbit rect,
+  .emphasis, .cand-a .composer, .chip, .btn, .composer { animation: none !important; transition: none !important; }
+  .spark, .seq, .vspark, .corner-arc, .orbit { opacity: 0 !important; }
 }
 
 /* ==========================================================================
    7. 快捷操作图标状态（静态角标，运行期才有一个 1.125rem 小弧）
    ========================================================================== */
-.qa-row { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.qa-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .qa {
   display: inline-flex; align-items: center; gap: var(--space-2);
   font: inherit; font-size: 0.8125rem; color: var(--secondary);
   background: var(--surface); border: 0; border-radius: var(--radius-control);
-  box-shadow: inset 0 0 0 1px var(--line);
-  min-height: 2.25rem; padding: 0 var(--space-3); position: relative;
+  box-shadow: var(--shadow-card), var(--hairline);
+  min-height: 2rem; padding: 0 var(--space-3); position: relative; cursor: pointer;
 }
+.qa:hover { background: var(--sage); color: var(--forest); }
 .qa .box { width: 1.125rem; height: 1.125rem; flex: none; position: relative; display: inline-grid; place-items: center; }
 .qa .box svg { display: block; color: var(--muted); }
 .qa[data-s="running"] .box svg { animation: qa-spin var(--motion-loop-slow) linear infinite; }
@@ -408,37 +712,108 @@ html.motion-off .qa[data-s="running"] .box svg,
 html.reduce-motion .qa[data-s="running"] .box svg { animation: none !important; }
 
 /* ==========================================================================
-   8. 状态映射总表 + 验收清单
+   8. 状态映射总表 + 验收清单 + 规格面板
    ========================================================================== */
-.table-wrap { overflow-x: auto; box-shadow: inset 0 0 0 1px var(--line); border-radius: var(--radius-control); background: var(--surface); }
+.table-wrap {
+  overflow-x: auto; border-radius: var(--radius-control);
+  background: var(--surface); box-shadow: var(--shadow-card), var(--hairline);
+}
 table { border-collapse: collapse; width: 100%; font-size: 0.8125rem; }
-th, td { text-align: left; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); vertical-align: top; }
-th { color: var(--muted); font-weight: 500; white-space: nowrap; }
+th, td { text-align: left; padding: var(--space-2) var(--space-3); border-bottom: var(--hairline); vertical-align: top; }
+th {
+  color: var(--muted); font-weight: 500; white-space: nowrap;
+  background: var(--sidebar);
+  font-family: var(--font-code); font-size: 0.6875rem;
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
 tbody tr:last-child td { border-bottom: 0; }
 td.k { font-family: var(--font-code); color: var(--secondary); white-space: nowrap; }
-.check li { margin-bottom: var(--space-1); font-size: 0.875rem; color: var(--secondary); }
-.readout {
-  font-family: var(--font-code); font-size: 0.75rem; color: var(--muted);
-  margin-top: var(--space-2);
+
+/* 规格面板：文档内容保留，视觉降级为可折叠区 */
+.spec { margin-top: var(--space-8); }
+.spec > summary {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4); cursor: pointer; list-style: none;
+  background: var(--surface); border-radius: var(--radius-control);
+  box-shadow: var(--shadow-card), var(--hairline);
+  font-size: 0.9375rem; font-weight: 600;
 }
+.spec > summary::-webkit-details-marker { display: none; }
+.spec > summary::after {
+  content: "▾"; margin-left: auto; color: var(--control); font-size: 0.75rem;
+  transition: transform var(--motion-duration-fast) var(--ease-standard);
+}
+.spec[open] > summary::after { transform: rotate(180deg); }
+.spec > summary .sec-num {
+  font-family: var(--font-code); font-size: 0.6875rem; font-weight: 400;
+  letter-spacing: 0.12em; color: var(--control); flex: none;
+}
+.spec-body { padding: var(--space-2) var(--space-4) var(--space-4); }
+.spec-body h2 { margin-top: var(--space-6); }
+
+.check { margin: 0; padding-left: var(--space-5); }
+.check li { margin-bottom: var(--space-2); font-size: 0.875rem; color: var(--secondary); line-height: 1.65; }
+.check li::marker { color: var(--control); font-family: var(--font-code); font-size: 0.8125rem; }
+
+/* 位移检测读数：归属到卡片区下方，不再裸悬 */
+.readout {
+  display: flex; align-items: center; gap: var(--space-2);
+  margin-top: var(--space-3); padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-badge);
+  background: var(--surface); box-shadow: var(--hairline);
+  font-family: var(--font-code); font-size: 0.75rem; color: var(--muted);
+}
+.readout .lbl { color: var(--control); font-size: 0.625rem; letter-spacing: 0.1em; }
 .readout b { color: var(--forest); font-weight: 600; }
 .readout b.bad { color: var(--red); }
 </style>
 </head>
 <body>
-<div class="page">
+<div class="shell">
 
-  <h1>Agent 状态视觉反馈系统 · 输入区动效三候选</h1>
+  <div class="titlebar">
+    <div class="marks" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="win-title">Relay-Agent <span class="crumb">· 输入区动效对比</span></div>
+    <div class="win-ctl" aria-hidden="true"><span>─</span><span>▢</span><span>✕</span></div>
+  </div>
+
+  <div class="shell-body">
+
+    <aside class="sidenav" aria-hidden="true">
+      <div class="nav-group">
+        <div class="nav-cap">项目</div>
+        <div class="nav-item is-current"><span class="dot on"></span>今日</div>
+        <div class="nav-item"><span class="dot"></span>任务</div>
+        <div class="nav-item"><span class="dot warn"></span>评审</div>
+        <div class="nav-item"><span class="dot"></span>知识</div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-cap">系统</div>
+        <div class="nav-item"><span class="dot"></span>连接</div>
+        <div class="nav-item"><span class="dot"></span>设置</div>
+      </div>
+      <div class="nav-spacer"></div>
+      <div class="nav-user">
+        <span class="avatar">R</span>
+        <span class="who"><b>Relay-Agent</b><span>本机 · 单用户</span></span>
+      </div>
+    </aside>
+
+    <main class="stage">
+
+  <h1>Agent 状态视觉反馈系统</h1>
+  <p class="subtitle">输入区动效六候选 · A 边框呼吸 / B 上边光点 / C 三点序列 / D 左边光点 / E 角弧光点 / F 环绕全框光点。独立原型，未接入项目；页面内状态与文案均为演示数据，不代表任何真实 Run / Task 事实。</p>
+
   <p class="note">
-    独立原型，<strong>未接入项目</strong>。页面内状态与文案均为演示数据，不代表任何真实 Run / Task 事实。
     颜色、间距、圆角取自 <code>docs/frontend/design-tokens.json</code>（v0.4.0 Proposed）；
     <code>design-system.md §7.1</code> 与 <code>workbench-design.md §6.1</code> 是规则依据。
     本轮把动效从「整圈流光 + 弥散光晕」收缩为 <strong>低干扰状态表达</strong>：全部时长与缓动只来自
     <code>--motion-*</code> token，运行期动效降为 Level 1–2，Level 3 只做一次性强调且不循环。
-    三个候选共用同一套 <code>StateVisualConfig</code>，差异只在输入框边框层的表达方式。
+    六个候选共用同一套 <code>StateVisualConfig</code>，差异只在输入框边框层的表达方式：
+    B / D / E / F 属「局部光点」家族，靠载体位置与路径区分；A / C 走非光点机制。
   </p>
 
-  <div class="toolbar">
+  <div class="controlbar">
     <label><input type="checkbox" id="motionToggle" checked> 允许动效</label>
     <label><input type="checkbox" id="reducedToggle"> 模拟系统「减少动态效果」</label>
     <label><input type="checkbox" id="hiddenToggle"> 模拟窗口失焦 / 后台</label>
@@ -446,67 +821,157 @@ td.k { font-family: var(--font-code); color: var(--secondary); white-space: nowr
     <span class="hint">关闭动效只改展示，不发送暂停或取消命令，不隐藏状态文字与操作入口；输入框在任何状态下都可编辑。</span>
   </div>
 
-  <h2>一、状态切换（11 个状态统一走同一份映射）</h2>
+  <h2><span class="sec-num">01</span>状态切换</h2>
   <div class="chips" id="chips" role="group" aria-label="切换演示状态"></div>
 
-  <h2>二、输入区动效三候选</h2>
+  <h2><span class="sec-num">02</span>输入区动效六候选</h2>
   <div class="grid" id="grid">
 
     <section class="card cand-a">
       <header>
-        <h3>A 静默基线 <span class="tag">零循环</span></h3>
-        <p class="desc">边框只换 1px 静态色；运行期完全不动，靠指示器图标 + 文字 + 边框色三通道表达。Level 0–3 全部静态，唯一动作是进入 need / success / error 时的一次性描边强调。</p>
+        <div class="cand-id">
+          <span class="cand-letter">A</span>
+          <div class="cand-meta">
+            <h3>边框呼吸</h3>
+            <span class="tag">零位移 · 非光点</span>
+          </div>
+        </div>
+        <p class="desc">整条 1px 边框在两个色阶之间往复，零位移、零方向。不横穿、不抖动——语义是「边界本身在注意」。</p>
         <p class="now" data-now></p>
       </header>
       <div class="indicator"></div>
       <div class="composer">
-        <div class="emphasis emphasis--tone"></div>
-        <div class="emphasis emphasis--soft"></div>
+        <div class="emphasis emphasis--tone" aria-hidden="true"></div>
+        <div class="emphasis emphasis--soft" aria-hidden="true"></div>
         <textarea placeholder="输入消息……" rows="2"></textarea>
         <div class="composer-bar"><span class="mark" data-mark></span><span>上下文 8%</span><button class="send" type="button">发送</button></div>
       </div>
-      <p class="desc">代价：长时间执行时「仍在工作」的感知最弱，需要用户看指示器文字。</p>
+      <p class="tradeoff"><b>代价</b>　长时间执行时「仍在工作」的感知最弱，需要用户看指示器文字。</p>
     </section>
 
-    <section class="card cand-b">
+    <section class="card cand-b" id="cand-b">
       <header>
-        <h3>B 局部光点 <span class="tag">Level 2 · 单点</span></h3>
+        <div class="cand-id">
+          <span class="cand-letter">B</span>
+          <div class="cand-meta">
+            <h3>局部光点</h3>
+            <span class="tag">Level 2 · 单点</span>
+          </div>
+        </div>
         <p class="desc">上边一条 18% 宽的 2px 光点。不做整圈流光，不加 blur 光晕，只用 transform。</p>
         <p class="now" data-now></p>
       </header>
       <div class="indicator"></div>
       <div class="composer">
-        <div class="emphasis emphasis--tone"></div>
-        <div class="emphasis emphasis--soft"></div>
+        <div class="emphasis emphasis--tone" aria-hidden="true"></div>
+        <div class="emphasis emphasis--soft" aria-hidden="true"></div>
         <div class="spark" aria-hidden="true"></div>
         <textarea placeholder="输入消息……" rows="2"></textarea>
         <div class="composer-bar"><span class="mark" data-mark></span><span>上下文 8%</span><button class="send" type="button">发送</button></div>
       </div>
-      <p class="desc">代价：光点经过输入文字上方 2px，需要确认不干扰首行阅读。</p>
+      <p class="tradeoff"><b>代价</b>　光点经过输入文字上方 2px，需要确认不干扰首行阅读。</p>
     </section>
 
     <section class="card cand-c">
       <header>
-        <h3>C 底部细基线 <span class="tag">Level 2 · 往复</span></h3>
-        <p class="desc">内缩基线上 26% 宽的低对比段。基线不接触边框，四角不可见，避免「进度条被误读为可拖动进度」。</p>
+        <div class="cand-id">
+          <span class="cand-letter">C</span>
+          <div class="cand-meta">
+            <h3>三点序列</h3>
+            <span class="tag">Level 2 · 离散</span>
+          </div>
+        </div>
+        <p class="desc">底部三点依次点亮，总长度恒定、只换明暗相位。读作信号或步骤推进，不会被误认为可拖动进度条。</p>
         <p class="now" data-now></p>
       </header>
       <div class="indicator"></div>
       <div class="composer">
-        <div class="emphasis emphasis--tone"></div>
-        <div class="emphasis emphasis--soft"></div>
-        <div class="track" aria-hidden="true"><div class="track-seg"></div></div>
-        <div class="queue-dot" aria-hidden="true"></div>
+        <div class="emphasis emphasis--tone" aria-hidden="true"></div>
+        <div class="emphasis emphasis--soft" aria-hidden="true"></div>
+        <div class="seq" aria-hidden="true"><i></i><i></i><i></i></div>
         <textarea placeholder="输入消息……" rows="2"></textarea>
         <div class="composer-bar"><span class="mark" data-mark></span><span>上下文 8%</span><button class="send" type="button">发送</button></div>
       </div>
-      <p class="desc">代价：与输入区底部分隔线重合，需要确认在 Windows 缩放下不显脏。</p>
+      <p class="tradeoff"><b>代价</b>　三点位于输入区底缘，与底部分隔线距离近，需要确认在 Windows 缩放下不显脏。</p>
+    </section>
+
+    <section class="card cand-d">
+      <header>
+        <div class="cand-id">
+          <span class="cand-letter">D</span>
+          <div class="cand-meta">
+            <h3>左边光点</h3>
+            <span class="tag">Level 2 · 光点族</span>
+          </div>
+        </div>
+        <p class="desc">B 的 90° 旋转：左边框一条 20% 高的 2px 光点竖向穿行。同一条光点语汇，换到纵向轴上。</p>
+        <p class="now" data-now></p>
+      </header>
+      <div class="indicator"></div>
+      <div class="composer">
+        <div class="emphasis emphasis--tone" aria-hidden="true"></div>
+        <div class="emphasis emphasis--soft" aria-hidden="true"></div>
+        <div class="vspark" aria-hidden="true"></div>
+        <textarea placeholder="输入消息……" rows="2"></textarea>
+        <div class="composer-bar"><span class="mark" data-mark></span><span>上下文 8%</span><button class="send" type="button">发送</button></div>
+      </div>
+      <p class="tradeoff"><b>代价</b>　纵向光点与光标上下方向一致，可能被误读为「正在打字」。</p>
+    </section>
+
+    <section class="card cand-e">
+      <header>
+        <div class="cand-id">
+          <span class="cand-letter">E</span>
+          <div class="cand-meta">
+            <h3>角弧光点</h3>
+            <span class="tag">Level 2 · 光点族</span>
+          </div>
+        </div>
+        <p class="desc">光点只走左上角一段 90° 弧，不进入其余三边。角是视觉上最「有动作感」的位置，也是最容易看出运动的角落。</p>
+        <p class="now" data-now></p>
+      </header>
+      <div class="indicator"></div>
+      <div class="composer">
+        <div class="emphasis emphasis--tone" aria-hidden="true"></div>
+        <div class="emphasis emphasis--soft" aria-hidden="true"></div>
+        <svg class="corner-arc" data-arc width="2.25rem" height="2.25rem" aria-hidden="true">
+          <path data-arc-path></path>
+        </svg>
+        <textarea placeholder="输入消息……" rows="2"></textarea>
+        <div class="composer-bar"><span class="mark" data-mark></span><span>上下文 8%</span><button class="send" type="button">发送</button></div>
+      </div>
+      <p class="tradeoff"><b>代价</b>　可用面积最小，只覆盖一个角，长时间 running 时感知弱于整边光点。</p>
+    </section>
+
+    <section class="card cand-f">
+      <header>
+        <div class="cand-id">
+          <span class="cand-letter">F</span>
+          <div class="cand-meta">
+            <h3>环绕全框</h3>
+            <span class="tag">Level 2 · 光点族</span>
+          </div>
+        </div>
+        <p class="desc">光点沿圆角矩形真实周长跑满一整圈。段长固定为周长 22%，靠 stroke-dashoffset 行进，不是整圈流光。</p>
+        <p class="now" data-now></p>
+      </header>
+      <div class="indicator"></div>
+      <div class="composer">
+        <div class="emphasis emphasis--tone" aria-hidden="true"></div>
+        <div class="emphasis emphasis--soft" aria-hidden="true"></div>
+        <svg class="orbit" data-orbit aria-hidden="true">
+          <rect data-orbit-rect rx="6" ry="6"></rect>
+        </svg>
+        <textarea placeholder="输入消息……" rows="2"></textarea>
+        <div class="composer-bar"><span class="mark" data-mark></span><span>上下文 8%</span><button class="send" type="button">发送</button></div>
+      </div>
+      <p class="tradeoff"><b>代价</b>　整圈环绕的「正在推进」暗示最强，也最容易被读成可拖动进度条，需在真实窗口确认误读风险。</p>
     </section>
 
   </div>
-  <p class="readout">布局位移检测（切换状态时输入框高度变化）：<b id="shiftReadout">0px</b></p>
+  <p class="readout"><span class="lbl">SHIFT</span>布局位移检测（切换状态时输入框高度变化）<b id="shiftReadout">0px</b></p>
 
-  <h2>三、快捷操作图标状态</h2>
+  <h2><span class="sec-num">03</span>快捷操作图标状态</h2>
   <div class="qa-row">
     <button class="qa" type="button" data-s="idle"><span class="box" data-icon="check"></span>代码检查<span class="badge"></span></button>
     <button class="qa" type="button" data-s="running"><span class="box" data-icon="loader"></span>运行测试<span class="badge"></span></button>
@@ -514,9 +979,13 @@ td.k { font-family: var(--font-code); color: var(--secondary); white-space: nowr
     <button class="qa" type="button" data-s="error"><span class="box" data-icon="alert"></span>提交代码<span class="badge">!</span></button>
     <button class="qa" type="button" data-s="need"><span class="box" data-icon="help"></span>继续任务<span class="badge">?</span></button>
   </div>
-  <p class="desc">运行中 = 图标自身缓慢旋转（无额外文字）；终态 = 图标变色 + 静态角标；需要人工 = 问号角标。图标区域高度固定，角标不推动布局。</p>
+  <p class="desc" style="margin-top: var(--space-3)">运行中 = 图标自身缓慢旋转（无额外文字）；终态 = 图标变色 + 静态角标；需要人工 = 问号角标。图标区域高度固定，角标不推动布局。</p>
 
-  <h2>四、状态 → 视觉映射总表（三候选共用）</h2>
+  <details class="spec" open>
+    <summary><span class="sec-num">SPEC</span>设计规格</summary>
+    <div class="spec-body">
+
+  <h2><span class="sec-num">04</span>状态 → 视觉映射总表（六候选共用）</h2>
   <div class="table-wrap">
     <table>
       <thead><tr><th>业务状态</th><th>Motion Level</th><th>指示器</th><th>边框 / 基线</th><th>输入框</th><th>一次性强调</th></tr></thead>
@@ -524,27 +993,34 @@ td.k { font-family: var(--font-code); color: var(--secondary); white-space: nowr
     </table>
   </div>
 
-  <h2>五、验收自查（本页可直接验证的项）</h2>
+  <h2><span class="sec-num">05</span>验收自查（本页可直接验证的项）</h2>
   <ul class="check">
-    <li>执行中三个输入框均可点击、输入、选择、复制；无 disabled，无遮罩层。</li>
-    <li>不看文字时，A 靠指示器图标形状 + 边框色，B 靠上边光点，C 靠底部基线段，可区分 running / paused / need / success / error。</li>
+    <li>执行中六个输入框均可点击、输入、选择、复制；无 disabled，无遮罩层。</li>
+    <li>不看文字时，六候选各自可区分：A 靠边框色阶往复（无位移），B 靠上边光点，C 靠底部三点顺序，D 靠左边光点，E 靠角弧，F 靠整圈环绕光点。</li>
+    <li>四个光点族候选（B / D / E / F）盲看是否可区分，需在真实窗口确认——同族同质感，只靠位置与路径区分，是本轮最需要人工判断的取舍。</li>
     <li>同一时刻只有一个候选的运行期循环动效处于 Level 2；快捷操作区仅运行中那一个旋转。</li>
     <li>进入 success / error / need 后，所有循环动效立即停止（emphasis 为 forwards 一次性，不循环）。</li>
-    <li>waiting_user 三候选同时出现琥珀边框 + 指示器问号图标 + placeholder 变更，三通道同时变化。</li>
-    <li>切换状态时输入框高度不变（见上方位移检测读数）。</li>
+    <li>waiting_user 六候选同时出现琥珀边框 + 指示器问号图标 + placeholder 变更，三通道同时变化。</li>
+    <li>切换状态时输入框高度不变（见上方位移检测读数，六项均须为 0px）。</li>
     <li>勾选「减少动态效果」后循环动效消失，但图标、文字、边框色、角标仍能区分全部状态。</li>
   </ul>
 
-  <h2>六、待验证项（本页无法证明）</h2>
+  <h2><span class="sec-num">06</span>待验证项（本页无法证明）</h2>
   <ul class="check">
     <li>长时间 running 下 4.5s / 7s 周期是否仍产生视觉疲劳，需真实桌面窗口连续使用 30 分钟以上判断。</li>
-    <li>Windows WebView 在 125%–150% DPI 下 2px 光点与基线的实际观感。</li>
-    <li>键盘 focus-visible 描边与运行期光点/基线并存的对比度是否达标。</li>
+    <li>Windows WebView 在 125%–150% DPI 下 2px 光点、三点与环形的实际观感。</li>
+    <li>键盘 focus-visible 描边与运行期光点/三点/环形并存的对比度是否达标。</li>
     <li>光点经过输入首行文字上方时，Windows 透明合成层是否产生文字边缘抖动。</li>
+    <li>四个光点族候选同屏并列时，D（纵向）与 E（角弧）的暗示强度是否够，是否需要牺牲其中一个。</li>
     <li>真实接入后：Task A 的迟到事件不得点亮 Task B 的输入区；后台 SSE 断流时状态不得停在 running。</li>
     <li>屏幕阅读器只播报状态文字，不读出装饰动效；装饰层必须保持 aria-hidden。</li>
   </ul>
 
+    </div>
+  </details>
+
+    </main>
+  </div>
 </div>
 
 <script>
@@ -580,17 +1056,22 @@ const STATE_VISUALS = {
   },
   planning: {
     label: '规划中', level: 2, tone: 'active', glyph: 'planning',
-    meta: '正在拆分步骤', border: 'B 上边光点 / C 基线段', baseline: '6s · 9s 单向 / 往复',
+    meta: '正在拆分步骤',
+    border: 'A 边框呼吸 / B 上边光点 / D 左边光点 / E 角弧光点 / F 环绕全框 / C 三点序列',
+    baseline: 'A 6s 呼吸 · B 6s 横穿 · D 6s 竖穿 · E 6s 一轮 · F 9s 环绕 · C 6s 依次点亮',
     input: '可输入', emphasis: false, placeholder: null
   },
   running: {
     label: '执行中', level: 2, tone: 'active', glyph: 'running',
-    meta: '正在读取文件与调用工具', border: 'B 上边光点 / C 基线段', baseline: '4.5s · 7s 单向 / 往复',
+    meta: '正在读取文件与调用工具',
+    border: 'A 边框呼吸 / B 上边光点 / D 左边光点 / E 角弧光点 / F 环绕全框 / C 三点序列',
+    baseline: 'A 4.5s · B 4.5s · D 4.5s · E 4.5s · F 7s · C 4.5s',
     input: '可输入', emphasis: false, placeholder: null
   },
   waiting_external: {
     label: '等待外部结果', level: 1, tone: 'active', glyph: 'waiting_external',
-    meta: '等待终端 / MCP / 网络返回', border: '静态 1px', baseline: 'B/C 停在中间 ±2px 晃动 6s',
+    meta: '等待终端 / MCP / 网络返回', border: 'A 中间色阶 / C 三点等亮 / E 角弧半亮',
+    baseline: 'A·C·E·F 静止 · B·D 停在中间 ±2px 晃动 6s',
     input: '可输入', emphasis: false, placeholder: null
   },
   waiting_user: {
@@ -638,11 +1119,11 @@ const CANDIDATE_NOW = {
   a: {
     idle: '边框 --line，零动效，无角标',
     queued: '边框灰 + 虚圈角标「排队中」',
-    planning: '边框浅绿，零动效',
-    running: '边框绿，零动效',
-    waiting_external: '边框浅绿，零动效',
+    planning: '边框色 6s 缓慢呼吸往复，零位移',
+    running: '边框色 4.5s 呼吸往复，零位移',
+    waiting_external: '边框停中间色阶，零动效',
     waiting_user: '琥珀边框 + 问号角标「等待你处理」',
-    paused: '虚线边框 + 双竖条角标「已暂停」',
+    paused: '虚线边框 + 边框呼吸冻结 + 双竖条角标',
     success: '绿边框 + 对勾角标「已完成」',
     partial_success: '琥珀边框 + 半环角标「部分完成」',
     error: '红边框 + 感叹号角标「执行失败」',
@@ -662,17 +1143,56 @@ const CANDIDATE_NOW = {
     cancelled: '光点不显示 + 叉号角标「已取消」'
   },
   c: {
-    idle: '基线不显示，无角标',
-    queued: '居中静态点脉冲 4.5s + 虚圈角标',
-    planning: '基线段往复 9s',
-    running: '基线段往复 7s',
-    waiting_external: '基线段停在中间 ±2px 晃动 6s',
-    waiting_user: '基线消失 + 琥珀边框 + 问号角标',
-    paused: '基线段冻结 + 虚线边框 + 双竖条角标',
-    success: '基线消失 + 绿边框 + 对勾角标',
-    partial_success: '基线消失 + 琥珀边框 + 半环角标',
-    error: '基线消失 + 红边框 + 感叹号角标',
-    cancelled: '基线不显示 + 叉号角标「已取消」'
+    idle: '三点不显示，无角标',
+    queued: '中点单亮 4.5s 透明度脉冲 + 虚圈角标',
+    planning: '三点依次点亮 6s，总长恒定',
+    running: '三点依次点亮 4.5s，总长恒定',
+    waiting_external: '三点等亮且静止，零动效',
+    waiting_user: '三点消失 + 琥珀边框 + 问号角标',
+    paused: '三点冻结在中途 + 虚线边框 + 双竖条角标',
+    success: '三点消失 + 绿边框 + 对勾角标',
+    partial_success: '三点消失 + 琥珀边框 + 半环角标',
+    error: '三点消失 + 红边框 + 感叹号角标',
+    cancelled: '三点不显示 + 叉号角标「已取消」'
+  },
+  d: {
+    idle: '光点不显示，无角标',
+    queued: '光点不显示 + 虚圈角标「排队中」',
+    planning: '光点竖向穿行 6s',
+    running: '光点竖向穿行 4.5s',
+    waiting_external: '光点停在左侧中段 ±2px 晃动 6s',
+    waiting_user: '光点消失 + 琥珀边框 + 问号角标',
+    paused: '光点冻结 + 虚线边框 + 双竖条角标',
+    success: '光点消失 + 绿边框 + 对勾角标',
+    partial_success: '光点消失 + 琥珀边框 + 半环角标',
+    error: '光点消失 + 红边框 + 感叹号角标',
+    cancelled: '光点不显示 + 叉号角标「已取消」'
+  },
+  e: {
+    idle: '角弧不显示，无角标',
+    queued: '角弧不显示 + 虚圈角标「排队中」',
+    planning: '角弧光点 6s 一轮',
+    running: '角弧光点 4.5s 一轮',
+    waiting_external: '角弧静态半亮，零动效',
+    waiting_user: '角弧消失 + 琥珀边框 + 问号角标',
+    paused: '角弧冻结 + 虚线边框 + 双竖条角标',
+    success: '角弧消失 + 绿边框 + 对勾角标',
+    partial_success: '角弧消失 + 琥珀边框 + 半环角标',
+    error: '角弧消失 + 红边框 + 感叹号角标',
+    cancelled: '角弧不显示 + 叉号角标「已取消」'
+  },
+  f: {
+    idle: '环形光点不显示，无角标',
+    queued: '环形光点不显示 + 虚圈角标「排队中」',
+    planning: '光点绕全框一周 9s',
+    running: '光点绕全框一周 7s',
+    waiting_external: '光点停在顶边中段，不运动',
+    waiting_user: '环形消失 + 琥珀边框 + 问号角标',
+    paused: '环绕冻结 + 虚线边框 + 双竖条角标',
+    success: '环形消失 + 绿边框 + 对勾角标',
+    partial_success: '环形消失 + 琥珀边框 + 半环角标',
+    error: '环形消失 + 红边框 + 感叹号角标',
+    cancelled: '环形光点不显示 + 叉号角标「已取消」'
   }
 };
 
@@ -790,6 +1310,48 @@ function startSimulation() {
   };
   tick();
 }
+
+/* ---------- 初始化：SVG 光点轨道的真实周长 ----------
+   stroke-dasharray 的段长与 gap 必须按真实周长算，否则光点会走不满一圈或提前回到起点。
+   周长通过 getTotalLength() 读取，不手算，避免圆角处误差。 */
+function fitOrbit(svg) {
+  const rect = svg.querySelector('rect');
+  const path = svg.querySelector('path');
+  const composer = svg.closest('.composer');
+  const cs = getComputedStyle(composer);
+  const inset = parseFloat(cs.borderLeftWidth) + 3;
+  const w = composer.clientWidth - inset * 2;
+  const h = composer.clientHeight - inset * 2;
+  const radius = 6;
+
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.setAttribute('width', w);
+  svg.setAttribute('height', h);
+
+  if (rect) {
+    rect.setAttribute('x', 0); rect.setAttribute('y', 0);
+    rect.setAttribute('width', w); rect.setAttribute('height', h);
+    rect.setAttribute('rx', radius); rect.setAttribute('ry', radius);
+    const P = rect.getTotalLength();
+    // 段长固定为周长的 22%，与 B/D 的观感一致
+    const seg = P * 0.22;
+    rect.style.strokeDasharray = `${seg} ${P - seg}`;
+    svg.style.setProperty('--orbit-p', P - seg);
+    return;
+  }
+
+  if (path) {
+    // 左上角 90° 弧：水平直线 + 一段 90° 圆弧
+    const arm = w * 0.55;
+    path.setAttribute('d', `M 0 ${radius} A ${radius} ${radius} 0 0 1 ${radius} 0 H ${arm}`);
+    const P = path.getTotalLength();
+    const seg = P * 0.6;
+    path.style.strokeDasharray = `${seg} ${P - seg}`;
+    svg.style.setProperty('--arc-p', P - seg);
+  }
+}
+
+document.querySelectorAll('[data-orbit], [data-arc]').forEach(fitOrbit);
 
 /* ---------- 初始化 ---------- */
 ORDER.forEach((key) => {
