@@ -8,7 +8,8 @@ import { flush, mountReact } from "./mountApp";
 
 const resources = ["resource-1", "resource-2"].map((id) => ({ id, projectId: "project-1",
   canonicalRoot: `D:\\${id}`, status: "ACTIVE", revision: "1", resourceEpoch: "1", fileWriteIdentityBound: false }));
-const connections = [{ id: "read-1", status: "ACTIVE", capabilities: ["GIT_READ"], allowedHost: null }];
+const connections = [{ id: "read-1", status: "ACTIVE", capabilities: ["GIT_READ"], allowedHost: null,
+  allowedExecutables: null }];
 const statusResult = { branch: "feature/中文", head_commit: "a".repeat(40), staged: ["staged.ts"],
   unstaged: ["改动.ts"], untracked: ["new.md"], limit: 1, truncated: true,
   totals: { staged: 3, unstaged: 1, untracked: 2 } };
