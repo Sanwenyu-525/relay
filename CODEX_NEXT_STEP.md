@@ -2,6 +2,22 @@
 
 更新：2026-10-05。角色：唯一阶段、模块与下一步入口。功能通过/未通过/未验收只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)；长篇经过保存在[历史快照](docs/development/codex-next-step-history-20260930.md)，不作为默认交接输入。
 
+## 标题栏常用操作回到左侧（2026-10-05）
+
+用户指出后退、前进、搜索、新建任务原本在标题栏左边，此前一轮被移到下一层应用顶栏。现已移回：`DesktopTitleBar` 渲染 `WorkbenchActions` 于拖动区之前，`AppShell` 不再重复承载；无面包屑页面在宽屏收起空顶栏。行为、准入与草稿保护未变，浏览器仍显示这四个入口、只有窗口控制归桌面宿主。开发自检 `tsc --noEmit` exit0、全量 vitest **733/733**、`vite build` 通过、新增浏览器用例 5/5；唯一失败的 `R02` 已用 `git stash` 在基线复核为既有偶发。**真实 Windows 窗口未验**，成绩与限制只见[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)“标题栏常用操作回到左侧（2026-10-05）”行。
+
+## 会话模式与人设助手（2026-10-06，后端已实施）
+
+用户要求在协作页聊天框加一个切换模式的单选框，两档为「普通 Agent」与「像 grok bot 那种的」；随后明确 bot 只是举例、改称**助手**，并选定「团队角色」只作为组织方式进入本片（不引入多角色同场协作）。取舍见 [ADR-018](docs/decisions/ADR-018-assistant-conversations.md)，范围归[范围补充](docs/requirements/v1-scope.md#会话模式与人设助手补充)，工程责任归[运行架构 §2.6](docs/architecture/runtime-context.md#26-会话级只读工具轮次)。
+
+**本轮完成（后端，提交 `f64b19e`/`c58f8de`/`1243d7b`）**：迁移 0059 建立 `assistant_profiles` 与会话身份列，身份在建立时冻结；迁移 0060 新增第四种 Gateway 来源与 `session_tool_calls`；助手会话复用既有领取/租约/取消/CAS，只换词表、账本与来源三处。真实 PG 出口：会话模式与助手配置 13/13、只读轮次 6/6、准入与撤销 6/6，回归 `tool-loop` 36/36、`folder-first-conversation` 7/7，API 单元 446 通过/0 失败/1 跳过，整仓 `tsc --noEmit` exit0。实际成绩与限制只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)“会话模式与人设助手（2026-10-05）”行。
+
+**未做**：前端单选框、助手选择与新建、深链与导航分组、助手档呈现；真实 Windows 人工路径、原生 IME、DPI、安装升级卸载；真实 Provider 下助手会话的质量与边界遵守。未运行规格归[测试计划 §23](docs/testing/verification-plan.md#23-会话模式与人设助手验收规格)，接口归[工作台 §25](docs/frontend/workbench-design.md#25-会话模式单选框与人设助手)。
+
+**依赖与边界**：普通档行为逐字未变；A 档的「派发子 Agent」仍属 ADR-017 且至今零代码，因此单选框标签不得写该承诺。助手档不排队、拒绝 Skill 与提案、归档后冻结但历史可读；停止复用既有消息取消通道，不新增停止资源。多角色同场协作与 ADR-017 已否决的候选三重叠，须另开 ADR，本轮不做。
+
+下一步：按[工作台 §25](docs/frontend/workbench-design.md#25-会话模式单选框与人设助手)接入前端单选框与助手选择/新建，再补浏览器与真实 Windows 路径验收。
+
 ## 传统 Agent 闭环接续（2026-10-05，当前工作范围）
 
 按用户「继续推进传统 agent 能力闭环」接续单 Agent：已补普通检查失败回传、失败检查释放原 claim、生产图返回修正轮与冻结检查 ID 可发现性，并修正失败/UNKNOWN 在恢复时被误当成功的问题。真实 Provider 已经生产调度图完成「检查退出 1 → 定位/读 → 写 → 同一检查退出 0」定向探针，候选与 HUMAN Review 已持久化，重放无新增效果；生产图与恢复回归的确切结果、指定模型独立复核和限制只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)，不升级 M/N 总出口。
@@ -84,6 +100,7 @@ N 阶段的实际结果、限制与归属分析只维护在功能验收表；本
 - 同日较早阶段（2026-10-01）：用户已选择[工作主线图](docs/frontend/mockups/2026-10-01/work-first.png)，整套共享页壳、协作区与七类业务页面实施基本完成。工作台/项目/待处理/资料为主入口；近期工作去重、按项目分组并保留真实续页，主流程采用紧凑页头与阅读纸面。Task/Session、提议意图、确切 Review 版本、组合草稿保护及原未决命令核对已经接入，旧路由/query 和服务端命令 Owner 保留。随后按用户最大化优先要求补齐[全局控件与交互基线](docs/frontend/design-system.md#62-全局控件与交互实施基线2026-10-01)，修复页面壳裁切、搜索范围文案、表单错误焦点、连接检查输入错配及弹层/页签键盘行为；所涉最大化真实 DesktopDev 样本已复验；用户随后五图反馈中的外扩焦点、相邻控件高度、工具底色、分组悬停及连接摘要开合位移亦已修复并复验，最终隔离前端生产构建已通过。实际成绩和剩余项只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)。没有本轮新发布包、真实业务写入或完整 Windows/IME/DPI/安装验收。业务规则见[工作台第 17 节](docs/frontend/workbench-design.md#17-整套-ui-重做提案2026-10-01)，原整套重做取舍及恢复根因见[开发记录](docs/development/ui-live-integration-2026-09-28.md#18-工作主线整套-ui-重做与恢复-owner-保护2026-10-01)。
 - 历史阶段（2026-09-29/30）：方向 1“对话主轴 · 双页工作桌”的协作精修与整套视觉纠偏已有当时的浏览器、自动化和目录测试包证据；最后辅助页与面包屑修正后曾重新打包，身份及范围仍绑定旧源。历史结果只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)，经过见[协作记录](docs/development/ui-live-integration-2026-09-28.md#13-协作页参考图接续与-review-修复2026-09-30)和[纠偏记录](docs/development/ui-live-integration-2026-09-28.md#16-整套页面视觉纠偏与发布输入冻结2026-09-30)。这些历史包与旧图不自动覆盖本轮工作主线，也未据此推进 M04–M07 总验收。
 - 菜单 6 `DesktopDev` 同包已初始化时直接复用开发库，跳过完整清单解析/资源校验；停库自动启动，首次或变包继续校验及必要初始化/备份升级。2026-10-01 隔离启动回归通过；本轮控件复验使用既有 `dev-desktop.ps1 -Action start` 重新打开最大化开发窗口，仅作界面只读与客户端失败校验，启动耗时与完整启动流程未重测；原 Windows 窗口、私有引导/readiness、重复启动与并发 Stop 证据仍绑定 2026-09-30。启动规则归[本机部署](docs/deployment/本机部署.md#持久桌面测试入口)，实际成绩只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)，未重打包、刷新 API 或验完整业务。
+- 菜单 6 真实启动修复（2026-10-06，用户报障）：`SCHEMA_UNAVAILABLE` / exit 101 有两层根因。①门控错位：开发窗口执行 `src-tauri/resources/api` 暂存产物，旧迁移门只比较 `test-release` 包清单 SHA-256，`-RefreshApi` 新增迁移后包清单不变即整段跳过迁移，readiness 又要求迁移清单完全相等。已改为「包清单改变**或**暂存迁移集摘要相对 `session.json.dev_schema_hash` 改变」，并让 DesktopDev 的 migrate/install-graph/init-workspace 取自暂存产物；`.gitattributes` 固定迁移 SQL 为 LF。②库侧历史污染：`relay_trial` 台账中 `0054` 摘要对应一份应用后即被改写、已不可恢复的草稿版，实际 DDL 少两个约束分支，按用户授权重建试验库并重放 61 条迁移。真实窗口与 readiness 证据、回归覆盖与剩余限制只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)；本轮未实测交互式 Ctrl+C 停止、打包版 Start 窗口与安装流程，旧集群副本 `.relay-test/cluster.pre-rebuild-20261006-005359` 暂留待用户处置。
 - 历史接续（2026-09-30 晚）：三工作台的任务/资料目录、确切版本正文与同任务 AI 入口，本设备显示偏好，同页 Task 合并提案及蓝图/Run 状态呈现已接入；Task Skill 重读失败和 Task/产物失权后仍保留草稿与原命令，403 后遇到 503 不恢复旧受限事实。该增量未重打桌面包，当前仍保留其业务能力；知识收录、非空恢复/搜索等完整 33 页面/状态及最新 Windows 取证并未由本轮工作主线视觉样本全部覆盖，Git diff/CLI UI 协议仍缺。结果只在[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)维护。
 - Git 只读 UI 已有未提交切片，独立与真实窗口验收仍缺；交互终端仍缺协议；PDF 导入、首输出分段统计及 Windows 安装交付仍未完成。本轮真实首预览仅有单次窗口观察，不能推断尾延迟或完整 UI 通过。V1 后续长期协作/N00–N07 属规划，Proposed 不自动成为当前实现授权。
 

@@ -200,6 +200,41 @@ LangGraph 继续作为唯一通用图编排器，PG 只分发受控运行命令�
 
 先闭合单 Agent 相关呈现/停止恢复依赖，再按[专项提示词](../../prompts/bounded-multi-agent.md)的持久协议→真实子执行与恢复→UI/Windows 出口实施。新增 API 的 DTO/错误/兼容、物理 schema/追加 migration、模型调用类别、子 claim/图布局及预算数字仍待工程核定；本轮不发布接口或修改数据库。
 
+### 2.6 会话级只读工具轮次
+
+2026-10-05 用户要求协作页聊天框有两档模式：A 档是既有普通 Agent，B 档是有固定人设、**可读不可写**的助手。产品取舍见 [ADR-018](../decisions/ADR-018-assistant-conversations.md)，本节只写工程责任；身份冻结的请求契约归[命令契约 §10.60](../api/http-command-contract.md)，物理形状归[物理设计第 62 节](../database/physical-design-postgresql.md)。**前端单选框与真实 Windows 出口未做**，这里记录的是已实现并有真实 PostgreSQL 证据的后端部分。
+
+#### 2.6.1 为什么复用既有生成身份，而不是另建一条执行链
+
+B 档要读真实文件，但既有 `run_tool_calls` 绑定 Run、Run 属于 Task，而 B 档明确不建 Task 与 Run。结论是**不新建执行链**：领取、心跳租约、`cancel_requested` 轮询与按 Worker 的 CAS 结算全部沿用 `assist_messages` 的既有机制。`runAssistGenerationTick` 只在读到助手模式会话时换掉三件事：
+
+| 换掉什么 | A 档 | B 档 |
+|---|---|---|
+| 模型词表 | 不声明任何工具 | 只读子集，按**当前**连接每轮重算 |
+| 工具事实落点 | 无工具 | `session_tool_calls`，按 `(session_id, message_id, round, ordinal)` 唯一 |
+| Gateway 来源 | 不适用 | 第四种来源，自带 project 与受管资源，外加 session 与 message 身份 |
+
+模型端口相应扩展：Assist 请求新增可选的只读词表与已结算工具轮次，结果新增工具请求变体。A 档不传这两个字段，因此既有行为逐字不变；万一 A 档收到工具请求，按「未声明工具却收到工具请求」的类型化原因收敛，不把伴随正文当候选正文。
+
+#### 2.6.2 只读动作仍然走 Gateway
+
+绕开 Gateway 直调 file/git adapter 会造出第二条准入路径，违反「Permission/Gateway 控制动作准入」。因此该来源与 `RUN`、`USER_IMPORT`、`USER_ACTION` 并列，迁移 0060 逐条重述既有 CHECK 后追加它的分支。准入矩阵按 capability 判定，只放行 `FILE_READ` / `FILE_QUERY` / `GIT_READ`；`FILE_WRITE` / `GIT_WRITE` / `CLI_RUN` / `WEB_FETCH` 一律不放开，写入口继续只有 `RUN`。
+
+准备与准入都按来源分派：受管根来源（`RUN` 与助手来源）共用同一套目标规范化与资源判定。目标不要求等于受管根本身——`READ_FILE` 的目标是根内文件，目录查询的目标是根或根内子目录，只有 Git 只读动作才等于根；准入时按 capability 分别用严格包含或目录包含复核它仍落在**同一个**受管根内。
+
+#### 2.6.3 两条容易被写错的边界
+
+- **人设快照冻结文本，不冻结能力。** 快照只有 name、role_description、tone、read_scope 四个文本字段，迁移用 CHECK 挡住 capabilities / connections / permissions 出现在快照里。词表每轮按当前连接重算：连接被删或停用后，下一轮就少一个工具，模型收到的是类型化原因而不是静默。
+- **两种执行身份不得互相冒充。** 绑定 Operation 时要求目标 Operation 的来源就是该来源，归属判定另行核对 project 与受管资源。B 档**不产生** `tasks`、`runs`、`run_scope_grants`、`run_tool_calls`、Review、`CompletionRecord` 与任何动作审批；它**会**产生只读的逻辑动作与调用记录，那是账本而不是授权。
+
+#### 2.6.4 控制与停止
+
+停止复用 `assist_messages.cancel_requested` 与既有 200ms 轮询，不新增停止列、停止端点或助手专属控制资源。暂停与 Handoff 在 B 档**不存在**——没有可移交的执行权，界面因此不渲染这些入口，而不是渲染成禁用加解释。
+
+B 档不排队：一条在途时再发被明确拒绝，文案不得出现「排队」。助手归档后的检查排在在途检查之前——助手已归档时告诉用户「等上一条结束」是误导，因为等下去那条消息也永远不会变得可发。幂等仍排在最前：同一 `command_id` 在第一条在途时重放必须拿回原回执。
+
+未知结果按原身份核对，不盲重试、不换 Adapter、不换动作 ID：状态为未知的行保留原 Operation，等人工核对。
+
 ## 3. Context Builder 管道
 
 输入 `ContextRequest(task_id, run_id?, step_kind, target_refs, contract_ref, budget)`。查询 canonical facts 后生成 manifest，不从聊天历史恢复任务真相。

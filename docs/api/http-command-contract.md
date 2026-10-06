@@ -976,3 +976,51 @@ Project 拥有接续点身份与说明；其他对象只保存捕获时的确切
 `allowed_actions` 里的动作名是**授权口径**，`CLI_RUN` 统一代表「本次任务范围内已配置的检查」：模型只能按 `check_id` 点名，`executable` 与 `args` 来自冻结清单，工具正文里不出现任何可执行内容。
 
 验证覆盖见[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。本节不含本轮运行结果。
+
+### 10.60 会话模式与人设助手（2026-10-05 源码实现）
+
+Breaking Change：Yes（语义）。取舍见 [ADR-018](../decisions/ADR-018-assistant-conversations.md)，工程责任见[运行架构 §2.6](../architecture/runtime-context.md#26-会话级只读工具轮次)。
+
+#### 10.60.1 兼容策略
+
+| 变化 | 影响 | 兼容 |
+|---|---|---|
+| `POST /assist-sessions` 请求体新增可选 `conversation_mode` 与 `assistant_profile_id` | 既有客户端不传即普通模式 | 既有字段与路由语义不变，无需改客户端 |
+| `assist_sessions` 增五列（迁移 0059） | 既有行按普通模式读出 | 列带默认值，既有数据不需回填 |
+| 新增四个助手配置端点 | 不改任何既有端点 | 纯新增 |
+| 会话 DTO 新增 `conversation_mode` / `assistant_profile_id` / `assistant_profile_revision` / `bot_role` 之外的 `assistant_role` / `remember` | 读取响应多字段 | 严格 schema 校验下，旧客户端若拒绝未知字段需同步；不接受字段缺失当默认值 |
+| 同一 `command_id` 换模式重放 | 按异载荷拒绝 | 这是有意的：同一条命令不能既建普通会话又建助手会话 |
+
+旧 URL 无模式参数一律按普通模式解析；不存在「缺参数就猜测助手」的路径。
+
+#### 10.60.2 助手配置端点
+
+| 端点 | 命令类型 | 说明 |
+|---|---|---|
+| `POST /workspaces/{workspace_id}/assistant-profiles` | `CreateAssistantProfile` | 名字在 workspace 内活跃唯一，重名按字段错误明确拒绝且不改已有助手；`read_scope` 只接受缺省或受管根内相对路径数组 |
+| `POST /assistant-profiles/{id}/revision` | `ReviseAssistantProfile` | 带 `expected_revision` 的 CAS；落后按 `REVISION_CONFLICT` 409，不 last-write-wins |
+| `POST /assistant-profiles/{id}/archive` | `ArchiveAssistantProfile` | 只推进「是否仍适用」，不改写配置文本；归档后既有会话冻结发消息但历史可读，名字释放给新助手复用 |
+| `GET /workspaces/{workspace_id}/assistant-profiles` | — | 默认只列活跃；`status=ARCHIVED` 列归档项，供界面显示「已归档」 |
+
+这些端点的 schema 里**没有** capability、connection 或 permission 字段——助手配置是文本，能力来自连接与 Gateway 准入。
+
+#### 10.60.3 建会话时的身份冻结
+
+`conversation_mode` 与 `assistant_profile_id` 进命令体，因此同一 `command_id` 换模式重放按异载荷拒绝。助手模式必须带 `assistant_profile_id`；跨 workspace 的助手与已归档的助手都建不出会话，错误带上助手名与下一步指引。
+
+会话建立时把助手的名字、角色、口吻、只读范围与当时的修订**冻结**进会话。改写助手不改变既有会话的显示人设；归档助手则让既有会话冻结发消息——快照冻结的是文本，冻结不了「这条依据是否仍有效」。
+
+#### 10.60.4 助手会话的消息准入
+
+| 情况 | 结果 | 理由 |
+|---|---|---|
+| 带 `skill_ref` | `INVALID_TRANSITION` 409 | 助手只做只读回答，Skill 在这条会话没有意义 |
+| `intent` 非 `DISCUSS` | `INVALID_TRANSITION` 409 | 同上；提案会带出写入路径 |
+| 助手已归档或跨 workspace | `INVALID_TRANSITION` 409，文案带助手名与「换一个助手」 | 撤销依据不能靠快照续命 |
+| 上一条仍在途 | `INVALID_TRANSITION` 409，文案**不得**出现「排队」 | 助手会话不排队；这条会话没有队列 |
+| 同 `command_id` 同载荷重放 | 返回原消息回执，附重放头 | 回执判定排在在途判定之前，否则连按两次发送会看到「请等它结束」 |
+| 同 `command_id` 异载荷 | `COMMAND_ID_REUSED` 409 | 那是一次新的用户决定 |
+
+普通会话的消息准入逐字未变。
+
+验证覆盖见[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)；未运行规格见[测试计划 §23](../testing/verification-plan.md)。本节不含本轮运行结果。

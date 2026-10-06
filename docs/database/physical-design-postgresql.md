@@ -834,3 +834,31 @@ API 不需要 Saver；Worker 与 supervisor 在领取前只读核对业务 schem
 
 HTTP 面归[命令契约 §10.56](../api/http-command-contract.md)，交互规则归[工作台 §18.8](../frontend/workbench-design.md)。
 
+## 62. 0059/0060 M04 会话模式与人设助手（2026-10-05 源码实现）
+
+依据 [ADR-018](../decisions/ADR-018-assistant-conversations.md) 与[运行架构 §2.6](../architecture/runtime-context.md#26-会话级只读工具轮次)。两条迁移都只新增与只放宽：不改既有表结构、不回填历史行、不改已应用迁移。
+
+### 62.1 0059：助手配置与会话身份
+
+| 对象 | 关键列与约束 | 理由 |
+|---|---|---|
+| `assistant_profiles` | `workspace_id` / `name` / `role_description` / `tone` / `read_scope` / `revision` / `status` | 配置文本，不是授权。`read_scope` 只接受缺省或带 roots 数组的形状（受管根内相对路径），由 CHECK 挡住其他形状 |
+| 活跃名唯一 | 部分唯一索引 `(workspace_id, lower(name)) WHERE status='ACTIVE'` | 归档的助手不占用名字，新助手可复用同一个名字 |
+| `assist_sessions` 增列 | `conversation_mode` / `assistant_profile_id` / `assistant_profile_revision` / `assistant_role_snapshot` / `remember` | 身份在建立时冻结。既有行按普通模式读出（`DEFAULT 'AGENT'`），不虚构助手关系 |
+| `ck_assist_session_mode` | 模式与三个助手列必须同时齐备或同时缺席 | 挡住「助手会话没有助手」与「普通会话其实挂着人设」两种形态 |
+| `ck_assist_session_role_snapshot` | 快照不得含 `capabilities` / `connections` / `permissions` | 人设快照是文本；把权限写进配置的那条路在存储层就被堵住 |
+
+迁移同时收紧既有授权：应用角色对 `assistant_profiles` 只有 `SELECT, INSERT`，可更新的列限于内容列与 `status` / `revision` / `updated_at`——归档推进的是「是否仍适用」，不改写配置文本。
+
+### 62.2 0060：第四种 Gateway 来源与会话级工具账本
+
+| 变更 | 内容 | 理由 |
+|---|---|---|
+| `ck_logical_operation_origin` 追加助手来源 | task / run / step / import_job 四列必须同时为 NULL | 助手只读动作既没有 Run 也不冒充 Run；否则 Run 的未决列表会漏掉它 |
+| `ck_logical_operation_resource` 追加该来源 | 只放行 `FILE_READ` / `FILE_QUERY` / `GIT_READ`，且必须绑定受管资源 | 「可读不可写」落在 CHECK，而不是靠应用层自觉 |
+| `ck_invocation_run_identity` 追加该来源 | 绑定受管资源，但 ownership_epoch / worker / claim 各列全为 NULL | 与 0058 的 `USER_ACTION` 同构：只读不建 claim，资源排他靠 `listOccupiedResources()` 拒绝在途目录 |
+| 新表 `session_tool_calls` | `(session_id, message_id, round, ordinal)` 唯一；`operation_id` 可空 | 与 `run_tool_calls` 刻意不合并：两种执行身份不得互相填对方的 id |
+
+状态与 Operation 的自洽由 `ck_session_tool_calls_operation` 三态判定：被拒的行必无 Operation；已结算与未知的行必有；请求中两种皆可——准备已绑定而派发未完成，崩溃后要按同一个身份核对，因此这一态不额外收紧，也不允许被当成「什么都没发生」。
+
+三条 CHECK 都**逐条重述**既有分支再追加，而不是就地追加：0054 重述 `ck_logical_operation_resource` 时漏掉 WEB_FETCH 与 FILE_WRITE，造成 9 例既有动作在下一次写入时违反约束，同一类教训。应用角色对 `session_tool_calls` 只有读写与状态推进，没有 DELETE——删行等于抹掉一次真实读取发生过的事实。
