@@ -113,6 +113,8 @@ const ALL_MIGRATIONS = [
   '0052_n03_project_knowledge_guide', '0053_n03_knowledge_curation_candidates',
   '0054_m04_agent_tool_loop', '0055_m05_message_queue', '0056_m04_run_scope_grants',
   '0057_m04_run_tool_call_events', '0058_m06_user_action_origin',
+  '0059_m04_assistant_conversation_modes', '0060_m04_assistant_readonly_origin',
+  '0061_m04_cli_run_allowed_executables',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {

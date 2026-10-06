@@ -208,6 +208,11 @@ test('纯讨论不创建 Task；明确请求建立真实 Task 并 Delegate 出�
   assert.equal(prepared.result.decision, 'PREPARE');
   assert.equal(prepared.result.status, 'READY');
   assert.equal((prepared.result.candidate?.title ?? null), '改写 answer.txt 并检查');
+  // 确认页必须能看到这次会真正执行的那条命令：候选要把它原样带给前端。
+  // 这条断言是前端 ExecutionSummary 那块展示的唯一服务端侧证据——没有它，
+  // 「组件会渲染」只能靠模拟响应证明，真实链路上 check 可能根本没传过去。
+  assert.deepEqual(prepared.result.candidate?.check,
+    { executable: process.execPath, args: ['--version'] });
   assert.equal(interpretationRequests[1]?.userContent, '帮我把这个文件的内容改成 after 并跑一次检查');
   assert.ok(interpretationRequests[1]?.system.includes(RELAY_AGENT_CORE_PROMPT));
   // 方案 B：解释只产出目标与范围，不产出文件正文——真正的读取与改写由 Run 内的工具循环做。
@@ -235,6 +240,8 @@ test('纯讨论不创建 Task；明确请求建立真实 Task 并 Delegate 出�
   assert.ok(resource !== undefined);
   const connectionId = await rootBoundConnection(app.db, { workspaceId, projectId,
     canonicalRoot: resource.canonical_root,
+    // process.execPath 是受管根之外的解释器：没有这份点名，冻结期就该拒绝它。
+    allowedExecutables: [process.execPath],
     capabilities: ['FILE_QUERY', 'FILE_READ', 'FILE_WRITE', 'CLI_RUN'] });
   for (const [capability, actionType] of [['FILE_QUERY', 'LIST_DIRECTORY'],
     ['FILE_QUERY', 'FIND_PATHS'], ['FILE_QUERY', 'SEARCH_TEXT'], ['FILE_READ', 'READ_FILE'],
@@ -401,12 +408,19 @@ test('不提供文件名时模型自行定位并改写；只读请求不需要�
 async function rootBoundConnection(db: DbExecutor, input: {
   readonly workspaceId: string; readonly projectId: string; readonly canonicalRoot: string;
   readonly capabilities: readonly GatewayCapability[];
+  /**
+   * 根外可执行入口的允许清单。测试用 `process.execPath` 作为检查入口，而它在受管根之外，
+   * 所以必须显式点名——这正是准入判定要锁住的产品行为。
+   */
+  readonly allowedExecutables?: readonly string[] | undefined;
 }): Promise<string> {
   return withTransaction(db, async (repositories) => {
     await repositories.workspaces.lockAuthority(input.workspaceId, 'update');
     const connection = await repositories.gateway.insertConnection({ id: randomUUID(),
       workspaceId: input.workspaceId, projectId: input.projectId,
-      config: { root_path: input.canonicalRoot } });
+      config: { root_path: input.canonicalRoot,
+        ...(input.allowedExecutables === undefined ? {} :
+          { allowed_executables: [...input.allowedExecutables] }) } });
     for (const capability of input.capabilities) {
       await repositories.gateway.addConnectionCapability(connection.id, capability);
     }
