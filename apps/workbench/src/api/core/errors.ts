@@ -1,0 +1,48 @@
+export interface RelayFieldError {
+  readonly field: string;
+  readonly message: string;
+}
+
+export interface RelayProblem {
+  readonly status: number;
+  readonly code: string;
+  readonly detail: string;
+  readonly retryable: boolean;
+  readonly retryAction: string | null;
+  /** 422 的字段定位；界面据此把错误放回对应输入项。 */
+  readonly fieldErrors: readonly RelayFieldError[];
+  /** 409 REVISION_CONFLICT 的版本差异；界面保留差异而不是直接覆盖。 */
+  readonly expectedRevision: string | null;
+  readonly actualRevision: string | null;
+  readonly blockingReasons?: readonly string[];
+}
+
+export class RelayApiError extends Error {
+  constructor(readonly problem: RelayProblem) {
+    super(problem.detail);
+    this.name = "RelayApiError";
+  }
+}
+
+/** 已收到 2xx 但正文形状不符合已声明契约：不能当成已确认事实，须与网络失败和服务端状态错误区分。 */
+export class RelayContractError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RelayContractError";
+  }
+}
+
+/** 命令响应未能可靠核对时，提交是否已入库无法由浏览器判断。 */
+export class RelayTransportError extends Error {
+  constructor(message = "网络请求未获得服务端响应。") {
+    super(message);
+    this.name = "RelayTransportError";
+  }
+}
+
+export class RelayRunEventHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`执行事件订阅返回 HTTP ${status}。`);
+    this.name = "RelayRunEventHttpError";
+  }
+}
