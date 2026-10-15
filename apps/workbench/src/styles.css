@@ -126,6 +126,12 @@ button {
     background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
 }
 
+/* 控件聚焦边框走主色：键盘 focus 的视觉强度不低于 hover（页面 hover 变主色边框时，
+   focus 不再停留在中性边框色）。 */
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]), select, textarea):focus-visible {
+  border-color: var(--relay-color-action-primary);
+}
+
 textarea {
   resize: vertical;
   line-height: var(--relay-font-lineHeight-ui);
@@ -141,13 +147,15 @@ input:is([type="checkbox"], [type="radio"]) {
   accent-color: var(--relay-color-action-primary);
 }
 
-/* 锚点与焦点滚入视口时预留顶栏（桌面含标题栏）高度，避免被固定区域遮住。 */
+/* 锚点与焦点滚入视口时预留顶栏（桌面含标题栏）高度，避免被固定区域遮住。
+   应用顶栏高度取 layout.header.height；桌面壳再加原生标题栏 control.nav.height，
+   两者是上下相邻的两条固定带，不互相重复计数。 */
 html {
   scroll-padding-top: var(--relay-layout-header-height);
 }
 
 html.app-desktop {
-  scroll-padding-top: calc(var(--relay-control-height-comfort) + var(--relay-layout-header-height));
+  scroll-padding-top: calc(var(--relay-control-nav-height) + var(--relay-layout-header-height));
 }
 
 button:disabled {
@@ -233,11 +241,19 @@ svg {
   cursor: default;
 }
 
+/* 常用操作与窗口控制同处一条标题带：按钮填满标题带高度并排除拖动命中，与窗口按钮同一几何。 */
 .workbench-actions {
   display: flex;
   flex: none;
+  align-self: stretch;
   align-items: center;
   gap: var(--relay-space-1);
+  padding-left: var(--relay-space-4);
+}
+.workbench-actions .icon-button {
+  width: var(--relay-control-height-comfort);
+  height: 100%;
+  border-radius: 0;
 }
 .workbench-actions .icon-button svg {
   width: var(--relay-control-icon-size);
@@ -371,10 +387,14 @@ svg {
   position: relative;
   display: grid;
   /* 2026-10-02 共享壳栏位分离：图标导航栏（固定宽度）+ 近期工作栏（可拖拽）+ 页面主体。
-     用户拖拽宽度（--relay-sidebar-user-width）只覆盖近期工作栏；≤63.9375rem 的断点用显式列宽覆盖，不受影响。 */
+     用户拖拽宽度（--relay-sidebar-user-width）只覆盖近期工作栏；width < 64rem 的断点用显式列宽覆盖，不受影响。
+     2026-10-15 近期工作栏的默认列宽由固定 14rem 改为 layout.shell.sidebarWidth（百分比 + 上下限）：
+     固定值下 1280 与 1920 的比例不一致——宽窗里这一栏显得过窄、中栏不成比例地被挤大。
+     --relay-shell-sidebar-width 在这里解析一次，拖拽手柄的定位复用同一变量，不会出现「列宽变了、手柄没跟上」。 */
+  --relay-shell-sidebar-width: var(--relay-sidebar-user-width, var(--relay-layout-shell-sidebarWidth));
   grid-template-columns:
     var(--relay-layout-navigation-railWidth)
-    var(--relay-sidebar-user-width, var(--relay-layout-sidebar-width))
+    var(--relay-shell-sidebar-width)
     minmax(0, 1fr);
   min-height: 100vh;
   align-items: start;
@@ -411,14 +431,15 @@ svg {
 }
 
 /* 近期工作栏拖拽分隔条：画在图标导航栏与近期工作栏之间；≥64rem 显示，
-   命中区按 control.target.minimum 居中扩到 24px，可见线由 .drag-separator 的 ::after 画在同一位置。 */
+   命中区按 control.target.minimum 居中扩到 24px，可见线由 .drag-separator 的 ::after 画在同一位置。
+   left 用 .app-frame 已解析的 --relay-shell-sidebar-width，与列宽同源。 */
 .sidebar-resize-handle {
   position: absolute;
   top: 0;
   bottom: 0;
   left: calc(
     var(--relay-layout-navigation-railWidth) +
-    var(--relay-sidebar-user-width, var(--relay-layout-sidebar-width)) -
+    var(--relay-shell-sidebar-width) -
     var(--relay-control-target-minimum) / 2
   );
   width: var(--relay-control-target-minimum);
@@ -440,7 +461,8 @@ svg {
   border-right: var(--relay-border-width) solid var(--relay-color-border-separator);
 }
 
-/* 近期工作栏：项目/任务上下文，与导航职责分离；可拖拽列宽与滚动 Owner 都在这里。 */
+/* 近期工作栏：项目/任务上下文，与导航职责分离；可拖拽列宽与滚动 Owner 都在这里。
+   2026-10-14 对齐 V4.2 原型：侧栏是白纸面，画布色留给主内容区，两栏之间才有可读的分层。 */
 .app-context-rail {
   position: sticky;
   top: 0;
@@ -449,8 +471,8 @@ svg {
   height: 100vh;
   min-width: 0;
   overflow: hidden;
-  padding: var(--relay-space-4) var(--relay-space-2) var(--relay-space-2);
-  background: var(--relay-color-bg-canvas);
+  padding: var(--relay-space-2);
+  background: var(--relay-color-bg-surface);
   border-right: var(--relay-border-width) solid var(--relay-color-border-separator);
 }
 
@@ -463,18 +485,33 @@ svg {
   justify-content: space-between;
   gap: var(--relay-space-2);
   flex: none;
-  padding-bottom: var(--relay-space-3);
+  min-height: var(--relay-control-height-compact);
+  padding-bottom: var(--relay-space-1);
+  margin-bottom: var(--relay-space-1);
 }
 
 .context-rail-brand {
   margin: 0;
   font-family: var(--relay-font-family-ui);
-  font-size: var(--relay-font-size-rowTitle);
+  font-size: var(--relay-font-size-body);
   font-weight: var(--relay-font-weight-semibold);
   color: var(--relay-color-text-primary);
+  line-height: var(--relay-font-lineHeight-heading);
 }
 
-.context-rail-new { flex: none; color: var(--relay-color-text-secondary); }
+/* 专栏头的「新对话」是这一栏唯一的主操作（协作页 §3.1）：从纯图标升为带文字的按钮，
+   尺寸取 control.height，与全局 primary 的配色、hover/active 反馈一致。 */
+.context-rail-new {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  min-height: var(--relay-control-height-compact);
+  height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-2);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-heading);
+}
 .context-rail-new > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
 
 .context-rail-placeholder {
@@ -483,12 +520,9 @@ svg {
   overflow-wrap: anywhere;
 }
 
-.brand {
-  padding: 0 var(--relay-space-2) var(--relay-space-6);
-  font-family: var(--relay-font-family-ui);
-  font-size: var(--relay-font-size-section);
-  font-weight: var(--relay-font-weight-semibold);
-}
+/* 2026-10-15 删除原 `.brand` 规则：外壳品牌标记早已改成图标栏内的 `.navrail-brand`
+   （AppShell.tsx），`class="brand"` 没有渲染点，留着的是一条谁也测不到的死规则。
+   原先它在 `width < 64rem` 档还有两条覆盖，随折叠点拆分一并移除。 */
 
 .navigation-list {
   display: flex;
@@ -504,7 +538,8 @@ svg {
 }
 
 /* 近期工作分组：按项目折叠、去重、沿服务端游标续页。范围与排序常驻可见（业务要求写明），
-   详细说明进入 title，不占首屏。基础规则服务两处宿主：宽屏的近期工作栏与窄屏的导航抽屉。 */
+   详细说明进入 title，不占首屏。基础规则服务两处宿主：宽屏的近期工作栏与窄屏的导航抽屉。
+   2026-10-11 密度精修：组头/行高/缩进收紧，搜索与组标题层级拉开，仍只用既有 token。 */
 .recent-work {
   display: flex;
   flex: 1;
@@ -516,80 +551,175 @@ svg {
 }
 
 /* 2026-10-02 共享壳栏位分离：列表高度与滚动 Owner 由近期工作栏自己持有。 */
-.app-context-rail .recent-work { padding-top: var(--relay-space-2); }
+.app-context-rail .recent-work { padding-top: 0; }
 .recent-work > :not(.recent-work-scroll) { flex: none; }
 .recent-work-scroll { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
 /* 错误里的 URL 和 ID 不能撑破侧栏：长标识允许断行，不产生整页横向滚动。 */
 .recent-work .action-error, .recent-work .helper-text { overflow-wrap: anywhere; }
-/* 近期工作栏内的搜索沿用全局 .search-field 原语，只在此处收敛它在窄栏里的基准。 */
-.recent-work-search { flex: none; min-width: 0; width: 100%; }
-.recent-work-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--relay-space-2); }
+/* 窄栏搜索：压掉全局 .search-field 的 min-width:12rem，底用 subtle、边用 separator，更贴栏宽。 */
+.recent-work-search {
+  flex: none;
+  min-width: 0;
+  width: 100%;
+  height: var(--relay-control-height-compact);
+  min-height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-2);
+  background: var(--relay-color-bg-subtle);
+  border-color: var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-round);
+}
+.recent-work-search > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); flex: none; }
+.recent-work-search input { font-size: var(--relay-font-size-meta); }
+.recent-work-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-1);
+  min-height: auto;
+  padding: var(--relay-space-0-5) var(--relay-space-1) 0;
+}
 .recent-work-heading h2 {
   display: flex;
   align-items: center;
   gap: var(--relay-space-2);
   margin: 0;
   font-size: var(--relay-font-size-meta);
-  font-weight: var(--relay-font-weight-medium);
+  font-weight: var(--relay-font-weight-semibold);
   color: var(--relay-color-text-secondary);
 }
 .recent-work-heading h2 > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
 /* 范围说明与刷新同排：占标题行的空白，不新增一行高度。 */
-.recent-work-count { flex: 1; margin: 0; color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); text-align: end; }
-.recent-work-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--relay-space-1); }
-.recent-work-group { margin-block: var(--relay-space-2) var(--relay-space-4); }
+.recent-work-count { flex: 1; margin: 0; color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); text-align: end; font-variant-numeric: tabular-nums; line-height: var(--relay-font-lineHeight-heading); }
+.recent-work-heading .icon-button {
+  width: var(--relay-control-height-compact);
+  min-width: var(--relay-control-height-compact);
+  min-height: var(--relay-control-height-compact);
+  padding: 0;
+}
+.recent-work-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.recent-work-group { margin-block: 0 var(--relay-space-1); }
+/* 组标题：meta + text.muted + medium，右侧带本组计数；高度压到 compact，与任务行拉开层级。 */
 .recent-work-group > summary {
-  display: flex; align-items: flex-start; gap: var(--relay-space-1);
-  list-style: none; cursor: pointer; padding: var(--relay-space-2) 0;
+  display: flex; align-items: center; gap: var(--relay-space-1);
+  list-style: none; cursor: pointer;
+  min-height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-1);
   border-radius: var(--relay-radius-control);
   font-size: var(--relay-font-size-meta); font-weight: var(--relay-font-weight-semibold);
+  color: var(--relay-color-text-secondary);
+  line-height: var(--relay-font-lineHeight-heading);
   transition: background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
 }
 .recent-work-group > summary:hover { background: var(--relay-color-selection-hover); }
 .recent-work-group > summary:active { background: var(--relay-color-selection-bg); }
 .recent-work-group > summary::-webkit-details-marker { display: none; }
-/* 标题折行时展开箭头仍跟首行居中对齐，不被两行标题压到中间。 */
-.recent-work-group > summary > svg { width: var(--relay-font-size-meta); height: var(--relay-font-size-meta); flex: none; margin-top: var(--relay-space-1); }
+.recent-work-group > summary > svg { width: var(--relay-font-size-meta); height: var(--relay-font-size-meta); flex: none; }
 .recent-work-group:not([open]) > summary > svg { transform: rotate(-90deg); }
-.recent-work-group > summary > span { overflow-wrap: anywhere; }
-.recent-work-group .recent-work-list { margin-left: var(--relay-space-6); border-left: var(--relay-border-width) solid var(--relay-color-border-separator); gap: 0; }
+.recent-work-group-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-work-group-count {
+  flex: none;
+  min-width: var(--relay-space-4);
+  padding: 0 var(--relay-space-1);
+  border-radius: var(--relay-radius-badge);
+  background: var(--relay-color-bg-subtle);
+  color: var(--relay-color-text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  line-height: var(--relay-font-lineHeight-ui);
+}
+.recent-work-group .recent-work-list {
+  margin-left: var(--relay-space-2);
+  padding-left: var(--relay-space-1);
+  border-left: var(--relay-border-width) solid var(--relay-color-border-separator);
+  gap: 0;
+}
+/* 密列表：行高 control.height.comfort；主名 body/medium、副行 meta/muted，行内用 heading 行高压进固定行高。
+   定位基准只为行内激活标记，标记本身不占 border。 */
 .recent-work-item {
+  position: relative;
   width: 100%;
+  min-height: var(--relay-control-height-comfort);
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--relay-space-2);
-  padding: var(--relay-space-2);
+  padding: var(--relay-space-0-5) var(--relay-space-2);
   text-align: left;
   background: transparent;
   border: 0;
-  border-left: var(--relay-focus-width) solid transparent;
   border-radius: var(--relay-radius-control);
   color: var(--relay-color-text-primary);
   cursor: pointer;
+  transition: background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
 }
 .recent-work-item:hover { background: var(--relay-color-selection-hover); }
-.recent-work-item--active { background: var(--relay-color-selection-bg); border-left-color: var(--relay-color-action-primary); }
+/* 激活行＝底色 + 行内激活标记 + 标题字重，三者共同表达同一状态，不靠颜色单独区分（设计系统 §6.1）。
+   标记画成行内伪元素而不是 border：未选中行不必空出 focus.width，选中切换时文字不横向跳动；
+   上下各内缩 space.1 并收圆角，既不顶满行高读成整条边框，也不与分组竖线连成一条。 */
+.recent-work-item--active {
+  background: var(--relay-color-selection-bg);
+  color: var(--relay-color-selection-text);
+}
+.recent-work-item--active::before {
+  content: "";
+  position: absolute;
+  inset-block: var(--relay-space-1);
+  inset-inline-start: 0;
+  width: var(--relay-focus-width);
+  border-radius: var(--relay-radius-round);
+  background: var(--relay-color-action-primary);
+}
+.recent-work-item--active .recent-work-title { color: var(--relay-color-selection-text); font-weight: var(--relay-font-weight-semibold); }
+.recent-work-item--active .recent-work-time { color: var(--relay-color-text-muted); }
 .recent-work-icon { flex: none; color: var(--relay-color-text-secondary); margin-top: var(--relay-space-1); }
 .recent-work-icon > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
-.recent-work-copy { flex: 1; display: grid; gap: var(--relay-space-1); min-width: 0; }
+/* 两行：主名独占整行宽度（栏宽可窄到 160px，时间不与标题抢横向空间），副行只放不重复的信息。 */
+.recent-work-copy { flex: 1; display: grid; gap: 0; min-width: 0; }
 .recent-work-title {
-  font-size: var(--relay-font-size-meta);
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  font-weight: var(--relay-font-weight-regular);
-  line-height: var(--relay-font-lineHeight-ui);
-}
-.recent-work-project {
-  color: var(--relay-color-text-secondary);
-  font-size: var(--relay-font-size-meta);
+  min-width: 0;
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-medium);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  line-height: var(--relay-font-lineHeight-heading);
 }
+.recent-work-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  line-height: var(--relay-font-lineHeight-heading);
+}
+/* 会话徽标：与组内计数同一套徽标语言（subtle 底 + muted 字 + radius.badge），只标类型不装状态。 */
+.recent-work-kind {
+  flex: none;
+  padding: 0 var(--relay-space-1);
+  border-radius: var(--relay-radius-badge);
+  background: var(--relay-color-bg-subtle);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+.recent-work-time {
+  flex: none;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 专栏底部的「查找更多任务 / 会话」：常驻一行文字链，展开区就在这一列内。 */
+.recent-work-more { flex: none; margin-top: auto; padding-top: var(--relay-space-2); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.recent-work-more-trigger {
+  padding: 0 var(--relay-space-1);
+  min-height: var(--relay-control-height-compact);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+  color: var(--relay-color-action-text);
+}
+.rail-picker { display: grid; gap: var(--relay-space-2); margin-top: var(--relay-space-2); padding: var(--relay-space-3); background: var(--relay-color-bg-subtle); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-control); }
+.rail-picker .field { display: grid; gap: var(--relay-space-1); margin: 0; }
+.rail-picker select { width: 100%; min-width: 0; }
+.rail-picker .form-actions { display: flex; flex-wrap: wrap; gap: var(--relay-space-2); margin: 0; }
 
 .mobile-navigation { display: grid; gap: var(--relay-space-4); min-height: 0; }
 .mobile-navigation .recent-work { flex: none; overflow: visible; }
@@ -608,6 +738,29 @@ svg {
   margin-top: auto;
   padding-top: var(--relay-space-2);
   border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+/* 图标导航顶端的品牌标记（V4.2 原型）：主色圆角方块，纯装饰。
+   短窗口让位给十个常驻入口——导航可达性优先于标识。 */
+.navrail-brand {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--relay-control-height);
+  height: var(--relay-control-height);
+  margin: 0 auto var(--relay-space-3);
+  background: var(--relay-color-action-primary);
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-onAction);
+}
+
+.navrail-brand > svg {
+  width: var(--relay-font-size-rowTitle);
+  height: var(--relay-font-size-rowTitle);
+}
+
+@media (max-height: 50rem) {
+  .navrail-brand { display: none; }
 }
 
 /* 图标导航栏：图标在上、文字在下，竖排是窄栏里保证中文名称完整可读的方式。 */
@@ -720,7 +873,8 @@ svg {
   gap: var(--relay-space-3);
   min-height: var(--relay-control-height-comfort);
   padding: 0 var(--relay-space-3);
-  background: var(--relay-color-bg-canvas);
+  /* 2026-10-14 对齐 V4.2 原型工具条：顶栏是白纸面，与下方画布形成一条明确的分隔。 */
+  background: var(--relay-color-bg-surface);
   border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
 }
 
@@ -814,7 +968,7 @@ svg {
   z-index: var(--relay-zIndex-popover);
   display: grid; gap: var(--relay-space-3);
   width: min(var(--relay-layout-rail-width), calc(100vw - 2 * var(--relay-layout-main-smallPadding)));
-  max-height: calc(100dvh - var(--relay-layout-header-height) - var(--relay-control-height-comfort) - 2 * var(--relay-space-4));
+  max-height: calc(100dvh - var(--relay-layout-header-height) - 2 * var(--relay-space-4));
   overflow: auto; padding: var(--relay-space-4);
   border: var(--relay-border-width) solid var(--relay-color-border-control);
   border-radius: var(--relay-radius-control); background: var(--relay-color-bg-surface);
@@ -829,6 +983,13 @@ svg {
 .app-topbar .breadcrumbs { flex: 1; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
 .app-topbar .breadcrumb-item { min-width: 0; }
 .app-topbar .breadcrumb-item:last-child > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+/* 宽屏没有面包屑时整行收起，不留空白带；折叠档仍需抽屉入口，不受此规则影响。
+   2026-10-15 区间由 min-width: 64rem 改为 48rem：折叠点下移后 48rem–64rem 的外壳
+   已不折叠，☰ 不再出现；此时 `/agent` 这类无面包屑页面若仍保留顶栏，就是一条
+   点开后内容已在屏幕上的空抽屉，因此整行收起与 ☰ 的可见区间对齐。 */
+@media (min-width: 48rem) {
+  .app-topbar:not(:has(.breadcrumbs)) { display: none; }
+}
 
 /* 任务详情：验收条件列表、产物版本与 Markdown 编辑/预览（UI-10/UI-11）。 */
 
@@ -1118,6 +1279,71 @@ svg {
   margin-top: var(--relay-space-4);
 }
 
+/* 空态：说明没有什么、为什么，以及下一步。默认无背景、无边框、无阴影，
+   按实际内容高度靠上排列，不铺满整列，也不随内容高度整块垂直居中。 */
+
+.empty-state {
+  display: grid;
+  justify-items: start;
+  gap: var(--relay-space-2);
+  max-width: var(--relay-layout-reading-maxWidth);
+  padding-block: var(--relay-space-6) var(--relay-space-8);
+}
+
+.empty-state__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--relay-control-target-minimum);
+  height: var(--relay-control-target-minimum);
+  color: var(--relay-color-text-muted);
+  background: var(--relay-color-bg-subtle);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+}
+
+.empty-state__icon > svg {
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+}
+
+.empty-state__title {
+  margin: 0;
+  font-size: var(--relay-font-size-section);
+  font-weight: var(--relay-font-weight-semibold);
+  line-height: var(--relay-font-lineHeight-heading);
+}
+
+.empty-state__description {
+  margin: 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-body);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.empty-state__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--relay-space-2);
+  margin-top: var(--relay-space-2);
+}
+
+.empty-state--compact {
+  gap: var(--relay-space-1);
+  padding-block: var(--relay-space-2) var(--relay-space-4);
+}
+
+.empty-state--compact .empty-state__title {
+  font-size: var(--relay-font-size-rowTitle);
+  font-weight: var(--relay-font-weight-medium);
+}
+
+.empty-state--compact .empty-state__description {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  overflow-wrap: anywhere;
+}
+
 .eyebrow {
   color: var(--relay-color-text-secondary);
   font-size: var(--relay-font-size-meta);
@@ -1153,12 +1379,15 @@ svg {
   font-size: var(--relay-font-size-meta);
 }
 
+/* 面板是「浮在画布上的内容块」：极轻的冷绿投影把它和背景分开，
+   2026-10-14 对齐 V4.2 原型进度卡与纸面的处理；列表与页壳仍不使用阴影。 */
 .surface-panel {
   margin-top: var(--relay-layout-section-gap);
   padding: var(--relay-space-6);
   background: var(--relay-color-bg-surface);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-panel);
+  box-shadow: var(--relay-shadow-card);
 }
 
 .section-heading-row {
@@ -1338,6 +1567,8 @@ svg {
   background: var(--relay-color-selection-bg);
 }
 
+/* danger 分级：仅用于不可逆或终止性操作（删除、终止等）；暂停、取消会话等可恢复操作
+   一律用 secondary，避免红色警示在日常流程中贬值。 */
 .danger-button {
   min-height: var(--relay-control-height-prominent);
   background: var(--relay-color-bg-surface);
@@ -1429,10 +1660,30 @@ svg {
   color: var(--relay-color-disabled-text);
 }
 
+/* 全局按钮 loading 态：JS 同时置 disabled 与 aria-busy；这里只做视觉降饱和提示。
+   pointer-events 保持，重复响应由 JS disabled 控制；不引入 spinner 动画，
+   过程文案仍由页面既有 loading 文案承担。 */
+.primary-button[aria-busy="true"],
+.secondary-button[aria-busy="true"],
+.danger-button[aria-busy="true"],
+.text-button[aria-busy="true"],
+.icon-button[aria-busy="true"] {
+  opacity: 0.7;
+  cursor: progress;
+}
+
 .primary-button--wide,
 .secondary-button--wide {
   width: 100%;
   margin-top: var(--relay-space-3);
+}
+
+/* 紧凑主/次按钮：高度回到标准控件档、字号降为 meta，供页面把 prominent（3rem）
+   主按钮收编回 2.5rem 的场景使用；不改默认按钮几何。 */
+.primary-button--compact,
+.secondary-button--compact {
+  min-height: var(--relay-control-height);
+  font-size: var(--relay-font-size-meta);
 }
 
 .rail-inline-actions {
@@ -1493,11 +1744,15 @@ svg {
   color: var(--relay-color-status-danger-text);
 }
 
+/* 回执与错误提示：2026-10-14 对齐 V4.2 原型的 error-box／attention-strip——
+   整圈细边框 + 圆角，而不是只画左侧一条粗色条。左侧色条在长句换行后会被读成
+   「这一段被引用」，整圈边框才明确表达「这是一块独立的状态区」。 */
 .receipt-message {
   margin-top: var(--relay-space-3);
   padding: var(--relay-space-3) var(--relay-space-4);
   background: var(--relay-color-status-success-bg);
   color: var(--relay-color-status-success-text);
+  border: var(--relay-border-width) solid var(--relay-color-status-success-text);
   border-radius: var(--relay-radius-control);
   font-size: var(--relay-font-size-meta);
 }
@@ -1507,6 +1762,7 @@ svg {
   padding: var(--relay-space-3) var(--relay-space-4);
   background: var(--relay-color-status-danger-bg);
   color: var(--relay-color-status-danger-text);
+  border: var(--relay-border-width) solid var(--relay-color-status-danger-text);
   border-radius: var(--relay-radius-control);
   font-size: var(--relay-font-size-meta);
 }
@@ -1537,9 +1793,44 @@ svg {
   margin-top: var(--relay-space-1);
 }
 
+/* 提示内按钮与上下文的间距：全局骨架承担（TodayView/ConnectionsView 的页面级重复已收编）。 */
+.warning-callout > button {
+  margin: var(--relay-space-3) var(--relay-space-3) 0 0;
+}
+
 .warning-callout .inline-link {
   color: var(--relay-color-status-warning-text);
   white-space: nowrap;
+}
+
+/* 成功提示：与 warning-callout 同一骨架（色底 + 同族边框），现有用法是裸 <p>/<div>，
+   不含图标位；需要图标时由页面自行渲染 svg，由 `> svg` 规则对齐。 */
+.success-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--relay-space-3);
+  margin-top: var(--relay-space-4);
+  padding: var(--relay-space-4);
+  background: var(--relay-color-status-success-bg);
+  color: var(--relay-color-status-success-text);
+  border: var(--relay-border-width) solid
+    color-mix(in srgb, var(--relay-color-status-success-text) 35%, var(--relay-color-status-success-bg));
+  border-radius: var(--relay-radius-control);
+}
+
+.success-callout > svg {
+  margin-top: var(--relay-space-1);
+}
+
+.success-callout .inline-link {
+  color: var(--relay-color-status-success-text);
+}
+
+/* 过程性 loading 文案：语义类（供页面收编"正在读取…"等裸 helper 文案）。
+   省略号动画暂不引入——现有 motion token 无动画周期档，避免硬编码时长。 */
+.loading-text {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
 }
 
 /* 蓝图 ------------------------------------------------------------------ */
@@ -1763,9 +2054,11 @@ svg {
   font-size: var(--relay-font-size-meta);
 }
 
-.edit-form input,
+/* checkbox/radio 不进入控件基类：宽度、min-height、padding 与边框都会破坏原生小控件，
+   由全局 accent-color（见文件头部）提供主题色，选择框回归原生合理尺寸。 */
+.edit-form input:not([type="checkbox"]):not([type="radio"]),
 .edit-form textarea,
-.field input,
+.field input:not([type="checkbox"]):not([type="radio"]),
 .field textarea,
 .field select {
   width: 100%;
@@ -1788,11 +2081,6 @@ svg {
   flex-direction: row;
   align-items: center;
   gap: var(--relay-space-2);
-}
-
-.radio-option input {
-  width: auto;
-  min-height: 0;
 }
 
 /* 验收方案 -------------------------------------------------------------- */
@@ -2268,6 +2556,12 @@ svg {
   background: var(--relay-color-selection-hover);
 }
 
+.mobile-navigation-item--active {
+  background: var(--relay-color-selection-bg);
+  color: var(--relay-color-selection-text);
+  font-weight: var(--relay-font-weight-medium);
+}
+
 /* 列表与筛选 ------------------------------------------------------------ */
 
 /* 本地最小值：只用于保证筛选控件与宽表在窄窗口下仍可读，不是新的 token 尺度。 */
@@ -2365,7 +2659,9 @@ svg {
 
 .navigation-item > svg { width: var(--relay-font-size-section); height: var(--relay-font-size-section); }
 
-/* 全空间任务以宽表格为主；范围说明仍通过原抽屉入口可达。 */
+/* 全空间任务以宽表格为主；范围说明仍通过原抽屉入口可达。
+   任务列表页（任意宽度）与项目页（窄窗，见下方媒体查询）共用同一份
+   「页面内联轻量按钮」形态，声明合并为一条共享规则。 */
 .task-list-page .page-layout { grid-template-columns: minmax(0, 1fr); }
 .task-list-page .desktop-rail { display: none; }
 .task-list-page .rail-trigger {
@@ -2377,7 +2673,7 @@ svg {
 }
 
 /* 窄窗：范围说明入口不占首屏整行，改为右上轻量按钮。 */
-@media (max-width: 79.9375rem) {
+@media (width < 80rem) {
   .page-layout {
     position: relative;
   }
@@ -2392,7 +2688,9 @@ svg {
   }
 
   .list-header--compact {
-    padding-right: 9.5rem;
+    /* 避让右上角绝对定位的 rail-trigger：页面右侧主 padding + 触发按钮预留宽
+       （约 8rem，按当前「图标 + 文字」触发按钮最大宽度估算；按钮文案显著变长时需同步调整）。 */
+    padding-right: calc(var(--relay-layout-main-compactPadding) + 8rem);
   }
 }
 
@@ -2411,15 +2709,12 @@ svg {
   font-size: var(--relay-font-size-meta);
 }
 
+/* 背景/边框/圆角/字体由全局控件基座承担，这里只保留下拉特有的几何与字号。 */
 .filter-field select {
   min-width: 8rem;
   height: var(--relay-control-height);
   padding: 0 var(--relay-space-3);
-  background: var(--relay-color-bg-surface);
   color: var(--relay-color-text-primary);
-  border: var(--relay-border-width) solid var(--relay-color-border-control);
-  border-radius: var(--relay-radius-control);
-  font: inherit;
   font-size: var(--relay-font-size-body);
 }
 
@@ -2581,6 +2876,28 @@ svg {
   flex-direction: column;
   gap: var(--relay-space-1);
   margin-top: var(--relay-space-6);
+}
+
+/* 横排字段：label 与输入同行，label 定宽对齐；用于筛选条、参数行等紧凑场景。
+   不带页面特定字号，保持 body 字号。 */
+.field--row {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--relay-space-2);
+}
+
+.field--row > .field-label {
+  flex: none;
+  min-width: 7rem;
+}
+
+/* 两列网格字段：label 列与输入列对齐；用于成组参数表单。
+   与 --row 互斥使用，页面按场景二选一。 */
+.field--grid {
+  display: grid;
+  grid-template-columns: minmax(0, 10rem) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--relay-space-2) var(--relay-space-3);
 }
 
 fieldset.field {
@@ -2888,28 +3205,22 @@ fieldset.field {
   }
 }
 
-@media (max-width: 63.9375rem) {
+/* 窄窗折叠档（width < 48rem）：外壳整体收起为单列，图标导航与近期工作两栏都进移动抽屉。
+
+   2026-10-15 折叠点由 64rem 下移到 48rem：1023px 往下（150% DPI 下最常见的桌面窗口宽度）
+   保留三列外壳，不再只剩中栏 + 抽屉。页面密度（内边距、标题档）仍按 < 64rem 收敛，
+   两件事分开写：本块只负责「外壳收纳」。 */
+@media (width < 48rem) {
   .app-frame {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .sidebar-resize-handle {
-    display: none;
-  }
-
-  /* 窄窗沿用既有收纳：两列外壳整体收起，导航与近期工作由移动抽屉承担。 */
   .app-navrail,
   .app-context-rail {
     display: none;
   }
 
-  .brand {
-    padding: 0 0 var(--relay-space-4);
-    text-align: center;
-    font-size: var(--relay-font-size-meta);
-  }
-
-  .brand,
+  /* 图标导航在此档退化为纯图标条：文字标签改为读屏可读但视觉隐藏。 */
   .navigation-label {
     position: absolute;
     width: 1px;
@@ -2937,8 +3248,27 @@ fieldset.field {
     font-size: 0.75rem;
   }
 
+  /* 外壳已折叠，导航只在这里可达。折叠点之上 ☰ 隐藏：点开只会重复屏幕上已有的内容。 */
   .app-topbar .mobile-menu-button {
     display: inline-flex;
+  }
+}
+
+/* 48rem–64rem：外壳仍是三列，但用户拖拽宽度只作用于 ≥64rem 宽断点基础列
+   （见 layout.shell.sidebarWidth 描述）。这里只覆盖列宽变量，不复制 grid 模板：
+   基态 .app-frame 的三列模板在本区间继续生效。否则一台被拖到 20rem 的窗口缩到
+   768px 时会把内容列压到 layout.workspace.centerMin 以下。 */
+@media (48rem <= width < 64rem) {
+  .app-frame {
+    --relay-shell-sidebar-width: var(--relay-layout-shell-sidebarWidth);
+  }
+}
+
+/* 页面密度档（width < 64rem）：与外壳收纳无关，内边距与标题档在此宽度起收敛。
+   拖拽手柄同样从 64rem 起关闭——48rem–64rem 的近期工作栏可见但不可调宽。 */
+@media (width < 64rem) {
+  .sidebar-resize-handle {
+    display: none;
   }
 
   .app-topbar {
@@ -2967,7 +3297,8 @@ fieldset.field {
   }
 }
 
-@media (max-width: 40rem) {
+/* 并入 48rem 折行档，原 40rem：极窄时收起面包屑中段与日期，只留当前层级，顶栏不挤压主操作。 */
+@media (width < 48rem) {
   .app-topbar { gap: var(--relay-space-2); }
   .breadcrumbs { flex: 1; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
   .breadcrumb-item:not(:last-child), .topbar-date { display: none; }
@@ -2976,7 +3307,7 @@ fieldset.field {
   .data-source-button > span { display: none; }
 }
 
-@media (max-width: 47.9375rem) {
+@media (width < 48rem) {
   .app-frame {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -3002,6 +3333,12 @@ fieldset.field {
 
   .blueprint-diff {
     grid-template-columns: var(--relay-control-icon-size) minmax(0, 1fr);
+  }
+
+  /* 文件写入冻结差异的双列对比同样在窄窗收为单列（原一次性 45rem 断点并入本档，
+     与 blueprint-diff 的窄窗单列化语义一致）。 */
+  .file-write-frozen-diff__compare {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .diff-heading > *:nth-child(2) {
@@ -3108,10 +3445,6 @@ fieldset.field {
 
 .file-write-frozen-diff__compare > p {
   grid-column: 1 / -1;
-}
-
-@media (max-width: 45rem) {
-  .file-write-frozen-diff__compare { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* 证据与追溯：长 hash 与产物类型以辅助信息呈现，不挤占判断所需的标题与操作。 */
