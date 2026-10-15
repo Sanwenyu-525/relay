@@ -1,7 +1,7 @@
 import { sql } from 'kysely';
 
 import type { AssistMessagePreviewRow, AssistMessageRow, AssistProposalRow,
-  AssistSessionRow } from '../infrastructure/database-schema.js';
+  AssistSessionRow, ConversationMode } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
 
@@ -20,7 +20,7 @@ export class AssistRepository {
    */
   async insertSession(input: { id: string; workspaceId: string; projectId: string | null;
     taskId: string | null; title: string;
-    conversationMode?: 'AGENT' | 'ASSISTANT' | undefined;
+    conversationMode?: ConversationMode | undefined;
     assistantProfileId?: string | null | undefined;
     assistantProfileRevision?: bigint | null | undefined;
     assistantRoleSnapshot?: JsonObject | null | undefined }): Promise<void> {
@@ -72,6 +72,18 @@ export class AssistRepository {
       updated_at = now() where id = ${id}`.execute(this.db);
   }
 
+  /**
+   * 绑定本会话的当前工作目录（0087）。
+   *
+   * 只改目录，不改 project_id、不改 task_id，也不产生任何写准入：目录绑定是**作用域**，
+   * 写能力仍要每次动作单独经 Gateway 核对连接与权限。换绑是允许的——用户换目录就是换作用域，
+   * 下一轮立即按新目录解析，不保留旧目录的缓存。
+   */
+  async bindSessionDirectory(id: string, resourceId: string | null): Promise<void> {
+    await sql`update assist_sessions set working_resource_id = ${resourceId},
+      revision = revision + 1, updated_at = now() where id = ${id}`.execute(this.db);
+  }
+
   /** 消息序号在会话行锁下分配，保证 (session_id, seq) 严格递增且无并发空洞。 */
   async nextMessageSeq(sessionId: string): Promise<bigint> {
     const row = await sql<{ seq: bigint }>`select coalesce(max(seq), 0) + 1 as seq
@@ -83,22 +95,40 @@ export class AssistRepository {
     role: AssistMessageRow['role']; status: AssistMessageRow['status'];
     intent: AssistMessageRow['intent']; content: string | null;
     sources: readonly JsonObject[]; skillSnapshot?: JsonObject | null;
-    skillInput?: JsonObject | null }): Promise<void> {
+    skillInput?: JsonObject | null; methodSnapshot?: JsonObject | null;
+    methodAction?: 'INSPECT' | 'MODIFY' | null; methodArgument?: string | null;
+    /** 0072：本轮不记录学习状态。随命令体持久，不由模型提示决定。 */
+    learningRecordDisabled?: boolean | undefined }): Promise<void> {
     await sql`insert into assist_messages (id, session_id, seq, role, status, intent,
-      content, sources, skill_snapshot, skill_input) values (${input.id}, ${input.sessionId},
+      content, sources, skill_snapshot, skill_input, method_snapshot, method_action,
+      method_argument, learning_record_disabled) values (${input.id}, ${input.sessionId},
       ${input.seq}, ${input.role},
       ${input.status}, ${input.intent}, ${input.content},
       ${JSON.stringify(input.sources)}::jsonb,
       ${input.skillSnapshot === undefined || input.skillSnapshot === null ? null :
         JSON.stringify(input.skillSnapshot)}::jsonb,
       ${input.skillInput === undefined || input.skillInput === null ? null :
-        JSON.stringify(input.skillInput)}::jsonb)`.execute(this.db);
+        JSON.stringify(input.skillInput)}::jsonb,
+      ${input.methodSnapshot === undefined || input.methodSnapshot === null ? null :
+        JSON.stringify(input.methodSnapshot)}::jsonb,
+      ${input.methodAction ?? null},
+      ${input.methodArgument ?? null},
+      ${input.learningRecordDisabled ?? false})`.execute(this.db);
   }
 
   async readMessage(id: string, lock: boolean | 'share' = false): Promise<AssistMessageRow | undefined> {
     const suffix = lock === 'share' ? sql`for share` : lock ? sql`for update` : sql``;
     return (await sql<AssistMessageRow>`select * from assist_messages
       where id = ${id} ${suffix}`.execute(this.db)).rows[0];
+  }
+
+  /**
+   * 0072 整改：按 (session_id, seq) 读一条消息。学习结算要按轮次身份取本 round 的
+   * 用户消息作为依据绑定目标（assistant 消息的 seq-1 就是发起本轮的那条用户消息）。
+   */
+  async readMessageAtSeq(sessionId: string, seq: bigint): Promise<AssistMessageRow | undefined> {
+    return (await sql<AssistMessageRow>`select * from assist_messages
+      where session_id = ${sessionId} and seq = ${seq}`.execute(this.db)).rows[0];
   }
 
   async readLivePreview(messageId: string): Promise<AssistMessagePreviewRow | undefined> {

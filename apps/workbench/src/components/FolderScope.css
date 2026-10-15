@@ -51,21 +51,8 @@
   gap: var(--relay-space-2);
 }
 
-.folder-scope-bar {
-  display: flex;
-  flex-direction: column;
-  gap: var(--relay-space-2);
-  padding: var(--relay-space-3);
-  border-bottom: 1px solid var(--relay-color-border-separator);
-}
-
-.folder-scope-bar > p {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--relay-space-2);
-  margin: 0;
-}
+/* 原 .folder-scope-bar（消息区上方的可折叠大块）已由 FolderScopeBar 的常驻细条取代，
+   这里不再保留它的样式；本文件只管对话框内的目录控件本身。 */
 
 .execution-summary {
   display: flex;
@@ -102,4 +89,26 @@
 
 .execution-summary > p {
   margin: 0;
+}
+
+/* 原会话里的本次读取结果：逐字节取自同一份工具 result_ref，不加工、不二次读取。
+   折叠区默认收起，展开后按条目给出工具名、目标与正文，正文用等宽块保留原格式。 */
+.execution-read-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-2);
+  margin: 0;
+  padding-left: var(--relay-space-4);
+}
+
+.execution-read-results > li {
+  min-height: 0;
+}
+
+.execution-read-results .trajectory-preview {
+  max-height: 16rem;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }

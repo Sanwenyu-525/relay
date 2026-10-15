@@ -9,6 +9,8 @@
 
 产品方向不变：Goal/Project State 定义方向与事实，Task 是正式执行与验收单位，对话是意图及接续入口。保留目标→任务的继承/对齐与原成果/验证/业务提交闭环；已有项目的目标、状态、规则和任务不因开目录或新会话重置。不得把Task隐藏成只有聊天记录的状态，不得用会话摘要代替Project State，也不为打开目录虚构Goal或默认验收。
 
+2026-10-09 状态维护接续：读取 Master Spec §0.8.1、workbench-design §18.9、domain-model §12.5 和 verification-plan §24。后续将对应增量纳入授权范围时，明确的修改/收录命令可以承载对应确认，无需统一额外接受点击；日常查看基线/返回轻量核对、摘要展开及整组撤回按新规则处理，原命名接续点、候选、动作审批和完成职责保留。此原入口工作包不自动扩张为全部状态维护增量，不重做已交付片。
+
 先读 AGENTS.md、CODEX_NEXT_STEP.md、docs/README.md；本任务设计主文档：
 - Personal_Workflow_OS_Master_Spec.md §0.5
 - docs/frontend/workbench-design.md §18

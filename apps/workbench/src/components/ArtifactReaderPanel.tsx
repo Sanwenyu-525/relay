@@ -187,7 +187,7 @@ const documentHeading = document && <header className="artifact-doc-heading">
   </header>;
   const readerContent = <>
     {!compact && <h2>产物</h2>}
-    {loading && <p className="helper-text" role="status">正在读取产物版本…</p>}
+    {loading && <p className="helper-text loading-text" role="status">正在读取产物版本…</p>}
     {error && <p className="action-error" role="alert" data-testid="collab-artifact-error">{error}
       <button className="secondary-button" type="button" onClick={() => void load()}>重新读取产物</button></p>}
     {!loading && !error && versions.length === 0 && <div className="collab-artifact-state"><h3>暂时没有已保存产物</h3><p className="helper-text">保存首版后，这里会显示正文与版本。执行中的预览单独展示，不计为已保存版本。</p></div>}

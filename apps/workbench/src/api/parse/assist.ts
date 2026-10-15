@@ -1,5 +1,5 @@
 import { array, boolean, decimal, integer, isRecord, nullableInteger, nullableOptionalInteger, nullableString, object, optionalString, string, stringArray, stringList } from "../core/primitives";
-import type { RelayAssistMessage, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayConversationCheck, RelayConversationExecution, RelayPackDefinition, RelayRunToolCall, RelayRunToolCalls, RelaySkillDefinition, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate } from "../dtos/assist";
+import type { RelayAssistMessage, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDirectoryBinding, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayConversationCheck, RelayConversationExecution, RelayPackDefinition, RelayRunToolCall, RelayRunToolCalls, RelaySkillDefinition, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate } from "../dtos/assist";
 import type { DecimalRevision } from "../../types";
 
 export function assistSourceBody(source: RelayAssistSourceRef) {
@@ -132,7 +132,10 @@ export function assistSessionFrom(value: unknown): RelayAssistSession {
   // 而「不认识的模式」意味着服务端在说我们听不懂的话，这时猜一个身份最糟。
   const conversationMode = row.conversation_mode === undefined
     ? "AGENT" : string(row, "conversation_mode", "assist session");
-  if (conversationMode !== "AGENT" && conversationMode !== "ASSISTANT") {
+  // 0072 新增 'LEARNING'：学习身份是独立受限档，必须在这里被**认识**，
+  // 否则读到一个学习会话会让整份会话清单解析失败。
+  if (conversationMode !== "AGENT" && conversationMode !== "ASSISTANT"
+    && conversationMode !== "LEARNING") {
     throw new Error(SESSION_FORMAT_ERROR);
   }
   // 三个助手列同理：0059 之前没有这些列，缺失等同 null；显式的 null 也是 null。
@@ -155,7 +158,10 @@ export function assistSessionFrom(value: unknown): RelayAssistSession {
     conversationMode, assistantProfileId, assistantProfileRevision,
     personaLabel: personaLabel(role, assistantProfileRevision),
     // 同理：remember 缺失只来自 0059 之前的响应，那时的会话默认可读。
-    remember: row.remember === undefined ? true : boolean(row, "remember", "assist session") };
+    remember: row.remember === undefined ? true : boolean(row, "remember", "assist session"),
+    // 0087：working_resource_id 缺失只来自该迁移之前的响应，那时会话本来就没有目录绑定。
+    workingResourceId: row.working_resource_id === undefined
+      ? null : nullableString(row, "working_resource_id", "assist session") };
 }
 
 export function assistMessageFrom(value: unknown): RelayAssistMessage {
@@ -319,6 +325,32 @@ export function workingDirectoryFrom(value: unknown): RelayWorkingDirectory {
       detail: string(readiness, "detail", "working directory write readiness") } };
 }
 
+/**
+ * 归入项目的回执：只读会话身份、项目归属与确切修订。
+ *
+ * 这里不解析目录是否就绪，也不解析任何权限字段——归属与执行准入是两件事，
+ * 回执里没有的就不得凭空补出来。首次响应与按原 command_id 查回的回执共用它。
+ */
+export function assistSessionBindingFrom(value: unknown): RelayAssistSessionBinding {
+  const row = object(value, "assist session binding");
+  return { sessionId: string(row, "session_id", "assist session binding"),
+    projectId: string(row, "project_id", "assist session binding"),
+    revision: decimal(row, "revision", "assist session binding") };
+}
+
+/**
+ * 绑定工作目录的回执解析（0087）。
+ *
+ * 与归属回执同样逐字核对：command_id 对不上、或回执里的资源不是这次请求的那个，
+ * 都不能当成已绑定，也不能换新 ID 重试。
+ */
+export function assistSessionDirectoryBindingFrom(value: unknown): RelayAssistSessionDirectoryBinding {
+  const row = object(value, "assist session directory binding");
+  return { sessionId: string(row, "session_id", "assist session directory binding"),
+    workingResourceId: string(row, "working_resource_id", "assist session directory binding"),
+    revision: decimal(row, "revision", "assist session directory binding") };
+}
+
 export const RELAY_TOOL_CALL_STATUSES = ["REQUESTED", "PREPARED", "WAITING_APPROVAL", "SETTLED",
   "REJECTED", "ABANDONED"] as const;
 
@@ -402,6 +434,7 @@ export function conversationExecutionFrom(value: unknown): RelayConversationExec
     title: candidate === null ? null : optionalString(candidate, "title"),
     objective: candidate === null ? null : optionalString(candidate, "objective"),
     check: candidate === null ? null : conversationCheckFrom(candidate),
+    autoStart: row.auto_start === true,
     taskId: nullableString(row, "task_id", "conversation execution"),
     runId: nullableString(row, "run_id", "conversation execution"),
     revision: decimal(row, "revision", "conversation execution") };
@@ -417,6 +450,7 @@ export function conversationExecutionSummaryFrom(value: unknown): RelayConversat
     candidateStatus: string(row, "candidate_status", "conversation execution"),
     rootPath: string(row, "root_path", "conversation execution"),
     questions: stringArray(row, "questions", "conversation execution"),
+    autoStart: row.auto_start === true,
     taskId: nullableString(row, "task_id", "conversation execution"),
     runId: nullableString(row, "run_id", "conversation execution"),
     revision: decimal(row, "revision", "conversation execution") };

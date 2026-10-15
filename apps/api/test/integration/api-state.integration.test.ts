@@ -107,11 +107,13 @@ test('returns the initial state with its own revision and dependency versions', 
   assert.deepEqual(state.completed_highlight_refs, []);
   assert.deepEqual(state.selected_artifact_version_refs, []);
   assert.deepEqual(state.key_decision_refs, []);
+  // 允许动作按 STATE_ACTIONS 的真实顺序精确核对（新增 ADD_BLOCKER 属合法新动作）。
   assert.deepEqual(state.allowed_actions, [
     'SET_PHASE',
     'SET_NEXT_ACTION',
     'SELECT_ARTIFACT_VERSION',
     'ADD_CONFIRMED_RISK',
+    'ADD_BLOCKER',
     'RESOLVE_BLOCKER',
   ]);
   assert.deepEqual(state.dependency_versions, {

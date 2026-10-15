@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Plus } from "lucide-react";
+import { ChevronRight, LayoutGrid, MessageSquare, PanelRight } from "lucide-react";
 import AppDialog from "../components/AppDialog";
 import AssistView, { type AssistNavigationState, type FirstMessageOwner, type FirstMessageProcess } from "./AssistView";
 import FactBar from "../components/FactBar";
@@ -10,10 +10,15 @@ import RunControlPanel, { runLabels, stepLabels } from "../components/RunControl
 import TaskDelegatePanel, { type DelegateTarget } from "../components/TaskDelegatePanel";
 import type { ReviewNavigationState } from "../components/ReviewDecisionPanel";
 import WorkspaceSidePanel from "../components/WorkspaceSidePanel";
+import TaskViewDashboard from "../components/TaskViewDashboard";
+import TaskInspectorPanel from "../components/TaskInspectorPanel";
 import CollaborationSplitter from "../components/CollaborationSplitter";
-import { createCommandId, type RelayApiClient, type RelayControlRequest, type RelayReview,
-  type RelayConversationMode, type RelayRun, type RelayTaskDetail, type RelayWorkingDirectory } from "../api/relayClient";
-import FolderScope, { rememberOpened } from "../components/FolderScope";
+import { createCommandId, RelayApiError, type RelayApiClient, type RelayControlRequest, type RelayReview,
+  type RelayArtifact, type RelayArtifactVersionSummary, type RelayConversationMode, type RelayRun, type RelayTaskDetail,
+  type RelayWorkingDirectory } from "../api/relayClient";
+import { rememberOpened } from "../components/FolderScope";
+import FolderScopeBar from "../components/FolderScopeBar";
+import { clearActiveConversation, publishActiveConversation } from "../lib/activeConversation";
 import { clearDraftGuard, currentDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { describeLiveError } from "../lib/liveErrors";
 import { executorLabels, taskStatusLabels } from "../lib/labels";
@@ -44,6 +49,50 @@ function readRecovery(client: RelayApiClient): readonly RecoveryRecord[] {
   } catch { return []; }
 }
 
+/**
+ * 同会话接续：把先前的普通讨论（尚未归属的既有会话）归入刚打开的项目。
+ *
+ * 这条命令只改归属，不新建第二个会话，也不授予任何执行权或提案入口。
+ * 结果未知时保留原 command_id 供核对，绝不换 ID 重试；迟到响应只更新它原本那次绑定。
+ */
+type BindingNotice = { readonly sessionId: string; readonly projectId: string; readonly commandId: string;
+  /** PENDING 在途；UNKNOWN 结果未知待按原 command_id 核对；CONFIRMED 服务端确认；FAILED 服务端明确拒绝。 */
+  readonly status: "PENDING" | "UNKNOWN" | "CONFIRMED" | "FAILED"; readonly error: string | null };
+
+/**
+ * 工作目录绑定的在途提示（0087）。
+ *
+ * 与归属同一套在途/未知/失败语义，但**分开记账**：两条命令的身份、回执与撤回入口都不同，
+ * 合成一条提示会让「目录没绑上」显示成「归属失败」，而这两件事的处置方式完全不同。
+ */
+type DirectoryNotice = { readonly sessionId: string; readonly resourceId: string;
+  readonly displayName: string; readonly commandId: string;
+  readonly status: "PENDING" | "UNKNOWN" | "CONFIRMED" | "FAILED"; readonly error: string | null };
+
+/** 目录绑定的拒绝文案与归属同类但换成本次动作的说法，不复用「归入项目」的措辞。 */
+function describeDirectoryRejection(caught: unknown): string {
+  if (caught instanceof RelayApiError) {
+    if (caught.problem.status === 409) return `服务端拒绝绑定这个目录（409）：${caught.problem.detail}`;
+    if (caught.problem.status === 404) return `会话或该目录在当前作用域不可见（404）：${caught.problem.detail}`;
+    if (caught.problem.status === 403) return `目录绑定请求未被允许（403）：${caught.problem.detail}`;
+  }
+  return describeLiveError(caught).message;
+}
+
+/**
+ * 归属失败按 HTTP 状态分类，而不是复用通用错误文案：
+ * 409 是「当前事实不允许」（已归属/在途/已归档），404 是会话或项目不可见，
+ * 403 是来源或权限被拒。三类都要如实说明，不能让用户以为归属成功或失败原因含糊。
+ */
+function describeBindingRejection(caught: unknown): string {
+  if (caught instanceof RelayApiError) {
+    if (caught.problem.status === 409) return `服务端拒绝归属（409）：${caught.problem.detail}`;
+    if (caught.problem.status === 404) return `会话或项目在当前作用域不可见（404）：${caught.problem.detail}`;
+    if (caught.problem.status === 403) return `归属请求未被允许（403）：${caught.problem.detail}`;
+  }
+  return describeLiveError(caught).message;
+}
+
 export default function CollaborationView() {
   const connection = useRelayConnection();
   if (connection.mode !== "live" || !connection.client) {
@@ -61,7 +110,15 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const [search, setSearch] = useSearchParams();
   const workId = search.get("work");
   const newConversationKey = search.get("new");
-  const [sessionId, setSessionId] = useState<string | null | undefined>(() => search.has("new") ? null : undefined);
+  /**
+   * `?session=` 是**一次性深链接种子**，不是持续 Owner（与 `?new=` 同一类）：
+   * 左栏把工作区级会话列成可点入口，点了就要能回到那条讨论；而会话身份本身
+   * 仍住在协作页状态里——写回 URL 会因 App 按 pathname+search 重挂载整条路由，
+   * 连目录作用域与首条草稿一起丢掉。种子只在挂载时读一次。
+   */
+  const sessionSeed = search.get("session");
+  const [sessionId, setSessionId] = useState<string | null | undefined>(() =>
+    search.has("new") ? null : sessionSeed ?? undefined);
   // 首条消息的完整过程住在协作页：文件夹入口的 AssistView 会按会话切换重新挂载，
   // 命令身份、在途阶段、首条原文与解释结果都不能随它卸载。迟到响应与回执核对
   // 可能跨越同一次重挂载，因此 busy 与「已解释」也必须是同一份共享事实。
@@ -88,6 +145,14 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const [runError, setRunError] = useState<string | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [sideTab, setSideTab] = useState<"DOCUMENT" | "CHECK" | "HISTORY">("DOCUMENT");
+  const [workbenchView, setWorkbenchView] = useState<"chat" | "task">("task");
+  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [selectedPreviewArtifact, setSelectedPreviewArtifact] = useState<{
+    readonly artifact: RelayArtifact; readonly version: RelayArtifactVersionSummary
+  } | null>(null);
+  const previewFocusTarget = useRef<{ readonly taskId: string; readonly artifactId: string; readonly trigger: HTMLButtonElement } | null>(null);
+  const inspectorToggleRef = useRef<HTMLButtonElement | null>(null);
+  const [sidePanelRevealed, setSidePanelRevealed] = useState(false);
   const [layout, setLayout] = useState(readCollaborationLayoutPreferences);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [narrowSideOpen, setNarrowSideOpen] = useState(false);
@@ -107,6 +172,14 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const [folder, setFolder] = useState<RelayWorkingDirectory | null>(null);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [folderBusy, setFolderBusy] = useState(false);
+  // 归属成功后让目录作用域的会话面板按项目身份重读一次，续读同一条历史而不是留一个空会话。
+  const [folderReloadKey, setFolderReloadKey] = useState(0);
+  const [binding, setBinding] = useState<BindingNotice | null>(null);
+  const [bindingChecking, setBindingChecking] = useState(false);
+  // 0087：目录绑定是服务端事实，界面只呈现它的在途与结果，不自己推算「现在读哪个目录」。
+  const [directoryNotice, setDirectoryNotice] = useState<DirectoryNotice | null>(null);
+  const directoryGateRef = useRef<string | null>(null);
+  const directoryRef = useRef<DirectoryNotice | null>(null);
   const [recents, setRecents] = useState<readonly RecentWorkingDirectory[]>(() => readRecentWorkingDirectories());
   const taskRequest = useRef(0);
   const runRequest = useRef(0);
@@ -118,6 +191,19 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   workIdRef.current = workId;
   const taskRef = useRef(task);
   taskRef.current = task;
+  // 归属在 openFolder 的异步闭包里读取当前会话，不能只靠渲染时捕获的 state。
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
+  /**
+   * AssistView **实际展示**的会话（含应用自动续上的那一条）。
+   * 只做事实回报、接进 ref 而不是 state：接进 state 会改变 AssistView 的 key，
+   * 换来一次多余的重挂载与重复读取。没有它，用户打开 /agent 自动续上最近讨论后
+   * 再选目录时，协作页不知道当前会话，归属命令就发不出去。
+   */
+  const activeSessionRef = useRef<string | null | undefined>(undefined);
+  const bindingRef = useRef<BindingNotice | null>(null);
+  // 同步闸：同一会话的在途归属只允许一条，重复点击/重挂载不会发出第二条命令。
+  const bindingGateRef = useRef<string | null>(null);
 
   const updateRecoveries = useCallback((update: (current: readonly RecoveryRecord[]) => readonly RecoveryRecord[]) => {
     setRecoveries((current) => {
@@ -143,7 +229,10 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
     const guard: DraftGuard = {
       hasUnsavedChanges: () => navigationRef.current.dirty || navigationRef.current.pending !== null,
       pendingCommandId: () => navigationRef.current.pending?.commandId ?? null,
-      discard: () => { navigationRef.current.discard?.(); navigationRef.current = cleanNavigation; }
+      discard: () => { navigationRef.current.discard?.(); navigationRef.current = cleanNavigation; },
+      // 「保留并继续编辑」的焦点恢复交给编辑器登记的存活恢复目标（AssistView 上报）；
+      // 恢复由 App 守卫弹层在关闭与默认回焦之后调用，这里只做转发。
+      restoreFocus: () => { navigationRef.current.restoreFocus?.(); }
     };
     setDraftGuard(guard);
     return () => clearDraftGuard(guard);
@@ -223,12 +312,14 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
     reviewNavigationRef.current = null; reviewRef.current = null;
     setProjectTitle(null); setProjectArchivedAt(undefined); setProjectReadError(null);
     setError(null); setRunError(null); setReviewError(null);
-    setSessionId(newConversationKey !== null ? null : undefined); setNarrowSideOpen(false);
+    setSelectedPreviewArtifact(null); previewFocusTarget.current = null; setSidePanelRevealed(false);
+    setSessionId(newConversationKey !== null ? null : sessionSeed ?? undefined); setNarrowSideOpen(false);
+    publishActiveConversation({ taskId: workId, sessionId: null });
     if (newConversationKey !== null) firstMessageOwner.write({
       draft: "", pending: null, busy: false, interpreted: null, execution: null });
     void reloadAll();
     return () => { taskRequest.current++; runRequest.current++; reviewRequest.current++; };
-  }, [workId, newConversationKey, reloadAll, firstMessageOwner]);
+  }, [workId, newConversationKey, sessionSeed, reloadAll, firstMessageOwner]);
 
   useEffect(() => { void reloadRun(); void reloadReviews(); },
     // 任务事实到达后才认得它的 Run 与待判断项；换任务、换执行权或手动刷新都重新读取。
@@ -285,6 +376,35 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
   const setLayoutMode = (mode: CollaborationLayoutMode) => {
     setLayout((current) => saveCollaborationLayoutPreferences({ ...current, mode }));
   };
+  const renderedLayoutMode: CollaborationLayoutMode = workbenchView === "chat" && inspectorOpen && !sidePanelRevealed
+    ? "chat" : workbenchView === "chat" && sidePanelRevealed && layout.mode !== "result" ? "split" : layout.mode;
+  function revealSidePanel(tab: "DOCUMENT" | "CHECK" | "HISTORY" = "DOCUMENT") {
+    setSidePanelRevealed(workbenchView === "chat");
+    if (workbenchView === "chat") setInspectorOpen(false);
+    setSideTab(tab);
+    setNarrowSideOpen(true);
+  }
+  function focusPreviewReturnTarget() {
+    const target = previewFocusTarget.current;
+    if (target?.trigger.isConnected && target.trigger.closest("[hidden]") === null) {
+      target.trigger.focus();
+      return;
+    }
+    if (target?.taskId === workIdRef.current) {
+      document.getElementById(`collab-inspector-asset-${target.artifactId}`)?.focus();
+    }
+  }
+  function selectArtifactVersion(artifact: RelayArtifact, version: RelayArtifactVersionSummary, trigger: HTMLButtonElement) {
+    previewFocusTarget.current = { taskId: artifact.taskId, artifactId: artifact.id, trigger };
+    setSelectedPreviewArtifact({ artifact, version });
+    setSidePanelRevealed(false);
+    setInspectorOpen(true);
+  }
+  function closeInspector() {
+    setSelectedPreviewArtifact(null);
+    setInspectorOpen(false);
+    window.requestAnimationFrame(() => inspectorToggleRef.current?.focus());
+  }
   const refreshFacts = useCallback(() => { setReloadKey((value) => value + 1); void reloadAll(); void reloadRun(); void reloadReviews(); },
     [reloadAll, reloadRun, reloadReviews]);
   const runControl = run !== null && task !== null
@@ -303,7 +423,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
         : `Run ${run.id.slice(0, 8)}` },
     { label: "任务 / 验收", note: `任务 v${task.revision} / 验收 v${task.acceptance.acceptanceRevision}` },
     { label: "证据：检查记录", action: <button className="text-link" type="button" data-testid="collab-open-checks"
-      onClick={() => { setSideTab("CHECK"); setNarrowSideOpen(true); if (layout.mode === "chat") setLayoutMode("result"); }}>查看运行与检查详情 →</button> }
+      onClick={() => revealSidePanel("CHECK")}>查看运行与检查详情 →</button> }
   ];
   // 验收目标属于任务说明：按选定稿收进按需展开区，不再占首屏一行。两种页头分支都渲染它，
   // 因此「展开不推高页头」的同时不会因为 Run 需要介入而让它从页面消失。
@@ -318,7 +438,14 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
         revision: task.revision, executorRunId: null, allowedActions: task.allowedActions }
     : null;
   const folderProjectId = folder?.status === "READY" ? folder.association?.projectId ?? null : null;
-  const folderState = { directory: folder, recents, busy: folderBusy };
+  /**
+   * 目录打开成功 ≠ 会话绑定成功：归属未确认（在途/结果未知/被拒）时，这段讨论
+   * 仍是未归属会话，保持工作区级视图按原会话身份读取，历史、消息身份与草稿
+   * 原地保留，不因目录已打开就切到项目作用域把原历史藏掉；只有归属确认后
+   * 才切项目作用域重读同一条历史。
+   */
+  const bindingUnconfirmed = binding !== null && binding.status !== "CONFIRMED";
+  const projectScopeActive = folderProjectId !== null && !bindingUnconfirmed;
   function startFolderConversation() {
     requestTransition(() => { setSessionId(null); setSearch({ new: createCommandId() }); });
   }
@@ -335,16 +462,220 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     else proceed();
   }
 
+  /**
+   * 输入区上方的常驻槽位（协作页 §3.2/§3.3）：文件夹作用域细条 + 归属回执。
+   *
+   * 两者讲的都是「发送前」的前提，因此挂在输入卡正上方，而不是消息区顶部——
+   * 目录是执行准入的前提，不是发送选项；离发送动作越近，告警才越可执行。
+   * 归属回执紧贴细条下方、不折叠：在途、结果未知与服务端拒绝都必须能直接看见，
+   * 否则用户会以为讨论已随目录一起归入项目。
+   * 目录写命令、草稿守卫与归属命令仍只有本页一个 Owner，细条只做呈现与转发。
+   */
+  const folderAssociationLabel = folder === null || folder.association === null ? "未归属"
+    : `已归入项目：${folder.association.projectTitle}${folder.createdProject ? "（本次新建的最小项目）" : ""}`;
+  // 告警优先报更具体的那一条：目录没就绪时不再叠一句「先选目录」，两句话讲的是同一件事。
+  const folderScopeWarning = folder !== null && folder.status === "NOT_READY"
+    ? `目录尚未就绪：${folder.reason ?? "UNKNOWN"}。仍可普通讨论，但不能对项目文件执行写操作。`
+    : !projectScopeActive
+      ? "这段讨论还没有归入项目，不能进入执行。先选目录并把它归入项目。"
+      : null;
+  const composerHeader = <>
+    <FolderScopeBar directory={folder} recents={recents} busy={folderBusy} error={folderError}
+      associationLabel={folderAssociationLabel} warning={folderScopeWarning}
+      onOpen={requestFolderTransition} onNewConversation={startFolderConversation} />
+    {binding !== null && <section className="collab-binding" data-testid="collab-binding"
+      data-status={binding.status} data-session={binding.sessionId}
+      role={binding.status === "FAILED" || binding.status === "UNKNOWN" ? "alert" : "status"}>
+      {binding.status === "PENDING" && <p className="helper-text">正在把这段讨论归入项目（原命令 {binding.commandId}）…</p>}
+      {binding.status === "CONFIRMED" && <p className="helper-text">这段讨论已归入项目；原会话、历史与原消息身份都保留。</p>}
+      {binding.status === "UNKNOWN" && <>
+        <p className="action-error">{binding.error} 原命令 {binding.commandId} 待核对，不会换 ID 重试；期间原讨论与历史保持可读。</p>
+        <div className="form-actions"><button className="secondary-button" type="button"
+          data-testid="collab-binding-receipt" disabled={bindingChecking}
+          onClick={() => void checkBindingReceipt()}>{bindingChecking ? "正在查询" : "查询原命令回执"}</button></div>
+      </>}
+      {binding.status === "FAILED" && <p className="action-error">{binding.error} 讨论原文与历史保留，未归入项目；可重新选择目录再归属，或继续这段无归属讨论。</p>}
+    </section>}
+    {directoryNotice !== null && <section className="collab-binding" data-testid="collab-directory-binding"
+      data-status={directoryNotice.status} data-session={directoryNotice.sessionId}
+      data-resource={directoryNotice.resourceId}
+      role={directoryNotice.status === "FAILED" || directoryNotice.status === "UNKNOWN" ? "alert" : "status"}>
+      {directoryNotice.status === "PENDING" &&
+        <p className="helper-text">正在把这段讨论绑定到目录 {directoryNotice.displayName}（原命令 {directoryNotice.commandId}）…</p>}
+      {directoryNotice.status === "CONFIRMED" &&
+        <p className="helper-text">这段讨论当前的工作目录是 {directoryNotice.displayName}；目录只提供作用域，不授予写权限。</p>}
+      {directoryNotice.status === "UNKNOWN" &&
+        <p className="action-error">{directoryNotice.error} 原命令 {directoryNotice.commandId} 待核对，不会换 ID 重试；核对期间读取按未绑定目录处理。</p>}
+      {directoryNotice.status === "FAILED" &&
+        <p className="action-error">{directoryNotice.error} 对话仍可继续；这一轮如需读取文件会明确说明缺的是目录。</p>}
+    </section>}
+  </>;
+
+  const writeBinding = useCallback((next: BindingNotice | null) => {
+    bindingRef.current = next; setBinding(next);
+  }, []);
+  /**
+   * AssistView 的事实回报入口：只写 ref，不触发渲染，也不改变会话 key。
+   * 同时把「当前正在看哪条会话」发布给左栏——左栏与协作页在组件树上是并列的，
+   * 没有父子通道；发布的是本页已经收到的同一份事实，不是第二套业务状态。
+   */
+  const reportActiveSession = useCallback((id: string | null) => {
+    activeSessionRef.current = id;
+    publishActiveConversation({ taskId: workIdRef.current, sessionId: id });
+  }, []);
+  // 离开协作页时清掉高亮，避免左栏停在一条已经不在看的会话上。
+  useEffect(() => () => clearActiveConversation(), []);
+
+  /**
+   * 把一段尚未归属的既有讨论归入项目。
+   *
+   * 归属是服务端事实：先按真实身份读回该会话确认它确实还没归属，才发起绑定命令；
+   * 回执只改 project_id，不产生执行、权限或提案。闸按会话身份加锁，重复点击与
+   * 重挂载都不会发出第二条命令；结果未知时保留原 command_id 等核对，不换 ID 重试；
+   * 迟到响应只写它原本那次绑定，绝不改当前会话或当前项目。
+   */
+  async function bindSessionToProject(targetSessionId: string, targetProjectId: string) {
+    if (bindingGateRef.current !== null) return;
+    bindingGateRef.current = targetSessionId;
+    const commandId = createCommandId();
+    writeBinding({ sessionId: targetSessionId, projectId: targetProjectId, commandId, status: "PENDING", error: null });
+    try {
+      const existing = await client.getAssistSession(targetSessionId);
+      if (bindingGateRef.current !== targetSessionId) return;
+      if (existing.id !== targetSessionId) throw new Error("会话读取结果与原会话不匹配。");
+      if (existing.projectId !== null) {
+        // 已归属的会话不重复绑定，也不改写归属：同一项目就当作已接续，别的项目就保持原样。
+        bindingGateRef.current = null;
+        if (existing.projectId === targetProjectId) {
+          writeBinding({ sessionId: targetSessionId, projectId: targetProjectId, commandId, status: "CONFIRMED", error: null });
+          setSessionId(targetSessionId);
+          setFolderReloadKey((value) => value + 1);
+        } else writeBinding(null);
+        return;
+      }
+      const result = await client.bindAssistSessionProject({ sessionId: targetSessionId, commandId, projectId: targetProjectId });
+      if (bindingGateRef.current !== targetSessionId || bindingRef.current?.commandId !== commandId) return;
+      bindingGateRef.current = null;
+      writeBinding({ sessionId: result.sessionId, projectId: result.projectId, commandId, status: "CONFIRMED", error: null });
+      setSessionId(result.sessionId);
+      setFolderReloadKey((value) => value + 1);
+    } catch (caught) {
+      if (bindingGateRef.current !== targetSessionId || bindingRef.current?.commandId !== commandId) return;
+      const described = describeLiveError(caught);
+      if (described.kind === "transport") {
+        // 结果未知：保留原命令身份，闸继续锁住该会话，等按原 command_id 核对。
+        writeBinding({ sessionId: targetSessionId, projectId: targetProjectId, commandId, status: "UNKNOWN",
+          error: "归属命令结果未知：请按原 command_id 查询回执，不要换 ID 重试。" });
+        return;
+      }
+      bindingGateRef.current = null;
+      writeBinding({ sessionId: targetSessionId, projectId: targetProjectId, commandId, status: "FAILED",
+        error: describeBindingRejection(caught) });
+    }
+  }
+
+  /** 归属回执核对：只按原 command_id 查询，不换 ID、不改载荷、不猜结果。 */
+  async function checkBindingReceipt() {
+    const record = bindingRef.current;
+    if (record === null || record.status !== "UNKNOWN" || bindingChecking) return;
+    setBindingChecking(true);
+    try {
+      const receipt = await client.getCommandReceipt(record.commandId);
+      if (bindingRef.current?.commandId !== record.commandId) return;
+      const result = receipt.result as { session_id?: unknown; project_id?: unknown };
+      if (receipt.commandId !== record.commandId || receipt.commandType !== "BindAssistSessionProject" ||
+        result.session_id !== record.sessionId || result.project_id !== record.projectId) {
+        throw new Error("归属回执与原命令不匹配。");
+      }
+      bindingGateRef.current = null;
+      writeBinding({ ...record, status: "CONFIRMED", error: null });
+      setSessionId(record.sessionId);
+      setFolderReloadKey((value) => value + 1);
+    } catch (caught) {
+      if (bindingRef.current?.commandId !== record.commandId) return;
+      writeBinding({ ...record, error: `${describeLiveError(caught).message} 原归属命令未换新 ID，不能另发命令重试。` });
+    } finally { setBindingChecking(false); }
+  }
+
+  /**
+   * 把当前会话绑定到这个受管目录（0087 / 运行架构 §2.7.1）。
+   *
+   * 这一步把「这次读哪个目录」变成**服务端事实**：普通 Agent 的读取动作只按会话行上的
+   * 绑定解析目标，界面里那份目录状态刷新后就丢，不能作为来源。
+   *
+   * 接续规则与归属同形但独立记账：闸按会话身份加锁，重复点击与重挂载不会发出第二条命令；
+   * 结果未知时保留原 command_id 等核对，不换 ID 重试；迟到响应只写它原本那次绑定，
+   * 绝不改当前会话或当前目录。绑定是**作用域**，不授予任何权限——因此失败也不阻断对话。
+   */
+  async function bindSessionDirectory(targetSessionId: string, resourceId: string,
+    displayName: string) {
+    if (directoryGateRef.current !== null) return;
+    directoryGateRef.current = targetSessionId;
+    const commandId = createCommandId();
+    const pending: DirectoryNotice = { sessionId: targetSessionId, resourceId, displayName,
+      commandId, status: "PENDING", error: null };
+    directoryRef.current = pending; setDirectoryNotice(pending);
+    try {
+      const existing = await client.getAssistSession(targetSessionId);
+      if (directoryGateRef.current !== targetSessionId) return;
+      if (existing.id !== targetSessionId) throw new Error("会话读取结果与原会话不匹配。");
+      if (existing.workingResourceId === resourceId) {
+        // 已经绑到这个目录：不重复发命令，也不把一次没有必要的写入说成「已绑定」。
+        directoryGateRef.current = null;
+        directoryRef.current = null; setDirectoryNotice(null);
+        return;
+      }
+      const result = await client.bindAssistSessionDirectory({ sessionId: targetSessionId,
+        commandId, resourceId });
+      if (directoryGateRef.current !== targetSessionId ||
+          directoryRef.current?.commandId !== commandId) return;
+      directoryGateRef.current = null;
+      const confirmed: DirectoryNotice = { sessionId: result.sessionId, resourceId,
+        displayName, commandId, status: "CONFIRMED", error: null };
+      directoryRef.current = confirmed; setDirectoryNotice(confirmed);
+    } catch (caught) {
+      if (directoryGateRef.current !== targetSessionId ||
+          directoryRef.current?.commandId !== commandId) return;
+      const described = describeLiveError(caught);
+      directoryGateRef.current = null;
+      const failed: DirectoryNotice = { sessionId: targetSessionId, resourceId, displayName,
+        commandId, status: described.kind === "transport" ? "UNKNOWN" : "FAILED",
+        error: described.kind === "transport"
+          ? "目录绑定结果未知：请按原 command_id 查询回执，不要换 ID 重试。"
+          : describeDirectoryRejection(caught) };
+      directoryRef.current = failed; setDirectoryNotice(failed);
+    }
+  }
+
   async function openFolder(rootPath: string, projectId?: string | null) {
     setFolderBusy(true); setFolderError(null);
+    let directory: RelayWorkingDirectory;
     try {
-      const directory = await client.openWorkingDirectory({ commandId: createCommandId(), rootPath,
+      directory = await client.openWorkingDirectory({ commandId: createCommandId(), rootPath,
         ...(projectId === undefined ? {} : { projectId }) });
-      setFolder(directory);
-      setRecents((current) => rememberOpened(directory, current));
     } catch (caught) {
-      setFolderError(describeLiveError(caught).message);
-    } finally { setFolderBusy(false); }
+      setFolderError(describeLiveError(caught).message); setFolderBusy(false); return;
+    }
+    setFolder(directory);
+    setRecents((current) => rememberOpened(directory, current));
+    // 目录已归入项目且当前存在一段尚未归属的既有讨论时，把它接续到该项目：
+    // 只改归属、不新建第二个会话，也不产生任何执行或权限。绑定随目录命令一起
+    // 走同一条 requestTransition 守卫，未保存草稿与未决命令会先被拦下；
+    // 归属有自己的在途/未知/失败呈现，因此不把目录打开卡在归属完成上。
+    setFolderBusy(false);
+    const boundProjectId = directory.status === "READY" ? directory.association?.projectId ?? null : null;
+    const pendingSessionId = activeSessionRef.current ?? sessionIdRef.current;
+    if (boundProjectId !== null && pendingSessionId != null) {
+      await bindSessionToProject(pendingSessionId, boundProjectId);
+    }
+    // 0087：目录就绪后把这条目录绑到当前会话。绑定是作用域不是准入，失败只如实呈现，
+    // 不阻断对话——服务端会按「未绑定目录」以类型化原因拒掉读取，而不是假装有权限。
+    const boundResourceId = directory.status === "READY"
+      ? directory.association?.resourceId ?? null : null;
+    const afterBinding = activeSessionRef.current ?? sessionIdRef.current;
+    if (boundResourceId !== null && afterBinding != null) {
+      await bindSessionDirectory(afterBinding, boundResourceId, directory.displayName);
+    }
   }
 
   /**
@@ -391,13 +722,35 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
 
 
 {task !== null && <header className="collab-goal" data-testid="collab-goal">
+        <div className="collab-breadcrumbs">
+          <span>工作台</span>
+          <ChevronRight size={12} aria-hidden="true" />
+          <strong>{projectTitle ?? (task.projectId === null ? "无项目" : "项目")}</strong>
+          <ChevronRight size={12} aria-hidden="true" />
+          <span>{task.title}</span>
+        </div>
         <PageHeader title={task.title} testId="collab-page-head" titleHref={`/tasks/${task.id}`}
           status={<span className="status-chip">{taskStatusLabels[task.status] ?? task.status}</span>}
           actions={<>
-            {reviews.length > 0 && <button className="secondary-button" type="button" data-testid="collab-open-judgment"
+            <button
+              type="button"
+              className={`secondary-button secondary-button--compact collab-inspector-toggle-btn ${inspectorOpen ? "active" : ""}`}
+              data-testid="collab-inspector-toggle"
+              ref={inspectorToggleRef}
+              title="查看或收起工作详情"
+              aria-expanded={inspectorOpen}
+              aria-controls={`collab-inspector-${task.id}`}
               onClick={() => {
-                setDevToolsOpen(false); setSideTab("DOCUMENT"); setNarrowSideOpen(true);
-                if (layout.mode === "chat") setLayoutMode("result");
+                if (!inspectorOpen) setSidePanelRevealed(false);
+                setInspectorOpen((open) => !open);
+              }}
+            >
+              <PanelRight size={14} aria-hidden="true" />
+              <span>工作详情</span>
+            </button>
+            {reviews.length > 0 && <button className="secondary-button secondary-button--compact" type="button" data-testid="collab-open-judgment"
+              onClick={() => {
+                setDevToolsOpen(false); revealSidePanel("DOCUMENT");
                 window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-testid="collab-judgment"]')?.focus());
               }}>查看待处理 {reviews.length}</button>}
           </>}
@@ -407,7 +760,11 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
             <div className="collab-layout-modes" role="group" aria-label="协作工作区布局">
               {([["split", "双栏"], ["chat", "对话"], ["result", "成果"]] as const).map(([mode, label]) =>
                 <button key={mode} className="secondary-button" type="button" data-testid={`collab-layout-${mode}`}
-                  aria-pressed={layout.mode === mode} onClick={() => setLayoutMode(mode)}>{label}</button>)}
+                aria-pressed={layout.mode === mode} onClick={() => {
+                  setSidePanelRevealed(workbenchView === "chat" && mode !== "chat");
+                  if (workbenchView === "chat" && mode !== "chat") setInspectorOpen(false);
+                  setLayoutMode(mode);
+                }}>{label}</button>)}
             </div>
             {/* Run 控制只有一个 Owner：需要人工介入时移进页头常驻，否则留在这个默认收起的展开区。 */}
             {!runNeedsAttention && <details className="collab-facts-disclosure">
@@ -417,11 +774,11 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
               <FactBar label="任务与执行事实" testId="collab-facts" cells={factCells} />
               <p className="helper-text">控制提交回执表示 PENDING；等待安全点期间，Run 与任务执行者仍以重新查询的事实为准。</p>
             </details>}
-            {task.projectId !== null && <button className="secondary-button collab-tools-toggle" type="button"
+            {task.projectId !== null && <button className="secondary-button secondary-button--compact collab-tools-toggle" type="button"
               data-testid="collab-devtools-toggle" aria-expanded={devToolsOpen}
               onClick={() => {
                 setDevToolsOpen((open) => !open);
-                if (!devToolsOpen) { setNarrowSideOpen(true); if (layout.mode === "chat") setLayoutMode("result"); }
+                if (!devToolsOpen) revealSidePanel(sideTab);
               }}>
               {devToolsOpen ? "收起工具面板" : "文件与运行工具"}</button>}
             <ModelConnectionStrip client={client} compact />
@@ -438,6 +795,32 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
             {currentStep && <> · 当前步骤：{stepLabels[currentStep.kind] ?? currentStep.kind}</>}
             {waitReason && <> · 等待原因：{waitReason}</>}
           </p>
+          <div className="collab-views-line">
+            <div className="collab-viewtabs" role="tablist" aria-label="工作台双视图">
+              <button
+                type="button"
+                role="tab"
+                className={`collab-viewtab ${workbenchView === "chat" ? "active" : ""}`}
+                data-testid="collab-viewtab-chat"
+                aria-selected={workbenchView === "chat"}
+                onClick={() => { setWorkbenchView("chat"); setSidePanelRevealed(false); setInspectorOpen(true); }}
+              >
+                <MessageSquare size={14} aria-hidden="true" />
+                <span>聊天视图</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                className={`collab-viewtab ${workbenchView === "task" ? "active" : ""}`}
+                data-testid="collab-viewtab-task"
+                aria-selected={workbenchView === "task"}
+                onClick={() => { setWorkbenchView("task"); setSidePanelRevealed(false); }}
+              >
+                <LayoutGrid size={14} aria-hidden="true" />
+                <span>任务视图</span>
+              </button>
+            </div>
+          </div>
           {/* UNKNOWN、控制请求与失败原因不折叠：这三类一旦收进「更多操作」就不再可发现。
               事实条同步移出展开区，否则「无法确认的执行结果」只剩展开后才可见。 */}
           {runNeedsAttention && <div className="collab-run-controls" data-testid="collab-run-disclosure">
@@ -453,90 +836,90 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
         {projectWriteBlockedReason && <p className="disabled-reason" data-testid="collab-project-archive-reason">{projectWriteBlockedReason}</p>}
       </div>}
 
-      {task !== null && <div className="collab-narrow-tabs" aria-label="工作区视图" hidden={layout.mode !== "split"}>
+      {task !== null && <div className="collab-narrow-tabs" aria-label="工作区视图" hidden={renderedLayoutMode !== "split"}>
         <button type="button" className={`collab-side-tab${!narrowSideOpen ? " collab-side-tab--active" : ""}`}
-          data-testid="collab-narrow-DISCUSSION" aria-pressed={!narrowSideOpen} onClick={() => setNarrowSideOpen(false)}>讨论</button>
+          data-testid="collab-narrow-DISCUSSION" aria-pressed={!narrowSideOpen} onClick={() => {
+            setNarrowSideOpen(false);
+            if (workbenchView === "chat" && sidePanelRevealed) { setSidePanelRevealed(false); setInspectorOpen(true); }
+          }}>讨论</button>
         <button type="button" className={`collab-side-tab${narrowSideOpen ? " collab-side-tab--active" : ""}`}
-          data-testid="collab-narrow-DOCUMENT" aria-pressed={narrowSideOpen} onClick={() => setNarrowSideOpen(true)}>成果与判断</button>
+          data-testid="collab-narrow-DOCUMENT" aria-pressed={narrowSideOpen} onClick={() => revealSidePanel("DOCUMENT")}>成果与判断</button>
       </div>}
 
       <div className={`collab-columns${task === null ? " collab-columns--empty" : ""}`} data-pane={sideTab}
-        data-layout-mode={task === null ? "split" : layout.mode} data-narrow-side={narrowSideOpen ? "open" : "closed"}
+        data-layout-mode={task === null ? "split" : renderedLayoutMode} data-narrow-side={narrowSideOpen ? "open" : "closed"}
         style={{ "--relay-collab-chat-column": `${layout.chatRatio}fr`, "--relay-collab-result-column": `${1 - layout.chatRatio}fr` } as CSSProperties}>
 {task === null
-          ? <>
-              <section className="collab-center" aria-label="工作主区" data-testid="collab-center">
-                {/* 作用域行：目录是执行准入的前提，不是发送选项，因此固定在输入区上方。
-                    没打开目录时它只提供入口 —— 讨论本身不需要先选目录。 */}
-                <details className="folder-scope-bar" data-testid="folder-scope-bar">
-                  <summary data-testid="folder-scope-options">{folder?.displayName ?? "选择文件夹（可选）"}
-                    {folder && <span className="helper-text"> · 更换或查看范围</span>}</summary>
-                  {folder === null
-                    ? <p><strong>未选择目录</strong><span className="helper-text">先讨论也可以；选目录后才能对项目文件执行写操作</span></p>
-                    : <>
-                      <p><strong>{folder.displayName}</strong><span className="helper-text">{folder.canonicalRoot}</span></p>
-                      {folder.association !== null && <p className="helper-text" data-testid="folder-scope-project">
-                        项目：{folder.association.projectTitle}
-                        {folder.createdProject && "（本次新建的最小项目；目录名不是项目目标）"}</p>}
-                      {folder.status === "NOT_READY" && <p className="disabled-reason" role="status" data-testid="folder-scope-not-ready">目录尚未就绪：{folder.reason ?? "UNKNOWN"}。仍可普通讨论，但不能对项目文件执行写操作。</p>}
-                    </>}
-                  {folderError && <p className="action-error" role="alert" data-testid="folder-error">{folderError}</p>}
-                  <div className="form-actions">
-                    <FolderScope state={folderState} onOpen={requestFolderTransition}
-                      onNewConversation={startFolderConversation} />
-                  </div>
-                {/* 0051 的 project_id NOT NULL 让未归属会话无法发起执行请求，
-                    因此界面必须先说明下一步，而不是让用户拿到一条数据库约束错误。 */}
-                {folderProjectId === null && <p className="disabled-reason" role="status"
-                  data-testid="collab-unassigned-execution-hint">
-                  这段讨论还没有归入项目，不能进入执行。先选目录并把它归入项目。</p>}
-                </details>
-                <details className="collab-existing-work" data-testid="collab-existing-work">
-                  <summary>接续已有任务</summary>
-                  <TargetPicker client={client} onOpen={(next) => requestTransition(() => {
-                    setSessionId(next.sessionId); setSearch({ work: next.taskId }); setSideTab("DOCUMENT"); })} />
-                </details>
-                {folderProjectId === null
-                  ? <AssistView key={`unassigned:${newConversationKey ?? ""}:${sessionId === undefined ? "auto" : sessionId}`}
-                    workspaceLevel deferSessionCreation
-                    preferredSessionId={sessionId} standalone
-                    onNavigationStateChange={reportNavigation}
-                    onRequestNewSession={requestTransition}
-                    onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
-                    onSessionCreated={(created) => setSessionId(created)}
-                    firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage}
-                    conversationTarget={conversationTarget} onConversationTargetChange={setConversationTarget} />
-                  : <AssistView key={`folder:${folderProjectId}:${newConversationKey ?? ""}:${sessionId === undefined ? "auto" : sessionId}`}
-                    targetKind="PROJECT" targetId={folderProjectId}
-                    preferredSessionId={sessionId} standalone deferSessionCreation
-                    executionScope={folder}
-                    onNavigationStateChange={reportNavigation}
-                    onRequestNewSession={requestTransition}
-                    onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
-                    onSessionCreated={(created) => setSessionId(created)}
-                    onExecutionPrepared={(taskId) => void openExecutionTask(taskId)}
-                    conversationTarget={conversationTarget} onConversationTargetChange={setConversationTarget}
-                    firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage} />}
-              </section>
-            </>
+          ? <section className="collab-center" aria-label="工作主区" data-testid="collab-center">
+              {/* 顶部两个 details 大块（选择文件夹、接续已有任务）已删除：它们压在首屏最显眼处，
+                  展开体量大、折叠后又只剩一行摘要。功能全部保留并换位——文件夹作用域收成输入卡
+                  上方的常驻细条（composerHeader），「接续已有任务」迁到左栏就地展开区。 */}
+              {/* 归属未确认时继续用工作区级会话面板：原历史与消息身份留在原地，
+                  讨论输入不受限，依赖归属的执行入口由细条告警与空 executionScope 关闭。 */}
+              {!projectScopeActive
+                ? <AssistView key={`unassigned:${newConversationKey ?? ""}:${sessionId === undefined ? "auto" : sessionId}`}
+                  workspaceLevel deferSessionCreation
+                  preferredSessionId={sessionId} standalone
+                  composerHeader={composerHeader}
+                  onNavigationStateChange={reportNavigation}
+                  onRequestNewSession={requestTransition}
+                  onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
+                  onSessionCreated={(created) => setSessionId(created)}
+                  onActiveSessionChange={reportActiveSession}
+                  firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage}
+                  conversationTarget={conversationTarget} onConversationTargetChange={setConversationTarget} />
+                : <AssistView key={`folder:${folderProjectId}:${folderReloadKey}:${newConversationKey ?? ""}:${sessionId === undefined ? "auto" : sessionId}`}
+                  targetKind="PROJECT" targetId={folderProjectId}
+                  preferredSessionId={sessionId} standalone deferSessionCreation
+                  executionScope={folder}
+                  composerHeader={composerHeader}
+                  onNavigationStateChange={reportNavigation}
+                  onRequestNewSession={requestTransition}
+                  onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
+                  onSessionCreated={(created) => setSessionId(created)}
+                  onActiveSessionChange={reportActiveSession}
+                  onExecutionPrepared={(taskId) => void openExecutionTask(taskId)}
+                  conversationTarget={conversationTarget} onConversationTargetChange={setConversationTarget}
+                  firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage} />}
+            </section>
           : <>
-            <section className="collab-center" aria-label="工作主区" data-testid="collab-center" hidden={layout.mode === "result"}>
-              <AssistView key={`${task.id}:${sessionId === undefined ? "auto" : sessionId}`}
-                targetKind="TASK" targetId={task.id}
-                preferredSessionId={sessionId} standalone
-                externalWriteBlockedReason={projectWriteBlockedReason}
-                onNavigationStateChange={reportNavigation}
-                onRequestNewSession={requestTransition}
-                onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
-                onSessionCreated={(created) => setSessionId(created)} />
+            <section className="collab-center" aria-label="工作主区" data-testid="collab-center" hidden={renderedLayoutMode === "result"}>
+              <div className="collab-task-view-container" hidden={workbenchView !== "task"}>
+                <TaskViewDashboard
+                  client={client}
+                  task={task}
+                  run={run}
+                  projectTitle={projectTitle}
+                  reviews={reviews}
+                  openReview={openReview}
+                  reviewError={reviewError}
+                  reviewWriteBlockedReason={reviewWriteBlockedReason}
+                  projectWriteBlockedReason={projectWriteBlockedReason}
+                  onReviewNavigationStateChange={reportReviewNavigation}
+                  onRefresh={refreshFacts}
+                  onSelectFileForPreview={selectArtifactVersion}
+                  onSwitchToChat={() => setWorkbenchView("chat")}
+                  onOpenInspector={() => setInspectorOpen(true)}
+                />
+              </div>
+              <div className="collab-chat-view-container" hidden={workbenchView !== "chat"}>
+                <AssistView key={`${task.id}:${sessionId === undefined ? "auto" : sessionId}`}
+                  targetKind="TASK" targetId={task.id}
+                  preferredSessionId={sessionId} standalone
+                  externalWriteBlockedReason={projectWriteBlockedReason}
+                  onNavigationStateChange={reportNavigation}
+                  onRequestNewSession={requestTransition}
+                  onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
+                  onSessionCreated={(created) => setSessionId(created)} />
+              </div>
             </section>
 
-            <CollaborationSplitter ratio={layout.chatRatio} hidden={layout.mode !== "split"}
+            <CollaborationSplitter ratio={layout.chatRatio} hidden={renderedLayoutMode !== "split"}
               onRatioChange={(chatRatio, commit) => setLayout((current) => {
                 const next = { ...current, chatRatio };
                 return commit ? saveCollaborationLayoutPreferences(next) : next;
               })} />
-            <div className="collab-result-pane" hidden={layout.mode === "chat"}>
+            <div className="collab-result-pane" hidden={renderedLayoutMode === "chat"}>
             <WorkspaceSidePanel client={client} task={task} run={run} draft={draft}
               tab={sideTab} onTabChange={setSideTab}
               devToolsOpen={devToolsOpen} onCloseDevTools={() => setDevToolsOpen(false)}
@@ -552,6 +935,27 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
               onReviewNavigationStateChange={reportReviewNavigation}
               onRefresh={refreshFacts} />
             </div>
+
+            {inspectorOpen && (
+              <TaskInspectorPanel
+                key={task.id}
+                client={client}
+                task={task}
+                run={run}
+                projectTitle={projectTitle}
+                folder={folder}
+                mode={conversationTarget.mode}
+                selectedArtifact={selectedPreviewArtifact?.artifact.taskId === task.id ? selectedPreviewArtifact : null}
+                onSelectArtifactVersion={selectArtifactVersion}
+                onCloseFilePreview={() => {
+                  setSelectedPreviewArtifact(null);
+                  window.requestAnimationFrame(focusPreviewReturnTarget);
+                }}
+                onClose={closeInspector}
+                onSwitchToTask={() => setWorkbenchView("task")}
+                isChatView={workbenchView === "chat"}
+              />
+            )}
           </>}
       </div>
     </div>
@@ -572,52 +976,5 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
           }}>丢弃并继续</button>}
       </div>
     </AppDialog>
-  </section>;
-}
-
-function TargetPicker({ client, onOpen }: {  client: RelayApiClient;
-  onOpen: (next: { readonly taskId: string; readonly sessionId: string | null | undefined }) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [tasks, setTasks] = useState<readonly { id: string; title: string }[]>([]);
-  const [selected, setSelected] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const request = useRef(0);
-
-  useEffect(() => {
-    if (!open) return;
-    const version = ++request.current;
-    setLoading(true); setError(null);
-    void client.getWorkspaceTasksPage(null).then((page) => {
-      if (version !== request.current) return;
-      setTasks(page.items.map((item) => ({ id: item.id, title: item.title }))); setLoading(false);
-    }, (caught: unknown) => {
-      if (version !== request.current) return;
-      setError(describeLiveError(caught).message); setLoading(false);
-    });
-    return () => { request.current++; };
-  }, [open, client]);
-
-  if (!open) return <button className="primary-button" type="button" data-testid="collab-pick-target" onClick={() => setOpen(true)}>
-    <Plus aria-hidden="true" />选择要推进的任务</button>;
-  return <section className="collab-picker" data-testid="collab-target-picker">
-    <h2>选择要推进的任务</h2>
-    <p className="helper-text">讨论会留在这项任务中，方便下次继续。</p>
-    {loading && <p className="helper-text" role="status">正在读取任务…</p>}
-    {error && <p className="action-error" role="alert">{error}</p>}
-    {!loading && !error && tasks.length === 0 && <p className="helper-text">当前工作空间还没有任务。
-      <Link className="text-link" to="/tasks?view=create">前往新建任务</Link></p>}
-    <label className="field"><span className="field-label">任务</span>
-      <select data-testid="collab-target-select" value={selected} disabled={loading || error !== null || tasks.length === 0}
-        onChange={(event) => setSelected(event.target.value)}>
-        <option value="">{loading ? "正在读取任务…" : "请选择任务"}</option>
-        {tasks.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
-      </select></label>
-    <div className="form-actions">
-      <button className="primary-button" type="button" data-testid="collab-target-open" disabled={!selected || loading || error !== null}
-        onClick={() => { if (selected) onOpen({ taskId: selected, sessionId: undefined }); }}>打开这项工作</button>
-      <button className="secondary-button" type="button" onClick={() => setOpen(false)}>取消</button>
-    </div>
   </section>;
 }

@@ -90,6 +90,8 @@ export default function DevToolsPanel({ client, projectId, taskId, run, onClose 
         {tab === "FILES" && <section data-testid="devtools-files">
           <h3>受管目录</h3>
           <p className="helper-text">这里只列出该 Project 已登记的受管目录。目录浏览接口尚未接入（待接入），因此不推断本机任意路径可读。</p>
+          <p className="helper-text">下面是一次读取时的快照，不是实时监视：目录在窗口打开前后被停用、归档或以同一路径重新登记，
+            都要重新读取才知道；Git 读取也会把服务端的拒绝原样呈现。</p>
           {loading && <p className="helper-text" role="status">正在读取受管目录…</p>}
           {resourceError && <p className="action-error" role="alert" data-testid="devtools-resource-error">{resourceError}</p>}
           {!loading && !resourceError && resources.length === 0 && <p className="helper-text">当前项目没有登记受管目录；这不是“工作目录干净”的结论。</p>}
@@ -97,6 +99,8 @@ export default function DevToolsPanel({ client, projectId, taskId, run, onClose 
             <span><code className="hash-code">{resource.canonicalRoot}</code>
               <small>状态 {resource.status} · 资源修订 v{resource.revision} · 写身份已绑定：{resource.fileWriteIdentityBound ? "是" : "否"}</small></span>
           </li>)}</ul>}
+          <button className="secondary-button" type="button" data-testid="devtools-reload-resources"
+            disabled={loading} onClick={() => void loadResources()}>重新读取受管目录</button>
           <h3>本任务的受管产物</h3>
           <p className="helper-text">受管产物是任务产物版本，工作目录文件是受管目录下的普通文件；两者来源不同，不混成同一版本。产物正文在右侧产物区按确切版本阅读。</p>
           <Link className="text-link" to={`/tasks/${taskId}?tab=artifacts`}>打开任务产物版本</Link>

@@ -17,7 +17,13 @@ function response(body: unknown, status = 200): Response {
 }
 
 const fingerprint = "a".repeat(64);
-function verificationBody(overrides: Record<string, unknown> = {}) {
+type VerificationBody = {
+  current_config_fingerprint: string | null;
+  last: ReturnType<typeof lastBody> | null;
+  matches_current_config: boolean;
+  worker_startup_validation: string;
+};
+function verificationBody(overrides: Partial<VerificationBody> = {}): VerificationBody {
   return {
     current_config_fingerprint: fingerprint,
     last: null,
@@ -101,15 +107,21 @@ describe("设置页模型端口状态", () => {
   it("live 显示真实 Provider：已配置未验证 → 点击验证 → 验证通过", async () => {
     connect();
     let verifyCalls = 0;
+    // 假服务必须像真服务一样记住验证结果：POST /verify 之后 GET /verification 要读得到 last 与
+    // matches_current_config。此前夹具恒返回 last=null，只因客户端在本地拼装状态才「通过」——
+    // 那正是把归一化结论交给前端推导的缺陷。
+    let stored: VerificationBody | null = null;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/attention/interventions")) return response({ items: [] });
       if (url === `${root}/model-port`) return response({ provider: "openai-compatible", configured: true,
         model: "gpt-test", base_url: "https://api.example.com/v1", api_key: "sk-leak-attempt" });
-      if (url === `${root}/model-port/verification`) return response(verificationBody());
+      if (url === `${root}/model-port/verification`) return response(stored ?? verificationBody());
       if (url === `${root}/model-port/verify` && init?.method === "POST") {
         verifyCalls += 1;
-        return response(lastBody());
+        const last = lastBody();
+        stored = verificationBody({ last, matches_current_config: true });
+        return response(last);
       }
       throw new Error(`Unexpected ${url}`);
     }));
@@ -128,11 +140,16 @@ describe("设置页模型端口状态", () => {
     await button.trigger("click");
     await flush();
     expect(verifyCalls).toBe(1);
+    // 通过状态必须来自重读的服务端事实，不是 POST 成功就算通过：服务端仍说 last=null 时
+    // 即使命令成功也不得显示「验证通过」。
     expect(mounted.wrapper.get('[data-testid="service-state"]').text()).toContain("验证通过");
     const detail = mounted.wrapper.get('[data-testid="verification-detail"]');
     expect(detail.text()).toContain("与当前配置一致");
     expect(detail.text()).toContain("真实任务执行成功");
     expect(detail.text()).toContain("连接验证通过");
+    // 验证时间用本设备可读格式显示，原始 ISO 串只保留在 time.dateTime 属性里。
+    expect(detail.text()).not.toContain("2026-09-28T10:00:00.000Z");
+    expect(detail.text()).toContain("2026-09-28 18:00:00");
     expect(mounted.wrapper.text()).not.toContain("sk-leak-attempt");
   });
 
@@ -154,6 +171,9 @@ describe("设置页模型端口状态", () => {
     expect(states.text()).toContain("验证失败");
     expect(mounted.wrapper.get('[data-testid="verify-error-guide"]').text())
       .toContain("核对 API Key");
+    // 错误分类 chip 用中文短名，原枚举 AUTH 只保留在 title 供核对。
+    expect(mounted.wrapper.get('[data-testid="verification-detail"]').text()).toContain("认证失败");
+    expect(mounted.wrapper.text()).not.toContain("AUTH");
   });
 
   it("配置指纹不匹配时显示已配置未验证，不沿用旧通过结果", async () => {
@@ -176,6 +196,29 @@ describe("设置页模型端口状态", () => {
     expect(states.text()).toContain("配置变更后旧验证结果自动失效");
     expect(mounted.wrapper.get('[data-testid="verification-detail"]').text())
       .toContain("旧结果不再算已验证");
+  });
+
+  // 守住「验证通过」只能来自服务端读取：POST /verify 返回成功也不够，若 GET /verification
+  // 仍说没有匹配的验证记录，界面必须停在「已配置未验证」。
+  it("验证命令成功但服务端未记录匹配结果时，不得显示验证通过", async () => {
+    connect();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/attention/interventions")) return response({ items: [] });
+      if (url === `${root}/model-port`) return response({ provider: "openai-compatible", configured: true,
+        model: "gpt-test", base_url: "https://api.example.com/v1" });
+      if (url === `${root}/model-port/verification`) return response(verificationBody({ last: null, matches_current_config: false }));
+      if (url === `${root}/model-port/verify` && init?.method === "POST") return response(lastBody());
+      throw new Error(`Unexpected ${url}`);
+    }));
+    const mounted = await mountModelSettings(); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="verify-model-port"]').trigger("click");
+    await flush();
+    // 断言精确到状态 chip：行标题「模型验证成功」是固定 dt 文案，不随状态变化；
+    // 服务端未记录匹配结果时 chip 必须停在「已配置未验证」，不得显示「验证通过/验证成功」。
+    const row = mounted.wrapper.get('[data-testid="service-state-verified"]');
+    expect(row.text()).toContain("已配置未验证");
+    expect(row.get(".status-chip").text()).toBe("已配置未验证");
   });
 
   it("配置残缺显示当前不可用", async () => {
@@ -207,9 +250,13 @@ describe("设置页模型端口状态", () => {
     await mounted.wrapper.get('[data-testid="settings-group-execution"]').trigger("click");
     const text = mounted.wrapper.text();
     expect(text).not.toContain("策略与调度尚未冻结");
+    // 界面只保留用户语言的摘要；规格全文降级为悬浮 title，不再整段直出。
     expect(text).toContain("仅提醒必须由用户介入的事项");
     expect(text).toContain("同一事项只提醒一次");
-    expect(text).toContain("合并为一条通知");
+    expect(text).not.toContain("合并为一条通知");
+    expect(text).toContain("暂不可修改");
+    // 不提供假开关：执行策略面板不出现任何表单控件。
+    expect(mounted.wrapper.get("#settings-panel-execution").findAll("input, select, textarea")).toHaveLength(0);
   });
 
   it("live 显示真实 Provider 的模型与端点，服务端密钥字段即使出现也不渲染", async () => {

@@ -73,8 +73,8 @@ it("桌面标题栏搜索打开原命令面板，应用顶栏不重复显示搜�
   expect(mounted.wrapper.get('[data-testid="titlebar-search"]').exists()).toBe(true);
   await mounted.wrapper.get('[data-testid="titlebar-search"]').trigger("click");
   expect(document.querySelector('[data-testid="command-palette"]')).not.toBeNull();
-  expect(mounted.wrapper.find('.desktop-titlebar [data-testid="titlebar-search"]').exists()).toBe(false);
-  expect(mounted.wrapper.find('.app-topbar [data-testid="titlebar-search"]').exists()).toBe(true);
+  expect(mounted.wrapper.find('.desktop-titlebar [data-testid="titlebar-search"]').exists()).toBe(true);
+  expect(mounted.wrapper.find('.app-topbar [data-testid="titlebar-search"]').exists()).toBe(false);
 });
 
 it("标题栏后退遵守新建任务未保存草稿保护", async () => {

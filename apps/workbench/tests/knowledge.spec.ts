@@ -51,6 +51,14 @@ function searchItem(title: string) {
     matched_fields: ["title"], source_ref: `knowledge:${knowledgeId}:v1`, status: "ACTIVE", project_id: null };
 }
 
+function rule(id: string, overrides: Record<string, unknown> = {}) {
+  return { id, scope: "WORKSPACE", scope_id: workspaceId, project_id: null, task_id: null,
+    status: "ACTIVE", revision: "0", current_version: "1", rule_key: "citation-required",
+    statement: "所有引用须核验", strength: "PREFERENCE", applicability: "AI_RUN",
+    enforcement: "POST_CHECK", method: null, target_spec: {},
+    created_at: "2026-09-23T00:00:00.000Z", updated_at: "2026-09-23T00:00:00.000Z", ...overrides };
+}
+
 function activate(): void {
   activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
 }
@@ -62,6 +70,53 @@ afterEach(() => {
 });
 
 describe("P10 information workbench", () => {
+  it("右栏对空范围按资料类型说明没有对象，且读取失败不会成为成功空态", async () => {
+    activate();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `${base}/knowledge` || url === `${base}/memories`) return response(200, []);
+      throw new Error(`unexpected ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench("/knowledge"); unmount = mounted.unmount; await flush();
+    const emptyKnowledge = mounted.wrapper.get('[data-testid="knowledge-detail-empty-state"]');
+    expect(emptyKnowledge.text()).toContain("当前范围没有资料");
+    expect(emptyKnowledge.text()).not.toContain("选择一项资料");
+    await mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]').trigger("click"); await flush();
+    const emptyMemory = mounted.wrapper.get('[data-testid="knowledge-detail-empty-state"]');
+    expect(emptyMemory.text()).toContain("当前范围没有记忆");
+    expect(emptyMemory.text()).not.toContain("选择一项记忆");
+
+    mounted.unmount(); unmount = null;
+    activate();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === `${base}/knowledge`) return response(403, { code: "FORBIDDEN", detail: "资料不可读取" });
+      throw new Error(`unexpected ${String(input)}`);
+    }));
+    const failed = await mountWorkbench("/knowledge"); unmount = failed.unmount; await flush();
+    expect(failed.wrapper.get('[data-testid="knowledge-read-error"]').text()).toContain("资料不可读取");
+    const failedDetail = failed.wrapper.get('[data-testid="knowledge-detail-empty-state"]');
+    expect(failedDetail.text()).toContain("读取失败");
+    expect(failedDetail.text()).not.toContain("当前范围没有资料");
+  });
+
+  it("资料右栏在读取中显示进度，非空列表选择后仍显示真实详情", async () => {
+    activate();
+    let release: ((value: Response) => void) | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `${base}/knowledge`) return new Promise<Response>((resolve) => { release = resolve; });
+      if (url === `${base}/knowledge/${knowledgeId}`) return response(200, knowledge());
+      if (url === `${base}/knowledge/${knowledgeId}/versions`) return response(200, []);
+      throw new Error(`unexpected ${url}`);
+    }));
+    const loading = await mountWorkbench("/knowledge"); unmount = loading.unmount;
+    expect(loading.wrapper.get('[data-testid="knowledge-detail-empty-state"]').text()).toContain("正在读取");
+    release!(response(200, [knowledge()])); await flush();
+    expect(loading.wrapper.get(".knowledge-detail").text()).toContain("设计资料");
+    expect(loading.wrapper.find('[data-testid="knowledge-detail-empty-state"]').exists()).toBe(false);
+  });
+
   it("资料类型页签关联同页正文，方向键首尾循环且忽略输入法合成", async () => {
     activate();
     const fetchMock = vi.fn(async (_input: string, _init?: RequestInit) => response(200, [])); vi.stubGlobal("fetch", fetchMock);
@@ -434,5 +489,121 @@ describe("P10 information workbench", () => {
     expect(rows[1]!.text()).toContain("当前 v2");
     expect(rows[1]!.text()).toContain("工作空间");
     expect(mounted.wrapper.get('[data-testid="knowledge-detail-scope"]').text()).toContain(`项目 ${projectId}`);
+  });
+
+  it("规则与搜索结果用中文呈现枚举，原枚举降级保留，目标约束不直出 JSON", async () => {
+    activate();
+    const ruleId = "66666666-6666-4666-8666-666666666666";
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const url = String(input);
+      if (url === `${base}/rules`) return response(200, [rule(ruleId)]);
+      if (url === `${base}/rules/${ruleId}`) return response(200, rule(ruleId));
+      if (url === `${base}/rules/${ruleId}/versions`) return response(200, [
+        { rule_id: ruleId, version: "1", rule_key: "citation-required", statement: "旧版本陈述",
+          strength: "HARD", applicability: "AI_RUN", enforcement: "PRE_ACTION", method: null,
+          target_spec: {}, created_at: "2026-09-20T00:00:00.000Z" }]);
+      if (url.includes("/search?")) return response(200, { items: [{ type: "RULE", id: ruleId,
+        version: "1", title: "规则搜索", snippet: "引用须核验", matched_fields: ["title"],
+        source_ref: `rule:${ruleId}:v1`, status: "ACTIVE", project_id: null }], next_cursor: null });
+      throw new Error(`unexpected request ${url}`);
+    }));
+    const mounted = await mountWorkbench("/knowledge?kind=RULE"); unmount = mounted.unmount;
+    await flush();
+    // 列表行状态与详情同页一致，使用中文映射。
+    const row = mounted.wrapper.get(".knowledge-row");
+    expect(row.text()).toContain("有效");
+    expect(row.text()).not.toContain("ACTIVE");
+    // 管理面板：中文承担阅读，原枚举以 small（title 属性）保留供核对。
+    const facts = mounted.wrapper.get('[data-testid="knowledge-rule-facts"]');
+    expect(facts.text()).toContain("偏好（PREFERENCE）");
+    expect(facts.text()).toContain("工作空间（WORKSPACE）");
+    expect(facts.text()).toContain("AI 运行时（AI_RUN）");
+    // 目标约束：空对象说「未提供具体检查对象」，不把 {} 直出到阅读位。
+    const spec = mounted.wrapper.get('[data-testid="knowledge-rule-target-spec"]');
+    expect(spec.text()).toContain("未提供具体检查对象");
+    expect(spec.text()).not.toContain("{");
+    expect(mounted.wrapper.find('[data-testid="knowledge-rule-target-spec-json"]').exists()).toBe(false);
+    // 版本历史同样映射强度与执行检查。
+    const history = mounted.wrapper.get(".knowledge-history");
+    expect(history.text()).toContain("硬约束（HARD）");
+    expect(history.text()).toContain("动作前检查（PRE_ACTION）");
+    // 搜索结果：状态映射；来源路径保留但降级为 code 小字。
+    await mounted.wrapper.get('[data-testid="knowledge-search"]').setValue("规则");
+    await flush(300);
+    const result = mounted.wrapper.get(".knowledge-result");
+    expect(result.text()).toContain("有效");
+    expect(result.text()).not.toContain("ACTIVE");
+    expect(result.find("code").text()).toBe(`rule:${ruleId}:v1`);
+  });
+
+  it("列表空态区分首装、项目范围为空与搜索无匹配三种语义", async () => {
+    activate();
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const url = String(input);
+      if (url === `${base}/knowledge`) return response(200, []);
+      throw new Error(`unexpected request ${url}`);
+    }));
+    const workspace = await mountWorkbench("/knowledge"); unmount = workspace.unmount; await flush();
+    // 首装语义：工作空间还没有任何资料，引导新建。
+    const wsEmpty = workspace.wrapper.get('[data-testid="knowledge-list-empty"]');
+    expect(wsEmpty.text()).toContain("还没有资料");
+    expect(wsEmpty.text()).toContain("新建");
+    workspace.unmount(); unmount = null;
+
+    activate();
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const url = String(input);
+      if (url === `${base}/projects/${projectId}`) return response(200, project());
+      if (url === `${base}/knowledge?project_id=${projectId}`) return response(200, []);
+      throw new Error(`unexpected request ${url}`);
+    }));
+    const projectView = await mountWorkbench(`/projects/${projectId}/knowledge`); unmount = projectView.unmount; await flush();
+    // 范围为空语义：说清项目范围只显示项目内容，不与首装混同。
+    const projEmpty = projectView.wrapper.get('[data-testid="knowledge-list-empty"]');
+    expect(projEmpty.text()).toContain("当前项目还没有资料");
+    expect(projEmpty.text()).toContain("工作空间范围");
+    projectView.unmount(); unmount = null;
+
+    activate();
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const url = String(input);
+      if (url === `${base}/knowledge`) return response(200, [knowledge()]);
+      if (url === `${base}/knowledge/${knowledgeId}`) return response(200, knowledge());
+      if (url === `${base}/knowledge/${knowledgeId}/versions`) return response(200, []);
+      if (url.includes("/search?")) return response(200, { items: [], next_cursor: null });
+      throw new Error(`unexpected request ${url}`);
+    }));
+    const searchView = await mountWorkbench("/knowledge"); unmount = searchView.unmount; await flush();
+    await searchView.wrapper.get('[data-testid="knowledge-search"]').setValue("不存在的词");
+    await flush(300);
+    // 搜索无匹配语义：提示换关键词，不暗示全空。
+    const searchEmpty = searchView.wrapper.get('[data-testid="knowledge-search-empty"]');
+    expect(searchEmpty.text()).toContain("不存在的词");
+    expect(searchEmpty.text()).toContain("关键词");
+    expect(searchEmpty.text()).not.toContain("还没有资料");
+  });
+
+  it("规则表单选项统一为「中文 · 原枚举」风格", async () => {
+    activate();
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const url = String(input);
+      if (url === `${base}/rules`) return response(200, []);
+      throw new Error(`unexpected request ${url}`);
+    }));
+    const mounted = await mountWorkbench("/knowledge?kind=RULE"); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="knowledge-create"]').trigger("click");
+    const options = mounted.wrapper.get('[data-testid="knowledge-form"]').findAll("option")
+      .map((option) => option.text());
+    expect(options).toContain("工作空间 · WORKSPACE");
+    expect(options).toContain("项目 · PROJECT");
+    expect(options).toContain("任务 · TASK");
+    expect(options).toContain("偏好 · PREFERENCE");
+    expect(options).toContain("硬约束 · HARD");
+    expect(options).toContain("动作前检查 · PRE_ACTION");
+    expect(options).toContain("动作后检查 · POST_CHECK");
+    expect(options).toContain("文档结构 · MARKDOWN_STRUCTURE");
+    expect(options).toContain("引用存在 · CITATION_EXISTS");
+    expect(options).not.toContain("WORKSPACE");
+    expect(options).not.toContain("PREFERENCE");
   });
 });

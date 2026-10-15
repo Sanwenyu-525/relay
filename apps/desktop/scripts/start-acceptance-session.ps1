@@ -2,14 +2,20 @@
 # This is test infrastructure; it never configures or manages an existing user PostgreSQL service.
 [CmdletBinding()]
 param([switch]$SkipDesktop, [switch]$InstallGraph, [switch]$UseCLocale,
-  [ValidatePattern('^[0-9a-f]{32}$')][string]$SessionId)
+  [ValidatePattern('^[0-9a-f]{32}$')][string]$SessionId,
+  # build-release.ps1 writes apps\desktop\release by default and <workspace>\test-release
+  # with -TestPackage. The launcher used to hardcode the first one, so a -TestPackage
+  # build was never the package this session actually started. Pass the built directory.
+  [string]$ReleaseRoot)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $desktopRoot = Split-Path -Parent $PSScriptRoot
 $appsRoot = Split-Path -Parent $desktopRoot
 $workspaceRoot = Split-Path -Parent $appsRoot
-$releaseRoot = Join-Path $desktopRoot 'release'
+$releaseRoot = if ($ReleaseRoot) {
+  [IO.Path]::GetFullPath($ReleaseRoot).TrimEnd('\')
+} else { Join-Path $desktopRoot 'release' }
 $exe = Join-Path $releaseRoot 'relay-desktop.exe'
 $node = Join-Path $releaseRoot 'node.exe'
 $apiRoot = Join-Path $releaseRoot 'api'
@@ -23,6 +29,27 @@ $requiredInputs = @($exe, $node, (Join-Path $apiRoot 'dist\src\cli\migrate.js'),
 if ($InstallGraph) { $requiredInputs += $graphInstaller }
 foreach ($required in $requiredInputs) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Required acceptance input is missing: $required" }
+}
+
+# Package identity: the session must start the exact directory-package it was pointed at.
+# Read only the flat manifest fields; the manifest holds one hash per resource file.
+$packageManifestPath = Join-Path $releaseRoot 'desktop-build-manifest.json'
+if (-not (Test-Path -LiteralPath $packageManifestPath -PathType Leaf)) {
+  throw "The package directory has no build-release manifest: $packageManifestPath"
+}
+$packageSummaryText = & $node '-e' @'
+const fs = require('node:fs');
+const manifest = JSON.parse(fs.readFileSync(process.argv[1], 'utf8').replace(/^\uFEFF/, ''));
+if (manifest.schema_version !== 1 || typeof manifest.artifact_sha256 !== 'string') process.exit(2);
+process.stdout.write(JSON.stringify({ artifact_sha256: manifest.artifact_sha256,
+  built_at_utc: manifest.built_at_utc ?? null,
+  build_input_fingerprint_sha256: manifest.build_input_fingerprint_sha256 ?? null }));
+'@ $packageManifestPath
+if ($LASTEXITCODE -ne 0) { throw "Unreadable build-release manifest: $packageManifestPath" }
+$packageSummary = $packageSummaryText | ConvertFrom-Json
+$releaseSha256 = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($releaseSha256 -ne $packageSummary.artifact_sha256) {
+  throw "Package executable does not match its own manifest artifact_sha256 ($releaseSha256 vs $($packageSummary.artifact_sha256)). Rebuild the package directory instead of launching a stale one."
 }
 
 $sessionId = if ($SessionId) { $SessionId } else { [guid]::NewGuid().ToString('N') }
@@ -52,7 +79,11 @@ try {
     schema_version = 1
     session_id = $sessionId
     release_exe = $exe
-    release_sha256 = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+    release_sha256 = $releaseSha256
+    package_root = $releaseRoot
+    package_manifest_sha256 = (Get-FileHash -LiteralPath $packageManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    package_built_at_utc = $packageSummary.built_at_utc
+    package_build_input_fingerprint_sha256 = $packageSummary.build_input_fingerprint_sha256
     cluster_path = $cluster
     postgres_port = $port
     desktop_pid = 0
@@ -106,7 +137,10 @@ try {
   Write-Host "session_root=$sessionRoot"
   Write-Host "postgres_port=$port"
   Write-Host "desktop_pid=$($state.desktop_pid)"
-  Write-Host "release_sha256=$((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant())"
+  Write-Host "package_root=$releaseRoot"
+  Write-Host "package_built_at_utc=$($packageSummary.built_at_utc)"
+  Write-Host "package_build_input_fingerprint_sha256=$($packageSummary.build_input_fingerprint_sha256)"
+  Write-Host "release_sha256=$releaseSha256"
   Write-Host "cleanup: powershell -NoProfile -ExecutionPolicy Bypass -File apps/desktop/scripts/stop-acceptance-session.ps1 -SessionRoot `"$sessionRoot`""
 } catch {
   $desktopStillRunning = $desktopStarted -and (-not $desktop.HasExited)

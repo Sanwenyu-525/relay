@@ -1,0 +1,22 @@
+[
+  {
+    "Path": "D:\\Develop\\Relay-Agent\\apps\\workbench\\src\\components\\TaskInspectorPanel.tsx",
+    "Hash": "6CC00C2C97B99702CB9EAE7E8EEA6D863684B9D8B8A95501BCF37DAF45366CED"
+  },
+  {
+    "Path": "D:\\Develop\\Relay-Agent\\apps\\workbench\\src\\components\\TaskInspectorPanel.css",
+    "Hash": "34AA85C42928FC3D84B893CC1DAC69C63EED8D31E33ED22C601FBC50E58BCE82"
+  },
+  {
+    "Path": "D:\\Develop\\Relay-Agent\\apps\\workbench\\src\\components\\TaskViewDashboard.tsx",
+    "Hash": "4CE0108AE5874AE8E5FA8D090A13DED33AC832723FCF00C7B9BD550CF8A91B94"
+  },
+  {
+    "Path": "D:\\Develop\\Relay-Agent\\apps\\workbench\\src\\views\\CollaborationView.tsx",
+    "Hash": "3C448274627B79606FD0D400FA0CCAC4A995F5124FA751CE282EF23D6E10DC18"
+  },
+  {
+    "Path": "D:\\Develop\\Relay-Agent\\apps\\workbench\\src\\views\\CollaborationView.css",
+    "Hash": "463A817D29CED8785E956FC82DA231098113842EB5B8C2AFC1618E9D091DDCF3"
+  }
+]

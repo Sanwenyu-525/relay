@@ -1,0 +1,644 @@
+/*
+ * 项目列表页私有样式（2026-10-11 重设计）。
+ *
+ * 结构：推进摘要条 → 三页签工具栏 → 项目卡片网格（含「开启一个新项目」卡）→ 范围说明。
+ * 详情从常驻右栏改为「查看项目」打开的抽屉，页面因此不再使用 .page-layout / .page-primary。
+ *
+ * 全部数值只消费 design-tokens.json 安装的 CSS 变量，未新增色值、字号、圆角或动效数值。
+ * 通用控件（按钮、搜索框、页签、空态）继续复用 styles.css 的全局类，这里只补页面私有布局。
+ */
+
+.projects-page .projects-inner {
+  max-width: var(--relay-layout-content-maxWidth);
+  margin: 0 auto;
+  padding: var(--relay-layout-main-padding);
+}
+
+/* ── 推进摘要条 ─────────────────────────────────────────────────────────── */
+
+.projects-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-3) var(--relay-space-6);
+  margin-top: var(--relay-space-6);
+  padding: var(--relay-space-4) var(--relay-space-6);
+  background: var(--relay-color-bg-subtle);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+}
+
+.projects-summary__left {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-3);
+  min-width: 0;
+}
+
+.projects-summary__symbol {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--relay-control-height-comfort);
+  height: var(--relay-control-height-comfort);
+  color: var(--relay-color-action-text);
+  background: var(--relay-color-selection-bg);
+  border-radius: var(--relay-radius-control);
+}
+
+.projects-summary__symbol > svg {
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+}
+
+.projects-summary__text {
+  min-width: 0;
+}
+
+.projects-summary__main {
+  margin: 0;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
+.projects-summary__desc {
+  margin: var(--relay-space-0-5) 0 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+}
+
+.projects-summary__right {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+}
+
+.projects-summary__right > svg {
+  flex: none;
+  width: var(--relay-font-size-body);
+  height: var(--relay-font-size-body);
+}
+
+/* 待办状态只用文字色表达，不整块套警示底——摘要条是常驻区块，不是一次告警。 */
+.projects-summary__alert {
+  color: var(--relay-color-status-warning-text);
+}
+
+.projects-summary__ok {
+  color: var(--relay-color-status-success-text);
+}
+
+.projects-summary__link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--relay-color-action-text);
+  font: inherit;
+  font-weight: var(--relay-font-weight-medium);
+  cursor: pointer;
+}
+
+.projects-summary__link:hover {
+  text-decoration: underline;
+}
+
+/* ── 工具栏：页签 + 搜索 + 视图切换 ─────────────────────────────────────── */
+
+.projects-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--relay-space-3) var(--relay-space-6);
+  margin-top: var(--relay-space-8);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.projects-toolbar .subnav {
+  margin-top: 0;
+  border-bottom: none;
+}
+
+.projects-toolbar .subnav-item {
+  gap: var(--relay-space-2);
+}
+
+/* 页签计数沿用既有 subnav 的「进行中 (3)」写法，只把数字换成等宽字形便于对齐。 */
+.subnav-count {
+  color: var(--relay-color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.subnav-item--active .subnav-count {
+  color: var(--relay-color-selection-text);
+}
+
+.projects-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+  padding-bottom: var(--relay-space-2);
+}
+
+.projects-tools .search-field {
+  flex: none;
+  width: 15rem;
+  min-width: 10rem;
+}
+
+.projects-view-toggle {
+  display: flex;
+  gap: var(--relay-space-0-5);
+  padding: var(--relay-space-0-5);
+  background: var(--relay-color-bg-subtle);
+  border-radius: var(--relay-radius-control);
+}
+
+.projects-view-toggle__btn {
+  display: grid;
+  place-items: center;
+  width: var(--relay-control-height-compact);
+  height: var(--relay-control-height-compact);
+  border: none;
+  border-radius: var(--relay-radius-control);
+  background: none;
+  color: var(--relay-color-text-muted);
+  cursor: pointer;
+}
+
+.projects-view-toggle__btn:hover {
+  color: var(--relay-color-action-text);
+}
+
+.projects-view-toggle__btn.is-active {
+  color: var(--relay-color-selection-text);
+  background: var(--relay-color-bg-surface);
+}
+
+.projects-view-toggle__btn > svg {
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+}
+
+/* ── 卡片网格 ───────────────────────────────────────────────────────────── */
+
+.projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 1fr));
+  gap: var(--relay-space-6);
+  align-items: stretch;
+  margin-top: var(--relay-space-6);
+}
+
+.projects-grid.is-list {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--relay-space-4);
+}
+
+.project-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 17rem;
+  overflow: hidden;
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 顶缘细色条：用主色到选中色再淡出，不引入新色值。 */
+.project-card::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
+  height: var(--relay-space-0-5);
+  background: linear-gradient(90deg, var(--relay-color-action-primary) 0%,
+    var(--relay-color-selection-bg) 45%, transparent 90%);
+}
+
+.project-card:hover {
+  border-color: var(--relay-color-border-control);
+}
+
+.project-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-4);
+  flex: 1;
+  padding: var(--relay-space-6) var(--relay-space-6) var(--relay-space-4);
+}
+
+.project-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-2);
+}
+
+.project-card__kind {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
+.project-card__kind-dot {
+  width: var(--relay-space-2);
+  height: var(--relay-space-2);
+  border-radius: var(--relay-radius-round);
+  background: var(--relay-color-action-primary);
+}
+
+.project-card--archived .project-card__kind-dot {
+  background: var(--relay-color-text-muted);
+}
+
+.project-card__control {
+  display: grid;
+  place-items: center;
+  width: var(--relay-control-height-compact);
+  height: var(--relay-control-height-compact);
+  border: none;
+  border-radius: var(--relay-radius-control);
+  background: none;
+  color: var(--relay-color-text-muted);
+  cursor: pointer;
+}
+
+.project-card__control:hover {
+  color: var(--relay-color-text-primary);
+  background: var(--relay-color-selection-hover);
+}
+
+.project-card__control > svg {
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+}
+
+.project-card__ident {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--relay-space-3);
+}
+
+.project-card__emblem {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--relay-control-height-prominent);
+  height: var(--relay-control-height-prominent);
+  color: var(--relay-color-action-text);
+  background: var(--relay-color-selection-bg);
+  border-radius: var(--relay-radius-control);
+}
+
+.project-card__emblem > svg {
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+}
+
+.project-card__names {
+  flex: 1;
+  min-width: 0;
+}
+
+.project-card__name {
+  margin: 0;
+  font-size: var(--relay-font-size-rowTitle);
+  font-weight: var(--relay-font-weight-semibold);
+  line-height: var(--relay-font-lineHeight-heading);
+}
+
+/* 名称是键盘可达的打开入口；颜色与正文一致，不额外引入「链接蓝」。 */
+.project-card__name-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.project-card__name-button:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.project-card__caption {
+  margin: var(--relay-space-1) 0 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+}
+
+.project-card__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  flex: none;
+  padding: var(--relay-space-0-5) var(--relay-space-2);
+  color: var(--relay-color-status-success-text);
+  background: var(--relay-color-status-success-bg);
+  border-radius: var(--relay-radius-round);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+  white-space: nowrap;
+}
+
+.project-card__status.is-archived {
+  color: var(--relay-color-status-neutral-text);
+  background: var(--relay-color-status-neutral-bg);
+}
+
+.project-card__status-dot {
+  width: var(--relay-space-1);
+  height: var(--relay-space-1);
+  border-radius: var(--relay-radius-round);
+  background: currentColor;
+}
+
+.project-card__meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  gap: var(--relay-border-width);
+  margin-top: auto;
+  overflow: hidden;
+  background: var(--relay-color-border-separator);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+}
+
+.project-card__meta-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-1);
+  padding: var(--relay-space-3);
+  background: var(--relay-color-bg-canvas);
+}
+
+.project-card__meta-label {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+}
+
+.project-card__meta-value {
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-body);
+  overflow-wrap: anywhere;
+}
+
+/* 尚未明确下一步用警示文字色，不用整块警示底；它是一条待补事实，不是错误。 */
+.project-card__meta-value.is-unset {
+  color: var(--relay-color-status-warning-text);
+}
+
+.project-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-3);
+  padding: var(--relay-space-3) var(--relay-space-6);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.project-card__footer-note {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  min-width: 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+}
+
+.project-card__footer-note > svg {
+  flex: none;
+  width: var(--relay-font-size-body);
+  height: var(--relay-font-size-body);
+}
+
+.project-card__open {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  flex: none;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--relay-color-action-text);
+  font: inherit;
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+  cursor: pointer;
+}
+
+.project-card__open:hover {
+  text-decoration: underline;
+}
+
+.project-card__open > svg {
+  width: var(--relay-font-size-body);
+  height: var(--relay-font-size-body);
+}
+
+/* ── 「开启一个新项目」卡 ───────────────────────────────────────────────── */
+
+.project-card--new {
+  align-items: center;
+  justify-content: center;
+  gap: var(--relay-space-3);
+  padding: var(--relay-space-6);
+  background: var(--relay-color-bg-subtle);
+  border-style: dashed;
+  border-color: var(--relay-color-border-control);
+  text-align: center;
+  cursor: pointer;
+}
+
+/* 新建卡没有顶缘色条，避免把入口读成已存在的项目。 */
+.project-card--new::before {
+  content: none;
+}
+
+.project-card--new:hover {
+  border-color: var(--relay-color-action-primary);
+  background: var(--relay-color-selection-hover);
+}
+
+.project-card__new-icon {
+  display: grid;
+  place-items: center;
+  width: var(--relay-control-height-prominent);
+  height: var(--relay-control-height-prominent);
+  color: var(--relay-color-action-text);
+  background: var(--relay-color-selection-bg);
+  border-radius: var(--relay-radius-control);
+}
+
+.project-card__new-icon > svg {
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+}
+
+.project-card__new-title {
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
+.project-card__new-desc {
+  max-width: 20rem;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.project-card__new-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  margin-top: var(--relay-space-1);
+  padding: var(--relay-space-2) var(--relay-space-4);
+  color: var(--relay-color-action-text);
+  background: var(--relay-color-selection-bg);
+  border-radius: var(--relay-radius-control);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+}
+
+.project-card__new-action > svg {
+  width: var(--relay-font-size-body);
+  height: var(--relay-font-size-body);
+}
+
+/* ── 范围说明与详情抽屉 ─────────────────────────────────────────────────── */
+
+.projects-note {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  margin-top: var(--relay-space-6);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+}
+
+.projects-note > svg {
+  flex: none;
+  width: var(--relay-font-size-body);
+  height: var(--relay-font-size-body);
+}
+
+.projects-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-3);
+}
+
+.projects-detail__status {
+  margin: 0;
+  color: var(--relay-color-status-success-text);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
+.projects-detail__status.is-archived {
+  color: var(--relay-color-status-neutral-text);
+}
+
+.projects-detail__title {
+  margin: 0;
+  font-size: var(--relay-font-size-section);
+  font-weight: var(--relay-font-weight-semibold);
+  line-height: var(--relay-font-lineHeight-heading);
+  overflow-wrap: anywhere;
+}
+
+.projects-detail__desc {
+  margin: 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.projects-detail__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--relay-space-2);
+}
+
+.projects-detail__divider {
+  height: var(--relay-border-width);
+  margin: var(--relay-space-2) 0;
+  background: var(--relay-color-border-separator);
+}
+
+.projects-detail__heading {
+  margin: 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
+.projects-detail__rows {
+  display: grid;
+  gap: var(--relay-space-2);
+  margin: 0;
+}
+
+.projects-detail__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--relay-space-4);
+  font-size: var(--relay-font-size-body);
+}
+
+.projects-detail__row > dt {
+  color: var(--relay-color-text-secondary);
+}
+
+.projects-detail__row > dd {
+  margin: 0;
+  font-weight: var(--relay-font-weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.projects-detail__text {
+  margin: 0;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-body);
+  overflow-wrap: anywhere;
+}
+
+/* 窄窗：卡片单列，工具栏纵向堆叠，搜索框占满一行。 */
+@media (width < 48rem) {
+  .projects-page .projects-inner {
+    padding: var(--relay-layout-main-smallPadding);
+  }
+
+  .projects-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .projects-tools {
+    justify-content: space-between;
+  }
+
+  .projects-tools .search-field {
+    flex: 1;
+    width: auto;
+  }
+}

@@ -166,23 +166,21 @@
   .artifact-workspace .artifact-action-rail { padding-top: var(--relay-space-6); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 }
 
-@media (min-width: 64rem) and (max-width: 79.9375rem) {
+@media (64rem <= width < 80rem) {
   .task-detail-page--artifact .artifact-workspace { grid-template-columns: minmax(0, 1fr) var(--relay-layout-rail-narrowWidth); }
   .task-detail-page--artifact .artifact-document,
   .task-detail-page--artifact .artifact-action-rail { padding: var(--relay-layout-main-compactPadding); }
   .task-detail-page--artifact .artifact-action-rail { border-top: 0; }
 }
 
-@media (max-width: 63.9375rem) {
+@media (width < 64rem) {
   .task-detail-page--artifact .artifact-action-rail { border-left: 0; }
 }
 
-@media (max-width: 47.9375rem) {
+/* 并入 48rem 折行档，原 40rem：产物工作区在窄屏一并降为单列与紧凑内距。 */
+@media (width < 48rem) {
   .task-detail-page--artifact .artifact-document,
   .task-detail-page--artifact .artifact-action-rail { padding: var(--relay-layout-main-smallPadding); }
-}
-
-@media (max-width: 40rem) {
   .artifact-workspace { gap: var(--relay-space-6); }
   .artifact-workspace .artifact-document-tabs { gap: var(--relay-space-4); padding-inline: var(--relay-space-4); }
   .artifact-workspace .artifact-paper-body,

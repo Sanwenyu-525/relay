@@ -1,0 +1,435 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { AIMessageChunk } from '@langchain/core/messages';
+import { ChatOpenAI } from '@langchain/openai';
+import { FIRST_PARTY_REGISTRY } from '../../src/skills/first-party-registry.js';
+import { CANDIDATE_OUTPUT_SCHEMA } from '../../src/workflow/markdown-deliverable.js';
+import { OpenAiCompatibleModelPort, ModelCallBudgetError, ModelOutputBudgetError, ModelTimeoutError, ModelSourcePolicyError, ModelToolOutputError, SemanticResponseError } from '../../src/workflow/openai-compatible-model-port.js';
+const config = {
+    provider: 'openai-compatible', model: 'fixture-model', apiKey: 'fixture-key',
+    baseUrl: 'https://models.vendor.com/v1', timeoutMs: 1_000,
+    maxOutputTokens: 256, maxCallTokens: 4_096,
+    maxScopeCalls: 32, maxScopeTokens: 262_144,
+};
+const publicLookup = async () => [{ address: '8.8.8.8', family: 4 }];
+function event(content, finishReason = null, usage) {
+    return `data: ${JSON.stringify({ id: 'chatcmpl-fixture',
+        object: 'chat.completion.chunk', created: 1, model: 'fixture-model',
+        choices: content === null ? [] : [{ index: 0, delta: { role: 'assistant', content },
+                finish_reason: finishReason }], ...(usage === undefined ? {} : { usage }) })}\n\n`;
+}
+function response(chunks, signal, finish = 'CLOSE') {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+        start(controller) {
+            for (const chunk of chunks)
+                controller.enqueue(encoder.encode(chunk));
+            if (finish === 'CLOSE')
+                controller.close();
+            if (finish === 'ERROR')
+                controller.error(new Error('fixture stream broke'));
+            if (finish === 'STALL')
+                signal?.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError')), { once: true });
+        },
+    });
+    return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
+}
+function port(handler, overrides = {}) {
+    return new OpenAiCompatibleModelPort({ ...config, ...overrides }, {
+        lookup: publicLookup,
+        fetch: async (input, init) => handler(input, init),
+    });
+}
+function toolEvent(content = '', usage) {
+    return `data: ${JSON.stringify({ id: 'chatcmpl-tool-fixture',
+        object: 'chat.completion.chunk', created: 1, model: 'fixture-model',
+        choices: [{ index: 0, delta: { role: 'assistant', content,
+                    tool_calls: [{ index: 0, id: 'fixture-tool', type: 'function',
+                            function: { name: 'write_file', arguments: '{"path":"synthetic.txt"}' } }] },
+                finish_reason: 'tool_calls' }], ...(usage === undefined ? {} : { usage }) })}\n\n`;
+}
+const nullUsage = { inputTokens: null, outputTokens: null,
+    cacheReadTokens: null, cacheCreationTokens: null };
+// 没有声明任何工具的入口（Assist/Skill/语义检查）仍然拒绝工具请求。拒绝是完整的：
+// Provider request id 与它真实上报的用量一起留在错误证据里，未上报的保持 null 而不是补零。
+// 这里不再断言「工具请求那一帧里的 wire usage 会被丢弃」——端口读完整个流才判定，
+// 因此 Provider 在工具帧之后上报的用量同样被保全。
+for (const scenario of [
+    { name: 'usage reported after the tool chunk', chunks: [toolEvent('must not publish', { prompt_tokens: 41, completion_tokens: 9, total_tokens: 50 })],
+        usage: { inputTokens: 41, outputTokens: 9, cacheReadTokens: null, cacheCreationTokens: null },
+        deltas: [] },
+    { name: 'prior empty and usage frames', chunks: [event(''),
+            event(null, null, { prompt_tokens: 43, completion_tokens: 8, total_tokens: 51 }), toolEvent()],
+        usage: { inputTokens: 43, outputTokens: 8, cacheReadTokens: null, cacheCreationTokens: null },
+        deltas: [] },
+    { name: 'partial text before tool refusal', chunks: [event('partial synthetic reply'),
+            event(null, null, { prompt_tokens: 43, completion_tokens: 8, total_tokens: 51 }), toolEvent()],
+        usage: { inputTokens: 43, outputTokens: 8, cacheReadTokens: null, cacheCreationTokens: null },
+        // 前置文本照常逐块发布（流式体验不能为了这一种被拒绝的结局而整体延后），
+        // 整轮的丢弃由调用层负责：被拒绝的模型调用不会提交任何草稿。
+        deltas: ['partial synthetic reply'] },
+    { name: 'unknown usage stays null', chunks: [toolEvent()],
+        usage: nullUsage, deltas: [] },
+]) {
+    test(`tool refusal preserves request metadata: ${scenario.name}`, async () => {
+        let calls = 0;
+        const model = port(() => {
+            calls += 1;
+            return response([...scenario.chunks, 'data: [DONE]\n\n']);
+        });
+        const deltas = [];
+        await assert.rejects(() => model.assist({ intent: 'DISCUSS', system: 'synthetic only',
+            turns: [{ role: 'user', content: 'reply' }],
+            onTextDelta: async (text) => { deltas.push(text); } }), (error) => {
+            assert.ok(error instanceof ModelToolOutputError);
+            assert.ok('providerRequestId' in error && 'usage' in error);
+            assert.equal(error.providerRequestId, 'chatcmpl-tool-fixture');
+            assert.deepEqual(error.usage, scenario.usage);
+            assert.ok(!JSON.stringify(error).includes('synthetic.txt'), 'tool arguments entered error evidence');
+            return true;
+        });
+        assert.deepEqual(deltas, scenario.deltas);
+        assert.equal(calls, 1);
+    });
+}
+/** 声明了工具的 DRAFT 端口：完整且已声明的请求成为 TOOL_CALLS；
+ * 半截参数、未声明工具名与「正文 + 工具」并存一律拒绝，不进入派发路径。 */
+const DRAFT_TOOLS = [{ name: 'search_text', description: '搜索受管根内的文本',
+        parameters: { type: 'object', properties: { query: { type: 'string' } },
+            required: ['query'], additionalProperties: false } }];
+function toolChunk(name, args, id = 'fixture-tool') {
+    return `data: ${JSON.stringify({ id: 'chatcmpl-tool-fixture',
+        object: 'chat.completion.chunk', created: 1, model: 'fixture-model',
+        choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id, type: 'function',
+                            function: { name, arguments: args } }] }, finish_reason: 'tool_calls' }] })}\n\n`;
+}
+function draftManifest() {
+    return { task: { title: '工具循环协议' }, contract: { objective: '验证工具请求协议' } };
+}
+test('a complete declared tool request becomes TOOL_CALLS with its provider id', async () => {
+    const model = port(() => response([toolChunk('search_text', '{"query":"Relay"}'),
+        'data: [DONE]\n\n']));
+    const result = await model.generate({ manifest: draftManifest(),
+        outputSchema: CANDIDATE_OUTPUT_SCHEMA, tools: DRAFT_TOOLS });
+    assert.equal(result.kind, 'TOOL_CALLS');
+    if (result.kind !== 'TOOL_CALLS')
+        return;
+    assert.equal(result.providerRequestId, 'chatcmpl-tool-fixture');
+    assert.deepEqual(result.calls, [{ providerToolCallId: 'fixture-tool',
+            name: 'search_text', arguments: { query: 'Relay' } }]);
+});
+for (const scenario of [
+    { name: 'half-sent arguments', chunks: [toolChunk('search_text', '{"query":"Rel')] },
+    { name: 'arguments are not an object', chunks: [toolChunk('search_text', '"Relay"')] },
+    { name: 'undeclared tool name', chunks: [toolChunk('apply_changeset', '{}')] },
+    { name: 'missing tool name', chunks: [toolChunk('', '{}')] },
+]) {
+    test(`an incomplete tool request is refused before dispatch: ${scenario.name}`, async () => {
+        const model = port(() => response([...scenario.chunks, 'data: [DONE]\n\n']));
+        await assert.rejects(() => model.generate({ manifest: draftManifest(),
+            outputSchema: CANDIDATE_OUTPUT_SCHEMA, tools: DRAFT_TOOLS }), (error) => {
+            assert.ok(error instanceof ModelToolOutputError);
+            assert.equal(error.providerRequestId, 'chatcmpl-tool-fixture');
+            assert.ok(!JSON.stringify(error).includes('Rel'), 'partial arguments entered error evidence');
+            return true;
+        });
+    });
+}
+test('text beside a tool request stays preamble and never settles as the reply', async () => {
+    // 真实 Provider 会边输出正文边调工具。整轮失败会让工具循环不可用，因此文本只作为
+    // 该轮的前置说明交给结算方处理，候选正文仍只来自没有工具请求的那一轮。
+    const deltas = [];
+    const model = port(() => response([event('我先查一下'), event('已修改三个文件'),
+        toolChunk('search_text', '{"query":"x"}'), 'data: [DONE]\n\n']));
+    const result = await model.generate({ manifest: draftManifest(),
+        outputSchema: CANDIDATE_OUTPUT_SCHEMA, tools: DRAFT_TOOLS,
+        onTextDelta: async (text) => { deltas.push(text); } });
+    assert.equal(result.kind, 'TOOL_CALLS');
+    if (result.kind !== 'TOOL_CALLS')
+        return;
+    assert.equal(result.preamble, '我先查一下已修改三个文件');
+    assert.deepEqual(result.calls, [{ providerToolCallId: 'fixture-tool',
+            name: 'search_text', arguments: { query: 'x' } }]);
+    // 流式预览保留：文本增量照常发布，由结算方在结算为工具请求时清空该轮预览。
+    assert.equal(deltas.join(''), '我先查一下已修改三个文件');
+});
+test('a tool request without any text leaves the preamble empty', async () => {
+    const model = port(() => response([toolChunk('search_text', '{"query":"x"}'),
+        'data: [DONE]\n\n']));
+    const result = await model.generate({ manifest: draftManifest(),
+        outputSchema: CANDIDATE_OUTPUT_SCHEMA, tools: DRAFT_TOOLS });
+    assert.equal(result.kind, 'TOOL_CALLS');
+    if (result.kind !== 'TOOL_CALLS')
+        return;
+    assert.equal(result.preamble, '');
+});
+for (const scenario of ['prior usage', 'same-chunk usage', 'empty request ID', 'non-text content']) {
+    test(`tool refusal retains normalized SDK metadata: ${scenario}`, async (t) => {
+        // Explicit SDK chunk seam: current SSE conversion emits usage only at stream end.
+        // This checks metadata already observed, not unread wire usage or real billing.
+        t.mock.method(ChatOpenAI.prototype, 'stream', async () => (async function* () {
+            if (scenario === 'prior usage') {
+                yield Object.assign(new AIMessageChunk({ content: '', id: 'chatcmpl-known-usage' }), {
+                    usage_metadata: { input_tokens: 43, output_tokens: 8, total_tokens: 51 }
+                });
+            }
+            if (scenario === 'non-text content') {
+                yield new AIMessageChunk({ id: 'chatcmpl-known-usage',
+                    content: [{ type: 'image_url', image_url: { url: 'https://synthetic.invalid/image.png' } }] });
+                return;
+            }
+            const tool = new AIMessageChunk({ content: 'must not publish',
+                id: scenario === 'empty request ID' ? '' : 'chatcmpl-known-usage',
+                tool_call_chunks: [{ name: 'write_file', args: '{"path":"synthetic.txt"}',
+                        id: 'fixture-tool', index: 0, type: 'tool_call_chunk' }] });
+            yield scenario === 'same-chunk usage' ? Object.assign(tool, {
+                usage_metadata: { input_tokens: 43, output_tokens: 8, total_tokens: 51 }
+            }) : tool;
+        })());
+        const model = port(() => { throw new Error('controlled SDK chunks must not call transport'); });
+        const deltas = [];
+        await assert.rejects(() => model.assist({ intent: 'DISCUSS', system: 'synthetic',
+            turns: [{ role: 'user', content: 'reply' }],
+            onTextDelta: async (text) => { deltas.push(text); } }), (error) => {
+            assert.ok(error instanceof ModelToolOutputError);
+            assert.equal(error.providerRequestId, scenario === 'empty request ID'
+                ? undefined : 'chatcmpl-known-usage');
+            assert.deepEqual(error.usage, scenario === 'prior usage' || scenario === 'same-chunk usage'
+                ? { inputTokens: 43, outputTokens: 8, cacheReadTokens: null, cacheCreationTokens: null }
+                : { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheCreationTokens: null });
+            assert.ok(!JSON.stringify(error).includes('synthetic.txt'));
+            assert.ok(!JSON.stringify(error).includes('https://synthetic.invalid/image.png'));
+            return true;
+        });
+        assert.deepEqual(deltas, []);
+    });
+}
+test('streamed fragments settle only after DONE and preserve optional usage', async () => {
+    let calls = 0;
+    const model = port((_input, init) => {
+        calls += 1;
+        assert.equal(init?.redirect, 'error');
+        return response([event('# Hello'), event('\n\n## 摘要\n内容'),
+            event('\n\n## 结论\n完成', 'stop'),
+            event(null, null, { prompt_tokens: 34, completion_tokens: 19, total_tokens: 53 }),
+            'data: [DONE]\n\n']);
+    });
+    const result = await model.generate({ manifest: { task: { title: 'Hello' } },
+        outputSchema: CANDIDATE_OUTPUT_SCHEMA });
+    assert.equal(result.kind, 'CONTENT');
+    if (result.kind === 'CONTENT') {
+        assert.equal(result.content, '# Hello\n\n## 摘要\n内容\n\n## 结论\n完成');
+        assert.deepEqual(result.usage, { inputTokens: 34, outputTokens: 19,
+            cacheReadTokens: null, cacheCreationTokens: null });
+        assert.equal(result.providerRequestId, 'chatcmpl-fixture');
+    }
+    assert.equal(calls, 1);
+    const withoutUsage = port(() => response([event('ok', 'stop'), 'data: [DONE]\n\n']));
+    const assist = await withoutUsage.assist({ intent: 'DISCUSS', system: 'say ok',
+        turns: [{ role: 'user', content: 'ok' }] });
+    assert.equal(assist.kind, 'CONTENT');
+    if (assist.kind === 'CONTENT') {
+        assert.deepEqual(assist.usage, { inputTokens: null, outputTokens: null,
+            cacheReadTokens: null, cacheCreationTokens: null });
+    }
+});
+test('prompt cache tokens are carried through and absence stays unknown, not zero', async () => {
+    // Provider-reported cached tokens must survive the port; a Provider that omits the
+    // field must leave cache columns NULL so the UI can say "未采集" instead of 0%.
+    const cached = port(() => response([event('ok', 'stop'),
+        event(null, null, { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120,
+            prompt_tokens_details: { cached_tokens: 64 } }), 'data: [DONE]\n\n']));
+    const withCache = await cached.assist({ intent: 'DISCUSS', system: 'sys',
+        turns: [{ role: 'user', content: 'hi' }] });
+    assert.equal(withCache.kind, 'CONTENT');
+    if (withCache.kind === 'CONTENT') {
+        assert.deepEqual(withCache.usage, { inputTokens: 100, outputTokens: 20,
+            cacheReadTokens: 64, cacheCreationTokens: null });
+    }
+    const uncached = port(() => response([event('ok', 'stop'),
+        event(null, null, { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 }),
+        'data: [DONE]\n\n']));
+    const withoutCache = await uncached.assist({ intent: 'DISCUSS', system: 'sys',
+        turns: [{ role: 'user', content: 'hi' }] });
+    assert.equal(withoutCache.kind, 'CONTENT');
+    if (withoutCache.kind === 'CONTENT') {
+        assert.deepEqual(withoutCache.usage, { inputTokens: 100, outputTokens: 20,
+            cacheReadTokens: null, cacheCreationTokens: null });
+    }
+});
+test('plain DISCUSS publishes a text delta before DONE while structured Assist stays private', async () => {
+    const encoder = new TextEncoder();
+    let finish;
+    let first;
+    const firstDelta = new Promise((resolve) => { first = resolve; });
+    const streaming = port(() => new Response(new ReadableStream({
+        start(controller) {
+            controller.enqueue(encoder.encode(event('首段')));
+            finish = () => {
+                controller.enqueue(encoder.encode(event('后段', 'stop') + 'data: [DONE]\n\n'));
+                controller.close();
+            };
+        },
+    }), { headers: { 'content-type': 'text/event-stream' } }));
+    let settled = false;
+    const invocation = streaming.assist({ intent: 'DISCUSS', system: 'reply',
+        turns: [{ role: 'user', content: 'hello' }],
+        onTextDelta: async (piece) => {
+            assert.equal(settled, false);
+            if (piece === '首段')
+                first();
+            else
+                assert.equal(piece, '后段');
+        } }).then((result) => { settled = true; return result; });
+    const firstArrived = await Promise.race([firstDelta.then(() => true),
+        new Promise((resolve) => setTimeout(() => resolve(false), 1_000))]);
+    const settledBeforeDone = settled;
+    finish();
+    assert.equal(firstArrived, true);
+    assert.equal(settledBeforeDone, false);
+    const result = await invocation;
+    assert.equal(result.kind, 'CONTENT');
+    if (result.kind === 'CONTENT')
+        assert.equal(result.content, '首段后段');
+    let structuredDelta = false;
+    const structured = port(() => response([event('{"summary":"ok"}', 'stop'),
+        'data: [DONE]\n\n']));
+    await structured.assist({ intent: 'PROPOSE_TASK', system: 'json',
+        turns: [{ role: 'user', content: 'task' }],
+        onTextDelta: async () => { structuredDelta = true; } });
+    assert.equal(structuredDelta, false);
+});
+const assistResponseFormatCases = [
+    { name: 'ordinary DISCUSS', intent: 'DISCUSS', structured: false },
+    ...[
+        ['task-to-execution-contract', '1.1.0'],
+        ['verification-plan', '1.1.0'],
+        ['project-resume', '1.0.0'],
+    ].map(([id, version]) => {
+        const frozen = FIRST_PARTY_REGISTRY.skill(id, version);
+        return { name: `${frozen.id}@${frozen.version}`, intent: 'DISCUSS',
+            skill: { id: frozen.id, version: frozen.version, facts: { synthetic: true } },
+            structured: true };
+    }),
+    { name: 'PROPOSE_TASK', intent: 'PROPOSE_TASK', structured: true },
+];
+for (const scenario of assistResponseFormatCases) {
+    test(`Assist response format: ${scenario.name}`, async () => {
+        let calls = 0;
+        let requestBody;
+        const pieces = scenario.structured ? ['{"summary":', '"synthetic"}']
+            : ['synthetic ', 'reply'];
+        const model = port((_input, init) => {
+            calls += 1;
+            assert.equal(typeof init?.body, 'string');
+            requestBody = JSON.parse(init.body);
+            return response([event(pieces[0]), event(pieces[1], 'stop'),
+                event(null, null, { prompt_tokens: 34, completion_tokens: 19, total_tokens: 53 }),
+                'data: [DONE]\n\n']);
+        });
+        const deltas = [];
+        const result = await model.assist({ intent: scenario.intent,
+            system: 'synthetic only', turns: [{ role: 'user', content: 'reply' }],
+            skill: scenario.skill, onTextDelta: async (text) => { deltas.push(text); } });
+        assert.equal(calls, 1);
+        assert.deepEqual(result, { kind: 'CONTENT', content: pieces.join(''),
+            providerRequestId: 'chatcmpl-fixture',
+            usage: { inputTokens: 34, outputTokens: 19,
+                cacheReadTokens: null, cacheCreationTokens: null } });
+        assert.deepEqual(deltas, scenario.structured ? [] : pieces);
+        assert.ok(requestBody);
+        if (scenario.structured) {
+            assert.deepEqual(requestBody.response_format, { type: 'json_object' });
+        }
+        else {
+            assert.equal(Object.hasOwn(requestBody, 'response_format'), false);
+        }
+    });
+}
+test('DRAFT publishes Markdown fragments before DONE but settles only the complete response', async () => {
+    const encoder = new TextEncoder();
+    let finish;
+    let first;
+    const firstDelta = new Promise((resolve) => { first = resolve; });
+    const streaming = port(() => new Response(new ReadableStream({
+        start(controller) {
+            controller.enqueue(encoder.encode(event('# 草稿')));
+            finish = () => {
+                controller.enqueue(encoder.encode(event('\n\n完整结尾', 'stop') +
+                    'data: [DONE]\n\n'));
+                controller.close();
+            };
+        },
+    }), { headers: { 'content-type': 'text/event-stream' } }));
+    let settled = false;
+    const seen = [];
+    const invocation = streaming.generate({ manifest: { task: { title: '草稿' } },
+        outputSchema: CANDIDATE_OUTPUT_SCHEMA,
+        onTextDelta: async (piece) => { seen.push(piece); if (piece === '# 草稿')
+            first(); },
+    }).then((result) => { settled = true; return result; });
+    const arrived = await Promise.race([firstDelta.then(() => true),
+        new Promise((resolve) => setTimeout(() => resolve(false), 1_000))]);
+    assert.equal(arrived, true);
+    assert.equal(settled, false);
+    finish();
+    const result = await invocation;
+    assert.equal(result.kind, 'CONTENT');
+    if (result.kind === 'CONTENT')
+        assert.equal(result.content, '# 草稿\n\n完整结尾');
+    assert.deepEqual(seen, ['# 草稿', '\n\n完整结尾']);
+});
+test('semantic JSON is exact and invalid complete responses keep usage evidence', async () => {
+    const valid = port(() => response([event('{"verdict":"PASS",'),
+        event('"reason":"成立"}', 'stop'),
+        event(null, null, { prompt_tokens: 10, completion_tokens: 7, total_tokens: 17 }),
+        'data: [DONE]\n\n']));
+    assert.deepEqual(await valid.evaluate({ statement: '有摘要', content: '有摘要' }), {
+        verdict: 'PASS', reason: '成立', providerRequestId: 'chatcmpl-fixture',
+        usage: { inputTokens: 10, outputTokens: 7,
+            cacheReadTokens: null, cacheCreationTokens: null },
+    });
+    const invalid = port(() => response([event('prefix {"verdict":"PASS","reason":"x"}', 'stop'),
+        event(null, null, { prompt_tokens: 10, completion_tokens: 7, total_tokens: 17 }),
+        'data: [DONE]\n\n']));
+    await assert.rejects(() => invalid.evaluate({ statement: 'x', content: 'y' }), (error) => error instanceof SemanticResponseError &&
+        error.providerRequestId === 'chatcmpl-fixture' &&
+        error.usage.inputTokens === 10);
+});
+test('cancel, timeout, broken stream and local call budget never return partial content', async () => {
+    const controller = new AbortController();
+    const cancelled = port((_input, init) => {
+        setTimeout(() => controller.abort(), 20);
+        return response([event('partial')], init?.signal ?? undefined, 'STALL');
+    });
+    assert.deepEqual(await cancelled.assist({ intent: 'DISCUSS', system: 'x',
+        turns: [{ role: 'user', content: 'x' }], signal: controller.signal }), { kind: 'CANCELLED' });
+    const timedOut = port((_input, init) => response([event('partial')], init?.signal ?? undefined, 'STALL'), { timeoutMs: 40 });
+    await assert.rejects(() => timedOut.assist({ intent: 'DISCUSS', system: 'x',
+        turns: [{ role: 'user', content: 'x' }] }), ModelTimeoutError);
+    const broken = port(() => response([event('partial')], undefined, 'ERROR'));
+    await assert.rejects(() => broken.assist({ intent: 'DISCUSS', system: 'x',
+        turns: [{ role: 'user', content: 'x' }] }));
+    const prematureEnd = port(() => response([event('partial')]));
+    await assert.rejects(() => prematureEnd.assist({ intent: 'DISCUSS', system: 'x',
+        turns: [{ role: 'user', content: 'x' }] }));
+    let invoked = false;
+    const budget = port(() => { invoked = true; throw new Error('must not call'); }, { maxCallTokens: 256, maxOutputTokens: 256 });
+    await assert.rejects(() => budget.assist({ intent: 'DISCUSS', system: 'x',
+        turns: [{ role: 'user', content: 'x' }] }), ModelCallBudgetError);
+    assert.equal(invoked, false);
+    const exceededActual = port(() => response([event('complete', 'stop'),
+        event(null, null, { prompt_tokens: 200, completion_tokens: 120,
+            total_tokens: 320 }), 'data: [DONE]\n\n']), { maxCallTokens: 300, maxOutputTokens: 256 });
+    await assert.rejects(() => exceededActual.assist({ intent: 'DISCUSS',
+        system: 'x', turns: [{ role: 'user', content: 'x' }] }), (error) => error instanceof ModelCallBudgetError &&
+        error.usage?.inputTokens === 200 && error.usage.outputTokens === 120);
+    const oversized = port(() => response([event('x'.repeat(4_100), 'stop'),
+        'data: [DONE]\n\n']));
+    await assert.rejects(() => oversized.assist({ intent: 'DISCUSS',
+        system: 'x', turns: [{ role: 'user', content: 'x' }] }), ModelOutputBudgetError);
+    await assert.rejects(() => budget.generate({ outputSchema: CANDIDATE_OUTPUT_SCHEMA,
+        manifest: { sources: [{ selection_reason: 'RECENT_SCOPE_FALLBACK',
+                    content: 'do not send' }] } }), ModelSourcePolicyError);
+    assert.equal(invoked, false);
+});

@@ -100,6 +100,17 @@ export interface RelayImpactCandidateGroup {
     readonly staleCandidates: number; readonly unavailable: number };
   readonly unanalysedScope: readonly string[];
   readonly combinationCheckIds: readonly string[];
+  readonly dependencies?: readonly { readonly targetVersionId: string; readonly dependsOnTargetVersionId: string }[];
+}
+
+export interface RelayImpactGroupSelection {
+  readonly id: string; readonly groupId: string; readonly createdAt: string;
+  readonly appliedCount: number; readonly overallResult: 'NONE';
+  readonly items: readonly { readonly candidateId: string; readonly targetArtifactId: string;
+    readonly targetVersionId: string; readonly expectedTargetRevision: string;
+    readonly dependencyCandidateIds: readonly string[]; readonly candidateStatus: string;
+    readonly appliedVersionId: string | null; readonly appliedIsCurrent: boolean;
+    readonly canApply: boolean; readonly reason: string | null }[];
 }
 
 /** 组合检查是覆盖快照：没有整体结论，单项事实不相加。 */

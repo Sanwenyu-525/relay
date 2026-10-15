@@ -7,15 +7,16 @@ import { isNormalCliFailure } from '../cli-worker/cli-adapter.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import type { RunToolCallRow } from '../infrastructure/database-schema.js';
-import { claimGatewayWorker, claimRunForGateway, codeOf, dispatchGatewayAction,
-  prepareGatewayAction, readGatewayOperation, releaseGatewayWorker,
+import { claimGatewayWorker, claimRunForGateway, codeOf, denyGraphActionBeforeInvocation,
+  dispatchGatewayAction, prepareGatewayAction, readGatewayOperation, releaseGatewayWorker,
   type GatewayOrigin } from '../application/gateway-actions.js';
 import { applySafeControl } from '../application/control-requests.js';
 import { gatewayParamsFor, resolveToolLoopPlan, toolTargetFor, ToolRequestRejected,
   type ToolLoopPlan } from '../application/tool-loop.js';
 import { resolveFrozenCheck, RunScopeGrantRepository, type FrozenCheck }
   from '../application/run-scope-grant.js';
-import { createRepositories } from '../application/unit-of-work.js';
+import { createRepositories, withTransaction } from '../application/unit-of-work.js';
+import { lockTaskAndRun } from '../application/lock-task-run.js';
 import { readInternalTool, type InternalToolDefinition } from '../workflow/tool-catalog.js';
 import { RunToolCallRepository } from '../run/run-tool-call-repository.js';
 import type { ClaimedRunCommand } from '../application/run-dispatch.js';
@@ -59,6 +60,10 @@ export async function executeToolLoopStep(db: DbExecutor, input: ExecuteToolLoop
     throw new Error('Tool loop request does not belong to this Run');
   }
   if (row.status === 'REJECTED' || row.status === 'ABANDONED') {
+    if (row.status === 'REJECTED' &&
+      (row.result_ref as { readonly reason?: unknown } | null)?.reason === 'RUN_TERMINAL') {
+      return { status: 'STOPPED', toolCallId: row.id, operationId: row.operation_id };
+    }
     return { status: 'SUCCEEDED', toolCallId: row.id, operationId: row.operation_id };
   }
   if (row.status === 'SETTLED') {
@@ -90,8 +95,11 @@ export async function executeToolLoopStep(db: DbExecutor, input: ExecuteToolLoop
     } catch (error) {
       // 用户按了暂停/取消/交接，或 Run 已离开可执行状态：派发前就被挡住，一个字节都不写。
       // 这是一次人为停止，不是动作被准入拒绝，因此给独立状态而不是未分类异常或 DENIED。
-      // 请求行保持 REQUESTED：暂停可恢复，恢复后仍走同一个动作身份，不会派生第二次写入。
       if (codeOf(error) !== 'GATEWAY_RUN_NOT_READY') throw error;
+      // 暂停可恢复：请求行保持 REQUESTED，恢复后仍走同一个动作身份，不会派生第二次写入。
+      // 取消/失败/完成是终态，不会再恢复。此时必须给遗留请求一个终态归属，否则它会永远停在
+      // REQUESTED，在历史里看起来仍是一个可能完成的悬空请求（旧 Worker 与取消同时到达时就会这样）。
+      await rejectToolCallIfRunTerminal(db, repository, row);
       return { status: 'STOPPED', toolCallId: row.id, operationId: null };
     }
     const prepared = await prepareToolAction(db, { workspaceId: claim.workspaceId, row,
@@ -128,10 +136,22 @@ export async function executeToolLoopStep(db: DbExecutor, input: ExecuteToolLoop
       if (!approved) {
         return { status: 'WAITING', toolCallId: row.id, operationId, reviewId: review.id };
       }
-      workerEpoch = BigInt((await claimGatewayWorker(db, { workspaceId: claim.workspaceId,
-        operationId, workerId: claim.workerId,
-        ...(input.leaseMs === undefined ? {} : { leaseMs: input.leaseMs }),
-        ...(delivery === undefined ? {} : { delivery }) })).worker_epoch);
+      // 恢复也要复核批准当时绑定的材料：材料在批准之后被换掉时，领取 Worker 这一步
+      // 就已经能挡住，不必等到真正派发。拒绝按与派发同一口径落成类型化原因。
+      try {
+        workerEpoch = BigInt((await claimGatewayWorker(db, { workspaceId: claim.workspaceId,
+          operationId, workerId: claim.workerId,
+          ...(input.leaseMs === undefined ? {} : { leaseMs: input.leaseMs }),
+          ...(delivery === undefined ? {} : { delivery }) })).worker_epoch);
+      } catch (error) {
+        if (!isAuthorizationRefusal(codeOf(error))) throw error;
+        // 领取失败时事务已回滚，本次没有持有任何 Worker claim。
+        if (await deniedBeforeInvocation(db, { claim, row, operationId,
+          resourceId: plan.resourceId, delivery, error })) {
+          return { status: 'FAILED', toolCallId: row.id, operationId };
+        }
+        throw error;
+      }
     } else if (operation.status === 'SUCCEEDED' || operation.status === 'FAILED' ||
         operation.status === 'DENIED') {
       await repository.settle(row.id, operation.result_ref);
@@ -161,11 +181,11 @@ export async function executeToolLoopStep(db: DbExecutor, input: ExecuteToolLoop
   } catch (error) {
     // 派发前的授权拒绝同样可处理；DISPATCHING/UNKNOWN 不在这里处理，必须走恢复核对。
     if (isAuthorizationRefusal(codeOf(error))) {
-      await repository.settle(row.id, { reason: codeOf(error) ?? 'GATEWAY_ACTION_DENIED',
-        detail: error instanceof Error ? error.message : '工具动作被准入拒绝。' });
-      await releaseWorkerIfHeld(db, claim, workerEpoch, delivery);
-      await applySafeControl(db, claim.runId);
-      return { status: 'FAILED', toolCallId: row.id, operationId };
+      if (await deniedBeforeInvocation(db, { claim, row, operationId,
+        resourceId: plan.resourceId, delivery,
+        ...(workerEpoch === undefined ? {} : { workerEpoch }), error })) {
+        return { status: 'FAILED', toolCallId: row.id, operationId };
+      }
     }
     throw error;
   }
@@ -177,6 +197,66 @@ export async function executeToolLoopStep(db: DbExecutor, input: ExecuteToolLoop
   return { status: await settledToolStatus(db, { ...row, operation_id: operationId },
     dispatched.status, dispatched.result_ref),
     toolCallId: row.id, operationId };
+}
+
+/**
+ * 已终止的 Run 不会再交回它遗留的工具请求。
+ *
+ * 暂停不是终态，请求行保持 REQUESTED 以便恢复；但取消、失败、完成是终态，恢复入口
+ * 明确拒绝它们。若旧 Worker 拿着一个尚未派发的请求走到这里而 Run 已经终止，就必须把
+ * 这一行落成 REJECTED 并带上类型化原因：既证明「未派发、未落盘」，又给历史一个可读的
+ * 终态归属，而不是留一条永远 REQUESTED、看起来仍可完成的悬空请求。约束要求未连
+ * Operation 的行只能落 REQUESTED/REJECTED，所以这里用 reject 而不是 abandon。
+ * 准备与绑定之间的竞态会在 logical_operations 留下同 id 的行，此时跳过，走既有
+ * 停止与核对流程，不误拒绝已准备/已执行。Task→Run 锁序与控制收口一致，幂等。
+ */
+async function rejectToolCallIfRunTerminal(db: DbExecutor, repository: RunToolCallRepository,
+  row: RunToolCallRow): Promise<void> {
+  await withTransaction(db, async (repositories) => {
+    const locked = await lockTaskAndRun(repositories, row.run_id, row.workspace_id);
+    const run = locked.run;
+    if (run.status !== 'COMPLETED' && run.status !== 'FAILED' && run.status !== 'CANCELLED') return;
+    await repositories.toolCalls.rejectUndispatchedForTerminalRun(row.run_id, run.status);
+  });
+}
+
+/**
+ * 派发前被确定性拒绝的动作必须沿领域入口收口，而不是只结算工具行。
+ *
+ * 只落一条类型化原因会留下「已结算的工具行 ＋ 仍等待批准的 Operation ＋ 已 DECIDED 的
+ * Review」：原 Run 已被命令队列判定为不可领取，`advanceRunStep` 又会把这条零 Invocation 的
+ * 动作投影成 ACTION_UNKNOWN，原 Task 就此悬空。固定动作链对同一类拒绝用的是
+ * `denyGraphActionBeforeInvocation`，工具循环在这里复用同一个入口，不新建第二套状态语义。
+ *
+ * 该入口只在能证明未执行时成立：它要求 Operation 仍处于 WAITING_APPROVAL/PREPARED，且最后
+ * 一次 Invocation 只可能是 PREPARED/NOT_EXECUTED。DISPATCHING/UNKNOWN 走不通这里，仍必须
+ * 走既有核对与隔离流程。
+ *
+ * 返回 false 表示本次不属于本 Worker 的确定性拒绝（例如已有待处理控制）：此时调用方继续
+ * 抛出原异常，不谎称已经安全结束。
+ */
+async function deniedBeforeInvocation(db: DbExecutor, input: {
+  readonly claim: ClaimedRunCommand;
+  readonly row: RunToolCallRow;
+  readonly operationId: string;
+  readonly resourceId: string;
+  readonly delivery: { readonly commandId: string; readonly invocationEpoch: bigint } | undefined;
+  readonly workerEpoch?: bigint;
+  readonly error: unknown;
+}): Promise<boolean> {
+  const code = codeOf(input.error) ?? 'GATEWAY_ACTION_DENIED';
+  const denied = await denyGraphActionBeforeInvocation(db, {
+    workspaceId: input.claim.workspaceId, runId: input.claim.runId,
+    operationId: input.operationId, resourceId: input.resourceId,
+    workerId: input.claim.workerId,
+    ...(input.workerEpoch === undefined ? {} : { workerEpoch: input.workerEpoch }),
+    ...(input.delivery === undefined ? {} : { delivery: input.delivery }),
+    toolCall: { id: input.row.id, resultRef: { reason: code,
+      detail: input.error instanceof Error ? input.error.message : '工具动作被准入拒绝。' } },
+    reason: code,
+  });
+  if (denied) await applySafeControl(db, input.claim.runId);
+  return denied;
 }
 
 /** Replaying a settled row must preserve the original outcome, including quarantine. */

@@ -14,6 +14,7 @@ import {
   parseModelBaseUrl,
   type ModelFetchDependencies,
 } from './model-endpoint-policy.js';
+import { connectionVerifyUserProbe } from './prompts/run-prompts.js';
 import {
   MODEL_ERROR_CATEGORIES,
   classifyProviderErrorOrProtocol,
@@ -28,7 +29,15 @@ import {
  * 响应永不包含密钥或原始响应头；失败不回退 Mock。
  */
 
-export const VERIFY_PROMPT = 'relay-verify-1';
+/**
+ * 连接验证用的固定 user 探针。
+ *
+ * 正文是 `workflow/prompts/run-prompts.ts` 的 `connectionVerifyUserProbe()`，经统一
+ * 路由入口以 `USER_PROBE` 类型返回——它**不是** system 模板、不是 Agent 工作模式，
+ * 也不组合公共核心。这里保留常量导出，让 `model_calls.input_hash` 与外呼 body 继续
+ * 钉在同一个字符串上。
+ */
+export const VERIFY_PROMPT = connectionVerifyUserProbe();
 export const VERIFY_TIMEOUT_MS = 15_000;
 const VERIFY_MAX_OUTPUT_TOKENS = 16;
 

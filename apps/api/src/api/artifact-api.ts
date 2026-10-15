@@ -12,6 +12,7 @@ import { applyArtifactImpactCandidate, readArtifactImpactCandidate,
   startArtifactImpactCheck } from '../application/artifact-impact-checks.js';
 import { createCombinationCheck, createImpactCandidateGroup, readCombinationCheck,
   readImpactCandidateGroup } from '../application/artifact-impact-groups.js';
+import { createImpactGroupSelection, readImpactGroupSelection } from '../application/impact-group-selections.js';
 import {
   ArtifactSchema,
   ArtifactVersionResultSchema,
@@ -65,6 +66,7 @@ const ImpactCandidateBodySchema = Type.Object({ command_id: UuidSchema,
 }, { additionalProperties: false });
 const ApplyImpactBodySchema = Type.Object({ command_id: UuidSchema,
   expected_target_revision: Type.String({ pattern: '^(0|[1-9][0-9]*)$' }),
+  group_selection_id: Type.Optional(UuidSchema),
 }, { additionalProperties: false });
 const ImpactCandidateSchema = Type.Object({ id: UuidSchema, impact_check_id: UuidSchema,
   target_artifact_id: UuidSchema, target_version_id: UuidSchema, status: Type.String(),
@@ -72,8 +74,11 @@ const ImpactCandidateSchema = Type.Object({ id: UuidSchema, impact_check_id: Uui
   markdown: Type.Union([Type.String(), Type.Null()]), stale: Type.Boolean(),
   applied_version_id: Type.Union([UuidSchema, Type.Null()]),
 }, { additionalProperties: false });
+const ImpactDependencySchema = Type.Object({ target_version_id: UuidSchema,
+  depends_on_target_version_id: UuidSchema }, { additionalProperties: false });
 const ImpactGroupBodySchema = Type.Object({ command_id: UuidSchema,
   target_version_ids: Type.Array(UuidSchema, { minItems: 1, maxItems: 10, uniqueItems: true }),
+  dependencies: Type.Optional(Type.Array(ImpactDependencySchema, { maxItems: 90 })),
 }, { additionalProperties: false });
 const ImpactGroupItemSchema = Type.Object({ ordinal: Type.Integer({ minimum: 0 }),
   target_artifact_id: UuidSchema, target_version_id: UuidSchema, relation: Type.String(),
@@ -95,6 +100,7 @@ const ImpactGroupSchema = Type.Object({ id: UuidSchema, impact_check_id: UuidSch
     stale_candidates: Type.Integer(), unavailable: Type.Integer() }, { additionalProperties: false }),
   unanalysed_scope: Type.Array(Type.String()),
   combination_check_ids: Type.Array(UuidSchema),
+  dependencies: Type.Array(ImpactDependencySchema),
 }, { additionalProperties: false });
 const CombinationCheckBodySchema = Type.Object({ command_id: UuidSchema,
   artifact_version_ids: Type.Array(UuidSchema, { minItems: 1, maxItems: 20, uniqueItems: true }),
@@ -183,7 +189,8 @@ export function registerArtifactRoutes(
     bodySchema: ApplyImpactBodySchema, execute: async ({ executor, body, params }) => {
       const outcome = await applyArtifactImpactCandidate(executor, dependencies.storage, {
         workspaceId: params.workspace_id ?? '', candidateId: params.candidate_id ?? '',
-        commandId: body.command_id, expectedTargetRevision: body.expected_target_revision });
+        commandId: body.command_id, expectedTargetRevision: body.expected_target_revision,
+        ...(body.group_selection_id === undefined ? {} : { groupSelectionId: body.group_selection_id }) });
       return { outcome, result: outcome.result };
     } }));
   app.post('/impact-checks/:impact_check_id/candidate-groups', {
@@ -196,7 +203,8 @@ export function registerArtifactRoutes(
     bodySchema: ImpactGroupBodySchema, execute: async ({ executor, body, params }) => {
       const outcome = await createImpactCandidateGroup(executor, {
         workspaceId: params.workspace_id ?? '', checkId: params.impact_check_id ?? '',
-        targetVersionIds: body.target_version_ids, commandId: body.command_id });
+        targetVersionIds: body.target_version_ids, commandId: body.command_id,
+        ...(body.dependencies === undefined ? {} : { dependencies: body.dependencies }) });
       return { outcome, result: outcome.result };
     } }));
   app.get('/impact-candidate-groups/:group_id', {
@@ -208,6 +216,26 @@ export function registerArtifactRoutes(
       const p = request.params as { workspace_id: string; group_id: string };
       return await readImpactCandidateGroup(dependencies.database.executor, p.workspace_id,
         p.group_id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+  const selectionBody = Type.Object({ command_id: UuidSchema,
+    candidate_ids: Type.Array(UuidSchema, { minItems: 1, maxItems: 10, uniqueItems: true }) }, { additionalProperties: false });
+  app.post('/impact-candidate-groups/:group_id/selections', {
+    schema: { params: Type.Object({ workspace_id: UuidSchema, group_id: UuidSchema }, { additionalProperties: false }),
+      body: selectionBody, response: { 201: commandEnvelopeSchema(Type.Object({
+        selection_id: UuidSchema, group_id: UuidSchema, item_count: Type.String() }, { additionalProperties: false })) } },
+  }, createCommandHandler(dependencies, { commandType: 'CreateImpactGroupSelection', bodySchema: selectionBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await createImpactGroupSelection(executor, { workspaceId: params.workspace_id ?? '',
+        groupId: params.group_id ?? '', commandId: body.command_id, candidateIds: body.candidate_ids });
+      return { outcome, result: outcome.result };
+    } }));
+  app.get('/impact-group-selections/:selection_id', {
+    schema: { params: Type.Object({ workspace_id: UuidSchema, selection_id: UuidSchema }, { additionalProperties: false }) },
+  }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string; selection_id: string };
+      return await readImpactGroupSelection(dependencies.database.executor, p.workspace_id, p.selection_id);
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
   app.post('/impact-candidate-groups/:group_id/combination-checks', {

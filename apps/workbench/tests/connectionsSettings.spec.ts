@@ -72,6 +72,195 @@ describe("项目连接与 Permission 设置", () => {
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 
+  it("CLI_RUN 连接可点名根外可执行文件并在列表读回；其他能力不出现该输入", async () => {
+    connect(); const data = state(); const rootPath = "D:\\Workspace\\query";
+    const inputNodePath = "C:\\Program Files\\NodeJS\\node.exe";
+    const normalizedNodePath = "C:\\Program Files\\nodejs\\node.exe";
+    const toolPath = "D:\\Tools with spaces\\runner.exe";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if ((init?.method ?? "GET") === "GET") return baseGet(path, data) ?? response(404, {});
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(path).toBe(`/projects/${projectId}/connections`);
+      expect(body).toMatchObject({ capabilities: ["CLI_RUN"], root_path: rootPath,
+        allowed_executables: [inputNodePath, toolPath] });
+      data.connections = [{ id: connectionId, project_id: projectId, status: "ACTIVE", version: "1",
+        capabilities: ["CLI_RUN"], allowed_host: null, allowed_executables: [normalizedNodePath, toolPath],
+        created_at: created }];
+      return response(201, receipt(String(body.command_id), { project_id: projectId,
+        connection_id: connectionId, version: "1", status: "ACTIVE" }));
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+
+    // 非 CLI_RUN 能力下不出现这个输入：挂到别的能力会被服务端明确拒绝。
+    await mounted.wrapper.get('[data-testid="connection-capability"]').setValue("FILE_QUERY");
+    expect(mounted.wrapper.find('[data-testid="connection-executables"]').exists()).toBe(false);
+
+    await mounted.wrapper.get('[data-testid="connection-capability"]').setValue("CLI_RUN");
+    expect(mounted.wrapper.find('[data-testid="connection-executables"]').exists()).toBe(true);
+    await mounted.wrapper.get('[data-testid="connection-root"]').setValue(rootPath);
+    await mounted.wrapper.get('[data-testid="connection-executables"]').setValue(`${inputNodePath}\r\n  \r\n${toolPath}\n`);
+    await mounted.wrapper.get(".connections-form").trigger("submit"); await flush();
+
+    // 读回的是服务端规范化后的生效值，不是用户输入的原文。
+    expect(mounted.wrapper.get('[data-testid="connection-allowed-executables"]').text())
+      .toBe(`允许的可执行文件：${normalizedNodePath}、${toolPath}`);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
+  it("离开 CLI_RUN 后即使保留草稿，其他能力也不提交允许可执行文件", async () => {
+    connect(); const data = state(); const rootPath = "D:\\Workspace\\query";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if ((init?.method ?? "GET") === "GET") return baseGet(path, data) ?? response(404, {});
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(path).toBe(`/projects/${projectId}/connections`);
+      expect(body).toMatchObject({ capabilities: ["FILE_QUERY"], root_path: rootPath });
+      expect(body).not.toHaveProperty("allowed_executables");
+      data.connections = [{ id: connectionId, project_id: projectId, status: "ACTIVE", version: "1",
+        capabilities: ["FILE_QUERY"], allowed_host: null, created_at: created }];
+      return response(201, receipt(String(body.command_id), { project_id: projectId,
+        connection_id: connectionId, version: "1", status: "ACTIVE" }));
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+
+    await mounted.wrapper.get('[data-testid="connection-capability"]').setValue("CLI_RUN");
+    await mounted.wrapper.get('[data-testid="connection-executables"]').setValue("C:\\Program Files\\nodejs\\node.exe");
+    await mounted.wrapper.get('[data-testid="connection-capability"]').setValue("FILE_QUERY");
+    expect(mounted.wrapper.find('[data-testid="connection-executables"]').exists()).toBe(false);
+    await mounted.wrapper.get('[data-testid="connection-root"]').setValue(rootPath);
+    await mounted.wrapper.get(".connections-form").trigger("submit"); await flush();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
+  it("CLI_RUN 服务端 422 是明确拒绝，不留下未知回执或原样重试入口", async () => {
+    connect(); const data = state();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if ((init?.method ?? "GET") === "GET") return baseGet(path, data) ?? response(404, { code: "FIXTURE_NOT_FOUND", detail: path });
+      return response(422, { code: "VALIDATION_FAILED", detail: "请求未通过校验。",
+        field_errors: [{ field: "allowed_executables", message: "文件不存在或不是普通文件" }] });
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="connection-capability"]').setValue("CLI_RUN");
+    await mounted.wrapper.get('[data-testid="connection-root"]').setValue("D:\\Workspace\\query");
+    await mounted.wrapper.get('[data-testid="connection-executables"]').setValue("D:\\Missing\\tool.exe");
+    await mounted.wrapper.get(".connections-form").trigger("submit"); await flush();
+
+    expect(mounted.wrapper.find('[data-testid="connections-pending"]').exists()).toBe(false);
+    expect(mounted.wrapper.findAll("button").some((button) => button.text().includes("用原 ID 和内容重试"))).toBe(false);
+    expect(mounted.wrapper.findAll('[role="alert"]').map((alert) => alert.text()).join(" "))
+      .toContain("allowed_executables");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
+  it("服务端撤销连接写权限时显示明确拒绝，不把 403 当成未知命令", async () => {
+    connect(); const data = state();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if ((init?.method ?? "GET") === "GET") return baseGet(path, data) ?? response(404, {});
+      return response(403, { code: "FORBIDDEN", detail: "连接写权限已撤销。" });
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="connection-host"]').setValue("example.org");
+    await mounted.wrapper.get(".connections-form").trigger("submit"); await flush();
+
+    expect(mounted.wrapper.find('[data-testid="connections-pending"]').exists()).toBe(false);
+    expect(mounted.wrapper.findAll("button").some((button) => button.text().includes("用原 ID 和内容重试"))).toBe(false);
+    expect(mounted.wrapper.findAll('[role="alert"]').map((alert) => alert.text()).join(" "))
+      .toContain("连接写权限已撤销");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
+  it("连接权限读取失败时不展示新建表单，也不发送写命令", async () => {
+    connect(); const data = state();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if ((init?.method ?? "GET") !== "GET") throw new Error(`不应提交写命令：${path}`);
+      if (path === `/projects/${projectId}/connections`) return response(403, { code: "FORBIDDEN", detail: "无权读取连接配置。" });
+      return baseGet(path, data) ?? response(404, { code: "FIXTURE_NOT_FOUND", detail: path });
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+    expect(mounted.wrapper.findAll('[role="alert"]').map((alert) => alert.text()).join(" "))
+      .toContain("无权读取连接配置");
+    expect(mounted.wrapper.find(".connections-form").exists()).toBe(false);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  });
+
+  it("CLI_RUN 响应丢失后即使表单暂存值变化，回执查询和重试仍使用原 ID 与规范化前清单", async () => {
+    connect(); const data = state();
+    const rootPath = "D:\\Workspace\\query";
+    const executables = ["C:\\Program Files\\nodejs\\node.exe", "D:\\Tools\\runner.exe"];
+    let sent: Record<string, unknown> = {}; let posts = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if ((init?.method ?? "GET") === "GET") {
+        if (path.startsWith("/commands/")) return response(404, { code: "COMMAND_NOT_FOUND", detail: "missing" });
+        return baseGet(path, data) ?? response(404, {});
+      }
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (path !== `/projects/${projectId}/connections`) throw new Error(`Unexpected POST ${path}`);
+      posts++;
+      if (posts === 1) { sent = body; throw new TypeError("connection lost"); }
+      expect(body).toEqual(sent);
+      data.connections = [{ id: connectionId, project_id: projectId, status: "ACTIVE", version: "1",
+        capabilities: ["CLI_RUN"], allowed_host: null, allowed_executables: executables, created_at: created }];
+      return response(201, receipt(String(body.command_id), { project_id: projectId,
+        connection_id: connectionId, version: "1", status: "ACTIVE" }));
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="connection-capability"]').setValue("CLI_RUN");
+    await mounted.wrapper.get('[data-testid="connection-root"]').setValue(rootPath);
+    await mounted.wrapper.get('[data-testid="connection-executables"]').setValue(executables.join("\n"));
+    await mounted.wrapper.get(".connections-form").trigger("submit"); await flush();
+    const originalCommandId = String(sent.command_id);
+    expect(mounted.wrapper.text()).toContain(`原 command_id：${originalCommandId}`);
+
+    // 服务端结果未决时界面会锁字段；测试将控件临时解锁并派发真实输入事件，验证重试不读当前草稿。
+    const rootInput = mounted.wrapper.get('[data-testid="connection-root"]').element as HTMLInputElement;
+    const executableInput = mounted.wrapper.get('[data-testid="connection-executables"]').element as HTMLTextAreaElement;
+    const capabilitySelect = mounted.wrapper.get('[data-testid="connection-capability"]').element as HTMLSelectElement;
+    rootInput.disabled = false; executableInput.disabled = false; capabilitySelect.disabled = false;
+    await mounted.wrapper.get('[data-testid="connection-root"]').setValue("D:\\Workspace\\changed");
+    await mounted.wrapper.get('[data-testid="connection-executables"]').setValue("E:\\Changed\\other.exe");
+    await mounted.wrapper.get('[data-testid="connection-capability"]').setValue("FILE_QUERY");
+    rootInput.disabled = true; executableInput.disabled = true; capabilitySelect.disabled = true;
+    expect(executableInput.value).toBe("E:\\Changed\\other.exe");
+    expect(capabilitySelect.value).toBe("FILE_QUERY");
+
+    await mounted.wrapper.findAll("button").find((button) => button.text() === "查询原命令回执")!.trigger("click"); await flush();
+    expect(mounted.wrapper.text()).toContain("原命令回执暂未找到");
+    await mounted.wrapper.findAll("button").find((button) => button.text() === "用原 ID 和内容重试")!.trigger("click"); await flush();
+    expect(posts).toBe(2);
+    expect(sent).toMatchObject({ command_id: originalCommandId, capabilities: ["CLI_RUN"], root_path: rootPath,
+      allowed_executables: executables });
+    expect(mounted.wrapper.text()).toContain("连接创建已由服务端回执和最新项目查询确认");
+  });
+
+  it("未点名时不发送空清单，避免把「没配」变成一个死配置", async () => {
+    connect(); const data = state(); const rootPath = "D:\\Workspace\\query";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if ((init?.method ?? "GET") === "GET") return baseGet(path, data) ?? response(404, {});
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body).toMatchObject({ capabilities: ["CLI_RUN"], root_path: rootPath });
+      expect(body).not.toHaveProperty("allowed_executables");
+      data.connections = [{ id: connectionId, project_id: projectId, status: "ACTIVE", version: "1",
+        capabilities: ["CLI_RUN"], allowed_host: null, allowed_executables: null, created_at: created }];
+      return response(201, receipt(String(body.command_id), { project_id: projectId,
+        connection_id: connectionId, version: "1", status: "ACTIVE" }));
+    }); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="connection-capability"]').setValue("CLI_RUN");
+    await mounted.wrapper.get('[data-testid="connection-root"]').setValue(rootPath);
+    // 只有空行与空白：按未配置处理，不提交空数组。
+    await mounted.wrapper.get('[data-testid="connection-executables"]').setValue("  \n   \n");
+    await mounted.wrapper.get(".connections-form").trigger("submit"); await flush();
+    expect(mounted.wrapper.get('[data-testid="connection-allowed-executables"]').text())
+      .toContain("未配置");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
   it("查询策略明确选择动作并在修订中保留，切换能力后清除旧动作", async () => {
     connect(); const data = state();
     data.resources = [{ id: resourceId, project_id: projectId, canonical_root: "D:\\Workspace\\query",
@@ -172,6 +361,10 @@ describe("项目连接与 Permission 设置", () => {
     const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountWorkbench("/connections"); unmount = mounted.unmount;
     expect(mounted.wrapper.text()).toContain("示例数据");
+    // 按已知项目 ID 打开是备用入口，按钮不用主色与主流程抢层级。
+    const openButtonClass = mounted.wrapper.get(".connections-entry button").attributes("class") ?? "";
+    expect(openButtonClass).not.toContain("primary-button");
+    expect(openButtonClass).toContain("secondary-button");
     await mounted.wrapper.get('[data-testid="connections-project-id"]').setValue(projectId);
     await mounted.wrapper.get(".connections-entry").trigger("submit"); await flush();
     expect(mounted.router.currentRoute.value.path).toBe(`/projects/${projectId}/connections`);
@@ -207,10 +400,13 @@ describe("项目连接与 Permission 设置", () => {
     expect(mounted.wrapper.text()).toContain("连接创建已由服务端回执和最新项目查询确认");
     expect(mounted.wrapper.text()).toContain("本项目没有权限策略，当前默认 DENY");
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    // 列表行以中文为主：状态不与原枚举双写，标题用能力中文名。
+    expect(mounted.wrapper.text()).toContain("已连接（尚未授权） · v1");
+    expect(mounted.wrapper.text()).not.toContain("已连接（尚未授权） · ACTIVE");
     await mounted.wrapper.get('[data-testid="policy-host"]').setValue("example.org");
     await mounted.wrapper.get('[data-testid="policy-decision"]').setValue("AUTO");
     await mounted.wrapper.get('[data-testid="policy-form"]').trigger("submit"); await flush();
-    expect(mounted.wrapper.text()).toContain("WEB_FETCH · AUTO");
+    expect(mounted.wrapper.text()).toContain("网页抓取 · 自动准入");
     expect(mounted.wrapper.text()).toContain("example.org");
     expect(mounted.wrapper.findAll(`a[href="/projects/${projectId}"]`).some((link) => link.text() === "返回原项目页")).toBe(true);
   });
@@ -243,7 +439,7 @@ describe("项目连接与 Permission 设置", () => {
     expect(mounted.wrapper.get('[data-testid="connection-root"]').element).toHaveProperty("value", "");
     await mounted.wrapper.findAll("button").find((button) => button.text() === "停用连接")!.trigger("click"); await flush();
     expect(mounted.wrapper.text()).toContain(`${connectionId}`);
-    expect(mounted.wrapper.text()).toContain("DISABLED · v2");
+    expect(mounted.wrapper.text()).toContain("已停用（失效） · v2");
     expect(mounted.wrapper.text()).toContain("本项目没有权限策略，当前默认 DENY");
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(2);
   });
@@ -295,14 +491,16 @@ describe("项目连接与 Permission 设置", () => {
     expect(mounted.wrapper.text()).toContain("连接目录未由此接口公开");
     expect(mounted.wrapper.text()).toContain("D:\\Workspace\\managed");
     expect(mounted.wrapper.text()).toContain("Windows 文件写入目录身份：未绑定");
+    // 受管资源状态用中文短名，原枚举降为 title。
+    expect(mounted.wrapper.text()).toContain("有效 · rev 1");
     await mounted.wrapper.get('[data-testid="policy-capability"]').setValue("FILE_READ");
     expect(mounted.wrapper.get('[data-testid="policy-resource"]').findAll("option")).toHaveLength(2);
     await mounted.wrapper.get('[data-testid="policy-resource"]').setValue(resourceId);
     await mounted.wrapper.get('[data-testid="policy-decision"]').setValue("ASK");
     await mounted.wrapper.get('[data-testid="policy-form"]').trigger("submit"); await flush();
-    expect(mounted.wrapper.text()).toContain("FILE_READ · ASK");
+    expect(mounted.wrapper.text()).toContain("文件读取 · 每次请求审批");
     await mounted.wrapper.findAll("button").find((button) => button.text() === "撤销")!.trigger("click"); await flush();
-    expect(mounted.wrapper.text()).toContain("无有效版本 · DENY");
+    expect(mounted.wrapper.text()).toContain("无有效版本 · 拒绝");
     expect(mounted.wrapper.text()).toContain("查看已读取版本（1，最多最近 100 条）");
   });
 
@@ -343,7 +541,7 @@ describe("项目连接与 Permission 设置", () => {
     await mounted.wrapper.get('[data-testid="policy-resource"]').setValue(resourceId);
     await mounted.wrapper.get('[data-testid="policy-decision"]').setValue("ASK");
     await mounted.wrapper.get('[data-testid="policy-form"]').trigger("submit"); await flush();
-    expect(mounted.wrapper.text()).toContain("CLI_RUN · ASK");
+    expect(mounted.wrapper.text()).toContain("命令执行 · 每次请求审批");
   });
 
   it("FAKE 能力不绑定任何边界：连接与策略都不出现目录或主机输入", async () => {
@@ -391,6 +589,8 @@ describe("项目连接与 Permission 设置", () => {
     expect(mounted.wrapper.text()).toContain("已连接（尚未授权）");
     await mounted.wrapper.get(`[data-testid="connection-health-${connectionId}"]`).trigger("click"); await flush();
     expect(mounted.wrapper.text()).toContain("服务端只读核对");
+    // 健康结果只保留一种状态表达，不再「枚举（中文）」双写。
+    expect(mounted.wrapper.text()).not.toContain("ACTIVE（已连接）");
     expect(mounted.wrapper.text()).toContain("允许主机 example.org");
     expect(mounted.wrapper.text()).toContain("真实可达性探针当前无只读接口");
     expect(fetchMock.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET")).toBe(true);

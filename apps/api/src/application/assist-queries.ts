@@ -6,6 +6,8 @@ import { recheckAssistSources } from './assist-runner.js';
 import { createRepositories, withTransaction } from './unit-of-work.js';
 import { availableFrozenSkill, inspectFrozenSkillSnapshot,
   isCallableSkill } from '../skills/first-party-registry.js';
+import { availableFrozenMethod,
+  inspectFrozenMethodSnapshot } from '../skills/builtin-methods.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import { toDecimalString } from '../shared/decimal.js';
 
@@ -136,8 +138,31 @@ export async function projectAssistSkillMessage(db: DbExecutor, storage: Managed
   session: AssistSessionRow, message: AssistMessageRow): Promise<{
     readonly skill: JsonObject | null; readonly skill_input: JsonObject | null;
     readonly skill_output: JsonObject | null; readonly content: string | null;
-    readonly sources: unknown;
+    readonly sources: unknown; readonly method: JsonObject | null;
+    readonly method_argument: string | null;
   }> {
+  // 内置工作方法（0071）：与 Skill 同口径——身份按发起时冻结的摘要核对，定义被替换后
+  // 只显示历史身份，不按当前注册表补造；正文只在来源仍可读时投影。
+  if (message.method_snapshot !== null) {
+    const historical = inspectFrozenMethodSnapshot(message.method_snapshot);
+    const resolved = historical === null ? null : availableFrozenMethod(message.method_snapshot);
+    const ref = message.method_snapshot;
+    const identity = historical === null ? {
+      id: typeof ref.id === 'string' ? ref.id : 'UNKNOWN',
+      version: typeof ref.version === 'string' ? ref.version : 'UNKNOWN',
+      sha256: typeof ref.sha256 === 'string' && /^[0-9a-f]{64}$/u.test(ref.sha256)
+        ? ref.sha256 : null,
+      definition_availability: 'UNAVAILABLE',
+    } : { ...historical, definition_availability: resolved === null
+      ? 'HISTORICAL_ONLY' : 'AVAILABLE' };
+    const r = createRepositories(db);
+    const { available, safeSources } = await recheckAssistSources(r, storage, session,
+      message.sources);
+    return { skill: null, skill_input: null, skill_output: null,
+      content: available ? message.content : null, sources: safeSources,
+      method: { ...identity, action: message.method_action },
+      method_argument: message.method_argument };
+  }
   if (message.skill_snapshot === null) {
     const r = createRepositories(db);
     const checked = await recheckAssistSources(r, storage, session, message.sources);
@@ -152,7 +177,8 @@ export async function projectAssistSkillMessage(db: DbExecutor, storage: Managed
       content: checked.available && targetAvailable ? message.content : null,
       sources: checked.safeSources.map((source, index) => targetAvailable &&
         source.status === 'AVAILABLE' &&
-        Array.isArray(message.sources) ? message.sources[index] : source) };
+        Array.isArray(message.sources) ? message.sources[index] : source),
+      method: null, method_argument: null };
   }
   const historical = inspectFrozenSkillSnapshot(message.skill_snapshot);
   const resolved = historical === null ? null : availableFrozenSkill(message.skill_snapshot);
@@ -190,5 +216,6 @@ export async function projectAssistSkillMessage(db: DbExecutor, storage: Managed
     skill_output: outputAvailability === 'HISTORICAL_SNAPSHOT'
       ? message.skill_output : null,
     content: outputAvailability === 'HISTORICAL_SNAPSHOT'
-      ? message.content : null, sources: safeSources };
+      ? message.content : null, sources: safeSources,
+    method: null, method_argument: null };
 }

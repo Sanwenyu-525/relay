@@ -20,6 +20,9 @@ export default function TaskAcceptanceEditPanel({ client, taskId, taskRevision, 
   const pendingRef = useRef(pending);
   const textRef = useRef(text);
   const active = useRef(true);
+  const openButtonRef = useRef<HTMLButtonElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const wasEditing = useRef(false);
   const scope = useRef({ client, taskId });
   scope.current = { client, taskId }; textRef.current = text; pendingRef.current = pending;
   const additions = text.split(/\r?\n/u).map(line => line.trim()).filter(Boolean);
@@ -37,6 +40,11 @@ export default function TaskAcceptanceEditPanel({ client, taskId, taskRevision, 
     setDraftGuard(guard);
     return () => { active.current = false; clearDraftGuard(guard); };
   }, []);
+  // 就地展开/收起的焦点去向：展开进输入区，收起（取消或保存后）回到触发按钮。
+  useEffect(() => {
+    if (editing) { wasEditing.current = true; textareaRef.current?.focus(); }
+    else if (wasEditing.current) { wasEditing.current = false; openButtonRef.current?.focus(); }
+  }, [editing]);
   const current = (record: RelayTaskAcceptanceRevisionInput) => active.current &&
     scope.current.client === client && scope.current.taskId === record.taskId;
   function clearPending() { pendingRef.current = null; setPending(null); setMayRetry(false); }
@@ -93,20 +101,22 @@ export default function TaskAcceptanceEditPanel({ client, taskId, taskRevision, 
     void act(() => send(record));
   }
 
-  return <section className="surface-panel" data-testid="task-acceptance-edit">
-    <h2>补充完成条件</h2>
+  return <section className="task-detail-supplement" data-testid="task-acceptance-edit">
+    <div className="task-detail-supplement-row">
+      <h3 className="task-detail-supplement-title">补充完成条件</h3>
+      {!editing && <button className="task-detail-text-button" type="button" data-testid="task-acceptance-edit-open" ref={openButtonRef}
+        disabled={writeBlocked !== null || busy || pending !== null} onClick={() => { setEditing(true); setSaved(null); }}>补充验收条件</button>}
+    </div>
     <p className="helper-text">保留已确认条件，新增需要人工核对的条件。保存后仍需单独开始任务，旧验证不自动用于新验收版本。</p>
-    {!editing && <button className="secondary-button" type="button" data-testid="task-acceptance-edit-open"
-      disabled={writeBlocked !== null || busy || pending !== null} onClick={() => { setEditing(true); setSaved(null); }}>补充验收条件</button>}
     {writeBlocked && <p className="disabled-reason">{writeBlocked}</p>}
     {editing && <form onSubmit={event => { event.preventDefault(); submit(); }}>
       <label className="field"><span className="field-label">新增完成条件（每行一条）</span>
-        <textarea data-testid="task-acceptance-additions" rows={4} value={text} disabled={busy || pending !== null}
+        <textarea data-testid="task-acceptance-additions" ref={textareaRef} rows={4} value={text} disabled={busy || pending !== null}
           onChange={event => setText(event.target.value)} /></label>
       {inputError && <p className="helper-text">{inputError}</p>}
       <div className="form-actions"><button className="primary-button" type="submit" data-testid="task-acceptance-save"
         disabled={busy || pending !== null || writeBlocked !== null || inputError !== null}>{busy ? "正在核对…" : "保存完成条件"}</button>
-        <button className="secondary-button" type="button" disabled={busy || pending !== null}
+        <button className="secondary-button" type="button" data-testid="task-acceptance-cancel" disabled={busy || pending !== null}
           onClick={() => { textRef.current = ""; setText(""); setEditing(false); setError(null); }}>放弃本次输入</button></div>
     </form>}
     {error && <p className="action-error" role="alert">{error}</p>}

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { hasUnsavedDraft, currentDraftGuard } from "../src/lib/draftGuard";
-import { flush, mountWorkbench } from "./mountApp";
+import { flush, dialogText, mountWorkbench } from "./mountApp";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const taskId = "33333333-3333-4333-8333-333333333333";
@@ -180,6 +180,14 @@ describe("创建后人工补验收条件", () => {
     expect(posts(view.calls)).toHaveLength(0);
   });
 
+  it("展开后焦点移入输入区，收起后回到触发按钮", async () => {
+    const view = await mount();
+    await view.wrapper.get('[data-testid="task-acceptance-edit-open"]').trigger("click");
+    expect(view.wrapper.get('[data-testid="task-acceptance-additions"]').element).toBe(document.activeElement);
+    await view.wrapper.get('[data-testid="task-acceptance-cancel"]').trigger("click");
+    expect(view.wrapper.get('[data-testid="task-acceptance-edit-open"]').element).toBe(document.activeElement);
+  });
+
   it("快速重复点击只有一个命令，在途禁止改内容", async () => {
     let resolve!: (response: Response) => void;
     const view = await mount({ post: body => new Promise<Response>(done => {
@@ -193,5 +201,62 @@ describe("创建后人工补验收条件", () => {
     expect(view.wrapper.get('[data-testid="task-acceptance-additions"]').attributes("disabled")).toBeDefined();
     resolve(response(200, {})); await flush();
     expect(view.wrapper.find('[data-testid="task-acceptance-saved"]').exists()).toBe(true);
+  });
+});
+
+describe("FE-05 已满足项的验收反例锁", () => {
+  it("P1 界面不提供条件删除、任意检查 DSL、多方法编辑器或自动重跑入口", async () => {
+    const view = await mount(); await enter(view, "新增条件");
+    const panel = view.wrapper.get('[data-testid="task-acceptance-edit"]');
+    const html = panel.element?.outerHTML ?? "";
+    expect(html).not.toMatch(/删除|移除|重跑|重新运行|自动运行|DSL/);
+    expect(panel.findAll("select")).toHaveLength(0);
+    expect(panel.findAll("textarea")).toHaveLength(1);
+    expect(view.wrapper.find('[data-testid="task-acceptance-delete"]').exists()).toBe(false);
+    expect(view.wrapper.find('[data-testid="task-acceptance-rerun"]').exists()).toBe(false);
+  });
+
+  it("P2 修订冲突提示明确说明服务端基准已变化且本次输入不会被覆盖", async () => {
+    const view = await mount({ post: async () => response(409, { code: "REVISION_CONFLICT",
+      detail: "验收版本已变化", expected_revision: "2", actual_revision: "5" }) });
+    await enter(view);
+    await view.wrapper.get('[data-testid="task-acceptance-save"]').trigger("click"); await flush();
+    const alert = view.wrapper.get('[data-testid="task-acceptance-edit"] [role="alert"]').text();
+    expect(alert).toContain("版本");
+    expect(alert).toContain("不会");
+  });
+
+  it("P3 原命令未核对时拦住离开，不能进入新 Task 让迟到回执落到别处", async () => {
+    const otherId = "55555555-5555-4555-8555-555555555555";
+    const view = await mount({ post: async () => { throw new TypeError("response lost"); } });
+    await enter(view);
+    await view.wrapper.get('[data-testid="task-acceptance-save"]').trigger("click"); await flush();
+    const pendingCommandId = view.wrapper.get('[data-testid="task-acceptance-pending"] code').text();
+    await view.router.push(`/tasks/${otherId}`); await flush();
+    expect(view.router.currentRoute.value.path).toBe(`/tasks/${taskId}`);
+    const dialog = dialogText();
+    expect(dialog).toContain("命令结果待核对");
+    expect(dialog).toContain(pendingCommandId);
+    expect(dialog).not.toContain("丢弃草稿并离开");
+    expect(view.wrapper.find('[data-testid="task-acceptance-edit"]').exists()).toBe(true);
+  });
+
+  it("P4 修订冲突重读后按服务端顺序拼装，不静默丢弃别人的条件", async () => {
+    const other = { criterion_id: "other", statement: "别人的条件", required: true, method: "HUMAN", target_spec: {} };
+    let attempt = 0;
+    const view = await mount({ post: async body => {
+      if (++attempt === 1) { view.setCurrent({ revision: "5", acceptance_revision: "4",
+        acceptance: { ...taskBody().acceptance, acceptance_revision: "4", criteria: [oldCriterion, other] } });
+        return response(409, { code: "REVISION_CONFLICT", detail: "验收版本已变化" }); }
+      return response(200, { command_id: body.command_id, committed_at: "2026-10-05T00:00:00Z",
+        result: { ...savedResult(body), previous_acceptance_revision: "4", acceptance_revision: "5", revision: "6" } });
+    } });
+    await enter(view, "我的新增条件");
+    await view.wrapper.get('[data-testid="task-acceptance-save"]').trigger("click"); await flush();
+    await view.wrapper.get('[data-testid="task-acceptance-save"]').trigger("click"); await flush();
+    const sent = posts(view.calls); expect(sent).toHaveLength(2);
+    const criteria = sent[1]?.body.criteria as Record<string, unknown>[];
+    expect(criteria.slice(0, 2)).toEqual([oldCriterion, other]);
+    expect(criteria[2]).toEqual({ statement: "我的新增条件", required: true, method: "HUMAN", target_spec: {} });
   });
 });

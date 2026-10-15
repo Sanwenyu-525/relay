@@ -51,6 +51,48 @@ export function successStatusOf(commandType: string): 200 | 201 | 202 {
 /** 命令回执的资源链接目标（由 command_type 与结果推导，GET 回执与首次响应一致）。 */
 export function resourcePathOf(commandType: string, result: JsonObject): string | undefined {
   switch (commandType) {
+    case 'CreateTaskChain':
+    case 'AuthorizeTaskChain':
+    case 'StopTaskChain':
+      return typeof result.chain_id==='string'?`task-chains/${result.chain_id}`:undefined;
+    case 'CreateProjectReminder':
+    case 'EditProjectReminder':
+    case 'SetProjectReminderStatus':
+      return typeof result.reminder_id === 'string' ? `project-reminders/${result.reminder_id}` : undefined;
+    case 'ResolveReminderOccurrence':
+      return typeof result.occurrence_id === 'string' ? `reminder-occurrences/${result.occurrence_id}` : undefined;
+    case 'ProposeScopeSimulation':
+    case 'SelectScopeSimulation':
+      return typeof result.simulation_id === 'string' ? `scope-simulations/${result.simulation_id}` : undefined;
+    case 'RecordTaskTimeEstimate':
+      return typeof result.task_id === 'string' ? `tasks/${result.task_id}/time-estimates` : undefined;
+    case 'ProposePeriodPlan':
+    case 'ResolvePeriodPlanItem':
+      return typeof result.plan_id === 'string' ? `period-plans/${result.plan_id}` : undefined;
+    case 'StartWorkSegment':
+    case 'FinishWorkSegment':
+    case 'ProposeWorkSegmentEvent':
+    case 'ResolveWorkSegmentEvent':
+      return typeof result.segment_id === 'string' ? `work-segments/${result.segment_id}` : undefined;
+    case 'RegisterDecisionPremise':
+      return typeof result.decision_id === 'string' ? `decisions/${result.decision_id}/premises` : undefined;
+    case 'ResolveDecisionReview':
+      return typeof result.project_id === 'string' ? `projects/${result.project_id}/decision-reviews` : undefined;
+    case 'CreateHypothesis':
+    case 'VersionHypothesis':
+    case 'ObserveHypothesis':
+    case 'SuggestHypothesisConclusion':
+    case 'ConfirmHypothesisConclusion':
+      return typeof result.hypothesis_id === 'string' ? `hypotheses/${result.hypothesis_id}` : undefined;
+    case 'FreezeAcceptanceComparison':
+      return typeof result.project_id === 'string' ? `projects/${result.project_id}/acceptance-comparisons` : undefined;
+    case 'StartTaskAcceptanceTrial':
+    case 'TransitionTaskAcceptanceTrial':
+    case 'RecordTaskAcceptanceObservation':
+      return typeof result.task_id === 'string' ? `tasks/${result.task_id}/acceptance-trials` : undefined;
+    case 'AttachTaskAcceptanceMaterial':
+    case 'WithdrawTaskAcceptanceMaterial':
+      return typeof result.task_id === 'string' ? `tasks/${result.task_id}/acceptance-materials` : undefined;
     case 'CreateProject':
     case 'LinkProjectGoal':
     case 'UnlinkProjectGoal':
@@ -119,8 +161,12 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
     case 'SetFocusSelection':
       return 'today';
     case 'CreateAssistSession':
+    case 'ExecuteChatCommand':
       return typeof result.session_id === 'string' ? `assist-sessions/${result.session_id}` : undefined;
+    case 'WithdrawStateMaintenance':
+      return typeof result.request_id === 'string' ? `conversation-state-requests/${result.request_id}` : undefined;
     case 'BindAssistSessionProject':
+    case 'BindAssistSessionDirectory':
       return typeof result.session_id === 'string' ? `assist-sessions/${result.session_id}` : undefined;
     case 'CreateProjectBlueprintProposal':
     case 'ApplyProjectBlueprint':

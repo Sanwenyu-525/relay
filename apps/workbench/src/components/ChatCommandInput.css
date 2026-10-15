@@ -1,0 +1,27 @@
+.chat-command-input { position: relative; min-width: 0; }
+.chat-command-input textarea { width: 100%; }
+.chat-command-menu {
+  position: absolute; bottom: 100%; inset-inline: 0; z-index: var(--relay-zIndex-popover);
+  margin-bottom: var(--relay-space-2);
+  padding: var(--relay-space-2);
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-surface);
+  box-shadow: var(--relay-shadow-floating);
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+}
+.chat-command-hint { margin: 0 0 var(--relay-space-2); color: var(--relay-color-text-muted); }
+.chat-command-menu ul { list-style: none; margin: 0; padding: 0; max-height: min(30dvh, var(--relay-layout-workspace-sideWidth)); overflow-y: auto; }
+.chat-command-menu [role="option"] {
+  display: grid; gap: var(--relay-space-1); width: 100%;
+  padding: var(--relay-space-2); border: 0; border-radius: var(--relay-radius-control);
+  background: transparent; color: inherit; text-align: start; cursor: pointer;
+  overflow-wrap: anywhere; font: inherit;
+}
+.chat-command-menu [role="option"] > span:first-child { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--relay-space-2); }
+.chat-command-menu [role="option"][aria-selected="true"], .chat-command-menu [role="option"]:hover { background: var(--relay-color-bg-subtle); }
+.chat-command-menu small { color: var(--relay-color-text-muted); font-size: inherit; }
+/* 在途输入仍可编辑草稿；菜单不被装饰光点的裁切规则截断。 */
+.agent-chat-composer[data-inflight="true"]:has(.chat-command-menu),
+.create-form[data-inflight="true"]:has(.chat-command-menu) { overflow: visible; }

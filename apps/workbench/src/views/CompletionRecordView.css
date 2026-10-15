@@ -26,4 +26,4 @@
 .completion-version-ref { display: block; }
 .completion-list { margin: var(--relay-space-4) 0 0; padding: 0; list-style: none; }
 .completion-list li { display: grid; gap: var(--relay-space-2); padding: var(--relay-space-4) 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
-@media (max-width: 47.9375rem) { .completion-facts div { grid-template-columns: 1fr; } }
+@media (width < 48rem) { .completion-facts div { grid-template-columns: 1fr; } }

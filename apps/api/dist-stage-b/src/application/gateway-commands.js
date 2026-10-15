@@ -1,0 +1,393 @@
+import { randomUUID } from 'node:crypto';
+import { realpath, stat } from 'node:fs/promises';
+import { isAbsolute } from 'node:path';
+import { toDecimalString } from '../shared/decimal.js';
+import { httpCommandScopeKey } from './actor.js';
+import { runIdempotentCommand } from './command.js';
+import { invalidTransition, resourceNotFound, revisionConflict, validationFailed } from './domain-error.js';
+import { canonicalResourceIdentity, registrationFileWriteRootId, rootsOverlap } from './gateway-configuration.js';
+import { lockWritableProjectInWorkspace } from './guards.js';
+import { requireRevision } from './revisions.js';
+import { createRepositories } from './unit-of-work.js';
+async function authorityWrite(repositories, workspaceId) {
+    if (await repositories.workspaces.lockAuthority(workspaceId, 'update') === undefined) {
+        throw resourceNotFound('Workspace authority');
+    }
+}
+async function projectVisible(repositories, workspaceId, projectId) {
+    await lockWritableProjectInWorkspace(repositories, workspaceId, projectId);
+}
+export async function createGatewayConnectionCommand(db, input) {
+    if (input.capabilities.length === 0 || new Set(input.capabilities).size !== input.capabilities.length) {
+        throw validationFailed([{ field: 'capabilities', message: 'must be a nonempty unique list' }]);
+    }
+    // REAL connections bind exactly one real-world boundary: FILE_READ one real
+    // directory, WEB_FETCH one allowed host; other capabilities keep the empty
+    // P09 config (no credentials stored).
+    const config = await resolveConnectionConfig(input.capabilities, input.rootPath, input.allowedHost, input.allowPrivate, input.allowedExecutables);
+    return runIdempotentCommand(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
+        commandId: input.commandId, commandType: 'CreateGatewayConnection',
+        target: { project_id: input.projectId },
+        body: { capabilities: [...input.capabilities].sort(),
+            ...(config === undefined ? {} : { ...config }) },
+        execute: async (repositories) => {
+            await authorityWrite(repositories, input.workspaceId);
+            await projectVisible(repositories, input.workspaceId, input.projectId);
+            const connection = await repositories.gateway.insertConnection({ id: randomUUID(),
+                workspaceId: input.workspaceId, projectId: input.projectId,
+                config: config === undefined ? {} : config });
+            for (const capability of input.capabilities)
+                await repositories.gateway.addConnectionCapability(connection.id, capability);
+            await repositories.workspaces.bumpAuthority(input.workspaceId);
+            return { project_id: input.projectId, connection_id: connection.id,
+                version: toDecimalString(connection.version), status: connection.status };
+        } });
+}
+async function resolveConnectionConfig(capabilities, rootPath, allowedHost, allowPrivate, allowedExecutables) {
+    const rootBoundCaps = ['FILE_READ', 'FILE_QUERY', 'FILE_WRITE', 'GIT_READ', 'GIT_WRITE', 'CLI_RUN'];
+    const hasRootBound = capabilities.some((c) => rootBoundCaps.includes(c));
+    const hasWebFetch = capabilities.includes('WEB_FETCH');
+    if (hasRootBound && hasWebFetch) {
+        throw validationFailed([{ field: 'capabilities',
+                message: 'a REAL connection binds exactly one boundary; split filesystem and WEB_FETCH' }]);
+    }
+    if (!hasRootBound && !hasWebFetch) {
+        if (rootPath !== undefined || allowedHost !== undefined || allowPrivate !== undefined) {
+            throw validationFailed([{ field: 'root_path',
+                    message: 'only filesystem/WEB_FETCH connections bind a boundary' }]);
+        }
+        // 没有 root-bound 能力就不可能挂得上 CLI_RUN，清单必须在此拒掉，
+        // 否则会变成一个谁也读不到、谁也生效不了的死配置。
+        await resolveAllowedExecutables(capabilities, allowedExecutables);
+        return undefined;
+    }
+    if (rootPath !== undefined && allowedHost !== undefined) {
+        throw validationFailed([{ field: 'root_path',
+                message: 'filesystem and WEB_FETCH boundaries are mutually exclusive' }]);
+    }
+    if (hasRootBound) {
+        if (allowedHost !== undefined || allowPrivate !== undefined) {
+            throw validationFailed([{ field: 'allowed_host', message: 'only WEB_FETCH connections bind a host' }]);
+        }
+        if (rootPath === undefined || !isAbsolute(rootPath)) {
+            throw validationFailed([{ field: 'root_path', message: 'filesystem connections require an absolute root path' }]);
+        }
+        let stats;
+        try {
+            stats = await stat(rootPath);
+        }
+        catch {
+            throw validationFailed([{ field: 'root_path', message: 'root path must be an existing directory' }]);
+        }
+        if (!stats.isDirectory()) {
+            throw validationFailed([{ field: 'root_path', message: 'root path must be an existing directory' }]);
+        }
+        const executables = await resolveAllowedExecutables(capabilities, allowedExecutables);
+        return { root_path: await realpath(rootPath),
+            // 未配置时不落这个键：既有连接行的 config 形状必须逐字不变。
+            ...(executables === undefined ? {} : { allowed_executables: [...executables] }) };
+    }
+    if (rootPath !== undefined) {
+        throw validationFailed([{ field: 'root_path', message: 'only filesystem connections bind a root' }]);
+    }
+    // WEB_FETCH 分支没有 CLI_RUN 可用，清单在此拒掉而不是静默丢弃。
+    await resolveAllowedExecutables(capabilities, allowedExecutables);
+    // Only an explicit opt-IN is storable; allow_private=false is the default and
+    // must not appear in the config (the SQL shape guard only accepts true).
+    return { allowed_host: requireValidHost(allowedHost),
+        ...(allowPrivate === true ? { allow_private: true } : {}) };
+}
+/** Allowed host is a syntactic DNS hostname stored lowercase; the web adapter
+ * re-checks scheme and resolved addresses at prepare/execute time. */
+function requireValidHost(host) {
+    if (host === undefined || host === '') {
+        throw validationFailed([{ field: 'allowed_host', message: 'WEB_FETCH connections require an allowed host' }]);
+    }
+    const normalized = host.trim().toLowerCase();
+    if (normalized.length > 253 ||
+        !/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/u.test(normalized)) {
+        throw validationFailed([{ field: 'allowed_host', message: 'must be a DNS hostname without scheme, path or port' }]);
+    }
+    return normalized;
+}
+/** 允许清单的条目上限；与检查的冻结清单一样按可枚举、可核对的口径设上限。 */
+export const ALLOWED_EXECUTABLES_MAX = 32;
+/**
+ * CLI_RUN 连接上的可执行文件允许清单（plans/2026-10-05-cli-executable-admission.md）。
+ *
+ * 模型只**提出**一次检查的入口。根内脚本不需要配置；根外入口（包管理器、解释器、
+ * 系统工具）必须由用户在这里点名，否则准入判定会拒绝。清单是用户授权的一部分，
+ * 所以每一项都要在写入前实测存在且是可运行文件，并按 realpath 规范化存储——
+ * 用户回读到的就是真正生效的那一份。
+ *
+ * 未配置（undefined）与配了空清单语义不同：空清单是一个没有意义的配置，
+ * 存下来只会让人以为「配过了」，所以直接拒绝。
+ */
+export async function resolveAllowedExecutables(capabilities, entries) {
+    if (entries === undefined)
+        return undefined;
+    const refuse = (message) => validationFailed([{ field: 'allowed_executables', message }]);
+    // 清单只对 CLI_RUN 有意义；挂到别的能力上会让人误以为那项能力也受这份约束。
+    if (!capabilities.includes('CLI_RUN')) {
+        throw refuse('allowed_executables is only meaningful for a CLI_RUN connection');
+    }
+    if (entries.length === 0)
+        throw refuse('allowed_executables must name at least one executable');
+    if (entries.length > ALLOWED_EXECUTABLES_MAX) {
+        throw refuse(`allowed_executables must name at most ${ALLOWED_EXECUTABLES_MAX} executables`);
+    }
+    const seen = new Set();
+    const resolved = [];
+    for (const entry of entries) {
+        const trimmed = entry.trim();
+        if (trimmed === '')
+            throw refuse('allowed_executables entries must be non-empty paths');
+        if (!isAbsolute(trimmed))
+            throw refuse(`allowed_executables entry must be an absolute path: ${trimmed}`);
+        let real;
+        try {
+            real = await realpath(trimmed);
+        }
+        catch {
+            throw refuse(`allowed_executables entry does not exist: ${trimmed}`);
+        }
+        const stats = await stat(real);
+        if (!stats.isFile())
+            throw refuse(`allowed_executables entry must be a file: ${trimmed}`);
+        // Windows 上同一个文件的大小写写法必须折叠成一项，否则清单回读会多出重复行。
+        const key = process.platform === 'win32' ? real.toLowerCase() : real;
+        if (seen.has(key))
+            continue;
+        seen.add(key);
+        resolved.push(real);
+    }
+    return resolved;
+}
+export async function disableGatewayConnectionCommand(db, input) {
+    const expected = requireRevision(input.expectedVersion, 'expected_version');
+    return runIdempotentCommand(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
+        commandId: input.commandId, commandType: 'DisableGatewayConnection',
+        target: { project_id: input.projectId, connection_id: input.connectionId },
+        body: { expected_version: toDecimalString(expected) },
+        execute: async (repositories) => {
+            await authorityWrite(repositories, input.workspaceId);
+            const current = await repositories.gateway.readConnection(input.connectionId);
+            if (current?.workspace_id !== input.workspaceId || current.project_id !== input.projectId)
+                throw resourceNotFound('Connection');
+            await projectVisible(repositories, input.workspaceId, input.projectId);
+            if (current.version !== expected)
+                throw revisionConflict({ entityType: 'CONNECTION',
+                    expectedRevision: toDecimalString(expected), actualRevision: toDecimalString(current.version) });
+            if (current.status === 'DISABLED')
+                throw invalidTransition('Connection 已停用。');
+            const changed = await repositories.gateway.setConnection({ id: current.id, status: 'DISABLED', config: {} });
+            await repositories.workspaces.bumpAuthority(input.workspaceId);
+            return { project_id: input.projectId, connection_id: changed.id,
+                version: toDecimalString(changed.version), status: changed.status };
+        } });
+}
+async function policyScope(repositories, workspaceId, projectId, capability, resourceId, host, actionType) {
+    if (capability === 'FAKE_PUBLIC_READ') {
+        if (resourceId !== null)
+            throw validationFailed([{ field: 'resource_id', message: 'public read has no resource' }]);
+        return { actionType: 'READ_PUBLIC', targetPrefix: 'https://public.example/' };
+    }
+    if (capability === 'WEB_FETCH') {
+        if (resourceId !== null)
+            throw validationFailed([{ field: 'resource_id', message: 'web fetch has no resource' }]);
+        // WEB_FETCH policies match by URL host; the host is the web analogue of a path prefix.
+        return { actionType: 'WEB_FETCH', targetPrefix: requireValidHost(host) };
+    }
+    if (resourceId === null)
+        throw validationFailed([{ field: 'resource_id', message: 'write permission requires a resource' }]);
+    const resource = await repositories.gateway.readResource(resourceId);
+    if (resource?.workspace_id !== workspaceId || resource.project_id !== projectId || resource.status !== 'ACTIVE') {
+        throw resourceNotFound('Managed resource');
+    }
+    // 同一 capability 下不同 action_type 是**不同**的权限事实（读 diff 与读状态不是同一授权）。
+    // 缺省仍取既有的单一默认动作，因此既有调用方与历史策略的判定不变。
+    const derived = defaultActionTypeOf(capability);
+    if (actionType !== undefined && actionType !== derived) {
+        if (!SUPPORTED_POLICY_ACTIONS[capability].includes(actionType)) {
+            throw validationFailed([{ field: 'action_type',
+                    message: `unsupported action for ${capability}: ${SUPPORTED_POLICY_ACTIONS[capability].join(', ')}` }]);
+        }
+        return { actionType, targetPrefix: resource.canonical_root };
+    }
+    return { actionType: derived, targetPrefix: resource.canonical_root };
+}
+/** 每个 capability 在 Permission 词表里可出现的 action_type。缺省动作见 defaultActionTypeOf。 */
+const SUPPORTED_POLICY_ACTIONS = {
+    FAKE_WRITE: ['WRITE_MARKER'],
+    FAKE_PUBLIC_READ: ['READ_PUBLIC'],
+    FILE_READ: ['READ_FILE'],
+    FILE_QUERY: ['LIST_DIRECTORY', 'FIND_PATHS', 'SEARCH_TEXT'],
+    WEB_FETCH: ['WEB_FETCH'],
+    FILE_WRITE: ['WRITE_FILE', 'APPLY_CHANGESET', 'READ_CHANGE_SET'],
+    GIT_READ: ['GIT_STATUS', 'GIT_DIFF', 'GIT_LOG'],
+    GIT_WRITE: ['GIT_STAGE', 'GIT_COMMIT', 'GIT_PUSH'],
+    CLI_RUN: ['CLI_RUN', 'RUN_BUILD', 'RUN_TEST'],
+};
+function defaultActionTypeOf(capability) {
+    if (capability === 'FAKE_PUBLIC_READ')
+        return 'READ_PUBLIC';
+    if (capability === 'WEB_FETCH')
+        return 'WEB_FETCH';
+    if (capability === 'FILE_READ')
+        return 'READ_FILE';
+    if (capability === 'FILE_QUERY')
+        return 'LIST_DIRECTORY';
+    if (capability === 'FILE_WRITE')
+        return 'APPLY_CHANGESET';
+    if (capability === 'GIT_READ')
+        return 'GIT_STATUS';
+    if (capability === 'GIT_WRITE')
+        return 'GIT_COMMIT';
+    if (capability === 'CLI_RUN')
+        return 'CLI_RUN';
+    return 'WRITE_MARKER';
+}
+export async function createGatewayPolicyCommand(db, input) {
+    if (!Number.isInteger(input.maxPayloadBytes) || input.maxPayloadBytes < 0 || input.maxPayloadBytes > 262144) {
+        throw validationFailed([{ field: 'max_payload_bytes', message: 'must be from 0 to 262144' }]);
+    }
+    return runIdempotentCommand(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
+        commandId: input.commandId, commandType: 'CreateGatewayPolicy',
+        target: { project_id: input.projectId }, body: { capability: input.capability,
+            resource_id: input.resourceId, decision: input.decision, max_payload_bytes: input.maxPayloadBytes,
+            ...(input.host === undefined ? {} : { host: input.host.toLowerCase() }),
+            ...(input.actionType === undefined ? {} : { action_type: input.actionType }) },
+        execute: async (repositories) => {
+            await authorityWrite(repositories, input.workspaceId);
+            await projectVisible(repositories, input.workspaceId, input.projectId);
+            const scope = await policyScope(repositories, input.workspaceId, input.projectId, input.capability, input.resourceId, input.host, input.actionType);
+            const policy = await repositories.gateway.insertPolicy({ id: randomUUID(), workspaceId: input.workspaceId,
+                projectId: input.projectId, capability: input.capability, actionType: scope.actionType,
+                targetPrefix: scope.targetPrefix, decision: input.decision, maxPayloadBytes: input.maxPayloadBytes });
+            await repositories.workspaces.bumpAuthority(input.workspaceId);
+            return { project_id: input.projectId, policy_id: policy.id,
+                revision: toDecimalString(policy.revision), version: '1', status: policy.status };
+        } });
+}
+export async function addGatewayPolicyVersionCommand(db, input) {
+    const expected = requireRevision(input.expectedRevision, 'expected_revision');
+    return runIdempotentCommand(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
+        commandId: input.commandId, commandType: 'AddGatewayPolicyVersion',
+        target: { project_id: input.projectId, policy_id: input.policyId },
+        body: { expected_revision: toDecimalString(expected), capability: input.capability,
+            resource_id: input.resourceId, decision: input.decision, max_payload_bytes: input.maxPayloadBytes,
+            ...(input.host === undefined ? {} : { host: input.host.toLowerCase() }),
+            ...(input.actionType === undefined ? {} : { action_type: input.actionType }) },
+        execute: async (repositories) => {
+            await authorityWrite(repositories, input.workspaceId);
+            const policy = await repositories.gateway.readPolicy(input.policyId);
+            if (policy?.workspace_id !== input.workspaceId || policy.project_id !== input.projectId)
+                throw resourceNotFound('Permission policy');
+            await projectVisible(repositories, input.workspaceId, input.projectId);
+            if (policy.revision !== expected)
+                throw revisionConflict({ entityType: 'PERMISSION_POLICY',
+                    expectedRevision: toDecimalString(expected), actualRevision: toDecimalString(policy.revision) });
+            const scope = await policyScope(repositories, input.workspaceId, input.projectId, input.capability, input.resourceId, input.host, input.actionType);
+            const version = (await repositories.gateway.latestPolicyVersion(policy.id)) + 1n;
+            await repositories.gateway.insertPolicyVersion({ policyId: policy.id, version,
+                capability: input.capability, actionType: scope.actionType, targetPrefix: scope.targetPrefix,
+                decision: input.decision, maxPayloadBytes: input.maxPayloadBytes });
+            const activated = await repositories.gateway.activatePolicyVersion(policy.id, version);
+            await repositories.workspaces.bumpAuthority(input.workspaceId);
+            return { project_id: input.projectId, policy_id: policy.id, version: toDecimalString(version),
+                revision: toDecimalString(activated.revision), status: activated.status };
+        } });
+}
+export async function revokeGatewayPolicyCommand(db, input) {
+    const expected = requireRevision(input.expectedRevision, 'expected_revision');
+    return runIdempotentCommand(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
+        commandId: input.commandId, commandType: 'RevokeGatewayPolicy',
+        target: { project_id: input.projectId, policy_id: input.policyId },
+        body: { expected_revision: toDecimalString(expected) }, execute: async (repositories) => {
+            await authorityWrite(repositories, input.workspaceId);
+            const policy = await repositories.gateway.readPolicy(input.policyId);
+            if (policy?.workspace_id !== input.workspaceId || policy.project_id !== input.projectId)
+                throw resourceNotFound('Permission policy');
+            await projectVisible(repositories, input.workspaceId, input.projectId);
+            if (policy.revision !== expected)
+                throw revisionConflict({ entityType: 'PERMISSION_POLICY',
+                    expectedRevision: toDecimalString(expected), actualRevision: toDecimalString(policy.revision) });
+            if (policy.status === 'REVOKED')
+                throw invalidTransition('Permission 已撤销。');
+            const revoked = await repositories.gateway.revokePolicy(policy.id);
+            await repositories.workspaces.bumpAuthority(input.workspaceId);
+            return { project_id: input.projectId, policy_id: policy.id,
+                revision: toDecimalString(revoked.revision), status: revoked.status };
+        } });
+}
+export async function createManagedResourceCommand(db, input) {
+    const scopeKey = httpCommandScopeKey(input.workspaceId);
+    // A committed receipt must replay even if its directory has since moved. Native
+    // inspection is outside the registration transaction and only runs for first use.
+    const prior = await createRepositories(db).receipts.findReceipt({ scopeKey,
+        commandId: input.commandId });
+    let prepared;
+    if (prior === undefined) {
+        let root;
+        try {
+            root = await realpath(input.rootPath);
+        }
+        catch (error) {
+            if (['ENOENT', 'ENOTDIR'].includes(error.code ?? '')) {
+                throw validationFailed([{ field: 'root_path', message: 'must be an existing directory' }]);
+            }
+            throw error;
+        }
+        if (!(await stat(root)).isDirectory())
+            throw validationFailed([{ field: 'root_path', message: 'must be an existing directory' }]);
+        const fileWriteRootId = await registrationFileWriteRootId(root);
+        prepared = { root, fileWriteRootId };
+    }
+    return runIdempotentCommand(db, { scopeKey,
+        commandId: input.commandId, commandType: 'CreateManagedResource',
+        target: { project_id: input.projectId }, body: { root_path: input.rootPath },
+        execute: async (repositories) => {
+            if (prepared === undefined)
+                throw new Error('Managed resource receipt disappeared during replay');
+            const { root, fileWriteRootId } = prepared;
+            const key = canonicalResourceIdentity(root);
+            await authorityWrite(repositories, input.workspaceId);
+            await projectVisible(repositories, input.workspaceId, input.projectId);
+            await repositories.gateway.lockResourceRegistry();
+            if ((await repositories.gateway.listResources()).some((row) => row.project_id === input.projectId && row.identity_key === key && row.status === 'ACTIVE')) {
+                throw invalidTransition('同一 Project 已登记该实际目录。');
+            }
+            const resource = await repositories.gateway.insertResource({ id: randomUUID(),
+                workspaceId: input.workspaceId, projectId: input.projectId, canonicalRoot: root,
+                identityKey: key, fileWriteRootId });
+            await repositories.workspaces.bumpAuthority(input.workspaceId);
+            return { project_id: input.projectId, resource_id: resource.id,
+                revision: toDecimalString(resource.revision),
+                canonical_root: resource.canonical_root, status: resource.status };
+        } });
+}
+export async function disableManagedResourceCommand(db, input) {
+    const expected = requireRevision(input.expectedRevision, 'expected_revision');
+    return runIdempotentCommand(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
+        commandId: input.commandId, commandType: 'DisableManagedResource',
+        target: { project_id: input.projectId, resource_id: input.resourceId },
+        body: { expected_revision: toDecimalString(expected) }, execute: async (repositories) => {
+            await authorityWrite(repositories, input.workspaceId);
+            const resource = await repositories.gateway.lockResource(input.resourceId);
+            if (resource?.workspace_id !== input.workspaceId || resource.project_id !== input.projectId)
+                throw resourceNotFound('Managed resource');
+            await projectVisible(repositories, input.workspaceId, input.projectId);
+            if (resource.revision !== expected)
+                throw revisionConflict({ entityType: 'MANAGED_RESOURCE',
+                    expectedRevision: toDecimalString(expected), actualRevision: toDecimalString(resource.revision) });
+            if (resource.status === 'DISABLED')
+                throw invalidTransition('资源已停用。');
+            await repositories.gateway.lockResourceRegistry();
+            if ((await repositories.gateway.listOccupiedResources()).some((row) => rootsOverlap(row.identity_key, resource.identity_key)))
+                throw invalidTransition('资源仍被占用或隔离。');
+            const disabled = await repositories.gateway.disableResource(resource.id);
+            await repositories.workspaces.bumpAuthority(input.workspaceId);
+            return { project_id: input.projectId, resource_id: disabled.id,
+                revision: toDecimalString(disabled.revision), status: disabled.status };
+        } });
+}

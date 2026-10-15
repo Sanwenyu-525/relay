@@ -1,4 +1,4 @@
-﻿import assert from 'node:assert/strict';
+﻿﻿﻿﻿import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { sql } from 'kysely';
 import { randomUUID } from 'node:crypto';
@@ -14,8 +14,9 @@ import { createGatewayPolicy, registerManagedResource } from
 import { advanceRunStep } from '../../src/application/run-steps.js';
 import { markTaskReady } from '../../src/application/task-commands.js';
 import { resolveReview } from '../../src/application/review-decisions.js';
-import { requestRunControl } from '../../src/application/control-requests.js';
+import { requestRunControl, applySafeControl, resumeRun } from '../../src/application/control-requests.js';
 import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
+import { claimRunForGateway, prepareGatewayAction } from '../../src/application/gateway-actions.js';
 import { readRunToolCalls } from '../../src/application/run-tool-call-projection.js';
 import { buildToolTurns, resolveToolLoopPlan } from '../../src/application/tool-loop.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
@@ -1268,6 +1269,112 @@ test('a pending user pause blocks a requested write before it reaches the disk',
   assert.equal(rows[0]!.operation_id, null);
 });
 
+test('a write paused before dispatch resumes under the same identity and writes exactly once', async () => {
+  const fx = await fixture('scope-pause-resume-write', { scopeActions: ['APPLY_CHANGESET'],
+    allowedTools: ['apply_changeset'] });
+  const path = join(fx.canonicalRoot, 'src', 'index.ts');
+  const original = await readFile(path, 'utf8');
+  const baseline = await sha256File(path);
+  const toolCallId = await advanceToPendingToolAction(fx, [[{ name: 'apply_changeset',
+    arguments: { changes: [{ action: 'MODIFY', path: 'src/index.ts', baselineSha256: baseline,
+      content: 'export const relay = "resumed-once";\n' }] } }]]);
+  assert.deepEqual((await toolRows(fx.runId)).map((row) => row.status), ['REQUESTED']);
+
+  // 暂停先真正应用（而不只是挂一个 PENDING 意图）：磁盘未动、动作未建、行保原身份。
+  const before = await withTransaction(app.db, async (repositories) => ({
+    task: await repositories.tasks.readTask(fx.taskId), run: await repositories.runs.readRun(fx.runId) }));
+  await requestRunControl(app.db, { workspaceId: fx.workspaceId, runId: fx.runId,
+    commandId: randomUUID(), expectedTaskRevision: before.task!.revision.toString(),
+    expectedRunRevision: before.run!.revision.toString(), type: 'PAUSE' });
+  const applied = await applySafeControl(app.db, fx.runId);
+  assert.equal(applied?.status, 'APPLIED');
+  assert.equal((await withTransaction(app.db, (repositories) =>
+    repositories.runs.readRun(fx.runId)))?.status, 'PAUSED');
+  assert.equal(await readFile(path, 'utf8'), original);
+  assert.equal((await withTransaction(app.db, (repositories) =>
+    repositories.gateway.listRunOperations(fx.runId))).length, 0);
+  const paused = await toolRows(fx.runId);
+  assert.deepEqual(paused.map((row) => [row.id, row.status, row.operation_id]),
+    [[toolCallId, 'REQUESTED', null]]);
+
+  // 恢复：同一个 Run 回到 RUNNING，同一个请求身份被派发一次。
+  const task = await withTransaction(app.db, (repositories) => repositories.tasks.readTask(fx.taskId));
+  const run = await withTransaction(app.db, (repositories) => repositories.runs.readRun(fx.runId));
+  const resumed = await resumeRun(app.db, { workspaceId: fx.workspaceId, runId: fx.runId,
+    commandId: randomUUID(), expectedTaskRevision: task!.revision.toString(),
+    expectedRunRevision: run!.revision.toString() });
+  assert.equal(resumed.result.status, 'RUNNING', JSON.stringify(resumed.result));
+
+  const settled = await executeToolLoopStep(app.db, { claim: toolClaim(fx), toolCallId });
+  assert.equal(settled.status, 'SUCCEEDED', JSON.stringify(settled));
+  // 行 id 就是动作身份：恢复后走的仍是同一个 Operation，没有第二次写入。
+  assert.equal(settled.operationId, toolCallId);
+  assert.equal(await readFile(path, 'utf8'), 'export const relay = "resumed-once";\n');
+  assert.deepEqual((await toolRows(fx.runId)).map((row) => [row.id, row.status, row.operation_id]),
+    [[toolCallId, 'SETTLED', toolCallId]]);
+  const operations = await withTransaction(app.db, (repositories) =>
+    repositories.gateway.listRunOperations(fx.runId));
+  assert.deepEqual(operations.map((operation) => [operation.id, operation.status]),
+    [[toolCallId, 'SUCCEEDED']]);
+  // 变化集账本只有一条，且实测摘要与磁盘一致——这是「没有第二次写入」的落盘证据。
+  const ledgers = await withTransaction(app.db, (repositories) =>
+    repositories.changeSets.listByOperation(toolCallId));
+  assert.equal(ledgers.length, 1);
+  const files = await withTransaction(app.db, (repositories) =>
+    repositories.changeSets.listFiles(ledgers[0]!.id));
+  assert.deepEqual(files.map((file) => [file.relative_path, file.status]),
+    [['src/index.ts', 'APPLIED']]);
+  assert.equal(files[0]!.actual_sha256, await sha256File(path));
+});
+
+test('a cancelled Run abandons the leftover write request instead of leaving it dispatchable', async () => {
+  const fx = await fixture('scope-cancel-write', { scopeActions: ['APPLY_CHANGESET'],
+    allowedTools: ['apply_changeset'] });
+  const path = join(fx.canonicalRoot, 'src', 'index.ts');
+  const original = await readFile(path, 'utf8');
+  const baseline = await sha256File(path);
+  const toolCallId = await advanceToPendingToolAction(fx, [[{ name: 'apply_changeset',
+    arguments: { changes: [{ action: 'MODIFY', path: 'src/index.ts', baselineSha256: baseline,
+      content: 'export const relay = "cancelled";\n' }] } }]]);
+  assert.deepEqual((await toolRows(fx.runId)).map((row) => row.status), ['REQUESTED']);
+
+  // 取消应用：Run 落终态，磁盘仍未动。
+  const before = await withTransaction(app.db, async (repositories) => ({
+    task: await repositories.tasks.readTask(fx.taskId), run: await repositories.runs.readRun(fx.runId) }));
+  await requestRunControl(app.db, { workspaceId: fx.workspaceId, runId: fx.runId,
+    commandId: randomUUID(), expectedTaskRevision: before.task!.revision.toString(),
+    expectedRunRevision: before.run!.revision.toString(), type: 'CANCEL' });
+  const applied = await applySafeControl(app.db, fx.runId);
+  assert.equal(applied?.status, 'APPLIED');
+  assert.equal((await withTransaction(app.db, (repositories) =>
+    repositories.runs.readRun(fx.runId)))?.status, 'CANCELLED');
+
+  // 终态图不会再交回这个请求；旧 Worker 若仍拿着它，必须得到类型化结果而不是抛未分类异常。
+  const advanced = await advanceRunStep(app.db, { runId: fx.runId,
+    workerId: `cancel-${randomUUID()}`, storage: new ManagedContentStore(dataRoot) });
+  assert.equal(advanced.status, 'RUN_TERMINAL', JSON.stringify(advanced));
+  const outcome = await executeToolLoopStep(app.db, { claim: toolClaim(fx), toolCallId });
+  assert.equal(outcome.status, 'STOPPED', JSON.stringify(outcome));
+
+  // 一个字节都没落盘，也没有留下任何动作。
+  assert.equal(await readFile(path, 'utf8'), original);
+  assert.equal((await withTransaction(app.db, (repositories) =>
+    repositories.gateway.listRunOperations(fx.runId))).length, 0);
+
+  // 遗留请求落定终态归属：不再是看起来仍可完成的 REQUESTED，历史仍可读且带类型化原因。
+  const rows = await toolRows(fx.runId);
+  assert.deepEqual(rows.map((row) => [row.id, row.status, row.operation_id]),
+    [[toolCallId, 'REJECTED', null]]);
+  assert.equal(rows[0]!.result_ref?.reason, 'RUN_TERMINAL');
+  assert.ok(String(rows[0]!.result_ref?.detail ?? '').length > 0);
+  const pending = await new RunToolCallRepository(app.db).listPending(fx.runId);
+  assert.deepEqual(pending.map((row) => row.id), []);
+  const projection = await readRunToolCalls(app.db, fx.workspaceId, fx.runId);
+  assert.equal(projection.run_status, 'CANCELLED');
+  assert.equal(projection.rounds[0]?.calls[0]?.status, 'REJECTED');
+  assert.equal(projection.rounds[0]?.calls[0]?.operation_id, null);
+});
+
 test('a write request past the call budget is rejected without an Operation or a disk byte', async () => {
   const fx = await fixture('scope-budget-write', { scopeActions: ['APPLY_CHANGESET'],
     allowedTools: ['apply_changeset'], maxToolCalls: 1 });
@@ -1367,4 +1474,276 @@ test('a check whose program changed after the grant falls back to a single-actio
   const operation = await withTransaction(app.db, (repositories) =>
     repositories.gateway.readOperation(rows[0]!.id!));
   assert.equal(operation?.status, 'WAITING_APPROVAL');
+});
+
+test('a cancelled Run exits pending without the old worker returning', async () => {
+  const fx = await fixture('scope-cancel-no-worker', { scopeActions: ['APPLY_CHANGESET'],
+    allowedTools: ['apply_changeset'] });
+  const path = join(fx.canonicalRoot, 'src', 'index.ts');
+  const original = await readFile(path, 'utf8');
+  const baseline = await sha256File(path);
+  const toolCallId = await advanceToPendingToolAction(fx, [[{ name: 'apply_changeset',
+    arguments: { changes: [{ action: 'MODIFY', path: 'src/index.ts', baselineSha256: baseline,
+      content: 'export const relay = "cancelled-no-worker";\n' }] } }]]);
+  assert.deepEqual((await toolRows(fx.runId)).map((row) => row.status), ['REQUESTED']);
+
+  const before = await withTransaction(app.db, async (repositories) => ({
+    task: await repositories.tasks.readTask(fx.taskId),
+    run: await repositories.runs.readRun(fx.runId) }));
+  await requestRunControl(app.db, { workspaceId: fx.workspaceId, runId: fx.runId,
+    commandId: randomUUID(), expectedTaskRevision: before.task!.revision.toString(),
+    expectedRunRevision: before.run!.revision.toString(), type: 'CANCEL' });
+  const applied = await applySafeControl(app.db, fx.runId);
+  assert.equal(applied?.status, 'APPLIED');
+  assert.equal((await withTransaction(app.db, (repositories) =>
+    repositories.runs.readRun(fx.runId)))?.status, 'CANCELLED');
+
+  // 旧 Worker 永不返回：正常调度收口必须已退出 pending，不依赖补偿。
+  const pendingAfterApply = await new RunToolCallRepository(app.db).listPending(fx.runId);
+  assert.deepEqual(pendingAfterApply.map((row) => row.id), []);
+  const advanced = await advanceRunStep(app.db, { runId: fx.runId,
+    workerId: `cancel-no-worker-${randomUUID()}`, storage: new ManagedContentStore(dataRoot) });
+  assert.equal(advanced.status, 'RUN_TERMINAL', JSON.stringify(advanced));
+  const rows = await toolRows(fx.runId);
+  assert.deepEqual(rows.map((row) => [row.id, row.status, row.operation_id]),
+    [[toolCallId, 'REJECTED', null]]);
+  assert.equal(rows[0]!.result_ref?.reason, 'RUN_TERMINAL');
+  assert.ok(String(rows[0]!.result_ref?.detail ?? '').length > 0);
+  assert.equal(await readFile(path, 'utf8'), original);
+  assert.equal((await withTransaction(app.db, (repositories) =>
+    repositories.gateway.listRunOperations(fx.runId))).length, 0);
+});
+
+test('cancel applied after the old worker stopped once closes the request without another entry', async () => {
+  const fx = await fixture('scope-cancel-stopped-entry', { scopeActions: ['APPLY_CHANGESET'],
+    allowedTools: ['apply_changeset'] });
+  const path = join(fx.canonicalRoot, 'src', 'index.ts');
+  const original = await readFile(path, 'utf8');
+  const baseline = await sha256File(path);
+  const toolCallId = await advanceToPendingToolAction(fx, [[{ name: 'apply_changeset',
+    arguments: { changes: [{ action: 'MODIFY', path: 'src/index.ts', baselineSha256: baseline,
+      content: 'export const relay = "stopped-entry";\n' }] } }]]);
+  assert.deepEqual((await toolRows(fx.runId)).map((row) => row.status), ['REQUESTED']);
+
+  // 取消意图先持久化。旧 Worker 此时做最后一次进入：领取被 GATEWAY_RUN_NOT_READY 挡下，
+  // 得到类型化 STOPPED；Run 还没到终态，请求行此刻必须保持 REQUESTED，不能提前终态化。
+  const before = await withTransaction(app.db, async (repositories) => ({
+    task: await repositories.tasks.readTask(fx.taskId),
+    run: await repositories.runs.readRun(fx.runId) }));
+  await requestRunControl(app.db, { workspaceId: fx.workspaceId, runId: fx.runId,
+    commandId: randomUUID(), expectedTaskRevision: before.task!.revision.toString(),
+    expectedRunRevision: before.run!.revision.toString(), type: 'CANCEL' });
+  const stoppedEntry = await executeToolLoopStep(app.db, { claim: toolClaim(fx), toolCallId });
+  assert.equal(stoppedEntry.status, 'STOPPED', JSON.stringify(stoppedEntry));
+  assert.deepEqual((await toolRows(fx.runId)).map((row) => row.status), ['REQUESTED']);
+
+  // 旧 Worker 从这里起不会再进入。取消在此刻应用：收口必须发生在取消应用路径上，
+  // 而不是等旧 Worker 恰好再进一次执行入口的补偿。终态化并带类型化原因，不伪造结果。
+  const applied = await applySafeControl(app.db, fx.runId);
+  assert.equal(applied?.status, 'APPLIED');
+  assert.equal((await withTransaction(app.db, (repositories) =>
+    repositories.runs.readRun(fx.runId)))?.status, 'CANCELLED');
+  const pendingAfterApply = await new RunToolCallRepository(app.db).listPending(fx.runId);
+  assert.deepEqual(pendingAfterApply.map((row) => row.id), []);
+
+  // 之后的入口只是确认终态：不再正常派发，也不依赖任何 Worker 回来。
+  const advanced = await advanceRunStep(app.db, { runId: fx.runId,
+    workerId: `cancel-stopped-${randomUUID()}`, storage: new ManagedContentStore(dataRoot) });
+  assert.equal(advanced.status, 'RUN_TERMINAL', JSON.stringify(advanced));
+  const rows = await toolRows(fx.runId);
+  assert.deepEqual(rows.map((row) => [row.id, row.status, row.operation_id]),
+    [[toolCallId, 'REJECTED', null]]);
+  assert.equal(rows[0]!.result_ref?.reason, 'RUN_TERMINAL');
+  assert.ok(String(rows[0]!.result_ref?.detail ?? '').length > 0);
+  assert.equal(await readFile(path, 'utf8'), original);
+  assert.equal((await withTransaction(app.db, (repositories) =>
+    repositories.gateway.listRunOperations(fx.runId))).length, 0);
+  const projection = await readRunToolCalls(app.db, fx.workspaceId, fx.runId);
+  assert.equal(projection.run_status, 'CANCELLED');
+  assert.equal(projection.rounds[0]?.calls[0]?.status, 'REJECTED');
+  assert.equal(projection.rounds[0]?.calls[0]?.operation_id, null);
+});
+
+test('multiple undispatched requests on one Run exit pending together on cancel', async () => {
+  const fx = await fixture('scope-cancel-multi', { scopeActions: ['APPLY_CHANGESET'],
+    allowedTools: ['apply_changeset'] });
+  const indexPath = join(fx.canonicalRoot, 'src', 'index.ts');
+  const readmePath = join(fx.canonicalRoot, 'README.md');
+  const indexBaseline = await sha256File(indexPath);
+  const readmeBaseline = await sha256File(readmePath);
+  const firstId = await advanceToPendingToolAction(fx, [[
+    { name: 'apply_changeset', arguments: { changes: [{ action: 'MODIFY', path: 'src/index.ts',
+      baselineSha256: indexBaseline, content: 'export const relay = "multi-1";\n' }] } },
+    { name: 'apply_changeset', arguments: { changes: [{ action: 'MODIFY', path: 'README.md',
+      baselineSha256: readmeBaseline, content: '# multi-2\n' }] } },
+  ]]);
+  const beforeRows = await toolRows(fx.runId);
+  assert.equal(beforeRows.length, 2);
+  assert.deepEqual(beforeRows.map((row) => row.status), ['REQUESTED', 'REQUESTED']);
+  assert.ok(beforeRows.some((row) => row.id === firstId));
+
+  const before = await withTransaction(app.db, async (repositories) => ({
+    task: await repositories.tasks.readTask(fx.taskId),
+    run: await repositories.runs.readRun(fx.runId) }));
+  await requestRunControl(app.db, { workspaceId: fx.workspaceId, runId: fx.runId,
+    commandId: randomUUID(), expectedTaskRevision: before.task!.revision.toString(),
+    expectedRunRevision: before.run!.revision.toString(), type: 'CANCEL' });
+  const applied = await applySafeControl(app.db, fx.runId);
+  assert.equal(applied?.status, 'APPLIED');
+  const advanced = await advanceRunStep(app.db, { runId: fx.runId,
+    workerId: `cancel-multi-${randomUUID()}`, storage: new ManagedContentStore(dataRoot) });
+  assert.equal(advanced.status, 'RUN_TERMINAL', JSON.stringify(advanced));
+  const rows = await toolRows(fx.runId);
+  assert.deepEqual(rows.map((row) => row.status), ['REJECTED', 'REJECTED']);
+  assert.ok(rows.every((row) => row.operation_id === null &&
+    row.result_ref?.reason === 'RUN_TERMINAL'));
+  assert.deepEqual((await new RunToolCallRepository(app.db).listPending(fx.runId)).length, 0);
+  assert.equal((await withTransaction(app.db, (repositories) =>
+    repositories.gateway.listRunOperations(fx.runId))).length, 0);
+});
+
+test('repeated terminal convergence after cancel is idempotent', async () => {
+  const fx = await fixture('scope-cancel-idempotent', { scopeActions: ['APPLY_CHANGESET'],
+    allowedTools: ['apply_changeset'] });
+  const path = join(fx.canonicalRoot, 'src', 'index.ts');
+  const original = await readFile(path, 'utf8');
+  const baseline = await sha256File(path);
+  const toolCallId = await advanceToPendingToolAction(fx, [[{ name: 'apply_changeset',
+    arguments: { changes: [{ action: 'MODIFY', path: 'src/index.ts', baselineSha256: baseline,
+      content: 'export const relay = "idempotent";\n' }] } }]]);
+
+  const before = await withTransaction(app.db, async (repositories) => ({
+    task: await repositories.tasks.readTask(fx.taskId),
+    run: await repositories.runs.readRun(fx.runId) }));
+  await requestRunControl(app.db, { workspaceId: fx.workspaceId, runId: fx.runId,
+    commandId: randomUUID(), expectedTaskRevision: before.task!.revision.toString(),
+    expectedRunRevision: before.run!.revision.toString(), type: 'CANCEL' });
+  assert.equal((await applySafeControl(app.db, fx.runId))?.status, 'APPLIED');
+  const first = await toolRows(fx.runId);
+  assert.deepEqual(first.map((row) => [row.id, row.status]), [[toolCallId, 'REJECTED']]);
+  const firstRevision = first[0]!.revision;
+
+  // 重复收口：不再改写已结算行，不建新动作/请求/命令。
+  assert.equal(await applySafeControl(app.db, fx.runId), null);
+  for (let round = 0; round < 2; round += 1) {
+    const advanced = await advanceRunStep(app.db, { runId: fx.runId,
+      workerId: `cancel-idempotent-${randomUUID()}`, storage: new ManagedContentStore(dataRoot) });
+    assert.equal(advanced.status, 'RUN_TERMINAL', JSON.stringify(advanced));
+  }
+  const late = await executeToolLoopStep(app.db, { claim: toolClaim(fx), toolCallId });
+  assert.equal(late.status, 'STOPPED', JSON.stringify(late));
+  const again = await executeToolLoopStep(app.db, { claim: toolClaim(fx), toolCallId });
+  assert.equal(again.status, 'STOPPED', JSON.stringify(again));
+  const rows = await toolRows(fx.runId);
+  assert.deepEqual(rows.map((row) => [row.id, row.status, row.operation_id]),
+    [[toolCallId, 'REJECTED', null]]);
+  assert.equal(rows[0]!.revision, firstRevision);
+  assert.equal(rows[0]!.result_ref?.reason, 'RUN_TERMINAL');
+  assert.deepEqual((await new RunToolCallRepository(app.db).listPending(fx.runId)).length, 0);
+  assert.equal(await readFile(path, 'utf8'), original);
+  assert.equal((await withTransaction(app.db, (repositories) =>
+    repositories.gateway.listRunOperations(fx.runId))).length, 0);
+});
+
+test('cancel skips a prepared-but-unbound request instead of mis-rejecting it', async () => {
+  const fx = await fixture('scope-race-prepare-bind', { allowedTools: ['list_directory'] });
+  const toolCallId = await advanceToPendingToolAction(fx, [[{ name: 'list_directory',
+    arguments: {} }]]);
+  const rowBefore = await new RunToolCallRepository(app.db).read(toolCallId);
+  assert.equal(rowBefore?.status, 'REQUESTED');
+  assert.equal(rowBefore?.operation_id, null);
+  const plan = await resolveToolLoopPlan(app.db, fx.runId, fx.workspaceId);
+  assert.ok(plan !== undefined);
+  // 准备与绑定之间的竞态：Operation 已落库，行仍未绑定。只看 operation_id 为 null
+  // 就宣布未执行会误拒绝已准备的动作。
+  const workerId = `race-${randomUUID()}`;
+  const claimed = await claimRunForGateway(app.db, { workspaceId: fx.workspaceId,
+    runId: fx.runId, workerId });
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: fx.workspaceId,
+    operationId: toolCallId, intentKey: `tool-loop-v1#${rowBefore!.round}#${rowBefore!.ordinal}`,
+    connectionId: fx.connectionId,
+    origin: { kind: 'RUN', runId: fx.runId, stepId: rowBefore!.step_id,
+      resourceId: plan!.resourceId, workerId, workerEpoch: BigInt(claimed.worker_epoch) },
+    actionType: 'LIST_DIRECTORY', target: plan!.canonicalRoot, params: {} });
+  assert.equal(prepared.status, 'PREPARED');
+  assert.deepEqual((await new RunToolCallRepository(app.db).read(toolCallId))?.status,
+    'REQUESTED');
+
+  // 终态收口必须核对对应 Operation：有 Operation 的行跳过，无 Operation 的行才拒绝。
+  const skipped = await withTransaction(app.db, (repositories) =>
+    repositories.toolCalls.rejectUndispatchedForTerminalRun(fx.runId, 'CANCELLED'));
+  assert.equal(skipped, 0);
+  assert.equal((await new RunToolCallRepository(app.db).read(toolCallId))?.status, 'REQUESTED');
+  assert.ok((await withTransaction(app.db, (repositories) =>
+    repositories.gateway.readOperation(toolCallId))) !== undefined);
+});
+
+test('an UNKNOWN tool outcome is never batch-rejected by terminal settlement', async () => {
+  const checkRoot = await mkdtemp(join(tmpdir(), 'relay-unknown-terminal-'));
+  roots.push(checkRoot);
+  const script = join(checkRoot, 'check.mjs');
+  await writeFile(script, 'await new Promise(resolve => setTimeout(resolve, 1500));\nconsole.log("closed");\n');
+  const check: FrozenCheck = { id: 'slow', executable: process.execPath, args: [script],
+    executable_sha256: await sha256File(process.execPath), max_output_bytes: 4096 };
+  const fx = await fixture('check-unknown-terminal', { allowedTools: ['run_check'],
+    scopeActions: ['CLI_RUN'], checks: [check] });
+  const toolCallId = await advanceToPendingToolAction(fx, [[{ name: 'run_check',
+    arguments: { check_id: 'slow' } }]]);
+  const outcome = await executeToolLoopStep(app.db,
+    { claim: toolClaim(fx), toolCallId, leaseMs: 1000 });
+  assert.equal(outcome.status, 'UNKNOWN');
+  assert.equal((await new RunToolCallRepository(app.db).read(toolCallId))?.status, 'PREPARED');
+  assert.equal((await withTransaction(app.db, (repositories) =>
+    repositories.gateway.readOperation(toolCallId)))?.status, 'UNKNOWN');
+
+  // 在途 UNKNOWN 阻止取消应用：控制停在 PENDING，走既有核对流程，不批量改 REJECTED。
+  const before = await withTransaction(app.db, async (repositories) => ({
+    task: await repositories.tasks.readTask(fx.taskId),
+    run: await repositories.runs.readRun(fx.runId) }));
+  await requestRunControl(app.db, { workspaceId: fx.workspaceId, runId: fx.runId,
+    commandId: randomUUID(), expectedTaskRevision: before.task!.revision.toString(),
+    expectedRunRevision: before.run!.revision.toString(), type: 'CANCEL' });
+  const applied = await applySafeControl(app.db, fx.runId);
+  assert.equal(applied?.status, 'PENDING');
+  assert.equal((await withTransaction(app.db, (repositories) =>
+    repositories.runs.readRun(fx.runId)))?.status, 'RUNNING');
+  assert.equal((await new RunToolCallRepository(app.db).read(toolCallId))?.status, 'PREPARED');
+  assert.equal((await withTransaction(app.db, (repositories) =>
+    repositories.gateway.readOperation(toolCallId)))?.status, 'UNKNOWN');
+  // 终态收口只动 REQUESTED 且无 Operation 的行：PREPARED/UNKNOWN 一律不动，不宣称无副作用。
+  const settled = await withTransaction(app.db, (repositories) =>
+    repositories.toolCalls.rejectUndispatchedForTerminalRun(fx.runId, 'CANCELLED'));
+  assert.equal(settled, 0);
+});
+
+test('a waiting approval keeps its identity through cancel instead of being rejected', async () => {
+  const fx = await fixture('scope-cancel-waiting', { scopeActions: [],
+    allowedTools: ['apply_changeset'], auto: false });
+  const path = join(fx.canonicalRoot, 'src', 'index.ts');
+  const original = await readFile(path, 'utf8');
+  const baseline = await sha256File(path);
+  const toolCallId = await advanceToPendingToolAction(fx, [[{ name: 'apply_changeset',
+    arguments: { changes: [{ action: 'MODIFY', path: 'src/index.ts', baselineSha256: baseline,
+      content: 'export const relay = "waiting-cancel";\n' }] } }]]);
+  const dispatched = await executeToolLoopStep(app.db, { claim: toolClaim(fx), toolCallId });
+  assert.equal(dispatched.status, 'WAITING', JSON.stringify(dispatched));
+  assert.equal((await new RunToolCallRepository(app.db).read(toolCallId))?.status,
+    'WAITING_APPROVAL');
+
+  const before = await withTransaction(app.db, async (repositories) => ({
+    task: await repositories.tasks.readTask(fx.taskId),
+    run: await repositories.runs.readRun(fx.runId) }));
+  await requestRunControl(app.db, { workspaceId: fx.workspaceId, runId: fx.runId,
+    commandId: randomUUID(), expectedTaskRevision: before.task!.revision.toString(),
+    expectedRunRevision: before.run!.revision.toString(), type: 'CANCEL' });
+  const applied = await applySafeControl(app.db, fx.runId);
+  assert.equal(applied?.status, 'APPLIED');
+  assert.equal((await withTransaction(app.db, (repositories) =>
+    repositories.runs.readRun(fx.runId)))?.status, 'CANCELLED');
+  // 已有 Operation 的行走既有停止流程：Operation 按既有规则 DENIED，行本身不被批量 REJECTED。
+  assert.equal((await withTransaction(app.db, (repositories) =>
+    repositories.gateway.readOperation(toolCallId)))?.status, 'DENIED');
+  assert.equal((await new RunToolCallRepository(app.db).read(toolCallId))?.status,
+    'WAITING_APPROVAL');
+  assert.equal(await readFile(path, 'utf8'), original);
 });

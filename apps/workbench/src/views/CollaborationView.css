@@ -7,56 +7,82 @@
 .collab-main { container-name: collaboration; container-type: inline-size; }
 .collab-columns { display: grid; flex: 1; grid-template-columns: minmax(0, var(--relay-collab-chat-column)) var(--relay-space-2) minmax(0, var(--relay-collab-result-column)); min-height: 0; overflow: hidden; }
 .collab-columns--empty { grid-template-columns: minmax(0, 1fr); }
-.collab-columns--empty .folder-scope-bar { flex: none; }
-.folder-scope-bar > summary, .collab-existing-work > summary {
-  cursor: pointer; padding-block: var(--relay-space-2); font-size: var(--relay-font-size-meta);
-  color: var(--relay-color-text-secondary);
+/* 归属回执常驻在输入卡上方、细条正下方，不折叠：在途、结果未知与服务端拒绝
+   都必须能直接看见，否则用户会以为讨论已随目录一起归入项目。 */
+.collab-binding {
+  flex: none;
+  display: grid;
+  gap: var(--relay-space-1);
+  width: 100%;
+  max-width: var(--relay-layout-reading-maxWidth);
+  margin: var(--relay-space-1) auto 0;
+  padding: var(--relay-space-1) var(--relay-space-3);
+  background: var(--relay-color-bg-subtle);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
 }
-/* 目录范围条展开时自己滚动：实测内容 485px，中栏 672px。
-   不设上限它就把下面的对话整列挤没（转录区只剩 124px，一屏读不到几条）。
-   它因此是同列的一个额外滚动容器，只在用户主动展开目录入口时存在。 */
-.folder-scope-bar[open] { max-height: 40%; overflow-y: auto; }
-.collab-existing-work { flex: none; }
-.collab-existing-work[open] { max-height: 40%; overflow-y: auto; }
+.collab-binding > p { margin: 0; font-size: var(--relay-font-size-meta); overflow-wrap: anywhere; }
+.collab-binding[data-status="UNKNOWN"], .collab-binding[data-status="FAILED"] {
+  background: var(--relay-color-status-danger-bg);
+  border-color: var(--relay-color-status-danger-text);
+}
+.collab-binding .form-actions { display: flex; flex-wrap: wrap; gap: var(--relay-space-2); margin: 0; }
 .collab-columns[data-layout-mode="chat"], .collab-columns[data-layout-mode="result"] { grid-template-columns: minmax(0, 1fr); }
-.collab-columns > [hidden], .collab-narrow-tabs[hidden] { display: none; }
+/* 两个视图容器都是 display: flex，会压过 UA 的 [hidden] { display: none }：
+   不显式收口的话「任务视图」下仪表盘与聊天区会同时渲染，页签切换形同虚设。 */
+.collab-columns > [hidden], .collab-center > [hidden], .collab-narrow-tabs[hidden] { display: none; }
 .collab-result-pane { display: flex; min-width: 0; min-height: 0; overflow: hidden; }
 .collab-result-pane > .collab-side { flex: 1; max-width: 100%; }
 
-.collab-center { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: var(--relay-space-2) var(--relay-space-3); gap: var(--relay-space-1); }
+/* 块间距与顶部留白：4px 的贴边间距让整列读成一堵墙。试点把节奏放到 space.3，
+   顶部留白交给 space.4，块与块之间才有呼吸。 */
+.collab-center { display: flex; flex-direction: column; align-items: stretch; min-width: 0; min-height: 0; overflow: hidden; padding: var(--relay-space-4) var(--relay-space-4) var(--relay-space-3); gap: var(--relay-space-3); }
 .collab-center > * { flex: none; }
 /* 消息区是中栏的主轴，basis 用 auto：flex-basis:0（flex:1）时这一项
    不按内容参与收缩，目录范围条实测占 424px 也不肯让出高度，整列只剩 174px，
    转录区被压到 16px——正好一行文字高，看上去就是输入器上方遮住了一块文字。 */
-.collab-center > .agent-assist { flex: 1 1 auto; min-height: 0; gap: var(--relay-space-1); }
-.collab-center > .agent-assist > .agent-assist-heading { display: none; }
+/* 双视图的聊天容器也须把剩余高度交给 AssistView，否则输入卡停在消息后面而非窗口底部。 */
+.collab-center > .agent-assist,
+.collab-chat-view-container > .agent-assist { flex: 1 1 auto; min-height: 0; gap: var(--relay-space-1); }
+.collab-center .agent-assist > .agent-assist-heading { display: none; }
 .collab-center .agent-chat-conversation { flex: 1; min-height: 0; margin: 0; padding: 0; background: transparent; border: 0; }
 .collab-center .agent-chat-conversation-heading { display: none; }
-.collab-center .agent-assist-session-bar { padding: 0; background: transparent; border: 0; margin: 0; }
+.collab-center .agent-assist-session-bar { flex: none; padding: 0; background: transparent; border: 0; margin: 0; }
 .collab-center .agent-assist-session-bar .form-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-2); margin: 0; }
-.collab-center .agent-assist-session-bar .field { display: flex; flex-direction: row; align-items: center; flex: 1; gap: var(--relay-space-2); min-width: 0; margin: 0; }
-.collab-center .agent-assist-session-bar .field-label { flex: none; font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); }
-.collab-center .agent-assist-session-bar select { min-width: 0; flex: 1; }
-.collab-center .agent-assist-session-bar :is(select, .primary-button, .secondary-button) { height: var(--relay-control-height); min-height: var(--relay-control-height); padding: 0 var(--relay-space-3); font-size: var(--relay-font-size-meta); }
+.collab-center .agent-assist-session-controls { width: fit-content; max-width: 100%; margin-inline: auto; }
+/* 横向 label 布局与按钮密度归全局基座：会话行在 AssistView.tsx 引用 .field--row，
+   按钮引用 .primary-button--compact / .secondary-button--compact（standalone 即协作页）。
+   这里只保留协作页头部行的伸缩与外边距约束，select 没有全局紧凑变体，密度留在本地。 */
+.collab-center .agent-assist-session-bar .field { flex: 1; min-width: 0; margin: 0; }
+.collab-center .agent-assist-session-bar select { min-width: 0; flex: 1; height: var(--relay-control-height-compact); min-height: var(--relay-control-height-compact); padding: 0 var(--relay-space-2); font-size: var(--relay-font-size-meta); }
 .collab-center .agent-assist-session-bar--empty { display: grid; gap: var(--relay-space-3); }
 .agent-session-welcome { display: flex; align-items: center; gap: var(--relay-space-2); }
 .agent-session-welcome svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); color: var(--relay-color-action-text); }
 .agent-session-welcome h2 { margin: 0; font-size: var(--relay-font-size-section); }
 
 /* 页头外壳：层级与留白归共享 .page-head，这里只留协作页特有的尺寸与控件密度。 */
-.collab-goal { flex: none; padding: var(--relay-space-2) var(--relay-space-3); border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.collab-goal { flex: none; padding: var(--relay-space-3) var(--relay-space-4); border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
 /* 任务名与状态同行：长任务名先省略，不把状态挤到下一行，也不推高上下文。
    6rem 是本地可读下限，窄窗时整块换行而不是把标题压成一条线。 */
-.collab-goal .page-head-title > h1 { flex: 0 1 auto; min-width: 6rem; font-size: var(--relay-font-size-compactPage); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collab-goal .page-head-title > h1 { flex: 0 1 auto; min-width: 6rem; font-size: var(--relay-font-size-rowTitle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .collab-goal .page-head-title > .status-chip { flex: none; }
 .collab-goal .status-chip { background: var(--relay-color-selection-bg); color: var(--relay-color-selection-text); font-size: var(--relay-font-size-meta); }
-.collab-current-need { margin: 0; font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); overflow-wrap: anywhere; }
-.collab-goal .page-head-actions > button { min-height: var(--relay-control-height); font-size: var(--relay-font-size-meta); }
+.collab-current-need { margin: 0; font-size: var(--relay-font-size-caption); color: var(--relay-color-text-secondary); overflow-wrap: anywhere; }
+/* 页头 meta 属于「谁负责、归在哪」这类背景信息，试点降到 caption；共享 .page-head-meta
+   本身仍服务其他页面，这里只在协作页收口。 */
+.collab-goal .page-head-meta { font-size: var(--relay-font-size-caption); }
+/* 页头动作按钮的紧凑密度由 tsx 上的 .secondary-button--compact 承担，不再页面压回。 */
 .collab-goal .page-head-actions .collaboration-delegate { border: 0; padding: 0; min-width: 0; }
-/* 浮层可能比视口高，长内容在面板内滚动，不把页头或输入区推出可视范围。 */
+/* 浮层可能比视口高：70vh 随窗口收缩，30rem 是 flyout 高度上限——超过部分在面板内滚动，
+   不把页头或输入区推出可视范围。 */
 .collab-goal .page-head-more-panel { max-height: min(70vh, 30rem); overflow-y: auto; }
-.collab-goal .page-head-more-panel > button { min-height: var(--relay-control-height); font-size: var(--relay-font-size-meta); }
-.collaboration-delegate-toggle { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-2); min-height: var(--relay-control-height); padding: var(--relay-space-2) var(--relay-space-3); background: var(--relay-color-action-primary); color: var(--relay-color-text-onAction); border: var(--relay-border-width) solid var(--relay-color-action-primary); border-radius: var(--relay-radius-control); cursor: pointer; font: inherit; font-size: var(--relay-font-size-meta); }
+/* 展开区按钮的紧凑密度同样由 tsx 上的 --compact 变体承担。 */
+/* 委托开关复刻 primary 外观：按钮类名在 components/TaskDelegatePanel.tsx（不在本轮收编
+   所有权内），组件侧换成 .primary-button--compact 后本块可删。先补齐 hover/active，
+   使交互反馈与全局 primary 一致；业务语义（委托开关的 aria-expanded/controls）留在组件。 */
+.collaboration-delegate-toggle { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-2); min-height: var(--relay-control-height); padding: var(--relay-space-2) var(--relay-space-3); background: var(--relay-color-action-primary); color: var(--relay-color-text-onAction); border: var(--relay-border-width) solid var(--relay-color-action-primary); border-radius: var(--relay-radius-control); cursor: pointer; font: inherit; font-size: var(--relay-font-size-meta); transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard), color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard); }
+.collaboration-delegate-toggle:hover:not(:disabled) { background: var(--relay-color-action-hover); border-color: var(--relay-color-action-hover); }
+.collaboration-delegate-toggle:active:not(:disabled) { background: var(--relay-color-action-pressed); border-color: var(--relay-color-action-pressed); }
 .collaboration-delegate-toggle svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
 .collaboration-delegate-toggle .helper-text { color: inherit; margin: 0; }
 .collaboration-delegate-toggle:disabled { cursor: default; }
@@ -76,6 +102,8 @@
 .collab-run-controls .collaboration-run-control { border: 0; padding: 0; }
 .collab-run-controls .collaboration-run-control > .helper-text:first-child { display: none; }
 .collab-run-controls .run-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-1); margin: 0; }
+/* Run 按钮的紧凑密度本应归全局 --compact 变体，但按钮类名在 RunControlPanel.tsx
+   （本轮禁改文件）：组件侧加 --compact 后删除这条页面压回。 */
 .collab-run-controls .run-actions > button { min-height: var(--relay-control-height); padding: var(--relay-space-1) var(--relay-space-2); font-size: var(--relay-font-size-meta); }
 .collab-run-controls .collaboration-run-control > p { margin-block: var(--relay-space-1); }
 .collab-notices { padding-inline: var(--relay-space-3); }
@@ -197,7 +225,6 @@
   .collab-center--empty { padding: var(--relay-space-3); }
   .collab-columns--empty .collab-side { display: none; }
   .collab-narrow-tabs:not([hidden]) { display: flex; flex: none; gap: var(--relay-space-2); margin: 0 var(--relay-space-3); }
-.collab-goal .page-head-title > h1 { font-size: var(--relay-font-size-section); }
   .collab-goal .fact-bar { grid-template-columns: minmax(0, 1fr); }
   .collab-side-tabs, .collab-side-body, .collab-review-shortcut { padding-inline: var(--relay-space-3); }
 }
@@ -209,7 +236,7 @@
   .collab-center, .collab-side-body[data-testid="collab-panel-DOCUMENT"] { overflow-y: auto; }
   .collab-center > .agent-assist { flex: none; min-height: 0; }
   .collab-center .agent-chat-conversation { flex: none; min-height: 0; }
-.collab-center .agent-chat-transcript { flex: none; height: var(--relay-layout-workspace-centerMin); min-height: var(--relay-layout-workspace-centerMin); }
+.collab-center .agent-chat-transcript { flex: none; min-height: min(16rem, 50dvh); height: auto; }
   /* 阅读下限在这里已经由整层滚动接管，正文与判断按自然高度排列。 */
   .collab-side-body > .collab-reader, .collab-document-paper, .collab-reader-scroll { flex: none; min-height: 0; overflow: visible; }
   .collab-reader .artifact-doc-body { overflow: visible; }
@@ -218,9 +245,179 @@
   .collab-judgment { position: static; }
   .collab-judgment { max-height: none; overflow: visible; }
 .collab-center { padding-top: var(--relay-space-3); }
-  .collab-goal .page-head-title > h1 { font-size: var(--relay-font-size-section); }
   @container collaboration (max-width: calc(26rem + 20rem + 6rem)) {
     .collab-columns .collab-result-pane, .collab-columns .collab-side { flex: none; min-height: 0; overflow: visible; }
     .collab-columns .collab-side .collab-side-body[data-testid="collab-panel-DOCUMENT"] { flex: none; min-height: 0; overflow: visible; }
+  }
+}
+
+/* 双视图工作台新增规则：面包屑、视图切换 Tabs、容器与 Inspector 适配 */
+.collab-breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+  margin-bottom: var(--relay-space-1);
+}
+
+.collab-breadcrumbs strong {
+  color: var(--relay-color-text-secondary);
+}
+
+.collab-views-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--relay-space-2);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+  padding-top: var(--relay-space-1);
+}
+
+.collab-viewtabs {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-4);
+}
+
+.collab-viewtab {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: var(--relay-space-1) var(--relay-space-2) var(--relay-space-2);
+  background: transparent;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-body);
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  cursor: pointer;
+  transition: color var(--relay-motion-duration-fast), border-color var(--relay-motion-duration-fast);
+}
+
+.collab-viewtab:hover {
+  color: var(--relay-color-action-primary);
+}
+
+.collab-viewtab.active {
+  color: var(--relay-color-action-primary);
+  border-color: var(--relay-color-action-primary);
+  font-weight: var(--relay-font-weight-bold);
+}
+
+.collab-inspector-toggle-btn.active {
+  background: var(--relay-color-selection-bg);
+  color: var(--relay-color-selection-text);
+  border-color: var(--relay-color-action-primary);
+}
+
+.collab-task-view-container {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.collab-chat-view-container {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.collab-columns:has(.task-inspector) {
+  display: flex;
+}
+
+.collab-columns:has(.task-inspector) > .collab-center {
+  flex: 1;
+}
+
+/* 工作详情打开后是四栏。这里必须回到网格：flex 下成果栏会按自身内容宽度
+   （layout.workspace.sideWidth ≈ 34rem）抢占空间，把中栏挤到 1280 宽只剩 71px、
+   1440 宽只剩 231px，中文被压成一字一行。四栏沿用与双栏同一套比例变量，
+   中栏与成果栏按用户既有的 chatRatio 分配剩余宽度。
+   只在容器够宽时生效：窄容器仍走下面 @container 的纵向堆叠与浮层。 */
+@container collaboration (min-width: calc(26rem + 20rem + 6rem)) {
+  .collab-columns:has(.task-inspector) {
+    display: grid;
+    grid-template-columns:
+      minmax(0, var(--relay-collab-chat-column))
+      var(--relay-space-2)
+      minmax(0, var(--relay-collab-result-column))
+      var(--relay-layout-inspector-width);
+  }
+
+  /* 单区模式（对话 / 成果）只剩两栏：被隐藏的兄弟不占格，因此只声明两列。 */
+  .collab-columns:has(.task-inspector)[data-layout-mode="chat"],
+  .collab-columns:has(.task-inspector)[data-layout-mode="result"] {
+    grid-template-columns: minmax(0, 1fr) var(--relay-layout-inspector-width);
+  }
+
+  /* 深预览要宽得多的第四栏：按预览态换 track，否则正文轨道被固定宽度压成一列窄条。 */
+  .collab-columns:has(> .task-inspector--preview) {
+    grid-template-columns:
+      minmax(0, var(--relay-collab-chat-column))
+      var(--relay-space-2)
+      minmax(0, var(--relay-collab-result-column))
+      var(--relay-layout-inspector-wideWidth);
+  }
+
+  .collab-columns:has(.task-inspector)[data-layout-mode="chat"]:has(> .task-inspector--preview),
+  .collab-columns:has(.task-inspector)[data-layout-mode="result"]:has(> .task-inspector--preview) {
+    grid-template-columns: minmax(0, 1fr) var(--relay-layout-inspector-wideWidth);
+  }
+
+  /* 网格项的包含块是它所在的轨道，所以面板自己那个 clamp(…, 20%, …) 会拿
+     轨道宽去算百分比、永远落在下限，还会在轨道与面板之间留一道空隙。
+     这里让宽度交给 track：width:100% 不多不少正好填满所属轨道。 */
+  .collab-columns:has(.task-inspector) > .task-inspector {
+    width: 100%;
+  }
+
+  .collab-columns:has(.task-inspector) > .collab-center,
+  .collab-columns:has(.task-inspector) > .collab-result-pane {
+    min-width: 0;
+  }
+}
+
+/* 工作详情面板的窄容器收纳。
+   宽窗里它是独立一列；窄窗里没有第三列的位置，改为覆盖在成果区之上的浮层，
+   宽度沿用同一 token，避免出现「一半宽的面板把正文压成几个字」。
+   定位上下文由 .collab-columns 提供，面板本身仍是同一个组件与同一份数据。 */
+.collab-columns:has(.task-inspector) {
+  position: relative;
+}
+
+@media (width < 80rem) {
+  /* 面板改成 position:absolute 之后不再占格——但上面 @container 里的网格仍为它留着
+     第四条 track（实测在 1100px 视口白吃掉 288px，中栏只剩 281px）。这里把那一列撤掉。
+     单区模式（对话 / 成果）只剩一栏，同样要收回 1fr，否则可见的那栏只拿到 52%。 */
+  .collab-columns:has(.task-inspector) {
+    grid-template-columns:
+      minmax(0, var(--relay-collab-chat-column))
+      var(--relay-space-2)
+      minmax(0, var(--relay-collab-result-column));
+  }
+
+  .collab-columns:has(.task-inspector)[data-layout-mode="chat"],
+  .collab-columns:has(.task-inspector)[data-layout-mode="result"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .collab-columns:has(.task-inspector) > .task-inspector {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-end: 0;
+    z-index: var(--relay-zIndex-sticky);
+    width: min(var(--relay-layout-inspector-width), calc(100% - var(--relay-space-6)));
+    box-shadow: var(--relay-shadow-floating);
+  }
+
+  .collab-columns:has(.task-inspector) > .task-inspector--preview {
+    width: min(var(--relay-layout-inspector-wideWidth), calc(100% - var(--relay-space-4)));
   }
 }

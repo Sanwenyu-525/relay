@@ -9,6 +9,8 @@ const projectId = "22222222-2222-4222-8222-222222222222";
 const taskId = "33333333-3333-4333-8333-333333333333";
 const tasksUrl = `${baseUrl}/api/v1/workspaces/${workspaceId}/tasks`;
 const projectsUrl = `${baseUrl}/api/v1/workspaces/${workspaceId}/projects?status=active`;
+/** 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1），因此每次读列表都会带上这一次读取。 */
+const sessionsUrl = `${baseUrl}/api/v1/workspaces/${workspaceId}/assist-sessions?`;
 let unmount: (() => void) | null = null;
 
 afterEach(() => {
@@ -37,22 +39,26 @@ describe("live 任务入口", () => {
     const mounted = await mountWorkbench("/tasks");
     unmount = mounted.unmount;
 
-    expect(mounted.wrapper.get('[data-testid="tasks-live-all"]').text()).toContain("当前工作空间没有任务");
+    // 首装空态按新文案与 testId 断言；断的是呈现方式，不是「不混入示例数据」这一行为。
+    expect(mounted.wrapper.find('[data-testid="tasks-empty"]').exists()).toBe(true);
+    expect(mounted.wrapper.get('[data-testid="tasks-empty"]').text()).toContain("还没有任务");
     expect(mounted.wrapper.text()).not.toContain("确定实验评价指标");
     expect(fixtureAdapter.getCallCount("listTasks")).toBe(0);
     expect(fixtureAdapter.getCallCount("loadTaskOptions")).toBe(0);
     const requestedUrls = () => vi.mocked(fetch).mock.calls.map(([input]) => String(input))
       .filter((url) => !url.endsWith("/attention/interventions"));
-    // 一次来自全局近期工作，一次来自当前全部任务页。
-    expect(requestedUrls()).toEqual([`${tasksUrl}?scope=all`, projectsUrl, `${tasksUrl}?scope=all`]);
+    // 一次来自全局近期工作（任务 + 会话），一次来自当前全部任务页。
+    expect(requestedUrls()).toEqual([`${tasksUrl}?scope=all`, projectsUrl, sessionsUrl, `${tasksUrl}?scope=all`]);
 
     await mounted.wrapper.get('[data-testid="tasks-tab-inbox"]').trigger("click");
     await flush();
-    expect(mounted.wrapper.get('[data-testid="tasks-live-inbox"]').text()).toContain("当前收件箱没有任务");
+    // 收件箱为空与整个工作空间为空是不同状态，各自用自己的空态。
+    expect(mounted.wrapper.find('[data-testid="inbox-empty"]').exists()).toBe(true);
+    expect(mounted.wrapper.get('[data-testid="inbox-empty"]').text()).toContain("收件箱里没有任务");
     expect(mounted.wrapper.text()).not.toContain("完善文献综述");
     expect(fixtureAdapter.getCallCount("listTasks")).toBe(0);
     expect(fixtureAdapter.getCallCount("loadTaskOptions")).toBe(0);
-    expect(requestedUrls()).toEqual([`${tasksUrl}?scope=all`, projectsUrl,
+    expect(requestedUrls()).toEqual([`${tasksUrl}?scope=all`, projectsUrl, sessionsUrl,
       `${tasksUrl}?scope=all`, `${tasksUrl}?inbox=true`]);
 
     await mounted.router.push("/tasks");
@@ -80,6 +86,8 @@ describe("live 任务入口", () => {
         json: async () => ({ items: [], next_cursor: null }) } as Response;
       if (String(input) === `${tasksUrl}?scope=all`) return { ok: true, status: 200,
         json: async () => ({ items: [], next_cursor: null }) } as Response;
+      if (String(input) === sessionsUrl) return { ok: true, status: 200,
+        json: async () => ({ items: [] }) } as Response;
       expect(String(input)).toBe(tasksUrl);
       expect(init?.method).toBe("POST");
       const commandId = (JSON.parse(String(init?.body)) as { command_id: string }).command_id;
@@ -94,7 +102,7 @@ describe("live 任务入口", () => {
     const mounted = await mountWorkbench("/tasks?view=create");
     unmount = mounted.unmount;
     expect(fetchMock.mock.calls.map(([input]) => String(input)).filter((url) => !url.endsWith("/attention/interventions")))
-      .toEqual([`${tasksUrl}?scope=all`, projectsUrl]);
+      .toEqual([`${tasksUrl}?scope=all`, projectsUrl, sessionsUrl]);
 
     await mounted.wrapper.get('input[name="task-title"]').setValue("本次真实任务");
     await mounted.wrapper.get('input[name="task-expected-result"]').setValue("真实结果");
@@ -107,13 +115,15 @@ describe("live 任务入口", () => {
     await flush();
 
     expect(mounted.router.currentRoute.value.path).toBe("/tasks");
-    expect(mounted.wrapper.get('[data-testid="tasks-live-all"]').text()).toContain("当前工作空间没有任务");
+    // 换工作空间后重新落回首装空态；仍不得混入任何示例数据。
+    expect(mounted.wrapper.find('[data-testid="tasks-empty"]').exists()).toBe(true);
+    expect(mounted.wrapper.get('[data-testid="tasks-empty"]').text()).toContain("还没有任务");
     expect(mounted.wrapper.text()).not.toContain("确定实验评价指标");
     expect(fixtureAdapter.getCallCount("listTasks")).toBe(0);
     expect(fixtureAdapter.getCallCount("loadTaskOptions")).toBe(0);
     expect(fixtureAdapter.getCallCount("createTask")).toBe(0);
     expect(fetchMock.mock.calls.map(([input]) => String(input)).filter((url) => !url.endsWith("/attention/interventions")))
-      .toEqual([`${tasksUrl}?scope=all`, projectsUrl, tasksUrl, `${tasksUrl}?scope=all`]);
+      .toEqual([`${tasksUrl}?scope=all`, projectsUrl, sessionsUrl, tasksUrl, `${tasksUrl}?scope=all`]);
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 });

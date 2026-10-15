@@ -565,46 +565,47 @@ html[data-state="running"]  .cand-e .corner-arc { animation-duration: calc(var(-
 }
 html[data-state="waiting_external"] .cand-e .corner-arc { opacity: 0.6; animation: none; }
 
-/* ---------- F：环绕全框的局部光点 ----------
-   用 SVG 圆角矩形的 stroke-dashoffset 沿真实周长行进，段长固定。
-   不用 rotate 拼接四边：那样段会漂出轨道，且圆角处会出现错位。 */
-/* viewBox 与实际像素尺寸必须 1:1，否则 dashoffset 的行进距离与视觉周长不一致，
-   光点会「跑得比框快」或「跑不满一圈」。fitOrbit 会把 svg 尺寸锁到轨道尺寸。 */
+/* ---------- F：B 的全框版 ----------
+   B 的视觉是「一段带两端渐隐的光点沿边移动」。F 把同一段光点扩展到环绕整个边框。
+   实现用 conic-gradient + mask-composite: exclude 抠出 2px 环形轨道：
+   - 两端渐隐靠渐变本身，stroke-dashoffset 做不到（描边只有实心段）
+   - 环宽由 padding 决定，圆角由 border-radius: inherit 自动跟随，不需要 JS 计算周长 */
+@property --orbit-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
 .orbit {
-  position: absolute; pointer-events: none;
-  opacity: 0; overflow: visible;
-}
-/* 环形轨道底衬：让光点跑在一个可见轨道上，而不是贴着边框内侧凭空移动 */
-.cand-f .composer::after {
-  content: ""; position: absolute; inset: 3px;
-  border-radius: calc(var(--radius-control) - 3px);
-  border: 1px solid color-mix(in srgb, var(--tone) 16%, transparent);
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  padding: 2px;                         /* 环宽 = B 的 2px 光点厚度 */
   pointer-events: none;
-}
-.orbit rect {
-  fill: none;
-  stroke: var(--tone);
-  stroke-width: 2;
-  stroke-linecap: round;
+  opacity: 0;
+  background: conic-gradient(
+    from var(--orbit-angle),
+    transparent 0deg,
+    color-mix(in srgb, var(--tone) 12%, transparent) 16deg,
+    var(--tone) 32deg,
+    color-mix(in srgb, var(--tone) 12%, transparent) 48deg,
+    transparent 64deg,
+    transparent 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
 }
 html[data-state="planning"] .cand-f .orbit,
 html[data-state="running"]  .cand-f .orbit,
 html[data-state="paused"]   .cand-f .orbit { opacity: 1; }
-html[data-state="planning"] .cand-f .orbit rect,
-html[data-state="running"]  .cand-f .orbit rect,
-html[data-state="paused"]   .cand-f .orbit rect {
+html[data-state="planning"] .cand-f .orbit,
+html[data-state="running"]  .cand-f .orbit,
+html[data-state="paused"]   .cand-f .orbit {
   animation: orbit-run var(--motion-loop-slow) linear infinite;
 }
-html[data-state="running"] .cand-f .orbit rect { animation-duration: calc(var(--motion-loop-slow) * 0.78); }
+html[data-state="running"] .cand-f .orbit { animation-duration: calc(var(--motion-loop-slow) * 0.78); }
 @keyframes orbit-run {
-  from { stroke-dashoffset: var(--orbit-p); }
-  to   { stroke-dashoffset: 0; }
+  from { --orbit-angle: 0deg; }
+  to   { --orbit-angle: 360deg; }
 }
-/* Level 1 悬停：光点停在顶边中段，不运动——与 running 的整圈环绕区分 */
-html[data-state="waiting_external"] .cand-f .orbit { opacity: 1; }
-html[data-state="waiting_external"] .cand-f .orbit rect {
-  animation: none; stroke-dashoffset: calc(var(--orbit-p) * 0.5);
-}
+/* Level 1 悬停：光点停在顶边中段且不运动——与 running 的整圈环绕区分 */
+html[data-state="waiting_external"] .cand-f .orbit { opacity: 1; --orbit-angle: 180deg; animation: none; }
 
 /* ==========================================================================
    5. Paused / Resume 直觉隐喻：运动冻结 + 一次性启动
@@ -614,7 +615,7 @@ html[data-state="paused"] .cand-b .spark { animation-play-state: paused; opacity
 html[data-state="paused"] .cand-c .seq i { animation-play-state: paused; }
 html[data-state="paused"] .cand-d .vspark,
 html[data-state="paused"] .cand-e .corner-arc path { animation-play-state: paused; }
-html[data-state="paused"] .cand-f .orbit rect { animation-play-state: paused; }
+html[data-state="paused"] .cand-f .orbit { animation-play-state: paused; }
 html[data-state="paused"] .indicator .glyph { opacity: 0.75; }
 
 /* 恢复动效挂在伪元素上，避免替换宿主的循环 animation 导致运动被永久停掉 */
@@ -646,7 +647,7 @@ html.page-hidden .spark,
 html.page-hidden .seq i,
 html.page-hidden .vspark,
 html.page-hidden .corner-arc path,
-html.page-hidden .orbit rect,
+html.page-hidden .orbit,
 html.page-hidden .cand-a .composer { animation-play-state: paused !important; }
 
 html.motion-off .spark,
@@ -673,7 +674,7 @@ html.motion-off .composer,
 html.reduce-motion .composer { transition: none !important; }
 
 @media (prefers-reduced-motion: reduce) {
-  .spark, .seq, .seq i, .vspark, .corner-arc, .orbit, .corner-arc path, .orbit rect,
+  .spark, .seq, .seq i, .vspark, .corner-arc, .orbit, .corner-arc path,
   .emphasis, .cand-a .composer, .chip, .btn, .composer { animation: none !important; transition: none !important; }
   .spark, .seq, .vspark, .corner-arc, .orbit { opacity: 0 !important; }
 }
@@ -959,9 +960,7 @@ td.k { font-family: var(--font-code); color: var(--secondary); white-space: nowr
       <div class="composer">
         <div class="emphasis emphasis--tone" aria-hidden="true"></div>
         <div class="emphasis emphasis--soft" aria-hidden="true"></div>
-        <svg class="orbit" data-orbit aria-hidden="true">
-          <rect data-orbit-rect rx="6" ry="6"></rect>
-        </svg>
+        <div class="orbit" aria-hidden="true"></div>
         <textarea placeholder="输入消息……" rows="2"></textarea>
         <div class="composer-bar"><span class="mark" data-mark></span><span>上下文 8%</span><button class="send" type="button">发送</button></div>
       </div>
@@ -1311,47 +1310,26 @@ function startSimulation() {
   tick();
 }
 
-/* ---------- 初始化：SVG 光点轨道的真实周长 ----------
+/* ---------- 初始化：E 的角弧路径周长 ----------
    stroke-dasharray 的段长与 gap 必须按真实周长算，否则光点会走不满一圈或提前回到起点。
    周长通过 getTotalLength() 读取，不手算，避免圆角处误差。 */
-function fitOrbit(svg) {
-  const rect = svg.querySelector('rect');
+function fitArc(svg) {
   const path = svg.querySelector('path');
+  if (!path) return;
   const composer = svg.closest('.composer');
   const cs = getComputedStyle(composer);
   const inset = parseFloat(cs.borderLeftWidth) + 3;
   const w = composer.clientWidth - inset * 2;
-  const h = composer.clientHeight - inset * 2;
   const radius = 6;
-
-  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
-  svg.setAttribute('width', w);
-  svg.setAttribute('height', h);
-
-  if (rect) {
-    rect.setAttribute('x', 0); rect.setAttribute('y', 0);
-    rect.setAttribute('width', w); rect.setAttribute('height', h);
-    rect.setAttribute('rx', radius); rect.setAttribute('ry', radius);
-    const P = rect.getTotalLength();
-    // 段长固定为周长的 22%，与 B/D 的观感一致
-    const seg = P * 0.22;
-    rect.style.strokeDasharray = `${seg} ${P - seg}`;
-    svg.style.setProperty('--orbit-p', P - seg);
-    return;
-  }
-
-  if (path) {
-    // 左上角 90° 弧：水平直线 + 一段 90° 圆弧
-    const arm = w * 0.55;
-    path.setAttribute('d', `M 0 ${radius} A ${radius} ${radius} 0 0 1 ${radius} 0 H ${arm}`);
-    const P = path.getTotalLength();
-    const seg = P * 0.6;
-    path.style.strokeDasharray = `${seg} ${P - seg}`;
-    svg.style.setProperty('--arc-p', P - seg);
-  }
+  const arm = w * 0.55;
+  path.setAttribute('d', `M 0 ${radius} A ${radius} ${radius} 0 0 1 ${radius} 0 H ${arm}`);
+  const P = path.getTotalLength();
+  const seg = P * 0.6;
+  path.style.strokeDasharray = `${seg} ${P - seg}`;
+  svg.style.setProperty('--arc-p', P - seg);
 }
 
-document.querySelectorAll('[data-orbit], [data-arc]').forEach(fitOrbit);
+document.querySelectorAll('[data-arc]').forEach(fitArc);
 
 /* ---------- 初始化 ---------- */
 ORDER.forEach((key) => {

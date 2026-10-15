@@ -115,6 +115,32 @@ const ALL_MIGRATIONS = [
   '0057_m04_run_tool_call_events', '0058_m06_user_action_origin',
   '0059_m04_assistant_conversation_modes', '0060_m04_assistant_readonly_origin',
   '0061_m04_cli_run_allowed_executables',
+  '0062_natural_language_state_maintenance',
+  '0063_project_daily_view_baselines',
+  '0064_natural_language_state_binding',
+  '0065_project_daily_view_presentation_seq',
+  '0066_natural_language_task_planning',
+  '0067_natural_language_recheck_remediation',
+  '0068_natural_language_external_sync',
+  '0069_project_return_reviews',
+  '0070_natural_language_undo',
+  '0071_builtin_methods_and_chat_commands',
+  '0072_learning_mode_records',
+  '0073_model_tool_turn_assistant_message',
+  '0074_task_acceptance_materials',
+  '0075_task_acceptance_trials',
+  '0076_task_acceptance_comparisons',
+  '0077_conversation_acceptance_time',
+  '0078_project_hypotheses',
+  '0079_decision_review_candidates',
+  '0080_work_segments',
+  '0081_personal_planning',
+  '0082_plan_scope_simulations',
+  '0083_project_reminders',
+  '0084_task_chains',
+  '0085_task_chain_execution_specs',
+  '0086_impact_group_dependencies',
+  '0087_agent_conversation_main_loop',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {
@@ -145,6 +171,10 @@ test('first-output migration leaves pre-existing settled calls NULL', async () =
     // 0058 只放宽三条 CHECK，但它重述的既有分支来自 0054/0016；与 0054 一起缺席才能保持
     // 「历史迁移目录」这一夹具的前提自洽。
     files.delete('0058_m06_user_action_origin.sql');
+    files.delete('0073_model_tool_turn_assistant_message.sql');
+    // 0086 给 artifact_impact_candidate_groups 加依赖列，而建出这张表的 0050 在本夹具里
+    // 被删掉了；它与 0050 必须同进同出，否则第一轮就会报「关系不存在」而不是走到断言。
+    files.delete('0086_impact_group_dependencies.sql');
   });
   const app = openDatabase(database.appUrl, 'relay-api-test-legacy-call');
   try {
@@ -175,7 +205,11 @@ test('first-output migration leaves pre-existing settled calls NULL', async () =
       '0050_n02_impact_candidate_groups', '0051_conversation_execution_requests',
       '0052_n03_project_knowledge_guide', '0053_n03_knowledge_curation_candidates',
     '0054_m04_agent_tool_loop', '0055_m05_message_queue', '0056_m04_run_scope_grants',
-      '0057_m04_run_tool_call_events', '0058_m06_user_action_origin']);
+      '0057_m04_run_tool_call_events', '0058_m06_user_action_origin',
+      '0073_model_tool_turn_assistant_message',
+      // 0086 与 0050 同进同出，所以第二轮在这里补上；0087 只依赖 0008/0015 建出的表，
+      // 不依赖被删掉的那一批，因此它留在历史夹具里，第二轮不会重复应用。
+      '0086_impact_group_dependencies']);
     await calls.recordFirstTextDelta(callId, new Date());
     await calls.recordFirstPreviewPersisted(callId);
     const legacy = await calls.read(callId);

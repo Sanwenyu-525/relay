@@ -96,7 +96,30 @@ Git 暂存、提交和推送不进入本轮新增模型工具集，后续再接�
 
 2026-10-05 补齐检查后的修正：工具声明列出本 Run 的合法冻结检查 ID，普通非零退出回传错误标志和原输出；取得明确正常关闭回执的 `run_check` 可以释放 claim 并让原 DRAFT 继续读取和修正。每次复检都是新工具请求/Operation，原失败回执保留，不重放原失败进程，不把 exit 0 自动写成验收 PASS。取消、超时、失权与 UNKNOWN 不进入自动修正，规则归[运行架构 §2.3](runtime-context.md#23-内部工具循环的对象身份与恢复2026-10-03-实施设计)。**Breaking Change: No（HTTP 形状、动作状态、授权与审批契约不变）**；新增的 `CHECK_FAILED` 是内部 Worker 分类。
 
-当前信任边界仍有缺口：`executable_sha256` 只检查程序入口；`node.exe + args[check.mjs]` 不会复核脚本正文摘要。不能声称脚本/构建配置变化已完整栅栏，也不能把单进程检查出口当作 Windows Job Object 或脱离进程树的安全证明。定向修复探针把检查脚本放在受管根外并核对字节不变；产品的通用脚本信任与检查证据对产物版本的适用性另需闭合。
+**检查入口的信任摘要（2026-10-07 实施）。** 授权冻结时不再只存入口程序的 `executable_sha256`，而是由 `application/check-trust-basis.ts` 的 `computeCheckTrustBasis` 实测一份 `check-trust-v1` 依据并随授权落库：
+
+- **材料集合是有限、明确、可枚举的**：入口可执行程序（根内或根外都算）、**第一个位置脚本参数**（`node <script>` / `python <script>` 形态里真正被执行的脚本）、受管根**顶层**直接决定检查行为的构建/测试配置（`package.json`、`tsconfig.json`/`tsconfig.base.json`、`vitest.config.*`、`vite.config.*`、`jest.config.*`）。每条材料记录规范绝对路径、根内相对路径（根外为 `null`）、SHA-256 与角色（`EXECUTABLE` / `REFERENCED_SCRIPT` / `BUILD_CONFIG`），按规范路径排序后取摘要。
+- **后续位置参数是这次检查的输入（工作集），不进材料**。把它算进材料会让「检查失败 → 读取修正 → 再跑同一检查」这条主链直接不可用；同理，检查程序自己 import 的兄弟模块不在本版材料内——这是明确的**范围限制**，不用静默少算材料维持 AUTO。
+- **读不到就是读不到**：材料不存在、是目录或不可读返回 `CHECK_TRUST_MATERIAL_UNREADABLE`；解释器内联求值（`-e`/`-c`/`--eval` 等）、shell 组合（`&&`/`|`/`;`/反引号/`$()`）与通配符返回 `CHECK_TRUST_DYNAMIC_EXECUTION_UNSUPPORTED`。两种都在**冻结期**拒绝该授权，不给一个没有依据的检查去 AUTO 放行。
+- **同路径、同命令名不能掩盖内容变化**：`evaluateScopeGrant` 在 `CLI_RUN` 分支先比 `executable_sha256`，再比信任摘要；`resolveFrozenCheck` 解析并校验落库的 `trust_basis`，形状不合法即视为该检查不可解析。历史授权行（只有入口摘要、没有材料依据）仍可读出，但按「依据不一致」退回人工确认，不当成摘要相同。
+- **不放宽任何既有边界**：本机制不改连接允许的可执行入口清单，不改用户授予的动作权限，也不把检查出口当作 Windows Job Object 或脱离进程树的安全证明。
+
+摘要只回答「磁盘上的材料是什么」。`run_check` 的可信 exit0 仍只表示这一次检查对其受验输入正常结束，不代表业务验收 PASS。规则归[运行架构 §2.3](runtime-context.md#23-内部工具循环的对象身份与恢复2026-10-03-实施设计)，规格见[测试计划 §20.10](../testing/verification-plan.md#2010-检查入口的信任摘要与检查证据适用性2026-10-07-实施)。
+
+**人工批准与检查材料绑定（2026-10-09 实施）。** 上面这套范围授权摘要只保护 AUTO 那条路。2026-10-08 后端独立验收确认的缺口是：材料漂移让范围授权退回 ASK 后，`createGatewayReview` 建的那条 `ACTION_APPROVAL` 的 target 只绑定动作、路径、参数与连接/策略版本，**没有绑定创建时观察到的材料**；`requireCurrentGatewayGrant` 接受有效单动作批准后也不再要求当前材料与该批准的材料相同。因此「Review 创建后至批准前改脚本」与「批准后至派发前改脚本」都能凭同一条旧批准真实执行新脚本。现由 `application/approval-check-material.ts` 在既有 Owner 内补齐，不新建第二套授权判定：
+
+- **绑定**：`prepareGatewayAction` 建 Review 时，用服务端自己实测到的整份 `CheckTrustBasis` 写进 target 的 `check_trust_basis` 字段，因此它一并进入 `target_hash` 的完整性校验。批准对象从此不只包含「跑什么」，还包含「跑的是磁盘上哪一份材料」；`evidence.check_material` 另存一份可读清单给前端展示。
+- **核对输入全部来自已持久化的 Operation 事实**：重算用的是 `op.params` 里的 executable/args 与受管资源的 canonical root，不是调用方自报的摘要，也不重新解析调用点名的 check_id。因此 prepare、批准提交、最终派发准入三处重算的是同一份依据。
+- **两处核对，保守失败**：`resolveRunReview` 在保存 APPROVE 之前核对一次（材料已变则拒绝这次批准，而不是记下一份永远不该生效的判断），`requireCurrentGatewayGrant` 在真实执行前再核对一次。判定为 `run_check` 驱动（有 `run_tool_calls` 且 `tool_name = 'run_check'`）的动作缺依据、读不出依据或摘要不同，一律拒绝。
+- **拒绝后的收口与原任务接续（2026-10-09 修复）**：材料绑定挡住了旧批准执行新材料，但**派发前的确定性拒绝此前只结算了工具行**——原 Operation 仍停在 `WAITING_APPROVAL`、Review 已 `DECIDED`、Run 与 Task 悬在等待态，两条命令结算后没有下一条能唤醒它，`advanceRunStep` 又把这条零 Invocation 的动作投影成 `ACTION_UNKNOWN`。现在工具循环与固定动作链走**同一个领域入口** `denyGraphActionBeforeInvocation`：单个短事务内把 `PREPARED` 的 Invocation 落 `NOT_EXECUTED` 并释放资源 claim、原 Operation 落 `DENIED`、绑定的工具行落 `SETTLED`、释放 Worker claim、Run 落 `FAILED`、Task 释放回 `READY`，并写 `RUN_FAILED` 审计。恢复领取（`claimGatewayWorker`）与派发准入（`dispatchGatewayAction`）两处拒绝都走它，因此不需要新的状态枚举或第二个授权/恢复 Owner。
+  - **收口与 UNKNOWN 的分界**：`ACTION_UNKNOWN` 只能由「可能已产生外部效果」的动作触发。`advanceRunStep` 的兼容分支因此只对处于 `DISPATCHING`/`UNKNOWN` 的 Operation 返回它；`PREPARED` 与 `WAITING_APPROVAL` 从未派发，不得被投影成未知。
+  - **合法接续路径**：收口把 Run 置为终态并把 AI 执行权释放回用户。用户在**原 Task、原受管资源**上按既有 Delegate 入口重新委托（`retry_of_run_id` 指向已终态的原 Run），新 Run 按磁盘上的当前材料重新冻结范围授权并正常执行；旧 Run、旧 Operation、旧 Review 与其绑定的材料摘要全部保持可追溯。复制一个新工作区/目录/Task 只能证明「新任务能跑」，不构成原任务恢复。
+  - **拒绝不追溯撤销已确定的单动作批准**（契约 SC-13）：范围授权撤销后，那条已保存的精确批准仍可执行它绑定的材料；Permission 撤销则相反，旧批准不能覆盖撤销，必须零 Invocation 并按上述口径收口。两者是不同的对象，本版分别验证。
+  - **不绕过控制与竞态**：已有待处理控制时收口入口不生效，由 `applySafeControl` 按既有安全点处理；Worker 身份或命令投递已失效时收口入口同样拒绝，调用方继续抛出原异常而不是谎称已安全结束。
+- **权限与身份优先**：撤销、过期、连接/策略版本变化、UNKNOWN 与在途动作保护都不因这条绑定而放宽；APPROVE 仍不豁免当前权限。真实 `DISPATCHING`/`UNKNOWN` 不走上面的捷径，仍按原 Operation/Invocation 身份走核对与隔离。
+- **已知边界**：最终核对与外部进程真正读取之间仍是同机普通文件系统上的时间差，因此这不是操作系统级隔离；材料集合仍是 `check-trust-v1` 的有限可枚举集合（见上），检查程序自己 import 的兄弟模块与动态依赖不在其中。
+
+**Breaking Change: No**（Review target 增加只读字段，HTTP 形状、动作状态与授权判定不变）；没有新增或修改数据库结构，因此没有 migration。`denyGraphActionBeforeInvocation` 的 `delivery` 改为可选与该文件其余 Gateway 入口一致（图驱动时仍提供并核对），调用方行为不变。
 
 变化集证据读取没有外部效果，因此 reconcile 按同一冻结引用安全重读一次即可（`SAFE_RE_READ`），不需要 `UNKNOWN` 隔离。这与 `FILE_WRITE` 落盘路径的核对要求不同。
 

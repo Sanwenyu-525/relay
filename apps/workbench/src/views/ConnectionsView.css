@@ -2,9 +2,9 @@
 .connections-page > h1 { font-size: var(--relay-font-size-page); }
 .connections-view-configuration > summary { padding: var(--relay-space-2) 0; color: var(--relay-color-text-secondary); cursor: pointer; }
 .connections-view-configuration > summary::marker { color: var(--relay-color-action-primary); }
-@media (max-width: 60rem) {
-  .connections-page > h1 { font-size: var(--relay-font-size-compactPage); }
-}
+/* 原 60rem 档只有一条标题降级，且 `.connections-page > h1` 选择器从未命中真实节点
+   （h1 由 PageHeader 渲染在 .page-head-title 内）；该语义已由全局 <64rem 档的
+   `.page-head-title > h1` compactPage 降级承担，随断点收敛移除，不在此重复维护。 */
 .connections-page .connections-title { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--relay-space-4); margin-top: var(--relay-space-6); }
 .connections-page .connections-title h2 { margin: 0; }
 .connections-page .connections-list { list-style: none; margin: var(--relay-space-4) 0 0; padding: 0; }

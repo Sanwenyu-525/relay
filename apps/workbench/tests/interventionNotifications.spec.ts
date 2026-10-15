@@ -93,7 +93,7 @@ describe("人工介入提醒聚合", () => {
       status: 200, headers: { "Content-Type": "application/json" }
     })));
     const mounted = await mountReact(createElement(MemoryRouter, {}, createElement(Fragment, null,
-      createElement(DesktopTitleBar, { available: true }),
+      createElement(DesktopTitleBar, { available: true, onSearch: vi.fn() }),
       createElement(AppShell, {
         desktopStatus: "idle", commandOpen: false, onCommandOpen: vi.fn(), onCommandClose: vi.fn(),
         children: createElement("h1", {}, "当前工作")

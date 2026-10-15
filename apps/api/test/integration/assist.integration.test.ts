@@ -28,8 +28,8 @@ import { FakeModelPort, type AssistModelPort, type AssistRequest } from '../../s
 import { RELAY_AGENT_CORE_PROMPT } from '../../src/workflow/agent-system-prompt.js';
 import { ModelCallBudgetError } from '../../src/workflow/openai-compatible-model-port.js';
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
-import { createDataRoot, delay, expectProblem, startTestApi, workspacePath }
-  from './api-harness.js';
+import { createDataRoot, delay, expectCommandAccepted, expectProblem, startTestApi,
+  workspacePath } from './api-harness.js';
 import { APP_DATABASE_URL, MIGRATIONS_DIRECTORY, MIGRATION_DATABASE_URL,
   openDatabase } from './integration-support.js';
 
@@ -1348,6 +1348,97 @@ test('Project Resume excludes revoked and prior-acceptance verification sessions
   assert.equal((newCycle.baseline.tasks as { id: string;
     acceptance_revision: string }[]).find((task) => task.id === f.taskId)
     ?.acceptance_revision, '2');
+});
+
+test('R1：Skill 与方法仍互斥；无 Skill 的自然语言方法识别保持有效', async () => {
+  const f = await fixture('READY');
+  const api = await startTestApi();
+  const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+    commandId: randomUUID(), projectId: f.projectId, title: '身份互斥' });
+  try {
+    // 显式双身份：既有 422 验证拒绝保留。
+    const both = await api.post(
+      `${workspacePath(f.workspaceId)}/assist-sessions/${session.result.session_id}/messages`, {
+        command_id: randomUUID(), content: '请审查这个项目的当前状态',
+        skill_ref: { id: 'project-resume', version: '1.0.0' },
+        method_ref: { id: 'code-review', version: '1.0.0' } });
+    assert.equal(both.status, 422, both.text);
+
+    // 显式 Skill + 正文里的 /方法 命令：同样按「一条消息一种身份」拒绝，不写双快照。
+    const command = await api.post(
+      `${workspacePath(f.workspaceId)}/assist-sessions/${session.result.session_id}/messages`, {
+        command_id: randomUUID(), content: '/code-review 看一看这个项目',
+        skill_ref: { id: 'project-resume', version: '1.0.0' } });
+    assert.equal(command.status, 422, command.text);
+
+    // 没有显式 Skill：自然语言方法照常绑定（method 三列落库，skill 列为空）。
+    const detectedCommandId = randomUUID();
+    const detected = await api.post(
+      `${workspacePath(f.workspaceId)}/assist-sessions/${session.result.session_id}/messages`, {
+        command_id: detectedCommandId, content: '请审查这个项目的当前状态' });
+    const detectedResult = expectCommandAccepted(detected, 202, detectedCommandId);
+    const row = await sql<{ skill_snapshot: JsonObject | null; method_snapshot: JsonObject | null;
+      method_action: string | null }>`
+      select skill_snapshot, method_snapshot, method_action from assist_messages
+      where id = ${detectedResult.assistant_message_id as string}`
+      .execute(app.db);
+    assert.equal(row.rows[0]?.skill_snapshot, null);
+    assert.ok(row.rows[0]?.method_snapshot !== null, '无 Skill 时自然语言方法识别必须保持有效');
+    assert.equal(row.rows[0]?.method_action, 'INSPECT');
+    // 消费这条 PENDING 消息：同一套件共享一个库，遗留的 PENDING 会被后续 tick 领走，
+    // 让别的用例的 messageId 断言错位。
+    const consumed = await runAssistGenerationTick(app.db, { workerId: `r1a-${randomUUID()}`,
+      storage, modelPort, leaseMs: 30_000 });
+    assert.equal(consumed?.messageId, detectedResult.assistant_message_id);
+    assert.equal(consumed?.status, 'COMPLETED', JSON.stringify(consumed));
+  } finally { await api.stop(); }
+});
+
+test('R1：显式 Skill 身份决定入口，自然语言方法不再与 Skill 双写', async () => {
+  const f = await fixture('READY');
+  const api = await startTestApi();
+  const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+    commandId: randomUUID(), projectId: f.projectId, title: 'Skill 与方法身份' });
+  try {
+    // 复现反例：显式 project-resume + 自然语言方法触发词（"请审查这个项目的当前状态"）。
+    // 修复前同一消息写 skill_snapshot + method_snapshot，撞 0071 互斥约束整单 500 回滚。
+    const commandId = randomUUID();
+    const sent = await api.post(
+      `${workspacePath(f.workspaceId)}/assist-sessions/${session.result.session_id}/messages`, {
+        command_id: commandId, content: '请审查这个项目的当前状态',
+        skill_ref: { id: 'project-resume', version: '1.0.0' } });
+    const sentResult = expectCommandAccepted(sent, 202, commandId);
+
+    const row = await sql<{ skill_snapshot: JsonObject | null; method_snapshot: JsonObject | null;
+      method_action: string | null; method_argument: string | null; status: string }>`
+      select skill_snapshot, method_snapshot, method_action, method_argument, status
+      from assist_messages where id = ${sentResult.assistant_message_id as string}`
+      .execute(app.db);
+    assert.equal(row.rows[0]?.status, 'PENDING');
+    assert.ok(row.rows[0]?.skill_snapshot !== null, '显式 Skill 身份必须冻结');
+    assert.equal(row.rows[0]?.method_snapshot, null, '显式 Skill 消息不得再绑定方法');
+    assert.equal(row.rows[0]?.method_action, null);
+    assert.equal(row.rows[0]?.method_argument, null);
+
+    // 正文是 Skill 输入：tick 走原 Skill 路由完成本次生成（不是方法轮）。
+    const tick = await runAssistGenerationTick(app.db, { workerId: `r1-${randomUUID()}`,
+      storage, modelPort, leaseMs: 30_000 });
+    assert.equal(tick?.messageId, sentResult.assistant_message_id);
+    assert.equal(tick?.status, 'COMPLETED', JSON.stringify(tick));
+
+    // 同命令重放仍返回原结果；异载荷按 COMMAND_ID_REUSED，不新建重复消息。
+    const replay = await api.post(
+      `${workspacePath(f.workspaceId)}/assist-sessions/${session.result.session_id}/messages`, {
+        command_id: commandId, content: '请审查这个项目的当前状态',
+        skill_ref: { id: 'project-resume', version: '1.0.0' } });
+    const replayResult = expectCommandAccepted(replay, 202, commandId);
+    assert.equal(replayResult.assistant_message_id, sentResult.assistant_message_id);
+    const reused = await api.post(
+      `${workspacePath(f.workspaceId)}/assist-sessions/${session.result.session_id}/messages`, {
+        command_id: commandId, content: '换一个正文',
+        skill_ref: { id: 'project-resume', version: '1.0.0' } });
+    expectProblem(reused, 409, 'COMMAND_ID_REUSED');
+  } finally { await api.stop(); }
 });
 
 async function generateTaskSkillProposal(f: Fixture, skillId:

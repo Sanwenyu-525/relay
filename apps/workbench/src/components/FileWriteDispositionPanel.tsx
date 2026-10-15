@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import AppDialog from "./AppDialog";
 import FileWriteFrozenDiffPanel from "./FileWriteFrozenDiffPanel";
 import { createCommandId, RelayApiError, RelayTransportError, type RelayApiClient,
@@ -17,9 +17,20 @@ const blockingLabels: Record<string, string> = {
   CURRENT_FILES_UNREADABLE: "当前文件无法安全回读",
   RUN_NOT_READY: "旧 Run 或任务尚未到达处置安全点"
 };
-function statusLabel(status: string): string {
-  return ({ UNKNOWN: "待核对", PARTIAL: "部分应用", APPLIED: "账本记录已应用",
-    CONFLICT: "冲突", FAILED: "失败", MANUALLY_CLOSED: "人工结清" } as Record<string, string>)[status] ?? status;
+// 与 RunView 的 gateway 枚举文案同一语义；PARTIAL/APPLIED/CONFLICT 是逐文件账本特有状态，仅新增不覆盖既有取值。
+// 未知值回退原枚举展示；原枚举经 enumText 以 small/title 降级保留，供按原身份核对。
+const statusLabels: Record<string, string> = {
+  UNKNOWN: "待核对", PARTIAL: "部分应用", APPLIED: "账本记录已应用", CONFLICT: "冲突", FAILED: "失败",
+  MANUALLY_CLOSED: "人工结清", WAITING_APPROVAL: "等待批准", PREPARED: "已准备", DISPATCHING: "派发中",
+  SUCCEEDED: "已成功", NOT_EXECUTED: "未执行", DENIED: "已拒绝"
+};
+const fileActionLabels: Record<string, string> = {
+  FILE_WRITE: "写入文件", WRITE_FILE: "写入文件", CREATE: "新建", MODIFY: "修改", DELETE: "删除"
+};
+const residualStatusLabels: Record<string, string> = { READABLE: "可读取" };
+function enumText(labels: Record<string, string>, value: string): ReactNode {
+  const label = labels[value] ?? value;
+  return <>{label}{label !== value && <small title={value}>（{value}）</small>}</>;
 }
 
 function pendingKey(client: RelayApiClient, operationId: string): string {
@@ -68,6 +79,11 @@ export default function FileWriteDispositionPanel({ client, operationId, runId, 
   const [mayRetry, setMayRetry] = useState(false);
   const requestVersion = useRef(0);
   const diffRequestVersion = useRef(0);
+  // 处置命令的归属范围在渲染期同步：换一个 Operation/Run 之后，迟到的 POST 回包与回执
+  // 只能清理它自己那条会话记录，不得写进新 Operation 的界面或触发对新事实的刷新。
+  const commandScope = `${operationId}:${runId}`;
+  const commandScopeRef = useRef(commandScope);
+  commandScopeRef.current = commandScope;
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
@@ -118,10 +134,17 @@ export default function FileWriteDispositionPanel({ client, operationId, runId, 
     if (!retry && !savePending(storageKey, command)) {
       setError("无法暂存原处置命令，尚未发送。请检查浏览器会话存储后重试。"); return;
     }
+    const scope = commandScopeRef.current;
     setPendingCommand(command); setMayRetry(false); setSubmitting(true); setConfirming(false); setError(null); setMessage(null);
     try {
       await client.closePartialFileWrite(command);
     } catch (caught) {
+      // 原会话记录按它自己的 key 清理：即使界面已经切到别的 Operation，这条待核对的原命令
+      // 也必须留在会话存储里等人核对，只是不能再写进别人的界面。
+      if (scope !== commandScopeRef.current) {
+        savePending(storageKey, null);
+        return;
+      }
       if (caught instanceof RelayTransportError || caught instanceof RelayApiError &&
           (caught.problem.status >= 500 || caught.problem.code === "COMMAND_ID_REUSED")) {
         setError("处置响应无法核对；先查询原 command_id 回执。只有明确未找到后，才可用原 ID 和原载荷重试。");
@@ -135,8 +158,10 @@ export default function FileWriteDispositionPanel({ client, operationId, runId, 
       }
       setSubmitting(false); return;
     }
-    savePending(storageKey, null); setPendingCommand(null); setSubmitting(false);
-    setMessage("原 FILE_WRITE 已人工结清；保留当前文件，旧 Run 记为失败。正在重新查询任务和证据。");
+    savePending(storageKey, null);
+    if (scope !== commandScopeRef.current) return;
+    setPendingCommand(null); setSubmitting(false);
+    setMessage("原 FILE_WRITE 已人工结清；保留当前文件，旧 Run 记为失败。这不代表原动作已完成全部文件。正在重新查询任务和证据。");
     try { await refreshFacts(); }
     catch (caught) { setError(`命令已结清，但最新事实读取失败：${describeLiveError(caught).message}`); }
   }
@@ -152,9 +177,11 @@ export default function FileWriteDispositionPanel({ client, operationId, runId, 
 
   async function checkReceipt() {
     if (!pendingCommand || submitting) return;
+    const scope = commandScopeRef.current;
     setSubmitting(true); setMayRetry(false);
     try {
       const receipt = await client.getCommandReceipt(pendingCommand.commandId);
+      if (scope !== commandScopeRef.current) return;
       if (receipt.commandId !== pendingCommand.commandId || receipt.commandType !== "ClosePartialFileWrite" ||
           receipt.result.operation_id !== operationId || receipt.result.invocation_id !== pendingCommand.invocationId ||
           receipt.result.run_id !== runId ||
@@ -163,15 +190,16 @@ export default function FileWriteDispositionPanel({ client, operationId, runId, 
         setError("原命令回执与本次处置不匹配；结果仍待核对。"); return;
       }
       savePending(storageKey, null); setPendingCommand(null); setError(null);
-      setMessage("已找到原命令回执；保留当前文件，旧 Run 记为失败。正在重新读取任务与证据。");
+      setMessage("已找到原命令回执；保留当前文件，旧 Run 记为失败。这不代表原动作已完成全部文件。正在重新读取任务与证据。");
       await refreshFacts();
     } catch (caught) {
+      if (scope !== commandScopeRef.current) return;
       if (caught instanceof RelayApiError && caught.problem.code === "COMMAND_NOT_FOUND") {
         setMayRetry(true);
         setError("服务端明确未找到原命令；可继续查询，或用同一个 command_id 和冻结载荷重试。");
       } else setError(describeLiveError(caught).message);
     }
-    finally { setSubmitting(false); }
+    finally { if (scope === commandScopeRef.current) setSubmitting(false); }
   }
 
   return <div data-testid={`file-write-disposition-${operationId}`}>
@@ -192,32 +220,34 @@ export default function FileWriteDispositionPanel({ client, operationId, runId, 
         className="secondary-button" type="button" data-testid="file-write-dispose-retry" disabled={submitting}
         onClick={() => void sendCommand(pendingCommand, true)}>用原 ID 和载荷重试</button>}</p>}
     {!loading && ledgers.map((ledger) => <div key={ledger.id} data-testid="file-write-ledger">
-      <p><strong>逐文件账本：{ledger.status}（{statusLabel(ledger.status)}）</strong> · change_set_id：{ledger.id} · 原 invocation_id：{ledger.invocationId}</p>
+      <p><strong>逐文件账本：{enumText(statusLabels, ledger.status)}</strong> · change_set_id：{ledger.id} · 原 invocation_id：{ledger.invocationId}</p>
       <ul className="run-list">{ledger.files.map((file) => <li key={file.relativePath}>
-        {file.relativePath} · {file.action} · 账本 {file.status}（{statusLabel(file.status)}）{file.error && <> · 错误 {file.error}</>}
+        {file.relativePath} · {enumText(fileActionLabels, file.action)} · 账本 {enumText(statusLabels, file.status)}{file.error && <> · 错误 {file.error}</>}
       </li>)}</ul>
     </div>)}
     {!loading && preview && <div data-testid="file-write-preview">
-      <p>原 Operation：{preview.operationStatus}（{statusLabel(preview.operationStatus)}） · 停机证明：{preview.stopProofRecorded ? "已记录" : "未记录"}</p>
+      <p>原 Operation：{enumText(statusLabels, preview.operationStatus)} · 停机证明：{preview.stopProofRecorded ? "已记录" : "未记录"}</p>
+      <p className="helper-text">原 operation_id：{preview.operationId} · 原 invocation_id：{preview.invocationId ?? "服务端未返回"} · 观察模式 {preview.observationMode ?? "有执行回执"}。
+        人工处置与重试只使用这两个既有身份，不会派生新的调用。</p>
       {preview.observationMode === "NO_RECEIPT" && <p className="action-error">原助手没有留下执行回执。下列目标和候选残留只是当前磁盘观察，不能归因于原调用；程序不会自动移动或删除它们。</p>}
       {preview.disposition ? <><p>人工处置：保留当时文件并结束旧 Run · {preview.disposition.createdAt} · 当时观察 sha256 {preview.disposition.observationSha256}。不能据此认定所有文件均已写入。</p>
         <ul className="run-list">{preview.disposition.observationFiles.map((file) => <li key={file.path}>
-          {file.path} · 当时账本 {file.ledgerStatus}（{statusLabel(file.ledgerStatus)}） · 当时文件 {file.currentSha256 ?? "不存在"}
+          {file.path} · 当时账本 {enumText(statusLabels, file.ledgerStatus)} · 当时文件 {file.currentSha256 ?? "不存在"}
           <div>当时账本实际 sha256：{file.ledgerActualSha256 ?? "无"}</div>
           {preview.disposition?.observationMode === "NO_RECEIPT" && <><div>当时目标 File ID：{file.currentTargetId ?? "不存在"}</div>
             <div>当时候选残留（不归因于原调用）：{file.residualCandidates.length === 0 ? "无" : ""}</div>
             <ul className="run-list">{file.residualCandidates.map((candidate) => <li key={candidate.path}>
-              {candidate.path} · File ID {candidate.id ?? "不可用"} · sha256 {candidate.sha256 ?? "不可用"} · {candidate.status}
+              {candidate.path} · File ID {candidate.id ?? "不可用"} · sha256 {candidate.sha256 ?? "不可用"} · {enumText(residualStatusLabels, candidate.status)}
             </li>)}</ul></>}
         </li>)}</ul></>
         : <><p>当前文件观察 sha256：{preview.observationSha256 ?? "无法安全计算"}。当前摘要是读取时的状态，不能据此认定原动作已完成全部文件。</p>
           <ul className="run-list">{preview.files.map((file) => <li key={file.relativePath}>
-            {file.relativePath} · 账本 {file.ledgerStatus}（{statusLabel(file.ledgerStatus)}） · 当前 {file.readable ? (file.currentSha256 ?? "文件不存在") : "不可读取"}
+            {file.relativePath} · 账本 {enumText(statusLabels, file.ledgerStatus)} · 当前 {file.readable ? (file.currentSha256 ?? "文件不存在") : "不可读取"}
             <div>账本实际 sha256：{file.ledgerActualSha256 ?? "无"}</div>
             {preview.observationMode === "NO_RECEIPT" && <><div>当前目标 File ID：{file.currentTargetId ?? "不存在"}</div>
               <div>候选残留（不归因于原调用）：{file.residualCandidates.length === 0 ? "无" : ""}</div>
               <ul className="run-list">{file.residualCandidates.map((candidate) => <li key={candidate.path}>
-                {candidate.path} · File ID {candidate.id ?? "不可用"} · sha256 {candidate.sha256 ?? "不可用"} · {candidate.status}
+                {candidate.path} · File ID {candidate.id ?? "不可用"} · sha256 {candidate.sha256 ?? "不可用"} · {enumText(residualStatusLabels, candidate.status)}
               </li>)}</ul></>}
           </li>)}</ul>
           {preview.blockingReasons.length > 0 && <p className="disabled-reason">处置受阻：{preview.blockingReasons.map((reason) => `${blockingLabels[reason] ?? reason}（${reason}）`).join("、")}</p>}

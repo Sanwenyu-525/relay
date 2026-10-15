@@ -64,7 +64,7 @@ test('解释模型声明要改文件但还不知道具体路径时，写能力�
   assert.equal(wantsWrite!(validated.candidate), true);
 });
 
-test('只读请求不会因为新增字段拿到写能力；声明了文件列表本身就是写意图', () => {
+test('只读请求不会因为新增字段拿到写能力；缺省声明仍按文件列表推导写意图', () => {
   const readOnly = validateConversationCandidate({ task: { ...validTask,
     writes_files: false, file_changes: [] } });
   assert.equal(readOnly.ok, true);
@@ -79,6 +79,65 @@ test('只读请求不会因为新增字段拿到写能力；声明了文件列�
   assert.equal(legacy.ok, true);
   if (!legacy.ok) return;
   assert.equal(wantsWrite!(legacy.candidate), true);
+});
+
+test('只读声明压过文件列表：把路径当定位提示的读取请求不得拿到写工具', () => {
+  // 实测真实模型对「读取 README.md」会给 writes_files:false 同时把路径列进 file_changes
+  //（当定位提示用）。按「有变更即写」处理会让一次纯读取静默拿到 apply_changeset 与范围授权。
+  const wantsWrite = conversationExecution.wantsConversationFileWrite;
+  const validated = validateConversationCandidate({ task: { ...validTask,
+    writes_files: false, file_changes: [{ path: 'README.md', action: 'MODIFY' }] } });
+  assert.equal(validated.ok, true);
+  if (!validated.ok) return;
+  assert.equal(wantsWrite(validated.candidate), false);
+  // 显式声明要写时，路径列表只是额外的定位信息，仍然是写意图。
+  const declaredWrite = validateConversationCandidate({ task: { ...validTask,
+    writes_files: true, file_changes: [{ path: 'src/parse.ts', action: 'MODIFY' }] } });
+  assert.equal(declaredWrite.ok, true);
+  if (!declaredWrite.ok) return;
+  assert.equal(wantsWrite(declaredWrite.candidate), true);
+});
+
+test('schema 的 check 空占位按「本次不跑检查」处理，不把只读候选判成澄清', () => {
+  // schema 无条件声明了 check，真实模型对只读请求照样填 {"executable":"","args":[]}。
+  // 当成格式错误的检查命令会让「列一下当前目录」被追问「检查命令需要一个可执行文件名」。
+  for (const check of [{ executable: '', args: [] }, {}, null]) {
+    const validated = validateConversationCandidate({ task: { ...validTask,
+      writes_files: false, file_changes: [], check } });
+    assert.equal(validated.ok, true, `空占位 check 应被接受：${JSON.stringify(check)}`);
+    if (!validated.ok) continue;
+    assert.equal(validated.candidate.check, undefined);
+  }
+  // 真的写了可执行名却缺参数，仍然按非法拒绝：丢掉空占位只让权限更小，不能放宽成任意命令。
+  const partial = validateConversationCandidate({ task: { ...validTask,
+    writes_files: false, file_changes: [], check: { executable: 'node', args: [] } } });
+  assert.equal(partial.ok, false);
+  assert.match(partial.ok ? '' : partial.reason, /可执行文件名/u);
+});
+
+test('auto_start 只对就绪的只读候选成立；写意图与未就绪一律 false', () => {
+  const isReadOnly = conversationExecution.isReadOnlyConversationExecution;
+  const readOnly = validateConversationCandidate({ task: { ...validTask,
+    title: '列出目录', writes_files: false, file_changes: [] } });
+  assert.equal(readOnly.ok, true);
+  if (!readOnly.ok) return;
+  const candidate = readOnly.candidate as unknown as JsonObject;
+  assert.equal(isReadOnly({ decision: 'PREPARE', candidate_status: 'READY', candidate }), true);
+  // 带写意图的候选必须回到人工确认：只读豁免不能顺带覆盖会改文件的请求。
+  assert.equal(isReadOnly({ decision: 'PREPARE', candidate_status: 'READY', candidate: validTask }),
+    false, '缺省 writes_files 按文件列表推导，validTask 含 MODIFY，应视为写意图');
+  const declaredWrite = validateConversationCandidate({ task: { ...validTask, writes_files: true } });
+  assert.equal(declaredWrite.ok, true);
+  if (!declaredWrite.ok) return;
+  assert.equal(isReadOnly({ decision: 'PREPARE', candidate_status: 'READY',
+    candidate: declaredWrite.candidate as unknown as JsonObject }), false);
+  // 讨论、澄清与不可用候选一律不是可启动的执行请求。
+  for (const row of [
+    { decision: 'DISCUSS', candidate_status: 'UNAVAILABLE', candidate: null },
+    { decision: 'CLARIFY', candidate_status: 'UNAVAILABLE', candidate: null },
+    { decision: 'PREPARE', candidate_status: 'INVALID', candidate },
+    { decision: 'PREPARE', candidate_status: 'READY', candidate: null },
+  ]) assert.equal(isReadOnly(row), false, JSON.stringify(row.decision));
 });
 
 test('不可判断的验收条件被拒绝，而不是用占位措辞凑齐任务', () => {

@@ -11,7 +11,8 @@ import { Client } from 'pg';
 import { installGraphCheckpoints } from '../../src/infrastructure/graph-checkpoints.js';
 import { MIGRATION_LOCK_NAMESPACE, runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { postgresErrorCode } from '../../src/infrastructure/postgres-error.js';
-import { createTemporaryDatabase, MIGRATIONS_DIRECTORY, type TemporaryDatabase } from './integration-support.js';
+import { assertMigrationLedgerMatchesManifest, createTemporaryDatabase, currentMigrationCount,
+  MIGRATIONS_DIRECTORY, type TemporaryDatabase } from './integration-support.js';
 import { delay } from './api-harness.js';
 
 /** Mechanism probes only: no production freeze coordinator, durable recovery Owner or backup protocol exists here. */
@@ -146,7 +147,12 @@ test('mechanism probe: committed CONNECT revoke preserves existing app writes an
       assert.equal((await reader.query<{ name: string }>('select name from workspaces where id = $1', [id])).rows[0]?.name,
         'old connection still writes');
       assert.equal((await reader.query<{ count: string }>('select count(*)::text from relay_graph_v1.checkpoint_migrations')).rows[0]?.count, '5');
-      assert.equal((await reader.query<{ count: string }>('select count(*)::text from relay_schema_migrations')).rows[0]?.count, '48');
+      // 恢复出的库必须持有与仓库当前源码逐条一致的迁移集合，而不是某个条数常量。
+      const restoredLedger = (await reader.query<{ name: string; content_sha256: Buffer }>(
+        'select name, content_sha256 from relay_schema_migrations order by name')).rows
+        .map((row) => ({ name: row.name, sha256Hex: Buffer.from(row.content_sha256).toString('hex') }));
+      assert.ok(await assertMigrationLedgerMatchesManifest(restoredLedger,
+        'boundary_restore 恢复目标库') > 0, 'restored target must carry the real complete migration set');
       await reader.end();
     } finally { await restored.drop(); }
   } finally { await restore(owner, original); }
@@ -185,7 +191,9 @@ test('mechanism probe: both original DDL entry points really wait on their exist
     await owner.query('select pg_advisory_unlock(hashtextextended($1, 0))', [MIGRATION_LOCK_NAMESPACE]);
   }
   const [migration] = await Promise.all([business, graph]);
-  assert.equal(migration.applied.length, 0); assert.equal(migration.ledgerRows, 48);
+  // 等待期间没有新迁移可应用，且 ledger 仍与仓库当前清单逐条一致（不是某个条数常量）。
+  assert.equal(migration.applied.length, 0);
+  assert.equal(migration.ledgerRows, await currentMigrationCount());
   assert.equal(businessDone, true); assert.equal(graphDone, true);
 });
 

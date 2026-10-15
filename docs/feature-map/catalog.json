@@ -673,6 +673,132 @@
           "intent": "current"
         },
         {
+          "id": "task-acceptance-materials",
+          "name": "Task 验收参考材料",
+          "description": "沿 Knowledge 导入文本并关联确切版本，保留待核对、缺项和撤销历史；前端提供客户端方法，UI 尚未接入。",
+          "code": [
+            "apps/api/src/application/task-acceptance-materials.ts",
+            "apps/api/src/api/task-acceptance-material-api.ts",
+            "apps/api/src/task/task-acceptance-material-repository.ts",
+            "apps/api/migrations/0074_task_acceptance_materials.sql",
+            "apps/workbench/src/api/dtos/taskAcceptanceMaterials.ts",
+            "apps/workbench/src/api/resources/taskAcceptanceMaterials.ts"
+          ],
+          "docs": ["docs/api/http-command-contract.md", "docs/database/physical-design-postgresql.md", "docs/architecture/domain-model.md", "docs/requirements/post-v1-roadmap.md"],
+          "prompts": ["prompts/evidence-and-investment.md"],
+          "tests": ["apps/api/test/integration/task-acceptance-materials.integration.test.ts", "apps/workbench/tests/taskAcceptanceMaterialsClient.spec.ts"],
+          "acceptance": ["基础验收材料与试用记录（2026-10-14）"],
+          "intent": "current"
+        },
+        {
+          "id": "task-acceptance-trials",
+          "name": "验收试用计时与人工补录",
+          "description": "独立保存原流程/证据流程样本、有效/暂停/经过时间及人工耗时纠正来源，尚不形成收益结论。",
+          "code": [
+            "apps/api/src/application/task-acceptance-trials.ts",
+            "apps/api/src/api/task-acceptance-trial-api.ts",
+            "apps/api/src/task/task-acceptance-trial-repository.ts",
+            "apps/api/migrations/0075_task_acceptance_trials.sql",
+            "apps/workbench/src/api/dtos/taskAcceptanceTrials.ts",
+            "apps/workbench/src/api/resources/taskAcceptanceTrials.ts"
+          ],
+          "docs": ["docs/api/http-command-contract.md", "docs/database/physical-design-postgresql.md", "docs/architecture/domain-model.md", "docs/requirements/post-v1-roadmap.md"],
+          "prompts": ["prompts/evidence-and-investment.md"],
+          "tests": ["apps/api/test/integration/task-acceptance-materials.integration.test.ts", "apps/workbench/tests/taskAcceptanceTrialsClient.spec.ts"],
+          "acceptance": ["基础验收材料与试用记录（2026-10-14）"],
+          "intent": "current"
+        },
+        {
+          "id": "acceptance-comparison-baselines",
+          "name": "验收试用冻结基线与比较",
+          "description": "原流程基线先于新试用冻结，保留全部样本及准备/总成本、正确性自述与过期状态；只有前后端数据功能，无 UI 或收益证明。",
+          "code": [
+            "apps/api/src/application/task-acceptance-comparisons.ts",
+            "apps/api/src/api/task-acceptance-comparison-api.ts",
+            "apps/api/src/task/task-acceptance-comparison-repository.ts",
+            "apps/api/migrations/0076_task_acceptance_comparisons.sql",
+            "apps/workbench/src/api/dtos/taskAcceptanceComparisons.ts",
+            "apps/workbench/src/api/resources/taskAcceptanceComparisons.ts"
+          ],
+          "docs": ["docs/api/http-command-contract.md", "docs/database/physical-design-postgresql.md", "docs/architecture/domain-model.md", "docs/requirements/post-v1-roadmap.md"],
+          "prompts": ["prompts/evidence-and-investment.md"],
+          "tests": ["apps/api/test/unit/task-acceptance-comparison.test.ts", "apps/api/test/integration/acceptance-comparisons.integration.test.ts", "apps/workbench/tests/taskAcceptanceComparisonsClient.spec.ts"],
+          "acceptance": ["基础验收试用比较（2026-10-14）"],
+          "intent": "current"
+        },
+        {
+          "id": "conversation-acceptance-time",
+          "name": "会话一句话验收耗时补录",
+          "description": "原用户消息经已有状态维护解释/澄清和应用入口，向确切试用追加人工耗时观察；保留原文来源、未知及纠正历史，客户端可调用。",
+          "code": [
+            "apps/api/src/application/conversation-state.ts",
+            "apps/api/src/application/task-acceptance-trials.ts",
+            "apps/api/src/task/acceptance-time-statement.ts",
+            "apps/api/src/workflow/prompts/interpretation-prompts.ts",
+            "apps/api/migrations/0077_conversation_acceptance_time.sql",
+            "apps/workbench/src/api/resources/stateMaintenance.ts"
+          ],
+          "docs": ["docs/api/http-command-contract.md", "docs/database/physical-design-postgresql.md", "docs/architecture/domain-model.md", "docs/requirements/post-v1-roadmap.md"],
+          "prompts": ["prompts/evidence-and-investment.md"],
+          "tests": ["apps/api/test/unit/acceptance-time-statement.test.ts", "apps/api/test/integration/acceptance-time-conversation.integration.test.ts", "apps/workbench/tests/acceptanceTimeConversationClient.spec.ts"],
+          "acceptance": ["基础会话验收耗时补录（2026-10-14）"],
+          "intent": "current"
+        },
+        {
+          "id": "project-hypotheses",
+          "name": "基础假设记录与用户结论",
+          "description": "项目内保存主张/方法/标准版本、观察和候选建议，用户确认结论，来源/观察变化后保留旧依据；原会话支持明确建档，无新 UI 或自动模型分析。",
+          "code": [
+            "apps/api/src/application/hypotheses.ts",
+            "apps/api/src/hypothesis/hypothesis-repository.ts",
+            "apps/api/src/api/hypothesis-api.ts",
+            "apps/api/migrations/0078_project_hypotheses.sql",
+            "apps/workbench/src/api/dtos/hypotheses.ts",
+            "apps/workbench/src/api/resources/hypotheses.ts"
+          ],
+          "docs": ["docs/api/http-command-contract.md", "docs/database/physical-design-postgresql.md", "docs/architecture/domain-model.md", "docs/requirements/post-v1-roadmap.md"],
+          "prompts": ["prompts/evidence-and-investment.md"],
+          "tests": ["apps/api/test/unit/hypotheses.test.ts", "apps/api/test/integration/hypotheses.integration.test.ts", "apps/workbench/tests/hypothesesClient.spec.ts"],
+          "acceptance": ["基础假设记录与用户结论（2026-10-14）"],
+          "intent": "current"
+        },
+        {
+          "id": "decision-premise-reviews",
+          "name": "基础决定前提与复审",
+          "description": "明确登记资料/假设前提，已有来源写入时准备去重候选，保留变化引用和用户处理；原决定仍由原 Owner 替代，无新 UI 或后台监控。",
+          "code": [
+            "apps/api/src/application/decision-reviews.ts",
+            "apps/api/src/information/decision-review-repository.ts",
+            "apps/api/src/api/decision-review-api.ts",
+            "apps/api/migrations/0079_decision_review_candidates.sql",
+            "apps/workbench/src/api/dtos/decisionReviews.ts",
+            "apps/workbench/src/api/resources/decisionReviews.ts"
+          ],
+          "docs": ["docs/api/http-command-contract.md", "docs/database/physical-design-postgresql.md", "docs/architecture/domain-model.md", "docs/requirements/post-v1-roadmap.md"],
+          "prompts": ["prompts/evidence-and-investment.md"],
+          "tests": ["apps/api/test/integration/decision-reviews.integration.test.ts", "apps/workbench/tests/decisionReviewsClient.spec.ts"],
+          "acceptance": ["基础决定前提与复审（2026-10-14）"],
+          "intent": "current"
+        },
+        {
+          "id": "work-segment-retrospectives",
+          "name": "基础工作段预期与产出复盘",
+          "description": "保存既有任务与确认预期，结束冻结本段验收产出/未完成/用量，用户确认事件及撤回保留历史，临时回顾复用可核对历史预期；无新 UI 或自动执行。",
+          "code": [
+            "apps/api/src/application/work-segments.ts",
+            "apps/api/src/work-segment/work-segment-repository.ts",
+            "apps/api/src/api/work-segment-api.ts",
+            "apps/api/migrations/0080_work_segments.sql",
+            "apps/workbench/src/api/dtos/workSegments.ts",
+            "apps/workbench/src/api/resources/workSegments.ts"
+          ],
+          "docs": ["docs/api/http-command-contract.md", "docs/database/physical-design-postgresql.md", "docs/architecture/domain-model.md", "docs/requirements/post-v1-roadmap.md"],
+          "prompts": ["prompts/evidence-and-investment.md"],
+          "tests": ["apps/api/test/unit/work-segments.test.ts", "apps/api/test/integration/work-segments.integration.test.ts", "apps/workbench/tests/workSegmentsClient.spec.ts"],
+          "acceptance": ["基础工作段预期与产出复盘（2026-10-14）"],
+          "intent": "current"
+        },
+        {
           "id": "verification-current-binding",
           "name": "验收版本与过期判定",
           "description": "验证会话绑定确切产物、验收修订及规则，变化后重新核对适用性。",
@@ -1927,16 +2053,18 @@
         {
           "id": "model-connection-verification",
           "name": "连接与能力验证",
-          "description": "通过独立验证调用核对模型可用性及声明能力。",
+          "description": "通过独立验证调用核对模型可用性及声明能力；固定 user 探针由统一路由入口返回。",
           "code": [
             "apps/api/src/application/model-port-verification.ts",
-            "apps/api/src/workflow/model-port-verify.ts"
+            "apps/api/src/workflow/model-port-verify.ts",
+            "apps/api/src/workflow/prompts/run-prompts.ts"
           ],
           "docs": [
             "docs/architecture/runtime-context.md",
             "docs/api/http-command-contract.md"
           ],
           "prompts": [
+            "prompts/runtime-prompt-routing.md",
             "prompts/D-context-product.md"
           ],
           "tests": [
@@ -1951,9 +2079,10 @@
         {
           "id": "provider-stream-schema",
           "name": "真实 Provider 流式与结构化输出",
-          "description": "模型端口处理流式文本和 JSON schema 输出，专用语义检查继续独立。",
+          "description": "模型端口处理流式文本和 JSON schema 输出，DRAFT 与语义检查模板经统一路由入口选择。",
           "code": [
             "apps/api/src/workflow/openai-compatible-model-port.ts",
+            "apps/api/src/workflow/prompts/run-prompts.ts",
             "apps/api/src/workflow/markdown-deliverable.ts"
           ],
           "docs": [
@@ -1961,12 +2090,14 @@
             "docs/architecture/agent-prompt-design.md"
           ],
           "prompts": [
+            "prompts/runtime-prompt-routing.md",
             "prompts/D-context-product.md",
-            "apps/api/src/workflow/openai-compatible-model-port.ts"
+            "apps/api/src/workflow/prompts/run-prompts.ts"
           ],
           "tests": [
             "apps/api/test/integration/real-model.integration.test.ts",
-            "apps/api/test/unit/openai-compatible-model-port.test.ts"
+            "apps/api/test/unit/openai-compatible-model-port.test.ts",
+            "apps/api/test/unit/run-prompts.test.ts"
           ],
           "acceptance": [
             "真实 DRAFT、HARD SEMANTIC、取消/abort",
@@ -2247,17 +2378,20 @@
           "code": [
             "apps/api/src/skills/skill-basis.ts",
             "apps/api/src/skills/skill-output.ts",
-            "apps/api/src/skills/skill-proposal.ts"
+            "apps/api/src/skills/skill-proposal.ts",
+            "apps/api/src/workflow/prompts/conversation-prompts.ts"
           ],
           "docs": [
             "docs/architecture/relay-skills.md",
             "docs/architecture/agent-prompt-design.md"
           ],
           "prompts": [
+            "prompts/runtime-prompt-routing.md",
             "prompts/D-context-product.md"
           ],
           "tests": [
             "apps/api/test/unit/first-party-skills.test.ts",
+            "apps/api/test/unit/conversation-prompts.test.ts",
             "apps/api/test/integration/assist.integration.test.ts"
           ],
           "acceptance": [
@@ -2268,9 +2402,11 @@
         {
           "id": "agent-public-core-prompt",
           "name": "公共 Agent 核心提示词",
-          "description": "运行源码统一维护公共协作、事实、权限和完成边界并接入现有入口。",
+          "description": "运行源码统一维护公共协作、事实、权限和完成边界，经统一路由入口接入现有调用。",
           "code": [
             "apps/api/src/workflow/agent-system-prompt.ts",
+            "apps/api/src/workflow/prompts/route-types.ts",
+            "apps/api/src/workflow/prompts/index.ts",
             "apps/api/src/application/assist-runner.ts",
             "apps/api/src/application/conversation-execution.ts",
             "apps/api/src/workflow/openai-compatible-model-port.ts"
@@ -2281,10 +2417,12 @@
           ],
           "prompts": [
             "apps/api/src/workflow/agent-system-prompt.ts",
+            "prompts/runtime-prompt-routing.md",
             "prompts/D-context-product.md"
           ],
           "tests": [
             "apps/api/test/unit/agent-runtime-prompts.test.ts",
+            "apps/api/test/unit/runtime-prompt-router.test.ts",
             "apps/api/test/integration/assist.integration.test.ts"
           ],
           "acceptance": [
@@ -2295,10 +2433,18 @@
         {
           "id": "agent-specialized-prompts",
           "name": "专用输出与模式提示词",
-          "description": "公共核心组合 Assist、Skill、DRAFT 和请求解释的专用输出要求。",
+          "description": "统一路由入口按调用场景选择会话、解释、Run 与验证探针模板并组合公共核心。",
           "code": [
+            "apps/api/src/workflow/prompts/index.ts",
+            "apps/api/src/workflow/prompts/route-types.ts",
+            "apps/api/src/workflow/prompts/conversation-prompts.ts",
+            "apps/api/src/workflow/prompts/interpretation-prompts.ts",
+            "apps/api/src/workflow/prompts/run-prompts.ts",
             "apps/api/src/application/assist-runner.ts",
+            "apps/api/src/application/assistant-readonly-round.ts",
+            "apps/api/src/application/learning-round.ts",
             "apps/api/src/application/conversation-execution.ts",
+            "apps/api/src/application/conversation-state.ts",
             "apps/api/src/skills/first-party-registry.ts",
             "apps/api/src/workflow/openai-compatible-model-port.ts"
           ],
@@ -2306,13 +2452,14 @@
             "docs/architecture/agent-prompt-design.md"
           ],
           "prompts": [
-            "apps/api/src/workflow/agent-system-prompt.ts",
-            "apps/api/src/application/assist-runner.ts",
-            "apps/api/src/application/conversation-execution.ts",
-            "apps/api/src/skills/first-party-registry.ts",
-            "apps/api/src/workflow/openai-compatible-model-port.ts"
+            "apps/api/src/workflow/prompts/index.ts",
+            "prompts/runtime-prompt-routing.md"
           ],
           "tests": [
+            "apps/api/test/unit/runtime-prompt-router.test.ts",
+            "apps/api/test/unit/conversation-prompts.test.ts",
+            "apps/api/test/unit/interpretation-prompts.test.ts",
+            "apps/api/test/unit/run-prompts.test.ts",
             "apps/api/test/unit/agent-runtime-prompts.test.ts"
           ],
           "acceptance": [
@@ -2510,9 +2657,10 @@
         {
           "id": "conversation-request-interpretation",
           "name": "讨论、澄清与执行解释",
-          "description": "对确切原消息生成 DISCUSS/CLARIFY/PREPARE 结果，前端不按关键词判定。",
+          "description": "对确切原消息生成 DISCUSS/CLARIFY/PREPARE 结果，前端不按关键词判定；模板经统一路由入口选择。",
           "code": [
             "apps/api/src/application/conversation-execution.ts",
+            "apps/api/src/workflow/prompts/interpretation-prompts.ts",
             "apps/api/src/api/conversation-execution-api.ts",
             "apps/workbench/src/components/ExecutionSummary.tsx"
           ],
@@ -2522,11 +2670,13 @@
             "docs/api/http-command-contract.md"
           ],
           "prompts": [
+            "prompts/runtime-prompt-routing.md",
             "prompts/folder-first-conversation.md",
-            "apps/api/src/application/conversation-execution.ts"
+            "apps/api/src/workflow/prompts/interpretation-prompts.ts"
           ],
           "tests": [
             "apps/api/test/unit/conversation-execution.test.ts",
+            "apps/api/test/unit/interpretation-prompts.test.ts",
             "apps/api/test/integration/folder-first-conversation.integration.test.ts"
           ],
           "acceptance": [
@@ -3500,20 +3650,43 @@
         {
           "id": "bounded-serial-delegation",
           "name": "有限串行任务链",
-          "description": "显式授权的任务集合在预算、有效期和停止条件内串行准入。",
-          "code": [],
+          "description": "固定任务集合在预算与有效期内串行准入，复用原文件读取/修改、配置检查和人工验收。",
+          "code": [
+            "apps/api/src/application/task-chains.ts",
+            "apps/api/src/application/task-chain-execution.ts",
+            "apps/api/src/application/task-chain-admission.ts",
+            "apps/api/src/application/run-scope-grant.ts",
+            "apps/api/src/planning/task-chain-repository.ts",
+            "apps/api/src/api/task-chain-api.ts",
+            "apps/api/src/runtime/task-chain-scheduler.ts",
+            "apps/workbench/src/api/resources/taskChains.ts"
+          ],
           "docs": [
             "docs/requirements/post-v1-roadmap.md",
             "docs/architecture/domain-model.md",
+            "docs/decisions/ADR-021-bounded-task-chain-admission.md",
+            "docs/api/http-command-contract.md",
+            "docs/database/physical-design-postgresql.md",
+            "docs/testing/verification-plan.md",
             "docs/frontend/workbench-design.md"
           ],
           "prompts": [
             "prompts/post-v1-collaboration.md"
           ],
-          "tests": [],
-          "acceptance": [],
-          "intent": "planned",
-          "note": "N06 重启须人工继续；到期通过原控制入口安全暂停，UNKNOWN 沿原身份核对。"
+          "tests": [
+            "apps/api/test/integration/task-chains.integration.test.ts",
+            "apps/api/test/integration/task-chain-execution.integration.test.ts",
+            "apps/api/test/unit/task-chain-execution.test.ts",
+            "apps/workbench/tests/taskChainExecutionClient.spec.ts",
+            "apps/workbench/tests/taskChainsClient.spec.ts"
+          ],
+          "acceptance": [
+            "基础有限 Markdown 任务链（2026-10-14）",
+            "任务链基础只读文件与来源（2026-10-14）",
+            "任务链基础修改与检查（2026-10-14）"
+          ],
+          "intent": "current",
+          "note": "仅基础 API/客户端与所列证据；N06 UI、活动续期、自定义方法和完整出口仍后置。重开人工继续，到期沿原控制安全暂停，UNKNOWN 沿原身份核对。"
         },
         {
           "id": "declarative-personal-config",

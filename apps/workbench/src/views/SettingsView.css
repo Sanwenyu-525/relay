@@ -1,7 +1,4 @@
 .settings-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; padding: var(--relay-layout-main-padding); }
-.settings-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--relay-space-3) var(--relay-space-6); margin-bottom: var(--relay-space-6); }
-.settings-heading > h1 { margin: 0; font-size: var(--relay-font-size-page); }
-.settings-heading > .page-lede { margin: 0; font-size: var(--relay-font-size-body); }
 .settings-card { margin-top: var(--relay-space-6); }
 .settings-layout { display: grid; gap: var(--relay-space-6); }
 .settings-content { min-width: 0; }
@@ -22,12 +19,17 @@
 .settings-save-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-4); margin-top: var(--relay-space-6); }
 .settings-save-actions .primary-button { min-width: 10rem; }
 .settings-save-result { color: var(--relay-color-action-text); font-size: var(--relay-font-size-meta); }
+/* 保存失败的错误信息独占一行，与按钮和表单左缘对齐，不与按钮挤在同一行。 */
+.settings-save-actions .action-error { flex-basis: 100%; margin: 0; }
 .settings-device-note { margin-top: var(--relay-space-3); }
 .settings-explanation { padding-top: var(--relay-space-6); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .settings-explanation p { margin-top: var(--relay-space-4); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-reading); line-height: var(--relay-font-lineHeight-reading); }
 .settings-explanation { margin-top: var(--relay-space-6); }
 .settings-explanation > summary { cursor: pointer; color: var(--relay-color-text-secondary); }
 .settings-explanation p + p { margin-top: var(--relay-space-3); }
+/* 宽视口两列 label 网格与全局 .field--grid 同构：设置页的 .settings-field 是
+   label+控件的自有结构（不是 .field/.field-label），换用全局变体需 SettingsView.tsx
+   重排标记（不在本轮所有权内），故先保留本地实现并保持 token 取值一致。 */
 @media (min-width: 64rem) {
   .settings-field { display: grid; grid-template-columns: minmax(0, 0.65fr) minmax(0, 1fr); gap: var(--relay-space-2) var(--relay-space-4); align-items: center; }
   .settings-field label { margin: 0; }
@@ -47,9 +49,11 @@
 .settings-page .pack-catalog-members small { display: block; margin-top: var(--relay-space-1); color: var(--relay-color-text-secondary); }
 .settings-page .pack-catalog-members .hash-code { background: var(--relay-color-bg-canvas); }
 
-@media (max-width: 700px) {
+/* 窄窗（width < 48rem）：
+   - 页面留白换紧凑档；
+   - definition-list 的 8rem 定宽 dt 列在窄窗挤压 dd，改单列上下排；
+   （原 700px 断点里的标题降级规则随 PageHeader 接管页头与 .settings-heading 移除已失效，一并删除。） */
+@media (width < 48rem) {
   .settings-page { padding: var(--relay-layout-main-smallPadding); }
-  .settings-page > h1 { font-size: var(--relay-font-size-compactPage); }
-  .settings-heading > h1 { font-size: var(--relay-font-size-compactPage); }
   .settings-definition-list > div { grid-template-columns: 1fr; gap: var(--relay-space-1); }
 }

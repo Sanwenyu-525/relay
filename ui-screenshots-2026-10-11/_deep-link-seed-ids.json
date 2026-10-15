@@ -1,0 +1,20 @@
+{
+    "workspaceId":  "b34f1735-63f4-4962-a2ea-dc340439b608",
+    "projectId":  "b7b7a62e-ef45-4247-8ce2-5372d9f703dd",
+    "layoutTaskId":  "a3e57735-932b-4b96-85a9-1ea90bb884f9",
+    "runTaskId":  "9c6ae9f2-71eb-4510-8438-e91bd648ee42",
+    "runId":  "0898fbbe-288a-493e-98ce-393ac4880ba9",
+    "completionTaskId":  "2b50758f-dc84-4350-b342-5fe9edaa5a06",
+    "completionId":  "820ca548-60f9-469b-8fe3-6bff8d9081bb",
+    "artifactId":  "9a458b1f-767d-46b9-a7a7-987cd88db082",
+    "artifactVersionIdV1":  "b5dbf96f-d029-4468-aa87-500f13550894",
+    "artifactVersionId":  "ecbe6fcf-5cbe-40fe-b31b-7be578f841fa",
+    "seededAt":  "2026-10-11T14:59:28+08:00",
+    "notes":  [
+                  "layout: /agent?work=\u003clayoutTaskId\u003e then open page-head-more then collab-layout-*",
+                  "run: /runs/\u003crunId\u003e",
+                  "completion: /completion-records/\u003ccompletionId\u003e",
+                  "lineage: /artifact-versions/\u003cartifactVersionId\u003e/lineage",
+                  "directory: browser uses folder-manual-root (no OS dialog)"
+              ]
+}

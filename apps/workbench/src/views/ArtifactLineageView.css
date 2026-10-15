@@ -24,5 +24,9 @@
 .knowledge-curation__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--relay-space-2); }
 .knowledge-curation__status { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); }
 .knowledge-curation__actions { display: flex; flex-wrap: wrap; gap: var(--relay-space-3); margin-top: var(--relay-space-3); }
-@media (max-width: 700px) { .lineage-page { padding: var(--relay-layout-main-smallPadding); } .lineage-summary dl div { grid-template-columns: 1fr; } }
-@media (max-width: 700px) { .lineage-diff-columns { grid-template-columns: 1fr; } }
+/* 并入 48rem 折行档，原 700px：页面留白降级；定义列表与差异对比的双列在窄屏折叠为单列。 */
+@media (width < 48rem) {
+  .lineage-page { padding: var(--relay-layout-main-smallPadding); }
+  .lineage-summary dl div { grid-template-columns: 1fr; }
+  .lineage-diff-columns { grid-template-columns: 1fr; }
+}

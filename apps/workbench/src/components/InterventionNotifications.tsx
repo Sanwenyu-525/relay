@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Bell, BellRing } from "lucide-react";
 import { type RelayApiClient, type RelayInterventionItem } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import { deliverProjectReminderNotifications } from "../lib/projectReminderNotifications";
 
 const AGGREGATION_MS = 3_000;
 const POLL_MS = 10_000;
@@ -37,6 +38,10 @@ export default function InterventionNotifications({ client }:
         const latest = await client.getInterventions();
         if (!active) return;
         setItems(latest); setError(null);
+        if (latest.length === 0) {
+          try { await deliverProjectReminderNotifications(client, navigate, () => active); }
+          catch { console.warn("project_reminder_notification_failed"); }
+        }
         if (!isTauri() || collecting || latest.length === 0) return;
         const { getCurrentWindow } = await import("@tauri-apps/api/window");
         if (!active || await getCurrentWindow().isFocused()) return;

@@ -1,0 +1,39 @@
+/* ── 返回项目的顶部接续卡（总纲 §0.8.1 / 工作台 §18.9）──────────
+   只用既有 --relay-* token：摘要行默认可见，阻塞与在途计数不允许藏进展开区；
+   阻塞不为零时整卡带 attention 边线，不靠颜色单独承载语义（文字计数同时可见）。 */
+.daily-continuation {
+  margin: 0 0 var(--relay-space-3);
+  padding: var(--relay-space-3);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+}
+
+.daily-continuation--attention {
+  border-color: var(--relay-color-palette-amber);
+}
+
+.daily-continuation--failed {
+  border-color: var(--relay-color-palette-red);
+}
+
+.daily-continuation > p { margin: 0 0 var(--relay-space-2); }
+.daily-continuation > :last-child { margin-bottom: 0; }
+
+.daily-continuation-summary { font-weight: var(--relay-font-weight-medium); }
+
+.daily-continuation-facts { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+
+.daily-continuation-facts--attention { color: var(--relay-color-text-primary); font-weight: var(--relay-font-weight-medium); }
+
+.daily-continuation-details { margin-top: var(--relay-space-2); }
+
+.daily-continuation-delta {
+  display: grid;
+  gap: var(--relay-space-1);
+  margin: var(--relay-space-2) 0;
+}
+
+.daily-continuation-delta > div { display: flex; gap: var(--relay-space-2); }
+.daily-continuation-delta dt { flex: none; min-width: 4em; color: var(--relay-color-text-secondary); }
+.daily-continuation-delta dd { margin: 0; overflow-wrap: anywhere; }

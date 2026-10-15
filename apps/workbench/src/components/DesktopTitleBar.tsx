@@ -5,10 +5,11 @@ import { Link } from "react-router-dom";
 import { Copy, Inbox, Link2, Minus, Square, X } from "lucide-react";
 import InterventionNotifications from "./InterventionNotifications";
 import RelayConnectionDialog from "./RelayConnectionDialog";
+import WorkbenchActions from "./WorkbenchActions";
 import { useDisplayPreferences } from "../lib/displayPreferences";
 import { useRelayConnection } from "../lib/relayConnection";
 
-export default function DesktopTitleBar({ available }: { available: boolean }) {
+export default function DesktopTitleBar({ available, onSearch }: { available: boolean; onSearch: () => void }) {
   const desktop = isTauri();
   const connection = useRelayConnection();
   const { timeZone } = useDisplayPreferences();
@@ -64,6 +65,9 @@ export default function DesktopTitleBar({ available }: { available: boolean }) {
 
   return <>
     <div className="desktop-titlebar" data-testid="desktop-titlebar">
+      {/* 常用操作回到标题带左侧：这一组属于常驻窗口外壳，应用顶栏不再重复承载。
+          连接中与服务失败页没有可用的应用内路由与命令面板，因此不渲染。 */}
+      {available && <WorkbenchActions onSearch={onSearch} />}
       <div className="desktop-titlebar__drag" onMouseDown={onDragMouseDown}>
         {error && <span className="desktop-titlebar__error" role="alert">窗口操作失败</span>}
       </div>

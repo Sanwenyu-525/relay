@@ -80,3 +80,58 @@ export async function mountReact(element: ReactElement) {
 export function dialogText(): string { return Array.from(document.querySelectorAll('[role="dialog"]')).map((dialog) => dialog.textContent ?? "").join("\n"); }
 export function dialogLabels(): string[] { return Array.from(document.querySelectorAll('[role="dialog"]')).map((dialog) => dialog.getAttribute("aria-label") ?? ""); }
 export function pressEscape(): void { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); }
+
+/**
+ * 打开一个工作目录（协作页 §3.3 之后的唯一路径）。
+ *
+ * 目录控件从消息区顶部的折叠块搬进了细条上的「更换目录」对话框，而 AppDialog 走 portal
+ * 挂在 body 上，所以这里用 document 查询，而不是 mountWorkbench 返回的容器。
+ * 选定后对话框会自行关闭（模态框留着会挡住刚更新的细条），因此调用返回时页面已可交互。
+ */
+export async function openWorkingDirectory(root: string): Promise<void> {
+  const trigger = document.querySelector<HTMLElement>('[data-testid="folder-scope-change"]');
+  if (trigger === null) throw new Error('DOM test selector not found: [data-testid="folder-scope-change"]');
+  await act(async () => { trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+  await flush();
+  const input = document.querySelector<HTMLInputElement>('[data-testid="folder-manual-root"]');
+  if (input === null) throw new Error('DOM test selector not found: [data-testid="folder-manual-root"]（更换目录对话框未打开，或本机可用原生目录选择器）');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, root);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const submit = document.querySelector<HTMLElement>('[data-testid="folder-open-manual"]');
+  if (submit === null) throw new Error('DOM test selector not found: [data-testid="folder-open-manual"]');
+  await act(async () => { submit.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+  await flush(80);
+}
+
+/** 目录作用域细条上的当前目录名；未选择目录时返回「未选择目录」。 */
+export function folderStripName(): string {
+  return document.querySelector('[data-testid="folder-scope-options"]')?.textContent?.trim() ?? "";
+}
+
+/**
+ * 点 portal 里的控件。
+ *
+ * AppDialog 用 createPortal 把面板挂到 document.body，mountWorkbench 返回的容器查不到它，
+ * 因此这类点击必须走 document。找不到时如实报错，不静默跳过。
+ */
+export async function clickPortal(testId: string): Promise<void> {
+  const target = document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+  if (target === null) throw new Error(`DOM test selector not found (portal): [data-testid="${testId}"]`);
+  await act(async () => { target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+}
+
+/** 打开「更换目录」框（portal 里的模态框）。 */
+export async function openFolderDialog(): Promise<void> {
+  const trigger = document.querySelector<HTMLElement>('[data-testid="folder-scope-change"]');
+  if (trigger === null) throw new Error('DOM test selector not found: [data-testid="folder-scope-change"]');
+  await act(async () => { trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+  await flush();
+}
+
+/** 细条上的归属文案（「已归入项目：X」/「未归属」）。 */
+export function folderStripAssociation(): string {
+  return document.querySelector('[data-testid="folder-scope-association"]')?.textContent?.trim() ?? "";
+}

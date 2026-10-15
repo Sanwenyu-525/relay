@@ -54,10 +54,11 @@
 .task-skill-facts .task-proposal-actions .form-actions { display: block; }
 .task-skill-facts .task-skill-confirmation .rail-content { margin-top: var(--relay-space-6); }
 .task-skill-facts .task-check-plan { padding: var(--relay-space-6) 0; border: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: 0; background: transparent; }
-@media (max-width: 79.9375rem) {
+@media (width < 80rem) {
   .task-skill-facts .task-skill-confirmation { border-left: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 }
-@media (max-width: 40rem) {
+/* 并入 48rem 折行档，原 40rem：提案定义与嵌入式助手在窄屏降为单列并收紧内距。 */
+@media (width < 48rem) {
   .task-skill-facts .task-proposal-definition > div { grid-template-columns: minmax(0, 1fr); gap: var(--relay-space-2); }
   .task-skill-facts .embedded-assist .assist-proposal,
   .task-skill-facts .task-skill-current-objective { padding: var(--relay-space-4); }

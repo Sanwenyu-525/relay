@@ -41,7 +41,9 @@
 .review-decision { margin-top: var(--relay-space-6); padding-top: var(--relay-space-4); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .review-actions { display: flex; flex-wrap: wrap; gap: var(--relay-space-3); margin-top: var(--relay-space-4); }
 .review-empty { color: var(--relay-color-text-secondary); }
-@media (max-width: 60rem) { .review-columns { grid-template-columns: 1fr; } .review-list { border-right: 0; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); padding-right: 0; padding-bottom: var(--relay-space-4); } }
+/* 并入 48rem 折行档，原 60rem：评审列表与详情窄屏折叠为单列；
+   两列均为 minmax(0,·) 且内容可任意折行，48–60rem 区间保持双列不会溢出。 */
+@media (width < 48rem) { .review-columns { grid-template-columns: 1fr; } .review-list { border-right: 0; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); padding-right: 0; padding-bottom: var(--relay-space-4); } }
 
 /* From src/views/RunView.vue */
 .run-actions { display: flex; flex-wrap: wrap; gap: var(--relay-space-3); margin-top: var(--relay-space-4); }

@@ -8,7 +8,7 @@ export interface RelayAssistSourceRef {
 }
 
 /** 会话身份在建立时冻结；切换模式等于换会话，不在会话中途改写。 */
-export type RelayConversationMode = "AGENT" | "ASSISTANT";
+export type RelayConversationMode = "AGENT" | "ASSISTANT" | "LEARNING";
 
 /**
  * 人设助手配置（ADR-018、命令契约 §10.60）。
@@ -44,6 +44,39 @@ export interface RelayAssistSession {
   readonly personaLabel: string | null;
   /** 「一次性问答」：false 时该轮不作为可续读历史。 */
   readonly remember: boolean;
+  /**
+   * 本会话当前绑定的受管工作目录；未绑定为 null。
+   *
+   * 0087 起这是**服务端事实**，不是组件里那份目录状态：普通 Agent 的读取动作按这一列
+   * 解析目标，刷新或换设备不会丢。它是作用域，不是准入——读到读不到仍由服务端按连接与
+   * 权限判定，界面不得据此显示「已获读取权限」。
+   */
+  readonly workingResourceId: string | null;
+}
+
+/**
+ * 归入项目的回执：只有会话身份、项目归属与确切修订。
+ *
+ * 这里刻意**不含任何执行权字段**：绑定只改 project_id，目录是否就绪、
+ * 文件写入身份与命令执行准入仍由各自的服务端入口判定。
+ * 目录身份是本地事实，与这条服务端事实不是一回事，因此这个类型里没有它的位置。
+ */
+export interface RelayAssistSessionBinding {
+  readonly sessionId: string;
+  readonly projectId: string;
+  readonly revision: DecimalRevision;
+}
+
+/**
+ * 绑定工作目录的回执：只有会话身份、受管资源身份与确切修订。
+ *
+ * 与归属回执同样**不含任何执行权字段**：目录绑定只确定「这次读哪个目录」，
+ * 能不能读、能不能写仍由服务端按连接与权限逐次判定。
+ */
+export interface RelayAssistSessionDirectoryBinding {
+  readonly sessionId: string;
+  readonly workingResourceId: string;
+  readonly revision: DecimalRevision;
 }
 
 /** 文件夹入口的结果：目录是当前工作目录，不是新 Workspace，也不隐含任何权限。 */
@@ -128,6 +161,14 @@ export interface RelayConversationExecution {
    * 不显示就等于让用户在不知情下同意。准入判定在服务端，这里不做本地猜测。
    */
   readonly check?: RelayConversationCheck | null;
+  /**
+   * 服务端已判定这次是明确的只读执行请求（无写意图、候选就绪）。
+   *
+   * 客户端不自己判断「这次是不是只读」：同一判定必须只存在于服务端那条与实际授予工具集
+   * 同源的规则里，两处各写一遍就会各自漂移。缺失（旧投影）按 false 处理——那等于退回
+   * 保留一次确认，是保守方向。
+   */
+  readonly autoStart?: boolean | undefined;
   readonly taskId: string | null;
   readonly runId: string | null;
   readonly revision: DecimalRevision;

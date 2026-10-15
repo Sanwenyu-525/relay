@@ -9,6 +9,10 @@ import { canonicalizeJson, computePayloadHash } from '../receipt/payload-hash.js
 import { toDecimalString } from '../shared/decimal.js';
 import { availableFrozenSkill, FIRST_PARTY_REGISTRY, frozenSkillSnapshot, isCallableSkill,
   normalizeSkillInput } from '../skills/first-party-registry.js';
+import { BUILTIN_METHOD_REGISTRY, currentBuiltinMethod, frozenMethodSnapshot,
+  type FrozenMethod, type MethodActionKind } from '../skills/builtin-methods.js';
+import { resolveChatCommand } from './chat-commands.js';
+import { detectMethodIntent } from './method-intent.js';
 import { checkAssistContent, checkRequiredText, normalizeText } from '../shared/text.js';
 import type { ContextSourceRef } from '../workflow/execution-contract.js';
 import { httpCommandScopeKey } from './actor.js';
@@ -238,6 +242,89 @@ export async function bindAssistSessionProject(
   });
 }
 
+export type BindAssistSessionDirectoryResult = {
+  readonly session_id: string;
+  readonly working_resource_id: string;
+  readonly revision: string;
+};
+
+export interface BindAssistSessionDirectoryInput {
+  readonly workspaceId: string;
+  readonly sessionId: string;
+  readonly commandId: string;
+  readonly resourceId: string;
+}
+
+/**
+ * 绑定本会话的当前工作目录（0087 / 运行架构 §2.7.1）。
+ *
+ * 目录绑定是**作用域**，不是准入：它只让普通会话的读取动作有一个确切目标，
+ * 不授予任何能力；能不能读、能不能写，仍由每次动作经 Gateway 按连接与权限判定。
+ *
+ * 三条不能放宽的边界：
+ *   * 资源必须属于**该会话自己的 Project**。跨项目借用目录等于让一段会话读到别的项目的
+ *     文件，因此这里按会话行上的 project_id 核对，不采信客户端传来的 project_id；
+ *   * 资源必须当前 ACTIVE。停用过的目录不靠重新绑定获得准入，也不换资源 ID 绕过停用；
+ *   * 会话必须 ACTIVE 且没有在途消息。在途消息已经按发送时的作用域开始生成，
+ *     中途换目录会让这一次读取落到与用户所见不同的目录。
+ *
+ * 换绑是允许的：用户换目录就是换作用域，下一轮立即按新目录解析，不保留旧目录的缓存。
+ */
+export async function bindAssistSessionDirectory(
+  db: DbExecutor,
+  input: BindAssistSessionDirectoryInput,
+): Promise<CommandOutcome<BindAssistSessionDirectoryResult>> {
+  if (input.resourceId.trim() === '') {
+    throw validationFailed([{ field: 'resource_id', message: 'must be a uuid' }]);
+  }
+  return runIdempotentCommand<BindAssistSessionDirectoryResult>(db, {
+    scopeKey: httpCommandScopeKey(input.workspaceId),
+    commandId: input.commandId,
+    commandType: 'BindAssistSessionDirectory',
+    target: { session_id: input.sessionId },
+    body: { resource_id: input.resourceId },
+    execute: async (repositories) => {
+      // 行锁先于判定：并发绑定同一会话时，后到者必须读到已改的 working_resource_id。
+      const session = await repositories.assist.readSession(input.sessionId, true);
+      if (session === undefined || session.workspace_id !== input.workspaceId) {
+        throw resourceNotFound('Assist session');
+      }
+      if (session.status !== 'ACTIVE') {
+        throw invalidTransition('会话已归档，不能绑定目录。');
+      }
+      if (session.project_id === null) {
+        throw invalidTransition('这段讨论还没有归入项目；先选定目录所属项目再绑定。');
+      }
+      const resource = await repositories.gateway.readResource(input.resourceId);
+      if (resource === undefined || resource.workspace_id !== input.workspaceId) {
+        throw resourceNotFound('Managed resource');
+      }
+      // 归属核对按会话行上的 project_id，而不是客户端传来的值。
+      if (resource.project_id !== session.project_id) {
+        throw invalidTransition('该受管目录不属于这段会话的项目，不能跨项目借用。');
+      }
+      if (resource.status !== 'ACTIVE') {
+        throw invalidTransition('受管目录已停用，恢复后才能作为这段会话的工作目录。');
+      }
+      const project = await repositories.projects.readProject(session.project_id);
+      if (project === undefined || project.archived_at !== null) {
+        throw invalidTransition('项目已归档，不能作为这段会话的工作目录。');
+      }
+      await lockWritableProjectInWorkspace(repositories, input.workspaceId, session.project_id);
+      if (await repositories.assist.hasInflightMessages(input.sessionId)) {
+        throw invalidTransition('这段讨论还有消息在途，等它结束再换目录。');
+      }
+      await repositories.assist.bindSessionDirectory(input.sessionId, resource.id);
+      const updated = await repositories.assist.readSession(input.sessionId);
+      if (updated === undefined || updated.working_resource_id === null) {
+        throw new Error('assist session row vanished within its directory binding transaction');
+      }
+      return { session_id: updated.id, working_resource_id: updated.working_resource_id,
+        revision: toDecimalString(updated.revision) };
+    },
+  });
+}
+
 export interface RequestAssistMessageInput {
   readonly workspaceId: string;
   readonly sessionId: string;
@@ -247,6 +334,14 @@ export interface RequestAssistMessageInput {
   readonly sourceRefs?: readonly AssistSourceRefInput[] | undefined;
   readonly skillRef?: { readonly id: string; readonly version: string } | undefined;
   readonly skillInput?: JsonObject | undefined;
+  /** 显式选择内置工作方法；不传时由 `/命令` 或自然语言识别决定。 */
+  readonly methodRef?: { readonly id: string; readonly version: string;
+    readonly action?: MethodActionKind } | undefined;
+  /**
+   * 0072：本轮是否写入个人学习状态。缺省 true（照常记录）。
+   * 只在学习会话上有意义；关闭时本轮增量一律不写（提示词 §9.4）。
+   */
+  readonly recordLearning?: boolean | undefined;
 }
 
 const ASSIST_INTENTS: readonly string[] = ['DISCUSS', 'PROPOSE_CANDIDATE', 'PROPOSE_TASK'];
@@ -268,6 +363,18 @@ export async function requestAssistMessage(
     throw validationFailed([{ field: 'skill_ref',
       message: 'Skill 调用由 skill_ref 决定意图，不能混用 intent；skill_input 需要 skill_ref' }]);
   }
+  if (input.skillRef !== undefined && input.methodRef !== undefined) {
+    throw validationFailed([{ field: 'method_ref',
+      message: '一条消息只能采用一种身份：Skill 与内置方法不能同时指定' }]);
+  }
+  // 显式 Skill 身份决定这条消息的处理入口：正文是 Skill 输入，不再进入自然语言
+  // 方法识别。否则「skill_ref + 请审查这个项目的当前状态」会在同一条消息上写出
+  // `skill_snapshot` 与 `method_snapshot`，撞上 0071 的互斥约束，整条消息回滚。
+  // `/命令` 解析仍然生效（未知/系统/菜单命令照旧类型化拒绝），正文里的 `/方法`
+  // 命令与 skill_ref 同样按「一条消息一种身份」拒绝，而不是写成双快照。
+  const methodRequest = input.skillRef === undefined
+    ? resolveMethodRequest(content, input.methodRef)
+    : resolveMethodFreeRequest(content);
 
   return runIdempotentCommand<RequestAssistMessageResult>(db, {
     scopeKey: httpCommandScopeKey(input.workspaceId),
@@ -275,8 +382,13 @@ export async function requestAssistMessage(
     commandType: 'RequestAssistMessage',
     target: { session_id: input.sessionId },
     body: { content, intent,
+      ...(input.recordLearning === undefined ? {} : { record_learning: input.recordLearning }),
       ...(input.skillRef === undefined ? {} : {
         skill_ref: input.skillRef, skill_input: input.skillInput ?? {},
+      }),
+      ...(methodRequest.kind !== 'BOUND' ? {} : {
+        method_ref: { id: methodRequest.method.id, version: methodRequest.method.version },
+        method_action: methodRequest.action,
       }),
       sources: input.sourceRefs === undefined ? null :
         input.sourceRefs.map((source): JsonObject => ({
@@ -302,6 +414,11 @@ export async function requestAssistMessage(
           throw invalidTransition('助手会话不调用 Skill；请在普通会话里发起。',
             { sessionId: session.id });
         }
+        // 只读助手不因方法、命令或定制获得写能力：只读方法可以运行，要求修改的一律拒绝。
+        if (methodRequest.kind === 'BOUND' && methodRequest.action === 'MODIFY') {
+          throw invalidTransition('只读助手会话不因内置方法获得修改能力；请在普通会话里发起。',
+            { sessionId: session.id });
+        }
         if (intent !== 'DISCUSS') {
           throw invalidTransition('助手会话只做只读回答，不生成提案。',
             { sessionId: session.id });
@@ -311,6 +428,22 @@ export async function requestAssistMessage(
         await requireLiveAssistantProfile(repositories, session);
         if (await repositories.assist.hasInflightMessages(session.id)) {
           throw invalidTransition('这段对话正在回答上一条，请等它结束再发。',
+            { sessionId: session.id });
+        }
+      }
+      // 0072：学习会话与助手档同样是受限身份——它不调 Skill、不提提案、不因内置方法获得修改能力。
+      // 学习身份**只**多一项能力：经专门入口写个人学习记录；对项目仍然只读。
+      if (session.conversation_mode === 'LEARNING') {
+        if (input.skillRef !== undefined) {
+          throw invalidTransition('学习会话不调用 Skill；请在普通会话里发起。',
+            { sessionId: session.id });
+        }
+        if (methodRequest.kind === 'BOUND' && methodRequest.action === 'MODIFY') {
+          throw invalidTransition('学习会话不因内置方法获得修改能力；请在普通会话里发起。',
+            { sessionId: session.id });
+        }
+        if (intent !== 'DISCUSS') {
+          throw invalidTransition('学习会话只做教学回答，不生成提案。',
             { sessionId: session.id });
         }
       }
@@ -340,6 +473,9 @@ export async function requestAssistMessage(
         throw validationFailed([{ field: 'skill_input', message: '输入不符合该 Skill 的固定契约' }]);
       }
       const sources = await resolveAssistSources(repositories, session, input.sourceRefs);
+      // 方法身份同样在发起时冻结：之后定义被替换或禁用都不改变这条消息已采用的版本。
+      const method = methodRequest.kind === 'BOUND' ? methodRequest.method : null;
+      const methodAction = methodRequest.kind === 'BOUND' ? methodRequest.action : null;
 
       const userSeq = await repositories.assist.nextMessageSeq(session.id);
       const userMessageId = randomUUID();
@@ -351,8 +487,14 @@ export async function requestAssistMessage(
       await repositories.assist.insertMessage({
         id: assistantMessageId, sessionId: session.id, seq: userSeq + 1n, role: 'ASSISTANT',
         status: 'PENDING', intent: intent as 'DISCUSS', content: null, sources,
+        ...(session.conversation_mode === 'LEARNING' && input.recordLearning === false
+          ? { learningRecordDisabled: true } : {}),
         ...(skill === null || skill === undefined ? {} : {
           skillSnapshot: frozenSkillSnapshot(skill), skillInput: skillInput!,
+        }),
+        ...(method === null ? {} : {
+          methodSnapshot: frozenMethodSnapshot(method), methodAction: methodAction!,
+          methodArgument: methodRequest.kind === 'BOUND' ? methodRequest.argument : null,
         }),
       });
       return { session_id: session.id, user_message_id: userMessageId,
@@ -404,6 +546,85 @@ async function resolveAssistSources(repositories: Repositories, session: AssistS
 
 function isContextSourceKind(kind: string): kind is ContextSourceRef['kind'] {
   return kind === 'KNOWLEDGE' || kind === 'MEMORY' || kind === 'DECISION';
+}
+
+type MethodRequest =
+  | { readonly kind: 'NONE' }
+  | { readonly kind: 'BOUND'; readonly method: FrozenMethod;
+      readonly action: MethodActionKind; readonly argument: string | null };
+
+/**
+ * 本次消息采用的内置工作方法（Skill 专题 §9.2）。
+ *
+ * 显式 `/命令` 优先；否则由自然语言识别决定，且**讨论不执行**（"讨论诊断方法"不会采用）。
+ * 未知命令与非法参数在这里类型化拒绝，保留用户可修改的输入；系统命令不由消息入口执行。
+ */
+function resolveMethodRequest(content: string,
+  explicit: { readonly id: string; readonly version: string;
+    readonly action?: MethodActionKind } | undefined): MethodRequest {
+  const command = resolveChatCommand(content);
+  if (command.kind === 'UNKNOWN_COMMAND' || command.kind === 'INVALID_ARGUMENT') {
+    throw validationFailed([{ field: 'content', message: command.detail }]);
+  }
+  if (command.kind === 'MENU') {
+    throw validationFailed([{ field: 'content',
+      message: '“/”是命令菜单前缀；请选择或补全命令后再发送。' }]);
+  }
+  if (command.kind === 'SYSTEM') {
+    throw validationFailed([{ field: 'content',
+      message: `/${command.system} 是系统命令，由会话控制入口执行，不作为普通消息发送。` }]);
+  }
+  let ref = explicit;
+  let action: MethodActionKind | null = explicit?.action ?? null;
+  let argument: string | null = null;
+  if (command.kind === 'METHOD') {
+    ref = { id: command.method.id, version: command.method.version };
+    action = command.action;
+    argument = command.argument === '' ? null : command.argument;
+  } else if (explicit === undefined) {
+    const detected = detectMethodIntent(content);
+    if (detected !== null && !detected.discussion) {
+      const current = currentBuiltinMethod(detected.method_id);
+      if (current === undefined) {
+        throw validationFailed([{ field: 'content', message: '内置方法当前不可用。' }]);
+      }
+      ref = { id: current.id, version: current.version };
+      action = detected.action;
+    }
+  }
+  if (ref === undefined) return { kind: 'NONE' };
+  const method = BUILTIN_METHOD_REGISTRY.method(ref.id, ref.version);
+  if (method === undefined) {
+    throw validationFailed([{ field: 'method_ref', message: '未知或不可用的内置方法版本' }]);
+  }
+  return { kind: 'BOUND', method, action: action ?? method.definition.default_action, argument };
+}
+
+/**
+ * 显式 Skill 消息的方法解析：只保留 `/命令` 的输入校验，不绑定任何方法身份。
+ *
+ * 显式 skill_ref 已经决定处理入口，正文整体是 Skill 输入——自然语言识别与 `/方法`
+ * 命令都不再产生第二身份。命令解析的拒绝（未知命令、非法参数、菜单前缀、系统命令）
+ * 仍然前置：那是输入校验，与身份绑定无关。
+ */
+function resolveMethodFreeRequest(content: string): MethodRequest {
+  const command = resolveChatCommand(content);
+  if (command.kind === 'UNKNOWN_COMMAND' || command.kind === 'INVALID_ARGUMENT') {
+    throw validationFailed([{ field: 'content', message: command.detail }]);
+  }
+  if (command.kind === 'MENU') {
+    throw validationFailed([{ field: 'content',
+      message: '“/”是命令菜单前缀；请选择或补全命令后再发送。' }]);
+  }
+  if (command.kind === 'SYSTEM') {
+    throw validationFailed([{ field: 'content',
+      message: `/${command.system} 是系统命令，由会话控制入口执行，不作为普通消息发送。` }]);
+  }
+  if (command.kind === 'METHOD') {
+    throw validationFailed([{ field: 'method_ref',
+      message: '一条消息只能采用一种身份：Skill 与内置方法不能同时指定' }]);
+  }
+  return { kind: 'NONE' };
 }
 
 export type CancelAssistMessageResult = {

@@ -68,6 +68,35 @@ export class ConversationExecutionRepository {
       order by created_at desc, id desc limit ${limit}`.execute(this.db)).rows;
   }
 
+  /**
+   * 同一会话上**仍在推进**的 Run，用来判断「当前推进责任在谁手里」（§12.6 幂等与接续）。
+   *
+   * 活动状态集与 `findLiveRunForTask()` 逐字一致：同一个「活动」定义不能在两处各写一份，
+   * 否则 Run 收口语义会悄悄漂移。请求自己排除在外——本请求接续自己的 Run 不是并行推进。
+   */
+  async findLiveRunForSession(workspaceId: string, sessionId: string,
+    excludeRequestId: string): Promise<{ readonly requestId: string;
+      readonly runId: string } | undefined> {
+    const rows = await sql<{ request_id: string; run_id: string }>`
+      select request.id as request_id, request.run_id
+      from conversation_execution_requests request
+      join runs on runs.id = request.run_id
+      where request.workspace_id = ${workspaceId}
+        and request.session_id = ${sessionId}
+        and request.id <> ${excludeRequestId}
+        and request.status = 'DELEGATED'
+        and request.run_id is not null
+        and runs.status in (
+          'CREATED', 'CONTEXT_BUILDING', 'PLANNING', 'RUNNING', 'WAITING_APPROVAL',
+          'VERIFYING', 'RETRYING', 'PAUSED'
+        )
+      order by request.created_at desc, request.id desc
+      limit 1`.execute(this.db);
+    const found = rows.rows[0];
+    return found === undefined ? undefined :
+      { requestId: found.request_id, runId: found.run_id };
+  }
+
   /** 候选先落库：只有 PENDING 能写入，重复结算不会覆盖已保存的整理结果。 */
   async saveInterpretation(id: string, input: {
     readonly decision: ConversationDecision;

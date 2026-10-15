@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type { DbExecutor } from '../infrastructure/database.js';
-import type { ProjectType } from '../infrastructure/database-schema.js';
+import type { ProjectBlockerTargetKind, ProjectType } from '../infrastructure/database-schema.js';
 import { isPhaseOfProjectType, PHASES_BY_PROJECT_TYPE } from '../project/project-phase.js';
 import { toDecimalString } from '../shared/decimal.js';
 import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
@@ -206,6 +206,20 @@ export async function applyAction(
 
       return bumpOnly(repositories, projectId, expectedRevision);
     }
+    case 'ADD_BLOCKER': {
+      // 多态目标没有外键可依赖：登记前按种类核对真实存在，不写悬空 blocker。
+      await requireBlockerTarget(repositories, projectId, action.targetKind, action.targetId);
+      await repositories.projects.insertBlocker({
+        id: randomUUID(),
+        projectId,
+        targetKind: action.targetKind,
+        targetId: action.targetId,
+        reason: action.reason,
+        sourceRef: action.sourceRef,
+      });
+
+      return bumpOnly(repositories, projectId, expectedRevision);
+    }
     case 'RESOLVE_BLOCKER': {
       const blocker = await repositories.projects.readBlocker(action.blockerId);
 
@@ -237,6 +251,50 @@ async function bumpOnly(
   );
 
   return requireBumped(state, expectedRevision);
+}
+
+/**
+ * 多态 blocker 目标没有外键可依赖：登记前按种类核对真实存在，不写悬空 blocker。
+ * PROJECT 指本项目本身；TASK 必须属于本项目；GOAL 必须与项目同属一个 Workspace。
+ * applyAction 不携带 workspaceId，这里按项目行自行推导，不做第二个入参契约。
+ */
+async function requireBlockerTarget(
+  repositories: Repositories,
+  projectId: string,
+  targetKind: ProjectBlockerTargetKind,
+  targetId: string,
+): Promise<void> {
+  if (targetKind === 'PROJECT') {
+    if (targetId !== projectId) {
+      throw validationFailed([
+        { field: 'target_id', message: 'must reference this project' },
+      ]);
+    }
+
+    return;
+  }
+
+  if (targetKind === 'TASK') {
+    const task = await repositories.tasks.readTask(targetId);
+
+    if (task === undefined || task.project_id !== projectId) {
+      throw validationFailed([
+        { field: 'target_id', message: 'must reference a task of this project' },
+      ]);
+    }
+
+    return;
+  }
+
+  const project = await repositories.projects.readProject(projectId);
+  const goal = await repositories.projects.readGoal(targetId);
+
+  if (project === undefined || goal === undefined ||
+      goal.workspace_id !== project.workspace_id) {
+    throw validationFailed([
+      { field: 'target_id', message: 'must reference a goal of this workspace' },
+    ]);
+  }
 }
 
 /** CAS 未命中只可能发生在锁外并发的极端情况：按版本冲突处理，不静默继续。 */

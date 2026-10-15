@@ -1,30 +1,339 @@
+/* 任务详情页（/tasks/:id）：主区为纸面阅读流（标题+内容+分隔线），右栏为紧凑事实列。
+   间距、颜色、圆角只消费 --relay-* token。 */
+
 .task-detail-page--full-width > .page-layout { grid-template-columns: minmax(0, 1fr); }
 .app-main .task-detail-page--artifact { padding: 0; }
 .task-detail-page--artifact > .page-layout > .page-primary { padding: 0; }
-.task-detail-page--artifact .page-primary > .skill-tabs { margin: 0; padding: var(--relay-space-3) var(--relay-layout-main-padding) 0; }
 .task-detail-page [role="tabpanel"] { min-width: 0; }
 .task-detail-page [role="tabpanel"] > [hidden] { display: none; }
+
+/* 页签行：左侧页签，右侧辅助文字入口；分隔线由行承载，窄窗自动换行。 */
+.task-detail-page .task-detail-tabrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--relay-space-2) var(--relay-space-8);
+  margin-top: var(--relay-space-2);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.task-detail-page .task-detail-tabrow .skill-tabs {
+  padding: 0;
+  margin-top: 0;
+  border-bottom: 0;
+}
+
+.task-detail-page .task-detail-quick-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-1) var(--relay-space-4);
+  padding-bottom: var(--relay-space-2);
+}
+
+.task-detail-quick-link {
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.task-detail-quick-link:hover { color: var(--relay-color-action-text); }
+
+.task-detail-page--artifact .task-detail-tabrow {
+  margin-top: 0;
+  padding: var(--relay-space-3) var(--relay-layout-main-padding) 0;
+}
+
+/* 主区区块：标题+内容+分隔线的纸面流，不逐块套卡片。 */
+.task-detail-section {
+  padding: var(--relay-space-6) 0;
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.task-detail-section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--relay-space-1) var(--relay-space-4);
+  margin-bottom: var(--relay-space-3);
+}
+
+.task-detail-section h2,
+.task-detail-section-heading h2 {
+  margin: 0;
+  font-family: var(--relay-font-family-ui);
+  font-size: var(--relay-font-size-rowTitle);
+  font-weight: var(--relay-font-weight-semibold);
+  line-height: var(--relay-font-lineHeight-heading);
+}
+
+.task-detail-section-meta {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+}
+
+.task-detail-objective {
+  margin: 0;
+  font-size: var(--relay-font-size-reading);
+  line-height: var(--relay-font-lineHeight-reading);
+  overflow-wrap: anywhere;
+}
+
+/* 验收条件：编号列固定宽、正文 minmax(0,1fr)，长条件换行后对齐稳定。 */
+.task-detail-criteria-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-detail-criterion {
+  display: grid;
+  grid-template-columns: var(--relay-space-8) minmax(0, 1fr);
+  gap: var(--relay-space-1) var(--relay-space-3);
+  padding: var(--relay-space-4) 0;
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+/* 验收依据的条件列表与上面同名行类，但结构不同：它是 <ul>，没有编号元素，
+   行内只有正文一个子节点。编号列在这里没有承载物，复用两列网格会让正文自动
+   落进编号列（32px），中文被挤成每行约两字的竖条。因此这一份列表用专属修饰类
+   显式声明单列，差异由结构表达而不是靠子节点数量隐式推断；
+   有编号的原验收条件列表继续走上面的两列网格，编号与正文对齐不变。 */
+.task-detail-criteria-list--evidence > .task-detail-criterion {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.task-detail-criterion:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.task-detail-criterion-index {
+  font-family: var(--relay-font-family-ui);
+  font-size: var(--relay-font-size-rowTitle);
+  color: var(--relay-color-text-secondary);
+}
+
+.task-detail-criterion-body {
+  display: grid;
+  gap: var(--relay-space-2);
+  min-width: 0;
+}
+
+.task-detail-criterion-statement {
+  margin: 0;
+  font-size: var(--relay-font-size-body);
+  line-height: var(--relay-font-lineHeight-reading);
+  overflow-wrap: anywhere;
+}
+
+.task-detail-criterion-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-1) var(--relay-space-3);
+  margin: 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+}
+
+.task-detail-criterion-meta small {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  overflow-wrap: anywhere;
+}
+
+/* 结论句与下一步可能带长路径、哈希或服务端末语，允许在任意位置断行，
+   不允许出现横向撑破或被裁切。 */
+.task-detail-criterion-result {
+  margin: 0;
+  font-size: var(--relay-font-size-body);
+  overflow-wrap: anywhere;
+}
+
+.task-detail-criterion-next {
+  margin: 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  overflow-wrap: anywhere;
+}
+
+/* 前置依赖：空态一行紧凑文字，非空为紧凑行列表。 */
+.task-detail-dependency-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-detail-dependency-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--relay-space-1) var(--relay-space-3);
+  padding: var(--relay-space-3) 0;
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.task-detail-dependency-list > li:last-child { border-bottom: 0; }
+.task-detail-dependency-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+.task-detail-dependency-status {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+}
+
+/* 基本信息：两列 dl，事实入口链接保留在区块尾部。 */
+.task-detail-basic-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--relay-space-8);
+}
+
+.task-detail-basic-list > div {
+  border-bottom: 0;
+  padding: var(--relay-space-2) 0;
+}
+
+.task-detail-basic-list dd { overflow-wrap: anywhere; }
+
+.task-detail-basic-links {
+  margin: var(--relay-space-3) 0 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+}
+
+/* 右栏：紧凑事实列（meta 字号），不为填满高度堆卡片。 */
+.task-detail-rail .task-detail-status {
+  padding-bottom: var(--relay-space-4);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.task-detail-rail .task-detail-facts { margin-top: 0; }
+.task-detail-rail .task-detail-facts dd { font-size: var(--relay-font-size-meta); }
+
+.task-detail-rail-note {
+  margin: var(--relay-space-4) 0 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  overflow-wrap: anywhere;
+}
+
+.task-detail-page .task-detail-status > .inline-link {
+  display: inline-block;
+  margin-top: var(--relay-space-2);
+}
+
+/* 产物页签的按需展开区沿用原有收纳结构。 */
 .task-detail-page--artifact .artifact-task-context { margin: var(--relay-space-4) 0; }
 .task-detail-page--artifact .artifact-task-context > summary { cursor: pointer; color: var(--relay-color-text-secondary); }
 .task-detail-page--artifact .artifact-task-context > h2 { font-size: var(--relay-font-size-rowTitle); margin-top: var(--relay-space-4); }
 .task-detail-page--artifact .artifact-task-context > .page-lede { font-size: var(--relay-font-size-body); margin: 0 0 var(--relay-space-4); }
-.task-detail-page--artifact .task-detail-status { margin: var(--relay-space-4) 0; }
 .task-detail-page--artifact .artifact-task-context > .form-actions { margin: var(--relay-space-3) 0; }
-.task-detail-page .task-detail-status { margin: var(--relay-space-6) 0; }
-.task-detail-page .task-detail-facts { display: flex; flex-wrap: wrap; gap: var(--relay-space-3) var(--relay-space-4); margin: 0; }
-.task-detail-page .task-detail-facts > div { display: flex; align-items: center; gap: var(--relay-space-2); min-width: 0; padding: 0; border: 0; }
-.task-detail-page .task-detail-facts > div + div { padding-left: var(--relay-space-4); border-left: var(--relay-border-width) solid var(--relay-color-border-separator); }
-.task-detail-page .task-detail-facts dd { overflow-wrap: anywhere; }
-.task-detail-page .task-detail-status > .inline-link { display: inline-block; margin-top: var(--relay-space-2); }
-.task-detail-rail > .surface-panel { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
-.task-detail-rail > .surface-panel + .surface-panel { margin-top: var(--relay-space-6); padding-top: var(--relay-space-6); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
-.task-detail-rail .form-actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--relay-space-3); margin-top: var(--relay-space-4); }
+.task-detail-page--artifact .task-detail-status { margin: var(--relay-space-4) 0; }
+
+/* 补充完成条件：验收条件区块内的紧凑子区，触发为就地文字按钮。 */
+.task-detail-supplement {
+  margin-top: var(--relay-space-4);
+  padding-top: var(--relay-space-4);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.task-detail-supplement-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--relay-space-1) var(--relay-space-3);
+}
+
+.task-detail-supplement-title {
+  margin: 0;
+  font-family: var(--relay-font-family-ui);
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
+.task-detail-text-button {
+  padding: var(--relay-space-1) var(--relay-space-2);
+  background: none;
+  border: 0;
+  color: var(--relay-color-action-text);
+  font-size: var(--relay-font-size-meta);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+.task-detail-text-button:disabled {
+  color: var(--relay-color-disabled-text);
+  text-decoration: none;
+  cursor: default;
+}
+
+/* 任务页头元信息：分组换行而不是一整句「·」串。
+   项目名、任务编号、修订各成一组，换行只发生在组之间；长项目名整组折行，
+   不会把后面的「修订 v4」顶到单独一行、更不会在「修订」与「v4」之间断开。 */
+.task-detail-head-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--relay-space-1) var(--relay-space-3);
+}
+
+.task-detail-head-meta-item {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 「修订 vN」这类标签+数字是同一个事实，组内不允许断行。 */
+.task-detail-head-meta-fact { white-space: nowrap; }
+
+/* 完整任务 ID 的核对入口：默认收起；展开后是可选中复制的完整 code 文本，信息不隐藏。 */
+.task-detail-head-identity > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+}
+
+/* 验收依据：四事实结论为主阅读位，技术内容降级进 details。 */
+.task-detail-evidence-line {
+  margin: var(--relay-space-2) 0 0;
+  font-size: var(--relay-font-size-body);
+  overflow-wrap: anywhere;
+}
+
+.task-detail-evidence-line small {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+}
+
+.task-detail-tech { margin: var(--relay-space-2) 0 0; }
+
+.task-detail-tech > summary {
+  cursor: pointer;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+}
+
+.task-detail-tech p {
+  margin: var(--relay-space-2) 0 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  overflow-wrap: anywhere;
+}
+
+.task-detail-tech code { overflow-wrap: anywhere; }
 
 @media (width < 80rem) {
   .task-detail-page .task-detail-rail { border-left: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 }
 
-@media (max-width: 40rem) {
-  .task-detail-page .task-detail-facts { flex-direction: column; align-items: flex-start; }
-  .task-detail-page .task-detail-facts > div + div { padding-left: 0; border-left: 0; }
+/* 并入 48rem 折行档，原 40rem：基础信息列表在窄屏降为单列。 */
+@media (width < 48rem) {
+  .task-detail-basic-list { grid-template-columns: minmax(0, 1fr); }
 }

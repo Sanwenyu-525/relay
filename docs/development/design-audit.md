@@ -320,3 +320,13 @@ Documentation Impact Check：更新产品总纲、V1 范围、交互、设计系
 独立复核进一步发现恢复捷径把已 SETTLED 的超时/拒绝一律视为成功，以及 UNKNOWN 在判断前先被 SETTLED。已改按权威 Operation、原 Invocation 和 claim 重建结果；UNKNOWN 保持未决，旧错误 SETTLED 行在领取步骤前被权威未决动作挡住。防回归由真实子进程的失权与超时结算反例、生产图检查点与重放计数承担。
 
 受影响文件为 `application/tool-loop.ts`、`gateway-actions.ts`、`run-steps.ts`、`run/run-tool-call-repository.ts`、`cli-worker/cli-adapter.ts`、`worker/tool-loop-action.ts`、`run-graph.ts` 与测试透传入口 `run-command.ts`；未新增依赖、数据库列或 migration。HTTP 形状及既有动作状态不变，Breaking Change: No。当前明确保留的风险：参数指向的脚本正文尚无独立信任摘要、Windows Job/脱离子进程树未闭合、通用产物版本与检查证据绑定未实现。实际成绩及证据性质只维护在[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)，规格归[测试计划 §20.9](../testing/verification-plan.md#209-传统-agent-检查失败后的自主修正2026-10-05)。
+
+## 27. 验收证据与投入判断的产品确认（2026-10-11）
+
+用户提出增加有价值的功能，经逐项讨论后确认写成文档。核心痛点为已知验收要求但证据分散，因此优先增强单个 Task 的证据核对；用户选择主动收录外部文本材料、找证据计时及暂停，并以相对降幅作为未来试验目标。假设结论由用户确认；已登记决定依据变化产生复审候选；工作段预期与实际产出用于主动复盘；计划首版比较固定时间下的范围取舍。
+
+取舍是先验证查找收益并公开准备成本和误判，再决定下一阶段投入；不先扩建解析格式、自动监控、完整补验执行闭环或资源扩充推演。正式假设管理不阻塞首片试用，保存预期基线不启动执行，现有 N01 → N02 → N03 优先级保留。详细产品规则、分期、交互和未运行场景分别归[总纲 §0.14](../../Personal_Workflow_OS_Master_Spec.md#014-验收证据与投入判断)、[路线 §10](../requirements/post-v1-roadmap.md#10-验收证据与投入判断的范围和分期)、[工作台 §29](../frontend/workbench-design.md#29-验收证据与投入判断)与[测试计划 §27](../testing/verification-plan.md#27-验收证据与投入判断验收规格)。
+
+文档影响检查：同步上述主文档、V1 范围补充、文档地图和执行映射；保留既有并行改动。不改变产品代码、依赖、业务状态、当前进度或验收成绩，无运行 API/数据库变更，Breaking Change: No；具体工程协议尚待核定，不新增架构 ADR、端点、表或 migration。运行、安装、真实 Provider 和实际省时均未在本轮验证，文档检查不能替代这些证据。
+
+文档验证：node scripts/check-docs.mjs 与受影响文档的 git diff --check 均通过；人工核对产品选择、实施前置、唯一事实源及当前/历史边界，未运行功能或收益试验。

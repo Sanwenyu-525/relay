@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { requireTaskChainAdmission, type TaskChainBinding } from './task-chain-admission.js';
+import type { RunMethodBinding } from '../skills/builtin-methods.js';
 
 import type { DbExecutor } from '../infrastructure/database.js';
 import { isPostgresError, POSTGRES_ERROR_CODES } from '../infrastructure/postgres-error.js';
@@ -24,7 +26,7 @@ import {
   WORKFLOW_VERSION,
   WORKFLOW_STEPS,
 } from '../workflow/markdown-deliverable.js';
-import { freezeExecutionContract, readContextSources, TOOL_LOOP_MAX_ROUNDS,
+import { freezeExecutionContract, readContextSources, TOOL_LOOP_MAX_ROUNDS, MAX_EXPLICIT_CONTEXT_SOURCES,
   TOOL_LOOP_MAX_TOOL_CALLS } from '../workflow/execution-contract.js';
 import { readInternalTool } from '../workflow/tool-catalog.js';
 
@@ -38,7 +40,7 @@ import { loadRulePlanBasis } from './rule-plan-basis.js';
 import { canonicalRelativePath, requireFrozenBaseline,
   requireMatchingTarget } from '../files/file-changeset.js';
 import type { FileWriteChangeIntent } from '../workflow/execution-contract.js';
-import { SCOPE_GRANT_ACTIONS, SCOPE_GRANT_ACTION_CAPABILITIES,
+import { SCOPE_GRANT_ACTIONS, SCOPE_GRANT_ACTION_CAPABILITIES, freezeScopeChecks,
   type FrozenCheck } from './run-scope-grant.js';
 
 /**
@@ -63,6 +65,7 @@ export type DelegateTaskResult = {
 };
 
 export interface DelegateTaskInput {
+  readonly taskChainBinding?: TaskChainBinding;
   readonly workspaceId: string;
   readonly taskId: string;
   readonly commandId: string;
@@ -76,6 +79,8 @@ export interface DelegateTaskInput {
   } | undefined;
   /** 用户显式选中的长期信息来源；随 Run 冻结，版本不可变。 */
   readonly contextSources?: readonly ContextSourceRef[] | undefined;
+  /** 由会话应用入口取得的已冻结方法；不构成额外执行权限。 */
+  readonly executionMethod?: RunMethodBinding | undefined;
   /** 可选固定 Mock 文件读意图；与 mockGatewayAction、webFetchAction 互斥。 */
   readonly fileReadAction?: {
     readonly connection_id: string; readonly resource_id: string; readonly relative_target: string;
@@ -149,10 +154,12 @@ export async function delegateTask(
     target: { task_id: input.taskId },
     body: {
       expected_task_revision: toDecimalString(expectedTaskRevision),
+      ...(input.taskChainBinding === undefined ? {} : { task_chain: { chain_id: input.taskChainBinding.chainId, item_id: input.taskChainBinding.itemId,...(input.taskChainBinding.executionSignature===undefined?{}:{execution_signature:input.taskChainBinding.executionSignature}) } }),
       retry_of_run_id: retryOfRunId,
       workflow_version_id: workflowVersionId,
       execution_config_version_id: executionConfigVersionId,
       mock_gateway_action: input.mockGatewayAction ?? null,
+      ...(input.executionMethod === undefined ? {} : { execution_method: input.executionMethod }),
       context_sources: input.contextSources === undefined ? null :
         input.contextSources.map((source) => ({ kind: source.kind,
           root_id: source.root_id, version: source.version })),
@@ -173,6 +180,7 @@ export async function delegateTask(
       const authority = await repositories.workspaces.lockAuthority(input.workspaceId, 'share');
       if (authority === undefined) throw resourceNotFound('Workspace authority');
       await input.hooks?.afterAuthorityLock?.();
+      if (input.taskChainBinding !== undefined) await requireTaskChainAdmission(repositories,input.taskChainBinding,input.workspaceId,input.taskId);
       const task = await lockTaskInWorkspace(repositories, input.workspaceId, input.taskId);
 
       requireRevisionMatch(task, expectedTaskRevision);
@@ -266,6 +274,8 @@ export async function delegateTask(
         throw invalidTransition('Gateway action 只能冻结「一个读取动作」，或「标记 / 文件变更 / 检查命令」其一，或「文件变更 + 检查命令」。',
           { taskId: task.id });
       }
+      // 冻结期算出的信任依据，随授权一起落库（Run 与授权同批提交）。
+      let frozenScopeChecks: readonly FrozenCheck[] = [];
       if (input.toolLoopAction !== undefined) {
         // 信封是模型自主调用的上界，不是授权：工具名、连接与受管资源都在冻结期核对。
         if (readIntents.length > 0) {
@@ -323,21 +333,11 @@ export async function delegateTask(
                 { taskId: task.id });
             }
           }
-          const ids = new Set<string>();
-          for (const check of input.scopeGrant.checks) {
-            if (check.id === '' || ids.has(check.id) || check.executable === '' ||
-                !/^[0-9a-f]{64}$/.test(check.executable_sha256) ||
-                check.max_output_bytes !== undefined &&
-                  (check.max_output_bytes < 1 || check.max_output_bytes > 1048576)) {
-              throw invalidTransition(`scope_grant 的已配置检查 ${check.id || '(空)'} 不合法。`,
-                { taskId: task.id });
-            }
-            ids.add(check.id);
-          }
+          frozenScopeChecks = await freezeScopeChecks(resource.canonical_root, input.scopeGrant.checks, task.id);
           if (requested.has('CLI_RUN')) {
             if (!capabilities.has('CLI_RUN')) throw invalidTransition(
               'scope_grant 放行检查命令需要信封里同时冻结 CLI_RUN 连接。', { taskId: task.id });
-            if (ids.size === 0) {
+            if (frozenScopeChecks.length === 0) {
               throw invalidTransition('scope_grant 放行检查命令时必须至少配置一个检查。', { taskId: task.id });
             }
           }
@@ -417,6 +417,7 @@ export async function delegateTask(
         task, input.contextSources);
       const frozen = freezeExecutionContract({
         taskId: task.id,
+        ...(input.executionMethod === undefined ? {} : { executionMethod: input.executionMethod }),
         acceptanceRevision: task.acceptance_revision,
         objective: acceptance.objective,
         expectedOutputs: acceptance.required_output_spec,
@@ -477,9 +478,10 @@ export async function delegateTask(
           intent_key: 'scope-grant-v1' as const,
           resource_id: input.scopeGrant.resource_id,
           allowed_actions: [...input.scopeGrant.allowed_actions],
-          checks: input.scopeGrant.checks.map((check) => ({
+          checks: frozenScopeChecks.map((check) => ({
             id: check.id, executable: check.executable, args: [...check.args],
             executable_sha256: check.executable_sha256,
+            ...(check.trust_basis === undefined ? {} : { trust_basis: check.trust_basis }),
             ...(check.max_output_bytes === undefined ? {} :
               { max_output_bytes: check.max_output_bytes }) })),
           expires_at: input.scopeGrant.expires_at ?? null,
@@ -532,7 +534,7 @@ export async function delegateTask(
             resourceId: input.scopeGrant.resource_id,
             canonicalRoot: granted?.canonical_root ?? '',
             allowedActions: input.scopeGrant.allowed_actions,
-            checks: input.scopeGrant.checks,
+            checks: frozenScopeChecks,
             ...(input.scopeGrant.expires_at === undefined ? {} :
               { expiresAt: new Date(input.scopeGrant.expires_at) }),
             ...(input.scopeGrant.survives_run_terminal === undefined ? {} :
@@ -570,6 +572,7 @@ export async function delegateTask(
         sourceCommandId: input.commandId, kind: 'START',
       });
       await input.hooks?.afterDispatchInsert?.();
+      if (input.taskChainBinding !== undefined) await repositories.taskChains.bind(input.taskChainBinding.chainId,input.taskChainBinding.itemId,runId);
 
       await repositories.activities.insertActivityRecord({
         id: randomUUID(),
@@ -616,7 +619,6 @@ function requireRevisionMatch(task: { readonly revision: bigint; readonly id: st
   }
 }
 
-const MAX_EXPLICIT_CONTEXT_SOURCES = 10;
 
 /**
  * Delegate 时校验显式选中的长期信息来源：根必须在同一 Workspace、处于 ACTIVE、

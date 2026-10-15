@@ -129,7 +129,7 @@ function row(overrides: Partial<RunToolCallRow> & Pick<RunToolCallRow, 'round' |
     workspace_id: 'w', project_id: 'p', run_id: 'r', step_id: 's', step_attempt_id: 'a',
     model_call_id: 'm', provider_tool_call_id: `provider-${overrides.round}-${overrides.ordinal}`,
     tool_name: 'search_text', arguments: { query: 'Relay' },
-    arguments_sha256: '0'.repeat(64), operation_id: null, result_ref: null,
+    arguments_sha256: '0'.repeat(64), assistant_message: null, operation_id: null, result_ref: null,
     adaptation_of: null, adapted_path: null, revision: 1n,
     created_at: new Date(0), updated_at: new Date(0), ...overrides };
 }
@@ -148,6 +148,21 @@ test('only fully settled rounds are replayed to the model', () => {
   assert.equal(turns[0]!.results[1]!.isError, true);
   // Provider 的 tool_call_id 只是轮内配对标签，原样回传即可。
   assert.equal(turns[0]!.calls[0]!.providerToolCallId, 'provider-0-0');
+});
+
+test('settled tool rounds restore their saved assistant fields and keep old rows unknown', () => {
+  const first = row({ round: 0, ordinal: 0, status: 'SETTLED', operation_id: 'op-0',
+    assistant_message: { content: '我先读取文件。', reasoning_content: '按实际文件继续。' } });
+  const second = row({ round: 0, ordinal: 1, status: 'SETTLED', operation_id: 'op-1' });
+  const legacy = row({ round: 1, ordinal: 0, status: 'SETTLED', operation_id: 'op-2' });
+  const turns = buildToolTurns([first, second, legacy], new Map([
+    ['op-0', { count: 1 }], ['op-1', { count: 2 }], ['op-2', { count: 3 }],
+  ]));
+  assert.equal(turns[0]!.preamble, first.assistant_message?.content);
+  assert.equal(turns[0]!.reasoningContent, first.assistant_message?.reasoning_content);
+  assert.equal(turns[0]!.calls.length, 2);
+  assert.equal(turns[1]!.preamble, '');
+  assert.equal(turns[1]!.reasoningContent, undefined);
 });
 
 test('a settled operation whose result is gone is reported as an error to the model', () => {

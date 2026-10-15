@@ -104,7 +104,7 @@ export default function AttentionQueue({ client }: { readonly client: RelayApiCl
       <Link className="subnav-item" to="/tasks?tab=inbox">未归属任务收件箱</Link>
       <Link className="subnav-item subnav-item--active" to="/tasks?tab=attention" aria-current="page">人工待处理</Link></nav>
     <p className="helper-text">只汇总已读取的开放 Review、工作空间任务及其当前 Run。历史上已脱离 Task 指针的 Run 不在本次范围内；处理决定请进入原入口核对版本。</p>
-    {loading && <p role="status">正在读取 Review、全部任务页及当前 Run，完成前不显示空队列结论…</p>}
+    {loading && <p className="loading-text" role="status">正在读取 Review、全部任务页及当前 Run，完成前不显示空队列结论…</p>}
     {snapshot && <>
       <p className="helper-text">本次读取完成于 <time dateTime={snapshot.queriedAt}>{new Date(snapshot.queriedAt).toLocaleString("zh-CN")}</time>；各项可能在读取后继续变化，处理前请到原入口核对。</p>
       {!complete && <div className="warning-callout" role="alert" data-testid="attention-incomplete"><strong>待处理范围未核对完整</strong>

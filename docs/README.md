@@ -1,5 +1,27 @@
 # 文档入口与维护规范
 
+2026-10-15 普通 Agent 主流程设计已确认、待重构：[总纲 §0.5.1](../Personal_Workflow_OS_Master_Spec.md#051-普通-agent-的连续工具主流程2026-10-15已确认待重构)拥有产品规则，[工作台 §18.10](frontend/workbench-design.md#1810-普通-agent-的连续工具主流程)拥有交互，[领域模型 §12.6](architecture/domain-model.md#126-普通-agent-主流程的应用边界)与[ADR-022](decisions/ADR-022-agent-conversation-main-loop.md)拥有责任/取舍，[提示词设计 §2.4](architecture/agent-prompt-design.md#24-普通-agent-主流程与模板选择的区别)区分模板选择和模型分类，[测试计划 §17.2](testing/verification-plan.md#172-普通-agent-连续工具主流程)定义未运行出口。本轮仅文档与任务书，不改已有路由源码或功能成绩；现有模板集中入口不是必须保留三路模型解释的理由。
+
+2026-10-14 任务链执行规格导航：[HTTP §10.78](api/http-command-contract.md#1078-任务链只读执行规格与来源2026-10-14-协议)维护确切资料/原会话只读方法，[§10.79](api/http-command-contract.md#1079-任务链受控修改与检查2026-10-14-协议)维护普通修改/配置检查、范围与原方法行动，[数据库 §86](database/physical-design-postgresql.md#86-0085-任务链执行规格2026-10-14-协议)维护规格与原 Run 授权存储；[领域模型 §21](architecture/domain-model.md#21-基础有限任务链2026-10-14)、[ADR-021](decisions/ADR-021-bounded-task-chain-admission.md)维护 Owner 与资源配置/占有 epoch 区分；[检查范围 §30](testing/verification-plan.md#30-基础有限-markdown-任务链检查范围)限定原权限、实际文件与配置子进程证据，成绩只归统一表。
+
+2026-10-14 基础有限任务链导航：[ADR-021](decisions/ADR-021-bounded-task-chain-admission.md)、[领域模型 §21](architecture/domain-model.md#21-基础有限任务链2026-10-14)维护授权与原 Owner 责任；[HTTP §10.77](api/http-command-contract.md#1077-基础有限-markdown-任务链2026-10-14-协议)、[数据库 §85](database/physical-design-postgresql.md#85-0084-基础有限任务链2026-10-14-协议)维护队列/累计预算/重开协议，[检查范围 §30](testing/verification-plan.md#30-基础有限-markdown-任务链检查范围)限定生产模块与受控模型证据，完整 N06 和 UI 继续后置。
+
+2026-10-14 基础一次性项目提醒导航：[后续路线 N05](requirements/post-v1-roadmap.md#n05-有限触发与提醒控制)、[领域模型 §20](architecture/domain-model.md#20-基础一次性继续项目提醒2026-10-14)维护时间/发生/Owner 边界；[HTTP 契约 §10.76](api/http-command-contract.md#1076-基础一次性继续项目提醒2026-10-14-协议)、[数据库设计 §84](database/physical-design-postgresql.md#84-0083-基础一次性项目提醒2026-10-14-协议)维护协议，[检查范围 §29](testing/verification-plan.md#29-基础一次性项目提醒检查范围)限定真实 API 生命周期与受控通知证据。设置/待处理 UI、真实 Windows 投递继续后置，成绩只归统一验收表。
+
+2026-10-14 基础范围推演导航：[领域模型 §19](architecture/domain-model.md#19-基础固定容量范围推演2026-10-14)维护同一基线和原计划 Owner，[HTTP 契约 §10.75](api/http-command-contract.md#1075-基础固定容量范围推演2026-10-14-协议)、[数据库设计 §83](database/physical-design-postgresql.md#83-0082-基础范围推演2026-10-14-协议)维护三方案与选择协议；[检查映射 §27](testing/verification-plan.md#27-验收证据与投入判断验收规格)限定任务集比较、逐项应用和未知，功能成绩仍只在统一验收表。
+
+2026-10-14 基础下一段计划导航：[后续路线 N04](requirements/post-v1-roadmap.md#n04-周期计划与重排建议)维护产品范围，[领域模型 §18](architecture/domain-model.md#18-基础下一段工作计划2026-10-14)维护 Owner/应用边界，[HTTP 契约 §10.74](api/http-command-contract.md#1074-基础下一段工作计划2026-10-14-协议)与[数据库设计 §82](database/physical-design-postgresql.md#82-0081-基础下一段工作计划2026-10-14-协议)维护数据协议，[检查范围 §28](testing/verification-plan.md#28-基础下一段工作计划检查范围)限定基础测试；当前阶段、实际结果仍归原唯一主文档。UI 后置。
+
+2026-10-11 验收证据与投入判断导航：[总纲 §0.14](../Personal_Workflow_OS_Master_Spec.md#014-验收证据与投入判断)拥有五项已确认产品规则及首个价值试验，[范围补充](requirements/v1-scope.md#验收证据与投入判断补充)拥有 V1 边界，[后续路线 §10](requirements/post-v1-roadmap.md#10-验收证据与投入判断的范围和分期)拥有分期、复用缺口和工程前置，[工作台 §29](frontend/workbench-design.md#29-验收证据与投入判断)拥有交付证据、计时、复审、复盘与推演交互，[测试计划 §27](testing/verification-plan.md#27-验收证据与投入判断验收规格)维护目标规格，[执行映射](../prompts/README.md#产品补充的执行映射)及[分批实施任务书](../prompts/evidence-and-investment.md)接续用户实际下发后的工作。任务书默认第 1 批 A–D，后两批按授权和前置接续。此处保留 2026-10-11 文档确认时点。2026-10-14 已接基础验收数据链、假设/决定前提复审及工作段复盘，协议见 HTTP 契约 §10.67–73、数据库设计 §75–81；当前阶段和实际成绩仍分别归原主文档，UI 待后续重构，实际收益未验证。
+
+2026-10-11 内置方法与命令导航：[总纲 §0.13](../Personal_Workflow_OS_Master_Spec.md#013-内置工作方法与会话控制)拥有已确认产品范围，[扩展专题第 9 节](architecture/relay-skills.md#9-内置工作方法与可定制-skill)拥有三项新增方法、自然语言选择与 `SKILL.md` 定制版本，[运行架构第 8 节](architecture/runtime-context.md#8-会话压缩与消息文件恢复)拥有 DeepSeek 优先压缩、协议/检查点及文件恢复责任，[工作台第 27 节](frontend/workbench-design.md#27-内置-skill-与聊天命令)拥有 `/命令`、会话控制和消息撤回按钮，[ADR-019](decisions/ADR-019-builtin-methods-and-conversation-checkpoints.md)记录取舍，[后续路线第 9 节](requirements/post-v1-roadmap.md#9-内置工作方法命令与会话恢复的范围)拥有实施前置，[测试计划第 26 节](testing/verification-plan.md#26-内置-skill命令压缩与消息文件恢复验收规格)为未运行规格，[完整实施提示词](../prompts/builtin-methods-and-conversation-checkpoints.md)为用户实际下发后的执行入口。本轮仅文档与提示词，新增能力未实施、未验收，不改变当前阶段和成绩。
+
+2026-10-11 学习模式协议冻结：[ADR-020](decisions/ADR-020-learning-mode-record-protocol.md) 冻结独立 `LEARNING` 会话身份、五张记录表与唯一写入 Owner、同轮有限增量信封、事前冻结的结算基线、清除代次与迟到结果、命令幂等与回执形状、Context 选择规则、逐次调用计量与转执行不升权；[领域模型 §13.4](architecture/domain-model.md#134-工程协议2026-10-11-冻结未实施)与[后续路线 §8](requirements/post-v1-roadmap.md#8-学习模式的范围与实施前置)已接续。协议冻结**不等于**实现或验收；本轮未写产品代码，按[完整实施提示词](../prompts/learning-mode.md)工作包 A→D 推进。
+
+2026-10-10 学习模式导航（2026-10-11 提示词接续）：[总纲 §0.12](../Personal_Workflow_OS_Master_Spec.md#012-学习模式)拥有已确认产品规则，[范围补充](requirements/v1-scope.md#学习模式补充)与[后续路线 §8](requirements/post-v1-roadmap.md#8-学习模式的范围与实施前置)拥有范围和实施前置，[工作台 §26](frontend/workbench-design.md#26-学习模式)拥有教学、状态展示与转执行交互，[领域模型 §13](architecture/domain-model.md#13-学习模式的状态与权限边界)拥有个人记录和权限边界，[测试计划 §25](testing/verification-plan.md#25-学习模式验收规格)为未运行规格；[完整实施提示词](../prompts/learning-mode.md)组织后续工作包、当前源码映射与验证。
+
+2026-10-09 自然语言状态维护接续：[总纲 §0.8.1](../Personal_Workflow_OS_Master_Spec.md#081-自然语言维护项目状态)拥有已确认产品规则，[工作台 §18.9](frontend/workbench-design.md#189-自然语言状态维护与接续摘要)拥有对话变更、接续卡与撤回交互，[应用边界 §12.5](architecture/domain-model.md#125-自然语言状态维护的应用边界)拥有 Owner/确认/基线/核对/恢复约束，[范围补充](requirements/v1-scope.md#自然语言状态维护与自动接续补充)与[后续路线 §7](requirements/post-v1-roadmap.md#7-已确认的未来软件协作能力)拥有范围接续，[测试计划 §24](testing/verification-plan.md#24-自然语言状态维护与自动接续验收规格)为未运行规格，[执行映射](../prompts/README.md#产品补充的执行映射)及[完整实施提示词](../prompts/natural-language-state-maintenance.md)同步后续输入。提示词已交付、尚未执行；本轮仅文档，未启动开发或改变 M/N 阶段及成绩。
+
 2026-10-05 有界协作文档接续：[总纲 §0.9](../Personal_Workflow_OS_Master_Spec.md#09-有界多-agent-与自动会话)拥有已确认产品规则，[范围补充](requirements/v1-scope.md#有界多-agent-与自动会话补充)拥有首版边界，[运行架构 §2.5](architecture/runtime-context.md#25-有界子-agent-的委派与会话关联)拥有委派/预算/来源/恢复，[工作台 §23](frontend/workbench-design.md#23-主子会话与有界协作)拥有交互，[ADR-017](decisions/ADR-017-bounded-multi-agent-conversations.md)记录取舍，[测试计划 §21](testing/verification-plan.md#21-有界多-agent-与自动会话验收规格)拥有未运行场景；[专项提示词](../prompts/bounded-multi-agent.md)为另行获授权后的执行入口。本轮仅文档，工程协议待核定，不启动代码开发。
 
 [功能地图](feature-map/README.md)提供模块 → 功能 → 代码/文档/提示词/测试/验收的资料导航，支持本机实时更新与离线快照。它只维护关系目录，不拥有第二份阶段或验收状态；新增文件自动提示待归类，新增功能的语义由对应开发任务同步登记。
@@ -36,9 +58,11 @@
 | 当前阶段、阻塞、下一步 | [CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md) | 历史研究日志不另写一份当前进度 |
 | 业务不变量 | [契约包](../contracts/README.md) | 01–04 分别拥有事实、执行、验证、恢复；其他文档引用 |
 | 当前架构与模块职责 | [领域模型](architecture/domain-model.md) | 架构主入口；运行/信息/工具专题补充实现边界 |
-| 产品 Agent 提示词与输入协议设计 | [Agent 提示词设计](architecture/agent-prompt-design.md)、[运行公共核心](../apps/api/src/workflow/agent-system-prompt.ts) | 设计文件不被运行程序加载；已接入核心由源码唯一维护，目标剩余增量与已实现入口分开；编码任务入口仍为根目录 prompts |
+| 产品 Agent 提示词与输入协议设计 | [Agent 提示词设计](architecture/agent-prompt-design.md)、[当前运行时路由](architecture/agent-prompt-design.md#21-当前运行时提示词路由)、[运行公共核心](../apps/api/src/workflow/agent-system-prompt.ts)、[统一路由入口](../apps/api/src/workflow/prompts/index.ts) | 路由表记录触发条件、组合、版本与源码入口，不被运行程序加载；模板正文由源码唯一维护，目标剩余增量与已实现入口分开；编码任务入口仍为根目录 prompts |
+
+2026-10-11 运行时提示词路由已落成代码入口：[集中描述但无代码入口]的表述已失效，当前选择由 `apps/api/src/workflow/prompts/` 的统一入口完成（`route-types.ts` 登记表 + `index.ts` 选择入口 + 三个按职责分组的模板模块），原 application 与模型端口调用只保留单一来源的兼容再导出。路由事实仍只维护在[提示词设计 §2.1–2.3](architecture/agent-prompt-design.md#21-当前运行时提示词路由)，本页不复制第二份路由表；实施范围与未闭合项归[CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md)。
 | 共享知识来源与长期信息 | [信息与计划](architecture/information-planning.md#11-人和-ai-共用知识来源) | 人与 AI 同源的版本、原件及收录边界；阅读交互归工作台第 12 节，产品定义归 Master Spec 第 33/90 节 |
-| 扩展组合、Skill 与蓝图协议 | [Relay 扩展模型](architecture/relay-skills.md) | Pack/Profile/Recipe/Proposal 复用既有模块，设计仍 Proposed；API/存储字段和 Eval 规格各归所属文档 |
+| 扩展组合、Skill 与蓝图协议 | [Relay 扩展模型](architecture/relay-skills.md) | Pack/Profile/Recipe/Proposal 复用既有模块；原整体设计仍 Proposed，第 9 节产品范围已确认，新增实现待做；API/存储字段和 Eval 规格各归所属文档 |
 | 主栈、可选依赖与冻结门槛 | [技术选型](architecture/技术选型.md) | 不在 README、提示词或 UI 文档复制版本表 |
 | 决策理由与替代关系 | [ADR 入口](#3-决策与历史) | 保存为什么；不代替当前实现证据 |
 | 逻辑数据关系 | [逻辑模型](database/logical-model.md) | 物理类型/索引/锁协议见其对应物理设计 |

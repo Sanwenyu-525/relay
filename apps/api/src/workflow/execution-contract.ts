@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { JsonObject, JsonValue } from '../infrastructure/json.js';
 import { canonicalizeJson } from '../receipt/payload-hash.js';
 import { toDecimalString } from '../shared/decimal.js';
+import { readRunMethodBinding, type RunMethodBinding } from '../skills/builtin-methods.js';
 import {
   DEFAULT_EXECUTION_CONFIG_VERSION,
   WORKFLOW_KEY,
@@ -51,6 +52,7 @@ export interface FreezeExecutionContractInput {
   readonly cliRunAction?: CliRunActionIntent | undefined;
   readonly toolLoopAction?: ToolLoopActionIntent | undefined;
   readonly contextSources?: readonly ContextSourceRef[] | undefined;
+  readonly executionMethod?: RunMethodBinding | undefined;
 }
 
 /**
@@ -73,6 +75,7 @@ export interface ToolLoopActionIntent {
 /** 首批工具循环的循环预算上限；Delegate 只接受不超过这些值的请求。 */
 export const TOOL_LOOP_MAX_ROUNDS = 12;
 export const TOOL_LOOP_MAX_TOOL_CALLS = 48;
+export const MAX_EXPLICIT_CONTEXT_SOURCES = 10;
 // 与 delegate-task 的同名清单保持一致：信封允许写入与受控命令，但那只说明「模型可以
 // 请求」，不代表放行——准入仍由当前 Permission 与本次范围授权决定。
 const TOOL_LOOP_CAPABILITIES: readonly string[] =
@@ -387,6 +390,7 @@ export function freezeExecutionContract(
   const workflowVersion = input.workflowVersion ?? WORKFLOW_VERSION;
   const executionConfigVersion =
     input.executionConfigVersion ?? DEFAULT_EXECUTION_CONFIG_VERSION;
+  const method = readRunMethodBinding(input.executionMethod);
 
   const criteria: readonly JsonValue[] = input.criteria.map((criterion) => ({
     criterion_id: criterion.criterionId,
@@ -411,6 +415,7 @@ export function freezeExecutionContract(
       version: workflowVersion,
     },
     execution_config_version: executionConfigVersion,
+    ...(method === undefined ? {} : { execution_method: method }),
     ...(input.mockGatewayAction === undefined ? {} : { mock_gateway_action: { ...input.mockGatewayAction } }),
     ...(input.fileReadAction === undefined ? {} : { file_read_action: { ...input.fileReadAction } }),
     ...(input.webFetchAction === undefined ? {} : { web_fetch_action: { ...input.webFetchAction } }),

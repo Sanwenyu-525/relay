@@ -7,6 +7,7 @@ import BlueprintView from "./BlueprintView";
 import ProjectResumeView from "./ProjectResumeView";
 import ResponsiveRail from "../components/ResponsiveRail";
 import PageHeader from "../components/PageHeader";
+import DailyContinuationCard from "../components/DailyContinuationCard";
 import type { RelayProjectGoal } from "../api/blueprintDtos";
 import type { RelayApiClient, RelayDecision, RelayProject, RelayProjectState, RelayReview, RelayTaskSummary } from "../api/relayClient";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
@@ -101,6 +102,10 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
       lede={activeGoals && activeGoals.length ? activeGoals.map((goal) => goal.title).join("；") : `${type}项目 · ${phaseLabel(state.phaseKey)}`}
       actions={<button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}><RotateCcw aria-hidden="true" />刷新</button>} />
     {project.archivedAt !== null && <p className="warning-callout" role="status">项目已归档，本页只读；不能再提交新的写命令。</p>}
+    {/* 返回项目的顶部接续卡（工作台 §18.9）：当前事实、相对上次已确认查看的变化、在途与阻塞。
+        挂在项目总览页（/projects/:id）——「返回项目」路径必然经过的项目维度入口，
+        只读展示，不影响下方既有事实区块。 */}
+    <DailyContinuationCard client={client} projectId={id} />
     {goals === null && <p className="warning-callout" role="alert">Goal 关系本次读取失败，目标范围待核对。</p>}
     <section className="resume-section project-next-step"><h2>下一步</h2>
       {state.nextActionTaskId === null ? <p className="helper-text">Project State 尚未指定下一步 Task。</p>

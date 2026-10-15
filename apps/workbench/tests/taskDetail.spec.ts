@@ -203,14 +203,25 @@ describe("任务详情（UI-10）", () => {
     expect(text).toContain("当前状态");
     expect(text).toContain("执行模式");
     expect(text).toContain("验收版本");
+    expect(text).toContain("任务修订");
     expect(mounted.wrapper.find('[data-testid="task-detail"]').exists()).toBe(true);
     expect(mounted.wrapper.get(".task-detail-status").attributes("aria-labelledby")).toBe("task-detail-status-heading");
     expect(mounted.wrapper.get("#task-detail-status-heading").text()).toBe("当前状态");
-    expect(mounted.wrapper.findAll(".task-detail-facts > div")).toHaveLength(5);
-    expect(mounted.wrapper.get(".task-detail-rail").text()).toContain("编辑入口");
-    expect(mounted.wrapper.get(".task-detail-rail").text()).toContain("前置依赖");
-    expect(mounted.wrapper.get(".page-primary").text()).toContain("验收标准");
+    // 右栏收口后：事实列只保留 工作状态/执行模式/当前执行者/当前 Run；前置依赖移入主区。
+    expect(mounted.wrapper.findAll(".task-detail-facts > div")).toHaveLength(4);
+    expect(mounted.wrapper.get(".task-detail-facts").text()).toContain("无活动 Run");
+    expect(mounted.wrapper.get(".task-detail-rail").text()).not.toContain("编辑入口");
+    expect(mounted.wrapper.get(".page-primary").text()).toContain("前置依赖");
+    expect(mounted.wrapper.get(".page-primary").text()).toContain("验收条件");
     expect(mounted.wrapper.get(".page-primary").text()).not.toContain("编辑入口");
+    // 精修后的关键断言（RED 基线）：验收条件 grid 编号列、基本信息双列、页签行辅助入口。
+    const criteriaRows = mounted.wrapper.findAll(".task-detail-criterion");
+    expect(criteriaRows).toHaveLength(4);
+    criteriaRows.forEach((row, index) => expect(row.get(".task-detail-criterion-index").text()).toBe(String(index + 1)));
+    expect(mounted.wrapper.get('[data-testid="task-detail-basics"]').findAll("dd")).toHaveLength(6);
+    expect(mounted.wrapper.get('[data-testid="task-detail-tabrow"]').text()).toContain("完善定义");
+    expect(mounted.wrapper.get('[data-testid="task-detail-tabrow"]').text()).toContain("验收方案");
+    expect(mounted.wrapper.get('[data-testid="task-detail-tabrow"]').text()).toContain("AI 讨论");
 
     await mounted.wrapper.get('[data-testid="task-detail-tab-artifacts"]').trigger("click");
     await flush();

@@ -33,6 +33,7 @@ export const COMPLETION_BLOCKED_REASON = {
   ACCEPTANCE_REVISION_CHANGED: 'ACCEPTANCE_REVISION_CHANGED',
   VERIFICATION_NOT_PASSED: 'VERIFICATION_NOT_PASSED',
   VERIFICATION_REVOKED: 'VERIFICATION_REVOKED',
+  VERIFICATION_TARGET_STALE: 'VERIFICATION_TARGET_STALE',
   DECLARED_OUTPUTS_UNSATISFIED: 'DECLARED_OUTPUTS_UNSATISFIED',
   GATEWAY_OPERATION_UNRESOLVED: 'GATEWAY_OPERATION_UNRESOLVED',
 } as const;
@@ -98,6 +99,18 @@ export async function evaluateCompletionGate(
   }
 
   const targets = await repositories.verifications.listTargets(latest.id);
+
+  // 证据必须绑定「当前候选」这一确切版本身份：PASS 的 target 若已被新候选取代，
+  // 旧 PASS 不能完成新产物。判据是 version_id，不是文本/内容比较——内容完全相同
+  // 但换了版本，仍属「证据对当前候选不再适用」，旧证据作为历史保留。
+  const persistStep = await repositories.runs.readStepByKind(input.run.id, 'PERSIST_CANDIDATE');
+  const candidateVersionId = readResultString(persistStep?.result_ref, 'artifact_version_id');
+
+  if (candidateVersionId === undefined || targets.length === 0 ||
+      targets.some((target) => target.artifact_version_id !== candidateVersionId)) {
+    return { ok: false, reason: COMPLETION_BLOCKED_REASON.VERIFICATION_TARGET_STALE };
+  }
+
   const providedArtifactKinds: ArtifactKind[] = [];
 
   for (const target of targets) {
@@ -287,4 +300,11 @@ function frozenExpectedOutputs(snapshot: JsonObject): JsonObject | undefined {
 
 function isJsonObject(value: unknown): value is JsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** 从步骤 result_ref 里取一个字符串字段；形状不对就当没有，不猜。 */
+function readResultString(ref: JsonObject | null | undefined, key: string): string | undefined {
+  if (ref === null || ref === undefined) return undefined;
+  const value = ref[key];
+  return typeof value === 'string' && value !== '' ? value : undefined;
 }

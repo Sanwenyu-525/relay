@@ -301,7 +301,7 @@ test('跨身份冒用被拒：B 档的行不能指向一个 RUN 的既有 Operat
 
   // 直接改写绕过仓库方法也不行：0060 的 capability × origin CHECK 挡住写能力来源，
   // 而仓库方法本身按 ASSISTANT_READ 过滤，两条路都不给跨身份冒用留缝。
-  assert.equal(await repository.attachOperation(attached.id, randomUUID()), false);
+  assert.equal(await repository.attachOperation(attached.id, randomUUID(), 'ASSISTANT_READ'), false);
   await assert.rejects(() => sql`update session_tool_calls set operation_id = ${randomUUID()}
     where id = ${attached.id}`.execute(app.db), '外键约束必须挡住不存在的 Operation');
 });

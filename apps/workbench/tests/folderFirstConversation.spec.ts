@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { flush, mountWorkbench } from "./mountApp";
+import { clickPortal, flush, folderStripAssociation, folderStripName, mountWorkbench, openFolderDialog, openWorkingDirectory, pressEscape } from "./mountApp";
 
 /**
  * 工作台 §18.1/§18.2 的前端反例：打开目录直达输入区、首条发送自动建会话，
@@ -45,6 +45,8 @@ function execution(over: Record<string, unknown> = {}) {
 }
 
 interface Routes {
+  apply?: () => Response;
+  executionRequests?: () => Response;
   open?: (body: Record<string, unknown>) => Response;
   messages?: () => Response;
   sessions?: () => Response;
@@ -85,7 +87,7 @@ function router(routes: Routes, posts: { path: string; body: unknown }[]) {
       if (path === `${prefix}/assist-sessions/${sessionId}/execution-requests`) return json({
         command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z", result: execution(),
         links: { resource: "" } }, 202);
-      if (path === `${prefix}/conversation-execution-requests/${requestId}/applications`) return json({
+      if (path === `${prefix}/conversation-execution-requests/${requestId}/applications`) return routes.apply?.() ?? json({
         command_id: "apply-1", committed_at: "2026-10-02T00:00:01Z",
         result: { request_id: requestId, status: "DELEGATED", task_id: taskId, run_id: runId, revision: "3" },
         links: { resource: "" } }, 200);
@@ -108,7 +110,7 @@ function router(routes: Routes, posts: { path: string; body: unknown }[]) {
       error_code: null, provider_error_kind: null, created_at: "2026-10-02T00:00:00Z", updated_at: "2026-10-02T00:00:00Z",
       usage: { input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_creation_tokens: null },
       skill: null }] });
-    if (path.startsWith(`${prefix}/conversation-execution-requests`)) return json({ items: [
+    if (path.startsWith(`${prefix}/conversation-execution-requests`)) return routes.executionRequests?.() ?? json({ items: [
       { request_id: requestId, session_id: sessionId, source_message_id: "msg-1", decision: "PREPARE",
         status: "DELEGATED", candidate_status: "READY", root_path: root, questions: [],
         task_id: taskId, run_id: runId, revision: "3", created_at: "2026-10-02T00:00:00Z",
@@ -129,31 +131,78 @@ beforeEach(() => { window.localStorage.clear(); });
 afterEach(() => { resetRelayConnectionForTest(); vi.unstubAllGlobals(); window.localStorage.clear(); });
 
 describe("文件夹入口与对话直接执行", () => {
+  it("执行准备失败后读回原任务并继续，保留目标和原请求身份", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    let attempts = 0;
+    vi.stubGlobal("fetch", router({
+      sessions: () => response({ items: [{ id: sessionId, workspace_id: workspaceId, project_id: projectId,
+        task_id: null, title: "关于MyProject", status: "ACTIVE", revision: "1",
+        updated_at: "2026-10-02T00:00:00Z" }] }),
+      apply: () => {
+        attempts += 1;
+        return attempts === 1 ? response({ code: "INVALID_TRANSITION", detail: "未绑定 FILE_QUERY 连接" }, 409)
+          : response({ result: { request_id: requestId, status: "DELEGATED", task_id: taskId,
+            run_id: runId, revision: "3" }, links: {} });
+      },
+      executionRequests: () => response({ items: attempts === 0 ? [] : [execution({
+        candidate: undefined, status: attempts === 1 ? "TASK_PREPARED" : "DELEGATED",
+        task_id: taskId, run_id: attempts === 1 ? null : runId, revision: "2" })] })
+    }, posts));
+    const view = await mountWorkbench("/agent");
+    try {
+      await openWorkingDirectory(root);
+      await flush();
+      await view.wrapper.get('[data-testid="assist-draft"]').setValue("帮我读取目录");
+      await flush();
+      await view.wrapper.get('[data-testid="assist-send"]').trigger("click");
+      await flush();
+      await flush();
+      await view.wrapper.get('[data-testid="execution-start"]').trigger("click");
+      await flush();
+      await flush();
+      const summary = view.wrapper.get('[data-testid="execution-summary"]');
+      expect(summary.attributes("data-status")).toBe("TASK_PREPARED");
+      expect(summary.text()).toContain("FILE_QUERY");
+      expect(summary.text()).toContain("改写 answer.txt");
+      expect(view.wrapper.get('[data-testid="execution-start"]').text()).toContain("继续");
+      await view.wrapper.get('[data-testid="execution-start"]').trigger("click");
+      await flush();
+      await flush();
+      expect(attempts).toBe(2);
+      expect(posts.filter((post) => post.path.endsWith("/execution-requests"))).toHaveLength(1);
+      expect(posts.filter((post) => post.path.endsWith("/applications")).map((post) => post.path))
+        .toEqual(Array(2).fill(`${prefix}/conversation-execution-requests/${requestId}/applications`));
+    } finally { view.unmount(); }
+  });
   it("未打开目录时不进入任何写路径；打开目录后直达输入区且首条发送自动建会话", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const posts: { path: string; body: unknown }[] = [];
     const fetchMock = router({}, posts); vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench("/agent");
     try {
-      expect(view.wrapper.get('[data-testid="folder-scope"]').exists()).toBe(true);
       // 页面读取本身不发任何写命令：打开目录之前不登记任何东西。
-      // 作用域行一直在，只是没有目录可显示 —— 它就是选目录的入口所在。
-      expect(view.wrapper.get('[data-testid="folder-scope-bar"]').exists()).toBe(true);
-      expect(view.wrapper.get('[data-testid="folder-scope-bar"]').text()).toContain("未选择目录");
-      // 非桌面宿主没有原生选择器：必须给出可用的手动路径，而不是一个死按钮。
-      expect(view.wrapper.get('[data-testid="folder-manual-root"]').exists()).toBe(true);
+      // 作用域细条常驻在输入卡上方，只是没有目录可显示 —— 它就是选目录的入口所在。
+      expect(view.wrapper.get('[data-testid="folder-scope-strip"]').exists()).toBe(true);
+      expect(folderStripName()).toBe("未选择目录");
+      expect(folderStripAssociation()).toBe("未归属");
+      // 非桌面宿主没有原生选择器：更换目录框里必须给出可用的手动路径，而不是一个死按钮。
+      expect(view.wrapper.get('[data-testid="folder-scope-change"]').attributes("aria-haspopup")).toBe("dialog");
       expect(posts.length).toBe(0);
 
-      await view.wrapper.get('[data-testid="folder-manual-root"]').setValue(root);
-      await flush();
-      await view.wrapper.get('[data-testid="folder-open-manual"]').trigger("click");
+      await openWorkingDirectory(root);
       await flush();
       await flush();
       expect(posts.map((post) => post.path)).toContain(`${prefix}/working-directories/open`);
       expect((posts[0]?.body as { root_path?: string }).root_path).toBe(root);
-      expect(view.wrapper.get('[data-testid="folder-scope-bar"]').exists()).toBe(true);
-      expect(view.wrapper.get('[data-testid="folder-write-readiness"]').text())
+      expect(folderStripName()).toBe("MyProject");
+      expect(folderStripAssociation()).toContain("已归入项目：MyProject");
+      // 写入就绪说明归更换目录框内的目录控件，细条只承担目录名与归属。
+      await openFolderDialog();
+      expect(document.querySelector('[data-testid="folder-write-readiness"]')?.textContent ?? "")
         .toContain("还没有绑定该目录的文件写入连接");
+      await pressEscape();
+      await flush();
 
       await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("先讨论一下这个目录");
       await flush();
@@ -186,16 +235,15 @@ describe("文件夹入口与对话直接执行", () => {
     vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench("/agent");
     try {
-      await view.wrapper.get('[data-testid="folder-manual-root"]').setValue(root);
-      await flush();
-      await view.wrapper.get('[data-testid="folder-open-manual"]').trigger("click");
+      await openWorkingDirectory(root);
       await flush();
       await flush();
-      const reason = view.wrapper.get('[data-testid="folder-not-ready"]').text();
+      // 需要再选一次作用域时更换目录框保持打开（候选按钮就在框里），框走 portal 挂在 body 上。
+      const reason = document.querySelector('[data-testid="folder-not-ready"]')?.textContent ?? "";
       // 原因码本身不是解释：用户必须知道这个目录为什么不能写、接下来该做什么。
       expect(reason).toContain("另一个已受管根");
       expect(reason).not.toContain("UNKNOWN");
-      expect(view.wrapper.get('[data-testid="folder-ambiguous"]').exists()).toBe(true);
+      expect(document.querySelector('[data-testid="folder-ambiguous"]')).not.toBeNull();
     } finally { view.unmount(); }
   });
 
@@ -207,7 +255,7 @@ describe("文件夹入口与对话直接执行", () => {
     try {
       // 用户不必先选目录才能说话：工作空间级会话（project_id 为空）就能讨论。
       expect(view.wrapper.get('[data-testid="assist-first-draft"]').exists()).toBe(true);
-      expect(view.wrapper.get('[data-testid="folder-scope"]').exists()).toBe(true);
+      expect(view.wrapper.get('[data-testid="folder-scope-strip"]').exists()).toBe(true);
       // 未归属时不得给出执行入口：0051 的 project_id NOT NULL 会让请求必然失败。
       expect(view.wrapper.find('[data-testid="execution-start"]').exists()).toBe(false);
       expect(view.wrapper.get('[data-testid="collab-unassigned-execution-hint"]').text())
@@ -237,18 +285,16 @@ describe("文件夹入口与对话直接执行", () => {
     vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench("/agent");
     try {
-      await view.wrapper.get('[data-testid="folder-manual-root"]').setValue(root);
-      await flush();
-      await view.wrapper.get('[data-testid="folder-open-manual"]').trigger("click");
+      await openWorkingDirectory(root);
       await flush();
       await flush();
-      expect(view.wrapper.get('[data-testid="folder-ambiguous"]').exists()).toBe(true);
+      expect(document.querySelector('[data-testid="folder-ambiguous"]')).not.toBeNull();
       // 作用域未定只是不能写文件，讨论仍然可用：这里只登记了目录，没有别的写命令。
       expect(view.wrapper.get('[data-testid="assist-first-draft"]').exists()).toBe(true);
       expect(view.wrapper.get('[data-testid="collab-unassigned-execution-hint"]').exists()).toBe(true);
       expect(posts.length).toBe(1);
 
-      await view.wrapper.get(`[data-testid="collab-folder-candidate-${otherProjectId}"]`).trigger("click");
+      await clickPortal(`collab-folder-candidate-${otherProjectId}`);
       await flush();
       expect((posts[1]?.body as { project_id?: string }).project_id).toBe(otherProjectId);
     } finally { view.unmount(); }
@@ -266,9 +312,7 @@ describe("文件夹入口与对话直接执行", () => {
     vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench("/agent");
     try {
-      await view.wrapper.get('[data-testid="folder-manual-root"]').setValue(root);
-      await flush();
-      await view.wrapper.get('[data-testid="folder-open-manual"]').trigger("click");
+      await openWorkingDirectory(root);
       await flush();
       await flush();
       expect(view.wrapper.get('[data-testid="assist-draft"]').exists()).toBe(true);
@@ -328,9 +372,7 @@ describe("文件夹入口与对话直接执行", () => {
     }));
     const view = await mountWorkbench("/agent");
     try {
-      await view.wrapper.get('[data-testid="folder-manual-root"]').setValue(root);
-      await flush();
-      await view.wrapper.get('[data-testid="folder-open-manual"]').trigger("click");
+      await openWorkingDirectory(root);
       await flush();
       await flush();
       await view.wrapper.get('[data-testid="assist-draft"]').setValue("这个功能能不能改");
@@ -348,9 +390,7 @@ describe("文件夹入口与对话直接执行", () => {
 
   async function openFolderAndType(view: { wrapper: { get(s: string): { setValue(v: string): Promise<void>;
     trigger(e: string): Promise<void> } } }, text: string) {
-    await view.wrapper.get('[data-testid="folder-manual-root"]').setValue(root);
-    await flush();
-    await view.wrapper.get('[data-testid="folder-open-manual"]').trigger("click");
+    await openWorkingDirectory(root);
     await flush();
     await flush();
     await view.wrapper.get('[data-testid="assist-first-draft"]').setValue(text);
@@ -593,9 +633,7 @@ describe("文件夹入口与对话直接执行", () => {
         await openFolderAndType(view, "还没发送的首条草稿");
         const opened = posts.filter((post) => post.path.endsWith("/working-directories/open")).length;
         // 直接请求换到另一个目录：必须先弹保护，且在用户决定前不得发出 OpenWorkingDirectory。
-        await view.wrapper.get('[data-testid="folder-manual-root"]').setValue("D:\\Develop\\OtherProject");
-        await flush();
-        await view.wrapper.get('[data-testid="folder-open-manual"]').trigger("click");
+        await openWorkingDirectory("D:\\Develop\\OtherProject");
         await flush();
 
         expect(document.querySelector('[role="dialog"]')?.getAttribute("aria-label")).toBe("未发送的内容");
@@ -622,9 +660,7 @@ describe("文件夹入口与对话直接执行", () => {
         await flush();
         const before = pendingPosts.filter((post) => post.path.endsWith("/working-directories/open")).length;
 
-        await pending.wrapper.get('[data-testid="folder-manual-root"]').setValue("D:\\Develop\\OtherProject");
-        await flush();
-        await pending.wrapper.get('[data-testid="folder-open-manual"]').trigger("click");
+        await openWorkingDirectory("D:\\Develop\\OtherProject");
         await flush();
 
         expect(document.querySelector('[role="dialog"]')?.getAttribute("aria-label")).toBe("命令结果待核对");
@@ -677,9 +713,7 @@ describe("文件夹入口与对话直接执行", () => {
         // 未决消息时换目录被守卫拦住：作用域不变，也就无从把解释指向别的资源。
         scopeResourceId = "res-2";
         const opened = posts.filter((post) => post.path.endsWith("/working-directories/open")).length;
-        await view.wrapper.get('[data-testid="folder-manual-root"]').setValue("D:\\Develop\\OtherProject");
-        await flush();
-        await view.wrapper.get('[data-testid="folder-open-manual"]').trigger("click");
+        await openWorkingDirectory("D:\\Develop\\OtherProject");
         await flush();
         expect(document.querySelector('[role="dialog"]')?.getAttribute("aria-label")).toBe("命令结果待核对");
         expect(posts.filter((post) => post.path.endsWith("/working-directories/open"))).toHaveLength(opened);

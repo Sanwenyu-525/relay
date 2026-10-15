@@ -126,6 +126,15 @@ describe("26 日需求验收证据", () => {
     expect(mounted.wrapper.get('[data-testid="acceptance-criterion-must-1"]').text()).toContain("历史检查 PASS，当前适用性未核实");
     expect(mounted.wrapper.get('[data-testid="acceptance-criterion-must-2"]').text()).toContain("未关联当前 CheckPlan");
     expect(mounted.wrapper.text()).toContain("组合版本证据：当前接口没有可核对");
+    // 精修后的关键断言（RED 基线）：四事实结论、技术字段折叠、枚举中文映射。
+    const evidenceEl = mounted.wrapper.get('[data-testid="task-acceptance-evidence"]');
+    expect(evidenceEl.text()).toContain("检查是否运行");
+    expect(evidenceEl.text()).toContain("已出结果");
+    expect(evidenceEl.find("details").exists()).toBe(true);
+    expect(evidenceEl.get("details").text()).toContain("plan-1");
+    expect(mounted.wrapper.get('[data-testid="acceptance-criterion-must-1"]').text()).toContain("自动检查");
+    expect(mounted.wrapper.get('[data-testid="acceptance-criterion-must-1"]').text()).toContain("（AUTO）");
+    expect(mounted.wrapper.get('[data-testid="acceptance-criterion-must-2"]').text()).toContain("当前响应未提供");
   });
   it("检查器 ERROR 与未完成会话分别保留错误和未运行缺口", async () => {
     const mounted = await mountReact(createElement(MemoryRouter, null, createElement(TaskAcceptanceEvidence, { client: client("ERROR"), taskId: "task-1",
@@ -182,5 +191,125 @@ describe("26 日需求验收证据", () => {
     await flush();
     expect(mounted.wrapper.get('[data-testid="acceptance-criterion-must-2"]').text()).toContain("无当前完成凭据关联");
     expect(mounted.wrapper.text()).toContain("不适用、来源缺失或读取未完成");
+  });
+});
+
+describe("26 日验收依据无 Run 文案区分", () => {
+  const acceptance: RelayTaskAcceptance = { acceptanceRevision: "3", objective: "人工交付并核对组合结果",
+    expectedOutputs: { kind: "CODE" }, source: "HUMAN",
+    criteria: [{ criterionId: "hum-1", statement: "重要行为人工可用", required: true,
+      method: "AUTO", targetSpec: { artifact_kind: "CODE" } },
+    { criterionId: "hum-2", statement: "人工逐条确认", required: true, method: "HUMAN", targetSpec: null }] };
+  // 计划预览把两条条件（含 HUMAN）都映射到计划项：预览关联不要求有 Run，也不代表已执行。
+  const planPreview = { taskId: "task-1", status: "AVAILABLE", sources: { taskRevision: "2", acceptanceRevision: "3" },
+    checkPlanSha256: "plan-1", checkPlan: { entries: [{ criterionId: "hum-1", checkerId: "checker-1", checkerVersion: "1" },
+      { criterionId: "hum-2", checkerId: "human-note", checkerVersion: "1" }] } };
+  function traceTripwire() {
+    return vi.fn(async () => { throw new Error("无 Run 分支不应读取 Run Trace"); });
+  }
+
+  it("无 Run 人工任务：主阅读位只陈述未关联执行记录，下一步指向任务工作区人工核对，预览关联不是已执行", async () => {
+    const api = {
+      getTaskCheckPlanPreview: vi.fn(async () => planPreview),
+      getTaskArtifacts: vi.fn(async () => ({ items: [] })),
+      getRunTrace: traceTripwire(),
+      getTask: vi.fn(async () => ({ revision: "2", acceptance: { acceptanceRevision: "3" }, executorRunId: null, currentCompletionId: null }))
+    } as unknown as RelayApiClient;
+    const mounted = await mountReact(createElement(MemoryRouter, null, createElement(TaskAcceptanceEvidence, {
+      client: api, taskId: "task-1", taskRevision: "2", acceptance, runId: null, completionId: null }))); unmount = mounted.unmount;
+    await flush();
+    const evidenceEl = mounted.wrapper.get('[data-testid="task-acceptance-evidence"]');
+    // runId=null 只陈述「当前未关联执行记录」；不由空验证数组反推「尚未运行检查」，
+    // 也不出现「当前 Run」「原 Run」这类指向不存在执行记录的措辞。
+    expect(evidenceEl.text()).toContain("当前任务未关联执行记录（Run）");
+    expect(evidenceEl.text()).not.toContain("尚未运行检查");
+    expect(evidenceEl.text()).not.toContain("当前 Run");
+    expect(evidenceEl.text()).not.toContain("原 Run");
+    // 无 Run 分支不读取 Run Trace（读取计数为 0）。
+    expect(vi.mocked(api.getRunTrace)).not.toHaveBeenCalled();
+    // 计划项已映射（含 HUMAN 条件）的逐项下一步：任务工作区人工核对并补充人工证据。
+    expect(mounted.wrapper.get('[data-testid="acceptance-criterion-hum-1"]').text())
+      .toContain("下一步：人工核对本条件，并在任务工作区补充人工证据");
+    expect(mounted.wrapper.get('[data-testid="acceptance-criterion-hum-2"]').text())
+      .toContain("下一步：人工核对本条件，并在任务工作区补充人工证据");
+    expect(evidenceEl.text()).not.toContain("运行或核对原 Run");
+    // 预览关联不等于已执行或通过：全部条件已关联计划项时仍保留读时预览与免责文案。
+    expect(evidenceEl.text()).toContain("全部条件已关联检查计划的检查项");
+    expect(evidenceEl.text()).toContain("这是读时预览，尚未执行");
+    expect(evidenceEl.text()).not.toContain("已通过");
+    expect(evidenceEl.text()).not.toContain("PASS");
+  });
+
+  it("有 Run 但零验证记录：保留原语义，不误写也没有引导核对不存在的 Run", async () => {
+    const api = {
+      getTaskCheckPlanPreview: vi.fn(async () => planPreview),
+      getTaskArtifacts: vi.fn(async () => ({ items: [] })),
+      getRunTrace: vi.fn(async () => ({ taskId: "task-1", runId: "run-1", verifications: [] })),
+      getTask: vi.fn(async () => ({ revision: "2", acceptance: { acceptanceRevision: "3" }, executorRunId: "run-1", currentCompletionId: null }))
+    } as unknown as RelayApiClient;
+    const mounted = await mountReact(createElement(MemoryRouter, null, createElement(TaskAcceptanceEvidence, {
+      client: api, taskId: "task-1", taskRevision: "2", acceptance, runId: "run-1", completionId: null }))); unmount = mounted.unmount;
+    await flush();
+    const evidenceEl = mounted.wrapper.get('[data-testid="task-acceptance-evidence"]');
+    expect(evidenceEl.text()).toContain("尚未运行检查：当前 Run 没有已完成的验证会话。");
+    expect(mounted.wrapper.get('[data-testid="acceptance-criterion-hum-1"]').text())
+      .toContain("下一步：运行或核对原 Run 的当前版本检查");
+    expect(evidenceEl.text()).not.toContain("当前任务未关联执行记录");
+  });
+
+  it("有历史验证但计划摘要不匹配：版本不适用提示保留", async () => {
+    const api = {
+      getTaskCheckPlanPreview: vi.fn(async () => planPreview),
+      getTaskArtifacts: vi.fn(async () => ({ items: [{ latestVersionId: "version-1",
+        versions: [{ artifactVersionId: "version-1", sha256: "sha-1" }] }] })),
+      getRunTrace: vi.fn(async () => ({ taskId: "task-1", runId: "run-1", verifications: [{ id: "session-1",
+        status: "FINALIZED", verdict: "PASS", acceptanceRevision: "3", checkPlanHash: "plan-old",
+        finalizedAt: "2026-09-27T00:00:00Z", targets: [{ artifactVersionId: "version-1", contentSha256: "sha-1" }],
+        checks: [{ criterionId: "hum-1", result: "PASS" }] }] })),
+      getTask: vi.fn(async () => ({ revision: "2", acceptance: { acceptanceRevision: "3" }, executorRunId: "run-1", currentCompletionId: null }))
+    } as unknown as RelayApiClient;
+    const mounted = await mountReact(createElement(MemoryRouter, null, createElement(TaskAcceptanceEvidence, {
+      client: api, taskId: "task-1", taskRevision: "2", acceptance, runId: "run-1", completionId: null }))); unmount = mounted.unmount;
+    await flush();
+    const evidenceEl = mounted.wrapper.get('[data-testid="task-acceptance-evidence"]');
+    expect(evidenceEl.text()).toContain("已出结果：共 1 项验证会话记录。");
+    expect(evidenceEl.text()).toContain("没有匹配当前验收版本与产物版本的历史会话。");
+    expect(evidenceEl.text()).toContain("已有历史检查，但验收版本、计划摘要或当前产物版本未全部匹配；旧结果不适用于本次判定。");
+    expect(mounted.wrapper.get('[data-testid="acceptance-criterion-hum-1"]').text()).toContain("实际证据：旧结果不适用");
+  });
+
+  it("读取失败：显示读取不完整而不是「没有运行」", async () => {
+    const api = {
+      getTaskCheckPlanPreview: vi.fn(async () => { throw new Error("CheckPlan 离线"); }),
+      getTaskArtifacts: vi.fn(async () => ({ items: [] })),
+      getRunTrace: vi.fn(async () => ({ taskId: "task-1", runId: "run-1", verifications: [] })),
+      getTask: vi.fn(async () => ({ revision: "2", acceptance: { acceptanceRevision: "3" }, executorRunId: "run-1", currentCompletionId: null }))
+    } as unknown as RelayApiClient;
+    const mounted = await mountReact(createElement(MemoryRouter, null, createElement(TaskAcceptanceEvidence, {
+      client: api, taskId: "task-1", taskRevision: "2", acceptance, runId: "run-1", completionId: null }))); unmount = mounted.unmount;
+    await flush();
+    const evidenceEl = mounted.wrapper.get('[data-testid="task-acceptance-evidence"]');
+    expect(evidenceEl.text()).toContain("证据读取不完整，不能判定是否运行。");
+    expect(evidenceEl.text()).toContain("CheckPlan 读取失败");
+    expect(evidenceEl.text()).toContain("读取不完整，不能判定版本匹配。");
+    expect(evidenceEl.text()).not.toContain("尚未运行检查");
+  });
+
+  it("读取期间任务关联的执行记录变化：按变化事实提示，不输出误导旧文案", async () => {
+    const api = {
+      getTaskCheckPlanPreview: vi.fn(async () => planPreview),
+      getTaskArtifacts: vi.fn(async () => ({ items: [] })),
+      getRunTrace: traceTripwire(),
+      getTask: vi.fn(async () => ({ revision: "2", acceptance: { acceptanceRevision: "3" }, executorRunId: "run-2", currentCompletionId: null }))
+    } as unknown as RelayApiClient;
+    const mounted = await mountReact(createElement(MemoryRouter, null, createElement(TaskAcceptanceEvidence, {
+      client: api, taskId: "task-1", taskRevision: "2", acceptance, runId: null, completionId: null }))); unmount = mounted.unmount;
+    await flush();
+    const evidenceEl = mounted.wrapper.get('[data-testid="task-acceptance-evidence"]');
+    expect(evidenceEl.text()).toContain("Task 或验收版本在读取期间变化");
+    expect(evidenceEl.text()).toContain("读取期间任务或验收版本已变化，当前关联的执行记录需刷新后再判定。");
+    expect(evidenceEl.text()).not.toContain("尚未运行检查");
+    expect(evidenceEl.text()).not.toContain("当前 Run");
+    expect(vi.mocked(api.getRunTrace)).not.toHaveBeenCalled();
   });
 });

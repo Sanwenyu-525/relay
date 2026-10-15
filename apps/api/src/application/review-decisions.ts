@@ -12,6 +12,7 @@ import { runIdempotentCommand, type CommandOutcome } from './command.js';
 import { invalidTransition, resourceNotFound, revisionConflict, validationFailed } from './domain-error.js';
 import { requireRevision } from './revisions.js';
 import { reviewTargetHash } from './review-requests.js';
+import { verifyApprovalCheckMaterial } from './approval-check-material.js';
 import { normalizeStateAction, type NormalizedStateAction } from './state-action.js';
 import { applyAction } from './state-commands.js';
 import { lockWritableProjectInWorkspace } from './guards.js';
@@ -270,6 +271,16 @@ async function resolveRunReview(repositories: Repositories, input: {
         actorRef: `run:${run.id}`, commandId: null, projectId: task.project_id,
         taskId: task.id, eventType: 'RUN_FAILED',
         factRefs: { run_id: run.id, operation_id: operation.id, reason: 'ACTION_APPROVAL_DENIED' } });
+    }
+    // APPROVE 前核对材料：批准只覆盖人工当时看到的那份磁盘内容。Review 创建之后脚本
+    // 被换掉时，人工看到的与将要执行的已经不是同一份材料，此时保存 APPROVE 会产生一份
+    // 永远不该生效的判断。拒绝它而不是记下来——合法路径是按领域入口重新确认，那会生成
+    // 绑定当前材料的新 Review；本条 Review 与其历史保持原样，不被抹去。
+    if (decision === 'APPROVE' && operation !== undefined) {
+      const material = await verifyApprovalCheckMaterial(repositories, operation, review);
+      if (material.status === 'STALE') {
+        throw invalidTransition(material.detail, { taskId: task.id });
+      }
     }
     return { action_authorized: decision === 'APPROVE', operation_id: review.operation_id, external_effect_executed: false };
   }

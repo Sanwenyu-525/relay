@@ -79,8 +79,8 @@
 .project-workbench .workbench-check > span { float: right; color: var(--relay-color-text-secondary); }
 .project-workbench .workbench-unavailable { color: var(--relay-color-text-secondary); }
 .project-workbench-entry { display: flex; justify-content: flex-end; padding: var(--relay-space-4) var(--relay-layout-main-padding) 0; }
-@media (max-width: 64rem) { .project-workbench .workbench-reading-desk { grid-template-columns: minmax(10rem, 0.34fr) minmax(0, 1fr); } }
-@media (max-width: 48rem) {
+@media (width < 64rem) { .project-workbench .workbench-reading-desk { grid-template-columns: minmax(10rem, 0.34fr) minmax(0, 1fr); } }
+@media (width < 48rem) {
   .project-workbench .workbench-reading-desk { grid-template-columns: minmax(0, 1fr); }
   .project-workbench .workbench-source-directory { border-right: 0; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
   .project-workbench .workbench-directory-group { display: flex; flex-wrap: wrap; gap: var(--relay-space-2); }

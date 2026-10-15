@@ -1,16 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Info, RotateCcw, ShieldCheck } from "lucide-react";
-import type { RelayModelPortStatus, RelayModelVerificationState,
-  RelayModelVerifyResult, RelayViewKind } from "../api/relayClient";
+import type { RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyErrorCategory,
+  RelayViewKind } from "../api/relayClient";
 import PackCatalogPanel from "../components/PackCatalogPanel";
 import PageHeader from "../components/PageHeader";
 import { describeLiveError } from "../lib/liveErrors";
 import { modelErrorGuides } from "../lib/modelErrorGuides";
 import { useRelayConnection } from "../lib/relayConnection";
-import { saveDisplayPreferences, useDisplayPreferences } from "../lib/displayPreferences";
+import { formatReadableDateTime, saveDisplayPreferences, useDisplayPreferences } from "../lib/displayPreferences";
 import { handleTabListKeyDown } from "../lib/tabNavigation";
 import "./SettingsView.css";
+
+/** 验证错误分类的中文短名；原枚举保留在 chip 的 title 供核对。 */
+const verifyErrorCategoryLabels: Record<RelayModelVerifyErrorCategory, string> = {
+  AUTH: "认证失败",
+  RATE_LIMIT: "限流",
+  TIMEOUT: "超时",
+  STREAM_BROKEN: "流中断",
+  PROTOCOL: "协议或模型无效",
+  NETWORK: "网络不可达"
+};
 
 const providerLabels: Record<RelayModelPortStatus["provider"], string> = {
   fake: "Mock 模型端口",
@@ -178,6 +188,7 @@ function VerificationDetailCard({ verification, verifying }: {
 }) {
   const last = verification?.last ?? null;
   const matches = verification?.matchesCurrentConfig === true;
+  const { timeZone } = useDisplayPreferences();
   return <section className="surface-panel settings-card" data-testid="verification-detail">
     <h2>最近一次验证</h2>
     {last === null
@@ -186,14 +197,16 @@ function VerificationDetailCard({ verification, verifying }: {
         <div><dt>结果</dt><dd>
           <span className={`status-chip status-chip--${last.ok ? "success" : "danger"}`}>
             {last.ok ? "通过" : "失败"}</span>
-          {" "}验证于 {last.verifiedAt}{last.latencyMs === null ? "" : ` · ${last.latencyMs} ms`}</dd></div>
+          {" "}验证于 <time dateTime={last.verifiedAt}>{formatReadableDateTime(last.verifiedAt, timeZone)}</time>
+          {last.latencyMs === null ? "" : ` · ${last.latencyMs} ms`}</dd></div>
         <div><dt>目标</dt><dd>{last.provider} / {last.model}</dd></div>
         <div><dt>配置指纹</dt><dd><code className="hash-code">{last.configFingerprint}</code>
           {matches
             ? "（与当前配置一致）"
             : "（与当前配置不一致：配置已变更，旧结果不再算已验证）"}</dd></div>
         {last.errorCategory !== null && <div><dt>错误分类</dt><dd>
-          <span className="status-chip status-chip--danger">{last.errorCategory}</span>
+          <span className="status-chip status-chip--danger" title={last.errorCategory}>
+            {verifyErrorCategoryLabels[last.errorCategory] ?? last.errorCategory}</span>
           {" "}{modelErrorGuides[last.errorCategory]}</dd></div>}
       </dl>}
     {verifying && <p role="status">正在验证…</p>}
@@ -299,18 +312,15 @@ export default function SettingsView() {
 
   const onVerify = client === null ? null : () => {
     setVerifying(true); setVerifyError(null);
-    void client.verifyModelPort().then((result: RelayModelVerifyResult) => {
-      setVerifying(false);
-      setVerification((previous) => ({
-        currentConfigFingerprint: previous?.currentConfigFingerprint ??
-          result.configFingerprint,
-        last: result,
-        matchesCurrentConfig: previous?.currentConfigFingerprint == null
-          ? true
-          : previous.currentConfigFingerprint === result.configFingerprint,
-        workerStartupValidation: previous?.workerStartupValidation ?? "NOT_CONFIGURED"
-      }));
-    }).catch((caught: unknown) => {
+    // 验证是否与当前配置匹配只能由服务端回答：本地拼一个 matchesCurrentConfig 会在配置指纹
+    // 读不到时凭空变成「通过」，等于在组件里维护第二套已确认事实。命令成功不等于事实已刷新，
+    // 因此这里重读一次权威状态，而不是就地改写上一次的读取结果。
+    void client.verifyModelPort()
+      .then(() => client.getModelPortVerification())
+      .then((nextVerification) => {
+        setVerifying(false);
+        setVerification(nextVerification);
+      }).catch((caught: unknown) => {
       setVerifying(false);
       setVerifyError(describeLiveError(caught).message);
     });
@@ -356,9 +366,11 @@ return <section className="settings-page" data-testid="settings-page">
         <h2>执行策略</h2>
         <p className="helper-text">执行连接与权限按项目管理，通知偏好尚无写接口。</p>
         <dl className="settings-definition-list">
-          <div><dt>界面语言</dt><dd><span className="status-chip status-chip--neutral">暂不可用</span> 尚无语言偏好接口。</dd></div>
-          <div><dt>通知偏好</dt><dd><span className="status-chip status-chip--neutral">暂不可用</span>
-            人工介入提醒规则已确认（工作台 11.5）：仅提醒必须由用户介入的事项；Relay 运行期间应用内保留待处理标记，窗口外另发 Windows 通知；同一事项只提醒一次；短时间多个事项合并为一条通知。本页暂无写接口，不提供假开关。</dd></div>
+          <div><dt>界面语言</dt><dd><span className="status-chip status-chip--neutral">暂不可用</span> 语言偏好读写接口尚未提供，暂不可修改。</dd></div>
+          <div><dt>通知偏好</dt>
+            <dd title="完整通知规则见《工作台交互设计》11.5：仅提醒必须由用户介入的事项；Relay 运行期间应用内保留待处理标记，窗口外另发 Windows 通知；同一事项只提醒一次；短时间多个事项合并为一条通知。">
+              <span className="status-chip status-chip--neutral">暂不可用</span>
+              提醒规则已确认：仅提醒必须由用户介入的事项，同一事项只提醒一次。设置写入接口尚未提供，暂不可修改；接口提供后此处开放设置。</dd></div>
         </dl>
         <Link className="inline-link" to="/connections">查看连接与权限</Link>
       </section></div>

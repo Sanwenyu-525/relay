@@ -111,7 +111,7 @@ for (const scenario of [
 }
 
 /** 声明了工具的 DRAFT 端口：完整且已声明的请求成为 TOOL_CALLS；
- * 半截参数、未声明工具名与「正文 + 工具」并存一律拒绝，不进入派发路径。 */
+ * 半截参数与未声明工具名拒绝，伴随正文保留为该轮的前置说明。 */
 const DRAFT_TOOLS = [{ name: 'search_text', description: '搜索受管根内的文本',
   parameters: { type: 'object', properties: { query: { type: 'string' } },
     required: ['query'], additionalProperties: false } }] as const;
@@ -125,6 +125,49 @@ function toolChunk(name: string, args: string, id = 'fixture-tool'): string {
 
 function draftManifest(): JsonObject {
   return { task: { title: '工具循环协议' }, contract: { objective: '验证工具请求协议' } };
+}
+
+for (const entry of ['DRAFT', 'ASSIST'] as const) {
+  test(`${entry} replays assistant text and provider reasoning in the next tool round`, async () => {
+    let calls = 0;
+    let nextBody: JsonObject | undefined;
+    const reasoningChunk = (text: string): string => `data: ${JSON.stringify({
+      id: 'chatcmpl-tool-fixture', object: 'chat.completion.chunk', created: 1,
+      model: 'fixture-model', choices: [{ index: 0,
+        delta: { role: 'assistant', reasoning_content: text }, finish_reason: null }],
+    })}\n\n`;
+    const model = port((_input, init) => {
+      calls += 1;
+      if (calls === 1) return response([reasoningChunk('先读取'), reasoningChunk('实际文件。'),
+        event('我先查一下。'), toolChunk('search_text', '{"query":"Relay"}'),
+        'data: [DONE]\n\n']);
+      nextBody = JSON.parse(String(init?.body)) as JsonObject;
+      return response([event('已找到结果。', 'stop'), 'data: [DONE]\n\n']);
+    });
+    const request = { tools: DRAFT_TOOLS };
+    const invoke = (toolTurns?: NonNullable<AssistRequest['toolTurns']>) => entry === 'DRAFT'
+      ? model.generate({ ...request, manifest: draftManifest(),
+        outputSchema: CANDIDATE_OUTPUT_SCHEMA, toolTurns })
+      : model.assist({ ...request, intent: 'DISCUSS', system: '基础工具往返',
+        turns: [{ role: 'user', content: '查找 Relay' }], toolTurns });
+    const first = await invoke();
+    assert.equal(first.kind, 'TOOL_CALLS');
+    if (first.kind !== 'TOOL_CALLS') return;
+    assert.equal(first.preamble, '我先查一下。');
+    assert.equal(first.reasoningContent, '先读取实际文件。');
+    const second = await invoke([{ calls: first.calls, preamble: first.preamble,
+      reasoningContent: first.reasoningContent,
+      results: [{ providerToolCallId: 'fixture-tool', name: 'search_text',
+        content: '{"count":1}', isError: false }] }]);
+    assert.equal(second.kind, 'CONTENT');
+    assert.equal(calls, 2);
+    const messages = nextBody?.messages as JsonObject[];
+    assert.deepEqual(messages.at(-2), { role: 'assistant', content: first.preamble,
+      reasoning_content: first.reasoningContent, tool_calls: [{ id: 'fixture-tool',
+        type: 'function', function: { name: 'search_text', arguments: '{"query":"Relay"}' } }] });
+    assert.equal(messages.at(-1)?.role, 'tool');
+    assert.equal(messages.at(-1)?.content, '{"count":1}');
+  });
 }
 
 test('a complete declared tool request becomes TOOL_CALLS with its provider id', async () => {

@@ -33,6 +33,25 @@ const isFileCapability = (capability: RelayGatewayCapability) =>
   capability !== "WEB_FETCH" && capability !== "FAKE_PUBLIC_READ";
 const connectionStatusText = (status: string): string => status === "ACTIVE" ? "已连接（尚未授权）"
   : status === "DISABLED" ? "已停用（失效）" : status === "REVOKED" ? "已撤销" : `未连接（${status}）`;
+/** 能力的中文显示名；原枚举以 title 呈现供核对，未知枚举回退原文。 */
+const capabilityLabels: Record<RelayGatewayCapability, string> = {
+  WEB_FETCH: "网页抓取", FILE_READ: "文件读取", FILE_QUERY: "目录检索",
+  FILE_WRITE: "文件写入", GIT_READ: "Git 读取", GIT_WRITE: "Git 写入",
+  CLI_RUN: "命令执行", FAKE_WRITE: "示例写入", FAKE_PUBLIC_READ: "示例公开读取"
+};
+const capabilityLabel = (capability: string): string =>
+  capabilityLabels[capability as RelayGatewayCapability] ?? capability;
+/** 列表用的决定中文短名；下拉保持「枚举 · 中文」双语便于与服务端核对。 */
+const decisionLabels: Record<RelayGatewayDecision, string> = {
+  DENY: "拒绝", ASK: "每次请求审批", AUTO: "自动准入"
+};
+const decisionLabel = (decision: string): string =>
+  decisionLabels[decision as RelayGatewayDecision] ?? decision;
+/** 受管资源与权限策略共用的状态中文短名；连接的 ACTIVE 另有专门语义文案。 */
+const recordStatusLabels: Record<string, string> = {
+  ACTIVE: "有效", DISABLED: "已停用", REVOKED: "已撤销"
+};
+const recordStatusLabel = (status: string): string => recordStatusLabels[status] ?? status;
 
 interface PolicyRow {
   readonly policy: RelayGatewayPolicy;
@@ -97,7 +116,14 @@ export default function ConnectionsView() {
       if (request !== projectRequest.current) return;
       setProjects((current) => cursor === null ? page.items : [...current, ...page.items.filter((item) => !current.some((row) => row.id === item.id))]);
       setNextCursor(page.nextCursor);
-    } catch (caught) { if (request === projectRequest.current) setError(describeLiveError(caught).message); }
+    } catch (caught) {
+      // 首屏/刷新读取失败时必须让旧列表失效：否则错误横幅旁仍渲染一份未重新核实的项目清单，
+      // 用户无法区分「这就是当前项目」与「这是上次读到的」。分页失败保留已有条目，只报错误。
+      if (request === projectRequest.current) {
+        setError(describeLiveError(caught).message);
+        if (cursor === null) { setProjects([]); setNextCursor(null); setProjectId(""); }
+      }
+    }
     finally { if (request === projectRequest.current) setLoading(false); }
   }
   useEffect(() => {
@@ -119,7 +145,7 @@ export default function ConnectionsView() {
       <h2>打开项目连接设置</h2>
       <p className="helper-text">可从项目列表打开项目后进入连接设置，或输入已知的 Project ID。</p>
       <label className="field"><span className="field-label">项目 ID</span><input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="项目的 UUID" data-testid="connections-project-id" /></label>
-      <button className="primary-button" type="submit" disabled={!projectId.trim()}>打开连接设置</button>
+      <button className="secondary-button" type="submit" disabled={!projectId.trim()}>打开连接设置</button>
     </form></details>
     <Link className="inline-link" to="/projects">返回项目入口</Link>
   </section>;
@@ -147,6 +173,7 @@ export function ProjectConnectionsView() {
   const [connectionCapability, setConnectionCapability] = useState<RelayGatewayCapability>("WEB_FETCH");
   const [connectionHost, setConnectionHost] = useState("");
   const [connectionRoot, setConnectionRoot] = useState("");
+  const [connectionExecutables, setConnectionExecutables] = useState("");
   const [resourceRoot, setResourceRoot] = useState("");
   const [policyId, setPolicyId] = useState("");
   const [policyCapability, setPolicyCapability] = useState<RelayGatewayCapability>("WEB_FETCH");
@@ -167,8 +194,8 @@ export function ProjectConnectionsView() {
       if (detail.id !== connectionId || detail.projectId !== projectId) throw new Error("连接详情与目标不匹配。");
       const active = detail.status === "ACTIVE";
       setHealth((current) => ({ ...current, [connectionId]: { checking: false, error: null,
-        result: `服务端只读核对：状态 ${detail.status}（${active ? "已连接" : "未连接/已停用"}） · 版本 v${detail.version}`
-          + (detail.capabilities.length > 0 ? ` · 能力 ${detail.capabilities.join(" · ")}` : "")
+        result: `服务端只读核对：${connectionStatusText(detail.status)} · 版本 v${detail.version}`
+          + (detail.capabilities.length > 0 ? ` · 能力 ${detail.capabilities.map(capabilityLabel).join(" · ")}` : "")
           + (detail.allowedHost ? ` · 允许主机 ${detail.allowedHost}` : "")
           + (active ? "" : "；连接存在不等于已获授权，失效后原批准不可继续复用。") } }));
     } catch (caught) {
@@ -221,7 +248,9 @@ export function ProjectConnectionsView() {
           next?.resources.some((item) => item.id === resultId && item.revision === envelope.result.revision && item.status === envelope.result.status);
     setMessage(confirmed ? `${command.label}已由服务端回执和最新项目查询确认。` : `${command.label}回执已提交；列表尚未确认最新状态，请刷新核对。`);
     if (command.resultKey === "policy_id" && next?.policies.some(({ policy }) => policy.id === resultId)) setPolicyId(resultId);
-    if (command.type === "CreateGatewayConnection") { setConnectionHost(""); setConnectionRoot(""); }
+    if (command.type === "CreateGatewayConnection") {
+      setConnectionHost(""); setConnectionRoot(""); setConnectionExecutables("");
+    }
     if (command.type === "CreateManagedResource") setResourceRoot("");
   }
 
@@ -275,10 +304,14 @@ export function ProjectConnectionsView() {
     const capability = connectionCapability;
     const rootPath = connectionRoot.trim();
     const allowedHost = connectionHost.trim();
+    const allowedExecutables: readonly string[] = capability === "CLI_RUN"
+      ? Object.freeze(connectionExecutables.split(/\r\n?|\n/u).map((path) => path.trim()).filter(Boolean))
+      : [];
     if ((rootBoundCapabilities.includes(capability) && !rootPath) || (capability === "WEB_FETCH" && !allowedHost)) return;
     const command: PendingCommand = { id: createCommandId(), type: "CreateGatewayConnection", resultKey: "connection_id", targetId: null, expectedStatus: "ACTIVE",
       label: "连接创建", send: (api, commandId) => api.createGatewayConnection({ projectId, commandId, capability,
-        ...(rootBoundCapabilities.includes(capability) ? { rootPath } : {}), ...(capability === "WEB_FETCH" ? { allowedHost } : {}) }) };
+        ...(rootBoundCapabilities.includes(capability) ? { rootPath } : {}), ...(capability === "WEB_FETCH" ? { allowedHost } : {}),
+        ...(capability === "CLI_RUN" && allowedExecutables.length > 0 ? { allowedExecutables } : {}) }) };
     void sendCommand(command);
   }
 
@@ -358,8 +391,11 @@ export function ProjectConnectionsView() {
           {snapshot.connections.length === 0 ? <p className="helper-text">本项目尚无连接。</p> : <ul className="connections-list">{snapshot.connections.map((item) => {
             const healthState = health[item.id];
             return <li key={item.id}>
-            <div><strong>{item.capabilities.join(" · ")}</strong><small>{connectionStatusText(item.status)} · {item.status} · v{item.version} · {item.id}</small>
+            <div><strong title={item.capabilities.join(" · ")}>
+              {item.capabilities.map(capabilityLabel).join(" · ")}</strong>
+              <small title={item.status}>{connectionStatusText(item.status)} · v{item.version} · <code className="hash-code">{item.id}</code></small>
               {item.capabilities.includes("WEB_FETCH") && <small>允许主机：{item.allowedHost ?? "未由接口公开"}</small>}
+              {item.capabilities.includes("CLI_RUN") && <small data-testid="connection-allowed-executables">允许的可执行文件：{item.allowedExecutables?.length ? item.allowedExecutables.join("、") : "未配置"}</small>}
               {item.capabilities.some((capability) => rootBoundCapabilities.includes(capability as RelayGatewayCapability)) && <small>连接目录未由此接口公开；下方受管资源目录是独立配置，不推定同根。</small>}
               {healthState?.result && <small className="connection-health" role="status">{healthState.result}</small>}
               {healthState?.error && <small className="action-error" role="alert">健康核对失败：{healthState.error}</small>}</div>
@@ -377,12 +413,13 @@ export function ProjectConnectionsView() {
               {capabilities.map((capability) => <option key={capability} value={capability}>{capability}</option>)}</select></label>
             {connectionCapability === "WEB_FETCH" && <label className="field"><span className="field-label">允许主机</span><input value={connectionHost} onChange={(event) => setConnectionHost(event.target.value)} disabled={busy} required placeholder="example.org" data-testid="connection-host" /><span className="field-hint">只填 DNS 主机，不含 scheme、端口和路径；本页不启用私有地址例外。</span></label>}
             {rootBoundCapabilities.includes(connectionCapability) && <label className="field"><span className="field-label">连接目录</span><input value={connectionRoot} onChange={(event) => setConnectionRoot(event.target.value)} disabled={busy} required placeholder="本机已有绝对目录" data-testid="connection-root" /><span className="field-hint">服务端要求现存目录；提交后查询接口不读回原目录。</span></label>}
+            {connectionCapability === "CLI_RUN" && <label className="field"><span className="field-label">允许的可执行文件</span><textarea value={connectionExecutables} onChange={(event) => setConnectionExecutables(event.target.value)} disabled={busy} rows={3} data-testid="connection-executables" /><span className="field-hint">每行填写一个完整绝对路径（路径可含空格），留空表示未配置。服务端会核验现存普通文件并返回规范化路径；根目录内脚本无需列出，根目录外可执行文件需与此列表匹配。此列表不替代动作权限。</span></label>}
             <button className="primary-button" type="submit" disabled={busy || writeBlockedReason !== null}>创建连接</button>
           </form></details>
         </section>
 
         <section className="surface-panel"><h2>受管资源</h2><p className="helper-text">本列表最多读取服务端前 100 条，没有下一页。下列目录是文件读取 / 写入类策略可引用的独立受管资源，不等于文件读取连接自身的目录。</p>
-          {snapshot.resources.length === 0 ? <p className="helper-text">本项目尚无受管资源。</p> : <ul className="connections-list">{snapshot.resources.map((item) => <li key={item.id}><div><strong>{item.canonicalRoot}</strong><small>{item.status} · rev {item.revision} · epoch {item.resourceEpoch} · {item.id}</small>
+          {snapshot.resources.length === 0 ? <p className="helper-text">本项目尚无受管资源。</p> : <ul className="connections-list">{snapshot.resources.map((item) => <li key={item.id}><div><strong>{item.canonicalRoot}</strong><small title={item.status}>{recordStatusLabel(item.status)} · rev {item.revision} · epoch {item.resourceEpoch} · <code className="hash-code">{item.id}</code></small>
             <small>Windows 文件写入目录身份：{item.fileWriteIdentityBound ? "已绑定" : "未绑定；若需在 Windows 使用 FILE_WRITE，请在 Windows 停用后重新登记此目录"}</small></div>
             {item.status === "ACTIVE" && <button className="danger-button" type="button" disabled={busy || writeBlockedReason !== null} onClick={() => { void sendCommand({
               id: createCommandId(), type: "DisableManagedResource", resultKey: "resource_id", targetId: item.id, expectedStatus: "DISABLED",
@@ -397,8 +434,10 @@ export function ProjectConnectionsView() {
           <p className="helper-text">本列表最多读取服务端前 100 条，没有下一页。没有匹配的有效策略时默认拒绝（DENY）。自动放行 / 询问 / 拒绝（AUTO / ASK / DENY）只在你明确提交策略后生效；还需有效连接及目标边界匹配。</p>
           {snapshot.policies.length === 0 ? <p className="helper-text">本项目没有权限策略，当前默认 DENY。</p> : <ul className="connections-list">{snapshot.policies.map(({ policy, versions }) => {
             const active = versions.find((version) => version.version === policy.activeVersion);
-            return <li key={policy.id}><div><strong>{active ? `${active.capability} · ${active.decision}` : "无有效版本 · DENY"}</strong>
-              <small>{policy.status} · rev {policy.revision} · active v{policy.activeVersion ?? "无"} · {policy.id}</small>
+            return <li key={policy.id}><div><strong title={active ? `${active.capability} · ${active.decision}` : "DENY"}>
+              {active ? `${capabilityLabel(active.capability)} · ${decisionLabel(active.decision)}`
+                : `无有效版本 · ${decisionLabel("DENY")}`}</strong>
+              <small title={policy.status}>{recordStatusLabel(policy.status)} · rev {policy.revision} · 生效版本 {policy.activeVersion ?? "无"} · <code className="hash-code">{policy.id}</code></small>
               {active && <small>目标：{active.targetPrefix} · 上限 {active.maxPayloadBytes} bytes · {active.actionType}</small>}
               {policy.activeVersion && !active && <small>当前版本详情尚未读到，不推断授权。</small>}
               <details><summary>查看已读取版本（{versions.length}，最多最近 100 条）</summary><ol>{versions.map((version) => <li key={version.version}>v{version.version} · {version.capability} · {version.decision} · {version.targetPrefix} · {version.maxPayloadBytes} bytes</li>)}</ol></details>

@@ -34,7 +34,10 @@ $bootstrapRoles = Join-Path $apiRoot 'sql\bootstrap-roles.sql'
 $testDirectory = Join-Path $apiRoot 'dist\test\integration'
 $testSourceDirectory = Join-Path $apiRoot 'test\integration'
 if ($TestFile -ne '') {
-  if ($TestFile -notmatch '^[a-z0-9-]+$') { throw 'TestFile must be a simple integration test basename' }
+  if ($TestFile -notmatch '^[a-z0-9-]+(,[a-z0-9-]+)*$') { throw 'TestFile must be a comma-separated list of simple integration test basenames' }
+  $requestedFiles = @($TestFile -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+} else {
+  $requestedFiles = @()
 }
 
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("relay-api-integration-$($([guid]::NewGuid().ToString('N')).Substring(0, 10))")
@@ -51,6 +54,8 @@ $businessMigrationExitCode = $null
 $graphInstallExitCode = $null
 $directoryRemoved = $false
 $failureMessage = $null
+$failedSuites = @()
+$testFileNameIndex = @{}
 
 Write-Host "Temporary cluster root: $temporaryRoot"
 
@@ -98,10 +103,17 @@ try {
     Get-Item -LiteralPath (Join-Path $testSourceDirectory 'm03-mock-benchmark.bench.ts')
   } else {
     Get-ChildItem -LiteralPath $testSourceDirectory -Recurse -File -Filter '*.test.ts' |
-      Where-Object { $TestFile -eq '' -or $_.Name -eq "$TestFile.integration.test.ts" }
+      Where-Object { $requestedFiles.Count -eq 0 -or $requestedFiles -contains ($_.Name -replace '\.integration\.test\.ts$', '') }
   })
   if ($testSources.Count -eq 0) {
     throw "Integration test sources are missing: $TestFile"
+  }
+  # 指定了文件就必须逐个解析到真实源文件：少匹配任何一个都要报错。
+  # 静默少跑一个套件会让「定向回归全绿」看起来覆盖了实际没跑的出口。
+  $resolvedNames = @($testSources | ForEach-Object { $_.Name -replace '\.integration\.test\.ts$', '' })
+  $missing = @($requestedFiles | Where-Object { $resolvedNames -notcontains $_ })
+  if ($missing.Count -gt 0) {
+    throw ("No integration test source matched: " + ($missing -join ', '))
   }
   $testFiles = @($testSources | ForEach-Object {
     $relative = $_.FullName.Substring($testSourceDirectory.Length + 1)
@@ -113,6 +125,11 @@ try {
     }
   }
   Write-Host ("Current source integration suites: " + $testFiles.Count)
+  # 每个文件一个短且唯一的库名后缀（PostgreSQL 标识符上限 63 字符）。
+  for ($index = 0; $index -lt $testFiles.Count; $index += 1) {
+    $testFileNameIndex[$testFiles[$index]] = ('f{0:d3}_{1}' -f $index,
+      ([guid]::NewGuid().ToString('N')).Substring(0, 12))
+  }
 
   $initdbArgs = @('-D', $dataDirectory, '-U', 'relay_api_admin', '-A', 'trust', '--encoding=UTF8')
   if ($UseCLocale) { $initdbArgs += '--locale=C' }
@@ -185,16 +202,45 @@ try {
   }
 
   # Do not pipe node --test either: the test process spawns the API process under test.
-  # Test files share this database; one test temporarily changes table-level RLS.
-  # Keep files serial so that policy cannot hide rows from an unrelated file.
+  #
+  # 每个测试文件用**独占数据库**，而不是全部文件共享一个库。理由是生产语义本身是全局的：
+  # Assist 领取（`claimNextPendingMessage`）、Run 命令队列与维护准入都按整库选取，
+  # `--test-concurrency=1` 只保证文件不并发执行，并不提供任何数据隔离。共享一个库时，
+  # 某个套件遗留的 PENDING 消息会被下一个套件启动的真实 API 进程领走，于是出现
+  # 「单跑全绿、全量串行却失败」这种无法归因的组合失败。
+  #
+  # 这里按 `CREATE DATABASE ... TEMPLATE` 从已迁移的库克隆：迁移只跑一次，每个文件拿到
+  # 干净副本，跑完即删。生产 claim 逻辑、维护门与连接安全门都不需要为此放宽。
   Push-Location $apiRoot
   try {
-    if ($TestNamePattern -eq '') {
-      & $nodeExe '--test' '--test-concurrency=1' @testFiles
-    } else {
-      & $nodeExe '--test' '--test-concurrency=1' "--test-name-pattern=$TestNamePattern" @testFiles
+    $testExitCode = 0
+    foreach ($testFile in $testFiles) {
+      $fileDatabase = "relay_api_test_$($testFileNameIndex[$testFile])"
+      # owner 必须显式指定：CREATE DATABASE ... TEMPLATE 默认把新库交给执行者（管理员），
+      # 而 public schema 归 pg_database_owner，owner 变了迁移角色就失去建表权限。
+      & $psqlExe $adminUrl '-w' '-v' 'ON_ERROR_STOP=1' `
+        '-c' "create database $fileDatabase template $databaseName owner relay_migrator"
+      if ($LASTEXITCODE -ne 0) {
+        throw "creating the isolated database for $testFile failed with exit code $LASTEXITCODE"
+      }
+      try {
+        $env:RELAY_TEST_ADMIN_DATABASE_URL = "postgresql://relay_api_admin@127.0.0.1:$port/$fileDatabase"
+        $env:RELAY_TEST_MIGRATION_DATABASE_URL = "postgresql://relay_migrator@127.0.0.1:$port/$fileDatabase"
+        $env:RELAY_TEST_DATABASE_URL = "postgresql://relay_app@127.0.0.1:$port/$fileDatabase"
+        if ($TestNamePattern -eq '') {
+          & $nodeExe '--test' '--test-concurrency=1' $testFile
+        } else {
+          & $nodeExe '--test' '--test-concurrency=1' "--test-name-pattern=$TestNamePattern" $testFile
+        }
+        if ($LASTEXITCODE -ne 0) {
+          $failedSuites += ([System.IO.Path]::GetFileNameWithoutExtension($testFile))
+          $testExitCode = 1
+        }
+      } finally {
+        & $psqlExe $adminUrl '-w' '-c' "drop database if exists $fileDatabase with (force)" | Out-Null
+      }
     }
-    $testExitCode = $LASTEXITCODE
+    if ($failedSuites.Count -gt 0) { Write-Host ("failing suites: " + ($failedSuites -join ', ')) }
   } finally {
     Pop-Location
   }

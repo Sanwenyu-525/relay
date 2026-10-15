@@ -4,11 +4,13 @@ import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
 
 /**
- * session_tool_calls 的独占写入口（迁移 0060）。
+ * session_tool_calls 的独占写入口（迁移 0060；0087 起同时承载两种会话读取来源）。
  *
- * 这是 B 档工具轮次的账本。它与 run_tool_calls 刻意不合并：Run 是 Task 的执行身份，
- * 人设会话没有 Task 也没有 Run，两者不得互相填对方的 id。因此本表不存 step/attempt，
- * 只存会话与消息身份，以及那次只读动作自己的 Operation。
+ * 这是**会话读取**工具轮次的账本，覆盖 B 档人设助手与普通 Agent 主流程两种身份。它与
+ * run_tool_calls 刻意不合并：Run 是 Task 的执行身份，这两种会话都没有 Task 也没有 Run，
+ * 两者不得互相填对方的 id。因此本表不存 step/attempt，只存会话与消息身份，以及那次
+ * 只读动作自己的 Operation。两种来源靠 `attachOperation()` 的 origin 参数区分：
+ * 一档的行不能绑到另一档的动作上。
  */
 export interface SessionToolCallRow {
   readonly id: string;
@@ -65,15 +67,17 @@ export class SessionToolCallRepository {
   /**
    * 绑定那次只读动作的 Operation 身份。
    *
-   * 目标 Operation 必须是 ASSISTANT_READ 来源、同一 Project 与受管资源——由 0060 的
-   * CHECK 与这里的显式核对共同保证。跨身份冒用（指向一个 RUN 的既有 Operation）
-   * 在这里被挡住，而不是等读取投影时才发现。
+   * 目标 Operation 必须是**本次调用方自己的**会话读取来源、同一 Project 与受管资源——
+   * 由 0060/0087 的 CHECK 与这里的显式核对共同保证。跨身份冒用（人设助手的行指向普通
+   * 会话的 Operation，或反过来，或指向一个 RUN 的既有 Operation）在这里被挡住，
+   * 而不是等读取投影时才发现。
    */
-  async attachOperation(id: string, operationId: string): Promise<boolean> {
+  async attachOperation(id: string, operationId: string,
+    origin: 'ASSISTANT_READ' | 'AGENT_SESSION_READ'): Promise<boolean> {
     return (await sql<{ id: string }>`update session_tool_calls set operation_id = ${operationId}
       where id = ${id} and operation_id is null
         and exists (select 1 from logical_operations o where o.id = ${operationId}
-          and o.origin = 'ASSISTANT_READ')
+          and o.origin = ${origin})
       returning id`.execute(this.db)).rows.length === 1;
   }
 

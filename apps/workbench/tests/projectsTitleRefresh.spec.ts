@@ -18,7 +18,8 @@ for (const firstReadFails of [false, true]) {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith('/attention/interventions')) return response(200,{items:[]});
-      if (url === `${root}/projects?status=active`) return response(200,{items:[{
+      // 左栏近期工作读 status=active，项目主区自 2026-10-11 起默认读 status=all；两条都返回同一份。
+      if (url === `${root}/projects?status=active` || url === `${root}/projects?status=all`) return response(200,{items:[{
         id:projectId,title:'审查项目',project_type:'GENERAL',archived_at:null,archive_status:'ACTIVE',
         revision:'2',state_revision:'3',phase_key:'PLANNING',next_action_task_id:taskId,
         created_at:'2026-09-28T00:00:00Z',updated_at:'2026-09-28T00:00:00Z'

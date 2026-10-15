@@ -17,6 +17,9 @@ const STATUS_LABELS: Record<string, string> = {
   FAILED: "准备失败",
 };
 
+/** 可以直接启动、还没有 Run、且此前没有报错的阶段。 */
+const STARTABLE = ["READY", "TASK_PREPARED", "FAILED"];
+
 export default function ExecutionSummary({ execution, busy, onApply, onOpenTask, error }: {
   execution: RelayConversationExecution | null;
   busy: boolean;
@@ -29,25 +32,32 @@ export default function ExecutionSummary({ execution, busy, onApply, onOpenTask,
     data-testid="execution-summary" role="alert">
     <p className="action-error">{error}</p></section>;
   const request = execution;
+  const startable = STARTABLE.includes(request.status) &&
+    request.candidateStatus === "READY" && request.runId === null;
+  // 服务端已判定为明确只读执行请求时，按 ADR-016 §18.2 直接沿既有入口启动，不再要求
+  // 固定一次「按这个目标执行」；自动启动失败时按钮才作为人工恢复入口出现。
+  // 写意图的请求仍保留这次确认（§18.4.1），两者不由本组件判断。
+  const autoStart = request.autoStart === true;
+  const showStart = startable && (!autoStart || error !== null);
   return <section className={`execution-summary execution-summary--${request.decision.toLowerCase()}`}
     data-testid="execution-summary" data-decision={request.decision} data-status={request.status}
-    aria-live="polite">
+    data-auto-start={autoStart ? "true" : "false"} aria-live="polite">
     <p className="execution-summary-stage" data-testid="execution-summary-stage">
       {STATUS_LABELS[request.status] ?? request.status}
     </p>
     {request.decision === "PREPARE" && <>
-      <p className="execution-summary-title" data-testid="execution-summary-title">{request.title}</p>
-      <p className="helper-text">{request.objective}</p>
+      <p className="execution-summary-title" data-testid="execution-summary-title">{request.title ?? "原执行目标已保存"}</p>
+      {request.objective != null && <p className="helper-text">{request.objective}</p>}
       <p className="helper-text" data-testid="execution-summary-root">当前目录：{request.rootPath}</p>
       <div className="form-actions">
-        {request.status === "READY" && <button className="primary-button" type="button"
+        {showStart && <button className="primary-button" type="button"
           data-testid="execution-start" disabled={busy} onClick={() => onApply(request.requestId)}>
-          {busy ? "正在建立任务" : "按这个目标执行"}</button>}
+          {busy ? "正在核对并接续" : request.status === "READY" ? "按这个目标执行" : "继续原请求执行"}</button>}
         {request.taskId !== null && <button className="secondary-button" type="button"
           data-testid="execution-open-task" onClick={() => onOpenTask(request.taskId as string)}>
           查看任务 {request.taskId.slice(0, 8)}</button>}
       </div>
-      <p className="helper-text">现在确认的是目标与范围，不是已经写好的新正文：文件内容会在执行时读取后决定。开始执行不代表已完成——写入文件与运行检查仍会各自请求一次批准。</p>
+      <p className="helper-text">现在确认的是目标与范围：文件内容会在执行时读取后决定。开始执行不代表已完成；动作按现有权限与本次范围授权准入，必要判断沿原审批入口处理。</p>
     </>}
     {request.decision === "CLARIFY" && <p className="execution-summary-question"
       data-testid="execution-clarify">{request.questions[0] ?? "这次要处理的具体内容是什么？"}</p>}

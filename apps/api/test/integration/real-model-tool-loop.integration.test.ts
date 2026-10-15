@@ -19,6 +19,7 @@ import { sql } from 'kysely';
 
 import { createGatewayPolicy, registerManagedResource } from
   '../../src/application/gateway-configuration.js';
+import { computeCheckTrustBasis } from '../../src/application/check-trust-basis.js';
 import { createTask } from '../../src/application/create-task.js';
 import { delegateTask } from '../../src/application/delegate-task.js';
 import { applySafeControl, requestRunControl } from '../../src/application/control-requests.js';
@@ -270,6 +271,16 @@ async function repairFixture(): Promise<RepairFixture> {
   const check: FrozenCheck = { id: 'check-1', executable: process.execPath,
     args: [scriptPath, join(base.rootPath, targetPath)], max_output_bytes: 4096,
     executable_sha256: createHash('sha256').update(await readFile(process.execPath)).digest('hex') };
+  // 依据在委托前从实际材料计算，不能从委托回执复制出一份必然相等的预期。
+  const trust = await computeCheckTrustBasis({ canonicalRoot: base.rootPath,
+    executable: check.executable, args: check.args });
+  assert.ok(trust.ok);
+  assert.equal(trust.basis.materials.length, 2);
+  assert.equal(trust.basis.materials.find((material) => material.role === 'EXECUTABLE')?.sha256,
+    check.executable_sha256);
+  assert.equal(trust.basis.materials.find((material) => material.role === 'REFERENCED_SCRIPT')?.sha256,
+    createHash('sha256').update(scriptText).digest('hex'));
+  const frozenCheck: FrozenCheck = { ...check, trust_basis: trust.basis };
 
   await withTransaction(app.db, async (repositories) => {
     await repositories.workspaces.lockAuthority(base.workspaceId, 'update');
@@ -304,7 +315,7 @@ async function repairFixture(): Promise<RepairFixture> {
       allowed_actions: ['APPLY_CHANGESET', 'CLI_RUN'], checks: [check] } });
   return { ...base, runId: delegated.result.run_id, taskId: task.result.task_id,
     marker, targetPath, sourceText, sourceSha256,
-    expectedGreeting, check, scriptPath, scriptText, preservedFiles, entries };
+    expectedGreeting, check: frozenCheck, scriptPath, scriptText, preservedFiles, entries };
 }
 
 /** 真实模型下交替推进步骤与工具派发；上限只是防失控，不是产品预算。 */

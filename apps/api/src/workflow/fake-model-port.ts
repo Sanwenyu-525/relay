@@ -51,6 +51,8 @@ export type ModelResult =
        * 它不是候选正文：候选只能来自没有工具请求的那一轮。空串表示模型没有说话。
        */
       readonly preamble: string;
+      /** Provider 原样返回的续轮字段；不作为正文发布，也不作为业务判断依据。 */
+      readonly reasoningContent?: string | undefined;
       readonly providerRequestId: string;
       readonly usage: ModelUsage;
     }
@@ -94,6 +96,9 @@ export type FakeToolScript = readonly FakeToolScriptRound[];
 export interface ModelToolTurn {
   readonly calls: readonly ModelToolCall[];
   readonly results: readonly ModelToolTurnResult[];
+  /** 老账本未保存前置说明时保持缺省，不能补造历史。 */
+  readonly preamble?: string | undefined;
+  readonly reasoningContent?: string | undefined;
 }
 
 export interface ModelToolTurnResult {
@@ -148,6 +153,71 @@ export interface AssistRequest {
   readonly tools?: readonly ModelToolSpec[] | undefined;
   /** 已经结算的历史工具轮次，按顺序原样回传。 */
   readonly toolTurns?: readonly ModelToolTurn[] | undefined;
+  /**
+   * 学习轮次（0072 / ADR-020 §4）：给出本轮**相关短状态**与获准来源身份，
+   * 端口改用结构化信封返回正文与有限类型化候选增量。缺省时既有行为逐字不变。
+   */
+  readonly learning?: AssistLearningRequest | undefined;
+}
+
+/**
+ * 学习轮次的输入。
+ *
+ * `state` 由应用选择与裁剪（模型不能自选知识点），`material` 只保留可核对的来源身份——
+ * 正文仍由既有的只读材料读取能力提供，不在这里复制项目内容。
+ */
+export interface AssistLearningRequest {
+  readonly state: JsonObject;
+  readonly material: readonly JsonObject[];
+}
+
+/** 结构化教学信封的解析结果。`schemaError` 非空表示信封不合法：保留正文，不写增量。 */
+export interface LearningEnvelope {
+  readonly answer: string;
+  readonly increments: readonly JsonObject[];
+  readonly schemaError: string | null;
+}
+
+const LEARNING_ENVELOPE_KEYS: readonly string[] = ['answer', 'increments'];
+
+/**
+ * 解析教学信封：只接受 `{answer, increments}` 两个键。
+ *
+ * 多一个键就整封拒绝——这是「候选不能携带任意存储路径、项目命令或 SQL」的第一道闸：
+ * 任何额外字段都不进入应用层，而不是被静默忽略。
+ */
+export function parseLearningEnvelope(text: string): LearningEnvelope {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { answer: text.trim(), increments: [], schemaError: 'LEARNING_ENVELOPE_NOT_JSON' };
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { answer: text.trim(), increments: [], schemaError: 'LEARNING_ENVELOPE_NOT_OBJECT' };
+  }
+  const record = parsed as Record<string, unknown>;
+  const extra = Object.keys(record).filter((key) => !LEARNING_ENVELOPE_KEYS.includes(key));
+  if (extra.length > 0) {
+    return { answer: text.trim(), increments: [],
+      schemaError: `LEARNING_ENVELOPE_UNEXPECTED_FIELDS:${extra.sort().join(',')}` };
+  }
+  if (typeof record.answer !== 'string' || record.answer.trim() === '') {
+    return { answer: text.trim(), increments: [], schemaError: 'LEARNING_ENVELOPE_ANSWER_MISSING' };
+  }
+  if (!Array.isArray(record.increments)) {
+    return { answer: record.answer.trim(), increments: [],
+      schemaError: 'LEARNING_ENVELOPE_INCREMENTS_MISSING' };
+  }
+  const increments: JsonObject[] = [];
+  for (const entry of record.increments) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      return { answer: record.answer.trim(), increments: [],
+        schemaError: 'LEARNING_ENVELOPE_INCREMENT_NOT_OBJECT' };
+    }
+    increments.push(entry as JsonObject);
+  }
+  return { answer: record.answer.trim(), increments, schemaError: null };
 }
 
 export type AssistResult =
@@ -156,6 +226,9 @@ export type AssistResult =
       readonly content: string;
       readonly providerRequestId: string;
       readonly usage: ModelUsage;
+      /** 仅学习轮次存在：与本轮正文一起返回的有限候选增量与信封校验结果。 */
+      readonly learning?: { readonly increments: readonly JsonObject[];
+        readonly schemaError: string | null } | undefined;
     }
   /**
    * 一次完整、可解析的工具请求。断流或半截参数绝不产生这个结果。
@@ -165,6 +238,7 @@ export type AssistResult =
       readonly kind: 'TOOL_CALLS';
       readonly calls: readonly ModelToolCall[];
       readonly preamble: string;
+      readonly reasoningContent?: string | undefined;
       readonly providerRequestId: string;
       readonly usage: ModelUsage;
     }
@@ -203,6 +277,30 @@ export const MISSING_MATERIAL_INPUT = 'material';
  * M04 Assist：按 intent 返回确定性回复或提案 JSON；触发串仅用于测试
  * （真实端口不解释这些标记），生产 Mock 路径不会包含它们。
  */
+/**
+ * Fake 的教学信封：从用户轮次里的 `LEARNING: op | topic | concept | scenario | detail`
+ * 行式标记构造增量，其余文本作为讲解正文。仅测试使用——真实端口不解释这些标记。
+ */
+export function fakeLearningEnvelope(text: string): LearningEnvelope {
+  const increments: JsonObject[] = [];
+  const kept: string[] = [];
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('LEARNING:')) {
+      if (trimmed !== '') kept.push(trimmed);
+      continue;
+    }
+    const fields = trimmed.slice('LEARNING:'.length).split('|').map((part) => part.trim());
+    if (fields.length !== 5 || fields.some((part) => part === '')) continue;
+    increments.push({ op: fields[0]!, topic: fields[1]!, concept: fields[2]!,
+      scenario: fields[3]!, detail: fields[4]! });
+  }
+  const answer = kept.length === 0
+    ? '（Fake 学习搭档）本轮没有新的问题，先按当前状态继续。'
+    : `（Fake 学习搭档）${kept.join(' ').slice(0, 400)}`;
+  return { answer, increments, schemaError: null };
+}
+
 export class FakeModelPort implements AssistModelPort {
   readonly identity: ModelIdentity = {
     provider: 'fake', model: 'fake-model-v1',
@@ -310,6 +408,21 @@ export class FakeModelPort implements AssistModelPort {
       cacheReadTokens: null,
       cacheCreationTokens: null,
     };
+    if (request.learning !== undefined) {
+      // 学习轮次：一次调用同时产出正文与有限增量（不额外发起评分调用）。
+      // 触发串只服务测试断言，真实端口不解释它。
+      const text = lastUser?.content ?? '';
+      if (text.includes('FAKE_LEARNING_BAD_ENVELOPE')) {
+        const broken = '（Fake 学习搭档）本轮讲解正文；增量信封不合法。';
+        return { kind: 'CONTENT', content: broken, providerRequestId,
+          usage: { ...usage, outputTokens: Math.max(1, Math.ceil(broken.length / 4)) },
+          learning: { increments: [], schemaError: 'LEARNING_ENVELOPE_NOT_JSON' } };
+      }
+      const envelope = fakeLearningEnvelope(text);
+      return { kind: 'CONTENT', content: envelope.answer, providerRequestId,
+        usage: { ...usage, outputTokens: Math.max(1, Math.ceil(envelope.answer.length / 4)) },
+        learning: { increments: envelope.increments, schemaError: null } };
+    }
     if (request.skill !== undefined) {
       const facts = request.skill.facts;
       let proposal: JsonObject;

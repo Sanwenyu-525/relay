@@ -285,6 +285,7 @@ export async function advanceRunStep(
     }
 
     if (isTerminalRunStatus(run.status)) {
+      await repositories.toolCalls.rejectUndispatchedForTerminalRun(run.id, run.status);
       return { status: 'RUN_TERMINAL', run_status: run.status };
     }
 
@@ -354,7 +355,11 @@ export async function advanceRunStep(
     }
     // Compatibility: older builds could mark an UNKNOWN tool row SETTLED. Check
     // authoritative operations before attempting to reclaim or generate a new draft.
+    // ACTION_UNKNOWN 只能由「可能已经产生外部效果」的动作触发，也就是 Operation 本身处于
+    // DISPATCHING/UNKNOWN。PREPARED 与 WAITING_APPROVAL 从未派发：把它们投影成未知，会让一个
+    // 已证明零副作用的确定性拒绝看起来仍需人工核对，并把 Run 挂成等待停机证据。
     for (const operation of await repositories.gateway.listUnresolvedRunOperations(run.id)) {
+      if (!['DISPATCHING', 'UNKNOWN'].includes(operation.status)) continue;
       if (await repositories.toolCalls.readByOperation(run.id, operation.id) !== undefined) {
         return { status: 'ACTION_UNKNOWN', run_id: run.id, operation_id: operation.id };
       }
@@ -921,6 +926,7 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
               workspaceId: claim.run.workspace_id, projectId: toolPlan.projectId,
               runId: claim.run.id, stepId: claim.step.id, stepAttemptId: claim.attempt.id,
               modelCallId: recorded.callId, round, calls: recorded.result.calls, plan: toolPlan,
+              preamble: recorded.result.preamble, reasoningContent: recorded.result.reasoningContent,
               usedCalls,
               cancelled: input.signal?.aborted === true });
             const dispatchable = persisted.rows.find((row) => row.status === 'REQUESTED');

@@ -23,7 +23,7 @@
 
 用户要求克隆源码以便对照、参考。本次复用已有七个仓库，新增克隆 pg-boss 和 Vercel AI SDK；已核对九个仓库的 origin、HEAD、检出范围和工作树状态，工作树均无未提交变更。下列路径均相对项目根目录 `D:/Develop/Relay-Agent`，位于 `.gitignore` 排除的 `.research/` 中。
 
-此标题保留首批核验日期和既有锚点；DeepSeek 缓存于 2026-10-01 更新，清单该行及 §1.2 记录当前快照。2026-10-02 又对其余落后仓库执行 `fetch` 与 `merge --ff-only`（先核对工作树干净，未改 remote、未改稀疏检出范围），清单“核验提交”列改为记录当前缓存提交，原提交作为历史锚点保留；Vercel AI SDK 只补取 `origin/main` 作为远程引用，未移动 HEAD，理由见本节末。
+此标题保留首批核验日期和既有锚点；DeepSeek 缓存于 2026-10-01 更新，清单该行及 §1.2 记录当前快照。2026-10-02 又对其余落后仓库执行 `fetch` 与 `merge --ff-only`（先核对工作树干净，未改 remote、未改稀疏检出范围），清单“核验提交”列改为记录当前缓存提交，原提交作为历史锚点保留；Vercel AI SDK 只补取 `origin/main` 作为远程引用，未移动 HEAD，理由见本节末。2026-10-10 按用户要求新增克隆 OpenCode 与 ZCode，已核对两仓库的 origin、HEAD 与工作树状态（均干净、与远端 HEAD 一致），尚未开展源码研究或运行验证。
 
 | 项目 | 本地目录 | 核验提交 / 版本依据 | 工作树范围 | 对照用途 |
 |---|---|---|---|---|
@@ -36,12 +36,14 @@
 | Kysely | `.research/upstream/kysely` | `996eae17fe32`；0.29.6；原 `2fefd4c848cc` | 完整检出 | SQL、事务和 Migrator 锁处理 |
 | pg-boss | `.research/upstream/pg-boss` | `8bbcf5815357`；12.35.1；原 `4e05af1eeaad` | 完整检出 | PostgreSQL 队列、领取与唤醒机制，待研究 |
 | Vercel AI SDK | `.research/vercel-ai` | `08ae5ad05bc12`；`ai@7.0.107`，实验锁文件 | 完整检出 | 模型流、工具 schema、审批和取消边界 |
+| OpenCode | `.research/upstream/opencode` | `055d95bb7e27`；§1.3 在线研究锚点 `907b3bc518fa` | 完整检出 | 会话执行计划、Todo 原子更新与会话底部计划 UI |
+| ZCode | `.research/upstream/zcode` | `aac4755666d0`；tag `v3.15.1` | 完整检出 | Z.ai coding agent harness 机制对照，待研究 |
 
-首批六项的历史完整提交及 origin 以本节上方的 [upstream-lock.json](upstream-lock.json) 为准；DeepSeek 当前缓存以 §1.2 的更新快照为准，首批锁文件和下文 P00/P07/P09 的固定提交证据保持历史基准。Vercel AI SDK 以 [AI SDK 实验锁文件](../../experiments/ai-sdk-p00/upstream-lock.json)为准，克隆命令见[实验说明](../../experiments/ai-sdk-p00/README.md)。新增清单来源为 [Kysely](https://github.com/kysely-org/kysely.git) 和 [pg-boss](https://github.com/timgit/pg-boss.git)。pg-boss 的提交仅记录本次源码快照，尚未开展源码研究或运行验证，不代表已选为生产依赖。
+首批六项的历史完整提交及 origin 以本节上方的 [upstream-lock.json](upstream-lock.json) 为准；DeepSeek 当前缓存以 §1.2 的更新快照为准，首批锁文件和下文 P00/P07/P09 的固定提交证据保持历史基准。Vercel AI SDK 以 [AI SDK 实验锁文件](../../experiments/ai-sdk-p00/upstream-lock.json)为准，克隆命令见[实验说明](../../experiments/ai-sdk-p00/README.md)。新增清单来源为 [Kysely](https://github.com/kysely-org/kysely.git) 和 [pg-boss](https://github.com/timgit/pg-boss.git)。pg-boss 的提交仅记录本次源码快照，尚未开展源码研究或运行验证，不代表已选为生产依赖。2026-10-10 新增来源为 [OpenCode](https://github.com/anomalyco/opencode.git)（`055d95bb7e27`）和 [ZCode](https://github.com/zai-org/ZCode.git)（`aac4755666d0`，tag `v3.15.1`）；OpenCode 的 §1.3 在线研究锚点 `907b3bc518fa48e90e8ec24dd327d13eee71c36c` 经 GitHub compare 核验为 `055d95bb7e27` 的祖先（领先 36 个提交），本地浅克隆未含该提交，需要按锚点阅读时另行 fetch。两者均只完成克隆与核验，未开展源码研究、未安装依赖、未构建或运行上游测试，不代表已选为参考或生产依赖。
 
 `.research/vercel-ai` 的 fetch refspec 固定为 tag `ai@7.0.107`，HEAD 即该 tag 提交，而实验锁文件记录了同一提交与逐文件 sha256；移动 HEAD 会使实验证据基准失效，因此 2026-10-02 只补取 `origin/main`（`5b8e63bad820`，`ai` 7.0.127）作为远程引用。是否把实验推进到新版本属于实验范围，未在本轮决定。2026-10-02 七个 ff-only 更新同样只更换缓存提交，没有安装上游依赖、构建或运行上游测试；新旧机制差异的研究快照尚未写入本文件。
 
-九个仓库均为浅克隆，未取得完整 Git 历史。“完整检出”仅指当前提交的工作树文件；首批六项仍只展开选定目录，需要查阅其余源码时可在确认工作树干净后展开，例如：
+十一个仓库均为浅克隆，未取得完整 Git 历史。“完整检出”仅指当前提交的工作树文件；首批六项仍只展开选定目录，需要查阅其余源码时可在确认工作树干净后展开，例如：
 
 ```powershell
 git -C .research/upstream/codex status --short
@@ -69,7 +71,7 @@ git -C .research/upstream/codex sparse-checkout disable
 
 ### 1.3 会话执行计划机制对照（2026-10-03）
 
-本轮依据官方公开源码与文档进行只读比较，未安装、构建或运行这些 Agent。固定源码提交限定本次结论；在线文档和 main 链接只是读取时点的依据，不作为 Relay 已锁定的依赖版本。OpenCode 此次为在线查阅，未新增本地克隆；Codex 沿用 §1.1 的研究缓存。
+本轮依据官方公开源码与文档进行只读比较，未安装、构建或运行这些 Agent。固定源码提交限定本次结论；在线文档和 main 链接只是读取时点的依据，不作为 Relay 已锁定的依赖版本。OpenCode 此次为在线查阅，本地克隆于 2026-10-10 补入，见 §1.1；Codex 沿用 §1.1 的研究缓存。
 
 | 对象 | 核验机制与一手来源 | Relay 采用与差异 |
 |---|---|---|
@@ -132,6 +134,20 @@ C 片开工前的只读对照，为「协作页如何呈现模型实际做了什
 **明确不采用**：AI SDK 的 tool part 作为账本——它没有独立生命周期或 Owner，归约器**原地改字段** `part.state = options.state`（`packages/ai/src/ui/process-ui-message-stream.ts:230-244`），`reset-step` 删除当前 step 的全部 part（同文件 `896-911`），状态只在内存（`ui/chat.ts:583-589`），`reconnectToStream` 重连的是服务端当前仍活着的流、204 即放弃（`http-chat-transport.ts:262-272`）；更关键的是同一代码库存在两套互相矛盾的「完成」口径——`lastAssistantMessageIsCompleteWithToolCalls` 忽略 `output-denied`（`last-assistant-message-is-complete-with-tool-calls.ts:31-38`），而 `convertToModelMessages` 的 `ignoreIncompleteToolCalls` 保留它（`convert-to-model-messages.ts:62-74`），且两者都把 `output-error` 视为完成。这一层失败与成功不可区分，与 Relay「验证器故障不能算通过」直接冲突。另不采用 Codex 的进程内 `ApprovalStore`（会话创建时 `Mutex::new` 初始化、不落盘，`codex-rs/core/src/session/session.rs:1741`），重启即失效的批量授权不能当作可恢复授权；不采用 DeepSeek 的 `ToolCallView` 卡片词汇表（其 Web Client 自身并不消费，`packages/core/tools/src/presentation.ts:42-46` 与 `docs/cookbook/adding-a-tool.md:95`），引入它等于新增一套与 Relay 产物版本模型无关的「卡片意图」词汇。
 
 Relay 的采纳规则与本批次验收规格分别归[工作台 §18.8](../frontend/workbench-design.md)与[测试计划 §20.4](../testing/verification-plan.md)；物理设计归[第 60 节](../database/physical-design-postgresql.md)。本节不含本轮运行结果。
+
+### 1.7 绑定目录后「查看目录文件」的对话链路对照（2026-10-15）
+
+用户实测失败：普通 Agent 会话已绑定工作目录，问「看一下这个目录下面的文件」，实际得到状态维护澄清卡与「我没有本地文件访问能力」的普通回复，既无目录清单也无读取结果。本节只读源码核对上游如何让同一句话到达真实读取，不安装依赖、不构建、不运行上游测试、不调用 Provider。Codex 为 `.research/upstream/codex`（`e7ea5f4a8658`，完整工作树，已核验干净），OpenCode 为 `.research/upstream/opencode`（`055d95b`，完整工作树）。**本节不含本轮运行结果。**
+
+| 对照问题 | 当前源码机制与固定提交依据 | Relay 采用与差异 |
+|---|---|---|
+| 是否存在意图路由 | OpenCode 全量检出搜 `classify\|intent\|route.*message\|triage` 无任何路由器：用户消息直接进 agent loop，工具已声明，模型自行决定调不调 `read`（`packages/opencode/src/tool/read.ts:256`）。Codex 同样，`codex-rs/core/src/client.rs:920-938` 只拼工具与基础指令，无预判分支 | **这是本节最重要的一条**：Relay 的 `interpretConversationMessage()`（DISCUSS/CLARIFY/PREPARE）是本项目独有的一跳模型调用，上游产生不了这类缺陷，因为它没有该环节。本次实测的误判正发生在这一跳。**不据此取消这一跳**——Relay 要落 Task/Run 账本、Gateway 准入与恢复语义，上游无对应物；但须承认多一跳就多一次误判面 |
+| 目录如何交给模型 | Codex 把 `<environment_context>`（`<cwd>`、`<shell>`，以及 `<filesystem><workspace_roots>` 与 `<permission_profile>`）作为**独立的 user-message fragment** 注入，排在用户原文之前（渲染见 `codex-rs/core/src/context/world_state/environment.rs:323-348`；顺序断言见 `codex-rs/app-server/tests/suite/v2/thread_inject_items.rs:267-277`）；路径值经 `push_xml_escaped_text` 转义，值不可能被读成标记或指令。OpenCode 不叙述目录，而是把它绑成执行上下文：`packages/opencode/src/agent/agent.ts:106` 把 `ctx.directory` 交给 `Location.Ref`，工具相对它解析 | **采纳 Codex 的形态**：目录上下文作为独立分段紧贴原用户消息（`conversation-execution.ts` 的 `describeWorkingDirectory()` + `readExecutionSource()`），不混进 system prompt、不与指令同段。转义要求对应本项目既有的「目录名与路径不得被读成指令或授权」。**不采纳** OpenCode 的 `Location.Ref`：那是进程内工具解析上下文，Relay 的等价物是已持久化的受管资源与 Gateway 根边界 |
+| 读为何不必确认、写为何必须单独判定 | OpenCode 把读与写拆成**两个独立权限键**：`read.ts:256` → `permission: "read"`、`edit.ts:103` 与 `apply_patch.ts:207` → `permission: "edit"`；默认配置 `agent.ts:119-136` 为 `read: {"*": "allow", "*.env": "ask"}` 与 `external_directory: {"*": "ask"}`，即**读默认放行、写单独判定、越出根目录才问**。Codex 的只读 profile 根本不输出任何 `<entry access="write">`（`environment_render_tests.rs:244-247`），受管 profile 也只按根逐条授予写并单列 deny（`:220`） | **采纳**：只读请求不获得 `FILE_WRITE`/`CLI_RUN`、不落空的范围授权，越界与写各自独立判定。落点不同：上游在工具准入层，Relay 在范围授权与 Gateway（`planToolLoop()` 只解析读连接）。两者结论一致，落点不可互换 |
+| 列目录与读文件的关系 | OpenCode 的 `read` 一个工具同时覆盖两者——`tool/read.txt:1` 明确「Read a file **or directory**」，目录项逐行返回、子目录带尾部 `/`；`explore.txt` 的只读专员靠提示词约束「Do not create any files, or run bash commands that modify the user's system state」，而非另设一个只读路由器 | **不照搬合工具**：Relay 的 `list_directory` / `find_paths` / `search_text` / `read_file` 是封闭词表（`tool-catalog.ts`），摘要与轨迹按词表分类而非解析命令文本（§1.6 已采纳 Codex 的分组呈现）。照搬合工具会让 Relay 的只读/写入边界失去可判定的工具身份 |
+| 执行是否有一道固定确认门 | Codex 与 OpenCode 收到消息即开跑，准入按**动作**逐次判定，没有「候选就绪→按开始执行」这道门；工具调用与结果直接流式出现在对话里 | 与 Relay [工作台 §18.2](../frontend/workbench-design.md#182-从对话进入执行)「范围足够明确时直接进入原 Task/Run 链」同向。本轮据此为**只读**候选在服务端给出 `auto_start`（`isReadOnlyConversationExecution()`），界面据此不要求固定二次确认；写意图仍保留一次确认（§18.4.1）。该豁免只覆盖只读，不放宽任何权限边界 |
+
+**明确不采用**：Codex 的进程内 `ApprovalStore` 与 DeepSeek 的 `ToolCallView` 卡片词汇表已在本文件 §1.6 记录，本节不重复。**本节未覆盖**：DeepSeek Harness、Pi、Rig、LangChain/Graph 未就本问题逐一核对；上游缺少 Task/Run 账本、Gateway 准入与崩溃恢复语义，因此这些对照只能支撑交互与输入形态的判断，**不能**证明本项目按同样方式实现也成立。本轮 Relay 侧的实际结果只归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)，不在本节。
 
 ## 2. 机制采用表
 

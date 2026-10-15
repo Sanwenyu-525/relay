@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { DomWrapper, flush, mountWorkbench } from "./mountApp";
+import { DomWrapper, flush, folderStripName, mountWorkbench } from "./mountApp";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const sessionId = "66666666-6666-4666-8666-666666666666";
@@ -75,9 +75,11 @@ describe("新对话直接起步", () => {
     expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists(), view.wrapper.text()).toBe(true);
     expect(view.wrapper.find('[data-testid="assist-session"]').exists()).toBe(false);
     expect(view.wrapper.find('[data-testid="collab-side-empty"]').exists()).toBe(false);
-    expect(view.wrapper.get('[data-testid="folder-scope-bar"]').element?.tagName).toBe("DETAILS");
-    expect(view.wrapper.get('[data-testid="folder-scope-bar"]').attributes("open")).toBeUndefined();
-    expect(view.wrapper.get('[data-testid="collab-existing-work"]').attributes("open")).toBeUndefined();
+    // 目录作用域已收成常驻细条（不再是要先展开的 details），「查找更多任务 / 会话」默认收起。
+    expect(view.wrapper.get('[data-testid="folder-scope-strip"]').exists()).toBe(true);
+    expect(folderStripName()).toBe("未选择目录");
+    expect(view.wrapper.get('[data-testid="recent-work-find-more"]').attributes("aria-expanded")).toBe("false");
+    expect(view.wrapper.find('[data-testid="collab-target-picker"]').exists()).toBe(false);
     expect(view.posts).toHaveLength(0);
   });
 

@@ -27,8 +27,8 @@ import { exportFirstPartyRegistryArchive } from '../../src/skills/first-party-re
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
 import { recoverStoppedDesktopLaunch } from '../../src/worker/supervisor.js';
 import { createDataRoot, createWorkspace } from './api-harness.js';
-import { createTemporaryDatabase, MIGRATIONS_DIRECTORY, openDatabase }
-  from './integration-support.js';
+import { createTemporaryDatabase, MIGRATIONS_DIRECTORY, openDatabase,
+  assertLedgerMatchesCurrentMigrations } from './integration-support.js';
 
 for (const variant of ['PARTIAL', 'NO_RECEIPT'] as const) {
   test(`backup preserves Owner-closed ${variant} UNKNOWN without requiring a retired launch`, async (t) => {
@@ -40,7 +40,15 @@ for (const variant of ['PARTIAL', 'NO_RECEIPT'] as const) {
       await runMigrations({ connectionString: database.migrationUrl, directory: MIGRATIONS_DIRECTORY });
       await installGraphCheckpoints(database.migrationUrl);
       const migrations = await loadMigrations(MIGRATIONS_DIRECTORY);
-      assert.equal(migrations.length, 48, 'the real complete migration set is required');
+      // 完整性由「ledger 与仓库当前清单逐条一致」保证，不是一个会随加迁移失效的条数常量。
+      // ledger 只对迁移角色可读，因此用迁移角色连接核对——这与备份/恢复本身的读取身份一致。
+      const ledgerReader = openDatabase(database.migrationUrl, 'relay-m07-backup-history-ledger');
+      try {
+        await assertLedgerMatchesCurrentMigrations(ledgerReader.db, 'backup-history 备份源库');
+      } finally {
+        await ledgerReader.close();
+      }
+      assert.ok(migrations.length > 0, 'the real complete migration set is required');
       const resourceHashes = Object.fromEntries(migrations.map(migration =>
         [`api/migrations/${migration.name}.sql`, migration.sha256.toString('hex')]));
       const state = () => readBackupDatabaseState({ migrationUrl: database.migrationUrl,

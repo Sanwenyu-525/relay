@@ -403,8 +403,11 @@ export interface ImportJobRow {
 }
 /** 0058：人工在已登记受管资源上直接触发的受控动作来源。它没有 run/task/step/import_job，
  * 但必须绑定受管资源与能力；词表只放行 GIT_READ，写入与 CLI 仍只有 RUN。 */
-/** 0060 追加 ASSISTANT_READ：人设会话的只读动作，与 RUN / USER_IMPORT / USER_ACTION 并列。 */
-export type GatewayOriginKey = 'RUN' | 'USER_IMPORT' | 'USER_ACTION' | 'ASSISTANT_READ';
+/** 0060 追加 ASSISTANT_READ：人设会话的只读动作，与 RUN / USER_IMPORT / USER_ACTION 并列。
+ *  0087 追加 AGENT_SESSION_READ：普通 Agent 主流程的只读动作。与 ASSISTANT_READ 同形但
+ *  必须可分辨——运行架构 §2.6.3 要求两种执行身份不得互相冒充。 */
+export type GatewayOriginKey = 'RUN' | 'USER_IMPORT' | 'USER_ACTION' | 'ASSISTANT_READ'
+  | 'AGENT_SESSION_READ';
 
 export interface LogicalOperationRow {
   readonly id: string; readonly workspace_id: string; readonly project_id: string;
@@ -531,6 +534,8 @@ export interface RunToolCallRow {
   readonly round: number; readonly ordinal: number;
   readonly provider_tool_call_id: string; readonly tool_name: string;
   readonly arguments: JsonObject; readonly arguments_sha256: string;
+  /** 0073：每轮 ordinal=0 的不可变 assistant 续轮字段；旧行 NULL。 */
+  readonly assistant_message: JsonObject | null;
   readonly status: RunToolCallStatus;
   readonly operation_id: string | null;
   readonly result_ref: JsonObject | null;
@@ -978,8 +983,204 @@ export interface ConversationExecutionRequestRow {
   readonly updated_at: Date;
 }
 
+export type StateMaintenanceDecision = 'DISCUSS' | 'CLARIFY' | 'MAINTAIN';
+export type StateMaintenanceStatus = 'INTERPRETING' | 'DISCUSSED' | 'CLARIFY' | 'READY' |
+  'APPLYING' | 'APPLIED' | 'PARTIAL' | 'FAILED' | 'DECISION_REQUIRED' | 'DECLINED' |
+  'UNDOING' | 'UNDONE' | 'UNDO_PARTIAL' | 'UNDO_BLOCKED';
+export type StateChangeKind = 'CREATE_GOAL' | 'LINK_GOAL' | 'CREATE_KNOWLEDGE' |
+  'VERSION_KNOWLEDGE' | 'CREATE_DECISION' | 'CREATE_TASK' | 'ADD_TASK_DEPENDENCY' |
+  'SET_NEXT_ACTION' | 'SET_PHASE' | 'ADD_BLOCKER' | 'RESOLVE_BLOCKER' | 'SET_TASK_PLANNING' |
+  'SYNC_EXTERNAL_RESULT' | 'COMPLETE_TASK' | 'UNDO_STATE_CHANGE' | 'REPORT_ACCEPTANCE_TIME' | 'CREATE_HYPOTHESIS' | 'START_WORK_SEGMENT';
+export type StateChangeStatus = 'PENDING' | 'APPLIED' | 'FAILED' | 'SKIPPED' | 'DECLINED' |
+  'COMPENSATED' | 'COMPENSATION_FAILED';
+
+/** 0062：一条原用户消息对应一次状态维护请求。模型只解释候选，授权来自原消息本身。 */
+export interface ConversationStateRequestRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly project_id: string;
+  readonly session_id: string;
+  readonly source_message_id: string;
+  readonly command_id: string;
+  readonly apply_command_id: string;
+  readonly undo_command_id: string;
+  readonly base_content_sha256: Buffer;
+  readonly decision: StateMaintenanceDecision;
+  readonly candidate_status: ConversationCandidateStatus;
+  readonly clarification: JsonObject | null;
+  readonly candidate: JsonObject | null;
+  readonly decision_required: JsonObject | null;
+  /** 0064：已确认的撤回方案（plan_digest + change_ids），中断恢复按它继续剩余补偿。 */
+  readonly undo_scope: JsonObject | null;
+  /** 0067（R3）：claim 事务里、调用模型之前冻结的解释基线；结算与恢复都沿它关联。 */
+  readonly interpretation_baseline: JsonObject | null;
+  readonly status: StateMaintenanceStatus;
+  readonly revision: bigint;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
+
+/** 0062：请求下的一条类型化领域变更。命令身份在请求创建时固定，撤回沿同一身份补偿。 */
+export interface ConversationStateChangeRow {
+  readonly id: string;
+  readonly request_id: string;
+  readonly ordinal: number;
+  readonly change_kind: StateChangeKind;
+  readonly command_id: string;
+  readonly payload: JsonObject;
+  readonly status: StateChangeStatus;
+  readonly before_ref: JsonObject | null;
+  readonly after_ref: JsonObject | null;
+  /** 0064：解释结算时冻结的适用基线（state_revision 与实际目标身份）。 */
+  readonly baseline_ref: JsonObject | null;
+  readonly error: JsonObject | null;
+  readonly applied_at: Date | null;
+  readonly compensation_command_id: string | null;
+  readonly compensated_at: Date | null;
+}
+
+/**
+ * 0063：一次「实际查看确认」留下的日常查看基线（每 Project 至多一行，单调推进）。
+ * 只保存查看时点的版本引用（viewed_state_revision 与 viewed_fact_refs），不复制业务正文；
+ * 「已查看」不是接受或接手，本表不参与验收、批准或执行权转移。
+ */
+export interface ProjectDailyViewBaselineRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly project_id: string;
+  readonly viewed_state_revision: bigint;
+  readonly viewed_fact_refs: JsonObject;
+  readonly presentation_id: string;
+  /** 0065：确认时点的服务端展示序号；推进要求它严格增大。 */
+  readonly viewed_presentation_seq: bigint;
+  readonly confirmed_at: Date;
+}
+
+/**
+ * 0065：按 Project 签发的展示序号计数器。
+ * 读取时递增签发，确认只接受不超过已签发上限的序号——顺序由服务端给出，不用客户端时钟。
+ */
+export interface ProjectDailyViewPresentationCounterRow {
+  readonly workspace_id: string;
+  readonly project_id: string;
+  readonly issued_seq: bigint;
+  readonly last_presentation_id: string | null;
+  readonly updated_at: Date;
+}
+
+/**
+ * 0067（R6）：一次真实读取签发的展示身份与当次事实摘要。
+ * 确认必须逐项对上签发记录（身份 + 序号 + State 版本 + 已展示事实），
+ * 序号在已签发上限内不再足以证明「这份身份/内容展示过」。
+ */
+export interface ProjectDailyViewPresentationRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly project_id: string;
+  readonly presentation_id: string;
+  readonly issued_seq: bigint;
+  readonly state_revision: bigint;
+  readonly fact_refs: JsonObject;
+  readonly issued_at: Date;
+}
+
+/**
+ * 0069（Slice C / NLS-05、NLS-08、NLS-09）：返回时的轻量核对记录。
+ * 一个 (project, fingerprint) 一条：事实与证据没变就复用，变了就重新核对；
+ * 核对本身是同步只读动作，不伪造 Run、不启动进程。
+ */
+export interface ProjectReturnReviewRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly project_id: string;
+  readonly fingerprint: string;
+  readonly status: 'APPLICABLE' | 'CHANGED';
+  readonly result: JsonObject;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
+
+/**
+ * 0072（ADR-020 / 领域模型 §13）：学习模式的知识点身份。
+ * 解析只按 slug / 别名精确匹配；generation 是概念代次，单项删除或纠正替换时递增，
+ * 使冻结在旧代次上的在途轮次失去写入资格。
+ */
+export interface LearningConceptRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly topic: string;
+  readonly slug: string;
+  readonly display_name: string;
+  readonly aliases: JsonObject;
+  readonly generation: bigint;
+  readonly revision: bigint;
+  readonly status: 'ACTIVE' | 'ARCHIVED';
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
+
+/** 0072：单条学习证据。四类性质不同，各自保留依据与时间。 */
+export type LearningEvidenceKind = 'EXPOSURE' | 'SELF_REPORT' | 'OBSERVED' | 'GAP';
+export type LearningEvidenceDisposition = 'ACTIVE' | 'PENDING_REVIEW' | 'SUPERSEDED' | 'WITHDRAWN';
+export type LearningEvidenceSourceKind = 'LEARNING_MESSAGE' | 'USER_CONTROL';
+
+export interface LearningEvidenceRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly concept_id: string;
+  readonly kind: LearningEvidenceKind;
+  readonly scenario: string;
+  readonly detail: string;
+  readonly disposition: LearningEvidenceDisposition;
+  readonly source_kind: LearningEvidenceSourceKind;
+  readonly source_message_id: string | null;
+  readonly session_id: string | null;
+  readonly observed_at: Date;
+  readonly epoch: bigint;
+  readonly revision: bigint;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
+
+/** 0072：清除边界，每 workspace 一行（惰性建立；缺行等价于 epoch 0）。 */
+export interface LearningRecordEpochRow {
+  readonly workspace_id: string;
+  readonly epoch: bigint;
+  readonly cleared_at: Date | null;
+  readonly clear_command_id: string | null;
+  readonly updated_at: Date;
+}
+
+/** 0072：会话级「后续不记录」。与消息级开关分开，作用范围与生效时间都可核对。 */
+export interface LearningSessionControlRow {
+  readonly session_id: string;
+  readonly workspace_id: string;
+  readonly records_enabled: boolean;
+  readonly revision: bigint;
+  readonly updated_by_message_id: string | null;
+  readonly updated_at: Date;
+}
+
+export type LearningRoundStatus = 'PENDING' | 'SETTLED' | 'REJECTED' | 'CANCELLED';
+
+/** 0072：一次教学轮次的结算依据，在调用模型**之前**写入。 */
+export interface LearningRoundRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly session_id: string;
+  readonly message_id: string;
+  readonly epoch: bigint;
+  readonly concept_generations: JsonObject;
+  readonly record_enabled: boolean;
+  readonly status: LearningRoundStatus;
+  readonly rejection_reason: string | null;
+  readonly settled_at: Date | null;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
+
 /** 0059：会话建立时冻结的一种身份。既有会话按 'AGENT' 读出，不虚构 助手 关系。 */
-export type ConversationMode = 'AGENT' | 'ASSISTANT';
+export type ConversationMode = 'AGENT' | 'ASSISTANT' | 'LEARNING';
 
 /** 0059：助手配置。配置文本存在这里，能力不在这里——能力来自连接与 Gateway 准入。 */
 export interface AssistantProfileRow {
@@ -1010,6 +1211,15 @@ export interface AssistSessionRow {
   readonly assistant_role_snapshot: JsonObject | null;
   /** 「一次性问答」开关：false 时该轮不作为可续读历史。 */
   readonly remember: boolean;
+  /**
+   * 0087：本会话当前绑定的受管工作目录。
+   *
+   * 这是普通 Agent 主流程**唯一**的目录判定来源（此前只存在于浏览器组件状态，
+   * 导致刷新即丢、且服务端只能「取第一个受管资源」）。为 NULL 表示未绑定目录：
+   * 主流程按类型化原因拒掉本次读取，不回落到任意资源。资源是否 ACTIVE、是否属于本会话的
+   * Project 仍由应用层按调用时的当前状态判定，不写进数据库 CHECK。
+   */
+  readonly working_resource_id: string | null;
   readonly revision: bigint;
   readonly created_at: Date;
   readonly updated_at: Date;
@@ -1029,6 +1239,10 @@ export interface AssistMessageRow {
   readonly skill_snapshot: JsonObject | null;
   readonly skill_input: JsonObject | null;
   readonly skill_output: JsonObject | null;
+  /** 0071：内置工作方法身份（冻结定义 + 摘要）；与 skill_snapshot 互斥。 */
+  readonly method_snapshot: JsonObject | null;
+  readonly method_action: 'INSPECT' | 'MODIFY' | null;
+  readonly method_argument: string | null;
   readonly provider_request_id: string | null;
   readonly usage_input_tokens: number | null;
   readonly usage_output_tokens: number | null;
@@ -1036,6 +1250,8 @@ export interface AssistMessageRow {
   readonly usage_cache_creation_tokens: number | null;
   readonly worker_id: string | null;
   readonly cancel_requested: boolean;
+  /** 0072：本轮不记录学习状态。随发送命令持久，不由模型提示决定。 */
+  readonly learning_record_disabled: boolean;
   readonly created_at: Date;
   readonly updated_at: Date;
 }
@@ -1167,6 +1383,12 @@ export interface RelayDatabaseSchema {
   project_view_configurations: ProjectViewConfigurationRow;
   project_continuation_points: ProjectContinuationPointRow;
   project_continuation_point_refs: ProjectContinuationPointRefRow;
+  conversation_state_requests: ConversationStateRequestRow;
+  conversation_state_changes: ConversationStateChangeRow;
+  project_daily_view_baselines: ProjectDailyViewBaselineRow;
+  project_daily_view_presentation_counters: ProjectDailyViewPresentationCounterRow;
+  project_daily_view_presentations: ProjectDailyViewPresentationRow;
+  project_return_reviews: ProjectReturnReviewRow;
   project_blueprint_proposals: ProjectBlueprintProposalRow;
   goals: GoalRow;
   project_goals: ProjectGoalRow;

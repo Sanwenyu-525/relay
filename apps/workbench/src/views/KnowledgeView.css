@@ -14,6 +14,12 @@
 .knowledge-actions { display: flex; flex-wrap: wrap; gap: var(--relay-space-3); margin-top: var(--relay-space-4); }
 .knowledge-history { margin-top: var(--relay-space-6); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .knowledge-history li { padding: var(--relay-space-3) 0; overflow-wrap: anywhere; }
+/* 枚举降级：中文承担阅读，原枚举以 small（title）/ code 小字保留供核对，不占主要阅读位。 */
+.knowledge-rule-facts small, .knowledge-history small, .knowledge-result code { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); }
+.knowledge-result code { overflow-wrap: anywhere; }
+.knowledge-tech-details { margin: var(--relay-space-2) 0; }
+.knowledge-tech-details > summary { color: var(--relay-color-text-secondary); cursor: pointer; }
+.knowledge-tech-details code { display: block; overflow-wrap: anywhere; }
 .knowledge-search-list { list-style: none; margin: var(--relay-space-4) 0; padding: 0; }
 .knowledge-check { display: flex; align-items: center; gap: var(--relay-space-3); margin-top: var(--relay-space-4); }
 .knowledge-import { margin-top: var(--relay-space-6); overflow-wrap: anywhere; }
@@ -136,13 +142,15 @@
 @media (min-width: 90rem) {
   .knowledge-capture-paper { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); }
 }
-@media (max-width: 80rem) {
+/* width < 80rem：与 min-width: 80rem 档（rail 出现）在恰 80rem 不再双触发；原 max-width: 80rem。 */
+@media (width < 80rem) {
   .knowledge-reader { grid-template-columns: minmax(0, 1fr) minmax(0, var(--relay-layout-rail-narrowWidth)); }
   .knowledge-reader__outline { grid-column: 1 / -1; border-right: 0; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); padding: 0 0 var(--relay-space-3); }
   .knowledge-reader__toc h2 { margin-bottom: var(--relay-space-2); }
   .knowledge-reader__toc ol { display: flex; flex-wrap: wrap; gap: var(--relay-space-2); }
 }
-@media (max-width: 60rem) {
+/* 并入 48rem 折行档，原 60rem：留白降级、列表/阅读双列折叠为单列，来源栏移到正文之下。 */
+@media (width < 48rem) {
   .knowledge-page { padding: var(--relay-layout-main-compactPadding); }
   .knowledge-columns, .knowledge-reader, .knowledge-reader--no-toc { grid-template-columns: minmax(0, 1fr); }
   .knowledge-reader__source { border-left: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); padding: var(--relay-space-6) 0 0; }

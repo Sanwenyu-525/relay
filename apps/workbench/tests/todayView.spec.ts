@@ -67,7 +67,7 @@ describe("P13 Today 真实投影", () => {
     mounted = await mountWorkbench("/today"); unmount = mounted.unmount;
     expect(mounted.wrapper.text()).toContain("可开始或继续 · 1");
     expect(mounted.wrapper.text()).toContain("已置顶，待处理 · 1");
-    expect(mounted.wrapper.text()).toContain("其他等待 · 0");
+    expect(mounted.wrapper.text()).not.toContain("其他等待");
     expect(mounted.wrapper.text()).toContain("LATER_ACTIVE");
     expect(mounted.wrapper.text()).toContain(`task:${blockedId}/revision:2`);
     const blocked = mounted.wrapper.get(".today-group:nth-of-type(2)");
@@ -97,6 +97,8 @@ describe("P13 Today 真实投影", () => {
     const adjustToggle = Array.from(mounted.wrapper.element!.querySelectorAll("button"))
       .find((button) => button.textContent?.includes("调整时区"))!;
     await new DomWrapper(adjustToggle).trigger("click"); await flush();
+    const zoneSelect = mounted.wrapper.get('[data-testid="today-timezone-select"]');
+    expect(zoneSelect.findAll("option").map((option) => option.attributes("value"))).toContain("Asia/Tokyo");
     await mounted.wrapper.get('.today-query input:not([type="date"])').setValue("Asia/Tokyo");
     await mounted.wrapper.get(".today-query form").trigger("submit"); await flush();
     expect(requests.some((path) => path.includes("date=2026-09-27") && path.includes("Asia%2FTokyo"))).toBe(true);

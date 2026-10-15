@@ -28,7 +28,9 @@ describe("P15 Activity 只读追溯", () => {
   it("从任务深链进入时展开已应用的范围，不将子范围呈现为全空间", async () => {
     connect();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      expect(String(input).slice(root.length)).toBe(`/activities?task_id=${taskId}`);
+      const path = String(input).slice(root.length);
+      if (path.startsWith("/projects?")) return response({ items: [], next_cursor: null });
+      expect(path).toBe(`/activities?task_id=${taskId}`);
       return response({ items: [], next_cursor: null });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -36,14 +38,16 @@ describe("P15 Activity 只读追溯", () => {
     const disclosure = mounted.wrapper.get('[data-testid="activity-advanced-filter"]');
     expect((disclosure.element as HTMLDetailsElement).open).toBe(true);
     expect(disclosure.get("summary").text()).toContain("已应用范围");
-    expect((disclosure.findAll("input")[1]!.element as HTMLInputElement).value).toBe(taskId);
+    expect((disclosure.findAll("input")[0]!.element as HTMLInputElement).value).toBe(taskId);
     expect(fetchMock).toHaveBeenCalled();
   });
 
   it("高级筛选默认收起且常驻，展开和草稿输入不会自动查询或改变执行方入口", async () => {
     connect();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      expect(String(input).slice(root.length)).toBe("/activities");
+      const path = String(input).slice(root.length);
+      if (path.startsWith("/projects?")) return response({ items: [], next_cursor: null });
+      expect(path).toBe("/activities");
       return response({ items: [], next_cursor: null });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -93,7 +97,10 @@ describe("P15 Activity 只读追溯", () => {
     mounted = await mountWorkbench("/activity"); unmount = mounted.unmount;
     expect(mounted.wrapper.text()).toContain("完成任务");
     expect(mounted.wrapper.text()).not.toContain("secret-actor-ref");
-    expect(mounted.wrapper.text()).toContain("目标 66666666-6666-4666-8666-666666666666（当前无直达页）");
+    expect(mounted.wrapper.text()).not.toContain(`项目 ${projectId}`);
+    expect(mounted.wrapper.text()).toContain("打开项目");
+    expect(mounted.wrapper.text()).toContain("目标：当前无直达页");
+    expect(mounted.wrapper.text()).toContain("66666666-6666-4666-8666-666666666666");
     expect(mounted.wrapper.find(`a[href="/projects/${projectId}"]`).exists()).toBe(true);
     expect(mounted.wrapper.find(`a[href="/tasks/${taskId}"]`).exists()).toBe(true);
     expect(mounted.wrapper.find(`a[href="/runs/${runId}"]`).exists()).toBe(true);
@@ -105,19 +112,39 @@ describe("P15 Activity 只读追溯", () => {
     expect(mounted.wrapper.text()).toContain("当前已读取 2 条；本次查询没有后续游标");
   });
 
+  it("项目筛选从已加载项目下拉选择，手填非法 ID 的报错给出可执行的修正指引", async () => {
+    connect();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input).slice(root.length);
+      if (path.startsWith("/projects?")) return response({ items: [projectRow()], next_cursor: null });
+      if (path === "/activities") return response({ items: [], next_cursor: null });
+      throw new Error(`Unexpected ${path}`);
+    }));
+    const mounted = await mountWorkbench("/activity"); unmount = mounted.unmount;
+    const disclosure = mounted.wrapper.get('[data-testid="activity-advanced-filter"]');
+    const projectSelect = disclosure.get('[data-testid="activity-project-filter"]');
+    expect(projectSelect.findAll("option").map((option) => option.attributes("value"))).toContain(projectId);
+    await disclosure.get("input").setValue("not-a-uuid");
+    await disclosure.get("form").trigger("submit"); await flush();
+    expect(mounted.wrapper.text()).toContain("可从下拉选择");
+    expect(mounted.wrapper.text()).toContain("需要完整 UUID");
+  });
+
   it("项目/任务/Run/时间筛选发送 UTC 边界，切换范围后旧响应不能覆盖", async () => {
     connect(); const old: { resolve?: (value: Response) => void } = {};
     const calls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input).slice(root.length); calls.push(path);
+      if (path.startsWith("/projects?")) return response({ items: [projectRow()], next_cursor: null });
       if (path === "/activities") return new Promise<Response>((resolve) => { old.resolve = resolve; });
       if (path.startsWith("/activities?")) return response({ items: [activity("77777777-7777-4777-8777-777777777777", "新筛选")], next_cursor: null });
       throw new Error(`Unexpected ${path}`);
     }));
     const mounted = await mountWorkbench("/activity"); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="activity-project-filter"]').setValue(projectId);
     const inputs = mounted.wrapper.findAll(".activity-filter input");
-    await inputs[0]!.setValue(projectId); await inputs[1]!.setValue(taskId); await inputs[2]!.setValue(runId);
-    await inputs[3]!.setValue("2026-09-26T08:00"); await inputs[4]!.setValue("2026-09-27T08:00");
+    await inputs[0]!.setValue(taskId); await inputs[1]!.setValue(runId);
+    await inputs[2]!.setValue("2026-09-26T08:00"); await inputs[3]!.setValue("2026-09-27T08:00");
     await mounted.wrapper.get(".activity-filter").trigger("submit"); await flush();
     expect(calls.some((path) => path.includes(`project_id=${projectId}`) && path.includes(`task_id=${taskId}`) && path.includes(`run_id=${runId}`)
       && path.includes("from=") && path.includes("to="))).toBe(true);
@@ -145,6 +172,9 @@ describe("P15 Activity 只读追溯", () => {
   });
 });
 
+function projectRow() { return { id: projectId, title: "示例项目", project_type: "GENERAL", revision: "1", state_revision: "1",
+  archived_at: null, archive_status: "ACTIVE", phase_key: "PLANNING", next_action_task_id: null,
+  created_at: "2026-09-01T00:00:00.000Z", updated_at: "2026-09-01T00:00:00.000Z" }; }
 function makeActivity(id: string, options: { event: string; actor: string; created: string; summary: string }) {
   return { id, created_at: options.created, actor_kind: options.actor, actor_ref: "raw-actor-ref", command_id: null,
     event_type: options.event, summary: options.summary, project_id: projectId, task_id: taskId, run_id: runId, entity_refs: [] };

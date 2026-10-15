@@ -358,7 +358,10 @@ export default function ArtifactPanel(props: Props) {
         onClick={() => { if (readingTarget) void readVersion(readingTarget.versionId); }}>重试读取正文</button>
     </div>}
     {visibleReading && <div data-testid="artifact-saved-content"><SafeMarkdown source={visibleReading.content} /></div>}
-    {!readingTarget && !versionsLoading && <div className="artifact-paper-state"><h3>{sourceUnavailable ? "已保存正文暂不可读" : "还没有已保存的正文"}</h3><p className="helper-text">{sourceUnavailable ? "旧正文与版本事实已隐藏；你的未保存输入与原命令仍保留。" : "在“编辑”中写下成果，保存首版后即可阅读确切版本。"}</p></div>}
+    {/* versionsFailure 时不能落到「还没有已保存的正文」：版本读不到时 versions 为空、readingTarget
+        为 null，那正是「没读到」而不是「确实没写」。versionsReady 是同组件 :418 已有的正确守卫。 */}
+    {!readingTarget && !versionsLoading && versionsFailure === null && <div className="artifact-paper-state"><h3>{sourceUnavailable ? "已保存正文暂不可读" : "还没有已保存的正文"}</h3><p className="helper-text">{sourceUnavailable ? "旧正文与版本事实已隐藏；你的未保存输入与原命令仍保留。" : "在“编辑”中写下成果，保存首版后即可阅读确切版本。"}</p></div>}
+    {!readingTarget && !versionsLoading && versionsFailure !== null && <div className="artifact-paper-state" role="alert"><h3>版本没有读到</h3><p className="helper-text">当前无法确认这任务已保存哪些正文版本；这不代表它没有正文。请重试读取，已保存的版本事实不会被改写。</p></div>}
   </>;
   const ArtifactHeading = documentHeader ? "h1" : "h2";
   return <div className={`artifact-workspace${documentHeader ? " artifact-workspace--with-header" : ""}${conflicting ? " artifact-workspace--conflict" : ""}`} data-testid="artifact-workspace">

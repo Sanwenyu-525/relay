@@ -153,6 +153,7 @@ export async function applySafeControl(db: DbExecutor, runId: string): Promise<C
       await repositories.gateway.setOperationStatus(operation.id, 'DENIED', { reason: 'RUN_CONTROL_APPLIED' });
     }
     if (isTerminal(run.status) || task.executor_run_id !== run.id || task.ownership_epoch !== run.ownership_epoch) {
+      await repositories.toolCalls.rejectUndispatchedForTerminalRun(run.id, run.status);
       const rejected = await repositories.recovery.decideControl(pending.id, 'REJECTED', { reason: 'RUN_TERMINAL_OR_STALE' });
       if (rejected === undefined) throw new Error('control reject CAS failed');
       return controlDto(rejected);
@@ -176,6 +177,7 @@ export async function applySafeControl(db: DbExecutor, runId: string): Promise<C
       const released = await repositories.tasks.releaseExecutionFromRun({ taskId: task.id, runId: run.id,
         expectedRevision: task.revision, toStatus });
       if (released === undefined) throw new Error('control Task release CAS failed');
+      await repositories.toolCalls.rejectUndispatchedForTerminalRun(run.id, 'CANCELLED');
     }
     const resultRef: JsonObject = pending.type === 'HANDOFF'
       ? { run_status: 'CANCELLED', type: 'HANDOFF', handoff: await buildHandoffRef(repositories, run) }
@@ -215,14 +217,23 @@ function stringRef(value: JsonObject | null | undefined, key: string): string | 
 export async function resumeRun(db: DbExecutor, input: {
   readonly workspaceId: string; readonly runId: string; readonly commandId: string;
   readonly expectedTaskRevision: string; readonly expectedRunRevision: string;
+  readonly taskChainResume?: {chainId:string;runtimeId:string};
 }): Promise<CommandOutcome<ResumeRunResult>> {
   const taskRevision = requireRevision(input.expectedTaskRevision, 'expected_task_revision');
   const runRevision = requireRevision(input.expectedRunRevision, 'expected_run_revision');
   return runIdempotentCommand(db, {
     scopeKey: httpCommandScopeKey(input.workspaceId), commandId: input.commandId,
     commandType: 'ResumeRun', target: { run_id: input.runId },
-    body: { expected_task_revision: toDecimalString(taskRevision), expected_run_revision: toDecimalString(runRevision) },
+    body: { expected_task_revision: toDecimalString(taskRevision), expected_run_revision: toDecimalString(runRevision),...(input.taskChainResume===undefined?{}:{task_chain_id:input.taskChainResume.chainId}) },
     execute: async (repositories) => {
+      if(input.taskChainResume!==undefined) {
+        await repositories.workspaces.lockAuthority(input.workspaceId,'share');
+        const chain=await repositories.taskChains.read(input.taskChainResume.chainId,true);
+        if(chain?.workspace_id!==input.workspaceId || chain.status!=='ACTIVE' || chain.runtime_id!==input.taskChainResume.runtimeId || chain.resume_command_id!==input.commandId || chain.expires_at===null || chain.expires_at<=await repositories.taskChains.now()) throw invalidTransition('任务链不再允许恢复原执行。');
+        const item=(await repositories.taskChains.items(chain.id)).find(i=>i.status!=='COMPLETED');
+        if(item?.run_id!==input.runId) throw invalidTransition('恢复目标不是原任务链当前执行。');
+        await repositories.taskChains.clearResume(chain.id,input.commandId);
+      }
       const { task, run } = await lockTaskAndRun(repositories, input.runId, input.workspaceId);
       requireRevisionMatch(task, run, taskRevision, runRevision);
       if (run.status !== 'PAUSED' || task.status !== 'WAITING' || task.executor_run_id !== run.id ||

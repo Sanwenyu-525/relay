@@ -141,8 +141,35 @@ test('migrate entry reports the applied migrations without repeating them', asyn
       '0053_n03_knowledge_curation_candidates',
       '0054_m04_agent_tool_loop', '0055_m05_message_queue', '0056_m04_run_scope_grants',
       '0057_m04_run_tool_call_events', '0058_m06_user_action_origin',
+      '0059_m04_assistant_conversation_modes', '0060_m04_assistant_readonly_origin',
+      '0061_m04_cli_run_allowed_executables',
+      '0062_natural_language_state_maintenance',
+      '0063_project_daily_view_baselines',
+      '0064_natural_language_state_binding',
+      '0065_project_daily_view_presentation_seq',
+      '0066_natural_language_task_planning',
+      '0067_natural_language_recheck_remediation',
+      '0068_natural_language_external_sync',
+      '0069_project_return_reviews',
+      '0070_natural_language_undo',
+      '0071_builtin_methods_and_chat_commands',
+      '0072_learning_mode_records',
+      '0073_model_tool_turn_assistant_message',
+      '0074_task_acceptance_materials',
+      '0075_task_acceptance_trials',
+      '0076_task_acceptance_comparisons',
+      '0077_conversation_acceptance_time',
+      '0078_project_hypotheses',
+      '0079_decision_review_candidates',
+      '0080_work_segments',
+      '0081_personal_planning',
+      '0082_plan_scope_simulations',
+      '0083_project_reminders',
+      '0084_task_chains',
+      '0085_task_chain_execution_specs',
+      '0086_impact_group_dependencies',
     ]);
-  assert.equal(payload.ledger_rows, 58);
+  assert.equal(payload.ledger_rows, 86);
 });
 
 test('migrate entry fails explicitly without a migration connection', async () => {

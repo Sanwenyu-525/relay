@@ -6,6 +6,7 @@ import { ManagedContentStore } from '../storage/managed-content-store.js';
 import { registerArtifactRoutes } from './artifact-api.js';
 import { registerAttentionRoutes } from './attention-api.js';
 import { registerAssistRoutes } from './assist-api.js';
+import { registerChatCommandRoutes } from './chat-command-api.js';
 import { createBearerGuard, type BoundaryConfig } from './boundary.js';
 import { registerCommandRoutes } from './command-api.js';
 import { registerContextRoutes } from './context-api.js';
@@ -32,6 +33,21 @@ import { registerFirstPartySkillRoutes } from './first-party-skills-api.js';
 import { registerViewConfigurationRoutes } from './view-configuration-api.js';
 import { registerWorkingDirectoryRoutes } from './working-directory-api.js';
 import { registerConversationExecutionRoutes } from './conversation-execution-api.js';
+import { registerStateMaintenanceRoutes } from './state-maintenance-api.js';
+import { registerProjectDailyContinuationRoutes } from './project-daily-continuation-api.js';
+import { registerLearningRoutes } from './learning-api.js';
+import { registerTaskAcceptanceMaterialRoutes } from './task-acceptance-material-api.js';
+import { registerTaskAcceptanceTrialRoutes } from './task-acceptance-trial-api.js';
+import { registerTaskAcceptanceComparisonRoutes } from './task-acceptance-comparison-api.js';
+import { registerHypothesisRoutes } from './hypothesis-api.js';
+import { registerDecisionReviewRoutes } from './decision-review-api.js';
+import { registerWorkSegmentRoutes } from './work-segment-api.js';
+import { registerPersonalPlanningRoutes } from './personal-planning-api.js';
+import { registerScopeSimulationRoutes } from './plan-scope-simulation-api.js';
+import { registerProjectReminderRoutes } from './project-reminder-api.js';
+import { registerProjectReminderScheduler } from '../runtime/project-reminder-scheduler.js';
+import { registerTaskChainScheduler } from '../runtime/task-chain-scheduler.js';
+import { registerTaskChainRoutes } from './task-chain-api.js';
 import { registerBlueprintRoutes } from './blueprint-api.js';
 import { registerModelRoutes } from './model-api.js';
 
@@ -56,6 +72,8 @@ export function registerRoutes(
   // config 供 loopback 边界使用；领域路由只需要 database.executor，不额外持有连接池语义。
   dependencies: RouteDependenciesInput,
 ): void {
+  registerProjectReminderScheduler(app, dependencies);
+  const taskChainRuntimeId=registerTaskChainScheduler(app,dependencies);
   const apiDependencies: RouteDependencies = {
     database: dependencies.database,
     storage: new ManagedContentStore(dependencies.dataRoot),
@@ -122,6 +140,16 @@ export function registerRoutes(
       registerProjectContinuationRoutes(scope, apiDependencies);
 registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
       registerTaskRoutes(scope, apiDependencies);
+      registerTaskAcceptanceMaterialRoutes(scope, apiDependencies);
+    registerTaskAcceptanceTrialRoutes(scope, apiDependencies);
+    registerTaskAcceptanceComparisonRoutes(scope, apiDependencies);
+    registerHypothesisRoutes(scope, apiDependencies);
+    registerDecisionReviewRoutes(scope, apiDependencies);
+    registerWorkSegmentRoutes(scope, apiDependencies);
+    registerPersonalPlanningRoutes(scope, apiDependencies);
+    registerScopeSimulationRoutes(scope, apiDependencies);
+    registerProjectReminderRoutes(scope, apiDependencies);
+    registerTaskChainRoutes(scope,apiDependencies,taskChainRuntimeId);
       registerTodayRoutes(scope, apiDependencies);
       registerActivityRoutes(scope, apiDependencies);
       registerTraceRoutes(scope, apiDependencies);
@@ -141,9 +169,14 @@ registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
       registerInformationRoutes(scope, apiDependencies);
       registerReviewRoutes(scope, apiDependencies);
       registerAssistRoutes(scope, apiDependencies);
+      registerChatCommandRoutes(scope, apiDependencies);
       registerAssistantProfileRoutes(scope, apiDependencies);
       registerWorkingDirectoryRoutes(scope, apiDependencies);
       registerConversationExecutionRoutes(scope, apiDependencies);
+      registerStateMaintenanceRoutes(scope, apiDependencies);
+      registerProjectDailyContinuationRoutes(scope, apiDependencies);
+      // 0072：学习记录（ADR-020）。读路径只读应用保存的同一记录，不调模型总结。
+      registerLearningRoutes(scope, apiDependencies);
       registerCommandRoutes(scope, apiDependencies);
     },
     { prefix: API_PREFIX },

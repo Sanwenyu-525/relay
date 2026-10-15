@@ -12,6 +12,9 @@
   margin-top: var(--relay-space-3);
 }
 
+/* 两列 label 布局与全局 .field--grid 同构（.field 标记已就位，只差 tsx 上的变体类）。
+   CreateTaskView.tsx 不在本轮收编所有权内：组件侧给 .create-form > .field 加上
+   field--grid 后，本媒体查询块即可整体删除，改由全局基座承担。 */
 @media (min-width: 64rem) {
   .create-task-page .create-form > .field {
     display: grid;

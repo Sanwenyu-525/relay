@@ -568,7 +568,19 @@ test('completion gate rejects unsupported or malformed frozen output requirement
   }
 });
 
-test('completion gate rejects a PASS whose exact verification targets do not cover the frozen Markdown requirement', async () => {
+/**
+ * 完成门有**两个彼此独立**的门，这里分别锁住，不能只留一条：
+ *
+ *   1. 证据绑定门（`VERIFICATION_TARGET_STALE`）：PASS 的 verification target 必须仍然
+ *      绑定当前 PERSIST_CANDIDATE 的那一个确切版本。target 被删空、被换版本都归这里。
+ *   2. 输出覆盖门（`DECLARED_OUTPUTS_UNSATISFIED`）：绑定一致之后，才按 target 解析出的
+ *      artifact_kind 核对冻结的 expected_outputs。
+ *
+ * 2026-10-08 验收记录的那条反例原本想测第 2 门，实际把 target 删空了，于是被第 1 门
+ * 提前挡下（完成仍 BLOCKED，不是误完成缺陷）。下面两条各测一门：删空 target 属于第 1 门；
+ * 第 2 门用「绑定保持一致、但产物本身取不到」来触发，避免再被第 1 门短路。
+ */
+test('completion gate rejects a PASS whose verification targets no longer bind the current candidate', async () => {
   const fixture = await setupDelegatedRun([
     { criterionId: 'c1', statement: '必需节与结构完整', required: true, method: 'MARKDOWN_STRUCTURE' },
   ], { artifacts: ['MARKDOWN_DOCUMENT'] });
@@ -577,10 +589,49 @@ test('completion gate rejects a PASS whose exact verification targets do not cov
   await expectStepSucceeded(await advance(fixture), 'VERIFY');
 
   const session = await latestSession(fixture.runId);
+  assert.equal(session.status, 'PASS');
 
+  // target 全部消失：证据不再绑定当前候选，绑定门必须先挡住。
   await withMigrationClient(async (client) => {
     await client.query('delete from verification_targets where session_id = $1::uuid', [session.id]);
   });
+
+  const completeStepId = await stepId(fixture.runId, 'COMPLETE');
+  const blocked = await advance(fixture);
+
+  assert.equal(blocked.status, 'COMPLETION_BLOCKED', JSON.stringify(blocked));
+
+  if (blocked.status !== 'COMPLETION_BLOCKED') {
+    throw new Error('expected COMPLETION_BLOCKED');
+  }
+
+  assert.equal(blocked.reason, 'VERIFICATION_TARGET_STALE');
+  assert.equal(await countAttempts(completeStepId), 0n);
+  assert.equal(await countCompletionRecords(fixture.taskId), 0n);
+  assert.equal(await countStateCompletionRefs(fixture.projectId), 0n);
+  assert.equal(await countCompletionActivities(fixture.taskId), 0n);
+  assert.equal((await readTask(fixture.taskId)).status, 'IN_PROGRESS');
+  assert.equal((await readRun(fixture.runId)).status, 'VERIFYING');
+});
+
+test('completion gate rejects a bound PASS whose targets do not cover the frozen Markdown requirement', async () => {
+  const fixture = await setupDelegatedRun([
+    { criterionId: 'c1', statement: '必需节与结构完整', required: true, method: 'MARKDOWN_STRUCTURE' },
+  ], { artifacts: ['MARKDOWN_DOCUMENT'] });
+
+  await advanceToVerifying(fixture);
+  await expectStepSucceeded(await advance(fixture), 'VERIFY');
+
+  const session = await latestSession(fixture.runId);
+  assert.equal(session.status, 'PASS');
+
+  // verification_targets 原样保留（仍绑定当前候选版本），因此绑定门必然通过；
+  // 只把冻结的 expected_outputs 换成产物集合覆盖不了的形态，让完成落到输出覆盖门。
+  const bound = await sql<{ artifact_version_id: string }>`
+    select artifact_version_id from verification_targets where session_id = ${session.id}`.execute(app.db);
+  assert.ok(bound.rows.length > 0, 'PASS 必须有绑定的 verification target');
+  await replaceFrozenExpectedOutputs(fixture.runId,
+    { artifacts: ['MARKDOWN_DOCUMENT', 'TEST_REPORT'] });
 
   const completeStepId = await stepId(fixture.runId, 'COMPLETE');
   const blocked = await advance(fixture);
@@ -598,6 +649,93 @@ test('completion gate rejects a PASS whose exact verification targets do not cov
   assert.equal(await countCompletionActivities(fixture.taskId), 0n);
   assert.equal((await readTask(fixture.taskId)).status, 'IN_PROGRESS');
   assert.equal((await readRun(fixture.runId)).status, 'VERIFYING');
+});
+
+/**
+ * 把 Run 的当前候选指针指向同一 Artifact 的新版本（内容可完全相同），
+ * 用于证明完成门按「确切版本身份」而不是文本/内容比较来判断证据是否仍适用。
+ */
+async function repointCandidateToNewVersion(fixture: RunFixture): Promise<string> {
+  const persist = await withTransaction(app.db,
+    (repositories) => repositories.runs.readStepByKind(fixture.runId, 'PERSIST_CANDIDATE'));
+  assert.ok(persist);
+  const originalId = persist.result_ref?.artifact_version_id;
+  assert.equal(typeof originalId, 'string');
+
+  return withTransaction(app.db, async (repositories) => {
+    const original = await repositories.artifacts.readArtifactVersion(originalId as string);
+    assert.ok(original);
+    const newer = await repositories.artifacts.insertArtifactVersion({
+      id: randomUUID(), artifactId: original.artifact_id,
+      versionNumber: original.version_number + 1n,
+      storageRef: original.storage_ref, contentHash: original.content_hash,
+      size: original.size, mediaType: original.media_type,
+      sourceKind: 'AI', sourceRef: `test:repoint:${randomUUID()}`,
+    });
+    await sql`update run_steps
+      set result_ref = jsonb_set(result_ref, '{artifact_version_id}', to_jsonb(${newer.id}::text))
+      where id = ${persist.id}`.execute(app.db);
+    return newer.id;
+  });
+}
+
+test('completion gate rejects a PASS whose target version is no longer the current candidate', async () => {
+  const fixture = await setupDelegatedRun([
+    { criterionId: 'c1', statement: '必需节与结构完整', required: true, method: 'MARKDOWN_STRUCTURE' },
+  ], { artifacts: ['MARKDOWN_DOCUMENT'] });
+
+  await advanceToVerifying(fixture);
+  await expectStepSucceeded(await advance(fixture), 'VERIFY');
+
+  const session = await latestSession(fixture.runId);
+
+  assert.equal(session.status, 'PASS');
+  const historyBefore = await listCheckResults(session.id);
+
+  // 候选换成新版本：内容相同、身份不同。正式绑定协议按 version_id 判断，不能只比较文本。
+  await repointCandidateToNewVersion(fixture);
+
+  const completeStepId = await stepId(fixture.runId, 'COMPLETE');
+  const blocked = await advance(fixture);
+
+  assert.equal(blocked.status, 'COMPLETION_BLOCKED', JSON.stringify(blocked));
+
+  if (blocked.status !== 'COMPLETION_BLOCKED') {
+    throw new Error('expected COMPLETION_BLOCKED');
+  }
+
+  assert.equal(blocked.reason, 'VERIFICATION_TARGET_STALE');
+  assert.equal(await countAttempts(completeStepId), 0n);
+  assert.equal(await countCompletionRecords(fixture.taskId), 0n);
+  assert.equal(await countStateCompletionRefs(fixture.projectId), 0n);
+  assert.equal(await countCompletionActivities(fixture.taskId), 0n);
+  assert.equal((await readTask(fixture.taskId)).status, 'IN_PROGRESS');
+  assert.equal((await readRun(fixture.runId)).status, 'VERIFYING');
+  // v1 的通过证据作为历史保留，不被改写或删除。
+  assert.deepEqual(await listCheckResults(session.id), historyBefore);
+  assert.equal((await latestSession(fixture.runId)).status, 'PASS');
+});
+
+test('a required rule change after PASS fences the completion step', async () => {
+  const fixture = await setupDelegatedRun([
+    { criterionId: 'c1', statement: '必需节与结构完整', required: true, method: 'MARKDOWN_STRUCTURE' },
+  ], { artifacts: ['MARKDOWN_DOCUMENT'] });
+
+  await advanceToVerifying(fixture);
+  await expectStepSucceeded(await advance(fixture), 'VERIFY');
+
+  assert.equal((await latestSession(fixture.runId)).status, 'PASS');
+
+  // 必需规则版本变化：旧 PASS 不能完成新规则快照下的同一 Task（事务拒绝陈旧依据）。
+  await withTransaction(app.db, async (repositories) => {
+    await repositories.workspaces.bumpRuleRevision(fixture.workspaceId);
+  });
+
+  await assert.rejects(
+    advance(fixture),
+    (error: unknown) => (error as { code?: string }).code === 'RULE_SNAPSHOT_STALE',
+  );
+  assert.equal(await countCompletionRecords(fixture.taskId), 0n);
 });
 
 /* -------------------------------------------------------------------------- */

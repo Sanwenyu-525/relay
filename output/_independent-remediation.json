@@ -1,0 +1,63 @@
+[api-harness] live pid=28872 port=3165 livenessMs=5864 firstOutputMs=5822 probes=54
+{
+  "facts": [
+    {
+      "name": "R1-explicit-skill",
+      "httpStatus": 202,
+      "bodyCode": null,
+      "assistantRows": 1,
+      "skillFrozen": true,
+      "methodFrozen": false,
+      "methodAction": null,
+      "methodArgument": null
+    },
+    {
+      "name": "R2-expired-worker",
+      "outcome": "DISCARDED",
+      "messageStatus": "FAILED",
+      "messageError": "LEASE_LOST",
+      "roundStatus": "REJECTED",
+      "roundReason": "LEASE_LOST",
+      "evidenceRows": 0
+    },
+    {
+      "name": "R3-durable-cancel",
+      "outcome": "CANCELLED",
+      "messageStatus": "CANCELLED",
+      "cancelRequested": true,
+      "roundStatus": "CANCELLED",
+      "roundReason": "LEARNING_ROUND_CANCELLED",
+      "evidenceRows": 0
+    },
+    {
+      "name": "R8-unreferenced-observed",
+      "errorCode": "LEARNING_EVIDENCE_REF_INVALID",
+      "saved": null,
+      "concepts": 0,
+      "evidenceRows": 0
+    }
+  ],
+  "verdicts": [
+    {
+      "name": "R1",
+      "ok": true,
+      "detail": "HTTP 202 skill=true method=false"
+    },
+    {
+      "name": "R2",
+      "ok": true,
+      "detail": "outcome=DISCARDED message=FAILED/LEASE_LOST round=REJECTED/LEASE_LOST evidence=0"
+    },
+    {
+      "name": "R3",
+      "ok": true,
+      "detail": "message=CANCELLED cancel=true outcome=CANCELLED evidence=0"
+    },
+    {
+      "name": "R8",
+      "ok": true,
+      "detail": "error=LEARNING_EVIDENCE_REF_INVALID concepts=0"
+    }
+  ]
+}
+ALL_PASS=true

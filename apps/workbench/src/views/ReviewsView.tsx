@@ -107,7 +107,7 @@ export default function ReviewsView() {
         actions={<button className="secondary-button" type="button" data-testid="review-refresh" disabled={loading || refreshing}
           onClick={() => void load()}><RotateCcw aria-hidden="true" />{refreshing ? "正在更新" : "刷新"}</button>} />
       {!live && <p className="warning-callout">当前为只读示例。连接本机 API 后可处理真实 Review 请求。</p>}
-      {error && <p className="action-error" role="alert">{error}</p>}
+      {error && <p className="action-error" role="alert" data-testid="review-read-error">{error}</p>}
       <section className="review-list" aria-label="待审请求">
         <nav className="review-filters" aria-label="请求类型">
           <button type="button" data-testid="review-filter-ALL" aria-pressed={kind === "ALL"} onClick={() => setKind("ALL")}>全部 <span>{reviews.length}</span></button>
@@ -116,13 +116,17 @@ export default function ReviewsView() {
         </nav>
         {loading ? <p className="helper-text" role="status">正在读取待审请求…</p> : <>
           <div className="review-list-columns" aria-hidden="true"><span>请求事项</span><span>类型</span><span>所属项目</span><span>请求时间</span><span>当前状态</span></div>
-          {!visibleReviews.length && <p className="helper-text">{reviews.length ? "当前类型没有待处理请求。" : "当前没有待处理请求。只有验证或动作准入确实需要人工判断时，才会出现新请求。"}</p>}
+          {/* 读取失败不是「没有请求」：列表为空既可能是真的没有，也可能是这次没读到。缺 error
+              判定时上方错误横幅与下方「当前没有待处理请求」会同时出现，等于把读取失败说成没有数据。 */}
+          {!visibleReviews.length && (error !== null
+            ? <p className="helper-text" role="status">待审请求没有读到，请查看上方的错误并重试；下面不代表当前确实没有请求。</p>
+            : <p className="helper-text">{reviews.length ? "当前类型没有待处理请求。" : "当前没有待处理请求。只有验证或动作准入确实需要人工判断时，才会出现新请求。"}</p>)}
           {visibleReviews.map((review) => <button key={review.id} className={`review-list-item${selected?.id === review.id ? " review-list-item--selected" : ""}`} type="button" aria-current={selected?.id === review.id ? "true" : undefined} onClick={() => selectReview(review.id)}>
             <strong>{title(review)}<small>请求 v{review.revision}</small></strong>
             <span className="review-kind">{kindLabels[review.kind]}</span>
             <span className="review-project">{review.projectId === null ? "未归属项目" : labels?.projectTitle && selected?.projectId === review.projectId ? labels.projectTitle : "项目名称暂不可读"}</span>
             <time dateTime={review.createdAt}>{requestTime(review.createdAt)}</time>
-            <span className={`status-chip status-chip--${review.status === "OPEN" && !isReviewExpired(review) ? "warning" : "neutral"}`}>{status(review)}</span>
+            <span className={`status-chip status-chip--${review.status === "OPEN" ? "warning" : "neutral"}`}>{status(review)}</span>
           </button>)}
         </>}
       </section>
@@ -133,15 +137,22 @@ export default function ReviewsView() {
         <ArtifactReaderPanel key={`${connection.epoch}:${selected.id}:${selected.revision}`} client={connection.client} taskId={selected.taskId} projectId={selected.projectId}
           selectedVersionId={selected.target.artifact_version_id} draft={null} /></section>}
     {selected && (selectedId === null || selected.id === selectedId) ? <article className="review-detail" aria-label="所选待审请求详情">
-      <div className="review-detail-heading"><h2>为何需要你</h2><span className={`status-chip status-chip--${selected.status === "OPEN" && !isReviewExpired(selected) ? "warning" : "neutral"}`}>{status(selected)}</span></div>
+      <div className="review-detail-heading"><h2>为何需要你</h2><span className={`status-chip status-chip--${selected.status === "OPEN" ? "warning" : "neutral"}`}>{status(selected)}</span></div>
       <p className="review-reason">{reviewReasonText(selected.reason)}</p>
       <dl className="review-request-facts"><div><dt>请求事项 · {kindLabels[selected.kind]}</dt><dd>{title(selected)}</dd></div><div><dt>请求时间</dt><dd><time dateTime={selected.createdAt}>{requestTime(selected.createdAt)}</time></dd></div></dl>
       <details className="review-request-identity"><summary>请求身份 · v{selected.revision}</summary><p className="helper-text">请求 ID：<code className="hash-code">{selected.id}</code> · 请求 v{selected.revision}</p>{selected.projectId && <p className="helper-text">Project ID：{selected.projectId}</p>}{selected.taskId && <p className="helper-text">Task ID：{selected.taskId}</p>}</details>
-      {selected.expiresAt && <p className="helper-text">有效期至：{selected.expiresAt}</p>}
+      {selected.expiresAt && <p className="helper-text" data-testid="review-expires-at">有效期至：{requestTime(selected.expiresAt)}</p>}
       {selected.taskId && live && <div className="form-actions"><Link className="text-link" to={`/tasks/${selected.taskId}?tab=artifacts`}>查看关联任务与产物</Link>{typeof selected.target.artifact_version_id === "string" && <Link className="text-link" to={`/artifact-versions/${selected.target.artifact_version_id}/lineage`}>核对版本来源</Link>}</div>}
       <ReviewDecisionPanel live={live} review={selected} writeBlockedReason={projectWriteBlockedReason}
         busy={loading || refreshing} onRefresh={load} />
       <details className="page-explanation"><summary>逐项判断的边界</summary><p className="helper-text">每条请求绑定自己的对象与依据，不能绕过证据自动接受。判断保存后，任务完成与执行权仍须分别核对。</p></details>
-    </article> : <div className="review-detail review-empty" role="status"><h2>为何需要你</h2><p className="helper-text"><Info aria-hidden="true" /> 选择一条待审请求查看绑定对象、证据和可用决定。</p></div>}
+    </article> : <div className="review-detail review-empty" role="status"><h2>为何需要你</h2>
+      {loading || refreshing ? <p className="helper-text" data-testid="review-detail-empty-state"><Info aria-hidden="true" /> 正在读取待审请求…</p>
+        : error !== null ? <p className="helper-text" data-testid="review-detail-empty-state"><Info aria-hidden="true" /> 待审请求读取失败，请先查看页面上方的错误并重试。</p>
+          : visibleReviews.length === 0 ? <p className="helper-text" data-testid="review-detail-empty-state"><Info aria-hidden="true" /> {reviews.length === 0
+            ? "当前没有可选择的待审请求。只有验证或动作准入确实需要人工判断时，才会出现新请求。"
+            : "当前请求类型没有可选择的待审请求。"}</p>
+            : <p className="helper-text" data-testid="review-detail-empty-state"><Info aria-hidden="true" /> 列表中有 {visibleReviews.length} 条待审请求，请选择一条查看绑定对象、证据和可用决定。</p>}
+    </div>}
   </div></section>;
 }

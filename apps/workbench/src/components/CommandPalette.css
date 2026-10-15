@@ -13,6 +13,7 @@
 .command-palette-actions > button:disabled { color: var(--relay-color-disabled-text); cursor: default; }
 .command-palette-project { margin-top: var(--relay-space-6); padding-top: var(--relay-space-4); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .command-palette-project .secondary-button { margin-top: var(--relay-space-4); }
-@media (max-width: 60rem) {
+/* 并入 48rem 折行档，原 60rem：窄屏取消结果区内部滚动，交给页面滚动；两种形态都不产生横向溢出。 */
+@media (width < 48rem) {
   .command-palette-results { max-height: none; overflow-y: visible; }
 }

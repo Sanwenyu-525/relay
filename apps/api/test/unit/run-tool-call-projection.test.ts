@@ -28,6 +28,7 @@ function row(overrides: Partial<RunToolCallRow> & Pick<RunToolCallRow, 'round' |
     tool_name: 'read_file',
     arguments: { relative_path: 'a.ts' },
     arguments_sha256: 'a'.repeat(64),
+    assistant_message: null,
     operation_id: null,
     result_ref: null,
     adaptation_of: null,
@@ -81,12 +82,15 @@ test('passes arguments and result_ref through byte for byte', () => {
   // 截断后缀是模型当时实际收到的内容：重新序列化会改变字节，界面与模型就对不上账。
   const resultRef = { entries: ['a', 'b'], truncated: true, omitted_bytes: 4096 };
   const projection = projectRunToolCalls(run(), [row({ round: 0, ordinal: 0, status: 'SETTLED',
-    arguments: { relative_path: 'src/x.ts', limit: 7 }, result_ref: resultRef })]);
+    arguments: { relative_path: 'src/x.ts', limit: 7 }, result_ref: resultRef,
+    assistant_message: { content: '我先查找文件。', reasoning_content: 'Provider protocol data' } })]);
 
   const call = projection.rounds[0]?.calls[0];
   assert.deepEqual(call?.arguments, { relative_path: 'src/x.ts', limit: 7 });
   assert.deepEqual(call?.result_ref, resultRef);
   assert.equal(JSON.stringify(call?.result_ref), JSON.stringify(resultRef));
+  assert.equal('assistant_message' in (call ?? {}), false);
+  assert.equal(JSON.stringify(projection).includes('Provider protocol data'), false);
 });
 
 test('keeps a missing result distinct from an empty one and an undispatched operation null', () => {

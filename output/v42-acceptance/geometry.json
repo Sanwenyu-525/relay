@@ -1,0 +1,38 @@
+[
+  {
+    "closeRight": 751,
+    "composerBottom": 888,
+    "pageWidth": 767,
+    "width": 767
+  },
+  {
+    "closeRight": 752,
+    "composerBottom": 888,
+    "pageWidth": 768,
+    "width": 768
+  },
+  {
+    "closeRight": 884,
+    "composerBottom": 888,
+    "pageWidth": 900,
+    "width": 900
+  },
+  {
+    "closeRight": 1084,
+    "composerBottom": 888,
+    "pageWidth": 1100,
+    "width": 1100
+  },
+  {
+    "closeRight": 1241,
+    "composerBottom": 888,
+    "pageWidth": 1280,
+    "width": 1280
+  },
+  {
+    "closeRight": 1415,
+    "composerBottom": 888,
+    "pageWidth": 1440,
+    "width": 1440
+  }
+]

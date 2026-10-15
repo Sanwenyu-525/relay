@@ -8,6 +8,9 @@ import type { JsonObject, JsonValue } from '../infrastructure/json.js';
 import type { GatewayCapability, RunScopeGrantRow } from '../infrastructure/database-schema.js';
 import { canonicalizeJson } from '../receipt/payload-hash.js';
 import { requireRow } from '../shared/sql-rows.js';
+import type { CheckTrustBasis } from './check-trust-basis.js';
+import { parseCheckTrustBasis, computeCheckTrustBasis, CHECK_TRUST_REASON } from './check-trust-basis.js';
+import { invalidTransition } from './domain-error.js';
 import { canonicalResourceIdentity } from './gateway-configuration.js';
 
 /**
@@ -45,6 +48,37 @@ export interface FrozenCheck {
   readonly max_output_bytes?: number;
   /** 可执行程序（或脚本入口）的内容摘要；变化后原授权不再适用。 */
   readonly executable_sha256: string;
+  /** 检查入口信任摘要：入口脚本 + 被引用脚本 + 直接决定检查行为的构建/测试配置。 */
+  readonly trust_basis?: CheckTrustBasis | undefined;
+}
+
+/** 原 Delegate 与任务链共用检查冻结；已有信任依据只核对，不静默换成新脚本。 */
+export async function freezeScopeChecks(canonicalRoot: string, checks: readonly FrozenCheck[],
+  taskId: string): Promise<readonly FrozenCheck[]> {
+  const ids = new Set<string>();
+  const enriched: FrozenCheck[] = [];
+  for (const check of checks) {
+    if (check.id === '' || ids.has(check.id) || check.executable === '' ||
+        !/^[0-9a-f]{64}$/.test(check.executable_sha256) ||
+        check.max_output_bytes !== undefined &&
+          (check.max_output_bytes < 1 || check.max_output_bytes > 1048576)) {
+      throw invalidTransition(`scope_grant 的已配置检查 ${check.id || '(空)'} 不合法。`, { taskId });
+    }
+    ids.add(check.id);
+    const trust = await computeCheckTrustBasis({ canonicalRoot,
+      executable: check.executable, args: check.args });
+    if (!trust.ok) {
+      const hint = trust.reason === CHECK_TRUST_REASON.DYNAMIC_EXECUTION_UNSUPPORTED
+        ? '它用了内联求值、shell 组合或通配符，无法证明执行范围，请改成对单一脚本文件的直接调用。'
+        : '请确认入口脚本与参数引用的脚本都在磁盘上可读。';
+      throw invalidTransition(`无法冻结检查 ${check.id} 的可信依据（${trust.reason}）：${trust.detail}${hint}`, { taskId });
+    }
+    if (check.trust_basis !== undefined && check.trust_basis.digest !== trust.basis.digest) {
+      throw invalidTransition(`检查 ${check.id} 的材料已变化，请重新圈定。`, { taskId });
+    }
+    enriched.push({ ...check, trust_basis: trust.basis });
+  }
+  return enriched;
 }
 
 export interface CreateScopeGrantInput {
@@ -119,6 +153,8 @@ export interface EvaluateScopeGrantInput {
   readonly check?: FrozenCheck | undefined;
   /** 派发时实测到的可执行程序摘要；与冻结值不同即视为配置已变。 */
   readonly observedExecutableSha256?: string | undefined;
+  /** 派发时实测到的信任摘要；与冻结值不同即视为检查材料已变。 */
+  readonly observedTrustDigest?: string | undefined;
   /** 本次变化集是否含删除。删除永远需要单动作确认，授权不能豁免。 */
   readonly containsDelete?: boolean | undefined;
 }
@@ -159,6 +195,16 @@ export async function evaluateScopeGrant(db: DbExecutor,
       // 脚本或构建配置在授权之后被改过：原信任依据不成立，退回人工判断。
       return { covered: false, reason: 'SCOPE_GRANT_CHECK_CHANGED' };
     }
+    const frozenTrust = input.check.trust_basis;
+    if (frozenTrust === undefined) {
+      // 历史授权只冻结了入口摘要，没有材料依据：无法确认当前材料与批准时一致，
+      // 按「依据不完整」退回人工确认，而不是当成摘要相同放行。
+      return { covered: false, reason: 'SCOPE_GRANT_CHECK_CHANGED' };
+    }
+    if (frozenTrust.digest !== input.observedTrustDigest) {
+      // 入口未变，但被参数引用的检查脚本或构建/测试配置变了：同一 check_id 不能沿用原批准。
+      return { covered: false, reason: 'SCOPE_GRANT_CHECK_CHANGED' };
+    }
   }
   return { covered: true };
 }
@@ -176,7 +222,12 @@ export function resolveFrozenCheck(grant: RunScopeGrantRow | undefined,
       !Array.isArray(check.args) || !check.args.every((arg) => typeof arg === 'string')) {
     return undefined;
   }
+  const trustBasis = check.trust_basis === undefined
+    ? undefined : parseCheckTrustBasis(check.trust_basis);
+  // 形状不合法的信任摘要不能被当成「没有摘要」静默忽略：那份检查直接判为不可解析。
+  if (check.trust_basis !== undefined && trustBasis === undefined) return undefined;
   return { id: checkId, executable: check.executable, args: check.args as readonly string[],
     executable_sha256: check.executable_sha256,
+    ...(trustBasis === undefined ? {} : { trust_basis: trustBasis }),
     ...(typeof check.max_output_bytes === 'number' ? { max_output_bytes: check.max_output_bytes } : {}) };
 }

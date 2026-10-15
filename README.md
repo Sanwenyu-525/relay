@@ -2,6 +2,8 @@
 
 > 当前阶段、授权与下一步只看 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)，已验证范围与剩余出口只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)。取舍见 [ADR-010](docs/decisions/ADR-010-agent-stack-react-desktop.md)，工作包见 [M01–M07](prompts/stack-migration.md)。
 
+当前已确认的产品主线是“用户表达意图 → Agent 推进工作并维护项目事实 → UI 展示变化、成果和必要决定”，减少重复填表、登记和衔接状态的操作。完整规则归[总纲 §0.8.1](Personal_Workflow_OS_Master_Spec.md#081-自然语言维护项目状态)；已有工程切片与完整产品目标分别核定，当前可用范围以功能验收表为准。
+
 面向长期项目的人与 AI 协作工作系统，交付目标为 Windows 可安装应用，具有独立窗口和启动入口。仓库包含产品设计、业务契约、研究实验、UI 视觉规范、Fastify/Kysely/PostgreSQL 后端、React 工作台与 Tauri 桌面宿主。显式连接本机 API 后可走人工路径——创建项目 → 创建任务（含 ready）→ 开始 → 任务详情 → 保存 Markdown 产物版本 → 选择接受版本 → 完成 → 重开（[前端预览记录第 9、10 节](docs/development/前端预览实施与验收.md#10-ui-10-任务详情与-ui-11-产物编辑2026-09-21)），也可在待审页处理 Review、在 Run 页查看控制和追溯、在资料页管理 Knowledge/Memory/Decision/Rule。仓库还提供 Mock Runtime、模型端口、Context、Assist/首批 Skill 与蓝图、Today、内置工作台及文件/Git/CLI 的实现；实现与验收边界由上述功能验收表限定。后端接口见 [HTTP 契约第 10 节](docs/api/http-command-contract.md)。本项目与 AI Manga Drama Studio 独立。
 
 当前工作区为 D:/Develop/Relay-Agent。阶段、已有证据、缺口及下一步统一见 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)；旧迁入路径与变更经过见[交付审计](docs/development/design-audit.md)，不作为当前启动位置。
@@ -27,6 +29,10 @@ P10 开发自检：后端真实 PostgreSQL 全量 158/158、P10 定向 7/7、Gat
 9. [V1 后续长期协作路线](docs/requirements/post-v1-roadmap.md)：项目接续、共创、知识整理与有限自动推进的推荐分期，配套[架构提案](docs/decisions/ADR-013-bounded-project-continuation.md)和[N 工作包提示词](prompts/post-v1-collaboration.md)；仅规划，未增加当前 V1 交付范围。
 
 ## 当前可运行内容
+
+基础任务链沿[HTTP §10.77](docs/api/http-command-contract.md#1077-基础有限-markdown-任务链2026-10-14-协议)与客户端使用：先固定既有范围，再明确授权累计任务/调用数和有效期，沿原 Worker/人工验收/完成串行接续。重开需人工确认，原预算与身份不重置；[§10.78](docs/api/http-command-contract.md#1078-任务链只读执行规格与来源2026-10-14-协议)接受管文件读取和确切资料来源，[§10.79](docs/api/http-command-contract.md#1079-任务链受控修改与检查2026-10-14-协议)接普通文件修改、配置检查及原明确修改方法，需先升级至 migration 0085。范围授权、单次审批与人工验收沿原入口，任务链 UI 后置，实际证据见统一验收表。
+
+一次性项目提醒沿[HTTP 契约 §10.76](docs/api/http-command-contract.md#1076-基础一次性继续项目提醒2026-10-14-协议)与工作台客户端使用；迁移就绪后 API 存活期间扫描，退出不运行，重开只补同一代次的待处理。触发不调用模型或创建计划；设置/待处理 UI 后置，Windows 投递证据仍见统一验收表。
 
 实验位于 experiments/，运行命令和局限见[实验说明](experiments/README.md)及 [P00 记录](docs/research/p00-source-study.md)。研究缓存 .research/ 不进入产品源码。实验成绩不代表生产 PostgreSQL、模型适配或全部业务验收通过。
 

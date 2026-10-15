@@ -101,6 +101,25 @@ function Get-PgStatus {
   if ($LASTEXITCODE -notin @(0, 3)) { throw 'Could not determine trial PostgreSQL status' }
   return $LASTEXITCODE
 }
+# 开发窗口执行的是 src-tauri\resources\api 暂存产物，其迁移集可以领先于 test-release 包。
+# 只比较包清单 SHA-256 会漏掉「暂存产物新增/改写迁移但包未重打包」这一路，数据库停在旧
+# 迁移集、readiness 又要求清单完全相等，于是窗口以 SCHEMA_UNAVAILABLE 启动失败。
+# 这里按同一规则（文件名 + 内容 SHA-256）给暂存迁移集算一个摘要，与 session.json 中记录的
+# 值比较；变化即与包清单变化同等对待，从暂存产物补迁移。
+function Get-MigrationSetHash {
+  param([string]$Directory)
+  if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { return $null }
+  $lines = @(Get-ChildItem -LiteralPath $Directory -File -Filter '*.sql' | Sort-Object Name | ForEach-Object {
+    $_.Name + ':' + (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+  })
+  if (-not $lines.Count) { return $null }
+  $bytes = [Text.Encoding]::UTF8.GetBytes(($lines -join "`n") + "`n")
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '') } finally { $sha.Dispose() }
+}
+# DesktopDev 时优先取暂存产物作为 migrate/install-graph/init-workspace 的来源；暂存产物缺失时
+# 退回测试包（dev-desktop.ps1 在真正开窗前会另行拒绝缺少暂存资源的开发启动）。
+$stagedApi = Join-Path $root 'apps\desktop\src-tauri\resources\api'
 try {
   if ($Action -eq 'Build') {
     if (@(Get-TrialProcesses).Count) { throw 'Close the desktop window before rebuilding.' }
@@ -164,9 +183,21 @@ try {
     $listener.Start()
     $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port
     $listener.Stop()
-    $state = [pscustomobject]@{ schema_version = 1; cluster_path = $cluster; port = $port; workspace_id = [guid]::NewGuid().ToString(); command_id = [guid]::NewGuid().ToString(); ready = $false; manifest_hash = '' }
+    $state = [pscustomobject]@{ schema_version = 1; cluster_path = $cluster; port = $port; workspace_id = [guid]::NewGuid().ToString(); command_id = [guid]::NewGuid().ToString(); ready = $false; manifest_hash = ''; dev_schema_hash = '' }
     Save-State
   }
+  # 暂存产物可用且本次是 DesktopDev 时，把暂存迁移集摘要纳入补迁移判据。
+  $recordedDevSchemaHash = ''
+  if ($state.PSObject.Properties.Name -contains 'dev_schema_hash' -and $state.dev_schema_hash) { $recordedDevSchemaHash = $state.dev_schema_hash }
+  $stagedApiAvailable = Test-Path -LiteralPath (Join-Path $stagedApi 'dist\src\cli\migrate.js') -PathType Leaf
+  $devSchemaHash = $recordedDevSchemaHash
+  if ($Action -eq 'DesktopDev' -and $stagedApiAvailable) {
+    $computedDevSchemaHash = Get-MigrationSetHash (Join-Path $stagedApi 'migrations')
+    if ($computedDevSchemaHash) { $devSchemaHash = $computedDevSchemaHash }
+  }
+  $cliRoot = if ($Action -eq 'DesktopDev' -and $stagedApiAvailable) { $stagedApi } else { Join-Path $package 'api' }
+  $devSchemaChanged = ($Action -eq 'DesktopDev') -and ($devSchemaHash -ne $recordedDevSchemaHash)
+  $needsMigration = ($state.manifest_hash -ne $manifestHash) -or $devSchemaChanged
   if (-not (Test-Path -LiteralPath (Join-Path $cluster 'PG_VERSION'))) {
     Write-Host '首次使用：正在初始化开发数据库…'
     Invoke-Checked (Join-Path $pgBin 'initdb.exe') @('-D', $cluster, '-U', 'relay_api_admin', '-A', 'trust', '--encoding=UTF8', '--locale=C')
@@ -183,7 +214,7 @@ try {
     $exists = Invoke-Checked $psql @($adminUrl, '-w', '-tAc', "SELECT 1 FROM pg_database WHERE datname='relay_trial'")
     if (($exists -join '').Trim() -ne '1') { Invoke-Checked $psql @($adminUrl, '-w', '-v', 'ON_ERROR_STOP=1', '-c', 'CREATE DATABASE relay_trial OWNER relay_migrator') }
   }
-  if ($state.manifest_hash -ne $manifestHash) {
+  if ($needsMigration) {
     Write-Host '正在初始化或升级数据库结构…'
     if ($state.ready) {
       $backup = Join-Path $trial ('before-upgrade-' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '.dump')
@@ -191,16 +222,17 @@ try {
       Write-Host "Database backup before migration: $backup"
     }
     $env:RELAY_MIGRATION_DB_URL = "postgresql://relay_migrator@127.0.0.1:$($state.port)/relay_trial"
-    Invoke-Checked $node @((Join-Path $package 'api\dist\src\cli\migrate.js'))
-    Invoke-Checked $node @((Join-Path $package 'api\dist\src\cli\install-graph.js'))
+    Invoke-Checked $node @((Join-Path $cliRoot 'dist\src\cli\migrate.js'))
+    Invoke-Checked $node @((Join-Path $cliRoot 'dist\src\cli\install-graph.js'))
   }
   Remove-Item Env:RELAY_MIGRATION_DB_URL -ErrorAction SilentlyContinue
   $env:RELAY_DB_URL = "postgresql://relay_app@127.0.0.1:$($state.port)/relay_trial"
   if (-not $state.ready) {
-    Invoke-Checked $node @((Join-Path $package 'api\dist\src\cli\init-workspace.js'), '--name', 'Relay trial', '--workspace-id', $state.workspace_id, '--command-id', $state.command_id) | Out-Null
+    Invoke-Checked $node @((Join-Path $cliRoot 'dist\src\cli\init-workspace.js'), '--name', 'Relay trial', '--workspace-id', $state.workspace_id, '--command-id', $state.command_id) | Out-Null
   }
   $state.ready = $true
   $state.manifest_hash = $manifestHash
+  $state.dev_schema_hash = $devSchemaHash
   Save-State
   $config = Join-Path $trial 'desktop.env'
   # 字段 Owner：DB/工作区四个运行时键由本脚本按当前状态重写；其余键（如 RELAY_MODEL_*

@@ -1,4 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const apiBase = process.env.RELAY_M02_API_BASE_URL;
 const workspaceId = process.env.RELAY_M02_WORKSPACE_ID;
@@ -39,9 +43,9 @@ test("真实 API 人工闭环：创建项目与任务、启动、版本、当前
   await page.getByRole("button", { name: "返回任务入口" }).click();
   // 2026-10-02 共享壳栏位分离后主导航在图标导航栏，不再是合并的 .app-sidebar。
   await page.locator(".app-navrail").getByRole("link", { name: "项目" }).click();
-  // 按已知 Project ID 打开是右栏里默认收起的次级入口（项目列表优先按名称选择，技术 ID 保留在详情里），
-  // 这里显式展开它，顺带证明该折叠入口在真实 API 下可达。
-  const openById = page.locator(".rail-content details.page-explanation",
+  // 按已知 Project ID 打开是主列底部默认收起的次级入口（项目列表优先按名称选择，技术 ID 保留在详情里），
+  // 这里显式展开它，顺带证明该折叠入口在真实 API 下可达。2026-10-11 起它随详情抽屉从右栏迁到主列。
+  const openById = page.locator("details.page-explanation",
     { has: page.locator('input[name="live-project-id"]') });
   await openById.locator("summary").click();
   await openById.locator('input[name="live-project-id"]').fill(projectId!);
@@ -111,4 +115,57 @@ test("真实 API 人工闭环：创建项目与任务、启动、版本、当前
   await page.getByTestId("artifact-versions").locator("summary").click();
   await expect(page.getByTestId(`artifact-version-${firstVersionId}`).locator("xpath=ancestor::li")).not.toContainText("本轮接受");
   console.log("real API browser human path: refresh preserves artifact history and separates selected/accepted pointers PASSED");
+});
+
+/**
+ * FE-01 的真实链路出口：夹具证明不了服务端真的改了归属。
+ *
+ * 这里用真实 PG + 真实 API：先用 API 预置一条 `project_id` 为空的普通讨论（不经过模型，
+ * 因此不依赖 Provider），再在真实 Chromium 里打开目录，最后**用 API 断言**该会话的
+ * `project_id` 已被改写、且仍是同一个 session id。目录用一次性临时目录，结束后删除。
+ */
+test("真实 API 同会话归属：普通讨论选目录后归入项目，会话身份与历史保留", async ({ page }) => {
+  if (!apiBase || !workspaceId || !bearerToken) throw new Error("Run with scripts/run-real-api-browser.ps1");
+  const headers = { authorization: `Bearer ${bearerToken}` };
+  const api = (path: string) => `${apiBase}/api/v1/workspaces/${workspaceId}${path}`;
+  const folderRoot = mkdtempSync(join(tmpdir(), "relay-binding-"));
+  try {
+    const created = await page.request.post(api("/assist-sessions"), {
+      headers,
+      data: { command_id: randomUUID(), project_id: null, task_id: null, title: "归属真实链路（测试）" }
+    });
+    expect(created.ok()).toBe(true);
+    const sessionId = (await created.json() as { result: { session_id: string } }).result.session_id;
+    expect(sessionId).toBeTruthy();
+
+    await page.goto("/agent");
+    await connect(page);
+    // 应用自动续上这条尚未归属的讨论。
+    await expect(page.getByTestId("assist-transcript")).toBeVisible();
+
+    await page.getByTestId("folder-scope-change").click();
+    await page.getByTestId("folder-manual-root").fill(folderRoot);
+    await page.getByTestId("folder-open-manual").click();
+    await expect(page.getByTestId("collab-binding")).toHaveAttribute("data-status", "CONFIRMED");
+    await expect(page.getByTestId("collab-binding")).toHaveAttribute("data-session", sessionId);
+
+    // 服务端事实：同一个会话被归入目录解析出的项目，不是新建第二个会话。
+    const bound = await page.request.get(api(`/assist-sessions/${sessionId}`), { headers });
+    expect(bound.ok()).toBe(true);
+    const session = await bound.json() as { id: string; project_id: string | null };
+    expect(session.id).toBe(sessionId);
+    expect(session.project_id).toMatch(/^[0-9a-f-]{36}$/u);
+
+    const unassigned = await page.request.get(api("/assist-sessions"), { headers });
+    const list = await unassigned.json() as { items: { id: string; project_id: string | null }[] };
+    expect(list.items.filter((item) => item.id === sessionId)).toHaveLength(1);
+
+    // 归属不是授权：没有因此产生执行请求。
+    const requests = await page.request.get(api(`/conversation-execution-requests?session_id=${sessionId}`), { headers });
+    const executions = await requests.json() as { items: unknown[] };
+    expect(executions.items).toHaveLength(0);
+    console.log(`real API binding path: session ${sessionId} bound to ${session.project_id} PASSED`);
+  } finally {
+    rmSync(folderRoot, { recursive: true, force: true });
+  }
 });

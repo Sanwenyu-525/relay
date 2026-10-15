@@ -2,14 +2,58 @@ import * as readinessApi from "./resources/readiness";
 import * as projectsApi from "./resources/projects";
 import * as tasksApi from "./resources/tasks";
 import * as artifactsApi from "./resources/artifacts";
+import * as impactGroupSelectionsApi from "./resources/impactGroupSelections";
 import * as informationApi from "./resources/information";
 import * as assistApi from "./resources/assist";
+import * as chatControlsApi from "./resources/chatControls";
+import * as learningApi from "./resources/learning";
+import * as acceptanceMaterialsApi from "./resources/taskAcceptanceMaterials";
+import * as acceptanceTrialsApi from "./resources/taskAcceptanceTrials";
+import * as acceptanceComparisonsApi from "./resources/taskAcceptanceComparisons";
+import * as hypothesesApi from "./resources/hypotheses";
+import * as decisionReviewsApi from "./resources/decisionReviews";
+import * as workSegmentsApi from "./resources/workSegments";
+import * as personalPlanningApi from "./resources/personalPlanning";
+import * as scopeSimulationsApi from "./resources/scopeSimulations";
+import * as projectRemindersApi from "./resources/projectReminders";
+import * as taskChainsApi from "./resources/taskChains";
+import type { RelayTaskChainCreate,RelayTaskChainAuthorization,RelayTaskChainControl } from "./dtos/taskChains";
+export type { RelayTaskChain,RelayTaskChainCreate,RelayTaskChainAuthorization,RelayTaskChainControl,RelayTaskChainResult,RelayTaskChainExecution } from "./dtos/taskChains";
+import type { RelayReminderCreate, RelayReminderEdit, RelayReminderStatusInput, RelayReminderResolution, RelayReminderNotification } from "./dtos/projectReminders";
+export type { RelayReminderCreate, RelayReminderEdit, RelayReminderStatusInput, RelayReminderResolution, RelayReminderNotification, RelayReminderOccurrence, RelayProjectReminder, RelayReminderResult, RelayReminderStatus } from "./dtos/projectReminders";
+import type { RelayScopeSimulationInput, RelayScopeSelection } from "./dtos/scopeSimulations";
+export type { RelayScopeSimulationInput, RelayScopeSelection, RelayScopeSimulation, RelayScopeSimulationResult, RelayScopeOption, RelayScopeOptionKind } from "./dtos/scopeSimulations";
+import type { RelayTimeEstimateInput, RelayPeriodPlanInput, RelayPeriodPlanResolution } from "./dtos/personalPlanning";
+export type { RelayTimeEstimateInput, RelayTimeEstimate, RelayPeriodPlanInput, RelayPeriodPlanResolution, RelayPeriodPlan, RelayPeriodPlanItem, RelayPeriodPlanResult } from "./dtos/personalPlanning";
+import type { RelayWorkSegmentStart, RelayWorkSegmentMutation, RelayWorkSegmentEventInput, RelayWorkSegmentEventResolution } from "./dtos/workSegments";
+export type { RelayWorkSegment, RelayWorkSegmentEvent, RelayWorkSegmentStart, RelayWorkSegmentMutation,
+  RelayWorkSegmentEventInput, RelayWorkSegmentEventResolution, RelayWorkSegmentResult, RelayWorkSegmentTaskInput } from "./dtos/workSegments";
+import type { RelayDecisionPremiseInput, RelayDecisionReviewResolution } from "./dtos/decisionReviews";
+export type { RelayDecisionPremise, RelayDecisionPremiseInput, RelayDecisionReview, RelayDecisionReviewResolution } from "./dtos/decisionReviews";
+import type { RelayHypothesisCreate, RelayHypothesisDefinition, RelayHypothesisMutation, RelayHypothesisSuggestion } from "./dtos/hypotheses";
+export type { RelayHypothesis, RelayHypothesisConclusion, RelayHypothesisCreate, RelayHypothesisDefinition,
+  RelayHypothesisMutation, RelayHypothesisObservation, RelayHypothesisResult, RelayHypothesisSuggestion, RelayHypothesisVersion } from "./dtos/hypotheses";
+import type { RelayAcceptanceComparisonInput } from "./dtos/taskAcceptanceComparisons";
+export type { RelayAcceptanceComparisonInput, RelayAcceptanceComparison, RelayAcceptanceComparisonSample,
+  RelayAcceptanceComparisons, RelayComparisonObservation } from "./dtos/taskAcceptanceComparisons";
+import type { RelayAcceptanceObservationInput, RelayAcceptanceTrialStart, RelayAcceptanceTrialTransition } from "./dtos/taskAcceptanceTrials";
+export type { RelayAcceptanceObservationInput, RelayAcceptanceObservation, RelayAcceptanceTrialStart,
+  RelayAcceptanceTrialTransition, RelayAcceptanceTrial, RelayAcceptanceTrialResult, RelayAcceptanceTrials } from "./dtos/taskAcceptanceTrials";
+import type { RelayAcceptanceMaterialInput, RelayAcceptanceMaterialImport } from "./dtos/taskAcceptanceMaterials";
+export type { RelayAcceptanceMaterial, RelayAcceptanceMaterialResult, RelayAcceptanceMaterials,
+  RelayAcceptanceMaterialInput, RelayAcceptanceMaterialImport } from "./dtos/taskAcceptanceMaterials";
+import type { RelayLearningCommand } from "./resources/learning";
+import * as stateMaintenanceApi from "./resources/stateMaintenance";
+import * as projectDailyContinuationApi from "./resources/projectDailyContinuation";
 import * as runApi from "./resources/run";
 import * as gatewayApi from "./resources/gateway";
 import type { DecimalRevision, InteractionMode } from "../types";
 import type { RelayBlueprintDraft, RelayBlueprintProposal, RelayGoal, RelayProjectGoal } from "./blueprintDtos";
 import type { RelayArtifact, RelayArtifactDirectUses, RelayArtifactImpactCandidate, RelayArtifactImpactCheck, RelayArtifactLineage, RelayArtifactTextLock, RelayArtifactVersionResult, RelayClosePartialFileWriteInput, RelayCombinationCheck, RelayFileWriteChangeSet, RelayFileWriteDispositionPreview, RelayFileWriteFrozenDiff, RelayImpactCandidateGroup, RelayTaskArtifacts } from "./dtos/artifacts";
 import type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistProposal, RelayAssistSession, RelayAssistSourceRef, RelayAssistantProfile, RelayConversationExecution, RelayConversationExecutionStage, RelayConversationMode, RelayPackDefinition, RelayRunToolCalls, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory } from "./dtos/assist";
+import type { RelayStateMaintenanceApplyResult, RelayStateMaintenanceRequest,
+  RelayUndoPlan } from "./dtos/stateMaintenance";
+import type { RelayDailyContinuation, RelayDailyViewConfirmationInput, RelayReturnReview } from "./dtos/projectDailyContinuation";
 import type { RelayFileReadAction, RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayManagedGitReadInput, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayAction, RelayMockGatewayConnection, RelayMockManagedResource, RelayWebFetchAction, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "./dtos/gateway";
 import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryRevision, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "./dtos/information";
 import type { RelayActivityFilter, RelayActivityPage, RelayCommandEnvelope, RelayCommandReceipt, RelayContinuationComparison, RelayContinuationPointSummary, RelayGoalCreation, RelayProject, RelayProjectCreation, RelayProjectGoalLink, RelayProjectPage, RelayProjectState, RelayStateMutation, RelayViewConfiguration, RelayViewKind } from "./dtos/projects";
@@ -25,6 +69,8 @@ export { RelayApiError, RelayRunEventHttpError, RelayTransportError } from "./co
 export type { RelayApiConnection } from "./core/http";
 export type { RelayArtifact, RelayArtifactDirectUses, RelayArtifactImpactCandidate, RelayArtifactImpactCheck, RelayArtifactLineage, RelayArtifactTextLock, RelayArtifactVersionResult, RelayArtifactVersionSummary, RelayClosePartialFileWriteInput, RelayCombinationCheck, RelayFileWriteChangeSet, RelayFileWriteDispositionPreview, RelayFileWriteFrozenDiff, RelayFileWriteResidualCandidate, RelayImpactCandidateGroup, RelayImpactCandidateGroupItem, RelayLineageParentKind, RelayLineageRelation, RelayTaskArtifacts } from "./dtos/artifacts";
 export type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistProposal, RelayAssistSession, RelayAssistSkillOutput, RelayAssistSourceRef, RelayAssistantProfile, RelayConversationCheck, RelayConversationExecution, RelayConversationExecutionStage, RelayConversationMode, RelayPackDefinition, RelayRunToolCall, RelayRunToolCalls, RelaySkillDefinition, RelaySkillInput, RelayTaskSkillProposal, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate } from "./dtos/assist";
+export type { RelayStateMaintenanceApplyResult, RelayStateMaintenanceChange, RelayStateMaintenanceDecisionRequired, RelayStateMaintenanceRequest, RelayUndoPlan, RelayUndoPlanItem } from "./dtos/stateMaintenance";
+export type { RelayDailyContinuation, RelayDailyContinuationBaseline, RelayDailyContinuationCurrent, RelayDailyContinuationDelta, RelayDailyViewConfirmationInput, RelayReturnReview } from "./dtos/projectDailyContinuation";
 export type { RelayFileReadAction, RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayGitDiffResult, RelayGitReadAction, RelayGitStatusResult, RelayManagedGitReadInput, RelayManagedGitReadOutcome, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayAction, RelayMockGatewayConnection, RelayMockManagedResource, RelayWebFetchAction, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "./dtos/gateway";
 export type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntry, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryRevision, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyErrorCategory, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchItem, RelaySearchPage } from "./dtos/information";
 export type { RelayActivityFilter, RelayActivityItem, RelayActivityPage, RelayActivityRefKind, RelayCommandEnvelope, RelayCommandReceipt, RelayContinuationComparison, RelayContinuationPointSummary, RelayContinuationRef, RelayContinuationRefChange, RelayContinuationRefKind, RelayGoalCreation, RelayProject, RelayProjectArchiveResult, RelayProjectCreation, RelayProjectGoalLink, RelayProjectListItem, RelayProjectPage, RelayProjectState, RelayStateArtifactRef, RelayStateMutation, RelayViewConfiguration, RelayViewKind } from "./dtos/projects";
@@ -39,6 +85,81 @@ export { completionFrom, reopenFrom, taskAcceptanceRevisionFrom, taskCreationFro
 
 
 export class RelayApiClient {
+  createTaskChain(input:RelayTaskChainCreate){return taskChainsApi.createTaskChain(this.#http,input);}
+  authorizeTaskChain(input:RelayTaskChainAuthorization){return taskChainsApi.authorizeTaskChain(this.#http,input);}
+  stopTaskChain(input:RelayTaskChainControl){return taskChainsApi.stopTaskChain(this.#http,input);}
+  getTaskChain(id:string){return taskChainsApi.getTaskChain(this.#http,id);}
+  getProjectTaskChains(projectId:string){return taskChainsApi.getProjectTaskChains(this.#http,projectId);}
+  createProjectReminder(input: RelayReminderCreate) { return projectRemindersApi.createProjectReminder(this.#http, input); }
+  editProjectReminder(input: RelayReminderEdit) { return projectRemindersApi.editProjectReminder(this.#http, input); }
+  setProjectReminderStatus(input: RelayReminderStatusInput) { return projectRemindersApi.setProjectReminderStatus(this.#http, input); }
+  getProjectReminder(id: string) { return projectRemindersApi.getProjectReminder(this.#http, id); }
+  getProjectReminders(projectId: string) { return projectRemindersApi.getProjectReminders(this.#http, projectId); }
+  getReminderOccurrences(projectId?: string) { return projectRemindersApi.getReminderOccurrences(this.#http, projectId); }
+  getReminderOccurrence(id: string) { return projectRemindersApi.getReminderOccurrence(this.#http, id); }
+  resolveReminderOccurrence(input: RelayReminderResolution) { return projectRemindersApi.resolveReminderOccurrence(this.#http, input); }
+  claimReminderNotifications() { return projectRemindersApi.claimReminderNotifications(this.#http); }
+  settleReminderNotification(item: RelayReminderNotification, status: 'DISPATCHED' | 'DENIED' | 'FAILED') { return projectRemindersApi.settleReminderNotification(this.#http, item, status); }
+  proposeScopeSimulation(input: RelayScopeSimulationInput) { return scopeSimulationsApi.proposeScopeSimulation(this.#http, input); }
+  selectScopeSimulation(input: RelayScopeSelection) { return scopeSimulationsApi.selectScopeSimulation(this.#http, input); }
+  getScopeSimulation(id: string) { return scopeSimulationsApi.getScopeSimulation(this.#http, id); }
+  getPlanScopeSimulations(planId: string) { return scopeSimulationsApi.getPlanScopeSimulations(this.#http, planId); }
+  recordTaskTimeEstimate(input: RelayTimeEstimateInput) { return personalPlanningApi.recordTaskTimeEstimate(this.#http, input); }
+  getTaskTimeEstimates(id: string) { return personalPlanningApi.getTaskTimeEstimates(this.#http, id); }
+  proposePeriodPlan(input: RelayPeriodPlanInput) { return personalPlanningApi.proposePeriodPlan(this.#http, input); }
+  resolvePeriodPlanItem(input: RelayPeriodPlanResolution) { return personalPlanningApi.resolvePeriodPlanItem(this.#http, input); }
+  getPeriodPlan(id: string) { return personalPlanningApi.getPeriodPlan(this.#http, id); }
+  getProjectPeriodPlans(projectId: string) { return personalPlanningApi.getProjectPeriodPlans(this.#http, projectId); }
+  startWorkSegment(input: RelayWorkSegmentStart) { return workSegmentsApi.startWorkSegment(this.#http, input); }
+  finishWorkSegment(input: RelayWorkSegmentMutation) { return workSegmentsApi.finishWorkSegment(this.#http, input); }
+  proposeWorkSegmentEvent(input: RelayWorkSegmentEventInput) { return workSegmentsApi.proposeWorkSegmentEvent(this.#http, input); }
+  resolveWorkSegmentEvent(input: RelayWorkSegmentEventResolution) { return workSegmentsApi.resolveWorkSegmentEvent(this.#http, input); }
+  getWorkSegment(id: string) { return workSegmentsApi.getWorkSegment(this.#http, id); }
+  getProjectWorkSegments(projectId: string) { return workSegmentsApi.getProjectWorkSegments(this.#http, projectId); }
+  getTemporaryRetrospective(projectId: string, taskIds: readonly string[]) { return workSegmentsApi.getTemporaryRetrospective(this.#http, projectId, taskIds); }
+  startWorkSegmentFromConversation(input: { sessionId: string; sourceMessageId: string; commandId: string; timezone?: string }) {
+    return stateMaintenanceApi.startWorkSegmentFromConversation(this.#http, input);
+  }
+  registerDecisionPremise(input: RelayDecisionPremiseInput) { return decisionReviewsApi.registerDecisionPremise(this.#http, input); }
+  getDecisionPremises(id: string) { return decisionReviewsApi.getDecisionPremises(this.#http, id); }
+  getProjectDecisionReviews(projectId: string) { return decisionReviewsApi.getProjectDecisionReviews(this.#http, projectId); }
+  resolveDecisionReview(input: RelayDecisionReviewResolution) { return decisionReviewsApi.resolveDecisionReview(this.#http, input); }
+  createHypothesis(input: RelayHypothesisCreate) { return hypothesesApi.createHypothesis(this.#http, input); }
+  versionHypothesis(input: RelayHypothesisMutation & RelayHypothesisDefinition) { return hypothesesApi.versionHypothesis(this.#http, input); }
+  observeHypothesis(input: RelayHypothesisMutation & { summary: string; knowledgeVersionId?: string }) { return hypothesesApi.observeHypothesis(this.#http, input); }
+  suggestHypothesisConclusion(input: RelayHypothesisSuggestion) { return hypothesesApi.suggestHypothesisConclusion(this.#http, input); }
+  confirmHypothesisConclusion(input: RelayHypothesisMutation & { suggestionId: string; confirmed: true }) { return hypothesesApi.confirmHypothesisConclusion(this.#http, input); }
+  getHypothesis(id: string) { return hypothesesApi.getHypothesis(this.#http, id); }
+  getProjectHypotheses(projectId: string) { return hypothesesApi.getProjectHypotheses(this.#http, projectId); }
+  createHypothesisFromConversation(input: { sessionId: string; sourceMessageId: string; commandId: string; timezone?: string }) {
+    return stateMaintenanceApi.createHypothesisFromConversation(this.#http, input);
+  }
+  reportAcceptanceTimeFromConversation(input: { sessionId: string; sourceMessageId: string; commandId: string; timezone?: string }) {
+    return stateMaintenanceApi.reportAcceptanceTimeFromConversation(this.#http, input);
+  }
+  freezeAcceptanceComparison(input: RelayAcceptanceComparisonInput) { return acceptanceComparisonsApi.freezeAcceptanceComparison(this.#http, input); }
+  getAcceptanceComparisons(projectId: string) { return acceptanceComparisonsApi.getAcceptanceComparisons(this.#http, projectId); }
+  getTaskAcceptanceTrials(taskId: string) { return acceptanceTrialsApi.getTaskAcceptanceTrials(this.#http, taskId); }
+  startTaskAcceptanceTrial(input: RelayAcceptanceTrialStart) { return acceptanceTrialsApi.startTaskAcceptanceTrial(this.#http, input); }
+  transitionTaskAcceptanceTrial(input: RelayAcceptanceTrialTransition) { return acceptanceTrialsApi.transitionTaskAcceptanceTrial(this.#http, input); }
+  recordTaskAcceptanceObservation(input: RelayAcceptanceObservationInput) { return acceptanceTrialsApi.recordTaskAcceptanceObservation(this.#http, input); }
+  async getTaskAcceptanceMaterials(taskId: string) {
+    return acceptanceMaterialsApi.getTaskAcceptanceMaterials(this.#http, taskId);
+  }
+
+  async attachTaskAcceptanceMaterial(input: RelayAcceptanceMaterialInput) {
+    return acceptanceMaterialsApi.attachTaskAcceptanceMaterial(this.#http, input);
+  }
+
+  async importTaskAcceptanceMaterial(input: RelayAcceptanceMaterialImport) {
+    return acceptanceMaterialsApi.importTaskAcceptanceMaterial(this.#http, input);
+  }
+
+  async withdrawTaskAcceptanceMaterial(input: {
+    taskId: string; materialId: string; commandId: string; expectedRevision: DecimalRevision;
+  }) {
+    return acceptanceMaterialsApi.withdrawTaskAcceptanceMaterial(this.#http, input);
+  }
   readonly #http: RelayHttp;
 
   constructor(connection: RelayApiConnection) {
@@ -52,6 +173,14 @@ export class RelayApiClient {
   get baseUrl(): string {
     return this.#http.baseUrl;
   }
+  getChatCommands() { return chatControlsApi.getChatCommands(this.#http); }
+  restartAssistSession(input: { sessionId: string; commandId: string; text: string; system: "clear" | "new" }) {
+    return chatControlsApi.restartAssistSession(this.#http, input);
+  }
+  getLearningRecords() { return learningApi.getLearningRecords(this.#http); }
+  getLearningState(sessionId: string) { return learningApi.getLearningState(this.#http, sessionId); }
+  getLearningContinuation(sessionId: string) { return learningApi.getLearningContinuation(this.#http, sessionId); }
+  submitLearningCommand(action: RelayLearningCommand) { return learningApi.submitLearningCommand(this.#http, action); }
   async getHealthReady(): Promise<RelayReadiness> {
     return readinessApi.getHealthReady(this.#http);
   }
@@ -331,6 +460,20 @@ export class RelayApiClient {
     return assistApi.createAssistSession(this.#http, input);
   }
 
+  async bindAssistSessionProject(input: { readonly sessionId: string; readonly commandId: string; readonly projectId: string }): ReturnType<typeof assistApi.bindAssistSessionProject> {
+    return assistApi.bindAssistSessionProject(this.#http, input);
+  }
+
+  /**
+   * 绑定本会话的当前工作目录（0087）。
+   *
+   * 与归属同一条接续原则：作用域是服务端事实，按原 command_id 重放拿回原回执，
+   * 迟到或无法核对的结果不换 ID 重试。
+   */
+  async bindAssistSessionDirectory(input: { readonly sessionId: string; readonly commandId: string; readonly resourceId: string }): ReturnType<typeof assistApi.bindAssistSessionDirectory> {
+    return assistApi.bindAssistSessionDirectory(this.#http, input);
+  }
+
   async getAssistantProfiles(options: { includeArchived?: boolean } = {}): Promise<readonly RelayAssistantProfile[]> {
     return assistApi.getAssistantProfiles(this.#http, options);
   }
@@ -351,7 +494,7 @@ export class RelayApiClient {
     return assistApi.getAssistLivePreview(this.#http, sessionId, messageId);
   }
 
-  async requestAssistMessage(input: { sessionId: string; commandId: string; content: string; sourceRefs: readonly RelayAssistSourceRef[] } & ( { intent: "DISCUSS" | "PROPOSE_CANDIDATE" | "PROPOSE_TASK"; skillRef?: never; skillInput?: never } | { intent?: never; skillRef: { id: string; version: string }; skillInput: RelaySkillInput } | { intent?: never; skillRef?: never; skillInput?: never } )): Promise<{ userMessageId: string; assistantMessageId: string }> {
+  async requestAssistMessage(input: { sessionId: string; commandId: string; content: string; sourceRefs: readonly RelayAssistSourceRef[]; recordLearning?: boolean } & ( { intent: "DISCUSS" | "PROPOSE_CANDIDATE" | "PROPOSE_TASK"; skillRef?: never; skillInput?: never } | { intent?: never; skillRef: { id: string; version: string }; skillInput: RelaySkillInput } | { intent?: never; skillRef?: never; skillInput?: never } )): Promise<{ userMessageId: string; assistantMessageId: string }> {
     return assistApi.requestAssistMessage(this.#http, input);
   }
 
@@ -380,6 +523,54 @@ export class RelayApiClient {
 
   async getConversationExecutionRequests(sessionId: string): Promise<readonly RelayConversationExecution[]> {
     return assistApi.getConversationExecutionRequests(this.#http, sessionId);
+  }
+
+  /** 对话状态维护解释：明确维护指令的 user 消息 → 状态维护请求投影。 */
+  async createStateMaintenanceRequest(input: { sessionId: string; sourceMessageId: string;
+    commandId: string; timezone?: string }): Promise<RelayStateMaintenanceRequest> {
+    return stateMaintenanceApi.createStateMaintenanceRequest(this.#http, input);
+  }
+
+  /** 明确指令自动生效：applications 入口，服务端按请求行幂等。 */
+  async applyConversationStateRequest(requestId: string): Promise<RelayStateMaintenanceApplyResult> {
+    return stateMaintenanceApi.applyConversationStateRequest(this.#http, requestId);
+  }
+
+  /** 已生效整组的撤回：按发送时固定的命令身份重放；整组有不可撤回项时须先读方案。 */
+  async withdrawConversationStateRequest(input: { requestId: string; commandId: string;
+    planDigest?: string; confirmedChangeIds?: readonly string[] }): Promise<RelayStateMaintenanceApplyResult> {
+    return stateMaintenanceApi.withdrawConversationStateRequest(this.#http, input);
+  }
+
+  /** 撤回事前预检方案（只读）：逐条可撤回性、原因与影响。 */
+  async getConversationStateUndoPlan(requestId: string): Promise<RelayUndoPlan> {
+    return stateMaintenanceApi.getConversationStateUndoPlan(this.#http, requestId);
+  }
+
+  /** 对既有待决定的一句话续答：绑定原请求与展示版本，决定本身不写业务事实。 */
+  async answerConversationStateDecision(input: { requestId: string; commandId: string;
+    resolution: "ACCEPT" | "DECLINE"; answer: string;
+    expectedRevision: string }): Promise<RelayStateMaintenanceApplyResult> {
+    return stateMaintenanceApi.answerConversationStateDecision(this.#http, input);
+  }
+
+  async getConversationStateRequests(sessionId: string): Promise<readonly RelayStateMaintenanceRequest[]> {
+    return stateMaintenanceApi.getConversationStateRequests(this.#http, sessionId);
+  }
+
+  /** 返回项目时的顶部接续卡：当前事实、相对上次已确认查看的基线与变化。 */
+  async getDailyContinuation(projectId: string): Promise<RelayDailyContinuation> {
+    return projectDailyContinuationApi.getDailyContinuation(this.#http, projectId);
+  }
+
+  /** 「已查看」确认：只记录阅读进度（一次 presentation_id 一次），不是接受或完成。 */
+  async confirmDailyView(projectId: string, input: RelayDailyViewConfirmationInput): Promise<RelayDailyContinuation> {
+    return projectDailyContinuationApi.confirmDailyView(this.#http, projectId, input);
+  }
+
+  /** 返回轻量核对：同一份事实与证据由服务端复用同一核对记录，只读、不启动进程。 */
+  async reviewProjectReturn(projectId: string, commandId: string): Promise<RelayReturnReview> {
+    return projectDailyContinuationApi.reviewProjectReturn(this.#http, projectId, commandId);
   }
 
   async acceptAssistProposal(proposalId: string, commandId: string, taskContract?: { expectedTaskRevision: DecimalRevision; expectedAcceptanceRevision: DecimalRevision; payloadHash: string }): Promise<RelayCommandEnvelope> {
@@ -605,12 +796,20 @@ export class RelayApiClient {
   }
 
   /** N02：组只关联已登记目标，不调用模型；响应不明按原 command_id 核对。 */
-  async createImpactCandidateGroup(input: { readonly checkId: string; readonly targetVersionIds: readonly string[]; readonly commandId: string }): Promise<string> {
+  async createImpactCandidateGroup(input: { readonly checkId: string; readonly targetVersionIds: readonly string[]; readonly commandId: string; readonly dependencies?: readonly { readonly targetVersionId: string; readonly dependsOnTargetVersionId: string }[] }): Promise<string> {
     return artifactsApi.createImpactCandidateGroup(this.#http, input);
   }
 
   async getImpactCandidateGroup(id: string): Promise<RelayImpactCandidateGroup> {
     return artifactsApi.getImpactCandidateGroup(this.#http, id);
+  }
+
+  async createImpactGroupSelection(input: { groupId: string; commandId: string; candidateIds: readonly string[] }) {
+    return impactGroupSelectionsApi.createImpactGroupSelection(this.#http, input);
+  }
+
+  async getImpactGroupSelection(id: string) {
+    return impactGroupSelectionsApi.getImpactGroupSelection(this.#http, id);
   }
 
   async createCombinationCheck(input: { readonly groupId: string; readonly artifactVersionIds: readonly string[]; readonly commandId: string }): Promise<string> {
@@ -676,7 +875,7 @@ export class RelayApiClient {
     return informationApi.settleInterventionNotification(this.#http, item, status);
   }
 
-  async applyArtifactImpactCandidate(input: { readonly candidateId: string; readonly expectedTargetRevision: DecimalRevision; readonly commandId: string }): Promise<string> {
+  async applyArtifactImpactCandidate(input: { readonly candidateId: string; readonly expectedTargetRevision: DecimalRevision; readonly commandId: string; readonly groupSelectionId?: string }): Promise<string> {
     return artifactsApi.applyArtifactImpactCandidate(this.#http, input);
   }
 

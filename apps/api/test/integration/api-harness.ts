@@ -429,11 +429,11 @@ export interface TestApi {
 
 /** 启动一个真实 API 进程（真实监听端口 + 真实 PostgreSQL），并返回带默认 Host/Bearer 的客户端。 */
 export async function startTestApi(options: { databaseUrl?: string;
-  databasePoolMax?: number } = {}): Promise<TestApi> {
+  databasePoolMax?: number; dataRoot?: string } = {}): Promise<TestApi> {
   const port = await pickFreePort();
   const allowedOrigin = `http://127.0.0.1:${await pickFreePort()}`;
   const bearerToken = randomBytes(32).toString('hex');
-  const dataRoot = await createDataRoot();
+  const dataRoot = options.dataRoot ?? await createDataRoot();
   const running = startApi(baseEnvironment({
     port, allowedOrigin, bearerToken, dataRoot, ...options,
   }));
@@ -443,7 +443,8 @@ export async function startTestApi(options: { databaseUrl?: string;
     await waitForLiveness(running, port);
   } catch (error) {
     // before hook 失败时 after 可能拿不到 api 引用；这里必须自行回收进程与临时目录
-    await discardFailedStart(running, dataRoot);
+    if(options.dataRoot===undefined) await discardFailedStart(running, dataRoot);
+    else await stopApi(running);
     throw error;
   }
 
@@ -467,7 +468,7 @@ export async function startTestApi(options: { databaseUrl?: string;
     stop: async () => {
       const exitCode = await stopApi(running);
 
-      await rm(dataRoot, { recursive: true, force: true });
+      if(options.dataRoot===undefined) await rm(dataRoot, { recursive: true, force: true });
 
       return exitCode;
     },

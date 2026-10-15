@@ -185,10 +185,52 @@ describe("局部导航与浮层行为", () => {
     expect(mounted.wrapper.get(".breadcrumbs").text()).toContain("收件箱");
     expect(mounted.wrapper.find('[data-testid="task-row-task-reading-notes"]').exists()).toBe(true);
     expect(mounted.wrapper.get('nav[aria-label="主导航"]').text()).not.toContain("收件箱");
+    const secondary = mounted.wrapper.get('nav[aria-label="次级导航"]');
+    expect(secondary.get('a[href="/inbox"]').attributes("aria-current")).toBe("page");
+    expect((secondary.get('a[href="/inbox"]').element as HTMLElement).classList.contains("navigation-item--active")).toBe(true);
+    expect(secondary.get('a[href="/tasks"]').attributes("aria-current")).toBeUndefined();
+    expect((secondary.get('a[href="/tasks"]').element as HTMLElement).classList.contains("navigation-item--active")).toBe(false);
     await mounted.router.push("/today");
     await mounted.wrapper.get('[data-testid="inbox-open"]').trigger("click");
     await flush();
     expect(mounted.router.currentRoute.value.path).toBe("/tasks");
     expect(mounted.router.currentRoute.value.query.tab).toBe("inbox");
+  });
+
+  it("任务收件箱状态与全部任务互斥，创建子页和窄屏抽屉使用同一选中态", async () => {
+    const mounted = await mountWorkbench("/tasks");
+    unmount = mounted.unmount;
+    const secondary = mounted.wrapper.get('nav[aria-label="次级导航"]');
+    const allTasks = secondary.get('a[href="/tasks"]');
+    const inbox = secondary.get('a[href="/inbox"]');
+    expect(allTasks.attributes("aria-current")).toBe("page");
+    expect((allTasks.element as HTMLElement).classList.contains("navigation-item--active")).toBe(true);
+    expect(inbox.attributes("aria-current")).toBeUndefined();
+
+    await mounted.router.push("/tasks?tab=inbox");
+    await flush();
+    expect(inbox.attributes("aria-current")).toBe("page");
+    expect(allTasks.attributes("aria-current")).toBeUndefined();
+    await mounted.router.push("/tasks?tab=inbox&view=create");
+    await flush();
+    expect(inbox.attributes("aria-current")).toBe("page");
+    expect(allTasks.attributes("aria-current")).toBeUndefined();
+
+    await mounted.router.push("/tasks?tab=inbox");
+    await mounted.wrapper.get('button[aria-label="打开导航"]').trigger("click");
+    await flush();
+    const drawer = new DomWrapper(document.querySelector('nav[aria-label="完整导航"]'));
+    const drawerInbox = drawer.get('a[href="/inbox"]');
+    const drawerAll = drawer.get('a[href="/tasks"]');
+    expect(drawerInbox.attributes("aria-current")).toBe("page");
+    expect((drawerInbox.element as HTMLElement).classList.contains("mobile-navigation-item--active")).toBe(true);
+    expect(drawerAll.attributes("aria-current")).toBeUndefined();
+    await drawerAll.trigger("click");
+    await flush();
+    expect(mounted.router.currentRoute.value.path).toBe("/tasks");
+    expect(mounted.router.currentRoute.value.query.tab).toBeUndefined();
+    expect(dialogLabels()).toHaveLength(0);
+    expect(allTasks.attributes("aria-current")).toBe("page");
+    expect(inbox.attributes("aria-current")).toBeUndefined();
   });
 });

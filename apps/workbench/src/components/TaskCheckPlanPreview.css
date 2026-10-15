@@ -11,7 +11,8 @@
 .task-check-plan-dot { flex: none; width: var(--relay-space-3); height: var(--relay-space-3); border: var(--relay-border-width) solid var(--relay-color-border-control); border-radius: var(--relay-radius-round); }
 .task-check-plan-details { margin-top: var(--relay-space-6); }
 .task-check-plan-details > summary { color: var(--relay-color-text-secondary); }
-@media (max-width: 40rem) {
+/* 并入 48rem 折行档，原 40rem：检查计划表头允许折行、单元格内距收紧。 */
+@media (width < 48rem) {
   .task-check-plan-heading { align-items: flex-start; flex-wrap: wrap; }
   .task-check-plan-table th, .task-check-plan-table td { padding: var(--relay-space-3) var(--relay-space-2); }
 }

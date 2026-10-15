@@ -58,16 +58,18 @@ describe("live 创建任务的真实项目选择", () => {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>; posts.push(body);
         return creation(String(body.command_id), projectB);
       }
+      // 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1）。
+      if (url === `${root}/assist-sessions?`) return response(200, { items: [] });
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/tasks?view=create"); unmount = mounted.unmount;
     // 全局近期工作已读取，但项目选择器仍须由用户打开后独立查询。
-    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`]);
+    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?`]);
     expect(mounted.wrapper.find('[data-testid="task-project-list-count"]').exists()).toBe(false);
     expect((mounted.wrapper.get('input[name="task-project-id"]').element as HTMLInputElement).value).toBe("");
     await mounted.wrapper.get('[data-testid="task-project-list-open"]').trigger("click");
     await flush(30);
-    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/projects?status=active`]);
+    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?`, `${root}/projects?status=active`]);
     expect(mounted.wrapper.get('[data-testid="task-project-list-count"]').text())
       .toContain("已加载 1 项 · 当前搜索显示 1 项 · 仍有后续页");
     expect((mounted.wrapper.get('input[name="task-project-id"]').element as HTMLInputElement).value).toBe("");
@@ -88,7 +90,7 @@ describe("live 创建任务的真实项目选择", () => {
     expect(posts).toHaveLength(1);
     expect(posts[0].project_id).toBe(projectB);
     expect(posts[0].title).toBe("显式项目任务");
-    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`,
+    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?`,
       `${root}/projects?status=active`, `${root}/projects?status=active&cursor=page%2B2`,
       `${root}/tasks?project_id=${projectB}`, `${root}/projects/${projectB}`, `${root}/tasks`]);
   });
@@ -127,6 +129,8 @@ describe("live 创建任务的真实项目选择", () => {
         return response(200, { items: [project(projectC, "新空间项目")], next_cursor: null });
       if (url === `${root}/tasks?project_id=${projectA}`) return response(200, { items: [], next_cursor: null });
       if (url === `${root}/projects/${projectA}`) return response(200, project(projectA, "甲项目"));
+      // 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1）。
+      if (url === `${root}/assist-sessions?`) return response(200, { items: [] });
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench(`/tasks?view=create&project=${projectA}`); unmount = mounted.unmount;
@@ -162,6 +166,8 @@ describe("live 创建任务的真实项目选择", () => {
       }
       if (url.startsWith(`${root}/commands/`)) return response(404, {
         code: "COMMAND_NOT_FOUND", detail: "not found" });
+      // 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1）。
+      if (url === `${root}/assist-sessions?`) return response(200, { items: [] });
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/tasks?view=create"); unmount = mounted.unmount;
@@ -205,6 +211,8 @@ describe("live 创建任务的真实项目选择", () => {
       if (url === `${root}/projects/${projectA}`) return caseName === "预填已归档"
         ? response(200, { ...project(projectA, "历史项目"), archived_at: "2026-09-26T00:00:00Z", archive_status: "ARCHIVED" })
         : response(403, { code: "FORBIDDEN", detail: "Project 不可读" });
+      // 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1）。
+      if (url === `${root}/assist-sessions?`) return response(200, { items: [] });
       throw new Error(`unexpected ${url}`);
     }); vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountWorkbench(caseName === "预填已归档"

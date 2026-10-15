@@ -308,20 +308,20 @@ test('concurrent Accept with one command_id but different content is rejected as
   const api = await startTestApi();
   const path = `${workspacePath(f.workspaceId)}/assist-proposals/${proposal.id}/accept`;
   const commandId = randomUUID();
+  const same = { command_id: commandId, expected_task_revision: proposal.taskRevision,
+    expected_acceptance_revision: proposal.acceptanceRevision,
+    payload_hash: proposal.payloadHash };
+  const different = { ...same, expected_task_revision: '99' };
+  // 受控屏障保证**有效**请求先取得候选锁并提交：不是「谁先谁赢」的概率竞争。
   const blocker = await ControlledLock.holdCandidateRow('assist_proposals', proposal.id);
   try {
-    const same = { command_id: commandId, expected_task_revision: proposal.taskRevision,
-      expected_acceptance_revision: proposal.acceptanceRevision,
-      payload_hash: proposal.payloadHash };
-    const different = { ...same, expected_task_revision: '99' };
-    const first = api.post(path, same);
-    const second = api.post(path, different);
-    await blocker.waitForBlockedWaiters(2);
+    const winner = api.post(path, same);
+    await blocker.waitForBlockedWaiters(1);
     await blocker.release();
-    const [winner, loser] = await Promise.all([first, second]);
-    const statuses = [winner.status, loser.status].sort();
-    assert.deepEqual(statuses, [200, 409]);
-    expectProblem(winner.status === 409 ? winner : loser, 409, 'COMMAND_ID_REUSED');
+    assert.equal((await winner).status, 200, '有效载荷先提交成功');
+    // 同 command_id 的异载荷请求核对原 receipt：按 COMMAND_ID_REUSED 拒绝。
+    const loser = await api.post(path, different);
+    expectProblem(loser, 409, 'COMMAND_ID_REUSED');
     // 幂等重放不能放宽：异内容必须拒绝，且只留下胜出那一次业务效果。
     assert.equal(await receiptCount(`workspace:${f.workspaceId}:user:local`, commandId), 1);
     const acceptance = await sql<{ count: number }>`select count(*)::int as count
@@ -404,16 +404,17 @@ test('concurrent Apply with one command_id but different baseline is rejected as
     const body = { command_id: commandId, candidate_sha256: created.candidate_sha256,
       expected_project_revision: '0', expected_state_revision: '0',
       expected_view_revision: '0' };
+    // 受控屏障保证 baseline 0 的**有效**请求先取得候选锁并提交成功：无效请求先获锁、
+    // 尚无成功回执时返回 INVALID_TRANSITION 是合法路径，但证明不了幂等损坏，也就不算
+    // 这条回归的目的。固定顺序后，异载荷请求必须核对原 receipt。
     const blocker = await ControlledLock.holdCandidateRow('project_blueprint_proposals', created.id);
     try {
-      const first = api.post(applyPath, body);
-      const second = api.post(applyPath, { ...body, expected_state_revision: '7' });
-      await blocker.waitForBlockedWaiters(2);
+      const winner = api.post(applyPath, body);
+      await blocker.waitForBlockedWaiters(1);
       await blocker.release();
-      const [winner, loser] = await Promise.all([first, second]);
-      const statuses = [winner.status, loser.status].sort();
-      assert.deepEqual(statuses, [200, 409]);
-      expectProblem(winner.status === 409 ? winner : loser, 409, 'COMMAND_ID_REUSED');
+      assert.equal((await winner).status, 200, '有效载荷先提交成功');
+      const loser = await api.post(applyPath, { ...body, expected_state_revision: '7' });
+      expectProblem(loser, 409, 'COMMAND_ID_REUSED');
       assert.equal(await receiptCount(`workspace:${workspaceId}:user:local`, commandId), 1);
       const tasks = await sql<{ count: number }>`select count(*)::int as count
         from tasks where project_id = ${projectId}`.execute(app.db);

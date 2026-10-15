@@ -20,13 +20,16 @@ export interface AssistantDraft {
 
 const emptyDraft: AssistantDraft = { name: "", roleDescription: "", tone: "", readRoots: "" };
 
-export function ConversationModeSwitch({ mode, assistantProfileId, profiles, profilesError, remember, disabled,
-  lockedReason, onChangeMode, onChangeAssistant, onChangeRemember, onCreateAssistant }: {
+export function ConversationModeSwitch({ mode, assistantProfileId, profiles, profilesError, profilesLoading,
+  onReloadProfiles, remember, disabled, lockedReason, onChangeMode, onChangeAssistant, onChangeRemember,
+  onCreateAssistant, recordLearning = true, onChangeRecordLearning }: {
   mode: RelayConversationMode;
   assistantProfileId: string | null;
   profiles: readonly RelayAssistantProfile[];
   /** 清单读不到的真实原因；不显示它，空下拉会看起来像「你没有助手」。 */
   profilesError: string | null;
+  profilesLoading: boolean;
+  onReloadProfiles: () => void;
   /** 「一次性问答」：不记住就不作为可续读历史。 */
   remember: boolean;
   /** 在途时整组禁用；lockedReason 是禁用原因，文案要说清下一步。 */
@@ -36,6 +39,8 @@ export function ConversationModeSwitch({ mode, assistantProfileId, profiles, pro
   onChangeAssistant: (profileId: string) => void;
   onChangeRemember: (next: boolean) => void;
   onCreateAssistant: (draft: AssistantDraft) => Promise<void>;
+  recordLearning?: boolean;
+  onChangeRecordLearning?: (next: boolean) => void;
 }) {
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState<AssistantDraft>(emptyDraft);
@@ -71,19 +76,37 @@ export function ConversationModeSwitch({ mode, assistantProfileId, profiles, pro
           data-testid="assist-conversation-mode-assistant"
           onChange={() => onChangeMode("ASSISTANT")} />
         <span>人设助手</span></label>
+      <label className="agent-chat-mode-option">
+        <input type="radio" name="conversation-mode" value="LEARNING" checked={mode === "LEARNING"}
+          data-testid="assist-conversation-mode-learning" onChange={() => onChangeMode("LEARNING")} />
+        <span>学习</span></label>
     </fieldset>
     {lockedReason !== null && <p className="disabled-reason" data-testid="conversation-mode-locked">{lockedReason}</p>}
+    {mode === "LEARNING" && <p className="helper-text" data-testid="learning-readonly-note">
+      学习：可保存个人学习记录，对项目只读；明确转入普通会话后才进入执行流程。</p>}
+    {mode === "LEARNING" && onChangeRecordLearning && <label className="agent-chat-mode-option">
+      <input type="checkbox" disabled={disabled} checked={!recordLearning} data-testid="learning-message-no-record"
+        onChange={(event) => onChangeRecordLearning(!event.target.checked)} /><span>本条消息不记录</span></label>}
     {mode === "ASSISTANT" && <div className="agent-chat-assistant">
       <label className="field agent-chat-assistant-picker"><span className="visually-hidden">助手</span>
         <select data-testid="assist-assistant-picker" value={assistantProfileId ?? ""}
-          disabled={disabled || (active.length === 0 && profilesError === null)}
+          disabled={disabled || profilesLoading || profilesError !== null || active.length === 0}
           onChange={(event) => onChangeAssistant(event.target.value)}>
-          <option value="">{active.length === 0 ? "还没有助手，先新建一个" : "选择助手"}</option>
+          <option value="">{profilesLoading ? "正在读取助手清单…"
+            : active.length === 0 ? "还没有可用助手，先新建一个" : "选择助手"}</option>
           {profiles.map((profile) => <option key={profile.id} value={profile.id}
             disabled={profile.status === "ARCHIVED"}>{profile.optionLabel}</option>)}
         </select></label>
+      {profilesLoading && <p className="helper-text" role="status"
+        data-testid="assist-assistant-list-loading">正在读取助手清单，读取完成后才能发送。</p>}
       {profilesError !== null && <p className="action-error" role="alert"
-        data-testid="assist-assistant-list-error">助手清单暂不可读：{profilesError}。仍可新建助手。</p>}
+        data-testid="assist-assistant-list-error">助手清单暂不可读：{profilesError}。可以先新建助手，或
+        <button className="text-button" type="button" data-testid="assist-assistant-list-reload"
+          disabled={profilesLoading} onClick={onReloadProfiles}>重新读取助手清单</button>。</p>}
+      {profilesError === null && !profilesLoading && active.length === 0 && <p className="helper-text"
+        data-testid="assist-assistant-list-empty">当前没有可用助手。新建助手后即可继续，或
+        <button className="text-button" type="button" data-testid="assist-assistant-list-reload"
+          onClick={onReloadProfiles}>重新读取助手清单</button>。</p>}
       <label className="agent-chat-mode-option">
         <input type="checkbox" checked={!remember} data-testid="assist-remember-toggle"
           disabled={disabled} onChange={(event) => onChangeRemember(!event.target.checked)} />

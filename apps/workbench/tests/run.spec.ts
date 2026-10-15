@@ -80,8 +80,8 @@ describe("P08 Run 工作台", () => {
     await panel.get("button").trigger("click");
     await flush(30);
     expect(panel.text()).toContain(`原 operation_id：${operationId}`);
-    expect(panel.text()).toContain("WRITE_MARKER · SUCCEEDED");
-    expect(panel.text()).toContain("Invocation：SUCCEEDED");
+    expect(panel.text()).toContain("WRITE_MARKER · 已成功（SUCCEEDED）");
+    expect(panel.text()).toContain("调用状态：已成功（SUCCEEDED）");
   });
 
   it("示例模式不生成 Run；真实任务只在 executor.run_id 存在时提供入口", async () => {
@@ -100,10 +100,10 @@ describe("P08 Run 工作台", () => {
     mounted = await mountWorkbench(`/tasks/${taskId}`);
     unmount = mounted.unmount;
     await flush(30);
-    const taskRail = mounted.wrapper.get(".task-detail-rail");
-    expect(taskRail.get('[data-testid="task-request-handoff"]').attributes("href")).toBe(`/runs/${runId}`);
-    expect(taskRail.text()).toContain("只读查看任务定义");
-    expect(taskRail.text()).toContain("接手在运行页生效后再编辑");
+    const pageHead = mounted.wrapper.get('[data-testid="task-detail-page-head"]');
+    expect(pageHead.get('[data-testid="task-request-handoff"]').attributes("href")).toBe(`/runs/${runId}`);
+    expect(mounted.wrapper.get('[data-testid="task-detail-tabrow"]').text()).toContain("只读查看任务定义");
+    expect(mounted.wrapper.get(".task-detail-rail").text()).toContain("接手在运行页生效后再编辑");
     await mounted.wrapper.get('[data-testid="task-detail-tab-runs"]').trigger("click");
     expect(mounted.wrapper.get('[data-testid="task-runs"]').text()).toContain(runId);
     expect(mounted.wrapper.get('[data-testid="task-runs"] a').attributes("href")).toBe(`/runs/${runId}`);

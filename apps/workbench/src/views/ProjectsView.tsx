@@ -1,21 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowRight, Archive, ChevronRight, Info, RotateCcw, Search } from "lucide-react";
+import { Archive, ArrowRight, Check, Clock, Folder, FolderPlus, Info, LayoutGrid, List,
+  MoreHorizontal, Package, Plus, RotateCcw, Search, Sparkles, Target, TriangleAlert } from "lucide-react";
 import { createCommandId, projectArchiveResultFrom, RelayApiError, RelayTransportError,
   type RelayApiClient, type RelayCommandEnvelope, type RelayProject,
   type RelayProjectArchiveResult, type RelayProjectListItem } from "../api/relayClient";
 import AppDialog from "../components/AppDialog";
+import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
-import ResponsiveRail from "../components/ResponsiveRail";
 import CreateGoalView from "./CreateGoalView";
 import CreateProjectView from "./CreateProjectView";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { fixtureModeFromQuery } from "../lib/fixtureMode";
+import { formatReadableDateTime, useDisplayPreferences } from "../lib/displayPreferences";
 import { phaseLabel, projectTypeLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
 import { takeCreationFlash } from "../lib/navigationFlash";
 import { useRelayConnection } from "../lib/relayConnection";
 import type { ProjectSummary, ProjectType } from "../types";
+import "./ProjectsView.css";
 
 function message(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message.trim() : fallback;
@@ -25,6 +28,33 @@ function message(error: unknown, fallback: string): string {
 // 这里在行内归零内层输入，避免出现双层边框与高度溢出（共享层修复前先由页面自行约束）。
 const searchInputStyle = { appearance: "none", background: "transparent", border: "none",
   padding: 0, minHeight: 0 } as const;
+
+/**
+ * 项目列表的三个范围。页签是路由链接（沿用既有 `aria-current`），
+ * 不用 `role=tablist`——设计系统 §6 规定「路由用链接，同页 Tab 才用 tablist」。
+ *
+ * 默认范围是「全部项目」，对齐本次原型首屏：`/projects` 不带参数即全部，
+ * 进行中与已归档各自显式带 `?scope=`。live 模式一次只加载一个范围，
+ * 因此页签计数只显示已加载的那个范围，其余不造数。
+ */
+type ProjectScope = "all" | "active" | "archived";
+
+const scopeTabs: readonly { scope: ProjectScope; label: string; testId: string; to: string }[] = [
+  { scope: "all", label: "全部项目", testId: "projects-tab-all", to: "/projects" },
+  { scope: "active", label: "进行中", testId: "projects-tab-active", to: "/projects?scope=active" },
+  { scope: "archived", label: "已归档", testId: "projects-tab-archived", to: "/projects?scope=archived" }
+];
+
+/** 历史深链接 `?archived=1` 继续可用；未给范围时落在「全部项目」。 */
+function scopeFromQuery(query: URLSearchParams): ProjectScope {
+  const scope = query.get("scope");
+  if (scope === "all" || scope === "active" || scope === "archived") return scope;
+  return query.get("archived") === "1" ? "archived" : "all";
+}
+
+function scopeLabel(scope: ProjectScope): string {
+  return scope === "all" ? "全部" : scope === "archived" ? "已归档" : "进行中";
+}
 
 interface PendingArchive {
   readonly commandId: string;
@@ -80,6 +110,155 @@ function confirmedArchive(envelope: RelayCommandEnvelope, pending: PendingArchiv
   return result;
 }
 
+/* ── 共享呈现层 ─────────────────────────────────────────────────────────── */
+
+interface ProjectCardModel {
+  readonly id: string;
+  readonly title: string;
+  readonly typeLabel: string;
+  readonly phase: string;
+  readonly nextAction: string | null;
+  readonly archived: boolean;
+  readonly footerNote: string;
+}
+
+/**
+ * 推进摘要条：正在推进数 + 尚未明确下一步数。
+ * 计数口径随数据来源不同——fixture 为全量精确值，live 只覆盖已加载项，
+ * 后者由 `note` 显式限定，不把部分计数冒充全量。
+ */
+function ProjectsSummary({ activeCount, missingCount, note, onFix }: {
+  readonly activeCount: number;
+  readonly missingCount: number;
+  readonly note?: string | null;
+  readonly onFix?: () => void;
+}) {
+  return <section className="projects-summary" data-testid="projects-summary" aria-label="推进摘要">
+    <div className="projects-summary__left">
+      <span className="projects-summary__symbol" aria-hidden="true"><Sparkles /></span>
+      <div className="projects-summary__text">
+        <p className="projects-summary__main">{activeCount} 个项目正在推进</p>
+        <p className="projects-summary__desc">{note ?? "聚焦下一步，把计划变成可执行的行动。"}</p>
+      </div>
+    </div>
+    <div className="projects-summary__right">
+      {missingCount > 0
+        ? <><TriangleAlert className="projects-summary__alert" aria-hidden="true" />
+          <span className="projects-summary__hint">{missingCount} 个项目尚未明确下一步</span>
+          {onFix && <button className="projects-summary__link" type="button" data-testid="projects-summary-fix" onClick={onFix}>去完善 <span aria-hidden="true">→</span></button>}</>
+        : <><Check className="projects-summary__ok" aria-hidden="true" />
+          <span className="projects-summary__hint">所有项目的下一步都已明确</span></>}
+    </div>
+  </section>;
+}
+
+function ProjectsToolbar({ scope, counts, search, onSearch, view, onView, searchName, tools }: {
+  readonly scope: ProjectScope;
+  readonly counts: Readonly<Record<ProjectScope, number | null>>;
+  readonly search: string;
+  readonly onSearch: (value: string) => void;
+  readonly view: "grid" | "list";
+  readonly onView: (view: "grid" | "list") => void;
+  /** 示例与 live 各自沿用历史字段名，避免深链接与既有测试口径被无关改名打断。 */
+  readonly searchName: string;
+  readonly tools?: ReactNode;
+}) {
+  return <div className="projects-toolbar">
+    <nav className="subnav" aria-label="项目范围">
+      {scopeTabs.map((tab) => {
+        const count = counts[tab.scope];
+        return <Link key={tab.scope} className={`subnav-item${scope === tab.scope ? " subnav-item--active" : ""}`}
+          to={tab.to} data-testid={tab.testId} aria-current={scope === tab.scope ? "page" : undefined}>
+          {tab.label}{count === null ? null : <> <span className="subnav-count">({count})</span></>}
+        </Link>;
+      })}
+    </nav>
+    <div className="projects-tools">
+      {tools}
+      <label className="search-field"><Search aria-hidden="true" />
+        <span className="visually-hidden">按项目名称搜索</span>
+        <input value={search} onChange={(event) => onSearch(event.target.value)} type="search"
+          name={searchName} placeholder="搜索项目名称…" style={searchInputStyle} /></label>
+      <div className="projects-view-toggle" role="group" aria-label="项目显示方式">
+        <button className={`projects-view-toggle__btn${view === "grid" ? " is-active" : ""}`} type="button"
+          aria-pressed={view === "grid"} data-testid="projects-view-grid" title="网格视图" onClick={() => onView("grid")}><LayoutGrid aria-hidden="true" /></button>
+        <button className={`projects-view-toggle__btn${view === "list" ? " is-active" : ""}`} type="button"
+          aria-pressed={view === "list"} data-testid="projects-view-list" title="列表视图" onClick={() => onView("list")}><List aria-hidden="true" /></button>
+      </div>
+    </div>
+  </div>;
+}
+
+function ProjectCard({ project, onOpen }: { readonly project: ProjectCardModel; readonly onOpen: () => void }) {
+  const unset = project.nextAction === null;
+  return <article className={`project-card${project.archived ? " project-card--archived" : ""}`}
+    data-testid={`project-row-${project.id}`} onClick={onOpen}>
+    <div className="project-card__body">
+      <div className="project-card__top">
+        <span className="project-card__kind"><span className="project-card__kind-dot" aria-hidden="true" />{project.archived ? "归档项目" : "活跃项目"}</span>
+        <button className="project-card__control" type="button" data-testid={`project-card-more-${project.id}`}
+          aria-label={`查看「${project.title}」的详情`} onClick={onOpen}><MoreHorizontal aria-hidden="true" /></button>
+      </div>
+      <div className="project-card__ident">
+        <span className="project-card__emblem" aria-hidden="true"><Folder aria-hidden="true" /></span>
+        <div className="project-card__names">
+          <h3 className="project-card__name">
+            <button className="project-card__name-button" type="button"
+              data-testid={`project-card-open-${project.id}`} onClick={onOpen}>{project.title}</button>
+          </h3>
+          <p className="project-card__caption">{project.typeLabel}项目 · 正在组织你的工作</p>
+        </div>
+        <span className={`project-card__status${project.archived ? " is-archived" : ""}`}>
+          <span className="project-card__status-dot" aria-hidden="true" />{project.archived ? "已归档" : "进行中"}</span>
+      </div>
+      <div className="project-card__meta">
+        <div className="project-card__meta-box">
+          <span className="project-card__meta-label">当前阶段</span>
+          <span className="project-card__meta-value">{project.phase}</span>
+        </div>
+        <div className="project-card__meta-box">
+          <span className="project-card__meta-label">下一步</span>
+          <span className={`project-card__meta-value${unset ? " is-unset" : ""}`}>{unset ? "尚未明确" : project.nextAction}</span>
+        </div>
+      </div>
+    </div>
+    <div className="project-card__footer">
+      <span className="project-card__footer-note"><Clock aria-hidden="true" />{project.footerNote}</span>
+      <button className="project-card__open" type="button" onClick={onOpen}>查看项目 <ArrowRight aria-hidden="true" /></button>
+    </div>
+  </article>;
+}
+
+function NewProjectCard({ onCreate }: { readonly onCreate: () => void }) {
+  return <button className="project-card project-card--new" type="button" data-testid="projects-new-card" onClick={onCreate}>
+    <span className="project-card__new-icon" aria-hidden="true"><Plus aria-hidden="true" /></span>
+    <span className="project-card__new-title">开启一个新项目</span>
+    <span className="project-card__new-desc">为下一个想法建立专属空间，从目标开始逐步推进。</span>
+    <span className="project-card__new-action"><Plus aria-hidden="true" />新建项目</span>
+  </button>;
+}
+
+/** 网格与列表共用同一份卡片标记，只有容器类决定单列还是多列（对齐原型）。 */
+function ProjectsGrid({ view, children }: { readonly view: "grid" | "list"; readonly children: ReactNode }) {
+  return <div className={`projects-grid${view === "list" ? " is-list" : ""}`}>{children}</div>;
+}
+
+/** 项目详情抽屉：宽屏不再常驻右栏，统一由「查看项目」打开。 */
+function ProjectDetailDialog({ open, onClose, children }: {
+  readonly open: boolean; readonly onClose: () => void; readonly children: ReactNode;
+}) {
+  return <AppDialog open={open} title="项目详情" variant="drawer" onClose={onClose}>{children}</AppDialog>;
+}
+
+function DetailRows({ rows }: { readonly rows: readonly { label: string; value: ReactNode }[] }) {
+  return <dl className="projects-detail__rows">
+    {rows.map((row) => <div className="projects-detail__row" key={row.label}>
+      <dt>{row.label}</dt><dd>{row.value}</dd></div>)}
+  </dl>;
+}
+
+/* ── 页面 ───────────────────────────────────────────────────────────────── */
+
 export default function ProjectsView() {
   const navigate = useNavigate();
   const [query] = useSearchParams();
@@ -87,15 +266,16 @@ export default function ProjectsView() {
   const creating = query.get("view") === "create";
   // Goal 是 Workspace 级事实，轻量入口独立于「新建项目」表单：不用先建项目再重复抄目标。
   const goalView = query.get("view") === "goal";
-  const archivedTab = query.get("archived") === "1";
+  const scope = scopeFromQuery(query);
   const connection = useRelayConnection();
   const live = connection.mode === "live";
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [view, setView] = useState<"grid" | "list">("grid");
   const [receipt, setReceipt] = useState<string | null>(null);
   const [importStatus, setImportStatus] = useState<"none" | "SUCCEEDED" | "FAILED">("none");
   const [actionError, setActionError] = useState<string | null>(null);
@@ -119,11 +299,6 @@ export default function ProjectsView() {
         setReceipt(flash.receipt);
         setImportStatus(flash.importStatus);
       }
-      setSelectedId((current) =>
-        (flash && response.some((project) => project.id === flash.projectId) ? flash.projectId : null) ??
-        (response.some((project) => project.id === current) ? current : null) ??
-        response.find((project) => !project.archived)?.id ?? null
-      );
     } catch (caught) {
       if (!disposed.current && request === requestVersion.current) setError(message(caught, "读取示例项目时发生未知错误。"));
     } finally {
@@ -142,15 +317,22 @@ export default function ProjectsView() {
 
   const activeProjects = projects.filter((project) => !project.archived);
   const archivedProjects = projects.filter((project) => project.archived);
+  const scopedProjects = scope === "all" ? projects : scope === "active" ? activeProjects : archivedProjects;
   const needle = search.trim().toLowerCase();
-  const visibleProjects = (archivedTab ? archivedProjects : activeProjects).filter((project) => !needle || project.title.toLowerCase().includes(needle));
-  const selected = projects.find((project) => project.id === selectedId) ?? null;
+  const visibleProjects = scopedProjects.filter((project) => !needle || project.title.toLowerCase().includes(needle));
+  const selected = projects.find((project) => project.id === detailId) ?? null;
+  const missingNext = activeProjects.filter((project) => project.nextAction === null);
 
-  function selectProject(project: ProjectSummary) {
-    setSelectedId(project.id);
+  function openDetail(projectId: string) {
+    setDetailId(projectId);
     setReceipt(null);
     setImportStatus("none");
     setActionError(null);
+  }
+  function closeDetail() { setDetailId(null); }
+  function openFirstMissing() {
+    const target = missingNext[0];
+    if (target) openDetail(target.id);
   }
 
   async function archiveSelected() {
@@ -162,6 +344,7 @@ export default function ProjectsView() {
     try {
       const result = await fixtureAdapter.archiveProject(selected.id, mode);
       if (disposed.current || request !== requestVersion.current) return;
+      setDetailId(null);
       await load();
       if (!disposed.current) setReceipt(result.description);
     } catch (caught) {
@@ -180,41 +363,112 @@ export default function ProjectsView() {
   if (creating) return <section className="skill-page"><CreateProjectView onCancel={() => navigate("/projects")} /></section>;
 
   if (live && connection.client) return <LiveProjectsListView
-    key={`${connection.epoch}:${archivedTab}`} client={connection.client} archived={archivedTab}
+    key={`${connection.epoch}:${scope}`} client={connection.client} scope={scope}
     onCreate={() => navigate("/projects?view=create")} />;
 
   if (loading) return <section className="page-state" aria-live="polite"><p className="eyebrow">项目</p><h1>正在读取项目列表</h1><p>示例数据正在加载，页面尚未提交任何变更。</p></section>;
   if (error) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">项目</p><h1>暂时无法显示项目</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
 
-  return <section className="skill-page projects-page"><div className="page-layout">
-    <div className="page-primary">
-      <PageHeader title="项目" testId="projects-page-head" lede="每一个长期目标，都有可继续的下一步。"
-        actions={<><Link className="secondary-button" data-testid="goal-create-open" to="/projects?view=goal">记录目标</Link>
-          <button className="primary-button" type="button" data-testid="project-create-open" onClick={() => navigate("/projects?view=create")}>新建项目</button></>} />
-      <div className="subnav-row">
-        <nav className="subnav" aria-label="项目范围"><Link className={`subnav-item${archivedTab ? "" : " subnav-item--active"}`} to="/projects" data-testid="projects-tab-active" aria-current={archivedTab ? undefined : "page"}>进行中 ({activeProjects.length})</Link><Link className={`subnav-item${archivedTab ? " subnav-item--active" : ""}`} to="/projects?archived=1" data-testid="projects-tab-archived" aria-current={archivedTab ? "page" : undefined}>已归档 ({archivedProjects.length})</Link></nav>
-        <div className="list-toolbar list-toolbar--compact"><label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">按项目名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="project-search" placeholder="搜索项目" style={searchInputStyle} /></label></div>
-      </div>
+  const counts: Record<ProjectScope, number | null> = {
+    all: projects.length, active: activeProjects.length, archived: archivedProjects.length };
+
+  return <section className="skill-page projects-page">
+    <div className="projects-inner">
+      <PageHeader title="项目" testId="projects-page-head" lede="让长期目标有序推进，下一步始终清晰。"
+        actions={<><Link className="secondary-button" data-testid="goal-create-open" to="/projects?view=goal"><Target aria-hidden="true" />记录目标</Link>
+          <button className="primary-button" type="button" data-testid="project-create-open" onClick={() => navigate("/projects?view=create")}><Plus aria-hidden="true" />新建项目</button></>} />
+      <ProjectsSummary activeCount={activeProjects.length} missingCount={missingNext.length}
+        onFix={missingNext.length > 0 ? openFirstMissing : undefined} />
+      <ProjectsToolbar scope={scope} counts={counts} search={search} onSearch={setSearch} view={view} onView={setView}
+        searchName="project-search" />
       {refreshing && <p className="helper-text" role="status">正在更新项目列表，已显示的内容保持可见。</p>}
-      {visibleProjects.length === 0 ? <div className="page-state"><p>{search.trim() ? `当前范围没有匹配“${search.trim()}”的项目。` : archivedTab ? "还没有已归档的项目；归档后仍会保留历史事实。" : "还没有进行中的项目。"}</p>{!archivedTab && !search.trim() ? <button className="primary-button" type="button" onClick={() => navigate("/projects?view=create")}>新建项目</button> : <button className="secondary-button" type="button" onClick={() => setSearch("")}>清除搜索</button>}</div> :
-        <div className="table-scroll"><div className="data-table"><div className="data-row data-row--head data-row--projects" aria-hidden="true"><span className="data-cell">项目</span><span className="data-cell">类型</span><span className="data-cell">当前阶段</span><span className="data-cell">下一步</span></div><ul className="data-list">{visibleProjects.map((project) => <li key={project.id}><button className={`data-row data-row--projects data-row--interactive${project.id === selectedId ? " data-row--selected" : ""}`} type="button" aria-current={project.id === selectedId ? "true" : undefined} data-testid={`project-row-${project.id}`} onClick={() => selectProject(project)}><span className="data-cell"><strong>{project.title}</strong><small>{project.goal}</small></span><span className="data-cell data-cell--meta">{projectTypeLabels[project.projectType]}</span><span className="data-cell data-cell--meta">{phaseLabel(project.phase)}</span><span className="data-cell data-cell--meta data-cell--next-action"><span>{project.nextAction ?? "尚未明确"}</span><ChevronRight aria-hidden="true" size={16} /></span></button></li>)}</ul></div></div>}
-      <p className="list-footer-note"><Info aria-hidden="true" />项目阶段由你显式设置，系统不按任务完成数量自动跳阶段；列表中的下一步来自项目状态。</p>
+      {receipt && <p className="receipt-message" role="status">{receipt}</p>}
+      {importStatus !== "none" && <p className="helper-text" data-testid="project-import-status"><Info aria-hidden="true" />初始资料导入：{importStatus === "SUCCEEDED" ? "已完成登记，导入成功不代表内容已经验证。" : "失败，项目仍然保留，可稍后重新导入。"}</p>}
+      {actionError && <p className="action-error" role="alert">{actionError}</p>}
+      {visibleProjects.length === 0
+        ? search.trim()
+          ? <EmptyState size="compact" title={`当前范围没有匹配“${search.trim()}”的项目`}
+            description="示例数据的名称搜索只作用于已加载范围；清除搜索可回到完整列表。"
+            testId="projects-fixture-no-match"
+            actions={<button className="secondary-button" type="button" onClick={() => setSearch("")}>清除搜索</button>} />
+          : scope === "archived"
+            ? <EmptyState size="compact" icon={Package} title="还没有已归档的项目"
+              description="归档只改变项目状态并保留历史事实；没有项目归档过时，这个范围就是空的。"
+              testId="projects-archived-empty"
+              actions={<Link className="secondary-button" to="/projects">回到进行中</Link>} />
+            : <EmptyState icon={FolderPlus} as="h2" title="还没有进行中的项目"
+              description="项目是长期目标的容器：当前阶段、下一步、任务和产物版本都记在它下面。示例模式可以浏览布局，创建前需先连接本机 API。"
+              testId="projects-empty"
+              actions={<button className="primary-button" type="button" onClick={() => navigate("/projects?view=create")}>新建项目</button>} />
+        : <>
+          <ProjectsGrid view={view}>
+            {visibleProjects.map((project) => <ProjectCard key={project.id} onOpen={() => openDetail(project.id)}
+              project={{ id: project.id, title: project.title, typeLabel: projectTypeLabels[project.projectType],
+                phase: phaseLabel(project.phase), nextAction: project.nextAction, archived: project.archived,
+                footerNote: "已加载到工作区" }} />)}
+            {!search.trim() && scope !== "archived" &&
+              <NewProjectCard onCreate={() => navigate("/projects?view=create")} />}
+          </ProjectsGrid>
+          <p className="projects-note"><Check aria-hidden="true" />已加载 {visibleProjects.length} 个项目 · 点击「查看项目」可查看详情</p>
+        </>}
+      <details className="page-explanation"><summary>列表范围与状态来源</summary>
+        <p className="helper-text">下一步来自项目状态；项目阶段由你显式设置，系统不按任务完成数量自动跳阶段。归档只改变项目状态并保留历史，不会删除任务、产物或验收记录。</p></details>
     </div>
-    <ResponsiveRail label="查看项目摘要" title={selected?.title ?? "项目摘要"}><div className="rail-content"><h2 className="rail-heading">项目摘要</h2>{selected && <p className="rail-project-name">{selected.title}</p>}{selected ? <><p className="rail-intro">{selected.summary}</p><section className="project-state-summary" aria-label="项目当前状态"><span>当前阶段</span><strong>{phaseLabel(selected.phase)}</strong><small>状态修订 v{selected.stateRevision} · 待审 {selected.pendingReviewCount} 项</small></section><section className="rail-section"><h3>明确目标</h3><p>{selected.goal}</p></section>
-      {receipt && <p className="receipt-message" role="status">{receipt}</p>}{importStatus !== "none" && <p className="helper-text" data-testid="project-import-status"><Info aria-hidden="true" />初始资料导入：{importStatus === "SUCCEEDED" ? "已完成登记，导入成功不代表内容已经验证。" : "失败，项目仍然保留，可稍后重新导入。"}</p>}{actionError && <p className="action-error" role="alert">{actionError}</p>}
-      {!selected.archived ? <Link className="primary-button primary-button--wide" data-testid="project-open" to={`/projects/${selected.id}`}>打开项目<ArrowRight aria-hidden="true" /></Link> : <><button className="primary-button primary-button--wide" type="button" disabled>打开项目</button><p className="disabled-reason" data-testid="project-archived-reason"><Info aria-hidden="true" />已归档项目在本轮交互预览中只读；恢复入口尚未接入。</p></>}
-      {!selected.archived && <><button className="secondary-button secondary-button--wide" type="button" data-testid="project-archive" disabled={submitting || Boolean(selected.archiveBlockedReason)} onClick={() => void archiveSelected()}><Archive aria-hidden="true" />{submitting ? "正在归档" : "归档项目"}</button>{selected.archiveBlockedReason ? <p className="disabled-reason" data-testid="project-archive-reason"><Info aria-hidden="true" />{selected.archiveBlockedReason}</p> : <p className="helper-text">归档只改变项目状态并保留历史；不会删除任务、产物或验收记录。</p>}</>}</> : <p className="rail-intro">请先在列表中选择一个项目，这里会显示它的目标与当前状态。</p>}</div></ResponsiveRail>
-  </div></section>;
+    <ProjectDetailDialog open={selected !== null} onClose={closeDetail}>
+      {selected && <FixtureDetail project={selected} submitting={submitting} onArchive={() => void archiveSelected()} />}
+    </ProjectDetailDialog>
+  </section>;
 }
 
-function LiveProjectsListView({ client, archived, onCreate }: {
-  client: RelayApiClient; archived: boolean; onCreate: () => void }) {
+/** 示例模式的项目详情：只读事实 + 归档入口，不制造示例模式没有的能力。 */
+function FixtureDetail({ project, submitting, onArchive }: {
+  readonly project: ProjectSummary; readonly submitting: boolean; readonly onArchive: () => void;
+}) {
+  return <div className="projects-detail">
+    <p className={`projects-detail__status${project.archived ? " is-archived" : ""}`}>
+      {project.archived ? "已归档的项目" : "进行中的项目"}</p>
+    <h2 className="projects-detail__title">{project.title}</h2>
+    <p className="projects-detail__desc">{project.summary}</p>
+    <div className="projects-detail__actions">
+      {!project.archived
+        ? <Link className="primary-button" data-testid="project-open" to={`/projects/${project.id}`}>打开项目<ArrowRight aria-hidden="true" /></Link>
+        : <button className="primary-button" type="button" disabled>打开项目</button>}
+    </div>
+    {project.archived && <p className="disabled-reason" data-testid="project-archived-reason"><Info aria-hidden="true" />已归档项目在本轮交互预览中只读；恢复入口尚未接入。</p>}
+    <div className="projects-detail__divider" />
+    <h3 className="projects-detail__heading">项目概况</h3>
+    <DetailRows rows={[
+      { label: "项目类型", value: projectTypeLabels[project.projectType] },
+      { label: "当前阶段", value: phaseLabel(project.phase) },
+      { label: "项目状态", value: project.archived ? "已归档" : "进行中" }
+    ]} />
+    <p className="helper-text">状态修订 v{project.stateRevision} · 待审 {project.pendingReviewCount} 项</p>
+    <div className="projects-detail__divider" />
+    <h3 className="projects-detail__heading">明确目标</h3>
+    <p className="projects-detail__text">{project.goal}</p>
+    {!project.archived && <>
+      <div className="projects-detail__divider" />
+      <button className="secondary-button secondary-button--wide" type="button" data-testid="project-archive"
+        disabled={submitting || Boolean(project.archiveBlockedReason)} onClick={onArchive}>
+        <Archive aria-hidden="true" />{submitting ? "正在归档" : "归档项目"}</button>
+      {project.archiveBlockedReason
+        ? <p className="disabled-reason" data-testid="project-archive-reason"><Info aria-hidden="true" />{project.archiveBlockedReason}</p>
+        : <p className="helper-text">归档只改变项目状态并保留历史；不会删除任务、产物或验收记录。</p>}
+    </>}
+  </div>;
+}
+
+/* ── live 列表 ──────────────────────────────────────────────────────────── */
+
+function LiveProjectsListView({ client, scope, onCreate }: {
+  client: RelayApiClient; scope: ProjectScope; onCreate: () => void }) {
   const navigate = useNavigate();
   const [items, setItems] = useState<readonly RelayProjectListItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [knownId, setKnownId] = useState("");
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [knownId, setKnownId] = useState("");
+  const [view, setView] = useState<"grid" | "list">("grid");
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -230,8 +484,13 @@ function LiveProjectsListView({ client, archived, onCreate }: {
   const busy = useRef(false);
   const archiveFlight = useRef(false);
   const disposed = useRef(false);
-  const status = archived ? "archived" : "active";
+  // 详情抽屉在刷新期间保留最后一次可读事实：列表重读会短暂清空 items，
+  // 只按 id 查会让抽屉闪一下；这里存最近一次读到的对象，数据回来后按 id 覆盖。
+  const detailSnapshot = useRef<RelayProjectListItem | null>(null);
   const pendingStorageKey = archiveKey(client);
+  // 归档时间用本设备显示时区渲染；原始 ISO 串仍放在 time.dateTime 里保留机器可读凭据。
+  const { timeZone } = useDisplayPreferences();
+  const archivedScope = scope === "archived";
 
   async function loadPage(cursor: string | null, force = false) {
     if (busy.current && !force) return;
@@ -239,22 +498,31 @@ function LiveProjectsListView({ client, archived, onCreate }: {
     const request = ++requestVersion.current;
     if (cursor === null) {
       // 重新读取列表时下一步标题缓存一并失效，避免继续显示过期标题。
+      // 详情抽屉不在这里强制关闭：普通刷新保留已知内容（设计系统「组件状态补充」），
+      // 抽屉内容在数据回来后按 id 重新对齐；确实已不在范围内才在下方收口。
       invalidateTaskTitles();
-      setItems([]); setNextCursor(null); setSelectedId(null); setLoading(true);
+      setItems([]); setNextCursor(null); setLoading(true);
     } else setLoadingMore(true);
     setError(null);
     try {
-      const page = await client.getProjectsPage(status, cursor);
+      const page = await client.getProjectsPage(scope, cursor);
       if (disposed.current || request !== requestVersion.current) return;
-      if (page.items.some((project) => project.archiveStatus !== (archived ? "ARCHIVED" : "ACTIVE"))) {
+      // 归档范围必须与请求一致；「全部」范围同时允许两种状态，因此只在单范围时校验。
+      const expected = scope === "all" ? null : archivedScope ? "ARCHIVED" : "ACTIVE";
+      if (expected !== null &&
+        page.items.some((project) => project.archiveStatus !== expected)) {
         throw new Error("项目列表响应与当前归档范围不匹配，已停止显示。");
       }
       setItems((current) => cursor === null ? page.items : [...current, ...page.items]);
-      if (cursor === null) setSelectedId(page.items[0]?.id ?? null);
       setNextCursor(page.nextCursor);
+      // 只有在列表已到末页时才能断言「这个项目不在了」；仍有后续页时保持抽屉不动。
+      if (cursor === null && page.nextCursor === null) {
+        setDetailId((current) => current !== null &&
+          !page.items.some((project) => project.id === current) ? null : current);
+      }
     } catch (caught) {
       if (!disposed.current && request === requestVersion.current) {
-        setItems([]); setNextCursor(null); setSelectedId(null);
+        setItems([]); setNextCursor(null); setDetailId(null);
         setError(describeLiveError(caught).message);
       }
     } finally {
@@ -267,10 +535,16 @@ function LiveProjectsListView({ client, archived, onCreate }: {
     disposed.current = false;
     void loadPage(null);
     return () => { disposed.current = true; requestVersion.current++; };
-  }, [client, status]);
+  }, [client, scope]);
+
+  useEffect(() => {
+    if (detailId === null) { detailSnapshot.current = null; return; }
+    const found = items.find((project) => project.id === detailId);
+    if (found) detailSnapshot.current = found;
+  }, [items, detailId]);
 
   async function prepareArchive(project: RelayProjectListItem) {
-    if (archived || loading || loadingMore || error || checkingArchive || archiveBusy || pendingArchive ||
+    if (archivedScope || loading || loadingMore || error || checkingArchive || archiveBusy || pendingArchive ||
       project.archiveStatus !== "ACTIVE" || project.archivedAt !== null) return;
     setCheckingArchive(true); setArchiveError(null); setArchiveBlockers([]); setArchiveSuccess(null);
     try {
@@ -307,6 +581,7 @@ function LiveProjectsListView({ client, archived, onCreate }: {
       const result = confirmedArchive(envelope, command);
       savePendingArchive(pendingStorageKey, null); setPendingArchive(null);
       setArchiveSuccess({ id: result.projectId, archivedAt: result.archivedAt });
+      setDetailId(null);
       await loadPage(null, true);
     } catch (caught) {
       if (disposed.current) return;
@@ -340,6 +615,7 @@ function LiveProjectsListView({ client, archived, onCreate }: {
       const result = confirmedArchive(receipt, pendingArchive, true);
       savePendingArchive(pendingStorageKey, null); setPendingArchive(null);
       setArchiveSuccess({ id: result.projectId, archivedAt: result.archivedAt });
+      setDetailId(null);
       await loadPage(null, true);
     } catch (caught) {
       if (disposed.current) return;
@@ -352,7 +628,10 @@ function LiveProjectsListView({ client, archived, onCreate }: {
 
   const needle = search.trim().toLocaleLowerCase();
   const visible = items.filter((project) => !needle || project.title.toLocaleLowerCase().includes(needle));
-  const selected = visible.find((project) => project.id === selectedId) ?? null;
+  const selected = detailId === null ? null
+    : items.find((project) => project.id === detailId) ?? detailSnapshot.current;
+  // 页签计数与示例版一致；live 一次只加载一个范围，计数只来自已成功加载的数据，另一范围不造数。
+  const loadedCount = loading || error ? null : items.length;
   // 下一步只拿到 Task ID；按 ID 单读真实标题。缓存仅在请求结束后写入；
   // 显式刷新列表时整批失效并重读，失败结果也可在下次刷新时重试。
   const [taskTitles, setTaskTitles] = useState<Record<string, string | null>>({});
@@ -387,78 +666,130 @@ function LiveProjectsListView({ client, archived, onCreate }: {
   const nextLabel = (project: RelayProjectListItem): string =>
     project.nextActionTaskId === null ? "尚未明确"
       : taskTitles[project.nextActionTaskId] ?? "标题暂不可读";
-  return <section className="skill-page projects-page" data-testid="projects-live-list"><div className="page-layout">
-    <div className="page-primary">
-      <PageHeader title="项目" testId="projects-page-head" lede="每一个长期目标，都有可继续的下一步。"
-        actions={<><Link className="secondary-button" data-testid="goal-create-open" to="/projects?view=goal">记录目标</Link>
-          <button className="primary-button" type="button" data-testid="project-create-open" onClick={onCreate}>新建项目</button></>} />
-      <div className="subnav-row">
-        <nav className="subnav" aria-label="项目范围"><Link className={`subnav-item${archived ? "" : " subnav-item--active"}`}
-          to="/projects" data-testid="projects-tab-active" aria-current={archived ? undefined : "page"}>进行中</Link>
-          <Link className={`subnav-item${archived ? " subnav-item--active" : ""}`} to="/projects?archived=1"
-            data-testid="projects-tab-archived" aria-current={archived ? "page" : undefined}>已归档</Link></nav>
-        <div className="list-toolbar list-toolbar--compact">
-          <button className="secondary-button" type="button" data-testid="projects-live-refresh" disabled={loading || loadingMore}
-            onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />刷新当前范围</button>
-          <label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">在已加载项目中按名称搜索</span>
-            <input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="live-project-search"
-              placeholder="搜索已加载项目" style={searchInputStyle} /></label></div>
-      </div>
-      {archiveSuccess && <p className="receipt-message" role="status" data-testid="project-archive-success">已归档 Project {archiveSuccess.id}（{archiveSuccess.archivedAt}）。<Link className="inline-link" to={`/projects/${archiveSuccess.id}`}>查看历史项目</Link> · <Link className="inline-link" to="/projects?archived=1">查看已归档列表</Link></p>}
+
+  const counts: Record<ProjectScope, number | null> = {
+    all: scope === "all" ? loadedCount : null,
+    active: scope === "active" ? loadedCount : null,
+    archived: scope === "archived" ? loadedCount : null };
+  // 摘要条只统计已加载项；有后续页时用 note 限定，不把部分计数冒充全量。
+  const loadedActive = items.filter((project) => project.archiveStatus === "ACTIVE");
+  const missingNext = loadedActive.filter((project) => project.nextActionTaskId === null);
+  const summaryNote = nextCursor !== null
+    ? "按已加载项目统计，仍有后续页。" : undefined;
+  const openFirstMissing = () => {
+    const target = missingNext[0];
+    if (target) setDetailId(target.id);
+  };
+
+  return <section className="skill-page projects-page" data-testid="projects-live-list">
+    <div className="projects-inner">
+      <PageHeader title="项目" testId="projects-page-head" lede="让长期目标有序推进，下一步始终清晰。"
+        actions={<><Link className="secondary-button" data-testid="goal-create-open" to="/projects?view=goal"><Target aria-hidden="true" />记录目标</Link>
+          <button className="primary-button" type="button" data-testid="project-create-open" onClick={onCreate}><Plus aria-hidden="true" />新建项目</button></>} />
+      <ProjectsSummary activeCount={loadedActive.length} missingCount={missingNext.length}
+        note={summaryNote} onFix={missingNext.length > 0 ? openFirstMissing : undefined} />
+      <ProjectsToolbar scope={scope} counts={counts} search={search} onSearch={setSearch} view={view} onView={setView}
+        searchName="live-project-search"
+        tools={<button className="secondary-button" type="button" data-testid="projects-live-refresh"
+          disabled={loading || loadingMore} onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />刷新当前范围</button>} />
+      {archiveSuccess && <p className="receipt-message" role="status" data-testid="project-archive-success">已归档项目（<time dateTime={archiveSuccess.archivedAt}>{formatReadableDateTime(archiveSuccess.archivedAt, timeZone)}</time>）。<Link className="inline-link" to={`/projects/${archiveSuccess.id}`}>查看历史项目</Link> · <Link className="inline-link" to="/projects?scope=archived">查看已归档列表</Link> <small>Project ID：{archiveSuccess.id}</small></p>}
       {archiveError && <p className="action-error" role="alert" data-testid="project-archive-error">{archiveError}</p>}
       {archiveBlockers.length > 0 && <div className="warning-callout" data-testid="project-archive-blockers"><strong>归档阻断原因</strong><ul>{archiveBlockers.map((reason, index) => <li key={`${reason}-${index}`}><strong>{reason}</strong>：{archiveBlockerLabels[reason] ?? "服务端报告未识别的阻断事实；请重新读取项目并核对当前状态。"}</li>)}</ul></div>}
       {pendingArchive && <div className="warning-callout" data-testid="project-archive-pending"><strong>归档命令待核对</strong><p>原 command ID：{pendingArchive.commandId} · Project {pendingArchive.projectId} · 基于修订 v{pendingArchive.expectedRevision}。核对前不会创建另一条归档命令。</p><button className="secondary-button" type="button" data-testid="project-archive-receipt" disabled={archiveBusy} onClick={() => void checkArchiveReceipt()}>查询原命令回执</button>{mayRetryArchive && <button className="secondary-button" type="button" data-testid="project-archive-retry" disabled={archiveBusy} onClick={() => void sendArchive(pendingArchive, true)}>用原 ID 和修订重试</button>}</div>}
-      {loading ? <div className="page-state" aria-live="polite"><p>正在读取{archived ? "已归档" : "进行中"}项目…</p></div> :
+      {loading ? <div className="page-state" aria-live="polite"><p>正在读取{scopeLabel(scope)}项目…</p></div> :
         error ? <div className="page-state page-state--error" role="alert"><p>{error}</p>
           <button className="secondary-button" type="button" onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />重新读取</button></div> : <>
           <p className="list-footer-note" data-testid="projects-live-count">已加载 {items.length} 项 · 当前搜索显示 {visible.length} 项
             {nextCursor ? " · 仍有后续页" : " · 已到列表末页"}。名称搜索只作用于已加载项目。</p>
-          {visible.length === 0 ? <div className="page-state"><p>{items.length === 0
-            ? archived ? "当前没有已归档项目。" : "当前没有进行中项目。"
-            : "已加载项目中没有匹配项；后续页可能仍有匹配项目。"}</p>
-            {needle && <button className="secondary-button" type="button" onClick={() => setSearch("")}>清除搜索</button>}</div> :
-            <div className="table-scroll"><div className="data-table"><div className="data-row data-row--head data-row--projects" aria-hidden="true"><span className="data-cell">项目</span><span className="data-cell">类型</span><span className="data-cell">当前阶段</span><span className="data-cell">下一步</span></div>
-              <ul className="data-list">{visible.map((project) => <li key={project.id}><button className={`data-row data-row--projects data-row--interactive${project.id === selectedId ? " data-row--selected" : ""}`}
-                type="button" aria-current={project.id === selectedId ? "true" : undefined} data-testid={`project-row-${project.id}`}
-                onClick={() => setSelectedId(project.id)}><span className="data-cell"><strong>{project.title}</strong></span>
-                <span className="data-cell data-cell--meta">{projectTypeLabels[project.projectType as ProjectType] ?? project.projectType}</span>
-                <span className="data-cell data-cell--meta">{phaseLabel(project.phaseKey)}</span>
-                <span className="data-cell data-cell--meta data-cell--next-action"><span>{nextLabel(project)}</span><ChevronRight aria-hidden="true" size={16} /></span></button></li>)}</ul></div></div>}
-          {nextCursor && <button className="secondary-button" type="button" data-testid="projects-live-load-more"
-            disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>{loadingMore ? "正在加载" : "加载更多"}</button>}
+          {visible.length === 0
+            ? items.length === 0
+              ? archivedScope
+                // 归档范围为空说明的是范围本身的状态，与主区首装空态不是同一件事：
+                // 归档后仍保留历史事实，这里只负责把人带回进行中范围，不提供无效的新建入口。
+                ? <EmptyState size="compact" icon={Package} title="当前没有已归档的项目"
+                  description="归档只改变项目状态，历史事实仍会保留；没有项目归档过时，这个范围就是空的。"
+                  testId="projects-archived-empty"
+                  actions={<Link className="secondary-button" to="/projects">回到进行中</Link>} />
+                // 首装状态：本页还没有任何 Project 事实。把「项目是什么」和「建完能做什么」说清，
+                // 并在这里给出主操作——页头的「新建项目」是常驻入口，这里是离内容最近的那一个。
+                : <EmptyState icon={FolderPlus} as="h2" title="还没有进行中的项目"
+                  description="项目是长期目标的容器：当前阶段、下一步、任务和产物版本都记在它下面。先建一个项目，再从它拆出第一条任务；不建项目也可以先记一条独立任务。"
+                  testId="projects-empty"
+                  actions={<><button className="primary-button" type="button" onClick={onCreate}>新建项目</button>
+                    <Link className="secondary-button" to="/projects?view=goal">记录目标</Link></>} />
+              // 搜索无匹配与工作空间为空不同：只能说已加载范围内没有命中，不能暗示整个工作空间为空。
+              : <EmptyState size="compact" title="已加载项目里没有匹配项"
+                description={`已加载 ${items.length} 项，当前搜索显示 0 项。名称搜索只作用于已加载范围，后续页可能仍有匹配项目。`}
+                testId="projects-live-no-match"
+                actions={<button className="secondary-button" type="button" onClick={() => setSearch("")}>清除搜索</button>} />
+            : <>
+              <ProjectsGrid view={view}>
+                {visible.map((project) => <ProjectCard key={project.id} onOpen={() => setDetailId(project.id)}
+                  project={{ id: project.id, title: project.title,
+                    typeLabel: projectTypeLabels[project.projectType as ProjectType] ?? project.projectType,
+                    phase: phaseLabel(project.phaseKey),
+                    nextAction: project.nextActionTaskId === null ? null : nextLabel(project),
+                    archived: project.archiveStatus === "ARCHIVED",
+                    footerNote: `更新于 ${formatReadableDateTime(project.updatedAt, timeZone)}` }} />)}
+                {!needle && !archivedScope && <NewProjectCard onCreate={onCreate} />}
+              </ProjectsGrid>
+              {nextCursor && <button className="secondary-button" type="button" data-testid="projects-live-load-more"
+                disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>{loadingMore ? "正在加载" : "加载更多"}</button>}
+            </>}
         </>}
-      <details className="page-explanation"><summary>列表范围与状态来源</summary><p className="helper-text">下一步来自项目状态，显示对应任务的标题；任务的确切 ID、修订与打开入口在选中项目后的右侧摘要中。</p></details>
-    </div><ResponsiveRail label="查看项目摘要" title={selected?.title ?? "项目摘要"}><div className="rail-content">
-      <h2 className="rail-heading">项目摘要</h2>{selected && <p className="rail-project-name">{selected.title}</p>}{selected ? <>
-        <section className="project-state-summary" aria-label="项目当前状态"><span>项目阶段</span>
-          <strong>{phaseLabel(selected.phaseKey)}</strong><small>Project v{selected.revision} · State v{selected.stateRevision}</small></section>
-        <section className="rail-section"><h3>下一步</h3><p>{selected.nextActionTaskId
-          ? <Link className="inline-link" to={`/tasks/${selected.nextActionTaskId}`}>
-            {taskTitles[selected.nextActionTaskId] ?? "打开任务"}</Link>
-          : "尚未明确"}</p>
-          </section>
-        <Link className="primary-button primary-button--wide" data-testid="project-open" to={`/projects/${selected.id}`}>打开项目<ArrowRight aria-hidden="true" /></Link>
-        {!archived && <><button className="secondary-button secondary-button--wide" type="button" data-testid="project-archive"
-          disabled={checkingArchive || archiveBusy || pendingArchive !== null || loading || loadingMore || error !== null ||
-            selected.archiveStatus !== "ACTIVE" || selected.archivedAt !== null}
-          onClick={() => void prepareArchive(selected)}><Archive aria-hidden="true" />{checkingArchive ? "正在核对 Project" : "归档项目"}</button>
-          <p className="helper-text">归档需再次确认，历史事实仍可读取。</p></>}
-          <details className="page-explanation"><summary>项目与任务身份</summary><p className="helper-text hash-code">Project ID：{selected.id}</p><p className="helper-text">原始阶段键：{selected.phaseKey}</p>{selected.nextActionTaskId && <p className="helper-text">任务 ID：{selected.nextActionTaskId}</p>}<p className="helper-text">归档前会单读当前 Project；服务端会检查未结清任务、运行与外部效果。</p></details></> :
-        <p className="rail-intro">选择已加载项目查看确切 ID、阶段和修订。</p>}
-      <details className="page-explanation"><summary>按已知项目 ID 打开</summary><form className="create-form" noValidate onSubmit={(event) => { event.preventDefault();
-        if (knownId.trim()) navigate(`/projects/${encodeURIComponent(knownId.trim())}/tasks`);
-      }}><label className="field"><span className="field-label">用项目 ID 打开任务</span><input value={knownId}
-        onChange={(event) => setKnownId(event.target.value)} name="live-project-id" autoComplete="off" placeholder="Project UUID" /></label>
-        <button className="secondary-button" type="submit" data-testid="projects-live-open" disabled={!knownId.trim()}>打开项目任务</button></form></details>
-    </div></ResponsiveRail>
-  </div>
-  <AppDialog open={confirmProject !== null} title="确认归档项目" initialFocusSelector='[data-testid="project-archive-cancel"]'
-    onClose={() => setConfirmProject(null)}>
-    {confirmProject && <><p>确定归档“{confirmProject.title}”？</p><p className="helper-text">Project {confirmProject.id} · 当前修订 v{confirmProject.revision}。提交后由服务端核对所有阻断事实；历史仍可读取，当前没有恢复项目命令。</p>
-      <div className="form-actions"><button className="secondary-button" type="button" data-testid="project-archive-cancel"
-        onClick={() => setConfirmProject(null)}>暂不归档</button><button className="danger-button" type="button"
-        data-testid="project-archive-confirm" disabled={archiveBusy}
-        onClick={() => void sendArchive({ commandId: createCommandId(), projectId: confirmProject.id,
-          expectedRevision: confirmProject.revision })}>确认归档</button></div></>}
-  </AppDialog></section>;
+      <details className="page-explanation"><summary>列表范围与状态来源</summary><p className="helper-text">下一步来自项目状态，显示对应任务的标题；任务的确切 ID、修订与打开入口在选中项目后的详情抽屉中。归档前会单读当前 Project；服务端会检查未结清任务、运行与外部效果。</p></details>
+      {/* 按 ID 打开是折叠的辅助入口：项目列表优先按名称选择，只有拿到确切 UUID 时才需要它。 */}
+      <details className="page-explanation"><summary>按已知项目 ID 打开</summary>
+        <form className="create-form" noValidate onSubmit={(event) => { event.preventDefault();
+          if (knownId.trim()) navigate(`/projects/${encodeURIComponent(knownId.trim())}/tasks`);
+        }}><label className="field"><span className="field-label">用项目 ID 打开任务</span><input value={knownId}
+          onChange={(event) => setKnownId(event.target.value)} name="live-project-id" autoComplete="off" placeholder="Project UUID" /></label>
+          <button className="secondary-button" type="submit" data-testid="projects-live-open" disabled={!knownId.trim()}>打开项目任务</button></form></details>
+    </div>
+    <ProjectDetailDialog open={selected !== null} onClose={() => setDetailId(null)}>
+      {selected && <div className="projects-detail">
+        <p className={`projects-detail__status${selected.archiveStatus === "ARCHIVED" ? " is-archived" : ""}`}>
+          {selected.archiveStatus === "ARCHIVED" ? "已归档的项目" : "进行中的项目"}</p>
+        <h2 className="projects-detail__title">{selected.title}</h2>
+        <p className="projects-detail__desc">在这里查看项目阶段、修订与下一步；打开项目后可以继续安排任务与产物。</p>
+        <div className="projects-detail__actions">
+          <Link className="primary-button" data-testid="project-open" to={`/projects/${selected.id}`}>打开项目<ArrowRight aria-hidden="true" /></Link>
+        </div>
+        <div className="projects-detail__divider" />
+        <h3 className="projects-detail__heading">项目概况</h3>
+        <DetailRows rows={[
+          { label: "项目类型", value: projectTypeLabels[selected.projectType as ProjectType] ?? selected.projectType },
+          { label: "项目阶段", value: phaseLabel(selected.phaseKey) },
+          { label: "项目状态", value: selected.archiveStatus === "ARCHIVED" ? "已归档" : "进行中" },
+          { label: "修订", value: `Project v${selected.revision} · State v${selected.stateRevision}` }
+        ]} />
+        <div className="projects-detail__divider" />
+        <h3 className="projects-detail__heading">下一步</h3>
+        <p className="projects-detail__text">{selected.nextActionTaskId === null ? "尚未明确"
+          : <Link className="inline-link" to={`/tasks/${selected.nextActionTaskId}`}>
+            {taskTitles[selected.nextActionTaskId] ?? "打开任务"}</Link>}</p>
+        {!archivedScope && selected.archiveStatus === "ACTIVE" && <>
+          <div className="projects-detail__divider" />
+          <button className="secondary-button secondary-button--wide" type="button" data-testid="project-archive"
+            disabled={checkingArchive || archiveBusy || pendingArchive !== null || loading || loadingMore || error !== null}
+            onClick={() => void prepareArchive(selected)}><Archive aria-hidden="true" />{checkingArchive ? "正在核对 Project" : "归档项目"}</button>
+          <p className="helper-text">归档需再次确认，历史事实仍可读取。</p>
+        </>}
+        <div className="projects-detail__divider" />
+        <h3 className="projects-detail__heading">项目身份</h3>
+        <p className="helper-text hash-code">Project ID：{selected.id}</p>
+        <p className="helper-text">原始阶段键：{selected.phaseKey}</p>
+        {selected.nextActionTaskId && <p className="helper-text">任务 ID：{selected.nextActionTaskId}</p>}
+      </div>}
+    </ProjectDetailDialog>
+    <AppDialog open={confirmProject !== null} title="确认归档项目" initialFocusSelector='[data-testid="project-archive-cancel"]'
+      onClose={() => setConfirmProject(null)}>
+      {confirmProject && <><p>确定归档“{confirmProject.title}”？</p><p className="helper-text">Project {confirmProject.id} · 当前修订 v{confirmProject.revision}。提交后由服务端核对所有阻断事实；历史仍可读取，当前没有恢复项目命令。</p>
+        <div className="form-actions"><button className="secondary-button" type="button" data-testid="project-archive-cancel"
+          onClick={() => setConfirmProject(null)}>暂不归档</button><button className="danger-button" type="button"
+          data-testid="project-archive-confirm" disabled={archiveBusy}
+          onClick={() => void sendArchive({ commandId: createCommandId(), projectId: confirmProject.id,
+            expectedRevision: confirmProject.revision })}>确认归档</button></div></>}
+    </AppDialog>
+  </section>;
 }

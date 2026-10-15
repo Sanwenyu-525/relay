@@ -1,8 +1,8 @@
 # 协作页 UI 优化设计（结构重塑 + 质感精修）
 
 - 日期：2026-10-10。状态：Proposed（等用户评审 spec 后进入 writing-plans）。
-- 依据：用户 2026-10-10 以运行截图发起「优化 UI」，经 brainstorming 逐问收敛；视觉参考为 [2026-10-02 选稿](../frontend/mockups/2026-10-02/conversation-workspace-selected.png) 与 [2026-10-01 工作主线图](../frontend/mockups/2026-10-01/work-first.png)。
-- 约束来源：业务交互仍以[工作台交互](workbench-design.md)与契约为准；视觉规则归[设计系统](design-system.md)，数值唯一源为 [design-tokens.json](design-tokens.json)。本 spec 不得反向改变业务状态、权限或命令 Owner。
+- 依据：用户 2026-10-10 以运行截图发起「优化 UI」，经 brainstorming 逐问收敛；视觉参考为 [2026-10-02 选稿](../../frontend/mockups/2026-10-02/conversation-workspace-selected.png) 与 [2026-10-01 工作主线图](../../frontend/mockups/2026-10-01/work-first.png)。
+- 约束来源：业务交互仍以[工作台交互](../../frontend/workbench-design.md)与契约为准；视觉规则归[设计系统](../../frontend/design-system.md)，数值唯一源为 [design-tokens.json](../../frontend/design-tokens.json)。本 spec 不得反向改变业务状态、权限或命令 Owner。
 
 ## 1. 目标与范围
 
@@ -66,7 +66,7 @@
   3. 「普通通过」`details` 下拉：文案与准入说明原位保留。
   4. ContextMeter 圆环 + 「缓存未采集/命中率」绝对文字：发送键左侧，照既有 `role="img"` + `aria-label` + `title` 规则。
   5. 发送键：右下，`control.height.compact`，在途时字形切换与「正在停止生成」禁用逻辑不变。
-- 运行光点（在途提示）继续按[设计系统 §7.1](../frontend/design-system.md#71-输入区运行光点2026-10-05-选定局部光点)挂卡片上边，不因一体化改动位移或加倍。
+- 运行光点（在途提示）继续按[设计系统 §7.1](../../frontend/design-system.md#71-输入区运行光点2026-10-05-选定局部光点)挂卡片上边，不因一体化改动位移或加倍。
 
 ## 4. 视觉精修规格（全部引用现有 token）
 
@@ -120,10 +120,10 @@
 
 ## 9. 文档同步（实施后）
 
-- [workbench-design.md](../frontend/workbench-design.md)：新增「协作页结构重塑（2026-10-10）」小节，记录左栏迁移（TargetPicker 入口）、细条契约、输入卡一体化与状态绑定保留点；§14/§17 既有交互规则不改语义。
-- [design-system.md](../frontend/design-system.md)：「可复用组件规则」补充 chips/细条/欢迎卡/回到最新四条外观规则（引用 token 名，不复制数值）。
-- [design-tokens.json](../frontend/design-tokens.json)：预期零变更；若有新尺度先修订本 spec 再改 token。
-- [CODEX_NEXT_STEP.md](../../CODEX_NEXT_STEP.md)：完成后记一行范围、验证结果与剩余限制；成绩归[功能验收表](../testing/overall-acceptance-2026-09-28.md)。
+- [workbench-design.md](../../frontend/workbench-design.md)：新增「协作页结构重塑（2026-10-10）」小节，记录左栏迁移（TargetPicker 入口）、细条契约、输入卡一体化与状态绑定保留点；§14/§17 既有交互规则不改语义。
+- [design-system.md](../../frontend/design-system.md)：「可复用组件规则」补充 chips/细条/欢迎卡/回到最新四条外观规则（引用 token 名，不复制数值）。
+- [design-tokens.json](../../frontend/design-tokens.json)：预期零变更；若有新尺度先修订本 spec 再改 token。
+- [CODEX_NEXT_STEP.md](../../../CODEX_NEXT_STEP.md)：完成后记一行范围、验证结果与剩余限制；成绩归[功能验收表](../../testing/overall-acceptance-2026-09-28.md)。
 
 ## 10. 待确认（已在本轮澄清，留档）
 

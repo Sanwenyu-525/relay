@@ -98,7 +98,12 @@ try {
   $uiPort = Free-Port
   if (@(@($pgPort, $apiPort, $uiPort) | Select-Object -Unique).Count -ne 3) { throw 'Port allocation collision; rerun the short-lived session' }
 
-  & $initdbExe '-D' $cluster '-U' 'relay_api_admin' '-A' 'trust' '--encoding=UTF8'
+  # --locale=C pins the cluster locale: initdb otherwise derives it from the host locale, and a
+  # host locale without a matching text search configuration makes initdb print that complaint to
+  # stderr. initdb still exits 0, but the script sets $ErrorActionPreference='Stop', so PowerShell
+  # 5.1 turns native stderr into a terminating NativeCommandError and the whole run aborts before
+  # Playwright starts. Pinning the locale keeps this acceptance deterministic across machines.
+  & $initdbExe '-D' $cluster '-U' 'relay_api_admin' '-A' 'trust' '--encoding=UTF8' '--locale=C'
   if ($LASTEXITCODE -ne 0) { throw "initdb exit $LASTEXITCODE" }
   # Never pipe pg_ctl start: the child retains the write handle and PowerShell waits for EOF.
   & $pgCtlExe 'start' '-D' $cluster '-l' $serverLog '-o' "-h 127.0.0.1 -p $pgPort" '-w' '-t' '30'

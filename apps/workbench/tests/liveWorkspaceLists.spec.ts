@@ -1,6 +1,7 @@
+import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { flush, mountWorkbench } from "./mountApp";
+import { DomWrapper, flush, mountWorkbench, pressEscape } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -14,6 +15,10 @@ const taskC = "77777777-7777-4777-8777-777777777777";
 const root = `${baseUrl}/api/v1/workspaces/${workspaceId}`;
 const created = "2026-09-26T00:00:00.000Z";
 let unmount: (() => void) | null = null;
+
+// 项目详情自 2026-10-11 起改为 AppDialog 抽屉（createPortal → document.body），
+// 详情里的控件必须用 document 查询，而不是 mountWorkbench 返回的容器。
+const portal = () => new DomWrapper(document.body);
 
 afterEach(() => {
   unmount?.(); unmount = null;
@@ -45,43 +50,50 @@ describe("live Workspace 项目与任务列表", () => {
       if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
       urls.push(url);
       if (url === `${root}/tasks?scope=all`) return response(200, { items: [], next_cursor: null });
-      if (url === `${root}/projects?status=active`) return response(200, { items: [
+      // 左栏近期工作固定读 status=active；项目主区默认读 status=all。
+      if (url === `${root}/projects?status=active`) return response(200, { items: [], next_cursor: null });
+      if (url === `${root}/projects?status=all`) return response(200, { items: [
         project(projectA, "甲项目", false, taskA), project(projectB, "乙项目")], next_cursor: "p+2" });
       if (url === `${root}/tasks/${taskA}`) return response(200, {
         ...task(taskA, "下一步任务甲", projectA),
         acceptance: { acceptance_revision: "1", objective: "核对下一步", source: "HUMAN", criteria: [] },
         dependencies: [] });
-      if (url === `${root}/projects?status=active&cursor=p%2B2`) return response(200, {
+      if (url === `${root}/projects?status=all&cursor=p%2B2`) return response(200, {
         items: [project(projectC, "丙项目")], next_cursor: null });
       if (url === `${root}/projects?status=archived`) return response(200, {
         items: [project(projectB, "历史项目", true)], next_cursor: null });
+      // 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1）。
+      if (url === `${root}/assist-sessions?`) return response(200, { items: [] });
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/projects"); unmount = mounted.unmount;
     // 近期工作读取 Task/Project 各一次，项目主区再读取项目列表及确切下一步。
-    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`,
-      `${root}/projects?status=active`, `${root}/tasks/${taskA}`]);
+    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?`,
+      `${root}/projects?status=all`, `${root}/tasks/${taskA}`]);
     expect(mounted.wrapper.get('[data-testid="projects-live-count"]').text())
       .toContain("已加载 2 项 · 当前搜索显示 2 项 · 仍有后续页");
     // 下一步按 Task ID 单读真实标题：行内显示标题，不再把原始 UUID 摆在列表主区。
     expect(mounted.wrapper.get(`[data-testid="project-row-${projectA}"]`).text()).toContain("下一步任务甲");
     expect(mounted.wrapper.get(`[data-testid="project-row-${projectA}"]`).text()).not.toContain(taskA);
-    expect(mounted.wrapper.get('[data-testid="project-archive"]').attributes("disabled")).toBeUndefined();
     expect(mounted.wrapper.text()).toContain("归档前会单读当前 Project");
+    // 归档入口在详情抽屉里：打开 projectA 的详情核对入口可用，再关掉继续做列表断言。
+    await mounted.wrapper.get(`[data-testid="project-row-${projectA}"]`).trigger("click"); await flush();
+    expect(portal().get('[data-testid="project-archive"]').attributes("disabled")).toBeUndefined();
+    await act(async () => { pressEscape(); }); await flush();
     await mounted.wrapper.get('input[name="live-project-search"]').setValue("乙");
     expect(mounted.wrapper.get('[data-testid="projects-live-count"]').text()).toContain("当前搜索显示 1 项");
     expect(mounted.wrapper.find(`[data-testid="project-row-${projectA}"]`).exists()).toBe(false);
     await mounted.wrapper.get('[data-testid="projects-live-load-more"]').trigger("click");
     await flush(30);
-    expect(urls.at(-1)).toBe(`${root}/projects?status=active&cursor=p%2B2`);
+    expect(urls.at(-1)).toBe(`${root}/projects?status=all&cursor=p%2B2`);
     expect(mounted.wrapper.get('[data-testid="projects-live-count"]').text())
       .toContain("已加载 3 项 · 当前搜索显示 1 项 · 已到列表末页");
     await mounted.wrapper.get('[data-testid="projects-tab-archived"]').trigger("click");
     await flush(30);
     expect(urls.at(-1)).toBe(`${root}/projects?status=archived`);
-    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`,
-      `${root}/projects?status=active`, `${root}/tasks/${taskA}`,
-      `${root}/projects?status=active&cursor=p%2B2`, `${root}/projects?status=archived`]);
+    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?`,
+      `${root}/projects?status=all`, `${root}/tasks/${taskA}`,
+      `${root}/projects?status=all&cursor=p%2B2`, `${root}/projects?status=archived`]);
     expect(mounted.wrapper.find(`[data-testid="project-row-${projectA}"]`).exists()).toBe(false);
     expect(mounted.wrapper.get(`[data-testid="project-row-${projectB}"]`).text()).toContain("历史项目");
     expect(mounted.wrapper.text()).not.toContain("归档项目只读");
@@ -97,12 +109,17 @@ describe("live Workspace 项目与任务列表", () => {
       if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
       if ([workspaceId, otherWorkspaceId].some((id) => url === `${baseUrl}/api/v1/workspaces/${id}/tasks?scope=all`))
         return response(200, { items: [], next_cursor: null });
-      if (url === `${root}/projects?status=active`) return authorized
+      // 左栏近期工作固定读 status=active；项目主区默认读 status=all，失权只影响主区。
+      if (url === `${root}/projects?status=active`) return response(200, { items: [], next_cursor: null });
+      if (url === `${root}/projects?status=all`) return authorized
         ? response(200, { items: [project(projectA, "旧项目")], next_cursor: null })
         : response(403, { code: "FORBIDDEN", detail: "项目列表不可读" });
       if (url === `${root}/projects?status=archived`) return archivedPending;
-      if (url === `${baseUrl}/api/v1/workspaces/${otherWorkspaceId}/projects?status=active`)
+      // 切到其他 Workspace 时当前页签可能停在进行中，两个范围都返回同一份新空间事实。
+      if (url.startsWith(`${baseUrl}/api/v1/workspaces/${otherWorkspaceId}/projects?status=`))
         return response(200, { items: [project(projectC, "新空间项目")], next_cursor: null });
+      // 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1）。
+      if (url === `${root}/assist-sessions?`) return response(200, { items: [] });
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/projects"); unmount = mounted.unmount;
@@ -140,11 +157,13 @@ describe("live Workspace 项目与任务列表", () => {
         items: [task(taskC, "后续任务", projectB)], next_cursor: null });
       if (url === `${root}/tasks?inbox=true`) return response(200, {
         items: [task(taskB, "收件箱任务", null)], next_cursor: null });
+      // 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1）。
+      if (url === `${root}/assist-sessions?`) return response(200, { items: [] });
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/tasks"); unmount = mounted.unmount;
     // 全局与主区各读一次全部任务；只有主区按确切 Project 单读标题。
-    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`,
+    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?`,
       `${root}/tasks?scope=all`, `${root}/projects/${projectA}`]);
     expect(mounted.wrapper.get('[data-testid="tasks-live-count"]').text())
       .toContain("已加载 2 项 · 当前筛选显示 2 项 · 仍有后续页");
@@ -169,7 +188,7 @@ describe("live Workspace 项目与任务列表", () => {
       .toContain("已加载 3 项 · 当前筛选显示 1 项 · 已到列表末页");
     await mounted.wrapper.get('[data-testid="tasks-tab-inbox"]').trigger("click");
     await flush(30);
-    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`,
+    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?`,
       `${root}/tasks?scope=all`, `${root}/projects/${projectA}`,
       `${root}/tasks?scope=all&cursor=t%2B2`, `${root}/projects/${projectB}`, `${root}/tasks?inbox=true`]);
     expect(mounted.wrapper.find(`[data-testid="task-row-${taskA}"]`).exists()).toBe(false);
@@ -189,6 +208,8 @@ describe("live Workspace 项目与任务列表", () => {
       if (url === `${root}/tasks?scope=all`) return authorized
         ? response(200, { items: [task(taskA, "旧任务", projectA)], next_cursor: null })
         : response(403, { code: "FORBIDDEN", detail: "任务列表不可读" });
+      // 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1）。
+      if (url === `${root}/assist-sessions?`) return response(200, { items: [] });
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/tasks"); unmount = mounted.unmount;
@@ -216,6 +237,8 @@ describe("live Workspace 项目与任务列表", () => {
         ? response(200, { items: [], next_cursor: null }) : allPending;
       if (url === `${root}/tasks?inbox=true`) return response(200, {
         items: [task(taskB, "当前收件箱任务", null)], next_cursor: null });
+      // 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1）。
+      if (url === `${root}/assist-sessions?`) return response(200, { items: [] });
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/tasks"); unmount = mounted.unmount;

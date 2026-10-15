@@ -177,8 +177,12 @@ export default function ContinuationPointPanel({ client, projectId, captureBlock
     <p className="helper-text">接续点由你显式保存：它记录当时的 Project State 版本、未决任务与当前选用成果版本，不复制正文，也不会因为打开本页而改变当前事实。保存不停止正在执行的 Run。</p>
     {loading && <p role="status">正在读取已保存的接续点…</p>}
     {!factsReadable && <p className="helper-text">项目事实尚未读取确认，已隐藏接续点及对比。草稿与原命令回执仍保留。</p>}
-    {factsReadable && !loading && points.length === 0 && pending === null &&
+    {/* 读取失败不是「还没有保存过」：接续点为空既可能真的没保存过，也可能是这次没读到。
+        缺 error 判定会把读取失败说成没有保存过，而 :179 已有正确的 factsReadable 分支。 */}
+    {factsReadable && !loading && error === null && points.length === 0 && pending === null &&
       <p className="helper-text">还没有保存过接续点；本页不会用“当前事实”冒充“上次看到的样子”。</p>}
+    {factsReadable && !loading && error !== null && points.length === 0 && pending === null &&
+      <p className="helper-text" role="status">接续点没有读到，请查看错误并重试；这不代表当前确实没有保存过接续点。</p>}
     {factsReadable && points.length > 0 && <ul className="run-list">{points.map((point) => <li key={point.id}>
       <button className="inline-link" type="button" data-testid="continuation-open"
         disabled={busy || loading || comparisonBusy}

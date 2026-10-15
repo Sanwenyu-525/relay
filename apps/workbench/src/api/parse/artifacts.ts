@@ -87,6 +87,10 @@ export function impactCandidateGroupFrom(value: unknown): RelayImpactCandidateGr
       staleCandidates: integer(summary, "stale_candidates", "impact group summary"),
       unavailable: integer(summary, "unavailable", "impact group summary") },
     unanalysedScope: stringArray(row, "unanalysed_scope", "impact candidate group"),
+    dependencies: (row.dependencies === undefined ? [] : array(row, "dependencies", "impact candidate group")).map(value => {
+      const d = object(value, "impact dependency");
+      return { targetVersionId: string(d, "target_version_id", "impact dependency"), dependsOnTargetVersionId: string(d, "depends_on_target_version_id", "impact dependency") };
+    }),
     combinationCheckIds: array(row, "combination_check_ids", "impact candidate group")
       .map((value) => {
         if (typeof value !== "string") throw new Error("组合检查标识无效。");

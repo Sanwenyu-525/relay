@@ -289,3 +289,38 @@ it("延迟结果属于原资源，切页不派发，切换项目后旧结果不�
     expect(view.wrapper.find('[data-testid="git-read-pending"]').exists()).toBe(false);
   } finally { view.unmount(); }
 });
+
+it("只提供状态与差异只读入口，不含提交/推送/检出/重置/清理或自动解决冲突", async () => {
+  const context = setup(); const view = await open(context);
+  try {
+    const labels = Array.from(view.wrapper.element?.querySelectorAll("button") ?? [])
+      .map((button) => button.textContent ?? "");
+    for (const forbidden of ["提交", "推送", "检出", "重置", "清理", "合并", "解决冲突", "回滚", "暂存"]) {
+      expect(labels.some((label) => label.includes(forbidden))).toBe(false);
+    }
+    expect(labels).toContain("读取状态");
+    expect(labels).toContain("读取差异");
+  } finally { view.unmount(); }
+});
+
+it("含空格的相对路径不被本地拒绝，按原样派发差异读取", async () => {
+  const context = setup(); const view = await open(context);
+  try {
+    await view.wrapper.get('[data-testid="git-read-path"]').setValue("src/my file.ts");
+    expect(view.wrapper.get('[data-testid="git-read-diff"]').attributes("disabled")).toBeUndefined();
+    await view.wrapper.get('[data-testid="git-read-diff"]').trigger("click"); await flush();
+    expect(context.read.mock.calls[0]?.[0]).toMatchObject({ actionType: "GIT_DIFF", relativePath: "src/my file.ts" });
+  } finally { view.unmount(); }
+});
+
+it("受管目录在窗口打开后发生变化时如实反馈，不静默改读新根", async () => {
+  const context = setup(); context.read.mockRejectedValue(problem("GATEWAY_RESOURCE_ROOT_CHANGED"));
+  const view = await open(context);
+  try {
+    await view.wrapper.get('[data-testid="git-read-status"]').trigger("click"); await flush();
+    const error = view.wrapper.get('[data-testid="git-read-error"]').text();
+    expect(error).toContain("GATEWAY_RESOURCE_ROOT_CHANGED");
+    expect(error).toContain("目录发生变化");
+    expect(view.wrapper.find('[data-testid="git-status-clean"]').exists()).toBe(false);
+  } finally { view.unmount(); }
+});

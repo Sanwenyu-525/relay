@@ -46,6 +46,61 @@ function activate(): void {
 }
 
 describe("P07 Review Inbox", () => {
+  it("0 条右栏说明没有可选对象，类型筛选为空仍保留已选请求详情", async () => {
+    activate();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `${reviewUrl}?status=OPEN`) return response(200, { items: [] });
+      throw new Error(`unexpected ${url}`);
+    }));
+    const empty = await mountWorkbench("/reviews"); unmount = empty.unmount; await flush();
+    const emptyDetail = empty.wrapper.get('[data-testid="review-detail-empty-state"]');
+    expect(emptyDetail.text()).toContain("当前没有可选择的待审请求");
+    expect(emptyDetail.text()).not.toContain("选择一条");
+    expect(empty.wrapper.text()).not.toContain("整个项目已完成");
+
+    empty.unmount(); unmount = null;
+    activate();
+    const item = review();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `${reviewUrl}?status=OPEN`) return response(200, { items: [item] });
+      if (url === `${reviewUrl}/${reviewId}`) return response(200, item);
+      if (url.endsWith("/artifacts")) return response(200, { items: [], current_accepted_version_ids: [] });
+      throw new Error(`unexpected ${url}`);
+    }));
+    const filtered = await mountWorkbench("/reviews?kind=ACTION_APPROVAL"); unmount = filtered.unmount; await flush();
+    expect(filtered.wrapper.get(".review-list").text()).toContain("当前类型没有待处理请求");
+    expect(filtered.wrapper.get('[aria-label="所选待审请求详情"]').text()).toContain("请核对产物中的结论");
+    expect(filtered.wrapper.find('[data-testid="review-detail-empty-state"]').exists()).toBe(false);
+  });
+
+  it("待处理右栏区分加载、读取失败与空列表，不把失败显示成成功空态", async () => {
+    activate();
+    let release: ((value: Response) => void) | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `${reviewUrl}?status=OPEN`) return new Promise<Response>((resolve) => { release = resolve; });
+      throw new Error(`unexpected ${url}`);
+    }));
+    const loading = await mountWorkbench("/reviews"); unmount = loading.unmount;
+    expect(loading.wrapper.get('[data-testid="review-detail-empty-state"]').text()).toContain("正在读取待审请求");
+    release!(response(200, { items: [] })); await flush();
+    expect(loading.wrapper.get('[data-testid="review-detail-empty-state"]').text()).toContain("当前没有可选择的待审请求");
+
+    loading.unmount(); unmount = null;
+    activate();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === `${reviewUrl}?status=OPEN`) return response(403, { code: "FORBIDDEN", detail: "请求不可读取" });
+      throw new Error(`unexpected ${String(input)}`);
+    }));
+    const failed = await mountWorkbench("/reviews"); unmount = failed.unmount; await flush();
+    expect(failed.wrapper.get('[data-testid="review-read-error"]').text()).toContain("请求不可读取");
+    const failedDetail = failed.wrapper.get('[data-testid="review-detail-empty-state"]');
+    expect(failedDetail.text()).toContain("读取失败");
+    expect(failedDetail.text()).not.toContain("当前没有可选择的待审请求");
+  });
+
   it("读取请求旁的确切历史正文，不以最新版替代，也不提交决定", async () => {
     activate(); const item = review(); const reads: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -517,5 +572,36 @@ describe("P07 Review Inbox", () => {
     expect(mounted.wrapper.text()).toContain("动作内容或目标已经变化");
     expect(mounted.wrapper.text()).not.toContain("决定已保存");
     expect(reloads).toBeGreaterThan(initialReloads);
+  });
+
+  it("状态语气分层：过期与待判断用警示色、已处理保持中性；有效期用同页时间格式", async () => {
+    activate();
+    const item = { ...review(), expires_at: "2030-01-01T00:00:00.000Z" };
+    const expired = { ...review(), id: "77777777-7777-4777-8777-777777777777", expires_at: "2020-01-01T00:00:00.000Z" };
+    const decided = { ...review(), id: "88888888-8888-4888-8888-888888888888", status: "DECIDED", revision: "2" };
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const url = String(input);
+      if (url === `${reviewUrl}?status=OPEN`) return response(200, { items: [item, expired, decided] });
+      if (url === `${reviewUrl}/${reviewId}`) return response(200, item);
+      if (url.endsWith("/artifacts")) return response(200, { items: [], current_accepted_version_ids: [] });
+      if (url.endsWith("/content")) return { ok: true, status: 200, text: async () => "正文" } as Response;
+      throw new Error(`unexpected request: ${url}`);
+    }));
+    const mounted = await mountWorkbench(`/reviews?id=${reviewId}`); unmount = mounted.unmount;
+    await flush(); await flush();
+    // 有效期与请求时间使用同页格式化函数，不再原始 ISO 直出。
+    const expiresAt = mounted.wrapper.get('[data-testid="review-expires-at"]');
+    expect(expiresAt.text()).toMatch(/有效期至：\d{2}[/-]\d{2} \d{2}:\d{2}$/u);
+    expect(expiresAt.text()).not.toContain("T");
+    expect(expiresAt.text()).not.toContain("2030");
+    // 过期是需注意事实：与待判断同用 warning；已处理保持中性，不用警示或成功色。
+    const chips = mounted.wrapper.findAll(".review-list-item .status-chip");
+    expect(chips.map((chip) => chip.text())).toEqual(["待判断", "已过期", "已处理"]);
+    expect(chips[0]!.attributes("class")).toContain("status-chip--warning");
+    expect(chips[1]!.attributes("class")).toContain("status-chip--warning");
+    expect(chips[2]!.attributes("class")).toContain("status-chip--neutral");
+    const detailChip = mounted.wrapper.get(".review-detail-heading .status-chip");
+    expect(detailChip.text()).toBe("待判断");
+    expect(detailChip.attributes("class")).toContain("status-chip--warning");
   });
 });

@@ -112,6 +112,12 @@ export default function CompletionRecordView() {
           <div><dt>完成凭据 ID</dt><dd>{evidence.completionId}</dd></div>
           <div><dt>关联任务</dt><dd><Link className="inline-link" to={`/tasks/${evidence.taskId}`}>{evidence.taskId}</Link></dd></div>
         </dl></details></section>}
+      {/* 右栏不能整段沉默：未连接、读取中与读取失败都要说明当前依据不可用及其原因，
+          而不是留一块空白让人以为没有完成记录（对照 ReviewsView 的四分支处理）。 */}
+      {!evidence && <section className="completion-section" data-testid="completion-rail-unavailable">
+        <p className="helper-text" role="status">{client === null ? "当前是示例数据，没有真实完成凭据；右栏的完成依据与版本入口不可用。"
+          : error !== null ? "完成凭据读取失败，右栏的完成依据与版本入口暂时不可用；请按上方错误重读。"
+            : "正在读取完成凭据，右栏的完成依据与版本入口暂不可用。"}</p></section>}
     </div></ResponsiveRail>
   </div></section>;
 }

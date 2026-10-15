@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act } from "react";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { flush, mountWorkbench } from "./mountApp";
+import { DomWrapper, dialogText, flush, mountWorkbench, openWorkingDirectory } from "./mountApp";
 
 /**
  * 协作页聊天框的会话模式单选框与人设助手（工作台 §25、ADR-018、测试计划 §23.2）。
@@ -19,6 +20,8 @@ const agentSessionId = "33333333-3333-4333-8333-333333333333";
 const assistantSessionId = "44444444-4444-4444-8444-444444444444";
 const assistantProfileId = "55555555-5555-4555-8555-555555555555";
 const createdProfileId = "99999999-9999-4999-8999-999999999999";
+const createdSessionId = "77777777-7777-4777-8777-777777777777";
+const learningSessionId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
 
 function json(body: unknown, status = 200): Response {
@@ -37,6 +40,9 @@ function assistantSession() {
     assistant_profile_revision: "3",
     assistant_role: { name: "审读", role_description: "只读复核", tone: "简短", read_scope: {} },
     remember: true, updated_at: "2026-10-06T00:00:00Z" };
+}
+function learningSession() {
+  return { ...agentSession(), id: learningSessionId, title: "学习幂等性", conversation_mode: "LEARNING" };
 }
 function profile(extra: Record<string, unknown> = {}) {
   return { id: assistantProfileId, workspace_id: workspaceId, name: "审读",
@@ -61,12 +67,19 @@ function message(session: string) {
 interface Stub {
   sessions: unknown[];
   posts: { path: string; body: Record<string, unknown> }[];
+  profiles?: readonly unknown[];
+  profileList?: () => Response | Promise<Response>;
+  loseCreateResponse?: boolean;
+  loseFirstMessageResponse?: boolean;
+  loseChatResponse?: boolean;
   /** 哪些会话有一条已完成的助手消息；人设标签要落在消息行上才有东西可断言。 */
   withMessages?: readonly string[];
+  withSources?: boolean;
   inflightSessionId?: string;
 }
 
 function stub(options: Stub) {
+  let chatReceipt: Record<string, unknown> | null = null;
   return vi.fn(async (input: string, init?: RequestInit) => {
     const path = new URL(String(input)).pathname;
     const method = init?.method ?? "GET";
@@ -96,12 +109,54 @@ function stub(options: Stub) {
           name: body.name, role_description: body.role_description, tone: body.tone ?? null,
           read_scope: body.read_scope ?? {}, status: "ACTIVE", revision: "1" } }, 201);
     }
-    if (path === `${prefix}/assistant-profiles`) return json({ items: [profile()] });
+    if (path === `${prefix}/assistant-profiles`) return options.profileList?.()
+      ?? json({ items: options.profiles ?? [profile()] });
+    if (path === `${prefix}/assist-sessions` && method === "POST") {
+      const body = options.posts.at(-1)?.body ?? {};
+      const assistant = body.conversation_mode === "ASSISTANT";
+      const created = { ...(assistant ? assistantSession() : agentSession()), id: createdSessionId,
+        project_id: body.project_id ?? null, task_id: body.task_id ?? null, title: String(body.title ?? "新讨论"),
+        conversation_mode: body.conversation_mode ?? "AGENT",
+        assistant_profile_id: assistant ? body.assistant_profile_id ?? null : null,
+        assistant_profile_revision: assistant ? "3" : null,
+        assistant_role: assistant ? assistantSession().assistant_role : null };
+      if (options.loseCreateResponse) { options.loseCreateResponse = false; throw new TypeError("response lost after commit"); }
+      options.sessions.push(created);
+      return json({ command_id: body.command_id, committed_at: "2026-10-07T00:00:00Z",
+        result: { ...created, session_id: createdSessionId }, links: { resource: "" } }, 201);
+    }
     if (path === `${prefix}/assist-sessions`) return json({ items: options.sessions });
+    const control = path.match(/\/assist-sessions\/([0-9a-f-]+)\/chat-commands$/u);
+    if (control && method === "POST") {
+      const body = options.posts.at(-1)!.body;
+      const source = options.sessions.find((item) => (item as { id: string }).id === control[1]) as ReturnType<typeof agentSession>;
+      const created = { ...source, id: createdSessionId };
+      options.sessions.push(created);
+      chatReceipt = { command_id: body.command_id, command_type: "ExecuteChatCommand",
+        committed_at: "2026-10-13T00:00:00Z", links: { resource: "" }, result: {
+          ...created, kind: "NEW_SESSION", system: body.text === "/new" ? "new" : "clear",
+          source_session_id: source.id, session_id: created.id } };
+      if (options.loseChatResponse) { options.loseChatResponse = false; throw new TypeError("chat response lost"); }
+      return json(chatReceipt);
+    }
+    if (chatReceipt !== null && path.endsWith(`/commands/${String(chatReceipt.command_id)}`)) return json(chatReceipt);
+    if (path === `${prefix}/learning-records`) return json({ epoch: "0", cleared_at: null, concepts: [] });
+    if (path.endsWith("/state") && path.includes("/learning-sessions/")) return json({
+      session_id: path.split("/").at(-2), records_enabled: true, revision: "0", rounds: [] });
+    if (path.endsWith("/continuation") && path.includes("/learning-sessions/")) return json({
+      session_id: path.split("/").at(-2), goal: "学习幂等性", last_observed_at: null, topics: [], open_items: [] });
+    const sessionDetail = path.match(/^\/api\/v1\/workspaces\/[0-9a-f-]+\/assist-sessions\/([0-9a-f-]+)$/u);
+    if (sessionDetail) return json(options.sessions.find((item) =>
+      (item as { id?: string }).id === sessionDetail[1]) ?? { code: "NOT_FOUND", detail: "会话不存在" },
+      options.sessions.some((item) => (item as { id?: string }).id === sessionDetail[1]) ? 200 : 404);
     const messages = path.match(/^\/api\/v1\/workspaces\/[0-9a-f-]+\/assist-sessions\/([0-9a-f-]+)\/messages$/u);
     if (messages) {
       if (method === "POST") {
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        if (options.loseFirstMessageResponse) {
+          options.loseFirstMessageResponse = false;
+          throw new TypeError("response lost after commit");
+        }
         return json({ command_id: body.command_id, committed_at: "2026-10-06T00:00:00Z",
           result: { session_id: messages[1], user_message_id: "77777777-7777-4777-8777-777777777777",
             assistant_message_id: "88888888-8888-4888-8888-888888888888" } }, 202);
@@ -111,10 +166,19 @@ function stub(options: Stub) {
           status: "RUNNING", content: null, cancel_requested: false }] });
       }
       return json({ items: options.withMessages?.includes(messages[1] ?? "") === true
-        ? [message(messages[1]!)] : [] });
+        ? [{ ...message(messages[1]!), sources: options.withSources ? [{ kind: "KNOWLEDGE", root_id: assistantProfileId,
+          version: "1", status: "FROZEN" }] : [] }] : [] });
     }
     if (path.startsWith(`${prefix}/conversation-execution-requests`)) return json({ items: [] });
     if (path === `${prefix}/assist-proposals`) return json({ items: [] });
+    if (path === `${prefix}/chat-commands`) return json({ items: [
+      { kind: "METHOD", name: "review", aliases: ["代码审查", "审查"], title: "代码审查",
+        summary: "阅读当前改动，不自动修复。", usage: "/review [目标]", method_id: "code-review" },
+      { kind: "SYSTEM", name: "clear", aliases: ["清空"], title: "/clear",
+        summary: "新建空会话，保留项目与目录。", usage: "/clear", system_id: "clear" },
+      { kind: "SYSTEM", name: "model", aliases: ["模型"], title: "/model <模型名>",
+        summary: "选择模型。", usage: "/model <模型名>", system_id: "model" }
+    ] });
     if (path === `${prefix}/skill-definitions`) return json({ items: [] });
     if (path === `${prefix}/model-port`) return json({ provider: "fake", configured: false,
       model: null, base_url: null, max_call_tokens: null });
@@ -137,10 +201,7 @@ async function openAgent(options: Stub) {
   activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
   vi.stubGlobal("fetch", stub(options));
   const view = await mountWorkbench("/agent");
-  await view.wrapper.get('[data-testid="folder-manual-root"]').setValue("D:/tmp/probe");
-  await flush();
-  await view.wrapper.get('[data-testid="folder-open-manual"]').trigger("click");
-  await flush(80);
+  await openWorkingDirectory("D:/tmp/probe");
   return view;
 }
 
@@ -161,12 +222,171 @@ beforeEach(() => { window.localStorage.clear(); });
 afterEach(() => { resetRelayConnectionForTest(); vi.unstubAllGlobals(); window.localStorage.clear(); });
 
 describe("会话模式单选框", () => {
-  it("两档都渲染，普通档标签不承诺尚未实现的子 Agent 派发", async () => {
+  it("首条输入的命令菜单按中文检索，选择只改草稿且保留焦点", async () => {
+    const options: Stub = { sessions: [], posts: [] };
+    const view = await openAgent(options);
+    try {
+      const input = view.wrapper.get('[data-testid="assist-first-draft"]');
+      await act(async () => (input.element as HTMLTextAreaElement).focus());
+      await input.setValue("/审查");
+      await flush();
+      await view.wrapper.get('[data-testid="chat-command-review"]').trigger("click");
+      expect((input.element as HTMLTextAreaElement).value).toBe("/review ");
+      expect(document.activeElement).toBe(input.element);
+      expect(view.wrapper.find('[data-testid="chat-command-menu"]').exists()).toBe(false);
+      expect(options.posts.filter((p) => !p.path.endsWith("/working-directories/open"))).toHaveLength(0);
+    } finally { view.unmount(); }
+  });
+
+  it("已有会话从菜单选 clear 后仍需发送，沿原会话命令创建", async () => {
+    const options: Stub = { sessions: [agentSession()], posts: [] };
+    const view = await openAgent(options);
+    try {
+      const input = view.wrapper.get('[data-testid="assist-draft"]');
+      await act(async () => (input.element as HTMLTextAreaElement).focus());
+      await input.setValue("/清空");
+      await flush();
+      await input.trigger("keydown", { key: "Enter" });
+      expect((input.element as HTMLTextAreaElement).value).toBe("/clear ");
+      expect(options.posts.filter((p) => p.path.endsWith("/chat-commands"))).toHaveLength(0);
+      await view.wrapper.get('[data-testid="assist-send"]').trigger("click");
+      await flush(100);
+      expect(options.posts.filter((p) => p.path.endsWith("/chat-commands"))).toHaveLength(1);
+      expect(options.posts.some((p) => p.path.endsWith("/messages"))).toBe(false);
+    } finally { view.unmount(); }
+  });
+
+  it.each([
+    { mode: "AGENT", command: "/clear", source: agentSession() },
+    { mode: "ASSISTANT", command: "/new", source: assistantSession() },
+    { mode: "LEARNING", command: "/清空", source: learningSession() }
+  ])("$mode 的 $command 建空会话并保留身份与历史", async ({ mode, command, source }) => {
+    const options: Stub = { sessions: [source], posts: [], withMessages: [source.id] };
+    const view = await openAgent(options);
+    try {
+      if (mode !== "AGENT") {
+        await view.wrapper.get(`[data-testid="assist-conversation-mode-${mode.toLowerCase()}"]`).setValue(true);
+        await flush(80);
+      }
+      await view.wrapper.get('[data-testid="assist-draft"]').setValue(command);
+      await view.wrapper.get('[data-testid="assist-composer"] form').trigger("submit");
+      await flush(100);
+      expect(options.posts.filter((p) => p.path.endsWith("/chat-commands"))).toHaveLength(1);
+      expect(options.posts.some((p) => p.path.endsWith("/messages") || p.path.endsWith("/interpret"))).toBe(false);
+      expect(options.sessions).toHaveLength(2);
+      expect(options.sessions[1]).toMatchObject({ id: createdSessionId, conversation_mode: mode,
+        project_id: projectId, assistant_profile_id: source.assistant_profile_id });
+      expect(view.wrapper.get('[data-testid="assist-session"]').text()).toContain(createdSessionId);
+      expect(view.wrapper.find('[data-role="ASSISTANT"]').exists()).toBe(false);
+      const labels = view.wrapper.get('[data-testid="assist-session-select"]').findAll("option")
+        .map((option) => option.text()).filter((label) => label.includes(source.title));
+      expect(labels).toHaveLength(2);
+      expect(labels.every((label) => label.includes("更新"))).toBe(true);
+      expect(labels.filter((label) => label.includes("当前"))).toHaveLength(1);
+    } finally { view.unmount(); }
+  });
+  it("新会话响应丢失后按原回执接续，不重复创建", async () => {
+    const options: Stub = { sessions: [agentSession()], posts: [], loseChatResponse: true };
+    const view = await openAgent(options);
+    try {
+      await view.wrapper.get('[data-testid="assist-draft"]').setValue("/clear");
+      await view.wrapper.get('[data-testid="assist-composer"] form').trigger("submit");
+      await flush(80);
+      expect(view.wrapper.find(".assist-pending").exists()).toBe(true);
+      expect((document.querySelector('[data-testid="assist-draft"]') as HTMLTextAreaElement).value).toBe("/clear");
+      await view.wrapper.findAll("button").find((item) => item.text() === "查询原命令回执")!.trigger("click");
+      await flush(100);
+      expect(view.wrapper.get('[data-testid="assist-session"]').text()).toContain(createdSessionId);
+      expect(options.posts.filter((p) => p.path.endsWith("/chat-commands"))).toHaveLength(1);
+      expect(options.sessions).toHaveLength(2);
+    } finally { view.unmount(); }
+  });
+  it("撤回命令提示具体调整回执，不作为模型消息或猜测撤回目标", async () => {
+    const options: Stub = { sessions: [agentSession()], posts: [] };
+    const view = await openAgent(options);
+    try {
+      await view.wrapper.get('[data-testid="assist-draft"]').setValue("/undo");
+      await view.wrapper.get('[data-testid="assist-composer"] form').trigger("submit");
+      await flush(60);
+      expect(view.wrapper.get('[data-testid="assist-receipt-notice"]').text()).toContain("撤回本次调整");
+      expect(options.posts.filter((p) => !p.path.endsWith("/working-directories/open"))).toHaveLength(0);
+    } finally { view.unmount(); }
+  });
+  it("明确转执行新建普通身份，带目标和方案，不改原学习会话", async () => {
+    const options: Stub = { sessions: [agentSession(), learningSession()], posts: [], withMessages: [learningSessionId], withSources: true };
+    const view = await openAgent(options);
+    await view.wrapper.get('[data-testid="assist-conversation-mode-learning"]').setValue(true);
+    await flush(80);
+    const panel = view.wrapper.get('[data-testid="learning-records-panel"]');
+    await panel.findAll("summary").find((item) => item.text() === "转入普通执行会话")!.trigger("click");
+    await panel.findAll("textarea")[0]!.setValue("按这个方案实现");
+    await panel.findAll("button").find((item) => item.text() === "转入执行")!.trigger("click");
+    await flush(120);
+    const creates = options.posts.filter((p) => p.path.endsWith("/assist-sessions"));
+    expect(creates).toHaveLength(1);
+    expect(creates[0]!.body).toMatchObject({ conversation_mode: "AGENT", project_id: projectId });
+    const send = options.posts.find((p) => p.path.endsWith("/messages"));
+    expect(send?.body.content).toContain("按这个方案实现");
+    expect(send?.body.content).toContain(learningSessionId);
+    expect(send?.body.content).toContain("学习幂等性");
+    expect(send?.body.content).toContain(message(learningSessionId).content);
+    expect(send?.body.source_refs).toEqual([{ kind: "KNOWLEDGE", root_id: assistantProfileId, version: "1" }]);
+    expect((options.sessions.find((s) => (s as { id: string }).id === learningSessionId) as { conversation_mode: string }).conversation_mode).toBe("LEARNING");
+    view.unmount();
+  });
+  it("学习档复用已有身份，发送不带执行意图，不触发执行或状态维护解释", async () => {
+    const options: Stub = { sessions: [agentSession(), learningSession()], posts: [] };
+    const view = await openAgent(options);
+    await view.wrapper.get('[data-testid="assist-conversation-mode-learning"]').setValue(true);
+    await flush(80);
+    expect(view.wrapper.get('[data-testid="learning-readonly-note"]').text()).toContain("对项目只读");
+    expect(view.wrapper.find('[data-testid="assist-intent"]').exists()).toBe(false);
+    expect(view.wrapper.find('[data-testid="learning-records-panel"]').exists()).toBe(true);
+    await view.wrapper.get('[data-testid="learning-message-no-record"]').setValue(true);
+    await view.wrapper.get('[data-testid="assist-draft"]').setValue("解释重复提交");
+    await view.wrapper.get('[data-testid="assist-send"]').trigger("click");
+    // 图标按钮关联表单，在 jsdom 中显式提交与浏览器相同的表单。
+    await view.wrapper.get('[data-testid="assist-composer"] form').trigger("submit");
+    await flush(100);
+    const sends = options.posts.filter((p) => p.path.endsWith("/messages"));
+    expect(sends).toHaveLength(1);
+    expect(sends[0]!.path).toContain(learningSessionId);
+    expect(sends[0]!.body).toMatchObject({ content: "解释重复提交", record_learning: false });
+    expect(sends[0]!.body).not.toHaveProperty("intent");
+    expect(sends[0]!.body).not.toHaveProperty("skill_ref");
+    expect(options.posts.filter((p) => p.path.includes("execution") || p.path.includes("maintenance") || p.path.endsWith("/assist-sessions"))).toHaveLength(0);
+    view.unmount();
+  });
+
+  it("自由学习不要求目录；首条响应丢失后原命令重试仍保留学习身份与不记录载荷", async () => {
+    const options: Stub = { sessions: [], posts: [], loseFirstMessageResponse: true };
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    vi.stubGlobal("fetch", stub(options));
+    const view = await mountWorkbench("/agent");
+    await view.wrapper.get('[data-testid="assist-conversation-mode-learning"]').setValue(true);
+    await view.wrapper.get('[data-testid="learning-message-no-record"]').setValue(true);
+    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("带我理解幂等性");
+    await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit");
+    await flush(120);
+    const create = options.posts.find((p) => p.path.endsWith("/assist-sessions"));
+    expect(create?.body).toMatchObject({ conversation_mode: "LEARNING", project_id: null, task_id: null });
+    expect(view.wrapper.find('[data-testid="assist-first-retry"]').exists()).toBe(true);
+    await view.wrapper.get('[data-testid="assist-first-retry"]').trigger("click");
+    await flush(100);
+    const sends = options.posts.filter((p) => p.path.endsWith("/messages"));
+    expect(sends).toHaveLength(2);
+    expect(sends[0]!.body).toEqual(sends[1]!.body);
+    expect(sends[0]!.body.record_learning).toBe(false);
+    expect(sends[0]!.body).not.toHaveProperty("intent");
+    expect(options.posts.filter((p) => p.path.endsWith("/assist-sessions"))).toHaveLength(1);
+    view.unmount();
+  });
+  it("三档都渲染，普通档标签不承诺尚未实现的子 Agent 派发", async () => {
     const options: Stub = { sessions: [agentSession()], posts: [] };
     const view = await openAgent(options);
     const radios = view.wrapper.findAll('[data-testid="conversation-mode"] input[type="radio"]')
       .map((item) => item.attributes("value"));
-    expect(radios).toEqual(["AGENT", "ASSISTANT"]);
+    expect(radios).toEqual(["AGENT", "ASSISTANT", "LEARNING"]);
     // ADR-017 的子 Agent 至今零代码，标签不能预先承诺。
     expect(view.wrapper.get('[data-testid="conversation-mode"]').text()).not.toContain("子 Agent");
     expect(view.wrapper.get('[data-testid="assist-conversation-mode-agent"]').attributes("checked")).toBe("");
@@ -203,6 +423,183 @@ describe("会话模式单选框", () => {
     expect(view.wrapper.find('[data-testid="assist-skill"]').exists()).toBe(false);
     expect(view.wrapper.get('[data-testid="assist-readonly-note"]').text()).toContain("只读");
     view.unmount();
+  });
+
+  it("首条助手档隐藏普通讨论入口；没有可用身份时按钮、Enter 与 submit 都被拦截", async () => {
+    const options: Stub = { sessions: [], posts: [], profiles: [] };
+    const view = await openAgent(options);
+    await flipToAssistant(view);
+    try {
+      expect(view.wrapper.get('[data-testid="assist-first-message"]').find("details.agent-chat-options").exists()).toBe(false);
+      const draft = view.wrapper.get('[data-testid="assist-first-draft"]');
+      await draft.setValue("没有助手时不得创建会话");
+      expect(view.wrapper.get('[data-testid="assist-first-send"]').attributes("disabled")).toBe("");
+      expect(view.wrapper.get('[data-testid="assist-first-blocked"]').text()).toContain("先新建一个");
+      await draft.trigger("keydown", { key: "Enter" });
+      await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit");
+      await flush(80);
+      expect(options.posts.filter((post) => post.path === `${prefix}/assist-sessions` ||
+        post.path.endsWith("/messages"))).toHaveLength(0);
+    } finally { view.unmount(); }
+  });
+
+  it("助手清单读取失败时保留错误并提供重读，不能建首条会话", async () => {
+    const options: Stub = { sessions: [], posts: [],
+      profileList: () => json({ code: "SERVICE_UNAVAILABLE", detail: "暂不可读" }, 503) };
+    const view = await openAgent(options);
+    await flipToAssistant(view);
+    try {
+      const draft = view.wrapper.get('[data-testid="assist-first-draft"]');
+      await draft.setValue("读取失败时不得创建会话");
+      expect(view.wrapper.get('[data-testid="assist-assistant-list-error"]').text()).toContain("暂不可读");
+      expect(view.wrapper.get('[data-testid="assist-assistant-list-reload"]').exists()).toBe(true);
+      expect(view.wrapper.get('[data-testid="assist-first-send"]').attributes("disabled")).toBe("");
+      await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit");
+      await flush(80);
+      expect(options.posts.filter((post) => post.path === `${prefix}/assist-sessions` ||
+        post.path.endsWith("/messages"))).toHaveLength(0);
+    } finally { view.unmount(); }
+  });
+
+  it("助手清单仍在加载时不能通过 Enter 新建首条会话", async () => {
+    let finishProfiles!: (response: Response) => void;
+    const profileResponse = new Promise<Response>((resolve) => { finishProfiles = resolve; });
+    const options: Stub = { sessions: [], posts: [], profileList: () => profileResponse };
+    const view = await openAgent(options);
+    await flipToAssistant(view);
+    try {
+      const draft = view.wrapper.get('[data-testid="assist-first-draft"]');
+      await draft.setValue("加载中不得创建会话");
+      expect(view.wrapper.get('[data-testid="assist-assistant-list-loading"]').exists()).toBe(true);
+      expect(view.wrapper.get('[data-testid="assist-first-send"]').attributes("disabled")).toBe("");
+      await draft.trigger("keydown", { key: "Enter" });
+      await flush(80);
+      expect(options.posts.filter((post) => post.path === `${prefix}/assist-sessions` ||
+        post.path.endsWith("/messages"))).toHaveLength(0);
+    } finally {
+      finishProfiles(json({ items: [profile()] }));
+      await flush();
+      view.unmount();
+    }
+  });
+
+  it("首条助手消息使用有效助手身份并省略普通 intent 与 Skill 字段", async () => {
+    const options: Stub = { sessions: [], posts: [] };
+    const view = await openAgent(options);
+    await flipToAssistant(view);
+    try {
+      await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("只读复核这份改动");
+      await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit");
+      await flush(120);
+      const create = options.posts.find((post) => post.path === `${prefix}/assist-sessions`);
+      expect(create?.body).toMatchObject({ conversation_mode: "ASSISTANT", assistant_profile_id: assistantProfileId });
+      const messagePost = options.posts.find((post) => post.path.endsWith("/messages"));
+      expect(messagePost?.body).toMatchObject({ content: "只读复核这份改动" });
+      expect(messagePost?.body).not.toHaveProperty("intent");
+      expect(messagePost?.body).not.toHaveProperty("skill_ref");
+      expect(options.posts.some((post) => post.path.endsWith("/execution-requests"))).toBe(false);
+    } finally { view.unmount(); }
+  });
+
+  it("首条普通档保留普通讨论入口，切档保留草稿且仍按普通消息提交", async () => {
+    const options: Stub = { sessions: [], posts: [] };
+    const view = await openAgent(options);
+    try {
+      expect(view.wrapper.get('[data-testid="assist-first-message"]').find("details.agent-chat-options").exists()).toBe(true);
+      const draft = view.wrapper.get('[data-testid="assist-first-draft"]');
+      await draft.setValue("首条草稿切档后保留");
+      await flipToAssistant(view);
+      expect((draft.element as HTMLTextAreaElement).value).toBe("首条草稿切档后保留");
+      expect(view.wrapper.get('[data-testid="assist-first-message"]').find("details.agent-chat-options").exists()).toBe(false);
+      await view.wrapper.get('[data-testid="assist-conversation-mode-agent"]').setValue(true);
+      await flush(80);
+      expect((draft.element as HTMLTextAreaElement).value).toBe("首条草稿切档后保留");
+      expect(view.wrapper.get('[data-testid="assist-first-message"]').find("details.agent-chat-options").exists()).toBe(true);
+      await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit");
+      await flush(120);
+      const create = options.posts.find((post) => post.path === `${prefix}/assist-sessions`);
+      expect(create?.body).toMatchObject({ conversation_mode: "AGENT" });
+      const sent = options.posts.find((post) => post.path.endsWith("/messages"));
+      expect(sent?.body).toMatchObject({ content: "首条草稿切档后保留", intent: "DISCUSS" });
+    } finally { view.unmount(); }
+  });
+
+  it.each([
+    { label: "只剩已归档助手", profiles: [profile({ status: "ARCHIVED" })], invalidId: null,
+      reason: "当前没有可用助手" },
+    { label: "所选 ID 已不在可用清单", profiles: [profile()], invalidId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      reason: "所选助手已归档或不在当前可用清单中" }
+  ])("首条助手档在$label 时阻止所有新建入口", async ({ profiles, invalidId, reason }) => {
+    const options: Stub = { sessions: [], posts: [], profiles };
+    const view = await openAgent(options);
+    await flipToAssistant(view);
+    try {
+      if (invalidId !== null) await view.wrapper.get('[data-testid="assist-assistant-picker"]').setValue(invalidId);
+      const draft = view.wrapper.get('[data-testid="assist-first-draft"]');
+      await draft.setValue("无效助手身份不得发送");
+      expect(view.wrapper.get('[data-testid="assist-first-send"]').attributes("disabled")).toBe("");
+      expect(view.wrapper.get('[data-testid="assist-first-blocked"]').text()).toContain(reason);
+      if (profiles[0] && (profiles[0] as { status?: string }).status === "ARCHIVED") {
+        expect(view.wrapper.get('[data-testid="assist-assistant-list-empty"]').text()).toContain("重新读取助手清单");
+        expect(view.wrapper.get('[data-testid="assist-assistant-list-reload"]').exists()).toBe(true);
+      }
+      await draft.trigger("keydown", { key: "Enter" });
+      await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit");
+      await flush(80);
+      expect(options.posts.filter((post) => post.path === `${prefix}/assist-sessions` ||
+        post.path.endsWith("/messages"))).toHaveLength(0);
+    } finally { view.unmount(); }
+  });
+
+  it("建会话回执不确定时按原命令恢复助手身份，不随当前选择变化", async () => {
+    const options: Stub = { sessions: [], posts: [], profiles: [profile(), profile({
+      id: createdProfileId, name: "编辑", role_description: "从编辑角度复核" })], loseCreateResponse: true };
+    const view = await openAgent(options);
+    await flipToAssistant(view);
+    try {
+      await view.wrapper.get('[data-testid="assist-assistant-picker"]').setValue(assistantProfileId);
+      await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("原命令必须保留第一位助手");
+      await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit");
+      await flush(100);
+      const firstCreate = options.posts.find((post) => post.path === `${prefix}/assist-sessions`);
+      expect(firstCreate?.body.assistant_profile_id).toBe(assistantProfileId);
+      expect(view.wrapper.get('[data-testid="assist-first-create-retry"]').exists()).toBe(true);
+
+      await view.wrapper.get('[data-testid="assist-assistant-picker"]').setValue(createdProfileId);
+      await view.wrapper.get('[data-testid="assist-first-create-retry"]').trigger("click");
+      await flush(160);
+      const createPosts = options.posts.filter((post) => post.path === `${prefix}/assist-sessions`);
+      expect(createPosts).toHaveLength(2);
+      expect(createPosts[1]?.body).toEqual(firstCreate?.body);
+      const sent = options.posts.find((post) => post.path.endsWith("/messages"));
+      expect(sent?.body).toMatchObject({ content: "原命令必须保留第一位助手" });
+      expect(sent?.body).not.toHaveProperty("intent");
+      expect(sent?.body).not.toHaveProperty("skill_ref");
+    } finally { view.unmount(); }
+  });
+
+  it("首条助手消息响应丢失后重试保持原消息 ID 和无 intent 载荷", async () => {
+    const options: Stub = { sessions: [], posts: [], profiles: [profile(), profile({
+      id: createdProfileId, name: "编辑", role_description: "从编辑角度复核" })], loseFirstMessageResponse: true };
+    const view = await openAgent(options);
+    await flipToAssistant(view);
+    try {
+      await view.wrapper.get('[data-testid="assist-assistant-picker"]').setValue(assistantProfileId);
+      await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("重试不新增 intent");
+      await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit");
+      await flush(140);
+      const firstSend = options.posts.find((post) => post.path.endsWith("/messages"));
+      expect(firstSend?.body).toMatchObject({ content: "重试不新增 intent" });
+      expect(firstSend?.body).not.toHaveProperty("intent");
+      expect(view.wrapper.get('[data-testid="assist-first-retry"]').exists()).toBe(true);
+      await view.wrapper.get('[data-testid="assist-assistant-picker"]').setValue(createdProfileId);
+      await view.wrapper.get('[data-testid="assist-first-retry"]').trigger("click");
+      await flush(120);
+      const sends = options.posts.filter((post) => post.path.endsWith("/messages"));
+      expect(sends).toHaveLength(2);
+      expect(sends[1]?.body).toEqual(firstSend?.body);
+      expect(options.posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(1);
+    } finally { view.unmount(); }
   });
 
   it("助手档消息按冻结人设标注，不写「AI」", async () => {
@@ -263,6 +660,7 @@ describe("会话模式单选框", () => {
     const options: Stub = { sessions: [], posts: [] };
     const view = await openAgent(options);
     await flipToAssistant(view);
+    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("保存助手不能提交这条首条草稿");
     await view.wrapper.get('[data-testid="assist-assistant-create-toggle"]').trigger("click");
     await view.wrapper.get('[data-testid="assist-assistant-name"]').setValue("审读");
     await view.wrapper.get('[data-testid="assist-assistant-role"]').setValue("只读复核这份改动");
@@ -273,9 +671,46 @@ describe("会话模式单选框", () => {
     // 只读范围只能缩小受管根：提交的是受管根内相对路径，不是绝对路径。
     expect(created?.body).toMatchObject({ name: "审读", role_description: "只读复核这份改动",
       read_scope: { roots: ["src", "tests"] } });
+    expect(options.posts.filter((post) => post.path === `${prefix}/assist-sessions` ||
+      post.path.endsWith("/messages"))).toHaveLength(0);
     // 新建成功后直接选中它，否则用户会看到「助手已建但当前仍无身份」。
     expect(selectValue("assist-assistant-picker")).toBe(createdProfileId);
+    expect((view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement).value)
+      .toBe("保存助手不能提交这条首条草稿");
     view.unmount();
+  });
+
+  it("迟到的初次助手清单不能覆盖刚创建并选中的有效身份", async () => {
+    let finishProfiles!: (response: Response) => void;
+    const profileResponse = new Promise<Response>((resolve) => { finishProfiles = resolve; });
+    const options: Stub = { sessions: [], posts: [], profileList: () => profileResponse };
+    const view = await openAgent(options);
+    await flipToAssistant(view);
+    try {
+      expect(view.wrapper.get('[data-testid="assist-assistant-list-loading"]').exists()).toBe(true);
+      await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("使用刚创建的助手");
+      await view.wrapper.get('[data-testid="assist-assistant-create-toggle"]').trigger("click");
+      await view.wrapper.get('[data-testid="assist-assistant-name"]').setValue("新审读");
+      await view.wrapper.get('[data-testid="assist-assistant-role"]').setValue("只读复核");
+      await view.wrapper.get('[data-testid="assist-assistant-save"]').trigger("click");
+      await flush(80);
+      expect(selectValue("assist-assistant-picker")).toBe(createdProfileId);
+      expect(options.posts.filter((post) => post.path === `${prefix}/assist-sessions` ||
+        post.path.endsWith("/messages"))).toHaveLength(0);
+
+      finishProfiles(json({ items: [profile()] }));
+      await flush(80);
+      expect(selectValue("assist-assistant-picker")).toBe(createdProfileId);
+      expect(view.wrapper.get('[data-testid="assist-first-send"]').attributes("disabled")).toBeUndefined();
+      await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit");
+      await flush(120);
+      const create = options.posts.find((post) => post.path === `${prefix}/assist-sessions`);
+      expect(create?.body).toMatchObject({ conversation_mode: "ASSISTANT", assistant_profile_id: createdProfileId });
+    } finally {
+      finishProfiles(json({ items: [profile()] }));
+      await flush();
+      view.unmount();
+    }
   });
 
   it("助手清单读不到时说明原因，不把空下拉当成「你没有助手」", async () => {
@@ -289,12 +724,70 @@ describe("会话模式单选框", () => {
       return stub(options)(input, init);
     }));
     const view = await mountWorkbench("/agent");
-    await view.wrapper.get('[data-testid="folder-manual-root"]').setValue("D:/tmp/probe");
-    await flush();
-    await view.wrapper.get('[data-testid="folder-open-manual"]').trigger("click");
-    await flush(80);
+    await openWorkingDirectory("D:/tmp/probe");
     await flipToAssistant(view);
     expect(view.wrapper.get('[data-testid="assist-assistant-list-error"]').text()).toContain("助手清单暂不可读");
     view.unmount();
+  });
+
+  it("已建会话内切档是导航：先走同一离页守卫，草稿留在原会话，明确丢弃才切", async () => {
+    const options: Stub = { sessions: [agentSession(), assistantSession()], posts: [] };
+    const view = await openAgent(options);
+    try {
+      // 默认落在普通会话上。
+      expect(selectValue("assist-session-select")).toBe(agentSessionId);
+      await view.wrapper.get('[data-testid="assist-draft"]').setValue("切档前未发送的草稿");
+      await flipToAssistant(view);
+      // 有未发草稿时切档必须先经离页守卫：不静默丢草稿，也不静默换会话。
+      expect(dialogText()).toContain("未发送的内容");
+      expect(selectValue("assist-session-select")).toBe(agentSessionId);
+      expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
+        .toBe("切档前未发送的草稿");
+
+      // 选择留下：不切档、草稿保留、零业务提交。
+      const keep = Array.from(document.querySelectorAll("button"))
+        .find((button) => button.textContent?.includes("留在当前工作区"));
+      await act(async () => { keep?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+      await flush(80);
+      expect(selectValue("assist-session-select")).toBe(agentSessionId);
+      expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
+        .toBe("切档前未发送的草稿");
+
+      // 明确丢弃后才真正导航到助手会话，且全程不建会话、不发消息。
+      await flipToAssistant(view);
+      const discard = document.querySelector('[data-testid="collab-discard-draft"]');
+      expect(discard).not.toBeNull();
+      await new DomWrapper(discard).trigger("click");
+      await flush(120);
+      expect(selectValue("assist-session-select")).toBe(assistantSessionId);
+      expect(options.posts.filter((post) => post.path === `${prefix}/assist-sessions` ||
+        post.path.endsWith("/messages"))).toHaveLength(0);
+    } finally { view.unmount(); }
+  });
+
+  it("首条输入法合成中 Enter 不发送，普通 Enter 才发送", async () => {
+    const options: Stub = { sessions: [], posts: [] };
+    const view = await openAgent(options);
+    await flipToAssistant(view);
+    try {
+      await view.wrapper.get('[data-testid="assist-assistant-picker"]').setValue(assistantProfileId);
+      const draft = view.wrapper.get('[data-testid="assist-first-draft"]');
+      await draft.setValue("合成中的中文");
+      // 合成态（isComposing / keyCode 229）下的回车只是确认候选，不得提交。
+      for (const init of [{ key: "Enter", isComposing: true }, { key: "Enter", keyCode: 229 }]) {
+        await act(async () => {
+          draft.element!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+        });
+        await flush(40);
+        expect(options.posts.filter((post) => post.path === `${prefix}/assist-sessions` ||
+          post.path.endsWith("/messages"))).toHaveLength(0);
+      }
+      // 非合成回车才真正发送。
+      await act(async () => {
+        draft.element!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+      });
+      await flush(120);
+      expect(options.posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(1);
+    } finally { view.unmount(); }
   });
 });

@@ -13,11 +13,13 @@ import { DomainError, invalidTransition, resourceNotFound, revisionConflict,
 import { requireRevision } from './revisions.js';
 import type { Repositories } from './unit-of-work.js';
 import { lockWritableProjectInWorkspace } from './guards.js';
+import { prepareDecisionReviews } from './decision-reviews.js';
 
 type ScopeInput = { workspaceId: string; commandId: string };
 type Result = { readonly knowledge_id?: string; readonly memory_id?: string;
   readonly decision_id?: string; readonly replacement_decision_id?: string;
   readonly rule_id?: string; readonly revision: string; readonly version?: string;
+  readonly decision_review_count?: string; readonly decision_review_candidates_ref?: string;
   readonly status: string };
 const MAX_TEXT_BYTES = 262144;
 
@@ -155,8 +157,12 @@ export async function addKnowledgeVersion(db: DbExecutor, input: ScopeInput & {
         artifactVersionId: source.artifactVersionId, sourceUri: null, sourceRefs: source.refs });
       await r.information.setRootVersion('knowledge', item.id, version);
       await r.workspaces.bumpContextRevision(input.workspaceId);
+      const reviewCount = await prepareDecisionReviews(r, { workspaceId: input.workspaceId,
+        commandId: input.commandId, knowledgeId: item.id });
       return { knowledge_id: item.id, revision: toDecimalString(item.revision + 1n),
-        version: toDecimalString(version), status: 'ACTIVE' };
+        version: toDecimalString(version), status: 'ACTIVE',
+        ...(reviewCount === '0' ? {} : { decision_review_count: reviewCount }),
+        ...(reviewCount === '0' || item.project_id === null ? {} : { decision_review_candidates_ref: `projects/${item.project_id}/decision-reviews` }) };
     } });
 }
 
@@ -243,8 +249,12 @@ export async function addKnowledgeVersionInTransaction(repositories: Repositorie
         artifactVersionId: source.artifactVersionId, sourceUri: null, sourceRefs: source.refs });
       await r.information.setRootVersion('knowledge', item.id, version);
       await r.workspaces.bumpContextRevision(input.workspaceId);
+      const reviewCount = await prepareDecisionReviews(r, { workspaceId: input.workspaceId,
+        commandId: input.commandId, knowledgeId: item.id });
       return { knowledge_id: item.id, revision: toDecimalString(item.revision + 1n),
-        version: toDecimalString(version), status: 'ACTIVE' };
+        version: toDecimalString(version), status: 'ACTIVE',
+        ...(reviewCount === '0' ? {} : { decision_review_count: reviewCount }),
+        ...(reviewCount === '0' || item.project_id === null ? {} : { decision_review_candidates_ref: `projects/${item.project_id}/decision-reviews` }) };
     } });
 }
 
@@ -468,7 +478,11 @@ export async function retireInformation(db: DbExecutor, input: ScopeInput & {
       await r.information.setRootStatus(input.kind, item.id, status);
       if (input.kind === 'rule') await r.workspaces.bumpRuleRevision(input.workspaceId);
       else await r.workspaces.bumpContextRevision(input.workspaceId);
-      return { [`${input.kind}_id`]: item.id, revision: toDecimalString(item.revision + 1n), status };
+      const reviewCount = input.kind === 'knowledge' ? await prepareDecisionReviews(r, {
+        workspaceId: input.workspaceId, commandId: input.commandId, knowledgeId: item.id }) : undefined;
+      return { [`${input.kind}_id`]: item.id, revision: toDecimalString(item.revision + 1n), status,
+        ...(reviewCount === undefined || reviewCount === '0' ? {} : { decision_review_count: reviewCount }),
+        ...(reviewCount === undefined || reviewCount === '0' || item.project_id === null ? {} : { decision_review_candidates_ref: `projects/${item.project_id}/decision-reviews` }) };
     } });
 }
 

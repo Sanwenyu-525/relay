@@ -2,9 +2,8 @@
 
 .today-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; padding: var(--relay-layout-main-padding); }
 
-/* 主标题使用 compactPage：空态与窄窗不铺 display 尺寸，保留宋体标题气质（角色规则见 design-system）。 */
-.today-main > h1 { margin-bottom: var(--relay-space-2); font-size: var(--relay-font-size-page); }
-.today-page .page-lede { margin-top: 0; margin-bottom: var(--relay-space-3); color: var(--relay-color-text-secondary); }
+/* 页标题与目标句由 PageHeader 渲染（.page-head-title > h1 / .page-head-lede），尺寸与间距由全局样式承担；
+   旧的 `.today-main > h1`、`.today-page .page-lede` 选择器不再命中真实节点，随死规则清理移除。 */
 .today-intro-note { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--relay-space-2);
   margin-bottom: var(--relay-space-4); }
 .today-page .page-note { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
@@ -21,6 +20,7 @@
 .today-query__field, .today-query__timezone { display: flex; align-items: center; gap: var(--relay-space-2); }
 .today-query__label { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .today-query input { width: auto; min-width: 9.5rem; }
+.today-query__editor select { min-width: 14rem; max-width: 22rem; }
 .today-query__zone { color: var(--relay-color-text-primary); font-size: var(--relay-font-size-meta); }
 .today-query__adjust-toggle { min-height: var(--relay-control-target-minimum); display: inline-flex;
   align-items: center; padding: 0 var(--relay-space-2); border: none; border-radius: var(--relay-radius-control);
@@ -86,7 +86,7 @@
   border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .today-focus__header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-3); }
 .today-focus__header h2 { font-size: var(--relay-font-size-section); }
-.today-focus__pin-badge { padding: 0.125rem var(--relay-space-2); border-radius: var(--relay-radius-badge);
+.today-focus__pin-badge { padding: var(--relay-space-0-5) var(--relay-space-2); border-radius: var(--relay-radius-badge);
   background: var(--relay-color-status-success-bg); color: var(--relay-color-status-success-text); font-size: var(--relay-font-size-meta); }
 .today-focus__empty { margin-top: var(--relay-space-2); color: var(--relay-color-text-secondary); max-width: 42rem; }
 .today-focus__target { margin-top: var(--relay-space-3); }
@@ -117,10 +117,9 @@
   font-size: var(--relay-font-size-meta); max-width: 46rem; }
 .today-review-entry .secondary-button { flex: none; }
 
-/* 分组：有数据保留标题与列表；零数量组收为一行提示，不再整段铺开。 */
+/* 分组：只渲染有内容的分组；零数量分组不渲染，避免「· 0 项」占位行稀释扫描。 */
 .today-group { margin-top: var(--relay-space-8); }
 .today-group > h2 { font-size: var(--relay-font-size-section); }
-.today-group__empty { margin-top: var(--relay-space-4); color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); }
 .today-list { padding: 0; margin: var(--relay-space-3) 0 0; list-style: none; }
 .today-task { padding: var(--relay-space-6) 0; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .today-task__heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--relay-space-3); }
@@ -160,9 +159,10 @@
 .today-empty__hint { margin-top: var(--relay-space-2); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .today-empty__actions { display: flex; flex-wrap: wrap; gap: var(--relay-space-3); margin-top: var(--relay-space-6); }
 
-@media (max-width: 700px) {
+/* 并入 48rem 折行档，原 700px：页面留白降级、查询工具条纵向折行与表单满宽。
+   标题降级不再在此重复——全局已在 <64rem 档把 .page-head-title > h1 降为 compactPage。 */
+@media (width < 48rem) {
   .today-page { padding: var(--relay-layout-main-smallPadding); }
-  .today-main > h1 { font-size: var(--relay-font-size-compactPage); }
   .today-query { align-items: stretch; flex-direction: column; gap: var(--relay-space-3); }
   .today-task__forms form { width: 100%; }
 }

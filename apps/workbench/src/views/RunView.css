@@ -36,12 +36,19 @@
 .run-step[data-step-status="FAILED"] .run-step-status,
 .run-step[data-step-status="FAILED"] .run-step-reason { color: var(--relay-color-status-danger-text); }
 
-@media (max-width: 60rem) {
-  .run-step-body { grid-template-columns: minmax(0, 1fr) auto; }
-  .run-step-status { grid-column: 2; grid-row: 1; }
-  .run-step-time { grid-column: 1 / -1; grid-row: 2; }
-}
-@media (max-width: 40rem) {
+/* 资源与租约要点：关键结论为正文，限定说明降级为辅文，要点间用分隔线分行提升扫描性。 */
+.run-resource-points { margin: var(--relay-space-3) 0 0; padding: 0; list-style: none; }
+.run-resource-points > li { padding: var(--relay-space-2) 0; overflow-wrap: anywhere; }
+.run-resource-points > li + li { border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.run-resource-points strong { font-size: var(--relay-font-size-rowTitle); font-weight: var(--relay-font-weight-medium); }
+.run-resource-points p { margin: var(--relay-space-1) 0 0; }
+.run-resource-points small { display: block; margin-top: var(--relay-space-1); color: var(--relay-color-text-muted); }
+
+/* 并入 48rem 折行档，原 60rem：时间列折到标题下一行，行内保持「标题 + 状态」两列；
+   列均为 minmax(0,·)/auto，48–60rem 区间回到三列也不会溢出。 */
+/* 并入 48rem 折行档：原 47.9375rem 两列档与 40rem 单列档合并——窄屏一律折为单列，
+   时间与状态各自成行。原 60rem 的时间折行规则同属本档，逐项注释见上方 .run-step-body 基础规则。 */
+@media (width < 48rem) {
   .run-step-body { grid-template-columns: minmax(0, 1fr); }
   .run-step-time,
   .run-step-status { grid-column: 1; grid-row: auto; }

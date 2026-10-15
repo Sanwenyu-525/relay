@@ -41,6 +41,47 @@ export const executorLabels: Record<ExecutorKind, string> = {
   AI: "AI"
 };
 
+/** 验收条件的验证方式。服务端枚举开放扩展，未知值回退为原枚举展示。 */
+const criterionMethodRecords: Record<string, string> = {
+  HUMAN: "人工核对",
+  AUTO: "自动检查",
+  MARKDOWN_STRUCTURE: "文档结构检查",
+  CITATION_EXISTS: "引用存在检查",
+  SEMANTIC: "语义检查"
+};
+
+export function criterionMethodLabel(method: string): string {
+  return criterionMethodRecords[method] ?? method;
+}
+
+/** 验收方案来源；原枚举以 title/small 呈现供核对。 */
+export const acceptanceSourceLabels: Record<string, string> = {
+  CREATE: "创建时生成",
+  CONTRACT_CHANGE: "契约变更",
+  HUMAN: "人工制定"
+};
+
+/** 可用性枚举（检查计划预览、完成凭据各来源共用）。 */
+export const availabilityLabels: Record<string, string> = {
+  AVAILABLE: "可用",
+  UNAVAILABLE: "不可用"
+};
+
+export function availabilityLabel(value: string | null | undefined): string {
+  return value === null || value === undefined ? "不可用" : availabilityLabels[value] ?? value;
+}
+
+/** Run 逐条件检查结果；未知值回退为原枚举展示。 */
+export const checkResultLabels: Record<string, string> = {
+  PASS: "通过",
+  FAIL: "未通过",
+  ERROR: "执行出错"
+};
+
+export function checkResultLabel(value: string): string {
+  return checkResultLabels[value] ?? value;
+}
+
 /** 阶段词汇按 Project Type 分组，用户显式设置，系统不按任务数量自动跳阶段。 */
 export const phaseLabels: Record<string, string> = {
   GENERAL: "通用阶段",
@@ -61,6 +102,69 @@ export const phaseLabels: Record<string, string> = {
 
 export function phaseLabel(phase: string): string {
   return phaseLabels[phase] ?? phase;
+}
+
+/* ── 自然语言状态维护（总纲 §0.8.1）────────────────────────────
+   服务端枚举开放扩展：未知值一律回退原枚举展示，原值经 title 保留供核对。 */
+
+/** 状态维护请求状态。 */
+const stateMaintenanceStatusRecords: Record<string, string> = {
+  INTERPRETING: "正在解释",
+  DISCUSSED: "已整理",
+  CLARIFY: "待澄清",
+  READY: "已就绪",
+  APPLYING: "正在生效",
+  APPLIED: "已生效",
+  PARTIAL: "部分生效",
+  FAILED: "未生效",
+  DECISION_REQUIRED: "需要决定",
+  DECLINED: "按决定未执行",
+  UNDOING: "正在撤回",
+  UNDONE: "已撤回",
+  UNDO_PARTIAL: "部分撤回",
+  UNDO_BLOCKED: "撤回受阻"
+};
+
+export function stateMaintenanceStatusLabel(value: string): string {
+  return stateMaintenanceStatusRecords[value] ?? value;
+}
+
+/** 状态维护变更种类（migration 0062 词表；新增种类回退原枚举展示）。 */
+const stateMaintenanceChangeKindRecords: Record<string, string> = {
+  CREATE_GOAL: "新建目标",
+  LINK_GOAL: "关联目标",
+  CREATE_KNOWLEDGE: "新增知识",
+  VERSION_KNOWLEDGE: "新增知识版本",
+  CREATE_DECISION: "记录决策",
+  CREATE_TASK: "新建任务",
+  ADD_TASK_DEPENDENCY: "新增任务依赖",
+  SET_NEXT_ACTION: "设置下一步",
+  SET_PHASE: "设置阶段",
+  ADD_BLOCKER: "登记阻塞",
+  RESOLVE_BLOCKER: "解除阻塞",
+  SET_TASK_PLANNING: "调整优先级/截止日期",
+  SYNC_EXTERNAL_RESULT: "核对外部成果",
+  COMPLETE_TASK: "完成并接受任务",
+  UNDO_STATE_CHANGE: "撤回上次调整"
+};
+
+export function stateMaintenanceChangeKindLabel(value: string): string {
+  return stateMaintenanceChangeKindRecords[value] ?? value;
+}
+
+/** 逐条变更的结算状态。 */
+const stateMaintenanceChangeStatusRecords: Record<string, string> = {
+  PENDING: "待生效",
+  APPLIED: "已生效",
+  FAILED: "失败",
+  SKIPPED: "已跳过",
+  DECLINED: "按你的决定未执行",
+  COMPENSATED: "已撤回",
+  COMPENSATION_FAILED: "撤回失败"
+};
+
+export function stateMaintenanceChangeStatusLabel(value: string): string {
+  return stateMaintenanceChangeStatusRecords[value] ?? value;
 }
 
 /**

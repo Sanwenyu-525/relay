@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import ProjectNav from "../components/ProjectNav";
 import PageHeader from "../components/PageHeader";
 import AppDialog from "../components/AppDialog";
+import EmptyState from "../components/EmptyState";
 import KnowledgeReader from "../components/KnowledgeReader";
 import SafeMarkdown from "../components/SafeMarkdown";
 import ProjectKnowledgeGuide from "../components/ProjectKnowledgeGuide";
@@ -43,8 +44,35 @@ function rowTitle(row: InformationRow): string {
 }
 
 function rowScopeLabel(row: InformationRow): string {
-  if ("scope" in row) return row.scope === "WORKSPACE" ? "工作空间" : row.scope === "PROJECT" ? "项目" : "任务";
+  if ("scope" in row) return ruleScopeLabels[row.scope] ?? row.scope;
   return row.projectId ? "项目" : "工作空间";
+}
+
+/** 状态语气只分三种事实：有效、已被替代、停用或归档；未知值回退原枚举，不推测。 */
+function statusLabel(status: string): string {
+  return status === "ACTIVE" ? "有效" : status === "SUPERSEDED" ? "已被替代" : "已停用或归档";
+}
+
+/** 规则枚举的中文显示：中文承担阅读，未知值回退原枚举。 */
+const ruleScopeLabels: Record<string, string> = { WORKSPACE: "工作空间", PROJECT: "项目", TASK: "任务" };
+const ruleStrengthLabels: Record<string, string> = { HARD: "硬约束", PREFERENCE: "偏好" };
+const ruleEnforcementLabels: Record<string, string> = {
+  PRE_ACTION: "动作前检查", POST_CHECK: "动作后检查", SEMANTIC: "语义检查", HUMAN: "人工检查"
+};
+const ruleApplicabilityLabels: Record<string, string> = { AI_RUN: "AI 运行时" };
+
+/** 已映射的枚举以 small（title 属性）保留原枚举供核对；未映射的值原样展示。 */
+function enumText(labels: Record<string, string>, value: string) {
+  const label = labels[value];
+  return label === undefined ? value : <>{label}<small title={value}>（{value}）</small></>;
+}
+
+/** 目标约束不把原始 JSON 摆到阅读位：空对象、缺失与有内容三种事实分开说。 */
+function ruleTargetSpecView(targetSpec: Readonly<Record<string, unknown>> | null): { text: string; json: string | null } {
+  if (targetSpec === null) return { text: "当前响应未提供", json: null };
+  return Object.keys(targetSpec).length === 0
+    ? { text: "未提供具体检查对象", json: null }
+    : { text: "已提供，展开查看技术 JSON", json: JSON.stringify(targetSpec) };
 }
 
 function splitLines(value: string): string[] {
@@ -86,7 +114,7 @@ export default function KnowledgeView() {
   const [knowledgeVersions, setKnowledgeVersions] = useState<readonly RelayKnowledgeVersion[]>([]);
   const [memoryRevisions, setMemoryRevisions] = useState<readonly RelayMemoryRevision[]>([]);
   const [ruleVersions, setRuleVersions] = useState<readonly RelayRuleVersion[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -574,6 +602,7 @@ export default function KnowledgeView() {
   const captureTargetLabel = revisionMode && knowledgeDraftBase === null ? "修订目标待重新核对"
     : captureProjectId ? `项目 ${captureProjectId}` : "工作空间";
   const artifactPreviewMatches = artifactPreview !== null && artifactPreview.id === artifactVersionId.trim();
+  const selectedRuleSpec = selectedRule ? ruleTargetSpecView(selectedRule.targetSpec) : null;
   const writeGateFeedback = writeBlockedReason && <p className="disabled-reason" data-testid="knowledge-project-write-blocked">{writeBlockedReason} <button type="button" className="text-button" onClick={() => setGateReload((value) => value + 1)}>重读项目状态</button></p>;
   const pendingReceipt = pendingCommand && <div className="surface-panel" data-testid="knowledge-pending-receipt">
     <h2>提交结果待核对</h2><p>原 command_id：{pendingCommand.id}。查询原命令回执前不再次提交。</p>
@@ -591,9 +620,17 @@ export default function KnowledgeView() {
     <div role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-tab-${kind}`} tabIndex={0}>
     <div className="section-heading-row"><h2>{currentNoun}</h2>
       <button type="button" className="secondary-button" data-testid="knowledge-create" disabled={pendingCommand !== null} onClick={() => openForm(false)}>新建</button></div>
-    {!loading && rows.length === 0 && <p className="helper-text">当前范围还没有{currentNoun}。点击右上角「新建」添加第一条{currentNoun}。</p>}
+    {/* 读取失败不能呈现为「还没有」：同一文件的详情空态已有正确的 error 分支（见下方
+        data-testid="knowledge-detail-empty-state"），列表这里此前缺失，会把失败说成没有数据。 */}
+    {/* 列表空态按共享规格区分三种事实：首装无资料、项目范围为空、读取失败（见下方 error 分支）不互相冒充。 */}
+    {!loading && error === null && rows.length === 0 && (projectId
+      ? <EmptyState size="compact" testId="knowledge-list-empty" title={`当前项目还没有${currentNoun}`}
+        description={`项目范围只显示归属当前项目的${currentNoun}，工作空间范围的${currentNoun}不会出现在这里。可以点「新建」添加第一条，或到工作空间资料查看已有内容。`} />
+      : <EmptyState size="compact" testId="knowledge-list-empty" title={`还没有${currentNoun}`}
+        description={`当前工作空间还没有收录${currentNoun}。${currentNoun}用来沉淀跨任务长期有效的事实与约定；点击「新建」添加第一条，保存后才会出现在这里。`} />)}
+    {!loading && error !== null && rows.length === 0 && <p className="helper-text" role="status">当前范围的{currentNoun}没有读到，请查看上方错误并重试；这不代表当前范围确实没有{currentNoun}。</p>}
     {rows.map((row) => <button key={row.id} type="button" className={`knowledge-row${row.id === selectedId ? " knowledge-row--active" : ""}`}
-      disabled={pendingCommand !== null} onClick={() => selectRow(row.id)}><strong>{rowTitle(row)}</strong><small>{row.status} · 当前 v{row.currentVersion} · {rowScopeLabel(row)}</small></button>)}
+      disabled={pendingCommand !== null} onClick={() => selectRow(row.id)}><strong>{rowTitle(row)}</strong><small>{statusLabel(row.status)} · 当前 v{row.currentVersion} · {rowScopeLabel(row)}</small></button>)}
     </div>
   </section>;
 
@@ -618,9 +655,9 @@ export default function KnowledgeView() {
         {searchError && <p className="action-error" role="alert">{searchError}</p>}
         {searchItems.length > 0 ? <ul className="knowledge-search-list">{searchItems.map((item) =>
           <li key={`${item.type}-${item.id}-${item.version}`}><button type="button" className="knowledge-result" disabled={pendingCommand !== null} onClick={() => openSearchItem(item)}>
-            <strong>{item.title}</strong> · {kinds.find((k) => k.kind === item.type)?.noun ?? item.type} v{item.version} · {item.status}
-            <span>{item.snippet}</span><small>匹配：{item.matchedFields.join("、")} · 来源 {item.sourceRef}</small>
-          </button></li>)}</ul> : query.trim() && !searching && !searchError && <p className="helper-text">没有匹配的当前有效资料。</p>}
+            <strong>{item.title}</strong> · {kinds.find((k) => k.kind === item.type)?.noun ?? item.type} v{item.version} · {statusLabel(item.status)}
+            <span>{item.snippet}</span><small>匹配：{item.matchedFields.join("、")} · 来源 <code>{item.sourceRef}</code></small>
+          </button></li>)}</ul> : query.trim() && !searching && !searchError && <p className="helper-text" data-testid="knowledge-search-empty">没有匹配「{query.trim()}」的当前有效资料。试试更短的关键词或切换资料类型；这只说明搜索没有结果，不代表当前范围没有{currentNoun}。</p>}
         {nextCursor && <button type="button" className="secondary-button" data-testid="knowledge-more" disabled={searching}
           onClick={() => { void runSearch(searchVersion.current, query.trim(), nextCursor); }}>加载下一页</button>}
       </section>
@@ -652,7 +689,7 @@ export default function KnowledgeView() {
           });
         }} />}
 
-      {error && <p className="action-error" role="alert">{error} <button type="button" className="text-button" onClick={() => { void load(); }}>重新读取</button></p>}
+      {error && <p className="action-error" role="alert" data-testid="knowledge-read-error">{error} <button type="button" className="text-button" onClick={() => { void load(); }}>重新读取</button></p>}
       {loading && <p role="status">正在读取资料…</p>}
       {refreshing && <p role="status">正在读取最新版本…</p>}
       {actionError && !capturing && <p className="action-error" role="alert">{actionError}</p>}
@@ -670,20 +707,21 @@ export default function KnowledgeView() {
               initialVersion={routeItem === selectedKnowledge.id ? routeVersion : null}
               onNewVersion={selected.status === "ACTIVE" && pendingCommand === null ? () => openForm(true) : undefined}
               newVersionDisabled={writeBlockedReason !== null} />}
-            {!reading && <header className="knowledge-item-heading"><div><h2>{rowTitle(selected)}</h2><p className="helper-text">当前版本 v{selected.currentVersion} · {selected.status === "ACTIVE" ? "有效" : selected.status === "SUPERSEDED" ? "已被替代" : "已停用或归档"}</p></div>
+            {!reading && <header className="knowledge-item-heading"><div><h2>{rowTitle(selected)}</h2><p className="helper-text">当前版本 v{selected.currentVersion} · {statusLabel(selected.status)}</p></div>
               {selected.status === "ACTIVE" && pendingCommand === null && kind !== "DECISION" && <button type="button" className="secondary-button" data-testid="knowledge-new-version" disabled={writeBlockedReason !== null} onClick={() => openForm(true)}>追加新版本</button>}</header>}
             {selectedMemory && <article className="knowledge-fact-paper"><p className="knowledge-body">{selectedMemory.text}</p><p className="helper-text">明确确认：{selectedMemory.confirmedBy} · {selectedMemory.confirmedAt}{selectedMemory.expiresAt && <> · 到期 {selectedMemory.expiresAt}</>}</p></article>}
             {selectedDecision && <article className="knowledge-fact-paper"><h3>做出的选择</h3><p className="knowledge-body">{selectedDecision.choice}</p><h3>依据</h3><p className="knowledge-body">{selectedDecision.rationale}</p><h3>备选与代价</h3><p>备选：{selectedDecision.alternatives.join("、") || "未记录"}</p><p>代价：{selectedDecision.costs.join("、") || "未记录"}</p>{selectedDecision.supersededById && <p data-testid="decision-supersession">已由决定 {selectedDecision.supersededById} 替代；旧决定保留可查。</p>}</article>}
             {selectedRule && <article className="knowledge-fact-paper"><p className="knowledge-body">{selectedRule.statement}</p><p>{selectedRule.strength === "HARD" ? "硬约束" : "偏好"} · 执行检查：{selectedRule.enforcement}{selectedRule.method && <> · {selectedRule.method}</>}</p></article>}
             <details className="knowledge-management">
             <summary>资料管理与范围</summary>
-            <div className="section-heading-row"><h2>{rowTitle(selected)}</h2><span>{selected.status} · 修订 v{selected.revision}</span></div>
+            <div className="section-heading-row"><h2>{rowTitle(selected)}</h2><span>{statusLabel(selected.status)} · 修订 v{selected.revision}</span></div>
             <p className="helper-text">ID：{selected.id} · 当前版本 v{selected.currentVersion}</p>
             <p className="helper-text" data-testid="knowledge-detail-scope">范围：{"scope" in selected
               ? (selected.scope === "WORKSPACE" ? "工作空间" : `${selected.scope === "PROJECT" ? "项目" : "任务"} ${selected.scopeId}`)
               : selected.projectId ? `项目 ${selected.projectId}` : "工作空间"}</p>
-            {selectedRule && <><p>{selectedRule.strength} · {selectedRule.scope} / {selectedRule.scopeId} · {selectedRule.applicability}</p>
-              <p className="helper-text">目标约束：{JSON.stringify(selectedRule.targetSpec)}</p></>}
+            {selectedRule && selectedRuleSpec && <><p className="knowledge-rule-facts" data-testid="knowledge-rule-facts">{enumText(ruleStrengthLabels, selectedRule.strength)} · {enumText(ruleScopeLabels, selectedRule.scope)} / {selectedRule.scopeId} · {enumText(ruleApplicabilityLabels, selectedRule.applicability)}</p>
+              <p className="helper-text" data-testid="knowledge-rule-target-spec">目标约束：{selectedRuleSpec.text}</p>
+              {selectedRuleSpec.json !== null && <details className="knowledge-tech-details" data-testid="knowledge-rule-target-spec-json"><summary>目标约束 JSON</summary><code>{selectedRuleSpec.json}</code></details>}</>}
 
             {selected.status === "ACTIVE" && pendingCommand === null && <div className="knowledge-actions">
               {kind === "KNOWLEDGE" && <button type="button" className="danger-button" disabled={writeBlockedReason !== null} onClick={() => { void retire(); }}>归档资料</button>}
@@ -698,9 +736,16 @@ export default function KnowledgeView() {
             {selectedMemory && <section className="knowledge-history"><h3>确认修订历史</h3><ol>{memoryRevisions.map((revision) =>
               <li key={revision.id}>v{revision.version} · {revision.title} · {revision.confirmedBy} 于 {revision.confirmedAt}<p>{revision.text}</p></li>)}</ol></section>}
             {selectedRule && <section className="knowledge-history"><h3>规则版本历史</h3><ol>{ruleVersions.map((version) =>
-              <li key={`${version.ruleId}-${version.version}`}>v{version.version} · {version.strength} · {version.enforcement} · {version.ruleKey}<p>{version.statement}</p></li>)}</ol></section>}
+              <li key={`${version.ruleId}-${version.version}`}>v{version.version} · {enumText(ruleStrengthLabels, version.strength)} · {enumText(ruleEnforcementLabels, version.enforcement)} · {version.ruleKey}<p>{version.statement}</p></li>)}</ol></section>}
             </details>
-          </section> : !loading && !capturing && <section className="surface-panel"><p>选择一项资料查看详情与版本。</p></section>}
+          </section> : !capturing && <section className="surface-panel" data-testid="knowledge-detail-empty-state">
+            <p className="helper-text" role={loading || refreshing ? "status" : undefined}>
+              {loading || refreshing ? `正在读取当前范围的${currentNoun}…`
+                : error !== null ? `当前范围的${currentNoun}读取失败，请查看上方错误并重试。`
+                  : rows.length === 0 ? `当前范围没有${currentNoun}。可使用左侧列表中的「新建」入口添加。`
+                    : `当前列表有 ${rows.length} 项${currentNoun}，请选择一项查看详情与版本。`}
+            </p>
+          </section>}
 
           {formOpen && <form ref={formRef} className={`surface-panel knowledge-form${capturing ? " knowledge-form--capture" : ""}`} data-testid="knowledge-form" onSubmit={(event) => { void save(event); }}>
             <div className="knowledge-form-main"><header className={capturing ? "knowledge-capture-heading" : undefined}>
@@ -735,17 +780,17 @@ export default function KnowledgeView() {
             </>}
             {kind === "RULE" && <>
               {!revisionMode && <><label className="field"><span className="field-label">作用域</span><select value={scope} onChange={(event) => setScope(event.target.value as Scope)} disabled={pendingCommand !== null}>
-                <option value="WORKSPACE">WORKSPACE</option><option value="PROJECT">PROJECT</option><option value="TASK">TASK</option></select></label>
+                <option value="WORKSPACE">工作空间 · WORKSPACE</option><option value="PROJECT">项目 · PROJECT</option><option value="TASK">任务 · TASK</option></select></label>
                 {(scope === "TASK" || (scope === "PROJECT" && !projectId)) && <label className="field"><span className="field-label">作用域 ID</span><input value={scopeId} onChange={(event) => setScopeId(event.target.value)} data-testid="rule-scope-id" disabled={pendingCommand !== null} /></label>}</>}
               <label className="field"><span className="field-label">规则键</span><input value={ruleKey} onChange={(event) => setRuleKey(event.target.value)} disabled={pendingCommand !== null} /></label>
               <label className="field"><span className="field-label">规则陈述</span><textarea value={statement} onChange={(event) => setStatement(event.target.value)} rows={4} disabled={pendingCommand !== null} /></label>
               <label className="field"><span className="field-label">强度</span><select value={strength} onChange={(event) => setStrength(event.target.value as RelayRuleStrength)} data-testid="rule-strength" disabled={pendingCommand !== null}>
-                <option value="PREFERENCE">PREFERENCE · 偏好</option><option value="HARD">HARD · 硬约束</option></select></label>
+                <option value="PREFERENCE">偏好 · PREFERENCE</option><option value="HARD">硬约束 · HARD</option></select></label>
               <label className="field"><span className="field-label">执行检查路径</span><select value={enforcement} onChange={(event) => setEnforcement(event.target.value as RelayRuleEnforcement)} data-testid="rule-enforcement" disabled={pendingCommand !== null}>
-                <option value="PRE_ACTION">PRE_ACTION</option><option value="POST_CHECK">POST_CHECK</option><option value="SEMANTIC">SEMANTIC</option><option value="HUMAN">HUMAN</option></select></label>
+                <option value="PRE_ACTION">动作前检查 · PRE_ACTION</option><option value="POST_CHECK">动作后检查 · POST_CHECK</option><option value="SEMANTIC">语义检查 · SEMANTIC</option><option value="HUMAN">人工检查 · HUMAN</option></select></label>
               <label className="field"><span className="field-label">检查方法</span><select value={method} onChange={(event) => setMethod(event.target.value)} disabled={pendingCommand !== null}>
-                <option value="">未指定</option><option value="MARKDOWN_STRUCTURE">MARKDOWN_STRUCTURE</option><option value="CITATION_EXISTS">CITATION_EXISTS</option>
-                <option value="SEMANTIC">SEMANTIC</option><option value="HUMAN">HUMAN</option></select></label>
+                <option value="">未指定</option><option value="MARKDOWN_STRUCTURE">文档结构 · MARKDOWN_STRUCTURE</option><option value="CITATION_EXISTS">引用存在 · CITATION_EXISTS</option>
+                <option value="SEMANTIC">语义检查 · SEMANTIC</option><option value="HUMAN">人工检查 · HUMAN</option></select></label>
               <label className="field"><span className="field-label">目标约束 JSON（可选）</span><textarea value={targetSpec} onChange={(event) => setTargetSpec(event.target.value)} rows={3} disabled={pendingCommand !== null} /></label>
               <p className="field-hint">HARD 冲突或必需检查路径不可用时，服务端拒绝写入；不会把未检查的规则当作生效。</p>
             </>}

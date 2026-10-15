@@ -102,7 +102,7 @@ describe("M06 文件写入人工处置", () => {
     await flush(30); await mounted.wrapper.get('[data-testid="run-gateway-operations"] button').trigger("click");
     await flush(30);
     const panel = mounted.wrapper.get('[data-testid="run-file-write-operation"]');
-    expect(panel.text()).toContain("逐文件账本：UNKNOWN");
+    expect(panel.text()).toContain("逐文件账本：待核对（UNKNOWN）");
     expect(panel.text()).toContain("不能归因于原调用");
     expect(panel.text()).toContain(".__relay-file-io-example.tmp");
     expect(panel.text()).toContain("0123456789abcdef:0123456789abcdef0123456789abcdef");
@@ -112,8 +112,11 @@ describe("M06 文件写入人工处置", () => {
     await flush(50);
     expect(posted).toMatchObject({ invocation_id: invocationId,
       expected_observation_sha256: "b".repeat(64), decision: "KEEP_CURRENT_AND_FAIL_RUN" });
-    expect(panel.text()).toContain("当时候选残留（不归因于原调用）");
-    expect(panel.text()).toContain(".__relay-file-io-example.tmp");
+    // 结清后父级刷新会先清空动作账本再重读，处置面板随操作列表卸载并重挂；断言必须重新查询
+    // 当前 DOM，否则读到的是已脱离文档的旧节点文本。
+    const disposedPanel = mounted.wrapper.get('[data-testid="run-file-write-operation"]');
+    expect(disposedPanel.text()).toContain("当时候选残留（不归因于原调用）");
+    expect(disposedPanel.text()).toContain(".__relay-file-io-example.tmp");
   });
 
   it("按需显示冻结计划文本差异，并明确历史基线缺失", async () => {
@@ -189,10 +192,15 @@ describe("M06 文件写入人工处置", () => {
     await mounted.wrapper.get('[data-testid="run-gateway-operations"] button').trigger("click");
     await flush(30);
     const panel = mounted.wrapper.get('[data-testid="run-file-write-operation"]');
-    expect(panel.text()).toContain("FILE_WRITE 原动作 · UNKNOWN");
-    expect(panel.text()).toContain("逐文件账本：PARTIAL");
-    expect(panel.text()).toContain("a.txt · 账本 APPLIED（账本记录已应用） · 当前");
-    expect(panel.text()).toContain("b.txt · 账本 CONFLICT（冲突） · 当前");
+    // 「…原动作」标题属 RunView，现已按 actionType 动态中文化（夹具为 APPLY_CHANGESET）；
+    // 面板内原枚举已降级为 small 括注，保留按原身份核对的能力。
+    expect(panel.text()).toContain("应用变更集（APPLY_CHANGESET） 原动作 · 结果未知（UNKNOWN）");
+    expect(panel.text()).toContain("原 Operation：待核对（UNKNOWN）");
+    expect(panel.text()).toContain("逐文件账本：部分应用（PARTIAL）");
+    expect(panel.text()).toContain("a.txt · 新建（CREATE） · 账本 账本记录已应用（APPLIED）");
+    expect(panel.text()).toContain("b.txt · 修改（MODIFY） · 账本 冲突（CONFLICT）");
+    expect(panel.text()).toContain("a.txt · 账本 账本记录已应用（APPLIED） · 当前");
+    expect(panel.text()).toContain("b.txt · 账本 冲突（CONFLICT） · 当前");
     expect(panel.text()).toContain("停机证明：未记录");
     expect(panel.text()).toContain("TRUSTED_STOP_PROOF_REQUIRED");
     expect(panel.find('[data-testid="file-write-dispose-open"]').exists()).toBe(false);
@@ -238,7 +246,7 @@ describe("M06 文件写入人工处置", () => {
     expect(runReads).toBeGreaterThan(1); expect(taskReads).toBeGreaterThan(1); expect(evidenceReads).toBeGreaterThan(2);
     expect(mounted.wrapper.get('[data-testid="run-file-write-operation"]').text()).toContain("MANUALLY_CLOSED");
     expect(mounted.wrapper.get('[data-testid="run-file-write-operation"]').text()).toContain("保留当时文件并结束旧 Run");
-    expect(mounted.wrapper.get('[data-testid="run-file-write-operation"]').text()).toContain("b.txt · 当时账本 CONFLICT");
+    expect(mounted.wrapper.get('[data-testid="run-file-write-operation"]').text()).toContain("b.txt · 当时账本 冲突（CONFLICT）");
   });
 
   it("处置遇到 409 后重新读取版本与证据，并撤去过期确认入口", async () => {
@@ -324,6 +332,8 @@ describe("M06 文件写入人工处置", () => {
     expect(posts).toHaveLength(2);
     expect(posts[1]).toBe(posts[0]);
     expect(sessionStorage.getItem(key)).toBeNull();
-    expect(panel.text()).toContain("保留当时文件并结束旧 Run");
+    // 重试成功后父级刷新会先清空动作账本再重读，处置面板会重挂；重新查询当前 DOM 再断言。
+    expect(mounted.wrapper.get('[data-testid="run-file-write-operation"]').text())
+      .toContain("保留当时文件并结束旧 Run");
   });
 });

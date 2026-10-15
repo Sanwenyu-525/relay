@@ -10,6 +10,7 @@ import { Client, Pool } from 'pg';
 import type { DbExecutor } from '../../src/infrastructure/database.js';
 import type { RelayDatabaseSchema } from '../../src/infrastructure/database-schema.js';
 import { postgresErrorCode } from '../../src/infrastructure/postgres-error.js';
+import { loadMigrations } from '../../src/infrastructure/migration-runner.js';
 import '../../src/infrastructure/pg-types.js';
 
 /**
@@ -152,6 +153,72 @@ export async function expectSqlState(
   }
 
   throw new Error(`${label} was expected to fail with SQLSTATE ${expectedCode}`);
+}
+
+/**
+ * 当前仓库的完整迁移清单（名称 + 内容摘要），直接来自真实迁移目录。
+ *
+ * 备份/恢复类测试需要的不是「迁移一共多少条」这个会随每次加迁移而失效的常量，而是
+ * 「被备份的数据库确实持有与仓库当前源码完全一致的那一套迁移」。因此这里返回可逐条
+ * 比对的清单，由断言与数据库里的实际 ledger 对照。
+ */
+export async function currentMigrationManifest(): Promise<readonly {
+  readonly name: string;
+  readonly sha256Hex: string;
+}[]> {
+  const migrations = await loadMigrations(MIGRATIONS_DIRECTORY);
+
+  return migrations.map((migration) => ({
+    name: migration.name,
+    sha256Hex: migration.sha256.toString('hex'),
+  }));
+}
+
+/**
+ * 断言某连接上的迁移 ledger 与仓库当前迁移清单逐条一致（名称与内容摘要都相同）。
+ *
+ * 两个方向都要查：多出来的行说明备份混入了别的东西，缺少或摘要不符的行说明备份/恢复
+ * 没有带走真实完整的迁移集合。只比条数会把「48 条里换掉一条」读成通过，因此不采用。
+ */
+export async function assertLedgerMatchesCurrentMigrations(
+  db: DbExecutor,
+  label: string,
+): Promise<number> {
+  const result = await sql<{ name: string; content_sha256: Buffer }>`
+    select name, content_sha256 from relay_schema_migrations order by name
+  `.execute(db);
+  const recorded = result.rows.map((row) => ({
+    name: row.name, sha256Hex: Buffer.from(row.content_sha256).toString('hex'),
+  }));
+
+  return assertMigrationLedgerMatchesManifest(recorded, label);
+}
+
+/** 同一断言的纯数据入口：给持有裸 `pg.Client` 的测试用（那里没有 DbExecutor）。 */
+export async function assertMigrationLedgerMatchesManifest(
+  recorded: readonly { readonly name: string; readonly sha256Hex: string }[],
+  label: string,
+): Promise<number> {
+  const manifest = await currentMigrationManifest();
+  const actual = new Map(recorded.map((entry) => [entry.name, entry.sha256Hex]));
+  const expected = new Map(manifest.map((entry) => [entry.name, entry.sha256Hex]));
+
+  assert.ok(expected.size > 0, '仓库必须至少有一份迁移，否则这条断言没有意义');
+  const missing = [...expected.keys()].filter((name) => !actual.has(name));
+  const extra = [...actual.keys()].filter((name) => !expected.has(name));
+  const changed = [...expected.keys()].filter((name) =>
+    actual.has(name) && actual.get(name) !== expected.get(name));
+
+  assert.deepEqual({ missing, extra, changed }, { missing: [], extra: [], changed: [] },
+    `${label}: ledger 必须与仓库当前迁移清单逐条一致（名称与内容摘要）`);
+  return expected.size;
+}
+
+/** 仓库当前迁移条数；只用于与运行器自己报告的 ledgerRows 对照，不是独立断言。 */
+export async function currentMigrationCount(): Promise<number> {
+  const manifest = await currentMigrationManifest();
+  assert.ok(manifest.length > 0, '仓库必须至少有一份迁移');
+  return manifest.length;
 }
 
 /**

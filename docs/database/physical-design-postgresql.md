@@ -862,3 +862,193 @@ HTTP 面归[命令契约 §10.56](../api/http-command-contract.md)，交互规�
 状态与 Operation 的自洽由 `ck_session_tool_calls_operation` 三态判定：被拒的行必无 Operation；已结算与未知的行必有；请求中两种皆可——准备已绑定而派发未完成，崩溃后要按同一个身份核对，因此这一态不额外收紧，也不允许被当成「什么都没发生」。
 
 三条 CHECK 都**逐条重述**既有分支再追加，而不是就地追加：0054 重述 `ck_logical_operation_resource` 时漏掉 WEB_FETCH 与 FILE_WRITE，造成 9 例既有动作在下一次写入时违反约束，同一类教训。应用角色对 `session_tool_calls` 只有读写与状态推进，没有 DELETE——删行等于抹掉一次真实读取发生过的事实。
+
+## 63. 0062 自然语言状态维护的请求与变更账本（2026-10-09 源码实现）
+
+依据总纲 §0.8.1 与[领域模型 §12.5](../architecture/domain-model.md#125-自然语言状态维护的应用边界)、HTTP 契约 §10.61。两张表**不复制业务事实**：目标、知识、决策、任务、计划、进度、阻塞仍各归原 Owner；这里只保存「原消息 → 确认内容 → 领域命令 → 回执」的关系与整组撤回的补偿轨迹。
+
+| 对象 | 关键列与约束 | 理由 |
+|---|---|---|
+| `conversation_state_requests` | `unique(workspace_id, command_id)`、`unique(source_message_id)`、`base_content_sha256`、三阶段命令身份（interpret/apply/undo）建行即固化 | 原消息与阶段身份可追溯；摘要当前只落库，尚无内容漂移核验及解析对象版本基线。唯一约束排除重复请求行，不等于排除重复在途模型调用或保证各阶段可恢复 |
+| `ck_conversation_state_request_status`（13 态）与 `ck_..._decision_stage` | `CLARIFY` 与已决态互斥；应用过必须已结算候选 | 状态机由 CHECK 兜底：解释成功才可应用，应用过的请求不会退回 DISCUSS |
+| `decision_required` jsonb | 非空时不得自动应用（应用层 409）；含 `blocked_changes`（null = 整组等待） | 连带承诺先取得决定，不把「延后导出」放大成「推迟发布」；只给序号时独立且明确的修改照常生效 |
+| `conversation_state_changes` | `unique(request_id, ordinal)`、`unique(command_id)`、`before_ref`/`after_ref`、`baseline_ref`（0064）、6 态 + 补偿列 | 每条变更一条固定命令身份；`APPLIED` 必须留 `after_ref` 与 `applied_at`，否则「改了什么」无从核对、撤回无从定位；`COMPENSATED` 必须带补偿命令身份 |
+| `change_kind` 白名单（12 种，0066 放宽） | CREATE_GOAL…RESOLVE_BLOCKER + SET_TASK_PLANNING | 类型化变更，不接受任意 JSON Patch；ID 由应用按当前事实解析，模型给的 ID 不进库 |
+
+应用角色只有 SELECT/INSERT/UPDATE，没有 DELETE——撤回是沿原 Owner 的新变更与补偿轨迹，不是抹掉「曾生效过」的事实。
+
+## 64. 0063 返回项目的日常查看基线（2026-10-09 源码实现）
+
+依据 HTTP 契约 §10.62。单表 `project_daily_view_baselines`：`unique(workspace_id, project_id)` 每项目一行查看基线，当前行 `unique(workspace_id, presentation_id)` 排除展示身份同时占用；推进会替换 presentation_id，历史确认还须依靠命令回执。`viewed_state_revision` + `viewed_fact_refs` 保存必要引用（phase、下一步任务、未终结任务 id 集合 ≤200、阻塞计数与截断标记），不复制业务正文、不存第二套 Project State。推进条件见 §66（0065 起为「展示序号严格增大且 State revision 不倒退」双条件）。命名接续点（`project_continuation_points`，0044/0045）不被日常查看写入或重设。
+
+## 65. 0064 确认时点的适用基线与已确认撤回方案（2026-10-10 源码实现）
+
+依据 HTTP 契约 §10.61、[领域模型 §12.5](../architecture/domain-model.md#125-自然语言状态维护的应用边界)、测试计划 NLS-11。两条 `ALTER TABLE ... ADD COLUMN`，不改既有约束、不改 0062/0063 文件。
+
+| 对象 | 关键列 | 理由 |
+|---|---|---|
+| `conversation_state_changes.baseline_ref` jsonb | 状态类变更记确认时点 `state_revision`；按标题可解析的对象记 `target_task_id`/`target_goal_id`/`blocker_id`/`knowledge_id`＋`knowledge_revision`；确认时点解析不到记 `resolved:false` | 应用与补偿各自重查适用性：版本/身份对不上就保留当前事实并报类型化冲突。不用「读最新 revision」消除冲突，也不只比较字段值——后续修改可能又改回同值，必须按版本识别 |
+| `conversation_state_requests.undo_scope` jsonb | `{ plan_digest, change_ids }`，与 `UNDOING` 状态在同一语句提交 | 事前预检的**已确认方案**持久化：只有持久 Owner 推进撤回，`UNDOING` 中断后按同一范围恢复剩余补偿，不会把未确认的项也补偿掉；CAS 输方拿不到行即不执行计划 |
+
+`baseline_ref` 只保存「确认时点看到了什么」，不复制业务正文；目标、任务、State 仍各归原 Owner。0062 已应用的库按追加迁移升级，历史行该列为 NULL（应用时按当前事实首次解析，不为历史数据伪造版本）。
+
+## 66. 0065 日常查看的服务端展示序号（2026-10-10 源码实现）
+
+依据 HTTP 契约 §10.62、测试计划 NLS-06。新表 `project_daily_view_presentation_counters`（`PRIMARY KEY(workspace_id, project_id)`）在每次 `GET /daily-continuation` 时 `INSERT ... ON CONFLICT DO UPDATE SET issued_seq = issued_seq + 1` 递增签发；基线表追加 `viewed_presentation_seq bigint NOT NULL DEFAULT 0`。
+
+推进条件改为 `viewed_presentation_seq < 新序号 AND viewed_state_revision <= 新值`（仓库层条件更新 + 行锁双保险）。序号解决的是「State revision 不变时任务集合变化」的查看顺序问题：签发顺序由服务端给出，不用客户端时钟；确认携带的序号超过已签发上限即拒绝，客户端不能自造一次展示。表只存计数与最后签发的展示身份，不存业务正文。
+
+## 67. 0066 既有任务的计划调整（2026-10-10 源码实现）
+
+依据 HTTP 契约 §10.61、测试计划 §24。只放宽 `ck_conversation_state_change_kind` 增加 `SET_TASK_PLANNING`（drop 后按完整清单重述再 add，遵守「CHECK 逐条重述而非就地追加」的既有教训），其余约束逐字保留。该变更沿原 Owner `SetTaskPlanningMetadata` 生效，只改模型真正给出的字段，截止日期必须配时区（由客户端随解释请求提交并冻结进 `baseline_ref` 同级的载荷）。
+
+## 68. 0067 复验整改：DECLINED 终态、解释基线前置与展示签发记录（2026-10-10 源码实现）
+
+依据整改任务书 `prompts/remediation/natural-language-state-maintenance-acceptance-20261010.md` R1/R3/R6。三处追加：
+
+1. **R1 拒绝语义**：`conversation_state_requests.status` 与 `conversation_state_changes.status` 白名单各增加 `DECLINED`（drop 后完整重述）。用户回答「不调整」后，受该决定约束的变更进入 `DECLINED`——既不是 `APPLIED/SKIPPED`（不谎报生效/已存在），也不是 `PENDING`（不被自动应用再次执行）。
+2. **R3 解释基线前置**：`conversation_state_requests` 新增 `interpretation_baseline jsonb`，在 claim 事务内、调用模型**之前**持久冻结该意图依据的 Project State 版本；结算与重启恢复沿同一基准，不把模型返回时间当成再次确认。迁移前旧行该列为 NULL：缺可信基线的状态类变更按 `STATE_BASELINE_MISSING` 保守拒绝，不读最新版本冒充原基线。
+3. **R6 展示签发绑定**：新表 `project_daily_view_presentations`（`UNIQUE(workspace_id, presentation_id)`、`UNIQUE(workspace_id, project_id, issued_seq)`）记录每次真实读取签发的身份、序号、当次 State 版本与已展示事实摘要；确认必须逐项对上签发记录，**取代 §66 中「序号不超过已签发上限」的单点校验**。兼容回填：迁移时把既有基线按其自身身份回填一条 legacy 签发记录（0065 之前的历史行序号为 0）。污染基线（签发来源缺失且版本高于任何真实读取）由应用层按 `PROJECT_DAILY_VIEW_BASELINE_REPAIRED` 审计恢复。
+
+## 69. 0068 外部成果核对与完成指令（2026-10-10 源码实现）
+
+依据测试计划 NLS-04、任务书第五节第 3 项（Slice B）。只放宽 `ck_conversation_state_change_kind` 增加 `SYNC_EXTERNAL_RESULT`（只读核对）与 `COMPLETE_TASK`（沿原完成 Owner `CompleteHumanTask` 提交）；其余约束逐字保留。核对结果写入变更 `after_ref`（`check_result` 分类）与 `CONVERSATION_EXTERNAL_CHECKED` 审计，不改任何业务状态；完成以 `baseline_ref` 冻结任务版本与验收版本，接受声明绑定原用户消息原文，Owner 规则不满足即类型化失败。`SYNC_EXTERNAL_RESULT` 不进补偿计划（只读历史），`COMPLETE_TASK` 归为 `UNDO_ENTRY_MISSING`（完成记录不随整组撤回自动重开，NLS-12）。
+
+## 70. 0069 返回轻量核对记录（2026-10-10 源码实现）
+
+依据测试计划 NLS-05/NLS-08/NLS-09、任务书第五节第 4 项（Slice C）。新表 `project_return_reviews`（`UNIQUE(workspace_id, project_id, fingerprint)`，`status IN ('APPLICABLE','CHANGED')`）：一次核对 = 一个事实与证据指纹行；事实与证据没变复用同一行（重复打开、双击、重启不产生第二次核对），变了得到新指纹重新核对。`result jsonb` 只存变化维度、delta 摘要与完成证据适用性引用，不复制业务正文；核对是同步只读动作，不伪造 Run、不启动进程。回滚风险：纯追加表，回退后旧代码不读它。
+
+## 71. 0070 自然语言撤回的候选白名单（2026-10-10 源码实现）
+
+依据测试计划 NLS-11、任务书第五节第 1 项。只放宽 `ck_conversation_state_change_kind` 增加 `UNDO_STATE_CHANGE`。候选不携带任何 ID：结算时解析同会话**唯一**一条已生效调整并把身份冻结进 `baseline_ref`（0 条或多条记 `resolved:false`，应用时按 `UNDO_TARGET_NOT_FOUND` / `UNDO_TARGET_AMBIGUOUS` 类型化失败）；应用阶段复用按钮撤回的同一应用用例（undo-plan、范围决定与持久 `undo_command_id` 全部不变）。撤回结果本身不进补偿计划（归为 `UNDO_ENTRY_MISSING`，要恢复原调整需重新发起）。
+
+## 72. 0071 内置工作方法与聊天命令（2026-10-11 源码实现）
+
+依据 Skill 专题 §9、ADR-019 与测试计划 §26 BC-02–BC-04。只给 `assist_messages` 追加三列，不改既有列、不回填历史行：
+
+* `method_snapshot jsonb`：内置工作方法的冻结定义与摘要（形状与校验见 `apps/api/src/skills/builtin-methods.ts` 的 `inspectFrozenMethodSnapshot`），发起时冻结，注册表替换后只显示历史身份；
+* `method_action text`：`INSPECT`（只读报告）或 `MODIFY`（用户明确要求修改）；
+* `method_argument text`：用户补充的目标文本（与 `skill_input` 分开，不参与提案解析）。
+
+两条约束：`ck_assist_message_method` 要求三列同时齐备或同时缺席（缺行动会让回执无法解释本次做了什么），且 `method_argument` 不超过 2000 字符；`ck_assist_message_method_exclusive` 要求 `method_snapshot` 与 `skill_snapshot` 互斥（方法与第一方 Skill 是两种身份）。
+
+迁移 `0071` 与并行的 `0072`（学习模式记录）互不依赖。回滚风险：纯追加可空列与 CHECK，回退后旧代码不读这三列；已写入的方法身份不会因为回退而被删除，只是不再投影。
+
+## 73. 0072 学习模式的会话身份与个人学习记录（2026-10-11 源码实现）
+
+依据 ADR-020、领域模型 §13.4 与提示词工作包 A。三处改动，都是**纯追加**，旧代码不读新列/新表即行为逐字不变：
+
+* **会话身份**：`assist_sessions.conversation_mode` 增加取值 `LEARNING`。0059 的 `ck_assist_session_mode` 重建为三分支：`AGENT` 与人设四列全空、`ASSISTANT` 与人设四列全有、`LEARNING` 与人设四列全空（学习身份不由配置文本获得能力）。既有会话仍按 `AGENT` 读出，不回填、不虚构。
+* **消息级记录开关**：`assist_messages.learning_record_disabled boolean NOT NULL DEFAULT false`。随发送命令的命令体持久，因而进入幂等摘要；`false` 即照常记录。它只管「本轮」，与下面 `learning_session_controls` 的会话级开关分开。
+* **五张记录表**：
+  * `learning_concepts`（`UNIQUE(workspace_id, slug)`）：知识点身份，`slug` 是跨轮次找到同一概念的稳定标识，`aliases jsonb` 是有限别名，`generation` 是概念代次。
+  * `learning_evidence`：单条证据。`kind IN ('EXPOSURE','SELF_REPORT','OBSERVED','GAP')` 区分接触/自述/表现/缺口；`disposition IN ('ACTIVE','PENDING_REVIEW','SUPERSEDED','WITHDRAWN')`；`ck_learning_evidence_source` 要求 `LEARNING_MESSAGE` 行必须绑定本轮消息、`USER_CONTROL` 行不得绑定模型消息——这一条同时挡住「模型伪造用户答题/自述」。
+  * `learning_record_epochs`：每 workspace 一行的清除边界（惰性建立，缺行等价 epoch 0）。
+  * `learning_session_controls`：会话级「后续不记录」，带 `revision` 供 CAS。2026-10-13：缺行按开启/revision 0 读取；首次 `expected_revision=0` 用原子 INSERT/ON CONFLICT（只允许已有 revision 0）写为 1，已有非零版本返回冲突，避免首次操作永远失败。没有表/列/约束变化，不新增 migration；旧不带期望版本的请求保持原行为。
+  * `learning_rounds`（`UNIQUE(message_id)`）：一次教学轮次的结算依据，**在调用模型之前**写入，冻结当时的 `epoch`、相关知识点 `concept_generations` 与记录控制；结算只落在仍 `PENDING` 且代次未变的轮次上。`concept_generations` 的形状（2026-10-12 整改 R4 后）：顶层是 `concept_id → generation`，覆盖该 workspace **全部**既有知识点；保留键 `$identities` 另存同一批知识点的 `slug → generation`。冻结身份分区是为了把「本轮合法新建知识点」与「既有知识点被删除后以同名重建」区分开——后者会拿到新 `concept_id`，只有身份基线能识别，从而挡住「靠新建绕过删除代次」。**不改列类型、不加列、不加迁移**：`jsonb` 对旧轮次缺 `$identities` 时按空表处理。
+* **授权**：五表 `SELECT, INSERT, UPDATE, DELETE`（DELETE 只服务单项删除与全清）。`assist_sessions`/`assist_messages` 的既有表级授权已覆盖新增列。
+* **清除与结算的序列化（2026-10-12 整改 R6）**：不新增表或列，用 `pg_advisory_xact_lock(hashtextextended('learning-record-epoch:<workspace_id>', 0))` 把「全清」与「轮次结算」排成一致序列。两处都**先取该事务锁再碰 `learning_rounds` 行**（统一锁顺序，避免与概念行 `for update` 死锁），因此只有两种合法结果：全清先提交 → 旧轮次读到新 `epoch` 判 `LEARNING_ROUND_STALE`；结算先提交 → 全清随后把新证据一并清掉。锁随事务结束自动释放，不落任何持久元数据。
+
+**删除范围**：全清/单项删除清掉 `learning_concepts` 与 `learning_evidence`（评估内容）；`learning_rounds` 只改状态（`CANCELLED`）并**保留**为最小控制元数据——它只有冻结代次与概念代次、不含任何评估正文，保留它才能让迟到轮次得到「依据已过期」这一可核对原因，而不是笼统的「依据不存在」。命令回执沿用全局 `command_receipts`，学习 `result_ref` 设计上不含评估正文。
+
+回滚风险：纯追加表、可空列与 CHECK 重建。回退应用后旧代码不读新表与新列；`conversation_mode='LEARNING'` 的会话在旧代码下会被当成未知模式读出，因此回退前应先确认没有学习会话。真实 PG 出口见[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)「学习模式：协议冻结与工作包 A」行。
+
+## 74. 0073 工具续轮的 assistant 协议数据（2026-10-13）
+
+Migration：`0073_model_tool_turn_assistant_message.sql`，在既有 `run_tool_calls` 增加可空 `assistant_message jsonb`，仅每轮 `ordinal=0` 行保存 `{content, reasoning_content?}`。字段为实际完整模型响应的前置正文及可选 Provider 推理内容，用于把工具结果接回同一轮 assistant 消息；不作为用户授权、业务结论或新的计量数据，不通过工具轨迹 HTTP DTO 暴露。其余工具行不复制内容，`model_calls` 仍只保存原计量与调用状态。
+
+约束要求对象只有上述键、值为字符串、正文与推理合计不超过 512 KiB，非首行只能 NULL。`relay_app` 原表级 INSERT 覆盖新列，既有列级 UPDATE 不包含此列，因此协议数据首次插入后不改写。旧行保留 NULL，恢复只能按空正文/无推理字段读取，不能补造历史响应。
+
+兼容：纯追加可空列，无历史回填；旧应用忽略新列，新应用运行前先应用 0073。回滚删列会丢失已保存的续轮协议信息，后续恢复无法再取得该字段，不应在有依赖该协议的活动 Run 时回退。方法执行的 `execution_method` 另在既有执行请求 candidate 与 Run 契约 JSON 中追加，无新表或列：没有方法的旧契约形状及摘要保持不变。
+
+## 75. 0074 Task 验收参考材料（2026-10-14）
+
+Migration：`0074_task_acceptance_materials.sql`。新增 `task_acceptance_materials`，由 Task 验收材料应用用例独占写入。关联冻结 Task、验收 revision、可空条件、确切 KnowledgeVersion 和可空被测 ArtifactVersion；正文与摘要继续由 Knowledge Owner 保存。缺项合法但显式返回，不转成正式 CheckResult、Review 或完成依据。
+
+外键约束 Task/验收修订/条件和两个版本身份；同项目与 Workspace、材料可用性及被测产物属于该 Task 由应用入口核对。`status` 为 ACTIVE/WITHDRAWN，撤销只更新状态、时间和 revision，保留原关联。审计与关联同一短事务提交，命令复用现有回执。索引覆盖 Workspace/Task 列表，应用角色只有 SELECT/INSERT/UPDATE，无 DELETE。
+
+兼容：纯追加表，无旧数据回填，Breaking Change：No；新应用先应用 0074。应用回退后新表可保留；删表会丢失引用与撤销历史，正文仍留在原 Knowledge，不在材料写入期间回退。
+## 76. 0075 Task 验收试用记录（2026-10-14 基础协议）
+
+Migration：`0075_task_acceptance_trials.sql`。`task_acceptance_trials` 保存 Task/验收修订、ORIGINAL/EVIDENCE_VIEW、样本标签、冻结材料 ID JSON、RUNNING/PAUSED/FINISHED、数据库开始/活动段/结束时间、累计有效毫秒与 revision；试用计时应用用例是唯一写入 Owner。原流程无需材料，证据流程逐项核对既有关系，不复制正文或业务状态。
+
+`task_acceptance_trial_observations` 追加人工准备/总验收毫秒、来源说明和创建时间，全部历史保留，最新一条为当前人工观察；两项可空，未知不写零，总耗时已经包含准备且不能小于已知准备。新观察与试用 revision、审计同事务提交。应用角色试用表 SELECT/INSERT/UPDATE，观察表只有 SELECT/INSERT；无 DELETE。
+
+兼容：两张纯追加表，无回填，Breaking Change：No；旧应用忽略新表，新应用先迁移。回退应用可保留数据；删表丢失计时与纠正来源，不在活动试用期间回退。接口归 HTTP 契约 §10.68。
+## 77. 0076 验收试用冻结比较（2026-10-14 协议）
+
+Migration：`0076_task_acceptance_comparisons.sql`。新增 `task_acceptance_comparisons`，保存 Workspace/Project、已结束 ORIGINAL 试用 ID/冻结 revision、可空确切人工观察 ID、目标整数百分比、样本口径和冻结时间；比较应用入口唯一写入，应用角色只 SELECT/INSERT，无改写或 DELETE。基线时长沿已结束试用读取，人工观察沿不可变观察 ID 读取；基线后续纠正只标旧比较过期，不替换引用。
+
+`task_acceptance_trials` 追加可空 `comparison_id` 外键，只在开始时写入，旧试用不回填。`task_acceptance_trial_observations` 追加非空 `correctness_outcome`，默认 UNKNOWN，约束为 UNKNOWN/NO_ISSUE_REPORTED/ISSUE_REPORTED；旧观察只是未知，不回填成功判断。全部新增值是试用记录，不形成 Task 完成或正式 CheckResult。
+
+兼容：纯追加表/字段，Breaking Change：No，新应用先迁移；旧客户端不带可选字段仍可用，旧应用忽略新表/列。回退应用可保留数据；删表/列丢失比较基线、样本归属及正确性自述，不在活动试用期间回退。API 归 HTTP 契约 §10.69。
+## 78. 0077 会话验收耗时补录（2026-10-14 协议）
+
+Migration：`0077_conversation_acceptance_time.sql`。既有 `conversation_state_changes` 白名单追加 REPORT_ACCEPTANCE_TIME；候选、原用户消息、阶段命令身份和适用基线继续由 Conversation State Owner 保存。请求既有 `interpretation_baseline` JSON 追加 `acceptance_trials` 轻量身份/revision/标题快照，在模型前冻结，不另建请求表。
+
+既有 `task_acceptance_trial_observations` 追加可空 `source_message_id` 外键到 assist_messages；只有原试用观察 Owner 在校验同 Workspace/Project、USER/COMPLETED、AGENT 会话后保存。普通手动补录为 null，旧行不回填。关联仅用于来源，不把消息状态当正式验收或执行权。
+
+兼容：追加候选值/可空列，无数据删除，Breaking Change：No；新应用先迁移，旧应用不支持新候选。回退应用可保留来源列；缩回约束前必须确认没有新候选行，删来源列丢失可追溯引用，不在状态请求应用过程中回退。
+## 79. 0078 基础假设记录（2026-10-14 协议）
+
+Migration：`0078_project_hypotheses.sql`。新增 hypotheses（项目内身份、当前定义版本、revision、当前用户结论指针）、hypothesis_versions（不可变主张/方法/标准、可空 KnowledgeVersion/原用户消息来源）、hypothesis_observations（按定义版本追加摘要与可空资料版本）、hypothesis_conclusions（SUGGESTION/USER_CONFIRMED、判断/理由、可靠/充分声明、冻结观察 ID、原建议引用）。Hypothesis 应用入口是唯一 Owner，观察/版本/结论应用角色只 SELECT/INSERT，身份表 SELECT/INSERT/UPDATE，无 DELETE。
+
+所有观察与结论通过 (hypothesis_id, version) 外键绑定定义；当前用户结论引用独立结论行，原建议不冒充确认。观察集合和资料适用性在查询/确认中核对，未知或旧资料不被替换。会话状态候选白名单追加 CREATE_HYPOTHESIS，仍沿原请求/回执/授权，不另建聊天事实源。
+
+兼容：纯追加表与候选值，无旧数据回填，Breaking Change：No，新应用先迁移；回退应用可保留表，旧应用不识别新候选。删除表丢失假设、来源和判断历史；缩回约束前必须确认没有新候选行，不在状态请求/假设写入期间回退。HTTP 契约 §10.71；不新增正式验收或业务完成关系。
+## 80. 0079 决定前提与复审候选（2026-10-14 协议）
+
+Migration：`0079_decision_review_candidates.sql`。decision_premises 保存明确登记的决定/项目、决定 revision、说明、互斥的 Knowledge/Hypothesis 来源 FK、来源基线 JSON 和前提 revision；决定复审入口独占。KEEP_DECISION 更新来源基线及 revision，原基线仍保留在候选 before_ref/after_ref 和用户理由中。
+
+decision_review_candidates 保存前提/决定 revision、变化指纹、前后引用、原变化命令、PENDING/KEPT/DISMISSED、处理理由/时间与 revision；UNIQUE(premise_id,fingerprint) 去重。应用角色两表 SELECT/INSERT/UPDATE，无 DELETE；复审不改 Decision、Task/Run 或正式验收表。
+
+Knowledge 与 Hypothesis 变化在原事务中复用复审准备入口，只有明确登记的关联参与；未确认假设建议不是已确认依据变化。无通用事件总线或第二套来源正文。兼容：纯追加两表，无旧前提回填，Breaking Change：No；新应用先迁移，回退可保留表，删除会丢失基线/候选/用户判断历史，不在来源写入或候选处理期间回退。
+## 82. 0081 基础下一段工作计划（2026-10-14 协议）
+
+Migration：`0081_personal_planning.sql`。task_time_estimates 保存 Task/确切验收复合 FK、独立估时 revision、五个可空时长和用户来源说明；UNIQUE(task_id,revision)，应用角色只 SELECT/INSERT，新估时追加而不覆写原记录。elapsed 独立声明，分项不自动求和；旧记录不回填未知时长，不写 Task 执行事实。
+
+period_plans 保存 Workspace/Project FK、标题、可用容量、数据库起止时刻、冻结依据 JSON、当前逐项选择 JSON 与 revision。依据不因读取或接受重建；只更新候选选择/理由和诊断 Task 引用。PersonalPlanning 为唯一逻辑 Owner，应用角色 SELECT/INSERT/UPDATE，无 DELETE。诊断接受的 Task/验收创建、选择、审计和原命令回执同事务提交，沿原 Task Owner；不新建 Run 或权限记录。
+
+兼容：纯追加两表，无旧行迁移或新依赖，Breaking Change：No；新应用先迁移。回退可保留两表，删除会丢失估时历史与计划选择；已创建诊断 Task 是原领域事实，不能通过删除计划撤销，不在计划应用时回退。
+
+## 81. 0080 基础工作段复盘（2026-10-14 协议）
+
+Migration：`0080_work_segments.sql`。work_segments 保存项目内身份、确认预期、只含既有 Task/验收/完成引用的 baseline JSON、可空原用户消息、数据库起止时间、OPEN/FINISHED、revision 和结束结果 JSON；结束快照不再改写。工作段应用入口是唯一 Owner，JSON 只服务当前选定 Task 范围，不建立通用计划/统计平台。
+
+work_segment_events 保存 REWORK/HUMAN_INTERVENTION 候选、范围内可空 Task/Run FK、描述、可空人工 duration_ms、CANDIDATE/CONFIRMED/WITHDRAWN、revision 和处理历史 JSON。用户确认/撤回追加历史，保留原候选，不删除；工作段及事件均 SELECT/INSERT/UPDATE，无 DELETE。Task/Run/Completion/ModelCall 仍归原 Owner，复盘只读其确切事实，不补金额或未记录时间。
+
+兼容：纯追加两表与 START_WORK_SEGMENT 会话候选，旧行无回填，Breaking Change：No；新应用先迁移。回退可保留表，删除丢失预期、结果和纠正历史；缩回会话约束前确认没有新候选，不在工作段/会话写入过程中回退。
+
+## 86. 0085 任务链执行规格（2026-10-14 协议）
+
+受控修改/检查接续：复用该 JSONB 列保存 scope_grant、确切检查清单/服务端 trust_basis 和原 MODIFY 方法，无新表/列/迁移。创建只是候选规格；有效 Run 范围仍由既有 run_scope_grants Owner 在原 Delegate 同一事务创建，期限收窄到本链期限且不跨 Run 终态。旧项/旧 Run/既有授权不回填、不改写，链续授权不更新已签发的 Run 授权。协议归 HTTP §10.79，Breaking Change：No；回滚需先停止新规格准入并保留原授权/动作账本。
+
+Migration：`0085_task_chain_execution_specs.sql`。task_chain_items 追加 execution_spec JSONB NOT NULL DEFAULT `{}`，旧项为空，不回填来源、文件或方法。创建保存确切资料版本/根基线、只读资源/连接依据、固定读或有界工具循环及可选原会话方法绑定；只读查询不重算/升级规格，不修改当前 Task 或原资料。TaskChain 应用入口独占，原 Run/动作/Permission Owner 不变。
+
+资源冻结配置 revision/身份键/根路径，不冻结 resource_epoch：该 epoch 是 Gateway 领取执行权的栅栏，正常读取会推进，不能冒充业务配置版本。连接冻结 version/capability，资料引用保留不可变版本和原头基线；规格规范 JSON 摘要绑定专用原命令，空旧规格不改变原摘要。没有新增库、事件总线、模型调用或权限授权表。
+
+兼容：纯追加列，无旧来源伪造、新依赖或公开旧请求必填变化，Breaking Change：No；应用/Worker 先迁移。降级保留列和新规格/原 Run/回执，旧代码不应重新解释新规格；删列会丢失来源和执行范围，不能用删除规格回滚已完成业务或外部操作。
+
+## 85. 0084 基础有限任务链（2026-10-14 协议）
+
+Migration：`0084_task_chains.sql`。task_chains 保存 Workspace/Project、固定依据 JSON、队列协调状态/revision、内部运行实例元数据、明确累计任务/调用上限与已预留数、有效期、停止目标/原 control_request FK、恢复命令身份和授权历史。运行实例字段只控制重开后接续，不作为业务身份或 Worker 已停证明。
+
+task_chain_items 保存有序既有 Task/验收复合 FK、冻结依据、当前准入 Task revision、原 ready/Delegate 命令 ID、唯一 Run FK 和确切 Completion FK；UNIQUE(chain_id,ordinal/task_id) 固定范围，原 Run/完成仍由原 Owner 写。两表应用角色 SELECT/INSERT/UPDATE，无 DELETE。链绑定/任务预留沿原 Delegate 事务；调用预留通过专用链仓库与原模型账本 STARTED 共用事务，失败回滚，未知不清零。
+
+兼容：纯追加两表，无历史链回填、新依赖或外部效果；Breaking Change：No，新应用先迁移，API/Worker Schema 就绪后接新协议。降级先停止链接续与在途准入，保留表/原 Task/Run/回执/账本；删除会丢失授权、累计预算和接续依据，不能靠删除链回滚已完成事实或通知在途动作已停。
+
+## 84. 0083 基础一次性项目提醒（2026-10-14 协议）
+
+Migration：`0083_project_reminders.sql`。project_reminders 保存 Workspace/Project FK、标题、timestamptz 实际时刻、原时区、ENABLED/PAUSED/DISABLED、配置 revision 与独立 schedule_generation、追加配置 history；当前代次只因明确改实际时刻变化，不按显示或暂停/恢复生成第二次发生。
+
+project_reminder_occurrences 保存稳定 ID、Reminder/Workspace/Project FK、代次/config_revision、原标题/时刻/时区、missed、PENDING/HANDLED/DISMISSED、revision、处理理由/时间。UNIQUE(reminder_id,schedule_generation) 防止扫描/重开重发；配置后续编辑不改原事项。两表应用角色 SELECT/INSERT/UPDATE，无 DELETE，提醒应用入口唯一逻辑 Owner。触发事务只写事项和审计；通知复用已有 attention_notification_receipts，领取/投递结果不成为事项处理事实，不另建通知库或业务完成记录。
+
+兼容：纯追加两表，无旧提醒回填、新依赖或自动模型调用，Breaking Change：No；新应用先迁移，扫描在 Schema 未就绪时跳过。回退保留两表；删除会丢失确认设置、发生/处理历史与去重依据，降级前停止该版本扫描，不在发生/编辑/处理期间回退。已发通知属于外部投递，不能伪称与数据库原子或用删行撤销。
+
+## 83. 0082 基础范围推演（2026-10-14 协议）
+
+Migration：`0082_plan_scope_simulations.sql`。plan_scope_simulations 保存 Workspace/Project、原 period_plan FK/修订、冻结基线与来源 JSON、三方案 JSON、PROPOSED/SELECTED、选项/理由/新计划 FK、revision 与创建时间。只更新选定引用和状态，冻结来源及方案不在读回时重算；应用角色 SELECT/INSERT/UPDATE，无 DELETE，PersonalPlanning 唯一逻辑 Owner。
+
+选择经原计划事务内应用入口写 period_plans 新候选，再保存选择/审计/原命令回执；原计划及业务 Task/Run 不改变。逐项应用和诊断创建继续沿 0081/Task Owner，推演 GET 读取所选计划当前每项状态，不另存第二份应用结果。估时可靠性声明仅属于推演，不覆写 task_time_estimates；来源变化标不适用而保留旧比较。
+
+兼容：纯追加一表，无旧行回填或新依赖，Breaking Change：No；新应用先迁移。回退可保留该表；删除会丢失比较和选择历史，已生成计划/诊断 Task 不能由删除推演撤销，不在方案选择/计划应用期间回退。

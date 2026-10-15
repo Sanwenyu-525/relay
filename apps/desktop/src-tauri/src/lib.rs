@@ -65,6 +65,13 @@ fn is_allowed_frontend_navigation(url: &tauri::Url) -> bool {
 }
 const WINDOW_TITLE: &str = "Relay Agent";
 const NODE_VERSION: &str = "v24.21.0";
+/// API 与 supervisor 的私有就绪握手预算。两者都是打包的 Node 进程，冷启动需要逐个
+/// 打开 3404 个 ESM 模块文件（约 112 MiB）；在装有文件级端点防护（深信服 EDR、
+/// Defender 实时扫描、电脑管家）的机器上，实测仅读取这批文件就需约 47 秒，原来的
+/// 30 秒预算会把正常启动误判为失败并让窗口以 panic 退出。
+/// 该预算只约束「进程存活但静默」这一种情形：进程一旦退出，EOF 会立刻结束等待，
+/// 所以放宽预算不会推迟真实失败的报错。
+const DESKTOP_READY_TIMEOUT: Duration = Duration::from_secs(180);
 #[cfg(windows)]
 const SUPERVISOR_PROTOCOL_MARKER: &str = "relay-desktop-supervisor-v1";
 
@@ -400,7 +407,7 @@ fn iso_utc_timestamp() -> String {
 }
 
 fn read_startup(stdout: impl std::io::Read + Send + 'static, nonce: &str) -> Result<(u16, String), String> {
-    read_startup_with_timeout(stdout, nonce, Duration::from_secs(30))
+    read_startup_with_timeout(stdout, nonce, DESKTOP_READY_TIMEOUT)
 }
 
 fn read_startup_with_timeout(
@@ -526,7 +533,7 @@ fn read_supervisor_startup(
     failed: Arc<AtomicBool>, worker_log: Option<PathBuf>,
 ) -> Result<Vec<String>, String> {
     read_supervisor_startup_with_timeouts(stdout, nonce, launch_id, stopped_launches, failed,
-        worker_log, Duration::from_secs(30), RECOVERY_IDLE_TIMEOUT, RECOVERY_TOTAL_TIMEOUT)
+        worker_log, DESKTOP_READY_TIMEOUT, RECOVERY_IDLE_TIMEOUT, RECOVERY_TOTAL_TIMEOUT)
 }
 
 #[cfg(windows)]
@@ -825,10 +832,17 @@ fn start_api(app: &tauri::AppHandle, single_instance: SingleInstanceGuard) -> Re
         ("RELAY_FILE_IO_HELPER".into(), file_io_helper.as_os_str().to_os_string()),
     ];
     if tauri::is_dev() { api_env.push(("RELAY_DESKTOP_EXTRA_ORIGIN".into(), DEV_ORIGIN.into())); }
-    let mut api = ManagedProcess::spawn(&node, &api_args, &api_env, launch.api_job, None)?;
+    // D2 同款：API 也是托管子进程，stderr 不能丢进 NUL，否则窗口 panic 之后
+    // 无从区分「启动慢」还是「启动失败」，只能看到一个退出码。
+    let mut api = ManagedProcess::spawn(&node, &api_args, &api_env, launch.api_job, Some(&worker_log))?;
     let frame = serde_json::json!({ "nonce": nonce, "bearerToken": token });
     api.write_frame(&frame.to_string())?;
-    let (port, workspace_id) = read_startup(api.take_stdout()?, &nonce)?;
+    let ready_at = std::time::Instant::now();
+    let (port, workspace_id) = read_startup(api.take_stdout()?, &nonce).map_err(|error| {
+        append_worker_log(&worker_log, &format!(
+            "host: bundled API readiness failed after {} s: {error}", ready_at.elapsed().as_secs()));
+        error
+    })?;
     let supervisor_args = [env_file.clone(), supervisor_entry.clone().into_os_string()];
     let mut supervisor = ManagedProcess::spawn(&node, &supervisor_args, &[
         ("RELAY_DATA_ROOT".into(), data_root.as_os_str().to_os_string()),

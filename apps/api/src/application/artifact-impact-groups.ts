@@ -9,6 +9,7 @@ import { lockArtifactInWorkspace } from './guards.js';
 import { readArtifactImpactCheck } from './artifact-impact-checks.js';
 import { createRepositories } from './unit-of-work.js';
 import type { NewCombinationCheckItem } from '../artifact/impact-repository.js';
+import { impactDependencyOrder, type ImpactGroupDependency } from './impact-group-selections.js';
 
 /**
  * N02 跨成果共创。候选组只回答「哪几个确切目标被放在一起看」，逐项应用仍走既有
@@ -55,6 +56,7 @@ export interface ImpactCandidateGroupDto extends JsonObject {
   };
   readonly unanalysed_scope: readonly string[];
   readonly combination_check_ids: readonly string[];
+  readonly dependencies: readonly JsonObject[];
 }
 
 async function loadGroupScope(db: DbExecutor, workspaceId: string, groupId: string) {
@@ -70,12 +72,14 @@ async function loadGroupScope(db: DbExecutor, workspaceId: string, groupId: stri
 }
 
 export async function createImpactCandidateGroup(db: DbExecutor, input: { workspaceId: string;
-  checkId: string; targetVersionIds: readonly string[]; commandId: string }): Promise<
+  checkId: string; targetVersionIds: readonly string[]; commandId: string;
+  dependencies?: readonly ImpactGroupDependency[] }): Promise<
   CommandOutcome<{ readonly group_id: string; readonly item_count: string }>> {
   return runIdempotentCommand(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
     commandId: input.commandId, commandType: 'CreateImpactCandidateGroup',
     target: { impact_check_id: input.checkId },
-    body: { target_version_ids: [...input.targetVersionIds] },
+    body: { target_version_ids: [...input.targetVersionIds],
+      ...(input.dependencies === undefined ? {} : { dependencies: input.dependencies.map(d => ({ ...d })) }) },
     execute: async (r) => {
       const check = await readArtifactImpactCheck(db, input.workspaceId, input.checkId);
       const checkRow = await r.impacts.read(input.checkId);
@@ -97,6 +101,7 @@ export async function createImpactCandidateGroup(db: DbExecutor, input: { worksp
           new Set(selected).size !== selected.length) {
         throw invalidTransition(`候选组须选择 1–${MAX_GROUP_ITEMS} 个不重复的已登记直接引用目标。`);
       }
+      impactDependencyOrder(selected, input.dependencies ?? []);
       const relationByVersion = new Map<string, { relation: string; availability: string;
         analysed: boolean }>();
       for (const target of check.direct_targets) {
@@ -125,7 +130,8 @@ export async function createImpactCandidateGroup(db: DbExecutor, input: { worksp
         checkId: checkRow.id, sourceArtifactId: source.id,
         beforeVersionId: checkRow.source_before_version_id,
         afterVersionId: checkRow.source_after_version_id,
-        sourceArtifactRevision: source.revision });
+        sourceArtifactRevision: source.revision,
+        dependencies: (input.dependencies ?? []).map(d => ({ ...d })) });
       await r.impacts.insertGroupItems(rows.map((row) => ({ groupId, ordinal: row.ordinal,
         targetArtifactId: artifacts.get(row.targetVersionId)!, targetVersionId: row.targetVersionId,
         relation: row.relation, speculative: row.speculative })));
@@ -190,7 +196,7 @@ export async function readImpactCandidateGroup(db: DbExecutor, workspaceId: stri
       unavailable: views.filter((view) => view.availability !== 'AVAILABLE').length,
     },
     unanalysed_scope: check.unanalysed_scope,
-    combination_check_ids: combinationChecks };
+    combination_check_ids: combinationChecks, dependencies: group.dependencies };
 }
 
 interface CombinationCheckItemView extends JsonObject {

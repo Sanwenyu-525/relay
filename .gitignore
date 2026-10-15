@@ -60,3 +60,10 @@ coverage/
 /.relay-dev/
 
 .superpowers/
+
+# 代理会话导出：opencode `opencode export <id>` 的默认落点是仓库根目录，
+# 含完整对话与用量，不进入版本库。需要留档时放到 output/acceptance-raw/
+/ses_*.json
+
+# 其他代理工作流在本机留下的记忆目录，不属于本仓库事实源
+.workbuddy-ai/

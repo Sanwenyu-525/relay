@@ -261,10 +261,11 @@ export async function getArtifactImpactCandidate(http: RelayHttp, id: string): P
 }
 
 /** N02：组只关联已登记目标，不调用模型；响应不明按原 command_id 核对。 */
-export async function createImpactCandidateGroup(http: RelayHttp, input: { readonly checkId: string; readonly targetVersionIds: readonly string[]; readonly commandId: string }): Promise<string> {
+export async function createImpactCandidateGroup(http: RelayHttp, input: { readonly checkId: string; readonly targetVersionIds: readonly string[]; readonly commandId: string; readonly dependencies?: readonly { readonly targetVersionId: string; readonly dependsOnTargetVersionId: string }[] }): Promise<string> {
   const row = object(commandEnvelopeFrom(await http.request(http.workspacePath(`/impact-checks/${encodeURIComponent(input.checkId)}/candidate-groups`), {
     method: "POST", body: JSON.stringify({ command_id: input.commandId,
-      target_version_ids: input.targetVersionIds }) })).result, "impact group request");
+      target_version_ids: input.targetVersionIds,
+      ...(input.dependencies === undefined ? {} : { dependencies: input.dependencies.map(d => ({ target_version_id: d.targetVersionId, depends_on_target_version_id: d.dependsOnTargetVersionId })) }) }) })).result, "impact group request");
   return string(row, "group_id", "impact group request");
 }
 
@@ -283,10 +284,11 @@ export async function getCombinationCheck(http: RelayHttp, id: string): Promise<
   return combinationCheckFrom(await http.request(http.workspacePath(`/combination-checks/${encodeURIComponent(id)}`)));
 }
 
-export async function applyArtifactImpactCandidate(http: RelayHttp, input: { readonly candidateId: string; readonly expectedTargetRevision: DecimalRevision; readonly commandId: string }): Promise<string> {
+export async function applyArtifactImpactCandidate(http: RelayHttp, input: { readonly candidateId: string; readonly expectedTargetRevision: DecimalRevision; readonly commandId: string; readonly groupSelectionId?: string }): Promise<string> {
   const row = object(commandEnvelopeFrom(await http.request(http.workspacePath(`/impact-candidates/${encodeURIComponent(input.candidateId)}/apply`), {
     method: "POST", body: JSON.stringify({ command_id: input.commandId,
-      expected_target_revision: input.expectedTargetRevision }) })).result, "apply impact candidate");
+      expected_target_revision: input.expectedTargetRevision,
+      ...(input.groupSelectionId === undefined ? {} : { group_selection_id: input.groupSelectionId }) }) })).result, "apply impact candidate");
   return string(row, "version_id", "apply impact candidate");
 }
 

@@ -1,8 +1,9 @@
 import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 
-import { applyConversationExecution, interpretConversationMessage } from
-  '../application/conversation-execution.js';
+import type { JsonObject } from '../infrastructure/json.js';
+import { applyConversationExecution, interpretConversationMessage, isReadOnlyConversationExecution }
+  from '../application/conversation-execution.js';
 import { resourceNotFound } from '../application/domain-error.js';
 import { createRepositories } from '../application/unit-of-work.js';
 import { toDecimalString } from '../shared/decimal.js';
@@ -35,6 +36,7 @@ const interpretationResult = Type.Object({
   task_id: Type.Union([uuid, Type.Null()]),
   run_id: Type.Union([uuid, Type.Null()]),
   revision: Type.String(),
+  auto_start: Type.Boolean(),
 }, strict);
 
 const applyResult = Type.Object({
@@ -57,6 +59,8 @@ const requestProjection = Type.Object({
   task_id: Type.Union([uuid, Type.Null()]),
   run_id: Type.Union([uuid, Type.Null()]),
   revision: Type.String(),
+  /** 与解释回执同源：恢复/刷新后也据此判断这次只读请求是否已可直接启动。 */
+  auto_start: Type.Boolean(),
   created_at: Type.String(),
   updated_at: Type.String(),
 }, strict);
@@ -65,6 +69,7 @@ function project(row: {
   readonly id: string; readonly session_id: string; readonly source_message_id: string;
   readonly decision: string; readonly status: string; readonly candidate_status: string;
   readonly root_path: string; readonly clarification: { readonly questions?: unknown } | null;
+  readonly candidate: JsonObject | null;
   readonly task_id: string | null; readonly run_id: string | null; readonly revision: bigint;
   readonly created_at: Date; readonly updated_at: Date;
 }) {
@@ -74,6 +79,7 @@ function project(row: {
     candidate_status: row.candidate_status, root_path: row.root_path,
     questions: Array.isArray(raw) ? raw.filter((item) => typeof item === 'string') : [],
     task_id: row.task_id, run_id: row.run_id, revision: toDecimalString(row.revision),
+    auto_start: isReadOnlyConversationExecution(row),
     created_at: row.created_at.toISOString(), updated_at: row.updated_at.toISOString() };
 }
 

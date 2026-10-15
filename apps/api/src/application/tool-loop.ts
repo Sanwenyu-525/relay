@@ -298,6 +298,8 @@ export async function persistToolRound(db: DbExecutor, input: {
   readonly modelCallId: string;
   readonly round: number;
   readonly calls: readonly ModelToolCall[];
+  readonly preamble?: string;
+  readonly reasoningContent?: string | undefined;
   readonly plan: ToolLoopPlan;
   readonly usedCalls: number;
   readonly cancelled: boolean;
@@ -355,6 +357,9 @@ export async function persistToolRound(db: DbExecutor, input: {
       step_attempt_id: input.stepAttemptId, model_call_id: input.modelCallId,
       round: input.round, ordinal, provider_tool_call_id: call.providerToolCallId,
       tool_name: call.name, arguments: argumentsValue ?? {}, arguments_sha256: argumentsSha,
+      assistant_message: ordinal === 0 ? { content: input.preamble ?? '',
+        ...(input.reasoningContent === undefined ? {}
+          : { reasoning_content: input.reasoningContent }) } : null,
       adaptation_of: adaptation?.of ?? null, adapted_path: adaptation?.path ?? null });
     if (rejection !== null) {
       await repository.reject(id, rejection.reason, rejection.message);
@@ -561,7 +566,11 @@ export function buildToolTurns(rows: readonly RunToolCallRow[],
           operationResult.outcome === 'FAILED' ||
           typeof operationResult.reason === 'string' });
     }
-    turns.push({ calls, results: turnResults });
+    const assistant = bucket.find((row) => row.ordinal === 0)?.assistant_message;
+    turns.push({ calls, results: turnResults,
+      preamble: typeof assistant?.content === 'string' ? assistant.content : '',
+      ...(typeof assistant?.reasoning_content === 'string'
+        ? { reasoningContent: assistant.reasoning_content } : {}) });
   }
   return turns;
 }

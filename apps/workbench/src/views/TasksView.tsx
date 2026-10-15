@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Info, Plus, RotateCcw, Search } from "lucide-react";
+import { Inbox, Info, ListTodo, Plus, RotateCcw, Search, SearchX } from "lucide-react";
 import type { RelayApiClient, RelayTaskSummary } from "../api/relayClient";
+import EmptyState from "../components/EmptyState";
 import ResponsiveRail from "../components/ResponsiveRail";
 import AttentionQueue from "../components/AttentionQueue";
 import PageHeader from "../components/PageHeader";
@@ -12,6 +13,7 @@ import { fixtureModeFromQuery } from "../lib/fixtureMode";
 import { executorLabels, interactionModeLabels, taskStatusLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
+import "./TasksView.css";
 import type { InteractionMode, ProjectSummary, TaskStatus, TaskSummary } from "../types";
 
 const statusOptions = Object.keys(taskStatusLabels) as TaskStatus[];
@@ -62,7 +64,6 @@ export default function TasksView() {
   useEffect(() => { if (!live) void load(); return () => { requestVersion.current++; }; }, [live, mode, scope, projectFilter, statusFilter, modeFilter, search]);
   useEffect(() => { setProjectFilter("all"); }, [scope]);
   const hasFilters = projectFilter !== "all" || statusFilter !== "all" || modeFilter !== "all" || search !== "";
-  const anyFilterActive = hasFilters || scope === "inbox";
   const clearFilters = () => { setProjectFilter("all"); setStatusFilter("all"); setModeFilter("all"); setSearch(""); };
   const projectTitle = (projectId: string | null) => projectId === null ? "未归属项目" : projects.find((project) => project.id === projectId)?.title ?? projectId;
   const openCreate = () => navigate(`/tasks?view=create${scope === "inbox" ? "&tab=inbox" : ""}`);
@@ -87,7 +88,25 @@ export default function TasksView() {
     <nav className="subnav" aria-label="任务范围"><Link className={`subnav-item${scope === "all" ? " subnav-item--active" : ""}`} to="/tasks" data-testid="tasks-tab-all" aria-current={scope === "all" ? "page" : undefined}>全部</Link><Link className={`subnav-item${scope === "inbox" ? " subnav-item--active" : ""}`} to="/tasks?tab=inbox" data-testid="tasks-tab-inbox" aria-current={scope === "inbox" ? "page" : undefined}>收件箱</Link><Link className="subnav-item" to="/tasks?tab=attention">人工待处理</Link></nav>
     <div className="list-toolbar list-toolbar--compact"><label className="filter-field">项目<select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)} name="task-filter-project" disabled={scope === "inbox"}><option value="all">全部</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}<option value="inbox">未归属项目</option></select></label><label className="filter-field">状态<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as TaskStatus | "all")} name="task-filter-status"><option value="all">全部</option>{statusOptions.map((status) => <option key={status} value={status}>{taskStatusLabels[status]}</option>)}</select></label><label className="filter-field">执行模式<select value={modeFilter} onChange={(event) => setModeFilter(event.target.value as InteractionMode | "all")} name="task-filter-mode"><option value="all">全部</option>{modeOptions.map((item) => <option key={item} value={item}>{interactionModeLabels[item]}</option>)}</select></label><label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">按任务名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="task-search" placeholder="搜索任务" /></label></div>
     {refreshing && <p className="helper-text" role="status" data-testid="tasks-refreshing">正在按当前筛选更新列表，已显示的内容保持可见。</p>}
-    {tasks.length === 0 ? <div className="page-state"><p>{anyFilterActive ? "当前筛选没有匹配的任务；清除筛选后可以看到全部任务。" : "还没有任务。可以先新建一项任务，或从项目页创建项目内任务。"}</p>{anyFilterActive ? <button className="secondary-button" type="button" data-testid="task-clear-filters" onClick={clearFilters}>清除筛选</button> : <button className="primary-button" type="button" onClick={openCreate}><Plus aria-hidden="true" />新建任务</button>}</div> : <div className="table-scroll"><div className="data-table"><div className="data-row data-row--head data-row--tasks" aria-hidden="true"><span className="data-cell">任务</span><span className="data-cell">项目</span><span className="data-cell">工作状态</span><span className="data-cell">执行模式</span><span className="data-cell">当前执行者</span></div><ul className="data-list">{tasks.map((task) => <li key={task.id}><Link className="data-row data-row--tasks data-row--interactive" to={`/tasks/${task.id}`} data-testid={`task-row-${task.id}`} style={rowLinkStyle}><span className="data-cell"><strong>{task.title}</strong><small>任务修订 v{task.revision}</small></span><span className="data-cell data-cell--meta">{projectTitle(task.projectId)}</span><span className="data-cell"><StatusChip status={task.status} />{(task.waitingReason ?? task.blockedReason) && <small>{task.waitingReason ?? task.blockedReason}</small>}</span><span className="data-cell data-cell--meta">{interactionModeLabels[task.mode]}</span><span className="data-cell data-cell--meta">{executorLabels[task.executor]}</span></Link></li>)}</ul></div></div>}
+    {tasks.length === 0
+      ? hasFilters
+        // 筛选无匹配：只能说当前筛选下没有命中，不能说工作空间没有任务。
+        ? <EmptyState size="compact" icon={SearchX} title="当前筛选没有匹配的任务"
+          description="清除筛选后可以看到全部任务；筛选只作用于已加载范围，不代表工作空间里没有别的工作。"
+          testId="tasks-fixture-no-match"
+          actions={<button className="secondary-button" type="button" data-testid="task-clear-filters" onClick={clearFilters}>清除筛选</button>} />
+        // 收件箱范围自身的空不等于「筛选无匹配」：范围没变，清除筛选也回不到全部任务。
+        : scope === "inbox"
+          ? <EmptyState size="compact" icon={Inbox} title="收件箱里没有任务"
+            description="收件箱只收未归属项目的人工任务。把任务挂到项目下，它就不再出现在这里；也可以直接在这里新建一条。"
+            testId="inbox-empty"
+            actions={<button className="primary-button" type="button" onClick={openCreate}>新建任务</button>} />
+          : <EmptyState icon={ListTodo} as="h2" title="还没有任务"
+            description="任务是一次可验收的工作：写清验收条件后即可开始，完成时留下确切产物版本。可以直接新建一条，也可以先建项目再在项目内拆任务。"
+            testId="tasks-empty"
+            actions={<><button className="primary-button" type="button" onClick={openCreate}><Plus aria-hidden="true" />新建任务</button>
+              <Link className="secondary-button" to="/projects">打开项目</Link></>} />
+      : <div className="table-scroll"><div className="data-table"><div className="data-row data-row--head data-row--tasks" aria-hidden="true"><span className="data-cell">任务</span><span className="data-cell">项目</span><span className="data-cell">工作状态</span><span className="data-cell">执行模式</span><span className="data-cell">当前执行者</span></div><ul className="data-list">{tasks.map((task) => <li key={task.id}><Link className="data-row data-row--tasks data-row--interactive" to={`/tasks/${task.id}`} data-testid={`task-row-${task.id}`} style={rowLinkStyle}><span className="data-cell"><strong title={task.title}>{task.title}</strong><small>任务修订 v{task.revision}</small></span><span className="data-cell data-cell--meta">{projectTitle(task.projectId)}</span><span className="data-cell"><StatusChip status={task.status} />{(task.waitingReason ?? task.blockedReason) && <small>{task.waitingReason ?? task.blockedReason}</small>}</span><span className="data-cell data-cell--meta">{interactionModeLabels[task.mode]}</span><span className="data-cell data-cell--meta">{executorLabels[task.executor]}</span></Link></li>)}</ul></div></div>}
     <p className="list-footer-note"><Info aria-hidden="true" />完成依据来自产物、验收与提交；工作状态、执行模式与当前执行者是三个独立事实，不能用一枚标签合并。</p>
   </div><ResponsiveRail label="查看范围说明" title="当前范围"><div className="rail-content"><h2>当前范围</h2><p className="rail-intro">{scope === "inbox" ? "收件箱只包含未归属项目的人工任务。" : "这里是整个工作空间的任务，不限定在某个项目内。"}</p><section className="rail-section"><h3>筛选保持作用域</h3><p>项目、状态与执行模式的筛选只作用于当前列表；切换“全部/收件箱”会重置项目筛选，避免把上一个范围的条件带到新范围。</p></section><section className="rail-section"><h3>未归属任务</h3><p>未归属项目的任务只允许人工事项；把它们关联到项目需要显式操作，不会自动创建 Project。</p><Link className="secondary-button secondary-button--wide" to="/tasks?tab=inbox">查看收件箱任务</Link></section><section className="rail-section"><h3>委托前确认</h3><p>AI 委托是执行意图，不是当前状态；只有满足执行条件后，单独的委托流程才能确认执行者。</p></section></div></ResponsiveRail></div></section>;
 }
@@ -194,20 +213,35 @@ function LiveTaskListView({ client, scope, onCreate, onCreateLightweight }: {
         <label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">在已加载任务中按名称搜索</span>
           <input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="task-search"
             placeholder="搜索已加载任务" /></label></div>
-      {loading ? <div className="page-state" aria-live="polite"><p>正在读取真实{scope === "inbox" ? "收件箱" : "工作空间"}任务…</p></div> :
+      {loading ? <div className="page-state" aria-live="polite"><p>正在从本机服务读取{scope === "inbox" ? "收件箱" : "工作空间"}任务…</p></div> :
         error ? <div className="page-state page-state--error" role="alert"><p>{error}</p>
           <button className="secondary-button" type="button" onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />重新读取</button></div> : <>
           <p className="list-count-note" data-testid={scope === "inbox" ? "inbox-count" : "tasks-live-count"}>已加载 {items.length} 项 · 当前筛选显示 {visible.length} 项
             {nextCursor ? " · 仍有后续页" : " · 已到列表末页"}。筛选只作用于已加载任务。</p>
-          {visible.length === 0 ? <div className="page-state"><p>{items.length === 0
-            ? scope === "inbox" ? "当前收件箱没有任务。" : "当前工作空间没有任务。"
-            : "已加载任务中没有匹配项；后续页可能仍有匹配任务。"}</p>
-            {hasFilters && <button className="secondary-button" type="button" onClick={() => {
-              setProjectFilter("all"); setStatusFilter("all"); setModeFilter("all"); setSearch("");
-            }}>清除筛选</button>}</div> :
+          {visible.length === 0
+            ? items.length === 0
+              // 收件箱是「未归属项目的人工任务」这一范围，它的空与整个工作空间的空不是同一件事。
+              ? scope === "inbox"
+                ? <EmptyState size="compact" icon={Inbox} title="收件箱里没有任务"
+                  description="收件箱只收未归属项目的人工任务。把任务挂到项目下，它就不再出现在这里；也可以直接在这里新建一条。"
+                  testId="inbox-empty"
+                  actions={<button className="primary-button" type="button" onClick={onCreate}>新建任务</button>} />
+                : <EmptyState icon={ListTodo} as="h2" title="还没有任务"
+                  description="任务是一次可验收的工作：写清验收条件后即可开始，完成时留下确切产物版本。可以直接新建一条，也可以先建项目再在项目内拆任务。"
+                  testId="tasks-empty"
+                  actions={<><button className="primary-button" type="button" onClick={onCreate}>新建任务</button>
+                    <Link className="secondary-button" to="/projects">打开项目</Link></>} />
+              // 筛选无匹配与工作空间为空不同：只能说已加载范围内没有命中。
+              : <EmptyState size="compact" icon={SearchX} title="已加载任务里没有匹配项"
+                description={`已加载 ${items.length} 项，当前筛选显示 0 项。状态、模式与标题筛选只作用于已加载范围，后续页可能仍有匹配任务。`}
+                testId="tasks-live-no-match"
+                actions={hasFilters ? <button className="secondary-button" type="button" onClick={() => {
+                  setProjectFilter("all"); setStatusFilter("all"); setModeFilter("all"); setSearch("");
+                }}>清除筛选</button> : undefined} />
+            :
             <div className="table-scroll"><div className="data-table"><div className="data-row data-row--head data-row--tasks" aria-hidden="true"><span className="data-cell">任务</span><span className="data-cell">项目</span><span className="data-cell">工作状态</span><span className="data-cell">执行模式</span><span className="data-cell">当前执行者</span></div>
               <ul className="data-list">{visible.map((task) => <li key={task.id}><Link className="data-row data-row--tasks data-row--interactive"
-                to={`/tasks/${task.id}`} data-testid={`task-row-${task.id}`}><span className="data-cell"><strong>{task.title}</strong><small>任务修订 v{task.revision}</small></span>
+                to={`/tasks/${task.id}`} data-testid={`task-row-${task.id}`}><span className="data-cell"><strong title={task.title}>{task.title}</strong><small>任务修订 v{task.revision}</small></span>
                 <span className="data-cell data-cell--meta">{task.projectId === null ? "未归属项目"
                   : projectTitles[task.projectId] ?? `项目 ${task.projectId}`}</span><span className="data-cell"><StatusChip status={task.status} />
                   {task.waitingReason && <small>{task.waitingReason}</small>}</span><span className="data-cell data-cell--meta">{interactionModeLabels[task.mode]}</span>
@@ -217,16 +251,22 @@ function LiveTaskListView({ client, scope, onCreate, onCreateLightweight }: {
         </>}
     </div><ResponsiveRail label="查看任务范围" title="已加载范围"><div className="rail-content"><h2>{scope === "inbox" ? "收件箱范围" : "全工作空间范围"}</h2>
       <p className="rail-intro">{scope === "inbox" ? "服务端只返回未归属项目的人工任务。" : "服务端返回当前工作空间的项目内与未归属任务。"}每页最多 50 项；状态、模式和标题筛选只处理已加载的页，不代表全量任务总数。</p>
-      {scope === "all" && <><form className="create-form" noValidate onSubmit={(event) => { event.preventDefault();
-        if (liveProjectId.trim()) navigate(`/projects/${encodeURIComponent(liveProjectId.trim())}/tasks`);
-      }}><label className="field"><span className="field-label">用项目 ID 打开任务</span><input value={liveProjectId}
-        onChange={(event) => setLiveProjectId(event.target.value)} name="live-task-project-id" autoComplete="off" placeholder="Project UUID" /></label>
-        <button className="secondary-button" type="submit" data-testid="tasks-live-open-project" disabled={!liveProjectId.trim()}>打开项目任务</button></form>
+      {/* 按 ID 打开是折叠的辅助入口：只有拿到确切 UUID（如从别处复制）才需要，
+          不与列表、筛选这些主流程抢层级；表单与路由语义保持不变。 */}
+      {scope === "all" && <details className="page-explanation" data-testid="tasks-live-id-open">
+        <summary>按 ID 打开任务</summary>
+        <p className="helper-text">知道确切 ID 时可直接定位：项目 ID 打开该项目的任务列表，任务 ID 打开任务详情。日常浏览用列表与筛选即可，不需要粘贴 ID。</p>
+        <form className="create-form" noValidate onSubmit={(event) => { event.preventDefault();
+          if (liveProjectId.trim()) navigate(`/projects/${encodeURIComponent(liveProjectId.trim())}/tasks`);
+        }}><label className="field"><span className="field-label">项目 ID</span><input value={liveProjectId}
+          onChange={(event) => setLiveProjectId(event.target.value)} name="live-task-project-id" autoComplete="off" placeholder="Project UUID" /></label>
+          <button className="secondary-button" type="submit" data-testid="tasks-live-open-project" disabled={!liveProjectId.trim()}>打开项目任务</button></form>
         <form className="create-form" noValidate onSubmit={(event) => { event.preventDefault();
           if (liveTaskId.trim()) navigate(`/tasks/${encodeURIComponent(liveTaskId.trim())}`);
-        }}><label className="field"><span className="field-label">用任务 ID 打开详情</span><input value={liveTaskId}
+        }}><label className="field"><span className="field-label">任务 ID</span><input value={liveTaskId}
           onChange={(event) => setLiveTaskId(event.target.value)} name="live-task-id" autoComplete="off" placeholder="Task UUID" /></label>
-          <button className="secondary-button" type="submit" data-testid="tasks-live-open-task" disabled={!liveTaskId.trim()}>打开真实任务</button></form></>}
+          <button className="secondary-button" type="submit" data-testid="tasks-live-open-task" disabled={!liveTaskId.trim()}>打开任务详情</button></form>
+      </details>}
     </div></ResponsiveRail>
   </div></section>;
 }

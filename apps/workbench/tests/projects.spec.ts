@@ -1,8 +1,12 @@
 import { describe, expect, it, afterEach } from "vitest";
 import { fixtureAdapter } from "../src/fixtures/fixtureAdapter";
-import { flush, mountWorkbench } from "./mountApp";
+import { DomWrapper, flush, mountWorkbench } from "./mountApp";
 
 let unmount: (() => void) | null = null;
+
+// 项目详情自 2026-10-11 起改为 AppDialog 抽屉：它走 createPortal 挂在 document.body，
+// mountWorkbench 返回的容器查不到，所以详情内容一律用 document 查询。
+const portal = () => new DomWrapper(document.body);
 
 afterEach(() => {
   unmount?.();
@@ -10,13 +14,16 @@ afterEach(() => {
 });
 
 describe("项目列表", () => {
-  it("按进行中/已归档分区并给出计数，搜索保持当前作用域", async () => {
+  it("按全部/进行中/已归档分区并给出计数，搜索保持当前作用域", async () => {
     const mounted = await mountWorkbench("/projects");
     unmount = mounted.unmount;
 
-    expect(mounted.wrapper.text()).toContain("每一个长期目标，都有可继续的下一步。");
+    expect(mounted.wrapper.text()).toContain("让长期目标有序推进，下一步始终清晰。");
+    expect(mounted.wrapper.get('[data-testid="projects-tab-all"]').text()).toContain("全部项目 (4)");
     expect(mounted.wrapper.get('[data-testid="projects-tab-active"]').text()).toContain("进行中 (3)");
     expect(mounted.wrapper.get('[data-testid="projects-tab-archived"]').text()).toContain("已归档 (1)");
+    // 默认范围是「全部项目」：归档项目也在首屏列表里。
+    expect(mounted.wrapper.find('[data-testid="project-row-project-thesis-topic"]').exists()).toBe(true);
 
     await mounted.wrapper.get('input[name="project-search"]').setValue("Workflow");
     await flush(60);
@@ -37,9 +44,9 @@ describe("项目列表", () => {
     await mounted.wrapper.get('[data-testid="project-row-project-knowledge"]').trigger("click");
     await flush();
 
-    expect(mounted.wrapper.text()).toContain("建立可持续的个人知识体系");
-    expect(mounted.wrapper.text()).toContain("状态修订 v2");
-    expect(mounted.wrapper.get('[data-testid="project-open"]').attributes("href")).toBe("/projects/project-knowledge");
+    expect(portal().text()).toContain("建立可持续的个人知识体系");
+    expect(portal().text()).toContain("状态修订 v2");
+    expect(portal().get('[data-testid="project-open"]').attributes("href")).toBe("/projects/project-knowledge");
   });
 
   it("归档被拒绝时给出原因，可归档项目完成后列表计数同步", async () => {
@@ -49,12 +56,12 @@ describe("项目列表", () => {
     await mounted.wrapper.get('[data-testid="project-row-project-workflow-os"]').trigger("click");
     await flush();
 
-    expect(mounted.wrapper.get('[data-testid="project-archive"]').attributes("disabled")).toBeDefined();
-    expect(mounted.wrapper.get('[data-testid="project-archive-reason"]').text()).toContain("正在进行的执行");
+    expect(portal().get('[data-testid="project-archive"]').attributes("disabled")).toBeDefined();
+    expect(portal().get('[data-testid="project-archive-reason"]').text()).toContain("正在进行的执行");
 
     await mounted.wrapper.get('[data-testid="project-row-project-hci"]').trigger("click");
     await flush();
-    await mounted.wrapper.get('[data-testid="project-archive"]').trigger("click");
+    await portal().get('[data-testid="project-archive"]').trigger("click");
     await flush(80);
 
     expect(mounted.wrapper.text()).toContain("本次演示已归档");
@@ -70,8 +77,41 @@ describe("项目列表", () => {
     await mounted.wrapper.get('[data-testid="project-row-project-thesis-topic"]').trigger("click");
     await flush();
 
-    expect(mounted.wrapper.text()).toContain("已归档项目在本轮交互预览中只读");
-    expect(mounted.wrapper.find('[data-testid="project-open"]').exists()).toBe(false);
+    expect(portal().text()).toContain("已归档项目在本轮交互预览中只读");
+    expect(portal().find('[data-testid="project-open"]').exists()).toBe(false);
+  });
+
+  it("推进摘要条给出正在推进与待补下一步的数量，并可直接跳到待完善的项目", async () => {
+    const mounted = await mountWorkbench("/projects");
+    unmount = mounted.unmount;
+
+    const summary = mounted.wrapper.get('[data-testid="projects-summary"]');
+    expect(summary.text()).toContain("3 个项目正在推进");
+    expect(summary.text()).toContain("1 个项目尚未明确下一步");
+
+    // 示例数据里只有「人机协作工作流研究」没有下一步，去完善应打开它的详情。
+    await mounted.wrapper.get('[data-testid="projects-summary-fix"]').trigger("click");
+    await flush();
+    expect(portal().text()).toContain("人机协作工作流研究");
+  });
+
+  it("网格/列表视图切换只换容器类，卡片标记与选中范围不变", async () => {
+    const mounted = await mountWorkbench("/projects");
+    unmount = mounted.unmount;
+
+    const grid = () => document.querySelector(".projects-grid");
+    expect(grid()?.classList.contains("is-list")).toBe(false);
+
+    await mounted.wrapper.get('[data-testid="projects-view-list"]').trigger("click");
+    expect(grid()?.classList.contains("is-list")).toBe(true);
+    expect(mounted.wrapper.get('[data-testid="projects-view-list"]').attributes("aria-pressed")).toBe("true");
+    // 切视图不重建卡片：同一个项目行仍在，且仍可打开详情。
+    await mounted.wrapper.get('[data-testid="project-row-project-knowledge"]').trigger("click");
+    await flush();
+    expect(portal().get('[data-testid="project-open"]').attributes("href")).toBe("/projects/project-knowledge");
+
+    await mounted.wrapper.get('[data-testid="projects-view-grid"]').trigger("click");
+    expect(grid()?.classList.contains("is-list")).toBe(false);
   });
 
   it("读取失败可重试，空列表提供新建入口", async () => {
@@ -82,7 +122,11 @@ describe("项目列表", () => {
 
     const empty = await mountWorkbench("/projects?fixture=empty");
     unmount = empty.unmount;
-    expect(empty.wrapper.text()).toContain("还没有进行中的项目。");
+    // 首装空态已由单行文案拆成标题＋说明两段（见 ProjectsView 的 EmptyState），
+    // 断言随之更新；不把句号加回标题，那会退回已废弃的写法。
+    const emptyState = empty.wrapper.get('[data-testid="projects-empty"]');
+    expect(emptyState.text()).toContain("还没有进行中的项目");
+    expect(emptyState.text()).toContain("项目是长期目标的容器");
     expect(empty.wrapper.text()).toContain("新建项目");
   });
 });

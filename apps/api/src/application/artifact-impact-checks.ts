@@ -15,6 +15,7 @@ import { advanceAiTextLocks, normalizeArtifactContent, requireAiTextLocks,
   requireHumanInProgress } from './artifact-commands.js';
 import { StorageConflictError, StorageUnavailableError } from '../storage/managed-content-store.js';
 import { storageUnavailable } from './domain-error.js';
+import { loadImpactSelectionBinding, requireImpactDependenciesCurrent } from './impact-group-selections.js';
 
 const MAX_SOURCE_CHARS = 12_000;
 const MAX_TARGETS = 10;
@@ -280,7 +281,7 @@ export interface ImpactCandidateDto extends JsonObject {
   readonly applied_version_id: string | null;
 }
 
-function parseImpactCandidateMarkdown(content: string | null): string | null {
+export function parseImpactCandidateMarkdown(content: string | null): string | null {
   try {
     const parsed: unknown = JSON.parse(content ?? '');
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
@@ -326,14 +327,15 @@ export async function readArtifactImpactCandidate(db: DbExecutor, workspaceId: s
 /** Explicit user application, still fenced as AI-origin content at the Artifact write boundary. */
 export async function applyArtifactImpactCandidate(db: DbExecutor,
   storage: ManagedContentStore, input: { workspaceId: string; candidateId: string;
-    commandId: string; expectedTargetRevision: string }): Promise<CommandOutcome<{
+    commandId: string; expectedTargetRevision: string; groupSelectionId?: string }): Promise<CommandOutcome<{
       readonly artifact_id: string; readonly version_id: string;
       readonly artifact_revision: string; readonly task_revision: string }>> {
   const expected = requireRevision(input.expectedTargetRevision, 'expected_target_revision');
   return runIdempotentCommand(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
     commandId: input.commandId, commandType: 'ApplyArtifactImpactCandidate',
     target: { candidate_id: input.candidateId },
-    body: { expected_target_revision: expected.toString() },
+    body: { expected_target_revision: expected.toString(),
+      ...(input.groupSelectionId === undefined ? {} : { group_selection_id: input.groupSelectionId }) },
     execute: async (r) => {
       const candidate = await r.impacts.readCandidate(input.candidateId, true);
       if (!candidate || candidate.workspace_id !== input.workspaceId) throw resourceNotFound('Impact candidate');
@@ -352,14 +354,22 @@ export async function applyArtifactImpactCandidate(db: DbExecutor,
       const target = await r.artifacts.readArtifact(candidate.target_artifact_id);
       if (!source || !target || source.workspace_id !== input.workspaceId ||
           target.workspace_id !== input.workspaceId) throw resourceNotFound('Artifact');
-      const tasks = [...new Set([source.task_id, target.task_id])].sort();
+      const parents = await loadImpactSelectionBinding(r, input.workspaceId, candidate, input.groupSelectionId);
+      const parentArtifacts = [];
+      for (const parent of parents) {
+        const artifact = await r.artifacts.readArtifact(parent.target_artifact_id);
+        if (artifact?.workspace_id !== input.workspaceId) throw resourceNotFound('Prerequisite artifact');
+        parentArtifacts.push(artifact);
+      }
+      const tasks = [...new Set([source.task_id, target.task_id, ...parentArtifacts.map(p => p.task_id)])].sort();
       const taskRows = [];
       for (const id of tasks) taskRows.push(await lockTaskInWorkspace(r, input.workspaceId, id));
       const targetTask = taskRows.find((task) => task.id === target.task_id)!;
       requireHumanInProgress(targetTask, '应用 AI 修改候选');
       if (target.project_id) await lockWritableProjectInWorkspace(r, input.workspaceId, target.project_id);
-      const artifacts = [...new Set([source.id, target.id])].sort();
+      const artifacts = [...new Set([source.id, target.id, ...parentArtifacts.map(p => p.id)])].sort();
       for (const id of artifacts) await lockArtifactInWorkspace(r, input.workspaceId, id);
+      await requireImpactDependenciesCurrent(r, parents);
       const sourceCurrent = await r.artifacts.readArtifact(source.id);
       const targetCurrent = await r.artifacts.readArtifact(target.id);
       const sourceLatest = (await r.artifacts.listArtifactVersions(source.id)).at(-1);

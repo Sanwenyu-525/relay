@@ -40,6 +40,8 @@ import {
 import { executeCliCommand, isNormalCliFailure, reconcileCliExecution } from '../cli-worker/cli-adapter.js';
 import { evaluateScopeGrant, type FrozenCheck, type ScopeGrantDecision }
   from './run-scope-grant.js';
+import { computeCheckTrustBasis, type CheckTrustBasis } from './check-trust-basis.js';
+import { approvalCheckMaterialTarget, verifyApprovalCheckMaterial } from './approval-check-material.js';
 import { getAdapterDescriptor } from '../gateway/adapter-metadata.js';
 import { readAdmission, requireNormalAdmission } from './maintenance-admission.js';
 
@@ -60,7 +62,16 @@ export type GatewayOrigin =
    * 因此与 USER_ACTION 同样自带 Project 与受管资源；会话与消息身份用来核对
    * 「这条只读动作确实属于这条会话的这一次回答」，也让两种执行身份无法互相冒充。 */
   | { readonly kind: 'ASSISTANT_READ'; readonly projectId: string; readonly resourceId: string;
-      readonly sessionId: string; readonly messageId: string };
+      readonly sessionId: string; readonly messageId: string }
+  /**
+   * 0087：普通 Agent 连续主流程的只读动作（ADR-022）。形状与 ASSISTANT_READ 相同——
+   * 同样没有 Run/Task/Step/Attempt，同样只放行只读能力——但**必须是另一个来源**：
+   * 运行架构 §2.6.3 要求两种执行身份不得互相冒充，而 `originMatches()` 与
+   * `SessionToolCallRepository.attachOperation()` 都按来源核对；复用 ASSISTANT_READ
+   * 会让普通会话的行与人设助手的行在库层面无法区分，也让普通会话「看起来像」有冻结人设快照。
+   */
+  | { readonly kind: 'AGENT_SESSION_READ'; readonly projectId: string;
+      readonly resourceId: string; readonly sessionId: string; readonly messageId: string };
 
 export type GatewayActionType =
   | 'WRITE_MARKER'
@@ -123,9 +134,30 @@ const USER_ACTION_ALLOWED_ACTIONS: readonly GatewayActionType[] = ['GIT_STATUS',
  * 词表按 capability 而不是逐条动作列举，因为这三种能力下只存在只读动作；
  * 写能力（FILE_WRITE / GIT_WRITE / CLI_RUN）与 WEB_FETCH 一律不在此词表内——
  * B 档是「可读不可写」，写入口继续只有 RUN。
+ *
+ * 0087: AGENT_SESSION_READ 用**同一份**词表。会话读取身份只说明「谁在读」，
+ * 不说明「能读到什么」；两者能力边界相同，但来源身份不同、可在账本上分辨。
  */
 const ASSISTANT_READ_ALLOWED_CAPABILITIES: readonly GatewayCapability[] =
   ['FILE_READ', 'FILE_QUERY', 'GIT_READ'];
+
+/** 两种会话读取来源：共用只读能力词表，来源身份各自独立。 */
+const SESSION_READ_ORIGINS: readonly string[] = ['ASSISTANT_READ', 'AGENT_SESSION_READ'];
+
+/**
+ * 会话读取来源的子集。
+ *
+ * 单独导出这个子集而不是各处的 `includes()`：用数组做判定会让 TypeScript 失去收窄，
+ * 于是「只有 RUN 有 worker lease」这类事实就再也表达不出来，最终以编译错误的形式
+ * 重新被发现一次。
+ */
+export type GatewaySessionReadOrigin = Extract<GatewayOrigin,
+  { kind: 'ASSISTANT_READ' | 'AGENT_SESSION_READ' }>;
+
+/** 类型收窄版判定：与 `SESSION_READ_ORIGINS` 同一份词表。 */
+export function isSessionReadOrigin(origin: GatewayOrigin): origin is GatewaySessionReadOrigin {
+  return SESSION_READ_ORIGINS.includes(origin.kind);
+}
 
 export function originAllows(
   origin: GatewayOrigin, actionType: GatewayActionType, capability: GatewayCapability,
@@ -135,7 +167,7 @@ export function originAllows(
   ];
   if (origin.kind === 'RUN') return allowedRunCaps.includes(capability);
   if (origin.kind === 'USER_IMPORT') return ['FAKE_PUBLIC_READ', 'WEB_FETCH'].includes(capability);
-  if (origin.kind === 'ASSISTANT_READ') return ASSISTANT_READ_ALLOWED_CAPABILITIES.includes(capability);
+  if (isSessionReadOrigin(origin)) return ASSISTANT_READ_ALLOWED_CAPABILITIES.includes(capability);
   return capability === 'GIT_READ' && USER_ACTION_ALLOWED_ACTIONS.includes(actionType);
 }
 
@@ -145,6 +177,10 @@ function originDenialDetail(kind: GatewayOrigin['kind']): string {
   }
   if (kind === 'ASSISTANT_READ') {
     return 'ASSISTANT_READ 仅允许受管资源上的只读查询：人设会话不改文件、不建任务、不派子 Agent。';
+  }
+  if (kind === 'AGENT_SESSION_READ') {
+    return 'AGENT_SESSION_READ 仅允许本会话绑定受管目录内的只读查询：会话读取不改文件、不建任务；' +
+      '修改文件与运行检查沿既有 Task/Run 执行入口。';
   }
   return 'RUN 仅允许受管工具调用，USER_IMPORT 仅允许公共网络导入，USER_ACTION 仅允许受管资源上的 Git 只读。';
 }
@@ -413,8 +449,38 @@ function targetMatches(prefix: string, target: string, capability: GatewayCapabi
 
 interface SelectedPolicy extends GatewayPermissionVersionRow { readonly id: string; readonly project_id: string }
 
-async function selectedPolicy(repositories: Repositories, input: {
-  workspaceId: string; projectId: string; capability: GatewayCapability;
+/**
+ * 派发/准入时实测检查材料摘要。
+ *
+ * 与 `observedExecutableSha256` 互补：那个只覆盖入口程序，这里覆盖入口脚本、被参数引用的
+ * 检查脚本与构建/测试配置。算不出来（材料被删、不可读、动态执行）就不给实测值，
+ * `evaluateScopeGrant` 会按「依据不一致」退回人工确认，而不是当成摘要相同放行。
+ */
+async function observedCheckTrustDigest(canonicalRoot: string,
+  check: FrozenCheck | undefined): Promise<{ readonly observedTrustDigest?: string }> {
+  if (check === undefined) return {};
+  const result = await computeCheckTrustBasis({ canonicalRoot,
+    executable: check.executable, args: check.args });
+  return result.ok ? { observedTrustDigest: result.basis.digest } : {};
+}
+
+/**
+ * 建 Review 时实测到的检查材料依据。
+ *
+ * 与 `observedCheckTrustDigest` 同一个计算，只是把整份依据带回来绑定进 target：
+ * 摘要用于「与授权比较」，依据用于「与人工批准绑定」，两者不能互相替代。
+ * 算不出来就返回 undefined——不写依据的 Review 在批准与派发两处都会被保守拒绝，
+ * 而不是被当成「材料没变」。
+ */
+async function observeCheckMaterial(canonicalRoot: string,
+  check: FrozenCheck | undefined): Promise<CheckTrustBasis | undefined> {
+  if (check === undefined) return undefined;
+  const result = await computeCheckTrustBasis({ canonicalRoot,
+    executable: check.executable, args: check.args });
+  return result.ok ? result.basis : undefined;
+}
+
+async function selectedPolicy(repositories: Repositories, input: {  workspaceId: string; projectId: string; capability: GatewayCapability;
   actionType: string; target: string; payloadBytes: number;
 }): Promise<SelectedPolicy> {
   const candidates = (await repositories.gateway.listActivePolicies(input.workspaceId, input.projectId,
@@ -597,7 +663,8 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
   // 0060: ASSISTANT_READ 与 RUN 同形地解析只读目标——写分支对它是死代码，因为
   // originAllows 已在上面按只读能力词表拒掉 FILE_WRITE / GIT_WRITE / CLI_RUN。
   // 落进 else（公共读取）分支会让目录浏览去校验 HTTPS URL，那不是「更严」而是读错了地方。
-  const managedRootOrigin = input.origin.kind === 'RUN' || input.origin.kind === 'ASSISTANT_READ';
+  const managedRootOrigin = input.origin.kind === 'RUN' ||
+    SESSION_READ_ORIGINS.includes(input.origin.kind);
   let target: string;
   if (managedRootOrigin) {
     if (webFetch) {
@@ -872,11 +939,17 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
           ? { containsDelete: true } : {}),
         ...(input.observedExecutableSha256 === undefined ? {} :
           { observedExecutableSha256: input.observedExecutableSha256 }),
+        ...(await observedCheckTrustDigest(resource.canonical_root, input.scopeCheck)),
       });
     const scopeCovered = scopeDecision?.covered === true && policy.decision === 'AUTO';
     const effectiveDecision: GatewayDecision =
       !descriptor.approvalPassthrough && policy.decision === 'AUTO' && !scopeCovered
         ? 'ASK' : policy.decision;
+    // 范围授权本可 AUTO，却因为授权失效/检查材料变化而退回人工：这个原因必须能被前端读到，
+    // 否则「检查脚本被改过」会和「策略本来就要人工」混成同一句「需要批准」。
+    const scopeBlockedReason = effectiveDecision === 'ASK' && policy.decision === 'AUTO' &&
+      scopeDecision !== undefined && scopeDecision.covered === false
+      ? scopeDecision.reason : undefined;
 
     const op = await repositories.gateway.insertOperation({ id: input.operationId,
       workspace_id: input.workspaceId, project_id: projectId, origin: input.origin.kind,
@@ -919,7 +992,11 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
           normalized_target: op.normalized_target, status: op.status } });
     }
     if (effectiveDecision === 'ASK') {
-      const review = await createGatewayReview(repositories, op, run, task);
+      const review = await createGatewayReview(repositories, op, run, task, scopeBlockedReason,
+        // 绑定这一次建 Review 时**服务端自己实测**到的材料。核对侧会用同样的输入
+        // （Operation 冻结的 executable/args + 受管资源根）重算，因此不依赖调用方自报摘要。
+        resource === undefined || input.scopeCheck === undefined ? undefined
+          : await observeCheckMaterial(resource.canonical_root, input.scopeCheck));
       if (run !== undefined && task !== undefined && input.origin.kind === 'RUN') {
         const changed = await repositories.runs.advanceRun({ runId: run.id, expectedRevision: run.revision,
           status: 'WAITING_APPROVAL', waitReason: 'ACTION_APPROVAL_REQUIRED', resumePhase: 'RUNNING' });
@@ -940,20 +1017,33 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
 }
 
 async function createGatewayReview(repositories: Repositories, op: LogicalOperationRow,
-  run: RunRow | undefined, task: TaskRow | undefined) {
+  run: RunRow | undefined, task: TaskRow | undefined, scopeBlockedReason?: string,
+  observedMaterial?: CheckTrustBasis | undefined) {
+  // 检查材料依据写进 target，因此一并进入 target_hash：批准对象不只包含「跑什么」，
+  // 还包含「跑的是磁盘上哪一份材料」。材料此后变化时旧 target 自然失效。
   const target: JsonObject = { operation_id: op.id, origin: op.origin, run_id: op.run_id,
     step_id: op.step_id, import_job_id: op.import_job_id, action_type: op.action_type,
     normalized_target: op.normalized_target, params_hash: op.params_hash.toString('hex'),
     connection_id: op.connection_id, connection_version: op.connection_version.toString(),
     policy_id: op.policy_id, policy_version: op.policy_version.toString(),
-    acceptance_revision: task?.acceptance_revision.toString() ?? null };
+    acceptance_revision: task?.acceptance_revision.toString() ?? null,
+    ...approvalCheckMaterialTarget(observedMaterial) };
   return repositories.reviews.insertRequest({ id: randomUUID(), workspaceId: op.workspace_id,
     projectId: op.project_id, taskId: task?.id ?? null, runId: run?.id ?? null,
     verificationSessionId: null, criterionId: null, operationId: op.id,
     importJobId: op.import_job_id,
-    kind: 'ACTION_APPROVAL', reason: '此 Fake 动作需要针对最终目标与参数的批准。',
+    kind: 'ACTION_APPROVAL',
+    reason: scopeBlockedReason === undefined
+      ? '此 Fake 动作需要针对最终目标与参数的批准。'
+      : `本次任务范围授权不再自动放行这个动作（${scopeBlockedReason}），需要针对确切动作与参数的批准。`,
     targetHash: reviewTargetHash(target), target,
-    evidence: { capability: op.capability_key, action_type: op.action_type },
+    evidence: { capability: op.capability_key, action_type: op.action_type,
+      ...(scopeBlockedReason === undefined ? {} : { scope_decision_reason: scopeBlockedReason }),
+      // 人工看到的「依据」是实测结果，不是摘要相等的一句话断言。
+      ...(observedMaterial === undefined ? {} : { check_material: {
+        digest: observedMaterial.digest,
+        materials: observedMaterial.materials.map((material) => ({
+          path: material.path, role: material.role, sha256: material.sha256 })) } }) },
     effect: { external_effect_executed: false }, allowedDecisions: ['APPROVE', 'DENY'],
     expiresAt: new Date(Date.now() + 30 * 60_000) });
 }
@@ -1127,8 +1217,10 @@ function originMatches(op: LogicalOperationRow, origin: GatewayOrigin): boolean 
   // 受管资源与 Project 就是它们在 Operation 上的完整归属。
   // 会话与消息身份不在 Operation 上——它由 session_tool_calls 那一行绑定，
   // 由 attachOperation 核对；两种执行身份因此无法互相冒充。
-  if (origin.kind === 'ASSISTANT_READ') return op.origin === 'ASSISTANT_READ' &&
-    op.resource_id === origin.resourceId && op.project_id === origin.projectId;
+  if (origin.kind === 'ASSISTANT_READ' || origin.kind === 'AGENT_SESSION_READ') {
+    return op.origin === origin.kind && op.resource_id === origin.resourceId &&
+      op.project_id === origin.projectId;
+  }
   return op.origin === 'USER_ACTION' && op.resource_id === origin.resourceId &&
     op.project_id === origin.projectId;
 }
@@ -1176,6 +1268,12 @@ async function requireCurrentGatewayGrant(repositories: Repositories, op: Logica
         (review.expires_at !== null && review.expires_at.getTime() <= Date.now()) ||
         (await repositories.reviews.readDecision(review.id))?.decision !== 'APPROVE') {
       throw gatewayDenied('GATEWAY_APPROVAL_REQUIRED', '最终目标的有效批准尚未保存。');
+    }
+    // 批准只覆盖它当时审阅的那份材料。派发是最后一道真实执行前的核对，因此在这里
+    // 再算一次此刻的材料：材料在批准之后变了，旧批准就不能驱动真实子进程。
+    const material = await verifyApprovalCheckMaterial(repositories, op, review);
+    if (material.status === 'STALE') {
+      throw gatewayDenied('GATEWAY_APPROVAL_STALE', material.detail);
     }
   } else if (review !== undefined) {
     throw gatewayDenied('GATEWAY_APPROVAL_STALE', '动作带有不适用的旧 Review。');
@@ -1232,8 +1330,8 @@ async function admitGatewayInvocation(db: DbExecutor, input: DispatchGatewayInpu
       if ((await repositories.gateway.listUnresolvedImportOperations(job.id)).some((row) => row.id !== located.id)) {
         throw gatewayDenied('GATEWAY_OPERATION_UNRESOLVED', '导入的其他动作仍未核对。');
       }
-    } else if (input.origin.kind === 'ASSISTANT_READ') {
-      // 0060: 与 prepare 同一锁序与同一资源判定，并保留「在途目录」拒绝——
+    } else if (SESSION_READ_ORIGINS.includes(input.origin.kind)) {
+      // 0060/0087: 与 prepare 同一锁序与同一资源判定，并保留「在途目录」拒绝——
       // 一次未完成的写入不得被只读会话读成干净状态。
       // 目标不要求等于受管根本身：READ_FILE 的目标是根内文件，目录查询的目标是根或根内子目录，
       // 只有 GIT_* 才等于根。prepare 已把路径归一，这里再确认它仍落在**同一个**受管根内。
@@ -1280,7 +1378,8 @@ async function admitGatewayInvocation(db: DbExecutor, input: DispatchGatewayInpu
         ...(input.scopeCheck === undefined ? {} : { check: input.scopeCheck }),
         ...(changesetContainsDelete(op.params) ? { containsDelete: true } : {}),
         ...(input.observedExecutableSha256 === undefined ? {} :
-          { observedExecutableSha256: input.observedExecutableSha256 }) })
+          { observedExecutableSha256: input.observedExecutableSha256 }),
+        ...(await observedCheckTrustDigest(resource.canonical_root, input.scopeCheck)) })
       : undefined;
     const selected = await requireCurrentGatewayGrant(repositories, op, review, admitScope);
     if (input.origin.kind === 'RUN' && run !== undefined && task !== undefined) {
@@ -1367,7 +1466,7 @@ async function fakeExecute(op: LogicalOperationRow, invocation: InvocationAttemp
 async function hasCurrentGatewayEffectLease(db: DbExecutor, admitted: AdmittedInvocation,
   origin: GatewayOrigin): Promise<boolean> {
   if (origin.kind === 'USER_IMPORT') return true;
-  if (origin.kind === 'USER_ACTION' || origin.kind === 'ASSISTANT_READ') {
+  if (origin.kind === 'USER_ACTION' || isSessionReadOrigin(origin)) {
     // 0058/0060: 没有 Worker lease 与资源 claim 可核，栅栏落在「本次调用身份仍是 DISPATCHING」
     // 这一条上——它挡住的是并发重复投递，而不是冒充另一个执行者。
     return (await createRepositories(db).gateway.readInvocation(admitted.invocation.id))?.status === 'DISPATCHING';
@@ -2096,15 +2195,21 @@ export async function denyGraphActionBeforeInvocation(db: DbExecutor, input: {
   readonly workspaceId: string; readonly runId: string; readonly operationId: string;
   /** WEB_FETCH binds no managed resource; the deny then requires resource_id IS NULL. */
   readonly resourceId?: string; readonly workerId: string; readonly workerEpoch?: bigint;
-  readonly delivery: { readonly commandId: string; readonly invocationEpoch: bigint };
+  /** 图驱动时提供：额外核对本次命令投递仍是当前的。直接驱动该端口的调用方没有这条身份，
+   * 与 claimRunForGateway / claimGatewayWorker / releaseGatewayWorker 的同一口径一致。 */
+  readonly delivery?: { readonly commandId: string; readonly invocationEpoch: bigint };
+  /** 模型工具请求行：与原动作在同一短事务里一起落定。只结算工具行会留下「已结算的工具行
+   * ＋仍等待批准的动作＋已决定的 Review」，原任务既不能再推进也没有命令能唤醒它。 */
+  readonly toolCall?: { readonly id: string; readonly resultRef: JsonObject };
   readonly reason: string;
 }): Promise<boolean> {
   return withTransaction(db, async (repositories) => {
     const { task, run } = await lockTaskAndRun(repositories, input.runId, input.workspaceId);
     if (task.executor_run_id !== run.id || task.ownership_epoch !== run.ownership_epoch ||
         !['WAITING_APPROVAL', 'RUNNING'].includes(run.status) ||
-        !(await repositories.dispatch.hasCurrentCommandInvocation(run.id,
-          input.delivery.commandId, input.workerId, input.delivery.invocationEpoch))) return false;
+        (input.delivery !== undefined &&
+          !(await repositories.dispatch.hasCurrentCommandInvocation(run.id,
+            input.delivery.commandId, input.workerId, input.delivery.invocationEpoch)))) return false;
     if ((await repositories.recovery.lockPendingControl(run.id)) !== undefined) return false;
     if (run.worker_id !== null && (run.worker_id !== input.workerId ||
         run.worker_epoch !== input.workerEpoch)) return false;
@@ -2129,6 +2234,19 @@ export async function denyGraphActionBeforeInvocation(db: DbExecutor, input: {
       }
     }
     await repositories.gateway.setOperationStatus(operation.id, 'DENIED', { reason: input.reason });
+    if (input.toolCall !== undefined) {
+      // 工具行与原动作、Run、Task 同事务落定：分两次提交会留下「工具已结算但动作仍在等待」
+      // 的中间态，恢复后既不能重放也不能核对。行必须确实绑在这次动作上且仍未结算，
+      // 否则说明事实与调用方的前提不符——整笔回滚，不留下半收口的状态。
+      const toolRow = await repositories.toolCalls.lock(input.toolCall.id);
+      if (toolRow?.operation_id !== operation.id ||
+          (toolRow.status !== 'PREPARED' && toolRow.status !== 'WAITING_APPROVAL')) {
+        throw new Error('pre-invocation deny tool row binding CAS failed');
+      }
+      if (!(await repositories.toolCalls.settle(toolRow.id, input.toolCall.resultRef))) {
+        throw new Error('pre-invocation deny tool row settle failed');
+      }
+    }
     if (run.worker_id !== null && input.workerEpoch !== undefined) {
       const released = await repositories.runs.releaseWorker(run.id, input.workerId, input.workerEpoch);
       if (released === undefined) throw new Error('pre-invocation deny Worker release failed');

@@ -28,6 +28,7 @@ interface Ctx {
   messages: unknown[];
   /** 左栏近期工作列表；搜索用例需要真实条目。 */
   tasks: unknown[];
+  assistantProfiles?: unknown[];
 }
 
 function cors(): Record<string, string> {
@@ -156,6 +157,17 @@ async function installRoutes(page: Page, ctx: Ctx): Promise<void> {
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return fulfillJson(route, { items: ctx.messages });
     if (path.startsWith(`${prefix}/conversation-execution-requests`)) return fulfillJson(route, { items: [] });
     if (path === `${prefix}/assist-proposals`) return fulfillJson(route, { items: [] });
+    if (path === `${prefix}/assistant-profiles`) return fulfillJson(route, { items: ctx.assistantProfiles ?? [] });
+    if (path === `${prefix}/chat-commands`) return fulfillJson(route, { items: [
+      { kind: "METHOD", name: "review", aliases: ["代码审查", "审查"], title: "代码审查",
+        summary: "阅读当前改动及相关影响，不自动修复。", usage: "/review [目标]", method_id: "code-review" },
+      { kind: "METHOD", name: "diagnose", aliases: ["诊断"], title: "故障诊断",
+        summary: "默认定位，明确修好才修改。", usage: "/diagnose [目标]", method_id: "fault-diagnosis" },
+      { kind: "SYSTEM", name: "clear", aliases: ["清空"], title: "/clear",
+        summary: "新建空会话，保留项目与目录绑定。", usage: "/clear", system_id: "clear" },
+      { kind: "SYSTEM", name: "compact", aliases: ["压缩"], title: "/compact",
+        summary: "整理当前会话上下文。", usage: "/compact", system_id: "compact" }
+    ] });
     if (path === `${prefix}/skill-definitions`) return fulfillJson(route, { items: [] });
     if (path === `${prefix}/model-port`) {
       return fulfillJson(route, { provider: "fake", configured: false, model: null, base_url: null,
@@ -195,14 +207,180 @@ async function openFolder(page: Page, ctx: Ctx): Promise<void> {
   await installRoutes(page, ctx);
   await page.goto("/agent");
   await connect(page);
-  await page.getByTestId("folder-scope-bar").locator("summary").click();
+  await page.getByTestId("folder-scope-change").click();
   await page.locator('[data-testid="folder-manual-root"]').fill(root);
   await page.locator('[data-testid="folder-open-manual"]').click();
+  // 目录定下来后更换目录框自行关闭（协作页 §3.3），这里不需要再手动收起。
   await page.locator('[data-testid="assist-first-draft"]').waitFor({ timeout: 20_000 });
-  await page.getByTestId("folder-scope-bar").locator("summary").click();
 }
 
 test.describe("方案 2 独立验收四项整改（真实 Chromium）", () => {
+  test("聊天命令菜单在窄窗口可读，选择仅插入；首条发送后已有会话沿用菜单", async ({ page }) => {
+    const ctx: Ctx = { posts: [], loseMessageResponse: 0, receipts: new Map(), sessionCreated: false, messages: [], tasks: [] };
+    await page.setViewportSize({ width: 843, height: 600 });
+    await openFolder(page, ctx);
+    const first = page.getByTestId("assist-first-draft");
+    await first.click();
+    await first.fill("/");
+    await expect(first).toBeFocused();
+    const menu = page.getByTestId("chat-command-menu");
+    await expect(menu.getByRole("option")).toHaveCount(4);
+    await expect(page.getByTestId("chat-command-clear")).toContainText("需已有会话");
+    await expect(page.getByTestId("chat-command-compact")).toContainText("待接入");
+    const geometry = await menu.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const textarea = document.querySelector<HTMLTextAreaElement>('[data-testid="assist-first-draft"]')!.getBoundingClientRect();
+      return { left: box.left, right: box.right, top: box.top, bottom: box.bottom,
+        inputBottom: textarea.bottom, viewport: { width: innerWidth, height: innerHeight },
+        pageWidth: document.documentElement.scrollWidth };
+    });
+    expect(geometry.left).toBeGreaterThanOrEqual(0);
+    expect(geometry.right).toBeLessThanOrEqual(geometry.viewport.width);
+    expect(geometry.top).toBeGreaterThanOrEqual(0);
+    expect(geometry.inputBottom).toBeLessThanOrEqual(geometry.viewport.height);
+    expect(geometry.pageWidth).toBeLessThanOrEqual(geometry.viewport.width);
+    await page.screenshot({ path: "../../output/playwright/chat-command-menu-narrow.png" });
+    await first.press("ArrowDown");
+    await first.press("Enter");
+    await expect(first).toHaveValue("/diagnose ");
+    await expect(first).toBeFocused();
+    expect(ctx.posts.filter((item) => !item.path.endsWith("/working-directories/open"))).toHaveLength(0);
+    await first.fill("/审查");
+    await page.getByTestId("chat-command-review").click();
+    await expect(first).toHaveValue("/review ");
+    await first.fill("/review 检查当前改动");
+    await page.getByTestId("assist-first-send").click();
+    const existing = page.getByTestId("assist-draft");
+    await expect(existing).toBeVisible();
+    expect(ctx.posts.filter((item) => item.path.endsWith("/messages"))).toHaveLength(1);
+    expect(ctx.posts.find((item) => item.path.endsWith("/messages"))?.body.content).toBe("/review 检查当前改动");
+    await existing.fill("/清空");
+    await expect(page.getByTestId("chat-command-clear")).toContainText("可用");
+    await existing.press("Escape");
+    await expect(menu).toBeHidden();
+    await expect(existing).toHaveValue("/清空");
+    expect(ctx.posts.filter((item) => item.path.endsWith("/chat-commands"))).toHaveLength(0);
+  });
+
+  test("首条助手档没有有效助手时不显示普通讨论且不能创建；切回普通档保留草稿并发送", async ({ page }) => {
+    const ctx: Ctx = { posts: [], loseMessageResponse: 0, receipts: new Map(), sessionCreated: false,
+      messages: [], tasks: [], assistantProfiles: [] };
+    await openFolder(page, ctx);
+    const draft = page.getByTestId("assist-first-draft");
+    await draft.fill("切换模式仍保留的草稿");
+    await page.getByTestId("assist-conversation-mode-assistant").check();
+    await expect(page.locator("details.agent-chat-options")).toHaveCount(0);
+    await expect(page.getByTestId("assist-first-blocked")).toContainText("当前没有可用助手");
+    await expect(page.getByTestId("assist-first-send")).toBeDisabled();
+    await expect(draft).toHaveValue("切换模式仍保留的草稿");
+
+    await draft.press("Enter");
+    await page.locator('[data-testid="assist-first-message"] form.agent-chat-message-form').evaluate((form) =>
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(ctx.posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(0);
+    expect(ctx.posts.filter((post) => post.path.endsWith("/messages"))).toHaveLength(0);
+
+    await page.getByTestId("assist-conversation-mode-agent").check();
+    await expect(page.locator("details.agent-chat-options")).toBeVisible();
+    await expect(draft).toHaveValue("切换模式仍保留的草稿");
+    await page.getByTestId("assist-first-send").click();
+    await expect.poll(() => ctx.posts.filter((post) => post.path.endsWith("/messages")).length,
+      { timeout: 20_000 }).toBe(1);
+    const created = ctx.posts.find((post) => post.path === `${prefix}/assist-sessions`);
+    const sent = ctx.posts.find((post) => post.path.endsWith("/messages"));
+    expect(created?.body).toMatchObject({ conversation_mode: "AGENT" });
+    expect(sent?.body).toMatchObject({ content: "切换模式仍保留的草稿", intent: "DISCUSS" });
+  });
+
+  test("新建与已有会话的模式 chip 在四种窗口尺寸下保持单行、无重叠且助手说明可读", async ({ page }) => {
+    const ctx: Ctx = { posts: [], loseMessageResponse: 0, receipts: new Map(), sessionCreated: false,
+      messages: [], tasks: [], assistantProfiles: [] };
+    const viewports = [
+      { width: 843, height: 782 }, { width: 1162, height: 782 },
+      { width: 2048, height: 1104 }, { width: 843, height: 600 }
+    ];
+    await openFolder(page, ctx);
+    const draft = page.getByTestId("assist-first-draft");
+    await draft.fill("跨视口切换时保留的草稿");
+
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      // 断点切换可能先显示目标/会话读取态；等输入器回到真实草稿后再量几何。
+      await expect(draft).toHaveValue("跨视口切换时保留的草稿");
+      const look = await page.evaluate(() => {
+        const chip = document.querySelector<HTMLElement>(".agent-chat-mode-picker > .agent-chat-mode-option")!;
+        const tools = document.querySelector<HTMLElement>(".agent-chat-composer-tools")!;
+        const key = document.querySelector<HTMLElement>(".agent-chat-send")!;
+        const composer = document.querySelector<HTMLElement>(".agent-chat-composer")!;
+        const box = (node: HTMLElement) => {
+          const rect = node.getBoundingClientRect();
+          return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+            width: rect.width, height: rect.height };
+        };
+        return { chip: box(chip), tools: box(tools), key: box(key), composer: box(composer),
+          viewportWidth: document.documentElement.clientWidth, pageWidth: document.documentElement.scrollWidth };
+      });
+      expect(Math.abs(look.chip.height - look.key.height)).toBeLessThanOrEqual(1);
+      expect(look.chip.left).toBeGreaterThanOrEqual(look.composer.left - 1);
+      expect(look.chip.right).toBeLessThanOrEqual(look.composer.right + 1);
+      expect(look.key.left).toBeGreaterThanOrEqual(look.composer.left - 1);
+      expect(look.key.right).toBeLessThanOrEqual(look.composer.right + 1);
+      expect(look.tools.bottom).toBeLessThanOrEqual(look.composer.bottom + 1);
+      expect(look.pageWidth).toBeLessThanOrEqual(look.viewportWidth + 1);
+
+      const agent = page.getByTestId("assist-conversation-mode-agent");
+      await agent.focus();
+      await page.keyboard.press("ArrowRight");
+      await expect(page.getByTestId("assist-conversation-mode-assistant")).toBeChecked();
+      await expect(page.getByTestId("assist-assistant-list-empty")).toBeVisible();
+      await expect(page.getByTestId("assist-readonly-note")).toBeVisible();
+      await expect(page.getByTestId("assist-assistant-create-toggle")).toBeVisible();
+      await expect(page.getByTestId("assist-first-blocked")).toBeVisible();
+      await expect(page.getByTestId("assist-first-send")).toBeDisabled();
+      await expect(draft).toHaveValue("跨视口切换时保留的草稿");
+      const expanded = await page.evaluate(() => {
+        const tools = document.querySelector<HTMLElement>(".agent-chat-composer-tools")!;
+        const note = document.querySelector<HTMLElement>('[data-testid="assist-assistant-list-empty"]')!;
+        const blocked = document.querySelector<HTMLElement>('[data-testid="assist-first-blocked"]')!;
+        const toolsRect = tools.getBoundingClientRect();
+        return { toolsHeight: toolsRect.height, toolsScrollHeight: tools.scrollHeight,
+          noteHeight: note.getBoundingClientRect().height,
+          blockedBottom: blocked.getBoundingClientRect().bottom, toolsBottom: toolsRect.bottom };
+      });
+      expect(expanded.noteHeight).toBeGreaterThan(0);
+      expect(expanded.toolsScrollHeight).toBeLessThanOrEqual(expanded.toolsHeight + 1);
+      expect(expanded.blockedBottom).toBeLessThanOrEqual(expanded.toolsBottom + 1);
+
+      await page.getByTestId("assist-conversation-mode-assistant").focus();
+      await page.keyboard.press("ArrowLeft");
+      await expect(agent).toBeChecked();
+      await expect(draft).toHaveValue("跨视口切换时保留的草稿");
+      await expect(page.locator("details.agent-chat-options")).toBeVisible();
+    }
+
+    await page.getByTestId("assist-first-send").click();
+    await expect(page.getByTestId("assist-draft")).toBeVisible({ timeout: 20_000 });
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      const look = await page.evaluate(() => {
+        const chip = document.querySelector<HTMLElement>(".agent-chat-mode-picker > .agent-chat-mode-option")!;
+        const key = document.querySelector<HTMLElement>(".agent-chat-send")!;
+        const composer = document.querySelector<HTMLElement>(".agent-chat-composer")!;
+        const chipRect = chip.getBoundingClientRect();
+        const keyRect = key.getBoundingClientRect();
+        const composerRect = composer.getBoundingClientRect();
+        return { chipHeight: chipRect.height, keyHeight: keyRect.height,
+          chipInside: chipRect.left >= composerRect.left - 1 && chipRect.right <= composerRect.right + 1,
+          keyInside: keyRect.left >= composerRect.left - 1 && keyRect.right <= composerRect.right + 1,
+          pageWidth: document.documentElement.scrollWidth, viewportWidth: document.documentElement.clientWidth };
+      });
+      expect(Math.abs(look.chipHeight - look.keyHeight)).toBeLessThanOrEqual(1);
+      expect(look.chipInside).toBe(true);
+      expect(look.keyInside).toBe(true);
+      expect(look.pageWidth).toBeLessThanOrEqual(look.viewportWidth + 1);
+    }
+  });
+
   test("P2：首条草稿未发送时离页被拦截，保留后原文仍在，显式放弃才清除", async ({ page }) => {
     const ctx: Ctx = { posts: [], loseMessageResponse: 0, receipts: new Map(), sessionCreated: false, messages: [], tasks: [] };
     await openFolder(page, ctx);
@@ -319,6 +497,8 @@ test.describe("方案 2 页面结构对齐（真实 Chromium）", () => {
     }
     await page.locator(".agent-chat-transcript").waitFor({ timeout: 20_000 });
   }
+
+
 
   test("消息列与输入器同宽，且上限由同一个 rem token 决定", async ({ page }) => {
     const ctx: Ctx = { posts: [], loseMessageResponse: 0, receipts: new Map(), sessionCreated: false, messages: [], tasks: [] };
@@ -452,25 +632,34 @@ test.describe("方案 2 页面结构对齐（真实 Chromium）", () => {
     await expect(page.locator("body")).not.toContainText("回复状态以服务端消息为准");
   });
 
-  test("资料与讨论是无边框 chip：右侧 chevron，两者之间一条竖分隔线", async ({ page }) => {
+  test("资料与讨论是胶囊 chip：radius.round + 控件边框，两者之间不再有竖分隔线", async ({ page }) => {
     const ctx: Ctx = { posts: [], loseMessageResponse: 0, receipts: new Map(), sessionCreated: false, messages: [], tasks: [] };
     await openSessionWith(page, ctx, 1);
 
     for (const selector of [".agent-chat-tool", ".agent-chat-options > summary"]) {
       const chip = await page.locator(selector).evaluate((node) => {
         const style = getComputedStyle(node);
-        return { border: style.borderTopWidth, chevrons: node.querySelectorAll(".agent-chat-chip-chevron").length };
+        const box = node.getBoundingClientRect();
+        const radius = Number.parseFloat(style.borderTopLeftRadius);
+        return { border: style.borderTopWidth, background: style.backgroundColor,
+          // 胶囊：圆角不小于半高，整条边都是弧。
+          pill: radius >= box.height / 2,
+          chevrons: node.querySelectorAll(".agent-chat-chip-chevron").length };
       });
-      expect(chip.border).toBe("0px");
+      // 2026-10-10 协作页 §4：chips 统一为 radius.round + border.control + bg.surface。
+      expect(chip.border).not.toBe("0px");
+      expect(chip.pill).toBe(true);
+      expect(chip.background).not.toBe("rgba(0, 0, 0, 0)");
       // chevron 在文字之后的同一行里，不是前缀符号。
       expect(chip.chevrons).toBe(1);
     }
+    // 同一排的 chip 不再插竖分隔线：那会把同类控件切成两组。
     const divider = await page.locator(".agent-chat-composer-tools > .agent-chat-options").evaluate(
       (node) => getComputedStyle(node).borderLeftWidth);
-    expect(divider).not.toBe("0px");
+    expect(divider).toBe("0px");
   });
 
-  test("回到最新只有图标、无背景，水平居中", async ({ page }) => {
+  test("回到最新是胶囊悬浮键：有底色、边框与阴影，水平居中", async ({ page }) => {
     const ctx: Ctx = { posts: [], loseMessageResponse: 0, receipts: new Map(), sessionCreated: false, messages: [], tasks: [] };
     await openSessionWith(page, ctx, 8);
     // 滚上去让按钮出现。
@@ -482,15 +671,20 @@ test.describe("方案 2 页面结构对齐（真实 Chromium）", () => {
       const style = getComputedStyle(node);
       const box = node.getBoundingClientRect();
       const host = node.parentElement!.getBoundingClientRect();
-      return { background: style.backgroundColor, text: (node.textContent ?? "").trim(),
+      const radius = Number.parseFloat(style.borderTopLeftRadius);
+      return { background: style.backgroundColor, border: style.borderTopWidth, shadow: style.boxShadow,
+        pill: radius >= box.height / 2, text: (node.textContent ?? "").trim(),
         centerDelta: Math.abs((box.left + box.width / 2) - (host.left + host.width / 2)),
         aria: node.getAttribute("aria-label") };
     });
     // 没有可见文字，可读名称在 aria-label 上。
     expect(look.text).toBe("");
     expect(look.aria).toBe("回到最新消息");
-    // 透明背景。
-    expect(["rgba(0, 0, 0, 0)", "transparent"]).toContain(look.background);
+    // 2026-10-10 协作页 §4：radius.round + border.control + bg.surface + shadow.floating。
+    expect(["rgba(0, 0, 0, 0)", "transparent"]).not.toContain(look.background);
+    expect(look.border).not.toBe("0px");
+    expect(look.shadow).not.toBe("none");
+    expect(look.pill).toBe(true);
     // 水平居中：中心与宿主中线的偏差不超过 1px。
     expect(look.centerDelta).toBeLessThanOrEqual(1);
   });
@@ -533,7 +727,7 @@ test.describe("方案 2 页面结构对齐（真实 Chromium）", () => {
       const out: string[] = [];
       for (const node of document.querySelectorAll<HTMLElement>(".collab-center *")) {
         // 目录范围条与近期工作是上下文面板，不是对话区的一部分。
-        if (node.closest(".folder-scope-bar, .collab-existing-work") !== null) continue;
+        if (node.closest(".folder-scope-strip") !== null) continue;
         const style = getComputedStyle(node);
         if (!/(auto|scroll)/u.test(style.overflowY)) continue;
         if (node.scrollHeight <= node.clientHeight) continue;

@@ -77,6 +77,25 @@ const todayReasonLabels: Record<string, string> = {
 
 const priorityLabels: Record<RelayTodayPriority, string> = { LOW: "低", NORMAL: "中", HIGH: "高" };
 
+/** 时区下拉候选：常用时区带中文说明，其余来自本机 IANA 全量；列表之外的仍可手动填写。 */
+const commonTimezones: readonly [string, string][] = [
+  ["Asia/Shanghai", "Asia/Shanghai（北京时间）"],
+  ["Asia/Hong_Kong", "Asia/Hong_Kong（香港时间）"],
+  ["Asia/Taipei", "Asia/Taipei（台北时间）"],
+  ["Asia/Tokyo", "Asia/Tokyo（日本时间）"],
+  ["Asia/Singapore", "Asia/Singapore（新加坡时间）"],
+  ["Europe/London", "Europe/London（伦敦时间）"],
+  ["Europe/Berlin", "Europe/Berlin（柏林时间）"],
+  ["America/New_York", "America/New_York（纽约时间）"],
+  ["America/Los_Angeles", "America/Los_Angeles（洛杉矶时间）"],
+  ["UTC", "UTC（协调世界时）"]
+];
+const ianaTimezoneOptions: readonly [string, string][] = (() => {
+  const supported = (Intl as { supportedValuesOf?: (key: string) => readonly string[] }).supportedValuesOf?.("timeZone") ?? [];
+  return [...commonTimezones,
+    ...supported.filter((zone) => !commonTimezones.some(([value]) => value === zone)).map((zone) => [zone, zone] as [string, string])];
+})();
+
 function TodayTask({ item, eligible, busy, queryTimezone, queryDate, projectTitle, onSelection, onFocus, onPlanning }: {
   item: RelayTodayItem; eligible: boolean; busy: boolean; queryTimezone: string; queryDate: string;
   projectTitle: string | null;
@@ -116,7 +135,7 @@ function TodayTask({ item, eligible, busy, queryTimezone, queryDate, projectTitl
           <p className="today-task__meta">
             <span>{statusLabel}</span>
             {item.projectId && <><span className="today-task__dot" aria-hidden="true">·</span>
-              <Link to={`/projects/${item.projectId}/tasks`}>{projectTitle ?? "所属项目"}</Link></>}
+              <Link to={`/projects/${item.projectId}/tasks`}>{projectTitle ?? "项目详情"}</Link></>}
             {item.priority && <><span className="today-task__dot" aria-hidden="true">·</span><span>优先级 {priorityLabels[item.priority] ?? item.priority}</span></>}
             {item.dueLocalDate && <><span className="today-task__dot" aria-hidden="true">·</span><span>截止 {item.dueLocalDate}</span></>}
             {item.pin && <><span className="today-task__dot" aria-hidden="true">·</span><span>已置顶</span></>}
@@ -417,7 +436,7 @@ export default function TodayView() {
       onSelection={select} onFocus={focus} onPlanning={plan} />)}</ul>;
   }
   function renderGroup(title: string, count: number, list: readonly RelayTodayItem[], eligible: boolean) {
-    if (count === 0) return <p className="today-group__empty">{title} · 0 项</p>;
+    if (count === 0) return null;
     return <section className="today-group"><h2>{title} · {count}</h2>{renderList(list, eligible)}</section>;
   }
 
@@ -448,7 +467,14 @@ export default function TodayView() {
         <button className="secondary-button" type="button" disabled={loading} onClick={() => { void loadToday(client, date, timezone); }}>刷新</button>
         {loading && <p role="status" className="today-query__status">{current ? "正在刷新…" : "正在读取…"}</p>}
         {zoneEditorOpen && <form className="today-query__editor" onSubmit={applyTimezone}>
-          <label><span>IANA 时区</span>
+          <label><span>选择时区</span>
+            <select data-testid="today-timezone-select" aria-label="选择常用时区"
+              value={ianaTimezoneOptions.some(([value]) => value === timezoneDraft) ? timezoneDraft : ""}
+              onChange={(event) => { setTimezoneDraft(event.target.value); setTimezoneError(null); }}>
+              {ianaTimezoneOptions.every(([value]) => value !== timezoneDraft) && <option value="">{timezoneDraft || "未选择"}（手动填写）</option>}
+              {ianaTimezoneOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select></label>
+          <label><span>或手动填写</span>
             <input value={timezoneDraft} onChange={(event) => setTimezoneDraft(event.target.value)} aria-label="时区名称" /></label>
           <button className="secondary-button" type="submit">应用</button>
           <button className="text-button" type="button" onClick={cancelTimezoneEdit}>取消</button>
@@ -476,9 +502,11 @@ export default function TodayView() {
           </div>
           {current.focus ? (focusTask
             ? <div className="today-focus__target">
-              <p className="today-focus__project">{focusTask.projectId
-                ? <>项目：<Link to={`/projects/${focusTask.projectId}/tasks`}>{projectTitles[focusTask.projectId] ?? "所属项目"}</Link></>
-                : "未归属项目的人工任务"}</p>
+              {focusTask.projectId
+                ? <p className="today-focus__project">{projectTitles[focusTask.projectId]
+                  ? <>项目：<Link to={`/projects/${focusTask.projectId}/tasks`}>{projectTitles[focusTask.projectId]}</Link></>
+                  : <Link to={`/projects/${focusTask.projectId}/tasks`}>查看所属项目</Link>}</p>
+                : <p className="today-focus__project">未归属项目的人工任务</p>}
               <p className="today-focus__title"><Link to={`/tasks/${focusTask.taskId}`}>{focusTask.title}</Link></p>
               <p className="today-focus__meta">
                 <span>{taskStatusLabels[focusTask.status] ?? focusTask.status}</span>

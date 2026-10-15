@@ -1,3 +1,4 @@
+import type { ProjectBlockerTargetKind } from '../infrastructure/database-schema.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import type { FieldError } from '../shared/field-error.js';
 import { checkRequiredText, normalizeText, type TextLimit } from '../shared/text.js';
@@ -17,6 +18,7 @@ export const STATE_ACTIONS = [
   'SET_NEXT_ACTION',
   'SELECT_ARTIFACT_VERSION',
   'ADD_CONFIRMED_RISK',
+  'ADD_BLOCKER',
   'RESOLVE_BLOCKER',
 ] as const;
 
@@ -27,6 +29,7 @@ const ALLOWED_PARAMS: Readonly<Record<StateAction, readonly string[]>> = {
   SET_NEXT_ACTION: ['next_action_task_id'],
   SELECT_ARTIFACT_VERSION: ['artifact_version_id', 'source_ref'],
   ADD_CONFIRMED_RISK: ['statement', 'source_ref', 'confirmation_ref'],
+  ADD_BLOCKER: ['target_kind', 'target_id', 'reason', 'source_ref'],
   RESOLVE_BLOCKER: ['blocker_id'],
 };
 
@@ -49,6 +52,14 @@ export type NormalizedStateAction =
       readonly statement: string;
       readonly sourceRef: string;
       readonly confirmationRef: string;
+    }
+  | {
+      readonly action: 'ADD_BLOCKER';
+      readonly body: JsonObject;
+      readonly targetKind: ProjectBlockerTargetKind;
+      readonly targetId: string;
+      readonly reason: string;
+      readonly sourceRef: string;
     }
   | { readonly action: 'RESOLVE_BLOCKER'; readonly body: JsonObject; readonly blockerId: string };
 
@@ -109,6 +120,35 @@ export function normalizeStateAction(
           statement,
           source_ref: sourceRef,
           confirmation_ref: confirmationRef,
+        },
+      };
+    }
+    case 'ADD_BLOCKER': {
+      const BLOCKER_TARGET_KINDS: readonly ProjectBlockerTargetKind[] =
+        ['PROJECT', 'TASK', 'GOAL'];
+      const rawTargetKind = params.target_kind;
+      if (typeof rawTargetKind !== 'string' ||
+          !BLOCKER_TARGET_KINDS.includes(rawTargetKind as ProjectBlockerTargetKind)) {
+        throw validationFailed([
+          { field: 'target_kind', message: `must be one of ${BLOCKER_TARGET_KINDS.join(', ')}` },
+        ]);
+      }
+      const targetId = requireUuidParam(params, 'target_id');
+      const reason = requireTextParam(params, 'reason', 'reason');
+      const sourceRef = requireTextParam(params, 'source_ref', 'sourceRef');
+
+      return {
+        action,
+        targetKind: rawTargetKind as ProjectBlockerTargetKind,
+        targetId,
+        reason,
+        sourceRef,
+        body: {
+          action,
+          target_kind: rawTargetKind,
+          target_id: targetId,
+          reason,
+          source_ref: sourceRef,
         },
       };
     }

@@ -1,0 +1,9 @@
+/* 任务列表页（/tasks）：列表页重点是扫描与筛选，长标题限两行截断以保持行高一致。
+   完整名称经 <strong title> 悬停可读；选择器限定在本页容器内，不改动共享 .data-cell strong 规则。 */
+.task-list-page .data-cell strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}

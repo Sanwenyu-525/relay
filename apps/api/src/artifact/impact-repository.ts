@@ -43,6 +43,15 @@ export interface ImpactCandidateGroupRow {
   readonly source_before_version_id: string;
   readonly source_after_version_id: string;
   readonly source_artifact_revision: bigint;
+  readonly dependencies: readonly JsonObject[];
+  readonly created_at: Date;
+}
+
+export interface ImpactGroupSelectionRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly group_id: string;
+  readonly items: readonly JsonObject[];
   readonly created_at: Date;
 }
 
@@ -165,12 +174,13 @@ export class ImpactRepository {
 
   async insertGroup(input: { id: string; workspaceId: string; checkId: string;
     sourceArtifactId: string; beforeVersionId: string; afterVersionId: string;
-    sourceArtifactRevision: bigint }): Promise<ImpactCandidateGroupRow> {
+    sourceArtifactRevision: bigint; dependencies?: readonly JsonObject[] }): Promise<ImpactCandidateGroupRow> {
     const result = await sql<ImpactCandidateGroupRow>`insert into artifact_impact_candidate_groups
       (id, workspace_id, impact_check_id, source_artifact_id, source_before_version_id,
-        source_after_version_id, source_artifact_revision)
+        source_after_version_id, source_artifact_revision, dependencies)
       values (${input.id}, ${input.workspaceId}, ${input.checkId}, ${input.sourceArtifactId},
-        ${input.beforeVersionId}, ${input.afterVersionId}, ${input.sourceArtifactRevision})
+        ${input.beforeVersionId}, ${input.afterVersionId}, ${input.sourceArtifactRevision},
+        ${JSON.stringify(input.dependencies ?? [])}::jsonb)
       returning *`.execute(this.db);
     return requireRow(result.rows, 'insert into artifact_impact_candidate_groups');
   }
@@ -179,6 +189,24 @@ export class ImpactRepository {
     const result = await sql<ImpactCandidateGroupRow>`select *
       from artifact_impact_candidate_groups where id = ${id}`.execute(this.db);
     return result.rows[0];
+  }
+
+  async dependencyGroups(checkId: string, targetVersionId: string): Promise<readonly string[]> {
+    return (await sql<{ id: string }>`select id from artifact_impact_candidate_groups g
+      where impact_check_id = ${checkId} and exists (select 1
+        from jsonb_array_elements(g.dependencies) d
+        where d->>'target_version_id' = ${targetVersionId})`.execute(this.db)).rows.map(r => r.id);
+  }
+
+  async insertSelection(id: string, workspaceId: string, groupId: string,
+    items: readonly JsonObject[]): Promise<void> {
+    await sql`insert into artifact_impact_group_selections(id, workspace_id, group_id, items)
+      values(${id}, ${workspaceId}, ${groupId}, ${JSON.stringify(items)}::jsonb)`.execute(this.db);
+  }
+
+  async readSelection(id: string): Promise<ImpactGroupSelectionRow | undefined> {
+    return (await sql<ImpactGroupSelectionRow>`select * from artifact_impact_group_selections
+      where id = ${id}`.execute(this.db)).rows[0];
   }
 
   async insertGroupItems(items: readonly NewImpactGroupItem[]): Promise<void> {

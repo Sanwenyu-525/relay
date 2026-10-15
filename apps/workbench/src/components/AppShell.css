@@ -1,0 +1,44 @@
+/* AppShell 页壳私有样式。
+ *
+ * 只收窄窗导航抽屉里那条「新对话」入口的基座。几何与颜色全部消费 styles.css 已有的唯一 token
+ * （control.nav.height / radius.control / space / selection / action.text），
+ * 不引入第二套尺寸或色值，styles.css 不需要为此改动。
+ *
+ * 与 .mobile-navigation-item 分开而不是合并：那一条是导航目的地（带 aria-current），
+ * 这一条是动作（打开空白讨论）。共用基座会让动作在语义上伪装成「当前页」。 */
+
+.mobile-navigation-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-1);
+  padding-bottom: var(--relay-space-3);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.mobile-navigation-action {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-3);
+  /* 点击区域与抽屉里的导航行同高，键盘与指针目标都不缩水。 */
+  min-height: var(--relay-control-nav-height);
+  padding: 0 var(--relay-space-3);
+  border-radius: var(--relay-radius-control);
+  /* 动作名用 color.action.text：与同屏导航目的地（text.primary）区分，读得出这是动作。 */
+  color: var(--relay-color-action-text);
+  text-decoration: none;
+  transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+
+.mobile-navigation-action:hover {
+  background: var(--relay-color-selection-hover);
+}
+
+.mobile-navigation-action:active {
+  background: var(--relay-color-selection-bg);
+}
+
+/* 焦点环与全局 :focus-visible 同源，这里只保证不被同层规则覆盖。 */
+.mobile-navigation-action:focus-visible {
+  outline: var(--relay-focus-width) solid var(--relay-color-focus-ring);
+  outline-offset: calc(-1 * var(--relay-focus-width));
+}

@@ -28,6 +28,7 @@ export class RunToolCallRepository {
     readonly tool_name: string;
     readonly arguments: JsonObject;
     readonly arguments_sha256: string;
+    readonly assistant_message?: JsonObject | null;
     /** 对某一次已结算冲突的重新适配；只能指向原始请求，深度限制由应用层判定。 */
     readonly adaptation_of?: string | null;
     readonly adapted_path?: string | null;
@@ -35,12 +36,13 @@ export class RunToolCallRepository {
     const result = await sql<RunToolCallRow>`
       insert into run_tool_calls
         (id, workspace_id, project_id, run_id, step_id, step_attempt_id, model_call_id,
-         round, ordinal, provider_tool_call_id, tool_name, arguments, arguments_sha256,
+         round, ordinal, provider_tool_call_id, tool_name, arguments, arguments_sha256, assistant_message,
          status, operation_id, result_ref, revision, adaptation_of, adapted_path)
       values (${input.id}, ${input.workspace_id}, ${input.project_id}, ${input.run_id},
         ${input.step_id}, ${input.step_attempt_id}, ${input.model_call_id}, ${input.round},
         ${input.ordinal}, ${input.provider_tool_call_id}, ${input.tool_name},
         ${JSON.stringify(input.arguments)}::jsonb, ${input.arguments_sha256},
+        ${input.assistant_message == null ? null : JSON.stringify(input.assistant_message)}::jsonb,
         'REQUESTED', null, null, 1, ${input.adaptation_of ?? null}, ${input.adapted_path ?? null})
       returning *
     `.execute(db);
@@ -123,6 +125,37 @@ export class RunToolCallRepository {
       where id = ${id} and status = 'REQUESTED'
       returning id`.execute(db);
     return result.rows.length === 1;
+  }
+
+  /**
+   * 终态收口：把已证明未派发的 REQUESTED 行退出 pending。
+   *
+   * 只处理 operation_id 为 NULL 且同 id 无对应 Operation 的行：准备与绑定之间
+   * 的竞态会在 logical_operations 里留下同 id 的行，此时必须跳过，走既有停止
+   * 与核对流程。已有 Operation/Invocation/在途效果/UNKNOWN 一律不动。
+   * 调用方须已按 Task→Run 锁序持有行锁（控制收口或终态查询事务内）。
+   * 幂等：已 REJECTED/SETTLED/ABANDONED 的行不受影响，不建新行。
+   */
+  async rejectUndispatchedForTerminalRun(runId: string, runStatus: string,
+    db: DbExecutor = this.db): Promise<number> {
+    const candidates = (await sql<{ id: string }>`select id from run_tool_calls
+      where run_id = ${runId} and status = 'REQUESTED' and operation_id is null
+      order by round asc, ordinal asc`.execute(db)).rows;
+    let rejected = 0;
+    for (const candidate of candidates) {
+      const operation = (await sql<{ id: string }>`select id from logical_operations
+        where id = ${candidate.id}`.execute(db)).rows[0];
+      if (operation !== undefined) continue;
+      const done = (await sql<{ id: string }>`update run_tool_calls
+        set status = 'REJECTED',
+            result_ref = ${JSON.stringify({ reason: 'RUN_TERMINAL',
+              detail: `Run 已进入终态或已脱离当前执行权（状态：${runStatus}），遗留的工具请求不再派发。` })}::jsonb,
+            revision = revision + 1, updated_at = clock_timestamp()
+        where id = ${candidate.id} and status = 'REQUESTED'
+        returning id`.execute(db)).rows.length === 1;
+      if (done) rejected += 1;
+    }
+    return rejected;
   }
 
   /**

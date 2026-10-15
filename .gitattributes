@@ -1,0 +1,6 @@
+# 迁移 SQL 的字节内容有两处硬依赖：SHA-256 写入 relay_schema_migrations 台账并参与
+# schema 兼容比对（readiness 要求迁移清单完全相等），以及进入测试包的
+# resource_file_sha256 清单。core.autocrlf=true 时 checkout 会把 LF 改写成 CRLF，
+# 摘要随即与已应用版本不一致，迁移入口会以 "applied migration ... content digest
+# changed" 拒绝执行、桌面窗口以 SCHEMA_UNAVAILABLE 启动失败。因此按 LF 原样存储。
+apps/api/migrations/*.sql text eol=lf

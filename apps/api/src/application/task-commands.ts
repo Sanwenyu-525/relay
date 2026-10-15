@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { requireTaskChainAdmission,type TaskChainBinding } from './task-chain-admission.js';
 
 import type { DbExecutor } from '../infrastructure/database.js';
 import type {
@@ -171,6 +172,7 @@ export async function markTaskReady(
     readonly taskId: string;
     readonly commandId: string;
     readonly expectedRevision: string;
+    readonly taskChainBinding?: TaskChainBinding;
   },
 ): Promise<CommandOutcome<TaskCommandResult>> {
   const expectedRevision = requireRevision(input.expectedRevision, 'expected_revision');
@@ -180,8 +182,12 @@ export async function markTaskReady(
     commandId: input.commandId,
     commandType: 'MarkTaskReady',
     target: { task_id: input.taskId },
-    body: { expected_revision: toDecimalString(expectedRevision) },
+    body: { expected_revision: toDecimalString(expectedRevision), ...(input.taskChainBinding===undefined?{}:{task_chain:{chain_id:input.taskChainBinding.chainId,item_id:input.taskChainBinding.itemId,...(input.taskChainBinding.executionSignature===undefined?{}:{execution_signature:input.taskChainBinding.executionSignature})}}) },
     execute: async (repositories) => {
+      if (input.taskChainBinding!==undefined) {
+        await repositories.workspaces.lockAuthority(input.workspaceId,'share');
+        await requireTaskChainAdmission(repositories,input.taskChainBinding,input.workspaceId,input.taskId);
+      }
       const task = await lockTaskInWorkspace(repositories, input.workspaceId, input.taskId);
 
       requireRevisionMatch(task, expectedRevision);
@@ -213,6 +219,8 @@ export async function markTaskReady(
           actualRevision: toDecimalString(task.revision),
         });
       }
+
+      if (input.taskChainBinding!==undefined) await repositories.taskChains.ready(input.taskChainBinding.itemId,updated.revision);
 
       await recordActivity(repositories, {
         commandId: input.commandId,

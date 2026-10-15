@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { fixtureAdapter } from "../src/fixtures/fixtureAdapter";
-import { resetRelayConnectionForTest } from "../src/lib/relayConnection";
+import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { DomWrapper, flush, mountWorkbench } from "./mountApp";
 
 let unmount: (() => void) | null = null;
@@ -85,4 +85,67 @@ it("readiness 检查冻结对应输入，失败后恢复编辑并保留输入", 
   expect((page.get('input[name="relay-workspace-id"]').element as HTMLInputElement).disabled).toBe(false);
   expect((page.get('input[name="relay-workspace-id"]').element as HTMLInputElement).value).toBe("11111111-1111-4111-8111-111111111111");
   expect(page.get('[data-testid="relay-connection-error"]').text()).not.toBe("");
+});
+
+const controlBase = "http://127.0.0.1:8787";
+const controlWorkspace = "11111111-1111-4111-8111-111111111111";
+const controlTask = "22222222-2222-4222-8222-222222222222";
+const controlRun = "33333333-3333-4333-8333-333333333333";
+const controlRequest = "44444444-4444-4444-8444-444444444444";
+const controlPrefix = `${controlBase}/api/v1/workspaces/${controlWorkspace}`;
+const controlRunUrl = `${controlPrefix}/runs/${controlRun}`;
+const controlResponse = (status: number, body: unknown): Response =>
+  ({ ok: status >= 200 && status < 300, status, json: async () => body } as Response);
+const controlTaskBody = () => ({ id: controlTask, project_id: null, title: "运行页任务", status: "IN_PROGRESS",
+  mode: "DELEGATE_AI", revision: "4", executor: { kind: "AI", run_id: controlRun, ownership_epoch: "1" },
+  current_completion_id: null, waiting_reason: null, blocking_task_ids: [], unresolved_blocker_ids: [],
+  allowed_actions: [], acceptance: { acceptance_revision: "1", objective: "核对", source: "CREATE", criteria: [] },
+  dependencies: [] });
+const controlRunBody = (status: string) => ({ id: controlRun, task_id: controlTask, status, revision: "3",
+  ownership_epoch: "1", retry_of_run_id: null, current_step_id: "step-1", wait_reason: null,
+  created_at: "2026-09-23T00:00:00.000Z", updated_at: "2026-09-23T00:01:00.000Z", terminal_at: null,
+  contract: { workflow_key: "markdown-deliverable-v1", workflow_version: "1", execution_config_version: "1",
+    acceptance_revision: "1", contract_hash: "a".repeat(64) }, current_step: null,
+  steps: [{ step_id: "step-1", step_index: 0, step_kind: "BUILD_CONTEXT", status: "SUCCEEDED",
+    started_at: null, finished_at: null }], recent_attempts: [], result_refs: [], blocking_review_ids: [],
+  pending_control_request: null, unresolved_operation_ids: [] });
+
+it("暂停在途只显示正在处理，不把 Run 本地改写成已暂停；受理后仍以服务端状态为准", async () => {
+  activateRelayConnection({ baseUrl: controlBase, workspaceId: controlWorkspace, bearerToken: "test-token" });
+  let release: (value: Response) => void = () => undefined;
+  const inFlight = new Promise<Response>((resolve) => { release = resolve; });
+  let postedCommandId = "";
+  let paused = false;
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    const address = String(url);
+    if (address === controlRunUrl && init?.method !== "POST") return controlResponse(200, controlRunBody(paused ? "PAUSED" : "RUNNING"));
+    if (address === `${controlPrefix}/tasks/${controlTask}`) return controlResponse(200, controlTaskBody());
+    if (address === `${controlRunUrl}/reviews`) return controlResponse(200, { items: [] });
+    if (address === `${controlRunUrl}/context-manifests`) return controlResponse(200,
+      { items: [], build: { status: "NOT_STARTED", reason_code: null, message: null } });
+    if (address === `${controlRunUrl}/control-requests` && init?.method === "POST") {
+      postedCommandId = String((JSON.parse(String(init.body)) as Record<string, unknown>).command_id);
+      return inFlight;
+    }
+    if (address === `${controlRunUrl}/control-requests/${controlRequest}`) return controlResponse(200,
+      { id: controlRequest, run_id: controlRun, task_id: controlTask, type: "PAUSE", status: "PENDING",
+        revision: "1", requested_at: "2026-09-23T00:01:00.000Z", decided_at: null, result_ref: null });
+    throw new Error(`unexpected request: ${address}`);
+  }));
+  const mounted = await mountWorkbench(`/runs/${controlRun}`); unmount = mounted.unmount;
+  await flush(30);
+  await mounted.wrapper.get('[data-testid="run-control-PAUSE"]').trigger("click");
+  // 在途窗口：按钮已受理 ≠ 动作已停止，界面不先把它改写成已暂停。
+  const inflight = mounted.wrapper.get('[data-testid="run-control-inflight"]').text();
+  expect(inflight).toContain("正在处理");
+  expect(inflight).toContain("Run 尚未暂停");
+  // 未收到服务端事实前，不出现「已暂停」的摘要面板。
+  expect(mounted.wrapper.find('[data-testid="run-paused-summary"]').exists()).toBe(false);
+  // 服务端受理后重新查询：状态一律以服务端事实为准。
+  paused = true;
+  release(controlResponse(202, { command_id: postedCommandId, committed_at: "2026-09-23T00:01:00.000Z",
+    result: { control_request_id: controlRequest, run_id: controlRun, task_id: controlTask,
+      type: "PAUSE", status: "PENDING", run_revision: "4" } }));
+  await flush(60);
+  expect(mounted.wrapper.find('[data-testid="run-paused-summary"]').exists()).toBe(true);
 });

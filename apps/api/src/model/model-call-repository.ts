@@ -1,4 +1,5 @@
 import { sql } from 'kysely';
+import { TaskChainRepository } from '../planning/task-chain-repository.js';
 
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { ModelCallRow } from '../infrastructure/database-schema.js';
@@ -86,6 +87,7 @@ export class ModelCallRepository {
           throw new ModelScopeArchivedError();
         }
       }
+      if (runScope!==undefined && !await new TaskChainRepository(trx).reserveCall(runScope.id)) throw new ModelScopeBudgetError();
       if (budget !== undefined) {
         if (runScope !== undefined) {
           await sql`select id from runs where id = ${runScope.id} for update`.execute(trx);

@@ -1,0 +1,50 @@
+import { createHash } from 'node:crypto';
+import { canonicalizeJson } from '../receipt/payload-hash.js';
+import { toDecimalString } from '../shared/decimal.js';
+/** A Task row revision also changes on status and Review transitions, which are not ModelPort inputs. */
+export function matchesTaskContext(payload, task) {
+    const sources = payload.sources;
+    const taskSource = Array.isArray(sources) ? sources.find((source) => readString(source, 'kind') === 'TASK' &&
+        readString(source, 'source_ref') === `task:${task.id}`) : undefined;
+    return readString(payload.task, 'id') === task.id &&
+        readString(payload.task, 'title') === task.title &&
+        readString(payload.project, 'id') === task.project_id &&
+        readString(taskSource, 'version') === toDecimalString(task.acceptance_revision);
+}
+export async function contextManifestMatchesCurrent(repositories, payload, run, task, authority) {
+    const dependencies = payload.dependencies;
+    if (readString(dependencies, 'context_revision') !== toDecimalString(authority.context_revision) ||
+        readString(dependencies, 'authority_revision') !== toDecimalString(authority.revision) ||
+        readString(payload.run, 'id') !== run.id ||
+        readString(payload.run, 'ownership_epoch') !== toDecimalString(run.ownership_epoch) ||
+        !matchesTaskContext(payload, task))
+        return false;
+    const project = task.project_id === null ? undefined :
+        await repositories.projects.readProject(task.project_id, true);
+    return project !== undefined &&
+        readString(dependencies, 'project_revision') === toDecimalString(project.revision);
+}
+/** Called inside the authority → Task → Run admission transaction before a Gateway effect. */
+export async function hasCurrentRunContext(repositories, run, task, authority) {
+    const built = await repositories.runs.readStepByKind(run.id, 'BUILD_CONTEXT');
+    const hash = readString(built?.result_ref, 'manifest_hash');
+    if (built?.status !== 'SUCCEEDED' || hash === undefined)
+        return false;
+    const expected = Buffer.from(hash, 'hex');
+    const manifest = await repositories.runs.readContextManifestByHash(run.id, expected);
+    if (manifest === undefined)
+        return false;
+    // The frozen reference must still match the actual stored payload. A payload
+    // edited in place (corruption or upgrade anomaly) keeps the identity fields
+    // the freshness comparison checks, so only the recomputed digest detects it.
+    if (!createHash('sha256').update(canonicalizeJson(manifest.payload)).digest().equals(expected)) {
+        return false;
+    }
+    return contextManifestMatchesCurrent(repositories, manifest.payload, run, task, authority);
+}
+function readString(value, key) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value))
+        return undefined;
+    const field = value[key];
+    return typeof field === 'string' ? field : undefined;
+}

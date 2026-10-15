@@ -6,6 +6,7 @@
 .live-resume .continuation-capture-form { margin-top: var(--relay-space-4); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .live-resume__continuation { padding: 0 var(--relay-layout-main-padding) var(--relay-layout-main-padding); }
 .live-resume__continuation > .resume-section { max-width: var(--relay-layout-reading-maxWidth); }
-@media (max-width: 60rem) {
+/* 并入 48rem 折行档，原 60rem：续读区留白随窄屏降级。 */
+@media (width < 48rem) {
   .live-resume__continuation { padding: 0 var(--relay-layout-main-compactPadding) var(--relay-layout-main-compactPadding); }
 }

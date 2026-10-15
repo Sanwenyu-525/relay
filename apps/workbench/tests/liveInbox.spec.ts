@@ -11,6 +11,8 @@ const taskId3 = "55555555-5555-4555-8555-555555555555";
 const path = `${baseUrl}/api/v1/workspaces/${workspaceId}/tasks?inbox=true`;
 const allPath = `${baseUrl}/api/v1/workspaces/${workspaceId}/tasks?scope=all`;
 const projectsPath = `${baseUrl}/api/v1/workspaces/${workspaceId}/projects?status=active`;
+/** 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1），因此它也会读这个端点。 */
+const sessionsPath = `${baseUrl}/api/v1/workspaces/${workspaceId}/assist-sessions?`;
 let unmount: (() => void) | null = null;
 
 afterEach(() => {
@@ -26,7 +28,8 @@ function response(status: number, body: unknown): Response {
 function recentWorkResponse(url: string): Response | null {
   return [workspaceId, otherWorkspaceId].some((id) =>
     url === `${baseUrl}/api/v1/workspaces/${id}/tasks?scope=all` ||
-    url === `${baseUrl}/api/v1/workspaces/${id}/projects?status=active`)
+    url === `${baseUrl}/api/v1/workspaces/${id}/projects?status=active` ||
+    url === `${baseUrl}/api/v1/workspaces/${id}/assist-sessions?`)
     ? response(200, { items: [], next_cursor: null }) : null;
 }
 function task(id: string, title: string, status = "INBOX", projectId: string | null = null,
@@ -52,7 +55,7 @@ describe("live 任务收件箱", () => {
     expect(mounted.router.currentRoute.value.query.tab).toBe("inbox");
     expect(mounted.wrapper.get(`[data-testid="task-row-${taskId1}"]`).text()).toContain("直达任务");
     expect(fetchMock.mock.calls.map(([input]) => String(input)).filter((url) => !url.endsWith("/attention/interventions")))
-      .toEqual([allPath, projectsPath, path]);
+      .toEqual([allPath, projectsPath, sessionsPath, path]);
   });
 
   it("按真实游标追加页，状态、模式和标题只筛选已加载任务且计数准确", async () => {
@@ -70,7 +73,7 @@ describe("live 任务收件箱", () => {
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/tasks?tab=inbox"); unmount = mounted.unmount;
-    expect(urls).toEqual([allPath, projectsPath, path]);
+    expect(urls).toEqual([allPath, projectsPath, sessionsPath, path]);
     expect(mounted.wrapper.get('[data-testid="inbox-count"]').text())
       .toContain("已加载 2 项 · 当前筛选显示 2 项 · 仍有后续页");
     expect(mounted.wrapper.get(`[data-testid="task-row-${taskId1}"]`).text()).toContain("未归属项目");
@@ -86,7 +89,7 @@ describe("live 任务收件箱", () => {
     expect(mounted.wrapper.get('[data-testid="inbox-count"]').text()).toContain("当前筛选显示 1 项");
     await mounted.wrapper.get('[data-testid="inbox-load-more"]').trigger("click");
     await flush(40);
-    expect(urls).toEqual([allPath, projectsPath, path, `${path}&cursor=opaque%2B2`]);
+    expect(urls).toEqual([allPath, projectsPath, sessionsPath, path, `${path}&cursor=opaque%2B2`]);
     expect(mounted.wrapper.get('[data-testid="inbox-count"]').text())
       .toContain("已加载 3 项 · 当前筛选显示 1 项 · 已到列表末页");
     expect(mounted.wrapper.find('[data-testid="inbox-load-more"]').exists()).toBe(false);
@@ -133,10 +136,11 @@ describe("live 任务收件箱", () => {
     const mounted = await mountWorkbench("/tasks?tab=inbox"); unmount = mounted.unmount;
     expect(mounted.wrapper.get(`[data-testid="task-row-${taskId1}"]`).text()).toContain("旧空间任务");
     await mounted.wrapper.get('[data-testid="tasks-tab-all"]').trigger("click");
-    expect(mounted.wrapper.get('[data-testid="tasks-live-all"]').text())
-      .toContain("当前工作空间没有任务");
+    // 切到全部范围时该工作空间确实没有任务，落回首装空态而非收件箱空态。
+    expect(mounted.wrapper.find('[data-testid="tasks-empty"]').exists()).toBe(true);
+    expect(mounted.wrapper.find('[data-testid="inbox-empty"]').exists()).toBe(false);
     await mounted.wrapper.get('[data-testid="tasks-tab-inbox"]').trigger("click");
-    expect(mounted.wrapper.text()).toContain("正在读取真实收件箱任务");
+    expect(mounted.wrapper.text()).toContain("正在从本机服务读取收件箱任务");
     expect(mounted.wrapper.text()).not.toContain("旧空间任务");
     await mounted.wrapper.get('[data-testid="tasks-tab-all"]').trigger("click");
     finishOld!(response(200, { items: [task(taskId1, "晚到旧任务")], next_cursor: null }));

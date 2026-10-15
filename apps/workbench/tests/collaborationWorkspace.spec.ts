@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { DomWrapper, dialogText, flush, mountWorkbench } from "./mountApp";
+import { DomWrapper, dialogText, flush, folderStripName, mountWorkbench } from "./mountApp";
 import { COLLABORATION_LAYOUT_STORAGE_KEY } from "../src/lib/collaborationLayoutPreferences";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -12,6 +12,8 @@ const runId = "44444444-4444-4444-8444-444444444444";
 const versionId = "55555555-5555-4555-8555-555555555555";
 const sessionId = "66666666-6666-4666-8666-666666666666";
 const reviewId = "77777777-7777-4777-8777-777777777777";
+const stateRequestId = "88888888-8888-4888-8888-888888888888";
+const stateUndoCommandId = "99999999-9999-4999-8999-999999999998";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
 
 function response(body: unknown, status = 200): Response {
@@ -149,7 +151,9 @@ function router(routes: Routes) {
   });
 }
 
-afterEach(() => { resetRelayConnectionForTest(); vi.unstubAllGlobals(); window.localStorage.removeItem(COLLABORATION_LAYOUT_STORAGE_KEY); });
+// 会话内恢复线索（未确认的 Run 控制命令按 Run 存在 sessionStorage）不属于协作页夹具状态：
+// 每条用例都以「没有上一条未确认命令」为前提，因此连同布局偏好一起清掉。
+afterEach(() => { resetRelayConnectionForTest(); vi.unstubAllGlobals(); window.localStorage.removeItem(COLLABORATION_LAYOUT_STORAGE_KEY); window.sessionStorage.clear(); });
 
 describe("协作工作区主路径", () => {
   it("双栏、对话、成果切换保留原Owner、会话草稿和判断说明，零业务提交", async () => {
@@ -377,6 +381,53 @@ describe("协作工作区主路径", () => {
       expect(Object.keys(posts[0]!.body)).toEqual(["command_id"]);
       expect(typeof posts[0]!.body.command_id).toBe("string");
       expect(view.wrapper.get('[data-testid="assist-proposals"]').text()).toContain("ACCEPTED");
+    } finally { view.unmount(); }
+  });
+
+  it("任务定义提案预览：验证方式与预期产物中文化，原枚举降级保留，不再直出 JSON", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const fetchMock = router({ proposals: () => response({ items: [{ id: "proposal-definition", session_id: sessionId,
+      message_id: "definition-message", kind: "TASK_DEFINITION", target_type: "PROJECT", target_id: projectId,
+      base_revision: "1", payload_hash: "f".repeat(64), status: "PENDING",
+      payload: { title: "撰写评价方案", objective: "形成可核对的评价口径",
+        criteria: [{ statement: "指标定义明确", required: true, method: "HUMAN" },
+          { statement: "来源可追溯", required: false, method: "HUMAN_REVIEW" }],
+        expected_outputs: { kind: "MARKDOWN_DOCUMENT", description: "评价方案文档" } } }] }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      const detail = view.wrapper.get('[data-testid="assist-transcript"] .agent-chat-proposal-details');
+      expect(detail.attributes("open")).toBeUndefined();
+      await act(async () => { (detail.element as HTMLDetailsElement).open = true; });
+      const text = detail.text();
+      expect(text).toContain("验证方式：人工核对（HUMAN）");
+      // 服务端枚举开放扩展：未收录的验证方式回退原枚举展示，不编造中文。
+      expect(text).toContain("验证方式：HUMAN_REVIEW");
+      expect(text).toContain("产物类型：Markdown 文档");
+      expect(text).toContain("结果说明：评价方案文档");
+      expect(text).not.toContain('"kind":"MARKDOWN_DOCUMENT"');
+      expect(text).toContain("目标 项目（PROJECT）");
+      const chips = detail.findAll(".assist-proposal-output-chip");
+      expect(chips).toHaveLength(2);
+      expect(chips[0]!.attributes("title")).toBe("kind: MARKDOWN_DOCUMENT");
+      expect(chips[1]!.attributes("title")).toBe("description: 评价方案文档");
+    } finally { view.unmount(); }
+  });
+
+  it("任务定义提案未指定预期产物时给出紧凑空态，不序列化空对象", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const fetchMock = router({ proposals: () => response({ items: [{ id: "proposal-definition-empty", session_id: sessionId,
+      message_id: "definition-message", kind: "TASK_DEFINITION", target_type: "PROJECT", target_id: projectId,
+      base_revision: "1", payload_hash: "f".repeat(64), status: "PENDING",
+      payload: { title: "撰写评价方案", objective: "形成可核对的评价口径",
+        criteria: [], expected_outputs: {} } }] }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      const detail = view.wrapper.get('[data-testid="assist-transcript"] .agent-chat-proposal-details');
+      await act(async () => { (detail.element as HTMLDetailsElement).open = true; });
+      expect(detail.text()).toContain("未指定预期产物");
+      expect(detail.text()).not.toContain("{}");
     } finally { view.unmount(); }
   });
 
@@ -674,8 +725,19 @@ describe("协作工作区主路径", () => {
 
   it("聊天Enter发送保留输入法与Shift换行保护", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
-    const posts: Record<string, unknown>[] = []; const read = router({});
+    const posts: Record<string, unknown>[] = []; const postPaths: string[] = []; const read = router({});
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      // 项目绑定普通档会话的发送会沿新入口触发状态维护解释：DISCUSS 静默，不产生回执。
+      if (path.endsWith("/state-maintenance-requests") && init?.method === "POST") {
+        postPaths.push(path);
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return response({ command_id: body.command_id, committed_at: "2026-10-01T03:00:00Z",
+          result: { request_id: stateRequestId, session_id: sessionId, source_message_id: "user-new",
+            project_id: projectId, decision: "DISCUSS", status: "DISCUSSED", candidate_status: "UNAVAILABLE",
+            questions: [], changes: null, decision_required: null, undo_command_id: stateUndoCommandId,
+            revision: "1", created_at: "2026-10-01T03:00:00Z", updated_at: "2026-10-01T03:00:00Z" } }, 202);
+      }
       if (init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>; posts.push(body);
         return response({ command_id: body.command_id, committed_at: "2026-10-01T03:00:00Z", result: {
@@ -697,7 +759,10 @@ describe("协作工作区主路径", () => {
       expect(posts).toHaveLength(0);
       expect((draft.element as HTMLTextAreaElement).value).toBe("输入法完成后的内容");
       await press({}); await flush();
+      // 消息本身 1 条 + 状态维护解释 1 条；DISCUSS 静默所以没有更多 POST。
       expect(posts).toHaveLength(1); expect(posts[0]).toMatchObject({ content: "输入法完成后的内容", intent: "DISCUSS", source_refs: [] });
+      expect(postPaths).toHaveLength(1);
+      expect(postPaths[0]).toBe(`${prefix}/assist-sessions/${sessionId}/state-maintenance-requests`);
     } finally { view.unmount(); }
   });
 
@@ -743,8 +808,18 @@ describe("协作工作区主路径", () => {
 
   it("输入Enter发送真实讨论，中文IME与Shift+Enter保留草稿且不提交", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
-    const posts: Record<string, unknown>[] = []; const read = router({});
+    const posts: Record<string, unknown>[] = []; const postPaths: string[] = []; const read = router({});
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/state-maintenance-requests") && init?.method === "POST") {
+        postPaths.push(path);
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return response({ command_id: body.command_id, committed_at: "2026-10-01T03:00:00Z",
+          result: { request_id: stateRequestId, session_id: sessionId, source_message_id: "user-request",
+            project_id: projectId, decision: "DISCUSS", status: "DISCUSSED", candidate_status: "UNAVAILABLE",
+            questions: [], changes: null, decision_required: null, undo_command_id: stateUndoCommandId,
+            revision: "1", created_at: "2026-10-01T03:00:00Z", updated_at: "2026-10-01T03:00:00Z" } }, 202);
+      }
       if (init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>; posts.push(body);
         return response({ command_id: body.command_id, committed_at: "2026-10-01T03:00:00Z",
@@ -763,6 +838,8 @@ describe("协作工作区主路径", () => {
       await flush(); expect(posts).toHaveLength(1);
       expect(posts[0]).toMatchObject({ content: "补充实验指标来源", intent: "DISCUSS", source_refs: [] });
       expect((draft.element as HTMLTextAreaElement).value).toBe("");
+      // 新增的状态维护解释恰好一条，且不因 IME/Shift 按键提前触发。
+      expect(postPaths).toEqual([`${prefix}/assist-sessions/${sessionId}/state-maintenance-requests`]);
     } finally { view.unmount(); }
   });
 
@@ -1093,7 +1170,7 @@ describe("协作工作区主路径", () => {
     try {
       await view.wrapper.get('button[aria-label="打开导航"]').trigger("click"); await flush();
       const drawer = new DomWrapper(document.querySelector('[role="dialog"][aria-label="导航"]'));
-      expect(drawer.get('[data-testid="recent-work"] [title="全部任务 · 按最近变更排序"]').exists()).toBe(true);
+      expect(drawer.get('[data-testid="recent-work"] [title="全部任务与会话 · 按最近变更排序"]').exists()).toBe(true);
       await drawer.get(`[data-testid="recent-work-${taskId}"]`).trigger("click"); await flush();
       expect(view.router.currentRoute.value).toMatchObject({ path: "/agent", query: { work: taskId } });
       expect(document.querySelector('[role="dialog"][aria-label="导航"]')).toBeNull();
@@ -1137,13 +1214,13 @@ describe("协作工作区主路径", () => {
     const view = await mountWorkbench("/agent");
     await flush(60);
     // 空工作区的入口是选目录（§18.1），但不再挡在对话前面：直接就能输入，
-    // 目录只是执行准入的前提，不是开始讨论的前提。
-    expect(view.wrapper.get('[data-testid="folder-scope-bar"]').text()).toContain("未选择目录");
+    // 目录只是执行准入的前提，不是开始讨论的前提。作用域现在收成输入卡上方的常驻细条。
+    expect(folderStripName()).toBe("未选择目录");
     expect(view.wrapper.get('[data-testid="assist-first-draft"]').exists()).toBe(true);
     expect(view.wrapper.get('[data-testid="collab-unassigned-execution-hint"]').exists()).toBe(true);
     expect(view.wrapper.get('[data-testid="recent-work"]').text()).toContain("还没有任务");
     // 范围与排序常驻可见，避免用户把会话列表误当作全部工作。
-    expect(view.wrapper.get('[data-testid="recent-work"] [title="全部任务 · 按最近变更排序"]').exists()).toBe(true);
+    expect(view.wrapper.get('[data-testid="recent-work"] [title="全部任务与会话 · 按最近变更排序"]').exists()).toBe(true);
     expect(view.wrapper.find('[data-testid="assist-draft"]').exists()).toBe(false);
     const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
     expect(posts).toHaveLength(0);
@@ -1162,9 +1239,10 @@ describe("协作工作区主路径", () => {
     await flush(60);
     expect(view.wrapper.find('[data-testid="collab-goal"]').exists()).toBe(false);
 
-    await view.wrapper.get('[data-testid="collab-pick-target"]').trigger("click");
+    // 「接续已有任务」的选择器已从消息区顶部的折叠块迁到左栏就地展开区（协作页 §3.1）。
+    await view.wrapper.get('[data-testid="recent-work-find-more"]').trigger("click");
     await flush(60);
-    await view.wrapper.get('[data-testid="collab-target-select"]').setValue(taskId);
+    await view.wrapper.get('[data-testid="collab-target-select"]').setValue(`task:${taskId}`);
     expect(view.wrapper.get('[data-testid="collab-target-open"]').attributes("disabled")).toBeUndefined();
     await view.wrapper.get('[data-testid="collab-target-open"]').trigger("click");
     await flush(60);

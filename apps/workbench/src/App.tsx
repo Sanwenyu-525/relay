@@ -92,6 +92,26 @@ export default function App() {
     blocker.proceed?.();
   }
 
+  /**
+   * 「保留并继续编辑」的编辑焦点恢复状态机：点击时先登记意图，再由弹层关闭触发
+   * blocked → unblocked 迁移，在迁移效果里执行恢复。AppDialog 的关闭清理（默认回焦到
+   * 「打开导航」按钮）与这里的迁移效果同处一轮 passive flush，React 保证先执行全部
+   * 清理再执行新建效果，因此恢复发生在默认回焦之后、不会被覆盖——不用定时器猜时序。
+   * 组件卸载或未点击「保留并继续编辑」（Escape、丢弃）时意图为空，默认回焦保持原行为。
+   */
+  const keepEditingFocus = useRef(false);
+  const wasBlocked = useRef(false);
+  useEffect(() => {
+    const blocked = blocker.state === "blocked";
+    if (wasBlocked.current && !blocked && keepEditingFocus.current) {
+      keepEditingFocus.current = false;
+      // 命令结果待核对时没有可续写的编辑器，「保留并继续编辑」只是留在当前工作区，
+      // 维持弹层默认回焦，不把焦点塞进禁用的输入区。
+      if (currentDraftGuard()?.pendingCommandId?.() == null) currentDraftGuard()?.restoreFocus?.();
+    }
+    wasBlocked.current = blocked;
+  }, [blocker.state]);
+
   async function discardAndClose(): Promise<void> {
     if (currentDraftGuard()?.pendingCommandId?.()) return;
     currentDraftGuard()?.discard();
@@ -102,7 +122,7 @@ export default function App() {
   }
 
   if (desktopStatus !== "idle") {
-    return <div className="desktop-window"><DesktopTitleBar available={false} /><main className="page-state" data-testid={desktopStatus === "error" ? "desktop-service-unavailable" : "desktop-service-connecting"} role="status">
+    return <div className="desktop-window"><DesktopTitleBar available={false} onSearch={() => setCommandOpen(true)} /><main className="page-state" data-testid={desktopStatus === "error" ? "desktop-service-unavailable" : "desktop-service-connecting"} role="status">
       {desktopStatus === "error" ? <>
         <h1>本机服务不可用</h1>
         <p>无法连接桌面工作空间。请关闭并重新启动 Relay Agent；如果问题持续，请检查 PostgreSQL 和桌面配置。</p>
@@ -119,14 +139,15 @@ export default function App() {
     {/* 跳转链接由窗口框架持有并排在标题栏之前：它 position:fixed，视觉位置不变，
         但必须是第一个 Tab 站位，否则键盘用户先落在标题栏按钮上（WCAG 2.4.1）。 */}
     <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById("main-content")?.focus(); }}>跳到主要内容</a>
-    <DesktopTitleBar available />
+    <DesktopTitleBar available onSearch={() => setCommandOpen(true)} />
     <AppShell desktopStatus={desktopStatus} commandOpen={commandOpen} onCommandOpen={() => setCommandOpen(true)} onCommandClose={() => setCommandOpen(false)}>
       <div key={`${preserveCreateTask ? "create-task" : connection.epoch}:${location.pathname}${location.search}`}><Outlet /></div>
     </AppShell>
     <AppDialog open={blocker.state === "blocked"} title={pendingCommandId ? "命令结果待核对" : "保留未保存的修改"} onClose={() => blocker.reset?.()}>
       <p>{pendingCommandId ? `原命令 ${pendingCommandId} 的结果仍待核对，请留在当前建议区查询回执。` : "即将离开的页面还有未保存的修改。你可以继续编辑，或丢弃草稿后离开。"}</p>
       <div className="dialog-actions">
-        <button className="secondary-button" type="button" onClick={() => blocker.reset?.()}>保留并继续编辑</button>
+        <button className="secondary-button" type="button"
+          onClick={() => { keepEditingFocus.current = true; blocker.reset?.(); }}>保留并继续编辑</button>
         {!pendingCommandId && <button className="danger-button" type="button" data-testid="discard-draft-leave" onClick={discardAndContinue}>丢弃草稿并离开</button>}
       </div>
     </AppDialog>

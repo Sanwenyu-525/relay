@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { Link, NavLink, useLocation } from "react-router-dom";
-import { Bell, BookOpen, FolderKanban, House, Inbox, Link2, ListChecks, ListTree, Menu, Settings, SquarePen } from "lucide-react";
+import { Link, useLocation } from "react-router-dom";
+import { Bell, BookOpen, FolderKanban, House, Inbox, Link2, ListChecks, ListTree, Menu, Settings, Sparkles, SquarePen } from "lucide-react";
 import AppDialog from "./AppDialog";
 import CommandPalette from "./CommandPalette";
 import RecentWorkRail from "./RecentWorkRail";
 import SidebarResizeHandle, { clampSidebarWidth } from "./SidebarResizeHandle";
-import WorkbenchActions from "./WorkbenchActions";
 import { dialogCount } from "../lib/dialogStack";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { useRelayConnection } from "../lib/relayConnection";
+import "./AppShell.css";
 
 // 可拖拽列宽是纯展示偏好，不是业务事实；localStorage 只保存这一个数值，读写失败时本次会话仍可调整。
 // 2026-10-02 共享壳栏位分离后，这个键归属「近期工作」栏；沿用同一键与同一钳制区间，
@@ -35,6 +35,11 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
   onCommandClose: () => void;
 }) {
   const location = useLocation();
+  const query = new URLSearchParams(location.search);
+  const path = location.pathname;
+  const inboxActive = path === "/tasks" && query.get("tab") === "inbox";
+  const isNavigationItemActive = (to: string) => to === "/inbox" ? inboxActive
+    : to === "/tasks" ? path === "/tasks" && !inboxActive : path === to;
   const connection = useRelayConnection();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState<number | null>(readStoredSidebarWidth);
@@ -72,32 +77,40 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
     { label: "动态", to: "/activity", icon: ListTree, count: "" },
     { label: "收件箱", to: "/inbox", icon: Inbox, count: "" }
   ];
-  const query = new URLSearchParams(location.search);
-  const path = location.pathname;
   const currentWorkId = path === "/agent" ? query.get("work") : null;
+  /**
+   * 全局「新对话」只有一个 URL 入口意图：每次不同的 `/agent?new=…`。
+   * 协作页按这个键打开空白输入，不恢复最近会话、不沿用当前目录或任务；
+   * 会话草稿、目录作用域与首条发送仍然只有协作页一个 Owner（工作台 §17.12.1）。
+   * 两个宿主共用这一条 href：宽窗在近期工作栏头部，窄窗（该栏 display:none）在导航抽屉里。
+   * 这不是第二套会话状态，也不复用会话列表里的「新建会话」——那会保留当前目标与目录。
+   */
+  const newConversationHref = `/agent?new=${encodeURIComponent(location.key)}`;
   const secondaryNavigation = [
     { label: "设置", to: "/settings", icon: Settings },
     { label: "连接与同步", to: "/connections", icon: Link2 }
   ];
-  const breadcrumb = (() => {
-    if (path === "/today") return ["工作空间", "今日"];
-    if (path === "/activity" || path === "/activities") return ["工作空间", "动态"];
+  // 面包屑父级可点：只有存在语义上级路由的层级才带 to（任务链回任务列表与任务详情，项目链回项目列表与项目页）；
+  // 末级保持纯文本，没有对应页面的层级（工作空间、产物版本）不硬造入口。链接复用全局 text-link 样式。
+  const breadcrumb = ((): { label: string; to?: string }[] => {
+    if (path === "/today") return [{ label: "工作空间" }, { label: "今日" }];
+    if (path === "/activity" || path === "/activities") return [{ label: "工作空间" }, { label: "动态" }];
     // 工作台页不显示面包屑：那一行与页头重复，且页头标题本身就是返回确切任务的入口。
     if (path === "/agent") return [];
-    if (/^\/artifact-versions\/[^/]+\/lineage$/u.test(path)) return ["产物版本", "来源"];
-    if (path === "/projects") return ["工作空间", query.get("view") === "create" ? "新建项目" : "项目"];
+    if (/^\/artifact-versions\/[^/]+\/lineage$/u.test(path)) return [{ label: "产物版本" }, { label: "来源" }];
+    if (path === "/projects") return [{ label: "工作空间" }, { label: query.get("view") === "create" ? "新建项目" : "项目" }];
     if (path === "/tasks") return query.get("view") === "create"
-      ? ["工作空间", "新建任务与执行准备"]
-      : query.get("tab") === "inbox" ? ["工作空间", "任务", "收件箱"] : ["工作空间", "任务"];
-    if (path === "/reviews") return ["工作空间", "待处理"];
-    if (path === "/knowledge") return ["工作空间", "资料"];
-    if (path === "/settings") return ["工作空间", "设置"];
-    if (path === "/connections" || path === "/settings/connections") return ["工作空间", "连接与同步"];
+      ? [{ label: "工作空间" }, { label: "新建任务与执行准备" }]
+      : query.get("tab") === "inbox" ? [{ label: "工作空间" }, { label: "任务", to: "/tasks" }, { label: "收件箱" }] : [{ label: "工作空间" }, { label: "任务" }];
+    if (path === "/reviews") return [{ label: "工作空间" }, { label: "待处理" }];
+    if (path === "/knowledge") return [{ label: "工作空间" }, { label: "资料" }];
+    if (path === "/settings") return [{ label: "工作空间" }, { label: "设置" }];
+    if (path === "/connections" || path === "/settings/connections") return [{ label: "工作空间" }, { label: "连接与同步" }];
     const workbench = /^\/projects\/([^/]+)\/workbench\/(general|thesis|development)$/u.exec(path);
     if (workbench) {
       const title = connection.mode === "live" ? null : fixtureAdapter.getProjectTitle(workbench[1] ?? "");
       const kind = workbench[2] === "thesis" ? "论文工作台" : workbench[2] === "development" ? "开发工作台" : "通用工作台";
-      return ["项目", title ?? "当前项目", kind];
+      return [{ label: "项目", to: "/projects" }, { label: title ?? "当前项目", to: `/projects/${workbench[1] ?? ""}` }, { label: kind }];
     }
     const project = /^\/projects\/([^/]+)(?:\/(tasks|knowledge|connections))?$/u.exec(path);
     if (project) {
@@ -105,62 +118,72 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
       const requested = query.get("skill");
       const skill = requested === "blueprint" || requested === "resume" || requested === "assist" ? requested : "overview";
       const suffix = project[2] === "tasks" ? "任务" : project[2] === "knowledge" ? "资料" : project[2] === "connections" ? "连接" : skillPageNames[skill];
-      return ["项目", title ?? "当前项目", suffix];
+      return [{ label: "项目", to: "/projects" }, { label: title ?? "当前项目", to: `/projects/${project[1] ?? ""}` }, { label: suffix }];
     }
     const task = /^\/tasks\/([^/]+)$/u.exec(path);
     if (task) {
       const title = connection.mode === "live" ? null : fixtureAdapter.getTaskTitle(task[1] ?? "");
       const skill = query.get("skill");
       const suffix = skill === "definition" || skill === "verification" || skill === "assist" ? skillPageNames[skill] : "任务详情";
-      return ["任务", title ?? "当前任务", suffix];
+      return [{ label: "任务", to: "/tasks" }, { label: title ?? "当前任务", to: `/tasks/${task[1] ?? ""}` }, { label: suffix }];
     }
-    return ["工作空间"];
+    return [{ label: "工作空间" }];
   })();
 
   return <>
     <div className={`app-frame${path === "/agent" ? " app-frame--collaboration" : ""}`} style={frameStyle}>
       {/* 2026-10-02 共享壳栏位分离：图标导航只承担定位，近期工作与主导航各有各的滚动 Owner 和宽度偏好。 */}
       <aside className="app-navrail" aria-label="应用导航">
+        {/* 品牌标记：V4.2 原型在图标导航顶端放了一枚方形标识，让这一栏读起来是「应用」
+            而不是一条纯图标条。纯装饰，不承载任何导航或状态，因此对辅助技术隐藏。 */}
+        <div className="navrail-brand" aria-hidden="true"><Sparkles /></div>
         <nav className="navigation-list" aria-label="主导航">
-          {primaryNavigation.map((item) => <NavLink key={item.label} to={item.to} end className={({ isActive }) => `navigation-item${isActive ? " navigation-item--active" : ""}`}>
-            {({ isActive }) => <><item.icon aria-hidden="true" /><span className="navigation-label">{item.label}</span>
+          {primaryNavigation.map((item) => {
+            const isActive = isNavigationItemActive(item.to);
+            return <Link key={item.label} to={item.to} aria-current={isActive ? "page" : undefined} className={`navigation-item${isActive ? " navigation-item--active" : ""}`}>
+            {isActive && <span className="visually-hidden">当前页</span>}<item.icon aria-hidden="true" /><span className="navigation-label">{item.label}</span>
               {item.count && <span className="navigation-count" aria-label={`${item.label} ${item.count} 项`}>{item.count}</span>}
-              {isActive && <span className="visually-hidden">当前页</span>}
-            </>}
-          </NavLink>)}
+            </Link>;
+          })}
         </nav>
         <nav className="navigation-list navigation-list--secondary" aria-label="次级导航">
-          {secondaryWorkNavigation.map((item) => <NavLink key={item.label} to={item.to} end className={({ isActive }) => `navigation-item${isActive ? " navigation-item--active" : ""}`}>
-            {({ isActive }) => <><item.icon aria-hidden="true" /><span className="navigation-label">{item.label}</span>
+          {secondaryWorkNavigation.map((item) => {
+            const isActive = isNavigationItemActive(item.to);
+            return <Link key={item.label} to={item.to} aria-current={isActive ? "page" : undefined} className={`navigation-item${isActive ? " navigation-item--active" : ""}`}>
+            {isActive && <span className="visually-hidden">当前页</span>}<item.icon aria-hidden="true" /><span className="navigation-label">{item.label}</span>
               {item.count && <span className="navigation-count" aria-label={`${item.label} ${item.count} 项`}>{item.count}</span>}
-              {isActive && <span className="visually-hidden">当前页</span>}
-            </>}
-          </NavLink>)}
+            </Link>;
+          })}
         </nav>
         <nav className="navigation-list navigation-list--bottom" aria-label="辅助导航">
-          {secondaryNavigation.map((item) => <NavLink key={item.label} to={item.to} end className={({ isActive }) => `navigation-item${isActive ? " navigation-item--active" : ""}`}>
+          {secondaryNavigation.map((item) => {
+            const isActive = isNavigationItemActive(item.to);
+            return <Link key={item.label} to={item.to} aria-current={isActive ? "page" : undefined} className={`navigation-item${isActive ? " navigation-item--active" : ""}`}>
             <item.icon aria-hidden="true" /><span className="navigation-label">{item.label}</span>
-          </NavLink>)}
+            </Link>;
+          })}
         </nav>
       </aside>
       <aside className="app-context-rail" aria-label="近期工作上下文" data-testid="app-context-rail">
         <div className="context-rail-head">
           <p className="context-rail-brand">Relay</p>
-          {/* 新对话仍由协作页持有会话草稿与目录入口，这里只回到那条既有路径，不新建第二套会话状态。 */}
-          <Link className="icon-button context-rail-new" to={`/agent?new=${encodeURIComponent(location.key)}`} data-testid="context-new-conversation"
-            aria-label="新对话" title="新对话"><SquarePen aria-hidden="true" /><span className="visually-hidden">新对话</span></Link>
+          {/* 新对话仍由协作页持有会话草稿与目录入口，这里只回到那条既有路径，不新建第二套会话状态。
+              2026-10-10 协作页 §3.1：从只有图标的入口升为带文字的置顶主操作，尺寸取 control.height。 */}
+          <Link className="primary-button context-rail-new" to={newConversationHref} data-testid="context-new-conversation"
+            title="新对话"><SquarePen aria-hidden="true" /><span>新对话</span></Link>
         </div>
         {connection.mode === "live" && connection.client
           ? <RecentWorkRail key={connection.epoch} client={connection.client} currentTaskId={currentWorkId} />
           : <p className="helper-text context-rail-placeholder">示例数据没有真实近期工作；连接本机 API 后这里按项目分组显示。</p>}
       </aside>
       <div className="app-content">
-        {/* 标题带承担窗口与状态；常用操作就近放在内容区，复用同一命令面板与路由保护。 */}
+        {/* 标题带承担窗口、状态与常用操作；应用顶栏只剩窄屏导航入口与面包屑。 */}
         <header className="app-topbar">
           <button className="mobile-menu-button icon-button" type="button" aria-label="打开导航" onClick={() => setNavigationOpen(true)}><Menu aria-hidden="true" /></button>
-          <WorkbenchActions onSearch={onCommandOpen} />
-          {breadcrumb.length > 0 && <nav className="breadcrumbs" aria-label="面包屑">{breadcrumb.map((item, index) => <span key={`${index}-${item}`} className="breadcrumb-item">
-            {index > 0 && <span className="breadcrumb-separator" aria-hidden="true">/</span>}<span>{item}</span>
+          {breadcrumb.length > 0 && <nav className="breadcrumbs" aria-label="面包屑">{breadcrumb.map((item, index) => <span key={`${index}-${item.label}`} className="breadcrumb-item">
+            {index > 0 && <span className="breadcrumb-separator" aria-hidden="true">/</span>}{item.to
+              ? <Link className="text-link" to={item.to}>{item.label}</Link>
+              : <span>{item.label}</span>}
           </span>)}</nav>}
         </header>
         {desktopStatus === "connecting" && <p className="helper-text desktop-bootstrap-status" role="status">正在连接桌面本机服务…</p>}
@@ -175,12 +198,23 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
     <CommandPalette open={commandOpen} onClose={onCommandClose} />
     <AppDialog open={navigationOpen} title="导航" variant="drawer" onClose={() => setNavigationOpen(false)}>
       <div className="mobile-navigation">
+      {/* 窄窗下 .app-context-rail 整体 display:none，栏头部那条入口随之消失。
+          抽屉顶部承载同一个 href：这是窄窗唯一一处「新对话」，不与栏内或其他区域重复堆主按钮，
+          也不要求先展开工作台的「选择文件夹」。抽屉关闭后焦点由 AppDialog 交还给打开按钮。 */}
+      <div className="mobile-navigation-actions">
+        <Link className="mobile-navigation-action" to={newConversationHref} data-testid="mobile-new-conversation"
+          onClick={() => setNavigationOpen(false)}>
+          <SquarePen aria-hidden="true" /><span>新对话</span></Link>
+      </div>
       {connection.mode === "live" && connection.client && <RecentWorkRail key={connection.epoch}
         client={connection.client} currentTaskId={currentWorkId} onOpen={() => setNavigationOpen(false)} />}
       <nav className="mobile-navigation-list" aria-label="完整导航">
-        {[...primaryNavigation, ...secondaryWorkNavigation, ...secondaryNavigation].map((item) => <NavLink key={item.label} to={item.to} className="mobile-navigation-item" onClick={() => setNavigationOpen(false)}>
-          <item.icon aria-hidden="true" /><span>{item.label}</span>
-        </NavLink>)}
+        {[...primaryNavigation, ...secondaryWorkNavigation, ...secondaryNavigation].map((item) => {
+          const isActive = isNavigationItemActive(item.to);
+          return <Link key={item.label} to={item.to} aria-current={isActive ? "page" : undefined} className={`mobile-navigation-item${isActive ? " mobile-navigation-item--active" : ""}`} onClick={() => setNavigationOpen(false)}>
+          <item.icon aria-hidden="true" /><span>{item.label}</span>{isActive && <span className="visually-hidden">当前页</span>}
+          </Link>;
+        })}
       </nav>
       </div>
     </AppDialog>

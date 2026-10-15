@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { RelayApiError, type RelayActivityFilter, type RelayActivityItem, type RelayActivityRefKind } from "../api/relayClient";
+import { RelayApiError, type RelayActivityFilter, type RelayActivityItem, type RelayActivityRefKind, type RelayProjectListItem } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import PageHeader from "../components/PageHeader";
 import "./ActivityView.css";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const MANUAL_PROJECT_OPTION = "__manual__";
 type ActorKind = RelayActivityItem["actorKind"];
 // 单用户本机应用：人工动作以「我」呈现，与服务端 actor_kind=HUMAN 对应；不显示原始 actor_ref。
 const actorLabels: Record<ActorKind, string> = { HUMAN: "我", AI: "AI", SYSTEM: "系统" };
@@ -117,8 +118,9 @@ function ActivityRow({ item, selected, onSelect }: { item: RelayActivityItem; se
     <div className="activity-refs">{item.entityRefs.length ? <ul>{item.entityRefs.map((ref) => {
       const target = refTarget(ref.kind, ref.id);
       return <li key={`${ref.kind}:${ref.id}`}>{target
-        ? <Link className="inline-link" to={target}>{refLabels[ref.kind]} {ref.id}</Link>
-        : <span>{refLabels[ref.kind]} {ref.id}（当前无直达页）</span>}</li>;
+        ? <Link className="inline-link" to={target}>{refLinkLabels[ref.kind] ?? `打开${refLabels[ref.kind]}`}</Link>
+        : <span>{refLabels[ref.kind]}：当前无直达页</span>}
+        <code className="activity-ref-id" title={ref.id}>{ref.id}</code></li>;
     })}</ul> : <p className="activity-meta">本条未返回可展示的实体引用。</p>}</div>
   </li>;
 }
@@ -172,6 +174,10 @@ export default function ActivityView() {
   const [error, setError] = useState<string | null>(null);
   const [moreError, setMoreError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const [projectOptions, setProjectOptions] = useState<readonly RelayProjectListItem[]>([]);
+  const [projectListState, setProjectListState] = useState<"loading" | "ready" | "error">("loading");
+  const [projectManual, setProjectManual] = useState(false);
+  const projectListScope = useRef(0);
   const requestVersion = useRef(0);
   const keyRef = useRef(filterKey);
   keyRef.current = filterKey;
@@ -198,6 +204,33 @@ export default function ActivityView() {
     return () => { requestVersion.current++; };
   }, [client, filterKey, reload]);
 
+  // 项目下拉候选来自真实的项目列表查询；读取失败时下拉只剩「全部项目 + 手动输入」，不伪造选项。
+  useEffect(() => {
+    if (client === null) return;
+    const scope = ++projectListScope.current;
+    setProjectListState("loading");
+    void (async () => {
+      try {
+        const collected: RelayProjectListItem[] = [];
+        let cursor: string | null = null;
+        do {
+          const page = await client.getProjectsPage("active", cursor);
+          if (scope !== projectListScope.current) return;
+          collected.push(...page.items);
+          cursor = page.nextCursor;
+        } while (cursor !== null);
+        if (scope !== projectListScope.current) return;
+        setProjectOptions(collected);
+        setProjectListState("ready");
+      } catch {
+        if (scope !== projectListScope.current) return;
+        setProjectOptions([]);
+        setProjectListState("error");
+      }
+    })();
+    return () => { projectListScope.current++; };
+  }, [client, connection.epoch]);
+
   async function loadMore() {
     if (client === null || !nextCursor || loading || loadingMore) return;
     const request = requestVersion.current;
@@ -217,7 +250,10 @@ export default function ActivityView() {
   function apply(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setFormError(null);
     const ids = [projectId.trim(), taskId.trim(), runId.trim()];
-    if (ids.some((id) => id && !uuid.test(id))) { setFormError("项目、任务和 Run 筛选需要完整 UUID。"); return; }
+    if (ids.some((id) => id && !uuid.test(id))) {
+      setFormError("项目、任务和 Run 筛选需要完整 UUID；项目可从下拉选择，其余请粘贴完整 ID。");
+      return;
+    }
     const fromUtc = from ? new Date(from).toISOString() : null;
     const toUtc = to ? new Date(to).toISOString() : null;
     if (fromUtc && toUtc && fromUtc >= toUtc) { setFormError("结束时间须晚于起始时间；结束边界不包含在结果内。"); return; }
@@ -234,6 +270,8 @@ export default function ActivityView() {
 
   // 服务端不支持按执行方分页筛选，这里只对「已加载项」做本地筛选，并如实标注范围。
   const visibleItems = useMemo(() => (actorFilter === "ALL" ? items : items.filter((item) => item.actorKind === actorFilter)), [items, actorFilter]);
+  const projectInOptions = projectOptions.some((project) => project.id === projectId);
+  const projectManualMode = projectManual || (projectId !== "" && projectListState === "ready" && !projectInOptions);
   const groups = useMemo(() => {
     const buckets: { key: number | null; label: string; items: RelayActivityItem[] }[] = [];
     for (const item of visibleItems) {
@@ -253,8 +291,18 @@ export default function ActivityView() {
       <details className="activity-advanced-filter" data-testid="activity-advanced-filter" open={hasActiveFilter}>
         <summary>按项目、任务与时间筛选{hasActiveFilter ? " · 已应用范围" : ""}</summary>
       <form className="surface-panel activity-filter" onSubmit={apply}>
-        <label>Project ID<input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="可选 UUID" /></label>
-        <label>Task ID<input value={taskId} onChange={(event) => setTaskId(event.target.value)} placeholder="可选 UUID" /></label>
+        <label>项目
+          <select data-testid="activity-project-filter" value={projectManualMode ? MANUAL_PROJECT_OPTION : projectId}
+            disabled={projectListState === "loading"}
+            onChange={(event) => { const next = event.target.value; setProjectManual(next === MANUAL_PROJECT_OPTION); if (next !== MANUAL_PROJECT_OPTION) setProjectId(next); }}>
+            <option value="">全部项目</option>
+            {projectOptions.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
+            <option value={MANUAL_PROJECT_OPTION}>手动输入 ID…</option>
+          </select>
+        </label>
+        {projectManualMode && <label>项目 ID<input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="完整 UUID" aria-label="项目 ID" /></label>}
+        {projectListState === "error" && <p className="helper-text" role="status">项目列表读取失败，筛选暂只能手动输入完整项目 ID；其余筛选不受影响，可稍后重连后重试。</p>}
+        <label>任务 ID<input value={taskId} onChange={(event) => setTaskId(event.target.value)} placeholder="可选 UUID" /></label>
         <label>Run ID<input value={runId} onChange={(event) => setRunId(event.target.value)} placeholder="可选 UUID" /></label>
         <label>起始时间（本机时区，包含）<input type="datetime-local" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
         <label>结束时间（本机时区，不包含）<input type="datetime-local" value={to} onChange={(event) => setTo(event.target.value)} /></label>
@@ -277,7 +325,7 @@ export default function ActivityView() {
       </div>
       <div className="activity-layout">
         <div className="activity-main">
-          {loading && <p role="status">正在读取当前筛选范围的 Activity…</p>}
+          {loading && <p className="loading-text" role="status">正在读取当前筛选范围的 Activity…</p>}
           {error && <p className="action-error" role="alert">{error}</p>}
           {!loading && !error && <>
             <p className="helper-text">当前已读取 {items.length} 条{nextCursor ? "；还有后续页" : "；本次查询没有后续游标"}。不把本页数量当作历史总数。</p>

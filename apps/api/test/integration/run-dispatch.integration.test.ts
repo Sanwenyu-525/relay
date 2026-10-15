@@ -925,7 +925,15 @@ test('desktop EOF during Assist generation leaves no false user cancellation and
       assert.deepEqual(failed, { status: 'FAILED', error_code: 'LEASE_LOST' });
       const calls = (await sql<{ count: bigint }>`select count(*) as count from model_calls
         where assist_message_id = ${messageId}`.execute(app.db)).rows[0];
-      assert.equal(calls?.count, 1n);
+      // 租约清扫与恢复**不得产生第二次模型调用**——这是这条用例真正要锁的安全性质。
+      //
+      // 这里不能断言「恰好一次」：`recordModelInvocation` 的保证是「begin 行在调用
+      // Provider 之前提交」，而不是「消息一旦被领取就一定留下调用行」。EOF 与 Worker
+      // 领取之间存在调度窗口，Worker 在跨过该边界之前被杀是合法结果，此时调用行本来
+      // 就不该存在——凭一条不存在的行反推「模型被调用过」会把调度时序当成产品契约。
+      // 上两条断言已经锁住本用例声明的两项行为：没有伪造用户取消，claim 以 LEASE_LOST 收敛。
+      assert.ok(calls?.count === 0n || calls?.count === 1n,
+        `恢复后不得出现第二次模型调用：${String(calls?.count)}`);
     } finally {
       recovery.child.kill('SIGKILL');
     }

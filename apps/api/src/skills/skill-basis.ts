@@ -21,7 +21,7 @@ const MAX_FACT_BYTES = 24 * 1024;
 
 export class SkillBasisUnavailable extends Error {
   constructor(readonly code: 'SKILL_SCOPE_UNAVAILABLE' | 'SKILL_INPUT_OVER_BUDGET' |
-    'SKILL_BASELINE_STALE') {
+    'SKILL_BASELINE_STALE' | 'METHOD_INPUT_OVER_BUDGET') {
     super(code);
   }
 }

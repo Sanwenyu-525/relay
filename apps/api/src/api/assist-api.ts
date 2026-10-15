@@ -1,7 +1,8 @@
 import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 
-import { acceptAssistProposal, bindAssistSessionProject, cancelAssistMessage, createAssistSession,
+import { acceptAssistProposal, bindAssistSessionDirectory, bindAssistSessionProject,
+  cancelAssistMessage, createAssistSession,
   rejectAssistProposal, requestAssistMessage } from '../application/assist-commands.js';
 import { listAssistMessages, listAssistProposals, listAssistSessions, readAssistProposal,
   readAssistSession, projectAssistSkillMessage, readAssistLivePreview }
@@ -30,14 +31,16 @@ const AssistSessionDto = Type.Object({
   project_id: Type.Union([uuid, Type.Null()]),
   task_id: Type.Union([uuid, Type.Null()]),
   title: Type.String(), status: Type.String(), revision: rev,
-  /** 冻结的会话身份：'AGENT' 是既有普通会话，'ASSISTANT' 是人设 助手会话。 */
-  conversation_mode: Type.Union([Type.Literal('AGENT'), Type.Literal('ASSISTANT')]),
+  /** 冻结的会话身份：'AGENT' 普通会话，'ASSISTANT' 人设 助手会话，'LEARNING' 学习会话。 */
+  conversation_mode: Type.Union([Type.Literal('AGENT'), Type.Literal('ASSISTANT'), Type.Literal('LEARNING')]),
   assistant_profile_id: Type.Union([uuid, Type.Null()]),
   /** 建会话时冻结的 助手 修订；AGENT 会话恒为 null。 */
   assistant_profile_revision: Type.Union([rev, Type.Null()]),
   /** 冻结的人设文本：只含文本，不含任何能力或连接信息。 */
   assistant_role: Type.Union([Type.Object({}, { additionalProperties: true }), Type.Null()]),
   remember: Type.Boolean(),
+  /** 0087：本会话当前绑定的受管工作目录；未绑定为 null。作用域不是准入。 */
+  working_resource_id: Type.Union([uuid, Type.Null()]),
   created_at: Type.String(), updated_at: Type.String(),
 }, strict);
 /** 命令回执里的会话结果（resource 以 session_id 命名，与命令契约一致）。 */
@@ -46,7 +49,7 @@ const AssistSessionResult = Type.Object({
   project_id: Type.Union([uuid, Type.Null()]),
   task_id: Type.Union([uuid, Type.Null()]),
   title: Type.String(), status: Type.String(), revision: rev,
-  conversation_mode: Type.Union([Type.Literal('AGENT'), Type.Literal('ASSISTANT')]),
+  conversation_mode: Type.Union([Type.Literal('AGENT'), Type.Literal('ASSISTANT'), Type.Literal('LEARNING')]),
   assistant_profile_id: Type.Union([uuid, Type.Null()]),
   assistant_profile_revision: Type.Union([rev, Type.Null()]),
   remember: Type.Boolean(),
@@ -63,6 +66,9 @@ const AssistMessageDto = Type.Object({
   skill: Type.Union([Type.Object({}, { additionalProperties: true }), Type.Null()]),
   skill_input: Type.Union([Type.Object({}, { additionalProperties: true }), Type.Null()]),
   skill_output: Type.Union([Type.Object({}, { additionalProperties: true }), Type.Null()]),
+  /** 0071：内置工作方法身份（冻结定义 + 摘要 + 本次行动）；未采用方法时为 null。 */
+  method: Type.Union([Type.Object({}, { additionalProperties: true }), Type.Null()]),
+  method_argument: Type.Union([Type.String(), Type.Null()]),
   provider_request_id: Type.Union([Type.String(), Type.Null()]),
   // cache_* 是 Provider 可选字段：null 表示未上报，不得读成"没有缓存"。
   usage: Type.Object({ input_tokens: Type.Union([Type.Integer(), Type.Null()]),
@@ -101,9 +107,10 @@ const createSessionBody = Type.Object({
   title: Type.String({ minLength: 1, maxLength: 200 }),
   /**
    * 会话身份在建立时冻结，之后不改写：不传即 'AGENT'，既有客户端不受影响。
+   * 'LEARNING' 是 0072 新增的独立受限身份：对项目只读，只多一项写个人学习记录的能力。
    * Breaking Change：Yes（语义）——同一 command_id 换模式重放按异载荷拒绝。
    */
-  conversation_mode: Type.Optional(Type.Union([Type.Literal('AGENT'), Type.Literal('ASSISTANT')])),
+  conversation_mode: Type.Optional(Type.Union([Type.Literal('AGENT'), Type.Literal('ASSISTANT'), Type.Literal('LEARNING')])),
   assistant_profile_id: Type.Optional(uuid),
 }, strict);
 const sessionsQuery = Type.Object({
@@ -116,6 +123,10 @@ const sessionsQuery = Type.Object({
 const bindSessionBody = Type.Object({ command_id: uuid, project_id: uuid }, strict);
 const BindSessionResult = Type.Object({
   session_id: uuid, project_id: uuid, revision: rev,
+}, strict);
+const bindDirectoryBody = Type.Object({ command_id: uuid, resource_id: uuid }, strict);
+const BindDirectoryResult = Type.Object({
+  session_id: uuid, working_resource_id: uuid, revision: rev,
 }, strict);
 const messagesQuery = Type.Object({ limit: Type.Optional(Type.String({ pattern: '^(?:[1-9]|[1-9][0-9]{1,2}|200)$' })) }, strict);
 const sourceRef = Type.Object({
@@ -130,6 +141,16 @@ const requestMessageBody = Type.Object({
   skill_ref: Type.Optional(Type.Object({ id: Type.String({ minLength: 1, maxLength: 100 }),
     version: Type.String({ minLength: 1, maxLength: 32 }) }, strict)),
   skill_input: Type.Optional(Type.Object({}, { additionalProperties: true })),
+  /** 显式选择内置工作方法；不传时由 `/命令` 或自然语言识别决定（见 chat-commands.ts）。 */
+  method_ref: Type.Optional(Type.Object({ id: Type.String({ minLength: 1, maxLength: 100 }),
+    version: Type.String({ minLength: 1, maxLength: 32 }),
+    /** 不传时取该方法的默认行动（三种方法默认都是只读的 INSPECT）。 */
+    action: Type.Optional(Type.Union([Type.Literal('INSPECT'), Type.Literal('MODIFY')])) }, strict)),
+  /**
+   * 0072：本轮是否写入个人学习状态，缺省 true。只在学习会话上有意义；
+   * 关闭时模型即使返回增量，应用也拒绝写入（提示词 §9.4）。
+   */
+  record_learning: Type.Optional(Type.Boolean()),
 }, strict);
 const cancelBody = Type.Object({ command_id: uuid }, strict);
 const proposalsQuery = Type.Object({
@@ -146,7 +167,7 @@ function sessionDto(row: { id: string; workspace_id: string; project_id: string 
   task_id: string | null; title: string; status: string; revision: bigint;
   conversation_mode: ConversationMode; assistant_profile_id: string | null;
   assistant_profile_revision: bigint | null; assistant_role_snapshot: JsonObject | null;
-  remember: boolean; created_at: Date; updated_at: Date }) {
+  remember: boolean; working_resource_id: string | null; created_at: Date; updated_at: Date }) {
   return {
     id: row.id, workspace_id: row.workspace_id, project_id: row.project_id,
     task_id: row.task_id, title: row.title, status: row.status,
@@ -158,6 +179,9 @@ function sessionDto(row: { id: string; workspace_id: string; project_id: string 
     // 人设快照逐字返回：客户端显示的就是这条会话建立时的人设，不读当前助手。
     assistant_role: row.assistant_role_snapshot,
     remember: row.remember,
+    // 0087：会话当前绑定的受管目录。只读投影——作用域不是准入，客户端据此显示
+    // 「这次会读哪个目录」，不代表这次读取一定会被放行。
+    working_resource_id: row.working_resource_id,
     created_at: row.created_at.toISOString(), updated_at: row.updated_at.toISOString(),
   };
 }
@@ -170,14 +194,17 @@ function messageDto(row: { id: string; session_id: string; seq: bigint; role: st
   usage_cache_creation_tokens: number | null; cancel_requested: boolean;
   created_at: Date; updated_at: Date },
   projection: { skill: JsonObject | null; skill_input: JsonObject | null;
-    skill_output: JsonObject | null; content: string | null; sources: unknown }) {
+    skill_output: JsonObject | null; content: string | null; sources: unknown;
+    method: JsonObject | null; method_argument: string | null }) {
   return {
     id: row.id, session_id: row.session_id, seq: toDecimalString(row.seq), role: row.role,
     status: row.status, intent: row.intent, content: projection.content,
     error_code: row.error_code, provider_error_kind: row.provider_error_kind,
     sources: projection.sources,
     skill: projection.skill, skill_input: projection.skill_input,
-    skill_output: projection.skill_output, provider_request_id: row.provider_request_id,
+    skill_output: projection.skill_output,
+    method: projection.method, method_argument: projection.method_argument,
+    provider_request_id: row.provider_request_id,
     usage: { input_tokens: row.usage_input_tokens, output_tokens: row.usage_output_tokens,
       cache_read_tokens: row.usage_cache_read_tokens,
       cache_creation_tokens: row.usage_cache_creation_tokens },
@@ -240,6 +267,18 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
       return { outcome, result: outcome.result };
     } }));
 
+  // 0087：绑定本会话的当前工作目录。目录是作用域不是准入——写入仍逐次经 Gateway 核对。
+  app.post('/assist-sessions/:id/working-directory', { schema: { params: sessionItem,
+    body: bindDirectoryBody, response: { 200: commandEnvelopeSchema(BindDirectoryResult) } } },
+  createCommandHandler(dependencies, { commandType: 'BindAssistSessionDirectory',
+    bodySchema: bindDirectoryBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await bindAssistSessionDirectory(executor, {
+        workspaceId: params.workspace_id ?? '', sessionId: params.id ?? '',
+        commandId: body.command_id, resourceId: body.resource_id });
+      return { outcome, result: outcome.result };
+    } }));
+
   app.get('/assist-sessions', { schema: { params: base, querystring: sessionsQuery } },
   async (request, reply) => {
     try {
@@ -280,6 +319,8 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
         ...(body.source_refs === undefined ? {} : { sourceRefs: body.source_refs }),
         ...(body.skill_ref === undefined ? {} : { skillRef: body.skill_ref }),
         ...(body.skill_input === undefined ? {} : { skillInput: body.skill_input }),
+        ...(body.method_ref === undefined ? {} : { methodRef: body.method_ref }),
+        ...(body.record_learning === undefined ? {} : { recordLearning: body.record_learning }),
       });
       return { outcome, result: outcome.result };
     } }));
