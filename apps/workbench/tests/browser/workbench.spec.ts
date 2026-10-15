@@ -245,29 +245,35 @@ test.describe("项目与任务列表", () => {
 
   test("项目列表选择、归档与打开入口可用", async ({ page }) => {
     await page.goto(projects);
-    await expect(page.locator(".desktop-rail")).toBeVisible();
+    // 2026-10-11 重设计：项目详情改为抽屉，宽屏不再有常驻右栏。
+    await expect(page.locator(".projects-page .desktop-rail")).toHaveCount(0);
 
     await page.getByTestId("project-row-project-workflow-os").click();
-    await expect(page.getByTestId("project-archive")).toBeDisabled();
-    await expect(page.getByTestId("project-archive-reason")).toContainText("正在进行的执行");
+    const drawer = page.getByRole("dialog", { name: "项目详情" });
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByTestId("project-archive")).toBeDisabled();
+    await expect(drawer.getByTestId("project-archive-reason")).toContainText("正在进行的执行");
 
+    await page.keyboard.press("Escape");
+    await expect(drawer).toHaveCount(0);
     await page.getByTestId("project-row-project-hci").click();
-    await page.getByTestId("project-open").click();
+    await drawer.getByTestId("project-open").click();
     await expect(page).toHaveURL(/\/projects\/project-hci$/);
   });
 
-  test("项目摘要突出当前对象与状态，且不凭任务数量宣称完成", async ({ page }) => {
+  test("项目详情抽屉展示当前对象与状态，且不凭任务数量宣称完成", async ({ page }) => {
     await page.goto(projects);
     await page.getByTestId("project-row-project-knowledge").click();
 
-    // 工作台 §17.9：项目列表试点保留右侧摘要栏结构不变。栏标题是分区名「项目摘要」，
-    // 当前对象由紧随其后的项目名承担——原先断言的 .project-summary-kicker 已不在当前结构中。
-    await expect(page.locator(".rail-content > h2")).toHaveText("项目摘要");
-    await expect(page.locator(".rail-project-name")).toHaveText("个人知识整理");
-    await expect(page.locator(".rail-intro")).not.toBeEmpty();
-    await expect(page.locator(".project-state-summary")).toContainText("当前阶段");
-    await expect(page.locator(".project-state-summary")).toContainText("执行");
-    await expect(page.locator(".project-state-summary")).toContainText("状态修订 v2 · 待审 0 项");
+    // 详情从常驻右栏改为「查看项目」打开的抽屉；对象、阶段与修订仍在同一决策区。
+    const drawer = page.getByRole("dialog", { name: "项目详情" });
+    await expect(drawer).toBeVisible();
+    await expect(drawer.locator(".projects-detail__title")).toHaveText("个人知识整理");
+    await expect(drawer).toContainText("建立可持续的个人知识体系");
+    await expect(drawer).toContainText("状态修订 v2 · 待审 0 项");
+    // 卡片本身已内联当前阶段与下一步，不打开抽屉也能定位当前工作。
+    await expect(page.getByTestId("project-row-project-knowledge")).toContainText("当前阶段");
+    await expect(page.getByTestId("project-row-project-knowledge")).toContainText("整理研究笔记");
   });
 
   test("创建项目：必填校验后就地报错，填写后进入列表", async ({ page }) => {
@@ -282,7 +288,8 @@ test.describe("项目与任务列表", () => {
     await page.getByTestId("project-create-submit").click();
 
     await expect(page).toHaveURL(/\/projects$/);
-    await expect(page.locator(".desktop-rail")).toContainText("本次演示已创建项目");
+    // 创建回执自 2026-10-11 起就地显示在主列（原先在常驻右栏）。
+    await expect(page.locator(".projects-page")).toContainText("本次演示已创建项目");
     await expect(page.getByText("浏览器创建的项目").first()).toBeVisible();
   });
 
@@ -321,15 +328,25 @@ test.describe("项目与任务列表", () => {
 test.describe("列表窄视口", () => {
   test.use({ viewport: { width: 960, height: 720 } });
 
-  test("宽表在局部滚动，右区改为按钮打开且主操作可达", async ({ page }) => {
+  // 2026-10-15：本用例原先等一个 `.app-context-rail` 之外的项目页右栏触发键（`rail-trigger`），
+  // 而 2026-10-11 项目页重设计已把常驻右栏整体移除、详情改为卡片自身打开的抽屉——
+  // 那个键在 `/projects` 上根本不存在。断言随组件契约改为「卡片 → 抽屉」，并把
+  // 「无 `rail-trigger`」写成显式事实，避免再次出现「元素不存在也算 hidden」的空断言。
+  test("项目详情在窄视口由卡片打开抽屉且不超出窗口，任务列表无整页横向滚动", async ({ page }) => {
     await page.goto(projects);
-    await expect(page.locator(".desktop-rail")).toBeHidden();
-    await page.getByTestId("rail-trigger").click();
-    const open = page.locator('[role="dialog"]').getByTestId("project-open");
+    await expect(page.locator(".projects-page .desktop-rail")).toHaveCount(0);
+    await expect(page.getByTestId("rail-trigger")).toHaveCount(0);
+
+    await page.getByTestId("project-row-project-hci").click();
+    const drawer = page.getByRole("dialog", { name: "项目详情" });
+    await expect(drawer).toBeVisible();
+    const open = drawer.getByTestId("project-open");
     await expect(open).toBeVisible();
+    // 抽屉与它的主操作必须整体落在窄窗口内，不能被右缘切掉。
     const box = await open.boundingBox();
     expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(960);
     await page.keyboard.press("Escape");
+    await expect(drawer).toHaveCount(0);
 
     await page.goto(tasks);
     const overflow = await page.evaluate(
@@ -345,7 +362,6 @@ test.describe("200% 内容缩放", () => {
 
   test("Chromium 内容缩放为 200% 时当前对象与主操作仍可达", async ({ page }) => {
     await page.goto(projects);
-    await page.getByTestId("project-row-project-knowledge").click();
 
     const session = await page.context().newCDPSession(page);
     await session.send("Emulation.setPageScaleFactor", { pageScaleFactor: 2 });
@@ -353,9 +369,12 @@ test.describe("200% 内容缩放", () => {
       .poll(() => page.evaluate(() => window.visualViewport?.scale ?? 1))
       .toBe(2);
 
-    const trigger = page.getByTestId("rail-trigger");
-    await trigger.focus();
-    await expect(trigger).toBeFocused();
+    // 2026-10-11 起详情抽屉由卡片自身打开：缩放下仍要能用键盘聚焦卡片并进入确切对象。
+    const card = page.getByTestId("project-row-project-knowledge");
+    await card.scrollIntoViewIfNeeded();
+    const cardOpen = card.getByTestId("project-card-open-project-knowledge");
+    await cardOpen.focus();
+    await expect(cardOpen).toBeFocused();
     await page.keyboard.press("Enter");
 
     const open = page.locator('[role="dialog"]').getByTestId("project-open");
@@ -371,15 +390,19 @@ test.describe("200% 内容缩放", () => {
 test.describe("200% 内容缩放等效视口", () => {
   test.use({ viewport: { width: 480, height: 360 } });
 
-  test("项目摘要和主操作在窄宽度下可打开、滚动到达并关闭", async ({ page }) => {
+  test("项目详情在窄宽度下可打开、滚动到达并关闭", async ({ page }) => {
     await page.goto(projects);
-    await page.getByTestId("project-row-project-knowledge").click();
-    await expect(page.locator(".desktop-rail")).toBeHidden();
+    // 宽屏不再有常驻右栏，窄窗也不再需要单独的触发按钮：详情统一由卡片打开。
+    await expect(page.locator(".projects-page .desktop-rail")).toHaveCount(0);
+    await expect(page.locator(".projects-page .rail-trigger")).toHaveCount(0);
 
-    await page.getByTestId("rail-trigger").click();
+    const card = page.getByTestId("project-row-project-knowledge");
+    await card.scrollIntoViewIfNeeded();
+    await card.click();
     const dialog = page.locator('[role="dialog"]');
-    await expect(dialog).toHaveAttribute("aria-label", "个人知识整理");
-    await expect(dialog.locator(".project-state-summary")).toContainText("状态修订 v2");
+    await expect(dialog).toHaveAttribute("aria-label", "项目详情");
+    await expect(dialog.locator(".projects-detail__title")).toHaveText("个人知识整理");
+    await expect(dialog).toContainText("状态修订 v2 · 待审 0 项");
 
     const open = dialog.getByTestId("project-open");
     await open.scrollIntoViewIfNeeded();
