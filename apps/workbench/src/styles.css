@@ -574,6 +574,9 @@ svg {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  /* 2026-10-15 允许整块换行：48rem–64rem 档栏宽取 clamp 下限 176px，计数必须整块落到
+     第二行，而不是被 flex 压成逐字竖排把栏头撑成三四行。 */
+  flex-wrap: wrap;
   gap: var(--relay-space-1);
   min-height: auto;
   padding: var(--relay-space-0-5) var(--relay-space-1) 0;
@@ -589,7 +592,9 @@ svg {
 }
 .recent-work-heading h2 > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
 /* 范围说明与刷新同排：占标题行的空白，不新增一行高度。 */
-.recent-work-count { flex: 1; margin: 0; color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); text-align: end; font-variant-numeric: tabular-nums; line-height: var(--relay-font-lineHeight-heading); }
+/* nowrap 是必需的：flex:1 遇到 176px 的窄栏会把它压到一两个字符宽，中文随即逐字折行，
+   栏头被撑成三四行并把列表挤出首屏。允许整块换行，不允许内部折行。 */
+.recent-work-count { flex: 1; margin: 0; color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); text-align: end; font-variant-numeric: tabular-nums; line-height: var(--relay-font-lineHeight-heading); white-space: nowrap; }
 .recent-work-heading .icon-button {
   width: var(--relay-control-height-compact);
   min-width: var(--relay-control-height-compact);
