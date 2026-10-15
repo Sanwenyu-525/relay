@@ -392,6 +392,10 @@ svg {
      固定值下 1280 与 1920 的比例不一致——宽窗里这一栏显得过窄、中栏不成比例地被挤大。
      --relay-shell-sidebar-width 在这里解析一次，拖拽手柄的定位复用同一变量，不会出现「列宽变了、手柄没跟上」。 */
   --relay-shell-sidebar-width: var(--relay-sidebar-user-width, var(--relay-layout-shell-sidebarWidth));
+  /* 两栏之间留一档间隙：底色不同（navigation 浅绿白 vs surface 纯白）时靠颜色分野，
+      看着像一整块从左顶到右；加间隙后底色分野才有边界含义。此前 column-gap 为 0，
+      图标栏右缘直接贴上近期工作栏左缘（实测 railGap=0）。 */
+  column-gap: var(--relay-space-2);
   grid-template-columns:
     var(--relay-layout-navigation-railWidth)
     var(--relay-shell-sidebar-width)
@@ -437,8 +441,11 @@ svg {
   position: absolute;
   top: 0;
   bottom: 0;
+  /* 列宽 + 一档 column-gap（.app-frame）才是边界：间隙插在图标栏与近期工作栏之间，
+     描边线画在列边界上，不能跟着挪进间隙。 */
   left: calc(
     var(--relay-layout-navigation-railWidth) +
+    var(--relay-space-2) +
     var(--relay-shell-sidebar-width) -
     var(--relay-control-target-minimum) / 2
   );
