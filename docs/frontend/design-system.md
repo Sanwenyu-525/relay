@@ -71,6 +71,7 @@ token 文件使用本项目简单扁平结构：metadata 保存版本/状态/来
 | 行标题 | font.size.rowTitle / ui | ui / medium | 任务/产物名称，长名换行 |
 | 控件与业务正文 | font.size.body / ui | ui / regular 或 medium | 按钮、导航、状态、字段；文本输入与下拉继承 UI 字体，不落回浏览器默认字体 |
 | 辅助信息 | font.size.meta / ui | ui / regular | 时间、来源、版本；不能承担长正文 |
+| 背景注记 | font.size.caption / ui | ui / regular | 字段旁注、单位计数、eyebrow、状态副文案、面包屑。不承担阅读任务：这些字与正文同档时，页面会读成一片等重的字。2026-10-14 起先在协作页试点 |
 | 长文阅读 | font.size.reading / reading | ui / regular | 论文/Markdown 阅读内容；编辑输入保持清晰 |
 | 代码与 diff | font.size.meta / code | code / regular | 保留等宽与可复制文本；不使用图片充当代码 |
 
@@ -86,18 +87,18 @@ token 文件使用本项目简单扁平结构：metadata 保存版本/状态/来
 
 2026-09-28 设计接续：用户要求标题栏左侧放常用操作，不显示 `Relay Agent`。[完整窗口 v2](mockups/2026-09-28/README.md)展示左侧后退、前进、搜索、新建任务，中间空白拖动区，右侧最小化/最大化或还原/关闭。该共享窗口层适用于全部页面，旧图仍仅定义页面内容。操作区已接入工作台代码；效果图本身不构成真实 Windows 验收。
 
-标题栏与下一层应用顶栏分开；面包屑及适用工作台页签仍在应用顶栏，不重复放一组快捷操作。2026-10-04 起日期与星期、收件箱、数据来源与通知入口也移入标题带，位于拖动区右侧、最小化按钮左侧（见[工作台第2节](workbench-design.md#2-信息架构与路由)）；应用顶栏因此只剩面包屑与窄屏导航按钮，宽屏无面包屑时整行收起。新增 `.desktop-titlebar__cluster` 与 `.desktop-titlebar__date` 两个类名，日期沿用原 `.topbar-date` 的 `font.size.meta` 与 `color.text.muted`，未新增数值 token。高度及窗口按钮宽度复用 `control.height.comfort`，其他颜色、字体、图标、细线与留白引用现有 token；不从概念图建立第二套数值。只有中间空白参与拖动/双击，所有按钮及浮层排除拖动命中。窄窗优先隐藏快捷键提示和可替代的文字标签，保留可访问名称、焦点和窗口按钮。浏览器不显示桌面控制时，业务搜索和创建入口仍应可达。具体动作及草稿保护见[工作台第2节](workbench-design.md#2-信息架构与路由)。
+标题栏与下一层应用顶栏分开；面包屑及适用工作台页签仍在应用顶栏，不重复放一组快捷操作。2026-10-05 起后退、前进、搜索、新建任务（`WorkbenchActions`，挂 `.workbench-actions`）也回到标题带最左侧、拖动区之前：用户指出这四个按钮原本就在左边，此前被移到应用顶栏反而让标题栏左侧空出一段。四枚按钮填满标题带高度、宽度复用 `control.height.comfort`、圆角归零，与右侧窗口按钮同一几何；左内边距用 `space.4`。2026-10-04 起日期与星期、收件箱、数据来源与通知入口也在标题带内，位于拖动区右侧、最小化按钮左侧（见[工作台第2节](workbench-design.md#2-信息架构与路由)）；应用顶栏因此只剩面包屑与窄屏导航按钮。标题栏与顶栏都空了的那一页（工作台页无面包屑）在宽屏按 `.app-topbar:not(:has(.breadcrumbs))` 整行收起，不留空白带；窄屏仍保留导航抽屉入口，不受该规则影响。新增 `.desktop-titlebar__cluster` 与 `.desktop-titlebar__date` 两个类名，日期沿用原 `.topbar-date` 的 `font.size.meta` 与 `color.text.muted`，未新增数值 token。高度及窗口按钮宽度复用 `control.height.comfort`，其他颜色、字体、图标、细线与留白引用现有 token；不从概念图建立第二套数值。只有中间空白参与拖动/双击，所有按钮及浮层排除拖动命中。窄窗优先隐藏快捷键提示和可替代的文字标签，保留可访问名称、焦点和窗口按钮。浏览器不显示桌面控制时，业务搜索和创建入口仍应可达。具体动作及草稿保护见[工作台第2节](workbench-design.md#2-信息架构与路由)。
 
 现有图定义应用客户区，不包含 Windows 原生标题栏。当前 Windows 主窗口使用浅色自定义标题栏，复用 navigation 背景、UI 字体、separator 和 `control.height.comfort`；图中的应用顶栏继续承载面包屑等内容。左侧操作按钮与中间空白拖动区分离，只有空白区可拖动、双击切换最大化；右侧窗口按钮有独立命中区，关闭请求受草稿与原未决命令保护。搜索复用 Ctrl+K 命令面板，业务快捷入口集中在共享标题带，应用上下文栏不重复搜索。浏览器保留搜索、新建与应用内前后退，不渲染假最小化/最大化/关闭控件或拖动行为。连接中和服务失败页仅桌面保留真实窗口控制，业务操作按可用条件禁用。侧栏高度扣除标题带，侧栏和应用顶栏的 sticky 起点移至其下方；跳转主内容链接聚焦后显示在标题带下方，不覆盖按钮。窗口启动/关闭交互按[部署设计](../deployment/本机部署.md)，不新增托盘或多窗口。
 
-window.content.initialWidth/initialHeight 与 minWidth/minHeight 为客户区逻辑 DIP 推荐值；不按截图像素设置窗口。首次打开和恢复窗口位置时，依据当前显示器工作区扣除系统边框/标题栏后限制尺寸和位置；工作区小于推荐最小值时允许继续收缩，避免窗口伸出屏幕。DIP 与 CSS px/rem 分开处理，不手工重复乘 Windows 缩放倍数。
+window.content.initialWidth/initialHeight 与 minWidth/minHeight 为客户区逻辑 DIP 推荐值；不按截图像素设置窗口。首次打开和恢复窗口位置时，依据当前显示器工作区扣除系统边框/标题栏后限制尺寸和位置；工作区小于推荐最小值时允许继续收缩，避免窗口伸出屏幕。DIP 与 CSS px/rem 分开处理，不手工重复乘 Windows 缩放倍数。2026-10-15 核对：桌面壳实际以 1160×780 逻辑 px 建窗且未设 `min_inner_size`（`apps/desktop/src-tauri/src/lib.rs`），上列数值是目标约束而非当前实现值。窗口宽度落到 `width < 48rem`（150% DPI 下约少于 1152 物理像素）时外壳进窄窗档——两栏整体收起、导航与近期工作由应用顶栏的 ☰ 抽屉承担，**这是既有收纳规则，不是桌面端没接入**；48rem–64rem 保留三列，因此 150% DPI 下 960–1440 物理像素的窗口不再只剩中栏。窄窗档的抽屉入口与「新对话」可达性由 `tests/browser/narrowWindowNewConversation.spec.ts` 覆盖。
 
 沿用图中的疏朗密度，以 space.* 形成 4px 基础、8px 主节奏。文字与图标用小间距；字段内关系、列表行和区域之间按层级增大；不为每一个偏移增加 token。
 
 | 区域 | 尺度引用 | 规则 |
 |---|---|---|
 | 左导航 | layout.sidebar.width / control.nav.height | 暖灰背景、底部连接与设置；长页面可滚动，不挤压底部项；≥64rem 可拖拽调宽（10–20rem，双击复位，键盘可调），用户宽度只作用于宽断点基础列 |
-| 顶栏 | layout.header.height | 面包屑、视图切换、日期按可用宽度排列；日期不阻塞主要操作 |
+| 顶栏 | layout.header.height | 面包屑、视图切换、日期按可用宽度排列；日期不阻塞主要操作。该 token 专指应用上下文顶栏 `.app-topbar` 的实际高度（`control.height.comfort` + `border.width`，2026-10-10 由 3.5rem 更正），桌面壳的固定区总高另加原生标题栏 `control.nav.height`，两者上下相邻、不重复计数 |
 | 中央工作区 | layout.main.padding / layout.section.gap | 对齐统一左边线；区块用留白和细线分组 |
 | 右判断区 | layout.rail.width / narrowWidth | 左侧细分隔线；有独立标题、证据、范围及操作；内容滚动可达 |
 | 内容上限 | layout.content.maxWidth | 超宽屏限制工作区总宽度，避免按钮远离对象 |
@@ -227,14 +228,35 @@ live 新建任务的 Project 选择保留原手动 ID 字段，在旁边按需�
 
 Inbox 快捷入口复用顶栏既有 `icon-button` 形态，提供可读的名称与键盘焦点；`/inbox` 跳到原收件箱页，不添加新的一级侧栏样式或 token。命令面板中 Inbox 与 Activity 都是导航，分别在目标页读取事实。
 
+### EmptyState（2026-10-06）
+
+共享空态组件 `components/EmptyState.tsx`，集中一处说明「没有什么」「为什么」和「下一步」。消费既有 token（`bg.subtle` 底 + `separator` 边框 + `radius.control` 图标框、`control.target.minimum` 图标框边长、`font.size.section`/`rowTitle` 标题、`font.size.body`/`meta` 说明），**未新增色值、圆角、时长或第二套尺寸**。
+
+- 形态：`regular` 用于主区（真实 heading + 图标 + 说明 + 动作），`compact` 用于侧栏、右栏与次级面板（无图标、meta 字号）。两者都不套卡片、不铺满整列，按实际内容高度靠上排列，与第 5.1 节协作页空白页同源。
+- 图标是装饰，含义由标题文字承担，因此 `aria-hidden`；标题保留真实 heading 以维持文档大纲，只有不承担层级的紧凑场合才用 `as="p"`。
+- 一屏仍只有一个主操作：空态动作与页头常驻入口可以同屏并存，但页头入口始终可发现、不因空态出现而隐藏，也不因此产生布局跳变。
+
+范围区分是硬要求，不能合并成同一句话：**首装为空**、**搜索无匹配**、**某个页签/归档范围为空**是三件事。搜索无匹配只能说「已加载 N 项里没有命中」，不得暗示整个工作空间为空；归档范围为空不得提供「新建项目」这类无效入口。
+
+**待确认**：首装空态的「新建项目」与页头常驻「新建项目」目前同屏出现两个 primary。取舍理由是页头入口在「已归档」页签与列表非空时同样需要保留；是否把其中一个降为次要待定，改动可逆。
+
 ### 组件状态补充
 
-- 空态：说明没有什么、为什么以及下一步；无模型连接仍可人工工作。
+- 空态：说明没有什么、为什么以及下一步；无模型连接仍可人工工作。已有数据时的空范围、搜索无匹配与首装为空分别表达，不用同一句话覆盖。
 - 错误：就近提供原因与可行操作；权限/过期冲突不是通用“网络错误”。
 - 版本冲突：保留草稿，展示当前版本和差异入口，不用 toast 后自动覆盖。
 - 待核对：持续展示不确定范围，禁用可能重复副作用的动作。
 - 加载：首次读取可用静态 skeleton 或文字；普通刷新可保留已知内容并标识更新，涉及新写准入的父对象重读按页面门槛隐藏旧事实并禁新写，禁止假进度。
 - 浮层：使用单一层级表，focus ring 不被 overflow 裁掉；popover 不盖过 modal。
+
+### 协作页结构原语（2026-10-10）
+
+协作页结构重塑（工作台 §28）新增四条可复用外观规则，全部引用既有 token，**未新增色值、字号、圆角或动效数值**。数值唯一源仍是 [design-tokens.json](design-tokens.json)，此处只记引用关系，不复制数值。
+
+- **chips**（模式切换 / 资料 / 动作下拉 / 更换目录）：`radius.round` 胶囊 + `border.control` 边 + `bg.surface` 底；选中态（含展开中的下拉）`selection.bg` + `selection.text` + `action.primary` 边；hover `selection.hover`，过渡 `motion.duration.fast`。禁用态用 `disabled.bg` / `disabled.text`，不留「无底」的中间形态。同一排的 chips 不再插竖分隔线——那会把同类控件切成两组。
+- **文件夹作用域细条**：常态 `bg.canvas` 底 + `border.separator` 上缘，分隔线横贯整列、内容与输入卡同宽同轴（`layout.reading.maxWidth`）；目录名 `font.size.body` + `font.weight.medium` 是这一行的事实主角，归属是 `font.size.meta` + `text.muted` 的次要事实，宽度不足时先在归属处省略。告警态整条换 `status.warning.bg` + `status.warning.text`，由图标、目录名与状态短语三处同时承载（不靠单一颜色表达状态），次要事实保持 `text.secondary`，不跟着整条换色；状态短语只说后果、不复述归属那一句，完整原因给读屏与 `title`。它是常驻状态线，因此不加圆角、不加阴影、不套底色，也不再把整行收进胶囊；行内唯一动作按 chips 规则取 `border.control` + `bg.surface` + `radius.round` 的紧凑键。
+- **欢迎卡与引导卡**：欢迎标题 `font.size.compactPage` + `font.family.ui` + `font.weight.semibold`；引导卡 `bg.subtle` 底 + `border.separator` 边 + `radius.control`，卡内正文左对齐（外层欢迎区居中，列表居中会读成诗）。
+- **「回到最新」悬浮键**：`radius.round` + `border.control` + `bg.surface` + `shadow.floating` + `zIndex.popover`，边长 `control.height.compact`，hover 用 `selection.hover`。它是真实 `button`，不是装饰；出现与消失仍是挂载/卸载，没有退场动画。
 
 ### 6.1 交互状态的统一表达（2026-09-29）
 
@@ -410,7 +432,8 @@ hover/focus 的颜色过渡用 motion.duration.fast；抽屉/面板用 panel；�
 
 | 组件责任 | 落地规则 | 验证出口 |
 |---|---|---|
-| 共享壳两列 | 图标导航栏（`layout.navigation.railWidth`，图标在上、文字在下，允许「连接与同步」这类长名称折行）与近期工作栏（`layout.sidebar.width`，可拖拽）职责分离；`.app-frame` 为三列网格，拖拽分隔条画在两列之间 | 实测 1487×1058 与 1280×720 两列均为 88px / 224px，分隔条中心落在列边界 ±14px 内；≤63.9375rem 两列收起、导航与近期工作由抽屉承担 |
+| 项目列表摘要入口（2026-10-07，**2026-10-11 已被 §9.7 取代**） | 窄窗参与正常文档流，位于主区内容之后，不绝对覆盖页头创建动作；宽屏仍使用常驻右栏，短窗操作可滚达。仅作用于项目列表，间距复用现有 token | 几何、抽屉与真实窗口成绩归功能验收表本次页面巡检行 |
+| 共享壳两列 | 图标导航栏（`layout.navigation.railWidth`，图标在上、文字在下，允许「连接与同步」这类长名称折行）与近期工作栏（`layout.sidebar.width`，可拖拽）职责分离；`.app-frame` 为三列网格，拖拽分隔条画在两列之间 | 实测 1487×1058 与 1280×720 两列均为 88px / 224px，分隔条中心落在列边界 ±14px 内；≤63.9375rem 两列收起、导航与近期工作由抽屉承担。**2026-10-15 折叠点下移到 `width < 48rem`**：768px 以下才收起；48rem–64rem 保留三列，该区间侧栏取 `layout.shell.sidebarWidth` 默认值、**不采用户拖拽宽度**（否则 768px 窗口下内容列会被压穿 `layout.workspace.centerMin`），拖拽手柄仍从 64rem 起关闭；证据见 `tests/browser/responsiveFoldGeometry.spec.ts` 的 700/767/768/900/1023/1024 六档 |
 | 图标导航栏文字 | 保留可见文字而不是纯图标：中文名称在 5.5rem 宽度下折行也比只剩悬停提示可用；`aria-current` 与「当前页」隐藏文本不变 | 既有 `navigation`、`sidebarResize`、`workBreadcrumbScope` 断言未改写 |
 | 图标导航栏入口分组 | 主导航 4 条（工作台、项目、待处理、资料）、次级 4 条（今日、全部任务、动态、收件箱）与底部 2 条（设置、连接与同步）之间只用 `border.separator` 细分隔线分组，10 条全部常驻、不折叠。`max-height: 50rem` 时竖排入口收紧纵向内距（61px → 53px）并压缩组间距；这条覆盖必须写在 `.app-navrail .navigation-item` 之后，同特异度下靠后生效 | 实测 1487×1058、1280×900、1280×760、1280×720 均为 10 条、无纵向滚动、底部项可见；1280×680 时导航自身滚动 5px |
 | 近期工作宽度偏好 | 沿用 `relay.workbench.sidebarWidthPx` 同一键与 160–320px 同一钳制区间，归属从「组合侧栏」改为「近期工作栏」；旧值对新单栏仍然成立，不迁移也不清空 | `sidebarResize` 默认 224px、步进 16px、双击复位断言保持不变 |
@@ -428,6 +451,113 @@ hover/focus 的颜色过渡用 motion.duration.fast；抽屉/面板用 panel；�
 
 依据用户提供的已有对话截图，新建入口复用 `.agent-chat-composer` 的底部常驻布局与 `layout.reading.maxWidth`，不再以 `layout.workspace.sideWidth` 限制首条输入器。欢迎语占空白消息区，目录与接续已有任务按需展开；两者置于主区顶部，避免在输入器下方另占一行。主区内距与已有对话共用，短窗沿用既有自然高度规则。
 
-首条输入器与已有会话共用两行初始输入、占位文案、圆角、底栏类名和圆发送键。左侧资料及普通讨论、右侧缓存及上下文圆环保持同一顺序；首次模型调用前复用 `ContextMeter` 的未知状态，不伪造占用或缓存比例。资料按钮的禁用与讨论说明由[工作台 §18.1.1](workbench-design.md#1811-新对话直接起步2026-10-05-接续实施)定义。
+首条输入器与已有会话共用两行初始输入、占位文案、圆角、底栏类名和圆发送键。左侧资料及普通档讨论入口、右侧缓存及上下文圆环保持同一顺序；助手档隐藏讨论入口，准入与恢复规则归工作台 §25.1。首次模型调用前复用 `ContextMeter` 的未知状态，不伪造占用或缓存比例。资料按钮的禁用与讨论说明由[工作台 §18.1.1](workbench-design.md#1811-新对话直接起步2026-10-05-接续实施)定义。
+
+2026-10-07 单行底栏修正：模式 radio chip 与资料/讨论 chip 同样以 `2 × radius.composer` 推导最小高度，与发送键对齐，避免通用控件高度撑高普通工具行；保留原生 radio、焦点与目标下限。助手选择器、说明和创建表单展开后仍按内容自然增高，不能把整个助手区固定为单行。数值只归现有 token，不更新几何断言迁就布局缺陷。
 
 本片不新增 token、字体、图像素材或业务状态；全局导航与近期任务继续由共享页壳渲染。图中的历史消息、项目内容与 Windows 控制按钮不复制成新对话空态。实际成绩及 Windows 验证限制只归功能验收表。
+
+### 9.5 任务详情样板与全站枚举呈现（2026-10-07）
+
+任务详情页精修样板的视觉规则，交互出口归[工作台 §17.14](workbench-design.md#1714-任务详情精修样板与全站视觉收口2026-10-07)。全部数值继续消费唯一 `design-tokens.json`，本轮未新增 token：主区为纸面阅读流（区块间 `space-6`/`space-8`、「标题+内容+分隔线」，不逐块套 surface-panel 卡片），右栏为紧凑事实列（`font.size.meta`，不为填满高度堆卡片）；区块标题 `rowTitle` + 顶部大间距、底部小间距；主区与右栏以左边框与背景区分。新增页面样式一律写页面私有 CSS（类前缀 `.task-detail-` 等），`styles.css` 只由协调者收口。
+
+
+**同名行类必须按结构区分，不按子节点数量隐式推断（2026-10-08 补充）**：任务详情有两份条件列表复用 .task-detail-criteria-list / .task-detail-criterion——「验收条件」是有编号 <ol>（含 .task-detail-criterion-index），「验收依据」是无编号 <ul>（行内只有正文一个子节点）。两者结构不同，网格列数也不同：有编号的保持「编号列 + 正文列」；无编号的由修饰类显式声明单列 minmax(0, 1fr)，差异写在结构上。**不得**把两列网格无条件套在共用行类上——那会让唯一的正文子节点自动落进编号列宽度（实测 2048px 下正文仅 32px，中文被挤成每行约两字的竖条）；也**不得**为修它全局取消 grid，那会让原验收条件列表失去编号对齐。
+
+**页头元信息按分组换行，不是一整句「·」串（2026-10-08 补充）**：长项目名会让「修订 vN」被顶到单独一行、甚至在「修订」与「v4」之间断开。页头 meta 用 flex 分组（所属项目 / 任务编号 / 修订各成一组），换行只发生在组之间；标签 + 数字 这类同一个事实的组内不允许断行。完整 36 字符任务 ID 不再直出普通 meta 长句：按上条基线降为 code 小字缩略（hash-code），完整值由同一页头内一个默认收起的 <details> 给出，可展开、可选中复制，信息不隐藏。只有 UUID / 长哈希形状才缩略，本身是可读短标识的原样显示。
+**枚举与技术值的呈现基线**（全站生效，各页枚举中文化时遵循）：
+
+- 用户可见文案不直接输出原始枚举、`JSON.stringify` 结果或完整技术 ID；中文映射 + 原枚举降级（`small`/`title`/`code`）是默认形态，映射缺失的开放扩展值回退原文且只显示一次。
+- 「尚未加载（loading）」「确认没有」「字段缺失」三种状态用不同文案区分，不互相冒充；未运行、未确认、UNKNOWN、失效结果不得使用 `status-chip--success` 或勾选样式。绿色只表达服务端确认的确定事实（如 Run COMPLETED）。
+- 就地辅助操作用文字按钮（下划线 + `color.action.text`），与主/次按钮三级分层；空态一行紧凑文字或共享 EmptyState，不用大标题大留白撑空间。
+- 时间一律走本设备显示时区的可读格式（ISO 原串保留在 `time.dateTime`）；长 UUID/哈希保留可核对性但降为 `code` 小字或折叠 `<details>`。
+
+本轮新增中文映射：`criterionMethodLabel` 补 `CITATION_EXISTS`/`SEMANTIC`；`acceptanceSourceLabels`（CREATE/CONTRACT_CHANGE/HUMAN）；连接页能力/决定/状态局部映射；Run 页 Gateway 动作与调用状态局部映射；各页其余映射以页面局部常量先行，后续统一收编进 `labels.ts` 由协调者执行。
+
+### 9.6 控件基座与响应式收敛（2026-10-08）
+
+用户要求对所有按钮、表单控件、导航元素、状态提示做控件级精修。本轮全部数值仍消费唯一 tokens（新增 `space.0.5 = 0.125rem` 微间距档；contrastChecks 补 `muted on selection.hover ≥4.5` 与 `onAction on danger ≥4.5` 两道门槛），styles.css 改造 +198/−22 行，交互出口归[工作台 §17.15](workbench-design.md#1715-控件交互基线与响应式收敛2026-10-08)。规则：
+
+- **按钮**：`[aria-busy="true"]` 全局降饱和（opacity .7 + `cursor: progress`），五类按钮通用；`.primary-button--compact`/`.secondary-button--compact` 修饰符（min-height=control.height + meta 字号）收编页面私改的 2.5rem 主按钮，页面不得再压回全局按钮高度；danger 仅用于不可逆/终止操作，可恢复操作（暂停、取消会话）用 secondary——分级注释固化在 danger-button 规则处。复合开关控件（如委托开关：主按钮+内嵌说明文字的 flex-wrap 结构）保留自有规则，但其 hover/active/focus 必须与全局 primary 等值。
+- **表单**：输入基座 `:focus-visible` 主色边框（focus 视觉 ≥ hover）；`.field` 基类排除 checkbox/radio（回归原生 + accent-color，删除历史补丁）；label 布局收敛为全局 `.field--row`（横向，label `flex:none; min-width:7rem`）与 `.field--grid`（两列 grid）两个变体，页面私有横排/两列实现应替换为变体；结构不同的页面实现允许保留但须注释收编路径。
+- **状态提示**：补全局 `.success-callout`（warning 同族骨架）；receipt-message/action-error 补 3px 左色条形成同族呼应；`.loading-text` 统一裸 loading 文案（meta 字号 + muted），「还在跑」的持续信号（inflight-dots、composer 光条）不属于此类不动；`warning-callout > button` margin 全局化，页面不得手写。
+- **断点收敛**：目标为三档语义——`width < 48rem`（折行/降级）、`width < 64rem`（大屏增强）、`width < 80rem`（rail 出现），写法统一 range 语法并与整数 min-width 档配对，禁止新增 `.9375rem` 补丁与 min/max 双触发。本轮处理的 700px、60rem、45rem 规则已并入对应语义档（逐处注释）；既有页面仍有遗留断点，不能描述为全站已收敛，具体剩余范围归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。PageHeader 接管页面标题后，确认不再匹配的页面 `> h1`/`.page-lede` 直选规则可清理。
+
+  2026-10-15 外壳折叠点下移（spec/计划见 `docs/superpowers/`）：外壳收纳（`.app-frame` 单列、两栏 `display: none`、图标栏退化为纯图标、`☰` 出现）由 `width < 64rem` 迁到 `width < 48rem`，因此 64rem 档回归它本来的「大屏增强」语义（拖拽手柄、页面密度），不再兼做外壳收纳；同区间新增一条 `@media (48rem <= width < 64rem)` 只覆盖 `--relay-shell-sidebar-width`，让用户拖拽宽度不泄漏到该档。页面密度（主区内边距、标题降 `compactPage`）与拖拽手柄仍留在 `< 64rem`。`.app-topbar:not(:has(.breadcrumbs))` 的整行收起区间同步改为 `min-width: 48rem`，避免该区间出现「点开只是重复屏幕上内容」的空抽屉顶栏。
+
+  2026-10-10 收敛回写：剩余遗留断点已按四档语义值（`breakpoint.medium/large/rail/wide` = 48/64/80/90rem）收口——Reviews 的 60rem 标题档因与全局 `<64rem` 重复而删除，Knowledge/Run/TaskDetail/ArtifactPanel/LiveTaskSkillFacts/TaskCheckPlanPreview/styles 的 40rem 兜底档并入 `<48rem`，各处 `.9375rem` 与 min/max 双触发改写为 range 语法（逐处注释）。`tests/responsiveTiers.spec.ts` 把档位集合、禁补丁、禁双触发与禁旧式 max-width 写成可执行守卫；`tests/browser/responsiveFoldGeometry.spec.ts` 在真实 Chromium 复核 700/767/768/900/1023/1024px 的折行边界与无横向溢出。**未收敛**：`views/AssistView.css` 的 `max-width: 64rem` 属自然语言状态维护任务在途文件，本轮只做守卫豁免（语义档位合规、写法待其 Owner 归一），不覆盖他人未提交改动。
+- **对比度**：token 组合新增两道 contrastChecks 门槛；各页新增背景/文字组合时必须能映射到 contrastChecks 已有条目或补充条目。
+
+### 9.7 项目列表页结构（2026-10-11）
+
+用户以静态原型 [projects-redesign.html](mockups/2026-10-11/projects-redesign.html)（含同目录渲染截图 [projects-redesign.png](mockups/2026-10-11/projects-redesign.png)）发起项目页改造，并选择「整体重做 / 跟随原型」。本轮只改 `/projects` 的呈现结构，**不改业务规则、命令 Owner、API、数据库与路由语义**；设计取舍见[项目页重设计 spec](../superpowers/specs/2026-10-11-projects-page-redesign-design.md)。页面样式全部写进页面私有 [`views/ProjectsView.css`](../../apps/workbench/src/views/ProjectsView.css)，`styles.css` 只删除了已失效的 `.projects-page .rail-trigger` 两条规则。
+
+| 区域 | 规则 | 备注 |
+|---|---|---|
+| 推进摘要条 | `bg.subtle` 底 + `separator` 边 + `radius.panel`；左侧 `selection.bg` 图标框 + 「N 个项目正在推进」+ 说明；右侧未明确下一步用 `status.warning.text` 文字，已明确用 `status.success.text` | 常驻区块，不整块套警示底；「去完善」是文字按钮，打开首个缺下一步的项目详情 |
+| 计数口径 | fixture 为全量精确值；live 只统计**已加载**项，有后续页时说明「按已加载项目统计，仍有后续页」 | 不把部分计数冒充全量 |
+| 页签 | 全部项目 / 进行中 / 已归档，是**路由链接**（`aria-current`），不用 `role=tablist`（§6 规则）；计数沿用既有「进行中 (3)」写法 | live 一次只加载一个范围，只有当前范围显示计数 |
+| 默认范围 | `/projects` 不带参数即「全部项目」；进行中 `?scope=active`、已归档 `?scope=archived`，历史深链接 `?archived=1` 继续可用 | 与原型首屏一致；是**可逆取舍**，改回默认 `active` 只需改 `scopeFromQuery` |
+| 卡片网格 | `auto-fill minmax(min(100%, 23rem), 1fr)`，`space.6` 间距；卡片 `bg.surface` + `separator` 边 + `radius.panel`，顶缘一条 `action.primary → selection.bg → transparent` 细色条 | 网格/列表切换只换容器类（`.projects-grid.is-list`），卡片标记不变；细色条高度用 `space.0.5` |
+| 卡片内容 | 活跃/归档标记、图标框、名称（键盘可达的打开按钮）、类型说明、状态胶囊、当前阶段与下一步两个内嵌信息格、页脚范围说明与「查看项目」 | 下一步为「尚未明确」时用 `status.warning.text` 文字色，不套警示底 |
+| 新建卡 | 虚线边 + `bg.subtle`，悬停换 `action.primary` 边与 `selection.hover` 底；无顶缘色条 | 只在「全部/进行中」范围且无搜索词时出现，避免把入口读成已存在的项目 |
+| 详情抽屉 | `AppDialog variant="drawer"`，标题「项目详情」；对象名、阶段、修订、下一步、归档入口与确切 ID 都在这里 | **宽屏不再有常驻右栏**；`.desktop-rail` / `.rail-trigger` 在项目页不再渲染 |
+| 就地反馈 | 归档阻断原因、待核对原命令、成功回执与失权错误仍留在主列，不随抽屉关闭而消失 | 抽屉不是唯一证据载体 |
+
+空态三种区分（首装为空 / 搜索无匹配 / 归档范围为空）与各 `data-testid` 命名保持不变。本轮**未新增任何色值、字号、圆角或动效数值**；验证出口与未覆盖范围归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)，真实 Windows WebView2 的字体、DPI、输入法与辅助技术仍需单独验收。
+
+### 9.8 V4.2 页面原型对齐（2026-10-14）
+
+用户以 Relay V4.2 页面原型（`GPT页面原型/Relay_V4.2_工作详情与成果预览.html`；仓库里该文件名带 URL 编码字符，故此处以文本引用而不是链接，避免文档检查器解码后找不到目标）发起整站视觉对齐，并选择「全站统一视觉 / 接入现有 token 体系」。因此**不新建第二套色值表**：原型那套冷绿语言全部收敛进 `design-tokens.json` 的基础色，再由语义别名与既有组件消费，配色/圆角/阴影一次改动即传播到全部页面。
+
+| 原型值 | 处理 | 理由 |
+|---|---|---|
+| `--bg #fbfcfa` / `--rail #f8faf7` / `--dark #203329` / `--text #425248` | 直接收敛为 `color.palette.paper / sidebar / ink / secondary` | 画布—导航—文字三层关系与原型一致，画布上分别为 13.0:1 与 8.1:1 |
+| `--line #e8eee8` / `--tint #edf5ef` / `--green #205d47` | 收敛为 `line / sage / forest`，hover、pressed、sageHover 由原型的 `#164735` 等值接续 | 主操作色与选中底是原型的识别特征 |
+| `--muted #88998d` | **同色系加深**为 `#55675d` | 原型值在画布上只有 2.92:1，低于 §3 的 4.5 门槛；加深后画布 5.86:1、选中悬停底 4.99:1，色相不变 |
+| `--warn #a76e30` | **同色系加深**为 `#96622a` | 原型值在 `--warnbg` 上只有 4.02:1；加深后 4.84:1 |
+| `--red #a34f43` / `--redbg #fff2ee` | 直接收敛为 `red / redSoft` | 5.11:1，无需调整 |
+| 卡片 12px 圆角、6px 徽标圆角 | `radius.panel` 0.5→0.75rem，`radius.badge` 0.1875→0.375rem | 原型的卡片与状态标签比旧值更圆；`radius.composer` 保持 1rem，因为发送键按 `2 × radius` 同心推导，缩到 12px 会容不下 32px 的键 |
+| 卡片投影 `0 10px 32px rgba(30,57,37,.055)` | 新增 `shadow.card` | 只给「浮在画布上的内容块」（面板、纸面）；列表、侧栏与页壳仍无阴影（§1 的既有约束不变） |
+
+新增的其它 token：`color.palette.lineStrong`（`meter.track` 需要与纸面拉开 ≥1.2:1，`line` 只有 1.18:1）、`layout.inspector.width / wideWidth`（工作详情面板 322 / 610px）。同时**补定义**了三个早已被 `TaskInspectorPanel.css`、`TaskViewDashboard.css` 消费却从未存在的 token：`font.weight.bold`、`font.lineHeight.snug`、`font.lineHeight.relaxed`——此前浏览器按无效值回退，面板小标题与说明段落拿不到声明过的层级。
+
+组件规则的同步变化：
+
+- 回执与错误提示（`.receipt-message` / `.action-error`）由「左侧 3px 色条」改为「整圈 1px 边框 + 圆角」，对齐原型的 `error-box` / `attention-strip`：长句换行后，整圈边框才读得出「这是一块独立状态区」。
+- 应用顶栏与近期工作栏底色由 `bg.canvas` 改为 `bg.surface`，与原型「白工具条 + 白侧栏、画布色留给主内容」的分层一致。
+- 图标导航顶端新增 `.navrail-brand`（主色圆角方块，`aria-hidden`），纯装饰；短窗口（`max-height: 50rem`）隐藏，把高度让给十个常驻入口。
+- 右侧面板重构为原型的「工作详情」三页签（进展 / 成果 / 记录）+ 成果深预览（预览 / 版本与来源）。**未实现原型的「变更」页签**：面板没有真实 diff 数据源，按 §2 的「不伪造」原则只呈现真实读到的字段。面板在 `<80rem` 改为覆盖在成果区之上的浮层，宽度仍取同一 token。
+
+本轮没有改动业务规则、命令 Owner、API、路由语义与任何写入路径；色值变更只落在 JSON，验证出口与未覆盖范围归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
+### 9.9 横向尺寸改为「百分比 + 上下限」（2026-10-15）
+
+原型对齐后暴露一个问题：固定 rem 列宽会让同一界面在不同分辨率下比例不一致——侧栏固定 14rem 时，1920 宽窗里它只占 10.6%，中栏被不成比例地拉大；右栏固定 25.5rem 时同样越宽占比越小。用户据此要求「尺寸做百分比和上下限」，本轮把**所有横向列宽**改成 `clamp(下限, 百分比, 上限)`：
+
+| 列 | token | 值 | 边界 |
+|---|---|---|---|
+| 图标导航 | `layout.navigation.railWidth` | 5.5rem **固定** | 有意不参与缩放：它是窗口外壳常量，竖排标签在宽窗下会被拉散 |
+| 近期工作栏 | `layout.shell.sidebarWidth` | `clamp(11rem, 16%, 17rem)` | 176–272px |
+| 页面右栏 | `layout.rail.width` | `clamp(20rem, 26%, 26rem)` | 320–416px |
+| 窄右栏 | `layout.rail.narrowWidth` | `clamp(18rem, 24%, 24rem)` | 288–384px |
+| 工作详情面板 | `layout.inspector.width` | `clamp(18rem, 20%, 22rem)` | 288–352px |
+| 成果深预览 | `layout.inspector.wideWidth` | `clamp(30rem, 34%, 40rem)` | 480–640px |
+
+百分比基准是**各自所在的容器**而不是视口：侧栏比 `.app-frame`，面板比 `.collab-columns`。这样窗口出现滚动条、或面板收成浮层时，各栏仍按同一比例分配。`layout.sidebar.width`（14rem）保留，但语义收窄为**拖拽起点默认值**——`SidebarResizeHandle` 仍按它推导 px 上下限，用户手拖后由 `--relay-sidebar-user-width` 覆写。
+
+实测（工作详情打开；对话/成果两栏在所有宽度恒定 52/48）：
+
+| 视口 | 侧栏 | 中栏 | 成果栏 | 面板 | 面板占比 |
+|---|---|---|---|---|---|
+| 1280 | 205 (16%) | 359 | 332 | 288（下限） | 29.2% |
+| 1440 | 230 (16%) | 429 | 396 | 288（下限） | 25.7% |
+| 1920 | 272（上限） | 645 | 595 | 312 | 20.0% |
+| 2560 | 272（上限） | 957 | 883 | 352（上限） | 16.0% |
+
+占比只在被上下限截断时才偏离百分比——这正是上下限的用途：窄窗保住可读宽度，宽窗限制上限避免侧栏吃掉中栏。
+
+实现过程中踩到两个 CSS 陷阱，都已写进注释：
+
+1. **clamp 的 `%` 在网格里会拿轨道宽当基准。** 面板自身 `width: clamp(18rem, 20%, 22rem)` 时，网格项的包含块是它所在的轨道，于是 20% 恒小于下限、永远取 18rem，还会在轨道与面板之间留一道空隙。修法是把宽度交给 track（`.collab-columns:has(.task-inspector) > .task-inspector { width: 100% }`），clamp 只出现在 `grid-template-columns` 里。
+2. **拖拽手柄必须与列宽同源。** `.app-frame` 上解析一次 `--relay-shell-sidebar-width`（内含「用户覆写优先、否则回退 clamp」），分隔条 `left` 复用同一变量，否则列宽变了、分隔条还停在旧位置。实测手柄中心与侧栏右缘偏差 0px（含 localStorage 预设 260px 的场景）。

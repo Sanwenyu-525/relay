@@ -1,6 +1,498 @@
 # Relay 当前状态与下一步
 
-更新：2026-10-05。角色：唯一阶段、模块与下一步入口。功能通过/未通过/未验收只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)；长篇经过保存在[历史快照](docs/development/codex-next-step-history-20260930.md)，不作为默认交接输入。
+更新：2026-10-15。角色：唯一阶段、模块与下一步入口。功能通过/未通过/未验收只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)；长篇经过保存在[历史快照](docs/development/codex-next-step-history-20260930.md)，不作为默认交接输入。
+
+## 目录作用域细条 + 窄窗外壳折叠点（2026-10-15）
+
+**细条**：`/agent` 输入卡上方的目录作用域由居中胶囊改回常驻状态线——整列一条分隔线、内容与输入卡同宽同轴、无圆角无阴影（回到 `design-system.md` 原有规则，此前实现走偏）；目录名 `body`+medium 当事实主角、归属 `meta`+muted 次要、窄窗先省略归属并用 `title` 给完整路径；状态短语只说后果（「执行前需归入项目」/「目录未就绪，暂不能执行写操作」），完整原因仍给读屏与 tooltip；［更换目录］改按 chips 规则的有边框紧凑键。token 零新增。
+
+**外壳折叠点**：由 `width < 64rem` 下移到 `width < 48rem`，48rem–64rem 保留三列（150% DPI 下 960–1440 物理像素不再只剩中栏），该区间侧栏取默认列宽、不采用户拖拽宽度；`<64rem` 块按职责拆成「外壳收纳」与「页面密度」，另修掉无渲染点的死规则 `.brand`。设计与计划见 [spec](docs/superpowers/specs/2026-10-15-narrow-window-shell-fold-design.md) 与 [计划](docs/superpowers/plans/2026-10-15-narrow-window-shell-fold.md)（三任务，各自独立提交）。
+
+**已运行**：`tsc --noEmit` exit 0、`vite build` exit 0、`vitest` 920/922（两项既有失败：执行摘要文案与 `run-events` SSE 时序，后者单跑 5/5）、`responsiveTiers` 守卫 2/2、浏览器 96/99（`workbench.spec.ts` 的「宽表在局部滚动」是 2026-10-11 项目页重设计移除右栏后的残留测试，与本轮无关且改前同样失败；另两项在全量并发下不稳定、单跑通过）、`check-docs` exit 0。**未取证**：真实 Windows 窗口 150% DPI 下跨 1024px 拖动的切换观感。
+
+**契约与实现曾脱节，已校正**：`window.content.initialWidth` 写 1280、`minWidth` 写 960，而桌面壳实际以 1160×780 建窗且未设 `min_inner_size`（`apps/desktop/src-tauri/src/lib.rs`）。两条 token 描述已改为「目标约束 + 实现实况 + 为什么不能加强制下限」，窗口尺寸段的窄窗区间同步更正为 `< 48rem`。
+
+## 普通 Agent 连续工具主流程（2026-10-15，文档与任务书）
+
+用户确认普通 Agent 不再固定拆成无工具聊天、执行解释、状态维护解释三条独立模型分支。目标是一条原消息主流程按必要工具推进并回到原会话：纯读取复用会话只读机制、不制造 Task/Run；文件修改/检查沿原 Task/Run，业务维护沿原 Owner；确定性模板路由、模式隔离、权限、控制、UNKNOWN 与业务完成边界保持。产品规则归总纲 §0.5.1，取舍归 ADR-022，工程责任归领域模型 §12.6，交互归工作台 §18.10，验收规格归测试计划 §17.2。
+
+本轮授权仅更新文档并交付[重构任务书](prompts/agent-conversation-main-loop-refactor.md)，不修改代码、运行协议或数据库，不宣称截图原消息已完成根因复现或读取已修复。下一步由用户实际下发任务书后，核对源码及现有会话只读/Run/状态维护入口，先复现，再按持久身份、兼容与停止边界分批重构；不重做已实现模块或扩展为新 Runtime/多 Agent 项目。
+
+## 阶段 A/B/C 第一段已实施（2026-10-15，接上一节）
+
+用户已实际下发该任务书，本轮完成**阶段 A（复现＋最小持久协议）、阶段 B（会话只读闭环）与阶段 C 第一段（主流程提交类型化执行候选）**；**阶段 C 其余与阶段 D 未做**。实际成绩与限制只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)“普通 Agent 连续工具主流程·阶段 A/B/C（2026-10-15）”行，本节不重复数字。
+
+**复现到的根因（不是截图推断）。** 普通 AGENT 会话此前在 `assist-runner` 主分支里**不声明任何工具**，模型一旦请求工具就被结算成 `TOOL_CALLS_WITHOUT_DECLARED_TOOLS`；同时「这条会话绑定哪个目录」只存在于浏览器组件状态，服务端只能按项目**取第一个受管资源**。这正是用户看到「没有文件读取能力」的结构性来源。
+
+**一个实测到的额外事实**：`method-intent.ts` 把 `readme` 列为 `docs-maintenance` 的触发词，所以任务书自己举的「读取 README.md」会被绑成**方法轮次**，而方法轮次同样没有任何工具——尽管方法模板自己要求「只依据实际读取到的内容下结论」。已改为：方法轮次保留自己的模板、但同样拿到只读工具，而不是为它新造一个合并 schema。
+
+**阶段 C 第一段做了什么。** 主流程收尾那一次模型输出改为 `{reply, execution}` 信封，候选经**既有** `validateConversationCandidate()` 判定后落进**原** `conversation_execution_requests` 行（复用原 `claimExecutionRequest`＋`saveInterpretation`，准入、幂等与三个阶段命令身份只有一份实现），因此**不再需要第二次解释模型调用**。本段**不自动应用**：`applyConversationExecution` 与 `auto_start` 未改，Task/Run 仍只在用户动作后出现。信封解析刻意容错——不是信封就当普通回复，模型编造候选时最多「这一次没整理成候选」，绝不会凭空造出 Task/Run。
+
+**下一步按顺序**：
+1. **阶段 C 其余**——状态维护接进主流程的类型化工具（复用原 Owner、基线、决定与撤回）；会话↔Run 的推进责任与结果按原身份投影回原会话（AM-06）。
+2. **阶段 D**——迁移前端「由新发消息自动发起解释」这 13 条规格反例后，再删掉 `AssistView` 里的解释调用。当前删掉会让它们转红，因此已回退；服务端侧的第二次模型判定已经消除。
+
+会话读取轮次尚不做流式预览（与人设档、学习档一致）。真实 Provider、Windows 窗口与安装仍未验；本轮未重打包，**用户当前窗口没有加载本次代码**。
+
+## 工作台 UI 对齐 V4.2 页面原型（2026-10-14）
+
+用户给出 `GPT页面原型/Relay_V4.2_工作详情与成果预览.html`，要求按原型重构 UI 且不改功能与业务逻辑，并选定「全站统一视觉 / 接入现有 token 体系」。当前 Agent 把原型那套冷绿语言收敛进唯一 `docs/frontend/design-tokens.json`（只改基础色与语义别名，不新建第二套色值表），因此配色、卡片与徽标圆角、卡片投影一次改动即传播全站；原型过浅的 `--muted`/`--warn` 在同色系内加深到通过既有 4.5:1 门槛。右侧 `TaskInspectorPanel` 重构为原型「工作详情」三页签（进展/成果/记录）与成果深预览。
+
+无新依赖、无迁移、不改业务规则、命令 Owner、API、路由与任何写入路径；`tsc --noEmit` 与 `node scripts/check-docs.mjs` 通过，`vitest run` 918/919、`playwright test` 92/96，5 例失败全部为既有问题（其中 2 例已用「token 还原到 HEAD 后仍复现」直接排除）。顺带修掉一处真实布局缺陷：工作详情打开时四栏走 flex，成果栏按自身内容宽度抢占空间，1280 宽下中栏只剩 71px，现改为沿用双栏比例的网格。2026-10-15 按用户要求把所有横向列宽改为「百分比 + 上下限」（clamp），不同分辨率下比例一致；修掉两个对应 CSS 陷阱：clamp 的 `%` 在网格里会拿轨道宽当基准（必须写在 `grid-template-columns`）、拖拽手柄与列宽必须同源。设计取舍归 design-system §9.8/§9.9，实际成绩只归统一验收表「工作台 UI 对齐 V4.2 原型」行。原型的「变更」页签无真实 diff 数据源故未实现；真实 Windows WebView2 字形、DPI、IME 与全站逐页视觉仍未验收。
+
+## 任务链基础修改与检查接续（2026-10-14）
+
+当前 Agent 单独把原普通文件修改、配置检查、范围授权和明确 MODIFY 方法接入现有任务链。创建只保存候选规格；明确执行授权后原 Delegate 按项/Run 签发范围，不超过链期限、不跨 Run 终态。原变化集基线和真实子进程结果可读，检查失败可在原循环修正后重查，原人工验收完成后才接下项；未给范围授权时走原 ACTION_APPROVAL，DENY 不覆盖，INSPECT 不进入修改。前端只扩原客户端，无 UI。
+
+复用 0085 规格与既有 Run 授权表，无新迁移或依赖，不升级用户库；协议归 HTTP §10.79、数据库 §86，领域模型 §21/ADR-021 接续 Owner，检查范围归测试计划 §30，实际成绩只归统一验收表「任务链基础修改与检查」行。后续继续核对其他独立基础模块；自定义 Skill/方法、活动无缝续期、UI、真实 Provider/Windows 与完整 N06 仍未通过，不扩大到并发故障全矩阵。
+
+## 任务链基础只读文件与来源接续（2026-10-14，前序切片）
+
+当前 Agent 单独在原任务链项追加只读执行规格：支持原固定文件读取或限定目录/文件工具循环，选定确切资料版本和原会话 INSPECT 方法。资源身份/配置、连接和来源依据保存，在原 ready/Delegate 新准入时核对；原 Gateway/权限与工具账本承担实际读取和拒绝，不由链批准。原方法定义/消息、资料和动作进入同一 Run，原人工验收完成后再继续；前端只扩原客户端，无 UI。
+
+0085 只追加 execution_spec 列，旧项为空、旧摘要不变，无新依赖、不升级用户运行库。协议归 HTTP §10.78、数据库 §86，领域模型 §21/ADR-021 接续资源配置与领取 epoch 边界；检查范围归测试计划 §30，实际结果只归统一验收表「任务链基础只读文件与来源」行。首轮误冻结领取 epoch 导致正常读取后下一项失效，已改核对资源配置/身份；不删除原隔离或权限检查。后续接已有受控写入/检查范围或其他独立基础模块；文件写入/CLI、自定义方法、UI、真实 Provider/Windows、并发故障全矩阵与完整 N06 尚未通过。
+
+## 基础有限 Markdown 任务链接续（2026-10-14，前序切片）
+
+当前 Agent 单独接 N06 第一片：创建固定既有任务范围不执行，明确确认累计任务/调用限额与有效期后沿原 ready/Delegate/Run/LangGraph 串行推进；上一项原人工验收和 COMPLETE 的确切 Task/Run/Completion 基准满足后才进入下一项。调用预留与原账本 STARTED 同事务，未知保留占用；暂停/撤销/到期复用原持久控制，实际应用前保持 PAUSING，重开先人工确认，原身份/文件/累计消耗保持。前端只接五个方法，无新 UI。
+
+0084 纯追加两表，无新依赖，不升级用户运行库；责任/取舍归 ADR-021、领域模型 §21，协议归 HTTP §10.77、数据库 §85，检查范围归测试计划 §30，实际成绩只归统一验收表「基础有限 Markdown 任务链」行。首片只允许内部 Markdown 成果，不带外部工具或资源；来源/方法/工具范围、活动中续期、真实 Provider/Windows/故障全出口和 N06 整体仍未通过。后续先接已有工具循环的有限范围或核对其他独立基础模块，不以本片宣称整个任务链或 M/N 总交付完成。
+
+## 基础一次性继续项目提醒接续（2026-10-14，前序切片）
+
+当前 Agent 单独接 N05 基础功能：确认绝对时刻与原时区、配置 revision/实际时刻代次、API 存活期间扫描、独立到时/错过事项和 HANDLE/DISMISS；暂停/禁用/继续不重复原发生，改时间保存新发生而保留旧待处理。客户端提供配置/事项/原计划引用，原通知轮询在没有必须介入事项时投递项目提醒，复用宿主权限和投递回执，旧点击先重读当前项目/事项；没有新页面、样式或布局。
+
+0083 纯追加两表，无新依赖，不升级用户运行库；协议归 HTTP 契约 §10.76、数据库设计 §84、领域模型 §20，基本检查归测试计划 §29，实际结果只归统一验收表「基础一次性继续项目提醒」行。触发与通知均不创建计划/Task/Run/模型请求；API 关闭停止扫描，Schema 未就绪/维护排空不写新发生。下一步核对 N06 任务集合、原委托/完成/控制与预算入口后接基础有限任务链，继续由当前 Agent 完成。设置/待处理 UI、Windows 原生投递、完整 PV05/PV08、收益与 M/N 总出口仍未据此通过。
+
+## 基础固定容量范围推演接续（2026-10-14，前序切片）
+
+当前 Agent 单独沿 N04 基础计划接第 3 批范围比较：用户从未应用的既有计划发起，在同一容量/窗口/Task/验收/估时/Goal 基线下保存 ALL/SHRINK/DEFER；缩小任务集保留必要前置，推迟指定任务传播至下游，来源/未知与延后影响可读，不改原验收。显式不可靠估时按未知/必要诊断处理，资料与权限仍待执行核验。用户选方案经原计划 Owner 生成新候选，再由原入口逐项接受/拒绝；选择本身不建 Task、启动 Run 或授执行权，客户端读回部分结果。
+
+0082 只追加推演表，无新依赖、不升级用户运行库；协议归 HTTP 契约 §10.75、数据库设计 §83、领域模型 §19，基础场景归测试计划 §27，实际结果只归统一验收表「基础固定容量范围推演」行。前端只接四个方法，无 UI、自然语言发起、自动推演、任务内部验收缩减或收益验证。后续继续核对 N05 一次性提醒等独立基础模块；完整 N04/N05/N06、Windows/安装和真实使用收益未借此放行。
+
+## 基础下一段工作计划接续（2026-10-14，前序切片）
+
+按用户继续实现基础文档模块、只做前后端功能的授权，当前 Agent 单独接 N04 数据片：原 Task 估时按验收周期追加，本段容量与诊断预算由用户手动提供，固定窗口下按明确目标/主线、BLOCKS 必要前置、原优先级/截止日期生成候选，逐项接受/拒绝。未知关键估时提出独立诊断，接受沿原 Task Owner 建 ME/HUMAN/INBOX 与自己的输出/验收；原任务不完成，计划不授执行权限。前端只加客户端，无 UI、日历、后台自动重排或会话新候选。
+
+0081 纯追加估时/计划两表，无新依赖，不升级用户运行库；协议归 HTTP 契约 §10.74、数据库设计 §82、领域模型 §18，检查范围归测试计划 §28，实际结果只归统一验收表「基础下一段工作计划」行。估时分项不重复相加，未知总时间不从分项推算；计划保守串行，不推测跨任务重叠收益，资料/权限缺口仍待原执行入口核验。下一步复核 N04 基础片可供范围推演复用的候选/容量/逐项应用，再接其他基础模块；完整 N04/PV04、N05/N06、UI、真实 Provider 和实用收益未据此通过。
+
+## 基础工作段预期与产出复盘接续（2026-10-14，前序切片）
+
+当前 Agent 单独接第 3 批工作段数据功能：保存同项目既有 Task/验收/Goal 引用与确认预期，结束保存本段完成记录/确切产物引用、未完成或基线变化、Task 范围已登记用量和未知。返工/人工介入先候选，确认后计入、撤回保留历史，结束事实不被后续事件纠正改写；临时回顾按当前验收周期读取最近登记预期，缺失项保持 UNKNOWN。前端只接客户端，原会话支持“接下来做这几项，结束后复盘”，不创建 Task、启动 Run 或应用计划。
+
+0080 追加工作段/事件表与会话候选，无新依赖，不升级用户运行库；协议归 HTTP 契约 §10.73、数据库设计 §81 和领域模型 §17，实际结果归统一功能验收表「基础工作段预期与产出复盘」行。用量覆盖范围仅已有 Task 绑定调用账本，金额没有历史记录，不能补估；完成引用不等于新增文件可用性核对。后续先核对 N04 的当前计划/容量/应用前置，再接基础范围推演或其他独立文档模块，不借此宣称整个第三批、UI、真实 Provider 或收益已完成。
+
+## 基础决定前提与复审接续（2026-10-14，前序切片）
+
+当前 Agent 单独接第 2 批决定复审数据链：明确登记本项目决定依赖的资料版本或假设，Knowledge 新版本/归档（含事务内组合入口）、Hypothesis 定义/观察/用户结论变化时在原事务中准备候选，关联资料变化可传播至假设前提；只保存未确认假设建议不触发。相关命令回执提供新候选数量和项目查询入口，前端提供登记/读取/处理方法，不做 UI 或后台监控。
+
+0079 纯追加前提/候选表，无新依赖，不升级用户运行库。前后引用、决定/前提版本及指纹去重由复审入口保存；用户保留决定或忽略候选留理由/历史，不改变 Decision/Task/Run。替代仍走原 Decision Owner，来源再次变化或决定替代后旧候选不可行动。协议归 HTTP 契约 §10.72、数据库设计 §80 与领域模型 §16，实际结果归统一功能验收表「基础决定前提与复审」行。本节保留前序切片，基础工作段复盘已由上节接续；UI、真实模型分析/解释和收益试验仍未验证。
+
+## 基础假设记录与用户结论接续（2026-10-14，前序切片）
+
+按用户继续开发基础文档模块的授权，当前 Agent 单独进入第 2 批假设数据功能：项目内建档、不可变定义版本、观察追加、候选建议和明确用户确认，前端提供 API 客户端；会话“把这个想法记成假设”沿原状态维护链建档，缺主张/方法/标准先澄清。假设应用入口拥有新记录，Knowledge 只提供确切来源引用，Task/Run/Verification/Review/Decision 责任不变；没有新 UI、模型分析后台或统计平台。
+
+0078 为追加表/候选值，无新依赖，不升级用户运行库；协议归 HTTP 契约 §10.71、数据库设计 §79 与领域模型 §15，实际检查归统一功能验收表「基础假设记录与用户结论」行。来源、定义或观察变化后保留旧结论并标不再适用，停止投入只是候选建议。本节保留前序切片，基础决定复审已由上节接续；消息/Task UI 双入口、真实 Provider 解释质量及收益试验仍未验证。
+
+## 基础会话验收耗时补录接续（2026-10-14，前序切片）
+
+当前 Agent 在原会话状态维护链追加 REPORT_ACCEPTANCE_TIME，解释前冻结试用身份/版本，用户一句话补录准备与整体验收耗时；数字和单位按原文核对，试用不唯一或口径不明沿原澄清入口。应用沿原观察 Owner 和原命令回执，保留未提到的原耗时及纠正历史，读回来源消息；不改变 Task/Run、计时状态或正式验收。前端只接客户端方法与来源解析，不改 UI。
+
+0077 只追加候选值和观察来源列，无新端点或依赖，不升级用户运行库。实际检查归统一功能验收表「基础会话验收耗时补录」行；可控解释与真实数据库/HTTP 分开限定，不据此认定真实 Provider 解释质量或窗口可用。基础验收数据链已覆盖材料、计时、补录和比较；本节保留前序切片，基础假设记录已由上节接续，消息/Task UI 双入口留待重构，正式收益试验未运行。
+
+## 基础验收对比接续（2026-10-14，前序切片）
+
+在材料与试用记录上继续接前后端基础比较：已结束原流程记录冻结 revision、人工观察 ID、用户目标百分比和样本口径，新证据试用在开始时绑定基线；读取全部关联样本，分别比较找证据、准备和已含准备的总验收耗时。缺项保持未知，漏验自述不算成功，材料/验收/基线变化保留历史并标过期。不做 UI、统计平台或压力测试，也不把单样本状态当实际收益证明。
+
+0076 为纯追加表/列，比较应用入口只写冻结参考、原试用入口保存样本与人工自述，Task/Run/Verification 责任不变。协议归 HTTP 契约 §10.69 与数据库设计 §77，实际验证归统一功能验收表。本节保留前序切片，基础自然语言补录由上节接续；消息/Task UI 双入口继续留给后续重构，正式收益试验未运行。
+
+## 基础验收材料与试用记录接续（2026-10-14，前序切片）
+
+按用户继续开发文档模块的授权，当前 Agent 单独接第 1 批基础数据功能：文本/Markdown 沿原 Knowledge 导入，按 Task、验收修订、条件与确切被测版本关联，查询缺项、材料可用性与版本匹配，撤销保留历史；新增原流程/证据视图试用、开始/暂停/继续/结束和人工准备/总耗时补录，原流程可独立记录，纠正保留来源历史。前端只加 API 客户端、DTO 与解析，不改 UI。
+
+材料和试用应用入口各自拥有新增记录，Task/Run/正式 Verification/Review/Completion 沿原 Owner；0074/0075 为纯追加迁移，无新依赖，不升级用户运行库。协议及实际验证归各自事实源，不把基础正常流程扩成压力测试或整体交付。本节保留前序切片范围，冻结基线与基础对比已由上节接续；自然语言补录、消息/Task UI 双入口和后两批能力仍未接入，收益试验尚未进行。
+
+## 基础前后端功能接续（2026-10-14）
+
+用户收敛范围为最基础的前后端功能，前端 UI 后续由用户重构，本轮不做布局、样式或页面重构，不扩展极端场景和压力测试。当前 Agent 单独修正执行客户端：`applications` 的成功响应是命令回执，Task/Run 等阶段字段须从 `result` 读取，不能从顶层读取而把已成功委托解析成失败。复用已有后端接口与业务 Owner，无新 API、migration 或依赖。
+
+补齐普通会话的基础正常组合检查：HTTP 消息与解释请求 → Task/Run → 生产 Worker/LangGraph 真实读取 → 成果内容 API → 人工验收 → 完成记录。使用独立 PG 与本地 Fake，结果和限制只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「基础前后端执行组合」行；不据此升级真实 Provider、Windows 或安装出口。后续仍按基础功能缺口推进，UI 重构不在当前范围；模型切换、压缩、定制和完整恢复继续后置。
+
+## 基础执行请求接续（2026-10-13）
+
+用户继续授权基础功能开发，当前 Agent 单独补齐原请求接续：任务已建立但执行准备失败时，会话读回真实阶段并保留继续入口；原委托已经提交而请求阶段保存失败时，按原命令回执核对并关联原 Run。沿用现有 Task/Run、权限与维护准入，无新接口字段、migration 或依赖，不扩展压力测试。
+
+数据库反例与页面反例已先复现后修正，实际结果及窗口限制只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「基础执行请求接续」行。本轮电脑插件只观察已有开发窗口，未停止或修改该实例，不把项目页观察算作新接续链验收。后续继续普通用户会话到执行/成果回执的基础组合；模型切换、压缩、定制与完整恢复仍后置。
+
+## 基础执行结果展示补齐（2026-10-13）
+
+用户继续授权后续基础开发；当前 Agent 单独修正普通 Agent 结果展示，不扩展模型切换、压缩或压力测试。工具回执 `outcome: FAILED` 即使没有 `reason`，聊天摘要和逐步轨迹也明确显示失败；失败写入不计作完成写入，缺失结果显示「结果未提供」，已有结果时仍展示在途调用。读取/检索与写入按调用次数呈现，避免把目录浏览算成文件数、把一批变更算成文件处数。只消费原回执，不改权限、运行账本或完成条件。
+
+新增正常失败→修正→复检、在途与缺失结果反例先复现，随后定向组件与构建通过；具体成绩只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「基础执行结果展示」行。此次没有更新测试目录包中的摘要，因此当前源码组件证据不冒充该包的 Windows 运行结果。
+
+电脑插件本轮已能激活、导航、输入并操作原自有 Relay 窗口，补验已有命令菜单展开和方法选择只插入草稿；PG核对零消息/Run/模型调用/完成记录。未复制模型密钥、未调用真实 Provider。原完整文件执行/用户会话组合仍未验；自有草稿与窗口、独立 PG 已收尾，原 Session 记录只作历史，不再代表可用环境。后续优先补普通用户会话到执行/成果回执的基础组合路径；完整模型切换/压缩/定制/恢复继续后置。
+
+## 电脑插件窗口验收：等待桌面输入恢复（2026-10-13，原准备轮）
+
+接续状态：本轮已恢复有限窗口操作并收尾原自有环境，实际结果见上节和统一验收表；以下保留最初准备与输入阻塞时点，不能再按原 Session 记录宣称环境仍在等待或复用其已删除的 PG。
+
+用户明确要求 `computer-use` 验收。本轮已从当前源码重建 `test-release` 并启动独立 PG/Graph 与真实 Relay/WebView2 窗口；准备合成工作目录及原领域入口的受控读写连接，没有改用户原配置/运行数据库。插件成功读到当前窗口的工作台/项目导航和连接状态，但激活原窗口、重新选择窗口后的唯一重试均返回 `GetCursorPos failed: 拒绝访问 (0x80070005)`，因此没有执行点击或输入，也没有取得常规会话/文件执行的 Windows 通过证据。具体结果、包身份与限制只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「电脑插件常规 Agent 窗口验收」行。
+
+已请用户解锁并返回普通桌面（若原本未锁定则说明状态）；还在等待是否允许把现有模型配置临时复制到自有验收 `desktop.env` 的明确回复，未写入模型密钥。当前窗口使用本地 Fake，未发模型请求。自有验收窗口/PG 暂留以便桌面恢复后接续，不能在输入访问失败时宣称窗口已正常关闭；会话由本机 `output/acceptance-raw/computer-agent-20261013/session-ref.json` 指向，后续只按该记录操作与收尾。下一步先重新观察窗口，再进行菜单/普通会话、有限读写及成果回执的真实操作，不用 API 或浏览器夹具替代窗口动作。
+
+## 常规 Agent 主链复跑与顺序修正（2026-10-13）
+
+用户要求常规 Agent 能力没跑通就继续。本轮当前 Agent 单独复跑普通读写、已配置检查及失败修正，先取得基础真实 PG/文件证据，再使用既有 `openai-compatible / agnes-3.0-flash` 配置在自有隔离目录和数据库做生产 Worker/LangGraph 的真实模型修复探针，每个 Run 调用上限限定为 16，不改用户配置或运行数据库。
+
+首轮真实模型完成修复却未满足“先检查再读取”的原任务顺序，定位为 DRAFT 固定“先查找与读取”覆盖冻结目标。最小修改工具模板遵守冻结顺序，要求检查优先时先取实际输出、下一轮再据证据读取/修复；读写权限、UNKNOWN、原动作身份和人工完成门保持原链。两条工具模板版本更新为 `1.0.1`；补提示词定向反例，保留真实模型原行为断言。随后发现真实模型探针的检查清单预期未跟上现有 `trust_basis` 协议，改为委托前实测并校验完整入口/脚本摘要，没有删失败断言。
+
+修正后真实模型、检查失败修正与候选保存/重放已跑通；精确成绩、初轮失败和限制只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「常规 Agent 主链与检查顺序」行。当前源码已取得所列常规后端能力证据，仍需真实用户会话解释、产品配置与 Windows 窗口组合验证；不把合成目录的单次模型成功当整体交付或稳定性。模型切换、压缩、定制与完整文件恢复仍后置，不继续扩展压力测试。自有 PG/合成目录全部收尾，未停止用户实例、未 commit/push、未派子代理。
+
+## 基础聊天命令菜单接续（2026-10-13）
+
+用户继续授权基础开发。本轮由当前 Agent 单独补首条与已有会话的 `/` 菜单：按需读取既有后端登记，支持中英文检索、用途/默认范围与接入状态、键盘和鼠标插入、退出保留草稿、清单失败重试；选择只编辑原草稿，发送仍沿原会话/方法入口。普通档显示登记方法，学习/人设档保持原只读身份；模型切换、压缩、定制与完整文件恢复未扩展，无 API/数据库或依赖变更。
+
+浏览器发现内联菜单会把窄窗口输入器挤出视野，已改为上方浮层并保留失败几何断言；相关断点布局测试改为等待真实输入草稿恢复后量几何，未降低断言。结果与当前保留失败只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「基础聊天命令菜单」行。`computer-use` 在自有 Chrome 夹具窗口连续返回身份校验错误，未取得插件操作或 Relay/WebView2 菜单验收；自动浏览器/组词模拟不计真实 Windows/IME 或 Provider 通过。
+
+后续仍优先基础 Agent 使用缺口及本片真实窗口补验；`/model`、`/compact`、自动压缩、定制 Skill 与完整消息文件恢复后置。未改用户 `.env` 或运行数据库、未停止用户实例、未 commit/push、未派子代理；自有测试窗口与服务已收尾。以下小节保留各轮时点，其中菜单未实施的表述已由本节接续。
+
+## 基础会话入口：Windows 验收与显示修复（2026-10-13）
+
+用户继续授权基础开发，并指出验收使用电脑插件；当前 Agent 单独使用 `computer-use` 的 `@oai/sky` 操作真实 Relay/WebView2 窗口。先从当前源码生成测试目录包，在独立 PG/Graph 环境验证首条普通消息、`/clear` 和原历史读回；随后修正真实窗口发现的两个基础显示问题：同名会话选项增加设备时区下的更新时间和「当前」标记，近期工作按协作页发布的确切会话 ID 读回该行，保留已加载任务分页，不维护第二套业务状态。
+
+最终两处修复通过当前源码的开发 Windows 窗口复核，另验证普通/学习档 `/new`、学习首条消息/记录面板/后续记录关闭，以及 `/undo` 的具体回执指引。所有模型均为本地 Fake，真实 Provider 与完整状态撤回、安装总出口不据此通过；修复前目录包与最终开发窗口分别限定证据，未重新打含最后两处显示修复的发布包。实际结果与限制归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「基础会话入口 Windows 验收与修复」行。
+
+自有验收窗口、开发 Vite 和独立 PG 已收尾，测试集群删除；未改用户 `.env` 或数据库、不 commit/push、不派子代理、不扩展压力测试。后续仍优先基础 Agent 使用缺口；`/model`、`/compact`、定制 Skill、自动压缩与完整消息文件恢复继续后置。下节“真实 Windows 尚未验证”是该输入实施轮时点，本节只补所列实际窗口路径。
+
+## 基础聊天命令输入接续（2026-10-13）
+
+用户要求继续开发并明确不再开子 Agent。本轮由当前 Agent 独自接已有基础控制：已有会话输入 `/clear`、`/new`（含既有中文别名）通过原 chat-commands 端点创建空会话，核对原回执与新会话身份/绑定后切换，原历史保留；响应丢失或详情暂不可读时保留原命令 ID，可查回执或原载荷重试。未发资料、补充输入、学习记录草稿与在途状态调整先处理后再新建，尚无会话时系统命令只说明使用条件，不创建再清空，也不发模型消息。
+
+`/undo` 明确引导用户在具体消息下点击「撤回本次调整」，沿已有目标、范围确认、原撤回身份与补偿 Owner；不猜历史目标。`/model`、`/compact` 明确提示尚未接通。基础正常流程检查结果归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「基础聊天命令输入」行；这轮无 API/数据库变更、不新增压力测试，也未升级用户运行数据库或调用真实 Provider。以下后端轮中“前端命令未接线”仅表示该轮时点；输入接续已由本节覆盖，命令菜单与真实 Windows 操作仍后置。
+
+## 基础 Agent 后端接续（2026-10-13）
+
+用户要求继续基础 Agent 后端，只需功能链路能通、不做严格或压力测试，并明确要求多开子 Agent。主 Agent 负责方法到执行主链，两个实际派发的 `gpt-6.1-sol` 分别负责基础会话控制与模型工具续轮，按整文件所有权协作；主 Agent 统一检查接缝、构建与有限真实 PG/HTTP/文件流程。未启动新 UI、模型切换、压缩、定制 Skill、压力/收益实验，也未 commit/push、改用户 `.env`、停止用户实例或调用真实 Provider。
+
+**本轮实现**：① `/diagnose 修好…`、`/docs 更新文档…` 的明确修改行动从解析/消息冻结一致进入原执行候选，再随 Run 契约保留方法快照、参数与原消息来源，复用 Task/READY/Delegate、读/改/检查、候选保存和原人工判断入口；只读方法不因模型输出获得写能力，学习/人设助手不能直接进入普通执行。② `POST /assist-sessions/{id}/chat-commands` 接通 `/clear`、`/new` 与使用原 `undo_command_id` 的 `/undo`，保留身份/绑定/历史及原回执；前端命令输入尚未接线。③ 工具续轮保留实际 assistant 正文与可选 `reasoning_content`，通过 migration `0073_model_tool_turn_assistant_message.sql` 随 Run 工具账本持久；旧 NULL 不补造历史，SDK 局部回填不改变原计量或权限。
+
+**接续边界**：当前已收敛到上述基础后端，实际结果只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「基础 Agent 后端三个模块」行。新增工具协议运行前需将数据库升级到 0073；本轮只迁移了自有隔离测试库，没有更新用户运行实例。真实 Provider/Windows 与完整前端命令操作仍未验，`/model`、`/compact` 和 `SKILL.md` 定制继续后置。以下日期段是原时点状态，其中“方法写链未接通/系统命令只解析”不再是本轮基础实现状态。
+
+## 学习模式工作包 C：基础功能（2026-10-13）
+
+用户选择继续工作包 C，随后明确「只需要最基础功能，不需要各种压力测试」。本轮由当前 Agent 单独完成学习档切换、自由学习首条消息、记录查看/接续、UI 纠正/单项删除/全清、消息级与会话级记录开关，以及明确转入普通执行会话。复用现有 Assist、命令回执、目录和草稿 Owner；只同步相关文档，不自动提交或调用真实 Provider。
+
+后端补 `GET /learning-sessions/{id}/state`，读取持久记录控制与最近 200 个轮次的最小状态；明确 UI 纠正可省略 `source_message_id`，模型增量仍严格校验本轮依据。首次记录控制 CAS 的缺行版本 0 已补原子插入，不扩大权限、不新增 migration。前端学习身份不触发执行/状态维护解释，不提供 Skill/提案；转执行新建 AGENT 会话，带学习目标、可编辑的最近回答与当前可用来源，后续沿原执行、权限与验收链。
+
+**当前接续**：基础功能实现及所列定向检查已收口，结果与限制只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「学习模式工作包 C 基础功能」行。本轮不扩展压力/负载测试、成本实验或工作包 D。真实浏览器与前后端组合、Windows/IME/DPI、真实 Provider 与效果仍未验；学习对话中的自然语言执行请求尚不自动跨会话转发，当前使用明确「转入执行」入口。以下日期小节保留当时状态；其中 C 未实施的表述不作为当前缺口。
+
+## 后端验收整改与回归收口（2026-10-12）
+
+按[后端修复与回归收口任务书](prompts/remediation/backend-acceptance-remediation-20261011.md)执行：逐项复现并修复 2026-10-11 后端独立验收的 **R1–R8** 八个真实反例，把有效独立反例转为正式测试，修正迁移/CLI 数量断言与 f24 并发测试时序，再跑真实 PG/HTTP 定向与全量回归。具体成绩、环境阻塞与未覆盖项只归[功能验收表本轮行](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)。未修改 `.env`、未停用户实例、未 reset/stash/clean、未 commit/push、未调用真实 Provider、未实施新 UI。
+
+**8 个反例全部闭合（实现 + 正式回归，红→绿）**：
+
+| 反例 | 根因 | 最小修改 |
+|---|---|---|
+| R1 显式 Skill 与自然语言方法双写导致 HTTP500 | `requestAssistMessage` 对含 `skill_ref` 的消息仍跑自然语言方法识别，同条消息写 `skill_snapshot` + `method_snapshot`，撞 `0071` 的 `ck_assist_message_method_exclusive` | `assist-commands.ts`：显式 `skill_ref` 走 `resolveMethodFreeRequest`（保留 `/命令` 输入校验，不绑定方法身份）；无显式 Skill 的原路径不变 |
+| R2 失权 Worker 的迟到结算仍写学习证据 | 结算只看轮次状态，不核对领取身份 | `applySettlement` 在同一事务内核对消息仍 `RUNNING` 且 `worker_id` 匹配；失权 → `REJECTED/LEASE_LOST`、零新增、消息 `DISCARDED` |
+| R3 持久取消被迟到 CONTENT 绕过 | 结算不读 `cancel_requested`，正文结算无条件标 `COMPLETED` | 同一事务内核对取消意图；取消先提交 → `CANCELLED`/零新增；增量先提交 → 既有事实不倒删 |
+| R4 最近 20 条之外的删除被旧轮复活 | 轮次只冻结「最近 20 条证据涉及」的知识点，其余被解释成无限制写入 | 冻结**全部**既有知识点，并加身份分区 `$identities`（`slug → generation`）识别「删除后同名重建」 |
+| R5 已解除 GAP 仍进未决项 | 两个读取入口按 `kind === 'GAP'` 判定 | 统一按 `disposition === 'PENDING_REVIEW'`；`SUPERSEDED`/`WITHDRAWN` 保留为历史 |
+| R6 清除扫描与 epoch 推进之间的并发结算 | 清除与结算没有一致序列，旧 epoch 证据残留 | 两处取同一 workspace 级 `pg_advisory_xact_lock`，统一「先锁再碰轮次行」顺序 |
+| R7 generation 校验后的人工纠正被旧轮越过 | 校验与写入不在同一临界区 | `insertEvidence` 的 `expectedGeneration` + `for update` 重读，把校验与写入放进同一临界区 |
+| R8 无可信依据仍写「实际表现」 | 保存前不校验依据，模型可自称依据 | 应用按候选性质绑定 `source_message_id`，结算校验存在/属于本轮/性质匹配/本轮有真实输入；缺依据 422 `LEARNING_EVIDENCE_REF_INVALID` 且零新增 |
+
+**独立复验（不只看测试汇总）**：修复后由当前 Agent 在一次性 PG18.6 集群上新建独占库，独立操作 4 个关键反例并直接读 PG/HTTP 事实（`output/_independent-remediation.json`）：R1 显式 Skill 消息 HTTP **202**、DB 中助手行 `skill_snapshot` 非空且方法三列全空；R2 失权 Worker → `DISCARDED`、消息 `FAILED/LEASE_LOST`、轮次 `REJECTED/LEASE_LOST`、证据 **0** 行；R3 持久取消 → `cancel_requested=true`、消息与轮次 `CANCELLED`、证据 **0** 行；R8 跳过轮次的无依据 OBSERVE → `LEARNING_EVIDENCE_REF_INVALID`、知识点与证据均 **0** 行。探针库已 DROP，未连接用户数据库。
+
+**测试与隔离环境修正**：`migration`/`cli` 集成断言同步到真实清单 **72**（0070 之后追加 0071/0072，`ledger_rows` 72），保留完整迁移名、hash、重复执行零新增、旧 schema 升级与 0071/0072 实质断言；`f24-proposal-idempotency` 用既有 `holdReceiptInsert` 屏障保证有效请求先持候选锁并提交，异载荷再核对原 receipt 报 409 `COMMAND_ID_REUSED`（未给未成功提交的 command 加身份预占协议）；`learning-late-settlement` 用可控模型屏障 + `pg_stat_activity` 锁等待固定提交顺序。
+
+**文档同步**：[HTTP 契约 §10.65/§10.66](docs/api/http-command-contract.md)（身份优先级、依据绑定、领取身份与取消、基线冻结范围、清除边界、纠正临界区、已解除缺口；Breaking Change：No）、[物理设计 §73](docs/database/physical-design-postgresql.md)（冻结基线形状与 advisory 锁，无新迁移）、[ADR-020](docs/decisions/ADR-020-learning-mode-record-protocol.md)（R1–R8 实现落点与已核定语义边界）、[测试计划 §25](docs/testing/verification-plan.md#25-学习模式验收规格)（反例转正式回归映射）。`node scripts/check-docs.mjs` exit0。
+
+**环境阻塞（与本轮改动无关，不计入产品缺陷）**：本机原生 `relay-file-io-helper.exe` 的受管内容写入路径返回 `DELETE_FAILED`（直接探测：`ManagedContentStore.publish` → `StorageUnavailableError`；helper 协议层 `WindowsContentError: DELETE_FAILED`），落在 `content-freeze`/`managed-content-store`/`file-write-frozen-diff`/`git-adapter` 单元与全部落盘集成用例上。这与工作记忆 2026-10-07 记录的同一族阻塞一致；helper 二进制与产品源码未变。**备份/恢复维护门**：2026-10-11 验收时阻塞于非自有桌面实例（PID34280），该实例现已退出，本轮按自有隔离环境复跑，结论见验收表。
+
+**未闭合与推荐下一步**：① 环境阻塞需用户决定——给仓库/临时目录加安全软件排除项后复跑，或换干净机器复跑；② 学习模式工作包 C（协作页学习档单选框、记录查看/纠正/删除/清空组件、明确转执行）与 D（真实 Windows 窗口、授权 Provider、成本阈值冻结、LM-16 效果）仍未实施，本轮不自动启动；③ 内置方法后续阶段（`MODIFY` 写执行链、`SKILL.md` 定制、系统命令接线、会话级模型选择与压缩）仍未实施。并行会话在同一工作区活跃，后续读写共享文件前须重新核对最新基准。
+
+## 后端独立验收与整改入口（2026-10-11）
+
+本轮当前源码后端整体**未通过**。已完成源码基准核对、全量单元、全量真实 PG/HTTP、独立业务反例及只读复核；具体成绩、环境阻塞与未覆盖项只归[功能验收表本轮行](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)。未修改产品源码或正式测试，未停用户桌面实例。
+
+**推荐下一步**：先修显式 Skill 与自然语言方法的唯一身份，再修学习轮次的失权/取消、删除与纠正 generation、清除 epoch、本轮可信依据和已解除 GAP 的读取边界；随后修正迁移数量断言与 f24 并发测试顺序，补不占用用户实例的备份恢复验收。用户本次要求交付提示词，[后端修复与回归收口任务书](prompts/remediation/backend-acceptance-remediation-20261011.md)已写成、**尚未执行**；不自动进入方法后续阶段、学习前端、真实 Provider 或 Windows/安装开发。
+
+下方各专项小节保留其实施时点。尤其“学习模式：协议冻结与工作包 A”中的 B 未实施与 fail-closed 描述属于当时快照：本轮源码已有 learning-round/Context/调用计量接线，正式 learning-round 集成通过，但独立迟到写入与版本反例失败，**不能继续把 A 时点描述当当前实现，也不能把 B 已出现当完成验收**。当前缺口与执行范围以上述验收表、整改任务书及实时源码为准。
+
+## 运行时提示词路由统一入口（2026-10-11）
+
+用户下发[并行实施任务书](prompts/runtime-prompt-routing.md)后，由主 Agent 冻结接口、接线并独立复验，**实际并行派发子代理**完成模板提取：首波 A（会话模板）/B（Run 与验证模板）中，任务书指定模型 `gpt-6.1-sol` 在当前账号不可用（派发被工具拒绝，如实报告而非静默换模型），A 重派后与 C（两类解释模板）、一个只读审查员**三路同时运行**，文件所有权互不重叠；未自动 commit/push、未 reset/stash/clean、未停用户桌面实例、未调用真实 Provider、未实施其他专项。
+
+**已实现**：`apps/api/src/workflow/prompts/` 下 ① `route-types.ts`——封闭路由输入联合、16 条路由登记表（routeId / 模板版本 / 核心版本 / 模板位置）、`SYSTEM` 与 `USER_PROBE` 判别联合返回；② `index.ts`——唯一入口 `selectRuntimePrompt()` / `selectRuntimeSystemPrompt()`，switch + `never` 穷尽守卫，未知路由抛 `UnknownRuntimePromptRouteError`；③ `conversation-prompts.ts`（Assist 五意图、第一方 Skill、内置方法、只读助手、学习搭档）、`interpretation-prompts.ts`（执行解释、状态维护解释）、`run-prompts.ts`（DRAFT 三分支、语义验收、连接验证探针）——正文单一来源，各自只组合一次公共核心。七处原调用（`assist-runner`、`assistant-readonly-round`、`learning-round`、`conversation-execution`、`conversation-state`、`openai-compatible-model-port`、`model-port-verify`）改为经统一入口取模板；`assistantSystemPrompt`/`learningSystemPrompt`/`INTERPRETATION_SYSTEM_PROMPT`/`STATE_MAINTENANCE_SYSTEM_PROMPT`/`VERIFY_PROMPT` 保留为单一来源的兼容再导出，无第二份正文。`conversation-execution.ts` 与 `openai-compatible-model-port.ts` 保持原 CRLF 行尾。
+
+**实际运行（最终源码）**：`tsc --noEmit -p tsconfig.json`/`tsc -p` 均 exit0；接线后经统一入口对改动前捕获的 32 个基线键逐字节复比对 **45/45 通过**（含 16 条路由元数据、核心恰好一次、未知路由拒绝）；定向 16 个受影响单元套件 **131/131 exit0**；**后端全量单元 541：526 通过 / 14 失败 / 1 跳过**——14 条全部落在 `backup-package`(4)、`content-freeze`(5)、`managed-content-store`(3)、`restore-isolation`(2) 的本机原生 helper / 备份恢复族环境阻塞，无一涉及 prompts / assist / conversation-state / learning。**真实 PG/HTTP**（一次性 PG18.6、逐套件独占库、build/migration/graph/start/stop 均 exit0、临时集群已删）：第一批 12 套件 **11 套件全绿**，第二批 7 套件 **6 套件全绿**。`node scripts/check-docs.mjs` **exit0**；`npm run feature-map:check` 通过。
+
+**有意行为变化**：未知 `AssistIntent` 由旧实现的「落入任务提案默认分支」改为显式抛错（任务书 §5.4）；五种合法意图文本与协议不变。**Breaking Change：No**——无 API、数据库、migration 或新依赖；调用账本仍未记录组合版本，历史缺项保持未知，不宣称提示词审计已完成。
+
+**未闭合（下一步）**：① **被并行工作包缺陷阻塞**：`assist.integration.test` 8 例与 `f24-proposal-idempotency.integration.test` 3 例失败，根因不在本轮——失败在 `assist-commands.requestAssistMessage` → `insertMessage` 的 INSERT 上，报迁移 `0071` 的 `ck_assist_message_method_exclusive`：含 `skillRef` 的消息因自然语言方法识别同时写入 `skill_snapshot` 与 `method_snapshot`。调用栈位于提示词代码执行之前，属「内置方法与会话检查点」工作包的自然语言绑定未考虑已绑定 Skill 的场景；需其 Owner 修正后补 `SKILL`/`METHOD` 两条路由的真实 PG 证据。② 组合版本入调用账本、解释接入统一调用记录仍未做（见[提示词设计 §7](docs/architecture/agent-prompt-design.md#7-与当前源码的差距)）。③ 未调用真实 Provider、未跑真实 Windows 与安装。④ 14 条全量单元失败为本机环境阻塞，未停非自有桌面实例、未放宽维护门。并行会话在同一工作区活跃（`0072`/`src/learning/`、`0071` 方法工作包），后续读写共享文件前须重新核对最新基准。
+
+## 学习模式：协议冻结与工作包 A（2026-10-11）
+
+用户下发[完整实施与验收提示词](prompts/learning-mode.md)并选择「开始实施，先冻结协议」后，由当前 Agent 单独执行：**未派子代理**（指定 `gpt-6.1-sol` 在当前账号不可用，按提示词要求报告限制而非静默降级）、未创建其他聊天、未自动 commit/push、未 reset/stash/clean、未停用户桌面实例、未调用真实 Provider。实际成绩只归[功能验收表本轮行](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)，本节只记范围、边界与下一步。
+
+**协议冻结**：[ADR-020](docs/decisions/ADR-020-learning-mode-record-protocol.md) 落定独立 `LEARNING` 会话身份、五张记录表与唯一写入 Owner、同轮有限增量信封、**调用模型前冻结的结算基线**、清除代次与迟到结果、命令幂等与回执形状、Context 选择规则、逐次调用计量、转执行不升权；[领域模型 §13.4](docs/architecture/domain-model.md#134-工程协议2026-10-11-冻结未实施)、[后续路线 §8](docs/requirements/post-v1-roadmap.md#8-学习模式的范围与实施前置)、[文档入口](docs/README.md) 已接续。
+
+**工作包 A 已实现**：迁移 `0072`（重建 `ck_assist_session_mode` 为三分支、`assist_messages.learning_record_disabled`、五张学习表）；`learning/learning-repository.ts` ＋ `application/learning-records.ts` ＋ `api/learning-api.ts`（六端点），注册进 `Repositories`；`assist-commands` 增加学习身份准入与 `record_learning` 开关；`conversation-state` 改为只放行 `AGENT`；`assist-runner` 对学习身份 **fail closed**。
+
+**实际运行（最终源码）**：API `tsc --noEmit` exit0；workbench `tsc --noEmit` exit0；**真实 PG 定向集成 `learning-records` 7/7 PASSED、exit0**（首轮 6/7，红在「清除后迟到轮次报 `UNAVAILABLE` 而非 `STALE`」，据此把 `learning_rounds` 改为保留为最小控制元数据并把代次校验提到状态校验之前，复跑转绿）。**回归**：后端全量单元 508 条 **493 通过 / 14 失败 / 1 跳过**——14 条全部落在 `backup-package`(4)、`content-freeze`(5)、`managed-content-store`(3)、`file-write-frozen-diff`(1)、`restore-isolation`(1)，即本机原生 helper / 备份恢复族的环境阻塞，**无一涉及 assist / conversation-state / learning**；前端受会话枚举与 parser 影响的 5 个定向规格 **68/68**。`scripts/check-docs.mjs` **exit0**。原始输出 `output/learning-int.txt`（首轮）、`output/learning-int2.txt`、`output/learning-int3.txt`（复跑 7/7）。
+
+**文档**：[ADR-020](docs/decisions/ADR-020-learning-mode-record-protocol.md)、[物理设计 §73](docs/database/physical-design-postgresql.md)、[HTTP 契约 §10.66](docs/api/http-command-contract.md)、[领域模型 §13.4](docs/architecture/domain-model.md)、[后续路线 §8](docs/requirements/post-v1-roadmap.md)、[文档入口](docs/README.md)、[功能验收表本轮行](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)。Breaking Change：No。
+
+**未闭合（下一步，按工作包顺序）**：① **B——教学轮次**：模型端口的同轮有限增量信封（含 Fake 与真实 Provider 兼容）、学习专用 Context 装配与短路线/可选检查/接续、**每次调用与重试进 `recordModelInvocation`**（明确不照抄助手只读轮次的计量缺口）、受控故障注入；② **C——产品入口**：协作页学习档单选框（parser 已能识别 `LEARNING`）、状态变化与记录查看/纠正/删除/清空组件、明确转执行；③ **D——独立复验**：真实 Windows 窗口、授权 Provider、成本阈值冻结与 LM-16 学习效果评价协议；④ 学习身份目前发送消息会以 `LEARNING_ROUND_NOT_AVAILABLE` 失败，这是**有意的 fail-closed 安全边界**，不是可用功能——B 落地前不得对外宣称学习模式可用。并行会话在同一工作区活跃，后续读写共享文档前须重新核对最新基准。
+
+## 内置工作方法与聊天命令：首批后端切片（2026-10-11）
+
+用户下发[内置方法与会话检查点实施提示词](prompts/builtin-methods-and-conversation-checkpoints.md)后，由当前 Agent 单独执行**阶段 A（缺口与协议冻结）与阶段 B 的后端核心**：未派子代理、未创建其他聊天、不自动 commit/push、未 reset/stash/clean、未停用户桌面实例、未触碰并行会话在途文件（学习模式 `0072` 与 `src/learning/`）。**阶段 C–F（DeepSeek 协议/压缩、消息文件恢复、前端接线）未进入**；本轮不宣称该专项完成。
+
+**已实现（后端）**：① `apps/api/src/skills/builtin-methods.ts` —— 三条内置方法（`code-review`/`fault-diagnosis`/`docs-maintenance`，各 `@1.0.0`）固定英文命令名、中文别名、默认作用范围、默认行动、能力需求与验证说明；定义 + `sha256` 冻结，`inspectFrozenMethodSnapshot` 校验形状/摘要自洽/未知字段。② `apps/api/src/application/chat-commands.ts` —— 方法与五条系统命令（`/clear`、`/new`、`/model`、`/undo`、`/compact`）共用登记表，英文与中文别名同义；只认行首 `/名称`，代码块与 `/usr/bin/env` 类路径不触发，未知命令/非法参数类型化拒绝；解析是纯函数（不写存储、不调模型、不执行动作）。③ `apps/api/src/application/method-intent.ts` —— 确定性自然语言识别，区分「讨论/审查/诊断/修复/文档维护」与「当前/全项目」；「讨论」优先于「修好」。④ 迁移 `0071` 给 `assist_messages` 加 `method_snapshot`/`method_action`/`method_argument`（三列齐备或全空、与 `skill_snapshot` 互斥），发送时冻结方法身份；只读方法轮复用原 Assist 生成链与既有系统边界，不新建 SkillRun；只读 `ASSISTANT` 会话请求 `MODIFY` 一律 409。⑤ 两条只读端点 `GET /chat-commands`、`POST /chat-commands/resolve`（无 `command_id`、无回执、零副作用）。
+
+**工程取舍（已记录）**：方法**不放进**第一方 Skill 注册表——那张表被冻结、归档并参与备份包校验（`inspectBackupRegistryArchive` 逐字校验 4 个 id 与 `definition` 键集），塞入执行型方法会改归档契约。方法定义单独冻结，命令登记统一解析两张表。
+
+**实际运行（最终源码）**：API `tsc --noEmit` **exit 0**；单元 `builtin-methods.test.ts` **5/5**；定向复跑 `builtin-methods`+`first-party-skills`+`assistant-readonly-round` **17/17**；**后端全量单元 508：497 通过 / 10 失败 / 1 跳过**——10 例全部是既有 Windows file-io/AV 环境阻塞族（native freeze、content-freeze、managed-content、restore/desktop-api isolation），与本轮改动无关、未修改。**真实 PG/HTTP 集成 `chat-commands` 4/4 PASSED、exit 0**（首轮 3/4：断言把校验失败写成 400，实际是 **422**，改正后复跑通过）。`node scripts/check-docs.mjs` **exit 1**——2 个错误全部来自并行会话的项目页重设计文件（`design-system.md:490` 与 `superpowers/specs/2026-10-11-projects-page-redesign-design.md` 的外部越界链接），本轮新增链接零错误。
+
+**文档**：[HTTP 契约 §10.65](docs/api/http-command-contract.md)、[物理设计 §72](docs/database/physical-design-postgresql.md)（迁移 `0071`）、[Skill 专题 §9.5](docs/architecture/relay-skills.md#95-实施状态2026-10-11首批后端切片)、[测试计划 §26.1 覆盖映射](docs/testing/verification-plan.md#261-首批后端切片覆盖映射2026-10-11)。Breaking Change：No。
+
+**未闭合（下一步，按阶段顺序）**：① 阶段 B 剩余——方法到**写**执行链的绑定（`MODIFY` 目前只产生只读分析与方案，实际修改仍需既有会话执行入口）、`SKILL.md` 个人/项目定制与草稿/启用协议、系统命令的实际应用用例接线、前端输入位置菜单与 IME/草稿交互；② 阶段 C——模型协议完整回传（`renderToolTurns` 仍以空正文 `AIMessage` + tools 重建，未带 `reasoning_content` 与 assistant 前置正文）、会话级模型选择与 Run 模型冻结、三层上下文整理与检查点；③ 阶段 D/E——消息发送前可恢复文件基线与撤回按钮、安全停写与 Task 重开；④ 阶段 F——前端真实接线；⑤ 真实 DeepSeek 与真实 Windows 未验。
+
+**并行工作区提醒**：同一工作区另有会话在途（学习模式 `0072`、`src/learning/`、`assist-api.ts` 的 `record_learning`）。后续读写前须重新核对共享文件；本轮未覆盖其改动。
+
+## 协作页 UI 结构重塑（2026-10-10，与 NLS 整改并行）
+
+用户下发「按已写入 superpower 文档的 /agent 页 UI 改造方案实施」后，由当前 Agent 单独完成实施、测试、真实 Chromium 核对与文档同步：**未派子代理、未创建其他聊天、不自动 commit/push、未 reset/stash/clean、未停用户桌面 PID34280**。实际成绩只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)，交互规则归[工作台 §28](docs/frontend/workbench-design.md#28-协作页结构重塑2026-10-10)，外观规则归[设计系统 §6](docs/frontend/design-system.md#协作页结构原语2026-10-10)。
+
+**范围**：只动 `/agent` 的工作区级会话态（`task === null`）与承载它的左栏；不动风格基调、标题带、左导航栏与有任务态布局；token 零新增。设计依据是并行会话已提交的 [spec](docs/superpowers/specs/2026-10-10-collab-page-ui-optimization-design.md)。
+
+**实现**：① 左栏 `RecentWorkRail` —— 「＋ 新对话」升为置顶主按钮；行高 `control.height.comfort` 的密列表（主名 `body`/medium 单行省略 + 副行 `meta`）；组标题带计数、折叠状态写本地偏好；工作区级会话与任务同列；当前项 `selection.bg` + 2px 主色左线；「查找更多任务 / 会话」就地展开（原 `CollaborationView` 内部的选择器抽成共享组件 `TargetPicker`）。② 主区删除两个顶部 `details` 大块，欢迎卡标题降为 `compactPage` 并内嵌编号引导卡。③ 文件夹作用域收成输入卡上方的常驻细条（新组件 `FolderScopeBar`，常态/未归属/未就绪三态，告警整条换 `status.warning`），`FolderScope` 控件整体迁入「更换目录」对话框。④ 输入区 chips 统一为 `radius.round` + `border.control` + `bg.surface`，「回到最新」改为胶囊悬浮键。
+
+**实测（最终源码）**：workbench `tsc --noEmit` exit0；**全量 vitest 100 文件 862/863、exit1**——唯一失败为 `run-events` SSE 时序（单跑复跑 **5/5**，与全量 PG 并行负载下的既有 flake 同类，本轮保留首轮结果）；`vite build` exit0；**全量 Chromium 94 通过 / 1 失败（`workbench.spec.ts` R02 既有 flake，见验收表前行记录）**；真实 Chromium 逐屏截图核对三态（空态 / READY 细条 / 有会话）结构与设计稿一致。
+
+**测试同步**：结构变化使 10 个组件 spec 与 4 个 Playwright 布局 spec 的既有选择器失效，逐处按新结构改写（目录入口改走「更换目录」框并注明 portal 查询原因、选择器改走左栏就地展开区、请求清单补上新增的会话读取、两例断言旧外观的用例改为断言新胶囊规格）；`recentWorkPagination` 新增「工作区级会话与任务同列」「分组折叠偏好持久化」两例。未删除任何失败检查。
+
+**降级取舍**：会话列表读不到时左栏按「任务列表照常 + 一行说明会话读不到」呈现，不把已读到的任务一起清掉，也不假装没有会话。
+
+**文档**：工作台新增 §28（含与设计稿的 5 处差异确认）；设计系统 §6 补 chips / 细条 / 欢迎卡 / 回到最新四条外观规则；`scripts/check-docs.mjs` 由 exit1（13 处断链）转为 **exit0**——顺带修正 spec 与验收表中的相对路径断链，不改语义。
+
+**未闭合（下一步）**：① 真实 Windows 窗口的中文 IME 组词与 DPI 100%/150% 输入卡版式未取证；② 全站推广未做（本轮只协作页）；③ 新建讨论后左栏需手动刷新才出现（与任务创建后的既有行为一致，未加自动刷新）；④ 会话读取失败只有说明、没有重试入口。
+
+## 自然语言状态维护复验整改与第五节切片（2026-10-10，当前结论）
+
+用户下发[复验后整改任务书](prompts/remediation/natural-language-state-maintenance-acceptance-20261010.md)后，由当前 Agent 单独完成实施、测试、真实浏览器复验与文档同步：**未派子代理、未创建其他聊天、不自动 commit/push、未 reset/stash/clean、未停用户桌面 PID34280**。实际成绩只归[功能验收表本轮行](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)，本节只记范围与边界。
+
+**六项反例红→绿**：R1 拒绝语义（`DECLINED` 终态 + 写事务内 `expected_revision` CAS + 回执先行）、R2 任务版本冻结（`baseline_ref.task_revision` + 链式期望版本）、R3 解释基线在**调用模型之前**冻结（`conversation_state_requests.interpretation_baseline`，缺基线 `STATE_BASELINE_MISSING` 保守拒绝）、R4 `after_ref` 记 Owner 返回新版本 + 补偿链 CAS + 同任务范围后缀校验、R5 决定回执先于状态前置（同命令重放 200 / 异载荷 `COMMAND_ID_REUSED` / 并发收敛原回执）、R6 展示签发记录逐项核对（`project_daily_view_presentations`，污染基线 `PROJECT_DAILY_VIEW_BASELINE_REPAIRED` 恢复）。红灯证据：R1/R2/R3/R4/R5/R6 各有失败日志（`output/acceptance-raw/nls-fix-r1-20261010/red*.log`）。
+
+**第五节剩余切片**：`SYNC_EXTERNAL_RESULT`（只读核对 + `CONVERSATION_EXTERNAL_CHECKED` 审计，不完成不接受）、`COMPLETE_TASK`（沿原完成 Owner，接受声明绑定原消息原文，冻结任务/验收版本）、`UNDO_STATE_CHANGE`（自然语言撤回，冻结同会话唯一已生效调整，复用 `withdrawals` 用例，0/多候选类型化失败）、`POST /projects/{id}/return-reviews`（返回轻量核对，事实指纹持久 `project_return_reviews`，复用同记录、变化重核，失权 404 零写入）——迁移 `0068`/`0069`/`0070` 追加，Breaking Change：No（新增 kind 与新端点）。前端：`DECLINED`/核对/完成/撤回回执明细行、决定命令身份按展示版本复用、接续卡轻量核对行、只读核对与撤回回执不再提供撤回入口。
+
+**实际运行（最终源码）**：API `tsc --noEmit`/`tsc -p` exit0；**定向 8 源码套件 110/110、exit0**（conversation-state 43、project-return-review 3、project-daily-continuation 12、check-trust-gate 25、拒绝收口 2、api-state 10、cli 5、migration 10，材料绑定与拒绝收口未退化）；**后端全量单元 503：502 通过/0 失败/1 跳过、exit0**（跳过仍为本机目录替换链接边界用例）。**真实浏览器组合验收 exit0：14/14 检查全过**（真实 Chromium + 一次性 PG18.6 + 真实 API/UI/Worker + 本机忽略目录的确定性解释适配）：返回轻量核对行、R1「不调整不执行」（回执 `DECLINED` + 服务端 `DISCOVERY`）、NL 状态自动生效、自然语言撤回回 `DISCOVERY`、计划调整后按钮撤回、外部成果核对不完成、明确完成 DONE、刷新回执持久、页面零未捕获异常；**数据库层事实**（`output/acceptance-raw/nls-browser-20261010/evidence/db-facts.txt`）：`SET_PHASE=DECLINED 1`、`SET_PHASE/SET_TASK_PLANNING=COMPENSATED 各1`、`SYNC/COMPLETE/UNDO_STATE_CHANGE=APPLIED 各1`、`可完成任务 DONE+t`、`计划任务 priority 为空（撤回恢复）`、四类审计与回执各 1、`project_return_reviews CHANGED 1`；截图 6 张同目录。**前端**：`tsc --noEmit` exit0、`vite build` exit0；定向 4 规格 99/99；全量首轮 **861：860 通过/1 失败**（`run-events` SSE 时序，与全量 PG 并行负载下的既有 flake，首轮保留），单跑复跑 **5/5**。首轮全量 PG（Slice B/C 前的 dist）**73 套件 843：810/19 失败/14 跳过**，19 = backup 7＋restore 8（`MAINTENANCE_SESSION_BUSY`，用户桌面互斥量，未停该实例）＋ cli 1＋migration 3（dist 旧迁移清单，重建后定向复跑已绿）；**最终源码全量 PG 终轮另行结算，结果只写验收表**。`scripts/check-docs.mjs` exit1——11 个错误全部来自并行会话已提交的 `docs/superpowers/specs/2026-10-10-collab-page-ui-optimization-design.md`（链接目标不存在），本任务触及的文档链接零错误、未修改他人文件。
+
+**文档**：[HTTP 契约 §10.63/§10.64](docs/api/http-command-contract.md)、[物理设计 §68–§71](docs/database/physical-design-postgresql.md)、[领域模型 §12.5](docs/architecture/domain-model.md)、[工作台 §18.9](docs/frontend/workbench-design.md)、[测试计划 §24 形式化落点](docs/testing/verification-plan.md#24-自然语言状态维护与自动接续验收规格)。
+
+**未闭合（下一步）**：① 真实 Windows 组合窗口、中文 IME/DPI、安装/升级/卸载未验；② 备份/恢复 15 条仍需不占用用户实例的环境补验；③ Slice B 的 run 侧验证会话错误分支（FAIL/ERROR 检查结果的对话内呈现）与「错误分支/未知目录」场景、Slice C 的执行型检查（FrozenCheck 外呼、目录资源与模型预算核算）仍按 §24 与任务书缺口清单标为未覆盖；④ 需求/计划与 Goal 内容写入口仍无领域 Owner；⑤ 真实 Provider 解释质量未验。并行会话在同一工作区活跃（今日提交 `f8c39d5`、在途 CSS/规格改动），后续读写前须重新核对共享文件。
+
+下节为独立复验原始结论（整改输入），再下节为复验前实施记录，均已由本节更新。
+
+## 自然语言状态维护整改独立复验（2026-10-10，整改输入）
+
+用户提供实施会话后，由当前 Agent 单独读取当前源码、编译并从真实 PG/HTTP 与 Chrome 浏览器插件复验，未派子代理、未修改产品源码或正式测试。**整体未通过，不能标记任务全部完成。** 前轮反例已落成正式回归，但新增既有任务与决定续答仍有独立失败；成绩、原始输出与限制只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)最新行，不继承实施者自述。
+
+下一步按[复验后整改提示词](prompts/remediation/natural-language-state-maintenance-acceptance-20261010.md)先修六项：① `DECLINE` 仍清空待决定并自动生效，浏览器点击「不调整」后阶段实际进入 RELEASE；② 任务计划候选未冻结 Task revision，覆盖确认后的人工修改；③ 模型在途的新 State 修改被结算时读取的最新 revision 吸收并覆盖；④ 任务计划 `after_ref` 保存生效前 revision，无后续修改也误报撤回冲突；⑤ 决定续答在幂等回执检查前校验当前状态，同原命令响应丢失重放 409；⑥ 查看确认只校验序号上限，未绑定实际签发的展示身份/事实，接受虚构版本后正常查看不能推进基线。恢复反例与现有材料绑定/拒绝收口保持通过，勿重写这些已验证路径。
+
+以上复验通过后，继续原任务书尚未完成的自然语言撤回、外部成果核对与返回轻量检查，再补真实 Windows 组合验收。需求/计划及 Goal 内容写入口的缺口继续明确列为未接入。浏览器本轮已使用真实 API/PG 与可控模型，不能提升为真实 Provider、产品认证、Windows IME/DPI 或安装验收。用户桌面仍为 PID34280（本轮核对启动时间 2026-10-08 22:43:31），未停止；备份/恢复占用出口仍待独立环境补验。
+
+下节为整改实施自检记录，当前下一步以上节为准。
+
+## 响应式收敛回写与 layout.header.height 语义澄清（2026-10-10，并行于 NLS 整改）
+
+用户说明另一 Agent 正在执行[自然语言状态维护任务](prompts/natural-language-state-maintenance.md)后，本会话继续开发其余部分并避开该任务范围。选取的收尾片与 NLS 文件零重叠：只改 `apps/workbench/src/**/*.css`、`docs/frontend/*` 与三个新增测试，未动 AssistView/CollaborationView/DailyContinuationCard/relayClient/labels、迁移与应用层，未提交、未停他人进程。
+
+**断点收敛已收口**：新增 `apps/workbench/tests/responsiveTiers.spec.ts` 把[设计系统 §9.6](docs/frontend/design-system.md#96-控件基座与响应式收敛2026-10-08)的档位规则变成守卫——宽度断点只允许四档语义值 48/64/80/90rem，禁 `.9375rem` 补丁、禁 min/max 双触发、禁旧式 `max-width` 写法。RED 列出 31 处遗留后逐处归并：Reviews 的 60rem 标题档与全局 `<64rem` 重复，**删除**而非换档；styles、ArtifactPanel、Run、TaskDetail、LiveTaskSkillFacts、TaskCheckPlanPreview 的 40rem 兜底档并入 `<48rem`；其余 `.9375rem` 与双触发改写为 range 语法，逐处注释。附带发现：TaskDetailView 的 40rem 规则写在非 grid 容器的 `dl` 上，历来无实际效果，已在其注释中固化，避免后人误判。
+
+**`layout.header.height` 语义已澄清**：该 token 自本节起专指 `.app-topbar` 实际高度，值由 3.5rem（更早布局遗留）更正为 **2.8125rem**（`control.height.comfort` + `border.width`）；桌面上方固定区总高 = 原生标题栏 `control.nav.height` + 该 token，`html.app-desktop` 滚动预留、通知浮层 max-height、ActivityView sticky 偏移都按这一口径统一。真实 Chromium 先实测 RED（token 56px vs 顶栏 44px）后 2/2 绿。
+
+**验证**：workbench `tsc --noEmit` exit0；全量 vitest 串行 **100 文件 861/861、exit 0**；全量 Chromium **94 通过 / 1 失败**（`workbench.spec.ts` R02 草稿守卫拦截浏览器返回，路径文件均为他人 10-08/10-09 在途修改，验收表早有「R02 偶发」记录，单独复跑仍失败，不计本轮）；新增两个浏览器用例 6/6 + 2/2，其中折行边界用例经反向验证（临时删规则转红、恢复转绿）。
+
+**文档**：[设计系统 §5 顶栏行与 §9.6](docs/frontend/design-system.md)、[工作台 §17.15](docs/frontend/workbench-design.md#1715-控件交互基线与响应式收敛2026-10-08)、`design-tokens.json`（值＋description＋updated）已同步；验收表新增本轮行并更新控件基座行剩余项。
+
+**遗留**：① `views/AssistView.css` 一处旧式 `max-width: 64rem` 属 NLS 在途文件，守卫已豁免其语法检查，待其 Owner 归一；② 真实 Windows 目视、IME/DPI、屏幕阅读器、安装未验；③ 备份/恢复 15 条仍在维护互斥量下未复跑；④ `node scripts/check-docs.mjs` 现 exit 1，11 个错误全部来自当日 22:02 他人在建、被 git 忽略的 `docs/superpowers/specs/2026-10-10-collab-page-ui-optimization-design.md`（失效本地链接），需其 Owner 修链接或补图；本机 Markdown 链接核对在该文件修复前不可过。
+
+## 自然语言状态维护整改与既有对象/决定续答（2026-10-10，复验前实施记录）
+
+用户下发[本轮整改提示词](prompts/remediation/natural-language-state-maintenance-acceptance-20261010.md)后，由当前 Agent 单独完成实施、测试、复验与文档同步：**未派子代理、未创建其他聊天、未向其他任务发送材料、未自动创建 goal**。上一节的独立验收只作为整改输入，不继承为本轮成绩。实际运行结果只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)本轮行；本节只记范围、下一步与边界。
+
+**A/B/C 三段（上轮 10 个失败场景）已落成正式回归**：反例 A/B 与同值修订、目标身份替换按确认时点的适用基线（迁移 `0064.baseline_ref`）识别冲突，保留当前事实并按冲突表达；非法 `decision_required` 与混合/全非法条目整单澄清、不产生写入；整组撤回先只读预检（`GET .../undo-plan`），有不可撤回项时**一项都不补偿**，由用户勾选具体范围并回传 `plan_digest`，范围与方案在同一条语句里持久（`undo_scope`），CAS 输方不执行；同 `command_id` 改来源 409 `COMMAND_ID_REUSED`、同原消息并发只调一次模型、模型明确失败结算为可读 `FAILED`（新 `command_id` 沿原请求恢复）、`UNDOING` 中断按原 `undo_command_id` 继续剩余补偿；日常查看基线改为服务端签发展示序号（迁移 `0065`），State 不变也能推进、迟到旧确认不覆盖新查看，任务集合超 200 条按截断标记且 delta 置未知。
+
+**第五节纵向场景**：新增 `SET_TASK_PLANNING`（迁移 `0066`，沿原 Owner `SetTaskPlanningMetadata`，只改模型给出的字段、截止日期冻结客户端时区）；`decision_required.blocked_changes` 让独立且明确的修改不被另一项必要决定整组冻结；新增 `POST .../decision-replies` 一句话续答，绑定展示版本（不符 409 `DECISION_STALE`）并由原 applications 继续原请求；解释输入带上同会话上下文与既有回执，使纠正/续答对得上原对象（上下文只供理解、不构成授权）。前端接线：冲突与「已存在」分开表达、撤回方案面板（勾选具体范围）、待决定的一句话回答入口、接续卡改用服务端展示身份。
+
+**实际运行**：后端 `tsc --noEmit`/`tsc -p` exit0；**后端全量单元 502：501 通过、0 失败、1 跳过、exit0**（唯一一次失败是断言未同步 `blocked_changes`，修正后整轮复跑取得该结果；跳过仍为本机不能把目录替换为链接的边界用例）；真实 PG 定向日志 7 源码套件 exit0（conversation-state 22、project-daily 10、check-trust-gate 25、check-trust-refusal-lifecycle 2、api-state 10、cli 5、migration 10 等全绿）；**实施全量原输出复核：73 源码套件 825 条，通过 796、失败 15、跳过 14**，15 条失败**全部**为 `backup` 7＋`restore` 8 的 `MAINTENANCE_SESSION_BUSY`（非自有桌面 PID34280 持有命名互斥量，未停该实例、未放宽维护门），14 跳过为真实 Provider opt-in 13＋Windows helper 1。前端 `tsc --noEmit` exit0、全量 vitest **99 文件 858/858**、`vite build` exit0；`scripts/check-docs.mjs` exit0。原始输出留本机 `output/acceptance-raw/nls-remediation/`。
+
+**文档**：[HTTP 契约 §10.61/§10.62](docs/api/http-command-contract.md)（新增 decision-replies/undo-plan、`presentation_seq` 必填）、[物理设计 §63–§67](docs/database/physical-design-postgresql.md)（追加迁移 0064/0065/0066）、[领域模型 §12.5](docs/architecture/domain-model.md)、[工作台 §18.9](docs/frontend/workbench-design.md)、[测试计划 §24](docs/testing/verification-plan.md)（形式化回归落点表）。**Breaking Change：Yes**——`daily-view-confirmations` 新增必填 `presentation_seq`，其余为新增端点/字段与追加迁移。
+
+**未闭合（下一步）**：① 第六节外部成果核对与返回轻量检查**未进入**——返回卡仍只查询并确认基线，没有真实检查触发、证据复用与预算门，按出口要求继续标为未闭合；② 纯自然语言触发整组撤回**未接入**（候选词表没有对应 kind，撤回目前只有按钮入口，已沿请求行的原 `undo_command_id` 用例执行）；需求/计划领域无 Owner，相关维护仍是未接入口；③ 真实浏览器与真实 Windows 组合路径本轮**未运行**（只做了组件级与真实 PG/HTTP 证据）；④ 备份恢复 15 条仍需在不占用用户实例的环境补验；⑤ 真实 Provider 理解质量、安装/升级/卸载未验。
+
+## 后端与自然语言状态维护独立验收（2026-10-10，前轮验收记录）
+
+当前 Agent 单独验收，未派子代理、未修改产品源码。按新定位验收：明确指令沿原 Owner 维护事实，摘要展示实际变化与必要决定；简化操作不取消版本、权限、完成条件或 UNKNOWN 核对。**上轮批准失效后的拒绝收口与原 Task 接续已闭合；自然语言维护与自动接续整体未通过，A/C 只有有限路径实现，不能直接称两片完成。** 实际检查与环境限制只归[功能验收表本轮行](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
+下一步先按[本轮整改提示词](prompts/remediation/natural-language-state-maintenance-acceptance-20261010.md)修复：原对象/基线绑定、非法候选的保守处理、撤回整组事前核对、原命令与在途恢复、日常多对象基线。补齐原请求绑定的自然语言纠正/撤回及必要决定续答，明确需求/计划与既有对象维护缺口。以上复验后再进入依赖它们的外部成果核对、返回轻量检查与 Windows 组合路径；不重写已通过的 CT-12，不把显示接续卡当作检查已运行。提示词交付不自动启动整改，仍不派子代理。
+
+后端回归另需同步新增 ADD_BLOCKER 的精确接口断言，以及 0062/0063 后 CLI/迁移的 63 项清单与计数；维护占用的备份/恢复出口保持可见，不停止非自有桌面实例或放宽维护门换绿色。真实 Provider、Windows 新流程与安装出口未验收。
+
+以下保留实施与前轮验收记录；当前下一步以上节为准。
+
+## 自然语言状态维护：首批切片实施记录（2026-10-09，前轮）
+
+用户下发[专项提示词](prompts/natural-language-state-maintenance.md)后，本轮由协调者＋两个实施子代理（后端/前端文件所有权互不重叠）并行实施。**Slice A（对话状态维护）与 Slice C（返回项目日常接续卡）已实施并经协调者复验**；外部进展核对（Slice B）未进入；真实 Windows（Slice D）未验。成绩与限制只归[验收表「Slice A/C 实施轮」行](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
+- **Slice A**：迁移 `0062` 两表（前轮已建）＋ `conversation-state.ts` 用例/仓库/五端点；每条变更沿原 Owner 短事务生效（SetProjectState/CreateTask/addTaskDependency/createGoal/linkProjectGoal/createDecision/createKnowledge/addKnowledgeVersion），`undo_command_id` 整组逆序补偿，无撤销入口如实 `COMPENSATION_FAILED`。前端 AssistView 回执：MAINTAIN 自动生效（无接受按钮）、DECISION_REQUIRED 不自动应用、两步整组撤回、PARTIAL 折叠态可见。真实 PG `conversation-state` **7/7**、单元 **6/6**；前端组件 **7/7**。协调者修复接缝缺陷：撤回身份必须用请求行固化的 `undo_command_id`（投影已携带），不由客户端新造命令。
+- **Slice C**：迁移 `0063` `project_daily_view_baselines`（每项目一行查看基线、presentation 幂等、迟到确认单调不覆盖、不复制业务正文）；`GET /daily-continuation`＋`POST /daily-view-confirmations`；`DailyContinuationCard` 挂 `/projects/:id` 顶部，确认针对已展示结果（viewed_fact_refs 回显），「已查看」不是接受；N01 命名点行为不变。真实 PG `project-daily-continuation` **6/6**、单元 **8/8**；前端组件 **7/7**。协调者修复接缝缺陷：确认载荷补 `unresolved_blocker_count`。
+- **共享检查（协调者亲跑）**：前端 `tsc --noEmit` exit0、全量 vitest **99 文件 855/855**；后端 `tsc -p` exit0、全量单元 **501：500 通过/0 失败/1 跳过 exit0**（并发重复运行曾使 `restore-isolation` 相撞，串行复跑为准）；`collaborationWorkspace` 两条 Enter 用例按新增解释 POST 更新计数（加路径断言，未放宽）。**Slice B 前置**：CT-12 拒绝生命周期在当前源码 **2/2 PASSED**——上一节所记「批准失效后拒绝收口」阻塞已被并行后端整改闭合，其余整改范围（Permission 撤销 RESUME 严格断言、维护占用出口）不属本任务、未执行。
+- **文档**：[HTTP 契约 §10.61/§10.62](docs/api/http-command-contract.md)、[物理设计 §63/§64](docs/database/physical-design-postgresql.md)、[领域模型 §12.5](docs/architecture/domain-model.md)与[工作台 §18.9](docs/frontend/workbench-design.md)已标注实施边界；Breaking Change：No。
+- **指定模型限制**：子代理调度工具不支持 `gpt-6.1-sol`（当前账号不可用，沿用既有记录），本轮未虚报独立复核；工程复验由协调者亲跑承担。
+
+**下一步**：① Slice B——外部进展→成果/证据核对→原验收/完成入口（NLS-04/05/08/09），前置 CT-12 已绿，可直接开工；② Slice D——真实 Windows 窗口按「返回项目→一句话调整→连带决定→外部成果核对→纠正/撤回→重启接续」串联验收；③ Slice A 补充——真实模型解释质量探针、`decision_required` 回执内联决定的交互口径。
+
+## 后端独立复验（2026-10-09，前轮）
+
+用户要求再次验收并给接续提示词。本轮由当前 Agent 单独完成，未派子代理、未修改产品源码。**原材料绑定漏洞在本轮反例上被挡住，后端整体仍未通过**：真实 START→LangGraph 等待→批准产生的 RESUME 链中，材料漂移被拒且 Invocation 为 0，但工具行已 SETTLED、Review 已 DECIDED，原 Operation/Run 仍 WAITING_APPROVAL、Task 仍 WAITING；两个 outbox 已 DONE、无下一命令，继续推进返回 ACTION_UNKNOWN。根因是派发前授权拒绝只结算工具行，未通过领域入口闭合原动作与任务状态。现有“重新确认”测试创建独立新 Task/目录，“撤销”测试用了随机恢复命令且允许两种结果，不能证明原任务接续与严格撤权出口。
+
+当前源码全量单元与真实 PG、独立批准/完整图探针、Windows debug helper 定向补验及清理结果只归[统一验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)本轮行。该轮 PG 失败均为 backup/restore 的 MAINTENANCE_SESSION_BUSY，正在运行的非自有桌面 PID34280 保留；restore-postgres 本轮全量通过，不能沿用实施轮的连接栅栏失败作为本轮失败。真实 Provider、Windows 界面业务与安装等出口不提升。
+
+**后端下一步**：按[批准失效后的状态收口与真实复验提示词](prompts/remediation/backend-refusal-lifecycle-20261009.md)，补正式图反例、修复确定未执行拒绝的领域收口、证明原 Task/资源的合法接续，并收紧真实 RESUME 的范围授权/Permission 撤销测试。保留材料绑定与真实 UNKNOWN 保护，再复验相关回归和全量；维护占用出口需在合乎契约且不占用用户实例的环境中补跑。提示词已交付、尚未执行，不派子代理。
+
+以下为前轮实施记录，当前下一步以上一节为准。
+
+## 后端整改：批准材料绑定与全量回归收口（2026-10-09，前轮实施）
+
+用户下发[后端整改提示词](prompts/remediation/backend-approval-and-regression-20261009.md)后，本轮由当前 Agent 单独执行，未派子代理、未创建其他聊天、未向其他任务发送材料。
+
+**A（P1）已闭合**：2026-10-08 独立验收确认的根因是 `createGatewayReview` 的 `ACTION_APPROVAL` target 只绑定动作/路径/参数/连接与策略版本，没有绑定创建时观察到的检查材料，`requireCurrentGatewayGrant` 接受有效单动作批准后也不再要求当前材料相同。现由新增的 `application/approval-check-material.ts` 在既有 Owner 内补齐：建 Review 时把服务端实测的整份 `check-trust-basis` 写进 target（因而进入 `target_hash` 完整性校验），`resolveRunReview` 在保存 APPROVE 前与 `requireCurrentGatewayGrant` 在真实执行前各核对一次；核对输入只来自已持久化的 Operation 事实（`op.params` 的 executable/args ＋ 受管资源 canonical root）。规则与剩余边界归[工具适配器 §1.6](docs/architecture/tool-adapters.md#16-写差异与检查工具2026-10-04-实施)，正式场景归[测试计划 §20.10](docs/testing/verification-plan.md#2010-检查入口的信任摘要与检查证据适用性2026-10-07-实施) CT-11。Breaking Change：No，无数据库结构变化、无 migration。
+
+**B 已按真实根因处理**：① 队列/维护状态隔离——根因是生产 Assist 领取 `claimNextPendingMessage` 按整库选取、不带 workspace 过滤，而运行器此前让全部集成文件共享一个库；`--test-concurrency=1` 不提供数据隔离。现改为每个测试文件用 `CREATE DATABASE ... TEMPLATE ... OWNER relay_migrator` 克隆独占库、跑完即删、文件仍串行，生产 claim 逻辑与维护/连接安全门未放宽。② 迁移完整性——`backup-history` 与 `database-maintenance-boundary` 写死的 48 改为用仓库当前迁移清单与 ledger **逐条双向核对**（缺行/多行/摘要不符均失败），不是把 48 改成 61。③ 完成验证 fixture——原输出种类反例被删空的 target 短路到 `VERIFICATION_TARGET_STALE`，已拆成两条独立用例分别锁绑定门与输出覆盖门。
+
+**下一步**：以本次同一源码基准取得的真实 PG 全量结果为准继续处理剩余项（见[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)对应行）。当前剩余 16 条全部集中在备份恢复族：`backup` 7 条＋`restore` 8 条是 `MAINTENANCE_SESSION_BUSY`，根因为本机存在非本次自有的运行中桌面实例（PID 34280 `relay-desktop.exe`）持有原生命名单实例互斥量——需在停掉该实例后复跑，不能停用维护门换绿色；`restore-postgres` 1 条连接栅栏失败单独复跑 2/2 通过。未闭合的出口不变：真实 Provider 调用、Windows 界面业务、安装/升级/卸载、产品多 Agent 与其他 M/N 功能均未在本任务范围内，不提升 M/N 总出口。
+
+## 后端独立验收（2026-10-08，前轮）
+
+用户要求验收后端且不派子代理，本轮由当前 Agent 单独核对当前未提交源码、构建及真实 PostgreSQL 反例。**后端整体未通过**：检查材料退回人工批准后，创建 Review 至批准前、以及批准至派发前再次修改检查脚本，旧批准均可执行新内容。根因与待修边界归[工具适配器 §1.6](docs/architecture/tool-adapters.md#16-写差异与检查工具2026-10-04-实施)，正式回归规格归[测试计划 §20.10](docs/testing/verification-plan.md#2010-检查入口的信任摘要与检查证据适用性2026-10-07-实施) CT-11；实际成绩、全量回归差异和清理结果只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)。本轮未修改产品源码，不提升 M/N 总出口。该轮的两条漂移反例与三类全量回归问题已由上一节的后端整改处理。
+
+## 草稿编辑焦点与无 Run 文案修复（2026-10-08，实施完成）
+
+用户下发[两项有限修复提示词](prompts/remediation/draft-focus-and-no-run-copy-20261008.md)后，本轮**实际并行派发两个实施子代理**（A 焦点恢复：`draftGuard.ts`/`AssistView.tsx`/`CollaborationView.tsx`/`App.tsx`；B 无 Run 文案：`TaskAcceptanceEvidence.tsx`），文件所有权互不重叠；协调者统一修改共享测试 `taskDetailVisual.spec.ts` 的旧文案断言并独占共享构建。两项修复均先红后绿：**焦点恢复**——`DraftGuard.restoreFocus` 沿既有草稿 Owner 注册链，App.tsx 在 blocker blocked→unblocked 迁移效果中执行恢复（与 AppDialog 关闭清理同轮 passive flush，不用定时器），组件 **9/9**、浏览器 **8/8**；**无 Run 文案**——按真实 `runId` 分四种事实，无 Run 不再指引核对「当前/原 Run」，vitest **13/13**、布局浏览器 **16/16**（含 `getRunTrace` tripwire 计数 0、预览≠已执行/通过）。**协调者亲跑共享检查**：workbench `tsc --noEmit` exit0、全量 vitest **97 文件 841/841**、三个受影响 Playwright spec **32/32**、`vite build` exit0；`build-release.ps1` **exit 0**（manifest `desktop-build-manifest.json`、EXE SHA `ac06cc1e…1f191`、输入指纹 `86f4d2f2…5312`、17252 资源哈希、0 禁止配置文件）。成绩、反例范围与剩余限制只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「草稿继续编辑焦点与无 Run 文案（2026-10-08 实施轮）」行；焦点规则归[工作台 §17.13.2](docs/frontend/workbench-design.md#17132-保留并继续编辑的焦点恢复2026-10-08)。
+
+**下一步**：真实 Windows 窗口内按上一轮电脑插件复验的两条复现路径复验两处修复（新包已含修复，EXE `ac06cc1e…`）；编辑器禁用兜底分支与窗口关闭弹层/协作页 transition 弹层的默认回焦维持现状（按要求未接入恢复）。未验的绑定异常、UNKNOWN、IME/DPI及安装等不是本修复任务范围，不据此判当前功能失败或提升 M/N 总出口。
+
+## 当前 release 的真实 Windows 限定业务复验（2026-10-08，前轮记录）
+
+用户明确要求用电脑插件做真实验收。协调者使用 computer-use 实际操作当前 release 的 Windows/WebView2 窗口，并复用两个只读子代理并行核对包/实例身份与前后业务快照。**窄短窗新对话、草稿保护、原生目录取消/确认、同一会话归入项目并保留原消息身份，本次限定范围通过。** 当前包已在新的自有隔离实例真实运行，测试实例已正常关窗并准确清理。本次未改产品源码、未重建包、未重跑前轮工程/浏览器成绩；结果与限制只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)，不提升 M/N 总出口。
+
+**前轮实施成绩（本次未重跑）**：workbench `tsc --noEmit` **exit 0**、组件全量 **97 文件 832/832**、Chromium 全量 **83/83**（串行）、窄窗新对话浏览器 **5/5**；`build-release.ps1` **exit 0**（17252 个资源哈希、0 个禁止配置文件）。
+
+**前轮修掉的两项**：① 窄窗/短窗的全局「新对话」入口随左栏隐藏而消失，唯一替代路径藏在文件夹折叠区 —— 现抽出唯一 `/agent?new=<key>` href，宽窗与抽屉共用；② `build-release.ps1 -TestPackage` 构建一个目录而启动器硬编码读另一个目录、且从不比对 exe 与 manifest —— 现启动前强制包身份校验并把包身份写进 `session.json`。
+
+**当前包与本次实例**：沿用 manifest `built_at_utc=2026-10-08T08:49:17Z`、EXE SHA `e4ba4145…dc16c` 的当前 release，四对关键源码/包资源经只读核对匹配。新自有实例宿主80452→API78884/1442、监督器78016、PG76860/1434，61条迁移和Graph存在，PG与live正常，真实业务读写成功。匿名ready401为权限边界，本次未另取凭据做外部认证ready探测。配置仅4个DB/Workspace键，宿主过滤继承Provider配置；实际账本为1次Fake Assist、0次真实Provider。
+
+**下一步**：补原生绑定拒绝/响应丢失和未知Run控制回执跨revision/整页重读的剩余出口。现有release没有可靠的有限控制响应丢失注入能力，Playwright拦截、普通202/PENDING或Mock动作UNKNOWN均不能替代；保持未验收，不据此判产品失败或扩展生产架构。原ff4e…实例/marker/端口本次检查已不存在，旧资源故障与清理阻塞只保留历史；本次新cde4e864…实例启动exit0，电脑插件正常关窗后宿主/API/监督器已退出，匹配stop脚本exit0、PG停止、临时根删除True。残余目录 `…\Temp\relay-api-integration-04c2bc42f4` 仍保持记录、未重试。**未验**：安装/升级/卸载、真实中文IME、多DPI、屏幕阅读器和真实Provider；当前release的限定原生业务通过不等于整体交付。旧包备份仍在仓库外 `%TEMP%\opencode\release-backup-20261005`。
+
+**本轮不推进其他 M／N 模块，不提升 M／N 总出口。**
+
+
+## 当前桌面产物与窄窗新对话入口接续（2026-10-08，历史任务基准）
+
+用户明确要求使用电脑插件验收后交付提示词。协调者实际操作真实 Windows/WebView2，并复用两个只读子代理并行核对运行资源和入口语义。**短窗任务详情阅读、完整编号展开、导航及目录选择取消保留草稿通过；窄窗全局新对话入口未迁移，替代入口藏在文件夹折叠区，属于可发现性缺口。当前原生后端和已有 release 资源仍旧，完整新包的 Windows 业务及安装出口未闭合。** 本次没有修改产品源码或正式测试，没有重跑前次工程/PG/浏览器成绩。实际范围、窗口身份与剩余项只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)，不提升 M/N 总出口。
+
+**已执行**：[环境配置材料核对与真实业务验收接续](prompts/remediation/env-material-and-real-business-20261008.md)中的环境文件材料修复及未知控制命令整页重读恢复，均已进入当前实现并完成前次限定独立复验。保留已通过的验收依据正文和页头布局，不重复重做。
+
+**下一步**：按[当前桌面产物、窄窗新对话入口与真实业务接续](prompts/remediation/current-desktop-and-new-conversation-20261008.md)，实际并行派发桌面准备与窄窗入口两个子任务，由协调者独占构建、隔离启停及电脑插件独立验收。提示词已交付，尚未执行；本次授权仅为验收与写提示词。下一轮需让当前源码的完整桌面资源确实运行在匹配初始化的自有环境，再补同会话目录绑定、拒绝/结果未知与控制命令整页重读的真实 Windows 证据。当前旧 debug 窗承载 5173 当前前端，但实际 bootstrap API 为 7661、旧 target/debug/api 资源、relay_trial，不能拼接成 8788/relay_acc_20261008_c 的浏览器业务成绩。真实 IME/DPI、屏幕阅读器及安装/升级/卸载仍未验，真实 Provider 未调用。残余 Temp/relay-api-integration-04c2bc42f4 清理此前被自动审核拒绝，本次未重试，保持人工处理记录。不扩展到其他 M/N 模块或全站响应式重构。
+
+以下为之前的实施与独立复验时点，不继续沿用其“当前下一步”、已修复阻塞或工具不可用描述。
+
+## 正文与页头复验完成；环境文件材料及真实业务待闭合（2026-10-08，前轮独立复验记录）
+
+用户要求完成后再次验收并给出接续提示词。本轮实际复用两个只读验收子代理，分别独立核对当前后端与前端，协调者通过电脑插件复核真实 Windows/WebView2。验收依据正文与页头技术信息本片通过，已修复项不再重做；检查材料仍有环境文件读取漏算，且本轮未取得正式 PG 结果。确切成绩、反例范围、窗口身份与审核限制只归[统一验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)，不提升 M/N 总出口。
+
+**下一步**：按[环境配置材料核对与真实业务验收接续](prompts/remediation/env-material-and-real-business-20261008.md)，修复或明确拒绝环境文件值被误当终止符的形态；先核对私有验收 wrapper 与原运行器差异，再取得当前源码的正式 PG 结果；补真实 API/PG 与 Windows 的同会话归属和未知控制核对。提示词已写、尚未执行，本轮没有修改产品源码。保留既有 Windows 窄/短窗、IME/DPI 与安装限制，已被审核拒绝清理的临时目录留待人工处理。
+
+以下为之前的实施与复验时点，不继续沿用其“当前下一步”或工具不可用描述。
+
+## 检查入口漏算与验收依据窄列整改（2026-10-08，实施记录）
+
+用户要求按上一轮独立验收的三项缺陷直接整改并复验。本轮**实际派发两个实施子代理并行**（A 后端检查信任解析＋单元/真实 PG 集成；B 前端验收依据布局、任务页头元信息＋组件/浏览器回归），文件所有权互不重叠，协调者负责公共集成、独立复验、真实 Windows 复验与文档。**三项已确认缺陷全部修复，两项真实反例先红后绿**，成绩、原始证据与桌面覆盖边界只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)对应两行。
+
+**本轮实际成绩（协调者亲跑，不继承上一轮成绩）**：固定 Node v24.21.0，`apps/api` 重编译 exit 0；定向单元 **51/51**；真实 PG `check-trust-gate` **12/12**（status PASSED、临时集群已删除）与 `tool-loop` **45/45**。workbench `tsc --noEmit` exit 0、`vite build` exit 0、组件全量 **95 文件 824/824**、Chromium 全量 **78/78**。
+
+**修掉的三项**：① `check-trust-basis` 保留「选项已结束」状态，终止符之后真正被执行、名称以横线开头的入口计入冻结材料（`node -- --entry.mjs src/value.txt` 旧实现漏算，冻结后换入口仍 AUTO）；② 验收依据的无编号条件列表改用专属修饰类单列，原编号＋正文二列 grid 一字未动，正文不再落进 32px 编号列；③ 任务页头完整任务 ID 降为 `code` 小字缩略并保留可展开的完整值核对入口，元信息改分组换行。**协调者另行修正子代理的一处语义**：终止符只在入口之前有「选项结束」含义（Node 实测 `node check.mjs -- --verbose` 正常执行并把二者作为 argv 传下）。
+
+**下一步**：真实 Windows／WebView2 窗口复验仍未做——本会话没有电脑／桌面控制插件（工具目录与 MCP 均无 sky／computer-use 类工具，已按规则有界重试后停止，不绕过插件）。窗口身份已核（PID 69560、debug `relay-desktop.exe`、SHA256 `52949ea4…b48e3`、标题 `Relay Agent`、Responding=True），但该 exe 是**旧构建**，不等于当前源码的新发布包。恢复 dev server 后确认 5173 提供的是已修复源码，可在下一次具备桌面控制能力时直接复验：任务详情滚动阅读完整验收依据、补充条件表单就地展开／空值禁用／取消、窄窗 Run 抽屉入口与滚动后焦点不被顶栏遮挡。另需留意两处环境与残留限制：`.relay-test` 试库缺 LangGraph checkpoint 表致 `/health/ready` 503（业务数据路径正常），以及 `node --env-file=-- check.mjs` 会读取名为 `--` 的文件而该文件不进材料（修复前既有行为，需受管根内存在该文件名才触发）。目录绑定／未知控制的真实桌面业务闭环、IME／DPI 与安装验收仍保留。
+
+**本轮不提升 M／N 总出口。** 断点收敛仍未覆盖全站（Reviews 仍有 60rem/.9375，Knowledge 与 Run 仍有旧式及局部断点）；本轮不借此扩大为全站响应式重构。
+
+## 优化 UI 与业务底线独立复验（2026-10-08，上一轮）
+
+用户要求验收当前实现。本轮复用后端验收子代理，并另派前端只读验收子代理并行复核当前源码；协调者通过电脑插件操作真实 Windows/WebView2 窗口。旧五项缺陷的已测试形态已闭合，但本轮发现新的检查入口信任漏算与验收依据窄列问题，因此整体仍未通过。实际成绩、原始证据及真实桌面覆盖边界只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)，本轮未修改产品源码，不提升 M/N 总出口。
+
+**下一步**：已由上一节接手（旧检查入口信任漏算与验收依据窄列整改）；任务页头完整 UUID 的呈现与既有降级规则也需对齐。修复后重新编译、复跑原回归和新增反例，再复核真实 Windows 的任务详情阅读路径；目录绑定/未知控制的真实桌面闭环、IME/DPI 与安装仍保留验收限制。
+
+以下为各实施与验收时点的接续记录；已修复的旧红例不作为当前缺陷，当前下一步以上述段落与验收表为准。
+
+## 控件基座与响应式收敛（2026-10-08，实施记录）
+
+用户要求对全部按钮（含发送键）、表单控件、导航、状态提示做控件级精修并统一响应式。本轮先派 2 个只读审计代理（控件层/导航与响应式），再**实际派发 4 个实施子代理并行**（D1 styles.css 基座 +198/−22；D2 协作/Assist/Settings/CreateTask 收编；D3 断点收敛 9 处；D4 面包屑 Link 化+文件处置枚举中文），协调者补 token（`space.0.5`、contrastChecks 31→33）与 RunView h2 收尾。**修掉两个 P0**：全局 `[aria-busy]` 缺失、`.success-callout` 无定义致蓝图页裸段落；**一致性修复 12 项**：primary 双高度 compact 修饰符、输入 focus 弱于 hover、checkbox/radio 误套 min-height、发送键 token 引用（几何不变）、委托开关反馈补齐、断点 11 种写法收敛为三档语义、恰 80rem 双触发、死标题规则、裸 z-index、面包屑父级可点、Activity 选中行零位移方案、sticky top 实测修正。**不强改**：委托开关复合控件保留自有规则（反馈已对齐）、ARIA 两套语义并存各自合法。**验证（协调者实跑，exit 0）**：tsc、全量 **824/824**、生产构建、浏览器基线 **8/8**；子代理定向 117/117、58/58、19/19、全量 824/824。成绩与限制只见[验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「控件基座与响应式收敛（2026-10-08）」行；规则归[设计系统 §9.6](docs/frontend/design-system.md#96-控件基座与响应式收敛2026-10-08)与[工作台 §17.15](docs/frontend/workbench-design.md#1715-控件交互基线与响应式收敛2026-10-08)。**下一步**：桌面解锁后目视复验 48–60rem 区间与控件新状态；对比度运行时取色实测；`layout.header.height` token 语义澄清回写。本轮不提升 M/N 总出口。
+
+## 前端视觉样板与全站收口；五项业务底线闭合（2026-10-07 晚）
+
+用户以任务详情截图为样板要求直接实现优化 UI，并要求多子代理并行、完成一批自动推进下一批。本轮**实际派发 10 个执行子代理并行**（第一批 A1/A2/A3/A4/B，第二批 C1–C5），文件所有权互不重叠，协调者独立复验每批后自动推进。**四项未闭合缺陷已修复并有 RED→GREEN 证据**：检查信任的等号/分离式开关值漏算（A1）、取消终态后 REQUESTED 工具请求收口（A2，取消应用事务内直接收口，暂停路径不触碰）、RunControlPanel runKey 含 revision 丢未知控制命令（A3）、协作页绑定拒绝后历史消失（A4，归属未确认保持工作区级视图）。任务详情页按设计图完成布局重组、验收条件 grid、补充条件就地化与验收依据四事实呈现；列表/待处理/资料/设置/连接/今日/动态/协作/Run 九类页面完成枚举中文化、实现词清理、时间本地化与空态收口。
+
+**工程成绩**（协调者实跑，exit 0）：workbench `tsc`、全量组件 **95 文件 824/824**、生产构建；API 单元 **468/0/1**（固定 Node + helper）；真实 PG `tool-loop` **45/45**、`check-trust-gate` **10/10**（子代理跑）；新增 `taskDetailVisual` Chromium 多分辨率 **8/8**。**真实 Windows**：`desktop-dev.ps1` 启动 relay-desktop（需 `RELAY_DESKTOP_CONFIG_PATH` 指向 `.relay-test\desktop.env`），语义树确认任务详情精修结构完整呈现；锁屏后桌面交互收敛，目录绑定/短窗/IME/DPI 未验。过程中恢复 workbench `node_modules/.bin` 垫片（workbench 为 pnpm 独立包，需在其目录 `pnpm install --ignore-workspace`）；结束了一个 10-06 关窗遗留的无窗口 relay-desktop 进程以释放编译锁。成绩、限制与未做项只见[验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「任务详情精修样板与全站视觉收口（2026-10-07，本轮）」行；规则归[工作台 §17.14](docs/frontend/workbench-design.md#1714-任务详情精修样板与全站视觉收口2026-10-07)与[设计系统 §9.5](docs/frontend/design-system.md#95-任务详情样板与全站枚举呈现2026-10-07)。**下一步**：桌面解锁后补真实目录绑定与短窗交互复验；指定模型独立验收仍按用户既定决策等待；各页局部映射择机收编 `labels.ts`。本轮不提升 M/N 总出口。
+
+## 后端接续：检查信任摘要、证据适用性与控制归属（2026-10-07）
+
+用户下发[后端接续任务书](prompts/remediation/backend-continuation-20261007.md)并要求继续执行（「有些可能已经做过了」）。开工核对确认：上一轮已写好阶段 A 的 RED 测试与占位实现及类型骨架，但**未实现、未接线**；阶段 B–E 无新产物。
+
+**阶段 A/B/C 实现已接线，整体独立验收未通过**：检查信任摘要在冻结期落库并由 Gateway 核对，候选证据版本完成门与终态请求补偿已有实现。本次独立实测确认两类可执行参数被漏算，修改被执行脚本后摘要未变仍获 AUTO；取消已应用后未派发工具请求仍留 `REQUESTED`，现有补偿只有旧 Worker 再进执行入口时才触发。阶段 B 的候选版本与既有暂停/取消等定向真实 PG 出口本次已实际复跑，不再写「集成未跑」。下一步先修参数语义与取消安全点收口，并以新增反例及原回归独立复验；范围与成绩只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)。规格归[测试计划 §20.6/§20.10](docs/testing/verification-plan.md#2010-检查入口的信任摘要与检查证据适用性2026-10-07-实施)。
+
+**文件助手状态更正**：此前记录的 `DELETE_FAILED` 是当轮失败现象，未足以证明所有写路径永远不可跑或排除产品缺陷。本次现有 helper 的合成受管写入/清理成功，相关单元与真实 PG 写路径均能复跑；撤回「全部本机环境阻塞」及「已排除产品缺陷与调用口径」的确定归因，不据此要求修改系统安全策略。历史输出保留在本机，复发时按实际输入和 native 结果重新定位。当前优先级是修已复现的业务缺陷。
+
+## 前端接续首波：同会话归属与工具事实（2026-10-07）
+
+用户下发[前端接续任务书](prompts/remediation/frontend-continuation-20261007.md)后，本轮完成 FE-00 基准冻结与首波并行实施。**实际派发两个独立子代理**：A 做 FE-01 同会话目录/项目归属，B 做 FE-02/03 Git/轨迹/控制事实审计与缺口修复；文件所有权互不重叠，协调者负责公共集成、独立复验与文档。
+
+**首波实现已接入，但独立验收未通过**：同会话目录归属与 `onActiveSessionChange` 接线、跨 Run 轨迹游标重置已有实现。本次受控反例确认：目录绑定被 409/403/404 拒绝后原未归属历史从当前界面消失；同 Run 的修订更新会清掉结果未知的控制命令 ID 与回执核对入口。下一步先修这两处并复验，不能按「FE-02/03 已满足」继续依赖模块。具体位置、成绩与限制只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
+**工程与桌面结论分开**：本次类型与构建通过，全量组件仍有失败；受控反例确认上述缺陷。真实 Windows 已补待处理/资料/记忆/收件箱空态及原测试任务刷新读回，未覆盖有会话目录绑定和 Run 控制。因此本片保持未通过，不提升 M/N 总出口。规格归[测试计划 §17.1.1](docs/testing/verification-plan.md#1711-同会话目录项目归属2026-10-07)，交互归[工作台 §18.1.2](docs/frontend/workbench-design.md#1812-同会话目录项目归属2026-10-07)。
+
+**剩余范围**：FE-04（助手身份/归档/首条恢复）与 FE-05（验收条件 CAS 与旧证据适用性界面）未进入；FE-06 全站空态/错误收口未完成，FE-07 真实 API/PG 浏览器未运行，FE-08 只补验收表所列的空态导航与原人工任务读回，总出口仍未完成。真实 Windows 原生目录选择、同会话历史、中文 IME、DPI、安装升级卸载仍待验。本轮不提升 M/N 总出口。
+
+## 前后端长任务提示词与真实桌面接续（2026-10-07）
+
+本轮用户要求按「先后端提示词 → 电脑插件真实 Windows 验收 → 前端提示词」交付。新入口为[后端接续任务书](prompts/remediation/backend-continuation-20261007.md)与[前端接续任务书](prompts/remediation/frontend-continuation-20261007.md)，均要求执行协调者实际派发两个独立子代理并行、共享文件单 Owner、分批复用及独立验收后推进；本轮只编写任务书与执行桌面验收，未启动任务书中的业务开发。
+
+真实 Windows 本轮已从现有窗口创建明确标记的测试项目/人工任务，追加条件并刷新读回；范围与电脑插件最大化后点击边界故障只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「Windows 有数据人工创建与条件追加」行。下一步按任务书闭合单 Agent 后端信任/证据/恢复及前端同会话目录绑定、工具事实与人工处理；新提示词不扩大到产品多 Agent、M07 恢复激活或 N 后续，也不提升 M/N 总出口。测试项目与任务明确保留，未委托、未调用模型。
+
+## Windows 页面巡检整改（2026-10-07，限定整改已复验）
+
+用户已授权将巡检发现的四类问题写成[详细整改提示词](prompts/remediation/windows-page-acceptance-20261007.md)，并直接派给 `gpt-6-luna / max`（用户指定模型的最高可用推理档）。范围限定为摘要入口覆盖、首条助手消息呈现与准入、收件箱导航高亮、待处理/资料右栏空态；保留既有未提交修改，不推进其他 M/N 模块。执行者负责源码与自动化自检，协调 Agent 负责文档及独立复验。
+
+四类问题已完成实现、自检与协调独立复验。真实 Windows 复验覆盖摘要开关、首条助手空清单准入、导航唯一高亮及待处理/资料右栏空态；工程测试成绩与剩余限制只维护[验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「真实 Windows 页面巡检及限定整改（2026-10-07）」行。两页默认自动选首条，非空未选中分支没有稳定页面操作复现，不为造测试新增功能。
+
+接续授权（2026-10-07）：用户要求继续验收并直接派发，已按[第二轮详细提示词](prompts/remediation/windows-page-round2-20261007.md)复用 `gpt-6-luna / max` 执行者，限定修复 CLI_RUN 可执行文件配置 UI 与普通聊天底栏行高。两项红例已修复并经协调者独立复验，工程成绩及真实 Windows 短窗范围只归[验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「Windows 页面第二轮整改（2026-10-07）」行。下一步补齐有数据真实 Windows 业务路径及真实连接配置闭环；空工作空间巡检不提升为发送/恢复或安装验收，不自动推进其他 M/N 模块。
+
+## 首装空态：说清「没有」并给出入口（2026-10-06）
+
+用户反馈「没数据的时候好空」，裁定范围为首装空态、实现方式为共享组件逐步替换。新增共享组件 `components/EmptyState.tsx`（`regular` / `compact` 两形态，消费既有 token，未新增色值/圆角/时长/第二套尺寸），本轮替换 `/projects` 的 fixture 与 live 两个视图与左栏「近期的任务」。交互归[工作台 §17.13](docs/frontend/workbench-design.md#1713-首装空态说清没有并给出入口2026-10-06)，组件归[设计系统 §6 EmptyState](docs/frontend/design-system.md#emptystate2026-10-06)。
+
+顺带修掉一个真实的分支不一致：live 视图的空态此前没有任何主操作——`onCreate` 已传入 `LiveProjectsListView` 却未在空态里使用，而 fixture 视图本就有「新建项目」。
+
+范围区分是硬要求：首装为空、搜索无匹配、页签/归档范围为空是三件事，不能合并成同一句话；搜索无匹配不得暗示整个工作空间为空，归档范围为空不得提供「新建项目」这类无效入口。左栏只给文字动作，不放 primary。
+
+**实际验证**：`typecheck` 通过、`build` 通过、浏览器用例 `projects-empty-state` **6/6 通过**（Chromium headless，页面内拦截伪造空工作空间；本轮独立复核更正此前记录的 4/4，该 spec 实为 6 条用例）。**归属更正（2026-10-07 独立复核）**：`uiOption2FirstSession.spec.ts:437` 的 `toolsHeight` 32 vs 40 失败**不是本轮引入**——结论成立，但此前归因写的是「未提交 `AssistView.css` 改动」，**该表述有误已更正**：实测该文件没有任何未提交改动，根因来自**已提交**的 `3abcc46`，其 `.agent-chat-mode-option { min-height: control-height }`（40px）作为底栏行首个子元素顶高整行；该 chip 破坏了 `design-tokens.json` 中 `radius.composer`「底栏行高与此键一致」的既有契约，**是真实缺陷但归属不在本轮**，修复点在 `AssistView.css`，需其所有者裁定。同轮由 4 个子代理分工复核工作台 API client 四层，两端 typecheck exit 0、前端全量 752/755，修掉传输层与 `createKnowledgeCurationCandidates` 两处真实缺陷并闭合了 24 个未跟踪文件的提交缺口，成绩与限制只见[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)“工作台 API client 分层与传输层加固”行。
+
+**未做**：其余 10 余处空态未替换；真实 Windows 窗口渲染、窄/短窗、DPI、真实中文 IME、屏幕阅读器与对比度实测均未做。**未决待用户裁定**：首装空态「新建项目」与页头常驻「新建项目」同屏两个 primary，当前保留两个（页头入口在「已归档」页签与列表非空时同样必须可发现），是否降级其中一个待定。成绩与限制只见[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)“首装空态（2026-10-06）”行。
 
 ## 标题栏常用操作回到左侧（2026-10-05）
 
@@ -32,7 +524,7 @@
 
 同日用户要求新建对话对齐已有对话截图：首条输入器已复用已有会话的阅读宽度、底部位置及工具栏，目录与接续已有任务入口收在主区顶部；功能与视觉验证仍只归验收表「新对话直接起步」行。
 
-本片不推进 M/N 总出口。下一步仍需当前源码对应的真实 Windows 人工路径；**普通讨论开始后选目录并绑定同一会话**的前端接续未接入，不能宣称已支持跨归属连续上下文。此前验收条件与 Git UI 的未提交切片保留，本片不将它们的旧自检自动升级为验收。
+本片不推进 M/N 总出口。普通讨论后选目录的同会话归属前端已接入，但当前独立验收发现绑定拒绝后历史隐藏，尚未通过；接续状态以本文件上方前端接续节及验收表为准。此前验收条件与 Git UI 的未提交切片保留，不将它们的旧自检自动升级为验收。
 
 ## 读写主链（2026-10-05 首片，保留原验证范围）
 
@@ -59,9 +551,9 @@ N 阶段（V1 后续长期协作）已按[整阶段提示词](prompts/post-v1-co
 | N01 项目接续点 | 工程自检通过，独立验收 P1 已修并复跑 | 独立验收的 P1 断言已改按 `ref_id`，当前源码连续 3 次 4/4 全绿；P3-1 规格缺口已登记。真实 Windows 人工路径与 PV01/PV08 未跑 |
 | N02 跨成果共创 | 首片工程自检通过；独立验收阻塞项已修复复跑 | 候选组＋组合检查单（迁移 0050、四个端点、面板视图），真实 PG/HTTP 3/3、组件 3/3。首轮独立验收 CHANGES_REQUESTED 的唯一阻塞项（登记引用缺口核错父版本造成每项假缺口）已修并补两条断言。候选间依赖联动、不完整选择拒绝、组级回滚与真实 Windows 差异审阅未做 |
 | N03 项目知识整理 | 后端与前端均已接入；独立验收 P1 与四项 P2 已修复复跑 | 导读编排（迁移 0052）+ 整理候选（迁移 0053），7 个端点，真实 PG 5/5（含接受/拒绝竞态与同 command_id 并发重放）。前端：知识页导读编排视图（重写 `ProjectKnowledgeGuide.tsx`）、谱系页整理候选面板（新增 `KnowledgeCurationPanel.tsx`）、workbench 606/607。首轮独立验收 CHANGES_REQUESTED 的 P1（被拒候选仍产生无归属知识版本）与 P2（拒绝态读取丢失、两处并发不返回原回执、工作空间级同名知识死路）均已修复。旧版客户端聚合导读已整体替换，项目目标不再出现在导读内。真实 Windows 与 PV03/PV08 未做 |
-| N04 周期计划 | 未进入 | N01/N03 已有首片工程输入，真实 Windows/完整使用出口仍缺；本轮仅规划，未授权开工 |
-| N05 有限触发 | 未进入 | 依赖 N04；一次性、错过处置及绝对时刻规则已确认，提醒调度/持久去重工程协议待核定 |
-| N06 有限连续委托 | 未进入 | 依赖 N04＋N05；串行、重启人工继续及到期安全暂停已确认，授权/预算/控制组合工程协议待核定 |
+| N04 周期计划 | 基础数据片已接，完整出口未验 | 2026-10-14 当前授权接估时、固定容量、候选与逐项选择/独立诊断，协议归 HTTP §10.74；实际成绩只归统一验收表。前端只接客户端，完整重排/会话入口、Windows/实用出口仍缺，不继承旧轮仅规划的授权表述 |
+| N05 有限触发 | 基础一次性数据/调度/客户端已接，完整出口未验 | 2026-10-14 沿当前授权接确认时刻、独立代次/发生、生命周期扫描与处理、原宿主投递功能；协议归 HTTP §10.76，成绩归统一验收表。设置/待处理 UI、Windows 原生投递与完整 PV05/PV08 仍缺，不自动放行 N06 |
+| N06 有限连续委托 | 基础链及读取/修改/检查已接，完整出口未验 | 2026-10-14 接固定范围、累计预算/有效期、原 Owner 串行/控制/重开确认、确切资料和原方法行动，修改/配置检查复用原范围授权与审批；协议归 HTTP §10.77–10.79、ADR-021，成绩归统一验收表。自定义方法、活动续期、UI、Windows/PV06/PV08 与故障全出口仍缺 |
 | N07 声明式配置 | 不进入 | 需 N03/N04 的实际重复使用证据；当前无该证据 |
 
 N 阶段的实际结果、限制与归属分析只维护在功能验收表；本表只维护阶段状态。M 阶段与文件夹入口的分工、并行 Agent 的未提交改动与既有阻塞见下。
@@ -76,7 +568,7 @@ N 阶段的实际结果、限制与归属分析只维护在功能验收表；本
 | M03：Mock Runtime 与可靠性 | ACCEPTED | 2026-09-30 本轮后端源码与确切冻结包的有限 Mock G01–G08 出口独立复核通过；一次启动退出 101 未定位、后续连续重启未再现，保留风险，不称已修复。成绩、包身份、性能及 harness 边界只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表) |
 | M04：模型、Context、Assist、低风险工具 | IN_PROGRESS | **2026-10-02 F24 修复轮**：两处提案接受幂等缺陷已修并复验（真实 PG/HTTP 受控行锁反例，先跑红后跑绿）；**第四项蓝图的真实模型定向测试新增并 4/4 通过**，覆盖生成只写候选、来源冻结、只读预览/Diff、基线不符 409、显式 Apply 只建 HUMAN/ME/INBOX Task、选择 Pack 不授权、重放与取消。同轮量化：`task-to-execution-contract@1.1.0` 真实调用 10 次 7 通过、3 次 `OUTPUT_SCHEMA_INVALID`，**稳定性未闭合**；四项 Skill 的质量案例/评分/重复次数/预算本轮未冻结，故只有契约合规性有证据。原调用首文本/首预览计时、选源 DRAFT→Review→完成、Assist 多轮/提案接受、Files/Web 图组合与读取委托 Windows UI 的既有定向成绩保留；真实服务故障、能力/质量、真实 Windows 与完整状态矩阵仍待验；基准和限制只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表) |
 | M05：工作体验与追溯 | IN_PROGRESS（消息队列分片实现完成但未验收；首条消息恢复四类缺口已修待独立验收） | Today/工作台/知识/追溯及归档已有实现与分片自检；首条消息恢复 A/B/C/D 已修并自检（见[验收表 §10.9.1](docs/testing/overall-acceptance-2026-09-28.md#1091-四类缺口的修复与复验2026-10-04)），独立验收缺；**轻量 Goal 创建入口已实施并复验**（同表「目标/任务轻量起步与状态接续」行）；当前 UI 和业务总验收未完成 |
-| M06：真实工具与 Coding Worker | IN_PROGRESS | 文件/Git/CLI、账本、UNKNOWN/PARTIAL 人工处置及无回执恢复有分片验证；2026-10-02 补齐 **root-bound 能力配置入口**（`FILE_WRITE`/`GIT_READ`/`GIT_WRITE`/`CLI_RUN` 连接与策略此前无法从产品内创建，`resolveConnectionConfig` 与 HTTP schema 早已支持）；**2026-10-05 Git 动作触发的只读侧已补齐**（迁移 `0058` 新增第三种 origin `USER_ACTION` + `POST /projects/{id}/managed-resources/{id}/git-read`，真实 PG `git-user-action` **15/15**、API 单元 412 项 0 失败、`tsc --noEmit` exit 0）；**写侧与恢复驱动仍缺**——人工触发的暂存/提交/推送、受控 CLI 与目录浏览无公开入口（`USER_ACTION` 词表只放行 `GIT_READ`），`USER_ACTION` 的崩溃后自动恢复驱动尚未接入（`reconcileGatewayInvocation` 分支已就位但无调度器调用，停在 `DISPATCHING`/`UNKNOWN` 须人工核对、不盲重试）；前端 Git 页签接入未做；[确切包、人工交互及总出口](docs/testing/m06-independent-acceptance.md)仍待验 |
+| M06：真实工具与 Coding Worker | IN_PROGRESS | 文件/Git/CLI、账本、UNKNOWN/PARTIAL 人工处置及无回执恢复有分片验证；2026-10-02 补齐 **root-bound 能力配置入口**（`FILE_WRITE`/`GIT_READ`/`GIT_WRITE`/`CLI_RUN` 连接与策略此前无法从产品内创建，`resolveConnectionConfig` 与 HTTP schema 早已支持）；**2026-10-05 Git 动作触发的只读侧已补齐**（迁移 `0058` 新增第三种 origin `USER_ACTION` + `POST /projects/{id}/managed-resources/{id}/git-read`，真实 PG `git-user-action` **15/15**、API 单元 412 项 0 失败、`tsc --noEmit` exit 0）；**写侧与恢复驱动仍缺**——人工触发的暂存/提交/推送、受控 CLI 与目录浏览无公开入口（`USER_ACTION` 词表只放行 `GIT_READ`），`USER_ACTION` 的崩溃后自动恢复驱动尚未接入（`reconcileGatewayInvocation` 分支已就位但无调度器调用，停在 `DISPATCHING`/`UNKNOWN` 须人工核对、不盲重试）；前端 Git 页签源码已接入（2026-10-07 只读核对），独立与真实窗口验收仍缺；[确切包、人工交互及总出口](docs/testing/m06-independent-acceptance.md)仍待验 |
 | M07：Windows 安装与 V1 总验收 | IN_PROGRESS | 完整备份CLI、启动隔离、新空库/data_root隔离还原CLI及非空目标业务只读维护核对已有实现；原/目标包分别绑定，目标CONNECT与标记保留，历史ARMED只进evidence，不自动放行或重发UNKNOWN。隔离还原原冻结源码出口已通过独立验收，维护核对冻结源码出口已通过独立验收，其余维护连接的PG环境继承已修正，冻结完整恢复组合独立复验已通过；小资源fixture不等于确切新发布包。后续为兼容/外部身份核对、明确放行及确切包维护链、安装/升级/卸载，实际结果只看功能验收表 |
 
 ## 当前实现与验证边界

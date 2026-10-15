@@ -1,14 +1,15 @@
 {
   "metadata": {
-    "version": "0.4.0",
+    "version": "0.5.0",
     "status": "Proposed",
     "theme": "light",
-    "updated": "2026-10-02",
+    "updated": "2026-10-14",
     "format": "Relay 文档用扁平 token 数据；不是 DTCG 兼容声明或已集成的主题包。",
-    "basis": "2026-10-01 用户选定工作主线图作为当前重做基准；历史参考保留。色值为归一推荐，尺寸/响应式待实际页面与 Windows 验证。",
+    "basis": "2026-10-01 用户选定工作主线图作为重做基准；2026-10-14 用户选定 Relay V4.2 页面原型作为配色与密度的当前基准，把原型那套冷绿语言收敛进本文件（不是新增第二套色值表）。原型中的辅助文字过浅（#88998D 在画布上仅 2.92:1），本文件在同色系内加深到通过既有 contrastChecks；色值为归一推荐，尺寸/响应式待实际页面与 Windows 验证。",
     "unit": "rem 按桌面 WebView 默认 16 CSS px 解释，保留字号缩放；window.content.* 的 number 单位为逻辑 DIP，不能当成物理像素或 rem。",
     "sourceDocument": "design-system.md",
     "sources": [
+      "../../GPT页面原型/Relay_V4.2_%E5%B7%A5%E4%BD%9C%E8%AF%A6%E6%83%85%E4%B8%8E%E6%88%90%E6%9E%9C%E9%A2%84%E8%A7%88.html",
       "../../thesis-review-original-20260919.png",
       "mockups/2026-09-19/today.png",
       "mockups/2026-09-19/project-overview.png",
@@ -25,7 +26,7 @@
     "window.content.initialWidth": {
       "$type": "number",
       "$value": 1280,
-      "$description": "首次窗口客户区宽度，逻辑 DIP 推荐值；按显示器可用工作区限制，待桌面实测。"
+      "$description": "首次窗口客户区宽度，逻辑 DIP 推荐值；按显示器可用工作区限制，待桌面实测。2026-10-15 核对：本 token 是目标约束，桌面壳当前实际以 1160×780 逻辑 px 建窗（apps/desktop/src-tauri/src/lib.rs create_window），两者不一致时以代码为准。"
     },
     "window.content.initialHeight": {
       "$type": "number",
@@ -35,7 +36,7 @@
     "window.content.minWidth": {
       "$type": "number",
       "$value": 960,
-      "$description": "常规工作区的推荐最小客户区宽度，逻辑 DIP；小工作区允许继续收缩，不强制屏外窗口。"
+      "$description": "常规工作区的推荐最小客户区宽度，逻辑 DIP；小工作区允许继续收缩，不强制屏外窗口。2026-10-15 核对：桌面壳未设 min_inner_size，窗口能缩得比本值更窄，因此这是建议下限而非强制约束。外壳折叠点是 width < 48rem（本值之下仍在三列档内）；960–1024 与 48rem–64rem 一样保留图标导航与近期工作两栏，导航不需进抽屉。只有 768px 以下才折叠进 ☰ 抽屉（150% DPI 下约 1152 物理像素）。不要为了让两栏常驻给窗口加 1024 的强制下限——1366×768 @150% DPI 的工作区只有 910 逻辑 px，强制下限会让窗口伸出屏幕。"
     },
     "window.content.minHeight": {
       "$type": "number",
@@ -44,93 +45,98 @@
     },
     "color.palette.paper": {
       "$type": "color",
-      "$value": "#FAF9F6",
-      "$description": "依据四张参考图归一的推荐色，并非原始设计源文件精确值。"
+      "$value": "#FBFCFA",
+      "$description": "2026-10-14 由 V4.2 原型的 --bg 收敛而来（原 #FAF9F6 为暖白，现为极轻冷绿白）。"
     },
     "color.palette.sidebar": {
       "$type": "color",
-      "$value": "#F4F3EF",
-      "$description": "依据四张参考图归一的推荐色，并非原始设计源文件精确值。"
+      "$value": "#F8FAF7",
+      "$description": "2026-10-14 由 V4.2 原型的 --rail 收敛而来，用于图标导航与近期工作栏。"
     },
     "color.palette.surface": {
       "$type": "color",
       "$value": "#FFFFFF",
-      "$description": "依据四张参考图归一的推荐色，并非原始设计源文件精确值。"
+      "$description": "文档与卡片纸面，保持纯白。"
     },
     "color.palette.ink": {
       "$type": "color",
-      "$value": "#18211F",
-      "$description": "依据四张参考图归一的推荐色，并非原始设计源文件精确值。"
+      "$value": "#203329",
+      "$description": "2026-10-14 由 V4.2 原型的 --dark 收敛而来（冷墨绿黑）。"
     },
     "color.palette.secondary": {
       "$type": "color",
-      "$value": "#4F5B55",
-      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+      "$value": "#425248",
+      "$description": "2026-10-14 由 V4.2 原型的 --text 收敛而来；画布上 8.06:1。"
     },
     "color.palette.muted": {
       "$type": "color",
-      "$value": "#5D6861",
-      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+      "$value": "#55675D",
+      "$description": "2026-10-14 由 V4.2 原型 --muted(#88998D) 同色系加深：原型值在画布上仅 2.92:1，不满足 contrastChecks 的 4.5，故取同色相更暗一档（画布 5.86:1、选中悬停底 4.99:1）。"
     },
     "color.palette.line": {
       "$type": "color",
-      "$value": "#E3E4DF",
-      "$description": "依据四张参考图归一的推荐色，并非原始设计源文件精确值。"
+      "$value": "#E8EEE8",
+      "$description": "2026-10-14 由 V4.2 原型的 --line 收敛而来。"
+    },
+    "color.palette.lineStrong": {
+      "$type": "color",
+      "$value": "#DCE5DD",
+      "$description": "2026-10-14 新增：比 line 深一档的可见底纹，供 meter.track 这类需要与纸面拉开 ≥1.2:1 的轨道使用（line 在白纸上只有 1.18:1）。"
     },
     "color.palette.control": {
       "$type": "color",
-      "$value": "#8E8A80",
-      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+      "$value": "#849185",
+      "$description": "2026-10-14 由 V4.2 原型 --line2 方向收敛为冷绿灰，并加深到画布/纸面 ≥3:1 的控件边界。"
     },
     "color.palette.forest": {
       "$type": "color",
-      "$value": "#285747",
-      "$description": "依据四张参考图归一的推荐色，并非原始设计源文件精确值。"
+      "$value": "#205D47",
+      "$description": "2026-10-14 由 V4.2 原型的 --green 收敛而来（主操作色）。"
     },
     "color.palette.forestHover": {
       "$type": "color",
-      "$value": "#204B3C",
-      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+      "$value": "#164735",
+      "$description": "2026-10-14 对齐 V4.2 原型 .new-btn/.primary:hover。"
     },
     "color.palette.forestPressed": {
       "$type": "color",
-      "$value": "#193D31",
-      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+      "$value": "#123A2B",
+      "$description": "2026-10-14 在 hover 基础上再压一档，保持 pressed 反馈。"
     },
     "color.palette.sage": {
       "$type": "color",
-      "$value": "#E7EEE6",
-      "$description": "依据四张参考图归一的推荐色，并非原始设计源文件精确值。"
+      "$value": "#EDF5EF",
+      "$description": "2026-10-14 由 V4.2 原型的 --tint 收敛而来（选中/浅绿底）。"
     },
     "color.palette.sageHover": {
       "$type": "color",
-      "$value": "#DCE7DC",
-      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+      "$value": "#E0EDE4",
+      "$description": "2026-10-14 在 tint 上加深一档，承载 hover 与 muted 文字仍 ≥4.5:1。"
     },
     "color.palette.amber": {
       "$type": "color",
-      "$value": "#795519",
-      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+      "$value": "#96622A",
+      "$description": "2026-10-14 由 V4.2 原型 --warn(#A76E30) 同色系加深：原型值在 --warnbg 上仅 4.02:1，取 #96622A 得 4.84:1。"
     },
     "color.palette.amberSoft": {
       "$type": "color",
-      "$value": "#F5EBD7",
-      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+      "$value": "#FFF7EA",
+      "$description": "2026-10-14 由 V4.2 原型的 --warnbg 收敛而来。"
     },
     "color.palette.red": {
       "$type": "color",
-      "$value": "#9B3535",
-      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+      "$value": "#A34F43",
+      "$description": "2026-10-14 由 V4.2 原型的 --red 收敛而来。"
     },
     "color.palette.redSoft": {
       "$type": "color",
-      "$value": "#F8EAE7",
-      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+      "$value": "#FFF2EE",
+      "$description": "2026-10-14 由 V4.2 原型的 --redbg 收敛而来。"
     },
     "color.palette.disabled": {
       "$type": "color",
-      "$value": "#E8E5DD",
-      "$description": "为状态或可读性补充的推荐色，待真实 UI 验证。"
+      "$value": "#E9EDE9",
+      "$description": "2026-10-14 由 line 方向收敛为冷绿灰；禁用文字仍用 muted 并保持 ≥4.5:1。"
     },
     "color.bg.canvas": {
       "$type": "color",
@@ -206,8 +212,8 @@
     },
     "color.meter.track": {
       "$type": "color",
-      "$value": "{color.palette.line}",
-      "$description": "上下文占用圆环的未占用轨道。"
+      "$value": "{color.palette.lineStrong}",
+      "$description": "上下文占用圆环的未占用轨道；2026-10-14 由 line 改指 lineStrong，保证在白纸上仍可分辨。"
     },
     "color.meter.fill": {
       "$type": "color",
@@ -273,6 +279,11 @@
       "$type": "dimension",
       "$value": "0rem"
     },
+    "space.0.5": {
+      "$type": "dimension",
+      "$value": "0.125rem",
+      "$description": "2026-10-08 控件基座轮新增：小于 space.1 的最小间距档（TodayView 时间徽标等微间距此前硬编码 0.125rem）。"
+    },
     "space.1": {
       "$type": "dimension",
       "$value": "0.25rem"
@@ -323,6 +334,11 @@
       "$type": "fontFamily",
       "$value": "\"Cascadia Mono\", \"Consolas\", \"SFMono-Regular\", monospace"
     },
+    "font.size.caption": {
+      "$type": "dimension",
+      "$value": "0.75rem",
+      "$description": "2026-10-14 协作页试点新增：辅助信息档。只给时间戳、单位计数、字段旁注、eyebrow 与状态副文案——这些文字不承担阅读任务，降到 12px 才能让 14/16px 真正承担内容；此前它们与正文同档，全页 65% 文字都是 14px，层级拉不开。不用于正文、列表主名、按钮与任何需要读懂的说明句。"
+    },
     "font.size.meta": {
       "$type": "dimension",
       "$value": "0.875rem"
@@ -371,13 +387,28 @@
       "$type": "fontWeight",
       "$value": 600
     },
+    "font.weight.bold": {
+      "$type": "fontWeight",
+      "$value": 700,
+      "$description": "2026-10-14 补定义：TaskInspectorPanel.css 与 TaskViewDashboard.css 早已消费 --relay-font-weight-bold，但本文件从未定义，浏览器按无效值回退。V4.2 原型的面板小标题用 700–760，本档承接该层级。"
+    },
     "font.lineHeight.heading": {
       "$type": "number",
       "$value": 1.25
     },
+    "font.lineHeight.snug": {
+      "$type": "number",
+      "$value": 1.35,
+      "$description": "2026-10-14 补定义：同上，两处组件早已消费 --relay-font-lineHeight-snug。用于两行以内的短标签与键值行。"
+    },
     "font.lineHeight.ui": {
       "$type": "number",
       "$value": 1.5
+    },
+    "font.lineHeight.relaxed": {
+      "$type": "number",
+      "$value": 1.7,
+      "$description": "2026-10-14 补定义：同上，用于面板内的说明段落。长文阅读仍用 font.lineHeight.reading。"
     },
     "font.lineHeight.reading": {
       "$type": "number",
@@ -390,16 +421,41 @@
     "layout.navigation.railWidth": {
       "$type": "dimension",
       "$value": "5.5rem",
-      "$description": "全局图标导航栏列宽。2026-10-02 共享壳栏位分离时新增：导航只承担定位，近期工作改由 layout.sidebar.width 承担。栏宽取自方案 2 选定稿的图标+文字竖排比例，未按图片物理像素硬编码。"
+      "$description": "全局图标导航栏列宽。2026-10-02 共享壳栏位分离时新增：导航只承担定位，近期工作改由 layout.sidebar.width 承担。栏宽取自方案 2 选定稿的图标+文字竖排比例，未按图片物理像素硬编码。固定宽度是有意的：图标导航是窗口外壳常量，不随内容区伸缩，否则竖排标签会在宽窗下被拉散。"
     },
     "layout.sidebar.width": {
       "$type": "dimension",
       "$value": "14rem",
-      "$description": "近期工作栏默认列宽，也是可拖拽列的上限内基准（SidebarResizeHandle 从本 token 推导默认值）。2026-10-02 起不再包含主导航。"
+      "$description": "近期工作栏的**拖拽默认值**（SidebarResizeHandle 据此导出 px 上下限）。2026-10-02 起不再包含主导航。注意：页壳里实际渲染的列宽是 layout.shell.sidebarWidth（百分比 + 上下限），本 token 只作为用户没有手拖过时的回退与拖拽起点。"
+    },
+    "layout.shell.sidebarWidth": {
+      "$type": "dimension",
+      "$value": "clamp(11rem, 16%, 17rem)",
+      "$description": "2026-10-15 新增：近期工作栏的**实际列宽**。百分比 + 上下限，避免固定 rem 在 1280 与 1920 下比例不一致——固定 14rem 时宽窗里这一栏显得过窄、中栏被挤。下限 11rem 保证竖排外的最低可读宽度，上限 17rem 防止过宽吃掉中栏。用户手拖后由 --relay-sidebar-user-width 覆写，但该覆写**只在 ≥64rem 生效**：48rem–64rem 由一条 @media 强制取本值，否则被拖到 20rem 的窗口缩到 768px 时内容列会低于 layout.workspace.centerMin。"
+    },
+    "layout.rail.width": {
+      "$type": "dimension",
+      "$value": "clamp(20rem, 26%, 26rem)",
+      "$description": "普通页面右栏列宽。2026-10-15 由固定 25.5rem 改为百分比 + 上下限：固定值在宽窗下右栏占比被压缩、屏幕越大越不一致。下限 20rem，上限 26rem。"
+    },
+    "layout.rail.narrowWidth": {
+      "$type": "dimension",
+      "$value": "clamp(18rem, 24%, 24rem)",
+      "$description": "窄右栏列宽。2026-10-15 由固定 20rem 改为百分比 + 上下限：下限 18rem，上限 24rem。"
     },
     "layout.collaboration.chatRatio": {
       "$type": "number",
       "$value": 0.52
+    },
+    "layout.inspector.width": {
+      "$type": "dimension",
+      "$value": "clamp(18rem, 20%, 22rem)",
+      "$description": "工作台右侧「工作详情」面板列宽。2026-10-14 新增为固定 20.125rem；2026-10-15 改为百分比 + 上下限：固定值下宽窗里面板占比被压缩、窄窗里又会把中栏吃光。下限 18rem（288px）保证正文与步骤流可读，上限 22rem（352px）防止过宽。窄容器下改为浮层，宽度仍取本值。"
+    },
+    "layout.inspector.wideWidth": {
+      "$type": "dimension",
+      "$value": "clamp(30rem, 34%, 40rem)",
+      "$description": "成果深预览时的面板宽度。2026-10-14 新增为固定 38.125rem；2026-10-15 改为百分比 + 上下限：下限 30rem（480px）是正文阅读下限，上限 40rem（640px）。不足时按可用宽度收缩。"
     },
     "layout.sidebar.compactWidth": {
       "$type": "dimension",
@@ -407,15 +463,8 @@
     },
     "layout.header.height": {
       "$type": "dimension",
-      "$value": "3.5rem"
-    },
-    "layout.rail.width": {
-      "$type": "dimension",
-      "$value": "25.5rem"
-    },
-    "layout.rail.narrowWidth": {
-      "$type": "dimension",
-      "$value": "20rem"
+      "$value": "2.8125rem",
+      "$description": "应用上下文顶栏 .app-topbar 的实际高度 = control.height.comfort + border.width。2026-10-10 语义澄清：旧值 3.5rem 属更早布局遗留，与 styles.css 中 .app-topbar { min-height: control.height.comfort; border-bottom: border.width } 不符，会让锚点滚动预留偏大。桌面壳的固定区总高另加原生标题栏 control.nav.height，不在本 token 内重复计数。"
     },
     "layout.main.padding": {
       "$type": "dimension",
@@ -555,11 +604,13 @@
     },
     "radius.panel": {
       "$type": "dimension",
-      "$value": "0.5rem"
+      "$value": "0.75rem",
+      "$description": "面板与卡片圆角；2026-10-14 由 0.5rem 提到 0.75rem，对齐 V4.2 原型卡片的 12px 圆角。"
     },
     "radius.badge": {
       "$type": "dimension",
-      "$value": "0.1875rem"
+      "$value": "0.375rem",
+      "$description": "徽标/状态标签圆角；2026-10-14 由 0.1875rem 提到 0.375rem，对齐 V4.2 原型 6px 的状态与计数徽标。"
     },
     "radius.composer": {
       "$type": "dimension",
@@ -620,10 +671,15 @@
       "$type": "shadow",
       "$value": "none"
     },
+    "shadow.card": {
+      "$type": "shadow",
+      "$value": "0 10px 32px rgb(30 57 37 / 0.055)",
+      "$description": "2026-10-14 新增：V4.2 原型里进度卡/预览纸面这类「浮在画布上的内容块」用的极轻冷绿投影。仍不使用在普通列表、侧栏与页壳上。"
+    },
     "shadow.floating": {
       "$type": "shadow",
-      "$value": "0 8px 24px rgb(24 33 31 / 0.12)",
-      "$description": "仅浮层/菜单；普通列表、侧栏和文档区域无阴影。"
+      "$value": "0 14px 44px rgb(32 61 40 / 0.13)",
+      "$description": "仅浮层/菜单；普通列表、侧栏和文档区域无阴影。2026-10-14 由偏中性的投影换成 V4.2 原型的冷绿投影。"
     }
   },
   "contrastChecks": [
@@ -735,6 +791,16 @@
     {
       "foreground": "color.disabled.text",
       "background": "color.disabled.bg",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.text.muted",
+      "background": "color.selection.hover",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "color.text.onAction",
+      "background": "color.status.danger.text",
       "minimum": 4.5
     },
     {
