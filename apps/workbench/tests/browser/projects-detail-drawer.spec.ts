@@ -63,9 +63,11 @@ test("项目详情改为抽屉：宽屏不再常驻右栏，短窗仍可从卡�
 
   const cases = [
     { width: 843, height: 782 },
+    { width: 768, height: 900 },
     { width: 1162, height: 782 },
     { width: 2048, height: 1104 },
-    { width: 843, height: 600 }
+    { width: 843, height: 600 },
+    { width: 390, height: 844 }
   ];
   for (const viewport of cases) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
@@ -73,9 +75,14 @@ test("项目详情改为抽屉：宽屏不再常驻右栏，短窗仍可从卡�
     await expect(page.getByTestId("goal-create-open")).toBeVisible();
     await expect(page.getByTestId("project-create-open")).toBeVisible();
     await expect(drawer).toHaveCount(0);
+    // V43-04 响应式回归：窄窗（≤768）与宽窗（≥1280）都不得出现整页横向溢出。
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
 
     await card.scrollIntoViewIfNeeded();
-    await card.click();
+    await page.getByTestId(`project-card-more-${projectId}`).click();
     await expect(drawer).toBeVisible();
     await expect(drawer.getByTestId("project-open")).toBeVisible();
     await page.keyboard.press("Escape");

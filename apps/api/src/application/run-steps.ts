@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFile, stat } from 'node:fs/promises';
 
 import type { DbExecutor } from '../infrastructure/database.js';
 import type {
@@ -64,6 +65,9 @@ import { advanceAiTextLocks, requireAiTextLocks } from './artifact-commands.js';
 import { RunToolCallRepository } from '../run/run-tool-call-repository.js';
 import { buildToolTurns, operationIdsOf, persistToolRound, resolveToolLoopPlan }
   from './tool-loop.js';
+import { validateSafeRelativePath } from '../files/file-changeset.js';
+import { MAX_PREVIEW_FILE_BYTES, ToolCallPreviewPublisher }
+  from '../conversation-diff/tool-call-preview.js';
 import type { RunToolCallRow } from '../infrastructure/database-schema.js';
 import type { FakeToolScript, ModelToolTurn } from '../workflow/fake-model-port.js';
 
@@ -874,34 +878,61 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
                 publishRunDraftPreview(db, { ...previewOwner, text, truncated }),
                 () => { previewEnabled = false; });
               const toolTurns = toolPlan === undefined ? [] : await loadSettledToolTurns(db, toolRows);
-              const generated = await currentPort.generate({ manifest: manifest.payload,
-              outputSchema: CANDIDATE_OUTPUT_SCHEMA,
-                ...(toolPlan === undefined ? {} : { tools: toolPlan.specs, toolTurns }),
-                ...(input.signal === undefined ? {} : { signal: input.signal }),
-                onTextDelta: async (piece) => {
-                  const observedAt = new Date();
-                  if (piece === '' || !previewEnabled || input.signal?.aborted) return;
-                  try {
-                    if (!textObserved) {
-                      textObserved = await recordRunDraftFirstTextDelta(db,
-                        { ...previewOwner, observedAt });
-                      if (!textObserved) { previewEnabled = false; return; }
+              // 生成中的只读预览通道（工作台 §34.4 / CD-09–11）：只给 APPLY_CHANGESET 类
+              // 工具建发布器，逐工具序号隔离；任何预览失败都不改变模型调用与后续执行。
+              const toolPreviews = new Map<number, ToolCallPreviewPublisher>();
+              let generated: Awaited<ReturnType<typeof currentPort.generate>>;
+              try {
+                generated = await currentPort.generate({ manifest: manifest.payload,
+                outputSchema: CANDIDATE_OUTPUT_SCHEMA,
+                  ...(toolPlan === undefined ? {} : { tools: toolPlan.specs, toolTurns }),
+                  ...(input.signal === undefined ? {} : { signal: input.signal }),
+                  onTextDelta: async (piece) => {
+                    const observedAt = new Date();
+                    if (piece === '' || !previewEnabled || input.signal?.aborted) return;
+                    try {
+                      if (!textObserved) {
+                        textObserved = await recordRunDraftFirstTextDelta(db,
+                          { ...previewOwner, observedAt });
+                        if (!textObserved) { previewEnabled = false; return; }
+                      }
+                      await preview.push(piece);
                     }
-                    await preview.push(piece);
-                  }
+                    catch (error) {
+                      if (!(error instanceof AssistPreviewOwnershipLostError)) {
+                        throw new RunDraftPreviewWriteError();
+                      }
+                    }
+                  },
+                  onToolArgumentsDelta: async (delta) => {
+                    const plan = toolPlan;
+                    if (plan === undefined) return;
+                    if (plan.allowed.get(delta.name)?.actionType !== 'APPLY_CHANGESET') return;
+                    let publisher = toolPreviews.get(delta.toolIndex);
+                    if (publisher === undefined) {
+                      publisher = new ToolCallPreviewPublisher({ repositories,
+                        sink: { workspaceId: claim.run.workspace_id, runId: claim.run.id,
+                          modelCallId: callId, ordinal: delta.toolIndex },
+                        toolName: delta.name,
+                        readFile: (relativePath) => readManagedPreviewFile(
+                          plan.canonicalRoot, relativePath) });
+                      toolPreviews.set(delta.toolIndex, publisher);
+                    }
+                    await publisher.feed(delta.argumentsText);
+                  } });
+                if (generated.kind !== 'CANCELLED' && previewEnabled) {
+                  try { await preview.flush(); }
                   catch (error) {
                     if (!(error instanceof AssistPreviewOwnershipLostError)) {
                       throw new RunDraftPreviewWriteError();
                     }
                   }
-                } });
-              if (generated.kind !== 'CANCELLED' && previewEnabled) {
-                try { await preview.flush(); }
-                catch (error) {
-                  if (!(error instanceof AssistPreviewOwnershipLostError)) {
-                    throw new RunDraftPreviewWriteError();
-                  }
                 }
+              } finally {
+                // 生成结束即撤下临时预览：工具行的「执行中/已修改」随后接管这一位置。
+                // 清理失败也只影响展示：读接口按模型调用状态过滤已结算调用的残留预览。
+                for (const publisher of toolPreviews.values()) await publisher.flush();
+                await deleteToolCallPreviews(repositories, claim.run.workspace_id, callId);
               }
               return generated;
             },
@@ -1060,6 +1091,39 @@ async function loadSettledToolTurns(db: DbExecutor,
     }
   }
   return buildToolTurns(rows, results);
+}
+
+/**
+ * 生成中预览的只读文本获取：受管根内、非保护路径、且不超过预览上限。
+ *
+ * 任何不可读（逃逸/保护路径/目录/超限/IO 失败）都返回 null——该文件预览记「待核对」，
+ * 真实写入仍走原 Gateway 校验；这里不读、不缓存、不写任何东西。
+ */
+async function readManagedPreviewFile(rootPath: string,
+  relativePath: string): Promise<string | null> {
+  let absolute: string;
+  try {
+    absolute = validateSafeRelativePath(rootPath, relativePath);
+  } catch {
+    return null;
+  }
+  try {
+    const info = await stat(absolute);
+    if (!info.isFile() || info.size > MAX_PREVIEW_FILE_BYTES) return null;
+    return await readFile(absolute, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/** 生成结束后的预览清理；失败只影响展示，不改变模型调用结果与执行。 */
+async function deleteToolCallPreviews(repositories: Repositories, workspaceId: string,
+  modelCallId: string): Promise<void> {
+  try {
+    await repositories.toolCallPreview.deleteForCall(workspaceId, modelCallId);
+  } catch {
+    // 预览是可丢弃证据：清理失败留给读接口按模型调用状态过滤。
+  }
 }
 
 async function preloadVersion(repositories: Repositories, storage: ManagedContentStore, versionId: string,

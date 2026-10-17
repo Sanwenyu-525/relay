@@ -1,5 +1,6 @@
 import { createBrowserRouter, createMemoryRouter, Navigate, type RouteObject } from "react-router-dom";
 import App from "./App";
+import RouteErrorBoundary from "./components/RouteErrorBoundary";
 import ActivityView from "./views/ActivityView";
 import CollaborationView from "./views/CollaborationView";
 import ArtifactLineageView from "./views/ArtifactLineageView";
@@ -23,6 +24,8 @@ import UnsupportedView from "./views/UnsupportedView";
 export const workbenchRoutes: RouteObject[] = [{
   path: "/",
   element: <App />,
+  // 根级兜底：任何视图的渲染错误先落这里，不再摔到 React Router 的英文默认错误页。
+  errorElement: <RouteErrorBoundary />,
   children: [
     { index: true, element: <Navigate to="/projects" replace /> },
     { path: "today", element: <TodayView /> },

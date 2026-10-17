@@ -44,12 +44,11 @@ body {
   overflow: hidden;
 }
 
-/* 滚动条原生化：细、透明轨道、悬浮显形圆角 thumb。标准属性 + WebView2/Chromium 前缀双写。 */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--relay-color-border-control) transparent;
-}
-
+/* 滚动条只用 ::-webkit-scrollbar 自绘（细、透明轨道、悬浮显形圆角 thumb）。
+   2026-10-17 去掉 * 上的 scrollbar-width / scrollbar-color 双写：Chromium/WebView2 只要看到
+   非 auto 的 scrollbar-width 就改画原生滚动条，并忽略下面整组前缀规则——于是 thumb 是
+   control 档的深绿灰，轨道两端还各带一枚跳转箭头，正是用户要求去掉的两处。
+   需要整条隐藏滚动条的容器仍用标准属性 scrollbar-width: none（它同样屏蔽前缀规则）。 */
 ::-webkit-scrollbar {
   width: 12px;
   height: 12px;
@@ -59,15 +58,22 @@ body {
   background: transparent;
 }
 
+/* 两端箭头按钮：自绘滚动条里显式归零，不靠默认值。 */
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 ::-webkit-scrollbar-thumb {
-  background: var(--relay-color-border-control);
+  background: var(--relay-color-palette-lineStrong);
   background-clip: padding-box;
   border: 3px solid transparent;
   border-radius: var(--relay-radius-round);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--relay-color-text-muted);
+  background: var(--relay-color-border-control);
   background-clip: padding-box;
 }
 
@@ -259,6 +265,12 @@ svg {
   width: var(--relay-control-icon-size);
   height: var(--relay-control-icon-size);
 }
+/* 后退/前进箭头只作为导航把手：不可用的一侧保持透明，不再落一块常显灰底
+   （历史起点时「后退」总是禁用态，全局 disabled 底色会让它看着像被永久高亮）。 */
+.workbench-actions .icon-button:disabled {
+  background: transparent;
+  color: var(--relay-color-text-muted);
+}
 
 .desktop-titlebar__separator {
   height: var(--relay-space-4);
@@ -392,10 +404,13 @@ svg {
      固定值下 1280 与 1920 的比例不一致——宽窗里这一栏显得过窄、中栏不成比例地被挤大。
      --relay-shell-sidebar-width 在这里解析一次，拖拽手柄的定位复用同一变量，不会出现「列宽变了、手柄没跟上」。 */
   --relay-shell-sidebar-width: var(--relay-sidebar-user-width, var(--relay-layout-shell-sidebarWidth));
-  /* 两栏之间留一档间隙：底色不同（navigation 浅绿白 vs surface 纯白）时靠颜色分野，
-      看着像一整块从左顶到右；加间隙后底色分野才有边界含义。此前 column-gap 为 0，
-      图标栏右缘直接贴上近期工作栏左缘（实测 railGap=0）。 */
-  column-gap: var(--relay-space-2);
+  /* 2026-10-16 外壳改成「图标栏右侧一整张卡片」后，这档间隙不再是两栏之间的桌面带：
+      卡片左缘由自己的描边加圆角说完，间隙归零，让图标格左右对称——它距屏幕左缘 12px
+      （图标栏左右内边距），距卡片左缘也必须是 12px（图标栏右内边距），中间不再插缝。
+      归零同时消掉了会话栏与正文之间的列间缝，卡片因此是一整块连续纸面。
+      历史：column-gap 曾为 0 → 8px（靠底色分野）→ 4px → 现在回到 0，但语义已换，
+      边界不再交给颜色，交给卡片描边。拖拽手柄的定位与此同源。 */
+  column-gap: 0;
   grid-template-columns:
     var(--relay-layout-navigation-railWidth)
     var(--relay-shell-sidebar-width)
@@ -405,7 +420,8 @@ svg {
 }
 
 /* 拖拽分隔条通用样式：所有 role="separator" 的列宽拖拽条共用同一交互与外观。
-   默认透明，悬停/拖拽/聚焦才显示深控制线，线由 ::after 居中画在命中区中轴上。
+   默认透明，悬停/聚焦才显示控制线，线由 ::after 居中画在命中区中轴上。
+   2026-10-17 用户指令：悬停线比控件边界浅一档；拖拽期间保持与悬停相同的线，不再消失。
    使用方需自行提供定位上下文（position 非 static）与命中区宽度。 */
 .drag-separator {
   position: relative;
@@ -430,8 +446,9 @@ svg {
 
 .drag-separator:hover::after,
 .drag-separator:focus-visible::after,
-.drag-separator--dragging::after {
-  background: var(--relay-color-border-control);
+.drag-separator--dragging::after,
+.drag-separator--dragging:hover::after {
+  background: color-mix(in srgb, var(--relay-color-border-control) 55%, transparent);
 }
 
 /* 近期工作栏拖拽分隔条：画在图标导航栏与近期工作栏之间；≥64rem 显示，
@@ -441,11 +458,10 @@ svg {
   position: absolute;
   top: 0;
   bottom: 0;
-  /* 列宽 + 一档 column-gap（.app-frame）才是边界：间隙插在图标栏与近期工作栏之间，
-     描边线画在列边界上，不能跟着挪进间隙。 */
+  /* 图标栏列宽 + column-gap（.app-frame，现为 0）+ 会话栏列宽 才是边界：
+     描边线画在列边界上。这里的间隙项必须与 .app-frame 的 column-gap 同值，否则手柄和分隔线错开。 */
   left: calc(
     var(--relay-layout-navigation-railWidth) +
-    var(--relay-space-2) +
     var(--relay-shell-sidebar-width) -
     var(--relay-control-target-minimum) / 2
   );
@@ -453,7 +469,11 @@ svg {
   z-index: var(--relay-zIndex-sticky);
 }
 
-/* 图标导航栏：只承担定位。窄栏用图标 + 竖排文字，不横向挤压文字或把名称压成一条线。 */
+/* 图标导航栏：只承担定位。窄栏用图标 + 竖排文字，不横向挤压文字或把名称压成一条线。
+   左右内边距取 space.3 而不是 space.1：原型 `.rail` 的色块就是按钮本身（44px 放进 49px 内容盒），
+   两侧各留约 7px 空白，所以它读成「一块方形瓷砖」；本站栏宽 4.75rem，若只留 4px，
+   色块被拉到 67px 宽、53px 高的整行高亮，面积接近原型两倍，选中态完全换了语义。
+   收到 12px 后单格 52×50，与原型 44×44 同为方块，激活条也重新落在色块左缘上。 */
 .app-navrail {
   position: sticky;
   top: 0;
@@ -463,13 +483,18 @@ svg {
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: var(--relay-space-4) var(--relay-space-1) var(--relay-space-3);
+  padding: var(--relay-space-2) var(--relay-space-3) var(--relay-space-3);
   background: var(--relay-color-bg-navigation);
   border-right: var(--relay-border-width) solid var(--relay-color-border-separator);
 }
 
-/* 近期工作栏：项目/任务上下文，与导航职责分离；可拖拽列宽与滚动 Owner 都在这里。
-   2026-10-14 对齐 V4.2 原型：侧栏是白纸面，画布色留给主内容区，两栏之间才有可读的分层。 */
+/* 图标栏顶端不放品牌方块/logo：V4.2 曾加过 `.navrail-brand`（V4.3 对齐时改名放大），
+   2026-10-16 按用户要求移除，定位由下方入口本身承担。后续照页面原型改造时不要加回来。 */
+
+/* 近期工作栏（会话栏）：项目/任务上下文，与导航职责分离；可拖拽列宽与滚动 Owner 都在这里。
+   2026-10-14 对齐 V4.2 原型：侧栏是白纸面，画布色留给主内容区，两栏之间才有可读的分层。
+   2026-10-16 会话栏与中栏合并成同一张卡片（见下方外壳分层）：列间不再露出桌面色缝隙，
+   这一栏的左边界就是整张卡片的左边界；右缘描边保留，作为会话栏与正文的分界。 */
 .app-context-rail {
   position: sticky;
   top: 0;
@@ -480,7 +505,6 @@ svg {
   overflow: hidden;
   padding: var(--relay-space-2);
   background: var(--relay-color-bg-surface);
-  border-right: var(--relay-border-width) solid var(--relay-color-border-separator);
 }
 
 .desktop-window .app-navrail,
@@ -494,10 +518,15 @@ svg {
   flex: none;
   min-height: var(--relay-control-height-compact);
   padding-bottom: var(--relay-space-1);
+  /* 这一档 margin 就是栏头「新对话」的「上间距」：2026-10-16 第六轮按用户要求 space.2 → space.1。 */
   margin-bottom: var(--relay-space-1);
 }
 
 .context-rail-brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--relay-space-1);
+  min-width: 0;
   margin: 0;
   font-family: var(--relay-font-family-ui);
   font-size: var(--relay-font-size-body);
@@ -506,20 +535,86 @@ svg {
   line-height: var(--relay-font-lineHeight-heading);
 }
 
-/* 专栏头的「新对话」是这一栏唯一的主操作（协作页 §3.1）：从纯图标升为带文字的按钮，
-   尺寸取 control.height，与全局 primary 的配色、hover/active 反馈一致。 */
+/* 品牌副名（原型 brand 里的小字 Workspace）：只说明这一栏是什么，字重与字号都压到 caption，
+   不与「Relay」抢同一层强调。 */
+.context-rail-brand-tag {
+  flex: none;
+  font-size: var(--relay-font-size-caption);
+  font-weight: var(--relay-font-weight-medium);
+  color: var(--relay-color-text-muted);
+}
+
+/* 专栏头的「新对话」是这一栏唯一的主操作（协作页 §3.1）。
+   2026-10-15 对齐 V4.3 原型：从品牌行内的紧凑按钮改为独占一行的全宽按钮，
+   高度仍取 primary 的 control.height.prominent（不为贴原型 13px 基准而缩到可点面积以下）。
+   2026-10-16 用户要求去掉底色：不再走 primary 的实心底与 onAction 白字，改用与窄窗抽屉里
+   同一条 href 的 `.mobile-navigation-action` 同一套无底动作语言（action.text + selection 两档反馈），
+   两处入口的视觉因此一致。primary 类保留：它仍承担 prominent 高度与共享 focus/disabled 机制。
+   同日第二轮按用户要求收小并左对齐：字号 body → meta（与栏内行标题同档，不再比列表项更重），
+   图标 control.icon.size(20px) → 16px（取 font.size.body，与本文件「图标跟随当前字号」的既有写法同源，
+   不新增 token），`justify-content` 居中 → 左起，横向内边距 space.3 → space.2，
+   实测图标左缘距栏 17px，与下方搜索框的放大镜同一条竖线；文字左缘 41px。命中区仍是 48px，未跟着缩。
+   同日第三轮按用户要求收矮悬停底色：实心淡底由整块 48px 收进一条上下各内缩 space.2 的色带（实测 30px 高、
+   横向仍满行、圆角 radius.control），命中区、焦点环与内边距一寸未动。色带画成 `::before` 而不是改用
+   `background-clip: content-box`：后者会把圆角按「外圈 − padding − border」内收，本站 8px padding 配 8px
+   圆角直接被压成直角，要保住圆角就得再写一个三 token 相加的同心算式；`z-index: -1` 落在元素自己的
+   stacking context 里（靠 `isolation` 建立），压不住图标与文字。上下内缩这条与同栏 `.recent-work-item`
+   激活标记的写法同源。
+   同日第四轮按用户要求收掉按钮自身的上下留白：整块高度由 primary 的 prominent(48px) 降到共享默认
+   `control.height`(40px)——这一条推翻本注释开头「高度仍取 prominent、不为贴原型缩命中区」那句，理由是
+   用户连着四轮把这条入口往小里收，48px 的正文档高度是给实心主按钮用的，无底小入口留着只会让 14px 标签
+   上下各空 17px。40px 仍是全站按钮共用的默认控件高，未跌破 `control.height.compact`(32px) 这条可读下限；
+   色带内缩随之由 space.2 收到 space.1，保持第三轮已确认的 30px 带高不变。
+   同日第五轮把 `width` 由 100% 改成 fit-content、收成贴着内容的左侧小块——**这一轮是对用户指令的误读
+   （把「上下间距还是太大」读成横向太宽），当日第六轮整条撤回**：`width` 回到 100%，整行命中区恢复。
+   同日第六轮才是用户真正指的那件事，三处一起收：整块高 `control.height`(40px) → `control.height.compact`
+   (32px)（该 token 自己的说明就是「仍高于 control.target.minimum，键盘与指针目标不缩水」，且与下方搜索框同高），
+   按钮 `margin-bottom` 与栏头 `.context-rail-head` 的 `margin-bottom` 各由 space.2 → space.1（这两条就是标签
+   上下的那道空隙）。色带内缩仍取 space.1，父盒变矮后带高由 30px 收到 22px，仍高于 14px 标签。
+   实测标签上下各空 7.25px（第四轮 11.25px、第三轮及以前 17px），品牌行→按钮→搜索框两段间隙各 4px。 */
 .context-rail-new {
   flex: none;
-  display: inline-flex;
+  width: 100%;
+  display: flex;
   align-items: center;
-  gap: var(--relay-space-1);
-  min-height: var(--relay-control-height-compact);
-  height: var(--relay-control-height-compact);
-  padding: 0 var(--relay-space-2);
+  gap: var(--relay-space-2);
+  margin-bottom: var(--relay-space-1);
   font-size: var(--relay-font-size-meta);
   line-height: var(--relay-font-lineHeight-heading);
+  position: relative;
+  isolation: isolate;
 }
-.context-rail-new > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+.context-rail-new::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: var(--relay-space-1) 0;
+  border-radius: var(--relay-radius-control);
+  background: transparent;
+  transition: background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+/* 选择器写成双类：`.primary-button` 与共享按钮基座都在本文件靠后位置，
+   单类覆盖会被同特异度的它们反压——底色、字色、字重、内边距、`justify-content` 与 `min-height` 都会落回默认值
+   （实测把 `justify-content: flex-start` 只写在上面那条里，计算值仍是 center）。 */
+.primary-button.context-rail-new {
+  background: transparent;
+  color: var(--relay-color-action-text);
+  justify-content: flex-start;
+  min-height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-2);
+  font-weight: var(--relay-font-weight-semibold);
+}
+/* 悬停与按下都改画在色带上，元素自身底色仍须显式压一次：共享基座 `.primary-button:hover/:active:not(:disabled)`
+   特异度 0,3,0，高于上面 `background: transparent` 的 0,2,0，不压住 hover 会把实心绿底整块填回来
+   （本轮把淡底移上色带后实测到的第二处反压）。 */
+.primary-button.context-rail-new:hover:not(:disabled),
+.primary-button.context-rail-new:active:not(:disabled) { background: transparent; }
+.primary-button.context-rail-new:hover:not(:disabled)::before { background: var(--relay-color-selection-hover); }
+.primary-button.context-rail-new:active:not(:disabled)::before { background: var(--relay-color-selection-bg); }
+/* 焦点环跟着底色一起改：全局把 primary 的环换成 text.onAction 白，是为实心绿底准备的（§6）；
+   无底之后白环落在白色栏上不可见，这里回到默认 focus.ring——与 action.text 同色，实测对栏底 7.73:1。 */
+.primary-button.context-rail-new:focus-visible { outline-color: var(--relay-color-focus-ring); }
+.context-rail-new > svg { width: var(--relay-font-size-body); height: var(--relay-font-size-body); flex: none; }
 
 .context-rail-placeholder {
   margin: 0;
@@ -527,21 +622,67 @@ svg {
   overflow-wrap: anywhere;
 }
 
-/* 2026-10-15 删除原 `.brand` 规则：外壳品牌标记早已改成图标栏内的 `.navrail-brand`
+/* 2026-10-15 收起/折叠近期工作栏（原型 toggle-side）：外壳单入口把这一栏收成一条窄把手列，
+   只留折叠按钮；图标导航与主内容不受影响。列宽取 control.height-comfort，与顶部把手同档。
+   grid-template 只在 ≥48rem 覆写：<48rem 两栏都 display:none 走单列，硬套三列会空占两道轨。 */
+@media (width >= 48rem) {
+  .app-frame[data-context-collapsed="true"] {
+    grid-template-columns: var(--relay-layout-navigation-railWidth) var(--relay-control-height-comfort) minmax(0, 1fr);
+  }
+}
+.app-frame[data-context-collapsed="true"] .app-context-rail {
+  padding: var(--relay-space-2) var(--relay-space-1);
+  overflow: visible;
+}
+.app-frame[data-context-collapsed="true"] .context-rail-head {
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--relay-space-2);
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.app-frame[data-context-collapsed="true"] .context-rail-brand,
+.app-frame[data-context-collapsed="true"] .context-rail-new,
+.app-frame[data-context-collapsed="true"] .context-rail-placeholder,
+.app-frame[data-context-collapsed="true"] .recent-work {
+  display: none;
+}
+.app-frame[data-context-collapsed="true"] .context-rail-collapse {
+  width: var(--relay-control-height-comfort);
+  min-width: var(--relay-control-height-comfort);
+  padding: 0;
+}
+/* 收起后没有可调列宽，隐藏拖拽条。 */
+.app-frame[data-context-collapsed="true"] .sidebar-resize-handle {
+  display: none;
+}
+
+/* 项目列表、待处理和动态将宽度交给业务内容。保留会话栏的挂载与折叠偏好，
+   返回工作台时恢复原上下文；收起偏好不能在这些页面空占一条把手列。 */
+@media (width >= 48rem) {
+  .app-frame.app-frame--page-focused {
+    grid-template-columns: var(--relay-layout-navigation-railWidth) minmax(0, 1fr);
+  }
+}
+.app-frame--page-focused .app-context-rail,
+.app-frame--page-focused .sidebar-resize-handle { display: none; }
+
+/* 2026-10-15 删除原 `.brand` 规则：外壳品牌标记当时是图标栏内的 `.navrail-brand`
    （AppShell.tsx），`class="brand"` 没有渲染点，留着的是一条谁也测不到的死规则。
-   原先它在 `width < 64rem` 档还有两条覆盖，随折叠点拆分一并移除。 */
+   原先它在 `width < 64rem` 档还有两条覆盖，随折叠点拆分一并移除。
+   2026-10-16 接续：`.navrail-brand` 本身也已移除，图标栏顶端不再放任何标识。 */
 
 .navigation-list {
   display: flex;
   flex-direction: column;
-  gap: var(--relay-space-1);
+  /* 入口之间留 space.2：space.1 时十个竖排格子贴成一片，读不出「一格一项」。 */
+  gap: var(--relay-space-2);
 }
 
-/* 图标栏内的次级入口组（今日、全部任务、动态、收件箱）：常驻显示，只用一条细分隔线与主导航分组。 */
+/* 图标栏内的次级入口组（今日、全部任务、动态、收件箱）：常驻显示；2026-10-15 去分区——不再用分隔线，只留一点间距。 */
 .navigation-list--secondary {
-  margin-top: var(--relay-space-4);
-  padding-top: var(--relay-space-2);
-  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+  margin-top: var(--relay-space-2);
 }
 
 /* 近期工作分组：按项目折叠、去重、沿服务端游标续页。范围与排序常驻可见（业务要求写明），
@@ -560,11 +701,18 @@ svg {
 /* 2026-10-02 共享壳栏位分离：列表高度与滚动 Owner 由近期工作栏自己持有。 */
 .app-context-rail .recent-work { padding-top: 0; }
 .recent-work > :not(.recent-work-scroll) { flex: none; }
-.recent-work-scroll { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
+/* 滚动条隐藏：窄栏里常驻 thumb 既压视觉又占列宽，滚轮/触摸滚动不受影响。
+   scrollbar-width: none 在 Chromium/WebView2 下会一并忽略 ::-webkit-scrollbar，
+   同时 gutter 失去意义，不再预留。 */
+.recent-work-scroll { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
 /* 错误里的 URL 和 ID 不能撑破侧栏：长标识允许断行，不产生整页横向滚动。 */
 .recent-work .action-error, .recent-work .helper-text { overflow-wrap: anywhere; }
-/* 窄栏搜索：压掉全局 .search-field 的 min-width:12rem，底用 subtle、边用 separator，更贴栏宽。 */
-.recent-work-search {
+/* 窄栏搜索：全局 .search-field 带 min-width:12rem、control.height 与继承来的正文档字号，
+   而近期工作栏的列宽下限只有 11rem（内容盒 160px）——同特异度下靠后的全局规则会赢，
+   上一版把覆盖写在它之前，实测仍然落到 192px/40px/16px，被 overflow:hidden 切掉 32px。
+   这里用双类选择器提高特异度，不靠调整声明顺序。
+   字号写在容器上：.search-field input 的 font:inherit 会压掉内层任何 font-size。 */
+.search-field.recent-work-search {
   flex: none;
   min-width: 0;
   width: 100%;
@@ -574,50 +722,47 @@ svg {
   background: var(--relay-color-bg-subtle);
   border-color: var(--relay-color-border-separator);
   border-radius: var(--relay-radius-round);
+  font-size: var(--relay-font-size-meta);
 }
 .recent-work-search > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); flex: none; }
-.recent-work-search input { font-size: var(--relay-font-size-meta); }
-.recent-work-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  /* 2026-10-15 允许整块换行：48rem–64rem 档栏宽取 clamp 下限 176px，计数必须整块落到
-     第二行，而不是被 flex 压成逐字竖排把栏头撑成三四行。 */
-  flex-wrap: wrap;
-  gap: var(--relay-space-1);
-  min-height: auto;
-  padding: var(--relay-space-0-5) var(--relay-space-1) 0;
-}
-.recent-work-heading h2 {
-  display: flex;
-  align-items: center;
-  gap: var(--relay-space-2);
-  margin: 0;
-  font-size: var(--relay-font-size-meta);
-  font-weight: var(--relay-font-weight-semibold);
-  color: var(--relay-color-text-secondary);
-}
-.recent-work-heading h2 > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
-/* 范围说明与刷新同排：占标题行的空白，不新增一行高度。 */
-/* nowrap 是必需的：flex:1 遇到 176px 的窄栏会把它压到一两个字符宽，中文随即逐字折行，
-   栏头被撑成三四行并把列表挤出首屏。允许整块换行，不允许内部折行。 */
-.recent-work-count { flex: 1; margin: 0; color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); text-align: end; font-variant-numeric: tabular-nums; line-height: var(--relay-font-lineHeight-heading); white-space: nowrap; }
-.recent-work-heading .icon-button {
-  width: var(--relay-control-height-compact);
-  min-width: var(--relay-control-height-compact);
-  min-height: var(--relay-control-height-compact);
-  padding: 0;
-}
-.recent-work-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
-.recent-work-group { margin-block: 0 var(--relay-space-1); }
-/* 组标题：meta + text.muted + medium，右侧带本组计数；高度压到 compact，与任务行拉开层级。 */
+/* 行距只有一档：分组内列表与已归档区列表共用 space.0.5（行距 34px = 32px 行高 + 2px）。
+   2026-10-16 第七轮按用户「item 的间距再减小，而且要统一」撤掉分组覆盖里的 space.1——
+   此前分组内 4px、已归档区 2px，同一列出现两档行距。 */
+.recent-work-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--relay-space-0-5); position: relative; }
+/* 分组相对段标题的上下留白：上 4px 段标题→分组、下 8px 分组之间与「末组→下一根区」同档。
+   2026-10-16 第八轮按用户「间距还是太大」由 space.3(12) 收到 space.2(8)——
+   分组下外边距原为 12px，会塌穿包装层把根区间距顶回 12px，必须与根区 margin 同步收。 */
+.recent-work-group { margin-block: var(--relay-space-1) var(--relay-space-2); margin-inline-start: var(--relay-space-2); }
+/* 2026-10-16 第三轮截图反馈：根区之间不再画分隔线。目标／工作区（目录）／任务入口连排时，
+   这三条横线把一列切成几段，层级改由字号档、字重、缩进与留白表达（见设计系统 §9.11）。
+   同日第五轮按用户截图再收：margin 与 padding 原本各留一档（12 + 8 = 20px），分隔线撤掉后
+   padding 成了重复留白，与「任务入口 ↔ 已归档」的 12px 不一致；两边对齐到一档 space.3。
+   第七轮（同日）：已归档段移入 recent-work-list 包装层，与三个根区成为相邻兄弟——此前包装层
+   隔断相邻关系，「任务入口 ↔ 已归档」不吃这条 margin，任务入口收起时间隙塌成 0px，
+   用户截图指认「四个根区间距没有统一」。
+   第八轮（同日）：用户再看实机「间距还是太大」——条目行距已触紧凑 token 下限（32px 行高
+   ＋2px），块间距再收一档到 space.2（8px），与分组下外边距同档；层级留白成为
+   8px（根区／分组）→ 4px（段标题→分组）→ 2px（条目）的整档缩放，不新增数值。 */
+.recent-work-section + .recent-work-section { margin-top: var(--relay-space-2); }
+/* 空态也属于辅助信息；双类限定避免靠后的全局 helper-text 把它放回正文档。
+   水平居中：这一段没有可点对象，左对齐会读成「还有一列没显示出来的内容」。 */
+.recent-work .helper-text.recent-work-scope-note { margin: var(--relay-space-2); font-size: var(--relay-font-size-caption); line-height: var(--relay-font-lineHeight-ui); color: var(--relay-color-text-muted); text-align: center; }
+/* 根区标题静止时不铺底：淡底在这一列里读成一块抬起的卡片，三个根区连排会把左栏切成灰白条纹。
+   底色只在悬停/按下时出现，与内层组标题同一套交互，层级靠字号档、字重、缩进与留白表达。 */
+.recent-work-section > summary { display: flex; align-items: center; gap: var(--relay-space-1); min-height: var(--relay-control-height-compact); cursor: pointer; list-style: none; color: var(--relay-color-text-primary); border-radius: var(--relay-radius-badge); font-size: var(--relay-font-size-meta); font-weight: var(--relay-font-weight-semibold); padding: 0 var(--relay-space-2); transition: background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard); }
+.recent-work-section > summary:hover { background: var(--relay-color-bg-subtle); }
+.recent-work-section > summary:active { background: var(--relay-color-selection-hover); }
+.recent-work-section > summary > svg { order: 1; width: var(--relay-font-size-caption); height: var(--relay-font-size-caption); flex: none; color: var(--relay-color-text-muted); }
+.recent-work-section > summary::-webkit-details-marker { display: none; }
+.recent-work-section:not([open]) > summary > svg { transform: rotate(-90deg); }
+/* 区块 meta/semibold，内层组 caption/medium，条目 meta/regular；用一档缩进和树线补足层级。 */
 .recent-work-group > summary {
   display: flex; align-items: center; gap: var(--relay-space-1);
   list-style: none; cursor: pointer;
   min-height: var(--relay-control-height-compact);
   padding: 0 var(--relay-space-1);
   border-radius: var(--relay-radius-control);
-  font-size: var(--relay-font-size-meta); font-weight: var(--relay-font-weight-semibold);
+  font-size: var(--relay-font-size-caption); font-weight: var(--relay-font-weight-medium);
   color: var(--relay-color-text-secondary);
   line-height: var(--relay-font-lineHeight-heading);
   transition: background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
@@ -625,8 +770,10 @@ svg {
 .recent-work-group > summary:hover { background: var(--relay-color-selection-hover); }
 .recent-work-group > summary:active { background: var(--relay-color-selection-bg); }
 .recent-work-group > summary::-webkit-details-marker { display: none; }
-.recent-work-group > summary > svg { width: var(--relay-font-size-meta); height: var(--relay-font-size-meta); flex: none; }
-.recent-work-group:not([open]) > summary > svg { transform: rotate(-90deg); }
+.recent-work-group > summary > svg { width: var(--relay-font-size-caption); height: var(--relay-font-size-caption); flex: none; }
+/* 折叠标记只转第一枚图标：组标题前的目录标记是内容不是状态，收起时不该跟着转。 */
+.recent-work-group:not([open]) > summary > svg:first-of-type { transform: rotate(-90deg); }
+.recent-work-group-folder { color: var(--relay-color-text-muted); }
 .recent-work-group-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recent-work-group-count {
   flex: none;
@@ -635,22 +782,27 @@ svg {
   border-radius: var(--relay-radius-badge);
   background: var(--relay-color-bg-subtle);
   color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  font-weight: var(--relay-font-weight-regular);
   font-variant-numeric: tabular-nums;
   text-align: center;
   line-height: var(--relay-font-lineHeight-ui);
 }
 .recent-work-group .recent-work-list {
   margin-left: var(--relay-space-2);
-  padding-left: var(--relay-space-1);
+  /* 竖线是分组依据，条目和激活标记都要与它留出缝：贴着画会读成「这根线属于这一行」。 */
+  padding-left: var(--relay-space-0-5);
   border-left: var(--relay-border-width) solid var(--relay-color-border-separator);
-  gap: 0;
 }
-/* 密列表：行高 control.height.comfort；主名 body/medium、副行 meta/muted，行内用 heading 行高压进固定行高。
+/* 单行列表：标题 meta/regular，行内不再有第二行。2026-10-16 第五轮按用户「item 的间距太大」
+   把行高压到紧凑档（control.height.comfort 44 → control.height.compact 32）、竖直内边距同步由
+   space.2 收到 space.1；同日接续「再减小一点」把行内竖直留白与行间距再收半档（space.1 → space.0-5），
+   行距 48px → 34px。命中区仍是整行宽，不缩窄指针目标，行高下限仍是紧凑档。
    定位基准只为行内激活标记，标记本身不占 border。 */
 .recent-work-item {
   position: relative;
   width: 100%;
-  min-height: var(--relay-control-height-comfort);
+  min-height: var(--relay-control-height-compact);
   display: flex;
   align-items: center;
   gap: var(--relay-space-2);
@@ -671,67 +823,271 @@ svg {
   background: var(--relay-color-selection-bg);
   color: var(--relay-color-selection-text);
 }
+/* 激活标记相对条目左缘的偏移：2026-10-16 第五轮按用户指认右移 3px（原为 0）。
+   token 里没有 3px 这一档（space.0.5 = 2px、space.1 = 4px），按用户给定值写，
+   已记入设计系统 §9.11 待真实窗口复核。 */
 .recent-work-item--active::before {
   content: "";
   position: absolute;
   inset-block: var(--relay-space-1);
-  inset-inline-start: 0;
+  inset-inline-start: 3px;
   width: var(--relay-focus-width);
   border-radius: var(--relay-radius-round);
   background: var(--relay-color-action-primary);
 }
-.recent-work-item--active .recent-work-title { color: var(--relay-color-selection-text); font-weight: var(--relay-font-weight-semibold); }
-.recent-work-item--active .recent-work-time { color: var(--relay-color-text-muted); }
+.recent-work-item--active .recent-work-title { color: var(--relay-color-selection-text); font-weight: var(--relay-font-weight-medium); }
 .recent-work-icon { flex: none; color: var(--relay-color-text-secondary); margin-top: var(--relay-space-1); }
 .recent-work-icon > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
-/* 两行：主名独占整行宽度（栏宽可窄到 160px，时间不与标题抢横向空间），副行只放不重复的信息。 */
-.recent-work-copy { flex: 1; display: grid; gap: 0; min-width: 0; }
-.recent-work-title {
+/* 单行：类型图标 + 主名 + 置顶徽标排在同一行。2026-10-16 第五轮把常驻时间移出这一行，
+   时间与归属改由悬停摘要卡呈现（工作台 §28.9），同一屏因此能多看几条。
+   主名用 meta 而非 body：body 档在 160px 内容盒里只容得下 7 个汉字，整列都收在省略号上；
+   meta 档容到 8.6 字，与上游侧栏列表标题同档。 */
+.recent-work-copy {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
   min-width: 0;
-  font-size: var(--relay-font-size-body);
-  font-weight: var(--relay-font-weight-medium);
+}
+.recent-work-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-regular);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   overflow-wrap: anywhere;
-  line-height: var(--relay-font-lineHeight-heading);
+  line-height: var(--relay-font-lineHeight-snug);
 }
-.recent-work-sub {
+/* 会话类型只用一枚 caption 大小的轮廓图标，完整类型仍在行的可访问名称中。 */
+.recent-work-kind {
+  flex: none;
+  width: var(--relay-font-size-caption);
+  height: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+}
+/* 置顶标记：行只有一档高，只画一枚同尺寸图标 + 两字，不与标题抢横向空间。
+   用 selection 前景色而不是新的强调色——置顶是导航状态，不该读成一条业务事实。 */
+.recent-work-pin {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  color: var(--relay-color-selection-text);
+  font-size: var(--relay-font-size-caption);
+}
+.recent-work-pin > svg { width: var(--relay-font-size-caption); height: var(--relay-font-size-caption); }
+/* 未读标记：一枚圆点，画在类型图标与标题之间；状态同时写进行的可访问名称。
+   用 action.primary——置顶借用的是 selection 前景色，两者不是一回事，不为圆点另开新色。 */
+.recent-work-unread {
+  flex: none;
+  width: var(--relay-space-1);
+  height: var(--relay-space-1);
+  border-radius: var(--relay-radius-round);
+  background: var(--relay-color-action-primary);
+}
+
+/* 会话行拖拽改序（2026-10-17，工作台 §28.1）：只有「目标」「工作区（目录）」里未归档的会话行可拖。
+   落位横线绝对定位在这一列的 padding box 上（.recent-work-list 因此是它的定位上下文），
+   画在行与行之间那道 space.0.5 的缝里且高度同档；它不占网格轨道，所以松手之前整列不会
+   因为多出一个元素而跳位。抓握中的那一行整行跟着指针走（位移写成内联 transform），
+   但 transform 不改布局：其余行的位置与次序照旧，松手才重排——横线承诺的那道缝，
+   和条目真正落下的位置，因此始终是同一处。 */
+ul[data-reorder-list] > .recent-work-row > .recent-work-row-head > .recent-work-item { cursor: grab; }
+.recent-work--dragging { user-select: none; }
+/* 拖拽中指针必然扫过别的行，摘要卡会一路跟着冒出来压住落位线；整段期间不显示。 */
+.recent-work--dragging .recent-work-summary { display: none; }
+.recent-work--dragging ul[data-reorder-list] > .recent-work-row > .recent-work-row-head > .recent-work-item { cursor: grabbing; }
+/* 手里这一条浮在列表之上：底色仍用悬停那一档（不为抓握另发明第四种灰），投影取浮层那一档
+   （shadow.floating 只给浮层，被抓着的这行此刻就是浮在列表上的一层）；整行再抬一层，画在其余行前面。
+   transform 已经让它自成一层，这里的 z-index 只负责它与其他行、与落位横线之间的先后。 */
+.recent-work-row--dragging { position: relative; z-index: 2; }
+.recent-work-row--dragging > .recent-work-row-head > .recent-work-item {
+  background: var(--relay-color-selection-hover);
+  box-shadow: var(--relay-shadow-floating);
+}
+.recent-work-drop-line {
+  position: absolute;
+  inset-inline: 0;
+  /* 压在浮起来的这一条之上：它承诺的是「松手后落在哪」，被手挡住就读不出来了。 */
+  z-index: 3;
+  height: var(--relay-focus-width);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-radius: var(--relay-radius-round);
+  background: var(--relay-color-border-control);
+  pointer-events: none;
+}
+/* 落位强调：松手后刚放下的这一行保留一档 `selection.bg`（与时间线跳转的落点强调同一色、同一停留时长），
+   到点撤掉属性。这一档只声明在这条规则上：淡入走这里的 motion.panel，属性撤掉后规则不再命中，
+   淡出因此回到行按钮自己那一档 motion.fast——实测强调确实会 fade 掉而不是硬切（浏览器用例逐帧读到过）。
+   滑位由 JS 用 transform 播，不碰布局属性；这里只负责这层底色进出。
+   系统「减少动态效果」由上面的全局 * 归零过渡时长；本机显式关动效走 html[data-motion="off"]，
+   两条都只去掉过渡、保留这一档静态高亮（与 ChatTimelineNav 的落点强调同一套门）。 */
+.recent-work-row[data-recent-dropped="true"] > .recent-work-row-head > .recent-work-item {
+  background: var(--relay-color-selection-bg);
+  transition: background-color var(--relay-motion-duration-panel) var(--relay-motion-easing-standard);
+}
+html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-work-row-head > .recent-work-item { transition: none; }
+
+/* 会话行内操作（0090）：行头单独一层，⋯ 与行按钮平级，不是行内按钮里的按钮——
+   行本体已经是 <button>，HTML 不允许嵌套可交互控件，套进去会让整行点击与 ⋯ 点击互相吞。
+   2026-10-16 第五轮把两者一起收进 .recent-work-row-head：⋯ 的 `inset-block-start: 50%`
+   从此只相对行本身，面板改成浮层后不再把这一行以下整列推下去，触发器也就不会跳到
+   「行 + 面板」的中线——用户指认的「点击三个点位置会改变」正是这个成因。 */
+.recent-work-row-head { position: relative; }
+/* ⋯ 贴在这一行的右缘，只在悬停或键盘聚焦时出现。未出现时这一行与改造前逐像素相同，
+   窄列几何回归（栏宽 176px 下限）测的行高、行距与标题可用宽度都不会因此变化。
+   2026-10-16 按用户指认去掉了它自己的底色：此前铺 selection.hover 是想让 ⋯ 读成行的一部分，
+   但行悬停已经有淡底，控件再叠一块就成了「⋯ 自带阴影色块」。现在控件始终透明，
+   显形只用 display，指针落到 ⋯ 上也不再加深底色，只把图标换成主文字色。 */
+.recent-work-row-trigger {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-end: var(--relay-space-2);
+  transform: translateY(-50%);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--relay-control-height-compact);
+  height: var(--relay-control-height-compact);
+  padding: 0;
+  background: transparent;
+  border: var(--relay-border-width) solid transparent;
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-secondary);
+  cursor: pointer;
+}
+.recent-work-row-trigger > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+.recent-work-row:hover .recent-work-row-trigger,
+.recent-work-row:focus-within .recent-work-row-trigger,
+.recent-work-row-trigger[aria-expanded="true"] { display: flex; }
+.recent-work-row-trigger:hover:not(:disabled) { color: var(--relay-color-text-primary); }
+/* 展开面板是浮层（工作台 §28.9、设计系统 §9.14）：这一列在滚动容器（.recent-work-scroll，
+   overflow-y: auto）里，绝对定位会被裁掉；而祖先链上没有 transform / filter / contain，
+   position: fixed 不会退化成相对某个祖先定位，所以不需要 portal、DOM 仍留在这一行内。
+   坐标由组件按触发器实测位置写内联值：优先开在下方，放不下向上翻，横向拉回视口内；
+   滚动或点到别处即收起。面板因此完全不占这一列的布局，下面的行不再被推下去。 */
+.recent-work-row-panel {
+  position: fixed;
+  z-index: var(--relay-zIndex-popover);
+  display: grid;
+  gap: var(--relay-space-1);
+  /* 宽度跟着最宽的那条内容走（2026-10-16 用户指认）：此前 min-width 10rem 会让面板比条目宽一截，
+     右侧留出一片空底。条目满行宽（width: 100%），于是「面板宽 = 最宽条目 + 两侧各一档内间距」。
+     改名输入与错误句不能反过来把浮层撑开，二者的可用宽都锁在原 10rem 那一档（见下方规则）；
+     上限 15rem 只是兜底，防将来多一条超长条目时把浮层顶出视口。 */
+  --recent-work-panel-content: calc(10rem - 2 * var(--relay-space-1) - 2 * var(--relay-border-width));
+  width: max-content;
+  max-width: min(15rem, calc(100vw - var(--relay-space-4)));
+  padding: var(--relay-space-1);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  box-shadow: var(--relay-shadow-floating);
+}
+/* 悬停/聚焦摘要卡：标题 + 更新时刻 + 归属。与操作面板同一套浮层规矩（fixed + 组件摆位），
+   但它是纯展示——指针不接收，因此指针从行移到卡片上时不会闪断行的悬停态。 */
+.recent-work-summary {
+  position: fixed;
+  z-index: var(--relay-zIndex-popover);
+  display: grid;
+  gap: var(--relay-space-1);
+  min-width: 10rem;
+  max-width: calc(100vw - var(--relay-space-4));
+  padding: var(--relay-space-2) var(--relay-space-3);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  box-shadow: var(--relay-shadow-floating);
+  pointer-events: none;
+}
+.recent-work-summary-head { margin: 0; display: flex; align-items: baseline; gap: var(--relay-space-2); }
+.recent-work-summary-title {
+  min-width: 0;
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+  color: var(--relay-color-text-primary);
+  overflow-wrap: anywhere;
+}
+.recent-work-summary-time {
+  flex: none;
+  margin-inline-start: auto;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.recent-work-summary-scope {
+  margin: 0;
   display: flex;
   align-items: center;
   gap: var(--relay-space-1);
-  line-height: var(--relay-font-lineHeight-heading);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+  overflow-wrap: anywhere;
 }
-/* 会话徽标：与组内计数同一套徽标语言（subtle 底 + muted 字 + radius.badge），只标类型不装状态。 */
-.recent-work-kind {
-  flex: none;
-  padding: 0 var(--relay-space-1);
-  border-radius: var(--relay-radius-badge);
-  background: var(--relay-color-bg-subtle);
-  color: var(--relay-color-text-muted);
-  font-size: var(--relay-font-size-meta);
-  line-height: var(--relay-font-lineHeight-ui);
-}
-.recent-work-time {
-  flex: none;
-  color: var(--relay-color-text-muted);
-  font-size: var(--relay-font-size-meta);
-  font-variant-numeric: tabular-nums;
-}
-
-/* 专栏底部的「查找更多任务 / 会话」：常驻一行文字链，展开区就在这一列内。 */
-.recent-work-more { flex: none; margin-top: auto; padding-top: var(--relay-space-2); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
-.recent-work-more-trigger {
-  padding: 0 var(--relay-space-1);
+.recent-work-summary-scope > svg { flex: none; width: var(--relay-font-size-caption); height: var(--relay-font-size-caption); }
+/* 行内动作沿用共享的 .text-button 基座（inline-flex + gap + medium 已就位），这里只收它在这一列里的尺寸：
+   满行宽、左对齐、compact 一档高，space.4 的横向内边距在 160px 内容盒里太厚。
+   2026-10-16 按用户参考菜单给每条动作加一枚前缀图标：尺寸取 font.size.body 而不是
+   control.icon.size——与输入器「+」弹层（.agent-chat-attach-item-icon）、悬停摘要卡同一档，
+   20px 图标压在 14px 选项名旁会比文字还重；危险色收尾动作的图标靠 currentColor 继承。 */
+.recent-work-row-action {
+  width: 100%;
   min-height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-2);
   font-size: var(--relay-font-size-meta);
-  font-weight: var(--relay-font-weight-medium);
-  color: var(--relay-color-action-text);
+  text-align: start;
 }
-.rail-picker { display: grid; gap: var(--relay-space-2); margin-top: var(--relay-space-2); padding: var(--relay-space-3); background: var(--relay-color-bg-subtle); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-control); }
-.rail-picker .field { display: grid; gap: var(--relay-space-1); margin: 0; }
-.rail-picker select { width: 100%; min-width: 0; }
-.rail-picker .form-actions { display: flex; flex-wrap: wrap; gap: var(--relay-space-2); margin: 0; }
+.recent-work-row-action > svg { flex: none; width: var(--relay-font-size-body); height: var(--relay-font-size-body); }
+.recent-work-row-action:hover:not(:disabled) { background: var(--relay-color-selection-hover); }
+/* 左对齐与黑色文字必须抬到 (0,2,0) 才落地（2026-10-17 用户指认「选项文字居中、发绿」）：
+   共享基座 `.text-button` 把 `justify-content: center` 与 `color: color.action.text`（森林绿）
+   排在本文件**之后**、与单类同为 (0,1,0)，上面那条单类的 flex-start 因此从未生效
+   （`text-align: start` 不受影响——基座没声明它）。同一层叠陷阱在本文件已记过三次
+   （`.search-field.recent-work-search`、`.primary-button.context-rail-new`、下面那条 danger）。
+   只覆盖这两条属性，条目几何仍由上面那条与基座共同决定，本轮不改高度。 */
+.text-button.recent-work-row-action {
+  justify-content: flex-start;
+  color: var(--relay-color-text-primary);
+}
+/* 归档是唯一带不可逆读感的动作，用状态色而不是强调色标出，但仍不做大红按钮。
+   (0,3,0) 压得过上面的基础色；禁用态单独收回 disabled 色，提交中的归档不会读成红色可点。 */
+.text-button.recent-work-row-action.recent-work-row-action--danger { color: var(--relay-color-status-danger-text); }
+.text-button.recent-work-row-action:disabled { color: var(--relay-color-disabled-text); }
+/* 分组细线：置顶/重命名与归档之间一刀切开（参考菜单的两组读法）。与浮层边框同色，
+   上下各让一档 space.1——面板 gap 之外再给一刀，组间才读得出「两组」而不是「一排」。
+   它是 div 而不是 <button>：不吃焦点、不参与命令，只作视觉分隔。 */
+.recent-work-row-separator {
+  height: var(--relay-border-width);
+  margin: var(--relay-space-1) 0;
+  background: var(--relay-color-border-separator);
+}
+/* 改名：输入独占一行，保存/取消并排在下一行。这一列内容盒只有 160px，
+   三列并排会把输入压到没法看清自己在改哪个名字。
+   整块表单给确定宽度（= 面板内容那一档），输入框填满它：表单自己不去撑面板，
+   面板宽度始终由动作条目决定。此前两者都靠内容定宽时，输入框的自然宽（size=20 ≈ 177px）
+   会反过来把面板顶到 15rem 上限，改名态比动作态宽出一倍多。这一档宽同时是改版前 10rem 面板的
+   原可用宽，改名前后都不挤压。 */
+.recent-work-rename {
+  display: grid;
+  gap: var(--relay-space-1);
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: var(--recent-work-panel-content);
+}
+.recent-work-rename input {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
+  height: var(--relay-control-height-compact);
+}
+.recent-work-rename button { min-height: var(--relay-control-height-compact); padding: 0 var(--relay-space-2); font-size: var(--relay-font-size-meta); }
+/* 失败说明按同一档宽换行，同样不参与面板定宽：一句 26 字的中文说明能把这层浮层撑到上限，
+   而冲突说明本来就该留在原处读，不该靠把菜单拉宽来放下。 */
+.recent-work-row-error { max-width: var(--recent-work-panel-content); font-size: var(--relay-font-size-caption); color: var(--relay-color-status-danger-text); margin: 0; }
 
 .mobile-navigation { display: grid; gap: var(--relay-space-4); min-height: 0; }
 .mobile-navigation .recent-work { flex: none; overflow: visible; }
@@ -749,30 +1105,6 @@ svg {
 .navigation-list--bottom {
   margin-top: auto;
   padding-top: var(--relay-space-2);
-  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
-}
-
-/* 图标导航顶端的品牌标记（V4.2 原型）：主色圆角方块，纯装饰。
-   短窗口让位给十个常驻入口——导航可达性优先于标识。 */
-.navrail-brand {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: var(--relay-control-height);
-  height: var(--relay-control-height);
-  margin: 0 auto var(--relay-space-3);
-  background: var(--relay-color-action-primary);
-  border-radius: var(--relay-radius-control);
-  color: var(--relay-color-text-onAction);
-}
-
-.navrail-brand > svg {
-  width: var(--relay-font-size-rowTitle);
-  height: var(--relay-font-size-rowTitle);
-}
-
-@media (max-height: 50rem) {
-  .navrail-brand { display: none; }
 }
 
 /* 图标导航栏：图标在上、文字在下，竖排是窄栏里保证中文名称完整可读的方式。 */
@@ -781,8 +1113,8 @@ svg {
   align-items: center;
   justify-content: center;
   gap: var(--relay-space-1);
-  min-height: var(--relay-space-12);
-  padding: var(--relay-space-2) var(--relay-space-1);
+  min-height: var(--relay-space-10);
+  padding: var(--relay-space-1) var(--relay-space-1);
   text-align: center;
 }
 
@@ -794,7 +1126,9 @@ svg {
 .app-navrail .navigation-label {
   flex: none;
   max-width: 100%;
-  font-size: var(--relay-font-size-meta);
+  /* 竖排入口的名称走 caption（12px，§4 辅助档的下限）：与图标同档时十个入口读成一份文字清单，
+     图标反成了行首装饰。原型是 9px，低于 §4 可读下限，不跟。 */
+  font-size: var(--relay-font-size-caption);
   line-height: var(--relay-font-lineHeight-ui);
   /* 窄栏里「连接与同步」这类较长名称允许折行，不横向撑破图标栏。 */
   overflow-wrap: anywhere;
@@ -844,14 +1178,29 @@ svg {
   font-weight: var(--relay-font-weight-medium);
 }
 
+/* 图标栏的悬停与选中同层淡底（V4.3 原型 `button:hover, button.active` 本就共用一个色）。
+   全局 selection.hover（#E0EDE4）比 selection.bg（#EDF5EF）更深，在任务行那种密集列表里是对的——
+   悬停要比静止显眼；但图标栏只有十格、且每格都带淡底圆角块，扫过未选项时会比当前选中项还重一档，
+   层级读起来是倒的。只在这一栏覆写，不动两个全局 token。 */
+.app-navrail .navigation-item:hover {
+  background: var(--relay-color-selection-bg);
+}
+
+/* 激活条压在色块左缘上，与 V4.3 原型 `.marker` 同一读法：它标记的是「这一块」，
+   不是「文字旁边有一条短竖线」。单格实测 51×50 的方块，块左缘离图标左缘 13px（原型 10px），
+   所以既贴块又不显远；竖向居中于单格，与原型一样落在图标与文字的中段带上。
+   宽 3px、高 24px 与原型逐条同值；右侧圆角取 radius.badge（6px），在 3px 宽的盒子上被 CSS
+   按比例夹到 3px，正好等于原型的 `0 3px 3px 0`，不需要另找一档。 */
 .navigation-item--active::before {
   content: "";
   position: absolute;
-  left: calc(-1 * var(--relay-space-1));
-  top: var(--relay-space-1);
-  bottom: var(--relay-space-1);
-  width: var(--relay-focus-offset);
-  border-radius: var(--relay-radius-badge);
+  left: 0;
+  top: 50%;
+  height: var(--relay-space-6);
+  transform: translateY(-50%);
+  width: var(--relay-layout-navigation-markerWidth);
+  /* 只圆右缘：左缘与色块左缘重合，两侧同圆角会读出一根脱离色块的胶囊。 */
+  border-radius: 0 var(--relay-radius-badge) var(--relay-radius-badge) 0;
   background: var(--relay-color-action-primary);
 }
 
@@ -888,6 +1237,61 @@ svg {
   /* 2026-10-14 对齐 V4.2 原型工具条：顶栏是白纸面，与下方画布形成一条明确的分隔。 */
   background: var(--relay-color-bg-surface);
   border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+/* 外壳分层（2026-10-16）：卡片 = 图标导航栏右侧的整块区域，会话栏与中栏正文同属一张连续纸面
+   （列间不留 column-gap）。卡片左缘那圈描边加圆角就是与图标栏的分界，会话栏右缘仍保留一条描边
+   作为它与正文的分界，且正好落在拖拽条的中轴上，悬停时不会看见两条线。
+   图标栏与卡片之间不留桌面缝是为了让图标格左右对称：它距屏幕左缘 12px（图标栏内边距），
+   距卡片左缘也正好 12px；此前留 4px 缝时右边成了 16px，视觉上卡片把图标格挤向左边。
+   桌面底色用 bg-subtle，与 .desktop-titlebar 的导航色同族：标题栏与外壳连成同一张桌面，
+   纸面卡片浮在上面。此前桌面是纯白、卡片是画布色，两者只差一档，描边和圆角画上去也看不见，
+   边界要靠底色拉开，不能只靠一条 1px 线。
+   外壳顶部留一条 space-2 桌面带，三列从同一条带下方开始，左上那颗圆角四周才有可读参照物。
+   卡片右缘平铺到窗口边上，不做横向渐隐（2026-10-17 用户实机截图指令校正）：卡片与窗口右缘齐平
+   （实测 .app-content 右缘 = innerWidth），右边没有桌面可退，渐隐只会把正文右半染灰——聊天列左右
+   两缘同宽却一白一暗，转录区那两条 bg.surface 上下渐隐带也失去同一档底色。
+   顶栏在卡片内部，纸面由卡片自己铺。图标栏右缘不再补线，分界只画一次。
+   < 48rem 两栏都不渲染，卡片失去参照物，整套处理只在外壳为三列时生效。 */
+@media (width >= 48rem) {
+  .app-frame {
+    padding-top: var(--relay-space-2);
+    background: var(--relay-color-bg-subtle);
+  }
+
+  /* 图标栏底色与桌面同族，右缘细线成了同一色块上的杂线；分界交给卡片自己的描边。 */
+  .app-navrail {
+    border-right: 0;
+  }
+
+  .app-topbar {
+    background: transparent;
+  }
+
+  .app-context-rail {
+    border: var(--relay-border-width) solid var(--relay-color-border-separator);
+    border-radius: var(--relay-radius-panel) 0 0 var(--relay-radius-panel);
+  }
+
+  /* 外壳顶部多出的那档桌面带不属于卡片：拖拽条的命中区与可见线都从卡片上缘起，
+     不能伸进带里（top 的 0 是 .app-frame 内边距盒的顶，不是网格内容的顶）。 */
+  .sidebar-resize-handle {
+    top: var(--relay-space-2);
+  }
+
+  .app-content {
+    border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+    border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+    background: var(--relay-color-bg-surface);
+  }
+
+  /* 项目列表、待处理与动态不渲染会话栏（.app-frame--page-focused），
+     此时卡片左缘由正文列自己承担，否则整张卡会缺一条左边。 */
+  .app-frame--page-focused .app-content {
+    border-left: var(--relay-border-width) solid var(--relay-color-border-separator);
+    border-top-left-radius: var(--relay-radius-panel);
+    border-bottom-left-radius: var(--relay-radius-panel);
+  }
 }
 
 .breadcrumbs {
@@ -1402,6 +1806,77 @@ svg {
   box-shadow: var(--relay-shadow-card);
 }
 
+/* 页脚解释/诊断折叠块（.page-explanation）：跨多个视图共用的辅助说明与调试入口。
+   此前完全无样式，浏览器默认的 ▶ 文本裸挂在内容下方，读起来像没做完的脚手架。
+   这里给一层安静的「附注」容器——沿用此前就地面板那套 subtle 底 + separator 细边 + control 圆角，
+   自定义 chevron 取代原生标记，展开内容缩进到标题文字下方。只用既有 token，不新增色值。 */
+.page-explanation {
+  width: fit-content;
+  max-width: min(100%, 48rem);
+  margin-top: var(--relay-space-6);
+  padding: var(--relay-space-3) var(--relay-space-4);
+  background: var(--relay-color-bg-subtle);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+}
+
+.page-explanation > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  list-style: none;
+  color: var(--relay-color-text-secondary);
+  font-weight: var(--relay-font-weight-medium);
+  cursor: pointer;
+}
+
+.page-explanation > summary::-webkit-details-marker {
+  display: none;
+}
+
+.page-explanation > summary:hover {
+  color: var(--relay-color-text-primary);
+}
+
+/* 用两条边框画一个朝右的 chevron，展开时旋转到朝下；随文字色走，不引入图标依赖。 */
+.page-explanation > summary::before {
+  content: "";
+  flex: none;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-right: var(--relay-border-width) solid currentColor;
+  border-bottom: var(--relay-border-width) solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+
+.page-explanation[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+/* 展开内容缩进到标题文字下方，并与标题留一行距。 */
+.page-explanation > :not(summary) {
+  margin: var(--relay-space-2) 0 0;
+  padding-inline-start: calc(0.4rem + var(--relay-space-2));
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+/* 面板内的表单收编到紧凑档：压掉 create-form / field 的大顶距，次按钮回到标准控件高度。 */
+.page-explanation .create-form {
+  margin-top: var(--relay-space-2);
+}
+
+.page-explanation .field {
+  margin-top: 0;
+}
+
+.page-explanation .secondary-button {
+  min-height: var(--relay-control-height);
+  font-size: var(--relay-font-size-meta);
+}
+
 .section-heading-row {
   display: flex;
   align-items: baseline;
@@ -1843,6 +2318,99 @@ svg {
 .loading-text {
   color: var(--relay-color-text-muted);
   font-size: var(--relay-font-size-meta);
+}
+
+/* 浮层反馈（2026-10-17 用户指令「像这些 toast 不要影响页面布局」，同日第二轮「提示要在屏幕的正上方」）：
+   Toast／Snackbar／Notice 共用视口顶部这一条栈。整栈 fixed、只给卡片收指针事件，因此任何一条出现或
+   消失都不改变输入卡与消息区的高度；分类与停留规则见设计系统 §6.4。
+   顶边取「桌面标题带 + 外壳顶部桌面带」，与三列纸面的上缘同一条线：再往上就落进标题带的拖动命中区
+   （那 4–8 秒里窗口拖不动，还会盖住右缘的最小化/最大化/关闭），标题带是宿主操作，浮层不能吃掉它。
+   不选底部：底部左右分别是输入卡发送键与近期工作栏的行，浮在那里等于挡住正在用的控件。 */
+.feedback-stack {
+  position: fixed;
+  z-index: var(--relay-zIndex-toast);
+  top: calc(var(--relay-control-nav-height) + var(--relay-space-2));
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  gap: var(--relay-space-2);
+  width: min(var(--relay-layout-feedback-maxWidth), calc(100vw - 2 * var(--relay-space-4)));
+  pointer-events: none;
+}
+
+.feedback-card {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-3);
+  padding: var(--relay-space-3) var(--relay-space-4);
+  border: var(--relay-border-width) solid;
+  border-radius: var(--relay-radius-panel);
+  box-shadow: var(--relay-shadow-floating);
+  font-size: var(--relay-font-size-meta);
+  overflow-wrap: anywhere;
+  animation: feedback-drop var(--relay-motion-duration-panel) var(--relay-motion-easing-standard);
+}
+
+/* 边框取同族 35% 混色而不是整圈实色：receipt-message／action-error 贴在正文里，靠强边框
+   把自己从段落里切出来；这一档有投影已经离开画布，实色边在浮层上过重。 */
+.feedback-card--success {
+  background: var(--relay-color-status-success-bg);
+  color: var(--relay-color-status-success-text);
+  border-color: color-mix(in srgb, var(--relay-color-status-success-text) 35%, var(--relay-color-status-success-bg));
+}
+
+.feedback-card--danger {
+  background: var(--relay-color-status-danger-bg);
+  color: var(--relay-color-status-danger-text);
+  border-color: color-mix(in srgb, var(--relay-color-status-danger-text) 35%, var(--relay-color-status-danger-bg));
+}
+
+.feedback-card--warning {
+  background: var(--relay-color-status-warning-bg);
+  color: var(--relay-color-status-warning-text);
+  border-color: color-mix(in srgb, var(--relay-color-status-warning-text) 35%, var(--relay-color-status-warning-bg));
+}
+
+.feedback-card--neutral {
+  background: var(--relay-color-status-neutral-bg);
+  color: var(--relay-color-status-neutral-text);
+  border-color: color-mix(in srgb, var(--relay-color-status-neutral-text) 35%, var(--relay-color-status-neutral-bg));
+}
+
+.feedback-text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+/* 动作与关闭按钮跟着卡片语义色走，不回到全局 action 蓝：浮层底是状态色底，
+   蓝绿叠在一起两条都读不清。 */
+.feedback-card .text-button,
+.feedback-card .icon-button {
+  flex: none;
+  color: inherit;
+}
+
+.feedback-close {
+  width: var(--relay-control-height-compact);
+  height: var(--relay-control-height-compact);
+}
+
+@keyframes feedback-drop {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-1 * var(--relay-space-2)));
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+html[data-motion="off"] .feedback-card {
+  animation: none;
 }
 
 /* 蓝图 ------------------------------------------------------------------ */
@@ -2533,6 +3101,24 @@ svg {
 
 .dialog-header h2 {
   font-size: var(--relay-font-size-rowTitle);
+}
+
+/* 变体2：宽档弹窗。基础 .dialog-panel 的宽度是 min(35rem, 100%)，仅加 max-width 不会变宽，
+   所以这里直接覆盖 width，把「更换工作目录」这类信息量较大的弹窗放宽到 40rem（≈640px）。 */
+.dialog-panel--lg {
+  width: min(40rem, 100%);
+}
+
+/* 标题列在 header 里要能收缩：min-width:0 让长标题触发省略，不把关闭按钮挤出去。 */
+.dialog-heading {
+  min-width: 0;
+}
+
+.dialog-header-sub {
+  margin: var(--relay-space-1) 0 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
 }
 
 .dialog-content {
@@ -3247,10 +3833,6 @@ fieldset.field {
     padding: 0;
   }
 
-  .navigation-item--active::before {
-    left: 0;
-  }
-
   .navigation-count {
     position: absolute;
     top: var(--relay-space-1);
@@ -3511,4 +4093,41 @@ fieldset.field {
 
 .pack-catalog-historical .assist-proposal {
   margin-top: var(--relay-space-3);
+}
+
+/* 路由级兜底错误页（RouteErrorBoundary）：errorElement 不经过 App 布局，
+   自带容器与排版；数值照旧引用令牌，不为兜底页另立一套。 */
+.route-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--relay-space-3);
+  max-width: var(--relay-layout-reading-maxWidth);
+  margin: var(--relay-layout-main-padding) auto;
+  padding: var(--relay-space-6);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+}
+
+.route-error h1 {
+  margin: 0;
+  font-size: var(--relay-font-size-compactPage);
+}
+
+.route-error .form-actions {
+  margin-top: 0;
+}
+
+.route-error-stack {
+  max-height: 16rem;
+  overflow: auto;
+  margin: 0;
+  padding: var(--relay-space-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--relay-font-size-meta);
+  color: var(--relay-color-text-muted);
+  background: var(--relay-color-bg-subtle);
+  border-radius: var(--relay-radius-control);
 }

@@ -188,10 +188,12 @@
 
 /* ── 卡片网格 ───────────────────────────────────────────────────────────── */
 
+/* 对齐 V4.3 接续原型：紧凑卡按可用宽度自动铺满，每张保底 15.5rem，
+ * 容器变窄时自动回落列数。列表视图仍走单列。 */
 .projects-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 1fr));
-  gap: var(--relay-space-6);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15.5rem), 1fr));
+  gap: var(--relay-space-4);
   align-items: stretch;
   margin-top: var(--relay-space-6);
 }
@@ -205,7 +207,9 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 17rem;
+  gap: var(--relay-space-2);
+  min-height: 8rem;
+  padding: var(--relay-space-4);
   overflow: hidden;
   background: var(--relay-color-bg-surface);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
@@ -230,39 +234,19 @@
   border-color: var(--relay-color-border-control);
 }
 
-.project-card__body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--relay-space-4);
-  flex: 1;
-  padding: var(--relay-space-6) var(--relay-space-6) var(--relay-space-4);
-}
-
 .project-card__top {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--relay-space-2);
 }
 
-.project-card__kind {
+/* 阶段药丸与「⋯」入口并排靠右；「⋯」自带 stopPropagation，不抢整卡点击进入项目。 */
+.project-card__top-right {
   display: flex;
   align-items: center;
-  gap: var(--relay-space-2);
-  color: var(--relay-color-text-secondary);
-  font-size: var(--relay-font-size-meta);
-  font-weight: var(--relay-font-weight-semibold);
-}
-
-.project-card__kind-dot {
-  width: var(--relay-space-2);
-  height: var(--relay-space-2);
-  border-radius: var(--relay-radius-round);
-  background: var(--relay-color-action-primary);
-}
-
-.project-card--archived .project-card__kind-dot {
-  background: var(--relay-color-text-muted);
+  gap: var(--relay-space-1);
+  flex: none;
 }
 
 .project-card__control {
@@ -287,41 +271,15 @@
   height: var(--relay-control-icon-size);
 }
 
-.project-card__ident {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--relay-space-3);
-}
-
-.project-card__emblem {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: var(--relay-control-height-prominent);
-  height: var(--relay-control-height-prominent);
-  color: var(--relay-color-action-text);
-  background: var(--relay-color-selection-bg);
-  border-radius: var(--relay-radius-control);
-}
-
-.project-card__emblem > svg {
-  width: var(--relay-control-icon-size);
-  height: var(--relay-control-icon-size);
-}
-
-.project-card__names {
-  flex: 1;
-  min-width: 0;
-}
-
 .project-card__name {
   margin: 0;
+  min-width: 0;
   font-size: var(--relay-font-size-rowTitle);
   font-weight: var(--relay-font-weight-semibold);
   line-height: var(--relay-font-lineHeight-heading);
 }
 
-/* 名称是键盘可达的打开入口；颜色与正文一致，不额外引入「链接蓝」。 */
+/* 名称是键盘可达的进入项目入口；颜色与正文一致，不额外引入「链接蓝」。 */
 .project-card__name-button {
   padding: 0;
   border: none;
@@ -339,7 +297,7 @@
 }
 
 .project-card__caption {
-  margin: var(--relay-space-1) 0 0;
+  margin: 0;
   color: var(--relay-color-text-muted);
   font-size: var(--relay-font-size-meta);
 }
@@ -370,87 +328,26 @@
   background: currentColor;
 }
 
-.project-card__meta {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
-  gap: var(--relay-border-width);
-  margin-top: auto;
-  overflow: hidden;
-  background: var(--relay-color-border-separator);
-  border: var(--relay-border-width) solid var(--relay-color-border-separator);
-  border-radius: var(--relay-radius-control);
-}
-
-.project-card__meta-box {
+/* 下一步顶到卡底，用细线与上方分隔；缺下一步只是待补事实，故用警示文字色而非整块警示底。 */
+.project-card__next {
   display: flex;
-  flex-direction: column;
   gap: var(--relay-space-1);
-  padding: var(--relay-space-3);
-  background: var(--relay-color-bg-canvas);
-}
-
-.project-card__meta-label {
-  color: var(--relay-color-text-muted);
+  margin: auto 0 0;
+  padding-top: var(--relay-space-2);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+  color: var(--relay-color-text-secondary);
   font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
 }
 
-.project-card__meta-value {
+.project-card__next > span {
+  min-width: 0;
   color: var(--relay-color-text-primary);
-  font-size: var(--relay-font-size-body);
   overflow-wrap: anywhere;
 }
 
-/* 尚未明确下一步用警示文字色，不用整块警示底；它是一条待补事实，不是错误。 */
-.project-card__meta-value.is-unset {
+.project-card__next.is-unset > span {
   color: var(--relay-color-status-warning-text);
-}
-
-.project-card__footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--relay-space-3);
-  padding: var(--relay-space-3) var(--relay-space-6);
-  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
-}
-
-.project-card__footer-note {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--relay-space-2);
-  min-width: 0;
-  color: var(--relay-color-text-muted);
-  font-size: var(--relay-font-size-meta);
-}
-
-.project-card__footer-note > svg {
-  flex: none;
-  width: var(--relay-font-size-body);
-  height: var(--relay-font-size-body);
-}
-
-.project-card__open {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--relay-space-1);
-  flex: none;
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--relay-color-action-text);
-  font: inherit;
-  font-size: var(--relay-font-size-meta);
-  font-weight: var(--relay-font-weight-medium);
-  cursor: pointer;
-}
-
-.project-card__open:hover {
-  text-decoration: underline;
-}
-
-.project-card__open > svg {
-  width: var(--relay-font-size-body);
-  height: var(--relay-font-size-body);
 }
 
 /* ── 「开启一个新项目」卡 ───────────────────────────────────────────────── */
@@ -538,6 +435,45 @@
   flex: none;
   width: var(--relay-font-size-body);
   height: var(--relay-font-size-body);
+}
+
+/* 页脚附注：一条安静的收尾，不再摆成两块并排的盒子。
+   说明文字直接以 muted 脚注呈现；「按 ID 打开」收成一条无边框的「高级」折叠，
+   覆盖掉全局 .page-explanation 的盒子外观，避免与主区内容抢层级。 */
+.projects-footnote {
+  margin-top: var(--relay-space-6);
+  padding-top: var(--relay-space-4);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.projects-footnote__note {
+  max-width: 56rem;
+  margin: 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.projects-footnote__advanced {
+  width: fit-content;
+  max-width: 100%;
+  margin-top: var(--relay-space-3);
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+.projects-footnote__idform {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+}
+
+.projects-footnote__idform > input {
+  flex: 1;
+  min-width: min(100%, 16rem);
+  max-width: 24rem;
 }
 
 .projects-detail {
@@ -641,4 +577,29 @@
     flex: 1;
     width: auto;
   }
+}
+
+/* ── V4.3 项目总览接续呈现（V43-04）──────────────────────────────────────
+ * 项目页共用（.project-overview 由 ProjectSkillView 渲染；路由表静态引入本文件，
+ * 样式随包加载）。只消费既有 token，不新增色值。 */
+.project-overview .project-resume-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2) var(--relay-space-3);
+  margin-top: var(--relay-space-2);
+}
+
+/* 归档原因独占一行铺满，不与按钮挤同一行。 */
+.project-overview .project-resume-actions > .disabled-reason {
+  flex-basis: 100%;
+  margin-top: 0;
+}
+
+/* 任务行的不可开始/等待原因用警示文字色（原型 .task-row em 的语义），不整块铺警示底。 */
+.project-overview .project-task-reason {
+  margin: var(--relay-space-1) 0 0;
+  color: var(--relay-color-status-warning-text);
+  font-size: var(--relay-font-size-meta);
+  overflow-wrap: anywhere;
 }

@@ -761,6 +761,7 @@ export async function applyConversationExecution(db: DbExecutor, input: {
   const plan = await planToolLoop(db, { row, candidate, canonicalRoot: resource.canonical_root });
   const delegated = await delegateTask(db, {
     workspaceId: row.workspace_id, taskId,
+    modelSessionId: row.session_id,
     commandId: delegateCommandId,
     expectedTaskRevision: toDecimalString(latest?.revision ?? task.revision),
     toolLoopAction: plan.toolLoopAction,

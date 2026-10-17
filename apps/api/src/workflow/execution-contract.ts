@@ -53,6 +53,8 @@ export interface FreezeExecutionContractInput {
   readonly toolLoopAction?: ToolLoopActionIntent | undefined;
   readonly contextSources?: readonly ContextSourceRef[] | undefined;
   readonly executionMethod?: RunMethodBinding | undefined;
+  /** Non-secret model plan frozen by the application at Run admission. */
+  readonly modelSelectionSnapshot?: JsonObject | undefined;
 }
 
 /**
@@ -78,8 +80,10 @@ export const TOOL_LOOP_MAX_TOOL_CALLS = 48;
 export const MAX_EXPLICIT_CONTEXT_SOURCES = 10;
 // 与 delegate-task 的同名清单保持一致：信封允许写入与受控命令，但那只说明「模型可以
 // 请求」，不代表放行——准入仍由当前 Permission 与本次范围授权决定。
+// 0092: COMPUTER_READ/COMPUTER_INPUT 同理：信封允许桌面操作，桌面输入的实际放行
+// 由单动作审批（Allow once）或本次任务范围授权（Allow for task）决定。
 const TOOL_LOOP_CAPABILITIES: readonly string[] =
-  ['FILE_QUERY', 'FILE_READ', 'GIT_READ', 'FILE_WRITE', 'CLI_RUN'];
+  ['FILE_QUERY', 'FILE_READ', 'GIT_READ', 'FILE_WRITE', 'CLI_RUN', 'COMPUTER_READ', 'COMPUTER_INPUT'];
 
 export function readToolLoopAction(snapshot: JsonObject): ToolLoopActionIntent | undefined {
   const value = snapshot.tool_loop_action;
@@ -415,6 +419,9 @@ export function freezeExecutionContract(
       version: workflowVersion,
     },
     execution_config_version: executionConfigVersion,
+    ...(input.modelSelectionSnapshot === undefined ? {} : {
+      model_selection_snapshot: JSON.parse(JSON.stringify(input.modelSelectionSnapshot)) as JsonObject,
+    }),
     ...(method === undefined ? {} : { execution_method: method }),
     ...(input.mockGatewayAction === undefined ? {} : { mock_gateway_action: { ...input.mockGatewayAction } }),
     ...(input.fileReadAction === undefined ? {} : { file_read_action: { ...input.fileReadAction } }),

@@ -1,0 +1,42 @@
+-- 0094：修正会话模型选择的「连接 ↔ 目录来源」耦合（专项 prompts/free-model-catalog.md 阶段 0；
+-- FM-06、HTTP §10.82、数据库设计 §88）。
+--
+-- 已复现的缺陷：0089 的耦合 CHECK 只写全了后半句——
+--   (connection = 'default' OR catalog_source = 'openrouter')
+-- 它表达的是「openrouter 连接必须带 openrouter 目录来源」，但**没有**反过来禁止
+--   connection = 'default' 且 catalog_source = 'openrouter'
+-- 这一自相矛盾的组合。真实 PG 反例（默认连接混目录来源）本应报 SQLSTATE 23514，实际通过。
+--
+-- 为什么这条组合不能算无害：default 连接上的模型来自进程 RELAY_MODEL_*，它既不属于
+-- OpenRouter 目录快照，也没有任何目录依据。一旦允许它带上 catalog_source/snapshot_seq/
+-- model_id，读取方就会把「该会话的约束」误当成受某一版 OpenRouter 目录快照绑定——目录
+-- 刷新后可能被误判为失效，或反过来把目录里的严格免费判定套用一个非 OpenRouter 模型。
+-- 来源组合是「这次调用到底走哪枚连接、依据哪份事实」的一部分，必须互相自洽。
+--
+-- 为什么不能用 `catalog_source <> 'openrouter'`：SQL 的 NULL 三值语义会让
+-- catalog_source 为 NULL 时整条表达式求值为 NULL，CHECK 把 NULL 当作通过——那正好
+-- 放行了「default + 无依据」这个我们要允许的组合，却无法把「default + 有依据」区分出来。
+-- 因此必须写成显式 IS NULL 判定。0089 的两条 CHECK 本身也不能用 `=` 与 NULL 比较来补，
+-- 它们只在非 NULL 分支上成立。
+--
+-- 为什么不改写 0089：迁移台账按内容 sha256 逐条校验，已应用迁移被编辑会触发
+-- MigrationIntegrityError（见 migration-runner 的 verifyAppliedMigrations）。只能追加。
+--
+-- 约束合并后的完整语义（0089 的 connection 取值 CHECK 已限制只两枚连接）：
+--   * connection = 'default'    → catalog_source 必须为 NULL（不由目录快照支撑）；
+--   * connection = 'openrouter' → catalog_source 必须为 'openrouter'（0089 已覆盖）；
+--   * free_only = true          → 必须带完整三列目录依据（0089 已覆盖）；
+--   * 目录依据三列始终同现同缺（0089 已覆盖）。
+--
+-- 兼容与回滚：只新增一条 CHECK，不加列、不改数据、不新建表、不动授权；
+-- API Breaking Change: No——既有合法行全部满足新约束。既有库若存在该矛盾组合会在
+-- 本迁移处失败，那是**应当**的：本功能此前只在默认连接上落过行（free_only=false，
+-- catalog_source 恒为 NULL），生产与测试库都不存在冲突行。回滚可直接
+-- DROP CONSTRAINT ck_session_model_selection_default_no_catalog_source。
+--
+-- 编号说明：0090–0093 已被其他模块占用（assist_session_pin / composer_draft_assist /
+-- computer_use / assist_message_attachments），本迁移顺延 0094。
+
+ALTER TABLE session_model_selection
+  ADD CONSTRAINT ck_session_model_selection_default_no_catalog_source
+  CHECK (connection <> 'default' OR catalog_source IS NULL);

@@ -55,6 +55,8 @@ const requestProjection = Type.Object({
   status: Type.String(),
   candidate_status: Type.String(),
   root_path: Type.String(),
+  resource_id: uuid,
+  candidate: Type.Union([Type.Object({}, { additionalProperties: true }), Type.Null()]),
   questions: Type.Array(Type.String()),
   task_id: Type.Union([uuid, Type.Null()]),
   run_id: Type.Union([uuid, Type.Null()]),
@@ -68,7 +70,7 @@ const requestProjection = Type.Object({
 function project(row: {
   readonly id: string; readonly session_id: string; readonly source_message_id: string;
   readonly decision: string; readonly status: string; readonly candidate_status: string;
-  readonly root_path: string; readonly clarification: { readonly questions?: unknown } | null;
+  readonly root_path: string; readonly resource_id: string; readonly clarification: { readonly questions?: unknown } | null;
   readonly candidate: JsonObject | null;
   readonly task_id: string | null; readonly run_id: string | null; readonly revision: bigint;
   readonly created_at: Date; readonly updated_at: Date;
@@ -77,6 +79,7 @@ function project(row: {
   return { request_id: row.id, session_id: row.session_id,
     source_message_id: row.source_message_id, decision: row.decision, status: row.status,
     candidate_status: row.candidate_status, root_path: row.root_path,
+    resource_id: row.resource_id, candidate: row.candidate,
     questions: Array.isArray(raw) ? raw.filter((item) => typeof item === 'string') : [],
     task_id: row.task_id, run_id: row.run_id, revision: toDecimalString(row.revision),
     auto_start: isReadOnlyConversationExecution(row),

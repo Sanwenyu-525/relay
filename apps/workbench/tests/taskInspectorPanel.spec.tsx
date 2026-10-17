@@ -101,6 +101,44 @@ describe("工作详情的真实版本阅读", () => {
     expect(wrapper.text()).not.toContain("完成被拒绝");
   });
 
+  it("证据失败透出服务端给出的真因，文件缺失不与内容被改写混为一谈", async () => {
+    const { props, content } = setup({ selectedArtifact: { artifact, version: versions[1]! } });
+    content.mockRejectedValue(new RelayApiError({ status: 503, code: "EVIDENCE_UNAVAILABLE",
+      detail: "受管内容文件缺失；该产物版本不能被当作可核对证据使用。",
+      retryable: false, fieldErrors: [], retryAction: null, expectedRevision: null, actualRevision: null, blockingReasons: [] }));
+    const { wrapper } = await mount(props);
+    expect(wrapper.text()).toContain("受管内容文件缺失");
+    // 重读仍针对当前确切版本，不改用其他版本。
+    expect(wrapper.text()).toContain("仍针对该确切版本重读");
+    expect(content.mock.calls).toEqual([["version-2"]]);
+  });
+
+  it("预览内可切换同一成果的确切历史版本，重读绑定所选版本", async () => {
+    const { props } = setup({ selectedArtifact: { artifact, version: versions[1]! },
+      onSelectVersion: vi.fn() });
+    const { wrapper } = await mount(props);
+    expect(wrapper.get('[data-testid="collab-inspector-version-1"]').attributes("aria-pressed")).toBe("false");
+    expect(wrapper.get('[data-testid="collab-inspector-version-2"]').attributes("aria-pressed")).toBe("true");
+    await wrapper.get('[data-testid="collab-inspector-version-1"]').trigger("click");
+    expect(props.onSelectVersion).toHaveBeenCalledWith(versions[0]);
+    // 没有显式入口时回退打开动作：历史版本也不会变成不可达。
+    const opened = vi.fn();
+    const fallback = await mount({ ...props, onSelectVersion: undefined, onSelectArtifactVersion: opened });
+    await fallback.wrapper.get('[data-testid="collab-inspector-version-1"]').trigger("click");
+    expect(opened).toHaveBeenCalledWith(artifact, versions[0], expect.anything());
+  });
+
+  it("注意力提示给出去处，成果页尾可进入来源与检查记录", async () => {
+    const run = { id: "run-a", status: "FAILED", steps: [], unresolvedOperationIds: ["operation-a"] } as unknown as RelayRun;
+    const { props } = setup({ run });
+    const { wrapper } = await mount(props);
+    await wrapper.get('[data-testid="collab-inspector-attention-action"]').trigger("click");
+    expect(wrapper.get('[data-testid="collab-inspector-tab-RECORDS"]').attributes("aria-selected")).toBe("true");
+    await wrapper.get('[data-testid="collab-inspector-tab-RESULTS"]').trigger("click");
+    await wrapper.get('[data-testid="collab-inspector-open-records"]').trigger("click");
+    expect(wrapper.get('[data-testid="collab-inspector-tab-RECORDS"]').attributes("aria-selected")).toBe("true");
+  });
+
   it("切换任务后迟到正文不能出现在新任务中", async () => {
     const { props, content } = setup({ selectedArtifact: { artifact, version: versions[1]! } });
     let resolveOld!: (value: string) => void;
@@ -157,6 +195,34 @@ describe("工作详情的真实版本阅读", () => {
     const { wrapper } = await mount(props);
     expect(wrapper.text()).toContain("完成凭据待核对");
     expect(wrapper.find(".inspector-badge--success").exists()).toBe(false);
+  });
+
+  it("Run 暂停时当前步骤显示为挂起等待，不误报执行中或待进行", async () => {
+    const run = { id: "run-a", status: "PAUSED", currentStepId: "step-2", revision: "1",
+      unresolvedOperationIds: [], pendingControlRequest: null, waitReason: null,
+      steps: [
+        { id: "step-1", kind: "PLAN", status: "SUCCEEDED", reason: null, startedAt: null, finishedAt: null },
+        { id: "step-2", kind: "DRAFT", status: "RUNNING", reason: null, startedAt: null, finishedAt: null }
+      ] } as unknown as RelayRun;
+    const { props } = setup({ run });
+    const { wrapper } = await mount(props);
+    expect(wrapper.find(".inspector-step-symbol--warn").exists()).toBe(true);
+    expect(wrapper.find(".inspector-step-symbol--active").exists()).toBe(false);
+    expect(wrapper.text()).toContain("等待");
+  });
+
+  it("Run 正常执行且无挂起时当前步骤显示为执行中", async () => {
+    const run = { id: "run-a", status: "RUNNING", currentStepId: "step-2", revision: "1",
+      unresolvedOperationIds: [], pendingControlRequest: null, waitReason: null,
+      steps: [
+        { id: "step-1", kind: "PLAN", status: "SUCCEEDED", reason: null, startedAt: null, finishedAt: null },
+        { id: "step-2", kind: "DRAFT", status: "RUNNING", reason: null, startedAt: null, finishedAt: null }
+      ] } as unknown as RelayRun;
+    const { props } = setup({ run });
+    const { wrapper } = await mount(props);
+    expect(wrapper.find(".inspector-step-symbol--active").exists()).toBe(true);
+    expect(wrapper.find(".inspector-step-symbol--warn").exists()).toBe(false);
+    expect(wrapper.text()).toContain("执行中");
   });
 });
 

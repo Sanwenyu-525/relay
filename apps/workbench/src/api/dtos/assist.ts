@@ -1,4 +1,5 @@
 import type { DecimalRevision } from "../../types";
+import type { RelayGatewayDecision } from "./gateway";
 import type { RelayModelVerifyErrorCategory } from "./information";
 
 export interface RelayAssistSourceRef {
@@ -34,6 +35,18 @@ export interface RelayAssistSession {
   readonly taskId: string | null;
   readonly title: string;
   readonly status: string;
+  /**
+   * 置顶时刻（0090）。null 表示未置顶；缺字段只来自 0090 之前的响应，同样读成未置顶。
+   *
+   * 它是**导航排序键**，不是业务事实：归档与否、能不能发消息、绑哪个目录都不看这一列。
+   */
+  readonly pinnedAt: string | null;
+  /**
+   * 未读标记时刻（0104）。null = 已读；缺字段只来自 0104 之前的响应，同样读成已读。
+   *
+   * 它和置顶一样只是**导航标记**：不改变能不能发消息、绑哪个目录，也不参与列表排序。
+   */
+  readonly unreadAt: string | null;
   readonly revision: DecimalRevision;
   readonly updatedAt: string;
   readonly conversationMode: RelayConversationMode;
@@ -52,6 +65,11 @@ export interface RelayAssistSession {
    * 权限判定，界面不得据此显示「已获读取权限」。
    */
   readonly workingResourceId: string | null;
+  /** 只读导航依据；Goal 经项目关联，不代表会话直接绑定或获得目录权限。 */
+  readonly context?: {
+    readonly projectGoals: readonly { readonly goalId: string; readonly title: string }[];
+    readonly workingDirectory: { readonly resourceId: string; readonly canonicalRoot: string | null } | null;
+  };
 }
 
 /**
@@ -79,6 +97,43 @@ export interface RelayAssistSessionDirectoryBinding {
   readonly revision: DecimalRevision;
 }
 
+/**
+ * 会话行内控制的回执（0090）。改名/置顶/归档/重开各自只回它真正改过的那一项。
+ *
+ * 三条回执都只带会话身份、修订与更新时间，**不含任何执行权字段**：置顶只是排序键，
+ * 归档只是不再接收新消息，都不改变这条会话能不能读目录、能不能写文件。
+ */
+export interface RelayAssistSessionTitle {
+  readonly sessionId: string;
+  readonly title: string;
+  readonly revision: DecimalRevision;
+  readonly updatedAt: string;
+}
+
+export interface RelayAssistSessionPin {
+  readonly sessionId: string;
+  readonly pinned: boolean;
+  readonly pinnedAt: string | null;
+  readonly revision: DecimalRevision;
+  readonly updatedAt: string;
+}
+
+/** 未读回执（0104）：与置顶同一条形状，`unread` 是本次提交后的状态。 */
+export interface RelayAssistSessionUnread {
+  readonly sessionId: string;
+  readonly unread: boolean;
+  readonly unreadAt: string | null;
+  readonly revision: DecimalRevision;
+  readonly updatedAt: string;
+}
+
+export interface RelayAssistSessionState {
+  readonly sessionId: string;
+  readonly status: string;
+  readonly revision: DecimalRevision;
+  readonly updatedAt: string;
+}
+
 /** 文件夹入口的结果：目录是当前工作目录，不是新 Workspace，也不隐含任何权限。 */
 export interface RelayWorkingDirectoryCandidate {
   readonly projectId: string;
@@ -98,7 +153,15 @@ export interface RelayWorkingDirectory {
   readonly createdProject: boolean;
   readonly createdResource: boolean;
   readonly candidates: readonly RelayWorkingDirectoryCandidate[];
-  readonly writeReadiness: { readonly status: string; readonly detail: string };
+  /**
+   * 写档位以服务端投影为准：policyDecision 是该目录上 APPLY_CHANGESET 的生效策略档位
+   * （排序已在准入同一处完成，界面不再自己判定）；policyId / policyRevision 是改档位
+   * 需要的乐观锁坐标。旧回执里没有这组字段，一律为 null，表示「未核对」而不是「未授权」。
+   */
+  readonly writeReadiness: { readonly status: string; readonly detail: string;
+    readonly policyDecision: RelayGatewayDecision | null;
+    readonly policyId: string | null; readonly policyRevision: string | null;
+    readonly policyTargetPrefix: string | null };
 }
 
 /** 一次 Run 的工具调用轨迹（GET /runs/{id}/tool-calls）。
@@ -123,6 +186,21 @@ export interface RelayRunToolCall {
   readonly resultRef: Readonly<Record<string, unknown>> | null;
   readonly createdAt: string;
   readonly updatedAt: string;
+  /** 写类工具的逐文件结算账本（工作台 §34.2）；无可核对证据时为空数组。 */
+  readonly fileChanges: readonly RelayRunToolCallFileChange[];
+}
+
+/**
+ * 写类工具里单个文件的结算账本：`status` 来自适配器回执，
+ * `added`/`removed` 来自冻结的两份文本，-1 表示待核对。
+ */
+export interface RelayRunToolCallFileChange {
+  readonly path: string;
+  readonly action: "CREATE" | "MODIFY" | "DELETE";
+  readonly status: "APPLIED" | "CONFLICT" | "FAILED" | "UNKNOWN";
+  readonly added: number;
+  readonly removed: number;
+  readonly unavailableReason: string | null;
 }
 
 export interface RelayRunToolCalls {
@@ -134,6 +212,33 @@ export interface RelayRunToolCalls {
     readonly modelCallId: string;
     readonly calls: readonly RelayRunToolCall[];
   }[];
+}
+
+/**
+ * 生成中的工具预览（工作台 §34.4）：可丢弃的临时证据，不进入总数。
+ * `added`/`removed` 为 -1 表示待核对。
+ */
+export interface RelayRunToolCallPreviewFile {
+  readonly path: string;
+  readonly action: "CREATE" | "MODIFY" | "DELETE" | "UNKNOWN";
+  readonly added: number;
+  readonly removed: number;
+  readonly targetComplete: boolean;
+}
+
+export interface RelayRunToolCallPreview {
+  readonly modelCallId: string;
+  readonly ordinal: number;
+  readonly toolName: string;
+  readonly revision: string;
+  readonly truncated: boolean;
+  readonly updatedAt: string;
+  readonly files: readonly RelayRunToolCallPreviewFile[];
+}
+
+export interface RelayRunToolCallPreviews {
+  readonly runId: string;
+  readonly previews: readonly RelayRunToolCallPreview[];
 }
 
 /** 对话里的执行请求：原消息身份、模型整理出的候选摘要与阶段事实。 */
@@ -300,3 +405,70 @@ export type RelayAssistProposal = RelayAssistProposalBase & (
       readonly criteria: readonly { readonly statement: string; readonly required: boolean;
         readonly method: string }[]; readonly expectedOutputs: Readonly<Record<string, unknown>> } }
 ) | RelayTaskSkillProposal;
+
+/** 单文件净变化（工作台 §34 / 设计系统 §9.15）。局部 diff 与总数都来自同一套统计。 */
+export type RelayConversationFileAction = "CREATE" | "MODIFY" | "DELETE" | "SAME";
+
+export interface RelayConversationFileDiff {
+  readonly path: string;
+  readonly action: RelayConversationFileAction;
+  readonly added: number;
+  readonly removed: number;
+  /** 二进制/超限/读取失败等不可统计原因；非 null 时该文件不计入总数。 */
+  readonly unavailableReason: string | null;
+}
+
+/**
+ * 会话总 diff 的只读投影：基线（本轮对话起点）到当前已落盘内容的净变化。
+ *
+ * 不可用（无目录 / 无基线 / 根非 git / 资源不可用）时只给原因，不给伪造的零值。
+ */
+export type RelayConversationDiffUnavailableReason =
+  "NO_RESOURCE" | "NO_BASELINE" | "ROOT_NOT_GIT" | "RESOURCE_UNAVAILABLE";
+
+export type RelayConversationDiff =
+  | {
+      readonly available: true;
+      readonly baselineCapturedAt: string;
+      readonly baselineRevision: DecimalRevision;
+      readonly rootPath: string;
+      readonly resourceId: string;
+      readonly incomplete: boolean;
+      readonly totalFiles: number;
+      readonly totalAdded: number;
+      readonly totalRemoved: number;
+      readonly files: readonly RelayConversationFileDiff[];
+    }
+  | {
+      readonly available: false;
+      readonly reason: "NO_RESOURCE" | "NO_BASELINE" | "ROOT_NOT_GIT" | "RESOURCE_UNAVAILABLE";
+    };
+
+/** 展开阅读的单文件正文行；行号在该侧不存在时为 null。 */
+export interface RelayConversationDiffFileRow {
+  readonly kind: "CONTEXT" | "ADD" | "REMOVE";
+  readonly oldLine: number | null;
+  readonly newLine: number | null;
+  readonly text: string;
+}
+
+/**
+ * 展开阅读的单文件完整 diff（工作台 §34.2）。行数与总数同源；
+ * `rows` 为 null 时看 `rowsUnavailableReason`，不编造正文。
+ */
+export type RelayConversationDiffFile =
+  | {
+      readonly available: true;
+      readonly path: string;
+      readonly action: RelayConversationFileAction;
+      readonly added: number;
+      readonly removed: number;
+      readonly unavailableReason: string | null;
+      readonly rows: readonly RelayConversationDiffFileRow[] | null;
+      readonly rowsTruncated: boolean;
+      readonly rowsUnavailableReason: string | null;
+    }
+  | {
+      readonly available: false;
+      readonly reason: "NO_RESOURCE" | "NO_BASELINE" | "ROOT_NOT_GIT" | "RESOURCE_UNAVAILABLE" | "PATH_NOT_FOUND";
+    };

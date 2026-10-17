@@ -116,8 +116,8 @@ describe("项目列表 live 计数与归档横幅", () => {
     }));
     const mounted = await mountWorkbench("/projects");
     unmount = mounted.unmount;
-    // 归档入口在详情抽屉里（AppDialog 走 portal）。
-    await mounted.wrapper.get(`[data-testid="project-row-${projectId}"]`).trigger("click"); await flush();
+    // 归档入口在详情抽屉里（点「⋯」打开，AppDialog 走 portal）。
+    await mounted.wrapper.get(`[data-testid="project-card-more-${projectId}"]`).trigger("click"); await flush();
     await portal().get('[data-testid="project-archive"]').trigger("click"); await flush();
     await portal().get('[data-testid="project-archive-confirm"]').trigger("click"); await flush();
     const banner = mounted.wrapper.get('[data-testid="project-archive-success"]').text();

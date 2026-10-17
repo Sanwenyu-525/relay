@@ -41,7 +41,7 @@ describe("项目列表", () => {
     const mounted = await mountWorkbench("/projects");
     unmount = mounted.unmount;
 
-    await mounted.wrapper.get('[data-testid="project-row-project-knowledge"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="project-card-more-project-knowledge"]').trigger("click");
     await flush();
 
     expect(portal().text()).toContain("建立可持续的个人知识体系");
@@ -49,17 +49,29 @@ describe("项目列表", () => {
     expect(portal().get('[data-testid="project-open"]').attributes("href")).toBe("/projects/project-knowledge");
   });
 
+  it("点卡片主体进入项目详情路由（不再弹抽屉）", async () => {
+    const mounted = await mountWorkbench("/projects");
+    unmount = mounted.unmount;
+
+    await mounted.wrapper.get('[data-testid="project-row-project-knowledge"]').trigger("click");
+    await flush();
+
+    expect(mounted.router.currentRoute.value.path).toBe("/projects/project-knowledge");
+    // 抽屉未被打开：详情入口只在「⋯」里，主体点击是跳转而非弹层。
+    expect(portal().find('[data-testid="project-open"]').exists()).toBe(false);
+  });
+
   it("归档被拒绝时给出原因，可归档项目完成后列表计数同步", async () => {
     const mounted = await mountWorkbench("/projects");
     unmount = mounted.unmount;
 
-    await mounted.wrapper.get('[data-testid="project-row-project-workflow-os"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="project-card-more-project-workflow-os"]').trigger("click");
     await flush();
 
     expect(portal().get('[data-testid="project-archive"]').attributes("disabled")).toBeDefined();
     expect(portal().get('[data-testid="project-archive-reason"]').text()).toContain("正在进行的执行");
 
-    await mounted.wrapper.get('[data-testid="project-row-project-hci"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="project-card-more-project-hci"]').trigger("click");
     await flush();
     await portal().get('[data-testid="project-archive"]').trigger("click");
     await flush(80);
@@ -74,7 +86,7 @@ describe("项目列表", () => {
     const mounted = await mountWorkbench("/projects?archived=1");
     unmount = mounted.unmount;
 
-    await mounted.wrapper.get('[data-testid="project-row-project-thesis-topic"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="project-card-more-project-thesis-topic"]').trigger("click");
     await flush();
 
     expect(portal().text()).toContain("已归档项目在本轮交互预览中只读");
@@ -105,8 +117,8 @@ describe("项目列表", () => {
     await mounted.wrapper.get('[data-testid="projects-view-list"]').trigger("click");
     expect(grid()?.classList.contains("is-list")).toBe(true);
     expect(mounted.wrapper.get('[data-testid="projects-view-list"]').attributes("aria-pressed")).toBe("true");
-    // 切视图不重建卡片：同一个项目行仍在，且仍可打开详情。
-    await mounted.wrapper.get('[data-testid="project-row-project-knowledge"]').trigger("click");
+    // 切视图不重建卡片：同一个项目行仍在，且「⋯」仍可打开详情。
+    await mounted.wrapper.get('[data-testid="project-card-more-project-knowledge"]').trigger("click");
     await flush();
     expect(portal().get('[data-testid="project-open"]').attributes("href")).toBe("/projects/project-knowledge");
 

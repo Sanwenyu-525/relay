@@ -14,7 +14,7 @@
   display: grid;
   gap: var(--relay-space-1);
   width: 100%;
-  max-width: var(--relay-layout-reading-maxWidth);
+  max-width: var(--chat-measure, var(--relay-layout-reading-maxWidth));
   margin: var(--relay-space-1) auto 0;
   padding: var(--relay-space-1) var(--relay-space-3);
   background: var(--relay-color-bg-subtle);
@@ -38,14 +38,19 @@
    顶部留白交给 space.4，块与块之间才有呼吸。 */
 .collab-center { display: flex; flex-direction: column; align-items: stretch; min-width: 0; min-height: 0; overflow: hidden; padding: var(--relay-space-4) var(--relay-space-4) var(--relay-space-3); gap: var(--relay-space-3); }
 .collab-center > * { flex: none; }
+/* 有会话顶栏的那一列把顶部留白收到 space.2（2026-10-17 用户指令「你好这一行往上移，现在离卡片的上边缘太远」）：
+   顶栏自己就是这一列的第一块内容，它带底色渐变，再压一档留白就等于把正文整体往下推。
+   任务仪表盘与「新对话」欢迎态没有顶栏，留白不动。 */
+.collab-center:has(.collab-conversation-toolbar) { padding-top: var(--relay-space-2); }
 /* 消息区是中栏的主轴，basis 用 auto：flex-basis:0（flex:1）时这一项
    不按内容参与收缩，目录范围条实测占 424px 也不肯让出高度，整列只剩 174px，
    转录区被压到 16px——正好一行文字高，看上去就是输入器上方遮住了一块文字。 */
 /* 双视图的聊天容器也须把剩余高度交给 AssistView，否则输入卡停在消息后面而非窗口底部。 */
 .collab-center > .agent-assist,
-.collab-chat-view-container > .agent-assist { flex: 1 1 auto; min-height: 0; gap: var(--relay-space-1); }
+.collab-chat-view-container > .agent-assist { flex: 1 1 auto; min-height: 0; min-width: 0; gap: var(--relay-space-1); }
 .collab-center .agent-assist > .agent-assist-heading { display: none; }
-.collab-center .agent-chat-conversation { flex: 1; min-height: 0; margin: 0; padding: 0; background: transparent; border: 0; }
+/* 纸面底色归外壳卡片自己（styles.css 的 .app-content）：这里再铺一层会把卡片右缘的渐隐盖掉。 */
+.collab-center .agent-chat-conversation { flex: 1; min-height: 0; min-width: 0; margin: 0; padding: 0; background: transparent; border: 0; border-radius: 0; box-shadow: none; }
 .collab-center .agent-chat-conversation-heading { display: none; }
 .collab-center .agent-assist-session-bar { flex: none; padding: 0; background: transparent; border: 0; margin: 0; }
 .collab-center .agent-assist-session-bar .form-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-2); margin: 0; }
@@ -304,10 +309,52 @@
   font-weight: var(--relay-font-weight-bold);
 }
 
-.collab-inspector-toggle-btn.active {
+/* 2026-10-17 用户指令：工作详情收成纯图标开关键（Codex 参考图的图标密度），
+   右翼相邻的「切换讨论／新建会话／任务视图」随后并成同一档图标键。
+   可见文字删掉，键收成 compact 档的方形命中区，图标 18px；静止透明、悬停 selection.hover、
+   展开 selection.bg + selection.text。展开态不再补 action 描边——顶栏与页头同一档轻量键。 */
+.secondary-button.collab-inspector-toggle-btn,
+.secondary-button.collab-toolbar-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  flex: none;
+  width: var(--relay-control-height-compact);
+  min-width: var(--relay-control-height-compact);
+  height: var(--relay-control-height-compact);
+  min-height: var(--relay-control-height-compact);
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  color: var(--relay-color-text-secondary);
+}
+.secondary-button.collab-inspector-toggle-btn svg,
+.secondary-button.collab-toolbar-icon-button svg { width: 1.125rem; height: 1.125rem; }
+.secondary-button.collab-inspector-toggle-btn:hover:not(:disabled),
+.secondary-button.collab-toolbar-icon-button:hover:not(:disabled) {
+  background: var(--relay-color-selection-hover);
+  border-color: transparent;
+  color: var(--relay-color-text-primary);
+}
+.secondary-button.collab-inspector-toggle-btn.active,
+.secondary-button.collab-inspector-toggle-btn.active:hover:not(:disabled),
+.secondary-button.collab-toolbar-icon-button.active,
+.secondary-button.collab-toolbar-icon-button.active:hover:not(:disabled),
+/* 点完浮层键指针仍停在键上：hover 一档要一起收进展开态，否则读回淡底。 */
+.secondary-button.collab-toolbar-icon-button[aria-expanded="true"],
+.secondary-button.collab-toolbar-icon-button[aria-expanded="true"]:hover:not(:disabled) {
   background: var(--relay-color-selection-bg);
+  border-color: transparent;
   color: var(--relay-color-selection-text);
-  border-color: var(--relay-color-action-primary);
+}
+/* 静止透明的键没有边框可失去，禁用态必须换个说法：降到 muted 档并给出 not-allowed。 */
+.secondary-button.collab-inspector-toggle-btn:disabled,
+.secondary-button.collab-toolbar-icon-button:disabled {
+  background: transparent;
+  border-color: transparent;
+  color: var(--relay-color-text-muted);
+  cursor: not-allowed;
 }
 
 .collab-task-view-container {
@@ -340,7 +387,7 @@
    （layout.workspace.sideWidth ≈ 34rem）抢占空间，把中栏挤到 1280 宽只剩 71px、
    1440 宽只剩 231px，中文被压成一字一行。四栏沿用与双栏同一套比例变量，
    中栏与成果栏按用户既有的 chatRatio 分配剩余宽度。
-   只在容器够宽时生效：窄容器仍走下面 @container 的纵向堆叠与浮层。 */
+   只在容器够宽时生效：窄容器仍走下面 @container 的纵向堆叠与抽屉式收纳（CT-01）。 */
 @container collaboration (min-width: calc(26rem + 20rem + 6rem)) {
   .collab-columns:has(.task-inspector) {
     display: grid;
@@ -384,17 +431,39 @@
   }
 }
 
-/* 工作详情面板的窄容器收纳。
-   宽窗里它是独立一列；窄窗里没有第三列的位置，改为覆盖在成果区之上的浮层，
-   宽度沿用同一 token，避免出现「一半宽的面板把正文压成几个字」。
-   定位上下文由 .collab-columns 提供，面板本身仍是同一个组件与同一份数据。 */
+/* 工作详情面板的容器收纳（2026-10-17 点击验收整改 CT-01）。
+   宽容器里它是独立一列；容器放不下时收成覆盖抽屉：遮罩 + 关闭键 + Esc 三条关闭路径，
+   面板仍是同一个组件、同一份数据，定位上下文由 .collab-columns 提供。
+   判断依据必须是主区容器自己的宽度，不能看视口宽度：1162px 窗口里主区只有 900px
+   （导航栏与会话栏先占掉 262px），按视口判断会把它当成「有空间」，于是保留四轨网格、
+   面板绝对覆盖在成果区之上——实测压住工具栏的「任务视图 / 工作详情」两颗键。
+   阈值只能写成 calc 字面量：@container 的大小条件不接受 var()。
+   · 详情面板：低于既有的四栏档（中栏下限 26rem + 成果栏参考 20rem + 6rem 余量）收抽屉；
+   · 深预览面板：它自己是宽档 30rem，按「中栏下限 + 间距 + 面板」另算
+     26rem + 0.5rem + 30rem = 56.5rem，低于它不再保留一条被挤到无法阅读的聊天列。 */
 .collab-columns:has(.task-inspector) {
   position: relative;
 }
 
-@media (width < 80rem) {
-  /* 面板改成 position:absolute 之后不再占格——但上面 @container 里的网格仍为它留着
-     第四条 track（实测在 1100px 视口白吃掉 288px，中栏只剩 281px）。这里把那一列撤掉。
+/* 抽屉遮罩只盖到主区：吸底判断条（sticky 10）、输入器建议（popover 20）这类栏内层叠
+   不该穿透遮罩。两栏各自成为独立层叠上下文后，栏内 z-index 只在栏内比较，
+   遮罩停在 sticky - 1 就足够；顶栏（同为 sticky 10，独立上下文）仍在遮罩之上，通知面板照常可用。 */
+.collab-columns:has(.task-inspector) > .collab-center,
+.collab-columns:has(.task-inspector) > .collab-result-pane { isolation: isolate; }
+
+/* 覆盖抽屉的遮罩：只覆盖主区（页头与导航仍可操作），底色沿用 .dialog-backdrop 同一套配方。
+   分栏态不渲染这块面：非模态分栏不伪装成模态，也不吃正文的点击。 */
+.collab-inspector-scrim {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: calc(var(--relay-zIndex-sticky) - 1);
+  background: color-mix(in srgb, var(--relay-color-text-primary) 32%, transparent);
+}
+
+@container collaboration (max-width: calc(26rem + 20rem + 6rem)) {
+  /* 面板改成 position:absolute 之后不再占格——但上面的网格仍为它留着第四条 track
+     （实测白吃掉 288px，中栏只剩 281px）。这里把那一列撤掉。
      单区模式（对话 / 成果）只剩一栏，同样要收回 1fr，否则可见的那栏只拿到 52%。 */
   .collab-columns:has(.task-inspector) {
     grid-template-columns:
@@ -417,7 +486,171 @@
     box-shadow: var(--relay-shadow-floating);
   }
 
-  .collab-columns:has(.task-inspector) > .task-inspector--preview {
-    width: min(var(--relay-layout-inspector-wideWidth), calc(100% - var(--relay-space-4)));
-  }
+  .collab-inspector-scrim { display: block; }
 }
+
+@container collaboration (max-width: calc(26rem + 0.5rem + 30rem)) {
+  /* 深预览：容器放不下「26rem 中栏 + 30rem 预览面板」时同样收成抽屉，宽度沿用宽档 token。 */
+  .collab-columns:has(> .task-inspector--preview) {
+    grid-template-columns:
+      minmax(0, var(--relay-collab-chat-column))
+      var(--relay-space-2)
+      minmax(0, var(--relay-collab-result-column));
+  }
+
+  .collab-columns:has(.task-inspector)[data-layout-mode="chat"]:has(> .task-inspector--preview),
+  .collab-columns:has(.task-inspector)[data-layout-mode="result"]:has(> .task-inspector--preview) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .collab-columns:has(.task-inspector) > .task-inspector--preview {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-end: 0;
+    z-index: var(--relay-zIndex-sticky);
+    width: min(var(--relay-layout-inspector-wideWidth), calc(100% - var(--relay-space-4)));
+    box-shadow: var(--relay-shadow-floating);
+  }
+
+  /* 这一档只把深预览收成抽屉，详情面板在 52–56.5rem 之间仍是常驻分栏。
+     遮罩必须跟着「有没有真的抽屉」走：无条件铺上时它是 absolute + sticky-1，而分栏面板是
+     static，绘制顺序把遮罩压在上面，实测面板自己的 tab 与关闭键全部点不到（CT-01 回归 7 红）。 */
+  .collab-columns:has(> .task-inspector--preview) .collab-inspector-scrim { display: block; }
+}
+
+/* 会话顶栏：一行 chrome（2026-10-16 分成左右两翼；2026-10-17 用户指令「顶栏高度太宽」＋
+   「左侧显示会话名字就好，不需要下拉框」→ 收成一行，左侧只剩文字）。
+   同日接续（用户指令「你好这一行往上移…会话目录那个字样移动到你好下面，这三个协调一下」＋
+   「删除顶栏下面的分隔线，文字被顶栏遮盖部分用从上到下慢慢变透明的渐变处理（顶栏的颜色改变）」）：
+   · 左翼两行：会话名独占第一行，两件作用域（关联目标／会话目录）成组落在它下面，左缘对齐；
+   · 顶栏不再画下缘分隔线，收边换成自己的底色渐变——纸面色从上缘的实淡到下缘的透，
+     边界由颜色说出而不是 1px 线；正文那侧的淡出仍由转录区上缘遮罩完成（AssistView.css）；
+   · 上缘留白 space.1，中栏顶部留白 space.2，会话名距卡片上缘只剩一档呼吸。
+   2026-10-16 taste 审计（§4.4「卡片只在需要层级时用」）：顶栏此前是纸面卡里再套一张带描边圆角的卡，
+   两层边框互相抵消层级。改回 chrome：无描边、无圆角。
+   2026-10-17 两翼贴聊天列边：不按 --chat-measure 居中收窄，整条铺满聊天列（1fr/auto 两轨把右翼推到末端）。
+   高度：min-height 走 control.height.compact（32px），两行档由内容决定，见 conversationToolbarDensity 的几何断言。 */
+.collab-conversation-toolbar {
+  flex: none;
+  width: 100%;
+  /* 「切换讨论」的浮层要从顶栏里探到消息流上方：消息列自身是 positioned 且排在顶栏之后，
+     默认后画会盖住浮层。顶栏本来就是常驻头部，取 sticky 一档，不新造层级。 */
+  position: relative;
+  z-index: var(--relay-zIndex-sticky);
+  /* 顶栏自成一个查询容器（CT-01）：工作详情分栏时被挤窄的是中栏，主区容器可能仍然很宽，
+     量主区的规则在这类宽度下永远不会触发。挂在 collaboration 上的查询仍是别的规则的依据。 */
+  container-name: collab-toolbar;
+  container-type: inline-size;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--relay-space-2);
+  min-height: var(--relay-control-height-compact);
+  padding: var(--relay-space-1) var(--relay-space-3) var(--relay-space-2);
+  /* 底色就是这一列自己的纸面（外壳卡片 .app-content 铺的同一档 bg.surface）：静止时渐变不改变画面，
+     它保证的是顶栏与正文之间没有一条线、只有一段淡出。两翼文字停在 40% 以上的实底段里。 */
+  background: linear-gradient(to bottom, var(--relay-color-bg-surface) 0%, var(--relay-color-bg-surface) 40%, transparent 100%);
+  border: 0;
+  border-radius: 0;
+}
+/* 左翼两行：第一行是身份，第二行是作用域。目录值是路径末段，跟在会话名后面必然被挤短，
+   给它自己一行才读得完；两件作用域同档字号、同一套标签／取值配色，成组而不是各说各话。
+   两行都跟着这一列的宽度走（交叉轴 stretch，不写 align-items:flex-start）：列向 flex 里
+   交叉尺寸取内容宽，会话名会保持 20rem 上限而伸出主列轨道，实测在 1000×800 与右翼交叠 231px²。
+   左缘对齐由两行同一起点保证，不需要 flex-start。 */
+.collab-toolbar-info { display: flex; flex-direction: column; gap: var(--relay-space-1); min-width: 0; }
+/* 会话名是纯文字，不是控件：切换会话只有近期工作栏一个入口（AssistView.tsx 顶栏注释）。
+   封顶 50cqi，长标题在顶栏里截断，完整标题留在 title。 */
+.collab-toolbar-session {
+  min-width: 0;
+  max-width: min(20rem, 50cqi);
+  margin: 0;
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-medium);
+  line-height: var(--relay-font-lineHeight-heading);
+  color: var(--relay-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.collab-toolbar-crumb {
+  min-width: 0;
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-heading);
+  color: var(--relay-color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 两件作用域事实各自成立：16px 间隔在 12px 字号下黏成一串，放到 space.6。 */
+.collab-toolbar-crumb.collab-toolbar-crumb--scope { display: flex; flex: 0 1 auto; gap: var(--relay-space-6); min-width: 0; }
+.collab-toolbar-crumb--scope > span { display: flex; align-items: center; min-width: 0; max-width: 50%; white-space: nowrap; }
+.collab-toolbar-scope-label { flex: none; }
+.collab-toolbar-scope-value { overflow: hidden; text-overflow: ellipsis; color: var(--relay-color-text-secondary); }
+/* 占位状态（尚未关联目标／目录待核对…）不是取值：降到 muted 档，别与目录名这类真实取值同重。 */
+.collab-toolbar-scope-value--placeholder { color: var(--relay-color-text-muted); }
+/* 2026-10-17 用户指令：会话目录收成一个文件夹图标，完整路径改由悬停提示与可访问名称承担。 */
+.collab-toolbar-directory {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--relay-color-text-secondary);
+  cursor: default;
+}
+.collab-toolbar-directory--placeholder { color: var(--relay-color-text-muted); }
+.collab-toolbar-directory > svg { width: 0.875rem; height: 0.875rem; }
+/* 右翼动作区：四颗键同高同密度、按 space.2 成组；「工作详情」固定在最后。
+   图标键本身的基底与展开色见本文件上方的 `.collab-toolbar-icon-button`，这里只摆位置。 */
+.collab-toolbar-right { display: flex; align-items: center; gap: var(--relay-space-2); }
+/* 「切换讨论」浮层（2026-10-17）：贴在触发键正下方，右缘对齐顶栏右缘，宽度按最长一条讨论走，
+   与左栏行内菜单同一套浮层形（surface + separator + floating 阴影 + panel 圆角）。 */
+.collab-session-switcher { position: relative; display: flex; align-items: center; }
+.collab-session-switcher-panel {
+  position: absolute;
+  top: calc(100% + var(--relay-space-1));
+  right: 0;
+  z-index: var(--relay-zIndex-popover);
+  display: grid;
+  gap: var(--relay-space-1);
+  width: max-content;
+  max-width: min(20rem, calc(100vw - var(--relay-space-4)));
+  padding: var(--relay-space-1);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  box-shadow: var(--relay-shadow-floating);
+}
+.collab-session-switcher-option {
+  min-width: 0;
+  padding: var(--relay-space-1) var(--relay-space-2);
+  font-size: var(--relay-font-size-meta);
+  text-align: start;
+  color: var(--relay-color-text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--relay-radius-control);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.collab-session-switcher-option:hover:not(:disabled) {
+  background: var(--relay-color-selection-hover);
+  color: var(--relay-color-text-primary);
+}
+.collab-session-switcher-option[aria-current="true"] {
+  color: var(--relay-color-selection-text);
+  font-weight: var(--relay-font-weight-medium);
+}
+.collab-session-switcher-option:disabled { cursor: default; opacity: 1; }
+/* 右翼四颗键都是纯图标键：可见文字一律退出，可访问名称来自 aria-label / title。
+   「新建会话」在非顶栏的会话控制带里仍保留文字，因此只在本工具栏内隐藏标签。 */
+.collab-toolbar-right .agent-assist-new-session-label { display: none; }
+/* 窄顶栏里再让位：整条作用域收起，把宽度还给会话名（原型同款降级）。
+   量的是顶栏自己的宽度：详情分栏把中栏压窄时，被挤的是顶栏而不是主区。
+   会话目录另见输入区上方的目录细条，关联目标仍在顶栏 30rem 以上一档完整可读。 */
+@container collab-toolbar (max-width: 30rem) {
+  .collab-toolbar-crumb--scope { display: none; }
+}
+
+
+.collab-goal[hidden] { display: none; }

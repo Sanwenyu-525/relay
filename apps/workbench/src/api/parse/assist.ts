@@ -1,6 +1,7 @@
 import { array, boolean, decimal, integer, isRecord, nullableInteger, nullableOptionalInteger, nullableString, object, optionalString, string, stringArray, stringList } from "../core/primitives";
-import type { RelayAssistMessage, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDirectoryBinding, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayConversationCheck, RelayConversationExecution, RelayPackDefinition, RelayRunToolCall, RelayRunToolCalls, RelaySkillDefinition, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate } from "../dtos/assist";
+import type { RelayAssistMessage, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDirectoryBinding, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffFile, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySkillDefinition, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate } from "../dtos/assist";
 import type { DecimalRevision } from "../../types";
+import type { RelayGatewayDecision } from "../dtos/gateway";
 
 export function assistSourceBody(source: RelayAssistSourceRef) {
   return { kind: source.kind, root_id: source.rootId, version: source.version };
@@ -154,6 +155,10 @@ export function assistSessionFrom(value: unknown): RelayAssistSession {
     taskId: nullableString(row, "task_id", "assist session"),
     title: string(row, "title", "assist session"), status: string(row, "status", "assist session"),
     revision: decimal(row, "revision", "assist session"),
+    // 0090：pinned_at 缺失只来自该迁移之前的响应，那时还没有置顶这件事。
+    pinnedAt: optionalNullable(row, "pinned_at", "assist session"),
+    // 0104：unread_at 同理，缺失读成已读——未读是后加的可选标记，不是第三种状态。
+    unreadAt: optionalNullable(row, "unread_at", "assist session"),
     updatedAt: string(row, "updated_at", "assist session"),
     conversationMode, assistantProfileId, assistantProfileRevision,
     personaLabel: personaLabel(role, assistantProfileRevision),
@@ -161,7 +166,18 @@ export function assistSessionFrom(value: unknown): RelayAssistSession {
     remember: row.remember === undefined ? true : boolean(row, "remember", "assist session"),
     // 0087：working_resource_id 缺失只来自该迁移之前的响应，那时会话本来就没有目录绑定。
     workingResourceId: row.working_resource_id === undefined
-      ? null : nullableString(row, "working_resource_id", "assist session") };
+      ? null : nullableString(row, "working_resource_id", "assist session"),
+    ...(row.context === undefined ? {} : { context: (() => {
+      const context = object(row.context, "assist session context");
+      const directory = context.working_directory === null ? null
+        : object(context.working_directory, "assist session directory");
+      return { projectGoals: array(context, "project_goals", "assist session context").map((value) => {
+        const goal = object(value, "assist session goal");
+        return { goalId: string(goal, "goal_id", "assist session goal"), title: string(goal, "title", "assist session goal") };
+      }), workingDirectory: directory === null ? null : {
+        resourceId: string(directory, "resource_id", "assist session directory"),
+        canonicalRoot: nullableString(directory, "canonical_root", "assist session directory") } };
+    })() }) };
 }
 
 export function assistMessageFrom(value: unknown): RelayAssistMessage {
@@ -322,7 +338,21 @@ export function workingDirectoryFrom(value: unknown): RelayWorkingDirectory {
     createdResource: boolean(row, "created_resource", "working directory"),
     candidates: array(row, "candidates", "working directory").map(workingDirectoryCandidateFrom),
     writeReadiness: { status: string(readiness, "status", "working directory write readiness"),
-      detail: string(readiness, "detail", "working directory write readiness") } };
+      detail: string(readiness, "detail", "working directory write readiness"),
+      policyDecision: policyDecisionOf(readiness),
+      policyId: optionalString(readiness, "policy_id"),
+      policyRevision: optionalString(readiness, "policy_revision"),
+      policyTargetPrefix: optionalString(readiness, "policy_target_prefix") } };
+}
+
+/** 缺键（旧回执）当作未核对；出现无法识别的档位不当作空值蒙混，显式失败。 */
+function policyDecisionOf(readiness: Record<string, unknown>): RelayGatewayDecision | null {
+  const value = readiness.policy_decision;
+  if (value === undefined || value === null) return null;
+  if (value !== "DENY" && value !== "ASK" && value !== "AUTO") {
+    throw new Error("working directory write readiness.policy_decision 无法识别");
+  }
+  return value;
 }
 
 /**
@@ -351,6 +381,47 @@ export function assistSessionDirectoryBindingFrom(value: unknown): RelayAssistSe
     revision: decimal(row, "revision", "assist session directory binding") };
 }
 
+/**
+ * 会话行内控制三条回执的解析（0090）。
+ *
+ * 与绑定回执一样逐字核对：`pinned` 必须是布尔、`status` 只认库里那两个值——
+ * 读出一个听不懂的归档态却当成成功，比报错更糟。
+ */
+export function assistSessionTitleFrom(value: unknown): RelayAssistSessionTitle {
+  const row = object(value, "assist session title");
+  return { sessionId: string(row, "session_id", "assist session title"),
+    title: string(row, "title", "assist session title"),
+    revision: decimal(row, "revision", "assist session title"),
+    updatedAt: string(row, "updated_at", "assist session title") };
+}
+
+export function assistSessionPinFrom(value: unknown): RelayAssistSessionPin {
+  const row = object(value, "assist session pin");
+  if (typeof row.pinned !== "boolean") throw new Error("Assist 会话置顶回执格式无效。");
+  return { sessionId: string(row, "session_id", "assist session pin"), pinned: row.pinned,
+    pinnedAt: nullableString(row, "pinned_at", "assist session pin"),
+    revision: decimal(row, "revision", "assist session pin"),
+    updatedAt: string(row, "updated_at", "assist session pin") };
+}
+
+export function assistSessionUnreadFrom(value: unknown): RelayAssistSessionUnread {
+  const row = object(value, "assist session unread");
+  if (typeof row.unread !== "boolean") throw new Error("Assist 会话未读回执格式无效。");
+  return { sessionId: string(row, "session_id", "assist session unread"), unread: row.unread,
+    unreadAt: nullableString(row, "unread_at", "assist session unread"),
+    revision: decimal(row, "revision", "assist session unread"),
+    updatedAt: string(row, "updated_at", "assist session unread") };
+}
+
+export function assistSessionStateFrom(value: unknown): RelayAssistSessionState {
+  const row = object(value, "assist session state");
+  const status = string(row, "status", "assist session state");
+  if (status !== "ACTIVE" && status !== "ARCHIVED") throw new Error("Assist 会话状态回执无法识别。");
+  return { sessionId: string(row, "session_id", "assist session state"), status,
+    revision: decimal(row, "revision", "assist session state"),
+    updatedAt: string(row, "updated_at", "assist session state") };
+}
+
 export const RELAY_TOOL_CALL_STATUSES = ["REQUESTED", "PREPARED", "WAITING_APPROVAL", "SETTLED",
   "REJECTED", "ABANDONED"] as const;
 
@@ -377,7 +448,24 @@ export function toolCallFrom(value: unknown): RelayRunToolCall {
     resultRef: row.result_ref === null || row.result_ref === undefined
       ? null : object(row.result_ref, "Run tool call result"),
     createdAt: string(row, "created_at", "Run tool call"),
-    updatedAt: string(row, "updated_at", "Run tool call") };
+    updatedAt: string(row, "updated_at", "Run tool call"),
+    fileChanges: array(row, "file_changes", "Run tool call").map((entry) => {
+      const file = object(entry, "Run tool call file change");
+      const action = string(file, "action", "Run tool call file change");
+      if (action !== "CREATE" && action !== "MODIFY" && action !== "DELETE") {
+        throw new Error("Run 工具调用的文件动作无法识别。");
+      }
+      const status = string(file, "status", "Run tool call file change");
+      if (!["APPLIED", "CONFLICT", "FAILED", "UNKNOWN"].includes(status)) {
+        throw new Error("Run 工具调用的文件状态无法识别。");
+      }
+      return { path: string(file, "path", "Run tool call file change"),
+        action: action as "CREATE" | "MODIFY" | "DELETE",
+        status: status as "APPLIED" | "CONFLICT" | "FAILED" | "UNKNOWN",
+        added: integer(file, "added", "Run tool call file change"),
+        removed: integer(file, "removed", "Run tool call file change"),
+        unavailableReason: nullableString(file, "unavailable_reason", "Run tool call file change") };
+    }) };
 }
 
 export function runToolCallsFrom(value: unknown): RelayRunToolCalls {
@@ -442,6 +530,8 @@ export function conversationExecutionFrom(value: unknown): RelayConversationExec
 
 export function conversationExecutionSummaryFrom(value: unknown): RelayConversationExecution {
   const row = object(value, "conversation execution");
+  const candidate = row.candidate === null || row.candidate === undefined
+    ? null : object(row.candidate, "conversation execution candidate");
   return { requestId: string(row, "request_id", "conversation execution"),
     sessionId: string(row, "session_id", "conversation execution"),
     sourceMessageId: string(row, "source_message_id", "conversation execution"),
@@ -449,9 +539,137 @@ export function conversationExecutionSummaryFrom(value: unknown): RelayConversat
     status: string(row, "status", "conversation execution"),
     candidateStatus: string(row, "candidate_status", "conversation execution"),
     rootPath: string(row, "root_path", "conversation execution"),
+    resourceId: optionalString(row, "resource_id") ?? undefined,
+    title: candidate === null ? null : optionalString(candidate, "title"),
+    objective: candidate === null ? null : optionalString(candidate, "objective"),
+    check: candidate === null ? null : conversationCheckFrom(candidate),
     questions: stringArray(row, "questions", "conversation execution"),
     autoStart: row.auto_start === true,
     taskId: nullableString(row, "task_id", "conversation execution"),
     runId: nullableString(row, "run_id", "conversation execution"),
     revision: decimal(row, "revision", "conversation execution") };
+}
+
+/** 会话总 diff 的单文件净变化（工作台 §34）。 */
+export function conversationDiffFileFrom(value: unknown): RelayConversationFileDiff {
+  const row = object(value, "conversation file diff");
+  const action = string(row, "action", "conversation file diff");
+  if (!["CREATE", "MODIFY", "DELETE", "SAME"].includes(action)) {
+    throw new Error("会话文件 diff 动作无效。");
+  }
+  return {
+    path: string(row, "path", "conversation file diff"),
+    action: action as RelayConversationFileAction,
+    added: integer(row, "added", "conversation file diff"),
+    removed: integer(row, "removed", "conversation file diff"),
+    unavailableReason: nullableString(row, "unavailable_reason", "conversation file diff"),
+  };
+}
+
+/** 会话总 diff 的只读投影：基线到当前已落盘内容的净变化（CD-02/03/16/17）。 */
+export function conversationDiffFrom(value: unknown): RelayConversationDiff {
+  const row = object(value, "conversation diff");
+  const available = row.available;
+  if (available === true) {
+    return {
+      available: true,
+      baselineCapturedAt: string(row, "baseline_captured_at", "conversation diff"),
+      baselineRevision: decimal(row, "baseline_revision", "conversation diff"),
+      rootPath: string(row, "root_path", "conversation diff"),
+      resourceId: string(row, "resource_id", "conversation diff"),
+      incomplete: boolean(row, "incomplete", "conversation diff"),
+      totalFiles: integer(row, "total_files", "conversation diff"),
+      totalAdded: integer(row, "total_added", "conversation diff"),
+      totalRemoved: integer(row, "total_removed", "conversation diff"),
+      files: array(row, "files", "conversation diff").map(conversationDiffFileFrom),
+    };
+  }
+  if (available === false) {
+    const reason = string(row, "reason", "conversation diff");
+    if (!["NO_RESOURCE", "NO_BASELINE", "ROOT_NOT_GIT", "RESOURCE_UNAVAILABLE"].includes(reason)) {
+      throw new Error("会话 diff 不可用原因无效。");
+    }
+    return { available: false, reason: reason as RelayConversationDiffUnavailableReason };
+  }
+  throw new Error("会话 diff 可用性标记无效。");
+}
+
+/** 展开阅读的单文件完整 diff（工作台 §34.2）：行数与总数同源，rows 为 null 时看原因。 */
+export function conversationDiffFileDetailFrom(value: unknown): RelayConversationDiffFile {
+  const row = object(value, "conversation diff file");
+  if (row.available === true) {
+    const action = string(row, "action", "conversation diff file");
+    if (!["CREATE", "MODIFY", "DELETE", "SAME"].includes(action)) {
+      throw new Error("会话文件 diff 动作无效。");
+    }
+    const rawRows = row.rows;
+    const rows = rawRows === null || rawRows === undefined ? null
+      : (Array.isArray(rawRows) ? rawRows : (() => {
+          throw new Error("会话文件 diff 行无效。");
+        })()).map((entry) => {
+        const line = object(entry, "conversation diff row");
+        const kind = string(line, "kind", "conversation diff row");
+        if (!["CONTEXT", "ADD", "REMOVE"].includes(kind)) {
+          throw new Error("会话文件 diff 行类型无效。");
+        }
+        return { kind: kind as "CONTEXT" | "ADD" | "REMOVE",
+          oldLine: nullableInteger(line, "old_line", "conversation diff row"),
+          newLine: nullableInteger(line, "new_line", "conversation diff row"),
+          text: string(line, "text", "conversation diff row") };
+      });
+    return {
+      available: true,
+      path: string(row, "path", "conversation diff file"),
+      action: action as RelayConversationFileAction,
+      added: integer(row, "added", "conversation diff file"),
+      removed: integer(row, "removed", "conversation diff file"),
+      unavailableReason: nullableString(row, "unavailable_reason", "conversation diff file"),
+      rows,
+      rowsTruncated: boolean(row, "rows_truncated", "conversation diff file"),
+      rowsUnavailableReason: nullableString(row, "rows_unavailable_reason", "conversation diff file"),
+    };
+  }
+  if (row.available === false) {
+    const reason = string(row, "reason", "conversation diff file");
+    if (!["NO_RESOURCE", "NO_BASELINE", "ROOT_NOT_GIT", "RESOURCE_UNAVAILABLE",
+      "PATH_NOT_FOUND"].includes(reason)) {
+      throw new Error("会话文件 diff 不可用原因无效。");
+    }
+    return { available: false, reason: reason as "NO_RESOURCE" | "NO_BASELINE" | "ROOT_NOT_GIT"
+      | "RESOURCE_UNAVAILABLE" | "PATH_NOT_FOUND" };
+  }
+  throw new Error("会话文件 diff 可用性标记无效。");
+}
+
+/** 生成中的工具预览（工作台 §34.4）：可丢弃的临时证据；-1 表示待核对。 */
+export function runToolCallPreviewsFrom(value: unknown): RelayRunToolCallPreviews {
+  const row = object(value, "Run tool call previews");
+  return {
+    runId: string(row, "run_id", "Run tool call previews"),
+    previews: array(row, "previews", "Run tool call previews").map((entry) => {
+      const preview = object(entry, "Run tool call preview");
+      return {
+        modelCallId: string(preview, "model_call_id", "Run tool call preview"),
+        ordinal: integer(preview, "ordinal", "Run tool call preview"),
+        toolName: string(preview, "tool_name", "Run tool call preview"),
+        revision: string(preview, "revision", "Run tool call preview"),
+        truncated: boolean(preview, "truncated", "Run tool call preview"),
+        updatedAt: string(preview, "updated_at", "Run tool call preview"),
+        files: array(preview, "files", "Run tool call preview").map((fileEntry) => {
+          const file = object(fileEntry, "Run tool call preview file");
+          const action = string(file, "action", "Run tool call preview file");
+          if (!["CREATE", "MODIFY", "DELETE", "UNKNOWN"].includes(action)) {
+            throw new Error("Run 工具预览的文件动作无效。");
+          }
+          return {
+            path: string(file, "path", "Run tool call preview file"),
+            action: action as "CREATE" | "MODIFY" | "DELETE" | "UNKNOWN",
+            added: integer(file, "added", "Run tool call preview file"),
+            removed: integer(file, "removed", "Run tool call preview file"),
+            targetComplete: boolean(file, "target_complete", "Run tool call preview file"),
+          };
+        }),
+      };
+    }),
+  };
 }

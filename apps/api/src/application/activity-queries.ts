@@ -43,8 +43,10 @@ const RUN_ACTOR = /^run:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/u;
 const SUMMARY: Record<string, string> = {
   WORKSPACE_INITIALIZED: '创建工作区', PROJECT_CREATED: '创建项目',
-  PROJECT_ARCHIVED: '归档项目', GOAL_CREATED: '创建目标',
+  PROJECT_ARCHIVED: '归档项目', PROJECT_PRESENTATION_UPDATED: '修改项目名称', GOAL_CREATED: '创建目标',
+  GOAL_UPDATED: '修改目标', GOAL_ARCHIVED: '归档目标',
   TASK_CREATED: '创建任务', TASK_PRESENTATION_UPDATED: '修改任务',
+  TASK_PROJECT_ASSIGNED: '归入项目',
   TASK_ACCEPTANCE_CHANGED: '修改验收条件', TASK_PLANNING_UPDATED: '修改任务计划',
   TASK_DELEGATED: '委托任务', ARTIFACT_VERSION_SAVED: '保存产物版本',
   REVIEW_DECIDED: '人工判断已保存', TASK_COMPLETED: '完成任务',

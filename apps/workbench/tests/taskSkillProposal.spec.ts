@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { flush, mountWorkbench } from "./mountApp";
+import { flush, mountWorkbench, pageText } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -262,7 +262,7 @@ describe("P12 Task Skill 合并提案", () => {
     await view.wrapper.get(".assist-pending .secondary-button:last-child").trigger("click"); await flush();
     expect(bodies).toHaveLength(2);
     expect(bodies[1]).toEqual(bodies[0]);
-    expect(view.wrapper.text()).toContain("提案已接受；Task v3 / 验收 v2");
+    expect(pageText(view.wrapper)).toContain("提案已接受；Task v3 / 验收 v2");
     expect(view.wrapper.get('[data-testid="task-skill-proposal"]').text()).toContain("ACCEPTED");
     if (pageKind === "definition") expect(view.wrapper.get('[data-testid="live-task-accepted-facts"]').text()).toContain("任务 v3");
     view.unmount();
@@ -299,7 +299,7 @@ describe("P12 Task Skill 合并提案", () => {
     }
     await view.wrapper.get('[data-testid="task-proposal-actions"] button.primary-button').trigger("click");
     await view.wrapper.get('[data-testid="task-skill-accept"]').trigger("click"); await flush();
-    expect(view.wrapper.text()).toContain("原提案仍保留供核对");
+    expect(pageText(view.wrapper)).toContain("原提案仍保留供核对");
     expect(view.wrapper.text()).toContain("请重新生成提案");
     expect(view.wrapper.get('[data-testid="task-skill-proposal"]').text()).toContain("EXPIRED");
     expect(view.wrapper.get('[data-testid="task-skill-proposal"]').text()).toContain("服务端追加条件");
@@ -331,7 +331,7 @@ describe("P12 Task Skill 合并提案", () => {
     expect(view.wrapper.text()).toContain("命令结果待核对");
     await view.wrapper.get(".assist-pending .secondary-button:first-of-type").trigger("click"); await flush();
     expect(postCount).toBe(1);
-    expect(view.wrapper.text()).toContain("原命令回执已核对");
+    expect(pageText(view.wrapper)).toContain("原命令回执已核对");
     expect(view.wrapper.find(".assist-pending").exists()).toBe(false);
     view.unmount();
   });

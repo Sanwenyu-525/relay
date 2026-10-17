@@ -199,6 +199,20 @@ Commit 后断连：检查绑定仓库、预期父/tree/消息或动作标识与�
 
 2026-09-26 M06 开发自检：`GIT_READ`（status/diff/log）与 `GIT_WRITE`（stage/commit/push）作为 `REAL` 能力接入 Gateway（0030 登记，RUN 来源，绑定受管资源根为工作目录）。`git/git-adapter.ts` 的 `runSafeGit` 用 `execFile` 结构化参数数组（非 shell）、`GIT_CONFIG_NOSYSTEM=1`、`-c core.quotePath=false`、`-c diff.external=false` 与最小环境，禁用外部 diff；`gitStageFile` 拒绝 `.`/`*`/`..`（不允许隐式全量暂存），`gitCommit` 绑定预期 parent SHA（不匹配即拒），`gitPush` 拒绝以 `-`/`+` 开头或含 `:` 的 ref/remote（不开放强推/refspec/删远端），`reconcileGitCommit` 按预期 parent+message 只读核对 HEAD、`reconcileGitPush` 以 `ls-remote` 读回确切 ref 对象 ID（相同为 SUCCEEDED、否则 UNKNOWN，不默认重推）。`adapter-metadata.ts` 声明 GIT_WRITE `approval_passthrough:false`（AUTO 降为 ASK）、commit/push 可核对故 `resumable:true`。边界（2026-09-26 恢复类反例增量）：已有真实隔离 PG + 一次性测试仓库/本地 bare remote 的 Gateway 反例（`real-tools-gateway.integration.test.ts`）——GIT_READ status 以 AUTO 穿透真实执行、GIT_WRITE 非穿透强制 ASK、commit 绑定预期 parent（不符即 FAILED 且 HEAD 不变）、真实 commit/push 落库、`--force`/`+ref`/`-u` 等在 prepare 拒绝、push 崩溃于结算前后按真实 `ls-remote` 回读对象 ID 收敛（命中 SUCCEEDED 不重推，远端被外部推进后不匹配记 UNKNOWN 且阻断原 Run 再领取）。这仍属开发自检，不构成 M06 出口放行；重复动作幂等与审批内容变更（C03/C09/D02）专项反例、hooks/filter/credential helper 等真实可执行因素的信任审查、隔离 worktree 与共享元数据资源锁未实现，真实 Windows 会话与独立验收后置。
 
+### 4.1 GitHub 只读查询（0103，2026-10-17 开发自检）
+
+F25 首片按 [ADR-023](../decisions/ADR-023-builtin-github-skill.md) 新增 `GITHUB_READ`（`REAL`/`READ`）与专用只读 adapter，**不复用 `CLI_RUN`**：后者是写效果（`approvalPassthrough=false`、`resumable=false`、失败即隔离、核对恒 UNKNOWN），入口还必须是在连接上点名的绝对路径文件。决策层面的取舍不重复，这里只记实际实现边界。
+
+**动作与来源。** 词表固定四个动作：`GITHUB_REPO_VIEW`、`GITHUB_PR_LIST`、`GITHUB_PR_VIEW`、`GITHUB_ISSUE_LIST`；`githubParamsForAction` 只收该动作允许的字段（列表的 `state`/`limit`、PR 查看的 `number`），未知键拒绝而不是静默丢弃。能力只对 `ASSISTANT_READ` / `AGENT_SESSION_READ` 放行且必须绑定受管资源；`RUN`、`USER_ACTION`、`USER_IMPORT` 与写能力一样被 `0103` 的 CHECK 拒掉。工具循环信封的 `connections` 形状是冻结协议，本片不借它给 Run 增开后门。
+
+**仓库身份。** Connection 的 `config` 为 `{}`，不绑定目录边界；目标来自用例层选定的受管根 canonical path，Permission 再按该目标的前缀判定。适配器在受管根里让本地 `git config --get-regexp '^remote\..*\.url$'` 解析 remote，只认 `github.com`（https/ssh/scp 三种写法），多个候选按 remote 名确定性取第一个；解析不到就 `GH_REPO_UNIDENTIFIED`，不猜、不换仓库。模型参数里没有 `repo` 字段，`gh` 的 argv 只由适配器拼装成 `['--repo', <解析结果>, ...固定参数]`，因此模型不能指名任何仓库，也没有任何 `gh api` 入口进入词表。
+
+**执行与投影。** 按名从 PATH 解析 `gh`（与 `git` adapter 同一口径），`execFile` 结构化参数数组、`shell:false`、30 秒超时、可取消；环境变量为显式白名单，不转发 `RELAY_`/`GH_TOKEN` 等调用方环境。只读结果做有界投影而不是透传：列表最多 50 项、PR 正文 8 KiB（截断必须显式标 `body_truncated`）、状态检查最多 25 项且保留总数，所有结果带 `untrusted_external_content: true`——Issue/PR 正文与检查日志始终是数据。失败以 `FAILED` + 类型化原因结算（`GH_CLI_UNAVAILABLE`、`GH_UNAUTHENTICATED`、`GH_NETWORK_ERROR`、`GH_REPO_UNIDENTIFIED`、`GH_NOT_FOUND`、`GH_FORBIDDEN`、`GH_TIMEOUT`、`GH_CANCELLED`），并给可行动提示；不把「没装 gh」或「没登录」降级成空的查询结果。会话只读轮次对已派发但非 SUCCEEDED 的读取记 `UNKNOWN`，同时把类型化正文回传模型，避免同一失败被重复计成成功。
+
+**按需激活。** 四个工具只在当轮存在 `GITHUB_READ` 的 ACTIVE 连接时进入词表；停用连接后下一轮立即消失。本片不注入上游 `SKILL.md` 正文，工具描述自带用途与「失败≠空结果」的约束。
+
+**证据与未闭合。** 单测 `github-read.test.ts` **16/16**（词表封闭、来源拒绝、参数收窄、真实临时 git 仓库的 remote 解析、环境白名单、失败归类、缺失 `gh` 的真实探测、投影上限）；集成 `github-read.integration.test.ts` 在真实 PostgreSQL 上 **8/8**（`0103` 分支完整性、原始 INSERT 反例、连接启停、`GH_REPO_UNIDENTIFIED`、身份闸门后真实 `gh` 探测、`repo` 参数到不了适配器、逐动作 Permission、与 `FILE_READ` 共存）。未闭合：本机没有安装 `gh`，**无法验证已认证的真实 GitHub 读取**；GitHub 侧写动作不存在；官方 Skill 原文尚未接入打包与运行时提示；未跑真实 Windows 窗口与安装包验收，未 commit。
+
 ## 5. 受控 CLI
 
 V1 明确采用受信宿主项目模式，不提供恶意代码隔离。固定程序真实路径/版本、参数模板、工作根、允许环境变量、凭据引用、输出上限、超时、网络能力声明与脚本/构建配置 hash 组成 ExecutionConfig。脚本变化重新校验，任意 shell 字符串不作为输入。

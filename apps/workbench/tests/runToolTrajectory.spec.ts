@@ -56,7 +56,9 @@ const call = (over: Partial<RelayRunToolCall> & { id: string }): RelayRunToolCal
   round: 0, ordinal: 0, toolName: "read_file", status: "SETTLED",
   args: { relative_path: "a.ts" }, argsSha256: "a".repeat(64), providerToolCallId: "p",
   operationId: null, adaptationOf: null, adaptedPath: null, resultRef: { content: "x" },
-  createdAt: "2026-10-05T01:00:00Z", updatedAt: "2026-10-05T01:00:01Z", ...over });
+  createdAt: "2026-10-05T01:00:00Z", updatedAt: "2026-10-05T01:00:01Z", ...over,
+  // 写在展开之后：Partial 会把必需的逐文件账本重新放宽成 undefined。
+  fileChanges: over.fileChanges ?? [] });
 
 const projection = (over: Partial<RelayRunToolCalls> = {}): RelayRunToolCalls => ({
   runId: "run-a", runStatus: "RUNNING", waitReason: null,

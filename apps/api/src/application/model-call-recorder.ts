@@ -9,13 +9,14 @@ import { classifyProviderError } from '../workflow/model-error-classification.js
 /** The begin insert commits before invoking a Provider. A lost process leaves
  * STARTED as an unknown outcome and never silently invents zero usage. */
 export async function recordModelInvocation<T>(db: DbExecutor, input: {
+  readonly callId?: string;
   readonly origin: ModelCallOrigin;
   readonly identity: ModelIdentity;
   readonly signal?: AbortSignal;
   readonly invoke: (callId: string) => Promise<T>;
   readonly settle: (result: T) => ModelCallSettlement;
 }): Promise<{ readonly callId: string; readonly result: T }> {
-  const callId = randomUUID();
+  const callId = input.callId ?? randomUUID();
   const calls = new ModelCallRepository(db);
   await calls.begin(callId, input.origin, input.identity);
   let result: T;

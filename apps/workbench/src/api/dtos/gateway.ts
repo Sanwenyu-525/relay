@@ -35,6 +35,21 @@ export type RelayGatewayCapability =
 
 export type RelayGatewayDecision = "DENY" | "ASK" | "AUTO";
 
+/**
+ * 某个受管目录的写档位投影（GET …/managed-resources/:id/write-readiness）。
+ *
+ * 档位与「最严格者优先」的排序都在服务端完成，与准入门禁同源；界面只显示这里的值，
+ * 不再自己比较策略。policyId / policyRevision 是调整档位所需的乐观锁坐标。
+ */
+export interface RelayWriteReadiness {
+  readonly status: string;
+  readonly detail: string;
+  readonly policyDecision: RelayGatewayDecision | null;
+  readonly policyId: string | null;
+  readonly policyRevision: string | null;
+  readonly policyTargetPrefix: string | null;
+}
+
 export interface RelayGatewayConnectionSettings extends RelayGatewayConnection {
   readonly projectId: string;
   readonly version: DecimalRevision;

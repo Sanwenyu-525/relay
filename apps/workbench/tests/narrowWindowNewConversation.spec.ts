@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { dialogLabels, dialogText, DomWrapper, flush, folderStripName, mountWorkbench, openWorkingDirectory, pressEscape } from "./mountApp";
+import { dialogLabels, dialogText, DomWrapper, flush, folderStripName, mountWorkbench, openWorkingDirectory, pressEscape, toolbarSessionTitle } from "./mountApp";
 
 // 2026-10-08 窄窗/短窗「新对话」入口可发现性。
 // 抽屉入口与近期工作栏入口必须共用同一条 /agent?new=… 语义：进入空白讨论，
@@ -118,8 +118,7 @@ describe("窄窗抽屉里的新对话入口", () => {
   it("从既有会话进入新讨论：不继承旧会话与任务上下文，抽屉同时关闭", async () => {
     const view = await mount("/agent");
     expect(view.wrapper.find('[data-testid="assist-session"]').exists(), view.wrapper.text()).toBe(true);
-    expect((view.wrapper.get('[data-testid="assist-session-select"]').element as HTMLSelectElement).value)
-      .toBe(sessionId);
+    expect(toolbarSessionTitle()).toBe("已有的普通讨论");
 
     await openNavigation(view);
     await navigationAction().trigger("click");
@@ -130,7 +129,7 @@ describe("窄窗抽屉里的新对话入口", () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     // 没有选中会话，旧正文也不再出现在读区。
     expect(view.wrapper.find('[data-testid="assist-session"]').exists()).toBe(false);
-    expect(view.wrapper.find('[data-testid="assist-session-select"]').exists()).toBe(false);
+    expect(view.wrapper.find('[data-testid="collab-session-title"]').exists()).toBe(false);
     expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(true);
     expect(view.wrapper.text()).not.toContain("旧讨论的第一句");
     // 没有任务上下文。

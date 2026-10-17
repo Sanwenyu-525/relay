@@ -579,11 +579,8 @@ export async function addTaskDependency(
         throw dependencyCycle({ taskId: task.id, dependsOnTaskId: task.id });
       }
 
-      const upstream = await readTaskInWorkspace(
-        repositories,
-        input.workspaceId,
-        dependsOnTaskId,
-      );
+      const upstream = await repositories.tasks.readTaskForShare(dependsOnTaskId);
+      if (upstream === undefined || upstream.workspace_id !== input.workspaceId) throw resourceNotFound('Task');
 
       if (upstream.project_id !== task.project_id) {
         throw validationFailed([

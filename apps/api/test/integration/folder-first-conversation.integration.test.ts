@@ -213,6 +213,10 @@ test('基础会话组合：HTTP 消息到执行、真实读取、成果读回和
     const requests = await api.get(path(`/conversation-execution-requests?session_id=${sessionId}`));
     assert.equal(requests.status, 200, requests.text);
     assert.equal((requests.body as { items: { run_id: string }[] }).items[0]?.run_id, runId);
+    const projected = (requests.body as { items: { request_id: string; resource_id: string; candidate: JsonObject | null }[] }).items[0]!;
+    const saved = await repositories.conversationExecutions.readRequest(projected.request_id);
+    assert.equal(projected.resource_id, saved?.resource_id);
+    assert.deepEqual(projected.candidate, saved?.candidate);
     assert.equal(await readFile(join(root, 'notes.txt'), 'utf8'), original);
   } finally { await api.stop(); }
 });
@@ -603,6 +607,17 @@ test('不提供文件名时模型自行定位并改写；只读请求不需要�
       targetPrefix: resource.canonical_root, decision: 'AUTO', maxPayloadBytes: 262144 });
   }
 
+  // 目录写档位投影（工作台 §18.1）：对话页芯片显示的档位必须与实际准入门禁同源。
+  const autoView = await openWorkingDirectory(app.db, { workspaceId, commandId: randomUUID(),
+    rootPath: resource.canonical_root });
+  assert.equal(autoView.result.write_readiness.status, 'READY');
+  assert.equal(autoView.result.write_readiness.policy_decision, 'AUTO');
+  assert.ok(autoView.result.write_readiness.policy_id !== null, '生效条目 ID 必须给界面当乐观锁坐标');
+  assert.match(autoView.result.write_readiness.policy_revision ?? '', /^\d+$/u);
+  assert.equal(autoView.result.write_readiness.policy_target_prefix, resource.canonical_root);
+  // AUTO 不能再被描述成「具体动作仍需逐次批准」：措辞与档位不符会让人以为没有本次任务授权这回事。
+  assert.match(autoView.result.write_readiness.detail, /删除/u);
+
   const vague = await sessionIn(workspaceId, projectId,
     '目录里那个把字符串转数字的解析函数处理空串会崩，修一下');
   const vaguePrepared = await interpretConversationMessage(app.db, { workspaceId,
@@ -644,6 +659,14 @@ test('不提供文件名时模型自行定位并改写；只读请求不需要�
   assert.match(await readFile(broken, 'utf8'), /v\.trim\(\) === ""/u);
   // 用户已有的无关内容必须原样保留：模型只改了它定位到的那一个文件。
   assert.equal(await readFile(unrelated, 'utf8'), 'unrelated-user-note: keep this line\n');
+
+  // 最严格者优先：同目录再压一条 ASK，投影立刻从 AUTO 变成 ASK——与准入共用同一个排序函数。
+  await createGatewayPolicy(app.db, { workspaceId, projectId, capability: 'FILE_WRITE',
+    actionType: 'APPLY_CHANGESET', targetPrefix: resource.canonical_root, decision: 'ASK',
+    maxPayloadBytes: 262144 });
+  const askView = await openWorkingDirectory(app.db, { workspaceId, commandId: randomUUID(),
+    rootPath: resource.canonical_root });
+  assert.equal(askView.result.write_readiness.policy_decision, 'ASK');
 });
 
 /**

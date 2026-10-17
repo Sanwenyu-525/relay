@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { flush, mountWorkbench } from "./mountApp";
+import { flush, mountWorkbench, pageText } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -281,7 +281,7 @@ describe("M04 Assist 真实路由与命令", () => {
     const view = await mountWorkbench(`/projects/${projectId}?skill=assist`);
     await view.wrapper.get(".assist-proposal .primary-button").trigger("click");
     await flush();
-    expect(view.wrapper.text()).toContain("服务端当前版本是 2");
+    expect(pageText(view.wrapper)).toContain("服务端当前版本是 2");
     expect(view.wrapper.text()).toContain("EXPIRED");
     view.unmount();
   });

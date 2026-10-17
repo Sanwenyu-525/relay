@@ -22,6 +22,7 @@ import {
 import { reviseTaskAcceptance } from '../application/task-contract-commands.js';
 import { listTasks, readTaskById } from '../application/task-queries.js';
 import { readTaskCheckPlanPreview } from '../application/check-plan-preview.js';
+import { registerTaskProjectBindingRoutes } from './task-project-binding-api.js';
 import { decodeTaskListCursor, decodeWorkspaceTaskListCursor,
   encodeTaskListCursor, encodeWorkspaceTaskListCursor } from './cursor.js';
 import {
@@ -123,6 +124,7 @@ type TasksListQuery = Static<typeof TasksListQuerySchema>;
  * 不能改 status / mode / 执行权 / 验收版本。
  */
 export function registerTaskRoutes(app: FastifyInstance, dependencies: RouteDependencies): void {
+  registerTaskProjectBindingRoutes(app, dependencies);
   app.post(
     '/tasks',
     {

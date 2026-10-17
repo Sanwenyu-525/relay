@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Bell, BookOpen, FolderKanban, House, Inbox, Link2, ListChecks, ListTree, Menu, Settings, Sparkles, SquarePen } from "lucide-react";
+import { Bell, BookOpen, FolderKanban, House, Inbox, Link2, ListChecks, LineChart, Menu, PanelLeft, PanelLeftClose, Settings, SquarePen } from "lucide-react";
 import AppDialog from "./AppDialog";
 import CommandPalette from "./CommandPalette";
+import { FeedbackHost } from "./Feedback";
 import RecentWorkRail from "./RecentWorkRail";
 import SidebarResizeHandle, { clampSidebarWidth } from "./SidebarResizeHandle";
 import { dialogCount } from "../lib/dialogStack";
@@ -23,6 +24,12 @@ function readStoredSidebarWidth(): number | null {
   } catch { return null; }
 }
 
+// 近期工作栏的收起/折叠是外壳偏好（与列宽同类），只保存一个布尔；沿用原型 toggle-side 的单一入口。
+const CONTEXT_COLLAPSED_STORAGE_KEY = "relay.workbench.contextRailCollapsed";
+function readStoredContextCollapsed(): boolean {
+  try { return window.localStorage.getItem(CONTEXT_COLLAPSED_STORAGE_KEY) === "1"; } catch { return false; }
+}
+
 const skillPageNames: Record<string, string> = {
   overview: "总览", blueprint: "蓝图预览", resume: "继续项目", assist: "Assist", definition: "完善定义", verification: "验收方案"
 };
@@ -37,6 +44,7 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
   const location = useLocation();
   const query = new URLSearchParams(location.search);
   const path = location.pathname;
+  const pageFocused = ["/projects", "/reviews", "/activity", "/activities"].includes(path);
   const inboxActive = path === "/tasks" && query.get("tab") === "inbox";
   const isNavigationItemActive = (to: string) => to === "/inbox" ? inboxActive
     : to === "/tasks" ? path === "/tasks" && !inboxActive : path === to;
@@ -50,6 +58,15 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
       if (next === null) window.localStorage.removeItem(SIDEBAR_WIDTH_STORAGE_KEY);
       else window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(next));
     } catch { /* 存储不可写时仅本次会话生效 */ }
+  }, []);
+  // 收起/折叠近期工作栏：外壳单入口，与列宽同为纯展示偏好；读写失败时本次会话仍可切换。
+  const [contextCollapsed, setContextCollapsed] = useState(readStoredContextCollapsed);
+  const toggleContextCollapsed = useCallback(() => {
+    setContextCollapsed((current) => {
+      const next = !current;
+      try { window.localStorage.setItem(CONTEXT_COLLAPSED_STORAGE_KEY, next ? "1" : "0"); } catch { /* 存储不可写时仅本次会话生效 */ }
+      return next;
+    });
   }, []);
   const frameStyle = sidebarWidth === null ? undefined
     : { "--relay-sidebar-user-width": `${sidebarWidth}px` } as CSSProperties;
@@ -73,8 +90,8 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
   /** 次级入口保留路由可达性；侧栏高度足够，四条常驻显示，不再折叠，也不与主导航争抢分隔线以外的注意力。 */
   const secondaryWorkNavigation = [
     { label: "今日", to: "/today", icon: House, count: "" },
-    { label: "全部任务", to: "/tasks", icon: ListChecks, count: "" },
-    { label: "动态", to: "/activity", icon: ListTree, count: "" },
+    { label: "任务", to: "/tasks", icon: ListChecks, count: "" },
+    { label: "动态", to: "/activity", icon: LineChart, count: "" },
     { label: "收件箱", to: "/inbox", icon: Inbox, count: "" }
   ];
   const currentWorkId = path === "/agent" ? query.get("work") : null;
@@ -131,12 +148,9 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
   })();
 
   return <>
-    <div className={`app-frame${path === "/agent" ? " app-frame--collaboration" : ""}`} style={frameStyle}>
+    <div className={`app-frame${path === "/agent" ? " app-frame--collaboration" : ""}${pageFocused ? " app-frame--page-focused" : ""}`} data-context-collapsed={contextCollapsed ? "true" : "false"} style={frameStyle}>
       {/* 2026-10-02 共享壳栏位分离：图标导航只承担定位，近期工作与主导航各有各的滚动 Owner 和宽度偏好。 */}
       <aside className="app-navrail" aria-label="应用导航">
-        {/* 品牌标记：V4.2 原型在图标导航顶端放了一枚方形标识，让这一栏读起来是「应用」
-            而不是一条纯图标条。纯装饰，不承载任何导航或状态，因此对辅助技术隐藏。 */}
-        <div className="navrail-brand" aria-hidden="true"><Sparkles /></div>
         <nav className="navigation-list" aria-label="主导航">
           {primaryNavigation.map((item) => {
             const isActive = isNavigationItemActive(item.to);
@@ -166,12 +180,21 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
       </aside>
       <aside className="app-context-rail" aria-label="近期工作上下文" data-testid="app-context-rail">
         <div className="context-rail-head">
-          <p className="context-rail-brand">Relay</p>
-          {/* 新对话仍由协作页持有会话草稿与目录入口，这里只回到那条既有路径，不新建第二套会话状态。
-              2026-10-10 协作页 §3.1：从只有图标的入口升为带文字的置顶主操作，尺寸取 control.height。 */}
-          <Link className="primary-button context-rail-new" to={newConversationHref} data-testid="context-new-conversation"
-            title="新对话"><SquarePen aria-hidden="true" /><span>新对话</span></Link>
+          <p className="context-rail-brand">Relay<span className="context-rail-brand-tag">工作空间</span></p>
+          {/* 收起/折叠近期工作栏（原型 toggle-side）：外壳单入口，收起后本按钮仍在，作为再展开的把手。 */}
+          <button className="icon-button context-rail-collapse" type="button" aria-expanded={!contextCollapsed}
+            data-testid="context-rail-collapse"
+            aria-label={contextCollapsed ? "展开近期工作栏" : "收起近期工作栏"}
+            title={contextCollapsed ? "展开近期工作栏" : "收起近期工作栏"}
+            onClick={toggleContextCollapsed}>
+            {contextCollapsed ? <PanelLeft aria-hidden="true" /> : <PanelLeftClose aria-hidden="true" />}
+          </button>
         </div>
+        {/* 新对话仍由协作页持有会话草稿与目录入口，这里只回到那条既有路径，不新建第二套会话状态。
+            2026-10-15 对齐 V4.3 原型：从品牌行内的紧凑按钮改为独占一行的主操作，品牌行只留标识与折叠把手。
+            窄窗（该栏 display:none）在导航抽屉里另有同一 href 的一份入口。 */}
+        <Link className="primary-button context-rail-new" to={newConversationHref} data-testid="context-new-conversation"
+          title="新对话"><SquarePen aria-hidden="true" /><span>新对话</span></Link>
         {connection.mode === "live" && connection.client
           ? <RecentWorkRail key={connection.epoch} client={connection.client} currentTaskId={currentWorkId} />
           : <p className="helper-text context-rail-placeholder">示例数据没有真实近期工作；连接本机 API 后这里按项目分组显示。</p>}
@@ -193,9 +216,12 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
       {/* 分隔条放在内容之后：Tab 顺序为导航 → 内容 → 调宽；视觉位置由 CSS 绝对定位决定。 */}
       <SidebarResizeHandle width={sidebarWidth} onWidthChange={changeSidebarWidth} />
     </div>
-    {/* 连接状态入口已随数据来源按钮移入共享标题带，弹层由 DesktopTitleBar 持有。 */}
+    {/* 连接状态入口与其弹层由 DesktopTitleBar 持有。示例数据标注留在正文列末：
+        近期工作栏可以折叠、窄窗整体隐藏，数据来源这件事不能跟着消失。 */}
     {connection.mode !== "live" && <p className="demo-notice">交互预览 · 示例数据，刷新后重置</p>}
     <CommandPalette open={commandOpen} onClose={onCommandClose} />
+    {/* 浮层反馈栈只挂一次：各页的 Toast／Snackbar／Notice 组件只往栈里放条目，自己不进文档流。 */}
+    <FeedbackHost />
     <AppDialog open={navigationOpen} title="导航" variant="drawer" onClose={() => setNavigationOpen(false)}>
       <div className="mobile-navigation">
       {/* 窄窗下 .app-context-rail 整体 display:none，栏头部那条入口随之消失。

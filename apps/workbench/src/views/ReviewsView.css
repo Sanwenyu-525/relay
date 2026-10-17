@@ -1,22 +1,19 @@
 /* 请求列表与右侧判断区按既有待审参考图组织；所有数值复用唯一 token。 */
 .app-main .review-page { padding: 0; }
-.review-page .review-columns { grid-template-columns: minmax(0, 1fr) var(--relay-layout-rail-width); gap: 0; margin: 0; }
-/* 2026-10-02 待处理页型：列表 / 确切正文 / 判断三列。判断对象单独成列，正文不被列表挤出首屏。
-   没有可读的确切产物版本时退回两列，不留空列。 */
-.review-page .review-columns:has(> .review-reading) { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr) var(--relay-layout-rail-width); }
+.review-page .review-columns { grid-template-columns: minmax(0, 1fr); gap: 0; margin: 0; }
+.review-primary { grid-column: 1 / -1; }
 .review-primary, .review-page .review-detail { min-width: 0; padding: var(--relay-layout-main-padding); }
-.review-page .review-detail { border-left: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.review-page .review-detail { border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .review-page .review-primary > .page-head { margin-bottom: var(--relay-space-2); }
 .review-page .review-list { padding: 0; border: 0; margin-top: var(--relay-layout-section-gap); }
 .review-filters { display: flex; flex-wrap: wrap; gap: var(--relay-space-6); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); margin-bottom: var(--relay-space-6); padding-top: var(--relay-space-4); }
 .review-filters > button { display: flex; align-items: center; gap: var(--relay-space-2); min-height: var(--relay-control-height); border: 0; border-bottom: var(--relay-border-width) solid transparent; background: transparent; padding: 0; color: var(--relay-color-text-secondary); cursor: pointer; }
 .review-filters > button[aria-pressed="true"] { color: var(--relay-color-action-primary); border-bottom-color: var(--relay-color-action-primary); font-weight: var(--relay-font-weight-semibold); }
-.review-list-columns, .review-page .review-list-item { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 0.8fr) minmax(0, 1.2fr) minmax(0, 0.8fr) auto; gap: var(--relay-space-3); align-items: center; }
-.review-list-columns { padding: var(--relay-space-3) var(--relay-space-4); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+.review-page .review-list-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--relay-space-3); align-items: start; width: 100%; text-align: left; }
 .review-page .review-list-item { padding: var(--relay-space-4); border: var(--relay-border-width) solid transparent; border-bottom-color: var(--relay-color-border-separator); border-radius: var(--relay-radius-control); }
 .review-page .review-list-item--selected { border-color: var(--relay-color-action-primary); }
 .review-page .review-list-item > strong { min-width: 0; font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-rowTitle); font-weight: var(--relay-font-weight-semibold); overflow-wrap: anywhere; }
-.review-page .review-list-item small { display: block; margin-top: var(--relay-space-2); font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-meta); font-weight: var(--relay-font-weight-regular); }
+.review-list-meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--relay-space-2) var(--relay-space-4); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .review-kind, .review-page .review-list-item time { font-size: var(--relay-font-size-meta); }
 .review-project { min-width: 0; overflow-wrap: anywhere; }
 .review-project code { font-size: var(--relay-font-size-meta); }
@@ -44,7 +41,7 @@
 .review-page .review-actions > button[data-testid="review-decision-SET_RETRY_BUDGET"]:active:not(:disabled) { background: var(--relay-color-selection-bg); }
 .review-page .review-evidence-details, .review-page .review-feedback-details { margin: var(--relay-space-4) 0; }
 .review-page .review-evidence-details > summary, .review-page .review-feedback-details > summary { cursor: pointer; }
-.review-reading { min-width: 0; padding: var(--relay-layout-main-padding); border-left: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.review-reading { min-width: 0; padding: var(--relay-layout-main-padding); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .review-reading > h2 { margin: 0 0 var(--relay-space-4); font-size: var(--relay-font-size-section); }
 .review-reading > .surface-panel { margin: 0; padding: var(--relay-space-6); background: var(--relay-color-bg-surface); border-radius: var(--relay-radius-control); }
 .review-reading .artifact-doc-body { font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-reading); line-height: var(--relay-font-lineHeight-reading); }
@@ -53,24 +50,12 @@
 .review-reading .collab-compare-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--relay-space-4); }
 .review-request-identity { margin: var(--relay-space-4) 0; overflow-wrap: anywhere; }
 .review-request-identity > summary { cursor: pointer; color: var(--relay-color-text-secondary); }
-@media (width < 80rem) {
-  .review-page .review-columns { grid-template-columns: minmax(0, 1fr) var(--relay-layout-rail-narrowWidth); }
-  /* 两列放不下三栏：判断对象回到主列顶部，紧跟请求列表，顺序仍是列表 → 正文 → 判断。 */
-  .review-page .review-columns:has(> .review-reading) { grid-template-columns: minmax(0, 1fr) var(--relay-layout-rail-narrowWidth); }
-  .review-page .review-columns:has(> .review-reading) > .review-primary { grid-column: 1; grid-row: 1; }
-  .review-page .review-columns:has(> .review-reading) > .review-reading { grid-column: 1; grid-row: 2; border-left: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
-  .review-page .review-columns:has(> .review-reading) > .review-detail { grid-column: 2; grid-row: 1 / span 2; }
-  .review-primary, .review-page .review-detail, .review-reading { padding: var(--relay-layout-main-compactPadding); }
-  .review-list-columns, .review-page .review-list-item { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; }
-  .review-list-columns > :nth-child(3), .review-list-columns > :nth-child(4) { display: none; }
-  .review-page .review-list-item .review-project, .review-page .review-list-item time { grid-row: 2; }
-  .review-page .review-list-item .status-chip { grid-column: 3; grid-row: 1; }
+@media (width >= 80rem) {
+  .review-page .review-columns:has(> .review-reading) { grid-template-columns: minmax(0, 1fr) var(--relay-layout-rail-width); }
+  .review-page .review-columns:has(> .review-reading) > .review-detail { border-left: var(--relay-border-width) solid var(--relay-color-border-separator); }
 }
-@media (width < 64rem) {
-  .review-page .review-columns { grid-template-columns: 1fr; }
-  .review-page .review-detail { border-left: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
-  .review-page .review-columns:has(> .review-reading) > .review-reading { grid-column: 1; grid-row: auto; }
-  .review-page .review-columns:has(> .review-reading) > .review-detail { grid-column: 1; grid-row: auto; }
+@media (width < 80rem) {
+  .review-primary, .review-page .review-detail, .review-reading { padding: var(--relay-layout-main-compactPadding); }
 }
 /* 2026-10-10：原 60rem 的标题降级已由全局 width < 64rem 档覆盖（.page-head-title > h1 → compactPage），
    本页私有规则属重复声明，删除而不是换个档位保留。 */

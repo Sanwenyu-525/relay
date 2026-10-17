@@ -7,12 +7,16 @@ export interface AppDialogProps {
   open: boolean;
   title: string;
   variant?: "dialog" | "drawer";
+  /** 弹窗宽度档位；"lg" 追加 dialog-panel--lg 加宽，默认维持原宽。 */
+  size?: "md" | "lg";
+  /** 标题下方的一行副标题；不传则不渲染，保持原样。 */
+  subtitle?: string;
   initialFocusSelector?: string;
   onClose: () => void;
   children: ReactNode;
 }
 
-export default function AppDialog({ open, title, variant = "dialog", initialFocusSelector, onClose, children }: AppDialogProps) {
+export default function AppDialog({ open, title, variant = "dialog", size, subtitle, initialFocusSelector, onClose, children }: AppDialogProps) {
   const token = useRef(Symbol("relay-dialog"));
   const panel = useRef<HTMLElement>(null);
   const closeRef = useRef(onClose);
@@ -79,11 +83,16 @@ export default function AppDialog({ open, title, variant = "dialog", initialFocu
   if (!open) return null;
   return createPortal(
     <div className="dialog-backdrop" onMouseDown={(event) => {
-      if (event.target === event.currentTarget && isTopDialog(token.current)) closeRef.current();
+      // 只要按下点落在面板之外即视为「点空白关闭」，不要求恰好命中 backdrop 元素本身
+      // （面板投影、伪元素等会让空白区的 target 不是 backdrop）；仍只关栈顶弹窗。
+      if (isTopDialog(token.current) && panel.current && !panel.current.contains(event.target as Node)) closeRef.current();
     }}>
-      <section ref={panel} className={`dialog-panel dialog-panel--${variant}`} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}>
+      <section ref={panel} className={`dialog-panel dialog-panel--${variant}${size === "lg" ? " dialog-panel--lg" : ""}`} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}>
         <header className="dialog-header">
-          <h2>{title}</h2>
+          <div className="dialog-heading">
+            <h2>{title}</h2>
+            {subtitle ? <p className="dialog-header-sub">{subtitle}</p> : null}
+          </div>
           <button className="icon-button" type="button" aria-label="关闭面板" onClick={() => { if (isTopDialog(token.current)) closeRef.current(); }}><X aria-hidden="true" /></button>
         </header>
         <div className="dialog-content">{children}</div>

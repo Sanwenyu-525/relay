@@ -108,6 +108,25 @@ export class TaskRepository {
       where id = ${taskId} for share`.execute(this.db)).rows[0];
   }
 
+  async assignInboxTaskToProject(input: { taskId: string; expectedRevision: bigint; projectId: string }): Promise<TaskRow | undefined> {
+    const result = await sql<TaskRow>`update tasks set project_id = ${input.projectId},
+      revision = revision + 1, updated_at = now()
+      where id = ${input.taskId} and project_id is null and revision = ${input.expectedRevision}
+        and status in ('INBOX', 'READY') and executor_kind = 'HUMAN' and executor_run_id is null
+      returning ${TASK_COLUMNS}`.execute(this.db);
+    return result.rows[0];
+  }
+
+  async hasProjectBindingBlockers(taskId: string): Promise<{ priorWork: boolean; dependencies: boolean }> {
+    const row = (await sql<{ prior_work: boolean; dependencies: boolean }>`select
+      (exists(select 1 from artifacts where task_id = ${taskId})
+        or exists(select 1 from runs where task_id = ${taskId})
+        or exists(select 1 from completion_records where task_id = ${taskId})) as prior_work,
+      exists(select 1 from task_dependencies where task_id = ${taskId} or depends_on_task_id = ${taskId}) as dependencies
+    `.execute(this.db)).rows[0];
+    return { priorWork: row?.prior_work === true, dependencies: row?.dependencies === true };
+  }
+
   /** Task 行锁：状态迁移、展示字段、显式 Goal 对齐与依赖都在同一行上串行化。 */
   async lockTask(taskId: string): Promise<TaskRow | undefined> {
     const result = await sql<TaskRow>`

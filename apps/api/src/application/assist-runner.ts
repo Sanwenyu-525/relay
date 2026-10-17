@@ -6,19 +6,24 @@ import type { AssistMessageRow, AssistSessionRow, DecisionVersionRow, KnowledgeV
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
-import type { AssistIntent, AssistModelPort, AssistTurn,
-  ModelUsage } from '../workflow/fake-model-port.js';
+import type { AssistMessageAttachmentRow } from '../infrastructure/database-schema.js';
+import type { AssistContentPart, AssistIntent, AssistModelPort, AssistTurn,
+  ModelUsage, AssistRequest, AssistResult, ModelIdentity } from '../workflow/fake-model-port.js';
+import type { ModelFetchDependencies } from '../workflow/model-endpoint-policy.js';
+import { invokeAssistWithFreeModelRouting } from './assist-free-model-routing.js';
+import { parseAssistModelSnapshot } from './assist-model-snapshot.js';
 import { assistPayloadHash } from './assist-commands.js';
 import { recordModelInvocation } from './model-call-recorder.js';
 import { ModelCallRepository, ModelScopeBudgetError } from '../model/model-call-repository.js';
 import { ModelCallBudgetError } from '../workflow/openai-compatible-model-port.js';
 import { classifyProviderError, type ModelErrorCategory }
   from '../workflow/model-error-classification.js';
-import { INTERNAL_TOOL_DEFINITIONS, type InternalToolName } from '../workflow/tool-catalog.js';
+import { type InternalToolName } from '../workflow/tool-catalog.js';
 import { selectRuntimeSystemPrompt, UnknownRuntimePromptRouteError,
   type RuntimeSystemRoute } from '../workflow/prompts/index.js';
-import { assistantToolNames, runAgentSessionReadonlyRounds, runAssistantReadonlyRounds }
+import { runAgentSessionReadonlyRounds, runAssistantReadonlyRounds }
   from './assistant-readonly-round.js';
+import { sessionReadToolsForCurrentConnections } from './assist-read-tools.js';
 import { mainLoopMaintenanceField, readMainLoopOutcome, recordConversationExecutionCandidate }
   from './conversation-execution.js';
 import { freezeStateInterpretationBaseline, readMainLoopStateCandidate,
@@ -59,6 +64,9 @@ export interface AssistGenerationOptions {
   readonly workerId: string;
   readonly storage: ManagedContentStore;
   readonly modelPort: AssistModelPort;
+  /** Internal deterministic injection points; production uses process env and guarded fetch. */
+  readonly modelEnv?: NodeJS.ProcessEnv;
+  readonly modelFetchDependencies?: ModelFetchDependencies;
   readonly leaseMs: number;
   readonly signal?: AbortSignal | undefined;
   /** 每次 tick 最多处理的消息数；V1 为 1，保持与 Run 命令相同的单步节奏。 */
@@ -134,17 +142,22 @@ export async function runAssistGenerationTick(db: DbExecutor,
       return { messageId: message.id, sessionId: message.session_id, status: 'FAILED',
         errorCode: 'SESSION_MISSING', proposalIds: [] };
     }
+    const modelRoute = resolveAssistModelRoute(db, message, session, options, options.workerId);
 
     // B 档人设助手会话走只读工具轮次：领取身份、心跳租约、取消轮询与 Worker CAS 结算
     // 都是同一条既有机制，这里只换掉「模型拿到什么词表」与「结果落到哪张账本」。
     if (session.conversation_mode === 'ASSISTANT') {
-      return runAssistantReadonlyGeneration(db, { message, session, options, controller });
+      return runAssistantReadonlyGeneration(db, { message, session,
+        options: { ...options, modelPort: modelRoute.modelPort }, controller,
+        ...(modelRoute.invokeAssist === undefined ? {} : { invokeAssist: modelRoute.invokeAssist }) });
     }
 
     // 0072：学习身份走教学轮次（结构化信封 + 逐次计量）。它**不得**落入下面的 AGENT 分支——
     // 那条路径会装配提案意图、项目状态维护与自动执行解释，学习会话没有这些权限。
     if (session.conversation_mode === 'LEARNING') {
-      return runLearningGeneration(db, { message, session, options, controller });
+      return runLearningGeneration(db, { message, session,
+        options: { ...options, modelPort: modelRoute.modelPort }, controller,
+        ...(modelRoute.invokeAssist === undefined ? {} : { invokeAssist: modelRoute.invokeAssist }) });
     }
 
     const skill = message.skill_snapshot === null ? null :
@@ -196,7 +209,8 @@ export async function runAssistGenerationTick(db: DbExecutor,
             action: message.method_action }).system
           : selectRuntimeSystemPrompt({ kind: 'AGENT_MAIN_LOOP' }).system;
         return runAgentMainLoopGeneration(db, { message, session, options, controller,
-          availableTools, system });
+          availableTools, system,
+          ...(modelRoute.invokeAssist === undefined ? {} : { invokeAssist: modelRoute.invokeAssist }) });
       }
     }
 
@@ -236,11 +250,12 @@ export async function runAssistGenerationTick(db: DbExecutor,
     }
     let previewOwnershipLost = false;
     let preview!: AssistLivePreviewPublisher | null;
-    const recorded = await recordModelInvocation(db, {
-      origin: { workspaceId: session.workspace_id, kind: 'ASSIST', assistMessageId: message.id },
-      identity: options.modelPort.identity,
-      signal: controller.signal,
-      invoke: async (callId) => {
+    const baseRequest: AssistRequest = { intent: message.intent as AssistIntent,
+      system: systemPrompt, turns: skillTurns,
+      ...(basis === null ? {} : { skill: { id: skill!.id,
+        version: skill!.version, facts: basis.facts, input: message.skill_input ?? {} } }),
+      signal: controller.signal };
+    const invokeCandidate = async (modelPort: AssistModelPort, callId: string): Promise<AssistResult> => {
         const previewOwner = { workspaceId: session.workspace_id, messageId: message.id,
           workerId: options.workerId, callId };
         let textObserved = false;
@@ -249,14 +264,7 @@ export async function runAssistGenerationTick(db: DbExecutor,
           ? new AssistLivePreviewPublisher((text, truncated) =>
             publishAssistPreview(db, previewOwner, text, truncated), ownershipLost) : null;
         try {
-          return await options.modelPort.assist({
-            intent: message.intent as AssistIntent,
-            system: systemPrompt,
-            turns: skillTurns,
-            ...(basis === null ? {} : { skill: { id: skill!.id,
-              version: skill!.version, facts: basis.facts,
-              input: message.skill_input ?? {} } }),
-            signal: controller.signal,
+          return await modelPort.assist({ ...baseRequest,
             ...(message.intent === 'DISCUSS' && skill === null ? {
               onTextDelta: async (piece: string) => {
                 const observedAt = new Date();
@@ -289,14 +297,15 @@ export async function runAssistGenerationTick(db: DbExecutor,
           modelInvocationError = error;
           throw error;
         }
-      },
-      settle: (result) => result.kind === 'CANCELLED'
-        ? { status: 'CANCELLED', providerRequestId: result.providerRequestId ?? null,
-          ...(result.usage === undefined ? {} : { usage: result.usage }) }
-        : { status: 'COMPLETED', providerRequestId: result.providerRequestId,
-          usage: result.usage },
-    });
-    const result = recorded.result;
+    };
+    const result = modelRoute.invokeWithCallId === undefined
+      ? (await recordModelInvocation(db, {
+        origin: { workspaceId: session.workspace_id, kind: 'ASSIST', assistMessageId: message.id },
+        identity: modelRoute.modelPort.identity, signal: controller.signal,
+        invoke: async (callId) => invokeCandidate(modelRoute.modelPort, callId),
+        settle: settleAssistModelCall,
+      })).result
+      : await modelRoute.invokeWithCallId(baseRequest, invokeCandidate);
 
     // The model port maps an aborted stream to CANCELLED. Keep a lost Worker
     // distinct from an actual user cancellation before touching Message state.
@@ -500,6 +509,50 @@ interface AssistPreviewOwner {
   readonly workerId: string; readonly callId: string;
 }
 
+interface AssistModelRoute {
+  readonly modelPort: AssistModelPort;
+  readonly invokeAssist?: (request: AssistRequest) => Promise<AssistResult>;
+  readonly invokeWithCallId?: (request: AssistRequest,
+    invoke: (port: AssistModelPort, callId: string) => Promise<AssistResult>) => Promise<AssistResult>;
+}
+
+function resolveAssistModelRoute(db: DbExecutor, message: AssistMessageRow,
+  session: AssistSessionRow, options: AssistGenerationOptions, workerId: string): AssistModelRoute {
+  if (message.model_selection_snapshot === null) return { modelPort: options.modelPort };
+  const snapshot = parseAssistModelSnapshot(message.model_selection_snapshot);
+  const selected = snapshot.candidates[0];
+  if (selected === undefined) throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
+  if (selected.connection.provider === 'openai-compatible') {
+    if (selected.connection.model !== options.modelPort.identity.model ||
+        selected.connection.configFingerprint !== options.modelPort.identity.configFingerprint) {
+      throw new Error('ASSIST_MODEL_CONFIG_CHANGED');
+    }
+    return { modelPort: options.modelPort };
+  }
+  const env = options.modelEnv ?? process.env;
+  const context = { db, message, session, workerId, env,
+    defaultModelPort: options.modelPort,
+    ...(options.modelFetchDependencies === undefined ? {} : {
+      modelFetchDependencies: options.modelFetchDependencies,
+    }) };
+  const budget = snapshot.budget;
+  const identity: ModelIdentity = { provider: selected.connection.provider,
+    model: selected.connection.model, configFingerprint: selected.connection.configFingerprint,
+    budget: { callReservationTokens: budget.callReservationTokens,
+      scopeCallLimit: budget.scopeCallLimit, scopeTokenLimit: budget.scopeTokenLimit } };
+  const invokeAssist = (request: AssistRequest) => invokeAssistWithFreeModelRouting(context, request);
+  return { modelPort: { identity, assist: invokeAssist }, invokeAssist,
+    invokeWithCallId: (request, invoke) => invokeAssistWithFreeModelRouting(context, request, invoke) };
+}
+
+function settleAssistModelCall(result: AssistResult) {
+  return result.kind === 'CANCELLED'
+    ? { status: 'CANCELLED' as const, providerRequestId: result.providerRequestId ?? null,
+      ...(result.usage === undefined ? {} : { usage: result.usage }) }
+    : { status: 'COMPLETED' as const, providerRequestId: result.providerRequestId,
+      usage: result.usage };
+}
+
 /**
  * B 档的一次生成：只读工具轮次 + 既有结算。
  *
@@ -512,11 +565,13 @@ async function runAssistantReadonlyGeneration(db: DbExecutor, context: {
   readonly session: AssistSessionRow;
   readonly options: AssistGenerationOptions;
   readonly controller: AbortController;
+  readonly invokeAssist?: (request: AssistRequest) => Promise<AssistResult>;
 }): Promise<AssistGenerationOutcome> {
   const { message, session, options, controller } = context;
   const outcome = await runAssistantReadonlyRounds(db, { session, message,
     availableTools: await sessionReadToolsForCurrentConnections(db, session), modelPort: options.modelPort,
-    signal: controller.signal });
+    signal: controller.signal,
+    ...(context.invokeAssist === undefined ? {} : { invokeAssist: context.invokeAssist }) });
   if (outcome.kind === 'CONTENT') {
     const settled = await settleInTransaction(db, message, options.workerId, {
       status: 'COMPLETED', errorCode: null, content: outcome.content,
@@ -615,6 +670,7 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
   readonly availableTools: readonly InternalToolName[];
   /** 本轮 system 文本：普通会话用 AGENT_MAIN_LOOP，已冻结方法用方法自己的模板。 */
   readonly system: string;
+  readonly invokeAssist?: (request: AssistRequest) => Promise<AssistResult>;
 }): Promise<AssistGenerationOutcome> {
   const { message, session, options, controller, availableTools, system } = context;
   // 阶段 C 其余：状态维护的依据版本必须在**这次模型请求之前**冻结（R3）。主流程的模型
@@ -622,7 +678,8 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
   const frozenBaseline = session.project_id === null ? null :
     await freezeStateInterpretationBaseline(db, session.workspace_id, session.project_id);
   const outcome = await runAgentSessionReadonlyRounds(db, { session, message,
-    availableTools, system, modelPort: options.modelPort, signal: controller.signal });
+    availableTools, system, modelPort: options.modelPort, signal: controller.signal,
+    ...(context.invokeAssist === undefined ? {} : { invokeAssist: context.invokeAssist }) });
   if (outcome.kind === 'CONTENT') {
     // 阶段 C：这一次模型输出同时给出回复与（可选的）执行候选与状态维护候选，因此
     // 不再另起两次解释调用。判定与落库都走原入口：合法性由既有确定性校验决定，
@@ -673,6 +730,7 @@ async function runLearningGeneration(db: DbExecutor, context: {
   readonly session: AssistSessionRow;
   readonly options: AssistGenerationOptions;
   readonly controller: AbortController;
+  readonly invokeAssist?: (request: AssistRequest) => Promise<AssistResult>;
 }): Promise<AssistGenerationOutcome> {
   const { message, session, options, controller } = context;
   // 相关短状态读取失败不阻断教学：退化为「只有目标」的空状态，而不是拒答。
@@ -693,7 +751,8 @@ async function runLearningGeneration(db: DbExecutor, context: {
     outcome = await runLearningRounds(db, { session, message,
       availableTools: await sessionReadToolsForCurrentConnections(db, session),
       modelPort: options.modelPort, signal: controller.signal, storage: options.storage,
-      learningState, material });
+      learningState, material,
+      ...(context.invokeAssist === undefined ? {} : { invokeAssist: context.invokeAssist }) });
   } catch (error) {
     // 历史来源失权等装配失败：正文没有产生，消息按类型化失败收敛，不写任何学习增量。
     const errorCode = error instanceof Error && error.message === 'LEARNING_HISTORY_SOURCE_UNAVAILABLE'
@@ -835,36 +894,6 @@ async function settleLearningIncrements(db: DbExecutor, input: {
     await withTransaction(db, (tx) => tx.learning.settleRound(round.id, 'REJECTED', reason));
     return 'REJECTED';
   }
-}
-
-/**
- * 本轮可用的只读工具：按**当前**连接与权限算出来，不是从冻结快照读。
- *
- * 连接被删或停用后下一轮就少一个工具——这是「快照冻结文本不冻结能力」的落点。
- * 没有 FILE_QUERY / FILE_READ 连接时词表为空，模型只能凭已读内容回答。
- *
- * 三种会话身份（人设助手、学习搭档、普通 Agent 主流程）共用这一份计算：可见性只由
- * 当前配置决定，与会话身份无关。
- */
-async function sessionReadToolsForCurrentConnections(db: DbExecutor,
-  session: AssistSessionRow): Promise<readonly InternalToolName[]> {
-  if (session.project_id === null) return [];
-  const gateway = createRepositories(db).gateway;
-  const resources = (await gateway.listResources())
-    .filter((resource) => resource.workspace_id === session.workspace_id &&
-      resource.project_id === session.project_id);
-  if (resources.length === 0) return [];
-  const capabilities = new Set<string>();
-  for (const connection of await gateway.listConnections(session.workspace_id, session.project_id)) {
-    if (connection.status !== 'ACTIVE') continue;
-    for (const capability of await gateway.listConnectionCapabilities(connection.id)) {
-      capabilities.add(capability);
-    }
-  }
-  // 与 tool-catalog 的 capability 字段同一份口径：词表里每个工具各自声明它要什么能力。
-  return assistantToolNames(INTERNAL_TOOL_DEFINITIONS
-    .filter((definition) => capabilities.has(definition.capability))
-    .map((definition) => definition.name));
 }
 
 /** Preserve Message -> model call lock order for both observation and preview. */
@@ -1062,13 +1091,39 @@ async function buildGenerationInput(r: Repositories, storage: ManagedContentStor
     ? '- 显式选中资料：无。'
     : `- 显式选中资料：${sourceSections.length} 条（正文见下方数据块）。`);
 
+  // 0093：图片附件的上下文经济性——仅当前消息的附件进多模态 parts；历史消息的
+  // 附件降级为一行文本占位（说明那一轮附过图、本轮不回放图片内容），不冒充模型看得见。
+  const [currentAttachments, historicalAttachments] = await Promise.all([
+    message.role === 'USER' ? r.assist.listAttachmentsByMessage(message.id)
+      : Promise.resolve([] as readonly AssistMessageAttachmentRow[]),
+    r.assist.listAttachmentsByMessages(
+      history.filter((entry) => entry.id !== message.id).map((entry) => entry.id)),
+  ]);
+  const imageParts: readonly AssistContentPart[] = currentAttachments.map((row) => ({
+    type: 'image' as const, mediaType: row.media_type,
+    dataBase64: Buffer.from(row.content).toString('base64'),
+  }));
+  const historicalByMessage = new Map<string, string[]>();
+  for (const row of historicalAttachments) {
+    if (row.message_id === null) continue;
+    const names = historicalByMessage.get(row.message_id) ?? [];
+    names.push(row.name);
+    historicalByMessage.set(row.message_id, names);
+  }
+
   const turns: AssistTurn[] = [
     { role: 'user', content: [...scopeLines, '', ...sourceSections].join('\n') },
     ...(skillMode ? history.filter((entry) => entry.role === 'USER').slice(-1)
-      : history).filter((entry) => entry.content !== null).map((entry) => ({
-      role: entry.role === 'USER' ? 'user' as const : 'assistant' as const,
-      content: entry.content ?? '',
-    })),
+      : history).filter((entry) => entry.content !== null).map((entry) => {
+      const historicalNames = historicalByMessage.get(entry.id);
+      return {
+        role: entry.role === 'USER' ? 'user' as const : 'assistant' as const,
+        content: (entry.content ?? '') +
+          (historicalNames === undefined ? '' :
+            `\n（该轮随附图片：${historicalNames.join('、')}；图片内容不在本轮回放。）`),
+        ...(entry.id === message.id && imageParts.length > 0 ? { parts: imageParts } : {}),
+      };
+    }),
   ];
   return { turns, sourceRecords };
 }

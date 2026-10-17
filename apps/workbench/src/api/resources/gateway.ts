@@ -2,9 +2,10 @@ import type { DecimalRevision } from "../../types";
 import { RelayTransportError } from "../core/errors";
 import { RelayHttp } from "../core/http";
 import { decimal, directList, integer, nullableString, nullableStringArray, object, string, stringArray } from "../core/primitives";
-import { gatewayConnectionSettingsFrom, managedGitReadOutcomeFrom, managedResourceFrom, webImportJobFrom, webImportOperationFrom, webImportSubmissionFrom } from "../parse/gateway";
+import { gatewayConnectionSettingsFrom, managedGitReadOutcomeFrom, managedResourceFrom, webImportJobFrom, webImportOperationFrom, webImportSubmissionFrom, writeReadinessFrom } from "../parse/gateway";
 import { commandEnvelopeFrom } from "../parse/projects";
 import type { RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayManagedGitReadInput, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayConnection, RelayMockManagedResource, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "../dtos/gateway";
+import type { RelayWriteReadiness } from "../dtos/gateway";
 import type { RelayCommandEnvelope } from "../dtos/projects";
 
 export async function getGatewayConnections(http: RelayHttp, projectId: string): Promise<readonly RelayGatewayConnection[]> {
@@ -101,6 +102,12 @@ export async function getManagedResources(http: RelayHttp, projectId: string): P
 
 export async function getManagedResource(http: RelayHttp, projectId: string, resourceId: string): Promise<RelayManagedResource> {
   return managedResourceFrom(await http.request(http.workspacePath(`/projects/${encodeURIComponent(projectId)}/managed-resources/${encodeURIComponent(resourceId)}`)));
+}
+
+/** 目录写档位只读查询：档位由服务端投影给出，这里只解析，不比较策略。 */
+export async function getWriteReadiness(http: RelayHttp, projectId: string, resourceId: string): Promise<RelayWriteReadiness> {
+  return writeReadinessFrom(await http.request(http.workspacePath(
+    `/projects/${encodeURIComponent(projectId)}/managed-resources/${encodeURIComponent(resourceId)}/write-readiness`)));
 }
 
 export async function readManagedGitState(http: RelayHttp, input: RelayManagedGitReadInput): Promise<RelayManagedGitReadResponse> {

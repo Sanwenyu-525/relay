@@ -19,9 +19,12 @@ pnpm test            # Vitest 组件与交互测试
 pnpm test:browser    # Playwright 浏览器交互与视口测试
 pnpm screenshots     # 1487×1058、DPR 1 的 15 页截图 → artifacts/screenshots/
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-real-api-browser.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-real-api-browser.ps1 -Scenario FreeModels
 ```
 
 首次运行 Playwright 需要安装 Chromium。真实 API 短跑入口使用独立临时 PostgreSQL、迁移角色和 Workspace，执行浏览器人工闭环后停止 API/PG 并删除临时目录；不读取 `apps/api/.env`，运行前需构建 `apps/api/dist`。复跑输入、退出码及文件哈希见 [M02 开发记录](../../docs/development/m02-react-migration.md)。
+
+`FreeModels` 场景另启动真实 Worker，并仅为外部 OpenRouter 传输加载测试 fixture：目录、上游 429 和下一型号成功均来自本机受控 HTTP；页面和业务 API 不伪造响应，使用独立合成凭据。其证据用于受控端到端验收，不能代替真实 Provider 的可用性或结算验证；实际成绩只见[功能验收表](../../docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
 
 ## 页面与路由
 

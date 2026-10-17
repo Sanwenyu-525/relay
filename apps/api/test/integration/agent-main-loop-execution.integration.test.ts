@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { startTestApi, workspacePath } from './api-harness.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -252,6 +253,30 @@ test('状态维护待人工决定时仍落成原请求行，并停在 DECISION_R
 });
 
 // ------------------------------------------------- AM-06 会话接续 Run（阶段 C 第三段）
+
+test('主流程候选的 HTTP 只读投影保留资源、标题和目标，不产生第二次解释或执行', async () => {
+  const fx = await fixture();
+  const result = await ask(fx, '整理交付说明', oneShotPort(JSON.stringify({
+    reply: '目标已整理。', maintenance: null,
+    execution: { title: '整理交付说明', objective: '整理 NOTES.md 的交付说明',
+      criteria: [{ statement: '记录当前目录事实', required: true, method: 'HUMAN' }],
+      expected_outputs: { kind: 'MARKDOWN_DOCUMENT' }, writes_files: false, file_changes: [], check: null }
+  })));
+  const saved = result.requests[0]!;
+  const api = await startTestApi();
+  try {
+    const response = await api.get(`${workspacePath(fx.workspaceId)}/conversation-execution-requests?session_id=${fx.sessionId}`);
+    assert.equal(response.status, 200, response.text);
+    const row = (response.body as { items: { request_id: string; resource_id: string; candidate: JsonObject; task_id: string | null; run_id: string | null }[] }).items[0]!;
+    assert.equal(row.request_id, saved.id);
+    assert.equal(row.resource_id, saved.resource_id);
+    assert.deepEqual(row.candidate, saved.candidate);
+    assert.equal(row.candidate.title, '整理交付说明');
+    assert.equal(row.task_id, null);
+    assert.equal(row.run_id, null);
+    assert.equal(result.interpretCalls, 0);
+  } finally { await api.stop(); }
+});
 
 test('AM-06 原消息→请求→Task→Run 是一条链：Run 由 Run Worker 驱动，消息轮次不碰它', async () => {
   const fx = await fixture();

@@ -19,6 +19,9 @@ use uuid::Uuid;
 mod job_sidecar;
 #[cfg(windows)]
 mod maintenance_session;
+mod control_overlay;
+mod esc_hook;
+mod http_loopback;
 mod restore_isolation;
 #[cfg(windows)]
 use job_sidecar::{ManagedProcess, StoppedLaunch, arm_launch, recover_old_launches,
@@ -1043,6 +1046,10 @@ pub fn run() {
             let handle = app.handle().clone();
             let state = app.state::<RuntimeState>();
             create_window(&handle, &state)?;
+            // 电脑操控 Overlay（migration 0096）：轮询 API 的操控状态并驱动透明
+            // 置顶穿透窗口与全局 Esc。轮询失败只降级为不显示，不影响主窗口。
+            control_overlay::spawn(handle.clone(), state.base_url.clone(),
+                state.workspace_id.clone(), state.bearer_token.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![desktop_bootstrap, select_working_directory])

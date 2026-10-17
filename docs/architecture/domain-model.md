@@ -42,6 +42,8 @@ Workspace 在 V1 是作用域标识与配置边界，不引入团队成员、租
 
 ProjectState 是 Project 模块内部的独立写入边界，便于对状态补丁单独进行并发控制；这不允许绕过 Project 的语义校验。Goal 关联移除涉及显式对齐的 Task 时，由应用用例执行影响检查和用户明确选择的原子清理。
 
+2026-10-17 日常后端接续：Goal 标题/说明与归档仅更新 Goal 自身修订，Project 改名仅更新 Project 自身修订，不联动 Task/Run/ProjectState；接口归[基础维护契约](../api/project-goal-maintenance.md)。Inbox Task 首次归入 Project 由 Application 在同一短事务协调 Task 与 Assist 原 Owner，保留任务 ID、验收定义及会话历史，拒绝在途消息、已有执行/成果历史或尚存依赖的隐式搬迁；会话创建及依赖上游读取用 Task SHARE 锁与归属更新串行化，不能先读旧归属、再等待外键锁后提交旧作用域。精确入口与非目标归[任务归属契约](../api/task-project-binding.md)，不替代未来通用跨 Project 迁移协议。
+
 Information 是组织相关概念的逻辑边界，不要求实现四套基础设施。可以复用存储技术和版本机制，但 Rule 的强度、Decision 的替代关系以及来源证据必须保留明确语义。
 
 ## 3. 关系与事实来源

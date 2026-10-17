@@ -4,10 +4,10 @@ import type { DecimalRevision } from "../../types";
 import { RelayRunEventHttpError, RelayTransportError } from "../core/errors";
 import { RelayHttp } from "../core/http";
 import { array, boolean, decimal, directList, nullableString, object, optionalString, string } from "../core/primitives";
-import { assistSourceBody, runToolCallsFrom } from "../parse/assist";
+import { assistSourceBody, runToolCallPreviewsFrom, runToolCallsFrom } from "../parse/assist";
 import { commandEnvelopeFrom } from "../parse/projects";
 import { commandOutputFrom, contextBuildFrom, contextManifestDetailFrom, contextManifestSummaryFrom, controlRequestFrom, controlSubmissionFrom, delegateSubmissionFrom, reviewFrom, runFrom, runTraceFrom } from "../parse/run";
-import type { RelayAssistSourceRef, RelayRunToolCalls } from "../dtos/assist";
+import type { RelayAssistSourceRef, RelayRunToolCallPreviews, RelayRunToolCalls } from "../dtos/assist";
 import type { RelayFileReadAction, RelayMockGatewayAction, RelayWebFetchAction } from "../dtos/gateway";
 import type { RelayCommandEnvelope, RelayCommandReceipt } from "../dtos/projects";
 import type { RelayContextManifestDetail, RelayContextManifestList, RelayControlRequest, RelayControlSubmission, RelayControlType, RelayDelegateSubmission, RelayResumeSubmission, RelayReview, RelayReviewDecision, RelayRun, RelayRunDraftPreview, RelayRunGatewayOperation, RelayRunTrace } from "../dtos/run";
@@ -93,6 +93,12 @@ export async function getRunTrace(http: RelayHttp, runId: string): Promise<Relay
 export async function getRunToolCalls(http: RelayHttp, runId: string): Promise<RelayRunToolCalls> {
   return runToolCallsFrom(await http.request(
     http.workspacePath(`/runs/${encodeURIComponent(runId)}/tool-calls`)));
+}
+
+/** 生成中的工具预览（工作台 §34.4）：可丢弃、可空；Run 终态或调用已结算时为空列表。 */
+export async function getRunToolCallPreviews(http: RelayHttp, runId: string): Promise<RelayRunToolCallPreviews> {
+  return runToolCallPreviewsFrom(await http.request(
+    http.workspacePath(`/runs/${encodeURIComponent(runId)}/tool-call-previews`)));
 }
 
 export async function getRunGatewayOperations(http: RelayHttp, runId: string): Promise<readonly RelayRunGatewayOperation[]> {

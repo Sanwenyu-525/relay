@@ -1,9 +1,16 @@
 import { sql } from 'kysely';
 
-import type { AssistMessagePreviewRow, AssistMessageRow, AssistProposalRow,
-  AssistSessionRow, ConversationMode } from '../infrastructure/database-schema.js';
+import type { AssistMessageAttachmentRow, AssistMessagePreviewRow, AssistMessageRow,
+  AssistProposalRow, AssistSessionRow, AssistSessionStatus, ConversationMode } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
+
+export interface AssistSessionContext {
+  readonly session_id: string;
+  readonly session_revision: bigint;
+  readonly project_goals: readonly { readonly goal_id: string; readonly title: string }[];
+  readonly working_directory: { readonly resource_id: string; readonly canonical_root: string | null } | null;
+}
 
 /**
  * Assist 模块独占 assist_sessions / assist_messages / assist_proposals 的写入口
@@ -41,18 +48,60 @@ export class AssistRepository {
       where id = ${id} ${suffix}`.execute(this.db)).rows[0];
   }
 
-  async listSessions(workspaceId: string, projectId?: string,
-    taskId?: string): Promise<readonly AssistSessionRow[]> {
+  /**
+   * 会话列表：置顶优先，其余按创建时间倒序（0090）。
+   *
+   * `status` 由调用方显式给出——HTTP 层默认只列 ACTIVE，`all`/`archived` 是左栏「已归档」
+   * 那一段的读法。缺省不过滤，是为了让内部读取（按项目/任务定位会话）继续看得到全部身份。
+   * 排序键用 `pinned_at desc nulls last`：置顶项之间按置顶时刻倒序，未置顶的落在后面，
+   * 不再追加第二枚布尔排序键，避免「同现同缺」写成两套规则。
+   */
+  async listSessions(workspaceId: string, projectId?: string, taskId?: string,
+    status?: AssistSessionStatus | 'ALL'): Promise<readonly AssistSessionRow[]> {
     const project = projectId === undefined ? sql`` : sql`and project_id = ${projectId}`;
     const task = taskId === undefined ? sql`` : sql`and task_id = ${taskId}`;
+    const active = status === undefined || status === 'ALL' ? sql``
+      : sql`and status = ${status}`;
     return (await sql<AssistSessionRow>`select * from assist_sessions
-      where workspace_id = ${workspaceId} ${project} ${task}
-      order by created_at desc, id desc`.execute(this.db)).rows;
+      where workspace_id = ${workspaceId} ${project} ${task} ${active}
+      order by pinned_at desc nulls last, created_at desc, id desc`.execute(this.db)).rows;
   }
 
-  async archiveSession(id: string): Promise<void> {
-    await sql`update assist_sessions set status = 'ARCHIVED', revision = revision + 1,
-      updated_at = now() where id = ${id}`.execute(this.db);
+  /**
+   * 改名、置顶、归档、重开与未读共用这一条带 CAS 的会话改写（0090 / 0104）。
+   *
+   * `where revision = 期望值` 是唯一的并发裁决点：调用方已在同一事务内取到 `for update`
+   * 行锁并比对过修订，这里落空即返回 undefined，由用例翻成 `REVISION_CONFLICT`，
+   * 绝不静默覆盖更新的值。`pinnedAt`/`unreadAt` 用 `undefined`/`null` 区分「不改」与
+   * 「取消」，因为取消置顶与取消未读都是把那一项写回 NULL，不是删掉一列。
+   */
+  async applySessionControl(id: string, expectedRevision: bigint, patch: {
+    readonly title?: string; readonly pinnedAt?: Date | null; readonly status?: AssistSessionStatus;
+    readonly unreadAt?: Date | null;
+  }): Promise<AssistSessionRow | undefined> {
+    const sets = [sql`revision = revision + 1`, sql`updated_at = now()`];
+    if (patch.title !== undefined) sets.push(sql`title = ${patch.title}`);
+    if (patch.pinnedAt !== undefined) sets.push(sql`pinned_at = ${patch.pinnedAt}`);
+    if (patch.status !== undefined) sets.push(sql`status = ${patch.status}`);
+    if (patch.unreadAt !== undefined) sets.push(sql`unread_at = ${patch.unreadAt}`);
+    const updated = await sql<AssistSessionRow>`update assist_sessions set ${sql.join(sets, sql`, `)}
+      where id = ${id} and revision = ${expectedRevision} returning *`.execute(this.db);
+    return updated.rows[0];
+  }
+
+  /** 导航只读投影：目标经项目关联，目录来自会话绑定；二者不是彼此的归属边界。 */
+  async listSessionContexts(workspaceId: string, sessionIds: readonly string[]): Promise<readonly AssistSessionContext[]> {
+    if (sessionIds.length === 0) return [];
+    return (await sql<AssistSessionContext>`select s.id as session_id, s.revision as session_revision,
+      coalesce((select jsonb_agg(jsonb_build_object('goal_id', g.id, 'title', g.title) order by g.id)
+        from project_goals pg join goals g on g.id = pg.goal_id and g.workspace_id = pg.workspace_id
+        where pg.workspace_id = s.workspace_id and pg.project_id = s.project_id), '[]'::jsonb) as project_goals,
+      case when s.working_resource_id is null then null else
+        jsonb_build_object('resource_id', s.working_resource_id, 'canonical_root', r.canonical_root)
+      end as working_directory
+      from assist_sessions s left join managed_resources r
+        on r.id = s.working_resource_id and r.workspace_id = s.workspace_id
+      where s.workspace_id = ${workspaceId} and s.id in (${sql.join(sessionIds)})`.execute(this.db)).rows;
   }
 
   /**
@@ -97,11 +146,14 @@ export class AssistRepository {
     sources: readonly JsonObject[]; skillSnapshot?: JsonObject | null;
     skillInput?: JsonObject | null; methodSnapshot?: JsonObject | null;
     methodAction?: 'INSPECT' | 'MODIFY' | null; methodArgument?: string | null;
+    modelSelectionSnapshot?: JsonObject | null;
+    modelAttemptState?: JsonObject | null;
     /** 0072：本轮不记录学习状态。随命令体持久，不由模型提示决定。 */
     learningRecordDisabled?: boolean | undefined }): Promise<void> {
     await sql`insert into assist_messages (id, session_id, seq, role, status, intent,
       content, sources, skill_snapshot, skill_input, method_snapshot, method_action,
-      method_argument, learning_record_disabled) values (${input.id}, ${input.sessionId},
+      method_argument, learning_record_disabled, model_selection_snapshot, model_attempt_state)
+      values (${input.id}, ${input.sessionId},
       ${input.seq}, ${input.role},
       ${input.status}, ${input.intent}, ${input.content},
       ${JSON.stringify(input.sources)}::jsonb,
@@ -113,13 +165,60 @@ export class AssistRepository {
         JSON.stringify(input.methodSnapshot)}::jsonb,
       ${input.methodAction ?? null},
       ${input.methodArgument ?? null},
-      ${input.learningRecordDisabled ?? false})`.execute(this.db);
+      ${input.learningRecordDisabled ?? false},
+      ${input.modelSelectionSnapshot === undefined || input.modelSelectionSnapshot === null ? null :
+        JSON.stringify(input.modelSelectionSnapshot)}::jsonb,
+      ${input.modelAttemptState === undefined || input.modelAttemptState === null ? null :
+        JSON.stringify(input.modelAttemptState)}::jsonb)`.execute(this.db);
   }
 
   async readMessage(id: string, lock: boolean | 'share' = false): Promise<AssistMessageRow | undefined> {
     const suffix = lock === 'share' ? sql`for share` : lock ? sql`for update` : sql``;
     return (await sql<AssistMessageRow>`select * from assist_messages
       where id = ${id} ${suffix}`.execute(this.db)).rows[0];
+  }
+
+  /** 0099: claim one concrete Assist model call before the external request begins. */
+  async reserveModelCall(input: { messageId: string; workerId: string;
+    expectedRevision: string; expectedIndex: number; callId: string;
+    turnId: string; nextState: JsonObject }): Promise<boolean> {
+    return (await sql<{ id: string }>`update assist_messages set
+      model_attempt_state = ${JSON.stringify(input.nextState)}::jsonb, updated_at = now()
+      where id = ${input.messageId} and role = 'ASSISTANT' and status = 'RUNNING'
+        and worker_id = ${input.workerId} and cancel_requested = false
+        and model_attempt_state->>'revision' = ${input.expectedRevision}
+        and model_attempt_state->>'current_candidate_index' = ${String(input.expectedIndex)}
+        and model_attempt_state->>'status' = 'READY'
+        and model_attempt_state->>'active_call_id' is null
+      returning id`.execute(this.db)).rows.length === 1;
+  }
+
+  /** 0099: release a settled result only after its exact persisted call identity is known. */
+  async finishModelCall(input: { messageId: string; workerId: string;
+    expectedRevision: string; expectedIndex: number; callId: string;
+    nextState: JsonObject }): Promise<boolean> {
+    return (await sql<{ id: string }>`update assist_messages set
+      model_attempt_state = ${JSON.stringify(input.nextState)}::jsonb, updated_at = now()
+      where id = ${input.messageId} and role = 'ASSISTANT' and status = 'RUNNING'
+        and worker_id = ${input.workerId} and cancel_requested = false
+        and model_attempt_state->>'revision' = ${input.expectedRevision}
+        and model_attempt_state->>'current_candidate_index' = ${String(input.expectedIndex)}
+        and model_attempt_state->>'active_call_id' = ${input.callId}
+      returning id`.execute(this.db)).rows.length === 1;
+  }
+
+  /** 0099: advance only from the active, already-settled call after precise fallback evidence. */
+  async advanceModelCandidate(input: { messageId: string; workerId: string;
+    expectedRevision: string; expectedIndex: number; activeCallId: string | null;
+    nextState: JsonObject }): Promise<boolean> {
+    return (await sql<{ id: string }>`update assist_messages set
+      model_attempt_state = ${JSON.stringify(input.nextState)}::jsonb, updated_at = now()
+      where id = ${input.messageId} and role = 'ASSISTANT' and status = 'RUNNING'
+        and worker_id = ${input.workerId} and cancel_requested = false
+        and model_attempt_state->>'revision' = ${input.expectedRevision}
+        and model_attempt_state->>'current_candidate_index' = ${String(input.expectedIndex)}
+        and model_attempt_state->>'active_call_id' is not distinct from ${input.activeCallId}
+      returning id`.execute(this.db)).rows.length === 1;
   }
 
   /**
@@ -129,6 +228,58 @@ export class AssistRepository {
   async readMessageAtSeq(sessionId: string, seq: bigint): Promise<AssistMessageRow | undefined> {
     return (await sql<AssistMessageRow>`select * from assist_messages
       where session_id = ${sessionId} and seq = ${seq}`.execute(this.db)).rows[0];
+  }
+
+  // ---- 0093：消息图片附件（会话输入快照）。上传端点先落未引用行，消息命令在同一
+  // 事务内绑定到新消息；媒体类型与内容插入后不可变，应用角色无 DELETE。 ----
+
+  /** 上传暂存：类型白名单与字节上限由 0093 的 CHECK 兜底，这里只保证写入形状与调用方意图一致。 */
+  async insertAttachment(input: { id: string; workspaceId: string; sessionId: string;
+    name: string; mediaType: AssistMessageAttachmentRow['media_type']; content: Buffer;
+    contentHash: Buffer }): Promise<void> {
+    await sql`insert into assist_message_attachments (id, workspace_id, session_id,
+      name, media_type, byte_length, content_hash, content)
+      values (${input.id}, ${input.workspaceId}, ${input.sessionId}, ${input.name},
+      ${input.mediaType}, ${input.content.byteLength}, ${input.contentHash}, ${input.content})`
+      .execute(this.db);
+  }
+
+  /** 读取必须同时核对 workspace 与 session：跨会话/跨工作区引用一律查无（RESOURCE_NOT_FOUND）。 */
+  async readAttachment(id: string, workspaceId: string,
+    sessionId: string): Promise<AssistMessageAttachmentRow | undefined> {
+    return (await sql<AssistMessageAttachmentRow>`select * from assist_message_attachments
+      where id = ${id} and workspace_id = ${workspaceId} and session_id = ${sessionId}`
+      .execute(this.db)).rows[0];
+  }
+
+  /**
+   * 消息命令事务内绑定：`where message_id is null` 是唯一的绑定入口，兜底并发重复
+   * 绑定；返回实际绑定数，不足即有 id 查无或已被占用，由调用方按 RESOURCE_NOT_FOUND
+   * 拒绝整条命令。附件行不可变：没有任何路径改写媒体类型或内容。
+   */
+  async bindAttachments(sessionId: string, messageId: string,
+    ids: readonly string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    return (await sql<{ id: string }>`update assist_message_attachments
+      set message_id = ${messageId}
+      where session_id = ${sessionId} and message_id is null
+        and id in (${sql.join(ids)})`.execute(this.db)).rows.length;
+  }
+
+  /** 组装与投影读取：按消息取附件（含内容字节，多模态组装与回放都要用）。 */
+  async listAttachmentsByMessage(
+    messageId: string): Promise<readonly AssistMessageAttachmentRow[]> {
+    return (await sql<AssistMessageAttachmentRow>`select * from assist_message_attachments
+      where message_id = ${messageId} order by created_at, id`.execute(this.db)).rows;
+  }
+
+  /** 0093：历史轮次的附件占位读取；空入参直接返回，不产生 `in ()` 空列表查询。 */
+  async listAttachmentsByMessages(
+    messageIds: readonly string[]): Promise<readonly AssistMessageAttachmentRow[]> {
+    if (messageIds.length === 0) return [];
+    return (await sql<AssistMessageAttachmentRow>`select * from assist_message_attachments
+      where message_id in (${sql.join(messageIds)}) order by created_at, id`
+      .execute(this.db)).rows;
   }
 
   async readLivePreview(messageId: string): Promise<AssistMessagePreviewRow | undefined> {

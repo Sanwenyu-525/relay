@@ -1,5 +1,8 @@
 import { useState } from "react";
+import ChatLocalFileDiff from "./ChatLocalFileDiff";
 import { useRunToolCalls } from "../lib/useRunToolCalls";
+import { useRunToolCallPreviews } from "../lib/useRunToolCallPreviews";
+import { localFileDiffRows } from "../lib/localFileDiffRows";
 import { waitReasonText } from "../lib/waitReasons";
 import { failedToolResult } from "../lib/toolResults";
 import type { RelayApiClient, RelayRunToolCall, RelayRunToolCalls } from "../api/relayClient";
@@ -23,6 +26,8 @@ import type { RelayApiClient, RelayRunToolCall, RelayRunToolCalls } from "../api
 const READ_TOOLS = new Set(["read_file", "list_directory", "find_paths", "search_text"]);
 const WRITE_TOOLS = new Set(["apply_changeset"]);
 const CHECK_TOOLS = new Set(["run_check"]);
+/** Run 终态后不再有生成中预览，轮询到此为止（与轨迹页签同一词表）。 */
+const TERMINAL_RUN = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
 /** 折叠区最多逐字展示的正文行数；超出只算「还有更多」，不截断后冒充完整内容。 */
 const INLINE_MAX_LINES = 40;
 
@@ -101,6 +106,11 @@ export default function ExecutionTrajectorySummary({ client, runId, revision = n
   // 与右栏轨迹页签共用同一个读取入口：两处各读一次会出现两条可能不同步的事实来源。
   const { projection, loading, error } = useRunToolCalls(client, runId, revision);
   const [open, setOpen] = useState(false);
+  // 局部 diff 的行：数字来自同一份工具账本（已落盘）与生成中的临时预览（不落总数）。
+  // 预览只在 Run 非终态时轮询，Run 结束或切换后整份清空，迟到的片段不会复活「正在生成」。
+  const { previews } = useRunToolCallPreviews(client, runId,
+    projection !== null && TERMINAL_RUN.has(projection.runStatus) === false);
+  const localRows = localFileDiffRows(projection, previews);
 
   if (error !== null) {
     return <p className="helper-text" data-testid="execution-summary-error">
@@ -129,6 +139,9 @@ export default function ExecutionTrajectorySummary({ client, runId, revision = n
       <span>{parts.join(" · ")}</span>
       {projection.waitReason !== null && <span className="helper-text"> · Run 等待原因 {waitReasonText(projection.waitReason)}</span>}
     </p>
+    {/* 局部 diff：逐文件一行，紧邻这次编辑的摘要。同一文件被改多次留下多条，
+        生成中的行只说「预览」，落账后才换成实际数并可以写「已修改」。 */}
+    <ChatLocalFileDiff client={client} rows={localRows} />
     {reads.length > 0 && <>
       <button className="text-link" type="button" data-testid="execution-read-results-toggle"
         aria-expanded={open} onClick={() => setOpen((previous) => !previous)}>

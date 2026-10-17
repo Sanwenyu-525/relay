@@ -45,6 +45,8 @@ import { decodeGoalListCursor, decodeProjectListCursor, encodeGoalListCursor,
   encodeProjectListCursor } from './cursor.js';
 import { validationFailed } from '../application/domain-error.js';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
+import { registerWorkContextRoutes } from './work-context-api.js';
+import { registerProjectMaintenanceRoutes } from './project-maintenance-api.js';
 
 /**
  * Project 与 Goal 端点（docs/api/http-command-contract.md 第 3 节、
@@ -57,6 +59,8 @@ export function registerProjectRoutes(
   app: FastifyInstance,
   dependencies: RouteDependencies,
 ): void {
+  registerWorkContextRoutes(app, dependencies);
+  registerProjectMaintenanceRoutes(app, dependencies);
   app.get('/projects', {
     schema: {
       params: WorkspaceParamsSchema,

@@ -100,6 +100,7 @@ describe("P15 Activity 只读追溯", () => {
     expect(mounted.wrapper.text()).not.toContain(`项目 ${projectId}`);
     expect(mounted.wrapper.text()).toContain("打开项目");
     expect(mounted.wrapper.text()).toContain("目标：当前无直达页");
+    await basisButton(mounted, "77777777-7777-4777-8777-777777777777").trigger("click"); await flush();
     expect(mounted.wrapper.text()).toContain("66666666-6666-4666-8666-666666666666");
     expect(mounted.wrapper.find(`a[href="/projects/${projectId}"]`).exists()).toBe(true);
     expect(mounted.wrapper.find(`a[href="/tasks/${taskId}"]`).exists()).toBe(true);
@@ -184,6 +185,46 @@ function basisButton(mounted: Awaited<ReturnType<typeof mountWorkbench>>, id: st
 }
 
 describe("P15 Activity 分组、执行方筛选与依据侧栏", () => {
+  it("真实事件中文化且类别筛选与执行方组合，未知事件不推断成功，续页保留原游标", async () => {
+    connect();
+    const entries = [
+      makeActivity("cccccccc-0000-4000-8000-000000000001", { event: "VERIFICATION_FINALIZED", actor: "AI", created: "2026-10-16T00:00:00Z", summary: "业务事件" }),
+      makeActivity("cccccccc-0000-4000-8000-000000000002", { event: "REVIEW_REQUESTED", actor: "SYSTEM", created: "2026-10-16T00:00:00Z", summary: "业务事件" }),
+      makeActivity("cccccccc-0000-4000-8000-000000000003", { event: "PROJECT_RETURN_REVIEWED", actor: "HUMAN", created: "2026-10-16T00:00:00Z", summary: "业务事件" }),
+      makeActivity("cccccccc-0000-4000-8000-000000000004", { event: "FUTURE_EVENT", actor: "SYSTEM", created: "2026-10-16T00:00:00Z", summary: "业务事件" })
+    ];
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input).slice(root.length); calls.push(path);
+      if (path.startsWith("/projects?")) return response({ items: [], next_cursor: null });
+      if (path === "/activities") return response({ items: entries, next_cursor: "next-page" });
+      if (path === "/activities?cursor=next-page") return response({ items: [makeActivity("cccccccc-0000-4000-8000-000000000005", { event: "VERIFICATION_FINALIZED", actor: "SYSTEM", created: "2026-10-15T00:00:00Z", summary: "下一页检查" })], next_cursor: null });
+      throw new Error(path);
+    }));
+    const mounted = await mountWorkbench("/activity"); unmount = mounted.unmount;
+    const list = mounted.wrapper.get(".activity-groups");
+    expect(list.text()).toContain("检查已结算");
+    expect(list.text()).toContain("请求人工判断");
+    expect(list.text()).toContain("查看项目接续变化");
+    expect(list.text()).not.toContain("VERIFICATION_FINALIZED");
+    expect(list.text()).not.toContain("业务事件");
+    expect(list.text()).toContain("未识别的事件");
+    await basisButton(mounted, entries[3]!.id).trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="activity-basis-panel"]').text()).toContain("FUTURE_EVENT");
+    expect(mounted.wrapper.get('[data-testid="activity-basis-panel"]').text()).toContain("不能据此判断成功或完成");
+    const categories = mounted.wrapper.get('[aria-label="按事件类别筛选（仅已加载项）"]');
+    await categories.findAll("button").find((b) => b.text() === "检查")!.trigger("click"); await flush();
+    expect(mounted.wrapper.find('[data-testid="activity-basis-panel"]').exists()).toBe(false);
+    expect(mounted.wrapper.findAll(".activity-row")).toHaveLength(1);
+    const actors = mounted.wrapper.get('[aria-label="按执行方筛选（仅已加载项）"]');
+    await actors.findAll("button").find((b) => b.text() === "系统")!.trigger("click"); await flush();
+    expect(mounted.wrapper.text()).toContain("当前筛选在已加载项内没有匹配记录");
+    await mounted.wrapper.findAll("button").find((b) => b.text() === "继续加载")!.trigger("click"); await flush();
+    expect(mounted.wrapper.findAll(".activity-row")).toHaveLength(1);
+    expect(mounted.wrapper.get(".activity-groups").text()).toContain("下一页检查");
+    expect(calls.filter((p) => p.startsWith("/activities"))).toEqual(["/activities", "/activities?cursor=next-page"]);
+  });
+
   it("按日历日分组，选中事件在侧栏显示依据并分开批准与执行", async () => {
     connect();
     const approval = makeActivity("aaaaaaaa-0000-4000-8000-000000000001", { event: "REVIEW_DECIDED", actor: "HUMAN", created: "2026-09-26T12:00:00Z", summary: "接受研究问题" });
@@ -229,7 +270,7 @@ describe("P15 Activity 分组、执行方筛选与依据侧栏", () => {
     expect(mounted.wrapper.text()).toContain("AI 创建了运行");
     expect(mounted.wrapper.text()).not.toContain("我开始了任务");
     expect(mounted.wrapper.text()).not.toContain("系统完成验证");
-    const allChip = mounted.wrapper.findAll("button").find((button) => button.text() === "全部")!;
+    const allChip = mounted.wrapper.get('[aria-label="按执行方筛选（仅已加载项）"]').findAll("button").find((button) => button.text() === "全部")!;
     await allChip.trigger("click"); await flush();
     expect(mounted.wrapper.text()).toContain("我开始了任务");
   });

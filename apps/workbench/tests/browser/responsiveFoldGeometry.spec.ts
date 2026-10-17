@@ -152,7 +152,7 @@ test.describe("48rem 折行档与外壳折叠点的边界行为（2026-10-10 收
   // 2026-10-15：用户拖拽出来的列宽只在 ≥64rem 生效。夹具无法真的拖拽，
   // 这里直接写与拖拽手柄同源的变量，再看列宽实际落到哪里——只看变量不看列宽，
   // 变量生效但模板没用上时会漏过去。
-  test("两列外壳之间有间隙：底色分野才有边界，激活条不顶到右缘", async ({ page }) => {
+  test("图标格左右对称：卡片左缘贴图标栏右缘，边界由卡片自己的描边说完", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await installTaskDetail(page);
     await page.goto(`/tasks/${taskId}`);
@@ -162,29 +162,27 @@ test.describe("48rem 折行档与外壳折叠点的边界行为（2026-10-10 收
     const shell = await page.evaluate(() => {
       const navrail = document.querySelector(".app-navrail")!;
       const rail = document.querySelector(".app-context-rail")!;
-      const navrailBox = navrail.getBoundingClientRect();
       const railBox = rail.getBoundingClientRect();
-      const navrailStyle = getComputedStyle(navrail);
-      const railStyle = getComputedStyle(rail);
-      // 两栏底色不同（navigation 浅绿白 vs surface 纯白）时，必须靠间隙分隔，
-      // 否则两栏读成一整块、激活条直接顶到边界。
-      const active = navrail.querySelector(".navigation-item--active");
+      const tile = (navrail.querySelector(".navigation-item--active")
+        ?? navrail.querySelector(".navigation-item"))!;
+      const box = tile.getBoundingClientRect();
       return {
-        gap: Math.round(railBox.left - navrailBox.right),
-        activeToEdge: active === null ? null
-          : Math.round(navrailBox.right - active.getBoundingClientRect().right),
-        navrailBg: navrailStyle.backgroundColor,
-        railBg: railStyle.backgroundColor,
-        columnGap: getComputedStyle(document.querySelector(".app-frame")!).columnGap
+        // 图标格（含悬停淡底）到屏幕左缘、到卡片左缘的两个距离：必须相等。
+        insetToScreen: Math.round(box.left),
+        insetToCard: Math.round(railBox.left - box.right),
+        navrailBg: getComputedStyle(navrail).backgroundColor,
+        railBg: getComputedStyle(rail).backgroundColor,
+        cardStroke: getComputedStyle(rail).borderLeftWidth,
+        cardRadius: getComputedStyle(rail).borderTopLeftRadius,
       };
     });
-    // 间隙来自 token：0 意味着两栏底色直接相邻；小于 4px 在 Windows 缩放下看不出来。
-    expect(shell.gap).toBeGreaterThanOrEqual(8);
-    expect(shell.columnGap).not.toBe("normal");
-    // 不同底色才有区分可言；同底色时这条断言要重写，不能拿它证明间隙存在。
+    // 2026-10-16 外壳收成「图标栏右侧一整张卡片」，列间桌面缝归零：
+    // 图标栏左右内边距各 12px，缝一留就等于右边比左边宽，卡片把图标格挤向左边。
+    expect(shell.insetToCard).toBe(shell.insetToScreen);
+    // 底色相邻之后边界只剩卡片自己的描边加圆角，两者都必须在，否则两栏读成一整块。
+    expect(shell.cardStroke).not.toBe("0px");
+    expect(shell.cardRadius).not.toBe("0px");
     expect(shell.navrailBg).not.toBe(shell.railBg);
-    // 激活条与右缘之间至少留出间隙本身，不贴边。
-    if (shell.activeToEdge !== null) expect(shell.activeToEdge).toBeGreaterThan(0);
   });
 
   test("侧栏列宽：用户拖拽宽度不进 48rem–64rem，只在 ≥64rem 生效", async ({ page }) => {

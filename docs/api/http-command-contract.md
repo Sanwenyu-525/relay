@@ -522,6 +522,7 @@ Prepare 规范化目标：目标必须绝对路径、位于登记资源根内，
 
 - `POST /assist-sessions`（`CreateAssistSession`，201）：可选 `project_id`/`task_id`；绑定 Task 时作用域跟随 Task（`project_id` 与 Task 归属不一致 422），Task 跨 Workspace 或未知 404。会话可归档（`status='ARCHIVED'`）后拒收新消息。
 - `GET /assist-sessions?project_id&task_id`、`GET /assist-sessions/{id}`：按 Workspace 作用域过滤，跨作用域 ID 404。
+  - 2026-10-16 只读导航增量：两处均支持可选 `include_context=true|false`（查询字符串；省略或 `false` 不新增返回字段）。`true` 时附 `context: {project_goals: [{goal_id,title}], working_directory: {resource_id,canonical_root}|null}`。`project_goals` 只投影该会话所属 Project 的已保存 Goal 关联，不代表会话直接绑定 Goal，也不代表 Task 的显式 Goal 对齐；同一 Goal 可跨项目与本地目录，但不跨数据库 Workspace。`working_directory=null` 表示未绑定，已绑定而规范路径不可读时对象保留资源身份且 `canonical_root=null`。投影按 Workspace 过滤；若两次只读间会话 revision 变化，省略 `context`，客户端显示待核对，不混用新旧归属。不新增命令、表、迁移或权限；**Breaking Change: No**，旧调用方和旧客户端不受影响。
 - `POST /assist-sessions/{id}/messages`（`RequestAssistMessage`，**202**）：同事务写入一条 `USER`（COMPLETED）与一条 `ASSISTANT`（PENDING）消息；回复只写入本会话（固定消息目标，切页不会把旧回复落到新目标）。可选 `intent`：`DISCUSS`（默认）/`PROPOSE_CANDIDATE`（要求会话绑定 Task，否则 409）/`PROPOSE_TASK`（要求绑定 Project，否则 409）。可选 `source_refs: [{kind, root_id, version}]`（≤10 条）按 Delegate 显式选源同规则校验并随消息冻结；重复 command_id 幂等重放。
 - `GET /assist-sessions/{id}/messages?limit`：按 `seq` 返回消息及生成状态（PENDING/RUNNING/COMPLETED/FAILED/CANCELLED）、`usage: {input_tokens,output_tokens}`（各为非负整数或 `null`，后者表示未知）、`error_code` 与实际发送的来源状态记录（`SENT`/`UNAVAILABLE`）。
 
@@ -567,7 +568,7 @@ Execute 为 SSRF 安全 GET（tool-adapters.md 第 3 节 + OWASP）：**每一�
 
 ### 10.30 缓存用量与上下文占用分母（2026-10-02，开发自检）
 
-**Breaking Change: Yes（Assist 消息 `usage` 与 `/model-port` 响应新增字段）。** `GET /assist-sessions/{id}/messages?limit` 的 `usage` 从 `{input_tokens,output_tokens}` 扩为 `{input_tokens,output_tokens,cache_read_tokens,cache_creation_tokens}`，新增两项各为非负整数或 `null`。`null` 表示 Provider 未上报该字段，**不表示精确 0**——「没有缓存命中」与「Provider 没报」在协议上不可区分，UI 必须显示「未采集」而非 `0%`。按原两字段 schema 严格解析的客户端会因未知字段报错；本仓客户端已把这两项按可选字段处理（缺失等同 `null`），旧服务端无需升级。
+**Breaking Change: Yes（Assist 消息 `usage` 与 `/model-port` 响应新增字段）。** `GET /assist-sessions/{id}/messages?limit` 的 `usage` 从 `{input_tokens,output_tokens}` 扩为 `{input_tokens,output_tokens,cache_read_tokens,cache_creation_tokens}`，新增两项各为非负整数或 `null`。`null` 表示 Provider 未上报该字段，**不表示精确 0**——「没有缓存命中」与「Provider 没报」在协议上不可区分，UI 不得把 `null` 画成 `0%`（当前实现：没有读数时命中率那一格整体不渲染，规则见[工作台 §17.6](../frontend/workbench-design.md)）。按原两字段 schema 严格解析的客户端会因未知字段报错；本仓客户端已把这两项按可选字段处理（缺失等同 `null`），旧服务端无需升级。
 
 数据来源：`openai-compatible` 端口读取 Provider 的 `usage.prompt_tokens_details.cached_tokens` / `cache_write_tokens`（SDK 归一化为 `usage_metadata.input_token_details.cache_read` / `.cache_creation`），经既有 `validUsage()` 校验后原样落库。数据库关联 `0049_m04_model_call_cache_usage`：`model_calls` 与 `assist_messages` 各加两个可空列，历史行保持 `null`（迁移不回填，因为无法区分真实零与未知）；`USER` 消息由 CHECK 约束强制恒为 `null`——它从不是一次模型调用。检查约束保证 `cache_read + cache_creation ≤ input_tokens`，避免 Provider 口径不一致时落库自相矛盾。Fake 端口显式给 `null`：离线确定性模式不伪造计费事实。
 
@@ -833,10 +834,10 @@ Project 拥有接续点身份与说明；其他对象只保存捕获时的确切
 
 | 端点 | 行为 |
 |---|---|
-| POST /api/v1/workspaces/{workspace_id}/working-directories/open | 200。需要 `command_id`、`root_path`（1–1024），可选 `project_id`。`status` 为 `READY` / `AMBIGUOUS` / `NOT_READY`；`AMBIGUOUS` 表示同一实际目录关联了多个项目，需再带 `project_id` 选一次；`NOT_READY` 带稳定 `reason`（`MULTIPLE_PROJECTS` / `PROJECT_ARCHIVED` / `RESOURCE_DISABLED` / `OVERLAPPING_OTHER_PROJECT`）。`write_readiness` 只是**只读**投影现有连接与权限，不创建连接、不放宽权限。已有重叠受管根时不会新开项目造出第二个写 Owner。不存在或不是目录 422。 |
+| POST /api/v1/workspaces/{workspace_id}/working-directories/open | 200。需要 `command_id`、`root_path`（1–1024），可选 `project_id`。`status` 为 `READY` / `AMBIGUOUS` / `NOT_READY`；`AMBIGUOUS` 表示同一实际目录关联了多个项目，需再带 `project_id` 选一次；`NOT_READY` 带稳定 `reason`（`MULTIPLE_PROJECTS` / `PROJECT_ARCHIVED` / `RESOURCE_DISABLED` / `OVERLAPPING_OTHER_PROJECT`）。`write_readiness` 只是**只读**投影现有连接与权限，不创建连接、不放宽权限。2026-10-17 起该投影还带生效档位字段（`policy_decision` / `policy_id` / `policy_revision` / `policy_target_prefix`，可空；旧回执缺字段按「未核对」处理），查询与调整规则见 §10.86。已有重叠受管根时不会新开项目造出第二个写 Owner。不存在或不是目录 422。 |
 | POST /api/v1/workspaces/{workspace_id}/assist-sessions/{session_id}/execution-requests | 202。需要 `command_id`、`source_message_id`（该会话内一条已完成的 USER 消息）、`resource_id`（同项目 ACTIVE 受管资源）。返回 `decision`、`status`、`candidate_status`、`questions` 与候选摘要。原消息不属于该会话、非 USER 消息、未完成、会话未绑定 Project 或资源不可用时 409。同一原消息或同一 `command_id` 重放返回同一条请求，不重付模型整理成本。 |
 | POST /api/v1/workspaces/{workspace_id}/conversation-execution-requests/{request_id}/applications | 200。按固定的阶段命令身份建立真实 Task → READY → Delegate。候选不是 `READY`、受管资源不可用、或项目缺少绑定该目录的 `FILE_QUERY` / `FILE_READ` / `FILE_WRITE` / `CLI_RUN` 连接时 409 并给出**第一项缺失能力**的具体原因；本端点**不创建连接、不放宽权限**。重复调用返回同一个 `task_id` 与 `run_id`。 |
-| GET /api/v1/workspaces/{workspace_id}/conversation-execution-requests?session_id= | `{ items: 会话内最近的执行请求摘要[] }`，只读，不创建对象、不外呼。 |
+| GET /api/v1/workspaces/{workspace_id}/conversation-execution-requests?session_id= | `{ items: 会话内最近的执行请求摘要[] }`，只读，不创建对象、不外呼。2026-10-16 增加持久化 `resource_id` 与 `candidate`（对象或 null），用于主流程后恢复原候选的标题、目标与检查；单条 GET 同步。Breaking Change: No，旧客户端忽略增量字段，新客户端兼容旧响应缺少字段。 |
 | GET /api/v1/workspaces/{workspace_id}/conversation-execution-requests/{request_id} | 单条执行请求投影；不属于该 Workspace 时 404。 |
 
 **2026-10-04 改为冻结工具循环信封（用户选定方案 B）。** 解释阶段只产出**目标与范围**，`file_changes` 的每一项只有 `path` 与 `action`；带 `content` 会被确定性拒绝（`候选 INVALID`），因为解释模型没有任何目录访问，正文只能是编造。Delegate 时冻结 `tool_loop_action` 与 `scope_grant`，不再冻结 `file_write_action` / `cli_run_action`：
@@ -1335,3 +1336,143 @@ Breaking Change：No。Workspace 下新增 `POST/GET /period-plans/{id}/scope-si
 **来源身份。** 迁移 `0087` 同时给 `logical_operations` / `invocation_attempts` 的三条 CHECK 各追加一支 `AGENT_SESSION_READ`，与 `ASSISTANT_READ`（§10.60）同形：自带 project 与受管资源、会话/消息身份用于核对归属、`task_id`/`run_id`/`step_id`/`import_job_id` 四列全 `NULL`，capability 词表同样只放行 `FILE_READ`/`FILE_QUERY`/`GIT_READ`。**不复用人设助手的来源名**：`SessionToolCallRepository.attachOperation()` 按来源核对，两种会话读取身份在库层面必须可分辨（运行架构 §2.6.3）。写入口继续只有 `RUN`。
 
 Breaking Change：**No**——本节为**新增端点**与会话投影的**新增只读字段**；既有端点、表、CHECK 的既有分支与 `conversation_execution_requests` 原样保留。迁移 `0087` 只增一列与三条 CHECK 的追加分支，`relay_app` 新增该列的 UPDATE 授权。真实 PG 集成覆盖见[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)；未运行规格见[测试计划 §17.2](../testing/verification-plan.md#172-普通-agent-连续工具主流程)。
+
+### 10.81 免费模型目录只读与手动同步（2026-10-15 源码实现，阶段 B）
+
+[roadmap §9.1](../requirements/post-v1-roadmap.md) / [运行架构 §8.6](../architecture/runtime-context.md) 的目录面落点，实现 `prompts/free-model-catalog.md` **阶段 B**：OpenRouter 免费目录同步与严格免费判定。目录是**进程级全局事实**，不隶属某个 Workspace——与 `/model-port` 同一先例：为复用实例 Bearer 守卫，端点仍挂在 `API_PREFIX` 的 `…/workspaces/:workspace_id/` 之下，但 `workspace_id` **不作为作用域键**（处理器不据它过滤，正如 `GET /model-port` 忽略该值）。任何持本实例 Bearer 的客户端可见/可触发。**响应永不含密钥。**
+
+| 端点 | 命令？ | 说明 |
+|---|---|---|
+| `GET /model-catalog` | 否（只读） | 200，返回当前已发布快照的发布头（`source`、`directory_digest`、`snapshot_seq`、`last_success_at`/`last_attempt_at`/`last_failure_at`、`last_failure_reason`、`consecutive_failures`、`configured`、`cache_stale`）与条目列表。默认只回**严格免费**条目；`?free_only=false` 或 `?all=true` 连非免费一起回，供「目录收录≠免费」核对。无成功快照时各时间为 `null`、`directory_digest` 为 `null`，不伪造。 |
+| `POST /model-catalog/refresh` | 否（非幂等命令） | 200，触发一次 `manual` 同步，返回结构化 `{status, reason, snapshot_seq, total_count, free_count, fetched_at}`。`status ∈ NOT_CONFIGURED / SKIPPED / REJECTED / PUBLISHED / FAILED`；`SKIPPED.reason ∈ CACHE_FRESH / BACKOFF / RATE_LIMITED / IN_FLIGHT / SUPERSEDED`，`FAILED.reason` 为来源失败分类（`NETWORK/TIMEOUT/AUTH/RATE_LIMIT/PROTOCOL/INCOMPLETE/ENDPOINT_NOT_ALLOWED/NOT_CONFIGURED`），`REJECTED.reason = MAINTENANCE`。 |
+
+**同步不是带回执的幂等命令。** 与 `/model-port/verify` 同类，目录刷新不建 `command_receipt`，改用**数据库租约 + 快照序号 CAS** 收敛重复外呼：领取租约与快照发布各是独立短事务，网络拉取在事务外（模型/网络不进长事务，契约 §4）。跨进程/多客户端同一时刻只有一个执行体拿到未过期租约并外呼（`IN_FLIGHT`）；发布以 `snapshot_seq` 基线做 CAS，**迟到或较旧的响应基线不匹配即整体丢弃，绝不覆盖更新快照**（`SUPERSEDED`）。来源失败**保留旧快照与上次成功时间**，仅记失败原因并推进指数退避；合法但为空的目录**如实清空**可选免费集合。手动刷新受最小间隔限速（`RATE_LIMITED`），退避优先于 TTL 与限速判定。
+
+**错误映射。** 目录配置残缺（非法/越界的 `RELAY_MODEL_CATALOG_*`）→ `MODEL_CATALOG_CONFIG_INVALID` 409；其余读取异常按 `sendReadError` 走 ProblemDetails。`REJECTED`（维护/排空态）作为结构化 200 结果返回而非 503——目录刷新非关键路径，被拒不改写任何事实。
+
+**凭据与端点隔离。** 目录凭据 `RELAY_MODEL_CATALOG_API_KEY` **独立于**聊天 `RELAY_MODEL_API_KEY`，绝不串用；OpenRouter `/models` 列表公开可读，缺目录凭据仍可同步可核实目录，但「目录收录」不等于认证、实际工具能力或额度可用（额度真实性由阶段 C 的真实外呼另行证明）。来源、分页、响应字节数与条目数全部有界；端点复用 `parseModelBaseUrl`/`guardedModelFetch`（公开 https、拒凭据/query/fragment、锁同源与 API 路径前缀、拒重定向、发前复查 DNS），目录内容一律当**外部数据**、不得引入新的请求主机或升级为指令。是否免费按「本次支持的文本调用计价项」`prompt/completion/request` **字符串精确判零**（极小非零不误判为零），缺失/非法/负数/来源新增且非零的未知收费项一律保守拒绝并给类型化原因。
+
+**尚未实现（阶段 C，本批不建无当前调用方的表）。** 会话模型选择（带 revision/幂等的选择命令）、Run 模型冻结、以及**免费调用硬保护**（HTTP 体内零价格强制上限）留待下一批以 `0089+` 追加；`0088` 只建 `model_catalog_sync_state` 与 `model_catalog_entries` 两张全局表，不触碰 `assist_sessions`/`runs`/`model_calls` 契约。
+
+Breaking Change：**No**——纯新增两张全局表与两个新端点，既有端点、表、CHECK 分支原样保留；`relay_app` 对 `model_catalog_sync_state` 授 `SELECT` + 定向列 `UPDATE`（无 INSERT/DELETE，单例行由迁移预置），对 `model_catalog_entries` 授 `SELECT/INSERT/DELETE`（整体替换、不给单点 UPDATE）。回退可直接保留两表（旧代码不读）。
+
+**证据（如实）。** 严格免费判定、配置/生命周期决策、来源传输与凭据/端点隔离由定向单测覆盖并通过（`model-catalog-pricing`/`model-catalog-config`/`openrouter-catalog-source`，`apps/api` 全量 `tsc --noEmit` 通过）。同步用例的租约去重、CAS 不倒退、失败保留、空目录清空、以及「同步绝不写 `model_calls`」写为真实 PG 集成测试 `model-catalog-sync.integration.test.ts`，**本轮已通过类型检查但尚未执行**（共享工作树内另有并行执行实例，并发跑 `run-integration.ps1` 会挂死/偶发假失败，故留待空载单跑）。真实 OpenRouter 外呼、浏览器与 Windows 安装态**未验证**（无授权凭据）。
+
+### 10.82 会话模型选择、Run 模型冻结与免费调用硬限制（2026-10-15，免费模型专项阶段 C）
+
+[roadmap §9.1](../requirements/post-v1-roadmap.md) / [运行架构 §8.6](../architecture/runtime-context.md) 的选择与准入面，实现 `prompts/free-model-catalog.md` **阶段 C**。本节把「已实现且已接线」的会话选择持久化、「已实现并在外呼边界取证」的免费硬限制，与「尚未接线的 Run 冻结/实际外呼」明确分开，不把目标协议当现状。
+
+**冻结约束是随调用携带的非密钥快照。** `workflow/frozen-model-constraint.ts` 定义 `FrozenModelConstraint`：连接引用（`provider` + **确切** `model` + 64-hex `configFingerprint`）、`freeOnly` 布尔、`catalogBasis`（`source=openrouter` + `snapshotSeq` + `sourceModelId`，原默认连接为 `null`）与可选 `budget`。解析对**缺省/空**返回 `undefined`（旧会话无覆盖、旧 Run 无快照时调用方保留原默认，**不伪造**模型身份或免费约束），对半截/畸形对象抛 `FrozenModelConstraintError`——不可信的快照绝不能升级为「免费」或「确切模型」判定。「未知」用 `undefined` 表达，`freeOnly` 缺省视为无免费约束而非「已知非免费」。
+
+**免费调用硬限制已实现并在最终 HTTP 体外呼边界取证。** 携带 `freeOnly` 的约束经 `workflow/free-call-guard.ts` 生成服务商路由硬限制：`provider.max_price` 把 `prompt/completion/request/image` 全部钉为绝对 `0`（USD / 百万 token、每请求、每张），`allow_fallbacks:false` 关闭「免费端不可用落付费端」，`require_parameters:true` 拒绝能力被静默顶替。`OpenAiCompatibleModelPort` 以可选第三参数接受该硬限制，把注入包在 `guardedModelFetch` 之外、SDK 之内（`wireFetch`），因此**普通外呼与 reasoning 续轮重建的客户端都携带**；不带免费约束时端口请求体逐字不变（**原默认不受免费目录故障影响**，FM-07）。具体免费型号请求保持冻结的确切 `model`，**绝不调用 `openrouter/free`**（随机选型违反 Run 模型稳定语义）。受控 HTTP 用例经真实 ChatOpenAI SDK + 注入 fetch 捕获**最终发出体**证明之（`openai-compatible-free-guard`）。
+
+**本批已接线（migration `0089`）：会话模型选择的持久化与写读入口。** 唯一 Owner `application/select-session-model.ts`（`command_type='SelectSessionModel'`，复用既有命令回执/幂等/维护准入基础）在短事务内：校验会话属于本 Workspace 且 `ACTIVE` → 纯解析器 `model-selection-resolve.ts` 把请求的模型确定地判为「默认连接 / 目录免费 OpenRouter 项 / 类型化拒绝」→ 解析所选连接的非密钥配置指纹 → 以 `revision` CAS 写 `session_model_selection`（表见[物理设计 §88](../database/physical-design-postgresql.md)）。`/model <模型名>` 经既有 `POST /assist-sessions/:session_id/chat-commands` 落到该 Owner（命令只落选择与回执，浏览菜单/选中未发送天然零效果，绝不因此发一次模型调用），选择器与本命令共用同一 Owner，只影响该会话后续新请求、**从不改进程默认、从不写 `model_calls`/`runs`**。`GET /assist-sessions/:session_id/model-selection` 只读回显当前选择（无覆盖返回 `selection: null`，前端据此显示「沿用应用默认」）。作用域/鉴权：`httpCommandScopeKey(workspace)`，凭 `workspace_id + session_id` 定位；跨 Workspace 的 session 按不可见处理（`RESOURCE_NOT_FOUND`）。错误：`MODEL_NOT_REGISTERED`(400)、`MODEL_PAID_NOT_AVAILABLE`(409)、`OPENROUTER_CHAT_NOT_WIRED`(409)、`INVALID_TRANSITION`(409，归档会话或 CAS 冲突)、`RESOURCE_NOT_FOUND`(404)、`COMMAND_ID_REUSED`(409)；重放附 `command-replayed` 头并返回原结果（`revision` 不推进），同一 `command_id` 修正内容必须换新 ID。
+
+**旧会话与兼容语义。** 无选择行的旧会话 `readSessionModel` 返回 `undefined`，调用方保留应用默认、不倒造历史选择；归档会话不删选择行（`session_model_selection` 无 `DELETE` 权限），重开可读到原选择并按连接指纹核对是否失效。「仅免费」判定必带完整目录依据（`0089` 依据三列同现同缺 + coupling CHECK）。
+
+**目标协议（本批未接线，下一批以 `0090+` 追加）。** ① OpenRouter 聊天连接的配置解析与实际外呼：本批对命中目录免费项的选择如实拒绝 `OPENROUTER_CHAT_NOT_WIRED`，绝不落一条尚不可兑现的选择，也不预建无当前执行方的连接读取；② Run 创建时写入非密钥模型快照（`runs` 追加 JSONB 快照列），续轮/重试/重启按快照恢复、**不临时读当前会话选择**；③ **所有生成与连接验证入口读取各自冻结约束**（`run-steps`/`delegate-task`/`conversation-execution`/`conversation-state`/`checkers` 五处端口构造点传入对应 `freeGuard`），使「仅免费」选择强制免费准入、过期先刷新、无法核实/下架/所需工具能力未知或不足即拒绝新调用。目录转收费不改原 Run 身份、只在下次调用被原免费限制拒绝；已在途按原 ID 结算，`UNKNOWN` 沿原身份核对不盲重发；401/429/超时/无免费端点/能力不足明确反馈，不自动换付费或其他免费型号、不记免费成功、不把未回传成本补零。这些是下一批的验收落点。
+
+Breaking Change：**No**——`0089` 纯追加一张会话作用域表，既有端点/表/CHECK 不变；`POST /chat-commands` 的 `result` 增加 `MODEL_SELECTION` 判别式（新增 kind、不改既有 `NEW_SESSION`/`STATE_WITHDRAWAL` 结构，客户端按 `kind` 分支）、新增 `GET …/model-selection` 只读端点。`frozen-model-constraint`/`free-call-guard` 与端口第三参数缺省时行为与迁移前逐字一致；选择持久化的当前调用方是 `/model` 与 `GET`，把免费约束接到实际外呼属下一批。
+
+**证据（如实，分层）。** ① 纯解析器（默认命中 / 目录免费 / 收费拒绝 / 目录外拒绝 / 默认优先）与冻结约束/硬限制字段/端口最终体注入由定向单测通过：`model-selection-resolve` **7/7**，C-1 组（`frozen-model-constraint`/`free-call-guard`/`openai-compatible-free-guard` 连既有 `openai-compatible-model-port` 回归）**51/51**，`apps/api` 全量 `tsc --noEmit`（含本批新代码与集成用例）**全绿**。② **已写未跑**：`session-model-selection.integration.test.ts`（默认选择落库与只读回显、同 `command_id` 重放不推进 `revision`、新 `command_id` CAS 递增、仓库层陈旧基线返回 null、跨会话隔离、`OPENROUTER_CHAT_NOT_WIRED`/收费/目录外三类拒绝、归档回滚不留回执、`0089` CHECK 拦截半截写入）。**本轮共享工作树有并行实例、机器非空载，按项目规则未在真实 PG 运行，不计入通过**。③ **未验**：真实 OpenRouter 接受零价硬限制并据此零结算、跨续轮/重启读取持久化 Run 快照、各入口读冻结约束端到端拦截，属需真实凭据与真实 PG 的 FM-06/FM-07 出口；本批无授权凭据、相关端口读接线未实施，**按 §8 不宣称「零收费保证」或「免费分组端到端可用」成立**。
+
+
+#### 消息模型运行态只读投影（2026-10-17）
+
+`GET /assist-messages/:message_id/model-runtime`：200；**Breaking Change: No**，新增只读端点，既有消息载荷与命令回执不变。同实例 Bearer 与 Workspace 作用域检查仍成立，不存在或其他 Workspace 的消息返回 404。应用查询在一个短只读快照事务中读取原 Assist 消息、冻结策略、候选游标与 `model_calls`，不触发目录同步、生成、切换、结算或业务写入，不维护第二份执行状态。
+
+响应含 `message_id/session_id/message_status`、`snapshot_available`、`preferred_model`、`candidate_models`、`current_candidate_model`、`actual_model`、`max_candidates`、`routing_status/revision`，以及原 `calls`（确切 id/provider/model/status、错误类别、Provider request id、输入输出用量与时间）和 `switches`（原/新型号、原因、作用域与时间）。`actual_model` 取最近调用记录，不能把候选已推进当作 Provider 已成功返回；遗留 STARTED 保持未决。旧消息无快照时 `snapshot_available=false`，不按当前环境倒造首选与候选。
+
+`failure_scope/failure_reason/retry_after_at/free_daily_remaining` 来自持久 `last_failure`：额度为**限流核对时的账户共享日余额**，不是每模型专属余量或实时额度；未知均为 null。用量缺失同样为 null，不因目录免费而补零费用。响应不包含密钥、提示词、工具正文或连接 endpoint。界面只呈现这些事实，相关完成/验收权仍归原 Owner；实际验收成绩只见统一功能验收表。
+
+### 10.84 输入框草稿辅助：自动分点与手动润色（2026-10-16 源码实现）
+
+[工作台 §30](../frontend/workbench-design.md#30-输入框自动分点与手动润色) / [后续路线 §11](../requirements/post-v1-roadmap.md#11-输入框自动分点与手动润色) 的服务面。草稿辅助是**发送前**的文本整理，不是业务命令：它不建消息、Task、Run、提案或批准，因此**没有** `command_id`、**没有**幂等回执、不写任何业务事实——与 `/model-port/verify` 同一形态，是一次有界、有闸门、可能计费的真实模型调用。
+
+| 端点 | 命令？ | 说明 |
+|---|---|---|
+| `POST /composer/draft-assist` | 否（非幂等、无回执） | 200，请求体 `{operation: 'OUTLINE' \| 'POLISH', text}`（`text` 1–8192 UTF-16 单元），响应 `{operation, status, item_count, text}`。`status='OUTLINE'` 时 `item_count` 为条目数、`text` 为**程序按原文切片**并加编号换行的建议；`status='POLISH'` 时 `text` 为润色文本、`item_count=null`；`status='NO_SUGGESTION'`（分点边界为空，或草稿不适用自动分点）时两者皆 `null`。 |
+
+**请求只含当前草稿。** 端点不接收也不读取会话历史、项目资料、目录文件或工具声明；`workspace_id` 只作为实例 Bearer 边界与调用证据的 Workspace 归属，不作为业务作用域过滤（与 `GET /model-port` 一致）。草稿整段只作为 `UNTRUSTED_DATA` 放进 user 消息，其中的「执行命令」等内容仍只是待处理文本，不获得任何工具或写权限。
+
+**分点只回位置，不回文本。** `OUTLINE` 的模型输出被限定为 `{"breaks":[整数,...]}`：按 Unicode **码点**计数、0 起、左闭右开。`workflow/composer-draft.ts` 校验 JSON 形状、整数性、范围 `(0, 码点总数)`、严格递增、条目上限与「每段至少含一个非空白字符」，然后按原文切片并只加 `N. ` 前缀与段间换行。因此「去掉程序新增格式后逐字重建原文」是**构造保证**，不是比对结果；畸形边界整条拒绝（502 `COMPOSER_RESPONSE_INVALID`），不显示部分分点，也不用标点正则硬拆。已含换行、行首斜杠命令、短于 8 码点的草稿一律 `NO_SUGGESTION` 且不发起调用。
+
+**润色只回 `{"text": ...}`。** 非 JSON、多余字段、空串或超长一律拒绝（同样 502），**绝不用空结果清空草稿**；调用方保留原文并允许再次点击。
+
+**记账与预算。** 每次真实调用在既有 `model_calls` 账本写一行 `kind='COMPOSER'`（无 Run/会话作用域，不占 Run 或会话预算，见[物理设计 §89](../database/physical-design-postgresql.md)），准入与 `STARTED` 行同一短事务提交后才外呼；Provider 返回后按 `COMPLETED` 结算并记录真实 `usage`——**协议畸形也记 `COMPLETED`**（那是产品结论，不是 Provider 失败）。传输失败记 `FAILED` 与统一错误分类；取消记 `CANCELLED`。不新建第二套账本、不建占位 Run/Task。
+
+**边界与闸门。** 草稿码点 2–4000（超出 → 400 `COMPOSER_DRAFT_TOO_LONG`）；实例内最小调用间隔 400ms、并发上限 4（超出 → 429 `COMPOSER_RATE_LIMITED`，且**不写账本、不外呼**）。未配置真实 Provider（`RELAY_MODEL_PROVIDER` 缺省/`fake`）→ 409 `MODEL_PORT_NOT_CONFIGURED`；配置残缺 → 409 `MODEL_CONFIG_INVALID`。两者都在开事务之前判定，不留「已开始」的调用证据。辅助失败**不丢草稿、不阻止原发送**：草稿与发送仍沿原输入器与发送 Owner。
+
+Breaking Change：**No**——纯新增一个端点与一个 `model_calls.kind` 取值；旧读取方按 `kind` 过滤时看不到 `COMPOSER` 行，既有端点、表与 CHECK 分支原样保留。
+
+**证据（如实）。** ① 定向单测通过：`composer-draft.test.ts`（文档示例逐字重建、重复句/标点/空白/路径/URL/emoji 保真、畸形边界 9 类拒绝、润色协议与适用性）**10/10**；`composer-draft-port.test.ts`（两条路由登记与模板一致、受控 HTTP 捕获最终发出体证明请求只含草稿且 `response_format=json_object`、无工具声明）**3/3**；`apps/api` 全量 `tsc --noEmit` 通过。② **已写未跑**：`composer-draft-assist.integration.test.ts`（真实 PG：`COMPOSER` 行无作用域且 `COMPLETED`+usage、业务计数前后不变、不适用时不写行、畸形协议仍记 `COMPLETED`、Provider 失败记 `FAILED`、闸门限流不写行、未配置/超长在开事务前拒绝、HTTP 401/409/422）——共享工作树有并行实例、机器非空载，按项目规则未并发运行 `run-integration.ps1`，**不计入通过**。③ 前端：`tests/composerDraftAssist.spec.tsx` **12/12**（停笔才请求、组词零请求、忽略不重复请求、查看/采用/撤销、Esc 与焦点、润色中态与快照撤销、失败保留、迟到隔离与「改回相同文本不复用旧结果」、发送清空、来源变化清空）与 `tests/browser/composerDraftAssist.spec.ts`（真实 Chromium 主路径与在途编辑覆盖）已运行。④ **未验**：真实 Provider 的语义质量样本、真实 Windows 窗口的 IME/DPI 与安装态。
+
+### 10.85 Assist 消息图片附件（2026-10-16 后端源码实现，前端未接线）
+
+[工作台 §32](../frontend/workbench-design.md#33-输入框粘贴图片与消息附件) 的服务面。粘贴/拖拽进输入框的图片是**会话输入快照**：不是资料（不进 knowledge/memory/decision 版本体系，不占用显式选源 10 条上限），不是 artifact（不受管存储版本目录与防篡改核对语义），也不是幂等业务命令。链路分两阶段：**先传后引**——上传端点落一行不可变暂存，消息命令在同一事务内把附件绑定到新用户消息。
+
+| 端点 | 命令？ | 说明 |
+|---|---|---|
+| `POST /assist-sessions/{id}/message-attachments` | 否（暂存，无 `command_id`、无回执） | 201，请求体 `{name, media_type, data_base64}`（路由级 `bodyLimit` 4 MiB；`name` 1–200 字符），响应 `{attachment_id, byte_length, content_hash}`。媒体类型白名单 `image/png\|image/jpeg\|image/gif\|image/webp`；原始字节 >0 且 ≤2 MiB。会话必须存在、归属本 Workspace 且 ACTIVE（归档 → 409 `INVALID_TRANSITION`）。不改变任何业务状态，因此不走命令幂等 |
+| `POST /assist-sessions/{id}/messages` 新增可选 `attachment_ids: [uuid]`（≤4） | `RequestAssistMessage` | 202；`attachment_ids` 进命令载荷幂等摘要，重放按原 ids 核对。用例在同一事务内核对归属（同 Workspace+会话、未被他消息绑定）、去重、每消息 ≤4 张与总量 ≤6 MiB，然后绑定到新用户消息；任何核对失败整体回滚（404 `RESOURCE_NOT_FOUND` / 422 `VALIDATION_FAILED`），绝不部分绑定。**不传该字段时载荷逐字不变**，既有调用与重放零影响 |
+
+**物理**：迁移 `0093` 建表 `assist_message_attachments`（`bytea` 内容 + `content_hash` + `byte_length=octet_length(content)` CHECK + 类型白名单 CHECK；只授 `SELECT/INSERT/UPDATE`）。选 `bytea` 而非受管存储文件：附件必须与消息同短事务提交，`bytea` 没有「写了文件没写库」的中间态，也无孤儿文件；单用户本机体量由上限约束。详见[数据库设计 §91](../database/physical-design-postgresql.md#91-0093-assist-消息图片附件2026-10-16-源码实现)。
+
+**模型能力闸门（fail-closed）。** 当前聊天恒由进程默认连接服务（会话选择→端口接线属阶段 C-2b，落地后应改为读取冻结快照），因此带附件的发送按 `RELAY_MODEL_NAME` 在模型目录里查条目并读 `capabilities.image_input`（10.82 目录同步的三态：true/false/null）：**无条目或非 `true` 一律 422 拒绝**——未知不冒充可用，也不因带图就换模型、换连接或悄悄降级为纯文本。目录数据来自 OpenRouter `architecture.input_modalities` 含 `'image'`。
+
+**多模态组装。** 仅**当前消息**的附件以多模态 content parts 交给模型（LangChain 1.x 标准块 `{type:'image', source_type:'base64', data, mimeType}`，图片在前、正文文本收尾）；历史消息的附件降级为一行文本占位（`（该轮随附图片：…；图片内容不在本轮回放。）`），不冒充模型看得见，也不逐条回放历史图片占上下文。纯文本轮次的请求形状逐字不变。
+
+**边界。** 附件不授予任何读取/执行权限；上传与绑定都在会话作用域内核对，跨会话/跨 Workspace 引用按 404 拒绝。V1 仅支持图片；文本/PDF 等文件类型在上传端点明确拒绝并说明（模型目录的 image 输入是常见能力，文档输入极少支持），后续按需扩展。
+
+Breaking Change：**No**——全新端点与表 + 消息命令新增可选字段；无附件路径的载荷、hash、重放与请求形状逐字不变。
+
+**证据（如实分层）。** 已运行：`apps/api` 全量 `tsc --noEmit` 通过（唯一错误来自并行实例正在进行的 `model-catalog-repository` 签名重构与其测试文件的错位，非本片改动）；受影响单测 `model-catalog-pricing` / `openai-compatible-model-port` / `model-catalog-config` / `openai-compatible-free-guard` 合计 **58/58**（临时编译目录执行，未触碰共享 dist）。**未运行/未编写**：真实 PG 集成测试（附件落库/绑定/重放/隔离/闸门/CHECK）与浏览器/前端规格——前端尚未接线；按项目规则留待空载与前端完成后再取证。**未验**：真实 Provider 的多模态语义质量。
+
+### 10.86 目录写入档位投影与只读查询（2026-10-17 源码实现）
+
+**Breaking Change: No**。新增一个只读 GET；`POST /working-directories/open` 回执的 `write_readiness` 增加四个可空字段。无新命令、表、迁移或权限；旧回执缺字段时客户端按「未核对」处理，不猜档位。
+
+`GET /api/v1/workspaces/{workspace_id}/projects/{project_id}/managed-resources/{resource_id}/write-readiness`
+
+与打开目录共用同一个投影函数，只读、不建立关联、不创建连接、不放宽任何权限。受管资源不属于该 Workspace/Project 或项目不可见时 404，与既有只读端点一致。
+
+| 字段 | 约束 |
+|---|---|
+| `status` | 封闭词表：`READY` / `NEEDS_CONNECTION` / `NEEDS_PERMISSION` / `PERMISSION_DENIED` / `RESOURCE_IDENTITY_UNBOUND` / `RESOURCE_BUSY` / `RESOURCE_DISABLED` |
+| `detail` | 中文只读说明，对应上述状态；不是授权凭据 |
+| `policy_decision` | 当前命中的 `APPLY_CHANGESET` 条目决策 `AUTO` / `ASK` / `DENY`；没有命中条目时为 `null` |
+| `policy_id` / `policy_revision` | 该条目的身份与修订，调整档位时的乐观锁坐标；无条目时为 `null` |
+| `policy_target_prefix` | 该条目覆盖的目标前缀。只有它等于当前目录时，客户端才允许在这个目录入口改档；它不等于当前目录说明命中的是上层受管根条目 |
+
+选择规则与准入**同源**：先按 `FILE_WRITE` × `APPLY_CHANGESET` 列出本项目生效条目，过滤出目标前缀覆盖本目录的条目，再用与动作准入相同的 `rankActivePolicies` 取最严格者（`DENY` > `ASK` > `AUTO`，同档按更长前缀、再按 ID）。界面不自行排序，也不把 `READY` 当作批准。
+
+档位语义固定为三档，**没有「完全访问」**：
+
+| 档位 | 对应事实 | 边界 |
+|---|---|---|
+| 每次确认 | 生效条目为 `ASK` | 每次应用改动仍单独产生动作审批 |
+| 本次任务自动 | 生效条目为 `AUTO` | 只覆盖既有范围授权动作；删除、Git 提交/推送与超出本目录仍逐次确认 |
+| 不开放写入 | 没有命中条目或撤销本目录条目 | 目录只读；`DENY` 是单独状态 `PERMISSION_DENIED`，本入口不解除 |
+
+调整档位复用既有 Gateway 命令，不新增命令端点：`CreateGatewayPolicy`（`capability=FILE_WRITE`、`action_type=APPLY_CHANGESET`、`resource_id`、`decision=ASK|AUTO`、`max_payload_bytes=262144`）、`AddGatewayPolicyVersion`（携带 `expected_revision = policy_revision`）、`RevokeGatewayPolicy`（携带 `expected_revision`）。回执后客户端必须重新读取本投影，不能把命令成功当作档位已生效；响应丢失时保留原 `command_id`，按原回执核对或原样重试。`DENY` 不被批准或范围授权覆盖；本入口只处理本目录自己的条目，上层受管根条目仍归「连接与权限」页。
+
+**证据（如实分层）**：真实 PG 集成中，`folder-first-conversation.integration.test.ts` 的长链路已断言打开目录投影在 AUTO 下为 `READY`、`policy_decision=AUTO` 且带条目身份/修订/前缀，同目录再压一条 ASK 后投影变为 ASK（最严格优先）；该套件本轮整体仍为红，失败是两例既有用例（任务创建返回 422 `title/objective` 控制字符、越界读取用例的驱动器断言 `SUCCEEDED` 与用例自身「允许非 SETTLED」矛盾），与本投影无关。工作台定向 `writePermissionTier.spec.tsx` **8/8**（含未绑定态常驻、三档禁用且零查询、旧版 API 404 降级）、首条输入相关 4 套件 **84/84**、`folderFirstConversation`＋`assistBinding` **31/31**、`tsc --noEmit` exit0。新 GET 尚无独立的 HTTP 集成用例，仅由同一投影函数的集成断言与组件桩覆盖；真实 Windows 窗口未复验。实际验收结论只归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
+### 10.87 会话未读标记（2026-10-17 源码实现，迁移 0104）
+
+[工作台 §28.1](../frontend/workbench-design.md#281-左栏recentworkrail) 左栏会话行菜单「标记为未读／取消未读」的服务面。迁移 `0104_assist_session_unread.sql` 给 `assist_sessions` 只增一列可空 `unread_at`（物理边界见[数据库 §94](../database/physical-design-postgresql.md#94-0104-会话未读标记2026-10-17-源码实现)）。它与 0090 的置顶（`pinned_at`）**同一条命令形状**：一条命令两个方向，靠布尔载荷区分，不做两个端点。0090 的改名／置顶／归档／重开从未单独登记为 §10.83，本节只登记 0104，不回溯改写那批端点的语义。
+
+**Breaking Change：No**——新增端点与会话投影的新增只读字段；不读 `unread_at` 的旧客户端行为逐字不变。
+
+| 端点 | 命令类型 | 说明 |
+|---|---|---|
+| `POST /assist-sessions/{session_id}/unread` | `SetAssistSessionUnread`（body `command_id`、`expected_revision`、`unread`） | 200；回执 `{session_id, unread, unread_at, revision, updated_at}`。同一 `command_id` 重放返回原回执（附 `command-replayed` 头），修订不推进 |
+| `GET /assist-sessions/{session_id}`、`GET /assist-sessions` | — | 投影新增只读字段 `unread_at`：`null` = 已读，非空 = 标记未读的时刻；缺字段只来自 0104 之前的响应，客户端同样读成已读 |
+
+**语义边界。** `unread_at` 是**导航标记，不是业务事实**：它不改变标题、状态、项目／任务／目录绑定，不影响能否发消息，也**不参与列表排序**（排序键仍是 `pinned_at desc nulls last, created_at desc, id desc`）。标记未读写服务端当前时刻；取消未读写回 `NULL`，表里不留「曾经未读」的第三态——那一次改动留在命令回执里。
+
+**准入与冲突。** 命令走 `runIdempotentCommand`：行锁 + `where revision = expected_revision` CAS + 命令回执。归档会话一律 `INVALID_TRANSITION`（409，`requireEditableSession`）；跨 Workspace 的会话按不可见处理（`RESOURCE_NOT_FOUND`，404）；陈旧基线返回 `REVISION_CONFLICT`（409，带 `conflict.actual_revision`）；同一 `command_id` 换载荷返回 `COMMAND_ID_REUSED`（409）。客户端在 409 时只重读、不换 ID 自动重发（与置顶相同，见工作台 §28.1）。
+
+**本轮不做「点开自动清除」。** 当前只有人工 toggle 一个写入方，同一行的并发由 `revision` 这一道 CAS 裁决；上游 ZCode 的 `unread_at` + `last_unread_at` 双列是为后台自动清除与人工标记的并发准备的，本项目没有那个写入方，复制该机制属提前建设。会话「未读」与消息级「未读资料」不是一回事：后者在本项目仍没有领域状态与写路径。
+
+**证据（如实分层）。** 真实 PostgreSQL：`assist-session-controls.integration.test.ts` **14/14**——覆盖标记写入时刻、取消写回 `NULL`、修订推进且其它事实不变、重放不推进、换载荷 `COMMAND_ID_REUSED`、陈旧基线 409、归档拒绝且不留回执、跨 Workspace 不可见、`0104` 列形状与列表逐字回显、未读不参与排序；`run-integration.ps1 -TestFile assist-session-controls` 整体 PASSED（套件编译、迁移应用与清理 exit0）。工作台：`sessionRowMenu.spec.ts` **10/10**、真实 Chromium 伪造 API 的 `recentWorkRailDensity.spec.ts` **7/7**、`tsc --noEmit` 通过。真实 Windows 窗口与多 DPI 未复验；桌面窗口运行的是暂存 API，实机点到这条命令前需 `-RefreshApi` 重新暂存。

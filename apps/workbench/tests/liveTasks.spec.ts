@@ -9,8 +9,9 @@ const projectId = "22222222-2222-4222-8222-222222222222";
 const taskId = "33333333-3333-4333-8333-333333333333";
 const tasksUrl = `${baseUrl}/api/v1/workspaces/${workspaceId}/tasks`;
 const projectsUrl = `${baseUrl}/api/v1/workspaces/${workspaceId}/projects?status=active`;
-/** 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1），因此每次读列表都会带上这一次读取。 */
-const sessionsUrl = `${baseUrl}/api/v1/workspaces/${workspaceId}/assist-sessions?`;
+/** 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1），因此每次读列表都会带上这一次读取。
+    2026-10-16 起目标/目录分组要读会话上下文，这次读取带 include_context=true。 */
+const sessionsUrl = `${baseUrl}/api/v1/workspaces/${workspaceId}/assist-sessions?include_context=true`;
 let unmount: (() => void) | null = null;
 
 afterEach(() => {

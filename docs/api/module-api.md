@@ -6,8 +6,11 @@
 
 | 资源 | 读取 | 写命令（均 POST，含 command_id） | 特殊校验 |
 |---|---|---|---|
-| Goal | /goals、/goals/{id} | /goals；/goals/{id}/revisions、/archive | revision；被引用归档保留历史 |
+| Goal | /goals、/goals/{id} | /goals；/goals/{id}/revisions、/archive | revision；被引用归档保留历史；编辑/归档的精确契约见 [基础维护接口](project-goal-maintenance.md) |
+| Project 展示字段 | /projects、/projects/{id} | PATCH /projects/{id} | 仅改标题，沿原 revision/归档栅栏，不改变 ProjectState；见 [基础维护接口](project-goal-maintenance.md) |
+| Inbox 任务首次归入项目 | 原 Task、项目任务列表与 Inbox 列表 | /tasks/{id}/project-binding | 保留原 Task/验收及无在途会话，未开始的人工任务首次归属；不是通用跨 Project 迁移，见 [任务归属接口](task-project-binding.md) |
 | Project Goal | /projects/{id}/goals；/goals/{id}/projects（反向读该目标涉及哪些项目） | /projects/{id}/goal-links、/goal-unlinks | 解除带影响清单和处理方式，锁下重新核对 |
+| 目标 / 目录工作上下文 | /goals/{id}/work-context；/working-directories/{resource_id}/work-context | 无；写入沿现有 Goal、Project Goal 与目录/会话命令 | 目标按显式项目关联聚合，目录按会话目录绑定聚合；字段与读取边界归 [接口补充](goal-directory-work-context.md)，Breaking Change: No |
 | Task 对齐 | Task 查询携带 alignment | /tasks/{id}/goal-alignment | mode=INHERIT/EXPLICIT、goal_ids；校验子集 |
 | Task 元数据 | Task 查询 | /tasks/{id}/planning-metadata | priority、due_local_date、timezone；不改验收 |
 | Task 交互模式 | Task 查询携带 mode | /tasks/{id}/interaction-mode | HUMAN 可选 ME/AI_ASSIST；DELEGATE_AI 只能由 Delegate 用例设置 |

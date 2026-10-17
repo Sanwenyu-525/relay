@@ -9,6 +9,9 @@
 .activity-filter label { display: grid; gap: var(--relay-space-2); color: var(--relay-color-text-secondary); }
 .activity-filter label input, .activity-filter label select { min-width: 11rem; }
 .activity-filter .action-error { flex-basis: 100%; }
+.activity-categories { display: flex; flex-wrap: wrap; gap: var(--relay-space-2) var(--relay-space-6); border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); margin-bottom: var(--relay-space-4); }
+.activity-categories > button { min-height: var(--relay-control-height); border-bottom: var(--relay-border-width) solid transparent; border-radius: 0; }
+.activity-categories > button[aria-pressed="true"] { border-bottom-color: var(--relay-color-action-primary); color: var(--relay-color-action-primary); font-weight: var(--relay-font-weight-semibold); }
 .activity-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-4); margin-bottom: var(--relay-space-6); }
 .activity-toolbar .segmented { flex: none; white-space: nowrap; }
 .activity-toolbar .segmented-option { white-space: nowrap; }
@@ -39,10 +42,10 @@
 .activity-refs { margin-top: var(--relay-space-4); }
 .activity-refs ul { display: flex; flex-wrap: wrap; gap: var(--relay-space-2) var(--relay-space-4); list-style: none; padding: 0; margin-top: var(--relay-space-2); }
 .activity-refs p { color: var(--relay-color-text-secondary); margin-top: var(--relay-space-2); }
-/* 行内引用的完整 ID 降为小字，保住来源可核对性，不再作为链接主文本。 */
-.activity-ref-id { margin-left: var(--relay-space-2); color: var(--relay-color-text-muted);
+/* 完整身份留在所选事件依据中；列表只保留来源入口，避免 UUID 淹没事件摘要。 */
+.activity-ref-id { display: block; margin-top: var(--relay-space-1); color: var(--relay-color-text-muted);
   font-size: var(--relay-font-size-meta); font-family: var(--relay-font-family-ui); overflow-wrap: anywhere; }
-.activity-basis { gap: var(--relay-space-3); }
+.activity-basis { gap: var(--relay-space-3); overflow-wrap: anywhere; }
 .activity-basis h2 { font-size: var(--relay-font-size-rowTitle); margin: 0; }
 .activity-basis .status-chip { align-self: flex-start; }
 .activity-basis-summary { margin: var(--relay-space-2) 0 0; }

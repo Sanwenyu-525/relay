@@ -76,8 +76,8 @@ describe("live Workspace 项目与任务列表", () => {
     expect(mounted.wrapper.get(`[data-testid="project-row-${projectA}"]`).text()).toContain("下一步任务甲");
     expect(mounted.wrapper.get(`[data-testid="project-row-${projectA}"]`).text()).not.toContain(taskA);
     expect(mounted.wrapper.text()).toContain("归档前会单读当前 Project");
-    // 归档入口在详情抽屉里：打开 projectA 的详情核对入口可用，再关掉继续做列表断言。
-    await mounted.wrapper.get(`[data-testid="project-row-${projectA}"]`).trigger("click"); await flush();
+    // 归档入口在详情抽屉里：点「⋯」打开 projectA 的详情核对入口可用，再关掉继续做列表断言。
+    await mounted.wrapper.get(`[data-testid="project-card-more-${projectA}"]`).trigger("click"); await flush();
     expect(portal().get('[data-testid="project-archive"]').attributes("disabled")).toBeUndefined();
     await act(async () => { pressEscape(); }); await flush();
     await mounted.wrapper.get('input[name="live-project-search"]').setValue("乙");

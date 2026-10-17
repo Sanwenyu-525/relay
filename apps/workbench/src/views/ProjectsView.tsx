@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Archive, ArrowRight, Check, Clock, Folder, FolderPlus, Info, LayoutGrid, List,
+import { Archive, ArrowRight, Check, FolderPlus, Info, LayoutGrid, List,
   MoreHorizontal, Package, Plus, RotateCcw, Search, Sparkles, Target, TriangleAlert } from "lucide-react";
 import { createCommandId, projectArchiveResultFrom, RelayApiError, RelayTransportError,
   type RelayApiClient, type RelayCommandEnvelope, type RelayProject,
@@ -119,7 +119,6 @@ interface ProjectCardModel {
   readonly phase: string;
   readonly nextAction: string | null;
   readonly archived: boolean;
-  readonly footerNote: string;
 }
 
 /**
@@ -189,43 +188,32 @@ function ProjectsToolbar({ scope, counts, search, onSearch, view, onView, search
   </div>;
 }
 
-function ProjectCard({ project, onOpen }: { readonly project: ProjectCardModel; readonly onOpen: () => void }) {
+/**
+ * V4.3 紧凑卡：整卡主点击「进入项目」（onNavigate），右上角「⋯」打开详情抽屉
+ * （onOpen，承载归档等真实操作）。不展示目标/阻塞行——项目列表接口没有这两个字段，
+ * 硬放会成假数据；要看目标与状态走抽屉或项目页。
+ */
+function ProjectCard({ project, onOpen, onNavigate }: {
+  readonly project: ProjectCardModel; readonly onOpen: () => void; readonly onNavigate: () => void;
+}) {
   const unset = project.nextAction === null;
   return <article className={`project-card${project.archived ? " project-card--archived" : ""}`}
-    data-testid={`project-row-${project.id}`} onClick={onOpen}>
-    <div className="project-card__body">
-      <div className="project-card__top">
-        <span className="project-card__kind"><span className="project-card__kind-dot" aria-hidden="true" />{project.archived ? "归档项目" : "活跃项目"}</span>
-        <button className="project-card__control" type="button" data-testid={`project-card-more-${project.id}`}
-          aria-label={`查看「${project.title}」的详情`} onClick={onOpen}><MoreHorizontal aria-hidden="true" /></button>
-      </div>
-      <div className="project-card__ident">
-        <span className="project-card__emblem" aria-hidden="true"><Folder aria-hidden="true" /></span>
-        <div className="project-card__names">
-          <h3 className="project-card__name">
-            <button className="project-card__name-button" type="button"
-              data-testid={`project-card-open-${project.id}`} onClick={onOpen}>{project.title}</button>
-          </h3>
-          <p className="project-card__caption">{project.typeLabel}项目 · 正在组织你的工作</p>
-        </div>
+    data-testid={`project-row-${project.id}`} onClick={onNavigate}>
+    <div className="project-card__top">
+      <h3 className="project-card__name">
+        <button className="project-card__name-button" type="button"
+          data-testid={`project-card-open-${project.id}`} onClick={onNavigate}>{project.title}</button>
+      </h3>
+      <div className="project-card__top-right">
         <span className={`project-card__status${project.archived ? " is-archived" : ""}`}>
-          <span className="project-card__status-dot" aria-hidden="true" />{project.archived ? "已归档" : "进行中"}</span>
-      </div>
-      <div className="project-card__meta">
-        <div className="project-card__meta-box">
-          <span className="project-card__meta-label">当前阶段</span>
-          <span className="project-card__meta-value">{project.phase}</span>
-        </div>
-        <div className="project-card__meta-box">
-          <span className="project-card__meta-label">下一步</span>
-          <span className={`project-card__meta-value${unset ? " is-unset" : ""}`}>{unset ? "尚未明确" : project.nextAction}</span>
-        </div>
+          <span className="project-card__status-dot" aria-hidden="true" />{project.archived ? "已归档" : project.phase}</span>
+        <button className="project-card__control" type="button" data-testid={`project-card-more-${project.id}`}
+          aria-label={`查看「${project.title}」的详情与操作`}
+          onClick={(event) => { event.stopPropagation(); onOpen(); }}><MoreHorizontal aria-hidden="true" /></button>
       </div>
     </div>
-    <div className="project-card__footer">
-      <span className="project-card__footer-note"><Clock aria-hidden="true" />{project.footerNote}</span>
-      <button className="project-card__open" type="button" onClick={onOpen}>查看项目 <ArrowRight aria-hidden="true" /></button>
-    </div>
+    <p className="project-card__caption">{project.typeLabel}项目</p>
+    <p className={`project-card__next${unset ? " is-unset" : ""}`}>下一步：<span>{unset ? "尚未明确" : project.nextAction}</span></p>
   </article>;
 }
 
@@ -403,13 +391,13 @@ export default function ProjectsView() {
         : <>
           <ProjectsGrid view={view}>
             {visibleProjects.map((project) => <ProjectCard key={project.id} onOpen={() => openDetail(project.id)}
+              onNavigate={() => navigate(`/projects/${project.id}`)}
               project={{ id: project.id, title: project.title, typeLabel: projectTypeLabels[project.projectType],
-                phase: phaseLabel(project.phase), nextAction: project.nextAction, archived: project.archived,
-                footerNote: "已加载到工作区" }} />)}
+                phase: phaseLabel(project.phase), nextAction: project.nextAction, archived: project.archived }} />)}
             {!search.trim() && scope !== "archived" &&
               <NewProjectCard onCreate={() => navigate("/projects?view=create")} />}
           </ProjectsGrid>
-          <p className="projects-note"><Check aria-hidden="true" />已加载 {visibleProjects.length} 个项目 · 点击「查看项目」可查看详情</p>
+          <p className="projects-note"><Check aria-hidden="true" />已加载 {visibleProjects.length} 个项目 · 点卡片进入项目，点「⋯」查看详情与归档</p>
         </>}
       <details className="page-explanation"><summary>列表范围与状态来源</summary>
         <p className="helper-text">下一步来自项目状态；项目阶段由你显式设置，系统不按任务完成数量自动跳阶段。归档只改变项目状态并保留历史，不会删除任务、产物或验收记录。</p></details>
@@ -690,7 +678,7 @@ function LiveProjectsListView({ client, scope, onCreate }: {
         note={summaryNote} onFix={missingNext.length > 0 ? openFirstMissing : undefined} />
       <ProjectsToolbar scope={scope} counts={counts} search={search} onSearch={setSearch} view={view} onView={setView}
         searchName="live-project-search"
-        tools={<button className="secondary-button" type="button" data-testid="projects-live-refresh"
+        tools={<button className="secondary-button secondary-button--compact" type="button" data-testid="projects-live-refresh"
           disabled={loading || loadingMore} onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />刷新当前范围</button>} />
       {archiveSuccess && <p className="receipt-message" role="status" data-testid="project-archive-success">已归档项目（<time dateTime={archiveSuccess.archivedAt}>{formatReadableDateTime(archiveSuccess.archivedAt, timeZone)}</time>）。<Link className="inline-link" to={`/projects/${archiveSuccess.id}`}>查看历史项目</Link> · <Link className="inline-link" to="/projects?scope=archived">查看已归档列表</Link> <small>Project ID：{archiveSuccess.id}</small></p>}
       {archiveError && <p className="action-error" role="alert" data-testid="project-archive-error">{archiveError}</p>}
@@ -725,26 +713,29 @@ function LiveProjectsListView({ client, scope, onCreate }: {
             : <>
               <ProjectsGrid view={view}>
                 {visible.map((project) => <ProjectCard key={project.id} onOpen={() => setDetailId(project.id)}
+                  onNavigate={() => navigate(`/projects/${project.id}`)}
                   project={{ id: project.id, title: project.title,
                     typeLabel: projectTypeLabels[project.projectType as ProjectType] ?? project.projectType,
                     phase: phaseLabel(project.phaseKey),
                     nextAction: project.nextActionTaskId === null ? null : nextLabel(project),
-                    archived: project.archiveStatus === "ARCHIVED",
-                    footerNote: `更新于 ${formatReadableDateTime(project.updatedAt, timeZone)}` }} />)}
+                    archived: project.archiveStatus === "ARCHIVED" }} />)}
                 {!needle && !archivedScope && <NewProjectCard onCreate={onCreate} />}
               </ProjectsGrid>
               {nextCursor && <button className="secondary-button" type="button" data-testid="projects-live-load-more"
                 disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>{loadingMore ? "正在加载" : "加载更多"}</button>}
             </>}
         </>}
-      <details className="page-explanation"><summary>列表范围与状态来源</summary><p className="helper-text">下一步来自项目状态，显示对应任务的标题；任务的确切 ID、修订与打开入口在选中项目后的详情抽屉中。归档前会单读当前 Project；服务端会检查未结清任务、运行与外部效果。</p></details>
-      {/* 按 ID 打开是折叠的辅助入口：项目列表优先按名称选择，只有拿到确切 UUID 时才需要它。 */}
-      <details className="page-explanation"><summary>按已知项目 ID 打开</summary>
-        <form className="create-form" noValidate onSubmit={(event) => { event.preventDefault();
-          if (knownId.trim()) navigate(`/projects/${encodeURIComponent(knownId.trim())}/tasks`);
-        }}><label className="field"><span className="field-label">用项目 ID 打开任务</span><input value={knownId}
-          onChange={(event) => setKnownId(event.target.value)} name="live-project-id" autoComplete="off" placeholder="Project UUID" /></label>
-          <button className="secondary-button" type="submit" data-testid="projects-live-open" disabled={!knownId.trim()}>打开项目任务</button></form></details>
+      <footer className="projects-footnote">
+        <p className="projects-footnote__note">下一步来自项目状态，显示对应任务的标题；任务的确切 ID、修订与打开入口在选中项目后的详情抽屉中。归档前会单读当前 Project；服务端会检查未结清任务、运行与外部效果。</p>
+        {/* 按 ID 打开是深度链接的备用入口：正常按名称选项目即可，只有从别处拿到确切 ID（链接、日志）时才粘贴使用，
+            故收成一条安静的「高级」折叠、按钮走 text 层级，不与主流程抢注意力。 */}
+        <details className="page-explanation projects-footnote__advanced"><summary>高级：粘贴项目 ID 打开任务</summary>
+          <form className="projects-footnote__idform" noValidate onSubmit={(event) => { event.preventDefault();
+            if (knownId.trim()) navigate(`/projects/${encodeURIComponent(knownId.trim())}/tasks`);
+          }}><input value={knownId} onChange={(event) => setKnownId(event.target.value)}
+            name="live-project-id" autoComplete="off" placeholder="粘贴 Project ID（UUID）" aria-label="项目 ID" />
+            <button className="text-button" type="submit" data-testid="projects-live-open" disabled={!knownId.trim()}>打开</button></form></details>
+      </footer>
     </div>
     <ProjectDetailDialog open={selected !== null} onClose={() => setDetailId(null)}>
       {selected && <div className="projects-detail">

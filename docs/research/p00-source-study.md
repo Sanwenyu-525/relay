@@ -104,7 +104,7 @@ Codex 的 `prompt_cache_key`（如 guardian-v2 按 `guardian-v2:{thread_id}` 构
 | 分子 | 已上报调用的 `usage_cache_read_tokens` 合计 | 直接取 Provider 报告值，不推算 |
 | 分母 | **同一批已上报调用**的 `usage_input_tokens` 合计 | OpenAI 兼容语义下 `input_tokens` 已含 cached 部分（迁移 `0049` 的 CHECK 约束与此一致）；混入未上报的调用会让分子分母口径不一致 |
 | 未上报 | 单独计 `cache_unknown_calls`，不进分子也不进分母 | NULL 是「Provider 没有报告这个字段」，不是「没命中缓存」；当 0 计会把不支持缓存的 Provider 算成命中率 0% |
-| 全部未上报 | 命中率报 `null`，报告显示「未采集」 | 与前端 `AssistView` 的「缓存未采集」同一语义 |
+| 全部未上报 | 命中率报 `null`，脚本报告显示「未采集」 | 与前端 `AssistView` 同为「NULL 不等于 0%」的语义；界面上该格已不再输出「缓存未采集」文字，Provider 未上报时命中率那一格整体不渲染，只留占用圆环（规则见[工作台 §17.6](../frontend/workbench-design.md)） |
 | Mock 与真实 Provider | 分开统计，不合并 | `fake-model-port.ts` 全部返回 `cacheReadTokens: null`，混入会把基线算成假的 0% |
 | 逐调用序列 | 按 `started_at` 排列输出每次调用的命中率 | 聚合数字看不出前缀在哪一轮失效；断崖位置才是定位依据 |
 

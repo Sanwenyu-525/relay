@@ -3,7 +3,7 @@ import { realpath, stat } from 'node:fs/promises';
 import { basename } from 'node:path';
 
 import type { DbExecutor } from '../infrastructure/database.js';
-import type { ManagedResourceRow, ProjectRow } from '../infrastructure/database-schema.js';
+import type { GatewayDecision, ManagedResourceRow, ProjectRow } from '../infrastructure/database-schema.js';
 import { INITIAL_PHASE_BY_PROJECT_TYPE } from '../project/project-phase.js';
 import { toDecimalString } from '../shared/decimal.js';
 import { defaultViewKind } from '../view/builtin-view.js';
@@ -11,6 +11,7 @@ import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
 import { runIdempotentCommand, type CommandOutcome } from './command.js';
 import { invalidTransition, resourceNotFound, validationFailed } from './domain-error.js';
 import { canonicalResourceIdentity, registrationFileWriteRootId, rootsOverlap } from './gateway-configuration.js';
+import { rankActivePolicies, targetMatches } from './gateway-actions.js';
 import { lockWritableProjectInWorkspace, requireWorkspace } from './guards.js';
 import { createRepositories, type Repositories } from './unit-of-work.js';
 
@@ -36,7 +37,8 @@ export type WorkingDirectoryWriteReadiness =
   | 'RESOURCE_IDENTITY_UNBOUND'
   | 'RESOURCE_BUSY'
   | 'NEEDS_CONNECTION'
-  | 'NEEDS_PERMISSION';
+  | 'NEEDS_PERMISSION'
+  | 'PERMISSION_DENIED';
 
 /** 用 type 别名（而非 interface）声明：命令结果必须可赋给 JsonObject。 */
 export type WorkingDirectoryCandidate = {
@@ -57,8 +59,26 @@ export type OpenWorkingDirectoryResult = {
   readonly created_project: boolean;
   readonly created_resource: boolean;
   readonly candidates: readonly WorkingDirectoryCandidate[];
-  readonly write_readiness: { readonly status: WorkingDirectoryWriteReadiness; readonly detail: string };
+  readonly write_readiness: WorkingDirectoryWriteReadinessDetail;
 };
+
+/**
+ * 写档位投影。除状态与说明外，另给出该目录上 APPLY_CHANGESET 的生效策略：
+ * 排序与准入走同一个 `rankActivePolicies`，界面只展示这里给出的档位，不再自己判定。
+ * `policy_id` / `policy_revision` 是调整档位所需的乐观锁坐标；没核对到策略时为 null。
+ */
+export type WorkingDirectoryWriteReadinessDetail = {
+  readonly status: WorkingDirectoryWriteReadiness;
+  readonly detail: string;
+  readonly policy_decision: GatewayDecision | null;
+  readonly policy_id: string | null;
+  readonly policy_revision: string | null;
+  /** 生效条目覆盖的目标前缀：只有它等于本目录时，界面才允许改这一条策略。 */
+  readonly policy_target_prefix: string | null;
+};
+
+const NO_POLICY = { policy_decision: null, policy_id: null, policy_revision: null,
+  policy_target_prefix: null } as const;
 
 export interface OpenWorkingDirectoryInput {
   readonly workspaceId: string;
@@ -87,32 +107,67 @@ async function writeReadiness(repositories: Repositories, workspaceId: string,
   association: WorkingDirectoryCandidate, canonicalRoot: string,
 ): Promise<OpenWorkingDirectoryResult['write_readiness']> {
   if (association.project_archived) {
-    return { status: 'RESOURCE_DISABLED', detail: '项目已归档，其目录不提供执行准入。' };
+    return { status: 'RESOURCE_DISABLED', detail: '项目已归档，其目录不提供执行准入。', ...NO_POLICY };
   }
   if (association.resource_status !== 'ACTIVE') {
-    return { status: 'RESOURCE_DISABLED', detail: '受管目录已停用，需要在受管资源中恢复后才能执行。' };
+    return { status: 'RESOURCE_DISABLED', detail: '受管目录已停用，需要在受管资源中恢复后才能执行。', ...NO_POLICY };
   }
   if (!association.file_write_identity_bound) {
-    return { status: 'RESOURCE_IDENTITY_UNBOUND', detail: '该目录尚未绑定 Windows 写身份，只能对话，不能写入文件。' };
+    return { status: 'RESOURCE_IDENTITY_UNBOUND',
+      detail: '该目录尚未绑定 Windows 写身份，只能对话，不能写入文件。', ...NO_POLICY };
   }
   const occupied = await repositories.gateway.listOccupiedResources();
   if (occupied.some((row) => rootsOverlap(row.identity_key, canonicalRoot))) {
-    return { status: 'RESOURCE_BUSY', detail: '该实际工作目录正被其他动作占用或隔离。' };
+    return { status: 'RESOURCE_BUSY', detail: '该实际工作目录正被其他动作占用或隔离。', ...NO_POLICY };
   }
   const connections = await repositories.gateway.listConnections(workspaceId, association.project_id);
-  const writeConnections = (await Promise.all(connections
-    .filter((row) => row.status === 'ACTIVE')
-    .map(async (row) => ({ row, capabilities: await repositories.gateway.listConnectionCapabilities(row.id) }))))
+  const active = connections.filter((row) => row.status === 'ACTIVE');
+  const writeConnections = (await Promise.all(active.map(async (row) => ({ row,
+    capabilities: await repositories.gateway.listConnectionCapabilities(row.id) }))))
     .filter((entry) => entry.capabilities.includes('FILE_WRITE'));
   if (writeConnections.length === 0) {
-    return { status: 'NEEDS_CONNECTION', detail: '本项目还没有绑定该目录的文件写入连接。' };
+    return { status: 'NEEDS_CONNECTION', detail: '本项目还没有绑定该目录的文件写入连接。', ...NO_POLICY };
   }
-  const grants = await Promise.all(writeConnections.map(() =>
-    repositories.gateway.listActivePolicies(workspaceId, association.project_id, 'FILE_WRITE', 'APPLY_CHANGESET')));
-  if (!grants.some((rows) => rows.length > 0)) {
-    return { status: 'NEEDS_PERMISSION', detail: '还没有生效的文件写入权限条目；执行时仍会单独请求动作批准。' };
+  // 一次查询覆盖全部写入连接：策略按 项目 × 能力 × 动作 × 目标前缀 匹配，与连接无关，
+  // 逐连接重复查询既没有意义，也曾让这里的档位与实际准入门核对不上。
+  const policies = await repositories.gateway.listActivePolicies(workspaceId, association.project_id,
+    'FILE_WRITE', 'APPLY_CHANGESET');
+  const selected = rankActivePolicies(policies.filter((policy) =>
+    targetMatches(policy.target_prefix, canonicalRoot, 'FILE_WRITE')));
+  if (selected === undefined) {
+    return { status: 'NEEDS_PERMISSION',
+      detail: '还没有生效的文件写入权限条目；执行时会逐次请求动作批准。', ...NO_POLICY };
   }
-  return { status: 'READY', detail: '已具备受控文件修改的连接与权限；具体动作仍需逐次批准。' };
+  const coordinate = { policy_decision: selected.decision, policy_id: selected.id,
+    policy_revision: toDecimalString(selected.revision), policy_target_prefix: selected.target_prefix };
+  if (selected.decision === 'DENY') {
+    return { status: 'PERMISSION_DENIED',
+      detail: '这个目录的文件写入权限条目为拒绝；拒绝不会被批准或范围授权覆盖。', ...coordinate };
+  }
+  if (selected.decision === 'ASK') {
+    return { status: 'READY',
+      detail: '已具备受控文件修改的连接与权限；每次写入仍单独请求批准。', ...coordinate };
+  }
+  return { status: 'READY',
+    detail: '已具备受控文件修改的连接与自动准入权限；删除、Git 提交推送与扩大目录仍逐次确认。', ...coordinate };
+}
+
+/**
+ * 目录写档位的只读入口（工作台 §18.1）。
+ *
+ * 与 OpenWorkingDirectory 共用同一个投影函数：对话页显示的档位必须与实际准入门禁同源，
+ * 界面不能自己排一次策略次序。本查询不建立关联、不创建连接、不放宽任何权限。
+ */
+export async function readWorkingDirectoryWriteReadiness(db: DbExecutor, workspaceId: string,
+  projectId: string, resourceId: string): Promise<WorkingDirectoryWriteReadinessDetail> {
+  const repositories = createRepositories(db);
+  const resource = await repositories.gateway.readResource(resourceId);
+  if (resource === undefined || resource.workspace_id !== workspaceId || resource.project_id !== projectId) {
+    throw resourceNotFound('Managed resource');
+  }
+  const project = await repositories.projects.readProject(projectId);
+  if (project === undefined || project.workspace_id !== workspaceId) throw resourceNotFound('Project');
+  return writeReadiness(repositories, workspaceId, candidateOf(project, resource), resource.canonical_root);
 }
 
 export async function openWorkingDirectory(db: DbExecutor, input: OpenWorkingDirectoryInput,
@@ -212,7 +267,7 @@ export async function openWorkingDirectory(db: DbExecutor, input: OpenWorkingDir
           reason: 'MULTIPLE_PROJECTS', association: null, created_project: false, created_resource: false,
           candidates,
           write_readiness: { status: 'NEEDS_PERMISSION',
-            detail: '同一实际目录关联了多个项目；先选定作用域再继续。' } };
+            detail: '同一实际目录关联了多个项目；先选定作用域再继续。', ...NO_POLICY } };
       }
       if (sameIdentity.length === 1) {
         const existing = sameIdentity[0]!;
@@ -242,7 +297,7 @@ export async function openWorkingDirectory(db: DbExecutor, input: OpenWorkingDir
             reason: 'OVERLAPPING_OTHER_PROJECT', association: candidates[0] ?? null,
             created_project: false, created_resource: false, candidates,
             write_readiness: { status: 'RESOURCE_BUSY',
-              detail: '这个目录落在另一个已受管根之内或包含它；先选定作用域，不会另建第二个写 Owner。' } };
+              detail: '这个目录落在另一个已受管根之内或包含它；先选定作用域，不会另建第二个写 Owner。', ...NO_POLICY } };
         }
         const projectId0 = randomUUID();
         const project = await repositories.projects.insertProject({ id: projectId0,

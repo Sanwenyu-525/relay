@@ -741,4 +741,42 @@ export class ProjectRepository {
 
     return result.rows;
   }
+
+  async lockGoalForUpdate(goalId: string): Promise<GoalRow | undefined> {
+    return (await sql<GoalRow>`select id, workspace_id, title, description,
+      status, revision, created_at, updated_at from goals where id = ${goalId}
+      for update`.execute(this.db)).rows[0];
+  }
+
+  async updateGoalPresentation(goalId: string, expectedRevision: bigint,
+    title: string, description: string): Promise<GoalRow | undefined> {
+    const result = await sql<GoalRow>`
+      update goals set title = ${title}, description = ${description},
+        revision = revision + 1, updated_at = clock_timestamp()
+      where id = ${goalId} and revision = ${expectedRevision} and status = 'ACTIVE'
+      returning id, workspace_id, title, description, status, revision, created_at, updated_at
+    `.execute(this.db);
+    return result.rows[0];
+  }
+
+  async archiveGoal(goalId: string, expectedRevision: bigint): Promise<GoalRow | undefined> {
+    const result = await sql<GoalRow>`
+      update goals set status = 'ARCHIVED', revision = revision + 1,
+        updated_at = clock_timestamp()
+      where id = ${goalId} and revision = ${expectedRevision} and status = 'ACTIVE'
+      returning id, workspace_id, title, description, status, revision, created_at, updated_at
+    `.execute(this.db);
+    return result.rows[0];
+  }
+
+  async updateProjectTitle(projectId: string, expectedRevision: bigint,
+    title: string): Promise<ProjectRow | undefined> {
+    const result = await sql<ProjectRow>`
+      update projects set title = ${title}, revision = revision + 1,
+        updated_at = clock_timestamp()
+      where id = ${projectId} and revision = ${expectedRevision} and archived_at is null
+      returning id, workspace_id, title, project_type, archived_at, revision, created_at, updated_at
+    `.execute(this.db);
+    return result.rows[0];
+  }
 }

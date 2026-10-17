@@ -1,20 +1,25 @@
 import { ModelAbortError } from '@langchain/core/errors';
 import { AIMessage, AIMessageChunk, HumanMessage, SystemMessage, ToolMessage,
-  type BaseMessage } from '@langchain/core/messages';
+  type BaseMessage, type ContentBlock } from '@langchain/core/messages';
 import { ChatOpenAI } from '@langchain/openai';
 
 import type { JsonObject, JsonValue } from '../infrastructure/json.js';
 import { readRunMethodBinding } from '../skills/builtin-methods.js';
 import { CANDIDATE_OUTPUT_SCHEMA } from './markdown-deliverable.js';
+import { renderComposerUserPrompt } from './prompts/composer-prompts.js';
 import { selectRuntimeSystemPrompt } from './prompts/index.js';
-import type { AssistModelPort, AssistRequest, AssistResult, ConversationInterpretationRequest,
-  ModelPort, ModelRequest, ModelResult, ModelIdentity, ModelToolCall, ModelToolSpec,
+import type { AssistModelPort, AssistContentPart, AssistRequest,
+  AssistResult, AssistTurn, ComposerDraftPort,
+  ComposerDraftRequest, ComposerDraftResult, ConversationInterpretationRequest,
+  ModelPort, ModelRequest, ModelResult, ModelIdentity, ModelToolArgumentsDelta,
+  ModelToolCall, ModelToolSpec,
   ModelToolTurn, ModelUsage } from './fake-model-port.js';
 import { parseLearningEnvelope } from './fake-model-port.js';
 import type { ModelPortConfig } from './model-port-config.js';
 import { computeModelConfigFingerprint } from './model-port-config.js';
 import { DEFAULT_MODEL_BASE_URL, guardedModelFetch, parseModelBaseUrl,
   type ModelFetchDependencies } from './model-endpoint-policy.js';
+import { withProviderGuard, type ProviderRoutingGuard } from './free-call-guard.js';
 
 /**
  * OpenAI 兼容真实模型端口（M04 第一实现）。
@@ -36,24 +41,28 @@ import { DEFAULT_MODEL_BASE_URL, guardedModelFetch, parseModelBaseUrl,
  * 数据库、不判权限，也不因重构改变 `temperature` / `response_format` / 工具声明。
  */
 
-export class OpenAiCompatibleModelPort implements ModelPort, AssistModelPort {
+export class OpenAiCompatibleModelPort implements ModelPort, AssistModelPort, ComposerDraftPort {
   private readonly client: ChatOpenAI;
   private readonly modelFetch: typeof fetch;
+  /** 外呼边界 fetch：非免费约束时等于 modelFetch，携带免费硬限制时在其外包一层 provider 路由注入。 */
+  private readonly wireFetch: typeof fetch;
   private readonly baseUrl: string;
   readonly identity: ModelIdentity;
 
   constructor(private readonly config: ModelPortConfig,
-    transport: ModelFetchDependencies = {}) {
+    transport: ModelFetchDependencies = {}, freeGuard?: ProviderRoutingGuard) {
     const baseUrl = parseModelBaseUrl(config.baseUrl ?? DEFAULT_MODEL_BASE_URL);
     this.baseUrl = baseUrl;
     this.modelFetch = guardedModelFetch(baseUrl, transport);
+    this.wireFetch = freeGuard === undefined
+      ? this.modelFetch : withProviderGuard(this.modelFetch, freeGuard);
     this.identity = { provider: config.provider, model: config.model,
       configFingerprint: computeModelConfigFingerprint(config), budget: {
         callReservationTokens: config.maxCallTokens,
         scopeCallLimit: config.maxScopeCalls,
         scopeTokenLimit: config.maxScopeTokens,
       } };
-    this.client = this.createClient(this.modelFetch);
+    this.client = this.createClient(this.wireFetch);
   }
 
   private createClient(modelFetch: typeof fetch): ChatOpenAI {
@@ -92,7 +101,7 @@ export class OpenAiCompatibleModelPort implements ModelPort, AssistModelPort {
     ];
     try {
       const response = await this.complete(messages, request.signal, false,
-        request.onTextDelta, request.tools);
+        request.onTextDelta, request.tools, undefined, request.onToolArgumentsDelta);
       if (request.signal?.aborted === true) return { kind: 'CANCELLED',
         providerRequestId: response.providerRequestId, usage: response.usage };
       if (response.toolCalls !== undefined) {
@@ -141,7 +150,7 @@ ${input.content}`),
     const messages: BaseMessage[] = [
       new SystemMessage(request.system),
       ...request.turns.map((turn) => turn.role === 'user'
-        ? new HumanMessage(turn.content)
+        ? new HumanMessage(assistMessageContent(turn))
         : new AIMessage(turn.content)),
       ...renderToolTurns(request.toolTurns ?? []),
     ];
@@ -153,7 +162,8 @@ ${input.content}`),
       const response = await this.complete(messages, request.signal,
         request.intent !== 'DISCUSS' || request.skill !== undefined || learning,
         request.intent === 'DISCUSS' && request.skill === undefined && !learning
-          ? request.onTextDelta : undefined, tools);
+          ? request.onTextDelta : undefined, tools, request.onStreamEvent,
+        request.onToolArgumentsDelta);
       if (request.signal?.aborted === true) return { kind: 'CANCELLED',
         providerRequestId: response.providerRequestId, usage: response.usage };
       // 已声明工具时模型可能这一轮就发出请求：它不是正文，正文只来自没有工具请求的那一轮。
@@ -196,8 +206,35 @@ ${input.content}`),
     }
   }
 
+  /**
+   * 发送前草稿辅助（工作台 §30）：固定窄模板 + 当前草稿 → 协议正文。
+   *
+   * 请求里只有草稿与操作类型：不附带会话历史、项目资料、目录文件或工具声明，
+   * 因此草稿里写着「执行命令」也只是待处理文本（§30.4）。协议校验与切片在应用层，
+   * 端口只负责取回正文；畸形协议在那里被拒绝并保留原文，不会退化成半截结果。
+   */
+  async draftAssist(request: ComposerDraftRequest): Promise<ComposerDraftResult> {
+    const messages: BaseMessage[] = [
+      new SystemMessage(selectRuntimeSystemPrompt(request.operation === 'OUTLINE'
+        ? { kind: 'COMPOSER_OUTLINE' } : { kind: 'COMPOSER_POLISH' }).system),
+      new HumanMessage(renderComposerUserPrompt(request.operation, request.text)),
+    ];
+    try {
+      const response = await this.complete(messages, request.signal, true);
+      if (request.signal?.aborted === true) return { kind: 'CANCELLED',
+        providerRequestId: response.providerRequestId, usage: response.usage };
+      return { kind: 'CONTENT', content: response.text,
+        providerRequestId: response.providerRequestId, usage: response.usage };
+    } catch (error) {
+      if (request.signal?.aborted === true) return { kind: 'CANCELLED' };
+      throw error;
+    }
+  }
+
   private async complete(messages: BaseMessage[], userSignal?: AbortSignal,    structured = false, onTextDelta?: (text: string) => Promise<void>,
-    tools?: readonly ModelToolSpec[]): Promise<{ text: string; toolCalls?: readonly ModelToolCall[];
+    tools?: readonly ModelToolSpec[], onStreamEvent?: (() => Promise<void>) | undefined,
+    onToolArgumentsDelta?: ((delta: ModelToolArgumentsDelta) => Promise<void>) | undefined):
+    Promise<{ text: string; toolCalls?: readonly ModelToolCall[];
       reasoningContent?: string;
       providerRequestId: string;
       usage: ModelUsage }> {
@@ -217,6 +254,7 @@ ${input.content}`),
     let bytes = 0;
     let providerRequestId = '';
     let toolText = '';
+    let streamEventRecorded = false;
     // Streaming tool arguments arrive as partial chunks; they are accumulated exactly
     // like text and only parsed after the provider finished. A half-sent argument
     // therefore never reaches dispatch.
@@ -229,7 +267,7 @@ ${input.content}`),
       const hasReasoning = messages.some((message) =>
         typeof message.additional_kwargs.reasoning_content === 'string');
       const client = hasReasoning
-        ? this.createClient(withToolReasoning(this.modelFetch, messages)) : this.client;
+        ? this.createClient(withToolReasoning(this.wireFetch, messages)) : this.client;
       const runnable = tools === undefined || tools.length === 0 ? client
         : client.bindTools(tools.map((tool) => ({ type: 'function' as const,
           function: { name: tool.name, description: tool.description,
@@ -239,6 +277,10 @@ ${input.content}`),
         ...(structured ? { response_format: { type: 'json_object' as const } } : {}),
       });
       for await (const chunk of stream) {
+        if (!streamEventRecorded) {
+          streamEventRecorded = true;
+          await onStreamEvent?.();
+        }
         const chunkRequestId = chunk.id ?? chunk.response_metadata?.id;
         if (typeof chunkRequestId === 'string' && chunkRequestId !== '') {
           providerRequestId = chunkRequestId;
@@ -274,7 +316,16 @@ ${input.content}`),
           // 工具文本的归集与长度检查在下面照常进行，这里只决定要不要发布文本。
           if (!hasToolCall && onTextDelta !== undefined) await onTextDelta(piece);
         }
-        if (hasToolCall) toolText = collectToolText(accumulated ?? chunk);
+        if (hasToolCall) {
+          toolText = collectToolText(accumulated ?? chunk);
+          // 只读预览通道：把每个工具调用的**原始累计参数文本**交给消费方做有界增量解析。
+          // 它不参与上面任何校验，也不触发执行；解析失败只影响预览。
+          if (onToolArgumentsDelta !== undefined) {
+            for (const delta of toolArgumentsDeltas(chunk, accumulated ?? chunk)) {
+              await onToolArgumentsDelta(delta);
+            }
+          }
+        }
         if (chunk.response_metadata?.finish_reason === 'length' ||
             Buffer.byteLength(toolText, 'utf8') > maxBytes) {
           throw new ModelOutputBudgetError(providerRequestId, usage);
@@ -310,6 +361,20 @@ ${input.content}`),
 
 /** 把历史工具轮次还原成 assistant(tool_calls) + tool(result) 消息序列。
  * 结果正文只是数据；下一轮提示词已声明工具输出不是指令。 */
+/**
+ * 0093：把轮次转成 LangChain 消息内容。纯文本轮次仍是 string（与既有请求逐字一致，
+ * 不给 provider 引入形状变化）；带图片 parts 的轮次组合为多模态内容数组——图片在前、
+ * 正文文本收尾（正文 content 仍是权威文本，占位文本只出现在历史轮）。
+ */
+function assistMessageContent(turn: AssistTurn): string | ContentBlock[] {
+  if (turn.parts === undefined || turn.parts.length === 0) return turn.content;
+  const imageParts: ContentBlock[] = turn.parts.map((part) => part.type === 'image'
+    ? { type: 'image' as const, source_type: 'base64' as const,
+        data: part.dataBase64, mimeType: part.mediaType }
+    : { type: 'text' as const, text: part.text });
+  return [...imageParts, { type: 'text' as const, text: turn.content }];
+}
+
 export function renderToolTurns(turns: readonly ModelToolTurn[]): BaseMessage[] {
   const messages: BaseMessage[] = [];
   for (const turn of turns) {
@@ -348,6 +413,38 @@ function collectToolText(accumulated: AIMessageChunk): string {
   const chunks = accumulated.tool_call_chunks ?? [];
   if (chunks.length === 0) return '';
   return chunks.map((chunk) => chunk.args ?? '').join('');
+}
+
+/**
+ * 本次 chunk 内按工具序号归并的参数增量；argsText 是该调用到当前的**累计原始文本**。
+ *
+ * 只读预览通道使用：这里不解析、不校验、不执行，消费方按 toolIndex 隔离缓冲后自行做
+ * 有界增量提取。同一 chunk 里多个工具交错更新时全部投递，各自独立。
+ */
+function toolArgumentsDeltas(chunk: AIMessageChunk, accumulated: AIMessageChunk):
+  readonly ModelToolArgumentsDelta[] {
+  const changed = new Set<number>();
+  for (const part of chunk.tool_call_chunks ?? []) {
+    if (typeof part.args === 'string' && part.args !== '' && typeof part.index === 'number') {
+      changed.add(part.index);
+    }
+  }
+  if (changed.size === 0) return [];
+  const deltas: ModelToolArgumentsDelta[] = [];
+  for (const index of changed) {
+    const slice = (accumulated.tool_call_chunks ?? [])
+      .filter((part) => part.index === index)
+      .map((part) => part.args ?? '').join('');
+    const call = (accumulated.tool_calls ?? [])[index];
+    deltas.push({
+      toolIndex: index,
+      providerToolCallId: typeof call?.id === 'string' && call.id !== ''
+        ? call.id : `tool-${index}`,
+      name: typeof call?.name === 'string' ? call.name : '',
+      argumentsText: slice,
+    });
+  }
+  return deltas;
 }
 
 /**

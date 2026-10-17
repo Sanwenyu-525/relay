@@ -1,10 +1,12 @@
 /* 文件夹作用域细条（协作页 §3.3 / workbench-design §28.3）。
 
-   它是输入区上方常驻的一行状态，不是卡片也不是浮层：整列一条分隔线，内容与输入卡
-   同宽同轴（layout.reading.maxWidth + 居中），因此不加圆角、不加阴影、不再套一层底色。
+   它是输入区上方常驻的一行状态，不是卡片也不是浮层：内容收进输入卡同宽同轴的
+   一列（共用 --chat-measure owner + 居中），不加圆角、不加阴影、不铺底色。
+   2026-10-16 按用户反馈去掉上缘分隔线（原 border-top: color.border.separator）：
+   消息区与输入区之间只保留这一行常驻状态，不再叠一条横线。
    此前把这一行收成居中胶囊（radius.round + bg.subtle + 描边），内部再放一枚告警胶囊，
-   结果是圆角不一致的「徽标套徽标」，且告警底色被压在胶囊里、只占一格宽。
-   告警态整条换 status.warning.bg：状态由图标、目录名与状态短语三处同时承载，
+   结果是圆角不一致的「徽标套徽标」；后来又试过告警态整条换 status.warning.bg，
+   琥珀底横贯整列喧宾夺主，已去掉——告警由图标、目录名与状态短语三处的前景色承载，
    不靠单一颜色表达；归属等次要事实保持 text.secondary，避免整条同一色相把层级抹平。 */
 .folder-strip {
   display: flex;
@@ -12,15 +14,17 @@
   align-items: stretch;
   gap: var(--relay-space-1);
   flex: none;
+  width: 100%;
+  max-width: var(--chat-measure, var(--relay-layout-reading-maxWidth));
+  margin-inline: auto;
   padding: var(--relay-space-1) 0 0;
-  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
   background: transparent;
   color: var(--relay-color-text-primary);
 }
 
 .folder-strip > .action-error {
   width: 100%;
-  max-width: var(--relay-layout-reading-maxWidth);
+  max-width: var(--chat-measure, var(--relay-layout-reading-maxWidth));
   margin: 0 auto;
   font-size: var(--relay-font-size-meta);
 }
@@ -31,7 +35,7 @@
   flex-wrap: wrap;
   gap: var(--relay-space-2);
   width: 100%;
-  max-width: var(--relay-layout-reading-maxWidth);
+  max-width: var(--chat-measure, var(--relay-layout-reading-maxWidth));
   margin: 0 auto;
   min-height: var(--relay-control-height-compact);
 }
@@ -71,7 +75,7 @@
   line-height: var(--relay-font-lineHeight-heading);
 }
 
-/* 状态短语只说后果，不复述归属：整条已经换告警底，再给一句状态等于同一事实说两遍。
+/* 状态短语只说后果，不复述归属：整条没有底色可换，短语自身的前景色就是状态本身。
    完整原因给读屏（visually-hidden）与 title，可见区保持一行。 */
 .folder-strip-warning {
   flex: 0 1 auto;
@@ -84,18 +88,24 @@
   overflow-wrap: anywhere;
 }
 
-/* 更换目录是这一行唯一的动作，因此按设计系统的 chips 规则给足边框、命中区与胶囊形：
+/* 更换目录是这一行唯一的动作，因此保留 chips 的胶囊形与命中区；
    此前是一枚靠左分割线的幽灵文字，读成分段控件的一段而不是一个动作。
-   常态与告警态同款——告警是背景事实，不该把唯一入口一起染成提示色。 */
+   常态与告警态同款——告警是背景事实，不该把唯一入口一起染成提示色。
+   2026-10-17 用户指令「更换目录往左移动，贴到归入项目右边」：不再用 margin-inline-start:auto
+   把自己推到列的右缘。这一行读到哪儿，动作就紧跟在哪儿；行内 gap 已经给够一档间距。
+   同日接续「这个更换目录按钮胶囊很抢眼，能不能让它不那么抢眼，同时保证不会太难看」：
+   静止档从「白底 + control 边」降到「无底 + separator 边」——这条线就是输入卡自己用的那一档，
+   胶囊不再比它下面那张卡更抢眼；文字留在 text.secondary，可读性不靠描边撑。
+   降档不等于取消：悬停回到完整 chip（selection.hover 底 + control 边 + primary 文字），按下走选中色族，
+   所以「这是一个动作」仍由三态说出，而不是一圈静止的深色描边。 */
 .folder-strip-change {
   flex: none;
-  margin-inline-start: auto;
   display: inline-flex;
   align-items: center;
   min-height: var(--relay-control-height-compact);
   padding: 0 var(--relay-space-4);
-  background: var(--relay-color-bg-surface);
-  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  background: transparent;
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-round);
   color: var(--relay-color-text-secondary);
   font: inherit;
@@ -103,10 +113,19 @@
   font-weight: var(--relay-font-weight-medium);
   cursor: pointer;
   transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    border-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
     color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
 }
-.folder-strip-change:hover:not(:disabled) { background: var(--relay-color-selection-hover); color: var(--relay-color-text-primary); }
-.folder-strip-change:active:not(:disabled) { background: var(--relay-color-selection-bg); }
+.folder-strip-change:hover:not(:disabled) {
+  background: var(--relay-color-selection-hover);
+  border-color: var(--relay-color-border-control);
+  color: var(--relay-color-text-primary);
+}
+.folder-strip-change:active:not(:disabled) {
+  background: var(--relay-color-selection-bg);
+  border-color: var(--relay-color-action-primary);
+  color: var(--relay-color-selection-text);
+}
 .folder-strip-change:disabled {
   cursor: default;
   background: var(--relay-color-disabled-bg);
@@ -115,7 +134,6 @@
 }
 
 .folder-strip[data-state="warning"] {
-  background: var(--relay-color-status-warning-bg);
   color: var(--relay-color-status-warning-text);
 }
 .folder-strip[data-state="warning"] .folder-strip-icon,

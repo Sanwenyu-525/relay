@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
-import { ArrowDown, ArrowUp, BookOpen, ChevronDown, Copy, FileText, MessageSquareText, RotateCcw } from "lucide-react";
+import { ArrowDown, ArrowUp, BookOpen, Check, ChevronDown, ChevronRight, Copy, FileText, Folder, FolderOpen, ListTree, MessageSquareText, Plus, RotateCcw, Search, Settings, Sparkles, Terminal, Upload } from "lucide-react";
 import { createCommandId, RelayApiError, type RelayApiClient, type RelayAssistLivePreview,
   type RelayAssistMessage, type RelayAssistProposal,
   type RelayAssistSession, type RelayAssistSourceRef, type RelayAssistantProfile,
@@ -11,24 +11,35 @@ import { createCommandId, RelayApiError, type RelayApiClient, type RelayAssistLi
   type RelayTaskSkillProposal, type RelayUndoPlan,
   type RelayWorkingDirectory } from "../api/relayClient";
 import AssistSkillOutput from "../components/AssistSkillOutput";
-import ChatCommandInput from "../components/ChatCommandInput";
+import ModelSelector from "../components/ModelSelector";
+import AssistModelRuntime from "../components/AssistModelRuntime";
+import { sessionModelSelectionFrom } from "../api/resources/modelSelection";
+import ChatTimelineNav from "../components/ChatTimelineNav";
+import ChatCommandInput, { chatCommandScope, chatCommandStatus } from "../components/ChatCommandInput";
+import { ComposerDraftBar, ComposerPolishButton, useComposerDraftAssist } from "../components/ComposerDraftAssist";
 import PageHeader from "../components/PageHeader";
 import AssistSourcePicker from "../components/AssistSourcePicker";
 import ExecutionSummary from "../components/ExecutionSummary";
 import ExecutionTrajectorySummary from "../components/ExecutionTrajectorySummary";
+import ConversationDiffSummary from "../components/ConversationDiffSummary";
+import WritePermissionControl from "../components/WritePermissionControl";
 import SafeMarkdown from "../components/SafeMarkdown";
 import LearningRecordsPanel, { learningRoundText } from "../components/LearningRecordsPanel";
 import type { RelayLearningState } from "../api/resources/learning";
 import TaskContractProposalPreview from "../components/TaskContractProposalPreview";
-import { ConversationModeSwitch, type AssistantDraft } from "../components/ConversationModeSwitch";
+import { ConversationModeSwitch, ConversationModeHints, type AssistantDraft } from "../components/ConversationModeSwitch";
+import { Notice, Toast } from "../components/Feedback";
 import { describeLiveError } from "../lib/liveErrors";
 import { modelErrorGuides } from "../lib/modelErrorGuides";
 import { criterionMethodLabel, stateMaintenanceChangeKindLabel, stateMaintenanceChangeStatusLabel,
-  stateMaintenanceStatusLabel } from "../lib/labels";
+  stateMaintenanceStatusLabel, assistSourceKindLabels } from "../lib/labels";
 import { liveClient, useRelayConnection } from "../lib/relayConnection";
+import type { RecentWorkingDirectory } from "../lib/recentWorkingDirectories";
+import { rememberSourceRefs, readRecentSourceRefs } from "../lib/recentSourceRefs";
 import { formatReadableDateTime, useDisplayPreferences } from "../lib/displayPreferences";
 import { chatControlFromText } from "../lib/chatControls";
 import { chatSessionResultFrom, type RelayChatSessionResult } from "../api/resources/chatControls";
+import type { RelayChatCommand } from "../api/resources/chatControls";
 import { RelayTransportError } from "../api/core/errors";
 import "./AssistView.css";
 
@@ -77,12 +88,44 @@ const supportedSkillOutput: Readonly<Record<string, RelaySkillDefinition["output
   "project-resume": "PROJECT_RESUME",
   "verification-plan": "VERIFICATION_PLAN_SUGGESTION"
 };
+/** 新会话空态欢迎（按页面原型 empty-work 复刻）：居中符号 + 一句「有什么想一起完成的？」
+    + 一排覆盖软件工程全流程的快捷卡，点击把脚手架预填进输入框。首条输入区（尚未建会话）
+    与会话内空态（已建会话、尚无消息）共用同一视觉与同一组卡片，保证不同入口的新会话
+    首屏一致；文案差异只体现在说明句上，由调用方传入。 */
+const emptyWorkSuggestions = [
+  { key: "idea", label: "讨论一个想法", text: "我有个想法，先跟你聊聊：\n" },
+  { key: "requirement", label: "梳理需求", text: "帮我梳理这个需求：\n背景与目标：\n使用者与场景：\n核心功能点：\n边界与非目标：\n验收标准：" },
+  { key: "design", label: "设计方案", text: "帮我设计技术方案：\n要解决的问题：\n现有约束（技术栈/依赖）：\n候选方案与取舍：\n推荐方案的架构与数据流：\n风险与应对：" },
+  { key: "task", label: "拆解任务", text: "把这个目标拆成可执行任务：\n总目标：\n每个任务给出：范围、依赖、预估、验收方式：\n1. \n2. \n3. " },
+  { key: "implement", label: "实现功能", text: "帮我实现这个功能：\n功能描述：\n涉及模块/接口：\n输入与输出：\n边界与异常处理：\n验收标准：" },
+  { key: "test", label: "补充测试", text: "帮我补测试：\n被测对象（函数/类/接口）：\n需要覆盖的正常与异常场景：\n测试风格（单测/集成）：\n期望断言：" },
+  { key: "debug", label: "排查问题", text: "帮我排查这个问题：\n现象：\n复现步骤：\n期望结果：\n运行环境/版本：\n报错或日志：\n已排除的可能：" },
+  { key: "review", label: "代码审查", text: "帮我审查这段改动：\n改动目的：\n关注的点（正确性/性能/安全/可读性）：\n逐条给出：问题、影响、建议修改。" },
+  { key: "refactor", label: "重构优化", text: "帮我重构这段代码：\n现状与问题：\n重构目标：\n必须保持不变的约束（对外行为/接口）：\n可接受的技术手段：\n怎么算改好了：" },
+  { key: "docs", label: "写技术文档", text: "帮我写一份技术文档：\n文档类型（README/设计说明/API/运维手册）：\n读者：\n需要覆盖的章节：\n" },
+  { key: "resume", label: "接续上次工作", text: "接着上次的内容继续：\n" }
+] as const;
+function EmptyWorkWelcome({ testId, suggestTestIdPrefix, lede, onSuggest }: {
+  testId: string; suggestTestIdPrefix: string; lede: string; onSuggest: (text: string) => void;
+}) {
+  return <div className="agent-chat-empty-work" data-testid={testId}>
+    <div className="agent-chat-empty-symbol" aria-hidden="true"><img src="/logo.png" alt="" /></div>
+    <h1>有什么想一起完成的？</h1>
+    <p className="agent-chat-empty-lede">{lede}</p>
+    <div className="agent-chat-suggestions">
+      {emptyWorkSuggestions.map((suggestion) => <button key={suggestion.key} type="button"
+        className="agent-chat-suggestion" data-testid={`${suggestTestIdPrefix}-${suggestion.key}`}
+        onClick={() => onSuggest(suggestion.text)}>{suggestion.label}</button>)}
+    </div>
+  </div>;
+}
 type PendingAction = { readonly kind: "send"; readonly commandId: string; readonly content: string;
   readonly intent: AssistIntent | null; readonly skillRef: { readonly id: string; readonly version: string } | null;
   readonly skillInput: RelaySkillInput | null; readonly sources: readonly RelayAssistSourceRef[];
   readonly recordLearning?: boolean } |
   { readonly kind: "restart"; readonly commandId: string; readonly content: string;
     readonly system: "clear" | "new" } |
+  { readonly kind: "model"; readonly commandId: string; readonly model: string } |
   { readonly kind: "cancel" | "accept"; readonly commandId: string; readonly id: string } |
   { readonly kind: "acceptTask"; readonly commandId: string; readonly id: string;
     readonly taskId: string; readonly expectedTaskRevision: string;
@@ -96,11 +139,14 @@ type PendingAction = { readonly kind: "send"; readonly commandId: string; readon
  * 不能在核对时从当前目录作用域重新取值，否则换目录后会把原消息解释到别的资源上。
  */
 type PendingFirstMessage = { readonly sessionId: string; readonly commandId: string;
+  readonly modelSelection?: { readonly model: string; readonly commandId: string };
+  readonly modelSelectionConfirmed?: boolean;
   readonly content: string; readonly conversationMode: RelayConversationMode;
   readonly recordLearning?: boolean;
   readonly sourceRefs?: readonly RelayAssistSourceRef[];
   /** 传输失败时的真实原因；null 表示命令已确认发出。 */
-  readonly reason: string | null; readonly resourceId: string | null };
+  readonly reason: string | null; readonly resourceId: string | null;
+  readonly directoryCommandId?: string };
 /**
  * 建会话命令连同首条原文：创建响应丢失后按原回执恢复时，交接的必须是这一份载荷。
  *
@@ -108,6 +154,7 @@ type PendingFirstMessage = { readonly sessionId: string; readonly commandId: str
  * 否则「按原命令重试」会变成「建一条身份不同的新会话」。
  */
 type PendingCreate = { readonly commandId: string; readonly projectId: string | null;
+  readonly modelSelection?: { readonly model: string; readonly commandId: string };
   readonly taskId: string | null; readonly title: string;
   readonly firstContent: string; readonly resourceId: string | null;
   readonly conversationMode: RelayConversationMode; readonly assistantProfileId: string | null;
@@ -123,6 +170,8 @@ type CreateSessionInput = { commandId: string; projectId: string | null; taskId:
  * 而迟到响应与回执核对都可能跨越这次重挂载。
  */
 export type FirstMessageProcess = {
+  /** 首条发送前的选择草稿；发送过程使用 PendingCreate 固定的选择命令。 */
+  readonly model?: string;
   /** 首条输入原文。未发送时它就是未保存保护的对象，不因重挂载或换目录消失。 */
   readonly draft: string;
   readonly pending: PendingFirstMessage | null;
@@ -187,6 +236,8 @@ function targetMatches(session: RelayAssistSession, target: AssistTarget): boole
 }
 
 function receiptMatches(receipt: RelayCommandReceipt, action: PendingAction, sessionId: string): boolean {
+  if (action.kind === "model") return receipt.commandId === action.commandId &&
+    receipt.commandType === "SelectSessionModel" && receipt.result.session_id === sessionId && receipt.result.model === action.model;
   if (action.kind === "restart") return receipt.commandId === action.commandId &&
     receipt.commandType === "ExecuteChatCommand" && receipt.result.source_session_id === sessionId &&
     receipt.result.system === action.system && receipt.result.kind === "NEW_SESSION";
@@ -216,9 +267,10 @@ export default function AssistView({ targetKind, targetId, preferredSessionId, o
   standalone = false, onNavigationStateChange, onRequestNewSession, embedded = false,
   onRequestSessionChange, onSessionSelected, onActiveSessionChange,
   preferredSkillId, onTargetChanged, externalReadBlockedReason = null, externalWriteBlockedReason = null, proposalActionHost,
-  deferSessionCreation = false, executionScope = null, onExecutionPrepared,
+  deferSessionCreation = standalone, executionScope = null, onExecutionPrepared,
   firstMessageOwner, firstMessageProcess, workspaceLevel = false,
-  conversationTarget, onConversationTargetChange, composerHeader }: {
+  conversationTarget, onConversationTargetChange, composerHeader,
+  conversationToolbar = false, toolbarRight, onRequestFolder, recentFolders, onOpenRecentFolder }: {
   targetKind?: "PROJECT" | "TASK"; targetId?: string; preferredSessionId?: string | null;
   onSessionCreated?: (sessionId: string) => void;
   standalone?: boolean; onNavigationStateChange?: (state: AssistNavigationState) => void;
@@ -269,6 +321,24 @@ onExecutionPrepared?: (taskId: string) => void;
    * 所以这里只开一个渲染槽，不把目录状态搬进本视图，也不在本视图内发任何目录命令。
    */
   composerHeader?: ReactNode;
+  /**
+   * 会话视图（/agent 未关联任务）的顶栏重构（效果图 V4.2 renderToolbar）。
+   * 打开后本视图用三区工具栏取代旧的单条会话控制带：
+   * 左＝面包屑 + 当前会话标题、中＝会话下拉与新建（沿用本视图自持的 sessionControls）、
+   * 右＝由协作页注入的 toolbarRight 槽（工作详情入口等，归属仍只有一个 Owner）。
+   * 默认关闭：项目/任务子页、Skill 页、嵌入态一律维持既有渲染。
+   */
+  conversationToolbar?: boolean;
+  /** 工具栏右区插槽：由协作页传入，本视图不持有其内部状态。 */
+  toolbarRight?: ReactNode;
+  /** 「+」菜单里的文件夹入口：聚焦协作页持有的目录细条，本视图不发起目录命令。 */
+  onRequestFolder?: () => void;
+  /**
+   * 「+」二级菜单的「最近使用」目录：真实近期目录与切换动作都由协作页持有，
+   * 本视图只做转发，不建第二套目录状态，也不绕过目录命令的草稿守卫。
+   */
+  recentFolders?: readonly RecentWorkingDirectory[];
+  onOpenRecentFolder?: (canonicalRoot: string) => void;
 } = {}) {
   const location = useLocation();
   const { timeZone } = useDisplayPreferences();
@@ -303,14 +373,46 @@ onExecutionPrepared?: (taskId: string) => void;
   // 这里只把镜像同步到最新值，保证「当前生效会话」始终可读。
   sessionIdRef.current = sessionId;
   const [selectedRefs, setSelectedRefs] = useState<readonly RelayAssistSourceRef[]>([]);
+  /**
+   * 「+」二级菜单里引用行的开关：只改**本次消息的候选输入**，不发送、不落库、不授予权限。
+   * 上限与资料选择器一致（菜单里超限项已是禁用态，这里再兜一层，避免任何路径突破上限）。
+   */
+  const toggleSourceRef = useCallback((ref: RelayAssistSourceRef) => {
+    setSelectedRefs((current) => {
+      const same = (item: RelayAssistSourceRef) =>
+        item.kind === ref.kind && item.rootId === ref.rootId && item.version === ref.version;
+      if (current.some(same)) return current.filter((item) => !same(item));
+      return current.length >= attachSourceLimit ? current : [...current, ref];
+    });
+  }, []);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [pendingCreate, setPendingCreate] = useState<PendingCreate | null>(null);
   const [firstError, setFirstError] = useState<string | null>(null);
+  const [firstModelPickerOpen, setFirstModelPickerOpen] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   /**
+   * 顶栏「切换讨论」浮层。只在同一作用域读出 ≥2 条讨论时才挂出来（见 sessionSwitcherNode），
+   * 单条讨论的顶栏就是用户要的形：左边只有会话名，没有第二套切换控件。
+   * 收起有三个出口：选中一条、点到浮层之外、Esc 后把焦点还给触发键——与左栏行内菜单同一套规矩。
+   */
+  const [sessionSwitcherOpen, setSessionSwitcherOpen] = useState(false);
+  const sessionSwitcherRef = useRef<HTMLDivElement | null>(null);
+  const sessionSwitcherTriggerRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!sessionSwitcherOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!sessionSwitcherRef.current?.contains(event.target as Node)) setSessionSwitcherOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => { document.removeEventListener("pointerdown", onPointerDown, true); };
+  }, [sessionSwitcherOpen]);
+  // 会话从别处换了（近期工作栏、恢复回执）就把浮层收掉：浮层里列的是上一个作用域的行。
+  useEffect(() => { setSessionSwitcherOpen(false); }, [sessionId]);
+  /** 首条输入器的中文组词状态：草稿辅助据此保证组词期间零请求（工作台 §30.2）。 */
+  const [firstComposing, setFirstComposing] = useState(false);  /**
    * 首条消息过程的 Owner。文件夹入口下由协作页持有并跨重挂载存活；
    * 独立使用时退回本实例的局部记录，语义不变。
    */
@@ -379,6 +481,19 @@ onExecutionPrepared?: (taskId: string) => void;
     restoreComposerFocus(firstDraftRef.current, firstComposerBoxRef.current);
   }, []);
 
+  /**
+   * 首条草稿的发送前辅助（工作台 §30）。正文仍是 `first.draft` 一份；这里是纯辅助状态，
+   * 提示行渲染在输入卡上方、润色键渲染在输入卡工具行内（与原型 `#polishBtn` 同一位置）。
+   * 来源身份带 connection.epoch：重连后即使草稿一字未改，旧结果也必须失效。
+   */
+  const firstAssist = useComposerDraftAssist({
+    client, sourceKey: `${connection.epoch}:first`,
+    value: first.draft, onChange: (next) => updateFirst({ draft: next }),
+    disabled: firstBusy || creating,
+    inflight: firstBusy || creating || pendingFirst !== null,
+    composing: firstComposing, onRequestFocus: restoreFirstDraftFocus,
+  });
+
 useEffect(() => {
     if (!standalone && !embedded) return;
     // 首条草稿与已选资料是同一份未保存保护：未发送的首条输入离页同样要经过守卫，
@@ -386,8 +501,10 @@ useEffect(() => {
     onNavigationStateChange?.({
       dirty: sessionNavigation.dirty || selectedRefs.length > 0 || first.draft.trim() !== "",
       discard: () => { sessionNavigation.discard?.(); setSelectedRefs([]); updateFirst({ draft: "" }); },
-      pending: pendingFirst ? { commandId: pendingFirst.commandId,
-          commandType: "RequestAssistMessage", sessionId: pendingFirst.sessionId }
+      pending: pendingFirst ? { commandId: pendingFirst.modelSelection && !pendingFirst.modelSelectionConfirmed
+          ? pendingFirst.modelSelection.commandId : pendingFirst.commandId,
+          commandType: pendingFirst.modelSelection && !pendingFirst.modelSelectionConfirmed
+            ? "SelectSessionModel" : "RequestAssistMessage", sessionId: pendingFirst.sessionId }
         : pendingCreate ? { commandId: pendingCreate.commandId,
             commandType: "CreateAssistSession", sessionId: null }
           : sessionNavigation.pending,
@@ -406,7 +523,7 @@ useEffect(() => {
     setError(null); setLoading(client !== null);
     if (!client) return;
     try {
-      const list = await client.getAssistSessions();
+      const list = await client.getAssistSessions({ includeContext: conversationToolbar });
       if (version !== requestVersion.current || client !== liveClient()) return;
       const scoped = list.filter((item) => item.projectId === null && item.taskId === null);
       setSessions(scoped);
@@ -449,7 +566,7 @@ useEffect(() => {
             projectId: task.projectId, executor: task.executor, archivedAt };
         });
       const [nextTarget, list] = await Promise.all([targetPromise,
-        client.getAssistSessions(kind === "PROJECT" ? { projectId: id } : { taskId: id })]);
+        client.getAssistSessions(kind === "PROJECT" ? { projectId: id, includeContext: conversationToolbar } : { taskId: id, includeContext: conversationToolbar })]);
       if (version !== requestVersion.current || client !== liveClient()) return;
       const scoped = list.filter((item) => targetMatches(item, nextTarget));
       setTarget(nextTarget); setSessions(scoped);
@@ -486,44 +603,11 @@ useEffect(() => {
    *
    * 同一原消息只解释一次：先在 Owner 上按 command_id 声明，重复或迟到的成功路径拿不到声明。
    */
-  async function interpretFirstMessage(pending: PendingFirstMessage, sourceMessageId: string) {
+  async function confirmFirstMessage(pending: PendingFirstMessage) {
     const current = firstOwner.read();
-    if (current.interpreted === pending.commandId) return;
-    if (current.pending?.commandId !== pending.commandId) return;
+    if (current.interpreted === pending.commandId || current.pending?.commandId !== pending.commandId) return;
+    // 主流程保存执行/维护候选；前端只确认原消息发送，不再抢先解释或建立执行。
     firstOwner.write({ ...current, interpreted: pending.commandId, pending: null, draft: "" });
-    if (pending.resourceId === null || pending.conversationMode !== "AGENT") return;
-    // 状态维护与执行解释同一时机触发：项目绑定的普通档首条消息解释一次。
-    // 彼此独立成败：维护解释失败不阻塞执行解释链，回执由会话面板按原回执重读恢复。
-    //
-    // 阶段 D（未实施）：服务端主流程现在能在同一次模型判定里落候选，因此这条命令在
-    // 服务端会命中已保存的判定并直接重放，不再是第二次模型判定。但前端这条调用本身
-    // 仍保留——`folderFirstConversation.spec.ts` 等规格按「前端发起解释」断言，改成
-    // 「前端不再发起」需要连同这些反例一起迁移，属于阶段 D 的独立工作。
-    void interpretFirstStateMaintenance(pending, sourceMessageId);
-    try {
-      const execution = await client!.interpretConversationMessage({ sessionId: pending.sessionId,
-        sourceMessageId, resourceId: pending.resourceId, commandId: createCommandId() });
-      if (client !== liveClient() || firstOwner.read().interpreted !== pending.commandId) return;
-      if (execution.sessionId !== pending.sessionId || execution.sourceMessageId !== sourceMessageId ||
-          execution.resourceId !== pending.resourceId) throw new Error("执行解释与原会话、消息或目录不匹配。");
-      // 解释结果必须落在当前实例可见的 Owner 上：重挂载后的会话面板据此渲染摘要。
-      firstOwner.write({ ...firstOwner.read(), execution });
-    } catch (caught) {
-      if (firstOwner.read().interpreted === pending.commandId) setFirstError(describeLiveError(caught).message);
-    }
-  }
-
-/** 首条消息的状态维护解释：结果并入共享 Owner，由会话面板按 requestId 接手渲染。 */
-  async function interpretFirstStateMaintenance(pending: PendingFirstMessage, sourceMessageId: string) {
-    if (!client) return;
-    try {
-      const projection = await client.createStateMaintenanceRequest({ sessionId: pending.sessionId,
-        sourceMessageId, commandId: createCommandId(), timezone: localTimezone() });
-      if (client !== liveClient()) return;
-      if (projection.sessionId !== pending.sessionId || projection.sourceMessageId !== sourceMessageId) return;
-      if (firstOwner.read().interpreted !== pending.commandId) return;
-      firstOwner.write({ ...firstOwner.read(), maintenance: projection });
-    } catch { /* 与执行解释互相独立；已有请求行由会话面板的列表读取显示。 */ }
   }
 
   async function createSession(retry?: PendingCreate) {
@@ -542,6 +626,7 @@ useEffect(() => {
       title: target === null ? (unassignedTitle === "" ? "新讨论" : unassignedTitle)
         : `关于${target.title}`.slice(0, 200),
       firstContent: content, resourceId: executionScope?.association?.resourceId ?? null,
+      ...(firstOwner.read().model ? { modelSelection: { model: firstOwner.read().model!, commandId: createCommandId() } } : {}),
       conversationMode: wantedMode, assistantProfileId: wantedMode === "ASSISTANT" ? wantedAssistantId : null,
       ...(wantedMode === "LEARNING" ? { recordLearning } : {}) };
     const version = requestVersion.current;
@@ -557,6 +642,7 @@ useEffect(() => {
       // 也不把后来修改的文本混入原载荷。
       if (action.firstContent !== "") {
         const first: PendingFirstMessage = { sessionId: created.id, commandId: createCommandId(),
+          ...(action.modelSelection === undefined ? {} : { modelSelection: action.modelSelection }),
           content: action.firstContent, conversationMode: action.conversationMode,
           reason: null, resourceId: action.resourceId,
           ...(action.sourceRefs === undefined ? {} : { sourceRefs: action.sourceRefs }),
@@ -584,14 +670,35 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
     const current = firstOwner.read();
     if (!client || current.busy) return;
     if (current.interpreted === pending.commandId) return;
+    // 目录先持久绑定，再发送首条。固定绑定命令身份，响应丢失后仍沿原命令重放。
+    if (pending.resourceId !== null && pending.directoryCommandId === undefined) {
+      pending = { ...pending, directoryCommandId: createCommandId() };
+    }
     firstOwner.write({ ...current, pending, busy: true });
     setCreating(true); setFirstError(null);
     try {
-      const sent = await client.requestAssistMessage(pending.conversationMode !== "AGENT"
+      let expectedModelSelectionRevision: string | undefined;
+      if (pending.modelSelection !== undefined) {
+        const selection = await client.selectSessionModel({ sessionId: pending.sessionId, ...pending.modelSelection });
+        expectedModelSelectionRevision = selection.revision;
+        if (firstOwner.read().pending?.commandId !== pending.commandId || client !== liveClient()) return;
+        pending = { ...pending, modelSelectionConfirmed: true };
+        firstOwner.write({ ...firstOwner.read(), pending });
+      }
+      if (pending.resourceId !== null && pending.directoryCommandId !== undefined) {
+        await client.bindAssistSessionDirectory({ sessionId: pending.sessionId,
+          commandId: pending.directoryCommandId, resourceId: pending.resourceId });
+        if (firstOwner.read().pending?.commandId !== pending.commandId || client !== liveClient()) return;
+        await loadTarget(pending.sessionId);
+        onActiveSessionChange?.(pending.sessionId);
+      }
+      await client.requestAssistMessage(pending.conversationMode !== "AGENT"
         ? { sessionId: pending.sessionId, commandId: pending.commandId,
+          ...(expectedModelSelectionRevision === undefined ? {} : { expectedModelSelectionRevision }),
           content: pending.content, sourceRefs: pending.sourceRefs ?? [],
           ...(pending.recordLearning === undefined ? {} : { recordLearning: pending.recordLearning }) }
         : { sessionId: pending.sessionId, commandId: pending.commandId,
+          ...(expectedModelSelectionRevision === undefined ? {} : { expectedModelSelectionRevision }),
           content: pending.content, sourceRefs: pending.sourceRefs ?? [], intent: "DISCUSS" });
       // 回执核对或新对话已接续后，旧响应不再拥有这份过程，不能清掉新草稿或再次解释。
       if (firstOwner.read().pending?.commandId !== pending.commandId) return;
@@ -602,8 +709,11 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
         return;
       }
       firstOwner.write({ ...firstOwner.read(), busy: false });
+      // 服务端已受理这条首条消息：把它用过的资料版本记进本机「最近引用」
+      // （只记 kind/rootId/version 三元组，不缓存任何资料内容）。
+      rememberSourceRefs(pending.sourceRefs ?? []);
       setCreating(false);
-      await interpretFirstMessage(pending, sent.userMessageId);
+      await confirmFirstMessage(pending);
     } catch (caught) {
       // 传输失败不能推断成业务失败：原命令身份与真实原因一并保留，等核对或同 ID 重试。
       // 迟到失败不得复活已被核对清空的 pending：只有仍指向同一命令时才写回。
@@ -615,7 +725,7 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
 
   /**
    * 首条消息回执核对：只按原 command_id 查询，不重建会话、不改载荷、不猜测结果。
-   * 核对成功后与迟到响应走同一个 interpretFirstMessage，由 Owner 上的 declared 决定谁真正解释。
+   * 核对成功后与迟到响应走同一个 confirmFirstMessage，由共享 Owner 确认原发送过程。
    */
   async function checkFirstReceipt() {
     if (!client || !pendingFirst || creating) return;
@@ -623,8 +733,21 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
     firstOwner.write({ ...firstOwner.read(), busy: true });
     setCreating(true); setFirstError(null);
     try {
-      const receipt = await client.getCommandReceipt(pending.commandId);
+      const selectingModel = pending.modelSelection !== undefined && !pending.modelSelectionConfirmed;
+      const receipt = await client.getCommandReceipt(selectingModel ? pending.modelSelection!.commandId : pending.commandId);
       if (version !== requestVersion.current) return;
+      if (selectingModel) {
+        const selection = sessionModelSelectionFrom(receipt.result);
+        if (receipt.commandId !== pending.modelSelection!.commandId || receipt.commandType !== "SelectSessionModel" ||
+            selection.sessionId !== pending.sessionId || selection.model !== pending.modelSelection!.model) {
+          throw new Error("首条模型选择回执与原命令不匹配。");
+        }
+        const continued = { ...pending, modelSelectionConfirmed: true };
+        firstOwner.write({ ...firstOwner.read(), busy: false, pending: continued });
+        setCreating(false);
+        await sendFirstMessage(continued);
+        return;
+      }
       const result = receipt.result as { session_id?: unknown; user_message_id?: unknown };
       if (receipt.commandId !== pending.commandId || receipt.commandType !== "RequestAssistMessage" ||
           result.session_id !== pending.sessionId || typeof result.user_message_id !== "string") {
@@ -633,7 +756,7 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
       // 回执不匹配时不得清 pending，也不得宣称已送达。
       firstOwner.write({ ...firstOwner.read(), busy: false });
       setCreating(false);
-      await interpretFirstMessage(pending, result.user_message_id);
+      await confirmFirstMessage(pending);
     } catch (caught) {
       const latest = firstOwner.read();
       firstOwner.write({ ...latest, busy: false });
@@ -662,6 +785,7 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
       // 否则用户只看到空白会话，原文与载荷就此丢失。
       if (action.firstContent !== "") {
         const first: PendingFirstMessage = { sessionId: receipt.result.session_id, commandId: createCommandId(),
+          ...(action.modelSelection === undefined ? {} : { modelSelection: action.modelSelection }),
           content: action.firstContent, conversationMode: action.conversationMode,
           reason: null, resourceId: action.resourceId,
           ...(action.sourceRefs === undefined ? {} : { sourceRefs: action.sourceRefs }),
@@ -743,9 +867,6 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
     setAssistantProfilesError(null); setAssistantProfilesLoading(false);
     switchConversation("ASSISTANT", created.id);
   }
-  // 文件夹入口：目录作用域齐备且候选可用时，明确的请求才会走真实执行链。
-  const executionScopeReady = executionScope !== null && executionScope.status === "READY" &&
-    executionScope.association !== null;
   const firstComposer = deferSessionCreation && session === null && externalReadBlockedReason === null;
   function sendFirst(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -762,35 +883,31 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
   /**
    * 模式控件在输入器这一列的左侧，两档共用同一处位置。
    * 锁定原因写清下一步：在途时切档不是停止，必须让人先停。
+   * 原因与档位说明都渲染在**输入卡之外**（卡下方这一列）：输入卡是用户正在打字的那个框，
+   * 它一随状态长高、变矮，光标与工具行就跟着跳——卡内恒定只有正文、工具行与发送键。
    */
   const modeLocked = firstBusy || creating || sessionInflight || sessionNavigation.pending !== null;
+  const modeLockedReason = modeLocked ? "正在生成，停止后才能切换会话模式。" : null;
   const modeSwitch = <ConversationModeSwitch mode={wantedMode}
     assistantProfileId={wantedAssistantId} profiles={assistantProfiles}
     profilesError={assistantProfilesError} profilesLoading={assistantProfilesLoading}
     onReloadProfiles={() => { void reloadAssistantProfiles(); }} remember={rememberNext}
     disabled={modeLocked}
-    lockedReason={modeLocked ? "正在生成，停止后才能切换会话模式。" : null}
     onChangeMode={(next) => switchConversation(next, next === "ASSISTANT" ? wantedAssistantId : null)}
     onChangeAssistant={(profileId) => switchConversation("ASSISTANT", profileId)}
     onChangeRemember={setRememberNext}
     recordLearning={recordLearning} onChangeRecordLearning={setRecordLearning}
     onCreateAssistant={createAssistant} />;
   const firstMessage = <section className="surface-panel agent-chat-conversation agent-chat-start" data-testid="assist-first-message">
-    {/* 空态欢迎卡（协作页 §3.2）：标题用 compactPage 而不是 page——首屏标题 2.5rem
-        会把下面真正要做的事（怎么把内容交给这次讨论）压出视线；副说明回到 body，
-        引导收进一张底subtle的卡里，编号步骤因此能一次读完。 */}
-    <div className="agent-assist-session-welcome">
-      <h1>这次想聊些什么？</h1>
-      <p className="agent-chat-welcome-lede">直接说想法。需要处理项目文件时，再选择文件夹。</p>
-      <div className="agent-chat-guide" data-testid="assist-first-guide">
-        <ol className="agent-chat-guide-steps">
-          <li><span className="agent-chat-guide-step">选择或上传资料</span>在输入区点「资料」，添加文档、代码或日志；</li>
-          <li><span className="agent-chat-guide-step">直接粘贴内容</span>内容较少时，直接粘到对话里也可以。</li>
-        </ol>
-        <p className="agent-chat-guide-note">添加资料后先确认读取范围，再继续分析。</p>
-      </div>
-    </div>
+    {/* 不再用编号步骤引导——那会把首屏最该被看到的输入框挤下去。
+        目前是通用模板，之后可随工作区上下文动态变化。 */}
+    <EmptyWorkWelcome testId="assist-first-welcome" suggestTestIdPrefix="assist-first-suggest"
+      lede="可以直接讨论或描述目标。不需要先创建项目、任务，也不需要预先选择工作目录。"
+      onSuggest={(text) => { updateFirst({ draft: text });
+        firstComposerBoxRef.current?.querySelector("textarea")?.focus(); }} />
     {composerHeader}
+    {/* 发送前草稿辅助（工作台 §30）：提示行紧贴输入卡上方，正文仍归本处 Owner，辅助只申请替换。 */}
+    <ComposerDraftBar assist={firstAssist} value={first.draft} />
     <div className="agent-chat-composer" data-inflight={firstBusy || creating} ref={firstComposerBoxRef}>
     <span className="agent-chat-composer-spark" aria-hidden="true" />
     <form id={firstComposerFormId} className="agent-chat-message-form" onSubmit={sendFirst}>
@@ -798,6 +915,7 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
         <ChatCommandInput client={client} mode={wantedMode} hasSession={false}
           data-testid="assist-first-draft" ref={firstDraftRef} value={first.draft} maxLength={32768} rows={2}
           disabled={firstBusy || creating} placeholder="输入你的想法、修改意见或新的要求"
+          onCompositionChange={setFirstComposing}
           onValueChange={(draft) => updateFirst({ draft })} onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
               event.preventDefault(); event.currentTarget.form?.requestSubmit();
@@ -806,12 +924,30 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
     </form>
     <div className="agent-chat-composer-actions">
       <div className="agent-chat-composer-tools">
+        <ComposerAttach
+          client={client} mode={wantedMode} hasSession={false}
+          recentFolders={recentFolders} onOpenRecentFolder={onOpenRecentFolder}
+          onCommand={() => { updateFirst({ draft: first.draft.startsWith("/") ? first.draft : `/${first.draft}` });
+            firstComposerBoxRef.current?.querySelector("textarea")?.focus(); }}
+          onPickCommand={(name) => { updateFirst({ draft: `${first.draft.match(/^\s*/u)?.[0] ?? ""}/${name} ` });
+            firstComposerBoxRef.current?.querySelector("textarea")?.focus(); }}
+          onFolder={onRequestFolder}
+          notes={[{ text: "首条消息后可选资料与 Skill", keys: ["sources", "skill"] },
+            ...(onRequestFolder ? [] : [attachFolderNote])]} />
+        {/* 本目录写档位（§18.1.3）：紧挨「+」常驻；没有绑定目录时显示未绑定态并说明缺什么。 */}
+        {wantedMode === "AGENT" && <WritePermissionControl client={client}
+          projectId={executionScope?.association?.projectId ?? null}
+          resourceId={executionScope?.association?.resourceId ?? null}
+          canonicalRoot={executionScope?.canonicalRoot ?? null}
+          disabled={firstBusy || creating || pendingFirst !== null || projectWriteBlockedReason !== null} />}
         {modeSwitch}
-        {firstAssistantBlockedReason !== null && <p className="disabled-reason"
-          data-testid="assist-first-blocked">{firstAssistantBlockedReason}</p>}
         <button className="agent-chat-tool" type="button" disabled
           title="首条消息发送后，可在项目会话中选择资料" aria-label="资料 0，首条消息发送后可在项目会话中选择">
           <BookOpen aria-hidden="true" />资料 0<ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" /></button>
+        <ComposerPolishButton assist={firstAssist} />
+        <ModelSelector client={client} open={firstModelPickerOpen} onOpenChange={setFirstModelPickerOpen}
+          selectedModel={first.model ?? null} onChoose={(model) => updateFirst({ model })}
+          firstMessage disabled={firstBusy || creating || pendingFirst !== null} />
         {wantedMode === "AGENT" && <details className="agent-chat-options">
           <summary>普通讨论<ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" /></summary>
           <p className="helper-text">直接发送即可开始讨论。需要处理项目文件时，先选择文件夹。</p>
@@ -826,6 +962,11 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
         disabled={first.draft.trim() === "" || firstBusy || creating || projectWriteBlockedReason !== null || firstAssistantBlockedReason !== null}>
         <ArrowUp aria-hidden="true" /></button></div>
     </div>
+    {/* 卡外说明区（2026-10-16 用户指令「这些都导致输入框变化了」）：档位说明、禁用原因、
+        发送状态与目录阻塞一律在输入卡之外，卡片本体在空闲/在途/回执/各档下形状一致。 */}
+    <ConversationModeHints mode={wantedMode} lockedReason={modeLockedReason} />
+    {firstAssistantBlockedReason !== null && <p className="disabled-reason"
+      data-testid="assist-first-blocked">{firstAssistantBlockedReason}</p>}
     {(firstBusy || creating) && <p className="helper-text" role="status">正在发送首条消息…</p>}
     {projectWriteBlockedReason !== null && <p className="disabled-reason">{projectWriteBlockedReason}</p>}
   </section>;
@@ -845,13 +986,102 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
   }
   // 协作页（standalone）的会话行引用全局横向 field 与紧凑按钮变体；skill 子页保持
   // 纵向布局与常规按钮密度，紧凑密度不再由 CollaborationView.css 页面压回。
-  const sessionControls = <div className={`form-actions${standalone ? " agent-assist-session-controls" : ""}`}><label className={standalone ? "field field--row" : "field"}><span className={standalone ? "visually-hidden" : "field-label"}>当前会话</span><select data-testid="assist-session-select" aria-label="当前会话" disabled={creating || sessionChangeBlocked} value={sessionId ?? ""} onChange={(event) => selectSession(event.target.value || null)}><option value="">选择会话</option>{sessions.map((item) => <option key={item.id} value={item.id}>{item.title}{sessions.some((other) => other.id !== item.id && other.title === item.title) ? ` · 更新 ${formatReadableDateTime(item.updatedAt, timeZone)}${item.id === sessionId ? " · 当前" : ""}` : ""}{item.status !== "ACTIVE" ? " · 已结束" : ""}</option>)}</select></label><button className={standalone && !session ? "primary-button primary-button--compact" : `secondary-button${standalone ? " secondary-button--compact" : ""}`} type="button" data-testid="assist-new-session" disabled={creating || pendingCreate !== null || projectWriteBlockedReason !== null || sessionChangeBlocked} onClick={() => standalone && onRequestNewSession ? onRequestNewSession(newSession) : newSession()}>{creating ? "正在创建" : "新建会话"}</button><button className={`secondary-button${standalone ? " secondary-button--compact" : ""}`} type="button" disabled={sessionChangeBlocked} onClick={() => void loadTarget(sessionId ?? undefined)}>刷新会话</button></div>;
+  const newSessionLabel = creating ? "正在创建" : "新建会话";
+  /** 一条讨论在列表里的完整说法：同名时用更新时刻分开，非活动的一律标「已结束」。
+     下拉与顶栏浮层共用这一份措辞，两处不会出现「看到的和选到的不是同一句话」。 */
+  const sessionOptionLabel = (item: RelayAssistSession): string =>
+    `${item.title}${sessions.some((other) => other.id !== item.id && other.title === item.title)
+      ? ` · 更新 ${formatReadableDateTime(item.updatedAt, timeZone)}${item.id === sessionId ? " · 当前" : ""}` : ""}${
+      item.status !== "ACTIVE" ? " · 已结束" : ""}`;
+  /* 会话选择与「新建会话」拆成两个节点：非工具栏的会话带（?skill=assist 等子页）按原样并排，
+     顶栏不再放切换控件。select 与按钮各只有一份定义，由容器决定摆不摆。 */
+  const sessionSelectNode = <select data-testid="assist-session-select" aria-label="当前会话" title={session?.title ?? "选择会话"} disabled={creating || sessionChangeBlocked} value={sessionId ?? ""} onChange={(event) => selectSession(event.target.value || null)}><option value="">选择会话</option>{sessions.map((item) => <option key={item.id} value={item.id}>{sessionOptionLabel(item)}</option>)}</select>;
+  const newSessionButton = <button className={standalone && !session ? "primary-button primary-button--compact" : `secondary-button${standalone ? " secondary-button--compact" : ""}${conversationToolbar ? " collab-toolbar-icon-button" : ""}`} type="button" data-testid="assist-new-session" aria-label={newSessionLabel} title={newSessionLabel} disabled={creating || pendingCreate !== null || projectWriteBlockedReason !== null || sessionChangeBlocked} onClick={() => standalone && onRequestNewSession ? onRequestNewSession(newSession) : newSession()}>{standalone && <Plus size={14} aria-hidden="true" />}<span className="agent-assist-new-session-label">{newSessionLabel}</span></button>;
+  const sessionControls = <div className={`form-actions${standalone ? " agent-assist-session-controls" : ""}`}><label className={standalone ? "field field--row" : "field"}><span className={standalone ? "visually-hidden" : "field-label"}>当前会话</span>{sessionSelectNode}</label>{newSessionButton}</div>;
+  /**
+   * 顶栏右翼的「切换讨论」（2026-10-17）。左翼按用户指令只留会话名，不再有下拉框。
+   * 但一个作用域里确实能有多条讨论——右翼的「新建会话」就会造出第二条，而近期工作栏只列
+   * `taskId` 为空的会话、且新写出来的那条要等下一次读取才成行。没有这一颗键，刚建完会话
+   * 就回不到同作用域的另一条讨论，「新建会话」等于把用户推进死路。
+   * 因此浮层只在「本作用域读出 ≥2 条讨论」时出现：单条讨论的顶栏仍是纯净一行，
+   * 不多一套切换控件。走的是与旧下拉同一个 `selectSession`，未发送草稿的离开保护语义不改。
+   */
+  const sessionSwitcherNode = conversationToolbar && !firstComposer && session !== null && sessions.length > 1
+    ? <div className="collab-session-switcher" ref={sessionSwitcherRef} onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault(); event.stopPropagation();
+        setSessionSwitcherOpen(false); sessionSwitcherTriggerRef.current?.focus();
+      }}>
+        <button type="button" className="secondary-button secondary-button--compact collab-toolbar-icon-button collab-session-switcher-trigger"
+          ref={sessionSwitcherTriggerRef} data-testid="collab-session-switcher" aria-label="切换讨论" title="切换讨论"
+          aria-haspopup="true" aria-expanded={sessionSwitcherOpen} aria-controls="collab-session-switcher-panel"
+          disabled={sessionChangeBlocked}
+          onClick={() => setSessionSwitcherOpen((open) => !open)}>
+          <MessageSquareText size={18} aria-hidden="true" />
+        </button>
+        {sessionSwitcherOpen && <div className="collab-session-switcher-panel" id="collab-session-switcher-panel"
+          data-testid="collab-session-switcher-panel"
+          role="menu" aria-label="当前作用域的讨论">
+          {sessions.map((item) => <button key={item.id} type="button" role="menuitem"
+            className="collab-session-switcher-option" data-testid={`collab-session-option-${item.id}`}
+            title={item.title} aria-current={item.id === sessionId ? "true" : undefined}
+            disabled={item.id === sessionId || sessionChangeBlocked}
+            onClick={() => { setSessionSwitcherOpen(false); selectSession(item.id); }}>{sessionOptionLabel(item)}</button>)}
+        </div>}
+      </div>
+    : null;
   // 工作空间级讨论没有项目，资料选择器无从谈起：没有项目就没有可选的项目资料。
   const sourcePicker = session?.status === "ACTIVE" && target !== null
     ? <AssistSourcePicker key={`${connection.epoch}:${session.id}:${target.projectId ?? "none"}`} projectId={target.projectId} selectedRefs={selectedRefs} onChange={setSelectedRefs} /> : null;
   // 有会话时收成一行摘要，给消息区让出高度；无会话仍按设计系统 5.1 展开说明与新建入口。
   /* 协作页只保留一条会话控制带：不再叠「会话：标题」details +「当前会话」下拉双层壳。 */
   const sessionSwitcher = sessionControls;
+  /**
+   * 会话视图顶栏（2026-10-16 改左右两翼；2026-10-17 收成单行）。
+   * 左侧＝会话身份（会话名纯文字，完整标题留在 title）＋同一行的真实作用域（关联目标文字 / 会话目录文件夹图标）；
+   * 右侧＝动作区：「切换讨论」（本作用域有多条时）、「工作详情」开关，以及有任务/项目归属时的「新建会话」。
+   * 只读取本视图已持有的真实事实（target、session），绝不臆造项目名或运行状态。
+   * 新对话（firstComposer）没有会话，左侧只剩作用域两行——空白起步刻意不继承旧讨论。
+   * 2026-10-17 用户指令：左侧只显示会话名，不再放下拉框。跨作用域挑讨论走近期工作栏
+   * （行内 `recent-work-<会话 id>`，与路由切换同一套离开保护）；当前作用域里读出多条讨论时，
+   * 右翼才出现一颗「切换讨论」（见 sessionSwitcherNode），单条讨论的顶栏不多一套切换控件。
+   * 「新建会话」只在有归属时出现：全局「新对话」只建无作用域讨论，工作空间级这条与它重复。
+   */
+  const relatedGoals = session?.context?.projectGoals;
+  const entryGoalId = new URLSearchParams(location.search).get("goal");
+  const entryGoal = relatedGoals?.find((goal) => goal.goalId === entryGoalId);
+  const goalDescription = relatedGoals === undefined ? session ? "目标关联待核对" : "尚未关联目标"
+    : entryGoal ? entryGoal.title : relatedGoals.length > 0 ? relatedGoals.map((goal) => goal.title).join("、") : "尚未关联目标";
+  const directoryDescription = session?.context === undefined ? session ? "目录待核对" : "尚未绑定目录"
+    : session.context.workingDirectory === null ? "未绑定目录" : session.context.workingDirectory.canonicalRoot ?? "目录暂不可读取";
+  /* 占位状态不是取值：待核对／尚未关联／未绑定这些是「还没有事实」的说法，
+     顶栏按 muted 档呈现，避免与目录名这类真实取值同重（视觉归设计系统 §9.13）。 */
+  const goalIsPlaceholder = relatedGoals === undefined || (entryGoal === undefined && relatedGoals.length === 0);
+  const directoryIsPlaceholder = session?.context === undefined || session.context.workingDirectory === null
+    || session.context.workingDirectory.canonicalRoot === null;
+  const scopeValueClass = (placeholder: boolean): string => placeholder
+    ? "collab-toolbar-scope-value collab-toolbar-scope-value--placeholder" : "collab-toolbar-scope-value";
+  const conversationToolbarNode = conversationToolbar
+    ? <section className="collab-conversation-toolbar" data-testid="collab-conversation-toolbar">
+        <div className="collab-toolbar-info">
+          {session === null ? null : <p className="collab-toolbar-session" data-testid="collab-session-title" title={session.title}>{session.title}</p>}
+          <div className="collab-toolbar-crumb collab-toolbar-crumb--scope" data-testid="collab-conversation-scope"
+            title={`目标（项目关联）：${goalDescription}；会话目录：${directoryDescription}`}>
+            <span data-testid="collab-current-goal" title={goalDescription}><span className="collab-toolbar-scope-label">关联目标：</span><span className={scopeValueClass(goalIsPlaceholder)}>{goalDescription}</span></span>
+            <span className={`collab-toolbar-directory${directoryIsPlaceholder ? " collab-toolbar-directory--placeholder" : ""}`}
+              data-testid="collab-current-directory" role="img"
+              title={`会话目录：${directoryDescription}`} aria-label={`会话目录：${directoryDescription}`}>
+              <Folder aria-hidden="true" />
+            </span>
+          </div>
+        </div>
+        <div className="collab-toolbar-right">
+          {sessionSwitcherNode}
+          {!firstComposer && session !== null && target !== null ? newSessionButton : null}
+          {toolbarRight}
+        </div>
+      </section>
+    : null;
   return <section className={embedded ? "embedded-assist" : standalone ? "skill-page agent-assist" : "skill-page page-primary"} data-testid="assist-target"><div className={standalone ? "agent-assist-heading" : undefined}>{!embedded && !standalone && target !== null && <PageHeader testId="assist-page-head" title={target.title}
       meta={`${kind === "PROJECT" ? "项目 Assist" : "任务 Assist"} · ${id}`}
       lede={<>当前目标修订 v{target.revision}{target.executor && <> · 当前执行者 {target.executor}</>}</>}
@@ -859,7 +1089,8 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
       <p className="helper-text">消息固定写入当前会话；切换目标后重新读取。Assist 建议不会自动修改业务事实。</p>
     </PageHeader>}{!embedded && standalone && <Link className="text-link" to={kind === "PROJECT" ? `/projects/${id}` : `/tasks/${id}`}>返回{kind === "PROJECT" ? "项目" : "任务"}</Link>}</div>{loading && <p className="loading-text" role="status">正在刷新目标与会话…</p>}{error && <p className="action-error" role="alert">{error}</p>}
     {projectWriteBlockedReason && <p className="disabled-reason" data-testid="assist-archive-reason">{projectWriteBlockedReason}</p>}
-    {!externalReadBlockedReason && !(embedded && session) && !firstComposer && <section className={standalone ? `agent-assist-session-bar${!session ? " agent-assist-session-bar--empty" : ""}` : "surface-panel"}>{!standalone && <h2>会话</h2>}{standalone && !session && <div className="agent-session-welcome"><MessageSquareText aria-hidden="true" /><h2>开始讨论</h2></div>}{!session && preferredSessionId === null && <p className="helper-text" data-testid="assist-new-session-prompt">目标已选。可以新建会话，或在“当前会话”中返回已有讨论。</p>}{!sessions.length && preferredSessionId !== null && <p className="helper-text">当前目标还没有会话，先新建会话再发送消息。</p>}{sessionSwitcher}</section>}
+    {conversationToolbarNode}
+    {!externalReadBlockedReason && !(embedded && session) && !firstComposer && !conversationToolbar && <section className={standalone ? `agent-assist-session-bar${!session ? " agent-assist-session-bar--empty" : ""}` : "surface-panel"}>{!standalone && <h2>会话</h2>}{standalone && !session && <div className="agent-session-welcome"><MessageSquareText aria-hidden="true" /><h2>开始讨论</h2></div>}{!session && preferredSessionId === null && <p className="helper-text" data-testid="assist-new-session-prompt">目标已选。可以新建会话，或在“当前会话”中返回已有讨论。</p>}{!sessions.length && preferredSessionId !== null && <p className="helper-text">当前目标还没有会话，先新建会话再发送消息。</p>}{sessionSwitcher}</section>}
     {firstComposer && firstMessage}
     {/* 首条消息的错误与未决命令渲染在首条输入区之外：建会话成功后协作页会切到该 Task，
         这条部分成功事实必须继续留在对话区可发现、可核对，不能随输入区一起卸载。 */}
@@ -879,6 +1110,7 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
       <AssistSessionPanel key={`${connection.epoch}:${session.id}`} client={client} session={session} target={target} sources={selectedRefs}
         standalone={standalone} embedded={embedded} onNavigationStateChange={reportSessionNavigation}
         sourcePicker={sourcePicker}
+        firstMessageInflight={firstBusy || creating || pendingFirst !== null}
         sourcesOpen={sourcesOpen} onToggleSources={() => setSourcesOpen((open) => !open)}
         preferredSkillId={preferredSkillId}
         initialExecution={first.execution?.sessionId === session.id ? first.execution : null}
@@ -887,7 +1119,6 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
         proposalActionHost={proposalActionHost}
         externalReadBlockedReason={externalReadBlockedReason}
         writeBlockedReason={projectWriteBlockedReason}
-        executionScope={executionScopeReady ? executionScope : null}
         onExecutionPrepared={onExecutionPrepared}
         refreshTarget={async () => { await loadTarget(session.id); onTargetChanged?.(); }}
         onChatSessionCreated={(created) => {
@@ -897,6 +1128,7 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
         }}
         clearSentSources={(sent) => setSelectedRefs((current) => JSON.stringify(current) === JSON.stringify(sent) ? [] : current)}
         modeSwitch={modeSwitch}
+        modeHints={<ConversationModeHints mode={wantedMode} lockedReason={modeLockedReason} />}
         recordLearning={recordLearning}
         onLearningTransfer={(instruction, background, sourceRefs) => {
           if (modeLocked || sessionNavigation.pending !== null) return;
@@ -913,10 +1145,348 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
           proceed();
         }}
         composerHeader={composerHeader}
+        onRequestFolder={onRequestFolder}
+        onToggleSourceRef={toggleSourceRef}
+        onOpenRecentFolder={onOpenRecentFolder}
+        recentFolders={recentFolders}
         onInflightChange={setSessionInflight} />
       {!externalReadBlockedReason && embedded && <details className="embedded-assist-sources"><summary>会话与本次资料 · {session.title}</summary>{sessionControls}{sourcePicker}</details>}</>}
   </section>;
 }
+
+/**
+ * 输入器左侧的「+」上下文入口（效果图 V4.2 的 attach 按钮）。
+ *
+ * 一级回答「用户想做什么」，二级回答「具体选什么」：四项已存在的入口不再平铺成一张面板，
+ * 而是各自带一个向右展开的二级面板。所有内容都接入**已有**能力，不新造业务：
+ * 资料检索走既有资料选择器与真实对话来源，目录走协作页持有的目录条与真实近期目录，
+ * 命令清单复用 `getChatCommands` 与输入框内联菜单同一份登记。
+ *
+ * 一级与二级共用同一套 `AttachRow`，四项能力不各写一份菜单；禁用项如实禁用并把接入点
+ * 写进所在面板的脚注，绝不给出点了没反应或会臆造状态的入口。
+ *
+ * 交互：点击一级展开/收起二级（不用 hover——指针从一级移到二级的缝隙会闪断，且本项目
+ * 既有弹层都是点击语义）；二级执行后收起两级并保留草稿；点击弹层外部关闭；Esc 先收二级
+ * 再收一级；↑↓ 在当前层内移动，→ 展开二级并聚焦其首行，← 收二级回到原一级行，Enter 激活。
+ * 二级在右侧放不下时翻到左侧、下方放不下时按底部对齐，都不放不下时面板内滚动。
+ */
+type AttachSection = "sources" | "folder" | "skill" | "command";
+
+const attachSectionLabels: Record<AttachSection, string> = {
+  sources: "选择文件与资料", folder: "选择工作文件夹", skill: "选择 Skill 生成", command: "输入命令"
+};
+
+/**
+ * 尚未接入的能力必须在所在面板里如实标注，而不是让入口看起来可用。
+ * 每条都写明接入点：本地文件选择要有宿主文件选择命令（`desktopHost` 目前只有目录选择器）；
+ * 工作区管理要有独立管理工作区/受管根 UI；Skill 生成与要有生成用例与产物落库。
+ */
+const attachPendingNotes: Record<AttachSection, string | null> = {
+  sources: "本地文件选择尚未接入（桌面宿主当前只提供目录选择器）；可用下方检索、对话引用与最近引用。",
+  folder: "工作区管理尚未接入；目录请用上方目录条或下方最近目录切换。",
+  skill: "Skill 生成与管理尚未接入；当前只能在发送选项里选择已有 Skill。",
+  command: null
+};
+
+/** 每次消息可选资料版本的上限：与 `AssistSourcePicker` 同一条既有约束，不另立第二套。 */
+const attachSourceLimit = 10;
+
+type AttachRowSpec = {
+  readonly testId: string;
+  readonly level: 1 | 2;
+  readonly label: string;
+  readonly icon?: ReactNode;
+  /** 右侧轻量状态：计数用文本，布尔态用 `selected` 的对勾。 */
+  readonly hint?: string;
+  readonly title?: string;
+  readonly disabled?: boolean;
+  readonly selected?: boolean;
+  /** 禁用原因所在脚注的 id：读屏据此听到被合并的同类原因。 */
+  readonly describedBy?: string;
+  /** 一级条目的二级面板身份；只有能展开的行才有。 */
+  readonly section?: AttachSection;
+  readonly expanded?: boolean;
+  readonly onSelect: () => void;
+};
+
+/**
+ * 一行菜单项：一级与二级共用同一实现。图标、提示、选中标记、chevron 全由数据驱动，
+ * 因此「选择文件与资料」等四项不各写一份菜单。
+ */
+function AttachRow({ testId, level, label, icon, hint, title, disabled, selected, describedBy,
+  section, expanded, onSelect }: AttachRowSpec) {
+  /* 禁用的行不提供展开：显示 chevron / aria-expanded 等于承诺一个点不开的二级面板。 */
+  const disclosure = section !== undefined && disabled !== true ? section : undefined;
+  return <button type="button" className="agent-chat-attach-item" data-testid={testId}
+    data-level={level} data-active={disclosure !== undefined && expanded === true ? "true" : "false"}
+    disabled={disabled} data-section={disclosure} aria-describedby={describedBy}
+    aria-expanded={disclosure === undefined ? undefined : expanded === true}
+    title={title} onClick={onSelect}>
+    <span className="agent-chat-attach-item-icon" aria-hidden="true">{icon ?? null}</span>
+    <span className="agent-chat-attach-item-label">{label}</span>
+    {/* 尾组：状态位与 chevron 由它整组右对齐（`margin-left: auto`），短行多出来的空间因此落在
+        文字与尾组之间，行与面板的两条内边距才对称（设计系统 §9.14）。 */}
+    {(hint !== undefined || selected === true || disclosure !== undefined) &&
+      <span className="agent-chat-attach-item-tail">
+        {hint !== undefined && <span className="agent-chat-attach-item-hint">{hint}</span>}
+        {selected === true && <Check className="agent-chat-attach-item-check" aria-hidden="true" />}
+        {disclosure !== undefined && <ChevronRight className="agent-chat-attach-item-chevron" aria-hidden="true" />}
+      </span>}
+  </button>;
+}
+
+/** 导出给契约测试直接挂载：菜单框架（两级开合、键盘、翻转）不依赖整条 /agent 路由。 */
+export function ComposerAttach({
+  onCommand, onSources, onSkill, onFolder, onOpenRecentFolder, onPickCommand,
+  client = null, mode = "AGENT", hasSession = false,
+  recentFolders = [], folderPath = null, folderBound = false,
+  selectedRefs = [], conversationRefs = [], recentRefs = [], onToggleSourceRef,
+  skillSelected = false, notes
+}: {
+  onCommand: () => void;
+  onSources?: () => void; onSkill?: () => void; onFolder?: () => void;
+  /** 直接切换本机最近目录：与目录条走同一条 OpenWorkingDirectory 入口，不新建第二套目录状态。 */
+  onOpenRecentFolder?: (canonicalRoot: string) => void;
+  /** 把某个登记命令填进草稿（只编辑草稿，不发送）。 */
+  onPickCommand?: (name: string) => void;
+  client?: RelayApiClient | null;
+  /** 命令清单按档过滤 METHOD 项：与输入框内联菜单同一条规则。 */
+  mode?: RelayConversationMode;
+  hasSession?: boolean;
+  recentFolders?: readonly RecentWorkingDirectory[];
+  folderPath?: string | null;
+  folderBound?: boolean;
+  selectedRefs?: readonly RelayAssistSourceRef[];
+  /** 当前会话里真实出现过的资料引用（来自消息来源，不是推断）。 */
+  conversationRefs?: readonly RelayAssistSourceRef[];
+  /** 本机最近引用过的资料版本（本地偏好，见 recentSourceRefs）。 */
+  recentRefs?: readonly RelayAssistSourceRef[];
+  onToggleSourceRef?: (ref: RelayAssistSourceRef) => void;
+  skillSelected?: boolean;
+  notes?: { text: string; keys: string[] }[];
+}) {
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const subRef = useRef<HTMLDivElement>(null);
+  const noteScope = useId();
+  const [sub, setSub] = useState<AttachSection | null>(null);
+  const [flip, setFlip] = useState(false);
+  const [alignBottom, setAlignBottom] = useState(false);
+  /** 命令清单只在二级命令面板打开时读取一次；与输入框内联菜单共用同一份登记响应。 */
+  const [catalog, setCatalog] = useState<{ client: RelayApiClient;
+    items: readonly RelayChatCommand[] | null; error: string | null } | null>(null);
+
+  const close = (returnFocus: boolean) => {
+    const node = detailsRef.current;
+    if (!node) return;
+    node.open = false;
+    setSub(null);
+    if (returnFocus) node.querySelector("summary")?.focus({ preventScroll: true });
+  };
+  /* Esc 只收起弹层并回到「+」，不触碰输入框草稿。必须 preventDefault + stopPropagation 并先于
+     section 的 onPanelKeyDown 跑完，否则这次 Esc 会被 Esc Esc 停止序列记成第一下。组词期间的 Esc 归输入法。
+     二级打开时第一次 Esc 只收二级，把焦点还给一级那一行。 */
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDetailsElement>) => {
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 ||
+      event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const node = detailsRef.current;
+    if (!node?.open) return;
+    /** 键盘事件来自当前聚焦的行：层级与行序都按它算，不另猜一份焦点事实。 */
+    const source = event.target instanceof HTMLElement ? event.target : null;
+    const inSub = source !== null && source.closest("[data-submenu]") !== null;
+    const rowsIn = (level: 1 | 2) => {
+      const scope = level === 1 ? menuRef.current : subRef.current;
+      return Array.from(scope?.querySelectorAll<HTMLButtonElement>(
+        `button.agent-chat-attach-item[data-level="${level}"]:not(:disabled)`) ?? []);
+    };
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (sub !== null && inSub) {
+        const owner = sub;
+        setSub(null);
+        window.requestAnimationFrame(() => menuRef.current
+          ?.querySelector<HTMLButtonElement>(`[data-testid="assist-attach-${owner}"]`)?.focus({ preventScroll: true }));
+        return;
+      }
+      close(true);
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      const rows = rowsIn(inSub ? 2 : 1);
+      if (rows.length === 0) return;
+      event.preventDefault();
+      const index = source === null ? -1 : rows.indexOf(source as HTMLButtonElement);
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      const next = rows[index < 0 ? (step > 0 ? 0 : rows.length - 1) : (index + step + rows.length) % rows.length];
+      next?.focus({ preventScroll: true });
+      return;
+    }
+    if (event.key === "ArrowRight" && !inSub) {
+      const owner = source?.closest<HTMLButtonElement>("button[data-section]");
+      const section = owner?.dataset.section as AttachSection | undefined;
+      if (owner === null || owner === undefined || section === undefined || owner.disabled) return;
+      event.preventDefault();
+      setSub(section);
+      window.requestAnimationFrame(() => rowsIn(2)[0]?.focus({ preventScroll: true }));
+      return;
+    }
+    if (event.key === "ArrowLeft" && inSub) {
+      const owner = sub;
+      event.preventDefault();
+      setSub(null);
+      window.requestAnimationFrame(() => {
+        if (owner !== null) menuRef.current
+          ?.querySelector<HTMLButtonElement>(`[data-testid="assist-attach-${owner}"]`)?.focus({ preventScroll: true });
+      });
+    }
+  };
+  // 原生 details 不会因为点击别处而收起，弹层得自己处理外部按下；同时把二级一并收掉。
+  useEffect(() => {
+    const onPointerdown = (event: PointerEvent) => {
+      const node = detailsRef.current;
+      if (!node?.open || event.button !== 0 || node.contains(event.target as Node | null)) return;
+      node.open = false; setSub(null);
+    };
+    document.addEventListener("pointerdown", onPointerdown, true);
+    return () => document.removeEventListener("pointerdown", onPointerdown, true);
+  }, []);
+  /* 二级方向在挂载后按实际空间定：右侧放不下翻到左侧，下方放不下按底对齐。
+     面板宽度由 CSS 固定，因此这里量的宽高不会随方向再变，不会来回抖。 */
+  useLayoutEffect(() => {
+    if (sub === null) { setFlip(false); setAlignBottom(false); return; }
+    const menu = menuRef.current; const panel = subRef.current;
+    if (!menu || !panel) return;
+    const rect = menu.getBoundingClientRect();
+    const width = panel.offsetWidth; const height = panel.offsetHeight;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const gap = 8;
+    setFlip(rect.right + gap + width > viewportWidth && rect.left - gap - width >= 0);
+    setAlignBottom(rect.top + height > viewportHeight && rect.bottom - height >= 0);
+  }, [sub]);
+  useEffect(() => {
+    if (sub !== "command" || !client || catalog?.client === client && catalog.items !== null) return;
+    let live = true;
+    setCatalog({ client, items: null, error: null });
+    void client.getChatCommands().then((items) => {
+      if (live) setCatalog({ client, items, error: null });
+    }).catch(() => {
+      if (live) setCatalog({ client, items: null, error: "命令清单读取失败，草稿与输入不受影响。" });
+    });
+    return () => { live = false; };
+  }, [sub, client]);
+  const noteId = (key: string) => {
+    const index = notes?.findIndex((note) => note.keys.includes(key)) ?? -1;
+    return index < 0 ? undefined : `${noteScope}-note-${index}`;
+  };
+  const run = (fn?: () => void) => () => { close(true); fn?.(); };
+  const toggleSub = (section: AttachSection) => () => setSub((current) => current === section ? null : section);
+  const refKey = (ref: RelayAssistSourceRef) => `${ref.kind}:${ref.rootId}:${ref.version}`;
+  const refSelected = (ref: RelayAssistSourceRef) =>
+    selectedRefs.some((selected) => refKey(selected) === refKey(ref));
+  /** 已选满时未选中项不可再选：上限与资料选择器一致，超限不静默吞掉点击。 */
+  const sourceTogglesBlocked = onToggleSourceRef !== undefined && selectedRefs.length >= attachSourceLimit;
+  /** 引用行只是「本次消息的候选输入」开关：选中/取消都不关闭面板，方便连续多选。 */
+  const sourceRefRow = (ref: RelayAssistSourceRef, index: number) => {
+    const selected = refSelected(ref);
+    return <AttachRow key={`${refKey(ref)}:${index}`} level={2} testId={`assist-attach-ref-${index}`}
+      icon={<FileText />} label={`${assistSourceKindLabels[ref.kind]} · v${ref.version}`}
+      title={`${ref.kind} · v${ref.version} · ${ref.rootId}`} selected={selected}
+      disabled={sourceTogglesBlocked && !selected} onSelect={() => onToggleSourceRef?.(ref)} />;
+  };
+  const catalogItems = catalog?.client === client ? catalog.items : null;
+  const commandEntries = (catalogItems ?? []).filter((entry) => entry.kind !== "METHOD" || mode === "AGENT");
+  const sectionLabel = (text: string) => <p className="agent-chat-attach-section">{text}</p>;
+  const emptyLine = (text: string) => <p className="agent-chat-attach-empty">{text}</p>;
+  /** 一级四项：身份与排序固定，状态提示来自真实事实（已选资料数、已绑目录、已选 Skill）。 */
+  const level1Row = (key: AttachSection, spec: Omit<AttachRowSpec, "testId" | "level" | "section" | "expanded" | "describedBy" | "onSelect">): AttachRowSpec =>
+    ({ ...spec, testId: `assist-attach-${key}`, level: 1, section: key,
+      describedBy: noteId(key), expanded: sub === key, onSelect: toggleSub(key) });
+  const level1: readonly AttachRowSpec[] = [
+    level1Row("sources", { icon: <FileText />, label: attachSectionLabels.sources,
+      hint: selectedRefs.length > 0 ? String(selectedRefs.length) : undefined,
+      disabled: onSources === undefined }),
+    level1Row("folder", { icon: <Folder />, label: attachSectionLabels.folder,
+      selected: folderBound, disabled: onFolder === undefined && onOpenRecentFolder === undefined }),
+    level1Row("skill", { icon: <Sparkles />, label: attachSectionLabels.skill,
+      selected: skillSelected, disabled: onSkill === undefined }),
+    level1Row("command", { icon: <Terminal />, label: attachSectionLabels.command })
+  ];
+
+  const submenu = (section: AttachSection) => {
+    if (section === "sources") return <>
+      <AttachRow level={2} testId="assist-attach-local-file" icon={<Upload />} label="选择本地文件"
+        hint="暂未接入" disabled onSelect={() => {}} />
+      <AttachRow level={2} testId="assist-attach-search" icon={<Search />} label="检索项目资料"
+        disabled={onSources === undefined} onSelect={run(onSources)} />
+      {sectionLabel("对话中的资料")}
+      {conversationRefs.length === 0 ? emptyLine("当前对话还没有可引用的资料")
+        : conversationRefs.map(sourceRefRow)}
+      {sectionLabel("最近引用")}
+      {recentRefs.length === 0 ? emptyLine("本机还没有最近引用")
+        : recentRefs.map((ref, index) => sourceRefRow(ref, conversationRefs.length + index))}
+    </>;
+    if (section === "folder") return <>
+      <AttachRow level={2} testId="assist-attach-folder-pick" icon={<FolderOpen />} label="选择文件夹"
+        disabled={onFolder === undefined} onSelect={run(onFolder)} />
+      {sectionLabel("最近使用")}
+      {recentFolders.length === 0 ? emptyLine("本机还没有最近目录")
+        : recentFolders.map((item, index) => <AttachRow key={item.canonicalRoot} level={2}
+          testId={`assist-attach-recent-folder-${index}`} icon={<Folder />} label={item.displayName}
+          title={item.canonicalRoot} selected={folderPath !== null && item.canonicalRoot === folderPath}
+          disabled={onOpenRecentFolder === undefined}
+          onSelect={run(() => onOpenRecentFolder?.(item.canonicalRoot))} />)}
+      <AttachRow level={2} testId="assist-attach-workspace-manage" icon={<Settings />} label="管理工作区"
+        hint="暂未接入" disabled onSelect={() => {}} />
+    </>;
+    if (section === "skill") return <>
+      <AttachRow level={2} testId="assist-attach-skill-describe" icon={<Sparkles />} label="从描述生成 Skill"
+        hint="暂未接入" disabled onSelect={() => {}} />
+      <AttachRow level={2} testId="assist-attach-skill-file" icon={<FileText />} label="从文件生成 Skill"
+        hint="暂未接入" disabled onSelect={() => {}} />
+      <AttachRow level={2} testId="assist-attach-skill-existing" icon={<ListTree />} label="选择已有 Skill"
+        disabled={onSkill === undefined} onSelect={run(onSkill)} />
+    </>;
+    return <>
+      <AttachRow level={2} testId="assist-attach-command-focus" icon={<Terminal />} label="输入命令"
+        onSelect={run(onCommand)} />
+      {sectionLabel("登记命令")}
+      {client === null ? emptyLine("连接本机 API 后才能读取命令清单")
+        : catalog?.error != null ? emptyLine(catalog.error)
+        : catalogItems === null ? emptyLine("正在读取命令…")
+        : commandEntries.length === 0 ? emptyLine("没有可用的登记命令")
+        : commandEntries.map((entry) => <AttachRow key={entry.name} level={2}
+          testId={`assist-attach-command-${entry.name}`} icon={<Terminal />}
+          label={`/${entry.name} · ${entry.title}`}
+          hint={chatCommandStatus(entry, hasSession)}
+          title={`${entry.summary} · 用法：${entry.usage} · 范围：${chatCommandScope(entry)}`}
+          disabled={onPickCommand === undefined}
+          onSelect={run(() => onPickCommand?.(entry.name))} />)}
+    </>;
+  };
+
+  return <details className="agent-chat-attach" ref={detailsRef} onKeyDown={onKeyDown}
+    onToggle={(event) => { if (!(event.currentTarget as HTMLDetailsElement).open) setSub(null); }}>
+    <summary className="agent-chat-attach-btn" data-testid="assist-attach" aria-label="添加上下文与附件" title="添加上下文与附件">
+      <Plus aria-hidden="true" /></summary>
+    <div className="agent-chat-attach-menu" ref={menuRef} data-level="1">
+      {level1.map((row) => <AttachRow key={row.testId} {...row} />)}
+      {(notes ?? []).map((note, index) => <p className="agent-chat-attach-note"
+        id={`${noteScope}-note-${index}`} key={note.text}>{note.text}</p>)}
+      {sub !== null && <div className="agent-chat-attach-submenu" ref={subRef} data-submenu="true"
+        data-level="2" data-section={sub} data-flip={flip ? "left" : "right"}
+        data-align={alignBottom ? "bottom" : "top"} role="group" aria-label={attachSectionLabels[sub]}>
+        {submenu(sub)}
+        {attachPendingNotes[sub] !== null && <p className="agent-chat-attach-subnote">{attachPendingNotes[sub]}</p>}
+      </div>}
+    </div>
+  </details>;
+}
+
+/** 「+」弹层共用脚注：目录入口是常驻目录条而不是弹层里的选择器，禁用时必须写明去哪里。 */
+const attachFolderNote = { text: "在上方目录条更换工作目录", keys: ["folder"] };
+
 
 function canPreview(message: RelayAssistMessage): boolean {
   return message.role === "ASSISTANT" && message.intent === "DISCUSS" && message.skill === null &&
@@ -970,8 +1540,8 @@ function formatUsagePercent(value: number, limit: number): string {
 
 /**
  * 输入区底栏的用量指示：左文字是缓存命中率，右圆环是最近一次调用的上下文占用。
- * 三种状态必须能区分：没有调用、Provider 未上报、以及有真实读数。缺数据时写"未采集"，
- * 不把 null 画成 0%，也不拿配置值冒充实际用量。
+ * 命中率只在 Provider 真的上报缓存读数时出现；没有读数时这一格直接留空，
+ * 既不写"未采集"也不把 null 画成 0%，更不拿配置值冒充实际用量。占用圆环始终在。
  */
 function ContextMeter({ ratio, hitRate, call, limit }: { ratio: number | null;
   hitRate: number | null; call: RelayAssistMessage | null; limit: number | null }) {
@@ -980,10 +1550,9 @@ function ContextMeter({ ratio, hitRate, call, limit }: { ratio: number | null;
   const meterText = call === null ? "尚无模型调用"
     : ratio === null ? `输入 ${call.usage.inputTokens ?? "未知"} tokens · 占用不可算`
       : `输入 ${call.usage.inputTokens} / ${limit} tokens（${percent}%）`;
-  const hitText = hitRate === null ? "缓存未采集"
-    : `缓存命中 ${formatUsagePercent(hitRate, 1)}%`;
+  const hitText = hitRate === null ? null : `缓存命中 ${formatUsagePercent(hitRate, 1)}%`;
   return <div className="agent-chat-usage">
-    <span className="agent-chat-usage-text" data-testid="assist-cache-hit">{hitText}</span>
+    {hitText !== null && <span className="agent-chat-usage-text" data-testid="assist-cache-hit">{hitText}</span>}
     <span className="agent-chat-context-meter" data-testid="assist-context-meter"
       data-state={ratio === null ? "unknown" : high ? "high" : "normal"}
       role="img" aria-label={`上下文占用 ${meterText}`} title={meterText}>
@@ -1100,8 +1669,8 @@ function AssistMessageRow({ client, target, message, preview, previewError, onRe
         aria-label={message.status === "PENDING" ? "已提交，等待处理，正在生成" : "正在生成"}>
         <i aria-hidden="true" /><i aria-hidden="true" /><i aria-hidden="true" /></p>}
     {message.role === "ASSISTANT" && message.status === "COMPLETED" && <div className="agent-message-footer">
-      {/* 单行用量不折叠：只有一行事实；与复制键同排，少占竖直空白。 */}
-      <p className="helper-text agent-message-usage" data-testid={`assist-usage-${message.id}`}>用量：输入 {message.usage.inputTokens ?? "未知"}、输出 {message.usage.outputTokens ?? "未知"} tokens</p>
+      {/* 复制键在左、用量在右（2026-10-16 用户指令）：键是行首第一项，左缘因此与原用量起点
+          对齐；用量仍是不折叠的单行事实，与复制键同排，少占竖直空白。 */}
       {/* 纯客户端剪贴板动作：不新增命令、不落库、不假装是已保存的反馈。只有图标，
           可读名称与完成状态都放在 aria-label / title 上。 */}
       <button className="icon-button agent-message-copy" type="button"
@@ -1112,6 +1681,7 @@ function AssistMessageRow({ client, target, message, preview, previewError, onRe
           () => setCopyDone(message.id), () => setCopyDone(null))}>
         <Copy aria-hidden="true" />
       </button>
+      <p className="helper-text agent-message-usage" data-testid={`assist-usage-${message.id}`}>用量：输入 {message.usage.inputTokens ?? "未知"}、输出 {message.usage.outputTokens ?? "未知"} tokens</p>
     </div>}
     </div>
   </article>;
@@ -1502,8 +2072,9 @@ function StateMaintenanceReceipt({ entry, onRetry, onWithdraw, onToggleUndoConfi
 function AssistSessionPanel({ client, session, target, sources, writeBlockedReason,
   refreshTarget, clearSentSources, standalone, onNavigationStateChange, sourcesOpen, onToggleSources,
   sourcePicker, preferredSkillId, embedded, externalReadBlockedReason, proposalActionHost,
-  executionScope, onExecutionPrepared, initialExecution, confirmedFirstMessageCommandId,
-  initialMaintenance, modeSwitch, onInflightChange, composerHeader, onLearningTransfer, recordLearning = true,
+  onExecutionPrepared, initialExecution, confirmedFirstMessageCommandId,
+  initialMaintenance, modeSwitch, modeHints, onInflightChange, composerHeader, onLearningTransfer, recordLearning = true,
+  onRequestFolder, firstMessageInflight = false, onToggleSourceRef, onOpenRecentFolder, recentFolders,
   onChatSessionCreated }: { client: RelayApiClient;
   session: RelayAssistSession; target: AssistTarget | null; sources: readonly RelayAssistSourceRef[];
   writeBlockedReason: string | null;
@@ -1514,7 +2085,6 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   sourcesOpen: boolean; onToggleSources: () => void;
   sourcePicker: ReactNode; preferredSkillId?: string; embedded?: boolean;
   externalReadBlockedReason: string | null; proposalActionHost?: HTMLElement | null;
-  executionScope?: RelayWorkingDirectory | null;
   onExecutionPrepared?: ((taskId: string) => void) | undefined;
   /** 首条消息的解释结果：交给本面板既有 Owner 渲染与执行，避免出现第二套确认门。 */
   initialExecution?: RelayConversationExecution | null;
@@ -1523,8 +2093,19 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   initialMaintenance?: RelayStateMaintenanceRequest | null;
   /** 会话模式控件由外层持有（它才有会话与导航事实），面板只负责放在工具行左侧。 */
   modeSwitch?: ReactNode;
+  /** 档位说明区（在途锁定原因、学习档说明、助手档只读说明）同由外层持有，面板只负责放在**卡片下方**。 */
+  modeHints?: ReactNode;
+  /** 「+」菜单里的文件夹入口：聚焦协作页持有的目录细条，本面板不发起目录命令。 */
+  onRequestFolder?: () => void;
+  /** 「+」二级菜单里引用行的开关：只改本次消息的候选输入，不发送、不授予权限。 */
+  onToggleSourceRef?: (ref: RelayAssistSourceRef) => void;
+  /** 直接切换本机最近目录：由协作页沿既有目录入口执行，本面板不持有目录状态。 */
+  onOpenRecentFolder?: (canonicalRoot: string) => void;
+  recentFolders?: readonly RecentWorkingDirectory[];
   onLearningTransfer?: (instruction: string, background: string, sourceRefs: readonly RelayAssistSourceRef[]) => void;
   recordLearning?: boolean;
+  /** 首条消息在建/在途/待核对：此间空会话不渲染欢迎空态，保留原「还没有消息」避免与在途回执同屏。 */
+  firstMessageInflight?: boolean;
   /**
    * 在途状态上报。切档不是停止，禁用判定必须在真正看得见在途的那一层做，
    * 所以由面板把事实送上去，而不是外层另猜一份。
@@ -1554,6 +2135,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   }, [initialExecution]);
   const [executionBusy, setExecutionBusy] = useState(false);
   const [executionError, setExecutionError] = useState<string | null>(null);
+  const [projectionReload, setProjectionReload] = useState(0);
   const [previews, setPreviews] = useState<Readonly<Record<string, RelayAssistLivePreview>>>({});
   const [previewErrors, setPreviewErrors] = useState<Readonly<Record<string, PreviewReadError>>>({});
   const [previewRetry, setPreviewRetry] = useState(0);
@@ -1562,6 +2144,10 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  /** 本机最近引用过的资料版本（展示偏好）：「+」二级菜单的「最近引用」直接读它。 */
+  const [recentRefs, setRecentRefs] = useState<readonly RelayAssistSourceRef[]>(() => readRecentSourceRefs());
+  /** 会话输入器的中文组词状态：草稿辅助据此保证组词期间零请求（工作台 §30.2）。 */
+  const [composing, setComposing] = useState(false);
   const [intent, setIntent] = useState<AssistIntent>("DISCUSS");
   const [skills, setSkills] = useState<readonly RelaySkillDefinition[]>([]);
   const [skillError, setSkillError] = useState<string | null>(null);
@@ -1574,8 +2160,25 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   const disposed = useRef(false);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const transcriptContentRef = useRef<HTMLDivElement>(null);
+  /** 时间线导航只认这一个正文滚动容器：它读位置、它执行跳转，不新增第二个消息流滚动区。 */
+  const getTranscriptOwner = useCallback(() => transcriptRef.current, []);
   const followLatest = useRef(true);
   const [atLatest, setAtLatest] = useState(true);
+  /* 正文是否已滚过转录区上下缘：只在「真的有内容被边缘切走」时挂渐隐遮罩
+     （上缘那条带在协作页顶栏下方，下缘那条在目录细条上方）。
+     与 atLatest 一样按同值短路，滚动本身不重复渲染。 */
+  const [awayFromTop, setAwayFromTop] = useState(false);
+  const [awayFromBottom, setAwayFromBottom] = useState(false);
+  /** 上下缘渐隐的唯一判定：滚动、内容换掉与自动跟到底都走这里，不留第二套推断。
+     只看尺寸不碰阅读意图（followLatest 仍只由真实滚动决定）。 */
+  function syncEdgeFades(element: HTMLDivElement) {
+    if (element.clientHeight === 0) return;
+    const remaining = element.scrollHeight - element.scrollTop - element.clientHeight;
+    // 阈值取 1px 而不是 0：高 DPI 下 scrollTop 是小数，停在底部时 remaining 可能是 0.4，
+    // 那样会把渐变永久压在最后一条消息上——读起来像渲染坏了。
+    setAwayFromTop(element.scrollTop > 0);
+    setAwayFromBottom(remaining > 1);
+  }
   const previewSuccessAt = useRef<Record<string, string>>({});
   /* 刚提交、尚未在消息列表里可见的那条 ASSISTANT 回复的 id。
      不用「有没有在途消息」推导：消息列表要等 refresh() 回来才带上新行，
@@ -1588,6 +2191,16 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   /** Esc Esc 的第一次按键：记下它指向的那条 RUNNING 回复，超过间隔或换了回复就失效。 */
   const stopSequence = useRef<{ readonly messageId: string; readonly deadline: number } | null>(null);
   const [callLimit, setCallLimit] = useState<number | null>(null);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    setSelectedModel(null);
+    void client.getSessionModelSelection(session.id).then((selection) => {
+      if (active) setSelectedModel(selection?.model ?? null);
+    }).catch(() => { /* 打开选择器时仍重新读取目录；不据此变更服务端选择。 */ });
+    return () => { active = false; };
+  }, [client, session.id]);
   useEffect(() => {
     let active = true;
     // 圆环分母只用于表达"这次调用占了多少预算"。读不到就留空，不拿别的数字顶替。
@@ -1611,6 +2224,9 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     const transcript = transcriptRef.current;
     if (standalone && transcript && transcript.clientHeight > 0 && followLatest.current)
       transcript.scrollTop = transcript.scrollHeight;
+    // 换会话、消息整批替换都可能让溢出消失而滚动值原地不动（不触发 scroll）：
+    // 渐隐必须跟着重算，否则上一条长会话留下的遮罩会永久压在短会话的第一条消息上。
+    if (transcript) syncEdgeFades(transcript);
   }, [standalone, messages, previews, proposals]);
   useLayoutEffect(() => {
     const transcript = transcriptRef.current;
@@ -1619,6 +2235,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     const observer = new ResizeObserver(() => {
       // 隐藏布局不能重置阅读意图；再次显示时由尺寸通知继续原来的跟随状态。
       if (followLatest.current && transcript.clientHeight > 0) transcript.scrollTop = transcript.scrollHeight;
+      // 视口自己变矮（队列面板出现、窗口变高）不产生 scroll 事件，但底缘切掉的确实变多了。
+      syncEdgeFades(transcript);
     });
     observer.observe(transcript); observer.observe(content);
     return () => observer.disconnect();
@@ -1630,6 +2248,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       pending: pending ? { commandId: pending.commandId,
         commandType: pending.kind === "send" ? "RequestAssistMessage" : pending.kind === "cancel"
           ? "CancelAssistMessage" : pending.kind === "restart" ? "ExecuteChatCommand"
+            : pending.kind === "model" ? "SelectSessionModel"
             : "AcceptAssistProposal", sessionId: session.id } : learningNavigation.pending,
       restoreFocus: restoreDraftFocus });
   }, [standalone, embedded, draft, skillInputText, selectedSkillKey, intent, pending, session.id,
@@ -1752,7 +2371,12 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       (retry && pending !== action)) return;
     setBusy(true); setPending(action); setActionError(null); setNotice(null);
     try {
-      if (action.kind === "restart") {
+      if (action.kind === "model") {
+        const selection = await client.selectSessionModel({ sessionId: session.id, commandId: action.commandId, model: action.model });
+        if (disposed.current) return;
+        setSelectedModel(selection.model); setDraft((current) => chatControlFromText(current) === "model" ? "" : current);
+        setNotice(`后续新消息首选 ${selection.model}；活动 Run 保留原策略。`);
+      } else if (action.kind === "restart") {
         const result = await client.restartAssistSession({ sessionId: session.id, commandId: action.commandId,
           text: action.content, system: action.system });
         await finishChatSession(result);
@@ -1763,7 +2387,6 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
           content: action.content, sourceRefs: action.sources,
           ...(action.recordLearning === undefined ? {} : { recordLearning: action.recordLearning }) };
         // 只有普通 DISCUSS 消息会被解释成执行候选；Skill 与提案意图保持原语义。
-        const interpretable = !readonlyMode && (action.skillRef === null || action.skillRef === undefined);
         // 三条分支是排他的：助手档既没有 intent 也没有 skill_ref，载荷里两个都不出现。
         const sent = action.skillRef && action.skillInput
           ? await client.requestAssistMessage({ ...common, skillRef: action.skillRef, skillInput: action.skillInput })
@@ -1774,6 +2397,9 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
               : await client.requestAssistMessage({ ...common, intent: action.intent ?? "DISCUSS" });
         if (disposed.current) return;
         setDraft(""); clearSentSources(action.sources);
+        // 已受理：这次用过的资料版本进入本机「最近引用」。
+        setRecentRefs(rememberSourceRefs(action.sources));
+        setProjectionReload((value) => value + 1);
         // 202 只表示已提交，回复行可能还没出现在列表里。记下它的 id，
         // 让输入器从这一刻起就保持途，不等 refresh() 回来——
         // 否则会在「无在途」与「在途」之间跳一下，读起来是一下闪。
@@ -1783,11 +2409,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
         // 2026-10-04 按用户判断去掉「消息已排队」：这条只是复述已提交的 202 回执，
         // 不携带新事实；消息本身的 PENDING/RUNNING 状态已经在消息行里说明。
         // 其余 notice（取消、提案回执、原命令回执）仍保留，它们各自说明不同的结果。
-        if (interpretable) void requestExecution(sent.userMessageId);
-        // 状态维护解释与执行解释同一时机触发：项目绑定的普通档会话才解释，助手档完全不触发。
-        if (interpretable && !readonlyMode && session.projectId !== null) {
-          void requestStateMaintenance(sent.userMessageId);
-        }
+        // 普通消息由服务端主流程处理；结果经终态后的只读投影恢复。
       } else if (action.kind === "cancel") {
         const status = await client.cancelAssistMessage(action.id, action.commandId);
         if (disposed.current) return;
@@ -1828,11 +2450,13 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       const receipt = await client.getCommandReceipt(pending.commandId);
       if (disposed.current) return;
       if (!receiptMatches(receipt, pending, session.id)) throw new Error("回执与本次 Assist 命令不匹配。");
+      if (pending.kind === "model") setSelectedModel(sessionModelSelectionFrom(receipt.result).model);
       if (pending.kind === "restart") {
         await finishChatSession(chatSessionResultFrom(receipt.result, session.id, pending.system));
         return;
       }
-      if (pending.kind === "send") { setDraft(""); clearSentSources(pending.sources); }
+      if (pending.kind === "send") { setDraft(""); clearSentSources(pending.sources);
+        setRecentRefs(rememberSourceRefs(pending.sources)); }
       if (pending.kind === "acceptTask") void refreshTarget();
       setPending(null); setNotice("原命令回执已核对；正在读取服务端状态。"); await refresh();
     } catch (caught) { if (!disposed.current) setActionError(describeLiveError(caught).message); }
@@ -1846,7 +2470,13 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     if (control !== null) {
       setActionError(null); setNotice(null);
       if (composerInflight) { setActionError("当前消息仍在生成，请先停止并等结算后使用会话命令。"); return; }
-      if (control === "model" || control === "compact") { setActionError("模型切换与上下文压缩暂未接通。"); return; }
+      if (control === "model") {
+        const model = content.replace(/^\/\S+\s*/u, "").trim();
+        if (model === "") setModelPickerOpen(true);
+        else void runAction({ kind: "model", commandId: createCommandId(), model });
+        return;
+      }
+      if (control === "compact") { setActionError("上下文压缩暂未接通。"); return; }
       if (/\s/u.test(content)) { setActionError("此会话命令不接受参数，请单独输入命令。"); return; }
       if (control === "undo") {
         setNotice(readonlyMode ? "此会话对项目只读；请回到原普通会话的调整回执撤回。"
@@ -1881,21 +2511,6 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       sources: sources.map((ref) => ({ ...ref })) });
   }
 
-  /** 整理一条刚发出的用户消息；结果只作为候选展示，缺关键信息时退回一个聚焦澄清。 */
-  async function requestExecution(sourceMessageId: string) {
-    const resourceId = executionScope?.association?.resourceId ?? null;
-    if (readonlyMode || resourceId === null || disposed.current || executionBusy) return;
-    setExecutionBusy(true); setExecutionError(null);
-    try {
-      const next = await client.interpretConversationMessage({ sessionId: session.id,
-        sourceMessageId, resourceId, commandId: createCommandId() });
-      if (!disposed.current) setExecution(next);
-    } catch (caught) {
-      if (!disposed.current) setExecutionError(describeLiveError(caught).message);
-    } finally { if (!disposed.current) setExecutionBusy(false); }
-  }
-
-  /** 候选 → Task/READY/Delegate。按请求行固定的命令身份重放，不产生第二个 Task/Run。 */
   async function applyExecution(requestId: string) {
     if (disposed.current || executionBusy) return;
     setExecutionBusy(true); setExecutionError(null);
@@ -1904,7 +2519,10 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
         .find((item) => item.requestId === requestId) ?? null;
       if (!disposed.current && next !== null) setExecution((previous) => ({
         ...(previous?.requestId === requestId ? previous : {}), ...next,
-        resourceId: executionScope?.association?.resourceId ?? "", sessionId: session.id }));
+          title: next.title ?? (previous?.requestId === requestId ? previous.title : null),
+          objective: next.objective ?? (previous?.requestId === requestId ? previous.objective : null),
+          resourceId: next.resourceId ?? (previous?.requestId === requestId ? previous.resourceId : ""),
+          sessionId: session.id }));
       return next;
     }
     try {
@@ -1960,6 +2578,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     maintenanceRef.current = next;
     setMaintenance(next);
   }
+  const settledMessageKey = messages?.filter((item) => item.role === "ASSISTANT" &&
+    !["PENDING", "RUNNING"].includes(item.status)).map((item) => `${item.id}:${item.status}`).join("|") ?? "";
   /** 会话已有的维护请求：按 source_message_id 归位到各条 user 消息下。助手档与未归属会话没有维护事实。 */
   useEffect(() => {
     if (readonlyMode || session.projectId === null) {
@@ -1979,7 +2599,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       if (active) { maintenanceRef.current = new Map(); setMaintenance(new Map()); }
     });
     return () => { active = false; };
-  }, [client, session.id, session.projectId, readonlyMode]);
+  }, [client, session.id, session.projectId, readonlyMode, settledMessageKey, projectionReload, confirmedFirstMessageCommandId]);
   // 首条消息的解释结果可能在本面板挂载后才到达（建会话后按会话 key 重挂载过）。
   const adoptedMaintenanceRequestId = useRef<string | null>(initialMaintenance?.requestId ?? null);
   useEffect(() => {
@@ -2205,7 +2825,6 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     ReadonlyMap<string, RelayConversationExecution>>(() => new Map());
   useEffect(() => {
     let active = true;
-    setExecutionSummaries(new Map());
     if (target === null || readonlyMode) return () => { active = false; };
     void client.getConversationExecutionRequests(session.id).then((requests) => {
       if (!active) return;
@@ -2220,6 +2839,11 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
         }
       }
       setExecutionSummaries(latest);
+      const currentCandidate = [...latest.values()].find((item) =>
+        item.candidateStatus === "READY" || item.status === "CLARIFY" || item.status === "DECISION_REQUIRED");
+      if (currentCandidate !== undefined) setExecution((previous) =>
+        previous?.requestId === currentCandidate.requestId && BigInt(previous.revision) > BigInt(currentCandidate.revision)
+          ? previous : currentCandidate);
       // 恢复：刷新后读到同一条「明确只读、尚未启动」的原请求时继续原启动。只接管这类请求，
       // 否则会把别的阶段重新显示成待确认。已经由本会话解释出的结果优先，不被覆盖。
       const resumable = [...latest.values()]
@@ -2233,17 +2857,28 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       if (active) setExecutionSummaries(new Map());
     });
     return () => { active = false; };
-  }, [client, session.id, target?.id]);
+  }, [client, session.id, target?.id, settledMessageKey, projectionReload, confirmedFirstMessageCommandId]);
 
   const transcriptContent = <>
     {messages === null && !error && <p className="loading-text" role="status">正在读取会话消息…</p>}
     {error && <p className="action-error" role="alert">{error} <button type="button" className="text-link" onClick={() => void refresh()}>重读</button></p>}
-    {messages?.length === 0 && <p className="helper-text">还没有消息。</p>}
+    {/* 协作页空会话与全局新对话同一欢迎空态：不同入口新建会话首屏一致。说明句按目标
+        归属收敛——任务/项目作用域已有所属，不再宣称「不需要先创建项目、任务」。
+        首条消息在途/待核对时不渲染欢迎，保留原空态文本，避免与回执核对区同屏打架。 */}
+    {messages?.length === 0 && (standalone && !firstMessageInflight
+      ? <EmptyWorkWelcome testId="assist-empty-welcome" suggestTestIdPrefix="assist-empty-suggest"
+          lede={target === null
+            ? "可以直接讨论或描述目标。不需要先创建项目、任务，也不需要预先选择工作目录。"
+            : target.kind === "TASK" ? "围绕当前任务直接讨论，或描述新的目标与要求。"
+              : "围绕当前项目直接讨论，或描述新的目标与要求。"}
+          onSuggest={(text) => { setDraft(text); draftRef.current?.focus(); }} />
+      : <p className="helper-text">还没有消息。</p>)}
     {!!messages?.length && <ol className="agent-message-list">{messages.map((message, index) => {
       const previous = index > 0 ? messages[index - 1] : undefined;
       const day = messageDay(message.createdAt);
       const newDay = day !== null && (previous === undefined || messageDay(previous.createdAt) !== day);
-      return <li key={message.id} className="agent-message-slot">
+      return <li key={message.id} className="agent-message-slot" data-chat-timeline-slot="true"
+        data-timeline-session={session.id} data-message-id={message.id}>
         {newDay && <p className="agent-date-separator" role="separator" aria-label={`日期 ${day}`}><span>{day}</span></p>}
 {/* busy / pending 已随消息内取消按钮一起移除；writeBlocked 只剩预览重读这一处只读入口。 */}
 <AssistMessageRow client={client} target={target} message={message}
@@ -2297,7 +2932,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     })}</ol>}</>;
 
   // 上下文占用与缓存命中率都取自最近一次有真实用量的 AI 回复。USER 消息没有模型
-  // 调用，用量恒为 null；Provider 未上报缓存时显示"未采集"，不显示 0%。
+  // 调用，用量恒为 null；Provider 未上报缓存时命中率那一格不渲染（见 ContextMeter）。
   const lastCall = [...(messages ?? [])].reverse().find((message) =>
     message.role === "ASSISTANT" && (message.usage.inputTokens !== null ||
       message.usage.cacheReadTokens !== null || message.usage.cacheCreationTokens !== null)) ?? null;
@@ -2358,6 +2993,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     })}
   </ProposalContainer>;
 
+  const emptyStandaloneWelcome = standalone && firstMessageInflight === false &&
+    messages !== null && messages.length === 0;
   const transcript = <div ref={transcriptRef} className={standalone ? "agent-chat-transcript" : undefined}
     role="region" aria-label="会话消息" tabIndex={0} data-testid="assist-transcript"
     onScroll={(event) => {
@@ -2365,7 +3002,9 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       if (element.clientHeight === 0) return;
       const latest = element.scrollHeight - element.scrollTop - element.clientHeight < 32;
       followLatest.current = latest; setAtLatest(latest);
-    }}><div ref={transcriptContentRef} className="agent-chat-content">{transcriptContent}{standalone && !externalReadBlockedReason && visibleProposals.length > 0 && proposalPanel}</div></div>;
+      syncEdgeFades(element);
+    }}><div ref={transcriptContentRef}
+      className={emptyStandaloneWelcome ? "agent-chat-content agent-chat-content--empty" : "agent-chat-content"}>{transcriptContent}{standalone && !externalReadBlockedReason && visibleProposals.length > 0 && proposalPanel}</div></div>;
   const frozenSkill = pending?.kind === "send" && pending.skillRef
     ? skills.find((item) => item.id === pending.skillRef?.id && item.version === pending.skillRef.version) : null;
   const sendLabel = pending?.kind === "send"
@@ -2381,6 +3020,27 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       learningTransferSources.push({ kind: source.kind, rootId: source.rootId, version: source.version });
     }
   }
+
+  /**
+   * 「+」二级菜单里「对话中的资料」的真实来源：当前会话消息上已出现过的资料引用。
+   * 只收本选择器支持的三类（KNOWLEDGE/MEMORY/DECISION）且三元组齐全的条目，按最近出现去重
+   * （越新的越靠前）；不推断、不补全缺失字段，也不把标题/摘要当身份。
+   */
+  const conversationRefs = useMemo<readonly RelayAssistSourceRef[]>(() => {
+    const seen = new Set<string>();
+    const collected: RelayAssistSourceRef[] = [];
+    for (const message of [...(messages ?? [])].reverse()) {
+      for (const source of message.sources) {
+        if (source.kind !== "KNOWLEDGE" && source.kind !== "MEMORY" && source.kind !== "DECISION") continue;
+        if (source.rootId === null || source.version === null) continue;
+        const ref: RelayAssistSourceRef = { kind: source.kind, rootId: source.rootId, version: source.version };
+        const key = `${ref.kind}:${ref.rootId}:${ref.version}`;
+        if (seen.has(key)) continue;
+        seen.add(key); collected.push(ref);
+      }
+    }
+    return collected;
+  }, [messages]);
 
   const sendOptions = <details className={standalone ? "agent-chat-options" : "assist-options-expanded"} open={!standalone || sourcesOpen}
         onKeyDown={(event) => {
@@ -2436,6 +3096,21 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   const stopPending = inflightMessage !== null && inflightMessage.cancelRequested;
   /* 输入器的在途呈现：服务端已有在途行，或刚提交、回复行尚未出现在列表里。 */
   const composerInflight = inflightMessage !== null || awaitingAssistantId !== null;
+
+  /**
+   * 会话草稿的发送前辅助（工作台 §30）。来源身份用 session.id：本面板已按
+   * `${connection.epoch}:${session.id}` 挂载 key，连接或会话变化会重挂载，因此
+   * 面板存活期内 session.id 就是稳定且唯一的来源。
+   * 提示行渲染在输入卡上方，润色键渲染在工具行内（原型 `#polishBtn` 的位置）；
+   * 没有工具行的子页/嵌入态由提示行自带（inlinePolish）。
+   */
+  const assistant = useComposerDraftAssist({
+    client, sourceKey: `${session.id}`,
+    value: draft, onChange: setDraft,
+    disabled: pending !== null || busy,
+    inflight: composerInflight,
+    composing, onRequestFocus: restoreDraftFocus,
+  });
   useEffect(() => { onInflightChange?.(composerInflight || learningNavigation.pending !== null); }, [composerInflight, learningNavigation.pending, onInflightChange]);
 
   /* Esc Esc 停止：第一次按键只记录，不消费——单次 Esc 要留给资料面板关闭与焦点管理，
@@ -2492,11 +3167,17 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       })}</ol>
     </div>;
 
+  const latestModelMessage = [...(messages ?? [])].reverse().find((message) => message.role === "ASSISTANT");
   return <section className={standalone ? "surface-panel agent-chat-conversation" : "surface-panel"} data-testid="assist-session"
     onKeyDown={onPanelKeyDown}>
     {!externalReadBlockedReason && embedded && proposalPanel}
     {!externalReadBlockedReason && <div className={standalone ? "agent-chat-conversation-heading" : embedded ? "embedded-assist-session-heading" : undefined}><div>{!embedded && <h2>{standalone ? "对话" : "消息与提案"}</h2>}{standalone || embedded ? <details><summary>会话信息</summary><p className="helper-text">{session.title} · {session.status} · {session.id}</p></details> : <p className="helper-text">会话 {session.id} · {session.status}。生成与取消均以服务端状态为准。</p>}</div><button className="secondary-button" type="button" data-testid="assist-refresh" onClick={() => void refresh()}>{standalone ? "刷新" : "刷新消息与提案"}</button></div>}
-    {!externalReadBlockedReason && (embedded ? <details className="embedded-assist-history"><summary>查看会话历史与原始建议</summary>{transcript}</details> : <div className={standalone ? "agent-chat-transcript-shell" : undefined}>{transcript}
+    {!externalReadBlockedReason && (embedded ? <details className="embedded-assist-history"><summary>查看会话历史与原始建议</summary>{transcript}</details> : <div className={standalone ? "agent-chat-transcript-shell" : undefined} data-top-fade={awayFromTop ? "on" : undefined}
+        data-bottom-fade={awayFromBottom ? "on" : undefined}>{transcript}
+      {/* 时间线只消费已加载消息与消息流容器；嵌入态的转录区在 details 里没有自己的滚动容器，
+          因此只在 standalone 接入，避免第二个滚动 Owner（工作台 §31.1）。 */}
+      {standalone && <ChatTimelineNav sessionId={session.id} messages={messages ?? []}
+        getScrollOwner={getTranscriptOwner} />}
       {/* 只有图标，没有可见文字：可读名称与状态都在 aria-label / title 上。 */}
     {standalone && !atLatest && <button className="icon-button agent-chat-latest" type="button" data-testid="assist-latest"
       aria-label="回到最新消息" title="回到最新消息"
@@ -2514,7 +3195,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     {!externalReadBlockedReason && (queuePanel ??
       <div className="assist-queue" data-empty="true" aria-hidden="true" />)}
 
-    {!readonlyMode && standalone && executionScope !== null && <ExecutionSummary execution={execution}
+    {!readonlyMode && standalone && execution !== null && execution.status !== "DELEGATED" && <ExecutionSummary execution={execution}
       busy={executionBusy} error={executionError}
       onApply={(requestId) => void applyExecution(requestId)}
       onOpenTask={(taskId) => onExecutionPrepared?.(taskId)} />}
@@ -2531,19 +3212,32 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       onStateChange={setLearningState} onNavigationChange={setLearningNavigation}
       onTransfer={onLearningTransfer ? (instruction, background) => onLearningTransfer(instruction, background, learningTransferSources) : undefined} />}
 
-    {/* 命令回执留在输入器这一列内，不再作为整宽底栏：反馈不删，只是不占满页面。 */}
+    {/* 会话总 diff（工作台 §34.2）：输入卡**外**上方居中，一行文字按钮就是展开入口。
+        它不写进卡片，所以数字位数变化、路径变长都不会撑高输入卡或挤掉发送/停止键；
+        总数只反映已落盘内容，生成中的预览不进这里（§34.4）。 */}
+    {session.status === "ACTIVE" && <ConversationDiffSummary client={client} sessionId={session.id}
+      enabled={externalReadBlockedReason === null}
+      directoryBound={session.workingResourceId !== null && session.workingResourceId !== undefined} />}
+
+    {/* 发送前草稿辅助（工作台 §30）。提示行在输入卡上方；润色键跟着工具行走，
+        原型三方案共用那一处键位。没有工具行的子页由提示行自带润色键。 */}
+    {session.status === "ACTIVE" && <ComposerDraftBar assist={assistant} value={draft}
+      inlinePolish={!standalone} />}
+    {/* 命令回执留在输入器这一列内，不再作为整宽底栏：反馈不删，只是不占满页面。
+        2026-10-16：回执同样搬出**卡片本体**，与档位说明一起排在卡下方的这一列——
+        留在卡内会让卡片随「有没有回执」长高变矮（用户截图指认「这些都导致输入框变化了」）。 */}
     {session.status === "ACTIVE" && <div className={standalone ? "agent-chat-composer" : "create-form"}
       data-inflight={composerInflight} data-testid="assist-composer" ref={composerBoxRef}>
       {/* 在途光点。装饰层跟随实际在输入的那个输入器，两种形态都渲染：
           aria-hidden 且不承载事实——在途状态由消息行的状态文字承担。 */}
       <span className="agent-chat-composer-spark" aria-hidden="true" />
-      {notice && <p className="receipt-message" role="status" data-testid="assist-receipt-notice">{notice}</p>}
       <form id={composerFormId} className="agent-chat-message-form" onSubmit={send}>
       <div className="field"><span className={standalone ? "visually-hidden" : "field-label"}>本次消息</span><ChatCommandInput
         client={client} mode={session.conversationMode} hasSession={true} data-testid="assist-draft"
         ref={draftRef}
         placeholder={standalone ? "输入你的想法、修改意见或新的要求" : undefined}
         value={draft} onValueChange={setDraft} maxLength={32768} rows={standalone ? 2 : 4}
+        onCompositionChange={setComposing}
         onSelectCommand={(entry) => {
           if (entry.kind === "METHOD") { setSelectedSkillKey(""); setIntent("DISCUSS"); }
         }}
@@ -2569,9 +3263,42 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     </form>
       {standalone && <div className="agent-chat-composer-actions">
         <div className="agent-chat-composer-tools">
+          <ComposerAttach
+            client={client} mode={session.conversationMode} hasSession
+            selectedRefs={sources} conversationRefs={conversationRefs} recentRefs={recentRefs}
+            onToggleSourceRef={onToggleSourceRef}
+            recentFolders={recentFolders} onOpenRecentFolder={onOpenRecentFolder}
+            folderPath={session.context?.workingDirectory?.canonicalRoot ?? null}
+            folderBound={session.context?.workingDirectory !== null && session.context?.workingDirectory !== undefined}
+            skillSelected={selectedSkill !== null}
+            onCommand={() => { setDraft(draft.startsWith("/") ? draft : `/${draft}`);
+              composerBoxRef.current?.querySelector("textarea")?.focus(); }}
+            onPickCommand={(name) => { setDraft(`${draft.match(/^\s*/u)?.[0] ?? ""}/${name} `);
+              composerBoxRef.current?.querySelector("textarea")?.focus(); }}
+            onSources={!assistantMode && !readonlyMode ? onToggleSources : undefined}
+            onSkill={!assistantMode && !readonlyMode ? onToggleSources : undefined}
+            onFolder={onRequestFolder}
+            notes={[
+              ...(assistantMode || readonlyMode ? [{ text: assistantMode
+                ? "助手档没有资料与 Skill" : "只读会话不能选资料与 Skill", keys: ["sources", "skill"] }] : []),
+              ...(onRequestFolder ? [] : [attachFolderNote]),
+            ]} />
+          {/* 会话档：档位属于「项目 × 这个目录」，所以只在智能体档、会话有项目归属时出现；
+              只读会话不写文件，不摆一颗点了没用的芯片。 */}
+          {!assistantMode && !readonlyMode && <WritePermissionControl client={client}
+            projectId={session.projectId}
+            resourceId={session.context?.workingDirectory?.resourceId ?? null}
+            canonicalRoot={session.context?.workingDirectory?.canonicalRoot ?? null}
+            disabled={busy || pending !== null || writeBlockedReason !== null} />}
           {modeSwitch}
           {!assistantMode && <button className="agent-chat-tool" type="button" data-testid="assist-open-sources"
             aria-expanded={sourcesOpen} onClick={onToggleSources}><BookOpen aria-hidden="true" />资料 {sources.length}<ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" /></button>}
+          {/* 润色键与资料同一行（原型 #polishBtn 的位置）：同一键位三态，不另起一行。 */}
+          <ComposerPolishButton assist={assistant} />
+          <ModelSelector client={client} open={modelPickerOpen} onOpenChange={setModelPickerOpen}
+            sessionId={session.id}
+            selectedModel={selectedModel} disabled={busy || pending !== null || writeBlockedReason !== null}
+            onChoose={(model) => void runAction({ kind: "model", commandId: createCommandId(), model })} />
           {/* 助手档没有 intent 与 Skill 可选：隐藏「发送选项」而不是渲染成禁用，
               让「这一档没有这条选择」本身可见。 */}
           {readonlyMode || sendOptions}
@@ -2594,7 +3321,17 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
             Boolean(selectedSkill && (!selectedSkill.callSupported || selectedSkill.missingCapabilities.length > 0))}><ArrowUp aria-hidden="true" /></button>}
       </div>}
       {!standalone && !readonlyMode && sendOptions}
-    </div>}    {actionError && <p className="action-error" role="alert">{actionError}</p>}{pending && <div className="assist-pending"><p className="helper-text">命令结果待核对，原 command_id：{pending.commandId}。先查回执；未找到时只能用原命令 ID 和原载荷重试。</p><button className="secondary-button" type="button" disabled={busy} onClick={() => void checkReceipt()}>查询原命令回执</button><button className="secondary-button" type="button" disabled={busy} onClick={() => void runAction(pending, true)}>以原命令重试</button></div>}
+    </div>}
+    {/* 卡外说明区（2026-10-16 用户指令「这些都导致输入框变化了」）：档位说明、在途锁定原因与
+        命令回执都渲染在输入卡之外，卡内恒定只有正文、工具行与发送键——卡片在空闲、在途、
+        收到回执与各档下形状一致，打字时光标与工具行不跳。 */}
+    {session.status === "ACTIVE" && <>
+      {modeHints}
+      {!externalReadBlockedReason && latestModelMessage && <AssistModelRuntime key={latestModelMessage.id} client={client}
+        messageId={latestModelMessage.id} messageStatus={latestModelMessage.status} />}
+      {notice && <Toast testId="assist-receipt-notice">{notice}</Toast>}
+    </>}
+    {actionError && <Notice testId="assist-action-error">{actionError}</Notice>}{pending && <div className="assist-pending"><p className="helper-text">命令结果待核对，原 command_id：{pending.commandId}。先查回执；未找到时只能用原命令 ID 和原载荷重试。</p><button className="secondary-button" type="button" disabled={busy} onClick={() => void checkReceipt()}>查询原命令回执</button><button className="secondary-button" type="button" disabled={busy} onClick={() => void runAction(pending, true)}>以原命令重试</button></div>}
     {!readonlyMode && !externalReadBlockedReason && !embedded && !standalone && proposalPanel}
   </section>;
 }

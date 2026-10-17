@@ -1,3 +1,4 @@
+import * as composerPrompts from './composer-prompts.js';
 import * as conversationPrompts from './conversation-prompts.js';
 import * as interpretationPrompts from './interpretation-prompts.js';
 import * as runPrompts from './run-prompts.js';
@@ -88,6 +89,11 @@ export function selectRuntimePrompt(route: RuntimePromptRoute): RuntimePromptSel
           : runPrompts.draftNoToolSystemPrompt());
     case 'SEMANTIC_VERDICT':
       return systemSelection('SEMANTIC_VERDICT', runPrompts.semanticVerdictSystemPrompt());
+    /* --------------------------- 草稿辅助（§30） --------------------------- */
+    case 'COMPOSER_OUTLINE':
+      return systemSelection('COMPOSER_OUTLINE', composerPrompts.composerOutlineSystemPrompt());
+    case 'COMPOSER_POLISH':
+      return systemSelection('COMPOSER_POLISH', composerPrompts.composerPolishSystemPrompt());
     /* --------------------------- 连接验证探针 --------------------------- */
     case 'CONNECTION_VERIFY':
       return { kind: 'USER_PROBE', route: RUNTIME_ROUTES.CONNECTION_VERIFY,

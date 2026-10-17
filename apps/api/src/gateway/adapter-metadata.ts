@@ -109,6 +109,46 @@ export const ADAPTER_DESCRIPTORS: Readonly<Record<GatewayCapability, AdapterDesc
     approvalPassthrough: true,
     sandboxed: false,
   },
+  COMPUTER_READ: {
+    capabilityKey: 'COMPUTER_READ',
+    adapterId: 'computer-read-v1',
+    version: '1.0.0',
+    effectKind: 'READ',
+    // 截图与窗口枚举是纯读取：崩溃后安全重取，不留下半应用动作。
+    resumable: true,
+    cancellable: true,
+    // 只读没有可审批的外部效果；默认策略 AUTO 即可连续观察。
+    approvalPassthrough: true,
+    // 读取的是整台桌面，进程边界不是 OS 沙箱。
+    sandboxed: false,
+  },
+  COMPUTER_INPUT: {
+    capabilityKey: 'COMPUTER_INPUT',
+    adapterId: 'computer-input-v1',
+    version: '1.0.0',
+    effectKind: 'WRITE',
+    // 一次点击或一段文本已产生外部效果：不能盲目重放，UNKNOWN 必须人工核对。
+    resumable: false,
+    // 取消只解除等待，不终止进行中的输入（终止只会把未知变成更未知）。
+    cancellable: true,
+    // 与 CLI_RUN 同一纪律：桌面输入不可无人审批自动执行；「本次任务允许」走
+    // 范围授权，「仅此一次」走单动作审批，「始终允许」V1 不开放。
+    approvalPassthrough: false,
+    sandboxed: false,
+  },
+  GITHUB_READ: {
+    capabilityKey: 'GITHUB_READ',
+    adapterId: 'github-read-v1',
+    version: '1.0.0',
+    effectKind: 'READ',
+    // 只读查询没有外部效果：崩溃后按同一冻结参数安全重读，不需要 UNKNOWN 隔离。
+    resumable: true,
+    cancellable: true,
+    // 读取不产生需要人工裁决的效果；默认策略仍由 Permission 版本决定，这里只声明可 AUTO。
+    approvalPassthrough: true,
+    // gh 会访问网络并在本机进程里运行，进程边界不是 OS 沙箱。
+    sandboxed: false,
+  },
 };
 
 export function getAdapterDescriptor(capability: GatewayCapability): AdapterDescriptor {

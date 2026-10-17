@@ -69,6 +69,15 @@ export type RuntimePromptRoute =
   /* ---------------------------- Run 档 ---------------------------- */
   | { readonly kind: 'DRAFT'; readonly capability: RuntimeDraftCapabilityInput }
   | { readonly kind: 'SEMANTIC_VERDICT' }
+  /* ------------------------ 草稿辅助（§30） ------------------------ */
+  /**
+   * 发送前的草稿辅助：分点（只给原文边界）与润色（改写表达）。
+   *
+   * 与 Run 档分开：草稿辅助不产生 Task/Run，也不写任何业务事实；两条路由各自
+   * 一句协议，不能与语义验收或 DRAFT 共用模板。
+   */
+  | { readonly kind: 'COMPOSER_OUTLINE' }
+  | { readonly kind: 'COMPOSER_POLISH' }
   /* ------------------------ 连接验证（探针） ------------------------ */
   | { readonly kind: 'CONNECTION_VERIFY' };
 
@@ -99,9 +108,11 @@ export type RuntimeRouteId =
   | 'DRAFT_READ_ONLY_TOOLS'
   | 'DRAFT_WRITE_TOOLS'
   | 'SEMANTIC_VERDICT'
+  | 'COMPOSER_OUTLINE'
+  | 'COMPOSER_POLISH'
   | 'CONNECTION_VERIFY';
 
-export type RuntimeRouteGroup = 'CONVERSATION' | 'INTERPRETATION' | 'RUN' | 'VERIFICATION';
+export type RuntimeRouteGroup = 'CONVERSATION' | 'INTERPRETATION' | 'RUN' | 'VERIFICATION' | 'COMPOSER';
 
 /**
  * 一条路由的登记元数据。
@@ -192,6 +203,14 @@ export const RUNTIME_ROUTES: Readonly<Record<RuntimeRouteId, RuntimeRouteDescrip
     templateVersion: '1.0.0', coreVersion: null,
     templateSource: 'src/workflow/prompts/run-prompts.ts',
     summary: '独立语义验收：窄提示词，不加载执行者公共核心' },
+  COMPOSER_OUTLINE: { routeId: 'COMPOSER_OUTLINE', group: 'COMPOSER',
+    templateVersion: '1.0.0', coreVersion: null,
+    templateSource: 'src/workflow/prompts/composer-prompts.ts',
+    summary: '输入框草稿分点：只输出原文边界序号 {breaks}，切片由程序完成' },
+  COMPOSER_POLISH: { routeId: 'COMPOSER_POLISH', group: 'COMPOSER',
+    templateVersion: '1.0.0', coreVersion: null,
+    templateSource: 'src/workflow/prompts/composer-prompts.ts',
+    summary: '输入框草稿润色：只输出 {text}，保留否定/数字/条件/范围与已有分点' },
   CONNECTION_VERIFY: { routeId: 'CONNECTION_VERIFY', group: 'VERIFICATION',
     templateVersion: '1.0.0', coreVersion: null,
     templateSource: 'src/workflow/prompts/run-prompts.ts',

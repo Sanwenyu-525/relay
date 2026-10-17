@@ -1,10 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { act } from "react";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { DomWrapper, flush, folderStripName, mountWorkbench } from "./mountApp";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const sessionId = "66666666-6666-4666-8666-666666666666";
 const root = `/api/v1/workspaces/${workspaceId}`;
+/* 顶栏改左右两翼后，工作空间级讨论不再有「新建会话」（与左栏「新对话」重复）；
+   这条入口只剩任务/目录归属一条路径，所以「会话内新建」的两个不变量改在有归属的
+   顶栏上验证：同一份 deferSessionCreation 与首条命令 owner，换入口不换语义。 */
+const taskId = "33333333-3333-4333-8333-333333333333";
+const taskProjectId = "22222222-2222-4222-8222-222222222222";
+const taskSessionId = "77777777-7777-4777-8777-777777777777";
+const taskSession = { id: taskSessionId, workspace_id: workspaceId, project_id: taskProjectId, task_id: taskId,
+  title: "任务内的会话", status: "ACTIVE", revision: "1", created_at: "2026-10-05T00:00:00Z", updated_at: "2026-10-05T00:00:00Z" };
 const oldSession = { id: sessionId, workspace_id: workspaceId, project_id: null, task_id: null,
   title: "已有普通讨论", status: "ACTIVE", revision: "1", created_at: "2026-10-05T00:00:00Z", updated_at: "2026-10-05T00:00:00Z" };
 let unmount: (() => void) | null = null;
@@ -13,15 +22,25 @@ function response(body: unknown, status = 200): Response {
   return { ok: status < 400, status, json: async () => body } as Response;
 }
 async function mount(path = "/agent", withOldSession = false,
-  failure?: "CREATE_RESPONSE_LOST" | "MESSAGE_RESPONSE_LOST", withTaskSession = false, messageGate?: Promise<void>) {
+  failure?: "CREATE_RESPONSE_LOST" | "MESSAGE_RESPONSE_LOST" | "MODEL_SELECTION_RESPONSE_LOST", withTaskSession = false, messageGate?: Promise<void>) {
   activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "synthetic-token" });
   const posts: { path: string; body: Record<string, unknown> }[] = []; let created = false;
   const messages: unknown[] = [];
   const receipts = new Map<string, Record<string, unknown>>();
+  let modelSelected = false;
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input)); const path = url.pathname;
     if (init?.method === "POST") {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>; posts.push({ path, body });
+      if (path.endsWith("/chat-commands")) {
+        const firstSelection = !modelSelected; modelSelected = true;
+        const receipt = { command_id: body.command_id, committed_at: "2026-10-17T00:00:00Z",
+          result: { kind: "MODEL_SELECTION", session_id: sessionId, connection: "openrouter",
+            model: "v/a:free", free_only: true, revision: "7" } };
+        receipts.set(String(body.command_id), { ...receipt, command_type: "SelectSessionModel" });
+        if (failure === "MODEL_SELECTION_RESPONSE_LOST" && firstSelection) throw new TypeError("selection response lost");
+        return response(receipt);
+      }
       if (path === `${root}/assist-sessions`) {
         created = true;
         const receipt = { command_id: body.command_id, command_type: "CreateAssistSession", payload_hash: "a".repeat(64),
@@ -49,10 +68,27 @@ async function mount(path = "/agent", withOldSession = false,
       throw new Error(`Unexpected command: ${path}`);
     }
     if (path === `${root}/assist-sessions`) return response({ items: [
-      ...(withTaskSession ? [{ ...oldSession, id: "77777777-7777-4777-8777-777777777777",
-        task_id: "33333333-3333-4333-8333-333333333333", title: "无项目任务的专属会话" }] : []),
+      ...(withTaskSession ? [{ ...oldSession, id: "88888888-8888-4888-8888-888888888888",
+        task_id: taskId, title: "无项目任务的专属会话" }, taskSession] : []),
       ...(withOldSession || created ? [oldSession] : [])] });
+    if (path.endsWith("/model-selection")) return response({ selection: modelSelected ? {
+      session_id: sessionId, connection: "openrouter", model: "v/a:free", free_only: true, revision: "7" } : null });
+    if (path.endsWith("/model-port")) return response({ provider: "fake", configured: false, model: null, base_url: null, max_call_tokens: null });
+    if (path.endsWith("/model-catalog")) return response({ configured: true, chat_configured: true,
+      snapshot_seq: "9", last_success_at: "2026-10-17T00:00:00Z", last_failure_reason: null, cache_stale: false, free_count: 1,
+      entries: [{ source_model_id: "v/a:free", display_name: "免费 A", context_window: 65536, is_free: true,
+        capabilities: { tools: true, text_input: true, text_output: true } }] });
     if (path === `${root}/assist-sessions/${sessionId}`) return response(oldSession);
+    if (path === `${root}/assist-sessions/${taskSessionId}`) return response(taskSession);
+    if (path === `${root}/tasks/${taskId}`) return response({ id: taskId, project_id: taskProjectId,
+      title: "任务内的会话", status: "IN_PROGRESS", mode: "ME", revision: "1",
+      created_at: "2026-10-05T00:00:00Z", updated_at: "2026-10-05T00:00:00Z",
+      executor: { kind: "HUMAN", run_id: null, ownership_epoch: "1" }, current_completion_id: null,
+      waiting_reason: null, blocking_task_ids: [], unresolved_blocker_ids: [], allowed_actions: [],
+      acceptance: { acceptance_revision: "1", objective: "只读夹具。", source: "CREATE",
+        created_at: "2026-10-05T00:00:00Z", criteria: [] }, dependencies: [] });
+    if (path === `${root}/projects/${taskProjectId}`) return response({ id: taskProjectId, title: "任务会话入口项目",
+      project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
     if (path.startsWith(`${root}/commands/`)) return response(receipts.get(path.split("/").at(-1)!) ?? {}, 200);
     if (path.endsWith("/messages")) return response({ items: messages });
     if (path.endsWith("/skills")) return response({ items: [] });
@@ -63,6 +99,25 @@ async function mount(path = "/agent", withOldSession = false,
 }
 
 describe("新对话直接起步", () => {
+  it.each(["retry", "receipt"])("首条选免费模型先绑定后发送，选择回执丢失通过 %s 沿原命令接续并携带原版本", async (recovery) => {
+    const view = await mount("/agent?new=entry", false, "MODEL_SELECTION_RESPONSE_LOST");
+    await view.wrapper.get('[data-testid="model-selector-open"]').trigger("click"); await flush();
+    // 首条场景点清单条目即写入本地草稿，不再经过确认键；下拉不是对话框。
+    const option = [...document.querySelectorAll<HTMLButtonElement>('.model-selector-menu [role="option"]')]
+      .find((item) => item.querySelector(".model-selector-option-name")?.textContent === "免费 A")!;
+    await act(async () => option.click()); await flush();
+    expect(view.posts).toHaveLength(0);
+    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("首条使用我选择的免费模型");
+    await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit"); await flush();
+    expect(view.posts.filter((post) => post.path.endsWith("/messages"))).toHaveLength(0);
+    await view.wrapper.get(`[data-testid="assist-first-${recovery}"]`).trigger("click"); await flush();
+    const selections = view.posts.filter((post) => post.path.endsWith("/chat-commands"));
+    expect(selections).toHaveLength(2);
+    expect(selections[1]?.body).toEqual(selections[0]?.body);
+    expect(view.posts.filter((post) => post.path === `${root}/assist-sessions`)).toHaveLength(1);
+    expect(view.posts.filter((post) => post.path.endsWith("/messages"))).toHaveLength(1);
+    expect(view.posts.find((post) => post.path.endsWith("/messages"))?.body).toMatchObject({ expected_model_selection_revision: "7" });
+  });
   it("无项目任务的专属会话不会混入普通讨论", async () => {
     const view = await mount("/agent", false, undefined, true);
     expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(true);
@@ -75,11 +130,13 @@ describe("新对话直接起步", () => {
     expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists(), view.wrapper.text()).toBe(true);
     expect(view.wrapper.find('[data-testid="assist-session"]').exists()).toBe(false);
     expect(view.wrapper.find('[data-testid="collab-side-empty"]').exists()).toBe(false);
-    // 目录作用域已收成常驻细条（不再是要先展开的 details），「查找更多任务 / 会话」默认收起。
+    // 目录作用域已收成常驻细条（不再是要先展开的 details）；栏底「查找更多任务 / 会话」
+    // 入口已按用户决定删除（2026-10-16 第四轮），左栏行是任务与会话的唯一导航入口。
     expect(view.wrapper.get('[data-testid="folder-scope-strip"]').exists()).toBe(true);
     expect(folderStripName()).toBe("未选择目录");
-    expect(view.wrapper.get('[data-testid="recent-work-find-more"]').attributes("aria-expanded")).toBe("false");
-    expect(view.wrapper.find('[data-testid="collab-target-picker"]').exists()).toBe(false);
+    // 写入档位入口不因未选目录而消失（用户实机截图回归）：显示未绑定态而不是整颗芯片隐藏。
+    expect(view.wrapper.get('[data-testid="write-permission-chip"]').text()).toContain("未选择目录");
+    expect(view.wrapper.find('[data-testid="recent-work-find-more"]').exists()).toBe(false);
     expect(view.posts).toHaveLength(0);
   });
 
@@ -118,7 +175,9 @@ describe("新对话直接起步", () => {
   });
 
   it("会话内新建同样先打开输入框，不提前创建空会话", async () => {
-    const view = await mount("/agent", true);
+    // 有任务归属才有这颗入口：工作空间级讨论的「新建会话」已按用户指令删除（与左栏「新对话」重复）。
+    const view = await mount(`/agent?work=${taskId}&session=${taskSessionId}`, false, undefined, true);
+    await expect(view.wrapper.find('[data-testid="assist-new-session"]').exists()).toBe(true);
     await view.wrapper.get('[data-testid="assist-new-session"]').trigger("click"); await flush();
     expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(true);
     expect(view.posts).toHaveLength(0);
@@ -138,6 +197,10 @@ describe("新对话直接起步", () => {
   });
 
   it("核对首条回执后另开新对话，迟到原响应不清空新草稿", async () => {
+    /* 顶栏改左右两翼后，工作空间级讨论不再有「新建会话」（与左栏「新对话」重复），
+       本轮这颗键只在任务/目录归属的顶栏保留。此例因此改从左栏「新对话」另开——
+       验证的仍是同一条不变量（迟到响应不得清空新草稿），但入口换了，不再覆盖
+       「同一实例内就地新建」这一档；就地新建仍由上一例在有归属的顶栏上守住。 */
     const view = await mount("/agent?new=entry");
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
@@ -151,7 +214,7 @@ describe("新对话直接起步", () => {
     await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click"); await flush();
     await view.wrapper.get('[data-testid="assist-first-receipt"]').trigger("click"); await flush();
     expect(view.wrapper.find('[data-testid="assist-first-pending"]').exists()).toBe(false);
-    await view.wrapper.get('[data-testid="assist-new-session"]').trigger("click"); await flush();
+    await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click"); await flush();
     await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("新会话还没发送的草稿");
     release(); await flush(); await flush();
     expect((view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement).value)

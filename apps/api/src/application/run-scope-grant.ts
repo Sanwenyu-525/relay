@@ -32,14 +32,35 @@ import { canonicalResourceIdentity } from './gateway-configuration.js';
  * 检查统一用 `CLI_RUN` 而不是 `RUN_TEST` / `RUN_BUILD`：工具循环里模型只能按 check_id
  * 点名冻结清单中的某一次检查，「测什么、构建什么」的粒度已经由那份清单本身决定，
  * 授权再按动作名区分只会造出模型无法对应、也无法核对的口径。
+ *
+ * 0092: `COMPUTER_INPUT` 是同一纪律下的一个动作类——桌面输入（点击/输入/快捷键等
+ * 八种逻辑动作）在授权层合成一类，与 CLI_RUN 同理：授权回答「本次任务是否可以操作
+ * 电脑」，不替用户决定每一次点击。读取类（截图/窗口枚举）本就不需要授权。
  */
 export const SCOPE_GRANT_ACTIONS: readonly string[] =
-  ['WRITE_FILE', 'APPLY_CHANGESET', 'CLI_RUN'];
+  ['WRITE_FILE', 'APPLY_CHANGESET', 'CLI_RUN', 'COMPUTER_INPUT'];
 
 /** 授权动作 → Gateway 能力。信封里没有对应连接时不能放行该动作。 */
 export const SCOPE_GRANT_ACTION_CAPABILITIES: Readonly<Record<string, GatewayCapability>> = {
   WRITE_FILE: 'FILE_WRITE', APPLY_CHANGESET: 'FILE_WRITE', CLI_RUN: 'CLI_RUN',
+  COMPUTER_INPUT: 'COMPUTER_INPUT',
 };
+
+/** Computer 输入类逻辑动作 → 授权层的同一动作类名。 */
+const COMPUTER_INPUT_ACTIONS: ReadonlySet<string> = new Set([
+  'COMPUTER_ACTIVATE_WINDOW', 'COMPUTER_CLICK', 'COMPUTER_DOUBLE_CLICK', 'COMPUTER_SCROLL',
+  'COMPUTER_DRAG', 'COMPUTER_TYPE', 'COMPUTER_KEYPRESS', 'COMPUTER_HOTKEY',
+]);
+
+/**
+ * 授权判定用的动作名：Computer 输入动作合成一类，其余原样返回。
+ *
+ * 收敛到这一个函数，避免 prepare 与 admit 两处各写一份映射而漂移——授权语义
+ * 漂移的后果是「授权时放行、派发时退回」，用户看到的行为不可解释。
+ */
+export function scopeGrantActionFor(actionType: string): string {
+  return COMPUTER_INPUT_ACTIONS.has(actionType) ? 'COMPUTER_INPUT' : actionType;
+}
 
 export interface FrozenCheck {
   readonly id: string;

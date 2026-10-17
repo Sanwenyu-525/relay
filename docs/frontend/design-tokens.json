@@ -420,8 +420,13 @@
     },
     "layout.navigation.railWidth": {
       "$type": "dimension",
-      "$value": "5.5rem",
-      "$description": "全局图标导航栏列宽。2026-10-02 共享壳栏位分离时新增：导航只承担定位，近期工作改由 layout.sidebar.width 承担。栏宽取自方案 2 选定稿的图标+文字竖排比例，未按图片物理像素硬编码。固定宽度是有意的：图标导航是窗口外壳常量，不随内容区伸缩，否则竖排标签会在宽窗下被拉散。"
+      "$value": "4.75rem",
+      "$description": "全局图标导航栏列宽。2026-10-02 共享壳栏位分离时新增：导航只承担定位，近期工作改由 layout.sidebar.width 承担。栏宽取自方案 2 选定稿的图标+文字竖排比例，未按图片物理像素硬编码。固定宽度是有意的：图标导航是窗口外壳常量，不随内容区伸缩，否则竖排标签会在宽窗下被拉散。2026-10-15 由 5.5rem 收到 4.75rem：用户要求图标栏整体更紧凑；竖排标签仍靠 overflow-wrap 在更窄的栏宽内折行，不被压散。"
+    },
+    "layout.navigation.markerWidth": {
+      "$type": "dimension",
+      "$value": "0.1875rem",
+      "$description": "图标导航栏选中激活条的宽度（3px）。2026-10-16 新增：V4.3 原型 `.rail button.active .marker` 实测宽 3px，本站此前借用 focus.width（2px）——那是焦点环专用档，借来当选中记号既偏细又混用了两种语义。表内没有 3px 档，space.0.5 与 focus.width 都是 2px、space.1 是 4px，两头都不对，故单列一档而不是硬编码像素。高度仍复用 space.6（24px，与原型同值），不另开一档。"
     },
     "layout.sidebar.width": {
       "$type": "dimension",
@@ -515,9 +520,19 @@
       "$type": "dimension",
       "$value": "25.5rem"
     },
+    "layout.chatTimeline.previewWidth": {
+      "$type": "dimension",
+      "$value": "18rem",
+      "$description": "聊天消息时间线悬停/聚焦预览的浮层宽度。2026-10-16 实施时新增：现有宽度档最小的是 layout.rail.narrowWidth（18rem 但语义为页面右栏）、layout.drawer.maxWidth（25.5rem 为移动抽屉），都不适配消息区左缘的紧凑预览，故按预览卡片单列一档，不在组件里硬写像素。18rem 是首版实施默认值，与浮层内 meta/body 字号一起待真实窗口与 DPI 验证。"
+    },
     "layout.dialog.maxWidth": {
       "$type": "dimension",
       "$value": "35rem"
+    },
+    "layout.feedback.maxWidth": {
+      "$type": "dimension",
+      "$value": "28rem",
+      "$description": "浮层反馈（Toast／Snackbar／Notice）单条卡片的宽度上限。2026-10-17 实施时新增：dialog(35rem) 与 drawer(25.5rem) 是「用户主动打开、要读要填」的容器档，反馈卡承担的是两三行短句，35rem 会让一条「已保存」横贯半个窗口；chatTimeline.previewWidth(18rem) 又装不下带动作按钮的失败原因。窄窗另由 calc(100vw − 两侧内间距) 收回。28rem 是首版默认，待真实窗口验证。"
     },
     "breakpoint.medium": {
       "$type": "dimension",
@@ -643,7 +658,8 @@
     },
     "zIndex.toast": {
       "$type": "number",
-      "$value": 60
+      "$value": 60,
+      "$description": "浮层反馈栈（Toast／Snackbar／Notice）。2026-10-17 起有了消费者：定在 dialog(50) 之上，因为对话框里的保存回执与被对话框挡住的操作结果同样要立刻可读；仍在 overlay(40) 与 popover(20) 之上，栈内条目互相由 DOM 顺序叠放，不再分档。"
     },
     "motion.duration.fast": {
       "$type": "duration",
@@ -656,6 +672,21 @@
     "motion.duration.reduced": {
       "$type": "duration",
       "$value": "0ms"
+    },
+    "motion.duration.emphasis": {
+      "$type": "duration",
+      "$value": "1.2s",
+      "$description": "一次性强调的停留时长：时间线跳转后目标消息的落点高亮。2026-10-16 实施时新增。现有 motion.fast(120ms)/motion.panel(180ms) 是控件与面板过渡档，短到看不出「这就是刚跳过来的那条」；motion.loop.calm(6s) 是循环动效，语义是持续而非一次性；motion.reduced(0ms) 表示取消动效，不能当成长度为 0 的强调——那等于没有落点提示。三档都不能借用，故单列一档。减少动态效果时由 CSS 去掉过渡，只保留这一时长的静态高亮。1.2s 是首版实施默认值，待真实窗口验证后再冻结。2026-10-17 起有第二个同语义消费者：会话行拖拽改序后刚落位那一行的强调（设计系统 §9.17），沿用同一档而不另立。"
+    },
+    "motion.duration.toast": {
+      "$type": "duration",
+      "$value": "4s",
+      "$description": "Toast 的停留时长：一句「已保存」「复制成功」读完即走。2026-10-17 实施浮层反馈时新增。fast(120ms)/panel(180ms) 是过渡档，不是「停留」；emphasis(1.2s) 是给原地高亮的落点时长，读完一句中文都不止；loop.calm(6s) 是循环。四档都不能当自动消失的计时，故单列。悬停与键盘聚焦期间暂停计时由组件实现，不由 token 表达。4s 是首版默认，待真实窗口验证。"
+    },
+    "motion.duration.snackbar": {
+      "$type": "duration",
+      "$value": "8s",
+      "$description": "Snackbar 的停留时长：比 Toast 长一档，因为它带一个动作按钮（撤销、重新读取、查看），用户要先读完原因再决定点不点。2026-10-17 实施浮层反馈时新增，与 motion.duration.toast 分开，是为了让「无回执的短确认」和「可反悔的一次操作」在计时上不同档，而不是把 toast 时长调大当 snackbar 用。需要用户处理的事实不进这一档，走 notice（不自动消失）。8s 是首版默认，待真实窗口验证。"
     },
     "motion.easing.standard": {
       "$type": "cubicBezier",

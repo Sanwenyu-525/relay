@@ -141,6 +141,23 @@ const ALL_MIGRATIONS = [
   '0085_task_chain_execution_specs',
   '0086_impact_group_dependencies',
   '0087_agent_conversation_main_loop',
+  '0088_model_catalog_snapshot',
+  '0089_session_model_selection',
+  '0090_assist_session_pin',
+  '0091_composer_draft_assist',
+  '0092_computer_use',
+  '0093_assist_message_attachments',
+  '0094_session_model_selection_source_guard',
+  '0095_session_model_selection_openrouter_provenance',
+  '0096_computer_control_state',
+  '0097_conversation_diff_baseline',
+  '0098_assist_message_model_snapshot',
+  '0099_assist_model_call_identity',
+  '0100_model_provider_cooldown',
+  '0101_model_call_stream_event',
+  '0102_run_tool_call_preview',
+  '0103_github_read',
+  '0104_assist_session_unread',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {

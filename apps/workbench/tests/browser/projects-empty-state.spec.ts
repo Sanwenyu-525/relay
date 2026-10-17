@@ -92,10 +92,10 @@ test.describe("首装空态（真实 Chromium）", () => {
     await expect(page.locator(".projects-page .rail-trigger")).toHaveCount(0);
     await expect(page.locator('[role="dialog"][aria-label="项目详情"]')).toHaveCount(0);
 
-    await page.getByTestId("recent-work-empty").waitFor({ timeout: 20_000 });
-    // 左栏是定位入口，只给文字动作；新建任务的主决策区在任务页。
-    await expect(page.getByTestId("recent-work-empty").locator(".primary-button")).toHaveCount(0);
-    await expect(page.getByTestId("recent-work-empty").getByRole("button", { name: "新建任务" })).toBeEnabled();
+    // V43-01 起非工作台隐藏近期工作栏：首装的 /projects 也不再渲染该栏，
+    // 「左栏不给无效指引」由整栏隐藏承担；空态指引只在工作台页保留。
+    await expect(page.getByTestId("app-context-rail")).toBeHidden();
+    await expect(page.getByTestId("recent-work-empty")).toHaveCount(0);
   });
 
   test("归档范围为空时不提供无效的新建入口", async ({ page }) => {

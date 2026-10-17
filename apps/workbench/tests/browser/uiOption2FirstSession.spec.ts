@@ -329,27 +329,63 @@ test.describe("方案 2 独立验收四项整改（真实 Chromium）", () => {
       expect(look.pageWidth).toBeLessThanOrEqual(look.viewportWidth + 1);
 
       const agent = page.getByTestId("assist-conversation-mode-agent");
+      const before = await page.evaluate(() => ({
+        composer: document.querySelector<HTMLElement>(".agent-chat-composer")!.getBoundingClientRect().height,
+        tools: document.querySelector<HTMLElement>(".agent-chat-composer-tools")!.getBoundingClientRect().height
+      }));
       await agent.focus();
       await page.keyboard.press("ArrowRight");
       await expect(page.getByTestId("assist-conversation-mode-assistant")).toBeChecked();
-      await expect(page.getByTestId("assist-assistant-list-empty")).toBeVisible();
+      await expect(page.getByTestId("assist-assistant-config-toggle")).toBeVisible();
+      // 空清单时「新建助手」就地摆在 chip 旁：模式盒里只有图例、三个模式标签、chip 与该入口，
+      // 整段可见文字逐字钉住，多出来的裸字符（例如误留在 JSX 里的分号）会在这里现形。
+      await expect(page.getByTestId("assist-assistant-create-entry")).toBeVisible();
+      expect(await page.getByTestId("conversation-mode").innerText())
+        .toBe("会话模式\n普通 Agent\n人设助手\n学习\n选择助手\n新建助手");
       await expect(page.getByTestId("assist-readonly-note")).toBeVisible();
-      await expect(page.getByTestId("assist-assistant-create-toggle")).toBeVisible();
       await expect(page.getByTestId("assist-first-blocked")).toBeVisible();
       await expect(page.getByTestId("assist-first-send")).toBeDisabled();
       await expect(draft).toHaveValue("跨视口切换时保留的草稿");
+      // 撑高的东西一件都不许留在输入框里：下拉、空清单提示与新建表单都收在弹窗内；
+      // 就地新建入口是唯一例外（已在上面的模式盒文字里钉住），它不新增行。
+      await expect(page.getByTestId("assist-assistant-picker")).toHaveCount(0);
+      await expect(page.getByTestId("assist-assistant-list-empty")).toHaveCount(0);
+      await expect(page.getByTestId("assist-assistant-create-toggle")).toHaveCount(0);
       const expanded = await page.evaluate(() => {
+        const composer = document.querySelector<HTMLElement>(".agent-chat-composer")!;
         const tools = document.querySelector<HTMLElement>(".agent-chat-composer-tools")!;
-        const note = document.querySelector<HTMLElement>('[data-testid="assist-assistant-list-empty"]')!;
+        const note = document.querySelector<HTMLElement>('[data-testid="assist-readonly-note"]')!;
         const blocked = document.querySelector<HTMLElement>('[data-testid="assist-first-blocked"]')!;
-        const toolsRect = tools.getBoundingClientRect();
-        return { toolsHeight: toolsRect.height, toolsScrollHeight: tools.scrollHeight,
-          noteHeight: note.getBoundingClientRect().height,
-          blockedBottom: blocked.getBoundingClientRect().bottom, toolsBottom: toolsRect.bottom };
+        const chip = document.querySelector<HTMLElement>('[data-testid="assist-assistant-config-toggle"]')!;
+        return { composerHeight: composer.getBoundingClientRect().height,
+          noteHeight: note.getBoundingClientRect().height, chipHeight: chip.getBoundingClientRect().height,
+          blockedHeight: blocked.getBoundingClientRect().height,
+          toolsHeight: tools.getBoundingClientRect().height, toolsScrollHeight: tools.scrollHeight,
+          blockedBottom: blocked.getBoundingClientRect().bottom, toolsBottom: tools.getBoundingClientRect().bottom,
+          pageWidth: document.documentElement.clientWidth, pageScrollWidth: document.documentElement.scrollWidth };
       });
+      // 助手档只该多出常驻的两行文字：只读说明 + 不能发送的原因。第三项是这两行把底栏
+      // 挤到另起一行控件的代价（窄栏实测 843px 会多一行 32px 的计量环）。
+      expect(expanded.composerHeight - before.composer).toBeLessThanOrEqual(
+        expanded.noteHeight + expanded.blockedHeight + expanded.chipHeight + 12);
       expect(expanded.noteHeight).toBeGreaterThan(0);
       expect(expanded.toolsScrollHeight).toBeLessThanOrEqual(expanded.toolsHeight + 1);
       expect(expanded.blockedBottom).toBeLessThanOrEqual(expanded.toolsBottom + 1);
+      expect(expanded.pageScrollWidth).toBeLessThanOrEqual(expanded.pageWidth + 1);
+
+      // 配置弹窗：点开才有一件件控件，Esc 关掉后焦点回到 chip。
+      const chip = page.getByTestId("assist-assistant-config-toggle");
+      await chip.click();
+      const config = page.getByRole("dialog", { name: "人设助手" });
+      await expect(config).toBeVisible();
+      await expect(config.getByTestId("assist-assistant-list-empty")).toBeVisible();
+      await expect(config.getByTestId("assist-assistant-create-toggle")).toBeVisible();
+      await expect(config.getByTestId("assist-remember-toggle")).toBeVisible();
+      // 只读说明不跟着进弹窗——它必须不点开也看得见。
+      await expect(config.getByTestId("assist-readonly-note")).toHaveCount(0);
+      await page.keyboard.press("Escape");
+      await expect(config).toHaveCount(0);
+      await expect(chip).toBeFocused();
 
       await page.getByTestId("assist-conversation-mode-assistant").focus();
       await page.keyboard.press("ArrowLeft");
@@ -362,6 +398,8 @@ test.describe("方案 2 独立验收四项整改（真实 Chromium）", () => {
     await expect(page.getByTestId("assist-draft")).toBeVisible({ timeout: 20_000 });
     for (const viewport of viewports) {
       await page.setViewportSize(viewport);
+      // 首条发出后正在换到已有会话视图：先等模式盒就位，否则量到过渡态骨架。
+      await expect(page.locator(".agent-chat-mode-picker > .agent-chat-mode-option").first()).toBeVisible();
       const look = await page.evaluate(() => {
         const chip = document.querySelector<HTMLElement>(".agent-chat-mode-picker > .agent-chat-mode-option")!;
         const key = document.querySelector<HTMLElement>(".agent-chat-send")!;
@@ -536,7 +574,7 @@ test.describe("方案 2 页面结构对齐（真实 Chromium）", () => {
   // 不再能触发提示，保留就只剩空断言。其余 notice（取消、提案回执、原命令回执）
   // 仍渲染在输入器列内，但当前浏览器夹具无法可靠触发，属已知覆盖缺口。
 
-  test("左栏搜索只筛已加载范围，命中数与已加载数同时可读", async ({ page }) => {
+  test("左栏搜索只筛已加载范围：未命中项隐藏、空态说明范围", async ({ page }) => {
     const ctx: Ctx = { posts: [], loseMessageResponse: 0, receipts: new Map(), sessionCreated: false, messages: [], tasks: [] };
     ctx.tasks = [
       { id: "task-a", project_id: projectId, title: "人机协作工作流研究", status: "READY", mode: "ME",
@@ -548,12 +586,11 @@ test.describe("方案 2 页面结构对齐（真实 Chromium）", () => {
     ];
     await openSessionWith(page, ctx, 1);
 
-    await expect(page.locator('[data-testid="recent-work-scope"]')).toContainText("已加载 2 项");
     await page.locator('[data-testid="recent-work-search"]').fill("协作");
     await expect(page.locator('[data-testid="recent-work-task-a"]')).toBeVisible();
     await expect(page.locator('[data-testid="recent-work-task-b"]')).toHaveCount(0);
-    // 搜索范围不夸大：仍读得到已加载总数。
-    await expect(page.locator('[data-testid="recent-work-scope"]')).toContainText("已加载 2 项");
+    // 搜索范围不夸大：占位文案就写明「只覆盖已加载」，计数已按需求移除。
+    await expect(page.locator('[data-testid="recent-work-search"]')).toHaveAttribute("placeholder", /已加载/);
 
     await page.locator('[data-testid="recent-work-search"]').fill("不存在的东西");
     await expect(page.locator('[data-testid="recent-work-no-match"]')).toContainText("只覆盖已加载范围");
@@ -728,6 +765,10 @@ test.describe("方案 2 页面结构对齐（真实 Chromium）", () => {
       for (const node of document.querySelectorAll<HTMLElement>(".collab-center *")) {
         // 目录范围条与近期工作是上下文面板，不是对话区的一部分。
         if (node.closest(".folder-scope-strip") !== null) continue;
+        // 时间线导航的轨道与预览浮层是阅读辅助层，不是正文滚动 Owner：轨道
+        // `scrollbar-width:none` 不出滚动条，长会话由它自己滚动（工作台 §31.1），
+        // 正文唯一的滚动容器仍是下面的消息流。
+        if (node.closest(".agent-chat-timeline") !== null) continue;
         const style = getComputedStyle(node);
         if (!/(auto|scroll)/u.test(style.overflowY)) continue;
         if (node.scrollHeight <= node.clientHeight) continue;

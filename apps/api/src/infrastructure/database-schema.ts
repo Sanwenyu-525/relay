@@ -354,7 +354,13 @@ export type GatewayCapability =
   | 'FILE_WRITE'
   | 'GIT_READ'
   | 'GIT_WRITE'
-  | 'CLI_RUN';
+  | 'CLI_RUN'
+  /** 0092: Computer Plugin 桌面级只读（截图/窗口枚举）。 */
+  | 'COMPUTER_READ'
+  /** 0092: Computer Plugin 桌面级输入（窗口激活/鼠标/键盘）。 */
+  | 'COMPUTER_INPUT'
+  /** 0103: GitHub 只读查询（仓库身份、PR 与 Issue 状态）。 */
+  | 'GITHUB_READ';
 export type GatewayOperationStatus = 'WAITING_APPROVAL' | 'PREPARED' | 'DISPATCHING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN' | 'DENIED' | 'MANUALLY_CLOSED';
 export type InvocationStatus = 'PREPARED' | 'DISPATCHING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN' | 'NOT_EXECUTED';
 export type ResourceClaimStatus = 'HELD' | 'QUARANTINED' | 'RELEASED';
@@ -1220,6 +1226,22 @@ export interface AssistSessionRow {
    * Project 仍由应用层按调用时的当前状态判定，不写进数据库 CHECK。
    */
   readonly working_resource_id: string | null;
+  /**
+   * 0090：置顶时刻。NULL = 未置顶；有值即这条会话排在列表最前，取消置顶写回 NULL。
+   *
+   * 它是**导航排序键**，不是业务事实：归档与否、能不能发消息、绑哪个目录都仍由既有列决定。
+   * 取消不保留「曾经置顶」的历史——那一次改动留在命令回执里，不在这张表里另存一套。
+   */
+  readonly pinned_at: Date | null;
+  /**
+   * 0104：未读标记。NULL = 已读；有值即这条会话在近期工作栏里带未读点。
+   *
+   * 与 pinned_at 同一性质——**导航偏好，不是业务事实**：不参与排序、不改变任何准入判定，
+   * 归档与否、能不能发消息、绑哪个目录都仍由既有列与既有 Owner 决定。
+   * 上游对照里只有 ZCode 把它落库（Codex 会话列表没有未读，DSH 只在内存里、重启即丢），
+   * 我们采纳它「NULL=已读」的读法；「点开自动清除」需要 expected_unread_at 那类单调版本，本轮不做。
+   */
+  readonly unread_at: Date | null;
   readonly revision: bigint;
   readonly created_at: Date;
   readonly updated_at: Date;
@@ -1243,6 +1265,10 @@ export interface AssistMessageRow {
   readonly method_snapshot: JsonObject | null;
   readonly method_action: 'INSPECT' | 'MODIFY' | null;
   readonly method_argument: string | null;
+  /** 0098: non-secret model/provider candidate plan captured when this message was accepted. */
+  readonly model_selection_snapshot: JsonObject | null;
+  /** 0098: per-message candidate progress, CAS-updated independently of session selection. */
+  readonly model_attempt_state: JsonObject | null;
   readonly provider_request_id: string | null;
   readonly usage_input_tokens: number | null;
   readonly usage_output_tokens: number | null;
@@ -1265,6 +1291,26 @@ export interface AssistMessagePreviewRow {
   readonly updated_at: Date;
 }
 
+/**
+ * 0093：Assist 消息图片附件（输入框粘贴/拖拽）。
+ *
+ * 会话输入快照，不是资料也不受管存储：媒体类型与字节在插入后不可变，
+ * `message_id` 只允许从 NULL 绑定为非 NULL（由仓库层 UPDATE 守住，应用角色无 DELETE）。
+ * 「每消息 ≤4 张、总量 ≤6 MiB」由消息命令在事务内裁决，不写数据库触发器。
+ */
+export interface AssistMessageAttachmentRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly session_id: string;
+  readonly message_id: string | null;
+  readonly name: string;
+  readonly media_type: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+  readonly byte_length: number;
+  readonly content_hash: Buffer;
+  readonly content: Buffer;
+  readonly created_at: Date;
+}
+
 /** Disposable prefix for one current DRAFT claim and one actual model call. */
 export interface RunDraftPreviewRow {
   readonly run_id: string;
@@ -1284,7 +1330,7 @@ export interface RunDraftPreviewRow {
 export interface ModelCallRow {
   readonly id: string;
   readonly workspace_id: string;
-  readonly kind: 'DRAFT' | 'SEMANTIC_CHECK' | 'ASSIST' | 'VERIFY';
+  readonly kind: 'DRAFT' | 'SEMANTIC_CHECK' | 'ASSIST' | 'VERIFY' | 'COMPOSER';
   readonly step_attempt_id: string | null;
   readonly assist_message_id: string | null;
   readonly manifest_id: string | null;
@@ -1305,9 +1351,23 @@ export interface ModelCallRow {
   readonly budget_reserved_tokens: number | null;
   readonly error_kind: string | null;
   readonly started_at: Date;
+  readonly first_stream_event_at: Date | null;
   readonly first_text_delta_at: Date | null;
   readonly first_preview_persisted_at: Date | null;
   readonly settled_at: Date | null;
+}
+
+/** 0100: known provider Retry-After evidence, scoped to one model or account config. */
+export interface ModelProviderCooldownRow {
+  readonly provider: 'openrouter';
+  readonly scope: 'ACCOUNT' | 'MODEL';
+  readonly model_id: string;
+  readonly config_fingerprint: string;
+  readonly retry_after_at: Date;
+  readonly reason: 'UPSTREAM_PROVIDER_RATE_LIMIT' | 'PLATFORM_RATE_LIMIT' |
+    'ACCOUNT_FREE_DAILY_EXHAUSTED';
+  readonly model_call_id: string;
+  readonly observed_at: Date;
 }
 
 export interface AssistProposalRow {
@@ -1340,11 +1400,76 @@ export interface RuntimeAdmissionGateRow {
   readonly revision: bigint;
 }
 
+/**
+ * 模型目录发布头 + 跨进程同步租约 + 失败退避（迁移 0088）。单例行，快照事实只此一处。
+ * directory_digest/snapshot_seq 为「已成功发布」的指针；无成功快照时 digest 与时间为 NULL，不伪造。
+ */
+export interface ModelCatalogSyncStateRow {
+  readonly singleton: boolean;
+  readonly source: 'openrouter';
+  readonly directory_digest: string | null;
+  readonly snapshot_seq: bigint;
+  readonly last_success_at: Date | null;
+  readonly last_attempt_at: Date | null;
+  readonly last_failure_at: Date | null;
+  readonly last_failure_reason:
+    | 'NETWORK' | 'TIMEOUT' | 'AUTH' | 'RATE_LIMIT' | 'PROTOCOL'
+    | 'INCOMPLETE' | 'ENDPOINT_NOT_ALLOWED' | 'NOT_CONFIGURED' | null;
+  readonly consecutive_failures: number;
+  readonly sync_lease_token: string | null;
+  readonly sync_lease_expires_at: Date | null;
+  readonly revision: bigint;
+}
+
+/** 当前快照的免费判定条目（迁移 0088）。随成功发布整体替换，只保留最新一份。 */
+export interface ModelCatalogEntryRow {
+  readonly source_model_id: string;
+  readonly display_name: string;
+  readonly context_window: number | null;
+  readonly pricing: Record<string, string>;
+  readonly capabilities: {
+    readonly tools: boolean | null;
+    readonly structured_outputs: boolean | null;
+    readonly response_format: boolean | null;
+    readonly text_input: boolean | null;
+    readonly text_output: boolean | null;
+    readonly image_input: boolean | null;
+  };
+  readonly is_free: boolean;
+  readonly not_free_reason:
+    | 'MISSING_PRICE' | 'INVALID_PRICE' | 'NEGATIVE_PRICE' | 'NONZERO_PRICE'
+    | 'UNKNOWN_BILLABLE_ITEM' | null;
+  readonly fetched_at: Date;
+}
+
+/**
+ * 会话作用域的模型选择（迁移 0089，专项阶段 C）。是「该会话后续新请求用哪个模型」的事实记录，
+ * 随会话留存、可核对失效原因；从不写回进程默认，也不写 model_calls / runs。revision 供 CAS 幂等。
+ */
+export interface SessionModelSelectionRow {
+  readonly session_id: string;
+  readonly connection: 'default' | 'openrouter';
+  readonly model: string;
+  readonly config_fingerprint: string;
+  readonly free_only: boolean;
+  readonly catalog_source: 'openrouter' | null;
+  readonly catalog_snapshot_seq: bigint | null;
+  readonly catalog_model_id: string | null;
+  readonly revision: bigint;
+  readonly selected_by_command_id: string;
+  readonly updated_at: Date;
+}
+
 export interface RelayDatabaseSchema {
   runtime_admission_gate: RuntimeAdmissionGateRow;
   model_calls: ModelCallRow;
+  model_provider_cooldowns: ModelProviderCooldownRow;
+  model_catalog_sync_state: ModelCatalogSyncStateRow;
+  model_catalog_entries: ModelCatalogEntryRow;
+  session_model_selection: SessionModelSelectionRow;
   assist_sessions: AssistSessionRow;
   assist_messages: AssistMessageRow;
+  assist_message_attachments: AssistMessageAttachmentRow;
   assist_message_previews: AssistMessagePreviewRow;
   run_draft_previews: RunDraftPreviewRow;
   assist_proposals: AssistProposalRow;
@@ -1426,4 +1551,48 @@ export interface RelayDatabaseSchema {
   review_requests: ReviewRequestRow;
   review_decisions: ReviewDecisionRow;
   run_correction_budgets: RunCorrectionBudgetRow;
+  conversation_diff_baselines: ConversationDiffBaselineRow;
+  run_tool_call_previews: RunToolCallPreviewRow;
+}
+
+/** 一次原子发布的会话基线快照（工作台 §34）。详见迁移 0097。 */
+export interface ConversationDiffBaselineRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly session_id: string;
+  readonly resource_id: string;
+  /** 受管根的绝对路径；目录切换（不同根）产生新统计段，不跨段求和。 */
+  readonly root_path: string;
+  readonly captured_at: Date;
+  /** 基线文件清单与允许统计文本的真实内容（含 unavailable_reason 的不可统计项）。 */
+  readonly files: JsonObject;
+  /** 扫描因文件数/总量/时间超限而只覆盖部分范围时为 true；不把部分数据冒充完整。 */
+  readonly incomplete: boolean;
+  readonly capture_reason: string;
+  /** 全局单调：总数/列表/正文在同一 revision 下一致（CD-15）。 */
+  readonly revision: bigint;
+}
+
+/**
+ * 一次模型调用里某个工具 ordinal 的「生成中」临时预览（工作台 §34.4 / 迁移 0102）。
+ *
+ * 可丢弃的展示证据：不属于发起写动作的授权，不进入会话总数；工具轮次落库或调用结束
+ * 后由应用层删除，重启后允许读空，不要求恢复半截预览。
+ */
+export interface RunToolCallPreviewRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly run_id: string;
+  /** 模型调用 id：参数流期间就已存在，因此预览先于工具调用行（run_tool_calls）可用。 */
+  readonly model_call_id: string;
+  /** 同一次模型调用内工具请求的序号，与 run_tool_calls.ordinal 对齐。 */
+  readonly ordinal: number;
+  readonly tool_name: string;
+  /** 逐文件预览数组：[{ path, action, added, removed, target_complete }]；-1 表示待核对。 */
+  readonly files: JsonObject;
+  readonly truncated: boolean;
+  /** 全局单调：同一预览的更新只增不减，旧响应不能覆盖新值（CD-15）。 */
+  readonly revision: bigint;
+  readonly created_at: Date;
+  readonly updated_at: Date;
 }

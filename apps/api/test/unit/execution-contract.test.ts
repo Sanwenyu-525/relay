@@ -4,6 +4,20 @@ import test from 'node:test';
 import { freezeExecutionContract, readMockActionOperationId,
   readFileWriteAction, readWebFetchAction } from '../../src/workflow/execution-contract.js';
 
+test('model plan is immutable in the Run contract hash; legacy contracts remain without invented identity', () => {
+  const base = { taskId: '11111111-1111-1111-1111-111111111111', acceptanceRevision: 1n,
+    objective: 'o', expectedOutputs: {}, criteria: [] };
+  const plan = { version: 1, candidates: [{ connection: { provider: 'openrouter', model: 'fixture/a:free' } }] };
+  const frozen = freezeExecutionContract({ ...base, modelSelectionSnapshot: plan });
+  plan.candidates[0]!.connection.model = 'fixture/b:free';
+  assert.deepEqual(frozen.snapshot.model_selection_snapshot, {
+    version: 1, candidates: [{ connection: { provider: 'openrouter', model: 'fixture/a:free' } }],
+  });
+  const changed = freezeExecutionContract({ ...base, modelSelectionSnapshot: plan });
+  assert.notEqual(frozen.contractHash.toString('hex'), changed.contractHash.toString('hex'));
+  assert.equal('model_selection_snapshot' in freezeExecutionContract(base).snapshot, false);
+});
+
 test('file write changes and one operation identity are frozen into the contract hash', () => {
   const change = { path: 'src/result.txt', action: 'CREATE' as const, content: '' };
   const input = { taskId: '11111111-1111-1111-1111-111111111111', acceptanceRevision: 1n,

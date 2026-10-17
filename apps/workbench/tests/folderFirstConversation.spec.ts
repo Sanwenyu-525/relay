@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { clickPortal, flush, folderStripAssociation, folderStripName, mountWorkbench, openFolderDialog, openWorkingDirectory, pressEscape } from "./mountApp";
+import { clickPortal, flush, folderStripAssociation, folderStripName, mountWorkbench, openFolderDialog, openWorkingDirectory, pressEscape, switchToolbarSession } from "./mountApp";
 
 /**
  * 工作台 §18.1/§18.2 的前端反例：打开目录直达输入区、首条发送自动建会话，
@@ -45,6 +45,7 @@ function execution(over: Record<string, unknown> = {}) {
 }
 
 interface Routes {
+  loseDirectoryResponse?: boolean;
   apply?: () => Response;
   executionRequests?: () => Response;
   open?: (body: Record<string, unknown>) => Response;
@@ -57,6 +58,8 @@ interface Routes {
 }
 
 function router(routes: Routes, posts: { path: string; body: unknown }[]) {
+  let directoryAttempts = 0;
+  let messageCommitted = false;
   return vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(String(input));
     const path = url.pathname;
@@ -64,6 +67,13 @@ function router(routes: Routes, posts: { path: string; body: unknown }[]) {
     if (init?.method === "POST") {
       const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
       posts.push({ path, body });
+      if (path === `${prefix}/assist-sessions/${sessionId}/working-directory`) {
+        if (routes.loseDirectoryResponse && directoryAttempts++ === 0) throw new TypeError("directory response lost");
+        return json({
+        command_id: body.command_id, committed_at: "2026-10-16T00:00:00Z",
+        result: { session_id: sessionId, working_resource_id: body.resource_id, revision: "2" },
+        links: { resource: "" } });
+      }
       if (path === `${prefix}/working-directories/open`) return routes.open?.(body) ?? json({
         command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z", result: readyDirectory(),
         links: { resource: "" } }, 200);
@@ -74,6 +84,7 @@ function router(routes: Routes, posts: { path: string; body: unknown }[]) {
           created_at: "2026-10-02T00:00:00Z", updated_at: "2026-10-02T00:00:00Z" },
         links: { resource: "" } }, 201);
       if (path === `${prefix}/assist-sessions/${sessionId}/messages`) {
+        messageCommitted = true;
         const lose = routes.loseMessageResponse === true
           ? true : typeof routes.loseMessageResponse === "number" && routes.loseMessageResponse > 0;
         if (lose) {
@@ -110,11 +121,10 @@ function router(routes: Routes, posts: { path: string; body: unknown }[]) {
       error_code: null, provider_error_kind: null, created_at: "2026-10-02T00:00:00Z", updated_at: "2026-10-02T00:00:00Z",
       usage: { input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_creation_tokens: null },
       skill: null }] });
-    if (path.startsWith(`${prefix}/conversation-execution-requests`)) return routes.executionRequests?.() ?? json({ items: [
-      { request_id: requestId, session_id: sessionId, source_message_id: "msg-1", decision: "PREPARE",
-        status: "DELEGATED", candidate_status: "READY", root_path: root, questions: [],
-        task_id: taskId, run_id: runId, revision: "3", created_at: "2026-10-02T00:00:00Z",
-        updated_at: "2026-10-02T00:00:01Z" }] });
+    if (path.startsWith(`${prefix}/conversation-execution-requests`)) {
+      if (url.searchParams.get("session_id") !== sessionId) return json({ items: [] });
+      return routes.executionRequests?.() ?? json({ items: messageCommitted ? [execution()] : [] });
+    }
     if (path === `${prefix}/assist-proposals`) return json({ items: [] });
     if (path === `${prefix}/skill-definitions`) return json({ items: [] });
     if (path === `${prefix}/model-port`) return json({ provider: "fake", configured: false, model: null,
@@ -145,7 +155,7 @@ describe("文件夹入口与对话直接执行", () => {
           : response({ result: { request_id: requestId, status: "DELEGATED", task_id: taskId,
             run_id: runId, revision: "3" }, links: {} });
       },
-      executionRequests: () => response({ items: attempts === 0 ? [] : [execution({
+      executionRequests: () => response({ items: attempts === 0 ? [execution()] : [execution({
         candidate: undefined, status: attempts === 1 ? "TASK_PREPARED" : "DELEGATED",
         task_id: taskId, run_id: attempts === 1 ? null : runId, revision: "2" })] })
     }, posts));
@@ -170,7 +180,7 @@ describe("文件夹入口与对话直接执行", () => {
       await flush();
       await flush();
       expect(attempts).toBe(2);
-      expect(posts.filter((post) => post.path.endsWith("/execution-requests"))).toHaveLength(1);
+      expect(posts.filter((post) => post.path.endsWith("/execution-requests"))).toHaveLength(0);
       expect(posts.filter((post) => post.path.endsWith("/applications")).map((post) => post.path))
         .toEqual(Array(2).fill(`${prefix}/conversation-execution-requests/${requestId}/applications`));
     } finally { view.unmount(); }
@@ -210,6 +220,9 @@ describe("文件夹入口与对话直接执行", () => {
       await flush();
       const paths = posts.map((post) => post.path);
       expect(paths).toContain(`${prefix}/assist-sessions`);
+      const bindingPath = `${prefix}/assist-sessions/${sessionId}/working-directory`;
+      expect(paths).toContain(bindingPath);
+      expect(paths.indexOf(bindingPath)).toBeLessThan(paths.indexOf(`${prefix}/assist-sessions/${sessionId}/messages`));
       expect(paths).toContain(`${prefix}/assist-sessions/${sessionId}/messages`);
       const create = posts.find((post) => post.path === `${prefix}/assist-sessions`)?.body as
         { command_id?: string; project_id?: string };
@@ -218,6 +231,27 @@ describe("文件夹入口与对话直接执行", () => {
       expect(create.command_id).toMatch(/^[0-9a-f-]{36}$/);
       expect(create.project_id).toBe(projectId);
       expect(message.content).toBe("先讨论一下这个目录");
+    } finally { view.unmount(); }
+  });
+
+  it("首条目录绑定响应丢失时不发送消息，重试沿原绑定命令和原消息载荷", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    vi.stubGlobal("fetch", router({ loseDirectoryResponse: true }, posts));
+    const view = await mountWorkbench("/agent");
+    try {
+      await openWorkingDirectory(root); await flush();
+      await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("读取目录清单");
+      await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click"); await flush();
+      expect(posts.filter((post) => post.path.endsWith("/messages"))).toHaveLength(0);
+      const firstBinding = posts.find((post) => post.path.endsWith("/working-directory"));
+      expect(firstBinding).toBeDefined();
+      await view.wrapper.get('[data-testid="assist-first-retry"]').trigger("click"); await flush();
+      const bindings = posts.filter((post) => post.path.endsWith("/working-directory"));
+      expect(bindings).toHaveLength(2);
+      expect(bindings[1]?.body).toEqual(firstBinding?.body);
+      expect(posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(1);
+      expect((posts.find((post) => post.path.endsWith("/messages"))?.body as { content: string }).content).toBe("读取目录清单");
     } finally { view.unmount(); }
   });
 
@@ -337,8 +371,7 @@ describe("文件夹入口与对话直接执行", () => {
       expect(summary.text()).toContain("文件内容会在执行时读取后决定");
       const requested = posts.find((post) => post.path.endsWith("/execution-requests"))?.body as
         { source_message_id?: string; resource_id?: string };
-      expect(requested.source_message_id).toBe("msg-1");
-      expect(requested.resource_id).toBe("res-1");
+      expect(requested).toBeUndefined();
 
       await view.wrapper.get('[data-testid="execution-start"]').trigger("click");
       await flush();
@@ -363,10 +396,8 @@ describe("文件夹入口与对话直接执行", () => {
         updated_at: "2026-10-02T00:00:00Z" }] }) }, posts);
     const original = fetchMock.getMockImplementation()!;
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
-      if (String(input).includes("/execution-requests") && init?.method === "POST") {
-        const body = JSON.parse(String(init.body ?? "{}")) as { command_id: string };
-        return response({ command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z",
-          result: clarify, links: { resource: "" } }, 202);
+      if (String(input).includes("/conversation-execution-requests?") && !init?.method) {
+        return response({ items: [clarify] });
       }
       return original(input, init);
     }));
@@ -545,8 +576,8 @@ describe("文件夹入口与对话直接执行", () => {
       // 解释依据必须是消息回执里的真实 user message id 与确切目录资源，不能由前端关键词判断。
       const requested = posts.find((post) => post.path.endsWith("/execution-requests"))?.body as
         { source_message_id?: string; resource_id?: string } | undefined;
-      expect(requested?.source_message_id).toBe("msg-1");
-      expect(requested?.resource_id).toBe("res-1");
+      expect(requested).toBeUndefined();
+      expect(posts.some((post) => post.path.endsWith("/working-directory"))).toBe(true);
       // 解释仍由服务端决定；候选就绪也只是等待人工确认，不因首条发送自动建立 Task。
       expect(posts.some((post) => post.path.includes("/applications"))).toBe(false);
     } finally { view.unmount(); }
@@ -573,7 +604,7 @@ describe("文件夹入口与对话直接执行", () => {
       await discuss.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
       await flush();
       await flush();
-      expect(discussPosts.some((post) => post.path.endsWith("/execution-requests"))).toBe(true);
+      expect(discussPosts.some((post) => post.path.endsWith("/execution-requests"))).toBe(false);
       expect(discussPosts.some((post) => post.path.includes("/applications"))).toBe(false);
     } finally { discuss.unmount(); }
   });
@@ -616,7 +647,7 @@ describe("文件夹入口与对话直接执行", () => {
         await openFolderAndType(view, "帮我把这个文件的内容改成 after");
         await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click"); await flush(); await flush();
         if (!delayed) expect(view.wrapper.find('[data-testid="execution-start"]').exists()).toBe(true);
-        await view.wrapper.get('[data-testid="assist-session-select"]').setValue(secondSessionId); await flush();
+        await switchToolbarSession(secondSessionId); await flush();
         release(); await flush(); await flush();
         expect(view.wrapper.find('[data-testid="execution-start"]').exists()).toBe(false);
         expect(view.wrapper.text()).not.toContain("改写 answer.txt");
@@ -729,7 +760,8 @@ describe("文件夹入口与对话直接执行", () => {
 
         const requested = posts.find((post) => post.path.endsWith("/execution-requests"))?.body as
           { resource_id?: string } | undefined;
-        expect(requested?.resource_id).toBe("res-1");
+        expect(requested).toBeUndefined();
+        expect(posts.some((post) => post.path.endsWith("/working-directory") && (post.body as { resource_id: string }).resource_id === "res-1")).toBe(true);
         expect(posts.filter((post) => post.path.endsWith("/messages")))
           .toEqual(expect.arrayContaining([expect.objectContaining({ body: expect.objectContaining(
             { command_id: messageCommandId }) })]));
@@ -763,7 +795,7 @@ describe("文件夹入口与对话直接执行", () => {
         await flush();
         await flush(120);
 
-        expect(posts.filter((post) => post.path.endsWith("/execution-requests"))).toHaveLength(1);
+        expect(posts.filter((post) => post.path.endsWith("/execution-requests"))).toHaveLength(0);
         // 建会话只发生一次；解释只发生一次。
         expect(posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(1);
         // PREPARE 摘要必须出现在当前会话面板，而不是只断言 POST 数量。
@@ -818,7 +850,7 @@ describe("文件夹入口与对话直接执行", () => {
         await flush();
         await flush();
         const afterCheck = posts.filter((post) => post.path.endsWith("/execution-requests")).length;
-        expect(afterCheck).toBe(1);
+        expect(afterCheck).toBe(0);
 
         // 现在放行迟到响应：不得第二次解释，也不得复活已清空的 pending。
         releaseLate.run();
@@ -880,7 +912,7 @@ describe("文件夹入口与对话直接执行", () => {
         expect(messages).toHaveLength(1);
         expect((messages[0]?.body as { content?: string }).content).toBe("帮我把这个文件的内容改成 after");
         expect(posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(1);
-        expect(posts.filter((post) => post.path.endsWith("/execution-requests"))).toHaveLength(1);
+        expect(posts.filter((post) => post.path.endsWith("/execution-requests"))).toHaveLength(0);
         expect(view.wrapper.find('[data-testid="assist-first-pending"]').exists()).toBe(false);
       } finally { view.unmount(); }
     });

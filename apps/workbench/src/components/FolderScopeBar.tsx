@@ -19,8 +19,9 @@ import "./FolderScopeBar.css";
  * - 「更换目录」走 AppDialog，不新开路由，也不在细条内做第二套目录状态。
  */
 export default function FolderScopeBar({ directory, recents, busy, error,
-  associationLabel, warning, onOpen, onNewConversation }: {
+  associationLabel, warning, boundDirectoryPath = null, onOpen, onNewConversation }: {
   readonly directory: RelayWorkingDirectory | null;
+  readonly boundDirectoryPath?: string | null;
   readonly recents: readonly RecentWorkingDirectory[];
   readonly busy: boolean;
   /** 目录打开失败的真实原因；不显示它，用户只会以为「点了没反应」。 */
@@ -58,7 +59,7 @@ export default function FolderScopeBar({ directory, recents, busy, error,
       <FolderOpen aria-hidden="true" className="folder-strip-icon" />
       {/* 目录名过长时按本档省略，完整路径挂在 title 上：只有名字时无法核对是哪一个目录。 */}
       <span className="folder-strip-name" data-testid="folder-scope-options"
-        title={directory?.canonicalRoot}>{directory?.displayName ?? "未选择目录"}</span>
+        title={directory?.canonicalRoot ?? boundDirectoryPath ?? undefined}>{directory?.displayName ?? boundDirectoryPath?.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) ?? "未选择目录"}</span>
       <span className="folder-strip-meta" data-testid="folder-scope-association">{associationLabel}</span>
       {/* 完整告警给读屏与 title；可见区只留「这件事的后果」，不复述归属那一句，
           避免同一事实在一行里说两遍。 */}
@@ -72,8 +73,8 @@ export default function FolderScopeBar({ directory, recents, busy, error,
     </p>
     {error !== null && <p className="action-error" role="alert" data-testid="folder-error">{error}</p>}
 
-    <AppDialog open={changing} title="更换工作目录" onClose={() => setChanging(false)}>
-      <p className="helper-text">目录只是当前工作目录，不会自动读取整棵树、外发内容或开启任何权限。</p>
+    <AppDialog open={changing} title="更换工作目录" size="lg"
+      subtitle="选择一个本机文件夹作为当前工作目录" onClose={() => setChanging(false)}>
       <FolderScope state={{ directory, recents, busy }} onOpen={submit}
         onNewConversation={() => { setChanging(false); onNewConversation(); }} />
     </AppDialog>

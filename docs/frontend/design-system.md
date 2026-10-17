@@ -191,7 +191,7 @@ window.content.initialWidth/initialHeight 与 minWidth/minHeight 为客户区逻
 |---|---|---|
 | AppShell / NavigationItem | navigation 底、ui 字体、control.nav.height；当前项有色块/竖线 | 路由链接使用 aria-current；hover、focus、current 分开；待审计数来自真实查询 |
 | Breadcrumb / ViewTabs | 细字与绿色底线，无大块 pill | 导航使用链接；同页 Tab 才使用 tablist/tab/tabpanel 及方向键，不给路由伪装 Tab 语义 |
-| Button / TextAction | 同一行使用同一 height，独立主操作可用 prominent；control 圆角，主要实心、次要描边或文字 | 默认/hover/pressed/focus/disabled/loading 全部定义；相邻动作不按主次身份混用高度，文字动作保留可辨认链接样式 |
+| Button / TextAction | 同一行使用同一 height，独立主操作可用 prominent；control 圆角，主要实心、次要描边或文字（唯一的无底主操作见 §9.10 的近期工作栏「新对话」，2026-10-16 用户决定） | 默认/hover/pressed/focus/disabled/loading 全部定义；相邻动作不按主次身份混用高度，文字动作保留可辨认链接样式 |
 | TextField / Textarea | surface 底、control 边界、ui 字体 | 可见 label；required/错误说明与字段关联；不以 placeholder 代替标签；保留用户草稿 |
 | StatusLabel / MetadataRow | 轻量文字+图标，badge 圆角；不把普通标签做成按钮 | Task 状态、执行模式、执行者分别渲染；状态代码不由颜色决定 |
 | VersionSelector | 当前版本细绿边框/浅绿底，其余低强调 | “当前选用”“最新”“本轮接受”分别呈现；点击查看不等于接受 |
@@ -253,10 +253,11 @@ Inbox 快捷入口复用顶栏既有 `icon-button` 形态，提供可读的名�
 
 协作页结构重塑（工作台 §28）新增四条可复用外观规则，全部引用既有 token，**未新增色值、字号、圆角或动效数值**。数值唯一源仍是 [design-tokens.json](design-tokens.json)，此处只记引用关系，不复制数值。
 
-- **chips**（模式切换 / 资料 / 动作下拉 / 更换目录）：`radius.round` 胶囊 + `border.control` 边 + `bg.surface` 底；选中态（含展开中的下拉）`selection.bg` + `selection.text` + `action.primary` 边；hover `selection.hover`，过渡 `motion.duration.fast`。禁用态用 `disabled.bg` / `disabled.text`，不留「无底」的中间形态。同一排的 chips 不再插竖分隔线——那会把同类控件切成两组。
-- **文件夹作用域细条**：常态 `bg.canvas` 底 + `border.separator` 上缘，分隔线横贯整列、内容与输入卡同宽同轴（`layout.reading.maxWidth`）；目录名 `font.size.body` + `font.weight.medium` 是这一行的事实主角，归属是 `font.size.meta` + `text.muted` 的次要事实，宽度不足时先在归属处省略。告警态整条换 `status.warning.bg` + `status.warning.text`，由图标、目录名与状态短语三处同时承载（不靠单一颜色表达状态），次要事实保持 `text.secondary`，不跟着整条换色；状态短语只说后果、不复述归属那一句，完整原因给读屏与 `title`。它是常驻状态线，因此不加圆角、不加阴影、不套底色，也不再把整行收进胶囊；行内唯一动作按 chips 规则取 `border.control` + `bg.surface` + `radius.round` 的紧凑键。
+- **chips**（模式切换 / 资料 / 动作下拉 / 更换目录）：`radius.round` 胶囊 + `border.control` 边 + `bg.surface` 底；选中态（含展开中的下拉）`selection.bg` + `selection.text` + `action.primary` 边；hover `selection.hover`，过渡 `motion.duration.fast`。禁用态用 `disabled.bg` / `disabled.text`，不留「无底」的中间形态。同一排的 chips 不再插竖分隔线——那会把同类控件切成两组。**降档变体（常驻状态线上唯一的动作）**：静止可以是「无底 + `border.separator` 边 + `text.secondary` 文字」，hover 才回到完整 chip（`selection.hover` 底 + `border.control` 边 + `text.primary` 文字），按下仍走选中色族。用在信息层级已由文字说清的场合——那里的一圈深色描边会比它旁边的卡片更抢眼。降档只降静止权重：胶囊形、`control.height.compact` 命中区与三态一个都不能少，否则又退回「读成分段控件的一段而不是一个动作」。目前唯一的消费者是目录细条的［更换目录］（见下条）。
+- **文件夹作用域细条**：它是输入区上方常驻的一行状态，不是卡片也不是浮层：不铺底色、不加圆角与阴影，也没有上缘分隔线（2026-10-16 按用户反馈去掉，消息区与输入区之间只留这一行常驻状态）；内容与输入卡同宽同轴（`--chat-measure` + 居中），不横贯整列。目录名 `font.size.body` + `font.weight.medium` 是这一行的事实主角，归属是 `font.size.meta` + `text.muted` 的次要事实，宽度不足时先在归属处省略。告警态**不铺警示底色**（琥珀底横贯输入列喧宾夺主，2026-10-15 去掉），状态由图标、目录名与状态短语三处的前景色 `status.warning.text` 同时承载（不靠单一颜色表达状态），次要事实保持 `text.secondary`，不跟着整条换色；状态短语只说后果、不复述归属那一句，完整原因给读屏与 `title`。整行不收进胶囊（常驻状态线不是卡片）；行内唯一动作［更换目录］取上一条的**降档变体**——静止「无底 + `border.separator` + `text.secondary`」，hover 回到 `border.control` + `selection.hover` 的完整 chip，`radius.round` 与 compact 命中区不变（2026-10-17 用户实机截图指令「这个更换目录按钮胶囊很抢眼啊，能不能让他不那么抢眼，同时保证不会太难看」：静止描边从 `border.control` 降到输入卡同一档 `border.separator`，让这一行最抢眼的东西回到琥珀色的后果短语上）。
 - **欢迎卡与引导卡**：欢迎标题 `font.size.compactPage` + `font.family.ui` + `font.weight.semibold`；引导卡 `bg.subtle` 底 + `border.separator` 边 + `radius.control`，卡内正文左对齐（外层欢迎区居中，列表居中会读成诗）。
-- **「回到最新」悬浮键**：`radius.round` + `border.control` + `bg.surface` + `shadow.floating` + `zIndex.popover`，边长 `control.height.compact`，hover 用 `selection.hover`。它是真实 `button`，不是装饰；出现与消失仍是挂载/卸载，没有退场动画。
+- **「回到最新」悬浮键**：`radius.round` + `border.control` + `bg.surface` + `shadow.floating` + `zIndex.popover`，边长 `control.height.compact`，hover 用 `selection.hover`。它是真实 `button`，不是装饰；出现与消失仍是挂载/卸载，没有退场动画。宽高必须**同源声明**：只写 `min-height` 时全局 `.icon-button` 的 `height: control.height`（40px）仍然生效，32×40 配 `radius.round` 读出来是一枚竖胶囊而不是整圆（2026-10-17 用户实机截图指令校正，命中区仍是 32px，高于 `control.target.minimum`）。
+- **输入器「+」弹层**（2026-10-16）：外壳沿用浮层语言（`radius.panel` + `border.separator` + `shadow.floating` + `zIndex.popover`）。选项恒定单行：图标取 `font.size.body`，名称取 `font.size.meta` + `font.weight.medium`，行高 `control.height.compact`，图标与名称一起垂直居中。**禁用原因归弹层底部脚注，不归条目正文**：同一份弹层里出现两条两行高的选项时，解释与选项名几乎同权重，四个动作读不成形；脚注用 `font.size.caption` + `font.weight.regular` + `text.muted`，顶部 `border.separator` 细线切开动作区，左缘对齐名称列。同一原因合并成一条，每条禁用项用 `aria-describedby` 指回对应那一行——Chromium 不在 disabled 控件上弹 `title`，原因必须留在可见文本里。这一条推翻此前「原因写在条目正文里」那句，旧写法保留在第 202 行 Menu 行的约束之下，不再作为呈现方式。
 
 ### 6.1 交互状态的统一表达（2026-09-29）
 
@@ -267,20 +268,20 @@ Inbox 快捷入口复用顶栏既有 `icon-button` 形态，提供可读的名�
 | 状态 | 视觉与输入规则 | 退出条件 |
 |---|---|---|
 | 默认 | 明确操作对象与动词；同一决策区只突出一个主操作 | 指针、焦点或业务状态改变 |
-| 悬停 | 主按钮使用 `color.action.hover`；列表使用 `color.selection.hover`；不改变选中标志、执行者或版本 | 指针离开；键盘用户不依赖悬停获取信息 |
+| 悬停 | 主按钮使用 `color.action.hover`；列表使用 `color.selection.hover`；无底的主操作按列表档反馈（§9.10）；不改变选中标志、执行者或版本 | 指针离开；键盘用户不依赖悬停获取信息 |
 | 按下 | 使用 `color.action.pressed`，不缩放布局、不显示成功勾选 | 释放或取消按压；只在有效激活时提交一次 |
 | 键盘聚焦 | 独立使用 `color.focus.ring`、`focus.width`、`focus.offset`；可与选中/错误共存 | 焦点真实移动；异步刷新不随意夺焦点 |
 | 选中 | 稳定背景、文字和激活标记共同表达；与悬停有可辨差别 | 用户显式选择，或当前事实变更 |
 | 不可用 | 使用 `color.disabled.*`，就近显示原因与可行下一步；原因不能仅藏在 tooltip 中 | 前置条件重新核对有效；禁用不等于隐藏原因 |
 | 提交中 | 保留宽度与位置，动词改为“保存中/提交中”；拦截重复激活，保留阅读和安全导航 | 得到明确回执，或转为结果待核对 |
-| 失败/冲突 | 原操作附近持续显示原因；保留用户草稿；与字段关联，不能只闪 toast | 用户修正、重读或完成规定恢复流程 |
+| 失败/冲突 | 原操作附近持续显示原因；保留用户草稿；与字段关联，不能只闪 toast；只有辅助信息的读取失败与「停留到关闭」的 Notice 可进浮层，见 §6.4 | 用户修正、重读或完成规定恢复流程 |
 | 成功 | 按真实提交范围更新对象和状态，保留可查的版本/结果入口 | 不用固定延迟代替成功判定 |
 
 任务行主链接、复选框和更多菜单各自独立；点击菜单不同时打开任务。行内辅助操作可在 hover 或 focus-within 出现，但必要操作始终可发现。来源链接悬停只提示目标，不自动读取、选入 Context 或授权。标题栏操作区不参与拖动；留白才可拖动，窗口控制与业务按钮状态分离。无后退历史时按钮不可用但名称仍可读。
 
 Tooltip 仅补充名称/快捷键，键盘聚焦同样可触发，离开或 Esc 可关闭。菜单关闭回到触发控件；抽屉/对话框打开后聚焦其标题或首个合理控件，关闭返回原入口。未保存编辑的关闭行为沿用离开保护；Esc 不等于丢弃草稿，也不取消后台 Run。更新完成后若原控件消失，将焦点移到对应结果标题，避免落到页面起点。
 
-动效时长只引用 `motion.duration.fast`、`motion.duration.panel`、`motion.duration.reduced` 与 `motion.easing.standard`，不建立第二套数值。减少动态效果时保留静态文字和焦点反馈；既有输入区运行流光仅遵守第7.1节的限定，不扩展为通用加载动画。
+动效时长只引用 `motion.duration.fast`、`motion.duration.panel`、`motion.duration.reduced` 与 `motion.easing.standard`，浮层反馈的停留时长另引用 `motion.duration.toast`、`motion.duration.snackbar`（§6.4），不建立第二套数值。减少动态效果时保留静态文字和焦点反馈；既有输入区运行流光仅遵守第7.1节的限定，不扩展为通用加载动画。
 
 2026-09-30 整套页面呈现纠偏：普通主标题使用 page，今日仍保留用户选定的 compactPage；品牌、导航与默认侧栏宽度统一到唯一 token，已保存的侧栏宽度仍优先。任务列表标题不再被窄内容列限制；详情的状态、验收与产物事实横向并列，右侧编辑动作纵向铺满。知识阅读采用目录、白纸正文、来源三列，并按确切版本显示标题与目录；三工作台、知识管理和动态的辅助设置默认折叠，已应用的活动范围必须展开。折叠仅改变呈现，不能卸载草稿、原命令或未决结果。运行步骤用白纸与细线分组，诊断、控制和 UNKNOWN 入口保留。协作纸面为正文留出更多空间，判断元数据常驻，说明按需展开；宽而短的窗口允许判断区自身滚动。窄窗共用顶栏隐藏中间面包屑和日期、收为带可访问名称的来源按钮，保留搜索与收件箱入口。逐页证据及未测状态见[视觉 QA](../../design-qa.md)。
 
@@ -300,12 +301,34 @@ Tooltip 仅补充名称/快捷键，键盘聚焦同样可触发，离开或 Esc 
 | 输入、下拉、多行框、单/复选 | 原生语义控件 + `field`/`edit-form` | 标签常驻；说明/错误以 `aria-describedby` 关联，错误用 `aria-invalid`，required 与业务条件一致。公共层统一字体、边界、placeholder、hover、readonly、disabled 与错误；单/复选使用现有 action 色。只读保留选取，禁用有原因且文字不整体淡化。任务表单只在校验失败后聚焦首个错误，继续输入不跳焦点；结果替换表单且无上层弹层时焦点转至结果标题，迟到结果不抢走弹层焦点 |
 | 同页互斥页签 | [tabNavigation](../../apps/workbench/src/lib/tabNavigation.ts) | `tablist`/`tab`/`tabpanel`、稳定关联、`aria-selected` 与单一 Tab 停靠点；方向键/Home/End共用入口并过滤 IME。资料类型与开发工具复用此入口，草稿确认/未决命令优先于切换。单面板开关用 `aria-expanded`/`aria-controls`，路由仍用链接 |
 | 弹层与抽屉 | [AppDialog](../../apps/workbench/src/components/AppDialog.tsx) + dialogStack | 只有顶层响应关闭和焦点；跳过隐藏祖先、闭合 details、负 tabindex、禁用/隐藏输入及 inert 内容；面板/外部起点的 Tab 回到有效对象，关闭取消延迟聚焦并恢复原入口。IME 组合期间 Esc 不关窗，退出行为仍由页面草稿保护决定 |
-| 就地反馈与异步输入 | `field-error`、`action-error`、`warning-callout`、`receipt-message` + 页面状态 | 字段/业务失败、空态、读取中、提交中、待核对分开；错误与成功使用相应 alert/status 并保留可查结果。连接 readiness 检查期间冻结被核对的输入，失败后恢复编辑，避免屏幕值与实际激活值错配 |
+| 就地反馈与异步输入 | `field-error`、`action-error`、`warning-callout`、`receipt-message` + 页面状态 | 字段/业务失败、空态、读取中、提交中、待核对分开；错误与成功使用相应 alert/status 并保留可查结果。连接 readiness 检查期间冻结被核对的输入，失败后恢复编辑，避免屏幕值与实际激活值错配。会改写业务事实的结果继续留在就地；只说明「这条辅助信息暂时读不到」或短暂成功回执的可迁入浮层栈（§6.4），迁移判定归[工作台 §13.1](workbench-design.md#131-反馈通道的四类划分2026-10-17) |
 | 最大化页壳与滚动 | `.desktop-window .app-frame`/`.app-content`/`.app-main` | Grid 行及内容最小高度受剩余客户区约束；普通长页面由主区滚动，侧栏底部保持可达；协作内部滚动继续沿既有规则，不用外壳裁切隐藏按钮 |
 
 用户五图反馈的接续规则：焦点线覆盖原边界并向内加粗，无边框控件仍有内侧焦点，错误字段保留 danger 色，实心主按钮以 onAction 区分焦点；复合搜索/分段/文件入口只保留容器焦点，不叠加外圈。同一控件行显式选择一个高度，会话下拉、新建与刷新统一引用 control.height，主次差异由底色与字重表达。工具右栏及执行输出抽屉与主画布同用 canvas，subtle 列表和文档内容 surface 保留各自用途。近期项目分组 summary 的 hover/pressed 使用 selection.hover/bg，反馈不改变尺寸或展开状态。紧凑连接详情占稳定剩余宽度，摘要与工具按钮顶端对齐且共用 control.height，正文只在摘要下方展开；代码入口为[ModelConnectionStrip](../../apps/workbench/src/components/ModelConnectionStrip.css)。
 
 本轮没有缩窗/DPI、真实输入法组词或全量业务状态验收；原生 title 的键盘 tooltip 等未实现能力不因本基线自动变成已完成。实际结果只归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)，业务输入与恢复约束见[工作台第 17.5 节](workbench-design.md#175-最大化优先的控件与交互接续2026-10-01)。
+
+### 6.3 全局滚动条与拖拽分隔条（2026-10-17）
+
+**滚动条只用 `::-webkit-scrollbar` 自绘。** 公共层原先在 `*` 上双写 `scrollbar-width: thin` + `scrollbar-color: border.control`，与下面那组前缀规则并存。这条双写在 WebView2/Chromium 上是有害的：只要 `scrollbar-width` 不是 `auto`，引擎就改画**原生**滚动条并忽略整组前缀规则——于是 thumb 是 `color.palette.control`（#849185，控件边界档，为「与画布 ≥3:1」而生，用作 thumb 明显过重），且轨道两端各带一枚跳转箭头，正是用户实机圈出的两处。现规则：`*` 上不再写标准属性，thumb 静止取 `color.palette.lineStrong`（#DCE5DD）、悬停取 `color.palette.control`，`::-webkit-scrollbar-button` 显式归零。需要整条隐藏的容器（近期工作栏、时间线轨道）继续用 `scrollbar-width: none`，它同样屏蔽前缀规则，语义不变。零新增 token。
+
+**拖拽分隔条在拖拽过程中与悬停同款。** `role="separator"` 的列宽拖拽条（`.drag-separator`，两处消费者：近期工作栏手柄、对话与成果之间的分栏条）静止时线透明，悬停/键盘聚焦/拖拽时由 `::after` 画线；三态同色同宽，取 `color-mix(in srgb, border.control 55%, transparent)`。此前悬停用 `border.control` 实色、拖拽又被压回静止外观，抓握后指针滑出 24px 命中区时线会消失，实机读成「一拖就断」。现按用户指令把线整体调浅，并让 `--dragging` 与悬停共用同一条规则（多带一级 `:hover` 的旧覆盖已删除），指针离开命中区也保持同一外观。零新增 token、不改命中区宽度与列宽 Owner。
+
+**验证边界**：以上两条在 headless Chromium 探针里量的是计算样式（`scrollbar-width` 回到 `auto`、`::after` 三态色值），**滚动条的实际宽度与箭头消失只能在真实 WebView2 窗口复核**——headless 走 overlay 滚动条，`offsetWidth − clientWidth` 恒为 0，量不出占位。多 DPI 与真实窗口未复验。
+
+### 6.4 浮层反馈（Toast／Snackbar／Notice，2026-10-17）
+
+用户指令「像这些 toast 不要影响页面布局」把三类临时反馈从正文里搬进浮层。哪条反馈走哪一档由[工作台 §13.1](workbench-design.md#131-反馈通道的四类划分2026-10-17) 判定，本节只管呈现。公共入口：[Feedback.tsx](../../apps/workbench/src/components/Feedback.tsx) 的 `Toast`／`Snackbar`／`Notice` 三个插槽组件与页壳里挂一次的 `FeedbackHost`；条目状态在 [lib/feedback.ts](../../apps/workbench/src/lib/feedback.ts)，与 `dialogStack` 同为模块级 store，本项目没有 React Context，也不为这条栈新建 provider。
+
+**几何**：整栈 `position: fixed`、水平居中，顶边取 `control.nav.height + space.2`（桌面标题带与外壳顶部桌面带之下，与三列纸面的上缘同一条线；再往上就压住标题带的拖动命中区与右缘窗口按钮），宽度 `min(layout.feedback.maxWidth, 100vw − 两侧 space.4)`，条目自上而下按出现顺序堆叠。栈本身 `pointer-events: none`，只有卡片收指针事件——空栈不渲染，不留一个透明层盖住页面。卡片 `radius.panel` + `shadow.floating` + `space.3/4` 内间距 + meta 字号，长句 `overflow-wrap: anywhere`。位置由同日第二轮用户指令「提示要在屏幕的正上方」从底部中央改为顶部中央。
+
+**配色**：底与字沿用四档状态色（success／danger／warning／neutral），边框取同族 35% 混色而不是 `receipt-message` 那种整圈实色——就地提示要靠强边框从段落里切出来，浮层已经有投影把自己离开画布，实色边在浮层上过重。卡片内的动作与关闭按钮 `color: inherit`，跟随语义色而不是回到全局 action 蓝。
+
+**层级与动效**：`zIndex.toast`（60）在 `zIndex.dialog`（50）之上——对话框里的保存回执与被它挡住的读取失败同样要立刻可读；这条栈的键盘焦点不进对话框的焦点陷阱（它在 body 上，不是对话框子树）。进入动画只用 `motion.duration.panel` + `motion.easing.standard` 的下移淡入（自上方 `space.2` 落入，与栈的顶边方向一致），`prefers-reduced-motion` 与 `html[data-motion="off"]` 都去掉；停留时长引用新增的 `motion.duration.toast`／`motion.duration.snackbar`，需要停留到用户处理的条目不设置计时器。
+
+**无障碍**：非 danger 条目 `role="status"`，danger 条目 `role="alert"`；Snackbar 的动作按钮是卡片里唯一的按钮，Notice 的关闭按钮用紧凑档 `icon-button` 并带「关闭提示」可访问名称。悬停或键盘聚焦期间暂停自动消失，离开后才走完时长；Esc 不关浮层，该键继续归停止生成与对话框关闭。
+
+**本轮范围与验证边界**：只接入对话页输入卡外的三条（模型调用状态读取失败→Snackbar、命令回执→Toast、动作失败→停留到关闭的 Notice）；其余页面仍按 §6.2 的就地反馈保留，逐页迁移时先过 §13.1 四问。jsdom 用例断言条目落在 body 上的栈里、不在组件容器里，另有一条读源码 CSS 的位置守卫（顶边锚在 `control.nav.height + space.2`、不再声明 `bottom`、进入动画自上方落）。**仓外 Chromium 静态探针实测**（真 `styles.css` ＋ 展平后的 token ＋ 按 `Feedback.tsx` 抄出的 DOM，不是应用运行时）：1440×900 下栈顶 56px＝标题带 48 ＋ `space.2` 8，宽 448px（28rem）、left 496＝(1440−448)/2 精确水平居中，动画落定后首张卡片顶边与三列纸面上缘同线；一条与三条卡片两态下正文盒 `top/left/width/height` 与 `.app-main` 滚动高度逐值不变（101 / 306.39 / 1121.61 / 24 与 798），栈 `pointer-events: none`、卡片 `auto`，进入动画起点在最终位置上方 8px（48 → 56）。**顶部居中的已知代价（同一探针实测）**：三条一起出现时栈高 189px，会压住正文阅读区上沿约 190px；窗口宽 900 那一档居中的卡片横过应用顶栏的面包屑并吃掉其点击（`elementFromPoint` 命中的是浮层文字），1440／1100／760 三档不碰——浮层只停留 4／8 秒或可手动关闭，本轮未再加避让。真实 WebView2 窗口与多 DPI 下仍未复核。
 
 ## 7. 可访问性与动效
 
@@ -437,11 +460,11 @@ hover/focus 的颜色过渡用 motion.duration.fast；抽屉/面板用 panel；�
 | 图标导航栏文字 | 保留可见文字而不是纯图标：中文名称在 5.5rem 宽度下折行也比只剩悬停提示可用；`aria-current` 与「当前页」隐藏文本不变 | 既有 `navigation`、`sidebarResize`、`workBreadcrumbScope` 断言未改写 |
 | 图标导航栏入口分组 | 主导航 4 条（工作台、项目、待处理、资料）、次级 4 条（今日、全部任务、动态、收件箱）与底部 2 条（设置、连接与同步）之间只用 `border.separator` 细分隔线分组，10 条全部常驻、不折叠。`max-height: 50rem` 时竖排入口收紧纵向内距（61px → 53px）并压缩组间距；这条覆盖必须写在 `.app-navrail .navigation-item` 之后，同特异度下靠后生效 | 实测 1487×1058、1280×900、1280×760、1280×720 均为 10 条、无纵向滚动、底部项可见；1280×680 时导航自身滚动 5px |
 | 近期工作宽度偏好 | 沿用 `relay.workbench.sidebarWidthPx` 同一键与 160–320px 同一钳制区间，归属从「组合侧栏」改为「近期工作栏」；旧值对新单栏仍然成立，不迁移也不清空 | `sidebarResize` 默认 224px、步进 16px、双击复位断言保持不变 |
-| 近期工作栏头部 | 「Relay」+「新对话」两个元素。2026-10-05 新对话改为每次不同的 `/agent?new=...` 入口意图，打开空白输入；会话草稿与目录入口仍由协作页持有，不新建第二套会话状态 | 重复新对话与草稿/未决命令保护按工作台 §18.1.1 验证 |
+| 近期工作栏头部 | 品牌行「Relay」+「工作空间」标签与折叠把手，下方独占一行、左起的紧凑「新对话」入口（无底色、meta 字号、`control.height.compact` 高、横向仍占满栏宽、悬停淡底只占中部一条，2026-10-16 用户六轮决定；结构细则见 §9.10）。2026-10-05 新对话改为每次不同的 `/agent?new=...` 入口意图，打开空白输入；会话草稿与目录入口仍由协作页持有，不新建第二套会话状态 | 重复新对话与草稿/未决命令保护按工作台 §18.1.1 验证 |
 | 共享页头层级 | `PageHeader` 自带标题字号（`font.size.page`；`h2` 用 `font.size.section`）。此前该原语没有声明字号，`h1` 落回浏览器默认 2em，同一原语在不同页面看起来不一样 | 八个普通路由 1280px 一律 40px、`/projects` 按既定紧凑值 28px；390px 一律 28px；各宽度无横向溢出 |
 | 页头标题即对象入口 | `PageHeader` 新增可选 `titleHref`：标题成为指向确切对象页的链接。`title` 属性只服务悬停，键盘与辅助技术拿不到被省略号截断的完整名称 | 浏览器实测 Tab 聚焦标题链接、Enter 进入 `/tasks/:id` |
 | 紧凑页头 | 协作页、项目列表、技能页各自覆写标题字号；§17.6 的聊天页头不再常驻验收目标，改由「任务与执行详情」展开区承载，展开不推高页头。两种页头分支（`runNeedsAttention` 与否）都渲染它，折叠不是隐藏 | 页头 1487×1058 与 1280×720 均为 77px（接入前 105px）；1280×720 聊天记录 340px、成果阅读区 416px，均在 §17.6 的 240px 下限之上 |
-| 待处理三列 | `/reviews` 在存在可读确切产物版本时为「请求列表 / 判断对象 / 判断详情」三列，判断对象单独成列而不是埋在列表下方；没有可读版本时退回两列，不留空列 | 组件断言三列是 `.review-columns` 的直接子节点 |
+| 待处理请求与阅读分层（2026-10-16） | 请求卡片占满首行，事项与状态居首、元信息自然换行；存在正文时仅在 `width >= 80rem` 将正文与判断并排，较窄时顺序单列，无正文不留空列 | 根因与交互归工作台 §17.12.1；用实际元素宽度与排列验证，不只核对子节点数量 |
 | 阅读页头 | 资料详情页把正文状态（全文／仅部分正文／不可用／格式不支持／读取失败）提升为标题旁的状态芯片，原件与「编辑为新版本」进入首屏动作；保存时间仍在版本工具条，来源与历史版本仍在右栏 | `knowledgeReading`、`readingPresentation`、`knowledge`、`knowledgeCaptureLayout` 断言未改写 |
 | 不做的事 | 图中侧栏「搜索项目或任务」不实现（当前没有全量检索接口，命令面板只检索四类资料）；图中示例计数、日期与按钮位置不写入代码；不因统一外观给每个页面强加 `FactBar` | 见 §17.8 的图片偏差校准 |
 
@@ -454,6 +477,8 @@ hover/focus 的颜色过渡用 motion.duration.fast；抽屉/面板用 panel；�
 首条输入器与已有会话共用两行初始输入、占位文案、圆角、底栏类名和圆发送键。左侧资料及普通档讨论入口、右侧缓存及上下文圆环保持同一顺序；助手档隐藏讨论入口，准入与恢复规则归工作台 §25.1。首次模型调用前复用 `ContextMeter` 的未知状态，不伪造占用或缓存比例。资料按钮的禁用与讨论说明由[工作台 §18.1.1](workbench-design.md#1811-新对话直接起步2026-10-05-接续实施)定义。
 
 2026-10-07 单行底栏修正：模式 radio chip 与资料/讨论 chip 同样以 `2 × radius.composer` 推导最小高度，与发送键对齐，避免通用控件高度撑高普通工具行；保留原生 radio、焦点与目标下限。助手选择器、说明和创建表单展开后仍按内容自然增高，不能把整个助手区固定为单行。数值只归现有 token，不更新几何断言迁就布局缺陷。
+
+2026-10-16 发送键字形：按用户指令由纸飞机（lucide `Send`）换成**向上箭头**（lucide `ArrowUp`），首条输入器与已有会话两处同步。只换字形——键仍是 `control.height.compact` 32px 方形、`radius.control` 8px 圆角、图标 `control.icon.size` 20px、`control.icon.stroke` 描边，停止态的同位方块字形不动，可访问名称与 title 仍说明当前动作。此前文档只写过「圆发送键」的形状与几何，未固定字形，因此这条不构成对既有决定的推翻。
 
 本片不新增 token、字体、图像素材或业务状态；全局导航与近期任务继续由共享页壳渲染。图中的历史消息、项目内容与 Windows 控制按钮不复制成新对话空态。实际成绩及 Windows 验证限制只归功能验收表。
 
@@ -526,7 +551,7 @@ hover/focus 的颜色过渡用 motion.duration.fast；抽屉/面板用 panel；�
 
 - 回执与错误提示（`.receipt-message` / `.action-error`）由「左侧 3px 色条」改为「整圈 1px 边框 + 圆角」，对齐原型的 `error-box` / `attention-strip`：长句换行后，整圈边框才读得出「这是一块独立状态区」。
 - 应用顶栏与近期工作栏底色由 `bg.canvas` 改为 `bg.surface`，与原型「白工具条 + 白侧栏、画布色留给主内容」的分层一致。
-- 图标导航顶端新增 `.navrail-brand`（主色圆角方块，`aria-hidden`），纯装饰；短窗口（`max-height: 50rem`）隐藏，把高度让给十个常驻入口。
+- 图标导航顶端曾新增品牌方块（主色圆角方块，`aria-hidden`，纯装饰；短窗口 `max-height: 50rem` 隐藏，把高度让给十个常驻入口）。**该方块已于 2026-10-16 整体移除**，图标栏顶端不再放任何标识，理由与「按原型改造时不得加回」的声明见 §9.10。
 - 右侧面板重构为原型的「工作详情」三页签（进展 / 成果 / 记录）+ 成果深预览（预览 / 版本与来源）。**未实现原型的「变更」页签**：面板没有真实 diff 数据源，按 §2 的「不伪造」原则只呈现真实读到的字段。面板在 `<80rem` 改为覆盖在成果区之上的浮层，宽度仍取同一 token。
 
 本轮没有改动业务规则、命令 Owner、API、路由语义与任何写入路径；色值变更只落在 JSON，验证出口与未覆盖范围归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
@@ -537,13 +562,15 @@ hover/focus 的颜色过渡用 motion.duration.fast；抽屉/面板用 panel；�
 
 原生 Windows 窗口复查发现窄容器与短窗口的旧规则又将任务标题覆写为 `section`，造成窄窗标题反而变大；已删除两处覆写，所有尺寸沿用上述 `rowTitle`。
 
+2026-10-15 第二轮（本轮只增不改，零新增色值）：预览栏在多版本时新增「确切版本」切换组——`.inspector-preview-version` 用 `radius.badge` 圆角与 `border.control` 描边，选中态同时给 `selection.bg` 底色、`action.primary` 描边与字重三重表达（不靠颜色单独区分），`aria-pressed` 为准；attention 条目内的去处 `.inspector-attention-action` 沿正文同色同字重，仅用下划线与 `space.2` 缩进表达可点。三者全部消费既有 token。
+
 ### 9.9 横向尺寸改为「百分比 + 上下限」（2026-10-15）
 
 原型对齐后暴露一个问题：固定 rem 列宽会让同一界面在不同分辨率下比例不一致——侧栏固定 14rem 时，1920 宽窗里它只占 10.6%，中栏被不成比例地拉大；右栏固定 25.5rem 时同样越宽占比越小。用户据此要求「尺寸做百分比和上下限」，本轮把**所有横向列宽**改成 `clamp(下限, 百分比, 上限)`：
 
 | 列 | token | 值 | 边界 |
 |---|---|---|---|
-| 图标导航 | `layout.navigation.railWidth` | 5.5rem **固定** | 有意不参与缩放：它是窗口外壳常量，竖排标签在宽窗下会被拉散 |
+| 图标导航 | `layout.navigation.railWidth` | 4.75rem **固定** | 有意不参与缩放：它是窗口外壳常量，竖排标签在宽窗下会被拉散（2026-10-15 由 5.5rem 收到 4.75rem） |
 | 近期工作栏 | `layout.shell.sidebarWidth` | `clamp(11rem, 16%, 17rem)` | 176–272px |
 | 页面右栏 | `layout.rail.width` | `clamp(20rem, 26%, 26rem)` | 320–416px |
 | 窄右栏 | `layout.rail.narrowWidth` | `clamp(18rem, 24%, 24rem)` | 288–384px |
@@ -567,3 +594,240 @@ hover/focus 的颜色过渡用 motion.duration.fast；抽屉/面板用 panel；�
 
 1. **clamp 的 `%` 在网格里会拿轨道宽当基准。** 面板自身 `width: clamp(18rem, 20%, 22rem)` 时，网格项的包含块是它所在的轨道，于是 20% 恒小于下限、永远取 18rem，还会在轨道与面板之间留一道空隙。修法是把宽度交给 track（`.collab-columns:has(.task-inspector) > .task-inspector { width: 100% }`），clamp 只出现在 `grid-template-columns` 里。
 2. **拖拽手柄必须与列宽同源。** `.app-frame` 上解析一次 `--relay-shell-sidebar-width`（内含「用户覆写优先、否则回退 clamp」），分隔条 `left` 复用同一变量，否则列宽变了、分隔条还停在旧位置。实测手柄中心与侧栏右缘偏差 0px（含 localStorage 预设 260px 的场景）。
+
+### 9.10 V4.3 左侧两栏对齐（2026-10-15）
+
+用户给出新原型 [Relay_V4_3_项目接续与人工判断](../../GPT页面原型/Relay_V4_3_项目接续与人工判断.html)，要求据此复刻左侧导航视觉。范围只有外壳两列（`.app-navrail` 图标栏 + `.app-context-rail` 近期工作栏）的标记与样式：路由、`data-testid`、命令 Owner、会话草稿 Owner 一律不动，**零新增 token、零新增色值**，Breaking Change：No。
+
+| 落地规则 | 取值与取舍 |
+|---|---|
+| 近期工作栏头部拆两行 | 第一行品牌「Relay」+ 标签「工作空间」（`font.size.caption` + `text.muted`）+ 折叠把手；第二行「新对话」提升为独占一行、左起的紧凑入口（**无底色、meta 字号、`control.height.compact` 高、横向仍占满栏宽**，见下条）。原型把两者挤在同一行、按钮高 37px，本站高度此前由 `control.height.prominent`（48px）决定，2026-10-16 第四轮按用户要求收到全站默认的 `control.height`（40px）、第六轮再收到 `control.height.compact`（32px），仍不跟原型 37px 取一个自定义值 |
+| 项目分组摘要加目录图标 | `Folder` 只给真实项目，「未归入项目」不加：给它同一个图标会读成「还有一个项目叫这个名字」。chevron 的旋转规则同时收窄为 `svg:first-of-type`，目录图标不参与旋转 |
+| 图标栏左右内边距 `space.1` → `space.3`：选中块收成方块 | 2026-10-16 第二轮。用户对照原型截图指出「选中阴影面积不一样」，把两边逐像素量出来后根因很清楚：原型的色块**就是按钮本身**（44×44 放进 49px 内容盒，两侧各空约 2.5px），栏宽 59px 里靠自身 padding 又留出 5px，所以它读成一块方形瓷砖；本站栏宽 4.75rem 而 padding 只有 4px，色块被撑成 67×53 的整行高亮，面积 3551px² 接近原型 1936px² 的两倍，选中态换了语义。改 `.app-navrail` 的左右 padding 而不是给色块另建伪元素：单格实测 51×50，面积 2550px²，与原型同为方块，且不需要 `isolation` + 负 z-index 那套层叠把戏。栏宽本身未动（`layout.navigation.railWidth` 仍是 4.75rem，见下方「不照搬的项」） |
+| 竖排标签 `font.size.meta` → `font.size.caption` | 用户指出「原型标签字号小一点」。原型实测 9px／weight 400，低于 §4 可读下限，不跟；本站由 14px 收到 12px（§4 辅助档下限，与 §9.11 的「辅助信息走 caption」同源）。连带修掉一处旧毛病：标签盒由 59px 收到 43px，「连接与同步」从「连接与同／步」的单字孤行变成「连接与／同步」两行等长，且三字名称（36px）不再溢出 51px 的色块 |
+| 选中激活条压在色块左缘 | `.navigation-item--active::before` 取 `left: 0`、定高 `space.6`（24px）、宽 `layout.navigation.markerWidth`（3px）、竖向居中于单格。四项与原型 `.marker` 逐条同值（实测原型 3×24、`left` 在色块左缘、`0 3px 3px 0`、居中于 44px 单格），颜色本就同一个 `action.primary`（rgb(32,93,71)）。右侧圆角写 `radius.badge`（6px）而非 3px：CSS 对超出盒宽的圆角按比例整体收敛，3px 宽 × 上下各 6px 的 f = min(3/6, 24/12) = 0.5，**实际用值正好是 3px**，与原型 `0 3px 3px 0` 同形且不另开一档。3px 宽度本轮新增 token（见 §9.9 与 tokens 的 `layout.navigation.markerWidth`）：此前借用 `focus.width`（2px），一是偏细，二是把焦点环专用档挪去当选中记号，两种语义混用。**这一条接续并推翻了本轮前两次的写法**：先「贴栏边」（离图标 22px，读不出哪格被选中）、再「挂到图标左侧并上对齐图标顶」（2px 胶囊浮在色块内部）——两者都是在 67×53 的整行高亮上找位置，怎么放都不对；色块收成方块后，块左缘本身离图标左缘仅 13px（原型 10px），贴块与近图标不再是二选一 |
+| 图标栏悬停与选中同层淡底 | 原型 `.rail button:hover, .rail button.active` 共用一个 `#eaf3ec`；本站全局 `color.selection.hover`(#E0EDE4) 比 `color.selection.bg`(#EDF5EF) **更深**，直接沿用会让鼠标扫过任一未选中格子时，它的淡底比当前选中项还重一档——层级读起来是倒的。全局那档在任务行等密集列表里是对的（悬停必须比静止显眼），故只在 `.app-navrail` 内把 hover 覆写成 `selection.bg`，**两个全局 token 一字未动**；窄屏抽屉走 `.mobile-navigation-item`，本就不受该覆写影响。真实 Chromium 悬停实测：非选中项 hover 与选中项 rest 同为 rgb(237,245,239)，移开后回 `rgba(0,0,0,0)` |
+| 选中块与原型仍有两处数值差，不追 | 填充 `#EDF5EF` vs 原型 `#EAF3EC`（差 R+3 G+2 B+3，肉眼不可分）：token 表的 metadata 写明原型色值是「归一推荐」，且 `color.selection.bg` 是全局档，任务行与 chip 共用，为三个灰阶改它属不值当。圆角 `radius.control` 8px vs 原型 9px：表里没有 9px 档，不为 1px 开一档。两边 `box-shadow` 均为 `none`——所谓「选中阴影」一直是淡绿填充块，没有阴影可对齐 |
+| 图标栏入口间距 `space.1` → `space.2` | `.navigation-list` 的 `gap` 提到 8px（原型同为 8px）。4px 时十个竖排格子贴成一片，色块的边界被吃掉。单格收成 50px 高后三档实测均无纵向滚动，不需要再为短窗口退回 4px（曾加过一条退回规则，8px 在 53px 单格下会把 720 高档顶成 `scrollHeight` 647 > `clientHeight` 635；单格变矮后该覆写已删除） |
+
+**栏头「新对话」收成无底左对齐小入口（2026-10-16 用户六轮决定）**：用户先对照实机截图要求这条入口不要背景色，随后要求收小字号与图标并左对齐，再要求把悬停淡底收矮、收掉按钮自身的上下留白；第五轮我把「还是有点宽」误读成横向宽度（整条撤回，见本节末），第六轮才收到用户真正指的那件事——上下间距。落地为**无底左起动作**：`background: transparent` + `color.action.text`（#205D47，实测对栏底 `bg.surface` 白 7.73:1）+ `font.weight.semibold`；字号 `font.size.meta`（14px，与栏内行标题同档，不再比列表项更重）；图标 16px（取 `font.size.body`——本文件已有「图标跟随字号」的写法，`control.icon.size` 20px 是列表行图标在用的值，不为此新增 token）；`justify-content: flex-start` + 横向内边距 `space.2`，实测图标左缘距栏 17px、与下方搜索框的放大镜同一条竖线，文字左缘 41px。**淡底不顶满命中区**：hover/active 的底色画在 `::before` 色带上（`position: absolute` + `inset: space.1 0` + `z-index: -1`，元素自身用 `isolation: isolate` 建 stacking context，把色带压在图标与文字之下），实测色带 22px 高（32 − 2×`space.1` − 2×`border.width`）、每侧内缩 5px、圆角 `radius.control` 8px——上下内缩这条与同栏 `.recent-work-item` 激活标记的写法同源（`styles.css:747`）。两档淡底用的是 `selection.hover` / `selection.bg`——这正是窄窗抽屉里同一条 href 的 `.mobile-navigation-action` 早已在用的语言（`AppShell.css:18`）：此前宽窗是居中实心绿块、抽屉是无底左对齐绿字，同一件事长两种样子，现已归一。**整块高度 48px → 40px → 32px**：第四轮由 `control.height.prominent` 收到全站默认 `control.height`(40px)，第六轮再收到 `control.height.compact`(32px)，**这两条一起推翻本节开头与 §9.10 表格行此前记的「高度仍取 prominent、不为贴原型 37px 缩命中区」**——48px 是给实心主按钮用的高，无底小入口留着只会让 14px 标签上下各空 17px（实测）；32px 仍是 token 表里的紧凑控件档，`control.target.minimum`(24px) 之上有 8px 余量，指针与键盘目标不缩水，也没跟原型 37px 那个自定义值。**这一档的语义要如实写明**：`control.height.compact` 的 `$description` 原用途是「紧凑图标按钮（如对话输入器的发送键）的高度与最小宽度」，这里借给一条图标＋标签的文字入口，属同档尺寸复用而非该档本义，后续若觉得偏挤应退回 `control.height`(40px) 而不是开新档。实测标签上下各空 7.25px（第四轮 11.25px、第三轮及以前 17px）。**「上下间距」是整条竖向节奏，不只按钮自己的高**：`.context-rail-new` 的 `margin-bottom` 与栏头 `.context-rail-head` 的 `margin-bottom` 各由 `space.2` → `space.1`，实测品牌行→按钮、按钮→下方搜索框两段间隙各 4px；只缩 `min-height` 不动这两条 margin，用户看到的间距一寸没变。`primary-button` 类仍保留，它负责共享的 focus/disabled/loading 机制；覆盖 `min-height` 与底色、字重、内边距、`justify-content` 一样必须写进双类块，否则被靠后的 `.primary-button` 反压回 prominent。四处连带踩点，都记下来免得再踩：① 覆盖必须写成双类 `.primary-button.context-rail-new`——共享按钮基座与 `.primary-button` 都在 `styles.css` 靠后位置，单类覆盖会被同特异度反压，实测字重退回 medium、内边距退回 `space.4`、`justify-content` 退回 center（与 §9.11 同一课）。② 全局 `:where(.primary-button):focus-visible` 把焦点环换成 `text.onAction` 白，是为实心绿底准备的；去掉底色后白环落在白色栏上等于没有焦点，因此该元素显式回到默认 `focus.ring`（同为 #205D47，实测 2px 内描边可见）。③ 淡底反馈有 `motion.duration.fast` 过渡，脚本在 hover 后立刻读 `getComputedStyle` 会拿到过渡首帧的 `rgba(0,0,0,0)`，误判成规则没生效——等一帧以上再读，实测 260ms 后为 `rgb(224,237,228)`。④ 淡底改画到 `::before` 之后，元素自身底色必须显式再压一次：共享基座 `.primary-button:hover:not(:disabled)` 特异度 0,3,0，高于本条 `background: transparent` 的 0,2,0，不压住 hover 会把实心 `action.hover` 绿底整块填回来、绿字落在绿底上不可读（把淡底移上色带的第一版实测正是这个结果）。备选写法 `background-clip: content-box` 已否：它按「外圈 − padding − border」内收圆角，8px 内边距配 `radius.control` 8px 会把色带压成直角，要保住圆角就得再写一条三 token 相加的同心算式，还会连带改掉焦点环的圆角。
+
+**第五轮「横向收成贴着内容的小块」当日整条撤回（对指令的误读，留此防再犯）**：那一轮把 `width` 由 `100%` 改成 `fit-content`（配 `max-width: 100%` 兜极端窄栏），实测整块 84×40px、色带 82×30px、左右各留 `space.2`，代价是指针命中区由整行（栏内容宽 144–189px）缩成 84px 宽——「整行可点」这个便利属于功能回退。用户随后说明「我是指上下间距不是悬停阴影」，第六轮把 `width` 改回 `100%`，命中区横向恢复满行（1280 宽实测整块 186.8px 对栏内容宽 188.8px），色带随之回到满行。这条撤回留在文档里是因为它记的是流程教训：**用户指着一条入口说「还是有点宽」时，先确认是横向还是竖向**，涉及命中区缩小的改动不该在维度未定时落地。常驻断言同时补了一条横向的（`ownWidth ≥ 栏内容宽 − 2`），防止这条误读再次悄悄留在样式里。
+
+**图标栏顶端不放 logo（2026-10-16 用户决定；后续按页面原型改造不得加回）**：V4.2 在图标栏顶端加过品牌方块 `.navrail-brand`，V4.3 对齐时改名放大为 `.navrail-logo`，本轮按用户要求整体删除——`AppShell.tsx` 的 `.app-navrail` 内不再有品牌节点，`styles.css` 原位置只留一条说明注释。理由不是尺寸或配色：图标栏只承担定位，本站的品牌标识已由第二列头部的「Relay」品牌行持有，同一屏不需要第二个标识位，短窗口还得为它让位。原型 `.rail` 顶部那块 34px 绿色方块属图片自身设定，**不作为实现依据**；今后任何原型再出现同类 logo 位，默认同样不加，除非用户明确要求并连带说明标识 Owner 归谁。
+
+**不照搬的项**：原型的 9–10px 字号（低于 §4 可读下限，本站止于 caption 12px）、栏内只放 6 个入口（本站 10 条常驻，见 §9.3）、59px 栏宽（`layout.navigation.railWidth` 4.75rem 不动，本轮改的是栏内 padding 而非列宽：五字中文名称要留得下）、18px 图标（本站 `control.icon.size` 20px）、每行前缀图标（与会话类型徽标重复）、`sidebar { width: 0 }` 式折叠（本站保留常驻把手列，收起后仍能一键展开），以及上条单列的图标栏 logo。
+
+**剩余视觉差逐项对得上，不是漏改**：选中态、标签字号、色块面积、激活条粗细这四项经本轮量产后已对平原型的读法（方块 + 压在块缘上的 3px 短竖线）。仍能看出的差别只剩：顶端没有品牌方块（用户 2026-10-16 要求移除，见上条）、10 条入口而非 7 条（§9.3 常驻要求，故栏内更密）、标签 12px 而非 9px（§4 下限）、图标 20px 而非 18px、栏宽 76px 而非 59px。要再靠拢只能放宽这几条之一，属产品决定，不由视觉复刻轮次自行推翻。
+
+**数据来源声明不迁入侧栏**：原型把在线状态与说明文字放在侧栏页脚，本站的 `.demo-notice` 仍留在正文列末。近期工作栏可折叠、`< 48rem` 整体隐藏，「这是示例数据」这件事不能跟着一起消失——这是 §3 的既有约束，不是视觉偏好。
+
+验证出口：真实 Chromium 1280 宽三档（900 / 800 / 720 高）实测图标栏内品牌节点数为 0、10 条入口全部常驻、导航自身无纵向滚动（`scrollHeight` = `clientHeight` = 815 / 715 / 635），末项底边 803 / 707 / 627（相对栏顶）均在可视区内。本轮另把原型本身用真实 Chromium 打开逐像素量出基准（`.rail` 59 / 按钮 44×44 / radius 9px / `.marker` 3×24 且 `left` 在按钮左缘 / 标签 9px·weight 400 / 图标 18px / gap 8px / 7 个入口 / 激活色 rgb(32,93,71) 与本站 `action.primary` 同值），本站改后实测：单格 51×50、标签 12px、激活条 3×24 贴色块左缘（右侧圆角声明 6px、CSS 夹到实际 3px）、块左缘距图标左缘 13px（原型 10px）、入口间距 8px。宽窗目视核对方块色块、块缘短竖线、三字名称不出块、「连接与同步」两行等长。外壳与导航的既有浏览器断言未改写；运行成绩与未覆盖范围归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
+2026-10-16 页面收纳接续：项目列表、待处理、动态及其别名只保留图标导航与内容列，近期工作栏和调宽把手不占轨；返回工作台恢复原折叠及宽度偏好。该例外只覆盖工作台交互 §17.12.1 所列路由，未推广到项目详情等页面。待处理页的请求卡片占满首行，正文与判断仅在宽窗并排；类别筛选采用既有文字按钮与激活下边线，完整事件身份收进依据，字号、颜色、留白均复用现有 token。
+
+### 9.11 近期工作栏窄列：搜索框与行密度（2026-10-16）
+
+用户报告 `/agent` 左栏在窄窗下把搜索框切断、会话行拥挤，并指引用上游同位界面为据。范围只有 `RecentWorkRail` 的搜索框与列表行样式（`styles.css`）加一处 placeholder 文案：**零新增 token、零新增色值**，路由、`data-testid`、命令与会话草稿 Owner 未动，Breaking Change：No。
+
+**根因是同特异度的层叠失效，不是栏宽算错。** 全局 `.search-field` 带 `min-width: 12rem`、`control.height`、`radius.control` 与继承来的 `font.size.body`，且定义在 `styles.css` 靠后位置；栏内的 `.recent-work-search` 写在它之前、特异度相同（0,1,0），于是整块覆盖静默失效——搜索框仍按 192×40、字号 16 渲染，而本列下限是 §9.9 的 `clamp(11rem, 16%, 17rem)` = 176px，扣掉 `space.2` 内边距后内容盒只有 160px，`.recent-work { overflow: hidden }` 把它硬切掉 32px；768–1100 视口全部越界，1280 也还差 3px。修法用**双类选择器** `.search-field.recent-work-search` 抬高特异度，不靠调整声明顺序——顺序会随下一次样式表增删再翻一次。字号写在**容器**上：`.search-field input` 的 `font: inherit` 简体会压掉内层任何 `font-size`，上一版落在 input 上的 meta 声明从未生效。
+
+| 断言项 | 修复前 | 修复后 | 依据 |
+|---|---|---|---|
+| 搜索框超出内容盒 | 32px（被 overflow 硬切） | 0px | 双类选择器 + `min-width: 0` + `width: 100%` |
+| 搜索框高 / 字号 | 40px / 16px | 32px / 14px | `control.height.compact`、`font.size.meta`，与栏内其它控件同档 |
+| placeholder | 「搜索已加载的项目或任务…」放不下 | 84px ≤ 114px 文字区（176px 档）；160px 档 84 ≤ 98，留 14px | 文案收为「搜索已加载项」，完整范围声明留在 `visually-hidden` 标签（栏底「查找更多任务 / 会话」作为第二声明处已于同日第四轮随入口删除，见下条） |
+| 行高 / 行间距 | 48.48px / **2px** | 47.08px / **4px** | 行内纵向内边距与列表 gap 由 `space.0-5` 提到 `space.1`；纵向占位基本不变，但主副行不再贴着相邻行 |
+| 行标题字号与容字 | body 16px → 121px 容 7.6 字 | meta 14px → 121px 容 8.6 字（160px 档 105px 容 7.5 字） | 徽标与时间戳降到 caption，主名独占 meta 档 |
+
+**密度按上游同位界面校准，不自造分级系统。** 三条依据都在 `.research/upstream` 里，本轮逐条复核过：
+
+- opencode 侧栏会话行（`packages/app/src/pages/layout.tsx:2012`、`:2027`）：主名 `text-14-medium … truncate`、副行 `text-12-regular … truncate`，容器 `flex flex-col min-w-0`——14px 主 / 12px 副正是本站 meta / caption 两档，且它同样靠**截断而非换行**处理窄列。它的文件树行（`components/file-tree-v2.tsx:102`）在更窄的列里下探到 `text-12-medium`，这条本站不跟（§4 下限）。
+- opencode 可拖拽侧栏的最小宽度是 **244px**（`layout.tsx:1710`、`:2299`），比本站 176px 下限宽 68px。因此取它的**字号与截断做法**，不取它的栏宽——列宽属 §9.9 已定的外壳契约，不为一栏改全局比例。
+- codex `tui/src/resume_picker.rs:2139` 的 `toolbar_for_width`：**先量再降级**——完整版式容不下才换紧凑版式，紧凑版式仍容不下就只保留当前聚焦的那一个控件；每个控件同时带全名与 `compact_label`。placeholder 的取舍照此办理：可见文案用短形式，完整语义不丢（由 `visually-hidden` 标签承担），而不是让文字在框里被切。
+
+**两行方案接续（2026-10-16 用户确认，替代上表的列表行留白）**：保留 meta 标题 / caption 副行与单行标题截断；行内上下 padding 从 `space.1` 提到 `space.2`，主副行仍隔 `space.1`，副行至少保留一行 caption/ui 高度，缺少时间时也不塌缩。组间距从 `space.1` 提到 `space.3`；树线左侧缩进从 `space.2` 收到 `space.1`、线右内边距归零，将空间让给标题。副行以 caption 大小、muted 色的 `MessageSquare` 轮廓图标替代文字徽标，不再带底色；时间单行省略防止极窄列溢出，完整值保留在悬停与可访问名称中，日期简写规则归工作台 §28.1。当前项沿用 selection 底色、激活标记与字重。零新增 token、字号与默认栏宽不变，继续兼容 160–320px 拖拽范围。
+
+**目标／目录入口接续（2026-10-16）**：根区块标题按用户层级反馈改为 meta + semibold + primary 与右侧折叠标记（淡底的常驻与否见下条，同日第二轮已收回悬停），三类根区采用同一结构；内层组名使用 caption + medium + secondary，组外与树线各内缩一档，条目使用 meta + regular、当前项 medium。区块之间以 `space.3` 留白与 `space.2` 内边距分隔（根区分隔线同日第三轮去掉，见下条）；Goal 图标使用 `Target`，实际目录才用 `Folder`，未知或未绑定项不伪装成真实目录。区块、Goal 与目录均可折叠，折叠偏好是唯一依据（定位展开的语义变更见下条），原项目任务分组偏好继续有效。列表仍是上段两行结构，同一会话在两种导航维度均可高亮。正文顶栏的关联目标与会话目录分别一行，目录只露末段、提示给完整路径，避免窄列里把目录信息全部挤掉。业务含义与证据缺失规则只归工作台 §28.1，不新增 token。 空态提示通过 `.recent-work .helper-text.recent-work-scope-note` 限定 caption 与 muted，避免被靠后的全局 `.helper-text` 正文档覆盖；短文案仅作空态提示，完整已加载范围仍可读。
+
+**根区淡底收回悬停、条目离开树线（2026-10-16 同日第二轮截图反馈）**：三处纯视觉调整，不动结构与 token。① 根区标题的 `color.bg.subtle` 淡底由常驻改为**静止透明、hover 填 subtle、active 填 selection.hover**，并补 `motion.duration.fast` 过渡，与内层组标题同一套交互；三个根区连排时常驻淡底会读成三张卡片，字号档、字重、缩进与分隔线已经足够表达层级（该分隔线同日第三轮也按同一理由去掉，见下条）。② 空态短提示（「暂无关联目标」等）`text-align: center`：这一段没有可点对象，左对齐会读成还有一列没显示出来。③ `.recent-work-group .recent-work-list` 的线右内边距由 `0` 改为 `space.0.5`（2px），条目与画在条目左缘的激活标记一起右移——此前色带紧贴树线画，选中行读成「这根线属于这一行」。2px 是用户给的位移量，正好是 `space.0.5` 一档，不开新值。代价：条目可用宽度每档少 2px，窄列几何回归（176px 与用户拖到 160px 两档）仍达标，标题可容字数不变。折叠语义的变更（当前项所在区不再常驻强制展开，因此「工作区（目录）」收不起来）属交互契约，记在工作台 §28.1。实测（headless Chromium 1280×900，伪造 API）：根区标题静止 `rgba(0,0,0,0)`、悬停 260ms 后 `rgb(248,250,247)`＝`color.bg.subtle`；空态提示文字盒中心与父盒中心同 x；树线右缘到条目左缘 2px＝`space.0.5`，激活标记宽 2px；活动会话在段内时点 summary 该段 `open` 变为 false。真实 WebView2 窗口与多 DPI 仍未复验。
+
+**根区分隔线移除（2026-10-16 同日第三轮截图反馈）**：按用户截图反馈去掉目标／工作区（目录）／任务入口三个根区之间的横线——`.recent-work-section + .recent-work-section` 的 `border-top` 删除，只留 `space.3` 上间距与 `space.2` 上内边距。理由与上条收淡底同源：淡底读成三张卡片，这三条横线同样把一列切成分段；层级由字号档、字重、缩进与留白承担已经足够。栏底「查找更多任务 / 会话」的 `border-top` 保留——它分隔的是列表与栏底动作，不是并列的根区，两者不是同一个视觉构件（该入口连同这条边框已于同日第四轮删除，见下条）。零新增 token、零新增色值，结构、折叠偏好与交互约定未动。实测（headless Chromium 1280×900，伪造 API）：4 个根区（含「已归档」）`border-top-width` 全为 0，相邻根区间距 12px＝`space.3`（下限断言 ≥ `space.2`），树线右缘距条目 2px、激活标记宽 2px、空态提示居中偏差 0px 不回归。`recentWorkRailDensity.spec.ts` 的新增常驻断言已锁住这几项；该文件本轮 5 条 4 绿，唯一红「会话行内触发器静止不占几何」为点击前可见性等待超时，经「还原分隔线→复跑同样红」排除与本轮无关，未代改也未删断言（该红已在同日第四轮定位并修复，见下条）。真实 WebView2 窗口与多 DPI 仍未复验。
+
+**栏底「查找更多任务 / 会话」入口删除（2026-10-16 同日第四轮，用户确认）**：搜索框与栏底入口的职责重叠经取证确认——面板只读与本列相同的两个端点（任务仅第一页、无搜索翻页；会话集与本列一致且不含归档），能显示的这里都能显示，是更弱的重复入口，用户选定删除。`.recent-work-more`、`.recent-work-more-trigger` 与 `.rail-picker` 样式块随组件一并移除，栏底不再有任何常驻动作；这一列（搜索＋「更早的任务」）成为任务与会话的唯一导航入口，窄档换行遗留（见下）随之关闭。同轮把第三轮那条既有红定位修复：`recentWorkRailDensity.spec.ts` 的 ⋯ 菜单用例原用 `.first()` 点击行内操作按钮，而同一会话会同时渲染在「目标」与「工作区（目录）」两段、两份按钮的 `data-testid` 相同（目标区条目 testid 带 goal 前缀、按钮不带），命中的是从未悬停的目标区副本、触发器恒 `display:none`，改为按行定位被悬停的那一份后 **5/5 全绿**。零新增 token；路由、折叠偏好与几何基线未动。检查与运行成绩归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
+**不照搬的项**：§9.10 已判定原型的 9–10px 低于 §4 可读下限，本轮同样不下探——标题止于 meta（14px），辅助信息走 §4 已有的 caption（12px）。也不引入容器查询按栏宽切换字号：实际只有两档字号、一个断点，为它加一套分级属过度建设。
+
+**160px 拖拽下限保持不动。** `SidebarResizeHandle` 的 `SIDEBAR_MIN_WIDTH_PX = 160` 比 token 下限 176px 还窄 16px，看着像两处不一致，但 160–320px 是 `relay.workbench.sidebarWidthPx` 的既有承诺（§5 与[工作台交互](workbench-design.md)：旧值对新单栏仍然成立，不迁移、不清空）。本轮因此**没有**抬高下限，而是让这一档也自洽：它只要求容下 7 字（内容盒 105px），placeholder 留 14px 余量。
+
+验证出口：新增常驻用例 `tests/browser/recentWorkRailDensity.spec.ts`，在 768 / 1000 / 1280 与「1920 视口 + 用户拖到 160px」四档实测上表数值（API 全部 `page.route` 伪造，不连数据库、不调 Provider），断言搜索框越界 ≤ 0.5px、placeholder ≤ 文字区 −8px、行高 ≥ `control.height.compact`、行间距 ≥ `space.1`、标题字号 = meta、容字 ≥ 该档下限，四档全绿。踩到一处度量陷阱：Chromium **不**通过 `scrollWidth` 暴露 `<input>` 的 placeholder 溢出（192px 文字放进 144px 盒里仍报不溢出），原先那条断言恒为假、等于没断言，改用 canvas 直接量文字宽。768 / 1280 / 1920 三档截图留本机 `test-results/rail-density/final-*.png`；运行成绩归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
+**遗留（本轮未改）**：176px 档栏底「查找更多任务 / 会话」会换行且切在词中（「…会 / 话」）。属既有实现，改法要么动文案、要么给它单独的窄档排版，是另一轮决定；几何用例只覆盖搜索框与列表行，不含该按钮。该入口已于同日第四轮删除，此遗留随之关闭。
+
+**单行行与浮层菜单（2026-10-16 同日第五轮，用户截图与口述反馈）**：用户指出「去掉会话列表项里面的 item 的时间，像图片一样鼠标悬停显示 item 信息摘要；现在点击三个点位置会改变，而且弹出的垂直菜单样式不行」。四处一起改，**零新增 token、零新增色值**，范围覆盖会话行、任务行与归档区（用户选定「所有行统一」）：
+
+| 项 | 修复前 | 修复后 | 依据 |
+|---|---|---|---|
+| 行高 | 两行（标题 + 图标与时间），行内 `space.1` 间距 | **一行**（可选图标 + 标题 + 置顶徽标同行） | 时间移出常驻几何；`min-height` 仍 `control.height.comfort` |
+| 时间与归属 | 常驻在行内第二行 | 悬停／聚焦摘要卡：标题 + 右对齐时间 + 目录末段／项目名 | 用户要求「像图片一样」；行内不再重复写 |
+| ⋯ 位置 | 展开后跳到「行 + 面板」的中线 | 展开前后逐像素不动 | `inset-block-start: 50%` 原先相对被撑高的 `<li>`，现锚在 `.recent-work-row-head` |
+| 菜单形态 | 行下方就地展开，把以下整列推下去 | `position: fixed` 浮层下拉，不占这一列的布局 | 就地展开读不成下拉，也推挤列表 |
+
+摘要卡与操作面板共用同一套浮层规矩：`position: fixed` + 组件按锚点实测位置写内联坐标（优先开在下方、放不下向上翻、横向拉回视口内），沿用 `zIndex.popover`、`shadow.floating`、`radius.control`／`radius.panel`、`border.separator`。这一列在 `.recent-work-scroll`（`overflow-y: auto`）里，绝对定位会被裁掉；而祖先链上没有 `transform`／`filter`／`contain`，所以 `fixed` 不引入 portal、DOM 仍留在这一行内。摘要卡 `pointer-events: none`（纯展示层，指针从行移到卡片上不闪断悬停态），滚动或点到别处即收起，固定坐标不会停在旧位置。实测（headless Chromium 1280×900，伪造 API）：静止态触发器 `display: none` 且行盒逐像素不变；展开后触发器 `top`／`left` 与悬停态一致、滚动容器 `scrollHeight` 不变、面板 `position: fixed` 且顶边不低于触发器底边、右缘与触发器对齐；摘要卡落在行右缘外并与行同一横带。运行成绩归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
+**同日第五轮收尾的三条微调（用户逐条指认）**，零新增 token、零新增色值：
+
+| 项 | 改动 | 取值 |
+|---|---|---|
+| item 间距 | 行高压到紧凑档、竖直内边距与行间距同步收，行距由 48px 降到 **34px** | `min-height` `control.height.comfort`(44) → `control.height.compact`(32)；行内竖直内边距 `space.2`(8) → `space.1`(4) → `space.0-5`(2)（用户要求「再减小一点」）；行间距 `space.1`(4) → `space.0-5`(2)。命中区仍是整行宽，不缩窄 |
+| 激活条位置 | 相对条目左缘右移 **3px** | `inset-inline-start` 0 → 3px。token 无 3px 档（`space.0.5`=2px、`space.1`=4px），按用户给定值写，标为待真实窗口复核 |
+| 摘要卡时间 | **沿用原有口径，不加相对时长** | 用户明确「不用改」：今天时分／昨天／月日、跨年补年份，同组同名项补时分。参考图里的「6 小时」式相对时长会用掉「同名项靠时分区分」的依据，需要时单独一轮 |
+
+**根区间距拉齐（同日，用户截图指认）**：目标↔工作区↔任务入口原来是 `margin-top space.3`(12px) + `padding-top space.2`(8px) = **20px**，而任务入口↔已归档只有一档 `space.3` = **12px**（组的下外边距）。用户以「任务入口和已归档的间距就很合适」为准，要求把前三处也改成同样式样 → 撤掉那条在分隔线删除后已属重复留白的 `padding-top`，四区视觉间距统一为 **12px**。判断依据是实测而非目测：`sectionContentGaps` 量的是「上一区最后一个可见条目的底 → 下一区 summary 的顶」，此前 `[20, 20, 12]`，改后 `[12, 12, 12]`。
+
+实测（headless Chromium 1280×900）：行高 32px、行距 34px（下限断言仍为 `control.height.compact − 0.5`）；激活标记 `left` = 3px，`barWidth` 仍 `focus.width`，与分组竖线的距离不变；聊天消息正文字号 `font.size.body`(16px)、元信息 `meta`(14px)、输入器 `body`(16px)。`recentWorkRailDensity.spec.ts` 6/6，`tsc --noEmit` exit0。
+
+**根区间距与行距收口（2026-10-16 第七轮，用户再次截图指认）**：用户拿三张实机截图复提同一列的三件事——「这四个根区间距没有统一，统一成任务入口和已归档的间距」「item 的间距再减小，而且要统一」「这两个之间也要减小间距」，另问「有些会话前面加了一个消息图标，有些没有」。取证（headless Chromium 1280×900，伪造 API，一次性探针量 `getBoundingClientRect`）发现第五轮那条「拉齐到 12px」只在任务入口展开时成立，行距也只落在一半列表上：
+
+| 项 | 取证结果 | 修法 |
+|---|---|---|
+| 任务入口 ↔ 已归档 | 展开 12px、**收起 0px**（已归档贴着任务入口）；四区实测 `[12, 12, 0]` | 已归档段从 `recent-work-list` 包装层外移进层内，与三个根区成为相邻兄弟，`.recent-work-section + .recent-work-section` 覆盖全部三处间隙；仍挂在 `loadedCount` 之外，唯一一条会话归档后重开入口不消失 |
+| 分组内行距 | 36px（`space.1` 4px），已归档区 34px（`space.0-5` 2px）——同一列两档 | 撤掉 `.recent-work-group .recent-work-list` 的 `gap` 覆盖，一列只有一档行距 34px（= 32px 行高 + 2px）；密度用例行距下限断言随同从 `space.1` 收到 `space.0-5` |
+
+根因与 §9.11 开头同源：**相邻兄弟选择器管不到隔了一层包装的兄弟**——第五轮只撤了 padding，没注意到包装层让「任务入口 ↔ 已归档」的 12px 历来靠末组 margin 塌穿包装层凑数，展开时侥幸对齐、收起即塌方。消息图标不是缺陷：`MessageSquare` 只画在会话行（`kind === "session"`），任务行没有，是用一枚图标区分两种行类型，可访问名称另带「会话 · 」前缀；第五轮起它改在标题同行，不再占副行。验证出口：`recentWorkRailDensity.spec.ts` 新增常驻用例「任意折叠组合下四个根区间距同一档，分组与已归档行距同一档」（含归档段展开后行距同档、任务入口收起回归、全部收起回归），该文件 **7/7**；`sessionRowMenu.spec.ts` 的 `rowInActiveList` 辅助同步排除归档段副本（jsdom 折叠不摘子节点，全局 testid 会假通过）**7/7**；`liveTasks.spec.ts` 的 `sessionsUrl` 期望补上 `include_context=true`（此前未提交改动留下的存量偏差）后四文件 **30/30**；`tsc --noEmit` exit0。真实 WebView2 窗口与多 DPI 仍未复验。
+
+**块间距再收一档（2026-10-16 第八轮，用户「间距还是太大」）**：条目行距已触紧凑 token 下限（32px 行高 + 2px = 34px，再降要么破 `control.height.compact`、要么行距归零），唯一还能收的是块间距。根区 margin 与分组下外边距同步由 `space.3`(12px) 收到 `space.2`(8px)——两者必须同步：分组下外边距原为 12px，会塌穿包装层把「末组 → 下一根区」的间隙顶回 12px，只改根区 margin 没有效果。收完后层级留白成为 8px（根区↔根区、分组↔分组）→ 4px（段标题→分组）→ 2px（条目）的整档缩放，零新增数值。段标题→分组的 4px 与条目内的 2px 本轮未动。实测（headless Chromium 1280×900，伪造 API）：三处根区间距 `[8, 8, 8]`、分组 margin `4px/8px`、条目行距 `[2, 2]`、段标题→分组 4px；`recentWorkRailDensity.spec.ts` 的同一档断言随同从 `space.3` 改指 `space.2`，该文件 **7/7**。真实 WebView2 窗口与多 DPI 仍未复验。
+
+**⋯ 菜单条目左对齐与文字色（2026-10-17，用户指认「选项的文字要左对齐，文字颜色用黑色，危险操作像是归档用红色」）**：三条动作（置顶／重命名／归档）在浮层里**左缘对齐、图标在前**，常规条目文字取 `color.text.primary`（墨绿黑），归档取 `color.status.danger.text`（红），命令提交中的禁用态回到 `color.disabled.text`。**零新增 token、零新增色值**，条目几何（高度、内边距、字号、图标档）一字未动。根因是 §9.11 反复踩到的同特异度层叠：共享基座 `.text-button` 把 `justify-content: center` 与 `color: color.action.text`（森林绿）声明在本列规则**之后**、同为 (0,1,0)，所以 `.recent-work-row-action` 里那条 `flex-start` 从未生效、常规条目一直读成居中绿字——这与第五轮记录的「danger 状态色从未生效」是同一处机制的另一半。修法沿用本文件既有惯例：把需要覆盖的两条属性抬到 `.text-button.recent-work-row-action` (0,2,0)、danger 抬到 (0,3,0)，与声明顺序无关；只覆盖这两条属性，不整块搬高条目规则（那会连带把 `min-height` 从基座的 `control.target.minimum` 顶成 `control.height.compact`，属未请求的几何变更）。图标靠 `currentColor` 自动跟随新文字色，无需单独改。验证出口：`tests/browser/recentWorkRailDensity.spec.ts` 的 ⋯ 菜单用例把原先「归档色 ≠ 常规色」的弱断言换成三条 computed `color` 逐一等于 token 解析值（探针节点解 `var(--relay-*)`）、且常规条目**不等于**基座动作色，并新增三条 `justify-content` 全为 `flex-start`，该文件 **7/7**；`sessionRowMenu.spec.ts` **8/8** 未回归；`tsc --noEmit` exit0。归档态那一条「重开这段讨论」与三条动作共用同一类，本轮未单独取证。真实 WebView2 窗口与多 DPI 仍未复验。
+
+**未读圆点与两项行内动作（2026-10-17）**：未读会话在**类型图标与标题之间**画一枚圆点——`space.1`(4px) 见方、`radius.round`、`color.action.primary`，**零新增 token、零新增色值**；状态同时追加进行可访问名称（「· 未读」），不只靠颜色。行内菜单同日增加「标记为未读／取消未读」（`Mail`／`MailOpen`）与「复制会话 ID」（`Copy`）：前者与置顶同属常规条目色，后者不承载服务端事实、复制成功时同一行文案换成「已复制会话 ID」并在 1.6s 后复原；归档仍是唯一状态色条目。条目几何、分组细线与浮层外壳（§9.14）未动。验证出口：`recentWorkRailDensity.spec.ts` 的未读用例断言圆点存在性（另一条未读标记为 null 的会话不画）、边长 = `space.1`、正方形、颜色 = `action.primary` 解析值，⋯ 菜单用例断言五项顺序与五枚图标，该文件 **7/7**；`sessionRowMenu.spec.ts` **10/10**（含复制零命令、零重读、修订不变）。真实 WebView2 窗口与多 DPI 仍未复验。
+
+### 9.12 聊天消息时间线导航（设计补充）
+
+2026-10-16 补充设计，同日实施首版并通过组件与真实 Chromium 伪造 API 自检；真实 Windows 窗口与 DPI 未验收。业务与阅读行为以[工作台 §31](workbench-design.md#31-聊天消息时间线导航)为唯一来源；本节记录实际采用的呈现规则。
+
+- 导航轨贴在聊天消息区左缘的预留留白内，节点是横向短刻度：默认 `space.2` 长、`focus.width` 粗、控件边框色；当前阅读节点加长到 `space.4` 并取主操作色，同时用 `aria-current` 表达，不仅依赖颜色。留白 = `control.target.minimum + space.2`，由 `:has(.agent-chat-timeline)` 只给消息流加 `padding-inline-start`，空会话没有轨道时不留白。轨道不占用近期工作栏，也不新增第二个消息流滚动容器——长会话由轨道自身滚动，正文滚动 Owner 仍是消息流。
+- 可见刻度与命中区分开：刻度线很短，命中区始终是 `control.target.minimum` 见方（24px），窄档降级也不缩小。悬停/聚焦预览是紧凑浮层，标题走 meta、正文走 body、截断说明走 caption，沿用既有浮层背景/边框/圆角与 `shadow.floating`、`zIndex.popover`；宽度用新 token `layout.chatTimeline.previewWidth`（18rem），高度上限沿用本列两处浮层的 `min(60dvh, layout.workspace.sideWidth)`。浮层内容一律按纯文本片段呈现（含代码与用户贴入的标记），不解析成节点。浮层锚在刻度旁并按可视高度回拉，不越出消息区、不压输入器与发送按钮；跳转时主动收起，避免浮层停在刚定位到的正文上。
+- 键盘：Tab 聚焦刻度、Enter/Space 跳转、Esc 关闭预览；预览打开时这一次 Esc 由时间线消费并停止冒泡，不落到面板的 Esc Esc 停止序列。焦点不因浮层出现漂移，浮层不抢输入焦点。
+- 落点强调复用 selection 语义（`color.selection.bg` 一次性铺在目标消息上），时长取新 token `motion.duration.emphasis`（1.2s），不用持续闪烁表达当前位置。减少动态效果时跳转改为直接定位、强调去掉过渡：样式同时写 `@media (prefers-reduced-motion: reduce)` 与 `html[data-motion="off"]`，行为按 `resolveMotionPreference()` 实时判定。
+- 窄档按**聊天列实际宽度**判定（`.agent-chat-transcript-shell` 容器查询，条件里不能用 `var()`，故按仓内既有写法写字面 `48rem`，与 `breakpoint.medium` 同源，改断点须两处同看）：收起常驻轨与留白，降为左缘紧凑展开入口；展开后轨道是浮层，不回头压缩正文。
+
+本轮只在 `design-tokens.json` 单点新增两个确有缺项的值：`layout.chatTimeline.previewWidth`（现有浮层类宽度 token 都不面向这一列）与 `motion.duration.emphasis`（现有三档时长分别是控件过渡、面板过渡与循环，没有「一次性强调」档）。其余尺度全部复用既有 token，未复制第二套数值；刻度间距与 18rem / 1.2s 仍是本轮实测默认值，真实窗口验收后再冻结。
+
+**同日第二轮：刻度组居中与悬停长度联动**。用户同日指认「时间线要在垂直方向上居中，鼠标在上面悬停移动时每一条横线以及相邻长度的横线长度要变化」。两处都只动刻度的呈现，节点身份、命中区（仍 `control.target.minimum` 见方）、跳转目标与全部 API 未动，Breaking Change：No。
+
+| 项 | 规则 | 取值 |
+|---|---|---|
+| 刻度组位置 | 轨道可视高度内垂直居中；放不下时退回从顶排列 | 首/尾节点各 `margin-block: auto`，溢出时 `auto` 归零，第一条刻度仍可达 |
+| 刻度三档长度 | 默认 / 当前阅读 / 悬停峰值 | `space.2`（8px）/ `space.4`（16px）/ `control.target.minimum − space.1`（20px） |
+| 联动衰减 | 按「指针到刻度中心的距离」二次衰减，超出半径回默认档 | `base + (peak − base) × (1 − d/R)²`，R = 3 × `control.target.minimum`（72px，约上下各三条） |
+| 联动方向 | 只加长、不压短 | 与当前位置那档取较大值，`aria-current` 刻度不会被压到 16px 以下 |
+| 过渡 | 轨道内跟手、移出后复位 | 轨道带 `data-tracking="true"` 时该刻度 `transition: none`；移出后清变量与属性，按 `motion.duration.fast` 复位 |
+
+**零新增 token**：三档长度与影响半径全部是既有 token 的组合（`space.1` / `space.2` / `space.4` / `control.target.minimum`），没有第二套数值。实现上长度写在节点内联自定义属性 `--chat-timeline-tick-width`（`::before` 宽度取 `var(--chat-timeline-tick-width, space.2)`），由轨道 `pointermove` 经 rAF 节流写入，不触发 React 重渲染；只认非 `touch` 指针（触屏点按没有悬停语义，避免抬起后残留一帧波形），切换会话与卸载一并清空，旧长度不留在新会话的轨道上。8 / 16 / 20px 与 72px 半径是实测默认值，真实窗口验收后再冻结。
+
+### 9.13 会话视图顶栏密度（2026-10-16）
+
+**当前规则（2026-10-17 第四轮接续：左翼收成两行并贴住卡片上缘、顶栏不画分隔线而由自己的底色渐变收边）**：顶栏是左右两翼的 chrome——无上缘与下缘描边、无圆角，**也没有下缘分隔线**；它与正文之间的边界由顶栏自己的底色渐变说出（`bg.surface` 从 0% 实到 40%、100% 处透明）。底色取的就是这一列自己铺的纸面（外壳卡片 `.app-content` 的 `bg.surface`，平铺纯色、不在右缘做横向渐隐——2026-10-17 校正，见下文），所以静止时渐变不改变画面，它保证的是「顶栏与正文之间没有一条线、只有一段淡出」，两翼文字都停在 40% 以上的实底段里。**真正洗淡正文的仍是转录区自己那两条遮罩**（见下），顶栏渐变只负责自己不压出一条硬边，两者不重复计数。整条高度＝上 `space.1` + 内容 + 下 `space.2`，内容取两翼较大者：右翼 `control.height.compact`（32px）／左翼两行 20 + `space.1` + 15 = 39px，实测 1487 视口 **51px**（上一版单行档 49px，两行只多 2px）。左翼两行读完：**第一行是会话名**，纯文字身份（`font.size.body` + `font-weight.medium` + `text.primary`，封顶 `min(20rem, 50cqi)`，超长省略、完整标题挂 `title`）；**第二行并列两件作用域事实**（关联目标文字／会话目录文件夹图标，间隔 `space.6`；目标标签与占位状态走 muted、真实取值走 secondary；目录图标取 `Folder`，默认 secondary、未绑定降 muted，完整路径只放在 `title` 与可访问名称「会话目录：…」里），目录不再显示路径末段文字——它跟在会话名后面必然被挤短，而悬停提示能给出完整路径。两行同用 `font.lineHeight.heading`，块内行距 `space.1`，两行随聊天列宽收缩（交叉轴保持默认 `stretch`，不写 `align-items: flex-start`——列向 flex 的交叉尺寸取内容宽，会话名会保住 20rem 上限伸出主列轨道，实测 1000×800 与右翼交叠 231px²），左缘对齐由两行同一起点保证。顶栏纵向按自身内容居中，右翼那颗键实测停在两行的中线上。`.collab-center` 在这一列有顶栏时把顶部留白从 `space.4` 收到 `space.2`，会话名距卡片上缘实测 12px（`space.2` + 顶栏 `space.1`），任务仪表盘与「新对话」欢迎态没有顶栏、留白不动。**顶栏内不再有会话下拉**：跨作用域挑讨论的常驻入口是近期工作栏（`recent-work-<会话 id>`，与路由切换同一套离开保护）；只有本作用域读出 ≥2 条讨论时，右翼才出现一颗「切换讨论」浮层键——Task 绑定的会话不进工作栏，没有这颗键就等于回不到旧讨论，单条讨论的顶栏不多一套切换控件。右翼＝动作区，四颗纯图标键按事实出现：「切换讨论」（本作用域 ≥2 条讨论时）、「新建会话」（任务/项目归属时；工作空间级不重复左栏「新对话」）、「任务视图」（仅任务聊天）、「工作详情」常驻并固定在最后。四颗键同一档：可见文字全部退出（「新建会话」的标签只在非顶栏会话控制带保留），命中区 `control.height.compact` 见方（32×32）、图标 1.125rem（18px）、键间距 `space.2`，可访问名称来自各自的 `title`／`aria-label`。右翼键是 **ghost**：静止透明底、透明边、`text.secondary`，悬停 `selection.hover` + `text.primary`，按下、展开与 `aria-expanded="true"` 落 `selection.bg` + `selection.text`，圆角停在 `radius.control`；禁用态降到 muted 并给 `not-allowed`——静止没有边框可失去，不补这一档就分不清「点不动」与「能点」。「工作详情」收起态画 `PanelRightOpen`、展开态画 `PanelRightClose`，`title`／`aria-label` 按展开态切换「展开工作详情／收起工作详情」，`aria-expanded`／`aria-controls` 保留；展开态不补描边。右翼不设「更多」或折叠菜单：任务/项目/运行的低频与全局入口已在任务视图 PageHeader 既有的「更多操作」菜单里，会话顶栏只保留上述高频键与需要常驻的详情开关；窄档让位靠收掉左翼作用域行，不把右翼键藏进溢出菜单。顶栏整条铺满聊天列、两翼贴列边，并抬到 `zIndex.sticky`：切换浮层要从顶栏探到消息流上方，而后画、自身 positioned 的转录区默认会盖住它。转录区**上下两条边各一条** `space.8`（32px）渐隐带（`bg.surface` → 透明，`pointer-events: none`），分别由 `data-top-fade`／`data-bottom-fade` 在正文真的被那一条边切走时绘制：被顶栏下缘、或被输入区上方那行目录细条硬切，读起来像坏了；停在顶端／底端还压着渐变更像坏了。两条带都画在不滚动的外壳上（`::before`／`::after`），因此不给中栏添第二个滚动 Owner（[工作台 §31.1](workbench-design.md#311-位置与节点)）；层级停在 auto，时间线轨道（`zIndex.sticky`）与「回到最新」键（`zIndex.popover`）都浮在带之上，渐变只洗正文、不把刻度和那颗键一起糊掉。上下两条边是同一套机制，因此规则只写在本节这一处。首条空会话不显示会话身份，左翼只剩作用域，且不从历史继承目录或目标。顶栏自身的容器查询只留一档：`@container collab-toolbar (max-width: 30rem)` 收掉右翼按钮文字只留图标（可访问名仍来自各自 `title`）并整条隐去作用域那一行（目录另见输入区上方的目录细条），把宽度还给会话名；`46rem` 那一档属于非顶栏的会话控制带，量的是顶栏自身宽度而不是视口。会话 `select` 的样式规则（收窄到内容宽、封顶 `min(12rem, 40cqi)`、`base-select` 浮层）只保留在非顶栏的会话控制带（`?skill=` 独立 Assist 页）。零新增 token、零新增色值，路由、命令与会话 Owner 未动。Breaking Change：No。
+
+**工作详情纯图标键与会话目录图标（2026-10-17 第五轮，用户指令）**：「工作详情」原先带可见文字与按钮边框，在 32px 高的顶栏右翼里比相邻键重一档；本轮按用户给的 Codex 参考把密度收到与图标键一致：删掉「工作详情」文字，按展开态换 `PanelRightOpen`／`PanelRightClose`，命中区 `control.height.compact` 见方、图标 1.125rem（18px），静止透明、悬停 `selection.hover`、展开 `selection.bg` + `selection.text` 且不补描边；`title` 与 `aria-label` 随状态说「展开工作详情／收起工作详情」，`aria-expanded`／`aria-controls`、`data-testid`、点击处理与焦点返回均未动。同一开关同时服务会话顶栏与任务视图 PageHeader，文案由一个 `inspectorToggleLabel(open)` 派生，避免两处漂移。会话目录则由「会话目录：路径末段」文字收成 `Folder` 图标（0.875rem）：可见文字清空，完整路径放进 `title` 与 `role="img"` 的 `aria-label`（「会话目录：…」），未绑定目录时图标降 muted；右侧「关联目标」仍保留文字，两类事实的可见性因此不再对称，这是本轮唯一按指令接受的取舍。实现落在 `CollaborationView.tsx`／`CollaborationView.css`、`AssistView.tsx` 与全局 `styles.css`（分隔条），零新增 token；因视图样式先于全局 `styles.css` 求值，图标键的尺寸/底色用 `.secondary-button.collab-inspector-toggle-btn` 双类抬高特异度覆盖全局按钮档。Breaking Change：No。**取证**：`tsc --noEmit` exit 0；本批 `conversationToolbarDensity`＋`recentWorkRailDensity`＋`frontendAcceptance`＋`inspectorPreviewLayout` 四套浏览器用例 **29/29**（含新增分隔条用例：静止 `::after` 透明、悬停透明度介于 0 与 1、按下并把指针移出命中区后仍有 `drag-separator--dragging` 且颜色/宽度与悬停逐值相同、松开撤类）。**未复验**：真实 WebView2 窗口与多 DPI（探针与用例均为 headless Chromium）。
+
+**右翼相邻键统一为图标键、不增「更多」（2026-10-17 第六轮，用户指令）**：用户要求「工作详情」及相邻操作区更接近 Codex 的轻量图标工具栏。本轮把右翼四颗键收到同一档：「切换讨论」（本作用域 ≥2 条讨论）、「新建会话」（任务/项目归属）、「任务视图」（仅任务聊天）、「工作详情」（常驻，固定最后）全部只留图标——切换键 `MessageSquareText`、新建键 `Plus`、任务视图 `LayoutGrid`、详情键按状态 `PanelRightOpen`／`PanelRightClose`；`title`／`aria-label` 给出完整中文名称（切换讨论／新建会话／任务视图／展开·收起工作详情），无可见文字仍可按可访问名称定位。几何统一为 `control.height.compact` 见方（32×32）、图标 1.125rem（18px）、键间距 `space.2`，静止透明、悬停 `selection.hover` + `text.primary`、展开或 `aria-expanded="true"` 落 `selection.bg` + `selection.text`、禁用 muted + `not-allowed`；此前切换/新建两键的 14px 图标与逐键覆盖规则一并删除，改为共享 `.collab-toolbar-icon-button` 一类，零新增 token、零新增色值。三颗作用域键的显示条件未动，「新建会话」只在非顶栏会话控制带保留文字；任务视图 PageHeader 的动作区仍是「查看待处理」在前、工作详情在最后，其右侧既有的「更多操作」菜单（委派、布局、任务与执行详情、文件与运行工具、模型连接）不在本次动作区内，也未改动。**不新增「更多」**：会话顶栏没有明确的低频动作可收（进展/成果/记录仍在工作详情面板内），任务/项目/运行相关低频入口已在任务 PageHeader 的既有菜单里；再建一个空菜单或把 UNKNOWN、待人工处理、运行控制等关键状态折进去会降低可见性，因此本轮不加。**取证**：`tsc --noEmit` exit 0；`conversationToolbarDensity.spec.ts` **9/9**（新增一例在 1487×900 锁四键顺序、`innerText` 为空、32×32、18px、`title` 与 `aria-label` 一致、逐键悬停底色等于 `selection.hover`、键盘 Tab 焦点环可见、详情键固定在最后；任务页头同例核对详情键翻转 `aria-expanded` 与文案）；同行 `recentWorkRailDensity`＋`frontendAcceptance`＋`inspectorPreviewLayout`＋`emptyConversationWelcome`＋`narrowWindowNewConversation` 共 **46/46**；900×800 窄窗用例锁四键同档、在顶栏内两两不重叠（≤0.5px）、页面无横向溢出、详情键最后。截图 `conversation-toolbar-icons-wide.png`、`conversation-toolbar-icons-narrow.png`、`work-details-icon-task-header.png`。定向 jsdom 182/190，8 条红全部落在他人并行改动的 `assist-flow` 与 `collaborationWorkspace` 工具轨迹/执行摘要段，本轮只报不修。**未复验**：真实 WebView2 窗口、多 DPI 与安装态（截图与断言均为 headless Chromium）；dist 未重建。
+
+**两行左翼、去分隔线、底色渐变收边（2026-10-17 第四轮，用户实机截图四条指令）**：四条分别是「不要有这个提示」（输入卡上方那行「本次对话 · 未绑定工作目录，暂不统计」）、「更换目录往左移动，贴到归入项目右边」、「你好这一行往上移，现在离卡片的上边缘太远，然后会话目录那个字样移动到你好下面，这三个的视觉效果协调一下」、「删除顶栏下面的分隔线，文字被顶栏遮盖部分就用从上到下慢慢变透明的渐变效果处理（顶栏的颜色改变）」。三条纯视觉收敛，一条改呈现归属。**未绑定目录的统计入口整块删掉**（见[工作台 §34.2](workbench-design.md#342-两种比较与数据含义)）：同一屏的目录细条已常驻说出「未选择目录／执行前需归入项目」，这一行再复述一遍是把同一件事讲两次；绑定目录的行与服务端 `NO_RESOURCE`／`NON_GIT`／权限态一字未动。**「更换目录」去掉 `margin-inline-start: auto`**：那一句把自己推到列的右缘，读起来像另一栏；行内 `gap`（`space.2`）本来就给够一档间距，动作紧跟在这行读到哪儿的后面。**作用域两行的取舍**：按字面只搬「会话目录」会让「关联目标」独留第一行、同类事实分两行说；目录值是路径末段，跟在会话名后面必然被挤短，故两件作用域一起落到会话名下面第二行、左缘对齐，第一行只剩身份。这是本轮唯一一处比指令多做一步的解释，用户若要「只挪目录」可回退。「往上移」落在两处留白上：`.collab-center` 在有顶栏时 `padding-top` 由 `space.4` 收到 `space.2`，顶栏自己上内边距由 `space.2` 收到 `space.1`——只收一处要么仍隔 20px，要么把两翼文字贴死在卡片边。两行都补 `font.lineHeight.heading`，否则 16px/12px 各自按 `normal` 撑高，行距会随字号跳。**分隔线换成顶栏自己的底色渐变**：`linear-gradient(to bottom, bg.surface 0%, bg.surface 40%, transparent 100%)`。40% 实底段是给两翼文字留的——渐变若在 0% 就开始淡，第二行（12px 的次要文字）会先糊掉。这一列的纸面本来就是 `bg.surface`（外壳卡片 `.app-content` 铺的同一档），所以静止时渐变不改变画面，它换掉的只有那条 1px 硬边。**诚实边界**：渐变在顶栏自己身上，正文并不伸到顶栏底下，用户看到的「文字被遮盖处变淡」实际仍是转录区上缘那 32px 遮罩在做（`.agent-chat-transcript-shell::before`，`data-top-fade` 门控）；把顶栏做成覆盖在正文之上的渐变层要让它进滚动容器，会连带改浮动层归属、`scrollHeight` 与单滚动 Owner（[工作台 §31.1](workbench-design.md#311-位置与节点)），故没走那条路。零新增 token、零新增色值，`data-testid`、文案、路由、命令与会话 Owner 未动。Breaking Change：No。
+
+**本轮取证（2026-10-17 第四轮）**：`conversationToolbarDensity.spec.ts` 五例改写后 1487×900 单 worker 5/5——① 带高 ≥`compact` 且 ≤`compact`+32、会话名上缘距 `.collab-center` 上缘 ≤`space.2`+`space.1`、作用域行在会话名之下且左缘与其对齐（`toBeCloseTo(...,0)`）、右翼贴列边；② 顶栏上缘 0px／**下缘 0px**／圆角 0px／`backgroundColor` 读回 `rgba(0,0,0,0)`（渐变时算式只报底）、`backgroundImage` 命中 `linear-gradient(` 且含 `bg.surface 0%` 与 `rgba(0, 0, 0, 0) 100%` 两端色标，右翼键静止透明、展开落 `selection.bg`/`selection.text`；③ 上下两条渐隐带与回底键整圆不变；④⑤ 右翼「新建会话」与「切换讨论」两条既有事实不变。一次性探针量回的真实几何（用完即删，只把关系沉淀成断言）：带高 51px、左翼 39px（20 + 4 + 15）、会话名 top 69 vs 中栏 top 57（12px）、右翼键 96×32 且中心 88.5 与两行中心重合、顶栏左右缘 329.9／1471＝列边 ±`space.4`。jsdom 侧 `conversationDiffSummary`＋`folderFirstConversation`＋`feedback` 33/33；`conversationDiffLayout` 单 worker 7/10，3 条失败全部落在他人未提交的局部行落账、展开面板「部分不可统计」标记与 `conversation-diff-error` 上（本轮只报不修），我改的未绑定那一例（这一行计数 0、一次统计请求都不发、局部行 `+78` 仍在）在其中通过。`tsc --noEmit` exit 0。**两处 Chromium 度量坑**：`background` 写渐变时 `getComputedStyle().backgroundColor` 恒为 `rgba(0,0,0,0)`，只看它会误判成「规则没生效」，要看 `backgroundImage`；且序列化会把缺省方向 `to bottom` 省掉，正则不能锁方向字样，改锁渐变本体与两端色标。**未复验**：真实 WebView2 窗口与多 DPI（探针是 headless Chromium）；dist 未重建，生产模式窗口仍显示上一版顶栏。
+
+**收成单行、顶栏去下拉（2026-10-17 第二轮，用户实机截图四条指令 + taste 审计）**：四条分别是「顶栏高度太宽」「打开工作详情的按钮的样式改一下」「文字被顶栏遮盖的时候要有渐变效果」「左侧显示会话名字就好，不需要下拉框选择会话」。前三条是纯视觉收敛；第四条按指令删了顶栏的 `select`，但**切换能力按证据保留**：`tests/collaborationWorkspace.spec.ts`、`assistantModeSwitch.spec.ts`、`conversationStateMaintenance.spec.ts`、`folderFirstConversation.spec.ts` 里覆盖的是「同作用域能在两条讨论间往返，且离开保护照旧生效」，工作空间级会话在近期工作栏有行、Task 绑定的没有，故右翼补一颗作用域内浮层键，走的是与旧下拉同一个 `selectSession`，未发送草稿的守卫语义一字未改。同名会话的去重说法（`标题 · 更新 时间 · 当前` / `· 已结束`）由共享 `sessionOptionLabel` 承载，下拉与浮层同一份，没有第二种文案。浮层形照左栏行内菜单：`radius.panel` + `border.separator` + `shadow.floating` + `space.1` 内边距，右缘对齐顶栏右缘、宽度收缩到内容、上限 `min(20rem, 100vw − space.4)`，当前项 `aria-current="true"` 且自身禁用；点外（`pointerdown` capture）与 Esc 关闭，Esc 把焦点还给触发键。**渐隐带的取舍**：遮罩挂在 `.agent-chat-transcript-shell::before` 而不是顶栏上——顶栏在协作页里是中栏的兄弟，把它做成渐变要改 chrome 的高度语义；挂在滚动视口自己的上缘，滚动 Owner 仍是 `.agent-chat-transcript` 一个。**ghost 键的一处连带缺陷当场补掉**：静止透明后禁用态失去「灰掉」的载体，故补 `:disabled` 一档。触发键的展开色最初被 `:hover` 档冲掉（点完键指针正停在键上，hover 是 0,4,1、展开是 0,3,1），与 §9.11 同源于同特异度层叠，改法与「工作详情」的 `.active:hover` 一致：把 `:hover:not(:disabled)` 一起收进展开态选择器。
+
+**本轮取证（2026-10-17）**：`tests/browser/conversationToolbarDensity.spec.ts` 重写为五例，1487×900 视口下单 worker 5/5——① 带高 ≤`compact`+`space.2`×2+1px 且 ≥`compact`、左翼是会话名纯文字（内容＝会话名、`title`＝完整标题）、`select` 计数 0、单条讨论时切换键计数 0、右翼只有「工作详情」；② chrome 与占位分档（透明底、上缘 0px、下缘 1px、圆角 0px；间距停在 `space.6`；占位 muted／取值 secondary）＋右翼键静止透明、展开落 `selection.bg`/`selection.text` 且边框仍透明（轮询到 transition 落定，不按固定等待猜时长）；③ 渐隐带只在滚过顶部时 `opacity: 1`、回顶后 `data-top-fade` 撤掉、高 32px、`pointer-events: none`、中栏仍不是滚动容器；④ 任务归属右翼仍含「新建会话」且排在「工作详情」前；⑤ 同作用域两条讨论时切换键存在、排在右翼最前，面板两条都在，当前项 `aria-current="true"` 且自身禁用，`elementFromPoint` 打在面板中心命中的是面板自己（顶栏抬到 `zIndex.sticky` 生效），选另一条后会话名与正文一起换掉、面板收起。相关规格 `inspectorPreviewLayout`＋`chatTimelineNavigation`＋`narrowWindowNewConversation`＋`headerHeightToken`＋`responsiveFoldGeometry`＋`emptyConversationWelcome` 与本片五例同批单 worker 干净复跑 **50/50**（45＋5）。夹具另补一条伪造路由 `/assist-messages/{id}/model-runtime`：协作页会为最新助手消息轮询模型调用状态，落进 catch-all 的空清单会被解析契约拒成「模型调用状态读取失败」浮层，那是夹具缺路由而非被测事实。jsdom 侧随下拉入口下移的四个文件：`assistantModeSwitch`＋`conversationStateMaintenance`＋`folderFirstConversation` 76/76；`collaborationWorkspace` 73/77，4 条失败全部是并行开发的工具轨迹与执行摘要用例（他人未提交改动，本轮只报不修），我迁移的 5 条切换用例在其中通过。`tsc --noEmit` 剩余报错全部落在他人正在改的 `conversationDiffSummary`／`chatLocalFileDiff` 两处测试文件，本轮改动的 `AssistView.tsx`、`CollaborationView.css`、`AssistView.css` 与三个测试文件无报错。**未复验**：真实 WebView2 窗口与多 DPI（探针是 headless Chromium）；dist 未重建，生产模式窗口仍显示上一版顶栏。
+
+**底缘同套渐隐与回底键收成整圆（2026-10-17 第三轮，用户实机截图两条指令）**：「文字被未选择目录这一行遮盖的时候也要有同样的渐变效果」——底缘带与上缘同源（`space.8` 高、`bg.surface` → 透明、`pointer-events: none`、同一条 `prefers-reduced-motion` 例外），只是方向相反，画在 `.agent-chat-transcript-shell::after`。**判定只留一个 `syncEdgeFades`**，由真实滚动、消息整批替换（换会话）与视口自身变矮（队列面板出现、窗口变高）三处共用：只挂 `onScroll` 会漏掉后两条，它们都不产生 scroll 事件——长会话切到短会话时遮罩会永久压在第一条消息上，正是上面那句「停在顶端还压着渐变更像坏了」要避免的形态。底缘阈值取 `remaining > 1` 而不是 `> 0`：高 DPI 下 `scrollTop` 是小数，停在底部时 remaining 可能是 0.4，那样最后一条消息永远糊着一层渐变。阅读意图（`followLatest`／`atLatest` 的 32px 档）仍只由真实滚动决定，尺寸变化不改读者的位置。「回到底部的箭头改成圆形背景」——文档与代码早就写着「边长 `control.height.compact`」，实际只声明了 `min-height`，于是全局 `.icon-button` 的 `height: control.height`（40px）生效，32×40 配 `radius.round` 读成竖胶囊；补上同源的 `height` 即为整圆，零新增 token、零新增色值，命中区没缩。取证：`conversationToolbarDensity.spec.ts` 第三例扩为上下两条边＋键形，1487×900 单 worker 5/5，截图 `results/conversation-toolbar-top.png` 与 `conversation-toolbar-fade.png` 分别是「滚到最顶（底缘带在、回底键是圆）」与「停在底部（两条带都不画）」；同样消费回底键与转录区滚动的 `chatTimelineNavigation` 单 worker 11/11；jsdom 全量 1067/1089，22 条失败里没有一条提到 `data-top-fade`／`data-bottom-fade`／`assist-latest`。**未复验**：真实 WebView2 与多 DPI；同批 `uiOption2FirstSession.spec.ts` 16 例红，全部停在夹具的发送流程（`assist-copy-a-0` 不出现、近期工作栏报「当前会话暂未能在近期工作中核对」），落在他人未提交的 `RecentWorkRail.tsx` 改写（+492 行）上，本轮只报不修。
+
+**聊天列纸面左右同色（2026-10-17 实机截图指令）**：「输入框左右两侧怎么颜色不一样？左边是正常的背景白色，右边的颜色暗一点，是因为渐变吗？顶栏也有这个问题」。**不是转录区那两条上下遮罩**——那是纵向渐变、只画 32px 高的横带，产生不了竖边。染灰右半的是外壳卡片自己：2026-10-16 外壳分层那一轮给 `.app-content` 铺了 `linear-gradient(to right, bg.surface calc(100% − layout.workspace.sideWidth), transparent)`，本意是「纸面在窗口右缘淡出、不硬切一刀」。**这个前提不成立**：卡片与窗口右缘齐平（1480 视口实测 `.app-content` 右缘 = innerWidth = 1480），右边根本没有桌面可退，于是这条 544px 宽的横向渐变不淡出到任何边界，只把正文右半一路染向 `bg.subtle`。逐像素扫用户截图与本机复现：输入卡两侧留白同宽 195.6px，左缘 `#FFFFFF`、右缘 `#F8FAF7`；顶栏那一行从 x≈1100 起同样往右淡。顺带被这条渐变打穿的还有上面那两条遮罩——它们洗向 `bg.surface`，压在已被染灰的纸面上就成了「右半边突然变白」。修法是一行：`.app-content` 平铺 `bg.surface`，删掉渐变；几何、描边、圆角与桌面带一字未动，零新增 token、零新增色值。**断言锁的是可见事实而不是计算样式**：`conversationToolbarDensity.spec.ts` 新增一例，截整窗一行真实像素、在页面里用 canvas 解码，比对输入卡两侧留白与消息列两侧留白的 RGB 三通道必须逐通道相同且等于 `bg.surface`（祖先层叠出来的结果只看计算样式测不出）。A/B 证明这条断言会咬：把渐变挂回去，像素档读回 `[250, 251, 249]` 对 `[255, 255, 255]`；计算样式档同时报 `backgroundImage` 不是 `none`。**取证**：`conversationToolbarDensity` 本片六例 1487×900 单 worker 6/6；同批 `inspectorPreviewLayout`＋`chatTimelineNavigation`＋`narrowWindowNewConversation`＋`headerHeightToken`＋`responsiveFoldGeometry`＋`emptyConversationWelcome`＋`frontendAcceptance` 共 56 例 52/56——4 条红全部是 `sessionNameRightWing 交叠 66px²`，A/B 复跑（把渐变挂回去）同样红，落在他人未提交的 `CollaborationView.css`（+239 行，12:48）会话名 `max-width: min(20rem, 50cqi)` 那一档上，本轮只报不修；该 spec 第七例（他人 15:21 追加的「目录细条那颗动作」）与 `src/api/resources/gateway.ts`（他人 15:22 未提交，`RelayWriteReadiness`／`writeReadinessFrom` 未导入）的 2 条 `tsc` 报错同理只报不修。**未复验**：真实 WebView2 窗口与多 DPI（探针是 headless Chromium）；dist 未重建，生产模式窗口仍是上一版纸面。
+
+**顶栏两翼贴聊天列边（2026-10-17，用户实机截图指令）**：顶栏此前与输入卡同轴（`max-width: --chat-measure` + `margin-inline: auto`），两翼停在居中列的内侧，拖分栏时整条随中线左右滑动。按用户要求改为整条铺满聊天列：删掉 `max-width` 与 `margin-inline: auto` 两行，`grid-template-columns: minmax(0, 1fr) auto` 本就把右翼推到末端，于是左翼贴列左缘、右翼贴列右缘；`min-height: control.height`、`padding: space.2 space.3 space.3` 与下缘 `border.separator` 细分线一字未动，带高不变。消息列与输入器仍按 `--chat-measure` 居中收窄——chrome 铺满、正文保留阅读 measure 是既有分工（[工作台 §18.6](workbench-design.md#186-页面原型结构对齐2026-10-03)）。实测 1600 视口：顶栏 1236px（此前被夹到 744px）、左缘 348 = 中栏左缘 332 + 内边距 16、右缘 1584 = 1600 − 16，高 75px 与改前同值。顶栏自身的 `collab-toolbar` 容器查询量的是自身宽度，而 30rem 档本来就低于 46.5rem 上限，降级阈值不变。
+
+**触发框收窄（同日第三轮红框反馈）**：触发框按弹性主列拉伸后，短标题右侧是一整条空场、选择箭头孤悬最右端与标题断开（用户实机截图圈出）。改回收窄到内容宽——§9.13 单行档「按内容收宽并封顶」的既有先例：`.collab-toolbar-center` 内 `.field` 由 `flex: 1; width: 0` 改 `flex: 0 1 auto; width: auto; min-width: 6rem; max-width: min(12rem, 40cqi)`，中列控制带加 `justify-content: space-between` 把「新建会话」钉回右缘，与右区「工作详情」保持相邻成组，按钮位置与上一版观感一致。实测 1487 视口 solo 数据触发框 160×32（拉伸档约 496px），箭头紧随标题；透明边框、悬停淡底、compact 同高、浮层与选项样式不变。新增常驻回归 `tests/browser/conversationToolbarDensity.spec.ts` 锁住收窄、封顶、右缘钉住与透明边框；`narrowWindowNewConversation`＋`emptyConversationWelcome`＋`recentWorkRailDensity`＋`chatTimelineNavigation` 单 worker 33/33；顺带修 `recentWorkRailDensity.spec.ts` 两处 `panelActionColors` null 安全（前一轮未提交改动遗留，曾阻塞 `tsc --noEmit`）。`tsc --noEmit` 与 `vite build` 通过、dist 已重建——生产模式窗口需重启加载。真实 Windows 窗口与多 DPI 未复验。
+
+**顶栏改左右两翼（同日第五轮，用户指令）**：左翼＝会话信息（首行会话身份下拉，次行真实作用域两行），右翼＝动作区（「工作详情」开关，有任务/项目归属时另有「新建会话」）。左翼信息块 `flex-direction: column`、行距 `space.1`，作用域两行的间隔保持 `space.6`；会话触发框沿用「收窄到内容宽、封顶 `min(12rem, 40cqi)`、透明底、悬停 `selection.hover`」。右翼三颗键同停 `control.height.compact`、内边距 `space.3`、图标显式压回 0.875rem（全局 svg 规则否则盖成 `control.icon.size` 20px），`≤46rem` 收文字只留图标并把内边距退回 `space.2`。**「新建会话」按用户指令作为与左栏「新对话」重复的入口从工作空间级顶栏删除**；任务/目录归属下它仍是该作用域内另开会话的唯一入口（全局「新对话」只建无作用域讨论）故保留在右翼——这是本轮唯一一处「按指令删、但按证据留」的取舍。零新增 token／色值，`data-testid`、文案、路由与命令 Owner 未动。`AssistView.tsx` 把会话选择与「新建会话」拆成两个节点（select 与按钮各一份定义，两处容器只负责摆放），非工具栏的会话带渲染完全不变。**取证**：`conversationToolbarDensity.spec.ts` 重写为三例（左右翼几何、无归属 `assist-new-session` 计数 0 且右翼仅「工作详情」、任务归属右翼含「新建会话」且排在「工作详情」前；chrome 与占位分档一例保留），3/3；四个相关规格＋`frontendAcceptance` 单 worker 41/41；`newConversationEntry` 中两条依赖该键的守卫用例改挂到仍有该入口的路径（一条改为任务归属顶栏、一条改为左栏「新对话」）后 10/10，后者覆盖范围如实收窄为「另开新对话后迟到响应不清空新草稿」，不再覆盖「同一实例内就地新建」一档；`tsc --noEmit` exit0、`vite build` 通过并重建 dist。真实 Windows 窗口与多 DPI 未复验。
+
+**顶栏去卡片与作用域分档（同日第四轮，taste 审计）**：按用户要求用 taste-skill（`design-taste-frontend`，§4.4「卡片只在需要层级时用」、§9.C 间距数学、§4.5 空态不冒充取值）审计顶栏，该技能自述把密集产品 UI 列为 out of scope，故只取其可迁移条款，视觉权威仍是本设计系统。三处改动，零新增 token、零新增色值：① **去卡片**——顶栏此前是纸面卡里再套一层带描边圆角的卡，两层边框互相抵消层级；改为透明底、无描边圆角，只留一条下缘 `border.separator` 细分线（`padding` 收到 `space.2 space.3 space.3`），顶栏从此读作转录区的 chrome 而非浮卡。② **作用域间距**——两个作用域事实的间隔由 `space.4`(16px) 放到 `space.6`(24px)：12px 字号下 16px 间隔把两件事黏成一串。③ **占位不冒充取值**——「尚未关联目标／目标关联待核对／未绑定目录／目录待核对／目录暂不可读取」降到 muted 档（`collab-toolbar-scope-value--placeholder`），真实取值（目录名、目标名）仍走 secondary，避免没有事实的说法与真值同重。`AssistView.tsx` 只多两个派生布尔与一个 className，`data-testid`、文案、路由、命令与 Owner 全未动。常驻回归在同一 spec 第二例锁住「透明底＋零上缘描边＋1px 下缘线＋零圆角」「作用域间距停在 `space.6`」「占位 muted、取值 secondary」；`conversationToolbarDensity` 2/2、连同 `narrowWindowNewConversation`＋`emptyConversationWelcome`＋`recentWorkRailDensity`＋`chatTimelineNavigation`＋`frontendAcceptance` 单 worker 38/38；`tsc --noEmit` exit0、`vite build` 通过并重建 dist。真实 Windows 窗口与多 DPI 未复验。
+
+以下四段（贴列边／触发框收窄／改左右两翼／去卡片）与**此前单行三区布局的实现与测量历史**同属逐轮接续，保留是为了记根因与实机数值；其中顶栏高度与内边距、三列分配、下拉宽度上限，以及「会话选择放在顶栏左翼」这条布局决定，均已被以上「当前规则」替代（`select` 现在只出现在非顶栏的会话控制带）。实际检查结果只在统一验收表维护。
+
+2026-10-16 接续入口归一：同一顶栏用于新对话、目录/目标会话和任务聊天，任务视图保留显式入口。工作详情统一使用 `WorkDetailsFrame` 与既有 `.task-inspector` 的宽窗分列、窄窗覆盖规则；不再为独立会话另设覆盖布局。零新增 token/色值，状态内容按真实会话/任务区别。
+
+用户贴 `/agent` 会话视图顶栏的两张实机截图（收起态与展开下拉态）要求「优化一下这个区域」，同日晚接续要求把下拉浮层一起收进设计系统。范围只有 `CollaborationView.css` 的 `.collab-conversation-toolbar` 一块、`AssistView.css` 的会话控件下拉，以及 `AssistView.tsx` 里顶栏左区的两行标记：**零新增 token、零新增色值**，路由、`data-testid`、命令与会话 Owner 未动，Breaking Change：No。业务含义（哪条事实必须可见）归[工作台 §28.8](workbench-design.md#288-v42-工作详情与成果预览接续2026-10-15)。
+
+三处缺陷与修法：
+
+| 项 | 修复前 | 修复后 | 依据 |
+|---|---|---|---|
+| 顶栏高（1280 视口） | 74px | **48px** | 左块由三行收成两行，带高不再由文字撑开 |
+| 左块 | 178×64（64px 文字压在 74px 带内，上下各只剩 4px 内边距） | 258×38 | 去掉与下拉当前项重复的加粗会话标题；腾出的宽度回到作用域两行 |
+| 会话下拉 | 256×40、字号 16 | **94×32**、字号 14 | 原生 `select` 的固有宽度取「最宽那一项」，故改为按内容收宽并封顶 `min(12rem, 40cqi)` |
+| 新建会话 / 工作详情 | 74×32 / 102×40 | 74×32 / 102×32 | 三个控件同停 `control.height.compact` 一档 |
+| 窄档作用域可用宽（860 视口） | 100px | 126px | 中栏收宽后左右两个 `1fr` 列同步变宽 |
+
+**下拉比旁边按钮高 8px 的根因，与 §9.11 同源：同特异度层叠失效。** `main.tsx` 先求值 `./router`（其依赖链带进 `AssistView.css`）再 `import "./styles.css"`，所以视图样式落在全局之前；`AssistView.css` 的 `.agent-assist-session-controls select`（0,1,1）与全局 `.field select`（0,1,1）同权重，被后者按声明顺序压回 `control.height` 40px 与 `space.2/3` 内边距。修法同样是**抬高特异度**（`.agent-assist-session-controls > .field select`，0,2,1），不靠调整声明顺序。右区的「工作详情」虽然已经带 `secondary-button--compact`，但全局 compact 只回到 `control.height`（40），故在 `.collab-toolbar-right` 内按 `control.height.compact` 再压一档，只作用于本顶栏，不改任务视图 PageHeader 里的同名开关。
+
+**浮层收编（同日接续）**：改前那条灰/蓝色带由 Chromium 用系统 Highlight 直接绘制，`option:checked { background-color }` 加 `!important` 也不生效。两条候选：自建 listbox，或 Chromium 135+ 的「可自定义 select」。取后者——`appearance: base-select` + `::picker(select)` 让浮层与选项变成真实元素，底色、圆角、描边、投影全部落回现有 token，而键盘、IME、读屏与 `setValue` / `selectOption` 语义仍留在原生控件上，既有用例一字不动；不支持该值的引擎忽略本段、退回原生外观，功能不受影响（本机 WebView2 155、Playwright Chromium 153 均支持）。选项两档照抄栏内 `.recent-work-item` 的语义与顺序：`option:hover` 取 `selection.hover`，`option:checked` 在 `selection.bg` / `selection.text` 之上再落 `font-weight.medium`，hover 在前、当前项在后，叠加时当前项胜出。实测 `::picker(select)` 背景 `surface`、描边 `border.separator`、圆角 `radius.control`、`shadow.floating`、内边距 `space.1`；当前项 `#EDF5EF` / `#205D47`、非当前项 `text.secondary`、勾选标记 `::checkmark` 取 `selection.text`。
+
+同时补回两处随 `base-select` 丢掉的触发框行为：①按钮改为按内容收宽，短标签只剩 62px（字段自身下限是 6rem），故 `min-width: 6rem` 与 `.field` 同值、不新增 token；②按钮里的当前值改由引擎内部件渲染，长标题会换行把顶栏撑高（实测 30px → 36px），用 `white-space: nowrap` + `overflow: hidden` 在 `select` 上截断。**保留项**：Chromium 153 上仍是旧的「fallback button」渲染（实测 `::checkmark`、`::picker-icon` 存在而 `::selectedcontent` 不存在），长标题只能整字截断、没有省略号字形；换成 `::selectedcontent` 截断或自绘标签层都会牵动控件结构，留待该伪元素落地或换实现时再改。标签本体（`标题 · 更新 时间 · 当前`）是业务去重规则，未动。
+
+**「新建会话」图标档（同日第三段）**：中栏在 `@container collaboration (max-width: 46rem)` 下把「新建会话」收成加号（图标 + 标签，收的只是文字），与右区「工作详情」同一档降级、同一断点，实测 860/700 视口按钮 74 → 32×32、中栏 278 → 236px，省下的宽度归左块作用域（860 视口 128 → 146px）。图标 14px 跟随当前字号（与 `.context-rail-new` 同写法），颜色随按钮；按钮的可访问名仍来自可见文字「新建会话」（实测按钮内文字 56px、未被截断），用例不需要按图标名改。宽态按钮 74 → 96px（加号 14 + 间距 8 + 内边距各 8，文字仍 56px），中栏 282 → 300px、左块作用域 210 → 198px；这是本轮唯一一处变紧，换来中栏一眼可辨的新建入口。悬停 `selection.hover`、焦点 `2px` 森林环照旧。
+
+验证出口：`tests/browser/recentWorkRailDensity.spec.ts` 四条（含作用域两行文案与 `title` 断言，第四条为 2026-10-16 第二轮的根区淡底与树线留缝）与 `tests/browser/narrowWindowNewConversation.spec.ts` 九条全绿；`chatTimelineNavigation` 单跑九条全绿（与另两套并跑时出现过一次假红灯，归因见 §9.11 的并发提醒）。上表数值在 1280 / 1000 / 860 / 700 四档视口用一次性 Playwright 探针实测，截图留本机 `apps/workbench/results/`，探针脚本用完即删。浮层与触发框的接续实测同法：solo 数据触发框 96×32（改前 94×32）、crowded 数据 192×32（与改前同值），长标签下 `scrollHeight` 30px、不再换行；鼠标点选（含四档选项）、键盘 Enter 与数字键定位、`focus-visible` 的 `2px` 森林色聚焦环均照旧，截图见 `results/zz-select-popup.png`。未覆盖：真实 WebView2 窗口与多 DPI（探针是 headless Chromium），以及下拉浮层在用户 Windows 主题下的实际高亮色。
+
+### 9.14 两级上下文菜单视觉补充
+
+2026-10-16。用户下发「+ 菜单与二级能力菜单」提示词，并在同一条里明确要求**不要把这块推倒重做**：现有白底、轻边框、轻阴影、图标＋文字、从「+」向上弹出都是 Relay 的方向，本轮只做精修并补出二级。交互契约归[工作台 §32](workbench-design.md#32-两级上下文菜单与二级能力入口)。**token 零新增**，全部沿用既有数值。
+
+**一级（沿用既有外壳，只加状态位）**：行高 `control.height.compact`、圆角 `radius.panel`、边框 `border.separator`、阴影 `shadow.floating`、内边距 `space.2` 全部不变；条目仍是恒定单行、图标取 `font.size.body`、名称取 `font.size.meta`。**宽度收缩到内容**（`width: max-content`，只保留 `max-width` 上限）——2026-10-16 用户截图指出「菜单右侧留白太多」：此前写死 `min-width: 15rem`（Chromium 实测 235px）而最宽一行只占约 145px，短行右侧最多空出 108px 空白带；去掉下限后面板收到 **200px**。状态位分为行尾一个**尾组**：计数（`font.size.caption` + `text.muted`）、选中对勾与二级 chevron（均 `font.size.body`、`text.secondary`），尾组整体用 `margin-left: auto` 右对齐，因此短行多出来的空间落在文字与尾组之间、各行 chevron 落在同一列，行内左右内边距相等（实测各行尾组右缘距行右缘恒为 8px，与左内边距相同）。**不用彩色 Badge、不用实心色块**——状态是事实标注，不是装饰。
+
+**不参与宽度计算的长文本**：脚注、空态与二级脚注是整段说明，若让它们参与「收缩到适应宽度」，一条长说明就会把面板重新撑宽（Chromium 实测二级面板会从 194px 涨到 345px）。这三类文本统一用 `width: 0; min-width: 100%`：只填充最终宽度、自行折行，不贡献固有宽度。代价是脚注会比过去更早折行（一级脚注在 200px 面板内占两行）。
+
+**展开中的一级行**：底色取 `selection.bg`（比 hover 的 `selection.hover` 深一档），读起来是「当前所在层级」；不做旋转、不加粗、不改字号。
+
+**二级面板**：与一级同一套外壳语言（`radius.panel` + `border.separator` + `shadow.floating` + `space.2` 内边距），贴一级右侧、缝隙 `space.2`；宽度同样收缩到内容（实测 **194px**；上限仍是 `min(22rem, 100vw - space.6)`），高度上限 `min(60vh, 26rem)` 并在内部滚动（内容超高出现滚动条时实测无横向溢出、面板宽度不变）。面板内的小节标题用 `font.size.caption` + `text.muted`、上缘 `border.separator` 分隔；空态与脚注同款（`font.size.caption`、`text.muted`、`lineHeight.snug`），脚注左缘对齐选项名列——与一级脚注同一读法。
+
+**本轮几何证据（临时量测页 + 真实 Chromium，用后已删）**：面板宽度一级 235px → 200px、二级 → 194px；各级每行尾组右缘距行右缘 8px＝左内边距，逐行一致；二级面板 25 行超高滚动时 `scrollWidth === clientWidth`（无横向溢出）。量测页只用于几何验证，不作为产品页面保留。
+
+**动效**：一级入场 `opacity + translateY(space.1) + scale(0.98)`，二级入场 `opacity + translateX(±space.1)`（按展开方向取符号），时长与缓动统一 `motion.duration.fast` + `motion.easing.standard`。没有回弹、旋转、发光或渐变。`prefers-reduced-motion: reduce` 与 `html[data-motion="off"]` 两处都把动画置为 `none`，状态文字与控制入口不受影响。
+
+**验证出口**：`tests/composerAttachMenu.spec.tsx` 十六条（两级开合、状态位、**尾组右对齐的结构前提**、引用开关与上限、空态、键盘、Esc 两段、外部点击、方向翻转、未接入项的禁用与脚注）与 `tests/assistantModeSwitch.spec.ts` 的两条真实路由用例。jsdom 不量几何，所以「对称」由结构断言（尾组是行的最后一个子项、面板无 `min-width` 下限）＋上面的 Chromium 实测共同守住；真实 Windows 窗口与 DPI 下的观感未验收。
+
+### 9.15 会话 diff 的展示建议
+
+2026-10-16，**推荐方案，未实施**。业务和状态归[工作台 §34](workbench-design.md#34-会话局部与总-diff)。局部 diff 与文件名同一行，路径过长截断且完整路径可查看，数字不随路径一起被截断；预览／待核对使用既有次级文字，实际已修改才显示对应确认状态。总 diff 在输入卡外上方居中，以一行文字按钮作为展开入口，不增加厚卡片；窄宽度允许缩短标签，不能遮住发送、停止或草稿辅助入口，不因刷新撑高输入卡。
+
+新增为绿、删除为红，沿既有增删语义 token 并核对文字对比度；同时保留 `+`/`−` 和可访问名称，不能只靠颜色区分。数字使用等宽数位（`font-variant-numeric: tabular-nums`），直接切换到最新值，可沿用既有 `motion.duration.fast` 的淡入，不做计数补间或强制滚轮。遵从 reduced-motion 和全局关闭动效，避免为每次更新建立读屏播报；状态变化与展开阅读可访问，键盘开合及回焦沿既有组件。复用已有字体、间距与浮层 token，本轮不新增数值 token；位置与窄窗几何待浏览器和 Windows 实测。
+
+### 9.16 模型选择器：触发器显名与清单只显名（2026-10-17）
+
+2026-10-17 用户两轮指令：清单每项只显示一个模型名，细节悬停可见；下拉（触发器）显示具体模型名，不再只是「图标 + 模型」二字；形态是锚定在触发键上方的**下拉**，不是居中弹窗。交互契约归[工作台 §27.5](workbench-design.md#275-免费模型分组与模型选择)。**token 零新增**，沿用既有数值与浮层语言。
+
+**触发器**：仍是 `.agent-chat-tool` 几何（透明底、`control.height.compact`、`radius.control`、`font.size.meta` + medium），文字换成当前具体模型名，长名以省略号收在 chip 内（`flex: none` + `max-width: 100%`，名称 span 承担省略），完整名与「首选模型」语义挂 `title`；未选择时显示占位「模型」。不再渲染 Sparkles 图标，模型名本身是主角；原生 `select` 也一并去掉（它无法做「只显名 + 悬停细节」）。
+
+**下拉弹层**（`.model-selector-menu`）：与输入框「+」菜单 `.agent-chat-attach-menu` 同一套浮层语言——`position: absolute` 向上锚定 `bottom: calc(100% + space.2)`、`zIndex.popover`、`radius.panel`、`border.separator`、`shadow.floating`、`space.2` 内边距、`width: max-content` 收缩到内容、上限 `min(22rem, 100vw - space.6)`。弹层内部按「状态行 → 筛选 → 清单 → 同步脚注 → 有界接续说明」纵向排列，行间距 `space.1`；说明与脚注用 `font.size.meta` + `color.text.muted`，「立即刷新／重新读取」是同一行右侧的次级小按钮（`radius.control`、`border.separator`、`control.height.compact`），不额外起卡片。**清单本身**（`.model-selector-list` / `.model-selector-option`）：`border.separator` + `radius.control` + `space.1` 内边距，高度上限 `min(40dvh, layout.workspace.sideWidth)` 内部滚动。条目为 `control.height.compact` 单行、`font.size.body`、`radius.control`，**可见文本只有模型名**；当前选择在行尾（`margin-left` 自动推到右缘）显示 lucide `Check`，行背景为 `color.bg.subtle`（与聊天命令菜单的选中/悬停底同一档），悬停非禁用项同底；禁用项取 `color.text.muted` + `not-allowed`。分组标题（当前选择／已配置模型／免费模型 · OpenRouter）为 `font.size.meta` + `color.text.muted`。参考图里的「倍率」那一列不做——目录单价为零是分组前提，不是每行要并排比较的指标。
+
+**细节不放可见面**：ID、上下文窗口、工具能力与「目录已过期，仅供浏览」「调用凭据未配置」「已不在目录中」等原因写进条目的 `title`（鼠标悬停即原生提示）并重复进 `aria-label`（读屏可名）。这样「只显示名字」不牺牲核对能力；`title` 不做自绘浮层。
+
+**验证出口**：`apps/workbench/tests/modelSelector.spec.tsx` 七条（条目只显名＋细节在 title、失效原首选保留、过期/缺凭据禁用、Esc 回焦、搜索只筛清单、目录故障仍可明确选默认、首条直选）与 `tests/newConversationEntry.spec.ts` 的首条免费模型用例。真实 Windows 窗口与 DPI 下的省略号与悬停提示观感未验收。
+
+### 9.17 会话行拖拽落位横线（2026-10-17）
+
+2026-10-17 用户需求：会话行可以拖拽改位置，拖动时用一条横线表示松手后落在哪。交互与排序语义归[工作台 §28.1](workbench-design.md#281-左栏recentworkrail)。**token 零新增**，全部沿用既有档位。
+
+**横线是指示器，不是占位。** `.recent-work-drop-line` 画在被拖那一列（`ul.recent-work-list`，为此新增 `position: relative`）内，`position: absolute` + `inset-inline: 0` + 由落点算出的 `inset-block-start`，因此它不占网格轨道，拖拽期间整列的**布局**与行序保持原样，松手才重排——横线承诺的位置和条目真正落下的位置必须是同一处，列表先跳走就对不上了。被抓那一行的平移同样只写在 `transform` 上：布局一格没动，画面里跟着手动的是那一行的像素。
+
+**数值全部取现有档。** 线粗 `focus.width`(2px)、圆角 `radius.round`、底色 `color.border.control`（与分组竖线、控件边界同档，不引入第三种灰）；`pointer-events: none`，它不承担点击。摆位用 `offsetTop`/`offsetHeight` 与实测 `row-gap` 换算，缝取两行之间的中线。`z-index` 上线（3）压在被拿起来的行（2）之上：这一列自己 `z-index: auto` 且无 `transform`，不成层叠上下文，行与线同属一个上下文，先后就由这两个数决定（真实浏览器按此断言，线本身 `pointer-events: none` 拿不到 hit-test，故断的是层叠规则而不是命中）。
+
+**被抓握的那一行跟着指针走，并浮在列表之上**（2026-10-17 用户接续指认「鼠标要抓着这个 item」）。整行按「指针相对起手点走了多远」平移，位移写成内联 `transform: translateY()`，所以抓握点始终按在行的同一处——不是行在原地等指针去够它。底色仍用 `color.selection.hover`（与悬停同档，不为抓握另发明第四种灰），投影用 `shadow.floating`：这一档按 token 说明只给浮层，而此刻这一行确实是浮在列表之上的一层；它因此抬到 `z-index: 2`，画在其余行前面。光标 `grab` → `grabbing`；整段拖拽期间 `.recent-work--dragging` 关掉文字选区并收起悬停摘要卡——同一时刻这一列只出一个浮层，摘要卡压在横线上会读成两块内容。位移不加过渡：加了就变成拖着尾巴，指针与行的关系反而读不准了。带起来的只有起手那一列的那一份，同一会话在另一列里的副本留在原地，等落位那一拍再滑过去。
+
+**落位动效同样零新增 token。** 换位是一段 FLIP 位移：松手那一拍先记下每张行的顶边——被抓那一行记下的是它此刻在手里的画面位置——提交后用 Web Animations API 把差值播成 `transform: translateY()`，只碰 transform，不碰布局属性，所以整列不会因为动画再跳一次。时长与缓动取 `motion.duration.panel`(180ms) 与 `motion.easing.standard`——这是一次布局变化，与面板过渡同档，比控件悬停的 `motion.fast`(120ms) 长一档才读得清「谁搬去了哪儿」；只有真换了位的行进入动画，未动的行一个都不播。起点因此是「松手那一拍它所在的位置」而不是「它原来占的格子」：手里那一行读起来是从指间放下去的，另一列里的同一份则从旧格子滑进同一格，两处落点相同。落回原来那一格（没有换位）也走这条路，只有手里那一份滑回家，不硬跳。刚落位的那一行再留一档一次性强调：底色 `color.selection.bg`，停留 `motion.duration.emphasis`(1.2s)，与时间线跳转的落点高亮同色同时长；这里用 `bg` 而不是 `hover`，因为松手那一刻指针仍停在同一行上，hover 档会被读成「只是悬停」而不是「这就是刚放下的那条」。
+
+**两条动效门都要走到。** 滑位由 JS 判断：`resolveMotionPreference()` 为假就不发起动画。底色强调由 CSS 判断：系统「减少动态效果」命中上面那条全局 `*` 规则把过渡时长归零，本机显式关动效走 `html[data-motion="off"]`；两条都只去掉过渡，**保留这一档静态高亮**——取消动效不等于取消落点回执（与 `ChatTimelineNav` 的落点强调同一套门）。进出是两档而不是一个数字：`transition` 只声明在标记态规则上，淡入用这里的 `motion.panel`(180ms)；属性撤掉后规则不再命中，退场回到 `.recent-work-item` 基础的 `motion.fast`(120ms)。实测过这一点（浏览器用例在强调撤掉后仍读到起始色，据此把断言改成轮询到淡出结束），文档按实际行为分开写，不合并成「一次淡出」。
+
+**验证出口**：`apps/workbench/tests/browser/recentWorkDragLine.spec.ts` 在真实 Chromium 里量横线的缝位置（与两行之间的缝相差 ≤1.5px）、线宽等于 `focus.width`、左右铺满内容区、拖拽期间行序与**布局**不变（`offsetTop` 一格没动）、松手后行序等于横线承诺的次序；抓握那一条量的是画面：被抓的行偏下来的距离等于指针相对起手点走的距离（±1.5px，含「从第 0 格中线走到缝正中即一行半」），其余行的画面位置一格没动，整份左栏只有一行带内联位移（另一列的副本原地不动），指针那一点 `elementFromPoint` 命中的是被拿起来的这一行，而它自己的投影逐字等于 `shadow.floating`、底色逐字等于 `color.selection_hover` 解析后的值（临时探针节点把自定义属性翻成计算值再比）。动效那两条在同一浏览器里钩住 `Element.prototype.animate`，核对进入动画的只有真换位的行、位移量等于实测行距（手里那份等于「松手那一拍的偏移 − 新格子」）、参数就是 `motion.panel` 与 `motion.easing.standard`，并逐帧采样 computed `transform` 证明屏幕上确实在滑、收尾归 `none` 不留残余，强调画上后按 `motion.emphasis` 自己收掉；落回原格那一拖不写存储、不换位，但仍有且只有手里那一份播一段等于其抓握偏移的回家位移。`reducedMotion: reduce` 一档动画记录为空，但静态强调与 `transition-duration: 0s` 同时成立。参数与「只动画换位的行」另有 `apps/workbench/tests/recentWorkDrag.spec.ts` 六条在 jsdom 里守住（那里几何是自己造的，不能代替上面的实测）。`offsetTop` 在 Chromium 取整，故按缝边界放行 1.5px 而不是断言相等；**连续两拖之间必须先等滑行停住**——动画期间行的 `getBoundingClientRect` 还在半路上，照它算下一道目标缝会算出一个谁都不挨着的位置（落点数学本身不受影响，它读的是布局）。多 DPI 与真实 Windows 窗口的观感未复验。

@@ -87,8 +87,32 @@ export async function requestRunControl(db: DbExecutor, input: {
   });
 }
 
-/** Task cancel 的 AI 分支复用同一个锁内入队，不开启嵌套事务。 */
-export async function enqueueControlLocked(repositories: Repositories, input: {
+/**
+ * 电脑操控的 Esc 退出（migration 0096 状态条的取消通道）。
+ *
+ * 与 `requestRunControl` 的差别：Esc 来自桌面壳全局快捷键，调用方（Tauri 宿主）
+ * 拿不到 Task/Run 的乐观锁修订号，因此这里走锁内入队（同 `enqueueControlLocked`），
+ * 不做修订比对；重复按 Esc 由「已有 PENDING 控制即冲突」幂等挡住，调用方把
+ * CONTROL_CONFLICT 视为「已在退出中」的成功。
+ *
+ * Esc 语义是终止整个 Run（CANCEL，终态），不是暂停：用户按 Esc 表达的是
+ * 「停止操控我的电脑」，后续 Computer 动作与本次执行一并终止。Worker 侧
+ * run-command.ts 的控制轮询（100ms）会中止派发信号并杀掉 Computer Runtime。
+ */
+export async function requestComputerControlStop(db: DbExecutor, input: {
+  readonly workspaceId: string; readonly runId: string;
+}): Promise<ControlRequestDto> {
+  return withTransaction(db, async (repositories) => {
+    const { task, run } = await lockTaskAndRun(repositories, input.runId, input.workspaceId);
+    if (isTerminal(run.status)) throw runTerminal();
+    if (task.executor_run_id !== run.id || task.ownership_epoch !== run.ownership_epoch) {
+      throw invalidTransition('Run 未持有该 Task 的执行权，无法执行 Esc 退出。');
+    }
+    return controlDto(await enqueueControlLocked(repositories, { task, run, type: 'CANCEL' }));
+  });
+}
+
+/** Task cancel 的 AI 分支复用同一个锁内入队，不开启嵌套事务。 */export async function enqueueControlLocked(repositories: Repositories, input: {
   readonly task: TaskRow; readonly run: RunRow; readonly type: RunControlType;
   readonly supersedesRequestId?: string | null;
   readonly commandId?: string;

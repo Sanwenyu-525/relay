@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import type { JsonObject, JsonValue } from '../infrastructure/json.js';
 import { canonicalizeJson } from '../receipt/payload-hash.js';
+import type { ComposerDraftOperation } from './composer-draft.js';
 import {
   DEFAULT_FAKE_SCENARIO,
   isFakeScenario,
@@ -76,6 +77,24 @@ export interface ModelToolCall {
   readonly arguments: JsonObject;
 }
 
+/**
+ * 工具参数流的**原始**增量（工作台 §34.4 / CD-09/10）。
+ *
+ * 只在参数仍是字符串形态时投递：用于生成中的只读预览，不改变「完整参数通过 schema
+ * 校验之后才执行」的规则。`argumentsText` 是该次工具调用到当前为止的**累计原始 JSON
+ * 文本**（含转义），半截内容由消费方做有界增量解析；不 eval、不直接派发。
+ */
+export interface ModelToolArgumentsDelta {
+  readonly toolIndex: number;
+  readonly providerToolCallId: string;
+  readonly name: string;
+  readonly argumentsText: string;
+}
+
+/** 参数流增量回调：一次 chunk 内按工具序号归并，消费方按 index 隔离缓冲（交错调用不串）。 */
+export type ModelToolArgumentsDeltaHandler =
+  (delta: ModelToolArgumentsDelta) => Promise<void>;
+
 /** FakeModelPort 逐轮发出的单个工具请求。仅测试注入，生产路径不包含它。 */
 export interface FakeToolScriptCall {
   readonly name: string;
@@ -114,6 +133,11 @@ export interface ModelRequest {
   readonly signal?: AbortSignal | undefined;
   /** Uncommitted Markdown text only; validation and business settlement stay separate. */
   readonly onTextDelta?: ((text: string) => Promise<void>) | undefined;
+  /**
+   * 工具参数流增量（只读预览用）；缺省表示不消费，行为逐字不变。
+   * 完整参数仍只经 `ModelResult.TOOL_CALLS` 返回，本回调不触发执行。
+   */
+  readonly onToolArgumentsDelta?: ModelToolArgumentsDeltaHandler | undefined;
   /** 缺省表示本次不允许任何工具请求：既有 DRAFT/Assist/语义检查行为不变。 */
   readonly tools?: readonly ModelToolSpec[] | undefined;
   /** 已经结算的历史轮次，按顺序原样回传；恢复时由持久化的工具调用与结果重建。 */
@@ -129,9 +153,25 @@ export interface ModelPort {
  * Assist 对话端口（M04/P12）：与会话内已完成的轮次和显式选中资料一起构成输入。
  * Assist 不写业务状态：端口只返回内容或 typed failure，提案由应用层校验后另行落库。
  */
+/**
+ * 0093：多模态内容片段。仅当前消息的图片附件会以 parts 交给模型（历史消息附件
+ * 降级为文本占位，见 assist-runner 的 buildGenerationInput）；`mediaType` 复用
+ * 附件行的类型词汇，`dataBase64` 是原始字节的原生 base64 编码。
+ */
+export type AssistContentPart =
+  | { readonly type: 'text'; readonly text: string }
+  | { readonly type: 'image';
+      readonly mediaType: import('../infrastructure/database-schema.js').AssistMessageAttachmentRow['media_type'];
+      readonly dataBase64: string };
+
 export interface AssistTurn {
   readonly role: 'user' | 'assistant';
   readonly content: string;
+  /**
+   * 0093：缺省 undefined 表示纯文本轮次，行为与既有逐字一致；有 parts 时端口把
+   * 图片片段排在正文**之前**组合多模态消息（正文 content 仍是权威文本）。
+   */
+  readonly parts?: readonly AssistContentPart[] | undefined;
 }
 
 export type AssistIntent = 'DISCUSS' | 'PROPOSE_CANDIDATE' | 'PROPOSE_TASK' | 'IMPACT_CHECK' | 'IMPACT_CANDIDATE';
@@ -146,6 +186,10 @@ export interface AssistRequest {
   readonly signal?: AbortSignal | undefined;
   /** Only ordinary DISCUSS may expose these uncommitted text increments. */
   readonly onTextDelta?: ((text: string) => Promise<void>) | undefined;
+  /** 工具参数流增量（只读预览用）；只对声明了工具的轮次有意义，缺省行为逐字不变。 */
+  readonly onToolArgumentsDelta?: ModelToolArgumentsDeltaHandler | undefined;
+  /** Internal durable signal that a provider stream emitted any first chunk. */
+  readonly onStreamEvent?: (() => Promise<void>) | undefined;
   /**
    * 缺省表示本次不允许任何工具请求：既有 A 档 DISCUSS 与提案行为不变。
    * 只有 B 档人设会话会传入只读词表。
@@ -260,6 +304,36 @@ export interface AssistModelPort {
   assist(request: AssistRequest): Promise<AssistResult>;
   /** 缺省实现视为「没有请求解释能力」，由应用层给出 typed failure，不静默降级为讨论。 */
   interpret?(request: ConversationInterpretationRequest): Promise<AssistResult>;
+}
+
+/**
+ * 发送前草稿辅助端口（工作台 §30）：分点只给原文边界、润色给改写文本。
+ *
+ * 与 AssistModelPort 分开而不是加一个可选方法：草稿辅助没有会话历史、没有资料、
+ * 没有工具、没有提案，输入只有一份草稿与一个操作类型。把它塞进 Assist 请求形状里
+ * 会让人以为它能带上下文——那正是 §30.4 禁止的（不默认打包历史/文件/项目资料）。
+ */
+export interface ComposerDraftRequest {
+  readonly operation: ComposerDraftOperation;
+  /** 当前草稿原文。除它以外没有第二个输入。 */
+  readonly text: string;
+  readonly signal?: AbortSignal | undefined;
+}
+
+export type ComposerDraftResult =
+  | {
+      readonly kind: 'CONTENT';
+      /** 模型原始返回正文（分点为 `{breaks}`、润色为 `{text}`）；协议校验在应用层。 */
+      readonly content: string;
+      readonly providerRequestId: string;
+      readonly usage: ModelUsage;
+    }
+  | { readonly kind: 'CANCELLED'; readonly providerRequestId?: string;
+      readonly usage?: ModelUsage };
+
+export interface ComposerDraftPort {
+  readonly identity: ModelIdentity;
+  draftAssist(request: ComposerDraftRequest): Promise<ComposerDraftResult>;
 }
 
 /** 缺资料时声明缺失的输入名（供 DRAFT 记录证据；P05 不尝试补齐）。 */

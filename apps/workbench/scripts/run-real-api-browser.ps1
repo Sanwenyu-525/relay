@@ -3,6 +3,8 @@
 # The cluster and artifact root live under one validated temporary directory and are removed.
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File apps/workbench/scripts/run-real-api-browser.ps1
 
+param([ValidateSet('M02', 'FreeModels')][string]$Scenario = 'M02')
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -34,6 +36,7 @@ $token = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
 $pgStopCode = $null
 $testCode = $null
 $apiProcess = $null
+$workerProcess = $null
 $uiProcess = $null
 $failure = $null
 $removed = $false
@@ -133,8 +136,37 @@ try {
   $env:RELAY_DATA_ROOT = $dataRoot
   $env:RELAY_LOG_LEVEL = 'fatal'
   $env:RELAY_API_STOP_ON_STDIN_EOF = 'false'
-  $apiProcess = Start-Process -FilePath $nodeExe -ArgumentList @($apiEntry) -WorkingDirectory $apiRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $temporaryRoot 'api.out') -RedirectStandardError (Join-Path $temporaryRoot 'api.err')
+  $apiArguments = @($apiEntry)
+  if ($Scenario -eq 'FreeModels') {
+    $fixturePort = Free-Port
+    $fixturePreload = Join-Path $workbenchRoot 'tests\browser\fixtures\free-model-provider-preload.mjs'
+    $env:NODE_ENV = 'test'
+    $env:RELAY_MODEL_PROVIDER = 'fake'
+    $env:RELAY_MODEL_CATALOG_ENABLED = 'true'
+    $env:RELAY_MODEL_CATALOG_BASE_URL = 'https://openrouter.ai/api/v1'
+    $env:RELAY_MODEL_CATALOG_API_KEY = ''
+    $env:RELAY_OPENROUTER_API_KEY = 'synthetic-free-model-browser'
+    $env:RELAY_MODEL_MAX_OUTPUT_TOKENS = '1024'
+    $env:RELAY_MODEL_MAX_CALL_TOKENS = '16384'
+    $env:RELAY_MODEL_MAX_SCOPE_CALLS = '16'
+    $env:RELAY_MODEL_MAX_SCOPE_TOKENS = '262144'
+    $env:RELAY_FREE_MODEL_FIXTURE_PORT = "$fixturePort"
+    $env:RELAY_FREE_MODEL_FIXTURE_CLIENT = 'false'
+    $env:RELAY_BROWSER_SCENARIO = 'free-models'
+    # Node 24 --import only accepts file/data/node schemes, so the absolute Windows
+    # path becomes a file:// URL. This line stays ASCII: Windows PowerShell 5.1 reads
+    # a BOM-less script with the ANSI codepage, and a trailing double-byte char there
+    # swallows the next newline, merging the assignment below into this comment.
+    $fixturePreloadUrl = ([uri]$fixturePreload).AbsoluteUri
+    $apiArguments = @('--import', $fixturePreloadUrl, $apiEntry)
+  }
+  $apiProcess = Start-Process -FilePath $nodeExe -ArgumentList $apiArguments -WorkingDirectory $apiRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $temporaryRoot 'api.out') -RedirectStandardError (Join-Path $temporaryRoot 'api.err')
   Wait-Http -Url "http://127.0.0.1:$apiPort/health/live"
+  if ($Scenario -eq 'FreeModels') {
+    $env:RELAY_FREE_MODEL_FIXTURE_CLIENT = 'true'
+    $workerEntry = Join-Path $apiRoot 'dist\src\worker\main.js'
+    $workerProcess = Start-Process -FilePath $nodeExe -ArgumentList @('--import', $fixturePreloadUrl, $workerEntry) -WorkingDirectory $apiRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $temporaryRoot 'worker.out') -RedirectStandardError (Join-Path $temporaryRoot 'worker.err')
+  }
 
   Remove-Item Env:RELAY_API_BEARER_TOKEN
   Write-Host "M02 real browser: file I/O helper in use"
@@ -145,6 +177,7 @@ try {
   $env:RELAY_M02_UI_BASE_URL = "http://127.0.0.1:$uiPort"
   $env:RELAY_M02_WORKSPACE_ID = $workspaceId
   $env:RELAY_M02_BEARER_TOKEN = $token
+  if ($Scenario -eq 'FreeModels') { $env:RELAY_FREE_MODEL_FIXTURE_BASE_URL = "http://127.0.0.1:$fixturePort" }
   Write-Host "M02 real browser: PG18.6 / isolated $databaseName; API and UI on dynamic loopback ports"
   Push-Location $workbenchRoot
   try {
@@ -154,11 +187,20 @@ try {
 } catch {
   $failure = $_.Exception.Message
 } finally {
+  if ($Scenario -eq 'FreeModels' -and ($null -ne $failure -or ($null -ne $testCode -and $testCode -ne 0))) {
+    foreach ($name in @('api.err', 'worker.err', 'worker.out')) {
+      $diagnosticPath = Join-Path $temporaryRoot $name
+      if (Test-Path -LiteralPath $diagnosticPath -PathType Leaf) {
+        $diagnostic = (Get-Content -LiteralPath $diagnosticPath -Tail 12) -join "`n"
+        Write-Host ($diagnostic.Replace($token, '[redacted]'))
+      }
+    }
+  }
   Remove-Item Env:RELAY_MIGRATION_DB_URL -ErrorAction SilentlyContinue
   Remove-Item Env:RELAY_M02_BEARER_TOKEN -ErrorAction SilentlyContinue
   Remove-Item Env:RELAY_API_BEARER_TOKEN -ErrorAction SilentlyContinue
   $childrenStopped = $true
-  foreach ($child in @($uiProcess, $apiProcess)) {
+  foreach ($child in @($uiProcess, $workerProcess, $apiProcess)) {
     try {
       if (-not (Stop-Child -Process $child)) { $childrenStopped = $false }
     } catch { $childrenStopped = $false }
@@ -188,7 +230,7 @@ try {
     Write-Host "Temporary session preserved because a process did not stop: $safeTarget"
     if (-not $pgStopped) { Write-Host "Retry stop: $pgCtlExe stop -D $cluster -m fast -w -t 30" }
     if (-not $childrenStopped) {
-      foreach ($child in @($uiProcess, $apiProcess)) {
+      foreach ($child in @($uiProcess, $workerProcess, $apiProcess)) {
         if ($null -ne $child -and -not $child.HasExited) { Write-Host "Retry stop: Stop-Process -Id $($child.Id) -Force" }
       }
       Write-Host 'Stop the remaining API/UI process before deleting the temporary directory.'
@@ -196,7 +238,7 @@ try {
   }
 }
 
-Write-Host "M02 real browser summary: playwright=$testCode pg_stop=$pgStopCode temporary_removed=$removed"
+Write-Host "$Scenario real browser summary: playwright=$testCode pg_stop=$pgStopCode temporary_removed=$removed"
 if ($null -ne $failure) { Write-Host "M02 real browser failure: $failure" }
 if ($testCode -eq 0 -and $pgStopCode -eq 0 -and $removed -and $null -eq $failure) { exit 0 }
 exit 1

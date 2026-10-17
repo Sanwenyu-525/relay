@@ -1,10 +1,17 @@
-import type { RelayReview } from "../api/relayClient";
+import type { RelayAssistSourceRef, RelayReview } from "../api/relayClient";
 import type { ExecutorKind, InteractionMode, ProjectType, TaskStatus } from "../types";
 
 /**
  * 业务枚举的中文显示文案。枚举值本身以契约为准，展示文案只在这一处维护，
  * 避免同一状态在不同页面出现不同写法。
  */
+
+/** 可被引用的资料类别（「+」菜单与资料选择器共用同一份文案）。 */
+export const assistSourceKindLabels: Record<RelayAssistSourceRef["kind"], string> = {
+  KNOWLEDGE: "知识",
+  MEMORY: "记忆",
+  DECISION: "决定"
+};
 
 export const reviewKindLabels: Record<RelayReview["kind"], string> = {
   CRITERION: "人工验收",

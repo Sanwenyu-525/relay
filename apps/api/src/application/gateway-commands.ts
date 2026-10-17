@@ -11,6 +11,8 @@ import { httpCommandScopeKey } from './actor.js';
 import { runIdempotentCommand, type CommandOutcome } from './command.js';
 import { invalidTransition, resourceNotFound, revisionConflict, validationFailed } from './domain-error.js';
 import { canonicalResourceIdentity, registrationFileWriteRootId, rootsOverlap } from './gateway-configuration.js';
+import { COMPUTER_DESKTOP_TARGET } from '../computer/protocol.js';
+import { GITHUB_READ_ACTION_TYPES } from '../github/github-adapter.js';
 import { lockWritableProjectInWorkspace } from './guards.js';
 import { requireRevision } from './revisions.js';
 import { createRepositories, type Repositories } from './unit-of-work.js';
@@ -216,6 +218,16 @@ async function policyScope(repositories: Repositories, workspaceId: string, proj
     // WEB_FETCH policies match by URL host; the host is the web analogue of a path prefix.
     return { actionType: 'WEB_FETCH', targetPrefix: requireValidHost(host) };
   }
+  if (capability === 'COMPUTER_READ' || capability === 'COMPUTER_INPUT') {
+    // 0092: Computer 策略的目标是合成值 computer://desktop，不绑定受管根，
+    // 因此 resource_id 可空（与 WEB_FETCH 同形）；动作类仍按词表收编。
+    if (actionType !== undefined && !SUPPORTED_POLICY_ACTIONS[capability].includes(actionType)) {
+      throw validationFailed([{ field: 'action_type',
+        message: `unsupported action for ${capability}: ${SUPPORTED_POLICY_ACTIONS[capability].join(', ')}` }]);
+    }
+    return { actionType: actionType ?? defaultActionTypeOf(capability),
+      targetPrefix: COMPUTER_DESKTOP_TARGET };
+  }
   if (resourceId === null) throw validationFailed([{ field: 'resource_id', message: 'write permission requires a resource' }]);
   const resource = await repositories.gateway.readResource(resourceId);
   if (resource?.workspace_id !== workspaceId || resource.project_id !== projectId || resource.status !== 'ACTIVE') {
@@ -245,6 +257,11 @@ const SUPPORTED_POLICY_ACTIONS: Record<GatewayCapability, readonly string[]> = {
   GIT_READ: ['GIT_STATUS', 'GIT_DIFF', 'GIT_LOG'],
   GIT_WRITE: ['GIT_STAGE', 'GIT_COMMIT', 'GIT_PUSH'],
   CLI_RUN: ['CLI_RUN', 'RUN_BUILD', 'RUN_TEST'],
+  COMPUTER_READ: ['COMPUTER_SCREENSHOT', 'COMPUTER_GET_WINDOWS'],
+  COMPUTER_INPUT: ['COMPUTER_ACTIVATE_WINDOW', 'COMPUTER_CLICK', 'COMPUTER_DOUBLE_CLICK',
+    'COMPUTER_SCROLL', 'COMPUTER_DRAG', 'COMPUTER_TYPE', 'COMPUTER_KEYPRESS', 'COMPUTER_HOTKEY'],
+  // 0103: GitHub 只读四个动作。写动作不在词表内，因此也无法在这里被授权。
+  GITHUB_READ: GITHUB_READ_ACTION_TYPES,
 };
 
 function defaultActionTypeOf(capability: GatewayCapability): string {
@@ -256,6 +273,10 @@ function defaultActionTypeOf(capability: GatewayCapability): string {
   if (capability === 'GIT_READ') return 'GIT_STATUS';
   if (capability === 'GIT_WRITE') return 'GIT_COMMIT';
   if (capability === 'CLI_RUN') return 'CLI_RUN';
+  if (capability === 'COMPUTER_READ') return 'COMPUTER_SCREENSHOT';
+  if (capability === 'COMPUTER_INPUT') return 'COMPUTER_CLICK';
+  // 0103: 仓库身份是这份词表里唯一不需要参数的动作，缺省授权它等于「可以查这个仓库」。
+  if (capability === 'GITHUB_READ') return 'GITHUB_REPO_VIEW';
   return 'WRITE_MARKER';
 }
 

@@ -61,7 +61,7 @@ async function executeGit(args: readonly string[], options: GitExecOptions, read
   }
 }
 
-async function runReadOnlyGit(args: readonly string[], options: GitExecOptions): Promise<GitExecResult> {
+export async function runReadOnlyGit(args: readonly string[], options: GitExecOptions): Promise<GitExecResult> {
   // Status/diff can run clean filters even with external diff and textconv disabled.
   // Refuse them rather than silently bypassing a repository's content transformation.
   const filters = await executeGit(['config', '--null', '--get-regexp', '^filter\\..*\\.(clean|process)$'], options, true);

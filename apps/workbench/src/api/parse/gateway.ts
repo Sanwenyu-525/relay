@@ -1,5 +1,20 @@
-import { array, boolean, decimal, integer, nullableString, nullableStringArray, object, string, stringArray } from "../core/primitives";
-import type { RelayGatewayConnectionSettings, RelayGitReadAction, RelayManagedGitReadOutcome, RelayManagedResource, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "../dtos/gateway";
+import { array, boolean, decimal, integer, nullableString, nullableStringArray, object, optionalString, string, stringArray } from "../core/primitives";
+import type { RelayGatewayDecision, RelayGatewayConnectionSettings, RelayGitReadAction, RelayManagedGitReadOutcome, RelayManagedResource, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission, RelayWriteReadiness } from "../dtos/gateway";
+
+/** 写档位投影：缺档位当作「未核对」，无法识别的档位显式失败，不当成空值蒙混。 */
+export function writeReadinessFrom(value: unknown): RelayWriteReadiness {
+  const row = object(value, "write readiness");
+  const decision = optionalString(row, "policy_decision");
+  if (decision !== null && decision !== "DENY" && decision !== "ASK" && decision !== "AUTO") {
+    throw new Error("write readiness.policy_decision 无法识别");
+  }
+  return { status: string(row, "status", "write readiness"),
+    detail: string(row, "detail", "write readiness"),
+    policyDecision: decision === null ? null : decision as RelayGatewayDecision,
+    policyId: optionalString(row, "policy_id"),
+    policyRevision: optionalString(row, "policy_revision"),
+    policyTargetPrefix: optionalString(row, "policy_target_prefix") };
+}
 
 export function gatewayConnectionSettingsFrom(value: unknown): RelayGatewayConnectionSettings {
   const row = object(value, "connection settings");

@@ -7,7 +7,7 @@ import { flush, mountReact } from "./mountApp";
 const call = (id: string, toolName: string, resultRef: RelayRunToolCall["resultRef"],
   status: RelayRunToolCall["status"] = "SETTLED"): RelayRunToolCall => ({ id, toolName, resultRef, status,
   round: 0, ordinal: 0, args: {}, argsSha256: "a".repeat(64), providerToolCallId: id,
-  operationId: null, adaptationOf: null, adaptedPath: null,
+  operationId: null, adaptationOf: null, adaptedPath: null, fileChanges: [],
   createdAt: "2026-10-13T00:00:00Z", updatedAt: "2026-10-13T00:00:01Z" });
 
 async function mount(calls: readonly RelayRunToolCall[]) {

@@ -39,11 +39,11 @@ const portal = () => new DomWrapper(document.body);
 const confirmDialog = () => new DomWrapper(document.querySelector('[role="dialog"][aria-label="确认归档项目"]'));
 
 /**
- * 归档入口自 2026-10-11 起在项目详情抽屉里：先点卡片打开抽屉，再点抽屉中的归档按钮。
+ * 归档入口自 2026-10-11 起在项目详情抽屉里：先点「⋯」打开抽屉，再点抽屉中的归档按钮。
  * 抽屉走 createPortal 挂在 document.body，所以按钮必须用 document 查询。
  */
 async function openArchive(projectId: string, wrapper: DomWrapper): Promise<void> {
-  await wrapper.get(`[data-testid="project-row-${projectId}"]`).trigger("click");
+  await wrapper.get(`[data-testid="project-card-more-${projectId}"]`).trigger("click");
   await flush();
   await portal().get('[data-testid="project-archive"]').trigger("click");
   await flush();
@@ -87,7 +87,7 @@ describe("live Project 归档", () => {
     expect(mounted.wrapper.get('[data-testid="projects-live-count"]').text()).toContain("已加载 0 项");
     await mounted.wrapper.get('[data-testid="projects-tab-archived"]').trigger("click"); await flush(30);
     expect(mounted.wrapper.get(`[data-testid="project-row-${projectId}"]`).text()).toContain("待归档项目");
-    await mounted.wrapper.get(`[data-testid="project-row-${projectId}"]`).trigger("click"); await flush();
+    await mounted.wrapper.get(`[data-testid="project-card-more-${projectId}"]`).trigger("click"); await flush();
     expect(portal().get('[data-testid="project-open"]').attributes("href")).toBe(`/projects/${projectId}`);
     expect(fetchMock.mock.calls.some(([input]) => String(input) === `${root}/projects?status=archived`)).toBe(true);
   });
@@ -181,7 +181,7 @@ describe("live Project 归档", () => {
     await openArchive(projectId, mounted.wrapper);
     await portal().get('[data-testid="project-archive-confirm"]').trigger("click"); await flush();
     expect(mounted.wrapper.get('[data-testid="project-archive-pending"]').text()).toContain(projectId);
-    await mounted.wrapper.get(`[data-testid="project-row-${otherProjectId}"]`).trigger("click"); await flush();
+    await mounted.wrapper.get(`[data-testid="project-card-more-${otherProjectId}"]`).trigger("click"); await flush();
     expect(portal().get('[data-testid="project-archive"]').attributes("disabled")).toBeDefined();
     await act(async () => connect(otherWorkspaceId)); await flush();
     expect(mounted.wrapper.find('[data-testid="project-archive-pending"]').exists()).toBe(false);

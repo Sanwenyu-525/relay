@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { flush, mountWorkbench } from "./mountApp";
+import { flush, mountWorkbench, switchToolbarSession } from "./mountApp";
 
 /**
  * 自然语言状态维护（总纲 §0.8.1）的前端组件证据：明确维护指令在项目绑定的普通档会话里
@@ -122,6 +122,7 @@ interface Routes {
 }
 
 function router(routes: Routes, posts: { path: string; body: unknown }[]) {
+  let messageCommitted = false;
   return vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(String(input));
     const path = url.pathname;
@@ -134,6 +135,7 @@ function router(routes: Routes, posts: { path: string; body: unknown }[]) {
       posts.push({ path, body });
       const messageMatch = /\/assist-sessions\/([^/]+)\/messages$/u.exec(path);
       if (messageMatch) {
+        messageCommitted = true;
         return envelope({ session_id: messageMatch[1], user_message_id: "msg-1",
           assistant_message_id: "msg-2" }, 202, String(body.command_id));
       }
@@ -212,7 +214,11 @@ function router(routes: Routes, posts: { path: string; body: unknown }[]) {
     if (path === `${prefix}/conversation-execution-requests`) return json({ items: [] });
     if (path === `${prefix}/conversation-state-requests`) {
       const fromQuery = url.searchParams.get("session_id") ?? "";
-      return routes.stateItems?.(fromQuery) ?? json({ items: [] });
+      if (routes.stateItems) return routes.stateItems(fromQuery);
+      if (!messageCommitted || fromQuery !== sessionId) return json({ items: [] });
+      const saved = routes.gateStateMaintenance ? await routes.gateStateMaintenance()
+        : routes.stateMaintenance?.({ source_message_id: "msg-1" });
+      return json({ items: [saved ? (await saved.json()).result : stateProjection()] });
     }
     if (path === `${prefix}/conversation-state-requests/${requestId}/undo-plan`) {
       return routes.undoPlan?.() ?? json(undoPlanFixture());
@@ -243,14 +249,8 @@ describe("对话状态维护回执", () => {
       await view.wrapper.get('[data-testid="assist-send"]').trigger("click");
       await flush(); await flush(); await flush();
 
-      // 解释命令只带原消息身份与本机时区，不带 resource_id：状态维护不依赖目录作用域。
-      const statePost = posts.find((post) => post.path.endsWith("/state-maintenance-requests"));
-      expect(statePost).toBeDefined();
-      const stateBody = statePost!.body as { command_id: string; source_message_id: string;
-        timezone?: unknown };
-      expect(statePost?.body).toEqual({ command_id: expect.stringMatching(/^[0-9a-f-]{36}$/u),
-        source_message_id: "msg-1",
-        ...(typeof stateBody.timezone === "string" ? { timezone: stateBody.timezone } : {}) });
+      // 主流程已保存判定，前端只读回投影，不另发解释命令。
+      expect(posts.find((post) => post.path.endsWith("/state-maintenance-requests"))).toBeUndefined();
       // 明确指令自动沿 applications 生效：未点击任何按钮。
       const applyPost = posts.find((post) => post.path.endsWith("/applications"));
       expect(applyPost).toBeDefined();
@@ -322,7 +322,7 @@ describe("对话状态维护回执", () => {
       await flush(); await flush(); await flush();
 
       // 解释发生了，但带待决承诺的请求没有任何应用调用。
-      expect(posts.some((post) => post.path.endsWith("/state-maintenance-requests"))).toBe(true);
+      expect(posts.some((post) => post.path.endsWith("/state-maintenance-requests"))).toBe(false);
       expect(posts.some((post) => post.path.endsWith("/applications"))).toBe(false);
       const decision = view.wrapper.get('[data-testid="state-maintenance-decision"]');
       expect(decision.text()).toContain("会新建一个任务并把阶段改为实验");
@@ -353,7 +353,7 @@ describe("对话状态维护回执", () => {
       await view.wrapper.get('[data-testid="assist-send"]').trigger("click");
       await flush(); await flush(); await flush();
 
-      expect(posts.some((post) => post.path.endsWith("/state-maintenance-requests"))).toBe(true);
+      expect(posts.some((post) => post.path.endsWith("/state-maintenance-requests"))).toBe(false);
       // 正向守卫：解释成功落为 DISCUSS，而不是解释失败。
       expect(view.wrapper.find('[data-testid="state-maintenance-failed"]').exists()).toBe(false);
       expect(view.wrapper.find('[data-testid="state-maintenance-receipt"]').exists()).toBe(false);
@@ -627,10 +627,10 @@ describe("对话状态维护回执", () => {
       await view.wrapper.get('[data-testid="assist-send"]').trigger("click");
       await flush(); await flush();
       // 解释命令已发出但响应被扣住。
-      expect(posts.some((post) => post.path.endsWith("/state-maintenance-requests"))).toBe(true);
+      expect(posts.some((post) => post.path.endsWith("/state-maintenance-requests"))).toBe(false);
 
       // 切换到另一个会话：旧面板卸载，迟到响应失去归属。
-      await view.wrapper.get('[data-testid="assist-session-select"]').setValue(otherSessionId);
+      await switchToolbarSession(otherSessionId);
       await flush(); await flush();
       release!(response({ command_id: "late-fixed", committed_at: "2026-09-29T03:45:00Z",
         result: stateProjection({ decision: "MAINTAIN", status: "READY" }),

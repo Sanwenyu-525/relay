@@ -207,6 +207,61 @@
   font-weight: var(--relay-font-weight-bold);
 }
 
+/* 注意力提示的去处：与正文同色同字重，靠下划线与缩进表达可点，不新增色值。 */
+.inspector-attention-action {
+  display: block;
+  margin-top: var(--relay-space-2);
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: var(--relay-font-weight-semibold);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.inspector-attention-action:hover { text-decoration-thickness: 2px; }
+
+/* 预览内的确切版本切换：同一成果的历史版本必须能直接到达。 */
+.inspector-preview-versions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-1);
+  margin-bottom: var(--relay-space-2);
+}
+
+.inspector-preview-versions-label {
+  margin-inline-end: var(--relay-space-1);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+
+.inspector-preview-version {
+  min-height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-2);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-badge);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+}
+
+.inspector-preview-version:hover {
+  background: var(--relay-color-selection-hover);
+  border-color: var(--relay-color-border-control);
+  color: var(--relay-color-action-text);
+}
+
+/* 选中态同时给出底色、描边与 aria-pressed，不靠颜色单独表达。 */
+.inspector-preview-version--active {
+  background: var(--relay-color-selection-bg);
+  border-color: var(--relay-color-action-primary);
+  color: var(--relay-color-selection-text);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
 .inspector-section-head {
   display: flex;
   align-items: baseline;
@@ -251,6 +306,7 @@
 
 .inspector-step-symbol--done { background: var(--relay-color-status-success-bg); color: var(--relay-color-status-success-text); }
 .inspector-step-symbol--active { background: var(--relay-color-status-success-bg); color: var(--relay-color-status-success-text); }
+.inspector-step-symbol--warn { background: var(--relay-color-status-warning-bg); color: var(--relay-color-status-warning-text); }
 .inspector-step-symbol--failed { background: var(--relay-color-status-danger-bg); color: var(--relay-color-status-danger-text); }
 
 .inspector-step-body { flex: 1; min-width: 0; }
@@ -278,6 +334,7 @@
 }
 
 .inspector-step-state--active { color: var(--relay-color-status-success-text); }
+.inspector-step-state--warn { color: var(--relay-color-status-warning-text); }
 .inspector-step-state--failed { color: var(--relay-color-status-danger-text); }
 
 .inspector-note {
@@ -408,6 +465,7 @@ button.inspector-asset:focus-visible { outline: var(--relay-focus-width) solid v
 }
 
 .inspector-record-icon--done { color: var(--relay-color-status-success-text); }
+.inspector-record-icon--warn { background: var(--relay-color-status-warning-bg); color: var(--relay-color-status-warning-text); }
 .inspector-record-icon--failed { background: var(--relay-color-status-danger-bg); color: var(--relay-color-status-danger-text); }
 
 .inspector-record-text { display: grid; flex: 1; gap: var(--relay-space-0-5); min-width: 0; }

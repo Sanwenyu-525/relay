@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { randomUUID } from 'node:crypto';
 
-import type { AssistProposalRow, AssistSessionRow, AssistantProfileRow,
-  ConversationMode } from '../infrastructure/database-schema.js';
+import type { AssistMessageAttachmentRow, AssistProposalRow, AssistSessionRow,
+  AssistantProfileRow, ConversationMode } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import { canonicalizeJson, computePayloadHash } from '../receipt/payload-hash.js';
@@ -12,27 +12,33 @@ import { availableFrozenSkill, FIRST_PARTY_REGISTRY, frozenSkillSnapshot, isCall
 import { BUILTIN_METHOD_REGISTRY, currentBuiltinMethod, frozenMethodSnapshot,
   type FrozenMethod, type MethodActionKind } from '../skills/builtin-methods.js';
 import { resolveChatCommand } from './chat-commands.js';
+import { MAX_ASSIST_ATTACHMENTS_PER_MESSAGE, MAX_ASSIST_ATTACHMENT_TOTAL_BYTES }
+  from './assist-attachments.js';
 import { detectMethodIntent } from './method-intent.js';
 import { checkAssistContent, checkRequiredText, normalizeText } from '../shared/text.js';
 import type { ContextSourceRef } from '../workflow/execution-contract.js';
 import { httpCommandScopeKey } from './actor.js';
+import { establishConversationDiffBaseline } from '../conversation-diff/net-diff-service.js';
 import { frozenRoleSnapshot, requireActiveAssistantProfile } from './assistant-profile-commands.js';
 import { applyArtifactCreation, prepareArtifactCreation } from './artifact-commands.js';
 import { runIdempotentCommand, CommandIdReusedError, resolveExistingReceipt,
   resolveReceiptAfterUniqueViolation, type CommandOutcome } from './command.js';
 import { applyTaskCreation, prepareTaskCreation, type CreateTaskCriterionInput } from './create-task.js';
 import {
+  DomainError,
   invalidTransition,
   resourceNotFound,
   validationFailed,
 } from './domain-error.js';
-import { lockWritableProjectInWorkspace, readTaskInWorkspace } from './guards.js';
+import { lockWritableProjectInWorkspace } from './guards.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
 import { createRepositories, type Repositories } from './unit-of-work.js';
 import { applyTaskSkillContractChange } from './task-contract-commands.js';
 import { skillOutputHash } from '../skills/skill-proposal.js';
 import { requireRevision } from './revisions.js';
 import { readAdmission, requireNormalAdmission } from './maintenance-admission.js';
+import { freezeAssistModelSnapshot } from './assist-model-snapshot.js';
+import { resolveSessionReadTools } from './assist-read-tools.js';
 
 /**
  * Assist 命令（M04/P12，runtime-context.md 第 5 节）：
@@ -94,8 +100,8 @@ export async function createAssistSession(
       let projectId = input.projectId ?? null;
       const taskId = input.taskId ?? null;
       if (taskId !== null) {
-        const task = await readTaskInWorkspace(repositories, input.workspaceId, taskId);
-        if (task === undefined) throw resourceNotFound('Task');
+        const task = await repositories.tasks.readTaskForShare(taskId);
+        if (task === undefined || task.workspace_id !== input.workspaceId) throw resourceNotFound('Task');
         // 会话绑定 Task 时作用域跟随 Task，避免出现 Task 与 Project 不一致的会话。
         if (projectId !== null && task.project_id !== projectId) {
           throw validationFailed([{ field: 'task_id', message: 'task 与 project 不属于同一作用域' }]);
@@ -342,6 +348,20 @@ export interface RequestAssistMessageInput {
    * 只在学习会话上有意义；关闭时本轮增量一律不写（提示词 §9.4）。
    */
   readonly recordLearning?: boolean | undefined;
+  /**
+   * 0093：随消息发送的图片附件身份。上传端点已落未引用行，这里在消息命令的同一
+   * 事务内绑定到新用户消息；ids 进 payload hash，重放按原 ids 核对。无附件时不传，
+   * 既有载荷逐字不变。
+   */
+  readonly attachmentIds?: readonly string[] | undefined;
+  /**
+   * 0093：将实际服务本消息的进程默认模型名（路由从 RELAY_MODEL_NAME 传入）。
+   * 带附件时命令用它查目录并裁决图片输入能力；不传（或目录无条目）按未知拒绝，
+   * 不冒充可用。无附件时忽略。
+   */
+  readonly chatModelName?: string | undefined;
+  /** 0098: guards the create-session → select-model → first-message sequence. */
+  readonly expectedModelSelectionRevision?: string | undefined;
 }
 
 const ASSIST_INTENTS: readonly string[] = ['DISCUSS', 'PROPOSE_CANDIDATE', 'PROPOSE_TASK'];
@@ -350,7 +370,13 @@ const MAX_ASSIST_SOURCES = 10;
 export async function requestAssistMessage(
   db: DbExecutor,
   input: RequestAssistMessageInput,
+  modelEnv: NodeJS.ProcessEnv = process.env,
 ): Promise<CommandOutcome<RequestAssistMessageResult>> {
+  if (input.expectedModelSelectionRevision !== undefined &&
+      !/^[1-9][0-9]*$/u.test(input.expectedModelSelectionRevision)) {
+    throw validationFailed([{ field: 'expected_model_selection_revision',
+      message: '必须是正整数修订号' }]);
+  }
   const contentProblem = checkAssistContent(input.content, 'content');
   if (contentProblem !== undefined) throw validationFailed([contentProblem]);
   const content = normalizeText(input.content);
@@ -393,6 +419,12 @@ export async function requestAssistMessage(
       sources: input.sourceRefs === undefined ? null :
         input.sourceRefs.map((source): JsonObject => ({
           kind: source.kind, root_id: source.root_id, version: source.version })),
+      // 0093：ids 进 payload hash——重放按原 ids 核对；无附件时键不出现在载荷里，
+      // 既有消息的 payload 逐字不变。
+      ...(input.attachmentIds === undefined ? {} : { attachment_ids: [...input.attachmentIds] }),
+      ...(input.expectedModelSelectionRevision === undefined ? {} : {
+        expected_model_selection_revision: input.expectedModelSelectionRevision,
+      }),
     },
     execute: async (repositories) => {
       const session = await repositories.assist.readSession(input.sessionId, true);
@@ -401,6 +433,18 @@ export async function requestAssistMessage(
       }
       if (session.project_id !== null) {
         await lockWritableProjectInWorkspace(repositories, input.workspaceId, session.project_id);
+      }
+      // 工作台 §34：在首条消息开始处理、任何写入前建立会话基线（幂等）。采集失败不破坏原
+      // 消息与执行流程——只记录原因，后续读取按「缺少会话起点」呈现。
+      if (session.conversation_mode === 'AGENT' && session.working_resource_id !== null &&
+          session.status === 'ACTIVE') {
+        try {
+          await establishConversationDiffBaseline(repositories, {
+            workspaceId: input.workspaceId, sessionId: session.id,
+          });
+        } catch {
+          // 基线采集不阻塞聊天：失权/超限/非 Git 根等按「缺基线」在读取端呈现。
+        }
       }
       if (session.status !== 'ACTIVE') {
         throw invalidTransition('会话已归档，不能再发送消息。', { sessionId: session.id });
@@ -476,14 +520,54 @@ export async function requestAssistMessage(
       // 方法身份同样在发起时冻结：之后定义被替换或禁用都不改变这条消息已采用的版本。
       const method = methodRequest.kind === 'BOUND' ? methodRequest.method : null;
       const methodAction = methodRequest.kind === 'BOUND' ? methodRequest.action : null;
+      // The session row is already locked above. Freeze the exact selection and candidate
+      // order in this same acceptance transaction so queued messages never read later state.
+      const selection = await repositories.modelSelection.readForSession(session.id);
+      if (input.expectedModelSelectionRevision !== undefined &&
+          (selection === undefined || toDecimalString(selection.revision) !==
+            input.expectedModelSelectionRevision)) {
+        throw new DomainError({ code: 'MODEL_SELECTION_REVISION_CONFLICT', status: 409,
+          type: '/problems/model-selection-revision-conflict', title: '模型选择已变化',
+          detail: '发送首条消息前，会话模型选择已被其他操作修改；请重新读取选择并确认。',
+          retryable: true, retryAction: 'REFRESH_AND_REDECIDE', conflict: {
+            entityType: 'session_model_selection',
+            expectedRevision: input.expectedModelSelectionRevision,
+            ...(selection === undefined ? {} : { actualRevision: toDecimalString(selection.revision) }),
+            sessionId: session.id,
+          } });
+      }
+      const hasRuntimeTools = (session.conversation_mode === 'AGENT' ||
+        session.conversation_mode === 'ASSISTANT') && intent === 'DISCUSS' && skill === null &&
+        (await resolveSessionReadTools(repositories, session)).length > 0;
+      const modelSnapshot = await freezeAssistModelSnapshot(repositories, selection, modelEnv, {
+        requiresTools: hasRuntimeTools,
+        requiresJsonOutput: intent !== 'DISCUSS' || skill !== null ||
+          session.conversation_mode === 'LEARNING',
+      });
 
       const userSeq = await repositories.assist.nextMessageSeq(session.id);
       const userMessageId = randomUUID();
       const assistantMessageId = randomUUID();
+      // 0093：先裁决附件（归属/数量/总量），再写消息——全部在同一事务，任何拒绝整体回滚。
+      const messageAttachments = await resolveMessageAttachments(repositories, session,
+        input.attachmentIds);
+      if (messageAttachments.length > 0 && selection?.free_only === true) {
+        throw invalidTransition('免费模型会话仅支持文本消息。', { sessionId: session.id });
+      }
+      if (messageAttachments.length > 0) {
+        await assertChatModelAcceptsImages(repositories, input.chatModelName);
+      }
       await repositories.assist.insertMessage({
         id: userMessageId, sessionId: session.id, seq: userSeq, role: 'USER',
         status: 'COMPLETED', intent: 'DISCUSS', content, sources: [],
       });
+      if (messageAttachments.length > 0) {
+        const bound = await repositories.assist.bindAttachments(session.id, userMessageId,
+          messageAttachments.map((row) => row.id));
+        if (bound !== messageAttachments.length) {
+          throw resourceNotFound('Assist message attachment');
+        }
+      }
       await repositories.assist.insertMessage({
         id: assistantMessageId, sessionId: session.id, seq: userSeq + 1n, role: 'ASSISTANT',
         status: 'PENDING', intent: intent as 'DISCUSS', content: null, sources,
@@ -496,11 +580,71 @@ export async function requestAssistMessage(
           methodSnapshot: frozenMethodSnapshot(method), methodAction: methodAction!,
           methodArgument: methodRequest.kind === 'BOUND' ? methodRequest.argument : null,
         }),
+        ...(modelSnapshot === undefined ? {} : {
+          modelSelectionSnapshot: modelSnapshot.snapshot,
+          modelAttemptState: modelSnapshot.attemptState,
+        }),
       });
       return { session_id: session.id, user_message_id: userMessageId,
         assistant_message_id: assistantMessageId };
     },
   });
+}
+
+/**
+ * 0093：图片附件的模型能力闸门。当前聊天恒由进程默认连接服务（会话选择→端口接线
+ * 属阶段 C-2b，落地后此处应改为读取冻结快照），因此按进程默认模型名在目录里查条目：
+ * 无条目或 image_input 非 true 一律拒绝——未知不冒充可用，也不因带图就换模型、
+ * 换连接或悄悄降级为纯文本。
+ */
+async function assertChatModelAcceptsImages(
+  repositories: Repositories, chatModelName: string | undefined): Promise<void> {
+  const model = chatModelName?.trim() ?? '';
+  const entry = model === '' ? undefined
+    : await repositories.modelCatalog.readEntryBySourceModelId(model);
+  if (entry === undefined) {
+    throw validationFailed([{ field: 'attachment_ids',
+      message: '目录中没有当前聊天模型的条目，无法确认图片输入能力；请先同步模型目录或改发纯文本。' }]);
+  }
+  if (entry.capabilities.image_input !== true) {
+    throw validationFailed([{ field: 'attachment_ids',
+      message: '当前聊天模型不支持图片输入，不能发送图片附件。' }]);
+  }
+}
+
+/**
+ * 0093：随消息的图片附件裁决。上传端点已落未引用行；这里核对归属（同 workspace+
+ * session）、去重、数量与总量上限，返回待绑定行，由消息命令在同一事务内绑定到
+ * 新用户消息。ids 是命令体的一部分（payload hash 覆盖），重放按原 ids 重新核对；
+ * 已被占用的行由 bindAttachments 的 `where message_id is null` 挡住，绑定数不足
+ * 即按 RESOURCE_NOT_FOUND 拒绝整条命令，绝不部分绑定。
+ */
+async function resolveMessageAttachments(
+  repositories: Repositories, session: AssistSessionRow,
+  ids: readonly string[] | undefined): Promise<readonly AssistMessageAttachmentRow[]> {
+  if (ids === undefined || ids.length === 0) return [];
+  if (ids.length > MAX_ASSIST_ATTACHMENTS_PER_MESSAGE) {
+    throw validationFailed([{ field: 'attachment_ids',
+      message: `每条消息最多 ${MAX_ASSIST_ATTACHMENTS_PER_MESSAGE} 张图片` }]);
+  }
+  const seen = new Set<string>();
+  const rows: AssistMessageAttachmentRow[] = [];
+  let total = 0;
+  for (const id of ids) {
+    if (seen.has(id)) {
+      throw validationFailed([{ field: 'attachment_ids', message: '附件 id 重复' }]);
+    }
+    seen.add(id);
+    const row = await repositories.assist.readAttachment(id, session.workspace_id, session.id);
+    if (row === undefined) throw resourceNotFound('Assist message attachment');
+    rows.push(row);
+    total += row.byte_length;
+  }
+  if (total > MAX_ASSIST_ATTACHMENT_TOTAL_BYTES) {
+    throw validationFailed([{ field: 'attachment_ids',
+      message: `附件总量不得超过 ${MAX_ASSIST_ATTACHMENT_TOTAL_BYTES} 字节` }]);
+  }
+  return rows;
 }
 
 /**

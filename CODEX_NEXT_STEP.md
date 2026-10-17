@@ -1,6 +1,209 @@
 # Relay 当前状态与下一步
 
-更新：2026-10-15。角色：唯一阶段、模块与下一步入口。功能通过/未通过/未验收只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)；长篇经过保存在[历史快照](docs/development/codex-next-step-history-20260930.md)，不作为默认交接输入。
+更新：2026-10-17。角色：唯一阶段、模块与下一步入口。功能通过/未通过/未验收只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)；长篇经过保存在[历史快照](docs/development/codex-next-step-history-20260930.md)，不作为默认交接输入。
+
+## 会话顶栏图标工具栏、会话目录图标与拖拽分隔条（2026-10-17）
+
+用户 UI 指令已实施（未 commit/push）：①「工作详情」由带文字按钮改为纯图标开关——收起态 `PanelRightOpen`、展开态 `PanelRightClose`，32×32 命中区、18px 图标，收起透明、悬停浅底、展开落选中底色；`title`／`aria-label` 随状态切换「展开工作详情／收起工作详情」，`aria-expanded`／`aria-controls`、点击处理与焦点返回保留，会话顶栏与任务页头共用同一文案派生。②右翼相邻键一并收到同一档：「切换讨论」「新建会话」「任务视图」全部只留图标，四键同高 32×32、图标 18px、间距 `space.2`、悬停/展开/禁用同套状态，`title`／`aria-label` 保留完整中文名称，工作详情固定最后；三颗作用域键的显示条件与点击语义未动。会话顶栏**未新增「更多」**：没有明确的低频动作可收，任务/项目/运行低频入口已在任务 PageHeader 既有「更多操作」菜单，关键状态也不折进浮层。③会话目录由「会话目录：路径末段」文字改为 `Folder` 图标，完整路径进入悬停提示与可访问名称，未绑定目录时降 muted；关联目标仍保留文字。④全局 `.drag-separator`（侧栏手柄与协作分栏条共用）的线由 `border.control` 实色调浅为 55% 混合色，悬停/键盘聚焦/拖拽三态同色同宽，指针移出命中区也不再消失。零新增 token／色值。
+
+**实际证据**：workbench `tsc --noEmit` exit 0；`conversationToolbarDensity.spec.ts` **9/9**（四键顺序/纯图标/32×32/18px/可访问名称/逐键悬停底色/键盘焦点环/详情固定最后；任务页头 `aria-expanded` 与文案翻转；900×800 四键不重叠且无横向溢出），同行 `recentWorkRailDensity`＋`frontendAcceptance`＋`inspectorPreviewLayout`＋`emptyConversationWelcome`＋`narrowWindowNewConversation` 共 **46/46**；分隔条用例锁静止透明、悬停半透明、拖拽与悬停逐值相同且移出命中区仍保持。截图 `results/conversation-toolbar-icons-wide.png`、`conversation-toolbar-icons-narrow.png`、`work-details-icon-task-header.png` 已逐张核对。定向 jsdom 182/190，8 条红全部落在他人并行改动的 `assist-flow` 与 `collaborationWorkspace` 工具轨迹/执行摘要段（只报不修）。文档同步[设计系统 §6.3／§9.13](docs/frontend/design-system.md#63-全局滚动条与拖拽分隔条2026-10-17)与[工作台 §28.8](docs/frontend/workbench-design.md#288-v42-工作详情与成果预览接续2026-10-15)，成绩归验收表相应行。
+
+**未闭合**：真实 Windows/WebView2 窗口、多 DPI 与安装态未复验；dist 未重建，桌面生产包仍是上一版；共享工作树中他人未提交改动未触碰。
+
+## 对话输入器「本目录写入档位」：芯片与只读投影（2026-10-17）
+
+用户要求输入器增加与通用 Agent 同形、语义按本项目改写的权限档位入口。已实现（未 commit/push）：首条与会话输入器「+」右侧的紧凑芯片，三档为「每次确认／本次任务自动／不开放写入」，**没有「完全访问」**——V1 不提供始终允许，删除不在范围授权动作里，`DENY` 不被批准或范围授权覆盖。档位只读服务端投影，最严格优先排序与准入共用 `rankActivePolicies`；命中上层受管根时只读显示并指向「连接与权限」；改档沿既有创建/加版本（带 `expected_revision`）/撤销命令，回执后重读投影，丢响应保留原 `command_id`。服务端新增只读 `GET …/managed-resources/{id}/write-readiness`，与打开目录共用同一投影函数。
+
+**实际证据**：workbench `tsc --noEmit` exit0、`writePermissionTier.spec.tsx` **8/8**（含未绑定态常驻、菜单短文案长度守卫、旧版 API 404 降级）、首条输入相关 4 套件 **84/84**、`folderFirstConversation`＋`assistBinding` **31/31**；真实 Chromium＋dev server＋路由伪造 live API 中未选目录即显示「未选择目录」芯片；真实 PG 长链路投影断言通过（AUTO 下 READY＋条目坐标，同目录再压 ASK 后变 ASK）。用户实机截图指出「未选择目录」时芯片消失，已按 §18.1.3「常驻」改为未绑定态（未选择目录／未归入项目／未绑定目录，三档禁用且零查询）；截图中 404 已核对为桌面暂存 API（10-16）缺该路由，需 `-RefreshApi` 后复验，非源码缺失；菜单同时按「一大堆字」反馈压缩为每档一行。`folder-first-conversation` 集成套件整体仍为红，仅两例既有失败（任务创建 422 `title/objective` 控制字符；越界读取用例的驱动器断言 `SUCCEEDED` 与自身「允许非 SETTLED」矛盾），与本片无关，按共享工作树规则只报不修。新 GET 尚无独立 HTTP 集成用例。
+
+**未闭合**：真实 API＋浏览器闭环、真实 Windows/WebView2、多 DPI/IME 与安装态；若用桌面 dev 窗口查看，需按既有流程 `-RefreshApi` 重新暂存 API。规则归[工作台 §18.1.3](docs/frontend/workbench-design.md#1813-输入器的本目录写入档位2026-10-17)，服务面归[HTTP §10.86](docs/api/http-command-contract.md#1086-目录写入档位投影与只读查询2026-10-17-源码实现)，场景归[测试计划 §17.1.3](docs/testing/verification-plan.md#1713-本目录写入档位2026-10-17)，成绩归验收表新行。
+
+## 三项 opencode 在途任务收口：模型下拉、点击后界面、会话 diff（2026-10-17）
+
+用户要求把 opencode 侧三个未完成任务「都在你这里继续」并「派三个子智能体并行执行」。**未 commit、未 push**，成绩只归统一验收表。
+
+- **模型选择器：居中弹窗→锚定下拉**。用户参考图指令「直接一个下拉框就可以了，不需要一个弹窗……不需要倍率，只需要名字」：`ModelSelector.tsx` 重写为 `aria-haspopup="listbox"` 触发键＋向上锚定弹层，删除确认键与 `applyOnSelect`，首条与会话两种入口都点选即应用并收起，条目可见文本只有模型名（细节留 `title`），外部点击／Esc 收起并回焦、刷新中不收。规则与两轮指令归[工作台 §27.5](docs/frontend/workbench-design.md)，视觉归[设计系统 §9.16](docs/frontend/design-system.md)，成绩与真实 API 闭环归验收表「免费模型生产链」行。
+- **点击后界面 CT-01／CT-02**：遮罩吃掉面板点击的缺陷与「资料／生成方式」职责分离＋面板限高与状态保持已修，定向浏览器规格 `inspectorPreviewLayout` 9/9、`composerSourcePanel` 5/5。
+- **会话局部与总 diff W1–W3**：后端 `conversation-diff/` 模块＋会话只读端点＋迁移 `0097`/`0102`，前端两处位置（逐编辑局部行、输入卡外上方总数）与同源派生／有界轮询落地；本轮把三条断言对齐到[工作台 §34.4](docs/frontend/workbench-design.md#34-会话局部与总-diff) 已写的规则（过去时动词跟随账本动作、「部分不可统计」是入口级标记、保留可信值时不在面板里重复一条失败），并把这三条补写回 §34.4——不是改产品代码迁就测试。**W4 未闭合**：`apps/api/test/integration` 没有任何 conversation-diff 套件，真实 PG＋一次性 Git 仓库、真实 HTTP 失权、真实 Provider 分块工具流、真实 Windows 窗口都欠取证；[任务书](prompts/conversation-live-diff.md)状态行与工作台 §34 状态行同步为「W1–W3 已实施、W4 未闭合」。
+- **共享工作树现状**（本轮实测）：`apps/api` 编译到临时 outDir exit 0、5 个 conversation-diff 单元文件 52/52；workbench `tsc --noEmit` exit 0、全量 `vitest run` **122/132 文件通过**、真实 Chromium 浏览器全量 **157/157 通过**，10 个失败文件全部在本专项之外（他人在途的 `assist-flow`/`assist-preview`/`collaborationWorkspace`/`firstPartySkills`/`run-events`/`createTaskProjectPicker`、需本机 8787 API 的 `live*`、他人新增 `components/ComposerDraftAssist.css:75` 旧式 `max-width: 48rem` 引起的 `responsiveTiers`）；`folderFirstConversation` 单跑 19/19、`collaborationWorkspace` 单跑 4 failed/73 passed。他人红灯按约束只报不修。
+
+**下一步（待用户定，不自动开工）**：① W4 先补 conversation-diff 的真实 PG／一次性 Git 集成套件再谈验收；② 真实 Windows/WebView2 窗口核对下拉观感、CT-01/CT-02 与两处 diff 位置；③ 图片附件前端 T5–T8 仍等并行热文件安静后接线。
+
+## 按日常使用顺序接续后端（2026-10-17，基础链路已闭合）
+
+用户继续授权后端开发，沿用 GPT-6 Luna 实施、主 Agent 独立验收，并要求详细任务书、按首次/高频使用排序、以链路打通为停止条件。[日常后端任务书](prompts/daily-backend-chains.md)的三段现已闭合：① 目标编辑/归档与项目改名；② 先记下尚无验收条件的 Inbox 原任务，再首次归入项目，保留身份/验收/讨论；③ 经原入口补齐验收、就绪/开始→成果固定版本→人工接受/完成→重开→项目/今日再次接续。精确新增接口分别归[基础维护](docs/api/project-goal-maintenance.md)与[首次归属](docs/api/task-project-binding.md)。主 Agent已审查并独立重新编译、运行串行真实链路，实际成绩只归统一验收表。未新建迁移、前端接线或替代 Task/Run/完成 Owner；共享回执映射与 Task 会话创建的共享锁由主 Agent定点接线，不覆盖模型/工具主循环在途段落。首次编译曾被会话控制文件的缺失类型/组装函数阻挡；用户明确确认该部分修改结束并授权补齐后，仅恢复缺失声明和既有结果组装，未扩展会话控制入口。当前停止于这条基础日常后端链路已通；后续页面消费、任意跨 Project 迁移、真实 Agent/模型及桌面交付仍须按各自专项范围接续，不由本片成绩自动放行。
+
+## 目标与普通工作区：后端基础工作上下文（2026-10-17）
+
+用户授权先区分目标与普通工作区，只开发后端、避开并行改动，由 **GPT-6 Luna** 实施、主 Agent 验收。[执行任务书](prompts/goal-directory-backend.md)已实际派发；按用户追加要求补成六步说明，固定文件所有权、响应形状、SQL 作用域、原命令链路及检查出口。现已新增 Goal/目录两个只读 `work-context` 入口：Goal 沿当前显式 Goal–Project 关联汇集项目、目录和非 Task 会话，普通目录仅汇集精确绑定自身的会话；同一会话始终保持原 ID，无关联 Goal 的目录正常可读。未新增领域事实、迁移、权限或前端接线；现有源文件只在原本干净的 `project-api.ts` 增加导入及注册，未编辑在途模型、会话执行、目录打开和前端热文件。接口边界归 [API 补充](docs/api/goal-directory-work-context.md)，基础链路成绩归统一验收表。后端本片已完成；后续如需页面消费此能力，应待前端热文件可协调后单独接线，本轮不自动推进。
+
+## 内置 GitHub Skill 前移进 V1 主线：本轮仅范围决策与文档（2026-10-17）
+
+用户在三条备选（保持在 post-V1 分支 / 只做只读切片 / 前移主线）中明确选择**移主线**，否决[后续路线第 4 节](docs/requirements/post-v1-roadmap.md#4-后续候选的处置)原有的后置处置。本轮**只写文档**：新建 [ADR-023](docs/decisions/ADR-023-builtin-github-skill.md)；[范围矩阵](docs/requirements/v1-scope.md#内置-github-skill-范围补充)新增 **F25** 行与其范围节；[扩展专题第 10 节](docs/architecture/relay-skills.md#10-内置官方-skill-包)定义官方包的定义落点/分发/激活/启用规则；后续路线该行处置改为「已前移」并保留原条件。**未写源码、未新增随包资源、未动动作词表或迁移、未派子代理、未 commit/push**；GitHub 能力未实施、未验收，验收表不新增成绩行。
+
+已定边界一句概括：后端用官方 `gh` CLI 经既有受信 CLI 通路与可执行准入；上游 Skill 原文不改写、Relay 边界另置附录；登记落点用与内置方法同构的独立冻结表，不进参与备份包校验的第一方注册表；首片只读；本地暂存/提交/推送复用 `GIT_WRITE`，GitHub 侧写动作须先冻结 UNKNOWN 核对协议才可进入词表。
+
+**对主线的挤压**（用户需在开工前据此定优先级，不是本次已排定的顺序）：
+
+| 在途专项 | 冲突点 |
+|---|---|
+| 免费模型生产链剩余（阶段 A 契约、C-2b、阶段 D、自动目录生命周期、单模型额度有界接续） | Luna 与主 Agent 分工正在改 `tool-loop.ts`、`assist-runner.ts`、`openai-compatible-model-port.ts`、`database-schema.ts` 与 `apps/workbench/**`；GitHub 片的按需激活注入与 Skill 登记落在同一批会话/工具链文件 |
+| ADR-019 剩余（BC-05 `SKILL.md` 定制、会话压缩、消息文件恢复、前端命令菜单接线） | 官方包若要落成文件形态必须等 BC-05；本轮改走独立登记正是为了不阻塞，代价是之后一次同规则迁移 |
+| 内置方法→写执行链的闭合（本文件 2026-10-11 段的未闭合 ①） | GitHub 写动作直接依赖它；未闭合则写片不能开工，只读片不受影响 |
+| 会话局部/总 diff（工作台 §34）、粘贴图片前端 T5–T8 | 与 GitHub 片同样落在 `AssistView`/composer 热文件；前两轮已因并行实例在途而主动待接线 |
+| 迁移序号与共享文档 | 迁移已到 `0095`，`0093/0094/0095` 期间发生过分让；GitHub 片若需新表只能顺延，HTTP 契约/物理设计/验收表同为并行热文件 |
+
+**下一步（待用户定，不自动开工）**：① 只读片排在免费模型剩余链路之前还是之后；② 若先做，按 [ADR-023 的后续](docs/decisions/ADR-023-builtin-github-skill.md#后续)先冻结「获准的只读子命令集合 + 同一受管根上的仓库身份核对」工程协议，再补 API/测试计划规格；③ 三项待确认仍未批准：是否随包 `gh.exe`（Sidecar）、GitHub 写动作片在主线队列中的位置、上游 Skill 的来源 SHA 与许可固定方式。
+
+### F25 实施首轮（2026-10-17，用户下达「开始执行任务」）
+
+执行通路核对推翻了 ADR 里的一条假设：**项目内不存在合法的只读外部 CLI 通路**——`CLI_RUN` 是写语义（默认 ASK、失败即隔离、核对恒 UNKNOWN），会话读取词表不放行它，且入口必须是在连接上点名的绝对路径文件、连接没有更新端点。据此按 `0092 COMPUTER_READ` 的先例改走**新增 `GITHUB_READ` 能力 + 专用只读 adapter**，偏离与四条源码依据已记入 [ADR-023 的实施前核对与偏离](docs/decisions/ADR-023-builtin-github-skill.md#实施前核对与偏离2026-10-17)，范围随之修正的是首片不再「零迁移」。**已完成**：官方 `gh` Skill 原文逐字写入工作区（`apps/api/skills/builtin/gh/SKILL.md`，331 行 / 20,279 bytes，SHA-256 `49e3798…f7caad`）+ MIT `LICENSE` + `UPSTREAM.md` 固定上游提交 `4537a92f3352c8c4c1fd1b8febba1596059fc9e0`、记「不改写正文、Relay 边界另置附录、正文的 7 处 `gh api` 是待约束命令面而非授权」。**未接线且如实标注**：`apps/api` 只做 `tsc` 构建、`files` 仅含 `dist/src`/`migrations`，官方文本既没进包也进不了运行时提示；`GITHUB_READ` 的能力登记表、迁移、adapter 与连接尚未写。**另需决策**：官方文本落成随包资源（要动暂存与 `bundle.resources`）还是逐字内嵌常量 + sha256 一致性测试。`check-docs` 通过；本轮未运行任何代码测试。（能力、迁移、adapter 与测试在同一轮接续完成，见下条。）
+
+### F25 只读片实现与开发自检（2026-10-17，同一轮接续）
+
+**已实现（未 commit/push）**：迁移 `0103_github_read.sql` 登记 `GITHUB_READ`（`REAL`/`READ`）并逐条重述资源 CHECK；`apps/api/src/github/github-adapter.ts` 走本地 `git` remote 身份闸门、结构化 argv、环境白名单、30 秒超时/取消、有界投影与类型化失败；四个只读动作进入工具目录与会话只读词表，按 ACTIVE 连接逐轮激活，Permission 按动作分别裁决；`gh api` 与模型自带仓库名都不在词表内。官方原文仍未进入打包或运行时提示，独立官方包登记仍未建。
+
+**实际证据**：`github-read.test.ts` **16/16**；真实 PostgreSQL 集成 `github-read.integration.test.ts` **8/8**（含 `0103` 原始 INSERT 正反例、连接停用当轮收词、`GH_REPO_UNIDENTIFIED`、模型仓库名到不了适配器、`gh_api` 被拒且不落 Operation、逐动作 Permission、与 `FILE_READ` 共存）；受 CHECK 重述影响的既有套件回归 **85/85**（助手只读 6、人工 Git 15、真实工具 Gateway 54、迁移 10），退出码 0，临时集群正常删除。文档已同步：[工具适配器 §4.1](docs/architecture/tool-adapters.md#41-github-只读查询01032026-10-17-开发自检)、[扩展专题 §10](docs/architecture/relay-skills.md#10-内置官方-skill-包)、[ADR-023](docs/decisions/ADR-023-builtin-github-skill.md#首片实施记录2026-10-17开发自检)、[范围矩阵](docs/requirements/v1-scope.md#内置-github-skill-范围补充)、[测试计划 §35](docs/testing/verification-plan.md#35-内置-github-skill-只读片0103)、[物理设计 §93](docs/database/physical-design-postgresql.md#93-0103-github-只读能力2026-10-17-源码实现开发自检)与验收表新行。
+
+**未闭合，不得当作已验收**：本机没有安装 `gh`，没有真实已认证读取、权限失败或限流证据；官方 Skill 未随包分发、未登记、未注入提示，内置项禁用设置未做；GitHub 侧写动作未开工；无真实 Windows 窗口与安装包验收。F25 整体仍未验收。**仍待用户拍板**：① 随包 `gh.exe`（Sidecar）进入时点；② GitHub 写动作片在主线队列中的位置；③ 上游来源与许可虽已按「固定提交 SHA + 保留 LICENSE」落库，该长期维护方式仍未获用户确认。
+
+## 免费模型生产链与额度接续：Luna 实施及协调复验（2026-10-17）
+
+用户明确要求先验收、编写提示词并由 **GPT-6 Luna** 子代理执行，持续修复到跑通。本轮实际派发 `gpt-6-luna`，不是仅交付任务书；[执行分工](prompts/free-model-catalog.md#2026-10-17-实际执行派发gpt-6-luna)定义执行者与协调者文件责任。基线已重新验收，0095 来源约束反例已转绿，成绩只归统一验收表。当前推进剩余 A/C-2b/D、自动目录生命周期和单模型额度有界接续，保留既有业务 Owner、原默认路径与并行改动；不因工作树未提交永久停在阶段 0，也不覆盖已确认同时写入的文件段落。
+
+Luna 负责本专项后端源码/必要迁移/API与数据库契约和定向测试；主 Agent 接手前端选择器/client/首条发送接线与定向检查，并负责架构主文档、独立端到端验收和修复反馈。用户先选择完成受控 Provider HTTP＋真实 PG＋浏览器验收，随后提供独立 OpenRouter 凭据；协调者仅在临时进程内存使用，认证已通过，尚未执行真实生成。先完成受控生产链，再进行无敏感内容的最小真实调用，逐项核对实际型号、限制与计量，不能将认证通过冒充模型或零结算通过。安装/Windows 证据仍需分别取证，不自动升级用户库或重启用户桌面实例。
+
+## 会话局部与总 diff：方案与提示词留痕（2026-10-16）
+
+用户要求文件编辑记录旁的实时局部 diff，以及输入框上方居中的总 diff，已选择 B「本轮对话开始以来的净变化」。本轮仅编制方案和[开发任务书](prompts/conversation-live-diff.md)，未改产品源码、数据库或运行验收成绩，不启动开发、不重排其他专项。已确认选择与推荐默认唯一归[工作台 §34](docs/frontend/workbench-design.md#34-会话局部与总-diff)，视觉归设计系统 §9.15，待运行规格归测试计划 §34；后续明确下发任务书后，先核定持久会话基线/原身份与工具参数流，再开发后端、client 和两个 UI 位置。产品讨论须写入对应主方案、防止实现静默偏离的维护规则已补入[文档规范 §4](docs/README.md#4-变更规则与验收)。
+
+## 输入框粘贴图片与消息附件：后端全链路落地，前端待接线（2026-10-16）
+
+按用户确认的全链路方案（[实施计划](docs/superpowers/plans/2026-10-16-composer-paste-image-attachments.md)）与「先文档后前端」推进，当前 Agent 单独实施、未 commit/push。**后端已实现（T1–T4）**：迁移 `0093` 附件表（`bytea` + CHECK 白名单/上限/字节一致，只授 SELECT/INSERT/UPDATE）；暂存端点 `POST /assist-sessions/:id/message-attachments`（路由级 bodyLimit 4MiB，非幂等命令）；`RequestAssistMessage` 可选 `attachment_ids`（进 payload hash、事务内绑定、归属/去重/≤4张/≤6MiB、无附件载荷逐字不变）；目录能力 `image_input` 三态 + 发送闸门（按 `RELAY_MODEL_NAME` 查目录，无条目/非 true 拒绝，不冒充可用）；`AssistTurn.parts` 多模态组装（仅当前消息附件，历史降级文本占位）+ OpenAI 端口 LangChain 1.2 标准图片块。**文档已同步**：[HTTP §10.85](docs/api/http-command-contract.md#1085-assist-消息图片附件2026-10-16-后端源码实现前端未接线)、[数据库 §91](docs/database/physical-design-postgresql.md#91-0093-assist-消息图片附件2026-10-16-源码实现)、[工作台 §33](docs/frontend/workbench-design.md#33-输入框粘贴图片与消息附件)（标注前端未接线）、验收表新行（**未验收**）、`check-docs` 通过。**证据（如实）**：`apps/api` 全量 `tsc --noEmit` 通过（唯一错误来自并行实例在途的 `model-catalog-repository` 重构与其测试错位）；受影响 4 个单测 **58/58**（临时编译目录执行，未触碰共享 dist）。**待办（T5–T8）**：前端粘贴/拖拽捕获与附件 chip（`AssistView`/`ChatCommandInput`/`relayClient` 全是并行实例热文件，按用户决定待热文件安静后接线）、消息气泡缩略图、前端 jsdom/浏览器规格、真实 PG 集成测试（空载单跑）、真实 Provider 多模态样本。**并行协调**：同仓实例在改 `model-catalog-repository/pricing`（本片逐次重读后定点编辑，双向保留）；对方 `0094` 迁移已顺延避让我方 `0093`，双方文档互认。
+
+## 「+」两级上下文菜单与二级能力入口（2026-10-16）
+
+用户实际下发「+ 菜单与二级能力菜单」实施提示词（一级＝想做什么、二级＝具体选什么；基于真实代码增量改、优先复用既有组件、不得为完成 UI 造假业务）。本轮由当前 Agent 单独实施前端，未派子代理、未 commit/push、未改后端/数据库/权限/业务命令。**已实现**：`views/AssistView.tsx` 把原平铺四项弹层重构为数据驱动的两级菜单——一级/二级共用同一行组件（`AttachRow`），四项能力不各写一份；二级向右展开，右侧放不下翻左、下方放不下按底对齐，两侧都不够时面板内滚动；点击展开（刻意不用 hover，避免缝隙闪断）、点击外部关闭、Esc 先收二级再收一级、↑↓/→/←/Enter 键盘导航、候选行状态位（资料计数、已绑目录对勾、已选 Skill 对勾）全部来自真实事实。**接入既有能力，零新协议**：「检索项目资料」打开既有资料选择面板；「对话中的资料」取会话消息上真实出现过的引用（去重、三类、三元组齐全）；「最近使用」目录复用协作页持有的真实近期目录与同一目录入口（含草稿守卫，`CollaborationView` 仅新增 `recentFolders`/`onOpenRecentFolder` 两个透传 props）；命令清单复用 `GET /chat-commands` 与内联菜单同一套 `chatCommandScope`/`chatCommandStatus`（已从 `ChatCommandInput` 导出复用，不另写一份）。新增本机偏好 `lib/recentSourceRefs.ts`（仿 `recentWorkingDirectories`，只记 kind/rootId/version 三元组、不缓存正文，服务端受理后写入）。**如实禁用并写明接入点**：本地文件选择（`desktopHost` 只有目录选择器）、管理工作区（无工作区管理 UI）、Skill 生成两条（只有只读盘点与「选择已有 Skill」）；禁用行不显示 chevron、不进入焦点顺序。
+
+**同日追加（用户截图「菜单右侧留白太多」）。** 面板原本写死 `min-width: 15rem`（Chromium 实测 235px），而最宽一行只占约 145px，短行右侧最多空出 108px 空白带。改为 `width: max-content`（宽度由最宽一行决定，保留 `max-width` 上限），并把行尾状态位与 chevron 收进一个 `margin-left: auto` 的尾组：一级面板收到 **200px**、二级 **194px**，逐行尾组右缘距行右缘恒为 8px（＝左内边距），各行 chevron 落在同一列。脚注/空态/二级脚注用 `width: 0; min-width: 100%` 退出固有宽度计算——不排除这条，二级面板会被长脚注撑回 345px（实测）。`tests/composerAttachMenu.spec.tsx` 加一条尾组结构断言锁住对称前提，共 **16/16**。
+
+**证据（如实分层）。** 已运行：组件契约 `tests/composerAttachMenu.spec.tsx` **16/16**；真实 `/agent` 路由回归 `tests/assistantModeSwitch.spec.ts` **47/47**（含两条新增集成：目录二级→既有「更换目录」对话框、命令二级→真实登记填入首条草稿且零 POST；该文件同轮另有并行实例新增的输入器布局结构断言，两者共存且全绿）；`apps/workbench` 全量 `tsc --noEmit` 通过；`vite build` exit 0；`check-docs` exit 0（169 篇/3904 链接）。**未跑**：浏览器 Playwright 规格、真实 Windows 窗口/DPI/原生 IME、真实模型（本片不涉及模型调用）。为让真实路由用例能点到目录入口，`tests/setup.ts` 补了 `Element.prototype.scrollIntoView` 空实现（jsdom 无布局，真实浏览器有）。全量 vitest 在共享工作树内与并行实例同跑出现成组用例级抖动（同文件单跑全绿），故只用上列定向出口作证据；并行实例造成的既有红灯（`collaborationWorkspace` 执行摘要文案、`run-events` SSE 时序、`assist-flow`/`firstPartySkills` 的 `?skill=assist` 夹具已被其「旧 Assist 入口统一到 `/agent`」取代、`responsiveTiers` 报其新增 `ComposerDraftAssist.css`）不并入本片，也未代为修改。
+
+交互归[工作台 §32](docs/frontend/workbench-design.md#32-两级上下文菜单与二级能力入口)，视觉归[设计系统 §9.14](docs/frontend/design-system.md#914-两级上下文菜单视觉补充)（token 零新增），规格与实际运行范围归[测试计划 §33](docs/testing/verification-plan.md#33-两级上下文菜单验收规格)，成绩只归统一验收表「「+」两级上下文菜单与二级能力入口（2026-10-16）」行。**不改变**：不重排免费模型专项与阶段 C/D 顺序、不改模型目录或普通 Agent 主循环、不启动压缩/Skill 定制/文件恢复。
+
+## 免费模型来源约束反例修复（0095）与剩余链路门控（2026-10-16）
+
+用户实际下发「先修来源约束漏洞，再完成剩余闭环（含单模型额度耗尽自动接续）」。本轮**先复现再修**：真实 PG 单跑 [`model-selection-source-acceptance`](apps/api/test/integration/model-selection-source-acceptance.integration.test.ts) **0/1**（`openrouter` + `free_only=false` + 目录三列 NULL 写入成功，期望 23514），确认根因是**两条约束各自都被 NULL 语义绕过**——0089 的 `(connection='default' OR catalog_source='openrouter')` 在来源为 NULL 时求值 NULL（`false OR NULL = NULL` 视为通过），0094 的 `(connection <> 'default' OR catalog_source IS NULL)` 在 `openrouter` 时左支恒真。修复为追加迁移 **`0095_session_model_selection_openrouter_provenance.sql`**：`CHECK (connection <> 'openrouter' OR (catalog_source='openrouter' AND catalog_snapshot_seq IS NOT NULL AND catalog_model_id IS NOT NULL))`（`connection` 非空且只两枚，`<>` 恒为确定布尔；非默认分支全用显式 `IS NOT NULL`），并带**只读预检**——用 `IS DISTINCT FROM` 统计将违反的既有行，>0 即 `RAISE EXCEPTION ERRCODE='23514'` 回滚整个迁移，明确阻止而非伪造来源/改写/删行。反例文件与断言一字未改。**证据**：`tsc -p tsconfig.json` exit0；真实 PG `-TestFile model-selection-source-acceptance,session-model-selection,model-catalog-sync` **exit 0**（95 项迁移含 0095；反例 **1/1**、选择 **7/7** 含新增「不误伤合法组合」三组合、目录 **8/8**）；8 件定向单测 **91/91** 保持；`check-docs` 与 `git diff --check` exit0。成绩只归[统一验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「免费模型模块阶段 0 整改（2026-10-16）」行，数据库说明新增 §92 并更正 §90 的「后续需追加」表述。
+
+**剩余链路仍未实施（本轮未动生产接线）**：OpenRouter 服务端独立连接与凭据引用、会话选择与首条消息的实际模型绑定、Run 创建冻结配置/有序候选/接续策略、实际调用入口读取冻结约束并附零价硬限制、自动刷新生命周期、前端选择器，以及**单模型额度耗尽的有界自动接续**。门控未满足：本轮 23:39 仍实测到并行实例在改 `tool-loop.ts`、22:5x 改 `assist-runner.ts`/`openai-compatible-model-port.ts`/`database-schema.ts`，前端整层在改（computer-use 与粘贴图片两个专项同树在途）。这些改动落点与之重叠，且无调用方时预建表列违反「不建占位」规则；不把「反例已转绿」当模块完成。恢复信号与整批接通要求见上一节。
+
+## 免费模型阶段 0 独立复验：反向来源约束待修（2026-10-16）
+
+本轮用户仅要求验收，未补产品实现。阶段 0 原有整改已复验，但新增独立真实 PG 反例发现 `openrouter + free_only=false + 目录三列NULL` 仍被 0089/0094 放行；已保留 `model-selection-source-acceptance.integration.test.ts`，更正数据库文档的“合并后语义完备”结论，并接续专项任务书阶段 0。成绩只归统一验收表原“免费模型模块阶段 0 整改”行；该红例已由同日 0095 修复（见上一节），阶段 A/C-2b/D 仍在门控后。实际 OpenRouter 聊天、自动刷新生命周期、Run 候选冻结/UI 与额度自动接续仍未实施，不将原有定向检查通过当完整模块通过。
+
+## 免费模型阶段 0 整改完成（2026-10-16）
+
+用户实际下发[专项任务书](prompts/free-model-catalog.md)的**阶段 0**。本轮只做阶段 0：先复现失败，再最小修复转绿，不扩展阶段 A–D。**已修**：① 目录同步集成测试的 `before` hook 改用应用角色**本来就持有**的 `DELETE`（不再用 `TRUNCATE`，不给生产角色补危险权限），原 6 条断言一条未删；② 追加迁移 **`0094_session_model_selection_source_guard.sql`**，用显式 `IS NULL` 钉住「`default` 连接不得携带 OpenRouter 目录来源」（`0095+` 仍空；0089 不改写，台账按内容 sha256 校验）；③ 目录来源完整性收紧——非空畸形结果、不完整分页、同一 id 矛盾重复一律不发布且保留旧快照，未知计价项只有明确为零才放行，工具能力改按官方结构从模型**顶层** `supported_parameters` 解析；④ 同步在**领取租约的同一行锁内**按当前发布头复核 TTL/退避/刷新间隔。**证据**：真实 PG 94 项迁移 + 两套集成全绿（`model-catalog-sync` **8/8**、`session-model-selection` **6/6**）、PG 启停 exit0、临时集群已删除，`apps/api` 全量 `tsc --noEmit` exit 0，免费模型 6 件定向单测 **56/56**。原 6 项目录套件是**首次真正执行**（此前全灭于 before hook），其中 4 条时间预算/CAS 前置与事实不符，已按夹具修正（补时间推进、补一次真实 intervening publish）而非删除断言。成绩只归[统一验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「免费模型模块阶段 0 整改（2026-10-16）」行。
+
+**未做且在门控内**：阶段 A 剩余工程契约、阶段 C-2b（OpenRouter 服务端独立连接与真实聊天外呼、Run 创建冻结非密钥模型快照与候选策略、五处端口构造点读取冻结约束、目录转收费的下次调用拒绝）、阶段 D（前端选择器与 live 客户端接线），以及本次新增必交目标**单模型额度耗尽的有界自动接续**。恢复信号不变：`run-steps`/`conversation-*`/`checkers` 与 `apps/workbench/**` 不再被并行实例改动、或对方已提交。本轮实测**仍有并行实例在改**这些文件与 `model-catalog-*`（已逐次重读后定点编辑并保留其改动），故未动。无真实 OpenRouter 凭据与放行，真实外呼、浏览器、Windows 窗口与安装包保留未验；免费保证与零结算不成立。
+
+## 免费模型验收与额度接续任务书更新（2026-10-16）
+
+用户本轮明确“先验收并更新开发任务书”，不补产品实现，不解除 C-2b/阶段 D 的共享热文件门控。阶段 B/C-2a 的真实 PG 验收发现测试夹具与数据库约束问题，新增来源校验/并发整改前置；成绩和运行限制只见[统一验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)“免费模型模块独立验收”行。该轮要求的[专项任务书阶段 0](prompts/free-model-catalog.md)已于同日完成，见上一节；下一步是阶段 A 剩余契约与阶段 C-2b，仍受同一热文件门控。
+
+新目标为[后续路线 §9.1.1](docs/requirements/post-v1-roadmap.md#911-免费额度耗尽自动接续)：单模型额度耗尽后，按冻结有序免费候选有界接续；账户/平台共享额度耗尽停止，保留原消息/Run、实际模型尝试与切换记录，不转收费、不重跑工具。该目标未实施，替代旧“永不切其他免费模型”的设计限制；旧门控和其他模块顺序不变。
+
+## 会话顶栏触发框收窄（2026-10-16）
+
+按用户红框截图接续 §9.13：触发框此前按弹性主列拉伸，短标题右侧空场一整条、选择箭头孤悬最右端与标题断开。改回收窄到内容宽（`min-width: 6rem`、封顶 `min(12rem,40cqi)`，长标题在 select 上截断、完整值在 title），中列 `space-between` 把「新建会话」钉回右缘、与「工作详情」保持相邻成组；透明边框、悬停淡底、compact 同高与浮层样式不变。新增 `conversationToolbarDensity.spec.ts` 常驻回归（锁收窄、封顶、右缘钉住与透明边框）；`narrowWindowNewConversation`＋`emptyConversationWelcome`＋`recentWorkRailDensity`＋`chatTimelineNavigation` 单 worker 33/33；顺带修 `recentWorkRailDensity.spec.ts` 两处 `panelActionColors` null 安全（前一轮未提交改动遗留，曾阻塞 `tsc --noEmit`）。`tsc --noEmit` 与 `vite build` 通过、dist 已重建——生产模式桌面窗口需重启加载（用户 22:06 截图中的下拉边框即旧 dist 渲染，源码在 Chromium 探针中已证实为透明边框）。仅前端展示，不改业务事实、命令、权限或 API；视觉归[设计系统 §9.13](docs/frontend/design-system.md#913-会话视图顶栏密度2026-10-16)，成绩归验收表「会话视图顶栏密度」行；真实 Windows 窗口与多 DPI 未复验。
+
+## 会话顶栏改左右两翼（2026-10-16）
+
+用户指令：顶栏改为左侧会话信息、右侧「工作详情」，「新建会话」作为冗余入口删除。已实现：左翼＝会话身份下拉 + 作用域两行（同一信息块，行距 `space.1`），右翼＝动作区（`control.height.compact` 同高、内边距 `space.3`、图标 0.875rem，≤46rem 收文字只留图标）。**「新建会话」只在工作空间级删除**——全局「新对话」只建无作用域讨论，任务/目录归属下那颗键是「在同一任务/目录里再开一段」的唯一入口，故保留在右翼；这一取舍与理由已写进设计与验收。`AssistView.tsx` 把 select 与按钮拆成两个节点（各一份定义、两处容器只摆放），非工具栏会话带不变。**取证**：`conversationToolbarDensity.spec.ts` 重写为三例（左右翼几何、无归属无「新建会话」、任务归属保留且排在「工作详情」前）3/3；`narrowWindowNewConversation`＋`emptyConversationWelcome`＋`recentWorkRailDensity`＋`chatTimelineNavigation`＋`frontendAcceptance` 单 worker 41/41；`newConversationEntry` 两条依赖该键的守卫用例改挂到仍有该入口的路径后 10/10（其一覆盖范围如实收窄，见验收表）；`tsc --noEmit` exit0、`vite build` 重建 dist（生产模式窗口需重启加载）。视觉归[设计系统 §9.13](docs/frontend/design-system.md#913-会话视图顶栏密度2026-10-16)，成绩归验收表「会话视图顶栏密度」行；真实 Windows 窗口与多 DPI 未复验。
+
+## 会话顶栏 taste 审计：去卡片与作用域分档（2026-10-16）
+
+用户要求用 taste-skill 优化会话顶栏。技能已装入 `C:\Users\ASUS\.workbuddy\skills`（完整版 `design-taste-frontend` 与市场版 `design-taste-plus`），其 §13 自述把密集产品 UI 列为 out of scope，故只取其可迁移条款（§4.4 卡片只在需要层级时用、§9.C 间距数学、§4.5 空态不冒充取值），视觉权威仍是项目设计系统。三处改动（零新增 token／色值，`data-testid`、文案、路由与 Owner 全未动）：① 去卡片——顶栏由「纸面卡里再套带描边圆角的卡」改为透明底、无描边圆角、仅一条下缘细分线，读作转录区 chrome；② 作用域两行间距 `space.4` → `space.6`（12px 字号下 16px 黏成一串）；③ 占位状态（尚未关联目标／未绑定目录／待核对）降到 muted 档，真实取值仍 secondary，不拿「没有事实的说法」冒充取值。`conversationToolbarDensity.spec.ts` 追加第二例锁住这三条；连同 narrowWindowNewConversation＋emptyConversationWelcome＋recentWorkRailDensity＋chatTimelineNavigation＋frontendAcceptance 单 worker 38/38；`tsc --noEmit` exit0、`vite build` 重建 dist（生产模式窗口需重启加载）。视觉归[设计系统 §9.13](docs/frontend/design-system.md#913-会话视图顶栏密度2026-10-16)，成绩归验收表「会话视图顶栏密度」行；真实 Windows 窗口与多 DPI 未复验。
+
+## 会话顶栏收成单行与顶栏去下拉（2026-10-17，接续上面三轮）
+
+用户实机截图四条指令：顶栏太高、「工作详情」键换样式、文字被顶栏盖住时要渐变、左侧只要会话名不要下拉框；并要求 UI 改动走 taste-skill。已实现（零新增 token／色值，路由、命令、Owner 与业务事实未动）：顶栏由两行收成单行（1487×900 实测 75px → 49px）；右翼三颗键改 ghost（静止透明、悬停 `selection.hover`、按下与展开 `selection.bg`/`selection.text`、禁用降 muted）；正文滚过转录区上缘时绘制 32px 条件渐隐带，停在顶部不画，且不新增滚动 Owner；`/agent` 顶栏左翼改为会话名纯文字，`select` 只剩非顶栏的会话带（`?skill=` 页）。**按指令删控件、按证据留能力**：同作用域读出 ≥2 条讨论时右翼补一颗「切换讨论」浮层键（Task 绑定会话不进近期工作栏，没有它就回不到旧讨论），走同一 `selectSession`，离开保护与同名去重文案一字未改；顶栏随之抬到 `zIndex.sticky`，浮层才不被后画的正文盖住。**取证**：`conversationToolbarDensity` 重写为五例 5/5，与 `inspectorPreviewLayout`＋`chatTimelineNavigation`＋`narrowWindowNewConversation`＋`headerHeightToken`＋`responsiveFoldGeometry`＋`emptyConversationWelcome` 同批单 worker 干净复跑 50/50；jsdom 迁移四文件中 3 个文件 76/76、`collaborationWorkspace` 73/77（4 条属并行的工具轨迹／执行摘要用例，只报不修）；`tsc --noEmit` 剩余报错只在他人 `conversationDiffSummary`／`chatLocalFileDiff` 测试文件。视觉归[设计系统 §9.13](docs/frontend/design-system.md#913-会话视图顶栏密度2026-10-16)，成绩归验收表「会话视图顶栏密度」行。**未复验**：真实 WebView2 窗口与多 DPI；dist 未重建，生产模式窗口仍是上一版顶栏——要看实机效果走 dev 窗口。
+
+## 转录区上下两条边同套渐隐与回底键收成整圆（2026-10-17，接续上面四轮）
+
+用户实机截图两条指令：「文字被未选择目录这一行遮盖的时候也要有同样的渐变效果」「回到底部的箭头改成圆形背景」。纯展示层，零新增 token／色值，`data-testid`、文案、路由、命令与滚动 Owner 未动，Breaking Change：No。① 底缘加一条与上缘同源的条件渐隐带（`space.8`＝32px、`bg.surface` → 透明、`pointer-events: none`、`data-bottom-fade="on"` 才绘制）；上下两条边的判定合并为一个 `syncEdgeFades`，除真实滚动外还挂在消息整批替换与视口自身变矮两处——这两处都不产生 `scroll` 事件，只挂 `onScroll` 会让长会话切短会话时渐变永久压在第一条消息上；底缘阈值取 `remaining > 1` 而非 `> 0`，避开高 DPI 下小数 `scrollTop` 让停在底部仍绘制。阅读意图（`followLatest`／`atLatest` 的 32px 档）仍只由真实滚动决定，尺寸变化不改读者位置。② 回底键按文档本意是「边长 `control.height.compact`」，代码只写了 `min-height`，于是全局 `.icon-button` 的 `height: control.height`（40px）生效、32×40 配 `radius.round` 读成竖胶囊；补上同源 `height` 即为整圆，命中区没缩。**取证**：`conversationToolbarDensity` 第三例扩为上下两条边＋键形，单 worker 5/5；`chatTimelineNavigation` 单 worker 11/11；jsdom 全量 1067/1089，22 条失败里没有一条提到本轮三个新标识（`data-top-fade`／`data-bottom-fade`／`assist-latest`），全部落在他人未提交范围（`assist-flow` 仍找 V4.2 已删的 `.breadcrumbs`／`assist-target`、工具轨迹契约、live 夹具、`ComposerDraftAssist.css` 旧式断点）；`tsc --noEmit` 剩余报错同样只在他人三处测试文件。**未复验**：真实 WebView2 与多 DPI；dist 未重建；同批 `uiOption2FirstSession` 16 例红，停在夹具发送流程（`assist-copy-a-0` 不出现、近期工作栏报「当前会话暂未能在近期工作中核对」），归因他人未提交的 `RecentWorkRail.tsx` 改写（+492 行），本轮只报不修。视觉归[设计系统 §9.13](docs/frontend/design-system.md#913-会话视图顶栏密度2026-10-16)，成绩归验收表「会话视图顶栏密度」行。
+
+## 聊天列纸面左右同色（2026-10-17，接续上面五轮）
+
+用户实机截图一条指令：「输入框左右两侧怎么颜色不一样？左边是正常的背景白色，右边的颜色暗一点，是因为渐变吗？顶栏也有这个问题」。**归因不在本轮那两条上下遮罩**（纵向渐变、只画 32px 横带，产生不了竖边），而是 2026-10-16 外壳分层给 `.app-content` 铺的一条 `linear-gradient(to right, bg.surface calc(100% − layout.workspace.sideWidth), transparent)`：它的前提是「卡片右缘接近屏幕右缘时淡出回桌面」，而实测卡片与窗口右缘齐平（1480 视口 `.app-content` 右缘 = innerWidth = 1480），右边没有桌面可退，这条 544px 宽的横向渐变只把正文右半染向 `bg.subtle`——逐像素核对：改前输入卡两侧各 195.6px 留白是 #FFFFFF 对 #F8FAF7，顶栏那行从 x≈1100 起一路淡到右缘；顺带把转录区那两条洗向 `bg.surface` 的遮罩也打穿了（带子越往下越「亮」）。修法是一行：`.app-content` 平铺 `bg.surface`，几何、描边、圆角与顶部桌面带未动，零新增 token／色值，Breaking Change：No。**取证**：`conversationToolbarDensity` 新增一例——截整窗一行真实像素、在页面里用 canvas 解码，比对输入卡两侧与消息列两侧留白的 RGB 逐通道相同且等于 `bg.surface`（祖先层叠的结果只看计算样式测不出），本片六例 1487×900 单 worker 6/6；A/B 证明断言会咬：把渐变挂回去，像素档读回 `[250, 251, 249]` 对 `[255, 255, 255]`、计算样式档报 `backgroundImage` 非 `none`。同批七个相关规格 56 例 52/56，4 条红全是 `inspectorPreviewLayout` 的 `sessionNameRightWing 交叠 66px²`，A/B 复跑（挂回渐变）同样红，归因他人未提交的 `CollaborationView.css`（+239 行）会话名 `max-width: min(20rem, 50cqi)` 那一档；同一 spec 第七例（他人 15:21 追加）与 `src/api/resources/gateway.ts`（他人 15:22 未提交，`RelayWriteReadiness`／`writeReadinessFrom` 未导入）的 2 条 `tsc` 报错同理，均只报不修。视觉归[设计系统 §9.13](docs/frontend/design-system.md#913-会话视图顶栏密度2026-10-16)，成绩归验收表「会话视图顶栏密度」行。**未复验**：真实 WebView2 窗口与多 DPI（探针是 headless Chromium）；dist 未重建，生产模式窗口仍是上一版纸面——要看实机效果走 dev 窗口。
+
+## 输入框自动分点与手动润色接入源码（2026-10-16）
+
+用户实际下发[开发任务书](prompts/composer-outline-and-polish.md)，本轮由当前 Agent 单独接入源码，未派子代理、未 commit/push。**已实现**：服务端 `workflow/composer-draft.ts`（模型只回原文**码点**边界序号，程序按原文切片并只加 `N. ` 与换行；润色只回 `{text}`；畸形协议整条拒绝）、两条运行时提示词路由 `COMPOSER_OUTLINE`/`COMPOSER_POLISH`（`workflow/prompts/composer-prompts.ts`，不加载公共核心）、端口 `ComposerDraftPort` 与 `OpenAiCompatibleModelPort.draftAssist()`、用例 `application/composer-draft-assist.ts`（准入 + 既有 `model_calls` 记一行 `kind='COMPOSER'` 无作用域 + 实例闸门）、端点 `POST /composer/draft-assist`、前端 `components/ComposerDraftAssist` 接入首条与已有会话两处正文 Owner。迁移 `0091` 只给 `model_calls.kind` 加枚举值 `'COMPOSER'` 并补无作用域分支，**不新建表、不加列**。协议归 HTTP §10.84，物理归[数据库设计 §89](docs/database/physical-design-postgresql.md)，交互归[工作台 §30](docs/frontend/workbench-design.md#30-输入框自动分点与手动润色)（含 §30.6 实施默认），提示词路由归[提示词设计 §2.1](docs/architecture/agent-prompt-design.md#21-当前运行时提示词路由)，运行范围归[测试计划 §31.1](docs/testing/verification-plan.md#31-输入框自动分点与手动润色验收规格)。
+
+**证据（如实分层）。** 已运行：`composer-draft` 单测 **10/10**、`composer-draft-port` 单测 **3/3**（受控 HTTP 捕获最终发出体，证明请求只含当前草稿、`json_object`、无工具）、前端 `composerDraftAssist.spec.tsx` **13/13**、浏览器 `composerDraftAssist.spec.ts` **3/3**（真实 Chromium，含润色键在输入卡工具行内的键位回归）、`apps/api` 与 `apps/workbench` 全量 `tsc --noEmit` 均通过。**已写未跑**：真实 PG 集成 `composer-draft-assist.integration.test.ts`（`COMPOSER` 行无作用域 + 真实 usage、业务计数不变、畸形协议仍记 `COMPLETED`、失败记 `FAILED`、闸门不写行、未配置/超长开事务前拒绝、HTTP 401/409/422）——共享工作树有并行实例、机器非空载，按项目规则未并发跑 `run-integration.ps1`，留待空载 `-TestFile composer-draft-assist` 单跑。**未验**：真实 Provider 的语义质量样本（切点是否落在正确需求边界、是否保留否定与条件）、真实 Windows 窗口的 IME/DPI 与安装态、三方案预览的 B/C 两种呈现（CO-12，原型任务书未下发）。同日按用户截图反馈修正键位：**润色键从「输入卡上方独立一行」移进输入卡工具行**（与「资料 / 模式」同一行，原型 `#polishBtn` 的位置），浮层改为锚定提示行上方的非模态绝对定位，不再推动布局。
+
+**不改变**：不重排免费模型专项（阶段 C-2b 与阶段 D 仍受主循环热文件静默门控）、不扩展到压缩/Skill 定制/文件恢复，未新增产品验收成绩（成绩仍只归统一验收表）。
+
+## Agent 入口与目录读取修复（2026-10-16）
+
+按用户本次问题接续阶段 D：任务/项目旧 Assist 入口统一到 `/agent`，任务默认聊天并复用目录条、工具栏与详情外壳。首条先绑定持久目录再发送，未知重试保留原身份；普通发送移除两种抢先解释，终态只读回主流程候选。GET 执行请求增量回显原资源与候选，无 migration。真实测试库原先无工具连接，本次通过既有配置 Owner 仅为 Relay-Agent 根设置读取连接及四种只读动作策略，其他目录不自动获权。**同日接续（computer-use 真实窗口验收）**：三入口同址、工作详情三页签与关闭行为一致、先选目录发首条（持久绑定＋`list_directory` SETTLED＋真实模型回复真实名称）、只读零新增 Task/Run/执行请求（计数 5/2/4 前后不变）、无绑定如实提示；重开恢复时发现并修复归属行「当前项目」占位缺陷（`CollaborationView` 的 `projectTitle` 只随任务路径解析，现沿目录绑定 projectId 用既有 `getProject` 解析），修复后真实窗口复验通过。MODEL_FAILED 间歇失败（当日 2 败/4 成）取证后排除超时、预算与两类请求形状（直连协议探针 4/4 全 200），未能在带诊断产物上复现，按现有证据不归因本地实现、倾向 Provider 外部故障；临时诊断 `DEBUG-directory-read` 已从源码与两处 dist 清除并重建同步，干净产物复验成功。临时诊断落盘代码未当作修复；错误分类沿用 `MODEL_FAILED`＋`session_tool_calls` 对照。边界与成绩只归验收表「Agent 入口统一与目录读取」行；原「阶段 A/B/C」行的「阶段 D 未实施」已标注为 2026-10-15 时点结论。完整 Run 结果投影（AM-06 剩余）和安装包仍为后续，不改变免费模型等并行工作顺序。
+
+## V4.3 原型对齐接续：项目接续与无会话空态（2026-10-16）
+
+用户下发 [V4.3 整改任务书](prompts/v43-prototype-alignment.md)，按任务书派发子 Agent A（项目与接续）与 B（工作台首屏/输入区），两包均被用户中断、部分改动落树；主 Agent 遵「不改别人改动」只补 [ProjectSkillView.tsx](apps/workbench/src/views/ProjectSkillView.tsx) `readOverviewFacts` 返回对象缺的 `tasks/tasksNextCursor/tasksReadFailed` 三字段，并把一条未跟上 V43-01 外壳收纳契约的过时浏览器断言（`projects-empty-state` 在 `/projects` 等 `recent-work-empty`）对齐为整栏隐藏。**V43-04/V43-06 通过**（组件 + 真实 API + 电脑插件真实窗口复验：接续摘要卡/继续工作仅导航/查看动态带 project_id 过滤/归档说明；无会话任务聊天视图直接给输入卡、旧三选一停顿页消失）；**V43-05 未实施**（真实窗口首屏仍 11 建议常驻、工具行未紧凑化，子 Agent B 中断前未完成）。`tsc --noEmit`/`vite build`/`check-docs` exit0；任务书定向组 58/58、项目组 33/34、协作组 128/130、浏览器 frontendAcceptance 12/12 与 projects-empty-state 6/6。3 个失败均非产品缺陷（两个是新测试夹具自身 bug：缺 `/daily-continuation` GET 桩、`pathname` 与含 origin 的 `${prefix}` 比较永不匹配；1 个为验收表既有记录），待其 Owner 修复。成绩只归统一验收表「V4.3 原型对齐接续」行；下一步优先补 V43-05 与两个夹具缺陷。
+
+聊天区左侧消息时间线导航已由设计推进到首版实现：点击节点定位原会话对应消息，交互归[工作台 §31](docs/frontend/workbench-design.md#31-聊天消息时间线导航)，视觉归[设计系统 §9.12](docs/frontend/design-system.md#912-聊天消息时间线导航设计补充)，规格与实际运行范围归[测试计划 §32](docs/testing/verification-plan.md#32-聊天消息时间线导航验收规格)，成绩归验收表「聊天消息时间线导航」行。范围只有前端只读消费：新增 `components/ChatTimelineNav`，接入 standalone 聊天列，零 API、零 migration、零业务命令、零模型调用。原「节点粒度／长会话／窄窗待核定」三项按实施默认收口（只索引用户提问、导航轨局部滚动不缩命中区、聊天列 ≤48rem 降为左缘紧凑展开入口），嵌入态任务详情会话历史与真实 Windows／DPI 仍未做。不改变业务与后续开发顺序。
+
+近期工作栏按用户确认的两行方案调整：标题独占首行，副行简写更新时间并以轮廓图标区分会话，同组同名项保留时分；增加行内与分组留白、减少树形缩进，保留既有字号与拖拽栏宽。交互归工作台 §28.1，视觉归设计系统 §9.11，实际检查与未覆盖范围归功能验收表原「近期工作栏窄列搜索与行密度」行；不改变业务与后续开发顺序。
+
+同日按用户校正接续「目标／工作区（目录）」导航：以正式 Goal 经 Project 的已有多对多关系聚合跨目录会话，目录入口按持久化的会话资源绑定分组，原任务入口保留；两处恢复同一会话与历史，正文分别显示关联目标及会话目录。 按后续截图反馈统一根区标题、内层分组与条目的视觉层级，空态降为辅助提示，任务入口支持折叠。新增可选只读 `include_context` 投影，无 schema/migration 或执行权限变更，也未新增会话直接绑定 Goal。交互、视觉、API 分别归原主文档，运行结果归验收表「目标与目录会话导航」行；真实 Windows／DPI 仍待复验。
+
+同日再按截图反馈收四处：① **修掉「工作区（目录）」收不起来**——原实现按「当前项在哪一组」常驻强制展开，活动会话必然落在该段，点 summary 的同一拍就被改回展开；改为折叠偏好是唯一依据，只在定位（切换到另一条会话或任务）时展开它所在的区与组一次。② 根区标题的 `bg.subtle` 淡底由常驻收回悬停/按下，静止不铺底。③ 空态短提示（「暂无关联目标」等）在栏内水平居中。④ 条目列表在树线内侧再留 `space.0.5`，激活标记随条目一起右移 2px，不再贴着竖线画。本轮只动左栏展示与一条本地偏好读写时序，不改业务事实、命令、权限或 API；交互归工作台 §28.1，视觉归设计系统 §9.11，成绩归验收表原行。
+
+同日第三轮按截图反馈去掉近期工作栏根区之间的分隔线：目标／工作区（目录）／任务入口（含已归档）连排时三条横线把一列切成分段，撤掉后层级由字号档、字重、缩进与 `space.3` 间距＋`space.2` 内边距承担；栏底「查找更多任务 / 会话」的边框按「分隔的是列表与栏底动作、不是并列根区」保留（该入口连同边框已于同日第四轮删除，见下段）。仅样式与常驻断言，不改结构、折叠偏好与 API；视觉归设计系统 §9.11，交互归工作台 §28.1，成绩归验收表原行。
+
+同日第四轮按用户对搜索框与栏底入口功能重合的确认，删除栏底「查找更多任务 / 会话」入口：面板只读与左栏相同的端点（任务仅第一页、无搜索翻页），是更弱的重复入口；`components/TargetPicker.tsx` 与 `.recent-work-more`／`.rail-picker` 样式无调用方一并删除，窄档换行遗留（设计系统 §9.11）随之关闭。左栏（搜索＋「更早的任务」）成为任务与会话唯一导航入口；同轮修掉 `recentWorkRailDensity` 第三轮记录的 ⋯ 菜单既有红（同一会话在目标区与目录区各渲染一行、行内操作 testid 两份相同，`.first()` 命中未悬停副本），该文件 5/5 全绿。交互归工作台 §28.1，视觉归设计系统 §9.11，成绩归验收表原行。
+
+同日第七轮按用户三张实机截图复提左栏间距：① 「四个根区间距没有统一」——取证发现第五轮的「拉齐 12px」只在任务入口展开时成立：已归档段在 `recent-work-list` 包装层之外，相邻兄弟选择器覆盖不到「任务入口 ↔ 已归档」，展开时靠末组 margin 塌穿包装层凑到 12px，一收起就塌成 0px（四区实测 `[12, 12, 0]`，已归档贴着任务入口）；把已归档段移进同一包装层（仍挂 `loadedCount` 之外，归档后重开入口不消失），任意折叠组合下三处间隙都是 `space.3`。② 「item 的间距再减小，而且要统一」——第五轮把行距收到 `space.0-5` 只落在基座列表上，分组覆盖仍留 `space.1`，分组内 36px、已归档区 34px 两档并存；撤掉该覆盖后一列只有一档 34px 行距，密度用例行距下限随同从 `space.1` 收到 `space.0-5`。③ 消息图标疑问不是缺陷：`MessageSquare` 只画在会话行、任务行没有，以图标区分两种行类型（可访问名称另带「会话 · 」前缀）。新增常驻回归用例锁住「任意折叠组合下四区间距同一档＋分组与已归档行距同档」；同步修 `sessionRowMenu` 辅助函数排除归档段副本、`liveTasks` 存量 URL 期望补 `include_context=true`。仅前端展示与结构，不改业务事实、命令、权限或 API；视觉归设计系统 §9.11，交互归工作台 §28.1，成绩归验收表「目标与目录会话导航」行；真实 Windows／DPI 仍未复验。
+
+同日第八轮按用户实机反馈「间距还是太大」再收一档：条目行距已触紧凑 token 下限（32px 行高＋2px＝34px），唯一还能收的是块间距——根区 `margin-top` 与分组下外边距同步由 `space.3`(12px) 收到 `space.2`(8px)（分组下外边距会塌穿包装层顶住根区间距，必须同步改，只改根区无效）。层级留白成为 8px（根区／分组）→ 4px（段标题→分组）→ 2px（条目）整档缩放，段标题→分组与条目行距未动。密度用例同一档断言随同改指 `space.2`，该文件 7/7；`sessionRowMenu`＋`liveTasks`＋`recentWorkPagination`＋`assistBinding` 30/30；浏览器四规格 40/40（R02 在并跑中两次报红、单跑与复跑均过，对照运行换另一用例红，属 §9.11 记载的并发抖动，非本片改动）。仅样式数值，不改结构、业务事实、命令、权限或 API；视觉归设计系统 §9.11，成绩归验收表「目标与目录会话导航」行；真实 Windows／DPI 仍未复验。
+
+## 前端定向验收与整改（2026-10-16）
+
+按用户「验收，修改一下前端，不需要派发子 agent」独立完成项目列表、待处理、动态三个页面的明确缺陷整改。项目列表/待处理/动态及动态别名收纳近期工作栏与调宽把手，返回工作台恢复原偏好；待处理请求改为全宽卡片，正文与判断默认单列、宽窗才并排，消除旧 `:has` 特异性覆盖留下的空轨；动态补中文事件名称、已加载项类别与执行方组合筛选，完整身份留依据，检查结算不冒充通过。顺带补齐前端 `vite/client` 类型入口，修复既有错误页使用 `import.meta.env` 导致的构建类型错误。交互与根因归[工作台设计](docs/frontend/workbench-design.md)，布局规则归[设计系统](docs/frontend/design-system.md)，运行结果只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
+本轮不修改后端、数据库、权限或业务命令，不 commit/push，不替换用户的 API/PG。其余 V4.3 原型差距（项目接续整合、紧凑输入区、无会话任务的聊天入口、其他路由会话栏收纳）仍需后续按实际范围推进；本次页面整改不改变模型目录或普通 Agent 主循环的阶段边界。
+
+## 会话模型选择落地：阶段 C 第二批（2026-10-15，只做后端）
+
+按用户「只做后端、边写边让集成待跑」推进阶段 C 的会话模型选择数据面。已实现：迁移 `0089` 新建全局表 `session_model_selection`（`session_id` 主键引用 `assist_sessions`；`connection ∈ {default,openrouter}`、`model`、非密钥 `config_fingerprint`、`free_only`、目录三列 `catalog_source/seq/model_id`、CAS `revision`、`selected_by_command_id`；两条 CHECK 把「免费必带目录依据」与「非默认连接必来自 openrouter」钉死，只授 `SELECT/INSERT/UPDATE` 不给 `DELETE`）。纯分类器 `model-selection-resolve.ts` 依「命中进程默认模型→default、否则查严格免费目录→openrouter、都不命中/收费→如实拒绝」判定，不做外呼也不伪造快照。Owner `selectSessionModel` 复用既有幂等命令基建（`runIdempotentCommand` 的 `revision`/CAS/原回执重放），把 `/model <名称>` 接到 `execute-chat-command`，并新增只读 `GET /assist-sessions/:id/model-selection`；`envelope.ts` 补 `SelectSessionModel` 资源链接。协议归 HTTP §10.82，物理归[数据库设计 §88](docs/database/physical-design-postgresql.md)。
+
+**范围边界（本批只接通默认连接）。** 落库、重放、跨会话/跨 workspace 隔离与只读回显针对**默认连接**（`RELAY_MODEL_*` 已有聊天端口）已闭合；目录命中的 **OpenRouter 免费项本批如实拒绝** `OPENROUTER_CHAT_NOT_WIRED`——OpenRouter 聊天外呼配置解析尚未建、不预建无当前调用方的端口，Run 创建冻结非密钥模型快照与五处端口构造点读选择传 `freeGuard` 一并留作 C-2b（`0090+`）。选择不写 `model_calls`、不改动 Run。
+
+**证据（如实分层）。** 分类器定向单测 `model-selection-resolve` **7/7 通过**（真跑）；`apps/api` 全量 `tsc --noEmit`（含集成测试文件）**exit 0**。真实 PG 集成 `session-model-selection.integration.test.ts`（默认选择落库/重放不推进 revision/新命令 CAS 推进/跨会话隔离/跨 workspace `RESOURCE_NOT_FOUND`/仓库层 CAS 真值表/openrouter 拒绝不落库/归档 `INVALID_TRANSITION` 不留回执/0089 三条 CHECK 用 `expectSqlState('23514')`）**已编写并通过类型检查，本轮未执行**——共享工作树另有并行实例活跃、机器非空载时并发 `run-integration.ps1` 会挂死或偶发假失败，留待空载以 `-TestFile session-model-selection` 单跑。真实 Provider、HTTP、浏览器与 Windows 安装态**未取证**；按 §8，无凭据下**不宣称免费保证或零收费成立**。Breaking Change：No（`POST /chat-commands` 结果新增 `MODEL_SELECTION` kind + 新增只读 GET，旧读取方忽略新 kind 即可）。**阶段 D（最小 UI 选择器 + live 客户端）与真实 Provider/浏览器/Windows 仍未做。**
+
+## 免费调用硬限制与冻结约束词汇：阶段 C 首批（2026-10-15）
+
+按「依赖顺序分批闭合」推进阶段 C 的**第一批=安全关键的免费硬保护**（§8 以「硬限制未验证不宣称零收费」为总闸，先钉这一环）。已实现：`workflow/frozen-model-constraint.ts`（随调用携带的**非密钥**冻结快照类型 + 严格解析，缺省/畸形不伪造模型身份或免费约束）；`workflow/free-call-guard.ts`（对 `freeOnly` 约束生成服务商端 `provider.max_price` 绝对零价 + `allow_fallbacks:false` + `require_parameters:true`，覆盖 prompt/completion/request/image，**不用 `openrouter/free`**、不改写确切模型）；`OpenAiCompatibleModelPort` 新增**可选**第三参数把硬限制注入 `wireFetch`（普通外呼与 reasoning 续轮重建客户端均携带，非免费时请求体逐字不变，原默认不受目录故障影响）。协议归 HTTP §10.82，边界归[运行架构 §8.6](docs/architecture/runtime-context.md)。
+
+**证据（如实）。** `apps/api` 全量 `tsc --noEmit` 通过；`frozen-model-constraint`/`free-call-guard`/`openai-compatible-free-guard` 三新件单测连既有 `openai-compatible-model-port` 回归 **51/51 通过**——受控 HTTP 用真实 SDK 捕获**最终发出体**，证明零价硬限制到达外呼边界。**这只是请求体形状取证**：真实 OpenRouter 是否接受并据此零结算、跨续轮/重启按持久化快照恢复、选择命令 revision/CAS 与原回执重放均需真实凭据与真实 PG，本轮无凭据且共享工作树有并行实例，**未运行**，不宣称零收费保证成立。
+
+**下一批（阶段 C 剩余依赖，尚未做）。** 「会话选择（`revision`/幂等/原回执重放）Owner + `/model` 接线」已由上一节（阶段 C 第二批）实现，本批只接通默认连接、OpenRouter 目录项如实拒绝。**仍待做的 C-2b（`0090+`）**：OpenRouter 聊天外呼配置解析与真实连接、Run 创建冻结非密钥模型快照，再把冻结约束读取接入五处端口构造点（`run-steps`/`delegate-task`/`conversation-execution`/`conversation-state`/`checkers`）并覆盖目录转收费的下次调用拒绝、`UNKNOWN` 原身份核对。这些改动落在并行实例正在编辑的热文件（尤其 0087 普通 Agent 主循环与前端），且 FM-06/FM-07 出口需空载真实 PG+HTTP，故不预建无当前调用方的表列、不与并行实例抢改热路径。**C-2b 与阶段 D 同受「主循环热文件静默」门控**（用户 2026-10-15 决定停在 C-2a 干净边界）：恢复信号＝`run-steps`/`conversation-*`/`checkers` 与 `apps/workbench/**` 不再被并行实例改动或对方已提交；空载时再整批做，C-2b 须一次接通「OpenRouter 聊天外呼→Owner 停止拒绝 `openrouter`→Run 创建冻结快照→五处端口按 `free_only` 传 `freeGuard`」这条完整链，不拆成无消费者的悬垂步骤。**真实 Provider/浏览器/Windows 仍未做。**
+
+## 免费模型目录同步与严格免费判定：阶段 B 源码实现（2026-10-15）
+
+用户已实际下发[专项任务书](prompts/free-model-catalog.md)，完成**阶段 B**：OpenRouter 免费目录同步 + 严格免费判定，以及只读/手动刷新两个新端点。**该轮只交付阶段 B：会话模型选择其后的阶段 C 第二批已落地（见顶部「会话模型选择落地」节，且只接通默认连接），Run 模型冻结与 OpenRouter 聊天端到端仍未做（C-2b）；免费调用硬保护已在阶段 C 首批落地并取证。阶段 D（最小 UI 选择器 + live 客户端接线）未做。** 协议归 HTTP §10.81，物理归[数据库设计 §87（迁移 0088）](docs/database/physical-design-postgresql.md)，判定规则边界归[运行架构 §8.6](docs/architecture/runtime-context.md)、范围归[后续路线 §9.1](docs/requirements/post-v1-roadmap.md#91-免费模型分组与自动同步)。
+
+**做了什么。** 迁移 `0088` 新建两张全局表（`model_catalog_sync_state` 单例发布头 + 跨进程租约 + 失败退避；`model_catalog_entries` 逐条严格判定，随成功发布同事务整体替换）。`ModelCatalogRepository` 作为独占 SQL Owner 经 `unit-of-work` 登记；同步用例 `syncModelCatalog` 把网络拉取放在事务外，租约领取与 CAS 发布各是独立短事务，来源失败保留旧快照与上次成功时间、只记原因并推进指数退避，合法空目录如实清空。严格免费判定按「本次文本调用计价项」`prompt/completion/request` **字符串精确判零**（极小非零不误判为零），缺失/非法/负数/来源新增非零项一律保守拒绝。目录凭据独立于聊天凭据、端点复用 `guardedModelFetch`（公开 https、锁同源与路径前缀、拒重定向、发前复查 DNS），来源/字节/条目/耗时全部有界。`GET /model-catalog`（默认只回严格免费，`?all=true` 连非免费一起供核对）与 `POST /model-catalog/refresh`（结构化 status，非幂等命令）挂在既有 Bearer 守卫的工作区前缀下，与 `/model-port` 同一先例。
+
+**已运行**：严格判定、配置/生命周期决策、来源传输与凭据/端点隔离的定向单测 **26/26 通过**；`apps/api` 全量 `tsc --noEmit`（含集成测试文件）**exit 0**。**未运行**：同步用例的真实 PG 集成测试 `model-catalog-sync.integration.test.ts`（租约去重/CAS 不倒退/失败保留/空目录清空/绝不写 `model_calls`）已编写并通过类型检查，但**本轮未执行**——共享工作树内另有并行执行实例，并发跑 `run-integration.ps1` 会挂死/偶发假失败，留待机器空载时以 `-TestFile model-catalog-sync` 单跑。真实 OpenRouter 外呼、浏览器与 Windows 安装态**未取证**（无授权凭据，用户选择「无凭据/不放行，仅隔离验证」）。
+
+**限制与下一步。** 阶段 B 只交付目录同步与严格判定。其后的阶段 C 分批推进：免费调用硬保护已在首批落地取证、会话模型选择命令（带 revision/幂等）已在第二批落地（仅接通默认连接，OpenRouter 目录项如实拒绝），Run 模型冻结与 OpenRouter 聊天端到端仍未做（C-2b）；阶段 D 的最小选择器 UI + live 客户端接线未做。各批均不预建无当前调用方的表或列。阶段 B 本轮未新增产品验收成绩，实际通过与否以功能验收表为准；不扩展到压缩、Skill 定制或文件恢复。
+
+## 免费模型分组：文档与开发任务书（2026-10-15）
+
+用户本轮仅授权更新文档并交付开发提示词，该轮未启动实现（同日阶段 B 已实现，见上一节）。首版默认 OpenRouter 官方目录、独立免费分组、24 小时成功缓存与手动刷新、具体模型选择、会话覆盖与 Run 冻结、每次调用严格免费准入。范围归[后续路线 §9.1](docs/requirements/post-v1-roadmap.md#91-免费模型分组与自动同步)，执行入口为[专项任务书](prompts/free-model-catalog.md)。后续实际下发时先核对模型选择基础能力和旧 Run 兼容；不重排其他既定开发工作，不启动压缩/定制/文件恢复，不新增验收成绩。
 
 ## 目录作用域细条 + 窄窗外壳折叠点（2026-10-15）
 
@@ -11,6 +214,12 @@
 **已运行**：`tsc --noEmit` exit 0、`vite build` exit 0、`vitest` 920/922（两项既有失败：执行摘要文案与 `run-events` SSE 时序，后者单跑 5/5）、`responsiveTiers` 守卫 2/2、浏览器 96/99（`workbench.spec.ts` 的「宽表在局部滚动」是 2026-10-11 项目页重设计移除右栏后的残留测试，与本轮无关且改前同样失败；另两项在全量并发下不稳定、单跑通过）、`check-docs` exit 0。**未取证**：真实 Windows 窗口 150% DPI 下跨 1024px 拖动的切换观感。
 
 **契约与实现曾脱节，已校正**：`window.content.initialWidth` 写 1280、`minWidth` 写 960，而桌面壳实际以 1160×780 建窗且未设 `min_inner_size`（`apps/desktop/src-tauri/src/lib.rs`）。两条 token 描述已改为「目标约束 + 实现实况 + 为什么不能加强制下限」，窗口尺寸段的窄窗区间同步更正为 `< 48rem`。
+
+## V4.2 工作台接线第二轮：正文读取根因闭合 + 版本可达（2026-10-15）
+
+**根因（先复现后定位，类别 C 环境错配，不是代码或数据缺陷）**：种子「截图种子产物.md」v2 正文读不出，是**存储根不一致**——种子文件发布在 `D:/Relay-Agent-data`（`apps/api/.env` 的 dev 根），而当前调试窗口由 `scripts/test-desktop.ps1` 设 `RELAY_DESKTOP_DATA_ROOT=D:\Develop\Relay-Agent\.relay-test\data`（API sidecar → 127.0.0.1:8728，同一 12525/`relay_trial` 库）。隔离只读 API 实例双向交叉证实：trial 根 → v1/v2 均 503 `EVIDENCE_UNAVAILABLE`（detail 受管内容文件缺失）而清单 200；改用 `D:/Relay-Agent-data` → v1/v2 均 **200** 且正文、sha256、size 与数据库逐字节一致，此时反而是另一成果 503。数据库行、hash、size、版本号、来源均正确；桌面宿主内 API 与 Worker 共用同一 `data_root`（`lib.rs` 831/848），无产品级根不一致。本轮**未改配置、未迁移数据、未动种子**——窗口内可读与否要由用户决定改 `RELAY_DESKTOP_DATA_ROOT` 或迁文件，按停止条件待授权。
+
+**本轮实现**：正文失败透出服务端 detail 真因（MISSING/TAMPERED/UNREADABLE 不再压扁，保留原版本重读）；预览新增同一成果「确切版本」切换（v2↔v1，`aria-pressed`、返回焦点仍是原成果按钮）；进展页 attention 与成果页尾各补一条进入记录页的去处。`tsc --noEmit`、`vite build`、`git diff --check` 均 exit0；vitest **937/939**（两项失败为既有问题：开工基线单次 935/936 只含 `executionSummary` 文案，另一项 `run-events` SSE 时序是已记录的既有 flake、单独复跑 5/5，两项均与本轮改动文件无关）；定向 `taskInspectorPanel` **17/17**；后端 `tsc` exit0、`managed-content-store` **6/6**、真实 PG+HTTP `api-artifacts` 集成 **18/18**。电脑插件实测既有调试窗口：错误真因可见、版本切换后标题/aria/页脚 62 字节同步、返回与关闭焦点、页签方向键/End/Home、成果页尾入口跳记录页；切到任务 `9c6ae9f2` 打开另一成果 **正文正常读出（2439 字节、AI 来源）**，正常读取与历史种子失败在同一真实窗口各自成立；窄窗浮层关闭键可达；项目/资料/全部任务代表页无退化。成绩与限制只归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)原 V4.2 行，交互归[工作台 §28.8](docs/frontend/workbench-design.md#288-v42-工作详情与成果预览接续2026-10-15)。**聊天发送已验**：独立「你好」测试会话真实发出一条无写入意图的测试消息，收到真实模型回复与真实 token 用量，PG 核对新建 Task=0/Run=0（纯讨论未被误判为执行），未触碰用户原会话。**同日第三轮补齐**：A→B 预览隔离、同任务刷新保留预览、判断/编辑/Run 控制入口可达（只读取证，未点决策）、真实窗口 1280×800 与 1440×900 覆盖（本机 125% DPI，物理≠CSS 视口，截图留 `output/v42-acceptance/windows-native-20261015-1280x800.png` 与 `-1440x900.png`，窗口已恢复最大化）。**V4.2 正文读取修复完成（2026-10-15，用户指令「修复发现的问题」授权）**：把缺失的两份受管内容从 `D:/Relay-Agent-data` **复制**（保留源文件）到窗口实际使用的 `RELAY_DESKTOP_DATA_ROOT`（`.relay-test\data`），复制前后 sha256/size 与数据库登记值逐字节一致（v2 9e02…/77B、v1 f1ca…/62B）；未改数据库、hash、正文、版本号、接受事实、配置或种子原文件。真实窗口复验：v2 与 v1 正文均读出、版本切换同步，**历史种子 v2 正文在当前窗口由「未通过」转为通过**；截图 `output/v42-acceptance/windows-native-20261015-seed-v1-readable.png`。**未验证**：安装包、多 DPI、IME。
 
 ## 普通 Agent 连续工具主流程（2026-10-15，文档与任务书）
 

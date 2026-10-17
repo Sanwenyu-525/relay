@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { ConfigError } from '../../src/config/config.js';
-import { readModelPortConfig, validateModelPortConfig } from '../../src/workflow/model-port-config.js';
+import { OPENROUTER_CHAT_BASE_URL, readModelPortConfig,
+  readOpenRouterModelPortConfig, validateModelPortConfig }
+  from '../../src/workflow/model-port-config.js';
 
 test('no provider env keeps the Fake ModelPort path', () => {
   assert.equal(readModelPortConfig({}), undefined);
@@ -66,4 +68,20 @@ test('defaults apply when optional fields are absent', () => {
   assert.equal(config.maxCallTokens, 65_536);
   assert.equal(config.maxScopeCalls, 32);
   assert.equal(config.maxScopeTokens, 262_144);
+});
+
+test('OpenRouter chat credential is independent from default and catalog credentials', () => {
+  const env = { RELAY_MODEL_API_KEY: 'other-provider-key',
+    RELAY_MODEL_CATALOG_API_KEY: 'catalog-key', RELAY_MODEL_NAME: 'default-model',
+    RELAY_OPENROUTER_API_KEY: ' openrouter-chat-key ' };
+  const config = readOpenRouterModelPortConfig(env, 'vendor/model:free');
+  assert.equal(config.provider, 'openrouter');
+  assert.equal(config.model, 'vendor/model:free');
+  assert.equal(config.apiKey, 'openrouter-chat-key');
+  assert.equal(config.baseUrl, OPENROUTER_CHAT_BASE_URL);
+  assert.equal(config.maxScopeCalls, 32);
+  assert.throws(() => readOpenRouterModelPortConfig({
+    RELAY_MODEL_API_KEY: 'must-not-be-reused',
+    RELAY_MODEL_CATALOG_API_KEY: 'also-not-chat',
+  }, 'vendor/model:free'), ConfigError);
 });

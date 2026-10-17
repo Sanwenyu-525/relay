@@ -29,6 +29,11 @@ const openResultSchema = Type.Object({
   write_readiness: Type.Object({
     status: Type.String(),
     detail: Type.String(),
+    // 可选：已提交回执在这组字段存在之前写入，重放时必须照样返回。
+    policy_decision: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    policy_id: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    policy_revision: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    policy_target_prefix: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   }, strict),
 }, strict);
 

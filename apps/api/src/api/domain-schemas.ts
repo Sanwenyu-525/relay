@@ -494,19 +494,23 @@ export const DelegateTaskBodySchema = Type.Object(
         GIT_READ: Type.Optional(UuidSchema),
         FILE_WRITE: Type.Optional(UuidSchema),
         CLI_RUN: Type.Optional(UuidSchema),
+        COMPUTER_READ: Type.Optional(UuidSchema),
+        COMPUTER_INPUT: Type.Optional(UuidSchema),
       }, strict),
       allowed_tools: Type.Array(Type.String({ minLength: 1, maxLength: 64 }),
         { minItems: 1, maxItems: 32 }),
       max_rounds: Type.Integer({ minimum: 1, maximum: 12 }),
       max_tool_calls: Type.Integer({ minimum: 1, maximum: 48 }),
     }, strict)),
-    // 本次任务范围授权。只接受普通写入与已配置检查：删除与 Git 写入永远单独确认。
-    // 授权只能收窄 tool_loop_action 已冻结的受管资源与连接，不能扩大。
+    // 本次任务范围授权。只接受普通写入、已配置检查与 Computer 输入类：删除与 Git
+    // 写入永远单独确认。授权只能收窄 tool_loop_action 已冻结的受管资源与连接，不能扩大。
+    // 0092: COMPUTER_INPUT 是一个动作类（点击/输入/快捷键等八种逻辑动作合成一类），
+    // 与 CLI_RUN 同纪律：授权回答「本次任务是否可以操作电脑」。
     scope_grant: Type.Optional(Type.Object({
       resource_id: UuidSchema,
       allowed_actions: Type.Array(
         Type.Union([Type.Literal('WRITE_FILE'), Type.Literal('APPLY_CHANGESET'),
-          Type.Literal('CLI_RUN')]),
+          Type.Literal('CLI_RUN'), Type.Literal('COMPUTER_INPUT')]),
         { minItems: 1, maxItems: 4 }),
       checks: Type.Array(Type.Object({
         id: Type.String({ minLength: 1, maxLength: 64 }),
@@ -674,6 +678,15 @@ export const RunSchema = Type.Object(
 const RunToolCallStatusSchema = Type.Union(['REQUESTED', 'PREPARED', 'WAITING_APPROVAL',
   'SETTLED', 'REJECTED', 'ABANDONED'].map((status) => Type.Literal(status)));
 
+const RunToolCallFileChangeSchema = Type.Object({
+  path: Type.String(),
+  action: Type.Union([Type.Literal('CREATE'), Type.Literal('MODIFY'), Type.Literal('DELETE')]),
+  status: Type.Union(['APPLIED', 'CONFLICT', 'FAILED', 'UNKNOWN'].map((status) => Type.Literal(status))),
+  added: Type.Integer({ minimum: -1 }),
+  removed: Type.Integer({ minimum: -1 }),
+  unavailable_reason: Type.Union([Type.String(), Type.Null()]),
+}, strict);
+
 const RunToolCallSchema = Type.Object(
   {
     id: UuidSchema,
@@ -690,6 +703,7 @@ const RunToolCallSchema = Type.Object(
     adapted_path: Type.Union([Type.String(), Type.Null()]),
     created_at: TimestampSchema,
     updated_at: TimestampSchema,
+    file_changes: Type.Array(RunToolCallFileChangeSchema),
   },
   strict,
 );
@@ -703,6 +717,33 @@ export const RunToolCallsSchema = Type.Object(
       round: Type.Integer({ minimum: 0 }),
       model_call_id: UuidSchema,
       calls: Type.Array(RunToolCallSchema),
+    }, strict)),
+  },
+  strict,
+);
+
+/**
+ * 生成中工具预览（工作台 §34.4）。`added`/`removed` 为 -1 表示待核对；
+ * `revision` 全局单调，旧响应不能覆盖新值。
+ */
+export const RunToolCallPreviewsSchema = Type.Object(
+  {
+    run_id: UuidSchema,
+    previews: Type.Array(Type.Object({
+      model_call_id: UuidSchema,
+      ordinal: Type.Integer({ minimum: 0 }),
+      tool_name: Type.String(),
+      revision: Type.String({ pattern: '^[0-9]+$' }),
+      truncated: Type.Boolean(),
+      updated_at: TimestampSchema,
+      files: Type.Array(Type.Object({
+        path: Type.String(),
+        action: Type.Union(['CREATE', 'MODIFY', 'DELETE', 'UNKNOWN']
+          .map((action) => Type.Literal(action))),
+        added: Type.Integer({ minimum: -1 }),
+        removed: Type.Integer({ minimum: -1 }),
+        target_complete: Type.Boolean(),
+      }, strict)),
     }, strict)),
   },
   strict,
@@ -1139,3 +1180,71 @@ export const ProjectStateSchema = Type.Object(
   },
   strict,
 );
+
+// 会话局部与总 diff（工作台 §34）的只读投影。总数只反映已落盘内容，预览不混进来。
+const ConversationFileDiffSchema = Type.Object({
+  path: Type.String(),
+  action: Type.Union([
+    Type.Literal('CREATE'), Type.Literal('MODIFY'), Type.Literal('DELETE'), Type.Literal('SAME'),
+  ]),
+  added: Type.Integer(),
+  removed: Type.Integer(),
+  unavailable_reason: Type.Union([Type.String(), Type.Null()]),
+}, strict);
+
+export const AvailableConversationDiffSchema = Type.Object({
+  available: Type.Literal(true),
+  baseline_captured_at: Type.String(),
+  baseline_revision: DecimalSchema,
+  root_path: Type.String(),
+  resource_id: Type.String(),
+  incomplete: Type.Boolean(),
+  total_files: Type.Integer(),
+  total_added: Type.Integer(),
+  total_removed: Type.Integer(),
+  files: Type.Array(ConversationFileDiffSchema),
+}, strict);
+
+export const UnavailableConversationDiffSchema = Type.Object({
+  available: Type.Literal(false),
+  reason: Type.Union([
+    Type.Literal('NO_RESOURCE'), Type.Literal('NO_BASELINE'),
+    Type.Literal('ROOT_NOT_GIT'), Type.Literal('RESOURCE_UNAVAILABLE'),
+  ]),
+}, strict);
+
+export const ConversationDiffSchema = Type.Union([
+  AvailableConversationDiffSchema, UnavailableConversationDiffSchema,
+]);
+
+/**
+ * 展开阅读的单文件正文（工作台 §34.2）。行数与总数同源；`rows` 为 null 时看
+ * `rows_unavailable_reason`（不可统计或超出对齐上限），不编造正文。
+ */
+export const ConversationDiffFileSchema = Type.Union([
+  Type.Object({
+    available: Type.Literal(true),
+    path: Type.String(),
+    action: Type.Union([
+      Type.Literal('CREATE'), Type.Literal('MODIFY'), Type.Literal('DELETE'), Type.Literal('SAME'),
+    ]),
+    added: Type.Integer(),
+    removed: Type.Integer(),
+    unavailable_reason: Type.Union([Type.String(), Type.Null()]),
+    rows: Type.Union([Type.Array(Type.Object({
+      kind: Type.Union([Type.Literal('CONTEXT'), Type.Literal('ADD'), Type.Literal('REMOVE')]),
+      old_line: Type.Union([Type.Integer(), Type.Null()]),
+      new_line: Type.Union([Type.Integer(), Type.Null()]),
+      text: Type.String(),
+    }, strict)), Type.Null()]),
+    rows_truncated: Type.Boolean(),
+    rows_unavailable_reason: Type.Union([Type.String(), Type.Null()]),
+  }, strict),
+  Type.Object({
+    available: Type.Literal(false),
+    reason: Type.Union([
+      Type.Literal('NO_RESOURCE'), Type.Literal('NO_BASELINE'), Type.Literal('ROOT_NOT_GIT'),
+      Type.Literal('RESOURCE_UNAVAILABLE'), Type.Literal('PATH_NOT_FOUND'),
+    ]),
+  }, strict),
+]);

@@ -79,10 +79,15 @@ export async function linkProjectGoal(
         });
       }
 
-      const goal = await repositories.projects.readGoal(goalId);
+      // Lock order is Project -> Goal (FOR SHARE), matching Goal archive's
+      // Goal-only lock and avoiding a reverse Project lock from that command.
+      const goal = await repositories.projects.lockGoal(goalId);
 
       if (goal === undefined || goal.workspace_id !== input.workspaceId) {
         throw resourceNotFound('Goal');
+      }
+      if (goal.status !== 'ACTIVE') {
+        throw invalidTransition('已归档的目标不能关联到项目。', { goalId });
       }
 
       const existing = await repositories.projects.findProjectGoalLink(project.id, goalId);

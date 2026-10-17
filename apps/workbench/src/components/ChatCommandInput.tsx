@@ -1,11 +1,27 @@
-import { useEffect, useId, useRef, useState, type Ref, type TextareaHTMLAttributes } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type Ref, type TextareaHTMLAttributes } from "react";
 import type { RelayApiClient, RelayConversationMode } from "../api/relayClient";
 import type { RelayChatCommand } from "../api/resources/chatControls";
 import "./ChatCommandInput.css";
 
+/**
+ * 命令的作用范围与当前可用状态。输入框内联菜单与「+」二级菜单共用同一条口径：
+ * 两处各写一份会让命令可用性悄悄漂移，所以这里导出给二级菜单复用。
+ */
+export function chatCommandScope(entry: RelayChatCommand): string {
+  if (entry.kind === "METHOD") return entry.methodId === "fault-diagnosis" ? "当前任务" : "当前改动及相关影响";
+  return entry.systemId === "undo" ? "具体业务调整" : "当前会话";
+}
+
+export function chatCommandStatus(entry: RelayChatCommand, hasSession: boolean): string {
+  if (entry.systemId === "compact") return "待接入";
+  if (entry.kind === "SYSTEM" && !hasSession) return "需已有会话";
+  if (entry.systemId === "undo") return "查看具体调整的撤回入口";
+  return "可用";
+}
+
 /** 菜单仅消费服务端登记并编辑草稿；发送、身份与动作准入由原会话 Owner 处理。 */
 export default function ChatCommandInput({ client, mode, hasSession, value, onValueChange, onSelectCommand, ref,
-  onKeyDown, onFocus, onBlur, disabled, ...props }: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>,
+  onKeyDown, onFocus, onBlur, onCompositionChange, disabled, ...props }: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>,
     "value" | "onChange"> & {
     client: RelayApiClient | null;
     mode: RelayConversationMode;
@@ -13,6 +29,11 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
     value: string;
     onValueChange: (value: string) => void;
     onSelectCommand?: (entry: RelayChatCommand) => void;
+    /**
+     * 中文组词状态。草稿辅助（工作台 §30）据此保证「组词期间零请求」；
+     * 输入器自己已经用它挡斜杠菜单，这里只把同一事实报给调用方，不新建第二套判定。
+     */
+    onCompositionChange?: (composing: boolean) => void;
     ref?: Ref<HTMLTextAreaElement>;
   }) {
   const menuId = useId();
@@ -24,6 +45,28 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
   const [retry, setRetry] = useState(0);
   const [catalog, setCatalog] = useState<{ client: RelayApiClient;
     items: readonly RelayChatCommand[] | null; error: string | null } | null>(null);
+  // 输入框随内容自增高：先归零再取 scrollHeight，交给 CSS max-height(40dvh) 封顶、超出后框内滚动。
+  // jsdom 下 scrollHeight=0，加保护避免误设 0px 把框压没。
+  const autoGrow = () => {
+    const el = inputRef.current; if (!el) return;
+    el.style.height = "auto";
+    const next = el.scrollHeight;
+    if (next > 0) el.style.height = `${next}px`;
+  };
+  useLayoutEffect(autoGrow, [value]);
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let lastWidth = el.getBoundingClientRect().width;
+    // 只在宽度变化时重算：内容重新折行会改变所需高度；忽略我们自身改高度触发的回调，避免抖动。
+    const observer = new ResizeObserver(([entry]) => {
+      const width = entry.contentRect.width;
+      if (width === lastWidth) return;
+      lastWidth = width; autoGrow();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   // 只在行首命令 token 中展开，参数、文件路径与正文里的 / 都不抢输入。
   const token = /^\s*\/([^\s/]*)$/u.exec(value)?.[1]?.toLowerCase() ?? null;
   const open = focused && !disabled && !composing && token !== null && dismissed !== value;
@@ -52,16 +95,8 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
     setDismissed(next); onValueChange(next); onSelectCommand?.(entry);
     inputRef.current?.focus();
   }
-  function scope(entry: RelayChatCommand): string {
-    if (entry.kind === "METHOD") return entry.methodId === "fault-diagnosis" ? "当前任务" : "当前改动及相关影响";
-    return entry.systemId === "undo" ? "具体业务调整" : "当前会话";
-  }
-  function status(entry: RelayChatCommand): string {
-    if (entry.systemId === "model" || entry.systemId === "compact") return "待接入";
-    if (entry.kind === "SYSTEM" && !hasSession) return "需已有会话";
-    if (entry.systemId === "undo") return "查看具体调整的撤回入口";
-    return "可用";
-  }
+  function scope(entry: RelayChatCommand): string { return chatCommandScope(entry); }
+  function status(entry: RelayChatCommand): string { return chatCommandStatus(entry, hasSession); }
   return <div className="chat-command-input" onBlur={(event) => {
     if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
   }}>
@@ -97,7 +132,8 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
         if (!event.currentTarget.parentElement?.contains(event.relatedTarget)) setFocused(false);
         onBlur?.(event);
       }}
-      onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)}
+      onCompositionStart={() => { setComposing(true); onCompositionChange?.(true); }}
+      onCompositionEnd={() => { setComposing(false); onCompositionChange?.(false); }}
       onKeyDown={(event) => {
         if (composing || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
         if (open && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {

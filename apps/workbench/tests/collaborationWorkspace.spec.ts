@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { DomWrapper, dialogText, flush, folderStripName, mountWorkbench } from "./mountApp";
+import { DomWrapper, dialogText, flush, folderStripName, mountWorkbench, openSessionSwitcher, switchToolbarSession, toolbarSessionTitle } from "./mountApp";
 import { COLLABORATION_LAYOUT_STORAGE_KEY } from "../src/lib/collaborationLayoutPreferences";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -185,6 +185,24 @@ describe("协作工作区主路径", () => {
     } finally { view.unmount(); }
   });
 
+  it("任务作用域的空会话与全局新对话同一欢迎空态，快捷卡预填讨论草稿", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    vi.stubGlobal("fetch", router({}));
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      // 「还没有消息。」只留给首条在途或读取被挡的状态：空会话首屏与 ?new= 入口一致。
+      expect(view.wrapper.find('[data-testid="assist-empty-welcome"]').exists()).toBe(true);
+      expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("有什么想一起完成的？");
+      expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).not.toContain("还没有消息");
+      // 说明句按归属收敛：任务作用域已有所属，不再宣称「不需要先创建项目、任务」。
+      expect(view.wrapper.get('[data-testid="assist-empty-welcome"] .agent-chat-empty-lede').text())
+        .toBe("围绕当前任务直接讨论，或描述新的目标与要求。");
+      await view.wrapper.get('[data-testid="assist-empty-suggest-requirement"]').trigger("click");
+      expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
+        .toContain("帮我梳理这个需求：");
+    } finally { view.unmount(); }
+  });
+
   it.each(["assist", "review", "control"] as const)("模式切换保护%s响应丢失的原命令身份", async (owner) => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const read = router({}); let commandId = ""; let posts = 0; const receipts: string[] = [];
@@ -274,17 +292,18 @@ describe("协作工作区主路径", () => {
     vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench(`/agent?work=${taskId}`);
     try {
-      expect(view.wrapper.get('[data-testid="assist-session-select"]').findAll("option")).toHaveLength(3);
+      // 同一 Task 的两条讨论都列在顶栏「切换讨论」浮层里（左翼只显示会话名）。
+      expect(await openSessionSwitcher()).toHaveLength(2);
       expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("原讨论的指标来源");
       await view.wrapper.get('[data-testid="assist-draft"]').setValue("尚未发送的计算要求");
-      await view.wrapper.get('[data-testid="assist-session-select"]').setValue(secondSessionId);
+      await switchToolbarSession(secondSessionId);
       expect(dialogText()).toContain("未发送的内容");
       expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("原讨论的指标来源");
       expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value).toBe("尚未发送的计算要求");
       await new DomWrapper(document.querySelector('[data-testid="collab-discard-draft"]')).trigger("click");
       await flush();
       expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("第二讨论的方法对照");
-      await view.wrapper.get('[data-testid="assist-session-select"]').setValue(sessionId); await flush();
+      await switchToolbarSession(sessionId); await flush();
       expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("原讨论的指标来源");
       expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
     } finally { view.unmount(); }
@@ -326,7 +345,7 @@ describe("协作工作区主路径", () => {
       await view.wrapper.get(`[data-testid="collab-recovery-${oldCommandId}"]`).trigger("click"); await flush();
       expect(view.wrapper.get('[data-testid="assist-draft"]').element).toBe(originalInput);
       expect((originalInput as HTMLTextAreaElement).value).toBe("当前会话需要保留的讨论");
-      expect((view.wrapper.get('[data-testid="assist-session-select"]').element as HTMLSelectElement).value).toBe(sessionId);
+      expect(toolbarSessionTitle()).toBe("讨论1");
       expect(view.router.currentRoute.value.query.work).toBe(taskId);
       if (pending) {
         expect(dialogText()).toContain(currentCommandId);
@@ -434,7 +453,13 @@ describe("协作工作区主路径", () => {
   it.each([["PROPOSE_CANDIDATE", "请求文档候选"], ["PROPOSE_TASK", "请求任务提案"]])(
     "%s最后按钮与冻结载荷一致，响应丢失保留意图和原命令", async (intent, label) => {
       activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
-      const posts: Record<string, unknown>[] = []; const read = router({});
+      const posts: Record<string, unknown>[] = [];
+      // 同一 Task 放两条讨论，顶栏右翼的「切换讨论」才会挂出来——下面要核对它在途时的禁用态。
+      const read = router({ sessions: () => response({ items: [
+        { id: sessionId, workspace_id: workspaceId, project_id: projectId, task_id: taskId,
+          title: "关于确定实验评价指标", status: "ACTIVE", revision: "1", updated_at: "2026-09-29T03:40:00Z" },
+        { id: "99999999-9999-4999-8999-999999999999", workspace_id: workspaceId, project_id: projectId,
+          task_id: taskId, title: "评价方法第二讨论", status: "ACTIVE", revision: "1", updated_at: "2026-09-29T03:41:00Z" }] }) });
       vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
         if (init?.method === "POST") { posts.push(JSON.parse(String(init.body)) as Record<string, unknown>); throw new TypeError("response lost"); }
         return read(input, init);
@@ -451,7 +476,8 @@ describe("协作工作区主路径", () => {
         expect(posts[0]).toMatchObject({ intent, content: "请补充计算口径", source_refs: [] });
         expect(view.wrapper.get(".agent-chat-composer [data-testid='assist-send']")
           .attributes("aria-label")).toBe(label);
-        expect(view.wrapper.get('[data-testid="assist-session-select"]').attributes("disabled")).toBeDefined();
+        // 在途发送期间顶栏的切换键一起禁用：同一条「不许中途换讨论」的承诺，不再由下拉承载。
+        expect(view.wrapper.get('[data-testid="collab-session-switcher"]').attributes("disabled")).toBeDefined();
         await view.wrapper.get(".assist-pending").findAll("button")[1]!.trigger("click"); await flush();
         expect(posts).toHaveLength(2); expect(posts[1]).toEqual(posts[0]);
       } finally { view.unmount(); }
@@ -612,15 +638,15 @@ describe("协作工作区主路径", () => {
     { name: "有真实读数时给出命中率与占用圆环", maxCallTokens: 1_000,
       usage: { input_tokens: 800, output_tokens: 200, cache_read_tokens: 600, cache_creation_tokens: 100 },
       hit: "缓存命中 75%", state: "high", aria: "80%" },
-    { name: "Provider 未上报缓存时说明未采集，不显示成 0%", maxCallTokens: 1_000,
+    { name: "Provider 未上报缓存时不显示命中率，也不画成 0%", maxCallTokens: 1_000,
       usage: { input_tokens: 500, output_tokens: 20, cache_read_tokens: null, cache_creation_tokens: null },
-      hit: "缓存未采集", state: "normal", aria: "50%" },
+      hit: null, state: "normal", aria: "50%" },
     { name: "读不到单次上限时不画占用弧，说明不可算", maxCallTokens: null,
       usage: { input_tokens: 500, output_tokens: 20, cache_read_tokens: 250, cache_creation_tokens: null },
       hit: "缓存命中 50%", state: "unknown", aria: "占用不可算" },
-    { name: "还没有模型调用时如实说明", maxCallTokens: 1_000,
+    { name: "还没有模型调用时圆环如实说明", maxCallTokens: 1_000,
       usage: { input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_creation_tokens: null },
-      hit: "缓存未采集", state: "unknown", aria: "尚无模型调用" },
+      hit: null, state: "unknown", aria: "尚无模型调用" },
     // 996/1000 进位后是 100%，但 4 个 token 确实未命中。显示 100% 是把未命中说成完美命中。
     { name: "部分命中不进位成 100%", maxCallTokens: 1_000,
       usage: { input_tokens: 1_000, output_tokens: 200, cache_read_tokens: 996, cache_creation_tokens: null },
@@ -657,9 +683,11 @@ describe("协作工作区主路径", () => {
         // 资料、选项、命中率、圆环与发送键同属圆角卡内的底栏。
         const card = view.wrapper.get(".agent-chat-composer");
         expect(card.find('[data-testid="assist-open-sources"]').exists()).toBe(true);
-        expect(card.find('[data-testid="assist-cache-hit"]').exists()).toBe(true);
+        expect(card.find('[data-testid="assist-cache-hit"]').exists()).toBe(scenario.hit !== null);
         expect(card.find('[data-testid="assist-context-meter"]').exists()).toBe(true);
-        expect(view.wrapper.get('[data-testid="assist-cache-hit"]').text()).toBe(scenario.hit);
+        if (scenario.hit !== null) {
+          expect(view.wrapper.get('[data-testid="assist-cache-hit"]').text()).toBe(scenario.hit);
+        }
         const meter = view.wrapper.get('[data-testid="assist-context-meter"]');
         expect(meter.attributes("data-state")).toBe(scenario.state);
         expect(meter.attributes("aria-label")).toContain(scenario.aria);
@@ -761,8 +789,7 @@ describe("协作工作区主路径", () => {
       await press({}); await flush();
       // 消息本身 1 条 + 状态维护解释 1 条；DISCUSS 静默所以没有更多 POST。
       expect(posts).toHaveLength(1); expect(posts[0]).toMatchObject({ content: "输入法完成后的内容", intent: "DISCUSS", source_refs: [] });
-      expect(postPaths).toHaveLength(1);
-      expect(postPaths[0]).toBe(`${prefix}/assist-sessions/${sessionId}/state-maintenance-requests`);
+      expect(postPaths).toHaveLength(0);
     } finally { view.unmount(); }
   });
 
@@ -839,7 +866,7 @@ describe("协作工作区主路径", () => {
       expect(posts[0]).toMatchObject({ content: "补充实验指标来源", intent: "DISCUSS", source_refs: [] });
       expect((draft.element as HTMLTextAreaElement).value).toBe("");
       // 新增的状态维护解释恰好一条，且不因 IME/Shift 按键提前触发。
-      expect(postPaths).toEqual([`${prefix}/assist-sessions/${sessionId}/state-maintenance-requests`]);
+      expect(postPaths).toEqual([]);
     } finally { view.unmount(); }
   });
 
@@ -941,9 +968,9 @@ describe("协作工作区主路径", () => {
       expect(document.querySelector('[data-testid="collab-discard-draft"]')).toBeNull();
       expect((view.wrapper.get('[data-testid="collab-review-select"]').element as HTMLSelectElement).value).toBe("0");
       await new DomWrapper(document.querySelector('[role="dialog"] button')).trigger("click");
-      await view.wrapper.get('[data-testid="assist-session-select"]').setValue(secondSessionId); await flush();
+      await switchToolbarSession(secondSessionId); await flush();
       expect(dialogText()).toContain(commandId);
-      expect((view.wrapper.get('[data-testid="assist-session-select"]').element as HTMLSelectElement).value).toBe(sessionId);
+      expect(toolbarSessionTitle()).toBe("讨论1");
       await new DomWrapper(document.querySelector('[role="dialog"] button')).trigger("click");
       order = 1;
       await view.wrapper.get('[data-testid="run-refresh"]').trigger("click"); await flush();
@@ -1135,7 +1162,7 @@ describe("协作工作区主路径", () => {
     await view.wrapper.get('[data-testid="collab-narrow-DISCUSSION"]').trigger("click");
     expect(view.wrapper.get(".collab-columns").attributes("data-narrow-side")).toBe("closed");
     expect(view.wrapper.get('[data-testid="devtools-panel"]').element).toBe(toolsOwner);
-    expect(view.wrapper.get(".collab-columns").attributes("data-layout-mode")).toBe("split");
+    expect(view.wrapper.get(".collab-columns").attributes("data-layout-mode")).toBe("chat");
     expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
       .toBe("保留这段未发送的讨论");
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
@@ -1170,7 +1197,7 @@ describe("协作工作区主路径", () => {
     try {
       await view.wrapper.get('button[aria-label="打开导航"]').trigger("click"); await flush();
       const drawer = new DomWrapper(document.querySelector('[role="dialog"][aria-label="导航"]'));
-      expect(drawer.get('[data-testid="recent-work"] [title="全部任务与会话 · 按最近变更排序"]').exists()).toBe(true);
+      expect(drawer.get('[data-testid="recent-work"] [data-testid="recent-work-search"]').exists()).toBe(true);
       await drawer.get(`[data-testid="recent-work-${taskId}"]`).trigger("click"); await flush();
       expect(view.router.currentRoute.value).toMatchObject({ path: "/agent", query: { work: taskId } });
       expect(document.querySelector('[role="dialog"][aria-label="导航"]')).toBeNull();
@@ -1179,17 +1206,20 @@ describe("协作工作区主路径", () => {
   });
 
   it("全局近期工作重读失权后隐藏旧任务，不将读取错误说成写入待核对", async () => {
-    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const connection = { baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" };
+    activateRelayConnection(connection);
     let readable = true;
     const fetchMock = router({ workspaceTasks: () => readable ? response({ items: [task()], next_cursor: null })
       : response({ code: "RESOURCE_NOT_FOUND", detail: "近期工作不可读" }, 403) });
     vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench("/projects");
     try {
-      const rail = view.wrapper.get('[data-testid="recent-work"]');
-      expect(rail.find(`[data-testid="recent-work-${taskId}"]`).exists()).toBe(true);
+      const readRail = () => new DomWrapper(document.querySelector('[data-testid="recent-work"]'));
+      expect(readRail().find(`[data-testid="recent-work-${taskId}"]`).exists()).toBe(true);
       readable = false;
-      await rail.get('[data-testid="recent-work-refresh"]').trigger("click"); await flush();
+      // 左栏不再有独立刷新按钮；重读发生在重新连接（connection.epoch 变化会重挂载 RecentWorkRail）。
+      activateRelayConnection(connection); await flush();
+      const rail = readRail();
       expect(rail.find(`[data-testid="recent-work-${taskId}"]`).exists()).toBe(false);
       expect(rail.get('[data-testid="recent-work-error"]').text()).toContain("近期工作不可读");
       expect(rail.text()).not.toContain("命令结果待核对");
@@ -1219,8 +1249,9 @@ describe("协作工作区主路径", () => {
     expect(view.wrapper.get('[data-testid="assist-first-draft"]').exists()).toBe(true);
     expect(view.wrapper.get('[data-testid="collab-unassigned-execution-hint"]').exists()).toBe(true);
     expect(view.wrapper.get('[data-testid="recent-work"]').text()).toContain("还没有任务");
-    // 范围与排序常驻可见，避免用户把会话列表误当作全部工作。
-    expect(view.wrapper.get('[data-testid="recent-work"] [title="全部任务与会话 · 按最近变更排序"]').exists()).toBe(true);
+    // 栏头的标题/计数已按需求移除；范围改由搜索框占位文案说明「只覆盖已加载项」，避免把会话列表误当作全部工作。
+    expect(view.wrapper.get('[data-testid="recent-work"] [data-testid="recent-work-search"]')
+      .attributes("placeholder")).toContain("已加载");
     expect(view.wrapper.find('[data-testid="assist-draft"]').exists()).toBe(false);
     const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
     expect(posts).toHaveLength(0);
@@ -1239,12 +1270,9 @@ describe("协作工作区主路径", () => {
     await flush(60);
     expect(view.wrapper.find('[data-testid="collab-goal"]').exists()).toBe(false);
 
-    // 「接续已有任务」的选择器已从消息区顶部的折叠块迁到左栏就地展开区（协作页 §3.1）。
-    await view.wrapper.get('[data-testid="recent-work-find-more"]').trigger("click");
-    await flush(60);
-    await view.wrapper.get('[data-testid="collab-target-select"]').setValue(`task:${taskId}`);
-    expect(view.wrapper.get('[data-testid="collab-target-open"]').attributes("disabled")).toBeUndefined();
-    await view.wrapper.get('[data-testid="collab-target-open"]').trigger("click");
+    // 「接续已有任务」的入口已收敛为左栏任务行本身：栏底「查找更多任务 / 会话」面板
+    // 已于 2026-10-16 第四轮按用户决定删除（读取范围与左栏相同、任务仅第一页）。
+    await view.wrapper.get(`[data-testid="recent-work-${taskId}"]`).trigger("click");
     await flush(60);
 
     const goal = view.wrapper.get('[data-testid="collab-goal"]').text();

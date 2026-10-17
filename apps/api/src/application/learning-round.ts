@@ -10,7 +10,7 @@ import {
 import { declaredToolSpecs, type InternalToolName } from '../workflow/tool-catalog.js';
 import { selectRuntimeSystemPrompt } from '../workflow/prompts/index.js';
 import type { AssistModelPort, AssistResult, ModelToolTurn, ModelToolTurnResult,
-  ModelUsage } from '../workflow/fake-model-port.js';
+  ModelUsage, AssistRequest } from '../workflow/fake-model-port.js';
 import { recheckAssistSources, loadAssistSourceContent, type FrozenSourceRef }
   from './assist-runner.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
@@ -64,6 +64,8 @@ export interface LearningRoundInput {
   /** 当前连接可用的工具名；每轮重新计算，不从任何快照读。 */
   readonly availableTools: readonly InternalToolName[];
   readonly modelPort: AssistModelPort;
+  /** Optional per-message model router; owns a separate ledger row for every candidate call. */
+  readonly invokeAssist?: (request: AssistRequest) => Promise<AssistResult>;
   readonly signal: AbortSignal;
   readonly storage: ManagedContentStore;
   readonly learningState: JsonObject;
@@ -110,21 +112,25 @@ Promise<LearningRoundOutcome> {
     let response: AssistResult;
     // 逐次计量：begin 行在调用 Provider 之前提交，进程丢失留下 STARTED 而不是伪造零用量。
     try {
-      const recorded = await recordModelInvocation(db, {
-        origin: { workspaceId: session.workspace_id, kind: 'ASSIST',
-          assistMessageId: message.id },
-        identity: input.modelPort.identity,
-        signal: input.signal,
-        invoke: async () => input.modelPort.assist({ intent: 'DISCUSS', system, turns,
+      const request: AssistRequest = { intent: 'DISCUSS', system, turns,
           tools: declared, toolTurns, signal: input.signal,
-          learning: { state: input.learningState, material: input.material } }),
-        settle: (result) => result.kind === 'CANCELLED'
-          ? { status: 'CANCELLED', providerRequestId: result.providerRequestId ?? null,
-            ...(result.usage === undefined ? {} : { usage: result.usage }) }
-          : { status: 'COMPLETED', providerRequestId: result.providerRequestId,
-            usage: result.usage },
-      });
-      response = recorded.result;
+          learning: { state: input.learningState, material: input.material } };
+      if (input.invokeAssist !== undefined) response = await input.invokeAssist(request);
+      else {
+        const recorded = await recordModelInvocation(db, {
+          origin: { workspaceId: session.workspace_id, kind: 'ASSIST',
+            assistMessageId: message.id },
+          identity: input.modelPort.identity,
+          signal: input.signal,
+          invoke: async () => input.modelPort.assist(request),
+          settle: (result) => result.kind === 'CANCELLED'
+            ? { status: 'CANCELLED', providerRequestId: result.providerRequestId ?? null,
+              ...(result.usage === undefined ? {} : { usage: result.usage }) }
+            : { status: 'COMPLETED', providerRequestId: result.providerRequestId,
+              usage: result.usage },
+        });
+        response = recorded.result;
+      }
     } catch {
       return { kind: 'FAILED', errorCode: 'MODEL_FAILED', usage, providerRequestIds };
     }

@@ -13,7 +13,7 @@ import { DEFAULT_MODEL_BASE_URL, parseModelBaseUrl } from './model-endpoint-poli
  */
 
 export interface ModelPortConfig {
-  readonly provider: 'openai-compatible';
+  readonly provider: 'openai-compatible' | 'openrouter';
   readonly model: string;
   readonly apiKey: string;
   readonly baseUrl: string | undefined;
@@ -35,6 +35,7 @@ const MIN_MAX_CALL_TOKENS = 1_024;
 const MAX_MAX_CALL_TOKENS = 262_144;
 const DEFAULT_MAX_SCOPE_CALLS = 32;
 const DEFAULT_MAX_SCOPE_TOKENS = 262_144;
+export const OPENROUTER_CHAT_BASE_URL = 'https://openrouter.ai/api/v1';
 
 export function readModelPortConfig(env: NodeJS.ProcessEnv): ModelPortConfig | undefined {
   const provider = env.RELAY_MODEL_PROVIDER;
@@ -75,6 +76,56 @@ export function readModelPortConfig(env: NodeJS.ProcessEnv): ModelPortConfig | u
     baseUrl: parsedBaseUrl, timeoutMs: timeoutMs!, maxOutputTokens: maxOutputTokens!,
     maxCallTokens: maxCallTokens!, maxScopeCalls: maxScopeCalls!,
     maxScopeTokens: maxScopeTokens! };
+}
+
+/**
+ * Resolve the independently configured OpenRouter chat credential for one exact directory model.
+ * This deliberately never consults RELAY_MODEL_API_KEY or the catalog-list credential.
+ */
+export function readOpenRouterModelPortConfig(env: NodeJS.ProcessEnv,
+  model: string): ModelPortConfig {
+  const apiKey = env.RELAY_OPENROUTER_API_KEY;
+  const issues: string[] = [];
+  if (apiKey === undefined || apiKey.trim() === '') {
+    issues.push('RELAY_OPENROUTER_API_KEY is required');
+  }
+  if (model.trim() === '' || model.length > 200) {
+    issues.push('OpenRouter model id must contain 1 to 200 characters');
+  }
+  const timeoutMs = readBoundedInteger(env.RELAY_MODEL_TIMEOUT_MS, DEFAULT_TIMEOUT_MS,
+    MIN_TIMEOUT_MS, MAX_TIMEOUT_MS, 'RELAY_MODEL_TIMEOUT_MS', issues);
+  const maxOutputTokens = readBoundedInteger(env.RELAY_MODEL_MAX_OUTPUT_TOKENS,
+    DEFAULT_MAX_OUTPUT_TOKENS, MIN_MAX_OUTPUT_TOKENS, MAX_MAX_OUTPUT_TOKENS,
+    'RELAY_MODEL_MAX_OUTPUT_TOKENS', issues);
+  const maxCallTokens = readBoundedInteger(env.RELAY_MODEL_MAX_CALL_TOKENS,
+    DEFAULT_MAX_CALL_TOKENS, MIN_MAX_CALL_TOKENS, MAX_MAX_CALL_TOKENS,
+    'RELAY_MODEL_MAX_CALL_TOKENS', issues);
+  const maxScopeCalls = readBoundedInteger(env.RELAY_MODEL_MAX_SCOPE_CALLS,
+    DEFAULT_MAX_SCOPE_CALLS, 1, 256, 'RELAY_MODEL_MAX_SCOPE_CALLS', issues);
+  const maxScopeTokens = readBoundedInteger(env.RELAY_MODEL_MAX_SCOPE_TOKENS,
+    DEFAULT_MAX_SCOPE_TOKENS, MIN_MAX_CALL_TOKENS, 2_000_000,
+    'RELAY_MODEL_MAX_SCOPE_TOKENS', issues);
+  if (maxCallTokens < maxOutputTokens) {
+    issues.push('RELAY_MODEL_MAX_CALL_TOKENS must cover RELAY_MODEL_MAX_OUTPUT_TOKENS');
+  }
+  if (maxScopeTokens < maxCallTokens) {
+    issues.push('RELAY_MODEL_MAX_SCOPE_TOKENS must cover RELAY_MODEL_MAX_CALL_TOKENS');
+  }
+  if (issues.length > 0) throw new ConfigError(issues);
+  return { provider: 'openrouter', model: model.trim(), apiKey: apiKey!.trim(),
+    baseUrl: OPENROUTER_CHAT_BASE_URL, timeoutMs: timeoutMs!,
+    maxOutputTokens: maxOutputTokens!, maxCallTokens: maxCallTokens!,
+    maxScopeCalls: maxScopeCalls!, maxScopeTokens: maxScopeTokens! };
+}
+
+/** Configuration projection only; never returns or logs credential material. */
+export function hasOpenRouterChatConfig(env: NodeJS.ProcessEnv): boolean {
+  try {
+    readOpenRouterModelPortConfig(env, 'relay-config-probe');
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** 启动校验：残缺的真实模型配置让 Worker 明确失败，而不是静默回退 Fake。 */

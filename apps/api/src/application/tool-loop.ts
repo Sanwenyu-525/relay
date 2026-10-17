@@ -7,6 +7,7 @@ import type { RunToolCallRow } from '../infrastructure/database-schema.js';
 import type { ModelToolCall, ModelToolSpec, ModelToolTurn } from '../workflow/fake-model-port.js';
 import { readToolLoopAction, type ToolLoopActionIntent } from '../workflow/execution-contract.js';
 import { declaredToolSpecs, readInternalTool, type InternalToolDefinition } from '../workflow/tool-catalog.js';
+import { COMPUTER_DESKTOP_TARGET } from '../computer/protocol.js';
 import { canonicalizeJson } from '../receipt/payload-hash.js';
 import { RunToolCallRepository } from '../run/run-tool-call-repository.js';
 import { createRepositories } from './unit-of-work.js';
@@ -84,7 +85,8 @@ export async function resolveToolLoopPlan(db: DbExecutor, runId: string,
  * 校验一次模型工具请求。
  *
  * 这不是通用 JSON Schema 校验器，只覆盖首批词表实际使用的子集：对象、字符串/整数/布尔
- * 属性、必填与禁止额外属性。半截参数、未知工具名与越界 limit 都在这里被拒，不落库。
+ * 属性、枚举、嵌套对象（坐标点）、必填与禁止额外属性。半截参数、未知工具名与越界 limit
+ * 都在这里被拒，不落库。
  */
 export function validateToolArguments(spec: ModelToolSpec, args: JsonObject): JsonObject {
   const schema = spec.parameters;
@@ -110,6 +112,13 @@ export function validateToolArguments(spec: ModelToolSpec, args: JsonObject): Js
       if (raw.length > 4096) {
         throw new ToolRequestRejected('TOOL_ARGUMENT_TOO_LARGE', `工具 ${spec.name} 的 ${key} 过长。`);
       }
+      const allowed = Array.isArray(property.enum)
+        ? property.enum.filter((value): value is string => typeof value === 'string')
+        : undefined;
+      if (allowed !== undefined && !allowed.includes(raw)) {
+        throw new ToolRequestRejected('TOOL_ARGUMENT_INVALID',
+          `工具 ${spec.name} 的 ${key} 只接受 ${allowed.join(' / ')}。`);
+      }
       normalized[key] = raw;
       continue;
     }
@@ -133,6 +142,53 @@ export function validateToolArguments(spec: ModelToolSpec, args: JsonObject): Js
       normalized[key] = raw;
       continue;
     }
+    if (declared === 'object') {
+      // 嵌套对象（如坐标点）：按声明的 properties 与 required 递归校验一层，
+      // 不引入完整 JSON Schema 求值器。
+      if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+        throw new ToolRequestRejected('TOOL_ARGUMENT_INVALID', `工具 ${spec.name} 的 ${key} 必须是对象。`);
+      }
+      const nested = raw as JsonObject;
+      const nestedProperties = asObject(property.properties) ?? {};
+      const nestedRequired = Array.isArray(property.required)
+        ? property.required.filter((name): name is string => typeof name === 'string') : [];
+      if (property.additionalProperties === false) {
+        for (const name of Object.keys(nested)) {
+          if (!Object.hasOwn(nestedProperties, name)) {
+            throw new ToolRequestRejected('TOOL_ARGUMENT_UNKNOWN',
+              `工具 ${spec.name} 的 ${key} 不接受字段 ${name}。`);
+          }
+        }
+      }
+      const normalizedNested: Record<string, JsonValue> = {};
+      for (const [name, value] of Object.entries(nested)) {
+        const nestedProperty = asObject(nestedProperties[name]);
+        if (nestedProperty?.type === 'integer') {
+          if (typeof value !== 'number' || !Number.isInteger(value)) {
+            throw new ToolRequestRejected('TOOL_ARGUMENT_INVALID',
+              `工具 ${spec.name} 的 ${key}.${name} 必须是整数。`);
+          }
+          normalizedNested[name] = value;
+          continue;
+        }
+        if (nestedProperty?.type === 'string') {
+          if (typeof value !== 'string') {
+            throw new ToolRequestRejected('TOOL_ARGUMENT_INVALID',
+              `工具 ${spec.name} 的 ${key}.${name} 必须是字符串。`);
+          }
+          normalizedNested[name] = value;
+          continue;
+        }
+      }
+      for (const name of nestedRequired) {
+        if (!Object.hasOwn(normalizedNested, name)) {
+          throw new ToolRequestRejected('TOOL_ARGUMENT_MISSING',
+            `工具 ${spec.name} 的 ${key} 缺少必填字段 ${name}。`);
+        }
+      }
+      normalized[key] = normalizedNested;
+      continue;
+    }
     if (declared === 'array') {
       // 数组本身只做形状检查：逐项语义由该工具自己的规范化函数判定（写入类工具的
       // 每项字段各不相同，塞进通用校验器只会让合法请求被当成缺失参数拒掉）。
@@ -145,6 +201,14 @@ export function validateToolArguments(spec: ModelToolSpec, args: JsonObject): Js
           if (typeof item !== 'object' || item === null || Array.isArray(item)) {
             throw new ToolRequestRejected('TOOL_ARGUMENT_INVALID',
               `工具 ${spec.name} 的 ${key} 每一项都必须是对象。`);
+          }
+        }
+      }
+      if (items?.type === 'string') {
+        for (const item of raw) {
+          if (typeof item !== 'string') {
+            throw new ToolRequestRejected('TOOL_ARGUMENT_INVALID',
+              `工具 ${spec.name} 的 ${key} 每一项都必须是字符串。`);
           }
         }
       }
@@ -388,8 +452,14 @@ export async function persistToolRound(db: DbExecutor, input: {
  */
 export function toolTargetFor(plan: ToolLoopPlan, definition: InternalToolDefinition,
   args: JsonObject): string {
+  if (definition.capability === 'COMPUTER_READ' || definition.capability === 'COMPUTER_INPUT') {
+    // Computer 动作没有受管根：目标是整台电脑的合成值，prepare 按同一常量归一切。
+    return COMPUTER_DESKTOP_TARGET;
+  }
   if (definition.capability === 'GIT_READ' || definition.capability === 'FILE_WRITE' ||
-      definition.capability === 'CLI_RUN') {
+      definition.capability === 'CLI_RUN' || definition.capability === 'GITHUB_READ') {
+    // 0103: GitHub 查询与 Git 只读同形——目标就是受管根本身，仓库身份由适配器在该目录
+    // 本地解析 remote 得到，不接受调用方指定的仓库名。
     return plan.canonicalRoot;
   }
   const relative = typeof args.relative_path === 'string' && args.relative_path !== ''
@@ -482,6 +552,41 @@ export function gatewayParamsFor(definition: InternalToolDefinition,
     // 模型只提供 check_id；真实程序与参数由冻结检查决定，这里不展开任何命令内容。
     return { check_id: args.check_id ?? '' };
   }
+  if (definition.actionType === 'COMPUTER_CLICK') {
+    return { x: args.x ?? 0, y: args.y ?? 0,
+      ...(typeof args.button === 'string' ? { button: args.button } : {}) };
+  }
+  if (definition.actionType === 'COMPUTER_DOUBLE_CLICK') {
+    return { x: args.x ?? 0, y: args.y ?? 0 };
+  }
+  if (definition.actionType === 'COMPUTER_SCROLL') {
+    return { ...(typeof args.delta_x === 'number' ? { delta_x: args.delta_x } : {}),
+      ...(typeof args.delta_y === 'number' ? { delta_y: args.delta_y } : {}) };
+  }
+  if (definition.actionType === 'COMPUTER_DRAG') {
+    return { start: args.start ?? {}, end: args.end ?? {},
+      ...(typeof args.duration_ms === 'number' ? { duration_ms: args.duration_ms } : {}) };
+  }
+  if (definition.actionType === 'COMPUTER_ACTIVATE_WINDOW') {
+    return { window_id: args.window_id ?? '' };
+  }
+  if (definition.actionType === 'COMPUTER_TYPE') {
+    return { text: args.text ?? '',
+      ...(typeof args.delay_ms === 'number' ? { delay_ms: args.delay_ms } : {}) };
+  }
+  if (definition.actionType === 'COMPUTER_KEYPRESS') {
+    return { key: args.key ?? '' };
+  }
+  if (definition.actionType === 'COMPUTER_HOTKEY') {
+    return { keys: Array.isArray(args.keys) ? args.keys : [] };
+  }
+  if (definition.actionType === 'COMPUTER_SCREENSHOT') {
+    return { ...(typeof args.target === 'string' ? { target: args.target } : {}),
+      ...(typeof args.window_id === 'string' ? { window_id: args.window_id } : {}) };
+  }
+  if (definition.actionType === 'COMPUTER_GET_WINDOWS') {
+    return {};
+  }
   if (definition.actionType === 'FIND_PATHS') {
     return { ...(typeof args.pattern === 'string' ? { pattern: args.pattern } : {}),
       ...(typeof args.relative_path === 'string' ? { relative_path: args.relative_path } : {}),
@@ -504,6 +609,16 @@ export function gatewayParamsFor(definition: InternalToolDefinition,
   }
   if (definition.actionType === 'GIT_LOG') {
     return { max_count: typeof args.max_count === 'number' ? args.max_count : 10 };
+  }
+  // 0103: GitHub 只读。逐动作白名单转发，与 Computer 同一纪律——模型多带的字段不会
+  // 变成 Gateway 参数，缺必填参数交给 prepare 以类型化校验拒掉。
+  if (definition.actionType === 'GITHUB_REPO_VIEW') return {};
+  if (definition.actionType === 'GITHUB_PR_VIEW') {
+    return Number.isInteger(args.number) ? { number: args.number as number } : {};
+  }
+  if (definition.actionType === 'GITHUB_PR_LIST' || definition.actionType === 'GITHUB_ISSUE_LIST') {
+    return { ...(typeof args.state === 'string' ? { state: args.state } : {}),
+      ...(typeof args.limit === 'number' ? { limit: args.limit } : {}) };
   }
   return {};
 }

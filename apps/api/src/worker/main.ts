@@ -18,6 +18,7 @@ import { ManagedContentStore } from '../storage/managed-content-store.js';
 import { runAssistGenerationTick } from '../application/assist-runner.js';
 import { runWebImportTick } from '../application/web-import-runner.js';
 import { runOneCommand } from './run-command.js';
+import { startBackgroundModelCatalogSync } from '../application/model-catalog-background-sync.js';
 
 const MIGRATIONS_DIRECTORY = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'migrations');
 // Worker has its own pool, independent of RELAY_DB_POOL_MAX (API only).
@@ -61,6 +62,7 @@ async function main(): Promise<void> {
   const database = new RelayDatabase({
     databaseUrl, databasePoolMax: WORKER_DATABASE_POOL_MAX, databaseConnectTimeoutMs: 5_000,
   }, () => controller.abort());
+  let stopCatalogRefresh: (() => Promise<void>) | undefined;
   try {
     const readiness = await database.checkReadiness(new SchemaReadinessChecker(MIGRATIONS_DIRECTORY));
     if (readiness.database !== 'up' || readiness.schema !== 'up') {
@@ -71,6 +73,18 @@ async function main(): Promise<void> {
     }
     process.stdout.write(`${JSON.stringify({ type: 'worker_ready', worker_id: workerId })}\n`);
     const storage = new ManagedContentStore(dataRoot);
+    const catalogRefresh = startBackgroundModelCatalogSync({ db: database.executor,
+      env: process.env, signal: controller.signal,
+      onResult: (result) => {
+        if (result.status === 'FAILED' || result.status === 'REJECTED') {
+          process.stderr.write(`${JSON.stringify({ type: 'worker_model_catalog_sync',
+            status: result.status, reason: result.reason })}\n`);
+        }
+      },
+      onError: () => process.stderr.write(`${JSON.stringify({ type: 'worker_model_catalog_sync',
+        status: 'FAILED', reason: 'UNEXPECTED' })}\n`),
+    });
+    stopCatalogRefresh = catalogRefresh.stop;
     const modelConfig = readModelPortConfig(process.env);
     const assistModelPort = modelConfig === undefined
       ? new FakeModelPort(fakeModelDelayMs)
@@ -170,6 +184,7 @@ async function main(): Promise<void> {
       }
     }
   } finally {
+    await stopCatalogRefresh?.();
     await database.close();
   }
 }

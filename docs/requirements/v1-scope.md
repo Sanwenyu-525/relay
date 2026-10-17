@@ -40,6 +40,7 @@
 | F22 | 完整 API、错误、前后端兼容与发布 | 全程/F | API / 测试 | P21 |
 | F23 | 毕业论文可复核实验协议（可选研究交付） | F | 研究协议 | P22 |
 | F24 | 第一方声明式扩展组合；四项首批 Skill、最小 Thesis/Development Pack、版本绑定与基础 Eval，复用现有闭环 | D | [扩展专题](../architecture/relay-skills.md) | P11、P12、P14、P15；依赖 P05–P08，P21 回归 |
+| F25 | 内置官方 GitHub Skill：随安装包分发、按需激活，首片只限 GitHub 只读查询；本地暂存/提交/推送复用 F19，GitHub 侧写动作另片 | E | [扩展专题第 10 节](../architecture/relay-skills.md#10-内置官方-skill-包) / [工具适配器](../architecture/tool-adapters.md) | 依赖 P09、P18、P19；具体 P 编号在切片协议冻结时确定 |
 
 编码任务编号为本包实施分解，不是完成标记。F23 是原聊天研究方向的可选落地，不要求把未经导师确认的题目当作产品上线条件。
 
@@ -60,6 +61,19 @@
 既有细化缺口：Milestone 在总纲/Onboarding 中有建议需求，但当前正式字段与写命令未闭合；蓝图暂只输出建议，不能当作 completed highlight 保存。已有项目类型变更也没有当前 API，不能借蓝图静默改类型。相关写能力须先补契约再落地，不把它们报告为已实现。
 
 同日扩展模型补充：用户要求按评审修改文档并补充必要约束。Pack、Recipe、Profile 是既有能力的组合/配置，不各建新运行系统。V1 两个领域 Pack 仅引用已交付成员，不把候选领域 Skill 全部纳入必交；基础 Eval 属于工程验收，不因 P22 可选而省略。完整分工和升级/恢复限制统一见[扩展模型](../architecture/relay-skills.md#8-可组合扩展模型)。
+
+### 内置 GitHub Skill 范围补充
+
+2026-10-17 用户决策：否决[后续路线](post-v1-roadmap.md#4-后续候选的处置)把 GitHub 作为可选开发分支后置的处置，要求 GitHub 内置 Skill **移入 V1 主线**，记为 F25。取舍、候选与被拒方案唯一归 [ADR-023](../decisions/ADR-023-builtin-github-skill.md)，Skill 的定义落点、启用与版本边界归[扩展专题第 10 节](../architecture/relay-skills.md#10-内置官方-skill-包)；本节只拥有范围边界。
+
+纳入的是产品交付范围，不是新的执行系统：
+
+* 首片只读——仓库信息、Issue 查看与搜索、PR 查看与 diff、CI/Actions 状态与失败日志、Release 查看。写入分两片：本地暂存/提交/推送复用 F19 的 `GIT_WRITE` 与其核对，GitHub 侧写动作（创建/更新 PR 与 Issue、评论）在核对协议冻结前不进入动作词表。
+* 后端为官方 `gh` CLI：只读走**新增的 `GITHUB_READ` 能力与专用只读 adapter**（依 [ADR-023 的实施前核对与偏离](../decisions/ADR-023-builtin-github-skill.md#实施前核对与偏离2026-10-17)，原「复用受信 CLI 通路、不新增 capability」经源码核实不成立）；本地提交/推送仍复用 F19 的 `GIT_WRITE`。不自研 GitHub MCP Server、不新增 GitHub 页面或配置表单。
+* 随安装包分发，最终用户不需要单独下载或安装 Skill；首版只检测系统 `gh` 并在缺失时如实降级，不自动安装。
+* Issue、PR 正文、评论与 CI 日志始终是外部数据，不因内置 Skill 获得规则或授权效力；Delegate 与 Skill 启用不授予任何权限。
+
+F25 不改变 A–E 既有出口与恢复正确性要求，不因为「GitHub 能查」就把「一句话创建 PR」记为已交付。2026-10-17 首片只读已实施到**开发自检**（`GITHUB_READ`、迁移 `0103`、专用 adapter、四个只读动作与真实 PG 集成反例，边界见[工具适配器 §4.1](../architecture/tool-adapters.md#41-github-只读查询01032026-10-17-开发自检)），但随包分发、官方包登记、运行时提示与真实已认证读取均未完成，**F25 整体未验收**；GitHub 侧写动作仍须先冻结核对协议。
 
 ## 协作形态探索补充
 

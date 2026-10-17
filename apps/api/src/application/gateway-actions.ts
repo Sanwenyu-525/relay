@@ -38,12 +38,19 @@ import {
   reconcileGitCommit, reconcileGitPush,
 } from '../git/git-adapter.js';
 import { executeCliCommand, isNormalCliFailure, reconcileCliExecution } from '../cli-worker/cli-adapter.js';
-import { evaluateScopeGrant, type FrozenCheck, type ScopeGrantDecision }
+import { evaluateScopeGrant, scopeGrantActionFor, type FrozenCheck, type ScopeGrantDecision }
   from './run-scope-grant.js';
 import { computeCheckTrustBasis, type CheckTrustBasis } from './check-trust-basis.js';
 import { approvalCheckMaterialTarget, verifyApprovalCheckMaterial } from './approval-check-material.js';
 import { getAdapterDescriptor } from '../gateway/adapter-metadata.js';
 import { readAdmission, requireNormalAdmission } from './maintenance-admission.js';
+import { COMPUTER_DESKTOP_TARGET } from '../computer/protocol.js';
+import { computerExecute, computerParamsForAction, planComputerActionForPrepare }
+  from '../computer/computer-adapter.js';
+import { describeComputerAction } from '../computer/action-labels.js';
+import { reportComputerControlActivity } from '../computer/control-state.js';
+import { githubExecute, githubParamsForAction, isGithubReadAction }
+  from '../github/github-adapter.js';
 
 /** Test-only narrowing of WEB_FETCH budgets (production dispatch passes none). */
 type DispatchWebFetchLimits = Partial<WebFetchLimits>;
@@ -93,7 +100,35 @@ export type GatewayActionType =
   | 'GIT_PUSH'
   | 'RUN_BUILD'
   | 'RUN_TEST'
-  | 'CLI_RUN';
+  | 'CLI_RUN'
+  /** 0092: Computer Plugin V1 的十个桌面级逻辑动作。 */
+  | 'COMPUTER_SCREENSHOT'
+  | 'COMPUTER_GET_WINDOWS'
+  | 'COMPUTER_ACTIVATE_WINDOW'
+  | 'COMPUTER_CLICK'
+  | 'COMPUTER_DOUBLE_CLICK'
+  | 'COMPUTER_SCROLL'
+  | 'COMPUTER_DRAG'
+  | 'COMPUTER_TYPE'
+  | 'COMPUTER_KEYPRESS'
+  | 'COMPUTER_HOTKEY'
+  /** 0103: F25 内置官方 GitHub Skill 首片的四个只读逻辑动作。 */
+  | 'GITHUB_REPO_VIEW'
+  | 'GITHUB_PR_LIST'
+  | 'GITHUB_PR_VIEW'
+  | 'GITHUB_ISSUE_LIST';
+
+/** Computer 的逻辑动作全集（Gateway 侧与工具词表各有一份引用，不重复第三份）。 */
+export const COMPUTER_ACTION_TYPES: readonly GatewayActionType[] = [
+  'COMPUTER_SCREENSHOT', 'COMPUTER_GET_WINDOWS', 'COMPUTER_ACTIVATE_WINDOW',
+  'COMPUTER_CLICK', 'COMPUTER_DOUBLE_CLICK', 'COMPUTER_SCROLL', 'COMPUTER_DRAG',
+  'COMPUTER_TYPE', 'COMPUTER_KEYPRESS', 'COMPUTER_HOTKEY',
+];
+
+export function isComputerAction(actionType: string): actionType is
+  Extract<GatewayActionType, `COMPUTER_${string}`> {
+  return actionType.startsWith('COMPUTER_');
+}
 
 export interface PrepareGatewayActionInput {
   readonly workspaceId: string;
@@ -137,9 +172,14 @@ const USER_ACTION_ALLOWED_ACTIONS: readonly GatewayActionType[] = ['GIT_STATUS',
  *
  * 0087: AGENT_SESSION_READ 用**同一份**词表。会话读取身份只说明「谁在读」，
  * 不说明「能读到什么」；两者能力边界相同，但来源身份不同、可在账本上分辨。
+ *
+ * 0103: GITHUB_READ 也在这份词表内，但它不绑定受管根之外的任何东西——查询目标就是
+ * 该会话绑定的那个仓库目录，仓库身份由适配器在派发前本地核对（github-adapter）。
+ * RUN 来源本片不放行：工具循环信封的 connections 形状是冻结协议，放开它要与执行契约
+ * 与写动作协议一起改。
  */
 const ASSISTANT_READ_ALLOWED_CAPABILITIES: readonly GatewayCapability[] =
-  ['FILE_READ', 'FILE_QUERY', 'GIT_READ'];
+  ['FILE_READ', 'FILE_QUERY', 'GIT_READ', 'COMPUTER_READ', 'GITHUB_READ'];
 
 /** 两种会话读取来源：共用只读能力词表，来源身份各自独立。 */
 const SESSION_READ_ORIGINS: readonly string[] = ['ASSISTANT_READ', 'AGENT_SESSION_READ'];
@@ -164,6 +204,7 @@ export function originAllows(
 ): boolean {
   const allowedRunCaps: GatewayCapability[] = [
     'FAKE_WRITE', 'FILE_READ', 'FILE_QUERY', 'WEB_FETCH', 'FILE_WRITE', 'GIT_READ', 'GIT_WRITE', 'CLI_RUN',
+    'COMPUTER_READ', 'COMPUTER_INPUT',
   ];
   if (origin.kind === 'RUN') return allowedRunCaps.includes(capability);
   if (origin.kind === 'USER_IMPORT') return ['FAKE_PUBLIC_READ', 'WEB_FETCH'].includes(capability);
@@ -235,6 +276,11 @@ export function capabilityFor(action: GatewayActionType): GatewayCapability {
   if (action === 'GIT_STATUS' || action === 'GIT_DIFF' || action === 'GIT_LOG') return 'GIT_READ';
   if (action === 'GIT_STAGE' || action === 'GIT_COMMIT' || action === 'GIT_PUSH') return 'GIT_WRITE';
   if (action === 'RUN_BUILD' || action === 'RUN_TEST' || action === 'CLI_RUN') return 'CLI_RUN';
+  // 0092: Computer 只读（截图/窗口枚举）与输入（激活/鼠标/键盘）分属两个能力。
+  if (action === 'COMPUTER_SCREENSHOT' || action === 'COMPUTER_GET_WINDOWS') return 'COMPUTER_READ';
+  if (isComputerAction(action)) return 'COMPUTER_INPUT';
+  // 0103: GitHub 只有只读动作；写动作（开 PR / 评论 / 合并）不在本片的词表里。
+  if (isGithubReadAction(action)) return 'GITHUB_READ';
   return 'FAKE_PUBLIC_READ';
 }
 
@@ -426,7 +472,8 @@ function paramsHash(input: Pick<PrepareGatewayActionInput, 'actionType' | 'param
   })).digest();
 }
 
-function targetMatches(prefix: string, target: string, capability: GatewayCapability): boolean {
+/** 只读投影也要按同一规则判断目标是否落在策略前缀内，因此这里唯一一次定义匹配。 */
+export function targetMatches(prefix: string, target: string, capability: GatewayCapability): boolean {
   if (capability === 'FAKE_PUBLIC_READ') {
     try {
       const policyUrl = new URL(prefix);
@@ -441,6 +488,12 @@ function targetMatches(prefix: string, target: string, capability: GatewayCapabi
     try {
       return new URL(target).hostname.toLowerCase() === prefix.toLowerCase();
     } catch { return false; }
+  }
+  if (capability === 'COMPUTER_READ' || capability === 'COMPUTER_INPUT') {
+    // Computer 动作的目标是合成值 computer://desktop：没有路径前缀语义，
+    // 策略按全等匹配。空前缀视为「该类全部动作」，与文件能力的根前缀同义。
+    if (prefix === '') return true;
+    return prefix === target;
   }
   const left = process.platform === 'win32' ? prefix.toLowerCase() : prefix;
   const right = process.platform === 'win32' ? target.toLowerCase() : target;
@@ -480,17 +533,25 @@ async function observeCheckMaterial(canonicalRoot: string,
   return result.ok ? result.basis : undefined;
 }
 
+/**
+ * 多条策略同时命中时的选择规则：最严格者优先，其次更长前缀，再按 ID 定序。
+ * 准入路径与「目录写档位」只读投影共用这一份，界面不再自己排一次序。
+ */
+export function rankActivePolicies<P extends { readonly decision: GatewayDecision;
+  readonly target_prefix: string; readonly id: string }>(policies: readonly P[]): P | undefined {
+  return [...policies].sort((a, b) => {
+    const rank: Record<GatewayDecision, number> = { DENY: 0, ASK: 1, AUTO: 2 };
+    return rank[a.decision] - rank[b.decision] || b.target_prefix.length - a.target_prefix.length || a.id.localeCompare(b.id);
+  })[0];
+}
+
 async function selectedPolicy(repositories: Repositories, input: {  workspaceId: string; projectId: string; capability: GatewayCapability;
   actionType: string; target: string; payloadBytes: number;
 }): Promise<SelectedPolicy> {
   const candidates = (await repositories.gateway.listActivePolicies(input.workspaceId, input.projectId,
     input.capability, input.actionType)).filter((policy) =>
     targetMatches(policy.target_prefix, input.target, input.capability));
-  candidates.sort((a, b) => {
-    const rank: Record<GatewayDecision, number> = { DENY: 0, ASK: 1, AUTO: 2 };
-    return rank[a.decision] - rank[b.decision] || b.target_prefix.length - a.target_prefix.length || a.id.localeCompare(b.id);
-  });
-  const selected = candidates[0];
+  const selected = rankActivePolicies(candidates);
   if (selected === undefined || selected.decision === 'DENY' || input.payloadBytes > selected.max_payload_bytes) {
     throw gatewayDenied('GATEWAY_PERMISSION_DENIED', '当前目标、参数与大小未获得有效 Permission。');
   }
@@ -698,6 +759,28 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
       if (typeof input.params.operation_id !== 'string' || input.params.operation_id === '') {
         throw validationFailed([{ field: 'params.operation_id', message: 'must be a string' }]);
       }
+    } else if (isComputerAction(input.actionType)) {
+      // 0092: Computer 动作没有受管根，目标固定为合成值；受管资源仍绑定（来源身份
+      // 与账本归属），参数按运行时白名单规范化。prepare 不执行任何桌面操作。
+      target = COMPUTER_DESKTOP_TARGET;
+      try {
+        input = { ...input, params: computerParamsForAction(input.actionType,
+          input.params) as unknown as JsonObject };
+      } catch (error) {
+        throw validationFailed([{ field: 'params',
+          message: error instanceof Error ? error.message : 'Computer 动作参数不合法' }]);
+      }
+    } else if (isGithubReadAction(input.actionType)) {
+      // 0103: GitHub 只读的目标就是受管根本身——不是调用方给的主机或仓库名。仓库身份
+      // 由适配器在派发前用本地 git remote 核对，参数在这里按动作白名单收窄一次并冻结，
+      // 因此 `--repo`、`gh api` 与任意 flag 都无法从模型侧抵达。
+      target = resourceBefore!.canonical_root;
+      try {
+        input = { ...input, params: githubParamsForAction(input.actionType, input.params) };
+      } catch (error) {
+        throw validationFailed([{ field: 'params',
+          message: error instanceof Error ? error.message : 'GitHub 动作参数不合法' }]);
+      }
     } else if (input.actionType === 'WRITE_FILE') {
       target = await normalizedWriteTarget(input.target, resourceBefore!.canonical_root);
       const rel = relative(resourceBefore!.canonical_root, target);
@@ -829,6 +912,19 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
       throw gatewayDenied('GATEWAY_TARGET_DENIED', '只能读取本次 Run 自己的文件变更证据。');
     }
   }
+  // V2 §18/§30：Computer 输入动作在后台路径不可用时等价于「需要接管电脑」。
+  // 在事务外先算一次执行路由（读缓存过的环境探测），把可读的接管说明带进审批文案，
+  // 让用户看到的不是抽象的「需要批准」，而是「要不要把电脑交给 Agent 一会儿」。
+  // 探测失败不影响准备流程：退回通用文案，但动作照旧需要审批。
+  const takeoverReason = capability !== 'COMPUTER_INPUT' ? undefined
+    : await (async (): Promise<string | undefined> => {
+        const plan = await planComputerActionForPrepare(input.actionType, input.params);
+        if (plan === null || plan.mode !== 'foreground' || !plan.requiresUserAuthorization) {
+          return undefined;
+        }
+        return `⚠️ 此操作需要接管你的电脑。${plan.explanation}`
+          + '批准即表示允许本次在用户桌面产生真实鼠标/键盘输入；完成后控制权立即归还。';
+      })();
   return withTransaction(db, async (repositories) => {
     const authority = await repositories.workspaces.lockAuthority(input.workspaceId, 'share');
     if (authority === undefined) throw resourceNotFound('Workspace authority');
@@ -931,7 +1027,7 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
     // 有效授权覆盖这一个动作时让 AUTO 穿过这条降级。DENY 永不被授权覆盖。
     const scopeDecision = run === undefined || resource === undefined ? undefined :
       await evaluateScopeGrant(db, {
-        runId: run.id, actionType: input.actionType, capability,
+        runId: run.id, actionType: scopeGrantActionFor(input.actionType), capability,
         canonicalRoot: resource.canonical_root,
         runTerminal: TERMINAL_RUN_STATUSES.includes(run.status),
         ...(input.scopeCheck === undefined ? {} : { check: input.scopeCheck }),
@@ -996,7 +1092,8 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
         // 绑定这一次建 Review 时**服务端自己实测**到的材料。核对侧会用同样的输入
         // （Operation 冻结的 executable/args + 受管资源根）重算，因此不依赖调用方自报摘要。
         resource === undefined || input.scopeCheck === undefined ? undefined
-          : await observeCheckMaterial(resource.canonical_root, input.scopeCheck));
+          : await observeCheckMaterial(resource.canonical_root, input.scopeCheck),
+        takeoverReason);
       if (run !== undefined && task !== undefined && input.origin.kind === 'RUN') {
         const changed = await repositories.runs.advanceRun({ runId: run.id, expectedRevision: run.revision,
           status: 'WAITING_APPROVAL', waitReason: 'ACTION_APPROVAL_REQUIRED', resumePhase: 'RUNNING' });
@@ -1018,7 +1115,7 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
 
 async function createGatewayReview(repositories: Repositories, op: LogicalOperationRow,
   run: RunRow | undefined, task: TaskRow | undefined, scopeBlockedReason?: string,
-  observedMaterial?: CheckTrustBasis | undefined) {
+  observedMaterial?: CheckTrustBasis | undefined, takeoverReason?: string | undefined) {
   // 检查材料依据写进 target，因此一并进入 target_hash：批准对象不只包含「跑什么」，
   // 还包含「跑的是磁盘上哪一份材料」。材料此后变化时旧 target 自然失效。
   const target: JsonObject = { operation_id: op.id, origin: op.origin, run_id: op.run_id,
@@ -1033,9 +1130,9 @@ async function createGatewayReview(repositories: Repositories, op: LogicalOperat
     verificationSessionId: null, criterionId: null, operationId: op.id,
     importJobId: op.import_job_id,
     kind: 'ACTION_APPROVAL',
-    reason: scopeBlockedReason === undefined
+    reason: takeoverReason ?? (scopeBlockedReason === undefined
       ? '此 Fake 动作需要针对最终目标与参数的批准。'
-      : `本次任务范围授权不再自动放行这个动作（${scopeBlockedReason}），需要针对确切动作与参数的批准。`,
+      : `本次任务范围授权不再自动放行这个动作（${scopeBlockedReason}），需要针对确切动作与参数的批准。`),
     targetHash: reviewTargetHash(target), target,
     evidence: { capability: op.capability_key, action_type: op.action_type,
       ...(scopeBlockedReason === undefined ? {} : { scope_decision_reason: scopeBlockedReason }),
@@ -1779,8 +1876,7 @@ async function settleGatewayInvocation(db: DbExecutor, admitted: AdmittedInvocat
 }
 
 /** Admit commits before one FakeAdapter call. A crash leaves the same Invocation for reconciliation. */
-export async function dispatchGatewayAction(db: DbExecutor, input: DispatchGatewayInput): Promise<GatewayDispatchResult> {
-  let admitted: AdmittedInvocation;
+export async function dispatchGatewayAction(db: DbExecutor, input: DispatchGatewayInput): Promise<GatewayDispatchResult> {  let admitted: AdmittedInvocation;
   try {
     admitted = await admitGatewayInvocation(db, input);
   } catch (error) {
@@ -1847,6 +1943,34 @@ export async function dispatchGatewayAction(db: DbExecutor, input: DispatchGatew
   }
   if (admitted.operation.capability_key === 'CLI_RUN') {
     const res = await cliExecute(admitted.operation, admitted.invocation, input.signal, input.deadline);
+    await input.hooks?.afterFakeEffect?.();
+    return settleGatewayInvocation(db, admitted, res.outcome, res.result, input.origin);
+  }
+  if (admitted.operation.capability_key === 'COMPUTER_READ' ||
+      admitted.operation.capability_key === 'COMPUTER_INPUT') {
+    // 0092/V2: Computer 派发只翻译参数并调用运行时客户端；所有失败（运行时缺失、
+    // IPC 断开、超时、取消、输入被拒）都以 FAILED + 类型化 reason 结算，不抛出，
+    // 因此不会把桌面问题升级成 Worker 异常。截图正文不进入 result_ref。
+    // `foregroundAuthorized: true` 的依据是「已经走到派发」：COMPUTER_INPUT 是
+    // approvalPassthrough=false 的能力，派发前必有单动作批准或本次任务范围授权。
+    // 操控状态上报（migration 0096）：输入动作开启/刷新会话，只读动作只刷新既有
+    // 会话。上报失败不阻断派发——展示事实不能拖住真实执行。
+    try {
+      await reportComputerDispatchActivity(db, admitted, input.origin);
+    } catch {
+      // 静默：状态条缺失属于可感知的展示降级，绝不能让真实输入因此失败。
+    }
+    const res = await computerExecute({ actionType: admitted.operation.action_type,
+      params: admitted.operation.params,
+      foregroundAuthorized: admitted.operation.capability_key === 'COMPUTER_INPUT',
+      ...(input.signal === undefined ? {} : { signal: input.signal }) });
+    await input.hooks?.afterFakeEffect?.();
+    return settleGatewayInvocation(db, admitted, res.outcome, res.result, input.origin);
+  }
+  if (admitted.operation.capability_key === 'GITHUB_READ') {
+    // 0103: GitHub 只读派发。未装 gh、未登录、网络不通、目录没有 GitHub remote 都以
+    // FAILED + 类型化 failure_kind 结算，不抛出也不空返回——「查不到」必须与「没有」区分开。
+    const res = await githubExecute(admitted.operation, admitted.invocation, input.signal);
     await input.hooks?.afterFakeEffect?.();
     return settleGatewayInvocation(db, admitted, res.outcome, res.result, input.origin);
   }
@@ -2405,6 +2529,10 @@ export async function reconcileGatewayInvocation(db: DbExecutor, input: {
   } else if (op.capability_key === 'GIT_READ') {
     readOutcome = invocation.status === 'PREPARED' ? undefined
       : await gitExecute(op, invocation);
+  } else if (op.capability_key === 'GITHUB_READ') {
+    // 0103: 只读 GitHub 查询没有外部效果，核对方式就是按同一冻结参数再读一次；
+    // 与 GIT_READ 同类，不需要为目标是否存在做 UNKNOWN 隔离。
+    readOutcome = invocation.status === 'PREPARED' ? undefined : await githubExecute(op, invocation);
   } else if (op.capability_key === 'FILE_WRITE' && op.action_type === 'READ_CHANGE_SET') {
     // 读证据没有外部效果：按同一冻结引用安全重读一次即可，不需要 UNKNOWN 隔离。
     if (invocation.status === 'PREPARED') {
@@ -2599,7 +2727,8 @@ export async function reconcileGatewayInvocation(db: DbExecutor, input: {
     }
     // Once DISPATCHING committed, a missing target could have been written and
     // removed by an external actor. Only PREPARED proves no adapter call began.
-    const safeReread = op.capability_key === 'FILE_READ' || op.capability_key === 'WEB_FETCH' || op.capability_key === 'GIT_READ';
+    const safeReread = op.capability_key === 'FILE_READ' || op.capability_key === 'WEB_FETCH' ||
+      op.capability_key === 'GIT_READ' || op.capability_key === 'GITHUB_READ';
     const status: 'SUCCEEDED' | 'NOT_EXECUTED' | 'UNKNOWN' | 'FAILED' =
       safeReread
         ? (lockedInvocation.status === 'PREPARED' ? 'NOT_EXECUTED' : readOutcome!.outcome)
@@ -2636,5 +2765,29 @@ export async function reconcileGatewayInvocation(db: DbExecutor, input: {
       }
     }
     return { status, operation_id: op.id };
+  });
+}
+
+/**
+ * Computer 派发的操控状态上报（migration 0096，仅供 dispatchGatewayAction 使用）。
+ *
+ * 只有 RUN 来源的动作会上报：会话轮次（ASSISTANT_READ/AGENT_SESSION_READ）只读，
+ * 不产生桌面输入，不构成「正在操控电脑」。输入类动作开启/刷新会话；只读动作
+ * （截图、窗口枚举）只刷新同一 Run 的既有会话——操控间隙的核对仍是操控的一部分。
+ */
+async function reportComputerDispatchActivity(db: DbExecutor,
+  admitted: AdmittedInvocation, origin: GatewayOrigin): Promise<void> {
+  if (origin.kind !== 'RUN' || admitted.operation.run_id === null) return;
+  const isInput = admitted.operation.capability_key === 'COMPUTER_INPUT';
+  // 只读动作绝不开启会话：一个仅截屏的 Run 不该让全屏出现「正在操控」的光效。
+  if (!isInput) {
+    const running = await createRepositories(db).computerControl.readLatest();
+    if (running === undefined || running.state !== 'RUNNING' || running.run_id !== origin.runId) return;
+  }
+  await reportComputerControlActivity(db, {
+    runId: origin.runId, workspaceId: admitted.operation.workspace_id,
+    actionType: admitted.operation.action_type,
+    actionLabel: describeComputerAction(admitted.operation.action_type, admitted.operation.params),
+    isInput,
   });
 }

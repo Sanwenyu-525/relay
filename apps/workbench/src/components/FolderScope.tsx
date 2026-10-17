@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FolderOpen, MessageSquarePlus } from "lucide-react";
+import { FolderOpen, MessageSquarePlus, Info } from "lucide-react";
 import type { RelayWorkingDirectory } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { nativeFolderPickerAvailable, selectWorkingDirectory } from "../lib/desktopHost";
@@ -57,11 +57,20 @@ const needsScopeChoice = directory !== null && directory.candidates.length > 0 &
     {pickerError && <p className="action-error" role="alert" data-testid="folder-picker-error">{pickerError}</p>}
 
     {recents.length > 0 && <section className="folder-scope-recents" aria-label="近期文件夹">
-      <h3>近期文件夹</h3>
+      <div className="folder-scope-section-head">
+        <h3>近期文件夹</h3>
+        <span className="folder-scope-section-hint">点击直接切换</span>
+      </div>
       <ul>{recents.map((item) => <li key={item.canonicalRoot}>
-        <button className="text-link" type="button" data-testid="collab-recent-folder"
-          disabled={busy} onClick={() => onOpen(item.canonicalRoot)}>{item.displayName}</button>
-        <span className="helper-text">{item.canonicalRoot}</span>
+        <button className="folder-recent-item" type="button" data-testid="collab-recent-folder"
+          disabled={busy} onClick={() => onOpen(item.canonicalRoot)}>
+          <FolderOpen aria-hidden="true" className="folder-recent-icon" />
+          <span className="folder-recent-text">
+            <span className="folder-recent-name">{item.displayName}</span>
+            <span className="folder-recent-sep" aria-hidden="true">·</span>
+            <span className="folder-recent-path" title={item.canonicalRoot}>{item.canonicalRoot}</span>
+          </span>
+        </button>
       </li>)}</ul>
     </section>}
 
@@ -83,7 +92,10 @@ const needsScopeChoice = directory !== null && directory.candidates.length > 0 &
 
     {directory !== null && directory.status === "READY" && <p className="helper-text"
       data-testid="folder-write-readiness">{directory.writeReadiness.detail}</p>}
-    <p className="helper-text">目录只是当前工作目录，不会自动读取整棵树、外发内容或开启任何权限。</p>
+    <p className="folder-scope-footnote">
+      <Info aria-hidden="true" className="folder-scope-footnote-icon" />
+      目录只是当前工作目录，不会自动读取整棵树、外发内容或开启任何权限。
+    </p>
   </div>;
 }
 

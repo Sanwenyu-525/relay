@@ -5,6 +5,7 @@ import { delegateTask } from '../application/delegate-task.js';
 import { readRunById } from '../application/run-queries.js';
 import { readRunDraftPreview } from '../application/run-draft-preview.js';
 import { readRunToolCalls } from '../application/run-tool-call-projection.js';
+import { readRunToolCallPreviews } from '../application/run-tool-call-preview-projection.js';
 import { applySafeControl, readControlRequest, requestRunControl, resumeRun } from '../application/control-requests.js';
 import {
   DelegateTaskBodySchema,
@@ -16,6 +17,7 @@ import {
   RunResumeBodySchema,
   RunResumeResultSchema,
   RunToolCallsSchema,
+  RunToolCallPreviewsSchema,
   WorkspaceRunControlParamsSchema,
   WorkspaceRunParamsSchema,
   WorkspaceTaskParamsSchema,
@@ -127,6 +129,18 @@ export function registerRunRoutes(app: FastifyInstance, dependencies: RouteDepen
     try {
       const params = request.params as { workspace_id: string; run_id: string };
       return await readRunToolCalls(dependencies.database.executor, params.workspace_id, params.run_id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
+  // 生成中的工具预览（工作台 §34.4）：可丢弃、可空；Run 终态或模型调用已结算时返回空列表。
+  app.get('/runs/:run_id/tool-call-previews', {
+    schema: { params: WorkspaceRunParamsSchema, response: { 200: RunToolCallPreviewsSchema } },
+  }, async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    try {
+      const params = request.params as { workspace_id: string; run_id: string };
+      return await readRunToolCallPreviews(dependencies.database.executor,
+        params.workspace_id, params.run_id);
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
 

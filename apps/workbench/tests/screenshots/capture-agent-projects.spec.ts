@@ -134,7 +134,7 @@ test.describe("ui screenshots agent + projects", () => {
     }
 
     await gotoReady(page, "/projects");
-    const row = page.locator('[data-testid^="project-row-"], [data-testid^="project-card-open-"]').first();
+    const row = page.locator('[data-testid^="project-card-more-"]').first();
     if (await row.count()) {
       await row.click().catch(() => {});
       await page.waitForTimeout(400);
@@ -174,8 +174,9 @@ test.describe("ui screenshots agent + projects", () => {
       }
     }
 
-    await safeClick(page, page.getByTestId("assist-session-select"));
-    await shot(page, "agent-session-select-open");
+    // 顶栏左翼只显示会话名，切换讨论改由右翼那颗键的浮层承担（2026-10-17）。
+    await safeClick(page, page.getByTestId("collab-session-switcher"));
+    await shot(page, "agent-session-switcher-open");
     await page.keyboard.press("Escape");
     await safeClick(page, page.getByTestId("assist-new-session").or(page.getByRole("button", { name: /新建会话/ })));
     await shot(page, "agent-new-session");

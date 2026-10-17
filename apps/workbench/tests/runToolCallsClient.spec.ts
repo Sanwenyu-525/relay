@@ -13,7 +13,9 @@ function call(overrides: Record<string, unknown> = {}) {
     arguments_sha256: "a".repeat(64), provider_tool_call_id: "call-0",
     operation_id: "44444444-4444-4444-8444-444444444444", result_ref: { content: "中文" },
     adaptation_of: null, adapted_path: null, created_at: "2026-10-04T01:00:00.000Z",
-    updated_at: "2026-10-04T01:00:01.000Z", ...overrides };
+    updated_at: "2026-10-04T01:00:01.000Z",
+    // 服务端把逐文件账本声明为必需数组（domain-schemas 的 RunToolCallSchema），空账本也要如实给。
+    file_changes: [], ...overrides };
 }
 
 function reply(rounds: readonly unknown[], overrides: Record<string, unknown> = {}) {

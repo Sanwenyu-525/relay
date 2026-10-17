@@ -94,6 +94,7 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
     case 'WithdrawTaskAcceptanceMaterial':
       return typeof result.task_id === 'string' ? `tasks/${result.task_id}/acceptance-materials` : undefined;
     case 'CreateProject':
+    case 'EditProjectPresentation':
     case 'LinkProjectGoal':
     case 'UnlinkProjectGoal':
     case 'ArchiveProject':
@@ -103,6 +104,8 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
         ? `projects/${result.project_id}/state`
         : undefined;
     case 'CreateGoal':
+    case 'EditGoal':
+    case 'ArchiveGoal':
       return typeof result.goal_id === 'string' ? `goals/${result.goal_id}` : undefined;
     case 'CreateArtifactWithVersion':
     case 'SubmitHumanArtifactVersion':
@@ -145,6 +148,7 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
     case 'RetireRule':
       return typeof result.rule_id === 'string' ? `rules/${result.rule_id}` : undefined;
     case 'CreateTask':
+    case 'AssignInboxTaskToProject':
     case 'EditTaskPresentation':
     case 'SetTaskPlanningMetadata':
     case 'MarkTaskReady':
@@ -162,11 +166,17 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
       return 'today';
     case 'CreateAssistSession':
     case 'ExecuteChatCommand':
+    case 'SelectSessionModel':
       return typeof result.session_id === 'string' ? `assist-sessions/${result.session_id}` : undefined;
     case 'WithdrawStateMaintenance':
       return typeof result.request_id === 'string' ? `conversation-state-requests/${result.request_id}` : undefined;
     case 'BindAssistSessionProject':
     case 'BindAssistSessionDirectory':
+    case 'RenameAssistSession':
+    case 'SetAssistSessionPin':
+    case 'SetAssistSessionUnread':
+    case 'ArchiveAssistSession':
+    case 'ReopenAssistSession':
       return typeof result.session_id === 'string' ? `assist-sessions/${result.session_id}` : undefined;
     case 'CreateProjectBlueprintProposal':
     case 'ApplyProjectBlueprint':

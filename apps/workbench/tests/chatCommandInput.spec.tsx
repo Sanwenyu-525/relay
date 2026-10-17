@@ -115,7 +115,7 @@ describe("聊天命令输入", () => {
       await focus(view); await view.wrapper.get('[data-testid="input"]').setValue("/"); await flush();
       expect(view.wrapper.find('[data-testid="chat-command-review"]').exists()).toBe(false);
       expect(view.wrapper.get('[data-testid="chat-command-clear"]').text()).toContain("需已有会话");
-      expect(view.wrapper.get('[data-testid="chat-command-model"]').text()).toContain("待接入");
+      expect(view.wrapper.get('[data-testid="chat-command-model"]').text()).toContain("需已有会话");
       expect(view.wrapper.get('[data-testid="chat-command-compact"]').text()).toContain("待接入");
     } finally { view.unmount(); }
   });

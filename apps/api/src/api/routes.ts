@@ -6,6 +6,7 @@ import { ManagedContentStore } from '../storage/managed-content-store.js';
 import { registerArtifactRoutes } from './artifact-api.js';
 import { registerAttentionRoutes } from './attention-api.js';
 import { registerAssistRoutes } from './assist-api.js';
+import { registerAssistModelRuntimeRoutes } from './assist-model-runtime-api.js';
 import { registerChatCommandRoutes } from './chat-command-api.js';
 import { createBearerGuard, type BoundaryConfig } from './boundary.js';
 import { registerCommandRoutes } from './command-api.js';
@@ -50,6 +51,8 @@ import { registerTaskChainScheduler } from '../runtime/task-chain-scheduler.js';
 import { registerTaskChainRoutes } from './task-chain-api.js';
 import { registerBlueprintRoutes } from './blueprint-api.js';
 import { registerModelRoutes } from './model-api.js';
+import { registerComposerRoutes } from './composer-api.js';
+import { registerComputerRoutes } from './computer-api.js';
 
 export type { RouteDependencies };
 
@@ -160,6 +163,8 @@ registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
       registerArtifactRoutes(scope, apiDependencies);
       registerAttentionRoutes(scope, apiDependencies);
       registerModelRoutes(scope, apiDependencies);
+      // 工作台 §30：发送前草稿辅助（分点边界 / 润色）。不写业务事实，只记模型调用证据。
+      registerComposerRoutes(scope, apiDependencies);
       registerCompletionRoutes(scope, apiDependencies);
       registerStateRoutes(scope, apiDependencies);
       registerRunRoutes(scope, apiDependencies);
@@ -169,6 +174,7 @@ registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
       registerInformationRoutes(scope, apiDependencies);
       registerReviewRoutes(scope, apiDependencies);
       registerAssistRoutes(scope, apiDependencies);
+      registerAssistModelRuntimeRoutes(scope, apiDependencies);
       registerChatCommandRoutes(scope, apiDependencies);
       registerAssistantProfileRoutes(scope, apiDependencies);
       registerWorkingDirectoryRoutes(scope, apiDependencies);
@@ -178,6 +184,8 @@ registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
       // 0072：学习记录（ADR-020）。读路径只读应用保存的同一记录，不调模型总结。
       registerLearningRoutes(scope, apiDependencies);
       registerCommandRoutes(scope, apiDependencies);
+      // 电脑操控状态（migration 0096）：桌面壳轮询的展示状态与 Esc 取消入口。
+      registerComputerRoutes(scope, apiDependencies);
     },
     { prefix: API_PREFIX },
   );

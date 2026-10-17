@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ChevronRight, LayoutGrid, MessageSquare, PanelRight } from "lucide-react";
+import { ChevronRight, LayoutGrid, MessageSquare, PanelRightClose, PanelRightOpen } from "lucide-react";
 import AppDialog from "../components/AppDialog";
 import AssistView, { type AssistNavigationState, type FirstMessageOwner, type FirstMessageProcess } from "./AssistView";
 import FactBar from "../components/FactBar";
@@ -11,6 +11,7 @@ import TaskDelegatePanel, { type DelegateTarget } from "../components/TaskDelega
 import type { ReviewNavigationState } from "../components/ReviewDecisionPanel";
 import WorkspaceSidePanel from "../components/WorkspaceSidePanel";
 import TaskViewDashboard from "../components/TaskViewDashboard";
+import WorkDetailsFrame, { type WorkDetailsTab } from "../components/WorkDetailsFrame";
 import TaskInspectorPanel from "../components/TaskInspectorPanel";
 import CollaborationSplitter from "../components/CollaborationSplitter";
 import { createCommandId, RelayApiError, type RelayApiClient, type RelayControlRequest, type RelayReview,
@@ -30,6 +31,11 @@ import { readCollaborationLayoutPreferences, saveCollaborationLayoutPreferences,
 import "./CollaborationView.css";
 
 const cleanNavigation: AssistNavigationState = { dirty: false, pending: null };
+
+/** 工作详情是纯图标开关键：可访问名称与悬停提示都按展开态说清下一次点击做什么。 */
+function inspectorToggleLabel(open: boolean): string {
+  return open ? "收起工作详情" : "展开工作详情";
+}
 
 function recoveryKey(client: RelayApiClient): string {
   return `relay-agent-chat-pending:${client.baseUrl}:${client.workspaceId}`;
@@ -119,6 +125,22 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const sessionSeed = search.get("session");
   const [sessionId, setSessionId] = useState<string | null | undefined>(() =>
     search.has("new") ? null : sessionSeed ?? undefined);
+  const [sessionEntry, setSessionEntry] = useState<{ id: string; projectId: string | null; error: string | null } | null>(null);
+  const [sessionEntryReload, setSessionEntryReload] = useState(0);
+  // URL 只定位原会话；项目归属必须由服务端核对，不能把目录名或目标入口当成归属。
+  useEffect(() => {
+    if (workId !== null || sessionSeed === null || newConversationKey !== null) return;
+    let current = true;
+    void client.getAssistSession(sessionSeed, true).then((session) => {
+      if (!current) return;
+      if (session.id !== sessionSeed) throw new Error("会话读取结果与入口身份不匹配。");
+      if (session.taskId !== null) { setSearch({ work: session.taskId, session: session.id }, { replace: true }); return; }
+      setSessionEntry({ id: sessionSeed, projectId: session.projectId, error: null });
+    }).catch((caught: unknown) => {
+      if (current) setSessionEntry({ id: sessionSeed, projectId: null, error: describeLiveError(caught).message });
+    });
+    return () => { current = false; };
+  }, [client, workId, sessionSeed, newConversationKey, sessionEntryReload]);
   // 首条消息的完整过程住在协作页：文件夹入口的 AssistView 会按会话切换重新挂载，
   // 命令身份、在途阶段、首条原文与解释结果都不能随它卸载。迟到响应与回执核对
   // 可能跨越同一次重挂载，因此 busy 与「已解释」也必须是同一份共享事实。
@@ -145,8 +167,16 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const [runError, setRunError] = useState<string | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [sideTab, setSideTab] = useState<"DOCUMENT" | "CHECK" | "HISTORY">("DOCUMENT");
-  const [workbenchView, setWorkbenchView] = useState<"chat" | "task">("task");
-  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [workbenchView, setWorkbenchView] = useState<"chat" | "task">("chat");
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  /**
+   * 会话视图（未关联任务）的「工作详情」抽屉开关，默认关闭。
+   * 与任务视图的 inspectorOpen（默认开）分开：新对话首屏要让位给欢迎与输入区，
+   * 不能在进入时就用一个诚实空态盖住；任务视图既有体验也因此完全不变。
+   */
+  const [conversationInspectorOpen, setConversationInspectorOpen] = useState(false);
+  const conversationInspectorToggleRef = useRef<HTMLButtonElement | null>(null);
+  const [conversationInspectorTab, setConversationInspectorTab] = useState<WorkDetailsTab>("PROGRESS");
   const [selectedPreviewArtifact, setSelectedPreviewArtifact] = useState<{
     readonly artifact: RelayArtifact; readonly version: RelayArtifactVersionSummary
   } | null>(null);
@@ -170,6 +200,9 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const [conversationTarget, setConversationTarget] = useState<
     { mode: RelayConversationMode; assistantProfileId: string | null }>({ mode: "AGENT", assistantProfileId: null });
   const [folder, setFolder] = useState<RelayWorkingDirectory | null>(null);
+  const folderRef = useRef(folder); folderRef.current = folder;
+  const [boundDirectory, setBoundDirectory] = useState<{ sessionId: string; projectId: string | null; path: string | null } | null>(null);
+  const sessionContextRequest = useRef(0);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [folderBusy, setFolderBusy] = useState(false);
   // 归属成功后让目录作用域的会话面板按项目身份重读一次，续读同一条历史而不是留一个空会话。
@@ -340,6 +373,23 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
     return () => { active = false; };
   }, [client, task?.projectId]);
 
+  // 会话恢复路径（无任务）：归属行不能停在「当前项目」占位——目录绑定的 projectId
+  // 是服务端事实，项目标题沿它解析；任务路径由上一 effect 负责，这里不重复读。
+  const sessionDirectoryProjectId = task?.projectId ? null : boundDirectory?.projectId ?? null;
+  useEffect(() => {
+    if (sessionDirectoryProjectId === null) { setProjectTitle(null); setProjectReadError(null); return; }
+    let active = true;
+    void client.getProject(sessionDirectoryProjectId).then((project) => {
+      if (!active) return;
+      if (project.id !== sessionDirectoryProjectId) return;
+      setProjectTitle(project.title); setProjectReadError(null);
+    }, (caught: unknown) => {
+      if (!active) return;
+      setProjectTitle(null); setProjectReadError(describeLiveError(caught).message);
+    });
+    return () => { active = false; };
+  }, [client, sessionDirectoryProjectId]);
+
   const canReadDraft = run !== null && task !== null && run.status === "RUNNING" &&
     task.executor === "AI" && task.executorRunId === run.id &&
     run.steps.find((step) => step.id === run.currentStepId)?.kind === "DRAFT" &&
@@ -376,7 +426,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
   const setLayoutMode = (mode: CollaborationLayoutMode) => {
     setLayout((current) => saveCollaborationLayoutPreferences({ ...current, mode }));
   };
-  const renderedLayoutMode: CollaborationLayoutMode = workbenchView === "chat" && inspectorOpen && !sidePanelRevealed
+  const renderedLayoutMode: CollaborationLayoutMode = workbenchView === "chat" && !sidePanelRevealed
     ? "chat" : workbenchView === "chat" && sidePanelRevealed && layout.mode !== "result" ? "split" : layout.mode;
   function revealSidePanel(tab: "DOCUMENT" | "CHECK" | "HISTORY" = "DOCUMENT") {
     setSidePanelRevealed(workbenchView === "chat");
@@ -403,8 +453,58 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
   function closeInspector() {
     setSelectedPreviewArtifact(null);
     setInspectorOpen(false);
-    window.requestAnimationFrame(() => inspectorToggleRef.current?.focus());
+    window.requestAnimationFrame(() => (workbenchView === "chat" ? conversationInspectorToggleRef : inspectorToggleRef).current?.focus());
   }
+  function closeConversationInspector() {
+    setConversationInspectorOpen(false);
+    window.requestAnimationFrame(() => conversationInspectorToggleRef.current?.focus());
+  }
+  /**
+   * 2026-10-17 点击验收整改 CT-01：工作详情在宽容器里是常驻分栏，在容器放不下时是覆盖抽屉。
+   * 两种形态由 CollaborationView.css 的容器查询决定，这里不复制阈值——打开后读一次计算样式
+   * （抽屉态的面板是 position:absolute）再决定行为：
+   * · 抽屉：遮罩挡住其余内容，焦点送进面板，Esc 与点按遮罩都能收起，收起后回触发键；
+   * · 分栏：常驻内容、非模态，不抢焦点，Esc 仍留给输入器与资料面板。
+   */
+  const inspectorPanelTestId = task === null ? "collab-conversation-inspector" : "collab-inspector";
+  const inspectorOpenForView = task === null ? conversationInspectorOpen : inspectorOpen;
+  const closeOpenInspectorRef = useRef<() => void>(closeInspector);
+  closeOpenInspectorRef.current = task === null ? closeConversationInspector : closeInspector;
+  const drawerFocusHandled = useRef<string | null>(null);
+  useEffect(() => {
+    if (!inspectorOpenForView) { drawerFocusHandled.current = null; return; }
+    const frame = window.requestAnimationFrame(() => {
+      const panel = document.querySelector<HTMLElement>(`[data-testid="${inspectorPanelTestId}"]`);
+      if (panel === null || getComputedStyle(panel).position !== "absolute") return;
+      // 同一层内容换版本（预览内切 v1/v2）不动焦点：用户刚点的是面板里的版本键。
+      const layer = `${inspectorPanelTestId}:${selectedPreviewArtifact?.artifact.id ?? "details"}`;
+      if (drawerFocusHandled.current === layer) return;
+      drawerFocusHandled.current = layer;
+      panel.querySelector<HTMLElement>(".inspector-close")?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [inspectorOpenForView, inspectorPanelTestId, selectedPreviewArtifact]);
+  useEffect(() => {
+    if (!inspectorOpenForView) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
+      // 顶层弹窗（AppDialog）自己消费 Esc：抽屉不抢弹窗的关闭权。
+      if (document.querySelector('[role="dialog"][aria-modal="true"]') !== null) return;
+      const panel = document.querySelector<HTMLElement>(`[data-testid="${inspectorPanelTestId}"]`);
+      // 分栏是常驻内容：没有遮挡要撤，Esc 不是它的关闭路径。
+      if (panel === null || getComputedStyle(panel).position !== "absolute") return;
+      event.preventDefault();
+      // 预览是抽屉里的第二层：Esc 先退回工作详情，再按一次才收起整个抽屉。
+      if (task !== null && selectedPreviewArtifact !== null) {
+        setSelectedPreviewArtifact(null);
+        window.requestAnimationFrame(focusPreviewReturnTarget);
+        return;
+      }
+      closeOpenInspectorRef.current();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [inspectorOpenForView, inspectorPanelTestId, selectedPreviewArtifact, task]);
   const refreshFacts = useCallback(() => { setReloadKey((value) => value + 1); void reloadAll(); void reloadRun(); void reloadReviews(); },
     [reloadAll, reloadRun, reloadReviews]);
   const runControl = run !== null && task !== null
@@ -445,7 +545,11 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
    * 才切项目作用域重读同一条历史。
    */
   const bindingUnconfirmed = binding !== null && binding.status !== "CONFIRMED";
-  const projectScopeActive = folderProjectId !== null && !bindingUnconfirmed;
+  const entryPending = sessionSeed !== null && newConversationKey === null && sessionEntry?.id !== sessionSeed;
+  const entryError = sessionEntry !== null && sessionEntry.id === sessionSeed ? sessionEntry.error : null;
+  const entryProjectId = sessionEntry !== null && sessionEntry.id === sessionSeed && entryError === null ? sessionEntry.projectId : null;
+  const conversationProjectId = entryProjectId ?? boundDirectory?.projectId ?? folderProjectId ?? search.get("project");
+  const projectScopeActive = conversationProjectId !== null && !bindingUnconfirmed;
   function startFolderConversation() {
     requestTransition(() => { setSessionId(null); setSearch({ new: createCommandId() }); });
   }
@@ -471,16 +575,16 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
    * 否则用户会以为讨论已随目录一起归入项目。
    * 目录写命令、草稿守卫与归属命令仍只有本页一个 Owner，细条只做呈现与转发。
    */
-  const folderAssociationLabel = folder === null || folder.association === null ? "未归属"
+  const folderAssociationLabel = folder === null || folder.association === null ? (boundDirectory?.projectId || task?.projectId ? `已归入项目：${projectTitle ?? "当前项目"}` : "未归属")
     : `已归入项目：${folder.association.projectTitle}${folder.createdProject ? "（本次新建的最小项目）" : ""}`;
   // 告警优先报更具体的那一条：目录没就绪时不再叠一句「先选目录」，两句话讲的是同一件事。
   const folderScopeWarning = folder !== null && folder.status === "NOT_READY"
     ? `目录尚未就绪：${folder.reason ?? "UNKNOWN"}。仍可普通讨论，但不能对项目文件执行写操作。`
-    : !projectScopeActive
+    : !projectScopeActive && task?.projectId == null
       ? "这段讨论还没有归入项目，不能进入执行。先选目录并把它归入项目。"
       : null;
   const composerHeader = <>
-    <FolderScopeBar directory={folder} recents={recents} busy={folderBusy} error={folderError}
+    <FolderScopeBar directory={folder} boundDirectoryPath={boundDirectory?.path ?? null} recents={recents} busy={folderBusy} error={folderError}
       associationLabel={folderAssociationLabel} warning={folderScopeWarning}
       onOpen={requestFolderTransition} onNewConversation={startFolderConversation} />
     {binding !== null && <section className="collab-binding" data-testid="collab-binding"
@@ -520,11 +624,26 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
    * 没有父子通道；发布的是本页已经收到的同一份事实，不是第二套业务状态。
    */
   const reportActiveSession = useCallback((id: string | null) => {
+    const previous = activeSessionRef.current;
+    const version = ++sessionContextRequest.current;
     activeSessionRef.current = id;
     publishActiveConversation({ taskId: workIdRef.current, sessionId: id });
-  }, []);
+    // 同一项目内的新会话仍保留用户选定的目录；全局新对话由路由重新挂载清空。
+    if (id === null) return;
+    // 换会话先清除旧目录展示，但保留导航所属项目，避免退回工作区空会话并卸载原 Owner。
+    setBoundDirectory((current) => ({ sessionId: id,
+      projectId: current?.projectId ?? folderRef.current?.association?.projectId ?? null, path: null }));
+    if (previous !== null && previous !== id) setFolder(null);
+    void client.getAssistSession(id, true).then((session) => {
+      if (activeSessionRef.current !== id || version !== sessionContextRequest.current) return;
+      setBoundDirectory({ sessionId: id, projectId: session.projectId,
+        path: session.context?.workingDirectory?.canonicalRoot ?? null });
+    }).catch((caught: unknown) => {
+      if (activeSessionRef.current === id && version === sessionContextRequest.current) setFolderError(describeLiveError(caught).message);
+    });
+  }, [client]);
   // 离开协作页时清掉高亮，避免左栏停在一条已经不在看的会话上。
-  useEffect(() => () => clearActiveConversation(), []);
+  useEffect(() => () => { activeSessionRef.current = null; sessionContextRequest.current++; clearActiveConversation(); }, []);
 
   /**
    * 把一段尚未归属的既有讨论归入项目。
@@ -666,7 +785,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     const boundProjectId = directory.status === "READY" ? directory.association?.projectId ?? null : null;
     const pendingSessionId = activeSessionRef.current ?? sessionIdRef.current;
     if (boundProjectId !== null && pendingSessionId != null) {
-      await bindSessionToProject(pendingSessionId, boundProjectId);
+      if (workIdRef.current === null) await bindSessionToProject(pendingSessionId, boundProjectId);
     }
     // 0087：目录就绪后把这条目录绑到当前会话。绑定是作用域不是准入，失败只如实呈现，
     // 不阻断对话——服务端会按「未绑定目录」以类型化原因拒掉读取，而不是假装有权限。
@@ -707,6 +826,54 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     } finally { setCheckingId(null); }
   }
 
+  // 会话视图顶栏右区与「工作详情」抽屉（均只在 task===null 时出现）。
+  const conversationInspectorVisible = task === null ? conversationInspectorOpen : inspectorOpen;
+  const conversationInspectorLabel = inspectorToggleLabel(conversationInspectorVisible);
+  const conversationToolbarRight = <>{task !== null && <button type="button"
+    className="secondary-button secondary-button--compact collab-toolbar-icon-button"
+    data-testid="collab-open-task-view" title="任务视图" aria-label="任务视图"
+    onClick={() => setWorkbenchView("task")}><LayoutGrid size={18} aria-hidden="true" /></button>}<button type="button"
+    className={`secondary-button secondary-button--compact collab-inspector-toggle-btn collab-toolbar-icon-button${conversationInspectorVisible ? " active" : ""}`}
+    data-testid="collab-conversation-inspector-toggle" ref={conversationInspectorToggleRef}
+    title={conversationInspectorLabel} aria-label={conversationInspectorLabel}
+    aria-expanded={conversationInspectorVisible} aria-controls={task === null ? "collab-conversation-inspector" : `collab-inspector-${task.id}`}
+    onClick={() => { if (task === null) setConversationInspectorOpen((open) => !open); else setInspectorOpen((open) => !open); }}>
+    {conversationInspectorVisible ? <PanelRightClose size={18} aria-hidden="true" /> : <PanelRightOpen size={18} aria-hidden="true" />}
+  </button></>;
+  /**
+   * 输入框「+」里的「选择工作文件夹」不新建选择器：它把用户带回常驻的目录细条，
+   * 并直接触发细条自带的「更换目录」弹层（同一个 Owner）。细条在忙时按钮禁用，
+   * 退回到把细条滚入视野并聚焦，让用户自己决定何时点开，绝不绕过禁用态。
+   */
+  const requestFocusFolder = useCallback(() => {
+    const strip = document.querySelector<HTMLElement>('[data-testid="folder-scope-strip"]');
+    strip?.scrollIntoView({ block: "center" });
+    const change = document.querySelector<HTMLButtonElement>('[data-testid="folder-scope-change"]');
+    if (change !== null && !change.disabled) change.click();
+  }, []);
+  const conversationInspector = <WorkDetailsFrame className="task-inspector" id="collab-conversation-inspector"
+    testId="collab-conversation-inspector" tab={conversationInspectorTab} onTabChange={setConversationInspectorTab}
+    onClose={closeConversationInspector}>
+      {conversationInspectorTab === "PROGRESS" && <>
+        <p className="inspector-overline">当前工作</p>
+        <h3 className="inspector-title">暂无关联任务</h3>
+        <p className="inspector-sub">这是一段独立讨论，尚未关联任务，也没有正在执行的运行。</p>
+        <p className="inspector-note">进展、成果与执行记录会在创建任务并开始执行后出现在这里。读取目录与文件只需绑定目录并通过读取权限检查，无需创建任务或 Run。</p>
+      </>}
+      {conversationInspectorTab === "RESULTS" && <>
+        <p className="inspector-overline">工作成果</p>
+        <h3 className="inspector-title">已保存的成果版本</h3>
+        <p className="inspector-sub">请选择已保存的成果，阅读对应的确切版本正文。</p>
+        <p className="inspector-note">当前讨论没有已保存的成果版本。</p>
+      </>}
+      {conversationInspectorTab === "RECORDS" && <>
+        <p className="inspector-overline">运行记录</p>
+        <h3 className="inspector-title">执行与验证依据</h3>
+        <p className="inspector-sub">步骤状态、失败原因与运行身份集中在这里。</p>
+        <p className="inspector-note">当前讨论没有任务运行记录。会话中的目录与文件读取结果仍以原消息的实际工具回执为准。</p>
+      </>}
+  </WorkDetailsFrame>;
+
   return <section className="collab-page" data-testid="collab-page">
     <div className="collab-main">
       {recoveries.length > 0 && <section className="collab-recovery" role="status" data-testid="collab-recovery">
@@ -721,7 +888,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
       </section>}
 
 
-{task !== null && <header className="collab-goal" data-testid="collab-goal">
+{task !== null && <header hidden={workbenchView === "chat"} className="collab-goal" data-testid="collab-goal">
         <div className="collab-breadcrumbs">
           <span>工作台</span>
           <ChevronRight size={12} aria-hidden="true" />
@@ -732,12 +899,18 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
         <PageHeader title={task.title} testId="collab-page-head" titleHref={`/tasks/${task.id}`}
           status={<span className="status-chip">{taskStatusLabels[task.status] ?? task.status}</span>}
           actions={<>
+            {reviews.length > 0 && <button className="secondary-button secondary-button--compact" type="button" data-testid="collab-open-judgment"
+              onClick={() => {
+                setDevToolsOpen(false); revealSidePanel("DOCUMENT");
+                window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-testid="collab-judgment"]')?.focus());
+              }}>查看待处理 {reviews.length}</button>}
             <button
               type="button"
               className={`secondary-button secondary-button--compact collab-inspector-toggle-btn ${inspectorOpen ? "active" : ""}`}
               data-testid="collab-inspector-toggle"
               ref={inspectorToggleRef}
-              title="查看或收起工作详情"
+              title={inspectorToggleLabel(inspectorOpen)}
+              aria-label={inspectorToggleLabel(inspectorOpen)}
               aria-expanded={inspectorOpen}
               aria-controls={`collab-inspector-${task.id}`}
               onClick={() => {
@@ -745,14 +918,8 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                 setInspectorOpen((open) => !open);
               }}
             >
-              <PanelRight size={14} aria-hidden="true" />
-              <span>工作详情</span>
+              {inspectorOpen ? <PanelRightClose size={18} aria-hidden="true" /> : <PanelRightOpen size={18} aria-hidden="true" />}
             </button>
-            {reviews.length > 0 && <button className="secondary-button secondary-button--compact" type="button" data-testid="collab-open-judgment"
-              onClick={() => {
-                setDevToolsOpen(false); revealSidePanel("DOCUMENT");
-                window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-testid="collab-judgment"]')?.focus());
-              }}>查看待处理 {reviews.length}</button>}
           </>}
           more={<>
             {delegateTarget !== null && <TaskDelegatePanel compact client={client} task={delegateTarget}
@@ -829,6 +996,9 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
             <FactBar label="任务与执行事实" testId="collab-facts" cells={factCells} /></div>}
         </PageHeader>
       </header>}
+      {task !== null && workbenchView === "chat" && runNeedsAttention && <div className="collab-run-controls">
+        {runControl}<FactBar label="任务与执行事实" testId="collab-chat-facts" cells={factCells} />
+      </div>}
       {task !== null && <div className="collab-notices">
         {loading && <p className="helper-text" role="status">正在更新任务事实，已显示的内容保持可见。</p>}
         {error && <p className="action-error" role="alert" data-testid="collab-task-error">{error} 任务事实尚未重新核对，不能提交新的判断或任务命令。</p>}
@@ -847,16 +1017,22 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
       </div>}
 
       <div className={`collab-columns${task === null ? " collab-columns--empty" : ""}`} data-pane={sideTab}
-        data-layout-mode={task === null ? "split" : renderedLayoutMode} data-narrow-side={narrowSideOpen ? "open" : "closed"}
+        data-layout-mode={task === null ? "chat" : renderedLayoutMode} data-narrow-side={narrowSideOpen ? "open" : "closed"}
         style={{ "--relay-collab-chat-column": `${layout.chatRatio}fr`, "--relay-collab-result-column": `${1 - layout.chatRatio}fr` } as CSSProperties}>
 {task === null
-          ? <section className="collab-center" aria-label="工作主区" data-testid="collab-center">
+          ? <>
+          <section className="collab-center" aria-label="工作主区" data-testid="collab-center">
               {/* 顶部两个 details 大块（选择文件夹、接续已有任务）已删除：它们压在首屏最显眼处，
                   展开体量大、折叠后又只剩一行摘要。功能全部保留并换位——文件夹作用域收成输入卡
                   上方的常驻细条（composerHeader），「接续已有任务」迁到左栏就地展开区。 */}
               {/* 归属未确认时继续用工作区级会话面板：原历史与消息身份留在原地，
                   讨论输入不受限，依赖归属的执行入口由细条告警与空 executionScope 关闭。 */}
-              {!projectScopeActive
+              {entryPending ? <p className="helper-text" role="status">正在核对原会话归属…</p>
+                : entryError ? <div role="alert" className="page-state page-state--error" data-testid="collab-session-entry-error">
+                  <p>会话暂不可读取：{entryError}</p><button type="button" className="secondary-button" onClick={() => {
+                    setSessionEntry(null); setSessionEntryReload((value) => value + 1);
+                  }}>重新读取</button>
+                </div> : !projectScopeActive
                 ? <AssistView key={`unassigned:${newConversationKey ?? ""}:${sessionId === undefined ? "auto" : sessionId}`}
                   workspaceLevel deferSessionCreation
                   preferredSessionId={sessionId} standalone
@@ -867,11 +1043,14 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                   onSessionCreated={(created) => setSessionId(created)}
                   onActiveSessionChange={reportActiveSession}
                   firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage}
-                  conversationTarget={conversationTarget} onConversationTargetChange={setConversationTarget} />
-                : <AssistView key={`folder:${folderProjectId}:${folderReloadKey}:${newConversationKey ?? ""}:${sessionId === undefined ? "auto" : sessionId}`}
-                  targetKind="PROJECT" targetId={folderProjectId}
+                  conversationTarget={conversationTarget} onConversationTargetChange={setConversationTarget}
+                  conversationToolbar toolbarRight={conversationToolbarRight}
+                  onRequestFolder={requestFocusFolder} recentFolders={recents}
+                  onOpenRecentFolder={(canonicalRoot) => requestFolderTransition(canonicalRoot)} />
+                : <AssistView key={`folder:${conversationProjectId}:${folderReloadKey}:${newConversationKey ?? ""}:${sessionId === undefined ? "auto" : sessionId}`}
+                  targetKind="PROJECT" targetId={conversationProjectId ?? undefined}
                   preferredSessionId={sessionId} standalone deferSessionCreation
-                  executionScope={folder}
+                  executionScope={folderProjectId === conversationProjectId ? folder : null}
                   composerHeader={composerHeader}
                   onNavigationStateChange={reportNavigation}
                   onRequestNewSession={requestTransition}
@@ -880,8 +1059,18 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                   onActiveSessionChange={reportActiveSession}
                   onExecutionPrepared={(taskId) => void openExecutionTask(taskId)}
                   conversationTarget={conversationTarget} onConversationTargetChange={setConversationTarget}
-                  firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage} />}
+                  firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage}
+                  conversationToolbar toolbarRight={conversationToolbarRight}
+                  onRequestFolder={requestFocusFolder} recentFolders={recents}
+                  onOpenRecentFolder={(canonicalRoot) => requestFolderTransition(canonicalRoot)} />}
             </section>
+            {conversationInspectorOpen && <>
+              {/* 抽屉遮罩：分栏态由 CSS 收成 display:none，不产生第二套关闭语义。 */}
+              <div className="collab-inspector-scrim" data-testid="collab-conversation-inspector-scrim"
+                aria-hidden="true" onMouseDown={closeConversationInspector} />
+              {conversationInspector}
+            </>}
+          </>
           : <>
             <section className="collab-center" aria-label="工作主区" data-testid="collab-center" hidden={renderedLayoutMode === "result"}>
               <div className="collab-task-view-container" hidden={workbenchView !== "task"}>
@@ -905,7 +1094,15 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
               <div className="collab-chat-view-container" hidden={workbenchView !== "chat"}>
                 <AssistView key={`${task.id}:${sessionId === undefined ? "auto" : sessionId}`}
                   targetKind="TASK" targetId={task.id}
-                  preferredSessionId={sessionId} standalone
+                  preferredSessionId={sessionId} standalone deferSessionCreation
+                  firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage}
+                  composerHeader={composerHeader}
+                  executionScope={folder?.association?.projectId === task.projectId ? folder : null}
+                  onActiveSessionChange={reportActiveSession}
+                  conversationToolbar toolbarRight={conversationToolbarRight} onRequestFolder={requestFocusFolder}
+                  recentFolders={recents}
+                  onOpenRecentFolder={(canonicalRoot) => requestFolderTransition(canonicalRoot)}
+                  conversationTarget={conversationTarget} onConversationTargetChange={setConversationTarget}
                   externalWriteBlockedReason={projectWriteBlockedReason}
                   onNavigationStateChange={reportNavigation}
                   onRequestNewSession={requestTransition}
@@ -936,7 +1133,10 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
               onRefresh={refreshFacts} />
             </div>
 
-            {inspectorOpen && (
+            {inspectorOpen && <>
+              {/* 抽屉遮罩：分栏态由 CSS 收成 display:none；点按遮罩＝收起详情，与关闭键、Esc 同一条路径。 */}
+              <div className="collab-inspector-scrim" data-testid="collab-inspector-scrim"
+                aria-hidden="true" onMouseDown={closeInspector} />
               <TaskInspectorPanel
                 key={task.id}
                 client={client}
@@ -944,9 +1144,16 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                 run={run}
                 projectTitle={projectTitle}
                 folder={folder}
+                workingDirectoryPath={boundDirectory?.path ?? null}
                 mode={conversationTarget.mode}
                 selectedArtifact={selectedPreviewArtifact?.artifact.taskId === task.id ? selectedPreviewArtifact : null}
                 onSelectArtifactVersion={selectArtifactVersion}
+                onSelectVersion={(version) => {
+                  // 预览内换确切版本：沿用已登记的打开成果（任务必须还是那一条），返回焦点仍是原成果按钮。
+                  const current = selectedPreviewArtifact;
+                  if (current === null || current.artifact.taskId !== task.id) return;
+                  setSelectedPreviewArtifact({ artifact: current.artifact, version });
+                }}
                 onCloseFilePreview={() => {
                   setSelectedPreviewArtifact(null);
                   window.requestAnimationFrame(focusPreviewReturnTarget);
@@ -955,7 +1162,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                 onSwitchToTask={() => setWorkbenchView("task")}
                 isChatView={workbenchView === "chat"}
               />
-            )}
+            </>}
           </>}
       </div>
     </div>

@@ -3,6 +3,7 @@ import { requireTaskChainAdmission, type TaskChainBinding } from './task-chain-a
 import type { RunMethodBinding } from '../skills/builtin-methods.js';
 
 import type { DbExecutor } from '../infrastructure/database.js';
+import type { SessionModelSelectionRow } from '../infrastructure/database-schema.js';
 import { isPostgresError, POSTGRES_ERROR_CODES } from '../infrastructure/postgres-error.js';
 import { toDecimalString } from '../shared/decimal.js';
 import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
@@ -29,12 +30,14 @@ import {
 import { freezeExecutionContract, readContextSources, TOOL_LOOP_MAX_ROUNDS, MAX_EXPLICIT_CONTEXT_SOURCES,
   TOOL_LOOP_MAX_TOOL_CALLS } from '../workflow/execution-contract.js';
 import { readInternalTool } from '../workflow/tool-catalog.js';
+import { freezeAssistModelSnapshot } from './assist-model-snapshot.js';
 
 /** 首批工具循环只读三类能力；写入与检查在后续片按同一张表扩进来。 */
 // 写入与受控命令也在信封允许的能力之内：信封是模型自主调用的上界，不是授权。
 // 没有对应范围授权时，这些动作仍然退回落单动作审批（Gateway 的既有降级）。
+// 0092: COMPUTER_READ/COMPUTER_INPUT 同理——桌面输入的实际放行由审批或范围授权决定。
 const TOOL_LOOP_CAPABILITIES: readonly string[] =
-  ['FILE_QUERY', 'FILE_READ', 'GIT_READ', 'FILE_WRITE', 'CLI_RUN'];
+  ['FILE_QUERY', 'FILE_READ', 'GIT_READ', 'FILE_WRITE', 'CLI_RUN', 'COMPUTER_READ', 'COMPUTER_INPUT'];
 import type { ContextSourceRef } from '../workflow/execution-contract.js';
 import { loadRulePlanBasis } from './rule-plan-basis.js';
 import { canonicalRelativePath, requireFrozenBaseline,
@@ -73,6 +76,8 @@ export interface DelegateTaskInput {
   readonly retryOfRunId?: string | null;
   readonly workflowVersionId?: string | null;
   readonly executionConfigVersionId?: string | null;
+  /** Internal conversation origin; not an endpoint or credential supplied by the client. */
+  readonly modelSessionId?: string | undefined;
   readonly mockGatewayAction?: {
     readonly connection_id: string; readonly resource_id: string;
     readonly target: string; readonly content: string;
@@ -134,6 +139,7 @@ const TERMINAL_RUN_STATUSES: readonly string[] = ['COMPLETED', 'FAILED', 'CANCEL
 export async function delegateTask(
   db: DbExecutor,
   input: DelegateTaskInput,
+  modelEnv: NodeJS.ProcessEnv = process.env,
 ): Promise<CommandOutcome<DelegateTaskResult>> {
   const expectedTaskRevision = requireRevision(
     input.expectedTaskRevision,
@@ -158,6 +164,7 @@ export async function delegateTask(
       retry_of_run_id: retryOfRunId,
       workflow_version_id: workflowVersionId,
       execution_config_version_id: executionConfigVersionId,
+      ...(input.modelSessionId === undefined ? {} : { model_session_id: input.modelSessionId }),
       mock_gateway_action: input.mockGatewayAction ?? null,
       ...(input.executionMethod === undefined ? {} : { execution_method: input.executionMethod }),
       context_sources: input.contextSources === undefined ? null :
@@ -415,8 +422,22 @@ export async function delegateTask(
       const runId = randomUUID();
       const contextSources = await resolveExplicitContextSources(repositories, input.workspaceId,
         task, input.contextSources);
+      let modelSelection: SessionModelSelectionRow | undefined;
+      if (input.modelSessionId !== undefined) {
+        const session = await repositories.assist.readSession(input.modelSessionId, true);
+        if (session === undefined || session.workspace_id !== input.workspaceId) {
+          throw resourceNotFound('Assist session');
+        }
+        if (session.status !== 'ACTIVE') throw invalidTransition('模型来源会话已归档，不能创建新的执行。');
+        modelSelection = await repositories.modelSelection.readForSession(session.id);
+      }
+      const modelPlan = await freezeAssistModelSnapshot(repositories, modelSelection, modelEnv, {
+        requiresTools: input.toolLoopAction !== undefined,
+        requiresJsonOutput: [...criteria, ...ruleCriteria].some((criterion) => criterion.method === 'SEMANTIC'),
+      });
       const frozen = freezeExecutionContract({
         taskId: task.id,
+        ...(modelPlan === undefined ? {} : { modelSelectionSnapshot: modelPlan.snapshot }),
         ...(input.executionMethod === undefined ? {} : { executionMethod: input.executionMethod }),
         acceptanceRevision: task.acceptance_revision,
         objective: acceptance.objective,

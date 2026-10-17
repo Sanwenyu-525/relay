@@ -1,5 +1,9 @@
 # 内置 Skill、聊天命令、DeepSeek 压缩与消息文件撤回：完整实施提示词
 
+2026-10-16 免费额度接续：模型阶段同时核对[专项修订任务书](free-model-catalog.md)、需求 §9.1.1 与 FM-10–13；Run 冻结改为初始模型/有序候选策略不可变、实际切换另留回执。目录刷新或手动选择仍不改活动策略，不把旧“原 Run 永远只调用一个型号”套到已授权的模型级额度接续。仅下发专项不启动本文其他能力。
+
+2026-10-15 模型选择接续：免费分组、OpenRouter 目录同步及其必要会话选择/Run 冻结按[专项任务书](free-model-catalog.md)和[后续路线 §9.1](../docs/requirements/post-v1-roadmap.md#91-免费模型分组与自动同步)实施。仅下发该专项时不执行本文其余压缩、定制与文件恢复；若未来下发本完整任务，模型阶段需同时核对专项已完成部分，避免重做或绕过免费调用约束。
+
 日期：2026-10-11。用途：交给可访问 `D:/Develop/Relay-Agent` 的执行 Agent。**本文件目前只是提示词交付，没有启动产品开发、测试或真实模型调用。** 用户实际下发执行后，按下面任务完成必要工程设计、编码、自检、独立验收、修复复验和文档同步。
 
 已确认规则分别归[产品总纲 §0.13](../Personal_Workflow_OS_Master_Spec.md#013-内置工作方法与会话控制)、[Skill 专题第 9 节](../docs/architecture/relay-skills.md#9-内置工作方法与可定制-skill)、[运行架构第 8 节](../docs/architecture/runtime-context.md#8-会话压缩与消息文件恢复)、[工作台第 27 节](../docs/frontend/workbench-design.md#27-内置-skill-与聊天命令)和 [ADR-019](../docs/decisions/ADR-019-builtin-methods-and-conversation-checkpoints.md)。工程前置见[路线第 9 节](../docs/requirements/post-v1-roadmap.md#9-内置工作方法命令与会话恢复的范围)，验收映射见[BC-01–BC-17](../docs/testing/verification-plan.md#26-内置-skill命令压缩与消息文件恢复验收规格)。本文拥有实施顺序、分工和执行出口，不代替这些事实源。

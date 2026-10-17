@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { DomWrapper, dialogText, flush, mountWorkbench, openWorkingDirectory } from "./mountApp";
+import { DomWrapper, dialogText, feedbackText, flush, mountWorkbench, openSessionSwitcher, openWorkingDirectory, pressEscape, switcherCurrentSession, toolbarSessionTitle } from "./mountApp";
 
 /**
  * 协作页聊天框的会话模式单选框与人设助手（工作台 §25、ADR-018、测试计划 §23.2）。
@@ -11,6 +11,10 @@ import { DomWrapper, dialogText, flush, mountWorkbench, openWorkingDirectory } f
  *
  * 用 `/agent` 而不是项目子页：模式控件只在 standalone 的输入器工具行里，
  * 项目子页是嵌入式表单，没有那一行。
+ *
+ * 2026-10-16 助手配置从输入框内联改收进 AppDialog。AppDialog 是 Portal 到 body 的，
+ * 而 `view.wrapper` 只覆盖挂载容器，因此弹窗内的节点一律经 `assistantDialogEl` 取，
+ * 留在输入框里的节点（chip、只读说明、blocked 行）仍走 `view.wrapper`。
  */
 
 const baseUrl = "http://127.0.0.1:8787";
@@ -111,6 +115,11 @@ function stub(options: Stub) {
     }
     if (path === `${prefix}/assistant-profiles`) return options.profileList?.()
       ?? json({ items: options.profiles ?? [profile()] });
+    if (path.endsWith("/working-directory") && method === "POST") {
+      const body = options.posts.at(-1)!.body;
+      return json({ command_id: body.command_id, committed_at: "2026-10-16T00:00:00Z",
+        result: { session_id: path.split("/").at(-2), working_resource_id: body.resource_id, revision: "2" } });
+    }
     if (path === `${prefix}/assist-sessions` && method === "POST") {
       const body = options.posts.at(-1)?.body ?? {};
       const assistant = body.conversation_mode === "ASSISTANT";
@@ -205,14 +214,32 @@ async function openAgent(options: Stub) {
   return view;
 }
 
-/** select 的当前值：React 写的是 DOM property，getAttribute 读不到。 */
-function selectValue(testId: string): string {
-  const element = document.querySelector<HTMLSelectElement>(`[data-testid="${testId}"]`);
-  if (element === null) throw new Error(`selector not found: ${testId}`);
-  return element.value;
+const configDialogSelector = '[role="dialog"][aria-label="人设助手"]';
+function assistantDialogOpen(): boolean { return document.querySelector(configDialogSelector) !== null; }
+/** 助手配置在弹窗里，而弹窗挂在 body 上：必须从 document 取，不能从 view.wrapper 取。 */
+function assistantDialogEl(testId: string): DomWrapper {
+  const element = document.querySelector(`[data-testid="${testId}"]`);
+  if (element === null) throw new Error(`assistant config selector not found: ${testId}`);
+  return new DomWrapper(element);
+}
+async function openAssistantConfig(view: Awaited<ReturnType<typeof openAgent>>): Promise<void> {
+  if (assistantDialogOpen()) return;
+  await view.wrapper.get('[data-testid="assist-assistant-config-toggle"]').trigger("click");
+  await flush();
+}
+async function closeAssistantConfig(): Promise<void> {
+  if (!assistantDialogOpen()) return;
+  await act(async () => { pressEscape(); });
+  await flush();
+}
+/** 在弹窗里选一个助手。选中即收起弹窗：遮罩挡着输入框，留着不让人继续打字是刻意的。 */
+async function pickAssistant(view: Awaited<ReturnType<typeof openAgent>>, profileId: string): Promise<void> {
+  await openAssistantConfig(view);
+  await assistantDialogEl('assist-assistant-picker').setValue(profileId);
+  await flush();
 }
 
-/** 拨到助手档，等导航与面板挂载完。 */
+/** 拨到助手档，等导航与面板挂载完。配置弹窗不随切档自动打开，需要它的用例显式 open。 */
 async function flipToAssistant(view: Awaited<ReturnType<typeof openAgent>>) {
   await view.wrapper.get('[data-testid="assist-conversation-mode-assistant"]').setValue(true);
   await flush(80);
@@ -276,13 +303,14 @@ describe("会话模式单选框", () => {
       expect(options.sessions).toHaveLength(2);
       expect(options.sessions[1]).toMatchObject({ id: createdSessionId, conversation_mode: mode,
         project_id: projectId, assistant_profile_id: source.assistant_profile_id });
-      expect(view.wrapper.get('[data-testid="assist-session"]').text()).toContain(createdSessionId);
-      expect(view.wrapper.find('[data-role="ASSISTANT"]').exists()).toBe(false);
-      const labels = view.wrapper.get('[data-testid="assist-session-select"]').findAll("option")
-        .map((option) => option.text()).filter((label) => label.includes(source.title));
+      // 顶栏左翼只显示会话名；界面停在哪个会话由右翼「切换讨论」浮层读（取代旧下拉的 value 与文案）。
+      // 同名讨论仍在同一个入口里分开：同名才补更新时刻，且只有一条标「当前」。
+      const labels = (await openSessionSwitcher()).filter((label) => label.includes(source.title));
       expect(labels).toHaveLength(2);
       expect(labels.every((label) => label.includes("更新"))).toBe(true);
       expect(labels.filter((label) => label.includes("当前"))).toHaveLength(1);
+      expect(switcherCurrentSession()).toBe(createdSessionId);
+      expect(view.wrapper.find('[data-role="ASSISTANT"]').exists()).toBe(false);
     } finally { view.unmount(); }
   });
   it("新会话响应丢失后按原回执接续，不重复创建", async () => {
@@ -296,7 +324,9 @@ describe("会话模式单选框", () => {
       expect((document.querySelector('[data-testid="assist-draft"]') as HTMLTextAreaElement).value).toBe("/clear");
       await view.wrapper.findAll("button").find((item) => item.text() === "查询原命令回执")!.trigger("click");
       await flush(100);
-      expect(view.wrapper.get('[data-testid="assist-session"]').text()).toContain(createdSessionId);
+      // 回执接续之后停在按原 command_id 建出的那条讨论上（顶栏浮层的当前标记，取代旧下拉的 value）。
+      await openSessionSwitcher();
+      expect(switcherCurrentSession()).toBe(createdSessionId);
       expect(options.posts.filter((p) => p.path.endsWith("/chat-commands"))).toHaveLength(1);
       expect(options.sessions).toHaveLength(2);
     } finally { view.unmount(); }
@@ -308,7 +338,7 @@ describe("会话模式单选框", () => {
       await view.wrapper.get('[data-testid="assist-draft"]').setValue("/undo");
       await view.wrapper.get('[data-testid="assist-composer"] form').trigger("submit");
       await flush(60);
-      expect(view.wrapper.get('[data-testid="assist-receipt-notice"]').text()).toContain("撤回本次调整");
+      expect(feedbackText("assist-receipt-notice")).toContain("撤回本次调整");
       expect(options.posts.filter((p) => !p.path.endsWith("/working-directories/open"))).toHaveLength(0);
     } finally { view.unmount(); }
   });
@@ -398,6 +428,7 @@ describe("会话模式单选框", () => {
     const view = await openAgent(options);
     expect(view.wrapper.get('[data-testid="assist-conversation-mode-agent"]').attributes("checked")).toBe("");
     expect(view.wrapper.find('[data-testid="assist-assistant-picker"]').exists()).toBe(false);
+    expect(view.wrapper.find('[data-testid="assist-assistant-config-toggle"]').exists()).toBe(false);
     view.unmount();
   });
 
@@ -408,8 +439,9 @@ describe("会话模式单选框", () => {
     await flipToAssistant(view);
     // 建会话是写命令；切档如果偷偷建了一条，这里就会多一个 POST。
     expect(options.posts.slice(before).filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(0);
-    // 落到了那一条已有的助手会话上，而不是另开一条。
-    expect(selectValue("assist-assistant-picker")).toBe(assistantProfileId);
+    // 落到了那一条已有的助手会话上，而不是另开一条。配置收进弹窗后，
+    // 「跟谁说话」这件事必须不点开弹窗就看得见，所以断言落在 chip 上。
+    expect(view.wrapper.get('[data-testid="assist-assistant-config-toggle"]').text()).toContain("审读 · v3");
     expect(view.wrapper.find('[data-testid="assist-draft"]').exists()).toBe(true);
     view.unmount();
   });
@@ -423,6 +455,187 @@ describe("会话模式单选框", () => {
     expect(view.wrapper.find('[data-testid="assist-skill"]').exists()).toBe(false);
     expect(view.wrapper.get('[data-testid="assist-readonly-note"]').text()).toContain("只读");
     view.unmount();
+  });
+
+  it("切到助手档不自动弹遮罩：chip 说清还缺什么，撑高的东西一个都不进输入框", async () => {
+    const options: Stub = { sessions: [], posts: [], profiles: [] };
+    const view = await openAgent(options);
+    try {
+      await view.wrapper.get('[data-testid="assist-conversation-mode-assistant"]').setValue(true);
+      await flush(80);
+      expect(assistantDialogOpen()).toBe(false);
+      const chip = view.wrapper.get('[data-testid="assist-assistant-config-toggle"]');
+      expect(chip.text()).toContain("选择助手");
+      expect(chip.attributes("aria-expanded")).toBe("false");
+      // 下一步由常驻的 blocked 行说，不靠自动弹窗把人按在遮罩里。
+      expect(view.wrapper.get('[data-testid="assist-first-blocked"]').text()).toContain("先新建一个");
+      // 清单提示、下拉与新建表单都只在弹窗里，输入框卡内不留副本。
+      expect(view.wrapper.find('[data-testid="assist-assistant-picker"]').exists()).toBe(false);
+      expect(view.wrapper.find('[data-testid="assist-assistant-create-toggle"]').exists()).toBe(false);
+      expect(view.wrapper.find('[data-testid="assist-assistant-list-empty"]').exists()).toBe(false);
+    } finally { view.unmount(); }
+  });
+
+  it("chip 点开配置弹窗，Esc 关闭后焦点回到 chip", async () => {
+    const options: Stub = { sessions: [], posts: [], profiles: [] };
+    const view = await openAgent(options);
+    try {
+      await flipToAssistant(view);
+      const chip = view.wrapper.get('[data-testid="assist-assistant-config-toggle"]').element as HTMLElement;
+      // jsdom 的 click() 不移动焦点，真实浏览器会：先聚焦再点，才测得到关闭后的归位目标。
+      await act(async () => { chip.focus(); chip.click(); });
+      await flush();
+      expect(assistantDialogOpen()).toBe(true);
+      expect(assistantDialogEl('assist-assistant-list-empty').text()).toContain("重新读取助手清单");
+      await closeAssistantConfig();
+      expect(assistantDialogOpen()).toBe(false);
+      expect(document.activeElement).toBe(chip);
+      expect(view.wrapper.get('[data-testid="assist-assistant-config-toggle"]').attributes("aria-expanded")).toBe("false");
+    } finally { view.unmount(); }
+  });
+
+  it("只读边界说明常驻输入框，不跟着配置一起收进弹窗", async () => {
+    const options: Stub = { sessions: [], posts: [], profiles: [] };
+    const view = await openAgent(options);
+    try {
+      await flipToAssistant(view);
+      await openAssistantConfig(view);
+      // 这档最容易被误当成「什么都能干的另一个聊天窗口」，边界必须不点开也看得见。
+      expect(view.wrapper.get('[data-testid="assist-readonly-note"]').text()).toContain("不派子 Agent");
+      expect(document.querySelector(configDialogSelector)!.querySelector('[data-testid="assist-readonly-note"]'))
+        .toBeNull();
+    } finally { view.unmount(); }
+  });
+
+  it("没有可用助手时新建入口就地可见：点开同一弹窗，表单已展开、焦点在名字", async () => {
+    const options: Stub = { sessions: [], posts: [], profiles: [] };
+    const view = await openAgent(options);
+    await flipToAssistant(view);
+    try {
+      expect(view.wrapper.get('[data-testid="assist-assistant-create-entry"]').text()).toBe("新建助手");
+      await view.wrapper.get('[data-testid="assist-assistant-create-entry"]').trigger("click");
+      await flush();
+      expect(assistantDialogOpen()).toBe(true);
+      // 就地入口与 chip 点开的是同一个弹窗，差别只在表单已展开、焦点直接落在名字上。
+      const details = document.querySelector(`${configDialogSelector} details.agent-chat-assistant-create`);
+      expect(details?.hasAttribute("open")).toBe(true);
+      expect(document.activeElement).toBe(assistantDialogEl("assist-assistant-name").element);
+      // 入口只开配置，不替代发送：到此刻为止没有创建会话或消息。
+      expect(options.posts.filter((post) => post.path === `${prefix}/assist-sessions` ||
+        post.path.endsWith("/messages"))).toHaveLength(0);
+    } finally { view.unmount(); }
+  });
+
+  /* 「+」弹层的禁用原因落在底部一条脚注，而不是逐条挂在选项下（2026-10-16）。
+     这条断言锁的是「禁用仍有可见原因」：脚注一旦删掉，四条选项里两条灰掉却无人说明为什么。 */
+  it("「+」弹层：选项恒定单行，禁用原因合并成底部一条脚注并被禁用项引用", async () => {
+    const options: Stub = { sessions: [], posts: [], profiles: [] };
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    vi.stubGlobal("fetch", stub(options));
+    const view = await mountWorkbench("/agent");
+    try {
+      const note = document.querySelector(".agent-chat-attach-note");
+      expect(note?.textContent).toBe("首条消息后可选资料与 Skill");
+      expect(document.querySelector(".agent-chat-attach-item-reason")).toBeNull();
+      for (const key of ["sources", "skill"]) {
+        const item = document.querySelector(`[data-testid="assist-attach-${key}"]`);
+        expect(item?.hasAttribute("disabled")).toBe(true);
+        expect(item?.getAttribute("aria-describedby")).toBe(note?.id);
+      }
+      // 打开目录后文件夹入口是活的，命令入口任何时候都不该带原因。
+      expect(document.querySelector('[data-testid="assist-attach-folder"]')?.hasAttribute("disabled")).toBe(false);
+      expect(document.querySelector('[data-testid="assist-attach-command"]')?.getAttribute("aria-describedby")).toBeNull();
+    } finally { view.unmount(); }
+  });
+
+  /* 「+」二级菜单（2026-10-16，工作台 §32）：一级只表达「想做什么」，具体选择在二级，
+     执行仍走各自原有的 Owner。菜单框架本身的契约在 composerAttachMenu.spec.tsx 里单独锁，
+     这里补的是「真实路由下确实接到既有能力」这一段。 */
+  it("「+」目录二级：先展开二级，未接入项如实禁用，「选择文件夹」仍走协作页的目录入口", async () => {
+    const options: Stub = { sessions: [], posts: [], profiles: [] };
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    vi.stubGlobal("fetch", stub(options));
+    const view = await mountWorkbench("/agent");
+    try {
+      await view.wrapper.get('[data-testid="assist-attach"]').trigger("click");
+      await flush();
+      await view.wrapper.get('[data-testid="assist-attach-folder"]').trigger("click");
+      await flush();
+      const submenu = document.querySelector('[data-submenu="true"]');
+      expect(submenu?.getAttribute("data-section")).toBe("folder");
+      // 一级不因展开二级而收起：两级是同一个弹层里的两层，不是两个各自开关的浮层。
+      expect(document.querySelector(".agent-chat-attach")?.hasAttribute("open")).toBe(true);
+      // 未接入的能力不假装可用，并写明原因与当前替代路径。
+      expect(document.querySelector('[data-testid="assist-attach-workspace-manage"]')?.hasAttribute("disabled")).toBe(true);
+      expect(submenu?.querySelector(".agent-chat-attach-subnote")?.textContent).toContain("工作区管理尚未接入");
+      // 「选择文件夹」复用协作页持有的「更换目录」对话框，不新建第二套目录选择器。
+      await view.wrapper.get('[data-testid="assist-attach-folder-pick"]').trigger("click");
+      await flush(80);
+      expect(document.querySelector('[role="dialog"][aria-label="更换工作目录"]')).not.toBeNull();
+      await act(async () => { pressEscape(); });
+    } finally { view.unmount(); }
+  });
+
+  it("「+」命令二级：清单读真实登记，点击只把命令填进首条草稿", async () => {
+    const options: Stub = { sessions: [], posts: [], profiles: [] };
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    vi.stubGlobal("fetch", stub(options));
+    const view = await mountWorkbench("/agent");
+    try {
+      await view.wrapper.get('[data-testid="assist-attach"]').trigger("click");
+      await flush();
+      await view.wrapper.get('[data-testid="assist-attach-command"]').trigger("click");
+      await flush();
+      expect(document.querySelector('[data-testid="assist-attach-command-review"]')?.textContent)
+        .toContain("/review · 代码审查");
+      await view.wrapper.get('[data-testid="assist-attach-command-review"]').trigger("click");
+      await flush();
+      // 只编辑草稿：不发送、不建会话，用户仍可继续改写这条命令。
+      expect((document.querySelector('[data-testid="assist-first-draft"]') as HTMLTextAreaElement).value)
+        .toBe("/review ");
+      expect(options.posts.filter((post) => post.path === `${prefix}/assist-sessions` ||
+        post.path.endsWith("/messages"))).toHaveLength(0);
+    } finally { view.unmount(); }
+  });
+
+  it("从就地入口建完助手：弹窗收起、入口消失、chip 更新，全程不创建会话", async () => {
+    const options: Stub = { sessions: [], posts: [], profiles: [] };
+    const view = await openAgent(options);
+    await flipToAssistant(view);
+    try {
+      await view.wrapper.get('[data-testid="assist-assistant-create-entry"]').trigger("click");
+      await flush();
+      await assistantDialogEl("assist-assistant-name").setValue("审读");
+      await assistantDialogEl("assist-assistant-role").setValue("只读复核这份改动");
+      await assistantDialogEl("assist-assistant-save").trigger("click");
+      await flush(80);
+      expect(assistantDialogOpen()).toBe(false);
+      expect(view.wrapper.find('[data-testid="assist-assistant-create-entry"]').exists()).toBe(false);
+      expect(view.wrapper.get('[data-testid="assist-assistant-config-toggle"]').text()).toContain("审读 · v1");
+      expect(options.posts.filter((post) => post.path === `${prefix}/assist-sessions` ||
+        post.path.endsWith("/messages"))).toHaveLength(0);
+    } finally { view.unmount(); }
+  });
+
+  it("有可用助手时新建入口不再就地出现，只留在弹窗里", async () => {
+    const options: Stub = { sessions: [], posts: [] };
+    const view = await openAgent(options);
+    await flipToAssistant(view);
+    try {
+      expect(view.wrapper.find('[data-testid="assist-assistant-create-entry"]').exists()).toBe(false);
+      await openAssistantConfig(view);
+      expect(assistantDialogEl("assist-assistant-create-toggle").exists()).toBe(true);
+    } finally { view.unmount(); }
+  });
+
+  it("清单读取失败时新建入口同样就地可见，与弹窗里「可以先新建助手」的说法一致", async () => {
+    const options: Stub = { sessions: [], posts: [],
+      profileList: () => json({ code: "SERVICE_UNAVAILABLE", detail: "暂不可读" }, 503) };
+    const view = await openAgent(options);
+    await flipToAssistant(view);
+    try {
+      expect(view.wrapper.get('[data-testid="assist-assistant-create-entry"]').exists()).toBe(true);
+    } finally { view.unmount(); }
   });
 
   it("首条助手档隐藏普通讨论入口；没有可用身份时按钮、Enter 与 submit 都被拦截", async () => {
@@ -449,10 +662,11 @@ describe("会话模式单选框", () => {
     const view = await openAgent(options);
     await flipToAssistant(view);
     try {
+      await openAssistantConfig(view);
       const draft = view.wrapper.get('[data-testid="assist-first-draft"]');
       await draft.setValue("读取失败时不得创建会话");
-      expect(view.wrapper.get('[data-testid="assist-assistant-list-error"]').text()).toContain("暂不可读");
-      expect(view.wrapper.get('[data-testid="assist-assistant-list-reload"]').exists()).toBe(true);
+      expect(assistantDialogEl('assist-assistant-list-error').text()).toContain("暂不可读");
+      expect(assistantDialogEl('assist-assistant-list-reload').exists()).toBe(true);
       expect(view.wrapper.get('[data-testid="assist-first-send"]').attributes("disabled")).toBe("");
       await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit");
       await flush(80);
@@ -468,9 +682,12 @@ describe("会话模式单选框", () => {
     const view = await openAgent(options);
     await flipToAssistant(view);
     try {
+      // 清单还在读取时无从判断「没有助手」，就地入口要等读取结束再决定去留。
+      expect(view.wrapper.find('[data-testid="assist-assistant-create-entry"]').exists()).toBe(false);
+      await openAssistantConfig(view);
       const draft = view.wrapper.get('[data-testid="assist-first-draft"]');
       await draft.setValue("加载中不得创建会话");
-      expect(view.wrapper.get('[data-testid="assist-assistant-list-loading"]').exists()).toBe(true);
+      expect(assistantDialogEl('assist-assistant-list-loading').exists()).toBe(true);
       expect(view.wrapper.get('[data-testid="assist-first-send"]').attributes("disabled")).toBe("");
       await draft.trigger("keydown", { key: "Enter" });
       await flush(80);
@@ -534,14 +751,15 @@ describe("会话模式单选框", () => {
     const view = await openAgent(options);
     await flipToAssistant(view);
     try {
-      if (invalidId !== null) await view.wrapper.get('[data-testid="assist-assistant-picker"]').setValue(invalidId);
+      await openAssistantConfig(view);
+      if (invalidId !== null) await assistantDialogEl('assist-assistant-picker').setValue(invalidId);
       const draft = view.wrapper.get('[data-testid="assist-first-draft"]');
       await draft.setValue("无效助手身份不得发送");
       expect(view.wrapper.get('[data-testid="assist-first-send"]').attributes("disabled")).toBe("");
       expect(view.wrapper.get('[data-testid="assist-first-blocked"]').text()).toContain(reason);
       if (profiles[0] && (profiles[0] as { status?: string }).status === "ARCHIVED") {
-        expect(view.wrapper.get('[data-testid="assist-assistant-list-empty"]').text()).toContain("重新读取助手清单");
-        expect(view.wrapper.get('[data-testid="assist-assistant-list-reload"]').exists()).toBe(true);
+        expect(assistantDialogEl('assist-assistant-list-empty').text()).toContain("重新读取助手清单");
+        expect(assistantDialogEl('assist-assistant-list-reload').exists()).toBe(true);
       }
       await draft.trigger("keydown", { key: "Enter" });
       await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit");
@@ -557,7 +775,7 @@ describe("会话模式单选框", () => {
     const view = await openAgent(options);
     await flipToAssistant(view);
     try {
-      await view.wrapper.get('[data-testid="assist-assistant-picker"]').setValue(assistantProfileId);
+      await pickAssistant(view, assistantProfileId);
       await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("原命令必须保留第一位助手");
       await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit");
       await flush(100);
@@ -565,7 +783,7 @@ describe("会话模式单选框", () => {
       expect(firstCreate?.body.assistant_profile_id).toBe(assistantProfileId);
       expect(view.wrapper.get('[data-testid="assist-first-create-retry"]').exists()).toBe(true);
 
-      await view.wrapper.get('[data-testid="assist-assistant-picker"]').setValue(createdProfileId);
+      await pickAssistant(view, createdProfileId);
       await view.wrapper.get('[data-testid="assist-first-create-retry"]').trigger("click");
       await flush(160);
       const createPosts = options.posts.filter((post) => post.path === `${prefix}/assist-sessions`);
@@ -584,7 +802,7 @@ describe("会话模式单选框", () => {
     const view = await openAgent(options);
     await flipToAssistant(view);
     try {
-      await view.wrapper.get('[data-testid="assist-assistant-picker"]').setValue(assistantProfileId);
+      await pickAssistant(view, assistantProfileId);
       await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("重试不新增 intent");
       await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit");
       await flush(140);
@@ -592,7 +810,7 @@ describe("会话模式单选框", () => {
       expect(firstSend?.body).toMatchObject({ content: "重试不新增 intent" });
       expect(firstSend?.body).not.toHaveProperty("intent");
       expect(view.wrapper.get('[data-testid="assist-first-retry"]').exists()).toBe(true);
-      await view.wrapper.get('[data-testid="assist-assistant-picker"]').setValue(createdProfileId);
+      await pickAssistant(view, createdProfileId);
       await view.wrapper.get('[data-testid="assist-first-retry"]').trigger("click");
       await flush(120);
       const sends = options.posts.filter((post) => post.path.endsWith("/messages"));
@@ -646,6 +864,82 @@ describe("会话模式单选框", () => {
     view.unmount();
   });
 
+  /**
+   * 2026-10-16 布局回归（两轮）。用户先报「执行中输入框布局乱掉」，再按截图指认
+   * 「这些都导致输入框变化了」——档位锁定原因、学习/助手档说明、命令回执原先都渲染在
+   * 输入卡内部，卡片于是随状态长高、变矮，用户正在打字的光标与工具行跟着跳。
+   *
+   * 现在的契约：**卡内恒定只有正文、工具行与发送键**；模式说明与回执都在卡外这一列里
+   * （`.agent-chat-mode-hints` 与 `.receipt-message` 作为 `.agent-assist` 列的子项）。
+   * 说明行也不能退回模式盒：模式盒是 auto 宽 + `flex-wrap` 的内联 flex，长文本会让它
+   * 按可用宽度撑开（真实 Chromium 实测 241px → 483px、两行）把 chip 挤到别的行。
+   * jsdom 不做布局，所以这里锁的是结构不变式（父子关系与卡内子项清单），几何证据见验收表该行。
+   */
+  it("在途时输入卡不变形：锁定原因与档位说明都在卡外", async () => {
+    const options: Stub = { sessions: [agentSession(), assistantSession()], posts: [],
+      inflightSessionId: agentSessionId };
+    const view = await openAgent(options);
+    try {
+      const card = view.wrapper.get('[data-testid="assist-composer"]');
+      expect([...card.element!.children].map((element) => element.className.split(" ")[0]))
+        .toEqual(["agent-chat-composer-spark", "agent-chat-message-form", "agent-chat-composer-actions"]);
+      const locked = view.wrapper.get('[data-testid="conversation-mode-locked"]');
+      expect(locked.element?.closest(".agent-chat-composer")).toBeNull();
+      expect(locked.element?.closest(".agent-chat-mode")).toBeNull();
+      expect(locked.element?.parentElement?.classList.contains("agent-chat-mode-hints")).toBe(true);
+      expect(locked.element?.classList.contains("disabled-reason")).toBe(true);
+    } finally { view.unmount(); }
+  });
+
+  it("收到命令回执时输入卡同样不变形：回执在卡外", async () => {
+    const options: Stub = { sessions: [agentSession()], posts: [] };
+    const view = await openAgent(options);
+    try {
+      await view.wrapper.get('[data-testid="assist-draft"]').setValue("/undo");
+      await view.wrapper.get('[data-testid="assist-composer"] form').trigger("submit");
+      await flush(60);
+      const card = view.wrapper.get('[data-testid="assist-composer"]');
+      expect([...card.element!.children].map((element) => element.className.split(" ")[0]))
+        .toEqual(["agent-chat-composer-spark", "agent-chat-message-form", "agent-chat-composer-actions"]);
+      const receipt = document.querySelector('[data-testid="assist-receipt-notice"]');
+      expect(receipt?.textContent ?? "").toContain("撤回本次调整");
+      // 2026-10-17：回执从「卡外的一条正文」变成 body 上的浮层栈条目，
+      // 因此它既不在输入卡内，也不再占文档流——卡的高度与它出现与否无关。
+      expect(receipt?.closest(".agent-chat-composer")).toBeNull();
+    } finally { view.unmount(); }
+  });
+
+  it("学习档与助手档的常驻说明也在卡外", async () => {
+    const options: Stub = { sessions: [agentSession(), learningSession(), assistantSession()], posts: [],
+      withMessages: [learningSessionId] };
+    const view = await openAgent(options);
+    try {
+      await view.wrapper.get('[data-testid="assist-conversation-mode-learning"]').setValue(true);
+      await flush(80);
+      const learning = view.wrapper.get('[data-testid="learning-readonly-note"]');
+      expect(learning.element?.closest(".agent-chat-composer")).toBeNull();
+      expect(learning.element?.closest(".agent-chat-mode")).toBeNull();
+      expect(learning.element?.parentElement?.classList.contains("agent-chat-mode-hints")).toBe(true);
+      await flipToAssistant(view);
+      const assistant = view.wrapper.get('[data-testid="assist-readonly-note"]');
+      expect(assistant.element?.closest(".agent-chat-composer")).toBeNull();
+      expect(assistant.element?.closest(".agent-chat-mode")).toBeNull();
+      expect(assistant.element?.parentElement?.classList.contains("agent-chat-mode-hints")).toBe(true);
+    } finally { view.unmount(); }
+  });
+
+  it("消息底栏：复制键排在用量左侧，因此左缘与正文左缘对齐", async () => {
+    const options: Stub = { sessions: [agentSession()], posts: [], withMessages: [agentSessionId] };
+    const view = await openAgent(options);
+    try {
+      // 同一排的先后就是左缘的依据：flex 行首第一项贴着正文左缘，用量跟在它后面。
+      const children = Array.from(view.wrapper.get(".agent-message-footer").element?.children ?? []);
+      expect(children.map((element) => element.className.split(" ")[0])).toEqual(["icon-button", "helper-text"]);
+      expect(children[0]!.getAttribute("data-testid")).toContain("assist-copy-");
+      expect(children[1]!.getAttribute("data-testid")).toContain("assist-usage-");
+    } finally { view.unmount(); }
+  });
+
   it("助手档不渲染暂停与人工接管入口", async () => {
     const options: Stub = { sessions: [agentSession(), assistantSession()], posts: [],
       withMessages: [assistantSessionId] };
@@ -661,11 +955,12 @@ describe("会话模式单选框", () => {
     const view = await openAgent(options);
     await flipToAssistant(view);
     await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("保存助手不能提交这条首条草稿");
-    await view.wrapper.get('[data-testid="assist-assistant-create-toggle"]').trigger("click");
-    await view.wrapper.get('[data-testid="assist-assistant-name"]').setValue("审读");
-    await view.wrapper.get('[data-testid="assist-assistant-role"]').setValue("只读复核这份改动");
-    await view.wrapper.get('[data-testid="assist-assistant-scope"]').setValue("src; tests");
-    await view.wrapper.get('[data-testid="assist-assistant-save"]').trigger("click");
+    await openAssistantConfig(view);
+    await assistantDialogEl('assist-assistant-create-toggle').trigger("click");
+    await assistantDialogEl('assist-assistant-name').setValue("审读");
+    await assistantDialogEl('assist-assistant-role').setValue("只读复核这份改动");
+    await assistantDialogEl('assist-assistant-scope').setValue("src; tests");
+    await assistantDialogEl('assist-assistant-save').trigger("click");
     await flush(80);
     const created = options.posts.find((post) => post.path === `${prefix}/assistant-profiles`);
     // 只读范围只能缩小受管根：提交的是受管根内相对路径，不是绝对路径。
@@ -673,8 +968,10 @@ describe("会话模式单选框", () => {
       read_scope: { roots: ["src", "tests"] } });
     expect(options.posts.filter((post) => post.path === `${prefix}/assist-sessions` ||
       post.path.endsWith("/messages"))).toHaveLength(0);
-    // 新建成功后直接选中它，否则用户会看到「助手已建但当前仍无身份」。
-    expect(selectValue("assist-assistant-picker")).toBe(createdProfileId);
+    // 新建成功后直接选中它并收起弹窗，否则用户会看到「助手已建但当前仍无身份」，
+    // 或以为还要自己关掉遮罩才能继续。新助手是 v1，与清单里那条 v3 可分辨。
+    expect(assistantDialogOpen()).toBe(false);
+    expect(view.wrapper.get('[data-testid="assist-assistant-config-toggle"]').text()).toContain("审读 · v1");
     expect((view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement).value)
       .toBe("保存助手不能提交这条首条草稿");
     view.unmount();
@@ -687,20 +984,21 @@ describe("会话模式单选框", () => {
     const view = await openAgent(options);
     await flipToAssistant(view);
     try {
-      expect(view.wrapper.get('[data-testid="assist-assistant-list-loading"]').exists()).toBe(true);
+      await openAssistantConfig(view);
+      expect(assistantDialogEl('assist-assistant-list-loading').exists()).toBe(true);
       await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("使用刚创建的助手");
-      await view.wrapper.get('[data-testid="assist-assistant-create-toggle"]').trigger("click");
-      await view.wrapper.get('[data-testid="assist-assistant-name"]').setValue("新审读");
-      await view.wrapper.get('[data-testid="assist-assistant-role"]').setValue("只读复核");
-      await view.wrapper.get('[data-testid="assist-assistant-save"]').trigger("click");
+      await assistantDialogEl('assist-assistant-create-toggle').trigger("click");
+      await assistantDialogEl('assist-assistant-name').setValue("新审读");
+      await assistantDialogEl('assist-assistant-role').setValue("只读复核");
+      await assistantDialogEl('assist-assistant-save').trigger("click");
       await flush(80);
-      expect(selectValue("assist-assistant-picker")).toBe(createdProfileId);
+      expect(view.wrapper.get('[data-testid="assist-assistant-config-toggle"]').text()).toContain("新审读 · v1");
       expect(options.posts.filter((post) => post.path === `${prefix}/assist-sessions` ||
         post.path.endsWith("/messages"))).toHaveLength(0);
 
       finishProfiles(json({ items: [profile()] }));
       await flush(80);
-      expect(selectValue("assist-assistant-picker")).toBe(createdProfileId);
+      expect(view.wrapper.get('[data-testid="assist-assistant-config-toggle"]').text()).toContain("新审读 · v1");
       expect(view.wrapper.get('[data-testid="assist-first-send"]').attributes("disabled")).toBeUndefined();
       await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit");
       await flush(120);
@@ -726,7 +1024,10 @@ describe("会话模式单选框", () => {
     const view = await mountWorkbench("/agent");
     await openWorkingDirectory("D:/tmp/probe");
     await flipToAssistant(view);
-    expect(view.wrapper.get('[data-testid="assist-assistant-list-error"]').text()).toContain("助手清单暂不可读");
+    // 读不到清单时 chip 先说清是读取失败而不是「你没有助手」，原因正文在配置弹窗里。
+    expect(view.wrapper.get('[data-testid="assist-assistant-config-toggle"]').text()).toContain("助手清单读取失败");
+    await openAssistantConfig(view);
+    expect(assistantDialogEl('assist-assistant-list-error').text()).toContain("助手清单暂不可读");
     view.unmount();
   });
 
@@ -734,13 +1035,13 @@ describe("会话模式单选框", () => {
     const options: Stub = { sessions: [agentSession(), assistantSession()], posts: [] };
     const view = await openAgent(options);
     try {
-      // 默认落在普通会话上。
-      expect(selectValue("assist-session-select")).toBe(agentSessionId);
+      // 默认落在普通会话上（顶栏左翼只显示会话名）。
+      expect(toolbarSessionTitle()).toBe("普通会话");
       await view.wrapper.get('[data-testid="assist-draft"]').setValue("切档前未发送的草稿");
       await flipToAssistant(view);
       // 有未发草稿时切档必须先经离页守卫：不静默丢草稿，也不静默换会话。
       expect(dialogText()).toContain("未发送的内容");
-      expect(selectValue("assist-session-select")).toBe(agentSessionId);
+      expect(toolbarSessionTitle()).toBe("普通会话");
       expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
         .toBe("切档前未发送的草稿");
 
@@ -749,7 +1050,7 @@ describe("会话模式单选框", () => {
         .find((button) => button.textContent?.includes("留在当前工作区"));
       await act(async () => { keep?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
       await flush(80);
-      expect(selectValue("assist-session-select")).toBe(agentSessionId);
+      expect(toolbarSessionTitle()).toBe("普通会话");
       expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
         .toBe("切档前未发送的草稿");
 
@@ -759,7 +1060,7 @@ describe("会话模式单选框", () => {
       expect(discard).not.toBeNull();
       await new DomWrapper(discard).trigger("click");
       await flush(120);
-      expect(selectValue("assist-session-select")).toBe(assistantSessionId);
+      expect(toolbarSessionTitle()).toBe("人设会话");
       expect(options.posts.filter((post) => post.path === `${prefix}/assist-sessions` ||
         post.path.endsWith("/messages"))).toHaveLength(0);
     } finally { view.unmount(); }
@@ -770,7 +1071,7 @@ describe("会话模式单选框", () => {
     const view = await openAgent(options);
     await flipToAssistant(view);
     try {
-      await view.wrapper.get('[data-testid="assist-assistant-picker"]').setValue(assistantProfileId);
+      await pickAssistant(view, assistantProfileId);
       const draft = view.wrapper.get('[data-testid="assist-first-draft"]');
       await draft.setValue("合成中的中文");
       // 合成态（isComposing / keyCode 229）下的回车只是确认候选，不得提交。

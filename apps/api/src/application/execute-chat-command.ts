@@ -11,6 +11,7 @@ import { resolveExistingReceipt, runIdempotentCommand, type CommandOutcome } fro
 import { withdrawStateMaintenance } from './conversation-state.js';
 import { DomainError, invalidTransition, resourceNotFound, validationFailed } from './domain-error.js';
 import { lockWritableProjectInWorkspace } from './guards.js';
+import { selectSessionModel } from './select-session-model.js';
 import { createRepositories, type Repositories } from './unit-of-work.js';
 
 export type ExecuteChatCommandResult = {
@@ -32,6 +33,18 @@ export type ExecuteChatCommandResult = {
   readonly status: string;
   readonly revision: string;
   readonly undo_command_id: string;
+} | {
+  /** /model 落到会话模型选择 Owner 的当前结果（沿用其幂等回执，不重复记账）。 */
+  readonly kind: 'MODEL_SELECTION';
+  readonly session_id: string;
+  readonly connection: 'default' | 'openrouter';
+  readonly model: string;
+  readonly free_only: boolean;
+  readonly config_fingerprint: string;
+  readonly catalog_source: 'openrouter' | null;
+  readonly catalog_snapshot_seq: string | null;
+  readonly catalog_model_id: string | null;
+  readonly revision: string;
 };
 
 async function requireSession(repositories: Repositories, workspaceId: string,
@@ -59,7 +72,14 @@ export async function executeChatCommand(db: DbExecutor, input: {
 }): Promise<CommandOutcome<ExecuteChatCommandResult>> {
   const resolution = resolveChatCommand(input.text);
   if (resolution.kind !== 'SYSTEM') {
-    throw validationFailed([{ field: 'text', message: '此入口只执行 /clear、/new 或 /undo。' }]);
+    throw validationFailed([{ field: 'text', message: '此入口只执行 /clear、/new、/undo 或 /model。' }]);
+  }
+  // /model 交给会话模型选择的独占 Owner：自带幂等回执与 CAS，不在此处再套一层命令事务。
+  if (resolution.system === 'model') {
+    const outcome = await selectSessionModel(db, {
+      workspaceId: input.workspaceId, sessionId: input.sessionId,
+      commandId: input.commandId, requestedModel: resolution.argument ?? '' });
+    return { ...outcome, result: { kind: 'MODEL_SELECTION', ...outcome.result } };
   }
   if (resolution.system !== 'clear' && resolution.system !== 'new' && resolution.system !== 'undo') {
     throw new DomainError({ code: 'CHAT_COMMAND_UNAVAILABLE', status: 409,

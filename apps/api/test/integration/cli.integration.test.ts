@@ -168,8 +168,13 @@ test('migrate entry reports the applied migrations without repeating them', asyn
       '0084_task_chains',
       '0085_task_chain_execution_specs',
       '0086_impact_group_dependencies',
+      '0087_agent_conversation_main_loop',
+      '0088_model_catalog_snapshot',
+      '0089_session_model_selection',
+      '0090_assist_session_pin',
+      '0091_composer_draft_assist',
     ]);
-  assert.equal(payload.ledger_rows, 86);
+  assert.equal(payload.ledger_rows, 91);
 });
 
 test('migrate entry fails explicitly without a migration connection', async () => {

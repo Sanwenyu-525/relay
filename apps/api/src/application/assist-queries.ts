@@ -1,4 +1,4 @@
-import type { AssistMessageRow, AssistProposalRow, AssistSessionRow } from '../infrastructure/database-schema.js';
+import type { AssistMessageRow, AssistProposalRow, AssistSessionRow, AssistSessionStatus } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
 import { resourceNotFound } from './domain-error.js';
@@ -17,9 +17,10 @@ import { toDecimalString } from '../shared/decimal.js';
  */
 
 export async function listAssistSessions(db: DbExecutor, input: { workspaceId: string;
-  projectId?: string; taskId?: string }): Promise<readonly AssistSessionRow[]> {
+  projectId?: string; taskId?: string; status?: AssistSessionStatus | 'ALL' }):
+Promise<readonly AssistSessionRow[]> {
   const r = createRepositories(db);
-  return r.assist.listSessions(input.workspaceId, input.projectId, input.taskId);
+  return r.assist.listSessions(input.workspaceId, input.projectId, input.taskId, input.status);
 }
 
 export async function readAssistSession(db: DbExecutor, input: {
@@ -30,6 +31,12 @@ export async function readAssistSession(db: DbExecutor, input: {
     throw resourceNotFound('Assist session');
   }
   return session;
+}
+
+export async function readAssistSessionContexts(db: DbExecutor, input: {
+  workspaceId: string; sessionIds: readonly string[];
+}) {
+  return createRepositories(db).assist.listSessionContexts(input.workspaceId, input.sessionIds);
 }
 
 export async function listAssistMessages(db: DbExecutor, input: {

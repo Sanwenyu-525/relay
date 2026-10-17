@@ -4,15 +4,22 @@ import type { FastifyInstance } from 'fastify';
 import { acceptAssistProposal, bindAssistSessionDirectory, bindAssistSessionProject,
   cancelAssistMessage, createAssistSession,
   rejectAssistProposal, requestAssistMessage } from '../application/assist-commands.js';
+import { createRepositories } from '../application/unit-of-work.js';
+import { establishConversationDiffBaseline, readConversationDiff, readConversationDiffFile }
+  from '../conversation-diff/net-diff-service.js';
+import { MAX_ASSIST_ATTACHMENT_BODY_BYTES, uploadAssistMessageAttachment }
+  from '../application/assist-attachments.js';
+import { archiveAssistSession, renameAssistSession, reopenAssistSession,
+  setAssistSessionPin, setAssistSessionUnread } from '../application/assist-session-controls.js';
 import { listAssistMessages, listAssistProposals, listAssistSessions, readAssistProposal,
-  readAssistSession, projectAssistSkillMessage, readAssistLivePreview }
+  readAssistSession, readAssistSessionContexts, projectAssistSkillMessage, readAssistLivePreview }
   from '../application/assist-queries.js';
 import type { JsonObject } from '../infrastructure/json.js';
-import type { ConversationMode } from '../infrastructure/database-schema.js';
+import type { AssistSessionStatus, ConversationMode } from '../infrastructure/database-schema.js';
 import { MODEL_ERROR_CATEGORIES, type ModelErrorCategory }
   from '../workflow/model-error-classification.js';
 import { toDecimalString } from '../shared/decimal.js';
-import { commandEnvelopeSchema } from './domain-schemas.js';
+import { commandEnvelopeSchema, ConversationDiffFileSchema, ConversationDiffSchema } from './domain-schemas.js';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
 
 const strict = { additionalProperties: false } as const;
@@ -31,6 +38,8 @@ const AssistSessionDto = Type.Object({
   project_id: Type.Union([uuid, Type.Null()]),
   task_id: Type.Union([uuid, Type.Null()]),
   title: Type.String(), status: Type.String(), revision: rev,
+  /** 0090：置顶时刻（导航排序键，不是业务事实）。未置顶为 null。 */
+  pinned_at: Type.Union([Type.String(), Type.Null()]),
   /** 冻结的会话身份：'AGENT' 普通会话，'ASSISTANT' 人设 助手会话，'LEARNING' 学习会话。 */
   conversation_mode: Type.Union([Type.Literal('AGENT'), Type.Literal('ASSISTANT'), Type.Literal('LEARNING')]),
   assistant_profile_id: Type.Union([uuid, Type.Null()]),
@@ -41,6 +50,11 @@ const AssistSessionDto = Type.Object({
   remember: Type.Boolean(),
   /** 0087：本会话当前绑定的受管工作目录；未绑定为 null。作用域不是准入。 */
   working_resource_id: Type.Union([uuid, Type.Null()]),
+  context: Type.Optional(Type.Object({
+    project_goals: Type.Array(Type.Object({ goal_id: uuid, title: Type.String() }, strict)),
+    working_directory: Type.Union([Type.Null(), Type.Object({ resource_id: uuid,
+      canonical_root: Type.Union([Type.String(), Type.Null()]) }, strict)]),
+  }, strict)),
   created_at: Type.String(), updated_at: Type.String(),
 }, strict);
 /** 命令回执里的会话结果（resource 以 session_id 命名，与命令契约一致）。 */
@@ -115,6 +129,14 @@ const createSessionBody = Type.Object({
 }, strict);
 const sessionsQuery = Type.Object({
   project_id: Type.Optional(uuid), task_id: Type.Optional(uuid),
+  include_context: Type.Optional(Type.Union([Type.Literal('true'), Type.Literal('false')])),
+  /**
+   * 0090：左栏「已归档」那一段的读法。缺省只列 ACTIVE——归档的语义就是退出默认列表，
+   * 不传却返回全部会让「归档即隐藏」落空；`ALL` 供需要一屏看全部的场景显式使用。
+   * 取值与库里 status 列一致（大写），与 assistant-profiles、domain-schemas 的列表过滤同一口径。
+   */
+  status: Type.Optional(Type.Union([Type.Literal('ACTIVE'), Type.Literal('ARCHIVED'),
+    Type.Literal('ALL')])),
 }, strict);
 /**
  * 绑定只接受确切的项目：resource_id 不在这里，因为目录就绪属于执行准入，
@@ -127,6 +149,34 @@ const BindSessionResult = Type.Object({
 const bindDirectoryBody = Type.Object({ command_id: uuid, resource_id: uuid }, strict);
 const BindDirectoryResult = Type.Object({
   session_id: uuid, working_resource_id: uuid, revision: rev,
+}, strict);
+/**
+ * 0090 / 0104 会话行内控制：改名/置顶/未读/归档/重开都只带 `expected_revision`，不接收别的字段。
+ * 标题沿用建会话的 1–200 规则；归档与重开没有可携带的载荷，多余字段一律拒绝，
+ * 免得日后有人往同一条命令里塞「顺便改点什么」。
+ */
+const renameSessionBody = Type.Object({ command_id: uuid, expected_revision: rev,
+  title: Type.String({ minLength: 1, maxLength: 200 }) }, strict);
+const pinSessionBody = Type.Object({ command_id: uuid, expected_revision: rev,
+  pinned: Type.Boolean() }, strict);
+/** 未读与置顶同一形状：一条命令两个方向，靠 `unread` 布尔区分，不做两个端点。 */
+const unreadSessionBody = Type.Object({ command_id: uuid, expected_revision: rev,
+  unread: Type.Boolean() }, strict);
+const sessionStateBody = Type.Object({ command_id: uuid, expected_revision: rev }, strict);
+const SessionTitleResult = Type.Object({
+  session_id: uuid, title: Type.String(), revision: rev, updated_at: Type.String(),
+}, strict);
+const SessionPinResult = Type.Object({
+  session_id: uuid, pinned: Type.Boolean(),
+  pinned_at: Type.Union([Type.String(), Type.Null()]), revision: rev, updated_at: Type.String(),
+}, strict);
+const SessionUnreadResult = Type.Object({
+  session_id: uuid, unread: Type.Boolean(),
+  unread_at: Type.Union([Type.String(), Type.Null()]), revision: rev, updated_at: Type.String(),
+}, strict);
+const SessionStateResult = Type.Object({
+  session_id: uuid, status: Type.Union([Type.Literal('ACTIVE'), Type.Literal('ARCHIVED')]),
+  revision: rev, updated_at: Type.String(),
 }, strict);
 const messagesQuery = Type.Object({ limit: Type.Optional(Type.String({ pattern: '^(?:[1-9]|[1-9][0-9]{1,2}|200)$' })) }, strict);
 const sourceRef = Type.Object({
@@ -151,6 +201,24 @@ const requestMessageBody = Type.Object({
    * 关闭时模型即使返回增量，应用也拒绝写入（提示词 §9.4）。
    */
   record_learning: Type.Optional(Type.Boolean()),
+  /**
+   * 0093：随消息发送的图片附件身份（≤4，由上传端点先落行）。ids 进命令载荷 hash，
+   * 服务端在同一事务内核对归属并绑定；无附件时不传，既有载荷逐字不变。
+   */
+  attachment_ids: Type.Optional(Type.Array(uuid, { maxItems: 4 })),
+  /** 0098: model-selection revision returned before accepting a first message. */
+  expected_model_selection_revision: Type.Optional(Type.String({ pattern: '^[1-9][0-9]*$' })),
+}, strict);
+// 0093：上传一张图片附件（会话输入快照暂存）。media_type 白名单与字节上限由
+// 应用用例裁决并给出可解释错误，schema 只锁形状；name ≤200 与附件名列一致。
+const attachmentUploadBody = Type.Object({
+  name: Type.String({ minLength: 1, maxLength: 200 }),
+  media_type: Type.String({ minLength: 1, maxLength: 100 }),
+  data_base64: Type.String({ minLength: 1 }),
+}, strict);
+const AttachmentUploadResult = Type.Object({
+  attachment_id: uuid, byte_length: Type.Integer({ minimum: 1 }),
+  content_hash: Type.String({ minLength: 1 }),
 }, strict);
 const cancelBody = Type.Object({ command_id: uuid }, strict);
 const proposalsQuery = Type.Object({
@@ -165,6 +233,8 @@ const proposalAcceptBody = Type.Object({ command_id: uuid,
 
 function sessionDto(row: { id: string; workspace_id: string; project_id: string | null;
   task_id: string | null; title: string; status: string; revision: bigint;
+  pinned_at: Date | null;
+  unread_at: Date | null;
   conversation_mode: ConversationMode; assistant_profile_id: string | null;
   assistant_profile_revision: bigint | null; assistant_role_snapshot: JsonObject | null;
   remember: boolean; working_resource_id: string | null; created_at: Date; updated_at: Date }) {
@@ -172,6 +242,10 @@ function sessionDto(row: { id: string; workspace_id: string; project_id: string 
     id: row.id, workspace_id: row.workspace_id, project_id: row.project_id,
     task_id: row.task_id, title: row.title, status: row.status,
     revision: toDecimalString(row.revision),
+    // 置顶时刻逐字返回：客户端据此排序并显示「已置顶」，不自行推断。
+    pinned_at: row.pinned_at === null ? null : row.pinned_at.toISOString(),
+    // 0104：未读时刻同样逐字返回。NULL=已读，界面不替服务端猜「看过就算读」。
+    unread_at: row.unread_at === null ? null : row.unread_at.toISOString(),
     conversation_mode: row.conversation_mode,
     assistant_profile_id: row.assistant_profile_id,
     assistant_profile_revision: row.assistant_profile_revision === null ? null
@@ -279,33 +353,126 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
       return { outcome, result: outcome.result };
     } }));
 
+  // 0090：会话行内控制。四件事都只改这一行自身的标题/排序键/归档态，
+  // 统一 200（不新建资源），都带 command_id 幂等与 expected_revision CAS。
+  app.post('/assist-sessions/:id/title', { schema: { params: sessionItem,
+    body: renameSessionBody, response: { 200: commandEnvelopeSchema(SessionTitleResult) } } },
+  createCommandHandler(dependencies, { commandType: 'RenameAssistSession',
+    bodySchema: renameSessionBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await renameAssistSession(executor, {
+        workspaceId: params.workspace_id ?? '', sessionId: params.id ?? '',
+        commandId: body.command_id, expectedRevision: body.expected_revision,
+        title: body.title });
+      return { outcome, result: outcome.result };
+    } }));
+
+  app.post('/assist-sessions/:id/pin', { schema: { params: sessionItem,
+    body: pinSessionBody, response: { 200: commandEnvelopeSchema(SessionPinResult) } } },
+  createCommandHandler(dependencies, { commandType: 'SetAssistSessionPin',
+    bodySchema: pinSessionBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await setAssistSessionPin(executor, {
+        workspaceId: params.workspace_id ?? '', sessionId: params.id ?? '',
+        commandId: body.command_id, expectedRevision: body.expected_revision,
+        pinned: body.pinned });
+      return { outcome, result: outcome.result };
+    } }));
+
+  app.post('/assist-sessions/:id/unread', { schema: { params: sessionItem,
+    body: unreadSessionBody, response: { 200: commandEnvelopeSchema(SessionUnreadResult) } } },
+  createCommandHandler(dependencies, { commandType: 'SetAssistSessionUnread',
+    bodySchema: unreadSessionBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await setAssistSessionUnread(executor, {
+        workspaceId: params.workspace_id ?? '', sessionId: params.id ?? '',
+        commandId: body.command_id, expectedRevision: body.expected_revision,
+        unread: body.unread });
+      return { outcome, result: outcome.result };
+    } }));
+
+  app.post('/assist-sessions/:id/archive', { schema: { params: sessionItem,
+    body: sessionStateBody, response: { 200: commandEnvelopeSchema(SessionStateResult) } } },
+  createCommandHandler(dependencies, { commandType: 'ArchiveAssistSession',
+    bodySchema: sessionStateBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await archiveAssistSession(executor, {
+        workspaceId: params.workspace_id ?? '', sessionId: params.id ?? '',
+        commandId: body.command_id, expectedRevision: body.expected_revision });
+      return { outcome, result: outcome.result };
+    } }));
+
+  // 重开把会话放回 ACTIVE：它不授予新的执行权，发消息与目录准入照旧逐次核对。
+  app.post('/assist-sessions/:id/reopen', { schema: { params: sessionItem,
+    body: sessionStateBody, response: { 200: commandEnvelopeSchema(SessionStateResult) } } },
+  createCommandHandler(dependencies, { commandType: 'ReopenAssistSession',
+    bodySchema: sessionStateBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await reopenAssistSession(executor, {
+        workspaceId: params.workspace_id ?? '', sessionId: params.id ?? '',
+        commandId: body.command_id, expectedRevision: body.expected_revision });
+      return { outcome, result: outcome.result };
+    } }));
+
   app.get('/assist-sessions', { schema: { params: base, querystring: sessionsQuery } },
   async (request, reply) => {
     try {
       const p = request.params as { workspace_id: string };
-      const q = request.query as { project_id?: string; task_id?: string };
+      const q = request.query as { project_id?: string; task_id?: string;
+        include_context?: 'true' | 'false'; status?: AssistSessionStatus | 'ALL' };
       const rows = await listAssistSessions(dependencies.database.executor, {
         workspaceId: p.workspace_id,
         ...(q.project_id === undefined ? {} : { projectId: q.project_id }),
         ...(q.task_id === undefined ? {} : { taskId: q.task_id }),
+        status: q.status ?? 'ACTIVE',
       });
-      return { items: rows.map(sessionDto) };
+      const contexts = q.include_context === 'true' ? await readAssistSessionContexts(dependencies.database.executor,
+        { workspaceId: p.workspace_id, sessionIds: rows.map((row) => row.id) }) : [];
+      const byId = new Map(contexts.map((context) => [context.session_id, context]));
+      return { items: rows.map((row) => {
+        const readContext = byId.get(row.id);
+        const context = readContext?.session_revision === row.revision ? readContext : undefined;
+        return { ...sessionDto(row), ...(context === undefined ? {} : { context: {
+          project_goals: context.project_goals, working_directory: context.working_directory } }) };
+      }) };
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
 
   app.get('/assist-sessions/:id', { schema: { params: sessionItem,
+    querystring: Type.Object({ include_context: Type.Optional(Type.Union([Type.Literal('true'), Type.Literal('false')])) }, strict),
     response: { 200: AssistSessionDto } } }, async (request, reply) => {
     try {
       const p = request.params as { workspace_id: string; id: string };
       const session = await readAssistSession(dependencies.database.executor, {
         workspaceId: p.workspace_id, sessionId: p.id ?? '' });
-      return sessionDto(session);
+      const q = request.query as { include_context?: 'true' | 'false' };
+      const readContext = q.include_context === 'true' ? (await readAssistSessionContexts(dependencies.database.executor,
+        { workspaceId: p.workspace_id, sessionIds: [session.id] }))[0] : undefined;
+      const context = readContext?.session_revision === session.revision ? readContext : undefined;
+      return { ...sessionDto(session), ...(context === undefined ? {} : { context: {
+        project_goals: context.project_goals, working_directory: context.working_directory } }) };
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
+  // 0093：上传一张图片附件（会话输入快照暂存，不是幂等命令）。路由级放宽 bodyLimit
+  // 只作用于本端点：base64 后约 2.7 MiB + JSON 余量；其他端点仍用服务器默认限制。
+  app.post('/assist-sessions/:id/message-attachments', {
+    schema: { params: sessionItem, body: attachmentUploadBody,
+      response: { 201: AttachmentUploadResult } },
+    bodyLimit: MAX_ASSIST_ATTACHMENT_BODY_BYTES,
+  }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string; id: string };
+      const body = request.body as { name: string; media_type: string; data_base64: string };
+      const result = await uploadAssistMessageAttachment(dependencies.database.executor, {
+        workspaceId: p.workspace_id, sessionId: p.id ?? '', name: body.name,
+        mediaType: body.media_type, dataBase64: body.data_base64 });
+      return reply.code(201).send(result);
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
 
   // 异步生成：202 只代表消息已排队；回复以 GET messages 的 ASSISTANT 行状态为准。
-  app.post('/assist-sessions/:id/messages', { schema: { params: sessionItem,
-    body: requestMessageBody,
+  app.post('/assist-sessions/:id/messages', { schema: { params: sessionItem,    body: requestMessageBody,
     response: { 202: commandEnvelopeSchema(Type.Object({
       session_id: uuid, user_message_id: uuid, assistant_message_id: uuid,
     }, strict)) } } },
@@ -321,6 +488,12 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
         ...(body.skill_input === undefined ? {} : { skillInput: body.skill_input }),
         ...(body.method_ref === undefined ? {} : { methodRef: body.method_ref }),
         ...(body.record_learning === undefined ? {} : { recordLearning: body.record_learning }),
+        ...(body.attachment_ids === undefined ? {} : { attachmentIds: body.attachment_ids }),
+        ...(body.expected_model_selection_revision === undefined ? {} : {
+          expectedModelSelectionRevision: body.expected_model_selection_revision,
+        }),
+        // 0093：能力闸门的裁决输入——当前聊天恒由进程默认连接服务（见闸门注释）。
+        chatModelName: process.env.RELAY_MODEL_NAME,
       });
       return { outcome, result: outcome.result };
     } }));
@@ -427,4 +600,87 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
         commandId: body.command_id });
       return { outcome, result: outcome.result };
     } }));
+
+function conversationDiffDto(result: Awaited<ReturnType<typeof readConversationDiff>>): unknown {
+  if (!result.available) {
+    return { available: false, reason: result.reason };
+  }
+  const diff = result.diff;
+  return {
+    available: true,
+    baseline_captured_at: diff.baselineCapturedAt,
+    baseline_revision: diff.baselineRevision.toString(),
+    root_path: diff.rootPath,
+    resource_id: diff.resourceId,
+    incomplete: diff.incomplete,
+    total_files: diff.totalFiles,
+    total_added: diff.totalAdded,
+    total_removed: diff.totalRemoved,
+    files: diff.files.map((file) => ({
+      path: file.path,
+      action: file.action,
+      added: file.added,
+      removed: file.removed,
+      unavailable_reason: file.unavailableReason,
+    })),
+  };
+}
+
+app.get('/assist-sessions/:id/conversation-diff', {
+  schema: { params: sessionItem, response: { 200: ConversationDiffSchema } },
+}, async (request, reply) => {
+  try {
+    const p = request.params as { workspace_id: string; id: string };
+    reply.header('Cache-Control', 'no-store');
+    const result = await readConversationDiff(createRepositories(dependencies.database.executor), {
+      workspaceId: p.workspace_id, sessionId: p.id,
+    });
+    return conversationDiffDto(result);
+  } catch (error) { return sendReadError(reply, error, request.id); }
+});
+
+// CD-18：展开阅读——单文件的逐行完整 diff（与总数同一份基线修订 + 同一份当前快照）。
+app.get('/assist-sessions/:id/conversation-diff/file', {
+  schema: { params: sessionItem,
+    querystring: Type.Object({ path: Type.String({ minLength: 1 }) }, strict),
+    response: { 200: ConversationDiffFileSchema } },
+}, async (request, reply) => {
+  try {
+    const p = request.params as { workspace_id: string; id: string };
+    const query = request.query as { path: string };
+    reply.header('Cache-Control', 'no-store');
+    const result = await readConversationDiffFile(createRepositories(dependencies.database.executor), {
+      workspaceId: p.workspace_id, sessionId: p.id, path: query.path,
+    });
+    if (!result.available) return { available: false as const, reason: result.reason };
+    return {
+      available: true as const,
+      path: result.file.path,
+      action: result.file.action,
+      added: result.file.added,
+      removed: result.file.removed,
+      unavailable_reason: result.file.unavailableReason,
+      rows: result.file.rows === null ? null : result.file.rows.map((row) => ({
+        kind: row.kind, old_line: row.oldLine, new_line: row.newLine, text: row.text,
+      })),
+      rows_truncated: result.file.rowsTruncated,
+      rows_unavailable_reason: result.file.rowsUnavailableReason,
+    };
+  } catch (error) { return sendReadError(reply, error, request.id); }
+});
+
+// CD-05：主动「从现在开始统计」——为当前目录新建一段基线（不倒造过去）。返回幂等结果。
+app.post('/assist-sessions/:id/conversation-diff/baseline', {
+  schema: { params: sessionItem, body: Type.Object({}, { additionalProperties: false }),
+    response: { 200: Type.Object({ established: Type.Boolean(), reason: Type.String() }, strict) } },
+}, async (request, reply) => {
+  try {
+    const p = request.params as { workspace_id: string; id: string };
+    reply.header('Cache-Control', 'no-store');
+    const outcome = await establishConversationDiffBaseline(createRepositories(dependencies.database.executor), {
+      workspaceId: p.workspace_id, sessionId: p.id,
+    });
+    return { established: outcome.established, reason: outcome.reason };
+  } catch (error) { return sendReadError(reply, error, request.id); }
+});
 }

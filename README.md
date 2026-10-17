@@ -34,6 +34,8 @@ P10 开发自检：后端真实 PostgreSQL 全量 158/158、P10 定向 7/7、Gat
 
 一次性项目提醒沿[HTTP 契约 §10.76](docs/api/http-command-contract.md#1076-基础一次性继续项目提醒2026-10-14-协议)与工作台客户端使用；迁移就绪后 API 存活期间扫描，退出不运行，重开只补同一代次的待处理。触发不调用模型或创建计划；设置/待处理 UI 后置，Windows 投递证据仍见统一验收表。
 
+日常任务组织的新增后端接口见[Goal/Project 基础维护](docs/api/project-goal-maintenance.md)与[Inbox 原任务首次归入项目](docs/api/task-project-binding.md)：保留原任务、验收和讨论，再沿既有成果/完成/重开入口继续。本片尚无前端接线；实际可用范围仍以功能验收表为准。
+
 实验位于 experiments/，运行命令和局限见[实验说明](experiments/README.md)及 [P00 记录](docs/research/p00-source-study.md)。研究缓存 .research/ 不进入产品源码。实验成绩不代表生产 PostgreSQL、模型适配或全部业务验收通过。
 
 文档与 token 静态检查使用 Node 内置模块，无需安装依赖：

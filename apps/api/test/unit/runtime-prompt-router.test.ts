@@ -52,6 +52,9 @@ const SYSTEM_ROUTES: readonly RuntimeSystemRoute[] = [
   { kind: 'DRAFT', capability: { toolsEnabled: true, canWrite: false } },
   { kind: 'DRAFT', capability: { toolsEnabled: true, canWrite: true } },
   { kind: 'SEMANTIC_VERDICT' },
+  // §30 草稿辅助：分点（只给原文边界）与润色。同样登记在案就必须能被选中并与登记表互锁；
+  // 两条都不加载公共核心，由上面「核心出现次数」的通用断言守住。
+  { kind: 'COMPOSER_OUTLINE' }, { kind: 'COMPOSER_POLISH' },
 ];
 
 interface WireRequest {

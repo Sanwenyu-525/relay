@@ -115,23 +115,25 @@ export default function ReviewsView() {
             <button key={item} type="button" data-testid={`review-filter-${item}`} aria-pressed={kind === item} onClick={() => setKind(item)}>{kindLabels[item]} <span>{reviews.filter((review) => review.kind === item).length}</span></button>)}
         </nav>
         {loading ? <p className="helper-text" role="status">正在读取待审请求…</p> : <>
-          <div className="review-list-columns" aria-hidden="true"><span>请求事项</span><span>类型</span><span>所属项目</span><span>请求时间</span><span>当前状态</span></div>
           {/* 读取失败不是「没有请求」：列表为空既可能是真的没有，也可能是这次没读到。缺 error
               判定时上方错误横幅与下方「当前没有待处理请求」会同时出现，等于把读取失败说成没有数据。 */}
           {!visibleReviews.length && (error !== null
             ? <p className="helper-text" role="status">待审请求没有读到，请查看上方的错误并重试；下面不代表当前确实没有请求。</p>
             : <p className="helper-text">{reviews.length ? "当前类型没有待处理请求。" : "当前没有待处理请求。只有验证或动作准入确实需要人工判断时，才会出现新请求。"}</p>)}
           {visibleReviews.map((review) => <button key={review.id} className={`review-list-item${selected?.id === review.id ? " review-list-item--selected" : ""}`} type="button" aria-current={selected?.id === review.id ? "true" : undefined} onClick={() => selectReview(review.id)}>
-            <strong>{title(review)}<small>请求 v{review.revision}</small></strong>
-            <span className="review-kind">{kindLabels[review.kind]}</span>
-            <span className="review-project">{review.projectId === null ? "未归属项目" : labels?.projectTitle && selected?.projectId === review.projectId ? labels.projectTitle : "项目名称暂不可读"}</span>
-            <time dateTime={review.createdAt}>{requestTime(review.createdAt)}</time>
+            <strong>{title(review)}</strong>
             <span className={`status-chip status-chip--${review.status === "OPEN" ? "warning" : "neutral"}`}>{status(review)}</span>
+            <span className="review-list-meta">
+              <span className="review-kind">{kindLabels[review.kind]}</span>
+              <span className="review-project">{review.projectId === null ? "未归属项目" : labels?.projectTitle && selected?.projectId === review.projectId ? labels.projectTitle : "项目名称暂不可读"}</span>
+              <time dateTime={review.createdAt}>{requestTime(review.createdAt)}</time>
+              <span>请求 v{review.revision}</span>
+            </span>
           </button>)}
         </>}
       </section>
     </div>
-    {/* 判断对象是待处理页的主体：确切正文单独成列，不埋在列表下方被挤出首屏。 */}
+    {/* 请求摘要占满首行；正文与判断只在宽窗并列，窄窗沿 DOM 顺序充分占宽。 */}
     {live && connection.client && selected?.taskId && typeof selected.target.artifact_version_id === "string" && !error && !loading && !refreshing && (selectedId === null || selected.id === selectedId) &&
       <section className="review-reading" aria-label="阅读判断对象" data-testid="review-bound-reader"><h2>判断对象</h2>
         <ArtifactReaderPanel key={`${connection.epoch}:${selected.id}:${selected.revision}`} client={connection.client} taskId={selected.taskId} projectId={selected.projectId}

@@ -300,6 +300,8 @@ Task 执行权与业务完成继续归原主 Run 及应用用例；子反馈和�
 
 以上入口不另建 Runtime，不扩大纯只读助手权限，不将聊天摘要变成业务事实，也不让压缩或文件恢复恢复旧批准/PASS。重要取舍见 [ADR-019](docs/decisions/ADR-019-builtin-methods-and-conversation-checkpoints.md)，分期和待核定项见[后续路线第 9 节](docs/requirements/post-v1-roadmap.md#9-内置工作方法命令与会话恢复的范围)，未运行规格见[测试计划第 26 节](docs/testing/verification-plan.md#26-内置-skill命令压缩与消息文件恢复验收规格)。
 
+2026-10-15 补充：模型选择增加独立「免费模型」分组，支持按服务商目录自动更新及手动刷新。首版范围、免费定义和更新规则归[后续路线 §9.1](docs/requirements/post-v1-roadmap.md#91-免费模型分组与自动同步)，模型冻结和调用准入归[运行架构 §8.6](docs/architecture/runtime-context.md#86-模型目录会话选择与免费调用边界)。2026-10-16 用户新增单模型额度耗尽后自动切下一个免费模型，完整规则归[§9.1.1](docs/requirements/post-v1-roadmap.md#911-免费额度耗尽自动接续)；账户总额度、半截输出与未知结果不能用换模型绕过。本轮仅验收并更新开发任务书，不补产品实现。
+
 ## 0.14 验收证据与投入判断
 
 2026-10-11，用户逐项确认五项功能范围并要求写成文档。**产品设计已确认，使用收益待试验验证**。新增切片未实施的原表述属于 2026-10-11 设计时点；当前实现及接续范围只见后续路线和 CODEX_NEXT_STEP，实际成绩归统一功能验收表。本节拥有产品规则，分期与工程前置归[后续路线 §10](docs/requirements/post-v1-roadmap.md#10-验收证据与投入判断的范围和分期)，交互归[工作台 §29](docs/frontend/workbench-design.md#29-验收证据与投入判断)，未运行规格归[测试计划 §27](docs/testing/verification-plan.md#27-验收证据与投入判断验收规格)。不扩大当前 M/N 工作包或改变 N01 → N02 → N03 的既定优先级。

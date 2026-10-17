@@ -1,8 +1,7 @@
 import { reviewReasonText } from "../components/ReviewDecisionPanel";
 import { useEffect, useRef, useState } from "react";
-import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
-import { ArrowRight, CircleCheck, CircleDashed, FileText, RotateCcw } from "lucide-react";
-import AssistView from "./AssistView";
+import { Link, Navigate, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { ArrowRight, CircleCheck, CircleDashed, FileText, Info, RotateCcw, TriangleAlert } from "lucide-react";
 import BlueprintView from "./BlueprintView";
 import ProjectResumeView from "./ProjectResumeView";
 import ResponsiveRail from "../components/ResponsiveRail";
@@ -28,7 +27,11 @@ export default function ProjectSkillView() {
   const active: TabKey = requested === "blueprint" || requested === "resume" || requested === "assist" ? requested : "overview";
   function href(skill: string) { const next = new URLSearchParams(query); next.set("skill", skill); return `${location.pathname}?${next}`; }
   const projectId = /^\/projects\/([^/]+)$/u.exec(location.pathname)?.[1];
-  return <div className="skill-shell">{projectId && <div className="project-workbench-entry"><Link className="secondary-button" to={`/projects/${projectId}/workbench`}>打开项目工作台</Link></div>}<nav className="skill-tabs" aria-label="项目内页面">{tabs.map(([key, label]) => <Link key={key} className={`skill-tab${active === key ? " skill-tab--active" : ""}`} to={href(key)} aria-current={active === key ? "page" : undefined}>{label}</Link>)}</nav>{active === "overview" ? <ProjectOverview /> : active === "blueprint" ? <BlueprintView /> : active === "resume" ? <ProjectResumeView /> : <AssistView targetKind="PROJECT" />}</div>;
+  if (active === "assist" && projectId) {
+    query.delete("skill"); query.set("project", projectId);
+    return <Navigate to={`/agent?${query}`} replace />;
+  }
+  return <div className="skill-shell">{projectId && <div className="project-workbench-entry"><Link className="secondary-button" to={`/projects/${projectId}/workbench`}>打开项目工作台</Link></div>}<nav className="skill-tabs" aria-label="项目内页面">{tabs.map(([key, label]) => <Link key={key} className={`skill-tab${active === key ? " skill-tab--active" : ""}`} to={href(key)} aria-current={active === key ? "page" : undefined}>{label}</Link>)}</nav>{active === "overview" ? <ProjectOverview /> : active === "blueprint" ? <BlueprintView /> : <ProjectResumeView />}</div>;
 }
 
 /** UI-02 项目总览：只按真实 State revision / phase / Next Action 呈现，来源不可用不以摘要当真相。 */
@@ -50,17 +53,36 @@ interface OverviewFacts {
   readonly reviews: readonly RelayReview[] | null;
   readonly decisions: readonly RelayDecision[] | null;
   readonly artifacts: readonly OverviewArtifact[];
+  /** 项目任务首分页：总览「任务」区与阻塞提示的唯一数据来源，读取失败时 tasks 为空并由 tasksReadFailed 如实标注。 */
+  readonly tasks: readonly RelayTaskSummary[];
+  readonly tasksNextCursor: string | null;
+  readonly tasksReadFailed: boolean;
+}
+
+/**
+ * 不可开始/等待的原因：口径与 ProjectTasksView 的 blockedReason 一致——
+ * 未解除阻塞项优先，其次是前置任务，再其次才是服务端投影的等待原因；
+ * 三者都没有时只报「原因待核对」，不替服务端补一个解释。
+ */
+function overviewTaskReason(task: RelayTaskSummary): string {
+  if (task.unresolvedBlockerIds.length > 0) return `存在 ${task.unresolvedBlockerIds.length} 个未解除的阻塞项，服务端未投影 START 动作。`;
+  if (task.blockingTaskIds.length > 0) return "前置任务尚未完成，服务端未投影 START 动作。";
+  if (task.waitingReason) return task.waitingReason;
+  return "服务端报告该状态，具体原因本次未返回；请按原任务核对。";
 }
 
 async function readOverviewFacts(client: RelayApiClient, id: string): Promise<OverviewFacts> {
   const [project, state] = await Promise.all([client.getProject(id), client.getProjectState(id)]);
   if (project.id !== id || state.projectId !== id) throw new Error("总览查询返回了其他项目的事实。");
-  const [goalResult, reviewResult, decisionResult, nextResult, ...artifactResults] = await Promise.allSettled([
+  const [goalResult, reviewResult, decisionResult, nextResult, taskPageResult, ...artifactResults] = await Promise.allSettled([
     client.getProjectGoals(id), client.getReviews(), client.getDecisions(id),
     state.nextActionTaskId ? client.getTask(state.nextActionTaskId) : Promise.resolve(null),
+    client.getProjectTasksPage(id),
     ...state.selectedArtifactVersionRefs.map((ref) => client.getArtifact(ref.artifactId))
   ]);
   const nextAction = nextResult.status === "fulfilled" && nextResult.value && nextResult.value.projectId === id ? nextResult.value : null;
+  const taskPage = taskPageResult.status === "fulfilled" &&
+    taskPageResult.value.items.every((task) => task.projectId === id) ? taskPageResult.value : null;
   const artifacts: OverviewArtifact[] = state.selectedArtifactVersionRefs.map((ref, index) => {
     const settled = artifactResults[index];
     const artifact = settled && settled.status === "fulfilled" ? settled.value : null;
@@ -73,7 +95,10 @@ async function readOverviewFacts(client: RelayApiClient, id: string): Promise<Ov
     nextAction, nextActionFailed: state.nextActionTaskId !== null && nextAction === null,
     reviews: reviewResult.status === "fulfilled" ? reviewResult.value.filter((review) => review.projectId === id) : null,
     decisions: decisionResult.status === "fulfilled" ? decisionResult.value.filter((decision) => decision.projectId === id) : null,
-    artifacts };
+    artifacts,
+    tasks: taskPage?.items ?? [],
+    tasksNextCursor: taskPage?.nextCursor ?? null,
+    tasksReadFailed: taskPage === null };
 }
 
 function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClient }) {
@@ -95,35 +120,76 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
   if (error || !facts) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">项目</p><h1>暂时无法读取项目总览</h1><p>{error ?? "项目事实不可用。"}</p><button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>重新读取</button></section>;
 
   const { project, state, goals, nextAction, reviews, decisions, artifacts } = facts;
+  const { tasks, tasksNextCursor, tasksReadFailed } = facts;
   const type = project.projectType in projectTypeLabels ? projectTypeLabels[project.projectType as ProjectType] : project.projectType;
   const activeGoals = goals?.filter((goal) => goal.status === "ACTIVE") ?? null;
+  const archived = project.archivedAt !== null;
+  // 阻塞来自真实任务事实：BLOCKED 状态、前置未完成或未解除阻塞项（口径同 ProjectTasksView）。
+  const blockedTasks = tasks.filter((task) => task.status === "BLOCKED" ||
+    task.blockingTaskIds.length > 0 || task.unresolvedBlockerIds.length > 0);
+  const blockerNotes = [
+    facts.nextActionFailed ? `State 引用的下一步 Task ${state.nextActionTaskId} 本次单读失败。` : null,
+    ...blockedTasks.map((task) => `「${task.title}」${overviewTaskReason(task)}`)
+  ].filter(Boolean) as readonly string[];
   return <section className="skill-page project-overview" data-testid="project-overview-live"><div className="page-layout"><div className="page-primary">
+    <p className="metadata-row"><Link className="inline-link" to="/projects">← 全部项目</Link></p>
     <PageHeader testId="project-overview-page-head" title={project.title} meta={`${type} · ${phaseLabel(state.phaseKey)}`}
+      status={<span className={`status-chip ${archived ? "status-chip--neutral" : "status-chip--success"}`}>{archived ? "已归档" : phaseLabel(state.phaseKey)}</span>}
       lede={activeGoals && activeGoals.length ? activeGoals.map((goal) => goal.title).join("；") : `${type}项目 · ${phaseLabel(state.phaseKey)}`}
       actions={<button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}><RotateCcw aria-hidden="true" />刷新</button>} />
-    {project.archivedAt !== null && <p className="warning-callout" role="status">项目已归档，本页只读；不能再提交新的写命令。</p>}
-    {/* 返回项目的顶部接续卡（工作台 §18.9）：当前事实、相对上次已确认查看的变化、在途与阻塞。
-        挂在项目总览页（/projects/:id）——「返回项目」路径必然经过的项目维度入口，
-        只读展示，不影响下方既有事实区块。 */}
-    <DailyContinuationCard client={client} projectId={id} />
-    {goals === null && <p className="warning-callout" role="alert">Goal 关系本次读取失败，目标范围待核对。</p>}
-    <section className="resume-section project-next-step"><h2>下一步</h2>
-      {state.nextActionTaskId === null ? <p className="helper-text">Project State 尚未指定下一步 Task。</p>
-        : nextAction ? <><h3>{nextAction.title}</h3><p className="metadata-row">{taskStatusLabels[nextAction.status]} · {interactionModeLabels[nextAction.mode]} · {executorLabels[nextAction.executor]}</p>
-          <Link className="primary-button" to={`/tasks/${nextAction.id}`}>继续任务<ArrowRight aria-hidden="true" /></Link></>
-          : <p className="warning-callout">{facts.nextActionFailed ? `State 引用 Task ${state.nextActionTaskId}，本次单读失败；不以其他任务替代。` : "State 引用的下一步当前不可确认。"}</p>}
+    {archived && <p className="warning-callout" role="status">项目已归档，本页只读；不能再提交新的写命令。</p>}
+    {/* V43-04 接续摘要主入口：真实接续卡（当前事实、相对基线变化、在途与阻塞）+ 两个动作。
+        「继续工作」只做导航——有 State 下一步时去该任务详情，否则回项目工作台；
+        不自动委托、不创建 Task/Run/会话、不写业务状态。「查看动态」带原项目过滤。 */}
+    <section className="resume-section" data-testid="project-resume-card" aria-label="接续摘要">
+      <h2>接续摘要</h2>
+      <DailyContinuationCard client={client} projectId={id} />
+      <div className="project-resume-actions">
+        {archived ? <>
+          <button className="primary-button" type="button" disabled data-testid="project-resume-continue">继续工作</button>
+          <p className="disabled-reason" data-testid="project-resume-archived-reason"><Info aria-hidden="true" />项目已归档：只能阅读历史，恢复归档后才能继续。</p>
+        </> : state.nextActionTaskId !== null && nextAction
+          ? <Link className="primary-button" data-testid="project-resume-continue" to={`/tasks/${nextAction.id}`}>继续工作<ArrowRight aria-hidden="true" /></Link>
+          : <Link className="primary-button" data-testid="project-resume-continue" to={`/projects/${id}/workbench`}>继续工作<ArrowRight aria-hidden="true" /></Link>}
+        <Link className="secondary-button" data-testid="project-resume-activity" to={`/activity?project_id=${encodeURIComponent(id)}`}>查看动态</Link>
+      </div>
     </section>
-    <details className="resume-section project-state-details"><summary>项目当前状态 · {phaseLabel(state.phaseKey)} · v{state.revision}</summary>
-      <p className="metadata-row">State revision v{state.revision}<span aria-hidden="true"> · </span>{type}<span aria-hidden="true"> · </span>Project v{project.revision}</p>
-      <p className="disabled-reason"><CircleDashed aria-hidden="true" />State 的确认人与确认时间、以及「已确认 / 仍需明确」清单字段服务端尚未提供（待接入）；本页只呈现 revision、阶段、下一步、选用产物与 Decision 等真实事实，不推断状态由任务数量决定。</p>
+    {blockerNotes.length > 0 && <div className="warning-callout" role="status" data-testid="project-overview-blockers"><TriangleAlert aria-hidden="true" /><p><strong>阻塞</strong>：{blockerNotes.join("；")}</p></div>}
+    {goals === null && <p className="warning-callout" role="alert">Goal 关系本次读取失败，目标范围待核对。</p>}
+    <section className="resume-section" data-testid="project-overview-facts"><h2>已确认事实</h2>
       <dl className="rail-definition-list">
+        <div><dt>状态版本</dt><dd>State v{state.revision} · Project v{project.revision}</dd></div>
         <div><dt>当前阶段</dt><dd>{phaseLabel(state.phaseKey)}</dd></div>
         <div><dt>当前目标</dt><dd>{goals === null ? <span className="warning-callout">Goal 关系本次读取失败，目标范围待核对。</span>
           : activeGoals && activeGoals.length ? activeGoals.map((goal) => goal.title).join("；") : "当前没有关联 Goal；不据此推断项目没有目标。"}</dd></div>
+        <div><dt>下一步</dt><dd>{state.nextActionTaskId === null ? "尚未指定" : nextAction
+          ? <Link className="inline-link" to={`/tasks/${nextAction.id}`}>{nextAction.title}</Link>
+          : `State 引用 Task ${state.nextActionTaskId}，本次单读失败；不以其他任务替代。`}</dd></div>
+        {archived && <div><dt>归档时间</dt><dd>{new Date(project.archivedAt!).toLocaleString("zh-CN")}</dd></div>}
       </dl>
-    </details>
-    <section className="resume-section"><h2>关键产物与决定</h2>
-      <p className="helper-text">项目当前选用的确切版本与已记录决定。</p>
+      <p className="disabled-reason"><CircleDashed aria-hidden="true" />State 的确认人与确认时间、以及「已确认 / 仍需明确」清单字段服务端尚未提供（待接入）；本页只呈现 revision、阶段、下一步、任务、选用产物与 Decision 等真实事实，不推断状态由任务数量决定。</p>
+    </section>
+    <section className="resume-section" data-testid="project-overview-tasks"><h2>任务</h2>
+      {tasksReadFailed ? <p className="warning-callout">任务列表本次读取失败，无法列出项目任务；State 下一步仍单独核对。</p>
+        : <>
+          <p className="helper-text">已读取项目任务首分页 {tasks.length} 项{tasksNextCursor ? "；还有后续页，此处不是全量" : "；本次查询未返回后续游标"}。</p>
+          {tasks.length ? <ul className="run-list">{tasks.map((task) => {
+            const notStartable = task.status === "BLOCKED" || task.blockingTaskIds.length > 0 || task.unresolvedBlockerIds.length > 0;
+            const waiting = task.status === "WAITING" && task.waitingReason !== null;
+            return <li key={task.id}>
+              <strong>{task.title}</strong> · {taskStatusLabels[task.status]} · {interactionModeLabels[task.mode]} · {executorLabels[task.executor]} · v{task.revision}
+              {" "}<Link className="inline-link" to={`/tasks/${task.id}`}>打开任务</Link>
+              {notStartable && <p className="project-task-reason">不可开始原因：{overviewTaskReason(task)}</p>}
+              {waiting && <p className="project-task-reason">等待原因：{task.waitingReason}</p>}
+            </li>;
+          })}</ul> : <p className="helper-text">已读首分页没有任务。</p>}
+          {tasksNextCursor && <Link className="inline-link" to={`/projects/${id}/tasks`}>打开项目任务并继续加载</Link>}
+        </>}
+    </section>
+    <section className="resume-section" data-testid="project-overview-outputs"><h2>关键成果</h2>
+      <p className="helper-text">项目当前完成凭据、选用的确切版本与已记录决定。</p>
+      {state.completedHighlightRefs.length ? <ul className="run-list">{state.completedHighlightRefs.map((ref) => <li key={ref.completionId}>
+        <Link className="inline-link" to={`/completion-records/${ref.completionId}`}>查看完成凭据</Link> · Task {ref.taskId} · 当时验收 v{ref.acceptanceRevision}</li>)}</ul> : null}
       {artifacts.length ? <ul className="run-list">{artifacts.map((artifact) => <li key={artifact.versionId}>
         {artifact.title ? <><strong>{artifact.title}</strong> · v{artifact.version}{artifact.taskId && <> · <Link className="inline-link" to={`/tasks/${artifact.taskId}?tab=artifacts`}>打开任务产物</Link> · <Link className="inline-link" to={`/artifact-versions/${artifact.versionId}/lineage`}>查看来源</Link></>}</>
           : <>版本 <code className="hash-code">{artifact.versionId}</code> · v{artifact.version}（产物详情当前不可读取）</>}
@@ -174,7 +240,21 @@ function FixtureProjectOverview() {
   const typeLabel = summary.projectType in projectTypeLabels ? projectTypeLabels[summary.projectType as ProjectType] : summary.projectType;
   const phaseText = phaseLabel(summary.phase);
   return <section className="skill-page project-overview" data-testid="project-overview-fixture"><div className="page-layout"><div className="page-primary">
+    <p className="metadata-row"><Link className="inline-link" to="/projects">← 全部项目</Link></p>
     <PageHeader testId="project-overview-page-head" title={summary.title} meta="项目 · 示例数据" lede={summary.goal} />
+    {/* V43-04：总览是接续摘要主入口；示例模式同样只导航，不创建任何执行事实。 */}
+    <div className="project-resume-actions" data-testid="project-resume-card">
+      {summary.archived ? <>
+        <button className="primary-button" type="button" disabled data-testid="project-resume-continue">继续工作</button>
+        <p className="disabled-reason" data-testid="project-resume-archived-reason"><Info aria-hidden="true" />项目已归档：只能阅读历史，恢复归档后才能继续。</p>
+      </> : <>
+        {snapshot?.tasks.some((task) => task.status === "IN_PROGRESS")
+          ? <Link className="primary-button" data-testid="project-resume-continue"
+            to={`/tasks/${snapshot.tasks.find((task) => task.status === "IN_PROGRESS")!.id}`}>继续工作<ArrowRight aria-hidden="true" /></Link>
+          : <Link className="primary-button" data-testid="project-resume-continue" to={`/projects/${id}/workbench`}>继续工作<ArrowRight aria-hidden="true" /></Link>}
+        <Link className="secondary-button" data-testid="project-resume-activity" to={`/activity?project_id=${encodeURIComponent(id)}`}>查看动态</Link>
+      </>}
+    </div>
     <section className="resume-section"><h2>项目当前状态</h2>
       <p className="metadata-row">状态 v{summary.stateRevision}<span aria-hidden="true"> · </span>{typeLabel}<span aria-hidden="true"> · </span>阶段：{phaseText}</p>
       <p className="disabled-reason"><CircleDashed aria-hidden="true" />示例视图：确认人、确认时间与「已确认 / 仍需明确」清单为设计概念，服务端接口待接入。</p>

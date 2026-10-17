@@ -17,10 +17,21 @@ const eventTypeLabels: Record<string, string> = {
   TASK_COMPLETED: "完成任务", TASK_REOPENED: "重开任务", TASK_READY: "任务进入可执行",
   ARTIFACT_VERSION_SAVED: "保存产物版本", ARTIFACT_VERSION_SELECTED: "选用产物版本",
   DELEGATION_CREATED: "委托 AI 执行", RUN_CREATED: "创建 Run", RUN_FINISHED: "Run 结束",
-  REVIEW_DECIDED: "作出审批决定", VERIFICATION_COMPLETED: "验证完成"
+  REVIEW_DECIDED: "作出审批决定", VERIFICATION_COMPLETED: "验证完成",
+  WORKSPACE_INITIALIZED: "创建工作区", GOAL_CREATED: "创建目标",
+  PROJECT_RETURN_REVIEWED: "查看项目接续变化", PROJECT_DAILY_VIEW_CONFIRMED: "确认项目当日进展",
+  TASK_PRESENTATION_UPDATED: "修改任务", TASK_ACCEPTANCE_CHANGED: "修改验收条件", TASK_PLANNING_UPDATED: "修改任务计划",
+  TASK_READIED: "任务进入可执行", TASK_DELEGATED: "委托任务", RUN_FAILED: "运行失败",
+  RUN_CONTROL_REQUESTED: "请求运行控制", RUN_CONTROL_APPLIED: "运行控制已应用",
+  REVIEW_REQUESTED: "请求人工判断", VERIFICATION_FINALIZED: "检查已结算",
+  CONVERSATION_STATE_REQUESTED: "提交状态维护请求", CONVERSATION_EXECUTION_REQUESTED: "提交执行请求",
+  TODAY_TASK_SELECTION_CHANGED: "修改任务选择", TODAY_FOCUS_CHANGED: "修改当日焦点"
 };
 function eventTypeLabel(eventType: string): string {
-  return eventTypeLabels[eventType] ?? eventType;
+  return Object.hasOwn(eventTypeLabels, eventType) ? eventTypeLabels[eventType]! : "未识别的事件";
+}
+function eventSummary(item: RelayActivityItem): string {
+  return item.summary === "业务事件" ? eventTypeLabel(item.eventType) : item.summary;
 }
 const refLabels: Record<RelayActivityRefKind, string> = {
   PROJECT: "项目", TASK: "任务", RUN: "Run", GOAL: "目标", ARTIFACT_VERSION: "产物版本",
@@ -31,23 +42,33 @@ const refLinkLabels: Partial<Record<RelayActivityRefKind, string>> = {
   REVIEW: "查看审批请求", COMPLETION: "查看完成凭据"
 };
 
-// 事件按业务事实类别分组，用于「批准 / 验证 / 执行」分开显示；类别只依据 event_type，不推断状态。
-type EventCategory = "approval" | "verification" | "execution" | "delegation" | "state";
+// 类别只依据已知的确切 event_type，不从名称前缀或模型输出推断成功。
+type EventCategory = "approval" | "verification" | "execution" | "artifact" | "completion" | "state" | "unknown";
 const categoryByEvent: Record<string, EventCategory> = {
-  REVIEW_DECIDED: "approval",
-  VERIFICATION_COMPLETED: "verification",
-  ARTIFACT_VERSION_SAVED: "execution", ARTIFACT_VERSION_SELECTED: "execution", RUN_FINISHED: "execution", TASK_COMPLETED: "execution",
-  DELEGATION_CREATED: "delegation", RUN_CREATED: "delegation"
+  REVIEW_DECIDED: "approval", REVIEW_REQUESTED: "approval",
+  VERIFICATION_COMPLETED: "verification", VERIFICATION_FINALIZED: "verification",
+  ARTIFACT_VERSION_SAVED: "artifact", ARTIFACT_VERSION_SELECTED: "artifact", TASK_COMPLETED: "completion",
+  DELEGATION_CREATED: "execution", TASK_DELEGATED: "execution", RUN_CREATED: "execution", RUN_FINISHED: "execution",
+  RUN_FAILED: "execution", RUN_CONTROL_REQUESTED: "execution", RUN_CONTROL_APPLIED: "execution",
+  CONVERSATION_EXECUTION_REQUESTED: "execution", TASK_STARTED: "execution"
 };
+const categoryFilters: readonly { value: "ALL" | EventCategory; label: string }[] = [
+  { value: "ALL", label: "全部" }, { value: "execution", label: "执行" }, { value: "verification", label: "检查" },
+  { value: "artifact", label: "产物" }, { value: "approval", label: "决策" }, { value: "completion", label: "完成" },
+  { value: "state", label: "项目与任务" }, { value: "unknown", label: "其他" }
+];
 const categoryMeta: Record<EventCategory, { chip: string; tone: "neutral" | "warning" | "success"; note: string }> = {
-  approval: { chip: "人工决定", tone: "neutral", note: "这是一次人工判断记录。批准只针对当时的具体动作或版本，不代表相关动作已经执行成功，也不等于任务完成。" },
-  verification: { chip: "验证结果", tone: "warning", note: "验证结果只表示该版本在既定检查项上的判定。检查通过不等于任务完成，仍需人工验收。" },
-  execution: { chip: "动作 / 产物", tone: "success", note: "这是服务端记录的一次实际动作或产物变化，与人工批准、验证判定是分开的独立事实。" },
-  delegation: { chip: "委托 / 运行", tone: "neutral", note: "委托只表示执行权已授予 AI 并创建了运行，不表示模型已执行成功或任务已完成。" },
-  state: { chip: "状态变更", tone: "neutral", note: "这是项目或任务事实的一次变更，不据此推断执行结果或验收状态。" }
+  approval: { chip: "人工判断", tone: "neutral", note: "这是人工判断的请求或决定记录，请以确切事件为准。批准只针对当时的具体动作或版本，不代表相关动作已经执行成功，也不等于任务完成。" },
+  verification: { chip: "检查", tone: "neutral", note: "检查结算不表示通过；判定须核对相应版本与条件。检查通过不等于任务完成，仍需核对其他必需条件。" },
+  execution: { chip: "执行", tone: "neutral", note: "这是执行请求、委托或运行控制记录，请以确切事件为准。请求或运行结束不表示执行成功，也不等于任务完成。" },
+  artifact: { chip: "产物", tone: "neutral", note: "这是服务端记录的一次产物变化，与人工批准、验证判定是分开的独立事实。" },
+  completion: { chip: "完成", tone: "success", note: "这是当时提交的任务完成事实，确切产物与条件以完成凭据为准；当前状态仍需打开任务核对。" },
+  state: { chip: "项目与任务", tone: "neutral", note: "这是项目、任务或工作空间的操作记录，不据此推断执行结果或验收状态。" },
+  unknown: { chip: "未分类", tone: "neutral", note: "当前界面尚未识别此事件类型，不能据此判断成功或完成。原始类型与服务端摘要保留在依据中。" }
 };
 function eventCategory(eventType: string): EventCategory {
-  return categoryByEvent[eventType] ?? "state";
+  return Object.hasOwn(categoryByEvent, eventType) ? categoryByEvent[eventType]!
+    : Object.hasOwn(eventTypeLabels, eventType) ? "state" : "unknown";
 }
 
 function localInput(utc: string): string {
@@ -110,17 +131,17 @@ function ActivityRow({ item, selected, onSelect }: { item: RelayActivityItem; se
         <time dateTime={item.createdAt}>{localTime(item.createdAt)}</time>
         <span className={`activity-actor activity-actor--${item.actorKind}`} aria-hidden="true" />
         <span className="activity-actor-label">{actorLabels[item.actorKind]}</span>
-        <span className={`status-chip status-chip--${meta.tone}`}>{eventTypeLabel(item.eventType)}</span>
+        <span className={`status-chip status-chip--${meta.tone}`}>{meta.chip}</span>
       </div>
       <button className="text-button" type="button" data-testid={`activity-basis-${item.id}`} aria-pressed={selected} onClick={onSelect}>查看依据</button>
     </div>
-    <p className="activity-summary">{item.summary}</p>
+    <p className="activity-summary">{eventSummary(item)}</p>
     <div className="activity-refs">{item.entityRefs.length ? <ul>{item.entityRefs.map((ref) => {
       const target = refTarget(ref.kind, ref.id);
       return <li key={`${ref.kind}:${ref.id}`}>{target
         ? <Link className="inline-link" to={target}>{refLinkLabels[ref.kind] ?? `打开${refLabels[ref.kind]}`}</Link>
         : <span>{refLabels[ref.kind]}：当前无直达页</span>}
-        <code className="activity-ref-id" title={ref.id}>{ref.id}</code></li>;
+        </li>;
     })}</ul> : <p className="activity-meta">本条未返回可展示的实体引用。</p>}</div>
   </li>;
 }
@@ -131,10 +152,11 @@ function BasisPanel({ item }: { item: RelayActivityItem }) {
     <p className="eyebrow">事件依据</p>
     <h2>{eventTypeLabel(item.eventType)}</h2>
     <span className={`status-chip status-chip--${meta.tone}`}>{meta.chip}</span>
-    <p className="activity-basis-summary">{item.summary}</p>
+    <p className="activity-basis-summary">{eventSummary(item)}</p>
     <p className="activity-basis-note" role="note">{meta.note}</p>
     <dl className="rail-definition-list">
       <div><dt>事件类型</dt><dd>{item.eventType}</dd></div>
+      <div><dt>服务端摘要</dt><dd>{item.summary}</dd></div>
       <div><dt>发生时间</dt><dd>{fullLocalTime(item.createdAt)}（本机）</dd></div>
       <div><dt>执行方</dt><dd>{actorLabels[item.actorKind]}</dd></div>
       {item.commandId && <div><dt>原 command_id</dt><dd><code className="hash-code">{item.commandId}</code></dd></div>}
@@ -145,7 +167,8 @@ function BasisPanel({ item }: { item: RelayActivityItem }) {
       const target = refTarget(ref.kind, ref.id);
       return <li key={`${ref.kind}:${ref.id}`}>{target
         ? <Link className="inline-link" to={target}>{refLinkLabels[ref.kind] ?? `打开${refLabels[ref.kind]}`}</Link>
-        : <span className="activity-meta">{refLabels[ref.kind]}：当前无直达页</span>}</li>;
+        : <span className="activity-meta">{refLabels[ref.kind]}：当前无直达页</span>}
+        <code className="activity-ref-id">{ref.id}</code></li>;
     })}</ul> : <p className="activity-meta">本条未返回可展示的实体引用；不推断关联对象。</p>}
     <p className="activity-basis-footer">本页面不展示 AI 的原始推理过程；以上摘要、时间与引用均来自服务端已记录的事实。</p>
   </div>;
@@ -165,6 +188,7 @@ export default function ActivityView() {
   const [from, setFrom] = useState(active.from ? localInput(active.from) : "");
   const [to, setTo] = useState(active.to ? localInput(active.to) : "");
   const [actorFilter, setActorFilter] = useState<"ALL" | ActorKind>("ALL");
+  const [categoryFilter, setCategoryFilter] = useState<"ALL" | EventCategory>("ALL");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [items, setItems] = useState<readonly RelayActivityItem[]>([]);
@@ -269,7 +293,10 @@ export default function ActivityView() {
   }
 
   // 服务端不支持按执行方分页筛选，这里只对「已加载项」做本地筛选，并如实标注范围。
-  const visibleItems = useMemo(() => (actorFilter === "ALL" ? items : items.filter((item) => item.actorKind === actorFilter)), [items, actorFilter]);
+  const visibleItems = useMemo(() => items.filter((item) =>
+    (actorFilter === "ALL" || item.actorKind === actorFilter) &&
+    (categoryFilter === "ALL" || eventCategory(item.eventType) === categoryFilter)), [items, actorFilter, categoryFilter]);
+  useEffect(() => { setSelectedId(null); }, [actorFilter, categoryFilter]);
   const projectInOptions = projectOptions.some((project) => project.id === projectId);
   const projectManualMode = projectManual || (projectId !== "" && projectListState === "ready" && !projectInOptions);
   const groups = useMemo(() => {
@@ -282,7 +309,7 @@ export default function ActivityView() {
     }
     return buckets;
   }, [visibleItems]);
-  const selected = selectedId !== null ? items.find((item) => item.id === selectedId) ?? null : null;
+  const selected = selectedId !== null ? visibleItems.find((item) => item.id === selectedId) ?? null : null;
 
   return <section className="activity-page">
     <PageHeader testId="activity-page-head" title="动态" meta="工作空间"
@@ -311,6 +338,10 @@ export default function ActivityView() {
         {formError && <p className="action-error" role="alert">{formError}</p>}
       </form>
       </details>
+      <nav className="activity-categories" aria-label="按事件类别筛选（仅已加载项）">
+        {categoryFilters.map((option) => <button key={option.value} type="button" className="text-button"
+          aria-pressed={categoryFilter === option.value} onClick={() => setCategoryFilter(option.value)}>{option.label}</button>)}
+      </nav>
       <div className="activity-toolbar">
         <div className="segmented" role="group" aria-label="按执行方筛选（仅已加载项）">
           {(["ALL", "HUMAN", "AI", "SYSTEM"] as const).map((option) => <button key={option} type="button"
@@ -319,8 +350,8 @@ export default function ActivityView() {
             {option === "ALL" ? "全部" : actorLabels[option]}</button>)}
         </div>
         <details className="activity-filter-scope">
-          <summary>执行方仅筛选已加载的 {items.length} 条 · 范围说明</summary>
-          <p className="helper-text">时间按本机时区输入，发送为 UTC；每页由服务端最多返回 30 条，按时间与 ID 倒序。执行方筛选只作用于已加载的 {items.length} 条，服务端暂不支持按执行方分页筛选（待接入）。</p>
+          <summary>类别与执行方仅筛选已加载的 {items.length} 条 · 范围说明</summary>
+          <p className="helper-text">时间按本机时区输入，发送为 UTC；每页由服务端最多返回 30 条，按时间与 ID 倒序。类别与执行方筛选只作用于已加载的 {items.length} 条，服务端暂不支持按执行方分页筛选（待接入）。类别筛选同样不改变服务端范围与游标，可继续加载后续记录。</p>
         </details>
       </div>
       <div className="activity-layout">
@@ -333,7 +364,7 @@ export default function ActivityView() {
               <h2 className="activity-day">{group.label}</h2>
               <ol className="activity-list">{group.items.map((item) => <ActivityRow key={item.id} item={item} selected={item.id === selectedId} onSelect={() => setSelectedId((current) => current === item.id ? null : item.id)} />)}</ol>
             </section>)}</div>
-              : <p className="helper-text">{items.length ? "当前执行方筛选在已加载项内没有匹配记录；调整筛选或继续加载后重查。" : "当前筛选范围没有返回 Activity。可调整项目、任务、Run 或时间条件后重查。"}</p>}
+              : <p className="helper-text">{items.length ? "当前筛选在已加载项内没有匹配记录；调整类别、执行方或继续加载后重查。" : "当前筛选范围没有返回 Activity。可调整项目、任务、Run 或时间条件后重查。"}</p>}
             {moreError && <p className="action-error" role="alert">续页失败：{moreError}；已保留前面加载的结果。</p>}
             {nextCursor && <button className="secondary-button" type="button" disabled={loadingMore} onClick={() => { void loadMore(); }}>{loadingMore ? "正在读取后续页" : "继续加载"}</button>}
           </>}

@@ -16,6 +16,7 @@ import {
   testFakeGatewayConnection,
 } from '../application/gateway-queries.js';
 import { createRepositories } from '../application/unit-of-work.js';
+import { readWorkingDirectoryWriteReadiness } from '../application/open-working-directory.js';
 import { resourceNotFound } from '../application/domain-error.js';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
 import { commandEnvelopeSchema } from './domain-schemas.js';
@@ -29,6 +30,14 @@ const connectionParams = Type.Object({ workspace_id: uuid, project_id: uuid, con
 const policyParams = Type.Object({ workspace_id: uuid, project_id: uuid, policy_id: uuid }, strict);
 const resourceParams = Type.Object({ workspace_id: uuid, project_id: uuid, resource_id: uuid }, strict);
 const runParams = Type.Object({ workspace_id: uuid, run_id: uuid }, strict);
+const writeReadinessResponse = Type.Object({
+  status: Type.String(),
+  detail: Type.String(),
+  policy_decision: Type.Union([Type.String(), Type.Null()]),
+  policy_id: Type.Union([Type.String(), Type.Null()]),
+  policy_revision: Type.Union([Type.String(), Type.Null()]),
+  policy_target_prefix: Type.Union([Type.String(), Type.Null()]),
+}, strict);
 const importParams = Type.Object({ workspace_id: uuid, import_job_id: uuid }, strict);
 const operationParams = Type.Object({ workspace_id: uuid, operation_id: uuid }, strict);
 const capability = Type.Union([
@@ -185,6 +194,18 @@ export function registerGatewayRoutes(app: FastifyInstance, dependencies: RouteD
   app.get('/projects/:project_id/managed-resources/:resource_id', { schema: { params: resourceParams } }, async (request, reply) => {
     try { const p = request.params as { workspace_id: string; project_id: string; resource_id: string };
       return await readManagedResource(dependencies.database.executor, p.workspace_id, p.project_id, p.resource_id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+  /**
+   * 目录写档位只读查询（工作台 §18.1）：对话页的写入档位入口用它核对当前档位。
+   * 与 OpenWorkingDirectory 走同一个投影函数，不建立关联、不创建连接、不放宽权限。
+   */
+  app.get('/projects/:project_id/managed-resources/:resource_id/write-readiness', {
+    schema: { params: resourceParams, response: { 200: writeReadinessResponse } },
+  }, async (request, reply) => {
+    try { const p = request.params as { workspace_id: string; project_id: string; resource_id: string };
+      return await readWorkingDirectoryWriteReadiness(dependencies.database.executor,
+        p.workspace_id, p.project_id, p.resource_id);
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
   app.post('/projects/:project_id/managed-resources/:resource_id/disable', {

@@ -280,7 +280,7 @@ test.describe("窄窗与短窗的新对话入口", () => {
     await connect(page);
     // 普通 /agent 续上最近会话：前态确实带着一条旧讨论。
     await expect(page.getByTestId("assist-session")).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByTestId("assist-session-select")).toHaveValue(sessionId);
+    await expect(page.getByTestId("collab-session-title")).toHaveText("已有的普通讨论");
     await expect(page.getByTestId("assist-transcript")).toContainText("旧讨论的第一句");
 
     await menuButton(page).click();
@@ -290,7 +290,8 @@ test.describe("窄窗与短窗的新对话入口", () => {
     // 旧会话不继承：只剩空白输入主区，旧正文不在读区里。
     await expect(page.getByTestId("assist-first-draft")).toBeVisible();
     await expect(page.getByTestId("assist-session")).toHaveCount(0);
-    await expect(page.getByTestId("assist-session-select")).toHaveCount(0);
+    // 顶栏左翼只剩会话名：没有选中会话时那一格也不出现（切换入口本来就在近期工作栏）。
+    await expect(page.getByTestId("collab-session-title")).toHaveCount(0);
     await expect(page.getByTestId("assist-transcript")).toHaveCount(0);
     await expect(page.locator("main")).not.toContainText("旧讨论的第一句");
     await expect(page.getByTestId("collab-goal")).toHaveCount(0);

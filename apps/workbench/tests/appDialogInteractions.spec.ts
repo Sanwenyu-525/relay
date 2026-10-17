@@ -216,3 +216,27 @@ describe("AppDialog 多层焦点所有权", () => {
     expect(topClose).toHaveBeenCalledOnce();
   });
 });
+
+describe("AppDialog 点击面板外遮罩关闭", () => {
+  it("点单层弹窗面板外的空白触发关闭", async () => {
+    const onClose = vi.fn();
+    await render(testDialog(createElement("input"), onClose));
+    const panel = dialog();
+    // 冒泡派发到 backdrop（面板父级）：落点在面板之外，应关闭。
+    await act(async () => {
+      panel.parentElement!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("点面板内部空白不关闭", async () => {
+    const onClose = vi.fn();
+    await render(testDialog(createElement("div", { "data-testid": "filler" }, "正文留白"), onClose));
+    const panel = dialog();
+    // 直接派发到面板元素本身：仍属面板之内，不应关闭。
+    await act(async () => {
+      panel.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});

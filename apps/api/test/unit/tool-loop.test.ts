@@ -95,7 +95,13 @@ test('the catalog is a closed list: every entry maps to a declared Gateway actio
   const names = INTERNAL_TOOL_DEFINITIONS.map((entry) => entry.name);
   assert.deepEqual(names, ['apply_changeset', 'read_change_set', 'run_check',
     'list_directory', 'find_paths', 'search_text', 'read_file',
-    'git_status', 'git_diff', 'git_log']);
+    'git_status', 'git_diff', 'git_log',
+    // 0092: Computer Plugin V1 的十个桌面级工具。
+    'computer_screenshot', 'computer_get_windows', 'computer_activate_window',
+    'computer_click', 'computer_double_click', 'computer_scroll', 'computer_drag',
+    'computer_type', 'computer_keypress', 'computer_hotkey',
+    // 0103: F25 内置官方 GitHub Skill 首片的四个只读工具。
+    'github_repo_view', 'github_pr_list', 'github_pr_view', 'github_issue_list']);
   for (const entry of INTERNAL_TOOL_DEFINITIONS) {
     assert.equal(readInternalTool(entry.name), entry);
     assert.equal(entry.spec.name, entry.name);
@@ -104,6 +110,8 @@ test('the catalog is a closed list: every entry maps to a declared Gateway actio
   assert.equal(readInternalTool('apply_change_set'), undefined);
   assert.equal(readInternalTool('delete_file'), undefined);
   assert.equal(readInternalTool('run_bash'), undefined);
+  assert.equal(readInternalTool('computer.screenshot'), undefined,
+    '点号命名不在词表内：provider 协议只接受 snake_case');
 });
 
 test('a bounded tool result is marked truncated instead of passing a partial body as complete', () => {

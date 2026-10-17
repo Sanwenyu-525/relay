@@ -5,6 +5,8 @@ import { RunToolCallRepository } from '../run/run-tool-call-repository.js';
 import { resourceNotFound } from './domain-error.js';
 import { requireWorkspaceVisible } from './guards.js';
 import { createRepositories } from './unit-of-work.js';
+import { readFileWriteFrozenDiff } from './gateway-queries.js';
+import { computeLineDiff } from '../conversation-diff/diff-engine.js';
 
 /**
  * Run 工具调用只读投影（docs/api/http-command-contract.md §10.56）。
@@ -36,6 +38,22 @@ export interface RunToolCallDto {
   readonly adapted_path: string | null;
   readonly created_at: string;
   readonly updated_at: string;
+  /** 写类工具的逐文件结算账本（工作台 §34.2）：冻结意图 + 实际回执，缺证据则空。 */
+  readonly file_changes: readonly RunToolCallFileChangeDto[];
+}
+
+/**
+ * 一次写入里单个文件的事实：`status` 来自适配器回执（APPLIED/CONFLICT/FAILED），
+ * `added`/`removed` 只在冻结的两份文本都可统计时为真实行数，否则记 -1「待核对」。
+ */
+export interface RunToolCallFileChangeDto {
+  readonly path: string;
+  readonly action: 'CREATE' | 'MODIFY' | 'DELETE';
+  readonly status: 'APPLIED' | 'CONFLICT' | 'FAILED' | 'UNKNOWN';
+  /** -1 = 待核对（基线或目标文本不可用），绝不冒充 0。 */
+  readonly added: number;
+  readonly removed: number;
+  readonly unavailable_reason: string | null;
 }
 
 export interface RunToolCallRoundDto {
@@ -56,7 +74,8 @@ function asObject(value: JsonObject): JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? value : {};
 }
 
-function projectCall(row: RunToolCallRow): RunToolCallDto {
+function projectCall(row: RunToolCallRow,
+  fileChanges: readonly RunToolCallFileChangeDto[]): RunToolCallDto {
   return {
     id: row.id,
     round: row.round,
@@ -72,6 +91,7 @@ function projectCall(row: RunToolCallRow): RunToolCallDto {
     adapted_path: row.adapted_path,
     created_at: row.created_at.toISOString(),
     updated_at: row.updated_at.toISOString(),
+    file_changes: fileChanges,
   };
 }
 
@@ -82,6 +102,7 @@ function projectCall(row: RunToolCallRow): RunToolCallDto {
 export function projectRunToolCalls(
   run: RunRow,
   rows: readonly RunToolCallRow[],
+  fileChangesByCall: ReadonlyMap<string, readonly RunToolCallFileChangeDto[]> = new Map(),
 ): RunToolCallProjection {
   const byRound = new Map<number, RunToolCallRow[]>();
   for (const row of rows) {
@@ -97,7 +118,7 @@ export function projectRunToolCalls(
       round,
       // 同一轮的请求都来自同一次模型调用；出现不同值说明事实被改写过，按首次出现如实呈现。
       model_call_id: bucket[0]?.model_call_id ?? '',
-      calls: bucket.map(projectCall),
+      calls: bucket.map((row) => projectCall(row, fileChangesByCall.get(row.id) ?? [])),
     };
   });
 
@@ -118,5 +139,74 @@ export async function readRunToolCalls(
   const run = await repositories.runs.readRun(runId);
   if (run === undefined || run.workspace_id !== workspaceId) throw resourceNotFound('Run');
   const rows = await new RunToolCallRepository(db).listByRun(run.id);
-  return projectRunToolCalls(run, rows);
+  const fileChanges = await readWriteCallFileChanges(db, workspaceId, rows);
+  return projectRunToolCalls(run, rows, fileChanges);
+}
+
+/** 工具词表里的写类工具；与工具目录保持一致，新增写工具时同步。 */
+const WRITE_TOOL_NAMES = new Set(['apply_changeset']);
+
+/**
+ * 写类工具的逐文件结算账本：冻结的两份文本（基线 + 目标）算行数，回执给实际状态。
+ *
+ * 缺证据（无操作、冻结文本不可用、行数超限）时如实记 -1「待核对」——
+ * 局部记录不猜测，也不因为算不出行数就假装这次写入没发生。
+ */
+async function readWriteCallFileChanges(db: DbExecutor, workspaceId: string,
+  rows: readonly RunToolCallRow[]): Promise<Map<string, readonly RunToolCallFileChangeDto[]>> {
+  const result = new Map<string, readonly RunToolCallFileChangeDto[]>();
+  for (const row of rows) {
+    if (!WRITE_TOOL_NAMES.has(row.tool_name) || row.operation_id === null) continue;
+    let frozen;
+    try {
+      frozen = await readFileWriteFrozenDiff(db, workspaceId, row.operation_id);
+    } catch {
+      continue;
+    }
+    const statuses = appliedStatuses(row.result_ref);
+    result.set(row.id, frozen.files.map((file) => {
+      const counts = file.availability === 'AVAILABLE' && file.before_text !== null &&
+        file.after_text !== null
+        ? computeLineDiff(file.before_text, file.after_text) : null;
+      return {
+        path: file.relative_path,
+        action: file.action,
+        status: statuses.get(normalizePath(file.relative_path)) ?? 'UNKNOWN',
+        added: counts?.added ?? -1,
+        removed: counts?.removed ?? -1,
+        unavailable_reason: file.unavailable_reason,
+      };
+    }));
+  }
+  return result;
+}
+
+/**
+ * 从文件写回执里取每个路径的实际状态。
+ *
+ * 回执路径以 `result_ref.file_write_receipt.result.changes[].path` 为准；形状不认识时
+ * 全部落 UNKNOWN（调用方不得据此标「已修改」）。
+ */
+function appliedStatuses(resultRef: JsonObject | null):
+  ReadonlyMap<string, RunToolCallFileChangeDto['status']> {
+  const statuses = new Map<string, RunToolCallFileChangeDto['status']>();
+  const receipt = resultRef?.file_write_receipt;
+  if (typeof receipt !== 'object' || receipt === null || Array.isArray(receipt)) return statuses;
+  const result = (receipt as JsonObject).result;
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) return statuses;
+  const changes = (result as JsonObject).changes;
+  if (!Array.isArray(changes)) return statuses;
+  for (const entry of changes) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue;
+    const change = entry as JsonObject;
+    if (typeof change.path !== 'string') continue;
+    const status = change.status === 'APPLIED' || change.status === 'CONFLICT' ||
+      change.status === 'FAILED' ? change.status : 'UNKNOWN';
+    statuses.set(normalizePath(change.path), status);
+  }
+  return statuses;
+}
+
+function normalizePath(path: string): string {
+  return path.replaceAll('\\', '/');
 }

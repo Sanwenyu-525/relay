@@ -4,12 +4,13 @@
   display: flex;
   flex-direction: column;
   gap: var(--relay-space-3);
-  margin-block: var(--relay-space-4);
 }
 
+/* 两个入口等宽分摊整行：弹窗宽 40rem，两个自然宽按钮会把右侧留成大片空白；
+   等宽栅格让这一行读成弹窗的动作条，主次仍由按钮档位（primary/secondary）区分。 */
 .folder-scope-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: var(--relay-space-2);
 }
 
@@ -23,10 +24,97 @@
 }
 
 .folder-scope-recents li {
+  display: block;
+}
+
+/* 分区标题与右侧轻提示：一行两端对齐，标题不抢视觉重量。 */
+.folder-scope-section-head {
   display: flex;
-  flex-wrap: wrap;
   align-items: baseline;
+  justify-content: space-between;
   gap: var(--relay-space-2);
+}
+
+.folder-scope-section-head h3 {
+  margin: 0;
+  font-size: var(--relay-font-size-meta);
+  font-weight: 600;
+  color: var(--relay-color-text-secondary);
+}
+
+.folder-scope-section-hint {
+  font-size: var(--relay-font-size-meta);
+  color: var(--relay-color-text-muted);
+}
+
+/* 紧凑菜单行而非描边卡片：近期的职责是「快速点一下切回去」，卡片描边加内边距
+   会让几行文字占掉一大块视觉面积（占的区域远大于显示的内容）。整行仍是按钮，
+   命中区维持 control.height，悬浮只换浅底，不加边框也不加箭头装饰。 */
+.folder-recent-item {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  width: 100%;
+  min-height: var(--relay-control-height);
+  padding: var(--relay-space-1) var(--relay-space-2);
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: var(--relay-radius-control);
+  cursor: pointer;
+}
+
+.folder-recent-item:hover:not(:disabled) {
+  background: var(--relay-color-bg-subtle);
+}
+
+.folder-recent-icon {
+  color: var(--relay-color-text-muted);
+}
+
+.folder-recent-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--relay-space-1);
+}
+
+.folder-recent-name {
+  flex: none;
+  font-weight: 600;
+}
+
+.folder-recent-sep {
+  flex: none;
+  color: var(--relay-color-text-muted);
+}
+
+.folder-recent-path {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+}
+
+/* 底部权限脚注：Info 图标与文案首行对齐，尺寸交给全局 svg 规则。 */
+.folder-scope-footnote {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--relay-space-2);
+  margin: 0;
+  padding-top: var(--relay-space-1);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.folder-scope-footnote-icon {
+  color: var(--relay-color-text-muted);
 }
 
 .folder-scope-ambiguous {

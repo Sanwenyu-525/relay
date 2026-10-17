@@ -48,11 +48,13 @@ export class ModelCallRepository {
 
   async begin(id: string, origin: ModelCallOrigin, identity: ModelIdentity): Promise<void> {
     const budget = identity.budget;
-    // VERIFY 是实例级连通性探针：无 Run/Assist 作用域、不占预算。
-    if (origin.kind === 'VERIFY') {
+    // VERIFY 是实例级连通性探针，COMPOSER 是发送前的草稿辅助（工作台 §30）：
+    // 两者都没有 Run/Assist 作用域，因此不占 Run 或会话预算，也不受项目归档闸门约束
+    // （没有项目可归档）。它们仍各占一行真实调用证据，不用同一个 kind 互相冒名。
+    if (origin.kind === 'VERIFY' || origin.kind === 'COMPOSER') {
       if (origin.stepAttemptId !== undefined || origin.assistMessageId !== undefined ||
           origin.manifestId !== undefined || origin.criterionId !== undefined) {
-        throw new Error('VERIFY model call must not carry run or assist scope');
+        throw new Error(`${origin.kind} model call must not carry run or assist scope`);
       }
       await this.db.transaction().execute(async (trx) => {
         await this.insert(trx, id, origin, identity);
@@ -131,6 +133,16 @@ export class ModelCallRepository {
     await this.insert(this.db, id, { ...origin, kind: 'VERIFY' }, identity);
   }
 
+  /**
+   * 草稿辅助（工作台 §30）与 VERIFY 同一形态：Application 已经开好准入事务，
+   * 这里只写行，不再嵌套事务。kind 固定为 COMPOSER，不与验证探针共用身份。
+   */
+  async beginComposerInTransaction(id: string,
+    origin: Pick<ModelCallOrigin, 'workspaceId' | 'inputHash'>,
+    identity: ModelIdentity): Promise<void> {
+    await this.insert(this.db, id, { ...origin, kind: 'COMPOSER' }, identity);
+  }
+
   private async insert(db: DbExecutor, id: string, origin: ModelCallOrigin,
     identity: ModelIdentity): Promise<void> {
     await sql`insert into model_calls (id, workspace_id, kind, step_attempt_id,
@@ -164,6 +176,12 @@ export class ModelCallRepository {
   }
 
   /** Callers lock and verify the current business claim before these CAS writes. */
+  async recordFirstStreamEvent(id: string, observedAt: Date): Promise<void> {
+    await sql`update model_calls set first_stream_event_at = ${observedAt}
+      where id = ${id} and kind = 'ASSIST' and status = 'STARTED'
+        and first_stream_event_at is null`.execute(this.db);
+  }
+
   async recordFirstTextDelta(id: string, observedAt: Date): Promise<void> {
     await sql`update model_calls set first_text_delta_at = ${observedAt}
       where id = ${id} and kind in ('DRAFT', 'ASSIST') and status = 'STARTED'

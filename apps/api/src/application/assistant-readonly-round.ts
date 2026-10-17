@@ -7,13 +7,15 @@ import type { AssistMessageRow, AssistSessionRow } from '../infrastructure/datab
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import type { AssistModelPort, AssistResult, ModelToolTurn, ModelToolTurnResult,
-  ModelUsage } from '../workflow/fake-model-port.js';
+  ModelUsage, AssistRequest } from '../workflow/fake-model-port.js';
 import { gatewayParamsFor } from './tool-loop.js';
 import { declaredToolSpecs, readInternalTool, type InternalToolName } from
   '../workflow/tool-catalog.js';
 import { capabilityFor, dispatchGatewayAction, prepareGatewayAction,
   type GatewayActionType, type GatewayOrigin, type GatewaySessionReadOrigin }
   from './gateway-actions.js';
+import { COMPUTER_DESKTOP_TARGET } from '../computer/protocol.js';
+import { isGithubReadAction } from '../github/github-adapter.js';
 import { createRepositories } from './unit-of-work.js';
 import { selectRuntimeSystemPrompt } from '../workflow/prompts/index.js';
 
@@ -37,6 +39,12 @@ import { selectRuntimeSystemPrompt } from '../workflow/prompts/index.js';
 /** 会话读取允许出现的工具，按词表顺序固定，保证同一轮可复现。 */
 export const ASSISTANT_READ_TOOLS: readonly InternalToolName[] = [
   'list_directory', 'find_paths', 'search_text', 'read_file', 'git_status', 'git_diff', 'git_log',
+  // 0092: Computer 只读（截图/窗口枚举）。输入类工具不在此列——会话轮次可读不可写，
+  // 桌面输入只经 Run 工具循环，由单动作审批或本次任务范围授权放行。
+  'computer_screenshot', 'computer_get_windows',
+  // 0103: GitHub 只读。这四个工具只有当项目里存在声明 GITHUB_READ 的 ACTIVE 连接时才会
+  // 进入本轮词表（assistantToolNames 与实际连接求交集），没装 gh 或未授权时模型看不到它们。
+  'github_repo_view', 'github_pr_list', 'github_pr_view', 'github_issue_list',
 ];
 
 /**
@@ -69,6 +77,8 @@ export interface AssistantReadonlyRoundInput {
   /** 当前连接可用的工具名；每轮重新计算，不从快照读。 */
   readonly availableTools: readonly InternalToolName[];
   readonly modelPort: AssistModelPort;
+  /** 可选的消息级冻结模型调用入口；普通会话仍沿既有端口路径。 */
+  readonly invokeAssist?: (request: AssistRequest) => Promise<AssistResult>;
   readonly signal: AbortSignal;
   readonly maxRounds?: number | undefined;
   readonly maxToolCalls?: number | undefined;
@@ -104,6 +114,8 @@ export interface SessionReadonlyRoundInput {
   /** 当前连接可用的工具名；每轮重新计算，不从快照读。 */
   readonly availableTools: readonly InternalToolName[];
   readonly modelPort: AssistModelPort;
+  /** 消息冻结模型调用入口；缺省时保留既有模型端口调用。 */
+  readonly invokeAssist?: (request: AssistRequest) => Promise<AssistResult>;
   readonly signal: AbortSignal;
   /** 本次的 system 模板文本；由调用方按自己的会话身份经统一路由入口选出。 */
   readonly system: string;
@@ -179,8 +191,10 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
     }
     let response: AssistResult;
     try {
-      response = await input.modelPort.assist({ intent: 'DISCUSS', system: input.system,
-        turns, tools: declared, toolTurns, signal: input.signal });
+      const request: AssistRequest = { intent: 'DISCUSS', system: input.system,
+        turns, tools: declared, toolTurns, signal: input.signal };
+      response = input.invokeAssist === undefined
+        ? await input.modelPort.assist(request) : await input.invokeAssist(request);
     } catch {
       return { kind: 'FAILED', errorCode: 'MODEL_FAILED', usage, providerRequestIds };
     }
@@ -232,6 +246,7 @@ export async function runAssistantReadonlyRounds(db: DbExecutor,
     readScopeRoots: assistantReadScopeRoots(session) });
   return runSessionReadonlyRounds(db, { session, message, availableTools: input.availableTools,
     modelPort: input.modelPort, signal: input.signal, system,
+    ...(input.invokeAssist === undefined ? {} : { invokeAssist: input.invokeAssist }),
     resolveOrigin: () => assistantReadOrigin(db, session, message.id),
     ...(input.maxRounds === undefined ? {} : { maxRounds: input.maxRounds }),
     ...(input.maxToolCalls === undefined ? {} : { maxToolCalls: input.maxToolCalls }) });
@@ -259,6 +274,7 @@ export async function runAgentSessionReadonlyRounds(db: DbExecutor,
     selectRuntimeSystemPrompt({ kind: 'AGENT_MAIN_LOOP' }).system;
   return runSessionReadonlyRounds(db, { session, message, availableTools: input.availableTools,
     modelPort: input.modelPort, signal: input.signal, system,
+    ...(input.invokeAssist === undefined ? {} : { invokeAssist: input.invokeAssist }),
     resolveOrigin: () => agentSessionReadOrigin(db, session, message.id),
     ...(input.maxRounds === undefined ? {} : { maxRounds: input.maxRounds }),
     ...(input.maxToolCalls === undefined ? {} : { maxToolCalls: input.maxToolCalls }) });
@@ -424,7 +440,14 @@ function projectToolResult(actionType: GatewayActionType, resultRef: JsonObject 
  */
 export function toolTarget(canonicalRoot: string, actionType: GatewayActionType,
   args: JsonObject): string {
-  if (actionType === 'GIT_STATUS' || actionType === 'GIT_DIFF' || actionType === 'GIT_LOG') {
+  if (actionType === 'COMPUTER_SCREENSHOT' || actionType === 'COMPUTER_GET_WINDOWS') {
+    // Computer 只读动作没有受管根：目标是合成值，资源仍绑定（来源身份与账本）。
+    return COMPUTER_DESKTOP_TARGET;
+  }
+  if (actionType === 'GIT_STATUS' || actionType === 'GIT_DIFF' || actionType === 'GIT_LOG' ||
+      isGithubReadAction(actionType)) {
+    // 0103: GitHub 查询的目标就是这个目录本身——仓库身份由适配器在此本地解析 remote，
+    // 走的是与 GIT_READ 同一个绑定，因此不存在「读到别的仓库」。
     return canonicalRoot;
   }
   const relative = typeof args.relative_path === 'string' && args.relative_path !== ''
@@ -432,10 +455,12 @@ export function toolTarget(canonicalRoot: string, actionType: GatewayActionType,
   return join(canonicalRoot, relative ?? '');
 }
 
-function capabilityOf(actionType: GatewayActionType): 'FILE_QUERY' | 'FILE_READ' | 'GIT_READ' {
+function capabilityOf(actionType: GatewayActionType):
+  'FILE_QUERY' | 'FILE_READ' | 'GIT_READ' | 'COMPUTER_READ' | 'GITHUB_READ' {
   const capability = capabilityFor(actionType);
   // 会话读取只有只读能力；词表之外的动作在这一层之前已被拒，这里只做类型收窄。
-  if (capability !== 'FILE_QUERY' && capability !== 'FILE_READ' && capability !== 'GIT_READ') {
+  if (capability !== 'FILE_QUERY' && capability !== 'FILE_READ' && capability !== 'GIT_READ' &&
+      capability !== 'COMPUTER_READ' && capability !== 'GITHUB_READ') {
     throw new Error(`session read round reached a non-read capability: ${capability}`);
   }
   return capability;
@@ -521,7 +546,7 @@ async function agentSessionReadOrigin(db: DbExecutor, session: AssistSessionRow,
  */
 async function findActiveConnection(repositories: ReturnType<typeof createRepositories>,
   workspaceId: string, projectId: string,
-  capability: 'FILE_QUERY' | 'FILE_READ' | 'GIT_READ'): Promise<string | undefined> {
+  capability: 'FILE_QUERY' | 'FILE_READ' | 'GIT_READ' | 'COMPUTER_READ' | 'GITHUB_READ'): Promise<string | undefined> {
   for (const connection of await repositories.gateway.listConnections(workspaceId, projectId)) {
     if (connection.status !== 'ACTIVE') continue;
     const capabilities = await repositories.gateway.listConnectionCapabilities(connection.id);

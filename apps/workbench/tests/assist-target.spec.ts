@@ -40,6 +40,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** 与协作页任务聊天视图一致：standalone 任务作用域，不延迟建会话（V43-06 的空态场景）。 */
+async function mountedTaskAssist(props: Record<string, unknown> = {}) {
+  const TaskAssist = AssistView as unknown as (p: Record<string, unknown>) => ReactElement;
+  const router = createMemoryRouter([
+    { path: "/tasks/:id/assist", element: createElement(TaskAssist, { standalone: true,
+      targetKind: "TASK", targetId: taskId, ...props }) }
+  ], { initialEntries: [`/tasks/${taskId}/assist`] });
+  const mounted = await mountReact(createElement(RouterProvider, { router }));
+  return { wrapper: Object.assign(mounted.wrapper, { unmount: mounted.unmount }) };
+}
+
 /** 与协作页文件夹入口一致：没有 target，只有工作空间级会话可谈。 */
 async function mountedUnassignedAssist(props: Record<string, unknown> = {}) {
   // AssistView 的 props 全部可选且带默认值，TS 会把 createElement 落到 DOM 的
@@ -164,6 +175,73 @@ describe("工作空间级会话", () => {
     // CHECK (title <> '') 会拒绝空标题：命令必须发得出去，且带得出非空标题。
     expect(create?.body.title).toBe("新讨论");
     expect(create?.body.project_id).toBeNull();
+    wrapper.unmount();
+  });
+
+  // V43-06 反例：无会话的既有任务切到聊天视图，过去停在「开始讨论/选择会话/新建会话」
+  // 的三选一停顿页，没有输入卡。空态必须直接给出首条输入路径，发送时才建会话；
+  // 打开页面（只读）不得创建任何会话。
+  it("无会话的任务切聊天视图直接给首条输入，发送才创建会话", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: Record<string, unknown> }[] = [];
+    let created = false;
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      const path = url;
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+        posts.push({ path, body });
+        if (path.endsWith("/assist-sessions")) {
+          created = true;
+          return { ok: true, status: 201, json: async () => ({ command_id: body.command_id,
+            committed_at: "2026-10-05T00:00:00Z",
+            result: { session_id: sessionId, workspace_id: workspaceId,
+              project_id: body.project_id, task_id: body.task_id,
+              title: "关于新任务目标", status: "ACTIVE", revision: "1",
+              created_at: "2026-10-05T00:00:00Z", updated_at: "2026-10-05T00:00:00Z" } }) } as Response;
+        }
+        if (path.endsWith("/messages")) {
+          return { ok: true, status: 202, json: async () => ({ command_id: body.command_id,
+            committed_at: "2026-10-05T00:00:00Z",
+            result: { session_id: sessionId, user_message_id: "u-1", assistant_message_id: "a-1" } }) } as Response;
+        }
+        throw new Error(`unexpected POST ${url}`);
+      }
+      if (path === `${prefix}/tasks/${taskId}`) return response(task());
+      if (path === `${prefix}/projects/${projectId}`) return response({ id: projectId,
+        title: "当前项目", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return response({ items: [] });
+      if (path === `${prefix}/assist-sessions/${sessionId}`) return response({ id: sessionId,
+        workspace_id: workspaceId, project_id: projectId, task_id: taskId,
+        title: "关于新任务目标", status: "ACTIVE", revision: "1",
+        created_at: "2026-10-05T00:00:00Z", updated_at: "2026-10-05T00:00:00Z" });
+      if (path.startsWith(`${prefix}/assist-sessions`)) return response({ items: created
+        ? [{ id: sessionId, workspace_id: workspaceId, project_id: projectId, task_id: taskId,
+          title: "关于新任务目标", status: "ACTIVE", revision: "1",
+          created_at: "2026-10-05T00:00:00Z", updated_at: "2026-10-05T00:00:00Z" }] : [] });
+      // 会话面板的周边只读依赖：宽松兜底，避免把焦点测试绑在面板实现上。
+      if (path.endsWith("/model-port")) return response({ provider: "fake", configured: false,
+        model: null, base_url: null, max_call_tokens: null });
+      if (path.includes("/model-port/")) return response({ current_config_fingerprint: null,
+        last: null, matches_current_config: false, worker_startup_validation: "NOT_CONFIGURED" });
+      if (path.endsWith("/chat-commands")) return response({ items: [] });
+      return response({ items: [] });
+    }));
+    const { wrapper } = await mountedTaskAssist();
+    await flush(30);
+    // 旧的停顿页文案不再出现；主入口唯一且是输入卡。
+    expect(wrapper.text()).not.toContain("目标已选。可以新建会话");
+    expect(wrapper.get('[data-testid="assist-first-draft"]').exists()).toBe(true);
+    // 只读打开不发任何写命令。
+    expect(posts).toHaveLength(0);
+    await wrapper.get('[data-testid="assist-first-draft"]').setValue("先讨论这个任务");
+    await wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+    await flush(60);
+    const create = posts.find((post) => post.path.endsWith("/assist-sessions"));
+    expect(create?.body.task_id).toBe(taskId);
+    expect(create?.body.project_id).toBe(projectId);
+    expect(posts.filter((post) => post.path.endsWith("/messages"))).toHaveLength(1);
+    expect(posts.filter((post) => post.path.endsWith("/assist-sessions"))).toHaveLength(1);
     wrapper.unmount();
   });
 });

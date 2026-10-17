@@ -47,11 +47,12 @@
 
 | 层 | 文件 | 职责 |
 |---|---|---|
-| 共享契约与登记表 | [route-types.ts](../../apps/api/src/workflow/prompts/route-types.ts) | 合法路由输入（封闭联合）、返回形状、16 条路由的元数据 |
+| 共享契约与登记表 | [route-types.ts](../../apps/api/src/workflow/prompts/route-types.ts) | 合法路由输入（封闭联合）、返回形状、19 条路由的元数据 |
 | 统一入口 | [index.ts](../../apps/api/src/workflow/prompts/index.ts) | `selectRuntimePrompt()` 选模板、组合文本、返回本次元数据 |
 | 会话档模板 | [conversation-prompts.ts](../../apps/api/src/workflow/prompts/conversation-prompts.ts) | Assist 五意图、第一方 Skill、内置方法、只读助手、学习搭档 |
 | 解释模板 | [interpretation-prompts.ts](../../apps/api/src/workflow/prompts/interpretation-prompts.ts) | 原用户执行请求解释、项目状态维护解释 |
 | Run 与验证模板 | [run-prompts.ts](../../apps/api/src/workflow/prompts/run-prompts.ts) | DRAFT 三分支、语义验收、连接验证固定 user 探针 |
+| 草稿辅助模板 | [composer-prompts.ts](../../apps/api/src/workflow/prompts/composer-prompts.ts) | 输入框草稿分点（只给边界序号）与润色（只给 `{text}`） |
 
 返回类型上，`SYSTEM`（可发给 Provider 的 system 消息）与 `USER_PROBE`（连接验证探针）是判别联合的两个成员，探针不可能被当成 system 发出。每条路由的元数据含 `routeId`、专用模板版本、公共核心版本与模板维护位置；专用模板版本自 2026-10-11 的这次集中提取起登记为 `1.0.0`，公共核心与 Skill/方法定义版本仍保持各自原值。历史调用没有记录组合版本的地方保持未知——不倒填，也不声称完整提示词审计已经实现。
 
@@ -72,6 +73,8 @@
 | DRAFT 只读工具 | 工具清单非空，且不含 `apply_changeset` | 公共核心 + `draftToolSystemPrompt(false)` + `DRAFT_OUTPUT_SPEC`；可请求声明的只读工具，最终输出 Markdown 候选 | [openai-compatible-model-port](../../apps/api/src/workflow/openai-compatible-model-port.ts) 的 `generate()` |
 | DRAFT 含写工具 | 工具清单非空，且含 `apply_changeset` | 公共核心 + `draftToolSystemPrompt(true)` + `DRAFT_OUTPUT_SPEC`；声明授权范围内的文件修改，实际动作继续经过 Gateway 和冻结授权 | [openai-compatible-model-port](../../apps/api/src/workflow/openai-compatible-model-port.ts) 的 `generate()` |
 | 语义验收检查 | 检查器调用 `evaluate(statement, content)` | 独立验收提示词，不组合公共核心；JSON `PASS / FAIL / UNCERTAIN` 与理由，解析故障不算通过 | [checkers](../../apps/api/src/workflow/checkers.ts) 的 `ModelSemanticChecker` → [openai-compatible-model-port](../../apps/api/src/workflow/openai-compatible-model-port.ts) 的 `evaluate()` |
+| 草稿分点 | 草稿辅助用例按操作类型选 `COMPOSER_OUTLINE`；仅在草稿适用时（非空、非斜杠命令、未分行、长度在界内）才发起 | 独立窄提示词，不组合公共核心；JSON `{"breaks":[整数,...]}`，序号按 Unicode 码点、0 起、左闭右开；切片与编号由 `workflow/composer-draft.ts` 按原文完成，模型不返回改写文本 | [composer-draft-assist](../../apps/api/src/application/composer-draft-assist.ts) → [openai-compatible-model-port](../../apps/api/src/workflow/openai-compatible-model-port.ts) 的 `draftAssist()` |
+| 草稿润色 | 同上，操作类型为 `COMPOSER_POLISH`；由用户点击「润色」触发，不自动发起 | 独立窄提示词，不组合公共核心；JSON `{"text":"<润色后的完整草稿>"}`，明确要求保留否定、数字、条件、范围与已有分点 | [composer-draft-assist](../../apps/api/src/application/composer-draft-assist.ts) → [openai-compatible-model-port](../../apps/api/src/workflow/openai-compatible-model-port.ts) 的 `draftAssist()` |
 | 模型连接验证 | 应用调用模型端口验证用例；辅助探针，不属于 Agent 工作模式 | 固定 user 文本 `VERIFY_PROMPT = relay-verify-1`；没有 system 提示词或公共核心，非流式短调用 | [model-port-verification](../../apps/api/src/application/model-port-verification.ts) → [model-port-verify](../../apps/api/src/workflow/model-port-verify.ts) |
 
 日常接续卡与返回检查目前由 [project-daily-continuation](../../apps/api/src/application/project-daily-continuation.ts) / [project-return-review](../../apps/api/src/application/project-return-review.ts) 生成事实、差异与适用性投影，没有额外模型提示词。第一方 `project-resume` Skill 则属于表中的 Skill 模型调用，两条路径分别维护。

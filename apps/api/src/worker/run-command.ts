@@ -5,6 +5,7 @@ import {
   type ClaimedRunCommand,
 } from '../application/run-dispatch.js';
 import { createRepositories } from '../application/unit-of-work.js';
+import { interruptComputerRuntime } from '../computer/client-holder.js';
 import { executeClaimedRunGraph, RunGraphInvocationLost } from './run-graph.js';
 import type { MockGatewayStepResult } from './mock-gateway-action.js';
 import type { FakeToolScript } from '../workflow/fake-model-port.js';
@@ -71,7 +72,14 @@ export async function runOneCommand(db: DbExecutor, input: {
     controlPoll = setInterval(() => {
       if (controlCheck !== undefined || controller.signal.aborted) return;
       controlCheck = createRepositories(db).recovery.findPendingControl(claim.runId).then((pending) => {
-        if (pending !== undefined) controller.abort();
+        if (pending !== undefined) {
+          // 用户控制（暂停/取消，含电脑操控 Esc）到达：除中止派发信号外，还必须
+          // 立刻杀掉本进程的 Computer Runtime——abort 只解除等待，在途输入会继续
+          // 跑完；杀进程才保证已排队/在途的鼠标键盘输入真正停止（migration 0096
+          // 状态条的 Esc 契约）。没有运行时在跑就是无害空操作。
+          interruptComputerRuntime();
+          controller.abort();
+        }
       }).catch(() => {
         // Database uncertainty stops the local invocation; the supervisor must
         // witness child exit before it can release or requeue the claim.

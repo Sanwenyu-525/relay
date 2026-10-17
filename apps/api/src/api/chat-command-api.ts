@@ -4,8 +4,9 @@ import type { FastifyInstance } from 'fastify';
 import { listChatCommands, resolveChatCommand } from '../application/chat-commands.js';
 import { detectMethodIntent, isMethodDiscussion } from '../application/method-intent.js';
 import { executeChatCommand } from '../application/execute-chat-command.js';
+import { readSessionModel } from '../application/select-session-model.js';
 import { commandEnvelopeSchema } from './domain-schemas.js';
-import { problemFromError, sendProblem, type RouteDependencies } from './envelope.js';
+import { problemFromError, sendProblem, sendReadError, type RouteDependencies } from './envelope.js';
 
 /**
  * 聊天 `/命令` 的登记查询、只读解析与有限执行端点。
@@ -16,7 +17,9 @@ import { problemFromError, sendProblem, type RouteDependencies } from './envelop
  *
  * 之所以用 POST 而不是 GET：输入文本可能较长且含换行，放进 query 既难编码也容易截断；
  * resolve 不携带 command_id，也不产生命令回执，语义上仍是只读查询。
- * POST 会话 chat-commands 才执行 /clear、/new、/undo，并沿原应用 Owner 返回持久回执。
+ * POST 会话 chat-commands 才执行 /clear、/new、/undo 与 /model，并沿各自应用 Owner 返回持久回执；
+ * /model 落到会话模型选择的独占 Owner，只改本会话后续新请求所用模型，不动应用默认。
+ * GET 会话 model-selection 只读回显当前选择（无覆盖即 null），不发起调用、不写存储。
  */
 
 const strict = { additionalProperties: false } as const;
@@ -29,6 +32,21 @@ const executeParams = Type.Object({ workspace_id: Type.String({ format: 'uuid' }
   session_id: Type.String({ format: 'uuid' }) }, strict);
 const nullableUuid = Type.Union([Type.String({ format: 'uuid' }), Type.Null()]);
 const revision = Type.String({ pattern: '^(0|[1-9][0-9]*)$' });
+
+// 会话模型选择的可序列化字段：/model 回执结果与 GET 读取共用同一契约（bigint 一律十进制字符串）。
+const selectionFields = {
+  session_id: Type.String({ format: 'uuid' }),
+  connection: Type.Union([Type.Literal('default'), Type.Literal('openrouter')]),
+  model: Type.String(),
+  free_only: Type.Boolean(),
+  config_fingerprint: Type.String({ pattern: '^[0-9a-f]{64}$' }),
+  catalog_source: Type.Union([Type.Literal('openrouter'), Type.Null()]),
+  catalog_snapshot_seq: Type.Union([revision, Type.Null()]),
+  catalog_model_id: Type.Union([Type.String(), Type.Null()]),
+  revision,
+};
+const modelSelectionDto = Type.Object(selectionFields, strict);
+
 const executeResult = Type.Union([
   Type.Object({ kind: Type.Literal('NEW_SESSION'),
     system: Type.Union([Type.Literal('clear'), Type.Literal('new')]),
@@ -40,6 +58,7 @@ const executeResult = Type.Union([
   Type.Object({ kind: Type.Literal('STATE_WITHDRAWAL'), system: Type.Literal('undo'),
     session_id: Type.String({ format: 'uuid' }), request_id: Type.String({ format: 'uuid' }),
     status: Type.String(), revision, undo_command_id: Type.String({ format: 'uuid' }) }, strict),
+  Type.Object({ kind: Type.Literal('MODEL_SELECTION'), ...selectionFields }, strict),
 ]);
 
 const menuEntry = Type.Object({
@@ -83,14 +102,32 @@ export function registerChatCommandRoutes(app: FastifyInstance,
         workspaceId: params.workspace_id, sessionId: params.session_id,
         commandId: body.command_id, text: body.text });
       if (outcome.replayed) reply.header('command-replayed', 'true');
-      const resource = outcome.result.kind === 'NEW_SESSION'
-        ? `assist-sessions/${outcome.result.session_id}`
-        : `conversation-state-requests/${outcome.result.request_id}`;
+      const resource = outcome.result.kind === 'STATE_WITHDRAWAL'
+        ? `conversation-state-requests/${outcome.result.request_id}`
+        : `assist-sessions/${outcome.result.session_id}`;
       return reply.code(200).send({ command_id: body.command_id,
         committed_at: outcome.committedAt.toISOString(), result: outcome.result,
         links: { resource: `/api/v1/workspaces/${params.workspace_id}/${resource}` } });
     } catch (error) {
       return sendProblem(reply, problemFromError(error, body.command_id), request.id);
+    }
+  });
+
+  /**
+   * 读取本会话当前的模型选择（只读）：无覆盖时 selection 为 null，前端据此显示「沿用应用默认」。
+   * 不发起模型调用、不写存储；选择器与状态区用它区分「会话后续模型」与「应用默认」。
+   */
+  app.get('/assist-sessions/:session_id/model-selection', {
+    schema: { params: executeParams,
+      response: { 200: Type.Object({ selection: Type.Union([modelSelectionDto, Type.Null()]) }, strict) } },
+  }, async (request, reply) => {
+    const params = request.params as { workspace_id: string; session_id: string };
+    try {
+      const selection = await readSessionModel(dependencies.database.executor, {
+        workspaceId: params.workspace_id, sessionId: params.session_id });
+      return { selection: selection ?? null };
+    } catch (error) {
+      return sendReadError(reply, error, request.id);
     }
   });
 

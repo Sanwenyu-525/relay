@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import AssistSourcePicker from "../src/components/AssistSourcePicker";
@@ -125,5 +126,183 @@ describe("P12 Assist 显式来源选择", () => {
     await wrapper.get("#assist-source-query").setValue("新词");
     expect(wrapper.text()).not.toContain("上一词资料");
     wrapper.unmount();
+  });
+});
+
+/**
+ * CT-02（点击穿透整改，2026-10-17）常驻断言：资料面板只承担资料职责，四类读取状态互不掩盖，
+ * 选择动作不产生任何请求。视觉档位（限高、内部滚动、面板字号）由 `migrated-scoped.css` 的规则守住。
+ */
+function searchItem(id: string, title: string) {
+  return { type: "KNOWLEDGE", id, version: "1", title, snippet: "摘要", matched_fields: ["title"],
+    source_ref: `knowledge:${id}:v1`, status: "ACTIVE", project_id: projectId };
+}
+
+function ref(id: string): RelayAssistSourceRef {
+  return { kind: "KNOWLEDGE", rootId: id, version: "1" };
+}
+
+async function mount(props: { projectId: string | null; selectedRefs: readonly RelayAssistSourceRef[]; disabled?: boolean }) {
+  const emitted: (readonly RelayAssistSourceRef[])[] = [];
+  const mounted = await mountReact(createElement(AssistSourcePicker, {
+    ...props, onChange: (refs: readonly RelayAssistSourceRef[]) => { emitted.push(refs); }
+  }));
+  return Object.assign(mounted.wrapper, {
+    unmount: mounted.unmount,
+    setProps: async (patch: Partial<typeof props>) => {
+      props = { ...props, ...patch };
+      await mounted.rerender(createElement(AssistSourcePicker, { ...props, onChange: (refs: readonly RelayAssistSourceRef[]) => { emitted.push(refs); } }));
+    },
+    emitted,
+    searchCalls: () => requests.filter(([, init]) => !init?.method || init.method === "GET").length,
+    postCalls: () => requests.filter(([, init]) => init?.method === "POST").length
+  });
+}
+
+let requests: [string, RequestInit | undefined][] = [];
+
+function stubSearch(handler: (query: string | null) => unknown) {
+  requests = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    const url = new URL(String(input));
+    requests.push([String(input), init]);
+    if (url.pathname !== `/api/v1/workspaces/${workspaceId}/search`) throw new Error(`意外请求：${url.pathname}`);
+    return response(handler(url.searchParams.get("q")));
+  }));
+}
+
+describe("CT-02 资料面板的职责、状态与副作用边界", () => {
+  afterEach(() => {
+    resetRelayConnectionForTest();
+    vi.unstubAllGlobals();
+  });
+
+  it("面板只承载资料职责：标题、已选数量、已选项、引用范围按序分组且不含生成方式与意图", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    stubSearch(() => ({ items: [searchItem("33333333-3333-4333-8333-333333333333", "候选资料")], next_cursor: null }));
+    const wrapper = await mount({ projectId, selectedRefs: [ref("aaaaaaa1-1111-4111-8111-111111111111"), ref("aaaaaaa2-1111-4111-8111-111111111111")] });
+    try {
+      await wrapper.get("#assist-source-query").setValue("资料");
+      await wrapper.get('[data-testid="assist-source-picker"] form').trigger("submit");
+      await flush(20);
+      const before = (a: string, b: string) => {
+        const first = wrapper.get(a).element!; const second = wrapper.get(b).element!;
+        // compareDocumentPosition 返回位掩码：FOLLOWING 命中才说明 a 在 b 之前。
+        return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+      };
+      expect(wrapper.get(".assist-source-head h2").text()).toContain("资料");
+      expect(before(".assist-source-head", ".assist-source-body")).toBe(true);
+      expect(before(".assist-source-head", '[data-testid="assist-source-scope"]')).toBe(true);
+      expect(before("#assist-source-query", '[data-testid="assist-source-scope"]')).toBe(true);
+      expect(before('[data-testid="assist-source-scope"]', ".assist-source-body")).toBe(true);
+      expect(before('[data-region="selected"]', '[data-region="results"]')).toBe(true);
+      expect(wrapper.get('[data-testid="assist-source-count"]').text()).toContain("已选 2 / 10");
+      const text = wrapper.text();
+      expect(text).toContain("引用范围");
+      expect(text).not.toContain("生成方式");
+      expect(text).not.toContain("意图");
+      expect(wrapper.find('[data-testid="assist-skill"]').exists()).toBe(false);
+      expect(wrapper.find('[data-testid="assist-intent"]').exists()).toBe(false);
+    } finally { wrapper.unmount(); }
+  });
+
+  it("空态、查无结果与读取失败互不掩盖，失败后按同一检索词重试", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    let attempts = 0;
+    stubSearch((query) => {
+      if (query === "注定失败" && ++attempts === 1) throw new Error("读取失败");
+      return { items: [searchItem("33333333-3333-4333-8333-333333333333", `“${query}”的结果`)], next_cursor: null };
+    });
+    const wrapper = await mount({ projectId, selectedRefs: [] });
+    try {
+      expect(wrapper.get('[data-testid="assist-source-empty"]').exists()).toBe(true);
+      expect(wrapper.find('[data-testid="assist-source-none"]').exists()).toBe(false);
+      await wrapper.get("#assist-source-query").setValue("注定失败");
+      await wrapper.get('[data-testid="assist-source-picker"] form').trigger("submit");
+      await flush(20);
+      expect(wrapper.find('[data-testid="assist-source-empty"]').exists()).toBe(false);
+      // 失败不能渲染成「没有资料」的空列表：错误与无结果两种说法不能同时出现。
+      expect(wrapper.find('[data-testid="assist-source-none"]').exists()).toBe(false);
+      const retry = wrapper.get('[data-testid="assist-source-retry"]');
+      expect(wrapper.get(".action-error").exists()).toBe(true);
+      await retry.trigger("click");
+      await flush(20);
+      expect(wrapper.text()).toContain("“注定失败”的结果");
+      expect(wrapper.find('[data-testid="assist-source-retry"]').exists()).toBe(false);
+      expect(wrapper.searchCalls()).toBe(2);
+    } finally { wrapper.unmount(); }
+  });
+
+  it("检索过但没有匹配时才说查无结果，未检索时保持空态", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    stubSearch(() => ({ items: [], next_cursor: null }));
+    const wrapper = await mount({ projectId, selectedRefs: [] });
+    try {
+      await wrapper.get("#assist-source-query").setValue("查不到");
+      await wrapper.get('[data-testid="assist-source-picker"] form').trigger("submit");
+      await flush(20);
+      expect(wrapper.get('[data-testid="assist-source-none"]').text()).toContain("没有可见的匹配资料");
+      expect(wrapper.find('[data-testid="assist-source-empty"]').exists()).toBe(false);
+      await wrapper.get("#assist-source-query").setValue("查不到但没提交");
+      expect(wrapper.find('[data-testid="assist-source-none"]').exists()).toBe(false);
+      expect(wrapper.get('[data-testid="assist-source-empty"]').exists()).toBe(true);
+    } finally { wrapper.unmount(); }
+  });
+
+  it("勾选与移除资料只编辑本次候选输入：不发送消息、不建执行、不额外请求", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    stubSearch(() => ({ items: [searchItem("33333333-3333-4333-8333-333333333333", "甲资料"),
+      searchItem("44444444-4444-4444-8444-444444444444", "乙资料")], next_cursor: null }));
+    const wrapper = await mount({ projectId, selectedRefs: [] });
+    try {
+      await wrapper.get("#assist-source-query").setValue("资料");
+      await wrapper.get('[data-testid="assist-source-picker"] form').trigger("submit");
+      await flush(20);
+      const afterSearch = requests.length;
+      const boxes = wrapper.findAll('[data-region="results"] input[type="checkbox"]');
+      await boxes[0]!.setValue(true);
+      await wrapper.setProps({ selectedRefs: [ref("33333333-3333-4333-8333-333333333333")] });
+      await wrapper.get('[data-region="selected"] button').trigger("click");
+      await wrapper.setProps({ selectedRefs: [] });
+      await boxes[1]!.setValue(true);
+      expect(wrapper.emitted.at(-1)).toEqual([{ kind: "KNOWLEDGE", rootId: "44444444-4444-4444-8444-444444444444", version: "1" }]);
+      expect(requests.length).toBe(afterSearch);
+      expect(wrapper.postCalls()).toBe(0);
+    } finally { wrapper.unmount(); }
+  });
+
+  it("超出可选上限只给状态说明，不伪装成可重试的读取失败", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    stubSearch(() => ({ items: [searchItem("33333333-3333-4333-8333-333333333333", "第十一份资料")], next_cursor: null }));
+    const selected = Array.from({ length: 10 }, (_unused, index) => ref(`0000000${index}-0000-4000-8000-000000000000`));
+    const wrapper = await mount({ projectId, selectedRefs: selected });
+    try {
+      await wrapper.get("#assist-source-query").setValue("资料");
+      await wrapper.get('[data-testid="assist-source-picker"] form').trigger("submit");
+      await flush(20);
+      const emissions = wrapper.emitted.length;
+      await wrapper.get('[data-region="results"] input[type="checkbox"]').setValue(true);
+      expect(wrapper.get('[data-testid="assist-source-limit"]').text()).toContain("最多选择 10 个资料版本");
+      expect(wrapper.find('[data-testid="assist-source-retry"]').exists()).toBe(false);
+      expect(wrapper.find('[data-testid="assist-source-body"] .action-error').exists()).toBe(false);
+      expect(wrapper.emitted.length).toBe(emissions);
+      expect(wrapper.get('[data-testid="assist-source-count"]').text()).toContain("已选 10 / 10");
+    } finally { wrapper.unmount(); }
+  });
+
+  it("限高与内部滚动、面板字号档位留在样式表里（不新增数值档）", () => {
+    const css = readFileSync("src/migrated-scoped.css", "utf8");
+    const rule = (selector: string) => {
+      const found = new RegExp(`^\\.${selector}\\s*\\{([^}]*)\\}`, "mu").exec(css);
+      if (!found) throw new Error(`缺少样式规则：.${selector}`);
+      return found[1]!;
+    };
+    const body = rule("assist-source-body");
+    expect(body).toContain("max-height: min(30dvh, var(--relay-layout-workspace-sideWidth))");
+    expect(body).toContain("overflow-y: auto");
+    expect(rule("assist-source-title")).toContain("font-size: var(--relay-font-size-body)");
+    for (const selector of ["assist-source-title", "assist-source-count", "assist-source-scope", "assist-source-body"]) {
+      expect(rule(selector)).not.toMatch(/font-size:\s*\d/);
+    }
   });
 });

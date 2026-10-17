@@ -44,6 +44,13 @@ import { ViewRepository } from '../view/view-repository.js';
 import { BlueprintRepository } from '../blueprint/blueprint-repository.js';
 import { RuntimeAdmissionRepository } from '../runtime/runtime-admission-repository.js';
 import { RunScopeGrantRepository } from './run-scope-grant.js';
+import { ModelCatalogRepository } from '../model/model-catalog-repository.js';
+import { ComputerControlStateRepository } from '../computer/control-state.js';
+import { SessionModelSelectionRepository } from '../model/session-model-selection-repository.js';
+import { KyselyConversationDiffRepository, type ConversationDiffRepository }
+  from '../conversation-diff/conversation-diff-repository.js';
+import { KyselyToolCallPreviewRepository, type ToolCallPreviewRepository }
+  from '../conversation-diff/tool-call-preview-repository.js';
 
 /** 同一连接上的模块写入口集合。用例只能通过这里跨模块协作，不直接拼 SQL。 */
 export interface Repositories {
@@ -98,6 +105,16 @@ export interface Repositories {
   readonly today: TodayRepository;
   readonly views: ViewRepository;
   readonly blueprints: BlueprintRepository;
+  /** 免费模型目录快照与同步租约/退避的独占写入口（迁移 0088，专项阶段 B）。 */
+  readonly modelCatalog: ModelCatalogRepository;
+  /** 会话模型选择的独占写入口（迁移 0089，阶段 C）：会话作用域选择记录，从不写回进程默认。 */
+  readonly modelSelection: SessionModelSelectionRepository;
+  /** 电脑操控展示状态（迁移 0096）：「Relay 是否正在操控电脑」的唯一持久事实。 */
+  readonly computerControl: ComputerControlStateRepository;
+  /** 会话基线（迁移 0097）：「本轮对话以来」受管根内容快照的独占写入口（工作台 §34）。 */
+  readonly conversationDiff: ConversationDiffRepository;
+  /** 工具调用生成中预览（迁移 0102）：可丢弃的展示证据，不进总数、不授予权限。 */
+  readonly toolCallPreview: ToolCallPreviewRepository;
 }
 
 export function createRepositories(db: DbExecutor): Repositories {
@@ -147,6 +164,11 @@ export function createRepositories(db: DbExecutor): Repositories {
     today: new TodayRepository(db),
     views: new ViewRepository(db),
     blueprints: new BlueprintRepository(db),
+    modelCatalog: new ModelCatalogRepository(db),
+    modelSelection: new SessionModelSelectionRepository(db),
+    computerControl: new ComputerControlStateRepository(db),
+    conversationDiff: new KyselyConversationDiffRepository(db),
+    toolCallPreview: new KyselyToolCallPreviewRepository(db),
   };
 }
 
