@@ -1,0 +1,114 @@
+/* 输入器工具行上的「本目录写入档位」芯片与弹层（工作台 §18.1、§25.1）。
+   芯片沿用 .agent-chat-tool 的紧凑键形态，弹层外壳与「+」菜单同一套语言：
+   panel 圆角 + separator 细边 + floating 阴影，宽度收缩到内容。只使用既有 token。 */
+.agent-chat-permission { position: relative; display: inline-flex; }
+.agent-chat-permission-chip { list-style: none; }
+.agent-chat-permission-chip::-webkit-details-marker { display: none; }
+.agent-chat-permission-chip svg:not(.agent-chat-chip-chevron) {
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+  flex: none;
+}
+.agent-chat-permission[open] .agent-chat-permission-chip {
+  background: var(--relay-color-selection-hover);
+  color: var(--relay-color-text-primary);
+}
+.agent-chat-permission-menu {
+  position: absolute;
+  bottom: calc(100% + var(--relay-space-2));
+  left: 0;
+  z-index: var(--relay-zIndex-popover);
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-1);
+  width: max-content;
+  max-width: min(22rem, calc(100vw - var(--relay-space-6)));
+  padding: var(--relay-space-2);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  box-shadow: var(--relay-shadow-floating);
+}
+.agent-chat-permission-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-1);
+}
+.agent-chat-permission-target,
+.agent-chat-permission-footnote,
+.agent-chat-permission-hint,
+.agent-chat-permission-error {
+  margin: 0;
+  font-family: var(--relay-font-family-ui);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  color: var(--relay-color-text-secondary);
+}
+.agent-chat-permission-target {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-chat-permission-error { color: var(--relay-color-status-danger-text); }
+.agent-chat-permission-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--relay-space-0-5);
+  width: 100%;
+  padding: var(--relay-space-1) var(--relay-space-2);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--relay-radius-control);
+  cursor: pointer;
+  transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.agent-chat-permission-row:hover:not(:disabled) { background: var(--relay-color-selection-hover); }
+.agent-chat-permission-row[data-current="true"] {
+  background: var(--relay-color-selection-bg);
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+}
+.agent-chat-permission-row:disabled { color: var(--relay-color-text-muted); cursor: not-allowed; opacity: 0.85; }
+.agent-chat-permission-row-title {
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-medium);
+  line-height: var(--relay-font-lineHeight-heading);
+  color: var(--relay-color-text-primary);
+}
+.agent-chat-permission-row:disabled .agent-chat-permission-row-title { color: var(--relay-color-text-muted); }
+.agent-chat-permission-row-body {
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  color: var(--relay-color-text-secondary);
+}
+.agent-chat-permission-hint { color: var(--relay-color-status-warning-text); }
+.agent-chat-permission-pending {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-1);
+}
+.agent-chat-permission-footnote { color: var(--relay-color-text-muted); }
+.agent-chat-permission-recheck {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--relay-control-height-compact);
+  height: var(--relay-control-height-compact);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-secondary);
+  cursor: pointer;
+}
+.agent-chat-permission-recheck:hover:not(:disabled) { background: var(--relay-color-selection-hover); color: var(--relay-color-text-primary); }
+.agent-chat-permission-recheck:disabled { color: var(--relay-color-text-muted); cursor: not-allowed; }
+.agent-chat-permission-recheck svg {
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+  flex: none;
+}

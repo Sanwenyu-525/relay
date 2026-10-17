@@ -1,0 +1,192 @@
+/* 聊天消息时间线导航（工作台 §31 / 设计系统 §9.12）。
+   全部尺度取既有 token：轨道宽与刻度命中区 = control.target.minimum，
+   刻度长度 = space.2 / 当前档 space.4 / 悬停峰值 control.target.minimum − space.1，
+   悬停联动衰减半径 = 3 × control.target.minimum，刻度粗细 = focus.width，
+   浮层沿用 floating 层与 shadow.floating。
+   只有 gutter、悬停峰值与联动半径、折叠档是本地组合值。 */
+
+/* 常驻轨占用的左缘留白：轨道宽 + 一档间距。空会话没有 .agent-chat-timeline，自然不留。 */
+.agent-chat-transcript-shell { --chat-timeline-gutter: calc(var(--relay-control-target-minimum) + var(--relay-space-2)); }
+
+/* 选择器比 AssistView.css 里的基础规则多一级，避免依赖两份样式的加载顺序。
+   两侧等量留白，不是只让左边：阅读列与输入器共用同一条中线（uiOption2FirstSession
+   的「消息列与输入器同宽」钉住这一点），只加左 padding 会把消息列整体推右半个 gutter。 */
+.agent-chat-transcript-shell:has(.agent-chat-timeline) .agent-chat-transcript {
+  padding-inline: var(--chat-timeline-gutter);
+}
+
+.agent-chat-timeline {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: var(--relay-control-target-minimum);
+  z-index: var(--relay-zIndex-sticky);
+  display: flex;
+}
+
+/* 可见刻度与命中区分开：短线只有 focus.width 粗，命中区仍是 24px 见方。 */
+.agent-chat-timeline-rail {
+  width: 100%;
+  padding-block: var(--relay-space-4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* 长会话由导航轨自己滚动，消息流仍是唯一的正文滚动容器。 */
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
+
+/* 刻度组在轨道可视高度内垂直居中：首尾各留一个 auto 边距吸收剩余空间。
+   轨道自己滚动（长会话放不下）时没有剩余空间，auto 边距归零 → 回到从顶排列，
+   第一条刻度不会被居中挤出可视区，滚动可达性不变。 */
+.agent-chat-timeline-node:first-child { margin-block-start: auto; }
+.agent-chat-timeline-node:last-child { margin-block-end: auto; }
+
+.agent-chat-timeline-node {
+  flex: none;
+  width: var(--relay-control-target-minimum);
+  height: var(--relay-control-target-minimum);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--relay-radius-badge);
+  background: transparent;
+  cursor: pointer;
+}
+.agent-chat-timeline-node::before {
+  content: "";
+  display: block;
+  /* 悬停联动由组件按指针距离写内联 --chat-timeline-tick-width；没有该变量时用默认档。 */
+  width: var(--chat-timeline-tick-width, var(--relay-space-2));
+  height: var(--relay-focus-width);
+  border-radius: var(--relay-radius-round);
+  background: var(--relay-color-border-control);
+  transition: width var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.agent-chat-timeline-node:hover { background: var(--relay-color-selection-hover); }
+.agent-chat-timeline-node:hover::before { background: var(--relay-color-action-pressed); }
+/* 指针在轨道内（data-tracking）：长度直接跟手，不走过渡；移出后清变量与属性，
+   长度按 motion.duration.fast 复位。减少动态效果下两处结果同为 none，不互相冲突。 */
+.agent-chat-timeline-rail[data-tracking="true"] .agent-chat-timeline-node::before { transition: none; }
+/* 当前阅读位置：加长 + 主操作色，并用 aria-current 表达，不只靠颜色。
+   加长与联动共用同一个变量：指针在轨道内时组件写的内联值优先，移出后回落这一档；
+   联动取较大值，当前位置刻度不会被压得比默认态还短。 */
+.agent-chat-timeline-node[aria-current="true"] { --chat-timeline-tick-width: var(--relay-space-4); }
+.agent-chat-timeline-node[aria-current="true"]::before { background: var(--relay-color-action-primary); }
+
+.agent-chat-timeline-toggle { display: none; }
+
+/* 悬停/聚焦预览：纯文本片段，不调用模型，不参与布局。 */
+.agent-chat-timeline-preview {
+  position: absolute;
+  left: calc(var(--relay-control-target-minimum) + var(--relay-space-2));
+  width: var(--relay-layout-chatTimeline-previewWidth);
+  /* 高度上限沿用本列两处浮层的同一组合，不另立一个来源不明的数值。 */
+  max-height: min(60dvh, var(--relay-layout-workspace-sideWidth));
+  overflow-y: auto;
+  padding: var(--relay-space-3);
+  display: grid;
+  gap: var(--relay-space-1);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-control);
+  box-shadow: var(--relay-shadow-floating);
+  z-index: var(--relay-zIndex-popover);
+}
+.agent-chat-timeline-preview-title {
+  margin: 0;
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+  line-height: var(--relay-font-lineHeight-heading);
+  color: var(--relay-color-text-primary);
+  overflow-wrap: anywhere;
+}
+.agent-chat-timeline-preview-body {
+  margin: 0;
+  font-size: var(--relay-font-size-body);
+  line-height: var(--relay-font-lineHeight-ui);
+  color: var(--relay-color-text-secondary);
+  overflow-wrap: anywhere;
+}
+.agent-chat-timeline-preview-note {
+  margin: 0;
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+}
+
+/* 目标不可读时的就地提示：贴在消息区下沿内侧，不压刻度，也不遮挡输入器与发送键。 */
+.agent-chat-timeline-notice {
+  position: absolute;
+  inset-block-end: var(--relay-space-2);
+  left: calc(var(--relay-control-target-minimum) + var(--relay-space-2));
+  margin: 0;
+  max-width: var(--relay-layout-chatTimeline-previewWidth);
+  padding: var(--relay-space-2) var(--relay-space-3);
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-status-warning-text);
+  background: var(--relay-color-status-warning-bg);
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-control);
+  box-shadow: var(--relay-shadow-floating);
+  z-index: var(--relay-zIndex-popover);
+}
+
+/* 落点强调：复用 selection 语义，一次性过渡，不用持续闪烁表达当前位置。 */
+.agent-message-slot[data-chat-timeline-target="true"] .agent-message {
+  background: var(--relay-color-selection-bg);
+  border-radius: var(--relay-radius-control);
+  box-shadow: 0 0 0 var(--relay-space-2) var(--relay-color-selection-bg);
+  transition: background-color var(--relay-motion-duration-panel) var(--relay-motion-easing-standard);
+}
+
+/* 窄容器（聊天列 ≤ breakpoint.medium = 48rem）降为左缘紧凑入口，展开后节点与跳转能力不变。
+   这一档里导航轨改为浮层，正文不再预留 gutter，浮层覆盖左缘而不是压缩正文。
+   容器查询的条件里不能用 var()（CSS 规范如此），只能按仓内既有写法写字面档位，
+   与 tokens 的 breakpoint.medium 同源；改断点必须同时改这里。 */
+@container agent-chat (max-width: 48rem) {
+  .agent-chat-transcript-shell:has(.agent-chat-timeline) .agent-chat-transcript { padding-inline: 0; }
+  .agent-chat-timeline-rail { display: none; }
+  .agent-chat-timeline-rail[data-expanded="true"] {
+    display: flex;
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    width: var(--relay-control-target-minimum);
+    background: var(--relay-color-bg-surface);
+    border: var(--relay-border-width) solid var(--relay-color-border-control);
+    border-radius: var(--relay-radius-control);
+    box-shadow: var(--relay-shadow-floating);
+    z-index: var(--relay-zIndex-popover);
+  }
+  .agent-chat-timeline-toggle {
+    width: var(--relay-control-target-minimum);
+    height: var(--relay-control-height-compact);
+    margin-block-start: var(--relay-space-4);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    color: var(--relay-color-text-secondary);
+    background: transparent;
+    border: 0;
+    border-radius: var(--relay-radius-badge);
+    cursor: pointer;
+  }
+  .agent-chat-timeline-toggle svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+  .agent-chat-timeline-toggle:hover { color: var(--relay-color-action-primary); background: var(--relay-color-selection-hover); }
+}
+
+/* 减少动态效果：落点强调与刻度变化都改为直接生效，不靠过渡表达当前位置。
+   html[data-motion] 由 lib/motionPreference 提供，本机显式关闭与系统偏好都走这里。 */
+@media (prefers-reduced-motion: reduce) {
+  .agent-chat-timeline-node::before,
+  .agent-message-slot[data-chat-timeline-target="true"] .agent-message { transition: none; }
+}
+html[data-motion="off"] .agent-chat-timeline-node::before,
+html[data-motion="off"] .agent-message-slot[data-chat-timeline-target="true"] .agent-message {
+  transition: none;
+}

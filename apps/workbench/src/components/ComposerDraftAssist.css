@@ -1,0 +1,77 @@
+/* 输入框自动分点与手动润色（工作台 §30）。
+   结构对齐 GPT页面原型/Relay_Composer_Assist_Prototype.html：
+     * .composer-draft-bar     = 原型 .assist-bar   （输入卡上方的提示行）
+     * .composer-draft-popover = 原型 .assist-popover（bottom:100% 锚定输入卡上方，非模态）
+     * .composer-draft-polish  = 原型 #polishBtn    （工具行内的润色键，由 AssistView 放进
+       .agent-chat-composer-tools，这里只补它自己的忙态与说明）
+   数值全部复用既有 token，不新增色值。 */
+
+.composer-draft-bar {
+  position: relative;
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: var(--relay-space-2);
+  min-height: var(--relay-control-height-compact);
+  font-size: var(--relay-font-size-meta);
+  color: var(--relay-color-text-muted);
+}
+.composer-draft-bar[data-tone="bad"] { color: var(--relay-color-status-danger-text); }
+.composer-draft-bar[data-tone="warn"] { color: var(--relay-color-status-warning-text); }
+.composer-draft-bar-text { margin: 0; overflow-wrap: anywhere; }
+.composer-draft-bar-note {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+
+/* 提示行里的文字键：与原型 .assist-bar-cta 同一形态，不抢输入卡的视觉权重。 */
+.composer-draft-bar-cta {
+  border: 0; background: transparent;
+  padding: 0 var(--relay-space-1);
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-action-text);
+  font-size: inherit; font-weight: var(--relay-font-weight-medium);
+  text-decoration: underline; text-underline-offset: var(--relay-space-1);
+  cursor: pointer;
+}
+.composer-draft-bar-cta:hover { background: var(--relay-color-selection-hover); }
+
+/* 工具行内的润色键：沿用 .agent-chat-tool 外观，只在忙态与已应用时给一点区分。 */
+.composer-draft-polish[data-busy="true"] { color: var(--relay-color-text-muted); }
+
+/* 浮层：锚在输入区上方、限高局部滚动、非模态、不遮输入与发送。
+   整块限高，列表在内部滚——否则矮窗里浮层会从消息区顶部被裁掉。 */
+.composer-draft-popover {
+  position: absolute; bottom: 100%; inset-inline: 0;
+  z-index: var(--relay-zIndex-popover);
+  display: flex; flex-direction: column; gap: var(--relay-space-2);
+  min-height: 0; max-height: min(38dvh, 22rem); overflow: hidden;
+  margin-bottom: var(--relay-space-2); padding: var(--relay-space-2);
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-panel);
+  background: var(--relay-color-bg-surface);
+  box-shadow: var(--relay-shadow-floating);
+  color: var(--relay-color-text-primary);
+  text-align: start;
+}
+.composer-draft-popover > * { flex: none; min-height: 0; }
+/* 限高时只让两栏滚：标题与采用/取消不能被压扁。 */
+.composer-draft-compare { flex: 1 1 auto; min-height: 0; overflow: hidden;
+  display: grid; gap: var(--relay-space-2); grid-template-columns: 1fr 1fr; }
+.composer-draft-compare-column { min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.composer-draft-compare-label {
+  margin: 0 0 var(--relay-space-1); color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+.composer-draft-compare pre {
+  margin: 0; padding: var(--relay-space-2);
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  scrollbar-gutter: stable;
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+  font: inherit; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.composer-draft-panel-actions { display: flex; gap: var(--relay-space-2); justify-content: flex-end; }
+
+/* 窄窗：两栏对照改为纵向堆叠，浮层仍留在输入卡上方，不遮挡发送。 */
+@media (max-width: 48rem) {
+  .composer-draft-compare { grid-template-columns: 1fr; }
+}

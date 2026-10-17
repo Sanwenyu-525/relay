@@ -1,0 +1,259 @@
+/*
+ * Computer Control 桌面 Overlay：屏幕边缘呼吸光 + 顶部状态条。
+ *
+ * 这是被 Tauri 宿主创建的透明、点击穿透窗口的页面（apps/desktop/src-tauri
+ * control_overlay.rs 负责「什么时候显示」）；本页面只负责「怎么画」：
+ *   * 全屏透明，pointer-events 全部关闭（窗口层已是 WS_EX_TRANSPARENT，这里是双保险）；
+ *   * 状态由宿主通过 window.__relayControlOverlayState() 注入，页面自己不取数；
+ *   * 动画只用 opacity（GPU 合成，无 layout / 无 JS 每帧样式）；
+ *   * 颜色按参考效果图：Blue → Violet → 洋红尾缘的霓虹边缘光，非警报、非红色系。
+ */
+
+:root {
+  --overlay-font: "Relay Sans SC", "Microsoft YaHei UI", "Microsoft YaHei",
+    "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  --pill-bg: rgba(15, 17, 27, 0.78);
+  --pill-text: rgba(242, 244, 252, 0.96);
+  --pill-text-dim: rgba(235, 238, 250, 0.62);
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: var(--overlay-font);
+  pointer-events: none;
+  user-select: none;
+}
+
+#overlay-root {
+  position: fixed;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 240ms ease-out;
+}
+
+#overlay-root.is-visible {
+  opacity: 1;
+}
+
+#overlay-root.is-fading {
+  /* 退出：150–250ms 淡出 */
+  opacity: 0;
+  transition: opacity 200ms ease-in;
+}
+
+/* ── 屏幕边缘光：亮核线 + 向内 Bloom + 大范围环境光，三层共同呼吸 ── */
+
+.glow-layer {
+  position: absolute;
+  inset: 0;
+  will-change: opacity;
+}
+
+/* 第 1 层：大范围极淡环境光 */
+.glow-outer {
+  box-shadow:
+    inset 0 0 120px 24px rgba(96, 110, 255, 0.16),
+    inset 0 0 240px 60px rgba(150, 92, 255, 0.10);
+  animation: overlay-breathe 2.8s ease-in-out infinite reverse;
+}
+
+/* 第 2 层：向内 Bloom（柔和晕染；左蓝右粉的水平走向由亮核线承担） */
+.glow-bloom {
+  box-shadow:
+    inset 0 0 28px 5px rgba(110, 120, 255, 0.36),
+    inset 0 0 72px 16px rgba(124, 92, 255, 0.20),
+    inset 0 0 150px 40px rgba(150, 92, 255, 0.08);
+  animation: overlay-breathe 3.2s ease-in-out infinite;
+}
+
+/* 第 3 层：贴边亮核线——颜色不固定，沿屏幕四周持续流动。
+   实现：全屏 ring mask 只留 2.5px 边框区；conic 渐变角度经 @property 注册后
+   由 CSS 关键帧驱动（无需 JS、无巨型旋转图层）。蓝 → 紫 → 粉 → 洋红 → 青循环，
+   任一时刻各边颜色都随流动变化；不支持 @property 的宿主退化为静态多彩描边。 */
+@property --rim-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.glow-flow {
+  padding: 2.5px;
+  background: conic-gradient(from var(--rim-angle) at 50% 50%,
+    #4d7dff 0%,
+    #7c5cff 20%,
+    #ff6cd6 42%,
+    #c44dff 62%,
+    #37c0ff 82%,
+    #4d7dff 100%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+          mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+          mask-composite: exclude;
+  animation:
+    rim-flow 9s linear infinite,
+    overlay-breathe 3.0s ease-in-out infinite;
+}
+
+@keyframes rim-flow {
+  to { --rim-angle: 360deg; }
+}
+
+@keyframes overlay-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.66; }
+}
+
+/* 退出中：呼吸继续但整体压暗，由宿主在淡出后隐藏窗口 */
+#overlay-root.is-stopping .glow-layer {
+  animation-duration: 3.4s;
+}
+
+/* ── 顶部状态条：横向胶囊（图标块 | 标题+徽标/当前操作 | 分隔线 | Esc 区） ── */
+
+.control-pill {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 16px 7px 9px;
+  background: var(--pill-bg);
+  border-radius: 14px;
+  box-shadow:
+    0 8px 28px rgba(0, 0, 0, 0.35),
+    0 0 22px rgba(109, 99, 255, 0.35),
+    0 0 48px rgba(124, 92, 255, 0.18);
+  backdrop-filter: blur(14px);
+  color: var(--pill-text);
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateX(-50%) translateY(-8px);
+  transition: opacity 240ms ease-out, transform 240ms ease-out;
+}
+
+/* 渐变发光描边：mask 挖空中间只留 1.5px 环；左端蓝、右端粉（与边缘光同走向） */
+.control-pill::before {
+  content: "";
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 15.5px;
+  padding: 1.5px;
+  background: linear-gradient(90deg, #5b8cff 0%, #8b5cf6 52%, #ff6cd6 100%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+          mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+          mask-composite: exclude;
+  pointer-events: none;
+}
+
+#overlay-root.is-visible .control-pill {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* 左侧应用图标块：渐变圆角方块 + 白色显示器/指针 */
+.pill-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #4d7dff 0%, #7c5cff 100%);
+  color: #fff;
+  box-shadow:
+    0 0 12px rgba(96, 124, 255, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.pill-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* 中部两行：标题行 + 当前操作 */
+.pill-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.3;
+}
+
+.pill-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.pill-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.pill-state {
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 1.5px 8px;
+  border-radius: 999px;
+  color: #fff;
+  background: linear-gradient(135deg, #4d7dff 0%, #8b5cf6 100%);
+  box-shadow: 0 0 8px rgba(109, 99, 255, 0.45);
+}
+
+#overlay-root.is-stopping .pill-state {
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: none;
+  color: rgba(242, 244, 252, 0.78);
+}
+
+.pill-action {
+  font-size: 11.5px;
+  color: var(--pill-text-dim);
+  max-width: 40vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pill-action:empty {
+  display: none;
+}
+
+/* 分隔线 + 右侧 Esc 区（同一行） */
+.pill-divider {
+  width: 1px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.pill-esc {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--pill-text-dim);
+}
+
+.esc-key {
+  display: inline-block;
+  padding: 1px 7px;
+  font-size: 11px;
+  color: var(--pill-text);
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  line-height: 1.5;
+}
+
+/* 弱化动效偏好：不流动、不呼吸，只保留静态多彩边缘光 */
+@media (prefers-reduced-motion: reduce) {
+  .glow-layer { animation: none; }
+  .control-pill { transition: opacity 160ms ease-out; }
+}
