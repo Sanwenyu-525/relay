@@ -16,6 +16,8 @@ test-results/
 playwright-report/
 # Workbench 测试/截图结果，由 Playwright 生成，不进入版本库
 apps/workbench/results/
+# Workbench 临时探针脚本，不进入版本库
+apps/workbench/probe*.mjs
 
 # 原始验收过程输出默认留在本机；概要、截图、复跑脚本与历史压缩包保留
 /docs/testing/evidence/**/*.jsonl
