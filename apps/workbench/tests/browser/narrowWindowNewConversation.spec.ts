@@ -104,11 +104,12 @@ async function connect(page: Page): Promise<void> {
 
 /** 非桌面宿主没有原生选择器：走既有手动绝对目录入口建立目录作用域。 */
 async function openDirectory(page: Page): Promise<void> {
-  // 2026-10-10 协作页 §3.3：目录控件收进细条上的「更换目录」框，框走 portal 挂在 body 上。
+  // 2026-10-10 协作页 §3.3：目录控件收进细条上的「更换目录」浮层（2026-10-18 从居中弹窗改成
+  // 锚在目录名上方的紧凑面板）。浮层不是模态框，但控件仍按 body 定位，选择器写法不变。
   await page.getByTestId("folder-scope-change").click();
   await page.locator('[data-testid="folder-manual-root"]').fill(root);
   await page.locator('[data-testid="folder-open-manual"]').click();
-  // 目录定下来后框自行关闭（模态框留着会挡住刚更新的细条）；写入就绪说明仍在框内，重开一次核对。
+  // 目录定下来后浮层自行收起（留着会挡住刚更新的细条）；写入就绪说明仍在浮层内，重开一次核对。
   await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 20_000 });
   await page.getByTestId("folder-scope-change").click();
   await expect(page.getByTestId("folder-write-readiness")).toBeVisible({ timeout: 20_000 });
@@ -252,15 +253,15 @@ test.describe("窄窗与短窗的新对话入口", () => {
     await connect(page);
     await openDirectory(page);
     await expect(page.getByTestId("assist-first-draft")).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByTestId("folder-scope-options")).toContainText("NarrowWindowProject");
+    await expect(page.getByTestId("folder-scope-change")).toContainText("NarrowWindowProject");
 
     await menuButton(page).click();
     await action(page).click();
 
     await expect(page).toHaveURL(/\/agent\?new=(?!seed$)/u);
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    // 目录作用域不继承：范围条回到未选择目录，写准入说明一并消失。
-    await expect(page.getByTestId("folder-scope-options")).toContainText("未选择目录");
+    // 目录作用域不继承：范围条回到那颗「选择工作目录」键，写准入说明一并消失。
+    await expect(page.getByTestId("folder-scope-change")).toContainText("选择工作目录");
     await expect(page.getByTestId("folder-write-readiness")).toHaveCount(0);
     // 任务上下文不继承。
     await expect(page.getByTestId("collab-goal")).toHaveCount(0);
@@ -320,7 +321,7 @@ test.describe("窄窗与短窗的新对话入口", () => {
     await guard.getByRole("button", { name: "保留并继续编辑" }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByTestId("assist-first-draft")).toHaveValue("短窗里还没发送的草稿");
-    await expect(page.getByTestId("folder-scope-options")).toContainText("NarrowWindowProject");
+    await expect(page.getByTestId("folder-scope-change")).toContainText("NarrowWindowProject");
     expect(page.url()).toBe(before);
     // 留在原工作区不产生任何写命令。
     expect(ctx.posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(0);
@@ -333,7 +334,7 @@ test.describe("窄窗与短窗的新对话入口", () => {
       .getByRole("button", { name: "丢弃草稿并离开" }).click();
     await expect(page).toHaveURL(/\/agent\?new=(?!seed$)/u);
     await expect(page.getByTestId("assist-first-draft")).toBeVisible();
-    await expect(page.getByTestId("folder-scope-options")).toContainText("未选择目录");
+    await expect(page.getByTestId("folder-scope-change")).toContainText("选择工作目录");
     await expect(page.getByTestId("assist-session")).toHaveCount(0);
     expect(ctx.posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(0);
     expect(ctx.posts.filter((post) => post.path.endsWith("/messages"))).toHaveLength(0);

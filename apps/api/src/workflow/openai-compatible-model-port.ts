@@ -372,7 +372,10 @@ function assistMessageContent(turn: AssistTurn): string | ContentBlock[] {
     ? { type: 'image' as const, source_type: 'base64' as const,
         data: part.dataBase64, mimeType: part.mediaType }
     : { type: 'text' as const, text: part.text });
-  return [...imageParts, { type: 'text' as const, text: turn.content }];
+  // 只有图片的轮次（HTTP §10.85）没有正文可收尾：补一个空 text 块会给 Provider
+  // 引入一个没有内容的片段，因此这种情况下只发图片 parts。
+  return turn.content.trim() === '' ? imageParts
+    : [...imageParts, { type: 'text' as const, text: turn.content }];
 }
 
 export function renderToolTurns(turns: readonly ModelToolTurn[]): BaseMessage[] {

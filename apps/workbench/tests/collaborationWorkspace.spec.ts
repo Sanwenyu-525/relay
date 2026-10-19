@@ -66,6 +66,15 @@ function openReview() {
     created_at: "2026-09-29T03:41:00Z", decided_at: null };
 }
 
+function activity(over: Record<string, unknown> = {}) {
+  return {
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", created_at: "2026-09-29T03:42:00Z",
+    actor_kind: "HUMAN", command_id: null, event_type: "TASK_COMPLETED", summary: "业务事件",
+    project_id: projectId, task_id: taskId, run_id: runId,
+    entity_refs: [{ kind: "TASK", id: taskId }], ...over
+  };
+}
+
 interface Routes {
   task?: () => Response;
   project?: () => Response;
@@ -81,6 +90,8 @@ interface Routes {
   executions?: () => Response | Promise<Response>;
   sessions?: () => Response;
   proposals?: () => Response;
+  activities?: () => Response;
+  goals?: () => Response;
   modelPort?: () => Response;
   modelVerification?: () => Response;
 }
@@ -97,6 +108,7 @@ function router(routes: Routes) {
     if (path === `${prefix}/projects/${projectId}`) return routes.project?.() ?? json(project());
     if (path === `${prefix}/projects/${projectId}/state`) return json({ project_id: projectId, revision: "1",
       phase_key: "GENERAL", next_action_task_id: null, selected_artifact_version_refs: [], completed_highlight_refs: [] });
+    if (path === `${prefix}/projects/${projectId}/goals`) return routes.goals?.() ?? json({ items: [] });
     if (path === `${prefix}/tasks/${taskId}`) return routes.task?.() ?? json(task());
     if (path === `${prefix}/tasks/${taskId}/artifacts`) return routes.artifacts?.() ?? json(artifacts());
     if (path === `${prefix}/artifact-versions/${versionId}`) return json(artifacts().items[0]);
@@ -137,6 +149,7 @@ function router(routes: Routes) {
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return routes.messages?.() ?? json({ items: [] });
     if (path === `${prefix}/conversation-execution-requests`) return routes.executions?.() ?? json({ items: [] });
     if (path === `${prefix}/assist-proposals`) return routes.proposals?.() ?? json({ items: [] });
+    if (path === `${prefix}/activities`) return routes.activities?.() ?? json({ items: [], next_cursor: null });
     if (path === `${prefix}/skill-definitions`) return json({ items: [] });
     if (path === `${prefix}/projects/${projectId}/managed-resources`) return json([{ id: "res-1", project_id: projectId,
       canonical_root: "D:\\repo", status: "ACTIVE", revision: "1", resource_epoch: "0", file_write_identity_bound: true }]);
@@ -201,6 +214,89 @@ describe("协作工作区主路径", () => {
       expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
         .toContain("帮我梳理这个需求：");
     } finally { view.unmount(); }
+  });
+
+  it("首屏「最近动态」用真实活动流渲染，空态与错误态各自兜底", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+
+    // 有数据：渲染列表行、事件摘要与「查看全部动态」入口。
+    vi.stubGlobal("fetch", router({ activities: () => response({ items: [
+      activity({ id: "a1", event_type: "TASK_COMPLETED" }),
+      activity({ id: "a2", event_type: "PROJECT_CREATED", entity_refs: [{ kind: "PROJECT", id: projectId }] })
+    ], next_cursor: null }) }));
+    const withData = await mountWorkbench(`/agent?new=1`);
+    try {
+      await flush();
+      const section = withData.wrapper.get('[data-testid="recent-activity"]');
+      const list = withData.wrapper.get('[data-testid="recent-activity-list"]');
+      expect(list.exists()).toBe(true);
+      expect(list.findAll("li").length).toBe(2);
+      expect(section.text()).toContain("完成任务");
+      expect(section.text()).toContain("创建项目");
+      expect(section.text()).toContain("查看全部");
+      // 2026-10-18 用户指令：类别标签排在文字之前。跟在长短不一的摘要后面时，两列里每行的标签
+      // 起点各不相同，读成没对齐；放到行首才由同一列的左缘决定。这里锁 DOM 先后，不锁像素。
+      for (const row of list.findAll("li")) {
+        const kind = row.get(".recent-activity-kind").element!;
+        const label = row.get(".recent-activity-label").element!;
+        expect(kind.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      }
+    } finally { withData.unmount(); }
+
+    // 空态。
+    vi.stubGlobal("fetch", router({}));
+    const empty = await mountWorkbench(`/agent?new=1`);
+    try {
+      await flush();
+      expect(empty.wrapper.get('[data-testid="recent-activity"]').text()).toContain("还没有动态。");
+    } finally { empty.unmount(); }
+
+    // 错误态：活动接口不可用，保留兜底文案。
+    vi.stubGlobal("fetch", router({ activities: () => response({ error: "down" }, 500) }));
+    const failed = await mountWorkbench(`/agent?new=1`);
+    try {
+      await flush();
+      expect(failed.wrapper.get('[data-testid="recent-activity"]').text()).toContain("最近动态读不到");
+    } finally { failed.unmount(); }
+  });
+
+  it("「待你处理」按工作区给出真实入口，并与目录细条同一行", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+
+    // 全局（无项目、无目录）：待判断 + 未归属任务。
+    vi.stubGlobal("fetch", router({}));
+    const global = await mountWorkbench(`/agent?new=1`);
+    try {
+      await flush();
+      const strip = global.wrapper.get('[data-testid="pending-work"]');
+      expect(strip.attributes("data-scope")).toBe("GLOBAL");
+      expect(strip.text()).toContain("待你处理");
+      expect(strip.text()).toContain("1 项待判断");
+      expect(strip.text()).toContain("1 个未归属任务");
+      // 位置（2026-10-18 用户指令「这两个没有处于同一行」）：与目录细条同属输入卡上方
+      // 「发送前提」的一行——同一个行容器里的两个子节点，整行仍排在输入器之前。
+      const row = global.wrapper.get(".agent-chat-prereq-row").element!;
+      const folderStrip = global.wrapper.get('[data-testid="folder-scope-strip"]').element!;
+      const composer = global.wrapper.get('[data-testid="assist-first-draft"]').element!;
+      expect(folderStrip.parentElement).toBe(row);
+      expect(strip.element!.parentElement).toBe(row);
+      expect((row.compareDocumentPosition(composer) & 4) !== 0).toBe(true); // 行在输入器之前
+    } finally { global.unmount(); }
+
+    // 项目（任务归属项目）：目标 + 本项目待判断。
+    vi.stubGlobal("fetch", router({ goals: () => response({ items: [
+      { goal_id: "g1", title: "完成论文闭环", status: "ACTIVE", revision: "1" }
+    ] }) }));
+    const project = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      // 会话面板挂载比首条输入区多一轮异步（会话事实先到、正文再渲染），
+      // 单次 flush 会在空欢迎尚未出现时就去取「待你处理」；多等两拍再断言。
+      await flush(); await flush(); await flush();
+      const strip = project.wrapper.get('[data-testid="pending-work"]');
+      expect(strip.attributes("data-scope")).toBe("PROJECT");
+      expect(strip.text()).toContain("目标：完成论文闭环");
+      expect(strip.text()).toContain("1 项待判断");
+    } finally { project.unmount(); }
   });
 
   it.each(["assist", "review", "control"] as const)("模式切换保护%s响应丢失的原命令身份", async (owner) => {
@@ -1244,8 +1340,9 @@ describe("协作工作区主路径", () => {
     const view = await mountWorkbench("/agent");
     await flush(60);
     // 空工作区的入口是选目录（§18.1），但不再挡在对话前面：直接就能输入，
-    // 目录只是执行准入的前提，不是开始讨论的前提。作用域现在收成输入卡上方的常驻细条。
-    expect(folderStripName()).toBe("未选择目录");
+    // 目录只是执行准入的前提，不是开始讨论的前提。作用域现在收成输入卡上方的常驻细条，
+    // 缺目录那一档那颗键直接写动作「选择工作目录」（2026-10-18 用户指认状态名词看不出是按钮）。
+    expect(folderStripName()).toBe("选择工作目录");
     expect(view.wrapper.get('[data-testid="assist-first-draft"]').exists()).toBe(true);
     expect(view.wrapper.get('[data-testid="collab-unassigned-execution-hint"]').exists()).toBe(true);
     expect(view.wrapper.get('[data-testid="recent-work"]').text()).toContain("还没有任务");

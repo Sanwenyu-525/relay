@@ -3,7 +3,8 @@
   "private": true,
   "files": [
     "dist/src",
-    "migrations"
+    "migrations",
+    "skills/builtin/gh"
   ],
   "version": "0.0.0",
   "type": "module",
@@ -33,7 +34,8 @@
     "fastify": "5.12.5",
     "kysely": "0.29.6",
     "pg": "8.16.3",
-    "pg-connection-string": "2.14.0"
+    "pg-connection-string": "2.14.0",
+    "ws": "8.18.3"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

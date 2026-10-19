@@ -16,7 +16,8 @@ function response(body: unknown, status = 200): Response {
 }
 function session(id = sessionId) {
   return { id, workspace_id: workspaceId, project_id: projectId, task_id: null,
-    title: id === sessionId ? "原会话" : "新会话", status: "ACTIVE", revision: "1", updated_at: "2026-09-26T00:00:00Z" };
+    title: id === sessionId ? "原会话" : "新会话", status: "ACTIVE", revision: "1",
+    created_at: "2026-09-26T00:00:00Z", updated_at: "2026-09-26T00:00:00Z" };
 }
 function message(id = messageId, status = "RUNNING", content: string | null = null,
   intent = "DISCUSS", skill: unknown = null, currentSessionId = sessionId) {
@@ -213,6 +214,42 @@ describe("M04 Assist DISCUSS 生成中草稿", () => {
     expect(previewPaths.length).toBeGreaterThanOrEqual(2);
     expect(previewPaths.every((path) => path.endsWith(`/${sessionId}/messages/${messageId}/live-preview`))).toBe(true);
     expect(view.wrapper.text()).toContain("原消息草稿");
+  });
+
+  it("SSE assist_preview 帧直接驱动草稿，终态帧清空且不退回轮询", async () => {
+    connect(); let getPreviewCalls = 0;
+    let stream: ReadableStreamDefaultController<Uint8Array> | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const path = new URL(String(input)).pathname;
+      if (path === `${prefix}/projects/${projectId}`) return response({ id: projectId, title: "项目",
+        project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
+      if (path === `${prefix}/assist-sessions`) return response({ items: [session()] });
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return response({ items: [message()] });
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages/${messageId}/live-preview/events`) {
+        return { ok: true, status: 200, headers: { get: () => "text/event-stream" },
+          body: new ReadableStream<Uint8Array>({ start(controller) { stream = controller; } }) } as unknown as Response;
+      }
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages/${messageId}/live-preview`) {
+        getPreviewCalls++; return response(preview(null));
+      }
+      if (path === `${prefix}/assist-proposals`) return response({ items: [] });
+      if (path === `${prefix}/skill-definitions`) return response({ items: [] });
+      throw new Error(`unexpected request ${path}`);
+    }));
+    const view = await mountWorkbench(`/projects/${projectId}?skill=assist`); unmount = view.unmount;
+    expect(stream).toBeDefined();
+    const encoder = new TextEncoder();
+    const frame = (status: string, text: string | null) => encoder.encode(
+      `id: 1\nevent: assist_preview\ndata: ${JSON.stringify({ session_id: sessionId,
+        message_id: messageId, status, preview_revision: text === null ? "0" : "1",
+        preview_text: text, preview_truncated: false, preview_available: status === "RUNNING" })}\n\n`);
+    stream!.enqueue(frame("RUNNING", "来自 SSE 的对话草稿"));
+    await flush(60);
+    expect(view.wrapper.text()).toContain("来自 SSE 的对话草稿");
+    expect(getPreviewCalls).toBe(0);
+    stream!.enqueue(frame("COMPLETED", null));
+    await flush(60);
+    expect(view.wrapper.find(`[data-testid="assist-live-preview-${messageId}"]`).exists()).toBe(false);
   });
 
   it("Skill 与结构化提案消息不请求 raw 草稿预览", async () => {

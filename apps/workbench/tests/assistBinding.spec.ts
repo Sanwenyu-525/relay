@@ -63,6 +63,8 @@ interface Routes {
   directory?: (body: Record<string, unknown>) => Response;
   /** 受控故障：目录绑定已提交但响应丢失。 */
   loseDirectoryResponse?: boolean;
+  /** 让目录绑定回执晚于切换会话时顺带发出的那几次读取落地，用来验证绑定之后有没有再重读。 */
+  slowDirectoryResponse?: number;
   /** GET /commands/:id —— 只按原 command_id 返回回执。 */
   receipt?: (commandId: string) => Response;
   messages?: () => Response;
@@ -76,6 +78,8 @@ interface Harness {
   readonly bound: { value: boolean; projectId: string | null };
   /** 0087：会话行上已绑定的受管目录；null = 未绑定。 */
   readonly directory: { value: string | null };
+  /** 按发生顺序记录目录绑定命令与「带 include_context 的会话重读」，用来核对先后。 */
+  readonly scopeReads: string[];
 }
 
 function router(routes: Routes, harness: Harness) {
@@ -83,6 +87,10 @@ function router(routes: Routes, harness: Harness) {
     const url = new URL(String(input));
     const path = url.pathname;
     const method = init?.method ?? "GET";
+    // include_context 投影：绑定落地之后服务端才说得出这条会话读哪个目录，未落地就是 null。
+    const contextOf = () => url.searchParams.get("include_context") === "true"
+      ? { context: { project_goals: [], working_directory: harness.directory.value === null ? null
+        : { resource_id: harness.directory.value, canonical_root: root } } } : {};
     if (method === "POST") {
       const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       harness.posts.push({ path, body });
@@ -111,6 +119,9 @@ function router(routes: Routes, harness: Harness) {
       // 0087：目录绑定与归属是两条命令，身份、回执与撤回入口都分开记账。
       if (path === `${prefix}/assist-sessions/${sessionId}/working-directory`) {
         if (routes.loseDirectoryResponse) throw new TypeError("response lost after commit");
+        if (routes.slowDirectoryResponse) await new Promise((resolve) => setTimeout(resolve, routes.slowDirectoryResponse));
+        // 记在回执真正产出这一拍：之前落地的读取都还是绑定前的旧事实。
+        harness.scopeReads.push("BIND");
         if (routes.directory) return routes.directory(body);
         harness.directory.value = String(body.resource_id);
         return response({ command_id: body.command_id, committed_at: "2026-10-02T00:00:01Z",
@@ -125,13 +136,16 @@ function router(routes: Routes, harness: Harness) {
     if (path === `${prefix}/assist-sessions`) {
       const projectFilter = url.searchParams.get("project_id");
       if (projectFilter !== null) return response({ items: harness.bound.value && harness.bound.projectId === projectFilter
-        ? [session({ project_id: projectFilter })] : [] });
+        ? [session({ project_id: projectFilter, ...contextOf() })] : [] });
       // 工作空间级列表默认为空：首条消息建会话后才返回它，与真实服务端一致。
-      return routes.workspaceSessions?.() ?? response({ items: harness.created.value && !harness.bound.value ? [session()] : [] });
+      return routes.workspaceSessions?.() ?? response({ items: harness.created.value && !harness.bound.value
+        ? [session(contextOf())] : [] });
     }
-    if (path === `${prefix}/assist-sessions/${sessionId}`) return response(
-      session({ project_id: harness.bound.value ? harness.bound.projectId : null,
-        working_resource_id: harness.directory.value }));
+    if (path === `${prefix}/assist-sessions/${sessionId}`) {
+      if (url.searchParams.get("include_context") === "true") harness.scopeReads.push("READ");
+      return response(session({ project_id: harness.bound.value ? harness.bound.projectId : null,
+        working_resource_id: harness.directory.value, ...contextOf() }));
+    }
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return routes.messages?.() ?? response({ items: [message()] });
     if (path === `${prefix}/conversation-execution-requests`) return response({ items: [] });
     if (path === `${prefix}/assist-proposals`) return response({ items: [] });
@@ -155,7 +169,7 @@ function router(routes: Routes, harness: Harness) {
 
 function harness(): Harness {
   return { posts: [], gets: [], created: { value: false }, bound: { value: false, projectId: null },
-    directory: { value: null } };
+    directory: { value: null }, scopeReads: [] };
 }
 
 async function startDiscussion(view: Awaited<ReturnType<typeof mountWorkbench>>, text: string) {
@@ -212,6 +226,32 @@ describe("会话工作目录绑定（0087）", () => {
       // 再打开同一个目录不重复发命令：已绑到同一资源时不制造第二次写入。
       await openFolder();
       expect(directoryPosts(h)).toHaveLength(1);
+    } finally { view.unmount(); }
+  });
+
+  it("目录绑定确认后顶栏与左栏按服务端重读更新，不停在绑定发生前那份事实", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const h = harness();
+    // 回执压晚 120ms：切换会话与重挂载顺带发出的那几次读取全部落在绑定之前，
+    // 顶栏与左栏因此拿到的是「还没绑」那份事实——这正是用户实机看到的矛盾。
+    vi.stubGlobal("fetch", router({ slowDirectoryResponse: 120 }, h));
+    const view = await mountWorkbench("/agent");
+    try {
+      await startDiscussion(view, "看一下这个目录下面的文件");
+      await openWorkingDirectory(root);
+      for (let i = 0; i < 12 && h.directory.value === null; i++) await flush();
+      expect(view.wrapper.get('[data-testid="collab-directory-binding"]').attributes("data-status"))
+        .toBe("CONFIRMED");
+
+      // 绑定改的是服务端事实：回执之后必须还有一次带 include_context 的重读，两处投影才会跟上。
+      expect(h.scopeReads.lastIndexOf("READ")).toBeGreaterThan(h.scopeReads.indexOf("BIND"));
+
+      await flush(); await flush();
+      expect(document.querySelector('[data-testid="collab-current-directory"]')?.getAttribute("title"))
+        .toBe(`会话目录：${root}`);
+      const rail = document.querySelector('[data-testid="recent-work-directories"]')?.textContent ?? "";
+      expect(rail).toContain("MyProject");
+      expect(rail).not.toContain("未绑定目录");
     } finally { view.unmount(); }
   });
 
@@ -414,7 +454,7 @@ describe("归属命令的结果未知与迟到响应", () => {
       expect(bindingPosts(h)).toHaveLength(1);
 
       // 归属仍在途时用户显式新开一段讨论：不沿用旧会话，也不停在旧项目。
-      // 「新对话」随目录控件一起迁进了更换目录框（协作页 §3.3），因此先开框再点。
+      // 「新对话」随目录控件一起迁进了细条的更换目录浮层（协作页 §3.3），因此先开浮层再点。
       await openFolderDialog();
       await clickPortal("collab-new-conversation");
       await flush();

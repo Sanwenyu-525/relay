@@ -356,10 +356,15 @@ export interface RequestAssistMessageInput {
   readonly attachmentIds?: readonly string[] | undefined;
   /**
    * 0093：将实际服务本消息的进程默认模型名（路由从 RELAY_MODEL_NAME 传入）。
-   * 带附件时命令用它查目录并裁决图片输入能力；不传（或目录无条目）按未知拒绝，
-   * 不冒充可用。无附件时忽略。
+   * 带附件时命令用它查目录并裁决图片输入能力；目录无条目时只有 `declaredImageInput`
+   * 能放行，否则按未知拒绝，不冒充可用。无附件时忽略。
    */
   readonly chatModelName?: string | undefined;
+  /**
+   * 0093：模型目录里没有该模型时，运维用 `RELAY_MODEL_IMAGE_INPUT=true` 显式声明
+   * 它接受图片输入。目录有该模型时以目录为准，此声明不生效。
+   */
+  readonly declaredImageInput?: boolean | undefined;
   /** 0098: guards the create-session → select-model → first-message sequence. */
   readonly expectedModelSelectionRevision?: string | undefined;
 }
@@ -377,8 +382,25 @@ export async function requestAssistMessage(
     throw validationFailed([{ field: 'expected_model_selection_revision',
       message: '必须是正整数修订号' }]);
   }
-  const contentProblem = checkAssistContent(input.content, 'content');
-  if (contentProblem !== undefined) throw validationFailed([contentProblem]);
+  /**
+   * 正文非空是默认规则，唯一例外是**带图片附件的讨论轮**（HTTP §10.85，2026-10-18）：
+   * 只有图片、没有一句话是正常的输入形态，服务端为此放开 content。
+   * 例外范围刻意收窄——没有附件时空正文仍拒绝；Skill 与提案意图仍要正文，因为那两者
+   * 的处理入口本身以正文为输入，空正文会产生没有意义的 Skill 调用或提案载荷。
+   */
+  const hasAttachments = (input.attachmentIds?.length ?? 0) > 0;
+  const imagesOnly = hasAttachments && input.content.trim() === '';
+  if (imagesOnly) {
+    if (input.skillRef !== undefined) {
+      throw validationFailed([{ field: 'content', message: '带图片的 Skill 调用仍需正文输入。' }]);
+    }
+    if ((input.intent ?? 'DISCUSS') !== 'DISCUSS') {
+      throw validationFailed([{ field: 'content', message: '图片可随讨论发送；提案需要正文说明。' }]);
+    }
+  } else {
+    const contentProblem = checkAssistContent(input.content, 'content');
+    if (contentProblem !== undefined) throw validationFailed([contentProblem]);
+  }
   const content = normalizeText(input.content);
   const intent = input.intent ?? 'DISCUSS';
   if (!ASSIST_INTENTS.includes(intent)) {
@@ -555,7 +577,8 @@ export async function requestAssistMessage(
         throw invalidTransition('免费模型会话仅支持文本消息。', { sessionId: session.id });
       }
       if (messageAttachments.length > 0) {
-        await assertChatModelAcceptsImages(repositories, input.chatModelName);
+        await assertChatModelAcceptsImages(repositories, input.chatModelName,
+          input.declaredImageInput === true);
       }
       await repositories.assist.insertMessage({
         id: userMessageId, sessionId: session.id, seq: userSeq, role: 'USER',
@@ -596,15 +619,22 @@ export async function requestAssistMessage(
  * 属阶段 C-2b，落地后此处应改为读取冻结快照），因此按进程默认模型名在目录里查条目：
  * 无条目或 image_input 非 true 一律拒绝——未知不冒充可用，也不因带图就换模型、
  * 换连接或悄悄降级为纯文本。
+ *
+ * 2026-10-18：目录里**没有**该模型条目时，允许运维用 `RELAY_MODEL_IMAGE_INPUT=true`
+ * 显式声明（自建 Provider 不在 OpenRouter 目录里，这是唯一可核对的事实来源）。
+ * 目录里有条目时目录仍是准绳，声明不能把目录判定为「不支持」改成支持。
  */
 async function assertChatModelAcceptsImages(
-  repositories: Repositories, chatModelName: string | undefined): Promise<void> {
+  repositories: Repositories, chatModelName: string | undefined,
+  declaredImageInput = false): Promise<void> {
   const model = chatModelName?.trim() ?? '';
   const entry = model === '' ? undefined
     : await repositories.modelCatalog.readEntryBySourceModelId(model);
   if (entry === undefined) {
+    if (declaredImageInput) return;
     throw validationFailed([{ field: 'attachment_ids',
-      message: '目录中没有当前聊天模型的条目，无法确认图片输入能力；请先同步模型目录或改发纯文本。' }]);
+      message: '目录中没有当前聊天模型的条目，无法确认图片输入能力；请先同步模型目录、'
+        + '或在服务端显式声明 RELAY_MODEL_IMAGE_INPUT=true，或改发纯文本。' }]);
   }
   if (entry.capabilities.image_input !== true) {
     throw validationFailed([{ field: 'attachment_ids',

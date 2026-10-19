@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Folder, MessageSquare, Pin } from "lucide-react";
 import type { RelayApiClient, RelayAssistSession } from "../api/relayClient";
-import SessionRowMenu, { type SessionRowPatch } from "./SessionRowMenu";
+import SessionRowMenu, { type SessionRowMenuHandle, type SessionRowPatch } from "./SessionRowMenu";
 
 /**
  * 近期工作栏的一行（2026-10-16 第五轮，用户指认）。
  *
- * 三个形状不是随手选的：
+ * 四个形状不是随手选的：
  *
  * 1. **行只有一行文字。** 时间从行里移走（用户要求），标题、类型图标与置顶徽标同一行；
  *    时间与归属改由悬停摘要卡呈现。行内常驻信息少了，同一屏能多看几条。
@@ -21,6 +21,8 @@ import SessionRowMenu, { type SessionRowPatch } from "./SessionRowMenu";
  *    唯一的例外是抓握中的那一行：它整行吃一个 `translateY`（见 carryY），`fixed`
  *    因此会改成相对它定位。两层浮层在那之前就不在了——⋯ 的面板于 pointerdown 的捕获阶段
  *    关掉，摘要卡在整个拖拽期间 `display: none`，所以没有东西会被这个 transform 带偏。
+ * 4. **整行右键与点 ⋯ 打开同一个面板（2026-10-18 用户指令）。** 面板仍锚在 ⋯、不跟指针落点走：
+ *    这一行只有一套摆位几何，右键不必再养第二条坐标逻辑；任务行没有可改的会话事实，右键不接管。
  */
 
 /** 浮层与锚点之间的间距、以及离视口边缘的留边；都取 space.2（8px）。 */
@@ -109,6 +111,7 @@ export default function RecentWorkRow({ kind, title, testId, label, active, pinn
   timeValue, timeTitle, scopeName, rowKey, dragging, carryY, session, client, onOpen, onChanged, onStale }: RecentWorkRowProps) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<SessionRowMenuHandle>(null);
   const cardId = `recent-work-summary-${testId}`;
   const show = useCallback((element: HTMLElement) => setAnchor(element), []);
   const hide = useCallback(() => setAnchor(null), []);
@@ -120,7 +123,8 @@ export default function RecentWorkRow({ kind, title, testId, label, active, pinn
     : { transform: `translateY(${carryY}px)` };
   return <li className={`recent-work-row${dragging ? " recent-work-row--dragging" : ""}`}
     data-recent-row={rowKey} style={carry}>
-    <div className="recent-work-row-head">
+    <div className="recent-work-row-head" onContextMenu={session === undefined ? undefined
+      : (event) => { event.preventDefault(); menuRef.current?.open(); }}>
       <button type="button" className={`recent-work-item${active ? " recent-work-item--active" : ""}`}
         aria-label={label} data-testid={testId} aria-current={active ? "true" : undefined}
         aria-describedby={anchor !== null ? cardId : undefined}
@@ -139,7 +143,7 @@ export default function RecentWorkRow({ kind, title, testId, label, active, pinn
             <Pin aria-hidden="true" />置顶</span>}
         </span>
       </button>
-      {session !== undefined && <SessionRowMenu client={client} session={session}
+      {session !== undefined && <SessionRowMenu ref={menuRef} client={client} session={session}
         onChanged={onChanged} onStale={onStale} onOpenChange={setMenuOpen} />}
     </div>
     {anchor !== null && <RowSummary anchor={anchor} cardId={cardId} title={title}

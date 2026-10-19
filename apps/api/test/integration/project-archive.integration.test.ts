@@ -477,3 +477,63 @@ test('a terminal Run with an old running Step blocks archive, and its stale mode
     where step_attempt_id = ${attemptId}`.execute(app.db);
   assert.equal(calls.rows[0]?.count, '0');
 });
+
+test('撤销归档：archived_at 写回 NULL、修订推进，重复撤销不推进，活动范围重新放行', async () => {
+  const f = await fixture();
+  const archiveCommand = randomUUID();
+  const archived = expectCommandAccepted(
+    await archive(f.workspaceId, f.projectId, f.revision, archiveCommand), 200, archiveCommand) as
+    { revision: string };
+  const unarchiveCommand = randomUUID();
+  const postUnarchive = (commandId: string, revision: string) =>
+    api.post(workspacePath(f.workspaceId, `/projects/${f.projectId}/unarchive`), {
+      command_id: commandId, expected_revision: revision });
+
+  const response = await postUnarchive(unarchiveCommand, archived.revision);
+  const result = expectCommandAccepted(response, 200, unarchiveCommand) as
+    { project_id: string; revision: string; archived_at: null; archive_status: string };
+  assert.equal(result.project_id, f.projectId);
+  assert.equal(result.archived_at, null);
+  assert.equal(result.archive_status, 'ACTIVE');
+  assert.notEqual(result.revision, archived.revision, '撤销推进一次修订');
+
+  // 读入口重新按 ACTIVE 返回，活动列表也重新包含它。
+  const read = await api.get(workspacePath(f.workspaceId, `/projects/${f.projectId}`));
+  assert.equal(read.status, 200);
+  assert.equal((read.body as { archived_at: unknown }).archived_at, null);
+  const active = await api.get(workspacePath(f.workspaceId, '/projects?status=active'));
+  assert.ok((active.body as { items: readonly { id: string }[] }).items
+    .some((project) => project.id === f.projectId));
+
+  // 同 command_id + 同载荷重放原回执；已是 ACTIVE 时用新命令再撤销不推进修订。
+  const replay = await postUnarchive(unarchiveCommand, archived.revision);
+  expectCommandAccepted(replay, 200, unarchiveCommand);
+  assert.equal(replay.headers['command-replayed'], 'true');
+  const againCommand = randomUUID();
+  const again = expectCommandAccepted(await postUnarchive(againCommand, result.revision),
+    200, againCommand) as { revision: string };
+  assert.equal(again.revision, result.revision, '已经是活动状态：如实返回当前事实，不造空的修订推进');
+
+  // 陈旧基线不写任何东西。
+  expectProblem(await postUnarchive(randomUUID(), f.revision), 409, 'REVISION_CONFLICT');
+
+  // 两条 append-only 审计都在，且归档命令的回执仍可按原 ID 查。
+  const events = (await sql<{ event_type: string }>`select event_type from activity_records
+    where project_id = ${f.projectId} and event_type in ('PROJECT_ARCHIVED', 'PROJECT_UNARCHIVED')
+    order by created_at, event_type`.execute(app.db)).rows.map((row) => row.event_type);
+  assert.deepEqual(events.sort(), ['PROJECT_ARCHIVED', 'PROJECT_UNARCHIVED']);
+});
+
+test('撤销归档跨 Workspace 不可见：404 且 project 仍保持归档', async () => {
+  const f = await fixture();
+  const archiveCommand = randomUUID();
+  const archived = expectCommandAccepted(
+    await archive(f.workspaceId, f.projectId, f.revision, archiveCommand), 200, archiveCommand) as
+    { revision: string };
+  const otherWorkspace = await createWorkspace(app.db);
+  expectProblem(await api.post(workspacePath(otherWorkspace, `/projects/${f.projectId}/unarchive`), {
+    command_id: randomUUID(), expected_revision: archived.revision }), 404, 'RESOURCE_NOT_FOUND');
+  const row = (await sql<{ archived_at: unknown }>`select archived_at from projects
+    where id = ${f.projectId}`.execute(app.db)).rows[0];
+  assert.notEqual(row?.archived_at, null);
+});

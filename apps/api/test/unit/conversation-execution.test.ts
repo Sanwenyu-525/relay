@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import * as conversationExecution from '../../src/application/conversation-execution.js';
-import { readInterpretation, validateConversationCandidate } from
-  '../../src/application/conversation-execution.js';
+import { mainLoopEnvelope, readInterpretation, readMainLoopOutcome,
+  validateConversationCandidate } from '../../src/application/conversation-execution.js';
 import type { ConversationTaskCandidate } from
   '../../src/application/conversation-execution.js';
 
@@ -115,29 +115,29 @@ test('schema 的 check 空占位按「本次不跑检查」处理，不把只读
   assert.match(partial.ok ? '' : partial.reason, /可执行文件名/u);
 });
 
-test('auto_start 只对就绪的只读候选成立；写意图与未就绪一律 false', () => {
-  const isReadOnly = conversationExecution.isReadOnlyConversationExecution;
+test('auto_start 对就绪的明确执行候选成立；讨论与未就绪候选不启动', () => {
+  const autoStart = conversationExecution.isAutoStartConversationExecution;
   const readOnly = validateConversationCandidate({ task: { ...validTask,
     title: '列出目录', writes_files: false, file_changes: [] } });
   assert.equal(readOnly.ok, true);
   if (!readOnly.ok) return;
   const candidate = readOnly.candidate as unknown as JsonObject;
-  assert.equal(isReadOnly({ decision: 'PREPARE', candidate_status: 'READY', candidate }), true);
-  // 带写意图的候选必须回到人工确认：只读豁免不能顺带覆盖会改文件的请求。
-  assert.equal(isReadOnly({ decision: 'PREPARE', candidate_status: 'READY', candidate: validTask }),
-    false, '缺省 writes_files 按文件列表推导，validTask 含 MODIFY，应视为写意图');
+  assert.equal(autoStart({ decision: 'PREPARE', candidate_status: 'READY', candidate }), true);
+  // Task/Run 准备沿原请求自动进入；文件副作用仍由 Gateway 与确切动作 Review 控制。
+  assert.equal(autoStart({ decision: 'PREPARE', candidate_status: 'READY', candidate: validTask }), true,
+    '缺省 writes_files 按文件列表推导为写意图，但不应额外要求用户再点一次开始');
   const declaredWrite = validateConversationCandidate({ task: { ...validTask, writes_files: true } });
   assert.equal(declaredWrite.ok, true);
   if (!declaredWrite.ok) return;
-  assert.equal(isReadOnly({ decision: 'PREPARE', candidate_status: 'READY',
-    candidate: declaredWrite.candidate as unknown as JsonObject }), false);
+  assert.equal(autoStart({ decision: 'PREPARE', candidate_status: 'READY',
+    candidate: declaredWrite.candidate as unknown as JsonObject }), true);
   // 讨论、澄清与不可用候选一律不是可启动的执行请求。
   for (const row of [
     { decision: 'DISCUSS', candidate_status: 'UNAVAILABLE', candidate: null },
     { decision: 'CLARIFY', candidate_status: 'UNAVAILABLE', candidate: null },
     { decision: 'PREPARE', candidate_status: 'INVALID', candidate },
     { decision: 'PREPARE', candidate_status: 'READY', candidate: null },
-  ]) assert.equal(isReadOnly(row), false, JSON.stringify(row.decision));
+  ]) assert.equal(autoStart(row), false, JSON.stringify(row.decision));
 });
 
 test('不可判断的验收条件被拒绝，而不是用占位措辞凑齐任务', () => {
@@ -182,6 +182,60 @@ test('模型输出按 decision 分流；解析失败与非法字段都退回一�
   assert.equal(prepared.candidateStatus, 'READY');
   // 取消不是授权：按普通讨论收敛，不创建任务。
   assert.equal(readInterpretation({ kind: 'CANCELLED' }).status, 'DISCUSSED');
+});
+
+const createTask: JsonObject = { ...validTask, title: '在根目录创建 a.md',
+  objective: '在受管根目录创建一个名为 a.md 的新文件，不修改或删除其他文件',
+  file_changes: [{ path: 'a.md', action: 'CREATE' }], check: null };
+
+test('信封前多写一句结论时仍按信封处理，主回复不包含原始 JSON', () => {
+  // 实机截图回归：模型先给一句结论，再贴信封。旧实现按「整段输出必须是 JSON」把它
+  // 当普通回复落库，用户看到的是整段 JSON 原文，执行候选也随之丢失。
+  const contentText = [
+    '已确认根目录里还没有 a.md，可以新建，不会覆盖现有文件。',
+    JSON.stringify({ reply: '我会在根目录新建一个 a.md 文件。', execution: createTask,
+      maintenance: null }),
+  ].join('\n');
+  const outcome = readMainLoopOutcome(contentText);
+  assert.equal(outcome.kind, 'PREPARE');
+  assert.equal(outcome.reply, '我会在根目录新建一个 a.md 文件。');
+  if (outcome.kind !== 'PREPARE') return;
+  assert.deepEqual(outcome.candidate.file_changes, [{ path: 'a.md', action: 'CREATE' }]);
+  // 状态维护与执行候选共用同一个信封入口，不能一处认得、另一处认不得。
+  assert.equal(mainLoopEnvelope(contentText)?.maintenance, null);
+});
+
+test('信封套在 Markdown 代码框里也能识别，不把 JSON 当正文', () => {
+  const contentText = '给出候选：\n```json\n' + JSON.stringify({ reply: '我新建一个 a.md。',
+    execution: createTask, maintenance: null }) + '\n```';
+  const outcome = readMainLoopOutcome(contentText);
+  assert.equal(outcome.kind, 'PREPARE');
+  assert.equal(outcome.reply, '我新建一个 a.md。');
+});
+
+test('残缺信封不把原始 JSON 当正文：能救回的 reply 优先，其次保留前言', () => {
+  const salvaged = readMainLoopOutcome(
+    '已确认根目录里还没有 a.md。\n{"reply":"我会新建 a.md","execution":{"title":"创建 a.md",');
+  assert.equal(salvaged.kind, 'REPLY');
+  assert.equal(salvaged.reply, '我会新建 a.md');
+
+  const kept = readMainLoopOutcome('现在无法确定要改哪个文件。\n{"reply": "未闭合');
+  assert.equal(kept.kind, 'REPLY');
+  assert.equal(kept.reply, '现在无法确定要改哪个文件。');
+
+  const onlyBroken = readMainLoopOutcome('{"reply": "未闭合');
+  assert.equal(onlyBroken.kind, 'REPLY');
+  assert.match(onlyBroken.reply, /格式不完整/u);
+  assert.doesNotMatch(onlyBroken.reply, /[{}]|"reply"/u);
+
+  // 正文里偶然出现的 JSON 片段不是信封：没有 reply 就不认，也不原样展示。
+  assert.equal(mainLoopEnvelope('前言\n{"title":"随手写的配置"}'), undefined);
+  const notEnvelope = readMainLoopOutcome('{"title":"随手写的配置"}');
+  assert.equal(notEnvelope.kind, 'REPLY');
+  assert.doesNotMatch(notEnvelope.reply, /"title"/u);
+
+  // 普通正文永远原样返回：清洗只针对失败的「信封尝试」。
+  assert.equal(readMainLoopOutcome('目录里有 3 个文件。').reply, '目录里有 3 个文件。');
 });
 
 test('冻结契约允许「文件变更 + 一次检查命令」，但 Fake 标记不能与真实写入并存', () => {

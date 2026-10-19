@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
+import { PLAN_EXECUTION_STORAGE_KEY } from "../src/lib/planExecutionPreference";
 import { clickPortal, flush, folderStripAssociation, folderStripName, mountWorkbench, openFolderDialog, openWorkingDirectory, pressEscape, switchToolbarSession } from "./mountApp";
 
 /**
@@ -7,6 +8,19 @@ import { clickPortal, flush, folderStripAssociation, folderStripName, mountWorkb
  * 以及明确执行请求进入真实执行链前的紧凑摘要与聚焦澄清。
  * 这里只断言客户端行为：请求来源、命令身份和阶段显示，不替代真实 API 与真实 Windows 取证。
  */
+
+/**
+ * 桌面宿主的原生目录选择器（`isTauri()` 与 `invoke`）在 jsdom 里不存在，因此整仓默认
+ * 「没有原生选择器」，其余用例继续走更换框里的手动绝对路径。只有「+ → 选择文件夹」
+ * 那一条用例把 `available` 打开，用来锁住桌面宿主下「直接开文件浏览器」这条路径。
+ */
+const host = vi.hoisted(() => ({ available: false, picked: null as string | null, calls: 0 }));
+vi.mock("../src/lib/desktopHost", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/desktopHost")>();
+  return { ...actual,
+    nativeFolderPickerAvailable: () => host.available,
+    selectWorkingDirectory: async () => { host.calls += 1; return host.picked; } };
+});
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const projectId = "22222222-2222-4222-8222-222222222222";
@@ -192,10 +206,11 @@ describe("文件夹入口与对话直接执行", () => {
     const view = await mountWorkbench("/agent");
     try {
       // 页面读取本身不发任何写命令：打开目录之前不登记任何东西。
-      // 作用域细条常驻在输入卡上方，只是没有目录可显示 —— 它就是选目录的入口所在。
+      // 作用域细条常驻在输入卡上方，没有目录可显示时那颗键写的就是动作（2026-10-18 用户指认
+      // 「未选择目录」读起来像提示、看不出是按钮）。
       expect(view.wrapper.get('[data-testid="folder-scope-strip"]').exists()).toBe(true);
-      expect(folderStripName()).toBe("未选择目录");
-      expect(folderStripAssociation()).toBe("未归属");
+      expect(folderStripName()).toBe("选择工作目录");
+      expect(folderStripAssociation()).toBe("未归入项目");
       // 非桌面宿主没有原生选择器：更换目录框里必须给出可用的手动路径，而不是一个死按钮。
       expect(view.wrapper.get('[data-testid="folder-scope-change"]').attributes("aria-haspopup")).toBe("dialog");
       expect(posts.length).toBe(0);
@@ -207,12 +222,18 @@ describe("文件夹入口与对话直接执行", () => {
       expect((posts[0]?.body as { root_path?: string }).root_path).toBe(root);
       expect(folderStripName()).toBe("MyProject");
       expect(folderStripAssociation()).toContain("已归入项目：MyProject");
-      // 写入就绪说明归更换目录框内的目录控件，细条只承担目录名与归属。
+      // 写入就绪说明归更换目录浮层里的目录控件，细条只承担目录名与归属。
       await openFolderDialog();
       expect(document.querySelector('[data-testid="folder-write-readiness"]')?.textContent ?? "")
         .toContain("还没有绑定该目录的文件写入连接");
+      // 选择面是锚在细条上的紧凑浮层，不是居中模态弹窗（2026-10-18 用户指令「弹窗太大了」）：
+      // 没有遮罩层，面板就在细条自己的子树里，选完目录仍看得见刚更新的细条；Esc 即收。
+      expect(document.querySelector(".dialog-backdrop")).toBeNull();
+      expect(view.wrapper.get('[data-testid="folder-scope-strip"]')
+        .find('[data-testid="folder-scope"]').exists()).toBe(true);
       await pressEscape();
       await flush();
+      expect(document.querySelector('[data-testid="folder-scope"]')).toBeNull();
 
       await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("先讨论一下这个目录");
       await flush();
@@ -231,6 +252,39 @@ describe("文件夹入口与对话直接执行", () => {
       expect(create.command_id).toMatch(/^[0-9a-f-]{36}$/);
       expect(create.project_id).toBe(projectId);
       expect(message.content).toBe("先讨论一下这个目录");
+    } finally { view.unmount(); }
+  });
+
+  it("?dir= 种子按同一条 openFolder 打开目录、落在空对话上，首条发送才建会话并绑定", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    vi.stubGlobal("fetch", router({}, posts));
+    // 左栏目录行「＋」带进来的种子：new 是一次性的空白对话意图，dir 是那条分组里的目录路径。
+    const view = await mountWorkbench(`/agent?new=seed&dir=${encodeURIComponent(root)}`);
+    try {
+      await flush(); await flush();
+      // 挂载那一拍只发这一条目录命令，载荷就是种子路径；页面不自己登记第二份作用域。
+      const opens = posts.filter((post) => post.path === `${prefix}/working-directories/open`);
+      expect(opens).toHaveLength(1);
+      expect((opens[0]?.body as { root_path?: string }).root_path).toBe(root);
+      expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(true);
+      expect(posts.some((post) => post.path === `${prefix}/assist-sessions`)).toBe(false);
+      expect(folderStripName()).toBe("MyProject");
+      expect(folderStripAssociation()).toContain("已归入项目：MyProject");
+
+      // 目录打开后仍是既有链路：首条发送时建会话 → 先绑目录 → 再发消息。
+      await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("从这个目录开始");
+      await flush();
+      await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+      await flush();
+      const paths = posts.map((post) => post.path);
+      expect(paths).toContain(`${prefix}/assist-sessions`);
+      const bindingPath = `${prefix}/assist-sessions/${sessionId}/working-directory`;
+      expect(paths).toContain(bindingPath);
+      expect(paths.indexOf(bindingPath)).toBeLessThan(paths.indexOf(`${prefix}/assist-sessions/${sessionId}/messages`));
+      const create = posts.find((post) => post.path === `${prefix}/assist-sessions`)?.body as
+        { project_id?: string };
+      expect(create.project_id).toBe(projectId);
     } finally { view.unmount(); }
   });
 
@@ -272,7 +326,8 @@ describe("文件夹入口与对话直接执行", () => {
       await openWorkingDirectory(root);
       await flush();
       await flush();
-      // 需要再选一次作用域时更换目录框保持打开（候选按钮就在框里），框走 portal 挂在 body 上。
+      // 需要再选一次作用域时更换目录浮层保持打开（候选按钮就在浮层里）；浮层挂在细条子树里，
+      // 这里按 body 查是为了与弹窗形态的旧断言共用一条读法。
       const reason = document.querySelector('[data-testid="folder-not-ready"]')?.textContent ?? "";
       // 原因码本身不是解释：用户必须知道这个目录为什么不能写、接下来该做什么。
       expect(reason).toContain("另一个已受管根");
@@ -334,6 +389,44 @@ describe("文件夹入口与对话直接执行", () => {
     } finally { view.unmount(); }
   });
 
+  /* 「+ → 选择工作文件夹 → 选择文件夹」（2026-10-18 用户指令：这一步直接开文件浏览器，
+     不再隔一层更换目录框）。选定之后仍是同一条守卫与同一条 OpenWorkingDirectory 入口。 */
+  it("桌面宿主：「+」里的「选择文件夹」直接开原生选择器，取消不发命令", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    vi.stubGlobal("fetch", router({}, posts));
+    host.available = true; host.picked = null; host.calls = 0;
+    const view = await mountWorkbench("/agent");
+    /** 一级行执行后会收起两层（保留草稿），因此每次重新选都要把菜单再开一遍。 */
+    const openFolderSub = async () => {
+      await view.wrapper.get('[data-testid="assist-attach"]').trigger("click");
+      await flush();
+      await view.wrapper.get('[data-testid="assist-attach-folder"]').trigger("click");
+      await flush();
+      await view.wrapper.get('[data-testid="assist-attach-folder-pick"]').trigger("click");
+      await flush();
+    };
+    try {
+      // 取消选择：不发任何目录命令，也不退回更换目录框——用户只是没选。
+      await openFolderSub();
+      expect(host.calls).toBe(1);
+      expect(posts).toHaveLength(0);
+      expect(document.querySelector('[data-testid="folder-manual-root"]')).toBeNull();
+      // 选定后直接登记目录，细条同步到那个目录；更换框全程没有打开过。
+      host.picked = root;
+      await openFolderSub();
+      await flush();
+      expect(host.calls).toBe(2);
+      expect(posts.map((post) => post.path)).toContain(`${prefix}/working-directories/open`);
+      expect((posts[0]?.body as { root_path?: string }).root_path).toBe(root);
+      expect(folderStripName()).toBe("MyProject");
+      expect(document.querySelector('[data-testid="folder-scope"]')).toBeNull();
+    } finally {
+      host.available = false; host.picked = null;
+      view.unmount();
+    }
+  });
+
   it("明确执行请求显示紧凑摘要并按真实命令建立任务；纯讨论不建任务", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const posts: { path: string; body: unknown }[] = [];
@@ -379,6 +472,139 @@ describe("文件夹入口与对话直接执行", () => {
       expect(posts.some((post) => post.path ===
         `${prefix}/conversation-execution-requests/${requestId}/applications`)).toBe(true);
       // 建立真实 Task 后工作台切到那个任务：执行摘要不再冒充「正在写文件」。
+      expect(view.wrapper.find('[data-testid="collab-page"]').exists()).toBe(true);
+    } finally { view.unmount(); }
+  });
+
+  it("服务端标记就绪的明确文件请求自动应用原候选并保留原会话反馈", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    let applications = 0;
+    const fetchMock = router({
+      open: (body) => response({ command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z",
+        result: readyDirectory(), links: { resource: "" } }, 200),
+      sessions: () => response({ items: [{ id: sessionId, workspace_id: workspaceId, project_id: projectId,
+        task_id: null, title: "关于MyProject", status: "ACTIVE", revision: "1",
+        updated_at: "2026-10-02T00:00:00Z" }] }),
+      messages: () => {
+        const sent = posts.find((post) => post.path.endsWith("/messages"))?.body as
+          { content?: string } | undefined;
+        return response({ items: sent === undefined ? [] : [{ id: "msg-1", session_id: sessionId,
+          seq: "1", role: "USER", status: "COMPLETED", intent: "DISCUSS", content: sent.content ?? "",
+          sources: [], cancel_requested: false, error_code: null, provider_error_kind: null,
+          created_at: "2026-10-02T00:00:00Z", updated_at: "2026-10-02T00:00:00Z",
+          usage: { input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_creation_tokens: null },
+          skill: null }] });
+      },
+      apply: () => {
+        applications += 1;
+        return response({ command_id: "apply-1", committed_at: "2026-10-02T00:00:01Z",
+          result: { request_id: requestId, status: "DELEGATED", task_id: taskId,
+            run_id: runId, revision: "3" }, links: { resource: "" } });
+      },
+      executionRequests: () => response({ items: posts.some((post) => post.path.endsWith("/messages"))
+        ? [execution({ auto_start: true,
+          ...(applications > 0 ? { candidate: undefined, status: "DELEGATED", task_id: taskId,
+            run_id: runId, revision: "3" } : {}) })]
+        : [] })
+    }, posts);
+    const original = fetchMock.getMockImplementation()!;
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith(`/runs/${runId}/tool-calls`)) {
+        return response({ run_id: runId, run_status: "RUNNING", wait_reason: null, rounds: [] });
+      }
+      if (path.endsWith(`/runs/${runId}/tool-call-previews`)) {
+        return response({ run_id: runId, previews: [] });
+      }
+      return original(input, init);
+    }));
+    const view = await mountWorkbench("/agent");
+    try {
+      await openWorkingDirectory(root);
+      await flush(); await flush();
+      await view.wrapper.get('[data-testid="assist-draft"]').setValue("把 luna-modify.txt 改成确认后的内容");
+      await flush();
+      await view.wrapper.get('[data-testid="assist-send"]').trigger("click");
+      await flush(); await flush(); await flush();
+
+      expect(applications).toBe(1);
+      expect(posts.filter((post) => post.path ===
+        `${prefix}/conversation-execution-requests/${requestId}/applications`)).toHaveLength(1);
+      const message = posts.find((post) => post.path.endsWith("/messages"))?.body as
+        { content?: string };
+      expect(message.content).toBe("把 luna-modify.txt 改成确认后的内容");
+      expect(view.wrapper.get('[data-testid="execution-summary"]').text()).toContain("这次执行没有调用工具");
+      expect(view.wrapper.text()).toContain("把 luna-modify.txt 改成确认后的内容");
+      expect(view.wrapper.find('[data-testid="execution-start"]').exists()).toBe(false);
+      expect(view.wrapper.find('[data-testid="assist-draft"]').exists()).toBe(true);
+    } finally { view.unmount(); }
+  });
+
+  it("本设备选择人工确认时就绪候选不自动应用，点击后按原请求进入执行", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    let applications = 0;
+    localStorage.setItem(PLAN_EXECUTION_STORAGE_KEY, "CONFIRM");
+    const fetchMock = router({
+      open: (body) => response({ command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z",
+        result: readyDirectory(), links: { resource: "" } }, 200),
+      sessions: () => response({ items: [{ id: sessionId, workspace_id: workspaceId, project_id: projectId,
+        task_id: null, title: "关于MyProject", status: "ACTIVE", revision: "1",
+        updated_at: "2026-10-02T00:00:00Z" }] }),
+      messages: () => {
+        const sent = posts.find((post) => post.path.endsWith("/messages"))?.body as
+          { content?: string } | undefined;
+        return response({ items: sent === undefined ? [] : [{ id: "msg-1", session_id: sessionId,
+          seq: "1", role: "USER", status: "COMPLETED", intent: "DISCUSS", content: sent.content ?? "",
+          sources: [], cancel_requested: false, error_code: null, provider_error_kind: null,
+          created_at: "2026-10-02T00:00:00Z", updated_at: "2026-10-02T00:00:00Z",
+          usage: { input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_creation_tokens: null },
+          skill: null }] });
+      },
+      apply: () => {
+        applications += 1;
+        return response({ command_id: "apply-1", committed_at: "2026-10-02T00:00:01Z",
+          result: { request_id: requestId, status: "DELEGATED", task_id: taskId,
+            run_id: runId, revision: "3" }, links: { resource: "" } });
+      },
+      executionRequests: () => response({ items: posts.some((post) => post.path.endsWith("/messages"))
+        ? [execution({ auto_start: true,
+          ...(applications > 0 ? { candidate: undefined, status: "DELEGATED", task_id: taskId,
+            run_id: runId, revision: "3" } : {}) })]
+        : [] })
+    }, posts);
+    const original = fetchMock.getMockImplementation()!;
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith(`/runs/${runId}/tool-calls`)) {
+        return response({ run_id: runId, run_status: "RUNNING", wait_reason: null, rounds: [] });
+      }
+      if (path.endsWith(`/runs/${runId}/tool-call-previews`)) {
+        return response({ run_id: runId, previews: [] });
+      }
+      return original(input, init);
+    }));
+    const view = await mountWorkbench("/agent");
+    try {
+      await openWorkingDirectory(root);
+      await flush(); await flush();
+      await view.wrapper.get('[data-testid="assist-draft"]').setValue("把 luna-modify.txt 改成确认后的内容");
+      await flush();
+      await view.wrapper.get('[data-testid="assist-send"]').trigger("click");
+      await flush(); await flush(); await flush();
+
+      // 候选已就绪，但本设备选了人工确认：不自动应用，「按这个目标执行」留在摘要里。
+      expect(applications).toBe(0);
+      expect(view.wrapper.get('[data-testid="execution-summary"]').attributes("data-auto-start")).toBe("false");
+      expect(view.wrapper.get('[data-testid="execution-start"]').text()).toContain("按这个目标执行");
+      await view.wrapper.get('[data-testid="execution-start"]').trigger("click");
+      await flush(); await flush();
+
+      expect(applications).toBe(1);
+      expect(posts.filter((post) => post.path ===
+        `${prefix}/conversation-execution-requests/${requestId}/applications`)).toHaveLength(1);
+      // 人工确认成功后按 §18.4 自动切到原 Task，原会话仍可回到对话。
       expect(view.wrapper.find('[data-testid="collab-page"]').exists()).toBe(true);
     } finally { view.unmount(); }
   });

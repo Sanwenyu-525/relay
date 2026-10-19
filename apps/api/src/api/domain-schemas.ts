@@ -69,6 +69,14 @@ export const ArchiveProjectResultSchema = Type.Object({
   archive_status: Type.Literal('ARCHIVED'),
 }, strict);
 
+/** 撤销归档（ADR-027 的反向命令）：`archived_at` 恒为 null，回执没有归档时刻。 */
+export const UnarchiveProjectResultSchema = Type.Object({
+  project_id: UuidSchema,
+  revision: DecimalSchema,
+  archived_at: Type.Null(),
+  archive_status: Type.Literal('ACTIVE'),
+}, strict);
+
 export const CreateGoalResultSchema = Type.Object(
   { goal_id: UuidSchema, status: Type.String(), revision: DecimalSchema },
   strict,
@@ -1192,6 +1200,14 @@ const ConversationFileDiffSchema = Type.Object({
   unavailable_reason: Type.Union([Type.String(), Type.Null()]),
 }, strict);
 
+/** 一侧扫描的覆盖投影：`complete=false` 时 reason 说明停在哪，files/listed 给出核对与列到条数。 */
+const DiffScanSideSchema = Type.Object({
+  complete: Type.Boolean(),
+  reason: Type.Union([Type.String(), Type.Null()]),
+  files: Type.Integer(),
+  listed: Type.Union([Type.Integer(), Type.Null()]),
+}, strict);
+
 export const AvailableConversationDiffSchema = Type.Object({
   available: Type.Literal(true),
   baseline_captured_at: Type.String(),
@@ -1199,6 +1215,13 @@ export const AvailableConversationDiffSchema = Type.Object({
   root_path: Type.String(),
   resource_id: Type.String(),
   incomplete: Type.Boolean(),
+  /** 「不完整」的具体成因与条数：UI 必须据此解释，不能只说「部分不可统计」。 */
+  coverage: Type.Object({
+    baseline: DiffScanSideSchema,
+    current: DiffScanSideSchema,
+    unchecked_files: Type.Integer(),
+    unverified_files: Type.Integer(),
+  }, strict),
   total_files: Type.Integer(),
   total_added: Type.Integer(),
   total_removed: Type.Integer(),

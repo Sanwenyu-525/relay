@@ -131,6 +131,13 @@ pub fn mock_activate(window_id: &str) -> Result<Value, ComputerError> {
     Ok(info)
 }
 
+pub fn mock_move(params: &Value) -> Result<Value, ComputerError> {
+    coordinate_of(params)?;
+    let x = params.get("x").and_then(Value::as_i64).unwrap_or_default();
+    let y = params.get("y").and_then(Value::as_i64).unwrap_or_default();
+    Ok(json!({ "moved": true, "x": x, "y": y, "mock": true }))
+}
+
 pub fn mock_click(params: &Value) -> Result<Value, ComputerError> {
     coordinate_of(params)?;
     let x = params.get("x").and_then(Value::as_i64).unwrap_or_default();
@@ -138,13 +145,20 @@ pub fn mock_click(params: &Value) -> Result<Value, ComputerError> {
     Ok(json!({ "clicked": true, "x": x, "y": y, "button": button_of(params), "mock": true }))
 }
 
-pub fn mock_scroll(params: &Value) -> Result<Value, ComputerError> {
-    Ok(json!({
+/// mock 与真实路径同形：报**实际**整格位移，请求值不同时一并带出。
+pub fn mock_scroll(applied_x: i32, applied_y: i32, requested_x: i32,
+    requested_y: i32) -> Result<Value, ComputerError> {
+    let mut out = json!({
         "scrolled": true,
-        "delta_x": params.get("delta_x").and_then(Value::as_i64).unwrap_or(0),
-        "delta_y": params.get("delta_y").and_then(Value::as_i64).unwrap_or(0),
+        "delta_x": applied_x,
+        "delta_y": applied_y,
         "mock": true,
-    }))
+    });
+    if applied_x != requested_x || applied_y != requested_y {
+        out["requested_delta_x"] = json!(requested_x);
+        out["requested_delta_y"] = json!(requested_y);
+    }
+    Ok(out)
 }
 
 pub fn mock_drag(params: &Value) -> Result<Value, ComputerError> {

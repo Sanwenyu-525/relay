@@ -74,7 +74,8 @@
 .knowledge-reader__body { max-width: var(--relay-layout-reading-maxWidth); font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-reading); line-height: var(--relay-font-lineHeight-reading); overflow-wrap: anywhere; }
 .knowledge-reader__body .markdown-preview { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; font: inherit; }
 .knowledge-reader__body .markdown-preview__heading { margin: var(--relay-space-6) 0 var(--relay-space-2); font-size: var(--relay-font-size-compactPage); }
-.knowledge-reader__body .markdown-preview__subheading { margin: var(--relay-space-6) 0 var(--relay-space-2); font-size: var(--relay-font-size-section); }
+.knowledge-reader__body .markdown-preview__heading[data-heading-level="2"] { font-size: var(--relay-font-size-rowTitle); }
+.knowledge-reader__body .markdown-preview__subheading { margin: var(--relay-space-6) 0 var(--relay-space-2); font-size: var(--relay-font-size-reading); }
 .knowledge-reader__body .markdown-preview__heading:first-child, .knowledge-reader__body .markdown-preview__subheading:first-child { margin-top: 0; }
 .knowledge-reader__body .markdown-preview__paragraph, .knowledge-reader__body .markdown-preview__list { margin-bottom: var(--relay-space-4); }
 .knowledge-reader__plain { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }

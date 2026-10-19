@@ -67,7 +67,7 @@ export default function CompletionRecordView() {
             <details className="completion-technical"><summary>当时输出规格与来源</summary><p className="helper-text">预期输出：{evidence.acceptance.expectedOutputs === null ? "未记录" : JSON.stringify(evidence.acceptance.expectedOutputs)}</p></details>
             {evidence.acceptance.criteria.length ? <ul className="completion-list">{evidence.acceptance.criteria.map((item) => <li key={item.criterionId}>
               <strong>{item.statement}</strong><small>条件 {item.criterionId} · {item.required ? "必需" : "可选"} · {item.method}</small>
-              <details className="completion-technical"><summary>当时目标规格</summary><small>{JSON.stringify(item.targetSpec)}</small></details>
+              <details className="completion-technical"><summary>当时目标规格</summary><code className="hash-code">{JSON.stringify(item.targetSpec)}</code></details>
             </li>)}</ul> : <p className="helper-text">当时未记录验收条件。</p>}
           </>}
         </section>

@@ -29,6 +29,7 @@ import { DecisionReviewRepository } from '../information/decision-review-reposit
 import { WorkSegmentRepository } from '../work-segment/work-segment-repository.js';
 import { PersonalPlanningRepository } from '../planning/personal-planning-repository.js';
 import { ProjectReminderRepository } from '../planning/project-reminder-repository.js';
+import { ScheduledTaskRepository } from '../planning/scheduled-task-repository.js';
 import { TaskChainRepository } from '../planning/task-chain-repository.js';
 import { VerificationRepository } from '../verification/verification-repository.js';
 import { WorkspaceRepository } from '../workspace/workspace-repository.js';
@@ -46,6 +47,7 @@ import { RuntimeAdmissionRepository } from '../runtime/runtime-admission-reposit
 import { RunScopeGrantRepository } from './run-scope-grant.js';
 import { ModelCatalogRepository } from '../model/model-catalog-repository.js';
 import { ComputerControlStateRepository } from '../computer/control-state.js';
+import { ComputerDesktopLeaseRepository } from '../computer/desktop-lease-repository.js';
 import { SessionModelSelectionRepository } from '../model/session-model-selection-repository.js';
 import { KyselyConversationDiffRepository, type ConversationDiffRepository }
   from '../conversation-diff/conversation-diff-repository.js';
@@ -92,6 +94,7 @@ export interface Repositories {
   readonly workSegments: WorkSegmentRepository;
   readonly personalPlanning: PersonalPlanningRepository;
   readonly projectReminders: ProjectReminderRepository;
+  readonly scheduledTasks: ScheduledTaskRepository;
   readonly taskChains: TaskChainRepository;
   readonly verifications: VerificationRepository;
   readonly workspaces: WorkspaceRepository;
@@ -111,6 +114,8 @@ export interface Repositories {
   readonly modelSelection: SessionModelSelectionRepository;
   /** 电脑操控展示状态（迁移 0096）：「Relay 是否正在操控电脑」的唯一持久事实。 */
   readonly computerControl: ComputerControlStateRepository;
+  /** 全机前台输入会话的持久独占权（迁移 0114），与目录 resource_claims 分离。 */
+  readonly computerDesktopLease: ComputerDesktopLeaseRepository;
   /** 会话基线（迁移 0097）：「本轮对话以来」受管根内容快照的独占写入口（工作台 §34）。 */
   readonly conversationDiff: ConversationDiffRepository;
   /** 工具调用生成中预览（迁移 0102）：可丢弃的展示证据，不进总数、不授予权限。 */
@@ -151,6 +156,7 @@ export function createRepositories(db: DbExecutor): Repositories {
     workSegments: new WorkSegmentRepository(db),
     personalPlanning: new PersonalPlanningRepository(db),
     projectReminders: new ProjectReminderRepository(db),
+    scheduledTasks: new ScheduledTaskRepository(db),
     taskChains: new TaskChainRepository(db),
     verifications: new VerificationRepository(db),
     workspaces: new WorkspaceRepository(db),
@@ -167,6 +173,7 @@ export function createRepositories(db: DbExecutor): Repositories {
     modelCatalog: new ModelCatalogRepository(db),
     modelSelection: new SessionModelSelectionRepository(db),
     computerControl: new ComputerControlStateRepository(db),
+    computerDesktopLease: new ComputerDesktopLeaseRepository(db),
     conversationDiff: new KyselyConversationDiffRepository(db),
     toolCallPreview: new KyselyToolCallPreviewRepository(db),
   };

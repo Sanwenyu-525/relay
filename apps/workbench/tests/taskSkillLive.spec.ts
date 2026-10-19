@@ -39,7 +39,7 @@ describe("P12 Task Skill live 当前事实", () => {
       expect(init?.method ?? "GET").toBe("GET"); const url = String(input);
       if (url.endsWith("/attention/interventions")) return response({ items: [] });
       calls.push(url);
-      if (url.startsWith(`${root}/assist-sessions?`)) return response({ items: [] });
+      if (url.startsWith(`${root}/assist-sessions?include_context=true`)) return response({ items: [] });
       if (url === `${root}/tasks/${taskId}`) return response(task());
       throw new Error(`Unexpected ${url}`);
     }));
@@ -63,7 +63,7 @@ describe("P12 Task Skill live 当前事实", () => {
     connect(); const calls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input); calls.push(url);
-      if (url.startsWith(`${root}/assist-sessions?`)) return response({ items: [] });
+      if (url.startsWith(`${root}/assist-sessions?include_context=true`)) return response({ items: [] });
       if (url === `${root}/tasks/${taskId}`) return response(task(taskId, true));
       if (url === `${root}/tasks/${taskId}/check-plan-preview`) return response({ task_id: taskId,
         status: "AVAILABLE", admission_available: false, reason_codes: ["TASK_NOT_HUMAN_OWNED"],
@@ -124,7 +124,7 @@ describe("P12 Task Skill live 当前事实", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(init?.method ?? "GET").toBe("GET"); const url = String(input);
       if (url.endsWith("/attention/interventions")) return response({ items: [] });
-      if (url.startsWith(`${root}/assist-sessions?`)) return response({ items: [] });
+      if (url.startsWith(`${root}/assist-sessions?include_context=true`)) return response({ items: [] });
       if (url === `${root}/tasks/${taskId}`) return response(task());
       if (url === `${root}/tasks/${taskId}/check-plan-preview`) return response({ task_id: taskId,
         status: "AVAILABLE", admission_available: true, reason_codes: [],

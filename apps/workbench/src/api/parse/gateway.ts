@@ -8,12 +8,20 @@ export function writeReadinessFrom(value: unknown): RelayWriteReadiness {
   if (decision !== null && decision !== "DENY" && decision !== "ASK" && decision !== "AUTO") {
     throw new Error("write readiness.policy_decision 无法识别");
   }
+  const writeTier = optionalString(row, "write_tier");
+  if (writeTier !== null && writeTier !== "READ_ONLY" && writeTier !== "ASK" &&
+      writeTier !== "AUTO" && writeTier !== "FULL") {
+    throw new Error("write readiness.write_tier 无法识别");
+  }
+  const accessRevision = optionalString(row, "access_revision") ?? "0";
+  if (!/^(0|[1-9][0-9]*)$/u.test(accessRevision)) throw new Error("write readiness.access_revision 无法识别");
   return { status: string(row, "status", "write readiness"),
     detail: string(row, "detail", "write readiness"),
     policyDecision: decision === null ? null : decision as RelayGatewayDecision,
     policyId: optionalString(row, "policy_id"),
     policyRevision: optionalString(row, "policy_revision"),
-    policyTargetPrefix: optionalString(row, "policy_target_prefix") };
+    policyTargetPrefix: optionalString(row, "policy_target_prefix"),
+    writeTier, accessRevision };
 }
 
 export function gatewayConnectionSettingsFrom(value: unknown): RelayGatewayConnectionSettings {

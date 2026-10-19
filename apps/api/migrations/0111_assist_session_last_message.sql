@@ -1,0 +1,46 @@
+-- 会话活动排序键：最后一条消息的时刻（工作台 §28.1、HTTP §10.91、物理设计 §100）。
+-- 2026-10-18，源码实现。仅追加一列，不改写任何既有迁移、不回填、不动消息/提案/选择表。
+--
+-- 这一列表达「这段讨论最近一次真正说过话是什么时候」，与 0090 的 pinned_at、0104 的
+-- unread_at 同一性质：**导航排序键，不是业务事实**。会话能不能发消息、绑哪个目录、
+-- 归哪个项目、验收与否都仍由既有列与既有 Owner 决定，本列不参与任何准入判定。
+--
+-- 上游对照（2026-10-18 核验，四家只有 ZCode 是本列这个口径）：
+--   * ZCode：`session.time_updated` 由 `saveMessage`/`savePart`（含完成、取消、失败、工具）
+--     统一调 `touchSession`，写入用 `time_updated = max(time_updated, ?)` 保持单调；
+--   * OpenCode：`Session.touch` 只有一个调用点（用户消息准入时），消息与 part 落库
+--     **不** touch 父会话，还在 `applyUsage` 里用自引用 SQL 压制 `$onUpdate`，
+--     目的是不让无关写把会话顶上去；
+--   * Codex：`threads` 分开两列——任何追加都推进的 `updated_at` 与只在新一轮用户开口
+--     推进的 `recency_at`，产品列表用后者、读不到降级前者；
+--   * DeepSeek Harness：`updatedAt = max(header.createdAt, lastPromptAt)`，只有真实用户
+--     消息推进。
+-- 本列采纳 ZCode 与 Codex `updated_at` 的**活动序**：不分发送方，用户说完与 AI 说完
+-- 都算一次活动，因此失败或取消的那一轮同样上浮（这与 OpenCode 的「用户发起序」不同）。
+
+-- NULL = 这条会话还没有任何消息；有值 = 最后一条消息落库或生成结算的时刻。
+-- 排序用 `coalesce(last_message_at, created_at)`，新建还没说话的会话按创建时间落在原位，
+-- 不会因为本列为空而沉底或消失。
+ALTER TABLE assist_sessions ADD COLUMN last_message_at timestamptz NULL;
+
+-- 写入 Owner 只有一个：`assist-repository.ts` 的消息落库（insertMessage）与生成结算
+-- （settleGeneration）。改名、置顶、未读、归档、重开、绑定项目与绑定目录都**不**推进它，
+-- 否则「只是重命名过一次」的会话会跳到活动序最前（OpenCode 专门压制 `$onUpdate` 就是这个理由）。
+-- 写入取单调最大值 `greatest(last_message_at, now())`：并发结算不按提交顺序取时间时，
+-- 排序键只前进不回退。
+--
+-- 本列的写入**不**推进 `updated_at`，也**不**推进 `revision`。会话行的修订号是
+-- 改名/置顶/未读/归档那一组人工控制命令的 CAS 基线；若每条消息都推进修订，
+-- 在途生成会把这些命令打成 409，界面只能反复重读。生成结算因此只在消息行上留事实。
+-- 生成中的逐帧预览（assist_message_previews）同样不推进本列：它是会被删除的临时前缀，
+-- 每条增量都 touch 会让左栏在流式期间持续跳位。
+
+-- 权限：0015 已对 assist_sessions 授表级 SELECT/INSERT/UPDATE，新列自动在既有授权范围内，
+-- 因此不追加 GRANT（表级授权覆盖新列）。应用角色仍无 DELETE。
+--
+-- 索引：不为本列新建索引，与 0090/0104 的判断一致——单用户本机库会话量级小，
+-- 列表读仍走 ix_assist_sessions_scope 的既有范围过滤。
+--
+-- 兼容与回滚：纯追加一列，旧行取 NULL（无消息），既有响应只多一个可空只读字段，
+-- 旧客户端忽略它即可，Breaking Change: No。回退可直接保留该列（旧代码不读、旧排序键照旧
+-- 用 created_at）；删除该列只丢失活动排序偏好，不丢失任何会话、消息、回执或选择事实。

@@ -17,6 +17,7 @@ import {
 } from '../application/gateway-queries.js';
 import { createRepositories } from '../application/unit-of-work.js';
 import { readWorkingDirectoryWriteReadiness } from '../application/open-working-directory.js';
+import { setLocalDirectoryWriteTier } from '../application/local-directory-access.js';
 import { resourceNotFound } from '../application/domain-error.js';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
 import { commandEnvelopeSchema } from './domain-schemas.js';
@@ -37,6 +38,9 @@ const writeReadinessResponse = Type.Object({
   policy_id: Type.Union([Type.String(), Type.Null()]),
   policy_revision: Type.Union([Type.String(), Type.Null()]),
   policy_target_prefix: Type.Union([Type.String(), Type.Null()]),
+  write_tier: Type.Union([Type.Literal('READ_ONLY'), Type.Literal('ASK'), Type.Literal('AUTO'),
+    Type.Literal('FULL'), Type.Null()]),
+  access_revision: revision,
 }, strict);
 const importParams = Type.Object({ workspace_id: uuid, import_job_id: uuid }, strict);
 const operationParams = Type.Object({ workspace_id: uuid, operation_id: uuid }, strict);
@@ -80,6 +84,9 @@ const versionPolicyBody = Type.Object({ command_id: uuid, expected_revision: rev
 const revokeBody = Type.Object({ command_id: uuid, expected_revision: revision }, strict);
 const createResourceBody = Type.Object({ command_id: uuid, root_path: Type.String({ minLength: 1 }) }, strict);
 const disableResourceBody = Type.Object({ command_id: uuid, expected_revision: revision }, strict);
+const localDirectoryAccessBody = Type.Object({ command_id: uuid, expected_revision: revision,
+  write_tier: Type.Union([Type.Literal('READ_ONLY'), Type.Literal('ASK'), Type.Literal('AUTO'),
+    Type.Literal('FULL')]) }, strict);
 const createImportBody = Type.Object({ command_id: uuid,
   url: Type.String({ minLength: 1, maxLength: 2048 }), connection_id: uuid }, strict);
 const closePartialFileWriteBody = Type.Object({
@@ -216,6 +223,17 @@ export function registerGatewayRoutes(app: FastifyInstance, dependencies: RouteD
       const outcome = await disableManagedResourceCommand(executor, { workspaceId: params.workspace_id ?? '',
         projectId: params.project_id ?? '', resourceId: params.resource_id ?? '',
         commandId: body.command_id, expectedRevision: body.expected_revision });
+      return { outcome, result: outcome.result };
+    } }));
+
+  app.post('/projects/:project_id/managed-resources/:resource_id/local-access', {
+    schema: { params: resourceParams, body: localDirectoryAccessBody,
+      response: { 200: commandEnvelopeSchema(commandResult) } },
+  }, createCommandHandler(dependencies, { commandType: 'SetLocalDirectoryWriteTier', bodySchema: localDirectoryAccessBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await setLocalDirectoryWriteTier(executor, { workspaceId: params.workspace_id ?? '',
+        projectId: params.project_id ?? '', resourceId: params.resource_id ?? '', commandId: body.command_id,
+        expectedRevision: body.expected_revision, tier: body.write_tier });
       return { outcome, result: outcome.result };
     } }));
 

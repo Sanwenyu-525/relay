@@ -9,27 +9,39 @@ import { establishConversationDiffBaseline, readConversationDiff, readConversati
   from '../conversation-diff/net-diff-service.js';
 import { MAX_ASSIST_ATTACHMENT_BODY_BYTES, uploadAssistMessageAttachment }
   from '../application/assist-attachments.js';
-import { archiveAssistSession, renameAssistSession, reopenAssistSession,
-  setAssistSessionPin, setAssistSessionUnread } from '../application/assist-session-controls.js';
+import { archiveAssistSession, deleteAssistSession, forkAssistSession, renameAssistSession,
+  reopenAssistSession, setAssistSessionPin, setAssistSessionUnread }
+  from '../application/assist-session-controls.js';
 import { listAssistMessages, listAssistProposals, listAssistSessions, readAssistProposal,
-  readAssistSession, readAssistSessionContexts, projectAssistSkillMessage, readAssistLivePreview }
+  readAssistSession, readAssistSessionContexts, projectAssistSkillMessage, readAssistLivePreview,
+  listAssistMessageAttachmentMeta, readAssistMessageAttachment,
+  type AssistMessageAttachmentMeta }
   from '../application/assist-queries.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import type { AssistSessionStatus, ConversationMode } from '../infrastructure/database-schema.js';
 import { MODEL_ERROR_CATEGORIES, type ModelErrorCategory }
   from '../workflow/model-error-classification.js';
+import { readDeclaredImageInput } from '../workflow/model-port-config.js';
 import { toDecimalString } from '../shared/decimal.js';
 import { commandEnvelopeSchema, ConversationDiffFileSchema, ConversationDiffSchema } from './domain-schemas.js';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
+import { sendAssistLivePreviewStream } from './preview-events-api.js';
 
 const strict = { additionalProperties: false } as const;
 const uuid = Type.String({ format: 'uuid' });
 const rev = Type.String({ pattern: '^(0|[1-9][0-9]*)$' });
 const text = Type.String({ minLength: 1, maxLength: 32_768 });
+/**
+ * 消息正文。与 `text` 的唯一差别是允许空串：带图片附件的讨论轮可以只有图片
+ * （HTTP §10.85，2026-10-18）。是否真的允许空正文由用例裁决——schema 只锁上限与形状，
+ * 无附件时空正文仍在用例层按既有 `must not be empty` 拒绝。
+ */
+const assistMessageContent = Type.String({ maxLength: 32_768 });
 const base = Type.Object({ workspace_id: uuid }, strict);
 const sessionItem = Type.Object({ workspace_id: uuid, id: uuid }, strict);
 const proposalItem = Type.Object({ workspace_id: uuid, id: uuid }, strict);
 const messageItem = Type.Object({ workspace_id: uuid, id: uuid }, strict);
+const attachmentItem = Type.Object({ workspace_id: uuid, id: uuid, attachment_id: uuid }, strict);
 const livePreviewItem = Type.Object({ workspace_id: uuid, id: uuid,
   message_id: uuid }, strict);
 
@@ -40,6 +52,8 @@ const AssistSessionDto = Type.Object({
   title: Type.String(), status: Type.String(), revision: rev,
   /** 0090：置顶时刻（导航排序键，不是业务事实）。未置顶为 null。 */
   pinned_at: Type.Union([Type.String(), Type.Null()]),
+  /** 0111：最后一条消息落库或生成结算的时刻（活动排序键）。还没有消息为 null。 */
+  last_message_at: Type.Union([Type.String(), Type.Null()]),
   /** 冻结的会话身份：'AGENT' 普通会话，'ASSISTANT' 人设 助手会话，'LEARNING' 学习会话。 */
   conversation_mode: Type.Union([Type.Literal('AGENT'), Type.Literal('ASSISTANT'), Type.Literal('LEARNING')]),
   assistant_profile_id: Type.Union([uuid, Type.Null()]),
@@ -50,6 +64,8 @@ const AssistSessionDto = Type.Object({
   remember: Type.Boolean(),
   /** 0087：本会话当前绑定的受管工作目录；未绑定为 null。作用域不是准入。 */
   working_resource_id: Type.Union([uuid, Type.Null()]),
+  /** 0113：这条会话是哪一次分叉产生的；不是分叉来的为 null。来源只解释标题，不改变任何判定。 */
+  forked_from_session_id: Type.Union([uuid, Type.Null()]),
   context: Type.Optional(Type.Object({
     project_goals: Type.Array(Type.Object({ goal_id: uuid, title: Type.String() }, strict)),
     working_directory: Type.Union([Type.Null(), Type.Object({ resource_id: uuid,
@@ -90,6 +106,11 @@ const AssistMessageDto = Type.Object({
     cache_read_tokens: Type.Union([Type.Integer(), Type.Null()]),
     cache_creation_tokens: Type.Union([Type.Integer(), Type.Null()]) }, strict),
   cancel_requested: Type.Boolean(),
+  /** 0093：随这条消息发送的图片附件元数据（内容按单张另行读取）。 */
+  attachments: Type.Array(Type.Object({
+    id: uuid, name: Type.String(), media_type: Type.String(),
+    byte_length: Type.Integer({ minimum: 1 }),
+  }, strict)),
   created_at: Type.String(), updated_at: Type.String(),
 }, strict);
 const AssistLivePreviewDto = Type.Object({
@@ -151,8 +172,8 @@ const BindDirectoryResult = Type.Object({
   session_id: uuid, working_resource_id: uuid, revision: rev,
 }, strict);
 /**
- * 0090 / 0104 会话行内控制：改名/置顶/未读/归档/重开都只带 `expected_revision`，不接收别的字段。
- * 标题沿用建会话的 1–200 规则；归档与重开没有可携带的载荷，多余字段一律拒绝，
+ * 0090 / 0104 / 0113 会话行内控制：改名/置顶/未读/归档/重开/分叉都只带 `expected_revision`，
+ * 不接收别的字段。标题沿用建会话的 1–200 规则；归档、重开与分叉没有可携带的载荷，多余字段一律拒绝，
  * 免得日后有人往同一条命令里塞「顺便改点什么」。
  */
 const renameSessionBody = Type.Object({ command_id: uuid, expected_revision: rev,
@@ -178,13 +199,28 @@ const SessionStateResult = Type.Object({
   session_id: uuid, status: Type.Union([Type.Literal('ACTIVE'), Type.Literal('ARCHIVED')]),
   revision: rev, updated_at: Type.String(),
 }, strict);
+/** ADR-027：删除回执。`revision` 是删除前被核对过的那个修订，行本身已不存在。 */
+const SessionDeleteResult = Type.Object({
+  session_id: uuid, revision: rev,
+  deleted_messages: Type.Integer({ minimum: 0 }),
+  deleted_attachments: Type.Integer({ minimum: 0 }),
+  deleted_at: Type.String(),
+}, strict);
+/**
+ * 0113 分叉结果：`session_id` 是**新建的子会话**（命令目标才是源会话）。
+ * `copied_messages` 为 0 不是失败——空讨论分叉就是一条新的空讨论。
+ */
+const SessionForkResult = Type.Object({
+  session_id: uuid, title: Type.String(), revision: rev, updated_at: Type.String(),
+  copied_messages: Type.Integer({ minimum: 0 }),
+}, strict);
 const messagesQuery = Type.Object({ limit: Type.Optional(Type.String({ pattern: '^(?:[1-9]|[1-9][0-9]{1,2}|200)$' })) }, strict);
 const sourceRef = Type.Object({
   kind: Type.Union([Type.Literal('KNOWLEDGE'), Type.Literal('MEMORY'), Type.Literal('DECISION')]),
   root_id: uuid, version: Type.String({ pattern: '^[1-9][0-9]*$' }),
 }, strict);
 const requestMessageBody = Type.Object({
-  command_id: uuid, content: text,
+  command_id: uuid, content: assistMessageContent,
   intent: Type.Optional(Type.Union([Type.Literal('DISCUSS'), Type.Literal('PROPOSE_CANDIDATE'),
     Type.Literal('PROPOSE_TASK')])),
   source_refs: Type.Optional(Type.Array(sourceRef, { maxItems: 10 })),
@@ -220,6 +256,11 @@ const AttachmentUploadResult = Type.Object({
   attachment_id: uuid, byte_length: Type.Integer({ minimum: 1 }),
   content_hash: Type.String({ minLength: 1 }),
 }, strict);
+/** 0093：单张附件内容的只读投影（与上传返回同一身份字段，另加内容与名字/类型）。 */
+const AttachmentContent = Type.Object({
+  attachment_id: uuid, name: Type.String(), media_type: Type.String(),
+  byte_length: Type.Integer({ minimum: 1 }), data_base64: Type.String(),
+}, strict);
 const cancelBody = Type.Object({ command_id: uuid }, strict);
 const proposalsQuery = Type.Object({
   session_id: Type.Optional(uuid), status: Type.Optional(Type.String()), kind: Type.Optional(Type.String()),
@@ -235,9 +276,11 @@ function sessionDto(row: { id: string; workspace_id: string; project_id: string 
   task_id: string | null; title: string; status: string; revision: bigint;
   pinned_at: Date | null;
   unread_at: Date | null;
+  last_message_at: Date | null;
   conversation_mode: ConversationMode; assistant_profile_id: string | null;
   assistant_profile_revision: bigint | null; assistant_role_snapshot: JsonObject | null;
-  remember: boolean; working_resource_id: string | null; created_at: Date; updated_at: Date }) {
+  remember: boolean; working_resource_id: string | null;
+  forked_from_session_id: string | null; created_at: Date; updated_at: Date }) {
   return {
     id: row.id, workspace_id: row.workspace_id, project_id: row.project_id,
     task_id: row.task_id, title: row.title, status: row.status,
@@ -246,6 +289,8 @@ function sessionDto(row: { id: string; workspace_id: string; project_id: string 
     pinned_at: row.pinned_at === null ? null : row.pinned_at.toISOString(),
     // 0104：未读时刻同样逐字返回。NULL=已读，界面不替服务端猜「看过就算读」。
     unread_at: row.unread_at === null ? null : row.unread_at.toISOString(),
+    // 0111：活动排序键逐字返回。NULL 只表示这段会话还没有消息，顺序仍由服务端决定。
+    last_message_at: row.last_message_at === null ? null : row.last_message_at.toISOString(),
     conversation_mode: row.conversation_mode,
     assistant_profile_id: row.assistant_profile_id,
     assistant_profile_revision: row.assistant_profile_revision === null ? null
@@ -256,6 +301,8 @@ function sessionDto(row: { id: string; workspace_id: string; project_id: string 
     // 0087：会话当前绑定的受管目录。只读投影——作用域不是准入，客户端据此显示
     // 「这次会读哪个目录」，不代表这次读取一定会被放行。
     working_resource_id: row.working_resource_id,
+    // 0113：分叉来源逐字返回。它只解释标题里那个「（1）」从哪来，不参与任何判定。
+    forked_from_session_id: row.forked_from_session_id,
     created_at: row.created_at.toISOString(), updated_at: row.updated_at.toISOString(),
   };
 }
@@ -269,7 +316,8 @@ function messageDto(row: { id: string; session_id: string; seq: bigint; role: st
   created_at: Date; updated_at: Date },
   projection: { skill: JsonObject | null; skill_input: JsonObject | null;
     skill_output: JsonObject | null; content: string | null; sources: unknown;
-    method: JsonObject | null; method_argument: string | null }) {
+    method: JsonObject | null; method_argument: string | null },
+  attachments: readonly AssistMessageAttachmentMeta[] = []) {
   return {
     id: row.id, session_id: row.session_id, seq: toDecimalString(row.seq), role: row.role,
     status: row.status, intent: row.intent, content: projection.content,
@@ -283,6 +331,8 @@ function messageDto(row: { id: string; session_id: string; seq: bigint; role: st
       cache_read_tokens: row.usage_cache_read_tokens,
       cache_creation_tokens: row.usage_cache_creation_tokens },
     cancel_requested: row.cancel_requested,
+    attachments: attachments.map((item) => ({ id: item.id, name: item.name,
+      media_type: item.mediaType, byte_length: item.byteLength })),
     created_at: row.created_at.toISOString(), updated_at: row.updated_at.toISOString(),
   };
 }
@@ -414,6 +464,32 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
       return { outcome, result: outcome.result };
     } }));
 
+  // ADR-027：物理删除。不可撤销、没有回收站；被其它对象引用的会话整条拒绝（409
+  // SESSION_DELETE_BLOCKED），不提供强制删除开关。归档与删除是两条通道。
+  app.post('/assist-sessions/:id/delete', { schema: { params: sessionItem,
+    body: sessionStateBody, response: { 200: commandEnvelopeSchema(SessionDeleteResult) } } },
+  createCommandHandler(dependencies, { commandType: 'DeleteAssistSession',
+    bodySchema: sessionStateBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await deleteAssistSession(executor, {
+        workspaceId: params.workspace_id ?? '', sessionId: params.id ?? '',
+        commandId: body.command_id, expectedRevision: body.expected_revision });
+      return { outcome, result: outcome.result };
+    } }));
+
+  // 0113：分叉。与上面几条不同，它不改源会话，而是新建一条带历史的子会话，因此按新建资源给 201，
+  // 回执的资源链接指向子会话（命令目标仍是源会话）。源会话有消息在途时按状态冲突拒绝。
+  app.post('/assist-sessions/:id/fork', { schema: { params: sessionItem,
+    body: sessionStateBody, response: { 201: commandEnvelopeSchema(SessionForkResult) } } },
+  createCommandHandler(dependencies, { commandType: 'ForkAssistSession',
+    bodySchema: sessionStateBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await forkAssistSession(executor, {
+        workspaceId: params.workspace_id ?? '', sessionId: params.id ?? '',
+        commandId: body.command_id, expectedRevision: body.expected_revision });
+      return { outcome, result: outcome.result };
+    } }));
+
   app.get('/assist-sessions', { schema: { params: base, querystring: sessionsQuery } },
   async (request, reply) => {
     try {
@@ -471,6 +547,25 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
 
+  // 0093：读一张附件的内容（工作台 §33.3 历史消息缩略图）。只读、不改业务状态；
+  // 归属同时核对 workspace 与 session，跨会话引用按 404 拒绝。内容以 base64 返回，
+  // 与上传端点同一种传输形状，客户端不需要第二套二进制读法。
+  app.get('/assist-sessions/:id/message-attachments/:attachment_id', {
+    schema: { params: attachmentItem, response: { 200: AttachmentContent } },
+  }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string; id: string; attachment_id: string };
+      const attachment = await readAssistMessageAttachment(dependencies.database.executor, {
+        workspaceId: p.workspace_id, sessionId: p.id ?? '', attachmentId: p.attachment_id });
+      // 用例层用 camelCase，响应按 HTTP 契约的 snake_case 投影：schema 会丢掉未声明字段，
+      // 直接把用例对象返回会让客户端读到空响应体。
+      reply.header('Cache-Control', 'private, max-age=300');
+      return { attachment_id: attachment.attachmentId, name: attachment.name,
+        media_type: attachment.mediaType, byte_length: attachment.byteLength,
+        data_base64: attachment.dataBase64 };
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
   // 异步生成：202 只代表消息已排队；回复以 GET messages 的 ASSISTANT 行状态为准。
   app.post('/assist-sessions/:id/messages', { schema: { params: sessionItem,    body: requestMessageBody,
     response: { 202: commandEnvelopeSchema(Type.Object({
@@ -493,7 +588,9 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
           expectedModelSelectionRevision: body.expected_model_selection_revision,
         }),
         // 0093：能力闸门的裁决输入——当前聊天恒由进程默认连接服务（见闸门注释）。
+        // 目录无条目时 `RELAY_MODEL_IMAGE_INPUT=true` 是运维对该自建模型的显式声明。
         chatModelName: process.env.RELAY_MODEL_NAME,
+        declaredImageInput: readDeclaredImageInput(process.env),
       });
       return { outcome, result: outcome.result };
     } }));
@@ -511,9 +608,15 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
       });
       const session = await readAssistSession(dependencies.database.executor, {
         workspaceId: p.workspace_id, sessionId: p.id ?? '' });
+      // 0093：附件元数据按会话一次性取齐（只读 id/名/类型/字节数，不读内容字节），
+      // 再按 message_id 归到各自消息上——不为每条消息各发一次查询。
+      const attachments = await listAssistMessageAttachmentMeta(
+        dependencies.database.executor, { workspaceId: p.workspace_id,
+          sessionId: p.id ?? '', messageIds: rows.map((row) => row.id) });
       return { items: await Promise.all(rows.map(async (row) => messageDto(row,
         await projectAssistSkillMessage(dependencies.database.executor,
-          dependencies.storage, session, row)))) };
+          dependencies.storage, session, row),
+        attachments.get(row.id) ?? []))) };
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
 
@@ -528,6 +631,16 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
         dependencies.storage, { workspaceId: p.workspace_id, sessionId: p.id,
           messageId: p.message_id });
     } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
+  // 生成中预览 SSE（§10.59）：帧体与 GET live-preview 同形；每次推送前重新授权。
+  app.get('/assist-sessions/:id/messages/:message_id/live-preview/events', {
+    schema: { params: livePreviewItem },
+  }, async (request, reply) => {
+    const p = request.params as { workspace_id: string; id: string;
+      message_id: string };
+    return sendAssistLivePreviewStream(request, reply, dependencies.database.executor,
+      dependencies.storage, p.workspace_id, p.id, p.message_id);
   });
 
   app.post('/assist-messages/:id/cancel', { schema: { params: messageItem, body: cancelBody,
@@ -613,6 +726,16 @@ function conversationDiffDto(result: Awaited<ReturnType<typeof readConversationD
     root_path: diff.rootPath,
     resource_id: diff.resourceId,
     incomplete: diff.incomplete,
+    coverage: {
+      baseline: { complete: diff.coverage.baseline.complete,
+        reason: diff.coverage.baseline.reason, files: diff.coverage.baseline.files,
+        listed: diff.coverage.baseline.listed },
+      current: { complete: diff.coverage.current.complete,
+        reason: diff.coverage.current.reason, files: diff.coverage.current.files,
+        listed: diff.coverage.current.listed },
+      unchecked_files: diff.coverage.uncheckedFiles,
+      unverified_files: diff.coverage.unverifiedFiles,
+    },
     total_files: diff.totalFiles,
     total_added: diff.totalAdded,
     total_removed: diff.totalRemoved,

@@ -92,18 +92,21 @@ test('只读工具集：提示词明确本次不修改任何文件', async () =>
   assert.ok(!/请求修改/u.test(system));
 });
 
-test('授予编辑能力时提示词不再声称只读，而是要求先读后改并声明删除不在授权内', async () => {
+test('授予编辑能力时提示词要求先读后改，并把删除纳入受控授权', async () => {
   const requests: WireRequest[] = [];
   const model = fixtureModel('# 候选\n\n## 摘要\n说明\n\n## 结论\n待审阅', requests);
   await model.generate({ outputSchema: CANDIDATE_OUTPUT_SCHEMA, manifest: {},
     tools: declaredToolSpecs(['list_directory', 'find_paths', 'search_text', 'read_file',
       'apply_changeset', 'read_change_set']) });
   const system = requests[0]!.messages[0]!.content;
-  // 提示词必须与本次实际冻结的能力一致：既不能还说「工具只读」，也不能
-  // 把「本次获准编辑」说成「模型可以自行决定写什么」。
+  // 提示词必须与本次实际冻结的能力一致：既不能还说「工具只读」，也不能把删除整体
+  // 说成越权——工具 schema 与 Gateway 都能处理 DELETE，剩下的是任务明确性与逐次确认。
   assert.ok(!system.includes('工具只读，不修改任何文件'));
+  assert.ok(!system.includes('删除文件不在本次授权内'));
   assert.match(system, /先用读取工具读到真实内容/u);
-  assert.match(system, /删除文件不在本次授权内/u);
+  assert.match(system, /baselineSha256/u);
+  assert.match(system, /删除只在本次任务明确要求删除时提出/u);
+  assert.match(system, /自动批准档都不会豁免删除/u);
 });
 
 test('semantic checking keeps an independent narrow prompt and treats the candidate as data', async () => {

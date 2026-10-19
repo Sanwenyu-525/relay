@@ -12,9 +12,11 @@ import { gatewayParamsFor } from './tool-loop.js';
 import { declaredToolSpecs, readInternalTool, type InternalToolName } from
   '../workflow/tool-catalog.js';
 import { capabilityFor, dispatchGatewayAction, prepareGatewayAction,
-  type GatewayActionType, type GatewayOrigin, type GatewaySessionReadOrigin }
+  targetMatches, type GatewayActionType, type GatewayOrigin, type GatewaySessionReadOrigin }
   from './gateway-actions.js';
 import { COMPUTER_DESKTOP_TARGET } from '../computer/protocol.js';
+import { BROWSER_UNKNOWN_TARGET, isBrowserAction } from '../browser/protocol.js';
+import { browserTargetForTool } from '../browser/browser-adapter.js';
 import { isGithubReadAction } from '../github/github-adapter.js';
 import { createRepositories } from './unit-of-work.js';
 import { selectRuntimeSystemPrompt } from '../workflow/prompts/index.js';
@@ -42,9 +44,12 @@ export const ASSISTANT_READ_TOOLS: readonly InternalToolName[] = [
   // 0092: Computer 只读（截图/窗口枚举）。输入类工具不在此列——会话轮次可读不可写，
   // 桌面输入只经 Run 工具循环，由单动作审批或本次任务范围授权放行。
   'computer_screenshot', 'computer_get_windows',
-  // 0103: GitHub 只读。这四个工具只有当项目里存在声明 GITHUB_READ 的 ACTIVE 连接时才会
+  // 0103: GitHub 只读。这些工具只有当项目里存在声明 GITHUB_READ 的 ACTIVE 连接时才会
   // 进入本轮词表（assistantToolNames 与实际连接求交集），没装 gh 或未授权时模型看不到它们。
-  'github_repo_view', 'github_pr_list', 'github_pr_view', 'github_issue_list',
+  'github_repo_view', 'github_pr_list', 'github_pr_view', 'github_issue_list', 'github_issue_view',
+  // 0105: 浏览器只读（页面列表/快照/截图/等待）。交互与提交类工具不在此列——
+  // 会话轮次可读不可写，浏览器动作只经 Run 工具循环。
+  'browser_list_pages', 'browser_read_page', 'browser_screenshot', 'browser_wait_for',
 ];
 
 /**
@@ -356,7 +361,7 @@ export async function settleSessionReadonlyToolCall(db: DbExecutor,
   const capability = capabilityOf(definition.actionType);
   // 连接按**当前**配置选，不从冻结快照读：连接被删或停用后下一轮就少一个能力。
   const connectionId = await findActiveConnection(repositories, session.workspace_id,
-    origin.projectId, capability);
+    origin.projectId, capability, canonicalRoot);
   if (connectionId === undefined) {
     return refuse('SESSION_CAPABILITY_NOT_CONFIGURED',
       `当前项目没有可用的 ${capability} 连接，本次不提供该读取能力。`);
@@ -368,7 +373,7 @@ export async function settleSessionReadonlyToolCall(db: DbExecutor,
     prepared = await prepareGatewayAction(db, { workspaceId: session.workspace_id,
       operationId: row.id, intentKey, connectionId, origin,
       actionType: definition.actionType,
-      target: toolTarget(canonicalRoot, definition.actionType, call.arguments),
+      target: toolTarget(canonicalRoot, definition.actionType, call.arguments, origin),
       // 参数按工具词表裁剪（复用 Run 侧同一份映射）：模型多带的字段不会变成动作参数，
       // 而 read_file 这类「路径在 target 里」的动作不会带着 relative_path 去 prepare。
       params: gatewayParamsFor(definition, call.arguments) });
@@ -439,7 +444,7 @@ function projectToolResult(actionType: GatewayActionType, resultRef: JsonObject 
  * 不是最终裁决。
  */
 export function toolTarget(canonicalRoot: string, actionType: GatewayActionType,
-  args: JsonObject): string {
+  args: JsonObject, origin?: GatewayOrigin): string {
   if (actionType === 'COMPUTER_SCREENSHOT' || actionType === 'COMPUTER_GET_WINDOWS') {
     // Computer 只读动作没有受管根：目标是合成值，资源仍绑定（来源身份与账本）。
     return COMPUTER_DESKTOP_TARGET;
@@ -450,17 +455,23 @@ export function toolTarget(canonicalRoot: string, actionType: GatewayActionType,
     // 走的是与 GIT_READ 同一个绑定，因此不存在「读到别的仓库」。
     return canonicalRoot;
   }
+  if (isBrowserAction(actionType)) {
+    // 0105: 浏览器只读没有受管根；目标是按站点收窄的合成值，与工具循环同一算法。
+    return origin === undefined
+      ? BROWSER_UNKNOWN_TARGET : browserTargetForTool(origin, args);
+  }
   const relative = typeof args.relative_path === 'string' && args.relative_path !== ''
     ? args.relative_path : undefined;
   return join(canonicalRoot, relative ?? '');
 }
 
 function capabilityOf(actionType: GatewayActionType):
-  'FILE_QUERY' | 'FILE_READ' | 'GIT_READ' | 'COMPUTER_READ' | 'GITHUB_READ' {
+  'FILE_QUERY' | 'FILE_READ' | 'GIT_READ' | 'COMPUTER_READ' | 'GITHUB_READ' | 'BROWSER_READ' {
   const capability = capabilityFor(actionType);
   // 会话读取只有只读能力；词表之外的动作在这一层之前已被拒，这里只做类型收窄。
   if (capability !== 'FILE_QUERY' && capability !== 'FILE_READ' && capability !== 'GIT_READ' &&
-      capability !== 'COMPUTER_READ' && capability !== 'GITHUB_READ') {
+      capability !== 'COMPUTER_READ' && capability !== 'GITHUB_READ' &&
+      capability !== 'BROWSER_READ') {
     throw new Error(`session read round reached a non-read capability: ${capability}`);
   }
   return capability;
@@ -546,11 +557,16 @@ async function agentSessionReadOrigin(db: DbExecutor, session: AssistSessionRow,
  */
 async function findActiveConnection(repositories: ReturnType<typeof createRepositories>,
   workspaceId: string, projectId: string,
-  capability: 'FILE_QUERY' | 'FILE_READ' | 'GIT_READ' | 'COMPUTER_READ' | 'GITHUB_READ'): Promise<string | undefined> {
+  capability: 'FILE_QUERY' | 'FILE_READ' | 'GIT_READ' | 'COMPUTER_READ' | 'GITHUB_READ'
+    | 'BROWSER_READ', canonicalRoot: string): Promise<string | undefined> {
   for (const connection of await repositories.gateway.listConnections(workspaceId, projectId)) {
     if (connection.status !== 'ACTIVE') continue;
     const capabilities = await repositories.gateway.listConnectionCapabilities(connection.id);
-    if (capabilities.includes(capability)) return connection.id;
+    if (!capabilities.includes(capability)) continue;
+    if ((capability === 'FILE_QUERY' || capability === 'FILE_READ' || capability === 'GIT_READ') &&
+        (typeof connection.config.root_path !== 'string' ||
+          !targetMatches(connection.config.root_path, canonicalRoot, capability))) continue;
+    return connection.id;
   }
   return undefined;
 }

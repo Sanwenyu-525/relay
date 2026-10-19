@@ -7,7 +7,8 @@ import { join } from 'node:path';
 import { sql } from 'kysely';
 import test, { after, before } from 'node:test';
 
-import { applyConversationExecution } from '../../src/application/conversation-execution.js';
+import { applyConversationExecution, isAutoStartConversationExecution } from
+  '../../src/application/conversation-execution.js';
 import { createAssistSession, bindAssistSessionDirectory, requestAssistMessage }
   from '../../src/application/assist-commands.js';
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
@@ -37,8 +38,8 @@ import { APP_DATABASE_URL, MIGRATION_DATABASE_URL, MIGRATIONS_DIRECTORY, openDat
  *     都不出现。候选不是「凑执行入口」的产物。
  *   * 确定性校验仍归原入口：候选不合规时按原 `clarify` 收口并留原澄清，不造 Task/Run。
  *
- * 本文件**不**自动应用候选（`applyConversationExecution` 与 `auto_start` 规则未改）：
- * 建 Task/Run 仍由原 Owner 在用户动作后推进，本段只负责「同一次调用产出合法候选」。
+ * 本文件不代替 Workbench 调用 applications；它核对原请求行的就绪候选会投影为 `auto_start`，
+ * 由 Workbench 沿固定命令身份进入原 Task/Run Owner。
  */
 
 const app = openDatabase(APP_DATABASE_URL, 'relay-api-test-agent-main-loop-exec');
@@ -125,6 +126,43 @@ async function countRows(table: string, projectId: string): Promise<number> {
     select 1 from ${sql.table(table)} where project_id = ${projectId}) as present`
     .execute(app.db);
   return rows.rows[0]?.present === true ? 1 : 0;
+}
+
+async function addFileWriteConnection(fx: Fixture, rootPath: string,
+  status: 'ACTIVE' | 'DISABLED' = 'ACTIVE'): Promise<string> {
+  const connectionId = randomUUID();
+  await withTransaction(app.db, async (repositories) => {
+    await repositories.workspaces.lockAuthority(fx.workspaceId, 'update');
+    const connection = await repositories.gateway.insertConnection({ id: connectionId,
+      workspaceId: fx.workspaceId, projectId: fx.projectId, config: { root_path: rootPath } });
+    await repositories.gateway.addConnectionCapability(connection.id, 'FILE_WRITE');
+    if (status === 'DISABLED') await repositories.gateway.setConnection({ id: connection.id,
+      status, config: connection.config });
+    await repositories.workspaces.bumpAuthority(fx.workspaceId);
+  });
+  return connectionId;
+}
+
+async function prepareWriteCandidate(fx: Fixture) {
+  const candidate: JsonObject = { title: '修改受管文件', objective: '把 src/index.ts 改为 false',
+    criteria: [{ statement: 'src/index.ts 导出 false', required: true, method: 'HUMAN' }],
+    expected_outputs: { kind: 'MARKDOWN_DOCUMENT' },
+    file_changes: [{ path: 'src/index.ts', action: 'MODIFY' }], writes_files: true };
+  const outcome = await ask(fx, '把 src/index.ts 改为 false', oneShotPort(JSON.stringify({
+    reply: '我会按本目录的写入连接处理。', execution: candidate,
+  })));
+  assert.equal(outcome.requests.length, 1);
+  assert.equal(outcome.requests[0]?.candidate_status, 'READY');
+  return outcome.requests[0]!;
+}
+
+async function fileWriteConnectionFromRun(runId: string): Promise<string | undefined> {
+  const result = await sql<{ frozen_snapshot: JsonObject }>`
+    select frozen_snapshot from execution_contracts where run_id = ${runId}
+  `.execute(app.db);
+  const loop = result.rows[0]?.frozen_snapshot.tool_loop_action as JsonObject | undefined;
+  const connections = loop?.connections as JsonObject | undefined;
+  return typeof connections?.FILE_WRITE === 'string' ? connections.FILE_WRITE : undefined;
 }
 
 async function ask(fx: Fixture, content: string, port: AssistModelPort) {
@@ -423,9 +461,11 @@ test('AM-07 明确修改请求在同一次模型判定里产出候选，落进�
   // 阶段命令身份在创建时就固定，恢复按原身份重放而不是新建第二个 Task/Run。
   assert.ok(request.task_command_id !== null && request.ready_command_id !== null &&
     request.delegate_command_id !== null);
-  // 候选经**原**确定性校验：写意图为真，因此不会被当成只读自动启动。
+  // 候选经**原**确定性校验；写意图进入 Run 后仍受 Gateway / Review 控制。
   assert.equal((request.candidate as unknown as { writes_files?: boolean }).writes_files, true);
-  // 本段不应用候选：Task/Run 仍由原 Owner 在用户动作后推进。
+  assert.equal(isAutoStartConversationExecution(request), true,
+    '明确写请求沿原 applications 入口自动准备 Task/Run');
+  // 本集成仅确认候选与 auto_start 投影，没有模拟 Workbench 的 HTTP 应用调用。
   assert.equal(request.task_id, null);
   assert.equal(request.run_id, null);
   assert.equal(await countRows('tasks', fx.projectId), 0);
@@ -434,6 +474,70 @@ test('AM-07 明确修改请求在同一次模型判定里产出候选，落进�
     'export const relay = true;\n');
   // 回复落在原消息上，不是第二套状态。
   assert.match(outcome.message?.content ?? '', /整理成一条可执行的任务/u);
+});
+
+test('文件写执行选择匹配的根连接，即使它不是首个 ACTIVE 连接', async () => {
+  const fx = await fixture();
+  const wrongRoot = await mkdtemp(join(tmpdir(), 'relay-main-loop-wrong-root-'));
+  roots.push(wrongRoot);
+  const wrongConnectionId = await addFileWriteConnection(fx, wrongRoot);
+  const matchingConnectionId = await addFileWriteConnection(fx, fx.root);
+  const request = await prepareWriteCandidate(fx);
+
+  await applyConversationExecution(app.db, { workspaceId: fx.workspaceId, requestId: request.id });
+  const applied = await createRepositories(app.db).conversationExecutions.readRequest(request.id);
+  assert.ok(applied?.run_id);
+  assert.notEqual(wrongConnectionId, matchingConnectionId);
+  assert.equal(await fileWriteConnectionFromRun(applied.run_id), matchingConnectionId,
+    '执行契约必须冻结覆盖当前受管根的连接');
+});
+
+test('文件写执行拒绝只有不匹配根的 ACTIVE 连接', async () => {
+  const fx = await fixture();
+  const wrongRoot = await mkdtemp(join(tmpdir(), 'relay-main-loop-wrong-root-'));
+  roots.push(wrongRoot);
+  await addFileWriteConnection(fx, wrongRoot);
+  const request = await prepareWriteCandidate(fx);
+
+  await assert.rejects(() => applyConversationExecution(app.db,
+    { workspaceId: fx.workspaceId, requestId: request.id }), /本项目还没有绑定该目录的 FILE_WRITE 连接/u);
+  const saved = await createRepositories(app.db).conversationExecutions.readRequest(request.id);
+  assert.equal(saved?.run_id, null, '没有匹配根连接时不得创建 Run');
+});
+
+test('文件写执行不把已停用的同根连接当作匹配连接', async () => {
+  const fx = await fixture();
+  const wrongRoot = await mkdtemp(join(tmpdir(), 'relay-main-loop-wrong-root-'));
+  roots.push(wrongRoot);
+  await addFileWriteConnection(fx, wrongRoot);
+  await addFileWriteConnection(fx, fx.root, 'DISABLED');
+  const request = await prepareWriteCandidate(fx);
+
+  await assert.rejects(() => applyConversationExecution(app.db,
+    { workspaceId: fx.workspaceId, requestId: request.id }), /本项目还没有绑定该目录的 FILE_WRITE 连接/u);
+  const saved = await createRepositories(app.db).conversationExecutions.readRequest(request.id);
+  assert.equal(saved?.run_id, null);
+});
+
+test('文件写执行没有 FILE_WRITE 连接时仍拒绝创建 Run', async () => {
+  const fx = await fixture();
+  const request = await prepareWriteCandidate(fx);
+
+  await assert.rejects(() => applyConversationExecution(app.db,
+    { workspaceId: fx.workspaceId, requestId: request.id }), /本项目还没有绑定该目录的 FILE_WRITE 连接/u);
+  const saved = await createRepositories(app.db).conversationExecutions.readRequest(request.id);
+  assert.equal(saved?.run_id, null);
+});
+
+test('文件写执行沿用同根 FILE_WRITE 连接', async () => {
+  const fx = await fixture();
+  const matchingConnectionId = await addFileWriteConnection(fx, fx.root);
+  const request = await prepareWriteCandidate(fx);
+
+  await applyConversationExecution(app.db, { workspaceId: fx.workspaceId, requestId: request.id });
+  const applied = await createRepositories(app.db).conversationExecutions.readRequest(request.id);
+  assert.ok(applied?.run_id);
+  assert.equal(await fileWriteConnectionFromRun(applied.run_id), matchingConnectionId);
 });
 
 test('候选不合规时按原澄清收口，不造 Task/Run，也不把原文当成执行结果', async () => {

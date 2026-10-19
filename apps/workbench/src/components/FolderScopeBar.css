@@ -9,6 +9,7 @@
    琥珀底横贯整列喧宾夺主，已去掉——告警由图标、目录名与状态短语三处的前景色承载，
    不靠单一颜色表达；归属等次要事实保持 text.secondary，避免整条同一色相把层级抹平。 */
 .folder-strip {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -49,18 +50,52 @@
 }
 
 /* 目录名是这一行的事实主角：body + medium，固定不压缩，超出按省略号收在本档内
-   （完整路径挂在 title 上，窄窗也能核对）。 */
+   （完整路径挂在 title 上，窄窗也能核对）。
+   2026-10-18 用户指令「更换目录和未选择目录合并成一个按钮」：它同时是这一行唯一的
+   动作——点目录名打开选择框。因此首先是事实（颜色对比、字重、省略照旧，告警态随
+   细条换色），其次才是键：全局 button 只继承字体与颜色、不重置外框，这里自己剥掉
+   原生边框与底，静止不描边、不铺底、不加下划线（缺目录那一档的常驻虚线见下方 `--action`）；
+   悬停只补一道下划线说出「可点」，
+   键盘 focus 走全局 focus ring。命中区就是整段文字——不撒到行内 gap 上。 */
 .folder-strip-name {
   flex: 0 0 auto;
   max-width: 14rem;
   min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
   font-size: var(--relay-font-size-body);
   font-weight: var(--relay-font-weight-medium);
+  text-align: start;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: var(--relay-font-lineHeight-heading);
+  cursor: pointer;
 }
+.folder-strip-name:hover:not(:disabled) { text-decoration: underline; }
+.folder-strip-name:disabled { cursor: default; }
+
+/* 「还没有目录」那一档的唯一常驻可点线索（2026-10-18 用户指认「未选择目录看不出是按钮」）：
+   文案已是动作「选择工作目录」，再常驻一道虚线下划线——虚线说的是「这里还没有内容，点它是去补」，
+   与已有目录名那种实文本区分开。仍然只用 text-decoration：不描边、不铺底、不加内边距，
+   这一枚键不落回原生控件外观（浏览器用例锁着 borderStyle/background/padding 三处读数）。
+   下划线取 text.muted 而不是 currentColor：告警态文字是琥珀色，同色的下划线会把这一行
+   读成「一条警示」，中性细线才只说「可点」。悬停换成实线，与另两档的悬停语义一致。
+   偏移只有 1px 且本档不裁切：这颗键为了省略号带 `overflow: hidden`，行盒只有 20px、
+   基线在 17px，全站链接那档 `0.2em`（3.2px）加 1px 线宽会掉到盒子外被裁掉——
+   2026-10-18 用户实机截图指认「常驻下划线没生效」正是这个（计算样式仍是 dashed underline，
+   像素却画不出来）。缺目录档的文案是固定短串、永不省略，因此本档改回可见溢出。 */
+.folder-strip-name--action {
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-decoration-color: var(--relay-color-text-muted);
+  text-decoration-thickness: var(--relay-border-width);
+  text-underline-offset: 1px;
+  overflow: visible;
+}
+.folder-strip-name--action:hover:not(:disabled) { text-decoration: underline; text-decoration-style: solid; }
 
 /* 归属是次要事实：meta + muted。窄窗宽度不够时先在这里省略，目录名始终完整可读。 */
 .folder-strip-meta {
@@ -88,50 +123,9 @@
   overflow-wrap: anywhere;
 }
 
-/* 更换目录是这一行唯一的动作，因此保留 chips 的胶囊形与命中区；
-   此前是一枚靠左分割线的幽灵文字，读成分段控件的一段而不是一个动作。
-   常态与告警态同款——告警是背景事实，不该把唯一入口一起染成提示色。
-   2026-10-17 用户指令「更换目录往左移动，贴到归入项目右边」：不再用 margin-inline-start:auto
-   把自己推到列的右缘。这一行读到哪儿，动作就紧跟在哪儿；行内 gap 已经给够一档间距。
-   同日接续「这个更换目录按钮胶囊很抢眼，能不能让它不那么抢眼，同时保证不会太难看」：
-   静止档从「白底 + control 边」降到「无底 + separator 边」——这条线就是输入卡自己用的那一档，
-   胶囊不再比它下面那张卡更抢眼；文字留在 text.secondary，可读性不靠描边撑。
-   降档不等于取消：悬停回到完整 chip（selection.hover 底 + control 边 + primary 文字），按下走选中色族，
-   所以「这是一个动作」仍由三态说出，而不是一圈静止的深色描边。 */
-.folder-strip-change {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--relay-control-height-compact);
-  padding: 0 var(--relay-space-4);
-  background: transparent;
-  border: var(--relay-border-width) solid var(--relay-color-border-separator);
-  border-radius: var(--relay-radius-round);
-  color: var(--relay-color-text-secondary);
-  font: inherit;
-  font-size: var(--relay-font-size-meta);
-  font-weight: var(--relay-font-weight-medium);
-  cursor: pointer;
-  transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
-    border-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
-    color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
-}
-.folder-strip-change:hover:not(:disabled) {
-  background: var(--relay-color-selection-hover);
-  border-color: var(--relay-color-border-control);
-  color: var(--relay-color-text-primary);
-}
-.folder-strip-change:active:not(:disabled) {
-  background: var(--relay-color-selection-bg);
-  border-color: var(--relay-color-action-primary);
-  color: var(--relay-color-selection-text);
-}
-.folder-strip-change:disabled {
-  cursor: default;
-  background: var(--relay-color-disabled-bg);
-  border-color: transparent;
-  color: var(--relay-color-disabled-text);
-}
+/* 更换目录动作已并进目录名本身（2026-10-18 用户指令）：这一行不再有第二颗键，
+   原 .folder-strip-change 胶囊及其三态规则随之删除，降档 chips 的消费者归零
+   （规则仍留在设计系统「协作页结构原语」，供后续常驻状态线复用）。 */
 
 .folder-strip[data-state="warning"] {
   color: var(--relay-color-status-warning-text);
@@ -141,3 +135,31 @@
 .folder-strip[data-state="warning"] .folder-strip-warning { color: inherit; }
 /* 次要事实不跟着整条换色：告警仍然读得出「哪个目录、归了谁」，而不是一条同色文字。 */
 .folder-strip[data-state="warning"] .folder-strip-meta { color: var(--relay-color-text-secondary); }
+
+/* 更换目录浮层（2026-10-18 用户指令「弹窗太大了，像这样就好了：一部分是最近的工作区，
+   一部分是打开文件夹」）：原先是 40rem 居中弹窗，三行目录被撑成半屏。现在锚在目录名上方，
+   外壳与「+」菜单、写入档位弹层同一套语言（panel 圆角 + separator 细边 + floating 阴影 +
+   popover 层级），宽度收到 18rem，行内容自己决定高度，超出在面板内滚。
+   向上展开：细条紧贴输入卡上方，向下只剩输入卡那一段高度，放不下最近目录列表。
+   左边缘对齐细条（不是对齐那颗目录名按钮）：细条本身就在输入列里，面板因此不会顶出视口，
+   窄窗时随 100% 收到细条宽。
+   高度上限取 52vh 而不是「+」菜单那一档的 60vh：中栏 `.collab-center` 是 overflow:hidden，
+   浮层再高也会被它裁掉——实测 1280×620 短窗里最坏内容（多个候选作用域＋手动路径）自然高
+   443px，60vh＝372px 时上缘已被裁 5px，52vh＝322px 才完整落在细条上方的可用空间里。 */
+.folder-scope-pop {
+  position: absolute;
+  bottom: calc(100% + var(--relay-space-1));
+  left: 0;
+  z-index: var(--relay-zIndex-popover);
+  width: min(18rem, 100%);
+  max-height: min(52vh, 26rem);
+  overflow-y: auto;
+  padding: var(--relay-space-2);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  box-shadow: var(--relay-shadow-floating);
+  /* 面板必须自己定色：它是 .folder-strip 的子节点，而细条在告警态把警示前景传给整行
+     （目录名、图标、状态短语三处）。不重置的话，浮层里每一行动作文字都会跟着变琥珀色。 */
+  color: var(--relay-color-text-primary);
+}

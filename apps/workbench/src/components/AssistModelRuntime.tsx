@@ -52,7 +52,7 @@ export default function AssistModelRuntime({ client, messageId, messageStatus }:
         {change.reason === "UPSTREAM_PROVIDER_RATE_LIMIT" || change.reason === "UPSTREAM_RATE_LIMIT" ? "原模型上游限流。" : "依据已记录的接续策略。"}</p>)}
       {failure && <p role="status">{failure}</p>}
       {runtime.retryAfterAt && <p>服务商提供的恢复时间：{runtime.retryAfterAt}</p>}
-      <details><summary>模型尝试与用量</summary>
+      <details className="tech-details"><summary>模型尝试与用量</summary>
         <p>当前候选：{runtime.currentCandidateModel ?? "未知"}；上限 {runtime.maxCandidates ?? "未知"} 个型号。限流核对时的账户共享日剩余请求：{runtime.freeDailyRemaining ?? "未知"}。</p>
         <ol aria-label="冻结候选顺序">{runtime.candidateModels.map((model) => <li key={model}>{model}</li>)}</ol>
         <ol aria-label="模型调用记录">{runtime.calls.map((call) => <li key={call.id}>{call.model} · {

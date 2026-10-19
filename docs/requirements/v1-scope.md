@@ -41,6 +41,7 @@
 | F23 | 毕业论文可复核实验协议（可选研究交付） | F | 研究协议 | P22 |
 | F24 | 第一方声明式扩展组合；四项首批 Skill、最小 Thesis/Development Pack、版本绑定与基础 Eval，复用现有闭环 | D | [扩展专题](../architecture/relay-skills.md) | P11、P12、P14、P15；依赖 P05–P08，P21 回归 |
 | F25 | 内置官方 GitHub Skill：随安装包分发、按需激活，首片只限 GitHub 只读查询；本地暂存/提交/推送复用 F19，GitHub 侧写动作另片 | E | [扩展专题第 10 节](../architecture/relay-skills.md#10-内置官方-skill-包) / [工具适配器](../architecture/tool-adapters.md) | 依赖 P09、P18、P19；具体 P 编号在切片协议冻结时确定 |
+| F26 | 内置 Chrome 浏览器自动化：随包分发的浏览器后端、独立能力族与页面级隔离；Agent 与用户并行，不接管用户标签页 | E | [浏览器自动化 V1](../architecture/browser-automation-v1.md) / [ADR-024](../decisions/ADR-024-builtin-browser-automation.md) | 依赖 P09（Gateway/权限）；切片编号在 M1 映射冻结后确定 |
 
 编码任务编号为本包实施分解，不是完成标记。F23 是原聊天研究方向的可选落地，不要求把未经导师确认的题目当作产品上线条件。
 
@@ -73,7 +74,26 @@
 * 随安装包分发，最终用户不需要单独下载或安装 Skill；首版只检测系统 `gh` 并在缺失时如实降级，不自动安装。
 * Issue、PR 正文、评论与 CI 日志始终是外部数据，不因内置 Skill 获得规则或授权效力；Delegate 与 Skill 启用不授予任何权限。
 
-F25 不改变 A–E 既有出口与恢复正确性要求，不因为「GitHub 能查」就把「一句话创建 PR」记为已交付。2026-10-17 首片只读已实施到**开发自检**（`GITHUB_READ`、迁移 `0103`、专用 adapter、四个只读动作与真实 PG 集成反例，边界见[工具适配器 §4.1](../architecture/tool-adapters.md#41-github-只读查询01032026-10-17-开发自检)），但随包分发、官方包登记、运行时提示与真实已认证读取均未完成，**F25 整体未验收**；GitHub 侧写动作仍须先冻结核对协议。
+F25 不改变 A–E 既有出口与恢复正确性要求，不因为「GitHub 能查」就把「一句话创建 PR」记为已交付。首片只读已实现 `GITHUB_READ`、迁移 `0103`、专用 adapter、只读动作及真实 PG 反例；2026-10-18 已验证真实已认证四动作经过会话/Gateway/账本成功，同日补第五个只读动作 `GITHUB_ISSUE_VIEW`（仅开发自检）。原文资源打包改动待最终包验证，官方包登记与运行时提示注入未完成，**F25 整体未验收**；GitHub 侧写动作仍须先冻结核对协议。边界归[工具适配器 §4.1](../architecture/tool-adapters.md#41-github-只读查询01032026-10-17-开发自检)，成绩只归统一验收表。
+
+### 内置浏览器自动化范围补充（2026-10-17）
+
+2026-10-18 接续：F26 延续「为 Relay 桌面端增加内置 Chrome 浏览器操控能力」的目标；原自有 Chrome/CDP 选型只作为历史与非默认对照路线保留，连接方式以已接受的 [ADR-025](../decisions/ADR-025-extension-bridge.md) 为准。能力边界与用户路径归[工作台 §36.3](../frontend/workbench-design.md#363-浏览器使用现有-chrome-的非激活标签页)，较早的技术审查仍见[浏览器自动化 V1](../architecture/browser-automation-v1.md)及 [ADR-024](../decisions/ADR-024-builtin-browser-automation.md)。
+
+纳入范围：
+
+* **使用用户日常 Chrome**：复用其 profile 与登录态，由用户明确安装/加载 Relay 扩展并配对；默认操作扩展新建的非激活标签页，不接管用户已有标签页，不抢前台。扩展未配对或断线时给诊断，不静默切到 CDP。
+* **扩展桥接**：Manifest V3 扩展通过 `chrome.debugger` 操作归属于本次 Run/会话的页面，经受认证的 loopback WebSocket 与 Relay API 通信；不使用 Native Messaging，不写注册表或改 PATH。
+* **三个能力**：`BROWSER_READ`（读取/快照/截图/等待）、`BROWSER_ACTION`（导航/新建/点击/填写/按键/关闭自有页，可被本次任务范围授权覆盖）、`BROWSER_COMMIT`（提交表单、上传文件，永不免批）。
+* **执行与隔离**：会话只读轮次只提供读取；交互动作经既有 Run 执行入口。页面所有权、STALE/UNKNOWN 与外部副作用恢复规则不变。
+
+F26 不改变 A–E 既有出口。扩展 provider、API 桥接及 MV3 扩展已有实现，真实隔离 Chromium 已走通配对、后台页面操作及重连；用户日常 Chrome 的手动安装、登录态复用、真实停止及最终安装态仍待验，**默认路线整体尚未交付**。当前验收结论与证据归[统一功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。原 CDP M1/M2 自检只覆盖非默认路线，不替代扩展路线。
+
+### 电脑桌面操控范围补充（2026-10-18）
+
+电脑能力与浏览器能力分开授权。用户可在 Windows 上让 Agent 读取环境、窗口和截图；桌面输入只在 Task/Run 中发生，读取与输入使用独立的 `COMPUTER_READ` / `COMPUTER_INPUT` 能力，输入须逐动作审批或本次任务范围授权。桌面运行时、Overlay、Esc 停止、控制状态与 UNKNOWN 规则的设计细节归 [Computer Plugin V1](../architecture/computer-plugin-v1.md) 及其 [V2 迁移审查](../architecture/computer-plugin-v2-migration-audit.md)，本节只界定 V1 产品范围。
+
+当前代码已接入能力与状态 Overlay，但真实桌面输入、停止/接管、`relay_app` 对 `computer_control_state` 的权限及安装包仍需分层验收；应先验证运行时确认停止再显示 STOPPED。未通过的项目只归统一验收表，不因本段范围说明视为已实现或已验收。
 
 ## 协作形态探索补充
 
@@ -129,6 +149,8 @@ F25 不改变 A–E 既有出口与恢复正确性要求，不因为「GitHub �
 2026-10-01，产品规则已确认，尚未实现/验收。本轮仅改文档及提供提示词。用户选择「打开文件夹后直接对话，明确执行请求直接进入执行」，细化 F13/F14 与既有 Task/Run/受控工具路径，不新增 F 编号，不替代 M01–M07 未完成出口。产品定义见[Master Spec §0.5](../../Personal_Workflow_OS_Master_Spec.md#05-文件夹入口与对话直接执行2026-10-01产品规则已确认)，完整交互、工程责任及未运行场景分别归[工作台 §18](../frontend/workbench-design.md#18-文件夹入口与对话直接执行)、[领域模型 §12](../architecture/domain-model.md#12-文件夹入口与对话执行的应用边界)、[测试计划 §17](../testing/verification-plan.md#17-文件夹与对话直接执行验收规格)。无文件夹的普通对话仍可用；需要项目资源的执行必须先落实明确作用域。任务表单保留为组织长期工作的一种入口。
 
 2026-10-15 接续：用户已确认[普通 Agent 连续工具主流程](../../Personal_Workflow_OS_Master_Spec.md#051-普通-agent-的连续工具主流程2026-10-15已确认待重构)，重构既有 F13/F14 的普通消息入口；纯会话读取不制造 Task/Run，文件修改/检查和业务维护仍调用原 Owner。取舍归[ADR-022](../decisions/ADR-022-agent-conversation-main-loop.md)，不新增 F 编号、不扩大 M/N 完整出口。本轮仅产品与架构文档、实施任务书，源码与协议尚未切换，不能据此宣称可读文件或已验收。
+
+2026-10-18 接续：用户确认本地文件操作无需手工配置连接/策略，细化同一 F13/F14 范围。目标路径为选目录（默认只读）→目录权限档位→原消息执行；基础文件连接和策略由应用通过原 Owner 管理，连接与策略页作为高级入口。完整规则归[工作台 §18.1.4](../frontend/workbench-design.md#1814-本地目录权限设置2026-10-18已确认已实施)，产品定义归[总纲 §0.5.2](../../Personal_Workflow_OS_Master_Spec.md#052-本地目录无需手工连接配置2026-10-18已确认已实施)。**应用实现已接入，验收按统一表分层**；不扩展为任意 Shell、全盘访问或外部服务自动授权。
 
 ## 状态驱动与轻量起步补充
 

@@ -1,24 +1,32 @@
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import ExecutionTrajectorySummary from "../src/components/ExecutionTrajectorySummary";
-import type { RelayApiClient, RelayRunToolCall, RelayRunToolCalls } from "../src/api/relayClient";
+import type { RelayApiClient, RelayReview, RelayRunToolCall, RelayRunToolCalls } from "../src/api/relayClient";
 import { flush, mountReact } from "./mountApp";
 
 const call = (id: string, toolName: string, resultRef: RelayRunToolCall["resultRef"],
-  status: RelayRunToolCall["status"] = "SETTLED"): RelayRunToolCall => ({ id, toolName, resultRef, status,
-  round: 0, ordinal: 0, args: {}, argsSha256: "a".repeat(64), providerToolCallId: id,
-  operationId: null, adaptationOf: null, adaptedPath: null, fileChanges: [],
-  createdAt: "2026-10-13T00:00:00Z", updatedAt: "2026-10-13T00:00:01Z" });
+  status: RelayRunToolCall["status"] = "SETTLED", operationId: string | null = null): RelayRunToolCall =>
+  ({ id, toolName, resultRef, status,
+    round: 0, ordinal: 0, args: {}, argsSha256: "a".repeat(64), providerToolCallId: id,
+    operationId, adaptationOf: null, adaptedPath: null, fileChanges: [],
+    createdAt: "2026-10-13T00:00:00Z", updatedAt: "2026-10-13T00:00:01Z" });
 
-async function mount(calls: readonly RelayRunToolCall[]) {
+async function mount(calls: readonly RelayRunToolCall[], reviews: readonly RelayReview[] | Error = []) {
   const projection: RelayRunToolCalls = { runId: "run-a", runStatus: "RUNNING", waitReason: null,
     rounds: [{ round: 0, modelCallId: "m", calls }] };
   const client = { getRunToolCalls: vi.fn(async () => projection),
+    getRunReviews: vi.fn(async () => {
+      if (reviews instanceof Error) throw reviews;
+      return reviews;
+    }),
     readRunEvents: vi.fn<RelayApiClient["readRunEvents"]>(async (_runId, _after, _signal, _onEvent, onOpen) => { onOpen?.(); }) } as unknown as RelayApiClient;
   const view = await mountReact(createElement(ExecutionTrajectorySummary, { client, runId: "run-a" }));
   await flush(80);
   return view;
 }
+
+const approval = (id: string, operationId: string | null,
+  status = "OPEN"): RelayReview => ({ id, kind: "ACTION_APPROVAL", status, operationId }) as RelayReview;
 
 describe("基础执行结果摘要", () => {
   it("检查失败后修正并复检，失败回执仍可见，失败写入不计为改动", async () => {
@@ -52,6 +60,38 @@ describe("基础执行结果摘要", () => {
     try {
       expect(view.wrapper.get('[data-testid="execution-summary"]').text()).toContain("1 项结果未提供");
       expect(view.wrapper.text()).not.toContain("写入");
+    } finally { view.unmount(); }
+  });
+
+  it("等待批准时链接到 operation_id 匹配的原 Review", async () => {
+    const view = await mount([
+      call("waiting", "apply_changeset", null, "WAITING_APPROVAL", "operation-1")],
+    [approval("review-1", "operation-1")]);
+    try {
+      expect(view.wrapper.get('[data-testid="execution-summary"]').text()).toContain("1 项等待你批准");
+      expect(view.wrapper.get('[data-testid="execution-waiting-approval-link"]').attributes("href"))
+        .toBe("/reviews?id=review-1");
+    } finally { view.unmount(); }
+  });
+
+  it("找不到精确匹配的 Review 时退回原审批页，不隐藏入口", async () => {
+    const view = await mount([
+      call("waiting", "apply_changeset", null, "WAITING_APPROVAL", "operation-1")],
+    [approval("other-review", "operation-2"), approval("decided", "operation-1", "ACCEPTED")]);
+    try {
+      expect(view.wrapper.get('[data-testid="execution-waiting-approval-link"]').attributes("href"))
+        .toBe("/reviews?kind=ACTION_APPROVAL");
+    } finally { view.unmount(); }
+  });
+
+  it("审批读取失败时仍保留入口，不把读不到说成没有审批", async () => {
+    const view = await mount([
+      call("waiting", "apply_changeset", null, "WAITING_APPROVAL", "operation-1")],
+    new Error("reviews unavailable"));
+    try {
+      expect(view.wrapper.get('[data-testid="execution-summary"]').text()).toContain("1 项等待你批准");
+      expect(view.wrapper.get('[data-testid="execution-waiting-approval-link"]').attributes("href"))
+        .toBe("/reviews?kind=ACTION_APPROVAL");
     } finally { view.unmount(); }
   });
 });

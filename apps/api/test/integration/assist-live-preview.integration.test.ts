@@ -18,7 +18,7 @@ import type { AssistModelPort, AssistRequest, AssistResult }
   from '../../src/workflow/fake-model-port.js';
 import { FakeModelPort } from '../../src/workflow/fake-model-port.js';
 import { createWorkspace, expectCommandAccepted, expectProblem,
-  startTestApi, workspacePath, type TestApi } from './api-harness.js';
+  startTestApi, withTimeout, workspacePath, type TestApi } from './api-harness.js';
 import { APP_DATABASE_URL, MIGRATIONS_DIRECTORY, MIGRATION_DATABASE_URL,
   openDatabase } from './integration-support.js';
 
@@ -37,6 +37,50 @@ interface Preview {
   session_id: string; message_id: string; status: string;
   preview_revision: string; preview_text: string | null;
   preview_truncated: boolean; preview_available: boolean;
+}
+
+interface PreviewSseFrame { readonly id: string; readonly event: string; readonly data: Preview }
+
+/** Open the assist live-preview SSE endpoint; frames carry the full GET-shaped DTO (contract §10.59). */
+async function openPreviewStream(f: { workspaceId: string; sessionId: string }, messageId: string,
+  bearer = `Bearer ${api.bearerToken}`) {
+  const controller = new AbortController();
+  const response = await fetch(`http://127.0.0.1:${api.port}${workspacePath(f.workspaceId,
+    `/assist-sessions/${f.sessionId}/messages/${messageId}/live-preview/events`)}`, {
+    headers: { Authorization: bearer, Accept: 'text/event-stream' }, signal: controller.signal });
+  assert.ok(response.body, 'preview SSE response must have a body');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = '';
+  return {
+    status: response.status,
+    next: async (): Promise<PreviewSseFrame> => withTimeout((async () => {
+      while (true) {
+        const end = pending.indexOf('\n\n');
+        if (end >= 0) {
+          const frame = pending.slice(0, end);
+          pending = pending.slice(end + 2);
+          if (frame.startsWith(':')) continue;
+          const id = frame.split('\n').find((line) => line.startsWith('id: '))?.slice(4);
+          const event = frame.split('\n').find((line) => line.startsWith('event: '))?.slice(7);
+          const data = frame.split('\n').find((line) => line.startsWith('data: '))?.slice(6);
+          assert.ok(id && event && data, `incomplete preview frame: ${frame}`);
+          return { id, event, data: JSON.parse(data) as Preview };
+        }
+        const chunk = await reader.read();
+        if (chunk.done) throw new Error('preview SSE closed before the expected frame');
+        pending += decoder.decode(chunk.value, { stream: true });
+      }
+    })(), 10_000, 'preview SSE frame'),
+    expectClosed: async (): Promise<void> => withTimeout((async () => {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) { assert.equal(pending, ''); return; }
+        pending += decoder.decode(chunk.value, { stream: true });
+      }
+    })(), 10_000, 'preview SSE close'),
+    close: async () => { controller.abort(); await reader.cancel().catch(() => undefined); },
+  };
 }
 
 async function fixture() {
@@ -392,4 +436,53 @@ test('expired generation lease clears an in-flight preview before a stale Worker
   const rows = await sql<{ count: string }>`select count(*)::text as count
     from assist_message_previews where message_id = ${messageId}`.execute(app.db);
   assert.equal(rows.rows[0]?.count, '0');
+});
+
+test('SSE assist_preview pushes the GET DTO, re-pushes on reconnect and closes at terminal settlement', async () => {
+  const f = await fixture();
+  const messageId = await request(f);
+  const model = gatedPort('首批文本🙂', '，后续内容');
+  const generation = runAssistGenerationTick(app.db, { workerId: 'sse-preview',
+    storage, modelPort: model.port, leaseMs: 30_000 });
+  let stream: Awaited<ReturnType<typeof openPreviewStream>> | undefined;
+  try {
+    await model.firstPublished; // first committed prefix exists before we connect
+    stream = await openPreviewStream(f, messageId);
+    assert.equal(stream.status, 200);
+    const first = await stream.next();
+    const snapshot = (await api.get(path(f, messageId))).body as Preview;
+    assert.equal(first.event, 'assist_preview');
+    assert.equal(first.id, snapshot.preview_revision);
+    assert.deepEqual(first.data, snapshot);
+    assert.equal(snapshot.preview_text, '首批文本🙂');
+    // No after/Last-Event-ID: a fresh connection re-pushes the current full snapshot.
+    const again = await openPreviewStream(f, messageId);
+    try {
+      const replay = await again.next();
+      assert.equal(replay.id, snapshot.preview_revision);
+      assert.deepEqual(replay.data, snapshot);
+    } finally { await again.close(); }
+    // Foreign workspace fails before the stream is upgraded.
+    const other = await fixture();
+    const denied = await openPreviewStream({ workspaceId: other.workspaceId,
+      sessionId: f.sessionId }, messageId);
+    assert.equal(denied.status, 404);
+    await denied.close();
+    // Release the gated generation: settlement deletes the row and the next
+    // reauthorized read is terminal, so the server sends it and ends the stream.
+    model.release();
+    let last = await stream.next();
+    while (last.data.status === 'PENDING' || last.data.status === 'RUNNING') {
+      last = await stream.next();
+    }
+    assert.equal(last.data.status, 'COMPLETED');
+    assert.equal(last.data.preview_available, false);
+    assert.equal(last.data.preview_text, null);
+    await stream.expectClosed();
+  } finally {
+    model.release();
+    await stream?.close();
+  }
+  assert.equal((await generation)?.status, 'COMPLETED');
+  assert.equal(((await api.get(path(f, messageId))).body as Preview).status, 'COMPLETED');
 });

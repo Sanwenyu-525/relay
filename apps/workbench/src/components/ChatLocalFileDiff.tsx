@@ -43,6 +43,9 @@ export function localDiffReasonText(reason: string | null): string {
     CURRENT_TEXT_UNAVAILABLE: "当前内容不可读",
     MODIFY_BASELINE_UNAVAILABLE: "缺少可比对的原文，行数待核对",
     RESULT_UNVERIFIED: "结算结果待核对，不宣布已修改",
+    DIFF_TOO_LARGE: "差异规模超出展开上限，正文不展开",
+    CURRENT_SWEEP_INCOMPLETE: "本轮扫描没核对到这个文件，不能判定已删除",
+    BASELINE_SWEEP_INCOMPLETE: "会话起点没覆盖到这个文件，无法确认是本会话新增",
   };
   return `不可统计：${labels[reason] ?? reason}`;
 }

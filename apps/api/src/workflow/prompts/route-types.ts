@@ -62,7 +62,14 @@ export type RuntimePromptRoute =
       readonly material: readonly JsonObject[] }
   | { readonly kind: 'SKILL'; readonly skill: FrozenSkill }
   | { readonly kind: 'METHOD'; readonly method: FrozenMethod;
-      readonly action: 'INSPECT' | 'MODIFY' | null }
+      readonly action: 'INSPECT' | 'MODIFY' | null;
+      /**
+       * 本轮是否声明了真实只读工具。
+       *
+       * 有工具时 MODIFY 可以按主流程信封声明执行候选；无工具轮只能给修改方案。
+       * INSPECT / null 不受此位影响，始终只读。
+       */
+      readonly readTools: boolean }
   /* -------------------------- 解释（模型端口） -------------------------- */
   | { readonly kind: 'INTERPRETATION_EXECUTION' }
   | { readonly kind: 'INTERPRETATION_STATE_MAINTENANCE' }
@@ -176,9 +183,9 @@ export const RUNTIME_ROUTES: Readonly<Record<RuntimeRouteId, RuntimeRouteDescrip
     templateSource: 'src/workflow/prompts/conversation-prompts.ts',
     summary: '第一方 Skill：Skill 边界 + 该版本 definition.instructions + 输出协议' },
   METHOD: { routeId: 'METHOD', group: 'CONVERSATION',
-    templateVersion: '1.0.0', coreVersion: CORE,
+    templateVersion: '1.0.1', coreVersion: CORE,
     templateSource: 'src/workflow/prompts/conversation-prompts.ts',
-    summary: '内置工作方法：冻结方法说明 + INSPECT/MODIFY 约束' },
+    summary: '内置工作方法：冻结方法说明 + INSPECT/MODIFY 约束；MODIFY 有读取工具时可产出执行候选' },
   INTERPRETATION_EXECUTION: { routeId: 'INTERPRETATION_EXECUTION', group: 'INTERPRETATION',
     templateVersion: '1.0.0', coreVersion: CORE,
     templateSource: 'src/workflow/prompts/interpretation-prompts.ts',
@@ -196,9 +203,9 @@ export const RUNTIME_ROUTES: Readonly<Record<RuntimeRouteId, RuntimeRouteDescrip
     templateSource: 'src/workflow/prompts/run-prompts.ts',
     summary: 'DRAFT 只读工具集：声明工具只读，不修改任何文件' },
   DRAFT_WRITE_TOOLS: { routeId: 'DRAFT_WRITE_TOOLS', group: 'RUN',
-    templateVersion: '1.0.1', coreVersion: CORE,
+    templateVersion: '1.0.2', coreVersion: CORE,
     templateSource: 'src/workflow/prompts/run-prompts.ts',
-    summary: 'DRAFT 含 apply_changeset：先读后改，删除与目录外不在授权内' },
+    summary: 'DRAFT 含 apply_changeset：先读后改，支持 CREATE/MODIFY/DELETE；删除仍需任务明确与逐次准入' },
   SEMANTIC_VERDICT: { routeId: 'SEMANTIC_VERDICT', group: 'VERIFICATION',
     templateVersion: '1.0.0', coreVersion: null,
     templateSource: 'src/workflow/prompts/run-prompts.ts',

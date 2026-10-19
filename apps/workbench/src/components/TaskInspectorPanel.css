@@ -580,6 +580,7 @@ button.inspector-asset:focus-visible { outline: var(--relay-focus-width) solid v
 /* 预览纸面已经提供边框和留白，Markdown 只承担正文，避免再套一层卡片。 */
 .inspector-paper > .markdown-preview { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; font: inherit; }
 .inspector-paper .markdown-preview__heading { font-size: var(--relay-font-size-rowTitle); }
+.inspector-paper .markdown-preview__heading[data-heading-level="2"] { font-size: var(--relay-font-size-reading); }
 
 .inspector-preview-foot {
   flex: none;

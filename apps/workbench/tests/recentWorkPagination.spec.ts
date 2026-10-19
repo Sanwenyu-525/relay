@@ -109,6 +109,31 @@ it("分页失权时清除已读任务，不能继续从旧列表进入", async (
   expect(container.querySelector('[data-testid="recent-work-error"]')?.textContent).toBeTruthy();
 });
 
+it("目录行带「＋」：只在有真实路径的分组出现，点击以该目录打开新对话且不发命令", async () => {
+  const directory = "D:/thesis/docs";
+  const sessions = [
+    { id: id(30), project_id: projectId, task_id: null, title: "有目录的讨论", status: "ACTIVE", revision: "1",
+      updated_at: "2026-10-16T00:00:00Z", context: { project_goals: [],
+        working_directory: { resource_id: id(41), canonical_root: directory } } },
+    { id: id(31), project_id: null, task_id: null, title: "未绑定目录的讨论", status: "ACTIVE", revision: "1",
+      updated_at: "2026-10-15T00:00:00Z", context: { project_goals: [], working_directory: null } }
+  ];
+  const { container, router } = await mount(200, sessions);
+  const button = container.querySelector<HTMLButtonElement>(`[data-testid="recent-work-new-in-${id(41)}"]`)!;
+  expect(button).not.toBeNull();
+  // 没有路径的两组（未绑定目录／目录待核对）没有可打开的目录，不长这颗键。
+  expect(container.querySelectorAll(".recent-work-group-new")).toHaveLength(1);
+  // summary 的后代不许是可交互内容：「＋」只能当它的兄弟，否则整行折叠与按钮点击会互相吞。
+  expect(container.querySelector(".recent-work-group > summary .recent-work-group-new")).toBeNull();
+  await act(async () => { button.click(); });
+  const query = new URLSearchParams(router.state.location.search);
+  expect(router.state.location.pathname).toBe("/agent");
+  // 与栏头「新对话」同一语义：只带一次性种子，不提前建空会话。
+  expect(query.get("new")).toBeTruthy();
+  expect(query.get("dir")).toBe(directory);
+  expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+});
+
 it("目录入口与任务入口分开：会话行仍打开原会话身份", async () => {
   // 协作页 §3.1：左栏不再只列任务。会话行与任务行共用一个列表，但走的是 ?session=。
   const sessionId = "77777777-7777-4777-8777-777777777777";

@@ -45,7 +45,7 @@ const SYSTEM_ROUTES: readonly RuntimeSystemRoute[] = [
   { kind: 'AGENT_MAIN_LOOP' },
   { kind: 'LEARNING_PARTNER', state: learningState, material: [] },
   { kind: 'SKILL', skill: fixtureSkill },
-  { kind: 'METHOD', method: fixtureMethod, action: null },
+  { kind: 'METHOD', method: fixtureMethod, action: null, readTools: false },
   { kind: 'INTERPRETATION_EXECUTION' },
   { kind: 'INTERPRETATION_STATE_MAINTENANCE' },
   { kind: 'DRAFT', capability: { toolsEnabled: false, canWrite: false } },
@@ -91,10 +91,12 @@ test('every registered route resolves and its metadata matches the registry', ()
     const descriptor = RUNTIME_ROUTES[selection.route.routeId];
     assert.equal(selection.route, descriptor);
     // 每条路由的模板版本各自独立：AGENT_MAIN_LOOP 随本次信封扩展升到 1.0.2，
-    // DRAFT 只读/含写工具集的 1.0.1 是它们自己的版本，不能顺手一起抬。
+    // DRAFT 只读/含写工具集的 1.0.1 是它们自己的版本，不能顺手一起抬；
+    // METHOD 因新增「有读取工具的 MODIFY」分支升到 1.0.1，DRAFT 写分支因放开删除升到 1.0.2。
     const expectedVersion =
       descriptor.routeId === 'AGENT_MAIN_LOOP' ? '1.0.2' :
-      descriptor.routeId === 'DRAFT_READ_ONLY_TOOLS' || descriptor.routeId === 'DRAFT_WRITE_TOOLS'
+      descriptor.routeId === 'DRAFT_WRITE_TOOLS' ? '1.0.2' :
+      descriptor.routeId === 'DRAFT_READ_ONLY_TOOLS' || descriptor.routeId === 'METHOD'
         ? '1.0.1' : '1.0.0';
     assert.equal(descriptor.templateVersion, expectedVersion);
     // 元数据声称包含核心，模板里就必须恰好出现一次；声称不含就必须为零。
@@ -189,7 +191,7 @@ test('DRAFT selects its template from the actual tool list, and the wire shape i
     assert.equal(requests[2]!.messages[0]!.content,
       selectRuntimeSystemPrompt({ kind: 'DRAFT',
         capability: { toolsEnabled: true, canWrite: true } }).system);
-    assert.match(requests[2]!.messages[0]!.content, /删除文件不在本次授权内/u);
+    assert.match(requests[2]!.messages[0]!.content, /删除只在本次任务明确要求删除时提出/u);
     // 声明的工具必须原样到达 Provider Adapter：重构不得顺手改动工具声明。
     const declared = declaredToolSpecs(['list_directory', 'find_paths', 'search_text',
       'read_file', 'apply_changeset', 'read_change_set']);

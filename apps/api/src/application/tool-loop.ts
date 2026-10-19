@@ -8,6 +8,9 @@ import type { ModelToolCall, ModelToolSpec, ModelToolTurn } from '../workflow/fa
 import { readToolLoopAction, type ToolLoopActionIntent } from '../workflow/execution-contract.js';
 import { declaredToolSpecs, readInternalTool, type InternalToolDefinition } from '../workflow/tool-catalog.js';
 import { COMPUTER_DESKTOP_TARGET } from '../computer/protocol.js';
+import { BROWSER_UNKNOWN_TARGET } from '../browser/protocol.js';
+import { browserTargetForTool } from '../browser/browser-adapter.js';
+import type { GatewayOrigin } from './gateway-actions.js';
 import { canonicalizeJson } from '../receipt/payload-hash.js';
 import { RunToolCallRepository } from '../run/run-tool-call-repository.js';
 import { createRepositories } from './unit-of-work.js';
@@ -451,10 +454,17 @@ export async function persistToolRound(db: DbExecutor, input: {
  * 重新归一并做根内与保护路径判定，因此这里的拼接只是候选值，不是最终裁决。
  */
 export function toolTargetFor(plan: ToolLoopPlan, definition: InternalToolDefinition,
-  args: JsonObject): string {
+  args: JsonObject, origin?: GatewayOrigin): string {
   if (definition.capability === 'COMPUTER_READ' || definition.capability === 'COMPUTER_INPUT') {
     // Computer 动作没有受管根：目标是整台电脑的合成值，prepare 按同一常量归一切。
     return COMPUTER_DESKTOP_TARGET;
+  }
+  if (definition.capability === 'BROWSER_READ' || definition.capability === 'BROWSER_ACTION' ||
+      definition.capability === 'BROWSER_COMMIT') {
+    // 0105: 浏览器目标按站点收窄：origin 来自本次导航目标或该页最近一次已知 origin，
+    // 同步只读内存，不在这里启动浏览器。拿不到就退到 browser://unknown。
+    return origin === undefined
+      ? BROWSER_UNKNOWN_TARGET : browserTargetForTool(origin, args);
   }
   if (definition.capability === 'GIT_READ' || definition.capability === 'FILE_WRITE' ||
       definition.capability === 'CLI_RUN' || definition.capability === 'GITHUB_READ') {
@@ -552,6 +562,9 @@ export function gatewayParamsFor(definition: InternalToolDefinition,
     // 模型只提供 check_id；真实程序与参数由冻结检查决定，这里不展开任何命令内容。
     return { check_id: args.check_id ?? '' };
   }
+  if (definition.actionType === 'COMPUTER_MOVE') {
+    return { x: args.x ?? 0, y: args.y ?? 0 };
+  }
   if (definition.actionType === 'COMPUTER_CLICK') {
     return { x: args.x ?? 0, y: args.y ?? 0,
       ...(typeof args.button === 'string' ? { button: args.button } : {}) };
@@ -619,6 +632,45 @@ export function gatewayParamsFor(definition: InternalToolDefinition,
   if (definition.actionType === 'GITHUB_PR_LIST' || definition.actionType === 'GITHUB_ISSUE_LIST') {
     return { ...(typeof args.state === 'string' ? { state: args.state } : {}),
       ...(typeof args.limit === 'number' ? { limit: args.limit } : {}) };
+  }
+  // 0105: 浏览器。逐动作白名单转发；page_id 保持字符串（适配层负责解析成上游的数字 id），
+  // 缺必填参数交给 prepare 以类型化校验拒掉。
+  if (definition.capability === 'BROWSER_READ' || definition.capability === 'BROWSER_ACTION' ||
+      definition.capability === 'BROWSER_COMMIT') {
+    const page = typeof args.page_id === 'string' && args.page_id !== ''
+      ? { page_id: args.page_id } : {};
+    switch (definition.actionType) {
+      case 'BROWSER_LIST_PAGES':
+      case 'BROWSER_READ_PAGE':
+      case 'BROWSER_SCREENSHOT':
+        return { ...page };
+      case 'BROWSER_NEW_PAGE':
+        return { ...(typeof args.url === 'string' ? { url: args.url } : {}) };
+      case 'BROWSER_WAIT_FOR':
+        return { ...page, text: typeof args.text === 'string' ? args.text : '',
+          ...(typeof args.timeout_ms === 'number' ? { timeout_ms: args.timeout_ms } : {}) };
+      case 'BROWSER_NAVIGATE':
+        return { ...page,
+          ...(typeof args.url === 'string' ? { url: args.url } : {}),
+          ...(typeof args.history === 'string' ? { history: args.history } : {}) };
+      case 'BROWSER_CLICK':
+        return { ...page, uid: typeof args.uid === 'string' ? args.uid : '',
+          ...(args.double === true ? { double: true } : {}) };
+      case 'BROWSER_SUBMIT_FORM':
+        return { ...page, uid: typeof args.uid === 'string' ? args.uid : '' };
+      case 'BROWSER_FILL':
+        return { ...page, uid: typeof args.uid === 'string' ? args.uid : '',
+          text: typeof args.text === 'string' ? args.text : '' };
+      case 'BROWSER_PRESS_KEY':
+        return { ...page, key: typeof args.key === 'string' ? args.key : '' };
+      case 'BROWSER_CLOSE_PAGE':
+        return { ...page };
+      case 'BROWSER_UPLOAD_FILE':
+        return { ...page, uid: typeof args.uid === 'string' ? args.uid : '',
+          relative_path: typeof args.relative_path === 'string' ? args.relative_path : '' };
+      default:
+        return {};
+    }
   }
   return {};
 }

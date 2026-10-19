@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import SafeMarkdown from "./SafeMarkdown";
 import { RelayApiError, RelayTransportError, type RelayApiClient, type RelayArtifactVersionSummary, type RelayRunDraftPreview, type RelayTaskArtifacts } from "../api/relayClient";
+import { useDetailsMenu } from "../lib/popoverMenu";
 import { describeLiveError } from "../lib/liveErrors";
 
 interface Reading {
@@ -43,6 +44,10 @@ export default function ArtifactReaderPanel({ client, taskId, projectId, selecte
   const [compareWith, setCompareWith] = useState("");
   const [compare, setCompare] = useState<{ base: Reading; head: Reading } | null>(null);
   const [compareError, setCompareError] = useState<string | null>(null);
+  // 协作成果区里「版本与比较」是锚在文档头上的浮层（非紧凑态是内联披露区）：只有
+  // 弹层形态参与「点外面 / Esc / 独占」关闭语义，内联态不收口，行为与原有一致。
+  const versionControlsRef = useRef<HTMLDetailsElement>(null);
+  useDetailsMenu(versionControlsRef, { enabled: compact === true });
   const [compareLoading, setCompareLoading] = useState(false);
   const request = useRef(0);
   const readRequest = useRef(0);
@@ -140,7 +145,7 @@ export default function ArtifactReaderPanel({ client, taskId, projectId, selecte
   const document = reading ?? requestedVersion;
   const documentState = loading || readingLoading ? "loading" : error || readingError ? "error" : reading ? "ready" : "empty";
   const hasContent = reading !== null || compare !== null || (draft?.previewAvailable === true && draft.previewText !== null);
-  const versionControls = versions.length > 0 && <details className="collab-version-details" onKeyDown={(event) => {
+  const versionControls = versions.length > 0 && <details ref={versionControlsRef} className="collab-version-details" onKeyDown={(event) => {
     if (!compact || !event.currentTarget.open || event.key !== "Escape" || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     event.preventDefault(); event.stopPropagation();
     event.currentTarget.open = false;

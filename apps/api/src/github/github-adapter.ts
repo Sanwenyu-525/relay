@@ -21,11 +21,12 @@ import { promisify } from 'node:util';
 
 import type { JsonObject, JsonValue } from '../infrastructure/json.js';
 import { runSafeGit } from '../git/git-adapter.js';
+import { githubExecutable, githubExecutableHint } from './gh-executable.js';
 
 const execFileAsync = promisify(execFile);
 
 export const GITHUB_READ_ACTION_TYPES = [
-  'GITHUB_REPO_VIEW', 'GITHUB_PR_LIST', 'GITHUB_PR_VIEW', 'GITHUB_ISSUE_LIST',
+  'GITHUB_REPO_VIEW', 'GITHUB_PR_LIST', 'GITHUB_PR_VIEW', 'GITHUB_ISSUE_LIST', 'GITHUB_ISSUE_VIEW',
 ] as const;
 export type GithubReadAction = (typeof GITHUB_READ_ACTION_TYPES)[number];
 
@@ -35,10 +36,14 @@ export function isGithubReadAction(actionType: string): actionType is GithubRead
 
 /** 单次列表最多返回的条目数；模型只能在此范围内收窄。 */
 export const GITHUB_LIST_MAX = 50;
-/** PR 正文的字节上限：正文属于外部内容，默认只带前一段。 */
+/** PR / Issue 正文的字节上限：正文属于外部内容，默认只带前一段。 */
 export const GITHUB_BODY_MAX_BYTES = 8 * 1024;
 /** 状态检查结论最多带几条，超出只保留计数。 */
 export const GITHUB_CHECKS_MAX = 25;
+/** Issue 评论最多带几条，超出只保留总数。 */
+export const GITHUB_COMMENTS_MAX = 10;
+/** 单条评论正文的字节上限：评论是另一段不可信外部内容，不能独占上下文。 */
+export const GITHUB_COMMENT_MAX_BYTES = 2 * 1024;
 /** 失败原因里保留的 stderr 字节上限。 */
 const GITHUB_ERROR_MAX_BYTES = 2 * 1024;
 
@@ -84,6 +89,14 @@ export function githubParamsForAction(actionType: string, params: JsonObject): J
       const state = params.state === undefined ? 'open' : requireState(params.state, ISSUE_STATES, 'params.state');
       return { state, limit: requireLimit(params.limit) };
     }
+    case 'GITHUB_ISSUE_VIEW': {
+      for (const key of keys) if (key !== 'number') refuse('params', `未知的参数：${key}`);
+      const number = params.number;
+      if (!Number.isInteger(number) || (number as number) <= 0) {
+        refuse('params.number', 'github_issue_view 需要一个正整数 number');
+      }
+      return { number: number as number };
+    }
     default:
       throw new Error(`不支持的 GitHub 动作：${actionType}`);
   }
@@ -105,14 +118,17 @@ function requireLimit(value: JsonValue | undefined): number {
 }
 
 /**
- * argv 由本文件逐字段构造；`--repo` 用已核对过的 owner/name 显式钉住目标仓库，
- * 因此 `gh` 不会按它自己的 remote 优先级去猜另一个仓库。
+ * argv 由本文件逐字段构造：目标仓库用已核对过的 owner/name 显式钉住
+ * （`pr`/`issue` 用 `--repo`，`repo view` 用位置参数），因此 `gh` 不会按它自己的
+ * remote 优先级去猜另一个仓库。
  */
-function buildArgs(actionType: GithubReadAction, params: JsonObject, repo: string): string[] {
+export function buildArgs(actionType: GithubReadAction, params: JsonObject, repo: string): string[] {
   const scope = ['--repo', repo];
   switch (actionType) {
     case 'GITHUB_REPO_VIEW':
-      return ['repo', 'view', ...scope, '--json', 'name,owner,defaultBranchRef,url,isPrivate'];
+      // `gh repo view` **没有** `--repo` 标志：仓库是位置参数（gh 2.102.0 实测）。
+      // 写成 `--repo` 会被判 unknown flag——只靠「本机没装 gh」的测试永远发现不了。
+      return ['repo', 'view', repo, '--json', 'name,owner,defaultBranchRef,url,isPrivate'];
     case 'GITHUB_PR_LIST':
       return ['pr', 'list', ...scope, '--state', String(params.state),
         '--limit', String(params.limit), '--json', 'number,title,state,headRefName,url,updatedAt'];
@@ -123,6 +139,10 @@ function buildArgs(actionType: GithubReadAction, params: JsonObject, repo: strin
     case 'GITHUB_ISSUE_LIST':
       return ['issue', 'list', ...scope, '--state', String(params.state),
         '--limit', String(params.limit), '--json', 'number,title,state,url,updatedAt'];
+    case 'GITHUB_ISSUE_VIEW':
+      // 评论用 `--json ...,comments` 取（`--comments` 只配人类可读输出，见上游 gh Skill）。
+      return ['issue', 'view', ...scope, String(params.number), '--json',
+        'number,title,body,state,author,url,labels,createdAt,updatedAt,comments'];
   }
 }
 
@@ -141,6 +161,8 @@ export function githubEnv(): NodeJS.ProcessEnv {
     TEMP: source.TEMP ?? '', TMP: source.TMP ?? '',
     USERPROFILE: source.USERPROFILE ?? '', HOME: source.USERPROFILE ?? source.HOME ?? '',
     APPDATA: source.APPDATA ?? '', LOCALAPPDATA: source.LOCALAPPDATA ?? '',
+    HTTP_PROXY: source.HTTP_PROXY, HTTPS_PROXY: source.HTTPS_PROXY, NO_PROXY: source.NO_PROXY,
+    http_proxy: source.http_proxy, https_proxy: source.https_proxy, no_proxy: source.no_proxy,
     GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1',
   };
 }
@@ -157,7 +179,7 @@ export async function runGithub(args: readonly string[], options: {
   readonly cwd: string; readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number;
 }): Promise<GithubExecResult> {
   try {
-    const { stdout, stderr } = await execFileAsync('gh', [...args], {
+    const { stdout, stderr } = await execFileAsync(githubExecutable(), [...args], {
       cwd: options.cwd,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
       timeout: options.timeoutMs ?? 30_000,
@@ -280,15 +302,16 @@ function textOf(value: JsonValue | undefined): string {
 }
 
 /** 外部文本的有界化：截断必须显式说出来，否则读到的就是一段被悄悄剪短的正文。 */
-function boundedText(value: JsonValue | undefined): { text: string; truncated: boolean } {
+function boundedText(value: JsonValue | undefined,
+  maxBytes: number = GITHUB_BODY_MAX_BYTES): { text: string; truncated: boolean } {
   const text = typeof value === 'string' ? value : '';
   const bytes = Buffer.byteLength(text, 'utf8');
-  if (bytes <= GITHUB_BODY_MAX_BYTES) return { text, truncated: false };
+  if (bytes <= maxBytes) return { text, truncated: false };
   let kept = '';
   let used = 0;
   for (const char of text) {
     const size = Buffer.byteLength(char, 'utf8');
-    if (used + size > GITHUB_BODY_MAX_BYTES) break;
+    if (used + size > maxBytes) break;
     kept += char;
     used += size;
   }
@@ -332,6 +355,34 @@ export function projectGithubResult(actionType: GithubReadAction, stdout: string
     return {
       items: items.map(listItem),
       returned: items.length,
+      untrusted_external_content: true,
+    };
+  }
+  if (actionType === 'GITHUB_ISSUE_VIEW') {
+    const view = asObject(parsed) ?? {};
+    const body = boundedText(view.body);
+    const allComments = asArray(view.comments);
+    // 评论是另一段外部内容：条数与单条字节都设上限，并把被剪掉的事实说出来。
+    const comments = allComments.slice(0, GITHUB_COMMENTS_MAX).map((entry) => {
+      const comment = asObject(entry) ?? {};
+      const text = boundedText(comment.body, GITHUB_COMMENT_MAX_BYTES);
+      return { author: textOf(comment.author), created_at: textOf(comment.createdAt),
+        body: text.text, body_truncated: text.truncated };
+    });
+    return {
+      number: typeof view.number === 'number' ? view.number : null,
+      title: textOf(view.title),
+      state: textOf(view.state),
+      author: textOf(view.author),
+      url: textOf(view.url),
+      labels: asArray(view.labels).map((label) => textOf(asObject(label)?.name ?? label)),
+      created_at: textOf(view.createdAt),
+      updated_at: textOf(view.updatedAt),
+      body: body.text,
+      body_truncated: body.truncated,
+      comments: comments as unknown as JsonObject[],
+      comments_total: allComments.length,
+      comments_truncated: allComments.length > comments.length,
       untrusted_external_content: true,
     };
   }
@@ -419,7 +470,7 @@ function ghHint(kind: string, rawKind: string | undefined): string {
   if (rawKind === 'timeout') return 'GitHub CLI 在 30 秒内没有返回，本次结果未知。';
   if (rawKind === 'cancelled') return '本次 GitHub 读取已被取消，没有产生结果。';
   switch (kind) {
-    case 'GH_CLI_UNAVAILABLE': return '本机没有安装 GitHub CLI（gh），需要先安装 gh 才能查询 GitHub。';
+    case 'GH_CLI_UNAVAILABLE': return `找不到可执行的 GitHub CLI。${githubExecutableHint()}`;
     case 'GH_UNAUTHENTICATED': return 'GitHub CLI 当前没有可用凭据，请在本机执行 gh auth login 后重试。';
     case 'GH_NETWORK_ERROR': return '无法连接 GitHub，请检查网络或代理。';
     case 'GH_REPO_UNIDENTIFIED': return '这个工作目录没有指向 GitHub 的仓库 remote，无法确定要查询哪个仓库。';

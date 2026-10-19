@@ -27,6 +27,7 @@ import { lockWritableProjectInWorkspace } from './guards.js';
 import { markTaskReady } from './task-commands.js';
 import { readAdmission, requireNormalAdmission } from './maintenance-admission.js';
 import type { FrozenCheck } from './run-scope-grant.js';
+import { targetMatches } from './gateway-actions.js';
 import { createRepositories, withTransaction } from './unit-of-work.js';
 
 /**
@@ -107,23 +108,18 @@ export function wantsConversationFileWrite(candidate: ConversationTaskCandidate)
 }
 
 /**
- * 本次请求是否属于「明确的只读执行」，可以沿既有 applications 入口直接启动。
+ * 已就绪的明确执行候选沿原 applications 入口直接启动 Task/Run。
  *
- * 工作台 §18.2：范围足够明确的执行请求直接进入原 Task/Run 链，不统一要求再点一次开始。
- * 但那条豁免只覆盖只读：只读候选拿不到写工具、不落范围授权（`planToolLoop()` 只解析
- * FILE_QUERY/FILE_READ），因此直接启动不会扩大任何权限边界；带写意图的请求仍保留一次
- * 确认（§18.4.1）。
- *
- * 判定收敛到 `wantsConversationFileWrite()` 这一个纯函数——与实际授予的工具集同源，
- * 界面不需要也不应该自己判断「这次是不是只读」，否则两处规则会各自漂移。
+ * 文件副作用仍只由 Run 内 Gateway 准入，DELETE 仍要求确切动作 Review；自动启动不会
+ * 把候选本身变成写权限，也不会绕过连接、策略、范围授权或人工决定。
  */
-export function isReadOnlyConversationExecution(row: {
+export function isAutoStartConversationExecution(row: {
   readonly decision: string; readonly candidate_status: string; readonly candidate: JsonObject | null;
 }): boolean {
   if (row.decision !== 'PREPARE' || row.candidate_status !== 'READY' || row.candidate === null) {
     return false;
   }
-  return !wantsConversationFileWrite(row.candidate as unknown as ConversationTaskCandidate);
+  return true;
 }
 
 export type InterpretConversationMessageResult = {
@@ -140,7 +136,7 @@ export type InterpretConversationMessageResult = {
   readonly task_id: string | null;
   readonly run_id: string | null;
   readonly revision: string;
-  /** 服务端已判定的只读执行请求：界面据此直接启动，不再要求固定二次确认。 */
+  /** 服务端已判定候选就绪且可进入原 Task/Run 应用入口。 */
   readonly auto_start: boolean;
 };
 
@@ -176,7 +172,7 @@ function projection(row: ConversationExecutionRequestRow): InterpretConversation
     candidate_status: row.candidate_status, questions: questionsOf(row),
     candidate: row.candidate === null ? null : row.candidate as unknown as ConversationTaskCandidate,
     task_id: row.task_id, run_id: row.run_id, revision: toDecimalString(row.revision),
-    auto_start: isReadOnlyConversationExecution(row) };
+    auto_start: isAutoStartConversationExecution(row) };
 }
 
 function text(value: JsonValue | undefined, max: number): string | undefined {
@@ -554,7 +550,7 @@ export function readInterpretation(generated: AssistResult): InterpretationOutco
  * 因此回复与判定必须由同一次输出一起给出，否则两者会各说各话。
  */
 export type MainLoopOutcome =
-  /** 没有信封：整段正文就是回复，也没有执行请求。 */
+  /** 没有可用信封：回复是可读正文（未解析的信封会被清洗），也没有执行请求。 */
   | { readonly kind: 'REPLY'; readonly reply: string }
   /** 信封里显式声明「这次只是讨论」：有回复，没有执行对象。 */
   | { readonly kind: 'DISCUSSED'; readonly reply: string }
@@ -572,12 +568,68 @@ export function mainLoopMaintenanceField(value: JsonObject): unknown {
   return value.maintenance;
 }
 
-function envelopeOf(content: string): JsonObject | undefined {
+/** 信封前允许的结论长度；真实模型常先写一句结果，再贴 JSON。 */
+const ENVELOPE_PREAMBLE_LIMIT = 400;
+
+const INVALID_ENVELOPE_REPLY = '模型这次的输出格式不完整，没有生成可执行请求。请重试，或把要改的文件与期望结果说得更具体一些。';
+
+/** 取整段输出里的信封 JSON 原文：整段、或简短前言之后的单个 JSON 对象（可被代码框包住）。 */
+function envelopeCandidate(content: string): string | undefined {
   const trimmed = content.trim();
-  // 信封必须是**整个**输出：前后夹带正文的模型输出按普通回复处理，而不是猜出一段 JSON。
-  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return undefined;
-  const parsed = parseInterpretation(trimmed);
-  return parsed ?? undefined;
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) return trimmed;
+  const start = trimmed.indexOf('{');
+  if (start <= 0) return undefined;
+  if (trimmed.slice(0, start).trim().length > ENVELOPE_PREAMBLE_LIMIT) return undefined;
+  const end = trimmed.lastIndexOf('}');
+  if (end <= start) return undefined;
+  const suffix = trimmed.slice(end + 1).trim();
+  if (suffix !== '' && suffix !== '```') return undefined;
+  return trimmed.slice(start, end + 1);
+}
+
+/**
+ * 主流程信封：整段输出就是信封，或信封前只有一段简短前言。
+ *
+ * 放宽的只是「多写了一句结论」「套了代码框」这类排版问题——信封仍必须是**一个**完整
+ * JSON 对象，且带非空 `reply`（输出协议要求）；这样正文里偶然出现的 JSON 片段不会被
+ * 当成状态维护来源。候选合法性仍由 `validateConversationCandidate` 决定。执行候选与
+ * 状态维护共用这一个入口，避免两处对同一段输出判定不一致。
+ */
+export function mainLoopEnvelope(content: string): JsonObject | undefined {
+  const candidate = envelopeCandidate(content);
+  if (candidate === undefined) return undefined;
+  const parsed = parseInterpretation(candidate);
+  return parsed !== undefined && text(parsed.reply, 8_000) !== undefined ? parsed : undefined;
+}
+
+/** 这段输出是不是一次失败的「信封尝试」；只有这种输出才需要清洗，普通正文原样返回。 */
+function looksLikeEnvelopeAttempt(content: string): boolean {
+  const trimmed = content.trim();
+  if (trimmed.startsWith('{')) return true;
+  const start = trimmed.indexOf('{');
+  if (start < 0 || start > ENVELOPE_PREAMBLE_LIMIT) return false;
+  if (/^```(?:json)?\s*$/iu.test(trimmed.slice(0, start))) return true;
+  return /^"(?:reply|execution|maintenance)"\s*:/u.test(trimmed.slice(start + 1).trimStart());
+}
+
+/** 从残缺信封里救回 `reply` 字符串：用户能读到的应该是模型想说的话，而不是 JSON 转义。 */
+function salvageEnvelopeReply(content: string): string | undefined {
+  const match = /"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/u.exec(content);
+  if (match === null) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(`"${match[1]}"`);
+    return typeof parsed === 'string' && parsed.trim() !== '' ? parsed.trim() : undefined;
+  } catch { return undefined; }
+}
+
+/** 未解析的信封绝不按正文展示：优先救回 reply，其次保留 JSON 前的结论，最后给一句可读失败说明。 */
+function readableReply(content: string): string {
+  if (!looksLikeEnvelopeAttempt(content)) return content;
+  const salvaged = salvageEnvelopeReply(content);
+  if (salvaged !== undefined) return salvaged;
+  const start = content.indexOf('{');
+  const prose = start < 0 ? content.trim() : content.slice(0, start).trim();
+  return prose === '' || prose.startsWith('```') ? INVALID_ENVELOPE_REPLY : prose;
 }
 
 /**
@@ -588,14 +640,18 @@ function envelopeOf(content: string): JsonObject | undefined {
  *   * 模型**编造**一个执行候选时，代价最多是「这一次没有整理成候选」，绝不会
  *     因为解析失败而凭空造出 Task/Run。
  *
+ * 唯一不再容忍的是把未解析的信封原文当正文落库：真实模型会在 JSON 前多写一句结论，
+ * 也曾输出残缺 JSON。前者按信封正常处理，后者清洗成可读回复（截图回归）。
+ *
  * 候选一旦出现，合法性完全由 `validateConversationCandidate` 这份**既有**确定性校验
  * 决定——主流程不另立一套更宽松的规则，也不因为「模型这么写」就放宽。
  */
 export function readMainLoopOutcome(content: string): MainLoopOutcome {
-  const envelope = envelopeOf(content);
-  if (envelope === undefined) return { kind: 'REPLY', reply: content };
-  const reply = text(envelope.reply, 8_000);
-  if (reply === undefined) return { kind: 'REPLY', reply: content };
+  const envelope = mainLoopEnvelope(content);
+  const reply = envelope === undefined ? undefined : text(envelope.reply, 8_000);
+  if (envelope === undefined || reply === undefined) {
+    return { kind: 'REPLY', reply: readableReply(content) };
+  }
   if (envelope.execution === undefined || envelope.execution === null) {
     return { kind: 'DISCUSSED', reply };
   }
@@ -618,6 +674,11 @@ export interface RecordConversationExecutionCandidateInput {
   readonly sourceMessageId: string;
   readonly resourceId: string;
   readonly commandId: string;
+  /**
+   * 冻结的方法身份；主流程在消息写入时就已固定，候选落库时必须原样带上。
+   * 缺失表示这不是方法轮；非法形状在进入此入口前已由 `readRunMethodBinding` 拒绝。
+   */
+  readonly method?: RunMethodBinding;
   readonly outcome: Extract<MainLoopOutcome, { kind: 'PREPARE' | 'CLARIFY' }>;
 }
 
@@ -649,7 +710,8 @@ export async function recordConversationExecutionCandidate(db: DbExecutor,
       ? { decision: 'PREPARE', candidateStatus: 'READY', status: 'READY',
         candidate: outcome.candidate as unknown as JsonObject, clarification: null }
       : { decision: 'CLARIFY', candidateStatus: 'INVALID', status: 'CLARIFY',
-        candidate: null, clarification: { questions: [...outcome.questions] } });
+        candidate: null, clarification: { questions: [...outcome.questions] } },
+    input.method);
   void receipt;
   return projection(saved);
 }
@@ -974,10 +1036,15 @@ async function findConnection(db: DbExecutor, row: ConversationExecutionRequestR
   capability: GatewayCapability): Promise<{ readonly connectionId: string;
     readonly config: JsonObject } | undefined> {
   const repositories = createRepositories(db);
+  const resource = await repositories.gateway.readResource(row.resource_id);
+  if (resource === undefined || resource.workspace_id !== row.workspace_id ||
+      resource.project_id !== row.project_id) return undefined;
   const connections = await repositories.gateway.listConnections(row.workspace_id, row.project_id);
   for (const connection of connections) {
     if (connection.status !== 'ACTIVE') continue;
-    if ((await repositories.gateway.listConnectionCapabilities(connection.id)).includes(capability)) {
+    if ((await repositories.gateway.listConnectionCapabilities(connection.id)).includes(capability) &&
+        typeof connection.config.root_path === 'string' &&
+        targetMatches(connection.config.root_path, resource.canonical_root, capability)) {
       return { connectionId: connection.id, config: connection.config };
     }
   }

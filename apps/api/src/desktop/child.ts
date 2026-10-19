@@ -1,5 +1,6 @@
 import { request } from 'node:http';
 
+import { DESKTOP_DEFAULT_API_PORT } from '../config/config.js';
 import type { RelayDatabase } from '../infrastructure/database.js';
 import type { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
 
@@ -18,6 +19,31 @@ export interface DesktopReadiness {
   readonly port: number;
   readonly workspaceId: string;
   readonly nodeVersion: string;
+}
+
+/**
+ * 桌面子进程的环境模板。
+ *
+ * 端口取固定值（`DESKTOP_DEFAULT_API_PORT`）而不是 0：浏览器扩展只认用户手动填的
+ * 地址，临时端口会让配对在每次重启后失效。固定端口被占用时由 `main.ts` 回退到 0。
+ */
+export function desktopChildEnvironment(input: {
+  readonly frame: DesktopStartupFrame;
+  readonly base: NodeJS.ProcessEnv;
+  readonly extraOrigin: string | undefined;
+}): NodeJS.ProcessEnv {
+  return {
+    ...input.base,
+    RELAY_API_BIND_HOST: '127.0.0.1',
+    RELAY_API_PORT: String(DESKTOP_DEFAULT_API_PORT),
+    // 桌面宿主仅在 tauri dev 构建注入该变量；打包产物保持 tauri.localhost 单一来源。
+    RELAY_API_ALLOWED_ORIGINS: input.extraOrigin === undefined
+      ? 'http://tauri.localhost'
+      : `http://tauri.localhost,${input.extraOrigin}`,
+    RELAY_API_BEARER_TOKEN: input.frame.bearerToken,
+    RELAY_API_STOP_ON_STDIN_EOF: 'true',
+    RELAY_LOG_LEVEL: 'fatal',
+  };
 }
 
 /** The first line is delivered only over the parent's anonymous stdin pipe. */

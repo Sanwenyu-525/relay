@@ -711,7 +711,18 @@ svg {
    而近期工作栏的列宽下限只有 11rem（内容盒 160px）——同特异度下靠后的全局规则会赢，
    上一版把覆盖写在它之前，实测仍然落到 192px/40px/16px，被 overflow:hidden 切掉 32px。
    这里用双类选择器提高特异度，不靠调整声明顺序。
-   字号写在容器上：.search-field input 的 font:inherit 会压掉内层任何 font-size。 */
+   字号写在容器上：.search-field input 的 font:inherit 会压掉内层任何 font-size。
+   2026-10-18 用户截图指认「光标太小，而且离搜索太近」：
+   ① 行高同样写在容器上（理由同上）。Chromium 的 <input> 光标高度跟随行盒——实测本站
+   14px 字号下行高 21px 只有 11px 光标（宽 1 设备像素，平台绘制，CSS 无法加粗），
+      在 32px 胶囊里读着极小；行高 28px 时光标 18.2px，且输入盒（=行盒）28px 仍落在
+      标签 30px 内容盒内。行高取 control.height.compact − space.1，光标随控件档位走，
+      零新增数值；行高再往上探（≥30px）会顶满内容盒，且光标已触字体内容高约 20px 的天花板。
+   ② gap 保持全局默认 space.2（8px）；图标小一档到 font.size.body(16px)。两件事都别再放大：
+      第一轮为「离搜索太近」把 gap 提到 space.3(12px)，但根因是 11px 小光标，不是间距；
+      同日第二轮用户指认「放大镜右侧那块放不了内容、宽度该调小」——光标修到 19px 后
+      那 12px 就是一整块死区。调回 space.2 后死区 −4px，160px 档上实测 input 96→100px、
+      placeholder 余量 12→16px（密度用例的 −8px 断言留有 2 倍余量）。 */
 .search-field.recent-work-search {
   flex: none;
   min-width: 0;
@@ -719,12 +730,17 @@ svg {
   height: var(--relay-control-height-compact);
   min-height: var(--relay-control-height-compact);
   padding: 0 var(--relay-space-2);
+  gap: var(--relay-space-2);
   background: var(--relay-color-bg-subtle);
   border-color: var(--relay-color-border-separator);
   border-radius: var(--relay-radius-round);
   font-size: var(--relay-font-size-meta);
+  line-height: calc(var(--relay-control-height-compact) - var(--relay-space-1));
 }
-.recent-work-search > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); flex: none; }
+/* 图标比全局档（control.icon.size 20px）小一档，取 font.size.body(16px)——与栏头
+   「新对话」同一写法「图标跟随字号」：16px 图形配 14px 文字更合比例，也在 160px
+   拖拽下限下给 placeholder 多让出 4px（取 20px 时余量只剩 8px，压住密度用例的 −8px 断言）。 */
+.recent-work-search > svg { width: var(--relay-font-size-body); height: var(--relay-font-size-body); flex: none; }
 /* 行距只有一档：分组内列表与已归档区列表共用 space.0.5（行距 34px = 32px 行高 + 2px）。
    2026-10-16 第七轮按用户「item 的间距再减小，而且要统一」撤掉分组覆盖里的 space.1——
    此前分组内 4px、已归档区 2px，同一列出现两档行距。 */
@@ -732,7 +748,7 @@ svg {
 /* 分组相对段标题的上下留白：上 4px 段标题→分组、下 8px 分组之间与「末组→下一根区」同档。
    2026-10-16 第八轮按用户「间距还是太大」由 space.3(12) 收到 space.2(8)——
    分组下外边距原为 12px，会塌穿包装层把根区间距顶回 12px，必须与根区 margin 同步收。 */
-.recent-work-group { margin-block: var(--relay-space-1) var(--relay-space-2); margin-inline-start: var(--relay-space-2); }
+.recent-work-group { position: relative; margin-block: var(--relay-space-1) var(--relay-space-2); margin-inline-start: var(--relay-space-2); }
 /* 2026-10-16 第三轮截图反馈：根区之间不再画分隔线。目标／工作区（目录）／任务入口连排时，
    这三条横线把一列切成几段，层级改由字号档、字重、缩进与留白表达（见设计系统 §9.11）。
    同日第五轮按用户截图再收：margin 与 padding 原本各留一档（12 + 8 = 20px），分隔线撤掉后
@@ -787,6 +803,36 @@ svg {
   font-variant-numeric: tabular-nums;
   text-align: center;
   line-height: var(--relay-font-lineHeight-ui);
+}
+/* 目录行悬停的「＋」（在这个目录新建会话）：与 ⋯ 同一套显形规则——静止 display:none，
+   悬停或键盘聚焦才出现，静止时行盒逐像素不变。它压在数字徽标那一格上，显形时徽标
+   用 visibility 让位（仍占宽，标题可用宽度不动），两者不会同时出现。
+   位置相对 details 而不是 summary：summary 的后代不许是可交互内容，按钮只能当它的兄弟；
+   指针移上「＋」时它自己仍是悬停目标，不会闪断。 */
+.recent-work-group-new {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: var(--relay-space-1);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--relay-control-height-compact);
+  height: var(--relay-control-height-compact);
+  padding: 0;
+  background: transparent;
+  border: var(--relay-border-width) solid transparent;
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-secondary);
+  cursor: pointer;
+}
+.recent-work-group-new > svg { width: var(--relay-font-size-caption); height: var(--relay-font-size-caption); }
+.recent-work-group > summary:hover ~ .recent-work-group-new,
+.recent-work-group-new:hover,
+.recent-work-group-new:focus-visible { display: flex; }
+.recent-work-group-new:hover { color: var(--relay-color-text-primary); }
+.recent-work-group > summary:hover > .recent-work-group-count,
+.recent-work-group:has(> .recent-work-group-new:hover, > .recent-work-group-new:focus-visible) > summary > .recent-work-group-count {
+  visibility: hidden;
 }
 .recent-work-group .recent-work-list {
   margin-left: var(--relay-space-2);
@@ -1536,6 +1582,34 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
   font-size: var(--relay-font-size-section);
 }
 
+/* 文档标题默认按 data-heading-level 分级：SafeMarkdown 把 #/## 都输出为 __heading、###+ 为 __subheading，
+   class 本身不携带层级。保留上一条 section 作为无属性时的兜底；阅读面可用 0,2,0 的视图规则整体上调。
+   :where() 把特异性压到 0,1,0，既压过上面的旧兜底，又不与视图作用域抢优先级，不依赖 CSS 加载顺序。
+   __subheading 没有全局 h4 字重，不显式声明会落回 UA 的 700，反而比 # 更粗。 */
+.markdown-preview__heading:where([data-heading-level="1"]) {
+  margin: var(--relay-space-6) 0 var(--relay-space-2);
+  font-size: var(--relay-font-size-rowTitle);
+}
+
+.markdown-preview__heading:where([data-heading-level="2"]) {
+  margin: var(--relay-space-6) 0 var(--relay-space-2);
+  font-size: var(--relay-font-size-reading);
+  line-height: var(--relay-font-lineHeight-snug);
+}
+
+.markdown-preview__subheading {
+  margin: var(--relay-space-6) 0 var(--relay-space-2);
+  font-family: var(--relay-font-family-ui);
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-medium);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.markdown-preview__heading:first-child,
+.markdown-preview__subheading:first-child {
+  margin-top: 0;
+}
+
 .markdown-preview__list {
   margin: 0 0 var(--relay-space-2);
   padding-left: var(--relay-space-4);
@@ -1788,6 +1862,35 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
 
 .metadata-row span[aria-hidden="true"] {
   color: var(--relay-color-border-control);
+}
+
+/* 技术身份类折叠披露（2026-10-17 收口）：列表与正文里的「核对依据」details 长期直接用
+   浏览器默认样式——标题与正文同色同重、展开后没有间距、ol 带着浏览器默认大缩进，
+   读起来就是一块没有样式的纯文字。这里把既有三处手写规则（knowledge-tech-details、
+   connections-identity、completion-technical）并成一档共享类：summary 次级色 + 指针，
+   marker 用主色，展开内容一档行距，列表收进统一缩进。
+   常驻披露（page-explanation 一类）有自己的 chevron 形态，不并这一类。 */
+.tech-details { margin: var(--relay-space-2) 0; }
+.tech-details > summary {
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  cursor: pointer;
+}
+.tech-details > summary::marker { color: var(--relay-color-action-primary); }
+.tech-details[open] > summary { margin-bottom: var(--relay-space-2); }
+.tech-details > :not(summary) { line-height: var(--relay-font-lineHeight-ui); }
+.tech-details > :not(summary) + :not(summary) { margin-top: var(--relay-space-1); }
+.tech-details ol, .tech-details ul { margin: var(--relay-space-2) 0 0; padding-inline-start: var(--relay-space-4); }
+.tech-details li + li { margin-top: var(--relay-space-1); }
+.tech-details small { color: var(--relay-color-text-secondary); }
+.tech-details code { display: block; overflow-wrap: anywhere; }
+
+/* 项目技能页 run-list 的行内 meta（来源、版本 ID）：与恢复摘要页同一档处理——
+   块级、一档上距、muted 色；此前是裸 small，只有浏览器默认的小字号。 */
+.skill-page .run-list > li small {
+  display: block;
+  margin-top: var(--relay-space-2);
+  color: var(--relay-color-text-muted);
 }
 
 .helper-text {

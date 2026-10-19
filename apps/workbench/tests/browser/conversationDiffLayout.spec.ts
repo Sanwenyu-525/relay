@@ -37,7 +37,8 @@ const longPath = "src/very/long/nested/path/for/layout/check/conversationLiveDif
 const rootPath = "D:\\Work\\Relay\\Projects\\conversation-live-diff-verification\\repo";
 const baselineAt = "2026-10-16T09:00:00Z";
 
-/** 总数只反映已落盘内容：可核对的两份文件 +98 −6，第三份二进制不可统计。 */
+/** 总数只反映已落盘内容：可核对的两份文件 +98 −6，第三份二进制不可统计。
+ * 覆盖投影按本仓真实情形给：起点扫描撞到文件数上限（2000），当前侧扫全了。 */
 const changedDiff = {
   available: true,
   baseline_captured_at: baselineAt,
@@ -45,6 +46,12 @@ const changedDiff = {
   root_path: rootPath,
   resource_id: resourceId,
   incomplete: true,
+  coverage: {
+    baseline: { complete: false, reason: "FILE_COUNT_LIMIT", files: 2000, listed: null },
+    current: { complete: true, reason: null, files: 3, listed: 3 },
+    unchecked_files: 0,
+    unverified_files: 0,
+  },
   total_files: 3,
   total_added: 98,
   total_removed: 6,
@@ -197,7 +204,7 @@ async function installRoutes(page: Page): Promise<void> {
     if (detail) return fulfillJson(route, sessionRow());
     const messages = path.match(/^\/api\/v1\/workspaces\/[0-9a-f-]+\/assist-sessions\/[0-9a-f-]+\/messages$/u);
     if (messages) return fulfillJson(route, messagesBody());
-    const livePreview = path.match(/\/assist-sessions\/[0-9a-f-]+\/messages\/([0-9a-f-]+)\/live-preview$/u);
+    const livePreview = path.match(/\/assist-sessions\/[0-9a-f-]+\/messages\/([0-9a-f-]+)\/live-preview(\/events)?$/u);
     if (livePreview) return fulfillJson(route, { session_id: sessionId, message_id: livePreview[1],
       status: "RUNNING", preview_revision: "1", preview_text: null, preview_truncated: false,
       preview_available: false });
@@ -283,7 +290,9 @@ async function openChat(page: Page, over: Partial<State> = {},
   else await expect(page.getByTestId("conversation-diff-toggle")).toBeVisible({ timeout: 20_000 });
 }
 
-function diffRegion(page: Page): Locator { return page.locator(".conversation-diff"); }
+function diffEntry(page: Page): Locator { return page.getByTestId("conversation-diff-toggle"); }
+function diffFlag(page: Page): Locator { return page.getByTestId("conversation-diff-flag"); }
+function folderStrip(page: Page): Locator { return page.locator(".folder-strip"); }
 function diffPanel(page: Page): Locator { return page.getByTestId("conversation-diff-panel"); }
 function composer(page: Page): Locator { return page.getByTestId("assist-composer"); }
 function rows(page: Page): Locator {
@@ -301,6 +310,27 @@ async function box(locator: Locator): Promise<Box> {
 function intersects(left: Box, right: Box): boolean {
   return left.x < right.x + right.width && right.x < left.x + left.width
     && left.y < right.y + right.height && right.y < left.y + left.height;
+}
+
+/** 这一行的列间距：居中断言要按实际间距算剩余空间，不把 16px 写死在用例里。 */
+async function rowColumnGap(page: Page): Promise<number> {
+  const value = await page.locator(".agent-chat-prereq-row")
+    .evaluate((element) => getComputedStyle(element).columnGap);
+  return Number.parseFloat(value) || 0;
+}
+
+/** 取同一 CSS 变量的探针色与元素实测 computed color：颜色断言不靠类名自证。 */
+async function colorVsToken(page: Page, selector: string,
+  variable: string): Promise<{ actual: string; expected: string }> {
+  return page.evaluate(([target, name]) => {
+    const probe = document.createElement("span");
+    probe.style.color = `var(${name})`;
+    document.body.append(probe);
+    const expected = getComputedStyle(probe).color;
+    probe.remove();
+    const element = document.querySelector(target);
+    return { actual: element === null ? "MISSING" : getComputedStyle(element).color, expected };
+  }, [selector, variable] as [string, string]);
 }
 
 test.describe("会话局部与总 diff 的真实布局", () => {
@@ -327,8 +357,9 @@ test.describe("会话局部与总 diff 的真实布局", () => {
     expect((await page.locator(".local-file-diff-path").nth(1).innerText()).trim())
       .toBe("conversationLiveDiffRenderer.ts");
     // 生成中的预览不进总数：此刻总数仍是落盘的 +98 −6。
+    // 数字已拆成独立着色节点，节点之间没有空白文本，因此按 \s* 匹配整句。
     await expect(page.getByTestId("conversation-diff-toggle"))
-      .toContainText("本次对话 · 3 个文件 +98 −6");
+      .toContainText(/本次对话 · 3 个文件\s*\+98\s*−6/);
 
     // 第二行落账：预览清空、账本给出实际数，界面上的「正在生成」整行换成实际动作的说法。
     // 这一次账本动作是 CREATE，所以写「已新增」而不是「已修改」——文案跟着动作走（§34.4 / CD-12）。
@@ -341,7 +372,7 @@ test.describe("会话局部与总 diff 的真实布局", () => {
     await expect(rows(page).nth(1)).not.toContainText("预览");
     await expect(rows(page).first()).toContainText("+78"); // 旧记录不被重写
     await expect(page.getByTestId("conversation-diff-toggle"))
-      .toContainText("本次对话 · 4 个文件 +1548 −826");
+      .toContainText(/本次对话 · 4 个文件\s*\+1548\s*−826/);
 
     // CD-18：局部展开正文沿用既有只读入口（按原 operation_id 读冻结前后文本）。
     await rows(page).first().getByRole("button", { name: "查看这次编辑前后" }).click();
@@ -356,16 +387,37 @@ test.describe("会话局部与总 diff 的真实布局", () => {
     await page.screenshot({ path: "results/conversation-diff-local-rows.png" });
   });
 
-  test("总数在输入卡外上方居中：展开列表与正文不遮发送键、不撑高输入卡", async ({ page }) => {
+  test("目录信息与总数入口同一行：目录左对齐、入口在剩余空间居中，展开不撑高输入卡", async ({ page }) => {
     await openChat(page);
-    const region = await box(diffRegion(page));
     const card = await box(composer(page));
+    const column = await box(page.locator(".agent-chat-composer").first());
+    const strip = await box(folderStrip(page));
+    const entry = await box(diffEntry(page));
     const send = await box(page.getByTestId("assist-send"));
     // 位置：输入卡**外**（不是卡的后代），且在卡上方。
     await expect(composer(page).locator(".conversation-diff")).toHaveCount(0);
-    expect(region.y + region.height).toBeLessThanOrEqual(card.y + 1);
-    // 居中：与输入卡同一列的中线对齐（数字/路径都收在这一行内）。
-    expect(Math.abs(region.x + region.width / 2 - (card.x + card.width / 2))).toBeLessThan(2);
+    expect(entry.y + entry.height).toBeLessThanOrEqual(card.y + 1);
+    // 同行（2026-10-18 用户指令「diff 摘要把左侧目录信息顶到上一行」）：入口与目录细条的垂直区间
+    // 重叠、水平盒互不相交——目录没被顶到上一行，入口也没压在上面。
+    expect(entry.y < strip.y + strip.height && strip.y < entry.y + entry.height).toBe(true);
+    expect(intersects(entry, strip)).toBe(false);
+    // 目录保持左对齐在这一列的左边缘；目录名仍可读（没被入口挤成省略号碎片）。
+    expect(Math.abs(strip.x - column.x)).toBeLessThanOrEqual(1);
+    const name = await box(page.locator(".folder-strip-name"));
+    expect(name.width).toBeGreaterThan(40);
+    // 居中：入口中线落在「细条右缘 + 列间距 … 列右缘」这一段的中点——auto 边距自然给出的位置，
+    // 不是把宽度写死的坐标硬压。
+    const expectedCenter = (strip.x + strip.width + await rowColumnGap(page) + column.x + column.width) / 2;
+    expect(Math.abs(entry.x + entry.width / 2 - expectedCenter)).toBeLessThan(4);
+    // 着色走 computed style 实测：新增用 diff 绿、删除用 diff 红，且符号与可访问名都在。
+    const addedColor = await colorVsToken(page,
+      '[data-testid="conversation-diff-toggle"] [data-metric="added"]', "--relay-color-diff-add-marker");
+    const removedColor = await colorVsToken(page,
+      '[data-testid="conversation-diff-toggle"] [data-metric="removed"]', "--relay-color-diff-remove-marker");
+    expect(addedColor.actual).toBe(addedColor.expected);
+    expect(removedColor.actual).toBe(removedColor.expected);
+    expect(addedColor.actual).not.toBe(removedColor.actual);
+    await expect(diffEntry(page)).toContainText("新增 98 行，删除 6 行");
     // 发送键仍在卡内、可见可用，位置未被总数行挤走。
     await expect(page.getByTestId("assist-send")).toBeVisible();
     expect(send.x! >= card.x && send.x + send.width <= card.x + card.width).toBe(true);
@@ -385,11 +437,20 @@ test.describe("会话局部与总 diff 的真实布局", () => {
     const binary = page.getByTestId(`conversation-diff-file-${binaryPath}`);
     await expect(binary).toContainText("二进制内容，不统计行数");
     expect(await binary.innerText()).not.toMatch(/[+−]\s*0(\s|$)/u);
-    await expect(page.getByTestId("conversation-diff-incomplete")).toBeVisible();
-    // 「部分不可统计」这一面旗写在入口那一行上，展开后也仍在那颗按钮里；面板里是同义的整句说明。
-    await expect(page.getByTestId("conversation-diff-toggle")).toContainText("部分不可统计");
-    expect((await box(page.getByTestId("conversation-diff-toggle"))).height)
-      .toBeCloseTo(region.height, 0); // 展开面板不改变入口那一行的高度
+    // 「部分不可统计」当场说清是哪一类不完整：入口行上是可见的成因短语，不是隐藏提示。
+    await expect(diffFlag(page)).toBeVisible();
+    await expect(diffFlag(page)).toContainText("统计不完整：目录只扫描了部分文件");
+    await expect(diffFlag(page)).toContainText("1 个文件行数不可统计");
+    expect(await diffFlag(page).getAttribute("title")).toBeNull();
+    // 展开面板逐条给出范围与条数；起点侧没有清单，不能编造「共多少个」。
+    const incomplete = page.getByTestId("conversation-diff-incomplete");
+    await expect(incomplete).toBeVisible();
+    await expect(incomplete)
+      .toContainText("会话起点扫描不完整：已核对 2000 个文件，原因：文件数达到统计上限");
+    await expect(incomplete)
+      .toContainText("1 个已发现文件的行数不可统计（二进制、超限或读不到）");
+    expect(await incomplete.innerText()).not.toContain("2000/");
+    expect((await box(diffEntry(page))).height).toBeCloseTo(entry.height, 0); // 展开不改变入口那一行的高度
 
     // CD-18：完整正文走同一份修订的只读端点。
     await page.getByTestId(`conversation-diff-file-toggle-${adapterPath}`).click();
@@ -405,9 +466,9 @@ test.describe("会话局部与总 diff 的真实布局", () => {
     const afterSend = await box(page.getByTestId("assist-send"));
     expect(intersects(panel, afterSend)).toBe(false);
     expect(intersects(panel, await box(page.getByTestId("assist-attach")))).toBe(false);
-    const column = await box(page.locator(".agent-chat-composer").first());
-    expect(panel.x).toBeGreaterThanOrEqual(column.x - 1);
-    expect(panel.x + panel.width).toBeLessThanOrEqual(column.x + column.width + 1);
+    const expandedColumn = await box(page.locator(".agent-chat-composer").first());
+    expect(panel.x).toBeGreaterThanOrEqual(expandedColumn.x - 1);
+    expect(panel.x + panel.width).toBeLessThanOrEqual(expandedColumn.x + expandedColumn.width + 1);
     await page.screenshot({ path: "results/conversation-diff-total-expanded.png" });
     expect(state.writes).toEqual([]);
   });
@@ -501,7 +562,7 @@ test.describe("会话局部与总 diff 的真实布局", () => {
 
   test("未绑定工作目录：这一行整块不出现，且不发起任何统计读取", async ({ page }) => {
     await openChat(page, { unbound: true });
-    // 2026-10-17 用户指令「不要有这个提示」：同一屏里目录细条已经常驻写着「未选择目录／执行前需归入项目」，
+    // 2026-10-17 用户指令「不要有这个提示」：同一屏里目录细条已经常驻写着「选择工作目录／执行前需先归入项目」，
     // 统计入口不再复述一遍「暂不统计」；这一行连同展开面板一起不存在，但一次请求都不发。
     await expect(page.getByTestId("conversation-diff-toggle")).toHaveCount(0);
     expect(state.diffReads).toBe(0);

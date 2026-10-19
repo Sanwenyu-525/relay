@@ -1,0 +1,39 @@
+/* 只占自己那一块：与目录细条同一行、紧跟其内容右端，行布局见 AssistView.css 的
+   `.agent-chat-prereq-row`。 */
+.pending-work {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--relay-space-2);
+}
+
+.pending-work-label {
+  flex: none;
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+  letter-spacing: 0.02em;
+}
+
+.pending-work-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--relay-space-2);
+}
+
+.pending-work-item {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--relay-space-1) var(--relay-space-3);
+  font-size: var(--relay-font-size-meta);
+  color: var(--relay-color-text-secondary);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  text-decoration: none;
+}
+
+.pending-work-item:hover {
+  color: var(--relay-color-action-primary);
+  border-color: var(--relay-color-action-primary);
+}

@@ -173,8 +173,33 @@ test('migrate entry reports the applied migrations without repeating them', asyn
       '0089_session_model_selection',
       '0090_assist_session_pin',
       '0091_composer_draft_assist',
+      // 0092–0104：Computer Plugin / 附件 / 模型目录 / GitHub 只读 / 会话未读。
+      // 本清单此前停留在 0091（自 0092 起一直未更新，属既有失败），本次一并补齐。
+      '0092_computer_use',
+      '0093_assist_message_attachments',
+      '0094_session_model_selection_source_guard',
+      '0095_session_model_selection_openrouter_provenance',
+      '0096_computer_control_state',
+      '0097_conversation_diff_baseline',
+      '0098_assist_message_model_snapshot',
+      '0099_assist_model_call_identity',
+      '0100_model_provider_cooldown',
+      '0101_model_call_stream_event',
+      '0102_run_tool_call_preview',
+      '0103_github_read',
+      '0104_assist_session_unread',
+      // 0105–0108：F26 浏览器自动化（能力、后端健康、任务状态、授权词表）。
+      '0105_browser_automation',
+      '0106_browser_backend_state',
+      '0107_browser_sessions',
+      '0108_scope_grant_browser_actions',
+      '0109_local_directory_access',
+      '0110_computer_control_state_privileges',
+      '0111_assist_session_last_message',
+      '0112_local_directory_full_access',
+      '0113_assist_session_fork',
     ]);
-  assert.equal(payload.ledger_rows, 91);
+  assert.equal(payload.ledger_rows, 113);
 });
 
 test('migrate entry fails explicitly without a migration connection', async () => {

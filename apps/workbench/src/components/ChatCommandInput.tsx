@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type Ref, type TextareaHTMLAttributes } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ClipboardEvent, type Ref, type TextareaHTMLAttributes } from "react";
 import type { RelayApiClient, RelayConversationMode } from "../api/relayClient";
 import type { RelayChatCommand } from "../api/resources/chatControls";
 import "./ChatCommandInput.css";
@@ -21,7 +21,7 @@ export function chatCommandStatus(entry: RelayChatCommand, hasSession: boolean):
 
 /** 菜单仅消费服务端登记并编辑草稿；发送、身份与动作准入由原会话 Owner 处理。 */
 export default function ChatCommandInput({ client, mode, hasSession, value, onValueChange, onSelectCommand, ref,
-  onKeyDown, onFocus, onBlur, onCompositionChange, disabled, ...props }: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>,
+  onKeyDown, onFocus, onBlur, onCompositionChange, onAttachFiles, disabled, ...props }: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>,
     "value" | "onChange"> & {
     client: RelayApiClient | null;
     mode: RelayConversationMode;
@@ -34,6 +34,11 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
      * 输入器自己已经用它挡斜杠菜单，这里只把同一事实报给调用方，不新建第二套判定。
      */
     onCompositionChange?: (composing: boolean) => void;
+    /**
+     * 粘贴/拖入的图片文件（工作台 §33）。不传时输入器保持纯文本行为；
+     * 传了也只是把文件交出去——类型、上限与「要不要暂存」都由调用方的附件 Owner 裁决。
+     */
+    onAttachFiles?: (files: readonly File[]) => void;
     ref?: Ref<HTMLTextAreaElement>;
   }) {
   const menuId = useId();
@@ -43,6 +48,10 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   const [retry, setRetry] = useState(0);
+  /* 拖拽高亮只认「真的拖了文件」：dragover 阶段拿不到文件内容，只能看 types，
+     因此收起时同样按 types 判断，避免拖一段文字过来也点亮整块区域。 */
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
   const [catalog, setCatalog] = useState<{ client: RelayApiClient;
     items: readonly RelayChatCommand[] | null; error: string | null } | null>(null);
   // 输入框随内容自增高：先归零再取 scrollHeight，交给 CSS max-height(40dvh) 封顶、超出后框内滚动。
@@ -97,9 +106,49 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
   }
   function scope(entry: RelayChatCommand): string { return chatCommandScope(entry); }
   function status(entry: RelayChatCommand): string { return chatCommandStatus(entry, hasSession); }
-  return <div className="chat-command-input" onBlur={(event) => {
-    if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
-  }}>
+  /** 剪贴板里的文件项（截图/复制的图片）。文本项一律不管，纯文本粘贴逐字不变。 */
+  function clipboardFiles(event: ClipboardEvent<HTMLTextAreaElement>): readonly File[] {
+    const files: File[] = [];
+    for (const item of Array.from(event.clipboardData?.items ?? [])) {
+      if (item.kind !== "file") continue;
+      const file = item.getAsFile();
+      if (file !== null) files.push(file);
+    }
+    return files;
+  }
+  const acceptsDrop = onAttachFiles !== undefined && !disabled;
+  function hasFilePayload(data: DataTransfer | null): boolean {
+    return data !== null && Array.from(data.types).includes("Files");
+  }
+  return <div className="chat-command-input" data-drop={dragging}
+    onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
+    }}
+    onDragEnter={(event) => {
+      if (!acceptsDrop || !hasFilePayload(event.dataTransfer)) return;
+      event.preventDefault(); dragDepth.current += 1; setDragging(true);
+    }}
+    onDragOver={(event) => {
+      if (!acceptsDrop || !hasFilePayload(event.dataTransfer)) return;
+      // 不阻止默认行为，浏览器会把这个文件当成导航目标直接打开——等于把页面弄丢。
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    }}
+    onDragLeave={() => {
+      // 子元素的 dragleave 也会冒泡到这里，所以用进入次数抵消：
+      // 只在真的离开整块输入区时才收起高亮，否则掠过缩略图就闪一下。
+      if (!acceptsDrop) return;
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+      if (dragDepth.current === 0) setDragging(false);
+    }}
+    onDrop={(event) => {
+      if (!acceptsDrop) return;
+      const files = Array.from(event.dataTransfer?.files ?? []);
+      dragDepth.current = 0; setDragging(false);
+      if (files.length === 0) return;
+      event.preventDefault();
+      onAttachFiles?.(files);
+    }}>
     {open && <div className="chat-command-menu" data-testid="chat-command-menu">
       <p className="chat-command-hint">选择只插入草稿，发送后运行 · ↑↓ 选择 · Enter 插入 · Esc 关闭</p>
       {!client ? <p role="status">请先连接 Relay，草稿已保留。</p>
@@ -127,6 +176,15 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
       aria-autocomplete="list" aria-controls={open && entries.length > 0 ? menuId : undefined}
       aria-activedescendant={open && selected ? `${menuId}-${selected.name}` : undefined}
       onChange={(event) => { setActive(0); setDismissed(null); onValueChange(event.target.value); }}
+      onPaste={(event) => {
+        // 只有「剪贴板里真有文件项」才接管：截图/复制的图片进附件暂存，
+        // 其余粘贴（文字、表格、代码）保持原生行为，一个字符都不改。
+        if (onAttachFiles === undefined) return;
+        const files = clipboardFiles(event);
+        if (files.length === 0) return;
+        event.preventDefault();
+        onAttachFiles(files);
+      }}
       onFocus={(event) => { setFocused(true); onFocus?.(event); }}
       onBlur={(event) => {
         if (!event.currentTarget.parentElement?.contains(event.relatedTarget)) setFocused(false);

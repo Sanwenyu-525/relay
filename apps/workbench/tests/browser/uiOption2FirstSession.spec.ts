@@ -268,7 +268,7 @@ test.describe("方案 2 独立验收四项整改（真实 Chromium）", () => {
     await openFolder(page, ctx);
     const draft = page.getByTestId("assist-first-draft");
     await draft.fill("切换模式仍保留的草稿");
-    await page.getByTestId("assist-conversation-mode-assistant").check();
+    await page.getByTestId("conversation-mode-select").selectOption("ASSISTANT");
     await expect(page.locator("details.agent-chat-options")).toHaveCount(0);
     await expect(page.getByTestId("assist-first-blocked")).toContainText("当前没有可用助手");
     await expect(page.getByTestId("assist-first-send")).toBeDisabled();
@@ -280,7 +280,7 @@ test.describe("方案 2 独立验收四项整改（真实 Chromium）", () => {
     expect(ctx.posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(0);
     expect(ctx.posts.filter((post) => post.path.endsWith("/messages"))).toHaveLength(0);
 
-    await page.getByTestId("assist-conversation-mode-agent").check();
+    await page.getByTestId("conversation-mode-select").selectOption("AGENT");
     await expect(page.locator("details.agent-chat-options")).toBeVisible();
     await expect(draft).toHaveValue("切换模式仍保留的草稿");
     await page.getByTestId("assist-first-send").click();
@@ -308,7 +308,7 @@ test.describe("方案 2 独立验收四项整改（真实 Chromium）", () => {
       // 断点切换可能先显示目标/会话读取态；等输入器回到真实草稿后再量几何。
       await expect(draft).toHaveValue("跨视口切换时保留的草稿");
       const look = await page.evaluate(() => {
-        const chip = document.querySelector<HTMLElement>(".agent-chat-mode-picker > .agent-chat-mode-option")!;
+        const chip = document.querySelector<HTMLElement>(".agent-chat-mode-select-field")!;
         const tools = document.querySelector<HTMLElement>(".agent-chat-composer-tools")!;
         const key = document.querySelector<HTMLElement>(".agent-chat-send")!;
         const composer = document.querySelector<HTMLElement>(".agent-chat-composer")!;
@@ -328,20 +328,25 @@ test.describe("方案 2 独立验收四项整改（真实 Chromium）", () => {
       expect(look.tools.bottom).toBeLessThanOrEqual(look.composer.bottom + 1);
       expect(look.pageWidth).toBeLessThanOrEqual(look.viewportWidth + 1);
 
-      const agent = page.getByTestId("assist-conversation-mode-agent");
+      const modeSelect = page.getByTestId("conversation-mode-select");
       const before = await page.evaluate(() => ({
         composer: document.querySelector<HTMLElement>(".agent-chat-composer")!.getBoundingClientRect().height,
         tools: document.querySelector<HTMLElement>(".agent-chat-composer-tools")!.getBoundingClientRect().height
       }));
-      await agent.focus();
-      await page.keyboard.press("ArrowRight");
-      await expect(page.getByTestId("assist-conversation-mode-assistant")).toBeChecked();
+      await modeSelect.focus();
+      // 原生 select 里方向键换的是选中项（不是移到下一个 radio），语义仍是「切到下一档」。
+      await page.keyboard.press("ArrowDown");
+      await expect(modeSelect).toHaveValue("ASSISTANT");
       await expect(page.getByTestId("assist-assistant-config-toggle")).toBeVisible();
       // 空清单时「新建助手」就地摆在 chip 旁：模式盒里只有图例、三个模式标签、chip 与该入口，
       // 整段可见文字逐字钉住，多出来的裸字符（例如误留在 JSX 里的分号）会在这里现形。
       await expect(page.getByTestId("assist-assistant-create-entry")).toBeVisible();
-      expect(await page.getByTestId("conversation-mode").innerText())
-        .toBe("会话模式\n普通 Agent\n人设助手\n学习\n选择助手\n新建助手");
+      // 三档收进 select 后不再各占一段可见文字；这里钉住「模式盒里只有这一个下拉 + chip + 入口」。
+      expect(await modeSelect.evaluate((element) =>
+        Array.from((element as HTMLSelectElement).options).map((option) => option.textContent))).toEqual(
+        ["普通 Agent", "人设助手", "学习"]);
+      await expect(page.getByTestId("assist-assistant-config-toggle")).toBeVisible();
+      await expect(page.getByTestId("assist-assistant-create-entry")).toBeVisible();
       await expect(page.getByTestId("assist-readonly-note")).toBeVisible();
       await expect(page.getByTestId("assist-first-blocked")).toBeVisible();
       await expect(page.getByTestId("assist-first-send")).toBeDisabled();
@@ -387,9 +392,9 @@ test.describe("方案 2 独立验收四项整改（真实 Chromium）", () => {
       await expect(config).toHaveCount(0);
       await expect(chip).toBeFocused();
 
-      await page.getByTestId("assist-conversation-mode-assistant").focus();
-      await page.keyboard.press("ArrowLeft");
-      await expect(agent).toBeChecked();
+      await page.getByTestId("conversation-mode-select").focus();
+      await page.keyboard.press("ArrowUp");
+      await expect(page.getByTestId("conversation-mode-select")).toHaveValue("AGENT");
       await expect(draft).toHaveValue("跨视口切换时保留的草稿");
       await expect(page.locator("details.agent-chat-options")).toBeVisible();
     }
@@ -399,9 +404,9 @@ test.describe("方案 2 独立验收四项整改（真实 Chromium）", () => {
     for (const viewport of viewports) {
       await page.setViewportSize(viewport);
       // 首条发出后正在换到已有会话视图：先等模式盒就位，否则量到过渡态骨架。
-      await expect(page.locator(".agent-chat-mode-picker > .agent-chat-mode-option").first()).toBeVisible();
+      await expect(page.locator(".agent-chat-mode-select-field")).toBeVisible();
       const look = await page.evaluate(() => {
-        const chip = document.querySelector<HTMLElement>(".agent-chat-mode-picker > .agent-chat-mode-option")!;
+        const chip = document.querySelector<HTMLElement>(".agent-chat-mode-select-field")!;
         const key = document.querySelector<HTMLElement>(".agent-chat-send")!;
         const composer = document.querySelector<HTMLElement>(".agent-chat-composer")!;
         const chipRect = chip.getBoundingClientRect();

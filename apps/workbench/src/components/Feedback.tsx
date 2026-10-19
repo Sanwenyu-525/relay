@@ -60,6 +60,59 @@ export function Notice({ children, action, tone = "danger", testId = null }: {
   return null;
 }
 
+/**
+ * 命令式撤销条：入口必须活得比触发它的组件久。
+ *
+ * 上面三个插槽走 `useFeedbackSlot`，归属组件卸载就把自己收走。而危险操作成功后的第一件事
+ * 就是关掉那个面板（例如会话行菜单收起），撤销条要是跟着一起卸载，就等于没有撤销。
+ * 倒计时本来就归宿主侧的 `FeedbackCard` 管，`FeedbackHost` 挂在页壳里不随行卸载，
+ * 所以命令式条目天然不需要自己看定时器。
+ *
+ * 条目按业务键登记：同键再次打开复用同一个 id，`putFeedback` 于是走原位替换而不是压出第二条。
+ */
+const imperativeIds = new Map<string, number>();
+
+function imperativeId(key: string): number {
+  const known = imperativeIds.get(key);
+  const id = known ?? nextFeedbackId();
+  imperativeIds.set(key, id);
+  return id;
+}
+
+export function openUndoFeedback(key: string, spec: {
+  readonly text: string; readonly actionLabel: string; readonly onUndo: () => void; readonly testId?: string | null;
+}): void {
+  putFeedback({
+    id: imperativeId(key), variant: "snackbar", tone: "neutral", text: spec.text,
+    actionLabel: spec.actionLabel, dwellMs: SNACKBAR_MS, testId: spec.testId ?? null,
+    // 点击时 FeedbackCard 已按 id 收走条目；这里先清键登记，再跑调用方的反向命令。
+    onAction: () => { closeUndoFeedback(key); spec.onUndo(); },
+  });
+}
+
+/**
+ * 把同一键那条撤销条就地升级成停留到用户处理的 Notice。
+ *
+ * 反向命令失败时不能只把错误留在就地：那一刻用户手上的入口正是这条浮层，条目还活着，
+ * 改写成 Notice 后 `dwellMs` 从 8s 变 null，`FeedbackCard` 的计时 effect 依赖 `dwellMs`，
+ * 会自动清掉旧定时器并长出关闭按钮，不需要新增变体或新 token。
+ */
+export function escalateFeedback(key: string, spec: {
+  readonly text: string; readonly testId?: string | null;
+}): void {
+  putFeedback({
+    id: imperativeId(key), variant: "notice", tone: "danger", text: spec.text,
+    actionLabel: null, onAction: null, dwellMs: null, testId: spec.testId ?? null,
+  });
+}
+
+export function closeUndoFeedback(key: string): void {
+  const id = imperativeIds.get(key);
+  if (id === undefined) return;
+  imperativeIds.delete(key);
+  removeFeedback(id);
+}
+
 function FeedbackCard({ entry }: { readonly entry: FeedbackEntry }) {
   /** 悬停或键盘聚焦时暂停：读屏用户与伸手点动作按钮的用户都不该被计时器抢先。 */
   const [paused, setPaused] = useState(false);

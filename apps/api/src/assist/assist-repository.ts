@@ -1,9 +1,25 @@
 import { sql } from 'kysely';
 
-import type { AssistMessageAttachmentRow, AssistMessagePreviewRow, AssistMessageRow,
+import type { AssistMessageAttachmentMetaRow, AssistMessageAttachmentRow,
+  AssistMessagePreviewRow, AssistMessageRow,
   AssistProposalRow, AssistSessionRow, AssistSessionStatus, ConversationMode } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
+
+/**
+ * 会话物理删除的阻断项（ADR-027）。任何一项存在，删除命令整条拒绝、零删除。
+ * 「在途消息」不在这张表里：它由 `hasInflightMessages` 单独判定，与归档共用同一道栅栏。
+ */
+export type SessionDeleteBlockerReason =
+  | 'FORK_CHILDREN'
+  | 'TASK_ACCEPTANCE_CITED'
+  | 'HYPOTHESIS_CITED'
+  | 'WORK_SEGMENT_CITED'
+  | 'BLUEPRINT_CITED'
+  | 'EXECUTION_REQUESTS'
+  | 'LEARNING_RECORDS'
+  | 'ARTIFACT_IMPACT_COMMITTED'
+  | 'PROVIDER_COOLDOWN_ACTIVE';
 
 export interface AssistSessionContext {
   readonly session_id: string;
@@ -49,12 +65,14 @@ export class AssistRepository {
   }
 
   /**
-   * 会话列表：置顶优先，其余按创建时间倒序（0090）。
+   * 会话列表：置顶优先，其余按最后消息时间倒序（0090 / 0111）。
    *
    * `status` 由调用方显式给出——HTTP 层默认只列 ACTIVE，`all`/`archived` 是左栏「已归档」
    * 那一段的读法。缺省不过滤，是为了让内部读取（按项目/任务定位会话）继续看得到全部身份。
    * 排序键用 `pinned_at desc nulls last`：置顶项之间按置顶时刻倒序，未置顶的落在后面，
    * 不再追加第二枚布尔排序键，避免「同现同缺」写成两套规则。
+   * 活动序用 `coalesce(last_message_at, created_at)`：说过话的按最后一次消息落库或生成结算排，
+   * 还没说话的按创建时间留在原位，不因本列为空而沉底；`id desc` 只作同值决胜。
    */
   async listSessions(workspaceId: string, projectId?: string, taskId?: string,
     status?: AssistSessionStatus | 'ALL'): Promise<readonly AssistSessionRow[]> {
@@ -64,7 +82,20 @@ export class AssistRepository {
       : sql`and status = ${status}`;
     return (await sql<AssistSessionRow>`select * from assist_sessions
       where workspace_id = ${workspaceId} ${project} ${task} ${active}
-      order by pinned_at desc nulls last, created_at desc, id desc`.execute(this.db)).rows;
+      order by pinned_at desc nulls last,
+        coalesce(last_message_at, created_at) desc, id desc`.execute(this.db)).rows;
+  }
+
+  /**
+   * 会话活动排序键（0111）：只前进不回退，不碰 `updated_at` 与 `revision`。
+   *
+   * 调用方只有消息落库与生成结算两处。改名、置顶、未读、绑定都不推进它，它也不推进
+   * 人工控制命令赖以裁决的修订号——否则在途生成会把界面上的改名与置顶打成 409。
+   */
+  async touchLastMessage(sessionId: string): Promise<void> {
+    await sql`update assist_sessions
+      set last_message_at = greatest(last_message_at, now())
+      where id = ${sessionId}`.execute(this.db);
   }
 
   /**
@@ -87,6 +118,104 @@ export class AssistRepository {
     const updated = await sql<AssistSessionRow>`update assist_sessions set ${sql.join(sets, sql`, `)}
       where id = ${id} and revision = ${expectedRevision} returning *`.execute(this.db);
     return updated.rows[0];
+  }
+
+  /**
+   * 分叉一条会话（0113）。
+   *
+   * 用 `insert … select` 从源行整行搬运，而不是在 JS 里逐列取值再拼 INSERT：会话身份那一组
+   * 列（模式、人设 ID/修订/快照、是否续读、归属项目与任务、绑定目录）以后再加一列时，
+   * 逐列拼装会静默漏掉新列，按源行复制不会。
+   *
+   * 三枚导航列显式写 NULL：置顶、未读与「最近活动」都是这一行自己的事实，不从父行继承——
+   * 刚分出来的讨论要按新会话落在活动序顶部，而不是挤在父会话旁边。子会话修订从 0 起，
+   * 父会话一行都不改（分叉不推进它的修订与标题，见 0113）。
+   */
+  async insertForkedSession(input: { id: string; fromSessionId: string; title: string }):
+  Promise<AssistSessionRow | undefined> {
+    const inserted = await sql<AssistSessionRow>`insert into assist_sessions (
+        id, workspace_id, project_id, task_id, title, conversation_mode,
+        assistant_profile_id, assistant_profile_revision, assistant_role_snapshot,
+        remember, working_resource_id, status, pinned_at, unread_at, last_message_at,
+        forked_from_session_id)
+      select ${input.id}, s.workspace_id, s.project_id, s.task_id, ${input.title},
+        s.conversation_mode, s.assistant_profile_id, s.assistant_profile_revision,
+        s.assistant_role_snapshot, s.remember, s.working_resource_id, s.status,
+        null, null, null, s.id
+      from assist_sessions s where s.id = ${input.fromSessionId}
+      returning *`.execute(this.db);
+    return inserted.rows[0];
+  }
+
+  /**
+   * 0113：分叉要搬的历史消息。
+   *
+   * 只有「已完成且有正文」的一轮才算历史：RUNNING/PENDING 由用例的在途栅栏先拒掉，
+   * FAILED/CANCELLED 是那一轮自己的结局（错误码与服务商请求号都不随文本搬运），
+   * 把它们复制进子会话会变成「子会话里有一轮失败过，但它没有任何失败痕迹」。
+   */
+  async listForkableMessageIds(sessionId: string): Promise<readonly { id: string; seq: bigint }[]> {
+    return (await sql<{ id: string; seq: bigint }>`select id, seq from assist_messages
+      where session_id = ${sessionId} and status = 'COMPLETED' and content is not null
+      order by seq`.execute(this.db)).rows;
+  }
+
+  /**
+   * 0113：按源行复制一轮消息，正文与各类输入快照都在库里搬运，不经过应用进程。
+   *
+   * `seq` 由调用方按子会话从 1 重排（`UNIQUE (session_id, seq)`）。刻意**不**搬的列：
+   * `provider_request_id`、四枚 usage、`worker_id`、`cancel_requested`、`error_code`、
+   * `provider_error_kind`、`model_attempt_state`——它们记的是父会话那一轮的真实外呼与
+   * 领取过程，子会话没有发生过那次外呼，留着就是伪造已确认事实。
+   * `model_selection_snapshot` 同样不搬：0098 把这两列约束成成对非空
+   * （`(snapshot IS NULL) = (attempt_state IS NULL)`），单搬快照会让分叉撞 CHECK；
+   * 而复制过去的历史一律 COMPLETED、不会再被生成路径读取，快照只服务排队与重试，
+   * 子会话里没有它不影响任何读方。
+   * 提案（assist_proposals）也不搬：接受一次会写业务事实，同一条提案不能在两条会话里各接受一次。
+   */
+  async copyMessageInto(input: { sourceMessageId: string; parentSessionId: string;
+    childSessionId: string; childMessageId: string; seq: bigint }): Promise<boolean> {
+    const inserted = await sql<{ id: string }>`insert into assist_messages (
+        id, session_id, seq, role, status, intent, content, sources,
+        skill_snapshot, skill_input, skill_output, method_snapshot, method_action,
+        method_argument, learning_record_disabled,
+        created_at, updated_at)
+      select ${input.childMessageId}, ${input.childSessionId}, ${input.seq}, m.role, m.status,
+        m.intent, m.content, m.sources, m.skill_snapshot, m.skill_input, m.skill_output,
+        m.method_snapshot, m.method_action, m.method_argument, m.learning_record_disabled,
+        m.created_at, now()
+      from assist_messages m
+      where m.id = ${input.sourceMessageId} and m.session_id = ${input.parentSessionId}
+      returning id`.execute(this.db);
+    return inserted.rows.length === 1;
+  }
+
+  /** 0113：某条消息的图片附件身份（按落库顺序），字节不读出来——复制在库里完成。 */
+  async listAttachmentIdsByMessage(messageId: string): Promise<readonly string[]> {
+    return (await sql<{ id: string }>`select id from assist_message_attachments
+      where message_id = ${messageId} order by created_at, id`.execute(this.db)).rows
+      .map((row) => row.id);
+  }
+
+  /**
+   * 0113：把一张附件复制进子会话（0093 的字节不可变，这里只搬运不改写）。
+   *
+   * 逐张一条语句而不是整表 `insert … select`：新行 ID 仍由应用生成（全仓一致），
+   * 而 bytea 内容始终留在数据库内部，不经过程序——一条消息最多 4 张、单张最多 2 MiB，
+   * 把整段历史读进内存再写回会把一次分叉变成几十兆搬运。
+   */
+  async copyAttachmentInto(input: { sourceAttachmentId: string; parentSessionId: string;
+    childSessionId: string; childMessageId: string; childAttachmentId: string }): Promise<boolean> {
+    const inserted = await sql<{ id: string }>`insert into assist_message_attachments (
+        id, workspace_id, session_id, message_id, name, media_type, byte_length,
+        content_hash, content, created_at)
+      select ${input.childAttachmentId}, a.workspace_id, ${input.childSessionId},
+        ${input.childMessageId}, a.name, a.media_type, a.byte_length, a.content_hash,
+        a.content, a.created_at
+      from assist_message_attachments a
+      where a.id = ${input.sourceAttachmentId} and a.session_id = ${input.parentSessionId}
+      returning id`.execute(this.db);
+    return inserted.rows.length === 1;
   }
 
   /** 导航只读投影：目标经项目关联，目录来自会话绑定；二者不是彼此的归属边界。 */
@@ -113,6 +242,116 @@ export class AssistRepository {
       select 1 from assist_messages where session_id = ${sessionId}
       and status in ('PENDING', 'RUNNING')) as present`.execute(this.db);
     return rows.rows[0]?.present === true;
+  }
+
+  /**
+   * 物理删除的阻断面（ADR-027）：这条会话的账本里有没有被别的对象引用的来源消息。
+   *
+   * 只读，先于任何 DELETE 执行；命中任意一项，删除命令整条拒绝。理由不是保守，而是
+   * 这些行各自有保留 Owner：Task 验收观察属于任务、假设与工作片段属于项目、组合检查
+   * 绑定 Task、学习记录有自己的删除入口、执行请求是「任务从哪条消息来」的来源、
+   * 未到期的供应商冷却属于平台调用安全。删会话不能让它们一并消失。
+   *
+   * 分叉子会话单独算一类：外键是 NO ACTION，父行删掉后子会话的 `forked_from_session_id`
+   * 会永久悬空；不把来源说明改成 NULL，因为那等于替子会话改历史。
+   */
+  async listDeleteBlockers(sessionId: string): Promise<readonly SessionDeleteBlockerReason[]> {
+    const result = await sql<{ reason: SessionDeleteBlockerReason }>`
+      select reason from (
+      select 1 as ordinal, 'FORK_CHILDREN' as reason where exists (
+        select 1 from assist_sessions where forked_from_session_id = ${sessionId})
+      union all
+      select 2, 'TASK_ACCEPTANCE_CITED' where exists (
+        select 1 from task_acceptance_trial_observations o
+        join assist_messages m on m.id = o.source_message_id
+        where m.session_id = ${sessionId})
+      union all
+      select 3, 'HYPOTHESIS_CITED' where exists (
+        select 1 from hypothesis_versions h
+        join assist_messages m on m.id = h.source_message_id
+        where m.session_id = ${sessionId})
+      union all
+      select 4, 'WORK_SEGMENT_CITED' where exists (
+        select 1 from work_segments w
+        join assist_messages m on m.id = w.source_message_id
+        where m.session_id = ${sessionId})
+      union all
+      select 5, 'BLUEPRINT_CITED' where exists (
+        select 1 from project_blueprint_proposals b
+        join assist_messages m on m.id = b.skill_message_id
+        where m.session_id = ${sessionId})
+      union all
+      select 6, 'EXECUTION_REQUESTS' where exists (
+        select 1 from conversation_execution_requests where session_id = ${sessionId})
+      union all
+      select 7, 'LEARNING_RECORDS' where exists (
+        select 1 from learning_evidence where session_id = ${sessionId})
+      union all
+      select 8, 'ARTIFACT_IMPACT_COMMITTED' where exists (
+        select 1 from artifact_combination_checks c
+        join artifact_impact_candidate_groups g on g.id = c.group_id
+        join artifact_impact_checks k on k.id = g.impact_check_id
+        where k.assist_session_id = ${sessionId})
+      union all
+      select 9, 'PROVIDER_COOLDOWN_ACTIVE' where exists (
+        select 1 from model_provider_cooldowns c
+        join model_calls mc on mc.id = c.model_call_id
+        join assist_messages m on m.id = mc.assist_message_id
+        where m.session_id = ${sessionId} and c.retry_after_at > now())
+      union all
+      select 10, 'LEARNING_RECORDS' where exists (
+        select 1 from learning_rounds where session_id = ${sessionId})
+      union all
+      select 11, 'LEARNING_RECORDS' where exists (
+        select 1 from learning_session_controls where session_id = ${sessionId})
+      ) blockers order by ordinal`.execute(this.db);
+    return [...new Set(result.rows.map((row) => row.reason))];
+  }
+
+  /**
+   * 物理删除一条会话的自有账本（ADR-027）。调用方已持行锁、核对过修订、确认无阻断项，
+   * 且在同一短事务里跑完——这里不再重复判定，只按「子 → 父」顺序删。
+   *
+   * 顺序是显式的而不是 `ON DELETE CASCADE`：删错一层会当场撞外键失败并整条回滚，
+   * 不会让数据库按自己的级联规则决定哪些行该消失。`conversation_diff_baselines.session_id`
+   * 是普通列（0097 没有外键），必须单独删，否则留下悬空账本。
+   *
+   * 删的是**会话自有**的账本：消息、提案、附件、预览、工具调用、模型选择、状态维护请求、
+   * 未进入组合检查的影响检查、辅助模型调用计量、已到期冷却与 diff 基线。学习记录、
+   * 执行请求与跨对象来源在阻断层就已拒绝，不会走到这里。
+   */
+  async deleteSession(sessionId: string, expectedRevision: bigint):
+  Promise<{ readonly messages: number; readonly attachments: number } | undefined> {
+    const attachments = await sql<{ id: string }>`delete from assist_message_attachments
+      where session_id = ${sessionId} returning id`.execute(this.db);
+    await sql`delete from assist_message_previews where message_id in (
+      select id from assist_messages where session_id = ${sessionId})`.execute(this.db);
+    await sql`delete from session_tool_calls where session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from assist_proposals where session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from artifact_impact_candidate_group_items where group_id in (
+      select g.id from artifact_impact_candidate_groups g
+      join artifact_impact_checks k on k.id = g.impact_check_id
+      where k.assist_session_id = ${sessionId})`.execute(this.db);
+    await sql`delete from artifact_impact_candidate_groups where impact_check_id in (
+      select id from artifact_impact_checks where assist_session_id = ${sessionId})`.execute(this.db);
+    await sql`delete from artifact_impact_candidates where assist_session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from artifact_impact_checks where assist_session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from conversation_state_changes where request_id in (
+      select id from conversation_state_requests where session_id = ${sessionId})`.execute(this.db);
+    await sql`delete from conversation_state_requests where session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from model_provider_cooldowns where model_call_id in (
+      select mc.id from model_calls mc join assist_messages m on m.id = mc.assist_message_id
+      where m.session_id = ${sessionId})`.execute(this.db);
+    await sql`delete from model_calls where assist_message_id in (
+      select id from assist_messages where session_id = ${sessionId})`.execute(this.db);
+    await sql`delete from conversation_diff_baselines where session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from session_model_selection where session_id = ${sessionId}`.execute(this.db);
+    const messages = await sql<{ id: string }>`delete from assist_messages
+      where session_id = ${sessionId} returning id`.execute(this.db);
+    const session = await sql<{ id: string }>`delete from assist_sessions
+      where id = ${sessionId} and revision = ${expectedRevision} returning id`.execute(this.db);
+    if (session.rows.length === 0) return undefined;
+    return { messages: messages.rows.length, attachments: attachments.rows.length };
   }
 
   /** 绑定只改归属，不碰 task_id：会话仍可讨论，但执行准入另由目录决定。 */
@@ -170,6 +409,8 @@ export class AssistRepository {
         JSON.stringify(input.modelSelectionSnapshot)}::jsonb,
       ${input.modelAttemptState === undefined || input.modelAttemptState === null ? null :
         JSON.stringify(input.modelAttemptState)}::jsonb)`.execute(this.db);
+    // 0111：消息落库即活动，用户消息与预插的 ASSISTANT 行都推进同一个排序键。
+    await this.touchLastMessage(input.sessionId);
   }
 
   async readMessage(id: string, lock: boolean | 'share' = false): Promise<AssistMessageRow | undefined> {
@@ -256,6 +497,10 @@ export class AssistRepository {
    * 消息命令事务内绑定：`where message_id is null` 是唯一的绑定入口，兜底并发重复
    * 绑定；返回实际绑定数，不足即有 id 查无或已被占用，由调用方按 RESOURCE_NOT_FOUND
    * 拒绝整条命令。附件行不可变：没有任何路径改写媒体类型或内容。
+   *
+   * `returning id` 不是装饰：没有它时驱动只回「命令完成」，`rows` 恒为空，
+   * 绑定数永远是 0——2026-10-18 的真实 PG 用例就是这样暴露的（`affected` 被读成 0，
+   * 每条带图消息都按「附件在作用域内不可见」拒绝）。
    */
   async bindAttachments(sessionId: string, messageId: string,
     ids: readonly string[]): Promise<number> {
@@ -263,7 +508,8 @@ export class AssistRepository {
     return (await sql<{ id: string }>`update assist_message_attachments
       set message_id = ${messageId}
       where session_id = ${sessionId} and message_id is null
-        and id in (${sql.join(ids)})`.execute(this.db)).rows.length;
+        and id in (${sql.join(ids)})
+      returning id`.execute(this.db)).rows.length;
   }
 
   /** 组装与投影读取：按消息取附件（含内容字节，多模态组装与回放都要用）。 */
@@ -282,9 +528,32 @@ export class AssistRepository {
       .execute(this.db)).rows;
   }
 
+  /**
+   * 0093：消息列表投影用的**元数据**读取——刻意不选 `content`。
+   * 列表是每轮都要读的只读投影，把 bytea 带进去会让一次列表读取变成几 MB；
+   * 内容只在 `readAssistMessageAttachment` 里按单张读取。
+   */
+  async listAttachmentMetaByMessages(sessionId: string, messageIds: readonly string[]):
+  Promise<readonly AssistMessageAttachmentMetaRow[]> {
+    if (messageIds.length === 0) return [];
+    return (await sql<AssistMessageAttachmentMetaRow>`select id, message_id, name,
+      media_type, byte_length from assist_message_attachments
+      where session_id = ${sessionId} and message_id in (${sql.join(messageIds)})
+      order by created_at, id`.execute(this.db)).rows;
+  }
+
   async readLivePreview(messageId: string): Promise<AssistMessagePreviewRow | undefined> {
     return (await sql<AssistMessagePreviewRow>`select * from assist_message_previews
       where message_id = ${messageId}`.execute(this.db)).rows[0];
+  }
+
+  /** SSE 节流信号（preview-events-api）：只取 revision 与截断标志；授权与内容都在 readAssistLivePreview。 */
+  async readLivePreviewFinger(messageId: string): Promise<{
+    revision: bigint; truncated: boolean;
+  } | undefined> {
+    return (await sql<{ revision: bigint; truncated: boolean }>`select revision, truncated
+      from assist_message_previews where message_id = ${messageId}`
+      .execute(this.db)).rows[0];
   }
 
   /** Only the current generation owner can replace its bounded temporary prefix. */
@@ -368,7 +637,7 @@ export class AssistRepository {
       sql`, sources = ${JSON.stringify(input.finalSources)}::jsonb`;
     const skillOutput = input.skillOutput === undefined ? sql`` :
       sql`, skill_output = ${JSON.stringify(input.skillOutput)}::jsonb`;
-    const updated = (await sql<{ id: string }>`update assist_messages set status = ${input.status},
+    const settled = (await sql<{ session_id: string }>`update assist_messages set status = ${input.status},
       content = ${input.content}, error_code = ${input.errorCode},
       provider_error_kind = ${input.providerErrorKind ?? null},
       provider_request_id = ${input.providerRequestId},
@@ -378,12 +647,14 @@ export class AssistRepository {
       usage_cache_creation_tokens = ${input.usageCacheCreationTokens ?? null},
       worker_id = ${input.workerId}, updated_at = now()${sources}${skillOutput}
       where id = ${input.messageId} and status = 'RUNNING' and worker_id = ${input.workerId}
-      returning id`.execute(this.db)).rows.length > 0;
-    if (updated) {
+      returning session_id`.execute(this.db)).rows[0];
+    if (settled !== undefined) {
       await sql`delete from assist_message_previews where message_id = ${input.messageId}`
         .execute(this.db);
+      // 0111：AI 说完（含失败与取消）算一次活动；迟到的旧 Worker 结算失败不推进排序键。
+      await this.touchLastMessage(settled.session_id);
     }
-    return updated;
+    return settled !== undefined;
   }
 
   /** 生成期间的心跳：RUNNING 行持续续租，崩溃后由租约清扫收敛（LEASE_LOST 不会误伤活 Worker）。 */

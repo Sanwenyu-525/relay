@@ -33,7 +33,7 @@ function task() {
 function session(kind: "PROJECT" | "TASK") {
   return { id: sessionId, workspace_id: workspaceId, project_id: projectId,
     task_id: kind === "TASK" ? taskId : null, title: "会话", status: "ACTIVE", revision: "1",
-    updated_at: "2026-09-26T00:00:00Z" };
+    created_at: "2026-09-26T00:00:00Z", updated_at: "2026-09-26T00:00:00Z" };
 }
 function message(id: string, role: "USER" | "ASSISTANT", content: string | null,
   extra: Record<string, unknown> = {}) {
@@ -112,7 +112,13 @@ describe("M04 第一方 Skill 与 Pack", () => {
       throw new Error(`unexpected request ${path}`);
     }));
     const view = await mountWorkbench(`/tasks/${taskId}?skill=assist`);
-    expect(view.wrapper.get('[data-testid="assist-skill"]').text()).not.toContain("project-resume");
+    /* 2026-10-18：清单按「需要的上下文」判定，不再按会话目标的 kind 过滤。这条会话挂在任务上
+       且任务有 project_id，因此 PROJECT 类 project-resume 在服务端本就可调用——旧实现把它从
+       选项里删掉，让用户以为不存在；现在如实列出且可选。 */
+    const resume = view.wrapper.get('[data-testid="assist-skill"] option[value="project-resume@1.0.0"]');
+    expect(resume.attributes("disabled")).toBeUndefined();
+    expect(resume.text()).toContain("只读");
+    // 缺能力的那一项仍然不可选，理由不变。
     expect(view.wrapper.get('[data-testid="assist-skill"] option[value="verification-plan@1.0.0"]').attributes("disabled")).toBe("");
     await view.wrapper.get('[data-testid="assist-skill"]').setValue("task-to-execution-contract@1.0.0");
     await view.wrapper.get('[data-testid="assist-skill-input"]').setValue("完成说明");

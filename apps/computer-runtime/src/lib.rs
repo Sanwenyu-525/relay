@@ -125,6 +125,14 @@ fn dispatch(request: &ComputerRequest, mock: bool) -> Result<Value, ComputerErro
             let info = window::activate_window(&window_id)?;
             Ok(window_value(&info))
         }
+        "computer.move" => {
+            let point = point_param(params)?;
+            if mock {
+                return mock::mock_move(params);
+            }
+            input::move_mouse(point)?;
+            Ok(json!({ "moved": true, "x": point.x, "y": point.y }))
+        }
         "computer.click" => {
             let point = point_param(params)?;
             let button = match string_opt(params, "button")?.as_deref() {
@@ -153,11 +161,27 @@ fn dispatch(request: &ComputerRequest, mock: bool) -> Result<Value, ComputerErro
         }
         "computer.scroll" => {
             let (dx, dy) = scroll_params(params)?;
+            // 整格换算：请求值与实际滚动量可能不同（不足一格的量系统会忽略）。
+            // 结果里报**实际**位移，并在两者不同时把请求值一并写出来，避免模型
+            // 以为「我让它滚了 200 像素」而实际上只滚了一格。
+            let applied_x = input::wheel_notches(dx) * input::WHEEL_NOTCH;
+            let applied_y = input::wheel_notches(dy) * input::WHEEL_NOTCH;
+            if (dx != 0 && applied_x == 0) || (dy != 0 && applied_y == 0) {
+                return Err(protocol::invalid_request(format!(
+                    "scroll deltas must be whole wheel notches ({} px); got delta_x={dx}, delta_y={dy}",
+                    input::WHEEL_NOTCH
+                )));
+            }
             if mock {
-                return mock::mock_scroll(params);
+                return mock::mock_scroll(applied_x, applied_y, dx, dy);
             }
             input::scroll(dx, dy)?;
-            Ok(json!({ "scrolled": true, "delta_x": dx, "delta_y": dy }))
+            let mut out = json!({ "scrolled": true, "delta_x": applied_x, "delta_y": applied_y });
+            if applied_x != dx || applied_y != dy {
+                out["requested_delta_x"] = json!(dx);
+                out["requested_delta_y"] = json!(dy);
+            }
+            Ok(out)
         }
         "computer.drag" => {
             let start = point_at(params, "start")?;

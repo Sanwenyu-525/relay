@@ -246,6 +246,8 @@ Windows 受管内容的物理发布由既有原生文件助手持共享锁并执
 
 二轮确认：N04 的容量是本段计划窗口，预计执行/等待/审阅与人工投入分别表达，不自动授予执行权或设定 N06 授权有效期；关键估时未知先形成有界诊断候选，完成诊断不等于完成原修复 Task。N05 保存用户确认的同一实际提醒时刻及原设置时区；显示/设备时区变化不能写提醒配置或变更发生身份，显式时间编辑与触发须按版本串行裁决，原待处理事实保留。物理字段与具体接口在实施前核定。
 
+2026-10-18 N08 定时启动：`ScheduledTask` 归 Personal Planning，只拥有任务模板、重复规则、下次触发时刻、授权参数与触发发生记录；**不拥有 Task 状态、Run 生命周期、验收或执行权**。每次触发新建一个 Task（Task 终态不可复活，故周期只能表现为「每次新建」），再经原 `CreateTask` / `MarkTaskReady` / `DelegateTask` 准入。触发只按创建时已持久化的显式授权（`max_runs`、`authorization_expires_at` ≤ 90 天）执行，不授予新权限；`delegateTask` 在原命令事务内核对计划状态、代次、有效期、预算预留与上一轮 Task 终态，未通过即拒绝且效果不落库。因此「触发不写 Task」的 N05 口径对**提醒**继续成立，对**定时任务**由本条替代——两者不是同一事实，不能互相借用。准入以 Task 终态而非 Run 活跃为准：Run 完成后 Task 停在 WAITING 等人工验收，此时本轮跳过，不自动代答。错过不自动执行，只形成待处理。取舍与代价见 [ADR-026](../decisions/ADR-026-scheduled-task-autostart.md)，协议归 HTTP §10.92、数据库 §102。
+
 连续委托在应用用例内原子检查授权有效性、Task revision、资格和预算预留，再调用原 Delegate 与命令入口。不得依赖“先查还有预算、事务外再创建 Run”；跨 Worker 预算需要持久原子预留，单进程计数不算全局限制。用量未知的预留不能静默释放。具体锁顺序需与现有 authority、Task/Run、资源锁核对并以真实 PG 验证。
 
 2026-10-02 已确认的 N06 首片以任务数、模型调用次数和授权有效期限制新准入；用量未知保留预留并阻止后续准入，金额只有可信依据时才展示。一次明确执行请求可覆盖选定任务集合，当前 Task 仍须经原验证、必要人工判断和完成用例后才准入下一项。产品规则确认不代表预算存储、锁序或恢复协议已实现。
@@ -282,7 +284,7 @@ React、Tauri、Node、Fastify、Kysely/PostgreSQL 与 LangGraph 的技术职责
 |---|---|
 | Workspace | 沿用数据库作用域与配置边界，文件夹不是新租户/数据库 Workspace |
 | Project 与 ManagedResource | Application 协调找到或建立最小关联；Project Owner 管理项目，Resource Coordination 管理目录身份及冲突 |
-| Assist 会话/消息 | 可先不绑定 Task；保存原用户请求与有版本的来源，关联实际执行任务；不能拥有项目自主写权 |
+| Assist 会话/消息 | 可先不绑定 Task；保存原用户请求与有版本的来源，关联实际执行任务；不能拥有项目自主写权。会话可被软归档（有反向命令、可撤销），也可由用户显式物理删除（不可撤销、无恢复语义，[ADR-027](../decisions/ADR-027-session-physical-delete.md)）；删除只覆盖会话自有账本，被其它对象引用时拒绝 |
 | 请求解释与执行准备 | Application 组合入口复用现有 Assist/模型端口整理候选；保存原消息身份、内容基准、范围及命令来源，由确定性规则验证后分发固定领域命令 |
 | Task / Workflow | 原 Owner 创建任务、冻结执行契约、Delegate、推进 Run、控制及恢复；不新增聊天专属执行权/第二状态机 |
 | Permission / Gateway | 每次动作准入核对当前权限、资源和审批；明确用户请求不替代具体动作批准 |
@@ -303,6 +305,16 @@ CreateAssistSession 当前源码允许 projectId/taskId 为空，这只是可复
 首条发送串起会话创建与消息发送；目录关联、解释保存、任务准备、Delegate 分别有稳定幂等身份并关联一次用户意图。结果未明时查原回执；一次已启动的请求不能因换页面、新会话、同文重试或模型重复结果而创建第二 Task/Run。用户后来有意发出的新请求使用新意图身份，不用文本相同与否代替幂等判断。确切字段/键和唯一约束在实施时设计并以真实 PG 验证。
 
 纯讨论没有 Task/Run 写执行。需要项目工具执行时必须落到唯一 Project 和受管目录。执行来源是用户明确请求及有效约束，模型只做解释，不能用输出或网页/文件内容替代授权；请求整理不扩张为通用 Planner、意图 DSL 或自主循环。活跃 Run 的新范围按原安全停止/重新委托路径处理，未处理在途动作前不授予冲突执行权。
+
+#### 12.2.1 本地目录访问设置的应用责任（2026-10-18，已实施）
+
+产品规则唯一归[工作台 §18.1.4](../frontend/workbench-design.md#1814-本地目录权限设置2026-10-18已确认已实施)。主动选目录表达对该根基础读取的授权，写档位表达本目录的写准入方式；Application 协调原受管资源、连接/策略 Owner 与命令回执，不由 UI、模型或 Adapter 直接写配置。权限仍只有原 Gateway 一套准入事实，不新增独立的“目录允许列表”作为旁路。
+
+目录身份/物理检查放在短事务之外，提交时重查权威版本与根身份；目录关联、应用管理配置及设置回执须一致保存。优先复用现有事务内领域/仓储能力；若原命令只能分阶段提交，就保留固定阶段身份、已提交结果和可恢复状态，不能把多个 HTTP/磁盘动作说成原子。并发选择与改档按 workspace/project/resource 的既有锁序和 revision 收敛到一份有效结果，确需 schema 约束时再关联追加 migration。
+
+应用需识别本入口管理的条目及撤销/停用历史，避免补默认配置时绕过用户限制。就绪投影、会话读取连接选择、Run 信封准备和 Gateway 都按当前目录真实边界匹配，不能任取同项目的首个能力连接。旧手工设置与在途 Run/Operation/Review 不迁移执行身份；已有 Run 的配置/策略变更继续按原版本复查和安全停止/UNKNOWN 规则处理。GET、恢复旧会话或模型输出不触发权限重建，读权限设置也不发起模型调用。
+
+**当前实现**：`OpenWorkingDirectory` 在用户主动成功打开目录时调用 `ensureLocalDirectoryReadAccess`，为该根建立或复用默认只读的本地访问记录及基础文件读取配置；没有活动匹配项时，还按 Workspace/Project/能力/动作与根覆盖范围读取既有策略版本历史，避免默认 AUTO 重建已撤销的读取范围。后续明确活动授权可复用，不相关目录不受历史记录阻止；查询和恢复旧会话不触发配置写入。`SetLocalDirectoryWriteTier` 通过 `setLocalDirectoryWriteTier` 按 `expected_revision` 更新档位，并记录由本入口管理的连接/策略身份。命令在首次执行前核对真实根；已有回执的重放仍校验命令作用域和完整载荷，但不再依赖当前磁盘根。迁移 `0109_local_directory_access.sql` 保存这些管理元数据，不创建第二套准入事实；迁移 `0112_local_directory_full_access.sql` 只放宽该表的档位 CHECK 以加入 `FULL`（物理边界见[物理设计 §101](../database/physical-design-postgresql.md#101-0112-本地目录完全访问档位2026-10-18-源码实现)）。`FULL` 不引入第四种 Gateway 判定——它与 `AUTO` 落同一条策略行，差别只在档位这一列，因此实际准入必须按资源回读该列，prepare 与 dispatch 各读一次同一个函数；这一列仍不是准入事实本身，显式 DENY、上层受管根与目录根边界都优先于它。就绪投影、会话读取连接选择、Run 信封准备和 Gateway 均按当前目录根匹配，显式拒绝、停用、上层限制和 UNKNOWN 仍由原 Gateway/Run 规则约束。API 与物理结构见[HTTP 契约 §10.86](../api/http-command-contract.md#1086-目录写入档位投影与只读查询2026-10-17-源码实现)及[物理设计 §98](../database/physical-design-postgresql.md#98-0109-本地目录访问档位元数据2026-10-18-源码实现)。运行结果和未验边界只记在[统一验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
 
 ### 12.3 持久化、恢复与接口
 
@@ -343,17 +355,17 @@ UI 从持久事实恢复准备阶段、原消息/命令/会话/任务/Run 关系
 
 ### 12.6 普通 Agent 主流程的应用边界
 
-2026-10-15 设计确认。**会话读取部分已实施（阶段 A/B，见[运行架构 §2.7.1](runtime-context.md#271-主流程的最小持久协议2026-10-15-实施前核对结果)）；业务动作接续（阶段 C）与前端切换（阶段 D）尚未实现，因此「普通消息只有一条推进链」还不是当前运行事实。** 产品规则归[总纲 §0.5.1](../../Personal_Workflow_OS_Master_Spec.md#051-普通-agent-的连续工具主流程2026-10-15已确认待重构)，取舍归[ADR-022](../decisions/ADR-022-agent-conversation-main-loop.md)。§12.4–12.5 的已有请求和状态维护事实保留，以下替代的是普通消息固定并行解释的编排方式。
+2026-10-18 实施状态：会话读取、执行候选、READY 明确请求沿原 request_id 自动应用、原用户消息下的 Run 摘要投影与会话内 Run 排他均已接入。状态维护仍沿独立既有请求 Owner，故本节不宣称所有状态维护分支已合并为同一条推进链。产品规则归[总纲 §0.5.1](../../Personal_Workflow_OS_Master_Spec.md#051-普通-agent-的连续工具主流程2026-10-15已确认待重构)，取舍归[ADR-022](../decisions/ADR-022-agent-conversation-main-loop.md)，运行证据与未验范围归统一功能验收表。
 
 | 对象与入口 | 唯一责任及边界 |
 |---|---|
-| 原消息与工作轮次 | Assist/Application 保存原用户消息、当前作用域依据与工具/命令/结果关联，协调一个逻辑推进和回复 Owner；UI 不独立发起三套模型处理或自动提交业务变更。**当前：读取轮次、执行候选与状态维护候选都由 `assist_messages` 的既有领取/租约/CAS 驱动并经原入口落进原请求行；前端仍发起旧执行解释与状态维护解释命令（阶段 D 未迁移其规格反例）** |
+| 原消息与工作轮次 | Assist/Application 保存原用户消息、当前作用域依据与工具/命令/结果关联，协调一个逻辑推进和回复 Owner；UI 不独立发起三套模型处理或自动提交业务变更。**当前：读取轮次与执行候选由 `assist_messages` 的既有领取/租约/CAS 驱动并经原入口落进原请求行；READY 的明确请求沿原 `request_id` 自动 Apply，Run 摘要按原身份回到原用户消息。状态维护候选仍走既有独立请求 Owner。** |
 | 纯会话读取 | 复用已有会话只读轮次、消息领取/租约/CAS 和 Gateway，保存工具事实，不创建占位 Task/Run、写范围授权或完成凭据；适配普通 AGENT 的合法来源身份，不冒充 ASSISTANT 人设或 RUN。**当前：已实现，来源 `AGENT_SESSION_READ`，目录取自 `assist_sessions.working_resource_id`** |
-| 执行候选（阶段 C 第一段） | 主流程收尾那一次模型输出同时给出回复与可选类型化候选；候选经既有 `validateConversationCandidate()` 判定后由 `recordConversationExecutionCandidate()` 落进**原** `conversation_execution_requests` 行，`source_message_id` 指回那条原用户消息，阶段命令身份仍在创建时固定。**本段不自动应用**：建 Task/Run 仍由原 Owner 在用户动作后推进 |
+| 执行候选（阶段 C 第一段） | 主流程收尾那一次模型输出同时给出回复与可选类型化候选；候选经既有 `validateConversationCandidate()` 判定后由 `recordConversationExecutionCandidate()` 落进**原** `conversation_execution_requests` 行，`source_message_id` 指回那条原用户消息，阶段命令身份仍在创建时固定。**当前：READY 且由原用户明确请求的 PREPARE 候选投影 `auto_start=true`，Workbench 沿原 `request_id` 自动应用；Apply 读回同步刷新挂在原消息下的 Run 轨迹摘要。** 这只推进原 Task/Run，不授予文件权限；真实副作用仍受 Gateway、任务范围及 DELETE Review 控制。 |
 | 状态维护（阶段 C 第二段） | 同一信封的 `maintenance` 字段形状与旧解释入口输出**完全相同**，合法性只由既有 `validateStateMaintenanceCandidate()` 判定；`recordStateMaintenanceCandidate()` 复用原 `claimStateMaintenanceRequest()` 与 `settleStateInterpretation()`，因此基线、幂等、必要决定、独立条目、部分成功与整组撤回都只有一份实现。基线在**模型请求之前**冻结（`freezeStateInterpretationBaseline()`），模型在途期间的人工修改不会被吸收 |
 | 文件修改与检查 | 主流程通过现有任务准备、READY、Delegate 进入 Workflow 拥有的 Run；冻结确切范围、方法和检查，写入与 CLI 仍走 Gateway，不给会话读取来源添加写能力 |
 | 项目状态维护 | Agent 提出类型化请求，Application 按原消息授权、目标/版本/基线和必要决定校验后调用对象原 Owner；复用原变更组、回执、撤回预检与恢复，不把模型输出直接当写入 |
-| 回复与结果投影 | 由上述持久事实投影到原消息/会话；Run 接续后继续引用原 Task/Run 的结果，不另存可独立修改的执行状态或用聊天 COMPLETED 代替业务完成 |
+| 回复与结果投影 | 由上述持久事实投影到原消息/会话；Run 接续后继续引用原 Task/Run 的结果，不另存可独立修改的执行状态或用聊天 COMPLETED 代替业务完成。**当前：Apply 后原用户消息可读到对应 Run 摘要；完整运行详情仍由原 Task/Run Owner 提供。** |
 | 会话内 Run 排他（阶段 C 第三段） | 同一 `assist_sessions` 上**不并行推进两条执行链**：`applyConversationExecution` 建 Task 之前先按 `findLiveRunForSession()` 问「这条会话上是否已有别的请求到了 DELEGATED、且那个 Run 还没收口」，有则按类型化 `EXECUTOR_CONFLICT` 拒绝并指回原 Run。此时推进责任在 Run 一侧，消息侧另建 Task/Run 就是「聊天和后台各自规划出同一套工作」。守卫放在建 Task 之前，拒绝时不留半个 Task、原链不动；活动状态集与 `findLiveRunForTask()` 逐字一致，原 Run 收口后同一会话可再发起执行 |
 
 **事务与权限。** 服务端从合法会话关联核对唯一 Project/ManagedResource、当前目录及连接；上下文与工具可见性不替代动作准入。模型、文件、网络与等待在短事务外；原用户消息、准备/委托命令、动作与结果关联按既有入口提交。状态变更工具只暴露已有的有限用例，不创建任意命令/SQL/通用写对象工具；缺失 Owner 的能力仍待实现，不因统一主流程开放。

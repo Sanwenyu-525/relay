@@ -1,0 +1,561 @@
+import { randomUUID } from 'node:crypto';
+import type { DbExecutor } from '../infrastructure/database.js';
+import type { JsonObject } from '../infrastructure/json.js';
+import type { ScheduledTaskOccurrenceRow, ScheduledTaskRow, ScheduledTaskStatus } from '../planning/scheduled-task-repository.js';
+import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
+import { runIdempotentCommand } from './command.js';
+import { DomainError, invalidTransition, resourceNotFound, revisionConflict, validationFailed } from './domain-error.js';
+import { checkDeclaredOutputs } from './declared-output-requirements.js';
+import { lockWritableProjectInWorkspace, readProjectInWorkspace, requireWorkspace } from './guards.js';
+import { readAdmission } from './maintenance-admission.js';
+import { prepareTaskCreation, createTask, type CreateTaskCriterionInput } from './create-task.js';
+import { delegateTask } from './delegate-task.js';
+import { requireRevision } from './revisions.js';
+import { markTaskReady } from './task-commands.js';
+import { freezeTaskChainExecution, taskChainDelegateExecution, type TaskChainExecutionInput } from './task-chain-execution.js';
+import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
+import { advanceDueAt, isValidTimezone, localDateAt, parseLocalDate, parseLocalTime, resolveLocalDateTime, type RepeatRule } from './zoned-time.js';
+
+type Scope = { workspaceId: string; commandId: string };
+
+/** 授权上限：与 ADR-026 一致，最长 90 天。 */
+const MAX_AUTHORIZATION_DAYS = 90;
+const MAX_RUNS = 100;
+
+export interface ScheduledTaskTemplateInput {
+  readonly task_title: string;
+  readonly objective: string;
+  readonly criteria: readonly CreateTaskCriterionInput[];
+  readonly expected_outputs: JsonObject;
+  readonly mode: string;
+}
+
+const result = (row: ScheduledTaskRow) => ({
+  scheduled_task_id: row.id,
+  project_id: row.project_id,
+  status: row.status,
+  revision: row.revision.toString(),
+  schedule_generation: row.schedule_generation.toString(),
+  next_due_at: row.status === 'ENABLED' ? row.next_due_at.toISOString() : null,
+});
+
+export function requireText(value: string, field: string, max = 200): string {
+  if (!value.trim() || value.length > max) throw validationFailed([{ field, message: `需要 1–${max} 字。` }]);
+  return value.trim();
+}
+
+export function requireRule(value: RepeatRule): RepeatRule {
+  if (value.kind === 'DAILY') {
+    if (!Number.isInteger(value.interval_days) || value.interval_days < 1 || value.interval_days > 30) {
+      throw validationFailed([{ field: 'repeat_rule', message: '按天重复需要 1–30 天的间隔。' }]);
+    }
+    return { kind: 'DAILY', interval_days: value.interval_days };
+  }
+  const weekdays = [...new Set(value.weekdays)].sort((a, b) => a - b);
+  if (weekdays.length === 0 || weekdays.some((day) => !Number.isInteger(day) || day < 1 || day > 7)) {
+    throw validationFailed([{ field: 'repeat_rule', message: '按周重复需要 1–7 之间的星期几。' }]);
+  }
+  return { kind: 'WEEKLY', weekdays };
+}
+
+export function requireTimezone(value: string): string {
+  if (!isValidTimezone(value)) throw validationFailed([{ field: 'timezone', message: '需要有效时区名称。' }]);
+  return value;
+}
+
+export function requireLocalTime(value: string): string {
+  try {
+    parseLocalTime(value);
+  } catch {
+    throw validationFailed([{ field: 'local_time', message: '需要 HH:MM 形式的本地时刻。' }]);
+  }
+  return value;
+}
+
+export function requireLocalDate(value: string): { year: number; month: number; day: number } {
+  try {
+    return parseLocalDate(value);
+  } catch {
+    throw validationFailed([{ field: 'first_local_date', message: '需要 YYYY-MM-DD 形式且真实存在的日期。' }]);
+  }
+}
+
+export function requireMaxRuns(value: number): number {
+  if (!Number.isInteger(value) || value < 1 || value > MAX_RUNS) {
+    throw validationFailed([{ field: 'max_runs', message: `执行次数上限需要 1–${MAX_RUNS}。` }]);
+  }
+  return value;
+}
+
+export function requireExpiry(value: string): Date {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/u.test(value) || !Number.isFinite(Date.parse(value))) {
+    throw validationFailed([{ field: 'authorization_expires_at', message: '需要明确 Z 或偏移量的实际时刻。' }]);
+  }
+  return new Date(value);
+}
+
+/** 模板在创建时就按 CreateTask 的口径校验，避免等到首次触发才 422。 */
+function requireTemplate(input: ScheduledTaskTemplateInput, workspaceId: string, projectId: string, commandId: string): JsonObject {
+  const prepared = prepareTaskCreation({
+    workspaceId,
+    commandId,
+    projectId,
+    title: input.task_title,
+    objective: input.objective,
+    criteria: input.criteria,
+    expectedOutputs: input.expected_outputs,
+    mode: input.mode,
+  });
+  const declared = checkDeclaredOutputs({ requiredOutputSpec: input.expected_outputs });
+  if (declared.status !== 'SATISFIED') {
+    throw validationFailed([{ field: 'template.expected_outputs', message: '声明的产物要求当前无法判定。' }]);
+  }
+  return {
+    task_title: prepared.title,
+    objective: prepared.objective,
+    criteria: prepared.criteria.map((criterion) => ({
+      criterion_id: criterion.criterionId,
+      statement: criterion.statement,
+      required: criterion.required,
+      method: criterion.method,
+      target_spec: criterion.targetSpec,
+    })),
+    expected_outputs: input.expected_outputs,
+    mode: prepared.mode,
+  };
+}
+
+async function authority(r: Repositories, workspaceId: string): Promise<void> {
+  if (await r.workspaces.lockAuthority(workspaceId, 'share') === undefined) throw resourceNotFound('Workspace');
+}
+
+async function audit(r: Repositories, input: Scope, row: ScheduledTaskRow, event: string): Promise<void> {
+  await r.activities.insertActivityRecord({
+    id: randomUUID(), workspaceId: input.workspaceId, projectId: row.project_id, taskId: null,
+    actorKind: 'HUMAN', actorRef: LOCAL_ACTOR_REF, commandId: input.commandId, eventType: event, factRefs: result(row),
+  });
+}
+
+function configEvent(row: ScheduledTaskRow, commandId: string, reason: string): JsonObject {
+  return {
+    title: row.title, repeat_rule: row.repeat_rule, timezone: row.timezone, local_time: row.local_time,
+    status: row.status, schedule_generation: row.schedule_generation.toString(), revision: row.revision.toString(),
+    next_due_at: row.next_due_at.toISOString(), command_id: commandId, reason,
+  };
+}
+
+export interface CreateScheduledTaskInput {
+  readonly projectId: string;
+  readonly title: string;
+  readonly template: ScheduledTaskTemplateInput;
+  readonly repeat: RepeatRule;
+  readonly timezone: string;
+  readonly localTime: string;
+  readonly firstLocalDate: string;
+  readonly maxRuns: number;
+  readonly authorizationExpiresAt: string;
+  readonly execution: TaskChainExecutionInput | undefined;
+  readonly confirmed: true;
+}
+
+export async function createScheduledTask(db: DbExecutor, input: Scope & CreateScheduledTaskInput) {
+  if (input.confirmed !== true) throw validationFailed([{ field: 'confirmed', message: '需要确认定时启动的实际时刻与授权。' }]);
+  const title = requireText(input.title, 'title');
+  const repeat = requireRule(input.repeat);
+  const timezone = requireTimezone(input.timezone);
+  const localTime = requireLocalTime(input.localTime);
+  const firstLocalDate = requireLocalDate(input.firstLocalDate);
+  const maxRuns = requireMaxRuns(input.maxRuns);
+  const expiresAt = requireExpiry(input.authorizationExpiresAt);
+  const template = requireTemplate(input.template, input.workspaceId, input.projectId, input.commandId);
+
+  return runIdempotentCommand(db, {
+    scopeKey: httpCommandScopeKey(input.workspaceId), commandId: input.commandId, commandType: 'CreateScheduledTask',
+    target: { project_id: input.projectId },
+    body: {
+      title, template, repeat_rule: repeat as unknown as JsonObject, timezone, local_time: localTime,
+      first_local_date: input.firstLocalDate, max_runs: maxRuns,
+      authorization_expires_at: expiresAt.toISOString(), confirmed: input.confirmed,
+      execution: input.execution === undefined ? null : JSON.parse(JSON.stringify(input.execution)) as JsonObject,
+    },
+    execute: async (r) => {
+      await authority(r, input.workspaceId);
+      await lockWritableProjectInWorkspace(r, input.workspaceId, input.projectId);
+      const now = await r.scheduledTasks.now();
+      const firstRunAt = resolveLocalDateTime(firstLocalDate, parseLocalTime(localTime), timezone);
+      if (firstRunAt <= now) throw validationFailed([{ field: 'first_local_date', message: '首次触发必须在未来。' }]);
+      const horizon = now.getTime() + MAX_AUTHORIZATION_DAYS * 86_400_000;
+      if (expiresAt <= now || expiresAt.getTime() > horizon) {
+        throw validationFailed([{ field: 'authorization_expires_at', message: `授权到期需在未来 ${MAX_AUTHORIZATION_DAYS} 天内。` }]);
+      }
+      const row = await r.scheduledTasks.insert({
+        id: randomUUID(), workspace_id: input.workspaceId, project_id: input.projectId, title,
+        template, repeat_rule: repeat as unknown as JsonObject, timezone, local_time: localTime,
+        first_run_at: firstRunAt, next_due_at: firstRunAt, max_runs: maxRuns, authorization_expires_at: expiresAt,
+        execution_input: input.execution === undefined ? {} : JSON.parse(JSON.stringify(input.execution)) as JsonObject,
+        history: [{
+          title, template, repeat_rule: repeat as unknown as JsonObject, timezone, local_time: localTime,
+          first_run_at: firstRunAt.toISOString(), next_due_at: firstRunAt.toISOString(), status: 'ENABLED',
+          schedule_generation: '1', revision: '1', max_runs: maxRuns, authorization_expires_at: expiresAt.toISOString(),
+          command_id: input.commandId, reason: '用户确认周期定时启动授权',
+        }],
+      });
+      await audit(r, input, row, 'SCHEDULED_TASK_CREATED');
+      return result(row);
+    },
+  });
+}
+
+export interface EditScheduledTaskInput {
+  readonly scheduledTaskId: string;
+  readonly expectedRevision: string;
+  readonly title: string;
+  readonly template: ScheduledTaskTemplateInput;
+  readonly repeat: RepeatRule;
+  readonly timezone: string;
+  readonly localTime: string;
+  readonly firstLocalDate: string;
+  readonly maxRuns: number;
+  readonly authorizationExpiresAt: string;
+  readonly execution: TaskChainExecutionInput | undefined;
+  readonly confirmed: true;
+  readonly reason: string;
+}
+
+export async function editScheduledTask(db: DbExecutor, input: Scope & EditScheduledTaskInput) {
+  if (input.confirmed !== true) throw validationFailed([{ field: 'confirmed', message: '需要确认修改后的实际时刻。' }]);
+  const title = requireText(input.title, 'title');
+  const repeat = requireRule(input.repeat);
+  const timezone = requireTimezone(input.timezone);
+  const localTime = requireLocalTime(input.localTime);
+  const firstLocalDate = requireLocalDate(input.firstLocalDate);
+  const maxRuns = requireMaxRuns(input.maxRuns);
+  const expiresAt = requireExpiry(input.authorizationExpiresAt);
+  const reason = requireText(input.reason, 'reason', 4000);
+
+  return runIdempotentCommand(db, {
+    scopeKey: httpCommandScopeKey(input.workspaceId), commandId: input.commandId, commandType: 'EditScheduledTask',
+    target: { scheduled_task_id: input.scheduledTaskId },
+    body: {
+      expected_revision: input.expectedRevision, title, repeat_rule: repeat as unknown as JsonObject, timezone,
+      local_time: localTime, first_local_date: input.firstLocalDate, max_runs: maxRuns,
+      authorization_expires_at: expiresAt.toISOString(), confirmed: input.confirmed, reason,
+      execution: input.execution === undefined ? null : JSON.parse(JSON.stringify(input.execution)) as JsonObject,
+    },
+    execute: async (r) => {
+      await authority(r, input.workspaceId);
+      const row = await r.scheduledTasks.read(input.scheduledTaskId, true);
+      if (row?.workspace_id !== input.workspaceId) throw resourceNotFound('ScheduledTask');
+      await lockWritableProjectInWorkspace(r, input.workspaceId, row.project_id);
+      if (row.revision !== requireRevision(input.expectedRevision, 'expected_revision')) {
+        throw revisionConflict({ entityType: 'SCHEDULED_TASK', expectedRevision: input.expectedRevision, actualRevision: row.revision.toString() });
+      }
+      if (row.status === 'EXPIRED') throw invalidTransition('已到期的定时任务请新建，或先延长授权有效期。');
+
+      const now = await r.scheduledTasks.now();
+      const horizon = now.getTime() + MAX_AUTHORIZATION_DAYS * 86_400_000;
+      if (expiresAt <= now || expiresAt.getTime() > horizon) {
+        throw validationFailed([{ field: 'authorization_expires_at', message: `授权到期需在未来 ${MAX_AUTHORIZATION_DAYS} 天内。` }]);
+      }
+      const firstRunAt = resolveLocalDateTime(firstLocalDate, parseLocalTime(localTime), timezone);
+      const template = requireTemplate(input.template, input.workspaceId, row.project_id, input.commandId);
+
+      // 只有影响排期的字段变化才提升代次：改标题或模板不该让已排定的发生作废。
+      const scheduleChanged = row.timezone !== timezone || row.local_time !== localTime
+        || JSON.stringify(row.repeat_rule) !== JSON.stringify(repeat)
+        || row.first_run_at.getTime() !== firstRunAt.getTime();
+      const nextDueAt = row.status === 'ENABLED'
+        ? advanceDueAt({ rule: repeat, timezone, localTime, now, anchor: firstRunAt })
+        : row.next_due_at;
+
+      const updated = await r.scheduledTasks.update({
+        ...row, title, template, repeat_rule: repeat as unknown as JsonObject, timezone, local_time: localTime,
+        first_run_at: firstRunAt, max_runs: maxRuns, authorization_expires_at: expiresAt,
+        execution_input: input.execution === undefined ? {} : JSON.parse(JSON.stringify(input.execution)) as JsonObject,
+        schedule_generation: scheduleChanged ? row.schedule_generation + 1n : row.schedule_generation,
+      }, nextDueAt, configEvent({
+        ...row, title, template, repeat_rule: repeat as unknown as JsonObject, timezone, local_time: localTime,
+        first_run_at: firstRunAt, max_runs: maxRuns, authorization_expires_at: expiresAt,
+        schedule_generation: scheduleChanged ? row.schedule_generation + 1n : row.schedule_generation,
+        revision: row.revision + 1n,
+      }, input.commandId, reason));
+      await audit(r, input, updated, 'SCHEDULED_TASK_EDITED');
+      return result(updated);
+    },
+  });
+}
+
+export interface SetScheduledTaskStatusInput {
+  readonly scheduledTaskId: string;
+  readonly expectedRevision: string;
+  readonly status: 'ENABLED' | 'PAUSED' | 'DISABLED';
+  readonly reason: string;
+}
+
+export async function setScheduledTaskStatus(db: DbExecutor, input: Scope & SetScheduledTaskStatusInput) {
+  const reason = requireText(input.reason, 'reason', 4000);
+  return runIdempotentCommand(db, {
+    scopeKey: httpCommandScopeKey(input.workspaceId), commandId: input.commandId, commandType: 'SetScheduledTaskStatus',
+    target: { scheduled_task_id: input.scheduledTaskId },
+    body: { expected_revision: input.expectedRevision, status: input.status, reason },
+    execute: async (r) => {
+      await authority(r, input.workspaceId);
+      const row = await r.scheduledTasks.read(input.scheduledTaskId, true);
+      if (row?.workspace_id !== input.workspaceId) throw resourceNotFound('ScheduledTask');
+      await lockWritableProjectInWorkspace(r, input.workspaceId, row.project_id);
+      if (row.revision !== requireRevision(input.expectedRevision, 'expected_revision')) {
+        throw revisionConflict({ entityType: 'SCHEDULED_TASK', expectedRevision: input.expectedRevision, actualRevision: row.revision.toString() });
+      }
+      if (row.status === 'EXPIRED' && input.status === 'ENABLED') {
+        throw invalidTransition('已到期的定时任务需要先延长授权有效期，不能直接重新启用。');
+      }
+      if (row.status === input.status) throw invalidTransition('状态没有变化，请读回当前结果。');
+
+      // 重新启用时把已过去的时刻推到下一个未来时段，避免一开启就补跑关闭期间的多次。
+      const nextDueAt = input.status === 'ENABLED'
+        ? advanceDueAt({ rule: row.repeat_rule as unknown as RepeatRule, timezone: row.timezone, localTime: row.local_time, now: await r.scheduledTasks.now(), anchor: row.first_run_at })
+        : row.next_due_at;
+      const updated = await r.scheduledTasks.setStatus(row.id, input.status, nextDueAt, {
+        status: input.status, revision: (row.revision + 1n).toString(), next_due_at: nextDueAt.toISOString(),
+        command_id: input.commandId, reason,
+      });
+      await audit(r, input, updated, 'SCHEDULED_TASK_STATUS_CHANGED');
+      return result(updated);
+    },
+  });
+}
+
+export interface ResolveOccurrenceInput {
+  readonly occurrenceId: string;
+  readonly expectedRevision: string;
+  readonly action: 'RETRY' | 'DISMISS';
+  readonly reason: string;
+}
+
+export async function resolveScheduledTaskOccurrence(db: DbExecutor, input: Scope & ResolveOccurrenceInput) {
+  const reason = requireText(input.reason, 'reason', 4000);
+  return runIdempotentCommand(db, {
+    scopeKey: httpCommandScopeKey(input.workspaceId), commandId: input.commandId, commandType: 'ResolveScheduledTaskOccurrence',
+    target: { occurrence_id: input.occurrenceId },
+    body: { expected_revision: input.expectedRevision, action: input.action, reason },
+    execute: async (r) => {
+      await authority(r, input.workspaceId);
+      const occurrence = await r.scheduledTasks.readOccurrence(input.occurrenceId, true);
+      if (occurrence?.workspace_id !== input.workspaceId) throw resourceNotFound('ScheduledTaskOccurrence');
+      if (occurrence.revision !== requireRevision(input.expectedRevision, 'expected_revision')) {
+        throw revisionConflict({ entityType: 'SCHEDULED_TASK_OCCURRENCE', expectedRevision: input.expectedRevision, actualRevision: occurrence.revision.toString() });
+      }
+      if (occurrence.status !== 'BLOCKED') throw invalidTransition('只有待处理的触发才能补跑或忽略。');
+
+      const updated = input.action === 'RETRY'
+        ? await r.scheduledTasks.reopen(occurrence.id)
+        : await r.scheduledTasks.resolve(occurrence.id, 'RESOLVED', reason);
+      if (updated === undefined) throw invalidTransition('这次触发已经不在待处理状态。');
+      await r.activities.insertActivityRecord({
+        id: randomUUID(), workspaceId: input.workspaceId, projectId: occurrence.project_id, taskId: null,
+        actorKind: 'HUMAN', actorRef: LOCAL_ACTOR_REF, commandId: input.commandId, eventType: 'SCHEDULED_TASK_OCCURRENCE_RESOLVED',
+        factRefs: { occurrence_id: occurrence.id, action: input.action },
+      });
+      return { occurrence_id: occurrence.id, scheduled_task_id: occurrence.scheduled_task_id, status: updated.status, revision: updated.revision.toString() };
+    },
+  });
+}
+
+const occurrenceView = (row: ScheduledTaskOccurrenceRow) => ({
+  occurrence_id: row.id, scheduled_task_id: row.scheduled_task_id, project_id: row.project_id,
+  schedule_generation: row.schedule_generation.toString(), sequence: row.sequence.toString(),
+  due_at: row.due_at.toISOString(), timezone: row.timezone, missed: row.missed, status: row.status,
+  task_id: row.task_id, run_id: row.run_id, reason: row.reason, revision: row.revision.toString(),
+  created_at: row.created_at.toISOString(),
+});
+
+const taskView = (row: ScheduledTaskRow) => ({
+  ...result(row), title: row.title, template: row.template, repeat_rule: row.repeat_rule, timezone: row.timezone,
+  local_time: row.local_time, first_run_at: row.first_run_at.toISOString(),
+  max_runs: row.max_runs, runs_reserved: row.runs_reserved, runs_started: row.runs_started,
+  authorization_expires_at: row.authorization_expires_at.toISOString(), history: row.history,
+  created_at: row.created_at.toISOString(),
+});
+
+export async function readScheduledTask(db: DbExecutor, workspaceId: string, id: string) {
+  return withTransaction(db, async (r) => {
+    const row = await r.scheduledTasks.read(id);
+    if (row?.workspace_id !== workspaceId) throw resourceNotFound('ScheduledTask');
+    const project = await readProjectInWorkspace(r, workspaceId, row.project_id);
+    return {
+      ...taskView(row),
+      project: { title: project.title, revision: project.revision.toString(), archived: project.archived_at !== null },
+      occurrences: (await r.scheduledTasks.occurrences(id)).map(occurrenceView),
+    };
+  });
+}
+
+export async function listScheduledTasks(db: DbExecutor, workspaceId: string, projectId?: string) {
+  return withTransaction(db, async (r) => {
+    await requireWorkspace(r, workspaceId);
+    if (projectId !== undefined) await readProjectInWorkspace(r, workspaceId, projectId);
+    const items = [];
+    for (const row of await r.scheduledTasks.list(workspaceId, projectId)) {
+      const project = await readProjectInWorkspace(r, row.workspace_id, row.project_id);
+      items.push({
+        ...taskView(row),
+        project: { title: project.title, revision: project.revision.toString(), archived: project.archived_at !== null },
+      });
+    }
+    return { project_id: projectId ?? null, items };
+  });
+}
+
+/**
+ * 每 tick 的扫描：先清「待分发」（崩溃残留与人工补跑），再处理到期时段。
+ *
+ * 与 N05 提醒的关键差别：提醒只落待处理，这里会真正新建 Task 并启动；因此每条准入
+ * 都要在事务内裁决，失败也必须落一条 occurrence 说明原因，不能静默跳过。
+ */
+export async function scanScheduledTasks(db: DbExecutor, openedAt: Date): Promise<string[]> {
+  const dispatch: string[] = [];
+  for (const workspaceId of await createRepositories(db).scheduledTasks.dueWorkspaces()) {
+    const created = await withTransaction(db, async (r) => {
+      if ((await readAdmission(r, 'share')).mode !== 'NORMAL') return [];
+      await authority(r, workspaceId);
+      const now = await r.scheduledTasks.now();
+      const ids: string[] = [];
+
+      for (const pending of await r.scheduledTasks.pendingDispatch(workspaceId)) ids.push(pending.id);
+
+      for (const row of await r.scheduledTasks.due(workspaceId, now)) {
+        const project = await r.projects.lockProjectArchiveGate(row.project_id);
+        if (project?.archived_at !== null) continue;
+
+        const nextDueAt = advanceDueAt({
+          rule: row.repeat_rule as unknown as RepeatRule, timezone: row.timezone,
+          localTime: row.local_time, now, anchor: row.first_run_at,
+        });
+        // 先推进时段再落发生：推进失败说明状态已被暂停/停用，本轮不该再产生任何事实。
+        const advanced = await r.scheduledTasks.advanceSlot(row.id, nextDueAt);
+        if (advanced === undefined) continue;
+
+        const occurrenceBase = {
+          id: randomUUID(), scheduled_task_id: row.id, workspace_id: row.workspace_id, project_id: row.project_id,
+          schedule_generation: row.schedule_generation, sequence: BigInt(advanced.runs_reserved),
+          due_at: row.next_due_at, timezone: row.timezone, missed: row.next_due_at < openedAt,
+          create_command_id: randomUUID(), ready_command_id: randomUUID(), delegate_command_id: randomUUID(),
+        };
+
+        if (row.runs_started >= row.max_runs) {
+          await r.scheduledTasks.insertOccurrence(occurrenceBase, 'BLOCKED', 'BUDGET_EXHAUSTED');
+          await r.scheduledTasks.setStatus(row.id, 'EXPIRED', nextDueAt, { reason: 'BUDGET_EXHAUSTED', next_due_at: nextDueAt.toISOString() });
+          continue;
+        }
+        if (row.authorization_expires_at <= now) {
+          await r.scheduledTasks.insertOccurrence(occurrenceBase, 'BLOCKED', 'AUTHORIZATION_EXPIRED');
+          await r.scheduledTasks.setStatus(row.id, 'EXPIRED', nextDueAt, { reason: 'AUTHORIZATION_EXPIRED', next_due_at: nextDueAt.toISOString() });
+          continue;
+        }
+
+        // 应用关闭期间错过的时段不自动执行：只留一条待处理，由用户决定是否补跑。
+        // 先判错过再判「上一轮未验收」：关闭期间无法观测上一轮状态，用错过解释更准确。
+        if (occurrenceBase.missed) {
+          await r.scheduledTasks.insertOccurrence(occurrenceBase, 'BLOCKED', 'MISSED');
+          continue;
+        }
+
+        const previous = await r.scheduledTasks.latestOccurrence(row.id);
+        if (previous?.task_id != null) {
+          const task = await r.tasks.readTask(previous.task_id);
+          if (task !== undefined && !['DONE', 'CANCELLED'].includes(task.status)) {
+            await r.scheduledTasks.insertOccurrence(occurrenceBase, 'SKIPPED', 'PREVIOUS_TASK_NOT_ACCEPTED');
+            continue;
+          }
+        }
+
+        const inserted = await r.scheduledTasks.insertOccurrence(occurrenceBase, 'DISPATCHING');
+        if (inserted !== undefined) ids.push(inserted.id);
+      }
+      return ids;
+    });
+    dispatch.push(...created);
+  }
+  return dispatch;
+}
+
+function reasonOf(error: unknown): string {
+  if (error instanceof DomainError) return `${error.code}: ${error.detail}`;
+  return error instanceof Error ? error.name : 'DISPATCH_FAILED';
+}
+
+/**
+ * 执行一次触发：新建 Task → 冻结执行范围 → 标记就绪 → 委托。
+ *
+ * 三步命令的身份都在 occurrence 落库时预生成，所以中途崩溃后重跑靠回执重放，
+ * 不会重复建 Task；`expected_task_revision` 只能取自前一步回执，读库重算会让
+ * payload_hash 变化并被判成 CommandIdReused。
+ */
+export async function dispatchScheduledOccurrence(db: DbExecutor, occurrenceId: string): Promise<void> {
+  const occurrence = await withTransaction(db, async (r) => r.scheduledTasks.readOccurrence(occurrenceId));
+  if (occurrence === undefined || occurrence.status !== 'DISPATCHING') return;
+  const schedule = await withTransaction(db, async (r) => r.scheduledTasks.read(occurrence.scheduled_task_id));
+  if (schedule === undefined) {
+    await withTransaction(db, async (r) => { await r.scheduledTasks.markSettled(occurrenceId, 'BLOCKED', 'SCHEDULE_UNAVAILABLE'); });
+    return;
+  }
+
+  try {
+    const template = schedule.template;
+    const created = await createTask(db, {
+      workspaceId: occurrence.workspace_id,
+      commandId: occurrence.create_command_id,
+      projectId: occurrence.project_id,
+      title: String(template.task_title),
+      objective: String(template.objective),
+      criteria: (template.criteria ?? []) as unknown as readonly CreateTaskCriterionInput[],
+      expectedOutputs: (template.expected_outputs ?? {}) as JsonObject,
+      mode: String(template.mode),
+    });
+    const taskId = created.result.task_id;
+    await withTransaction(db, async (r) => { await r.scheduledTasks.bindTask(occurrenceId, taskId); });
+
+    // 执行范围按触发当时的状态冻结：连接/资料/资源漂移就让这一次失败，不静默降级。
+    const frozen = await withTransaction(db, async (r) => freezeTaskChainExecution(
+      r, occurrence.workspace_id, occurrence.project_id, taskId,
+      Object.keys(schedule.execution_input).length === 0 ? undefined : schedule.execution_input as unknown as TaskChainExecutionInput,
+    ));
+    await withTransaction(db, async (r) => { await r.scheduledTasks.freezeExecution(occurrenceId, frozen); });
+
+    const ready = await markTaskReady(db, {
+      workspaceId: occurrence.workspace_id, taskId,
+      commandId: occurrence.ready_command_id, expectedRevision: created.result.revision,
+    });
+    const delegated = await delegateTask(db, {
+      workspaceId: occurrence.workspace_id, taskId,
+      commandId: occurrence.delegate_command_id, expectedTaskRevision: ready.result.revision,
+      scheduledTaskBinding: {
+        occurrenceId: occurrence.id, scheduledTaskId: schedule.id,
+        scheduleGeneration: occurrence.schedule_generation.toString(),
+      },
+      ...taskChainDelegateExecution(frozen, schedule.authorization_expires_at),
+    });
+    await withTransaction(db, async (r) => {
+      await r.scheduledTasks.markDispatched(occurrenceId, taskId, delegated.result.run_id);
+      await r.scheduledTasks.markStarted(schedule.id);
+    });
+  } catch (error) {
+    await withTransaction(db, async (r) => {
+      await r.scheduledTasks.markSettled(occurrenceId, 'BLOCKED', reasonOf(error));
+    });
+  }
+}
+
+/** 调度器入口：扫描后逐条分发。分发失败已由 dispatchScheduledOccurrence 落成 BLOCKED。 */
+export async function runScheduledTaskTick(db: DbExecutor, openedAt: Date): Promise<number> {
+  const ids = await scanScheduledTasks(db, openedAt);
+  for (const id of ids) await dispatchScheduledOccurrence(db, id);
+  return ids.length;
+}
+
+export function describeLocalDue(row: ScheduledTaskRow): { localDate: string; localTime: string } {
+  const date = localDateAt(row.next_due_at, row.timezone);
+  return { localDate: `${date.year}-${String(date.month).padStart(2, '0')}-${String(date.day).padStart(2, '0')}`, localTime: row.local_time };
+}
+
+export type { ScheduledTaskStatus };

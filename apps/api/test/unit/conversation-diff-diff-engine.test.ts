@@ -56,6 +56,9 @@ function buildInput(parts: {
   baseline: readonly BaselineFile[];
   current: readonly CurrentFile[];
   incomplete?: boolean;
+  coverage?: SnapshotDiffInput['coverage'];
+  currentUnswept?: ReadonlySet<string>;
+  tracked?: ReadonlySet<string>;
 }): SnapshotDiffInput {
   const baselineMap = new Map<string, BaselineFile>();
   for (const file of parts.baseline) baselineMap.set(file.path, file);
@@ -67,9 +70,18 @@ function buildInput(parts: {
     baselineCapturedAt: '2026-01-01T00:00:00.000Z',
     baselineRevision: 1n,
     incomplete: parts.incomplete ?? false,
+    ...(parts.coverage === undefined ? {} : { coverage: parts.coverage }),
+    ...(parts.currentUnswept === undefined ? {} : { currentUnswept: parts.currentUnswept }),
+    ...(parts.tracked === undefined ? {} : { tracked: parts.tracked }),
     baseline: baselineMap,
     current: currentMap,
   };
+}
+
+/** 一侧扫描覆盖的测试构造：`listed` 只有当前侧能给，基线侧清单没有持久化。 */
+function side(complete: boolean, files: number, reason: string | null = null,
+  listed: number | null = null) {
+  return { complete, reason, files, listed };
 }
 
 test('normalizeLineEndings unifies CRLF and CR to LF', () => {
@@ -228,6 +240,68 @@ test('computeSnapshotDiff: incomplete flag propagates and files are sorted by pa
   assert.equal(diff.incomplete, true);
   // z.txt 内容相同归为 SAME 被排除，只剩 a.txt（排序后）。
   assert.deepEqual(diff.files.map((f) => f.path), ['a.txt']);
+});
+
+test('computeSnapshotDiff: 当前扫描未核对到的文件不得判成删除，也不得判成零变化', () => {
+  // 复现旧缺陷：目录达到文件数上限后扫描提前停止，尾部文件在「当前」里缺席，
+  // 那是没核对到，不是被删除——旧实现会按基线整文件行数报出一大笔删除。
+  const input = buildInput({
+    baseline: [baseline('a.txt', `one${LF}two`), baseline('tail.txt', `gone${LF}file`)],
+    current: [current('a.txt', `one${LF}two${LF}three`)],
+    currentUnswept: new Set(['tail.txt']),
+    coverage: { baseline: side(true, 2), current: side(false, 1, 'FILE_COUNT_LIMIT', 2) },
+  });
+  const diff = computeSnapshotDiff(input);
+  assert.deepEqual(diff.files.map((file) => file.path), ['a.txt']);
+  assert.equal(diff.totalRemoved, 0);
+  assert.equal(diff.totalFiles, 1);
+  assert.equal(diff.coverage.uncheckedFiles, 1);
+  assert.equal(diff.coverage.current.complete, false);
+  assert.equal(diff.incomplete, true);
+});
+
+test('computeSnapshotDiff: 基线不完整时已跟踪却缺席的文件不得算本会话新增', () => {
+  const input = buildInput({
+    baseline: [baseline('a.txt', 'one')],
+    current: [current('a.txt', 'one'), current('legacy.txt', `old${LF}content`)],
+    tracked: new Set(['a.txt', 'legacy.txt']),
+    coverage: { baseline: side(false, 1, 'FILE_COUNT_LIMIT'), current: side(true, 2, null, 2) },
+  });
+  const diff = computeSnapshotDiff(input);
+  assert.deepEqual(diff.files, []);
+  assert.equal(diff.totalAdded, 0);
+  assert.equal(diff.coverage.unverifiedFiles, 1);
+  assert.equal(diff.incomplete, true);
+});
+
+test('computeSnapshotDiff: 未被 Git 跟踪的新文件即使基线不完整仍照常计新增', () => {
+  // 反证上一条规则没有过宽：全新文件不在索引里，起点没覆盖也仍是本会话新建。
+  const input = buildInput({
+    baseline: [baseline('a.txt', 'one')],
+    current: [current('a.txt', 'one'), current('fresh.txt', 'new')],
+    tracked: new Set(['a.txt']),
+    coverage: { baseline: side(false, 1, 'FILE_COUNT_LIMIT'), current: side(true, 2, null, 2) },
+  });
+  const diff = computeSnapshotDiff(input);
+  const byPath = new Map(diff.files.map((file) => [file.path, file]));
+  assert.equal(byPath.get('fresh.txt')?.action, 'CREATE');
+  assert.equal(byPath.get('fresh.txt')?.added, 1);
+  assert.equal(diff.coverage.unverifiedFiles, 0);
+  assert.equal(diff.totalAdded, 1);
+});
+
+test('computeSnapshotDiff: 省略 coverage 时按「基线不完整、当前完整」回退', () => {
+  const input = buildInput({
+    baseline: [baseline('a.txt', 'one')],
+    current: [current('a.txt', `one${LF}two`)],
+    incomplete: true,
+  });
+  const diff = computeSnapshotDiff(input);
+  assert.equal(diff.coverage.baseline.complete, false);
+  assert.equal(diff.coverage.current.complete, true);
+  assert.equal(diff.coverage.uncheckedFiles, 0);
+  assert.equal(diff.totalAdded, 1);
+  assert.equal(diff.incomplete, true);
 });
 
 test('computeAlignedDiff: 替换行成对，未改动行是 CONTEXT，行号双侧对齐', () => {

@@ -1,15 +1,17 @@
-import { act, createElement } from "react";
+import { act, createElement, Fragment } from "react";
 import { createRoot } from "react-dom/client";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import RecentWorkRail from "../src/components/RecentWorkRail";
+import { FeedbackHost } from "../src/components/Feedback";
 import { RelayApiClient } from "../src/api/relayClient";
 import { clearActiveConversation } from "../src/lib/activeConversation";
+import { feedbackEntries, removeFeedback } from "../src/lib/feedback";
 
 /**
- * 近期工作栏里那条会话的 ⋯ 菜单（工作台 §28.9、命令契约 §10.86、迁移 0090/0104）。
+ * 近期工作栏里那条会话的 ⋯ 菜单（工作台 §28.9、命令契约 §10.86、迁移 0090/0104/0113）。
  *
- * 这里守护的不是「有没有按钮」，而是五条口径：
+ * 这里守护的不是「有没有按钮」，而是六条口径：
  * 1. **改动只走命令，显示只认服务端。** 每次成功都要重读那一条会话，行里出现的必须是
  *    读回来的标题/状态/置顶时刻，不是本地拼出来的乐观结果。
  * 2. **409 只重读，不重发。** 版本落后时最多一次命令、一次重读；用户再点才用**新的**
@@ -21,6 +23,8 @@ import { clearActiveConversation } from "../src/lib/activeConversation";
  *    面板改成 `position: fixed` 的浮层、落在行头之外——展开不再撑高这一行，⋯ 因此不会位移。
  * 5. **复制会话 ID 是纯客户端动作，未读走同一条 CAS。** 复制不发命令、不重读、不推进修订；
  *    未读与置顶同形，两个方向共用一个端点，行上的圆点只认重读回来的 unread_at。
+ * 6. **分叉改的是「多了一条会话」，不是这一行（0113）。** 命令之后重读的是回执里那个新会话身份，
+ *    源行不回头重读也不推进修订；标题编号（1）（2）由服务端算，界面只显示读回来的那一条。
  */
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -48,6 +52,15 @@ const row = (n: number, title: string, at: string): Row => ({
 const json = (body: unknown, status = 200) =>
   ({ ok: status < 400, status, json: async () => body }) as Response;
 
+/**
+ * 假服务端里的编号规则，与服务端同一读法：末位已是「（n）」就加一，否则追加「（1）」。
+ * 放在这里只为让「界面显示读回来的标题」这条断言有对象可读，不是客户端该算的东西。
+ */
+function nextForkTitle(title: string): string {
+  const matched = /[（(](\d+)[）)]\s*$/u.exec(title);
+  return `${matched === null ? title : title.slice(0, matched.index)}（${matched === null ? 1 : Number(matched[1]) + 1}）`;
+}
+
 /** 服务端顺序：置顶优先，其次创建时间倒序（与 listSessions 的 order by 一致）。 */
 function serverOrder(rows: readonly Row[]): Row[] {
   return [...rows].sort((a, b) => {
@@ -71,10 +84,20 @@ interface Fake {
  * 服务端，但回执里的 command_id 不是我们发出去的那一枚，客户端必须判为「无法核对」。
  */
 function fakeServer(rows: Row[], options: {
-  conflictOnFirstCommand?: boolean; pinReceiptCarriesForeignCommandId?: boolean } = {}): Fake {
+  conflictOnFirstCommand?: boolean; pinReceiptCarriesForeignCommandId?: boolean;
+  /** 撤销用的重开撞 409：归档已生效，反向命令被别处抢先，界面只能将这条撤销升级成停留的提示。 */
+  conflictOnReopen?: boolean;
+  /** 归档命令到了服务端并真的改了行，回执却带着别的 command_id：本次是否生效未定，不能给撤销条。 */
+  archiveReceiptCarriesForeignCommandId?: boolean;
+  /** 删除被跨对象引用挡住：服务端按 409 SESSION_DELETE_BLOCKED 返回阻止项，行必须原样保留。 */
+  deleteBlocked?: boolean;
+  /** 删除命令真的删了行，回执却对不上那一枚 command_id：本次结果不明，确认键必须锁死。 */
+  deleteReceiptCarriesForeignCommandId?: boolean } = {}): Fake {
   const posts: Record<string, unknown>[] = [];
   const reads: string[] = [];
   let conflicted = false;
+  // 分叉出去几条子会话，决定假行拿哪一枚身份：子会话不在源数据里，由命令现场造。
+  let forks = 0;
   const find = (sessionId: string) => rows.find((item) => item.id === sessionId);
   const bump = (target: Row) => {
     target.revision = String(Number(target.revision) + 1);
@@ -84,7 +107,7 @@ function fakeServer(rows: Row[], options: {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     const path = url.pathname;
-    const command = /\/assist-sessions\/([^/]+)\/(title|pin|unread|archive|reopen)$/u.exec(path);
+    const command = /\/assist-sessions\/([^/]+)\/(title|pin|unread|archive|reopen|fork|delete)$/u.exec(path);
     if (init?.method === "POST" && command !== null) {
       const [, sessionId, action] = command;
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
@@ -101,6 +124,30 @@ function fakeServer(rows: Row[], options: {
             actual_revision: target.revision } }, 409);
       }
       const committed = { command_id: String(body.command_id), committed_at: "2026-10-16T09:00:00Z" };
+      if (action === "reopen" && options.conflictOnReopen === true) {
+        // 归档已经生效，撤销这一发被别处抢先：反向命令失败不能只留一条就地错误，
+        // 用户手上那个入口刚刚消失，必须升级成停留到用户处理的提示。
+        bump(target);
+        return json({ code: "REVISION_CONFLICT", detail: "会话已被更新",
+          conflict: { expected_revision: String(body.expected_revision), actual_revision: target.revision } }, 409);
+      }
+      if (action === "delete") {
+        if (options.deleteBlocked === true) {
+          // 行没动：被别的对象引用是业务拒绝，不是「本次结果不明」。
+          return json({ code: "SESSION_DELETE_BLOCKED", detail: "referenced",
+            conflict: { blocking_reasons: ["TASK_ACCEPTANCE_CITED", "LEARNING_RECORDS"] } }, 409);
+        }
+        rows.splice(rows.indexOf(target), 1);
+        if (options.deleteReceiptCarriesForeignCommandId === true) {
+          return json({ command_id: "00000000-0000-4000-8000-000000000000",
+            committed_at: "2026-10-18T08:00:00Z", result: { session_id: target.id,
+              revision: target.revision, deleted_messages: 2, deleted_attachments: 0,
+              deleted_at: "2026-10-18T08:00:00.000Z" } });
+        }
+        return json({ ...committed, result: { session_id: target.id, revision: target.revision,
+          deleted_messages: 2, deleted_attachments: 0,
+          deleted_at: "2026-10-18T08:00:00.000Z" } });
+      }
       if (action === "title") {
         target.title = String(body.title);
         bump(target);
@@ -125,8 +172,27 @@ function fakeServer(rows: Row[], options: {
         return json({ ...committed, result: { session_id: target.id, unread: body.unread,
           unread_at: target.unread_at, revision: target.revision, updated_at: target.updated_at } });
       }
+      if (action === "fork") {
+        // 分叉新建一条子会话：源行一行都不改（不推进修订与更新时间），编号由「服务端」决定。
+        // 客户端不拼（1）（2）——界面只显示读回来的那一条，编号对不对由 API 用例守。
+        const title = nextForkTitle(target.title);
+        const child: Row = { ...target, id: id(90 + forks), title,
+          status: "ACTIVE", revision: "0", pinned_at: null, unread_at: null,
+          created_at: "2026-10-16T10:00:00Z", updated_at: "2026-10-16T10:00:00Z" };
+        forks += 1;
+        rows.push(child);
+        return json({ ...committed, result: { session_id: child.id, title: child.title,
+          revision: child.revision, updated_at: child.updated_at, copied_messages: 3 } }, 201);
+      }
       target.status = action === "archive" ? "ARCHIVED" : "ACTIVE";
       bump(target);
+      if (action === "archive" && options.archiveReceiptCarriesForeignCommandId === true) {
+        // 行确实被推进了，回执却对不上我们发出去的那一枚命令：客户端只能判「无法核对」，
+        // 这条会话此刻到底是归档还是没归档都没确定，不能承诺撤回已产生的副作用。
+        return json({ command_id: "00000000-0000-4000-8000-000000000000",
+          committed_at: "2026-10-16T09:00:00Z", result: { session_id: target.id, status: target.status,
+            revision: target.revision, updated_at: target.updated_at } });
+      }
       return json({ ...committed, result: { session_id: target.id, status: target.status,
         revision: target.revision, updated_at: target.updated_at } });
     }
@@ -154,6 +220,9 @@ function fakeServer(rows: Row[], options: {
 let cleanup: (() => void) | undefined;
 afterEach(() => {
   cleanup?.(); cleanup = undefined; clearActiveConversation();
+  // 命令式撤销条不随组件卸载收走（这正是它能活过面板关闭的原因），而这几条用例共用同一枚
+  // 会话 id：不清空 store，上一条的撤销条会被下一条的宿主重新渲染出来，断言就串了。
+  act(() => { feedbackEntries().forEach((entry) => { removeFeedback(entry.id); }); });
   vi.unstubAllGlobals(); window.localStorage.clear();
 });
 
@@ -167,7 +236,10 @@ async function mount(fake: Fake) {
   document.body.append(container);
   const root = createRoot(container);
   cleanup = () => { act(() => root.unmount()); container.remove(); };
-  await act(async () => { root.render(createElement(RouterProvider, { router })); });
+  // 真应用里这条栈由 AppShell 挂一次；这里只挂左栏，所以要自己补上宿主，
+  // 否则撤销条只进了 store 却没渲染，断言会把「看不见」读成「没实现」。
+  await act(async () => { root.render(createElement(Fragment, null,
+    createElement(RouterProvider, { router }), createElement(FeedbackHost))); });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
   return { container, router, fake };
 }
@@ -280,6 +352,31 @@ it("改名发的是去空白后的标题；空标题与未改动都不发请求"
     .toContain("标题不能超过 200 个字符");
 });
 
+it("分叉：一次命令、读回的是新建的子会话，源行一行都没改（0113）", async () => {
+  const fake = fakeServer([row(1, "要分叉的讨论", "01")]);
+  const { container } = await mount(fake);
+  const childId = id(90);
+
+  await openMenu(container, id(1));
+  await clickAction(container, id(1), "分叉这段讨论");
+
+  // 只发一次命令，且带的是这一行当前的修订；回执是 201（新建资源），客户端照单核对。
+  expect(fake.posts).toEqual([{ action: "fork", command_id: expect.any(String), expected_revision: "1" }]);
+  // 源会话没被改：修订与更新时间都还是原样，界面也没有回头重读它。
+  expect(fake.rows[0]?.revision).toBe("1");
+  expect(fake.reads.filter((read) => read.startsWith("single:"))).toEqual([`single:${childId}`]);
+  // 列里多出来的那一行是服务端给的那一条：标题里的（1）由服务端决定，界面不自己拼。
+  expect(rowInActiveList(container, childId)).not.toBeNull();
+  expect(rowOf(container, childId)?.querySelector(".recent-work-title")?.textContent).toBe("要分叉的讨论（1）");
+
+  // 对分叉出来的那条再分一次：编号仍由服务端算（（1）→（2）），CAS 基线用它自己的修订 0。
+  await openMenu(container, childId);
+  await clickAction(container, childId, "分叉这段讨论");
+  expect(fake.posts[1]).toMatchObject({ action: "fork", expected_revision: "0" });
+  expect(fake.rows[1]?.title).toBe("要分叉的讨论（1）");
+  expect(fake.rows[2]?.title).toBe("要分叉的讨论（2）");
+});
+
 it("归档即隐藏：行移出默认列表，「已归档」那一段按需才读，重开回到原处", async () => {
   const fake = fakeServer([row(1, "要被归档的讨论", "01"), row(2, "留下的讨论", "02")]);
   const { container } = await mount(fake);
@@ -302,13 +399,72 @@ it("归档即隐藏：行移出默认列表，「已归档」那一段按需才�
   expect(archivedSection.querySelector(".recent-work-group-count")?.textContent).toBe("1");
 
   await openMenu(container, id(1));
-  // 归档态的行只给一个入口：重命名/置顶都得先重开，避免「改了却什么都发不出去」。
+  // 归档态只留两条：重命名/置顶/分叉都得先重开；删除与归档是两条通道，不因归档被挡住。
   expect([...(panelOf(container, id(1))?.querySelectorAll("button") ?? [])]
-    .map((button) => (button.textContent ?? "").trim())).toEqual(["重开这段讨论"]);
+    .map((button) => (button.textContent ?? "").trim())).toEqual(["重开这段讨论", "删除这段讨论"]);
   await clickAction(container, id(1), "重开这段讨论");
   expect(fake.posts[1]).toMatchObject({ action: "reopen", expected_revision: "2" });
   expect(rowInActiveList(container, id(1))).not.toBeNull();
   expect(fake.rows[0]?.status).toBe("ACTIVE");
+});
+
+it("归档给反悔窗口：撤销是一条新的重开命令，修订取归档回执而不是左栏那行", async () => {
+  const fake = fakeServer([row(1, "要被归档的讨论", "01"), row(2, "留下的讨论", "02")]);
+  const { container } = await mount(fake);
+  await openMenu(container, id(1));
+  await clickAction(container, id(1), "归档");
+  expect(fake.posts).toHaveLength(1);
+  expect(rowInActiveList(container, id(1))).toBeNull();
+
+  // 面板已收起、那一行随之卸载，撤销条仍挂在 body 的那条栈里：命令式条目存在的理由。
+  const testId = `session-archive-undo-${id(1)}`;
+  expect(panelOf(container, id(1))).toBeNull();
+  const card = document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+  expect(card?.closest(".feedback-stack")).not.toBeNull();
+  expect(card?.textContent).toContain("已归档「要被归档的讨论」");
+
+  const undo = card?.querySelector<HTMLButtonElement>("button");
+  expect(undo?.textContent).toBe("撤销");
+  await act(async () => { undo?.click(); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+
+  // 撤销＝再发一条前向命令：新的 command_id + 归档回执推进后的修订，不是数据库回滚。
+  expect(fake.posts[1]).toMatchObject({ action: "reopen", expected_revision: "2" });
+  expect(fake.posts[1]?.command_id).not.toBe(fake.posts[0]?.command_id);
+  expect(rowInActiveList(container, id(1))).not.toBeNull();
+  expect(fake.rows[0]?.status).toBe("ACTIVE");
+  expect(document.querySelector(`[data-testid="${testId}"]`)).toBeNull();
+});
+
+it("撤销被别处抢先：不补第三发命令，把这条撤销升级成停留到用户处理的提示", async () => {
+  const fake = fakeServer([row(1, "抢跑的讨论", "01")], { conflictOnReopen: true });
+  const { container } = await mount(fake);
+  await openMenu(container, id(1));
+  await clickAction(container, id(1), "归档");
+  const testId = `session-archive-undo-${id(1)}`;
+  const card = document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+  await act(async () => { card?.querySelector<HTMLButtonElement>("button")?.click(); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+
+  // 关键红线：撤销失败后界面无权自动重试，只有一发归档 + 一发被拒的重开。
+  expect(fake.posts.map((post) => post.action)).toEqual(["archive", "reopen"]);
+  const notice = document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+  expect(notice?.getAttribute("data-variant")).toBe("notice");
+  expect(notice?.getAttribute("role")).toBe("alert");
+  expect(notice?.textContent).toContain("撤销没成功");
+  // 这句话必须指向常驻入口：撤销条超时不等于这段讨论再也回不来。
+  expect(notice?.textContent).toContain("已归档");
+});
+
+it("归档回执无法核对时不给撤销条：本次是否生效都没定，不能承诺撤回副作用", async () => {
+  const fake = fakeServer([row(1, "回执对不上的讨论", "01")], { archiveReceiptCarriesForeignCommandId: true });
+  const { container } = await mount(fake);
+  await openMenu(container, id(1));
+  await clickAction(container, id(1), "归档");
+  expect(fake.posts).toHaveLength(1);
+  expect(document.querySelector('[data-testid^="session-archive-undo-"]')).toBeNull();
+  // 结果不明留在就地：面板不收起，这句话只有还在浮层里才读得到。
+  expect(panelOf(container, id(1))?.querySelector('[role="alert"]')?.textContent).toContain("无法核对");
 });
 
 it("把唯一一条讨论归档后，重开入口仍在（不跟着空列表一起消失）", async () => {
@@ -381,7 +537,7 @@ it("标记为未读与取消未读：一条命令、一次重读，行上的圆�
 
   await openMenu(container, id(1));
   expect([...(panelOf(container, id(1))?.querySelectorAll("button") ?? [])]
-    .map((button) => (button.textContent ?? "").trim())).toEqual(["置顶", "重命名", "取消未读", "复制会话 ID", "归档"]);
+    .map((button) => (button.textContent ?? "").trim())).toEqual(["置顶", "重命名", "取消未读", "分叉这段讨论", "复制会话 ID", "归档", "删除这段讨论"]);
   await clickAction(container, id(1), "取消未读");
   expect(fake.posts[1]).toMatchObject({ action: "unread", unread: false, expected_revision: "2" });
   expect(fake.rows[0]?.unread_at).toBeNull();
@@ -398,7 +554,8 @@ it("复制会话 ID 是纯客户端动作：不发命令、不推进修订，复
     await openMenu(container, id(1));
     await clickAction(container, id(1), "复制会话 ID");
 
-    expect(writeText).toHaveBeenCalledWith(id(1));
+    // 复制的是 URI 形式，不是裸 ID：粘出去仍读得出这是 Relay 的哪条会话。
+    expect(writeText).toHaveBeenCalledWith(`relay://sessions/${id(1)}`);
     // 复制没有服务端事实：不发命令、不重读、不推进修订。
     expect(fake.posts).toEqual([]);
     expect(fake.reads.filter((read) => read.startsWith("single:"))).toEqual([]);
@@ -413,22 +570,39 @@ it("复制会话 ID 是纯客户端动作：不发命令、不推进修订，复
   }
 });
 
-it("动作按参考菜单分组成「图标 + 名称」：置顶／重命名／未读一组，分组细线之后复制身份与归档收尾", async () => {
+it("右键整行打开的就是 ⋯ 那个面板：锚点不变、不发命令，也不接管原生菜单", async () => {
+  const fake = fakeServer([row(1, "右键唤起的讨论", "01")]);
+  const { container } = await mount(fake);
+  const rowButton = rowOf(container, id(1));
+  if (rowButton === null) throw new Error("行按钮没有出现");
+
+  const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+  await act(async () => { rowButton.dispatchEvent(event); });
+
+  // 原生菜单让位：不 preventDefault 的话，WebView2 会在这一行上弹浏览器自带菜单。
+  expect(event.defaultPrevented).toBe(true);
+  expect(panelOf(container, id(1))).not.toBeNull();
+  // 同一个面板、同一个锚点：⋯ 的展开态同步，因此它也显形，摆位几何只有一套。
+  expect(menuOf(container, id(1))?.getAttribute("aria-expanded")).toBe("true");
+  expect(fake.posts).toEqual([]);
+});
+
+it("动作按参考菜单分组成「图标 + 名称」：置顶／重命名／未读一组，分组细线之后复制身份、归档与删除收尾", async () => {
   const fake = fakeServer([row(1, "分组结构", "01")]);
   const { container } = await mount(fake);
   const sessionId = id(1);
   await openMenu(container, sessionId);
   const panel = panelOf(container, sessionId)!;
 
-  // 顺序与分组：置顶／重命名／未读在前，分组细线之后复制身份与归档收尾（参考菜单的两组读法）。
+  // 顺序与分组：置顶／重命名／未读／分叉在前，分组细线之后复制身份、归档与删除收尾（参考菜单的两组读法）。
   expect([...panel.children].map((child) => child.getAttribute("role") === "separator"
     ? "separator" : (child.textContent ?? "").trim()))
-    .toEqual(["置顶", "重命名", "标记为未读", "separator", "复制会话 ID", "归档"]);
+    .toEqual(["置顶", "重命名", "标记为未读", "分叉这段讨论", "separator", "复制会话 ID", "归档", "删除这段讨论"]);
   // 分组细线是 div 而不是 button：不吃焦点、不参与命令，只作视觉分隔。
   expect(panel.querySelector('[role="separator"]')?.tagName).toBe("DIV");
-  // 五条动作各带一枚前缀图标；图标不进 textContent，因此单独核对存在性。
+  // 七条动作各带一枚前缀图标；图标不进 textContent，因此单独核对存在性。
   expect([...panel.querySelectorAll("button")].map((button) => button.querySelector("svg") !== null))
-    .toEqual([true, true, true, true, true]);
+    .toEqual([true, true, true, true, true, true, true]);
   // 带图标的按钮仍按整条命中：点击落在按钮本身上，命令照旧发出。
   await clickAction(container, sessionId, "置顶");
   expect(fake.posts).toEqual([{ action: "pin", command_id: expect.any(String),
@@ -462,4 +636,104 @@ it("⋯ 与行按钮平级；Esc 收起面板并把焦点交回 ⋯", async () =
   expect(panelOf(container, sessionId)).toBeNull();
   expect(trigger.getAttribute("aria-expanded")).toBe("false");
   expect(document.activeElement).toBe(trigger);
+});
+
+it("删除先确认：取消零命令；确认后行从活跃区消失，且不给撤销条", async () => {
+  const fake = fakeServer([row(1, "要删掉的讨论", "01")]);
+  const { container } = await mount(fake);
+  const sessionId = id(1);
+  const dialogCancel = () => document.querySelector<HTMLButtonElement>(
+    `[data-testid="session-delete-cancel-${sessionId}"]`);
+
+  await openMenu(container, sessionId);
+  await clickAction(container, sessionId, "删除这段讨论");
+  // 危险动作不从回车起手：初始焦点压在「取消」上，命令一条都没发。
+  expect(document.activeElement).toBe(dialogCancel());
+  expect(fake.posts).toEqual([]);
+
+  await act(async () => { dialogCancel()!.click(); });
+  expect(dialogCancel()).toBeNull();
+  expect(fake.posts).toEqual([]);
+  expect(rowInActiveList(container, sessionId)).not.toBeNull();
+
+  await openMenu(container, sessionId);
+  await clickAction(container, sessionId, "删除这段讨论");
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>(`[data-testid="session-delete-confirm-${sessionId}"]`)!.click();
+  });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  expect(fake.posts).toEqual([{ action: "delete", command_id: expect.any(String),
+    expected_revision: "1" }]);
+  expect(rowInActiveList(container, sessionId)).toBeNull();
+  expect(fake.rows).toEqual([]);
+  // 删除不可撤销：不像归档那样在浮层里留「撤销」；确认框也已经收起。
+  expect(document.querySelector('[data-testid^="session-archive-undo-"]')).toBeNull();
+  expect(document.querySelector(`[data-testid="session-delete-confirm-${sessionId}"]`)).toBeNull();
+});
+
+it("被其它对象引用时删除整条拒绝：阻止项留在确认框里，行不动、不发第二发", async () => {
+  const fake = fakeServer([row(1, "被引用的讨论", "01")], { deleteBlocked: true });
+  const { container } = await mount(fake);
+  const sessionId = id(1);
+
+  await openMenu(container, sessionId);
+  await clickAction(container, sessionId, "删除这段讨论");
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>(`[data-testid="session-delete-confirm-${sessionId}"]`)!.click();
+  });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+
+  expect(fake.posts).toHaveLength(1);
+  expect(rowInActiveList(container, sessionId)).not.toBeNull();
+  const alert = document.querySelector(`[data-testid="session-delete-confirm-${sessionId}"]`)
+    ?.closest(".dialog-panel")?.querySelector('[role="alert"]');
+  // 阻止项按可读中文逐条列出，并指向仍然可用的归档通道。
+  expect(alert?.textContent).toContain("被任务验收观察引用");
+  expect(alert?.textContent).toContain("有学习记录");
+  expect(alert?.textContent).toContain("归档");
+  // 业务拒绝不是回执不明：确认键仍可再按（用户先回去归档），对话框不锁死。
+  expect(document.querySelector<HTMLButtonElement>(`[data-testid="session-delete-confirm-${sessionId}"]`)?.disabled)
+    .toBe(false);
+});
+
+it("删除回执对不上时确认键锁死：不换 command_id 重发", async () => {
+  const fake = fakeServer([row(1, "回执不明", "01")], { deleteReceiptCarriesForeignCommandId: true });
+  const { container } = await mount(fake);
+  const sessionId = id(1);
+
+  await openMenu(container, sessionId);
+  await clickAction(container, sessionId, "删除这段讨论");
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>(`[data-testid="session-delete-confirm-${sessionId}"]`)!.click();
+  });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+
+  expect(fake.posts).toHaveLength(1);
+  const alert = document.querySelector(`[data-testid="session-delete-confirm-${sessionId}"]`)
+    ?.closest(".dialog-panel")?.querySelector('[role="alert"]');
+  expect(alert?.textContent).toContain("是否生效尚未确定");
+  // 本次是否删掉都未确定：确认键锁死，只能按原 command_id 查回执。
+  expect(document.querySelector<HTMLButtonElement>(`[data-testid="session-delete-confirm-${sessionId}"]`)?.disabled)
+    .toBe(true);
+});
+
+it("归档态的会话也能删除：只剩「重开」与「删除」两条，且删除仍先确认", async () => {
+  const fake = fakeServer([row(1, "已归档的讨论", "01")]);
+  const { container } = await mount(fake);
+  const sessionId = id(1);
+  // 归档段按需加载：先归档这一条，「已归档」那段才会读回它。
+  await openMenu(container, sessionId);
+  await clickAction(container, sessionId, "归档");
+  const archivedSection = container.querySelector<HTMLDetailsElement>('[data-testid="recent-work-archived"]')!;
+  await act(async () => { archivedSection.open = true;
+    archivedSection.dispatchEvent(new Event("toggle", { bubbles: true })); });
+
+  await openMenu(container, sessionId);
+  const panel = panelOf(container, sessionId)!;
+  expect([...panel.children].map((child) => child.getAttribute("role") === "separator"
+    ? "separator" : (child.textContent ?? "").trim()))
+    .toEqual(["重开这段讨论", "separator", "删除这段讨论"]);
+  await clickAction(container, sessionId, "删除这段讨论");
+  expect(document.querySelector(`[data-testid="session-delete-confirm-${sessionId}"]`)).not.toBeNull();
+  expect(fake.posts.map((post) => post.action)).toEqual(["archive"]);
 });

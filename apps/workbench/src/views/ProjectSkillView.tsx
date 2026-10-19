@@ -193,7 +193,7 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
       {artifacts.length ? <ul className="run-list">{artifacts.map((artifact) => <li key={artifact.versionId}>
         {artifact.title ? <><strong>{artifact.title}</strong> · v{artifact.version}{artifact.taskId && <> · <Link className="inline-link" to={`/tasks/${artifact.taskId}?tab=artifacts`}>打开任务产物</Link> · <Link className="inline-link" to={`/artifact-versions/${artifact.versionId}/lineage`}>查看来源</Link></>}</>
           : <>版本 <code className="hash-code">{artifact.versionId}</code> · v{artifact.version}（产物详情当前不可读取）</>}
-        <details><summary>版本来源</summary><small>版本 ID：{artifact.versionId} · 来源 {artifact.sourceRef}</small></details></li>)}</ul> : <p className="helper-text">State 当前没有选用的产物版本。</p>}
+        <details className="tech-details"><summary>版本来源</summary><small>版本 ID：{artifact.versionId} · 来源 {artifact.sourceRef}</small></details></li>)}</ul> : <p className="helper-text">State 当前没有选用的产物版本。</p>}
       {decisions === null ? <p className="warning-callout">Decision 本次读取失败，决定清单待核对。</p>
         : decisions.length ? <ul className="run-list">{decisions.slice(0, 5).map((decision) => <li key={decision.id}><strong>{decision.title}</strong> · {decision.status} · v{decision.currentVersion}<small><Link className="inline-link" to={`/projects/${id}/knowledge?kind=DECISION&item=${decision.id}`}>查看依据</Link> · 更新于 {new Date(decision.updatedAt).toLocaleDateString("zh-CN")}</small></li>)}</ul>
           : <p className="helper-text">本次查询未返回项目 Decision。</p>}

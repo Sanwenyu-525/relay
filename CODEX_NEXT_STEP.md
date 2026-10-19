@@ -1,6 +1,153 @@
 # Relay 当前状态与下一步
 
-更新：2026-10-17。角色：唯一阶段、模块与下一步入口。功能通过/未通过/未验收只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)；长篇经过保存在[历史快照](docs/development/codex-next-step-history-20260930.md)，不作为默认交接输入。
+更新：2026-10-18。角色：唯一阶段、模块与下一步入口。功能通过/未通过/未验收只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)；长篇经过保存在[历史快照](docs/development/codex-next-step-history-20260930.md)，不作为默认交接输入。
+
+## 危险操作可撤销化与会话物理删除（2026-10-18，未 commit）
+
+用户下达「危险操作像是会话归档删除，都要有一个 toast 可以让用户撤销动作」，两轮澄清后裁定：撤销条替代确认框、覆盖全部危险操作、会话新增物理删除且不可撤销、不可逆族只给确认框。规则唯一归[工作台 §13.2](docs/frontend/workbench-design.md#132-危险操作的两条通道2026-10-18)，删除边界归 [ADR-027](docs/decisions/ADR-027-session-physical-delete.md)。**未 commit/push**。
+
+- **已落地前四阶段的一部分**：① 命令式撤销条机制（`openUndoFeedback`／`escalateFeedback`／`closeUndoFeedback`，同键单条、升级 Notice 不新增 token/CSS、计时归宿主）；② 会话归档接撤销（归档成功弹 8 秒 Snackbar，撤销再发一条新 `command_id` 的「重开」，修订取归档回执；回执不明不给撤销）；③ 会话物理删除（迁移 `0116` 只授 DELETE；`DeleteAssistSession` 按子→父显式删会话自有账本；九类跨对象引用与在途消息整条拒绝；`activity_records` 写 `ASSIST_SESSION_DELETED`；前端菜单 danger 项 + `AppDialog` 确认、无撤销条）；④ 项目归档接撤销并去掉原确认框（`UnarchiveProject` 只把 `archived_at` 写回 NULL，已 ACTIVE 不推进修订，撤销用归档回执修订）。
+- **契约已同步**：`contracts/01` A03、`contracts/03` 有效性表与保留段、`domain-model` 会话责任行；新增 ADR-027。
+- **实际证据**：`tests/feedback.spec.tsx` 11/11；`tests/sessionRowMenu.spec.ts` 19/19；真实临时 PG `assist-session-delete.integration.test.ts` 9/9（`run-integration.ps1 -TestFile assist-session-delete` status PASSED）；`projectArchiveLive.spec.ts` 4/4、`listViewCopy.spec.ts` 归档回执用例、真实临时 PG `project-archive.integration.test.ts` 14/14（两条撤销归档）；两侧 `tsc --noEmit` 对本片文件干净。
+- **未闭合**：真实 Windows/WebView2 与多 DPI 未复核；迁移 `0116` 是否已在用户库应用未取证；资料归档、记忆/规则停用、连接与资源停用的反向命令（阶段 4 剩余）与不可逆族统一确认框（阶段 5）未实施。共享工作树里 `AssistView` 来源面板与 `conversationDiffLayout` 仍有他人未提交的类型错误，未代改。
+
+## 会话分叉：带历史 fork（迁移 0113，2026-10-18 源码实现，未 commit）
+
+用户先要求「复制会话 ID」写成 `relay://sessions/<id>`，随后追加「支持右键打开菜单、增加归档、fork（fork 后的会话名加『（1）』）」。归档、右键与浮层间距在前一轮落地；本轮补 fork，并按用户选定「带历史 fork」实现真复制。**未 commit/push**，成绩只归验收表新行。
+
+- **服务端**：`ForkAssistSession` + `POST /assist-sessions/{id}/fork`（201）。迁移 0113 只加可空自引用列 `assist_sessions.forked_from_session_id`（无索引/CHECK/GRANT，Breaking Change: No）。子会话整行搬运身份列、`revision=0`、置顶/未读/活动键归零；只复制 COMPLETED 消息与图片附件、`seq` 从 1 重排；提案、usage/请求号/worker/错误码/模型身份对（0098 成对约束）不复制。源会话一行不改、不推进修订；归档、在途、陈旧修订与跨 Workspace 各有栅栏；同 `command_id` 重放返回同一子会话。
+- **标题**：末位（n）→（n+1），否则（1）；编号跟被分叉那条自己的标题走（同一源两次都是（1））；200 上限截正文保编号，按完整码点退让。
+- **前端**：会话行菜单在「取消未读」后、分组线前加 `GitFork`「分叉这段讨论」；成功后不重读源行，按回执里的子会话身份定向重读；归档态不出现该入口。
+- **实际验证**：真实临时 PG `assist-session-controls` **22/22**（新增 5 条）、入口栅栏单测 **6/6**、Workbench `sessionRowMenu` **19/19**、API `tsc --noEmit` exit0、`node scripts/check-docs.mjs` 通过。Playwright 定向 **6/9**：失败载荷已确认菜单实际含「分叉这段讨论」；1 条红灯来自并行未提交的第 7 项「删除这段讨论」，另 2 条因并行未提交的 `AssistView.tsx` JSX 语法错误导致 dev 构建失败，均非本片。
+- **未闭合/取舍**：真实 Windows/WebView2 窗口未点验；子会话历史不回显当时的模型选择；同一源多次分叉标题相同，靠列表时间区分；迁移台账套件当前因并行流未登记 0114/0115 而红，非本迁移引入。规则归 [HTTP §10.93](docs/api/http-command-contract.md#1093-会话分叉2026-10-18-源码实现迁移-0113)、[数据库 §102](docs/database/physical-design-postgresql.md#102-0113-会话分叉血缘2026-10-18-源码实现)、[工作台 §28.1](docs/frontend/workbench-design.md#281-左栏recentworkrail)。
+
+## 会话按最后消息时间自动上浮（迁移 0111，2026-10-18 源码实现，未 commit）
+
+用户先问「会话 item 现在有按照 AI 最晚回复时间自动排序的功能吗」，确认没有后指定口径「就按消息的最后时间算吧，不管是 ai 还是用户」，并要求参考上游实现；随后以「需要」批准完整落地方案。本轮已实施，**未 commit/push**，成绩只归功能验收表新行。
+
+- **口径**：取**活动序**（不分发送方，失败或取消的那一轮同样上浮），不是 OpenCode 那种只在用户发起时 touch 的「最近问序」。服务端排序为 `pinned_at desc nulls last, coalesce(last_message_at, created_at) desc, id desc`；手动拖拽排出来的本机次序仍优先于活动序。
+- **迁移 0111**：`assist_sessions.last_message_at timestamptz NULL`，只加列，不回溯历史、不加索引、不加 GRANT，Breaking Change: No。写入 Owner 恰两个：`insertMessage`（用户消息与发送时预插的 PENDING ASSISTANT 行）与 `settleGeneration`（CAS 命中后结算），都以 `greatest(last_message_at, now())` 单调推进；**不推进 `revision` 与 `updated_at`**，否则在途生成会把改名、置顶、未读等人工命令的 CAS 基线打成 409；预览帧 `assist_message_previews` 不 touch。
+- **投影与前端**：HTTP 会话 DTO 增补只读 `last_message_at`（命令回执形状不变，迟到结算不会把列表读法变成写）；Workbench 解析为容缺可空字段并在客户端 `compareSessions` 用 `lastMessageAt ?? createdAt` 排同一档，与服务端 `coalesce` 同义。任务行排序与悬停摘要卡仍按/显示 `updatedAt`——后者是元数据写入时刻，改显示口径属另一轮界面决定。
+- **上游对照**：采纳 ZCode `touchSession`＋`max(time_updated, ?)` 的单键单调推进；Codex 把 `updated_at` 与 `recency_at` 分开、DSH 用 `max(createdAt, lastPromptAt)`，与本方案同向。对照与取舍归[数据库 §100](docs/database/physical-design-postgresql.md#100-0111-会话活动排序键2026-10-18-源码实现)与 [HTTP §10.91](docs/api/http-command-contract.md#1091-会话列表的活动排序键2026-10-18-源码实现迁移-0111)。
+- **实际验证**：真实临时 PG `assist-session-controls` **18/18 PASSED**（新增四例：列形状且不推进修订、单调推进、列表上浮、结算推进与迟到结算不推进）；Workbench `recentWorkDrag.spec.ts` **8/8**（新增活动序 3/1/2 与置顶压在活动序上）；本片文件 `tsc --noEmit` 干净；`node scripts/check-docs.mjs` exit0。集成脚本以 `-SkipBuild` 运行——全量构建被共享工作树中并行未提交文件的类型错误挡住，改用一次性 scratch tsconfig 发 dist，因此「整仓构建通过」未验。
+- **未闭合**：左栏只在挂载、整列重读与行内命令后的定向重读时取新序，**没有轮询也没有事件订阅**，AI 回完那一刻这一行不会当场跳位；真实 Windows/WebView2 窗口未复验；Workbench 全量 vitest 在并行编辑下存在与本片无关的红灯，未作为证据。迁移号占用更新：0111 为本功能，0112/0113 已被并行工作占用，当前下一个空闲为 **0114**。
+
+## 计划执行方式设置：生成计划后自动执行还是人工确认（2026-10-18）
+
+用户下达「给 relay 的计划模式增加一个设置，可以选择是生成计划后自动执行还是需要人工确认」。已实施（**未 commit**）：服务端契约与 `auto_start` 投影不变，新增**本设备偏好**（`apps/workbench/src/lib/planExecutionPreference.ts`，localStorage `relay.workbench.planExecution`，默认 `AUTO` 保持既有行为）；设置页「执行策略」分组新增 `plan-execution` 卡片（`settings-plan-execution-mode` / `settings-plan-execution-save`）；对话面板在 `CONFIRM` 档不自动应用就绪候选，摘要保留「按这个目标执行」，点击后按原 `request_id` 进入原 Task/Run 链并按 §18.4 自动切到原 Task。权限、Gateway 准入、范围授权与 DELETE 确切确认不因此改变任何一条；授权来源始终是最初那条用户消息。产品规则归[工作台 §18.4.2](docs/frontend/workbench-design.md#1842-计划执行方式生成计划后自动执行还是人工确认2026-10-18已实施)。
+
+**实际证据**：workbench `tsc --noEmit` 对本片文件零错误（两个测试文件的既有报错来自并行实例未提交改动）；`vitest run` 定向 5 文件 **67/67**（`settingsView` 15、`executionSummary` 7、`folderFirstConversation` 22 含新增「人工确认」反例、`displayPreferences` 7、`conversationExecutionClient` 4）；另跑 `collaborationWorkspace`/`assistantModeSwitch`/`assistBinding`/`conversationStateMaintenance` 4 文件 **145 通过 / 4 失败**，该 4 例经 `git worktree` HEAD 基线复跑同名失败，为既有失败，与本片无关。
+
+**未闭合**：真实 API/PG 与真实 Windows/WebView2 窗口未取证；偏好仅本设备生效，多设备同步不在本片范围；功能验收表未新增成绩行，待真实链路取证后再记。
+
+## 输入器权限档位改四档并新增「完全访问」（2026-10-18）
+
+用户实机指认对话输入器的权限下拉，要求按通用 Agent 口径改成**请求批准 / 自动批准 / 完全访问（红色）**，并澄清两点：「完全访问」要做成真实新档位（不是文案），「只读」保留为菜单第四行。本片按已批准计划实施，**未 commit/push**，成绩只归验收表新行。
+
+- **范围差异（重要）**：`FULL` 只覆盖 **FILE_WRITE 能力族**——该目录内的新建、修改、删除不再逐次确认。Git 提交/推送、CLI、浏览器、电脑控制、目录外动作仍按各自策略逐次确认；把目录档位扩成跨能力族授权会违反「能力与权限分开」，`git push` 更是不可逆外部副作用。
+- **后端**：迁移 `0112_local_directory_full_access.sql` 只放宽 `local_directory_access` 的档位 CHECK（加值、不动既有行、不加 GRANT）。网关判定词表仍是 `AUTO/ASK/DENY`，`FULL` 落的是与 `AUTO` 逐字相同的策略行，差别只记在 `write_tier` 一列，因此 prepare 与 dispatch 都通过**同一个** `directoryHasFullAccess` 按 `resource_id` 现算，豁免只并入 `scopeCovered` 一个条件；`evaluateScopeGrant` 与 `SCOPE_GRANT_DELETE_REQUIRES_APPROVAL` 保持不动（范围授权永远不含删除，这是范围授权的边界，不是目录档位的边界）。投影新增 FULL 分支文案，界面按 `write_tier` 而非 `policy_decision` 区分 AUTO 与 FULL。
+- **前端**：`WritePermissionControl` 四档 = 请求批准（`Hand`）／自动批准（`Zap`）／完全访问（`Flame`，整行与芯片取 `--relay-color-status-danger-text`）／只读（`Lock`）；四图标取轮廓互异的一组，不再全用盾牌族。菜单行改为「图标列 + 文本列」的 grid，不新增 token。底栏摘要行与芯片共用同一份 `tierLabels`，删除 `AssistView` 里的第二套枚举。
+- **实际验证**：API `tsc --noEmit` exit0；API 定向单测 **67/67**（`check-trust-basis`、`gateway-exec-allowlist`、`file-changeset`）；真实临时 PG 定向四套件 `local-directory-access`／`migration`／`cli`／`folder-first-conversation` **36/36**，含两例新增——`FULL` 档位往返＋策略行仍 `AUTO`＋未知取值 422，以及完全访问目录内 DELETE 不产生 `ACTION_APPROVAL` 且真实落盘（同套件既有的 AUTO 删除仍需确认那例同时保持绿）；Workbench `writePermissionTier` **13/13**、`popoverMenu` 5/5、`newConversationEntry` 12/12。全量 Workbench jsdom 仍有 **17 个文件红**（collaborationWorkspace、assistantModeSwitch、taskSkillProposal、folderFirstConversation 等，失败点集中在 `[data-testid="assist-draft"]`、项目总览文案、工具轨迹文案），全量 API 单测 **832 例 / 800 通过 / 31 失败**，两组红灯与上一节记录的他人并行改动清单同源，只报不修；Workbench 全量 typecheck 仍被 `tests/browser/zz-reviewsTypographyProbe.spec.tsx` 的未使用变量阻塞。
+- **偏离计划两处**：① 计划里的 `check-trust-basis.test.ts` FULL 单测没有落地——`evaluateScopeGrant` 不掌握目录档位，豁免发生在 Gateway 准入，因此改由上面的集成用例正面覆盖；② `ensureLocalDirectoryReadAccess` 的反向推导不需改（已有档位记录时提前返回），`FULL` 只可能来自显式命令。
+- **顺手修正他人红**：`migration.integration.test.ts` 的 `ALL_MIGRATIONS` 里 `0113_assist_session_fork` 被并列写了两遍（并行编辑产物），会让该套件按 114 条断言而真实只有 113 条；已删掉重复行。`cli.integration.test.ts` 的 `ledger_rows` 与两份迁移清单在本片开工前已被并行改成 113，无需再改。
+- **未闭合**：桌面 dev 窗口实机点击未复验（须先 `-RefreshApi` 重新暂存后端，否则新 `write_tier` 值会被旧暂存 API 判 422）；真实 Windows/WebView2、多 DPI、IME 与安装态本轮不复验；`FULL` 没有浏览器端 Playwright 取证（现无 `write-permission` 浏览器 spec）；跨能力族（Git 也免确认）不在本片范围。
+
+规则唯一归[工作台 §18.1.3](docs/frontend/workbench-design.md#1813-输入器的本目录写入档位2026-10-17)与 §18.1.4，服务面归[HTTP §10.86](docs/api/http-command-contract.md#1086-目录写入档位投影与只读查询2026-10-17-源码实现)，物理边界归[数据库 §101](docs/database/physical-design-postgresql.md#101-0112-本地目录完全访问档位2026-10-18-源码实现)，场景归[测试计划 §17.1.3/§17.1.4](docs/testing/verification-plan.md#1713-本目录写入档位2026-10-17)，取舍接续归 [ADR-016](docs/decisions/ADR-016-folder-first-conversation.md)；准入一致性口径补记在[工具适配器 §1.2](docs/architecture/tool-adapters.md)。
+
+## 普通聊天文件增删改与方法 MODIFY 接续（2026-10-18）
+
+用户反馈「relay 好像还没有增删改的能力」；确认范围是**对话 Agent 对绑定目录内文件执行 CREATE / MODIFY / DELETE**。本轮按已批准计划闭环整改，**未 commit/push**，成绩只归验收表「普通 Agent 文件 CRUD 接续」行；权限语义未变。
+
+- **写提示词**：Run 写分支此前明确写「删除不在授权内」，与工具 schema 和 Gateway 能力冲突，真实模型因此不会请求删除。现允许三种动作；MODIFY/DELETE 必须先 `read_file` 并带真实 `sha256` 基线，CREATE 目标必须不存在，删除只在任务明确要求时提出，ASK/AUTO 不豁免、FULL 由系统判定，禁止以清空/覆盖/改名绕过确认；只读分支未动。`DRAFT_WRITE_TOOLS` 模板版本抬到 `1.0.2`。
+- **方法 MODIFY**：此前「修好 / 改一下 / 更新文档」即使命中方法也只给只读方案。现本轮有真实读取工具时，方法提示词在冻结说明之后输出与主循环一致的执行信封（只声明路径与动作，不写正文）；`METHOD` 路由新增 `readTools` 并抬到 `1.0.1`。主流程记录候选时保留 `execution_method`；`INSPECT`、空行动与无工具轮仍只读，写候选被收口为 `CLARIFY`，零 Task/Run。
+- **可见性**：执行摘要在确认前显示「新建 / 修改 / 删除 · 相对路径」，含 DELETE 时说明仍需 Run 内动作审批；聊天摘要的「N 项等待你批准」带审批入口，按 `operation_id` 匹配 `OPEN` 的 `ACTION_APPROVAL` 直达原 Review，无精确匹配或读取失败时回退到过滤页。
+- **主流程输出协议（用户实机截图回归）**：模型在信封前多写一句结论时，旧解析按「整段必须是 JSON」把原文当正文落库，聊天直接显示 JSON、候选同时丢失。现允许 ≤400 字前言与代码框包裹的信封（仍须单个完整 JSON 对象，候选校验不变）；残缺信封优先救回 `reply`，否则保留前言或给出可读失败说明，绝不再把 JSON 原文当回复。执行候选与状态维护共用同一解析入口。
+
+**实际验证**：API typecheck 通过；定向提示词单测 **28/29**（唯一红为 HEAD 既有的 DISCUSS 文案断言，未修他人红灯）；`folder-first-conversation` 真实临时 PG/HTTP/磁盘 **20/20**；核心回归 `tool-loop` **45/45**、`agent-conversation-main-loop` **8/8**、`real-tools-gateway` **55/55**、`agent-main-loop-execution` **17/17**、`gateway` **30/30**；Workbench 定向 **15/15**，scoped typecheck 通过（全量 typecheck 仍被并行未提交文件的类型错误阻塞，未修）。真实 Provider 的 DELETE 批准/拒绝用例已写入 `real-model-tool-loop.integration.test.ts`，因未配置 `RELAY_MODEL_*` 本轮 **5 例全部 skip、0 运行、未验**。2026-10-18 用户实机截图已暴露上述解析缺陷；修复后 `conversation-execution` 单测 **15/15**（新增 3 例）、`folder-first-conversation` 复跑 **20/20**。截图会话目录为只读，重发前须切到请求批准或更高档位；活动桌面仍运行 2026-10-17 暂存 API，本次修复与当日提示词变更均未载入，需关闭应用后 `-RefreshApi` 重启再验。真实 Windows/WebView2 写操作（含 DELETE 批准/拒绝与方法 MODIFY）与真实 Provider 仍未验；不得以脚本化模型、HTTP 或组件测试替代。
+
+## 真实扩展复验：桌面端临时端口让桥接文件写成 0（2026-10-18）
+
+用户装好扩展后，本轮做真实链路复验，暴露一个**卡住桌面端浏览器能力**的缺陷：桌面模式给 API 的请求端口是 0（临时端口），而 `ensureBridgeRegistration` 在 listen 之前执行，`bridge.json` 因此写成 `"port": 0`；Worker 的 `ExtensionBridgeProvider` 读这个端口去 POST 命令，`127.0.0.1:0` 永远失败——扩展连得上也没用，所有 `browser_*` 动作都会落到 `BROWSER_BACKEND_DISCONNECTED`。本机两份数据根实测都是 0。已修：`listen` 之后用**实际绑定端口**重写桥接文件（`syncBridgePort`，沿用原令牌），`api_listening` 报实际端口；单测 **36/36**（浏览器四套件）。
+
+**同一次复验暴露的第二层未决问题**：扩展只认 `chrome.storage.local` 里的 `serverUrl`，而桌面端口每次启动都变（本机存的是上一次的 `127.0.0.1:4672`）。要让日常 Chrome 重启后仍可用，只能在「固定桥接端口（冲突回退）」与「固定端口单开桥接监听」之间选一个，两者都改变 ADR-025 的「单端口 + 手动配对」前提，本轮未单方面选，等用户决定。
+
+另：本机已加载的扩展副本仍是旧 manifest（`granted_permissions` 只有 `debugger/storage/tabs`，没有本轮新增的 `alarms`），需要在 `chrome://extensions` 点一次「重新加载」才会用上新代码——这也是空闲保活无法在真实浏览器里生效的原因。
+
+## 三插件第三轮：浏览器三处静默失效、电脑滚动报实际位移（2026-10-18）
+
+用户下达「继续修复缺陷或者开发」。本轮继续按「承诺 vs 实现」对表，改的都是**结果与实际不一致**的地方，均未 commit；成绩只归验收表两行。
+
+- **浏览器（Provider／适配层）**：① `browser_list_pages` 的 `truncated` 是死字段——Provider 先 `slice(0, MAX_PAGES)`，适配层再判「长度是否超上限」永远不成立；截断改为只在适配层做一次，`count` 保留真实总数。② `registration()` 把 `null` 也缓存，「桥接文件还没落盘」被固化成「永远没有桥接」，只能重启进程；改为只缓存成功结果、`dispose()` 清缓存。③ `browser_read_page` 承诺返回「加载状态」却没有该字段；扩展新增 `readyStateOf()`（CDP `Runtime.evaluate('document.readyState')`，取不到给 `null`），`BrowserSnapshot` 增加必填 `readyState`，适配层输出 `ready_state`。规则归[浏览器自动化 §14.5](docs/architecture/browser-automation-v1.md#145-两处静默失效的修复2026-10-18)，四套件 **35/35**。
+- **电脑**：`computer.scroll` 把请求值写回结果（发 200 读到 200），而系统只接受整格（120），另一轴不足一格还会被静默丢掉。新增 `wheel_notches`／`WHEEL_NOTCH` 统一换算，结果报**实际**位移并在不同时带 `requested_delta_*`；任一轴非零但不足一格即 `INVALID_REQUEST`。`cargo test` **20/20**。
+
+**仍未闭合**：真实日常 Chrome 的空闲保活／多标签页截断／页面 `loading` 态（需用户手动装扩展）、真实桌面指针与滚动（本机桌面会话阻塞）、`GITHUB_ISSUE_VIEW` 的真实已认证会话与真实 PG 集成、官方 Skill 登记/注入与最终安装态、GitHub 写动作（ADR-023 要求先冻结协议）。并行在途提示：`apps/api/src/application/zoned-time.ts` 曾一度未完成导致 `tsc` 全量编译失败（`noEmitOnError: true` 时 dist 不产出），已由该实例修复，本轮未触碰。
+
+## 三插件第二轮：扩展空闲保活、电脑描述对齐、GitHub issue 详情（2026-10-18）
+
+用户下达「继续开发 github、浏览器操控、电脑操控这三个插件」。本轮按上一节「仍未闭合」逐条筛出**不依赖用户操作或桌面会话**的三处，均为**未 commit**；成绩只归验收表三行。
+
+- **浏览器（默认 extension 路线）**：`background.js` 末尾那句「service worker 被 Chrome 回收后由 WS 重连唤醒」不成立——被终止的 worker 连同 `onclose` 的退避定时器一起消失，`chrome.runtime.onStartup` 只在浏览器启动时触发。§14.3 的服务端 20 秒 `keepalive` 帧只覆盖「连接仍在」，管不到「连接已断且 worker 已回收」。补 `alarms` 权限 + 30 秒周期闹钟 `relay.keepalive`，`onAlarm` 走 `reconnectIfDown()`（`OPEN`/`CONNECTING` 不动，避免握手期插出第二条连接）。规则归[浏览器自动化 §14.4](docs/architecture/browser-automation-v1.md#144-空闲保活兜底chromealarms2026-10-18)，定向 **14/14**。
+- **电脑**：`computer_type` 的定义自相矛盾——描述写「缺省 15ms、需要约 10ms 以上间隔」，参数说明写「缺省 30」，运行时 `DEFAULT_TYPE_DELAY_MS` 是 30（实测 20ms 确定性损坏、30/50ms 干净）。模型按描述排时序，已按运行时事实改写描述，并加一例**跨语言常量比对**（直接读 `input.rs`）防止三处再漂移。
+- **GitHub**：补第五个只读动作 `GITHUB_ISSUE_VIEW`（`gh issue view <n> --repo <slug> --json …,comments`），补齐「能列不能读」。仍属 `GITHUB_READ`：无新能力、无迁移、无权限分支；正文 8 KiB、评论 10 条 × 2 KiB，剪裁由 `body_truncated`/`comments_total`/`comments_truncated` 显式说出。规则归[工具适配器 §4.1](docs/architecture/tool-adapters.md#41-github-只读查询01032026-10-17-开发自检)。
+
+**仍未闭合（与上一节合并看）**：真实日常 Chrome 的空闲保活与登录态复用（需用户手动装扩展，Chrome 155 已忽略 `--load-extension`）、真实桌面指针移动（本机 `GetCursorPos` 拒绝访问）、`GITHUB_ISSUE_VIEW` 的真实已认证会话与真实 PG 集成（`github-read.integration.test.ts` 的逐动作列表仍是四个，本轮未改也未跑）、官方 Skill 登记/注入与最终安装态、GitHub 写动作（ADR-023 要求先冻结协议）。全量单测本机 **844 例 / 822 通过 / 21 失败 / 1 跳过**，失败全部落在 sealed-loader（15）、`conversation-prompts`（2）、`git-adapter`（1）、`file-io` 删除语义（1）、provider guard（1）等与本片无关项；本轮未修他人红灯。
+
+## 新会话的默认工作目录：方案与任务书落盘，未实施（2026-10-18）
+
+用户下达「新会话未选择目录的时候应该在默认目录工作，这个默认目录是可以用户配置的，上游中应该有」，随后按推荐选定两档：**本轮只落文档与任务书**；**默认目录没有本目录档位事实时按只读兜底**。本轮**未写产品代码、未新增迁移、未 commit/push**。
+
+- **上游核实结果（判断成立一半）**：五个缓存仓库都保证 Agent 有确切 cwd，因此 Relay 现在的「没目录→以 `AGENT_SESSION_HAS_NO_WORKING_DIRECTORY` 拒本次读取、对话照常」在上游没有对应物；但只有 DeepSeek Harness 把它做成可配置项并与写边界闭合（`sandbox.workspaceRoot`，`mode` 默认 `read-only`）。ZCode 给非项目对话准备应用托管共享目录 `~/.zcode/workspace/default` 且越界**钳制**回根；Codex/OpenCode/Pi 的兜底都是**进程 cwd**——本项目不采纳，因为 API/Worker 的进程目录是安装目录而非用户内容，照搬会显示一个用户从未选择的目录。证据与缺口归[研究 §1.8](docs/research/p00-source-study.md#18-未选目录时的默认工作目录机制对照2026-10-18)。
+- **采用的最小形态**：Workspace 级一条显式配置的默认目录，经既有 `OpenWorkingDirectory` 登记（因而连带其 Project 与 `local_directory_access` 档位），新会话在 `CreateAssistSession` **同一短事务**内继承并持久作用域来源；读取链不加兜底推断，缺目录仍按原类型化原因拒绝。不变量归[契约 01 §5](contracts/01-facts-and-ownership.md#5-projectgoal-与-inbox)，产品规则归[工作台 §18.1.5](docs/frontend/workbench-design.md#1815-未选目录时的默认工作目录2026-10-18已确认未实施)，责任与持久化归[运行架构 §2.8](docs/architecture/runtime-context.md#28-新会话的默认工作目录作用域2026-10-18已确认待实施)，场景归[测试计划 §17.1.5](docs/testing/verification-plan.md#1715-未选目录时的默认工作目录2026-10-18已确认未实施)，切片与停点归[任务书](prompts/default-working-directory.md)。
+- **必须正面处理的既有口径**：契约 01 §5 禁的是「让模型猜默认目录」，用户配置属已确认事实，因此新增四条不变量把「默认作用域须持久可追溯、来源须在界面可见、失效须回落为没有默认目录」写死；`managed_resources.project_id NOT NULL` 决定默认目录必然连带一个 Project，故继承后新会话不再是工作空间级会话，空态说明句与 §18.1 表格随之收敛，但不删「不需要先创建项目、任务」的既有承诺。
+- **接续约束**：本任务书与在途[本地目录交付链整改](prompts/remediation/local-directory-delivery-20261018.md)改同一批文件（`assist-commands.ts`、`assistant-readonly-round.ts`、`open-working-directory.ts`、`CollaborationView.tsx`、`AssistView.tsx`、工作台与本文件）。开工前按任务书第 3 节核对该片是否收口；未收口时只推进不重叠的迁移 `0111`、`Set/ClearWorkspaceDefaultDirectory` 与设置页三片。
+- **本轮文档影响与未验范围**：实际迁移、命令、UI 与测试全部未动，功能验收表不记成绩；`node scripts/check-docs.mjs` 只证明链接与结构，不代表任何默认目录能力可运行。**迁移号需按当前占用重排**：任务书里的计划值 `0111` 已被会话活动排序键占用，`0112`（完全访问档位）与 `0113`（会话 fork）亦被并行工作占用，当前下一个空闲为 `0114`。
+
+## 三插件接续：电脑补 move、浏览器补历史/双击/快照、GitHub 补 gh 解析与真实 argv（2026-10-18）
+
+用户下达「继续开发 github、操控电脑、操控浏览器这三个插件，上游有源码可借鉴」。本轮按「工具承诺 vs 默认路线实际实现」逐条对表，改了四处只读代码就能看见的矛盾，均**未 commit**，成绩只归验收表三行。
+
+- **电脑**：`computer_scroll` 的描述要求"先移动鼠标到目标区域"，但词表/适配器/运行时都没有移动动作。新增 `COMPUTER_MOVE` → `computer.move`（Rust `input::move_mouse` 早已存在，只是没进 `protocol::METHODS`），计入前台输入九项。`cargo test` 19/19、TS 定向 41/41。
+- **浏览器（默认 extension 路线）**：`chrome.debugger.onEvent` 监听签名写错（`(message, sender)` → 真实是 `(source, method, params)`，导致每次导航等满 30 秒）、快照只遍历嵌套 `node.nodes` 而真实 CDP 是扁平 `childIds`（只能渲染根节点）、`history`/`double` 被 Provider 直接拒绝、截图无尺寸与摘要。四处均已修，新增扩展命令层测试 8/8（VM 跑真实 `background.js`）。规则归[浏览器自动化 §14.1](docs/architecture/browser-automation-v1.md#141-扩展命令层补齐2026-10-18)。
+- **GitHub**：`gh` 只按 `PATH` 找（本机解包了 gh 2.102.0 却查不到），且 `GITHUB_REPO_VIEW` 用 `gh repo view --repo`——真实 gh 判 `unknown flag`，仓库是位置参数。补三级解析链（`RELAY_GH_PATH` → 随包 `gh.exe` → `PATH`）并改正 argv；真实探针从 `GH_ERROR` 变为 `GH_UNAUTHENTICATED`。
+
+**仍未闭合**：真实桌面指针移动（本机 `GetCursorPos` 拒绝访问，桌面会话阻塞）、真实 Chrome 扩展（需用户手动加载并配对，Chrome 155 已忽略 `--load-extension`）、官方 Skill 登记/注入及最终安装态（真实已认证四只读复验已通过，详见验收表）、官方 Skill 注入与登记、GitHub 写动作。全量单测本机 **818 例 / 780 通过 / 37 失败 / 1 跳过**，失败集中在 sealed-loader、备份包、restore 隔离、prompt 与 git 适配器等并行在途或环境依赖项；已用改动前的旧 `dist` 复跑 `conversation-prompts`、`free-call-guard`、`git-adapter` 确认同样红，本轮未修他人红灯。
+
+## 内置浏览器自动化（F26）：扩展桥接已实施，默认路线验收未通过（2026-10-18）
+
+**当前结论（2026-10-18 复验）**：默认路线仍按 ADR-025：用户现有 Chrome＋MV3 扩展＋配对令牌。已修复连接路径、hello 令牌、丢失响应的 UNKNOWN 与 ignored/none 包装节点漏掉后代；真实隔离 Chromium 加载实际扩展后，配对、后台建页、读/填写/点击/截图/导航、拒绝用户页、关闭自有页、断线重连均通过。插件定向单测 108/108；真实已认证 GitHub 四只读动作经会话/Gateway/账本通过；电脑真实 Gateway→Runtime 记事本输入及 PG 停止状态通过。全量 API 编译已恢复，构建夹具兼容回归 7/7，目录包第三次构建被并行 Workbench 临时测试的未使用变量阻塞，尚未通过；包含 runtime/extension/gh Skill 原文的打包规则不能当作包已验收。**剩余出口**：日常 Chrome 的空闲保活/登录态复用（手动安装、配对和后台页动作已通过）、跨 Run 桌面全局输入互斥、真实 Overlay/Esc→Worker 停止、官方 Skill 登记与运行时注入、最终安装态；不能标三插件整体通过。成绩和限制唯一归[统一功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)；用户路径归[工作台 §36](docs/frontend/workbench-design.md#36-电脑浏览器与-github-能力的日常使用2026-10-18)。下文 CDP 旧成绩不替代当前默认路线。
+
+### 历史回顾（2026-10-17，ADR-024 自有 Chrome/CDP 路线，现为非默认）
+
+用户下达「为 Relay 桌面端增加内置 Chrome 浏览器操控能力」，并明确要求**先做架构审查、不要直接写代码**。本轮只做只读审查与选型，**未写产品源码、未新增迁移、未引入随包资源、未建动作词表、未 commit/push**；工作树审查前后均为干净（`main` @ `390d92f1`），迁移序号停在 `0104`。
+
+**审查结论（依据源码，非文档转述）**：桌面为 Tauri `2.11.6` + React `19.3.0`；模型工具循环**全部在 Worker 进程**（`worker/main.ts` 同进程跑 Run 命令与 `runAssistGenerationTick`）；工具是 `workflow/tool-catalog.ts` 的冻结词表；权限是「能力→连接→策略→单动作 Review/本次任务范围授权」四段，`SCOPE_GRANT_ACTIONS` 是闭集；`apps/api/src`、`apps/workbench/src`、`apps/desktop/src-tauri/src` 中 **MCP 命中数为 0——仓库没有 MCP 运行时**；既有 `COMPUTER_*` 是 SendInput/GDI 的桌面 GUI 自动化，`execution-router` 的 `browser_cdp` 只是占位优先级位（Rust 侧 `not_configured`）；打包走 `build-release.ps1`（`pnpm deploy --prod` + 逐项清单校验），`tauri.conf.json` 只随包 node.exe/helper/api，**computer-runtime 尚未随包**。另发现既有缺口：前端 `RelayGatewayCapability` 只有 9 项，**缺 `COMPUTER_READ`/`COMPUTER_INPUT`/`GITHUB_READ`**，`ConnectionsView` 能力表同为硬编码 9 项。
+
+**选型**：`chrome-devtools-mcp` `1.11.0`（Apache-2.0、Google 维护、`node >=23` 由随包 `v24.21.0` 满足、发布物自包含无运行时依赖、14 MB/370 文件、59 工具、`--pageIdRouting` 默认开启）；**由 Relay 拉起自有 Chrome**（独立 profile + `--remote-debugging-port=0`，读 `DevToolsActivePort` 取端口）→ MCP 以 `--browserUrl` 附着；新增**最小 MCP stdio 客户端**（不引官方 SDK）；浏览器为**独立能力族** `BROWSER_READ`/`BROWSER_ACTION`/`BROWSER_COMMIT` + 12 个 `browser_*` 工具，**不并入 `COMPUTER_*`**；`chrome-use` 的扩展+native messaging 路径 V1 不接入（改用户 Chrome、驱动真实标签页、标签组不能当隔离）。
+
+**待用户拍板（开工前）**：① **D1 会话内是否允许浏览器动作**——现状 `ASSISTANT_READ`/`AGENT_SESSION_READ` 只放行只读能力，建议 V1 保持（chat 只读、动作走 Run），否则属于新增会话写身份的另一项架构变更；② **D2 是否复用用户已登录 Chrome**——建议 V1 不做；③ **D3 是否每 Run 独立 profile**——建议不进 V1。
+
+**历史下一步（已被 ADR-025 取代）**：按[浏览器自动化 V1 第 10 节](docs/architecture/browser-automation-v1.md#10-分阶段实施计划每阶段有明确出口不跨阶段预建)的 M1→M6 推进；该方案属于 ADR-024 自有 Chrome/CDP 路线。原审查文档和测试规格保留历史，不代表当前默认路线。
+
+### CDP M1 已实施：后端骨架与真实链路（2026-10-17，现为非默认路线）
+
+用户确认开工，D1–D3 按建议默认执行（会话只读、不复用用户登录态、不做每 Run 独立 profile）。M1 已落地，**未 commit/push**：
+
+- **能力与词表**：迁移 `0105` 登记 `BROWSER_READ`/`BROWSER_ACTION`/`BROWSER_COMMIT` 并逐条重述 `logical_operations` 的 origin×resource CHECK；12 个 `browser_*` 工具进冻结词表；`ADAPTER_DESCRIPTORS`、`capabilityFor`、`targetMatches` 的 `browser://<origin>` 分支、`normalizedBrowserTarget`、`SCOPE_GRANT_ACTIONS`（**只加 `BROWSER_ACTION`**，`BROWSER_COMMIT` 故意不入表）、委托信封能力、会话只读词表与目标全部接线。
+- **新增 `apps/api/src/browser/`**：最小 MCP stdio 客户端（initialize/tools/list/tools/call/cancelled，无 SDK 依赖）、Chrome 启动器（独立 profile + `--remote-debugging-port=0` + 读 `DevToolsActivePort` + taskkill 兜底）、`McpBrowserProvider`（冻结映射 + 启动自检）、`BrowserSessionManager`（页面所有权/缺省页/页级互斥/STALE/取消→UNKNOWN）、`browser-adapter`（参数白名单、目标核对、上传路径根内解析）。
+- **实测推翻三条按文档写的假设**（已写回主设计 §4.2.1）：上游 `pageId` 是 **number 且必填**；`new_page` 返回页面列表而非新 id；`navigate_page` 把失败写进正文；另外 `includeSnapshot` 在导航提交前取样，动作后改为重读并等页面稳定。
+- **已运行**：`tsc --noEmit` 与 `tsc -p` exit 0；浏览器单测 **23/23**；`tool-loop` 词表封闭性更新后与 `restore-isolation` 合计 **50/50**；真实链路冒烟（真实 Chrome `155.0.8059.40` + 后端 `1.11.0`，`output/acceptance-raw/browser-f26-m1-20261017/smoke.log`）走通「就绪→建页→快照→填写→错误 uid→截图→提交后拿到新页面→后退→file:// 被拒→关闭→dispose」；`scripts/fetch-browser-mcp.mjs --verify` 的 sha512 与 registry `integrity` 逐字一致。
+- **全量单测基线对比**：789 例中 8 例红，1 例是本次词表断言（已更新转绿），其余 7 例经 `git stash` 基线复跑确认为既有失败（`conversation-prompts`、`file-changeset`、`file-write-frozen-diff`、`free-call-guard`、`git-adapter` 各 1，`restore-isolation` 2 例为全量并发下的抖动，单跑 7/7）。**注意**：基线对比时 `git stash -u` 误收了并行实例未提交的前端改动，已从 `stash@{0}` 逐文件恢复（`AssistView.tsx`/`.css`/`composerAttachMenu.spec.tsx` 已还原；`docs/frontend/workbench-design.md` 以并行实例的更新版本为准未覆盖）；`stash@{0}` 暂未丢弃，作为该实例 `workbench-design.md` 快照的保险。
+- **M1 未做**：`browser_sessions` 状态表与风险分类器（M3，迁移 `0106`）、`/browser/*` HTTP（M2）、UI（M5）、随包资源与 `lib.rs` 注入（M6）。**F26 仍为未验收**；真实 Windows 窗口、安装态、多任务真实 PG 链路、用户接管实测都还没有证据。
+
+**历史下一步（已过期）**：M2（读工具端到端 + `GET /browser/status`），随后 M3 的动作与权限；以上是切换默认路线前的 CDP 实施计划。
+
+### CDP M2 已实施：读能力过完整 Gateway + 跨进程健康投影（2026-10-17，现为非默认路线）
+
+- **迁移 `0106`**：单行表 `browser_backend_state`（Worker 实测的后端健康结论；与 `0096` 同理由——三个进程只共享 PG，但基数不同：后端是安装级资源，单行正是真实基数）。**显式 `GRANT SELECT, INSERT, UPDATE` 给 `relay_app`、无 DELETE**；顺带记录既有缺口：`0096` 的 `computer_control_state` 建表时没授 `relay_app`，若应用角色不是表所有者，`GET /computer/control-session` 会在运行期报权限错误（未修，不在本片范围）。
+- **`GET /workspaces/{id}/browser/status`**：`Cache-Control: no-store`；URL 保留工作区段只因全站路由前缀，处理器不读它——健康结论是安装级诊断，不是工作区业务数据。API 进程**不会**为回答它去启动自己的浏览器实例（那会变成两个 Chrome）。
+- **实测修正第二处设计**：目标合成值改为**主机形式** `browser://example.com` / `browser://127.0.0.1:5155`，`browser://` 单独作「全部站点」前缀（策略创建要求前缀非空），`browser://unknown` 表示站点未知。原 `browser://https://…`（协议塞进 scheme）被自己的目标归一拒绝——集成测试第一次跑就撞上，已修正并写回主设计 §13。
+- **已运行**：浏览器单测 **25/25**；真实 PostgreSQL `browser-read.integration.test.ts` **6/6**（整体 PASSED，临时集群已删除）——BROWSER_READ 全链路成功 + 投影 READY、按站点收窄、非法目标 `GATEWAY_TARGET_DENIED`、后端不可用派发失败 + 投影 `CHROME_MISSING`、`BROWSER_ACTION` 无范围授权时 AUTO 降级 `WAITING_APPROVAL`、真实 API 进程经 HTTP 读同一行。日志 `output/acceptance-raw/browser-f26-m1-20261017/integration-browser-read-3.log`。
+- **未做**：`GET /browser/sessions` 与 stop（M3，等 `browser_sessions` 表）、风险分类器（M3）、UI（M5）、随包与安装态（M6）。**F26 仍未验收**。
 
 ## 会话顶栏图标工具栏、会话目录图标与拖拽分隔条（2026-10-17）
 
@@ -79,7 +226,7 @@ Luna 负责本专项后端源码/必要迁移/API与数据库契约和定向测�
 
 ## 输入框粘贴图片与消息附件：后端全链路落地，前端待接线（2026-10-16）
 
-按用户确认的全链路方案（[实施计划](docs/superpowers/plans/2026-10-16-composer-paste-image-attachments.md)）与「先文档后前端」推进，当前 Agent 单独实施、未 commit/push。**后端已实现（T1–T4）**：迁移 `0093` 附件表（`bytea` + CHECK 白名单/上限/字节一致，只授 SELECT/INSERT/UPDATE）；暂存端点 `POST /assist-sessions/:id/message-attachments`（路由级 bodyLimit 4MiB，非幂等命令）；`RequestAssistMessage` 可选 `attachment_ids`（进 payload hash、事务内绑定、归属/去重/≤4张/≤6MiB、无附件载荷逐字不变）；目录能力 `image_input` 三态 + 发送闸门（按 `RELAY_MODEL_NAME` 查目录，无条目/非 true 拒绝，不冒充可用）；`AssistTurn.parts` 多模态组装（仅当前消息附件，历史降级文本占位）+ OpenAI 端口 LangChain 1.2 标准图片块。**文档已同步**：[HTTP §10.85](docs/api/http-command-contract.md#1085-assist-消息图片附件2026-10-16-后端源码实现前端未接线)、[数据库 §91](docs/database/physical-design-postgresql.md#91-0093-assist-消息图片附件2026-10-16-源码实现)、[工作台 §33](docs/frontend/workbench-design.md#33-输入框粘贴图片与消息附件)（标注前端未接线）、验收表新行（**未验收**）、`check-docs` 通过。**证据（如实）**：`apps/api` 全量 `tsc --noEmit` 通过（唯一错误来自并行实例在途的 `model-catalog-repository` 重构与其测试错位）；受影响 4 个单测 **58/58**（临时编译目录执行，未触碰共享 dist）。**待办（T5–T8）**：前端粘贴/拖拽捕获与附件 chip（`AssistView`/`ChatCommandInput`/`relayClient` 全是并行实例热文件，按用户决定待热文件安静后接线）、消息气泡缩略图、前端 jsdom/浏览器规格、真实 PG 集成测试（空载单跑）、真实 Provider 多模态样本。**并行协调**：同仓实例在改 `model-catalog-repository/pricing`（本片逐次重读后定点编辑，双向保留）；对方 `0094` 迁移已顺延避让我方 `0093`，双方文档互认。
+按用户确认的全链路方案（[实施计划](docs/superpowers/plans/2026-10-16-composer-paste-image-attachments.md)）与「先文档后前端」推进，当前 Agent 单独实施、未 commit/push。**后端已实现（T1–T4）**：迁移 `0093` 附件表（`bytea` + CHECK 白名单/上限/字节一致，只授 SELECT/INSERT/UPDATE）；暂存端点 `POST /assist-sessions/:id/message-attachments`（路由级 bodyLimit 4MiB，非幂等命令）；`RequestAssistMessage` 可选 `attachment_ids`（进 payload hash、事务内绑定、归属/去重/≤4张/≤6MiB、无附件载荷逐字不变）；目录能力 `image_input` 三态 + 发送闸门（按 `RELAY_MODEL_NAME` 查目录，无条目/非 true 拒绝，不冒充可用）；`AssistTurn.parts` 多模态组装（仅当前消息附件，历史降级文本占位）+ OpenAI 端口 LangChain 1.2 标准图片块。**文档已同步**：[HTTP §10.85](docs/api/http-command-contract.md#1085-assist-消息图片附件2026-10-18-前后端接线)、[数据库 §91](docs/database/physical-design-postgresql.md#91-0093-assist-消息图片附件2026-10-16-源码实现)、[工作台 §33](docs/frontend/workbench-design.md#33-输入框粘贴图片与消息附件)（标注前端未接线）、验收表新行（**未验收**）、`check-docs` 通过。**证据（如实）**：`apps/api` 全量 `tsc --noEmit` 通过（唯一错误来自并行实例在途的 `model-catalog-repository` 重构与其测试错位）；受影响 4 个单测 **58/58**（临时编译目录执行，未触碰共享 dist）。**待办（T5–T8）**：前端粘贴/拖拽捕获与附件 chip（`AssistView`/`ChatCommandInput`/`relayClient` 全是并行实例热文件，按用户决定待热文件安静后接线）、消息气泡缩略图、前端 jsdom/浏览器规格、真实 PG 集成测试（空载单跑）、真实 Provider 多模态样本。**并行协调**：同仓实例在改 `model-catalog-repository/pricing`（本片逐次重读后定点编辑，双向保留）；对方 `0094` 迁移已顺延避让我方 `0093`，双方文档互认。
 
 ## 「+」两级上下文菜单与二级能力入口（2026-10-16）
 
@@ -146,6 +293,14 @@ Luna 负责本专项后端源码/必要迁移/API与数据库契约和定向测�
 **不改变**：不重排免费模型专项（阶段 C-2b 与阶段 D 仍受主循环热文件静默门控）、不扩展到压缩/Skill 定制/文件恢复，未新增产品验收成绩（成绩仍只归统一验收表）。
 
 ## Agent 入口与目录读取修复（2026-10-16）
+
+**2026-10-18 当前独立复验：D1–D4 限定范围通过，交付链继续整改**：协调者亲自重新构建并运行真实 PG/HTTP/磁盘四套24/24、Workbench三文件32/32及类型检查，四项已通过，不再停在“实施者自检待复验”。发现 `local-directory-access.js` 在当前编译输出与桌面 `resources/api` 中不同、debug/API副本无该模块；零配置真实浏览器链仍缺证据。已生成[产物与浏览器接续任务书](prompts/remediation/local-directory-delivery-20261018.md)，按用户授权继续派原 GPT-6 Luna 子代理执行。活动用户窗口不重启、不恢复电脑接管；本轮新 PG 集群均已清理，上一轮被自动审批拒绝删除的自有临时目录保留并明确限制。分层成绩只归统一验收表。
+
+**2026-10-18 D1–D4 修复实施者自检通过，待协调者独立复验**：原独立验收的四个反例分别确认默认读取权限复活、物理目录删除后精确命令重放失败、重试载荷 revision 漂移及目录选择告知缺少默认只读说明。本轮按[整改任务书](prompts/remediation/local-directory-access-acceptance-20261018.md)补历史策略范围核对、已有回执先判定、前端冻结命令载荷/作用域并区分历史回执与当前投影，以及真实目录入口说明。真实临时 PG 的四个相关集成套件 **24/24**，Workbench 三个定向文件 **32/32**，API/Workbench typecheck 与 Workbench production build 通过；证据、旧 RED 和自检/待复验边界只记在[统一验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)。真实 Provider、浏览器零预置权限及 Windows/活动桌面副本仍未验；没有操作用户桌面或 commit/push。
+
+**2026-10-18 本地目录免手工配置（应用实现已接入）**：用户确认基础文件不应要求手工配置连接/策略。主动选目录默认只读，写档位由 Application 管理精确目录的 Gateway 配置；连接与策略页保留给外部服务、特殊能力、排错和历史/限制管理，不是普通本地文件链路的前置步骤。实现边界归[工作台 §18.1.4](docs/frontend/workbench-design.md#1814-本地目录权限设置2026-10-18已确认已实施)，API/数据库合同分别见[HTTP §10.86](docs/api/http-command-contract.md#1086-目录写入档位投影与只读查询2026-10-17-源码实现)和[数据库 §98](docs/database/physical-design-postgresql.md#98-0109-本地目录访问档位元数据2026-10-18-源码实现)。真实运行成绩及残余 UI/Provider/桌面载入范围归统一验收表。
+
+**2026-10-18 普通聊天文件 CRUD 接续（服务端/真实 PG/HTTP/磁盘范围通过）**：在原会话此前的执行选择与 Run 回填基础上，修复就绪/执行连接按 canonical root 匹配；补齐 DELETE 拒绝时同事务结算原工具调用，避免 Review 已拒绝而 Run 工具行永久等待。受控模型端口经普通聊天消息、原申请/Apply/Run 和原消息投影走通 CREATE、MODIFY、DELETE 批准与拒绝，真实磁盘字节及原消息结果核验通过；同一项目双根、Gateway 与工具循环专项回归通过。真实 Provider 有界调用未通过（192K/8-call 运行超时，65K 运行预算耗尽且仅结算 find_paths），Windows/WebView2 交互未验；API 资源暂存与 Workbench dist 已更新，但正在运行的 `target/debug/api` 仍是旧副本，桌面窗口未重启。细节与证据只归统一验收表「本地目录免手工配置」及「普通 Agent 文件 CRUD 接续」行。任务书指定的物理 Escape 边界仍有效；未操作活动桌面窗口，也未派子代理、未 commit/push。
 
 按用户本次问题接续阶段 D：任务/项目旧 Assist 入口统一到 `/agent`，任务默认聊天并复用目录条、工具栏与详情外壳。首条先绑定持久目录再发送，未知重试保留原身份；普通发送移除两种抢先解释，终态只读回主流程候选。GET 执行请求增量回显原资源与候选，无 migration。真实测试库原先无工具连接，本次通过既有配置 Owner 仅为 Relay-Agent 根设置读取连接及四种只读动作策略，其他目录不自动获权。**同日接续（computer-use 真实窗口验收）**：三入口同址、工作详情三页签与关闭行为一致、先选目录发首条（持久绑定＋`list_directory` SETTLED＋真实模型回复真实名称）、只读零新增 Task/Run/执行请求（计数 5/2/4 前后不变）、无绑定如实提示；重开恢复时发现并修复归属行「当前项目」占位缺陷（`CollaborationView` 的 `projectTitle` 只随任务路径解析，现沿目录绑定 projectId 用既有 `getProject` 解析），修复后真实窗口复验通过。MODEL_FAILED 间歇失败（当日 2 败/4 成）取证后排除超时、预算与两类请求形状（直连协议探针 4/4 全 200），未能在带诊断产物上复现，按现有证据不归因本地实现、倾向 Provider 外部故障；临时诊断 `DEBUG-directory-read` 已从源码与两处 dist 清除并重建同步，干净产物复验成功。临时诊断落盘代码未当作修复；错误分类沿用 `MODEL_FAILED`＋`session_tool_calls` 对照。边界与成绩只归验收表「Agent 入口统一与目录读取」行；原「阶段 A/B/C」行的「阶段 D 未实施」已标注为 2026-10-15 时点结论。完整 Run 结果投影（AM-06 剩余）和安装包仍为后续，不改变免费模型等并行工作顺序。
 
@@ -880,3 +1035,5 @@ M 阶段后端接续与本轮已单独授权的整套 UI 重做维持各自分�
 PG还原分片的两处本轮独占输出亦暂留：`output/acceptance-raw/m07-20261001-restore-postgres-worker-dist` 与 `apps/api/output/acceptance-raw/m07-20261001-restore-postgres-worker-dist`，各313个纯JS输出、已核对在工作区内且无reparse；自动审批拒绝递归删除，仅返回 `blocked by policy`，已停止、不重试。临时PG清理与源码不受影响，后续独立编译采用内存emit逐字核对，不新增dist目录。
 
 文档维护与输出保留见[规则](docs/README.md#6-验收结果与原始输出保留)。所有日期块、原包身份和旧阶段经过可在历史快照及各专题记录恢复；这些记录不替代当前模块状态。
+
+2026-10-17 晚（输入区布局第三轮）：按用户实机截图指认完成两处输入区稳定化——①模型调用信息（本条首选/实际/记录）从输入卡下方说明列移入最近一条 AI 回复的消息行；②在途锁定原因转视觉隐藏并挂到禁用模式盒 title，卡下方说明列在空闲与在途之间不再增减可见行；③输入卡 :focus-within 去掉 3px 光晕，发送/聚焦不再多一层阴影。改动：AssistView.tsx/.css、ConversationModeSwitch.tsx、assistantModeSwitch.spec.ts（新增 fieldset title 与 visually-hidden 断言）。验证：tsc --noEmit exit0；assistantModeSwitch+assistModelRuntime 定向 51/51；check-docs 通过；全量 vitest 复跑见验收表该行。真实 Chromium/Windows 窗口复验未做，登记为该行剩余项。注意本树并行 Agent 在改同一批文件（Attach 菜单、tech-details），本轮未动其改动。

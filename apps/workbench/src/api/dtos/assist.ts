@@ -1,5 +1,5 @@
 import type { DecimalRevision } from "../../types";
-import type { RelayGatewayDecision } from "./gateway";
+import type { RelayGatewayDecision, RelayWriteTier } from "./gateway";
 import type { RelayModelVerifyErrorCategory } from "./information";
 
 export interface RelayAssistSourceRef {
@@ -47,7 +47,16 @@ export interface RelayAssistSession {
    * 它和置顶一样只是**导航标记**：不改变能不能发消息、绑哪个目录，也不参与列表排序。
    */
   readonly unreadAt: string | null;
+  /**
+   * 最后一条消息落库或生成结算的时刻（0111）。null = 这段会话还没有消息。
+   *
+   * 它和置顶一样只是**导航排序键**，不是业务事实：左栏按 `lastMessageAt ?? createdAt`
+   * 倒序排，与列表读法的 `coalesce(last_message_at, created_at)` 同一口径。缺字段只来自
+   * 0111 之前的响应，同样读成「还没有消息」，回落到创建时间。
+   */
+  readonly lastMessageAt: string | null;
   readonly revision: DecimalRevision;
+  readonly createdAt: string;
   readonly updatedAt: string;
   readonly conversationMode: RelayConversationMode;
   readonly assistantProfileId: string | null;
@@ -134,6 +143,33 @@ export interface RelayAssistSessionState {
   readonly updatedAt: string;
 }
 
+/**
+ * 删除回执（ADR-027）：`revision` 是删除前核对过的那个修订；会话行已不存在，
+ * 因此回执没有 status、updatedAt 或标题。删除不可撤销，客户端不得据此提供恢复入口。
+ */
+export interface RelayAssistSessionDelete {
+  readonly sessionId: string;
+  readonly revision: DecimalRevision;
+  readonly deletedMessages: number;
+  readonly deletedAttachments: number;
+  readonly deletedAt: string;
+}
+
+/**
+ * 分叉回执（0113）。
+ *
+ * 与上面几条不同：`sessionId` 是**新建的子会话**，不是命令目标那条源会话——源会话一行都没改。
+ * 界面据此把左栏刷新后定位到新会话，标题里的「（1）」由服务端决定，客户端不自己拼编号。
+ * `copiedMessages` 为 0 只说明这段讨论还没有可搬的历史，不是失败。
+ */
+export interface RelayAssistSessionFork {
+  readonly sessionId: string;
+  readonly title: string;
+  readonly revision: DecimalRevision;
+  readonly updatedAt: string;
+  readonly copiedMessages: number;
+}
+
 /** 文件夹入口的结果：目录是当前工作目录，不是新 Workspace，也不隐含任何权限。 */
 export interface RelayWorkingDirectoryCandidate {
   readonly projectId: string;
@@ -161,7 +197,9 @@ export interface RelayWorkingDirectory {
   readonly writeReadiness: { readonly status: string; readonly detail: string;
     readonly policyDecision: RelayGatewayDecision | null;
     readonly policyId: string | null; readonly policyRevision: string | null;
-    readonly policyTargetPrefix: string | null };
+    readonly policyTargetPrefix: string | null;
+    readonly writeTier: RelayWriteTier | null;
+    readonly accessRevision: string };
 }
 
 /** 一次 Run 的工具调用轨迹（GET /runs/{id}/tool-calls）。
@@ -247,6 +285,12 @@ export interface RelayConversationCheck {
   readonly args: readonly string[];
 }
 
+/** 候选声明的文件动作：只描述意图，正文与基线仍由 Run 内读取后决定。 */
+export interface RelayConversationCandidateFileChange {
+  readonly path: string;
+  readonly action: "CREATE" | "MODIFY" | "DELETE";
+}
+
 export interface RelayConversationExecution {
   readonly requestId: string;
   readonly sessionId: string;
@@ -266,6 +310,11 @@ export interface RelayConversationExecution {
    * 不显示就等于让用户在不知情下同意。准入判定在服务端，这里不做本地猜测。
    */
   readonly check?: RelayConversationCheck | null;
+  /**
+   * 候选声明的文件动作，供确认前看清将要新建 / 修改 / 删除哪些相对路径。
+   * 旧服务端没有这个字段时为空数组，不据此推断「本次不改文件」。
+   */
+  readonly fileChanges: readonly RelayConversationCandidateFileChange[];
   /**
    * 服务端已判定这次是明确的只读执行请求（无写意图、候选就绪）。
    *
@@ -342,6 +391,8 @@ export interface RelayAssistMessage {
   readonly status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
   /** 服务端既有字段，用于对话流的日期分隔线与消息时间；缺失只影响展示，不影响消息内容。 */
   readonly createdAt: string | null;
+  /** 服务端写入时间：终态消息上等于结算时刻，在途时是心跳，不能当作执行起点。 */
+  readonly updatedAt: string | null;
   readonly intent: string;
   readonly content: string | null;
   readonly errorCode: string | null;
@@ -360,6 +411,37 @@ export interface RelayAssistMessage {
   readonly usage: { readonly inputTokens: number | null; readonly outputTokens: number | null;
     readonly cacheReadTokens: number | null; readonly cacheCreationTokens: number | null };
   readonly cancelRequested: boolean;
+  /**
+   * 0093：随这条消息发送的图片附件元数据。缺字段（旧服务端）读成空数组——
+   * 没有附件与「服务端不报附件」在展示上是同一件事，不能因此判整条响应非法。
+   */
+  readonly attachments: readonly RelayAssistMessageAttachment[];
+}
+
+/**
+ * 0093：附件元数据（不含内容字节）。内容按单张另行读取，列表投影不带 bytea。
+ */
+export interface RelayAssistMessageAttachment {
+  readonly id: string;
+  readonly name: string;
+  readonly mediaType: string;
+  readonly byteLength: number;
+}
+
+/** 上传回执：附件身份，不改变任何业务状态（暂存行，随消息命令绑定）。 */
+export interface RelayAssistMessageAttachmentUpload {
+  readonly attachmentId: string;
+  readonly byteLength: number;
+  readonly contentHash: string;
+}
+
+/** 单张附件内容（历史消息缩略图）。 */
+export interface RelayAssistMessageAttachmentContent {
+  readonly attachmentId: string;
+  readonly name: string;
+  readonly mediaType: string;
+  readonly byteLength: number;
+  readonly dataBase64: string;
 }
 
 export interface RelayAssistLivePreview {
@@ -426,6 +508,29 @@ export interface RelayConversationFileDiff {
 export type RelayConversationDiffUnavailableReason =
   "NO_RESOURCE" | "NO_BASELINE" | "ROOT_NOT_GIT" | "RESOURCE_UNAVAILABLE";
 
+/** 一侧扫描的覆盖情况：`complete=false` 时 `reason` 说明扫描停在哪里。 */
+export interface RelayConversationDiffScanSide {
+  readonly complete: boolean;
+  readonly reason: string | null;
+  /** 实际逐条核对到的文件数。 */
+  readonly files: number;
+  /** 本轮列到的文件总数；基线侧没有持久化清单，故为 null。 */
+  readonly listed: number | null;
+}
+
+/**
+ * 「不完整」的具体成因与条数。
+ *
+ * `uncheckedFiles` 是起点有、本轮没核对到的文件（不能算删除）；`unverifiedFiles` 是本轮有、
+ * 起点没覆盖到且已被 Git 跟踪的文件（不能证明是本会话新增）。null 表示服务端未提供该投影。
+ */
+export interface RelayConversationDiffCoverage {
+  readonly baseline: RelayConversationDiffScanSide;
+  readonly current: RelayConversationDiffScanSide;
+  readonly uncheckedFiles: number;
+  readonly unverifiedFiles: number;
+}
+
 export type RelayConversationDiff =
   | {
       readonly available: true;
@@ -434,6 +539,7 @@ export type RelayConversationDiff =
       readonly rootPath: string;
       readonly resourceId: string;
       readonly incomplete: boolean;
+      readonly coverage: RelayConversationDiffCoverage | null;
       readonly totalFiles: number;
       readonly totalAdded: number;
       readonly totalRemoved: number;

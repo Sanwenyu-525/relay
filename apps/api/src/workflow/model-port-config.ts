@@ -79,10 +79,22 @@ export function readModelPortConfig(env: NodeJS.ProcessEnv): ModelPortConfig | u
 }
 
 /**
+ * 默认聊天模型是否**显式声明**接受图片输入（HTTP §10.85，2026-10-18）。
+ *
+ * 这份声明只补一处空白：**模型目录里没有条目**的自建 Provider（例如本机
+ * `agnes-3.0-flash`）。目录里有条目时目录仍是唯一准绳——声明不能把目录判定为
+ * 「不支持」的模型改成支持。未声明时保持 fail-closed：未知不等于可用。
+ *
+ * 这是运维声明，不是猜测，也不是「带图就换模型」的开关；值只接受 `true`。
+ */
+export function readDeclaredImageInput(env: NodeJS.ProcessEnv): boolean {
+  return env.RELAY_MODEL_IMAGE_INPUT?.trim().toLowerCase() === 'true';
+}
+
+/**
  * Resolve the independently configured OpenRouter chat credential for one exact directory model.
  * This deliberately never consults RELAY_MODEL_API_KEY or the catalog-list credential.
- */
-export function readOpenRouterModelPortConfig(env: NodeJS.ProcessEnv,
+ */export function readOpenRouterModelPortConfig(env: NodeJS.ProcessEnv,
   model: string): ModelPortConfig {
   const apiKey = env.RELAY_OPENROUTER_API_KEY;
   const issues: string[] = [];

@@ -98,6 +98,43 @@ interface Preview {
   preview_truncated: boolean; preview_available: boolean;
 }
 
+interface PreviewSseFrame { readonly id: string; readonly event: string; readonly data: Preview }
+
+/** Open the draft-preview SSE endpoint; frames carry the full GET-shaped DTO (contract §10.59). */
+async function openPreviewStream(f: { workspaceId: string; runId: string },
+  bearer = `Bearer ${api.bearerToken}`) {
+  const controller = new AbortController();
+  const response = await fetch(`http://127.0.0.1:${api.port}${workspacePath(f.workspaceId,
+    `/runs/${f.runId}/draft-preview/events`)}`, {
+    headers: { Authorization: bearer, Accept: 'text/event-stream' }, signal: controller.signal });
+  assert.ok(response.body, 'preview SSE response must have a body');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = '';
+  return {
+    status: response.status,
+    next: async (): Promise<PreviewSseFrame> => withTimeout((async () => {
+      while (true) {
+        const end = pending.indexOf('\n\n');
+        if (end >= 0) {
+          const frame = pending.slice(0, end);
+          pending = pending.slice(end + 2);
+          if (frame.startsWith(':')) continue;
+          const id = frame.split('\n').find((line) => line.startsWith('id: '))?.slice(4);
+          const event = frame.split('\n').find((line) => line.startsWith('event: '))?.slice(7);
+          const data = frame.split('\n').find((line) => line.startsWith('data: '))?.slice(6);
+          assert.ok(id && event && data, `incomplete preview frame: ${frame}`);
+          return { id, event, data: JSON.parse(data) as Preview };
+        }
+        const chunk = await reader.read();
+        if (chunk.done) throw new Error('preview SSE closed before the expected frame');
+        pending += decoder.decode(chunk.value, { stream: true });
+      }
+    })(), 10_000, 'preview SSE frame'),
+    close: async () => { controller.abort(); await reader.cancel().catch(() => undefined); },
+  };
+}
+
 // Controlled composition, not the Worker path: advanceRunStep has no transport
 // injection. Build one real claim through its repositories, without a Fake DRAFT
 // or a second model call on the same Attempt.
@@ -588,4 +625,52 @@ test('local DRAFT preview TypeErrors are isolated from Provider network diagnost
     assert.equal(trace.text.includes('TOP_SECRET_LOCAL_PREVIEW_PAYLOAD'), false);
     assert.equal(trace.text.includes('RunDraftPreviewWriteError'), false);
   }
+});
+
+test('SSE draft_preview pushes the same DTO as GET, advances by revision and rejects foreign scopes', async () => {
+  const f = await fixture();
+  const draft = blockedDraft(f);
+  await draft.reached; // preview row committed by DRAFT generation, step commit still blocked
+  const stream = await openPreviewStream(f);
+  try {
+    assert.equal(stream.status, 200);
+    const first = await stream.next();
+    const snapshot = (await api.get(previewPath(f))).body as Preview;
+    assert.equal(first.event, 'draft_preview');
+    assert.equal(first.id, snapshot.preview_revision);
+    assert.deepEqual(first.data, snapshot);
+    // No after/Last-Event-ID: a fresh connection re-pushes the current full snapshot.
+    const again = await openPreviewStream(f);
+    try {
+      const replay = await again.next();
+      assert.equal(replay.id, snapshot.preview_revision);
+      assert.deepEqual(replay.data, snapshot);
+    } finally { await again.close(); }
+    // A newly committed prefix bumps revision and is pushed as a further frame.
+    // The FakeModelPort fixture has already settled its model call, so the publisher
+    // owner check rejects a manual write; bump the already-authorized row directly.
+    // The SSE handler still re-reads through the same reauthorized projection as GET.
+    const updated = await sql`update run_draft_previews
+      set preview_text = ${`${snapshot.preview_text}\n\n## 追加`}, revision = revision + 1,
+        updated_at = clock_timestamp()
+      where run_id = ${f.runId}`.execute(app.db);
+    assert.equal(updated.numAffectedRows, 1n);
+    const second = await stream.next();
+    assert.equal(second.event, 'draft_preview');
+    assert.ok(BigInt(second.id) > BigInt(first.id));
+    assert.match(second.data.preview_text ?? '', /## 追加/u);
+    assert.equal(second.data.step_attempt_id, snapshot.step_attempt_id);
+    // Foreign workspace and bad bearer fail before the stream is upgraded.
+    const other = await fixture();
+    const denied = await openPreviewStream({ workspaceId: other.workspaceId, runId: f.runId });
+    assert.equal(denied.status, 404);
+    await denied.close();
+    const unauthorized = await openPreviewStream(f, 'Bearer wrong');
+    assert.equal(unauthorized.status, 401);
+    await unauthorized.close();
+  } finally { draft.release(); await stream.close(); }
+  assert.equal((await draft.completion).status, 'STEP_SUCCEEDED');
+  const removed = (await api.get(previewPath(f))).body as Preview;
+  assert.equal(removed.preview_available, false);
+  assert.equal(removed.preview_text, null);
 });

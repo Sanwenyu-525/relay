@@ -22,6 +22,19 @@ export interface LiveActionError {
   readonly fieldErrors: readonly RelayFieldError[];
 }
 
+/** 删除阻断项的中文说明（ADR-027）；未知代码原样保留，避免新阻断被静默吞掉。 */
+const sessionDeleteBlockerLabels: Record<string, string> = {
+  FORK_CHILDREN: "有分叉出去的讨论",
+  TASK_ACCEPTANCE_CITED: "被任务验收观察引用",
+  HYPOTHESIS_CITED: "被项目假设引用",
+  WORK_SEGMENT_CITED: "被工作片段引用",
+  BLUEPRINT_CITED: "被项目蓝图提案引用",
+  EXECUTION_REQUESTS: "发起过执行请求",
+  LEARNING_RECORDS: "有学习记录",
+  ARTIFACT_IMPACT_COMMITTED: "影响检查已进入组合检查",
+  PROVIDER_COOLDOWN_ACTIVE: "云模型仍在冷却",
+};
+
 /**
  * 把真实 API 的错误映射为可操作的界面说明。
  * 服务端 detail 是英文契约文本，因此这里按 code 给出中文解释，并保留差异信息。
@@ -104,6 +117,9 @@ export function describeLiveError(caught: unknown): LiveActionError {
         };
       case "INVALID_TRANSITION":
         return { ...base, kind: "transition", message: `当前状态不允许这个操作：${problem.detail}` };
+      case "SESSION_DELETE_BLOCKED":
+        return { ...base, kind: "transition", message: `这条讨论还不能删除：${(problem.blockingReasons ?? [])
+          .map((reason) => sessionDeleteBlockerLabels[reason] ?? reason).join("、") || "仍被其它对象引用"}。先改为归档，或在原对象解除引用后再删除。` };
       case "ACCEPTANCE_STALE":
         return { ...base, kind: "transition", message: "这次提交依据的验收版本已经失效：请重新读取任务后再操作。" };
       case "EVIDENCE_UNAVAILABLE":

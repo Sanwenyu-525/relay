@@ -1,10 +1,10 @@
 import type { DecimalRevision } from "../../types";
 import { RelayTransportError } from "../core/errors";
 import { RelayHttp } from "../core/http";
-import { array, boolean, decimal, nullableString, object, string } from "../core/primitives";
-import { assistMessageFrom, assistantProfileFrom, assistProposalFrom, assistSessionBindingFrom, assistSessionDirectoryBindingFrom, assistSessionFrom, assistSessionPinFrom, assistSessionStateFrom, assistSessionTitleFrom, assistSessionUnreadFrom, assistSourceBody, conversationExecutionFrom, conversationExecutionSummaryFrom, packDefinitionFrom, skillDefinitionFrom, workingDirectoryFrom } from "../parse/assist";
+import { array, boolean, decimal, integer, nullableString, object, string } from "../core/primitives";
+import { assistMessageFrom, assistantProfileFrom, assistProposalFrom, assistSessionBindingFrom, assistSessionDeleteFrom, assistSessionDirectoryBindingFrom, assistSessionForkFrom, assistSessionFrom, assistSessionPinFrom, assistSessionStateFrom, assistSessionTitleFrom, assistSessionUnreadFrom, assistSourceBody, conversationExecutionFrom, conversationExecutionSummaryFrom, packDefinitionFrom, skillDefinitionFrom, workingDirectoryFrom } from "../parse/assist";
 import { commandEnvelopeFrom } from "../parse/projects";
-import type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistProposal, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDirectoryBinding, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayConversationMode, RelayAssistSourceRef, RelayConversationExecution, RelayConversationExecutionStage, RelayPackDefinition, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory } from "../dtos/assist";
+import type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachmentContent, RelayAssistMessageAttachmentUpload, RelayAssistProposal, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayConversationMode, RelayAssistSourceRef, RelayConversationExecution, RelayConversationExecutionStage, RelayPackDefinition, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory } from "../dtos/assist";
 import type { RelayCommandEnvelope } from "../dtos/projects";
 
 export async function getAssistSessions(http: RelayHttp, target: { projectId?: string; taskId?: string; includeContext?: boolean; status?: "ACTIVE" | "ARCHIVED" | "ALL" } = {}): Promise<readonly RelayAssistSession[]> {
@@ -98,12 +98,13 @@ export async function bindAssistSessionDirectory(http: RelayHttp, input: { sessi
  * 这里绝不换新 command_id 重发。回执对不上同样只报「无法核对」，不假装改动已生效。
  */
 async function postSessionControl<T>(http: RelayHttp, input: { sessionId: string; commandId: string;
-  expectedRevision: DecimalRevision; path: string; extra?: Record<string, unknown> },
+  expectedRevision: DecimalRevision; path: string; extra?: Record<string, unknown>;
+  /** 会话控制统一 200；分叉新建子会话，按契约第 3 节是 201。 */ status?: number },
   parse: (value: unknown) => T, mismatch: (value: T) => boolean, label: string): Promise<T> {
   const body = await http.request(http.workspacePath(
     `/assist-sessions/${encodeURIComponent(input.sessionId)}/${input.path}`), { method: "POST",
     body: JSON.stringify({ command_id: input.commandId,
-      expected_revision: input.expectedRevision, ...(input.extra ?? {}) }) }, 200);
+      expected_revision: input.expectedRevision, ...(input.extra ?? {}) }) }, input.status ?? 200);
   try {
     const envelope = commandEnvelopeFrom(body);
     if (envelope.commandId !== input.commandId) throw new Error("command mismatch");
@@ -143,39 +144,99 @@ export function reopenAssistSession(http: RelayHttp, input: { sessionId: string;
     (r) => r.sessionId !== input.sessionId || r.status !== "ACTIVE", "重开");
 }
 
+/**
+ * 物理删除（ADR-027）。与归档不同，它不可撤销：回执只核对身份，界面不得据此提供恢复入口。
+ * 被其它对象引用的会话按 409 `SESSION_DELETE_BLOCKED` 拒绝，阻止项在 problem 的
+ * `blocking_reasons` 里；那是可读的业务拒绝，不是回执不明。
+ */
+export function deleteAssistSession(http: RelayHttp, input: { sessionId: string; commandId: string;
+  expectedRevision: DecimalRevision }): Promise<RelayAssistSessionDelete> {
+  return postSessionControl(http, { ...input, path: "delete" }, assistSessionDeleteFrom,
+    (r) => r.sessionId !== input.sessionId, "删除");
+}
+
+/**
+ * 分叉（0113）：回执里的会话身份是**新建的子会话**，提交前无从预知，因此不做「等于目标会话」
+ * 这一类核对，只核对 command_id 与回执形状（与新建会话同一读法）。
+ */
+export function forkAssistSession(http: RelayHttp, input: { sessionId: string; commandId: string;
+  expectedRevision: DecimalRevision }): Promise<RelayAssistSessionFork> {
+  return postSessionControl(http, { ...input, path: "fork", status: 201 }, assistSessionForkFrom,
+    () => false, "分叉");
+}
+
 export async function getAssistMessages(http: RelayHttp, sessionId: string): Promise<readonly RelayAssistMessage[]> {
   const body = object(await http.request(http.workspacePath(`/assist-sessions/${encodeURIComponent(sessionId)}/messages?limit=200`)), "assist messages");
   return array(body, "items", "assist messages").map(assistMessageFrom);
 }
 
-export async function getAssistLivePreview(http: RelayHttp, sessionId: string, messageId: string): Promise<RelayAssistLivePreview> {
-  const row = object(await http.request(http.workspacePath(
-    `/assist-sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/live-preview`)),
-  "assist live preview");
+/**
+ * 0093：上传一张图片附件（先暂存、随消息命令绑定，不是幂等命令）。
+ * 客户端不做业务裁决：类型白名单、单张上限与会话准入都由服务端唯一准绳决定，
+ * 前端只按同一组常量做发送前预检，拿到 422 时如实展示服务端说明。
+ */
+export async function uploadAssistMessageAttachment(http: RelayHttp, input: {
+  sessionId: string; name: string; mediaType: string; dataBase64: string }): Promise<RelayAssistMessageAttachmentUpload> {
+  const body = object(await http.request(http.workspacePath(
+    `/assist-sessions/${encodeURIComponent(input.sessionId)}/message-attachments`), { method: "POST",
+    body: JSON.stringify({ name: input.name, media_type: input.mediaType,
+      data_base64: input.dataBase64 }) }, 201), "assist attachment upload");
+  return { attachmentId: string(body, "attachment_id", "assist attachment upload"),
+    byteLength: integer(body, "byte_length", "assist attachment upload"),
+    contentHash: string(body, "content_hash", "assist attachment upload") };
+}
+
+/** 0093：读一张附件的内容（历史消息缩略图）。内容按单张读取，不进消息列表投影。 */
+export async function getAssistMessageAttachment(http: RelayHttp, input: {
+  sessionId: string; attachmentId: string }): Promise<RelayAssistMessageAttachmentContent> {
+  const body = object(await http.request(http.workspacePath(
+    `/assist-sessions/${encodeURIComponent(input.sessionId)}/message-attachments/${encodeURIComponent(input.attachmentId)}`)),
+    "assist attachment");
+  return { attachmentId: string(body, "attachment_id", "assist attachment"),
+    name: string(body, "name", "assist attachment"),
+    mediaType: string(body, "media_type", "assist attachment"),
+    byteLength: integer(body, "byte_length", "assist attachment"),
+    dataBase64: string(body, "data_base64", "assist attachment") };
+}
+
+export function assistLivePreviewFrom(raw: unknown, expectedSessionId: string, expectedMessageId: string): RelayAssistLivePreview {
+  const row = object(raw, "assist live preview");
   const status = string(row, "status", "assist live preview");
   if (!["PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"].includes(status) ||
-    string(row, "session_id", "assist live preview") !== sessionId ||
-    string(row, "message_id", "assist live preview") !== messageId) {
+    string(row, "session_id", "assist live preview") !== expectedSessionId ||
+    string(row, "message_id", "assist live preview") !== expectedMessageId) {
     throw new RelayTransportError("Assist 草稿预览与当前消息不匹配。");
   }
-  return { sessionId, messageId, status: status as RelayAssistMessage["status"],
+  return { sessionId: expectedSessionId, messageId: expectedMessageId,
+    status: status as RelayAssistMessage["status"],
     previewRevision: decimal(row, "preview_revision", "assist live preview"),
     previewText: nullableString(row, "preview_text", "assist live preview"),
     previewTruncated: boolean(row, "preview_truncated", "assist live preview"),
     previewAvailable: boolean(row, "preview_available", "assist live preview") };
 }
 
+export async function getAssistLivePreview(http: RelayHttp, sessionId: string, messageId: string): Promise<RelayAssistLivePreview> {
+  return assistLivePreviewFrom(await http.request(http.workspacePath(
+    `/assist-sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/live-preview`)),
+    sessionId, messageId);
+}
+
 /**
  * 发一条消息。三个分支是**排他的**，不是可选字段的组合：
  * 普通档带 intent 或 skill_ref；助手档两个都不带——服务端会以 409 拒绝助手档的
  * intent 与 Skill（ADR-018、命令契约 §10.60.4），客户端就不该把这条路留出来。
+ *
+ * `attachmentIds` 只在有图片附件时出现：它进命令载荷 hash，重放按原 ids 核对，
+ * 所以重试必须沿同一组 ids（不重新上传、不换 id）。没有附件时载荷逐字不变。
  */
-export async function requestAssistMessage(http: RelayHttp, input: { sessionId: string; commandId: string; content: string; sourceRefs: readonly RelayAssistSourceRef[]; recordLearning?: boolean; expectedModelSelectionRevision?: string } & ( { intent: "DISCUSS" | "PROPOSE_CANDIDATE" | "PROPOSE_TASK"; skillRef?: never; skillInput?: never } | { intent?: never; skillRef: { id: string; version: string }; skillInput: RelaySkillInput } | { intent?: never; skillRef?: never; skillInput?: never } )): Promise<{ userMessageId: string; assistantMessageId: string }> {
+export async function requestAssistMessage(http: RelayHttp, input: { sessionId: string; commandId: string; content: string; sourceRefs: readonly RelayAssistSourceRef[]; recordLearning?: boolean; expectedModelSelectionRevision?: string; attachmentIds?: readonly string[] } & ( { intent: "DISCUSS" | "PROPOSE_CANDIDATE" | "PROPOSE_TASK"; skillRef?: never; skillInput?: never } | { intent?: never; skillRef: { id: string; version: string }; skillInput: RelaySkillInput } | { intent?: never; skillRef?: never; skillInput?: never } )): Promise<{ userMessageId: string; assistantMessageId: string }> {
   const body = await http.request(http.workspacePath(`/assist-sessions/${encodeURIComponent(input.sessionId)}/messages`), {
     method: "POST", body: JSON.stringify({ command_id: input.commandId, content: input.content,
       source_refs: input.sourceRefs.map(assistSourceBody),
       ...(input.recordLearning === undefined ? {} : { record_learning: input.recordLearning }),
       ...(input.expectedModelSelectionRevision === undefined ? {} : { expected_model_selection_revision: input.expectedModelSelectionRevision }),
+      ...(input.attachmentIds === undefined || input.attachmentIds.length === 0 ? {}
+        : { attachment_ids: [...input.attachmentIds] }),
       ...(input.skillRef ? { skill_ref: input.skillRef, skill_input: input.skillInput }
         : input.intent ? { intent: input.intent } : {}) }) }, 202);
   try {

@@ -64,12 +64,9 @@ export async function getRun(http: RelayHttp, runId: string): Promise<RelayRun> 
   return runFrom(await http.request(http.workspacePath(`/runs/${encodeURIComponent(runId)}`)));
 }
 
-export async function getRunDraftPreview(http: RelayHttp, runId: string): Promise<RelayRunDraftPreview> {
-  const row = object(await http.request(http.workspacePath(`/runs/${encodeURIComponent(runId)}/draft-preview`)),
-    "Run DRAFT preview");
-  if (string(row, "run_id", "Run DRAFT preview") !== runId) {
-    throw new RelayTransportError("Run 草稿预览与当前执行记录不匹配。");
-  }
+export function runDraftPreviewFrom(raw: unknown): RelayRunDraftPreview {
+  const row = object(raw, "Run DRAFT preview");
+  const runId = string(row, "run_id", "Run DRAFT preview");
   const epoch = nullableString(row, "attempt_claim_epoch", "Run DRAFT preview");
   if (epoch !== null && !/^\d+$/u.test(epoch)) throw new RelayTransportError("Run 草稿轮次序号无效。");
   const available = boolean(row, "preview_available", "Run DRAFT preview");
@@ -84,6 +81,12 @@ export async function getRunDraftPreview(http: RelayHttp, runId: string): Promis
     previewRevision: decimal(row, "preview_revision", "Run DRAFT preview"),
     previewText, previewTruncated: boolean(row, "preview_truncated", "Run DRAFT preview"),
     previewAvailable: available };
+}
+
+export async function getRunDraftPreview(http: RelayHttp, runId: string): Promise<RelayRunDraftPreview> {
+  const preview = runDraftPreviewFrom(await http.request(http.workspacePath(`/runs/${encodeURIComponent(runId)}/draft-preview`)));
+  if (preview.runId !== runId) throw new RelayTransportError("Run 草稿预览与当前执行记录不匹配。");
+  return preview;
 }
 
 export async function getRunTrace(http: RelayHttp, runId: string): Promise<RelayRunTrace> {

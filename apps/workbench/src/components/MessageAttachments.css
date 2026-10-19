@@ -1,0 +1,42 @@
+/* 历史消息里的图片附件（工作台 §33.3）。
+   缩略图按卡片宽度等比受限，不撑破气泡；名称与大小作为图注常驻，
+   读不出内容时同一位置显示占位文字与重试入口，不留空白。 */
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--relay-space-2);
+  margin: var(--relay-space-1) 0 0;
+  min-width: 0;
+}
+.message-attachment {
+  display: grid;
+  gap: var(--relay-space-0-5);
+  justify-items: start;
+  margin: 0;
+  max-width: 100%;
+  min-width: 0;
+}
+.message-attachment-image {
+  display: block;
+  max-width: min(100%, 20rem);
+  max-height: 12rem;
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+  object-fit: contain;
+}
+.message-attachment-placeholder {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--relay-space-8);
+  padding: 0 var(--relay-space-2);
+  border: var(--relay-border-width) dashed var(--relay-color-border-control);
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+}
+.message-attachment figcaption {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  overflow-wrap: anywhere;
+}

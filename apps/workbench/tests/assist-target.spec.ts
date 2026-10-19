@@ -77,7 +77,7 @@ describe("P12 Assist 目标固定", () => {
           : response({ id: projectId, title: "当前项目", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
       }
       if (url === `${prefix}/tasks/${taskId}`) return response(task());
-      if (url.startsWith(`${prefix}/assist-sessions?`)) return response({ items: [] });
+      if (url.startsWith(`${prefix}/assist-sessions?include_context=true`)) return response({ items: [] });
       throw new Error(`unexpected request ${url}`);
     }));
     const { router, wrapper } = await mountedAssist(`/projects/${projectId}/assist`);

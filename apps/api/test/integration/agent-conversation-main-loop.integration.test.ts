@@ -11,6 +11,7 @@ import { createAssistSession, bindAssistSessionDirectory, cancelAssistMessage,
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
 import { createGatewayPolicy, registerManagedResource } from
   '../../src/application/gateway-configuration.js';
+import { openWorkingDirectory } from '../../src/application/open-working-directory.js';
 import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
 import { SessionToolCallRepository } from '../../src/assist/session-tool-call-repository.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
@@ -340,24 +341,28 @@ test('AM-03 目录来自服务端持久绑定；同项目多个受管资源时�
 
   // 换绑后下一轮立刻按新目录解析，不缓存旧绑定。
   //
-  // 本夹具只给第一个根配了连接与权限，所以换绑后的读取会被准入拒绝。这里要断言的是
-  // **它不再读第一个根**：如果实现仍按项目取「第一个受管资源」，请求会成功并带回
-  // README.md——那正是要防的缺陷。拒绝与否是权限事实，不是这条断言的目标。
+  // 目录重绑会按该根建立自己的只读配置；必须读取第二个根，不能复用第一个根的内容。
   const other = resources.find((row) => row.canonical_root !== fx.canonicalRoot)!;
+  const opened = await openWorkingDirectory(app.db, { workspaceId: fx.workspaceId,
+    commandId: randomUUID(), rootPath: other.canonical_root, projectId: fx.projectId });
+  assert.equal(opened.result.status, 'READY');
+  assert.equal(opened.result.association?.resource_id, other.id);
   await bindAssistSessionDirectory(app.db, { workspaceId: fx.workspaceId,
     sessionId: fx.sessionId, commandId: randomUUID(), resourceId: other.id });
   const rebound = await askWithScript(fx, [[{ name: 'list_directory', arguments: {} }]]);
   assert.equal(rebound.status, 'COMPLETED', JSON.stringify(rebound));
   const reboundListing = rebound.fedBack.find((item) => item.name === 'list_directory');
+  assert.ok((reboundListing?.content ?? '').includes('OTHER.md'),
+    '目录重绑后应读取新根：' + String(reboundListing?.content));
   assert.ok(!(reboundListing?.content ?? '').includes('README.md'),
     '换绑后不得继续读上一个根：' + String(reboundListing?.content));
   const reboundRows = await new SessionToolCallRepository(app.db).listBySession(fx.sessionId);
   const lastRow = reboundRows.at(-1);
-  assert.equal(lastRow?.status, 'REJECTED');
-  assert.ok((lastRow?.rejection_detail ?? '').includes(other.id) ||
-    lastRow?.rejection_reason === 'GATEWAY_ACTION_DENIED',
-  '换绑后的读取必须按新目录判定：' + JSON.stringify({ reason: lastRow?.rejection_reason,
-    detail: lastRow?.rejection_detail }));
+  assert.equal(lastRow?.status, 'SETTLED',
+    '新目录自动配置只读连接后，应通过原会话读取新的根');
+  const reboundOperation = await createRepositories(app.db).gateway.readOperation(lastRow!.operation_id!);
+  assert.equal(reboundOperation?.resource_id, other.id,
+    '第二条读取 Operation 必须绑定新目录的受管资源');
 });
 
 test('AM-03 未绑定目录的会话按类型化原因拒掉本次读取，不回落到「取第一个资源」', async () => {

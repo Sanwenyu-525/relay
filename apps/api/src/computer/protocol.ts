@@ -9,11 +9,12 @@
 /** 冻结的协议版本标签；不匹配的运行时一律拒绝，不静默降级。 */
 export const COMPUTER_PROTOCOL_VERSION = 'relay-computer-v1';
 
-/** V1 冻结的十个方法名 + V2 的环境探测（与 Rust `protocol::METHODS` 逐字一致）。 */
+/** V1 冻结的十个方法名 + V2 的鼠标移动与环境探测（与 Rust `protocol::METHODS` 逐字一致）。 */
 export const COMPUTER_METHODS = [
   'computer.screenshot',
   'computer.get_windows',
   'computer.activate_window',
+  'computer.move',
   'computer.click',
   'computer.double_click',
   'computer.scroll',
@@ -45,15 +46,18 @@ export const COMPUTER_ERROR_CODES = [
 ] as const;
 
 /**
- * V2：在用户当前桌面产生输入的八个动作。
+ * V2：在用户当前桌面产生输入的动作。
  *
  * 它们的执行**必须**由 Gateway 的显式授权（单动作 Review 批准 = 仅此一次，
  * 或本次任务范围授权 = 本任务内允许）驱动；适配器在派发时注入 `allow_foreground`，
  * 模型参数里不存在这一项，模型无法自我授权。
+ *
+ * `COMPUTER_MOVE` 也在此表内：移动光标不产生点击，但会改变用户桌面的指针位置，
+ * 而滚动与拖拽都以当前位置为前提，因此同样算前台输入。
  */
 export const COMPUTER_FOREGROUND_INPUT_ACTIONS: readonly string[] = [
-  'COMPUTER_ACTIVATE_WINDOW', 'COMPUTER_CLICK', 'COMPUTER_DOUBLE_CLICK', 'COMPUTER_SCROLL',
-  'COMPUTER_DRAG', 'COMPUTER_TYPE', 'COMPUTER_KEYPRESS', 'COMPUTER_HOTKEY',
+  'COMPUTER_ACTIVATE_WINDOW', 'COMPUTER_MOVE', 'COMPUTER_CLICK', 'COMPUTER_DOUBLE_CLICK',
+  'COMPUTER_SCROLL', 'COMPUTER_DRAG', 'COMPUTER_TYPE', 'COMPUTER_KEYPRESS', 'COMPUTER_HOTKEY',
 ];
 
 export function isForegroundInputAction(actionType: string): boolean {

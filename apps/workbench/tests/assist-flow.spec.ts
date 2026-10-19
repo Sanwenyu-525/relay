@@ -16,7 +16,8 @@ function response(body: unknown, status = 200): Response {
 }
 function session() {
   return { id: sessionId, workspace_id: workspaceId, project_id: projectId, task_id: null,
-    title: "关于测试项目", status: "ACTIVE", revision: "1", updated_at: "2026-09-26T00:00:00Z" };
+    title: "关于测试项目", status: "ACTIVE", revision: "1",
+    created_at: "2026-09-26T00:00:00Z", updated_at: "2026-09-26T00:00:00Z" };
 }
 function message(id: string, seq: string, role: string, status: string, content: string | null,
   sources: unknown[] = []) {
@@ -66,7 +67,7 @@ describe("M04 Assist 真实路由与命令", () => {
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
     view.unmount();
   });
-  it("已归档 Project Assist 深链可读历史会话，但禁新会话、消息、取消和接受提案", async () => {
+  it("已归档 Project Assist 深链可读历史会话，但禁消息、取消和接受提案", async () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
@@ -82,7 +83,9 @@ describe("M04 Assist 真实路由与命令", () => {
     }); vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench(`/projects/${projectId}?skill=assist`);
     expect(view.wrapper.get('[data-testid="assist-archive-reason"]').text()).toContain("已归档");
-    expect(view.wrapper.get('[data-testid="assist-new-session"]').attributes("disabled")).toBeDefined();
+    // 顶栏右翼的「新建会话」已按用户指令删除（2026-10-18）：归档态不再有这颗键，
+    // 写保护由归档说明与「零 POST」共同保证。
+    expect(view.wrapper.find('[data-testid="assist-new-session"]').exists()).toBe(false);
     await view.wrapper.get('[data-testid="assist-draft"]').setValue("仍想发送");
     // 有 RUNNING 回复时子页主键就是停止键，发送形态不存在；归档后停止同样禁写。
     expect(view.wrapper.find('[data-testid="assist-send"]').exists()).toBe(false);
@@ -112,7 +115,8 @@ describe("M04 Assist 真实路由与命令", () => {
     expect(view.wrapper.get(".breadcrumbs").text()).toContain("Assist");
     expect(view.wrapper.get('[data-testid="assist-target"]').text()).toContain("历史任务");
     expect(view.wrapper.get('[data-testid="assist-archive-reason"]').text()).toContain("已归档");
-    await view.wrapper.get('[data-testid="assist-new-session"]').trigger("click");
+    // 顶栏右翼已没有「新建会话」（2026-10-18 用户指令）：归档任务连入口带写保护一起收起。
+    expect(view.wrapper.find('[data-testid="assist-new-session"]').exists()).toBe(false);
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
     view.unmount();
   });

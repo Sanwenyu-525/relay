@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   archiveAssistSession,
+  forkAssistSession,
   reopenAssistSession,
   renameAssistSession,
   setAssistSessionPin,
@@ -11,7 +12,7 @@ import { DomainError } from '../../src/application/domain-error.js';
 import type { DbExecutor } from '../../src/infrastructure/database.js';
 
 /**
- * 会话行内控制（改名/置顶/归档/重开）的纯判定单元。
+ * 会话行内控制（改名/置顶/归档/重开/分叉）的纯判定单元。
  *
  * 这里只覆盖进入幂等命令之前、不依赖数据库的入口栅栏：标题文本规则与
  * `expected_revision` 的十进制字符串规则。这两道都是 422，必须在应用层就挡住，
@@ -79,7 +80,7 @@ test('改名拒绝标题里的控制字符', async () => {
   await assertValidation(rename('正常标题\u0007尾部'), 'title', 'must not contain control characters');
 });
 
-test('四条命令都要求十进制字符串的 expected_revision', async () => {
+test('五条命令都要求十进制字符串的 expected_revision', async () => {
   for (const expectedRevision of ['', 'abc', '-1', '1.5', '1e3', '9'.repeat(20)]) {
     await assertValidation(rename('可用的新标题', expectedRevision), 'expected_revision', revisionShape);
     await assertValidation(() => setAssistSessionPin(db, {
@@ -89,6 +90,10 @@ test('四条命令都要求十进制字符串的 expected_revision', async () =>
       workspaceId, sessionId, commandId, expectedRevision,
     }), 'expected_revision', revisionShape);
     await assertValidation(() => reopenAssistSession(db, {
+      workspaceId, sessionId, commandId, expectedRevision,
+    }), 'expected_revision', revisionShape);
+    // 分叉没有可调参数，修订是它唯一的入口栅栏；子会话标题由服务端算，不经过调用方。
+    await assertValidation(() => forkAssistSession(db, {
       workspaceId, sessionId, commandId, expectedRevision,
     }), 'expected_revision', revisionShape);
   }

@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act, type ReactElement } from "react";
 import { afterEach, expect, it, vi } from "vitest";
-import { FeedbackHost, Notice, Snackbar, Toast } from "../src/components/Feedback";
+import { FeedbackHost, Notice, Snackbar, Toast, closeUndoFeedback, escalateFeedback, openUndoFeedback } from "../src/components/Feedback";
+import { feedbackEntries, removeFeedback } from "../src/lib/feedback";
 import { feedbackText, flush, mountReact } from "./mountApp";
 
 /**
@@ -23,6 +24,13 @@ async function mount(slot: ReactElement) {
   return owner;
 }
 
+/** 命令式条目的归属方是业务动作而不是某个组件，所以这里只挂宿主。 */
+async function mountHost() {
+  const host = await mountReact(<FeedbackHost />);
+  roots.push(host);
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+}
+
 function card(testId: string): HTMLElement | null {
   return document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
 }
@@ -39,6 +47,8 @@ async function hover(testId: string, leaving = false): Promise<void> {
 
 afterEach(() => {
   while (roots.length > 0) roots.pop()?.unmount();
+  // 命令式条目不随组件卸载收走（这正是它存在的理由），不逐条清空会把上一条测试的浮层带进下一条。
+  act(() => { feedbackEntries().forEach((entry) => { removeFeedback(entry.id); }); });
   vi.useRealTimers();
 });
 
@@ -101,6 +111,71 @@ it("多条反馈按出现顺序叠放，来源组件卸载后不留孤儿条目"
   expect(cards[0]?.parentElement).toBe(cards[1]?.parentElement);
   await act(async () => { roots.pop()?.unmount(); });
   expect(card("feedback-stack")).toBeNull();
+});
+
+it("命令式撤销条不随触发它的插槽一起卸载，关闭后才消失", async () => {
+  await mountHost();
+  const owner = await mountReact(<Toast>插槽条目</Toast>);
+  roots.push(owner);
+  act(() => { openUndoFeedback("k-stay", { text: "已归档这段讨论", actionLabel: "撤销", onUndo: () => undefined, testId: "undo-stay" }); });
+  expect(card("undo-stay")).not.toBeNull();
+  // 归属组件卸载：插槽那条被自己的清理收走，撤销条必须留下。
+  owner.unmount();
+  roots.pop();
+  expect(card("feedback-toast")).toBeNull();
+  expect(feedbackText("undo-stay")).toContain("已归档这段讨论");
+  act(() => { closeUndoFeedback("k-stay"); });
+  expect(card("undo-stay")).toBeNull();
+});
+
+it("同一个键重复打开只保留一条，内容是后一次那份", async () => {
+  await mountHost();
+  act(() => { openUndoFeedback("k-dup", { text: "第一次归档", actionLabel: "撤销", onUndo: () => undefined, testId: "undo-dup" }); });
+  act(() => { openUndoFeedback("k-dup", { text: "第二次归档", actionLabel: "撤销", onUndo: () => undefined, testId: "undo-dup" }); });
+  const cards = Array.from(document.querySelectorAll('[data-testid="undo-dup"]'));
+  expect(cards).toHaveLength(1);
+  expect(cards[0]?.textContent).toContain("第二次归档");
+  expect(cards[0]?.getAttribute("data-variant")).toBe("snackbar");
+});
+
+it("点撤销跑恰一次反向命令并把条目同步收走", async () => {
+  let undos = 0;
+  await mountHost();
+  act(() => { openUndoFeedback("k-undo", { text: "已归档这段讨论", actionLabel: "撤销", onUndo: () => { undos += 1; }, testId: "undo-click" }); });
+  const button = card("undo-click")?.querySelector("button");
+  expect(button?.textContent).toBe("撤销");
+  await act(async () => { button?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+  expect(undos).toBe(1);
+  expect(card("undo-click")).toBeNull();
+});
+
+it("撤销条还在栈里时升级成 Notice：换内容不换条目，计时器不再收走", async () => {
+  vi.useFakeTimers();
+  await mountHost();
+  act(() => { openUndoFeedback("k-live", { text: "已归档这段讨论", actionLabel: "撤销", onUndo: () => undefined, testId: "undo-live" }); });
+  act(() => { escalateFeedback("k-live", { text: "撤销没成功：这段讨论刚被改过", testId: "undo-live" }); });
+  expect(Array.from(document.querySelectorAll('[data-testid="undo-live"]'))).toHaveLength(1);
+  const target = card("undo-live");
+  expect(target?.getAttribute("data-variant")).toBe("notice");
+  expect(target?.getAttribute("role")).toBe("alert");
+  // 原来的 8 秒停留计时必须被清掉，否则这条会在用户还没读完时自己消失。
+  await advance(60_000);
+  expect(card("undo-live")).not.toBeNull();
+  const close = card("undo-live")?.querySelector(".feedback-close");
+  await act(async () => { close?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+  expect(card("undo-live")).toBeNull();
+});
+
+it("撤销条已超时消失后再升级，仍作为 Notice 重新出现而不是静默丢弃", async () => {
+  vi.useFakeTimers();
+  await mountHost();
+  act(() => { openUndoFeedback("k-gone", { text: "已归档这段讨论", actionLabel: "撤销", onUndo: () => undefined, testId: "undo-gone" }); });
+  await advance(8_000);
+  expect(card("undo-gone")).toBeNull();
+  act(() => { escalateFeedback("k-gone", { text: "撤销没成功：这段讨论刚被改过", testId: "undo-gone" }); });
+  expect(card("undo-gone")?.getAttribute("data-variant")).toBe("notice");
+  await advance(120_000);
+  expect(card("undo-gone")).not.toBeNull();
 });
 
 it("栈锚在屏幕正上方且落在桌面标题带之下，不退回底部", () => {

@@ -1,0 +1,106 @@
+/* 输入器工具行上的「选择任务 / 选择项目」芯片与弹层（工作台 §32.11）。
+   与 `.agent-chat-permission` 同一套浮层语言：芯片沿用 `.agent-chat-tool`，
+   弹层向上弹出、panel 圆角 + separator 细边 + floating 阴影，宽度收缩到内容。
+   只使用既有 token，不新增数值。 */
+.composer-target { position: relative; display: inline-flex; }
+.composer-target-chip { list-style: none; }
+.composer-target-chip::-webkit-details-marker { display: none; }
+.composer-target-chip[aria-disabled="true"] { opacity: 0.6; cursor: not-allowed; }
+.composer-target-chip svg:not(.agent-chat-chip-chevron) {
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+  flex: none;
+}
+/* 缺上下文是「当前这一步做不了」，用警示色而不是危险色：它可修，不是错误。 */
+.composer-target-chip { color: var(--relay-color-status-warning-text); }
+.composer-target[open] .composer-target-chip {
+  background: var(--relay-color-selection-hover);
+  color: var(--relay-color-text-primary);
+}
+.composer-target-menu {
+  position: absolute;
+  bottom: calc(100% + var(--relay-space-2));
+  left: 0;
+  z-index: var(--relay-zIndex-popover);
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-0-5);
+  width: max-content;
+  min-width: 14rem;
+  max-width: min(24rem, calc(100vw - var(--relay-space-6)));
+  /* 项目/任务可能很多：面板自身滚动，不把底边推出视口。 */
+  max-height: min(22rem, 60vh);
+  overflow-y: auto;
+  padding: var(--relay-space-2);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  box-shadow: var(--relay-shadow-floating);
+}
+.composer-target-head {
+  margin: var(--relay-space-1) 0 0;
+  font-family: var(--relay-font-family-ui);
+  font-size: var(--relay-font-size-caption);
+  font-weight: var(--relay-font-weight-medium);
+  line-height: var(--relay-font-lineHeight-snug);
+  color: var(--relay-color-text-muted);
+}
+.composer-target-line,
+.composer-target-footnote {
+  margin: 0;
+  padding: var(--relay-space-1) var(--relay-space-2);
+  font-family: var(--relay-font-family-ui);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  color: var(--relay-color-text-secondary);
+}
+.composer-target-footnote {
+  margin-top: var(--relay-space-1);
+  padding-top: var(--relay-space-1);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+  color: var(--relay-color-text-muted);
+}
+.composer-target-line--error { color: var(--relay-color-status-danger-text); }
+.composer-target-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--relay-space-0-5);
+  width: 100%;
+  min-height: var(--relay-control-height-compact);
+  padding: var(--relay-space-1) var(--relay-space-2);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--relay-radius-control);
+  cursor: pointer;
+  transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.composer-target-row:hover { background: var(--relay-color-selection-hover); }
+.composer-target-row[data-current="true"] { background: var(--relay-color-selection-bg); }
+.composer-target-row-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  max-width: 100%;
+  font-family: var(--relay-font-family-ui);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+  line-height: var(--relay-font-lineHeight-ui);
+  color: var(--relay-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-target-row-title svg {
+  width: var(--relay-font-size-body);
+  height: var(--relay-font-size-body);
+  flex: none;
+  color: var(--relay-color-text-secondary);
+}
+.composer-target-row-body {
+  font-family: var(--relay-font-family-ui);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-snug);
+  color: var(--relay-color-text-muted);
+}

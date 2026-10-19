@@ -1,75 +1,21 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { RelayApiError, type RelayActivityFilter, type RelayActivityItem, type RelayActivityRefKind, type RelayProjectListItem } from "../api/relayClient";
+import { RelayApiError, type RelayActivityFilter, type RelayActivityItem, type RelayProjectListItem } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import PageHeader from "../components/PageHeader";
 import "./ActivityView.css";
+import { activityActorLabels as actorLabels, activityEventLabel as eventTypeLabel, activityEventSummary as eventSummary, activityRefLabels as refLabels, activityRefLinkLabels as refLinkLabels, activityRefTarget as refTarget, activityEventCategory as eventCategory, activityCategoryMeta as categoryMeta, type ActivityEventCategory } from "../lib/labels";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MANUAL_PROJECT_OPTION = "__manual__";
-type ActorKind = RelayActivityItem["actorKind"];
-// 单用户本机应用：人工动作以「我」呈现，与服务端 actor_kind=HUMAN 对应；不显示原始 actor_ref。
-const actorLabels: Record<ActorKind, string> = { HUMAN: "我", AI: "AI", SYSTEM: "系统" };
-const eventTypeLabels: Record<string, string> = {
-  PROJECT_CREATED: "创建项目", PROJECT_STATE_UPDATED: "更新项目状态", PROJECT_ARCHIVED: "归档项目",
-  TASK_CREATED: "创建任务", TASK_UPDATED: "更新任务", TASK_STARTED: "开始任务", TASK_CANCELLED: "取消任务",
-  TASK_COMPLETED: "完成任务", TASK_REOPENED: "重开任务", TASK_READY: "任务进入可执行",
-  ARTIFACT_VERSION_SAVED: "保存产物版本", ARTIFACT_VERSION_SELECTED: "选用产物版本",
-  DELEGATION_CREATED: "委托 AI 执行", RUN_CREATED: "创建 Run", RUN_FINISHED: "Run 结束",
-  REVIEW_DECIDED: "作出审批决定", VERIFICATION_COMPLETED: "验证完成",
-  WORKSPACE_INITIALIZED: "创建工作区", GOAL_CREATED: "创建目标",
-  PROJECT_RETURN_REVIEWED: "查看项目接续变化", PROJECT_DAILY_VIEW_CONFIRMED: "确认项目当日进展",
-  TASK_PRESENTATION_UPDATED: "修改任务", TASK_ACCEPTANCE_CHANGED: "修改验收条件", TASK_PLANNING_UPDATED: "修改任务计划",
-  TASK_READIED: "任务进入可执行", TASK_DELEGATED: "委托任务", RUN_FAILED: "运行失败",
-  RUN_CONTROL_REQUESTED: "请求运行控制", RUN_CONTROL_APPLIED: "运行控制已应用",
-  REVIEW_REQUESTED: "请求人工判断", VERIFICATION_FINALIZED: "检查已结算",
-  CONVERSATION_STATE_REQUESTED: "提交状态维护请求", CONVERSATION_EXECUTION_REQUESTED: "提交执行请求",
-  TODAY_TASK_SELECTION_CHANGED: "修改任务选择", TODAY_FOCUS_CHANGED: "修改当日焦点"
-};
-function eventTypeLabel(eventType: string): string {
-  return Object.hasOwn(eventTypeLabels, eventType) ? eventTypeLabels[eventType]! : "未识别的事件";
-}
-function eventSummary(item: RelayActivityItem): string {
-  return item.summary === "业务事件" ? eventTypeLabel(item.eventType) : item.summary;
-}
-const refLabels: Record<RelayActivityRefKind, string> = {
-  PROJECT: "项目", TASK: "任务", RUN: "Run", GOAL: "目标", ARTIFACT_VERSION: "产物版本",
-  REVIEW: "Review", COMPLETION: "完成凭据", VERIFICATION_SESSION: "验证会话"
-};
-const refLinkLabels: Partial<Record<RelayActivityRefKind, string>> = {
-  PROJECT: "打开项目", TASK: "打开关联任务", RUN: "查看执行记录", ARTIFACT_VERSION: "查看产物来源链",
-  REVIEW: "查看审批请求", COMPLETION: "查看完成凭据"
-};
+type EventCategory = ActivityEventCategory;
 
-// 类别只依据已知的确切 event_type，不从名称前缀或模型输出推断成功。
-type EventCategory = "approval" | "verification" | "execution" | "artifact" | "completion" | "state" | "unknown";
-const categoryByEvent: Record<string, EventCategory> = {
-  REVIEW_DECIDED: "approval", REVIEW_REQUESTED: "approval",
-  VERIFICATION_COMPLETED: "verification", VERIFICATION_FINALIZED: "verification",
-  ARTIFACT_VERSION_SAVED: "artifact", ARTIFACT_VERSION_SELECTED: "artifact", TASK_COMPLETED: "completion",
-  DELEGATION_CREATED: "execution", TASK_DELEGATED: "execution", RUN_CREATED: "execution", RUN_FINISHED: "execution",
-  RUN_FAILED: "execution", RUN_CONTROL_REQUESTED: "execution", RUN_CONTROL_APPLIED: "execution",
-  CONVERSATION_EXECUTION_REQUESTED: "execution", TASK_STARTED: "execution"
-};
 const categoryFilters: readonly { value: "ALL" | EventCategory; label: string }[] = [
   { value: "ALL", label: "全部" }, { value: "execution", label: "执行" }, { value: "verification", label: "检查" },
   { value: "artifact", label: "产物" }, { value: "approval", label: "决策" }, { value: "completion", label: "完成" },
   { value: "state", label: "项目与任务" }, { value: "unknown", label: "其他" }
 ];
-const categoryMeta: Record<EventCategory, { chip: string; tone: "neutral" | "warning" | "success"; note: string }> = {
-  approval: { chip: "人工判断", tone: "neutral", note: "这是人工判断的请求或决定记录，请以确切事件为准。批准只针对当时的具体动作或版本，不代表相关动作已经执行成功，也不等于任务完成。" },
-  verification: { chip: "检查", tone: "neutral", note: "检查结算不表示通过；判定须核对相应版本与条件。检查通过不等于任务完成，仍需核对其他必需条件。" },
-  execution: { chip: "执行", tone: "neutral", note: "这是执行请求、委托或运行控制记录，请以确切事件为准。请求或运行结束不表示执行成功，也不等于任务完成。" },
-  artifact: { chip: "产物", tone: "neutral", note: "这是服务端记录的一次产物变化，与人工批准、验证判定是分开的独立事实。" },
-  completion: { chip: "完成", tone: "success", note: "这是当时提交的任务完成事实，确切产物与条件以完成凭据为准；当前状态仍需打开任务核对。" },
-  state: { chip: "项目与任务", tone: "neutral", note: "这是项目、任务或工作空间的操作记录，不据此推断执行结果或验收状态。" },
-  unknown: { chip: "未分类", tone: "neutral", note: "当前界面尚未识别此事件类型，不能据此判断成功或完成。原始类型与服务端摘要保留在依据中。" }
-};
-function eventCategory(eventType: string): EventCategory {
-  return Object.hasOwn(categoryByEvent, eventType) ? categoryByEvent[eventType]!
-    : Object.hasOwn(eventTypeLabels, eventType) ? "state" : "unknown";
-}
 
 function localInput(utc: string): string {
   const date = new Date(utc);
@@ -81,16 +27,6 @@ function filterFromSearch(search: string): RelayActivityFilter {
   const query = new URLSearchParams(search);
   return { projectId: query.get("project_id") || undefined, taskId: query.get("task_id") || undefined,
     runId: query.get("run_id") || undefined, from: query.get("from") || undefined, to: query.get("to") || undefined };
-}
-
-function refTarget(kind: RelayActivityRefKind, id: string): string | null {
-  if (kind === "PROJECT") return `/projects/${id}`;
-  if (kind === "TASK") return `/tasks/${id}`;
-  if (kind === "RUN") return `/runs/${id}`;
-  if (kind === "REVIEW") return `/reviews?id=${id}`;
-  if (kind === "ARTIFACT_VERSION") return `/artifact-versions/${id}/lineage`;
-  if (kind === "COMPLETION") return `/completion-records/${id}`;
-  return null;
 }
 
 function localTime(utc: string): string {
@@ -187,7 +123,7 @@ export default function ActivityView() {
   const [runId, setRunId] = useState(active.runId ?? "");
   const [from, setFrom] = useState(active.from ? localInput(active.from) : "");
   const [to, setTo] = useState(active.to ? localInput(active.to) : "");
-  const [actorFilter, setActorFilter] = useState<"ALL" | ActorKind>("ALL");
+  const [actorFilter, setActorFilter] = useState<"ALL" | RelayActivityItem["actorKind"]>("ALL");
   const [categoryFilter, setCategoryFilter] = useState<"ALL" | EventCategory>("ALL");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);

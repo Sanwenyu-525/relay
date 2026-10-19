@@ -176,6 +176,23 @@ if ($RefreshApi) {
   Invoke-Pnpm $repoRoot @('--config.node-linker=hoisted', '--filter', '@relay-agent/api', 'deploy', '--prod', (Join-Path $resourceRoot 'api'))
   Write-Host '已重新构建并暂存 apps/api。'
 }
+# tauri-build 在编译期就校验 bundle.resources 的每一条路径，缺任何一条 `tauri dev` 都编不过
+# （报错是 build script 的 `resource path ... doesn't exist`，看不出缺的是打包资源）。
+# 这两项不依赖 release 流水线，dev 就地补齐：runtime 取 computer-runtime 的 release 产物，
+# 扩展只拷清单里那四个文件，与 build-release.ps1 的暂存内容同源。
+$computerExe = Join-Path $repoRoot 'apps\computer-runtime\target\release\relay-computer-runtime.exe'
+if (-not (Test-Path -LiteralPath $computerExe -PathType Leaf)) {
+  throw "缺少 $computerExe；先跑 cargo build --release --manifest-path apps\computer-runtime\Cargo.toml，或 dev-stack.bat Build 生成一次基础资源。"
+}
+Copy-Item -LiteralPath $computerExe -Destination (Join-Path $resourceRoot 'relay-computer-runtime.exe') -Force
+$extensionRoot = Join-Path $repoRoot 'apps\browser-extension'
+$extensionStage = Join-Path $resourceRoot 'browser-extension'
+New-Item -ItemType Directory -Path $extensionStage -Force | Out-Null
+foreach ($file in @('manifest.json', 'background.js', 'options.html', 'options.js')) {
+  $source = Join-Path $extensionRoot $file
+  if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "浏览器扩展源文件缺失：$source" }
+  Copy-Item -LiteralPath $source -Destination $extensionStage -Force
+}
 foreach ($name in @('node.exe', 'relay-file-io-helper.exe')) {
   $target = Join-Path $tauriRoot $name
   $source = Join-Path $resourceRoot $name

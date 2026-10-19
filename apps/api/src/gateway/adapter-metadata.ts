@@ -149,6 +149,44 @@ export const ADAPTER_DESCRIPTORS: Readonly<Record<GatewayCapability, AdapterDesc
     // gh 会访问网络并在本机进程里运行，进程边界不是 OS 沙箱。
     sandboxed: false,
   },
+  BROWSER_READ: {
+    capabilityKey: 'BROWSER_READ',
+    adapterId: 'browser-read-v1',
+    version: '1.0.0',
+    effectKind: 'READ',
+    // 页面快照/截图/等待都是纯读取：崩溃后重新读同一页即可，不留半应用动作。
+    resumable: true,
+    cancellable: true,
+    // 只读没有可审批的外部效果；默认策略 AUTO 才能连续「观察→定位→再观察」。
+    approvalPassthrough: true,
+    // 读的是用户浏览器实例里的页面内容；进程边界不是 OS 沙箱，页级隔离也不是安全隔离。
+    sandboxed: false,
+  },
+  BROWSER_ACTION: {
+    capabilityKey: 'BROWSER_ACTION',
+    adapterId: 'browser-action-v1',
+    version: '1.0.0',
+    effectKind: 'WRITE',
+    // 一次点击/填写/导航可能已对远端站点产生效果：不能盲目重放，UNKNOWN 必须重新观察。
+    resumable: false,
+    // 取消会向 MCP 发 notifications/cancelled；已发出的动作效果按 UNKNOWN 结算。
+    cancellable: true,
+    // 与 CLI_RUN 同一纪律：不允许 AUTO 绕过审批；「本次任务允许」走范围授权。
+    approvalPassthrough: false,
+    sandboxed: false,
+  },
+  BROWSER_COMMIT: {
+    capabilityKey: 'BROWSER_COMMIT',
+    adapterId: 'browser-commit-v1',
+    version: '1.0.0',
+    effectKind: 'WRITE',
+    // 提交表单、上传文件是不可逆外部效果：绝不重放。
+    resumable: false,
+    cancellable: true,
+    // 永不进入 AUTO，也不在 SCOPE_GRANT_ACTIONS 里——只能逐次单动作批准。
+    approvalPassthrough: false,
+    sandboxed: false,
+  },
 };
 
 export function getAdapterDescriptor(capability: GatewayCapability): AdapterDescriptor {

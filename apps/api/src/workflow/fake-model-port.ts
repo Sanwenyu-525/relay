@@ -589,6 +589,9 @@ export class FakeModelPort implements AssistModelPort {
    * `FAKE_INTERPRET_CLARIFY` / `FAKE_INTERPRET_BAD_JSON` 只服务测试断言。 */
   async interpret(request: ConversationInterpretationRequest): Promise<AssistResult> {
     const content = request.userContent;
+    const instructionMarker = '【当前指令】\n';
+    const instructionStart = content.lastIndexOf(instructionMarker);
+    const instruction = instructionStart < 0 ? content : content.slice(instructionStart + instructionMarker.length);
     const providerRequestId = `fake-interpret-${seedOf(content).slice(0, 16)}`;
     const usage: ModelUsage = { inputTokens: Math.max(1,
       Math.ceil((request.system.length + content.length) / 4)), outputTokens: 0,
@@ -600,8 +603,8 @@ export class FakeModelPort implements AssistModelPort {
     } else if (content.includes('FAKE_INTERPRET_CLARIFY')) {
       body = { decision: 'CLARIFY', questions: ['这次要改的是哪个文件或哪段功能？'] };
     } else {
-      body = { decision: 'PREPARE', task: { title: content.slice(0, 60),
-        objective: content.slice(0, 400),
+      body = { decision: 'PREPARE', task: { title: instruction.trim().slice(0, 60),
+        objective: instruction.trim().slice(0, 400),
         criteria: [{ statement: '存在可核对的交付说明。', required: true, method: 'HUMAN' }],
         expected_outputs: { kind: 'MARKDOWN_DOCUMENT' },
         file_changes: [] } };

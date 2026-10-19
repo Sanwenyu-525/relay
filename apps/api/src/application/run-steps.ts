@@ -32,6 +32,7 @@ import { createRepositories, withTransaction, type Repositories } from './unit-o
 import { lockTaskAndRun } from './lock-task-run.js';
 import { requireCurrentRuleSnapshot } from './rule-fence.js';
 import { applySafeControl } from './control-requests.js';
+import { releaseComputerDesktopLeaseAtSafeBoundary } from './computer-desktop-lease.js';
 import type { RunAdvance } from '../run/run-repository.js';
 import { type FakeScenario } from '../workflow/context-fixture.js';
 import { readFrozenRunActions } from '../workflow/execution-contract.js';
@@ -523,6 +524,9 @@ export async function advanceRunStep(
       }
       if (run.worker_id === input.workerId && run.worker_epoch === claim.workerEpoch) {
         await repositories.runs.releaseWorker(run.id, input.workerId, claim.workerEpoch);
+        await repositories.computerDesktopLease.unbindWorker({ runId: run.id,
+          workerId: input.workerId, workerEpoch: claim.workerEpoch });
+        await releaseComputerDesktopLeaseAtSafeBoundary(repositories, run.id);
       }
       return true;
     });
@@ -683,6 +687,9 @@ export async function advanceRunStep(
       const { run } = await lockTaskAndRun(repositories, input.runId);
       if (run.worker_id === input.workerId && run.worker_epoch === claim.workerEpoch) {
         await repositories.runs.releaseWorker(run.id, input.workerId, claim.workerEpoch);
+        await repositories.computerDesktopLease.unbindWorker({ runId: run.id,
+          workerId: input.workerId, workerEpoch: claim.workerEpoch });
+        await releaseComputerDesktopLeaseAtSafeBoundary(repositories, run.id);
       }
     });
     await applySafeControl(db, input.runId);
@@ -715,6 +722,8 @@ async function cleanupClaimAfterError(db: DbExecutor, input: AdvanceRunStepInput
     // 已发布但步骤尚未提交也需核对；保留 worker claim 直到停机证据到位并完成 fence。
     if (effect?.status === 'DISPATCHING' || effect?.status === 'UNKNOWN' || effect?.status === 'SUCCEEDED') return;
     await repositories.runs.releaseWorker(run.id, input.workerId, claim.workerEpoch);
+    await repositories.computerDesktopLease.unbindWorker({ runId: run.id,
+      workerId: input.workerId, workerEpoch: claim.workerEpoch });
   });
 }
 
@@ -1961,7 +1970,9 @@ async function advanceOrThrow(repositories: Repositories, advance: RunAdvance): 
   if (row === undefined) {
     throw new Error('run advance CAS failed while holding the run lock');
   }
-
+  if (isTerminalRunStatus(row.status)) {
+    await releaseComputerDesktopLeaseAtSafeBoundary(repositories, row.id);
+  }
   return row;
 }
 

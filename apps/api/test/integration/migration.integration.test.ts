@@ -158,6 +158,18 @@ const ALL_MIGRATIONS = [
   '0102_run_tool_call_preview',
   '0103_github_read',
   '0104_assist_session_unread',
+  '0105_browser_automation',
+  '0106_browser_backend_state',
+  '0107_browser_sessions',
+  '0108_scope_grant_browser_actions',
+  '0109_local_directory_access',
+  '0110_computer_control_state_privileges',
+  '0111_assist_session_last_message',
+  '0112_local_directory_full_access',
+  '0113_assist_session_fork',
+  '0114_computer_desktop_lease',
+  '0115_scheduled_tasks',
+  '0116_assist_session_delete',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {
@@ -192,6 +204,11 @@ test('first-output migration leaves pre-existing settled calls NULL', async () =
     // 0086 给 artifact_impact_candidate_groups 加依赖列，而建出这张表的 0050 在本夹具里
     // 被删掉了；它与 0050 必须同进同出，否则第一轮就会报「关系不存在」而不是走到断言。
     files.delete('0086_impact_group_dependencies.sql');
+    // 0116 会话删除授权引用 0050/0051 建出的影响检查与执行请求表；历史夹具里这两张表
+    // 不存在，授权迁移必须与它们同进同出，否则第一轮就会报「关系不存在」。
+    files.delete('0116_assist_session_delete.sql');
+    // 0108 修改 0056 创建的 run_scope_grants；历史夹具中必须与它一起缺席。
+    files.delete('0108_scope_grant_browser_actions.sql');
   });
   const app = openDatabase(database.appUrl, 'relay-api-test-legacy-call');
   try {
@@ -226,7 +243,9 @@ test('first-output migration leaves pre-existing settled calls NULL', async () =
       '0073_model_tool_turn_assistant_message',
       // 0086 与 0050 同进同出，所以第二轮在这里补上；0087 只依赖 0008/0015 建出的表，
       // 不依赖被删掉的那一批，因此它留在历史夹具里，第二轮不会重复应用。
-      '0086_impact_group_dependencies']);
+      '0086_impact_group_dependencies', '0108_scope_grant_browser_actions',
+      // 0116 的授权对象由第二轮补回的 0050/0051 建出，因此它也在第二轮应用。
+      '0116_assist_session_delete']);
     await calls.recordFirstTextDelta(callId, new Date());
     await calls.recordFirstPreviewPersisted(callId);
     const legacy = await calls.read(callId);

@@ -305,7 +305,7 @@ async function prepareToolAction(db: DbExecutor, input: {
       intentKey: `tool-loop-v1#${input.row.round}#${input.row.ordinal}`,
       connectionId: requireConnection(input.plan, input.definition.capability),
       origin: input.origin, actionType: input.definition.actionType,
-      target: toolTargetFor(input.plan, input.definition, input.row.arguments),
+      target: toolTargetFor(input.plan, input.definition, input.row.arguments, input.origin),
       params: resolveToolParams(input.definition, input.row.arguments, check),
       ...(check === undefined ? {} : { scopeCheck: check, observedExecutableSha256: observed }),
     });

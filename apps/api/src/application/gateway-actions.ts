@@ -49,8 +49,16 @@ import { computerExecute, computerParamsForAction, planComputerActionForPrepare 
   from '../computer/computer-adapter.js';
 import { describeComputerAction } from '../computer/action-labels.js';
 import { reportComputerControlActivity } from '../computer/control-state.js';
+import { releaseComputerDesktopLeaseAtSafeBoundary, usesDesktopInputLease } from './computer-desktop-lease.js';
 import { githubExecute, githubParamsForAction, isGithubReadAction }
   from '../github/github-adapter.js';
+import { browserCapabilityFor, isBrowserAction } from '../browser/protocol.js';
+import { browserOwnerFor } from '../browser/browser-adapter.js';
+import { getBrowserSessionManager } from '../browser/client-holder.js';
+import { describeBrowserAction } from '../browser/owner.js';
+import { markBrowserSessionActive } from '../browser/sessions.js';
+import { classifyClick } from '../browser/risk.js';
+import { browserExecute, browserParamsForAction } from '../browser/browser-adapter.js';
 
 /** Test-only narrowing of WEB_FETCH budgets (production dispatch passes none). */
 type DispatchWebFetchLimits = Partial<WebFetchLimits>;
@@ -105,6 +113,7 @@ export type GatewayActionType =
   | 'COMPUTER_SCREENSHOT'
   | 'COMPUTER_GET_WINDOWS'
   | 'COMPUTER_ACTIVATE_WINDOW'
+  | 'COMPUTER_MOVE'
   | 'COMPUTER_CLICK'
   | 'COMPUTER_DOUBLE_CLICK'
   | 'COMPUTER_SCROLL'
@@ -112,16 +121,30 @@ export type GatewayActionType =
   | 'COMPUTER_TYPE'
   | 'COMPUTER_KEYPRESS'
   | 'COMPUTER_HOTKEY'
-  /** 0103: F25 内置官方 GitHub Skill 首片的四个只读逻辑动作。 */
+  /** 0103: F25 内置官方 GitHub Skill 首片的只读逻辑动作（2026-10-18 补 issue 详情）。 */
   | 'GITHUB_REPO_VIEW'
   | 'GITHUB_PR_LIST'
   | 'GITHUB_PR_VIEW'
-  | 'GITHUB_ISSUE_LIST';
+  | 'GITHUB_ISSUE_LIST'
+  | 'GITHUB_ISSUE_VIEW'
+  /** 0105: F26 内置浏览器自动化的十二个逻辑动作（读四、交互六、提交二）。 */
+  | 'BROWSER_LIST_PAGES'
+  | 'BROWSER_READ_PAGE'
+  | 'BROWSER_SCREENSHOT'
+  | 'BROWSER_WAIT_FOR'
+  | 'BROWSER_NEW_PAGE'
+  | 'BROWSER_NAVIGATE'
+  | 'BROWSER_CLICK'
+  | 'BROWSER_FILL'
+  | 'BROWSER_PRESS_KEY'
+  | 'BROWSER_CLOSE_PAGE'
+  | 'BROWSER_SUBMIT_FORM'
+  | 'BROWSER_UPLOAD_FILE';
 
 /** Computer 的逻辑动作全集（Gateway 侧与工具词表各有一份引用，不重复第三份）。 */
 export const COMPUTER_ACTION_TYPES: readonly GatewayActionType[] = [
   'COMPUTER_SCREENSHOT', 'COMPUTER_GET_WINDOWS', 'COMPUTER_ACTIVATE_WINDOW',
-  'COMPUTER_CLICK', 'COMPUTER_DOUBLE_CLICK', 'COMPUTER_SCROLL', 'COMPUTER_DRAG',
+  'COMPUTER_MOVE', 'COMPUTER_CLICK', 'COMPUTER_DOUBLE_CLICK', 'COMPUTER_SCROLL', 'COMPUTER_DRAG',
   'COMPUTER_TYPE', 'COMPUTER_KEYPRESS', 'COMPUTER_HOTKEY',
 ];
 
@@ -179,7 +202,7 @@ const USER_ACTION_ALLOWED_ACTIONS: readonly GatewayActionType[] = ['GIT_STATUS',
  * 与写动作协议一起改。
  */
 const ASSISTANT_READ_ALLOWED_CAPABILITIES: readonly GatewayCapability[] =
-  ['FILE_READ', 'FILE_QUERY', 'GIT_READ', 'COMPUTER_READ', 'GITHUB_READ'];
+  ['FILE_READ', 'FILE_QUERY', 'GIT_READ', 'COMPUTER_READ', 'GITHUB_READ', 'BROWSER_READ'];
 
 /** 两种会话读取来源：共用只读能力词表，来源身份各自独立。 */
 const SESSION_READ_ORIGINS: readonly string[] = ['ASSISTANT_READ', 'AGENT_SESSION_READ'];
@@ -205,6 +228,8 @@ export function originAllows(
   const allowedRunCaps: GatewayCapability[] = [
     'FAKE_WRITE', 'FILE_READ', 'FILE_QUERY', 'WEB_FETCH', 'FILE_WRITE', 'GIT_READ', 'GIT_WRITE', 'CLI_RUN',
     'COMPUTER_READ', 'COMPUTER_INPUT',
+    // 0105: 浏览器三个能力都只在 RUN 与会话只读两种来源出现；RUN 侧不因此放宽任何既有能力。
+    'BROWSER_READ', 'BROWSER_ACTION', 'BROWSER_COMMIT',
   ];
   if (origin.kind === 'RUN') return allowedRunCaps.includes(capability);
   if (origin.kind === 'USER_IMPORT') return ['FAKE_PUBLIC_READ', 'WEB_FETCH'].includes(capability);
@@ -237,6 +262,20 @@ export function changesetContainsDelete(params: JsonObject): boolean {
   if (!Array.isArray(changes)) return false;
   return changes.some((change) => typeof change === 'object' && change !== null &&
     !Array.isArray(change) && (change as JsonObject).action === 'DELETE');
+}
+
+/**
+ * 本目录档位是否为「完全访问」。
+ *
+ * FULL 与 AUTO 在策略行上不可区分——GatewayDecision 没有第四值，档位差别只记在
+ * local_directory_access.write_tier，所以每次判定都要现读那一行。prepare 与 admit 调用
+ * 同一个函数，结论必然一致；期间档位被收紧时本就该重新判定并退回人工批准。
+ * 只认 FILE_WRITE：Git、CLI、浏览器与电脑各有自己的策略，不因目录档位放宽。
+ */
+async function directoryHasFullAccess(repositories: Repositories, capability: GatewayCapability,
+  resourceId: string | null | undefined): Promise<boolean> {
+  if (capability !== 'FILE_WRITE' || resourceId === undefined || resourceId === null) return false;
+  return (await repositories.gateway.readLocalDirectoryAccess(resourceId))?.write_tier === 'FULL';
 }
 
 export interface PreparedGatewayAction {
@@ -281,7 +320,86 @@ export function capabilityFor(action: GatewayActionType): GatewayCapability {
   if (isComputerAction(action)) return 'COMPUTER_INPUT';
   // 0103: GitHub 只有只读动作；写动作（开 PR / 评论 / 合并）不在本片的词表里。
   if (isGithubReadAction(action)) return 'GITHUB_READ';
+  // 0105: 浏览器三族一一对应；未知动作不静默落到 FAKE_PUBLIC_READ。
+  if (isBrowserAction(action)) {
+    const capability = browserCapabilityFor(action);
+    if (capability !== null) return capability;
+  }
   return 'FAKE_PUBLIC_READ';
+}
+
+/**
+ * 0105: 浏览器目标的形状归一。
+ *
+ * 只接受 `browser://<origin>` 或 `browser://unknown`：没有路径、查询、用户信息，
+ * origin 一律小写。任何别的形状都拒绝——目标被伪造会让按站点收窄的策略失效。
+ */
+function normalizedBrowserTarget(target: string): string {
+  const prefix = 'browser://';
+  if (!target.startsWith(prefix)) {
+    throw gatewayDenied('GATEWAY_TARGET_DENIED',
+      `浏览器动作的目标必须是 ${prefix}<origin> 形式。`);
+  }
+  const host = target.slice(prefix.length);
+  if (host === 'unknown') return target;
+  // 主机形式（可含端口）：不允许路径、查询、凭据，也不允许把协议塞进来。
+  // `https://` 会因为包含 `/` 被拒——那会让 `browser://` 前缀的语义失真。
+  if (host === '' || host.includes('/') || host.includes('?') || host.includes('#') ||
+      host.includes('@')) {
+    throw gatewayDenied('GATEWAY_TARGET_DENIED',
+      '浏览器动作的目标只接受主机名（可含端口），不含协议、路径或凭据。');
+  }
+  return `${prefix}${host.toLowerCase()}`;
+}
+
+/**
+ * 0105/M3：为一次浏览器点击做风险预检。
+ *
+ * 返回 null = 不需要升级（含读不到快照的情况：那一步点击会自己失败，
+ * 为一次注定失败的点击要审批没有意义）。返回原因文本 = 应升级为单动作审批。
+ */
+async function browserClickApprovalRisk(origin: GatewayOrigin,
+  params: JsonObject): Promise<string | null> {
+  try {
+    const owner = browserOwnerFor(origin);
+    const manager = getBrowserSessionManager();
+    const uid = typeof params.uid === 'string' ? params.uid : '';
+    const pageIdInput = typeof params.page_id === 'string' ? params.page_id : undefined;
+    const elements = await manager.previewElements(owner, pageIdInput);
+    if (elements === null) return null;
+    const verdict = classifyClick(elements, uid);
+    return verdict.risk === 'HIGH' ? verdict.reason : null;
+  } catch {
+    // 探测失败不拦截动作：宁可让点击执行并以其自身失败告终，也不因分类器故障堵死本功能。
+    return null;
+  }
+}
+
+/**
+ * 0105/M3：把一次浏览器动作的落点写进任务状态表。
+ *
+ * 从**结算结果**里取 page/url/title 而不是从参数猜——`browser_new_page` 的新页 id
+ * 只有结果里有。没有 page 的动作（`browser_list_pages`）不写：那一步没有"正在操作的页面"。
+ */
+async function reportBrowserSession(db: DbExecutor, input: {
+  readonly workspaceId: string;
+  readonly projectId: string | null;
+  readonly origin: GatewayOrigin;
+  readonly actionType: string;
+  readonly result: { readonly outcome: string; readonly result: Record<string, unknown> };
+}): Promise<void> {
+  if (input.projectId === null) return;
+  const pageId = input.result.result.page_id;
+  if (typeof pageId !== 'number' || !Number.isInteger(pageId) || pageId <= 0) return;
+  const owner = browserOwnerFor(input.origin);
+  const url = typeof input.result.result.url === 'string' ? input.result.result.url : null;
+  const title = typeof input.result.result.title === 'string' ? input.result.result.title : null;
+  await markBrowserSessionActive(db, {
+    ownerKind: owner.kind, ownerId: owner.id,
+    workspaceId: input.workspaceId, projectId: input.projectId,
+    actionType: input.actionType, actionLabel: describeBrowserAction(input.actionType),
+    pageId, url, title,
+  });
 }
 
 function normalizedPublicTarget(target: string): string {
@@ -494,6 +612,15 @@ export function targetMatches(prefix: string, target: string, capability: Gatewa
     // 策略按全等匹配。空前缀视为「该类全部动作」，与文件能力的根前缀同义。
     if (prefix === '') return true;
     return prefix === target;
+  }
+  if (capability === 'BROWSER_READ' || capability === 'BROWSER_ACTION' ||
+      capability === 'BROWSER_COMMIT') {
+    // 0105: 浏览器目标形如 browser://<origin>（origin 未知时 browser://unknown）。
+    // `browser://` 这一个前缀就是「全部站点」——策略创建要求前缀非空，因此不能靠空串表达；
+    // `browser://https://example.com` 只覆盖该 origin；`browser://unknown` 只能靠全量或全等放行，
+    // 不确定的目标不给"看起来差不多"的匹配。
+    if (prefix === '' || prefix.toLowerCase() === 'browser://') return true;
+    return prefix.toLowerCase() === target.toLowerCase();
   }
   const left = process.platform === 'win32' ? prefix.toLowerCase() : prefix;
   const right = process.platform === 'win32' ? target.toLowerCase() : target;
@@ -781,6 +908,17 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
         throw validationFailed([{ field: 'params',
           message: error instanceof Error ? error.message : 'GitHub 动作参数不合法' }]);
       }
+    } else if (isBrowserAction(input.actionType)) {
+      // 0105: 浏览器动作没有受管根，目标是 `browser://<origin>` 合成值。origin 由
+      // 工具循环按「本次导航目标 / 该页最近一次已知 origin」算出，这里只做形状归一，
+      // 不接受模型自报的站点；参数同样在这里按白名单收窄并冻结。
+      target = normalizedBrowserTarget(input.target);
+      try {
+        input = { ...input, params: browserParamsForAction(input.actionType, input.params) };
+      } catch (error) {
+        throw validationFailed([{ field: 'params',
+          message: error instanceof Error ? error.message : '浏览器动作参数不合法' }]);
+      }
     } else if (input.actionType === 'WRITE_FILE') {
       target = await normalizedWriteTarget(input.target, resourceBefore!.canonical_root);
       const rel = relative(resourceBefore!.canonical_root, target);
@@ -1007,6 +1145,13 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
         connection.status !== 'ACTIVE' || !(await repositories.gateway.hasConnectionCapability(connection.id, capability))) {
       throw gatewayDenied('GATEWAY_CONNECTION_DENIED', 'Connection 不存在、已停用或不具备该 Capability。');
     }
+    const rootBoundCapability = ['FILE_READ', 'FILE_QUERY', 'FILE_WRITE', 'GIT_READ', 'GIT_WRITE', 'CLI_RUN']
+      .includes(capability);
+    if (rootBoundCapability && (resourceBefore === undefined ||
+        typeof connection.config.root_path !== 'string' ||
+        !targetMatches(connection.config.root_path, resourceBefore.canonical_root, capability))) {
+      throw gatewayDenied('GATEWAY_TARGET_DENIED', 'Connection 的目录边界不覆盖当前受管目录。');
+    }
     if (webFetch) {
       // Host allowlist is the connection's registered boundary; it is re-checked
       // on every executed hop against redirects as well.
@@ -1037,8 +1182,11 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
           { observedExecutableSha256: input.observedExecutableSha256 }),
         ...(await observedCheckTrustDigest(resource.canonical_root, input.scopeCheck)),
       });
-    const scopeCovered = scopeDecision?.covered === true && policy.decision === 'AUTO';
-    const effectiveDecision: GatewayDecision =
+    // 「完全访问」是目录级豁免，与 Run 范围授权是两条独立理由：范围授权永远覆盖不到删除，
+    // 而 FULL 目录内的删除由用户显式选择档位免掉逐次确认。DENY/ASK 策略走不进这条豁免。
+    const fullAccess = await directoryHasFullAccess(repositories, capability, resource?.id);
+    const scopeCovered = policy.decision === 'AUTO' && (scopeDecision?.covered === true || fullAccess);
+    let effectiveDecision: GatewayDecision =
       !descriptor.approvalPassthrough && policy.decision === 'AUTO' && !scopeCovered
         ? 'ASK' : policy.decision;
     // 范围授权本可 AUTO，却因为授权失效/检查材料变化而退回人工：这个原因必须能被前端读到，
@@ -1046,6 +1194,15 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
     const scopeBlockedReason = effectiveDecision === 'ASK' && policy.decision === 'AUTO' &&
       scopeDecision !== undefined && scopeDecision.covered === false
       ? scopeDecision.reason : undefined;
+    // 0105/M3: 浏览器「提交类点击」的启发式升级。范围授权让普通点击在本次任务里走 AUTO，
+    // 但点提交按钮会把 AUTO 重新变成 ASK——读一次刚打开的页面快照来分类。
+    // 这**不是**安全边界（分类器可能漏判页面故意构造的按钮）：结构性护栏仍然是
+    // BROWSER_COMMIT 两个工具永不被范围授权覆盖、必须逐次批准。
+    // 只在 effectiveDecision 已经是 AUTO 时探测：别为一次注定被拒的动作启动浏览器。
+    const browserRiskReason = effectiveDecision === 'AUTO' && input.actionType === 'BROWSER_CLICK'
+      ? await browserClickApprovalRisk(input.origin, input.params)
+      : null;
+    if (browserRiskReason !== null) effectiveDecision = 'ASK';
 
     const op = await repositories.gateway.insertOperation({ id: input.operationId,
       workspace_id: input.workspaceId, project_id: projectId, origin: input.origin.kind,
@@ -1088,12 +1245,13 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
           normalized_target: op.normalized_target, status: op.status } });
     }
     if (effectiveDecision === 'ASK') {
-      const review = await createGatewayReview(repositories, op, run, task, scopeBlockedReason,
+      const review = await createGatewayReview(repositories, op, run, task,
+        scopeBlockedReason,
         // 绑定这一次建 Review 时**服务端自己实测**到的材料。核对侧会用同样的输入
         // （Operation 冻结的 executable/args + 受管资源根）重算，因此不依赖调用方自报摘要。
         resource === undefined || input.scopeCheck === undefined ? undefined
           : await observeCheckMaterial(resource.canonical_root, input.scopeCheck),
-        takeoverReason);
+        takeoverReason, browserRiskReason ?? undefined);
       if (run !== undefined && task !== undefined && input.origin.kind === 'RUN') {
         const changed = await repositories.runs.advanceRun({ runId: run.id, expectedRevision: run.revision,
           status: 'WAITING_APPROVAL', waitReason: 'ACTION_APPROVAL_REQUIRED', resumePhase: 'RUNNING' });
@@ -1105,6 +1263,8 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
         }
         const released = await repositories.runs.releaseWorker(run.id, input.origin.workerId, input.origin.workerEpoch);
         if (released === undefined) throw new Error('Gateway Review worker release failed');
+        await repositories.computerDesktopLease.unbindWorker({ runId: run.id,
+          workerId: input.origin.workerId, workerEpoch: input.origin.workerEpoch });
       }
       return { operation_id: op.id, status: 'WAITING_APPROVAL', invocation_id: null, review_id: review.id };
     }
@@ -1115,7 +1275,9 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
 
 async function createGatewayReview(repositories: Repositories, op: LogicalOperationRow,
   run: RunRow | undefined, task: TaskRow | undefined, scopeBlockedReason?: string,
-  observedMaterial?: CheckTrustBasis | undefined, takeoverReason?: string | undefined) {
+  observedMaterial?: CheckTrustBasis | undefined, takeoverReason?: string | undefined,
+  /** 0105/M3：浏览器提交类点击的升级原因。与范围授权失效是两件事，文案必须分开。 */
+  browserRiskReason?: string | undefined) {
   // 检查材料依据写进 target，因此一并进入 target_hash：批准对象不只包含「跑什么」，
   // 还包含「跑的是磁盘上哪一份材料」。材料此后变化时旧 target 自然失效。
   const target: JsonObject = { operation_id: op.id, origin: op.origin, run_id: op.run_id,
@@ -1130,9 +1292,12 @@ async function createGatewayReview(repositories: Repositories, op: LogicalOperat
     verificationSessionId: null, criterionId: null, operationId: op.id,
     importJobId: op.import_job_id,
     kind: 'ACTION_APPROVAL',
-    reason: takeoverReason ?? (scopeBlockedReason === undefined
-      ? '此 Fake 动作需要针对最终目标与参数的批准。'
-      : `本次任务范围授权不再自动放行这个动作（${scopeBlockedReason}），需要针对确切动作与参数的批准。`),
+    reason: takeoverReason ?? (browserRiskReason !== undefined
+      ? `这一步浏览器操作被判定为有外部影响：${browserRiskReason}` +
+        '本次任务里对普通网页交互的授权不覆盖它，需要你针对确切动作与参数单独批准。'
+      : scopeBlockedReason === undefined
+        ? '此 Fake 动作需要针对最终目标与参数的批准。'
+        : `本次任务范围授权不再自动放行这个动作（${scopeBlockedReason}），需要针对确切动作与参数的批准。`),
     targetHash: reviewTargetHash(target), target,
     evidence: { capability: op.capability_key, action_type: op.action_type,
       ...(scopeBlockedReason === undefined ? {} : { scope_decision_reason: scopeBlockedReason }),
@@ -1224,6 +1389,8 @@ export async function claimRunForGateway(db: DbExecutor, input: {
     const claimed = await repositories.runs.claimWorker(run.id, input.workerId,
       new Date(Date.now() + (input.leaseMs ?? 30_000)));
     if (claimed === undefined) throw gatewayDenied('GATEWAY_STALE_WORKER', 'Worker 领取竞争失败。');
+    await repositories.computerDesktopLease.bindClaimedWorker({ workspaceId: run.workspace_id,
+      runId: run.id, workerId: input.workerId, workerEpoch: claimed.worker_epoch });
     return { worker_epoch: claimed.worker_epoch.toString() };
   });
 }
@@ -1248,6 +1415,9 @@ export async function releaseGatewayWorker(db: DbExecutor, input: {
       throw gatewayDenied('GATEWAY_OPERATION_UNRESOLVED', '未决动作期间不能释放 Worker claim。');
     }
     await repositories.runs.releaseWorker(run.id, input.workerId, input.workerEpoch);
+    await repositories.computerDesktopLease.unbindWorker({ runId: run.id,
+      workerId: input.workerId, workerEpoch: input.workerEpoch });
+    await releaseComputerDesktopLeaseAtSafeBoundary(repositories, run.id);
   });
 }
 
@@ -1295,6 +1465,8 @@ export async function claimGatewayWorker(db: DbExecutor, input: {
     const claimed = await repositories.runs.claimWorker(run.id, input.workerId,
       new Date(Date.now() + (input.leaseMs ?? 30_000)));
     if (claimed === undefined) throw gatewayDenied('GATEWAY_STALE_WORKER', 'Worker 领取竞争失败。');
+    await repositories.computerDesktopLease.bindClaimedWorker({ workspaceId: run.workspace_id,
+      runId: run.id, workerId: input.workerId, workerEpoch: claimed.worker_epoch });
     return { worker_epoch: claimed.worker_epoch.toString() };
   });
 }
@@ -1343,6 +1515,15 @@ async function requireCurrentGatewayGrant(repositories: Repositories, op: Logica
       !(await repositories.gateway.hasConnectionCapability(connection.id, op.capability_key))) {
     throw gatewayDenied('GATEWAY_CONNECTION_STALE', 'Connection 已停用、变更或丧失 Capability。');
   }
+  if (['FILE_READ', 'FILE_QUERY', 'FILE_WRITE', 'GIT_READ', 'GIT_WRITE', 'CLI_RUN']
+      .includes(op.capability_key)) {
+    const resource = await repositories.gateway.readResource(op.resource_id ?? '');
+    if (resource?.workspace_id !== op.workspace_id || resource.project_id !== op.project_id ||
+        typeof connection.config.root_path !== 'string' ||
+        !targetMatches(connection.config.root_path, resource.canonical_root, op.capability_key)) {
+      throw gatewayDenied('GATEWAY_TARGET_DENIED', 'Connection 的目录边界不再覆盖当前受管目录。');
+    }
+  }
   const selected = await selectedPolicy(repositories, { workspaceId: op.workspace_id,
     projectId: op.project_id, capability: op.capability_key, actionType: op.action_type,
     target: op.normalized_target, payloadBytes: Buffer.byteLength(canonicalizeJson(op.params)) });
@@ -1355,10 +1536,12 @@ async function requireCurrentGatewayGrant(repositories: Repositories, op: Logica
   // writes (FILE_WRITE / GIT_WRITE / CLI_RUN) would be rejected as GATEWAY_APPROVAL_STALE.
   // The scope grant exemption must be mirrored identically: an operation prepared
   // under a live grant stays executable, while a revoked/expired grant falls back to
-  // requiring the single-action approval again.
+  // requiring the single-action approval again. The directory FULL exemption is
+  // re-read from the same function, so prepare and admit cannot disagree.
+  const fullAccess = await directoryHasFullAccess(repositories, op.capability_key, op.resource_id);
   const effectiveDecision: GatewayDecision =
     !getAdapterDescriptor(op.capability_key).approvalPassthrough &&
-      selected.decision === 'AUTO' && scopeDecision?.covered !== true
+      selected.decision === 'AUTO' && scopeDecision?.covered !== true && !fullAccess
       ? 'ASK' : selected.decision;
   if (effectiveDecision === 'ASK') {
     if (review === undefined || !reviewMatchesOperation(review, op) || review.status !== 'DECIDED' ||
@@ -1438,13 +1621,19 @@ async function admitGatewayInvocation(db: DbExecutor, input: DispatchGatewayInpu
           resource.project_id !== input.origin.projectId || resource.status !== 'ACTIVE') {
         throw resourceNotFound('Managed resource');
       }
-      const insideRoot = located.capability_key === 'FILE_QUERY'
-        ? containsDirectory(resource.canonical_root, located.normalized_target)
-        : located.capability_key === 'FILE_READ'
-          ? containsPath(resource.canonical_root, located.normalized_target)
-          : located.normalized_target === resource.canonical_root;
+      const insideRoot = located.capability_key === 'BROWSER_READ'
+        // 0105: 浏览器读取不读受管根，目标是 browser://<origin>。受管资源在这里只承担
+        // 「属于哪个项目」的身份作用，因此不做根内包含判定，也不受文件写入占用影响。
+        ? true
+        : located.capability_key === 'FILE_QUERY'
+          ? containsDirectory(resource.canonical_root, located.normalized_target)
+          : located.capability_key === 'FILE_READ'
+            ? containsPath(resource.canonical_root, located.normalized_target)
+            : located.normalized_target === resource.canonical_root;
       if (!insideRoot) throw resourceNotFound('Managed resource');
-      await assertResourceNotOccupied(repositories, resource);
+      if (located.capability_key !== 'BROWSER_READ') {
+        await assertResourceNotOccupied(repositories, resource);
+      }
     } else {
       // 0058: 与 prepare 同一锁序与同一判定。执行前重新确认资源仍是 ACTIVE 且身份未变，
       // 并再次拒绝在途目录——读取不得把一次未完成的写入读成干净状态。
@@ -1469,7 +1658,12 @@ async function admitGatewayInvocation(db: DbExecutor, input: DispatchGatewayInpu
     // 执行前复核：授权可能已在 prepare 之后被撤销、过期，或脚本已被改动。
     // 这里重新判定而不是信任 prepare 的结论——放行与否取决于「此刻」的事实。
     const admitScope = input.origin.kind === 'RUN' && resource !== undefined
-      ? await evaluateScopeGrant(db, { runId: located.run_id!, actionType: op.action_type,
+      ? await evaluateScopeGrant(db, { runId: located.run_id!,
+        // 与 prepare 用同一个归一函数：授权层把一组逻辑动作合成一类
+        // （0092 的 COMPUTER_INPUT、0105 的 BROWSER_ACTION）。这里此前直接用
+        // op.action_type，导致 prepare 已放行的动作在派发时被判「不在授权内」，
+        // 于是要一份从未创建过的批准——prepare 与 admit 的授权口径因此漂移。
+        actionType: scopeGrantActionFor(op.action_type),
         capability: op.capability_key, canonicalRoot: resource.canonical_root,
         runTerminal: TERMINAL_RUN_STATUSES.includes(run?.status ?? 'FAILED'),
         ...(input.scopeCheck === undefined ? {} : { check: input.scopeCheck }),
@@ -1487,6 +1681,17 @@ async function admitGatewayInvocation(db: DbExecutor, input: DispatchGatewayInpu
       } else if (run.status !== 'RUNNING') {
         throw gatewayDenied('GATEWAY_RUN_NOT_READY', 'Run 不在执行状态。');
       }
+    }
+    if (usesDesktopInputLease(op.capability_key, op.action_type)) {
+      if (input.origin.kind !== 'RUN' || run === undefined) {
+        throw gatewayDenied('GATEWAY_RUN_NOT_READY', '桌面输入或前台截图只能由受控 Run 执行。');
+      }
+      if (!(await repositories.computerDesktopLease.acquireForInput({ workspaceId: input.workspaceId,
+        runId: run.id, workerId: input.origin.workerId, workerEpoch: input.origin.workerEpoch }))) {
+        throw gatewayDenied('COMPUTER_DESKTOP_OCCUPIED', '电脑正由另一个操控会话使用；该动作尚未执行。');
+      }
+      await repositories.computerControl.markRunning({ runId: run.id, workspaceId: run.workspace_id,
+        actionType: op.action_type, actionLabel: describeComputerAction(op.action_type, op.params) });
     }
     let invocation = await repositories.gateway.lastInvocation(op.id);
     if (op.status === 'WAITING_APPROVAL' || invocation?.status === 'NOT_EXECUTED') {
@@ -1852,6 +2057,14 @@ async function settleGatewayInvocation(db: DbExecutor, admitted: AdmittedInvocat
     const resolved = await repositories.gateway.transitionInvocation(invocation.id, 'DISPATCHING', finalStatus, evidence);
     if (resolved === undefined) throw new Error('Invocation outcome CAS failed');
     await repositories.gateway.setOperationStatus(op.id, finalStatus, evidence);
+    if (usesDesktopInputLease(op.capability_key, op.action_type) &&
+        op.origin === 'RUN' && finalStatus === 'UNKNOWN') {
+      if (invocation.worker_id === null || invocation.worker_epoch === null || run === undefined ||
+          !(await repositories.computerDesktopLease.quarantine({ runId: run.id,
+            workerId: invocation.worker_id, workerEpoch: invocation.worker_epoch }))) {
+        throw gatewayDenied('COMPUTER_DESKTOP_LEASE_STALE', '未知输入结果与桌面 lease 的 Worker fence 不匹配。');
+      }
+    }
     if (invocation.resource_claim_id !== null) {
       // A read never mutates the resource, so even a FAILED read releases its claim.
       const released = finalStatus === 'SUCCEEDED' || (!stale && knownNoFileEffect) ||
@@ -1953,12 +2166,14 @@ export async function dispatchGatewayAction(db: DbExecutor, input: DispatchGatew
     // 因此不会把桌面问题升级成 Worker 异常。截图正文不进入 result_ref。
     // `foregroundAuthorized: true` 的依据是「已经走到派发」：COMPUTER_INPUT 是
     // approvalPassthrough=false 的能力，派发前必有单动作批准或本次任务范围授权。
-    // 操控状态上报（migration 0096）：输入动作开启/刷新会话，只读动作只刷新既有
-    // 会话。上报失败不阻断派发——展示事实不能拖住真实执行。
-    try {
-      await reportComputerDispatchActivity(db, admitted, input.origin);
-    } catch {
-      // 静默：状态条缺失属于可感知的展示降级，绝不能让真实输入因此失败。
+    // COMPUTER_INPUT 的 lease 与 RUNNING 投影已在 Admit 同一事务写入；只读动作
+    // 仍可刷新同一 Run 的既有投影，但不能开启桌面会话。
+    if (admitted.operation.capability_key === 'COMPUTER_READ') {
+      try {
+        await reportComputerDispatchActivity(db, admitted, input.origin);
+      } catch {
+        // 只读展示刷新失败不影响只读动作。
+      }
     }
     const res = await computerExecute({ actionType: admitted.operation.action_type,
       params: admitted.operation.params,
@@ -1971,6 +2186,37 @@ export async function dispatchGatewayAction(db: DbExecutor, input: DispatchGatew
     // 0103: GitHub 只读派发。未装 gh、未登录、网络不通、目录没有 GitHub remote 都以
     // FAILED + 类型化 failure_kind 结算，不抛出也不空返回——「查不到」必须与「没有」区分开。
     const res = await githubExecute(admitted.operation, admitted.invocation, input.signal);
+    await input.hooks?.afterFakeEffect?.();
+    return settleGatewayInvocation(db, admitted, res.outcome, res.result, input.origin);
+  }
+  if (admitted.operation.capability_key === 'BROWSER_READ' ||
+      admitted.operation.capability_key === 'BROWSER_ACTION' ||
+      admitted.operation.capability_key === 'BROWSER_COMMIT') {
+    // 0105: 浏览器派发。参数在这里再按白名单收一次（prepare 已校验，Gateway 不信任调用方），
+    // 页面所有权、STALE 与取消语义都在 session-manager 里收口；所有失败都以
+    // FAILED/UNKNOWN + 类型化 reason 结算，不把浏览器问题升级成 Worker 异常。
+    // 上传文件需要把相对路径解析到受管根：只在这一类动作上多读一次资源。
+    const needsRoot = admitted.operation.action_type === 'BROWSER_UPLOAD_FILE';
+    const canonicalRoot = needsRoot
+      ? (await createRepositories(db).gateway.readResource(admitted.operation.resource_id ?? ''))
+        ?.canonical_root ?? null
+      : null;
+    const res = await browserExecute({
+      db,
+      actionType: admitted.operation.action_type,
+      params: admitted.operation.params,
+      origin: input.origin,
+      canonicalRoot,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+    // 0107/M3：浏览器任务状态。owner 身份与 Gateway origin 同源——RUN 来源配 runId，
+    // 会话只读来源配 sessionId；写失败不阻断执行（与 0106 健康投影同一纪律）。
+    try {
+      await reportBrowserSession(db, {
+        workspaceId: input.workspaceId, projectId: admitted.operation.project_id,
+        origin: input.origin, actionType: admitted.operation.action_type, result: res,
+      });
+    } catch { /* 状态表写不进去不影响本次动作 */ }
     await input.hooks?.afterFakeEffect?.();
     return settleGatewayInvocation(db, admitted, res.outcome, res.result, input.origin);
   }
@@ -2309,6 +2555,8 @@ async function releaseUnadmittedApprovalClaim(db: DbExecutor, input: DispatchGat
         await repositories.gateway.lastInvocation(op.id) !== undefined ||
         (await repositories.recovery.listUnresolvedEffects(run.id)).length > 0) return false;
     await repositories.runs.releaseWorker(run.id, origin.workerId, origin.workerEpoch);
+    await repositories.computerDesktopLease.unbindWorker({ runId: run.id,
+      workerId: origin.workerId, workerEpoch: origin.workerEpoch });
     return true;
   });
 }
@@ -2374,6 +2622,8 @@ export async function denyGraphActionBeforeInvocation(db: DbExecutor, input: {
     if (run.worker_id !== null && input.workerEpoch !== undefined) {
       const released = await repositories.runs.releaseWorker(run.id, input.workerId, input.workerEpoch);
       if (released === undefined) throw new Error('pre-invocation deny Worker release failed');
+      await repositories.computerDesktopLease.unbindWorker({ runId: run.id,
+        workerId: input.workerId, workerEpoch: input.workerEpoch });
     }
     const failed = await repositories.runs.advanceRun({ runId: run.id,
       expectedRevision: run.revision, status: 'FAILED',
@@ -2388,6 +2638,7 @@ export async function denyGraphActionBeforeInvocation(db: DbExecutor, input: {
       actorRef: `run:${run.id}`, commandId: null, projectId: task.project_id,
       taskId: task.id, eventType: 'RUN_FAILED',
       factRefs: { run_id: run.id, operation_id: operation.id, reason: input.reason } });
+    await releaseComputerDesktopLeaseAtSafeBoundary(repositories, run.id);
     return true;
   });
 }
@@ -2433,6 +2684,8 @@ export async function failGraphActionAfterInvocation(db: DbExecutor, input: {
     if (run.worker_id !== null) {
       const released = await repositories.runs.releaseWorker(run.id, input.workerId, input.workerEpoch!);
       if (released === undefined) throw new Error('failed read Worker release CAS failed');
+      await repositories.computerDesktopLease.unbindWorker({ runId: run.id,
+        workerId: input.workerId, workerEpoch: input.workerEpoch! });
     }
     if ((await repositories.recovery.lockPendingControl(run.id)) !== undefined) {
       return 'CONTROL_PENDING';
@@ -2453,6 +2706,7 @@ export async function failGraphActionAfterInvocation(db: DbExecutor, input: {
       taskId: task.id, eventType: 'RUN_FAILED',
       factRefs: { run_id: run.id, operation_id: operation.id,
         invocation_id: invocation.id, reason } });
+    await releaseComputerDesktopLeaseAtSafeBoundary(repositories, run.id);
     return 'FAILED';
   });
 }
@@ -2479,6 +2733,8 @@ async function abandonPreparedForControl(db: DbExecutor, input: DispatchGatewayI
     await repositories.gateway.setOperationStatus(op.id, 'DENIED', { reason: 'CONTROL_PREEMPTED_BEFORE_ADMIT' });
     if (invocation.resource_claim_id !== null) await repositories.gateway.setClaimStatus(invocation.resource_claim_id, 'RELEASED');
     await repositories.runs.releaseWorker(run.id, run.worker_id!, run.worker_epoch);
+    await repositories.computerDesktopLease.unbindWorker({ runId: run.id,
+      workerId: run.worker_id!, workerEpoch: run.worker_epoch });
     return true;
   });
   if (abandoned) await applySafeControl(db, origin.runId);
@@ -2686,7 +2942,16 @@ export async function reconcileGatewayInvocation(db: DbExecutor, input: {
         !['PREPARED', 'DISPATCHING', 'UNKNOWN'].includes(lockedInvocation.status)) {
       throw gatewayDenied('GATEWAY_INVOCATION_STALE', '未决调用已经变化。');
     }
-    if (run?.worker_id !== null && run !== undefined) await tx.runs.fenceWorker(run.id);
+    if (run?.worker_id !== null && run !== undefined) {
+      await tx.runs.fenceWorker(run.id);
+      if (usesDesktopInputLease(op.capability_key, op.action_type)) {
+        if (invocation.worker_id === null || invocation.worker_epoch === null) {
+          throw gatewayDenied('COMPUTER_DESKTOP_LEASE_STALE', '未决输入缺少有效 Worker fence。');
+        }
+        await tx.computerDesktopLease.unbindWorker({ runId: run.id,
+          workerId: invocation.worker_id, workerEpoch: invocation.worker_epoch });
+      }
+    }
     let fileWriteProven = false;
     let fileWritePartialProven = false;
     let fileWriteApplied: boolean[] = [];
@@ -2748,6 +3013,19 @@ export async function reconcileGatewayInvocation(db: DbExecutor, input: {
     await tx.gateway.setOperationStatus(op.id, status === 'NOT_EXECUTED' ? 'PREPARED' : status, evidence);
     if (invocation.resource_claim_id !== null) await tx.gateway.setClaimStatus(invocation.resource_claim_id,
       status === 'UNKNOWN' ? 'QUARANTINED' : 'RELEASED');
+    if (usesDesktopInputLease(op.capability_key, op.action_type) && op.origin === 'RUN') {
+      const lease = await tx.computerDesktopLease.read();
+      if (status === 'UNKNOWN') {
+        if (lease.state !== 'QUARANTINED' || lease.run_id !== op.run_id) {
+          throw gatewayDenied('COMPUTER_DESKTOP_LEASE_STALE', '未知输入未能保持桌面 lease 隔离。');
+        }
+      } else if (lease.state === 'QUARANTINED' && lease.run_id === op.run_id &&
+          !(await tx.computerDesktopLease.resolveQuarantine({ runId: op.run_id!,
+            stoppedWorkerId: input.stoppedWorkerId!, stoppedWorkerEpoch: input.stoppedWorkerEpoch! }))) {
+        throw gatewayDenied('COMPUTER_DESKTOP_LEASE_STALE', '旧 Worker 核对不能解除当前桌面 lease 隔离。');
+      }
+    }
+    if (run !== undefined) await releaseComputerDesktopLeaseAtSafeBoundary(tx, run.id, true);
     if (op.capability_key === 'FILE_WRITE' && (status === 'SUCCEEDED' || status === 'UNKNOWN') &&
         toolReconciliation?.result !== undefined && Array.isArray(toolReconciliation.result.checks)) {
       // 原 Invocation 适配器回执、冻结输入和当前回读共同限定逐文件结果；未确认保持 UNKNOWN。

@@ -155,6 +155,39 @@ describe("M04 Run DRAFT 生成中草稿", () => {
     expect(view.wrapper.find('[data-testid="run-draft-preview"]').exists()).toBe(false);
   });
 
+  it("SSE draft_preview 帧直接驱动草稿，终态帧清空且不退回轮询", async () => {
+    activate(); let getPreviewCalls = 0;
+    let stream!: ReadableStreamDefaultController<Uint8Array>;
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const path = String(input);
+      const known = common(path);
+      if (known) return known;
+      if (path === `${prefix}/runs/${runId}/draft-preview/events`) {
+        return { ok: true, status: 200, headers: { get: () => "text/event-stream" },
+          body: new ReadableStream<Uint8Array>({ start(controller) { stream = controller; } }) } as unknown as Response;
+      }
+      if (path === `${prefix}/runs/${runId}/draft-preview`) {
+        getPreviewCalls++; return response(200, preview(null, attemptA, null));
+      }
+      throw new Error(`unexpected request ${path}`);
+    }));
+    const view = await mountWorkbench(`/runs/${runId}`); unmount = view.unmount;
+    const encoder = new TextEncoder();
+    const frame = (dto: unknown) => encoder.encode(
+      `id: 1\nevent: draft_preview\ndata: ${JSON.stringify(dto)}\n\n`);
+    stream.enqueue(frame({ run_id: runId, run_status: "RUNNING", step_attempt_id: attemptA,
+      attempt_claim_epoch: "1", model_call_id: modelA, preview_revision: "1",
+      preview_text: "来自 SSE 的草稿", preview_truncated: false, preview_available: true }));
+    await flush(60);
+    expect(view.wrapper.text()).toContain("来自 SSE 的草稿");
+    expect(getPreviewCalls).toBe(0);
+    stream.enqueue(frame({ run_id: runId, run_status: "COMPLETED", step_attempt_id: null,
+      attempt_claim_epoch: null, model_call_id: null, preview_revision: "1",
+      preview_text: null, preview_truncated: false, preview_available: false }));
+    await flush(60);
+    expect(view.wrapper.find('[data-testid="run-draft-preview"]').exists()).toBe(false);
+  });
+
   it("Run 路由切换后旧预览响应不能注入新任务", async () => {
     activate(); let releaseOld: ((value: Response) => void) | null = null;
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {

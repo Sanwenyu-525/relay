@@ -114,7 +114,7 @@ async function installRoutes(page: Page): Promise<void> {
       const list = grown ? grownMessages[session] ?? messagesBySession[session] : messagesBySession[session];
       return fulfillJson(route, { items: list ?? [] });
     }
-    const preview = path.match(/\/assist-sessions\/([0-9a-f-]+)\/messages\/([0-9a-f-]+)\/live-preview$/u);
+    const preview = path.match(/\/assist-sessions\/([0-9a-f-]+)\/messages\/([0-9a-f-]+)\/live-preview(\/events)?$/u);
     if (preview) return fulfillJson(route, { session_id: preview[1], message_id: preview[2],
       status: grown ? "COMPLETED" : "RUNNING", preview_revision: "1", preview_text: null,
       preview_truncated: false, preview_available: false });

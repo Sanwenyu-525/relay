@@ -360,7 +360,13 @@ export type GatewayCapability =
   /** 0092: Computer Plugin 桌面级输入（窗口激活/鼠标/键盘）。 */
   | 'COMPUTER_INPUT'
   /** 0103: GitHub 只读查询（仓库身份、PR 与 Issue 状态）。 */
-  | 'GITHUB_READ';
+  | 'GITHUB_READ'
+  /** 0105: 内置浏览器自动化的只读面（页面列表、快照、截图、等待）。 */
+  | 'BROWSER_READ'
+  /** 0105: 浏览器普通交互（导航、新建/关闭自有页、点击、填写、按键）。 */
+  | 'BROWSER_ACTION'
+  /** 0105: 有外部影响的浏览器动作（提交表单、上传文件），永不免批。 */
+  | 'BROWSER_COMMIT';
 export type GatewayOperationStatus = 'WAITING_APPROVAL' | 'PREPARED' | 'DISPATCHING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN' | 'DENIED' | 'MANUALLY_CLOSED';
 export type InvocationStatus = 'PREPARED' | 'DISPATCHING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN' | 'NOT_EXECUTED';
 export type ResourceClaimStatus = 'HELD' | 'QUARANTINED' | 'RELEASED';
@@ -389,6 +395,17 @@ export interface ManagedResourceRow {
   readonly status: 'ACTIVE' | 'DISABLED'; readonly resource_epoch: bigint;
   readonly revision: bigint;
   readonly created_at: Date;
+}
+export type LocalDirectoryWriteTier = 'READ_ONLY' | 'ASK' | 'AUTO' | 'FULL';
+/** Management pointers for the local directory flow; Gateway rows remain the permission truth. */
+export interface LocalDirectoryAccessRow {
+  readonly resource_id: string;
+  readonly write_tier: LocalDirectoryWriteTier;
+  readonly read_connection_id: string;
+  readonly write_connection_id: string | null;
+  readonly policy_ids: JsonObject;
+  readonly revision: bigint;
+  readonly updated_at: Date;
 }
 export interface ResourceClaimRow {
   readonly id: string; readonly workspace_id: string; readonly project_id: string;
@@ -1242,6 +1259,22 @@ export interface AssistSessionRow {
    * 我们采纳它「NULL=已读」的读法；「点开自动清除」需要 expected_unread_at 那类单调版本，本轮不做。
    */
   readonly unread_at: Date | null;
+  /**
+   * 0111：最后一条消息落库或生成结算的时刻。NULL = 这段会话还没有消息。
+   *
+   * 与 pinned_at、unread_at 同一性质——**导航排序键，不是业务事实**：不参与准入判定，
+   * 也不由 `revision` 裁决。写入口只有消息落库与生成结算两处；改名、置顶、未读、绑定
+   * 都不推进它，它自己也不推进 `updated_at` 与 `revision`（否则在途生成会把人工控制
+   * 命令的 CAS 基线打翻）。列表按 `coalesce(last_message_at, created_at)` 倒序排。
+   */
+  readonly last_message_at: Date | null;
+  /**
+   * 0113：分叉来源。NULL = 这条会话不是任何会话的分叉；有值即它由那一条分出来。
+   *
+   * 是**来源元数据**，不是状态也不是业务事实：分叉不改变父会话（不推进它的修订与标题），
+   * 子会话此后独立生长。写入口只有分叉命令，且只在插入时写一次。
+   */
+  readonly forked_from_session_id: string | null;
   readonly revision: bigint;
   readonly created_at: Date;
   readonly updated_at: Date;
@@ -1309,6 +1342,15 @@ export interface AssistMessageAttachmentRow {
   readonly content_hash: Buffer;
   readonly content: Buffer;
   readonly created_at: Date;
+}
+
+/** 0093：消息列表投影用的附件元数据（不读 `content` 字节）。 */
+export interface AssistMessageAttachmentMetaRow {
+  readonly id: string;
+  readonly message_id: string | null;
+  readonly name: string;
+  readonly media_type: AssistMessageAttachmentRow['media_type'];
+  readonly byte_length: number;
 }
 
 /** Disposable prefix for one current DRAFT claim and one actual model call. */
@@ -1488,6 +1530,7 @@ export interface RelayDatabaseSchema {
   gateway_permission_policies: GatewayPermissionPolicyRow;
   gateway_permission_versions: GatewayPermissionVersionRow;
   managed_resources: ManagedResourceRow;
+  local_directory_access: LocalDirectoryAccessRow;
   resource_claims: ResourceClaimRow;
   import_jobs: ImportJobRow;
   logical_operations: LogicalOperationRow;

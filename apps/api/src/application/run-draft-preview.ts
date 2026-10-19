@@ -14,6 +14,7 @@ import { lockTaskAndRun } from './lock-task-run.js';
 import { attachReadEvidenceWithinBudget, draftInputHash,
   loadRunReadEvidence } from './run-read-evidence.js';
 import { runManifestSourcesAvailable } from './trace-queries.js';
+import { targetMatches } from './gateway-actions.js';
 import { createRepositories, type Repositories } from './unit-of-work.js';
 
 export interface RunDraftPreviewDto {
@@ -186,6 +187,12 @@ async function toolReadCurrentlyVisible(r: Repositories, workspaceId: string,
     const resource = await r.gateway.readResource(operation.resource_id);
     if (resource?.workspace_id !== workspaceId || resource.project_id !== projectId ||
         resource.status !== 'ACTIVE') return false;
+    if (['FILE_READ', 'FILE_QUERY', 'FILE_WRITE', 'GIT_READ', 'GIT_WRITE', 'CLI_RUN']
+        .includes(operation.capability_key) &&
+        (typeof connection.config.root_path !== 'string' ||
+          !targetMatches(connection.config.root_path, resource.canonical_root, operation.capability_key))) {
+      return false;
+    }
   }
   return true;
 }

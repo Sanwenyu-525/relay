@@ -52,10 +52,10 @@
 }
 .agent-chat-permission-error { color: var(--relay-color-status-danger-text); }
 .agent-chat-permission-row {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--relay-space-0-5);
+  display: grid;
+  grid-template-columns: var(--relay-control-icon-size) minmax(0, 1fr);
+  column-gap: var(--relay-space-2);
+  align-items: start;
   width: 100%;
   padding: var(--relay-space-1) var(--relay-space-2);
   text-align: left;
@@ -64,6 +64,16 @@
   border-radius: var(--relay-radius-control);
   cursor: pointer;
   transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.agent-chat-permission-row-icon {
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+  margin-top: var(--relay-space-0-5);
+}
+.agent-chat-permission-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-0-5);
 }
 .agent-chat-permission-row:hover:not(:disabled) { background: var(--relay-color-selection-hover); }
 .agent-chat-permission-row[data-current="true"] {
@@ -111,4 +121,18 @@
   width: var(--relay-control-icon-size);
   height: var(--relay-control-icon-size);
   flex: none;
+}
+
+/* 完全访问是菜单里唯一免掉删除确认的一档，因此整行取 danger 前景色。
+   边框沿用 .danger-button 的画法（danger-text 直接当 border-color），不新增 token。 */
+.agent-chat-permission-row[data-tier="full"]:not(:disabled) .agent-chat-permission-row-title,
+.agent-chat-permission-row[data-tier="full"] .agent-chat-permission-row-icon {
+  color: var(--relay-color-status-danger-text);
+}
+.agent-chat-permission-row[data-tier="full"][data-current="true"] {
+  border-color: var(--relay-color-status-danger-text);
+}
+/* 放在 [open] 规则之后：同为三条选择器，靠顺序覆盖，展开时芯片仍保持红色。 */
+.agent-chat-permission .agent-chat-permission-chip[data-tier="full"] {
+  color: var(--relay-color-status-danger-text);
 }

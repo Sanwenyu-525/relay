@@ -10,12 +10,16 @@ import type { JsonObject } from '../infrastructure/json.js';
 
 export function describeComputerAction(actionType: string, params: JsonObject): string {
   switch (actionType) {
+    case 'BROWSER_CAPTURE_FOREGROUND':
+      return '浏览器前台截图（完成后恢复原页）';
     case 'COMPUTER_SCREENSHOT':
       return '正在截取屏幕画面';
     case 'COMPUTER_GET_WINDOWS':
       return '正在查看窗口列表';
     case 'COMPUTER_ACTIVATE_WINDOW':
       return '正在切换窗口';
+    case 'COMPUTER_MOVE':
+      return `正在移动鼠标到 (${integer(params.x)}, ${integer(params.y)})`;
     case 'COMPUTER_CLICK':
       return `正在点击 (${integer(params.x)}, ${integer(params.y)})`;
     case 'COMPUTER_DOUBLE_CLICK':

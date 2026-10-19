@@ -16,6 +16,7 @@ import { runIdempotentCommand, type CommandOutcome } from './command.js';
 import { invalidTransition, resourceNotFound, revisionConflict } from './domain-error.js';
 import { lockTaskAndRun } from './lock-task-run.js';
 import { createRepositories, type Repositories } from './unit-of-work.js';
+import { releaseComputerDesktopLeaseAtSafeBoundary } from './computer-desktop-lease.js';
 
 type Decision = 'KEEP_CURRENT_AND_FAIL_RUN';
 interface CurrentFile {
@@ -460,6 +461,7 @@ export async function closePartialFileWriteCommand(db: DbExecutor, input: {
         taskId: task.id, runId: run.id, expectedRevision: task.revision, toStatus: 'READY',
       });
       if (releasedTask === undefined) throw new Error('manual disposition Task CAS failed');
+      await releaseComputerDesktopLeaseAtSafeBoundary(repositories, run.id);
       await repositories.activities.insertActivityRecord({ id: randomUUID(),
         workspaceId: run.workspace_id, actorKind: 'HUMAN', actorRef: LOCAL_ACTOR_REF,
         commandId: input.commandId, projectId: task.project_id, taskId: task.id,

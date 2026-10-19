@@ -48,6 +48,64 @@ export async function listAssistMessages(db: DbExecutor, input: {
   return r.assist.listMessages(session.id, limit);
 }
 
+/**
+ * 0093：消息投影里的附件元数据（id/名/类型/字节数，**不含内容**）。
+ *
+ * 内容只在显式请求 `readAssistMessageAttachment` 时单独读取：消息列表是每轮都要读的
+ * 投影，把 bytea 混进去会让一次列表读取变成几 MB。按 message_id 分组返回，调用方
+ * 按第一条消息的顺序拼装。
+ */
+export async function listAssistMessageAttachmentMeta(db: DbExecutor, input: {
+  workspaceId: string; sessionId: string; messageIds: readonly string[] }):
+Promise<ReadonlyMap<string, readonly AssistMessageAttachmentMeta[]>> {
+  const session = await readAssistSession(db, input);
+  if (input.messageIds.length === 0) return new Map();
+  const rows = await createRepositories(db).assist
+    .listAttachmentMetaByMessages(session.id, input.messageIds);
+  const grouped = new Map<string, AssistMessageAttachmentMeta[]>();
+  for (const row of rows) {
+    if (row.message_id === null) continue;
+    const list = grouped.get(row.message_id) ?? [];
+    list.push({ id: row.id, name: row.name, mediaType: row.media_type,
+      byteLength: row.byte_length });
+    grouped.set(row.message_id, list);
+  }
+  return grouped;
+}
+
+export interface AssistMessageAttachmentMeta {
+  readonly id: string;
+  readonly name: string;
+  readonly mediaType: string;
+  readonly byteLength: number;
+}
+
+/**
+ * 0093：读取一张附件的内容（工作台 §33.3 的历史消息缩略图）。
+ *
+ * 只读、不改任何业务状态；归属同时核对 workspace 与 session——跨会话/跨工作区引用
+ * 一律按不可见处理（404），不因为知道 id 就放宽。内容以 base64 返回：HTTP 客户端
+ * 统一按 JSON 解析，二进制响应会给这条只读路径引入第二套传输形状。
+ */
+export async function readAssistMessageAttachment(db: DbExecutor, input: {
+  workspaceId: string; sessionId: string; attachmentId: string }):
+Promise<AssistMessageAttachmentContent> {
+  const session = await readAssistSession(db, input);
+  const row = await createRepositories(db).assist
+    .readAttachment(input.attachmentId, session.workspace_id, session.id);
+  if (row === undefined) throw resourceNotFound('Assist message attachment');
+  return { attachmentId: row.id, name: row.name, mediaType: row.media_type,
+    byteLength: row.byte_length, dataBase64: Buffer.from(row.content).toString('base64') };
+}
+
+export interface AssistMessageAttachmentContent {
+  readonly attachmentId: string;
+  readonly name: string;
+  readonly mediaType: string;
+  readonly byteLength: number;
+  readonly dataBase64: string;
+}
+
 /** Short, reauthorized snapshot; revisions describe only disposable draft display. */
 export async function readAssistLivePreview(db: DbExecutor, storage: ManagedContentStore,
   input: { workspaceId: string; sessionId: string; messageId: string }): Promise<{

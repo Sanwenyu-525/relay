@@ -34,6 +34,9 @@ const openResultSchema = Type.Object({
     policy_id: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     policy_revision: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     policy_target_prefix: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    write_tier: Type.Optional(Type.Union([Type.Literal('READ_ONLY'), Type.Literal('ASK'),
+      Type.Literal('AUTO'), Type.Literal('FULL'), Type.Null()])),
+    access_revision: Type.Optional(Type.String({ pattern: '^(0|[1-9][0-9]*)$' })),
   }, strict),
 }, strict);
 

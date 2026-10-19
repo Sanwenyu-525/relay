@@ -62,6 +62,7 @@
 .project-workbench .workbench-document-body .markdown-preview { margin: 0; padding: 0; border: 0; background: transparent; font: inherit; }
 .project-workbench .workbench-document-body h1 { font-size: var(--relay-font-size-section); }
 .project-workbench .workbench-document-body h2, .project-workbench .workbench-document-body h3 { font-size: var(--relay-font-size-rowTitle); margin-top: var(--relay-space-6); }
+.project-workbench .workbench-document-body .markdown-preview__heading[data-heading-level="2"] { font-size: var(--relay-font-size-reading); }
 .project-workbench .workbench-document-body pre { white-space: pre-wrap; font-family: inherit; font-size: inherit; overflow-wrap: anywhere; }
 .project-workbench .workbench-document-body pre:has(code) { font-family: var(--relay-font-family-code); font-size: var(--relay-font-size-meta); }
 .project-workbench .workbench-paper-empty { padding: var(--relay-space-6) 0; color: var(--relay-color-text-secondary); }

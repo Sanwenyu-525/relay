@@ -659,13 +659,13 @@ Project Assist 会话可用原 `POST /assist-sessions/{id}/messages` 发送 `{co
 
 **Breaking Change: No（新增只读端点）。** `GET /api/v1/workspaces/{workspace_id}/assist-sessions/{session_id}/messages/{message_id}/live-preview` 使用现有 Bearer 鉴权，返回 200、`Cache-Control: no-store` 和严格对象 `{session_id,message_id,status,preview_revision,preview_text,preview_truncated,preview_available}`。`status` 为原消息的 `PENDING|RUNNING|COMPLETED|FAILED|CANCELLED`；`preview_revision` 为十进制字符串，`preview_text` 可为 null，`preview_truncated` 表示 16 KiB UTF-8 前缀已截取。仅普通、无 Skill 的 `DISCUSS` 在 PENDING/RUNNING 且未请求取消、当前目标及本轮/有界历史来源仍可读时 `preview_available=true`；来源重查最多覆盖最近 20 条已完成消息、总计最多 20 个来源引用，超过界限保守隐藏草稿。PENDING 或首片段前仍可返回 `preview_text=null,preview_revision='0'`。完成、失败、取消、租约失效、非 DISCUSS、Skill 或来源失权均返回 `preview_available=false,preview_text=null,preview_revision='0'`。不同 Workspace、Session、Message 组合或不存在的 ID 返回 404 `RESOURCE_NOT_FOUND`，缺失/错误 Bearer 返回 401。调用方重连后重读累计文本并按 revision 去重；终态读取原 `GET /assist-sessions/{id}/messages` 的完整结算行，不把草稿当 Proposal、已接受结果或成功响应。
 
-消息来源的历史投影会重新核对当前可见性：已失权的普通 `DISCUSS` 正文返回 null，来源 ID/正文不出响应；仍可见来源保留既有记录字段。结构化提案、Skill、语义检查和 Run DRAFT 不在此端点公开原始生成片段；Run 的独立端点见 §10.39。临时草稿的容量/速率、删除和跨进程读取由 [物理设计 §41](../database/physical-design-postgresql.md)说明；真实 Provider 与前端首字延迟仍需单独验证。
+消息来源的历史投影会重新核对当前可见性：已失权的普通 `DISCUSS` 正文返回 null，来源 ID/正文不出响应；仍可见来源保留既有记录字段。结构化提案、Skill、语义检查和 Run DRAFT 不在此端点公开原始生成片段；Run 的独立端点见 §10.39。临时草稿的容量/速率、删除和跨进程读取由 [物理设计 §41](../database/physical-design-postgresql.md)说明；真实 Provider 与前端首字延迟仍需单独验证。2026-10-18 起新增可选的 SSE 加速通道（§10.59，帧体即本 DTO）；本端点保留为权威快照与降级路径。
 
 ### 10.39 M04 Run DRAFT 生成中临时草稿（2026-09-26）
 
 **Breaking Change: No（新增只读端点）。** `GET /api/v1/workspaces/{workspace_id}/runs/{run_id}/draft-preview` 使用现有 Bearer 与 Workspace 鉴权，返回 200、`Cache-Control: no-store`，严格对象 `{run_id,run_status,step_attempt_id,attempt_claim_epoch,model_call_id,preview_revision,preview_text,preview_truncated,preview_available}`。ID 为 UUID 或 null，epoch/revision 为十进制字符串或约定的 null；`preview_text` 为最多 16 KiB UTF-8 的累计 Markdown 前缀或 null，`preview_truncated` 表示前缀已达上限。生成中的当前 DRAFT Attempt 尚无首片段时可返回当前 `step_attempt_id` 与 `attempt_claim_epoch`、`preview_available=true`，而 `model_call_id/preview_text=null,preview_revision='0'`。同一 Attempt 的实际片段绑定原 `model_call_id`，递增 `preview_revision` 供重读去重。
 
-只有 Run 当前为 RUNNING、Task 仍由该 Run 占有、DRAFT Step/Attempt 为当前领取、Worker 与 dispatch invocation/租约有效、无 PENDING 控制请求，且当前 Manifest 及冻结 FILE_READ/WEB_FETCH 读证据的来源仍可见时草稿可用。重试的新 Attempt 或 Worker 领取使旧前缀不可见，旧回调不能覆盖；来源撤销、连接/策略/资源停用、租约失效、取消、失败或步骤终结返回 `preview_available=false,preview_text=null,preview_revision='0'`，不回显来源引用。不存在或跨 Workspace Run 返回 404 `RESOURCE_NOT_FOUND`，缺失/错误 Bearer 返回 401。客户端断线后重读并按 Attempt、claim epoch、模型调用与 revision 识别累计文本；终态必须查询原 Run/Artifact，临时草稿不创建 Artifact、不证明验证 PASS 或 Task DONE。现有 Run SSE 仍传事实刷新提示，此端点以短轮询读取片段；真实 Provider、前端首字延迟与桌面体验尚待测。
+只有 Run 当前为 RUNNING、Task 仍由该 Run 占有、DRAFT Step/Attempt 为当前领取、Worker 与 dispatch invocation/租约有效、无 PENDING 控制请求，且当前 Manifest 及冻结 FILE_READ/WEB_FETCH 读证据的来源仍可见时草稿可用。重试的新 Attempt 或 Worker 领取使旧前缀不可见，旧回调不能覆盖；来源撤销、连接/策略/资源停用、租约失效、取消、失败或步骤终结返回 `preview_available=false,preview_text=null,preview_revision='0'`，不回显来源引用。不存在或跨 Workspace Run 返回 404 `RESOURCE_NOT_FOUND`，缺失/错误 Bearer 返回 401。客户端断线后重读并按 Attempt、claim epoch、模型调用与 revision 识别累计文本；终态必须查询原 Run/Artifact，临时草稿不创建 Artifact、不证明验证 PASS 或 Task DONE。现有 Run SSE 仍传事实刷新提示，此端点以短轮询读取片段；真实 Provider、前端首字延迟与桌面体验尚待测。2026-10-18 起新增可选的 SSE 加速通道（§10.59，帧体即本 DTO）；本端点保留为权威快照与降级路径。
 
 ### 10.40 M05/P15 完成凭据详情（2026-09-26，后端开发自检）
 
@@ -834,7 +834,7 @@ Project 拥有接续点身份与说明；其他对象只保存捕获时的确切
 
 | 端点 | 行为 |
 |---|---|
-| POST /api/v1/workspaces/{workspace_id}/working-directories/open | 200。需要 `command_id`、`root_path`（1–1024），可选 `project_id`。`status` 为 `READY` / `AMBIGUOUS` / `NOT_READY`；`AMBIGUOUS` 表示同一实际目录关联了多个项目，需再带 `project_id` 选一次；`NOT_READY` 带稳定 `reason`（`MULTIPLE_PROJECTS` / `PROJECT_ARCHIVED` / `RESOURCE_DISABLED` / `OVERLAPPING_OTHER_PROJECT`）。`write_readiness` 只是**只读**投影现有连接与权限，不创建连接、不放宽权限。2026-10-17 起该投影还带生效档位字段（`policy_decision` / `policy_id` / `policy_revision` / `policy_target_prefix`，可空；旧回执缺字段按「未核对」处理），查询与调整规则见 §10.86。已有重叠受管根时不会新开项目造出第二个写 Owner。不存在或不是目录 422。 |
+| POST /api/v1/workspaces/{workspace_id}/working-directories/open | 200。需要 `command_id`、`root_path`（1–1024），可选 `project_id`。`status` 为 `READY` / `AMBIGUOUS` / `NOT_READY`；`AMBIGUOUS` 表示同一实际目录关联了多个项目，需再带 `project_id` 选一次；`NOT_READY` 带稳定 `reason`（`MULTIPLE_PROJECTS` / `PROJECT_ARCHIVED` / `RESOURCE_DISABLED` / `OVERLAPPING_OTHER_PROJECT`）。成功处理用户主动选择的目录时，Application 建立/复用本地只读基础读取配置；`write_readiness` 是原 Gateway 投影，不代表批准。回执含策略字段 `policy_decision` / `policy_id` / `policy_revision` / `policy_target_prefix`，并新增可选 `write_tier` / `access_revision`；旧命令回执重放可能缺后两字段，客户端按未核对处理。已有重叠受管根时不会新开项目造出第二个写 Owner。不存在或不是目录 422。 |
 | POST /api/v1/workspaces/{workspace_id}/assist-sessions/{session_id}/execution-requests | 202。需要 `command_id`、`source_message_id`（该会话内一条已完成的 USER 消息）、`resource_id`（同项目 ACTIVE 受管资源）。返回 `decision`、`status`、`candidate_status`、`questions` 与候选摘要。原消息不属于该会话、非 USER 消息、未完成、会话未绑定 Project 或资源不可用时 409。同一原消息或同一 `command_id` 重放返回同一条请求，不重付模型整理成本。 |
 | POST /api/v1/workspaces/{workspace_id}/conversation-execution-requests/{request_id}/applications | 200。按固定的阶段命令身份建立真实 Task → READY → Delegate。候选不是 `READY`、受管资源不可用、或项目缺少绑定该目录的 `FILE_QUERY` / `FILE_READ` / `FILE_WRITE` / `CLI_RUN` 连接时 409 并给出**第一项缺失能力**的具体原因；本端点**不创建连接、不放宽权限**。重复调用返回同一个 `task_id` 与 `run_id`。 |
 | GET /api/v1/workspaces/{workspace_id}/conversation-execution-requests?session_id= | `{ items: 会话内最近的执行请求摘要[] }`，只读，不创建对象、不外呼。2026-10-16 增加持久化 `resource_id` 与 `candidate`（对象或 null），用于主流程后恢复原候选的标题、目标与检查；单条 GET 同步。Breaking Change: No，旧客户端忽略增量字段，新客户端兼容旧响应缺少字段。 |
@@ -1407,30 +1407,39 @@ Breaking Change：**No**——纯新增一个端点与一个 `model_calls.kind` 
 
 **证据（如实）。** ① 定向单测通过：`composer-draft.test.ts`（文档示例逐字重建、重复句/标点/空白/路径/URL/emoji 保真、畸形边界 9 类拒绝、润色协议与适用性）**10/10**；`composer-draft-port.test.ts`（两条路由登记与模板一致、受控 HTTP 捕获最终发出体证明请求只含草稿且 `response_format=json_object`、无工具声明）**3/3**；`apps/api` 全量 `tsc --noEmit` 通过。② **已写未跑**：`composer-draft-assist.integration.test.ts`（真实 PG：`COMPOSER` 行无作用域且 `COMPLETED`+usage、业务计数前后不变、不适用时不写行、畸形协议仍记 `COMPLETED`、Provider 失败记 `FAILED`、闸门限流不写行、未配置/超长在开事务前拒绝、HTTP 401/409/422）——共享工作树有并行实例、机器非空载，按项目规则未并发运行 `run-integration.ps1`，**不计入通过**。③ 前端：`tests/composerDraftAssist.spec.tsx` **12/12**（停笔才请求、组词零请求、忽略不重复请求、查看/采用/撤销、Esc 与焦点、润色中态与快照撤销、失败保留、迟到隔离与「改回相同文本不复用旧结果」、发送清空、来源变化清空）与 `tests/browser/composerDraftAssist.spec.ts`（真实 Chromium 主路径与在途编辑覆盖）已运行。④ **未验**：真实 Provider 的语义质量样本、真实 Windows 窗口的 IME/DPI 与安装态。
 
-### 10.85 Assist 消息图片附件（2026-10-16 后端源码实现，前端未接线）
+### 10.85 Assist 消息图片附件（2026-10-18 前后端接线）
 
-[工作台 §32](../frontend/workbench-design.md#33-输入框粘贴图片与消息附件) 的服务面。粘贴/拖拽进输入框的图片是**会话输入快照**：不是资料（不进 knowledge/memory/decision 版本体系，不占用显式选源 10 条上限），不是 artifact（不受管存储版本目录与防篡改核对语义），也不是幂等业务命令。链路分两阶段：**先传后引**——上传端点落一行不可变暂存，消息命令在同一事务内把附件绑定到新用户消息。
+[工作台 §33](../frontend/workbench-design.md#33-输入框粘贴图片与消息附件) 的服务面。粘贴/拖拽进输入框的图片是**会话输入快照**：不是资料（不进 knowledge/memory/decision 版本体系，不占用显式选源 10 条上限），不是 artifact（不受管存储版本目录与防篡改核对语义），也不是幂等业务命令。链路分两阶段：**先传后引**——上传端点落一行不可变暂存，消息命令在同一事务内把附件绑定到新用户消息。
 
 | 端点 | 命令？ | 说明 |
 |---|---|---|
 | `POST /assist-sessions/{id}/message-attachments` | 否（暂存，无 `command_id`、无回执） | 201，请求体 `{name, media_type, data_base64}`（路由级 `bodyLimit` 4 MiB；`name` 1–200 字符），响应 `{attachment_id, byte_length, content_hash}`。媒体类型白名单 `image/png\|image/jpeg\|image/gif\|image/webp`；原始字节 >0 且 ≤2 MiB。会话必须存在、归属本 Workspace 且 ACTIVE（归档 → 409 `INVALID_TRANSITION`）。不改变任何业务状态，因此不走命令幂等 |
+| `GET /assist-sessions/{id}/message-attachments/{attachment_id}` | 否（只读） | 200，`{attachment_id, name, media_type, byte_length, data_base64}`。**2026-10-18 新增**：工作台 §33.3 的历史消息缩略图需要读回内容。归属同时核对 Workspace 与 Session，跨会话/跨 Workspace 一律 404 `RESOURCE_NOT_FOUND`；只读，不改任何业务状态。以 base64 返回而不是二进制：客户端只有一个 JSON 传输形状，不为这条只读路径引入第二套读法 |
 | `POST /assist-sessions/{id}/messages` 新增可选 `attachment_ids: [uuid]`（≤4） | `RequestAssistMessage` | 202；`attachment_ids` 进命令载荷幂等摘要，重放按原 ids 核对。用例在同一事务内核对归属（同 Workspace+会话、未被他消息绑定）、去重、每消息 ≤4 张与总量 ≤6 MiB，然后绑定到新用户消息；任何核对失败整体回滚（404 `RESOURCE_NOT_FOUND` / 422 `VALIDATION_FAILED`），绝不部分绑定。**不传该字段时载荷逐字不变**，既有调用与重放零影响 |
 
-**物理**：迁移 `0093` 建表 `assist_message_attachments`（`bytea` 内容 + `content_hash` + `byte_length=octet_length(content)` CHECK + 类型白名单 CHECK；只授 `SELECT/INSERT/UPDATE`）。选 `bytea` 而非受管存储文件：附件必须与消息同短事务提交，`bytea` 没有「写了文件没写库」的中间态，也无孤儿文件；单用户本机体量由上限约束。详见[数据库设计 §91](../database/physical-design-postgresql.md#91-0093-assist-消息图片附件2026-10-16-源码实现)。
+**正文可以为空，但只限带图片的讨论轮（2026-10-18）。** `content` 的 schema 由 1–32768 字符放宽为 0–32768，是否真的允许空正文由用例裁决：`attachment_ids` 非空、没有 `skill_ref`、`intent` 为 `DISCUSS`（或缺省）时允许空串（落库 `''`，不是 `NULL`，既有 `content IS NOT NULL` 约束不变）；其余情况仍是 `must not be empty`。理由是「只有图片、没有一句话」本身是正常的输入形态，而 Skill 与提案意图以正文为输入，空正文会产生没有意义载荷。**Breaking Change: No**——只是放宽，旧客户端行为逐字不变。
 
-**模型能力闸门（fail-closed）。** 当前聊天恒由进程默认连接服务（会话选择→端口接线属阶段 C-2b，落地后应改为读取冻结快照），因此带附件的发送按 `RELAY_MODEL_NAME` 在模型目录里查条目并读 `capabilities.image_input`（10.82 目录同步的三态：true/false/null）：**无条目或非 `true` 一律 422 拒绝**——未知不冒充可用，也不因带图就换模型、换连接或悄悄降级为纯文本。目录数据来自 OpenRouter `architecture.input_modalities` 含 `'image'`。
+**消息投影新增 `attachments`。** `GET /assist-sessions/{id}/messages` 每条消息多一个 `attachments: [{id, name, media_type, byte_length}]`（**只有元数据**，不读 `bytea`）。列表是每轮都读的投影，把内容混进去会让一次列表读取变成几 MB；内容按单张经上面的 GET 端点读取。缺字段按「没有附件」读，因此旧服务端的响应仍可解析。
 
-**多模态组装。** 仅**当前消息**的附件以多模态 content parts 交给模型（LangChain 1.x 标准块 `{type:'image', source_type:'base64', data, mimeType}`，图片在前、正文文本收尾）；历史消息的附件降级为一行文本占位（`（该轮随附图片：…；图片内容不在本轮回放。）`），不冒充模型看得见，也不逐条回放历史图片占上下文。纯文本轮次的请求形状逐字不变。
+**物理**：迁移 `0093` 建表 `assist_message_attachments`（`bytea` 内容 + `content_hash` + `byte_length=octet_length(content)` CHECK + 类型白名单 CHECK；只授 `SELECT/INSERT/UPDATE`）。选 `bytea` 而非受管存储文件：附件必须与消息同短事务提交，`bytea` 没有「写了文件没写库」的中间态，也无孤儿文件；单用户本机体量由上限约束。详见[数据库设计 §91](../database/physical-design-postgresql.md#91-0093-assist-消息图片附件2026-10-16-源码实现)。空正文与读端点都不需要新迁移（`content text` 本就可空、`''` 满足非空约束；读端点只查既有行）。
 
-**边界。** 附件不授予任何读取/执行权限；上传与绑定都在会话作用域内核对，跨会话/跨 Workspace 引用按 404 拒绝。V1 仅支持图片；文本/PDF 等文件类型在上传端点明确拒绝并说明（模型目录的 image 输入是常见能力，文档输入极少支持），后续按需扩展。
+**模型能力闸门（fail-closed，2026-10-18 补一处空白）。** 当前聊天恒由进程默认连接服务（会话选择→端口接线属阶段 C-2b，落地后应改为读取冻结快照），因此带附件的发送按 `RELAY_MODEL_NAME` 在模型目录里查条目并读 `capabilities.image_input`（10.82 目录同步的三态：true/false/null）。**目录里有条目时目录是唯一准绳**：非 `true` 一律 422 拒绝。**目录里没有条目时**（自建 Provider 不会出现在 OpenRouter 目录里，例如本机 `agnes-3.0-flash`），只有运维显式声明 `RELAY_MODEL_IMAGE_INPUT=true` 才放行；未声明仍按未知拒绝，错误里直接写明这个变量名。声明是运维事实而不是猜测，也不因带图换模型、换连接或悄悄降级为纯文本。
+
+**多模态组装。** 仅**当前消息**的附件以多模态 content parts 交给模型（LangChain 1.x 标准块 `{type:'image', source_type:'base64', data, mimeType}`，图片在前、正文文本收尾）；正文为空时不再追加空的 text 块。历史消息的附件降级为一行文本占位（`（该轮随附图片：…；图片内容不在本轮回放。）`），不冒充模型看得见，也不逐条回放历史图片占上下文。纯文本轮次的请求形状逐字不变。
+
+**边界。** 附件不授予任何读取/执行权限；上传、绑定与读回都在会话作用域内核对，跨会话/跨 Workspace 引用按 404 拒绝。V1 仅支持图片；文本/PDF 等文件类型在上传端点明确拒绝并说明（模型目录的 image 输入是常见能力，文档输入极少支持），后续按需扩展。
 
 Breaking Change：**No**——全新端点与表 + 消息命令新增可选字段；无附件路径的载荷、hash、重放与请求形状逐字不变。
 
-**证据（如实分层）。** 已运行：`apps/api` 全量 `tsc --noEmit` 通过（唯一错误来自并行实例正在进行的 `model-catalog-repository` 签名重构与其测试文件的错位，非本片改动）；受影响单测 `model-catalog-pricing` / `openai-compatible-model-port` / `model-catalog-config` / `openai-compatible-free-guard` 合计 **58/58**（临时编译目录执行，未触碰共享 dist）。**未运行/未编写**：真实 PG 集成测试（附件落库/绑定/重放/隔离/闸门/CHECK）与浏览器/前端规格——前端尚未接线；按项目规则留待空载与前端完成后再取证。**未验**：真实 Provider 的多模态语义质量。
+**证据（如实分层）。** 2026-10-16（后端首版）：`apps/api` 全量 `tsc --noEmit` 通过；受影响单测 `model-catalog-pricing` / `openai-compatible-model-port` / `model-catalog-config` / `openai-compatible-free-guard` 合计 **58/58**。当时**未运行/未编写**真实 PG 集成测试与前端规格（前端未接线）。
+
+2026-10-18（本轮回合）：真实 PostgreSQL `assist-message-attachments.integration.test.ts` **5/5**（`run-integration.ps1 -TestFile assist-message-attachments -UseCLocale` 整体 PASSED，临时集群已清理）——覆盖绑定与投影元数据、单张内容读回、跨会话/跨 Workspace 404、空正文例外（无附件/Skill/提案三种拒绝）、能力声明（未声明拒绝且错误里点名 `RELAY_MODEL_IMAGE_INPUT`，声明后通过）、类型/单张/数量/重复引用四类上限、被拒绝的命令不绑定任何行；另有一条 HTTP 面用例核对三个端点的响应形状（上传 201、能力未声明时 422 且错误点名变量、消息列表的 `attachments` 元数据、内容端点的字段名与字节）——它当场抓到了「用例层 camelCase 与响应 schema 的 snake_case 对不上、序列化后字段被丢掉」的投影遗漏。工作台 `tests/composerImageAttachments.spec.tsx` **6/6**。**该轮真实 PG 用例暴露并修掉一个后端缺陷**：`bindAttachments` 的 `UPDATE` 缺 `RETURNING`，驱动只回「命令完成」、`rows` 恒为空，绑定数被读成 0，任何带图消息都会以「附件在作用域内不可见」被拒——这是 0093 落地时没有集成测试的直接后果。**未验**：真实 Provider 的多模态语义质量、真实 Windows 窗口的粘贴/拖拽与 DPI。
 
 ### 10.86 目录写入档位投影与只读查询（2026-10-17 源码实现）
 
-**Breaking Change: No**。新增一个只读 GET；`POST /working-directories/open` 回执的 `write_readiness` 增加四个可空字段。无新命令、表、迁移或权限；旧回执缺字段时客户端按「未核对」处理，不猜档位。
+本节记录本地目录免手工配置的服务面；产品行为归[工作台 §18.1.4](../frontend/workbench-design.md#1814-本地目录权限设置2026-10-18已确认已实施)。用户主动打开并成功关联目录时，应用按原 Owner 建立或复用该根默认只读的基础读取配置；只读 GET、恢复旧会话与模型输出不写权限。改档使用下述命令入口，所有就绪状态仍由原 Gateway 准入事实投影。配置的管理元数据见[数据库 §98](../database/physical-design-postgresql.md#98-0109-本地目录访问档位元数据2026-10-18-源码实现)。
+
+**Breaking Change: No**。新增写档位命令端点和迁移 `0109`，并给目录打开/就绪回执增加可选档位字段；旧客户端可忽略新增字段，旧配置与在途命令不重绑。
 
 `GET /api/v1/workspaces/{workspace_id}/projects/{project_id}/managed-resources/{resource_id}/write-readiness`
 
@@ -1438,25 +1447,34 @@ Breaking Change：**No**——全新端点与表 + 消息命令新增可选字�
 
 | 字段 | 约束 |
 |---|---|
-| `status` | 封闭词表：`READY` / `NEEDS_CONNECTION` / `NEEDS_PERMISSION` / `PERMISSION_DENIED` / `RESOURCE_IDENTITY_UNBOUND` / `RESOURCE_BUSY` / `RESOURCE_DISABLED` |
+| `status` | 封闭词表：`READY` / `READ_ONLY` / `NEEDS_CONNECTION` / `NEEDS_PERMISSION` / `PERMISSION_DENIED` / `RESOURCE_IDENTITY_UNBOUND` / `RESOURCE_BUSY` / `RESOURCE_DISABLED` |
 | `detail` | 中文只读说明，对应上述状态；不是授权凭据 |
 | `policy_decision` | 当前命中的 `APPLY_CHANGESET` 条目决策 `AUTO` / `ASK` / `DENY`；没有命中条目时为 `null` |
 | `policy_id` / `policy_revision` | 该条目的身份与修订，调整档位时的乐观锁坐标；无条目时为 `null` |
 | `policy_target_prefix` | 该条目覆盖的目标前缀。只有它等于当前目录时，客户端才允许在这个目录入口改档；它不等于当前目录说明命中的是上层受管根条目 |
+| `write_tier` | `READ_ONLY` / `ASK` / `AUTO` / `FULL`，本目录保存的用户档位；未建立本地档位记录时为 `null`。`AUTO` 与 `FULL` 的 `policy_decision` 相同，界面必须读这一列才能区分两档（2026-10-18 加值） |
+| `access_revision` | 本地档位记录的 revision 十进制字符串；无记录时为 `0` |
 
 选择规则与准入**同源**：先按 `FILE_WRITE` × `APPLY_CHANGESET` 列出本项目生效条目，过滤出目标前缀覆盖本目录的条目，再用与动作准入相同的 `rankActivePolicies` 取最严格者（`DENY` > `ASK` > `AUTO`，同档按更长前缀、再按 ID）。界面不自行排序，也不把 `READY` 当作批准。
 
-档位语义固定为三档，**没有「完全访问」**：
+档位语义为四档（2026-10-18 由三档接续为四档，新增 `FULL`；此前本节记录的「没有完全访问」已被该接续替代）：
 
 | 档位 | 对应事实 | 边界 |
 |---|---|---|
-| 每次确认 | 生效条目为 `ASK` | 每次应用改动仍单独产生动作审批 |
-| 本次任务自动 | 生效条目为 `AUTO` | 只覆盖既有范围授权动作；删除、Git 提交/推送与超出本目录仍逐次确认 |
-| 不开放写入 | 没有命中条目或撤销本目录条目 | 目录只读；`DENY` 是单独状态 `PERMISSION_DENIED`，本入口不解除 |
+| 只读 | 本入口登记的 `READ_ONLY` 档位，生效条目为 `DENY` | 目录只读；不是 `PERMISSION_DENIED`，本入口可再改档 |
+| 请求批准 | 生效条目为 `ASK` | 每次应用改动仍单独产生动作审批 |
+| 自动批准 | 生效条目为 `AUTO`，`write_tier` 为 `AUTO` | 只覆盖既有范围授权动作；删除、Git 提交/推送与超出本目录仍逐次确认 |
+| 完全访问 | 生效条目同为 `AUTO`，`write_tier` 为 `FULL` | 本目录内的新建、修改与删除不再逐次确认；Git、CLI、浏览器、电脑与目录外动作仍按原准入逐次确认 |
 
-调整档位复用既有 Gateway 命令，不新增命令端点：`CreateGatewayPolicy`（`capability=FILE_WRITE`、`action_type=APPLY_CHANGESET`、`resource_id`、`decision=ASK|AUTO`、`max_payload_bytes=262144`）、`AddGatewayPolicyVersion`（携带 `expected_revision = policy_revision`）、`RevokeGatewayPolicy`（携带 `expected_revision`）。回执后客户端必须重新读取本投影，不能把命令成功当作档位已生效；响应丢失时保留原 `command_id`，按原回执核对或原样重试。`DENY` 不被批准或范围授权覆盖；本入口只处理本目录自己的条目，上层受管根条目仍归「连接与权限」页。
+`FULL` 不新增第四种 Gateway 判定：网关词表仍是 `AUTO` / `ASK` / `DENY`，排序仍是 `DENY` > `ASK` > `AUTO`（同档按更长前缀、再按 ID）。豁免只在准入处把「本目录档位为 `FULL`」并入「范围已覆盖」这一个条件，因此显式 `DENY`、上层受管根的更严格条目、目录根外目标与没有 FILE_WRITE 连接的目录都不被放宽；该档位必须由准入按 `resource_id` 回读 `local_directory_access`，prepare 与 dispatch 各读一次同一函数，客户端不得在动作请求里传档位。Run 范围授权继续永远不含删除——那是范围授权的边界，与目录档位无关。物理边界与回滚见[数据库 §101](../database/physical-design-postgresql.md#101-0112-本地目录完全访问档位2026-10-18-源码实现)。
 
-**证据（如实分层）**：真实 PG 集成中，`folder-first-conversation.integration.test.ts` 的长链路已断言打开目录投影在 AUTO 下为 `READY`、`policy_decision=AUTO` 且带条目身份/修订/前缀，同目录再压一条 ASK 后投影变为 ASK（最严格优先）；该套件本轮整体仍为红，失败是两例既有用例（任务创建返回 422 `title/objective` 控制字符、越界读取用例的驱动器断言 `SUCCEEDED` 与用例自身「允许非 SETTLED」矛盾），与本投影无关。工作台定向 `writePermissionTier.spec.tsx` **8/8**（含未绑定态常驻、三档禁用且零查询、旧版 API 404 降级）、首条输入相关 4 套件 **84/84**、`folderFirstConversation`＋`assistBinding` **31/31**、`tsc --noEmit` exit0。新 GET 尚无独立的 HTTP 集成用例，仅由同一投影函数的集成断言与组件桩覆盖；真实 Windows 窗口未复验。实际验收结论只归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+改档端点：`POST /api/v1/workspaces/{workspace_id}/projects/{project_id}/managed-resources/{resource_id}/local-access`，请求为 `{command_id, expected_revision, write_tier}`，其中 `write_tier` 接受 `READ_ONLY`、`ASK`、`AUTO`、`FULL`。Application 命令 `SetLocalDirectoryWriteTier` 在同一命令事务中按资源根、Project/Workspace 归属和 `expected_revision` 核验后更新档位，返回 `project_id`、`resource_id`、`write_tier` 与新 `revision`。首次执行前核对物理根；已存在回执时仍由命令执行器核对原作用域、命令类型与完整载荷，但精确重放不依赖当前磁盘根。相同 `command_id` 的载荷变化仍按 `COMMAND_ID_REUSED` 拒绝，重放不推进配置 revision。冲突不覆盖更新值。该命令只管理本入口登记的条目；显式 `DENY`、连接停用、上层受管根限制和已有 Gateway 准入规则不能被改档绕过。**Breaking Change: No**（`write_tier` 加值 `FULL` 是兼容新增：既有取值不变、旧行不受影响，旧客户端把未知取值读成「待核对」而不是猜一档；未知取值仍按 422 拒绝）。
+
+`POST /api/v1/workspaces/{workspace_id}/working-directories/open` 的 `write_readiness` 可附带 `write_tier` 与 `access_revision`；这是兼容性新增字段。首次成功的显式目录打开会准备基础读取配置，读取 `GET .../write-readiness`、重开旧会话和恢复请求不写配置。具体结果与未验边界见[统一功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
+新增默认读取配置前会查阅既有 Gateway 策略版本中的历史目标；若匹配当前根的范围曾明确配置/撤销且没有当前活动授权，首次目录打开不会另建 AUTO。该查询复用既有策略表和版本，不增加 API 字段或数据库结构；后续明确活动策略仍可按既有 Owner 复用。
+
+2026-10-18 的真实 PG/HTTP 与目录 CRUD 结果、桌面产物及未验证范围只记在[统一功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)；本节定义 API 合同，不把合同本身当作运行证据。
 
 ### 10.87 会话未读标记（2026-10-17 源码实现，迁移 0104）
 
@@ -1469,10 +1487,212 @@ Breaking Change：**No**——全新端点与表 + 消息命令新增可选字�
 | `POST /assist-sessions/{session_id}/unread` | `SetAssistSessionUnread`（body `command_id`、`expected_revision`、`unread`） | 200；回执 `{session_id, unread, unread_at, revision, updated_at}`。同一 `command_id` 重放返回原回执（附 `command-replayed` 头），修订不推进 |
 | `GET /assist-sessions/{session_id}`、`GET /assist-sessions` | — | 投影新增只读字段 `unread_at`：`null` = 已读，非空 = 标记未读的时刻；缺字段只来自 0104 之前的响应，客户端同样读成已读 |
 
-**语义边界。** `unread_at` 是**导航标记，不是业务事实**：它不改变标题、状态、项目／任务／目录绑定，不影响能否发消息，也**不参与列表排序**（排序键仍是 `pinned_at desc nulls last, created_at desc, id desc`）。标记未读写服务端当前时刻；取消未读写回 `NULL`，表里不留「曾经未读」的第三态——那一次改动留在命令回执里。
+**语义边界。** `unread_at` 是**导航标记，不是业务事实**：它不改变标题、状态、项目／任务／目录绑定，不影响能否发消息，也**不参与列表排序**（排序键仍只有置顶与活动序两档，见 §10.91）。标记未读写服务端当前时刻；取消未读写回 `NULL`，表里不留「曾经未读」的第三态——那一次改动留在命令回执里。
 
 **准入与冲突。** 命令走 `runIdempotentCommand`：行锁 + `where revision = expected_revision` CAS + 命令回执。归档会话一律 `INVALID_TRANSITION`（409，`requireEditableSession`）；跨 Workspace 的会话按不可见处理（`RESOURCE_NOT_FOUND`，404）；陈旧基线返回 `REVISION_CONFLICT`（409，带 `conflict.actual_revision`）；同一 `command_id` 换载荷返回 `COMMAND_ID_REUSED`（409）。客户端在 409 时只重读、不换 ID 自动重发（与置顶相同，见工作台 §28.1）。
 
 **本轮不做「点开自动清除」。** 当前只有人工 toggle 一个写入方，同一行的并发由 `revision` 这一道 CAS 裁决；上游 ZCode 的 `unread_at` + `last_unread_at` 双列是为后台自动清除与人工标记的并发准备的，本项目没有那个写入方，复制该机制属提前建设。会话「未读」与消息级「未读资料」不是一回事：后者在本项目仍没有领域状态与写路径。
 
 **证据（如实分层）。** 真实 PostgreSQL：`assist-session-controls.integration.test.ts` **14/14**——覆盖标记写入时刻、取消写回 `NULL`、修订推进且其它事实不变、重放不推进、换载荷 `COMMAND_ID_REUSED`、陈旧基线 409、归档拒绝且不留回执、跨 Workspace 不可见、`0104` 列形状与列表逐字回显、未读不参与排序；`run-integration.ps1 -TestFile assist-session-controls` 整体 PASSED（套件编译、迁移应用与清理 exit0）。工作台：`sessionRowMenu.spec.ts` **10/10**、真实 Chromium 伪造 API 的 `recentWorkRailDensity.spec.ts` **7/7**、`tsc --noEmit` 通过。真实 Windows 窗口与多 DPI 未复验；桌面窗口运行的是暂存 API，实机点到这条命令前需 `-RefreshApi` 重新暂存。
+
+### 10.88 浏览器后端状态（2026-10-17 源码实现，迁移 0106）
+
+F26 浏览器自动化（[浏览器自动化 V1](../architecture/browser-automation-v1.md)）M2 的唯一只读端点。物理边界归[数据库 §95](../database/physical-design-postgresql.md#95-0106-浏览器后端健康投影2026-10-17-源码实现)，规格归[测试计划 §36](../testing/verification-plan.md#36-内置浏览器自动化验收规格2026-10-17)。
+
+**Breaking Change：No** —— 全新端点，不改动任何既有响应。
+
+| 端点 | 说明 |
+|---|---|
+| `GET /workspaces/{workspace_id}/browser/status` | 200，返回浏览器后端（Relay 自有 Chrome 实例 + chrome-devtools-mcp）最近一次被 Worker 实测的健康结论 |
+
+响应形状：`{ status, backend_version, chrome_version, detail, remediation, tool_count, updated_at }`。`status ∈ NOT_STARTED \| READY \| CHROME_MISSING \| BACKEND_MISSING \| INCOMPATIBLE \| DISCONNECTED`。
+
+**语义边界。** 这是**安装级的运行时诊断，不是工作区业务数据**：URL 保留 `workspaces/{workspace_id}` 段只是沿用全站路由前缀，处理器**不读它、不校验工作区存在、不做跨工作区可见性裁剪**——换一个 workspace_id 得到的是同一份结论。它不参与任何准入。`NOT_STARTED` 表示本机从未使用过浏览器能力（表里没有行）；`updated_at` 是「这个结论是什么时候测出来的」，桌面壳据此显示「上次检查于…」。
+
+**事实来源与写方。** 唯一写入方是 Worker 派发路径的 `browserExecute`：每次动作前先 `ensureStarted` 并把结论 upsert 进 `browser_backend_state`（单行 `id=1`）。**上报失败不阻断真实动作**——投影写不进去时动作照常执行，UI 少一次状态刷新属于可感知降级。API 进程只读：它**不会**为了回答这个端点去启动自己的浏览器实例（那会变成两个 Chrome）。不做惰性过期：READY 的后端在 Worker 存活期间一直活着，猜测过期只会制造假阴性；进程真的退出时 Worker 写 `DISCONNECTED`。
+
+**remediation 是可操作建议**：`CHROME_MISSING` → 安装 Chrome 或设置 `RELAY_BROWSER_CHROME_PATH`；`BACKEND_MISSING` → 重装 Relay 或先跑 `fetch-browser-mcp.mjs`；`INCOMPATIBLE` → 更新 Relay；`DISCONNECTED` → 重新执行一次浏览器操作会自动重建。客户端直接展示这句，不自己拼提示。
+
+**证据（如实分层）。** 真实 PostgreSQL：`browser-read.integration.test.ts` **6/6**（`run-integration.ps1 -TestFile browser-read` 整体 PASSED，临时集群已删除）——「BROWSER_READ 全链路成功 + 投影 READY」「按站点收窄（前缀内 PREPARED、前缀外被拒）」「非法目标形状 GATEWAY_TARGET_DENIED」「后端不可用派发失败 + 投影 CHROME_MISSING」「BROWSER_ACTION 无范围授权时 AUTO 降级 WAITING_APPROVAL」「跨进程经 HTTP 读到同一行」。真实 Chrome 链路归 [browser-automation-v1 §12](../architecture/browser-automation-v1.md)；安装态未验。
+
+### 10.89 浏览器任务列表与停止（2026-10-17 源码实现，迁移 0107）
+
+F26 浏览器自动化 M3 的任务状态面。物理边界归[数据库 §96](../database/physical-design-postgresql.md#96-0107-浏览器任务状态2026-10-17-源码实现)，设计归[浏览器自动化 V1](../architecture/browser-automation-v1.md)。
+
+**Breaking Change：No** —— 两个新端点，不改动任何既有响应。
+
+| 端点 | 说明 |
+|---|---|
+| `GET /workspaces/{workspace_id}/browser/sessions` | 200：当前工作区内的浏览器任务，按 `updated_at desc`；附带 `idle_ms`（空闲阈值） |
+| `POST /workspaces/{workspace_id}/browser/sessions/{owner_kind}/{owner_id}/stop` | 200：`{state, control_request_id}`；`owner_kind ∈ RUN \| SESSION`，`owner_id` 为 uuid |
+
+`GET` 的每行形状：`{owner_kind, owner_id, page_id, url, title, action_type, action_label, state, started_at, updated_at}`。`state ∈ RUNNING | STOP_REQUESTED | STOPPED | 空列表`；`action_label` 是中文动作说明（"导航到新地址"、"点击页面元素"）。
+
+**事实来源与写方。** 唯一写方是 Worker 派发路径：`browserExecute` 之后按**结算结果**里的 `page_id/url/title` upsert 一行（`page_id` 是 `BROWSER_NEW_PAGE` 返回的新页，只有结果里有）。写失败不阻断真实执行。读取方按 `idle_ms` 惰性把长期未刷新的 `RUNNING` 落成 `STOPPED`——Worker 不留后台定时器。**没有 page 的动作**（`browser_list_pages`）不写行：那一步没有"正在操作的页面"。
+
+**停止语义。** 只支持 `RUN` 归属：写入 `STOP_REQUESTED` 并经既有 `run_control_requests` 通道入队一个 `CANCEL`（与 0096 的 Esc 退出同一条路）。幂等：重复停止返回同一结论，并发下别人先停也按已停处理。`SESSION` 归属返回 409 `BROWSER_SESSION_NOT_STOPPABLE`——会话只读轮次没有可取消的 Run，应改用"停止本次回答"，**不静默成功**。未知 owner 或跨工作区按"无可停任务"返回 `STOPPED`，不泄露其它工作区是否存在。
+
+**证据（如实分层）。** 真实 PostgreSQL：`browser-actions.integration.test.ts` **6/6**（与 `browser-read` 合计 12/12，整体 PASSED）——授权覆盖后 AUTO 派发并写入状态行（owner/page/action_label 逐字段核对）、`BROWSER_COMMIT` 不被范围授权覆盖、提交类点击升级为 `WAITING_APPROVAL` 且审批文案说明"这是提交类动作"、普通链接点击不升级、跨进程经 HTTP 读到同一行并成功 stop（`STOP_REQUESTED` + 控制请求 id）、停止未知任务是幂等空操作。真实 Windows 窗口与安装态未验。
+
+### 10.90 电脑控制状态与退出（2026-10-18 修复）
+
+工作区前缀为 `/api/v1/workspaces/{workspace_id}`，沿用本机 API 鉴权。**Breaking Change: No**，不改变响应字段；修正重复退出误报 STOPPED、投影与取消入队非原子，以及领域错误误报 500 的缺陷。
+
+- `GET /computer/control-session`：`Cache-Control: no-store`，返回 `{state, action_type, action_label, run_id, started_at, updated_at}`。状态为 RUNNING/STOP_REQUESTED/STOPPED；行缺失、已停止或属于其他工作区时返回 STOPPED，附属字段为 null。
+- `POST /computer/control-session/cancel`：返回 `{state, control_request_id}`。活动 Run 的 CANCEL 意图与 STOP_REQUESTED 投影在应用用例同一事务提交。重复请求在确认前仍返回 STOP_REQUESTED，不能提前显示已停止；已停止或跨工作区为幂等 STOPPED。已有同类 CANCEL 复用原请求，冲突的其它控制与无效 Run 返回既有领域错误，不把所有 409 当作取消成功。入队失败时不保留虚假的 STOP_REQUESTED。
+
+取消事务还须以 `id=1`、相同 `run_id`、状态为 RUNNING/STOP_REQUESTED 做 CAS；旧快照已被另一 Run 替换时返回 `409 INVALID_TRANSITION`，新入队的 CANCEL 随事务回滚。调用方应重读，不自动把原请求改投新 Run。
+
+退出等待复用 Run 的控制安全点：在途 Worker/Invocation 或未知效果未处理前不宣称停止；安全点应用控制后，状态投影才写 STOPPED。此投影不替代执行权、审批或外部动作账本。权限迁移与兼容边界见[数据库 §99](../database/physical-design-postgresql.md#99-0110-电脑控制状态的应用角色权限2026-10-18)，回归入口为 `computer-control.integration.test.ts`，实际成绩归统一验收表。
+
+### 10.59 生成中预览的 SSE 推送（2026-10-18 源码实现）
+
+**Breaking Change: No（新增只读端点；§10.38/§10.39 的 GET 保留为权威快照与降级路径）。** 为把「生成中草稿」的逐段到达从客户端轮询改为服务端推送，新增两个只读 SSE 端点：
+
+| 端点 | 事件名 | 帧体 |
+|---|---|---|
+| `GET /api/v1/workspaces/{workspace_id}/runs/{run_id}/draft-preview/events` | `draft_preview` | 与 §10.39 GET 完全相同的 DTO |
+| `GET /api/v1/workspaces/{workspace_id}/assist-sessions/{session_id}/messages/{message_id}/live-preview/events` | `assist_preview` | 与 §10.38 GET 完全相同的 DTO |
+
+两个端点沿用现有 Bearer 与 Workspace 鉴权，返回 `200`、`content-type: text/event-stream; charset=utf-8`、`cache-control: no-cache, no-transform`、`x-content-type-options: nosniff`、`x-accel-buffering: no`。不存在、跨 Workspace 或不可见资源在流升级前按 404 `RESOURCE_NOT_FOUND` 返回；缺失/错误 Bearer 返回 401；这两类失败不会打开 SSE。
+
+**帧体是本端点与 run_events 的关键差异。** §10.17 的 `run_hint` 只携带「该刷新了」的提示；本端点专用于预览，`data:` 就是与 GET 同形的完整对象（含 `preview_text`），`id:` 是该帧的 `preview_revision`。它不新增授权口径：**每一帧的文本都来自一次完整的重新授权读取**（与 §10.38/§10.39 GET 同一函数、同一次来源可见性/manifest/租约核对），连接建立或 `id` 都不携带权限。主键快查只作为「是否有变化」的节流信号，不承载正文、不授权。
+
+**游标与去重。** 本端点不声明 `after`、不读取 `Last-Event-ID`，也不对 `id` 做连续性断言：Run DRAFT 的 `preview_revision` 只在同一 `(run, model_call)` 世代内单调，换 Attempt/模型调用时重置为 `1` 且旧行被删；Assist 侧 `message_id` 即身份。连接建立即推送当前完整快照，断线重连天然得到当前状态。客户端必须按身份 + `preview_revision` 去重：Run 的身份为 `(step_attempt_id, attempt_claim_epoch, model_call_id)`，Assist 的身份为 `message_id`。
+
+**终态与关闭。** Run 侧在 `run_status` 为 `COMPLETED`/`FAILED`/`CANCELLED` 的帧后由服务端 `end()`；`PAUSED`、换 Attempt 的间隙、首片段前的 `preview_available=true, preview_text=null` 都保持连接，只推新身份帧。Assist 侧在消息状态非 `PENDING`/`RUNNING` 的帧后关闭。流打开后资源变为不可见（租约失效、来源撤销、连接/策略/资源停用）是正常的「不再可见」，服务端结束连接而不发正文；客户端重连时由流升级前的路径拿到 404 再停。空闲每约 15 秒发无 `id` 的注释心跳；背压沿用 §10.17 的 drain 超时与慢连接关闭语义。
+
+**与轮询的关系。** §10.38/§10.39 的 GET 端点保留：它们是权威快照读取，也是本端点不可用（反代缓冲、连接失败、旧客户端）时的降级路径。服务端约有 200ms 的变化检测轮询（低于客户端原 400ms 轮询）；最坏端到端延迟约为 100ms 生成侧 flush + 200ms 检测 + 一次重新授权读取。两条链路都只证明「正在生成的临时前缀」，都不是 Artifact、验证 PASS 或任务完成。
+
+**证据（如实分层）。** 回归入口：后端单元 `preview-events-api.test.ts`（probe key 的身份/重置语义、帧格式与终态判定）、真实 PG/HTTP 集成 `preview-events.integration.test.ts`（首帧等于 GET DTO、多帧 revision 递增、终态帧后关流、跨 Workspace 404、断线重连）；前端工作台定向用例覆盖 SSE 帧消费与 GET 降级。真实 Provider 首字延迟与桌面体验仍需单独测量；实际成绩归[统一验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
+### 10.91 会话列表的活动排序键（2026-10-18 源码实现，迁移 0111）
+
+工作区前缀为 `/api/v1/workspaces/{workspace_id}`。**Breaking Change：No**——没有新命令、没有新端点，只给既有会话投影加一个可空只读字段，并改掉 `GET /assist-sessions` 那一列的默认顺序。迁移与写入 Owner 见[数据库 §100](../database/physical-design-postgresql.md#100-0111-会话活动排序键2026-10-18-源码实现)，界面读法见[工作台 §28.1](../frontend/workbench-design.md#281-左栏recentworkrail)。
+
+| 端点 | 变化 | 说明 |
+|---|---|---|
+| `GET /assist-sessions`、`GET /assist-sessions/{session_id}` | 投影新增只读字段 `last_message_at` | 逐字回显活动时刻（ISO 8601）或 `null`；`null` 只表示这段会话还没有消息。缺字段只来自 0111 之前的响应，客户端同样回落 `created_at` |
+| `GET /assist-sessions` | 列表顺序 | `order by pinned_at desc nulls last, coalesce(last_message_at, created_at) desc, id desc` |
+| `POST .../title`、`/pin`、`/archive`、`/reopen`、`/unread` | 无 | 命令体与回执字段都不变，回执里**不**带 `last_message_at` |
+
+**排序口径。** 活动序＝这段讨论最近一次真正说过话是什么时候，不分发送方：用户消息落库与 AI 生成结算都算一次活动，所以失败或取消的那一轮同样上浮。置顶仍是第一排序键，活动序只在未置顶的组内生效；`coalesce` 让还没开口的会话按创建时间留在原位，不会因为新列为空而沉底。这是**导航排序键，不是业务事实**，与 0090 的 `pinned_at`、0104 的 `unread_at` 同性质，不参与任何准入判定。
+
+**不推进 `revision` 与 `updated_at`——这是本节的硬约束。** 会话行的修订号是上面那组人工控制命令的 CAS 基线。若消息写入也推进修订，在途生成期间发出的改名／置顶会稳定吃到 `REVISION_CONFLICT`（409），界面只能反复重读；若推进 `updated_at`，「只是重命名过一次」与「刚说过话」在响应里就分不开。因此发送消息与生成 Worker 的结算都不改这两列，集成测试把它们逐字锁住。同理，`assist_message_previews` 的流式增量帧不推进本字段：临时前缀每帧都动会让左栏在生成期间持续跳位。
+
+**迟到写入不推进。** 生成结算按 `(message_id, worker_id, status='RUNNING')` CAS；迟到的旧 Worker 结算既不收敛消息状态，也不 touch 会话排序键。排序键取单调最大值，时钟或提交顺序倒挂都不会把它拉回。
+
+**已知缺口（如实）。** 本字段只在列表与单会话读取时返回；左栏当前没有轮询或事件订阅，AI 说完那一刻不会自己跳位，要等下一次整列重读或该行发起命令后的定向重读才收敛。§10.17 的 `run_hint` 类提示没有为本字段扩展，见工作台 §28.1 与统一验收表的剩余限制列。
+
+### 10.93 会话分叉（2026-10-18 源码实现，迁移 0113）
+
+工作区前缀为 `/api/v1/workspaces/{workspace_id}`，沿用本机 API 鉴权。**Breaking Change: No**——新增一个命令与端点，既有会话投影只多一个可空只读字段。迁移与写入 Owner 见[数据库 §102](../database/physical-design-postgresql.md#102-0113-会话分叉血缘2026-10-18-源码实现)，界面读法见[工作台 §28.1](../frontend/workbench-design.md#281-左栏recentworkrail)。
+
+| 端点 | 命令 | 状态码 | 请求体 | 回执结果 |
+|---|---|---|---|---|
+| `POST /assist-sessions/{session_id}/fork` | `ForkAssistSession` | `201` | `{command_id, expected_revision}` | `{session_id, title, revision, updated_at, copied_messages}` |
+
+`session_id` 是**新建的子会话**，不是被分叉的那一条；`links.resource` 指向它。`revision` 恒为 `"0"`（新资源），`copied_messages` 是搬进历史的已完成轮数（可以为 `0`，不是失败）。分叉是唯一新建会话行的行内命令，因此与 `Create*` 同为 `201`，不是对源会话的改写。
+
+**源会话一行都不改。** `expected_revision` 仍然核对（陈旧基线返回 `409 REVISION_CONFLICT` 并带出 `actual_revision`，界面只重读、不自动重发），但它只用于挡住「界面看的是旧事实就按下分叉」；成功分叉**不推进**源会话的 `revision` 与 `updated_at`。源会话必须对当前 Workspace 可见（跨 Workspace 按 `404 RESOURCE_NOT_FOUND`）、状态为 `ACTIVE`（归档态 `409 INVALID_TRANSITION`，先重开），且没有 `PENDING`/`RUNNING` 消息（在途 `409 INVALID_TRANSITION`；正在生成的那一轮既不该进历史，也不该让子会话从半截开始）。
+
+**子会话的行形状。** 会话身份整行搬运：`workspace_id`、`project_id`、`task_id`、`conversation_mode`、`assistant_profile_id/revision/role_snapshot`、`remember`、`working_resource_id` 与源行一致；`status='ACTIVE'`、`revision=0`、`pinned_at`/`unread_at`/`last_message_at` 一律 `NULL`（导航偏好不继承，新讨论按活动序落在顶部），`forked_from_session_id` 写入源会话 ID。来源是**一次性写入的历史元数据**：改名、置顶、未读、归档、重开都不会改写它，它也不参与任何准入判定。
+
+**复制的是历史输入。** 只搬 `status='COMPLETED' AND content IS NOT NULL` 的消息，按子会话从 `seq=1` 重新编号（`UNIQUE (session_id, seq)`）；正文、`sources`、`skill_snapshot/skill_input/skill_output`、`method_*`、`learning_record_disabled` 与 `created_at` 原样保留，行 ID 全部新生成。图片附件逐张复制成新行（同一 `message_id` 绑定、内容与哈希字节不变，`bytea` 在库内搬运）。以下**不搬**：`assist_proposals`（接受一次会写业务事实，同一条提案不能在两条会话里各接受一次）；`provider_request_id`、usage 四列、`worker_id`、`cancel_requested`、`error_code`、`provider_error_kind`、`model_attempt_state`（子会话没有发生过那次外呼，留着就是伪造）；`model_selection_snapshot` 随尝试状态一起去掉——0098 要求两列成对非空，而复制后的历史一律 `COMPLETED`、不会再进生成路径，排队期的模型身份对子会话没有读方。
+
+**标题由服务端排号。** 末位是 `（n）` 或半角 `(n)` 时加一，否则追加 `（1）`；编号跟着**被分叉那一条自己的标题**走，所以同一源会话分两次都得到 `（1）`（标题不是唯一键），分叉一条 `（1）` 得到的是 `（2）`。总长仍守 `TEXT_LIMITS.title=200`：超长时截正文前缀、保留完整编号，并按完整码点退让（不切坏 emoji）。
+
+**幂等。** 同一 `command_id` + 同载荷重放返回原结果并附 `command-replayed: true`，不新建第二条子会话、不新增回执；同一 ID 换 `expected_revision` 返回 `409 COMMAND_ID_REUSED`。幂等作用域是 Workspace，与其它会话行内命令一致。
+
+**投影。** `GET /assist-sessions`（含默认列表、`status=ARCHIVED|ALL`）与 `GET /assist-sessions/{session_id}` 新增只读字段 `forked_from_session_id`（`uuid | null`），只解释标题里的编号从哪来，不改变列表顺序或任何判定。
+
+**证据（如实分层）。** 真实 PostgreSQL：`assist-session-controls.integration.test.ts` **22/22**（分叉 5 条：201 落库与源行零改动、历史/附件复制与提案不复制、同命令重放不产生第二条、在途/归档/陈旧修订/跨 Workspace 四道栅栏、标题排号与 200 上限、0113 列形状与列表投影）；入口栅栏单测 **6/6**；工作台 `sessionRowMenu.spec.ts` **19/19**。真实 Windows 窗口未点验。
+
+### 10.94 会话物理删除（2026-10-18 源码实现，迁移 0116）
+
+工作区前缀与鉴权沿用既有约定。**Breaking Change: No**——新增一个命令与端点，不改既有命令、投影或失败码；删除后的读入口按「不存在」处理。删除边界与取舍归 [ADR-027](../decisions/ADR-027-session-physical-delete.md)，授权形状见[数据库 §103](../database/physical-design-postgresql.md#103-0116-会话物理删除授权2026-10-18-源码实现)。
+
+| 端点 | 命令 | 状态码 | 请求体 | 回执结果 |
+|---|---|---|---|---|
+| `POST /assist-sessions/{session_id}/delete` | `DeleteAssistSession` | `200` | `{command_id, expected_revision}` | `{session_id, revision, deleted_messages, deleted_attachments, deleted_at}` |
+
+**不可撤销。** 这是全项目唯一删除会话的命令：没有回收站，没有「取消删除」反向命令，误删与重启都无法找回。界面必须先弹确认框、逐字写明不可恢复，**不给撤销条**；归档仍是可撤销通道，两者不合并成一个「移除」动作。
+
+**删什么。** 只删会话自有账本，按子 → 父顺序在同一短事务内显式执行（不依赖 `ON DELETE CASCADE`）：消息、提案、附件（`bytea` 内容随行消失）、生成中预览、会话工具调用、模型选择、自然语言状态维护请求与其变更、未进入组合检查的影响检查与候选分组、辅助模型调用计量与已到期供应商冷却、会话 diff 基线，最后是会话行本身。`conversation_diff_baselines.session_id` 是普通列（0097 无外键），必须显式删，否则留下悬空账本。
+
+**不删什么（阻断）。** 命令先查阻断项，命中任意一项即整条拒绝、零删除，返回 `409 SESSION_DELETE_BLOCKED`，`conflict.blocking_reasons` 逐项列出：
+
+| 代码 | 含义 |
+|---|---|
+| `FORK_CHILDREN` | 存在以本会话为来源的分叉会话 |
+| `TASK_ACCEPTANCE_CITED` | Task 验收观察把本会话的消息作为来源 |
+| `HYPOTHESIS_CITED` | 项目假设版本把本会话的消息作为来源 |
+| `WORK_SEGMENT_CITED` | 工作片段把本会话的消息作为来源 |
+| `BLUEPRINT_CITED` | 项目蓝图提案把本会话的消息作为来源 |
+| `EXECUTION_REQUESTS` | 本会话发起过执行请求 |
+| `LEARNING_RECORDS` | 本会话有学习记录 |
+| `ARTIFACT_IMPACT_COMMITTED` | 本会话的影响检查已进入组合检查 |
+| `PROVIDER_COOLDOWN_ACTIVE` | 本会话的模型调用仍在未到期的供应商冷却里 |
+
+另有与归档共用的在途栅栏：存在 `PENDING`/`RUNNING` 消息时返回 `409 INVALID_TRANSITION`。跨 Workspace 的会话按 `404 RESOURCE_NOT_FOUND`。
+
+**并发与幂等。** 行锁 + `expected_revision` CAS 先于判定：陈旧基线返回 `409 REVISION_CONFLICT` 并带出 `actual_revision`，一行不动。删除成功后会话行已不存在，重放**不能**靠再读会话判定，而是读 `command_receipts`：同 `command_id` 同载荷返回原结果并附 `command-replayed: true`，换载荷返回 `409 COMMAND_ID_REUSED`。
+
+**审计。** 命令回执之外，在同一事务写一条 append-only 的 `activity_records`（`event_type='ASSIST_SESSION_DELETED'`）。`fact_refs` 只记会话 ID、删除前修订与删除行数，不复制标题或正文——用户要求删除之后，审计不成为第二份保存。
+
+**证据（如实分层）。** 真实 PostgreSQL：`assist-session-delete.integration.test.ts` **9/9**（账本删净且无悬空基线、行消失后回执重放、换载荷复用 ID 被拒、陈旧基线零删除、在途消息栅栏、分叉与学习记录两类阻断、跨 Workspace 不可见、0116 授权不外溢、删除后无只读恢复入口）；工作台 `sessionRowMenu.spec.ts` **19/19**（新增四条：确认与取消、确认后行从活跃区消失且无撤销条、阻断项留在确认框、回执不明锁死确认键）；`tsc --noEmit` 两侧对本片文件干净。真实 WebView2 窗口与多 DPI 下确认框的焦点与观感未复核。
+
+### 10.94 周期定时启动任务（2026-10-18 源码实现，迁移 0115）
+
+| 方法 | 路径（前缀 `/api/v1/workspaces/{workspace_id}`） | 命令 | 成功 | 请求体 | 回执 `result` |
+|---|---|---|---|---|---|
+| POST | `/projects/{project_id}/scheduled-tasks` | `CreateScheduledTask` | `201` | `{command_id, confirmed:true, title, template, repeat_rule, timezone, local_time, first_local_date, max_runs, authorization_expires_at, execution?}` | `{scheduled_task_id, project_id, status, revision, schedule_generation, next_due_at}` |
+| POST | `/scheduled-tasks/{id}/edits` | `EditScheduledTask` | `200` | 同上 + `expected_revision, reason` | 同上 |
+| POST | `/scheduled-tasks/{id}/status-changes` | `SetScheduledTaskStatus` | `200` | `{command_id, expected_revision, status, reason}` | 同上 |
+| POST | `/scheduled-task-occurrences/{id}/resolutions` | `ResolveScheduledTaskOccurrence` | `200` | `{command_id, expected_revision, action:'RETRY'\|'DISMISS', reason}` | `{occurrence_id, scheduled_task_id, status, revision}` |
+
+只读：`GET /scheduled-tasks?project_id=`、`GET /scheduled-tasks/{id}`（含最近 20 次触发与项目投影）。
+
+**「定时任务」是模板 + 重复规则 + 提前授权，不是对某个 Task 的重复执行。** 每次触发新建一个 Task，再走原 `CreateTask → MarkTaskReady → DelegateTask`。Task 跑完即 `DONE`，终态不可复活，所以「周期」只能表现为「每次新建」；这也意味着重复执行的是**这套设定**，不是同一个任务。取舍与代价见 [ADR-026](../decisions/ADR-026-scheduled-task-autostart.md)。
+
+**模板在创建时就按 `CreateTask` 的口径校验。** `template` 的形状与创建任务一致（`task_title`、`objective`、`mode`、`expected_outputs`、`criteria[]`），创建命令内部调用 `prepareTaskCreation` 与 `checkDeclaredOutputs`，非法模板当场 `422`，不会等到首次触发才失败。`mode` 缺省 `ME`，`expected_outputs` 缺省 `{}`；`DELEGATE_AI` 仍按原口径 `CAPABILITY_DISABLED`。
+
+**重复规则只有两种。** `{kind:'DAILY', interval_days:1..30}` 与 `{kind:'WEEKLY', weekdays:[1..7]}`（1=周一，去重后升序）。不做 cron 表达式、月/年规则、多时区混排。
+
+**时刻是墙钟，不是固定偏移。** 请求传 `local_time`（`HH:MM`）+ `first_local_date`（`YYYY-MM-DD`）+ `timezone`，服务端算出绝对时刻并落 `first_run_at`/`next_due_at`。跨夏令时的「每天 09:00」仍是 09:00：春跳不存在的时刻顺延 +1 小时，秋回重复的时刻取较早一次。`first_local_date` 必须解析出严格晚于当前时刻的首次触发，否则 `422`。
+
+**授权一次性确认，到点只做准入。** `confirmed` 必须为 `true`；`max_runs` 取 1–100；`authorization_expires_at` 必须是带 `Z` 或偏移量的实际时刻，且在未来 90 天内（**这是对 N06 24 小时上限的有意偏离**，理由见 ADR-026）。触发不授予新权限：`delegateTask` 在**原命令事务内**核对触发发生身份、计划状态、代次、有效期与预算，未通过即拒绝且效果不落库。
+
+**准入以 Task 终态为准，不是 Run 是否活跃。** Run 完成后 Task 停在 `WAITING` 等人工验收；此时本轮记 `SKIPPED`（`reason='PREVIOUS_TASK_NOT_ACCEPTED'`），不自动代答验收，也不堆出第二个待验收任务。跳过的时段不消耗 `max_runs`——预算是「最多真正启动多少次」，不是「过了多少个时段」。
+
+**错过不自动执行。** 应用关闭期间错过的时段记 `BLOCKED`（`reason='MISSED'`，`missed=true`），**不建 Task**；用户在详情页选择「补跑一次」才把这条改回 `DISPATCHING` 重新准入。与 N05「最多形成一次待处理」同口径，区别是 N05 只形成待处理，本能力补跑后会真的启动。
+
+**到期与预算耗尽不是静默停止。** 两者都把计划置 `EXPIRED` 并留一条 `BLOCKED` 触发说明原因；`EXPIRED` 的计划不能直接改回 `ENABLED`，须先通过编辑延长授权。
+
+**执行范围在触发时冻结。** `execution`（资料引用 / 固定读取 / 工具循环 / 范围授权 / 原会话方法）与任务链共用同一份词表；用户选的只是意图，真正冻结发生在触发时、绑定到当次新建的 Task 上，并写入 occurrence 的 `frozen_execution`。依据漂移（连接停用、资料版本变化、范围授权到期）则这一次 `BLOCKED`，**不静默降级为无工具执行**。`scope_grant.expires_at` 被夹到计划授权到期时刻。
+
+**幂等。** 四个命令都是 `command_id` 幂等，作用域为 Workspace；同一 ID 换载荷返回 `409 COMMAND_ID_REUSED`。触发链路的三步命令身份在 occurrence 落库时预生成，崩溃后重跑靠回执重放，不会重复建 Task；`expected_task_revision` 只取自前一步回执，读库重算会改变 `payload_hash` 并被判成 ID 复用。
+
+**并发。** `DISPATCHING` 是租约：调度器用 `FOR UPDATE SKIP LOCKED` 取到期行、插入 occurrence 后，再按「待分发」逐个抢租约执行。同一时段有 `UNIQUE (scheduled_task_id, schedule_generation, sequence)` 与三个命令列的唯一约束兜底。与 N06 一致，本片假设单 API 进程运行调度器；多实例不在承诺范围。
+
+**待处理投影。** `GET /attention/interventions` 与 `POST /attention/notifications/claim` 新增 `kind='SCHEDULED_TASK_BLOCKED'`，`item_key` 前缀 `scheduled-task:`，`target_url` 为 `/scheduled-tasks/{id}`，`change_key` 取 occurrence 的 `revision`。不新开第二条轮询通道，也不与 N05 提醒的去重键混用。
+
+**一个已知的中间态。** 触发是「先建 Task、再准入 Delegate」两步。如果计划在两步之间被暂停、或 Delegate 的准入不通过，会留下一个已经 `READY` 但从未启动的 Task，同时该次触发记 `BLOCKED` 并带原因。这是刻意的：不删除已落库的任务，也不假装它没发生——用户可以在任务列表里直接处理或取消它。
+
+**证据（如实分层）。** 见[测试计划 §37](../testing/verification-plan.md#37-周期定时启动任务验收规格2026-10-18)与统一功能验收表。真实 Windows 窗口、安装态与多实例并发未验。
+
+### 10.95 撤销项目归档（2026-10-18 源码实现，迁移无）
+
+| 端点 | 命令 | 状态码 | 请求体 | 回执结果 |
+|---|---|---|---|---|
+| `POST /projects/{project_id}/unarchive` | `UnarchiveProject` | `200` | `{command_id, expected_revision}` | `{project_id, revision, archived_at: null, archive_status: "ACTIVE"}` |
+
+**只写一列。** 撤销把 `projects.archived_at` 写回 `NULL`，不恢复任何下游事实：归档成立的前提本来就没有活动 Task/Run/租约与未结算外部效果，所以撤销只是让既有读侧栅栏重新放行，不补写 Project State、不重开 Task，也不假装归档期间发生过事情。与归档共用 Project 排他锁与 `expected_revision` CAS；陈旧基线 `409 REVISION_CONFLICT` 带出 `actual_revision`。
+
+**已是 ACTIVE 不造修订。** 若读到的 `archived_at` 已是 `NULL`，如实返回当前事实且**不推进** `revision`（与 `reopenAssistSession` 同一口径）；同 `command_id` + 同载荷重放返回原回执并附 `command-replayed: true`，换载荷 `409 COMMAND_ID_REUSED`。跨 Workspace `404 RESOURCE_NOT_FOUND`。
+
+**审计。** 同一事务写 `activity_records`（`event_type='PROJECT_UNARCHIVED'`，`fact_refs` 记原归档时刻与前后修订），`PROJECT_ARCHIVED` 行不改不删。
+
+**界面。** 项目详情的归档按钮单击即发（撤销条替代确认框，工作台 §13.2）：成功后浮层给「已归档这个项目 · 撤销」；撤销用**新的** `command_id` 与归档回执推进后的修订，成功后把项目读回进行中范围并撤掉就地回执。撤销失败升级为停留到关闭的 Notice，并指向「已归档」范围。**Breaking Change: No**。
+
+**证据（如实分层）。** 真实临时 PostgreSQL：`project-archive.integration.test.ts` **14/14**（新增两条：撤销写回 NULL、推进修订、同命令重放、已 ACTIVE 不推进、陈旧基线零写入、活动范围重新放行、两条审计并存；跨 Workspace 404 且仍保持归档）；工作台 `projectArchiveLive.spec.ts` **4/4**（归档单击即发＋撤销发出第二发且修订取回执）与 `listViewCopy.spec.ts` 归档回执用例。真实 Windows 窗口未验。

@@ -1,5 +1,9 @@
 # 文档入口与维护规范
 
+2026-10-18 本地文件免手工配置：用户已确认“选目录＋本目录权限档位＋发消息”，产品规则由[工作台 §18.1.4](frontend/workbench-design.md#1814-本地目录权限设置2026-10-18已确认已实施)拥有；[领域模型 §12.2.1](architecture/domain-model.md#1221-本地目录访问设置的应用责任2026-10-18已实施)与 [ADR-016](decisions/ADR-016-folder-first-conversation.md)记录应用责任和取舍，[测试计划 §17.1.4](testing/verification-plan.md#1714-本地目录免手工配置2026-10-18已确认已实施)定义验收规格，[HTTP 契约 §10.86](api/http-command-contract.md#1086-目录写入档位投影与只读查询2026-10-17-源码实现)与[数据库 §98](database/physical-design-postgresql.md#98-0109-本地目录访问档位元数据2026-10-18-源码实现)记录实现协议。实际运行结果和未验边界归统一功能验收表；实施任务书保留为过程材料。
+
+2026-10-17 内置浏览器自动化导航：用户下达「为 Relay 桌面端增加内置 Chrome 浏览器操控能力」，记为 F26。[浏览器自动化 V1](architecture/browser-automation-v1.md) 拥有选型、模块责任、集成点、打包与测试口径，[ADR-024](decisions/ADR-024-builtin-browser-automation.md) 记录取舍与被拒方案，[范围矩阵 F26](requirements/v1-scope.md#内置浏览器自动化范围补充2026-10-17) 拥有范围边界，[测试计划 §36](testing/verification-plan.md#36-内置浏览器自动化验收规格2026-10-17) 拥有未运行规格，实际让位顺序归 [CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md)。本轮**只做架构审查与选型**：未写源码、未新增迁移、未引入随包资源、未建动作词表，能力未实施未验收。
+
 2026-10-17 内置 GitHub Skill 前移导航：用户否决后置处置，GitHub 内置 Skill 记为 F25 进入 V1 主线。[范围矩阵](requirements/v1-scope.md#内置-github-skill-范围补充)拥有范围边界，[扩展专题第 10 节](architecture/relay-skills.md#10-内置官方-skill-包)拥有官方包的定义落点/分发/按需激活/启用规则，[ADR-023](decisions/ADR-023-builtin-github-skill.md)记录取舍、被拒方案与工程前置，[后续路线第 4 节](requirements/post-v1-roadmap.md#4-后续候选的处置)记录原后置处置的变更，实际让位顺序归 [CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md)，成绩仍只归统一验收表。本轮仅文档：未写源码、未新增随包资源、未建动作词表或迁移，能力未实施未验收，不改变 A–E 既有出口与在途专项。
 
 2026-10-16 免费额度接续更新：[后续路线 §9.1.1](requirements/post-v1-roadmap.md#911-免费额度耗尽自动接续)拥有单模型额度用尽后的有界免费队列规则，[运行架构 §8.6](architecture/runtime-context.md#86-模型目录会话选择与免费调用边界)拥有原契约/独立模型尝试/切换持久身份与恢复，[工作台 §27.5](frontend/workbench-design.md#275-免费模型分组与模型选择)拥有实际切换反馈，[测试计划 §26.3](testing/verification-plan.md#263-免费模型目录与选择验收规格)新增 FM-10–13，[专项任务书](../prompts/free-model-catalog.md)增加验收整改前置。此段记录 2026-10-16 当时仅验收与任务书的授权；2026-10-17 的实际实施授权、分工与下一步只归 [CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md)，实际结果只归统一功能验收表，旧日期门控不能覆盖新的用户授权。
@@ -66,6 +70,7 @@
 | 当前阶段、阻塞、下一步 | [CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md) | 历史研究日志不另写一份当前进度 |
 | 业务不变量 | [契约包](../contracts/README.md) | 01–04 分别拥有事实、执行、验证、恢复；其他文档引用 |
 | 当前架构与模块职责 | [领域模型](architecture/domain-model.md) | 架构主入口；运行/信息/工具专题补充实现边界 |
+| 内置浏览器自动化（F26） | [浏览器自动化 V1](architecture/browser-automation-v1.md) | 拥有选型/能力族/页面所有权/打包/测试口径；不改 `COMPUTER_*` 与执行路由器 |
 | 产品 Agent 提示词与输入协议设计 | [Agent 提示词设计](architecture/agent-prompt-design.md)、[当前运行时路由](architecture/agent-prompt-design.md#21-当前运行时提示词路由)、[运行公共核心](../apps/api/src/workflow/agent-system-prompt.ts)、[统一路由入口](../apps/api/src/workflow/prompts/index.ts) | 路由表记录触发条件、组合、版本与源码入口，不被运行程序加载；模板正文由源码唯一维护，目标剩余增量与已实现入口分开；编码任务入口仍为根目录 prompts |
 
 2026-10-11 运行时提示词路由已落成代码入口：[集中描述但无代码入口]的表述已失效，当前选择由 `apps/api/src/workflow/prompts/` 的统一入口完成（`route-types.ts` 登记表 + `index.ts` 选择入口 + 三个按职责分组的模板模块），原 application 与模型端口调用只保留单一来源的兼容再导出。路由事实仍只维护在[提示词设计 §2.1–2.3](architecture/agent-prompt-design.md#21-当前运行时提示词路由)，本页不复制第二份路由表；实施范围与未闭合项归[CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md)。

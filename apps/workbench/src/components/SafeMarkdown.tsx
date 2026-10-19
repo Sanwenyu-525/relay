@@ -143,8 +143,8 @@ export default function SafeMarkdown({ source }: { source: string }) {
   const blocks = useMemo(() => parseBlocks(source), [source]);
   return <div className="markdown-preview" data-testid="markdown-preview">{blocks.map((block, index) => {
     if (block.kind === "heading") return block.level <= 2
-      ? <h3 key={index} className="markdown-preview__heading"><SafeInline segments={block.segments} /></h3>
-      : <h4 key={index} className="markdown-preview__subheading"><SafeInline segments={block.segments} /></h4>;
+      ? <h3 key={index} className="markdown-preview__heading" data-heading-level={block.level}><SafeInline segments={block.segments} /></h3>
+      : <h4 key={index} className="markdown-preview__subheading" data-heading-level={block.level}><SafeInline segments={block.segments} /></h4>;
     if (block.kind === "code") return <pre key={index} className="markdown-preview__code"><code>{block.text}</code></pre>;
     if (block.kind === "table") return <div key={index} className="markdown-preview__table-scroll"
       role="region" aria-label="Markdown 表格，较宽时可横向滚动" tabIndex={0}>

@@ -38,18 +38,27 @@ import { canonicalResourceIdentity } from './gateway-configuration.js';
  * 电脑」，不替用户决定每一次点击。读取类（截图/窗口枚举）本就不需要授权。
  */
 export const SCOPE_GRANT_ACTIONS: readonly string[] =
-  ['WRITE_FILE', 'APPLY_CHANGESET', 'CLI_RUN', 'COMPUTER_INPUT'];
+  ['WRITE_FILE', 'APPLY_CHANGESET', 'CLI_RUN', 'COMPUTER_INPUT', 'BROWSER_ACTION'];
 
 /** 授权动作 → Gateway 能力。信封里没有对应连接时不能放行该动作。 */
 export const SCOPE_GRANT_ACTION_CAPABILITIES: Readonly<Record<string, GatewayCapability>> = {
   WRITE_FILE: 'FILE_WRITE', APPLY_CHANGESET: 'FILE_WRITE', CLI_RUN: 'CLI_RUN',
   COMPUTER_INPUT: 'COMPUTER_INPUT',
+  // 0105: 只放行普通网页交互。BROWSER_COMMIT（提交表单、上传文件）**故意不在此表**——
+  // 它们是不可逆外部效果，只能逐次单动作批准，任何范围授权都覆盖不到。
+  BROWSER_ACTION: 'BROWSER_ACTION',
 };
+
+/** 浏览器交互类逻辑动作 → 授权层的同一动作类名。 */
+const BROWSER_ACTION_ACTIONS: ReadonlySet<string> = new Set([
+  'BROWSER_NEW_PAGE', 'BROWSER_NAVIGATE', 'BROWSER_CLICK',
+  'BROWSER_FILL', 'BROWSER_PRESS_KEY', 'BROWSER_CLOSE_PAGE',
+]);
 
 /** Computer 输入类逻辑动作 → 授权层的同一动作类名。 */
 const COMPUTER_INPUT_ACTIONS: ReadonlySet<string> = new Set([
-  'COMPUTER_ACTIVATE_WINDOW', 'COMPUTER_CLICK', 'COMPUTER_DOUBLE_CLICK', 'COMPUTER_SCROLL',
-  'COMPUTER_DRAG', 'COMPUTER_TYPE', 'COMPUTER_KEYPRESS', 'COMPUTER_HOTKEY',
+  'COMPUTER_ACTIVATE_WINDOW', 'COMPUTER_MOVE', 'COMPUTER_CLICK', 'COMPUTER_DOUBLE_CLICK',
+  'COMPUTER_SCROLL', 'COMPUTER_DRAG', 'COMPUTER_TYPE', 'COMPUTER_KEYPRESS', 'COMPUTER_HOTKEY',
 ]);
 
 /**
@@ -59,7 +68,11 @@ const COMPUTER_INPUT_ACTIONS: ReadonlySet<string> = new Set([
  * 漂移的后果是「授权时放行、派发时退回」，用户看到的行为不可解释。
  */
 export function scopeGrantActionFor(actionType: string): string {
-  return COMPUTER_INPUT_ACTIONS.has(actionType) ? 'COMPUTER_INPUT' : actionType;
+  if (COMPUTER_INPUT_ACTIONS.has(actionType)) return 'COMPUTER_INPUT';
+  // 0105: 六个交互动作在授权层合成一类，与 COMPUTER_INPUT 同理：授权回答
+  // 「本次任务是否可以操作网页」，不替用户决定每一次点击。
+  if (BROWSER_ACTION_ACTIONS.has(actionType)) return 'BROWSER_ACTION';
+  return actionType;
 }
 
 export interface FrozenCheck {

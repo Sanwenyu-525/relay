@@ -1,7 +1,7 @@
 import { array, boolean, decimal, integer, isRecord, nullableInteger, nullableOptionalInteger, nullableString, object, optionalString, string, stringArray, stringList } from "../core/primitives";
-import type { RelayAssistMessage, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDirectoryBinding, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffFile, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySkillDefinition, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate } from "../dtos/assist";
+import type { RelayAssistMessage, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayConversationCandidateFileChange, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySkillDefinition, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate } from "../dtos/assist";
 import type { DecimalRevision } from "../../types";
-import type { RelayGatewayDecision } from "../dtos/gateway";
+import type { RelayGatewayDecision, RelayWriteTier } from "../dtos/gateway";
 
 export function assistSourceBody(source: RelayAssistSourceRef) {
   return { kind: source.kind, root_id: source.rootId, version: source.version };
@@ -159,6 +159,13 @@ export function assistSessionFrom(value: unknown): RelayAssistSession {
     pinnedAt: optionalNullable(row, "pinned_at", "assist session"),
     // 0104：unread_at 同理，缺失读成已读——未读是后加的可选标记，不是第三种状态。
     unreadAt: optionalNullable(row, "unread_at", "assist session"),
+    // 0111：last_message_at 同理，缺失只来自该迁移之前的响应，读成「还没有消息」，
+    // 排序回落到 created_at——它与 updated_at 一样自 0015 就在响应里。
+    lastMessageAt: optionalNullable(row, "last_message_at", "assist session"),
+    // created_at 只作「还没有消息」那一档的排序回落（服务端 coalesce 的同义读法）。
+    // 它自 0015 起恒在会话投影里；这里容缺是因为缺字段不该让整条会话读不出来，
+    // 退到 updated_at——同样是 0015 就有的时刻列，最多让位置略偏，不会把行丢掉。
+    createdAt: optionalString(row, "created_at") ?? string(row, "updated_at", "assist session"),
     updatedAt: string(row, "updated_at", "assist session"),
     conversationMode, assistantProfileId, assistantProfileRevision,
     personaLabel: personaLabel(role, assistantProfileRevision),
@@ -220,6 +227,7 @@ export function assistMessageFrom(value: unknown): RelayAssistMessage {
     sessionId: string(row, "session_id", "assist message"),
     seq: decimal(row, "seq", "assist message"), role, status,
     createdAt: optionalString(row, "created_at"),
+    updatedAt: optionalString(row, "updated_at"),
     intent: string(row, "intent", "assist message"),
     content: nullableString(row, "content", "assist message"),
     errorCode: nullableString(row, "error_code", "assist message"),
@@ -242,7 +250,16 @@ export function assistMessageFrom(value: unknown): RelayAssistMessage {
       // 不能因为缺字段就判定整个响应非法。
       cacheReadTokens: nullableOptionalInteger(usage, "cache_read_tokens", "assist usage"),
       cacheCreationTokens: nullableOptionalInteger(usage, "cache_creation_tokens", "assist usage") },
-    cancelRequested: row.cancel_requested === true };
+    cancelRequested: row.cancel_requested === true,
+    // 0093：旧服务端没有这个字段，按「没有附件」读；新服务端每条消息都带数组。
+    attachments: row.attachments === undefined || row.attachments === null ? []
+      : array(row, "attachments", "assist message").map((value) => {
+        const item = object(value, "assist attachment");
+        return { id: string(item, "id", "assist attachment"),
+          name: string(item, "name", "assist attachment"),
+          mediaType: string(item, "media_type", "assist attachment"),
+          byteLength: integer(item, "byte_length", "assist attachment") };
+      }) };
 }
 
 export function assistProposalFrom(value: unknown): RelayAssistProposal {
@@ -342,7 +359,18 @@ export function workingDirectoryFrom(value: unknown): RelayWorkingDirectory {
       policyDecision: policyDecisionOf(readiness),
       policyId: optionalString(readiness, "policy_id"),
       policyRevision: optionalString(readiness, "policy_revision"),
-      policyTargetPrefix: optionalString(readiness, "policy_target_prefix") } };
+      policyTargetPrefix: optionalString(readiness, "policy_target_prefix"),
+      writeTier: localWriteTierOf(readiness),
+      accessRevision: optionalString(readiness, "access_revision") ?? "0" } };
+}
+
+function localWriteTierOf(readiness: Record<string, unknown>): RelayWriteTier | null {
+  const value = readiness.write_tier;
+  if (value === undefined || value === null) return null;
+  if (value !== "READ_ONLY" && value !== "ASK" && value !== "AUTO" && value !== "FULL") {
+    throw new Error("working directory write readiness.write_tier 无法识别");
+  }
+  return value;
 }
 
 /** 缺键（旧回执）当作未核对；出现无法识别的档位不当作空值蒙混，显式失败。 */
@@ -420,6 +448,30 @@ export function assistSessionStateFrom(value: unknown): RelayAssistSessionState 
   return { sessionId: string(row, "session_id", "assist session state"), status,
     revision: decimal(row, "revision", "assist session state"),
     updatedAt: string(row, "updated_at", "assist session state") };
+}
+
+/** 删除回执（ADR-027）：只有身份、修订与删除行数，没有状态——行已经不存在。 */
+export function assistSessionDeleteFrom(value: unknown): RelayAssistSessionDelete {
+  const row = object(value, "assist session delete");
+  return { sessionId: string(row, "session_id", "assist session delete"),
+    revision: decimal(row, "revision", "assist session delete"),
+    deletedMessages: integer(row, "deleted_messages", "assist session delete"),
+    deletedAttachments: integer(row, "deleted_attachments", "assist session delete"),
+    deletedAt: string(row, "deleted_at", "assist session delete") };
+}
+
+/**
+ * 分叉回执（0113）：这里的 `session_id` 是新建的子会话，不是命令目标。
+ * 客户端不核对它等于源会话——正因如此，回执身份只能由 command_id 与这条解析一起确认。
+ */
+export function assistSessionForkFrom(value: unknown): RelayAssistSessionFork {
+  const row = object(value, "assist session fork");
+  const copiedMessages = integer(row, "copied_messages", "assist session fork");
+  if (copiedMessages < 0) throw new Error("Assist 会话分叉回执格式无效。");
+  return { sessionId: string(row, "session_id", "assist session fork"),
+    title: string(row, "title", "assist session fork"),
+    revision: decimal(row, "revision", "assist session fork"),
+    updatedAt: string(row, "updated_at", "assist session fork"), copiedMessages };
 }
 
 export const RELAY_TOOL_CALL_STATUSES = ["REQUESTED", "PREPARED", "WAITING_APPROVAL", "SETTLED",
@@ -503,6 +555,29 @@ export function conversationCheckFrom(candidate: Record<string, unknown>): Relay
     args: args as readonly string[] };
 }
 
+/**
+ * 读出候选声明的文件动作。
+ *
+ * 缺字段是旧服务端的正常形状，按空数组处理；字段存在但不是数组、或某一项动作无法识别，
+ * 必须显式失败——静默丢弃会让确认页漏掉一个将要被删除的路径。
+ */
+export function conversationCandidateFileChangesFrom(
+  candidate: Record<string, unknown>): readonly RelayConversationCandidateFileChange[] {
+  const raw = candidate.file_changes;
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error("conversation execution candidate.file_changes 响应格式无效。");
+  }
+  return raw.map((entry) => {
+    const change = object(entry, "conversation execution candidate file change");
+    const action = string(change, "action", "conversation execution candidate file change");
+    if (action !== "CREATE" && action !== "MODIFY" && action !== "DELETE") {
+      throw new Error("conversation execution candidate file change.action 无法识别。");
+    }
+    return { path: string(change, "path", "conversation execution candidate file change"), action };
+  });
+}
+
 export function conversationExecutionFrom(value: unknown): RelayConversationExecution {
   const row = object(value, "conversation execution");
   const decision = string(row, "decision", "conversation execution");
@@ -522,6 +597,7 @@ export function conversationExecutionFrom(value: unknown): RelayConversationExec
     title: candidate === null ? null : optionalString(candidate, "title"),
     objective: candidate === null ? null : optionalString(candidate, "objective"),
     check: candidate === null ? null : conversationCheckFrom(candidate),
+    fileChanges: candidate === null ? [] : conversationCandidateFileChangesFrom(candidate),
     autoStart: row.auto_start === true,
     taskId: nullableString(row, "task_id", "conversation execution"),
     runId: nullableString(row, "run_id", "conversation execution"),
@@ -543,6 +619,7 @@ export function conversationExecutionSummaryFrom(value: unknown): RelayConversat
     title: candidate === null ? null : optionalString(candidate, "title"),
     objective: candidate === null ? null : optionalString(candidate, "objective"),
     check: candidate === null ? null : conversationCheckFrom(candidate),
+    fileChanges: candidate === null ? [] : conversationCandidateFileChangesFrom(candidate),
     questions: stringArray(row, "questions", "conversation execution"),
     autoStart: row.auto_start === true,
     taskId: nullableString(row, "task_id", "conversation execution"),
@@ -566,6 +643,31 @@ export function conversationDiffFileFrom(value: unknown): RelayConversationFileD
   };
 }
 
+/** 一侧扫描覆盖；服务端旧版本没给这一侧时返回 null，由调用方按「原因未知」呈现。 */
+function diffScanSideFrom(value: unknown, name: string): RelayConversationDiffScanSide | null {
+  if (!isRecord(value)) return null;
+  return {
+    complete: boolean(value, "complete", name),
+    reason: nullableString(value, "reason", name),
+    files: integer(value, "files", name),
+    listed: nullableInteger(value, "listed", name),
+  };
+}
+
+/** 会话总 diff 的覆盖投影；缺失（旧服务端）或格式不完整时为 null，不猜原因。 */
+function diffCoverageFrom(value: unknown): RelayConversationDiffCoverage | null {
+  if (!isRecord(value)) return null;
+  const baseline = diffScanSideFrom(value.baseline, "conversation diff coverage.baseline");
+  const current = diffScanSideFrom(value.current, "conversation diff coverage.current");
+  if (baseline === null || current === null) return null;
+  return {
+    baseline,
+    current,
+    uncheckedFiles: nullableOptionalInteger(value, "unchecked_files", "conversation diff coverage") ?? 0,
+    unverifiedFiles: nullableOptionalInteger(value, "unverified_files", "conversation diff coverage") ?? 0,
+  };
+}
+
 /** 会话总 diff 的只读投影：基线到当前已落盘内容的净变化（CD-02/03/16/17）。 */
 export function conversationDiffFrom(value: unknown): RelayConversationDiff {
   const row = object(value, "conversation diff");
@@ -578,6 +680,7 @@ export function conversationDiffFrom(value: unknown): RelayConversationDiff {
       rootPath: string(row, "root_path", "conversation diff"),
       resourceId: string(row, "resource_id", "conversation diff"),
       incomplete: boolean(row, "incomplete", "conversation diff"),
+      coverage: diffCoverageFrom(row.coverage),
       totalFiles: integer(row, "total_files", "conversation diff"),
       totalAdded: integer(row, "total_added", "conversation diff"),
       totalRemoved: integer(row, "total_removed", "conversation diff"),

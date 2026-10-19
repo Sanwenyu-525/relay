@@ -240,9 +240,16 @@ async function pickAssistant(view: Awaited<ReturnType<typeof openAgent>>, profil
 }
 
 /** 拨到助手档，等导航与面板挂载完。配置弹窗不随切档自动打开，需要它的用例显式 open。 */
-async function flipToAssistant(view: Awaited<ReturnType<typeof openAgent>>) {
-  await view.wrapper.get('[data-testid="assist-conversation-mode-assistant"]').setValue(true);
+/**
+ * 切档入口（2026-10-18 三档合并为一个下拉框后）：三档是同一个原生 select 的三个选项，
+ * 断言因此读它的 value，不再数三枚 radio。
+ */
+async function chooseMode(view: Awaited<ReturnType<typeof openAgent>>, mode: "AGENT" | "ASSISTANT" | "LEARNING") {
+  await view.wrapper.get('[data-testid="conversation-mode-select"]').setValue(mode);
   await flush(80);
+}
+async function flipToAssistant(view: Awaited<ReturnType<typeof openAgent>>) {
+  await chooseMode(view, "ASSISTANT");
 }
 
 beforeEach(() => { window.localStorage.clear(); });
@@ -292,8 +299,7 @@ describe("会话模式单选框", () => {
     const view = await openAgent(options);
     try {
       if (mode !== "AGENT") {
-        await view.wrapper.get(`[data-testid="assist-conversation-mode-${mode.toLowerCase()}"]`).setValue(true);
-        await flush(80);
+        await chooseMode(view, mode as "AGENT" | "ASSISTANT" | "LEARNING");
       }
       await view.wrapper.get('[data-testid="assist-draft"]').setValue(command);
       await view.wrapper.get('[data-testid="assist-composer"] form').trigger("submit");
@@ -345,7 +351,7 @@ describe("会话模式单选框", () => {
   it("明确转执行新建普通身份，带目标和方案，不改原学习会话", async () => {
     const options: Stub = { sessions: [agentSession(), learningSession()], posts: [], withMessages: [learningSessionId], withSources: true };
     const view = await openAgent(options);
-    await view.wrapper.get('[data-testid="assist-conversation-mode-learning"]').setValue(true);
+    await chooseMode(view, "LEARNING");
     await flush(80);
     const panel = view.wrapper.get('[data-testid="learning-records-panel"]');
     await panel.findAll("summary").find((item) => item.text() === "转入普通执行会话")!.trigger("click");
@@ -367,7 +373,7 @@ describe("会话模式单选框", () => {
   it("学习档复用已有身份，发送不带执行意图，不触发执行或状态维护解释", async () => {
     const options: Stub = { sessions: [agentSession(), learningSession()], posts: [] };
     const view = await openAgent(options);
-    await view.wrapper.get('[data-testid="assist-conversation-mode-learning"]').setValue(true);
+    await chooseMode(view, "LEARNING");
     await flush(80);
     expect(view.wrapper.get('[data-testid="learning-readonly-note"]').text()).toContain("对项目只读");
     expect(view.wrapper.find('[data-testid="assist-intent"]').exists()).toBe(false);
@@ -393,7 +399,7 @@ describe("会话模式单选框", () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
     vi.stubGlobal("fetch", stub(options));
     const view = await mountWorkbench("/agent");
-    await view.wrapper.get('[data-testid="assist-conversation-mode-learning"]').setValue(true);
+    await chooseMode(view, "LEARNING");
     await view.wrapper.get('[data-testid="learning-message-no-record"]').setValue(true);
     await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("带我理解幂等性");
     await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit");
@@ -411,22 +417,26 @@ describe("会话模式单选框", () => {
     expect(options.posts.filter((p) => p.path.endsWith("/assist-sessions"))).toHaveLength(1);
     view.unmount();
   });
-  it("三档都渲染，普通档标签不承诺尚未实现的子 Agent 派发", async () => {
+  it("三档收在一个下拉框里，普通档标签不承诺尚未实现的子 Agent 派发", async () => {
     const options: Stub = { sessions: [agentSession()], posts: [] };
     const view = await openAgent(options);
-    const radios = view.wrapper.findAll('[data-testid="conversation-mode"] input[type="radio"]')
-      .map((item) => item.attributes("value"));
-    expect(radios).toEqual(["AGENT", "ASSISTANT", "LEARNING"]);
+    // 2026-10-18 用户指令「普通 agent，人设助手，学习合并到一个下拉框中」：
+    // 三档不再是三枚常驻 radio，而是同一个 select 的三个选项。
+    expect(view.wrapper.findAll('[data-testid="conversation-mode"] input[type="radio"]')).toHaveLength(0);
+    expect(view.wrapper.findAll('[data-testid="conversation-mode"] option')
+      .map((item) => item.attributes("value"))).toEqual(["AGENT", "ASSISTANT", "LEARNING"]);
     // ADR-017 的子 Agent 至今零代码，标签不能预先承诺。
     expect(view.wrapper.get('[data-testid="conversation-mode"]').text()).not.toContain("子 Agent");
-    expect(view.wrapper.get('[data-testid="assist-conversation-mode-agent"]').attributes("checked")).toBe("");
+    expect((view.wrapper.get('[data-testid="conversation-mode-select"]').element as HTMLSelectElement).value)
+      .toBe("AGENT");
     view.unmount();
   });
 
   it("默认按普通档解析，不虚构助手关系", async () => {
     const options: Stub = { sessions: [agentSession()], posts: [] };
     const view = await openAgent(options);
-    expect(view.wrapper.get('[data-testid="assist-conversation-mode-agent"]').attributes("checked")).toBe("");
+    expect((view.wrapper.get('[data-testid="conversation-mode-select"]').element as HTMLSelectElement).value)
+      .toBe("AGENT");
     expect(view.wrapper.find('[data-testid="assist-assistant-picker"]').exists()).toBe(false);
     expect(view.wrapper.find('[data-testid="assist-assistant-config-toggle"]').exists()).toBe(false);
     view.unmount();
@@ -461,8 +471,7 @@ describe("会话模式单选框", () => {
     const options: Stub = { sessions: [], posts: [], profiles: [] };
     const view = await openAgent(options);
     try {
-      await view.wrapper.get('[data-testid="assist-conversation-mode-assistant"]').setValue(true);
-      await flush(80);
+      await chooseMode(view, "ASSISTANT");
       expect(assistantDialogOpen()).toBe(false);
       const chip = view.wrapper.get('[data-testid="assist-assistant-config-toggle"]');
       expect(chip.text()).toContain("选择助手");
@@ -534,14 +543,23 @@ describe("会话模式单选框", () => {
     vi.stubGlobal("fetch", stub(options));
     const view = await mountWorkbench("/agent");
     try {
-      const note = document.querySelector(".agent-chat-attach-note");
-      expect(note?.textContent).toBe("首条消息后可选资料与 Skill");
+      /* 2026-10-18 起清单全量、Skill 缺上下文时才提示：没有选中 Skill 时不再有 Skill 脚注，
+         只有「资料在会话中选择」与连接器的按项目登记说明；行本身都可点开。 */
+      const notes = Array.from(document.querySelectorAll(".agent-chat-attach-note"));
+      expect(notes.map((node) => node.textContent)).toEqual(["资料在会话中选择",
+        "连接器按项目登记；进入项目后可查看已连接能力"]);
       expect(document.querySelector(".agent-chat-attach-item-reason")).toBeNull();
-      for (const key of ["sources", "skill"]) {
+      // 资料在首条消息仍是禁用；Skill 与连接器可点开，连接器的原因挂在 title 与脚注上。
+      expect(document.querySelector('[data-testid="assist-attach-sources"]')?.hasAttribute("disabled")).toBe(true);
+      for (const key of ["sources", "connectors"]) {
         const item = document.querySelector(`[data-testid="assist-attach-${key}"]`);
-        expect(item?.hasAttribute("disabled")).toBe(true);
-        expect(item?.getAttribute("aria-describedby")).toBe(note?.id);
+        const referenced = notes.find((node) => node.id === item?.getAttribute("aria-describedby"));
+        expect(referenced?.textContent).toBeTruthy();
       }
+      // 原因同时挂在行上（悬停 title），不只留在脚注。
+      expect(document.querySelector('[data-testid="assist-attach-skill"]')?.hasAttribute("disabled")).toBe(false);
+      expect(document.querySelector('[data-testid="assist-attach-connectors"]')?.getAttribute("title"))
+        .toContain("连接器按项目登记");
       // 打开目录后文件夹入口是活的，命令入口任何时候都不该带原因。
       expect(document.querySelector('[data-testid="assist-attach-folder"]')?.hasAttribute("disabled")).toBe(false);
       expect(document.querySelector('[data-testid="assist-attach-command"]')?.getAttribute("aria-describedby")).toBeNull();
@@ -551,7 +569,7 @@ describe("会话模式单选框", () => {
   /* 「+」二级菜单（2026-10-16，工作台 §32）：一级只表达「想做什么」，具体选择在二级，
      执行仍走各自原有的 Owner。菜单框架本身的契约在 composerAttachMenu.spec.tsx 里单独锁，
      这里补的是「真实路由下确实接到既有能力」这一段。 */
-  it("「+」目录二级：先展开二级，未接入项如实禁用，「选择文件夹」仍走协作页的目录入口", async () => {
+  it("「+」目录二级：先展开二级，未接入项如实禁用，无原生选择器时「选择文件夹」退回更换目录框", async () => {
     const options: Stub = { sessions: [], posts: [], profiles: [] };
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
     vi.stubGlobal("fetch", stub(options));
@@ -568,7 +586,9 @@ describe("会话模式单选框", () => {
       // 未接入的能力不假装可用，并写明原因与当前替代路径。
       expect(document.querySelector('[data-testid="assist-attach-workspace-manage"]')?.hasAttribute("disabled")).toBe(true);
       expect(submenu?.querySelector(".agent-chat-attach-subnote")?.textContent).toContain("工作区管理尚未接入");
-      // 「选择文件夹」复用协作页持有的「更换目录」对话框，不新建第二套目录选择器。
+      // 本机没有原生选择器（jsdom 里 `isTauri()` 恒为 false）时才退回这一层：复用协作页
+      // 持有的「更换目录」对话框，不新建第二套目录选择器。桌面宿主下直接开文件浏览器，
+      // 那条路径锁在 folderFirstConversation.spec.ts。
       await view.wrapper.get('[data-testid="assist-attach-folder-pick"]').trigger("click");
       await flush(80);
       expect(document.querySelector('[role="dialog"][aria-label="更换工作目录"]')).not.toBeNull();
@@ -728,7 +748,7 @@ describe("会话模式单选框", () => {
       await flipToAssistant(view);
       expect((draft.element as HTMLTextAreaElement).value).toBe("首条草稿切档后保留");
       expect(view.wrapper.get('[data-testid="assist-first-message"]').find("details.agent-chat-options").exists()).toBe(false);
-      await view.wrapper.get('[data-testid="assist-conversation-mode-agent"]').setValue(true);
+      await chooseMode(view, "AGENT");
       await flush(80);
       expect((draft.element as HTMLTextAreaElement).value).toBe("首条草稿切档后保留");
       expect(view.wrapper.get('[data-testid="assist-first-message"]').find("details.agent-chat-options").exists()).toBe(true);
@@ -857,10 +877,11 @@ describe("会话模式单选框", () => {
       inflightSessionId: assistantSessionId };
     const view = await openAgent(options);
     await flipToAssistant(view);
-    // 整组禁用落在 fieldset 上：HTML 里这就是「这一组都不可选」，
-    // 给每个 radio 再复制一份 disabled 只会多一个可能漂移的地方。
-    expect(view.wrapper.get('[data-testid="conversation-mode"] fieldset').attributes("disabled")).toBe("");
+    // 禁用落在唯一的 select 上：在途时这一档不可改，也不靠切档隐式取消。
+    expect(view.wrapper.get('[data-testid="conversation-mode-select"]').attributes("disabled")).toBe("");
     expect(view.wrapper.get('[data-testid="conversation-mode-locked"]').text()).toContain("停止后才能切换");
+    // 2026-10-17：原因原文同时挂在模式盒的 title 上（悬停可读），可见行已转视觉隐藏。
+    expect(view.wrapper.get('[data-testid="conversation-mode"]').attributes("title")).toContain("停止后才能切换");
     view.unmount();
   });
 
@@ -888,6 +909,9 @@ describe("会话模式单选框", () => {
       expect(locked.element?.closest(".agent-chat-mode")).toBeNull();
       expect(locked.element?.parentElement?.classList.contains("agent-chat-mode-hints")).toBe(true);
       expect(locked.element?.classList.contains("disabled-reason")).toBe(true);
+      // 2026-10-17（用户指认执行中「不要弹出这个东西，整个布局都被他打乱了」）：锁定原因
+      // 不再占一行可见文字，转为视觉隐藏——在途开始/结束时卡下方这一列不增减可见行。
+      expect(locked.element?.classList.contains("visually-hidden")).toBe(true);
     } finally { view.unmount(); }
   });
 
@@ -914,7 +938,7 @@ describe("会话模式单选框", () => {
       withMessages: [learningSessionId] };
     const view = await openAgent(options);
     try {
-      await view.wrapper.get('[data-testid="assist-conversation-mode-learning"]').setValue(true);
+      await chooseMode(view, "LEARNING");
       await flush(80);
       const learning = view.wrapper.get('[data-testid="learning-readonly-note"]');
       expect(learning.element?.closest(".agent-chat-composer")).toBeNull();

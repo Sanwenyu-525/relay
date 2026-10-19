@@ -46,6 +46,7 @@ export function registerComputerRoutes(app: FastifyInstance, dependencies: Route
   app.get('/computer/control-session', {
     schema: { params: workspaceParams, response: { 200: controlSessionResponse } },
   }, async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
     try {
       const params = request.params as { workspace_id: string };
       return await readComputerControlSession(executor, params.workspace_id);
@@ -56,24 +57,23 @@ export function registerComputerRoutes(app: FastifyInstance, dependencies: Route
 
   app.post('/computer/control-session/cancel', {
     schema: { params: workspaceParams, response: { 200: cancelResponse } },
-  }, async (request) => {
+  }, async (request, reply) => {
     const params = request.params as { workspace_id: string };
     const row = await new ComputerControlStateRepository(executor).readLatest();
     // 没有活跃操控、状态已是终态、或状态属于别的空间：按已停止幂等返回。
-    if (row === undefined || row.state !== 'RUNNING' || row.workspace_id !== params.workspace_id) {
+    if (row === undefined || row.state === 'STOPPED' || row.workspace_id !== params.workspace_id) {
       return { state: 'STOPPED' as const, control_request_id: null };
     }
-    await new ComputerControlStateRepository(executor).markStopRequested(row.run_id);
+    if (row.state === 'STOP_REQUESTED') {
+      return { state: 'STOP_REQUESTED' as const, control_request_id: null };
+    }
     try {
       const control = await requestComputerControlStop(executor, {
         workspaceId: params.workspace_id, runId: row.run_id,
       });
       return { state: 'STOP_REQUESTED' as const, control_request_id: control.id };
     } catch (error) {
-      if (error instanceof DomainError && error.status === 409) {
-        // 已有 PENDING 控制（重复 Esc / 用户同时在界面取消）：意图一致，幂等成功。
-        return { state: 'STOP_REQUESTED' as const, control_request_id: null };
-      }
+      if (error instanceof DomainError) return sendReadError(reply, error, request.id);
       throw error;
     }
   });

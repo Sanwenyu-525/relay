@@ -30,7 +30,9 @@ export interface CommandBody {
 }
 
 /** 除 Create* 之外，契约第 3 节显式要求 201 的命令（新版本是新建资源）。 */
-const CREATED_COMMAND_TYPES: readonly string[] = ['SubmitHumanArtifactVersion'];
+const CREATED_COMMAND_TYPES: readonly string[] = ['SubmitHumanArtifactVersion',
+  // 分叉新建一条子会话（0113），不是对源会话的一次改写，因此与新建会话同一状态码。
+  'ForkAssistSession'];
 
 export function successStatusOf(commandType: string): 200 | 201 | 202 {
   // Delegate 已原子获得执行权，但工作尚未完成：按契约第 4 节返回 202（已接受）。
@@ -98,6 +100,8 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
     case 'LinkProjectGoal':
     case 'UnlinkProjectGoal':
     case 'ArchiveProject':
+      return typeof result.project_id === 'string' ? `projects/${result.project_id}` : undefined;
+    case 'UnarchiveProject':
       return typeof result.project_id === 'string' ? `projects/${result.project_id}` : undefined;
     case 'SetProjectState':
       return typeof result.project_id === 'string'
@@ -177,6 +181,7 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
     case 'SetAssistSessionUnread':
     case 'ArchiveAssistSession':
     case 'ReopenAssistSession':
+    case 'ForkAssistSession':
       return typeof result.session_id === 'string' ? `assist-sessions/${result.session_id}` : undefined;
     case 'CreateProjectBlueprintProposal':
     case 'ApplyProjectBlueprint':

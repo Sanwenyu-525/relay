@@ -14,7 +14,7 @@ import {
   type GatewayOrigin,
 } from '../../src/application/gateway-actions.js';
 import {
-  createFakeConnection, createGatewayPolicy, disableManagedResource, registerManagedResource,
+  createGatewayPolicy, disableManagedResource, registerManagedResource,
 } from '../../src/application/gateway-configuration.js';
 import { resolveReview } from '../../src/application/review-decisions.js';
 import { advanceRunStep } from '../../src/application/run-steps.js';
@@ -110,12 +110,21 @@ async function realFixture(input: {
     git(root, ['commit', '-q', '-m', 'seed']);
   }
   const resource = await registerManagedResource(app.db, { workspaceId, projectId, rootPath: root });
-  const connection = await createFakeConnection(app.db, { workspaceId, projectId, capabilities: input.capabilities });
+  const connectionId = await withTransaction(app.db, async (repositories) => {
+    await repositories.workspaces.lockAuthority(workspaceId, 'update');
+    const connection = await repositories.gateway.insertConnection({ id: randomUUID(),
+      workspaceId, projectId, config: { root_path: resource.canonicalRoot } });
+    for (const capability of input.capabilities) {
+      await repositories.gateway.addConnectionCapability(connection.id, capability);
+    }
+    await repositories.workspaces.bumpAuthority(workspaceId);
+    return connection.id;
+  });
   const policy = await createGatewayPolicy(app.db, { workspaceId, projectId, capability: input.capability,
     actionType: input.actionType, targetPrefix: resource.canonicalRoot, decision: input.decision ?? 'AUTO',
     maxPayloadBytes: input.maxPayloadBytes ?? 8192 });
   return { workspaceId, projectId, taskId, runId, stepId: step.id, root: resource.canonicalRoot,
-    resourceId: resource.resourceId, connectionId: connection.connectionId, policyId: policy.policyId };
+    resourceId: resource.resourceId, connectionId, policyId: policy.policyId };
 }
 
 async function claim(f: RealFixture, workerId = `worker-${randomUUID()}`) {
@@ -223,6 +232,33 @@ test('M06 frozen FILE_WRITE diff uses immutable planned baseline and target text
     const outside = await api.get(`/api/v1/workspaces/${randomUUID()}/operations/${op}/file-write-diff`);
     assert.equal(outside.status, 404);
   } finally { await api.stop(); }
+});
+
+test('Gateway rejects a FILE_WRITE connection whose root does not cover the Run resource', async () => {
+  const f = await realFixture({ capabilities: ['FILE_WRITE'], capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET' });
+  const otherRoot = join(dataRoot, `m06-other-root-${randomUUID()}`);
+  await mkdir(otherRoot, { recursive: true });
+  const otherResource = await registerManagedResource(app.db, { workspaceId: f.workspaceId,
+    projectId: f.projectId, rootPath: otherRoot });
+  const wrongConnectionId = await withTransaction(app.db, async (repositories) => {
+    await repositories.workspaces.lockAuthority(f.workspaceId, 'update');
+    const connection = await repositories.gateway.insertConnection({ id: randomUUID(),
+      workspaceId: f.workspaceId, projectId: f.projectId,
+      config: { root_path: otherResource.canonicalRoot } });
+    await repositories.gateway.addConnectionCapability(connection.id, 'FILE_WRITE');
+    await repositories.workspaces.bumpAuthority(f.workspaceId);
+    return connection.id;
+  });
+  const operationId = randomUUID();
+  const origin = await claim(f);
+  await assert.rejects(() => prepareGatewayAction(app.db, { workspaceId: f.workspaceId,
+    operationId, intentKey: `wrong-root-${randomUUID()}`, connectionId: wrongConnectionId,
+    origin, actionType: 'APPLY_CHANGESET', target: f.root,
+    params: { changes: [{ path: 'blocked.txt', action: 'CREATE', content: 'must not write\n' }] } }),
+  (error: unknown) => code(error) === 'GATEWAY_TARGET_DENIED');
+  const operations = await sql<{ count: number }>`select count(*)::integer as count
+    from logical_operations where id = ${operationId}`.execute(app.db);
+  assert.equal(operations.rows[0]?.count, 0, 'root mismatch is denied before an operation is persisted');
 });
 
 test('M06 frozen FILE_WRITE diff marks mismatched, binary and oversized baselines unavailable', async () => {

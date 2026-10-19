@@ -12,7 +12,7 @@ const path = `${baseUrl}/api/v1/workspaces/${workspaceId}/tasks?inbox=true`;
 const allPath = `${baseUrl}/api/v1/workspaces/${workspaceId}/tasks?scope=all`;
 const projectsPath = `${baseUrl}/api/v1/workspaces/${workspaceId}/projects?status=active`;
 /** 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1），因此它也会读这个端点。 */
-const sessionsPath = `${baseUrl}/api/v1/workspaces/${workspaceId}/assist-sessions?`;
+const sessionsPath = `${baseUrl}/api/v1/workspaces/${workspaceId}/assist-sessions?include_context=true`;
 let unmount: (() => void) | null = null;
 
 afterEach(() => {
@@ -29,7 +29,7 @@ function recentWorkResponse(url: string): Response | null {
   return [workspaceId, otherWorkspaceId].some((id) =>
     url === `${baseUrl}/api/v1/workspaces/${id}/tasks?scope=all` ||
     url === `${baseUrl}/api/v1/workspaces/${id}/projects?status=active` ||
-    url === `${baseUrl}/api/v1/workspaces/${id}/assist-sessions?`)
+    url === `${baseUrl}/api/v1/workspaces/${id}/assist-sessions?include_context=true`)
     ? response(200, { items: [], next_cursor: null }) : null;
 }
 function task(id: string, title: string, status = "INBOX", projectId: string | null = null,

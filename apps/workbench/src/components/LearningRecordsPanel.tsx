@@ -151,7 +151,7 @@ export default function LearningRecordsPanel({ client, sessionId, refreshKey, bl
     {confirmClear && <div><p>清除当前工作空间全部个人学习记录。原聊天、项目资料和执行事实保留；清除后旧轮次不能补回记录。</p>
       <button className="danger-button" type="button" disabled={locked} onClick={() => void submit({ kind: "clear", commandId: createCommandId() })}>确认清除学习记录</button>
       <button className="text-button" type="button" disabled={busy} onClick={() => setConfirmClear(false)}>保留记录</button></div>}
-    {onTransfer && <details><summary onClick={() => { if (!background) setBackground(defaultBackground); }}>转入普通执行会话</summary>
+    {onTransfer && <details className="tech-details"><summary onClick={() => { if (!background) setBackground(defaultBackground); }}>转入普通执行会话</summary>
       <p className="helper-text">输入明确执行要求与所选方案、约束和未决项。将新建普通会话；原学习身份保留，动作仍需原权限和验收。</p>
       <label className="field"><span>执行要求</span><textarea value={instruction} maxLength={2000}
         onChange={(event) => setInstruction(event.target.value)} disabled={busy || pending !== null} /></label>

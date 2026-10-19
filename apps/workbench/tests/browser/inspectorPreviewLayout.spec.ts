@@ -131,7 +131,6 @@ async function measure(page: Page, state: string) {
     const center = query('[data-testid="collab-center"]');
     const toolbar = query('[data-testid="collab-conversation-toolbar"]');
     const rightWing = query(".collab-toolbar-right");
-    const newSession = query('[data-testid="assist-new-session"]');
     const taskView = query('[data-testid="collab-open-task-view"]');
     const inspectorToggle = query('[data-testid="collab-conversation-inspector-toggle"]');
     const inspector = query('[data-testid="collab-inspector"]');
@@ -161,16 +160,13 @@ async function measure(page: Page, state: string) {
       center: box(center),
       toolbar: box(toolbar),
       rightWing: box(rightWing),
-      newSession: box(newSession),
       taskView: box(taskView),
       inspectorToggle: box(inspectorToggle),
       sessionName: box(sessionName),
       send: box(send),
       draft: box(draft),
       overlaps: {
-        newSessionTaskView: overlap(box(newSession), box(taskView)),
         taskViewInspectorToggle: overlap(box(taskView), box(inspectorToggle)),
-        newSessionInspectorToggle: overlap(box(newSession), box(inspectorToggle)),
         sessionNameRightWing: overlap(box(sessionName), box(rightWing)),
         inspectorTaskView: overlap(box(inspector), box(taskView)),
         inspectorInspectorToggle: overlap(box(inspector), box(inspectorToggle))
@@ -180,7 +176,7 @@ async function measure(page: Page, state: string) {
       inspectorClose: box(inspectorClose),
       scrim: { display: scrim === null ? "none" : getComputedStyle(scrim).display,
         box: box(scrim), zIndex: scrim === null ? null : getComputedStyle(scrim).zIndex },
-      hitTests: { newSession: hitTest(newSession), taskView: hitTest(taskView),
+      hitTests: { taskView: hitTest(taskView),
         inspectorToggle: hitTest(inspectorToggle), send: hitTest(send),
         inspectorClose: hitTest(inspectorClose), chatCorner },
       horizontalOverflow: { page: root.scrollWidth - root.clientWidth,
@@ -235,13 +231,13 @@ function expectLayoutContract(snapshot: Snapshot, label: string): void {
   const where = `${label} · ${snapshot.state}`;
   const columns = snapshot.columns.box;
   if (columns === null) throw new Error(`${where} · 缺少 .collab-columns`);
-  // 1. 右翼三颗键两两不交叠，左翼会话名不压到右翼之下。
+  // 1. 右翼图标键两两不交叠，左翼会话名不压到右翼之下。
   for (const [name, area] of Object.entries(snapshot.overlaps)) {
     if (name.startsWith("inspector")) continue;
     expect(area, `${where} · ${name} 交叠 ${area}px²`).toBeLessThanOrEqual(0.5);
   }
   // 2. 工具栏按钮落在主区内、不掉到视口外。
-  for (const [name, box] of [["新建会话", snapshot.newSession], ["任务视图", snapshot.taskView],
+  for (const [name, box] of [["任务视图", snapshot.taskView],
     ["工作详情", snapshot.inspectorToggle]] as const) {
     const placed = bounds(snapshot, where, name, box);
     expect(placed.left, `${where} · ${name} 越出主区右缘`).toBeLessThanOrEqual(columns.right + 0.5);

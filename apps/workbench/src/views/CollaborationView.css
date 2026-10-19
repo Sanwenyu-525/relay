@@ -143,9 +143,10 @@
 .collab-reader-outside { flex: none; }
 .collab-reader .markdown-preview { margin: 0; padding: var(--relay-space-4); border: 0; font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-reading); line-height: var(--relay-font-lineHeight-reading); }
 .collab-reader .markdown-preview__heading { margin: var(--relay-space-4) 0 var(--relay-space-2); font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-section); }
+.collab-reader .markdown-preview__heading[data-heading-level="2"] { font-size: var(--relay-font-size-rowTitle); }
 .collab-reader .markdown-preview__heading:first-child { margin-top: 0; }
 .collab-reader .markdown-preview__paragraph { margin: 0 0 var(--relay-space-4); }
-.collab-reader .markdown-preview__subheading { margin: var(--relay-space-4) 0 var(--relay-space-2); font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-rowTitle); }
+.collab-reader .markdown-preview__subheading { margin: var(--relay-space-4) 0 var(--relay-space-2); font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-reading); }
 .collab-version-details > summary, .collab-completion-details > summary { cursor: pointer; font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); }
 .collab-completion-details { flex: none; }
 .collab-completion-details[open] { flex: 1; overflow-y: auto; }
@@ -589,17 +590,21 @@
 .collab-toolbar-scope-value { overflow: hidden; text-overflow: ellipsis; color: var(--relay-color-text-secondary); }
 /* 占位状态（尚未关联目标／目录待核对…）不是取值：降到 muted 档，别与目录名这类真实取值同重。 */
 .collab-toolbar-scope-value--placeholder { color: var(--relay-color-text-muted); }
-/* 2026-10-17 用户指令：会话目录收成一个文件夹图标，完整路径改由悬停提示与可访问名称承担。 */
+/* 会话目录＝文件夹图标 + 目录名（2026-10-18 用户指认纯图标读不出是哪一个目录，回到带名一档）：
+   完整路径留在 title 与可访问名称，可见面按本档省略，与输入卡上方细条同一读法。 */
 .collab-toolbar-directory {
   display: inline-flex;
   align-items: center;
-  flex: none;
+  gap: var(--relay-space-1);
+  flex: 0 1 auto;
+  min-width: 0;
   color: var(--relay-color-text-secondary);
   cursor: default;
 }
 .collab-toolbar-directory--placeholder { color: var(--relay-color-text-muted); }
-.collab-toolbar-directory > svg { width: 0.875rem; height: 0.875rem; }
-/* 右翼动作区：四颗键同高同密度、按 space.2 成组；「工作详情」固定在最后。
+.collab-toolbar-directory > svg { width: 0.875rem; height: 0.875rem; flex: none; }
+.collab-toolbar-directory-name { overflow: hidden; text-overflow: ellipsis; }
+/* 右翼动作区：图标键同高同密度、按 space.2 成组；「工作详情」固定在最后。
    图标键本身的基底与展开色见本文件上方的 `.collab-toolbar-icon-button`，这里只摆位置。 */
 .collab-toolbar-right { display: flex; align-items: center; gap: var(--relay-space-2); }
 /* 「切换讨论」浮层（2026-10-17）：贴在触发键正下方，右缘对齐顶栏右缘，宽度按最长一条讨论走，
@@ -642,9 +647,8 @@
   font-weight: var(--relay-font-weight-medium);
 }
 .collab-session-switcher-option:disabled { cursor: default; opacity: 1; }
-/* 右翼四颗键都是纯图标键：可见文字一律退出，可访问名称来自 aria-label / title。
-   「新建会话」在非顶栏的会话控制带里仍保留文字，因此只在本工具栏内隐藏标签。 */
-.collab-toolbar-right .agent-assist-new-session-label { display: none; }
+/* 右翼图标键都是纯图标键：可见文字一律退出，可访问名称来自 aria-label / title。
+   「新建会话」不在右翼（2026-10-18 用户指令删除），它在非顶栏的会话控制带里仍保留文字。 */
 /* 窄顶栏里再让位：整条作用域收起，把宽度还给会话名（原型同款降级）。
    量的是顶栏自己的宽度：详情分栏把中栏压窄时，被挤的是顶栏而不是主区。
    会话目录另见输入区上方的目录细条，关联目标仍在顶栏 30rem 以上一档完整可读。 */

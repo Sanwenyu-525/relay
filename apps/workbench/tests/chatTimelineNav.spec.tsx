@@ -57,10 +57,11 @@ async function scrollBy(owner: HTMLElement, value: number): Promise<void> {
 
 function user(id: string, content: string | null): RelayAssistMessage {
   return { id, sessionId: SESSION, seq: "1", role: "USER", status: "COMPLETED",
-    createdAt: "2026-10-16T00:00:00Z", intent: "DISCUSS", content, errorCode: null,
+    createdAt: "2026-10-16T00:00:00Z", updatedAt: "2026-10-16T00:00:00Z",
+    intent: "DISCUSS", content, errorCode: null,
     providerErrorKind: null, sources: [], skill: null, skillInput: null, skillOutput: null,
     usage: { inputTokens: null, outputTokens: null, cacheReadTokens: null,
-      cacheCreationTokens: null }, cancelRequested: false };
+      cacheCreationTokens: null }, cancelRequested: false, attachments: [] };
 }
 function assistant(id: string, content: string | null, status: RelayAssistMessage["status"] = "COMPLETED"): RelayAssistMessage {
   return { ...user(id, content), role: "ASSISTANT", status };

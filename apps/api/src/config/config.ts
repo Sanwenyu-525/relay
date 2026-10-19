@@ -2,6 +2,15 @@ import { statSync } from 'node:fs';
 import { dirname, isAbsolute, parse, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/**
+ * 桌面模式默认的固定 API 端口。
+ *
+ * 浏览器扩展只认用户在设置页手动填的 `serverUrl`，而桌面宿主原先给 API 的是临时端口
+ * （每次启动都变），于是每次重启都要重新配对。固定端口让「填一次长期有效」成立；
+ * 被占用时由 `main.ts` 回退到临时端口（此时扩展需重新配对，但功能不降级）。
+ */
+export const DESKTOP_DEFAULT_API_PORT = 43117;
+
 export type LogLevel = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
 
 export interface ApiConfig {

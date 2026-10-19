@@ -80,7 +80,7 @@ async function mount(path = "/agent", options: { sessions?: boolean; directory?:
   unmount = view.unmount;
   await flush(80);
   if (options.directory === true) {
-    // 目录控件已搬进细条上的「更换目录」框（协作页 §3.3），框走 portal 挂在 body 上。
+    // 目录控件已搬进细条上的「更换目录」浮层（协作页 §3.3），控件按 body 查询。
     await openWorkingDirectory(canonicalRoot);
     await flush(120);
   }
@@ -148,8 +148,8 @@ describe("窄窗抽屉里的新对话入口", () => {
     await flush(120);
 
     expect(view.router.currentRoute.value.query.new).not.toBe("seed");
-    // 目录作用域清空：细条回到未选择目录，写准入说明一并消失。
-    expect(folderStripName()).toBe("未选择目录");
+    // 目录作用域清空：细条回到「选择工作目录」那颗键，写准入说明一并消失。
+    expect(folderStripName()).toBe("选择工作目录");
     expect(view.wrapper.find('[data-testid="folder-write-readiness"]').exists()).toBe(false);
     expect(view.wrapper.find('[data-testid="collab-goal"]').exists()).toBe(false);
     expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(true);

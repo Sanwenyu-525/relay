@@ -149,6 +149,23 @@ Relay 的采纳规则与本批次验收规格分别归[工作台 §18.8](../fron
 
 **明确不采用**：Codex 的进程内 `ApprovalStore` 与 DeepSeek 的 `ToolCallView` 卡片词汇表已在本文件 §1.6 记录，本节不重复。**本节未覆盖**：DeepSeek Harness、Pi、Rig、LangChain/Graph 未就本问题逐一核对；上游缺少 Task/Run 账本、Gateway 准入与崩溃恢复语义，因此这些对照只能支撑交互与输入形态的判断，**不能**证明本项目按同样方式实现也成立。本轮 Relay 侧的实际结果只归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)，不在本节。
 
+### 1.8 未选目录时的默认工作目录机制对照（2026-10-18）
+
+用户提出「新会话未选择目录的时候应该在默认目录工作，这个默认目录是可以用户配置的，上游中应该有」，并要求先定方案与任务书。本节只读核对五个固定提交（检出方式与清单见 §1.1；本轮 `git rev-parse --short HEAD` 复核：ZCode `aac47556`、DeepSeek Harness `639ed01539`、Codex `e7ea5f4a8`、OpenCode `055d95b`、Pi `7fbbd5f4`），未展开稀疏检出（所需文件均已在检出范围内）、未安装依赖、未构建、未运行上游测试、未调用 Provider。
+
+**结论：用户的判断成立一半。** 五家都保证「Agent 永远有一个确切 cwd」，因此 Relay 现在的「没目录→类型化拒掉本次读取、对话照常」在上游没有对应物；但只有 DeepSeek Harness 把它做成**用户可配置项并与权限边界闭合**，ZCode 只给出应用托管的共享目录，Codex/OpenCode/Pi 的兜底都是进程 cwd。**本节不含 Relay 侧运行结果，也不宣称本项目已实现默认目录。**
+
+| 对照问题 | 当前源码机制与固定提交依据 | Relay 采用与差异 |
+|---|---|---|
+| 缺省 cwd 落在哪里 | ZCode 为非项目对话准备应用托管的真实工作目录，注释即「非项目对话共享的真实工作目录；默认 `~/.zcode/workspace/default`」（`packages/services/src/paths.ts:50-53`）；Harness 三级兜底 `workspace?.path ?? request.cwd ?? this.defaultCwd`（`packages/api/session-controller/src/commands.ts:119`）；Codex `cwd_override` 为空即取进程目录（`codex-rs/core/src/config/mod.rs:1520-1524`），app-server 以 `codex_home` 作 fallback（`codex-rs/app-server/src/config_manager.rs:350`）；OpenCode `query.directory \|\| header["x-opencode-directory"] \|\| process.cwd()`（`packages/opencode/src/server/routes/instance/httpapi/middleware/workspace-routing.ts:86-88`）；Pi `cwdOverride ?? header cwd ?? process.cwd()`（`packages/coding-agent/src/core/session-manager.ts:1782`） | **采纳方向**：「没有选择目录」不等于「没有作用域」，Relay 要补的是可配的默认作用域，而不是让读取工具在缺目录时长期不可用。**不采纳**共同实现——落进程 cwd：Relay 的 API/Worker 进程目录是安装目录而非用户内容，落上去等于显示一个用户从未选择的目录。**保留**未配置默认目录时按类型化原因拒本次读取，不改成静默兜底 |
+| 是否真的存在用户可配的默认目录键 | 只有 Harness 有：`sandbox.workspaceRoot`，且 `mode` 默认 `read-only`、root 无 schema 默认值而在构造期解析为绝对路径（`packages/sandbox/sandbox-policy/src/index.ts:112-117`）。Codex 的 `config.toml` 结构体没有 cwd 字段，`pub projects: Option<HashMap<String, ProjectConfig>>`（`codex-rs/config/src/config_toml.rs:469`）是以 cwd 为**键**的信任配置；ZCode 可配的只有数据根（`ZCODE_DATA_BASE_DIR`，同文件 `paths.ts:35-41`），`workspace/default` 后缀不可配；OpenCode、Pi 在检出范围内无该键 | **采纳 Harness 形态**：配置项承载的是「目录＋该目录的档位」这一对事实，不是一个裸路径。Relay 的落点因此是既有受管资源与 `local_directory_access.write_tier`，而不是新的目录字符串配置，规则归[工作台 §18.1.5](../frontend/workbench-design.md#1815-未选目录时的默认工作目录2026-10-18已确认未实施) |
+| 默认目录与写权限怎么耦合 | Harness 的 `resolve()` 注释直说「session cwd 是它的 workspace-write 边界；配置的 root 是 agentless 调用与无 cwd 会话的兜底」（`packages/sandbox/sandbox-policy/src/index.ts:155-170`）；Codex 直接把 cwd 当唯一 workspace root 构造沙箱上下文（`codex-rs/core/src/config/mod.rs:4227`）；ZCode 对越界是**钳制**而不是拒绝——命令 `cd` 出界时 `nextWorkingDirectory = boundary.workspaceRoot` 并附 `Shell cwd was reset to …`（`apps/zcode-cli/packages/core/src/tool/handlers/bash-cwd-policy.ts:42-47`）；OpenCode 越界改为一次 `permission: "external_directory"` 询问（`packages/opencode/src/tool/external-directory.ts:36`） | **采纳**「默认目录同时就是边界」这条各家一致的隐含结论，但沿用 Relay 的边界机制而非上游进程内沙箱：默认目录没有本目录档位事实时按**只读**兜底（2026-10-18 用户选定），写仍逐次经 Gateway 与审批，绑定不授予能力（§18.1.4 既有口径）。**不采纳** ZCode 的执行中途钳制与 OpenCode 的越界询问：Relay 的作用域切换是显式命令，不在工具执行中改根 |
+| 上游有没有「无目录只拒副作用、对话照常」 | 五家均无该状态：都先保证有确切 cwd，再按动作判定权限。Codex 的 `is_projectless`（`codex-rs/config/src/state.rs` 一侧）指「cwd 下无项目标记」，用于信任判定，不是拒绝副作用 | Relay 的缺目录拒绝是自家设计，改动时须正面处理：不能因为「上游没有」就删掉它——它同时是[契约 01 §5](../../contracts/01-facts-and-ownership.md#5-projectgoal-与-inbox)「不让模型猜默认目录」的落地点；默认目录上线后，该拒绝只在「未配置默认目录」时保留 |
+
+**据此采用的最小形态**：Workspace 级一条显式配置的默认目录（经既有 `OpenWorkingDirectory` 登记，因而连带其 Project 与档位），新建会话在未显式选目录时于同一短事务内继承它并持久记录作用域来源；未配置、停用或项目归档时回落为「没有默认目录」，读取期仍不猜。责任与持久化归[运行架构 §2.8](../architecture/runtime-context.md#28-新会话的默认工作目录作用域2026-10-18已确认待实施)，不变量归[契约 01 §5](../../contracts/01-facts-and-ownership.md#5-projectgoal-与-inbox)，场景归[测试计划 §17.1.5](../testing/verification-plan.md#1715-未选目录时的默认工作目录2026-10-18已确认未实施)，实施切片与出口归[任务书](../../prompts/default-working-directory.md)。本轮只落文档与任务书，未写产品代码，成绩只归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
+
+**证据缺口**：① Codex 的在线配置参考已改为外链（`docs/config.md` 指向 developers.openai.com），「是否存在未收录的 cwd 类键」只能由 `config_toml.rs` 结构体字段否定，未对照在线全量文档；② Pi 为 cone 稀疏检出，不能断言全仓无目录配置键；③ Harness 的 `sandbox.workspaceRoot` 是否在终端用户设置界面暴露未见证据（`packages/settings/` 与该仓库桌面入口对该键零命中，其 `docs/config-catalog.md` 只称 deployment config）；④ ZCode 的 `lastWorkspaceSession`/`recentProjects` 属于记忆而非默认值配置，未与默认目录混淆。上游五家均缺少 Relay 的 Project/Task 账本、Gateway 准入与崩溃恢复语义，因此本节只支撑「默认作用域应存在且应可配」这一判断，**不能**证明本项目按同样方式实现也成立。
+
 ## 2. 机制采用表
 
 | 本项目问题 | 借鉴依据 | 本项目采用方式 | 不照搬的部分 | 验证依据 |

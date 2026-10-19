@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, Folder, Search, Target } from "lucide-react";
-import { RelayApiError, type RelayApiClient, type RelayAssistSession, type RelayProjectListItem, type RelayTaskSummary } from "../api/relayClient";
+import { ChevronDown, Folder, Plus, Search, Target } from "lucide-react";
+import { createCommandId, RelayApiError, type RelayApiClient, type RelayAssistSession, type RelayProjectListItem, type RelayTaskSummary } from "../api/relayClient";
 import { useActiveConversation } from "../lib/activeConversation";
 import { describeLiveError } from "../lib/liveErrors";
 import { resolveMotionPreference } from "../lib/motionPreference";
@@ -186,8 +186,8 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
   }, [client]);
 
   /**
-   * 行内命令之后重读这一条：改名、置顶、归档、重开都会让服务端多一个更新的事实，
-   * 左栏显示哪个版本必须由服务端说，不在本地拼一份看起来对的行。
+   * 行内命令之后按身份重读那一条：改名、置顶、归档、重开都重读这一条，分叉重读那次新建的
+   * 子会话（0113）。左栏显示哪个版本必须由服务端说，不在本地拼一份看起来对的行。
    * 归档的那条从活跃列表挪进归档区，重开的反向；读不回来时保留当前行，交给整列读取收敛。
    */
   const refreshSession = useCallback(async (sessionId: string) => {
@@ -206,13 +206,24 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
   }, [client]);
 
   function onRowChanged(sessionId: string, patch: SessionRowPatch) {
+    // 分叉不改这一行：源会话一行都没动，要读回来的是那次新建的子会话（0113）。
+    if (patch.kind === "fork") { void refreshSession(patch.forkedSessionId); return; }
+    // 删除后这条会话不再存在（ADR-027）：重读只会 404，直接从两个分区同时摘掉。
+    if (patch.kind === "delete") {
+      setLoaded((previous) => previous === null ? previous : { ...previous,
+        sessions: previous.sessions.filter((item) => item.id !== sessionId) });
+      setArchived((previous) => previous === null ? previous
+        : previous.filter((item) => item.id !== sessionId));
+      return;
+    }
     void refreshSession(sessionId);
-    // 归档/重开会让这一条换列表，其余三种只改这一行自身；都只重读这一条，不重置任务分页。
+    // 归档/重开会让这一条换列表，其余只改这一行自身；都只重读这一条，不重置任务分页。
     if (patch.kind !== "archive" && patch.kind !== "reopen") return;
     if (archived === null) void loadArchived();
   }
 
   // 会话创建/切换由协作页发布确切身份；只读回这一条，不重置已经加载的任务分页。
+  // `contextEpoch` 是同一会话换了目录或归属时的第二道触发：身份没变，只看身份就永远留在旧分组。
   useEffect(() => {
     if (active.taskId !== null || active.sessionId === null) return;
     const sessionId = active.sessionId;
@@ -225,7 +236,7 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
       if (current) setSessionsError("当前会话暂未能在近期工作中核对，请刷新重试。");
     });
     return () => { current = false; };
-  }, [client, active.taskId, active.sessionId]);
+  }, [client, active.taskId, active.sessionId, active.contextEpoch]);
 
   const tasks = loaded?.tasks ?? [];
   const loadedSessions = loaded?.sessions ?? [];
@@ -494,6 +505,17 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
       : `/agent?session=${encodeURIComponent(row.id)}${goalId ? `&goal=${encodeURIComponent(goalId)}` : ""}`);
     onOpen?.();
   }
+  /**
+   * 目录行悬停的「＋」：带着这一行的目录绝对路径去协作页开一段空对话。
+   *
+   * 与栏头「新对话」同一条语义——`?new=` 只打开空白输入，不提前建空会话（会话仍在首条发送时
+   * 建立）；差别是这里多带一个 `?dir=`，协作页在挂载那一拍按同一条 openFolder 打开它。
+   * 目录事实、草稿与首条命令仍然只有协作页一个 Owner，左栏不自己登记第二套作用域。
+   */
+  function newSessionInDirectory(rootPath: string) {
+    void navigate(`/agent?new=${encodeURIComponent(createCommandId())}&dir=${encodeURIComponent(rootPath)}`);
+    onOpen?.();
+  }
   function toggleGroup(key: string, open: boolean) {
     setCollapsed((current) => {
       const next = open ? current.filter((item) => item !== key) : current.includes(key) ? current : [...current, key];
@@ -554,6 +576,13 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
             <summary title={group.path ?? group.title}><ChevronDown aria-hidden="true" />
               {group.path !== null && <Folder aria-hidden="true" className="recent-work-group-folder" />}
               <span className="recent-work-group-title">{group.title}</span><span className="recent-work-group-count">{group.rows.length}</span></summary>
+            {/* 「＋」只在悬停/键盘聚焦这一行时出现，且是 summary 的兄弟节点：summary 里不许放可交互
+                内容（HTML 规定 summary 的后代不得是交互内容），套进去还会让点击与折叠互相吞。
+                没有目录依据的两段（未绑定目录／目录待核对）不长这颗键——它没有可打开的路径。 */}
+            {group.path !== null && <button type="button" className="recent-work-group-new"
+              title="在这个目录新建会话" aria-label={`在目录「${group.title}」新建会话`}
+              data-testid={`recent-work-new-in-${directoryId}`}
+              onClick={() => newSessionInDirectory(group.path!)}><Plus aria-hidden="true" /></button>}
             {renderRows(group.rows, `directory:${directoryId}`, { reorderable: true })}
           </details>)}
         </details>
@@ -603,17 +632,19 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
 }
 
 /**
- * 置顶优先，其余按更新时间倒序（0090）。
+ * 置顶优先，其余按最后消息时间倒序（0090 / 0111）——与服务端列表同一个口径。
  *
  * 服务端列表本来就是这个顺序，这里再排一次是因为行内命令会把一条会话插回数组头部：
  * 不在客户端保持同一顺序，置顶点了之后行会先跳到底下、下一次整列读取才回来。
+ * 活动键是 `lastMessageAt ?? createdAt`，对应服务端的 `coalesce(last_message_at, created_at)`：
+ * 还没说过话的新会话按创建时间留在原位，不因为这个键为空而沉底。
  */
 function compareSessions(a: RelayAssistSession, b: RelayAssistSession): number {
   if ((a.pinnedAt === null) !== (b.pinnedAt === null)) return a.pinnedAt === null ? 1 : -1;
   if (a.pinnedAt !== null && b.pinnedAt !== null && a.pinnedAt !== b.pinnedAt) {
     return b.pinnedAt.localeCompare(a.pinnedAt);
   }
-  return b.updatedAt.localeCompare(a.updatedAt);
+  return (b.lastMessageAt ?? b.createdAt).localeCompare(a.lastMessageAt ?? a.createdAt);
 }
 
 function sortSessions(sessions: readonly RelayAssistSession[]): RelayAssistSession[] {

@@ -34,6 +34,17 @@ export async function archiveProject(http: RelayHttp, input: { readonly projectI
   catch { throw new RelayTransportError("归档命令响应内容无法核对，请查询原 command ID 回执。"); }
 }
 
+/** 撤销归档（ADR-027 的反向命令）：只把 archived_at 写回 NULL，不恢复任何下游事实。 */
+export async function unarchiveProject(http: RelayHttp, input: { readonly projectId: string; readonly commandId: string; readonly expectedRevision: DecimalRevision }): Promise<RelayCommandEnvelope> {
+  const body = await http.request(http.workspacePath(
+    `/projects/${encodeURIComponent(input.projectId)}/unarchive`), {
+    method: "POST", body: JSON.stringify({ command_id: input.commandId,
+      expected_revision: input.expectedRevision })
+  }, 200);
+  try { return commandEnvelopeFrom(body); }
+  catch { throw new RelayTransportError("撤销归档的命令响应无法核对，请查询原 command ID 回执。"); }
+}
+
 export async function getViewConfiguration(http: RelayHttp, projectId: string): Promise<RelayViewConfiguration> {
   return viewConfigurationFrom(await http.request(http.workspacePath(
     `/projects/${encodeURIComponent(projectId)}/view-configuration`)));

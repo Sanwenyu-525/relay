@@ -4,7 +4,8 @@ import type { DbExecutor } from '../infrastructure/database.js';
 import type {
   GatewayCapability, GatewayConnectionRow, GatewayDecision, GatewayPermissionPolicyRow,
   GatewayPermissionVersionRow, ImportJobRow, InvocationAttemptRow, InvocationStatus,
-  LogicalOperationRow, ManagedResourceRow, ResourceClaimRow, ResourceClaimStatus,
+  LocalDirectoryAccessRow, LocalDirectoryWriteTier, LogicalOperationRow, ManagedResourceRow,
+  ResourceClaimRow, ResourceClaimStatus,
 } from '../infrastructure/database-schema.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import { requireRow } from '../shared/sql-rows.js';
@@ -63,6 +64,39 @@ export class GatewayRepository {
     return result.rows.map((row) => row.capability_key);
   }
 
+  /** App management pointers only; Gateway connections and policies remain the authorization truth. */
+  async readLocalDirectoryAccess(resourceId: string, forUpdate = false): Promise<LocalDirectoryAccessRow | undefined> {
+    const query = forUpdate
+      ? sql<LocalDirectoryAccessRow>`select * from local_directory_access where resource_id = ${resourceId} for update`
+      : sql<LocalDirectoryAccessRow>`select * from local_directory_access where resource_id = ${resourceId}`;
+    return (await query.execute(this.db)).rows[0];
+  }
+
+  async insertLocalDirectoryAccess(input: { resourceId: string; writeTier: LocalDirectoryWriteTier;
+    readConnectionId: string; writeConnectionId: string | null; policyIds: JsonObject }): Promise<LocalDirectoryAccessRow> {
+    const result = await sql<LocalDirectoryAccessRow>`
+      insert into local_directory_access
+        (resource_id, write_tier, read_connection_id, write_connection_id, policy_ids)
+      values (${input.resourceId}, ${input.writeTier}, ${input.readConnectionId}, ${input.writeConnectionId},
+        ${JSON.stringify(input.policyIds)}::jsonb)
+      returning *
+    `.execute(this.db);
+    return requireRow(result.rows, 'insert local directory access pointers');
+  }
+
+  async updateLocalDirectoryAccess(input: { resourceId: string; expectedRevision: bigint;
+    writeTier: LocalDirectoryWriteTier; writeConnectionId: string | null;
+    policyIds: JsonObject }): Promise<LocalDirectoryAccessRow | undefined> {
+    const result = await sql<LocalDirectoryAccessRow>`
+      update local_directory_access set write_tier = ${input.writeTier},
+        write_connection_id = ${input.writeConnectionId}, policy_ids = ${JSON.stringify(input.policyIds)}::jsonb,
+        revision = revision + 1, updated_at = now()
+      where resource_id = ${input.resourceId} and revision = ${input.expectedRevision}
+      returning *
+    `.execute(this.db);
+    return result.rows[0];
+  }
+
   async insertPolicy(input: { id: string; workspaceId: string; projectId: string; capability: GatewayCapability;
     actionType: string; targetPrefix: string; decision: GatewayDecision; maxPayloadBytes: number }): Promise<GatewayPermissionPolicyRow> {
     const root = await sql<GatewayPermissionPolicyRow>`
@@ -117,6 +151,19 @@ export class GatewayRepository {
         revision = revision + 1, updated_at = now() where id = ${id} returning *
     `.execute(this.db);
     return requireRow(result.rows, 'revoke Gateway policy');
+  }
+
+  /** Includes superseded versions so default directory setup cannot recreate a deliberately removed scope. */
+  async listPolicyTargetHistory(workspaceId: string, projectId: string,
+    capability: GatewayCapability, actionType: string): Promise<readonly string[]> {
+    const result = await sql<{ target_prefix: string }>`
+      select distinct v.target_prefix
+      from gateway_permission_policies p
+      join gateway_permission_versions v on v.policy_id = p.id
+      where p.workspace_id = ${workspaceId} and p.project_id = ${projectId}
+        and v.capability_key = ${capability} and v.action_type = ${actionType}
+    `.execute(this.db);
+    return result.rows.map((row) => row.target_prefix);
   }
 
   async listActivePolicies(workspaceId: string, projectId: string, capability: GatewayCapability, actionType: string): Promise<readonly ActivePolicy[]> {

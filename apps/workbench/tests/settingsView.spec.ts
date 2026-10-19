@@ -3,6 +3,7 @@ import { act } from "react";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { resolveVerificationState, type ModelVerificationStateKind }
   from "../src/views/SettingsView";
+import { PLAN_EXECUTION_STORAGE_KEY } from "../src/lib/planExecutionPreference";
 import { DomWrapper, flush, mountWorkbench } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
@@ -10,7 +11,8 @@ const workspaceId = "11111111-1111-4111-8111-111111111111";
 const root = `${baseUrl}/api/v1/workspaces/${workspaceId}`;
 let unmount: (() => void) | null = null;
 
-afterEach(() => { unmount?.(); unmount = null; resetRelayConnectionForTest(); vi.unstubAllGlobals(); });
+afterEach(() => { unmount?.(); unmount = null; resetRelayConnectionForTest(); vi.unstubAllGlobals();
+  localStorage.removeItem(PLAN_EXECUTION_STORAGE_KEY); });
 function connect() { activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-bearer-token-0123456789abcdef" }); }
 function response(body: unknown, status = 200): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
@@ -255,8 +257,53 @@ describe("设置页模型端口状态", () => {
     expect(text).toContain("同一事项只提醒一次");
     expect(text).not.toContain("合并为一条通知");
     expect(text).toContain("暂不可修改");
-    // 不提供假开关：执行策略面板不出现任何表单控件。
-    expect(mounted.wrapper.get("#settings-panel-execution").findAll("input, select, textarea")).toHaveLength(0);
+    // 不提供假开关：尚无写接口的语言与通知仍只有只读说明；唯一真正接线的控件是
+    // 「计划执行方式」（本设备偏好），它必须出现在执行策略面板里。
+    const controls = mounted.wrapper.get("#settings-panel-execution").findAll("select");
+    expect(controls).toHaveLength(1);
+    expect(controls[0]?.attributes("data-testid")).toBe("settings-plan-execution-mode");
+  });
+
+  it("计划执行方式：草稿不立即生效，保存后仅本设备保留，损坏值回落自动执行", async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="settings-group-execution"]').trigger("click");
+    const mode = mounted.wrapper.get('[data-testid="settings-plan-execution-mode"]');
+    expect((mode.element as HTMLSelectElement).value).toBe("AUTO");
+    await mode.setValue("CONFIRM");
+    expect(localStorage.getItem(PLAN_EXECUTION_STORAGE_KEY)).toBeNull();
+    await mounted.wrapper.get('[data-testid="plan-execution"] form').trigger("submit");
+    expect(localStorage.getItem(PLAN_EXECUTION_STORAGE_KEY)).toBe("CONFIRM");
+    expect(mounted.wrapper.get('[data-testid="plan-execution"]').text()).toContain("仅在本设备生效");
+    // 不向服务端打听偏好：这个设置只写本设备存储。
+    expect(fetchMock).not.toHaveBeenCalled();
+    mounted.unmount(); unmount = null;
+    const reloaded = await mountWorkbench("/settings"); unmount = reloaded.unmount;
+    await reloaded.wrapper.get('[data-testid="settings-group-execution"]').trigger("click");
+    expect((reloaded.wrapper.get('[data-testid="settings-plan-execution-mode"]').element as HTMLSelectElement).value).toBe("CONFIRM");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("计划执行方式：本地值无法识别时回落自动执行，不猜成某一种方式", async () => {
+    localStorage.setItem(PLAN_EXECUTION_STORAGE_KEY, "MAYBE");
+    const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="settings-group-execution"]').trigger("click");
+    expect((mounted.wrapper.get('[data-testid="settings-plan-execution-mode"]').element as HTMLSelectElement).value).toBe("AUTO");
+  });
+
+  it("计划执行方式：存储不可写时保留旧值并显示失败", async () => {
+    localStorage.setItem(PLAN_EXECUTION_STORAGE_KEY, "AUTO");
+    const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="settings-group-execution"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="settings-plan-execution-mode"]').setValue("CONFIRM");
+    const write = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("quota"); });
+    await mounted.wrapper.get('[data-testid="plan-execution"] form').trigger("submit");
+    expect(mounted.wrapper.get('[role="alert"]').text()).toContain("设置未保存");
+    expect(localStorage.getItem(PLAN_EXECUTION_STORAGE_KEY)).toBe("AUTO");
+    write.mockRestore();
+    await mounted.wrapper.get('[data-testid="plan-execution"] form').trigger("submit");
+    expect(mounted.wrapper.find('[role="alert"]').exists()).toBe(false);
+    expect(localStorage.getItem(PLAN_EXECUTION_STORAGE_KEY)).toBe("CONFIRM");
   });
 
   it("live 显示真实 Provider 的模型与端点，服务端密钥字段即使出现也不渲染", async () => {

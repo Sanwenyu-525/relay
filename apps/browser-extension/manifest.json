@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Relay Agent Browser Bridge",
+  "version": "0.1.0",
+  "description": "Relay 桌面端的浏览器桥接扩展：把 Agent 的页面操作经本地 WebSocket 转成 chrome.debugger 调用，只作用于 Agent 自己的标签页。",
+  "minimum_chrome_version": "116",
+  "permissions": ["debugger", "tabs", "storage", "alarms"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "Relay 浏览器桥接" },
+  "options_page": "options.html"
+}

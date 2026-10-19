@@ -107,9 +107,10 @@ export function pageText(wrapper: DomWrapper): string {
 /**
  * 打开一个工作目录（协作页 §3.3 之后的唯一路径）。
  *
- * 目录控件从消息区顶部的折叠块搬进了细条上的「更换目录」对话框，而 AppDialog 走 portal
- * 挂在 body 上，所以这里用 document 查询，而不是 mountWorkbench 返回的容器。
- * 选定后对话框会自行关闭（模态框留着会挡住刚更新的细条），因此调用返回时页面已可交互。
+ * 目录控件从消息区顶部的折叠块搬进细条上的「更换目录」浮层（2026-10-18：原先是 40rem
+ * 居中弹窗，用户指令「弹窗太大了」后改成锚在目录名上方的紧凑面板）。浮层挂在细条子树里，
+ * 但这里仍按 body 查：这些控件的可达性与位置无关，用 document 查询能同时覆盖浮层与弹窗。
+ * 选定后浮层自行收起（留着会挡住刚更新的细条），因此调用返回时页面已可交互。
  */
 export async function openWorkingDirectory(root: string): Promise<void> {
   const trigger = document.querySelector<HTMLElement>('[data-testid="folder-scope-change"]');
@@ -117,7 +118,7 @@ export async function openWorkingDirectory(root: string): Promise<void> {
   await act(async () => { trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
   await flush();
   const input = document.querySelector<HTMLInputElement>('[data-testid="folder-manual-root"]');
-  if (input === null) throw new Error('DOM test selector not found: [data-testid="folder-manual-root"]（更换目录对话框未打开，或本机可用原生目录选择器）');
+  if (input === null) throw new Error('DOM test selector not found: [data-testid="folder-manual-root"]（更换目录浮层未打开，或本机可用原生目录选择器）');
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, root);
     input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -129,9 +130,11 @@ export async function openWorkingDirectory(root: string): Promise<void> {
   await flush(80);
 }
 
-/** 目录作用域细条上的当前目录名；未选择目录时返回「未选择目录」。 */
+/** 目录作用域细条上的当前目录名；还没有目录时返回动作「选择工作目录」。
+ *  2026-10-18 两行合并后目录名本身就是「更换目录」入口（folder-scope-change），
+ *  名字仍读自这一颗键的文本。 */
 export function folderStripName(): string {
-  return document.querySelector('[data-testid="folder-scope-options"]')?.textContent?.trim() ?? "";
+  return document.querySelector('[data-testid="folder-scope-change"]')?.textContent?.trim() ?? "";
 }
 
 /**
@@ -146,7 +149,7 @@ export async function clickPortal(testId: string): Promise<void> {
   await act(async () => { target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
 }
 
-/** 打开「更换目录」框（portal 里的模态框）。 */
+/** 打开细条上的「更换目录」浮层（非模态，挂在细条子树里）。 */
 export async function openFolderDialog(): Promise<void> {
   const trigger = document.querySelector<HTMLElement>('[data-testid="folder-scope-change"]');
   if (trigger === null) throw new Error('DOM test selector not found: [data-testid="folder-scope-change"]');
@@ -154,7 +157,7 @@ export async function openFolderDialog(): Promise<void> {
   await flush();
 }
 
-/** 细条上的归属文案（「已归入项目：X」/「未归属」）。 */
+/** 细条上的归属文案（「已归入项目：X」/「未归入项目」）。 */
 export function folderStripAssociation(): string {
   return document.querySelector('[data-testid="folder-scope-association"]')?.textContent?.trim() ?? "";
 }

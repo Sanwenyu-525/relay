@@ -8,6 +8,7 @@ import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
 import { runIdempotentCommand, type CommandOutcome } from './command.js';
 import { DomainError, invalidTransition, resourceNotFound, revisionConflict } from './domain-error.js';
 import { lockTaskAndRun } from './lock-task-run.js';
+import { releaseComputerDesktopLeaseAtSafeBoundary } from './computer-desktop-lease.js';
 import { requireRevision } from './revisions.js';
 import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
 import { readFrozenActionOperationIds } from '../workflow/execution-contract.js';
@@ -92,8 +93,8 @@ export async function requestRunControl(db: DbExecutor, input: {
  *
  * 与 `requestRunControl` 的差别：Esc 来自桌面壳全局快捷键，调用方（Tauri 宿主）
  * 拿不到 Task/Run 的乐观锁修订号，因此这里走锁内入队（同 `enqueueControlLocked`），
- * 不做修订比对；重复按 Esc 由「已有 PENDING 控制即冲突」幂等挡住，调用方把
- * CONTROL_CONFLICT 视为「已在退出中」的成功。
+ * 不做修订比对；重复按 Esc 复用已有 PENDING CANCEL。取消入队与当前操控 Run 的
+ * 状态 CAS 在同一事务，旧快照不匹配时回滚，不能取消已经不在展示行里的旧 Run。
  *
  * Esc 语义是终止整个 Run（CANCEL，终态），不是暂停：用户按 Esc 表达的是
  * 「停止操控我的电脑」，后续 Computer 动作与本次执行一并终止。Worker 侧
@@ -108,7 +109,13 @@ export async function requestComputerControlStop(db: DbExecutor, input: {
     if (task.executor_run_id !== run.id || task.ownership_epoch !== run.ownership_epoch) {
       throw invalidTransition('Run 未持有该 Task 的执行权，无法执行 Esc 退出。');
     }
-    return controlDto(await enqueueControlLocked(repositories, { task, run, type: 'CANCEL' }));
+    const pending = await repositories.recovery.lockPendingControl(run.id);
+    const control = pending?.type === 'CANCEL' ? pending
+      : await enqueueControlLocked(repositories, { task, run, type: 'CANCEL' });
+    if (!await repositories.computerControl.markStopRequested(run.id)) {
+      throw invalidTransition('当前电脑操控已变化，请重新读取后再停止。');
+    }
+    return controlDto(control);
   });
 }
 
@@ -180,6 +187,7 @@ export async function applySafeControl(db: DbExecutor, runId: string): Promise<C
       await repositories.toolCalls.rejectUndispatchedForTerminalRun(run.id, run.status);
       const rejected = await repositories.recovery.decideControl(pending.id, 'REJECTED', { reason: 'RUN_TERMINAL_OR_STALE' });
       if (rejected === undefined) throw new Error('control reject CAS failed');
+      await releaseComputerDesktopLeaseAtSafeBoundary(repositories, run.id, true);
       return controlDto(rejected);
     }
     if (pending.type === 'PAUSE') {
@@ -208,6 +216,7 @@ export async function applySafeControl(db: DbExecutor, runId: string): Promise<C
       : { run_status: pending.type === 'PAUSE' ? 'PAUSED' : 'CANCELLED', type: pending.type };
     const decided = await repositories.recovery.decideControl(pending.id, 'APPLIED', resultRef);
     if (decided === undefined) throw new Error('control apply CAS failed');
+    await releaseComputerDesktopLeaseAtSafeBoundary(repositories, run.id, true);
     await repositories.activities.insertActivityRecord({ id: randomUUID(), actorKind: 'SYSTEM',
       workspaceId: run.workspace_id, runId: run.id,
       actorRef: `run:${run.id}`, commandId: null, projectId: task.project_id, taskId: task.id,

@@ -6,9 +6,9 @@ import { DomWrapper, flush, folderStripName, mountWorkbench } from "./mountApp";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const sessionId = "66666666-6666-4666-8666-666666666666";
 const root = `/api/v1/workspaces/${workspaceId}`;
-/* 顶栏改左右两翼后，工作空间级讨论不再有「新建会话」（与左栏「新对话」重复）；
-   这条入口只剩任务/目录归属一条路径，所以「会话内新建」的两个不变量改在有归属的
-   顶栏上验证：同一份 deferSessionCreation 与首条命令 owner，换入口不换语义。 */
+/* 顶栏右翼的「新建会话」已整条删除（2026-10-17 工作空间级、2026-10-18 任务/目录归属，均为
+   用户指令）：作用域内另开会话只剩目录细条浮层里的「新对话」，所以「会话内新建」的不变量改在
+   那条路径上验证：同一份 deferSessionCreation 与首条命令 owner，换入口不换语义。 */
 const taskId = "33333333-3333-4333-8333-333333333333";
 const taskProjectId = "22222222-2222-4222-8222-222222222222";
 const taskSessionId = "77777777-7777-4777-8777-777777777777";
@@ -133,9 +133,10 @@ describe("新对话直接起步", () => {
     // 目录作用域已收成常驻细条（不再是要先展开的 details）；栏底「查找更多任务 / 会话」
     // 入口已按用户决定删除（2026-10-16 第四轮），左栏行是任务与会话的唯一导航入口。
     expect(view.wrapper.get('[data-testid="folder-scope-strip"]').exists()).toBe(true);
-    expect(folderStripName()).toBe("未选择目录");
-    // 写入档位入口不因未选目录而消失（用户实机截图回归）：显示未绑定态而不是整颗芯片隐藏。
-    expect(view.wrapper.get('[data-testid="write-permission-chip"]').text()).toContain("未选择目录");
+    expect(folderStripName()).toBe("选择工作目录");
+    // 写入档位入口不因未选目录而消失（用户实机截图回归）：显示「未开放写入」这一档
+    // 而不是整颗芯片隐藏；目录状态由上方细条承担（2026-10-18 用户指认芯片只读权限）。
+    expect(view.wrapper.get('[data-testid="write-permission-chip"]').text()).toContain("未开放写入");
     expect(view.wrapper.find('[data-testid="recent-work-find-more"]').exists()).toBe(false);
     expect(view.posts).toHaveLength(0);
   });
@@ -175,10 +176,12 @@ describe("新对话直接起步", () => {
   });
 
   it("会话内新建同样先打开输入框，不提前创建空会话", async () => {
-    // 有任务归属才有这颗入口：工作空间级讨论的「新建会话」已按用户指令删除（与左栏「新对话」重复）。
+    // 顶栏右翼的「新建会话」已按用户指令删除（2026-10-18）：作用域内另开会话只剩目录细条
+    // 浮层这一条路径，它和左栏「新对话」共用同一个离开保护 Owner，换入口不换语义。
     const view = await mount(`/agent?work=${taskId}&session=${taskSessionId}`, false, undefined, true);
-    await expect(view.wrapper.find('[data-testid="assist-new-session"]').exists()).toBe(true);
-    await view.wrapper.get('[data-testid="assist-new-session"]').trigger("click"); await flush();
+    await view.wrapper.get('[data-testid="folder-scope-change"]').trigger("click"); await flush();
+    await expect(view.wrapper.find('[data-testid="collab-new-conversation"]').exists()).toBe(true);
+    await view.wrapper.get('[data-testid="collab-new-conversation"]').trigger("click"); await flush();
     expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(true);
     expect(view.posts).toHaveLength(0);
   });

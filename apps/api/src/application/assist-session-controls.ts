@@ -1,21 +1,27 @@
+import { randomUUID } from 'node:crypto';
+
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { AssistSessionRow, AssistSessionStatus } from '../infrastructure/database-schema.js';
-import { checkRequiredText, normalizeText } from '../shared/text.js';
+import { checkRequiredText, normalizeText, TEXT_LIMITS } from '../shared/text.js';
 import { toDecimalString } from '../shared/decimal.js';
-import { httpCommandScopeKey } from './actor.js';
+import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
 import { runIdempotentCommand, type CommandOutcome } from './command.js';
-import { invalidTransition, resourceNotFound, revisionConflict, validationFailed } from './domain-error.js';
+import { assistSessionDeleteBlocked, invalidTransition, resourceNotFound, revisionConflict, validationFailed } from './domain-error.js';
 import { requireRevision } from './revisions.js';
 import type { Repositories } from './unit-of-work.js';
 
 /**
- * 会话行内控制的唯一应用 Owner（协作页左栏 §28.1，迁移 0090 / 0104）。
+ * 会话行内控制的唯一应用 Owner（协作页左栏 §28.1，迁移 0090 / 0104 / 0113）。
  *
  * 这几件事改的都是 `assist_sessions` 行**自身**的几项事实：标题、置顶排序键、未读标记、归档状态。
  * 它们不建 Task/Run、不发模型或工具调用、不写任何业务事实，也不改会话身份
  * （`conversation_mode` 与人设快照仍按 0059/0072 冻结，改名不等于改身份）。
  * 与既有 Assist 命令一致，审计留在命令回执里，不另写 activity 事件——绑定目录那批
- * 会话级命令也没有 activity 记录，这里不引入第二套口径。
+ * 会话级命令也没有 activity 记录，这里不引入第二套口径。唯一的例外是物理删除：
+ * 会话行连同消息一起消失，回执之外再写一条 append-only 的 `ASSIST_SESSION_DELETED`。
+ *
+ * 分叉是这里唯一一条**新建行**的命令：它不改源会话，而是复制出一条子会话连它的历史输入快照
+ * （见 `forkAssistSession`）。源行的修订、标题与导航键都保持原样。
  *
  * 幂等与并发：同一 `command_id` + 同载荷重放返回当时结果；`expected_revision` 不匹配即
  * 409 `REVISION_CONFLICT`，界面重读后由人重新决定，绝不静默覆盖或换命令 ID 重试。
@@ -55,6 +61,15 @@ export type AssistSessionUnreadResult = {
   readonly unread_at: string | null;
   readonly revision: string;
   readonly updated_at: string;
+};
+
+export type AssistSessionForkResult = {
+  readonly session_id: string;
+  readonly title: string;
+  readonly revision: string;
+  readonly updated_at: string;
+  /** 这次复制进子会话的历史轮数；空讨论分叉即 0，不是失败。 */
+  readonly copied_messages: number;
 };
 
 export interface RenameAssistSessionInput {
@@ -170,6 +185,28 @@ export interface ArchiveAssistSessionInput {
   readonly expectedRevision: string;
 }
 
+export interface ForkAssistSessionInput {
+  readonly workspaceId: string;
+  readonly sessionId: string;
+  readonly commandId: string;
+  readonly expectedRevision: string;
+}
+
+export interface DeleteAssistSessionInput {
+  readonly workspaceId: string;
+  readonly sessionId: string;
+  readonly commandId: string;
+  readonly expectedRevision: string;
+}
+
+export type AssistSessionDeleteResult = {
+  readonly session_id: string;
+  readonly revision: string;
+  readonly deleted_messages: number;
+  readonly deleted_attachments: number;
+  readonly deleted_at: string;
+};
+
 /**
  * 归档：会话退出默认列表、拒收新消息，历史全部保留。
  *
@@ -225,6 +262,132 @@ export async function reopenAssistSession(db: DbExecutor,
       return statusResult(appliedSession(session, expectedRevision, updated));
     },
   });
+}
+
+/**
+ * 物理删除一条会话（ADR-027，迁移 0116）。这是本模块唯一**不可撤销**的命令。
+ *
+ * 与归档相反：归档保留全部历史并可用「重开」撤销；删除按子 → 父顺序删掉会话自有的账本，
+ * 会话行本身也消失，没有回收站、不提供恢复命令。删除前先过两道栅栏——在途消息（与归档
+ * 同一条）和跨对象引用（`listDeleteBlockers`），任何一道命中都整条拒绝、零删除。
+ *
+ * 审计：会话行与消息都不再存在，命令回执仍留在 `command_receipts`；另写一条 append-only 的
+ * `activity_records`，这是该会话存在过的唯一痕迹。`fact_refs` 只记身份、修订与删除行数，
+ * 不复制标题或正文——用户要求删除之后，审计不应该变成第二份保存。
+ */
+export async function deleteAssistSession(db: DbExecutor,
+  input: DeleteAssistSessionInput): Promise<CommandOutcome<AssistSessionDeleteResult>> {
+  const expectedRevision = requireRevision(input.expectedRevision, 'expected_revision');
+  return runIdempotentCommand<AssistSessionDeleteResult>(db, {
+    scopeKey: httpCommandScopeKey(input.workspaceId),
+    commandId: input.commandId,
+    commandType: 'DeleteAssistSession',
+    target: { session_id: input.sessionId },
+    body: { expected_revision: expectedRevision.toString() },
+    execute: async (repositories) => {
+      const session = await requireSessionInWorkspace(repositories, input.workspaceId, input.sessionId);
+      requireExpectedRevision(session, expectedRevision);
+      if (await repositories.assist.hasInflightMessages(session.id)) {
+        throw invalidTransition('这段讨论还有消息在途，等它结束再删除。', { sessionId: session.id });
+      }
+      const blockers = await repositories.assist.listDeleteBlockers(session.id);
+      if (blockers.length > 0) throw assistSessionDeleteBlocked(blockers);
+      const deleted = await repositories.assist.deleteSession(session.id, expectedRevision);
+      if (deleted === undefined) {
+        throw revisionConflict({ entityType: 'Assist session',
+          expectedRevision: expectedRevision.toString(), actualRevision: session.revision.toString() });
+      }
+      const deletedAt = new Date();
+      await repositories.activities.insertActivityRecord({
+        id: randomUUID(), workspaceId: input.workspaceId,
+        actorKind: 'HUMAN', actorRef: LOCAL_ACTOR_REF,
+        commandId: input.commandId, projectId: session.project_id, taskId: session.task_id,
+        eventType: 'ASSIST_SESSION_DELETED',
+        factRefs: { session_id: session.id,
+          previous_revision: expectedRevision.toString(),
+          deleted_messages: deleted.messages,
+          deleted_attachments: deleted.attachments },
+      });
+      return { session_id: session.id, revision: expectedRevision.toString(),
+        deleted_messages: deleted.messages, deleted_attachments: deleted.attachments,
+        deleted_at: deletedAt.toISOString() };
+    },
+  });
+}
+
+/**
+ * 分叉一条会话（0113）：把这段讨论连历史复制成一条新会话，两条此后各自独立生长。
+ *
+ * 复制的是**输入快照**：会话身份（模式、人设快照、是否续读、归属项目与任务、绑定目录）整行搬运，
+ * 已完成的消息与图片附件按新序号搬进子会话。刻意不搬的是过程与结局类事实——服务商请求号、
+ * token 用量、领取 worker、错误码、逐候选尝试状态：子会话没有发生过那次外呼，留着就是伪造。
+ * 模型选择快照也一并不搬：0098 要求它与尝试状态成对非空，而复制过去的历史不会再被生成路径
+ * 读取，单搬快照既撞库约束又只是在子会话里留下一份没有读方的排队期事实。
+ * 提案（assist_proposals）也不搬：接受一次会写业务事实，同一条提案不能在两条会话里各接受一次。
+ * 置顶与未读一律归零——那是这一行自己的导航偏好，不是历史。
+ *
+ * 源会话一行都不改，也**不推进它的修订**：分叉不是对父会话的一次改写。`expected_revision`
+ * 仍然核对，它挡的是「界面看的还是旧事实就按下分叉」（例如父会话其实已归档）。
+ *
+ * 在途消息挡住分叉：正在生成的那一轮既不该进历史，也不该让子会话从半截开始。理由与归档同一句
+ * ——控制意图必须持久化，在途动作未安全处理前不宣称「这一段已经定稿」。
+ */
+export async function forkAssistSession(db: DbExecutor,
+  input: ForkAssistSessionInput): Promise<CommandOutcome<AssistSessionForkResult>> {
+  const expectedRevision = requireRevision(input.expectedRevision, 'expected_revision');
+  return runIdempotentCommand<AssistSessionForkResult>(db, {
+    scopeKey: httpCommandScopeKey(input.workspaceId),
+    commandId: input.commandId,
+    commandType: 'ForkAssistSession',
+    target: { session_id: input.sessionId },
+    body: { expected_revision: expectedRevision.toString() },
+    execute: async (repositories) => {
+      const source = await requireEditableSession(repositories, input.workspaceId, input.sessionId,
+        expectedRevision, '分叉');
+      if (await repositories.assist.hasInflightMessages(source.id)) {
+        throw invalidTransition('这段讨论还有消息在途，等它结束再分叉。', { sessionId: source.id });
+      }
+      const child = await repositories.assist.insertForkedSession({ id: randomUUID(),
+        fromSessionId: source.id, title: nextForkTitle(source.title) });
+      if (child === undefined) throw resourceNotFound('Assist session');
+      const history = await repositories.assist.listForkableMessageIds(source.id);
+      for (const [index, message] of history.entries()) {
+        const childMessageId = randomUUID();
+        const copied = await repositories.assist.copyMessageInto({ sourceMessageId: message.id,
+          parentSessionId: source.id, childSessionId: child.id, childMessageId,
+          seq: BigInt(index + 1) });
+        if (!copied) throw resourceNotFound('Assist message');
+        for (const sourceAttachmentId of await repositories.assist
+          .listAttachmentIdsByMessage(message.id)) {
+          if (!await repositories.assist.copyAttachmentInto({ sourceAttachmentId,
+            parentSessionId: source.id, childSessionId: child.id, childMessageId,
+            childAttachmentId: randomUUID() })) throw resourceNotFound('Assist attachment');
+        }
+      }
+      // 子会话的这些行确实刚落库，活动排序键按「消息落库即活动」这一条口径推进一次；
+      // 父会话的 last_message_at 不受影响——分叉不是一次活动。空会话不分叉出「说过话」的假事实。
+      if (history.length > 0) await repositories.assist.touchLastMessage(child.id);
+      return forkResult(child, history.length);
+    },
+  });
+}
+
+/**
+ * 分叉标题由服务端决定，不让界面各写一套「（1）」：末位已经是「（n）」（全角或半角都认）
+ * 就把 n 加一，否则追加「（1）」。编号跟着**被分叉那一条自己的标题**走，因此同一源会话
+ * 分两次都是「（1）」（标题本来就不是唯一键），分叉一条「（1）」得到的才是「（2）」。
+ * 不按兄弟数量排号：那要在没有索引的来源列上反查子会话，只为一个显示编号不值得。
+ * 上限仍守标题这一档（200）：超长时截的是正文前缀，编号永远完整留在末尾。
+ */
+export function nextForkTitle(title: string): string {
+  const matched = /[（(](\d+)[）)]\s*$/u.exec(title);
+  const suffix = `（${matched === null ? 1 : Number(matched[1]) + 1}）`;
+  const chars = Array.from(matched === null ? title : title.slice(0, matched.index));
+  // 按完整码点退让：既守住标题这一档的长度上限，也不会把一个 emoji 切成半个。
+  while (chars.length > 0 && chars.join('').length + suffix.length > TEXT_LIMITS.title) {
+    chars.pop();
+  }
+  return `${chars.join('')}${suffix}`;
 }
 
 /** 行锁读取 + 作用域核对：跨 Workspace 的会话按不可见处理（404），与既有会话命令一致。 */
@@ -287,4 +450,9 @@ function unreadResult(row: AssistSessionRow): AssistSessionUnreadResult {
   return { session_id: row.id, unread: row.unread_at !== null,
     unread_at: row.unread_at?.toISOString() ?? null,
     revision: toDecimalString(row.revision), updated_at: row.updated_at.toISOString() };
+}
+
+function forkResult(row: AssistSessionRow, copiedMessages: number): AssistSessionForkResult {
+  return { session_id: row.id, title: row.title, revision: toDecimalString(row.revision),
+    updated_at: row.updated_at.toISOString(), copied_messages: copiedMessages };
 }

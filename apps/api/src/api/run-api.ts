@@ -25,6 +25,7 @@ import {
 } from './domain-schemas.js';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
 import { sendRunEventStream } from './run-events-api.js';
+import { sendRunDraftPreviewStream } from './preview-events-api.js';
 
 const draftPreviewDto = Type.Object({
   run_id: Type.String({ format: 'uuid' }), run_status: Type.String(),
@@ -150,6 +151,15 @@ export function registerRunRoutes(app: FastifyInstance, dependencies: RouteDepen
     const params = request.params as { workspace_id: string; run_id: string };
     return sendRunEventStream(request, reply, dependencies.database.executor,
       params.workspace_id, params.run_id);
+  });
+
+  // 生成中草稿 SSE（§10.59）：帧体与 GET draft-preview 同形；每次推送前重新授权。
+  app.get('/runs/:run_id/draft-preview/events', {
+    schema: { params: WorkspaceRunParamsSchema },
+  }, async (request, reply) => {
+    const params = request.params as { workspace_id: string; run_id: string };
+    return sendRunDraftPreviewStream(request, reply, dependencies.database.executor,
+      dependencies.storage, params.workspace_id, params.run_id);
   });
 
   app.post('/runs/:run_id/control-requests', {

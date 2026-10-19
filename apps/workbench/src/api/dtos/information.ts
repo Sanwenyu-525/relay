@@ -60,7 +60,7 @@ export interface RelayKnowledgeCurationCandidate {
 
 export interface RelayInterventionItem {
   readonly itemKey: string; readonly changeKey: string;
-  readonly kind: "REVIEW" | "LOCK_CONFLICT" | "RUN_FAILED" | "UNKNOWN";
+  readonly kind: "REVIEW" | "LOCK_CONFLICT" | "RUN_FAILED" | "UNKNOWN" | "SCHEDULED_TASK_BLOCKED";
   readonly title: string; readonly reason: string; readonly targetUrl: string;
 }
 

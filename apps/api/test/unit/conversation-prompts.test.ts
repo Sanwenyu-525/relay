@@ -86,6 +86,8 @@ function everyCoreBearingTemplate(): readonly { readonly name: string;
     for (const action of ['INSPECT', 'MODIFY', null] as const) {
       templates.push({ name: `method:${method.id}@${method.version}:${String(action)}`,
         system: methodSystemPrompt(method, action) });
+      templates.push({ name: `method-tools:${method.id}@${method.version}:${String(action)}`,
+        system: methodSystemPrompt(method, action, true) });
     }
   }
   templates.push({ name: 'assistant:readonly',
@@ -225,6 +227,48 @@ test('method rounds follow the action: MODIFY plans changes, INSPECT and null on
     assert.ok(modify.includes(title),
       `${method.id} MODIFY must keep the frozen title and version line`);
   }
+});
+
+test('method MODIFY with read tools emits the execution envelope after the frozen instructions', () => {
+  const executableLine = '本次是方法驱动的修改轮，你**不直接写文件**';
+  const readonlyLine = '本次是只读方法轮：不创建 Run、不修改任何业务事实、不判定 Task PASS，也不声称已经执行了任何修改。';
+  for (const method of BUILTIN_METHOD_REGISTRY.methods) {
+    const system = methodSystemPrompt(method, 'MODIFY', true);
+    // 用户明确要求修改、且本轮真有读取工具：不再给「只读方法轮」的方案，而是产出候选。
+    assert.ok(!system.includes(readonlyLine),
+      `${method.id} MODIFY with tools must not claim a read-only method round`);
+    assert.ok(system.includes(executableLine),
+      `${method.id} MODIFY with tools must say the Run performs the actual write`);
+    assert.ok(system.includes('writes_files'), `${method.id} must emit the write intent`);
+    assert.ok(system.includes('"file_changes":[{"path":"受管根内的相对路径","action":"CREATE|MODIFY|DELETE"}]'),
+      `${method.id} must declare file changes without content`);
+    assert.ok(system.includes('maintenance 一律填 null：方法轮不维护项目状态。'));
+    // 冻结说明里常有「默认不修改」，必须排在执行协议之前，让本轮要求压过默认行为。
+    assert.ok(system.indexOf(method.definition.instructions) < system.indexOf(executableLine),
+      `${method.id} frozen instructions must precede the MODIFY override`);
+    assert.ok(system.indexOf(method.definition.instructions) < system.indexOf('**输出格式。**'),
+      `${method.id} frozen instructions must precede the execution envelope`);
+    assert.ok(system.indexOf(executableLine) < system.indexOf('**输出格式。**'),
+      `${method.id} execution protocol must be the final instruction block`);
+    assert.ok(system.endsWith('maintenance 一律填 null：方法轮不维护项目状态。'),
+      `${method.id} envelope must close the prompt`);
+  }
+  // INSPECT 即使有读取工具也保持只读：诊断/审查不能被读成修改授权。
+  for (const action of ['INSPECT', null] as const) {
+    for (const method of BUILTIN_METHOD_REGISTRY.methods) {
+      const system = methodSystemPrompt(method, action, true);
+      assert.ok(system.includes(readonlyLine),
+        `${method.id} ${String(action)} with tools must stay read-only`);
+      assert.ok(!system.includes('"writes_files":true'),
+        `${method.id} ${String(action)} with tools must not emit a write candidate`);
+      assert.ok(system.endsWith(method.definition.instructions),
+        `${method.id} ${String(action)} must keep frozen instructions last`);
+    }
+  }
+  // 无工具轮保持旧行为：MODIFY 只给修改方案，避免原始 JSON 在没有工具时直接显示。
+  const planOnly = methodSystemPrompt(BUILTIN_METHOD_REGISTRY.methods[0]!, 'MODIFY');
+  assert.ok(planOnly.includes('请给出可执行的修改方案与受影响位置'));
+  assert.ok(!planOnly.includes('"writes_files":true'));
 });
 
 test('assistant readonly keeps the frozen persona as data with defaults and scope join', () => {

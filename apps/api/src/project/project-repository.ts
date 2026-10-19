@@ -410,6 +410,22 @@ export class ProjectRepository {
     return result.rows[0];
   }
 
+  /**
+   * 撤销归档（ADR-027 的「有反向命令」一类）：只把 `archived_at` 写回 NULL。
+   *
+   * 不恢复任何下游事实——归档的前提本来就是没有活动 Task/Run/租约，所以撤销只是让
+   * 原来那批读侧栅栏重新放行；不伪造归档期间发生过的事情，也不补写 Project State。
+   */
+  async unarchiveProject(projectId: string, expectedRevision: bigint): Promise<ProjectRow | undefined> {
+    const result = await sql<ProjectRow>`
+      update projects set archived_at = null, revision = revision + 1,
+        updated_at = clock_timestamp()
+      where id = ${projectId} and revision = ${expectedRevision} and archived_at is not null
+      returning id, workspace_id, title, project_type, archived_at, revision, created_at, updated_at
+    `.execute(this.db);
+    return result.rows[0];
+  }
+
   /** 关联 Goal 集合是 Project 的事实：变更时按 Project revision 做 CAS。 */
   async bumpProjectRevision(
     projectId: string,

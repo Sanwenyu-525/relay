@@ -5,7 +5,7 @@ import { decimal, directList, integer, nullableString, nullableStringArray, obje
 import { gatewayConnectionSettingsFrom, managedGitReadOutcomeFrom, managedResourceFrom, webImportJobFrom, webImportOperationFrom, webImportSubmissionFrom, writeReadinessFrom } from "../parse/gateway";
 import { commandEnvelopeFrom } from "../parse/projects";
 import type { RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayManagedGitReadInput, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayConnection, RelayMockManagedResource, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "../dtos/gateway";
-import type { RelayWriteReadiness } from "../dtos/gateway";
+import type { RelayWriteReadiness, RelayWriteTier } from "../dtos/gateway";
 import type { RelayCommandEnvelope } from "../dtos/projects";
 
 export async function getGatewayConnections(http: RelayHttp, projectId: string): Promise<readonly RelayGatewayConnection[]> {
@@ -108,6 +108,22 @@ export async function getManagedResource(http: RelayHttp, projectId: string, res
 export async function getWriteReadiness(http: RelayHttp, projectId: string, resourceId: string): Promise<RelayWriteReadiness> {
   return writeReadinessFrom(await http.request(http.workspacePath(
     `/projects/${encodeURIComponent(projectId)}/managed-resources/${encodeURIComponent(resourceId)}/write-readiness`)));
+}
+
+/** One Application command updates all local file action policies under the selected resource revision. */
+export async function setLocalDirectoryWriteTier(http: RelayHttp, input: {
+  projectId: string; resourceId: string; commandId: string; expectedRevision: DecimalRevision;
+  tier: RelayWriteTier;
+}): Promise<RelayCommandEnvelope> {
+  const envelope = commandEnvelopeFrom(await http.request(http.workspacePath(
+    `/projects/${encodeURIComponent(input.projectId)}/managed-resources/${encodeURIComponent(input.resourceId)}/local-access`), {
+      method: "POST", body: JSON.stringify({ command_id: input.commandId,
+        expected_revision: input.expectedRevision, write_tier: input.tier })
+    }, 200));
+  if (envelope.commandId !== input.commandId) {
+    throw new RelayTransportError("目录权限回执与原 command_id 不符，请查询原命令回执。");
+  }
+  return envelope;
 }
 
 export async function readManagedGitState(http: RelayHttp, input: RelayManagedGitReadInput): Promise<RelayManagedGitReadResponse> {

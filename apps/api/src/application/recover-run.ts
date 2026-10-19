@@ -6,6 +6,7 @@ import { contentHashOf, type ManagedContentStore } from '../storage/managed-cont
 import { createRepositories, withTransaction } from './unit-of-work.js';
 import { lockTaskAndRun } from './lock-task-run.js';
 import { applySafeControl } from './control-requests.js';
+import { releaseComputerDesktopLeaseAtSafeBoundary } from './computer-desktop-lease.js';
 import { invalidTransition, resourceNotFound } from './domain-error.js';
 
 /** 扫描器报告租约到期或已持久 fence 的未决动作；候选本身不能证明旧进程停止。 */
@@ -32,8 +33,11 @@ export async function recoverStoppedWorker(db: DbExecutor, input: {
     const { run, task } = await lockTaskAndRun(repositories, input.runId);
     if (run.worker_id === null) return false;
     if (run.worker_id !== input.stoppedWorkerId) throw invalidTransition('当前 Worker 已变化，不能核销另一个 Worker 的租约。');
+    const stoppedWorkerEpoch = run.worker_epoch;
     const changed = await repositories.runs.fenceWorker(run.id);
     if (changed === undefined) throw new Error('worker fence failed');
+    await repositories.computerDesktopLease.unbindWorker({ runId: run.id,
+      workerId: input.stoppedWorkerId, workerEpoch: stoppedWorkerEpoch });
     await repositories.activities.insertActivityRecord({ id: randomUUID(), actorKind: 'SYSTEM',
       workspaceId: run.workspace_id, runId: run.id,
       actorRef: 'recovery-scanner', commandId: null, projectId: task.project_id, taskId: task.id,
@@ -98,6 +102,10 @@ export async function recoverStoppedWorker(db: DbExecutor, input: {
   }
   await settleStoppedPureAttemptsForPendingControl(db, input.runId, input.stoppedWorkerId);
   await applySafeControl(db, input.runId);
+  await withTransaction(db, async (tx) => {
+    await lockTaskAndRun(tx, input.runId);
+    await releaseComputerDesktopLeaseAtSafeBoundary(tx, input.runId, true);
+  });
   const unresolved = await repositories.recovery.listUnresolvedEffects(input.runId);
   const pendingControl = await repositories.recovery.findPendingControl(input.runId);
   return { fenced, unresolved_operation_ids: unresolved

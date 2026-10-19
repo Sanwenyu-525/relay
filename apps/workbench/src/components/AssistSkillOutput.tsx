@@ -78,7 +78,7 @@ export default function AssistSkillOutput({ client, output, currentTarget }: { c
       <TaskCheckPlanPreview client={client} taskId={output.targetId} />
       <p className="helper-text">当前准入预览与建议及历史 Run Trace 分属不同事实；建议本身不是有效计划或验证结果。</p>
     </>}
-      <details><summary>生成依据与内容摘要</summary>
+      <details className="tech-details"><summary>生成依据与内容摘要</summary>
         <p className="helper-text">目标 {output.targetKind} · {targetPath
           ? <Link className="inline-link" to={targetPath}>{output.targetId}</Link> : output.targetId} · 生成依据时间 {output.asOf}</p>
         <p className="helper-text">基线 {JSON.stringify(output.baseline)} · 事实摘要 {output.basisSha256} · 输出摘要 {output.payloadSha256}</p>

@@ -72,14 +72,22 @@ export class ComputerControlStateRepository {
     `.execute(this.db);
   }
 
-  /** Esc 之后的确认位；只允许从 RUNNING 推进，重复请求幂等。 */
+  /** Esc 之后的确认位；绑定当前 Run，重复请求幂等。 */
   async markStopRequested(runId: string): Promise<boolean> {
     const result = await sql<ComputerControlStateRow>`
       update computer_control_state set state = 'STOP_REQUESTED', updated_at = now()
-      where id = 1 and state = 'RUNNING' and run_id = ${runId}
+      where id = 1 and state in ('RUNNING', 'STOP_REQUESTED') and run_id = ${runId}
       returning ${STATE_COLUMNS}
     `.execute(this.db);
     return result.rows.length > 0;
+  }
+
+  /** 仅在 Run 控制的安全点确认没有在途执行后调用。 */
+  async markStopped(runId: string): Promise<void> {
+    await sql`
+      update computer_control_state set state = 'STOPPED', updated_at = now()
+      where id = 1 and run_id = ${runId} and state <> 'STOPPED'
+    `.execute(this.db);
   }
 
   async readLatest(): Promise<ComputerControlStateRow | undefined> {
@@ -92,9 +100,17 @@ export class ComputerControlStateRepository {
   /** 过期惰性落库：RUNNING 但长时间未刷新 → STOPPED。幂等。 */
   async expireIfIdle(): Promise<void> {
     await sql`
+      with locked_lease as materialized (
+        select state, run_id from computer_desktop_lease where id = 1 for update
+      )
       update computer_control_state set state = 'STOPPED', updated_at = now()
       where id = 1 and state = 'RUNNING'
         and updated_at < now() - ${sql.raw(`interval '${Math.floor(COMPUTER_CONTROL_IDLE_MS / 1000)} seconds'`)}
+        and not exists (
+          select 1 from locked_lease
+          where state in ('HELD', 'QUARANTINED')
+            and run_id = computer_control_state.run_id
+        )
     `.execute(this.db);
   }
 }

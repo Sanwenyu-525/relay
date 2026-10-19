@@ -13,6 +13,7 @@ import { invalidTransition, resourceNotFound, revisionConflict, validationFailed
 import { requireRevision } from './revisions.js';
 import { reviewTargetHash } from './review-requests.js';
 import { verifyApprovalCheckMaterial } from './approval-check-material.js';
+import { releaseComputerDesktopLeaseAtSafeBoundary } from './computer-desktop-lease.js';
 import { normalizeStateAction, type NormalizedStateAction } from './state-action.js';
 import { applyAction } from './state-commands.js';
 import { lockWritableProjectInWorkspace } from './guards.js';
@@ -257,7 +258,14 @@ async function resolveRunReview(repositories: Repositories, input: {
       throw invalidTransition('操作审批的原动作已失效。');
     }
     if (decision === 'DENY' && operation !== undefined) {
-      await repositories.gateway.setOperationStatus(operation.id, 'DENIED', { reason: 'HUMAN_DENIED' });
+      const deniedOperation = await repositories.gateway.setOperationStatus(operation.id, 'DENIED', {
+        reason: 'HUMAN_DENIED', operation_id: operation.id,
+      });
+      const toolCall = await repositories.toolCalls.readByOperation(run.id, operation.id);
+      if (toolCall !== undefined && !(await repositories.toolCalls.settle(toolCall.id,
+        deniedOperation.result_ref))) {
+        throw new Error('denied Run tool call settlement CAS failed');
+      }
       const failed = await repositories.runs.advanceRun({ runId: run.id, expectedRevision: run.revision,
         status: 'FAILED', currentStepId: run.current_step_id,
         waitReason: 'ACTION_APPROVAL_DENIED', terminal: true });
@@ -266,6 +274,7 @@ async function resolveRunReview(repositories: Repositories, input: {
         taskId: task.id, runId: run.id, expectedRevision: task.revision, toStatus: 'READY',
       });
       if (released === undefined) throw new Error('denied Gateway Task release CAS failed');
+      await releaseComputerDesktopLeaseAtSafeBoundary(repositories, run.id);
       await repositories.activities.insertActivityRecord({ id: randomUUID(), actorKind: 'SYSTEM',
         workspaceId: run.workspace_id, runId: run.id,
         actorRef: `run:${run.id}`, commandId: null, projectId: task.project_id,

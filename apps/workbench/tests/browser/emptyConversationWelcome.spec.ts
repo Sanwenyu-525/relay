@@ -31,6 +31,15 @@ const emptySession = { id: sessionId, workspace_id: workspaceId, project_id: pro
     resource_id: "88888888-8888-4888-8888-888888888888", canonical_root: "D:\\Work\\Research" } },
   created_at: "2026-10-16T00:00:00Z", updated_at: "2026-10-16T00:00:00Z" };
 
+/** 「待你处理」要有真实来源才渲染得出：一条待人工判断的 Review（GLOBAL 作用域只按状态筛）。 */
+const openReview = { id: "44444444-4444-4444-8444-444444444444", kind: "CRITERION", status: "OPEN",
+  revision: "3", project_id: projectId, task_id: taskId, run_id: null,
+  reason: "AWAITING_HUMAN_EVIDENCE", target_hash: "b".repeat(64),
+  target: { artifact_version_id: "55555555-5555-4555-8555-555555555555", acceptance_revision: "2", criterion_id: "c1" },
+  evidence: { check_result: "自动检查不能代替人工判断" }, effect: { on_accept: "重新核对完成条件" },
+  allowed_decisions: ["ACCEPT", "REQUEST_CHANGES"], expires_at: null,
+  created_at: "2026-10-18T00:00:00Z", decided_at: null };
+
 function task(): unknown {
   return { id: taskId, project_id: projectId, title: "确定实验评价指标", status: "IN_PROGRESS", mode: "ME",
     revision: "2", created_at: "2026-10-16T00:00:00Z", updated_at: "2026-10-16T00:00:00Z",
@@ -98,7 +107,103 @@ test.describe("新建会话空态一致", () => {
     await expect(welcome).toBeVisible({ timeout: 20_000 });
     await expect(welcome.locator("h1")).toHaveText("有什么想一起完成的？");
     await expect(welcome.locator(".agent-chat-suggestion")).toHaveCount(11);
+    // 2026-10-18 用户指令「快捷语改成两行」：11 张卡在此视口必须摊成 6+5 两行。
+    // 锁行数与「最后一行的卡数」这一关系，不锁像素；卡片左右内边距被放宽回去就会多出一行。
+    const rows = await welcome.locator(".agent-chat-suggestion").evaluateAll((els) => {
+      const counts: number[] = [];
+      let top = Number.NaN;
+      for (const el of els) {
+        const b = el.getBoundingClientRect().top;
+        if (Number.isNaN(top) || Math.abs(b - top) > 6) { top = b; counts.push(1); }
+        else counts[counts.length - 1] += 1;
+      }
+      return counts;
+    });
+    expect(rows).toEqual([6, 5]);
+    // 分隔板只有功能族边界那 3 道（规划→实施→排查→文档接续），逐卡加箭头会读成强制顺序。
+    await expect(welcome.locator(".agent-chat-suggestion-sep")).toHaveCount(3);
     await page.screenshot({ path: "results/empty-welcome-first-composer.png" });
+  });
+
+  // 2026-10-18 用户指令「这两行的功能重复了」：输入卡上方的状态行与目录细条合并，
+  // 细条是唯一幸存的那一行——同宽同轴与「无原生控件外观」都由它承担；目录名本身
+  // 就是「更换目录」入口（点它打开选择框），不再有第二颗键，也不再有第二行。
+  // 同日第三轮两条指认：「不要放在最右边」→ 待处理紧跟细条内容；「这个待你处理为什么跟
+  // 左边没有在同一个高度上」「未选择目录的话用户不一定知道这是一个按钮」→ 同一行两条文字
+  // 落在同一根水平轴上，缺目录那一档的文案写成动作并常驻一道虚线下划线。
+  test("首条输入区上方的发送前提一行与输入卡同宽同轴，未选目录写成动作键并与「待你处理」同高", async ({ page }) => {
+    await installRoutes(page);
+    // 「待你处理」要有真实内容才能核对它与细条的同行关系。Playwright 后注册的 route 先匹配，
+    // 且 glob 要带查询串（客户端请求的是 `/reviews?status=OPEN`）并写全 API Origin（catch-all 用的是
+    // `apiBase` 那一档，相对 pattern 会解析到前端 4173 而不是 8787）。其余用例仍走空列表，整条不渲染。
+    await page.route(`${apiBase}${prefix}/reviews**`, (route) => fulfillJson(route, { items: [openReview] }));
+    await page.goto("/agent?new=browser");
+    await connect(page);
+    const strip = page.getByTestId("folder-scope-strip");
+    await expect(strip).toBeVisible({ timeout: 20_000 });
+    const bar = await strip.locator(".folder-strip-line").boundingBox();
+    const row = await page.locator(".agent-chat-prereq-row").boundingBox();
+    const composer = page.locator(".agent-chat-composer");
+    const composerBox = await composer.boundingBox();
+    expect(bar).not.toBeNull();
+    expect(row).not.toBeNull();
+    expect(composerBox).not.toBeNull();
+    // 这一列的居中规则（--chat-measure + margin-inline:auto）由输入卡持有，细条必须跟着它：
+    // 2026-10-18 用户实机截图里状态行按整列宽铺开，文字落到输入卡左侧很远处，读成没有样式。
+    // 同日第二轮把「待你处理」并到这一行、紧跟细条之后（用户指令「不要放在最右边」）：
+    // 细条改成按内容收，同宽同轴因此由整行容器承担——细条左缘仍对齐，行的左右缘对齐输入卡。
+    expect(bar!.x).toBeCloseTo(composerBox!.x, 0);
+    expect(row!.x).toBeCloseTo(composerBox!.x, 0);
+    expect(row!.width).toBeCloseTo(composerBox!.width, 0);
+    // 全局 `button` 只继承字体与颜色，不重置外框；这颗目录名键必须自己剥掉原生边框、底与内边距，
+    const chrome = await strip.locator(".folder-strip-name").evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { borderStyle: cs.borderStyle, borderWidth: cs.borderTopWidth,
+        background: cs.backgroundColor, padding: cs.paddingTop, textAlign: cs.textAlign };
+    });
+    expect(chrome).toEqual({ borderStyle: "none", borderWidth: "0px",
+      background: "rgba(0, 0, 0, 0)", padding: "0px", textAlign: "start" });
+    // 缺目录那一档不再读成状态提示：文案就是动作，静止再加一道虚线下划线说出「点它去补」。
+    // 虚线走 text-decoration 而不是描边或铺底，正是为了上面那组「不落回原生控件外观」的读数不变。
+    const name = strip.locator(".folder-strip-name");
+    await expect(name).toHaveText("选择工作目录");
+    const affordance = await name.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      // 计算样式写着 dashed 不等于看得见：这颗键为了省略号带 `overflow: hidden`，行盒只有 20px，
+      // 下划线偏移一大就整条掉到盒子外被裁掉（2026-10-18 用户实机指认「常驻下划线没生效」，
+      // 当时量到基线在 17px、`0.2em` 偏移＋1px 线宽要画到 20.2px）。这里按字体度量算出下划线
+      // 真正落下的位置，要求它没有被盒子裁掉——只锁计算样式会重犯同一个错。
+      const ctx = document.createElement("canvas").getContext("2d")!;
+      ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+      const metrics = ctx.measureText(el.textContent!.trim());
+      const lineHeight = Number.parseFloat(cs.lineHeight);
+      const baseline = (lineHeight - (metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent)) / 2
+        + metrics.fontBoundingBoxAscent;
+      const thickness = Number.parseFloat(cs.textDecorationThickness);
+      const underlineBottom = baseline + Number.parseFloat(cs.textUnderlineOffset)
+        + (Number.isFinite(thickness) ? thickness : 1);
+      return { line: cs.textDecorationLine, style: cs.textDecorationStyle,
+        clipped: cs.overflow === "hidden" && underlineBottom > el.getBoundingClientRect().height };
+    });
+    expect(affordance).toEqual({ line: "underline", style: "dashed", clipped: false });
+    // 同一行、同一根水平轴：原先那 4px 上内边距留在细条自己的盒子里，`align-items: center`
+    // 居中的是盒子不是文字，细条文字因此比「待你处理」低 2px（用户实机指认）。现在呼吸挪到行上。
+    const pending = page.getByTestId("pending-work");
+    await expect(pending).toBeVisible({ timeout: 20_000 });
+    const nameLabel = await name.boundingBox();
+    const pendingLabel = await pending.locator(".pending-work-label").boundingBox();
+    expect(nameLabel).not.toBeNull();
+    expect(pendingLabel).not.toBeNull();
+    const center = (box: { y: number; height: number }): number => box.y + box.height / 2;
+    expect(Math.abs(center(nameLabel!) - center(pendingLabel!))).toBeLessThan(1);
+    // 待处理紧跟细条内容右端，不顶到行的右缘（用户指令「不要放在最右边」）。
+    const pendingBox = await pending.boundingBox();
+    expect(pendingBox).not.toBeNull();
+    expect(pendingBox!.x).toBeGreaterThanOrEqual(bar!.x + bar!.width);
+    expect(pendingBox!.x + pendingBox!.width).toBeLessThan(row!.x + row!.width);
+    // 合并后输入卡上方只剩这一行：不再渲染第二行状态摘要。
+    await expect(page.getByTestId("composer-status")).toHaveCount(0);
+    await page.locator(".agent-chat-prereq-row").screenshot({ path: "results/prereq-row-aligned.png" });
   });
 
   test("任务作用域空会话：同一欢迎块，说明句按归属收敛", async ({ page }) => {
@@ -107,7 +212,7 @@ test.describe("新建会话空态一致", () => {
     await connect(page);
     await expect(page.getByTestId("collab-conversation-toolbar")).toBeVisible();
     await expect(page.getByTestId("folder-scope-strip")).toBeVisible();
-    await expect(page.getByTestId("folder-scope-options")).toHaveText("Research");
+    await expect(page.getByTestId("folder-scope-change")).toHaveText("Research");
     await expect(page.getByTestId("collab-goal")).toBeHidden();
     await expect(page.getByTestId("collab-inspector")).toHaveCount(0);
     await page.getByTestId("collab-conversation-inspector-toggle").click();
@@ -133,7 +238,7 @@ test.describe("新建会话空态一致", () => {
       await installRoutes(page); await page.goto(entry); await connect(page);
       await expect(page).toHaveURL(new RegExp(`/agent\\?.*work=${taskId}`));
       await expect(page.getByTestId("collab-conversation-toolbar")).toBeVisible();
-      await expect(page.getByTestId("folder-scope-options")).toHaveText("Research");
+      await expect(page.getByTestId("folder-scope-change")).toHaveText("Research");
       await expect(page.getByTestId("assist-empty-welcome")).toBeVisible();
     });
   }

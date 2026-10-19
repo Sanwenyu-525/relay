@@ -1,5 +1,11 @@
 # 独立验收修复与调整提示词
 
+2026-10-18 D1–D4 已由协调者独立复跑通过（真实 PG24/24、组件32/32），接续[暂存产物同步与零配置浏览器闭环](local-directory-delivery-20261018.md)。已证实目录权限子模块在源码编译输出与桌面 staging 中不同，浏览器零预置权限尚无证据；按用户授权继续复用原 `gpt-6-luna` 子代理处理，不发回旧 Codex 会话，不操作用户活动旧桌面。
+
+2026-10-18 本地目录独立验收后接续：[四项整改任务书](local-directory-access-acceptance-20261018.md)。正常路径真实 PG/HTTP/磁盘 20/20，但旧撤销默认恢复、目录消失后的回执重放、前端原请求载荷冻结与目录读取告知四项反例失败。用户最新要求改为本会话新派 **`gpt-6-luna` 子代理**修复，不再把提示词发到原 Codex 会话。完整产品目标仍以[本地目录访问任务书](../local-directory-access.md)和工作台 §18.1.4 为准，本提示词只接续当前缺口。
+
+2026-10-17 普通 Agent 文件能力接续：[文件新建、修改、删除真实闭环整改](agent-file-crud-20261017.md)。交由 **`gpt-6-luna` 单独执行**，就绪写候选自动 Apply 与原消息 Run 摘要回填已实施；协调独立验收发现目录连接匹配反例，完整 CRUD 仍未通过。用户随后确认免手工配置方向，当前实施以[本地目录访问新任务书](../local-directory-access.md)为准，替代旧任务书第 8 节原范围限制；后续提示词按用户授权直接发送原会话。成绩只归统一验收表，不重做已通目录读取，不扩展浏览器等其他能力。
+
 2026-10-11 当前后端整改入口：[当前源码后端验收后的修复与回归收口](backend-acceptance-remediation-20261011.md)。本轮独立验收已完成，当前后端未通过；任务书先修 Skill/方法身份与7个学习记录反例，再收口正式回归、测试时序和环境阻塞。**本次仅交付提示词，尚未执行修复**；不重复实施已经复验通过的 NLS 整改，也不自动进入学习前端、方法后续阶段或真实 Provider。成绩只看[功能验收表](../../docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)，阶段只看[CODEX_NEXT_STEP](../../CODEX_NEXT_STEP.md)。
 
 日期：2026-09-21。来源：[前后端独立验收](../../docs/testing/frontend-backend-acceptance-2026-09-21.md)。状态：**R01–R04 已执行并完成分层复验；未完成真实前后端联调、Windows 桌面与完整业务验收。**
@@ -22,7 +28,7 @@
 
 2026-10-07 专项入口：[真实 Windows 页面巡检四类问题整改](windows-page-acceptance-20261007.md)，接续[第二轮 CLI_RUN 配置与聊天底栏整改](windows-page-round2-20261007.md)。用户已授权直接执行，指定 `gpt-6-luna / max`，协调 Agent 独立复核。该用户指定覆盖默认模型，其他任务仍遵循各自当前授权。实际结果仅归统一验收表相应页面巡检行。
 
-2026-10-03 专项入口：[方案 2 首条会话与待审版本整改](ui-option-2-first-session.md)。本次实际验收结果归[统一验收表 §10.7](../../docs/testing/overall-acceptance-2026-09-28.md#107-当前源码的独立复核2026-10-03)，提示词独立交付、尚未执行；不属于下表历史 R01–R05。当前子代理模型遵循最新 AGENTS 的 `gpt-6.1-sol`，下方旧模型路由说明仅保留历史，不作为当前派发指令。
+2026-10-03 专项入口：[方案 2 首条会话与待审版本整改](ui-option-2-first-session.md)。本次实际验收结果归[统一验收表 §10.7](../../docs/testing/overall-acceptance-2026-09-28.md#107-当前源码的独立复核2026-10-03)，提示词独立交付、尚未执行；不属于下表历史 R01–R05。AGENTS.md 已不再统一规定子代理模型，下方旧模型路由说明仅保留历史，不作为当前派发指令。
 
 2026-10-04 专项入口：[C 片实施：协作页工具轨迹呈现](tool-trajectory-presentation.md)。对应 `prompts/agent-native-tools.md` 五节的 C 片，**尚未执行**；设计规则归[工作台 §18.8](../../docs/frontend/workbench-design.md#188-工具轨迹的呈现2026-10-04c-片设计)，端面归[命令契约 §10.56](../../docs/api/http-command-contract.md)，物理设计归[第 60 节](../../docs/database/physical-design-postgresql.md)，验收规格归[测试计划 §20.4](../../docs/testing/verification-plan.md)，上游依据归[研究 §1.6](../../docs/research/p00-source-study.md#16-工具调用呈现与刷新机制对照2026-10-04)。它同样不属于下表历史 R01–R05。
 

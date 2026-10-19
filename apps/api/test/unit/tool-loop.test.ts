@@ -96,12 +96,17 @@ test('the catalog is a closed list: every entry maps to a declared Gateway actio
   assert.deepEqual(names, ['apply_changeset', 'read_change_set', 'run_check',
     'list_directory', 'find_paths', 'search_text', 'read_file',
     'git_status', 'git_diff', 'git_log',
-    // 0092: Computer Plugin V1 的十个桌面级工具。
+    // 0092: Computer Plugin V1 的桌面级工具；2026-10-18 追加 computer_move。
     'computer_screenshot', 'computer_get_windows', 'computer_activate_window',
-    'computer_click', 'computer_double_click', 'computer_scroll', 'computer_drag',
-    'computer_type', 'computer_keypress', 'computer_hotkey',
-    // 0103: F25 内置官方 GitHub Skill 首片的四个只读工具。
-    'github_repo_view', 'github_pr_list', 'github_pr_view', 'github_issue_list']);
+    'computer_move', 'computer_click', 'computer_double_click', 'computer_scroll',
+    'computer_drag', 'computer_type', 'computer_keypress', 'computer_hotkey',
+    // 0103: F25 内置官方 GitHub Skill 首片的只读工具；2026-10-18 追加 issue 详情。
+    'github_repo_view', 'github_pr_list', 'github_pr_view', 'github_issue_list',
+    'github_issue_view',
+    // 0105: F26 内置浏览器自动化的十二个工具（读四、交互六、提交二）。
+    'browser_list_pages', 'browser_read_page', 'browser_screenshot', 'browser_wait_for',
+    'browser_new_page', 'browser_navigate', 'browser_click', 'browser_fill',
+    'browser_press_key', 'browser_close_page', 'browser_submit_form', 'browser_upload_file']);
   for (const entry of INTERNAL_TOOL_DEFINITIONS) {
     assert.equal(readInternalTool(entry.name), entry);
     assert.equal(entry.spec.name, entry.name);

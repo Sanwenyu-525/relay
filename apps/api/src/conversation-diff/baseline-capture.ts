@@ -38,11 +38,31 @@ export class NotAGitRepositoryError extends Error {
   }
 }
 
+/** `listScopedFiles` 里某一侧扫描停下来的位置。 */
+export type ScanStopReason = 'FILE_COUNT_LIMIT' | 'TOTAL_BYTES_LIMIT' | 'SCAN_ABORTED';
+
 export interface BaselineSnapshot {
   readonly rootPath: string;
   readonly files: readonly BaselineFile[];
   readonly incomplete: boolean;
   readonly captureReason: string;
+}
+
+/**
+ * 「当前」一次扫描的完整结果。
+ *
+ * `unswept` 是本轮列到但没有逐条核对的路径（达到文件数／总量上限即停）：它们既不能算
+ * 「已删除」也不能算「没变化」，所以必须单独带出去（§34.3 / CD-08 / CD-17）。
+ * `tracked` 是 Git 索引里已跟踪的路径，用来区分「本会话新建」与「起点没扫到」。
+ */
+export interface CurrentScan {
+  readonly files: Map<string, CurrentFile>;
+  readonly unswept: ReadonlySet<string>;
+  readonly tracked: ReadonlySet<string>;
+  readonly incomplete: boolean;
+  readonly reason: ScanStopReason | null;
+  /** 本次列到的文件总数（不含受保护路径）；`files.size` 是已核对数。 */
+  readonly listedTotal: number;
 }
 
 export interface BaselineCaptureOptions {
@@ -70,25 +90,42 @@ export async function findGitTopLevel(rootPath: string, options?: GitExecOptions
   return res.stdout.trim();
 }
 
-/** 列出受管根范围内、未被忽略的已跟踪与未跟踪文件（相对根路径）。 */
-async function listScopedFiles(rootPath: string, topLevel: string): Promise<string[]> {
+/** 列出受管根范围内、未被忽略的已跟踪与未跟踪文件（相对根路径，保持 Git 的输出顺序）。 */
+async function listScopedFiles(rootPath: string,
+  topLevel: string): Promise<{ paths: string[]; tracked: Set<string> }> {
   const rootRel = relative(topLevel, rootPath).replace(/\\/g, '/').replace(/\/+$/, '');
   const pathspec = rootRel === '' ? '.' : rootRel;
   // -z 让 git 以 NUL 分隔输出，避免路径含空格/换行时错位（下方按 \0 切分）。
-  const tracked = await runReadOnlyGit(['ls-files', '-z', '--', pathspec], { cwd: topLevel });
-  const untracked = await runReadOnlyGit(['ls-files', '-z', '--others', '--exclude-standard', '--', pathspec],
+  const trackedRes = await runReadOnlyGit(['ls-files', '-z', '--', pathspec], { cwd: topLevel });
+  const untrackedRes = await runReadOnlyGit(['ls-files', '-z', '--others', '--exclude-standard', '--', pathspec],
     { cwd: topLevel });
+  const tracked = new Set<string>();
   const seen = new Set<string>();
-  const out: string[] = [];
-  for (const line of [...tracked.stdout.split('\0'), ...untracked.stdout.split('\0')]) {
-    const raw = line.trim();
-    if (raw === '') continue;
+  const paths: string[] = [];
+  const add = (raw: string, isTracked: boolean): void => {
+    if (raw === '') return;
     const rel = rootRel === '' ? raw : raw.startsWith(rootRel + '/') ? raw.slice(rootRel.length + 1) : null;
-    if (rel === null) continue;
+    if (rel === null) return;
     const normalized = rel.replace(/\\/g, '/');
-    if (seen.has(normalized)) continue;
+    if (seen.has(normalized)) {
+      if (isTracked) tracked.add(normalized);
+      return;
+    }
     seen.add(normalized);
-    out.push(normalized);
+    if (isTracked) tracked.add(normalized);
+    paths.push(normalized);
+  };
+  for (const entry of trackedRes.stdout.split('\0')) add(entry.trim(), true);
+  for (const entry of untrackedRes.stdout.split('\0')) add(entry.trim(), false);
+  return { paths, tracked };
+}
+
+/** 从 `from` 起还没逐条核对的非受保护路径：这些文件本轮既不能说改了，也不能说没变。 */
+function collectUnswept(paths: readonly string[], from: number): Set<string> {
+  const out = new Set<string>();
+  for (let cursor = from; cursor < paths.length; cursor++) {
+    const rel = paths[cursor]!;
+    if (!isProtectedPath(rel)) out.add(rel);
   }
   return out;
 }
@@ -116,21 +153,27 @@ export async function captureBaseline(rootPath: string,
     throw error;
   }
 
-  const relPaths = await listScopedFiles(rootPath, topLevel);
+  const { paths: relPaths } = await listScopedFiles(rootPath, topLevel);
 
   const files: BaselineFile[] = [];
   let totalBytes = 0;
   let incomplete = false;
   let captureReason = '';
 
-  for (const rel of relPaths) {
+  for (let index = 0; index < relPaths.length; index++) {
+    const rel = relPaths[index]!;
     if (files.length >= limits.maxFiles) {
       incomplete = true;
       captureReason = 'FILE_COUNT_LIMIT';
       break;
     }
     if (isProtectedPath(rel)) continue;
-    if (signalAborted(options?.signal)) break;
+    if (signalAborted(options?.signal)) {
+      // 采到一半被中止同样是覆盖不完整：剩下的文件没有起点，不能事后当作「没变化」。
+      incomplete = true;
+      captureReason = 'SCAN_ABORTED';
+      break;
+    }
 
     const absolute = resolve(rootPath, rel);
     let entryStat;
@@ -199,11 +242,14 @@ export async function captureBaseline(rootPath: string,
  * 采集受管根「当前」磁盘状态（用于与基线比较）。
  *
  * 与 `captureBaseline` 同样的枚举与边界规则，但只产出给 `computeSnapshotDiff` 用的
- * `CurrentFile`：存在文件给摘要/文本/行数，不存在（被删）的文件不出现（→ DELETE）。
+ * `CurrentFile`：存在文件给摘要/文本/行数，**确认不存在**（被删）的文件不出现（→ DELETE）。
  * 同样跳过 `.git`、越界与受保护路径；超限/二进制标不可统计，不编造行数。
+ *
+ * 达到文件数／总量上限或被中止而停下来时，剩下的路径进 `unswept`：它们只是「本轮没核对到」，
+ * 不是「磁盘上没有」，绝不能被算成删除（§34.3 / CD-08 / CD-17）。
  */
 export async function captureCurrentState(rootPath: string,
-  options?: BaselineCaptureOptions): Promise<Map<string, CurrentFile>> {
+  options?: BaselineCaptureOptions): Promise<CurrentScan> {
   const limits: CaptureLimits = {
     maxFiles: options?.maxFiles ?? MAX_BASELINE_FILES,
     maxTotalBytes: options?.maxTotalBytes ?? MAX_BASELINE_TOTAL_BYTES,
@@ -217,19 +263,28 @@ export async function captureCurrentState(rootPath: string,
     if (error instanceof NotAGitRepositoryError) throw error;
     throw error;
   }
-  const relPaths = await listScopedFiles(rootPath, topLevel);
+  const { paths: relPaths, tracked } = await listScopedFiles(rootPath, topLevel);
   const result = new Map<string, CurrentFile>();
+  const unswept = new Set<string>();
   let totalBytes = 0;
-  for (const rel of relPaths) {
-    if (result.size >= limits.maxFiles) break;
+  let incomplete = false;
+  let reason: ScanStopReason | null = null;
+  const stop = (index: number, why: ScanStopReason): void => {
+    incomplete = true;
+    reason = why;
+    for (const path of collectUnswept(relPaths, index)) unswept.add(path);
+  };
+  for (let index = 0; index < relPaths.length; index++) {
+    const rel = relPaths[index]!;
+    if (result.size >= limits.maxFiles) { stop(index, 'FILE_COUNT_LIMIT'); break; }
     if (isProtectedPath(rel)) continue;
-    if (signalAborted(options?.signal)) break;
+    if (signalAborted(options?.signal)) { stop(index, 'SCAN_ABORTED'); break; }
     const absolute = resolve(rootPath, rel);
     let entryStat;
     try {
       entryStat = await stat(absolute);
     } catch {
-      continue; // 不存在 = 被删，不进入当前集合。
+      continue; // 列到了却读不到 = 被删，不进入当前集合，也不进 unswept。
     }
     if (!entryStat.isFile()) continue;
     const sizeBytes = Number(entryStat.size);
@@ -238,7 +293,7 @@ export async function captureCurrentState(rootPath: string,
         unavailableReason: 'TEXT_TOO_LARGE' });
       continue;
     }
-    if (totalBytes + sizeBytes > limits.maxTotalBytes) break;
+    if (totalBytes + sizeBytes > limits.maxTotalBytes) { stop(index, 'TOTAL_BYTES_LIMIT'); break; }
     let bytes: Buffer;
     try {
       bytes = await readFile(absolute);
@@ -277,7 +332,8 @@ export async function captureCurrentState(rootPath: string,
     });
     totalBytes += sizeBytes;
   }
-  return result;
+  return { files: result, unswept, tracked, incomplete, reason,
+    listedTotal: relPaths.filter((path) => !isProtectedPath(path)).length };
 }
 
 function computeSha256(content: Buffer): string {

@@ -1,5 +1,7 @@
 # 工具适配器与真实执行准入
 
+2026-10-18 实施状态：基础本地文件不要求用户手工建立连接和策略，目录打开与本地档位由 Application 通过原连接/策略 Owner 协调。日常入口、档位与历史限制以[工作台 §18.1.4](../frontend/workbench-design.md#1814-本地目录权限设置2026-10-18已确认已实施)为准，Application 责任归[领域模型 §12.2.1](domain-model.md#1221-本地目录访问设置的应用责任2026-10-18已实施)。下文能力注册、连接边界、策略准入、范围授权及确切动作审批继续作为内部执行机制；这项接续改变基础配置由谁建立和用户入口，不删除 Gateway、不新增会话写身份，也不自动开放 Git/CLI/浏览器/电脑或外部服务。运行证据与未验边界归统一功能验收表。
+
 2026-09-28 Windows 受管根登记身份增量：0038 将新登记资源的根卷号/File ID 单独留存，新 Windows `FILE_WRITE` 准备前必须与当前原生助手捕获结果相同；旧资源登记身份不可回填。0039 允许停用无占用旧资源后以同一路径登记新资源 ID，同时保持活动资源同项目路径唯一；历史动作与占用不改绑。助手不支持的目录仍可登记用于其他能力，但不开放新 Windows 文件写入。根普通目录在登记之后、动作准备之前被替换的真实 PG/Windows 反例已转为准备期 409，且不产生 Operation；现有准备后的 0036 冻结身份继续保护后续执行/恢复。含 0039 的确切桌面包 EXE SHA-256 `577a731e3022e540e38edc6a152301afc31b5a585e75eabb999919bbd5863efc` 已通过资源清单核验、旧 `PARTIAL` Windows Job 恢复链及 WebView2 冻结差异与身份提示复验，见 M06 增量 H。无回执的“助手完成后、保存回执前”强杀及 WebView2 处置已由同一确切包定向复验；MODIFY 换名空窗候选残留的确切包桌面同场景、人工交互与 M06 总验收仍待完成。下文 2026-09-27 段落保留当时边界。
 
 2026-09-27 当前 Windows `FILE_WRITE` 开发状态：新 Operation 经 0036 冻结受管根、父目录链与目标的卷号/File ID，Worker 调用随包 Rust 助手执行捕获、写入和恢复核对；旧 Operation 缺物理身份不从当前磁盘回填。助手逐段相对持有的目录句柄打开，拒绝重解析、别名与硬链接；CREATE/MODIFY 用已写完并核验的暂存对象提交，MODIFY 不原地改旧文件，目标名抢占或任何提交后证据不明返回 `effect_uncertain`，Gateway 保持原调用 `UNKNOWN` 与资源隔离。单文件 1 MiB、最多 16 文件；新 `WRITE_FILE` 账本和冻结差异均用受管根相对路径，历史行保留原值。真实 Windows 助手 16/16、隔离 PG real-tools 49/49、迁移 8/8 已通过；新增反例证明 MODIFY 换名空窗强杀后旧内容备份和新内容暂存同时残留，当前尚无可安全自动处置的原调用证据链。桌面 Job 恢复链与 WebView2 自动差异页已按确切 release 包复验；人工交互和 M06 总出口另验。下文保留各阶段当时的实现与证据，不作为本段新边界的当前声明。
@@ -46,7 +48,7 @@ P09 初版当时没有真实网络请求或 Git/CLI 执行；后续 M04/M06 已�
 
 ### 1.2 本次任务范围内的工具授权（2026-10-03）
 
-状态：用户已确认交互规则，准入协议已实现（2026-10-04）。Relay 内部工具循环采用本次任务范围授权：有效权限及已确认范围内的文件搜索、读取、Git status/diff 自动进行；普通文件编辑和已配置检查命令可以连续执行。删除文件、Git 提交/推送与扩大任务范围须再次确认；系统禁止项仍为 DENY。范围授权不由模型生成或工具正文授予。
+状态：用户已确认交互规则，准入协议已实现（2026-10-04）。Relay 内部工具循环采用本次任务范围授权：有效权限及已确认范围内的文件搜索、读取、Git status/diff 自动进行；普通文件编辑和已配置检查命令可以连续执行。删除文件、Git 提交/推送与扩大任务范围须再次确认；系统禁止项仍为 DENY。范围授权不由模型生成或工具正文授予。2026-10-18 接续：目录档位为「完全访问」（`FULL`，见工作台 §18.1.3）时，本目录内的删除不再产生单动作 Review；Git 提交/推送、CLI 与目录外动作不受该档位影响，范围授权本身也仍然永远不含删除。
 
 范围授权与单动作 ACTION_APPROVAL 分开：前者用于限定本次任务可 AUTO 执行的动作，后者仍按[契约 03](../../contracts/03-verification-and-approval.md#6-approval-的精确授权对象)绑定确切动作及参数，不用一次 Review 批准覆盖未来未知动作。每次执行仍复核当前权限、作用域、文件基线、资源互斥与取消状态；权限撤销、基线冲突和 UNKNOWN 继续阻止后续不满足准入的动作。
 
@@ -54,7 +56,7 @@ P09 初版当时没有真实网络请求或 Git/CLI 执行；后续 M04/M06 已�
 
 `allowed_actions` 首批只接受 `WRITE_FILE`、`APPLY_CHANGESET`、`CLI_RUN`。检查统一记作 `CLI_RUN` 而不是 `RUN_TEST`/`RUN_BUILD`：工具循环里模型只能按 `check_id` 点名冻结清单中的某一次检查，「测什么/构建什么」的粒度由那份清单决定，不由动作名决定。`DELETE` 不在集合内，且 `ck_run_scope_grants_no_delete` 显式禁止它出现；即使 `APPLY_CHANGESET` 已放行，含删除的声明仍退回单动作确认（`SCOPE_GRANT_DELETE_REQUIRES_APPROVAL`）。校验为「授权只能收窄信封」：`resource_id` 必须与 `tool_loop_action` 同一个受管资源，放行的每个动作都要求信封里已冻结对应能力连接，放行检查命令时必须至少配置一个检查。
 
-失效与撤销：已撤销、已过期、Run 已终止（除非显式 `survives_run_terminal`）、根身份已变、动作不在集合内、检查程序摘要已变——任一条成立都不放行，回落到既有 Permission 判定。`evaluateScopeGrant` 是唯一判定入口，`prepareGatewayAction` 与 `dispatchGatewayAction` 调用的是同一个函数，因此准备与执行前复核必然一致；两处都重新判定而不是信任对方的结论，因为撤销、过期与脚本改动都可能发生在两次调用之间。全局 `approval_passthrough` 不改：`FILE_WRITE`/`CLI_RUN` 仍是非穿透适配器，AUTO 降级为 ASK 的既有行为只在本次 Run 的有效授权下被局部豁免。
+失效与撤销：已撤销、已过期、Run 已终止（除非显式 `survives_run_terminal`）、根身份已变、动作不在集合内、检查程序摘要已变——任一条成立都不放行，回落到既有 Permission 判定。`evaluateScopeGrant` 是唯一范围授权判定入口，`prepareGatewayAction` 与 `dispatchGatewayAction` 调用的是同一个函数，因此准备与执行前复核必然一致；两处都重新判定而不是信任对方的结论，因为撤销、过期与脚本改动都可能发生在两次调用之间。2026-10-18 起，本目录档位为 `FULL` 时的文件写入豁免同样由**两处共用的一个读取函数**按 `resource_id` 现算（只并入 `scopeCovered` 这一个条件，不改 `evaluateScopeGrant` 的结论，也不新增第四种 Gateway 判定），与范围授权共用「同一函数必然同结论」这条约束；档位语义与边界只在工作台 §18.1.3 与 HTTP §10.86 维护。全局 `approval_passthrough` 不改：`FILE_WRITE`/`CLI_RUN` 仍是非穿透适配器，AUTO 降级为 ASK 的既有行为只在本次 Run 的有效授权或本目录 `FULL` 档位下被局部豁免。
 
 已配置检查的可信依据来自两处摘要比对：授权时冻结一份 `executable_sha256`，prepare 与 dispatch 各实测一份。实测缺失或与冻结值不同即判定「配置已变」（`SCOPE_GRANT_CHECK_CHANGED`），退回人工确认，而不是拿旧摘要继续放行。模型只能提交 `check_id`；真实程序与参数由冻结清单展开成 Gateway 的结构化参数，工具正文里不出现任何可执行内容。
 
@@ -207,9 +209,13 @@ F25 首片按 [ADR-023](../decisions/ADR-023-builtin-github-skill.md) 新增 `GI
 
 **仓库身份。** Connection 的 `config` 为 `{}`，不绑定目录边界；目标来自用例层选定的受管根 canonical path，Permission 再按该目标的前缀判定。适配器在受管根里让本地 `git config --get-regexp '^remote\..*\.url$'` 解析 remote，只认 `github.com`（https/ssh/scp 三种写法），多个候选按 remote 名确定性取第一个；解析不到就 `GH_REPO_UNIDENTIFIED`，不猜、不换仓库。模型参数里没有 `repo` 字段，`gh` 的 argv 只由适配器拼装成 `['--repo', <解析结果>, ...固定参数]`，因此模型不能指名任何仓库，也没有任何 `gh api` 入口进入词表。
 
-**执行与投影。** 按名从 PATH 解析 `gh`（与 `git` adapter 同一口径），`execFile` 结构化参数数组、`shell:false`、30 秒超时、可取消；环境变量为显式白名单，不转发 `RELAY_`/`GH_TOKEN` 等调用方环境。只读结果做有界投影而不是透传：列表最多 50 项、PR 正文 8 KiB（截断必须显式标 `body_truncated`）、状态检查最多 25 项且保留总数，所有结果带 `untrusted_external_content: true`——Issue/PR 正文与检查日志始终是数据。失败以 `FAILED` + 类型化原因结算（`GH_CLI_UNAVAILABLE`、`GH_UNAUTHENTICATED`、`GH_NETWORK_ERROR`、`GH_REPO_UNIDENTIFIED`、`GH_NOT_FOUND`、`GH_FORBIDDEN`、`GH_TIMEOUT`、`GH_CANCELLED`），并给可行动提示；不把「没装 gh」或「没登录」降级成空的查询结果。会话只读轮次对已派发但非 SUCCEEDED 的读取记 `UNKNOWN`，同时把类型化正文回传模型，避免同一失败被重复计成成功。
+**执行与投影。** `gh` 的解析顺序是 `RELAY_GH_PATH` → Node 可执行文件同目录的 `gh.exe`（安装态随包 sidecar）→ `PATH` 里的 `gh`（`src/github/gh-executable.ts`，与 `computer-runtime`/`file-io-helper` 同一套先例）；原先只认 `PATH`，本机把 gh 解包到 `.research/runtime-cache` 后仍然查不到，失败提示也说不清查过哪里。`execFile` 结构化参数数组、`shell:false`、30 秒超时、可取消；环境变量为显式白名单，不转发 `RELAY_`/`GH_TOKEN` 等调用方环境。只读结果做有界投影而不是透传：列表最多 50 项、PR 正文 8 KiB（截断必须显式标 `body_truncated`）、状态检查最多 25 项且保留总数，所有结果带 `untrusted_external_content: true`——Issue/PR 正文与检查日志始终是数据。失败以 `FAILED` + 类型化原因结算（`GH_CLI_UNAVAILABLE`、`GH_UNAUTHENTICATED`、`GH_NETWORK_ERROR`、`GH_REPO_UNIDENTIFIED`、`GH_NOT_FOUND`、`GH_FORBIDDEN`、`GH_TIMEOUT`、`GH_CANCELLED`），并给可行动提示；不把「没装 gh」或「没登录」降级成空的查询结果。`GH_CLI_UNAVAILABLE` 的文案会写出实际查过的位置与 `RELAY_GH_PATH` 用法（见 `github-executable.test.ts` 5/5）。会话只读轮次对已派发但非 SUCCEEDED 的读取记 `UNKNOWN`，同时把类型化正文回传模型，避免同一失败被重复计成成功。
 
 **按需激活。** 四个工具只在当轮存在 `GITHUB_READ` 的 ACTIVE 连接时进入词表；停用连接后下一轮立即消失。本片不注入上游 `SKILL.md` 正文，工具描述自带用途与「失败≠空结果」的约束。
+
+2026-10-18 修复网络环境边界：原白名单漏掉代理变量，导致用户终端可以经代理登录、Relay 子进程却直连失败。现在显式保留 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 及对应小写变量，仍排除调用方的 `GH_TOKEN`、Provider 密钥及其他非必要环境。凭据来自用户在 Relay 外完成认证后的 CLI 存储，不自动登录、不输出 token。真实已认证四动作的结果与限制归统一验收表，不再以「本机未安装 gh」作为当前阻塞。
+
+2026-10-18 补第五个只读动作 `GITHUB_ISSUE_VIEW`（`gh issue view <n> --json ...`）：此前只有 `issue list`，能列出编号却读不到正文与评论，模型要判断「这个 issue 到底说什么」没有任何合法入口。动作仍属 `GITHUB_READ`，没有新增能力、迁移或权限分支；`--json` 一次取 `number,title,body,state,author,url,labels,createdAt,updatedAt,comments`（评论走 `--json ...,comments` 而不是 `--comments`——后者只配人类可读输出，上游 `gh` Skill 原文明确区分）。投影沿用有界口径：正文 8 KiB、评论最多 10 条且单条 2 KiB，`comments_total`／`comments_truncated`／`body_truncated` 三个字段把「被剪掉」显式说出来，结果同样带 `untrusted_external_content`。写动作（开 PR、评论、合并）仍不在词表里。
 
 **证据与未闭合。** 单测 `github-read.test.ts` **16/16**（词表封闭、来源拒绝、参数收窄、真实临时 git 仓库的 remote 解析、环境白名单、失败归类、缺失 `gh` 的真实探测、投影上限）；集成 `github-read.integration.test.ts` 在真实 PostgreSQL 上 **8/8**（`0103` 分支完整性、原始 INSERT 反例、连接启停、`GH_REPO_UNIDENTIFIED`、身份闸门后真实 `gh` 探测、`repo` 参数到不了适配器、逐动作 Permission、与 `FILE_READ` 共存）。未闭合：本机没有安装 `gh`，**无法验证已认证的真实 GitHub 读取**；GitHub 侧写动作不存在；官方 Skill 原文尚未接入打包与运行时提示；未跑真实 Windows 窗口与安装包验收，未 commit。
 

@@ -241,6 +241,25 @@ export interface FileDiff {
   readonly unavailableReason: string | null;
 }
 
+/** 一侧扫描的覆盖情况：`complete=false` 时 `reason` 说明为什么停，`files` 是实际核对到的条数。 */
+export interface ScanSide {
+  readonly complete: boolean;
+  readonly reason: string | null;
+  readonly files: number;
+  /** 本轮列到的总条数；只有当前侧可确定，基线侧的清单没有持久化故为 null。 */
+  readonly listed: number | null;
+}
+
+/** 会话净差异连同「这一轮到底核对了多少」一起出去：总数不完整时必须能说明缺口在哪。 */
+export interface DiffCoverage {
+  readonly baseline: ScanSide;
+  readonly current: ScanSide;
+  /** 基线里有、当前扫描没核对到的文件数：不能算删除，也不能算零变化。 */
+  readonly uncheckedFiles: number;
+  /** 当前有、但基线扫描没覆盖到、又已被 Git 跟踪的文件数：不能证明是本会话新增。 */
+  readonly unverifiedFiles: number;
+}
+
 export interface ConversationDiff {
   readonly rootPath: string;
   readonly resourceId: string;
@@ -248,6 +267,7 @@ export interface ConversationDiff {
   readonly baselineRevision: bigint;
   /** 扫描或读取超限时为 true：总数只含可统计部分，不冒充完整。 */
   readonly incomplete: boolean;
+  readonly coverage: DiffCoverage;
   readonly totalFiles: number;
   readonly totalAdded: number;
   readonly totalRemoved: number;
@@ -260,6 +280,12 @@ export interface SnapshotDiffInput {
   readonly baselineCapturedAt: string;
   readonly baselineRevision: bigint;
   readonly incomplete: boolean;
+  /** 两侧扫描覆盖；省略时按「基线不完整就等于 incomplete、当前侧完整」处理（旧调用方）。 */
+  readonly coverage?: Omit<DiffCoverage, 'uncheckedFiles' | 'unverifiedFiles'> | undefined;
+  /** 当前扫描列到但没核对的路径；这些文件不得判成删除。 */
+  readonly currentUnswept?: ReadonlySet<string> | undefined;
+  /** Git 索引里已跟踪的路径：配合不完整的基线判断「新增」是否可信。 */
+  readonly tracked?: ReadonlySet<string> | undefined;
   readonly baseline: ReadonlyMap<string, BaselineFile>;
   readonly current: ReadonlyMap<string, CurrentFile>;
 }
@@ -273,8 +299,18 @@ export interface SnapshotDiffInput {
  *   * 基线有、当前无 = DELETE；基线无、当前有 = CREATE；都有且 hash 不同 = MODIFY；
  *     hash 相同 = SAME（不计）。
  *   * 总数只反映「可统计」的净变化；不可统计项显式标出，不静默混入 +0/−0。
+ *   * 当前扫描没核对到的文件不计删除，基线没覆盖到的已跟踪文件不计新增；两者各自汇总成
+ *     `coverage` 里的条数（未知 ≠ 已删除，也 ≠ 零变化）。
  */
 export function computeSnapshotDiff(input: SnapshotDiffInput): ConversationDiff {
+  const baselineSide = input.coverage?.baseline ??
+    { complete: !input.incomplete, reason: null, files: input.baseline.size, listed: null };
+  const currentSide = input.coverage?.current ??
+    { complete: true, reason: null, files: input.current.size, listed: input.current.size };
+  const unswept = input.currentUnswept ?? new Set<string>();
+  const tracked = input.tracked ?? new Set<string>();
+  const baselineComplete = baselineSide.complete;
+
   const actions = new Map<string, FileAction>();
   for (const path of input.baseline.keys()) {
     const current = input.current.get(path);
@@ -290,9 +326,18 @@ export function computeSnapshotDiff(input: SnapshotDiffInput): ConversationDiff 
   let totalFiles = 0;
   let totalAdded = 0;
   let totalRemoved = 0;
+  let uncheckedFiles = 0;
+  let unverifiedFiles = 0;
 
   for (const [path, action] of actions) {
     if (action === 'SAME') continue;
+    // 当前扫描只是没核到它，不能据此宣布被删除；也不能据此当成零变化，只能计入「未核对」。
+    if (action === 'DELETE' && unswept.has(path)) { uncheckedFiles += 1; continue; }
+    // 基线扫描不完整时，一个此刻已被 Git 跟踪却不在基线里的文件，可能是「起点没扫到」而非新建。
+    if (action === 'CREATE' && !baselineComplete && tracked.has(path)) {
+      unverifiedFiles += 1;
+      continue;
+    }
     const baseline = input.baseline.get(path);
     const current = input.current.get(path);
 
@@ -330,7 +375,9 @@ export function computeSnapshotDiff(input: SnapshotDiffInput): ConversationDiff 
     resourceId: input.resourceId,
     baselineCapturedAt: input.baselineCapturedAt,
     baselineRevision: input.baselineRevision,
-    incomplete: input.incomplete,
+    incomplete: input.incomplete || !baselineSide.complete || !currentSide.complete ||
+      uncheckedFiles > 0 || unverifiedFiles > 0,
+    coverage: { baseline: baselineSide, current: currentSide, uncheckedFiles, unverifiedFiles },
     totalFiles,
     totalAdded,
     totalRemoved,

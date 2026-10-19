@@ -250,7 +250,7 @@ B 档不排队：一条在途时再发被明确拒绝，文案不得出现「排
 
 目标不再固定运行“无工具聊天 + 执行解释 + 状态维护解释”三条模型分支。沿一次原用户消息形成连续轮次，必要读取返回原模型上下文，必要业务动作经原应用入口派生；完整 Owner、事务与兼容规则归[领域模型 §12.6](domain-model.md#126-普通-agent-主流程的应用边界)，模板选择与工作编排的区别归[提示词设计 §2.4](agent-prompt-design.md#24-普通-agent-主流程与模板选择的区别)。
 
-**当前实现边界（2026-10-15，阶段 A/B/C 已实施，C 的 Run 接续已含会话内排他）**：§2.7.1 的持久协议、**会话读取轮次**（来源 `AGENT_SESSION_READ`、目录取自 `assist_sessions.working_resource_id`、路由 `AGENT_MAIN_LOOP`）、**执行候选提交**、**状态维护提交**与**会话内 Run 排他**已落地——主流程收尾的那一次模型输出同时给出回复、可选的执行候选与可选的状态维护候选，两者都经既有确定性校验后落进**原**请求行，因此每条消息不再需要两次额外的解释模型调用。状态维护的基线在**这次模型请求之前**就由 `freezeStateInterpretationBaseline()` 冻结并原样传下去，模型在途期间的人工修改不会被吸收成原基线（R3）。**同一会话不并行推进两条执行链**：`applyConversationExecution()` 在建 Task 之前按 `findLiveRunForSession()` 问「这条会话上是否已有别的请求到了 DELEGATED、且那个 Run 还没收口」，有则按类型化 `EXECUTOR_CONFLICT` 拒绝并指回原 Run；活动状态集与 Task 级 `findLiveRunForTask()` 逐字一致，原 Run 收口后同一会话可再发起执行。仍未实施：Run 结果按原身份投影回原会话的可展开视图（AM-06 后半）；协作页也仍会发起旧执行解释与状态维护解释命令（那两条调用现在会在服务端命中已保存的判定并直接重放，但前端调用本身与它的规格反例都还在）。§2.6 中 A 档无工具/B 档只读的描述保留为当前实现事实。
+**当前实现边界（2026-10-18，阶段 A/B/C 已实施，原消息 Run 摘要已回填）**：§2.7.1 的持久协议、**会话读取轮次**（来源 `AGENT_SESSION_READ`、目录取自 `assist_sessions.working_resource_id`、路由 `AGENT_MAIN_LOOP`）、**执行候选提交**、**状态维护提交**与**会话内 Run 排他**已落地——主流程收尾的那一次模型输出同时给出回复、可选的执行候选与可选的状态维护候选，两者都经既有确定性校验后落进**原**请求行，因此每条消息不再需要两次额外的解释模型调用。状态维护的基线在**这次模型请求之前**就由 `freezeStateInterpretationBaseline()` 冻结并原样传下去，模型在途期间的人工修改不会被吸收成原基线（R3）。**同一会话不并行推进两条执行链**：`applyConversationExecution()` 在建 Task 之前按 `findLiveRunForSession()` 问「这条会话上是否已有别的请求到了 DELEGATED、且那个 Run 还没收口」，有则按类型化 `EXECUTOR_CONFLICT` 拒绝并指回原 Run；活动状态集与 Task 级 `findLiveRunForTask()` 逐字一致，原 Run 收口后同一会话可再发起执行。Apply 后原用户消息现可读取同一 `request_id`/Task/Run 的摘要投影；更完整的 Run 详情继续由原 Run Owner 提供。旧状态维护解释仍使用独立请求 Owner，相关 UI/窗口及 Provider 范围见统一功能验收表。§2.6 中 A 档无工具/B 档只读的描述保留为当前实现事实。
 
 纯会话读取复用 §2.6 的 `session_tool_calls`、Gateway 与消息租约机制；新 AGENT 来源必须被明确校验，不能伪装成人设助手或拿到 RUN 写权限。Task/Run 执行继续使用 §2.3 的 `run_tool_calls` 和原图；逻辑主流程接续 Run 时引用其原身份和工具结果，不把同一副作用登记为两次独立调用。会话工具调用与 Run 调用各有确切来源，跨边界关联保存后才能恢复。
 
@@ -274,6 +274,25 @@ B 档不排队：一条在途时再发被明确拒绝，文案不得出现「排
 | API Breaking Change 与兼容 | 无既有端点删除或改形；新增为增量。 | 新增 `BindAssistSessionDirectory` 与会话 `working_resource_id` 只读投影属**非破坏**；`conversation_execution_requests` 与旧解释端点原样保留（历史命令、回执、人工决定及撤回继续可用）。 |
 
 **为什么不复用 `ASSISTANT_READ`。** 该来源在迁移 0060 的三条 CHECK、`GatewayOriginKey` 与 `attachOperation()` 中都写死了 `ASSISTANT_READ`，而 §2.6.3 要求「两种执行身份不得互相冒充」。让普通 AGENT 轮次用这个名字，等于允许它与冻结人设快照的会话在账本上无法区分，也让 `originMatches()`/`attachOperation()` 的身份核对失去作用。新增来源的代价是三条 CHECK 各加一支（0054 重述 CHECK 时漏分支的教训见 0060 注释），换来的是两种身份在库层面可分辨。
+
+### 2.8 新会话的默认工作目录作用域（2026-10-18，已确认、待实施）
+
+产品规则归[工作台 §18.1.5](../frontend/workbench-design.md#1815-未选目录时的默认工作目录2026-10-18已确认未实施)，不变量归[契约 01 §5](../../contracts/01-facts-and-ownership.md#5-projectgoal-与-inbox)，取舍依据见[研究 §1.8](../research/p00-source-study.md#18-未选目录时的默认工作目录机制对照2026-10-18)，实施切片归[任务书](../../prompts/default-working-directory.md)，场景归[测试计划 §17.1.5](../testing/verification-plan.md#1715-未选目录时的默认工作目录2026-10-18已确认未实施)。本节只定义责任、持久化与事务形态；**尚未实施**，实施前不得按本节宣称系统已有默认目录。
+
+**要解决的问题**：`assist_sessions.working_resource_id` 为空时，普通讨论照常，但会话读取按 `AGENT_SESSION_HAS_NO_WORKING_DIRECTORY` 拒掉本次工具调用（§2.7.1、`assistant-readonly-round.ts` 的 `agentSessionReadOrigin()`）。用户提出的不是「让模型自己找个目录」，而是「用户可配置的默认落点」，因此本节把兜底责任从读取期挪到创建期，并要求该落点是一个已确认的持久事实。上游五家都保证 cwd 有值，共同落点是进程目录；Relay 不采纳，因为 API/Worker 的进程目录是安装目录而非用户内容。
+
+| 要回答的问题 | 本次协议 |
+|---|---|
+| 默认目录这条事实的 Owner 与形状 | Workspace 级持久配置：新增迁移 `0111`，单行/Workspace，字段为 `workspace_id`（主键）、`resource_id`、`revision`、`updated_at`。只由 `SetWorkspaceDefaultDirectory` / `ClearWorkspaceDefaultDirectory` 命令写入，属 Workspace 应用配置事实，与 `0020`/`0089` 的「会话内选择不是应用默认」分层互不覆盖：本表承载的正是用户确认过的应用默认，会话内的显式选择仍只属于该会话。**不进 localStorage**：`recentWorkingDirectories.ts` 已声明本机偏好不构成授权，而作用域是事实。 |
+| 默认目录如何取得资源身份 | 复用既有 `OpenWorkingDirectory`：规范化真实路径、必要时建立最小 Project 与受管资源，**READY 才允许登记为默认**。因此默认目录连带其 Project 与 `local_directory_access.write_tier`；AMBIGUOUS（同目录多项目）与 NOT_READY（重叠根等）不写默认值、如实显示服务端原因，不新建第二个写执行 Owner，也不换另一个根兜底。 |
+| 新会话如何继承 | 在 `CreateAssistSession` 的**同一短事务**内完成：请求未显式给出目录作用域、Workspace 配了默认目录、且该资源仍 ACTIVE 且其 Project 未归档时，写 `project_id`＝资源所属 Project、`working_resource_id`＝默认资源、作用域来源＝`WORKSPACE_DEFAULT`。任一条件不满足则按「没有默认目录」建会话，不报错、不猜测、不改用其他根。 |
+| 为什么落在创建期而不是读取期 | 读取链不改：`agentSessionReadOrigin()` 仍只按会话行读回一次受管资源，缺目录仍以类型化原因拒本次读取，**不查默认配置、不加兜底**。默认作用域一旦随创建事务落定就是会话自身的事实，可追溯、可重放；读取期临时推断会让「这次读取用了哪个根」重新变成不可核对的隐式状态，违反 §2.7.1 与契约 01 §5。 |
+| 来源如何持久且可追溯 | `assist_sessions` 增可空列 `working_directory_source`（`USER_PICKED` / `WORKSPACE_DEFAULT`；无资源时为 NULL），与绑定同事务写入；会话上下文的 `working_directory` 投影带出该值，界面据此显示「默认目录（来自设置）」。用户在会话内显式换目录后改为 `USER_PICKED`。历史会话不回填，作用域不变。 |
+| 写权限与档位 | 默认目录不自带写能力：没有本目录档位事实时按**只读**兜底（2026-10-18 用户选定），有档位则沿用该目录自己的档位。写仍逐次经 Gateway 判定，非完全访问目录的删除仍单独确认；Git、CLI、浏览器、电脑与外部服务不因默认目录获得权限，ASSISTANT/LEARNING 身份边界不变。默认目录的配置入口不提供「自动批准」，也不提供「完全访问」（2026-10-18 档位接续后该边界不变，见工作台 §18.1.5）；「绑定是作用域不是准入」的既有原则不动。 |
+| 与 `BindAssistSessionDirectory` 三条边界的关系 | 不放宽同 Project、ACTIVE、无在途消息三条边界，也不放宽 `hasInflightMessages` 与重叠根守卫：默认作用域在创建时由同一事务建立，不产生事后绑定命令，因此不与在途消息竞争；会话内换目录仍走原命令、原 `command_id` 与原核对流程。 |
+| 失效与回落 | 默认资源停用、其 Project 归档或跨 Workspace 借用时，创建按「没有默认目录」进行并在投影中给出未生效原因；已在途与历史会话保持原绑定，不因重设默认目录恢复已撤销的权限。 |
+| API、迁移与兼容 | 只增可空列、只增表、只增命令与只读投影，属**非破坏**；`createSessionBody` 若新增可选目录入参，按既有「同 `command_id` 异载荷拒绝」处理。未配置默认目录时全部既有回执形状与拒绝语义逐字不变，`AGENT_SESSION_HAS_NO_WORKING_DIRECTORY` 的提示原文保留。 |
+| 验证落点 | 默认作用域的继承与回落用真实 PostgreSQL 集成测试；读取正确性沿 §2.7.1 既有工具账本与真实文件证据，不靠前端禁用断言，也不以合成 fixture 代替真实 PG。既有「缺目录拒读」「不猜目录」用例必须在未配置默认目录时原样通过。 |
 
 ## 3. Context Builder 管道
 

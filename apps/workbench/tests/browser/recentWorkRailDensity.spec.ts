@@ -90,6 +90,18 @@ async function installRoutes(page: Page): Promise<void> {
         session("66666666-6666-4666-8666-666666666663", projectA, "整理论文资料", "2026-10-15T00:20:00Z")
       ] });
     }
+    // 目录行「＋」落地时要按种子路径打开目录（左栏只带路径，打开由协作页发命令）。
+    if (path === `${prefix}/working-directories/open` && request.method() === "POST") {
+      const body = JSON.parse(request.postData() ?? "{}") as { command_id: string; root_path: string };
+      return fulfillJson(route, { command_id: body.command_id, committed_at: "2026-10-18T00:00:00Z",
+        result: { canonical_root: body.root_path, display_name: body.root_path.split("/").at(-1),
+          status: "READY", reason: null,
+          association: { project_id: projectA, project_title: "WindowShell 响应式收敛", project_archived: false,
+            resource_id: projectA, resource_status: "ACTIVE", file_write_identity_bound: true },
+          created_project: false, created_resource: false, candidates: [],
+          // detail 必须是字符串：解析器对缺类型直接判「响应格式无效」，整条目录等于没打开。
+          write_readiness: { status: "NEEDS_CONNECTION", detail: "本项目还没有绑定该目录的文件写入连接。" } } });
+    }
     if (path === `${prefix}/assist-sessions/66666666-6666-4666-8666-666666666662`)
       return fulfillJson(route, session("66666666-6666-4666-8666-666666666662", projectB, "接续上次工作", "2026-10-15T00:18:00Z",
         "2026-10-17T02:30:00.000Z"));
@@ -185,7 +197,7 @@ test.describe("近期工作栏窄列几何", () => {
     await expect(page).toHaveURL(/session=66666666-6666-4666-8666-666666666662$/);
     await expect(page.getByTestId("collab-current-goal")).toContainText("完成毕业论文");
     await expect(page.getByTestId("collab-current-directory")).toHaveAttribute("title", "会话目录：D:/experiment/code");
-    await expect(page.getByTestId("collab-current-directory")).toHaveText("");
+    await expect(page.getByTestId("collab-current-directory")).toHaveText("code");
     expect(posts).toHaveLength(0);
     await page.screenshot({ path: "results/rail-goals-and-directories.png" });
     // 同一浏览器中核对用户反馈的「目标为空＋未绑定目录」层级，截图只取实际侧栏。
@@ -252,6 +264,179 @@ test.describe("近期工作栏窄列几何", () => {
       expect(look.titleRoom / look.titleFont, detail)
         .toBeGreaterThanOrEqual(titleChars[index]! - 0.5);
     }
+  });
+
+  // 2026-10-18 用户指令「鼠标悬停 item 的时候要显示一个新建会话的按钮，点击自动以该目录新建一个空会话」。
+  // 这里盯住悬停这一侧的可视契约：静止不占任何几何、悬停显形时数字徽标让位而行盒逐像素不动、
+  // 指针从行移到「＋」上不闪断；点击后的落地（种子目录 → 空白输入）由 folderFirstConversation 的
+  // `?dir=` 用例在组件层核对，这里只确认真的导航到了带 new+dir 的那条入口。
+  test("目录行悬停显形「＋」：静止不占位，悬停时徽标让位、行盒不变", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await installRoutes(page);
+    await page.goto("/agent");
+    await connect(page);
+    // 两个真实目录各一颗；「未绑定目录」那一组没有路径可打开，不长这颗键。
+    await expect(page.locator(".recent-work-group-new")).toHaveCount(2);
+    expect(await page.evaluate(() => document.querySelector("summary .recent-work-group-new"))).toBeNull();
+
+    const group = page.locator(`.recent-work-group:has(> [data-testid="recent-work-new-in-${projectA}"])`);
+    const button = page.getByTestId(`recent-work-new-in-${projectA}`);
+    const read = () => group.evaluate((element) => {
+      const root = getComputedStyle(document.documentElement);
+      const rem = (name: string) => Number.parseFloat(root.getPropertyValue(name)) * Number.parseFloat(root.fontSize);
+      const summary = element.querySelector(":scope > summary")!;
+      const trigger = element.querySelector(":scope > .recent-work-group-new") as HTMLElement;
+      const count = summary.querySelector(".recent-work-group-count") as HTMLElement;
+      const title = summary.querySelector(".recent-work-group-title") as HTMLElement;
+      const box = summary.getBoundingClientRect();
+      const triggerBox = trigger.getBoundingClientRect();
+      return {
+        triggerDisplay: getComputedStyle(trigger).display,
+        countVisibility: getComputedStyle(count).visibility,
+        summaryTop: box.top, summaryHeight: box.height, summaryRight: box.right,
+        triggerRight: triggerBox.right, triggerWidth: triggerBox.width,
+        titleWidth: title.getBoundingClientRect().width,
+        compactHeight: rem("--relay-control-height-compact")
+      };
+    });
+
+    const rest = await read();
+    expect(rest.triggerDisplay).toBe("none");
+    expect(rest.countVisibility).toBe("visible");
+
+    await group.locator(":scope > summary").hover();
+    const hovered = await read();
+    const detail = JSON.stringify({ rest, hovered });
+    expect(hovered.triggerDisplay, detail).toBe("flex");
+    // 徽标让位但仍占宽：标题可用宽度与行盒都不随悬停变化，只是右端换成了「＋」。
+    expect(hovered.countVisibility, detail).toBe("hidden");
+    expect(hovered.summaryTop, detail).toBe(rest.summaryTop);
+    expect(hovered.summaryHeight, detail).toBe(rest.summaryHeight);
+    expect(hovered.titleWidth, detail).toBe(rest.titleWidth);
+    // 「＋」落在这一行右端内缘，命中区仍是紧凑控件那一档。
+    expect(hovered.triggerRight, detail).toBeLessThanOrEqual(hovered.summaryRight + 0.5);
+    expect(hovered.triggerWidth, detail).toBeCloseTo(hovered.compactHeight, 1);
+    // 指针从行移到「＋」上：它自己就是悬停目标，不能闪断回徽标。
+    await button.hover();
+    const onTrigger = await read();
+    expect(onTrigger.triggerDisplay, JSON.stringify(onTrigger)).toBe("flex");
+    expect(onTrigger.countVisibility, JSON.stringify(onTrigger)).toBe("hidden");
+
+    // 点击进入同一条「新对话」入口，并带上这一行的目录路径；左栏自身不建会话、不发写命令。
+    await button.click();
+    await expect(page).toHaveURL(/\/agent\?new=[^&]+&dir=D%3A%2Fthesis%2Fdocs$/);
+    // 协作页按种子打开目录，落在空白输入上（会话仍在首条发送时建立）。
+    await expect(page.getByTestId("folder-scope-strip")).toContainText("docs");
+    await expect(page.getByTestId("assist-first-draft")).toBeVisible();
+  });
+
+  // 2026-10-18 用户实机指认「这个搜索框里面的光标也太小了吧？而且离搜索这个词太近了」。
+  // 根因：Chromium 的 <input> 光标高度跟随行盒——本栏 input 是 14px 字号 + 1.5 行高（21px），
+  // 实测光标只有 11px 高、1 设备像素宽（宽度由平台绘制，CSS 没有加粗属性），在 32px 胶囊里
+  // 读着极小；图标右缘到文字起点又只有 space.2（8px）。修法两处：行高写到容器上（input 的
+  // font:inherit 会压掉内层声明）取 control.height.compact − space.1（28px）→ 光标 18–19px，
+  // 图标小一档到 font.size.body，160px 拖拽档下 placeholder 余量实测 96→100px 盒宽、余量 16px。
+  // 同日第二轮用户指认「放大镜图标右侧那块放不了内容、宽度该调小」：上一轮顺手把 gap 提到
+  // space.3（12px），但根因是 11px 小光标不是间距，光标修大后那 12px 读成死区——调回 space.2。
+  // 这里同时锁计算值与像素实测：前者防样式回退，后者防「行高够了但光标没变大」的引擎侧变化。
+  test("搜索框光标高度与图标间距：用户指认的两处不再回归", async ({ page }) => {
+    await installRoutes(page);
+    await page.goto("/agent");
+    await connect(page);
+    const input = page.getByTestId("recent-work-search");
+    await expect(input).toBeVisible();
+
+    const geometry = await page.evaluate(() => {
+      const root = getComputedStyle(document.documentElement);
+      const rootPx = Number.parseFloat(root.fontSize);
+      const rem = (name: string) => Number.parseFloat(root.getPropertyValue(name)) * rootPx;
+      const el = document.querySelector<HTMLInputElement>('[data-testid="recent-work-search"]')!;
+      const label = el.closest("label")!;
+      const svg = label.querySelector("svg")!;
+      return {
+        lineHeight: Number.parseFloat(getComputedStyle(el).lineHeight),
+        fontSize: Number.parseFloat(getComputedStyle(el).fontSize),
+        lineHeightToken: rem("--relay-control-height-compact") - rem("--relay-space-1"),
+        iconToInput: el.getBoundingClientRect().left - svg.getBoundingClientRect().right,
+        gapToken: rem("--relay-space-2"),
+        inputHeight: el.getBoundingClientRect().height,
+        labelContentHeight: label.clientHeight,
+        dpr: window.devicePixelRatio
+      };
+    });
+    // 行高是光标唯一的 CSS 杠杆（宽度由平台画，没有属性能调）。
+    expect(geometry.lineHeight).toBeCloseTo(geometry.lineHeightToken, 1);
+    // 图标右缘 → 文字（光标）起点：space.2，2026-10-18 第二轮按用户指认从 space.3 调回。
+    expect(geometry.iconToInput).toBeCloseTo(geometry.gapToken, 1);
+    // 行盒长高后仍装进标签内容盒：28px 行盒 ≤ 30px（32px 胶囊 − 2×1px 边）。
+    expect(geometry.inputHeight).toBeLessThanOrEqual(geometry.labelContentHeight);
+
+    // 像素实测：清空值与 placeholder，聚焦后光标会闪，重试到拍到为止。
+    // caret:"initial" 才会把光标画进截图——Playwright 默认 caret:"hide"。
+    await input.evaluate((el: HTMLInputElement) => { el.value = ""; el.placeholder = ""; });
+    await input.click();
+    let caret: { heightCss: number; widthCss: number; topCss: number; lum: number } | null = null;
+    for (let attempt = 0; attempt < 10 && caret === null; attempt += 1) {
+      await page.waitForTimeout(200);
+      const shot = await input.screenshot({ caret: "initial" });
+      caret = await page.evaluate(async (dataUrl: string) => {
+        const image = new Image();
+        await new Promise((resolve, reject) => {
+          image.onload = resolve;
+          image.onerror = reject;
+          image.src = dataUrl;
+        });
+        const canvas = document.createElement("canvas");
+        canvas.width = image.width;
+        canvas.height = image.height;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(image, 0, 0);
+        const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const lum = (index: number) => 0.2126 * data[index] + 0.7152 * data[index + 1] + 0.0722 * data[index + 2];
+        let darkest = { lum: Infinity, x: -1, y: -1 };
+        let lightest = -1;
+        for (let y = 0; y < canvas.height; y += 1) {
+          for (let x = 0; x < canvas.width; x += 1) {
+            const value = lum((y * canvas.width + x) * 4);
+            if (value < darkest.lum) darkest = { lum: value, x, y };
+            if (value > lightest) lightest = value;
+          }
+        }
+        // 没有足够暗的像素＝光标正处于闪烁的熄灭相，下一拍再来。
+        if (darkest.x < 0 || darkest.lum > lightest - 40) return null;
+        const threshold = darkest.lum + 50;
+        let left = darkest.x;
+        let right = darkest.x;
+        const rowDark = (x: number) => lum((darkest.y * canvas.width + x) * 4) < threshold;
+        while (left > 0 && rowDark(left - 1)) left -= 1;
+        while (right < canvas.width - 1 && rowDark(right + 1)) right += 1;
+        const columnDark = (y: number) => {
+          for (let x = left; x <= right; x += 1) {
+            if (lum((y * canvas.width + x) * 4) < threshold) return true;
+          }
+          return false;
+        };
+        let top = darkest.y;
+        let bottom = darkest.y;
+        while (top > 0 && columnDark(top - 1)) top -= 1;
+        while (bottom < canvas.height - 1 && columnDark(bottom + 1)) bottom += 1;
+        const scale = window.devicePixelRatio;
+        return { heightCss: (bottom - top + 1) / scale, widthCss: (right - left + 1) / scale,
+          topCss: top / scale, lum: Math.round(darkest.lum) };
+      }, `data:image/png;base64,${shot.toString("base64")}`);
+    }
+    const detail = JSON.stringify({ caret });
+    expect(caret, detail).not.toBeNull();
+    // 下限不写死px：光标高度是引擎按行盒光栅化的，同一份 CSS 在 dpr=1 量到 15px、dpr≥2 量到 19px
+    // （修复前同法量到 8px / 11px）。用字号当基准——光标矮于字号就读作「小短线」，
+    // 这正是用户截图里看到的样子；上限 24px 防行高继续加码顶满胶囊。
+    expect(caret!.heightCss, detail).toBeGreaterThanOrEqual(geometry.fontSize - 1);
+    expect(caret!.heightCss, detail).toBeLessThanOrEqual(24);
+    // 宽度仍是平台发的 1 设备像素：只存档事实，不是可调量。
+    expect(caret!.widthCss, detail).toBeLessThanOrEqual(2);
+    // 光标落在输入行盒里，不顶到胶囊缘。
+    expect(caret!.topCss, detail).toBeGreaterThanOrEqual(0);
+    expect(caret!.topCss + caret!.heightCss, detail).toBeLessThanOrEqual(geometry.inputHeight + 1);
   });
 
   // 2026-10-16 用户截图反馈：三个根区标题常驻淡底，连排把左栏读成灰白条纹；条目贴着分组竖线画激活标记，
@@ -513,6 +698,9 @@ test.describe("近期工作栏窄列几何", () => {
         // 浮层：fixed 定位、顶边不低于触发器底边、右缘与触发器右缘对齐。
         panelPosition: panel === null ? null : getComputedStyle(panel).position,
         panelBelowTrigger: panelBox === null ? null : panelBox.top >= triggerBox.bottom - 1,
+        // 2026-10-18 用户指认「菜单竖直方向离三个点太远」：间距实测一档 space.1（4px）。
+        // 只写「在下方」量不出这一档，8px 也满足 panelBelowTrigger。
+        panelGap: panelBox === null ? null : panelBox.top - triggerBox.bottom,
         panelRightAligned: panelBox === null ? null : Math.abs(panelBox.right - triggerBox.right) < 2,
         // 2026-10-16：菜单宽度跟条目一致——面板宽 = 最宽条目「自然宽度」+ 两侧各一档内间距，
         // 右侧不留空底；此前 min-width 10rem 会让面板明显宽于条目。
@@ -612,26 +800,27 @@ test.describe("近期工作栏窄列几何", () => {
       .getByTestId(`recent-work-menu-${sessionId}`).click();
     const opened = await read();
     expect(opened.expanded, JSON.stringify(opened)).toBe("true");
-    // 2026-10-16 按用户参考菜单重排：置顶／重命名／未读在前，分组细线之后复制身份与归档收尾；
-    // 五条动作各带一枚前缀图标（图标不进 textContent，这里只核对顺序与存在性）。
+    // 2026-10-16 按用户参考菜单重排：置顶／重命名／未读／分叉在前，分组细线之后复制身份与归档收尾；
+    // 六条动作各带一枚前缀图标（图标不进 textContent，这里只核对顺序与存在性）。
     // 这条种子会话本身是未读态，所以第三项显示反向动作「取消未读」。
     expect(opened.panelActions, JSON.stringify(opened))
-      .toEqual(["置顶", "重命名", "取消未读", "复制会话 ID", "归档"]);
+      .toEqual(["置顶", "重命名", "取消未读", "分叉这段讨论", "复制会话 ID", "归档"]);
     expect(opened.panelSeparators, JSON.stringify(opened)).toBe(1);
-    expect(opened.panelActionIcons, JSON.stringify(opened)).toEqual([true, true, true, true, true]);
-    // 收尾的归档用状态红色（color.status.danger.text），上面四条常规动作用正文黑
+    expect(opened.panelActionIcons, JSON.stringify(opened))
+      .toEqual([true, true, true, true, true, true]);
+    // 收尾的归档用状态红色（color.status.danger.text），上面五条常规动作用正文黑
     // （color.text.primary）——2026-10-17 用户指认「文字要黑色、危险操作像归档用红色」。
     // 常规动作绝不能退回共享基座 `.text-button` 的森林绿动作色，那是这轮改掉的读感。
     expect(opened.panelActionColors, JSON.stringify(opened)).toEqual(
       [opened.tokenTextPrimary.primary, opened.tokenTextPrimary.primary,
         opened.tokenTextPrimary.primary, opened.tokenTextPrimary.primary,
-        opened.tokenTextPrimary.danger]);
+        opened.tokenTextPrimary.primary, opened.tokenTextPrimary.danger]);
     expect(opened.panelActionColors![0], JSON.stringify(opened))
       .not.toBe(opened.tokenTextPrimary.action);
-    // 五条都左对齐（图标在左、名称跟着）：`.text-button` 基座的 justify-content:center
+    // 六条都左对齐（图标在左、名称跟着）：`.text-button` 基座的 justify-content:center
     // 是同特异度后置声明，曾把这里的 flex-start 静默压成居中（用户指认「文字要左对齐」）。
     expect(opened.panelActionJustify, JSON.stringify(opened))
-      .toEqual(["flex-start", "flex-start", "flex-start", "flex-start", "flex-start"]);
+      .toEqual(["flex-start", "flex-start", "flex-start", "flex-start", "flex-start", "flex-start"]);
     // 菜单宽度跟条目一致（用户指认）：面板宽 - 最宽条目自然宽 = 两侧内间距 + 细边，右侧不留空底。
     expect(opened.panelWidth! - opened.panelItemNaturalWidth!, JSON.stringify(opened))
       .toBeCloseTo(opened.panelInlineInsets!, 0);
@@ -640,6 +829,8 @@ test.describe("近期工作栏窄列几何", () => {
     // 浮层：fixed 定位、开在触发器下方、右缘与触发器对齐。
     expect(opened.panelPosition, JSON.stringify(opened)).toBe("fixed");
     expect(opened.panelBelowTrigger, JSON.stringify(opened)).toBe(true);
+    // 间距只剩一档 space.1：⋯ 图标只有 20px 却压在 32px 控件框里，多一档就读成悬在行的下方。
+    expect(opened.panelGap!, JSON.stringify(opened)).toBeCloseTo(opened.space1, 1);
     expect(opened.panelRightAligned, JSON.stringify(opened)).toBe(true);
     // 用户指认的两处：展开后 ⋯ 一动不动，这一列也不被推挤（滚动高度不变）。
     expect(opened.triggerTop, JSON.stringify({ hovered, opened })).toBe(hovered.triggerTop);
@@ -673,6 +864,17 @@ test.describe("近期工作栏窄列几何", () => {
     expect(after.rowPitch, JSON.stringify({ look, after })).toBe(look.rowPitch);
     expect(after.rowHeight, JSON.stringify({ look, after })).toBe(look.rowHeight);
     // 只是看看面板，不该发任何命令。
+    expect(posts, JSON.stringify(posts)).toHaveLength(0);
+
+    // 整行右键（2026-10-18 用户指令）：开的是同一个面板，锚点仍在 ⋯、不跟指针落点走，
+    // 原生菜单让位（面板出现即说明 preventDefault 生效），同样一发命令都不发。
+    await page.locator(`.recent-work-row:has([data-testid="recent-work-${sessionId}"])`)
+      .first().click({ button: "right", position: { x: 12, y: 8 } });
+    const rightClicked = await read();
+    expect(rightClicked.expanded, JSON.stringify(rightClicked)).toBe("true");
+    expect(rightClicked.panelPosition, JSON.stringify(rightClicked)).toBe("fixed");
+    expect(rightClicked.panelGap!, JSON.stringify(rightClicked)).toBeCloseTo(rightClicked.space1, 1);
+    expect(rightClicked.panelRightAligned, JSON.stringify(rightClicked)).toBe(true);
     expect(posts, JSON.stringify(posts)).toHaveLength(0);
   });
 

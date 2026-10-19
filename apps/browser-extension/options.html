@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Relay 浏览器桥接</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; max-width: 34rem; }
+    label { display: block; margin: 12px 0 4px; font-weight: 600; }
+    input { width: 100%; padding: 6px 8px; box-sizing: border-box; }
+    button { margin-top: 16px; padding: 8px 16px; }
+    p { color: #555; line-height: 1.5; }
+    #status { margin-top: 12px; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Relay 浏览器桥接</h1>
+  <p>把 Relay API 的本机地址与配对令牌填在这里。两者都显示在 Relay 的浏览器能力面板里；
+     令牌只保存在本扩展的本地存储，不经过任何服务器。</p>
+  <label for="serverUrl">API 地址（本机）</label>
+  <input id="serverUrl" placeholder="http://127.0.0.1:8787">
+  <label for="token">配对令牌</label>
+  <input id="token" type="password" placeholder="粘贴 Relay 显示的配对令牌">
+  <button id="save">保存并连接</button>
+  <div id="status"></div>
+  <script src="options.js"></script>
+</body>
+</html>

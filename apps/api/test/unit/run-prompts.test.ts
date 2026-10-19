@@ -22,8 +22,12 @@ import {
  */
 
 const CORE_DUTY_HEADER = '【本次调用职责与输出约束】';
-const WRITE_ONLY_LINE = '本次授权范围内你可以请求修改文件';
-const DELETE_BOUNDARY_LINE = '删除文件不在本次授权内，目录范围之外的文件也不在授权内。';
+const WRITE_ONLY_LINE = '本次授权范围内你可以请求新建、修改或删除受管目录内的文件';
+const WRITE_BASELINE_LINE = '修改或删除既有文件必须把实际读到的 sha256 作为该变更的 baselineSha256；';
+const WRITE_CREATE_LINE = '新建无需基线，但目标必须不存在，不能用新建覆盖已有文件。';
+const WRITE_DELETE_LINE = '删除只在本次任务明确要求删除时提出。请求批准档与自动批准档都不会豁免删除，';
+const WRITE_NO_BYPASS_LINE = '不得用清空内容、覆盖写、改名或新建同名文件绕过删除确认；目录范围之外的文件不在授权内。';
+const WRITE_RECEIPT_LINE = '只有拿到工具回执才可以说已经修改或删除；等待确认、被拒绝或失败时如实说明。';
 const READ_ONLY_LINE = '工具只读，不修改任何文件，也不创建 Task/Run；不要用它们宣布业务完成。';
 const NO_TOOL_LINE = '本次只输出候选正文，不执行文件修改、不创建 Task/Run，也不宣布业务完成。';
 
@@ -46,14 +50,15 @@ test('DRAFT branches follow the actual tool list and never mix read with write',
     readonly forbidden: readonly string[];
   }[] = [
     { capability: { toolsEnabled: false, canWrite: false }, expectedRouteId: 'DRAFT_NO_TOOLS',
-      expected: [NO_TOOL_LINE], forbidden: [READ_ONLY_LINE, WRITE_ONLY_LINE, DELETE_BOUNDARY_LINE] },
+      expected: [NO_TOOL_LINE], forbidden: [READ_ONLY_LINE, WRITE_ONLY_LINE, WRITE_DELETE_LINE] },
     // 没有声明工具时 canWrite 不生效：空清单只能是无工具分支，不能漏出写能力文案。
     { capability: { toolsEnabled: false, canWrite: true }, expectedRouteId: 'DRAFT_NO_TOOLS',
-      expected: [NO_TOOL_LINE], forbidden: [READ_ONLY_LINE, WRITE_ONLY_LINE, DELETE_BOUNDARY_LINE] },
+      expected: [NO_TOOL_LINE], forbidden: [READ_ONLY_LINE, WRITE_ONLY_LINE, WRITE_DELETE_LINE] },
     { capability: { toolsEnabled: true, canWrite: false }, expectedRouteId: 'DRAFT_READ_ONLY_TOOLS',
-      expected: [READ_ONLY_LINE], forbidden: [NO_TOOL_LINE, WRITE_ONLY_LINE, DELETE_BOUNDARY_LINE] },
+      expected: [READ_ONLY_LINE], forbidden: [NO_TOOL_LINE, WRITE_ONLY_LINE, WRITE_DELETE_LINE] },
     { capability: { toolsEnabled: true, canWrite: true }, expectedRouteId: 'DRAFT_WRITE_TOOLS',
-      expected: [WRITE_ONLY_LINE, DELETE_BOUNDARY_LINE],
+      expected: [WRITE_ONLY_LINE, WRITE_BASELINE_LINE, WRITE_CREATE_LINE, WRITE_DELETE_LINE,
+        WRITE_NO_BYPASS_LINE, WRITE_RECEIPT_LINE],
       forbidden: [NO_TOOL_LINE, READ_ONLY_LINE] },
   ];
 
@@ -70,6 +75,27 @@ test('DRAFT branches follow the actual tool list and never mix read with write',
         `${testCase.expectedRouteId} system must not leak another branch's line: ${line}`);
     }
   }
+});
+
+test('write DRAFT allows DELETE but keeps task scope, baseline and per-action admission', () => {
+  const system = draftToolSystemPrompt(true);
+  // 工具 schema、Gateway 与产品规则都支持删除；提示词不能再把删除整体说成越权，
+  // 否则真实模型永远不提出删除，只有脚本化用例能走到删除分支。
+  assert.ok(!system.includes('删除文件不在本次授权内'),
+    'the prompt must not forbid DELETE outright while the admitted tool supports it');
+  assert.match(system, /新建、修改或删除受管目录内的文件/u);
+  assert.ok(system.includes(WRITE_BASELINE_LINE),
+    'MODIFY/DELETE must carry the sha256 read from the actual file');
+  assert.ok(system.includes(WRITE_CREATE_LINE),
+    'CREATE must not overwrite an existing file');
+  assert.match(system, /删除只在本次任务明确要求删除时提出/u);
+  assert.match(system, /自动批准档都不会豁免删除/u,
+    'AUTO must not be described as exempting delete');
+  assert.match(system, /完全访问档是否免确认由系统判定/u,
+    'only the system decides the FULL tier exemption');
+  assert.match(system, /不得用清空内容、覆盖写、改名或新建同名文件绕过删除确认/u);
+  assert.match(system, /目录范围之外的文件不在授权内/u);
+  assert.match(system, /只有拿到工具回执才可以说已经修改或删除/u);
 });
 
 test('every DRAFT system combines the shared core exactly once, as the cache prefix', () => {

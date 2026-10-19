@@ -92,7 +92,7 @@ async function connect(page: Page): Promise<void> {
   await page.keyboard.press("Escape");
 }
 
-/** 任务归属的一屏：任务聊天复用同一顶栏，但「新建会话」在这里是唯一入口。 */
+/** 任务归属的一屏：任务聊天复用同一顶栏，右翼同样不放「新建会话」（2026-10-18 用户指令）。 */
 const taskSession = { id: sessionId, workspace_id: workspaceId, project_id: projectId, task_id: taskId,
   title: "关于确定实验评价指标", status: "ACTIVE", revision: "1",
   working_resource_id: "88888888-8888-4888-8888-888888888888",
@@ -236,7 +236,7 @@ test.describe("会话顶栏单行密度", () => {
     expect(look.scopeLeft).toBeCloseTo(look.titleLeft!, 0);
     // 长标题在名字上截断，不撑高顶栏。
     expect(look.titleOverflow).toBe("ellipsis");
-    // 右翼：工作详情贴内容盒右缘，compact 一档；工作空间级讨论不重复「新建会话」。
+    // 右翼：工作详情贴内容盒右缘，compact 一档；「新建会话」已按用户指令从顶栏删除。
     expect(look.toolbarRight - look.detailsRight).toBeLessThanOrEqual(16);
     expect(look.detailsHeight).toBeCloseTo(look.compactHeight, 0);
     // 2026-10-17 用户指令：工作详情是纯图标键——32×32 命中区、18px 图标、无可见文字；
@@ -313,8 +313,8 @@ test.describe("会话顶栏单行密度", () => {
     expect(look.directoryPlaceholder).toBe(false);
     expect(look.goalColor).toBe(look.muted);
     expect(look.directoryColor).toBe(look.secondary);
-    // 会话目录是文件夹图标：文字全部退出可见层，完整路径留在 title 与可访问名称里。
-    expect(look.directoryText).toBe("");
+    // 会话目录可见的是目录名，完整路径仍在 title 与可访问名称里（图标单独说不出是哪一个目录）。
+    expect(look.directoryText).toBe("Relay-Agent");
     expect(look.directoryTitle).toBe("会话目录：D:\\Develop\\Relay-Agent");
     expect(look.directoryLabel).toBe("会话目录：D:\\Develop\\Relay-Agent");
     // 「工作详情」静止时没有底色也没有描边：顶栏不再套一圈卡片边框。
@@ -397,8 +397,9 @@ test.describe("会话顶栏单行密度", () => {
     await expect.poll(async () => (await fadeOpacity()).opacity, { timeout: 5_000 }).toBe(1);
   });
 
-  // 任务/项目归属下，顶栏的「新建会话」是唯一入口（全局「新对话」只建无作用域讨论），必须保留。
-  test("任务归属保留「新建会话」，与工作详情同在右翼", async ({ page }) => {
+  // 2026-10-18 用户指令：顶栏右翼不再有「新建会话」，任务归属也一样。
+  // 另开会话只剩左栏「新对话」与目录细条「新对话」两条路径，顶栏只负责身份与开关。
+  test("任务归属右翼不含「新建会话」，只剩任务视图与工作详情", async ({ page }) => {
     await installTaskRoutes(page);
     await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
     await connect(page);
@@ -413,24 +414,21 @@ test.describe("会话顶栏单行密度", () => {
       const buttons = [...right.querySelectorAll<HTMLElement>("button")].map((node) => node.dataset.testid ?? "");
       const t = title.getBoundingClientRect();
       const d = document.querySelector<HTMLElement>('[data-testid="collab-conversation-inspector-toggle"]')!.getBoundingClientRect();
-      const n = document.querySelector<HTMLElement>('[data-testid="assist-new-session"]')!.getBoundingClientRect();
-      return { buttons, titleLeft: t.left, titleRight: t.right,
-        detailsLeft: d.left, newRight: n.left }
+      const first = right.querySelector<HTMLElement>("button")!.getBoundingClientRect();
+      return { buttons, titleLeft: t.left, titleRight: t.right, detailsLeft: d.left, firstLeft: first.left,
+        newSessionAnywhere: document.querySelectorAll('[data-testid="assist-new-session"]').length };
     });
-    // 任务聊天右翼＝「新建会话」＋（已有的「任务视图」）＋「工作详情」，新建会话在前、同在右侧成组。
-    expect(look.buttons).toContain("assist-new-session");
-    expect(look.buttons).toContain("collab-conversation-inspector-toggle");
-    expect(look.buttons.indexOf("assist-new-session"))
-      .toBeLessThan(look.buttons.indexOf("collab-conversation-inspector-toggle"));
-    // 右翼两键成组，且整组落在左翼会话名右侧。
-    expect(look.newRight).toBeLessThanOrEqual(look.detailsLeft);
+    expect(look.newSessionAnywhere).toBe(0);
+    expect(look.buttons).toEqual(["collab-open-task-view", "collab-conversation-inspector-toggle"]);
+    // 右翼成组键仍整体落在左翼会话名右侧，去掉一颗后不改变其余键的位置契约。
+    expect(look.firstLeft).toBeLessThanOrEqual(look.detailsLeft);
     expect(look.detailsLeft).toBeGreaterThanOrEqual(look.titleRight);
     expect(look.titleLeft).toBeLessThan(look.detailsLeft);
   });
 
-  // 2026-10-17 接续：右翼四颗键统一成 Codex 式图标工具栏。四颗都无可见文字，
+  // 2026-10-17 接续：右翼图标键统一成 Codex 式图标工具栏。都不含可见文字，
   // 命中区、图标尺度、间距与悬停底色同档；「工作详情」固定在最后。
-  test("右翼四颗图标键同档：32×32、18px、无可见文字，详情固定在最后", async ({ page }) => {
+  test("右翼三颗图标键同档：32×32、18px、无可见文字，详情固定在最后", async ({ page }) => {
     await installTwoTaskSessions(page);
     await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
     await connect(page);
@@ -447,18 +445,16 @@ test.describe("会话顶栏单行密度", () => {
       const buttons = [...document.querySelectorAll<HTMLElement>(".collab-toolbar-right button")].map((node) => {
         const box = node.getBoundingClientRect();
         const icon = node.querySelector("svg")?.getBoundingClientRect();
-        // innerText 排除 display:none 的文字：新建会话的标签节点仍在 DOM 里，
-        // 但工具栏这一档只应看见图标。
+        // innerText 排除 display:none 的文字：右翼这一档只应看见图标。
         return { testid: node.dataset.testid ?? "", text: (node.innerText ?? "").trim(),
           title: node.getAttribute("title"), label: node.getAttribute("aria-label"),
           width: box.width, height: box.height, iconWidth: icon?.width ?? null };
       });
       return { buttons, compact, hoverBg };
     });
-    // 顺序：切换讨论（多条时）→ 新建会话（有归属时）→ 任务视图（任务聊天）→ 工作详情。
+    // 顺序：切换讨论（多条时）→ 任务视图（任务聊天）→ 工作详情。「新建会话」不在右翼。
     expect(look.buttons.map((button) => button.testid)).toEqual([
-      "collab-session-switcher", "assist-new-session", "collab-open-task-view",
-      "collab-conversation-inspector-toggle"
+      "collab-session-switcher", "collab-open-task-view", "collab-conversation-inspector-toggle"
     ]);
     for (const button of look.buttons) {
       expect(button.text, `${button.testid} 仍有可见文字`).toBe("");
@@ -468,7 +464,7 @@ test.describe("会话顶栏单行密度", () => {
       expect(button.title).not.toBeNull();
       expect(button.label).toBe(button.title);
     }
-    // 悬停四颗键都落到同一档 selection.hover，而不是只有工作详情被单独调过。
+    // 悬停右翼每颗键都落到同一档 selection.hover，而不是只有工作详情被单独调过。
     for (const button of look.buttons) {
       await page.getByTestId(button.testid).hover();
       await expect.poll(() => page.evaluate((testid) => {
@@ -515,9 +511,9 @@ test.describe("会话顶栏单行密度", () => {
     await page.locator(".page-head").screenshot({ path: "results/work-details-icon-task-header.png" });
   });
 
-  // 用户要求宽、窄窗都检查实际渲染：窄窗里四颗键同排且不互相交叠、不越出顶栏，
+  // 用户要求宽、窄窗都检查实际渲染：窄窗里右翼图标键同排且不互相交叠、不越出顶栏，
   // 左翼让位后仍给每颗键完整命中区。
-  test("窄窗：四颗图标键同排不重叠、不裁切，工作详情仍在最右", async ({ page }) => {
+  test("窄窗：右翼图标键同排不重叠、不裁切，工作详情仍在最右", async ({ page }) => {
     await page.setViewportSize({ width: 900, height: 800 });
     await installTwoTaskSessions(page);
     await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
@@ -690,16 +686,18 @@ test.describe("会话顶栏单行密度", () => {
     await page.locator(".collab-center").screenshot({ path: "results/conversation-paper-symmetry.png" });
   });
 
-  // 2026-10-17 用户实机截图指令「这个更换目录按钮胶囊很抢眼啊，能不能让他不那么抢眼，同时保证不会太难看」：
-  // 静止档降到「无底 + separator 边」（输入卡自己用的那一档线），悬停才回到完整 chip。
-  // 锁的是层级而不是像素：这一行唯一的动作不再比它下面那张卡更抢眼，但三态仍在说「这是动作」。
-  // 命中区没缩——降档不能顺手把 min-height 与胶囊形一起收掉。
-  test("目录细条那颗动作静止降档、悬停回到完整 chip，命中区不变", async ({ page }) => {
+  // 2026-10-18 用户指令「更换目录和未选择目录合并成一个按钮」（连同「这两行的功能重复了」）：
+  // 输入卡上方的状态行撤掉，目录细条是唯一幸存的那一行，「更换目录」并进目录名本身。
+  // 锁的是层级关系而不是像素：静止档就是目录名自己——无底、无框、无圆角、不加下划线，
+  // 字号字重与常态目录名逐值相同（它是事实主角，其次才是键）；悬停只补一道下划线说出
+  // 「可点」，不铺底不描边；颜色由细条自己的状态承担（告警态随细条换色，不另染一层）。
+  test("目录名即更换目录入口：静止无控件外观，悬停只补下划线", async ({ page }) => {
     await installRoutes(page);
     await page.goto(`/agent?session=${sessionId}`);
     await connect(page);
-    const chip = page.getByTestId("folder-scope-change");
-    await expect(chip).toBeVisible({ timeout: 20_000 });
+    const nameButton = page.getByTestId("folder-scope-change");
+    await expect(nameButton).toBeVisible({ timeout: 20_000 });
+    await expect(nameButton).toHaveText("Relay-Agent");
     const read = () => page.evaluate(() => {
       const root = getComputedStyle(document.documentElement);
       const asRgb = (value: string): string => {
@@ -709,29 +707,32 @@ test.describe("会话顶栏单行密度", () => {
       };
       const token = (name: string) => asRgb(root.getPropertyValue(name));
       const el = document.querySelector<HTMLElement>('[data-testid="folder-scope-change"]')!;
+      const strip = document.querySelector<HTMLElement>(".folder-strip")!;
       const style = getComputedStyle(el);
-      const box = el.getBoundingClientRect();
-      return { background: style.backgroundColor, border: style.borderTopColor, color: style.color,
-        radius: style.borderRadius, height: box.height,
-        transparent: "rgba(0, 0, 0, 0)", separator: token("--relay-color-border-separator"),
-        control: token("--relay-color-border-control"), hover: token("--relay-color-selection-hover"),
-        primary: token("--relay-color-text-primary"), secondary: token("--relay-color-text-secondary"),
-        compact: Number.parseFloat(root.getPropertyValue("--relay-control-height-compact"))
-          * Number.parseFloat(root.fontSize) };
+      return { background: style.backgroundColor, borderWidth: style.borderTopWidth, color: style.color,
+        radius: style.borderRadius, underline: style.textDecorationLine, cursor: style.cursor,
+        fontSize: Number.parseFloat(style.fontSize), fontWeight: style.fontWeight,
+        state: strip.dataset.state, transparent: "rgba(0, 0, 0, 0)",
+        primary: token("--relay-color-text-primary"), warningText: token("--relay-color-status-warning-text"),
+        body: Number.parseFloat(root.getPropertyValue("--relay-font-size-body")) * Number.parseFloat(root.fontSize),
+        medium: root.getPropertyValue("--relay-font-weight-medium").trim() };
     });
     const rest = await read();
+    // 这一屏细条处告警态（目录未归入项目）：目录名照旧随细条换警示色，键自己不另染一层。
+    expect(rest.state).toBe("warning");
+    expect(rest.color).toBe(rest.warningText);
     expect(rest.background).toBe(rest.transparent);
-    expect(rest.border).toBe(rest.separator);
-    expect(rest.color).toBe(rest.secondary);
-    expect(rest.radius).toBe("9999px");
-    expect(rest.height).toBeCloseTo(rest.compact, 0);
-    await page.locator(".folder-strip").screenshot({ path: "results/folder-strip-quiet-action.png" });
-    await chip.hover();
-    // 悬停档带 transition，轮询到落定再读（指针停在键上，hover 是真的参与计算样式）。
-    await expect.poll(async () => {
-      const look = await read();
-      return look.background === look.hover && look.border === look.control && look.color === look.primary;
-    }, { timeout: 5_000 }).toBe(true);
-    await page.locator(".folder-strip").screenshot({ path: "results/folder-strip-quiet-action-hover.png" });
+    expect(rest.borderWidth).toBe("0px");
+    expect(rest.radius).toBe("0px");
+    expect(rest.underline).toBe("none");
+    expect(rest.cursor).toBe("pointer");
+    // 它首先是那个目录名：正文档字号 + medium 字重，与合并前的目录名逐值相同。
+    expect(rest.fontSize).toBeCloseTo(rest.body, 1);
+    expect(rest.fontWeight).toBe(rest.medium);
+    await page.locator(".folder-strip").screenshot({ path: "results/folder-strip-name-action.png" });
+    await nameButton.hover();
+    // 悬停只补下划线（该键没有 transition，轮询是为读数稳定，不按固定等待猜时长）。
+    await expect.poll(async () => (await read()).underline, { timeout: 5_000 }).toBe("underline");
+    await page.locator(".folder-strip").screenshot({ path: "results/folder-strip-name-action-hover.png" });
   });
 });

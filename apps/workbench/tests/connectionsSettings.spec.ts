@@ -529,7 +529,8 @@ describe("项目连接与 Permission 设置", () => {
     const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
     const connectionOptions = mounted.wrapper.get('[data-testid="connection-capability"]')
       .findAll("option").map((option) => option.attributes("value"));
-    expect(connectionOptions).toEqual(["WEB_FETCH", "FILE_READ", "FILE_QUERY", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN", "FAKE_WRITE", "FAKE_PUBLIC_READ"]);
+    expect(connectionOptions).toEqual(["WEB_FETCH", "FILE_READ", "FILE_QUERY", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN",
+      "COMPUTER_READ", "COMPUTER_INPUT", "GITHUB_READ", "BROWSER_READ", "BROWSER_ACTION", "BROWSER_COMMIT", "FAKE_WRITE", "FAKE_PUBLIC_READ"]);
     await mounted.wrapper.get('[data-testid="connection-capability"]').setValue("CLI_RUN");
     await mounted.wrapper.get(".connections-form").trigger("submit"); await flush();
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
@@ -541,7 +542,7 @@ describe("项目连接与 Permission 设置", () => {
     await mounted.wrapper.get('[data-testid="policy-resource"]').setValue(resourceId);
     await mounted.wrapper.get('[data-testid="policy-decision"]').setValue("ASK");
     await mounted.wrapper.get('[data-testid="policy-form"]').trigger("submit"); await flush();
-    expect(mounted.wrapper.text()).toContain("命令执行 · 每次请求审批");
+    expect(mounted.wrapper.text()).toContain("命令行执行 · 每次请求审批");
   });
 
   it("FAKE 能力不绑定任何边界：连接与策略都不出现目录或主机输入", async () => {

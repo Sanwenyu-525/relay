@@ -30,6 +30,7 @@ const ACTION_TO_METHOD: Readonly<Record<string, ComputerMethod>> = {
   COMPUTER_SCREENSHOT: 'computer.screenshot',
   COMPUTER_GET_WINDOWS: 'computer.get_windows',
   COMPUTER_ACTIVATE_WINDOW: 'computer.activate_window',
+  COMPUTER_MOVE: 'computer.move',
   COMPUTER_CLICK: 'computer.click',
   COMPUTER_DOUBLE_CLICK: 'computer.double_click',
   COMPUTER_SCROLL: 'computer.scroll',
@@ -78,6 +79,10 @@ export function computerParamsForAction(actionType: string,
       return {};
     case 'COMPUTER_ACTIVATE_WINDOW':
       return { window_id: requireString(params, 'window_id') };
+    case 'COMPUTER_MOVE':
+      // 只移动指针，不点击。滚动与拖拽都以「指针已经在目标上」为前提，因此必须
+      // 有一个不产生副作用的定位动作，而不是逼调用方用一次点击来挪鼠标。
+      return { x: requireInteger(params, 'x'), y: requireInteger(params, 'y') };
     case 'COMPUTER_CLICK': {
       const request: Record<string, unknown> = {
         x: requireInteger(params, 'x'),

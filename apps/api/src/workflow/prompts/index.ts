@@ -73,7 +73,7 @@ export function selectRuntimePrompt(route: RuntimePromptRoute): RuntimePromptSel
       return systemSelection('SKILL', conversationPrompts.skillSystemPrompt(route.skill));
     case 'METHOD':
       return systemSelection('METHOD',
-        conversationPrompts.methodSystemPrompt(route.method, route.action));
+        conversationPrompts.methodSystemPrompt(route.method, route.action, route.readTools));
     /* ---------------------------- 解释（端口） ---------------------------- */
     case 'INTERPRETATION_EXECUTION':
       return systemSelection('INTERPRETATION_EXECUTION',

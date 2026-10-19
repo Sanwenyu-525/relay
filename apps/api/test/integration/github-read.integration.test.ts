@@ -72,6 +72,7 @@ async function fixture(options: {
   readonly capabilities?: readonly GatewayCapability[];
   /** 是否把受管根做成一个真的有 GitHub remote 的 git 仓库。 */
   readonly githubRemote?: boolean;
+  readonly githubRepo?: string;
   readonly policyActions?: readonly string[];
 } = {}): Promise<GithubFixture> {
   const workspaceId = randomUUID();
@@ -82,7 +83,8 @@ async function fixture(options: {
   await writeFile(join(root, 'README.md'), '# Relay\nGitHub 只读片\n', 'utf8');
   if (options.githubRemote === true) {
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
-    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/Sanwenyu-525/relay.git'],
+    execFileSync('git', ['remote', 'add', 'origin',
+      `https://github.com/${options.githubRepo ?? 'Sanwenyu-525/relay'}.git`],
       { cwd: root });
   }
 
@@ -353,6 +355,36 @@ test('受管根真的有 GitHub remote 时身份闸门放行，派发走到真�
     /GH_CLI_UNAVAILABLE|GH_UNAUTHENTICATED|GH_NETWORK_ERROR|GH_FORBIDDEN|GH_NOT_FOUND|GH_TIMEOUT|GH_ERROR/u
       .test(fedBack.content),
   `派发结果要么带不可信标记，要么是类型化失败：${fedBack.content.slice(0, 200)}`);
+});
+
+test('已认证真实 GitHub：四个只读工具经会话与 Gateway 成功并保存回执', {
+  skip: process.env.RELAY_TEST_AUTH_GITHUB !== '1',
+}, async () => {
+  execFileSync(process.env.RELAY_GH_PATH ?? 'gh', ['auth', 'status'], { stdio: 'pipe' });
+  // 只给测试临时目录登记公开官方仓库；不修改工作区 remote，不在 GitHub 创建测试对象。
+  const fx = await fixture({ githubRemote: true, githubRepo: 'cli/cli' });
+  const query = async (name: string, args: JsonObject): Promise<Record<string, unknown>> => {
+    const outcome = await askWithScript(fx, [[{ name, arguments: args }]]);
+    assert.equal(outcome.status, 'COMPLETED');
+    const feedback = outcome.fedBack.find((item) => item.name === name);
+    assert.ok(feedback, `missing feedback for ${name}`);
+    const result = JSON.parse(feedback.content) as Record<string, unknown>;
+    assert.equal(result.untrusted_external_content, true, `${name} must return a real result`);
+    return result;
+  };
+  await query('github_repo_view', {});
+  const list = await query('github_pr_list', { state: 'all', limit: 1 });
+  const first = (list.items as { number: number }[])[0];
+  assert.ok(first && Number.isInteger(first.number), 'public fixture must provide a real PR');
+  await query('github_pr_view', { number: first.number });
+  await query('github_issue_list', { state: 'all', limit: 1 });
+  const rows = await new SessionToolCallRepository(app.db).listBySession(fx.sessionId);
+  assert.equal(rows.length, 4);
+  assert.ok(rows.every((row) => row.status === 'SETTLED'), 'all four receipts must settle');
+  const operations = await sql<{ count: string }>`select count(*)::text as count
+    from logical_operations where project_id = ${fx.projectId} and status = 'SUCCEEDED'`
+    .execute(app.db);
+  assert.equal(operations.rows[0]!.count, '4', 'all four Gateway operations must succeed');
 });
 
 test('模型带进来的仓库名到不了适配器，词表外的 gh api 入口直接拒掉', async () => {

@@ -26,7 +26,6 @@
 .review-request-facts dt { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .review-request-facts dd { margin: var(--relay-space-2) 0 0; overflow-wrap: anywhere; }
 .review-page .review-bound-summary > p { font-size: var(--relay-font-size-meta); overflow-wrap: anywhere; }
-.review-page .review-facts > div { grid-template-columns: 1fr; gap: var(--relay-space-1); }
 .review-page .review-actions { flex-direction: column; }
 .review-page .review-actions > button { width: 100%; }
 /* 决定分层：接受/批准是主要决定，保持主按钮观感；重试检查与设置修正预算是派生动作，
@@ -50,9 +49,15 @@
 .review-reading .collab-compare-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--relay-space-4); }
 .review-request-identity { margin: var(--relay-space-4) 0; overflow-wrap: anywhere; }
 .review-request-identity > summary { cursor: pointer; color: var(--relay-color-text-secondary); }
+/* 宽窗右栏吸附：正文整篇展开在页面流里（workbench-design.md:784 要求完整待审页保留阅读正文），
+   判断区若随流滚动，「作出决定」会被推到折叠线以下。偏移取 layout.header.height，与同构网格的
+   ActivityView.css:56-62 一致；滚动容器是 styles.css:379-384 的 .app-main，故 sticky 可解析。
+   只写在 :has(> .review-reading) 内：空态没有阅读区，单列且不吸附。 */
 @media (width >= 80rem) {
   .review-page .review-columns:has(> .review-reading) { grid-template-columns: minmax(0, 1fr) var(--relay-layout-rail-width); }
-  .review-page .review-columns:has(> .review-reading) > .review-detail { border-left: var(--relay-border-width) solid var(--relay-color-border-separator); }
+  .review-page .review-columns:has(> .review-reading) > .review-detail { border-left: var(--relay-border-width) solid var(--relay-color-border-separator); position: sticky; top: var(--relay-layout-header-height); align-self: start; max-height: calc(100vh - var(--relay-layout-header-height)); overflow: auto; }
+  /* 桌面壳里顶栏为 static，判断区贴 .app-main 顶部即可，无需再让出 header 高度。 */
+  .desktop-window .review-page .review-columns:has(> .review-reading) > .review-detail { top: 0; }
 }
 @media (width < 80rem) {
   .review-primary, .review-page .review-detail, .review-reading { padding: var(--relay-layout-main-compactPadding); }
@@ -63,4 +68,10 @@
   .review-primary, .review-page .review-detail, .review-reading { padding: var(--relay-layout-main-smallPadding); }
   .review-page .review-list-item { gap: var(--relay-space-2); }
   .review-page .review-list-item > strong { font-size: var(--relay-font-size-body); }
+  /* 窄窗放不下标签列，键值对回到一行标签、一行值；宽窗沿用 migrated-scoped.css:53 的两列。 */
+  .review-page .review-facts > div { grid-template-columns: 1fr; gap: var(--relay-space-1); }
+}
+/* 矮窗不吸附判断区，避免整栏压住正文；口径同 CollaborationView.css:249-250 的判断条逃生阀。 */
+@media (max-height: 40rem) {
+  .review-page .review-columns:has(> .review-reading) > .review-detail { position: static; max-height: none; overflow: visible; }
 }

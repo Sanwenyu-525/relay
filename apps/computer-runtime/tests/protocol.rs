@@ -134,6 +134,20 @@ fn coordinate_validation_rejects_negative_and_missing_values() {
 }
 
 #[test]
+fn move_reports_the_pointer_position_and_rejects_bad_coordinates() {
+    // 移动指针是滚动/拖拽的前置动作：它只改位置，不产生点击。
+    let moved = ok("computer.move", json!({ "x": 640, "y": 480, "allow_foreground": true }));
+    assert_eq!(moved["moved"], true);
+    assert_eq!(moved["x"], 640);
+    assert_eq!(moved["y"], 480);
+    assert_eq!(moved["clicked"], serde_json::Value::Null, "move must not report a click");
+    assert_eq!(err("computer.move",
+        json!({ "x": -3, "y": 10, "allow_foreground": true })).code, "INVALID_COORDINATE");
+    assert_eq!(err("computer.move", json!({ "x": 3, "allow_foreground": true })).code,
+        "INVALID_REQUEST");
+}
+
+#[test]
 fn button_enum_is_closed() {
     assert_eq!(
         err("computer.click", json!({ "x": 10, "y": 10, "button": "double", "allow_foreground": true })).code,
@@ -204,8 +218,8 @@ fn every_frozen_error_code_is_declared() {
 fn desktop_input_requires_explicit_foreground_authorization() {
     // V2 硬闸门：不加 allow_foreground 一律不执行，绝不静默降级到用户桌面。
     for method in [
-        "computer.activate_window", "computer.click", "computer.double_click", "computer.scroll",
-        "computer.drag", "computer.type", "computer.keypress", "computer.hotkey",
+        "computer.activate_window", "computer.move", "computer.click", "computer.double_click",
+        "computer.scroll", "computer.drag", "computer.type", "computer.keypress", "computer.hotkey",
     ] {
         let mut params = json!({ "text": "x", "window_id": "1000", "key": "ENTER",
             "keys": ["CTRL", "C"], "x": 1, "y": 2,
@@ -272,4 +286,30 @@ fn environment_probe_in_real_mode_reports_platform_facts() {
     assert_eq!(env["ui_automation"]["provider_implemented"], false,
         "UIA provider 尚未实现，探测不得谎报");
     assert_eq!(env["mode_availability"]["foreground"]["status"], "requires_user_authorization");
+}
+
+#[test]
+fn scroll_reports_applied_notches_instead_of_the_requested_pixels() {
+    // 240 = 两格：请求值与实际一致，不该多出 requested_* 字段。
+    let exact = ok("computer.scroll", json!({ "delta_y": -240, "allow_foreground": true }));
+    assert_eq!(exact["delta_x"], json!(0));
+    assert_eq!(exact["delta_y"], json!(-240));
+    assert!(exact.get("requested_delta_y").is_none(), "一致时不必重复报告请求值");
+
+    // 200 像素只够一格：结果必须报 120，并说明请求值是 200。
+    let partial = ok("computer.scroll",
+        json!({ "delta_y": 200, "delta_x": 130, "allow_foreground": true }));
+    assert_eq!(partial["delta_y"], json!(120), "实际只滚了一格");
+    assert_eq!(partial["delta_x"], json!(120), "130 像素同样只够一格");
+    assert_eq!(partial["requested_delta_y"], json!(200));
+    assert_eq!(partial["requested_delta_x"], json!(130));
+
+    // 不足一格无法送进系统：类型化拒绝，而不是假装滚过。
+    let below = err("computer.scroll", json!({ "delta_y": 60, "allow_foreground": true }));
+    assert_eq!(below.code, codes::INVALID_REQUEST);
+    assert!(below.message.contains("120"), "错误里要写清一格是多少：{}", below.message);
+
+    // 另一轴合法时不静默丢掉不足一格的轴。
+    let mixed = err("computer.scroll", json!({ "delta_y": 240, "delta_x": 30, "allow_foreground": true }));
+    assert_eq!(mixed.code, codes::INVALID_REQUEST);
 }

@@ -5,6 +5,7 @@ import { Bell, BellRing } from "lucide-react";
 import { type RelayApiClient, type RelayInterventionItem } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { deliverProjectReminderNotifications } from "../lib/projectReminderNotifications";
+import { useDetailsMenu } from "../lib/popoverMenu";
 
 const AGGREGATION_MS = 3_000;
 const POLL_MS = 10_000;
@@ -17,15 +18,9 @@ export default function InterventionNotifications({ client }:
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">(
     typeof Notification === "undefined" ? "unsupported" : Notification.permission);
   const disclosure = useRef<HTMLDetailsElement>(null);
-  useEffect(() => {
-    const closeOutside = (event: PointerEvent) => {
-      if (event.target instanceof Node && disclosure.current && !disclosure.current.contains(event.target)) {
-        disclosure.current.open = false;
-      }
-    };
-    document.addEventListener("pointerdown", closeOutside);
-    return () => document.removeEventListener("pointerdown", closeOutside);
-  }, []);
+  // 通知面板是顶栏浮层：点外面、按 Esc、或打开别的浮层时收起。语义收口在 popoverMenu；
+  // Esc 的焦点归还由下方 details 上的内联 onKeyDown 完成。
+  useDetailsMenu(disclosure);
   useEffect(() => {
     let active = true;
     let checking = false;

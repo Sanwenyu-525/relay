@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { useMenuDismiss } from "../lib/popoverMenu";
 
 import { RelayApiError, RelayTransportError, type RelayApiClient } from "../api/relayClient";
 import "./ComposerDraftAssist.css";
@@ -346,15 +347,20 @@ export function ComposerDraftBar({ assist, value, inlinePolish = false }: {
   inlinePolish?: boolean;
 }) {
   const viewRef = useRef<HTMLButtonElement | null>(null);
+  const barRef = useRef<HTMLDivElement | null>(null);
   const tone = assist.failedOutline !== null ? "bad"
     : assist.polishFailed !== null ? "warn" : "normal";
   const showRow = assist.ready !== null || assist.outlineUndo !== null
     || assist.polishApplied || assist.polishBusy
     || assist.failedOutline !== null || assist.polishFailed !== null;
-  if (!showRow && !inlinePolish) return null;
   // 关闭浮层时焦点回「查看」键：提示行保持渲染，键一直都在，因此焦点有处可还。
   const closePanel = () => { assist.closePanel(); viewRef.current?.focus(); };
-  return <div className="composer-draft-bar" data-tone={tone} data-testid="composer-draft-assist">
+  // 分点浮层是提示行上方的非模态浮层：点提示行与浮层之外即收（Esc 由浮层内联处理），
+  // 并与其他浮层互斥。外壳取整条提示行：CTA 与浮层同属一行，点 CTA 的开关归它自己。
+  // 钩子必须早于下面的提前返回，条件只作为入参，不改钩子数量。
+  useMenuDismiss(assist.showPanel && assist.ready !== null, closePanel, barRef);
+  if (!showRow && !inlinePolish) return null;
+  return <div className="composer-draft-bar" data-tone={tone} data-testid="composer-draft-assist" ref={barRef}>
     {assist.ready !== null && <span className="composer-draft-bar-text" role="status">
       已整理为 {assist.ready.itemCount} 个要点</span>}
     {assist.outlineUndo !== null && <span className="composer-draft-bar-text">已采用分点</span>}

@@ -4,10 +4,10 @@ import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayK
 export function interventionFrom(value: unknown): RelayInterventionItem {
   const row = object(value, "intervention");
   const kind = string(row, "kind", "intervention");
-  if (!["REVIEW", "LOCK_CONFLICT", "RUN_FAILED", "UNKNOWN"].includes(kind))
+  if (!["REVIEW", "LOCK_CONFLICT", "RUN_FAILED", "UNKNOWN", "SCHEDULED_TASK_BLOCKED"].includes(kind))
     throw new Error("人工介入事项类型无效。");
   const targetUrl = string(row, "target_url", "intervention");
-  if (!/^\/(?:runs\/[^/]+|reviews\?id=[^/]+|tasks\?tab=attention)$/u.test(targetUrl))
+  if (!/^\/(?:runs\/[^/]+|reviews\?id=[^/]+|tasks\?tab=attention|scheduled-tasks\/[^/]+)$/u.test(targetUrl))
     throw new Error("人工介入事项入口无效。");
   return { itemKey: string(row, "item_key", "intervention"),
     changeKey: string(row, "change_key", "intervention"),

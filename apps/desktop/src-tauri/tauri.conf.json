@@ -18,6 +18,8 @@
     "resources": {
       "resources/node.exe": "node.exe",
       "resources/relay-file-io-helper.exe": "relay-file-io-helper.exe",
+      "resources/relay-computer-runtime.exe": "relay-computer-runtime.exe",
+      "resources/browser-extension/": "browser-extension/",
       "resources/api/": "api/"
     },
     "icon": [

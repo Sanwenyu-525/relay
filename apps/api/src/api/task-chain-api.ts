@@ -8,7 +8,8 @@ import { TOOL_LOOP_MAX_ROUNDS,TOOL_LOOP_MAX_TOOL_CALLS,MAX_EXPLICIT_CONTEXT_SOUR
 const strict={additionalProperties:false} as const;const uuid=Type.String({format:'uuid'});const revision=Type.String({pattern:'^[0-9]+$'});
 const params=Type.Object({workspace_id:uuid,id:uuid},strict);const projectParams=Type.Object({workspace_id:uuid,project_id:uuid},strict);
 const result=Type.Object({chain_id:uuid,project_id:uuid,status:Type.String(),revision},strict);
-const execution=Type.Object({
+/** 执行范围信封：任务链与定时任务共用同一份词表，避免两处漂移。 */
+export const execution=Type.Object({
  context_sources:Type.Optional(Type.Array(Type.Object({kind:Type.Union([Type.Literal('KNOWLEDGE'),Type.Literal('MEMORY'),Type.Literal('DECISION')]),root_id:uuid,version:Type.String({pattern:'^[1-9][0-9]*$'})},strict),{maxItems:MAX_EXPLICIT_CONTEXT_SOURCES})),
  file_read_action:Type.Optional(Type.Object({connection_id:uuid,resource_id:uuid,relative_target:Type.String({minLength:1,maxLength:1024})},strict)),
  tool_loop_action:Type.Optional(Type.Object({resource_id:uuid,connections:Type.Object({FILE_QUERY:Type.Optional(uuid),FILE_READ:Type.Optional(uuid),GIT_READ:Type.Optional(uuid),FILE_WRITE:Type.Optional(uuid),CLI_RUN:Type.Optional(uuid),COMPUTER_READ:Type.Optional(uuid),COMPUTER_INPUT:Type.Optional(uuid)},strict),allowed_tools:Type.Array(Type.Union(INTERNAL_TOOL_DEFINITIONS.map(t=>Type.Literal(t.name))),{minItems:1,maxItems:INTERNAL_TOOL_DEFINITIONS.length,uniqueItems:true}),max_rounds:Type.Integer({minimum:1,maximum:TOOL_LOOP_MAX_ROUNDS}),max_tool_calls:Type.Integer({minimum:1,maximum:TOOL_LOOP_MAX_TOOL_CALLS})},strict)),

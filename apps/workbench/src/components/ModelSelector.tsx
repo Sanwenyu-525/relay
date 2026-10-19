@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import type { RelayApiClient, RelayCatalogModel, RelayModelCatalog } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import { useMenuExclusive } from "../lib/popoverMenu";
 
 /**
  * 选择只提交给既有发送/命令 Owner；这里不另建幂等或回执状态。
@@ -55,6 +56,12 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
   const [readWarnings, setReadWarnings] = useState<readonly string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
+  // 刷新进行中不收下拉（否则「目录已更新」的回执会在用户眼前消失）；独占关值时读 ref 取最新。
+  const refreshingRef = useRef(false);
+  refreshingRef.current = refreshing;
+  // 打开别的浮层（「+」菜单、档位菜单）时收起本下拉：输入器工具行上的多个 chip 弹层
+  // 不允许同时打开互相压。自身的外部按下与 Esc 由下面那个 effect 负责。
+  useMenuExclusive(open, () => { if (!refreshingRef.current) onOpenChange(false); });
   useEffect(() => {
     if (!open) return;
     let active = true;

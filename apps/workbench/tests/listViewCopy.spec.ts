@@ -116,10 +116,10 @@ describe("项目列表 live 计数与归档横幅", () => {
     }));
     const mounted = await mountWorkbench("/projects");
     unmount = mounted.unmount;
-    // 归档入口在详情抽屉里（点「⋯」打开，AppDialog 走 portal）。
+    // 归档入口在详情抽屉里（点「⋯」打开，AppDialog 走 portal）。撤销条替代确认框：
+    // 单击归档即发命令，成功回执仍留在列表上方。
     await mounted.wrapper.get(`[data-testid="project-card-more-${projectId}"]`).trigger("click"); await flush();
     await portal().get('[data-testid="project-archive"]').trigger("click"); await flush();
-    await portal().get('[data-testid="project-archive-confirm"]').trigger("click"); await flush();
     const banner = mounted.wrapper.get('[data-testid="project-archive-success"]').text();
     // 设备显示时区默认 Asia/Shanghai：2026-09-26T00:00:00Z → 2026-09-26 08:00:00。
     expect(banner).toContain("2026-09-26 08:00:00");

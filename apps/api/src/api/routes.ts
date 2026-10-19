@@ -49,12 +49,31 @@ import { registerProjectReminderRoutes } from './project-reminder-api.js';
 import { registerProjectReminderScheduler } from '../runtime/project-reminder-scheduler.js';
 import { registerTaskChainScheduler } from '../runtime/task-chain-scheduler.js';
 import { registerTaskChainRoutes } from './task-chain-api.js';
+import { registerScheduledTaskRoutes } from './scheduled-task-api.js';
+import { registerScheduledTaskScheduler } from '../runtime/scheduled-task-scheduler.js';
 import { registerBlueprintRoutes } from './blueprint-api.js';
 import { registerModelRoutes } from './model-api.js';
 import { registerComposerRoutes } from './composer-api.js';
 import { registerComputerRoutes } from './computer-api.js';
+import { registerBrowserBridgeCommandRoutes, registerBrowserRoutes } from './browser-api.js';
+import { ensureBridgeRegistration } from '../browser/bridge.js';
 
 export type { RouteDependencies };
+
+/**
+ * 浏览器桥接路由：独立 scope，鉴权用桥接令牌而不是 bearer（Worker 是唯一调用方，
+ * 把 bearer 交给扩展/Worker 会扩大泄露面）。前缀 `/api/v1`，不带 workspace 段——
+ * 桥接是安装级通道，不是工作区业务。
+ */
+export function registerBrowserBridgeRoutes(app: FastifyInstance, dependencies: {
+  readonly bridgeToken: string;
+  readonly dataRoot: string;
+  readonly database: Parameters<typeof registerBrowserBridgeCommandRoutes>[1]['database'];
+}): void {
+  app.register(async (scope) => {
+    registerBrowserBridgeCommandRoutes(scope, dependencies);
+  }, { prefix: '/api/v1' });
+}
 
 /**
  * 业务 API 的统一前缀（docs/api/http-command-contract.md 第 1 节）。
@@ -77,6 +96,7 @@ export function registerRoutes(
 ): void {
   registerProjectReminderScheduler(app, dependencies);
   const taskChainRuntimeId=registerTaskChainScheduler(app,dependencies);
+  registerScheduledTaskScheduler(app, dependencies);
   const apiDependencies: RouteDependencies = {
     database: dependencies.database,
     storage: new ManagedContentStore(dependencies.dataRoot),
@@ -153,6 +173,7 @@ registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
     registerScopeSimulationRoutes(scope, apiDependencies);
     registerProjectReminderRoutes(scope, apiDependencies);
     registerTaskChainRoutes(scope,apiDependencies,taskChainRuntimeId);
+    registerScheduledTaskRoutes(scope, apiDependencies);
       registerTodayRoutes(scope, apiDependencies);
       registerActivityRoutes(scope, apiDependencies);
       registerTraceRoutes(scope, apiDependencies);
@@ -186,6 +207,8 @@ registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
       registerCommandRoutes(scope, apiDependencies);
       // 电脑操控状态（migration 0096）：桌面壳轮询的展示状态与 Esc 取消入口。
       registerComputerRoutes(scope, apiDependencies);
+      // 浏览器后端状态（migration 0106）：Worker 写入的健康投影，只读。
+      registerBrowserRoutes(scope, apiDependencies);
     },
     { prefix: API_PREFIX },
   );

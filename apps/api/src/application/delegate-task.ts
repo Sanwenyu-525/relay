@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { requireTaskChainAdmission, type TaskChainBinding } from './task-chain-admission.js';
+import { requireScheduledTaskAdmission, type ScheduledTaskBinding } from './scheduled-task-admission.js';
 import type { RunMethodBinding } from '../skills/builtin-methods.js';
 
 import type { DbExecutor } from '../infrastructure/database.js';
-import type { SessionModelSelectionRow } from '../infrastructure/database-schema.js';
+import type { GatewayCapability, SessionModelSelectionRow } from '../infrastructure/database-schema.js';
 import { isPostgresError, POSTGRES_ERROR_CODES } from '../infrastructure/postgres-error.js';
 import { toDecimalString } from '../shared/decimal.js';
 import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
@@ -16,6 +17,7 @@ import {
   revisionConflict,
 } from './domain-error.js';
 import { lockTaskInWorkspace } from './guards.js';
+import { targetMatches } from './gateway-actions.js';
 import { requireDeclaredOutputs } from './declared-output-requirements.js';
 import { requireRevision } from './revisions.js';
 import { loadTaskReadiness } from './task-readiness.js';
@@ -36,8 +38,11 @@ import { freezeAssistModelSnapshot } from './assist-model-snapshot.js';
 // 写入与受控命令也在信封允许的能力之内：信封是模型自主调用的上界，不是授权。
 // 没有对应范围授权时，这些动作仍然退回落单动作审批（Gateway 的既有降级）。
 // 0092: COMPUTER_READ/COMPUTER_INPUT 同理——桌面输入的实际放行由审批或范围授权决定。
+// 0105: 浏览器三族同理。BROWSER_COMMIT 即便进了信封也仍然每次都需要单动作批准
+// （它不在 SCOPE_GRANT_ACTIONS 里），信封只决定模型能不能看到这个工具。
 const TOOL_LOOP_CAPABILITIES: readonly string[] =
-  ['FILE_QUERY', 'FILE_READ', 'GIT_READ', 'FILE_WRITE', 'CLI_RUN', 'COMPUTER_READ', 'COMPUTER_INPUT'];
+  ['FILE_QUERY', 'FILE_READ', 'GIT_READ', 'FILE_WRITE', 'CLI_RUN', 'COMPUTER_READ', 'COMPUTER_INPUT',
+    'BROWSER_READ', 'BROWSER_ACTION', 'BROWSER_COMMIT'];
 import type { ContextSourceRef } from '../workflow/execution-contract.js';
 import { loadRulePlanBasis } from './rule-plan-basis.js';
 import { canonicalRelativePath, requireFrozenBaseline,
@@ -69,6 +74,8 @@ export type DelegateTaskResult = {
 
 export interface DelegateTaskInput {
   readonly taskChainBinding?: TaskChainBinding;
+  /** 定时任务触发发生绑定；与 taskChainBinding 互斥，由调度器在触发时提供。 */
+  readonly scheduledTaskBinding?: ScheduledTaskBinding;
   readonly workspaceId: string;
   readonly taskId: string;
   readonly commandId: string;
@@ -161,6 +168,7 @@ export async function delegateTask(
     body: {
       expected_task_revision: toDecimalString(expectedTaskRevision),
       ...(input.taskChainBinding === undefined ? {} : { task_chain: { chain_id: input.taskChainBinding.chainId, item_id: input.taskChainBinding.itemId,...(input.taskChainBinding.executionSignature===undefined?{}:{execution_signature:input.taskChainBinding.executionSignature}) } }),
+      ...(input.scheduledTaskBinding === undefined ? {} : { scheduled_task: { occurrence_id: input.scheduledTaskBinding.occurrenceId, scheduled_task_id: input.scheduledTaskBinding.scheduledTaskId, schedule_generation: input.scheduledTaskBinding.scheduleGeneration } }),
       retry_of_run_id: retryOfRunId,
       workflow_version_id: workflowVersionId,
       execution_config_version_id: executionConfigVersionId,
@@ -188,6 +196,7 @@ export async function delegateTask(
       if (authority === undefined) throw resourceNotFound('Workspace authority');
       await input.hooks?.afterAuthorityLock?.();
       if (input.taskChainBinding !== undefined) await requireTaskChainAdmission(repositories,input.taskChainBinding,input.workspaceId,input.taskId);
+      if (input.scheduledTaskBinding !== undefined) await requireScheduledTaskAdmission(repositories,input.scheduledTaskBinding,input.workspaceId,input.taskId);
       const task = await lockTaskInWorkspace(repositories, input.workspaceId, input.taskId);
 
       requireRevisionMatch(task, expectedTaskRevision);
@@ -308,6 +317,14 @@ export async function delegateTask(
               connection.status !== 'ACTIVE' ||
               !(await repositories.gateway.hasConnectionCapability(connectionId, capability as never))) {
             throw invalidTransition(`tool_loop_action 的 ${capability} 连接不可用或不属于当前 Project。`,
+              { taskId: task.id });
+          }
+          if (['FILE_READ', 'FILE_QUERY', 'FILE_WRITE', 'GIT_READ', 'GIT_WRITE', 'CLI_RUN']
+              .includes(capability) &&
+              (typeof connection.config.root_path !== 'string' ||
+                !targetMatches(connection.config.root_path, resource.canonical_root,
+                  capability as GatewayCapability))) {
+            throw invalidTransition(`tool_loop_action 的 ${capability} 连接目录边界不覆盖当前受管目录。`,
               { taskId: task.id });
           }
         }

@@ -3,6 +3,7 @@ import type { Static } from '@sinclair/typebox';
 
 import { createGoal } from '../application/create-goal.js';
 import { archiveProject } from '../application/archive-project.js';
+import { unarchiveProject } from '../application/unarchive-project.js';
 import { createProject } from '../application/create-project.js';
 import { requireWorkspaceVisible } from '../application/guards.js';
 import {
@@ -22,6 +23,7 @@ import {
   CreateGoalResultSchema,
   ArchiveProjectBodySchema,
   ArchiveProjectResultSchema,
+  UnarchiveProjectResultSchema,
   CreateProjectBodySchema,
   CreateProjectResultSchema,
   GoalListSchema,
@@ -149,6 +151,23 @@ export function registerProjectRoutes(
     commandType: 'ArchiveProject', bodySchema: ArchiveProjectBodySchema,
     execute: async ({ executor, body, params }) => {
       const outcome = await archiveProject(executor, {
+        workspaceId: params.workspace_id ?? '', projectId: params.project_id ?? '',
+        commandId: body.command_id, expectedRevision: body.expected_revision,
+      });
+      return { outcome, result: outcome.result };
+    },
+  }));
+
+  app.post('/projects/:project_id/unarchive', {
+    schema: {
+      params: WorkspaceProjectParamsSchema,
+      body: ArchiveProjectBodySchema,
+      response: { 200: commandEnvelopeSchema(UnarchiveProjectResultSchema) },
+    },
+  }, createCommandHandler(dependencies, {
+    commandType: 'UnarchiveProject', bodySchema: ArchiveProjectBodySchema,
+    execute: async ({ executor, body, params }) => {
+      const outcome = await unarchiveProject(executor, {
         workspaceId: params.workspace_id ?? '', projectId: params.project_id ?? '',
         commandId: body.command_id, expectedRevision: body.expected_revision,
       });

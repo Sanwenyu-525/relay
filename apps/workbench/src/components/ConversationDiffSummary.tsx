@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useConversationDiff } from "../lib/useConversationDiff";
 import { localDiffReasonText } from "./ChatLocalFileDiff";
-import type { RelayApiClient, RelayConversationDiffFile } from "../api/relayClient";
+import type { RelayApiClient, RelayConversationDiff, RelayConversationDiffFile, RelayConversationDiffScanSide } from "../api/relayClient";
 
 /**
- * 输入卡外上方居中的会话总 diff（工作台 §34.2 / §34.4，CD-01、CD-12、CD-17、CD-18）。
+ * 与目录细条同处输入卡**外**上方那一行的会话总 diff（工作台 §34.2 / §34.4，CD-01、CD-12、CD-17、CD-18）。
  *
  * 口径是 B「本轮对话开始以来的净变化」：会话基线 → 当前**已落盘**内容，生成中的预览不进这里。
  * 一行文字按钮就是展开入口，不加厚卡片、不撑高输入卡；路径变长或数字位数变化都收在这一行内，
@@ -12,6 +12,8 @@ import type { RelayApiClient, RelayConversationDiffFile } from "../api/relayClie
  *
  * 状态必须彼此可辨（CD-17）：统计中 / 空净变化 / 非 Git 根 / 缺基线 / 目录不可读（失权）/
  * 部分不可统计 / 刷新失败。刷新失败保留上次可信值并标「截至…」，未知一律不显示成 `+0 −0`。
+ * 「部分不可统计」必须当场说清是哪一类不完整（扫描覆盖不足 vs 已发现文件读不出行数）以及条数，
+ * 入口行给成因短语、展开面板逐条解释，不靠隐藏提示交代（2026-10-18 用户指令）。
  * 展开的列表与正文都取自同一份修订（CD-15/CD-18）：基线修订变了就重读，不把旧正文配新统计。
  */
 
@@ -21,6 +23,15 @@ const UNAVAILABLE_TEXT: Record<string, string> = {
   ROOT_NOT_GIT: "本次对话 · 该目录不是 Git 根，首版不统计",
   RESOURCE_UNAVAILABLE: "本次对话 · 目录当前不可读（权限或位置变化）",
 };
+
+/** 扫描停下来的位置（baseline-capture.ts 的 ScanStopReason）。 */
+const SCAN_STOP_TEXT: Record<string, string> = {
+  FILE_COUNT_LIMIT: "文件数达到统计上限",
+  TOTAL_BYTES_LIMIT: "累计体积达到统计上限",
+  SCAN_ABORTED: "扫描被中止",
+};
+
+type AvailableDiff = Extract<RelayConversationDiff, { available: true }>;
 
 const ESTABLISH_TEXT: Record<string, string> = {
   CREATED: "统计起点已从现在开始建立。",
@@ -35,6 +46,57 @@ const ESTABLISH_TEXT: Record<string, string> = {
 function timeText(value: string): string {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString("zh-CN");
+}
+
+/** 一侧扫描覆盖的可读细节：核对到多少、为什么停下来；`listed` 未知时不假称总数。 */
+function sideDetail(side: RelayConversationDiffScanSide): string {
+  const scope = side.listed === null ? `已核对 ${side.files} 个文件`
+    : `已核对 ${side.files}/${side.listed} 个文件`;
+  const stop = side.reason === null ? "" : `，原因：${SCAN_STOP_TEXT[side.reason] ?? side.reason}`;
+  return `${scope}${stop}`;
+}
+
+/** 已发现但行数读不出行数的条数（二进制/超限/读不到），与「扫描没覆盖到」是两类事实。 */
+function uncountableFiles(diff: AvailableDiff): number {
+  return diff.files.filter((file) => file.unavailableReason !== null).length;
+}
+
+/**
+ * 入口行上的可见成因：一句话说清这一轮为什么不是全部（CD-17）。
+ * 覆盖信息由服务端给出；没有覆盖信息时直说「成因未提供」，不退回含糊的隐藏提示。
+ */
+function incompleteFlag(diff: AvailableDiff): string {
+  const coverage = diff.coverage;
+  if (coverage === null) return "部分不可统计（服务端未给出成因）";
+  const parts: string[] = [];
+  if (!coverage.baseline.complete || !coverage.current.complete) parts.push("目录只扫描了部分文件");
+  if (coverage.uncheckedFiles > 0 || coverage.unverifiedFiles > 0) parts.push("部分文件未核对");
+  const uncountable = uncountableFiles(diff);
+  if (uncountable > 0) parts.push(`${uncountable} 个文件行数不可统计`);
+  return parts.length === 0 ? "部分不可统计（成因未提供）" : `统计不完整：${parts.join("、")}`;
+}
+
+/** 展开面板逐条解释不完整的具体范围与条数；只在数据可确定时给出数量，不做推测。 */
+function incompleteLines(diff: AvailableDiff): readonly string[] {
+  const coverage = diff.coverage;
+  if (coverage === null) {
+    return ["本次响应没有携带覆盖信息，服务端未说明不完整的具体成因。"];
+  }
+  const lines: string[] = [];
+  if (!coverage.baseline.complete) lines.push(`会话起点扫描不完整：${sideDetail(coverage.baseline)}。`);
+  if (!coverage.current.complete) lines.push(`本轮当前扫描不完整：${sideDetail(coverage.current)}。`);
+  if (coverage.uncheckedFiles > 0) {
+    lines.push(`${coverage.uncheckedFiles} 个文件在起点里有、本轮扫描没核对到：不计删除，也不计零变化。`);
+  }
+  if (coverage.unverifiedFiles > 0) {
+    lines.push(`${coverage.unverifiedFiles} 个文件本轮有、起点没覆盖且已被 Git 跟踪：无法确认是本会话新增，不计新增。`);
+  }
+  const uncountable = uncountableFiles(diff);
+  if (uncountable > 0) {
+    lines.push(`${uncountable} 个已发现文件的行数不可统计（二进制、超限或读不到），在下面的列表里逐条标出。`);
+  }
+  if (lines.length === 0) lines.push("服务端标记本次统计不完整，但没有给出具体成因与条数。");
+  return lines;
 }
 
 /** 逐文件正文：只在展开且修订一致时读取；失权或不可读时不显示正文。 */
@@ -116,6 +178,7 @@ export default function ConversationDiffSummary({ client, sessionId, enabled, di
     ? `${changed.resourceId}:${changed.baselineRevision}:${changed.rootPath}` : "none";
 
   let line: string;
+  let totals: { readonly added: number; readonly removed: number } | null = null;
   if (diff === null) {
     line = error !== null ? "本次对话 · 文件变化统计不可用"
       : loading ? "本次对话 · 正在统计文件变化…" : "本次对话 · 文件变化待读取";
@@ -124,7 +187,8 @@ export default function ConversationDiffSummary({ client, sessionId, enabled, di
   } else if (diff.totalFiles === 0 && !incomplete) {
     line = "本次对话 · 暂无文件变化";
   } else {
-    line = `本次对话 · ${diff.totalFiles} 个文件 +${diff.totalAdded} −${diff.totalRemoved}`;
+    line = `本次对话 · ${diff.totalFiles} 个文件`;
+    totals = { added: diff.totalAdded, removed: diff.totalRemoved };
   }
 
   async function establishBaseline() {
@@ -154,7 +218,15 @@ export default function ConversationDiffSummary({ client, sessionId, enabled, di
         : diff.available ? (diff.totalFiles === 0 ? "empty" : "changed") : diff.reason}
       onClick={() => setOpen((previous) => !previous)}>
       <span className="conversation-diff-line">{line}</span>
-      {changed !== null && incomplete && <span className="conversation-diff-flag">部分不可统计</span>}
+      {/* 数字各自成节点：新增用 diff 绿、删除用 diff 红（设计系统 §9.15），
+          同时保留 `+ / −` 符号与「新增 N 行，删除 M 行」的可访问名，不只靠颜色。 */}
+      {totals !== null && <>
+        <span className="conversation-diff-add" data-metric="added">+{totals.added}</span>
+        <span className="conversation-diff-remove" data-metric="removed">−{totals.removed}</span>
+        <span className="visually-hidden">新增 {totals.added} 行，删除 {totals.removed} 行</span>
+      </>}
+      {changed !== null && incomplete && <span className="conversation-diff-flag"
+        data-testid="conversation-diff-flag">{incompleteFlag(changed)}</span>}
       {stale && <span className="conversation-diff-stale" data-testid="conversation-diff-stale">
         更新失败 · 截至 {readAt === null ? "未知时刻" : timeText(readAt)}</span>}
       {!open && <span className="conversation-diff-hint" aria-hidden="true">展开</span>}
@@ -192,8 +264,14 @@ export default function ConversationDiffSummary({ client, sessionId, enabled, di
               </li>;
             })}
           </ul>}
-        {incomplete && <p className="helper-text" data-testid="conversation-diff-incomplete">
-          覆盖范围内有条目未能统计（超限、二进制或读不到）；上面的总数只包含可核对的文件，不冒充完整差异。</p>}
+        {incomplete && <div className="conversation-diff-incomplete" data-testid="conversation-diff-incomplete">
+          <p className="conversation-diff-incomplete-title">本次统计不完整，具体是：</p>
+          <ul className="conversation-diff-incomplete-list">
+            {incompleteLines(changed).map((text) => <li key={text}>{text}</li>)}
+          </ul>
+          <p className="helper-text">上面的总数只包含可核对的部分，不冒充完整差异；总数口径仍是
+            {" "}「会话起点 → 当前已落盘内容」。</p>
+        </div>}
       </> : <>
         {diff !== null && !diff.available && diff.reason === "NO_BASELINE" && <>
           <p className="helper-text">这个会话还没有可核对的统计起点，因此不给行数。可以从现在重新开始统计，

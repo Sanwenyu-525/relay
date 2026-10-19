@@ -139,10 +139,8 @@ test.describe("ui screenshots agent + projects", () => {
       await row.click().catch(() => {});
       await page.waitForTimeout(400);
       await shot(page, "projects-selected-detail");
-      if (await safeClick(page, page.getByTestId("project-archive"))) {
-        await shot(page, "projects-archive-dialog");
-        await safeClick(page, page.getByTestId("project-archive-cancel"));
-      }
+      // 归档已改为单击即发 + 撤销条（工作台 §13.2）：截图脚本不再点归档按钮，
+      // 否则会在截图库里真的归档一个项目。
     }
 
     // ========== LIVE: connect for /agent interactions ==========
@@ -183,11 +181,12 @@ test.describe("ui screenshots agent + projects", () => {
     await safeClick(page, page.getByTestId("assist-refresh").or(page.getByRole("button", { name: /刷新会话/ })));
     await shot(page, "agent-refresh-session");
 
-    await safeClick(page, page.getByTestId("assist-conversation-mode-agent"));
+    // 2026-10-18 三档合并为一个下拉框：截图脚本改用 selectOption。
+    await page.getByTestId("conversation-mode-select").selectOption("AGENT");
     await shot(page, "agent-mode-agent");
-    await safeClick(page, page.getByTestId("assist-conversation-mode-assistant"));
+    await page.getByTestId("conversation-mode-select").selectOption("ASSISTANT");
     await shot(page, "agent-mode-assistant");
-    await safeClick(page, page.getByTestId("assist-conversation-mode-agent"));
+    await page.getByTestId("conversation-mode-select").selectOption("AGENT");
 
     const details = page.locator("details").filter({ hasText: /资料|普通讨论|讨论/ });
     const sourceDetails = details.filter({ hasText: /资料/ }).first();
@@ -210,7 +209,7 @@ test.describe("ui screenshots agent + projects", () => {
     await safeClick(page, page.getByTestId("folder-scope-change").or(page.getByRole("button", { name: /更换目录|选择目录/ })));
     await shot(page, "agent-folder-change");
     await page.keyboard.press("Escape");
-    await safeClick(page, page.getByTestId("folder-scope-options"));
+    await safeClick(page, page.getByTestId("folder-scope-change"));
     await shot(page, "agent-folder-options");
     await page.keyboard.press("Escape");
     await safeClick(page, page.getByTestId("folder-scope-association").or(page.getByRole("button", { name: /归属|未归属/ })));

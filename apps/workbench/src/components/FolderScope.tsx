@@ -11,6 +11,11 @@ import "./FolderScope.css";
  *
  * 本组件只负责「让用户选一个目录」和如实显示服务端返回的关联状态；
  * 打开目录的写命令、错误呈现与草稿保护由协作页统一持有。
+ *
+ * 2026-10-18 随宿主从 40rem 弹窗改成锚在目录名上方的紧凑浮层，这里按「一行一项」重排：
+ * 上半是最近使用（点一行直接切换），下半是动作行（打开文件夹／新对话），中间一条分隔线。
+ * 原先的两枚并排按钮、分区右侧的「点击直接切换」提示与候选行的第二行说明都收掉了，
+ * 但每项的实际内容与可达性未减：完整路径挂 title，候选状态并进同一行的次要事实。
  */
 export default function FolderScope({ state, onOpen, onNewConversation }: {
   state: { readonly directory: RelayWorkingDirectory | null;
@@ -41,49 +46,54 @@ const needsScopeChoice = directory !== null && directory.candidates.length > 0 &
       (directory.status === "NOT_READY" && directory.reason === "OVERLAPPING_OTHER_PROJECT"));
 
   return <div className="folder-scope" data-testid="folder-scope">
-    <div className="folder-scope-actions">
-      <button className="primary-button" type="button" data-testid="collab-open-folder"
-        disabled={busy || !pickerAvailable} onClick={() => void pick()}>
-        <FolderOpen aria-hidden="true" />打开文件夹</button>
-      <button className="secondary-button" type="button" data-testid="collab-new-conversation"
-        disabled={busy} onClick={onNewConversation}>
-        <MessageSquarePlus aria-hidden="true" />新对话</button>
-    </div>
-    {!pickerAvailable && <label className="field"><span className="field-label">本机已有绝对目录</span>
-      <input data-testid="folder-manual-root" value={manualPath} disabled={busy} required
-        onChange={(event) => setManualPath(event.target.value)} placeholder="D:\\Develop\\MyProject" /></label>}
-    {!pickerAvailable && <button className="secondary-button" type="button" data-testid="folder-open-manual"
-      disabled={busy || manualPath.trim() === ""} onClick={() => onOpen(manualPath.trim())}>打开这个目录</button>}
-    {pickerError && <p className="action-error" role="alert" data-testid="folder-picker-error">{pickerError}</p>}
-
-    {recents.length > 0 && <section className="folder-scope-recents" aria-label="近期文件夹">
-      <div className="folder-scope-section-head">
-        <h3>近期文件夹</h3>
-        <span className="folder-scope-section-hint">点击直接切换</span>
-      </div>
+    {recents.length > 0 && <section className="folder-scope-recents" aria-label="最近使用">
+      <h3 className="folder-scope-label">最近使用</h3>
       <ul>{recents.map((item) => <li key={item.canonicalRoot}>
-        <button className="folder-recent-item" type="button" data-testid="collab-recent-folder"
+        <button className="folder-scope-row" type="button" data-testid="collab-recent-folder"
           disabled={busy} onClick={() => onOpen(item.canonicalRoot)}>
-          <FolderOpen aria-hidden="true" className="folder-recent-icon" />
-          <span className="folder-recent-text">
-            <span className="folder-recent-name">{item.displayName}</span>
-            <span className="folder-recent-sep" aria-hidden="true">·</span>
-            <span className="folder-recent-path" title={item.canonicalRoot}>{item.canonicalRoot}</span>
-          </span>
+          <FolderOpen aria-hidden="true" className="folder-scope-row-icon" />
+          <span className="folder-scope-row-label">{item.displayName}</span>
+          <span className="folder-scope-row-hint" title={item.canonicalRoot}>{item.canonicalRoot}</span>
         </button>
       </li>)}</ul>
     </section>}
 
+    <div className="folder-scope-actions">
+      {/* 没有原生选择器的宿主（浏览器／示例模式）不给一颗点了没反应的键：键如实禁用，
+          原因与替代入口写在 title 与下方手动路径区里。 */}
+      <button className="folder-scope-row" type="button" data-testid="collab-open-folder"
+        disabled={busy || !pickerAvailable} onClick={() => void pick()}
+        title={pickerAvailable ? "选择本机文件夹作为当前工作目录"
+          : "这个宿主没有原生目录选择器，请在下方填写本机绝对路径"}>
+        <FolderOpen aria-hidden="true" className="folder-scope-row-icon" />
+        <span className="folder-scope-row-label">打开文件夹</span></button>
+      <button className="folder-scope-row" type="button" data-testid="collab-new-conversation"
+        disabled={busy} onClick={onNewConversation}>
+        <MessageSquarePlus aria-hidden="true" className="folder-scope-row-icon" />
+        <span className="folder-scope-row-label">新对话</span></button>
+    </div>
+
+    {!pickerAvailable && <label className="field folder-scope-manual">
+      <span className="field-label">本机已有绝对目录</span>
+      <input data-testid="folder-manual-root" value={manualPath} disabled={busy} required
+        onChange={(event) => setManualPath(event.target.value)} placeholder="D:\\Develop\\MyProject" /></label>}
+    {!pickerAvailable && <button className="secondary-button secondary-button--compact" type="button"
+      data-testid="folder-open-manual"
+      disabled={busy || manualPath.trim() === ""} onClick={() => onOpen(manualPath.trim())}>打开这个目录</button>}
+    {pickerError && <p className="action-error" role="alert" data-testid="folder-picker-error">{pickerError}</p>}
+
     {needsScopeChoice && directory !== null && <section className="folder-scope-ambiguous"
       data-testid="folder-ambiguous" role="group" aria-label="同一目录关联的项目">
-      <p>{directory.status === "AMBIGUOUS"
+      <p className="folder-scope-reason">{directory.status === "AMBIGUOUS"
         ? "这个实际目录已经关联了多个项目。先选定一个作用域再继续，不会另建第二个写 Owner。"
         : "这个目录已经落在另一个项目的受管根之内。先选定作用域再继续，不会另建第二个写 Owner。"}</p>
       <ul>{directory.candidates.map((candidate) => <li key={candidate.projectId}>
-        <button className="secondary-button" type="button" disabled={busy}
+        <button className="folder-scope-row" type="button" disabled={busy}
           data-testid={`collab-folder-candidate-${candidate.projectId}`}
-          onClick={() => onOpen(directory.canonicalRoot, candidate.projectId)}>{candidate.projectTitle}</button>
-        <span className="helper-text">{candidate.projectArchived ? "项目已归档" : "项目可用"} · 目录 {candidate.resourceStatus}</span>
+          onClick={() => onOpen(directory.canonicalRoot, candidate.projectId)}>
+          <span className="folder-scope-row-label">{candidate.projectTitle}</span>
+          <span className="folder-scope-row-hint">{candidate.projectArchived ? "项目已归档" : "项目可用"} · 目录 {candidate.resourceStatus}</span>
+        </button>
       </li>)}</ul>
     </section>}
 
@@ -94,7 +104,7 @@ const needsScopeChoice = directory !== null && directory.candidates.length > 0 &
       data-testid="folder-write-readiness">{directory.writeReadiness.detail}</p>}
     <p className="folder-scope-footnote">
       <Info aria-hidden="true" className="folder-scope-footnote-icon" />
-      目录只是当前工作目录，不会自动读取整棵树、外发内容或开启任何权限。
+      新目录打开后可读取本目录文件，默认只读；已配置目录恢复原档位。不会自动读取整棵树或外发内容。
     </p>
   </div>;
 }

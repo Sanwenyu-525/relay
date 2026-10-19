@@ -1,5 +1,6 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { useDetailsMenu } from "../lib/popoverMenu";
 
 export interface PageHeaderProps {
   title: string;
@@ -28,20 +29,10 @@ export interface PageHeaderProps {
 export default function PageHeader({ title, status, meta, lede, actions, more, titleHref, headingLevel = 1, testId, children }: PageHeaderProps) {
   const Heading = headingLevel === 1 ? "h1" : "h2";
   const moreRef = useRef<HTMLDetailsElement>(null);
-
+  // 「更多操作」是浮层：点到外面、按 Esc、或打开别的浮层时收起（焦点还给 ⋯）。
   // 组词期间的 Esc 属于输入法，不关浮层；其余关闭只收起面板，不丢弃草稿或未决命令。
-  useEffect(() => {
-    const onKeydown = (event: KeyboardEvent) => {
-      const node = moreRef.current;
-      if (!node?.open || event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      node.open = false;
-      node.querySelector("summary")?.focus({ preventScroll: true });
-    };
-    document.addEventListener("keydown", onKeydown);
-    return () => document.removeEventListener("keydown", onKeydown);
-  }, []);
+  // 语义收口在 popoverMenu，与其余浮层同一套规矩。
+  useDetailsMenu(moreRef);
 
   return <header className="page-head" data-testid={testId}>
     <div className="page-head-main">

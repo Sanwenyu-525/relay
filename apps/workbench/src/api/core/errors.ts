@@ -46,3 +46,10 @@ export class RelayRunEventHttpError extends Error {
     this.name = "RelayRunEventHttpError";
   }
 }
+
+export class RelayPreviewHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`预览事件订阅返回 HTTP ${status}。`);
+    this.name = "RelayPreviewHttpError";
+  }
+}

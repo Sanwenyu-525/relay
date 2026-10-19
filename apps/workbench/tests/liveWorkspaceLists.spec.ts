@@ -63,12 +63,12 @@ describe("live Workspace 项目与任务列表", () => {
       if (url === `${root}/projects?status=archived`) return response(200, {
         items: [project(projectB, "历史项目", true)], next_cursor: null });
       // 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1）。
-      if (url === `${root}/assist-sessions?`) return response(200, { items: [] });
+      if (url === `${root}/assist-sessions?include_context=true`) return response(200, { items: [] });
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/projects"); unmount = mounted.unmount;
     // 近期工作读取 Task/Project 各一次，项目主区再读取项目列表及确切下一步。
-    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?`,
+    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?include_context=true`,
       `${root}/projects?status=all`, `${root}/tasks/${taskA}`]);
     expect(mounted.wrapper.get('[data-testid="projects-live-count"]').text())
       .toContain("已加载 2 项 · 当前搜索显示 2 项 · 仍有后续页");
@@ -91,7 +91,7 @@ describe("live Workspace 项目与任务列表", () => {
     await mounted.wrapper.get('[data-testid="projects-tab-archived"]').trigger("click");
     await flush(30);
     expect(urls.at(-1)).toBe(`${root}/projects?status=archived`);
-    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?`,
+    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?include_context=true`,
       `${root}/projects?status=all`, `${root}/tasks/${taskA}`,
       `${root}/projects?status=all&cursor=p%2B2`, `${root}/projects?status=archived`]);
     expect(mounted.wrapper.find(`[data-testid="project-row-${projectA}"]`).exists()).toBe(false);
@@ -119,7 +119,7 @@ describe("live Workspace 项目与任务列表", () => {
       if (url.startsWith(`${baseUrl}/api/v1/workspaces/${otherWorkspaceId}/projects?status=`))
         return response(200, { items: [project(projectC, "新空间项目")], next_cursor: null });
       // 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1）。
-      if (url === `${root}/assist-sessions?`) return response(200, { items: [] });
+      if (url === `${root}/assist-sessions?include_context=true`) return response(200, { items: [] });
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/projects"); unmount = mounted.unmount;
@@ -158,12 +158,12 @@ describe("live Workspace 项目与任务列表", () => {
       if (url === `${root}/tasks?inbox=true`) return response(200, {
         items: [task(taskB, "收件箱任务", null)], next_cursor: null });
       // 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1）。
-      if (url === `${root}/assist-sessions?`) return response(200, { items: [] });
+      if (url === `${root}/assist-sessions?include_context=true`) return response(200, { items: [] });
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/tasks"); unmount = mounted.unmount;
     // 全局与主区各读一次全部任务；只有主区按确切 Project 单读标题。
-    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?`,
+    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?include_context=true`,
       `${root}/tasks?scope=all`, `${root}/projects/${projectA}`]);
     expect(mounted.wrapper.get('[data-testid="tasks-live-count"]').text())
       .toContain("已加载 2 项 · 当前筛选显示 2 项 · 仍有后续页");
@@ -188,7 +188,7 @@ describe("live Workspace 项目与任务列表", () => {
       .toContain("已加载 3 项 · 当前筛选显示 1 项 · 已到列表末页");
     await mounted.wrapper.get('[data-testid="tasks-tab-inbox"]').trigger("click");
     await flush(30);
-    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?`,
+    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?include_context=true`,
       `${root}/tasks?scope=all`, `${root}/projects/${projectA}`,
       `${root}/tasks?scope=all&cursor=t%2B2`, `${root}/projects/${projectB}`, `${root}/tasks?inbox=true`]);
     expect(mounted.wrapper.find(`[data-testid="task-row-${taskA}"]`).exists()).toBe(false);
@@ -209,7 +209,7 @@ describe("live Workspace 项目与任务列表", () => {
         ? response(200, { items: [task(taskA, "旧任务", projectA)], next_cursor: null })
         : response(403, { code: "FORBIDDEN", detail: "任务列表不可读" });
       // 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1）。
-      if (url === `${root}/assist-sessions?`) return response(200, { items: [] });
+      if (url === `${root}/assist-sessions?include_context=true`) return response(200, { items: [] });
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/tasks"); unmount = mounted.unmount;
@@ -238,7 +238,7 @@ describe("live Workspace 项目与任务列表", () => {
       if (url === `${root}/tasks?inbox=true`) return response(200, {
         items: [task(taskB, "当前收件箱任务", null)], next_cursor: null });
       // 左栏自 2026-10-10 起把工作区级会话与任务并列（协作页 §3.1）。
-      if (url === `${root}/assist-sessions?`) return response(200, { items: [] });
+      if (url === `${root}/assist-sessions?include_context=true`) return response(200, { items: [] });
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/tasks"); unmount = mounted.unmount;

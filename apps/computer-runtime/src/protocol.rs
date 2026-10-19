@@ -103,11 +103,12 @@ pub fn unknown_error(message: impl Into<String>) -> ComputerError {
     ComputerError::new(codes::UNKNOWN, message, false)
 }
 
-/// The eleven frozen V1 tool/method names plus the V2 environment probe.
+/// The frozen tool/method names: V1 的十个动作 + V2 的鼠标移动与环境探测。
 pub const METHODS: &[&str] = &[
     "computer.screenshot",
     "computer.get_windows",
     "computer.activate_window",
+    "computer.move",
     "computer.click",
     "computer.double_click",
     "computer.scroll",
@@ -118,10 +119,14 @@ pub const METHODS: &[&str] = &[
     "computer.describe_environment",
 ];
 
-/// V2：在**用户当前桌面**上产生输入的八个方法。它们默认不执行，
+/// V2：在**用户当前桌面**上产生输入的方法。它们默认不执行，
 /// 必须由调用方显式传 `allow_foreground: true`（该授权由 Gateway 审批后才会带上）。
+///
+/// `computer.move` 也在此表内：移动光标虽然不产生点击，但会改变用户桌面的当前
+/// 指针位置，后续的滚动/拖拽都以它为前提，因此同样需要显式授权。
 pub const FOREGROUND_INPUT_METHODS: &[&str] = &[
     "computer.activate_window",
+    "computer.move",
     "computer.click",
     "computer.double_click",
     "computer.scroll",

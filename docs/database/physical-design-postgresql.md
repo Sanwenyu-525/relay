@@ -609,13 +609,13 @@ API 不需要 Saver；Worker 与 supervisor 在领取前只读核对业务 schem
 
 追加 [0028_m04_assist_live_preview.sql](../../apps/api/migrations/0028_m04_assist_live_preview.sql)：`assist_message_previews` 以 `message_id` 为主键及原 AssistMessage 外键，一条消息最多一条暂存行；`revision` 从 1 开始递增，`preview_text` 有 `octet_length <= 16384` 的数据库约束，另存截取标志与更新时间。不回填旧消息，不修改既有消息、Proposal 或模型调用事实；无自动 down migration，回退前须让旧应用忽略新表，删除表会丢失在途临时显示文本，但不影响已结算消息。
 
-普通无 Skill 的 `DISCUSS` 每次流式片段按 UTF-8 完整字符形成有界累计前缀，首片段立即写入，生成期间后续写入至少间隔 100 ms，完整输出返回前可再刷新一次。写入短事务先锁原消息并要求当前 Worker 身份、`RUNNING`、未取消，CAS 不再成立时不能继续发布。模型网络调用不占用这段事务；最终完整输出通过原校验和 Assist Owner 结算，结算同事务删除暂存行。取消请求立刻在读端遮蔽，终态和租约过期清理行；读取短事务以 WorkspaceAuthority SHARE 及消息 SHARE 锁建立与来源撤销、取消、结算的先后关系，并重查目标和有界历史来源。跨进程 API 只读该暂存，不将其当历史全文、审计、凭据或接受证据；重新连接用 revision 识别累计前缀。原消息正文在来源失权时也按当前权限遮蔽，不能借完成行绕过临时草稿的读时规则。
+普通无 Skill 的 `DISCUSS` 每次流式片段按 UTF-8 完整字符形成有界累计前缀，首片段立即写入，生成期间后续写入至少间隔 100 ms，完整输出返回前可再刷新一次。写入短事务先锁原消息并要求当前 Worker 身份、`RUNNING`、未取消，CAS 不再成立时不能继续发布。模型网络调用不占用这段事务；最终完整输出通过原校验和 Assist Owner 结算，结算同事务删除暂存行。取消请求立刻在读端遮蔽，终态和租约过期清理行；读取短事务以 WorkspaceAuthority SHARE 及消息 SHARE 锁建立与来源撤销、取消、结算的先后关系，并重查目标和有界历史来源。跨进程 API 只读该暂存，不将其当历史全文、审计、凭据或接受证据；重新连接用 revision 识别累计前缀。原消息正文在来源失权时也按当前权限遮蔽，不能借完成行绕过临时草稿的读时规则。2026-10-18 起，API 层以约 200ms 的主键快查 `revision`/`truncated` 作为变化信号，经 SSE（[HTTP 契约 §10.59](../api/http-command-contract.md#1059-生成中预览的-sse-推送2026-10-18-源码实现)）把每次重新授权读取的完整前缀推给客户端；表结构、100ms 写入节流和 16 KiB 上限不变。
 
 ## 42. 0029 Run DRAFT 生成中临时草稿（2026-09-26 M04 开发自检）
 
 追加 [0029_m04_run_draft_live_preview.sql](../../apps/api/migrations/0029_m04_run_draft_live_preview.sql)：`run_draft_previews` 每个 Run 最多一行，主键绑定原 `runs`，外键绑定 `step_attempts` 与唯一 `model_calls.call_id`；保存确切 Attempt claim、Run Worker epoch/ID、可选 dispatch invocation epoch、递增 revision、截断标志和最多 16 KiB UTF-8 的前缀。旧 Run 不回填，新表不改 Run/Artifact/Verification 事实。无自动 down migration；删除新表会丢失在途显示文本，不能影响已结算候选或后续恢复。
 
-模型端口收到 DRAFT Markdown 片段后，首片段立即提交，生成期间后续写入至少间隔 100 ms，完整返回前再刷新一次。每次写入在单独短事务核对 Task→Run→当前 DRAFT Step/Attempt、Worker/租约、dispatch invocation、原 STARTED model call 与无待处理控制；网络等待不占数据库事务。Run claim/release/fence 或 Attempt 结算在原事务删除旧草稿。读取以 WorkspaceAuthority SHARE、Task/Run SHARE 和原模型调用身份核对当前 Manifest、输入摘要及 FILE_READ/WEB_FETCH 原读证据，按当前权限重查来源、Connection、Policy 与 Resource；不可见只返回空草稿，不复制受限来源 ID。旧 Worker、旧 Attempt、失败/取消或租约到期不能将该行当作成功结果，恢复仍依原 Step/Attempt/operation 身份。真实 PG/HTTP 开发自检验证跨进程首片段、旧 Worker 与控制/来源栅栏；独立、真实 Provider 和桌面验收后置。
+模型端口收到 DRAFT Markdown 片段后，首片段立即提交，生成期间后续写入至少间隔 100 ms，完整返回前再刷新一次。每次写入在单独短事务核对 Task→Run→当前 DRAFT Step/Attempt、Worker/租约、dispatch invocation、原 STARTED model call 与无待处理控制；网络等待不占数据库事务。Run claim/release/fence 或 Attempt 结算在原事务删除旧草稿。读取以 WorkspaceAuthority SHARE、Task/Run SHARE 和原模型调用身份核对当前 Manifest、输入摘要及 FILE_READ/WEB_FETCH 原读证据，按当前权限重查来源、Connection、Policy 与 Resource；不可见只返回空草稿，不复制受限来源 ID。旧 Worker、旧 Attempt、失败/取消或租约到期不能将该行当作成功结果，恢复仍依原 Step/Attempt/operation 身份。真实 PG/HTTP 开发自检验证跨进程首片段、旧 Worker 与控制/来源栅栏；独立、真实 Provider 和桌面验收后置。2026-10-18 起，API 层以约 200ms 的主键快查 `revision`/截断标志作为变化信号，经 SSE（[HTTP 契约 §10.59](../api/http-command-contract.md#1059-生成中预览的-sse-推送2026-10-18-源码实现)）推送每次重新授权读取的完整前缀；换 Attempt/模型调用时 revision 重置，故变化键同时包含 `step_attempt_id`/`attempt_claim_epoch`/`run_worker_epoch`/`model_call_id` 身份字段，表结构与写入节流不变。
 
 ## 43. 0030 M06 真实工具能力登记（2026-09-26，开发自检）
 
@@ -1111,7 +1111,7 @@ Migration：`0094_session_model_selection_source_guard.sql`。**只新增一条 
 
 ## 91. 0093 Assist 消息图片附件（2026-10-16 源码实现）
 
-Migration：`0093_assist_message_attachments.sql`。协议归 [HTTP §10.85](../api/http-command-contract.md#1085-assist-消息图片附件2026-10-16-后端源码实现前端未接线)，交互归[工作台 §33](../frontend/workbench-design.md#33-输入框粘贴图片与消息附件)。Breaking Change：**No**（全新表，无既有读取方）。
+Migration：`0093_assist_message_attachments.sql`。协议归 [HTTP §10.85](../api/http-command-contract.md#1085-assist-消息图片附件2026-10-18-前后端接线)，交互归[工作台 §33](../frontend/workbench-design.md#33-输入框粘贴图片与消息附件)。Breaking Change：**No**（全新表，无既有读取方）。
 
 **定位**：粘贴/拖拽进输入框的图片是**会话输入快照**——不是资料（不进 knowledge/memory/decision 版本体系）、不是 artifact（不受管存储的版本目录与防篡改核对语义）、不是幂等命令（上传端点只暂存）。内容用 `bytea` 而非受管存储文件：附件必须与消息在同一短事务提交（契约 04），`bytea` 没有「写了文件没写库」的中间态，也无孤儿文件；单用户本机、体积由 CHECK 上限约束，DB 体量可控。
 
@@ -1165,7 +1165,7 @@ AND resource_id IS NOT NULL
 
 Migration：`0104_assist_session_unread.sql`。**只给 `assist_sessions` 增加一列可空 `unread_at timestamptz NULL`**，不新建表、不回填、不改写既有迁移、不动索引与授权；Breaking Change：**No**。协议归 [HTTP §10.87](../api/http-command-contract.md#1087-会话未读标记2026-10-17-源码实现迁移-0104)，交互归[工作台 §28.1](../frontend/workbench-design.md#281-左栏recentworkrail)。编号说明：`0090`（会话行内控制：改名/置顶/归档/重开）至今未在本文档登记，本批只登记自己引入的 `0104`。
 
-**形状：时间戳而不是布尔。** `NULL` = 已读，非空 = 标记未读的确切时刻；取消未读写回 `NULL`，不留「曾经未读」的第三态——那一次改动留在命令回执里。它与 `0090` 的 `pinned_at` 同一性质：**近期工作栏的导航偏好，不是业务事实**——不改变能否发消息、绑定哪个目录、归哪个项目。**不建索引**：未读不参与列表排序（`order by pinned_at desc nulls last, created_at desc, id desc`），也不作筛选条件，只按主键读写单行；与 0090 对 `pinned_at` 的判断一致。
+**形状：时间戳而不是布尔。** `NULL` = 已读，非空 = 标记未读的确切时刻；取消未读写回 `NULL`，不留「曾经未读」的第三态——那一次改动留在命令回执里。它与 `0090` 的 `pinned_at` 同一性质：**近期工作栏的导航偏好，不是业务事实**——不改变能否发消息、绑定哪个目录、归哪个项目。**不建索引**：未读不参与列表排序（当时的排序键为 `pinned_at desc nulls last, created_at desc, id desc`；2026-10-18 起 `created_at` 那一档换成 `coalesce(last_message_at, created_at)`，见 §100），也不作筛选条件，只按主键读写单行；与 0090 对 `pinned_at` 的判断一致。
 
 **Owner 与写入路径。** 唯一写入方是 `application/assist-session-controls.ts` 的 `setAssistSessionUnread`：`requireEditableSession`（归属、可见性与 ACTIVE 闸门）→ 仓库 `applySessionControl` 在同一事务内以行锁 + `where revision = expected_revision` 收窄写入并在成功时 `revision + 1`。它与改名／置顶／归档共用 `runIdempotentCommand` 的命令回执；归档会话在进入写入前即被拒，不会留下半截回执。**没有第二套并发机制**：上游 ZCode 用 `unread_at` + `last_unread_at` 两列，是为了让「点开自动清除」这个后台写入与人工标记各自 CAS；本项目当前只有人工 toggle 一个写入方，同一行的并发已经由 `revision` 裁决，提前加单调版本列没有当前调用方。
 
@@ -1176,3 +1176,133 @@ Migration：`0104_assist_session_unread.sql`。**只给 `assist_sessions` 增加
 **兼容与回滚。** 纯追加一列，旧行取 `NULL`（已读），旧响应与旧客户端不受影响。回退可直接保留该列（旧代码不读）；删除只丢失未读标记，不丢失会话、消息、命令回执或目录绑定。
 
 **验证（如实）。** 真实 PostgreSQL 的 `assist-session-controls.integration.test.ts` **14/14** 经 `run-integration.ps1` 整体 PASSED，覆盖 `0104` 的列形状（可空、`timestamptz`、无默认）、标记/取消的修订推进、重放与 CAS、归档拒绝、跨 Workspace 不可见、列表逐字回显与排序不变；工作台定向 **10/10**（jsdom）与 **7/7**（真实 Chromium 伪造 API）。真实 Windows 窗口与多 DPI 未复验；桌面实机需重新暂存 API。
+
+## 95. 0106 浏览器后端健康投影（2026-10-17 源码实现）
+
+Migration：`0106_browser_backend_state.sql`。新建单行表 `browser_backend_state`（`id integer PRIMARY KEY DEFAULT 1 CHECK (id = 1)`），承载浏览器后端最近一次被实测的健康结论；Breaking Change：**No**。协议归 [HTTP §10.88](../api/http-command-contract.md#1088-浏览器后端状态2026-10-17-源码实现迁移-0106)，设计与集成点归[浏览器自动化 V1](../architecture/browser-automation-v1.md)。
+
+**为什么是一张单行表。** 浏览器后端由 **Worker 进程**懒启动并持有，而读它的是 API 进程与桌面壳；三个进程之间只共享 PostgreSQL，因此「浏览器后端现在是什么状态」必须是库里的一行展示事实，而不是任何进程的内存单例——与 `0096` 的 `computer_control_state` 同一理由。**与 0096 的差异**：那是「是否有活跃操控会话」的单行（多任务只有一个前台会话），这一行是「后端本身健康吗」——后端是安装级资源，一个安装只有一份，单行正是它的真实基数。
+
+**形状。** `status` CHECK 五态（`READY`/`CHROME_MISSING`/`BACKEND_MISSING`/`INCOMPATIBLE`/`DISCONNECTED`）；`backend_version`/`chrome_version`/`detail`/`remediation` 为 `text NOT NULL DEFAULT ''`（空串=无值，读取方投影为 `null`）；`tool_count integer CHECK (tool_count >= 0)`；`updated_at timestamptz NOT NULL DEFAULT now()`。没有行的语义是「从未使用过浏览器能力」（读取方投影为 `NOT_STARTED`），不预插一行占位。
+
+**Owner 与写方。** 唯一写入方是 Worker 派发路径 `browserExecute`：每次动作前 `ensureStarted` 后 upsert。**上报失败不阻断真实执行**（try/catch 包住，与 0096 的操控状态上报同一纪律）。不做惰性过期——READY 的后端在 Worker 存活期间一直活着，按 `updated_at` 猜过期只会制造假阴性；进程退出时 Worker 写 `DISCONNECTED`。
+
+**权限。** `GRANT SELECT, INSERT, UPDATE ON browser_backend_state TO relay_app`。**没有 DELETE**：后端状态永远不该被「删掉」，只应被改写。历史发现的 `0096` 未授 `relay_app` 权限问题由迁移 `0110` 修复，见下节；不修改已应用迁移的内容。
+
+**兼容与回滚。** 纯新增表，不改既有列；回退可直接保留（旧代码不读）。`0105`/`0106` 都不改写历史迁移。
+
+**验证（如实）。** 真实 PostgreSQL：`browser-read.integration.test.ts` **6/6**（`run-integration.ps1 -TestFile browser-read` 整体 PASSED，临时集群已删除）——覆盖投影的写入/读取/失败态与跨进程可见（含真实 API 进程经 HTTP 读同一行）；单测 `projectBrowserHealth` 锁定内存结论 → DTO 的形状。安装态未验。
+
+## 96. 0107 浏览器任务状态（2026-10-17 源码实现）
+
+Migration：`0107_browser_sessions.sql`。新建 `browser_sessions`（`owner_kind` + `owner_id` 联合主键），承载"现在有哪个任务在操作哪个页面"；Breaking Change：**No**。协议归 [HTTP §10.89](../api/http-command-contract.md#1089-浏览器任务列表与停止2026-10-17-源码实现迁移-0107)，设计归[浏览器自动化 V1](../architecture/browser-automation-v1.md)。
+
+**与 0106/0096 的分工。** 0106 一行回答"后端本身健康吗"（安装级）；本表多行回答"哪些任务在操作哪些页面"；0096 同样是单行但语义是"是否正在操控电脑"。三者共用一个理由：读写方分布在不同进程，而进程之间只共享 PostgreSQL。**主键是 `(owner_kind, owner_id)` 而不是自增 id**：一个 owner 同时只有一个活跃页，upsert 就地改写不会累积历史行，也天然阻止同一任务出现两行互相矛盾的状态。`owner_kind` 与 Gateway 的 origin 词表一一对应（`RUN`/`SESSION`），不合成"任务表扩展"——那会迫使 Run 与会话两种身份互相冒充。
+
+**形状与权限。** `state` 三态同 0096；`page_id` CHECK > 0（没有页的动作不写行）；`GRANT SELECT, INSERT, UPDATE` 给 `relay_app`，**无 DELETE**——停止是改写而不是删除。读取方按空闲阈值（30s）惰性把 `RUNNING` 落成 `STOPPED`，Worker 不留后台定时器。
+
+**验证（如实）。** 真实 PostgreSQL：`browser-actions.integration.test.ts` **6/6**（与 `browser-read` 合计 12/12，`run-integration.ps1 -TestFile browser-read,browser-actions` 整体 PASSED）。
+
+## 97. 0108 范围授权词表补全（2026-10-17 源码实现）
+
+Migration：`0108_scope_grant_browser_actions.sql`。重述 `run_scope_grants` 的 `ck_run_scope_grants_actions`，把 `COMPUTER_INPUT` 与 `BROWSER_ACTION` 加入允许集合；Breaking Change：**No**（新集合是旧的超集，历史行全部仍合法）。
+
+**这是"CHECK 必须逐条重述"那条教训的第三次实例。** 0092 把 `COMPUTER_INPUT` 写进源码 `SCOPE_GRANT_ACTIONS`、0105 把 `BROWSER_ACTION` 写进去，但本约束自 0056 之后从未更新，于是**插入授权行本身就以 23514 失败**，而代码路径看起来完全正常。顺带说明：`COMPUTER_INPUT` 的"本次任务允许操作电脑"自 0092 起就无法在库里落地，本迁移一并修正。
+
+`BROWSER_COMMIT` **故意不在集合内**：提交表单与上传文件是不可逆外部效果，永远逐次单动作批准。
+
+**同一轮修正的既有口径漂移。** `gateway-actions.ts` 的 prepare 用 `scopeGrantActionFor(actionType)` 归一授权动作名，admit 却直接传 `op.action_type`，导致 prepare 已放行的动作在派发时被判"不在授权内"，进而要一份从未创建过的批准（`GATEWAY_APPROVAL_REQUIRED`）。该漂移对 `COMPUTER_INPUT` 与 `BROWSER_ACTION` 这类合成动作必然触发；本片已把 admit 也改为同一个归一函数。
+
+## 98. 0109 本地目录访问档位元数据（2026-10-18 源码实现）
+
+Migration：`0109_local_directory_access.sql`。新增 `local_directory_access`，以 `resource_id`（主键并关联 `managed_resources`）表示一个受管目录的应用管理设置；保存 `write_tier`（`READ_ONLY` / `ASK` / `AUTO`）、必需的读取连接 ID、可空的写连接 ID、由本入口管理的策略 ID JSON 对象、单调递增的 revision 与更新时间。CHECK 约束限制档位词表、策略 ID 为 JSON object、revision 非负。`relay_app` 只获得 SELECT/INSERT/UPDATE，无 DELETE。**Breaking Change: No**；只新增表与授权，旧客户端/代码忽略它即可。
+
+该表是档位与配置来源的管理元数据，不是第二套 Gateway 授权表。实际动作仍由原 `gateway_connections`、`gateway_policies`、Run 范围授权、Review 与 Gateway 准入判断。`policy_ids` 用于识别本入口有权维护的策略，不能据此绕过显式 DENY、停用、上层目录限制或历史动作约束。没有数据库回填；旧手工配置保持原身份。回退到旧代码时保留此表及关联 Gateway 行，不删除连接或策略；若以后移除该表，须先确认不再需要来源追溯并单独制定数据保留方案。
+
+默认目录读取配置会通过现有 `gateway_permission_policies` 与 `gateway_permission_versions` 查询相同 Workspace/Project/能力/动作且覆盖当前根的历史目标；若没有当前活动匹配策略则不自动创建新的 AUTO。此历史核对不新增表或字段，也不改变迁移 `0109`。
+
+## 99. 0110 电脑控制状态的应用角色权限（2026-10-18）
+
+Migration：`0110_computer_control_state_privileges.sql`。为 `relay_app` 补授 `computer_control_state` 的 SELECT/INSERT/UPDATE，不授 DELETE，不新增表、字段或回填。`0096` 原迁移没有授权，真实应用角色读状态及 Worker 上报均会得到 `42501`；使用迁移 Owner 的检查不能发现此问题。
+
+**Breaking Change: No**。保留 `0096` 内容以兼容已有迁移账本；旧应用可继续使用原表。回退应用版本无需删除数据或撤销授权；若显式 REVOKE，上报、状态查询及退出投影会重新不可用。控制意图和 STOP_REQUESTED 由应用用例在同一短事务提交，STOPPED 只在既有 Run 控制安全点确认后写入，不能以第二次请求代替停止确认。验证场景见 `computer-control.integration.test.ts`；结果唯一归统一验收表。
+
+## 100. 0111 会话活动排序键（2026-10-18 源码实现）
+
+Migration：`0111_assist_session_last_message.sql`。**只给 `assist_sessions` 增加一列可空 `last_message_at timestamptz NULL`**，不新建表、不回填、不改写既有迁移、不动索引与授权；Breaking Change：**No**。协议归 [HTTP §10.91](../api/http-command-contract.md#1091-会话列表的活动排序键2026-10-18-源码实现迁移-0111)，交互归[工作台 §28.1](../frontend/workbench-design.md#281-左栏recentworkrail)。
+
+**语义：这段讨论最近一次真正说过话是什么时候。** `NULL` = 还没有任何消息；有值 = 最后一条消息落库或生成结算的时刻。不分发送方——用户说完与 AI 说完都算一次活动，因此失败或取消的那一轮同样上浮。它和 0090 的 `pinned_at`、0104 的 `unread_at` 同一性质：**导航排序键，不是业务事实**，不参与能否发消息、目录绑定、项目归属或任何准入判定。
+
+**为什么不用 `max(assist_messages.updated_at)` 现算，也不复用 `updated_at`。** 列表每次读都要扫消息聚合，且生成中的逐帧预览会把它顶成「一直在动」；`updated_at` 同时是改名／置顶／归档那组命令的更新时间，用它排序会让「只是重命名过一次」的会话跳到活动序最前。上游正好有两派做法：ZCode 在 `saveMessage`/`savePart` 统一调 `touchSession` 并以 `time_updated = max(time_updated, ?)` 保持单调（本列采纳这一口径）；OpenCode 只在用户消息准入时 `Session.touch`，并用自引用 SQL 压制 `$onUpdate`，消息与 part 落库都不 touch 父会话；Codex 分两列——任何追加都推进的 `updated_at` 与只在用户新一轮开口推进的 `recency_at`；DeepSeek Harness 用 `max(header.createdAt, lastPromptAt)` 在内存算。本项目要的是「AI 说完这条也上浮」，取 Codex 的 `updated_at` 那一派而不是 `recency_at` 那一派。
+
+**Owner 与写入路径（两个，都在 `assist-repository.ts`）。** ① `insertMessage` 尾部调 `touchLastMessage`：用户消息与发送时预插的 PENDING ASSISTANT 行都推进同一键，写入取 `greatest(last_message_at, now())`，并发结算不按提交顺序取时间时排序键只前进不回退。② `settleGeneration` 只在 CAS 命中（返回受影响行）后 touch 该行所属会话：迟到的旧 Worker 结算既不收敛消息也不推进排序键。ASSISTANT 行在发送时刻预插，其 `created_at` 早于真正说完的时间，所以结算这一 touch 是「AI 说完才上浮」的依据，不能省。**改名、置顶、未读、归档、重开、绑定项目与绑定目录都不写本列**；生成中的预览表 `assist_message_previews` 也不写——那是会被删除的临时前缀，每条增量都 touch 会让左栏在流式期间持续跳位。租约过期的 `failExpiredLeases` 与 `setCancelRequested` 同样不额外 touch：消息落库时该键已不早于这些事件。
+
+**推进的是排序键，不是并发基线。** 本列的写入**不**推进 `revision`，也**不**推进 `updated_at`。会话行的修订号是上面那组人工控制命令的 CAS 基线；若每条消息都推进修订，在途生成会把置顶/改名打成 409，界面只能反复重读。测试把这条锁住：消息落库后 `revision` 与 `updated_at` 逐字不变。
+
+**排序读法。** `listSessions` 用 `order by pinned_at desc nulls last, coalesce(last_message_at, created_at) desc, id desc`——置顶仍是第一排序键，活动序只在未置顶的组内生效；`coalesce` 让还没说话的会话按创建时间留在原位，不因本列为空而沉底或消失。左栏客户端在没有人手动排过序时按同一口径重排，两边不各猜一套。
+
+**权限与索引。** 与其它批次一致：`0015` 已对 `assist_sessions` 授表级 `SELECT/INSERT/UPDATE`（无 `DELETE`），新列自动落在既有授权内，**不追加 GRANT**；**不新建索引**——单用户本机库会话量级小，列表读仍走 `ix_assist_sessions_scope` 的既有范围过滤，与 0090/0104 对 `pinned_at`／`unread_at` 的判断相同。
+
+**兼容与回滚。** 纯追加一列，旧行取 `NULL`（无消息，回落 `created_at`），既有响应只多一个可空只读字段，旧客户端忽略即可。回退可直接保留该列（旧代码不读、旧排序键照旧用 `created_at`）；删除该列只丢失活动排序偏好，不丢失任何会话、消息、命令回执或选择事实。
+
+**验证（如实，分层）。** 见[统一验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)对应行：真实 PostgreSQL 定向套件、工作台 jsdom 与两端 `tsc` 分别报告，一种证据不代替另一种。
+
+## 101. 0112 本地目录完全访问档位（2026-10-18 源码实现）
+
+Migration：`0112_local_directory_full_access.sql`。**只放宽 `local_directory_access` 的档位 CHECK**：`ck_local_directory_access_tier` 的取值集合由 `('READ_ONLY','ASK','AUTO')` 扩为 `('READ_ONLY','ASK','AUTO','FULL')`。不新增表、不加列、不回填、不改写既有迁移、不动索引与授权（`0109` 已给 `relay_app` 表级 `SELECT/INSERT/UPDATE`）。**Breaking Change: No**——加值是兼容新增，既有行取值不变，旧界面把未知取值读成「待核对」而不是替用户猜一档。
+
+`FULL` 仍然是[§98](#98-0109-本地目录访问档位元数据2026-10-18-源码实现)意义上的管理元数据，不是第二套授权表：网关判定词表只有 `AUTO/ASK/DENY` 三值，所以选 `FULL` 落的是与 `AUTO` 完全相同的策略行，两者的差别只存在这一列里。因此实际准入必须回读本列（`gateway-actions.ts` 的 prepare 与 dispatch 各读一次同一个函数），不能只信策略投影，也不能由界面把档位传进来。档位投影的反向推导不产生 `FULL`：`READ_ONLY/ASK/AUTO` 仍由策略行回推，`FULL` 只能来自用户显式发出的这条目录命令。
+
+**兼容与回滚。** 迁移不回撤。回退应用代码时库里的 `FULL` 仍受约束允许，旧代码读它当作一个非只读档位，准入退回「AUTO 目录 + 删除逐次确认」，也就是放宽前的行为，不会静默放大权限；旧代码写档位时不认识这个取值，只会拒绝新的一次设置。若以后要收掉这个取值，必须先把所有 `FULL` 行改写回 `AUTO` 再收窄约束——本迁移不提供自动降级，也不删除已发生的档位事实。
+
+## 102. 0113 会话分叉血缘（2026-10-18 源码实现）
+
+Migration：`0113_assist_session_fork.sql`。`assist_sessions` 追加一列可空自引用 `forked_from_session_id uuid REFERENCES assist_sessions (id)`；不回填、不改写任何既有迁移、不动消息/提案/附件/选择表的形状。
+
+**这一列是来源，不是状态。** 分叉之后父子两条会话各自独立生长，父会话不因为被分叉而变化——标题、`revision`、`updated_at`、`last_message_at` 与 `status` 都不动，也不维护反向的子会话列表。唯一的写方是 `forkAssistSession`（`assist-session-controls.ts`）里的 `insertForkedSession`：按源行 `insert … select` 整行搬运会话身份列，`forked_from_session_id` 只在插入时写一次；改名、置顶、未读、归档、重开与消息写入都不读写它。界面上它只用于解释分叉标题末尾那个「（n）」从哪来，不参与任何准入判定。
+
+**形状沿用 0006 的 `verification_sessions.parent_session_id`**：同表自引用、可空、无 CHECK。不加 `forked_from_session_id <> id`：子行 ID 由命令新生成，永不等于父行 ID；父子同 Workspace 由应用 Owner 的行锁读取保证（跨作用域的父会话按 `RESOURCE_NOT_FOUND` 拒掉）。不建索引：一张父会话可以有多个子会话（1:N），当前只有「按子行主键读它自己的父 ID」这一种读法，没有按父反查的读方；0006 的部分索引是配 UNIQUE「一个父只能派生一次」用的，本表既不反查也不唯一，照抄只会多一份写放大。若以后出现「列出某条会话的全部分叉」读方，再按 `(forked_from_session_id)` 增列索引也不迟。
+
+**权限。** `0015` 已对 `assist_sessions` 授表级 `SELECT/INSERT/UPDATE`（无 `DELETE`），新列自动落在既有授权内，不追加 GRANT。
+
+**与消息复制的关系。** 本列只记血缘；子会话里的消息与附件由同一命令用新 ID 复制（`assist_messages` 从 `seq=1` 重排、附件绑定到子会话的新消息行）。刻意不复制的是提案与过程/结局列（请求号、usage、worker、错误码、`model_attempt_state`）；`model_selection_snapshot` 一并不复制，因为 0098 要求它与尝试状态成对非空，而复制后的历史不会再进生成路径。协议见 [HTTP §10.93](../api/http-command-contract.md#1093-会话分叉2026-10-18-源码实现迁移-0113)。
+
+**兼容与回滚。** 纯追加一列，旧行取 `NULL`（不是任何会话的分叉），既有响应只多一个可空只读字段，旧客户端忽略即可，**Breaking Change: No**。回退可直接保留该列（旧代码不读）；删除该列只丢失「这条从哪来」的来源说明，不丢失任何会话、消息、附件、回执或选择事实。
+
+**验证（如实，分层）。** 真实 PostgreSQL：`assist-session-controls.integration.test.ts` **22/22**，其中 0113 用例从 `information_schema.columns` 核对可空与类型、从 `pg_constraint` 核对自引用外键，并验证列表/单会话投影逐字返回来源。真实 Windows 窗口未验；迁移台账用例另有并行流的登记缺口（0114/0115 未进 `ALL_MIGRATIONS`），不是本迁移引入。
+
+## 103. 0116 会话物理删除授权（2026-10-18 源码实现）
+
+会话物理删除（[ADR-027](../decisions/ADR-027-session-physical-delete.md)、[HTTP §10.94](../api/http-command-contract.md#1094-会话物理删除2026-10-18-源码实现迁移-0116)）只需要应用角色对**会话自有账本**的 `DELETE`。0015 授的是 `SELECT, INSERT, UPDATE`，0050/0060/0062/0089/0093/0097/0100 同样没有 DELETE，因此 0116 是一次纯授权迁移：不改表结构、不加 `ON DELETE CASCADE`、不回填任何数据。
+
+**授予 DELETE 的十五张表**：`assist_sessions`、`assist_messages`、`assist_proposals`、`assist_message_attachments`、`session_tool_calls`、`session_model_selection`、`artifact_impact_checks`、`artifact_impact_candidates`、`artifact_impact_candidate_groups`、`artifact_impact_candidate_group_items`、`conversation_state_requests`、`conversation_state_changes`、`model_calls`、`model_provider_cooldowns`、`conversation_diff_baselines`。逐表对应删除路径上的一次显式 DELETE；`assist_message_previews`（0028）与 `learning_*`（0072）已有 DELETE，不重复授予。
+
+**刻意不授予的表就是阻断面**：`task_acceptance_trial_observations`、`hypothesis_versions`、`work_segments`、`project_blueprint_proposals`、`conversation_execution_requests`、`learning_evidence`、`learning_rounds`、`learning_session_controls`，以及 Task/Artifact/Project 主表。删除命令在发现这些引用时整条拒绝（`409 SESSION_DELETE_BLOCKED`），**不能**借 DELETE 授权把它们一并抹掉。`activity_records` 仍只有 `SELECT, INSERT`：删除命令写一条 `ASSIST_SESSION_DELETED`，但不允许改写或抹去审计。
+
+**为什么不用级联。** 指向 `assist_sessions` 的 12 条外键全部是默认 `NO ACTION`；保留这个形状，删除顺序由仓储层逐表写出。顺序写错会当场撞外键失败并整条回滚，而不是让数据库按自己的规则扩大删除范围。`conversation_diff_baselines.session_id` 没有外键（0097），不在数据库的保护范围内，必须显式删。
+
+**权限边界与回滚。** 授权只覆盖会话自有账本，不外溢到 `tasks` 等其它对象（`has_table_privilege` 在集成用例里逐项核对）。回滚只需撤销这批 GRANT，会话行与消息不会被带回；已删除的数据不在回滚范围内。
+
+**证据（如实分层）。** 真实临时 PostgreSQL 18.6：`assist-session-delete.integration.test.ts` **9/9**，含账本删净与无悬空基线、删除后回执重放、阻断项（分叉、学习记录）、在途与陈旧基线栅栏、跨 Workspace 不可见、0116 授权边界。未在用户库验证 0116 是否已应用，也未做真实 Windows 安装态复核。
+
+## 103. 0115 周期定时启动任务（2026-10-18 源码实现）
+
+Migration：`0115_scheduled_tasks.sql`，新增 `scheduled_tasks` 与 `scheduled_task_occurrences` 两张表。取舍与代价见 [ADR-026](../decisions/ADR-026-scheduled-task-autostart.md)，协议见 [HTTP §10.94](../api/http-command-contract.md#1094-周期定时启动任务2026-10-18-源码实现迁移-0115)。
+
+**计划表只存配置与授权，不存执行状态。** `scheduled_tasks` 有模板 `template jsonb`（`task_title/objective/criteria/expected_outputs/mode`，与 `CreateTask` 入参同形）、重复规则 `repeat_rule jsonb`（`{kind:'DAILY',interval_days:1..30}` 或 `{kind:'WEEKLY',weekdays:[1..7]}`，CHECK 只放这两个 kind）、`timezone`、`local_time`（`HH:MM` 正则 CHECK）、`first_run_at`、`next_due_at`、`status`（`ENABLED/PAUSED/DISABLED/EXPIRED`）、`schedule_generation`、`revision`、`max_runs`（1–100）、`runs_reserved`、`runs_started`、`authorization_expires_at`、`execution_input jsonb`、`history jsonb`。Task 状态、Run 生命周期与验收都不在这里——它们仍归原 Owner。
+
+**两个计数列分工不同，不能合并。** `runs_reserved` 是「已产生的时段数」，只用于序号与顺序；`runs_started` 才是预算口径，因为用户理解的 `max_runs` 是「最多真正启动多少次」。跳过的时段（上一轮未验收）与阻塞的时段都推进 `runs_reserved`，但只有真正 Delegate 成功才推进 `runs_started`。约束只有 `runs_started <= runs_reserved`，刻意不加 `runs_reserved <= max_runs`：否则跳过次数会把额度吃光。
+
+**发生表记录「这一次时段」，不复制业务事实。** `scheduled_task_occurrences` 有 `schedule_generation`、`sequence`、`due_at`、`timezone`、`missed`、`status`（`DISPATCHING/DISPATCHED/BLOCKED/SKIPPED/RESOLVED`）、`task_id`、`run_id`、三个预生成命令身份、`frozen_execution jsonb`、`reason`、`revision`。`UNIQUE (scheduled_task_id, schedule_generation, sequence)` 是第二道防线；三个命令列各自 `UNIQUE`，保证同一时段不会建出两个 Task。
+
+**`DISPATCHING` 是租约，不是终态。** 插入即置该状态，调度器用行锁 + `UPDATE … RETURNING` 抢租约后才执行三步命令；进程在分发中途崩溃时该行保持 `DISPATCHING`，下一次扫描从「待分发」重新取它，靠预生成命令身份回执重放，不会重复建 Task。人工「补跑」也是把 `BLOCKED` 改回 `DISPATCHING`，不新增行、不消耗额度。
+
+**索引。** `scheduled_tasks(next_due_at) WHERE status='ENABLED'` 服务到期扫描；`(workspace_id, project_id, created_at)` 服务列表；`scheduled_task_occurrences(scheduled_task_id, created_at DESC, id DESC)` 服务详情页最近 20 条；`(workspace_id, created_at, id) WHERE status='BLOCKED'` 服务待处理投影。不建 `(due_at)` 索引：发生表按计划反查，没有按时刻全局扫描的读方。
+
+**权限。** 末尾 `GRANT SELECT, INSERT, UPDATE ON scheduled_tasks, scheduled_task_occurrences TO relay_app`，无 `DELETE`——两张表都不删除，取消与作废靠状态列表达。
+
+**时区与 DST。** 库只存 `local_time` 墙钟字符串与 `timezone` 名称，绝对时刻 `next_due_at`/`due_at` 由应用用 `zoned-time.ts` 现算。刻意不存固定偏移：跨夏令时的「每天 09:00」必须仍是 09:00。春跳不存在的时刻顺延 +1 小时，秋回重复的时刻取较早一次。
+
+**兼容与回滚。** 纯新增两张表，不改任何既有表或列，**Breaking Change: No**。回退应用代码时旧代码不读这两张表，定时任务停止调度但已产生的 Task/Run 事实不受影响；迁移不回撤。删除这两张表只丢失「哪些时段被排定过」的记录，不删除已经建出的 Task、Run、回执或审计。
+
+**验证（如实分层）。** 单元：`zoned-time.test.ts` **10/10**（上海/纽约春跳秋回/伦敦/Kolkata/Chatham/Kiritimati、跨 DST 的每日 09:00、关机三天只推进一次、严格晚于 now）、`scheduled-tasks.test.ts` **4/4**（规则/上限/到期/时刻/日期/时区/文本口径）。真实 PostgreSQL：`scheduled-tasks.integration.test.ts` 见[测试计划 §37](../testing/verification-plan.md#37-周期定时启动任务验收规格2026-10-18)与统一验收表。真实 Windows 窗口与安装态未验。

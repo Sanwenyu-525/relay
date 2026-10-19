@@ -7,7 +7,7 @@ import { sendReadError, type RouteDependencies } from './envelope.js';
 
 const ItemSchema = Type.Object({ item_key: Type.String(), change_key: Type.String(),
   kind: Type.Union([Type.Literal('REVIEW'), Type.Literal('LOCK_CONFLICT'),
-    Type.Literal('RUN_FAILED'), Type.Literal('UNKNOWN')]),
+    Type.Literal('RUN_FAILED'), Type.Literal('UNKNOWN'), Type.Literal('SCHEDULED_TASK_BLOCKED')]),
   title: Type.String(), reason: Type.String(), target_url: Type.String(),
 }, { additionalProperties: false });
 const ParamsSchema = Type.Object({ workspace_id: UuidSchema }, { additionalProperties: false });

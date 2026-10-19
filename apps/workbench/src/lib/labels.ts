@@ -1,4 +1,4 @@
-import type { RelayAssistSourceRef, RelayReview } from "../api/relayClient";
+import type { RelayActivityItem, RelayActivityRefKind, RelayAssistSourceRef, RelayReview } from "../api/relayClient";
 import type { ExecutorKind, InteractionMode, ProjectType, TaskStatus } from "../types";
 
 /**
@@ -12,6 +12,33 @@ export const assistSourceKindLabels: Record<RelayAssistSourceRef["kind"], string
   MEMORY: "记忆",
   DECISION: "决定"
 };
+
+/**
+ * 网关连接能力族的中文显示名（「+」菜单的连接器二级、连接与同步页共用同一份）。
+ * 清单本身来自服务端的连接登记，这里只维护「能力键 → 名称」映射；
+ * 服务端开放扩展的新能力键回退显示原始键，不会被前端词表挡住。
+ */
+const gatewayCapabilityLabelsKnown: Readonly<Record<string, string>> = {
+  FAKE_WRITE: "演示写入",
+  FAKE_PUBLIC_READ: "演示公网读取",
+  FILE_READ: "文件读取",
+  FILE_QUERY: "文件检索",
+  FILE_WRITE: "文件写入",
+  WEB_FETCH: "网页抓取",
+  GIT_READ: "Git 读取",
+  GIT_WRITE: "Git 写入",
+  CLI_RUN: "命令行执行",
+  COMPUTER_READ: "电脑查看（截图/窗口）",
+  COMPUTER_INPUT: "电脑操作（鼠标/键盘）",
+  GITHUB_READ: "GitHub 只读（仓库/PR/Issue）",
+  BROWSER_READ: "浏览器读取（页面/快照）",
+  BROWSER_ACTION: "浏览器操作（点击/填写）",
+  BROWSER_COMMIT: "浏览器提交（表单/上传）"
+};
+
+export function gatewayCapabilityLabel(capability: string): string {
+  return gatewayCapabilityLabelsKnown[capability] ?? capability;
+}
 
 export const reviewKindLabels: Record<RelayReview["kind"], string> = {
   CRITERION: "人工验收",
@@ -193,4 +220,84 @@ export function taskStatusTone(status: TaskStatus): StatusTone {
     default:
       return "neutral";
   }
+}
+
+/**
+ * 活动流展示文案（协作页首屏「最近动态」与 ActivityView 共用，单一来源）。
+ * 枚举值本身以契约为准，展示文案只在这一处维护。
+ */
+
+/** 单用户本机应用：人工动作以「我」呈现，与服务端 actor_kind=HUMAN 对应；不显示原始 actor_ref。 */
+export const activityActorLabels: Record<RelayActivityItem["actorKind"], string> = { HUMAN: "我", AI: "AI", SYSTEM: "系统" };
+
+const activityEventTypeLabels: Record<string, string> = {
+  PROJECT_CREATED: "创建项目", PROJECT_STATE_UPDATED: "更新项目状态", PROJECT_ARCHIVED: "归档项目",
+  TASK_CREATED: "创建任务", TASK_UPDATED: "更新任务", TASK_STARTED: "开始任务", TASK_CANCELLED: "取消任务",
+  TASK_COMPLETED: "完成任务", TASK_REOPENED: "重开任务", TASK_READY: "任务进入可执行",
+  ARTIFACT_VERSION_SAVED: "保存产物版本", ARTIFACT_VERSION_SELECTED: "选用产物版本",
+  DELEGATION_CREATED: "委托 AI 执行", RUN_CREATED: "创建 Run", RUN_FINISHED: "Run 结束",
+  REVIEW_DECIDED: "作出审批决定", VERIFICATION_COMPLETED: "验证完成",
+  WORKSPACE_INITIALIZED: "创建工作区", GOAL_CREATED: "创建目标",
+  PROJECT_RETURN_REVIEWED: "查看项目接续变化", PROJECT_DAILY_VIEW_CONFIRMED: "确认项目当日进展",
+  TASK_PRESENTATION_UPDATED: "修改任务", TASK_ACCEPTANCE_CHANGED: "修改验收条件", TASK_PLANNING_UPDATED: "修改任务计划",
+  TASK_READIED: "任务进入可执行", TASK_DELEGATED: "委托任务", RUN_FAILED: "运行失败",
+  RUN_CONTROL_REQUESTED: "请求运行控制", RUN_CONTROL_APPLIED: "运行控制已应用",
+  REVIEW_REQUESTED: "请求人工判断", VERIFICATION_FINALIZED: "检查已结算",
+  CONVERSATION_STATE_REQUESTED: "提交状态维护请求", CONVERSATION_EXECUTION_REQUESTED: "提交执行请求",
+  TODAY_TASK_SELECTION_CHANGED: "修改任务选择", TODAY_FOCUS_CHANGED: "修改当日焦点"
+};
+
+export function activityEventLabel(eventType: string): string {
+  return Object.hasOwn(activityEventTypeLabels, eventType) ? activityEventTypeLabels[eventType]! : "未识别的事件";
+}
+
+export function activityEventSummary(item: RelayActivityItem): string {
+  return item.summary === "业务事件" ? activityEventLabel(item.eventType) : item.summary;
+}
+
+export const activityRefLabels: Record<RelayActivityRefKind, string> = {
+  PROJECT: "项目", TASK: "任务", RUN: "Run", GOAL: "目标", ARTIFACT_VERSION: "产物版本",
+  REVIEW: "Review", COMPLETION: "完成凭据", VERIFICATION_SESSION: "验证会话"
+};
+
+export const activityRefLinkLabels: Partial<Record<RelayActivityRefKind, string>> = {
+  PROJECT: "打开项目", TASK: "打开关联任务", RUN: "查看执行记录", ARTIFACT_VERSION: "查看产物来源链",
+  REVIEW: "查看审批请求", COMPLETION: "查看完成凭据"
+};
+
+export function activityRefTarget(kind: RelayActivityRefKind, id: string): string | null {
+  if (kind === "PROJECT") return `/projects/${id}`;
+  if (kind === "TASK") return `/tasks/${id}`;
+  if (kind === "RUN") return `/runs/${id}`;
+  if (kind === "REVIEW") return `/reviews?id=${id}`;
+  if (kind === "ARTIFACT_VERSION") return `/artifact-versions/${id}/lineage`;
+  if (kind === "COMPLETION") return `/completion-records/${id}`;
+  return null;
+}
+
+// 类别只依据已知的确切 event_type，不从名称前缀或模型输出推断成功。
+export type ActivityEventCategory = "approval" | "verification" | "execution" | "artifact" | "completion" | "state" | "unknown";
+
+const activityCategoryByEvent: Record<string, ActivityEventCategory> = {
+  REVIEW_DECIDED: "approval", REVIEW_REQUESTED: "approval",
+  VERIFICATION_COMPLETED: "verification", VERIFICATION_FINALIZED: "verification",
+  ARTIFACT_VERSION_SAVED: "artifact", ARTIFACT_VERSION_SELECTED: "artifact", TASK_COMPLETED: "completion",
+  DELEGATION_CREATED: "execution", TASK_DELEGATED: "execution", RUN_CREATED: "execution", RUN_FINISHED: "execution",
+  RUN_FAILED: "execution", RUN_CONTROL_REQUESTED: "execution", RUN_CONTROL_APPLIED: "execution",
+  CONVERSATION_EXECUTION_REQUESTED: "execution", TASK_STARTED: "execution"
+};
+
+export const activityCategoryMeta: Record<ActivityEventCategory, { chip: string; chipShort: string; tone: "neutral" | "warning" | "success"; note: string }> = {
+  approval: { chip: "人工判断", chipShort: "决策", tone: "neutral", note: "这是人工判断的请求或决定记录，请以确切事件为准。批准只针对当时的具体动作或版本，不代表相关动作已经执行成功，也不等于任务完成。" },
+  verification: { chip: "检查", chipShort: "检查", tone: "neutral", note: "检查结算不表示通过；判定须核对相应版本与条件。检查通过不等于任务完成，仍需核对其他必需条件。" },
+  execution: { chip: "执行", chipShort: "执行", tone: "neutral", note: "这是执行请求、委托或运行控制记录，请以确切事件为准。请求或运行结束不表示执行成功，也不等于任务完成。" },
+  artifact: { chip: "产物", chipShort: "产物", tone: "neutral", note: "这是服务端记录的一次产物变化，与人工批准、验证判定是分开的独立事实。" },
+  completion: { chip: "完成", chipShort: "完成", tone: "success", note: "这是当时提交的任务完成事实，确切产物与条件以完成凭据为准；当前状态仍需打开任务核对。" },
+  state: { chip: "项目与任务", chipShort: "项目", tone: "neutral", note: "这是项目、任务或工作空间的操作记录，不据此推断执行结果或验收状态。" },
+  unknown: { chip: "未分类", chipShort: "其他", tone: "neutral", note: "当前界面尚未识别此事件类型，不能据此判断成功或完成。原始类型与服务端摘要保留在依据中。" }
+};
+
+export function activityEventCategory(eventType: string): ActivityEventCategory {
+  return Object.hasOwn(activityCategoryByEvent, eventType) ? activityCategoryByEvent[eventType]!
+    : Object.hasOwn(activityEventTypeLabels, eventType) ? "state" : "unknown";
 }

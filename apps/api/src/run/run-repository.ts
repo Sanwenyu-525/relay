@@ -238,6 +238,21 @@ export class RunRepository {
       where run_id = ${runId}`.execute(this.db)).rows[0];
   }
 
+  /**
+   * SSE 节流信号（preview-events-api）：只取身份与 revision，不取 preview_text。
+   * 不做授权——帧内容永远来自 readRunDraftPreview 的完整重新授权读取。
+   */
+  async readDraftPreviewFingerprint(runId: string): Promise<{
+    revision: bigint; step_attempt_id: string; attempt_claim_epoch: bigint;
+    run_worker_epoch: bigint; model_call_id: string; truncated: boolean;
+  } | undefined> {
+    return (await sql<{ revision: bigint; step_attempt_id: string;
+      attempt_claim_epoch: bigint; run_worker_epoch: bigint;
+      model_call_id: string; truncated: boolean }>`select revision, step_attempt_id,
+      attempt_claim_epoch, run_worker_epoch, model_call_id, truncated
+      from run_draft_previews where run_id = ${runId}`.execute(this.db)).rows[0];
+  }
+
   async readRunForShare(runId: string): Promise<RunRow | undefined> {
     return (await sql<RunRow>`select ${RUN_COLUMNS} from runs
       where id = ${runId} for share`.execute(this.db)).rows[0];

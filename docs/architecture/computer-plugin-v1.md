@@ -41,7 +41,7 @@ API 进程（Node）
 
 错误码词表（冻结）：`INVALID_REQUEST`、`RUNTIME_UNAVAILABLE`、`SCREENSHOT_FAILED`、`WINDOW_NOT_FOUND`、`WINDOW_ACTIVATION_FAILED`、`INVALID_COORDINATE`、`INPUT_FAILED`、`PERMISSION_DENIED`、`USER_CANCELLED`、`TIMEOUT`、`UNKNOWN`。API 侧另有传输层码 `IPC_DISCONNECTED`、`PROTOCOL_VIOLATION` 与 `effectUncertain` 标记。
 
-## 3. 十个工具
+## 3. 十一个工具
 
 工具名用 snake_case 的 `computer_` 前缀：OpenAI 兼容协议的工具名只接受 `[a-zA-Z0-9_-]`，点号会被 Provider 拒绝；对外稳定性由词表保证。
 
@@ -50,6 +50,7 @@ API 进程（Node）
 | `computer_screenshot` | COMPUTER_READ | 无 |
 | `computer_get_windows` | COMPUTER_READ | 无 |
 | `computer_activate_window` | COMPUTER_INPUT | `window_id` |
+| `computer_move` | COMPUTER_INPUT | `x`、`y` |
 | `computer_click` | COMPUTER_INPUT | `x`、`y`、`button?`（left/right/middle） |
 | `computer_double_click` | COMPUTER_INPUT | `x`、`y` |
 | `computer_scroll` | COMPUTER_INPUT | `delta_x?`、`delta_y?` |
@@ -82,6 +83,7 @@ API 进程（Node）
 - **不通过 shell 绕行**：不使用 cmd/PowerShell 完成鼠标键盘输入；输入只走 `SendInput`，文本走 `KEYEVENTF_UNICODE`。
 - **失败关闭**：非 Windows 且真实模式在启动前即 `RUNTIME_UNAVAILABLE`；未知方法/版本/按键名/坐标越界均类型化拒绝。
 - **坐标**：虚拟屏绝对坐标（多显示器合并），`validate_point` 按当前虚拟屏边界校验；滚动量按 120 单位取整，不足一格拒绝。
+- **滚动结果报实际位移（2026-10-18）**：`MOUSEEVENTF_WHEEL` 的 `mouseData` 只接受整格，此前运行时按 `delta / 120` 截断后仍把**请求值**写回结果——模型发 200 会读到 `delta_y: 200`，而桌面只滚了一格（120）；另一轴不足一格时还会被静默丢掉。现在 `wheel_notches` 统一换算，结果里的 `delta_x`/`delta_y` 是实际滚动量，与请求值不同时另带 `requested_delta_x`/`requested_delta_y`；任一轴非零但不足一格即 `INVALID_REQUEST`（错误里写清一格是 120），不再静默丢弃。mock 与真实路径同形。
 
 ## 8. 输入可靠性（实测）
 
@@ -101,11 +103,14 @@ API 进程（Node）
 
 V1 的「默认前台执行」路径已被[V2 迁移审查](computer-plugin-v2-migration-audit.md)判定为需迁移，Phase 2 已落地：
 
+**2026-10-18 已确认、正在实施的会话独占约束**：不同受管目录的 Run 共用同一物理桌面；仅按目录的资源 claim 不能防止它们交替切换窗口与输入。用户选择整个操控会话独占，而非只在单个输入动作期间互斥；第一次 COMPUTER_INPUT 准入后，同 Run 连续动作可以继续，其他 Run 输入需等待。独占只能在应用确认安全停止或执行结束后释放，UNKNOWN、过期 Worker 或租约超时保持隔离。必须覆盖暂停/取消/交接/完成/失败/恢复，不能让普通同 Run 文件动作被自己的桌面独占误挡；`computer_control_state` 仍是展示投影，不作为桌面执行权。具体持久化接线待最小实现核对，未据此声称已验收。
+
 - 运行时启动即 **per-monitor DPI aware V2**（坐标空间一致性的前提，实测虚拟屏 1536x864 → 物理 1920x1080）；
 - 新增 `computer.describe_environment`（DPI/显示器/Child Session/UIA 库/三模式可用性，API 侧 30s TTL 缓存）；
 - `computer.screenshot` 增加 `target`（`user_desktop`/`window`/`agent_session`/`browser_page`），后两者不可用即类型化拒绝；
-- **八个桌面输入方法必须带 `allow_foreground: true` 才执行**（`FOREGROUND_NOT_AUTHORIZED`）；该参数不在工具 schema 里，由适配器在 Gateway 派发时注入——派发前必有单动作批准或本次任务范围授权，模型无法自我授权；
+- **九个桌面输入方法必须带 `allow_foreground: true` 才执行**（`FOREGROUND_NOT_AUTHORIZED`）；该参数不在工具 schema 里，由适配器在 Gateway 派发时注入——派发前必有单动作批准或本次任务范围授权，模型无法自我授权；
 - 错误词表 +3：`FOREGROUND_NOT_AUTHORIZED`、`ISOLATED_SESSION_UNAVAILABLE`、`CAPTURE_TARGET_UNAVAILABLE`；方法词表 +1：`computer.describe_environment`；
+- **2026-10-18 追加 `computer.move`（`COMPUTER_MOVE`）**：只移动指针、不点击。加它的原因是滚动与拖拽都作用在指针当前位置上，而此前没有「把指针放到目标区域」的手段——`computer_scroll` 的描述要求「先移动鼠标到目标区域再滚动」，词表里却没有这个动作。移动同样改变用户桌面，因此计入前台输入（需授权、不进会话只读词表），`computer_params` 只接受 `x`、`y`；
 - 执行路由（`src/computer/execution-router.ts`）：后台不可用时输入类动作的结论是「需要用户授权」，prepare 的审批文案写明「⚠️ 此操作需要接管你的电脑」。
 
 V1 的 SendInput/SetForegroundWindow 实现保留为 foreground 路径的实现体，不再是无条件默认。

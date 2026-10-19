@@ -63,12 +63,12 @@ export default function TaskContractProposalPreview({ client, proposal, taskId, 
     {targetMatches && payload && task && <>
       <dl className="task-proposal-definition">
         <div><dt>任务目标</dt><dd><p>{payload.objective}</p>
-          <details><summary>对照当前目标</summary><p>当前：{task.acceptance.objective || "空"}</p><p>合并后：{payload.objective}</p></details></dd></div>
+          <details className="tech-details"><summary>对照当前目标</summary><p className="helper-text">当前：{task.acceptance.objective || "空"}</p><p className="helper-text">合并后：{payload.objective}</p></details></dd></div>
         <div><dt>预期结果</dt><dd><p>{typeof payload.requiredOutputSpec.description === "string"
           ? payload.requiredOutputSpec.description : "合并后的结果契约未提供说明，请展开核对具体配置。"}</p>
-          <details><summary>对照结果契约</summary><p>当前：{JSON.stringify(task.acceptance.expectedOutputs ?? {})}</p>
-            <p>合并后：{JSON.stringify(payload.requiredOutputSpec)}</p>
-            <p>期望结果说明：{typeof task.acceptance.expectedOutputs?.description === "string"
+          <details className="tech-details"><summary>对照结果契约</summary><p className="helper-text">当前：{JSON.stringify(task.acceptance.expectedOutputs ?? {})}</p>
+            <p className="helper-text">合并后：{JSON.stringify(payload.requiredOutputSpec)}</p>
+            <p className="helper-text">期望结果说明：{typeof task.acceptance.expectedOutputs?.description === "string"
               ? task.acceptance.expectedOutputs.description : "当前未填写"} →
               {typeof payload.requiredOutputSpec.description === "string"
                 ? payload.requiredOutputSpec.description : "合并后未填写"}</p></details></dd></div>

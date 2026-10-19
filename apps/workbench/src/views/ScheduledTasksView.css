@@ -1,0 +1,26 @@
+/* 定时任务列表（/scheduled-tasks）：重点是「下次触发」与「已执行次数」两列的扫描。
+   时间按任务自身时区显示，因此单元格内附一行本地时刻与时区，避免与浏览器时区混淆。 */
+.scheduled-tasks-page .data-table small {
+  display: block;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+
+.scheduled-task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--relay-space-2);
+  white-space: nowrap;
+}
+
+.scheduled-tasks-page .form-actions {
+  margin-block-end: var(--relay-space-3);
+}
+
+/* 排期四件套（日期 / 时刻 / 时区 / 上限）在同一行时按可用宽度折行，窄窗退化为单列。 */
+.scheduled-task-schedule-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--relay-space-3);
+  align-items: start;
+}

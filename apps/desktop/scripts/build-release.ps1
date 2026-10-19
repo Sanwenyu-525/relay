@@ -21,6 +21,10 @@ $fontLicenseSource = Join-Path $workbenchRoot 'public\licenses\NOTO-FONTS-LICENS
 $fontLicenseDist = Join-Path $workbenchRoot 'dist\licenses\NOTO-FONTS-LICENSE.txt'
 $helperRoot = Join-Path $appsRoot 'file-io-helper'
 $helperExe = Join-Path $helperRoot 'target\release\relay-file-io-helper.exe'
+$computerRoot = Join-Path $appsRoot 'computer-runtime'
+$computerExe = Join-Path $computerRoot 'target\release\relay-computer-runtime.exe'
+$extensionRoot = Join-Path $appsRoot 'browser-extension'
+$extensionFiles = @('manifest.json', 'background.js', 'options.html', 'options.js')
 $cargoReleaseRoot = Join-Path $tauriRoot 'target\release'
 $releaseRoot = Join-Path $desktopRoot 'release'
 if ($TestPackage) { $releaseRoot = Join-Path $workspaceRoot 'test-release' }
@@ -48,9 +52,10 @@ function Invoke-Pnpm {
 
 function Get-BuildInputFingerprint {
   $inputs = @()
-  foreach ($directory in @('apps\api\src', 'apps\api\migrations', 'apps\workbench\src', 'apps\workbench\public\licenses', 'apps\desktop\src-tauri\src', 'apps\desktop\scripts', 'apps\file-io-helper\src')) {
+  foreach ($directory in @('apps\api\src', 'apps\api\migrations', 'apps\api\skills\builtin\gh', 'apps\workbench\src', 'apps\workbench\public\licenses', 'apps\desktop\src-tauri\src', 'apps\desktop\scripts', 'apps\file-io-helper\src', 'apps\computer-runtime\src')) {
     $inputs += @(Get-ChildItem -LiteralPath (Join-Path $workspaceRoot $directory) -Recurse -File)
   }
+  foreach ($file in $extensionFiles) { $inputs += Get-Item -LiteralPath (Join-Path $extensionRoot $file) }
   foreach ($relative in @(
     'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'docs\frontend\design-tokens.json', 'apps\api\package.json', 'apps\api\tsconfig.json',
     'apps\workbench\package.json', 'apps\workbench\pnpm-lock.yaml', 'apps\workbench\tsconfig.json',
@@ -60,7 +65,8 @@ function Get-BuildInputFingerprint {
     'apps\desktop\src-tauri\tauri.conf.json', 'apps\desktop\src-tauri\build.rs',
     'apps\desktop\src-tauri\capabilities\default.json', 'apps\desktop\src-tauri\icons\icon.ico',
     'scripts\verify-desktop-maintenance-capability.mjs',
-    'apps\file-io-helper\Cargo.toml', 'apps\file-io-helper\Cargo.lock'
+    'apps\file-io-helper\Cargo.toml', 'apps\file-io-helper\Cargo.lock',
+    'apps\computer-runtime\Cargo.toml', 'apps\computer-runtime\Cargo.lock'
   )) { $inputs += Get-Item -LiteralPath (Join-Path $workspaceRoot $relative) }
   $lines = foreach ($file in @($inputs | Sort-Object FullName)) {
     "$($file.FullName)|$((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash)"
@@ -141,7 +147,7 @@ Invoke-Pnpm $workspaceRoot @('--filter', '@relay-agent/api', 'deploy', '--prod',
 # pnpm 9 deploy disables lockfile reads with the hoisted linker. Install the
 # reviewed deploy files using the workspace lock instead, rebased to this stage.
 New-Item -ItemType Directory -Path $apiStage -Force | Out-Null
-foreach ($entry in @('dist', 'migrations', 'package.json')) {
+foreach ($entry in @('dist', 'migrations', 'package.json', 'skills')) {
   Copy-Item -LiteralPath (Join-Path $lockedStage $entry) -Destination $apiStage -Recurse
 }
 $deployLockPath = Join-Path $apiStage 'pnpm-lock.yaml'
@@ -194,7 +200,7 @@ Remove-GeneratedStage $lockedStage
 Copy-Item -LiteralPath $node -Destination (Join-Path $resourceRoot 'node.exe') -Force
 
 $stageEntries = @(Get-ChildItem -LiteralPath $apiStage -Force | Select-Object -ExpandProperty Name | Sort-Object)
-$expectedEntries = @('dist', 'migrations', 'node_modules', 'package.json')
+$expectedEntries = @('dist', 'migrations', 'node_modules', 'package.json', 'skills')
 if (($stageEntries -join '|') -ne ($expectedEntries -join '|')) {
   throw "API resource inventory is not the expected deploy set: $($stageEntries -join ', ')"
 }
@@ -202,6 +208,11 @@ foreach ($required in @('dist\src\main.js', 'dist\src\worker\supervisor-main.js'
   if (-not (Test-Path -LiteralPath (Join-Path $apiStage $required))) { throw "Incomplete API resource: $required" }
 }
 $supervisorProtocolSource = Get-Content -LiteralPath (Join-Path $apiStage 'dist\src\worker\supervisor-main.js') -Raw
+foreach ($required in @('SKILL.md', 'LICENSE', 'UPSTREAM.md')) {
+  if (-not (Test-Path -LiteralPath (Join-Path $apiStage "skills\builtin\gh\$required") -PathType Leaf)) {
+    throw "The bundled GitHub Skill resource is missing: $required"
+  }
+}
 if (-not $supervisorProtocolSource.Contains('relay-desktop-supervisor-v1')) {
   throw 'The bundled supervisor lacks the required desktop recovery protocol'
 }
@@ -220,6 +231,19 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $helperExe -PathType Le
   throw 'The Windows file I/O helper build failed'
 }
 Copy-Item -LiteralPath $helperExe -Destination (Join-Path $resourceRoot 'relay-file-io-helper.exe') -Force
+& cargo build --release --locked --manifest-path (Join-Path $computerRoot 'Cargo.toml')
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $computerExe -PathType Leaf)) {
+  throw 'The Windows computer runtime build failed'
+}
+Copy-Item -LiteralPath $computerExe -Destination (Join-Path $resourceRoot 'relay-computer-runtime.exe') -Force
+$extensionStage = Join-Path $resourceRoot 'browser-extension'
+New-Item -ItemType Directory -Path $extensionStage -Force | Out-Null
+foreach ($file in $extensionFiles) {
+  Copy-Item -LiteralPath (Join-Path $extensionRoot $file) -Destination (Join-Path $extensionStage $file) -Force
+}
+if (@(Get-ChildItem -LiteralPath $extensionStage -Force).Count -ne $extensionFiles.Count) {
+  throw 'Browser extension staging contains unexpected files; do not bundle pairing configuration'
+}
 Invoke-Pnpm $desktopRoot @('exec', 'tauri', 'build', '--no-bundle')
 if ((Get-BuildInputFingerprint) -ne $buildInputFingerprint) {
   throw 'Build input changed during release compilation; artifact manifest was not published'
@@ -244,11 +268,13 @@ New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
 Copy-Item -LiteralPath $compiledExe -Destination $exe
 Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'node.exe') -Destination (Join-Path $releaseRoot 'node.exe')
 Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'relay-file-io-helper.exe') -Destination (Join-Path $releaseRoot 'relay-file-io-helper.exe')
+Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'relay-computer-runtime.exe') -Destination (Join-Path $releaseRoot 'relay-computer-runtime.exe')
+Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'browser-extension') -Destination $releaseRoot -Recurse
 Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'api') -Destination $releaseRoot -Recurse
 Copy-Item -LiteralPath (Join-Path $workbenchRoot 'dist\licenses') -Destination $releaseRoot -Recurse
 
 $releaseEntries = @(Get-ChildItem -LiteralPath $releaseRoot -Force | Select-Object -ExpandProperty Name | Sort-Object)
-if (($releaseEntries -join '|') -ne (@('api', 'licenses', 'node.exe', 'relay-desktop.exe', 'relay-file-io-helper.exe') -join '|')) {
+if (($releaseEntries -join '|') -ne (@('api', 'browser-extension', 'licenses', 'node.exe', 'relay-computer-runtime.exe', 'relay-desktop.exe', 'relay-file-io-helper.exe') -join '|')) {
   throw "Final release contains unexpected top-level entries: $($releaseEntries -join ', ')"
 }
 
@@ -294,12 +320,14 @@ $sourceHashes['desktop'] = Get-FileHashes $desktopRoot @('src-tauri\src', 'scrip
 )
 $sourceHashes['api'] = Get-FileHashes (Join-Path $appsRoot 'api') @('src', 'migrations') @('package.json', 'tsconfig.json')
 $sourceHashes['file_io_helper'] = Get-FileHashes $helperRoot @('src') @('Cargo.toml', 'Cargo.lock')
+$sourceHashes['computer_runtime'] = Get-FileHashes $computerRoot @('src') @('Cargo.toml', 'Cargo.lock')
+$sourceHashes['browser_extension'] = Get-FileHashes $extensionRoot @() $extensionFiles
 $sourceHashes['workbench'] = Get-FileHashes $workbenchRoot @('src', 'public\licenses') @('package.json', 'pnpm-lock.yaml', 'vite.config.ts', 'tsconfig.json', 'index.html')
 $sourceHashes['workspace_lock'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'pnpm-lock.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
 $sourceHashes['workspace_manifest'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'pnpm-workspace.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
 $sourceHashes['design_tokens'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'docs\frontend\design-tokens.json') -Algorithm SHA256).Hash.ToLowerInvariant()
 $sourceHashes['maintenance_capability_verifier'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'scripts\verify-desktop-maintenance-capability.mjs') -Algorithm SHA256).Hash.ToLowerInvariant()
-$resourceHashes = Get-FileHashes $releaseRoot @('api', 'licenses') @('node.exe', 'relay-file-io-helper.exe')
+$resourceHashes = Get-FileHashes $releaseRoot @('api', 'browser-extension', 'licenses') @('node.exe', 'relay-file-io-helper.exe', 'relay-computer-runtime.exe')
 
 # A legacy EXE can ignore --maintenance-session and open the normal desktop.
 # Check stable output markers and the invalid-argument CLI path, never a valid start/hold session.

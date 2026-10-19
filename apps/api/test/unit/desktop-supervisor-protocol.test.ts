@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
+import { DESKTOP_DEFAULT_API_PORT } from '../../src/config/config.js';
+import { desktopChildEnvironment } from '../../src/desktop/child.js';
 import { desktopDispatchReadyLine, desktopLaunchRecoveryAckLine } from
   '../../src/worker/desktop-supervisor-protocol.js';
 
@@ -84,4 +86,25 @@ test('launch recovery acknowledgement keeps a bounded exact JSON count', () => {
     retainedClaims: BigInt(Number.MAX_SAFE_INTEGER) + 1n }), /safe JSON integer/u);
   assert.throws(() => desktopLaunchRecoveryAckLine({ ...base,
     retainedClaims: 1 as unknown as bigint }), /safe JSON integer/u);
+});
+
+test('桌面子进程用固定 API 端口：扩展的配对地址不能每次启动都失效', () => {
+  const env = desktopChildEnvironment({
+    frame: { nonce: 'n', bearerToken: 'b'.repeat(64) },
+    base: { PATH: 'C:/Windows', RELAY_API_PORT: '9999' },
+    extraOrigin: undefined,
+  });
+  assert.equal(env.RELAY_API_PORT, String(DESKTOP_DEFAULT_API_PORT));
+  assert.notEqual(env.RELAY_API_PORT, '0',
+    '临时端口会让浏览器扩展每次重启都要重新配对');
+  assert.equal(env.RELAY_API_BIND_HOST, '127.0.0.1');
+  assert.equal(env.RELAY_API_ALLOWED_ORIGINS, 'http://tauri.localhost');
+  assert.equal(env.RELAY_API_STOP_ON_STDIN_EOF, 'true');
+  assert.equal(env.PATH, 'C:/Windows', '宿主环境必须保留');
+  // 开发构建的额外 origin 仍然拼进去。
+  const dev = desktopChildEnvironment({
+    frame: { nonce: 'n', bearerToken: 'b'.repeat(64) },
+    base: {}, extraOrigin: 'http://127.0.0.1:5173',
+  });
+  assert.equal(dev.RELAY_API_ALLOWED_ORIGINS, 'http://tauri.localhost,http://127.0.0.1:5173');
 });

@@ -130,6 +130,18 @@ pub fn double_click(point: Point) -> Result<(), ComputerError> {
     click(MouseButton::Left, point)
 }
 
+/// 一个滚轮格的位移量（Windows `WHEEL_DELTA`）。
+pub const WHEEL_NOTCH: i32 = 120;
+
+/// 把像素位移换算成整格数（向零取整）。
+///
+/// 这不是四舍五入的选择题：`MOUSEEVENTF_WHEEL` 的 `mouseData` 只接受整格，
+/// 不足一格的量到了系统侧就是「没滚」。因此实际滚动量必须由这里算出来并回报给
+/// 调用方——否则结果里的 `delta_y` 会是一个从未发生过的位移。
+pub fn wheel_notches(delta: i32) -> i32 {
+    delta / WHEEL_NOTCH
+}
+
 #[cfg(windows)]
 pub fn scroll(delta_x: i32, delta_y: i32) -> Result<(), ComputerError> {
     if delta_x == 0 && delta_y == 0 {
@@ -137,10 +149,10 @@ pub fn scroll(delta_x: i32, delta_y: i32) -> Result<(), ComputerError> {
     }
     let mut inputs = Vec::new();
     if delta_y != 0 {
-        inputs.push(mouse_input(0, 0, MOUSEEVENTF_WHEEL, (delta_y / 120) as u32));
+        inputs.push(mouse_input(0, 0, MOUSEEVENTF_WHEEL, wheel_notches(delta_y) as u32));
     }
     if delta_x != 0 {
-        inputs.push(mouse_input(0, 0, MOUSEEVENTF_HWHEEL, (delta_x / 120) as u32));
+        inputs.push(mouse_input(0, 0, MOUSEEVENTF_HWHEEL, wheel_notches(delta_x) as u32));
     }
     if inputs.is_empty() {
         return Err(ComputerError::new(

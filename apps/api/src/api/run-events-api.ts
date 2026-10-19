@@ -128,10 +128,11 @@ export function writeRunEventFrame(response: ServerResponse, frame: string, sign
   });
 }
 
-function waitForPoll(signal: AbortSignal): Promise<void> {
+/** 预览 SSE（preview-events-api）以更快的节奏复用同一等待原语；默认值保持既有行为。 */
+export function waitForPoll(signal: AbortSignal, ms: number = POLL_MS): Promise<void> {
   if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => {
-    const timeout = setTimeout(finish, POLL_MS);
+    const timeout = setTimeout(finish, ms);
     function finish(): void {
       clearTimeout(timeout);
       signal.removeEventListener('abort', finish);

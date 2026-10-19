@@ -1,0 +1,83 @@
+/* 输入卡内的附件芯片行（工作台 §33.2）。
+   位置：正文下方、工具行上方；宽度跟随输入卡，行内换行，不横向滚动。
+   只引用既有 token：缩略图圆角用 radius.control、边框用 border.control、
+   尺寸取 compact 控件高度，不新增色值或字号。 */
+.composer-attachments { display: grid; gap: var(--relay-space-1); min-width: 0; }
+.composer-attachments ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--relay-space-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.composer-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  max-width: 100%;
+  min-width: 0;
+  padding: var(--relay-space-0-5) var(--relay-space-1) var(--relay-space-0-5) var(--relay-space-0-5);
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+}
+.composer-attachment-thumb {
+  flex: none;
+  width: var(--relay-control-height-compact);
+  height: var(--relay-control-height-compact);
+  border-radius: var(--relay-radius-control);
+  object-fit: cover;
+  background: var(--relay-color-bg-surface);
+}
+/* 名称可截断，大小不截断：读得出「这是哪张图」比读全文件名更重要。 */
+.composer-attachment-copy { display: grid; min-width: 0; line-height: var(--relay-font-lineHeight-snug); }
+.composer-attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 16ch;
+}
+.composer-attachment-size { color: var(--relay-color-text-muted); }
+.composer-attachment-remove {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--relay-control-height-compact);
+  height: var(--relay-control-height-compact);
+  padding: 0;
+  border: 0;
+  border-radius: var(--relay-radius-round);
+  background: transparent;
+  color: var(--relay-color-text-secondary);
+  cursor: pointer;
+}
+.composer-attachment-remove:hover:not(:disabled) {
+  background: var(--relay-color-selection-hover);
+  color: var(--relay-color-text-primary);
+}
+.composer-attachment-remove:disabled { color: var(--relay-color-text-muted); cursor: not-allowed; }
+.composer-attachment-status,
+.composer-attachment-error { margin: 0; }
+
+/* 拖拽悬停：只在真的有文件拖过来时点亮（data-drop="true" 由输入器在 dragenter 时置位），
+   用虚线内描边而不是给整卡换底色——卡片底色属于状态语言，不借给拖拽。 */
+.chat-command-input[data-drop="true"] { position: relative; }
+.chat-command-input[data-drop="true"]::after {
+  content: "松开即可把图片加到这条消息";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: var(--relay-border-width) dashed var(--relay-color-border-control);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  pointer-events: none;
+}

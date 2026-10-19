@@ -128,16 +128,85 @@ test('captureCurrentState reflects disk changes and omits deleted files', async 
     await git(['add', '--', 'a.txt']);
     await git(['commit', '-m', 'initial']);
     const before = await captureCurrentState(root);
-    assert.equal(before.get('a.txt')?.text, `v1${LF}`);
+    assert.equal(before.files.get('a.txt')?.text, `v1${LF}`);
 
     await writeFile(join(root, 'a.txt'), `v2${LF}extra${LF}`);
     await writeFile(join(root, 'b.txt'), `new${LF}`);
     const after = await captureCurrentState(root);
-    assert.equal(after.get('a.txt')?.text, `v2${LF}extra${LF}`);
-    assert.equal(after.get('b.txt')?.text, `new${LF}`);
+    assert.equal(after.files.get('a.txt')?.text, `v2${LF}extra${LF}`);
+    assert.equal(after.files.get('b.txt')?.text, `new${LF}`);
 
     await rm(join(root, 'b.txt'));
     const afterDelete = await captureCurrentState(root);
-    assert.equal(afterDelete.has('b.txt'), false);
+    assert.equal(afterDelete.files.has('b.txt'), false);
+  });
+});
+
+test('captureCurrentState keeps the unscanned tail as unswept on the file-count limit', async () => {
+  await withTempRepo(async (root) => {
+    for (const name of ['a.txt', 'b.txt', 'c.txt', 'd.txt']) {
+      await writeFile(join(root, name), `${name}${LF}`);
+    }
+    const scan = await captureCurrentState(root, { maxFiles: 2 });
+    assert.equal(scan.incomplete, true);
+    assert.equal(scan.reason, 'FILE_COUNT_LIMIT');
+    assert.equal(scan.files.size, 2);
+    assert.equal(scan.listedTotal, 4);
+    // 尾部两条只是没核对到：带出去给上层，绝不能被算成「已删除」。
+    assert.equal(scan.unswept.has('c.txt'), true);
+    assert.equal(scan.unswept.has('d.txt'), true);
+    assert.equal(scan.unswept.has('a.txt'), false);
+  });
+});
+
+test('captureCurrentState keeps the unscanned tail as unswept on the total-bytes limit', async () => {
+  await withTempRepo(async (root) => {
+    for (const name of ['a.txt', 'b.txt', 'c.txt']) {
+      await writeFile(join(root, name), `${'x'.repeat(9)}${LF}`); // 每条 10 字节
+    }
+    const scan = await captureCurrentState(root, { maxTotalBytes: 15 });
+    assert.equal(scan.reason, 'TOTAL_BYTES_LIMIT');
+    assert.equal(scan.files.size, 1);
+    assert.deepEqual([...scan.unswept], ['b.txt', 'c.txt']);
+  });
+});
+
+test('captureCurrentState separates Git-tracked paths from newly created ones', async () => {
+  await withTempRepo(async (root, _base, git) => {
+    await writeFile(join(root, 'a.txt'), `a${LF}`);
+    await git(['add', '--', 'a.txt']);
+    await git(['commit', '-m', 'initial']);
+    await writeFile(join(root, 'fresh.txt'), `fresh${LF}`);
+    const scan = await captureCurrentState(root);
+    assert.equal(scan.tracked.has('a.txt'), true);
+    // 未跟踪的新文件不在索引里：基线不完整时它仍可被认定为「本会话新建」。
+    assert.equal(scan.tracked.has('fresh.txt'), false);
+    assert.equal(scan.incomplete, false);
+    assert.equal(scan.reason, null);
+    assert.equal(scan.unswept.size, 0);
+  });
+});
+
+test('captureCurrentState lists protected paths but never sweeps them', async () => {
+  await withTempRepo(async (root) => {
+    await writeFile(join(root, '.env'), `SECRET=1${LF}`);
+    await writeFile(join(root, 'a.txt'), `a${LF}`);
+    await writeFile(join(root, 'b.txt'), `b${LF}`);
+    const scan = await captureCurrentState(root, { maxFiles: 1 });
+    assert.equal(scan.listedTotal, 2);
+    assert.equal(scan.unswept.has('.env'), false);
+  });
+});
+
+test('captureBaseline marks an aborted scan as incomplete coverage', async () => {
+  await withTempRepo(async (root) => {
+    await writeFile(join(root, 'a.txt'), `a${LF}`);
+    const controller = new AbortController();
+    controller.abort();
+    const snap = await captureBaseline(root, { signal: controller.signal });
+    // 采到一半被中止 = 起点覆盖不完整：剩下的文件之后不能被当成「没变化」。
+    assert.equal(snap.incomplete, true);
+    assert.equal(snap.captureReason, 'SCAN_ABORTED');
+    assert.deepEqual(snap.files, []);
   });
 });

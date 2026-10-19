@@ -2,15 +2,19 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join, sep } from 'node:path';
+import { basename, join } from 'node:path';
 import test, { after, before } from 'node:test';
 import { sql } from 'kysely';
 
 import { createAssistSession, requestAssistMessage } from '../../src/application/assist-commands.js';
+import { disableGatewayConnectionCommand } from '../../src/application/gateway-commands.js';
+import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
 import { applyConversationExecution, interpretConversationMessage } from
   '../../src/application/conversation-execution.js';
 import { createGatewayPolicy, canonicalResourceIdentity } from
   '../../src/application/gateway-configuration.js';
+import { setLocalDirectoryWriteTier } from '../../src/application/local-directory-access.js';
+import { readWorkingDirectoryWriteReadiness } from '../../src/application/open-working-directory.js';
 import { openWorkingDirectory } from '../../src/application/open-working-directory.js';
 import { advanceRunStep } from '../../src/application/run-steps.js';
 import type { FrozenCheck } from '../../src/application/run-scope-grant.js';
@@ -23,7 +27,7 @@ import { runOneCommand } from '../../src/worker/run-command.js';
 import type { DbExecutor } from '../../src/infrastructure/database.js';
 import type { GatewayCapability } from '../../src/infrastructure/database-schema.js';
 import type { JsonObject } from '../../src/infrastructure/json.js';
-import type { AssistModelPort, ConversationInterpretationRequest, ModelIdentity } from '../../src/workflow/fake-model-port.js';
+import { FakeModelPort, type AssistModelPort, type ConversationInterpretationRequest, type ModelIdentity } from '../../src/workflow/fake-model-port.js';
 import { RELAY_AGENT_CORE_PROMPT } from '../../src/workflow/agent-system-prompt.js';
 import { renderDraftUserPrompt } from '../../src/workflow/openai-compatible-model-port.js';
 import { createDataRoot, startTestApi, workspacePath } from './api-harness.js';
@@ -115,6 +119,135 @@ async function sessionIn(workspaceId: string, projectId: string, content: string
   return { sessionId: session.result.session_id, userMessageId: sent.result.user_message_id };
 }
 
+function executionPort(input: { title: string; objective: string; path: string;
+  action: 'CREATE' | 'MODIFY' | 'DELETE' }): AssistModelPort {
+  const fake = new FakeModelPort();
+  const content = JSON.stringify({ reply: '我已把这条普通聊天请求接入受控文件执行。', maintenance: null,
+    execution: { title: input.title, objective: input.objective,
+      criteria: [{ statement: input.objective, required: true, method: 'HUMAN' }],
+      expected_outputs: { kind: 'MARKDOWN_DOCUMENT' }, writes_files: true,
+      file_changes: [{ path: input.path, action: input.action }] } });
+  return { identity: fake.identity, assist: async () => ({ kind: 'CONTENT', content,
+    providerRequestId: `file-crud-${randomUUID()}`,
+    usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null, cacheCreationTokens: null } }) };
+}
+
+/**
+ * 把本条助手消息驱动到结算。
+ *
+ * 消息轮次按整库先进先出领取，同一文件里前面直接解释的用例可能留下从未被领取的
+ * PENDING 消息，所以不能假设一次 tick 就会领取本条。这里循环领取到本条离开 PENDING
+ * 为止，仍由真实入口逐条处理，不绕过领取与租约。
+ */
+async function generateUntilSettled(api: Awaited<ReturnType<typeof startTestApi>>,
+  workspaceId: string, sessionId: string, assistantMessageId: string,
+  modelPort: AssistModelPort): Promise<string | undefined> {
+  const messagesPath = workspacePath(workspaceId, `/assist-sessions/${sessionId}/messages`);
+  const statusOf = async () => {
+    const response = await api.get(messagesPath);
+    assert.equal(response.status, 200, response.text);
+    return (response.body as { items: { id: string; status: string }[] }).items
+      .find((item) => item.id === assistantMessageId)?.status;
+  };
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (await statusOf() !== 'PENDING') break;
+    const generated = await runAssistGenerationTick(app.db, {
+      workerId: `method-main-loop-${randomUUID()}`,
+      storage: new ManagedContentStore(api.dataRoot), leaseMs: 60_000, maxMessages: 1,
+      modelPort });
+    assert.ok(generated, '方法消息必须由普通主流程领取');
+  }
+  return statusOf();
+}
+
+async function prepareOrdinaryWrite(api: Awaited<ReturnType<typeof startTestApi>>, input: {
+  workspaceId: string; projectId: string; resourceId: string; userContent: string;
+  title: string; objective: string; path: string; action: 'CREATE' | 'MODIFY' | 'DELETE';
+}) {
+  const path = (suffix: string) => workspacePath(input.workspaceId, suffix);
+  const created = await api.post(path('/assist-sessions'), { command_id: randomUUID(),
+    project_id: input.projectId, title: `普通聊天 ${input.action}` });
+  assert.equal(created.status, 201, created.text);
+  const sessionId = (created.body as { result: { session_id: string } }).result.session_id;
+  const bound = await api.post(path(`/assist-sessions/${sessionId}/working-directory`), {
+    command_id: randomUUID(), resource_id: input.resourceId });
+  assert.equal(bound.status, 200, bound.text);
+  const sent = await api.post(path(`/assist-sessions/${sessionId}/messages`), {
+    command_id: randomUUID(), content: input.userContent, intent: 'DISCUSS' });
+  assert.equal(sent.status, 202, sent.text);
+  const sentResult = (sent.body as { result: { user_message_id: string; assistant_message_id: string } }).result;
+  const generated = await runAssistGenerationTick(app.db, { workerId: `file-crud-${randomUUID()}`,
+    storage: new ManagedContentStore(api.dataRoot), modelPort: executionPort(input), leaseMs: 60_000, maxMessages: 1 });
+  assert.ok(generated, '普通聊天消息必须由原 Assist 主流程领取');
+
+  const messages = await api.get(path(`/assist-sessions/${sessionId}/messages`));
+  assert.equal(messages.status, 200, messages.text);
+  const assistant = (messages.body as { items: { id: string; status: string; content: string | null;
+    error_code: string | null }[] })
+    .items.find((item) => item.id === sentResult.assistant_message_id);
+  assert.equal(assistant?.status, 'COMPLETED', JSON.stringify({ generated, assistant }));
+  assert.match(assistant?.content ?? '', /受控文件执行/u);
+
+  const requestList = await api.get(path(`/conversation-execution-requests?session_id=${sessionId}`));
+  assert.equal(requestList.status, 200, requestList.text);
+  const request = (requestList.body as { items: { request_id: string; source_message_id: string;
+    status: string; candidate: JsonObject | null }[] }).items.find((item) =>
+    item.source_message_id === sentResult.user_message_id);
+  assert.ok(request, '主流程候选必须落在该用户原消息的请求行');
+  assert.equal(request.status, 'READY');
+  assert.equal((request.candidate as JsonObject | null)?.writes_files, true);
+
+  const applied = await api.post(path(`/conversation-execution-requests/${request.request_id}/applications`), {});
+  assert.equal(applied.status, 200, applied.text);
+  const appliedResult = (applied.body as { result: { task_id: string; run_id: string; status: string } }).result;
+  assert.equal(appliedResult.status, 'DELEGATED');
+  const replay = await api.post(path(`/conversation-execution-requests/${request.request_id}/applications`), {});
+  assert.equal(replay.status, 200, replay.text);
+  assert.equal((replay.body as { result: { run_id: string } }).result.run_id, appliedResult.run_id,
+    '原请求重放必须复用同一个 Run');
+  return { sessionId, userMessageId: sentResult.user_message_id, requestId: request.request_id,
+    taskId: appliedResult.task_id, runId: appliedResult.run_id };
+}
+
+async function openAutoWriteDirectory(api: Awaited<ReturnType<typeof startTestApi>>, name: string,
+  files: Readonly<Record<string, string>> = {}) {
+  const workspaceId = await workspace(name);
+  const root = await tempRoot();
+  for (const [relativePath, content] of Object.entries(files)) {
+    const target = join(root, relativePath);
+    await mkdir(join(target, '..'), { recursive: true });
+    await writeFile(target, content, 'utf8');
+  }
+  const open = await api.post(workspacePath(workspaceId, '/working-directories/open'), {
+    command_id: randomUUID(), root_path: root });
+  assert.equal(open.status, 200, open.text);
+  const result = (open.body as { result: { association: { project_id: string; resource_id: string };
+    write_readiness: { access_revision: string; write_tier: string } } }).result;
+  const { project_id: projectId, resource_id: resourceId } = result.association;
+  assert.equal(result.write_readiness.write_tier, 'READ_ONLY');
+  const write = await api.post(workspacePath(workspaceId,
+    `/projects/${projectId}/managed-resources/${resourceId}/local-access`), {
+    command_id: randomUUID(), expected_revision: result.write_readiness.access_revision,
+    write_tier: 'AUTO' });
+  assert.equal(write.status, 200, write.text);
+  return { workspaceId, projectId, resourceId, root };
+}
+
+async function runToolScript(api: Awaited<ReturnType<typeof startTestApi>>, runId: string,
+  script: readonly { readonly name: string; readonly arguments: JsonObject }[][]) {
+  const delivered = await runOneCommand(app.db, { workerId: `ordinary-file-crud-${randomUUID()}`,
+    dataRoot: api.dataRoot, checkpointUrl: APP_DATABASE_URL, fakeToolScript: script });
+  assert.equal(delivered?.runId, runId, `Run Worker 必须消费原 Run：${JSON.stringify(delivered)}`);
+}
+
+async function runToolFeed(api: Awaited<ReturnType<typeof startTestApi>>, workspaceId: string, runId: string) {
+  const response = await api.get(workspacePath(workspaceId, `/runs/${runId}/tool-calls`));
+  assert.equal(response.status, 200, response.text);
+  return response.body as { run_id: string; run_status: string; wait_reason: string | null;
+    rounds: { round: number; calls: { tool_name: string; status: string; result_ref: JsonObject | null;
+      file_changes: { path: string; action: string; status: string }[] }[] }[] };
+}
+
 async function readonlyRequest(name: string) {
   const workspaceId = await workspace(name);
   const root = await tempRoot();
@@ -139,6 +272,171 @@ async function assertSingleExecution(workspaceId: string) {
   assert.deepEqual(counts.rows[0], { tasks: '1', runs: '1' });
 }
 
+test('普通聊天主流程通过原消息与 Run 工具结果完成真实 CREATE/MODIFY', async () => {
+  const api = await startTestApi();
+  try {
+    const createdEnv = await openAutoWriteDirectory(api, 'ordinary-chat-create');
+    const createdText = `创建样本\nUTF-8：中文🚀\n${randomUUID()}\n`;
+    const created = await prepareOrdinaryWrite(api, { ...createdEnv,
+      userContent: `在当前目录新建 create.txt，内容为本次测试样本。`,
+      title: '新建 create.txt', objective: 'create.txt 已写入测试内容',
+      path: 'create.txt', action: 'CREATE' });
+    await runToolScript(api, created.runId, [[{ name: 'apply_changeset', arguments: { changes: [
+      { action: 'CREATE', path: 'create.txt', content: createdText },
+    ] } }]]);
+    assert.deepEqual(await readFile(join(createdEnv.root, 'create.txt')), Buffer.from(createdText, 'utf8'));
+    const createFeed = await runToolFeed(api, createdEnv.workspaceId, created.runId);
+    const createCall = createFeed.rounds.flatMap((round) => round.calls)
+      .find((call) => call.tool_name === 'apply_changeset');
+    assert.equal(createCall?.status, 'SETTLED');
+    assert.deepEqual(createCall?.file_changes.map((change) =>
+      [change.path, change.action, change.status]), [['create.txt', 'CREATE', 'APPLIED']]);
+    const createProjection = await api.get(workspacePath(createdEnv.workspaceId,
+      `/conversation-execution-requests?session_id=${created.sessionId}`));
+    const createRequest = (createProjection.body as { items: { source_message_id: string;
+      run_id: string | null }[] }).items.find((item) => item.source_message_id === created.userMessageId);
+    assert.equal(createRequest?.run_id, created.runId,
+      '原会话中的原用户消息必须能读回真实执行结果所属的 Run');
+
+    const original = '标题\n保留段落\nreplace-this\n结尾\n';
+    const replacement = '标题\n保留段落\nreplacement\n结尾\n';
+    const modifiedEnv = await openAutoWriteDirectory(api, 'ordinary-chat-modify', { 'modify.txt': original });
+    const modified = await prepareOrdinaryWrite(api, { ...modifiedEnv,
+      userContent: '读取 modify.txt，把 replace-this 替换成 replacement，其他内容保留。',
+      title: '修改 modify.txt', objective: 'modify.txt 中的目标行已替换且其他内容保留',
+      path: 'modify.txt', action: 'MODIFY' });
+    const baselineSha256 = await sha256Of(join(modifiedEnv.root, 'modify.txt'));
+    await runToolScript(api, modified.runId, [
+      [{ name: 'read_file', arguments: { relative_path: 'modify.txt' } }],
+      [{ name: 'apply_changeset', arguments: { changes: [
+        { action: 'MODIFY', path: 'modify.txt', baselineSha256, content: replacement },
+      ] } }],
+    ]);
+    assert.equal(await readFile(join(modifiedEnv.root, 'modify.txt'), 'utf8'), replacement);
+    const modifyFeed = await runToolFeed(api, modifiedEnv.workspaceId, modified.runId);
+    const modifyCalls = modifyFeed.rounds.flatMap((round) => round.calls);
+    assert.ok(String(modifyCalls.find((call) => call.tool_name === 'read_file')?.result_ref?.content)
+      .includes(original), '修改前的基线必须由真实 read_file 工具从磁盘读取');
+    assert.deepEqual(modifyCalls.find((call) => call.tool_name === 'apply_changeset')?.file_changes
+      .map((change) => [change.path, change.action, change.status]),
+    [['modify.txt', 'MODIFY', 'APPLIED']]);
+  } finally { await api.stop(); }
+});
+
+test('普通聊天 DELETE 在确切 Review 前不落盘，批准删除、拒绝保留并反馈原会话', async () => {
+  const api = await startTestApi();
+  try {
+    const runDeleteDecision = async (decision: 'APPROVE' | 'DENY', name: string) => {
+      const original = `delete sample ${randomUUID()}\n`;
+      const env = await openAutoWriteDirectory(api, name, { 'delete.txt': original });
+      const chat = await prepareOrdinaryWrite(api, { ...env,
+        userContent: '删除当前目录中的 delete.txt。', title: '删除 delete.txt',
+        objective: 'delete.txt 根据当前用户的确切确认删除', path: 'delete.txt', action: 'DELETE' });
+      const script: { readonly name: string; readonly arguments: JsonObject }[][] = [
+        [{ name: 'read_file', arguments: { relative_path: 'delete.txt' } }],
+        [{ name: 'apply_changeset', arguments: { changes: [{ action: 'DELETE', path: 'delete.txt',
+          baselineSha256: await sha256Of(join(env.root, 'delete.txt')) }] } }],
+      ];
+      await runToolScript(api, chat.runId, script);
+      assert.equal(await readFile(join(env.root, 'delete.txt'), 'utf8'), original,
+        'AUTO 档不能越过 DELETE 的单动作 Review');
+      const initialFeed = await runToolFeed(api, env.workspaceId, chat.runId);
+      const pending = initialFeed.rounds.flatMap((round) => round.calls)
+        .find((call) => call.tool_name === 'apply_changeset');
+      assert.equal(pending?.status, 'WAITING_APPROVAL');
+      const runReviews = await api.get(workspacePath(env.workspaceId, `/runs/${chat.runId}/reviews`));
+      assert.equal(runReviews.status, 200, runReviews.text);
+      const actionReview = (runReviews.body as { items: { id: string; kind: string; status: string;
+        revision: string; target_hash: string }[] }).items.find((review) =>
+        review.kind === 'ACTION_APPROVAL' && review.status === 'OPEN');
+      assert.ok(actionReview, '删除必须有绑定本次 Operation 的待确认 Review');
+      const decided = await api.post(workspacePath(env.workspaceId,
+        `/reviews/${actionReview.id}/decisions`), { command_id: randomUUID(),
+        expected_revision: actionReview.revision, target_hash: actionReview.target_hash, decision });
+      assert.equal(decided.status, 200, decided.text);
+      if (decision === 'APPROVE') {
+        await runToolScript(api, chat.runId, script);
+        await assert.rejects(() => readFile(join(env.root, 'delete.txt')),
+          (error: NodeJS.ErrnoException) => error.code === 'ENOENT');
+      } else {
+        assert.equal(await readFile(join(env.root, 'delete.txt'), 'utf8'), original,
+          '拒绝 Review 后真实磁盘字节必须保留');
+      }
+      const finalFeed = await runToolFeed(api, env.workspaceId, chat.runId);
+      const finalDeleteCall = finalFeed.rounds.flatMap((round) => round.calls)
+        .find((call) => call.tool_name === 'apply_changeset');
+      assert.notEqual(finalDeleteCall?.status, 'WAITING_APPROVAL',
+        '原会话工具投影不能在 Review 已决定后仍显示永久等待');
+      assert.equal(finalDeleteCall?.result_ref?.reason,
+        decision === 'DENY' ? 'HUMAN_DENIED' : undefined);
+      if (decision === 'APPROVE') {
+        assert.deepEqual(finalDeleteCall?.file_changes.map((change) =>
+          [change.path, change.action, change.status]), [['delete.txt', 'DELETE', 'APPLIED']]);
+      }
+      const sessionRequests = await api.get(workspacePath(env.workspaceId,
+        `/conversation-execution-requests?session_id=${chat.sessionId}`));
+      assert.equal(sessionRequests.status, 200, sessionRequests.text);
+      assert.ok((sessionRequests.body as { items: { source_message_id: string; run_id: string | null }[] })
+        .items.some((request) => request.source_message_id === chat.userMessageId &&
+          request.run_id === chat.runId), '原消息仍指向包含删除结果的同一 Run');
+    };
+    await runDeleteDecision('APPROVE', 'ordinary-chat-delete-approved');
+    await runDeleteDecision('DENY', 'ordinary-chat-delete-denied');
+  } finally { await api.stop(); }
+});
+
+/**
+ * 完全访问档的真实准入闭环（迁移 0112）。
+ *
+ * 上一例证明 AUTO 档的删除一定停在 ACTION_APPROVAL；这里只改变同一目录的档位，
+ * 其余流程逐字相同，因此两者的差值就是「档位」这一件事。策略行仍是 AUTO，
+ * 差别只记在 local_directory_access.write_tier 上。
+ */
+test('完全访问档：本目录 DELETE 不产生 ACTION_APPROVAL 并真实落盘', async () => {
+  const api = await startTestApi();
+  try {
+    const original = `full-access delete sample ${randomUUID()}\n`;
+    const env = await openAutoWriteDirectory(api, 'full-access-directory-delete', { 'delete.txt': original });
+    const readinessPath = workspacePath(env.workspaceId,
+      `/projects/${env.projectId}/managed-resources/${env.resourceId}/write-readiness`);
+    const revision = (await api.get(readinessPath)
+      .then((response) => response.body) as { access_revision: string }).access_revision;
+    const upgraded = await api.post(workspacePath(env.workspaceId,
+      `/projects/${env.projectId}/managed-resources/${env.resourceId}/local-access`), {
+      command_id: randomUUID(), expected_revision: revision, write_tier: 'FULL' });
+    assert.equal(upgraded.status, 200, upgraded.text);
+    assert.equal((upgraded.body as { result: { write_tier: string } }).result.write_tier, 'FULL');
+    const upgradedReadiness = await api.get(readinessPath)
+      .then((response) => response.body) as { write_tier: string; policy_decision: string; detail: string };
+    // 完全访问在权限侧就是一条 AUTO 策略：网关没有第四种判定，豁免来自目录档位。
+    assert.equal(upgradedReadiness.policy_decision, 'AUTO');
+    assert.equal(upgradedReadiness.write_tier, 'FULL');
+    assert.match(upgradedReadiness.detail, /完全访问/u);
+
+    const chat = await prepareOrdinaryWrite(api, { ...env,
+      userContent: '删除当前目录中的 delete.txt。', title: '删除 delete.txt',
+      objective: 'delete.txt 已按完全访问档删除', path: 'delete.txt', action: 'DELETE' });
+    await runToolScript(api, chat.runId, [
+      [{ name: 'read_file', arguments: { relative_path: 'delete.txt' } }],
+      [{ name: 'apply_changeset', arguments: { changes: [{ action: 'DELETE', path: 'delete.txt',
+        baselineSha256: await sha256Of(join(env.root, 'delete.txt')) }] } }],
+    ]);
+    await assert.rejects(() => readFile(join(env.root, 'delete.txt')),
+      (error: NodeJS.ErrnoException) => error.code === 'ENOENT',
+      '完全访问目录内的删除必须真实落盘，不再停在待确认');
+    const feed = await runToolFeed(api, env.workspaceId, chat.runId);
+    const deleteCall = feed.rounds.flatMap((round) => round.calls)
+      .find((call) => call.tool_name === 'apply_changeset');
+    assert.equal(deleteCall?.status, 'SETTLED');
+    assert.deepEqual(deleteCall?.file_changes.map((change) =>
+      [change.path, change.action, change.status]), [['delete.txt', 'DELETE', 'APPLIED']]);
+    const runReviews = await api.get(workspacePath(env.workspaceId, `/runs/${chat.runId}/reviews`));
+    assert.equal((runReviews.body as { items: { kind: string }[] }).items
+      .some((review) => review.kind === 'ACTION_APPROVAL'), false,
+      '完全访问免掉的是单动作 Review，不是操作、调用与账本记录');
+  } finally { await api.stop(); }
+});
+
 test('基础会话组合：HTTP 消息到执行、真实读取、成果读回和人工验收完成', async () => {
   const api = await startTestApi();
   try {
@@ -155,11 +453,18 @@ test('基础会话组合：HTTP 消息到执行、真实读取、成果读回和
         .result.association;
     const resource = await createRepositories(app.db).gateway.readResource(resourceId);
     assert.ok(resource);
-    await rootBoundConnection(app.db, { workspaceId, projectId,
-      canonicalRoot: resource.canonical_root, capabilities: ['FILE_QUERY', 'FILE_READ'] });
-    await createGatewayPolicy(app.db, { workspaceId, projectId, capability: 'FILE_READ',
-      actionType: 'READ_FILE', targetPrefix: resource.canonical_root,
-      decision: 'AUTO', maxPayloadBytes: 262144 });
+    const connections = await createRepositories(app.db).gateway.listConnections(workspaceId, projectId);
+    assert.equal(connections.length, 1, '目录选择本身创建一条基础读取连接');
+    assert.equal(connections[0]?.config.root_path, resource.canonical_root);
+    assert.deepEqual(await createRepositories(app.db).gateway.listConnectionCapabilities(connections[0]!.id),
+      ['FILE_QUERY', 'FILE_READ']);
+    for (const [capability, actionType] of [['FILE_QUERY', 'LIST_DIRECTORY'],
+      ['FILE_QUERY', 'FIND_PATHS'], ['FILE_QUERY', 'SEARCH_TEXT'], ['FILE_READ', 'READ_FILE']] as const) {
+      const policies = await createRepositories(app.db).gateway.listActivePolicies(workspaceId, projectId,
+        capability, actionType);
+      assert.ok(policies.some((policy) => policy.target_prefix === resource.canonical_root &&
+        policy.decision === 'AUTO'), `${actionType} read policy is created from directory selection`);
+    }
     const created = await api.post(path('/assist-sessions'), {
       command_id: randomUUID(), project_id: projectId, title: '基础普通会话' });
     assert.equal(created.status, 201, created.text);
@@ -221,17 +526,10 @@ test('基础会话组合：HTTP 消息到执行、真实读取、成果读回和
   } finally { await api.stop(); }
 });
 
-test('基础执行接续：补齐读连接后接续原 Task，不重复建立 Task/Run', async () => {
+test('目录选择自动补齐读连接后接续原 Task，不重复建立 Task/Run', async () => {
   const request = await readonlyRequest('resume-after-connection');
-  await assert.rejects(() => applyConversationExecution(app.db, request), /FILE_QUERY 连接/);
-  const saved = await createRepositories(app.db).conversationExecutions.readRequest(request.requestId);
-  assert.equal(saved?.status, 'TASK_PREPARED');
-  assert.ok(saved?.task_id);
-  await rootBoundConnection(app.db, { ...request, canonicalRoot: request.root,
-    capabilities: ['FILE_QUERY', 'FILE_READ'] });
   const delegated = await applyConversationExecution(app.db, request);
   assert.equal(delegated.status, 'DELEGATED');
-  assert.equal(delegated.task_id, saved.task_id);
   assert.deepEqual(await applyConversationExecution(app.db, request), delegated);
   await assertSingleExecution(request.workspaceId);
 });
@@ -357,7 +655,7 @@ test('同一实际目录关联多个项目时要求显式选择，不替用户�
   assert.equal(chosen.result.association?.project_id, otherProject);
 });
 
-test('基础方法请求：明确修复建立 Task/Run，读取真实文件、修改并检查，纯讨论不建 Task', async () => {
+test('基础方法请求：目录自带只读配置，切档后普通聊天读真实文件、修改并检查', async () => {
   const interpretationRequests: ConversationInterpretationRequest[] = [];
   const workspaceId = await workspace('conversation-execution');
   const root = await tempRoot();
@@ -424,25 +722,20 @@ test('基础方法请求：明确修复建立 Task/Run，读取真实文件、�
 
   const target = join(root, 'answer.txt');
   await writeFile(target, 'before\n', 'utf8');
-  // 缺连接时不静默放行：先给出具体原因，再由调用方补齐有效配置。
-  // 方案 B 下工具循环必须先能读，因此报出的是第一项缺失的读能力。
-  await assert.rejects(() => applyConversationExecution(app.db, { workspaceId,
-    requestId: prepared.result.request_id }), /FILE_QUERY 连接/);
-
   const resource = await createRepositories(app.db).gateway.readResource(resourceId);
   assert.ok(resource !== undefined);
-  const connectionId = await rootBoundConnection(app.db, { workspaceId, projectId,
-    canonicalRoot: resource.canonical_root,
-    // process.execPath 是受管根之外的解释器：没有这份点名，冻结期就该拒绝它。
-    allowedExecutables: [process.execPath],
-    capabilities: ['FILE_QUERY', 'FILE_READ', 'FILE_WRITE', 'CLI_RUN'] });
-  for (const [capability, actionType] of [['FILE_QUERY', 'LIST_DIRECTORY'],
-    ['FILE_QUERY', 'FIND_PATHS'], ['FILE_QUERY', 'SEARCH_TEXT'], ['FILE_READ', 'READ_FILE'],
-    ['FILE_WRITE', 'APPLY_CHANGESET'], ['FILE_WRITE', 'READ_CHANGE_SET'],
-    ['CLI_RUN', 'CLI_RUN']] as const) {
-    await createGatewayPolicy(app.db, { workspaceId, projectId, capability, actionType,
-      targetPrefix: resource.canonical_root, decision: 'AUTO', maxPayloadBytes: 262144 });
-  }
+  const readonly = await readWorkingDirectoryWriteReadiness(app.db, workspaceId, projectId, resourceId);
+  assert.equal(readonly.status, 'READ_ONLY', '选择目录后默认只读，不要求先建 FILE_WRITE 连接');
+  const access = await setLocalDirectoryWriteTier(app.db, { workspaceId, projectId, resourceId,
+    commandId: randomUUID(), expectedRevision: readonly.access_revision, tier: 'AUTO' });
+  assert.equal(access.result.write_tier, 'AUTO');
+  const localAccess = await createRepositories(app.db).gateway.readLocalDirectoryAccess(resourceId);
+  assert.ok(localAccess?.write_connection_id, '一次目录档位命令由应用创建精确目录 FILE_WRITE 连接');
+  const connectionId = localAccess.write_connection_id;
+  const cliConnectionId = await rootBoundConnection(app.db, { workspaceId, projectId,
+    canonicalRoot: resource.canonical_root, allowedExecutables: [process.execPath], capabilities: ['CLI_RUN'] });
+  await createGatewayPolicy(app.db, { workspaceId, projectId, capability: 'CLI_RUN', actionType: 'CLI_RUN',
+    targetPrefix: resource.canonical_root, decision: 'AUTO', maxPayloadBytes: 262144 });
 
   const applied = await applyConversationExecution(app.db, { workspaceId,
     requestId: prepared.result.request_id });
@@ -478,6 +771,8 @@ test('基础方法请求：明确修复建立 Task/Run，读取真实文件、�
     ['list_directory', 'find_paths', 'search_text', 'read_file', 'apply_changeset',
       'read_change_set', 'run_check']);
   assert.equal(snapshot.tool_loop_action?.connections?.FILE_WRITE, connectionId);
+  assert.equal(snapshot.tool_loop_action?.connections?.CLI_RUN, cliConnectionId,
+    '本地文件档位不得替 CLI 创建或扩张执行权限');
 
   // 授权只放行本次范围内的普通编辑与已配置检查；删除永远不在其中。
   const grant = await withTransaction(app.db, (repositories) =>
@@ -508,6 +803,109 @@ test('基础方法请求：明确修复建立 Task/Run，读取真实文件、�
   assert.equal(typeof persisted?.result_ref?.artifact_version_id, 'string');
   const run = await createRepositories(app.db).runs.readRun(applied.run_id as string);
   assert.equal(run?.status, 'WAITING_APPROVAL', '检查与候选保存完成后保留原 HUMAN 判断入口');
+});
+
+test('普通聊天里的方法 MODIFY：主流程保留 execution_method 并在 Run 内真实落盘', async () => {
+  const api = await startTestApi();
+  try {
+    const original = 'before\n';
+    const env = await openAutoWriteDirectory(api, 'method-main-loop-modify', { 'answer.txt': original });
+    const path = (suffix: string) => workspacePath(env.workspaceId, suffix);
+    const created = await api.post(path('/assist-sessions'), { command_id: randomUUID(),
+      project_id: env.projectId, title: '方法修改主流程' });
+    assert.equal(created.status, 201, created.text);
+    const sessionId = (created.body as { result: { session_id: string } }).result.session_id;
+    const bound = await api.post(path(`/assist-sessions/${sessionId}/working-directory`), {
+      command_id: randomUUID(), resource_id: env.resourceId });
+    assert.equal(bound.status, 200, bound.text);
+    const sent = await api.post(path(`/assist-sessions/${sessionId}/messages`), {
+      command_id: randomUUID(), intent: 'DISCUSS',
+      content: '/diagnose 修好 answer.txt，把内容改成 after' });
+    assert.equal(sent.status, 202, sent.text);
+    const sentResult = (sent.body as { result: { user_message_id: string;
+      assistant_message_id: string } }).result;
+    const status = await generateUntilSettled(api, env.workspaceId, sessionId,
+      sentResult.assistant_message_id,
+      executionPort({ title: '改写 answer.txt', objective: 'answer.txt 内容变成 after',
+        path: 'answer.txt', action: 'MODIFY' }));
+    assert.equal(status, 'COMPLETED', '方法消息必须由普通主流程完成');
+    const messages = await api.get(path(`/assist-sessions/${sessionId}/messages`));
+    assert.equal(messages.status, 200, messages.text);
+    const assistant = (messages.body as { items: { id: string; status: string; content: string | null }[] })
+      .items.find((item) => item.id === sentResult.assistant_message_id);
+    assert.match(assistant?.content ?? '', /受控文件执行/u);
+
+    const requestList = await api.get(path(`/conversation-execution-requests?session_id=${sessionId}`));
+    assert.equal(requestList.status, 200, requestList.text);
+    const request = (requestList.body as { items: { request_id: string; source_message_id: string;
+      status: string; candidate: JsonObject | null }[] }).items
+      .find((item) => item.source_message_id === sentResult.user_message_id);
+    assert.ok(request, '方法主流程的候选必须落在原用户消息的请求行');
+    assert.equal(request.status, 'READY');
+    assert.equal(request.candidate?.writes_files, true);
+    const method = request.candidate?.execution_method as JsonObject;
+    assert.equal(method.action, 'MODIFY', '主流程落库不能丢掉方法绑定');
+    assert.equal((method.method_snapshot as JsonObject).id, 'fault-diagnosis');
+    assert.equal(method.session_id, sessionId);
+    assert.equal(method.source_message_id, sentResult.user_message_id);
+
+    const applied = await api.post(path(
+      `/conversation-execution-requests/${request.request_id}/applications`), {});
+    assert.equal(applied.status, 200, applied.text);
+    const runId = (applied.body as { result: { run_id: string } }).result.run_id;
+    const contract = (await createRepositories(app.db).runs.readContract(runId))!;
+    assert.equal((contract.frozen_snapshot.execution_method as JsonObject).action, 'MODIFY');
+    const allowed = (contract.frozen_snapshot.tool_loop_action as JsonObject).allowed_tools as string[];
+    assert.ok(allowed.includes('read_file') && allowed.includes('apply_changeset'),
+      `方法 MODIFY 的 Run 必须拿到读写工具：${allowed.join(',')}`);
+    assert.match(renderDraftUserPrompt({ contract: contract.frozen_snapshot }),
+      /故障诊断（fault-diagnosis@1\.0\.0）/u);
+
+    const target = join(env.root, 'answer.txt');
+    const rows = await driveToolLoop(runId, env.workspaceId, [
+      [{ name: 'read_file', arguments: { relative_path: 'answer.txt' } }],
+      [{ name: 'apply_changeset', arguments: { changes: [{ action: 'MODIFY', path: 'answer.txt',
+        baselineSha256: await sha256Of(target), content: 'after\n' }] } }],
+    ]);
+    assert.deepEqual(rows.map((row) => row.status), ['SETTLED', 'SETTLED']);
+    assert.equal(await readFile(target, 'utf8'), 'after\n');
+  } finally { await api.stop(); }
+});
+
+test('方法 INSPECT 的写候选被收口为 CLARIFY，不建 Task/Run、磁盘不变', async () => {
+  const api = await startTestApi();
+  try {
+    const original = 'inspect-only\n';
+    const env = await openAutoWriteDirectory(api, 'method-main-loop-inspect', { 'answer.txt': original });
+    const path = (suffix: string) => workspacePath(env.workspaceId, suffix);
+    const created = await api.post(path('/assist-sessions'), { command_id: randomUUID(),
+      project_id: env.projectId, title: '方法只读主流程' });
+    assert.equal(created.status, 201, created.text);
+    const sessionId = (created.body as { result: { session_id: string } }).result.session_id;
+    await api.post(path(`/assist-sessions/${sessionId}/working-directory`), {
+      command_id: randomUUID(), resource_id: env.resourceId });
+    const sent = await api.post(path(`/assist-sessions/${sessionId}/messages`), {
+      command_id: randomUUID(), intent: 'DISCUSS', content: '/diagnose 看看 answer.txt 有没有问题' });
+    assert.equal(sent.status, 202, sent.text);
+    const sentResult = (sent.body as { result: { user_message_id: string;
+      assistant_message_id: string } }).result;
+    const status = await generateUntilSettled(api, env.workspaceId, sessionId,
+      sentResult.assistant_message_id,
+      executionPort({ title: '不该出现的写候选', objective: '不该落盘',
+        path: 'answer.txt', action: 'MODIFY' }));
+    assert.equal(status, 'COMPLETED');
+    const requestList = await api.get(path(`/conversation-execution-requests?session_id=${sessionId}`));
+    const request = (requestList.body as { items: { status: string; candidate: JsonObject | null;
+      source_message_id: string }[] }).items
+      .find((item) => item.source_message_id === sentResult.user_message_id);
+    assert.equal(request?.status, 'CLARIFY');
+    assert.equal(request?.candidate, null);
+    const counts = await sql<{ tasks: string; runs: string }>`select
+      (select count(*) from tasks where workspace_id = ${env.workspaceId})::text as tasks,
+      (select count(*) from runs where workspace_id = ${env.workspaceId})::text as runs`.execute(app.db);
+    assert.deepEqual(counts.rows[0], { tasks: '0', runs: '0' });
+    assert.equal(await readFile(join(env.root, 'answer.txt'), 'utf8'), original);
+  } finally { await api.stop(); }
 });
 
 test('基础只读方法：只配读连接即可进入 Run 并读取文件，原学习身份不进入执行', async () => {
@@ -763,17 +1161,20 @@ test('目录查看请求：缺读能力时报告真实缺口，不把它说成�
     modelPort: port({ decision: 'PREPARE', task: { title: '列出目录', objective: '列出直接子项',
       criteria: [{ statement: '已列出直接子项', required: true, method: 'HUMAN' }],
       expected_outputs: { kind: 'MARKDOWN_DOCUMENT' }, writes_files: false } }) });
+  // 目录选择已创建只读连接；显式停用后必须按真实缺口拒绝，且不能另建连接绕过停用。
+  const access = await createRepositories(app.db).gateway.readLocalDirectoryAccess(resourceId);
+  assert.ok(access?.read_connection_id);
+  const readConnection = await createRepositories(app.db).gateway.readConnection(access.read_connection_id);
+  assert.ok(readConnection);
+  await disableGatewayConnectionCommand(app.db, { workspaceId, projectId,
+    connectionId: readConnection.id, commandId: randomUUID(),
+    expectedVersion: readConnection.version.toString() });
+  const connectionCount = (await createRepositories(app.db).gateway.listConnections(workspaceId, projectId)).length;
   // 缺 FILE_QUERY：报出第一项缺失的具体能力，而不是笼统地否认本地文件能力。
   await assert.rejects(() => applyConversationExecution(app.db,
     { workspaceId, requestId: prepared.result.request_id }), /FILE_QUERY 连接/u);
-  // 补齐读能力后按原身份接续，不重复建 Task。
-  const resource = (await createRepositories(app.db).gateway.readResource(resourceId))!;
-  await rootBoundConnection(app.db, { workspaceId, projectId, canonicalRoot: resource.canonical_root,
-    capabilities: ['FILE_QUERY', 'FILE_READ'] });
-  const resumed = await applyConversationExecution(app.db,
-    { workspaceId, requestId: prepared.result.request_id });
-  assert.equal(resumed.status, 'DELEGATED');
-  await assertSingleExecution(workspaceId);
+  assert.equal((await createRepositories(app.db).gateway.listConnections(workspaceId, projectId)).length,
+    connectionCount, '停用连接不得被隐式替换成新的活动连接');
 });
 
 test('目录查看请求：受管根外的路径不被读取，停用关联不沿旧资源继续执行', async () => {
@@ -804,9 +1205,11 @@ test('目录查看请求：受管根外的路径不被读取，停用关联不�
   assert.ok(applied.run_id !== null);
   // 逃逸防护：受管根外的路径在真实派发处被拒，根外文件内容不得进入任何工具回执。
   const rows = await driveToolLoop(applied.run_id as string, workspaceId, [
-    [{ name: 'read_file', arguments: { relative_path: `..${sep}outside-file.txt` } }],
-  ]);
-  assert.equal(rows[0]!.status !== 'SETTLED' || !String(rows[0]!.result_ref?.content).includes('must-not-be-read'), true,
+    [{ name: 'read_file', arguments: { relative_path: '../outside-file.txt' } }],
+  ], true);
+  assert.equal(rows[0]!.status, 'REJECTED', '越界读取必须以拒绝结算，不能被当成普通成功调用');
+  assert.equal((rows[0]!.result_ref as JsonObject | null)?.reason, 'GATEWAY_TARGET_DENIED');
+  assert.ok(!JSON.stringify(rows[0]!.result_ref).includes(outsideText),
     `受管根外的内容不得出现在工具回执里：${JSON.stringify(rows[0]!.result_ref)}`);
   assert.equal(await readFile(outside, 'utf8'), outsideText, '越界尝试不得改动根外文件');
 });
@@ -910,7 +1313,8 @@ async function sha256Of(path: string): Promise<string> {
  * 返回 DRAFT Attempt 的全部工具行，供断言核对真实读写真实检查。
  */
 async function driveToolLoop(runId: string, workspaceId: string,
-  script: readonly { readonly name: string; readonly arguments: JsonObject }[][]) {
+  script: readonly { readonly name: string; readonly arguments: JsonObject }[][],
+  allowRejectedAction = false) {
   const storage = new ManagedContentStore(dataRoot);
   for (let iteration = 0; iteration < 20; iteration += 1) {
     const advanced = await advanceRunStep(app.db, { runId, workerId: `loop-${randomUUID()}`,
@@ -921,7 +1325,7 @@ async function driveToolLoop(runId: string, workspaceId: string,
     const dispatched = await executeToolLoopStep(app.db, { claim: { commandId: randomUUID(),
       runId, workspaceId, kind: 'START', reviewDecisionId: null,
       workerId: `loop-${randomUUID()}`, epoch: 0n }, toolCallId: advanced.tool_call_id });
-    if (dispatched.status !== 'SUCCEEDED') {
+    if (dispatched.status !== 'SUCCEEDED' && !(allowRejectedAction && dispatched.status === 'FAILED')) {
       assert.fail(`工具派发未成功：${dispatched.status}`);
     }
   }

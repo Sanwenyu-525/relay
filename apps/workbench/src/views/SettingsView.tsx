@@ -9,6 +9,8 @@ import { describeLiveError } from "../lib/liveErrors";
 import { modelErrorGuides } from "../lib/modelErrorGuides";
 import { useRelayConnection } from "../lib/relayConnection";
 import { formatReadableDateTime, saveDisplayPreferences, useDisplayPreferences } from "../lib/displayPreferences";
+import { savePlanExecutionMode, usePlanExecutionMode,
+  type PlanExecutionMode } from "../lib/planExecutionPreference";
 import { handleTabListKeyDown } from "../lib/tabNavigation";
 import "./SettingsView.css";
 
@@ -274,6 +276,57 @@ function DisplayPreferencesCard() {
   </section>;
 }
 
+const planExecutionLabels: Record<PlanExecutionMode, string> = {
+  AUTO: "自动执行",
+  CONFIRM: "需要人工确认"
+};
+
+/**
+ * 计划执行方式（工作台 §18.4.2）：对话里生成执行候选（计划）后，本设备是直接沿原入口
+ * 应用还是保留一次「按这个目标执行」。与显示偏好同一保存口径：草稿不立即生效，
+ * 保存成功只影响本设备；权限、准入与 DELETE 确切确认不因此改变任何一条。
+ */
+function PlanExecutionCard() {
+  const mode = usePlanExecutionMode();
+  const [draft, setDraft] = useState<PlanExecutionMode>(mode);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const changed = () => { setSaved(false); setError(null); };
+
+  return <section id="settings-plan-execution" className="surface-panel settings-card" data-testid="plan-execution">
+    <h2>计划执行方式</h2>
+    <p className="settings-basic-intro">对话里服务端把请求整理成执行候选（计划）后，是直接进入执行还是等你确认。</p>
+    <form onSubmit={(event) => {
+      event.preventDefault(); setError(null); setSaved(false);
+      try { savePlanExecutionMode(draft); setSaved(true); }
+      catch { setError("设置未保存：本设备存储不可写，请检查浏览器或应用的存储权限后重试。"); }
+    }}>
+      <div className="settings-field">
+        <label htmlFor="settings-plan-execution-mode">生成计划后</label>
+        <select id="settings-plan-execution-mode" data-testid="settings-plan-execution-mode" value={draft}
+          aria-describedby="settings-plan-execution-help"
+          onChange={(event) => { setDraft(event.target.value as PlanExecutionMode); changed(); }}>
+          {(Object.keys(planExecutionLabels) as PlanExecutionMode[]).map((value) =>
+            <option key={value} value={value}>{planExecutionLabels[value]}</option>)}
+        </select>
+        <p id="settings-plan-execution-help" className="helper-text">
+          自动执行：服务端判定候选就绪后，沿原入口直接建立任务并进入执行（当前默认）。
+          人工确认：摘要里保留「按这个目标执行」，点击后才进入执行；刷新后仍按原请求等待确认。
+        </p>
+      </div>
+      <div className="settings-save-actions">
+        <button type="submit" className="primary-button" data-testid="settings-plan-execution-save">保存设置</button>
+        {saved && <p role="status" className="settings-save-result">设置已保存，仅在本设备生效。</p>}
+        {error && <p role="alert" className="action-error">{error}</p>}
+      </div>
+      <p className="settings-device-note helper-text">
+        两种方式都不改变权限：写入仍按 Gateway 准入与本次任务范围授权，删除仍需逐个确认，
+        授权来源始终是最初那条用户消息。本设置仅保存在本设备。
+      </p>
+    </form>
+  </section>;
+}
+
 export default function SettingsView() {
   const connection = useRelayConnection();
   const client = connection.mode === "live" ? connection.client : null;
@@ -362,7 +415,7 @@ return <section className="settings-page" data-testid="settings-page">
       </section>
     </>}</div>
       <div role="tabpanel" id="settings-panel-workbench" aria-labelledby="settings-tab-workbench" hidden={group !== "workbench"}>{group === "workbench" && <div id="settings-packs"><PackCatalogPanel /></div>}</div>
-      <div role="tabpanel" id="settings-panel-execution" aria-labelledby="settings-tab-execution" hidden={group !== "execution"}><section className="surface-panel settings-card">
+      <div role="tabpanel" id="settings-panel-execution" aria-labelledby="settings-tab-execution" hidden={group !== "execution"}><PlanExecutionCard /><section className="surface-panel settings-card">
         <h2>执行策略</h2>
         <p className="helper-text">执行连接与权限按项目管理，通知偏好尚无写接口。</p>
         <dl className="settings-definition-list">

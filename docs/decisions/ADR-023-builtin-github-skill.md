@@ -60,6 +60,8 @@ GitHub 内置 Skill 作为 V1 交付项 `[F25]` 进入主线，归 E 阶段（�
 
 **已落地。** ① 上游 `gh` Skill 原文、MIT `LICENSE` 与 `UPSTREAM.md` 存于 `apps/api/skills/builtin/gh/`，固定提交 `4537a92…`、`SKILL.md` SHA-256 `49e3798…f7caad`，正文未改写；② 迁移 `0103` 登记 `GITHUB_READ`（`REAL`/`READ`）并完整重述 `ck_logical_operation_resource`，只放行 `ASSISTANT_READ`/`AGENT_SESSION_READ` 且必须绑定受管资源；③ `github-adapter.ts` 只认本地 `git` 解析出的 `github.com` remote、argv 结构化数组、环境白名单、超时/取消、有界投影与类型化失败；④ 四个只读工具进入工具目录与会话只读词表，按 ACTIVE 连接逐轮激活；⑤ 逐动作 Permission、停用连接即收回、与 `FILE_READ` 共存。证据：`github-read.test.ts` **16/16**、真实 PostgreSQL 上 `github-read.integration.test.ts` **8/8**，`0103` 在真实迁移链中应用成功；被 CHECK 重述影响的既有套件回归结果见[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。实现边界唯一记在[工具适配器 §4.1](../architecture/tool-adapters.md#41-github-只读查询01032026-10-17-开发自检)。
 
+**2026-10-18 增量**：只读动作由四个扩到五个（新增 `GITHUB_ISSUE_VIEW`，仍属 `GITHUB_READ`，无迁移、无权限分支）。本决策的其余边界不变：写动作仍须先冻结核对协议，官方包登记与运行时提示注入仍未建。
+
 **未落地。** 官方包独立登记表/API、随包资源与 `bundle.resources` 接线、运行时提示注入、内置项禁用设置、BC-05 文件形态迁移均不存在；GitHub 侧写动作未开工；本机没有安装 `gh`，已认证的真实读取与限流/权限错误只能靠单元与注入式探测验证，不能算真实服务取证；真实 Windows 窗口、安装包与独立验收未做。首片不构成 F25 验收通过，也不满足「一句话提交并创建 PR」。
 
 ## 决策原因

@@ -3,9 +3,10 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Archive, ArrowRight, Check, FolderPlus, Info, LayoutGrid, List,
   MoreHorizontal, Package, Plus, RotateCcw, Search, Sparkles, Target, TriangleAlert } from "lucide-react";
 import { createCommandId, projectArchiveResultFrom, RelayApiError, RelayTransportError,
-  type RelayApiClient, type RelayCommandEnvelope, type RelayProject,
+  type RelayApiClient, type RelayCommandEnvelope,
   type RelayProjectArchiveResult, type RelayProjectListItem } from "../api/relayClient";
 import AppDialog from "../components/AppDialog";
+import { escalateFeedback, openUndoFeedback } from "../components/Feedback";
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
 import CreateGoalView from "./CreateGoalView";
@@ -17,7 +18,7 @@ import { phaseLabel, projectTypeLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
 import { takeCreationFlash } from "../lib/navigationFlash";
 import { useRelayConnection } from "../lib/relayConnection";
-import type { ProjectSummary, ProjectType } from "../types";
+import type { DecimalRevision, ProjectSummary, ProjectType } from "../types";
 import "./ProjectsView.css";
 
 function message(error: unknown, fallback: string): string {
@@ -460,7 +461,6 @@ function LiveProjectsListView({ client, scope, onCreate }: {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirmProject, setConfirmProject] = useState<RelayProject | null>(null);
   const [checkingArchive, setCheckingArchive] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [pendingArchive, setPendingArchive] = useState<PendingArchive | null>(() => readPendingArchive(archiveKey(client)));
@@ -543,7 +543,10 @@ function LiveProjectsListView({ client, scope, onCreate }: {
         setArchiveError("该项目已归档，已重新读取列表；可在“已归档”范围打开历史事实。");
         void loadPage(null, true); return;
       }
-      setConfirmProject(current);
+      // 撤销条替代确认框（工作台 §13.2）：单击即发，8 秒反悔窗口在提交之后。
+      // 单读仍保留——它挡的是「界面看的是旧修订就按下归档」，不是二次确认。
+      await sendArchive({ commandId: createCommandId(), projectId: current.id,
+        expectedRevision: current.revision });
     } catch (caught) {
       if (!disposed.current) {
         setArchiveError(describeLiveError(caught).message);
@@ -560,7 +563,7 @@ function LiveProjectsListView({ client, scope, onCreate }: {
       setArchiveError("无法暂存原归档命令，尚未发送。请检查浏览器会话存储后重试。"); return;
     }
     archiveFlight.current = true;
-    setPendingArchive(command); setConfirmProject(null); setArchiveBusy(true);
+    setPendingArchive(command); setArchiveBusy(true);
     setMayRetryArchive(false); setArchiveError(null); setArchiveBlockers([]); setArchiveSuccess(null);
     try {
       const envelope = await client.archiveProject({ projectId: command.projectId,
@@ -570,6 +573,12 @@ function LiveProjectsListView({ client, scope, onCreate }: {
       savePendingArchive(pendingStorageKey, null); setPendingArchive(null);
       setArchiveSuccess({ id: result.projectId, archivedAt: result.archivedAt });
       setDetailId(null);
+      // 归档成功即给 8 秒反悔窗口；撤销是**新的**命令，修订取归档回执推进后的那一版。
+      openUndoFeedback(`archive-project:${result.projectId}`, {
+        text: "已归档这个项目", actionLabel: "撤销",
+        testId: `project-archive-undo-${result.projectId}`,
+        onUndo: () => { void undoArchiveProject(result.projectId, result.revision); },
+      });
       await loadPage(null, true);
     } catch (caught) {
       if (disposed.current) return;
@@ -591,6 +600,30 @@ function LiveProjectsListView({ client, scope, onCreate }: {
         } else setArchiveError(describeLiveError(caught).message);
       }
     } finally { archiveFlight.current = false; if (!disposed.current) setArchiveBusy(false); }
+  }
+
+  /**
+   * 撤销项目归档（工作台 §13.2）：再发一条**前向补偿命令**，把 `archived_at` 写回 NULL。
+   *
+   * 修订取归档回执推进后的那一版，不读列表里可能还没刷新的行。撤销失败不悄悄消失：
+   * 同一条浮层升级成停留到关闭的 Notice，并指向「已归档」范围里仍然存在的项目。
+   * 归档成功那条就地回执一并撤掉——撤销成功后再说「已归档」就是假话。
+   */
+  async function undoArchiveProject(projectId: string, revision: DecimalRevision) {
+    try {
+      await client.unarchiveProject({ projectId, commandId: createCommandId(),
+        expectedRevision: revision });
+      setArchiveSuccess(null);
+      await loadPage(null, true);
+    } catch (caught) {
+      const described = describeLiveError(caught);
+      escalateFeedback(`archive-project:${projectId}`, {
+        testId: `project-archive-undo-${projectId}`,
+        text: described.kind === "conflict"
+          ? "撤销没成功：项目刚被别处改过。在「已归档」范围仍能重新打开它。"
+          : `撤销没成功：${described.message}`,
+      });
+    }
   }
 
   async function checkArchiveReceipt() {
@@ -764,7 +797,7 @@ function LiveProjectsListView({ client, scope, onCreate }: {
           <button className="secondary-button secondary-button--wide" type="button" data-testid="project-archive"
             disabled={checkingArchive || archiveBusy || pendingArchive !== null || loading || loadingMore || error !== null}
             onClick={() => void prepareArchive(selected)}><Archive aria-hidden="true" />{checkingArchive ? "正在核对 Project" : "归档项目"}</button>
-          <p className="helper-text">归档需再次确认，历史事实仍可读取。</p>
+          <p className="helper-text">归档后可立即在提示条里撤销；历史事实仍可读取。</p>
         </>}
         <div className="projects-detail__divider" />
         <h3 className="projects-detail__heading">项目身份</h3>
@@ -773,14 +806,5 @@ function LiveProjectsListView({ client, scope, onCreate }: {
         {selected.nextActionTaskId && <p className="helper-text">任务 ID：{selected.nextActionTaskId}</p>}
       </div>}
     </ProjectDetailDialog>
-    <AppDialog open={confirmProject !== null} title="确认归档项目" initialFocusSelector='[data-testid="project-archive-cancel"]'
-      onClose={() => setConfirmProject(null)}>
-      {confirmProject && <><p>确定归档“{confirmProject.title}”？</p><p className="helper-text">Project {confirmProject.id} · 当前修订 v{confirmProject.revision}。提交后由服务端核对所有阻断事实；历史仍可读取，当前没有恢复项目命令。</p>
-        <div className="form-actions"><button className="secondary-button" type="button" data-testid="project-archive-cancel"
-          onClick={() => setConfirmProject(null)}>暂不归档</button><button className="danger-button" type="button"
-          data-testid="project-archive-confirm" disabled={archiveBusy}
-          onClick={() => void sendArchive({ commandId: createCommandId(), projectId: confirmProject.id,
-            expectedRevision: confirmProject.revision })}>确认归档</button></div></>}
-    </AppDialog>
   </section>;
 }

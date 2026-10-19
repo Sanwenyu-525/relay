@@ -15,6 +15,7 @@ import { resourceNotFound } from '../application/domain-error.js';
 import {
   captureBaseline,
   captureCurrentState,
+  type CurrentScan,
   NotAGitRepositoryError,
 } from './baseline-capture.js';
 import {
@@ -22,7 +23,7 @@ import {
   computeAlignedDiff,
   type BaselineFile,
   type ConversationDiff,
-  type CurrentFile,
+  type DiffCoverage,
   type DiffRow,
   type FileAction,
 } from './diff-engine.js';
@@ -138,7 +139,7 @@ export async function readConversationDiff(repositories: Repositories,
     return { available: false, reason: 'NO_BASELINE' };
   }
 
-  let current: Map<string, CurrentFile>;
+  let current: CurrentScan;
   try {
     current = await captureCurrentState(rootPath);
   } catch (error) {
@@ -153,14 +154,18 @@ export async function readConversationDiff(repositories: Repositories,
     baselineMap.set(file.path, storedToBaselineFile(file));
   }
 
+  const coverage = snapshotCoverage(baseline, current);
   const diff = computeSnapshotDiff({
     rootPath,
     resourceId,
     baselineCapturedAt: baseline.capturedAt.toISOString(),
     baselineRevision: baseline.revision,
     incomplete: baseline.incomplete,
+    coverage,
+    currentUnswept: current.unswept,
+    tracked: current.tracked,
     baseline: baselineMap,
-    current,
+    current: current.files,
   });
   return { available: true, diff };
 }
@@ -174,6 +179,31 @@ function storedToBaselineFile(file: StoredBaselineFile): BaselineFile {
     sizeBytes: file.size_bytes,
     unavailableReason: file.unavailable_reason,
   };
+}
+
+/**
+ * 两端扫描覆盖：哪一侧在什么条件下停下来、各自核对了多少条。
+ * 缺口条数（未核对／无法确认新增）由 `computeSnapshotDiff` 汇总，不在这里猜。
+ */
+function snapshotCoverage(baseline: StoredBaseline, current: CurrentScan):
+  Omit<DiffCoverage, 'uncheckedFiles' | 'unverifiedFiles'> {
+  return {
+    baseline: { complete: !baseline.incomplete,
+      reason: baseline.captureReason === '' ? null : baseline.captureReason,
+      files: baseline.files.length, listed: null },
+    current: { complete: !current.incomplete, reason: current.reason,
+      files: current.files.size, listed: current.listedTotal },
+  };
+}
+
+/**
+ * 扫描覆盖不到这一条时的正文投影：给出「候选动作」与成因，但不给伪造的行数。
+ * `added`/`removed` 用 -1 表示待核对，与局部行的既有约定一致（前端不画成 `+0 −0`）。
+ */
+function sweepIncompleteDetail(path: string, action: FileAction,
+  reason: string): ReadDiffFileResult {
+  return { available: true, file: { path, action, added: -1, removed: -1,
+    unavailableReason: reason, rows: null, rowsTruncated: false, rowsUnavailableReason: reason } };
 }
 
 export interface ReadDiffFileInput {
@@ -227,7 +257,7 @@ export async function readConversationDiffFile(repositories: Repositories,
     input.workspaceId, input.sessionId, resourceId, rootPath);
   if (baseline === undefined) return { available: false, reason: 'NO_BASELINE' };
 
-  let current: Map<string, CurrentFile>;
+  let current: CurrentScan;
   try {
     current = await captureCurrentState(rootPath);
   } catch (error) {
@@ -242,9 +272,18 @@ export async function readConversationDiffFile(repositories: Repositories,
     return { available: false, reason: 'PATH_NOT_FOUND' };
   }
   const baselineFile = baseline.files.find((file) => file.path === canonical);
-  const currentFile = current.get(canonical);
-  if (baselineFile === undefined && currentFile === undefined) {
+  const currentFile = current.files.get(canonical);
+  if (baselineFile === undefined && currentFile === undefined && !current.unswept.has(canonical)) {
     return { available: false, reason: 'PATH_NOT_FOUND' };
+  }
+  // 本轮扫描只是没核到它：既不能画成「整文件被删除」，也不能说「没有变化」。
+  if (currentFile === undefined && current.unswept.has(canonical)) {
+    return sweepIncompleteDetail(canonical, 'DELETE', 'CURRENT_SWEEP_INCOMPLETE');
+  }
+  // 起点扫描不完整，而这一条此刻已被 Git 跟踪：无法证明它是本会话新建的。
+  if (currentFile !== undefined && baselineFile === undefined && baseline.incomplete &&
+      current.tracked.has(canonical)) {
+    return sweepIncompleteDetail(canonical, 'CREATE', 'BASELINE_SWEEP_INCOMPLETE');
   }
 
   // 行数与总数走同一个纯函数：只喂该路径的两端，口径不会再分叉。
@@ -254,6 +293,9 @@ export async function readConversationDiffFile(repositories: Repositories,
     baselineCapturedAt: baseline.capturedAt.toISOString(),
     baselineRevision: baseline.revision,
     incomplete: baseline.incomplete,
+    coverage: snapshotCoverage(baseline, current),
+    currentUnswept: current.unswept,
+    tracked: current.tracked,
     baseline: baselineFile === undefined ? new Map()
       : new Map([[canonical, storedToBaselineFile(baselineFile)]]),
     current: currentFile === undefined ? new Map() : new Map([[canonical, currentFile]]),

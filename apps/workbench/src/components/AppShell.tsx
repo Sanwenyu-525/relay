@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Bell, BookOpen, FolderKanban, House, Inbox, Link2, ListChecks, LineChart, Menu, PanelLeft, PanelLeftClose, Settings, SquarePen } from "lucide-react";
+import { Bell, BookOpen, CalendarClock, FolderKanban, House, Inbox, Link2, ListChecks, LineChart, Menu, PanelLeft, PanelLeftClose, Settings, SquarePen } from "lucide-react";
 import AppDialog from "./AppDialog";
 import CommandPalette from "./CommandPalette";
 import { FeedbackHost } from "./Feedback";
@@ -47,7 +47,9 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
   const pageFocused = ["/projects", "/reviews", "/activity", "/activities"].includes(path);
   const inboxActive = path === "/tasks" && query.get("tab") === "inbox";
   const isNavigationItemActive = (to: string) => to === "/inbox" ? inboxActive
-    : to === "/tasks" ? path === "/tasks" && !inboxActive : path === to;
+    : to === "/tasks" ? path === "/tasks" && !inboxActive
+    : to === "/scheduled-tasks" ? path === "/scheduled-tasks" || path.startsWith("/scheduled-tasks/")
+    : path === to;
   const connection = useRelayConnection();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState<number | null>(readStoredSidebarWidth);
@@ -92,7 +94,8 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
     { label: "今日", to: "/today", icon: House, count: "" },
     { label: "任务", to: "/tasks", icon: ListChecks, count: "" },
     { label: "动态", to: "/activity", icon: LineChart, count: "" },
-    { label: "收件箱", to: "/inbox", icon: Inbox, count: "" }
+    { label: "收件箱", to: "/inbox", icon: Inbox, count: "" },
+    { label: "定时任务", to: "/scheduled-tasks", icon: CalendarClock, count: "" }
   ];
   const currentWorkId = path === "/agent" ? query.get("work") : null;
   /**
@@ -122,6 +125,10 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
     if (path === "/reviews") return [{ label: "工作空间" }, { label: "待处理" }];
     if (path === "/knowledge") return [{ label: "工作空间" }, { label: "资料" }];
     if (path === "/settings") return [{ label: "工作空间" }, { label: "设置" }];
+    if (path === "/scheduled-tasks") return query.get("view") === "create"
+      ? [{ label: "工作空间" }, { label: "定时任务", to: "/scheduled-tasks" }, { label: "新建定时任务" }]
+      : [{ label: "工作空间" }, { label: "定时任务" }];
+    if (/^\/scheduled-tasks\/[^/]+$/u.test(path)) return [{ label: "工作空间" }, { label: "定时任务", to: "/scheduled-tasks" }, { label: "定时任务详情" }];
     if (path === "/connections" || path === "/settings/connections") return [{ label: "工作空间" }, { label: "连接与同步" }];
     const workbench = /^\/projects\/([^/]+)\/workbench\/(general|thesis|development)$/u.exec(path);
     if (workbench) {

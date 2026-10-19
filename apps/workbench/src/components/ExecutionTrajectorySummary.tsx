@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ChatLocalFileDiff from "./ChatLocalFileDiff";
 import { useRunToolCalls } from "../lib/useRunToolCalls";
 import { useRunToolCallPreviews } from "../lib/useRunToolCallPreviews";
@@ -30,6 +30,8 @@ const CHECK_TOOLS = new Set(["run_check"]);
 const TERMINAL_RUN = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
 /** 折叠区最多逐字展示的正文行数；超出只算「还有更多」，不截断后冒充完整内容。 */
 const INLINE_MAX_LINES = 40;
+/** 找不到精确 Review 或读取失败时的审批入口：仍是原审批页，由面板自己列出待决项。 */
+const APPROVAL_FALLBACK_HREF = "/reviews?kind=ACTION_APPROVAL";
 
 interface Counts {
   readonly reads: number;
@@ -96,6 +98,17 @@ function settledReads(projection: RelayRunToolCalls): readonly RelayRunToolCall[
   return reads;
 }
 
+/** 等待批准的那几次调用的动作身份；审批按 operation_id 与 ACTION_APPROVAL Review 对齐。 */
+function waitingOperationIds(projection: RelayRunToolCalls): string {
+  const ids = new Set<string>();
+  for (const round of projection.rounds) {
+    for (const call of round.calls) {
+      if (call.status === "WAITING_APPROVAL" && call.operationId !== null) ids.add(call.operationId);
+    }
+  }
+  return [...ids].sort().join(",");
+}
+
 export default function ExecutionTrajectorySummary({ client, runId, revision = null, onOpenTrajectory }: {
   client: RelayApiClient;
   runId: string;
@@ -111,6 +124,28 @@ export default function ExecutionTrajectorySummary({ client, runId, revision = n
   const { previews } = useRunToolCallPreviews(client, runId,
     projection !== null && TERMINAL_RUN.has(projection.runStatus) === false);
   const localRows = localFileDiffRows(projection, previews);
+  // 等待批准时给出通往原 Review 决定入口的链接。这里只定位审批，不复制审批面板：
+  // 读取失败或找不到精确匹配也会退回原审批页，绝不把「读不到」呈现成「没有审批」。
+  const waitingKey = projection === null ? "" : waitingOperationIds(projection);
+  const [approvalHref, setApprovalHref] = useState<string | null>(null);
+  useEffect(() => {
+    if (waitingKey === "") {
+      setApprovalHref(null);
+      return;
+    }
+    let cancelled = false;
+    const waiting = new Set(waitingKey.split(","));
+    void client.getRunReviews(runId).then((reviews) => {
+      if (cancelled) return;
+      const match = reviews.find((review) => review.kind === "ACTION_APPROVAL" &&
+        review.status === "OPEN" && review.operationId !== null && waiting.has(review.operationId));
+      setApprovalHref(match === undefined ? APPROVAL_FALLBACK_HREF
+        : `/reviews?id=${encodeURIComponent(match.id)}`);
+    }).catch(() => {
+      if (!cancelled) setApprovalHref(APPROVAL_FALLBACK_HREF);
+    });
+    return () => { cancelled = true; };
+  }, [client, runId, waitingKey]);
 
   if (error !== null) {
     return <p className="helper-text" data-testid="execution-summary-error">
@@ -139,6 +174,10 @@ export default function ExecutionTrajectorySummary({ client, runId, revision = n
       <span>{parts.join(" · ")}</span>
       {projection.waitReason !== null && <span className="helper-text"> · Run 等待原因 {waitReasonText(projection.waitReason)}</span>}
     </p>
+    {counts.waiting > 0 && <p className="helper-text" data-testid="execution-waiting-approval">
+      <a className="inline-link" data-testid="execution-waiting-approval-link"
+        href={approvalHref ?? APPROVAL_FALLBACK_HREF}>打开审批入口批准或拒绝这次动作</a>
+    </p>}
     {/* 局部 diff：逐文件一行，紧邻这次编辑的摘要。同一文件被改多次留下多条，
         生成中的行只说「预览」，落账后才换成实际数并可以写「已修改」。 */}
     <ChatLocalFileDiff client={client} rows={localRows} />

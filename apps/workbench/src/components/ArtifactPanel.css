@@ -77,6 +77,8 @@
   overflow-wrap: anywhere;
 }
 .artifact-workspace .markdown-preview__heading { font-size: var(--relay-font-size-section); }
+.artifact-workspace .markdown-preview__heading[data-heading-level="2"] { font-size: var(--relay-font-size-rowTitle); }
+.artifact-workspace .markdown-preview__subheading { font-size: var(--relay-font-size-reading); }
 .artifact-workspace .markdown-editor {
   display: block;
   margin: 0;

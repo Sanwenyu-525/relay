@@ -18,6 +18,10 @@ import SettingsView from "./views/SettingsView";
 import TaskSkillView from "./views/TaskSkillView";
 import TasksView from "./views/TasksView";
 import TodayView from "./views/TodayView";
+import ScheduledTasksView from "./views/ScheduledTasksView";
+import CreateScheduledTaskView from "./views/CreateScheduledTaskView";
+import ScheduledTaskDetailView from "./views/ScheduledTaskDetailView";
+import { useSearchParams } from "react-router-dom";
 import UnsupportedView from "./views/UnsupportedView";
 
 /** 与归档 Vue router.ts 的 11 条记录一一对应，query 子页由对应组件处理。 */
@@ -43,6 +47,9 @@ export const workbenchRoutes: RouteObject[] = [{
     { path: "projects/:id/workbench/:kind", element: <ProjectWorkbenchView /> },
     { path: "projects/:id", element: <ProjectSkillView /> },
     { path: "tasks", element: <TasksView /> },
+    // 新建定时任务走同一个路由的 query 子页，与 /tasks?view=create 的既有约定一致。
+    { path: "scheduled-tasks", element: <ScheduledTasksRoute /> },
+    { path: "scheduled-tasks/:id", element: <ScheduledTaskDetailView /> },
     { path: "reviews", element: <ReviewsView /> },
     { path: "knowledge", element: <KnowledgeView /> },
     { path: "connections", element: <ConnectionsView /> },
@@ -53,6 +60,12 @@ export const workbenchRoutes: RouteObject[] = [{
     { path: "*", element: <UnsupportedView /> }
   ]
 }];
+
+/** 列表与新建共用一个路径，避免侧栏出现两个入口。 */
+function ScheduledTasksRoute() {
+  const [query] = useSearchParams();
+  return query.get("view") === "create" ? <CreateScheduledTaskView /> : <ScheduledTasksView />;
+}
 
 export function createWorkbenchRouter(initialEntries?: string[]) {
   return initialEntries

@@ -656,7 +656,7 @@ export default function KnowledgeView() {
         {searchItems.length > 0 ? <ul className="knowledge-search-list">{searchItems.map((item) =>
           <li key={`${item.type}-${item.id}-${item.version}`}><button type="button" className="knowledge-result" disabled={pendingCommand !== null} onClick={() => openSearchItem(item)}>
             <strong>{item.title}</strong> · {kinds.find((k) => k.kind === item.type)?.noun ?? item.type} v{item.version} · {statusLabel(item.status)}
-            <span>{item.snippet}</span><small>匹配：{item.matchedFields.join("、")} · 来源 <code>{item.sourceRef}</code></small>
+            <span>{item.snippet}</span><small>匹配：{item.matchedFields.join("、")} · 来源 <code className="hash-code">{item.sourceRef}</code></small>
           </button></li>)}</ul> : query.trim() && !searching && !searchError && <p className="helper-text" data-testid="knowledge-search-empty">没有匹配「{query.trim()}」的当前有效资料。试试更短的关键词或切换资料类型；这只说明搜索没有结果，不代表当前范围没有{currentNoun}。</p>}
         {nextCursor && <button type="button" className="secondary-button" data-testid="knowledge-more" disabled={searching}
           onClick={() => { void runSearch(searchVersion.current, query.trim(), nextCursor); }}>加载下一页</button>}

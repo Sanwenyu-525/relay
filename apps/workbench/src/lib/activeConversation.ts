@@ -11,16 +11,33 @@ import { useSyncExternalStore } from "react";
 export interface ActiveConversation {
   readonly taskId: string | null;
   readonly sessionId: string | null;
+  /**
+   * 这条会话的服务端作用域事实变化计数（换目录确认成功后 +1）。
+   * 同一会话换目录时身份一个字都没变，只按身份去重的发布叫不醒已经渲染过的消费者；
+   * 左栏需要这个计数才知道该再向服务端重读一次这一行。它不是第二套目录状态。
+   */
+  readonly contextEpoch: number;
 }
 
-const empty: ActiveConversation = { taskId: null, sessionId: null };
+const empty: ActiveConversation = { taskId: null, sessionId: null, contextEpoch: 0 };
 let current: ActiveConversation = empty;
 const listeners = new Set<() => void>();
 
-export function publishActiveConversation(next: ActiveConversation): void {
-  if (current.taskId === next.taskId && current.sessionId === next.sessionId) return;
-  current = next;
+function notify(): void {
   for (const listener of listeners) listener();
+}
+
+export function publishActiveConversation(next: { taskId: string | null; sessionId: string | null }): void {
+  if (current.taskId === next.taskId && current.sessionId === next.sessionId) return;
+  current = { ...next, contextEpoch: 0 };
+  notify();
+}
+
+/** 作用域事实已由服务端确认改变：让读取这一行的消费者重读，不改会话身份。 */
+export function bumpActiveConversationContext(): void {
+  if (current.sessionId === null) return;
+  current = { ...current, contextEpoch: current.contextEpoch + 1 };
+  notify();
 }
 
 export function clearActiveConversation(): void {

@@ -44,6 +44,12 @@ const emptyDraft: AssistantDraft = { name: "", roleDescription: "", tone: "", re
  * 为什么不在卡里：见文件头。为什么单独一个组件：文案与「哪一档有什么说明」属于模式契约，
  * 与控件放在同一个模块里，调用方只负责摆在卡外，不重复一份文案。
  * 什么都没有时返回 null——不留空盒子，否则卡下方会凭空多出一档列间距。
+ *
+ * 2026-10-17（用户截图指认「执行时不要弹出这个东西，整个布局都被他打乱了」）：在途锁定原因
+ * 不再占一行可见文字——它会随生成开始/结束在输入卡下方凭空出现又消失，卡下方的列随之跳动。
+ * 现在它保持视觉隐藏（AT 仍按文档序读到，`data-testid` 用例仍可定位），并把同一句话放到
+ * 禁用的模式盒 `title` 上（悬停可读）；模式盒本身在在途时整组禁用，禁用态已经表达了「此刻不能切」。
+ * 学习档 / 助手档的说明是**选择该档时的常驻说明**，不随在途出现消失，维持可见。
  */
 export function ConversationModeHints({ mode, lockedReason }: {
   mode: RelayConversationMode;
@@ -54,7 +60,7 @@ export function ConversationModeHints({ mode, lockedReason }: {
   const assistant = mode === "ASSISTANT";
   if (lockedReason === null && !learning && !assistant) return null;
   return <div className="agent-chat-mode-hints">
-    {lockedReason !== null && <p className="disabled-reason"
+    {lockedReason !== null && <p className="disabled-reason visually-hidden"
       data-testid="conversation-mode-locked">{lockedReason}</p>}
     {learning && <p className="helper-text" data-testid="learning-readonly-note">
       学习：可保存个人学习记录，对项目只读；明确转入普通会话后才进入执行流程。</p>}
@@ -64,7 +70,7 @@ export function ConversationModeHints({ mode, lockedReason }: {
 }
 
 export function ConversationModeSwitch({ mode, assistantProfileId, profiles, profilesError, profilesLoading,
-  onReloadProfiles, remember, disabled, onChangeMode, onChangeAssistant, onChangeRemember,
+  onReloadProfiles, remember, disabled, lockedReason = null, onChangeMode, onChangeAssistant, onChangeRemember,
   onCreateAssistant, recordLearning = true, onChangeRecordLearning }: {
   mode: RelayConversationMode;
   assistantProfileId: string | null;
@@ -77,6 +83,8 @@ export function ConversationModeSwitch({ mode, assistantProfileId, profiles, pro
   remember: boolean;
   /** 在途时整组禁用。禁用原因不在这里渲染，见 ConversationModeHints。 */
   disabled: boolean;
+  /** 在途禁用的原因原文：放在禁用模式盒的 title 上（2026-10-17，可见行已转视觉隐藏）。 */
+  lockedReason?: string | null;
   onChangeMode: (next: RelayConversationMode) => void;
   onChangeAssistant: (profileId: string) => void;
   onChangeRemember: (next: boolean) => void;
@@ -121,24 +129,24 @@ export function ConversationModeSwitch({ mode, assistantProfileId, profiles, pro
       : selected !== null ? `助手 · ${selected.optionLabel}` : "选择助手";
 
   return <>
-  <div className="agent-chat-mode" data-testid="conversation-mode">
-    <fieldset className="agent-chat-mode-picker" disabled={disabled} aria-label="会话模式">
-      <legend className="visually-hidden">会话模式</legend>
-      <label className="agent-chat-mode-option">
-        <input type="radio" name="conversation-mode" value="AGENT" checked={mode === "AGENT"}
-          data-testid="assist-conversation-mode-agent"
-          onChange={() => onChangeMode("AGENT")} />
-        <span>普通 Agent</span></label>
-      <label className="agent-chat-mode-option">
-        <input type="radio" name="conversation-mode" value="ASSISTANT" checked={mode === "ASSISTANT"}
-          data-testid="assist-conversation-mode-assistant"
-          onChange={() => onChangeMode("ASSISTANT")} />
-        <span>人设助手</span></label>
-      <label className="agent-chat-mode-option">
-        <input type="radio" name="conversation-mode" value="LEARNING" checked={mode === "LEARNING"}
-          data-testid="assist-conversation-mode-learning" onChange={() => onChangeMode("LEARNING")} />
-        <span>学习</span></label>
-    </fieldset>
+  <div className="agent-chat-mode" data-testid="conversation-mode" title={lockedReason ?? undefined}>
+    {/* 2026-10-18 用户指令「普通 agent，人设助手，学习合并到一个下拉框中」：
+        三档从三枚 radio 收成**一个原生 select**。理由不只是省宽度——三枚 radio 在窄卡
+        里会换行把工具行撑成两行（「执行中底栏散架」同源问题），而模式只有「当前是哪一档」
+        这一个事实，本来就不需要把三个候选一直摊在脸上。
+        仍是原生控件：方向键、读屏、禁用语义都用平台实现，不另写一套。 */}
+    <label className="agent-chat-mode-select-field">
+      <span className="visually-hidden">会话模式</span>
+      <select className="agent-chat-mode-select" data-testid="conversation-mode-select"
+        value={mode} disabled={disabled}
+        title={lockedReason ?? "切换会话模式（切档是导航到另一条会话，身份在建会话时冻结）"}
+        onChange={(event) => onChangeMode(event.target.value as RelayConversationMode)}>
+        <option value="AGENT">普通 Agent</option>
+        <option value="ASSISTANT">人设助手</option>
+        <option value="LEARNING">学习</option>
+      </select>
+      <ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" />
+    </label>
     {mode === "LEARNING" && onChangeRecordLearning && <label className="agent-chat-mode-option">
       <input type="checkbox" disabled={disabled} checked={!recordLearning} data-testid="learning-message-no-record"
         onChange={(event) => onChangeRecordLearning(!event.target.checked)} /><span>本条消息不记录</span></label>}

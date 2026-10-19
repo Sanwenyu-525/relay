@@ -30,10 +30,19 @@ export interface RelayGatewayConnection {
   readonly allowedExecutables: readonly string[] | null;
 }
 
+/** 与服务端 `GatewayCapability`（infrastructure/database-schema.ts）同一词表；开放扩展时先加后端。 */
 export type RelayGatewayCapability =
-  "FAKE_WRITE" | "FAKE_PUBLIC_READ" | "FILE_READ" | "FILE_QUERY" | "FILE_WRITE" | "WEB_FETCH" | "GIT_READ" | "GIT_WRITE" | "CLI_RUN";
+  | "FAKE_WRITE" | "FAKE_PUBLIC_READ" | "FILE_READ" | "FILE_QUERY" | "FILE_WRITE" | "WEB_FETCH"
+  | "GIT_READ" | "GIT_WRITE" | "CLI_RUN"
+  | "COMPUTER_READ" | "COMPUTER_INPUT"
+  | "GITHUB_READ"
+  | "BROWSER_READ" | "BROWSER_ACTION" | "BROWSER_COMMIT";
 
 export type RelayGatewayDecision = "DENY" | "ASK" | "AUTO";
+
+/** 本目录写入档位。FULL（界面「完全访问」）与 AUTO 在服务端策略行上同为 AUTO，
+ *  差别只在目录档位这一列，因此界面必须读投影的 write_tier，不能只看 policyDecision。 */
+export type RelayWriteTier = "READ_ONLY" | "ASK" | "AUTO" | "FULL";
 
 /**
  * 某个受管目录的写档位投影（GET …/managed-resources/:id/write-readiness）。
@@ -48,6 +57,8 @@ export interface RelayWriteReadiness {
   readonly policyId: string | null;
   readonly policyRevision: string | null;
   readonly policyTargetPrefix: string | null;
+  readonly writeTier: RelayWriteTier | null;
+  readonly accessRevision: DecimalRevision;
 }
 
 export interface RelayGatewayConnectionSettings extends RelayGatewayConnection {

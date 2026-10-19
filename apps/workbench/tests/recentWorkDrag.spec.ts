@@ -9,7 +9,7 @@ import { clearActiveConversation } from "../src/lib/activeConversation";
 /**
  * 会话行的拖拽改序（本机导航偏好，工作台 §28.1）。
  *
- * 守的五件事：
+ * 守的六件事：
  * 1. **横线指哪儿就落在哪儿。** 落位线所在的那一格与松手后的实际位置必须出自同一次计算，
  *    不能画在一处、落到另一处。抓握期间手里那一行跟着指针平移，其余行一动不动。
  * 2. **改的是这一列的显示次序，事实仍归服务端。** 拖拽不向服务端发任何命令，只写本机偏好；
@@ -18,6 +18,7 @@ import { clearActiveConversation } from "../src/lib/activeConversation";
  * 4. **归档区不参与手动排序**：那一列根本没有可拖的位置事实。
  * 5. **换位看得出来。** 只有真的换了位的行才播位移，位移量等于两次 rect 之差；
  *    刚落位的行留一档会自己消失的强调。关掉动效时这两段装饰都没有，但强调仍然给出。
+ * 6. **自动序的口径和服务端一致。** 没排过位时按最后消息时间倒序，置顶压在它上面（0090 / 0111）。
  */
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -81,12 +82,16 @@ interface Row {
   status: string;
   revision: string;
   pinned_at: string | null;
+  /** 0111：最后一条消息落库或生成结算的时刻；null = 这段会话还没有消息。 */
+  last_message_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
-const row = (n: number, title: string, status = "ACTIVE"): Row => ({
+const row = (n: number, title: string, status = "ACTIVE",
+  lastMessageAt: string | null = null): Row => ({
   id: id(n), project_id: null, task_id: null, title, status, revision: "1", pinned_at: null,
+  last_message_at: lastMessageAt,
   created_at: `2026-10-0${n}T10:00:00Z`, updated_at: `2026-10-0${n}T10:00:00Z`
 });
 
@@ -94,8 +99,9 @@ const json = (body: unknown, status = 200) =>
   ({ ok: status < 400, status, json: async () => body }) as Response;
 
 /**
- * 服务端顺序：置顶优先，其余按创建时间倒序（与 listSessions 的 order by 一致）。
- * 三条未置顶的会话因此读回来是 3、2、1。`posts` 收所有写命令，用来证明拖拽没发命令。
+ * 服务端顺序：置顶优先，其余按最后消息时间倒序，还没说过话的回落创建时间
+ * （与 listSessions 的 order by 一致）。三条未置顶、都没说过话的会话因此读回来是 3、2、1。
+ * `posts` 收所有写命令，用来证明拖拽没发命令。
  */
 function fakeServer(rows: Row[]) {
   const posts: Record<string, unknown>[] = [];
@@ -125,9 +131,10 @@ function fakeServer(rows: Row[]) {
     if (path.endsWith("/assist-sessions")) {
       const status = url.searchParams.get("status") ?? "ACTIVE";
       const visible = rows.filter((item) => status === "ALL" || item.status === status);
+      const activity = (item: Row) => item.last_message_at ?? item.created_at;
       return json({ items: [...visible].sort((a, b) => {
         if ((a.pinned_at === null) !== (b.pinned_at === null)) return a.pinned_at === null ? 1 : -1;
-        return b.created_at.localeCompare(a.created_at);
+        return activity(b).localeCompare(activity(a));
       }) });
     }
     const single = /\/assist-sessions\/([^/]+)$/u.exec(path);
@@ -272,6 +279,25 @@ it("整列重读仍认拖出来的次序；此后置顶只改标记，不再把�
   expect(again.container.querySelector(`[data-testid="recent-work-${id(3)}"] .recent-work-pin`)).not.toBeNull();
   // 人已排过的位不再被排序键顶掉：位置与置顶分开读，各自只有一个来源。
   expect(orderOf(again.container)).toEqual([`session:${id(2)}`, `session:${id(3)}`, `session:${id(1)}`]);
+});
+
+it("最后消息时间决定未置顶那一段的上下：刚说过话的旧会话排到没开口的新会话前面", async () => {
+  // 活动序（0111）：3 号刚才说完、1 号上午说过一句、2 号是这轮里最新建的但还没开口。
+  // 按创建时间应是 3、2、1；按最后消息时间应是 3、1、2——2 号不因这一列为空而沉到底。
+  fakeServer([row(1, "上午说过一句", "ACTIVE", "2026-10-18T01:00:00Z"),
+    row(2, "刚建的还没说话"), row(3, "刚才说完", "ACTIVE", "2026-10-18T02:00:00Z")]);
+  const { container } = await mount();
+  expect(orderOf(container)).toEqual([`session:${id(3)}`, `session:${id(1)}`, `session:${id(2)}`]);
+});
+
+it("置顶压在活动序上面：那一档只由 pinned_at 决定，最后消息时间不抢位", async () => {
+  const pinned = row(2, "置顶但说过话");
+  pinned.pinned_at = "2026-10-17T08:00:00.000Z";
+  pinned.last_message_at = "2026-10-16T09:00:00Z";
+  fakeServer([row(1, "更早的讨论"), pinned,
+    row(3, "刚才说完", "ACTIVE", "2026-10-18T02:00:00Z")]);
+  const { container } = await mount();
+  expect(orderOf(container)).toEqual([`session:${id(2)}`, `session:${id(3)}`, `session:${id(1)}`]);
 });
 
 it("落位动画把移动过的行从旧位置滑到新位置，刚落下的那一行短促强调", async () => {

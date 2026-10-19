@@ -25,6 +25,7 @@ import { isAuthorizationPending, isBlocked, planComputerAction }
   from '../../src/computer/execution-router.js';
 import { computerExecute, computerParamsForAction, projectComputerResult,
   MAX_WINDOWS_IN_RESULT } from '../../src/computer/computer-adapter.js';
+import { describeComputerAction } from '../../src/computer/action-labels.js';
 import { replaceComputerRuntimeClientForTest, shutdownComputerRuntimeClient }
   from '../../src/computer/client-holder.js';
 import { ComputerRuntimeClient, ComputerRuntimeError } from '../../src/computer/runtime-client.js';
@@ -45,13 +46,13 @@ import type { JsonObject } from '../../src/infrastructure/json.js';
 
 /* —— 词表与协议投影 ——————————————————————————— */
 
-test('十个 computer 工具全部注册，命名遵守 snake_case 词表约定', () => {
+test('十一个 computer 工具全部注册，命名遵守 snake_case 词表约定', () => {
   const names = INTERNAL_TOOL_DEFINITIONS.filter((entry) => entry.name.startsWith('computer_'))
     .map((entry) => entry.name).sort();
   assert.deepEqual(names, [
     'computer_activate_window', 'computer_click', 'computer_double_click', 'computer_drag',
-    'computer_get_windows', 'computer_hotkey', 'computer_keypress', 'computer_screenshot',
-    'computer_scroll', 'computer_type',
+    'computer_get_windows', 'computer_hotkey', 'computer_keypress', 'computer_move',
+    'computer_screenshot', 'computer_scroll', 'computer_type',
   ]);
   // 每个工具都有 JSON Schema、必填声明与禁止额外属性：模型多带字段必须被拒。
   for (const name of names) {
@@ -64,8 +65,8 @@ test('十个 computer 工具全部注册，命名遵守 snake_case 词表约定'
 });
 
 test('协议词表与 Rust 侧逐字一致的数量与形状', () => {
-  // V1 十个方法 + V2 的环境探测。
-  assert.equal(COMPUTER_METHODS.length, 11);
+  // V1 十个动作 + V2 的鼠标移动与环境探测。
+  assert.equal(COMPUTER_METHODS.length, 12);
   assert.ok(isComputerMethod('computer.describe_environment'));
   assert.equal(COMPUTER_PROTOCOL_VERSION, 'relay-computer-v1');
   for (const method of COMPUTER_METHODS) assert.ok(isComputerMethod(method));
@@ -77,7 +78,7 @@ test('协议词表与 Rust 侧逐字一致的数量与形状', () => {
     assert.ok(isComputerErrorCode(code), `${code} 必须保留在错误词表内`);
   }
   // 前台输入动作合集与词表的能力划分一致。
-  assert.equal(COMPUTER_FOREGROUND_INPUT_ACTIONS.length, 8);
+  assert.equal(COMPUTER_FOREGROUND_INPUT_ACTIONS.length, 9);
   for (const action of COMPUTER_ACTION_TYPES) {
     const isInput = action !== 'COMPUTER_SCREENSHOT' && action !== 'COMPUTER_GET_WINDOWS';
     assert.equal(isForegroundInputAction(action), isInput, `${action} 的前台属性必须一致`);
@@ -163,6 +164,28 @@ test('参数白名单转发：模型多带的字段不会变成运行时参数',
   assert.deepEqual(gatewayParamsFor(type_, { text: 'hi', delay_ms: 30 }), { text: 'hi', delay_ms: 30 });
   const screenshot = readInternalTool('computer_screenshot')!;
   assert.deepEqual(gatewayParamsFor(screenshot, { anything: 1 }), {});
+});
+
+test('computer_move 只移动指针：参数只有坐标，文案说明它不点击', () => {
+  // 滚动与拖拽都以当前指针位置为前提；没有定位动作时这个前提无法建立。
+  assert.deepEqual(computerParamsForAction('COMPUTER_MOVE', { x: 640, y: 480 }),
+    { x: 640, y: 480 });
+  assert.throws(() => computerParamsForAction('COMPUTER_MOVE', { x: 640 }),
+    (error: unknown) => error instanceof ComputerRuntimeError && error.code === 'INVALID_REQUEST');
+  // 模型多带的字段不会变成运行时参数（连 button 也不接受：移动没有按键语义）。
+  assert.deepEqual(computerParamsForAction('COMPUTER_MOVE', { x: 1, y: 2, button: 'left' }),
+    { x: 1, y: 2 });
+  const spec = declaredToolSpecs(['computer_move'])[0]!;
+  assert.deepEqual(validateToolArguments(spec, { x: 640, y: 480 }), { x: 640, y: 480 });
+  assert.throws(() => validateToolArguments(spec, { x: 1.5, y: 2 }),
+    (error: unknown) => (error as ToolRequestRejected).reason === 'TOOL_ARGUMENT_INVALID',
+  '坐标必须是整数；负值属于范围问题，由适配器在派发前拒绝');
+  assert.equal(describeComputerAction('COMPUTER_MOVE', { x: 640, y: 480 }),
+    '正在移动鼠标到 (640, 480)');
+  // 移动光标同样改变用户桌面，因此属于前台输入：需要授权，且不进会话只读词表。
+  assert.equal(isForegroundInputAction('COMPUTER_MOVE'), true);
+  assert.equal(capabilityFor('COMPUTER_MOVE'), 'COMPUTER_INPUT');
+  assert.ok(!ASSISTANT_READ_TOOLS.includes('computer_move' as never));
 });
 
 test('适配器参数规范化拒绝半截与非法坐标', () => {
@@ -298,7 +321,7 @@ test('参数非法在派发前就是 FAILED，不触碰运行时', async () => {
 
 /* —— 范围授权（Allow for task） ——————————————————— */
 
-test('Computer 输入八动作在授权层合成一类，读取类不占授权', () => {
+test('Computer 输入九动作在授权层合成一类，读取类不占授权', () => {
   for (const action of COMPUTER_ACTION_TYPES) {
     const grantAction = scopeGrantActionFor(action);
     if (action === 'COMPUTER_SCREENSHOT' || action === 'COMPUTER_GET_WINDOWS') {
@@ -451,6 +474,27 @@ test('截图目标的词表与规范化：非法目标在落库前被拒', () =>
   assert.deepEqual(gatewayParamsFor(readInternalTool('computer_screenshot')!,
     { target: 'user_desktop', evil: 'drop' }), { target: 'user_desktop' });
   assert.deepEqual(gatewayParamsFor(readInternalTool('computer_screenshot')!, {}), {});
+});
+
+/* —— 工具描述与运行时事实对齐 ——————————————————————— */
+
+test('computer_type 描述里的缺省间隔与运行时常量一致', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { resolve } = await import('node:path');
+  const rust = await readFile(resolve(process.cwd(), '../computer-runtime/src/input.rs'), 'utf8');
+  const match = /DEFAULT_TYPE_DELAY_MS:\s*u64\s*=\s*(\d+)/u.exec(rust);
+  assert.ok(match !== null, '运行时必须声明 DEFAULT_TYPE_DELAY_MS');
+  const runtimeDefault = Number(match[1]);
+  const spec = declaredToolSpecs(['computer_type'])[0]!;
+  const stated = /缺省\s*(\d+)\s*ms/u.exec(spec.description);
+  assert.ok(stated !== null, '描述里必须写明缺省字符间隔');
+  assert.equal(Number(stated[1]), runtimeDefault,
+    '描述与 runtime 的缺省值必须一致：模型按描述排时序，写错会被当成真实行为');
+  // 参数说明与描述不能互相矛盾（历史上描述写 15、参数写 30）。
+  const param = spec.parameters.properties as Record<string, { description?: string }>;
+  const paramStated = /缺省\s*(\d+)/u.exec(param.delay_ms?.description ?? '');
+  assert.ok(paramStated !== null);
+  assert.equal(Number(paramStated[1]), runtimeDefault);
 });
 
 test.after(() => {

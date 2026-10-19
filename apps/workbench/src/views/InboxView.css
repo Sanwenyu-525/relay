@@ -1,0 +1,257 @@
+/*
+ * 收件箱页私有样式（2026-10-18 按 Relay V5.11 原型改版）。
+ *
+ * 结构：页头（kicker + 标题 + 说明 + 动作）→ 范围页签 → 三张状态统计卡 →
+ *       紧凑筛选工具栏 → 任务卡片（行 = 状态图标 + 标题 + 事实行 + 等待/阻塞原因）→
+ *       计数与加载更多 → 范围说明折叠块。
+ * 页面语义未变：收件箱仍只收未归属项目的人工任务；本次只改版式与信息层级，
+ * 数据来源、筛选口径、分页行为与测试锚点均沿用原实现。
+ *
+ * 全部数值只消费 design-tokens.json 安装的 CSS 变量；通用控件（按钮、范围页签、
+ * 筛选框、搜索框、空态、计数注释、折叠说明）继续复用 styles.css 全局类，
+ * 这里只补页面私有布局与卡片行形态。
+ */
+
+.inbox-page .inbox-inner {
+  max-width: var(--relay-layout-reading-maxWidth);
+  margin: 0 auto;
+  padding: var(--relay-layout-main-padding);
+}
+
+/* ── 页头 ──────────────────────────────────────────────────────────────── */
+
+/* 对照原型页头：kicker 是页面身份（INBOX），标题降一档到紧凑页层级，
+   说明句用 meta 尺寸，主操作固定在右侧不随宽屏放大。 */
+.inbox-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--relay-space-4) var(--relay-space-6);
+}
+
+.inbox-head-main { min-width: 0; }
+
+.inbox-kicker {
+  margin: 0;
+  color: var(--relay-color-action-text);
+  font-size: var(--relay-font-size-caption);
+  font-weight: var(--relay-font-weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.inbox-page .inbox-head h1 {
+  margin: var(--relay-space-1) 0 0;
+  font-size: var(--relay-font-size-compactPage);
+  line-height: var(--relay-font-lineHeight-heading);
+  color: var(--relay-color-text-primary);
+}
+
+.inbox-lede {
+  margin: var(--relay-space-2) 0 0;
+  max-width: 44rem;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-relaxed);
+}
+
+.inbox-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  flex: none;
+}
+
+/* ── 状态统计卡 ─────────────────────────────────────────────────────────── */
+
+/* 三张等宽卡对应收件箱里最需要人工过目的桶；格数不足时自动回落列数，不压缩文字。 */
+.inbox-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  gap: var(--relay-space-4);
+  margin: var(--relay-space-6) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inbox-stat {
+  display: grid;
+  gap: var(--relay-space-1);
+  align-content: start;
+  padding: var(--relay-space-4);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+}
+
+.inbox-stat-label {
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+}
+
+.inbox-stat-value {
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-rowTitle);
+  font-weight: var(--relay-font-weight-bold);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--relay-font-lineHeight-heading);
+}
+
+.inbox-stat-hint {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+
+/* ── 任务卡片 ───────────────────────────────────────────────────────────── */
+
+/* 卡片体用 subtle 底把行区与纸面分开；行间分隔线与行内底色都只覆盖内容宽度，
+   与原型一致——整条通铺会让卡片读成一张表格而不是一组行。 */
+.inbox-card {
+  margin-top: var(--relay-space-4);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  overflow: hidden;
+}
+
+.inbox-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-3);
+  padding: var(--relay-space-3) var(--relay-space-4);
+  background: var(--relay-color-bg-surface);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.inbox-card-head strong {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
+.inbox-card-head strong > svg {
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+  color: var(--relay-color-action-text);
+}
+
+.inbox-card-head small {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.inbox-card-body {
+  padding: var(--relay-space-2) var(--relay-space-4);
+  background: var(--relay-color-bg-subtle);
+}
+
+/* ── 任务行 ─────────────────────────────────────────────────────────────── */
+
+/* 整行是一个链接：行的可点性由悬停底色与右侧箭头表达，不在行内再放一个同目标的按钮。 */
+.inbox-row {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-3);
+  padding: var(--relay-space-3) 0;
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+  color: inherit;
+  text-decoration: none;
+}
+
+.inbox-card-body > .inbox-row:last-child { border-bottom: none; }
+
+.inbox-row:hover { background: var(--relay-color-selection-hover); }
+
+/* 待整理 = 还没有人工过目的行：沿用原型「未读」的浅绿底，让需要先处理的行自己浮出来；
+   其余状态保持纸面，状态由行首图标与事实行文字承担。 */
+.inbox-row--untriaged { background: var(--relay-color-selection-bg); }
+
+.inbox-row-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--relay-control-height-comfort);
+  height: var(--relay-control-height-comfort);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-status-neutral-bg);
+  color: var(--relay-color-status-neutral-text);
+}
+
+.inbox-row-icon > svg {
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+}
+
+.inbox-row-icon--warning {
+  background: var(--relay-color-status-warning-bg);
+  color: var(--relay-color-status-warning-text);
+}
+
+.inbox-row-icon--success {
+  background: var(--relay-color-status-success-bg);
+  color: var(--relay-color-status-success-text);
+}
+
+.inbox-row-icon--danger {
+  background: var(--relay-color-status-danger-bg);
+  color: var(--relay-color-status-danger-text);
+}
+
+.inbox-row-main {
+  display: grid;
+  gap: var(--relay-space-1);
+  min-width: 0;
+  flex: 1;
+}
+
+.inbox-row-title {
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 事实行：项目归属、工作状态、执行模式、当前执行者与修订各自独立，用间隔号并列，
+   不合并成一枚标签；完整标题悬停行首链接可得，长原因整句换行。 */
+.inbox-row-facts {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.inbox-row-reason {
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  overflow-wrap: anywhere;
+}
+
+.inbox-row-arrow {
+  flex: none;
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+  color: var(--relay-color-border-control);
+}
+
+.inbox-row:hover .inbox-row-arrow { color: var(--relay-color-action-text); }
+
+/* ── 卡片脚注与加载更多 ─────────────────────────────────────────────────── */
+
+.inbox-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-3);
+  margin-top: var(--relay-space-3);
+}
+
+.inbox-card-foot .list-count-note { margin-top: 0; }

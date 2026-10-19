@@ -24,8 +24,8 @@ import { selectRuntimeSystemPrompt, UnknownRuntimePromptRouteError,
 import { runAgentSessionReadonlyRounds, runAssistantReadonlyRounds }
   from './assistant-readonly-round.js';
 import { sessionReadToolsForCurrentConnections } from './assist-read-tools.js';
-import { mainLoopMaintenanceField, readMainLoopOutcome, recordConversationExecutionCandidate }
-  from './conversation-execution.js';
+import { mainLoopEnvelope, mainLoopMaintenanceField, readMainLoopOutcome,
+  recordConversationExecutionCandidate } from './conversation-execution.js';
 import { freezeStateInterpretationBaseline, readMainLoopStateCandidate,
   recordStateMaintenanceCandidate } from './conversation-state.js';
 import { runLearningRounds } from './learning-round.js';
@@ -36,7 +36,8 @@ import { beginLearningRoundInTransaction, learningControlReason,
 import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
 import { availableFrozenSkill, isCallableSkill,
   type FrozenSkill } from '../skills/first-party-registry.js';
-import { availableFrozenMethod, type FrozenMethod } from '../skills/builtin-methods.js';
+import { availableFrozenMethod, readRunMethodBinding, type FrozenMethod }
+  from '../skills/builtin-methods.js';
 import { loadSkillBasis, SkillBasisUnavailable } from '../skills/skill-basis.js';
 import { parseSkillOutput } from '../skills/skill-output.js';
 import { buildTaskSkillProposal, skillOutputHash } from '../skills/skill-proposal.js';
@@ -206,7 +207,7 @@ export async function runAssistGenerationTick(db: DbExecutor,
       if (availableTools.length > 0) {
         const system = method !== null
           ? selectRuntimeSystemPrompt({ kind: 'METHOD', method,
-            action: message.method_action }).system
+            action: message.method_action, readTools: true }).system
           : selectRuntimeSystemPrompt({ kind: 'AGENT_MAIN_LOOP' }).system;
         return runAgentMainLoopGeneration(db, { message, session, options, controller,
           availableTools, system,
@@ -624,17 +625,6 @@ function mainLoopStateCommandId(assistantMessageId: string): string {
   return derivedUuid(`relay:main-loop:state:${assistantMessageId}`);
 }
 
-/** 主流程信封原文；不是信封时返回 undefined，由调用方按「没有候选」处理。 */
-function mainLoopEnvelope(content: string): JsonObject | undefined {
-  const trimmed = content.trim();
-  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return undefined;
-  try {
-    const parsed: unknown = JSON.parse(trimmed);
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? parsed as JsonObject : undefined;
-  } catch { return undefined; }
-}
-
 /**
  * 触发这一轮的原用户消息身份。
  *
@@ -688,10 +678,18 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
     const sourceMessageId = await previousUserMessageId(db, session, message);
     if (sourceMessageId !== null && (decided.kind === 'PREPARE' || decided.kind === 'CLARIFY') &&
         session.working_resource_id !== null) {
+      // 方法身份在消息写入时冻结，候选落库时一并绑定；丢了它，apply 阶段就取不到
+      // execution_method，方法 MODIFY 会退化成一条没有方法依据的普通执行请求。
+      // 形状由 readRunMethodBinding 校验：非法绑定显式失败，不静默降级。
+      const method = sourceMessageId !== null && message.method_snapshot !== null
+        ? readRunMethodBinding({ method_snapshot: message.method_snapshot,
+          action: message.method_action, argument: message.method_argument,
+          session_id: session.id, source_message_id: sourceMessageId })
+        : undefined;
       await recordConversationExecutionCandidate(db, { workspaceId: session.workspace_id,
         sessionId: session.id, sourceMessageId,
         resourceId: session.working_resource_id, commandId: mainLoopCommandId(message.id),
-        outcome: decided });
+        ...(method === undefined ? {} : { method }), outcome: decided });
     }
     if (sourceMessageId !== null && session.project_id !== null) {
       const envelope = mainLoopEnvelope(outcome.content);
@@ -1150,7 +1148,8 @@ function selectAssistSystemPrompt(intent: string, skill: FrozenSkill | null,
   method: FrozenMethod | null, action: 'INSPECT' | 'MODIFY' | null): string {
   if (skill !== null) return selectRuntimeSystemPrompt({ kind: 'SKILL', skill }).system;
   if (method !== null) {
-    return selectRuntimeSystemPrompt({ kind: 'METHOD', method, action }).system;
+    return selectRuntimeSystemPrompt({ kind: 'METHOD', method, action,
+      readTools: false }).system;
   }
   const route = ASSISTANT_ROUTE_BY_INTENT[intent as AssistIntent];
   if (route === undefined) throw new UnknownRuntimePromptRouteError(intent);

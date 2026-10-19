@@ -10,11 +10,14 @@ import ProjectNav from "../components/ProjectNav";
 import PageHeader from "../components/PageHeader";
 import ViewConfigurationPanel from "../components/ViewConfigurationPanel";
 import { describeLiveError } from "../lib/liveErrors";
+import { gatewayCapabilityLabel } from "../lib/labels";
 import { useRelayConnection } from "../lib/relayConnection";
 import "./ConnectionsView.css";
 
 const capabilities: readonly RelayGatewayCapability[] =
-  ["WEB_FETCH", "FILE_READ", "FILE_QUERY", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN", "FAKE_WRITE", "FAKE_PUBLIC_READ"];
+  ["WEB_FETCH", "FILE_READ", "FILE_QUERY", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN",
+    "COMPUTER_READ", "COMPUTER_INPUT", "GITHUB_READ", "BROWSER_READ", "BROWSER_ACTION", "BROWSER_COMMIT",
+    "FAKE_WRITE", "FAKE_PUBLIC_READ"];
 /** 服务端 rootBoundCaps：这类 Connection 必须绑定一个绝对根目录，Fake 能力不绑定任何边界。 */
 const rootBoundCapabilities: readonly RelayGatewayCapability[] =
   ["FILE_READ", "FILE_QUERY", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN"];
@@ -27,20 +30,24 @@ const policyActions: Record<RelayGatewayCapability, readonly string[]> = {
   GIT_WRITE: ["GIT_STAGE", "GIT_COMMIT", "GIT_PUSH"],
   CLI_RUN: ["CLI_RUN", "RUN_BUILD", "RUN_TEST"],
   FAKE_WRITE: ["WRITE_MARKER"], FAKE_PUBLIC_READ: ["READ_PUBLIC"],
+  COMPUTER_READ: ["COMPUTER_SCREENSHOT", "COMPUTER_GET_WINDOWS"],
+  COMPUTER_INPUT: ["COMPUTER_ACTIVATE_WINDOW", "COMPUTER_MOVE", "COMPUTER_CLICK",
+    "COMPUTER_DOUBLE_CLICK", "COMPUTER_SCROLL", "COMPUTER_DRAG", "COMPUTER_TYPE",
+    "COMPUTER_KEYPRESS", "COMPUTER_HOTKEY"],
+  GITHUB_READ: ["GITHUB_REPO_VIEW", "GITHUB_PR_LIST", "GITHUB_PR_VIEW", "GITHUB_ISSUE_LIST",
+    "GITHUB_ISSUE_VIEW"],
+  BROWSER_READ: ["BROWSER_LIST_PAGES", "BROWSER_READ_PAGE", "BROWSER_SCREENSHOT", "BROWSER_WAIT_FOR"],
+  BROWSER_ACTION: ["BROWSER_NEW_PAGE", "BROWSER_NAVIGATE", "BROWSER_CLICK", "BROWSER_FILL",
+    "BROWSER_PRESS_KEY", "BROWSER_CLOSE_PAGE"],
+  BROWSER_COMMIT: ["BROWSER_SUBMIT_FORM", "BROWSER_UPLOAD_FILE"]
 };
 /** 除公共读取外的策略都按受管资源目录限定目标前缀（服务端 policyScope）。 */
 const isFileCapability = (capability: RelayGatewayCapability) =>
   capability !== "WEB_FETCH" && capability !== "FAKE_PUBLIC_READ";
 const connectionStatusText = (status: string): string => status === "ACTIVE" ? "已连接（尚未授权）"
   : status === "DISABLED" ? "已停用（失效）" : status === "REVOKED" ? "已撤销" : `未连接（${status}）`;
-/** 能力的中文显示名；原枚举以 title 呈现供核对，未知枚举回退原文。 */
-const capabilityLabels: Record<RelayGatewayCapability, string> = {
-  WEB_FETCH: "网页抓取", FILE_READ: "文件读取", FILE_QUERY: "目录检索",
-  FILE_WRITE: "文件写入", GIT_READ: "Git 读取", GIT_WRITE: "Git 写入",
-  CLI_RUN: "命令执行", FAKE_WRITE: "示例写入", FAKE_PUBLIC_READ: "示例公开读取"
-};
-const capabilityLabel = (capability: string): string =>
-  capabilityLabels[capability as RelayGatewayCapability] ?? capability;
+/** 能力的中文显示名与「+」菜单连接器二级共用同一份（`lib/labels`），不另立第二套；未知枚举回退原文。 */
+const capabilityLabel = (capability: string): string => gatewayCapabilityLabel(capability);
 /** 列表用的决定中文短名；下拉保持「枚举 · 中文」双语便于与服务端核对。 */
 const decisionLabels: Record<RelayGatewayDecision, string> = {
   DENY: "拒绝", ASK: "每次请求审批", AUTO: "自动准入"
@@ -440,7 +447,7 @@ export function ProjectConnectionsView() {
               <small title={policy.status}>{recordStatusLabel(policy.status)} · rev {policy.revision} · 生效版本 {policy.activeVersion ?? "无"} · <code className="hash-code">{policy.id}</code></small>
               {active && <small>目标：{active.targetPrefix} · 上限 {active.maxPayloadBytes} bytes · {active.actionType}</small>}
               {policy.activeVersion && !active && <small>当前版本详情尚未读到，不推断授权。</small>}
-              <details><summary>查看已读取版本（{versions.length}，最多最近 100 条）</summary><ol>{versions.map((version) => <li key={version.version}>v{version.version} · {version.capability} · {version.decision} · {version.targetPrefix} · {version.maxPayloadBytes} bytes</li>)}</ol></details>
+              <details className="tech-details"><summary>查看已读取版本（{versions.length}，最多最近 100 条）</summary><ol>{versions.map((version) => <li key={version.version}>v{version.version} · {version.capability} · {version.decision} · {version.targetPrefix} · {version.maxPayloadBytes} bytes</li>)}</ol></details>
             </div><div className="connections-actions">
               {policy.status === "ACTIVE" && <button className="secondary-button" type="button" disabled={busy} onClick={() => selectPolicy(policy.id)}>修订</button>}
               {policy.status === "ACTIVE" && <button className="danger-button" type="button" disabled={busy || writeBlockedReason !== null} onClick={() => { void sendCommand({
