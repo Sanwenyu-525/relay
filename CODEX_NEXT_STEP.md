@@ -1,6 +1,8 @@
 # Relay 当前状态与下一步
 
-更新：2026-10-18。角色：唯一阶段、模块与下一步入口。功能通过/未通过/未验收只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)；长篇经过保存在[历史快照](docs/development/codex-next-step-history-20260930.md)，不作为默认交接输入。
+更新：2026-10-19。角色：唯一阶段、模块与下一步入口。功能通过/未通过/未验收只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)；长篇经过保存在[历史快照](docs/development/codex-next-step-history-20260930.md)，不作为默认交接输入。
+
+> **下文各节的「未 commit／未 commit/push」是当轮写作时的事实，现已过期**：2026-10-17/18 积压的浏览器自动化、定时任务、本地目录档位与会话生命周期等改动，已于 `7760e8d0` 一次性提交并推送。该提交前跑过 `node scripts/check-docs.mjs`、API `tsc --noEmit` 与 Workbench `tsc --noEmit`；Workbench 全仓类型检查原先被 `tests/browser/conversationDiffLayout.spec.ts` 同一测试体内重复声明的 `column` 挡住，已把展开后那次改名为 `expandedColumn`（两处取值表达式相同，断言语义未变），不再需要代改记录。真实 Windows/WebView2、集成与验收成绩仍按各节「未闭合」保留，未因此提交而改变。
 
 ## 危险操作可撤销化与会话物理删除（2026-10-18，未 commit）
 
