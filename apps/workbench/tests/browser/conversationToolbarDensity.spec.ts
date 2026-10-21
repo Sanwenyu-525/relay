@@ -713,14 +713,16 @@ test.describe("会话顶栏单行密度", () => {
         radius: style.borderRadius, underline: style.textDecorationLine, cursor: style.cursor,
         fontSize: Number.parseFloat(style.fontSize), fontWeight: style.fontWeight,
         state: strip.dataset.state, transparent: "rgba(0, 0, 0, 0)",
-        primary: token("--relay-color-text-primary"), warningText: token("--relay-color-status-warning-text"),
+        primary: token("--relay-color-text-primary"),
         body: Number.parseFloat(root.getPropertyValue("--relay-font-size-body")) * Number.parseFloat(root.fontSize),
         medium: root.getPropertyValue("--relay-font-weight-medium").trim() };
     });
     const rest = await read();
-    // 这一屏细条处告警态（目录未归入项目）：目录名照旧随细条换警示色，键自己不另染一层。
-    expect(rest.state).toBe("warning");
-    expect(rest.color).toBe(rest.warningText);
+    // 这一屏细条处未归入项目（2026-10-20 第五轮起为 advisory 而不是 warning）：它是常态而非
+    // 紧急故障，整条**不**换警示色，目录名照旧是正文阶——用户截图指认「不要将普通状态长期
+    // 显示为高优先级警告」。真正的警示色只留给「目录未就绪，暂不能执行写操作」那一档。
+    expect(rest.state).toBe("advisory");
+    expect(rest.color).toBe(rest.primary);
     expect(rest.background).toBe(rest.transparent);
     expect(rest.borderWidth).toBe("0px");
     expect(rest.radius).toBe("0px");

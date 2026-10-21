@@ -86,6 +86,17 @@ export type GatewayOrigin =
    * 会让普通会话的行与人设助手的行在库层面无法区分，也让普通会话「看起来像」有冻结人设快照。
    */
   | { readonly kind: 'AGENT_SESSION_READ'; readonly projectId: string;
+      readonly resourceId: string; readonly sessionId: string; readonly messageId: string }
+  /**
+   * 0126：会话内直接写文件。形状与 `AGENT_SESSION_READ` 完全相同，但**必须是另一个来源**：
+   * 「读身份只读」是库层面要成立的语义（见 0126 注释），放宽读身份会让这条语义失效，
+   * 也让一次会话动作究竟是读还是写在账本上无法分辨。
+   *
+   * 只放行 `FILE_WRITE` 能力下的 `APPLY_CHANGESET`：会话没有 Run 的 resource_claim 保护，
+   * 两个会话并发写同一文件时唯一可靠的闸门是同一条 SHA-256 基线。`WRITE_FILE` 全文覆盖
+   * 无基线，不开放。
+   */
+  | { readonly kind: 'AGENT_SESSION_WRITE'; readonly projectId: string;
       readonly resourceId: string; readonly sessionId: string; readonly messageId: string };
 
 export type GatewayActionType =
@@ -222,6 +233,29 @@ export function isSessionReadOrigin(origin: GatewayOrigin): origin is GatewaySes
   return SESSION_READ_ORIGINS.includes(origin.kind);
 }
 
+/**
+ * 0126：会话内写文件来源的子集。
+ *
+ * 与 `isSessionReadOrigin` 分开而不是合成一个「会话来源」判断：两者的能力词表互不相交，
+ * 合成会让 `originAllows` 的分支失去 TypeScript 收窄，最终以「会话写能读一切」这种
+ * 形式重新被发现一次。
+ */
+export type GatewaySessionWriteOrigin = Extract<GatewayOrigin, { kind: 'AGENT_SESSION_WRITE' }>;
+
+export function isSessionWriteOrigin(origin: GatewayOrigin): origin is GatewaySessionWriteOrigin {
+  return origin.kind === 'AGENT_SESSION_WRITE';
+}
+
+/**
+ * 0126：会话写来源只允许的动作。
+ *
+ * `READ_CHANGE_SET` 一并放行是因为它只读自己刚写出的那份变更集证据（按 operation_id 查，
+ * 不碰磁盘），不放行它就等于让模型写完看不到自己写了什么。`WRITE_FILE` 不在词表内：
+ * 它按全文覆盖目标，没有基线可核对。
+ */
+const SESSION_WRITE_ALLOWED_ACTIONS: readonly GatewayActionType[] =
+  ['APPLY_CHANGESET', 'READ_CHANGE_SET'];
+
 export function originAllows(
   origin: GatewayOrigin, actionType: GatewayActionType, capability: GatewayCapability,
 ): boolean {
@@ -234,6 +268,11 @@ export function originAllows(
   if (origin.kind === 'RUN') return allowedRunCaps.includes(capability);
   if (origin.kind === 'USER_IMPORT') return ['FAKE_PUBLIC_READ', 'WEB_FETCH'].includes(capability);
   if (isSessionReadOrigin(origin)) return ASSISTANT_READ_ALLOWED_CAPABILITIES.includes(capability);
+  // 0126：会话写只碰 FILE_WRITE 能力，且动作必须落在基线可核对的名单里。
+  // 能力与动作是两个维度都要判：FILE_WRITE 下的 WRITE_FILE 同属该能力，但它没有基线。
+  if (isSessionWriteOrigin(origin)) {
+    return capability === 'FILE_WRITE' && SESSION_WRITE_ALLOWED_ACTIONS.includes(actionType);
+  }
   return capability === 'GIT_READ' && USER_ACTION_ALLOWED_ACTIONS.includes(actionType);
 }
 
@@ -247,6 +286,10 @@ function originDenialDetail(kind: GatewayOrigin['kind']): string {
   if (kind === 'AGENT_SESSION_READ') {
     return 'AGENT_SESSION_READ 仅允许本会话绑定受管目录内的只读查询：会话读取不改文件、不建任务；' +
       '修改文件与运行检查沿既有 Task/Run 执行入口。';
+  }
+  if (kind === 'AGENT_SESSION_WRITE') {
+    return 'AGENT_SESSION_WRITE 仅允许本会话绑定受管目录内的变更集写入：不接受全文覆盖、' +
+      'Git 写入、命令行与网络动作；每次写入都要带读取时拿到的 SHA-256 基线。';
   }
   return 'RUN 仅允许受管工具调用，USER_IMPORT 仅允许公共网络导入，USER_ACTION 仅允许受管资源上的 Git 只读。';
 }
@@ -851,8 +894,10 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
   // 0060: ASSISTANT_READ 与 RUN 同形地解析只读目标——写分支对它是死代码，因为
   // originAllows 已在上面按只读能力词表拒掉 FILE_WRITE / GIT_WRITE / CLI_RUN。
   // 落进 else（公共读取）分支会让目录浏览去校验 HTTPS URL，那不是「更严」而是读错了地方。
+  // 0126：会话写来源同样绑定受管根，必须一起进来——漏掉它会掉进 else 被当成公共 URL，
+  // 表现为 `GATEWAY_TARGET_DENIED: P09 Fake 公共读取…`，从错误码完全看不出真正的原因。
   const managedRootOrigin = input.origin.kind === 'RUN' ||
-    SESSION_READ_ORIGINS.includes(input.origin.kind);
+    SESSION_READ_ORIGINS.includes(input.origin.kind) || isSessionWriteOrigin(input.origin);
   let target: string;
   if (managedRootOrigin) {
     if (webFetch) {
@@ -1048,6 +1093,16 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
     if (owned?.run_id !== input.origin.runId || owned.capability_key !== 'FILE_WRITE') {
       // 不能借别人的 Operation 读证据，也不能读一个非文件写的动作。
       throw gatewayDenied('GATEWAY_TARGET_DENIED', '只能读取本次 Run 自己的文件变更证据。');
+    }
+  }
+  if (readChangeSet && isSessionWriteOrigin(input.origin)) {
+    // 0126：会话写没有 Run 可比，归属沿用「同一 Project + 同一受管资源 + 同一来源」。
+    // 不校验就等于允许会话按任意 operation_id 读别人（别的会话、别的项目、Run）的变更集。
+    const owned = await createRepositories(db).gateway.readOperation(input.params.operation_id as string);
+    if (owned === undefined || owned.origin !== 'AGENT_SESSION_WRITE' ||
+        owned.project_id !== input.origin.projectId || owned.resource_id !== input.origin.resourceId ||
+        owned.capability_key !== 'FILE_WRITE') {
+      throw gatewayDenied('GATEWAY_TARGET_DENIED', '只能读取本会话自己那份文件变更证据。');
     }
   }
   // V2 §18/§30：Computer 输入动作在后台路径不可用时等价于「需要接管电脑」。
@@ -1486,7 +1541,9 @@ function originMatches(op: LogicalOperationRow, origin: GatewayOrigin): boolean 
   // 受管资源与 Project 就是它们在 Operation 上的完整归属。
   // 会话与消息身份不在 Operation 上——它由 session_tool_calls 那一行绑定，
   // 由 attachOperation 核对；两种执行身份因此无法互相冒充。
-  if (origin.kind === 'ASSISTANT_READ' || origin.kind === 'AGENT_SESSION_READ') {
+  // 0126: 会话写来源同形，`op.origin === origin.kind` 让它与读身份互相不可冒充。
+  if (origin.kind === 'ASSISTANT_READ' || origin.kind === 'AGENT_SESSION_READ' ||
+      origin.kind === 'AGENT_SESSION_WRITE') {
     return op.origin === origin.kind && op.resource_id === origin.resourceId &&
       op.project_id === origin.projectId;
   }
@@ -1768,9 +1825,10 @@ async function fakeExecute(op: LogicalOperationRow, invocation: InvocationAttemp
 async function hasCurrentGatewayEffectLease(db: DbExecutor, admitted: AdmittedInvocation,
   origin: GatewayOrigin): Promise<boolean> {
   if (origin.kind === 'USER_IMPORT') return true;
-  if (origin.kind === 'USER_ACTION' || isSessionReadOrigin(origin)) {
+  if (origin.kind === 'USER_ACTION' || isSessionReadOrigin(origin) || isSessionWriteOrigin(origin)) {
     // 0058/0060: 没有 Worker lease 与资源 claim 可核，栅栏落在「本次调用身份仍是 DISPATCHING」
     // 这一条上——它挡住的是并发重复投递，而不是冒充另一个执行者。
+    // 0126: 会话写同形——它同样没有 Run/Worker，靠 prepare/admit 的在途目录检查排他。
     return (await createRepositories(db).gateway.readInvocation(admitted.invocation.id))?.status === 'DISPATCHING';
   }
   return withTransaction(db, async (repositories) => {
@@ -2235,7 +2293,12 @@ export async function dispatchGatewayAction(db: DbExecutor, input: DispatchGatew
 async function fileWriteExecute(db: DbExecutor, op: LogicalOperationRow, invocation: InvocationAttemptRow,
   signal?: AbortSignal): Promise<{ outcome: 'SUCCEEDED' | 'FAILED'; result: JsonObject }> {
   if (signal?.aborted) throw new Error('Gateway dispatch aborted before file write');
-  if (process.platform === 'win32') {
+  // 0126：会话写不走 Windows 原生路径身份冻结。`file_write_path_identity` 的复合外键
+  // 强制绑定 (operation, run, resource, action_type)，会话写没有 run_id，插不进去；
+  // 强行放开要改那张表的主键语义，代价远大于收益。
+  // **这是一处已知的安全降级**：会话写因此落在下面的 `executeFileChangeset` 纯 Node 路径上，
+  // 存在 ADR-012 记录的「路径检查到实际 I/O 之间被替换」的竞争窗口。需要同等保护的写入走 Run。
+  if (process.platform === 'win32' && op.origin !== 'AGENT_SESSION_WRITE') {
     const pathRow = await createRepositories(db).fileWritePaths.readByOperation(op.id);
     if (pathRow === undefined) throw new Error('Windows FILE_WRITE has no frozen path identity');
     const changes = op.action_type === 'APPLY_CHANGESET'

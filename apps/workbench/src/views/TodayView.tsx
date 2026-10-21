@@ -28,6 +28,20 @@ function localDate(timezone: string): string {
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
+/**
+ * `date` 是查询时区里的日历日期，不是某个时刻。按 UTC 正午锚定后只用 UTC 格式化，
+ * 避免拿设备本地中午再转查询时区——两地相差超过 12 小时时会把日期和星期读成前一天。
+ */
+export function calendarHeading(date: string): { readonly longDate: string; readonly weekday: string } {
+  const [year, month, day] = date.split("-").map(Number);
+  const anchor = new Date(Date.UTC(year!, month! - 1, day!, 12));
+  return {
+    longDate: new Intl.DateTimeFormat("zh-CN", { timeZone: "UTC",
+      year: "numeric", month: "long", day: "numeric" }).format(anchor),
+    weekday: new Intl.DateTimeFormat("zh-CN", { timeZone: "UTC", weekday: "long" }).format(anchor)
+  };
+}
+
 function validTimezone(value: string): boolean {
   try { new Intl.DateTimeFormat("en-US", { timeZone: value }); return true; }
   catch { return false; }
@@ -377,8 +391,7 @@ export default function TodayView() {
   const current = snapshot?.date === date && snapshot.timezone === timezone ? snapshot : null;
   const busy = submitting || pending !== null || loading;
   const waitingOther = current?.waitingItems.filter((item) => !current.blockedPinnedItems.some((blocked) => blocked.taskId === item.taskId)) ?? [];
-  const weekday = new Intl.DateTimeFormat("zh-CN", { timeZone: timezone, weekday: "long" }).format(new Date(`${date}T12:00:00`));
-  const longDate = new Intl.DateTimeFormat("zh-CN", { timeZone: timezone, year: "numeric", month: "long", day: "numeric" }).format(new Date(`${date}T12:00:00`));
+  const { longDate, weekday } = calendarHeading(date);
   const focusTaskId = current?.focus?.targetKind === "TASK" ? current.focus.targetId : null;
   const focusTask = focusTaskId
     ? [...(current?.eligibleItems ?? []), ...(current?.waitingItems ?? [])].find((item) => item.taskId === focusTaskId) ?? null

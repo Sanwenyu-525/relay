@@ -15,8 +15,9 @@ const windowCalls = vi.hoisted(() => ({ isFocused: vi.fn(async () => false),
   onResized: vi.fn(async () => () => undefined), onFocusChanged: vi.fn(async () => () => undefined),
   isMaximized: vi.fn(async () => false), startDragging: vi.fn(async () => undefined),
   toggleMaximize: vi.fn(async () => undefined), minimize: vi.fn(async () => undefined),
-  close: vi.fn(async () => undefined) }));
+  close: vi.fn(async () => undefined), setOverlayIcon: vi.fn(async () => undefined) }));
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => windowCalls }));
+vi.mock("@tauri-apps/api/image", () => ({ Image: { new: async () => ({ rid: 1 }) } }));
 
 const item: RelayInterventionItem = { itemKey: "review:one", changeKey: "0",
   kind: "REVIEW", title: "待审批", reason: "请核对", targetUrl: "/reviews?id=one" };
@@ -105,6 +106,32 @@ describe("人工介入提醒聚合", () => {
       expect(mounted.wrapper.find('.app-content [data-testid="intervention-notifications"]').exists()).toBe(false);
       expect(mounted.wrapper.find('.intervention-notifications-panel [role="status"]').exists()).toBe(false);
       expect(mounted.wrapper.get("main h1").text()).toBe("当前工作");
+    } finally { mounted.unmount(); }
+  });
+
+  it("弹层逐项列出可读事项并直达原请求，聚合入口仍在", async () => {
+    const failing = { ...item, itemKey: "run-failed:two", kind: "RUN_FAILED" as const,
+      title: "执行失败，需要人工核对", reason: "这次执行停下来等你核对结果。", targetUrl: "/runs/two" };
+    const reviewItem = { ...item, reason: "CRITERION：AWAITING_HUMAN_EVIDENCE" };
+    const client = { getInterventions: async () => [reviewItem, failing] } as unknown as RelayApiClient;
+    const mounted = await mountReact(createElement(MemoryRouter, {},
+      createElement(InterventionNotifications, { client }), createElement(LocationProbe)));
+    try {
+      await flush();
+      await mounted.wrapper.get('[data-testid="intervention-notifications-open"]').trigger("click");
+      const panel = mounted.wrapper.get('[data-testid="intervention-notifications-panel"]');
+      expect(panel.findAll('[data-testid="intervention-item"]')).toHaveLength(2);
+      expect(panel.text()).toContain("执行失败，需要人工核对");
+      expect(panel.text()).toContain("这次执行停下来等你核对结果。");
+      // 服务端的 REVIEW 事项把「为什么」投影成枚举对，面板要翻成人话；翻不出来的原文照留。
+      expect(panel.text()).toContain("人工验收");
+      expect(panel.text()).toContain("必需验收条件需要你的判断");
+      expect(panel.text()).not.toContain("AWAITING_HUMAN_EVIDENCE");
+      await panel.get('[data-testid="intervention-item-link"][href="/runs/two"]').trigger("click");
+      expect(mounted.wrapper.get('[data-testid="notification-location"]').text()).toBe("/runs/two");
+      expect((mounted.wrapper.get('[data-testid="intervention-notifications"]').element as HTMLDetailsElement).open).toBe(false);
+      // 聚合入口不因为逐条列出而消失：整体清单仍是另一件事。
+      expect(mounted.wrapper.find('a[href="/tasks?tab=attention"]').exists()).toBe(true);
     } finally { mounted.unmount(); }
   });
 

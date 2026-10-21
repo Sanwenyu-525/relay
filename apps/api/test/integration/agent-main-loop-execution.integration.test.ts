@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { startTestApi, workspacePath } from './api-harness.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,9 +9,10 @@ import test, { after, before } from 'node:test';
 
 import { applyConversationExecution, isAutoStartConversationExecution } from
   '../../src/application/conversation-execution.js';
-import { createAssistSession, bindAssistSessionDirectory, requestAssistMessage }
-  from '../../src/application/assist-commands.js';
+import { createAssistSession, bindAssistSessionDirectory, requestAssistMessage,
+  steerAssistMessage } from '../../src/application/assist-commands.js';
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
+import { resolveSessionReadTools, sessionWriteAllowed } from '../../src/application/assist-read-tools.js';
 import { createGatewayPolicy, registerManagedResource } from
   '../../src/application/gateway-configuration.js';
 import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
@@ -553,4 +554,446 @@ test('候选不合规时按原澄清收口，不造 Task/Run，也不把原文�
   assert.equal(request.candidate_status, 'INVALID');
   assert.equal(request.candidate, null);
   assert.equal(await countRows('tasks', fx.projectId), 0);
+});
+
+// ------------------------------- 0126 会话内直接写文件（ADR-031）
+
+/**
+ * 把目录放到「完全访问」并补一条 APPLY_CHANGESET 的 AUTO 策略。
+ *
+ * FULL 与 AUTO 在策略行上不可区分，档位差别只记在 `local_directory_access.write_tier`：
+ * 会话侧按这一列决定「模型能不能看到写工具」，Gateway 侧按它决定要不要 ASK。
+ */
+async function enableSessionWrite(fx: Fixture):
+Promise<{ resourceId: string; canonicalRoot: string }> {
+  const resource = (await withTransaction(app.db, (repositories) =>
+    repositories.gateway.listResources())).find((item) => item.project_id === fx.projectId);
+  assert.ok(resource !== undefined, '夹具必须已有受管资源');
+  // 写连接的 root_path 必须用**服务端读回的规范根**：Windows 临时目录带 8.3/大小写别名，
+  // 拿原始 mkdtemp 路径建连接会让 `targetMatches` 判不出同一根，写能力静默不进入词表。
+  const writeConnectionId = await addFileWriteConnection(fx, resource.canonical_root);
+  const readConnection = await sql<{ id: string }>`select id from gateway_connections
+    where project_id = ${fx.projectId} and status = 'ACTIVE' and id <> ${writeConnectionId}
+    order by created_at limit 1`.execute(app.db);
+  const readConnectionId = readConnection.rows[0]?.id;
+  assert.ok(readConnectionId !== undefined, '夹具必须已有读连接');
+  await sql`insert into local_directory_access
+    (resource_id, write_tier, read_connection_id, write_connection_id)
+    values (${resource.id}, 'FULL', ${readConnectionId}, ${writeConnectionId})
+    on conflict (resource_id) do update set write_tier = 'FULL',
+      write_connection_id = ${writeConnectionId}`.execute(app.db);
+  await createGatewayPolicy(app.db, { workspaceId: fx.workspaceId, projectId: fx.projectId,
+    capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET',
+    targetPrefix: resource.canonical_root, decision: 'AUTO', maxPayloadBytes: 262144 });
+  // 前置校验：档位行必须与**会话实际绑定的**受管资源是同一行。写完就跑的用例最怕
+  // 「档位落在另一个资源上，于是词表看起来毫无变化」——那种失败会被误读成实现没生效。
+  const sessionRow = await sql<{ working_resource_id: string | null }>`
+    select working_resource_id from assist_sessions where id = ${fx.sessionId}`.execute(app.db);
+  assert.equal(sessionRow.rows[0]?.working_resource_id, resource.id,
+    '会话绑定的受管资源必须与档位行一致');
+  const tier = await sql<{ write_tier: string }>`select write_tier from local_directory_access
+    where resource_id = ${resource.id}`.execute(app.db);
+  assert.equal(tier.rows[0]?.write_tier, 'FULL');
+  return { resourceId: resource.id, canonicalRoot: resource.canonical_root };
+}
+
+/** 记录本轮模型实际拿到的工具词表的端口。 */
+function recordingPort(): { port: AssistModelPort; declared: () => readonly string[] } {
+  const base = new FakeModelPort();
+  let declared: readonly string[] = [];
+  return {
+    declared: () => declared,
+    port: {
+      identity: base.identity,
+      assist: async (request) => {
+        declared = (request.tools ?? []).map((spec) => spec.name);
+        return { kind: 'CONTENT' as const,
+          content: JSON.stringify({ reply: '记下了。', execution: null, maintenance: null }),
+          providerRequestId: 'declared-tools',
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null,
+            cacheCreationTokens: null } };
+      },
+    },
+  };
+}
+
+test('0126 只读档位下词表里没有写工具：模型看不到也就不会一直调用被拒', async () => {
+  const fx = await fixture();
+  const { port, declared } = recordingPort();
+  const outcome = await ask(fx, '看看这个目录', port);
+  assert.equal(outcome.message?.status, 'COMPLETED');
+  assert.ok(declared().includes('read_file'), `读工具应在词表内：${declared().join(',')}`);
+  assert.equal(declared().includes('apply_changeset'), false,
+    '没有目录写档位时写工具不得进入词表');
+  assert.equal(declared().includes('read_change_set'), false);
+});
+
+test('0126 完全访问档把写工具放进词表', async () => {
+  const fx = await fixture();
+  const { resourceId } = await enableSessionWrite(fx);
+  // 先单独验证工具解析这一层：若这里就没有 apply_changeset，问题在连接/根匹配，
+  // 而不是 runner 没把 allowWrite 传下去。
+  const sessionRow = (await sql<Record<string, unknown>>`
+    select * from assist_sessions where id = ${fx.sessionId}`.execute(app.db)).rows[0];
+  assert.ok(sessionRow !== undefined);
+  const direct = await resolveSessionReadTools(createRepositories(app.db),
+    sessionRow as never, true);
+  const caps = await sql<{ capability_key: string }>`
+    select capability_key from gateway_connection_capabilities
+    where connection_id = (select write_connection_id from local_directory_access
+      where resource_id = ${resourceId})`.execute(app.db);
+  assert.deepEqual([...direct].filter((name) => name === 'apply_changeset'),
+    ['apply_changeset'],
+    `工具解析层应含写工具；写连接能力=${caps.rows.map((row) => row.capability_key).join(',')}；` +
+    `解析结果=${direct.join(',')}`);
+  // 档位判定层：同一行 session 必须被判为可写。若这里为 false，问题在档位读取，
+  // 而不是 runner 的分支或传参。
+  const tierRow = await sql<{ write_tier: string }>`
+    select write_tier from local_directory_access where resource_id = ${resourceId}`.execute(app.db);
+  assert.equal(await sessionWriteAllowed(app.db, sessionRow as never), true,
+    `档位判定应为可写；tier=${tierRow.rows[0]?.write_tier ?? 'MISSING'}`);
+  const { port, declared } = recordingPort();
+  await ask(fx, '看看这个目录', port);
+  assert.ok(declared().includes('apply_changeset'), `写工具应在词表内：${declared().join(',')}`);
+  assert.ok(declared().includes('read_file'), '写启用不应挤掉读工具');
+});
+
+test('0126 会话轮次直接写：apply_changeset 真实落盘，写动作属 AGENT_SESSION_WRITE', async () => {
+  const fx = await fixture();
+  await enableSessionWrite(fx);
+  const target = join(fx.root, 'src', 'index.ts');
+  const before = await readFile(target, 'utf8');
+  const baselineSha256 = createHash('sha256').update(before, 'utf8').digest('hex');
+  const script = [[{ name: 'apply_changeset', arguments: { changes: [{ path: 'src/index.ts',
+    action: 'MODIFY', content: 'export const relay = false;\n', baselineSha256 }] } }]];
+  const outcome = await ask(fx, `FAKE_ASSIST_TOOLS ${JSON.stringify(script)}`, new FakeModelPort());
+  // 断言消息不能 JSON.stringify：消息行里有 bigint 修订号，序列化会抛 TypeError。
+  assert.equal(outcome.message?.status, 'COMPLETED',
+    `${outcome.message?.status}/${outcome.message?.error_code ?? 'no-error'}`);
+
+  // 磁盘真的变了——这一片唯一不能靠推断的事实。失败时把工具账本一起带出来：
+  // 「词表里有写工具但没落盘」最常见的三种原因是脚本没触发、准入拒绝、基线过期。
+  const diagRows = await sql<{ tool_name: string; status: string; rejection_reason: string | null;
+    rejection_detail: string | null }>`select tool_name, status, rejection_reason, rejection_detail
+    from session_tool_calls where session_id = ${fx.sessionId}`.execute(app.db);
+  const diag = diagRows.rows.map((row) => `${row.tool_name}:${row.status}:` +
+    `${row.rejection_reason ?? '-'}:${row.rejection_detail ?? '-'}`).join(' | ');
+  assert.equal(await readFile(target, 'utf8'), 'export const relay = false;\n', `账本=${diag}`);
+
+  // 写动作的来源必须是会话写身份，能力是 FILE_WRITE。
+  const ops = await sql<{ origin: string; capability_key: string; status: string }>`
+    select origin, capability_key, status from logical_operations
+    where project_id = ${fx.projectId} and capability_key = 'FILE_WRITE'`.execute(app.db);
+  assert.equal(ops.rows.length, 1);
+  assert.equal(ops.rows[0]?.origin, 'AGENT_SESSION_WRITE');
+  assert.equal(ops.rows[0]?.status, 'SUCCEEDED');
+
+  // 账本以 SETTLED 收口并保留 Operation 身份。
+  const calls = await sql<{ status: string; operation_id: string | null; tool_name: string }>`
+    select status, operation_id, tool_name from session_tool_calls
+    where session_id = ${fx.sessionId}`.execute(app.db);
+  assert.equal(calls.rows.length, 1);
+  assert.equal(calls.rows[0]?.tool_name, 'apply_changeset');
+  assert.equal(calls.rows[0]?.status, 'SETTLED');
+  assert.ok(calls.rows[0]?.operation_id !== null, 'SETTLED 必须指向原 Operation');
+
+  // 会话写不建 Task/Run：它没有验收条件，也不该污染执行面板。
+  // runs 没有 project_id（经 task 关联），按 workspace 数。
+  assert.equal(await countRows('tasks', fx.projectId), 0);
+  const runRows = await sql<{ count: string }>`select count(*)::text as count from runs
+    where workspace_id = ${fx.workspaceId}`.execute(app.db);
+  assert.equal(runRows.rows[0]?.count, '0');
+});
+
+test('0126 基线过期时拒绝并保留原文件，不覆盖别人刚写的正文', async () => {
+  const fx = await fixture();
+  await enableSessionWrite(fx);
+  const target = join(fx.root, 'src', 'index.ts');
+  // 模型读到的是旧内容，但磁盘在这之后被别人改了。
+  const stale = createHash('sha256').update('export const relay = true;\n', 'utf8').digest('hex');
+  await writeFile(target, 'export const relay = true; // 别人刚改成这样\n', 'utf8');
+  const script = [[{ name: 'apply_changeset', arguments: { changes: [{ path: 'src/index.ts',
+    action: 'MODIFY', content: 'export const relay = false;\n', baselineSha256: stale }] } }]];
+  await ask(fx, `FAKE_ASSIST_TOOLS ${JSON.stringify(script)}`, new FakeModelPort());
+  // 文件保持他人的改动，没有被这次写入覆盖。
+  assert.equal(await readFile(target, 'utf8'), 'export const relay = true; // 别人刚改成这样\n');
+  const ops = await sql<{ status: string }>`select status from logical_operations
+    where project_id = ${fx.projectId} and capability_key = 'FILE_WRITE'`.execute(app.db);
+  assert.ok(ops.rows.every((row) => row.status !== 'SUCCEEDED'), '过期基线不得以成功收口');
+  assert.equal(await countRows('tasks', fx.projectId), 0);
+});
+
+test('审批档不暴露无法接续审批的会话写工具，保留执行候选入口', async () => {
+  const fx = await fixture();
+  const { resourceId } = await enableSessionWrite(fx);
+  await sql`update local_directory_access set write_tier = 'ASK'
+    where resource_id = ${resourceId}`.execute(app.db);
+  const { port, declared } = recordingPort();
+  await ask(fx, '把 src/index.ts 改为 false', port);
+  assert.equal(declared().includes('apply_changeset'), false);
+  assert.equal(declared().includes('read_file'), true);
+  const request = await prepareWriteCandidate(fx);
+  assert.equal(request.candidate_status, 'READY');
+  assert.equal(isAutoStartConversationExecution(request), true);
+});
+
+test('写连接停用后不再向模型宣称可以直接写文件', async () => {
+  const fx = await fixture();
+  const { resourceId } = await enableSessionWrite(fx);
+  await sql`update gateway_connections set status = 'DISABLED'
+    where id = (select write_connection_id from local_directory_access
+      where resource_id = ${resourceId})`.execute(app.db);
+  const port = oneShotPort(JSON.stringify({ reply: '读取当前文件。', execution: null }));
+  const original = port.assist.bind(port);
+  port.assist = async (request) => {
+    assert.equal(request.tools?.some((tool) => tool.name === 'apply_changeset'), false);
+    assert.doesNotMatch(request.system, /本轮你可以直接修改文件/);
+    return original(request);
+  };
+  const outcome = await ask(fx, '看看 src/index.ts', port);
+  assert.equal(outcome.message?.status, 'COMPLETED');
+});
+
+test('明确修改的方法轮复用会话写工具，不强制创建 Task 和 Run', async () => {
+  const fx = await fixture();
+  await enableSessionWrite(fx);
+  const before = await readFile(join(fx.root, 'NOTES.md'), 'utf8');
+  const baselineSha256 = createHash('sha256').update(before, 'utf8').digest('hex');
+  const script = [[{ name: 'apply_changeset', arguments: { changes: [{ path: 'NOTES.md',
+    action: 'MODIFY', content: '# 已更新\n', baselineSha256 }] } }]];
+  const port = new FakeModelPort();
+  const original = port.assist.bind(port);
+  port.assist = async (request) => {
+    assert.ok(request.tools?.some((tool) => tool.name === 'apply_changeset'));
+    assert.doesNotMatch(request.system, /你\*\*不直接写文件\*\*/);
+    return original(request);
+  };
+  const outcome = await ask(fx, `更新文档 FAKE_ASSIST_TOOLS ${JSON.stringify(script)}`, port);
+  assert.equal(outcome.message?.status, 'COMPLETED');
+  assert.equal(await readFile(join(fx.root, 'NOTES.md'), 'utf8'), '# 已更新\n');
+  assert.equal(outcome.requests.length, 0);
+  assert.equal(await countRows('tasks', fx.projectId), 0);
+});
+
+test('只审查的方法轮即使目录完全访问也不暴露写工具', async () => {
+  const fx = await fixture();
+  await enableSessionWrite(fx);
+  const { port, declared } = recordingPort();
+  const outcome = await ask(fx, '代码审查，只报告问题', port);
+  assert.equal(outcome.message?.status, 'COMPLETED');
+  assert.equal(declared().includes('apply_changeset'), false);
+  assert.equal(outcome.requests.length, 0);
+});
+
+test('会话直写后可以提交仅运行检查的候选，原修改不重复入队', async () => {
+  const fx = await fixture();
+  await enableSessionWrite(fx);
+  const before = await readFile(join(fx.root, 'src', 'index.ts'), 'utf8');
+  const baselineSha256 = createHash('sha256').update(before, 'utf8').digest('hex');
+  const port = oneShotPort('');
+  port.assist = async (request) => {
+    assert.doesNotMatch(request.system, /execution 一律填 null/);
+    assert.match(request.system, /只运行检查时 writes_files=false/);
+    const common = { providerRequestId: 'write-then-check', usage: {
+      inputTokens: 1, outputTokens: 1, cacheReadTokens: null, cacheCreationTokens: null } };
+    if ((request.toolTurns?.length ?? 0) === 0) return { ...common, kind: 'TOOL_CALLS', preamble: '',
+      calls: [{ providerToolCallId: 'write-once', name: 'apply_changeset', arguments: {
+        changes: [{ path: 'src/index.ts', action: 'MODIFY', baselineSha256,
+          content: 'export const relay = false;\n' }] } }] };
+    assert.equal(request.toolTurns?.[0]?.results[0]?.isError, false);
+    return { ...common, kind: 'CONTENT', content: JSON.stringify({ reply: '文件已修改，继续检查。',
+      execution: { title: '核对修改', objective: '检查修改后的文件',
+        criteria: [{ statement: '检查命令成功', required: true, method: 'HUMAN' }],
+        expected_outputs: { kind: 'MARKDOWN_DOCUMENT' }, writes_files: false, file_changes: [],
+        check: { executable: 'node', args: ['--check', 'src/index.ts'] } }, maintenance: null }) };
+  };
+  const outcome = await ask(fx, '修改 src/index.ts 并运行检查', port);
+  assert.equal(outcome.message?.status, 'COMPLETED');
+  assert.equal(await readFile(join(fx.root, 'src', 'index.ts'), 'utf8'), 'export const relay = false;\n');
+  assert.equal(outcome.requests.length, 1);
+  assert.equal(outcome.requests[0]?.candidate_status, 'READY');
+  assert.equal(outcome.requests[0]?.candidate?.writes_files, false);
+  assert.deepEqual(outcome.requests[0]?.candidate?.file_changes, []);
+  assert.deepEqual(outcome.requests[0]?.candidate?.check,
+    { executable: 'node', args: ['--check', 'src/index.ts'] });
+  const writes = await sql<{ count: string }>`select count(*)::text as count from logical_operations
+    where project_id = ${fx.projectId} and capability_key = 'FILE_WRITE'`.execute(app.db);
+  assert.equal(writes.rows[0]?.count, '1');
+});
+
+for (const interaction of ['BROWSER', 'COMPUTER'] as const) {
+  test(`${interaction} 操作候选进入原 Run 工具循环，不因连接无文件根而丢失工具`, async () => {
+    const fx = await fixture();
+    const capabilities: readonly GatewayCapability[] = interaction === 'BROWSER'
+      ? ['BROWSER_READ', 'BROWSER_ACTION', 'BROWSER_COMMIT'] : ['COMPUTER_READ', 'COMPUTER_INPUT'];
+    await withTransaction(app.db, async (repositories) => {
+      const connection = await repositories.gateway.insertConnection({ id: randomUUID(),
+        workspaceId: fx.workspaceId, projectId: fx.projectId, config: {} });
+      for (const capability of capabilities) {
+        await repositories.gateway.addConnectionCapability(connection.id, capability);
+      }
+    });
+    const outcome = await ask(fx, '在已连接的工具中完成指定操作', oneShotPort(JSON.stringify({
+      reply: '按原请求执行。', execution: { title: '完成操作', objective: '打开目标并核对结果',
+        criteria: [{ statement: '有操作后的观察证据', required: true, method: 'HUMAN' }],
+        expected_outputs: { kind: 'MARKDOWN_DOCUMENT' }, writes_files: false,
+        file_changes: [], check: null, interaction }, maintenance: null })));
+    assert.equal(outcome.requests[0]?.candidate?.interaction, interaction);
+    const applied = await applyConversationExecution(app.db,
+      { workspaceId: fx.workspaceId, requestId: outcome.requests[0]!.id });
+    assert.equal(applied.status, 'DELEGATED');
+    const contract = await sql<{ frozen_snapshot: JsonObject }>`select frozen_snapshot
+      from execution_contracts where run_id = ${applied.run_id!}`.execute(app.db);
+    const loop = contract.rows[0]?.frozen_snapshot.tool_loop_action as JsonObject;
+    assert.ok(loop);
+    const tools = loop.allowed_tools as string[];
+    for (const tool of interaction === 'BROWSER'
+      ? ['browser_new_page', 'browser_read_page', 'browser_click', 'browser_submit_form']
+      : ['computer_screenshot', 'computer_get_windows', 'computer_click', 'computer_type']) {
+      assert.ok(tools.includes(tool), `Run 应拿到 ${tool}`);
+    }
+    assert.equal(tools.includes('apply_changeset'), false);
+    assert.equal(tools.includes('run_check'), false);
+    const grants = await sql<{ count: string }>`select count(*)::text as count from run_scope_grants
+      where run_id = ${applied.run_id!}`.execute(app.db);
+    assert.equal(grants.rows[0]?.count, '0', '工具需求不得隐式变成操作授权或免批');
+  });
+}
+
+test('AUTO 档删除在创建动作前转交 Run，不遗留无法接续的会话审批', async () => {
+  const fx = await fixture();
+  const { resourceId } = await enableSessionWrite(fx);
+  await sql`update local_directory_access set write_tier = 'AUTO'
+    where resource_id = ${resourceId}`.execute(app.db);
+  const before = await readFile(join(fx.root, 'NOTES.md'), 'utf8');
+  const baselineSha256 = createHash('sha256').update(before, 'utf8').digest('hex');
+  const script = [[{ name: 'apply_changeset', arguments: { changes: [
+    { path: 'NOTES.md', action: 'DELETE', baselineSha256 }] } }]];
+  const port = new FakeModelPort();
+  const original = port.assist.bind(port);
+  let refusal = '';
+  port.assist = async (request) => {
+    if (request.toolTurns?.[0] !== undefined) refusal = request.toolTurns[0].results[0]?.content ?? '';
+    return original(request);
+  };
+  await ask(fx, `FAKE_ASSIST_TOOLS ${JSON.stringify(script)}`, port);
+  assert.match(refusal, /SESSION_WRITE_REQUIRES_RUN/);
+  assert.equal(await readFile(join(fx.root, 'NOTES.md'), 'utf8'), before);
+  const operations = await sql<{ count: string }>`select count(*)::text as count from logical_operations
+    where project_id = ${fx.projectId} and capability_key = 'FILE_WRITE'`.execute(app.db);
+  assert.equal(operations.rows[0]?.count, '0');
+});
+
+test('缺少浏览器操作连接时先报能力缺口，不生成半成品 Task', async () => {
+  const fx = await fixture();
+  const outcome = await ask(fx, '打开目标页面', oneShotPort(JSON.stringify({ reply: '打开目标页面。',
+    execution: { title: '查看目标页面', objective: '打开页面并核对标题',
+      criteria: [{ statement: '取得页面标题', required: true, method: 'HUMAN' }],
+      expected_outputs: { kind: 'MARKDOWN_DOCUMENT' }, writes_files: false, file_changes: [],
+      interaction: 'BROWSER' } })));
+  await assert.rejects(() => applyConversationExecution(app.db,
+    { workspaceId: fx.workspaceId, requestId: outcome.requests[0]!.id }), /BROWSER_READ/);
+  assert.equal(await countRows('tasks', fx.projectId), 0);
+});
+
+// ---------------------------------------------------- 0128 插话撤回后的机械重试守卫
+
+/**
+ * 插话打断后模型原样重发刚被撤回的写动作。
+ *
+ * 这是「实际工具仍执行旧计划」的最小可复现场景：提示词已经要求模型按最新要求重新决定，
+ * 但提示词不是代码保证——写动作一旦执行就是真实副作用。守卫的判据是「自撤回以来有没有
+ * 新插话」：没有新信息时重复同一动作 = 机械重试；有新插话时同样的动作可能是用户的新指令。
+ */
+test('0128 插话撤回后原样重发旧写动作：动作被拦下，磁盘与账本都没有副作用', async () => {
+  const fx = await fixture();
+  await enableSessionWrite(fx);
+  const target = join(fx.root, 'src', 'index.ts');
+  const before = await readFile(target, 'utf8');
+  const baselineSha256 = createHash('sha256').update(before, 'utf8').digest('hex');
+  const change = { changes: [{ path: 'src/index.ts', action: 'MODIFY',
+    content: 'export const relay = "green";\n', baselineSha256 }] };
+  const usage = { inputTokens: 1, outputTokens: 1, cacheReadTokens: null,
+    cacheCreationTokens: null };
+  let round = 0;
+  const seenResults: string[] = [];
+  const port: AssistModelPort = { identity: new FakeModelPort().identity,
+    assist: async (request) => {
+      round += 1;
+      if (round === 1) {
+        // 在途期间用户插话：改成蓝色。这批写动作必须先停下。
+        const queued = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+          sessionId: fx.sessionId, commandId: randomUUID(), content: '改成蓝色' });
+        await steerAssistMessage(app.db, { workspaceId: fx.workspaceId,
+          messageId: queued.result.assistant_message_id, commandId: randomUUID() });
+        return { kind: 'TOOL_CALLS', calls: [{ providerToolCallId: 'retry-1',
+          name: 'apply_changeset', arguments: change }], preamble: '', providerRequestId: 'r1', usage };
+      }
+      if (round === 2) {
+        // 模型没听见新要求，原样重发刚被撤回的动作。
+        seenResults.push(request.toolTurns?.[0]?.results[0]?.content ?? '');
+        return { kind: 'TOOL_CALLS', calls: [{ providerToolCallId: 'retry-2',
+          name: 'apply_changeset', arguments: change }], preamble: '', providerRequestId: 'r2', usage };
+      }
+      seenResults.push(request.toolTurns?.[1]?.results[0]?.content ?? '');
+      return { kind: 'CONTENT', content: '已按最新要求处理。', providerRequestId: 'r3', usage };
+    } };
+  const outcome = await ask(fx, '把按钮改成绿色', port);
+  assert.equal(outcome.message?.status, 'COMPLETED',
+    `${outcome.message?.status}/${outcome.message?.error_code ?? 'no-error'}`);
+  // 关键证据：磁盘没被这次旧动作改过。
+  assert.equal(await readFile(target, 'utf8'), before, '被撤回的动作不得产生落盘副作用');
+  // 第二次请求里，那个动作被类型化拦下（而不是执行成功）。
+  const blocked = seenResults.find((content) => content.includes('ACTION_WITHDRAWN'));
+  assert.ok(blocked !== undefined, `重发动作必须被撤回守卫拦下；实际回执=${seenResults.join(' | ')}`);
+  assert.match(blocked, /NOT_EXECUTED/u);
+  // 零写副作用：没有 FILE_WRITE Operation，也没有已结算的写工具账本。
+  const operations = await sql<{ count: string }>`select count(*)::text as count from logical_operations
+    where project_id = ${fx.projectId} and capability_key = 'FILE_WRITE'`.execute(app.db);
+  assert.equal(operations.rows[0]?.count, '0');
+  const calls = await sql<{ count: string }>`select count(*)::text as count from session_tool_calls
+    where session_id = ${fx.sessionId} and tool_name = 'apply_changeset'`.execute(app.db);
+  assert.equal(calls.rows[0]?.count, '0', '被撤回与被拦下的动作都不入工具账本');
+});
+
+test('0128 新方向的动作不被撤回守卫误伤：改蓝色照常落盘', async () => {
+  const fx = await fixture();
+  await enableSessionWrite(fx);
+  const target = join(fx.root, 'src', 'index.ts');
+  const before = await readFile(target, 'utf8');
+  const baselineSha256 = createHash('sha256').update(before, 'utf8').digest('hex');
+  const green = { changes: [{ path: 'src/index.ts', action: 'MODIFY',
+    content: 'export const relay = "green";\n', baselineSha256 }] };
+  const blue = { changes: [{ path: 'src/index.ts', action: 'MODIFY',
+    content: 'export const relay = "blue";\n', baselineSha256 }] };
+  const usage = { inputTokens: 1, outputTokens: 1, cacheReadTokens: null,
+    cacheCreationTokens: null };
+  let round = 0;
+  const port: AssistModelPort = { identity: new FakeModelPort().identity,
+    assist: async () => {
+      round += 1;
+      if (round === 1) {
+        const queued = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+          sessionId: fx.sessionId, commandId: randomUUID(), content: '改成蓝色' });
+        await steerAssistMessage(app.db, { workspaceId: fx.workspaceId,
+          messageId: queued.result.assistant_message_id, commandId: randomUUID() });
+        return { kind: 'TOOL_CALLS', calls: [{ providerToolCallId: 'turn-1',
+          name: 'apply_changeset', arguments: green }], preamble: '', providerRequestId: 'b1', usage };
+      }
+      if (round === 2) {
+        // 模型按新要求改了动作：这是新签名，不该被守卫当成机械重试。
+        return { kind: 'TOOL_CALLS', calls: [{ providerToolCallId: 'turn-2',
+          name: 'apply_changeset', arguments: blue }], preamble: '', providerRequestId: 'b2', usage };
+      }
+      return { kind: 'CONTENT', content: '已按蓝色写好。', providerRequestId: 'b3', usage };
+    } };
+  const outcome = await ask(fx, '把按钮改成绿色', port);
+  assert.equal(outcome.message?.status, 'COMPLETED',
+    `${outcome.message?.status}/${outcome.message?.error_code ?? 'no-error'}`);
+  assert.equal(await readFile(target, 'utf8'), 'export const relay = "blue";\n',
+    '新方向的动作必须照常落盘');
+  const operations = await sql<{ status: string }>`select status from logical_operations
+    where project_id = ${fx.projectId} and capability_key = 'FILE_WRITE'`.execute(app.db);
+  assert.equal(operations.rows.length, 1);
+  assert.equal(operations.rows[0]?.status, 'SUCCEEDED');
 });

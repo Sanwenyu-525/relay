@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { RelayApiClient, RelayInterventionItem, RelayReview, RelayRun, RelayTaskSummary } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
-import { taskStatusLabels } from "../lib/labels";
+import { interventionReasonText, reviewKindLabels, reviewReasonText, taskStatusLabels } from "../lib/labels";
+import { controlLabels, runLabels } from "./RunControlPanel";
+import { reviewDecisionLabels } from "./ReviewDecisionPanel";
 import PageHeader from "./PageHeader";
 
 interface AttentionSnapshot {
@@ -11,6 +13,8 @@ interface AttentionSnapshot {
   readonly interventions: readonly RelayInterventionItem[];
   readonly tasks: readonly RelayTaskSummary[];
   readonly runs: readonly { readonly task: RelayTaskSummary; readonly run: RelayRun }[];
+  /** 项目 ID → 服务端标题。读不到或不在本页时卡片改说「项目名称暂不可读取」。 */
+  readonly projectTitles: ReadonlyMap<string, string>;
   readonly failures: readonly string[];
   readonly taskPagesComplete: boolean;
   readonly nextCursor: string | null;
@@ -23,6 +27,13 @@ function needsTaskAttention(task: RelayTaskSummary, reviewTaskIds: ReadonlySet<s
   if (reviewTaskIds.has(task.id)) return false;
   return task.executor === "HUMAN" && (task.status === "INBOX" || task.status === "READY") ||
     task.status === "WAITING" && task.waitingReason !== null;
+}
+
+/** 两条入口是否指向同一个对象：只比路径与 id，其余一概不当作「同一个」。 */
+function targetKey(url: string): string {
+  const [path, query = ""] = url.split("?");
+  const id = new URLSearchParams(query).get("id");
+  return id === null ? path : `${path}?id=${id}`;
 }
 
 async function readAttention(client: RelayApiClient, active: () => boolean,
@@ -74,8 +85,16 @@ async function readAttention(client: RelayApiClient, active: () => boolean,
       } else runs.push(result.value);
     });
   }
+  // 卡片要写项目名而不是 UUID。标题只是呈现用的只读事实：读不到就照说读不到，
+  // 不把 ID 当名字，也不因此宣称整个待处理范围没核对完（计数口径不由它决定）。
+  let projectTitles = new Map<string, string>();
+  try {
+    const page = await client.getProjectsPage("all", null);
+    if (active()) projectTitles = new Map(page.items.map((project) => [project.id, project.title]));
+  } catch { /* 名称缺失按「暂不可读取」呈现。 */ }
+
   return { queriedAt: new Date().toISOString(), reviews, interventions, tasks, runs,
-    failures, taskPagesComplete, nextCursor, seenCursors: cursors };
+    projectTitles, failures, taskPagesComplete, nextCursor, seenCursors: cursors };
 }
 
 export default function AttentionQueue({ client }: { readonly client: RelayApiClient }) {
@@ -95,6 +114,23 @@ export default function AttentionQueue({ client }: { readonly client: RelayApiCl
   const runItems = snapshot?.runs.filter(({ run }) => run.unresolvedOperationIds.length > 0 ||
     run.pendingControlRequest !== null) ?? [];
   const complete = snapshot !== null && snapshot.failures.length === 0 && snapshot.taskPagesComplete;
+  const titles = snapshot?.projectTitles ?? new Map<string, string>();
+  // 名称只说服务端给过的事实：读不到就写「暂不可读取」，不拿 UUID 冒充名字。
+  const projectName = (projectId: string | null) => projectId === null ? "未归入项目"
+    : titles.get(projectId) ?? "项目名称暂不可读取";
+  const taskName = (taskId: string | null) => taskId === null ? "未关联任务"
+    : snapshot?.tasks.find((item) => item.id === taskId)?.title ?? "任务标题暂不可读取";
+  const listed = new Map<string, string>();
+  for (const review of snapshot?.reviews ?? []) {
+    listed.set(targetKey(`/reviews?id=${review.id}`), "与下方「待判断 Review」列出的是同一条请求");
+  }
+  for (const { run } of runItems) {
+    listed.set(targetKey(`/runs/${run.id}`), "与下方「当前 Run 待核对」列出的是同一次执行");
+  }
+  for (const task of taskItems) {
+    listed.set(targetKey(`/tasks/${task.id}`), "与下方「人工任务与受阻 Task」列出的是同一个任务");
+  }
+  const attentionKeys = new Set(snapshot?.interventions.map((item) => targetKey(item.targetUrl)) ?? []);
   return <section className="skill-page page-primary" data-testid="attention-queue">
     <PageHeader testId="attention-page-head" title="需要你查看的事项" meta="跨项目人工待处理"
       lede="按 Review、当前 Run 与 Task 的服务端事实分组。每组保留原读取顺序，分组不表示紧急程度或截止时间。"
@@ -113,8 +149,14 @@ export default function AttentionQueue({ client }: { readonly client: RelayApiCl
         {snapshot.nextCursor && <p>Task 分页每次最多读取 10 页，尚有后续页。<button className="secondary-button" type="button" disabled={loading} onClick={() => void load(true)}>继续读取后续页</button></p>}</div>}
       <section className="surface-panel" data-testid="required-interventions"><h2>必须介入 · {snapshot.interventions.length}</h2>
         <p className="helper-text">来自当前服务端事实；普通收件箱与 READY 任务不会因此主动通知。进入原入口后重新核对是否仍待处理。</p>
-        {snapshot.interventions.length ? <ul>{snapshot.interventions.map((item) => <li key={`${item.itemKey}:${item.changeKey}`}>
-          <strong>{item.title}</strong><p>{item.reason}</p><p><Link to={item.targetUrl}>打开原处理入口</Link></p>
+        {snapshot.interventions.length ? <ul>{snapshot.interventions.map((item) => <li key={`${item.itemKey}:${item.changeKey}`}
+          data-testid={`attention-intervention-${item.itemKey}`}>
+          <strong>{item.title}</strong><p>{interventionReasonText(item)}</p>
+          {listed.has(targetKey(item.targetUrl)) && <p>这条提醒{listed.get(targetKey(item.targetUrl))}；处理仍在那一条的入口里做。</p>}
+          <p>下一步：<Link className="inline-link" data-testid="attention-main-entry" to={item.targetUrl}>打开原处理入口</Link>。进入后按那条请求的当前事实再核对一次。</p>
+          <details className="attention-identity"><summary>技术细节</summary>
+            <p>事项类型 {item.kind} · 事项键 {item.itemKey} · 变化键 {item.changeKey}</p>
+            <p>入口地址 {item.targetUrl}</p></details>
         </li>)}</ul> : <p className="helper-text">当前读取范围未发现必须介入事项。</p>}</section>
       {complete && snapshot.interventions.length === 0 && snapshot.reviews.length === 0 &&
         runItems.length === 0 && taskItems.length === 0 &&
@@ -122,22 +164,43 @@ export default function AttentionQueue({ client }: { readonly client: RelayApiCl
       <section className="surface-panel"><h2>待判断 Review · {snapshot.reviews.length}</h2>
         <p className="helper-text">每条决定绑定独立目标与版本；进入 Review 后重新读取，不批量批准。</p>
         <ul>{snapshot.reviews.map((review) => <li key={review.id} data-testid={`attention-review-${review.id}`}>
-          <strong>{review.kind} · {review.reason}</strong>
-          <p>Project {review.projectId ?? "未关联"} · Task {review.taskId ?? "未关联"} · Run {review.runId ?? "未关联"} · Review v{review.revision}</p>
-          <p>下一步：<Link to={`/reviews?id=${encodeURIComponent(review.id)}`}>打开原 Review 决定入口</Link>。延后影响以该请求当前事实为准，尚未由此队列确定。</p></li>)}</ul></section>
+          <strong>{reviewKindLabels[review.kind]} · {reviewReasonText(review.reason)}</strong>
+          <p>{projectName(review.projectId)} · 任务「{taskName(review.taskId)}」</p>
+          <p>你要做什么：{review.allowedDecisions.length
+            ? `核对判断依据后，在${review.allowedDecisions.map((decision) => reviewDecisionLabels[decision]).join("、")}里选一个作决定。`
+            : "打开这条请求核对当前状态；这次读取没有给出可用决定。"}</p>
+          <p>下一步：<Link className="inline-link" data-testid="attention-main-entry" to={`/reviews?id=${encodeURIComponent(review.id)}`}>打开原 Review 决定入口</Link>。延后影响以该请求当前事实为准，尚未由此队列确定。</p>
+          <details className="attention-identity"><summary>技术细节</summary>
+            <p>Review {review.id} · Project {review.projectId ?? "未关联"} · Task {review.taskId ?? "未关联"} · Run {review.runId ?? "未关联"} · Review v{review.revision}</p>
+            {attentionKeys.has(targetKey(`/reviews?id=${review.id}`)) &&
+              <p>这条请求也出现在「必须介入」事项里，那里只是提醒，不改变它的版本，也不代替这里的判断。</p>}</details></li>)}</ul></section>
       <section className="surface-panel"><h2>当前 Run 待核对 · {runItems.length}</h2>
         <ul>{runItems.map(({ task, run }) => <li key={run.id} data-testid={`attention-run-${run.id}`}>
-          <strong>{task.title} · Run {run.status}</strong>
-          <p>Project {task.projectId ?? "未关联"} · Task {task.id} · Run {run.id}</p>
-          <p>{run.unresolvedOperationIds.length ? `未决 Operation：${run.unresolvedOperationIds.join("、")}。状态或外部效果须按原身份核对。` : ""}
-            {run.pendingControlRequest ? `控制请求 ${run.pendingControlRequest.id}：${run.pendingControlRequest.status}。` : ""}</p>
-          <p>下一步：<Link to={`/runs/${run.id}`}>打开原 Run 核对入口</Link>。切换视图不会完成控制或重试动作。</p></li>)}</ul></section>
+          <strong>{task.title} · {runLabels[run.status] ?? run.status}</strong>
+          <p>{projectName(task.projectId)}</p>
+          <p>你要做什么：{[
+            run.unresolvedOperationIds.length ? `有 ${run.unresolvedOperationIds.length} 个动作的结果还没确定，要按原身份核对它是否已经生效。` : "",
+            run.pendingControlRequest ? `有一个「${controlLabels[run.pendingControlRequest.type] ?? run.pendingControlRequest.type}」在等待处理。` : ""]
+            .filter((line) => line !== "").join(" ")}</p>
+          <p>下一步：<Link className="inline-link" data-testid="attention-main-entry" to={`/runs/${run.id}`}>打开原 Run 核对入口</Link>。切换视图不会完成控制或重试动作。</p>
+          <details className="attention-identity"><summary>技术细节</summary>
+            <p>Run {run.id} · 状态 {run.status} · Task {task.id} · 任务 v{task.revision}</p>
+            {run.unresolvedOperationIds.length > 0 && <p>未决 Operation：{run.unresolvedOperationIds.join("、")}。状态或外部效果须按原身份核对。</p>}
+            {run.pendingControlRequest !== null && <p>控制请求 {run.pendingControlRequest.id}：{run.pendingControlRequest.status}。</p>}
+            {attentionKeys.has(targetKey(`/runs/${run.id}`)) &&
+              <p>这次执行也出现在「必须介入」事项里，那里只是提醒，不代替这里的核对。</p>}</details></li>)}</ul></section>
       <section className="surface-panel"><h2>人工任务与受阻 Task · {taskItems.length}</h2>
         <ul>{taskItems.map((task) => <li key={task.id} data-testid={`attention-task-${task.id}`}>
           <strong>{task.title} · {taskStatusLabels[task.status]}</strong>
-          <p>Project {task.projectId ?? "未归属"} · Task {task.id} · 任务 v{task.revision}</p>
-          <p>等待原因：{task.waitingReason ?? (task.unresolvedBlockerIds.length ? `未决阻塞 ${task.unresolvedBlockerIds.join("、")}` : "服务端未给出具体原因")}。未提供可证实的延后影响。</p>
-          <p>下一步：<Link to={`/tasks/${task.id}`}>打开任务核对当前状态</Link>{task.executorRunId && <>；<Link to={`/runs/${task.executorRunId}`}>查看当前 Run</Link></>}。</p></li>)}</ul></section>
+          <p>{projectName(task.projectId)}</p>
+          <p>等待原因：{task.waitingReason ?? (task.unresolvedBlockerIds.length
+            ? `有 ${task.unresolvedBlockerIds.length} 项未决阻塞（清单在技术细节里）` : "服务端未给出具体原因")}。未提供可证实的延后影响。</p>
+          <p>下一步：<Link className="inline-link" data-testid="attention-main-entry" to={`/tasks/${task.id}`}>打开任务核对当前状态</Link>{task.executorRunId && <>；<Link to={`/runs/${task.executorRunId}`}>查看当前 Run</Link></>}。</p>
+          <details className="attention-identity"><summary>技术细节</summary>
+            <p>Task {task.id} · 任务 v{task.revision}{task.executorRunId ? ` · Run ${task.executorRunId}` : ""}</p>
+            {task.unresolvedBlockerIds.length > 0 && <p>未决阻塞：{task.unresolvedBlockerIds.join("、")}</p>}
+            {attentionKeys.has(targetKey(`/tasks/${task.id}`)) &&
+              <p>这个任务也出现在「必须介入」事项里，那里只是提醒，不等于任务已经交给别人。</p>}</details></li>)}</ul></section>
     </>}
   </section>;
 }

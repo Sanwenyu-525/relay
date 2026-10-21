@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { RelayApiClient, RelayConversationDiff } from "../api/relayClient";
+import type { RelayApiClient, RelayConversationDiff, RelayConversationDiffScope } from "../api/relayClient";
 
 interface ConversationDiffState {
   readonly diff: RelayConversationDiff | null;
@@ -29,7 +29,7 @@ interface Snapshot {
  * 刷新失败**不清零**：保留上次可信值并标 stale（CD-17）；只有从未读到过可信值才显示不可用。
  */
 export function useConversationDiff(client: RelayApiClient, sessionId: string | null,
-  enabled: boolean, pollMs = 4000): ConversationDiffState {
+  enabled: boolean, pollMs = 4000, scope: RelayConversationDiffScope = "SESSION"): ConversationDiffState {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [inFlight, setInFlight] = useState(false);
@@ -43,7 +43,7 @@ export function useConversationDiff(client: RelayApiClient, sessionId: string | 
     const current = ++version.current;
     setInFlight(true);
     try {
-      const next = await client.getConversationDiff(sessionId);
+      const next = await client.getConversationDiff(sessionId, scope);
       if (current !== version.current) return;
       setSnapshot({ sessionId, diff: next, readAt: new Date().toISOString() });
       setError(null);
@@ -54,7 +54,7 @@ export function useConversationDiff(client: RelayApiClient, sessionId: string | 
     } finally {
       if (current === version.current) setInFlight(false);
     }
-  }, [client, sessionId, enabled]);
+  }, [client, sessionId, enabled, scope]);
 
   useEffect(() => {
     void read();

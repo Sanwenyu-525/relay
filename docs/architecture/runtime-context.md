@@ -252,6 +252,10 @@ B 档不排队：一条在途时再发被明确拒绝，文案不得出现「排
 
 **当前实现边界（2026-10-18，阶段 A/B/C 已实施，原消息 Run 摘要已回填）**：§2.7.1 的持久协议、**会话读取轮次**（来源 `AGENT_SESSION_READ`、目录取自 `assist_sessions.working_resource_id`、路由 `AGENT_MAIN_LOOP`）、**执行候选提交**、**状态维护提交**与**会话内 Run 排他**已落地——主流程收尾的那一次模型输出同时给出回复、可选的执行候选与可选的状态维护候选，两者都经既有确定性校验后落进**原**请求行，因此每条消息不再需要两次额外的解释模型调用。状态维护的基线在**这次模型请求之前**就由 `freezeStateInterpretationBaseline()` 冻结并原样传下去，模型在途期间的人工修改不会被吸收成原基线（R3）。**同一会话不并行推进两条执行链**：`applyConversationExecution()` 在建 Task 之前按 `findLiveRunForSession()` 问「这条会话上是否已有别的请求到了 DELEGATED、且那个 Run 还没收口」，有则按类型化 `EXECUTOR_CONFLICT` 拒绝并指回原 Run；活动状态集与 Task 级 `findLiveRunForTask()` 逐字一致，原 Run 收口后同一会话可再发起执行。Apply 后原用户消息现可读取同一 `request_id`/Task/Run 的摘要投影；更完整的 Run 详情继续由原 Run Owner 提供。旧状态维护解释仍使用独立请求 Owner，相关 UI/窗口及 Provider 范围见统一功能验收表。§2.6 中 A 档无工具/B 档只读的描述保留为当前实现事实。
 
+**会话读取轮次的预算收尾（2026-10-19，真实模型跑通普通会话文件修改时补）**：`runSessionReadonlyRounds()` 在**最后一次轮次**或**工具调用预算已用尽**时，本轮不再向模型声明任何工具，并追加一条收尾指令要求用已有结果作答。此前只靠轮次计数在循环结束后返回 `SESSION_TOOL_ROUNDS_EXHAUSTED`：真实 Provider 会反复 find/list/read（同一文件连读两次），提示它收尾时仍会再请求一次工具，整条消息于是以失败收场，用户看到的是一次报错而不是答复。「不声明工具」是机制而不是劝导——模型没有可调用的工具，只能输出正文。同一轮把模型异常按 `MODEL_TIMEOUT`／`MODEL_TOOL_OUTPUT_INVALID`／`MODEL_BUDGET_EXHAUSTED`／`MODEL_FAILED` 分类，不再一律折叠成 `MODEL_FAILED`：只保留类别，不复制 provider 正文或凭据。
+
+**执行候选的交付种类归一（2026-10-19）**：`expected_outputs.kind` 描述的是本次**可审查的交付说明**，不是被改动的文件。真实模型面对「把 greet 改成 X」会合理写成 `CODE_FILE`，而 `validateConversationCandidate()` 原来只认 `MARKDOWN_DOCUMENT`，整条执行请求因此被判成澄清，文件修改永远到不了 Run。现按同义表归一到当前工作流唯一可判定的种类，未知值仍然拒绝；`file_changes` 才是「改哪些文件」的唯一声明位置。提示词两处（主流程与独立解释模板）同步写清这条语义。
+
 纯会话读取复用 §2.6 的 `session_tool_calls`、Gateway 与消息租约机制；新 AGENT 来源必须被明确校验，不能伪装成人设助手或拿到 RUN 写权限。Task/Run 执行继续使用 §2.3 的 `run_tool_calls` 和原图；逻辑主流程接续 Run 时引用其原身份和工具结果，不把同一副作用登记为两次独立调用。会话工具调用与 Run 调用各有确切来源，跨边界关联保存后才能恢复。
 
 主流程须具备持久的领取与推进责任、预算和停止出口：结果保存前后崩溃按原调用/动作核对，不用重新问模型再生成一次动作；取消传到当前实际执行端，UNKNOWN 阻止盲重放。只读结果回放包含真实来源、截断与失败，不把工具正文当指令；历史轮次缺失的元数据保持未知。所有实际模型调用沿原计量记录，不能用移除分类调用的设计直接宣称已降低成本。
@@ -277,15 +281,15 @@ B 档不排队：一条在途时再发被明确拒绝，文案不得出现「排
 
 ### 2.8 新会话的默认工作目录作用域（2026-10-18，已确认、待实施）
 
-产品规则归[工作台 §18.1.5](../frontend/workbench-design.md#1815-未选目录时的默认工作目录2026-10-18已确认未实施)，不变量归[契约 01 §5](../../contracts/01-facts-and-ownership.md#5-projectgoal-与-inbox)，取舍依据见[研究 §1.8](../research/p00-source-study.md#18-未选目录时的默认工作目录机制对照2026-10-18)，实施切片归[任务书](../../prompts/default-working-directory.md)，场景归[测试计划 §17.1.5](../testing/verification-plan.md#1715-未选目录时的默认工作目录2026-10-18已确认未实施)。本节只定义责任、持久化与事务形态；**尚未实施**，实施前不得按本节宣称系统已有默认目录。
+产品规则归[工作台 §18.1.5](../frontend/workbench-design.md#1815-未选目录时的默认工作目录2026-10-18已确认未实施)，不变量归[契约 01 §5](../../contracts/01-facts-and-ownership.md#5-projectgoal-与-inbox)，取舍依据见[研究 §1.8](../research/p00-source-study.md#18-未选目录时的默认工作目录机制对照2026-10-18)，实施切片归[任务书](../../prompts/default-working-directory.md)，场景归[测试计划 §17.1.5](../testing/verification-plan.md#1715-未选目录时的默认工作目录2026-10-18已确认未实施)。2026-10-19 接续：**后端配置、创建事务继承与来源投影已实施，前端设置入口、创建后作用域读回与来源标记已接入**；本节标题保留原方案日期与链接锚点。实现协议见 [HTTP §10.96](../api/http-command-contract.md#1096-workspace-默认工作目录2026-10-19-后端实现)与[数据库 §104](../database/physical-design-postgresql.md#104-0117-workspace-默认目录2026-10-19)，运行结果只归统一验收表。
 
 **要解决的问题**：`assist_sessions.working_resource_id` 为空时，普通讨论照常，但会话读取按 `AGENT_SESSION_HAS_NO_WORKING_DIRECTORY` 拒掉本次工具调用（§2.7.1、`assistant-readonly-round.ts` 的 `agentSessionReadOrigin()`）。用户提出的不是「让模型自己找个目录」，而是「用户可配置的默认落点」，因此本节把兜底责任从读取期挪到创建期，并要求该落点是一个已确认的持久事实。上游五家都保证 cwd 有值，共同落点是进程目录；Relay 不采纳，因为 API/Worker 的进程目录是安装目录而非用户内容。
 
 | 要回答的问题 | 本次协议 |
 |---|---|
-| 默认目录这条事实的 Owner 与形状 | Workspace 级持久配置：新增迁移 `0111`，单行/Workspace，字段为 `workspace_id`（主键）、`resource_id`、`revision`、`updated_at`。只由 `SetWorkspaceDefaultDirectory` / `ClearWorkspaceDefaultDirectory` 命令写入，属 Workspace 应用配置事实，与 `0020`/`0089` 的「会话内选择不是应用默认」分层互不覆盖：本表承载的正是用户确认过的应用默认，会话内的显式选择仍只属于该会话。**不进 localStorage**：`recentWorkingDirectories.ts` 已声明本机偏好不构成授权，而作用域是事实。 |
-| 默认目录如何取得资源身份 | 复用既有 `OpenWorkingDirectory`：规范化真实路径、必要时建立最小 Project 与受管资源，**READY 才允许登记为默认**。因此默认目录连带其 Project 与 `local_directory_access.write_tier`；AMBIGUOUS（同目录多项目）与 NOT_READY（重叠根等）不写默认值、如实显示服务端原因，不新建第二个写执行 Owner，也不换另一个根兜底。 |
-| 新会话如何继承 | 在 `CreateAssistSession` 的**同一短事务**内完成：请求未显式给出目录作用域、Workspace 配了默认目录、且该资源仍 ACTIVE 且其 Project 未归档时，写 `project_id`＝资源所属 Project、`working_resource_id`＝默认资源、作用域来源＝`WORKSPACE_DEFAULT`。任一条件不满足则按「没有默认目录」建会话，不报错、不猜测、不改用其他根。 |
+| 默认目录这条事实的 Owner 与形状 | Workspace 级持久配置：迁移 `0117`（原计划号 `0111` 已占用），单行/Workspace，字段为 `workspace_id`（主键）、可空 `resource_id`、`revision`、`created_at`、`updated_at`。清除保留行和修订，避免旧表单在清除后覆盖新选择。写入方是 `SetWorkspaceDefaultDirectory` / `ClearWorkspaceDefaultDirectory` 命令，以及 `OpenWorkingDirectory` 在**当前没有默认目录**时的首次登记（2026-10-19 用户要求「基础能力不该让开发者自己配置」；已有默认不覆盖）。属 Workspace 应用配置事实，与 `0020`/`0089` 的「会话内选择不是应用默认」分层互不覆盖。**不进 localStorage**：本机偏好不构成授权，而作用域是事实。 |
+| 默认目录如何取得资源身份 | 复用既有 `OpenWorkingDirectory`：规范化真实路径、必要时建立最小 Project 与受管资源，**READY 才允许登记为默认**；`READY` 且工作区尚无默认时在该命令的同一事务内直接登记（`ensureWorkspaceDefaultDirectory`），因此「打开过一次文件夹」就等于配好了默认目录。因此默认目录连带其 Project 与 `local_directory_access.write_tier`；AMBIGUOUS（同目录多项目）与 NOT_READY（重叠根等）不写默认值、如实显示服务端原因，不新建第二个写执行 Owner，也不换另一个根兜底。 |
+| 新会话如何继承 | 在 `CreateAssistSession` 的**同一短事务**内完成：仅普通 `AGENT` 且未指定 Project/Task 时继承，显式 Project/Task 仍沿用原绑定流程；Workspace 配了默认目录、该资源仍 ACTIVE、Project 未归档、真实路径可核对且无活动重叠根时，写 `project_id`＝资源所属 Project、`working_resource_id`＝默认资源、作用域来源＝`WORKSPACE_DEFAULT`。任一条件不满足则按「没有默认目录」建会话，不猜测、不改用其他根；ASSISTANT/LEARNING 不继承。 |
 | 为什么落在创建期而不是读取期 | 读取链不改：`agentSessionReadOrigin()` 仍只按会话行读回一次受管资源，缺目录仍以类型化原因拒本次读取，**不查默认配置、不加兜底**。默认作用域一旦随创建事务落定就是会话自身的事实，可追溯、可重放；读取期临时推断会让「这次读取用了哪个根」重新变成不可核对的隐式状态，违反 §2.7.1 与契约 01 §5。 |
 | 来源如何持久且可追溯 | `assist_sessions` 增可空列 `working_directory_source`（`USER_PICKED` / `WORKSPACE_DEFAULT`；无资源时为 NULL），与绑定同事务写入；会话上下文的 `working_directory` 投影带出该值，界面据此显示「默认目录（来自设置）」。用户在会话内显式换目录后改为 `USER_PICKED`。历史会话不回填，作用域不变。 |
 | 写权限与档位 | 默认目录不自带写能力：没有本目录档位事实时按**只读**兜底（2026-10-18 用户选定），有档位则沿用该目录自己的档位。写仍逐次经 Gateway 判定，非完全访问目录的删除仍单独确认；Git、CLI、浏览器、电脑与外部服务不因默认目录获得权限，ASSISTANT/LEARNING 身份边界不变。默认目录的配置入口不提供「自动批准」，也不提供「完全访问」（2026-10-18 档位接续后该边界不变，见工作台 §18.1.5）；「绑定是作用域不是准入」的既有原则不动。 |
@@ -293,6 +297,120 @@ B 档不排队：一条在途时再发被明确拒绝，文案不得出现「排
 | 失效与回落 | 默认资源停用、其 Project 归档或跨 Workspace 借用时，创建按「没有默认目录」进行并在投影中给出未生效原因；已在途与历史会话保持原绑定，不因重设默认目录恢复已撤销的权限。 |
 | API、迁移与兼容 | 只增可空列、只增表、只增命令与只读投影，属**非破坏**；`createSessionBody` 若新增可选目录入参，按既有「同 `command_id` 异载荷拒绝」处理。未配置默认目录时全部既有回执形状与拒绝语义逐字不变，`AGENT_SESSION_HAS_NO_WORKING_DIRECTORY` 的提示原文保留。 |
 | 验证落点 | 默认作用域的继承与回落用真实 PostgreSQL 集成测试；读取正确性沿 §2.7.1 既有工具账本与真实文件证据，不靠前端禁用断言，也不以合成 fixture 代替真实 PG。既有「缺目录拒读」「不猜目录」用例必须在未配置默认目录时原样通过。 |
+
+### 2.9 排队消息的「插话」进入上下文的方式（2026-10-19，已实施）
+
+普通 Agent 会话里一条回复正在生成时，用户再发一条消息仍按既有路径落库为 `PENDING`（排队等这一轮结束）。本节的「插话」是同一批消息的**第二种投递方式**：用户要求它并入**正在生成的那一轮**，而不是等这一轮结束后另起一轮。交互归[工作台 §39](../frontend/workbench-design.md#39-排队消息的插话手势2026-10-19-已实施)，命令归 [HTTP §10.102](../api/http-command-contract.md#10102-排队消息的插话2026-10-19-源码实现)，物理列归[数据库 §106](../database/physical-design-postgresql.md#106-0122-排队消息的插话意图2026-10-19-源码实现)。
+
+**上游依据（2026-10-19 核验 `.research/upstream/deepseek-harness`）**：
+
+- `packages/core/agent-loop/src/agent.ts:167-173`：`steer()` 把消息插进 `next-step` inbox，`followup()` 插进 `next-turn`——两者是**不同投递目标**，不是同一个队列的两种状态；
+- 同文件 `:359-364`：一步结束时若 `nextStep` 非空，**这一轮不结束**，再跑一步。插话因此不会「排队等下一轮」，也不会丢掉；
+- `packages/client/ui-conversation/src/client/skeleton/InputBar.tsx:155`：`canSteerQueue` = 输入框为空 + 正在运行 + 队列非空；空草稿的 Enter 是插话手势，队列每行的「插话」按钮是同一操作的单条版本；
+- `packages/api/session-controller/src/commands.ts:477-497`：`steer` 只在目标仍是 `next-turn` 且 agent 仍 `running` 时受理，否则返回 `session/steer-unavailable`。
+
+**本项目采用的映射**：
+
+| 问题 | 结论 |
+|---|---|
+| 意图如何持久 | `assist_messages.steer_requested`（0122，默认 false）。命令 `SteerAssistMessage` 只把排队行置位，不搬动消息、不新建请求行；与 `cancel_requested` 同一性质：先落意图，生成方在安全点观察。 |
+| 谁消费、何时消费 | 唯一消费方是普通 Agent 主流程 `runSessionReadonlyRounds()`：模型请求前、正文结算前以及每个工具派发前检查 `drainSteerRequests()`；只有仍有后续模型请求机会时消费。它把命中的排队行在同一句里收口为 `CANCELLED` + `error_code='STEERED'`，并带回各自紧邻的用户原文。 |
+| 进入上下文的什么位置 | `assistMessages()` 保留真实顺序：`system → 历史 → 工具结果 → 新插话 → 根据该插话发出的工具及结果 → 后续插话`。尚未引发工具的插话放在末尾，引发工具后移入对应 `ModelToolTurn.steersBefore`，后续请求不再把旧插话移动到所有工具之后。原文逐字保留为用户消息，不增加资料前缀、不丢弃已执行结果。 |
+| 为什么这一轮会多跑一步 | 与上游 `:359-364` 同语义：模型已给出正文、但这一步之后又有插话到达时，本轮不结算，带着插话再跑一轮；最终只保留最后一轮的正文。这条路径不流式预览（`assist-runner.ts` 既有注释），因此被丢弃的中间正文用户从未看到，不会出现「答案跳变」。 |
+| 预算与收尾 | 只在**还有轮次预算**时消费（`shouldWrapUpReadonlyRound()` 为假）。收尾轮不再消费插话：接了却没有下一次请求，等于把用户消息取消掉却永远不回答它。 |
+| 排队行为什么不再自己回复 | 消费即收口为 `CANCELLED/STEERED`；这一行不出现在消息列表与历史里（`listMessages` / `history()` 都排除），用户原文仍作为真实 USER 消息留在转录区。 |
+| 迟到与竞争 | 插话意图已落库、那一轮恰好结算：意图留在行上，这一行随后按普通排队被领取（`claimNextPendingMessage` 在同一句里清零 `steer_requested`），消息照常得到自己的回复——不丢、不重复。生成中的那一轮自己不能插话（`RUNNING` 拒绝）。 |
+| 带图片的排队消息 | 不插话：插话通道只送用户原文，图片字节不在其中；命令按类型化原因拒绝，界面也不给这个入口，避免「图片被悄悄丢掉」。 |
+| 与取消的关系 | 两者都只作用于排队行，但语义相反：取消让这一行结束且不再回答；插话让它在当前这一轮里被回答。取消仍优先：`cancel_requested` 的行不再被插话消费。 |
+| 只在哪一档成立 | 仅普通 `AGENT` 会话。人设档与学习档的在途栅栏直接拒绝再次发送（§2.6.4「B 档不排队」），因此没有插话对象；单次生成路径（无工具、非 DISCUSS、Skill/提案意图）没有「步」的概念，排队消息照旧另起一轮。 |
+
+**不宣称**：插话不保证一定并入——它与「这一轮何时结算」竞争，落败时消息按普通排队被回答（用户可见原文仍在，回复顺序不变）。真实 Windows 窗口、原生 IME 与真实 Provider 下的手感未验。
+
+#### 连续插话与方向变化（2026-10-20，已授权、源码实现）
+
+用户指出连续插话可能属于同一目标，也可能后文已经撤回前文。本轮沿用既有队列与消费 Owner，不新增意图分类模型、第二套任务状态或数据库字段。语义规则由 `ASSIST_STEERING_RULES`（`USER_STEERING_V1`）在发生插话后追加到本轮 system；模型结合全部原话核对当前目标、仍有效约束、被替代要求及已执行结果。这是对话理解，不是已确认的结构化业务事实，也不保证任意 Provider 都正确理解。
+
+| 输入关系 | 已确认处理规则 |
+|---|---|
+| 相关补充 | 累积为同一目标，保留原要求；如登录页、手机号、验证码 |
+| 局部修正 | 后文只替代冲突部分，其余继续有效；如红色改绿色 |
+| 做法或阶段变化 | 按「先方案／不要修改」调整下一步，停止旧修改计划 |
+| 明确替换目标 | 按「原目标先不做，改做另一件」停止旧方向后续动作；不能机械执行已被后文撤回的要求 |
+| 临时提问或进度询问 | 回答问题，不自行取消原目标、不强行合并无关问题 |
+| 关系不清且影响执行 | 暂停受影响动作并简短澄清；不能只因最后一句较新而丢弃其他有效要求 |
+
+**工具边界由代码保证**：工具派发前收到新插话，本批未执行的所有工具返回 `NOT_EXECUTED / NEW_USER_INPUT`，不创建工具账本或 Gateway 动作；保留完整 tool-call/result 配对，再由下一次模型请求决定新动作。已完成的结果保留；执行中的动作按既有结算机制处理，不能宣称中断或回滚。进度询问也会先让未派发批次回模型判断，但不据此取消业务目标。不增加轮次预算，预算最后一次请求只能收尾；无后续请求机会的插话留在队列。
+
+**与正式 Task/Run 的边界（覆盖范围）**：插话的停止与转向只作用于**本轮会话工具循环里尚未执行的动作**。已经登记的执行候选与正在执行的正式 Run 不受聊天改向影响，不会因插话自动停止或改向——停止、调整与重新发起只能走项目既有的任务与运行控制入口（领域 Owner）。`USER_STEERING_V1` 明确禁止模型声称「已停止该任务」「已按新方向调整运行」；第二条执行候选与活动 Run 的冲突由既有领域拒绝（AM-06 类型化冲突）兜底。正式 Run 执行期间没有 `RUNNING` 的会话回复，插话手势本身也不出现；只有在新一轮生成与活动 Run 并存时插话才可用，那时它改的是**这一轮生成**的方向。
+
+正式 Task、Run、验收和权限仍由原领域入口拥有；聊天换方向不直接改冻结契约，也不复用旧批准执行新动作。多个输入按消费时已到达的集合处理，不能预知用户尚未发出的后续消息。
+
+本轮未增加派生目标快照或 Worker 重启后的工具/插话时序持久化，不据此宣称崩溃窗口恢复已闭合。真实 Provider 的补充、修正、换目标、临时提问和歧义澄清质量，以及 Windows/安装态和独立验收，须另行验证。
+
+**失败与恢复窗口（2026-10-20 独立检查，真实 PG 已验）**：被消费的插话不靠内存数组单独承担恢复——失败、取消与预算耗尽后的恢复事实是数据库里的既有行，不需要新增持久化字段：
+
+| 窗口 | 实际行为 |
+|---|---|
+| 消费后模型失败（含预算耗尽） | 排队占位行保持收口（`CANCELLED/STEERED`），不复活、不重复回答；失败的中间正文不落库；USER 原文行仍是 `COMPLETED`。用户重发新消息时，`assistMemory.history` 与 `listCompletedHistory` 都排除 STEERED 占位行、包含 USER 原文，恢复轮上下文能同时看到原要求与插话原文。 |
+| 消费后取消 | 取消在下一轮请求前生效，本轮按 `CANCELLED` 收口、零工具；已消费的插话行不因取消复活，USER 原文同样保留。 |
+| Worker 崩溃 | `failExpiredLeases` 把失联的 RUNNING 收口为 `FAILED/LEASE_LOST`，**没有**同一条消息自动重新生成的路径；此后恢复与上一行同构（靠新消息历史）。内存里未消费的 `steers` 数组随进程消失，但不存在"消费成功却静默丢失"的窗口：消费即已在数据库收口，未消费的行本来就还在队列。 |
+| 关闭记忆的会话（`remember=false`） | 历史只保留最后一条 USER（会话记忆的既有语义），被消费插话的原文**不会**进入恢复轮上下文。这是用户显式关闭记忆的既定代价，不是插话机制的缺陷；如实声明。 |
+
+**真实 Provider 检查（2026-10-20）**：`apps/api/test/integration/steer-provider.integration.test.ts` 用真实模型逐场景验证六类语义（相关补充、局部修正、改变阶段、明确替换目标、临时提问、关系不清）。默认整体跳过，只有显式 `RELAY_STEER_PROVIDER_CHECK=1` 且 Provider 配置可用时才跑（避免全量回归烧真实模型）。断言分两级：插话原文进入请求、被停止工具零账本/Gateway/磁盘改动、排队行收口是**硬断言**（与模型无关，失败即缺陷）；回答措辞与语义选择只记录供复核。场景 C 在 FULL 档位下用「先别改，只给方案」验证插话到达后写动作确实停止派发、磁盘逐字节不变。
+
+### 2.10 日常工具工作与正式交付分层（2026-10-20 实施）
+
+用户反馈覆盖文件工具、浏览器/电脑操作及任务/审批/验收步骤。调整遵循 [ADR-031](../decisions/ADR-031-session-direct-write.md) 的接续决定：日常文件工作不必制造正式任务；正式验收不因聊天回复而完成。
+
+| 工作 | 当前推进路径 | 人工边界 |
+|---|---|---|
+| 查看文件、目录与已连接工具的只读状态 | 同一消息连续工具循环 | 无额外“开始读取”确认 |
+| AUTO/FULL 目录的普通文件修改，包括明确 MODIFY 方法 | 同一循环直接写，保留基线与动作账本 | 不创建 Task/Run，不要求正式任务验收 |
+| ASK 写入、AUTO 删除 | 原消息候选 → 已有自动启动 → Run/Gateway | 在确切动作处审批；不要求重述目标或手工建任务 |
+| 修改后的检查 | 仅剩余检查进入 Run，已成功修改不再重复执行 | CLI 允许清单与冻结程序摘要仍有效 |
+| 浏览器、电脑操作 | 候选 `interaction=BROWSER|COMPUTER` → 原 Run 工具循环 | 仅解析本项目 ACTIVE 连接；不因工具需求自动新增范围授权；提交与外部副作用仍按原审批 |
+| 正式任务交付 | Artifact → Verification / Human Acceptance → Business Commit | 绑定确切版本；普通工具成功不等于业务完成 |
+
+`planToolLoop` 在登记 Task 前核对所需连接；缺工具先报告具体能力缺口，不留下无法委托的任务。浏览器/电脑连接不需要文件根，文件/Git/CLI 的目录匹配规则不变。`interaction` 只传达本次需要哪组工具，不能成为新的执行权或批准来源。
+
+限制：浏览器/电脑目前仍要求会话有项目与受管目录，尚未独立出无目录操作会话；会话自身没有异步动作审批恢复。自定义策略已经生成的 WAITING_APPROVAL 与 UNKNOWN 都按原动作核对，禁止用新候选绕过。真实模型选择质量与 Windows 操作效果需单独取证。
+
+#### 2.10.1 推进 Owner 收归服务端与能力事实说明（2026-10-20 第二轮）
+
+上一轮把「文件直写」留在了会话里，但「候选 → Task/Run」这一步仍由**前端 effect** 触发。
+后果是可预期的：关掉页面、刷新错过时机、或请求由另一台设备发起时，一条已经明确授权、
+已经落库的请求会停在 `READY` 等一次没有信息量的点击；同时前端与后台各自持有推进责任。
+
+- **唯一推进 Owner 是 Worker**：`runConversationExecutionAutoStartTick()` 每个 tick 扫
+  「决定 PREPARE、候选 READY、还没有 Run、阶段在 READY/TASK_PREPARED」的原请求，沿
+  请求行上**已固定的三个阶段命令身份**调用既有 `applyConversationExecution()`。
+  没有新命令、新表或第二个推进状态；重复与迟到扫描只重放原回执。
+- **前端不再推进**：本设备「计划执行方式」偏好（`relay.workbench.planExecution`）撤除。
+  它是同一件事的第二次确认，也是前端必须持有推进责任的唯一理由；目录写档位与逐动作
+  审批已经表达授权。界面只保留：显示阶段、失败后显式「继续原请求」。
+- **失败必须带原因并退出扫描**：推进失败把 `DomainError.detail` 写回原请求的
+  `clarification.questions`，阶段记 `FAILED`，候选与阶段命令身份全部保留。因此
+  「缺哪个连接、哪个目录、会话已有在途 Run」在关掉页面再回来时仍然可读，补齐前置条件
+  后仍可沿原 `request_id` 接续——而不是让用户重述目标、或在后台把同一失败刷成噪声。
+- **`auto_start` 变成阶段感知的投影**：`FAILED` / `DELEGATED` 不再为真。前端与服务端
+  扫描共用这一个判定，两处不会对同一行给出不同结论。
+- **能力缺口由服务端事实块说明**：普通 Agent 的 `DISCUSS` 轮次在 system 末尾追加一段
+  `assist-capability-notice`（有无目录、目录写档位、本轮真实可用工具、缺哪几族能力）。
+  它让模型把「无法执行」说成具体缺项，而不是「没有被赋予访问能力」或「请补充任务目标
+  与验收标准」。这段文字是**事实说明，不是授权**：词表、档位、连接与 Gateway 准入
+  一条都没有改变；Skill 轮次的严格输出协议不并入。
+
+仍然未闭合，且不能由本节推定：
+
+- **浏览器/电脑仍要求项目与受管目录**。`logical_operations` 的来源 CHECK 与
+  `conversation_execution_requests.resource_id` 都是非空，`prepareGatewayAction()` 除
+  `USER_IMPORT`/`WEB_FETCH` 外一律要求受管资源行。要做无目录的操作会话，最小改动是给
+  浏览器/电脑动作引入可空的资源身份并逐条重述这三处 CHECK——这是一次库层身份变更，
+  不是给一条路径加分支；在没有清楚归属前不用默认目录或别人的资源顶替。
+- **只要产生 Run，就仍是正式任务**：检查命令（`check`）与 ASK 写都走 Task/Run/验收。
+  「普通检查不卡在人工验收」需要区分「内部执行载体」与「正式交付」两种 Run，属于下一
+  项决定，本轮未做。
+- 真实 Provider 的选择质量、真实浏览器/桌面操作、Windows/WebView2 与安装态另验。
 
 ## 3. Context Builder 管道
 
@@ -369,7 +487,7 @@ Context 历史重放只能证明“输入可重建”，不保证随机模型产
 
 ## 8. 会话压缩与消息文件恢复
 
-2026-10-11，产品目标与控制边界已确认；本节新增压缩、协议保真和消息发送前文件检查点未实施、未验收。压缩检查点、文件检查点和既有 LangGraph Run 检查点分别保存各自恢复信息，不混为业务真相或“回滚整个项目”。取舍见 [ADR-019](../decisions/ADR-019-builtin-methods-and-conversation-checkpoints.md)。
+2026-10-11，产品目标与控制边界已确认。2026-10-19 接续普通 AGENT 的持久短期摘要与长期确认事实召回，工程边界见 [ADR-028](../decisions/ADR-028-memory-layers.md)、协议见 [HTTP §10.99](../api/http-command-contract.md#1099-长短期记忆接口2026-10-19)。本次不实现 Run 中途压缩、Provider 原生压缩、思考协议完整持久恢复或消息发送前文件恢复；文件检查点与 LangGraph Run 检查点仍各归原 Owner。阶段和实际成绩分别归 CODEX_NEXT_STEP 与统一验收表。
 
 ### 8.1 模型容量、工作预算与压缩时机
 
@@ -401,7 +519,7 @@ Codex 机制参考来自本地只读源码快照 `e7ea5f4a8658ebe49e879be933effe
 
 ### 8.4 当前缺口与冻结条件
 
-本轮只读调查：当前 ModelPort 未提供模型窗口/压缩能力画像；输入预算使用 UTF-8 字节/3 粗估。工具轮次端口及持久还原未形成 `reasoning_content` 等必要 Provider 字段的完整链路；Assist 最近消息截取不等于压缩检查点。以上是代码缺口，不是一次真实 DeepSeek 调用失败的证据。
+2026-10-11 调查时 Assist 仅截最近20条；2026-10-19 普通 AGENT 改为已提交摘要＋后续已结算原文，原记录保留，丢失/失效检查点回到合法原文；大于有界输入时明确失败。手动整理和自动触发共用持久请求、租约/CAS、既有计量和冻结工作模型；失败不发布新窗口。参数与来源撤销规则归 HTTP §10.99，不把固定字节阈值说成模型物理窗口。ModelPort 仍无完整窗口/压缩能力画像，思考协议的完整持久还原与真实 DeepSeek 缓存/摘要质量仍未验证。
 
 当前模型仍来自[进程配置](../../apps/api/src/workflow/model-port-config.ts)，[ExecutionContract](../../apps/api/src/workflow/execution-contract.ts) 未保存 Provider/模型配置快照。`/model` 的会话覆盖与活动 Run 模型冻结是新增目标，不是现有保证；实施须补齐冻结与调用绑定，并核定旧 Run 缺少快照时的兼容/继续策略，不能伪造其“原冻结模型”或随会话设置静默切换。
 
@@ -446,3 +564,51 @@ Codex 机制参考来自本地只读源码快照 `e7ea5f4a8658ebe49e879be933effe
 - 不直接启用服务商宽泛 `models` fallback 代替该协议：官方 fallback 会在多类错误后切模型，且不自动提供 Relay 每次失败尝试的持久身份与控制边界。候选已冻结也不代表运行时价格、凭据或权限永远有效。实际协议/表/migration 随后实施时归原 API/数据库文档，不在本轮预造。
 
 2026-10-17 官方协议核对纠偏：当前 [OpenAPI `PublicPricing`](https://openrouter.ai/openapi.json) 只要求 `prompt`/`completion`，`request` 为可选字段。免费判定保留原始缺项，不把缺失请求费写成零，也不因该可选字段缺失而排除明确零输入/输出项；声明的请求费及其他适用收费项仍须合法零，未知或非法不放行。实际请求继续附请求费在内的零价格上限。该变化修正旧夹具对所有费用字段必需的假设，不能推广为缺少必需文本价格也默认免费。
+
+## 9. 聊天目标与计划模式的运行边界
+
+2026-10-20，产品行为已确认；工作区已接入 `0127` 迁移、应用用例、Worker 推进和会话 UI。以下区分源码事实与仍需验证的恢复出口，不将基础接线视为整体交付。产品定义归[总纲 §0.15](../../Personal_Workflow_OS_Master_Spec.md#015-聊天目标与计划模式)，实际成绩及未闭合项只归统一功能验收表的「聊天 `/goal` 与 `/plan` 完整实施」行。
+
+- 会话/消息模式、计划版本、活动目标、轮次结算与显式扩额账本已持久化；`assist-plans.ts` 保存计划版本，`assist-goals.ts` 处理目标命令，`goal-advance.ts` 是目标轮次推进 Owner，由 Worker tick 调用。目标轮次投递回既有会话生成队列，不建立第二个模型执行框架。正式 Task/Run、权限、验证、人工判断和业务完成仍归原 Owner。
+- 2026-10-21 修正推进扫描的候选范围（DEV-0094）：控制落定只查 `PAUSING/CANCELLING`（有在途轮次的取消排到无在途目标之后），轮次结算只查「最新一条已结算消息尚无 `assist_goal_rounds` 行」的非终态目标。此前两个阶段共用「全部未终结目标按 `updated_at` 取 50 条」，历史 PAUSED/WAITING_USER 行会长期占满窗口，使较新的暂停/取消与待记账轮次永远轮不到；暂停目标上未记账的轮次也会因此丢失。每处理一条即离开候选集，单 tick 仍然有界；不提高页大小、不改无关目标时间戳，也没有新增推进 Owner。CAS、消息幂等、UNKNOWN 与暂停/取消优先语义不变。
+- 2026-10-21 修正取消目标时排队轮次的收口语义（DEV-0102）：`markMessageCancelRequested` 与既有 `assist-repository.setCancelRequested` 对齐——PENDING 轮次还没有调用模型，收到取消意图即直接结算为 `CANCELLED`；RUNNING 仍只记录停止意图，由生成方结算。此前 PENDING 行只被置 `cancel_requested=true`，仍留在领取队列中，生成 Worker 领走后按失权拒绝；目标轮次分支的返回未 await，拒绝会逃出 `runAssistGenerationTick` 并终止 Worker。目标状态仍只由推进器在轮次记账后置 `CANCELLED`；written→UNKNOWN、外部效果不撤销、不自动重放语义不变。
+- `/plan` 的只读约束须在工具准入落实，不能只写提示词。进入 `/goal` 不增加权限；执行必须沿受控入口。选定计划绑定版本，但计划接受本身不等于所有未来新增行动已获授权。
+- 服务端承担关闭页面后的推进；重启、继续和重复请求先读取原持久状态，核对执行权、现场及在途效果，再沿原身份接续。租约过期不证明旧进程停止，UNKNOWN 不得盲重试或新建动作绕过。暂停、取消、切换先持久保存控制意图并安全处理在途行动。
+- 产品不设额外的总时间、总轮次或总调用上限，不代表取消单次请求限制、权限或异常保护。当前目标推进保留共享模型预算闸门与显式扩额账本，不自动绕过服务商限额；未知额度不记为零或无限。额度耗尽保存现场，恢复后须用户点击继续；真实阻塞及无进展不能用无限重试掩盖。
+- 新消息须区分补充、进度询问、控制和冲突；更新不能静默改变冻结契约，迟到结果不能覆盖暂停或新版本。当前源码有暂停/取消的中间态、轮次幂等结算及完成前等待人工确认；不据此推定真实 Provider 的插话理解、进程重启恢复或全部竞态已验收。具体命令归 [HTTP §10.108](../api/http-command-contract.md#10108-聊天目标与计划模式2026-10-20-源码实现)，存储归[数据库 §109](../database/physical-design-postgresql.md#109-0127-聊天目标与计划模式2026-10-20-源码实现)，测试范围归测试计划 §41。
+
+## 10. 七种 Agent 模式的实现映射
+
+2026-10-20 源码核对。产品用途和能力边界唯一归[总纲 §0.16](../../Personal_Workflow_OS_Master_Spec.md#016-七种-agent-执行模式与产品能力边界)；本节只维护实现责任与定位入口，不重复运行成绩。当前组合为普通会话工具循环与正式 Run 图编排，计划/目标在应用层复用原生成与工具链。
+
+| 模式 | 当前实现入口 | 工程边界 |
+|---|---|---|
+| ReAct | [会话循环](../../apps/api/src/application/assistant-readonly-round.ts)、[Run 步骤](../../apps/api/src/application/run-steps.ts)、[工具轮次与历史](../../apps/api/src/application/tool-loop.ts) | 模型请求与工具结果交替，准入、预算和持久化由应用处理；`assistant-readonly-round.ts` 的历史文件名不代表普通 Agent 当前只有只读能力 |
+| Plan and Execute | [计划版本](../../apps/api/src/application/assist-plans.ts)、[目标命令](../../apps/api/src/application/assist-goals.ts)、[目标推进](../../apps/api/src/application/goal-advance.ts)、[Worker](../../apps/api/src/worker/main.ts) | 计划绑定确切版本，Worker 组织目标轮次；进度步骤不等同于每步已有独立 claim、产物验证和恢复协议 |
+| Reflexion | [Run 反馈与修正上下文](../../apps/api/src/application/run-steps.ts)、[工具历史回传](../../apps/api/src/application/tool-loop.ts) | 当前是工具/检查反馈驱动的局部纠错；未建立独立反思器与跨任务经验应用闭环。`learning-round.ts` 面向用户学习，不能作 Agent 自学习的实现依据 |
+| Workflow | [运行图](../../apps/api/src/worker/run-graph.ts) | 使用 LangGraph `StateGraph`、审批 `interrupt`/恢复与 PostgreSQL checkpoint；checkpoint 不代替业务状态和外部效果核对 |
+| Multi Agent | [ADR-017](../decisions/ADR-017-bounded-multi-agent-conversations.md)、本文件 §2.5 | 有界委派链（migration `0128` 与 `application/subagent-delegation.ts`）已进入生产会话链，但尚无一条真实跑完「主→子→汇合」的产品链证据；不得把普通 `DelegateTask` 业务命令解释为子 Agent 派发 |
+| Agent and Tool | [工具准入与派发](../../apps/api/src/application/assistant-readonly-round.ts)、[Gateway 应用入口](../../apps/api/src/application/gateway-actions.ts) | 单次调用复用原工具路径，无单独运行引擎；工具可用性按真实连接、当前权限和能力重算 |
+| Code as Action | [文件变更工具](../../apps/api/src/application/tool-loop.ts)、[CLI 适配器](../../apps/api/src/cli-worker/cli-adapter.ts)、[适配器边界](tool-adapters.md) | 受控程序与结构化参数，`shell:false`；没有通用代码解释器或 OS 沙箱。CLI 结果丢失时按原动作核对，不能盲重放生成代码 |
+
+上述映射不引入新 Runtime、业务状态机、API 或 migration，也不改变现有权限和完成契约。新增架构能力仍需单独设计与验证，不以术语映射作为开发授权。
+
+### 10.1 现状分级与证据缺口（2026-10-21 差距核对）
+
+分级口径：**A** 有代码且已接入生产路径；**B** 有代码但未接线或缺运行证据；**C** 产品规则已确认、尚未实现；**D** 产品行为尚未定义。分级只描述实现与证据状态，**不是验收成绩**——成绩唯一归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)；C 与 D 未经产品确认不得当作开发授权。
+
+| 模式 | 分级 | 已具备的证据类 | 还缺的证据类或未闭合接线 | 待产品决定（均为推荐/待确认，未实施） |
+|---|---|---|---|---|
+| ReAct | 会话链 **A**；正式 Run 内工具链 **B** | 真实 PG 的多轮工具循环与结果回传落在生产 tick，真实模型端到端通过 | 正式 Run 内的 Provider 审批往返、Windows 出口 | 无新增。既有未决项（会话发起的 Run 是否携带「非交付」标记、浏览器与电脑动作的资源身份）归 [CODEX_NEXT_STEP](../../CODEX_NEXT_STEP.md) |
+| Agent and Tool | **A** / **B** | 工具可用性、参数与权限全部由服务端按真实现场重算；单步即循环的短路 | 「简单调用不无故增加规划与确认步骤」这一产品验收维度没有基准 | **需决定**：`check` 与 ASK 写都建 Task 并要求人工验收是否维持。维持则简单动作必然带正式交付步骤，与总纲 §0.16 的承诺冲突；不维持则需给会话发起的 Run 加「非交付」标记 |
+| Workflow | **A** / **B** | LangGraph 图、审批 `interrupt` 与身份恢复、epoch 复核、UNKNOWN 核对全部生产接线，另有指定模型只读独立复核 | 总出口：Windows、浏览器与电脑资源的身份 | 无新增 |
+| Plan and Execute | **A** / **B** / 局部 **C** | 服务端双闸门只读、计划版本不可变、执行绑定确切版本、Worker 推进与类型化停止原因；真实 PG 集成通过（含 2026-10-21 计划内容读写形状修复） | 真实 Provider 的计划质量、重启后接续、独立验收 | 额度含义、识别来源与未知处理（总纲 §0.15 明写待工程核定，现按冻结快照、未知不记为零或无限）；无进展阈值（现为硬编码 3）与扩额幅度是否改走产品口径；计划卡步骤是否升级为具备独立执行与恢复的任务节点 |
+| Reflexion（当前任务内） | **A** | 检查失败→失败事实入库并回传→模型定位→原权限内修改→复检→据实结算，两个执行面都通，含真实 Provider 与只读独立复核 | — | — |
+| Reflexion（跨任务） | **D** | 无代码入口 | 「提炼什么经验、谁确认、何时召回、如何处理失效、如何衡量收益」尚未定义。`learning-round.ts` 面向用户学习，不能当 Agent 自学习的实现依据 | 只交最小方案。未确认前不新增反思记忆库、不自动修改 Skill、规则或用户偏好 |
+| Multi Agent | **B** ＋ 多项 **C** | 有界委派链已在生产会话链内（工具闸门、子执行只读、最多两子且仅一层、有界重试、epoch CAS、tick 恢复核对） | **没有一条真实跑完「主委派调查→主实施→委派独立审查→汇总交付」的产品链**：集成测试未调用 `createDelegation`／`runDelegationAttemptFlow`，`listSessionDelegations` 无生产调用方；开发环境由外部工具派发的子代理不算本产品证据 | C：主子共享预算并为主汇总预留额度、必要独立审查作为完成前置、子→主补充同步及真实来源保留、角色配置版本化 |
+| Code as Action（受控基础） | **A** / **B** | 文件修改、`run_check` 冻结标识、`shell:false` 子进程、动作账本与 UNKNOWN 核对生产接线 | 结果丢失的**真实进程级**故障注入（现有注入点是 test-only，需确认覆盖 `CLI_RUN` 而不只 `FILE_WRITE`）、真实 Windows 子进程的窗口与取消行为 | — |
+| Code as Action（通用解释器） | **D** | 无代码入口 | 产品行为与安全边界均未定义 | 推荐复用 `cli-adapter` 与 Gateway `CLI_RUN` 账本，不另立第二套外部效果 Owner；任何文案不得把「当前工作目录＋参数白名单＋子进程」写成 OS 沙箱 |
+
+关系结论（只记录事实，不重做实现）：七种模式不是七套引擎。当前只有两条真实执行体——会话工具循环（`assistant-readonly-round.ts`，由 `assist-runner.ts` 在生产 tick 内驱动）与正式 Run 图（`run-graph.ts` 加 `run-steps.ts`）。Agent and Tool 是会话循环的一次调用，Plan and Execute 是同一生成链的信封分支加一个推进 Owner，Reflexion 是两条链共享的失败回传，Multi Agent 是会话循环内一个额外的应用内工具，Code as Action 是同一批受控工具与 Gateway 动作。这与总纲 §0.16「可组合，不代表七套独立引擎」一致。
+
+跨模式共同缺的证据类只有五样：真实 Provider 下的模型选择与措辞质量、真实浏览器、真实 Windows/WebView2 窗口、安装态、独立验收。已具备的静态检查、fixture、真实 PG 集成与真实 HTTP 证据不能替代其中任何一项。

@@ -6,6 +6,7 @@ import { type ReviewNavigationState, reviewReasonText } from "./ReviewDecisionPa
 import { runLabels, stepLabels, stepStatusLabels } from "./RunControlPanel";
 import { executorLabels, taskStatusLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
+import { useDelayedVisible } from "../lib/useDelayedVisible";
 import "./TaskViewDashboard.css";
 
 export interface TaskViewDashboardProps {
@@ -56,6 +57,8 @@ export default function TaskViewDashboard({
   }, [client, task.id, task.revision, artifactReload]);
   const currentArtifactRead = artifactRead.taskId === task.id && artifactRead.revision === task.revision
     ? artifactRead : { taskId: task.id, revision: task.revision, status: "loading" as const };
+  /** 换任务时成果读取通常几十毫秒完成，加载提示延迟出现，避免「闪一下」（见 lib/useDelayedVisible）。 */
+  const artifactsLoadingVisible = useDelayedVisible(currentArtifactRead.status === "loading");
   const artifacts = currentArtifactRead.status === "ready" ? currentArtifactRead.value : null;
 
   const totalSteps = run?.steps.length ?? 0;
@@ -397,7 +400,7 @@ export default function TaskViewDashboard({
         {subtab === "files" && (
           <div>
             {currentArtifactRead.status === "loading" ? (
-              <p role="status" data-testid="collab-artifacts-loading">正在读取已保存成果…</p>
+              artifactsLoadingVisible ? <p role="status" data-testid="collab-artifacts-loading">正在读取已保存成果…</p> : null
             ) : currentArtifactRead.status === "error" ? (
               <div role="alert" data-testid="collab-artifacts-error">
                 <p>成果读取失败：{currentArtifactRead.error}</p>

@@ -1,20 +1,29 @@
 import { randomUUID } from 'node:crypto';
 
 import type { DbExecutor } from '../infrastructure/database.js';
-import type { AssistSessionRow, ConversationMode } from '../infrastructure/database-schema.js';
+import type { AssistSessionRow, ChatMode, ConversationMode } from '../infrastructure/database-schema.js';
 import { computePayloadHash } from '../receipt/payload-hash.js';
 import { toDecimalString } from '../shared/decimal.js';
 import { httpCommandScopeKey } from './actor.js';
 import { requireActiveAssistantProfile } from './assistant-profile-commands.js';
 import { resolveChatCommand } from './chat-commands.js';
+import { setChatMode } from './chat-mode.js';
 import { resolveExistingReceipt, runIdempotentCommand, type CommandOutcome } from './command.js';
 import { withdrawStateMaintenance } from './conversation-state.js';
 import { DomainError, invalidTransition, resourceNotFound, validationFailed } from './domain-error.js';
 import { lockWritableProjectInWorkspace } from './guards.js';
 import { selectSessionModel } from './select-session-model.js';
 import { createRepositories, type Repositories } from './unit-of-work.js';
+import type { ManagedContentStore } from '../storage/managed-content-store.js';
+import { requestMemoryCompaction } from './assist-memory.js';
 
 export type ExecuteChatCommandResult = {
+  readonly kind: 'MEMORY_COMPACTION';
+  readonly system: 'compact';
+  readonly session_id: string;
+  readonly request_id: string;
+  readonly status: 'PENDING';
+} | {
   readonly kind: 'NEW_SESSION';
   readonly system: 'clear' | 'new';
   readonly source_session_id: string;
@@ -33,6 +42,19 @@ export type ExecuteChatCommandResult = {
   readonly status: string;
   readonly revision: string;
   readonly undo_command_id: string;
+} | {
+  /**
+   * 0127：`/plan`、`/goal` 的**不带正文**形式——只切模式，不发消息。
+   *
+   * 带正文的形式不走这个入口：模式随消息进同一命令（`chat_mode` + 正文），
+   * 由消息 Owner 在同一事务里切模式并受理。这个分支因此只服务「命令菜单选中后
+   * 直接执行」与 API 直连两种没有正文的场景。
+   */
+  readonly kind: 'CHAT_MODE';
+  readonly system: 'plan' | 'goal';
+  readonly session_id: string;
+  readonly chat_mode: ChatMode;
+  readonly goal_stopping: boolean;
 } | {
   /** /model 落到会话模型选择 Owner 的当前结果（沿用其幂等回执，不重复记账）。 */
   readonly kind: 'MODEL_SELECTION';
@@ -69,10 +91,16 @@ export async function executeChatCommand(db: DbExecutor, input: {
   readonly sessionId: string;
   readonly commandId: string;
   readonly text: string;
-}): Promise<CommandOutcome<ExecuteChatCommandResult>> {
+}, storage?: ManagedContentStore): Promise<CommandOutcome<ExecuteChatCommandResult>> {
   const resolution = resolveChatCommand(input.text);
   if (resolution.kind !== 'SYSTEM') {
-    throw validationFailed([{ field: 'text', message: '此入口只执行 /clear、/new、/undo 或 /model。' }]);
+    throw validationFailed([{ field: 'text',
+      message: '此入口只执行 /clear、/new、/undo、/model 或不带正文的 /plan、/goal。' }]);
+  }
+  if (resolution.system === 'compact' && storage !== undefined) {
+    const outcome = await requestMemoryCompaction(db, input, storage);
+    return { ...outcome, result: { kind: 'MEMORY_COMPACTION', system: 'compact',
+      session_id: String(outcome.result.session_id), request_id: String(outcome.result.request_id), status: 'PENDING' } };
   }
   // /model 交给会话模型选择的独占 Owner：自带幂等回执与 CAS，不在此处再套一层命令事务。
   if (resolution.system === 'model') {
@@ -80,6 +108,28 @@ export async function executeChatCommand(db: DbExecutor, input: {
       workspaceId: input.workspaceId, sessionId: input.sessionId,
       commandId: input.commandId, requestedModel: resolution.argument ?? '' });
     return { ...outcome, result: { kind: 'MODEL_SELECTION', ...outcome.result } };
+  }
+  /*
+   * 0127：`/plan`、`/goal`。
+   *
+   * 带正文的形式在这里如实拒绝，并说清楚正确的发法：它是「命令 + 正文」，模式要随消息
+   * 一起进同一命令（`chat_mode` + 正文），由消息 Owner 在同一事务里生效。把这个入口
+   * 扩成「又能切模式又能发消息」会让同一件事有两条写入路径，违反单一 Owner。
+   * 不带正文的形式只切模式，交给模式切换 Owner（自带 CAS 与活动目标安全停止）。
+   */
+  if (resolution.system === 'plan' || resolution.system === 'goal') {
+    const mode = resolution.system === 'plan' ? 'PLAN' : 'GOAL';
+    if (resolution.argument !== null && resolution.argument !== '') {
+      throw validationFailed([{ field: 'text',
+        message: `/${resolution.system} 带正文时请直接发送这条消息：模式会随消息一起生效，`
+          + '不需要先单独执行命令。' }]);
+    }
+    const outcome = await setChatMode(db, {
+      workspaceId: input.workspaceId, sessionId: input.sessionId,
+      commandId: input.commandId, mode });
+    return { ...outcome, result: { kind: 'CHAT_MODE', system: resolution.system,
+      session_id: input.sessionId, chat_mode: mode,
+      goal_stopping: outcome.result.goal_stopping } };
   }
   if (resolution.system !== 'clear' && resolution.system !== 'new' && resolution.system !== 'undo') {
     throw new DomainError({ code: 'CHAT_COMMAND_UNAVAILABLE', status: 409,

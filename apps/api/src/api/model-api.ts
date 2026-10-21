@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { Type } from '@sinclair/typebox';
-import { describeModelPortStatus, hasOpenRouterChatConfig } from '../workflow/model-port-config.js';
+import { describeModelPortStatus, hasOpenRouterChatConfig, readDeclaredImageInput }
+  from '../workflow/model-port-config.js';
 import {
   MODEL_VERIFY_ERROR_CATEGORIES,
   ModelVerifyConfigError,
@@ -18,8 +19,68 @@ import { readModelCatalogConfig, isCacheStale } from '../workflow/model-catalog-
 import { ModelCatalogRepository } from '../model/model-catalog-repository.js';
 import type { ModelCatalogEntryRow } from '../infrastructure/database-schema.js';
 import { ConfigError } from '../config/config.js';
+import { createRepositories } from '../application/unit-of-work.js';
+import { decideChatImageInput, type ChatImageInputDecision }
+  from '../application/chat-image-input.js';
+
+/**
+ * 图片输入能力的只读投影：与发送闸门同一份判定（`decideChatImageInput`），让输入框在
+ * 粘贴图片时就能说明，而不是等上传完、点了发送才被 422 拒绝。
+ *
+ * 来源顺序：目录 → 声明表 → 环境变量 → 无。`image_input_source` 把「这次结论来自哪一层」
+ * 一并告诉界面，用户才能区分「目录说可以」和「你自己声明的」。
+ *
+ * 这个端点描述的是进程环境，本身不依赖数据库；目录/声明读失败时返回 `UNKNOWN`，
+ * 不整体失败、也不冒充「可以发」。
+ */
+async function describeImageInput(dependencies: RouteDependencies,
+  status: { readonly configured: boolean; readonly model: string | null;
+    readonly provider: 'fake' | 'openai-compatible' | 'invalid' },
+  log: { warn: (payload: unknown, message: string) => void }):
+  Promise<{ readonly state: ChatImageInputDecision['state'] | 'UNKNOWN';
+    readonly source: ChatImageInputDecision['source'] }> {
+  const model = status.model?.trim() ?? '';
+  if (!status.configured || model === '') {
+    const decision = decideChatImageInput({ configured: false, declared: false });
+    return { state: decision.state, source: decision.source };
+  }
+  try {
+    const repositories = createRepositories(dependencies.database.executor);
+    const entry = await repositories.modelCatalog.readEntryBySourceModelId(model);
+    // 目录有条目时不必读声明表：目录是准绳，声明不能覆盖它。
+    const declaration = entry === undefined
+      ? (await repositories.modelCapabilities.readDeclaration(status.provider, model))?.image_input
+      : undefined;
+    const decision = decideChatImageInput({ configured: true,
+      catalogEntry: entry === undefined ? undefined : { imageInput: entry.capabilities.image_input },
+      declaration, declared: readDeclaredImageInput(process.env) });
+    return { state: decision.state, source: decision.source };
+  } catch (error) {
+    // 降级成 UNKNOWN 是给界面看的结论；真正的失败必须留痕，否则「权限没授」这类
+    // 部署问题会伪装成「模型目录里没有这个模型」。
+    log.warn({ err: error }, 'model_port_image_input_unavailable');
+    return { state: 'UNKNOWN', source: 'NONE' };
+  }
+}
 
 const ParamsSchema = Type.Object({ workspace_id: UuidSchema }, { additionalProperties: false });
+/**
+ * 当前聊天模型能否接受图片输入（2026-10-19）。与发送时的能力闸门同一份判定
+ * （`application/chat-image-input.ts`）：输入框据此在粘贴图片时就给出说明，
+ * 而不是等上传完、点了发送才被 422 拒绝。
+ *
+ * `UNKNOWN` 只表示这一次读不到目录（数据库不可用）：读端点本身不因数据库而失败，
+ * 但也不冒充「可以发」。
+ */
+const ChatImageInputSchema = Type.Union([
+  Type.Literal('NOT_CONFIGURED'), Type.Literal('SUPPORTED'), Type.Literal('DECLARED'),
+  Type.Literal('MODEL_LACKS_IMAGE_INPUT'), Type.Literal('MODEL_NOT_IN_CATALOG'),
+  Type.Literal('UNKNOWN'),
+]);
+/** 这次结论来自哪一层（2026-10-19，迁移 0121）：目录 / 声明表 / 环境变量 / 都没有。 */
+const ChatImageInputSourceSchema = Type.Union([
+  Type.Literal('CATALOG'), Type.Literal('DECLARED'), Type.Literal('ENV'), Type.Literal('NONE'),
+]);
 const StatusSchema = Type.Object({
   provider: Type.Union([Type.Literal('fake'), Type.Literal('openai-compatible'), Type.Literal('invalid')]),
   configured: Type.Boolean(),
@@ -27,6 +88,8 @@ const StatusSchema = Type.Object({
   base_url: Type.Union([Type.String(), Type.Null()]),
   // 单次调用 token 上限，作为上下文占用的可核对分母；Fake 或配置残缺时为 null。
   max_call_tokens: Type.Union([Type.Integer(), Type.Null()]),
+  image_input: ChatImageInputSchema,
+  image_input_source: ChatImageInputSourceSchema,
 }, { additionalProperties: false });
 
 const ErrorCategorySchema = Type.Union(
@@ -213,6 +276,38 @@ class VerifyGate {
 }
 
 /**
+ * 模型能力声明（2026-10-19，迁移 0121）。
+ *
+ * 这是**实例级配置**，不是业务命令：一次声明没有状态机、没有修订、也没有「待确认」，
+ * 同 `(provider, model)` 再写一次就是改口（last-writer-wins），GET 是权威读取。
+ * 因此沿用 `/model-catalog/refresh` 的实例级先例，不建 command_receipt——回执要保护的是
+ * 「同一命令是否已生效」的歧义，而这里重发同体必然得到同一状态。
+ */
+const CapabilityParamsSchema = Type.Object({
+  workspace_id: UuidSchema,
+  // 只有真实连接才谈得上「这个模型能不能读图」；fake/invalid 不接受声明。
+  provider: Type.Literal('openai-compatible'),
+  source_model_id: Type.String({ minLength: 1, maxLength: 200 }),
+}, { additionalProperties: false });
+const CapabilityBodySchema = Type.Object({
+  image_input: Type.Boolean(),
+  note: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+}, { additionalProperties: false });
+const CapabilityRowSchema = Type.Object({
+  provider: Type.String(), source_model_id: Type.String(), image_input: Type.Boolean(),
+  note: Type.Union([Type.String(), Type.Null()]),
+  declared_at: Type.String(), updated_at: Type.String(),
+}, { additionalProperties: false });
+
+function capabilityJson(row: { readonly provider: string; readonly source_model_id: string;
+  readonly image_input: boolean; readonly note: string | null;
+  readonly declared_at: Date; readonly updated_at: Date }) {
+  return { provider: row.provider, source_model_id: row.source_model_id,
+    image_input: row.image_input, note: row.note,
+    declared_at: row.declared_at.toISOString(), updated_at: row.updated_at.toISOString() };
+}
+
+/**
  * 当前服务实例的模型端口状态与验证（M04 只读面 + 验证入口）：
  * 来自进程环境变量与 model_calls 账本，不含密钥，不依赖 Workspace 事实；
  * 任何持本实例 Bearer 的客户端可见/可触发。响应永不包含密钥。
@@ -226,15 +321,53 @@ export function registerModelRoutes(app: FastifyInstance, dependencies: RouteDep
         const p = request.params as { workspace_id: string };
         void p;
         const status = describeModelPortStatus(process.env);
+        const imageInput = await describeImageInput(dependencies, status, request.log);
         return { provider: status.provider, configured: status.configured,
           model: status.model, base_url: status.baseUrl,
-          max_call_tokens: status.maxCallTokens };
+          max_call_tokens: status.maxCallTokens,
+          image_input: imageInput.state, image_input_source: imageInput.source };
       } catch (error) { return sendReadError(reply, error, request.id); }
     });
 
-  app.get('/model-port/verification', { schema: {
-    params: ParamsSchema, response: { 200: VerificationStateSchema } } },
+  // —— 模型能力声明（实例级配置，非业务命令；见上方注释） ——
+  app.get('/model-capabilities', { schema: { params: ParamsSchema,
+    response: { 200: Type.Object({ items: Type.Array(CapabilityRowSchema) }, { additionalProperties: false }) } } },
   async (request, reply) => {
+    try {
+      const rows = await createRepositories(dependencies.database.executor)
+        .modelCapabilities.listDeclarations();
+      return { items: rows.map(capabilityJson) };
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
+  app.put('/model-capabilities/:provider/:source_model_id', {
+    schema: { params: CapabilityParamsSchema, body: CapabilityBodySchema,
+      response: { 200: CapabilityRowSchema } },
+  }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string; provider: string; source_model_id: string };
+      const body = request.body as { image_input: boolean; note?: string | null };
+      const row = await createRepositories(dependencies.database.executor).modelCapabilities
+        .writeDeclaration({ provider: p.provider, sourceModelId: p.source_model_id,
+          imageInput: body.image_input, note: body.note ?? null });
+      return capabilityJson(row);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
+  app.delete('/model-capabilities/:provider/:source_model_id', {
+    schema: { params: CapabilityParamsSchema,
+      response: { 200: Type.Object({ removed: Type.Boolean() }, { additionalProperties: false }) } },
+  }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string; provider: string; source_model_id: string };
+      const removed = await createRepositories(dependencies.database.executor).modelCapabilities
+        .deleteDeclaration(p.provider, p.source_model_id);
+      return { removed };
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
+  app.get('/model-port/verification', { schema: {
+    params: ParamsSchema, response: { 200: VerificationStateSchema } } },  async (request, reply) => {
     try {
       const state = await readModelVerificationState(
         dependencies.database.executor, process.env);

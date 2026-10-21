@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
+import { calendarHeading } from "../src/views/TodayView";
 import { DomWrapper, flush, mountWorkbench } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
@@ -46,6 +47,55 @@ function today(path: string, fields: Record<string, unknown> = {}) {
 function postBody(init?: RequestInit): Record<string, unknown> { return JSON.parse(String(init?.body)) as Record<string, unknown>; }
 
 describe("P13 Today 真实投影", () => {
+  it("日历日期按自身计算：跨年、月末、闰日、夏令时与 UTC 都不改日/星期", () => {
+    const cases: readonly [string, string, string][] = [
+      ["2026-10-21", "2026年10月21日", "星期三"],
+      ["2026-12-31", "2026年12月31日", "星期四"],
+      ["2027-01-01", "2027年1月1日", "星期五"],
+      ["2026-02-28", "2026年2月28日", "星期六"],
+      ["2028-02-29", "2028年2月29日", "星期二"],
+      ["2026-03-08", "2026年3月8日", "星期日"],
+      ["2026-11-01", "2026年11月1日", "星期日"]
+    ];
+    for (const [date, longDate, weekday] of cases) {
+      expect(calendarHeading(date)).toEqual({ longDate, weekday });
+    }
+  });
+
+  it("设备上海、查询洛杉矶时页头仍等于所选日历日期，刷新与查询参数一致", async () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = "Asia/Shanghai";
+    try {
+      connect();
+      const requests: string[] = [];
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input).slice(root.length);
+        if (path.startsWith("/today?")) { requests.push(path); return response(today(path)); }
+        const target = targetRead(path); if (target) return target;
+        throw new Error(`Unexpected ${path}`);
+      }));
+      const mounted = await mountWorkbench("/today"); unmount = mounted.unmount;
+      await mounted.wrapper.get('.today-query input[type="date"]').setValue("2026-10-21"); await flush();
+      const adjustToggle = Array.from(mounted.wrapper.element!.querySelectorAll("button"))
+        .find((button) => button.textContent?.includes("调整时区"))!;
+      await new DomWrapper(adjustToggle).trigger("click"); await flush();
+      await mounted.wrapper.get('.today-query input:not([type="date"])').setValue("America/Los_Angeles");
+      await mounted.wrapper.get(".today-query form").trigger("submit"); await flush();
+      const head = mounted.wrapper.get('[data-testid="today-page-head"]');
+      expect(head.text()).toContain("2026年10月21日");
+      expect(head.text()).toContain("星期三");
+      expect(head.text()).not.toContain("2026年10月20日");
+      expect(head.text()).not.toContain("星期二");
+      expect(requests.some((path) => path.includes("date=2026-10-21")
+        && path.includes("America%2FLos_Angeles"))).toBe(true);
+      await mounted.wrapper.get(".today-query .secondary-button").trigger("click"); await flush();
+      expect(head.text()).toContain("2026年10月21日");
+      expect(head.text()).toContain("星期三");
+    } finally {
+      if (previousTz === undefined) delete process.env.TZ; else process.env.TZ = previousTz;
+    }
+  });
+
   it("fixture 不查询 Today；live 区分候选、等待子集和服务端准入，Pin 发送全量选择", async () => {
     const fixtureFetch = vi.fn(); vi.stubGlobal("fetch", fixtureFetch);
     let mounted = await mountWorkbench("/today"); unmount = mounted.unmount;

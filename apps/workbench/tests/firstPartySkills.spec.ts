@@ -288,7 +288,10 @@ describe("M04 第一方 Skill 与 Pack", () => {
     expect(view.wrapper.get('[data-testid="assist-skill"]').find('option[value="project-resume@0.9.0"]').exists()).toBe(false);
     expect(view.wrapper.get('[data-testid="assist-skill"]').find('option[value="project-resume@1.0.0"]').exists()).toBe(true);
     expect(view.wrapper.findAll('[data-testid="assist-skill-output"]')).toHaveLength(1);
-    expect(view.wrapper.text()).toContain("等待生成");
+    // PENDING 不再标状态词（2026-10-21 用户指令），在途由正文前的三点承担；失败态仍必须显式可读。
+    expect(view.wrapper.text()).not.toContain("等待生成");
+    expect(view.wrapper.find('[data-testid="assist-inflight-88888888-8888-4888-8888-888888888888"]').exists()).toBe(true);
+    expect(view.wrapper.findAll(".agent-message-status").map((chip) => chip.text())).toEqual(["生成失败"]);
     expect(view.wrapper.text()).toContain("SKILL_DEFINITION_UNAVAILABLE");
     expect(view.wrapper.text()).not.toContain("接受此提案");
     view.unmount();

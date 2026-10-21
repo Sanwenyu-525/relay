@@ -74,16 +74,31 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function requestPath(input: Parameters<typeof fetch>[0]): string | undefined {
+  const raw = typeof input === 'string' ? input
+    : input instanceof URL ? input.href
+    : input.url;
+  try { return new URL(raw, 'http://localhost').pathname; } catch { return undefined; }
+}
+
+function isChatCompletion(input: Parameters<typeof fetch>[0]): boolean {
+  const path = requestPath(input);
+  return path !== undefined && /\/chat\/completions\/?$/.test(path);
+}
+
 /**
  * 外呼边界注入：包在 guardedModelFetch 之外、SDK 之内，改写**最终**发出体。
  *
  * 与端口既有的 reasoning 包装同层——只有在这里改写才能用捕获到的 HTTP body 证明
  * 免费硬限制确实到达外呼边界，而不只是停留在内部参数（§7 验证 3、FM-07）。
- * 无法解析为 JSON 对象的请求体（非本端口预期）原样放行，不臆造字段。
+ * 守卫只约束对话请求：`/chat/completions` 的 body 必须是能解析出带 `model` 对象的
+ * JSON 字符串，缺失或畸形的 body 一律 fail closed，绝不发出无价格上限的对话请求；
+ * 其余端点（模型列表、探测等无对话体的请求）原样放行，不臆造字段。
  */
 export function withProviderGuard(modelFetch: typeof fetch, guard: ProviderRoutingGuard):
   typeof fetch {
   return async (input, init) => {
+    if (!isChatCompletion(input)) return modelFetch(input, init);
     if (typeof init?.body !== 'string') throw new FreeCallGuardError();
     let body: Record<string, unknown>;
     try { body = JSON.parse(init.body) as Record<string, unknown>; }

@@ -366,3 +366,27 @@ test('P10 bounded Chinese literal search is scoped, stable and exposed through H
     expectProblem(await api.get(workspacePath(randomUUID(), `/knowledge/${id}`)), 404, 'RESOURCE_NOT_FOUND');
   } finally { await api.stop(); }
 });
+
+test('R2-03 CreateRule 可省略 rule_key：服务端按 command_id 派生稳定唯一键，重放不新增规则', async () => {
+  const f = await fixture();
+  const commandId = randomUUID();
+  const input = { workspaceId: f.workspaceId, commandId, scope: 'PROJECT' as const,
+    scopeId: f.projectId, statement: '统一用中文回复', strength: 'PREFERENCE' as const,
+    applicability: 'AI_RUN' as const, enforcement: 'HUMAN' as const };
+  const created = await createRule(app.db, input);
+  const listed = await withTransaction(app.db, (r) =>
+    r.information.listApplicableRules(f.workspaceId, f.projectId, f.taskId));
+  assert.equal(listed.length, 1);
+  // 键由 command_id 派生：随机值会让同一 command_id 的幂等重放算出不同载荷哈希。
+  assert.equal(listed[0]?.rule_key, `rule-${commandId}`);
+  const replayed = await createRule(app.db, input);
+  assert.equal(replayed.result.rule_id, created.result.rule_id);
+  assert.equal((await withTransaction(app.db, (r) =>
+    r.information.listApplicableRules(f.workspaceId, f.projectId, f.taskId))).length, 1);
+  // 显式给出的规则键原样保留：既有跨范围引用与冲突判定不受影响。
+  await createRule(app.db, { ...input, commandId: randomUUID(), ruleKey: 'citation-required',
+    statement: '引用须核验' });
+  const all = await withTransaction(app.db, (r) =>
+    r.information.listApplicableRules(f.workspaceId, f.projectId, f.taskId));
+  assert.deepEqual(all.map((row) => row.rule_key).sort(), ['citation-required', `rule-${commandId}`].sort());
+});

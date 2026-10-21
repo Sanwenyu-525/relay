@@ -13,7 +13,25 @@ import { COMPUTER_PROTOCOL_VERSION } from '../../src/computer/protocol.js';
 class FakeComputerProcess extends EventEmitter {
   stdinWrites: string[] = [];
   killed = false;
+  /** true = 模拟 spawn 失败（可执行文件不存在）：永远不发 'spawn'，只发 'error'。 */
+  readonly spawnFails: boolean;
   private stdoutListeners: ((chunk: Buffer) => void)[] = [];
+
+  constructor(options: { spawnFails?: boolean } = {}) {
+    super();
+    this.spawnFails = options.spawnFails === true;
+  }
+
+  /**
+   * 真实 Node 只在进程确实起来时发 'spawn'（spawn 失败只有 'error'）。
+   * 假进程在客户端登记监听后的微任务里发一次，保证「先 attach、后 spawn」的时序成立。
+   */
+  override on(event: string | symbol, listener: (...args: unknown[]) => void): this {
+    if (event === 'spawn' && !this.spawnFails) {
+      queueMicrotask(() => { this.emit('spawn'); });
+    }
+    return super.on(event, listener);
+  }
 
   get stdin() {
     const self = this;
@@ -41,9 +59,12 @@ class FakeComputerProcess extends EventEmitter {
 
   /** 向客户端推送一行 reply。 */
   emitReply(requestId: string, result: Record<string, unknown>): void {
-    const line = JSON.stringify({ version: COMPUTER_PROTOCOL_VERSION, request_id: requestId,
-      success: true, result }) + '\n';
-    for (const listener of this.stdoutListeners) listener(Buffer.from(line, 'utf8'));
+    this.emitBytes(replyLine(requestId, result));
+  }
+
+  /** 原样推送任意字节块：用于模拟管道在任意位置切分。 */
+  emitBytes(chunk: Buffer): void {
+    for (const listener of this.stdoutListeners) listener(chunk);
   }
 
   /** 向客户端推送一行 error reply。 */
@@ -59,8 +80,13 @@ class FakeComputerProcess extends EventEmitter {
   }
 }
 
-function clientWith(process: FakeComputerProcess, options: { idleReapMs?: number } = {}):
-  ComputerRuntimeClient {
+function replyLine(requestId: string, result: Record<string, unknown>): Buffer {
+  return Buffer.from(JSON.stringify({ version: COMPUTER_PROTOCOL_VERSION, request_id: requestId,
+    success: true, result }) + '\n', 'utf8');
+}
+
+function clientWith(process: FakeComputerProcess,
+  options: { idleReapMs?: number; maxLineBytes?: number } = {}): ComputerRuntimeClient {
   return new ComputerRuntimeClient({
     executable: 'fake-runtime.exe',
     mode: 'mock',
@@ -68,6 +94,7 @@ function clientWith(process: FakeComputerProcess, options: { idleReapMs?: number
     spawnProcess: (() => process) as SpawnProcess,
     idleReapMs: options.idleReapMs ?? 60_000,
     requestTimeoutMs: 200,
+    ...(options.maxLineBytes === undefined ? {} : { maxLineBytes: options.maxLineBytes }),
   });
 }
 
@@ -139,6 +166,42 @@ test('进程崩溃：在途请求失败且标记效果未知，下一个请求�
   assert.deepEqual(await retried, { windows: [{ id: '7' }] });
 });
 
+test('旧进程迟到的 close/error 不清掉新进程与在途请求', async () => {
+  const first = new FakeComputerProcess();
+  const client = new ComputerRuntimeClient({
+    executable: 'fake-runtime.exe',
+    mode: 'mock',
+    idleReapMs: 60_000,
+    requestTimeoutMs: 200,
+    spawnProcess: (() => first) as SpawnProcess,
+  });
+  const pending = client.request('computer.click', { x: 1, y: 2 });
+  await flush();
+  first.emit('exit', 1);
+  await assert.rejects(pending, (error: unknown) => {
+    assert.ok(error instanceof ComputerRuntimeError);
+    assert.equal(error.code, 'IPC_DISCONNECTED');
+    assert.equal(error.effectUncertain, true);
+    return true;
+  });
+
+  const second = new FakeComputerProcess();
+  (client as unknown as { spawnProcess: SpawnProcess }).spawnProcess = (() => second) as SpawnProcess;
+  const retried = client.request('computer.get_windows', {});
+  await flush();
+  assert.equal(client.alive, true, '新进程应已启动');
+
+  // 旧进程的迟到事件：不得再触碰新进程或它的在途请求。
+  first.emit('close', 1);
+  first.emit('error', new Error('stale spawn error'));
+  await flush();
+  assert.equal(client.alive, true, '旧进程事件不能清掉新进程');
+  const request = JSON.parse(second.stdinWrites[0]!.trim());
+  second.emitReply(request.request_id, { windows: [] });
+  assert.deepEqual(await retried, { windows: [] });
+  assert.equal(second.killed, false, '新进程不能被旧事件杀掉');
+});
+
 test('未写入就崩溃的请求按 RUNTIME_UNAVAILABLE 失败，不谎称效果未知', async () => {
   const process = new FakeComputerProcess();
   const client = clientWith(process);
@@ -152,6 +215,39 @@ test('未写入就崩溃的请求按 RUNTIME_UNAVAILABLE 失败，不谎称效�
     assert.equal(error.effectUncertain, false);
     return true;
   });
+});
+
+test('进程根本没起来（可执行文件不存在）：请求按 RUNTIME_UNAVAILABLE 失败，不谎称效果未知', async () => {
+  const process = new FakeComputerProcess({ spawnFails: true });
+  const client = clientWith(process);
+  const pending = client.request('computer.click', { x: 1, y: 2 });
+  await flush();
+  // 写管道发生在启动结果到达之前：请求字节已交给管道，但进程从未存在。
+  assert.equal(process.stdinWrites.length, 1, '启动失败前写入照样发生');
+  process.emit('error', new Error('spawn C:\\missing\\relay-computer-runtime.exe ENOENT'));
+  await assert.rejects(pending, (error: unknown) => {
+    assert.ok(error instanceof ComputerRuntimeError);
+    assert.equal(error.code, 'RUNTIME_UNAVAILABLE');
+    assert.equal(error.retryable, true);
+    assert.equal(error.effectUncertain, false,
+      '进程从未起来：没有派发就没有外部副作用，不该要求人工核对');
+    return true;
+  });
+  assert.equal(client.alive, false);
+});
+
+test('真实 spawn 失败（可执行文件不存在）：按 RUNTIME_UNAVAILABLE 失败且不拖垮进程', async () => {
+  if (process.platform !== 'win32') return; // 真实模式在非 Windows 会被平台守卫先挡掉。
+  const client = new ComputerRuntimeClient({
+    executable: 'C:\\relay-nonexistent-dir\\relay-computer-runtime.exe', mode: 'real' });
+  await assert.rejects(client.request('computer.get_windows', {}), (error: unknown) => {
+    assert.ok(error instanceof ComputerRuntimeError);
+    assert.equal(error.code, 'RUNTIME_UNAVAILABLE');
+    assert.equal(error.effectUncertain, false);
+    return true;
+  });
+  assert.equal(client.alive, false);
+  client.dispose();
 });
 
 test('超时杀掉整个进程，下一个请求在新进程上重新开始', async () => {
@@ -194,6 +290,79 @@ test('无法解析的回复行杀死进程：协议漂移不靠猜后续行形�
     return true;
   });
   assert.equal(process.killed, true);
+});
+
+test('畸形回复 envelope 失败关闭：null/数组/假成功/坏 result/坏 error', async () => {
+  const cases: { label: string; line: (id: string) => string }[] = [
+    { label: 'null', line: () => 'null' },
+    { label: '数组', line: () => '[]' },
+    { label: '基本类型', line: () => '"reply"' },
+    {
+      label: 'success 是字符串 false',
+      line: (id) => JSON.stringify({ version: COMPUTER_PROTOCOL_VERSION, request_id: id,
+        success: 'false', result: { clicked: true } }),
+    },
+    {
+      label: '缺少 request_id',
+      line: () => JSON.stringify({ version: COMPUTER_PROTOCOL_VERSION, success: true, result: {} }),
+    },
+    {
+      label: 'request_id 非字符串',
+      line: () => JSON.stringify({ version: COMPUTER_PROTOCOL_VERSION, request_id: 7,
+        success: true, result: {} }),
+    },
+    {
+      label: '成功但 result 是字符串',
+      line: (id) => JSON.stringify({ version: COMPUTER_PROTOCOL_VERSION, request_id: id,
+        success: true, result: 'ok' }),
+    },
+    {
+      label: '成功但缺少 result',
+      line: (id) => JSON.stringify({ version: COMPUTER_PROTOCOL_VERSION, request_id: id,
+        success: true }),
+    },
+    {
+      label: '失败但 error 为 null',
+      line: (id) => JSON.stringify({ version: COMPUTER_PROTOCOL_VERSION, request_id: id,
+        success: false, error: null }),
+    },
+    {
+      label: '失败但 retryable 不是布尔',
+      line: (id) => JSON.stringify({ version: COMPUTER_PROTOCOL_VERSION, request_id: id,
+        success: false, error: { code: 'INPUT_FAILED', message: 'x', retryable: 'false' } }),
+    },
+  ];
+
+  for (const item of cases) {
+    const process = new FakeComputerProcess();
+    const client = clientWith(process);
+    const pending = client.request('computer.get_windows', {});
+    await flush();
+    const requestId = JSON.parse(process.stdinWrites[0]!.trim()).request_id as string;
+    process.emitRaw(`${item.line(requestId)}\n`);
+    await assert.rejects(pending, (error: unknown) => {
+      assert.ok(error instanceof ComputerRuntimeError, `${item.label} 应失败关闭`);
+      assert.equal(error.code, 'IPC_DISCONNECTED', `${item.label} 应按失联结算`);
+      assert.equal(error.effectUncertain, true, `${item.label} 已写入请求应保持效果未知`);
+      return true;
+    }, `${item.label} 不能假成功或抛未捕获异常`);
+    assert.equal(process.killed, true, `${item.label} 必须杀掉进程`);
+    assert.equal(client.alive, false, `${item.label} 进程应已断开`);
+  }
+});
+
+test('未知 request_id 的合法回复被忽略，不打断当前请求', async () => {
+  const process = new FakeComputerProcess();
+  const client = clientWith(process);
+  const pending = client.request('computer.get_windows', {});
+  await flush();
+  const requestId = JSON.parse(process.stdinWrites[0]!.trim()).request_id as string;
+  process.emitRaw(JSON.stringify({ version: COMPUTER_PROTOCOL_VERSION,
+    request_id: 'unknown-request', success: true, result: { ignored: true } }) + '\n');
+  assert.equal(process.killed, false, '未知 request_id 的合法回复不应杀进程');
+  assert.equal(client.alive, true);
+  process.emitReply(requestId, { windows: [] });
+  assert.deepEqual(await pending, { windows: [] });
 });
 
 test('版本不匹配的回复杀死进程', async () => {
@@ -308,5 +477,104 @@ test('interrupt 立即杀掉进程：在途请求按效果未知失败，后续�
     assert.equal(error.effectUncertain, true, '在途输入的外部效果按未知核对');
     return true;
   });
+  assert.equal(client.alive, false);
+});
+
+test('UTF-8 回复在任意字节边界拆包仍逐字还原', async () => {
+  const result = { title: '测试窗口🙂', code: '中' };
+  const placeholder = '00000000-0000-4000-8000-000000000000';
+  const bytes = replyLine(placeholder, result);
+  // 每一个切分位置都试一次：包括落在中文三字节与 emoji 四字节内部的位置。
+  for (let split = 1; split < bytes.length; split += 1) {
+    const process = new FakeComputerProcess();
+    const client = clientWith(process);
+    const pending = client.request('computer.get_windows', {});
+    await flush();
+    const requestId = JSON.parse(process.stdinWrites[0]!.trim()).request_id as string;
+    const actual = replyLine(requestId, result);
+    process.emitBytes(actual.subarray(0, split));
+    process.emitBytes(actual.subarray(split));
+    assert.deepEqual(await pending, result, `split=${split} 时中文/emoji 必须逐字节还原`);
+    client.dispose();
+  }
+});
+
+test('同一 chunk 的多条合法行逐行处理，总字节数不当作单行超限', async () => {
+  const process = new FakeComputerProcess();
+  const client = clientWith(process, { maxLineBytes: 200 });
+  const first = client.request('computer.get_windows', {});
+  const second = client.request('computer.get_windows', {});
+  await flush();
+  const firstId = JSON.parse(process.stdinWrites[0]!.trim()).request_id as string;
+  const secondId = JSON.parse(process.stdinWrites[1]!.trim()).request_id as string;
+  const firstLine = replyLine(firstId, { title: '中'.repeat(20) });
+  const secondLine = replyLine(secondId, { title: '文'.repeat(20) });
+  assert.ok(Buffer.byteLength(firstLine) + Buffer.byteLength(secondLine) > 200,
+    '前提：两行合计超过单行上限');
+  assert.ok(Buffer.byteLength(firstLine) - 1 <= 200 && Buffer.byteLength(secondLine) - 1 <= 200,
+    '前提：每一行都不超过单行上限');
+  process.emitBytes(Buffer.concat([firstLine, secondLine]));
+  assert.deepEqual(await first, { title: '中'.repeat(20) });
+  assert.deepEqual(await second, { title: '文'.repeat(20) });
+  assert.equal(process.killed, false, '同一 chunk 多条合法行不得误杀进程');
+  assert.equal(client.alive, true);
+});
+
+test('单行字节数恰好等于上限时接受', async () => {
+  const result = { title: '中'.repeat(45) };
+  const placeholder = '00000000-0000-4000-8000-000000000000';
+  const contentBytes = Buffer.byteLength(replyLine(placeholder, result)) - 1;
+  const process = new FakeComputerProcess();
+  const client = clientWith(process, { maxLineBytes: contentBytes });
+  const pending = client.request('computer.get_windows', {});
+  await flush();
+  const requestId = JSON.parse(process.stdinWrites[0]!.trim()).request_id as string;
+  process.emitBytes(replyLine(requestId, result));
+  assert.deepEqual(await pending, result, '恰好等于字节上限的行必须接受');
+  assert.equal(process.killed, false);
+});
+
+test('单行字节超限杀掉进程，在途请求按效果未知结算', async () => {
+  const process = new FakeComputerProcess();
+  const client = clientWith(process, { maxLineBytes: 200 });
+  const pending = client.request('computer.get_windows', {});
+  await flush();
+  const requestId = JSON.parse(process.stdinWrites[0]!.trim()).request_id as string;
+  const line = replyLine(requestId, { title: '中'.repeat(45) });
+  assert.ok(Buffer.byteLength(line) - 1 > 200, '前提：该行字节数超过上限');
+  assert.ok(line.toString('utf8').length - 1 < 200,
+    '前提：码元数未超限，旧的码元比较会误接受这一行');
+  process.emitBytes(line);
+  await assert.rejects(pending, (error: unknown) => {
+    assert.ok(error instanceof ComputerRuntimeError);
+    assert.equal(error.code, 'IPC_DISCONNECTED');
+    assert.equal(error.effectUncertain, true, '已写入请求必须保持 UNKNOWN 语义');
+    return true;
+  });
+  assert.equal(process.killed, true);
+  assert.equal(client.alive, false);
+});
+
+test('非法 UTF-8 不静默替换字符：杀掉进程并按失联结算', async () => {
+  const process = new FakeComputerProcess();
+  const client = clientWith(process);
+  const pending = client.request('computer.get_windows', {});
+  await flush();
+  const requestId = JSON.parse(process.stdinWrites[0]!.trim()).request_id as string;
+  // 完整的一行 JSON，但字符串里插入一个残缺的「中」（E4 B8）再回到 ASCII。
+  const invalid = Buffer.concat([
+    Buffer.from(`{"version":"${COMPUTER_PROTOCOL_VERSION}","request_id":"${requestId}",`
+      + '"success":true,"result":{"title":"', 'utf8'),
+    Buffer.from([0xe4, 0xb8]),
+    Buffer.from('"}}\n', 'utf8'),
+  ]);
+  process.emitBytes(invalid);
+  await assert.rejects(pending, (error: unknown) => {
+    assert.ok(error instanceof ComputerRuntimeError);
+    assert.equal(error.code, 'IPC_DISCONNECTED');
+    assert.equal(error.effectUncertain, true);
+    return true;
+  });
+  assert.equal(process.killed, true, '无效协议必须失败关闭，不能继续解析后续行');
   assert.equal(client.alive, false);
 });

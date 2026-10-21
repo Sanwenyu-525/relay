@@ -2,9 +2,10 @@
  * Computer Runtime 的进程与模式配置。
  *
  * 解析顺序与 relay-file-io-helper 先例一致：显式环境变量优先，否则取 Node 可执行
- * 文件同目录的 `relay-computer-runtime.exe`（桌面宿主通过 RELAY_COMPUTER_RUNTIME
- * 传入资源目录内的确切路径）。模式开关 COMPUTER_RUNTIME_MODE=mock 只用于 UI 与
- * Agent 流程测试：mock 数据永远带 `mock: true` 标记，生产默认真实 Windows 运行时。
+ * 文件同目录的 `relay-computer-runtime.exe`。桌面打包版把运行时随 node.exe 放在资源
+ * 目录，默认路径即可命中；需要换位置时在 desktop.env 里写 RELAY_COMPUTER_RUNTIME
+ *（自行启动 API 时直接设同名环境变量）。模式开关 COMPUTER_RUNTIME_MODE=mock 只用于
+ * UI 与 Agent 流程测试：mock 数据永远带 `mock: true` 标记，生产默认真实 Windows 运行时。
  */
 
 import { dirname, join } from 'node:path';

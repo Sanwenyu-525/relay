@@ -41,6 +41,7 @@ const baselineAt = "2026-10-16T09:00:00Z";
  * 覆盖投影按本仓真实情形给：起点扫描撞到文件数上限（2000），当前侧扫全了。 */
 const changedDiff = {
   available: true,
+  scope: "SESSION",
   baseline_captured_at: baselineAt,
   baseline_revision: "3",
   root_path: rootPath,
@@ -51,6 +52,8 @@ const changedDiff = {
     current: { complete: true, reason: null, files: 3, listed: 3 },
     unchecked_files: 0,
     unverified_files: 0,
+    unverifiable_files: 0,
+    unscanned_files: 0,
   },
   total_files: 3,
   total_added: 98,
@@ -430,7 +433,7 @@ test.describe("会话局部与总 diff 的真实布局", () => {
     await expect(diffPanel(page).locator("time")).toHaveAttribute("datetime", baselineAt);
     await expect(diffPanel(page)).toContainText(rootPath);
     await expect(diffPanel(page))
-      .toContainText("包含该目录自基线起的同期修改，不代表全部由 Agent 产生。");
+      .toContainText("只统计本会话写入的文件；同一目录里其他程序或其他会话的同期修改不计入。");
     await expect(page.getByTestId(`conversation-diff-file-${adapterPath}`)).toContainText("+78");
     await expect(page.getByTestId(`conversation-diff-file-${notesPath}`)).toContainText("+20");
     // 不可统计的那一份说原因，不画 +0 −0。
@@ -438,17 +441,17 @@ test.describe("会话局部与总 diff 的真实布局", () => {
     await expect(binary).toContainText("二进制内容，不统计行数");
     expect(await binary.innerText()).not.toMatch(/[+−]\s*0(\s|$)/u);
     // 「部分不可统计」当场说清是哪一类不完整：入口行上是可见的成因短语，不是隐藏提示。
+    // 会话口径的统计范围只有本会话写过的路径，所以「整个目录没扫全」不出现在这里。
     await expect(diffFlag(page)).toBeVisible();
-    await expect(diffFlag(page)).toContainText("统计不完整：目录只扫描了部分文件");
-    await expect(diffFlag(page)).toContainText("1 个文件行数不可统计");
+    await expect(diffFlag(page)).toContainText("统计不完整：1 个文件行数不可统计");
+    await expect(diffFlag(page)).not.toContainText("目录只扫描了部分文件");
     expect(await diffFlag(page).getAttribute("title")).toBeNull();
     // 展开面板逐条给出范围与条数；起点侧没有清单，不能编造「共多少个」。
     const incomplete = page.getByTestId("conversation-diff-incomplete");
     await expect(incomplete).toBeVisible();
     await expect(incomplete)
-      .toContainText("会话起点扫描不完整：已核对 2000 个文件，原因：文件数达到统计上限");
-    await expect(incomplete)
       .toContainText("1 个已发现文件的行数不可统计（二进制、超限或读不到）");
+    await expect(incomplete).not.toContainText("会话起点扫描不完整");
     expect(await incomplete.innerText()).not.toContain("2000/");
     expect((await box(diffEntry(page))).height).toBeCloseTo(entry.height, 0); // 展开不改变入口那一行的高度
 
@@ -478,7 +481,7 @@ test.describe("会话局部与总 diff 的真实布局", () => {
     const card = await box(composer(page));
     const stop = await box(page.getByTestId("assist-stop"));
     await expect(page.getByTestId("conversation-diff-toggle"))
-      .toContainText("本次对话 · 4 个文件 +1548 −826");
+      .toContainText(/本次对话 · 4 个文件\s*\+1548\s*−826/);
     await page.getByTestId("conversation-diff-toggle").click();
     await page.getByTestId(`conversation-diff-file-toggle-${longPath}`).click();
     const panel = await box(diffPanel(page));
@@ -530,7 +533,7 @@ test.describe("会话局部与总 diff 的真实布局", () => {
       .toContainText("统计起点已从现在开始建立。");
     await expect(page.getByTestId("conversation-diff-establish-notice")).toContainText("现起点：");
     await expect(page.getByTestId("conversation-diff-toggle"))
-      .toContainText("本次对话 · 3 个文件 +98 −6");
+      .toContainText(/本次对话 · 3 个文件\s*\+98\s*−6/);
     // 唯一的写请求就是建立起点那一次；统计与展开正文都不写业务事实。
     expect(state.writes).toEqual([`${prefix}/assist-sessions/${sessionId}/conversation-diff/baseline`]);
   });
@@ -574,11 +577,11 @@ test.describe("会话局部与总 diff 的真实布局", () => {
   test("刷新失败保留上次可信值并标「截至…」，下一次成功读取后恢复", async ({ page }) => {
     test.setTimeout(60_000);
     await openChat(page, { diffMode: "refreshFail" });
-    await expect(page.getByTestId("conversation-diff-toggle")).toContainText("+98 −6");
+    await expect(page.getByTestId("conversation-diff-toggle")).toContainText(/\+98\s*−6/);
     await expect(page.getByTestId("conversation-diff-stale"))
       .toContainText("更新失败 · 截至", { timeout: 15_000 });
     // 可信值不清零：数字仍是上一次读到的那份，不退回 +0 也不消失。
-    await expect(page.getByTestId("conversation-diff-toggle")).toContainText("+98 −6");
+    await expect(page.getByTestId("conversation-diff-toggle")).toContainText(/\+98\s*−6/);
     await page.getByTestId("conversation-diff-toggle").click();
     // 保留可信值＝展开面板照常是上一次那份逐文件清单；失败只在入口那一行说一次，
     // 不在面板里再画一条红色错误，也不把清单换成「读不到」。

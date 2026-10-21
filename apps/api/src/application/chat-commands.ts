@@ -17,7 +17,7 @@ import { methodActionForArgument } from './method-intent.js';
  * 英文固定名与中文别名解析到**同一个**登记项，不维护两套行为。
  */
 
-export type SystemCommandId = 'clear' | 'new' | 'model' | 'undo' | 'compact';
+export type SystemCommandId = 'clear' | 'new' | 'model' | 'undo' | 'compact' | 'plan' | 'goal';
 
 export interface SystemCommandDefinition {
   readonly id: SystemCommandId;
@@ -46,6 +46,22 @@ const SYSTEM_COMMANDS: readonly SystemCommandDefinition[] = [
   { id: 'compact', command: 'compact', aliases: ['压缩'], argument: 'NONE',
     summary: '在安全边界手动整理当前会话上下文；不会替换在途请求的输入。',
     usage: '/compact' },
+  /*
+   * 0127：`/plan` 与 `/goal`（工作台 §44.1）。
+   *
+   * 与前五条的关键差别：它们是**命令 + 正文**。命令决定这条消息按哪种行为模式受理，
+   * 正文就是这一轮要说的话——因此 `argument` 是 TEXT，且发送路径不是 `ExecuteChatCommand`
+   * 而是普通消息命令（`chat_mode` 随消息进同一命令、同一事务）。
+   *
+   * 菜单里列出它们只为**预填**：选中只把 `/plan ` 插进草稿，用户补完内容再发送。
+   * 不带正文的形式（只输入 `/plan`）才是「只切模式」，走模式切换 Owner。
+   */
+  { id: 'plan', command: 'plan', aliases: ['计划'], argument: 'TEXT',
+    summary: '计划模式：只调查、读取与比较方案，不改项目；形成计划后可挑某一版执行。',
+    usage: '/plan <要说的事>' },
+  { id: 'goal', command: 'goal', aliases: ['目标'], argument: 'TEXT',
+    summary: '目标模式：说明目标后由服务端逐轮持续推进，直到完成、暂停或需要你决定。',
+    usage: '/goal <要说的事>' },
 ];
 
 /** 命令名语法：字母或汉字开头，后接字母/数字/连字符/汉字。 */

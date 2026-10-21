@@ -113,6 +113,8 @@ export type FakeToolScript = readonly FakeToolScriptRound[];
 
 /** 已结算的一轮工具交互，用于把结果回传给模型和从持久化事实重建。 */
 export interface ModelToolTurn {
+  /** 本次工具请求前已接收的用户插话，保留在对应工具之前，不随后续请求移到末尾。 */
+  readonly steersBefore?: readonly string[] | undefined;
   readonly calls: readonly ModelToolCall[];
   readonly results: readonly ModelToolTurnResult[];
   /** 老账本未保存前置说明时保持缺省，不能补造历史。 */
@@ -197,6 +199,11 @@ export interface AssistRequest {
   readonly tools?: readonly ModelToolSpec[] | undefined;
   /** 已经结算的历史工具轮次，按顺序原样回传。 */
   readonly toolTurns?: readonly ModelToolTurn[] | undefined;
+  /**
+   * 尚未归入工具轮次的用户插话原文，按发送顺序渲染在已有工具结果之后。
+   * 已引发工具请求的插话归入对应 ModelToolTurn.steersBefore，避免重排历史。
+   */
+  readonly steers?: readonly string[] | undefined;
   /**
    * 学习轮次（0072 / ADR-020 §4）：给出本轮**相关短状态**与获准来源身份，
    * 端口改用结构化信封返回正文与有限类型化候选增量。缺省时既有行为逐字不变。
@@ -452,6 +459,12 @@ export class FakeModelPort implements AssistModelPort {
   /** Assist 确定性回复：DISCUSS 回显最后一条用户消息；提案意图返回可通过
    * 应用层 schema 校验的 JSON。`FAKE_ASSIST_*` 触发串只服务测试断言。 */
   async assist(request: AssistRequest): Promise<AssistResult> {
+    if (request.system.includes('MEMORY_COMPACTION_V1')) {
+      const content = JSON.stringify({ summary: '【Mock 摘要，仅用于工程验证】\n' +
+        request.turns.map((turn) => turn.content).join('\n').slice(0, 8000) });
+      return { kind: 'CONTENT', content, providerRequestId: 'fake-memory-compaction',
+        usage: { inputTokens: 1, outputTokens: 1 } };
+    }
     const lastUser = [...request.turns].reverse().find((turn) => turn.role === 'user');
     // B 档只读轮次：声明了工具时按冻结脚本逐轮发出请求，脚本耗尽后回到普通回复。
     // 触发串只服务测试断言，真实端口不解释它。

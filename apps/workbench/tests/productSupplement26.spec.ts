@@ -20,9 +20,11 @@ describe("26 日人工待处理汇总", () => {
     const client = {
       getInterventions: vi.fn(async () => []),
       getReviews: vi.fn(async () => [{ id: "review-1", kind: "CRITERION", status: "OPEN", revision: "1",
-        projectId: "project-a", taskId: "task-a", runId: "run-a", reason: "需要人工判断" },
+        projectId: "project-a", taskId: "task-a", runId: "run-a", allowedDecisions: ["ACCEPT", "REQUEST_CHANGES"],
+        reason: "需要人工判断" },
       { id: "review-1", kind: "CRITERION", status: "OPEN", revision: "1",
-        projectId: "project-a", taskId: "task-a", runId: "run-a", reason: "需要人工判断" }]),
+        projectId: "project-a", taskId: "task-a", runId: "run-a", allowedDecisions: ["ACCEPT", "REQUEST_CHANGES"],
+        reason: "需要人工判断" }]),
       getWorkspaceTasksPage: vi.fn(async (cursor: string | null) => cursor === null
         ? { items: [task("task-a", "project-a", "WAITING", "run-a"), task("task-b", "project-b", "READY")], nextCursor: "page-2" }
         : { items: [task("task-b", "project-b", "READY"), task("task-c", "project-b", "WAITING", "run-c"),
@@ -73,7 +75,7 @@ describe("26 日人工待处理汇总", () => {
       getReviews: vi.fn(async () => {
         if (fail) throw new Error("Review 不可读");
         return open ? [{ id: "review-1", kind: "CRITERION", status: "OPEN", revision: "1",
-          projectId: "project-a", taskId: null, runId: null, reason: "待审" }] : [];
+          projectId: "project-a", taskId: null, runId: null, allowedDecisions: ["ACCEPT"], reason: "待审" }] : [];
       }),
       getWorkspaceTasksPage: vi.fn(async () => ({ items: [], nextCursor: null })),
       getRun: vi.fn()

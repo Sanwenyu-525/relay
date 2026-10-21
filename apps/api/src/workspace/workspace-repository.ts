@@ -4,6 +4,7 @@ import type { DbExecutor } from '../infrastructure/database.js';
 import type {
   WorkspaceExecutionAuthorityRow,
   WorkspaceRow,
+  WorkspaceDefaultDirectoryRow,
 } from '../infrastructure/database-schema.js';
 import { requireRow } from '../shared/sql-rows.js';
 
@@ -21,6 +22,20 @@ export class WorkspaceRepository {
 
   constructor(db: DbExecutor) {
     this.db = db;
+  }
+
+  async readDefaultDirectory(workspaceId: string): Promise<WorkspaceDefaultDirectoryRow | undefined> {
+    return (await sql<WorkspaceDefaultDirectoryRow>`select * from workspace_default_directories
+      where workspace_id = ${workspaceId}`.execute(this.db)).rows[0];
+  }
+
+  /** Clear retains the row and revision so an old settings form cannot overwrite a later choice. */
+  async setDefaultDirectory(workspaceId: string, resourceId: string | null): Promise<WorkspaceDefaultDirectoryRow> {
+    return requireRow((await sql<WorkspaceDefaultDirectoryRow>`insert into workspace_default_directories
+      (workspace_id, resource_id, revision) values (${workspaceId}, ${resourceId}, 1)
+      on conflict (workspace_id) do update set resource_id = excluded.resource_id,
+        revision = workspace_default_directories.revision + 1, updated_at = now()
+      returning *`.execute(this.db)).rows, 'set workspace default directory');
   }
 
   async insertWorkspace(workspace: NewWorkspace): Promise<WorkspaceRow> {

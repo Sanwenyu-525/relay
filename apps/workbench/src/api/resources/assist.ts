@@ -1,10 +1,10 @@
 import type { DecimalRevision } from "../../types";
-import { RelayTransportError } from "../core/errors";
+import { RelayContractError, RelayTransportError } from "../core/errors";
 import { RelayHttp } from "../core/http";
 import { array, boolean, decimal, integer, nullableString, object, string } from "../core/primitives";
-import { assistMessageFrom, assistantProfileFrom, assistProposalFrom, assistSessionBindingFrom, assistSessionDeleteFrom, assistSessionDirectoryBindingFrom, assistSessionForkFrom, assistSessionFrom, assistSessionPinFrom, assistSessionStateFrom, assistSessionTitleFrom, assistSessionUnreadFrom, assistSourceBody, conversationExecutionFrom, conversationExecutionSummaryFrom, packDefinitionFrom, skillDefinitionFrom, workingDirectoryFrom } from "../parse/assist";
+import { assistMessageFrom, assistantProfileFrom, assistProposalFrom, assistSessionBindingFrom, assistSessionDeleteFrom, assistSessionDirectoryBindingFrom, assistSessionForkFrom, assistSessionFrom, assistSessionPinFrom, assistSessionStateFrom, assistSessionTitleFrom, assistSessionUnreadFrom, assistSourceBody, conversationExecutionFrom, conversationExecutionSummaryFrom, packDefinitionFrom, sessionToolCallsFrom, skillDefinitionFrom, workingDirectoryFrom, workspaceDefaultDirectoryFrom } from "../parse/assist";
 import { commandEnvelopeFrom } from "../parse/projects";
-import type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachmentContent, RelayAssistMessageAttachmentUpload, RelayAssistProposal, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayConversationMode, RelayAssistSourceRef, RelayConversationExecution, RelayConversationExecutionStage, RelayPackDefinition, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory } from "../dtos/assist";
+import type { RelayChatMode, RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachmentContent, RelayAssistMessageAttachmentUpload, RelayAssistProposal, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayConversationMode, RelayAssistSourceRef, RelayConversationExecution, RelayConversationExecutionStage, RelayPackDefinition, RelaySessionToolCalls, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult } from "../dtos/assist";
 import type { RelayCommandEnvelope } from "../dtos/projects";
 
 export async function getAssistSessions(http: RelayHttp, target: { projectId?: string; taskId?: string; includeContext?: boolean; status?: "ACTIVE" | "ARCHIVED" | "ALL" } = {}): Promise<readonly RelayAssistSession[]> {
@@ -37,11 +37,13 @@ export async function getFirstPartyPacks(http: RelayHttp): Promise<readonly Rela
  * 建会话。身份在建立时冻结，因此模式与助手进**命令体**而不是查询参数：
  * 同一个 command_id 换模式重放会被服务端按异载荷拒绝，这正是我们要的行为。
  */
-export async function createAssistSession(http: RelayHttp, input: { commandId: string; projectId: string | null; taskId: string | null; title: string; conversationMode?: RelayConversationMode; assistantProfileId?: string | null }): Promise<RelayAssistSession> {
+export async function createAssistSession(http: RelayHttp, input: { commandId: string; projectId: string | null; taskId: string | null; title: string; conversationMode?: RelayConversationMode; chatMode?: RelayChatMode; assistantProfileId?: string | null }): Promise<RelayAssistSession> {
   const body = await http.request(http.workspacePath("/assist-sessions"), { method: "POST",
     body: JSON.stringify({ command_id: input.commandId, project_id: input.projectId,
       task_id: input.taskId, title: input.title,
       ...(input.conversationMode === undefined ? {} : { conversation_mode: input.conversationMode }),
+      // 0127：空会话里直接发 `/plan 内容` 时，模式随建会话命令一起落库。
+      ...(input.chatMode === undefined ? {} : { chat_mode: input.chatMode }),
       ...(input.assistantProfileId === undefined || input.assistantProfileId === null ? {} : { assistant_profile_id: input.assistantProfileId }) }) }, 201);
   try {
     const envelope = commandEnvelopeFrom(body);
@@ -222,6 +224,23 @@ export async function getAssistLivePreview(http: RelayHttp, sessionId: string, m
 }
 
 /**
+ * 会话工具轮次（工作台 §18.10）：折叠面板唯一的事实源。
+ * 身份核对沿用上面草稿预览那一条理由——轮询期间用户可能已经换到别的会话，
+ * 迟到的响应不能投给新目标。
+ */
+export async function getAssistSessionToolCalls(http: RelayHttp, sessionId: string, messageId: string): Promise<RelaySessionToolCalls> {
+  const trace = sessionToolCallsFrom(await http.request(http.workspacePath(
+    `/assist-sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/tool-calls`)));
+  if (trace.sessionId !== sessionId || trace.messageId !== messageId) {
+    // 用契约错误而不是传输错误：这条要说清的是「响应属于另一条消息」，
+    // 而传输错误会被 describeLiveError 换成「请用同一个 command ID 查询回执」那种提交口径。
+    throw new RelayContractError("会话工具轮次的响应身份与请求的消息不符：响应为 "
+      + `${trace.sessionId}/${trace.messageId}，请求为 ${sessionId}/${messageId}。`);
+  }
+  return trace;
+}
+
+/**
  * 发一条消息。三个分支是**排他的**，不是可选字段的组合：
  * 普通档带 intent 或 skill_ref；助手档两个都不带——服务端会以 409 拒绝助手档的
  * intent 与 Skill（ADR-018、命令契约 §10.60.4），客户端就不该把这条路留出来。
@@ -229,7 +248,7 @@ export async function getAssistLivePreview(http: RelayHttp, sessionId: string, m
  * `attachmentIds` 只在有图片附件时出现：它进命令载荷 hash，重放按原 ids 核对，
  * 所以重试必须沿同一组 ids（不重新上传、不换 id）。没有附件时载荷逐字不变。
  */
-export async function requestAssistMessage(http: RelayHttp, input: { sessionId: string; commandId: string; content: string; sourceRefs: readonly RelayAssistSourceRef[]; recordLearning?: boolean; expectedModelSelectionRevision?: string; attachmentIds?: readonly string[] } & ( { intent: "DISCUSS" | "PROPOSE_CANDIDATE" | "PROPOSE_TASK"; skillRef?: never; skillInput?: never } | { intent?: never; skillRef: { id: string; version: string }; skillInput: RelaySkillInput } | { intent?: never; skillRef?: never; skillInput?: never } )): Promise<{ userMessageId: string; assistantMessageId: string }> {
+export async function requestAssistMessage(http: RelayHttp, input: { sessionId: string; commandId: string; content: string; sourceRefs: readonly RelayAssistSourceRef[]; recordLearning?: boolean; expectedModelSelectionRevision?: string; attachmentIds?: readonly string[]; chatMode?: RelayChatMode } & ( { intent: "DISCUSS" | "PROPOSE_CANDIDATE" | "PROPOSE_TASK"; skillRef?: never; skillInput?: never } | { intent?: never; skillRef: { id: string; version: string }; skillInput: RelaySkillInput } | { intent?: never; skillRef?: never; skillInput?: never } )): Promise<{ userMessageId: string; assistantMessageId: string; chatMode: RelayChatMode | null; goalId: string | null }> {
   const body = await http.request(http.workspacePath(`/assist-sessions/${encodeURIComponent(input.sessionId)}/messages`), {
     method: "POST", body: JSON.stringify({ command_id: input.commandId, content: input.content,
       source_refs: input.sourceRefs.map(assistSourceBody),
@@ -237,13 +256,19 @@ export async function requestAssistMessage(http: RelayHttp, input: { sessionId: 
       ...(input.expectedModelSelectionRevision === undefined ? {} : { expected_model_selection_revision: input.expectedModelSelectionRevision }),
       ...(input.attachmentIds === undefined || input.attachmentIds.length === 0 ? {}
         : { attachment_ids: [...input.attachmentIds] }),
+      // 0127：模式随消息一起提交。`/plan 内容` 因此只有一次往返，模式与消息同一个事务。
+      ...(input.chatMode === undefined ? {} : { chat_mode: input.chatMode }),
       ...(input.skillRef ? { skill_ref: input.skillRef, skill_input: input.skillInput }
         : input.intent ? { intent: input.intent } : {}) }) }, 202);
   try {
     const envelope = commandEnvelopeFrom(body);
     if (envelope.commandId !== input.commandId || envelope.result.session_id !== input.sessionId) throw new Error("command mismatch");
     return { userMessageId: string(envelope.result, "user_message_id", "assist result"),
-      assistantMessageId: string(envelope.result, "assistant_message_id", "assist result") };
+      assistantMessageId: string(envelope.result, "assistant_message_id", "assist result"),
+      chatMode: envelope.result.chat_mode === undefined ? null
+        : string(envelope.result, "chat_mode", "assist result") as RelayChatMode,
+      goalId: envelope.result.goal_id === undefined ? null
+        : nullableString(envelope.result, "goal_id", "assist result") };
   } catch { throw new RelayTransportError("Assist 消息回执无法核对，请查询原 command_id。"); }
 }
 
@@ -257,10 +282,71 @@ export async function cancelAssistMessage(http: RelayHttp, messageId: string, co
   } catch { throw new RelayTransportError("Assist 取消回执无法核对，请查询原 command_id。"); }
 }
 
+/**
+ * 0122：把一条排队消息并入正在生成的那一轮。
+ *
+ * 与取消同一形状、同一幂等键；服务端只记录意图，真正接进上下文由生成方在下一次
+ * 模型请求前完成。回执里的 `STEER_REQUESTED` 只表示「已受理」，不等于已经并入。
+ */
+export async function steerAssistMessage(http: RelayHttp, messageId: string, commandId: string): Promise<string> {
+  const body = await http.request(http.workspacePath(`/assist-messages/${encodeURIComponent(messageId)}/steer`), {
+    method: "POST", body: JSON.stringify({ command_id: commandId }) }, 200);
+  try {
+    const envelope = commandEnvelopeFrom(body);
+    if (envelope.commandId !== commandId || envelope.result.message_id !== messageId) throw new Error("command mismatch");
+    return string(envelope.result, "status", "assist steer result");
+  } catch { throw new RelayTransportError("Assist 插话回执无法核对，请查询原 command_id。"); }
+}
+
 export async function getAssistProposals(http: RelayHttp, sessionId: string): Promise<readonly RelayAssistProposal[]> {
   const query = new URLSearchParams({ session_id: sessionId });
   const body = object(await http.request(`${http.workspacePath("/assist-proposals")}?${query}`), "assist proposals");
   return array(body, "items", "assist proposals").map(assistProposalFrom);
+}
+
+/**
+ * Workspace 默认工作目录（0117 / HTTP §10.96）。
+ *
+ * 读只返回投影；设置与清除是两条幂等命令，都带 `expected_revision`，并且只引用
+ * 已经登记的受管资源——它们不调用 Open、不建项目/连接/策略、不扩大任何权限。
+ * 回执必须同时核对命令身份、Workspace、目标资源与修订：对不上就只报「无法核对」，
+ * 由调用方按原 command_id 查询，绝不换 ID 重发。
+ */
+export async function getWorkspaceDefaultDirectory(http: RelayHttp): Promise<RelayWorkspaceDefaultDirectory> {
+  return workspaceDefaultDirectoryFrom(await http.request(http.workspacePath("/default-working-directory")));
+}
+
+async function postWorkspaceDefaultDirectory(http: RelayHttp, input: {
+  commandId: string; expectedRevision: DecimalRevision; resourceId: string | null;
+}): Promise<RelayWorkspaceDefaultDirectoryResult> {
+  const clearing = input.resourceId === null;
+  const body = await http.request(http.workspacePath(
+    clearing ? "/default-working-directory/clear" : "/default-working-directory"), { method: "POST",
+    body: JSON.stringify({ command_id: input.commandId, expected_revision: input.expectedRevision,
+      ...(clearing ? {} : { resource_id: input.resourceId }) }) }, 200);
+  try {
+    const envelope = commandEnvelopeFrom(body);
+    if (envelope.commandId !== input.commandId) throw new Error("command mismatch");
+    const result = { workspaceId: string(envelope.result, "workspace_id", "workspace default directory result"),
+      resourceId: nullableString(envelope.result, "resource_id", "workspace default directory result"),
+      revision: decimal(envelope.result, "revision", "workspace default directory result") };
+    if (result.workspaceId !== http.workspaceId || result.resourceId !== input.resourceId) {
+      throw new Error("command mismatch");
+    }
+    return result;
+  } catch { throw new RelayTransportError("默认工作目录回执无法核对，请查询原 command_id。"); }
+}
+
+export function setWorkspaceDefaultDirectory(http: RelayHttp, input: {
+  commandId: string; expectedRevision: DecimalRevision; resourceId: string;
+}): Promise<RelayWorkspaceDefaultDirectoryResult> {
+  return postWorkspaceDefaultDirectory(http, { ...input });
+}
+
+export function clearWorkspaceDefaultDirectory(http: RelayHttp, input: {
+  commandId: string; expectedRevision: DecimalRevision;
+}): Promise<RelayWorkspaceDefaultDirectoryResult> {
+  return postWorkspaceDefaultDirectory(http, { ...input, resourceId: null });
 }
 
 /** 文件夹入口：可能建立最小 Project 与受管资源，因此是写命令；页面读取不得调用它。 */

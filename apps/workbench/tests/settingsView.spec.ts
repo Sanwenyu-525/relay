@@ -3,7 +3,6 @@ import { act } from "react";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { resolveVerificationState, type ModelVerificationStateKind }
   from "../src/views/SettingsView";
-import { PLAN_EXECUTION_STORAGE_KEY } from "../src/lib/planExecutionPreference";
 import { DomWrapper, flush, mountWorkbench } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
@@ -12,7 +11,7 @@ const root = `${baseUrl}/api/v1/workspaces/${workspaceId}`;
 let unmount: (() => void) | null = null;
 
 afterEach(() => { unmount?.(); unmount = null; resetRelayConnectionForTest(); vi.unstubAllGlobals();
-  localStorage.removeItem(PLAN_EXECUTION_STORAGE_KEY); });
+  localStorage.removeItem("relay.workbench.planExecution"); });
 function connect() { activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-bearer-token-0123456789abcdef" }); }
 function response(body: unknown, status = 200): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
@@ -87,6 +86,10 @@ describe("设置页模型端口状态", () => {
       if (url === `${root}/model-port`) return response({ provider: "fake", configured: false, model: null, base_url: null });
       if (url === `${root}/model-port/verification`) return response(verificationBody({
         current_config_fingerprint: null, worker_startup_validation: "NOT_CONFIGURED" }));
+      // 设置页现在还会读 Workspace 记忆设置：桩必须像真服务一样回答，否则页面会多出一处
+      // 「记忆设置读取失败」，把这条用例的「模型端口读取失败」断言搅成页面级噪音。
+      if (url === `${root}/memory-settings`) return response({ workspace_id: workspaceId,
+        revision: "0", recall_enabled: true, automatic_compaction: true });
       throw new Error(`Unexpected ${url}`);
     }));
     const mounted = await mountModelSettings(); unmount = mounted.unmount;
@@ -125,6 +128,10 @@ describe("设置页模型端口状态", () => {
         stored = verificationBody({ last, matches_current_config: true });
         return response(last);
       }
+      // 设置页现在还会读 Workspace 记忆设置：桩必须像真服务一样回答，否则页面会多出一处
+      // 「记忆设置读取失败」，把这条用例的「模型端口读取失败」断言搅成页面级噪音。
+      if (url === `${root}/memory-settings`) return response({ workspace_id: workspaceId,
+        revision: "0", recall_enabled: true, automatic_compaction: true });
       throw new Error(`Unexpected ${url}`);
     }));
     const mounted = await mountModelSettings(); unmount = mounted.unmount;
@@ -166,6 +173,10 @@ describe("设置页模型端口状态", () => {
         last: lastBody({ ok: false, error_category: "AUTH" }),
         matches_current_config: true
       }));
+      // 设置页现在还会读 Workspace 记忆设置：桩必须像真服务一样回答，否则页面会多出一处
+      // 「记忆设置读取失败」，把这条用例的「模型端口读取失败」断言搅成页面级噪音。
+      if (url === `${root}/memory-settings`) return response({ workspace_id: workspaceId,
+        revision: "0", recall_enabled: true, automatic_compaction: true });
       throw new Error(`Unexpected ${url}`);
     }));
     const mounted = await mountModelSettings(); unmount = mounted.unmount;
@@ -190,6 +201,10 @@ describe("设置页模型端口状态", () => {
         last: lastBody(),
         matches_current_config: false
       }));
+      // 设置页现在还会读 Workspace 记忆设置：桩必须像真服务一样回答，否则页面会多出一处
+      // 「记忆设置读取失败」，把这条用例的「模型端口读取失败」断言搅成页面级噪音。
+      if (url === `${root}/memory-settings`) return response({ workspace_id: workspaceId,
+        revision: "0", recall_enabled: true, automatic_compaction: true });
       throw new Error(`Unexpected ${url}`);
     }));
     const mounted = await mountModelSettings(); unmount = mounted.unmount;
@@ -211,6 +226,10 @@ describe("设置页模型端口状态", () => {
         model: "gpt-test", base_url: "https://api.example.com/v1" });
       if (url === `${root}/model-port/verification`) return response(verificationBody({ last: null, matches_current_config: false }));
       if (url === `${root}/model-port/verify` && init?.method === "POST") return response(lastBody());
+      // 设置页现在还会读 Workspace 记忆设置：桩必须像真服务一样回答，否则页面会多出一处
+      // 「记忆设置读取失败」，把这条用例的「模型端口读取失败」断言搅成页面级噪音。
+      if (url === `${root}/memory-settings`) return response({ workspace_id: workspaceId,
+        revision: "0", recall_enabled: true, automatic_compaction: true });
       throw new Error(`Unexpected ${url}`);
     }));
     const mounted = await mountModelSettings(); unmount = mounted.unmount;
@@ -232,6 +251,10 @@ describe("设置页模型端口状态", () => {
         model: null, base_url: null });
       if (url === `${root}/model-port/verification`) return response(verificationBody({
         current_config_fingerprint: null, worker_startup_validation: "FAILED" }));
+      // 设置页现在还会读 Workspace 记忆设置：桩必须像真服务一样回答，否则页面会多出一处
+      // 「记忆设置读取失败」，把这条用例的「模型端口读取失败」断言搅成页面级噪音。
+      if (url === `${root}/memory-settings`) return response({ workspace_id: workspaceId,
+        revision: "0", recall_enabled: true, automatic_compaction: true });
       throw new Error(`Unexpected ${url}`);
     }));
     const mounted = await mountModelSettings(); unmount = mounted.unmount;
@@ -246,6 +269,10 @@ describe("设置页模型端口状态", () => {
       if (url === `${root}/model-port`) return response({ provider: "fake", configured: false, model: null, base_url: null });
       if (url === `${root}/model-port/verification`) return response(verificationBody({
         current_config_fingerprint: null }));
+      // 设置页现在还会读 Workspace 记忆设置：桩必须像真服务一样回答，否则页面会多出一处
+      // 「记忆设置读取失败」，把这条用例的「模型端口读取失败」断言搅成页面级噪音。
+      if (url === `${root}/memory-settings`) return response({ workspace_id: workspaceId,
+        revision: "0", recall_enabled: true, automatic_compaction: true });
       throw new Error(`Unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
@@ -257,53 +284,27 @@ describe("设置页模型端口状态", () => {
     expect(text).toContain("同一事项只提醒一次");
     expect(text).not.toContain("合并为一条通知");
     expect(text).toContain("暂不可修改");
-    // 不提供假开关：尚无写接口的语言与通知仍只有只读说明；唯一真正接线的控件是
-    // 「计划执行方式」（本设备偏好），它必须出现在执行策略面板里。
-    const controls = mounted.wrapper.get("#settings-panel-execution").findAll("select");
-    expect(controls).toHaveLength(1);
-    expect(controls[0]?.attributes("data-testid")).toBe("settings-plan-execution-mode");
+    // 不提供假开关：尚无写接口的语言与通知仍只有只读说明。
+    // 2026-10-20 第二轮撤掉了「计划执行方式」：它只是把同一件事再确认一次，
+    // 而推进已由服务端负责。执行策略面板里因此不再有任何 select。
+    expect(mounted.wrapper.get("#settings-panel-execution").findAll("select")).toHaveLength(0);
+    expect(mounted.wrapper.find('[data-testid="plan-execution"]').exists()).toBe(false);
   });
 
-  it("计划执行方式：草稿不立即生效，保存后仅本设备保留，损坏值回落自动执行", async () => {
+  it("不再有本设备的「计划执行方式」偏好：推进由服务端负责", async () => {
+    // 撤掉这个开关的理由不是「少一个设置」，而是它此前是**唯一的第二个推进 Owner**：
+    // 选「需要人工确认」时前端必须自己发 applications，页面关掉就会把一条已授权的
+    // 请求留在 READY。撤掉之后前端不再持有推进责任（工作台 §43）。
+    localStorage.setItem("relay.workbench.planExecution", "CONFIRM");
     const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
     await mounted.wrapper.get('[data-testid="settings-group-execution"]').trigger("click");
-    const mode = mounted.wrapper.get('[data-testid="settings-plan-execution-mode"]');
-    expect((mode.element as HTMLSelectElement).value).toBe("AUTO");
-    await mode.setValue("CONFIRM");
-    expect(localStorage.getItem(PLAN_EXECUTION_STORAGE_KEY)).toBeNull();
-    await mounted.wrapper.get('[data-testid="plan-execution"] form').trigger("submit");
-    expect(localStorage.getItem(PLAN_EXECUTION_STORAGE_KEY)).toBe("CONFIRM");
-    expect(mounted.wrapper.get('[data-testid="plan-execution"]').text()).toContain("仅在本设备生效");
-    // 不向服务端打听偏好：这个设置只写本设备存储。
+    expect(mounted.wrapper.find('[data-testid="plan-execution"]').exists()).toBe(false);
+    expect(mounted.wrapper.find('[data-testid="settings-plan-execution-mode"]').exists()).toBe(false);
+    expect(mounted.wrapper.text()).not.toContain("计划执行方式");
+    // 遗留的本地键不会被读取，也不会被清理：那是用户的浏览器存储，不是本页的事实。
+    expect(localStorage.getItem("relay.workbench.planExecution")).toBe("CONFIRM");
     expect(fetchMock).not.toHaveBeenCalled();
-    mounted.unmount(); unmount = null;
-    const reloaded = await mountWorkbench("/settings"); unmount = reloaded.unmount;
-    await reloaded.wrapper.get('[data-testid="settings-group-execution"]').trigger("click");
-    expect((reloaded.wrapper.get('[data-testid="settings-plan-execution-mode"]').element as HTMLSelectElement).value).toBe("CONFIRM");
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("计划执行方式：本地值无法识别时回落自动执行，不猜成某一种方式", async () => {
-    localStorage.setItem(PLAN_EXECUTION_STORAGE_KEY, "MAYBE");
-    const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
-    await mounted.wrapper.get('[data-testid="settings-group-execution"]').trigger("click");
-    expect((mounted.wrapper.get('[data-testid="settings-plan-execution-mode"]').element as HTMLSelectElement).value).toBe("AUTO");
-  });
-
-  it("计划执行方式：存储不可写时保留旧值并显示失败", async () => {
-    localStorage.setItem(PLAN_EXECUTION_STORAGE_KEY, "AUTO");
-    const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
-    await mounted.wrapper.get('[data-testid="settings-group-execution"]').trigger("click");
-    await mounted.wrapper.get('[data-testid="settings-plan-execution-mode"]').setValue("CONFIRM");
-    const write = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("quota"); });
-    await mounted.wrapper.get('[data-testid="plan-execution"] form').trigger("submit");
-    expect(mounted.wrapper.get('[role="alert"]').text()).toContain("设置未保存");
-    expect(localStorage.getItem(PLAN_EXECUTION_STORAGE_KEY)).toBe("AUTO");
-    write.mockRestore();
-    await mounted.wrapper.get('[data-testid="plan-execution"] form').trigger("submit");
-    expect(mounted.wrapper.find('[role="alert"]').exists()).toBe(false);
-    expect(localStorage.getItem(PLAN_EXECUTION_STORAGE_KEY)).toBe("CONFIRM");
   });
 
   it("live 显示真实 Provider 的模型与端点，服务端密钥字段即使出现也不渲染", async () => {
@@ -314,6 +315,10 @@ describe("设置页模型端口状态", () => {
       if (url === `${root}/model-port`) return response({ provider: "openai-compatible", configured: true,
         model: "gpt-test", base_url: "https://api.example.com/v1", api_key: "sk-leak-attempt" });
       if (url === `${root}/model-port/verification`) return response(verificationBody());
+      // 设置页现在还会读 Workspace 记忆设置：桩必须像真服务一样回答，否则页面会多出一处
+      // 「记忆设置读取失败」，把这条用例的「模型端口读取失败」断言搅成页面级噪音。
+      if (url === `${root}/memory-settings`) return response({ workspace_id: workspaceId,
+        revision: "0", recall_enabled: true, automatic_compaction: true });
       throw new Error(`Unexpected ${url}`);
     }));
     const mounted = await mountModelSettings(); unmount = mounted.unmount;
@@ -327,8 +332,47 @@ describe("设置页模型端口状态", () => {
     expect(states.text()).not.toContain("sk-leak-attempt");
   });
 
-  it("读取失败就地显示错误并可重读，成功后清除错误", async () => {
+  it("live 可声明图片输入能力：保存后重读，结论来源变成「你的声明」", async () => {
     connect();
+    let imageInput = "MODEL_NOT_IN_CATALOG";
+    const writes: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/attention/interventions")) return response({ items: [] });
+      if (url === `${root}/model-port`) return response({ provider: "openai-compatible",
+        configured: true, model: "agnes-3.0-flash", base_url: "https://api.example.com/v1",
+        image_input: imageInput,
+        image_input_source: imageInput === "DECLARED" ? "DECLARED" : "NONE" });
+      if (url === `${root}/model-port/verification`) return response(verificationBody());
+      if (url === `${root}/model-capabilities/openai-compatible/agnes-3.0-flash`
+        && init?.method === "PUT") {
+        writes.push(String(init.body));
+        imageInput = "DECLARED";
+        return response({ provider: "openai-compatible", source_model_id: "agnes-3.0-flash",
+          image_input: true, note: "官方文档写明原生多模态",
+          declared_at: "2026-10-20T00:00:00Z", updated_at: "2026-10-20T00:00:00Z" });
+      }
+      if (url === `${root}/memory-settings`) return response({ workspace_id: workspaceId,
+        revision: "0", recall_enabled: true, automatic_compaction: true });
+      throw new Error(`Unexpected ${url} ${init?.method ?? "GET"}`);
+    }));
+    const mounted = await mountModelSettings(); unmount = mounted.unmount;
+    // 声明前：目录里没有这个自建模型，界面如实说「未确认」而不是「不支持」。
+    expect(mounted.wrapper.get('[data-testid="model-port-image-input"]').text()).toContain("未确认");
+    await mounted.wrapper.get('[data-testid="model-image-input-note"]')
+      .setValue("官方文档写明原生多模态");
+    await mounted.wrapper.get('[data-testid="model-image-input-support"]').trigger("click");
+    await flush();
+    expect(writes).toHaveLength(1);
+    expect(JSON.parse(writes[0]!)).toEqual({ image_input: true, note: "官方文档写明原生多模态" });
+    expect(mounted.wrapper.get('[data-testid="model-image-input-saved"]').text())
+      .toContain("已声明支持图片输入");
+    // 保存后按同一入口重读：结论与来源都必须变，不能只更新本地文案。
+    expect(mounted.wrapper.get('[data-testid="model-port-image-input"]').text())
+      .toContain("支持（你的声明）");
+  });
+
+  it("读取失败就地显示错误并可重读，成功后清除错误", async () => {    connect();
     let healthy = true;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -339,6 +383,10 @@ describe("设置页模型端口状态", () => {
           ? response(verificationBody())
           : response({ provider: "fake", configured: false, model: null, base_url: null });
       }
+      // 设置页现在还会读 Workspace 记忆设置：桩必须像真服务一样回答，否则页面会多出一处
+      // 「记忆设置读取失败」，把这条用例的「模型端口读取失败」断言搅成页面级噪音。
+      if (url === `${root}/memory-settings`) return response({ workspace_id: workspaceId,
+        revision: "0", recall_enabled: true, automatic_compaction: true });
       throw new Error(`Unexpected ${url}`);
     }));
     const first = await mountModelSettings(); first.unmount();
@@ -352,13 +400,16 @@ describe("设置页模型端口状态", () => {
     await new DomWrapper(retry).trigger("click");
     await flush();
     expect(mounted.wrapper.get('[data-testid="model-port-status"]').exists()).toBe(true);
-    expect(mounted.wrapper.text()).not.toContain("读取失败：");
+    // 只断言模型端口那一处错误已清除：整页还有默认目录与记忆设置各自的读取结果，
+    // 页面级否定断言会把它们的真实状态一起读成「模型端口失败」。
+    expect(mounted.wrapper.find('[data-testid="verify-error"]').exists()).toBe(false);
+    expect(mounted.wrapper.text()).not.toContain("模型端口读取失败");
   });
 });
 
 describe("验证六态解析", () => {
   const configured = { provider: "openai-compatible", configured: true,
-    model: "gpt-test", baseUrl: null, maxCallTokens: null } as const;
+    model: "gpt-test", baseUrl: null, maxCallTokens: null, imageInput: "UNKNOWN", imageInputSource: "NONE" } as const;
   it("覆盖六态且互斥", () => {
     const cases: readonly { input: Parameters<typeof resolveVerificationState>[0];
       expected: ModelVerificationStateKind }[] = [
@@ -383,10 +434,10 @@ describe("验证六态解析", () => {
         verifying: false },
         expected: "VERIFY_FAILED" },
       { input: { status: { provider: "fake", configured: false, model: null, baseUrl: null,
-        maxCallTokens: null }, verification: null, verifying: false },
+        maxCallTokens: null, imageInput: "UNKNOWN", imageInputSource: "NONE" }, verification: null, verifying: false },
         expected: "UNCONFIGURED" },
       { input: { status: { provider: "invalid", configured: false, model: null, baseUrl: null,
-        maxCallTokens: null }, verification: null, verifying: false },
+        maxCallTokens: null, imageInput: "UNKNOWN", imageInputSource: "NONE" }, verification: null, verifying: false },
         expected: "UNAVAILABLE" },
     ];
     for (const entry of cases) {

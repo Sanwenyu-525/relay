@@ -9,7 +9,12 @@
 # 可选参数：
 #   -ConfigPath <绝对路径>   桌面 desktop.env（默认优先 .relay-test\desktop.env，其次 %APPDATA%\dev.relay.agent\desktop.env）
 #   -FrontendPort 5173       Vite 端口（需与 src-tauri DEV_ORIGIN/tauri.conf devUrl 一致，改动需同步 Rust 常量）
-#   -RefreshApi              重新构建 apps/api 并刷新 src-tauri 暂存资源
+#   -RefreshApi              强制重新构建 apps/api 并刷新 src-tauri 暂存资源
+#                            缺省时会对比源码与暂存产物的写入时间：源码更新则自动重建，
+#                            因此菜单 6 也不会再悄悄跑旧的暂存 API。
+#   -SkipApiRefresh         关闭上面的自动检测（只想开窗口、不重建时用）
+#   -SkipNativeBuild        关闭 computer-runtime / file-io-helper 的自动检测与重建
+#                           缺省时按源码写入时间判断：源码更新或产物缺失就自动 cargo build --release
 #   -SkipFrontendCheck       已自行启动 Vite 时跳过启动检查
 # 限制：与打包版共用单实例互斥；运行打包版时请先关闭，反之亦然。
 # Rust 源码变更由 tauri dev 自动重编译并重启应用；前端由 Vite HMR 热更新。
@@ -19,6 +24,8 @@ param(
   [string]$ConfigPath,
   [int]$FrontendPort = 5173,
   [switch]$RefreshApi,
+  [switch]$SkipApiRefresh,
+  [switch]$SkipNativeBuild,
   [switch]$SkipFrontendCheck,
   [switch]$RunForeground  # 内部参数：-Action start 以隐藏窗口后台拉起本脚本时使用
 )
@@ -29,7 +36,6 @@ $repoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScript
 $desktopRoot = Join-Path $repoRoot 'apps\desktop'
 $tauriRoot = Join-Path $desktopRoot 'src-tauri'
 $resourceRoot = Join-Path $tauriRoot 'resources'
-$apiRoot = Join-Path $repoRoot 'apps\api'
 $workbenchRoot = Join-Path $repoRoot 'apps\workbench'
 $node = Join-Path $repoRoot '.research\runtime-cache\node-v24.21.0-win-x64\node.exe'
 $corepack = Join-Path (Split-Path -Parent $node) 'node_modules\corepack\dist\corepack.js'
@@ -73,6 +79,8 @@ if ($Action -eq 'start') {
     '-RunForeground', '-FrontendPort', "$FrontendPort")
   if ($ConfigPath) { $runnerArgs += @('-ConfigPath', $ConfigPath) }
   if ($RefreshApi) { $runnerArgs += '-RefreshApi' }
+  if ($SkipApiRefresh) { $runnerArgs += '-SkipApiRefresh' }
+  if ($SkipNativeBuild) { $runnerArgs += '-SkipNativeBuild' }
   if ($SkipFrontendCheck) { $runnerArgs += '-SkipFrontendCheck' }
   $runner = Start-Process -FilePath 'powershell' -ArgumentList $runnerArgs -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput $logOut -RedirectStandardError $logErr
@@ -170,21 +178,18 @@ if (-not (Test-Path (Join-Path $resourceRoot 'api\dist\src\main.js')) -or
     -not (Test-Path (Join-Path $resourceRoot 'node.exe'))) {
   throw 'src-tauri\resources 缺少打包资源；请先运行 dev-stack.bat Build 生成一次基础资源。'
 }
-if ($RefreshApi) {
-  Invoke-Pnpm $repoRoot @('--filter', '@relay-agent/api', 'build')
-  Remove-Item -LiteralPath (Join-Path $resourceRoot 'api') -Recurse -Force
-  Invoke-Pnpm $repoRoot @('--config.node-linker=hoisted', '--filter', '@relay-agent/api', 'deploy', '--prod', (Join-Path $resourceRoot 'api'))
-  Write-Host '已重新构建并暂存 apps/api。'
-}
+# 刷新判据已抽到 stage-api.ps1：test-desktop.ps1 必须在补迁移之前用同一份实现刷新暂存，
+# 否则「先迁移、后刷新」会让窗口内的迁移清单超前于数据库（SCHEMA_UNAVAILABLE）。
+# -RefreshApi 强制刷新；-SkipApiRefresh 跳过；都不给时按源码/暂存写入时间自动判断。
+& (Join-Path $PSScriptRoot 'stage-api.ps1') -RepoRoot $repoRoot -Force:$RefreshApi -Skip:$SkipApiRefresh
+
 # tauri-build 在编译期就校验 bundle.resources 的每一条路径，缺任何一条 `tauri dev` 都编不过
 # （报错是 build script 的 `resource path ... doesn't exist`，看不出缺的是打包资源）。
-# 这两项不依赖 release 流水线，dev 就地补齐：runtime 取 computer-runtime 的 release 产物，
-# 扩展只拷清单里那四个文件，与 build-release.ps1 的暂存内容同源。
-$computerExe = Join-Path $repoRoot 'apps\computer-runtime\target\release\relay-computer-runtime.exe'
-if (-not (Test-Path -LiteralPath $computerExe -PathType Leaf)) {
-  throw "缺少 $computerExe；先跑 cargo build --release --manifest-path apps\computer-runtime\Cargo.toml，或 dev-stack.bat Build 生成一次基础资源。"
-}
-Copy-Item -LiteralPath $computerExe -Destination (Join-Path $resourceRoot 'relay-computer-runtime.exe') -Force
+# computer-runtime / file-io-helper 是独立 crate 的 release 产物，`tauri dev` 不会重编译它们：
+# 以前缺 exe 只报一句「先跑 cargo build」，源码改了却跑上一版 exe 则完全没有提示。
+# 现在由 ensure-native-tools.ps1 按源码写入时间判断，落后或缺失就地 cargo build --release，
+# 并把 resources 里的副本同步到新产物（resources 里那两个 exe 只由它维护）。
+& (Join-Path $PSScriptRoot 'ensure-native-tools.ps1') -RepoRoot $repoRoot -Skip:$SkipNativeBuild
 $extensionRoot = Join-Path $repoRoot 'apps\browser-extension'
 $extensionStage = Join-Path $resourceRoot 'browser-extension'
 New-Item -ItemType Directory -Path $extensionStage -Force | Out-Null
@@ -196,7 +201,15 @@ foreach ($file in @('manifest.json', 'background.js', 'options.html', 'options.j
 foreach ($name in @('node.exe', 'relay-file-io-helper.exe')) {
   $target = Join-Path $tauriRoot $name
   $source = Join-Path $resourceRoot $name
-  if (-not (Test-Path $target)) { Copy-Item -LiteralPath $source -Destination $target }
+  if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "缺少打包资源：$source；请先运行 dev-stack.bat Build 生成一次基础资源。" }
+  # dev 模式的 Resource 目录解析到 src-tauri 根，窗口实际用的是这里的副本。
+  # 只在目标缺失时拷，会把 ensure-native-tools 刚重建的 exe 挡在门外（旧副本一直留着），
+  # 因此按写入时间判断：源比目标新就覆盖。Copy-Item 保留源时间戳，重复启动不会再拷一次。
+  $needsCopy = $true
+  if (Test-Path -LiteralPath $target -PathType Leaf) {
+    $needsCopy = (Get-Item -LiteralPath $source).LastWriteTimeUtc -gt (Get-Item -LiteralPath $target).LastWriteTimeUtc
+  }
+  if ($needsCopy) { Copy-Item -LiteralPath $source -Destination $target -Force }
 }
 $apiStage = Join-Path $tauriRoot 'api'
 if (-not (Test-Path $apiStage)) {

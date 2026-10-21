@@ -53,6 +53,11 @@
 .review-facts > div { display: grid; grid-template-columns: minmax(7rem, 0.3fr) minmax(0, 1fr); gap: var(--relay-space-4); padding: var(--relay-space-2) 0; }
 .review-facts dt { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .review-facts dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+/* 判断依据逐条已是用户语言，原 JSON 只作为技术详情折叠保留（面板共用，故基座在此）：
+   展开后等宽、可换行、横向可滚，长哈希不撑破单列或右栏宽度。 */
+.review-raw-data { margin: var(--relay-space-4) 0 0; }
+.review-raw-data > summary { cursor: pointer; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+.review-raw-json { margin: var(--relay-space-2) 0 0; padding: var(--relay-space-4); max-width: 100%; overflow: auto; background: var(--relay-color-bg-subtle); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-control); font-family: var(--relay-font-family-code); font-size: var(--relay-font-size-meta); white-space: pre-wrap; overflow-wrap: anywhere; }
 .review-decision { margin-top: var(--relay-space-6); padding-top: var(--relay-space-4); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .review-actions { display: flex; flex-wrap: wrap; gap: var(--relay-space-3); margin-top: var(--relay-space-4); }
 .review-empty { color: var(--relay-color-text-secondary); }

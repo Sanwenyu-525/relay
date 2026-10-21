@@ -357,6 +357,32 @@ test('P08 a second crash after durable fence resumes reconciliation with the sam
     [before.rows[0]?.operation_id, 'SUCCEEDED', 2]);
 });
 
+test('P08 恢复重入依据结构化 fence 事实，审计文本被裁剪后仍成立', async () => {
+  const f = await fixture();
+  await advanceToPersist(f);
+  await assert.rejects(advanceRunStep(app.db, { runId: f.runId, workerId: f.workerId, storage: f.storage,
+    hooks: { afterEffectDispatch: async () => { throw new SimulatedWorkerCrash('after dispatch'); } } }), SimulatedWorkerCrash);
+  await assert.rejects(recoverStoppedWorker(app.db, { runId: f.runId, stoppedWorkerId: f.workerId,
+    stoppedEvidence: 'test: first worker process stopped', storage: f.storage,
+    hooks: { afterFence: async () => { throw new SimulatedWorkerCrash('after fence commit'); } } }), SimulatedWorkerCrash);
+  // 审计记录只是追溯材料；把它删掉不改变「旧 Worker 已停止」这一结构化事实。
+  // 应用角色没有 DELETE 权限，用迁移角色模拟留存策略裁剪。
+  const auditor = openDatabase(MIGRATION_DATABASE_URL, 'relay-api-test-p08-audit-trim');
+  try {
+    await sql`delete from activity_records where event_type = 'RUN_WORKER_FENCED'
+      and fact_refs ->> 'run_id' = ${f.runId}`.execute(auditor.db);
+  } finally {
+    await auditor.close();
+  }
+  assert.ok((await scanRecoveryCandidates(app.db)).some((row) => row.run_id === f.runId && row.worker_id === f.workerId));
+  const recovered = await recoverStoppedWorker(app.db, { runId: f.runId, stoppedWorkerId: f.workerId,
+    stoppedEvidence: 'test: reconfirmed first worker process stopped', storage: f.storage });
+  assert.equal(recovered.fenced, false);
+  assert.deepEqual(recovered.unresolved_operation_ids, []);
+  const result = await advanceRunStep(app.db, { runId: f.runId, workerId: `${f.workerId}-next`, storage: f.storage });
+  assert.equal(result.status, 'STEP_SUCCEEDED', JSON.stringify(result));
+});
+
 test('P08 a logged successful publish with missing or damaged content becomes UNKNOWN and blocks Handoff', async () => {
   for (const damage of ['MISSING', 'TAMPERED'] as const) {
     const f = await fixture();

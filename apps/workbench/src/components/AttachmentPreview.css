@@ -1,0 +1,27 @@
+/* 图片的悬停预览（工作台 §33.2 / §33.3），两处消费者共用。
+   挂在 document.body 上、position: fixed：输入卡在发送中 overflow: hidden，
+   对话列本身也是滚动容器，留在锚点子树里会被裁。
+   坐标与上限由 attachmentPreview.tsx 按锚点矩形算出并写在行内样式里，这里只管外观。
+   视觉沿用浮层语言：surface 底、control 边框、floating 阴影，不新增色值。 */
+.attachment-preview {
+  position: fixed;
+  z-index: var(--relay-zIndex-popover);
+  display: block;
+  max-width: calc(100vw - 2 * var(--relay-space-2));
+  padding: var(--relay-space-1);
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-surface);
+  box-shadow: var(--relay-shadow-floating);
+  /* 浮层不接管指针：否则它会挡在锚点上，自己触发 mouseout 造成闪烁。 */
+  pointer-events: none;
+}
+.attachment-preview-image {
+  display: block;
+  width: auto;
+  height: auto;
+  border-radius: var(--relay-radius-control);
+  /* 预览是放大阅读，不是装饰：缩到上限以内保持比例，不裁切。 */
+  object-fit: contain;
+  background: var(--relay-color-bg-subtle);
+}

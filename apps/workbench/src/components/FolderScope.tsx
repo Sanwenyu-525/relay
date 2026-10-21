@@ -19,14 +19,16 @@ import "./FolderScope.css";
  */
 export default function FolderScope({ state, onOpen, onNewConversation }: {
   state: { readonly directory: RelayWorkingDirectory | null;
-    readonly recents: readonly RecentWorkingDirectory[]; readonly busy: boolean };
+    readonly recents: readonly RecentWorkingDirectory[]; readonly busy: boolean;
+    /** 当前作用域的完整路径。细条只显示目录名，完整路径在这里可核对（2026-10-20 用户要求）。 */
+    readonly currentPath?: string | null };
   onOpen: (rootPath: string, projectId?: string | null) => void;
   onNewConversation: () => void;
 }) {
   const [manualPath, setManualPath] = useState("");
   const [pickerError, setPickerError] = useState<string | null>(null);
   const pickerAvailable = nativeFolderPickerAvailable();
-  const { directory, recents, busy } = state;
+  const { directory, recents, busy, currentPath = null } = state;
 
   async function pick() {
     setPickerError(null);
@@ -46,6 +48,9 @@ const needsScopeChoice = directory !== null && directory.candidates.length > 0 &
       (directory.status === "NOT_READY" && directory.reason === "OVERLAPPING_OTHER_PROJECT"));
 
   return <div className="folder-scope" data-testid="folder-scope">
+    {/* 细条只显示目录名（同名目录无法区分），完整路径放在这里可核对；长路径换行，不截断。 */}
+    {currentPath !== null && <p className="folder-scope-path" data-testid="folder-scope-path"
+      title={currentPath}>{currentPath}</p>}
     {recents.length > 0 && <section className="folder-scope-recents" aria-label="最近使用">
       <h3 className="folder-scope-label">最近使用</h3>
       <ul>{recents.map((item) => <li key={item.canonicalRoot}>
@@ -102,6 +107,21 @@ const needsScopeChoice = directory !== null && directory.candidates.length > 0 &
 
     {directory !== null && directory.status === "READY" && <p className="helper-text"
       data-testid="folder-write-readiness">{directory.writeReadiness.detail}</p>}
+    {/* Git 只读随目录成立（2026-10-20，P1-3）：这里只说服务端核对到的事实。
+        子目录不自动授权——`git log` 会返回整个仓库的历史——所以把「在仓库根打开」放在
+        原地，由用户自己决定是否扩大作用域；其余状态（非仓库、停用、撤销、需复核）
+        只如实说明，不提供「一键恢复」。 */}
+    {directory !== null && directory.status === "READY" && directory.gitRead !== null &&
+      <p className="helper-text folder-scope-git" data-testid="folder-git-read"
+        data-git-state={directory.gitRead.state}>
+        {directory.gitRead.state === "REPO_ROOT_REQUIRED" && directory.gitRead.repoRoot !== null
+          ? <>{directory.gitRead.detail}{" "}
+            <button className="text-link" type="button" disabled={busy}
+              data-testid="folder-git-open-root"
+              onClick={() => onOpen(directory.gitRead!.repoRoot!, directory.association?.projectId ?? null)}>
+              在仓库根打开</button></>
+          : directory.gitRead.detail}
+      </p>}
     <p className="folder-scope-footnote">
       <Info aria-hidden="true" className="folder-scope-footnote-icon" />
       新目录打开后可读取本目录文件，默认只读；已配置目录恢复原档位。不会自动读取整棵树或外发内容。

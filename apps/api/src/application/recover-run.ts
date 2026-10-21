@@ -36,6 +36,9 @@ export async function recoverStoppedWorker(db: DbExecutor, input: {
     const stoppedWorkerEpoch = run.worker_epoch;
     const changed = await repositories.runs.fenceWorker(run.id);
     if (changed === undefined) throw new Error('worker fence failed');
+    await repositories.recovery.insertWorkerFence({ runId: run.id,
+      stoppedWorkerId: input.stoppedWorkerId, workerEpoch: changed.worker_epoch,
+      stoppedEvidence: input.stoppedEvidence });
     await repositories.computerDesktopLease.unbindWorker({ runId: run.id,
       workerId: input.stoppedWorkerId, workerEpoch: stoppedWorkerEpoch });
     await repositories.activities.insertActivityRecord({ id: randomUUID(), actorKind: 'SYSTEM',

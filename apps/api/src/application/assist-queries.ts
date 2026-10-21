@@ -2,7 +2,8 @@ import type { AssistMessageRow, AssistProposalRow, AssistSessionRow, AssistSessi
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
 import { resourceNotFound } from './domain-error.js';
-import { recheckAssistSources } from './assist-runner.js';
+import { recheckAssistSources } from './assist-source-content.js';
+import { historicalReplyAvailable } from './assist-memory.js';
 import { createRepositories, withTransaction } from './unit-of-work.js';
 import { availableFrozenSkill, inspectFrozenSkillSnapshot,
   isCallableSkill } from '../skills/first-party-registry.js';
@@ -138,6 +139,7 @@ export async function readAssistLivePreview(db: DbExecutor, storage: ManagedCont
     const history = await r.assist.listCompletedHistory(session.id, message.seq, 20);
     const sourceGroups = [message.sources, ...history.filter((entry) =>
       entry.role === 'ASSISTANT').map((entry) => entry.sources)];
+    if (!await historicalReplyAvailable(r, storage, session, message.id)) return empty;
     if (sourceGroups.reduce((count, group) => count +
         (Array.isArray(group) ? group.length : 21), 0) > 20) return empty;
     for (const sources of sourceGroups) {
@@ -224,7 +226,7 @@ export async function projectAssistSkillMessage(db: DbExecutor, storage: Managed
     const { available, safeSources } = await recheckAssistSources(r, storage, session,
       message.sources);
     return { skill: null, skill_input: null, skill_output: null,
-      content: available ? message.content : null, sources: safeSources,
+      content: available && await historicalReplyAvailable(r, storage, session, message.id) ? message.content : null, sources: safeSources,
       method: { ...identity, action: message.method_action },
       method_argument: message.method_argument };
   }
@@ -239,7 +241,7 @@ export async function projectAssistSkillMessage(db: DbExecutor, storage: Managed
       (session.task_id === null || task?.workspace_id === session.workspace_id &&
         task.project_id === session.project_id);
     return { skill: null, skill_input: null, skill_output: null,
-      content: checked.available && targetAvailable ? message.content : null,
+      content: checked.available && targetAvailable && await historicalReplyAvailable(r, storage, session, message.id) ? message.content : null,
       sources: checked.safeSources.map((source, index) => targetAvailable &&
         source.status === 'AVAILABLE' &&
         Array.isArray(message.sources) ? message.sources[index] : source),

@@ -1,0 +1,59 @@
+/* 记忆来源与保存来源（工作台 §40）：两处都挂在既有 details 层级里，不新增浮层。 */
+
+.message-memory-sources,
+.memory-provenance {
+  margin-top: var(--relay-space-1);
+  font-size: var(--relay-font-size-caption);
+}
+
+.message-memory-sources > summary,
+.memory-provenance > summary {
+  cursor: pointer;
+  color: var(--relay-color-text-secondary);
+  list-style-position: inside;
+}
+
+.message-memory-sources > summary:focus-visible,
+.memory-provenance > summary:focus-visible {
+  outline: var(--relay-focus-width) solid var(--relay-color-focus-ring);
+  outline-offset: 2px;
+}
+
+.message-memory-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-2);
+  padding: var(--relay-space-2) 0 0 var(--relay-space-3);
+}
+
+.message-memory-body p { margin: 0; }
+
+.message-memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-1);
+  margin: 0;
+  padding-left: var(--relay-space-4);
+  overflow-wrap: anywhere;
+}
+
+.message-memory-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--relay-space-2);
+}
+
+.message-memory-list > li[data-available="false"] { color: var(--relay-color-status-warning-text); }
+
+.message-memory-ref {
+  color: var(--relay-color-text-primary);
+  font-family: var(--relay-font-family-code);
+}
+
+.message-memory-tag {
+  padding: 0 var(--relay-space-2);
+  border-radius: 999px;
+  background: var(--relay-color-bg-subtle);
+  color: var(--relay-color-text-secondary);
+}

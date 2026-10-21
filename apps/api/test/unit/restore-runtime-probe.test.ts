@@ -30,7 +30,6 @@ before(async () => {
   await copyFile(join(repository, '.research/runtime-cache/node-v24.21.0-win-x64/node.exe'), join(packageRoot, 'node.exe'));
   const current = JSON.parse(await readFile(join(repository, 'apps/api/package.json'), 'utf8')) as { dependencies: Record<string, string> };
   declarations = current.dependencies;
-  assert.equal(Object.keys(declarations).length, 10);
   await writeFile(join(packageRoot, 'api/package.json'), JSON.stringify({ name: '@relay-agent/api', type: 'module', dependencies: declarations }));
   // This is the existing ordinary full production tree, never synthetic library exports.
   await cp(join(repository, 'test-release/api/node_modules'), join(packageRoot, 'api/node_modules'), { recursive: true, dereference: false });
@@ -48,7 +47,9 @@ before(async () => {
   }
   await inventory(packageRoot);
   for (const [name, expected] of Object.entries(declarations)) {
-    const pkg = JSON.parse(await readFile(join(packageRoot, 'api/node_modules', name, 'package.json'), 'utf8')) as { name: string; version: string };
+    const metadata = join(packageRoot, 'api/node_modules', name, 'package.json');
+    assert.ok(existsSync(metadata), `missing direct dependency fixture: ${name}`);
+    const pkg = JSON.parse(await readFile(metadata, 'utf8')) as { name: string; version: string };
     assert.equal(pkg.name, name); assert.equal(pkg.version, expected);
   }
 });
@@ -76,7 +77,8 @@ test('real packaged production libraries have bound ESM entries and finite offli
     assert.equal(report.format, 'relay-restore-runtime-probe-v1'); assert.equal(report.scope, 'PACKAGED_DEPENDENCIES_OFFLINE_ONLY');
     assert.equal(report.node_version, version); assert.equal(report.node_sha256, resources['node.exe']);
     assert.equal(report.package_metadata_sha256, resources['api/package.json']);
-    assert.equal(report.direct_dependencies.length, 10); assert.ok(report.loaded_file_count > 1000);
+    assert.deepEqual(report.direct_dependencies.map(dependency => dependency.name).sort(),
+      Object.keys(declarations).sort()); assert.ok(report.loaded_file_count > 1000);
     assert.match(report.loaded_files_canonical_sha256, /^[0-9a-f]{64}$/u);
     for (const dependency of report.direct_dependencies) {
       assert.equal(dependency.version, declarations[dependency.name]);

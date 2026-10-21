@@ -2,7 +2,9 @@ import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 
 import { openWorkingDirectory } from '../application/open-working-directory.js';
-import { createCommandHandler, type RouteDependencies } from './envelope.js';
+import { readWorkspaceDefaultDirectory, setWorkspaceDefaultDirectory }
+  from '../application/workspace-default-directory.js';
+import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
 import { commandEnvelopeSchema } from './domain-schemas.js';
 
 const strict = { additionalProperties: false } as const;
@@ -26,6 +28,13 @@ const openResultSchema = Type.Object({
   created_project: Type.Boolean(),
   created_resource: Type.Boolean(),
   candidates: Type.Array(candidateSchema),
+  // 2026-10-20（P1-3）：Git 只读投影。可选是因为旧回执写在这些字段之前，
+  // 重放时必须照样返回，不能因为升级就丢掉一条已提交的回执。
+  git_read: Type.Optional(Type.Object({
+    state: Type.String(),
+    repo_root: Type.Union([Type.String(), Type.Null()]),
+    detail: Type.String(),
+  }, strict)),
   write_readiness: Type.Object({
     status: Type.String(),
     detail: Type.String(),
@@ -51,6 +60,40 @@ const openBody = Type.Object({
  * 取消选择、目录无效和登记失败都由调用方保留草稿并说明，不在这里伪造就绪状态。
  */
 export function registerWorkingDirectoryRoutes(app: FastifyInstance, dependencies: RouteDependencies): void {
+  const rev = Type.String({ pattern: '^(0|[1-9][0-9]*)$' });
+  const params = Type.Object({ workspace_id: uuid }, strict);
+  const result = Type.Object({ workspace_id: uuid, resource_id: Type.Union([uuid, Type.Null()]), revision: rev }, strict);
+  const setBody = Type.Object({ command_id: uuid, expected_revision: rev, resource_id: uuid }, strict);
+  const clearBody = Type.Object({ command_id: uuid, expected_revision: rev }, strict);
+  const projection = Type.Object({ resource_id: Type.Union([uuid, Type.Null()]),
+    canonical_root: Type.Union([Type.String(), Type.Null()]),
+    display_name: Type.Union([Type.String(), Type.Null()]),
+    write_tier: Type.Union([Type.Literal('READ_ONLY'), Type.Literal('ASK'), Type.Literal('AUTO'),
+      Type.Literal('FULL'), Type.Null()]),
+    status: Type.Union([Type.Literal('UNSET'), Type.Literal('READY'), Type.Literal('UNAVAILABLE')]),
+    reason: Type.Union([Type.String(), Type.Null()]), revision: rev }, strict);
+  app.get('/default-working-directory', { schema: { params, response: { 200: projection } } }, async (request, reply) => {
+    try {
+      return await readWorkspaceDefaultDirectory(dependencies.database.executor,
+        (request.params as { workspace_id: string }).workspace_id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+  app.post('/default-working-directory', {
+    schema: { params, body: setBody, response: { 200: commandEnvelopeSchema(result) } },
+  }, createCommandHandler(dependencies, { commandType: 'SetWorkspaceDefaultDirectory', bodySchema: setBody,
+    execute: async ({ executor, params: p, body }) => {
+      const outcome = await setWorkspaceDefaultDirectory(executor, { workspaceId: p.workspace_id ?? '',
+        commandId: body.command_id, expectedRevision: body.expected_revision, resourceId: body.resource_id });
+      return { outcome, result: outcome.result };
+    } }));
+  app.post('/default-working-directory/clear', {
+    schema: { params, body: clearBody, response: { 200: commandEnvelopeSchema(result) } },
+  }, createCommandHandler(dependencies, { commandType: 'ClearWorkspaceDefaultDirectory', bodySchema: clearBody,
+    execute: async ({ executor, params: p, body }) => {
+      const outcome = await setWorkspaceDefaultDirectory(executor, { workspaceId: p.workspace_id ?? '',
+        commandId: body.command_id, expectedRevision: body.expected_revision, resourceId: null });
+      return { outcome, result: outcome.result };
+    } }));
   app.post('/working-directories/open', {
     schema: { body: openBody, response: { 200: commandEnvelopeSchema(openResultSchema) } },
   }, createCommandHandler(dependencies, { commandType: 'OpenWorkingDirectory', bodySchema: openBody,

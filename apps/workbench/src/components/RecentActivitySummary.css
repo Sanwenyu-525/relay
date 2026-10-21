@@ -54,17 +54,47 @@
   cursor: pointer;
 }
 
+/* 紧凑单列时间线（2026-10-20 第五轮：原为两列 2×2）。首页只取 4 条、每条就一两句，
+   两列把 700px 宽切成两条 340px 的窄道，标签被省略号切碎、时间挤到折行——两列在这里换来的是
+   更差的可读性，不是空间利用率。单列后标签按内容宽度铺开，不再截断。
+   列间距变行间距仍取同一档 space.2，条目行距与左栏列表同一缩放档。 */
 .recent-activity-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: var(--relay-space-4);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--relay-space-1);
 }
 
-@media (max-width: 40rem) {
-  .recent-activity-list { grid-template-columns: 1fr; }
+/* 骨架与占位（2026-10-20）：加载中/行数不足/空态错误态共用同一 2×2 网格几何，
+   行与真实行同构同高——数据到达时原位替换，输入卡不移动。不写死行高：
+   骨架行复用真实行的字号与行盒，跨 DPI 自然相等。 */
+.recent-activity-body { position: relative; }
+
+.recent-activity-dot--skeleton { background: var(--relay-color-border-control); }
+
+.recent-activity-kind--skeleton,
+.recent-activity-label--skeleton,
+.recent-activity-time--skeleton {
+  color: transparent;
+  background: var(--relay-color-bg-subtle);
+  border-radius: var(--relay-radius-badge);
+}
+
+.recent-activity-kind--skeleton { border-color: transparent; }
+
+.recent-activity-note--overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  margin: 0;
+  padding: var(--relay-space-2) var(--relay-space-1);
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+  background: var(--relay-color-bg-surface);
 }
 
 .recent-activity-link {
@@ -114,11 +144,11 @@
 
 .recent-activity-label {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 单列之后有足够宽度：按内容铺开、允许折行，不再用省略号把一句话切成碎片
+     （2026-10-20 用户截图指认「两列布局文本被不必要地截断」）。 */
   font-size: var(--relay-font-size-meta);
   color: var(--relay-color-text-secondary);
+  line-height: var(--relay-font-lineHeight-ui);
 }
 
 .recent-activity-time {

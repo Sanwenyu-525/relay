@@ -24,3 +24,24 @@
   gap: var(--relay-space-3);
   align-items: start;
 }
+
+/* 有真实默认值的三项收进摘要：折叠的是表单，不是授权承诺——摘要行始终写明时区、次数与到期。 */
+.scheduled-task-advanced {
+  margin: var(--relay-space-4) 0;
+  padding-top: var(--relay-space-3);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.scheduled-task-advanced > summary {
+  padding: var(--relay-space-2) 0;
+  color: var(--relay-color-text-secondary);
+  cursor: pointer;
+}
+
+.scheduled-task-advanced > summary::marker {
+  color: var(--relay-color-action-primary);
+}
+
+.scheduled-task-advanced .scheduled-task-schedule-row {
+  margin-top: var(--relay-space-3);
+}

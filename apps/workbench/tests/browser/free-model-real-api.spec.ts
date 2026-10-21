@@ -97,10 +97,9 @@ test("免费模型真实界面闭环：首条选 A、上游限流后同消息接
   expect(runtime.switches).toMatchObject([{ from_model: "fixture/a:free", to_model: "fixture/b:free" }]);
   expect(runtimeResponse.headers()["content-type"]).toContain("application/json");
   expect(JSON.stringify(runtime)).not.toMatch(/synthetic-free-model-browser|config_fingerprint|authorization|system_prompt/u);
-  const runtimeView = page.getByTestId("assist-model-runtime");
-  await expect(runtimeView).toContainText("本条首选：fixture/a:free");
-  await expect(runtimeView).toContainText("最近实际调用：fixture/b:free");
-  await expect(runtimeView).toContainText("已从 fixture/a:free 切换到 fixture/b:free");
+  // 消息行不再展示「本条首选 / 实际调用 / 模型尝试与用量」块（2026-10-19 用户指令删除），
+  // 调用事实只经上面的 model-runtime 投影核对。
+  await expect(page.getByTestId("assist-model-runtime")).toHaveCount(0);
   await page.getByTestId("model-selector-open").click();
   await expect(menu).toContainText("当前首选：fixture/a:free");
   await menu.getByRole("option", { name: "Controlled free B · fixture/b:free", exact: true }).click();

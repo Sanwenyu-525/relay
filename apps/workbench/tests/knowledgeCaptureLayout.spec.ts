@@ -142,7 +142,10 @@ describe("知识收录纸面与确认区", () => {
     await mounted.wrapper.get('[data-testid="knowledge-text"]').setValue("尚未提交的追加内容");
     expect(mounted.wrapper.get('[data-testid="knowledge-reader"]').element).toBe(reader);
     expect(reader?.closest("[hidden]")).not.toBeNull();
-    expect(mounted.wrapper.get('[data-testid="knowledge-capture-confirmation"]').text()).toContain("基于起草修订 v4");
+    // 普通追加正文不再进收录仪式：没有右栏确认与「对照来源」，草稿标识由表单自身给出。
+    expect(mounted.wrapper.find('[data-testid="knowledge-capture-confirmation"]').exists()).toBe(false);
+    expect(mounted.wrapper.find('[data-testid="knowledge-capture-source"]').exists()).toBe(false);
+    expect(mounted.wrapper.get('[data-testid="knowledge-form"]').text()).toContain("基于起草时修订 v4");
     await mounted.wrapper.get('[data-testid="knowledge-capture-cancel"]').trigger("click");
     expect(mounted.wrapper.get('[data-testid="knowledge-reader"]').element).toBe(reader);
     expect(reader?.closest("[hidden]")).toBeNull();

@@ -91,6 +91,8 @@ function fakeServer(rows: Row[], options: {
   archiveReceiptCarriesForeignCommandId?: boolean;
   /** 删除被跨对象引用挡住：服务端按 409 SESSION_DELETE_BLOCKED 返回阻止项，行必须原样保留。 */
   deleteBlocked?: boolean;
+  /** 只挡住这几条（批量删除的「部分成功」）：其余照常删除。 */
+  deleteBlockedIds?: readonly string[];
   /** 删除命令真的删了行，回执却对不上那一枚 command_id：本次结果不明，确认键必须锁死。 */
   deleteReceiptCarriesForeignCommandId?: boolean } = {}): Fake {
   const posts: Record<string, unknown>[] = [];
@@ -132,7 +134,7 @@ function fakeServer(rows: Row[], options: {
           conflict: { expected_revision: String(body.expected_revision), actual_revision: target.revision } }, 409);
       }
       if (action === "delete") {
-        if (options.deleteBlocked === true) {
+        if (options.deleteBlocked === true || (options.deleteBlockedIds ?? []).includes(target.id)) {
           // 行没动：被别的对象引用是业务拒绝，不是「本次结果不明」。
           return json({ code: "SESSION_DELETE_BLOCKED", detail: "referenced",
             conflict: { blocking_reasons: ["TASK_ACCEPTANCE_CITED", "LEARNING_RECORDS"] } }, 409);
@@ -401,7 +403,7 @@ it("归档即隐藏：行移出默认列表，「已归档」那一段按需才�
   await openMenu(container, id(1));
   // 归档态只留两条：重命名/置顶/分叉都得先重开；删除与归档是两条通道，不因归档被挡住。
   expect([...(panelOf(container, id(1))?.querySelectorAll("button") ?? [])]
-    .map((button) => (button.textContent ?? "").trim())).toEqual(["重开这段讨论", "删除这段讨论"]);
+    .map((button) => (button.textContent ?? "").trim())).toEqual(["重开这段讨论", "删除"]);
   await clickAction(container, id(1), "重开这段讨论");
   expect(fake.posts[1]).toMatchObject({ action: "reopen", expected_revision: "2" });
   expect(rowInActiveList(container, id(1))).not.toBeNull();
@@ -534,14 +536,20 @@ it("标记为未读与取消未读：一条命令、一次重读，行上的圆�
   expect(fake.rows[0]?.unread_at).toBe("2026-10-17T02:30:00.000Z");
   // 圆点来自重读回来的 unread_at，不是本地乐观渲染。
   expect(container.querySelector('[data-testid="recent-work-unread-dot"]')).not.toBeNull();
+  // 2026-10-19 用户指认「标记为未读之后没有 ui 上的变化、不够明显」：除了圆点，行本身也挂
+  // --unread 一档（标题加粗由 CSS 承担）。只靠一枚 4px 的点在 12px 标题旁读不出状态变化。
+  expect(container.querySelector(`[data-testid="recent-work-${id(1)}"]`)?.classList.contains("recent-work-item--unread"))
+    .toBe(true);
 
   await openMenu(container, id(1));
   expect([...(panelOf(container, id(1))?.querySelectorAll("button") ?? [])]
-    .map((button) => (button.textContent ?? "").trim())).toEqual(["置顶", "重命名", "取消未读", "分叉这段讨论", "复制会话 ID", "归档", "删除这段讨论"]);
+    .map((button) => (button.textContent ?? "").trim())).toEqual(["置顶", "重命名", "取消未读", "分叉这段讨论", "复制会话 ID", "归档", "删除"]);
   await clickAction(container, id(1), "取消未读");
   expect(fake.posts[1]).toMatchObject({ action: "unread", unread: false, expected_revision: "2" });
   expect(fake.rows[0]?.unread_at).toBeNull();
   expect(container.querySelector('[data-testid="recent-work-unread-dot"]')).toBeNull();
+  expect(container.querySelector(`[data-testid="recent-work-${id(1)}"]`)?.classList.contains("recent-work-item--unread"))
+    .toBe(false);
 });
 
 it("复制会话 ID 是纯客户端动作：不发命令、不推进修订，复制后给出可见反馈", async () => {
@@ -597,7 +605,7 @@ it("动作按参考菜单分组成「图标 + 名称」：置顶／重命名／�
   // 顺序与分组：置顶／重命名／未读／分叉在前，分组细线之后复制身份、归档与删除收尾（参考菜单的两组读法）。
   expect([...panel.children].map((child) => child.getAttribute("role") === "separator"
     ? "separator" : (child.textContent ?? "").trim()))
-    .toEqual(["置顶", "重命名", "标记为未读", "分叉这段讨论", "separator", "复制会话 ID", "归档", "删除这段讨论"]);
+    .toEqual(["置顶", "重命名", "标记为未读", "分叉这段讨论", "separator", "复制会话 ID", "归档", "删除"]);
   // 分组细线是 div 而不是 button：不吃焦点、不参与命令，只作视觉分隔。
   expect(panel.querySelector('[role="separator"]')?.tagName).toBe("DIV");
   // 七条动作各带一枚前缀图标；图标不进 textContent，因此单独核对存在性。
@@ -646,7 +654,14 @@ it("删除先确认：取消零命令；确认后行从活跃区消失，且不�
     `[data-testid="session-delete-cancel-${sessionId}"]`);
 
   await openMenu(container, sessionId);
-  await clickAction(container, sessionId, "删除这段讨论");
+  await clickAction(container, sessionId, "删除");
+  // 2026-10-19 用户指令「改成简单弹窗」：确认是同一层浮层里的就地卡片，不是 AppDialog——
+  // 没有遮罩层、没有第二套弹窗外壳，取消键就长在 ⋯ 面板里，标题与那句后果也都在这一层。
+  expect(document.querySelector(".dialog-panel")).toBeNull();
+  expect(document.querySelector(".dialog-backdrop")).toBeNull();
+  expect(dialogCancel()?.closest('[data-testid="recent-work-panel-' + sessionId + '"]')).not.toBeNull();
+  expect(panelOf(container, sessionId)?.querySelector(".recent-work-confirm-title")?.textContent)
+    .toBe("删除这段讨论？");
   // 危险动作不从回车起手：初始焦点压在「取消」上，命令一条都没发。
   expect(document.activeElement).toBe(dialogCancel());
   expect(fake.posts).toEqual([]);
@@ -657,7 +672,7 @@ it("删除先确认：取消零命令；确认后行从活跃区消失，且不�
   expect(rowInActiveList(container, sessionId)).not.toBeNull();
 
   await openMenu(container, sessionId);
-  await clickAction(container, sessionId, "删除这段讨论");
+  await clickAction(container, sessionId, "删除");
   await act(async () => {
     document.querySelector<HTMLButtonElement>(`[data-testid="session-delete-confirm-${sessionId}"]`)!.click();
   });
@@ -677,7 +692,7 @@ it("被其它对象引用时删除整条拒绝：阻止项留在确认框里，�
   const sessionId = id(1);
 
   await openMenu(container, sessionId);
-  await clickAction(container, sessionId, "删除这段讨论");
+  await clickAction(container, sessionId, "删除");
   await act(async () => {
     document.querySelector<HTMLButtonElement>(`[data-testid="session-delete-confirm-${sessionId}"]`)!.click();
   });
@@ -686,7 +701,7 @@ it("被其它对象引用时删除整条拒绝：阻止项留在确认框里，�
   expect(fake.posts).toHaveLength(1);
   expect(rowInActiveList(container, sessionId)).not.toBeNull();
   const alert = document.querySelector(`[data-testid="session-delete-confirm-${sessionId}"]`)
-    ?.closest(".dialog-panel")?.querySelector('[role="alert"]');
+    ?.closest(".recent-work-row-panel")?.querySelector('[role="alert"]');
   // 阻止项按可读中文逐条列出，并指向仍然可用的归档通道。
   expect(alert?.textContent).toContain("被任务验收观察引用");
   expect(alert?.textContent).toContain("有学习记录");
@@ -702,7 +717,7 @@ it("删除回执对不上时确认键锁死：不换 command_id 重发", async (
   const sessionId = id(1);
 
   await openMenu(container, sessionId);
-  await clickAction(container, sessionId, "删除这段讨论");
+  await clickAction(container, sessionId, "删除");
   await act(async () => {
     document.querySelector<HTMLButtonElement>(`[data-testid="session-delete-confirm-${sessionId}"]`)!.click();
   });
@@ -710,7 +725,7 @@ it("删除回执对不上时确认键锁死：不换 command_id 重发", async (
 
   expect(fake.posts).toHaveLength(1);
   const alert = document.querySelector(`[data-testid="session-delete-confirm-${sessionId}"]`)
-    ?.closest(".dialog-panel")?.querySelector('[role="alert"]');
+    ?.closest(".recent-work-row-panel")?.querySelector('[role="alert"]');
   expect(alert?.textContent).toContain("是否生效尚未确定");
   // 本次是否删掉都未确定：确认键锁死，只能按原 command_id 查回执。
   expect(document.querySelector<HTMLButtonElement>(`[data-testid="session-delete-confirm-${sessionId}"]`)?.disabled)
@@ -732,8 +747,151 @@ it("归档态的会话也能删除：只剩「重开」与「删除」两条，�
   const panel = panelOf(container, sessionId)!;
   expect([...panel.children].map((child) => child.getAttribute("role") === "separator"
     ? "separator" : (child.textContent ?? "").trim()))
-    .toEqual(["重开这段讨论", "separator", "删除这段讨论"]);
-  await clickAction(container, sessionId, "删除这段讨论");
+    .toEqual(["重开这段讨论", "separator", "删除"]);
+  await clickAction(container, sessionId, "删除");
   expect(document.querySelector(`[data-testid="session-delete-confirm-${sessionId}"]`)).not.toBeNull();
   expect(fake.posts.map((post) => post.action)).toEqual(["archive"]);
+});
+
+/* ---------------------------------------------------------------------------------------------
+ * 会话行的批量选择复选框（2026-10-20 用户指令「给会话 item 加一个复选框，方便删除记录」）。
+ *
+ * 这里守四条口径，都是「删除不可撤销」这条业务事实的延伸：
+ * 1. **选择只是选择。** 勾选不发命令、不动行；只有确认那一下才发删除。
+ * 2. **一段一条命令。** 批量不是新端点：每段各取 command_id、各带读回来的修订，不假装原子。
+ * 3. **部分成功要如实报。** 被引用阻止的那条留在列表里并留在选择集里，同一原因只写一次。
+ * 4. **结果不明不重发。** 回执对不上就锁死确认键，勾选保留，只能由「取消」退出。
+ * ------------------------------------------------------------------------------------------- */
+
+const selectOf = (container: HTMLElement, sessionId: string) =>
+  container.querySelector<HTMLInputElement>(`[data-testid="recent-work-select-${sessionId}"]`);
+const barOf = (container: HTMLElement) =>
+  container.querySelector<HTMLElement>('[data-testid="recent-work-selection"]');
+const barText = (container: HTMLElement) => (barOf(container)?.textContent ?? "").replace(/\s+/gu, " ").trim();
+const barButton = (container: HTMLElement, testId: string) =>
+  container.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`);
+
+async function toggleRow(container: HTMLElement, sessionId: string): Promise<void> {
+  const box = selectOf(container, sessionId);
+  if (box === null) throw new Error("这一行没有选择复选框");
+  await act(async () => { box.click(); });
+}
+
+async function clickBar(container: HTMLElement, testId: string): Promise<void> {
+  const button = barButton(container, testId);
+  if (button === null) throw new Error(`批量条里没有 ${testId}`);
+  await act(async () => { button.click(); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+}
+
+it("会话行带复选框：勾选只攒选择、不发命令；取消选择后批量条收起", async () => {
+  const fake = fakeServer([row(1, "第一段", "01"), row(2, "第二段", "02")]);
+  const { container } = await mount(fake);
+
+  // 静止态没有批量条；复选框在 DOM 里，显形与否由 CSS 的悬停/聚焦规则决定。
+  expect(barOf(container)).toBeNull();
+  expect(selectOf(container, id(1))?.checked).toBe(false);
+
+  await toggleRow(container, id(1));
+  expect(barText(container)).toContain("已选 1 段讨论");
+  await toggleRow(container, id(2));
+  expect(barText(container)).toContain("已选 2 段讨论");
+  // 选择是纯客户端状态：一条命令都不发，行也不动。
+  expect(fake.posts).toEqual([]);
+  expect(rowInActiveList(container, id(1))).not.toBeNull();
+  expect(selectOf(container, id(2))?.checked).toBe(true);
+
+  await clickBar(container, "recent-work-selection-clear");
+  expect(barOf(container)).toBeNull();
+  expect(selectOf(container, id(1))?.checked).toBe(false);
+  expect(selectOf(container, id(2))?.checked).toBe(false);
+  expect(fake.posts).toEqual([]);
+});
+
+it("批量删除逐段发命令、各带读回来的修订；成功后行消失、选择集清空", async () => {
+  const fake = fakeServer([row(1, "要删的甲", "01"), row(2, "要删的乙", "02")]);
+  const { container } = await mount(fake);
+  await toggleRow(container, id(1));
+  await toggleRow(container, id(2));
+
+  await clickBar(container, "recent-work-batch-delete");
+  // 第一步只是就地确认：命令一条都没发。
+  expect(barText(container)).toContain("删除这 2 段讨论？");
+  expect(barText(container)).toContain("永久移除");
+  expect(fake.posts).toEqual([]);
+
+  await clickBar(container, "recent-work-batch-delete-confirm");
+  expect(fake.posts).toHaveLength(2);
+  expect(fake.posts.map((post) => post.action)).toEqual(["delete", "delete"]);
+  // 一段一条独立命令：command_id 不复用，expected_revision 是那一行读回来的修订。
+  expect(new Set(fake.posts.map((post) => post.command_id)).size).toBe(2);
+  expect(fake.posts.every((post) => post.expected_revision === "1")).toBe(true);
+  expect(rowInActiveList(container, id(1))).toBeNull();
+  expect(rowInActiveList(container, id(2))).toBeNull();
+  expect(barOf(container)).toBeNull();
+  expect(fake.rows).toEqual([]);
+});
+
+it("被引用阻止的那段留在列表与选择集里，其余照删，说明逐条列出并指向归档", async () => {
+  const fake = fakeServer([row(1, "被引用的", "01"), row(2, "可以删的", "02")],
+    { deleteBlockedIds: [id(1)] });
+  const { container } = await mount(fake);
+  await toggleRow(container, id(1));
+  await toggleRow(container, id(2));
+  await clickBar(container, "recent-work-batch-delete");
+  await clickBar(container, "recent-work-batch-delete-confirm");
+
+  expect(fake.posts).toHaveLength(2);
+  expect(rowInActiveList(container, id(1))).not.toBeNull();
+  expect(rowInActiveList(container, id(2))).toBeNull();
+  const alert = container.querySelector('[data-testid="recent-work-batch-error"]');
+  expect(alert?.textContent).toContain("已删除 1 段讨论");
+  expect(alert?.textContent).toContain("被任务验收观察引用");
+  expect(alert?.textContent).toContain("归档");
+  // 失败的那段仍勾着（用户可以回去归档后再删）；业务拒绝不是结果不明，确认键不锁死。
+  expect(selectOf(container, id(1))?.checked).toBe(true);
+  expect(barText(container)).toContain("已选 1 段讨论");
+  expect(barButton(container, "recent-work-batch-delete")?.disabled).toBe(false);
+});
+
+it("同因被阻止的多段合并成一句：原因只出现一次，同名标题按段数报", async () => {
+  const fake = fakeServer([row(1, "关于Relay-Agent", "01"), row(2, "关于Relay-Agent", "02"),
+    row(3, "关于Relay-Agent", "03")], { deleteBlockedIds: [id(1), id(2), id(3)] });
+  const { container } = await mount(fake);
+  for (const n of [1, 2, 3]) await toggleRow(container, id(n));
+  await clickBar(container, "recent-work-batch-delete");
+  await clickBar(container, "recent-work-batch-delete-confirm");
+
+  expect(fake.posts).toHaveLength(3);
+  const text = (container.querySelector('[data-testid="recent-work-batch-error"]')?.textContent ?? "")
+    .replace(/\s+/gu, " ");
+  expect(text).toContain("已删除 0 段讨论");
+  // 三条同名、同一阻断原因：标题去重后按段数报，原因写在括号里。
+  expect(text).toContain("「关于Relay-Agent」等 3 段还不能删除（被任务验收观察引用、有学习记录）");
+  // 整句与建议都不按条数重复（2026-10-20 用户截图指认的正是这三遍红字）。
+  expect(text.split("还不能删除").length - 1).toBe(1);
+  expect(text.split("先改为归档").length - 1).toBe(1);
+  expect(selectOf(container, id(1))?.checked).toBe(true);
+});
+
+it("批量删除的回执对不上时锁死确认键：不换 command_id 重发，勾选保留", async () => {
+  const fake = fakeServer([row(1, "回执不明", "01")], { deleteReceiptCarriesForeignCommandId: true });
+  const { container } = await mount(fake);
+  await toggleRow(container, id(1));
+  await clickBar(container, "recent-work-batch-delete");
+  await clickBar(container, "recent-work-batch-delete-confirm");
+
+  expect(fake.posts).toHaveLength(1);
+  const alert = container.querySelector('[data-testid="recent-work-batch-error"]');
+  expect(alert?.textContent).toContain("是否已删除尚未确定");
+  // 行与勾选都留着：本次是否删掉未定，界面不替用户猜。
+  expect(selectOf(container, id(1))?.checked).toBe(true);
+
+  // 再点一次「删除」只进确认态；确认键已锁死，点下去也不会多发一条命令。
+  await clickBar(container, "recent-work-batch-delete");
+  const confirm = barButton(container, "recent-work-batch-delete-confirm");
+  expect(confirm?.disabled).toBe(true);
+  await act(async () => { confirm?.click(); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  expect(fake.posts).toHaveLength(1);
 });

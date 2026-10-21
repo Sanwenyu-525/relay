@@ -6,6 +6,7 @@ import type { DecisionRow, DecisionVersionRow, InformationRootRow, KnowledgeVers
   MemoryVersionRow, RuleRow, RuleVersionRow } from '../infrastructure/database-schema.js';
 import { resourceNotFound, invalidCursor, validationFailed } from './domain-error.js';
 import { createRepositories } from './unit-of-work.js';
+import type { MemoryEffectiveStatus, MemoryStateRow } from '../information/information-repository.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
 
 type Kind = 'knowledge' | 'memory' | 'decision' | 'rule';
@@ -46,16 +47,19 @@ function versionDto(kind: Kind, version: unknown): Record<string, unknown> {
     created_at: v.created_at.toISOString() };
 }
 
-async function dto(db: DbExecutor, kind: Kind, row: Root): Promise<Record<string, unknown>> {
+function memoryDto(row: MemoryStateRow): Record<string, unknown> {
+  return { ...base(row), title: row.title, text: row.body_text,
+    confirmed_by: row.confirmed_by, confirmed_at: row.confirmed_at.toISOString(),
+    expires_at: row.expires_at?.toISOString() ?? null, effective_status: row.effective_status,
+    // 0125 承诺过的 origin 与 DEV-0042 的来源类别：界面据此区分「人工确认」「自动记住」
+    // 以及「自动记住里哪一条是用户原话、哪一条只是模型叙述」。
+    origin: row.origin, source_kind: row.source_kind };
+}
+
+async function dto(db: DbExecutor, kind: Exclude<Kind, 'memory'>, row: Root): Promise<Record<string, unknown>> {
   const v = await createRepositories(db).information.readCurrentVersion<unknown>(kind, row.id);
   if (v === undefined) throw new Error(`${kind} current version missing`);
   if (kind === 'knowledge') return { ...base(row), title: (row as InformationRootRow).title };
-  if (kind === 'memory') {
-    const m = v as MemoryVersionRow;
-    return { ...base(row), title: (row as InformationRootRow).title, text: m.body_text,
-      confirmed_by: m.confirmed_by, confirmed_at: m.confirmed_at.toISOString(),
-      expires_at: m.expires_at?.toISOString() ?? null };
-  }
   if (kind === 'decision') {
     const d = v as DecisionVersionRow;
     return { ...base(row), title: (row as InformationRootRow).title, choice: d.choice, rationale: d.rationale,
@@ -80,15 +84,26 @@ async function requireProjectFilter(db: DbExecutor, workspaceId: string,
 }
 
 export async function listInformation(db: DbExecutor, kind: Kind, workspaceId: string,
-  projectId?: string): Promise<readonly Record<string, unknown>[]> {
+  projectId?: string, effectiveStatus: MemoryEffectiveStatus | 'ALL' = 'ALL'): Promise<readonly Record<string, unknown>[]> {
   const repo = createRepositories(db).information;
   await requireProjectFilter(db, workspaceId, projectId);
+  if (kind === 'memory') {
+    if (!['ALL', 'ACTIVE', 'EXPIRED', 'RETIRED'].includes(effectiveStatus)) {
+      throw validationFailed([{ field: 'effective_status', message: 'expected ALL, ACTIVE, EXPIRED, or RETIRED' }]);
+    }
+    return (await repo.listMemoryStates(workspaceId, { projectId, effectiveStatus })).map(memoryDto);
+  }
   const rows = await repo.listRoots<Root>(kind, workspaceId, projectId);
   return Promise.all(rows.map((row) => dto(db, kind, row)));
 }
 
 export async function readInformation(db: DbExecutor, kind: Kind, workspaceId: string,
   id: string): Promise<Record<string, unknown>> {
+  if (kind === 'memory') {
+    const row = (await createRepositories(db).information.listMemoryStates(workspaceId, { id }))[0];
+    if (row === undefined) throw resourceNotFound(kind);
+    return memoryDto(row);
+  }
   const row = await createRepositories(db).information.readRoot<Root>(kind, id);
   if (row?.workspace_id !== workspaceId) throw resourceNotFound(kind);
   return dto(db, kind, row);

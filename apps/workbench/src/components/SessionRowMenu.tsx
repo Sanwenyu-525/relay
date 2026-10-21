@@ -3,7 +3,6 @@ import { Archive, Copy, GitFork, Mail, MailOpen, MoreHorizontal, Pencil, Pin, Pi
 import { createCommandId, type RelayApiClient, type RelayAssistSession } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { useMenuExclusive } from "../lib/popoverMenu";
-import AppDialog from "./AppDialog";
 import { escalateFeedback, openUndoFeedback } from "./Feedback";
 
 /**
@@ -79,6 +78,14 @@ const SESSION_URI_PREFIX = "relay://sessions/";
  *    一条新会话，标题编号（1）（2）由服务端决定，界面不自己拼；回执里的会话身份是**新建的子会话**，
  *    源会话一行都没改，所以成功后不重读源行，而把子会话读回这一列。归档态的会话只有「重开」一项，
  *    分叉同改名/置顶一样被服务端拒掉，这里就不出现。
+ * 9. **删除的确认改成就地浮层（2026-10-19 用户指令）。** 条目由「删除这段讨论」收成「删除」，
+ *    确认不再是 `AppDialog` 那种带遮罩、长正文与关闭叉的对话框，而是贴着 ⋯ 的一张窄卡：
+ *    标题 + 一句后果 + 取消／删除两键。两条理由：这一行刚在菜单里点过「删除」，再铺一层遮罩
+ *    等于把同一件事问第二遍；而原正文里「被引用不能删、请改用归档」只在服务端真的拒绝时才成立，
+ *    平时摆在那里只会稀释「这一下不可撤销」这唯一要紧的一句——现在它只在失败分支出现。
+ *    摆位与动作面板共用同一个触发器与同一套「越界拉回视口」的规矩，但方向相反：这张卡比 176px 的
+ *    左栏还宽，开在 ⋯ 左侧会被推到窗口左缘、尖角指不回触发器，所以它竖直居中地开在右侧，
+ *    尖角落在卡片左缘；右边放不下才翻回左侧。两种方向都不推高这一行，⋯ 因此一动不动。
  */
 export default function SessionRowMenu({ client, session, onChanged, onStale, onOpenChange, ref }: {
   client: RelayApiClient;
@@ -90,20 +97,26 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
   /** 行本体右键时由调用方（RecentWorkRow）拿来展开同一个面板。 */
   ref?: Ref<SessionRowMenuHandle>;
 }) {
-  const [panel, setPanel] = useState<"none" | "actions" | "rename">("none");
+  const [panel, setPanel] = useState<"none" | "actions" | "rename" | "confirm">("none");
   const [draft, setDraft] = useState(session.title);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   /** 删除回执不明时不再给「再删一次」：换 command_id 重发违反契约，必须按原 ID 查回执。 */
   const [deleteUncertain, setDeleteUncertain] = useState(false);
   const copyTimer = useRef<number | null>(null);
-  const [placed, setPlaced] = useState<CSSProperties | null>(null);
+  /**
+   * 摆位结果与「尖角朝哪边」一起存：确认浮层的卡片比左栏还宽，开在 ⋯ 左边会被推到窗口左缘，
+   * 尖角就指不回触发器了，所以它优先开在右侧（参考弹窗的读法：尖角在卡片左缘），
+   * 右边放不下才翻回左侧。
+   */
+  const [placed, setPlaced] = useState<{ style: CSSProperties; arrow: "top" | "start" } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  /** 危险动作不从回车起手：确认浮层一出现，焦点就压在「取消」上。 */
+  const cancelRef = useRef<HTMLButtonElement>(null);
   const archived = session.status === "ARCHIVED";
   const pinned = session.pinnedAt !== null;
   const unread = session.unreadAt !== null;
@@ -113,6 +126,7 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
   useImperativeHandle(ref, () => ({ open: openPanel }));
 
   useEffect(() => { if (panel === "rename") inputRef.current?.focus(); }, [panel]);
+  useEffect(() => { if (panel === "confirm") cancelRef.current?.focus(); }, [panel]);
   useEffect(() => { onOpenChange?.(open); }, [open, onOpenChange]);
   // 行外面板是浮层：自身的外部按下/滚动/Esc 都在下方处理，这里只挂独占——
   // 打开输入器上的任何浮层（「+」、档位、模型）时都把它收掉，两列浮层不互相压。
@@ -122,6 +136,8 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
   }, []);
 
   // 面板按触发器的实测位置摆放：优先开在下方，放不下向上翻；横向与右缘对齐并拉回视口内。
+  // 确认浮层是唯一例外：它比左栏宽，开在 ⋯ 左侧会被推到窗口左缘、尖角指不回触发器，
+  // 因此改为与触发器竖直居中、优先开在右侧（尖角落在卡片左缘），右边放不下才翻回左侧。
   useLayoutEffect(() => {
     if (!open) { setPlaced(null); return; }
     const place = () => {
@@ -131,10 +147,21 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
       const box = trigger.getBoundingClientRect();
       const width = element.offsetWidth;
       const height = element.offsetHeight;
+      const clampTop = (top: number) => Math.max(MARGIN_PX,
+        Math.min(top, window.innerHeight - MARGIN_PX - height));
+      if (panel === "confirm") {
+        const right = box.right + GAP_PX;
+        const toRight = right + width <= window.innerWidth - MARGIN_PX;
+        setPlaced({ arrow: toRight ? "start" : "top", style: {
+          left: toRight ? right : Math.max(MARGIN_PX, box.left - GAP_PX - width),
+          top: clampTop(box.top + box.height / 2 - height / 2) } });
+        return;
+      }
       const left = Math.max(MARGIN_PX, Math.min(box.right - width, window.innerWidth - MARGIN_PX - width));
       const below = box.bottom + GAP_PX;
-      setPlaced({ left, top: below + height <= window.innerHeight - MARGIN_PX ? below
-        : Math.max(MARGIN_PX, box.top - GAP_PX - height) });
+      const above = below + height > window.innerHeight - MARGIN_PX;
+      setPlaced({ arrow: "top", style: { left, top: above
+        ? Math.max(MARGIN_PX, box.top - GAP_PX - height) : below } });
     };
     place();
     window.addEventListener("resize", place);
@@ -225,20 +252,20 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
   }
 
   /**
-   * 删除是唯一不可撤销的会话操作（ADR-027）：单击只打开确认框，确认后才发命令。
+   * 删除是唯一不可撤销的会话操作（ADR-027）：单击只打开确认浮层，确认后才发命令。
    *
    * 三种失败各走各的路，不混成一句「删除失败」：
    * - 回执不明（`RelayTransportError`）——动作是否生效未定，按契约不得换 command_id 重发，
-   *   因此对话框保留、确认键锁死，只能按原 command_id 查回执；
-   * - 修订落后——让调用方重读这一条，对话框留着，人对着新事实重新决定；
-   * - 被其它对象引用（`SESSION_DELETE_BLOCKED`）——阻止项写进对话框，并指向归档。
+   *   因此浮层保留、确认键锁死，只能按原 command_id 查回执；
+   * - 修订落后——让调用方重读这一条，浮层留着，人对着新事实重新决定；
+   * - 被其它对象引用（`SESSION_DELETE_BLOCKED`）——阻止项写进浮层，并指向归档。
+   * 失败说明因此只能落在这一层浮层里：收起来就等于把「没删成」和「删了但结果不明」一起藏掉。
    */
   async function deleteSession() {
     setBusy(true); setDeleteError(null); setDeleteUncertain(false);
     try {
       await client.deleteAssistSession({ sessionId: session.id, commandId: createCommandId(),
         expectedRevision: session.revision });
-      setConfirmDelete(false);
       setPanel("none");
       onChanged({ kind: "delete" });
     } catch (caught) {
@@ -256,14 +283,14 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
   }
 
   function openDelete() {
-    setPanel("none");
+    setError(null);
     setDeleteError(null);
     setDeleteUncertain(false);
-    setConfirmDelete(true);
+    setPanel("confirm");
   }
 
   function closeDelete() {
-    setConfirmDelete(false);
+    setPanel("none");
     setDeleteError(null);
     triggerRef.current?.focus();
   }
@@ -307,9 +334,9 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
       onClick={() => { if (open) { setPanel("none"); setError(null); setCopied(false); } else openPanel(); }}>
       <MoreHorizontal aria-hidden="true" />
     </button>
-    {open && <div ref={panelRef} className={`recent-work-row-panel${panel === "rename" ? " recent-work-row-panel--rename" : ""}`}
+    {open && <div ref={panelRef} className={`recent-work-row-panel${panel === "rename" ? " recent-work-row-panel--rename" : ""}${panel === "confirm" ? " recent-work-row-panel--confirm" : ""}${panel === "confirm" && placed?.arrow === "start" ? " recent-work-row-panel--arrow-start" : ""}`}
       id={`recent-work-row-panel-${session.id}`} onKeyDown={onKeyDown}
-      style={placed ?? { visibility: "hidden" }}
+      style={placed?.style ?? { visibility: "hidden" }}
       data-testid={`recent-work-panel-${session.id}`}>
       {panel === "actions" && (archived
         ? <>
@@ -321,7 +348,7 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
           <div role="separator" className="recent-work-row-separator" />
           <button type="button" className="text-button recent-work-row-action recent-work-row-action--danger"
             disabled={busy} data-testid={`recent-work-delete-${session.id}`} onClick={openDelete}>
-            <Trash2 aria-hidden="true" />删除这段讨论</button>
+            <Trash2 aria-hidden="true" />删除</button>
         </>
         : <>
           <button type="button" className="text-button recent-work-row-action" disabled={busy}
@@ -358,10 +385,11 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
           <button type="button" className="text-button recent-work-row-action recent-work-row-action--danger" disabled={busy}
             onClick={() => void archiveSession()}>
             <Archive aria-hidden="true" />归档</button>
-          {/* 归档可撤销（上面那条 Snackbar），删除不可撤销——两者不合并成一个「移除」。 */}
+          {/* 归档可撤销（上面那条 Snackbar），删除不可撤销——两者不合并成一个「移除」。
+              条目名只留「删除」：这一行本身就在左栏列着，「这段讨论」四个字由浮层标题接手。 */}
           <button type="button" className="text-button recent-work-row-action recent-work-row-action--danger" disabled={busy}
             data-testid={`recent-work-delete-${session.id}`} onClick={openDelete}>
-            <Trash2 aria-hidden="true" />删除这段讨论</button>
+            <Trash2 aria-hidden="true" />删除</button>
         </>)}
       {panel === "rename" && <form className="recent-work-rename" onSubmit={(event) => {
         event.preventDefault(); submitRename(); }}>
@@ -371,22 +399,25 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
         <button type="submit" className="primary-button recent-work-rename-save" disabled={busy}>保存</button>
         <button type="button" className="text-button" disabled={busy} onClick={close}>取消</button>
       </form>}
+      {/* 确认浮层（2026-10-19）：标题 + 一句后果 + 两键，与动作面板同一个容器、同一套摆位。
+          长正文里那条「被引用不能删」不再常驻——它只在服务端真的拒绝时由 deleteError 说出。 */}
+      {panel === "confirm" && <>
+        <p className="recent-work-confirm-title">删除这段讨论？</p>
+        <p className="recent-work-confirm-text">
+          删除后，消息、附件与工具调用记录将永久移除，无法恢复。</p>
+        {deleteError !== null && <p className="recent-work-row-error" role="alert">{deleteError}</p>}
+        <div className="recent-work-confirm-actions">
+          {/* 删除在左、取消在右（2026-10-19 用户指令）：两键各占一半，合计铺满卡片内容宽，
+              与菜单条目同一条左右边界；初始焦点仍压在「取消」上，回车不会直接删。 */}
+          <button className="danger-button" type="button" disabled={busy || deleteUncertain}
+            data-testid={`session-delete-confirm-${session.id}`} onClick={() => void deleteSession()}>
+            {busy ? "正在删除…" : "删除"}
+          </button>
+          <button ref={cancelRef} className="secondary-button" type="button"
+            disabled={busy} data-testid={`session-delete-cancel-${session.id}`} onClick={closeDelete}>取消</button>
+        </div>
+      </>}
       {error !== null && <p className="recent-work-row-error" role="alert">{error}</p>}
     </div>}
-    <AppDialog open={confirmDelete} title="删除这段讨论？"
-      initialFocusSelector={`[data-testid="session-delete-cancel-${session.id}"]`}
-      onClose={() => { if (!busy) closeDelete(); }}>
-      <p>将永久删除「{session.title}」的全部消息、图片附件、工具调用记录与相关账本。删除后不可撤销，也没有回收站。</p>
-      <p className="disabled-reason">被任务验收、项目假设、工作片段、学习记录等其它对象引用的讨论不能删除；那种情况请改用归档。</p>
-      {deleteError !== null && <p className="recent-work-row-error" role="alert">{deleteError}</p>}
-      <div className="run-actions">
-        <button className="secondary-button" type="button" disabled={busy}
-          data-testid={`session-delete-cancel-${session.id}`} onClick={closeDelete}>取消</button>
-        <button className="danger-button" type="button" disabled={busy || deleteUncertain}
-          data-testid={`session-delete-confirm-${session.id}`} onClick={() => void deleteSession()}>
-          {busy ? "正在删除…" : "删除，且不保留"}
-        </button>
-      </div>
-    </AppDialog>
   </>;
 }

@@ -198,8 +198,19 @@ test('migrate entry reports the applied migrations without repeating them', asyn
       '0111_assist_session_last_message',
       '0112_local_directory_full_access',
       '0113_assist_session_fork',
+      '0114_computer_desktop_lease',
+      '0115_scheduled_tasks',
+      '0116_assist_session_delete',
+      '0117_workspace_default_directory',
+      '0118_long_term_memory',
+      '0119_short_term_memory',
+      '0120_memory_usage_sources',
+      '0121_model_capability_declarations',
+      '0122_assist_message_steer',
+      '0123_memory_usage_scope',
+      '0124_local_directory_git_read',
     ]);
-  assert.equal(payload.ledger_rows, 113);
+  assert.equal(payload.ledger_rows, 124);
 });
 
 test('migrate entry fails explicitly without a migration connection', async () => {

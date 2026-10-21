@@ -11,17 +11,20 @@ import TaskDelegatePanel, { type DelegateTarget } from "../components/TaskDelega
 import type { ReviewNavigationState } from "../components/ReviewDecisionPanel";
 import WorkspaceSidePanel from "../components/WorkspaceSidePanel";
 import TaskViewDashboard from "../components/TaskViewDashboard";
-import WorkDetailsFrame, { type WorkDetailsTab } from "../components/WorkDetailsFrame";
+import WorkDetailsFrame, { type WorkDetailsTab, type WorkDetailsTabItem } from "../components/WorkDetailsFrame";
+import ConversationDiffSummary from "../components/ConversationDiffSummary";
 import TaskInspectorPanel from "../components/TaskInspectorPanel";
 import CollaborationSplitter from "../components/CollaborationSplitter";
 import { createCommandId, RelayApiError, type RelayApiClient, type RelayControlRequest, type RelayReview,
   type RelayArtifact, type RelayArtifactVersionSummary, type RelayConversationMode, type RelayRun, type RelayTaskDetail,
-  type RelayWorkingDirectory } from "../api/relayClient";
+  type RelayWorkingDirectory, type RelayWorkingDirectorySource } from "../api/relayClient";
 import { rememberOpened } from "../components/FolderScope";
 import FolderScopeBar from "../components/FolderScopeBar";
 import { clearActiveConversation, publishActiveConversation, bumpActiveConversationContext } from "../lib/activeConversation";
 import { clearDraftGuard, currentDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
-import { nativeFolderPickerAvailable, selectWorkingDirectory } from "../lib/desktopHost";
+import { readComposerDraft, writeComposerDraft } from "../lib/composerDrafts";
+import { readLastModel } from "../lib/modelPreferences";
+import { useDelayedVisible } from "../lib/useDelayedVisible";
 import { describeLiveError } from "../lib/liveErrors";
 import { executorLabels, taskStatusLabels } from "../lib/labels";
 import { readRecentWorkingDirectories, type RecentWorkingDirectory } from "../lib/recentWorkingDirectories";
@@ -100,6 +103,16 @@ function describeBindingRejection(caught: unknown): string {
   return describeLiveError(caught).message;
 }
 
+/**
+ * 会话工作详情的页签：在任务详情三页之后多一页「变更」（2026-10-20 用户指令
+ * 「工作详情那里统计总目录就好了」）。这一页统计整段目录净变化，与输入卡上方那一行
+ * （只算本会话落盘的路径）刻意分开，两处消费同一份服务端投影，只是范围不同。
+ */
+const CONVERSATION_INSPECTOR_TABS: readonly WorkDetailsTabItem[] = [
+  { id: "PROGRESS", label: "进展" }, { id: "RESULTS", label: "成果" },
+  { id: "CHANGES", label: "变更" }, { id: "RECORDS", label: "记录" },
+];
+
 export default function CollaborationView() {
   const connection = useRelayConnection();
   if (connection.mode !== "live" || !connection.client) {
@@ -153,9 +166,26 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   // 首条消息的完整过程住在协作页：文件夹入口的 AssistView 会按会话切换重新挂载，
   // 命令身份、在途阶段、首条原文与解释结果都不能随它卸载。迟到响应与回执核对
   // 可能跨越同一次重挂载，因此 busy 与「已解释」也必须是同一份共享事实。
+  // 首条原文同时留在本机：离开这个工作区再回来（路由重挂载）仍能看到没发出去的那段话。
+  // 作用域带 `?new=` 键：不同新对话各自一份空白草稿，不会把上一处的正文带进下一条。
+  // 模型选择同样带本机偏好（2026-10-20 用户指令「记住上一次选择的模型」）：新对话的芯片
+  // 初始就是上次选的那个型号，不再是「模型」两个字；首条发送时它随 modelSelection 绑定
+  // 给新会话（见 AssistView createSession）。偏好只是初始值，不冒充服务端会话级事实。
+  const firstDraftScope = `first:${workId ?? "workspace"}:${newConversationKey ?? ""}`;
+  /**
+   * 当前首条内容属于哪个草稿作用域。作用域切换后、内容还没换成新作用域的草稿之前，
+   * 保存 effect 不得把旧正文写进新键——否则 A→B 会先污染 B，再被「恢复」成 A 的文本。
+   */
+  const firstDraftContentScope = useRef(firstDraftScope);
   const [firstMessage, setFirstMessage] = useState<FirstMessageProcess>({
-    draft: "", pending: null, busy: false, interpreted: null, execution: null });
+    draft: readComposerDraft(client.workspaceId, firstDraftScope),
+    model: readLastModel(client.workspaceId) ?? undefined,
+    pending: null, busy: false, interpreted: null, execution: null });
   const firstMessageRef = useRef(firstMessage); firstMessageRef.current = firstMessage;
+  useEffect(() => {
+    if (firstDraftContentScope.current !== firstDraftScope) return;
+    writeComposerDraft(client.workspaceId, firstDraftScope, firstMessage.draft);
+  }, [client.workspaceId, firstDraftScope, firstMessage.draft]);
   const firstMessageOwner = useMemo<FirstMessageOwner>(() => ({
     read: () => firstMessageRef.current,
     write: (next) => { firstMessageRef.current = next; setFirstMessage(next); },
@@ -195,7 +225,11 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const [layout, setLayout] = useState(readCollaborationLayoutPreferences);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [narrowSideOpen, setNarrowSideOpen] = useState(false);
-  const [transition, setTransition] = useState<{ kind: "dirty" | "pending"; proceed: () => void; commandId: string | null } | null>(null);
+  /**
+   * 唯一还会拦住切换的事实：原命令结果待核对。未发送草稿不再进入这里——
+   * 它按会话留在本机，切走不丢，回来原样恢复（2026-10-19 用户指令）。
+   */
+  const [transition, setTransition] = useState<{ commandId: string } | null>(null);
   const [recoveries, setRecoveries] = useState<readonly RecoveryRecord[]>(() => readRecovery(client));
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [checkingId, setCheckingId] = useState<string | null>(null);
@@ -210,7 +244,13 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
     { mode: RelayConversationMode; assistantProfileId: string | null }>({ mode: "AGENT", assistantProfileId: null });
   const [folder, setFolder] = useState<RelayWorkingDirectory | null>(null);
   const folderRef = useRef(folder); folderRef.current = folder;
-  const [boundDirectory, setBoundDirectory] = useState<{ sessionId: string; projectId: string | null; path: string | null } | null>(null);
+  /**
+   * 会话当前目录的服务端投影。`source` 作为服务端事实的只读副本保留（`WORKSPACE_DEFAULT` /
+   * `USER_PICKED` / 缺字段＝历史未知）；2026-10-20 用户指令「只显示目录名」后，它不再进
+   * 细条或顶栏的可见文案。这里是显示用的只读副本，目录事实仍归会话行与目录命令。
+   */
+  const [boundDirectory, setBoundDirectory] = useState<{ sessionId: string; projectId: string | null;
+    path: string | null; source: RelayWorkingDirectorySource | null } | null>(null);
   const sessionContextRequest = useRef(0);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [folderBusy, setFolderBusy] = useState(false);
@@ -275,7 +315,12 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   }, []);
   useEffect(() => {
     const guard: DraftGuard = {
-      hasUnsavedChanges: () => navigationRef.current.dirty || navigationRef.current.pending !== null,
+      /**
+       * 讨论草稿不再算「未保存」（2026-10-19 用户指令）：正文已按会话留在本机
+       * （`lib/composerDrafts.ts`），换工作区或离开页面都能原样恢复，因此不弹确认框。
+       * 其他页面（任务创建、蓝图、产物编辑）没有本机草稿存储，仍各自登记未保存事实。
+       */
+      hasUnsavedChanges: () => false,
       pendingCommandId: () => navigationRef.current.pending?.commandId ?? null,
       discard: () => { navigationRef.current.discard?.(); navigationRef.current = cleanNavigation; },
       // 「保留并继续编辑」的焦点恢复交给编辑器登记的存活恢复目标（AssistView 上报）；
@@ -363,11 +408,21 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
     setSelectedPreviewArtifact(null); previewFocusTarget.current = null; setSidePanelRevealed(false);
     setSessionId(newConversationKey !== null ? null : sessionSeed ?? undefined); setNarrowSideOpen(false);
     publishActiveConversation({ taskId: workId, sessionId: null });
-    if (newConversationKey !== null) firstMessageOwner.write({
-      draft: "", pending: null, busy: false, interpreted: null, execution: null });
+    // 新建对话要把首条输入器重置为空白，但模型偏好不能跟着一起被抹掉（2026-10-20 用户指令
+    // 「记住上一次选择的模型，不要每个新会话都先显示「模型」两个字」）：这里重读本机偏好，
+    // 使这一 effect 与 useState 初始值给出同一个种子，否则每次点「新建会话」都会退回占位文案。
+    // 只在真正换了 `?new=` 键时重置：回到同一个键要读回它自己的本机草稿，不能把首条内容清空
+    // 再让保存 effect 用空白覆盖（2026-10-21 用户实机指认）。
+    if (newConversationKey !== null && firstDraftContentScope.current !== firstDraftScope) {
+      firstDraftContentScope.current = firstDraftScope;
+      firstMessageOwner.write({
+        draft: readComposerDraft(client.workspaceId, firstDraftScope),
+        model: readLastModel(client.workspaceId) ?? undefined,
+        pending: null, busy: false, interpreted: null, execution: null });
+    }
     void reloadAll();
     return () => { taskRequest.current++; runRequest.current++; reviewRequest.current++; };
-  }, [workId, newConversationKey, sessionSeed, reloadAll, firstMessageOwner]);
+  }, [client, workId, newConversationKey, sessionSeed, reloadAll, firstMessageOwner]);
 
   useEffect(() => { void reloadRun(); void reloadReviews(); },
     // 任务事实到达后才认得它的 Run 与待判断项；换任务、换执行权或手动刷新都重新读取。
@@ -412,10 +467,21 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const draft = useRunDraftPreview({ client, runId: run?.id ?? "", revision: run?.revision ?? "",
     currentStepId: run?.currentStepId ?? null, enabled: canReadDraft, onSettled: () => { void reloadRun(); } });
 
-  const projectWriteBlockedReason = loading || error !== null ? "任务事实正在核对或读取失败，不能提交新的任务命令。"
+  /**
+   * 首次进入某项工作（URL 有 `?work=`，任务事实还没读到）时不渲染会话视图：
+   * 那不是「没有任务」，只是还没读到。此前会先渲染一遍会话输入器再整块换成任务视图，
+   * 切换工作区时读起来就是界面闪一下（2026-10-19 用户反馈）。
+   */
+  const awaitingWork = workId !== null && task === null && error === null;
+  /** 重读提示延迟出现：切换工作区时任务事实通常几十毫秒到位，立刻显示会闪一下（见 lib/useDelayedVisible）。 */
+  const taskUpdatingVisible = useDelayedVisible(loading && task !== null);
+  const projectWriteBlockedReason = awaitingWork ? null
+    : loading || error !== null ? "任务事实正在核对或读取失败，不能提交新的任务命令。"
     : task === null || task.projectId === null ? null
     : projectArchivedAt === undefined
-      ? `Project 事实正在核对或读取失败，不能提交新的任务命令。${projectReadError ?? ""}`
+      // `undefined` 是「项目事实还没读到」，不是「读取失败」：把它写成阻塞原因会在
+      // 切换工作区时先闪一句红字再消失。真读到失败（projectReadError）才说明原因。
+      ? projectReadError === null ? null : `Project 事实读取失败，不能提交新的任务命令。${projectReadError}`
       : projectArchivedAt !== null ? "项目已归档，不能提交新的任务命令。" : null;
   const visibleReviews = retainedReview ? [...reviews, retainedReview] : reviews;
   const reviewIndex = visibleReviews.findIndex((review) => review.id === selectedReviewId);
@@ -565,6 +631,28 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
   const entryProjectId = sessionEntry !== null && sessionEntry.id === sessionSeed && entryError === null ? sessionEntry.projectId : null;
   const conversationProjectId = entryProjectId ?? boundDirectory?.projectId ?? folderProjectId ?? search.get("project");
   const projectScopeActive = conversationProjectId !== null && !bindingUnconfirmed;
+  /**
+   * 左栏目录「＋」的 `?dir=` 在途：openFolder 尚无结果时不挂会话面板。
+   * 这时若先挂工作区级面板，目录一回来 projectScopeActive 翻真，AssistView 按 key
+   * 整块卸载重挂——聊天区在几百毫秒内画两遍，就是用户看到的「跳一下」
+   * （2026-10-20 截图指认；栏头「新对话」不带目录种子，因此只有这个入口能看见）。
+   * 在途态与 AssistView 的目标核对态同构（同为 page-state）；失败时 folderError 落到细条，
+   * 面板退回工作区级。
+   */
+  const directoryPending = directorySeed !== null && folder === null && folderError === null;
+  /**
+   * 目录打开的等待上限反馈：`openWorkingDirectory` 是无超时的写命令，请求不返回时在途屏
+   * 就是最终屏——没有细条、没有输入区、没有任何出口（2026-10-20 用户截图第三轮：停在
+   * 「正在打开目录…」）。慢阈值后给一个取消出口：只摘掉 URL 里的 `?dir=` 种子，回到同一条
+   * 新对话，不重发命令、不换 command_id（结果是否落地仍由服务端那条原命令决定），
+   * 目录随后可由细条重新打开。快路径（本机 API 通常一瞬）不显示这个出口，不加视觉噪声。
+   */
+  const [directorySlow, setDirectorySlow] = useState(false);
+  useEffect(() => {
+    if (!directoryPending) { setDirectorySlow(false); return; }
+    const timer = window.setTimeout(() => setDirectorySlow(true), 4000);
+    return () => { window.clearTimeout(timer); };
+  }, [directoryPending]);
   function startFolderConversation() {
     requestTransition(() => { setSessionId(null); setSearch({ new: createCommandId() }); });
   }
@@ -584,12 +672,15 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
         ...(target.skillId ? { skill: target.skillId } : {}), new: createCommandId() });
     });
   }
+  /**
+   * 换目录、选会话、切任务共用同一条出口：只有「原命令结果待核对」会拦下，
+   * 其余直接切换。未发送草稿按会话留在本机（composerDrafts），不需要先确认丢弃。
+   */
   function requestTransition(proceed: () => void) {
     const state = navigationRef.current;
     const guard = currentDraftGuard();
     const commandId = guard?.pendingCommandId?.() ?? state.pending?.commandId ?? null;
-    if (commandId) setTransition({ kind: "pending", proceed, commandId });
-    else if (guard?.hasUnsavedChanges() || state.dirty) setTransition({ kind: "dirty", proceed, commandId: null });
+    if (commandId) setTransition({ commandId });
     else proceed();
   }
 
@@ -613,7 +704,8 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
       ? "这段讨论还没有归入项目：普通讨论照旧，但不能进入执行。要执行前先选目录并把它归入项目。"
       : null;
   const composerHeader = <>
-    <FolderScopeBar directory={folder} boundDirectoryPath={boundDirectory?.path ?? null} recents={recents} busy={folderBusy} error={folderError}
+    <FolderScopeBar directory={folder} boundDirectoryPath={boundDirectory?.path ?? null}
+      recents={recents} busy={folderBusy} error={folderError}
       associationLabel={folderAssociationLabel} warning={folderScopeWarning}
       onOpen={requestFolderTransition} onNewConversation={startFolderConversation} />
     {binding !== null && <section className="collab-binding" data-testid="collab-binding"
@@ -661,7 +753,9 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     void client.getAssistSession(id, true).then((session) => {
       if (activeSessionRef.current !== id || version !== sessionContextRequest.current) return;
       setBoundDirectory({ sessionId: id, projectId: session.projectId,
-        path: session.context?.workingDirectory?.canonicalRoot ?? null });
+        path: session.context?.workingDirectory?.canonicalRoot ?? null,
+        // 缺字段（旧服务端）保持 null＝历史未知，不在这里补一个「用户选的」或「默认的」。
+        source: session.context?.workingDirectory?.source ?? null });
     }).catch((caught: unknown) => {
       if (activeSessionRef.current === id && version === sessionContextRequest.current) setFolderError(describeLiveError(caught).message);
     });
@@ -675,10 +769,31 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     if (id === null) return;
     // 换会话先清除旧目录展示，但保留导航所属项目，避免退回工作区空会话并卸载原 Owner。
     setBoundDirectory((current) => ({ sessionId: id,
-      projectId: current?.projectId ?? folderRef.current?.association?.projectId ?? null, path: null }));
+      projectId: current?.projectId ?? folderRef.current?.association?.projectId ?? null,
+      path: current?.sessionId === id ? current.path : null,
+      // 同一条会话已读到的来源不能被这次回报抹掉：抹掉会让「来源」在重读返回前闪回成未知，
+      // 两个说法短暂并存（来源本身已不上屏，仍按事实保留，不制造第二次推断）。
+      source: current?.sessionId === id ? current.source : null }));
     if (previous !== null && previous !== id) setFolder(null);
     rereadSessionScope(id);
   }, [client, rereadSessionScope]);
+  /**
+   * 建会话后**服务端**分配的作用域（0117 默认目录继承）。
+   *
+   * 这个会话从建立起就带 Project，不属于工作区级会话。只采用会话读回的事实切换作用域，
+   * 不按目录名、最近目录或配置投影推断；来源照原样记下（不上屏），不据此编造第二种说法。
+   * 切换会让 AssistView 按项目作用域重新挂载，首条过程仍由 firstMessageOwner 持有。
+   */
+  const adoptSessionScope = useCallback((scope: { readonly sessionId: string;
+    readonly projectId: string;
+    readonly workingDirectory: { readonly resourceId: string; readonly canonicalRoot: string | null;
+      readonly source: RelayWorkingDirectorySource | null } | null }) => {
+    setSessionId(scope.sessionId);
+    setBoundDirectory({ sessionId: scope.sessionId, projectId: scope.projectId,
+      path: scope.workingDirectory?.canonicalRoot ?? null,
+      source: scope.workingDirectory?.source ?? null });
+  }, []);
+
   // 离开协作页时清掉高亮，避免左栏停在一条已经不在看的会话上。
   useEffect(() => () => { activeSessionRef.current = null; sessionContextRequest.current++; clearActiveConversation(); }, []);
 
@@ -836,7 +951,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     if (directory.candidates.length > 0) requestFocusFolder();
     // 目录已归入项目且当前存在一段尚未归属的既有讨论时，把它接续到该项目：
     // 只改归属、不新建第二个会话，也不产生任何执行或权限。绑定随目录命令一起
-    // 走同一条 requestTransition 守卫，未保存草稿与未决命令会先被拦下；
+    // 走同一条 requestTransition：只有未决命令会先被拦下，未发送草稿按会话留在本机。
     // 归属有自己的在途/未知/失败呈现，因此不把目录打开卡在归属完成上。
     setFolderBusy(false);
     const boundProjectId = directory.status === "READY" ? directory.association?.projectId ?? null : null;
@@ -855,9 +970,9 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
   }
 
   /**
-   * 换目录与选会话、切任务共用同一条守卫：未发送草稿要先明确保留或放弃，
-   * 未决消息在核对前不得换目录。守卫必须先于 OpenWorkingDirectory，
-   * 不能先登记新作用域再询问，也不能由「仅选择或取消」吞掉原文。
+   * 换目录与选会话、切任务共用同一条出口：未决消息在核对前不得换目录；
+   * 未发送草稿不再要求先确认，它按会话留在本机，切回原作用域时恢复。
+   * 守卫必须先于 OpenWorkingDirectory，不能先登记新作用域再询问。
    */
   function requestFolderTransition(rootPath: string, projectId?: string | null) {
     requestTransition(() => { void openFolder(rootPath, projectId); });
@@ -911,9 +1026,9 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     {conversationInspectorVisible ? <PanelRightClose size={18} aria-hidden="true" /> : <PanelRightOpen size={18} aria-hidden="true" />}
   </button></>;
   /**
-   * 输入框「+」里的「选择工作文件夹」不新建选择器：它把用户带回常驻的目录细条，
-   * 并直接触发细条自带的「更换目录」弹层（同一个 Owner）。细条在忙时按钮禁用，
-   * 退回到把细条滚入视野并聚焦，让用户自己决定何时点开，绝不绕过禁用态。
+   * 「+」里的目录入口已撤出（2026-10-19 用户指认「选择目录之类的都是过度设计」）：
+   * 目录的常驻 Owner 就是本页目录细条，滚入视野并触发细条自带的「更换目录」弹层
+   * 仍是唯一路径。细条在忙时按钮禁用，绝不绕过禁用态。
    */
   const requestFocusFolder = useCallback(() => {
     const strip = document.querySelector<HTMLElement>('[data-testid="folder-scope-strip"]');
@@ -921,21 +1036,9 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     const change = document.querySelector<HTMLButtonElement>('[data-testid="folder-scope-change"]');
     if (change !== null && !change.disabled) change.click();
   }, []);
-  /**
-   * 「+ → 选择工作文件夹 → 选择文件夹」直接开原生目录选择器（2026-10-18 用户指令：
-   * 这一步不该再隔一层对话框）。选定后仍走同一条 `requestFolderTransition` 守卫与
-   * `openFolder`，不新建第二套目录状态；取消选择不发任何命令、保留草稿。
-   * 浏览器/示例模式没有原生选择器，退回细条的更换框——手动绝对路径与近期目录在那里。
-   */
-  function requestPickFolder() {
-    if (!nativeFolderPickerAvailable()) { requestFocusFolder(); return; }
-    void selectWorkingDirectory().then((picked) => {
-      if (picked !== null) requestFolderTransition(picked);
-    }).catch((caught) => { setFolderError(describeLiveError(caught).message); });
-  }
   const conversationInspector = <WorkDetailsFrame className="task-inspector" id="collab-conversation-inspector"
     testId="collab-conversation-inspector" tab={conversationInspectorTab} onTabChange={setConversationInspectorTab}
-    onClose={closeConversationInspector}>
+    tabs={CONVERSATION_INSPECTOR_TABS} onClose={closeConversationInspector}>
       {conversationInspectorTab === "PROGRESS" && <>
         <p className="inspector-overline">当前工作</p>
         <h3 className="inspector-title">暂无关联任务</h3>
@@ -947,6 +1050,15 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
         <h3 className="inspector-title">已保存的成果版本</h3>
         <p className="inspector-sub">请选择已保存的成果，阅读对应的确切版本正文。</p>
         <p className="inspector-note">当前讨论没有已保存的成果版本。</p>
+      </>}
+      {conversationInspectorTab === "CHANGES" && <>
+        <p className="inspector-overline">文件变更</p>
+        <h3 className="inspector-title">本次对话期间该目录的变化</h3>
+        <p className="inspector-sub">整段目录自会话起点起的净变化，含同期人工与其他程序的修改；不代表全部由 Agent 产生。</p>
+        {sessionId === null || sessionId === undefined
+          ? <p className="inspector-note">这段讨论还没有会话身份，暂时没有可核对的统计起点。</p>
+          : <ConversationDiffSummary client={client} sessionId={sessionId} enabled
+            directoryBound={false} scope="DIRECTORY" inline />}
       </>}
       {conversationInspectorTab === "RECORDS" && <>
         <p className="inspector-overline">运行记录</p>
@@ -1082,7 +1194,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
         {runControl}<FactBar label="任务与执行事实" testId="collab-chat-facts" cells={factCells} />
       </div>}
       {task !== null && <div className="collab-notices">
-        {loading && <p className="helper-text" role="status">正在更新任务事实，已显示的内容保持可见。</p>}
+        {taskUpdatingVisible && <p className="helper-text" role="status">正在更新任务事实，已显示的内容保持可见。</p>}
         {error && <p className="action-error" role="alert" data-testid="collab-task-error">{error} 任务事实尚未重新核对，不能提交新的判断或任务命令。</p>}
         {runError && <p className="action-error" role="alert" data-testid="collab-run-error">{runError} 已保存的产物与判断仍可继续阅读。</p>}
         {projectWriteBlockedReason && <p className="disabled-reason" data-testid="collab-project-archive-reason">{projectWriteBlockedReason}</p>}
@@ -1098,10 +1210,20 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
           data-testid="collab-narrow-DOCUMENT" aria-pressed={narrowSideOpen} onClick={() => revealSidePanel("DOCUMENT")}>成果与判断</button>
       </div>}
 
-      <div className={`collab-columns${task === null ? " collab-columns--empty" : ""}`} data-pane={sideTab}
-        data-layout-mode={task === null ? "chat" : renderedLayoutMode} data-narrow-side={narrowSideOpen ? "open" : "closed"}
+      <div className={`collab-columns${task === null && !awaitingWork ? " collab-columns--empty" : ""}`} data-pane={sideTab}
+        data-layout-mode={task === null && !awaitingWork ? "chat" : renderedLayoutMode} data-narrow-side={narrowSideOpen ? "open" : "closed"}
+        data-loading={awaitingWork ? "work" : undefined}
         style={{ "--relay-collab-chat-column": `${layout.chatRatio}fr`, "--relay-collab-result-column": `${1 - layout.chatRatio}fr` } as CSSProperties}>
-{task === null
+{/* 首帧骨架与任务视图同构（左对话列＋右成果列）：先给稳定列宽再填内容，
+    避免「单列会话视图 → 双列任务视图」的整块替换被读成闪一下。 */}
+{awaitingWork
+          ? <>
+              <section className="collab-center" aria-label="工作主区" data-testid="collab-center">
+                <p className="loading-text" role="status">正在打开这项工作…</p>
+              </section>
+              <div className="collab-result-pane" aria-hidden="true" />
+            </>
+          : task === null
           ? <>
           <section className="collab-center" aria-label="工作主区" data-testid="collab-center">
               {/* 顶部两个 details 大块（选择文件夹、接续已有任务）已删除：它们压在首屏最显眼处，
@@ -1109,7 +1231,20 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                   上方的常驻细条（composerHeader），「接续已有任务」迁到左栏就地展开区。 */}
               {/* 归属未确认时继续用工作区级会话面板：原历史与消息身份留在原地，
                   讨论输入不受限，依赖归属的执行入口由细条告警与空 executionScope 关闭。 */}
-              {entryPending ? <p className="helper-text" role="status">正在核对原会话归属…</p>
+              {/* `?dir=` 在途与 entryPending 同读法：目录还没打开就不挂面板，
+                  避免「工作区级 → 项目作用域」两段挂载把聊天区闪一下。
+                  在途态用 AssistView「正在核对对话目标与会话」同款 page-state 容器：
+                  目录一回来面板挂载、目标事实读回前也是这个容器，只翻一行标题，
+                  不再出现第二次整块布局替换（2026-10-20 用户截图第二轮指认）。 */}
+              {directoryPending ? <section className="page-state" aria-live="polite" data-testid="collab-directory-pending">
+                <p className="eyebrow">Assist</p><h1>正在打开目录…</h1>
+                {directorySlow && <>
+                  <p className="helper-text">目录打开比预期久。可以继续等待；也可以取消，回到这条新对话后再从目录细条重新打开。</p>
+                  <button type="button" className="secondary-button" data-testid="collab-directory-pending-cancel"
+                    onClick={() => { const next = new URLSearchParams(search); next.delete("dir"); setSearch(next); }}>取消并回到新对话</button>
+                </>}
+              </section>
+              : entryPending ? <p className="helper-text" role="status">正在核对原会话归属…</p>
                 : entryError ? <div role="alert" className="page-state page-state--error" data-testid="collab-session-entry-error">
                   <p>会话暂不可读取：{entryError}</p><button type="button" className="secondary-button" onClick={() => {
                     setSessionEntry(null); setSessionEntryReload((value) => value + 1);
@@ -1120,23 +1255,26 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                   workspaceLevel deferSessionCreation
                   preferredSessionId={sessionId} standalone
                   composerHeader={composerHeader}
+                  /* 顶栏的目录一项读这一份只读事实：还没建会话时它回答「本次已选目录」，
+                     不参与准入（准入仍只看下面那条 executionScope 的 READY 条件）。 */
+                  pendingDirectory={folder}
                   onNavigationStateChange={reportNavigation}
                   onRequestNewSession={requestTransition}
                   onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
                   onSessionCreated={(created) => setSessionId(created)}
                   onActiveSessionChange={reportActiveSession}
+                  onSessionScopeResolved={adoptSessionScope}
                   firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage}
                   conversationTarget={conversationTarget} onConversationTargetChange={setConversationTarget}
                   conversationToolbar toolbarRight={conversationToolbarRight}
-                  onRequestFolder={requestPickFolder} recentFolders={recents}
                   onRequestSkillTarget={requestSkillTarget}
-                  preferredSkillId={skillSeed ?? undefined}
-                  onOpenRecentFolder={(canonicalRoot) => requestFolderTransition(canonicalRoot)} />
+                  preferredSkillId={skillSeed ?? undefined} />
                 : <AssistView key={`folder:${conversationProjectId}:${folderReloadKey}:${newConversationKey ?? ""}:${sessionId === undefined ? "auto" : sessionId}`}
                   sessionContextEpoch={sessionContextEpoch}
                   targetKind="PROJECT" targetId={conversationProjectId ?? undefined}
                   preferredSessionId={sessionId} standalone deferSessionCreation
                   executionScope={folderProjectId === conversationProjectId ? folder : null}
+                  pendingDirectory={folder}
                   composerHeader={composerHeader}
                   onNavigationStateChange={reportNavigation}
                   onRequestNewSession={requestTransition}
@@ -1147,10 +1285,8 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                   conversationTarget={conversationTarget} onConversationTargetChange={setConversationTarget}
                   firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage}
                   conversationToolbar toolbarRight={conversationToolbarRight}
-                  onRequestFolder={requestPickFolder} recentFolders={recents}
                   onRequestSkillTarget={requestSkillTarget}
-                  preferredSkillId={skillSeed ?? undefined}
-                  onOpenRecentFolder={(canonicalRoot) => requestFolderTransition(canonicalRoot)} />}
+                  preferredSkillId={skillSeed ?? undefined} />}
             </section>
             {conversationInspectorOpen && <>
               {/* 抽屉遮罩：分栏态由 CSS 收成 display:none，不产生第二套关闭语义。 */}
@@ -1187,12 +1323,11 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                   firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage}
                   composerHeader={composerHeader}
                   executionScope={folder?.association?.projectId === task.projectId ? folder : null}
+                  pendingDirectory={folder}
                   onActiveSessionChange={reportActiveSession}
-                  conversationToolbar toolbarRight={conversationToolbarRight} onRequestFolder={requestPickFolder}
-                  recentFolders={recents}
+                  conversationToolbar toolbarRight={conversationToolbarRight}
                   onRequestSkillTarget={requestSkillTarget}
                   preferredSkillId={skillSeed ?? undefined}
-                  onOpenRecentFolder={(canonicalRoot) => requestFolderTransition(canonicalRoot)}
                   conversationTarget={conversationTarget} onConversationTargetChange={setConversationTarget}
                   externalWriteBlockedReason={projectWriteBlockedReason}
                   onNavigationStateChange={reportNavigation}
@@ -1258,20 +1393,11 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
       </div>
     </div>
 
-    <AppDialog open={transition !== null} title={transition?.kind === "pending" ? "命令结果待核对" : "未发送的内容"}
+    <AppDialog open={transition !== null} title="命令结果待核对"
       onClose={() => setTransition(null)}>
-      <p>{transition?.kind === "pending"
-        ? `原命令 ${transition.commandId ?? ""} 的结果仍待核对。请留在当前工作区查询回执；不会以新命令重试。`
-        : "当前工作区有未发送的消息、已选资料或判断说明。切换前请确认是否丢弃这些内容。"}</p>
+      <p>{`原命令 ${transition?.commandId ?? ""} 的结果仍待核对。请留在当前工作区查询回执；不会以新命令重试。`}</p>
       <div className="form-actions">
         <button className="secondary-button" type="button" onClick={() => setTransition(null)}>留在当前工作区</button>
-        {transition?.kind === "dirty" && <button className="primary-button" type="button" data-testid="collab-discard-draft"
-          onClick={() => {
-            const commandId = currentDraftGuard()?.pendingCommandId?.() ?? navigationRef.current.pending?.commandId ?? null;
-            if (commandId) { setTransition({ ...transition, kind: "pending", commandId }); return; }
-            const proceed = transition.proceed;
-            currentDraftGuard()?.discard(); setTransition(null); proceed();
-          }}>丢弃并继续</button>}
       </div>
     </AppDialog>
   </section>;

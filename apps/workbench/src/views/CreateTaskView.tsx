@@ -35,7 +35,6 @@ const clientScope = (client: RelayApiClient) => `${client.baseUrl}\n${client.wor
 function LiveProjectPicker({ client, selectedId, disabled, onSelect }: {
   client: RelayApiClient; selectedId: string; disabled: boolean; onSelect: (id: string) => void;
 }) {
-  const [opened, setOpened] = useState(false);
   const [items, setItems] = useState<readonly RelayProjectListItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -68,18 +67,26 @@ function LiveProjectPicker({ client, selectedId, disabled, onSelect }: {
     }
   }
 
+  /**
+   * 打开选择器就加载首屏：选项目本来就要先看见项目，
+   * 「先点一次读取、再选」只是把一次 GET 变成用户的步骤（工作台 §18.8）。
+   * 失败给重试与就地说明，不退回让人手抄项目 UUID。
+   */
+  useEffect(() => { void load(null); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [client]);
+
   const needle = search.trim().toLocaleLowerCase();
   const visible = items.filter((project) => !needle || project.title.toLocaleLowerCase().includes(needle));
   return <section className="surface-panel" aria-label="从真实进行中项目选择">
     <h2>所属项目</h2><p className="helper-text">选择一个进行中的项目，或暂不归属项目。</p>
-    {!opened ? <button className="secondary-button" type="button" data-testid="task-project-list-open"
-      disabled={disabled} onClick={() => { setOpened(true); void load(null); }}>读取进行中项目</button> : <>
       <button className="secondary-button" type="button" data-testid="task-project-list-refresh"
         disabled={disabled || loading} onClick={() => void load(null)}>刷新项目列表</button>
       <label className="field"><span className="field-label">搜索已加载项目</span><input type="search"
         value={search} onChange={(event) => setSearch(event.target.value)} disabled={disabled} name="task-project-search" /></label>
       {loading && <p role="status">正在读取进行中项目…</p>}
-      {error && <p className="action-error" role="alert">项目列表不可读取：{error}。仍可在下方手动指定已知项目。</p>}
+      {error && <p className="action-error" role="alert">项目列表不可读取：{error}。可以重试，或在下方按已知项目 ID 指定。</p>}
+      {error && <button className="secondary-button" type="button" data-testid="task-project-list-retry"
+        disabled={disabled || loading} onClick={() => void load(null)}>重试读取项目列表</button>}
       {!loading && !error && <><p className="helper-text" data-testid="task-project-list-count">已加载 {items.length} 项 · 当前搜索显示 {visible.length} 项
         {nextCursor ? " · 仍有后续页" : " · 已到列表末页"}。搜索和数量只覆盖已加载项目。</p>
         {visible.length === 0 ? <p className="helper-text">{items.length === 0 ? "当前没有已加载的进行中项目。" : "已加载项目中没有匹配项；后续页可能仍有匹配项目。"}</p> :
@@ -90,7 +97,6 @@ function LiveProjectPicker({ client, selectedId, disabled, onSelect }: {
         {nextCursor && <button className="secondary-button" type="button" data-testid="task-project-list-more"
           disabled={disabled} onClick={() => void load(nextCursor)}>加载更多进行中项目</button>}
       </>}
-    </>}
   </section>;
 }
 
@@ -412,8 +418,8 @@ export default function CreateTaskView({ inboxScope, onCancel }: { inboxScope: b
         没有可判断的完成条件时，系统不会把它变成「可开始」，也不会启动任何执行。</p>
       <div className="form-actions">
         <button className="primary-button" type="submit" data-testid="task-lightweight-save" aria-busy={submitting || undefined} disabled={formFrozen}>{submitting ? "正在保存" : "保存为待整理"}</button>
-        {/* 与 TasksView.openCreate 保持一致：从收件箱进入轻量入口后改用完整表单，不丢 tab=inbox。 */}
-        <Link className="text-button" to={`/tasks?view=create${inboxScope ? "&tab=inbox" : ""}`} data-testid="task-lightweight-full">改用完整表单</Link>
+        {/* 与 TasksView 的完整定义入口一致：从收件箱进入后改用完整表单，不丢 tab=inbox。 */}
+        <Link className="text-button" to={`/tasks?view=create${inboxScope ? "&tab=inbox" : ""}`} data-testid="task-lightweight-full">补充详细信息（完整表单）</Link>
         <button className="text-button" type="button" disabled={formFrozen} onClick={onCancel}>返回列表</button>
       </div>
       {receipt && <p className="receipt-message" role="status">{receipt}</p>}{readyBlockedReason && <p className="warning-callout" role="status" data-testid="task-ready-blocked"><Info aria-hidden="true" />{readyBlockedReason}</p>}{actionError && <p className="action-error" role="alert">{actionError.message}</p>}

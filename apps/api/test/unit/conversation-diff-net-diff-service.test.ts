@@ -46,6 +46,8 @@ interface FakeState {
   sessions: Map<string, any>;
   resources: Map<string, any>;
   baselines: StoredBaseline[];
+  /** 本会话写过的路径（真实实现来自会话写账本，这里直接给）。 */
+  written: string[];
 }
 
 function buildRepositories(state: FakeState): Repositories {
@@ -73,6 +75,9 @@ function buildRepositories(state: FakeState): Repositories {
           b.resourceId === resourceId && b.rootPath === rootPath)
         .sort((a, b) => b.capturedAt.getTime() - a.capturedAt.getTime());
       return matches[0];
+    },
+    async listWrittenPaths() {
+      return [...state.written];
     },
   };
   const repositories = {
@@ -112,7 +117,7 @@ function makeResource(overrides: Partial<any> = {}): any {
 }
 
 test('establish: session not found -> SESSION_NOT_FOUND', async () => {
-  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [] };
+  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [], written: [] };
   state.sessions.set('s1', undefined);
   const repos = buildRepositories(state);
   const result = await establishConversationDiffBaseline(repos, { workspaceId: 'ws-1', sessionId: 's1' });
@@ -121,7 +126,7 @@ test('establish: session not found -> SESSION_NOT_FOUND', async () => {
 });
 
 test('establish: session not ACTIVE -> SESSION_NOT_ACTIVE', async () => {
-  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [] };
+  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [], written: [] };
   state.sessions.set('s1', makeSession({ status: 'PAUSED' }));
   const repos = buildRepositories(state);
   const result = await establishConversationDiffBaseline(repos, { workspaceId: 'ws-1', sessionId: 's1' });
@@ -130,7 +135,7 @@ test('establish: session not ACTIVE -> SESSION_NOT_ACTIVE', async () => {
 });
 
 test('establish: no working resource -> NO_RESOURCE', async () => {
-  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [] };
+  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [], written: [] };
   state.sessions.set('s1', makeSession({ working_resource_id: null }));
   const repos = buildRepositories(state);
   const result = await establishConversationDiffBaseline(repos, { workspaceId: 'ws-1', sessionId: 's1' });
@@ -140,7 +145,7 @@ test('establish: no working resource -> NO_RESOURCE', async () => {
 
 test('establish: resource unavailable (missing / wrong workspace / inactive) -> RESOURCE_UNAVAILABLE', async () => {
   const mk = async (resource: any) => {
-    const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [] };
+    const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [], written: [] };
     state.sessions.set('s1', makeSession());
     state.resources.set('res-1', resource);
     return buildRepositories(state);
@@ -151,7 +156,7 @@ test('establish: resource unavailable (missing / wrong workspace / inactive) -> 
 });
 
 test('establish: project mismatch -> RESOURCE_UNAVAILABLE (no git capture)', async () => {
-  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [] };
+  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [], written: [] };
   state.sessions.set('s1', makeSession({ project_id: 'p1' }));
   state.resources.set('res-1', makeResource({ project_id: 'p2' }));
   const repos = buildRepositories(state);
@@ -164,7 +169,7 @@ test('establish: captures real baseline in a git repo -> CREATED, then REUSED', 
   const root = await withTempRepo(async (r) => {
     await writeFile(join(r, 'a.txt'), `base${LF}`);
   });
-  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [] };
+  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [], written: [] };
   state.sessions.set('s1', makeSession());
   state.resources.set('res-1', makeResource({ canonical_root: root }));
   const repos = buildRepositories(state);
@@ -185,7 +190,7 @@ test('establish: captures real baseline in a git repo -> CREATED, then REUSED', 
 });
 
 test('read: no resource -> NO_RESOURCE', async () => {
-  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [] };
+  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [], written: [] };
   state.sessions.set('s1', makeSession({ working_resource_id: null }));
   const repos = buildRepositories(state);
   const result = await readConversationDiff(repos, { workspaceId: 'ws-1', sessionId: 's1' });
@@ -195,7 +200,7 @@ test('read: no resource -> NO_RESOURCE', async () => {
 
 test('read: no baseline -> NO_BASELINE', async () => {
   const root = await withTempRepo(async () => {});
-  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [] };
+  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [], written: [] };
   state.sessions.set('s1', makeSession());
   state.resources.set('res-1', makeResource({ canonical_root: root }));
   const repos = buildRepositories(state);
@@ -209,7 +214,7 @@ test('read: baseline exists but current root not a git repo -> ROOT_NOT_GIT', as
   // 用一个真实存在但不是 git 仓库的临时目录作为根路径。
   const nonGitDir = await mkdtemp(join(tmpdir(), 'relay-cd-nongit-'));
   try {
-    const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [] };
+    const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [], written: [] };
     state.sessions.set('s1', makeSession());
     state.resources.set('res-1', makeResource({ canonical_root: nonGitDir }));
     // 直接预置一条基线（根路径指向非 git 目录），使 readLatestBaseline 命中、随后 captureCurrentState 失败。
@@ -234,11 +239,91 @@ test('read: baseline exists but current root not a git repo -> ROOT_NOT_GIT', as
   }
 });
 
+test('read: 会话口径只报本会话写过的路径，同目录其他改动不计入', async () => {
+  const root = await withTempRepo(async (r) => {
+    await writeFile(join(r, 'a.txt'), `base${LF}`);
+    await writeFile(join(r, 'other.txt'), `x${LF}`);
+  });
+  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [], written: ['a.txt'] };
+  state.sessions.set('s1', makeSession());
+  state.resources.set('res-1', makeResource({ canonical_root: root }));
+  const repos = buildRepositories(state);
+
+  await establishConversationDiffBaseline(repos, { workspaceId: 'ws-1', sessionId: 's1' });
+  // 本会话写过的 a.txt 与别的会话写的 other.txt 都变了，只有 a.txt 属于这条入口。
+  await writeFile(join(root, 'a.txt'), `base${LF}extra${LF}`);
+  await writeFile(join(root, 'other.txt'), `x${LF}y${LF}z${LF}`);
+
+  const result = await readConversationDiff(repos, { workspaceId: 'ws-1', sessionId: 's1' });
+  assert.equal(result.available, true);
+  if (result.available) {
+    assert.equal(result.diff.scope, 'SESSION');
+    assert.deepEqual(result.diff.files.map((file) => file.path), ['a.txt']);
+    assert.equal(result.diff.totalAdded, 1);
+    assert.equal(result.diff.totalRemoved, 0);
+  }
+  await rm(root, { recursive: true, force: true });
+});
+
+test('read: 本会话一个路径都没写过 -> 空 diff，且不因整目录扫描不全而报不完整', async () => {
+  const root = await withTempRepo(async (r) => {
+    await writeFile(join(r, 'a.txt'), `base${LF}`);
+  });
+  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [], written: [] };
+  state.sessions.set('s1', makeSession());
+  state.resources.set('res-1', makeResource({ canonical_root: root }));
+  const repos = buildRepositories(state);
+
+  await establishConversationDiffBaseline(repos, { workspaceId: 'ws-1', sessionId: 's1' });
+  await writeFile(join(root, 'a.txt'), `base${LF}changed-by-someone-else${LF}`);
+
+  const result = await readConversationDiff(repos, { workspaceId: 'ws-1', sessionId: 's1' });
+  assert.equal(result.available, true);
+  if (result.available) {
+    assert.deepEqual(result.diff.files, []);
+    assert.equal(result.diff.totalFiles, 0);
+    assert.equal(result.diff.incomplete, false);
+    assert.equal(result.diff.scope, 'SESSION');
+  }
+  await rm(root, { recursive: true, force: true });
+});
+
+test('read: 目录口径（工作详情「变更」页签）不看写账本，整段目录净变化都算', async () => {
+  const root = await withTempRepo(async (r) => {
+    await writeFile(join(r, 'a.txt'), `base${LF}`);
+    await writeFile(join(r, 'other.txt'), `x${LF}`);
+  });
+  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [], written: [] };
+  state.sessions.set('s1', makeSession());
+  state.resources.set('res-1', makeResource({ canonical_root: root }));
+  const repos = buildRepositories(state);
+
+  await establishConversationDiffBaseline(repos, { workspaceId: 'ws-1', sessionId: 's1' });
+  await writeFile(join(root, 'a.txt'), `base${LF}extra${LF}`);
+  await writeFile(join(root, 'other.txt'), `x${LF}y${LF}z${LF}`);
+
+  // 写账本为空，会话口径是「暂无变化」；目录口径仍要如实给出两条。
+  const sessionRead = await readConversationDiff(repos, { workspaceId: 'ws-1', sessionId: 's1' });
+  assert.equal(sessionRead.available, true);
+  if (sessionRead.available) assert.deepEqual(sessionRead.diff.files, []);
+
+  const directoryRead = await readConversationDiff(repos,
+    { workspaceId: 'ws-1', sessionId: 's1', scope: 'DIRECTORY' });
+  assert.equal(directoryRead.available, true);
+  if (directoryRead.available) {
+    assert.equal(directoryRead.diff.scope, 'DIRECTORY');
+    assert.deepEqual(directoryRead.diff.files.map((file) => file.path), ['a.txt', 'other.txt']);
+    // a.txt +1、other.txt +2，合计 3；会话口径那两个 0 不能混进来。
+    assert.equal(directoryRead.diff.totalAdded, 3);
+  }
+  await rm(root, { recursive: true, force: true });
+});
+
 test('read: available diff reflects on-disk net changes since baseline', async () => {
   const root = await withTempRepo(async (r) => {
     await writeFile(join(r, 'a.txt'), `base${LF}`);
   });
-  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [] };
+  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [], written: ['a.txt'] };
   state.sessions.set('s1', makeSession());
   state.resources.set('res-1', makeResource({ canonical_root: root }));
   const repos = buildRepositories(state);

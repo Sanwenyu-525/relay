@@ -12,7 +12,8 @@ import { runIdempotentCommand, type CommandOutcome } from './command.js';
 import { invalidTransition, resourceNotFound, validationFailed } from './domain-error.js';
 import { canonicalResourceIdentity, registrationFileWriteRootId, rootsOverlap } from './gateway-configuration.js';
 import { rankActivePolicies, targetMatches } from './gateway-actions.js';
-import { ensureLocalDirectoryReadAccess } from './local-directory-access.js';
+import { ensureLocalDirectoryReadAccess, type LocalDirectoryGitRead } from './local-directory-access.js';
+import { ensureWorkspaceDefaultDirectory } from './workspace-default-directory.js';
 import { lockWritableProjectInWorkspace, requireWorkspace } from './guards.js';
 import { createRepositories, type Repositories } from './unit-of-work.js';
 
@@ -62,6 +63,12 @@ export type OpenWorkingDirectoryResult = {
   readonly created_resource: boolean;
   readonly candidates: readonly WorkingDirectoryCandidate[];
   readonly write_readiness: WorkingDirectoryWriteReadinessDetail;
+  /**
+   * Git 只读投影（2026-10-20，P1-3）。打开目录本身就是对「这个目录」的读取授权，
+   * Git 的 status/diff/log 随它成立；子目录只报出仓库根，不扩大文件范围。
+   * 旧回执没有这个字段，因此响应契约里是可选。
+   */
+  readonly git_read: LocalDirectoryGitRead;
 };
 
 /**
@@ -83,6 +90,10 @@ export type WorkingDirectoryWriteReadinessDetail = {
 
 const NO_POLICY = { policy_decision: null, policy_id: null, policy_revision: null,
   policy_target_prefix: null } as const;
+
+/** 目录未就绪时不做任何 Git 核对：不能把「还没看」写成「不是仓库」。 */
+const GIT_NOT_CHECKED: LocalDirectoryGitRead = { state: 'NOT_CHECKED', repo_root: null,
+  detail: '目录未就绪，尚未核对 Git 仓库状态。' };
 
 export interface OpenWorkingDirectoryInput {
   readonly workspaceId: string;
@@ -260,19 +271,24 @@ export async function openWorkingDirectory(db: DbExecutor, input: OpenWorkingDir
         reason: WorkingDirectoryReason | null): Promise<OpenWorkingDirectoryResult> => {
         const project = await projectOf(resource);
         const association = candidateOf(project, resource);
+        let gitRead: LocalDirectoryGitRead = GIT_NOT_CHECKED;
         if (status === 'READY' && reason === null && resource.status === 'ACTIVE' &&
             project.archived_at === null) {
           const wasConfigured = await repositories.gateway.readLocalDirectoryAccess(resource.id);
-          await ensureLocalDirectoryReadAccess(repositories, { workspaceId: input.workspaceId,
+          const ensured = await ensureLocalDirectoryReadAccess(repositories, { workspaceId: input.workspaceId,
             projectId: project.id, resource });
-          if (createdResource || wasConfigured === undefined) {
+          gitRead = ensured.git;
+          // 打开目录本身就是一次显式选择：工作区还没有默认目录时顺手登记它，新会话因此
+          // 默认带着目录与基础读能力，不必先去设置页配置一次。已有默认目录时不覆盖。
+          await ensureWorkspaceDefaultDirectory(repositories, input.workspaceId, resource);
+          if (createdResource || wasConfigured === undefined || ensured.changed) {
             await repositories.workspaces.bumpAuthority(input.workspaceId);
           }
         }
         return { canonical_root: resource.canonical_root, display_name: basename(root) || root,
           status, reason, association,
           created_project: createdProject, created_resource: createdResource,
-          candidates,
+          candidates, git_read: gitRead,
           write_readiness: await writeReadiness(repositories, input.workspaceId, association,
             resource.canonical_root) };
       };
@@ -311,6 +327,7 @@ export async function openWorkingDirectory(db: DbExecutor, input: OpenWorkingDir
         return { canonical_root: root, display_name: basename(root) || root, status: 'AMBIGUOUS',
           reason: 'MULTIPLE_PROJECTS', association: null, created_project: false, created_resource: false,
           candidates,
+          git_read: GIT_NOT_CHECKED,
           write_readiness: { status: 'NEEDS_PERMISSION',
             detail: '同一实际目录关联了多个项目；先选定作用域再继续。', ...NO_POLICY,
             write_tier: null, access_revision: '0' } };
@@ -342,6 +359,7 @@ export async function openWorkingDirectory(db: DbExecutor, input: OpenWorkingDir
           return { canonical_root: root, display_name: basename(root) || root, status: 'NOT_READY',
             reason: 'OVERLAPPING_OTHER_PROJECT', association: candidates[0] ?? null,
             created_project: false, created_resource: false, candidates,
+            git_read: GIT_NOT_CHECKED,
             write_readiness: { status: 'RESOURCE_BUSY',
               detail: '这个目录落在另一个已受管根之内或包含它；先选定作用域，不会另建第二个写 Owner。',
               ...NO_POLICY, write_tier: null, access_revision: '0' } };

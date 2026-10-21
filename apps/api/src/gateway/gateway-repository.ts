@@ -73,12 +73,13 @@ export class GatewayRepository {
   }
 
   async insertLocalDirectoryAccess(input: { resourceId: string; writeTier: LocalDirectoryWriteTier;
-    readConnectionId: string; writeConnectionId: string | null; policyIds: JsonObject }): Promise<LocalDirectoryAccessRow> {
+    readConnectionId: string; writeConnectionId: string | null; gitConnectionId: string | null;
+    policyIds: JsonObject }): Promise<LocalDirectoryAccessRow> {
     const result = await sql<LocalDirectoryAccessRow>`
       insert into local_directory_access
-        (resource_id, write_tier, read_connection_id, write_connection_id, policy_ids)
+        (resource_id, write_tier, read_connection_id, write_connection_id, git_connection_id, policy_ids)
       values (${input.resourceId}, ${input.writeTier}, ${input.readConnectionId}, ${input.writeConnectionId},
-        ${JSON.stringify(input.policyIds)}::jsonb)
+        ${input.gitConnectionId}, ${JSON.stringify(input.policyIds)}::jsonb)
       returning *
     `.execute(this.db);
     return requireRow(result.rows, 'insert local directory access pointers');
@@ -86,10 +87,12 @@ export class GatewayRepository {
 
   async updateLocalDirectoryAccess(input: { resourceId: string; expectedRevision: bigint;
     writeTier: LocalDirectoryWriteTier; writeConnectionId: string | null;
-    policyIds: JsonObject }): Promise<LocalDirectoryAccessRow | undefined> {
+    gitConnectionId: string | null; policyIds: JsonObject }): Promise<LocalDirectoryAccessRow | undefined> {
     const result = await sql<LocalDirectoryAccessRow>`
       update local_directory_access set write_tier = ${input.writeTier},
-        write_connection_id = ${input.writeConnectionId}, policy_ids = ${JSON.stringify(input.policyIds)}::jsonb,
+        write_connection_id = ${input.writeConnectionId},
+        git_connection_id = ${input.gitConnectionId},
+        policy_ids = ${JSON.stringify(input.policyIds)}::jsonb,
         revision = revision + 1, updated_at = now()
       where resource_id = ${input.resourceId} and revision = ${input.expectedRevision}
       returning *

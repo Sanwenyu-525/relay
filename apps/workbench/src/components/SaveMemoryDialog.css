@@ -1,0 +1,67 @@
+/* 保存为长期记忆（工作台 §40）：来源核对在上，可编辑草稿在中，范围与确认在下。 */
+
+.save-memory {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-3);
+}
+
+.save-memory h3,
+.save-memory h4 {
+  margin: 0;
+  font-size: var(--relay-font-size-body);
+  font-weight: 600;
+  color: var(--relay-color-text-primary);
+}
+
+.save-memory-source,
+.save-memory-saved {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-2);
+  padding: var(--relay-space-3);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-sm, 6px);
+  background: var(--relay-color-bg-subtle);
+}
+
+.save-memory-source p,
+.save-memory-saved p { margin: 0; }
+
+.save-memory-scope {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-1);
+  margin: 0;
+  padding: var(--relay-space-2) var(--relay-space-3);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-sm, 6px);
+}
+
+.save-memory-scope legend {
+  padding: 0 var(--relay-space-1);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+}
+
+.save-memory-scope label {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+}
+
+.save-memory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+}
+
+.save-memory-sources {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-1);
+  margin: 0;
+  padding-left: var(--relay-space-4);
+  overflow-wrap: anywhere;
+}

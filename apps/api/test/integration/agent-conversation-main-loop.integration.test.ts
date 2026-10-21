@@ -7,17 +7,22 @@ import { sql } from 'kysely';
 import test, { after, before } from 'node:test';
 
 import { createAssistSession, bindAssistSessionDirectory, cancelAssistMessage,
-  requestAssistMessage } from '../../src/application/assist-commands.js';
+  requestAssistMessage, steerAssistMessage } from '../../src/application/assist-commands.js';
+import { listAssistMessages } from '../../src/application/assist-queries.js';
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
+import { runSessionReadonlyRounds } from '../../src/application/assistant-readonly-round.js';
 import { createGatewayPolicy, registerManagedResource } from
   '../../src/application/gateway-configuration.js';
 import { openWorkingDirectory } from '../../src/application/open-working-directory.js';
+import { readWorkspaceDefaultDirectory, setWorkspaceDefaultDirectory }
+  from '../../src/application/workspace-default-directory.js';
 import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
 import { SessionToolCallRepository } from '../../src/assist/session-tool-call-repository.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
 import { FakeModelPort, type AssistModelPort, type AssistResult } from
   '../../src/workflow/fake-model-port.js';
+import { ModelCallBudgetError } from '../../src/workflow/openai-compatible-model-port.js';
 import type { GatewayCapability } from '../../src/infrastructure/database-schema.js';
 import type { JsonObject } from '../../src/infrastructure/json.js';
 import { createDataRoot } from './api-harness.js';
@@ -137,6 +142,8 @@ async function fixture(options: {
 interface AskResult {
   readonly status: string;
   readonly errorCode: string | null;
+  /** Provider 传输类别：MODEL_FAILED 必须能归因，不许只剩一个 MODEL_FAILED。 */
+  readonly providerErrorKind: string | null;
   readonly content: string | null;
   readonly declaredTools: readonly string[];
   /** 回传给模型上下文的所有工具结果正文。 */
@@ -187,6 +194,7 @@ async function ask(fx: AgentFixture, content: string, port?: AssistModelPort): P
     sent.result.assistant_message_id);
   const sessionRow = await createRepositories(app.db).assist.readSession(fx.sessionId);
   return { status: message?.status ?? 'MISSING', errorCode: message?.error_code ?? null,
+    providerErrorKind: message?.provider_error_kind ?? null,
     content: message?.content ?? null, declaredTools, fedBack, assistCalls, interpretCalls,
     systemPrompts,
     identity: { intent: message?.intent ?? '', hasSkill: message?.skill_snapshot != null,
@@ -248,6 +256,36 @@ async function countRunsOfProject(projectId: string): Promise<number> {
 
 // ---------------------------------------------------------------- AM-01 / AM-02
 
+test('DD-03/06 默认目录在创建时绑定，首轮真实读取文件且不提升写权限', async () => {
+  const original = await fixture({ bind: false });
+  const repositories = createRepositories(app.db);
+  const resource = (await repositories.gateway.listResources()).find((r) =>
+    r.workspace_id === original.workspaceId && r.canonical_root === original.canonicalRoot);
+  assert.ok(resource);
+  assert.equal(await repositories.gateway.readLocalDirectoryAccess(resource.id), undefined);
+  await setWorkspaceDefaultDirectory(app.db, { workspaceId: original.workspaceId,
+    commandId: randomUUID(), resourceId: resource.id, expectedRevision: '0' });
+  assert.equal((await readWorkspaceDefaultDirectory(app.db, original.workspaceId)).write_tier, 'READ_ONLY');
+  const created = await createAssistSession(app.db, { workspaceId: original.workspaceId,
+    commandId: randomUUID(), title: 'default scope' });
+  const fx = { ...original, sessionId: created.result.session_id };
+  const before = await readFile(join(fx.root, 'README.md'), 'utf8');
+  const outcome = await askWithScript(fx, [
+    [{ name: 'list_directory', arguments: {} }],
+    [{ name: 'read_file', arguments: { relative_path: 'README.md' } }],
+  ]);
+  assert.equal(outcome.status, 'COMPLETED', JSON.stringify(outcome));
+  assert.ok(outcome.fedBack.some((item) => item.name === 'read_file' && item.content.includes(fx.marker)));
+  assert.equal((await repositories.assist.readSession(fx.sessionId))?.working_directory_source, 'WORKSPACE_DEFAULT');
+  assert.equal((await repositories.assist.readSession(original.sessionId))?.working_resource_id, null);
+  assert.equal(await repositories.gateway.readLocalDirectoryAccess(resource.id), undefined,
+    'config and creation do not create permission metadata');
+  assert.equal(await countRunsOfProject(fx.projectId), 0);
+  assert.equal(await countProjectRows('tasks', fx.projectId), 0);
+  assert.equal(await readFile(join(fx.root, 'README.md'), 'utf8'), before);
+  assert.ok(!outcome.declaredTools.includes('apply_changeset'));
+});
+
 test('AM-01/02 普通会话在同一条消息里读到真实目录与真实文件，随机标记进模型上下文，磁盘未变', async () => {
   const fx = await fixture();
   const before_ = await readFile(join(fx.root, 'README.md'), 'utf8');
@@ -263,8 +301,11 @@ test('AM-01/02 普通会话在同一条消息里读到真实目录与真实文�
     '主流程不允许再结算成 TOOL_CALLS_WITHOUT_DECLARED_TOOLS：' + String(outcome.errorCode));
 
   // 词表按当前连接裁剪，且只含只读工具。
+  // 0128：根会话的普通 Agent 主流程额外声明 delegate_subagent——它是应用内动作
+  // （子 Agent 只读轮次），不接 Gateway、不写盘，因此下面那条「不得出现写工具」的
+  // 断言仍然成立；词表里多出它是 0128 的既定接线，不是本用例放宽只读边界。
   assert.deepEqual(outcome.declaredTools,
-    ['list_directory', 'find_paths', 'search_text', 'read_file'],
+    ['list_directory', 'find_paths', 'search_text', 'read_file', 'delegate_subagent'],
     '词表诊断：' + JSON.stringify({ declaredTools: outcome.declaredTools,
       assistCalls: outcome.assistCalls, fedBack: outcome.fedBack,
       identity: outcome.identity,
@@ -476,4 +517,488 @@ test('AM-09 取消先于领取时本轮根本不启动：消息按 CANCELLED 收
   const rows = await new SessionToolCallRepository(app.db).listBySession(fx.sessionId);
   assert.equal(rows.length, 0, '取消后不得再派发工具读取');
   assert.equal(await countProjectRows('logical_operations', fx.projectId), 0);
+});
+
+// ---------------------------------------------------------------- 0122 插话
+
+test('0122 插话：排队消息在下一轮模型请求前并入当前回复，不另起一轮', async () => {
+  const fx = await fixture();
+  const queuedText = '先别改 README，先看 src 里有什么';
+  const seen: { steers: readonly string[]; toolTurns: number }[] = [];
+  let queuedId: string | null = null;
+  let round = 0;
+  const port: AssistModelPort = {
+    identity: new FakeModelPort().identity,
+    assist: async (request) => {
+      seen.push({ steers: [...(request.steers ?? [])],
+        toolTurns: request.toolTurns?.length ?? 0 });
+      round += 1;
+      if (round === 1) {
+        // 在途期间：用户又发一条（排队），再按一次回车请求插话。
+        const sent = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+          sessionId: fx.sessionId, commandId: randomUUID(), content: queuedText });
+        queuedId = sent.result.assistant_message_id;
+        const steered = await steerAssistMessage(app.db, { workspaceId: fx.workspaceId,
+          messageId: queuedId, commandId: randomUUID() });
+        assert.equal(steered.result.status, 'STEER_REQUESTED');
+        return { kind: 'TOOL_CALLS',
+          calls: [{ providerToolCallId: 'stub-1', name: 'list_directory', arguments: {} }],
+          preamble: '', providerRequestId: 'stub-r1',
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null,
+            cacheCreationTokens: null } };
+      }
+      return { kind: 'CONTENT', content: '已经按插话调整。', providerRequestId: `stub-r${round}`,
+        usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null,
+          cacheCreationTokens: null } };
+    },
+  };
+  const outcome = await ask(fx, '看一下这个目录', port);
+  assert.equal(outcome.status, 'COMPLETED');
+  assert.equal(outcome.assistCalls, 2, '插话让这一轮多跑一步，而不是另起一轮');
+  // 第一轮还没有插话；第二轮同时拿到工具轮次与插话（插话排在工具轮次之后）。
+  assert.deepEqual(seen[0]?.steers, []);
+  assert.deepEqual(seen[1]?.steers, [queuedText]);
+  assert.ok((seen[1]?.toolTurns ?? 0) > 0, '工具结果没有被插话挤掉');
+  assert.equal((await new SessionToolCallRepository(app.db).listBySession(fx.sessionId)).length,
+    0, '模型请求期间到达插话后，旧工具尚未派发，必须先重新判断方向');
+  assert.equal(await countProjectRows('logical_operations', fx.projectId), 0,
+    '被新输入打断的工具不得进入 Gateway');
+
+  // 排队那条被收口为 CANCELLED + STEERED：它不再自己生成回复。
+  assert.ok(queuedId !== null);
+  const row = await createRepositories(app.db).assist.readMessage(queuedId);
+  assert.equal(row?.status, 'CANCELLED');
+  assert.equal(row?.error_code, 'STEERED');
+  assert.equal(row?.steer_requested, true);
+  // 它不出现在消息列表里（没有回复的占位行），用户原文仍在——那是真实发过的一条。
+  const messages = await listAssistMessages(app.db, { workspaceId: fx.workspaceId,
+    sessionId: fx.sessionId });
+  assert.equal(messages.some((item) => item.id === queuedId), false);
+  assert.equal(messages.some((item) => item.role === 'USER' && item.content === queuedText), true);
+  // 这一轮只有一条 ASSISTANT 回复（插话没有生成第二条）。
+  assert.equal(messages.filter((item) => item.role === 'ASSISTANT' && item.status === 'COMPLETED')
+    .length, 1);
+});
+
+test('0122 插话只接受排队中的消息：没有在途回复时明确拒绝，不改投递方式', async () => {
+  const fx = await fixture();
+  const sent = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+    sessionId: fx.sessionId, commandId: randomUUID(), content: '一条还没开始的消息' });
+  // 还没领取：这条自己就是唯一的 PENDING，会话里没有 RUNNING。
+  await assert.rejects(steerAssistMessage(app.db, { workspaceId: fx.workspaceId,
+    messageId: sent.result.assistant_message_id, commandId: randomUUID() }),
+  /没有正在生成的回复/u);
+  const row = await createRepositories(app.db).assist.readMessage(
+    sent.result.assistant_message_id);
+  assert.equal(row?.status, 'PENDING');
+  assert.equal(row?.steer_requested, false);
+  // 收尾：这条仍是 PENDING，留着会被后续用例的 tick 领取，污染别的断言。
+  await cancelAssistMessage(app.db, { workspaceId: fx.workspaceId, commandId: randomUUID(),
+    messageId: sent.result.assistant_message_id });
+});
+
+test('连续插话：相关补充与最终换目标的全部原文按序交给同一轮判断', async () => {
+  const fx = await fixture();
+  const texts = ['支持手机号', '验证码也要', '登录先不做了', '只分析启动失败，先不要修改'];
+  let round = 0;
+  const port: AssistModelPort = { identity: new FakeModelPort().identity,
+    assist: async (request) => {
+      round += 1;
+      if (round === 1) {
+        for (const content of texts) {
+          const queued = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+            sessionId: fx.sessionId, commandId: randomUUID(), content });
+          await steerAssistMessage(app.db, { workspaceId: fx.workspaceId,
+            messageId: queued.result.assistant_message_id, commandId: randomUUID() });
+        }
+      } else {
+        assert.deepEqual(request.steers, texts);
+        assert.match(request.system, /USER_STEERING_V1/u);
+        assert.match(request.system, /后来的修正只替代冲突部分/u);
+        assert.match(request.system, /临时提问和进度询问先回答/u);
+        assert.match(request.system, /必须沿既有领域入口处理/u);
+        assert.match(request.system, /正在执行的正式 Run 不受聊天改向影响/u,
+          '插话规则必须写明正式 Run 的覆盖范围，防止模型承诺已停止 Run');
+      }
+      return { kind: 'CONTENT', content: '测试端口答复', providerRequestId: `batch-${round}`,
+        usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null, cacheCreationTokens: null } };
+    } };
+  const result = await ask(fx, '做登录页', port);
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(round, 2);
+  const messages = await listAssistMessages(app.db,
+    { workspaceId: fx.workspaceId, sessionId: fx.sessionId });
+  assert.deepEqual(messages.filter((item) => item.role === 'USER').map((item) => item.content),
+    ['做登录页', ...texts]);
+  assert.equal(messages.filter((item) => item.role === 'ASSISTANT').length, 1);
+  assert.equal(await countProjectRows('tasks', fx.projectId), 0, '插话不直接改正式任务');
+});
+
+test('跨轮连续插话：早先要求留在其工具之前，后到要求不挤掉真实结果', async () => {
+  const fx = await fixture();
+  const first = '先读 README';
+  const last = '不用列目录了，只解释刚才读到的内容';
+  let round = 0;
+  const enqueue = async (content: string) => {
+    const queued = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+      sessionId: fx.sessionId, commandId: randomUUID(), content });
+    await steerAssistMessage(app.db, { workspaceId: fx.workspaceId,
+      messageId: queued.result.assistant_message_id, commandId: randomUUID() });
+  };
+  const usage = { inputTokens: 1, outputTokens: 1, cacheReadTokens: null, cacheCreationTokens: null };
+  const port: AssistModelPort = { identity: new FakeModelPort().identity,
+    assist: async (request) => {
+      round += 1;
+      if (round === 1) {
+        await enqueue(first);
+        return { kind: 'CONTENT', content: '尚未结算的中间正文', providerRequestId: 'order-1', usage };
+      }
+      if (round === 2) {
+        assert.deepEqual(request.steers, [first]);
+        return { kind: 'TOOL_CALLS', calls: [{ providerToolCallId: 'order-read', name: 'read_file',
+          arguments: { relative_path: 'README.md' } }], preamble: '', providerRequestId: 'order-2', usage };
+      }
+      assert.equal(request.steers?.includes(first) ?? false, false, '旧插话不重新移动到末尾');
+      assert.deepEqual(request.toolTurns?.[0]?.steersBefore, [first]);
+      assert.match(request.toolTurns?.[0]?.results[0]?.content ?? '', new RegExp(fx.marker));
+      assert.match(request.system, /USER_STEERING_V1/u, '旧插话归入工具后仍保留理解规则');
+      if (round === 3) {
+        await enqueue(last);
+        return { kind: 'TOOL_CALLS', calls: [{ providerToolCallId: 'order-list',
+          name: 'list_directory', arguments: {} }], preamble: '', providerRequestId: 'order-3', usage };
+      }
+      assert.deepEqual(request.steers, [last]);
+      assert.equal(JSON.parse(request.toolTurns?.[1]?.results[0]?.content ?? '{}').status, 'NOT_EXECUTED');
+      return { kind: 'CONTENT', content: '完成时序测试', providerRequestId: 'order-4', usage };
+    } };
+  const result = await ask(fx, '检查项目', port);
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(round, 4);
+  assert.equal((await new SessionToolCallRepository(app.db).listBySession(fx.sessionId)).length, 1);
+  assert.equal(await countProjectRows('logical_operations', fx.projectId), 1);
+});
+
+for (const maxRounds of [0, 1]) {
+  test(`工具之间到达插话：保留已执行结果并停止剩余动作；maxRounds=${maxRounds}`, async () => {
+    const fx = await fixture();
+    const repository = createRepositories(app.db).assist;
+    const sent = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+      sessionId: fx.sessionId, commandId: randomUUID(), content: '读文件，然后列目录' });
+    const workerId = `between-tools-${randomUUID()}`;
+    const message = await repository.claimNextPendingMessage(workerId);
+    assert.equal(message?.id, sent.result.assistant_message_id);
+    assert.ok(message !== undefined);
+    const session = await repository.readSession(fx.sessionId);
+    assert.ok(session !== undefined && session.working_resource_id !== null);
+    let drains = 0;
+    let round = 0;
+    let queuedId: string | undefined;
+    const port: AssistModelPort = { identity: new FakeModelPort().identity,
+      assist: async (request) => {
+        round += 1;
+        if (maxRounds === 1 && round === 1) {
+          return { kind: 'TOOL_CALLS', calls: [
+            { providerToolCallId: 'already-read', name: 'read_file',
+              arguments: { relative_path: 'README.md' } },
+            { providerToolCallId: 'not-listed', name: 'list_directory', arguments: {} },
+          ], preamble: '', providerRequestId: 'between-1',
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null, cacheCreationTokens: null } };
+        }
+        if (maxRounds === 1) {
+          const results = request.toolTurns?.[0]?.results;
+          assert.match(results?.[0]?.content ?? '', new RegExp(fx.marker));
+          assert.equal(results?.[0]?.isError, false);
+          assert.equal(JSON.parse(results?.[1]?.content ?? '{}').reason, 'NEW_USER_INPUT');
+          assert.deepEqual(request.steers, ['不用列目录了，先解释刚才读到的内容']);
+          assert.deepEqual(request.tools, [], '最后一次模型请求收尾，不追加工具预算');
+        }
+        return { kind: 'CONTENT', content: '完成本轮测试', providerRequestId: `between-${round}`,
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null, cacheCreationTokens: null } };
+      } };
+    if (maxRounds === 0) {
+      const queued = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+        sessionId: fx.sessionId, commandId: randomUUID(), content: '迟到的要求' });
+      queuedId = queued.result.assistant_message_id;
+      await steerAssistMessage(app.db, { workspaceId: fx.workspaceId,
+        messageId: queuedId, commandId: randomUUID() });
+    }
+    const outcome = await runSessionReadonlyRounds(app.db, { session, message,
+      availableTools: ['read_file', 'list_directory'], system: 'TEST',
+      contextTurns: [{ role: 'user', content: '读文件，然后列目录' }],
+      modelPort: port, signal: new AbortController().signal, maxRounds,
+      resolveOrigin: async () => ({ ok: true, canonicalRoot: fx.canonicalRoot,
+        origin: { kind: 'AGENT_SESSION_READ', projectId: fx.projectId,
+          resourceId: session.working_resource_id!, sessionId: session.id, messageId: message.id } }),
+      drainSteers: async () => {
+        drains += 1;
+        if (drains === 3) {
+          // 第一次请求前、首个工具前均无插话；首个工具完成后才到达。
+          const queued = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+            sessionId: fx.sessionId, commandId: randomUUID(),
+            content: '不用列目录了，先解释刚才读到的内容' });
+          queuedId = queued.result.assistant_message_id;
+          await steerAssistMessage(app.db, { workspaceId: fx.workspaceId,
+            messageId: queuedId, commandId: randomUUID() });
+        }
+        return repository.drainSteerRequests(session.id, message.seq);
+      } });
+    assert.equal(outcome.kind, 'CONTENT');
+    const toolRows = await new SessionToolCallRepository(app.db).listBySession(fx.sessionId);
+    assert.equal(toolRows.length, maxRounds === 1 ? 1 : 0);
+    assert.equal(await countProjectRows('logical_operations', fx.projectId), maxRounds === 1 ? 1 : 0);
+    assert.ok(queuedId !== undefined);
+    assert.equal((await repository.readMessage(queuedId))?.status,
+      maxRounds === 1 ? 'CANCELLED' : 'PENDING');
+    if (maxRounds === 0) {
+      assert.equal(drains, 0, '收尾不消费无法在后续请求处理的插话');
+      await cancelAssistMessage(app.db, { workspaceId: fx.workspaceId,
+        messageId: queuedId, commandId: randomUUID() });
+    }
+    await repository.settleGeneration({ messageId: message.id, workerId, status: 'COMPLETED',
+      content: '完成本轮测试', errorCode: null, providerRequestId: null,
+      usageInputTokens: null, usageOutputTokens: null });
+  });
+}
+
+// ------------------------------------------------------- 0122 插话：失败与恢复窗口
+
+test('消费插话后模型失败：不静默丢失要求，恢复轮上下文仍能看到原文', async () => {
+  const fx = await fixture();
+  const queuedText = '先加手机号支持，其他不变';
+  let round = 0;
+  let queuedId: string | null = null;
+  const failingPort: AssistModelPort = { identity: new FakeModelPort().identity,
+    assist: async () => {
+      round += 1;
+      if (round === 1) {
+        // 在途期间排队一条并请求插话；本轮先给正文（结算前会被消费），随后下一次请求失败。
+        const queued = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+          sessionId: fx.sessionId, commandId: randomUUID(), content: queuedText });
+        queuedId = queued.result.assistant_message_id;
+        await steerAssistMessage(app.db, { workspaceId: fx.workspaceId,
+          messageId: queuedId, commandId: randomUUID() });
+        return { kind: 'CONTENT', content: '尚未结算的中间正文', providerRequestId: 'fail-1',
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null,
+            cacheCreationTokens: null } };
+      }
+      // 插话已在正文结算前消费，第二次请求在这里失败：FAILED 不能把它静默抹掉。
+      throw new Error('provider unavailable');
+    } };
+  const failed = await ask(fx, '做登录页', failingPort);
+  assert.equal(failed.status, 'FAILED');
+  assert.equal(failed.content, null, '失败的中间正文不落库');
+  assert.ok(queuedId !== null);
+  const repositories = createRepositories(app.db);
+  const queuedRow = await repositories.assist.readMessage(queuedId);
+  assert.equal(queuedRow?.status, 'CANCELLED', '已消费的插话行已收口，不再排队');
+  assert.equal(queuedRow?.error_code, 'STEERED');
+  const messages = await listAssistMessages(app.db, { workspaceId: fx.workspaceId,
+    sessionId: fx.sessionId });
+  assert.equal(messages.some((item) => item.role === 'USER' && item.content === queuedText), true,
+    '用户原文保留在转录区');
+  // 恢复事实：新消息的上下文构建仍能读到原要求与被消费插话的原文（用户重发即可接续）。
+  let recoveryTurns: readonly string[] = [];
+  const recoveryPort: AssistModelPort = { identity: new FakeModelPort().identity,
+    assist: async (request) => {
+      recoveryTurns = request.turns.map((turn) => turn.content);
+      return { kind: 'CONTENT', content: '恢复答复', providerRequestId: 'recover-1',
+        usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null,
+          cacheCreationTokens: null } };
+    } };
+  const recovered = await ask(fx, '继续', recoveryPort);
+  assert.equal(recovered.status, 'COMPLETED');
+  assert.ok(recoveryTurns.some((content) => content.includes('做登录页')), '原要求在恢复轮上下文');
+  assert.ok(recoveryTurns.some((content) => content.includes(queuedText)),
+    '被消费插话的原文在恢复轮上下文');
+  // 占位行不复活：恢复轮的列表里没有第二条 STEERED/CANCELLED 占位。
+  const after = await listAssistMessages(app.db, { workspaceId: fx.workspaceId,
+    sessionId: fx.sessionId });
+  assert.equal(after.some((item) => item.id === queuedId), false);
+});
+
+test('消费插话后模型失败带 Provider 类别：MODEL_FAILED 不是唯一的失败事实', async () => {
+  const fx = await fixture();
+  const queuedText = '先只改文案，不要动样式';
+  let round = 0;
+  let queuedId: string | null = null;
+  const transportFailingPort: AssistModelPort = { identity: new FakeModelPort().identity,
+    assist: async () => {
+      round += 1;
+      if (round === 1) {
+        const queued = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+          sessionId: fx.sessionId, commandId: randomUUID(), content: queuedText });
+        queuedId = queued.result.assistant_message_id;
+        await steerAssistMessage(app.db, { workspaceId: fx.workspaceId,
+          messageId: queuedId, commandId: randomUUID() });
+        return { kind: 'CONTENT', content: '尚未结算的中间正文', providerRequestId: 'kind-1',
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null,
+            cacheCreationTokens: null } };
+      }
+      // undici 的形态：TypeError('fetch failed')。它是 Provider 传输层失败，
+      // 与「本模块代码抛错」必须是两条可分辨的事实。
+      throw new TypeError('fetch failed');
+    } };
+  const failed = await ask(fx, '做登录页', transportFailingPort);
+  assert.equal(failed.status, 'FAILED');
+  assert.equal(failed.errorCode, 'MODEL_FAILED');
+  assert.equal(failed.providerErrorKind, 'NETWORK',
+    '会话轮次里的 Provider 传输失败必须留下类别，否则排查只能猜');
+  assert.ok(queuedId !== null);
+  const queuedRow = await createRepositories(app.db).assist.readMessage(queuedId);
+  assert.equal(queuedRow?.status, 'CANCELLED');
+  assert.equal(queuedRow?.error_code, 'STEERED', '有类别也不能把已消费的插话算成没消费');
+});
+
+test('消费插话后取消：本轮按 CANCELLED 收口，已消费插话不复活且原文保留', async () => {
+  const fx = await fixture();
+  const repository = createRepositories(app.db).assist;
+  const sent = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+    sessionId: fx.sessionId, commandId: randomUUID(), content: '做登录页' });
+  const workerId = `steer-cancel-${randomUUID()}`;
+  const message = await repository.claimNextPendingMessage(workerId);
+  assert.ok(message !== undefined);
+  const session = await repository.readSession(fx.sessionId);
+  assert.ok(session !== undefined && session.working_resource_id !== null);
+  const queuedText = '支持手机号登录';
+  let drains = 0;
+  let queuedId: string | undefined;
+  let rounds = 0;
+  const port: AssistModelPort = { identity: new FakeModelPort().identity,
+    assist: async () => {
+      rounds += 1;
+      return { kind: 'CONTENT', content: `中间正文 ${rounds}`, providerRequestId: `r${rounds}`,
+        usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null,
+          cacheCreationTokens: null } };
+    } };
+  const outcome = await runSessionReadonlyRounds(app.db, { session, message,
+    availableTools: ['read_file'], system: 'TEST',
+    contextTurns: [{ role: 'user', content: '做登录页' }],
+    modelPort: port, signal: new AbortController().signal,
+    resolveOrigin: async () => ({ ok: true, canonicalRoot: fx.canonicalRoot,
+      origin: { kind: 'AGENT_SESSION_READ', projectId: fx.projectId,
+        resourceId: session.working_resource_id!, sessionId: session.id, messageId: message.id } }),
+    drainSteers: async () => {
+      drains += 1;
+      if (drains === 2) {
+        // 第一次是首个请求前（无插话）；这里是正文结算前：插入插话并立即请求取消当前轮。
+        const queued = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+          sessionId: fx.sessionId, commandId: randomUUID(), content: queuedText });
+        queuedId = queued.result.assistant_message_id;
+        await steerAssistMessage(app.db, { workspaceId: fx.workspaceId,
+          messageId: queuedId, commandId: randomUUID() });
+        await cancelAssistMessage(app.db, { workspaceId: fx.workspaceId,
+          messageId: message.id, commandId: randomUUID() });
+      }
+      return repository.drainSteerRequests(session.id, message.seq);
+    } });
+  assert.equal(outcome.kind, 'CANCELLED', '取消在下一轮请求前生效，不产出正文');
+  assert.equal(rounds, 1, '取消后不再发起第二次模型请求');
+  assert.ok(queuedId !== undefined);
+  const queuedRow = await repository.readMessage(queuedId);
+  assert.equal(queuedRow?.status, 'CANCELLED', '已消费的插话行保持收口，不因取消复活');
+  assert.equal(queuedRow?.error_code, 'STEERED');
+  const messages = await listAssistMessages(app.db, { workspaceId: fx.workspaceId,
+    sessionId: fx.sessionId });
+  assert.equal(messages.some((item) => item.role === 'USER' && item.content === queuedText), true,
+    '用户原文保留');
+  assert.equal((await new SessionToolCallRepository(app.db).listBySession(fx.sessionId)).length, 0);
+  await repository.settleGeneration({ messageId: message.id, workerId, status: 'CANCELLED',
+    content: null, errorCode: null, providerRequestId: null,
+    usageInputTokens: null, usageOutputTokens: null });
+});
+
+test('消费插话后 Worker 崩溃：租约收口 LEASE_LOST，不自动重生，恢复轮读到原文', async () => {
+  const fx = await fixture();
+  const repository = createRepositories(app.db).assist;
+  const sent = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+    sessionId: fx.sessionId, commandId: randomUUID(), content: '做登录页' });
+  const workerId = `steer-crash-${randomUUID()}`;
+  const message = await repository.claimNextPendingMessage(workerId);
+  assert.ok(message !== undefined);
+  const queuedText = '先加手机号支持';
+  // 排队一条并请求插话，再由生成方消费——随后进程崩溃（不结算、不心跳）。
+  const queued = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+    sessionId: fx.sessionId, commandId: randomUUID(), content: queuedText });
+  await steerAssistMessage(app.db, { workspaceId: fx.workspaceId,
+    messageId: queued.result.assistant_message_id, commandId: randomUUID() });
+  const drained = await repository.drainSteerRequests(fx.sessionId, message.seq);
+  assert.deepEqual(drained.map((item) => item.content), [queuedText], '插话已被生成方消费');
+  // 崩溃后的清扫：租约过期把 RUNNING 收口为 FAILED/LEASE_LOST。
+  const expired = await repository.failExpiredLeases(new Date(Date.now() + 60_000));
+  assert.ok(expired.includes(message.id), '失联的生成必须被收口');
+  const failed = await repository.readMessage(message.id);
+  assert.equal(failed?.status, 'FAILED');
+  assert.equal(failed?.error_code, 'LEASE_LOST');
+  assert.equal(failed?.worker_id, null, '失联 Worker 的身份必须清除');
+  // 已消费的插话行保持收口，不会因崩溃复活成排队消息。
+  const queuedRow = await repository.readMessage(queued.result.assistant_message_id);
+  assert.equal(queuedRow?.status, 'CANCELLED');
+  assert.equal(queuedRow?.error_code, 'STEERED');
+  // 崩溃 Worker 的迟到结算被 CAS 拒绝，不能覆盖 LEASE_LOST。
+  assert.equal(await repository.settleGeneration({ messageId: message.id, workerId,
+    status: 'COMPLETED', content: '迟到的正文', errorCode: null, providerRequestId: null,
+    usageInputTokens: null, usageOutputTokens: null }), false);
+  // 恢复事实：新消息的上下文里同时有原要求与插话原文。
+  const seen: string[] = [];
+  const port: AssistModelPort = { identity: new FakeModelPort().identity,
+    assist: async (request) => {
+      seen.push(...request.turns.map((turn) => turn.content));
+      return { kind: 'CONTENT', content: '恢复答复', providerRequestId: 'recover',
+        usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null,
+          cacheCreationTokens: null } };
+    } };
+  const recovered = await ask(fx, '继续', port);
+  assert.equal(recovered.status, 'COMPLETED');
+  assert.ok(seen.some((content) => content.includes('做登录页')), '原要求在恢复轮上下文');
+  assert.ok(seen.some((content) => content.includes(queuedText)), '插话原文在恢复轮上下文');
+});
+
+test('连续插话期间预算耗尽：FAILED 带类型化原因，原文保留可恢复', async () => {
+  const fx = await fixture();
+  const queuedText = '先加手机号支持';
+  let round = 0;
+  let queuedId: string | null = null;
+  const failingPort: AssistModelPort = { identity: new FakeModelPort().identity,
+    assist: async () => {
+      round += 1;
+      if (round === 1) {
+        const queued = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+          sessionId: fx.sessionId, commandId: randomUUID(), content: queuedText });
+        queuedId = queued.result.assistant_message_id;
+        await steerAssistMessage(app.db, { workspaceId: fx.workspaceId,
+          messageId: queuedId, commandId: randomUUID() });
+        return { kind: 'CONTENT', content: '尚未结算的中间正文', providerRequestId: 'budget-1',
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null,
+            cacheCreationTokens: null } };
+      }
+      // 插话已在正文结算前消费；第二次请求撞上 Provider 端预算上限。
+      throw new ModelCallBudgetError('budget-2', { inputTokens: 1, outputTokens: 1,
+        cacheReadTokens: null, cacheCreationTokens: null });
+    } };
+  const failed = await ask(fx, '做登录页', failingPort);
+  assert.equal(failed.status, 'FAILED');
+  assert.equal(failed.errorCode, 'MODEL_BUDGET_EXHAUSTED', '预算耗尽必须是可判定的类型化原因');
+  assert.equal(failed.content, null, '中间正文不落库');
+  // 占位行恰好收口一次（列表排除 STEERED 行，直接读该行）。
+  assert.ok(queuedId !== null);
+  const queuedRow = await createRepositories(app.db).assist.readMessage(queuedId);
+  assert.equal(queuedRow?.status, 'CANCELLED');
+  assert.equal(queuedRow?.error_code, 'STEERED');
+  const messages = await listAssistMessages(app.db, { workspaceId: fx.workspaceId,
+    sessionId: fx.sessionId });
+  assert.equal(messages.some((item) => item.role === 'USER' && item.content === queuedText), true,
+    '预算耗尽不丢用户原文');
+  assert.equal(messages.some((item) => item.id === queuedId), false, '占位行不出现在列表');
+  // 恢复轮照样能读到原文（与模型失败同一恢复路径）。
+  const seen: string[] = [];
+  const recoveryPort: AssistModelPort = { identity: new FakeModelPort().identity,
+    assist: async (request) => {
+      seen.push(...request.turns.map((turn) => turn.content));
+      return { kind: 'CONTENT', content: '恢复答复', providerRequestId: 'recover',
+        usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null,
+          cacheCreationTokens: null } };
+    } };
+  const recovered = await ask(fx, '继续', recoveryPort);
+  assert.equal(recovered.status, 'COMPLETED');
+  assert.ok(seen.some((content) => content.includes(queuedText)), '插话原文在恢复轮上下文');
 });

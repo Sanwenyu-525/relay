@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   createCommandId, RelayApiError, RelayTransportError,
   type RelayApiClient, type RelayCommandEnvelope, type RelayGatewayCapability,
@@ -14,10 +14,23 @@ import { gatewayCapabilityLabel } from "../lib/labels";
 import { useRelayConnection } from "../lib/relayConnection";
 import "./ConnectionsView.css";
 
-const capabilities: readonly RelayGatewayCapability[] =
+/**
+ * 普通入口只列真实工具能力。测试能力（FAKE_*）不是用户要用的工具，把它们混进正常下拉，
+ * 等于让普通用户在一个「选哪个能力」的问题里先遇到一个只对测试有意义的选项。
+ * 显式开发入口见 `devCapabilitiesEnabled`（地址带 `?dev-capabilities=1`）。
+ */
+const dailyCapabilities: readonly RelayGatewayCapability[] =
   ["WEB_FETCH", "FILE_READ", "FILE_QUERY", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN",
-    "COMPUTER_READ", "COMPUTER_INPUT", "GITHUB_READ", "BROWSER_READ", "BROWSER_ACTION", "BROWSER_COMMIT",
-    "FAKE_WRITE", "FAKE_PUBLIC_READ"];
+    "COMPUTER_READ", "COMPUTER_INPUT", "GITHUB_READ", "BROWSER_READ", "BROWSER_ACTION", "BROWSER_COMMIT"];
+const testCapabilities: readonly RelayGatewayCapability[] = ["FAKE_WRITE", "FAKE_PUBLIC_READ"];
+/** 全部能力：只用于把历史策略回填到表单，不作为可选清单。 */
+const allCapabilities: readonly RelayGatewayCapability[] = [...dailyCapabilities, ...testCapabilities];
+/** 显式开发入口：只有主动在地址上声明，才把测试能力放进下拉。 */
+function devCapabilitiesEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  try { return new URLSearchParams(window.location.search).get("dev-capabilities") === "1"; }
+  catch { return false; }
+}
 /** 服务端 rootBoundCaps：这类 Connection 必须绑定一个绝对根目录，Fake 能力不绑定任何边界。 */
 const rootBoundCapabilities: readonly RelayGatewayCapability[] =
   ["FILE_READ", "FILE_QUERY", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN"];
@@ -64,6 +77,85 @@ interface PolicyRow {
   readonly policy: RelayGatewayPolicy;
   readonly versions: readonly RelayGatewayPolicyVersion[];
 }
+
+/**
+ * 日常区的工具清单：一行一个「用户真正要用的东西」，而不是一行一个能力键。
+ *
+ * 这些行只读服务端已返回的连接与策略快照（不新增查询、不推断可达性），把
+ * 「已连接」与「已授权」分开呈现：连接存在但策略为 DENY 时不能写成可用。
+ * 逐动作配置仍在高级区，普通入口不再要求用户先理解能力、动作与目标前缀。
+ */
+interface ToolRowSpec {
+  readonly key: string;
+  readonly label: string;
+  readonly purpose: string;
+  readonly capabilities: readonly RelayGatewayCapability[];
+  /** 缺口时唯一需要读的一句：去哪儿补，而不是「请配置」。 */
+  readonly next: string;
+}
+
+const toolRows: readonly ToolRowSpec[] = [
+  { key: "files", label: "本机文件", purpose: "列出 · 查找 · 搜索 · 读取，按档位写入当前目录",
+    capabilities: ["FILE_READ", "FILE_QUERY", "FILE_WRITE"],
+    next: "在对话里选择目录即可读取；写入档位在同一处切换。" },
+  { key: "git", label: "Git 只读", purpose: "status · diff · log",
+    capabilities: ["GIT_READ"], next: "打开 Git 仓库根目录后自动获得，不需要单独登记连接。" },
+  { key: "web", label: "网页抓取", purpose: "按允许的主机读取网页",
+    capabilities: ["WEB_FETCH"], next: "需要时在下方高级配置里添加允许主机。" },
+  { key: "cli", label: "命令行", purpose: "运行目录内脚本，或连接上点名的可执行文件",
+    capabilities: ["CLI_RUN"], next: "需要时在下方高级配置里登记目录与允许的可执行文件。" },
+  { key: "computer", label: "电脑操控", purpose: "截图 · 窗口 · 鼠标键盘",
+    capabilities: ["COMPUTER_READ", "COMPUTER_INPUT"],
+    next: "在下方高级区登记这项能力的连接并给出策略；本机运行时是否就绪回到会话的插件面板核对。" },
+  { key: "browser", label: "浏览器操控", purpose: "页面读取 · 点击 · 填表",
+    capabilities: ["BROWSER_READ", "BROWSER_ACTION", "BROWSER_COMMIT"],
+    next: "在下方高级区登记这项能力的连接并给出策略；后端是否连上回到会话的插件面板核对。" },
+  { key: "github", label: "GitHub", purpose: "仓库 · PR · Issue 只读",
+    capabilities: ["GITHUB_READ"],
+    next: "在下方高级区登记这项能力的连接并给出策略；CLI 登录状态回到会话的插件面板核对。" },
+];
+
+/**
+ * 返回位置（2026-10-21，R3-01）：`?from=` 由会话里的「管理连接与权限」写入，
+ * 这里只接受站内绝对路径——外链不能当作返回目标，否则一次跳转就能把人带出站。
+ */
+function returnPath(search: URLSearchParams): string | null {
+  const from = search.get("from");
+  if (from === null || !from.startsWith("/") || from.startsWith("//") || from.includes("\\")) return null;
+  return from;
+}
+
+function ReturnToConversation({ search }: { search: URLSearchParams }) {
+  const from = returnPath(search);
+  if (from === null) return null;
+  return <p><Link className="inline-link" data-testid="connections-return" to={from}>返回原会话</Link></p>;
+}
+
+type ToolTone = "success" | "warning" | "danger" | "neutral";
+
+/** 一个工具的真实状态：连接有效性 + 是否已有非拒绝策略；两者缺一都不能读作可用。 */
+function toolStatus(snapshot: Snapshot, spec: ToolRowSpec): { readonly text: string;
+  readonly tone: ToolTone; readonly detail: string } {
+  const matching = snapshot.connections.filter((item) =>
+    item.capabilities.some((capability) => spec.capabilities.includes(capability as RelayGatewayCapability)));
+  if (matching.length === 0) return { text: "未配置", tone: "neutral", detail: spec.next };
+  const active = matching.filter((item) => item.status === "ACTIVE");
+  if (active.length === 0) {
+    return matching.some((item) => item.status === "DISABLED")
+      ? { text: "已停用", tone: "warning", detail: "连接已停用；重新启用或重新授权前不会执行。" }
+      : { text: "已撤销", tone: "danger", detail: "连接已撤销；原批准不能继续复用。" };
+  }
+  const authorized = snapshot.policies.some(({ policy, versions }) => {
+    if (policy.status !== "ACTIVE") return false;
+    const version = versions.find((item) => item.version === policy.activeVersion);
+    return version !== undefined && spec.capabilities.includes(version.capability as RelayGatewayCapability) &&
+      version.decision !== "DENY";
+  });
+  return authorized
+    ? { text: "可用", tone: "success", detail: "连接有效且已有非拒绝策略；这不代表已经执行过任何动作。" }
+    : { text: "已连接，尚未授权", tone: "warning", detail: "连接本身不是授权；默认拒绝仍然生效。" };
+}
+
 interface Snapshot {
   readonly project: RelayProject;
   readonly connections: readonly RelayGatewayConnectionSettings[];
@@ -106,9 +198,8 @@ async function readSnapshot(client: RelayApiClient, projectId: string): Promise<
 }
 
 export default function ConnectionsView() {
-  const navigate = useNavigate();
+  const [search] = useSearchParams();
   const connection = useRelayConnection();
-  const [projectId, setProjectId] = useState("");
   const client = connection.client;
   const [projects, setProjects] = useState<readonly RelayProjectListItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -128,38 +219,46 @@ export default function ConnectionsView() {
       // 用户无法区分「这就是当前项目」与「这是上次读到的」。分页失败保留已有条目，只报错误。
       if (request === projectRequest.current) {
         setError(describeLiveError(caught).message);
-        if (cursor === null) { setProjects([]); setNextCursor(null); setProjectId(""); }
+        if (cursor === null) { setProjects([]); setNextCursor(null); }
       }
     }
     finally { if (request === projectRequest.current) setLoading(false); }
   }
   useEffect(() => {
-    setProjects([]); setNextCursor(null); setProjectId(""); setError(null); setLoading(false);
+    setProjects([]); setNextCursor(null); setError(null); setLoading(false);
     void loadProjects();
     return () => { projectRequest.current++; };
   }, [client, connection.epoch]);
   return <section className="connections-page">
     <PageHeader testId="connections-page-head" title="连接与权限" meta="项目设置"
       lede="选择项目，管理连接、受管目录与权限。" />
+    <ReturnToConversation search={search} />
     {connection.mode === "fixture" && <p className="warning-callout" role="status">当前为示例数据；连接设置只在显式连接本机 API 后可用。</p>}
     {client && <section className="surface-panel connections-project-picker" aria-label="选择项目"><div className="section-heading-row"><h2>项目</h2><button type="button" className="secondary-button" disabled={loading} onClick={() => void loadProjects()}>刷新</button></div>
       {loading && <p className="helper-text" role="status">正在读取项目…</p>}{error && <p className="action-error" role="alert">{error}</p>}
       {!loading && !error && projects.length === 0 && <p className="helper-text">当前没有进行中项目。<Link to="/projects">打开项目列表</Link></p>}
-      <ul className="connections-list">{projects.map((project) => <li key={project.id}><Link className="text-link" to={`/projects/${project.id}/connections`}>{project.title}</Link><span className="helper-text">v{project.revision}</span></li>)}</ul>
+      <ul className="connections-list">{projects.map((project) => <li key={project.id}>
+        {/* 选定项目继续携带返回位置：范围选择这一跳不能把人原路丢在半路。 */}
+        <Link className="text-link" data-testid="connections-picker-project"
+          to={`/projects/${project.id}/connections${returnPath(search) === null ? ""
+            : `?from=${encodeURIComponent(returnPath(search) ?? "")}`}`}>{project.title}</Link>
+        <span className="helper-text">v{project.revision}</span></li>)}</ul>
       {nextCursor && <button type="button" className="secondary-button" disabled={loading} onClick={() => void loadProjects(nextCursor)}>继续加载项目</button>}
     </section>}
-    <details className="connections-known-project" open={client === null}><summary>按已知项目 ID 打开</summary><form className="surface-panel connections-entry" onSubmit={(event) => { event.preventDefault(); if (projectId.trim()) navigate(`/projects/${encodeURIComponent(projectId.trim())}/connections`); }}>
-      <h2>打开项目连接设置</h2>
-      <p className="helper-text">可从项目列表打开项目后进入连接设置，或输入已知的 Project ID。</p>
-      <label className="field"><span className="field-label">项目 ID</span><input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="项目的 UUID" data-testid="connections-project-id" /></label>
-      <button className="secondary-button" type="submit" disabled={!projectId.trim()}>打开连接设置</button>
-    </form></details>
     <Link className="inline-link" to="/projects">返回项目入口</Link>
   </section>;
 }
 
 export function ProjectConnectionsView() {
   const { id: projectId = "" } = useParams();
+  const [search] = useSearchParams();
+  /**
+   * 从会话「+」的插件面板带进来的定位键（R3-01）：只认这一页真实存在的工具行，
+   * 未知键不猜某一行——猜错比不定位更糟，用户会对着一条无关结论做判断。
+   */
+  const locatedTool = toolRows.some((row) => row.key === search.get("tool")) ? search.get("tool") : null;
+  const locatedRef = useRef<HTMLLIElement | null>(null);
+  const locatedDone = useRef(false);
   const connection = useRelayConnection();
   const client = connection.mode === "live" ? connection.client : null;
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -176,6 +275,8 @@ export function ProjectConnectionsView() {
   const projectArchivedAt = !loading && error === null ? snapshot?.project.archivedAt : undefined;
   const writeBlockedReason = projectArchivedAt === undefined ? "Project 事实尚未确认，不能提交连接或权限变更。" :
     projectArchivedAt !== null ? "项目已归档，不能提交新的连接或权限变更。" : null;
+  /** 普通入口的能力清单；测试能力只经显式开发入口进入。 */
+  const capabilities = devCapabilitiesEnabled() ? allCapabilities : dailyCapabilities;
 
   const [connectionCapability, setConnectionCapability] = useState<RelayGatewayCapability>("WEB_FETCH");
   const [connectionHost, setConnectionHost] = useState("");
@@ -233,6 +334,17 @@ export function ProjectConnectionsView() {
     if (client !== null) void refresh(client, request);
     return () => { scope.current++; pendingRef.current = null; };
   }, [client, projectId, connection.epoch]);
+
+  /* 带 tool 进来时把这一行滚到眼前并交出台焦（只在数据落地后做一次，刷新不重复抢焦点）：
+     用户从会话里点「管理这个插件的连接与权限」，落在本页应当直接站在这一行前，
+     而不是重新在七行里找一遍。 */
+  useEffect(() => {
+    const node = locatedRef.current;
+    if (node === null || snapshot === null || locatedDone.current) return;
+    locatedDone.current = true;
+    node.scrollIntoView({ block: "center" });
+    node.focus({ preventScroll: true });
+  }, [locatedTool, snapshot]);
 
   async function resolveSuccess(activeClient: RelayApiClient, command: PendingCommand, envelope: RelayCommandEnvelope, request: number) {
     const resultId = matchingResult(envelope, command, projectId);
@@ -357,7 +469,7 @@ export function ProjectConnectionsView() {
     setPolicyId(id); setPolicyResourceId(""); setPolicyActionType("");
     const row = snapshot?.policies.find(({ policy }) => policy.id === id);
     const active = row?.versions.find((version) => version.version === row.policy.activeVersion);
-    if (active && capabilities.includes(active.capability as RelayGatewayCapability)) {
+    if (active && allCapabilities.includes(active.capability as RelayGatewayCapability)) {
       setPolicyCapability(active.capability as RelayGatewayCapability);
       setPolicyActionType(active.actionType);
       setPolicyDecision(active.decision as RelayGatewayDecision);
@@ -373,6 +485,7 @@ export function ProjectConnectionsView() {
     <PageHeader testId="project-connections-page-head" title="连接与权限" meta="项目设置"
       lede="连接限定能力与目标；权限策略单独控制 AUTO、ASK、DENY。创建连接后仍默认拒绝。" />
     <ProjectNav projectId={projectId} active="connections" />
+    <ReturnToConversation search={search} />
     <p><Link className="inline-link" to={`/projects/${projectId}`}>返回原项目页</Link></p>
     <details className="connections-view-configuration">
       <summary>工作台默认视图与页面顺序</summary>
@@ -393,6 +506,29 @@ export function ProjectConnectionsView() {
         {mayRetry && <button className="secondary-button" type="button" disabled={submitting} onClick={() => { void sendCommand(pending, true); }}>用原 ID 和内容重试</button>}
       </div>}
       {snapshot && <>
+        {/* 日常区：只回答「现在能做什么、缺什么、去哪儿补」。这里不出现能力、动作、
+            受管资源或 AUTO/ASK/DENY，也不需要用户先配一遍才能用文件。 */}
+        <section className="surface-panel connections-tools" data-testid="connections-tools">
+          <h2>可以用的工具</h2>
+          <p className="helper-text">日常使用不需要在这里逐项配置：在对话里选择目录、或直接说出要做的事即可。下面每行是服务端记录的真实状态。</p>
+          <ul className="connections-list connections-tool-list">{toolRows.map((row) => {
+            const state = toolStatus(snapshot, row);
+            return <li key={row.key} data-testid={`connections-tool-${row.key}`}
+              ref={row.key === locatedTool ? locatedRef : undefined}
+              data-located={row.key === locatedTool ? "true" : undefined}
+              tabIndex={row.key === locatedTool ? -1 : undefined}>
+              <div><strong>{row.label}</strong><small>{row.purpose}</small>
+                <small data-testid={`connections-tool-state-${row.key}`}>{state.detail}</small></div>
+              <div className="connections-actions">
+                <span className={`status-chip status-chip--${state.tone}`}>{state.text}</span>
+              </div>
+            </li>;
+          })}</ul>
+          <p className="field-hint">「可用」只表示连接有效且已有非拒绝策略；撤销、停用与拒绝仍然生效，不会因为这里显示可用而被覆盖。</p>
+        </section>
+        <details className="surface-panel connections-advanced" data-testid="connections-advanced">
+          <summary>高级：逐动作配置（连接、受管目录与权限策略）</summary>
+          <p className="helper-text">只有排查异常、或需要精确控制某个动作时才用这里。日常打开目录已经自动完成读取与 Git 只读配置；测试能力只在地址带 <code className="hash-code">?dev-capabilities=1</code> 时出现。</p>
         <section className="surface-panel"><h2>连接</h2>
           <p className="helper-text">本列表最多读取服务端前 100 条，没有下一页。状态与能力来自服务端；网页抓取（WEB_FETCH）只公开允许的主机，文件读取（FILE_READ）的连接目录未由此接口公开。连接本身不是授权。</p>
           {snapshot.connections.length === 0 ? <p className="helper-text">本项目尚无连接。</p> : <ul className="connections-list">{snapshot.connections.map((item) => {
@@ -474,6 +610,7 @@ export function ProjectConnectionsView() {
               {selectedPolicy && <button className="secondary-button" type="button" disabled={busy} onClick={() => selectPolicy("")}>取消修订</button>}</div>
           </form></details>
         </section>
+        </details>
       </>}
     </>}
   </section>;

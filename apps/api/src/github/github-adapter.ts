@@ -22,6 +22,7 @@ import { promisify } from 'node:util';
 import type { JsonObject, JsonValue } from '../infrastructure/json.js';
 import { runSafeGit } from '../git/git-adapter.js';
 import { githubExecutable, githubExecutableHint } from './gh-executable.js';
+import { githubEnv } from './gh-env.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -149,23 +150,10 @@ export function buildArgs(actionType: GithubReadAction, params: JsonObject, repo
 /**
  * 子进程环境的显式白名单。
  *
- * 不继承 `process.env`：那样会把 Relay 进程里的一切（包括它可能见过的 token）带进
- * 一个会访问网络的子进程。这里只给 Windows 定位与 `gh` 找到自己的凭据存储所必需的
- * 几项。`GH_PROMPT_DISABLED` 保证 `gh` 缺权限时直接失败而不是挂在 stdin 上。
+ * 唯一事实在 `gh-env.ts`：适配器与插件状态探测共用同一份，否则 Windows 上探测读不到
+ * `%APPDATA%\GitHub CLI\hosts.yml`，界面会误报「未登录」而实际链路可用。
  */
-export function githubEnv(): NodeJS.ProcessEnv {
-  const source = process.env;
-  return {
-    SYSTEMROOT: source.SYSTEMROOT ?? '', SYSTEMDRIVE: source.SYSTEMDRIVE ?? '',
-    WINDIR: source.WINDIR ?? '', PATH: source.PATH ?? '', PATHEXT: source.PATHEXT ?? '',
-    TEMP: source.TEMP ?? '', TMP: source.TMP ?? '',
-    USERPROFILE: source.USERPROFILE ?? '', HOME: source.USERPROFILE ?? source.HOME ?? '',
-    APPDATA: source.APPDATA ?? '', LOCALAPPDATA: source.LOCALAPPDATA ?? '',
-    HTTP_PROXY: source.HTTP_PROXY, HTTPS_PROXY: source.HTTPS_PROXY, NO_PROXY: source.NO_PROXY,
-    http_proxy: source.http_proxy, https_proxy: source.https_proxy, no_proxy: source.no_proxy,
-    GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1',
-  };
-}
+export { githubEnv } from './gh-env.js';
 
 export interface GithubExecResult {
   readonly exitCode: number;

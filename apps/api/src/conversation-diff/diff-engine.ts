@@ -197,19 +197,44 @@ export function isBinaryText(text: string): boolean {
 
 export type FileAction = 'CREATE' | 'MODIFY' | 'DELETE' | 'SAME';
 
-/** 由基线/当前两版的 hash 推导文件动作；两端都缺失表示无关文件（调用方不应传入）。 */
-export function classifyAction(
-  baselineSha: string | null | undefined,
-  currentSha: string | null | undefined,
-): FileAction {
-  const hasBaseline = baselineSha !== null && baselineSha !== undefined;
-  const hasCurrent = currentSha !== null && currentSha !== undefined;
-  if (hasBaseline && hasCurrent) {
-    return baselineSha!.toLowerCase() === currentSha!.toLowerCase() ? 'SAME' : 'MODIFY';
+/**
+ * 分类一侧的事实：**文件是否真的存在**（`present`）与可用的内容摘要（读不到时为 null）。
+ *
+ * 这两个事实必须分开：旧实现把「摘要为空」当成「文件不存在」，于是任何没读到内容的文件
+ * （超过单文件上限、采集时读失败）都被判成 `DELETE`——一份 11 MB 的字体文件在界面上成了
+ * 「本会话删除了 147 个文件」。存在性只能来自目录清单，不能从摘要反推。
+ */
+export interface ActionSide {
+  readonly present: boolean;
+  /** `null` 与空串都表示「没有可用摘要」，不再兼任「不存在」的语义。 */
+  readonly sha256: string | null;
+}
+
+/** 分类结果比文件动作多一个「无法核对」：两侧都在，但内容摘要读不到。 */
+export type ClassifiedAction = FileAction | 'UNVERIFIED';
+
+/**
+ * 由「两侧是否存在 + 内容摘要」推导文件动作。
+ *
+ * 两侧都存在而摘要读不到时返回 `UNVERIFIED`：既不能说改了，也不能说没变，
+ * 由调用方按覆盖缺口处理，而不是编造删除或零变化。
+ */
+export function classifyAction(baseline: ActionSide, current: ActionSide): ClassifiedAction {
+  if (baseline.present && current.present) {
+    const baselineSha = normalizeSha(baseline.sha256);
+    const currentSha = normalizeSha(current.sha256);
+    if (baselineSha === null || currentSha === null) return 'UNVERIFIED';
+    return baselineSha === currentSha ? 'SAME' : 'MODIFY';
   }
-  if (!hasBaseline && hasCurrent) return 'CREATE';
-  if (hasBaseline && !hasCurrent) return 'DELETE';
+  if (!baseline.present && current.present) return 'CREATE';
+  if (baseline.present && !current.present) return 'DELETE';
   return 'SAME';
+}
+
+/** 空串是既有基线（0097 起）里「没读到内容」的旧标记，与 null 等价。 */
+function normalizeSha(value: string | null | undefined): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  return value.toLowerCase();
 }
 
 /** 基线文件：相对根路径 + 实际内容摘要与（小文件）文本。 */
@@ -258,11 +283,26 @@ export interface DiffCoverage {
   readonly uncheckedFiles: number;
   /** 当前有、但基线扫描没覆盖到、又已被 Git 跟踪的文件数：不能证明是本会话新增。 */
   readonly unverifiedFiles: number;
+  /**
+   * 两侧都存在、但内容摘要读不到（超过单文件读取上限或采集时读失败）且字节数相同的文件数：
+   * 无法核对内容，既不计变化也不计未变——旧实现把它们报成删除，见 `ActionSide`。
+   */
+  readonly unverifiableFiles: number;
+  /**
+   * 会话口径下：本会话写过的路径在基线与当前扫描里都没出现（目录扫描到上限就停了）的条数。
+   * 目录口径下恒为 0——那时整个扫描范围就是统计范围，缺口由 `baseline`/`current` 的 complete 说明。
+   */
+  readonly unscannedFiles: number;
 }
+
+/** 统计范围：`SESSION` 只算本会话写过的路径，`DIRECTORY` 算整段目录净变化。 */
+export type DiffScope = 'SESSION' | 'DIRECTORY';
 
 export interface ConversationDiff {
   readonly rootPath: string;
   readonly resourceId: string;
+  /** `SESSION` = 只算本会话写过的路径；`DIRECTORY` = 整段目录净变化（含同期外部修改）。 */
+  readonly scope: DiffScope;
   readonly baselineCapturedAt: string;
   readonly baselineRevision: bigint;
   /** 扫描或读取超限时为 true：总数只含可统计部分，不冒充完整。 */
@@ -281,7 +321,12 @@ export interface SnapshotDiffInput {
   readonly baselineRevision: bigint;
   readonly incomplete: boolean;
   /** 两侧扫描覆盖；省略时按「基线不完整就等于 incomplete、当前侧完整」处理（旧调用方）。 */
-  readonly coverage?: Omit<DiffCoverage, 'uncheckedFiles' | 'unverifiedFiles'> | undefined;
+  readonly coverage?: Omit<DiffCoverage, 'uncheckedFiles' | 'unverifiedFiles' | 'unverifiableFiles' | 'unscannedFiles'> | undefined;
+  /**
+   * 统计范围：给定时只统计这些路径（会话口径——本会话写过的路径），省略时统计两侧并集（目录口径）。
+   * 范围内的路径若在两端都不存在，说明扫描没覆盖到它，记入 `unscannedFiles` 而不是当成零变化。
+   */
+  readonly scope?: ReadonlySet<string> | undefined;
   /** 当前扫描列到但没核对的路径；这些文件不得判成删除。 */
   readonly currentUnswept?: ReadonlySet<string> | undefined;
   /** Git 索引里已跟踪的路径：配合不完整的基线判断「新增」是否可信。 */
@@ -298,6 +343,10 @@ export interface SnapshotDiffInput {
  *     则该文件 unavailable，不计入总数（CD-16/17 不编造行数）。
  *   * 基线有、当前无 = DELETE；基线无、当前有 = CREATE；都有且 hash 不同 = MODIFY；
  *     hash 相同 = SAME（不计）。
+ *   * 两侧都在但内容摘要读不到 = 无法核对：字节数相同就不进列表（记入 `unverifiableFiles`），
+ *     字节数不同才作为不可统计的 MODIFY 列出。存在性只看目录清单，不从摘要缺失反推删除。
+ *   * 给了 `scope` 就只统计范围内（本会话写过的路径），范围外的同期外部修改不进这个视图；
+ *     范围内却两端都没扫到的路径记入 `unscannedFiles`，不当成零变化。
  *   * 总数只反映「可统计」的净变化；不可统计项显式标出，不静默混入 +0/−0。
  *   * 当前扫描没核对到的文件不计删除，基线没覆盖到的已跟踪文件不计新增；两者各自汇总成
  *     `coverage` 里的条数（未知 ≠ 已删除，也 ≠ 零变化）。
@@ -311,15 +360,20 @@ export function computeSnapshotDiff(input: SnapshotDiffInput): ConversationDiff 
   const tracked = input.tracked ?? new Set<string>();
   const baselineComplete = baselineSide.complete;
 
-  const actions = new Map<string, FileAction>();
-  for (const path of input.baseline.keys()) {
-    const current = input.current.get(path);
-    actions.set(path, classifyAction(input.baseline.get(path)!.sha256, current?.sha256));
-  }
-  for (const path of input.current.keys()) {
-    if (!actions.has(path)) {
-      actions.set(path, classifyAction(undefined, input.current.get(path)!.sha256));
+  const actions = new Map<string, ClassifiedAction>();
+  // 目录口径＝两侧并集；会话口径＝本会话写过的路径（可能两端都没扫到，那是一条覆盖缺口）。
+  const paths = input.scope ?? new Set<string>([...input.baseline.keys(), ...input.current.keys()]);
+  let unscannedFiles = 0;
+  for (const path of paths) {
+    const baselineFile = input.baseline.get(path);
+    const currentFile = input.current.get(path);
+    if (baselineFile === undefined && currentFile === undefined) {
+      if (input.scope !== undefined) unscannedFiles += 1;
+      continue;
     }
+    actions.set(path, classifyAction(
+      baselineFile === undefined ? { present: false, sha256: null } : { present: true, sha256: baselineFile.sha256 },
+      currentFile === undefined ? { present: false, sha256: null } : { present: true, sha256: currentFile.sha256 }));
   }
 
   const files: FileDiff[] = [];
@@ -328,9 +382,25 @@ export function computeSnapshotDiff(input: SnapshotDiffInput): ConversationDiff 
   let totalRemoved = 0;
   let uncheckedFiles = 0;
   let unverifiedFiles = 0;
+  let unverifiableFiles = 0;
 
-  for (const [path, action] of actions) {
-    if (action === 'SAME') continue;
+  for (const [path, classified] of actions) {
+    if (classified === 'SAME') continue;
+    const baseline = input.baseline.get(path);
+    const current = input.current.get(path);
+    let action: FileAction;
+    if (classified === 'UNVERIFIED') {
+      // 两侧都在、内容摘要读不到：字节数不同才足以证明内容变了（行数仍不编造）；
+      // 字节数相同就只能记成「无法核对」，绝不退化成删除。
+      if (baseline?.sizeBytes === undefined || current?.sizeBytes === null ||
+          current?.sizeBytes === undefined || baseline.sizeBytes === current.sizeBytes) {
+        unverifiableFiles += 1;
+        continue;
+      }
+      action = 'MODIFY';
+    } else {
+      action = classified;
+    }
     // 当前扫描只是没核到它，不能据此宣布被删除；也不能据此当成零变化，只能计入「未核对」。
     if (action === 'DELETE' && unswept.has(path)) { uncheckedFiles += 1; continue; }
     // 基线扫描不完整时，一个此刻已被 Git 跟踪却不在基线里的文件，可能是「起点没扫到」而非新建。
@@ -338,8 +408,6 @@ export function computeSnapshotDiff(input: SnapshotDiffInput): ConversationDiff 
       unverifiedFiles += 1;
       continue;
     }
-    const baseline = input.baseline.get(path);
-    const current = input.current.get(path);
 
     const unavailableReason = resolveUnavailable(baseline, current, action);
     let added = 0;
@@ -373,11 +441,17 @@ export function computeSnapshotDiff(input: SnapshotDiffInput): ConversationDiff 
   return {
     rootPath: input.rootPath,
     resourceId: input.resourceId,
+    scope: input.scope === undefined ? 'DIRECTORY' : 'SESSION',
     baselineCapturedAt: input.baselineCapturedAt,
     baselineRevision: input.baselineRevision,
-    incomplete: input.incomplete || !baselineSide.complete || !currentSide.complete ||
-      uncheckedFiles > 0 || unverifiedFiles > 0,
-    coverage: { baseline: baselineSide, current: currentSide, uncheckedFiles, unverifiedFiles },
+    // 会话口径下「整段目录扫描不全」不构成缺口——范围只有本会话写过的路径，
+    // 真正的缺口是「写过的路径两端都没扫到」（unscannedFiles）与各分项计数。
+    incomplete: (input.scope === undefined
+        ? input.incomplete || !baselineSide.complete || !currentSide.complete
+        : false) ||
+      uncheckedFiles > 0 || unverifiedFiles > 0 || unverifiableFiles > 0 || unscannedFiles > 0,
+    coverage: { baseline: baselineSide, current: currentSide, uncheckedFiles, unverifiedFiles,
+      unverifiableFiles, unscannedFiles },
     totalFiles,
     totalAdded,
     totalRemoved,

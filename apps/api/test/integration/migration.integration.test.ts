@@ -170,6 +170,20 @@ const ALL_MIGRATIONS = [
   '0114_computer_desktop_lease',
   '0115_scheduled_tasks',
   '0116_assist_session_delete',
+  '0117_workspace_default_directory',
+  '0118_long_term_memory',
+  '0119_short_term_memory',
+  '0120_memory_usage_sources',
+  '0121_model_capability_declarations',
+  '0122_assist_message_steer',
+  '0123_memory_usage_scope',
+  '0124_local_directory_git_read',
+  '0125_memory_auto_captures',
+  '0126_session_write_origin',
+  '0127_chat_goal_plan_modes',
+  '0128_bounded_subagent_delegation',
+  '0129_run_worker_fences',
+  '0130_memory_source_kind',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {

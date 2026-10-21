@@ -65,6 +65,33 @@ export interface RelayInterventionItem {
 }
 
 /** 只读模型端口状态：密钥永不出现在此结构中。 */
+/**
+ * 当前聊天模型能否接受图片输入（2026-10-19）：与发送时的能力闸门同一份判定，
+ * 输入框据此在粘贴图片时就给出说明。`UNKNOWN` 表示这次读不到模型目录（不是「不支持」）。
+ */
+export type RelayChatImageInput =
+  | "NOT_CONFIGURED" | "SUPPORTED" | "DECLARED"
+  | "MODEL_LACKS_IMAGE_INPUT" | "MODEL_NOT_IN_CATALOG" | "UNKNOWN";
+
+/**
+ * 这次图片输入结论来自哪一层（2026-10-19，迁移 0121）：模型目录 / 人的声明 / 环境变量 / 都没有。
+ * 界面用它区分「目录说可以」与「你自己声明的」；旧服务端缺字段按 `NONE`。
+ */
+export type RelayChatImageInputSource = "CATALOG" | "DECLARED" | "ENV" | "NONE";
+
+/**
+ * 模型能力声明（2026-10-19，迁移 0121）：人对某个模型能力的主张，按 (provider, model) 存档。
+ * 目录里有条目时目录仍是准绳，声明只补「目录里没有这个模型」这一处空白。
+ */
+export interface RelayModelCapabilityDeclaration {
+  readonly provider: string;
+  readonly sourceModelId: string;
+  readonly imageInput: boolean;
+  readonly note: string | null;
+  readonly declaredAt: string;
+  readonly updatedAt: string;
+}
+
 export interface RelayModelPortStatus {
   readonly provider: "fake" | "openai-compatible" | "invalid";
   readonly configured: boolean;
@@ -72,6 +99,8 @@ export interface RelayModelPortStatus {
   readonly baseUrl: string | null;
   /** 单次调用 token 上限：上下文占用的分母。null 表示不可核对，不能据此算比例。 */
   readonly maxCallTokens: number | null;
+  readonly imageInput: RelayChatImageInput;
+  readonly imageInputSource: RelayChatImageInputSource;
 }
 
 /** 验证错误分类：与设置页指引一一对应。 */
@@ -139,11 +168,36 @@ export interface RelayKnowledgeVersionContent extends Omit<RelayKnowledgeVersion
   readonly content: string | null;
 }
 
+/**
+ * 长期记忆的只读有效状态：由服务端在同一次快照里按数据库时间判定。
+ *
+ * 它是投影而不是可写状态：EXPIRED 不能当作命令状态提交，续期必须走 AddMemoryRevision。
+ */
+export type RelayMemoryEffectiveStatus = "ACTIVE" | "EXPIRED" | "RETIRED";
+
+export type RelayMemoryOrigin = "HUMAN_CONFIRMED" | "AUTO_CAPTURE";
+
+/** DEV-0042：记忆条目的来源类别——内容来自谁的哪一段。旧服务端缺字段时按 UNKNOWN 读。 */
+export type RelayMemorySourceKind = "MANUAL" | "USER_STATEMENT" | "MODEL_OBSERVATION" | "UNKNOWN";
+
 export interface RelayMemory {
   readonly id: string;
   readonly projectId: string | null;
   readonly title: string;
+  /** 0125：人工确认还是结算后自动记住。旧服务端缺字段时按人工确认读。 */
+  readonly origin: RelayMemoryOrigin;
+  /**
+   * DEV-0042：自动记住的条目里，哪一条是用户自己的话（USER_STATEMENT），
+   * 哪一条只是模型叙述的观察（MODEL_OBSERVATION，可能含工具结果或网页正文的转述）。
+   */
+  readonly sourceKind: RelayMemorySourceKind;
+  /** 原持久状态，仍只有 ACTIVE / RETIRED，用于停用与恢复命令。 */
   readonly status: string;
+  /**
+   * 服务端没有提供该字段（旧版本）时为 null：界面展示「状态待核对」，
+   * 不能退回 `status === "ACTIVE"` 推断有效，也不按浏览器时钟推算到期。
+   */
+  readonly effectiveStatus: RelayMemoryEffectiveStatus | null;
   readonly revision: DecimalRevision;
   readonly currentVersion: DecimalRevision;
   readonly text: string;
@@ -154,6 +208,7 @@ export interface RelayMemory {
   readonly updatedAt: string;
 }
 
+/** 历史修订保留当时的内容与有效期，不附加动态有效状态，也不随当前时间重新判定。 */
 export interface RelayMemoryRevision {
   readonly id: string;
   readonly memoryId: string;

@@ -1,5 +1,6 @@
+import { RelayContractError } from "../core/errors";
 import { array, boolean, decimal, integer, nullableInteger, nullableString, object, string, stringArray } from "../core/primitives";
-import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntry, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryRevision, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchItem } from "../dtos/information";
+import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntry, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryEffectiveStatus, RelayMemoryRevision, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchItem } from "../dtos/information";
 
 export function interventionFrom(value: unknown): RelayInterventionItem {
   const row = object(value, "intervention");
@@ -132,11 +133,44 @@ export function knowledgeVersionFrom(value: unknown): RelayKnowledgeVersion {
   };
 }
 
+/**
+ * 只读有效状态：缺字段视为旧服务端，落为 null（界面说「状态待核对」）；
+ * 已知枚举之外的任何形状都显式失败，不把未知悄悄当成 ACTIVE 或「未知」。
+ */
+function memoryEffectiveStatus(row: Record<string, unknown>, name: string): RelayMemoryEffectiveStatus | null {
+  const value = row.effective_status;
+  if (value === undefined) return null;
+  if (value === "ACTIVE" || value === "EXPIRED" || value === "RETIRED") return value;
+  throw new RelayContractError(`${name}.effective_status 响应格式无效。`);
+}
+
+/** 0125 的 origin：缺字段按人工确认读——旧数据没有「自动记住」这个概念。 */
+function memoryOrigin(row: Record<string, unknown>): RelayMemory["origin"] {
+  const value = row.origin;
+  if (value === undefined || value === null) return "HUMAN_CONFIRMED";
+  if (value === "HUMAN_CONFIRMED" || value === "AUTO_CAPTURE") return value;
+  throw new RelayContractError("memory.origin 包含未知取值。");
+}
+
+/** DEV-0042 的来源类别：缺字段按 UNKNOWN 读——旧数据没有经过来源核验，不能当成用户原话。 */
+function memorySourceKind(row: Record<string, unknown>): RelayMemory["sourceKind"] {
+  const value = row.source_kind;
+  if (value === undefined || value === null) return "UNKNOWN";
+  if (value === "MANUAL" || value === "USER_STATEMENT" || value === "MODEL_OBSERVATION" ||
+      value === "UNKNOWN") {
+    return value;
+  }
+  throw new RelayContractError("memory.source_kind 包含未知取值。");
+}
+
 export function memoryFrom(value: unknown): RelayMemory {
   const row = object(value, "memory");
   return {
     id: string(row, "id", "memory"), projectId: nullableString(row, "project_id", "memory"),
-    title: string(row, "title", "memory"), status: string(row, "status", "memory"),
+    title: string(row, "title", "memory"), origin: memoryOrigin(row),
+    sourceKind: memorySourceKind(row),
+    status: string(row, "status", "memory"),
+    effectiveStatus: memoryEffectiveStatus(row, "memory"),
     revision: decimal(row, "revision", "memory"), currentVersion: decimal(row, "current_version", "memory"),
     text: string(row, "text", "memory"), confirmedBy: string(row, "confirmed_by", "memory"),
     confirmedAt: string(row, "confirmed_at", "memory"), expiresAt: nullableString(row, "expires_at", "memory"),
@@ -144,6 +178,7 @@ export function memoryFrom(value: unknown): RelayMemory {
   };
 }
 
+/** 历史修订不可变：故意不读 effective_status，不把当前动态状态安到某一条旧版本上。 */
 export function memoryRevisionFrom(value: unknown): RelayMemoryRevision {
   const row = object(value, "memory revision");
   return {

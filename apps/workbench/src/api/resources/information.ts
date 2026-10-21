@@ -4,7 +4,7 @@ import { RelayHttp } from "../core/http";
 import { array, decimal, directList, integer, nullableOptionalInteger, nullableString, object, string, stringArray } from "../core/primitives";
 import { decisionFrom, interventionFrom, knowledgeCurationCandidateFrom, knowledgeFrom, knowledgeGuideFrom, knowledgeVersionContentFrom, knowledgeVersionFrom, memoryFrom, memoryRevisionFrom, modelVerifyResultFrom, ruleFrom, ruleVersionFrom, searchItemFrom } from "../parse/information";
 import { commandEnvelopeFrom } from "../parse/projects";
-import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryRevision, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "../dtos/information";
+import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayChatImageInput, RelayChatImageInputSource, RelayMemory, RelayModelCapabilityDeclaration, RelayMemoryEffectiveStatus, RelayMemoryRevision, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "../dtos/information";
 import type { RelayCommandEnvelope } from "../dtos/projects";
 
 export async function getKnowledge(http: RelayHttp, projectId: string | null = null): Promise<readonly RelayKnowledge[]> {
@@ -53,8 +53,48 @@ export async function archiveKnowledge(http: RelayHttp, id: string, commandId: s
     { command_id: commandId, expected_revision: expectedRevision }, 200);
 }
 
-export async function getMemories(http: RelayHttp, projectId: string | null = null): Promise<readonly RelayMemory[]> {
-  return directList(await http.request(informationListPath(http, "memories", projectId)), "memory list", memoryFrom);
+/**
+ * 反向命令回执核对：command_id、目标身份、ACTIVE 与修订下限四项都成立才算确认。
+ *
+ * 调用方拿这个结果当撤销/恢复的唯一依据，因此宁可抛「无法核对」也不能返回部分可信的信封；
+ * 修订下限挡的是把归档前的旧回执误当成本次恢复结果（服务端只会返回相等或更大的修订）。
+ */
+async function restoreCommand(http: RelayHttp, path: string, input: { commandId: string; id: string; expectedRevision: DecimalRevision }, resultKey: string): Promise<RelayCommandEnvelope> {
+  const body = await http.request(http.workspacePath(path), { method: "POST", body: JSON.stringify({
+    command_id: input.commandId, expected_revision: input.expectedRevision }) }, 200);
+  try {
+    const envelope = commandEnvelopeFrom(body);
+    if (envelope.commandId !== input.commandId) throw new Error("command ID mismatch");
+    const id = string(envelope.result, resultKey, "restore result");
+    const revision = decimal(envelope.result, "revision", "restore result");
+    if (id !== input.id) throw new Error("restore target mismatch");
+    if (envelope.result.status !== "ACTIVE") throw new Error("restore status mismatch");
+    if (BigInt(revision) < BigInt(input.expectedRevision)) throw new Error("restore revision regression");
+    return envelope;
+  } catch {
+    throw new RelayTransportError("命令回执无法核对，请查询原 command_id。");
+  }
+}
+
+/** 取消资料归档：只把根状态改回 ACTIVE，不改正文版本、来源与归档产生的待核对候选。 */
+export async function unarchiveKnowledge(http: RelayHttp, id: string, commandId: string, expectedRevision: DecimalRevision): Promise<RelayCommandEnvelope> {
+  return restoreCommand(http, `/knowledge/${encodeURIComponent(id)}/unarchive`,
+    { commandId, id, expectedRevision }, "knowledge_id");
+}
+
+/**
+ * 记忆列表：默认「全部」，与旧调用保持同一请求形状（不发多余参数）。
+ *
+ * 有效状态由服务端按数据库时间裁决；前端不按浏览器时钟或 `status === ACTIVE` 过滤已加载列表。
+ */
+export async function getMemories(http: RelayHttp, projectId: string | null = null,
+  effectiveStatus: RelayMemoryEffectiveStatus | "ALL" = "ALL"): Promise<readonly RelayMemory[]> {
+  const query = new URLSearchParams();
+  if (projectId !== null) query.set("project_id", projectId);
+  if (effectiveStatus !== "ALL") query.set("effective_status", effectiveStatus);
+  const suffix = query.toString();
+  const path = http.workspacePath("/memories");
+  return directList(await http.request(suffix === "" ? path : `${path}?${suffix}`), "memory list", memoryFrom);
 }
 
 export async function getMemory(http: RelayHttp, id: string): Promise<RelayMemory> {
@@ -85,6 +125,12 @@ export async function addMemoryRevision(http: RelayHttp, input: { id: string; co
 export async function retireMemory(http: RelayHttp, id: string, commandId: string, expectedRevision: DecimalRevision): Promise<RelayCommandEnvelope> {
   return informationCommand(http, `/memories/${encodeURIComponent(id)}/retire`,
     { command_id: commandId, expected_revision: expectedRevision }, 200);
+}
+
+/** 恢复记忆：只改根状态；确认主体与有效期不变，已过期版本仍按原过滤规则排除。 */
+export async function reactivateMemory(http: RelayHttp, id: string, commandId: string, expectedRevision: DecimalRevision): Promise<RelayCommandEnvelope> {
+  return restoreCommand(http, `/memories/${encodeURIComponent(id)}/reactivate`,
+    { commandId, id, expectedRevision }, "memory_id");
 }
 
 export async function getDecisions(http: RelayHttp, projectId: string | null = null): Promise<readonly RelayDecision[]> {
@@ -123,10 +169,12 @@ export async function getRuleVersions(http: RelayHttp, id: string): Promise<read
     "rule versions", ruleVersionFrom);
 }
 
-export async function createRule(http: RelayHttp, input: { commandId: string; scope: "WORKSPACE" | "PROJECT" | "TASK"; scopeId: string; ruleKey: string; statement: string; strength: RelayRuleStrength; enforcement: RelayRuleEnforcement; method?: string; targetSpec?: Readonly<Record<string, unknown>> }): Promise<RelayCommandEnvelope> {
+/** 规则键可选：缺省时由服务端按 command_id 生成稳定唯一键（HTTP §10.106）。 */
+export async function createRule(http: RelayHttp, input: { commandId: string; scope: "WORKSPACE" | "PROJECT" | "TASK"; scopeId: string; ruleKey?: string; statement: string; strength: RelayRuleStrength; enforcement: RelayRuleEnforcement; method?: string; targetSpec?: Readonly<Record<string, unknown>> }): Promise<RelayCommandEnvelope> {
   return informationCommand(http, "/rules", {
     command_id: input.commandId, scope: input.scope, scope_id: input.scopeId,
-    rule_key: input.ruleKey, statement: input.statement, strength: input.strength,
+    ...(input.ruleKey === undefined ? {} : { rule_key: input.ruleKey }),
+    statement: input.statement, strength: input.strength,
     applicability: "AI_RUN", enforcement: input.enforcement,
     ...(input.method === undefined ? {} : { method: input.method }),
     ...(input.targetSpec === undefined ? {} : { target_spec: input.targetSpec })
@@ -146,6 +194,12 @@ export async function addRuleVersion(http: RelayHttp, input: { id: string; comma
 export async function retireRule(http: RelayHttp, id: string, commandId: string, expectedRevision: DecimalRevision): Promise<RelayCommandEnvelope> {
   return informationCommand(http, `/rules/${encodeURIComponent(id)}/retire`,
     { command_id: commandId, expected_revision: expectedRevision }, 200);
+}
+
+/** 恢复规则：只改根状态；rule_revision / context_revision 继续递增，不回退既有执行契约。 */
+export async function reactivateRule(http: RelayHttp, id: string, commandId: string, expectedRevision: DecimalRevision): Promise<RelayCommandEnvelope> {
+  return restoreCommand(http, `/rules/${encodeURIComponent(id)}/reactivate`,
+    { commandId, id, expectedRevision }, "rule_id");
 }
 
 export async function searchInformation(http: RelayHttp, input: { q: string; projectId: string | null; types: readonly RelayInformationKind[]; limit?: number; cursor?: string }): Promise<RelaySearchPage> {
@@ -247,6 +301,33 @@ export async function getInterventions(http: RelayHttp): Promise<readonly RelayI
   return array(row, "items", "interventions").map(interventionFrom);
 }
 
+/**
+ * 图片输入能力：新增字段。旧服务端不返回时按 `UNKNOWN` 处理——界面只是不提前提示，
+ * 发送时的闸门仍是准绳（不因为读不到就宣称可以发）。
+ */
+const CHAT_IMAGE_INPUT_STATES: readonly RelayChatImageInput[] = ["NOT_CONFIGURED", "SUPPORTED",
+  "DECLARED", "MODEL_LACKS_IMAGE_INPUT", "MODEL_NOT_IN_CATALOG", "UNKNOWN"];
+function chatImageInputFrom(row: Record<string, unknown>): RelayChatImageInput {
+  const value = row.image_input;
+  if (value === undefined) return "UNKNOWN";
+  if (typeof value === "string" && (CHAT_IMAGE_INPUT_STATES as readonly string[]).includes(value)) {
+    return value as RelayChatImageInput;
+  }
+  throw new Error("model-port 返回了无法识别的 image_input 取值。");
+}
+
+/** 结论来源：旧服务端不返回时按 NONE（不冒充「目录判定」）。 */
+const CHAT_IMAGE_INPUT_SOURCES: readonly RelayChatImageInputSource[] =
+  ["CATALOG", "DECLARED", "ENV", "NONE"];
+function chatImageInputSourceFrom(row: Record<string, unknown>): RelayChatImageInputSource {
+  const value = row.image_input_source;
+  if (value === undefined) return "NONE";
+  if (typeof value === "string" && (CHAT_IMAGE_INPUT_SOURCES as readonly string[]).includes(value)) {
+    return value as RelayChatImageInputSource;
+  }
+  throw new Error("model-port 返回了无法识别的 image_input_source 取值。");
+}
+
 /** 模型端口只读状态：服务端保证不含密钥。 */
 export async function getModelPortStatus(http: RelayHttp): Promise<RelayModelPortStatus> {
   const row = object(await http.request(http.workspacePath('/model-port')), "model-port");
@@ -259,11 +340,55 @@ export async function getModelPortStatus(http: RelayHttp): Promise<RelayModelPor
     model: row.model === null ? null : string(row, "model", "model-port"),
     baseUrl: row.base_url === null ? null : string(row, "base_url", "model-port"),
     // max_call_tokens 是可选新增字段：缺失等同"不可核对"，不能当作 0 或默认值。
-    maxCallTokens: nullableOptionalInteger(row, "max_call_tokens", "model-port") };
+    maxCallTokens: nullableOptionalInteger(row, "max_call_tokens", "model-port"),
+    imageInput: chatImageInputFrom(row),
+    imageInputSource: chatImageInputSourceFrom(row) };
 }
 
-/** 最近一次模型验证与当前配置指纹匹配情况。 */
-export async function getModelPortVerification(http: RelayHttp): Promise<RelayModelVerificationState> {
+/**
+ * 模型能力声明（2026-10-19，迁移 0121）。
+ *
+ * 三个调用面：列出、覆盖声明、撤销声明。它是实例级配置而非业务命令，所以没有
+ * command_id 与回执——同键再写就是改口，GET 是权威读取。
+ */
+function capabilityFrom(value: unknown): RelayModelCapabilityDeclaration {
+  const row = object(value, "model-capability");
+  return { provider: string(row, "provider", "model-capability"),
+    sourceModelId: string(row, "source_model_id", "model-capability"),
+    imageInput: row.image_input === true,
+    note: row.note === null ? null : string(row, "note", "model-capability"),
+    declaredAt: string(row, "declared_at", "model-capability"),
+    updatedAt: string(row, "updated_at", "model-capability") };
+}
+
+export async function getModelCapabilities(http: RelayHttp):
+Promise<readonly RelayModelCapabilityDeclaration[]> {
+  const body = object(await http.request(http.workspacePath('/model-capabilities')),
+    "model-capabilities");
+  if (!Array.isArray(body.items)) throw new Error("model-capabilities 缺少 items 数组。");
+  return body.items.map(capabilityFrom);
+}
+
+export async function putModelCapability(http: RelayHttp, input: {
+  readonly provider: string; readonly model: string;
+  readonly imageInput: boolean; readonly note?: string | null;
+}): Promise<RelayModelCapabilityDeclaration> {
+  return capabilityFrom(await http.request(
+    http.workspacePath(`/model-capabilities/${encodeURIComponent(input.provider)}/${encodeURIComponent(input.model)}`),
+    { method: "PUT", body: JSON.stringify({ image_input: input.imageInput,
+      note: input.note ?? null }) }));
+}
+
+export async function deleteModelCapability(http: RelayHttp, input: {
+  readonly provider: string; readonly model: string;
+}): Promise<boolean> {
+  const body = object(await http.request(
+    http.workspacePath(`/model-capabilities/${encodeURIComponent(input.provider)}/${encodeURIComponent(input.model)}`),
+    { method: "DELETE" }), "model-capability delete");
+  return body.removed === true;
+}
+
+/** 最近一次模型验证与当前配置指纹匹配情况。 */export async function getModelPortVerification(http: RelayHttp): Promise<RelayModelVerificationState> {
   const row = object(await http.request(http.workspacePath("/model-port/verification")),
     "model-port verification");
   const fingerprint = row.current_config_fingerprint === null

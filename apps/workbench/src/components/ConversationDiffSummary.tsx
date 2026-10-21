@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useConversationDiff } from "../lib/useConversationDiff";
 import { localDiffReasonText } from "./ChatLocalFileDiff";
-import type { RelayApiClient, RelayConversationDiff, RelayConversationDiffFile, RelayConversationDiffScanSide } from "../api/relayClient";
+import type { RelayApiClient, RelayConversationDiff, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffScope } from "../api/relayClient";
 
 /**
  * 与目录细条同处输入卡**外**上方那一行的会话总 diff（工作台 §34.2 / §34.4，CD-01、CD-12、CD-17、CD-18）。
  *
- * 口径是 B「本轮对话开始以来的净变化」：会话基线 → 当前**已落盘**内容，生成中的预览不进这里。
- * 一行文字按钮就是展开入口，不加厚卡片、不撑高输入卡；路径变长或数字位数变化都收在这一行内，
- * 与发送/停止键不在同一块，因此不会挤掉它们。
+ * 口径：**只统计本会话自己写过的文件**（2026-10-20 用户指令「这里就只统计当前会话的 git diff」）。
+ * 服务端按会话的写账本圈定候选路径，再用「会话基线 → 当前已落盘内容」算净变化；同一目录里
+ * 其他程序、其他会话的同期修改不计入这条入口（目录级总变化是另一件事，不在这里冒充）。
+ * 生成中的预览不进这里。
  *
  * 状态必须彼此可辨（CD-17）：统计中 / 空净变化 / 非 Git 根 / 缺基线 / 目录不可读（失权）/
  * 部分不可统计 / 刷新失败。刷新失败保留上次可信值并标「截至…」，未知一律不显示成 `+0 −0`。
@@ -68,9 +69,17 @@ function uncountableFiles(diff: AvailableDiff): number {
 function incompleteFlag(diff: AvailableDiff): string {
   const coverage = diff.coverage;
   if (coverage === null) return "部分不可统计（服务端未给出成因）";
+  const sessionScope = diff.scope === "SESSION";
   const parts: string[] = [];
-  if (!coverage.baseline.complete || !coverage.current.complete) parts.push("目录只扫描了部分文件");
-  if (coverage.uncheckedFiles > 0 || coverage.unverifiedFiles > 0) parts.push("部分文件未核对");
+  // 会话口径的统计范围只有本会话写过的路径，「整个目录没扫全」不是它的缺口，不能拿来说事。
+  if (!sessionScope && (!coverage.baseline.complete || !coverage.current.complete)) {
+    parts.push("目录只扫描了部分文件");
+  }
+  if (coverage.uncheckedFiles > 0 || coverage.unverifiedFiles > 0) {
+    parts.push(sessionScope ? "部分写入路径未核对" : "部分文件未核对");
+  }
+  if (coverage.unscannedFiles > 0) parts.push(`${coverage.unscannedFiles} 个写入路径不在扫描范围`);
+  if (coverage.unverifiableFiles > 0) parts.push(`${coverage.unverifiableFiles} 个文件内容未核对`);
   const uncountable = uncountableFiles(diff);
   if (uncountable > 0) parts.push(`${uncountable} 个文件行数不可统计`);
   return parts.length === 0 ? "部分不可统计（成因未提供）" : `统计不完整：${parts.join("、")}`;
@@ -82,14 +91,30 @@ function incompleteLines(diff: AvailableDiff): readonly string[] {
   if (coverage === null) {
     return ["本次响应没有携带覆盖信息，服务端未说明不完整的具体成因。"];
   }
+  const sessionScope = diff.scope === "SESSION";
   const lines: string[] = [];
-  if (!coverage.baseline.complete) lines.push(`会话起点扫描不完整：${sideDetail(coverage.baseline)}。`);
-  if (!coverage.current.complete) lines.push(`本轮当前扫描不完整：${sideDetail(coverage.current)}。`);
+  if (!sessionScope && !coverage.baseline.complete) {
+    lines.push(`会话起点扫描不完整：${sideDetail(coverage.baseline)}。`);
+  }
+  if (!sessionScope && !coverage.current.complete) {
+    lines.push(`本轮当前扫描不完整：${sideDetail(coverage.current)}。`);
+  }
   if (coverage.uncheckedFiles > 0) {
-    lines.push(`${coverage.uncheckedFiles} 个文件在起点里有、本轮扫描没核对到：不计删除，也不计零变化。`);
+    lines.push(sessionScope
+      ? `${coverage.uncheckedFiles} 个本会话写入的路径本轮没核对到：不计删除，也不计零变化。`
+      : `${coverage.uncheckedFiles} 个文件在起点里有、本轮扫描没核对到：不计删除，也不计零变化。`);
   }
   if (coverage.unverifiedFiles > 0) {
-    lines.push(`${coverage.unverifiedFiles} 个文件本轮有、起点没覆盖且已被 Git 跟踪：无法确认是本会话新增，不计新增。`);
+    lines.push(sessionScope
+      ? `${coverage.unverifiedFiles} 个本会话写入的路径起点没覆盖、又已被 Git 跟踪：无法确认它原本是否已存在，不计新增。`
+      : `${coverage.unverifiedFiles} 个文件本轮有、起点没覆盖且已被 Git 跟踪：无法确认是本会话新增，不计新增。`);
+  }
+  if (coverage.unscannedFiles > 0) {
+    lines.push(`${coverage.unscannedFiles} 个本会话写过的路径在起点与本轮扫描里都没出现（目录扫描到上限就停了）：无法统计。`);
+  }
+  if (coverage.unverifiableFiles > 0) {
+    lines.push(`${coverage.unverifiableFiles} 个文件起点与本轮都在、但内容读不到（超过单文件读取上限或采集时读失败），` +
+      "字节数也没变：既不算修改，也不算没变，因此不出现在下面的列表里。");
   }
   const uncountable = uncountableFiles(diff);
   if (uncountable > 0) {
@@ -100,8 +125,9 @@ function incompleteLines(diff: AvailableDiff): readonly string[] {
 }
 
 /** 逐文件正文：只在展开且修订一致时读取；失权或不可读时不显示正文。 */
-function ConversationDiffFileBody({ client, sessionId, path, revisionKey }: {
+function ConversationDiffFileBody({ client, sessionId, path, revisionKey, scope }: {
   client: RelayApiClient; sessionId: string; path: string; revisionKey: string;
+  scope: RelayConversationDiffScope;
 }) {
   const [detail, setDetail] = useState<RelayConversationDiffFile | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -110,7 +136,7 @@ function ConversationDiffFileBody({ client, sessionId, path, revisionKey }: {
   useEffect(() => {
     const current = ++request.current;
     setDetail(null); setFailure(null);
-    void client.getConversationDiffFile(sessionId, path).then((next) => {
+    void client.getConversationDiffFile(sessionId, path, scope).then((next) => {
       if (current !== request.current) return; // 迟到响应不覆盖新修订（CD-13/CD-15）。
       setDetail(next);
     }).catch(() => {
@@ -118,7 +144,7 @@ function ConversationDiffFileBody({ client, sessionId, path, revisionKey }: {
       setFailure("该文件的正文当前读不到；总数与磁盘实际改动不受影响。权限变化时不显示正文。");
     });
     return () => { request.current++; };
-  }, [client, sessionId, path, revisionKey]);
+  }, [client, sessionId, path, revisionKey, scope]);
 
   if (failure !== null) return <p className="action-error" role="alert">{failure}</p>;
   if (detail === null) return <p className="helper-text" role="status">正在读取正文…</p>;
@@ -144,16 +170,29 @@ function ConversationDiffFileBody({ client, sessionId, path, revisionKey }: {
   </>;
 }
 
-export default function ConversationDiffSummary({ client, sessionId, enabled, directoryBound }: {
+export default function ConversationDiffSummary({ client, sessionId, enabled, directoryBound,
+  scope = "SESSION", inline = false }: {
   client: RelayApiClient;
   sessionId: string;
   /** 外部读取是否被挡（连接/权限失效）：为 false 时整块不出现，不显示任何数字。 */
   enabled: boolean;
   /** 会话是否已绑定工作目录。未绑定＝这一行不存在（该事实归目录细条），也不发统计请求（§34.3 纯聊天不做全盘扫描）。 */
   directoryBound: boolean;
+  /**
+   * 统计范围：对话输入框上方那一行用 `SESSION`（只算本会话落盘的路径）；
+   * 工作详情的「变更」页签用 `DIRECTORY`（整段目录净变化，含同期外部修改）。
+   */
+  scope?: RelayConversationDiffScope;
+  /** 内联形态（工作详情页签内）：直接摊开清单，不渲染「展开／收起」入口。 */
+  inline?: boolean;
 }) {
-  const reading = enabled && directoryBound;
-  const { diff, loading, error, stale, readAt, refresh } = useConversationDiff(client, sessionId, reading);
+  // 内联形态是「变更」页签自己发起的一次读取：目录未绑定时由服务端回答 NO_RESOURCE，
+  // 这里不能像输入卡上方那一行那样整块隐藏（那样页签会永远是空的）。
+  const reading = enabled && (directoryBound || inline);
+  /* 目录口径每次读取都要重扫受管根（本机 2000 条约 3 秒），页签里没必要 4 秒一次：
+     拉到 20 秒，配合面板底部的「重新读取」仍能手动取最新。会话口径零写入时服务端直接短路。 */
+  const { diff, loading, error, stale, readAt, refresh } = useConversationDiff(
+    client, sessionId, reading, inline ? 20000 : 4000, scope);
   const [open, setOpen] = useState(false);
   const [openFile, setOpenFile] = useState<string | null>(null);
   const [establishing, setEstablishing] = useState(false);
@@ -167,8 +206,9 @@ export default function ConversationDiffSummary({ client, sessionId, enabled, di
 
   if (!enabled) return null;
   /* 未绑定工作目录时这一行整块不出现（2026-10-17 用户指令「不要有这个提示」）：目录事实已经由
-     输入区上方那条目录细条常驻说出，同一屏再复述一遍「暂不统计」等于把同一件事讲两次。 */
-  if (!directoryBound) return null;
+     输入区上方那条目录细条常驻说出，同一屏再复述一遍「暂不统计」等于把同一件事讲两次。
+     内联形态（工作详情「变更」页签）不适用：那里就是专门来看统计的。 */
+  if (!directoryBound && !inline) return null;
 
   // 只在联合类型上直接判 `available`，让 TS 收窄到「可用」分支；别名不会带着收窄走。
   const changed = diff !== null && diff.available === true ? diff : null;
@@ -204,41 +244,33 @@ export default function ConversationDiffSummary({ client, sessionId, enabled, di
   }
 
   const panelId = `conversation-diff-panel-${sessionId}`;
-  return <div className="conversation-diff" data-region="conversation-diff"
-    onKeyDown={(event) => {
-      if (event.key === "Escape" && open) {
-        event.stopPropagation();
-        setOpen(false);
-        toggleRef.current?.focus(); // 键盘收起后回焦到入口（CD-19）。
-      }
-    }}>
-    <button ref={toggleRef} className="conversation-diff-toggle text-link" type="button"
-      aria-expanded={open} aria-controls={panelId} aria-busy={loading}
-      data-testid="conversation-diff-toggle" data-state={diff === null ? "unknown"
-        : diff.available ? (diff.totalFiles === 0 ? "empty" : "changed") : diff.reason}
-      onClick={() => setOpen((previous) => !previous)}>
-      <span className="conversation-diff-line">{line}</span>
-      {/* 数字各自成节点：新增用 diff 绿、删除用 diff 红（设计系统 §9.15），
-          同时保留 `+ / −` 符号与「新增 N 行，删除 M 行」的可访问名，不只靠颜色。 */}
-      {totals !== null && <>
-        <span className="conversation-diff-add" data-metric="added">+{totals.added}</span>
-        <span className="conversation-diff-remove" data-metric="removed">−{totals.removed}</span>
-        <span className="visually-hidden">新增 {totals.added} 行，删除 {totals.removed} 行</span>
-      </>}
-      {changed !== null && incomplete && <span className="conversation-diff-flag"
-        data-testid="conversation-diff-flag">{incompleteFlag(changed)}</span>}
-      {stale && <span className="conversation-diff-stale" data-testid="conversation-diff-stale">
-        更新失败 · 截至 {readAt === null ? "未知时刻" : timeText(readAt)}</span>}
-      {!open && <span className="conversation-diff-hint" aria-hidden="true">展开</span>}
-    </button>
-    {open && <div id={panelId} className="conversation-diff-panel" data-testid="conversation-diff-panel">
-      <p className="conversation-diff-panel-title" data-testid="conversation-diff-panel-title">本次对话的文件变化</p>
+  const entryLine = <>
+    <span className="conversation-diff-line">{line}</span>
+    {/* 数字各自成节点：新增用 diff 绿、删除用 diff 红（设计系统 §9.15），
+        同时保留 `+ / −` 符号与「新增 N 行，删除 M 行」的可访问名，不只靠颜色。 */}
+    {totals !== null && <>
+      <span className="conversation-diff-add" data-metric="added">+{totals.added}</span>
+      <span className="conversation-diff-remove" data-metric="removed">−{totals.removed}</span>
+      <span className="visually-hidden">新增 {totals.added} 行，删除 {totals.removed} 行</span>
+    </>}
+    {changed !== null && incomplete && <span className="conversation-diff-flag"
+      data-testid="conversation-diff-flag">{incompleteFlag(changed)}</span>}
+    {stale && <span className="conversation-diff-stale" data-testid="conversation-diff-stale">
+      更新失败 · 截至 {readAt === null ? "未知时刻" : timeText(readAt)}</span>}
+  </>;
+
+  const panel = <div id={panelId} className="conversation-diff-panel" data-testid="conversation-diff-panel">
+      <p className="conversation-diff-panel-title" data-testid="conversation-diff-panel-title">
+        {scope === "DIRECTORY" ? "本次对话期间该目录的变化" : "本次对话的文件变化"}</p>
       {changed !== null ? <>
         <p className="helper-text">统计起点 <time dateTime={changed.baselineCapturedAt}>{timeText(changed.baselineCapturedAt)}</time>
           {" "}· 目录 <span className="conversation-diff-root" title={changed.rootPath}>{changed.rootPath}</span></p>
-        <p className="helper-text">包含该目录自基线起的同期修改，不代表全部由 Agent 产生。</p>
+        <p className="helper-text">{changed.scope === "SESSION"
+          ? "只统计本会话写入的文件；同一目录里其他程序或其他会话的同期修改不计入。"
+          : "包含该目录自基线起的同期修改，不代表全部由 Agent 产生。"}</p>
         {changed.totalFiles === 0
-          ? <p className="helper-text" data-testid="conversation-diff-empty">本次对话暂无文件变化。</p>
+          ? <p className="helper-text" data-testid="conversation-diff-empty">
+            {incomplete ? "没有可统计的文件变化；本次统计不完整，具体缺口见下。" : "本次对话暂无文件变化。"}</p>
           : <ul className="conversation-diff-files" data-testid="conversation-diff-files">
             {files.map((file) => {
               const statable = file.unavailableReason === null && file.added >= 0 && file.removed >= 0;
@@ -260,7 +292,7 @@ export default function ConversationDiffSummary({ client, sessionId, enabled, di
                     {openFile === file.path ? "收起正文" : "查看完整差异"}</span>
                 </button>
                 {openFile === file.path && <ConversationDiffFileBody client={client} sessionId={sessionId}
-                  path={file.path} revisionKey={`${revisionKey}:${file.action}`} />}
+                  path={file.path} revisionKey={`${revisionKey}:${file.action}`} scope={scope} />}
               </li>;
             })}
           </ul>}
@@ -292,6 +324,31 @@ export default function ConversationDiffSummary({ client, sessionId, enabled, di
           ? ` 现起点：${timeText(changed.baselineCapturedAt)}` : ""}</p>}
       <button className="text-link" type="button" data-testid="conversation-diff-refresh"
         onClick={() => refresh()}>重新读取</button>
-    </div>}
+  </div>;
+
+  /* 内联形态（工作详情页签内）：没有「展开／收起」入口，清单直接摊开；
+     数据来源、范围与缺口措辞与对话入口完全一致，不另建一套统计。 */
+  if (inline) {
+    return <div className="conversation-diff conversation-diff--inline" data-region="conversation-diff"
+      data-scope={scope}>{panel}</div>;
+  }
+
+  return <div className="conversation-diff" data-region="conversation-diff" data-scope={scope}
+    onKeyDown={(event) => {
+      if (event.key === "Escape" && open) {
+        event.stopPropagation();
+        setOpen(false);
+        toggleRef.current?.focus(); // 键盘收起后回焦到入口（CD-19）。
+      }
+    }}>
+    <button ref={toggleRef} className="conversation-diff-toggle text-link" type="button"
+      aria-expanded={open} aria-controls={panelId} aria-busy={loading}
+      data-testid="conversation-diff-toggle" data-state={diff === null ? "unknown"
+        : diff.available ? (diff.totalFiles === 0 ? "empty" : "changed") : diff.reason}
+      onClick={() => setOpen((previous) => !previous)}>
+      {entryLine}
+      {!open && <span className="conversation-diff-hint" aria-hidden="true">展开</span>}
+    </button>
+    {open && panel}
   </div>;
 }

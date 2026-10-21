@@ -10,6 +10,7 @@ import { runLabels, stepLabels, stepStatusLabels } from "./RunControlPanel";
 import RunTracePanel from "./RunTracePanel";
 import TaskCheckPlanPreview from "./TaskCheckPlanPreview";
 import TaskCompletionPanel from "./TaskCompletionPanel";
+import { useDelayedVisible } from "../lib/useDelayedVisible";
 import { describeLiveError } from "../lib/liveErrors";
 import { reviewKindLabels } from "../lib/labels";
 import { handleTabListKeyDown } from "../lib/tabNavigation";
@@ -190,7 +191,9 @@ function VersionHistory({ client, taskId }: { client: RelayApiClient; taskId: st
     return () => { lineageRequest.current++; };
   }, [client, selected]);
 
-  if (loading) return <p className="helper-text" role="status">正在读取版本…</p>;
+  /** 换任务时版本清单读取通常几十毫秒完成，加载提示延迟出现，避免整块面板闪一下（见 lib/useDelayedVisible）。 */
+  const versionsLoadingVisible = useDelayedVisible(loading);
+  if (loading) return versionsLoadingVisible ? <p className="helper-text" role="status">正在读取版本…</p> : null;
   if (error) return <p className="action-error" role="alert">{error}</p>;
   if (versions.length === 0) return <p className="helper-text">该任务还没有已保存的产物版本；没有历史不是读取失败。</p>;
 

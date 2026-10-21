@@ -208,7 +208,8 @@ describe("P15 Activity 分组、执行方筛选与依据侧栏", () => {
     expect(list.text()).toContain("查看项目接续变化");
     expect(list.text()).not.toContain("VERIFICATION_FINALIZED");
     expect(list.text()).not.toContain("业务事件");
-    expect(list.text()).toContain("未识别的事件");
+    // 认识不了的类型不编造动作名，但也不读成界面错误：带上原始类型如实降级（2026-10-20 第五轮）。
+    expect(list.text()).toContain("其他事件（FUTURE_EVENT）");
     await basisButton(mounted, entries[3]!.id).trigger("click"); await flush();
     expect(mounted.wrapper.get('[data-testid="activity-basis-panel"]').text()).toContain("FUTURE_EVENT");
     expect(mounted.wrapper.get('[data-testid="activity-basis-panel"]').text()).toContain("不能据此判断成功或完成");

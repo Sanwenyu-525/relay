@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { DomWrapper, dialogText, feedbackText, flush, mountWorkbench, openSessionSwitcher, openWorkingDirectory, pressEscape, switcherCurrentSession, toolbarSessionTitle } from "./mountApp";
+import { DomWrapper, feedbackText, flush, mountWorkbench, openSessionSwitcher, openWorkingDirectory, pressEscape, switcherCurrentSession, toolbarSessionTitle } from "./mountApp";
 
 /**
  * 协作页聊天框的会话模式单选框与人设助手（工作台 §25、ADR-018、测试计划 §23.2）。
@@ -272,6 +272,34 @@ describe("会话模式单选框", () => {
     } finally { view.unmount(); }
   });
 
+  /**
+   * 首条输入器的底栏顺序（2026-10-20 用户指令「上下文和模型下拉按钮整体移动到发送按钮的左边」）。
+   * jsdom 看不见 CSS，但文档序就是渲染序；真实 Chromium 侧的同一条锁在 `composerSourcePanel.spec.ts` 3c。
+   */
+  it("首条输入器：计量环与模型在发送键左边成组，其余邻接关系不变", async () => {
+    const options: Stub = { sessions: [], posts: [] };
+    const view = await openAgent(options);
+    try {
+      const actions = document.querySelector(".agent-chat-composer-actions");
+      if (actions === null) throw new Error("首条输入器没有底栏");
+      const order = Array.from(actions.children).map((element) => element.className);
+      // 底栏只剩三个直接子件：工具行、右端一组（计量 + 模型）、发送键；一组紧贴发送键左边。
+      expect(order).toHaveLength(3);
+      expect(order[0]).toBe("agent-chat-composer-tools");
+      expect(order[1]).toBe("agent-chat-composer-tail");
+      expect(order[2]).toBe("primary-button agent-chat-send");
+      const tail = actions.children[1];
+      expect(Array.from(tail.children).map((element) => element.className))
+        .toEqual(["agent-chat-usage", "model-selector"]);
+      const tools = actions.querySelector(".agent-chat-composer-tools");
+      if (tools === null) throw new Error("首条输入器没有工具行");
+      const toolOrder = Array.from(tools.children).map((element) => element.className);
+      // 这次只搬两枚：「+」与写档位仍相邻，禁用资料说明芯片仍紧跟「普通讨论」浮层。
+      expect(toolOrder.indexOf("agent-chat-permission")).toBe(toolOrder.indexOf("agent-chat-attach") + 1);
+      expect(toolOrder.indexOf("agent-chat-tool")).toBe(toolOrder.indexOf("agent-chat-options") + 1);
+    } finally { view.unmount(); }
+  });
+
   it("已有会话从菜单选 clear 后仍需发送，沿原会话命令创建", async () => {
     const options: Stub = { sessions: [agentSession()], posts: [] };
     const view = await openAgent(options);
@@ -535,41 +563,37 @@ describe("会话模式单选框", () => {
     } finally { view.unmount(); }
   });
 
-  /* 「+」弹层的禁用原因落在底部一条脚注，而不是逐条挂在选项下（2026-10-16）。
-     这条断言锁的是「禁用仍有可见原因」：脚注一旦删掉，四条选项里两条灰掉却无人说明为什么。 */
-  it("「+」弹层：选项恒定单行，禁用原因合并成底部一条脚注并被禁用项引用", async () => {
+  /* 菜单里不再有整段说明（2026-10-19 用户指认「每个菜单下面都有文字……这个文字很影响体验」，
+     上游同类菜单也没有）：禁用原因只挂在行上的 `title`，面板高度只由选项行决定。 */
+  it("「+」弹层：选项恒定单行，禁用原因只挂在悬停 title，不再渲染底部脚注", async () => {
     const options: Stub = { sessions: [], posts: [], profiles: [] };
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
     vi.stubGlobal("fetch", stub(options));
     const view = await mountWorkbench("/agent");
     try {
-      /* 2026-10-18 起清单全量、Skill 缺上下文时才提示：没有选中 Skill 时不再有 Skill 脚注，
-         只有「资料在会话中选择」与连接器的按项目登记说明；行本身都可点开。 */
-      const notes = Array.from(document.querySelectorAll(".agent-chat-attach-note"));
-      expect(notes.map((node) => node.textContent)).toEqual(["资料在会话中选择",
-        "连接器按项目登记；进入项目后可查看已连接能力"]);
+      expect(document.querySelectorAll(".agent-chat-attach-note")).toHaveLength(0);
       expect(document.querySelector(".agent-chat-attach-item-reason")).toBeNull();
-      // 资料在首条消息仍是禁用；Skill 与连接器可点开，连接器的原因挂在 title 与脚注上。
-      expect(document.querySelector('[data-testid="assist-attach-sources"]')?.hasAttribute("disabled")).toBe(true);
-      for (const key of ["sources", "connectors"]) {
-        const item = document.querySelector(`[data-testid="assist-attach-${key}"]`);
-        const referenced = notes.find((node) => node.id === item?.getAttribute("aria-describedby"));
-        expect(referenced?.textContent).toBeTruthy();
+      // 资料在首条消息仍是禁用，原因只在悬停里；Skill 与连接器可点开。
+      const sources = document.querySelector('[data-testid="assist-attach-sources"]');
+      expect(sources?.hasAttribute("disabled")).toBe(true);
+      expect(sources?.getAttribute("title")).toBe("资料在会话中选择");
+      // 一行都没挂 aria-describedby：原来指向的脚注已经不存在，留着就是悬空引用。
+      for (const key of ["sources", "skill", "command", "connectors"]) {
+        expect(document.querySelector(`[data-testid="assist-attach-${key}"]`)?.getAttribute("aria-describedby"))
+          .toBeNull();
       }
-      // 原因同时挂在行上（悬停 title），不只留在脚注。
       expect(document.querySelector('[data-testid="assist-attach-skill"]')?.hasAttribute("disabled")).toBe(false);
       expect(document.querySelector('[data-testid="assist-attach-connectors"]')?.getAttribute("title"))
-        .toContain("连接器按项目登记");
-      // 打开目录后文件夹入口是活的，命令入口任何时候都不该带原因。
-      expect(document.querySelector('[data-testid="assist-attach-folder"]')?.hasAttribute("disabled")).toBe(false);
-      expect(document.querySelector('[data-testid="assist-attach-command"]')?.getAttribute("aria-describedby")).toBeNull();
+        .toContain("连接器随项目配置");
+      // 目录入口不在「+」里（2026-10-19）：一级只有四项，目录归协作页目录细条。
+      expect(document.querySelector('[data-testid="assist-attach-folder"]')).toBeNull();
     } finally { view.unmount(); }
   });
 
   /* 「+」二级菜单（2026-10-16，工作台 §32）：一级只表达「想做什么」，具体选择在二级，
      执行仍走各自原有的 Owner。菜单框架本身的契约在 composerAttachMenu.spec.tsx 里单独锁，
      这里补的是「真实路由下确实接到既有能力」这一段。 */
-  it("「+」目录二级：先展开二级，未接入项如实禁用，无原生选择器时「选择文件夹」退回更换目录框", async () => {
+  it("「+」里没有目录行：目录入口归协作页目录细条（2026-10-19 撤出弹层）", async () => {
     const options: Stub = { sessions: [], posts: [], profiles: [] };
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
     vi.stubGlobal("fetch", stub(options));
@@ -577,22 +601,14 @@ describe("会话模式单选框", () => {
     try {
       await view.wrapper.get('[data-testid="assist-attach"]').trigger("click");
       await flush();
-      await view.wrapper.get('[data-testid="assist-attach-folder"]').trigger("click");
-      await flush();
-      const submenu = document.querySelector('[data-submenu="true"]');
-      expect(submenu?.getAttribute("data-section")).toBe("folder");
-      // 一级不因展开二级而收起：两级是同一个弹层里的两层，不是两个各自开关的浮层。
-      expect(document.querySelector(".agent-chat-attach")?.hasAttribute("open")).toBe(true);
-      // 未接入的能力不假装可用，并写明原因与当前替代路径。
-      expect(document.querySelector('[data-testid="assist-attach-workspace-manage"]')?.hasAttribute("disabled")).toBe(true);
-      expect(submenu?.querySelector(".agent-chat-attach-subnote")?.textContent).toContain("工作区管理尚未接入");
-      // 本机没有原生选择器（jsdom 里 `isTauri()` 恒为 false）时才退回这一层：复用协作页
-      // 持有的「更换目录」对话框，不新建第二套目录选择器。桌面宿主下直接开文件浏览器，
-      // 那条路径锁在 folderFirstConversation.spec.ts。
-      await view.wrapper.get('[data-testid="assist-attach-folder-pick"]').trigger("click");
-      await flush(80);
-      expect(document.querySelector('[role="dialog"][aria-label="更换工作目录"]')).not.toBeNull();
-      await act(async () => { pressEscape(); });
+      // 一级只剩四项；目录与「更换目录」只由目录细条一处承担，弹层里不再放第二个入口。
+      for (const key of ["sources", "skill", "command", "connectors"]) {
+        expect(document.querySelector(`[data-testid="assist-attach-${key}"]`)).not.toBeNull();
+      }
+      expect(document.querySelector('[data-testid="assist-attach-folder"]')).toBeNull();
+      expect(document.querySelector('[data-testid="assist-attach-folder-pick"]')).toBeNull();
+      // 细条仍在，且是活的：目录名即入口。
+      expect(document.querySelector('[data-testid="folder-scope-strip"]')).not.toBeNull();
     } finally { view.unmount(); }
   });
 
@@ -1055,7 +1071,7 @@ describe("会话模式单选框", () => {
     view.unmount();
   });
 
-  it("已建会话内切档是导航：先走同一离页守卫，草稿留在原会话，明确丢弃才切", async () => {
+  it("已建会话内切档直接生效：草稿按会话留在原处，切回时原样恢复", async () => {
     const options: Stub = { sessions: [agentSession(), assistantSession()], posts: [] };
     const view = await openAgent(options);
     try {
@@ -1063,28 +1079,16 @@ describe("会话模式单选框", () => {
       expect(toolbarSessionTitle()).toBe("普通会话");
       await view.wrapper.get('[data-testid="assist-draft"]').setValue("切档前未发送的草稿");
       await flipToAssistant(view);
-      // 有未发草稿时切档必须先经离页守卫：不静默丢草稿，也不静默换会话。
-      expect(dialogText()).toContain("未发送的内容");
-      expect(toolbarSessionTitle()).toBe("普通会话");
-      expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
-        .toBe("切档前未发送的草稿");
-
-      // 选择留下：不切档、草稿保留、零业务提交。
-      const keep = Array.from(document.querySelectorAll("button"))
-        .find((button) => button.textContent?.includes("留在当前工作区"));
-      await act(async () => { keep?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
-      await flush(80);
-      expect(toolbarSessionTitle()).toBe("普通会话");
-      expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
-        .toBe("切档前未发送的草稿");
-
-      // 明确丢弃后才真正导航到助手会话，且全程不建会话、不发消息。
-      await flipToAssistant(view);
-      const discard = document.querySelector('[data-testid="collab-discard-draft"]');
-      expect(discard).not.toBeNull();
-      await new DomWrapper(discard).trigger("click");
-      await flush(120);
+      // 不再弹「未发送的内容」：直接切到助手会话，草稿留在普通会话，不跟过去。
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
       expect(toolbarSessionTitle()).toBe("人设会话");
+      expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value).toBe("");
+
+      // 切回普通档：草稿按会话留在本机，原样恢复；全程不建会话、不发消息。
+      await chooseMode(view, "AGENT");
+      expect(toolbarSessionTitle()).toBe("普通会话");
+      expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
+        .toBe("切档前未发送的草稿");
       expect(options.posts.filter((post) => post.path === `${prefix}/assist-sessions` ||
         post.path.endsWith("/messages"))).toHaveLength(0);
     } finally { view.unmount(); }

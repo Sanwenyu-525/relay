@@ -121,11 +121,25 @@ async function measure(page: Page) {
     const style = (target: Element | null) => target === null ? null : getComputedStyle(target);
     const body = node(".assist-source-body");
     const panel = node(".agent-chat-options");
+    // 展开的那片面板与它的入口芯片：2026-10-19 起浮层只包住内容，summary 留在工具行里。
+    const openPanel = node(".agent-chat-source-options > .agent-chat-options-panel");
+    const openSummary = node(".agent-chat-source-options > summary");
     const options = node('[data-testid="assist-skill"]');
     return {
       viewport: { width: window.innerWidth, height: window.innerHeight },
       rootFontSize: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
       panelBox: box(panel),
+      toolsBox: box(node(".agent-chat-composer-tools")),
+      // 工具行的文档序（类名）：位置换档只有量出来才锁得住，CSS 换行不改文档序。
+      toolOrder: Array.from(document.querySelector(".agent-chat-composer-tools")?.children ?? [])
+        .map((element) => element.className),
+      // 底栏的文档序与右端一组（计量 + 模型，2026-10-20 用户指令「整体移动到发送按钮的左边」）。
+      actionsOrder: Array.from(document.querySelector(".agent-chat-composer-actions")?.children ?? [])
+        .map((element) => element.className),
+      tailOrder: Array.from(document.querySelector(".agent-chat-composer-tail")?.children ?? [])
+        .map((element) => element.className),
+      openPanelBox: box(openPanel),
+      openSummaryBox: box(openSummary),
       panelStyle: style(panel) ? { maxHeight: style(panel)!.maxHeight, overflowY: style(panel)!.overflowY } : null,
       title: { box: box(node(".assist-source-title")), fontSize: style(node(".assist-source-title"))?.fontSize ?? null },
       headBox: box(node(".assist-source-head")),
@@ -151,6 +165,16 @@ async function measure(page: Page) {
           && options !== null
           && node('[data-testid="assist-source-picker"]')!.contains(options) },
       pickerOverflowX: body === null ? null : (body as HTMLElement).scrollWidth - (body as HTMLElement).clientWidth,
+      // 模式 select 与它的 chip 盒（2026-10-20 用户截图「竖直重心没有在一个高度」）：
+      // select 不允许撑满 chip——Chromium 把 select 内部文字按内容盒贴顶排，撑满即文字贴顶。
+      selectChip: (() => {
+        const chipNode = node(".agent-chat-mode-select-field");
+        const selectNode = chipNode?.querySelector(".agent-chat-mode-select") ?? null;
+        if (chipNode === null || selectNode === null) return null;
+        const chipBox = box(chipNode);
+        const selectBox = box(selectNode);
+        return chipBox === null || selectBox === null ? null : { chip: chipBox, select: selectBox };
+      })(),
       horizontalOverflow: (document.scrollingElement as HTMLElement).scrollWidth - (document.scrollingElement as HTMLElement).clientWidth
     };
   });
@@ -218,6 +242,34 @@ test.describe("CT-02 资料面板的职责、高度与可达性", () => {
       insideViewport(snapshot, where, "检索行", require(where, "query", snapshot.queryBox));
       expect(snapshot.hitTests.summary, `${where} · 关闭入口不可达`).toBe("self");
       expect(snapshot.hitTests.query, `${where} · 检索行不可达`).toBe("self");
+      // 3b. 展开只浮出内容，入口芯片不离开工具行（2026-10-19 用户指认「点击之后 ui 还会消失，
+      //     关闭菜单之后 ui 又出来了」：原先整个 details 连 summary 一起绝对定位，点开时芯片
+      //     从行里跳走、其余芯片左移）。面板必须仍在行的上方，且明显宽于芯片。
+      const tools = require(where, "工具行", snapshot.toolsBox);
+      const chip = require(where, "展开中的入口芯片", snapshot.openSummaryBox);
+      const floating = require(where, "展开中的面板", snapshot.openPanelBox);
+      expect(chip.top, `${where} · 入口芯片上沿跳出工具行`).toBeGreaterThanOrEqual(tools.top - 0.5);
+      expect(chip.bottom, `${where} · 入口芯片下沿跳出工具行`).toBeLessThanOrEqual(tools.bottom + 0.5);
+      expect(floating.bottom, `${where} · 面板没有浮在工具行之上`).toBeLessThanOrEqual(tools.top + 0.5);
+      expect(floating.width, `${where} · 面板宽度没有铺过输入卡`).toBeGreaterThan(chip.width);
+      // 3c. 行右端一组（2026-10-20 用户指令「上下文和模型下拉按钮整体移动到发送按钮的左边」）：
+      //     计量环与模型下拉收在发送键左边，工具行左端改由「+」起头；「普通讨论」与「资料」的
+      //     相对顺序保持 2026-10-18 那一半。
+      expect(snapshot.toolOrder[0], `${where} · 工具行左端不是「+」`).toBe("agent-chat-attach");
+      expect(snapshot.actionsOrder, `${where} · 底栏不是「工具行 → 右端一组 → 发送键」`).toEqual([
+        "agent-chat-composer-tools", "agent-chat-composer-tail", "primary-button agent-chat-send"]);
+      expect(snapshot.tailOrder, `${where} · 右端一组不是「计量环 → 模型」`).toEqual(
+        ["agent-chat-usage", "model-selector"]);
+      expect(snapshot.toolOrder.indexOf("agent-chat-options agent-chat-send-options"),
+        `${where} · 资料入口应在「普通讨论」右侧`).toBeLessThan(
+        snapshot.toolOrder.indexOf("agent-chat-options agent-chat-source-options"));
+      // 3d. 模式 select 不撑满 chip（2026-10-20 用户截图「竖直重心没有在一个高度」）：
+      //     Chromium（含 WebView2）把 select 的内部文字按内容盒贴顶排，height 撑满 chip 时
+      //     文字整体上浮 7-8px（像素实测）。select 必须保持内容高，由 chip 的
+      //     align-items:center 把整枚盒子居中到行中线上。
+      if (snapshot.selectChip === null) throw new Error(`${where} · 缺少模式 select 采样`);
+      expect(snapshot.selectChip.select.height, `${where} · select 撑满了 chip，文字会贴顶`)
+        .toBeLessThan(snapshot.selectChip.chip.height - 4);
       // 检索行本来就在弹层内，这里只核对它没被挤出滚动区（可命中即说明留在视野里）。
       // 4. 输入器不被面板压住：草稿与发送键仍然可命中，页面不横向溢出。
       insideViewport(snapshot, where, "发送键", require(where, "发送键", snapshot.sendBox));

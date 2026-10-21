@@ -110,18 +110,27 @@
   line-height: var(--relay-font-lineHeight-heading);
 }
 
-/* 状态短语只说后果，不复述归属：整条没有底色可换，短语自身的前景色就是状态本身。
-   完整原因给读屏（visually-hidden）与 title，可见区保持一行。 */
+/* 未归入项目（advisory，2026-10-20 第五轮）：默认是常态而不是高优先级告警，所以整条**不**换
+   前景色，目录名、图标照旧是正文阶。约束只说后果、不复述归属，用次要前景而非警示色——
+   「执行前需归入项目」是启动写操作的前置条件，不是当前这一行出了问题。
+   完整句子仍留在 visually-hidden 与 title 里（规范要求不得隐藏真实前置条件）。 */
 .folder-strip-warning {
   flex: 0 1 auto;
   min-width: 0;
   margin-inline-start: var(--relay-space-1);
-  color: var(--relay-color-status-warning-text);
+  color: var(--relay-color-text-secondary);
   font-size: var(--relay-font-size-meta);
-  font-weight: var(--relay-font-weight-medium);
   line-height: var(--relay-font-lineHeight-heading);
   overflow-wrap: anywhere;
 }
+.folder-strip[data-state="advisory"] .folder-strip-warning {
+  color: var(--relay-color-text-muted);
+  font-weight: var(--relay-font-weight-regular);
+}
+
+/* 状态短语只说后果，不复述归属：整条没有底色可换，短语自身的前景色就是状态本身。
+   完整原因给读屏（visually-hidden）与 title，可见区保持一行。
+   warning（目录未就绪）一档才是「真的要挡住写操作」：浅前景交给细条整体换色（见下方）。 */
 
 /* 更换目录动作已并进目录名本身（2026-10-18 用户指令）：这一行不再有第二颗键，
    原 .folder-strip-change 胶囊及其三态规则随之删除，降档 chips 的消费者归零
@@ -152,7 +161,9 @@
   left: 0;
   z-index: var(--relay-zIndex-popover);
   width: min(18rem, 100%);
-  max-height: min(52vh, 26rem);
+  /* 2026-10-20：最近使用改成两行（名称 + 完整路径）后内容变高，上限从 52vh/26rem 放宽到
+     64vh/30rem，避免默认状态下最后一行被裁成半截；仍保留滚动，目录很多时不会顶出屏幕。 */
+  max-height: min(64vh, 30rem);
   overflow-y: auto;
   padding: var(--relay-space-2);
   background: var(--relay-color-bg-surface);
@@ -162,4 +173,20 @@
   /* 面板必须自己定色：它是 .folder-strip 的子节点，而细条在告警态把警示前景传给整行
      （目录名、图标、状态短语三处）。不重置的话，浮层里每一行动作文字都会跟着变琥珀色。 */
   color: var(--relay-color-text-primary);
+}
+
+/* 2026-10-20：作用域来源后缀（.folder-strip-source）按用户指令「只显示目录名」移除，
+   对应规则一并删除，避免留下没有节点的死样式。 */
+
+/* Git 需要到仓库根才授权（2026-10-20，P1-3）：这是可行动的缺口，不是错误，
+   所以取次要前景色 + 极轻底色，与告警态（琥珀前景）区分开；完整原因挂 title。 */
+.folder-strip-git {
+  flex: 0 0 auto;
+  padding: 0 var(--relay-space-2);
+  border-radius: var(--relay-radius-badge);
+  background: var(--relay-color-status-neutral-bg);
+  color: var(--relay-color-status-neutral-text);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-heading);
+  white-space: nowrap;
 }

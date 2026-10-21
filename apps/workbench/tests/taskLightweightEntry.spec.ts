@@ -66,9 +66,9 @@ describe("Task 轻量起步", () => {
     vi.stubGlobal("fetch", router({}, posts));
     const view = await mountWorkbench("/tasks"); unmount = view.unmount;
 
-    // 并列入口可达，完整表单仍保留为详细编辑入口。
-    expect(view.wrapper.get('[data-testid="task-create-light-open"]').exists()).toBe(true);
-    expect(view.wrapper.get('[data-testid="task-create-open"]').exists()).toBe(true);
+    // 主入口就是一句话登记；完整定义仍在同一页，作为次要入口保留。
+    expect(view.wrapper.get('[data-testid="task-create-open"]').text()).toContain("新建任务");
+    expect(view.wrapper.get('[data-testid="task-create-full"]').text()).toContain("填写完整定义");
     await view.router.push("/tasks?view=create&light=1");
     expect(view.wrapper.get('[data-testid="task-lightweight-form"]').exists()).toBe(true);
     // 轻量入口不要求验收标准字段。

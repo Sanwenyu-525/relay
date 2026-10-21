@@ -20,6 +20,11 @@ function isConnection(value: unknown): value is RelayApiConnection {
 export default function App() {
   const location = useLocation();
   const connection = useRelayConnection();
+  /**
+   * 页面级草稿守卫仍按各页登记的事实工作：任务创建、蓝图、产物编辑等没有本机草稿存储，
+   * 离开时照旧询问。协作页的讨论草稿已按会话留在本机（见 CollaborationView 的守卫），
+   * 因此换工作区时它不再把「有草稿」报成未保存（2026-10-19 用户指令）。
+   */
   const blocker = useBlocker(() => hasUnsavedDraft());
   const [desktopStatus, setDesktopStatus] = useState<"idle" | "connecting" | "error">(() => isTauri() ? "connecting" : "idle");
   const [closeDialogOpen, setCloseDialogOpen] = useState(false);
@@ -133,7 +138,12 @@ export default function App() {
     </main></div>;
   }
 
-  const preserveCreateTask = location.pathname === "/tasks" && new URLSearchParams(location.search).get("view") === "create";
+  /**
+   * 创建表单在连接切换时保持挂载：待核对命令必须留在原 API/Workspace 的作用域里，
+   * 不能在重连后把局部状态丢掉（尚无本机草稿存储可恢复它）。
+   */
+  const preserveDraftCreation = (location.pathname === "/tasks" && new URLSearchParams(location.search).get("view") === "create")
+    || (location.pathname === "/scheduled-tasks" && new URLSearchParams(location.search).get("view") === "create");
   const pendingCommandId = currentDraftGuard()?.pendingCommandId?.() ?? null;
   return <div className="desktop-window">
     {/* 跳转链接由窗口框架持有并排在标题栏之前：它 position:fixed，视觉位置不变，
@@ -141,7 +151,7 @@ export default function App() {
     <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById("main-content")?.focus(); }}>跳到主要内容</a>
     <DesktopTitleBar available onSearch={() => setCommandOpen(true)} />
     <AppShell desktopStatus={desktopStatus} commandOpen={commandOpen} onCommandOpen={() => setCommandOpen(true)} onCommandClose={() => setCommandOpen(false)}>
-      <div key={`${preserveCreateTask ? "create-task" : connection.epoch}:${location.pathname}${location.search}`}><Outlet /></div>
+      <div key={`${preserveDraftCreation ? "draft-creation" : connection.epoch}:${location.pathname}${location.search}`}><Outlet /></div>
     </AppShell>
     <AppDialog open={blocker.state === "blocked"} title={pendingCommandId ? "命令结果待核对" : "保留未保存的修改"} onClose={() => blocker.reset?.()}>
       <p>{pendingCommandId ? `原命令 ${pendingCommandId} 的结果仍待核对，请留在当前建议区查询回执。` : "即将离开的页面还有未保存的修改。你可以继续编辑，或丢弃草稿后离开。"}</p>

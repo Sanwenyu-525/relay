@@ -5,6 +5,29 @@
 .knowledge-tabs button { cursor: pointer; }
 .knowledge-columns { display: grid; grid-template-columns: minmax(13rem, 0.3fr) minmax(0, 1fr); gap: var(--relay-space-4); }
 .knowledge-list { align-self: start; }
+/* 记忆有效状态筛选：沿用共享 .segmented 的选中态与尺寸，只在列表层级改成按宽度
+   2 列或 4 列的网格；窄列里三字标签不拆行、不越出按钮，宽列仍排成一行。 */
+.knowledge-memory-filter { display: grid; gap: var(--relay-space-2); margin: 0 0 var(--relay-space-4); container-type: inline-size; }
+.knowledge-memory-filter .segmented {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--relay-space-1);
+}
+@container (min-width: 18rem) {
+  .knowledge-memory-filter .segmented { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+.knowledge-memory-filter .segmented .segmented-option {
+  flex: none;
+  margin-left: 0;
+  padding-inline: var(--relay-space-1);
+  border-radius: var(--relay-radius-control);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.knowledge-memory-filter .helper-text { margin: 0; }
+/* 过期提示：沿用警示色左边线，不新增色值；续期入口复用既有按钮。 */
+.knowledge-expired { margin-top: var(--relay-space-4); padding-left: var(--relay-space-3); border-left: var(--relay-focus-width) solid var(--relay-color-status-warning-text); }
+.knowledge-expired .knowledge-actions { margin-top: var(--relay-space-3); }
 .knowledge-row, .knowledge-result { display: flex; flex-direction: column; width: 100%; gap: var(--relay-space-2); padding: var(--relay-space-4); border: 0; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); background: transparent; color: var(--relay-color-text-primary); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
 .knowledge-row:hover, .knowledge-result:hover { background: var(--relay-color-selection-hover); }
 .knowledge-row--active { background: var(--relay-color-selection-bg); border-left: var(--relay-focus-width) solid var(--relay-color-action-primary); }
@@ -53,6 +76,9 @@
 .knowledge-page--reading .knowledge-columns { display: block; }
 .knowledge-reading-detail.surface-panel { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
 .knowledge-management { margin-top: var(--relay-space-8); padding-top: var(--relay-space-3); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+/* 永久恢复入口：不依赖撤销条存活，因此放在阅读区末尾而不是浮层里。 */
+.knowledge-restore { margin-top: var(--relay-space-4); padding-top: var(--relay-space-3); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.knowledge-restore .knowledge-actions { margin-top: var(--relay-space-3); }
 .knowledge-item-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--relay-space-3); margin-bottom: var(--relay-space-4); }
 .knowledge-item-heading h2 { margin: 0; }
 .knowledge-fact-paper { padding: var(--relay-space-6); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-control); background: var(--relay-color-bg-surface); font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-reading); line-height: var(--relay-font-lineHeight-reading); }
@@ -136,6 +162,18 @@
 .knowledge-capture-confirmation [data-testid="knowledge-pending-receipt"] { padding: var(--relay-space-4) 0; border: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: 0; background: transparent; }
 .knowledge-capture-confirmation [data-testid="knowledge-pending-receipt"] h2 { font-size: var(--relay-font-size-rowTitle); }
 .knowledge-capture-permission-note { margin-top: var(--relay-space-8); padding-top: var(--relay-space-6); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); }
+/* 普通新建的「来源与收录设置」：与「资料管理」同一种折叠语义，不新造第三套折叠控件。 */
+.knowledge-source-settings { margin-top: var(--relay-space-6); padding-top: var(--relay-space-3); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.knowledge-source-settings > summary, .knowledge-rule-advanced > summary, .knowledge-artifact-manual > summary { padding: var(--relay-space-2) 0; color: var(--relay-color-text-secondary); cursor: pointer; }
+.knowledge-source-settings > summary::marker, .knowledge-rule-advanced > summary::marker, .knowledge-artifact-manual > summary::marker { color: var(--relay-color-action-primary); }
+.knowledge-rule-advanced { margin-top: var(--relay-space-4); padding-top: var(--relay-space-2); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.knowledge-artifact-candidates { display: grid; gap: var(--relay-space-2); margin: var(--relay-space-3) 0; padding: 0; list-style: none; max-height: 20rem; overflow-y: auto; }
+/* 一条候选就是「这一份确切版本」：标题、版本与任务、时间三行，选中态复用列表选中底色。 */
+.knowledge-artifact-candidate { display: flex; flex-direction: column; width: 100%; gap: var(--relay-space-1); padding: var(--relay-space-3); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-control); background: var(--relay-color-bg-surface); color: var(--relay-color-text-primary); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.knowledge-artifact-candidate:hover { background: var(--relay-color-selection-hover); }
+.knowledge-artifact-candidate--selected { background: var(--relay-color-selection-bg); border-color: var(--relay-color-action-primary); }
+.knowledge-artifact-candidate small { color: var(--relay-color-text-muted); }
+.knowledge-artifact-manual { margin: var(--relay-space-3) 0; }
 @media (min-width: 80rem) {
   .knowledge-form--capture.surface-panel { grid-template-columns: minmax(0, 1fr) minmax(0, var(--relay-layout-rail-narrowWidth)); }
   .knowledge-capture-confirmation { align-self: stretch; padding: var(--relay-space-3) 0 0 var(--relay-space-6); border-top: 0; border-left: var(--relay-border-width) solid var(--relay-color-border-separator); }

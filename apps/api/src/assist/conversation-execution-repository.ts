@@ -97,6 +97,40 @@ export class ConversationExecutionRepository {
       { requestId: found.request_id, runId: found.run_id };
   }
 
+  /**
+   * 服务端自动推进的扫描名单（2026-10-20 第二轮）。
+   *
+   * 只取「决定 PREPARE、候选 READY、还没有 Run、停在可接续阶段」的原请求，按最早优先，
+   * 让先到的请求先被推进。`FAILED` 不在名单内：那是已经给出过原因、等人工决定的终态。
+   *
+   * 不在这里加锁：真正的幂等由请求行上固定的三个阶段命令身份与 `advanceStage()` 的
+   * 状态 CAS 保证，扫描本身只是「谁先看到」的问题，不承担正确性。
+   */
+  async listAutoStartCandidates(limit: number): Promise<readonly ConversationExecutionRequestRow[]> {
+    return (await sql<ConversationExecutionRequestRow>`
+      select * from conversation_execution_requests
+      where decision = 'PREPARE' and candidate_status = 'READY' and run_id is null
+        and status in ('READY', 'TASK_PREPARED')
+      order by created_at asc, id asc
+      limit ${limit}`.execute(this.db)).rows;
+  }
+
+  /**
+   * 自动推进失败：把**具体原因**写在原请求行上，并把它从自动扫描里退出。
+   *
+   * 候选与 decision 一律保留，因此命中条件（连接、目录、在途 Run）修复之后，用户仍可
+   * 沿原 `request_id` 与同一组阶段命令身份显式「继续原请求」——不产生第二个候选。
+   * 这里不写 `candidate_status`：候选本身没有失效，失效的是这次推进的前置条件。
+   */
+  async markAutoStartFailed(id: string, reason: string): Promise<ConversationExecutionRequestRow | undefined> {
+    return (await sql<ConversationExecutionRequestRow>`
+      update conversation_execution_requests set status = 'FAILED',
+        clarification = ${JSON.stringify({ questions: [reason] })}::jsonb,
+        revision = revision + 1, updated_at = now()
+      where id = ${id} and run_id is null and status in ('READY', 'TASK_PREPARED')
+      returning *`.execute(this.db)).rows[0];
+  }
+
   /** 候选先落库：只有 PENDING 能写入，重复结算不会覆盖已保存的整理结果。 */
   async saveInterpretation(id: string, input: {
     readonly decision: ConversationDecision;

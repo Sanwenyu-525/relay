@@ -26,6 +26,8 @@
   display: flex;
   align-items: center;
   gap: var(--relay-space-2);
+  /* 2026-10-20：带完整路径的行要把路径折到第二行，因此允许换行；动作行没有 hint，不受影响。 */
+  flex-wrap: wrap;
   width: 100%;
   min-height: var(--relay-control-height-compact);
   padding: var(--relay-space-1) var(--relay-space-2);
@@ -67,13 +69,13 @@
    完整值挂在 title 或本行按钮上。收缩系数 3：面板放不下时先挤掉这一段，
    主标签（目录名／项目名）要到最后才省略——用户认的是名字，路径只是佐证。 */
 .folder-scope-row-hint {
-  flex: 0 3 auto;
+  /* 2026-10-20 用户指认桌面端浮层里的路径被省略号截断：完整路径独占第二行、允许任意断行，
+     左边距对齐目录名（图标宽 + 行内间距）。它仍是次要事实，字号取 caption 档。 */
+  flex: 1 1 100%;
   min-width: 0;
-  margin-inline-start: auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: end;
+  margin-inline-start: calc(var(--relay-control-icon-size) + var(--relay-space-2));
+  overflow-wrap: anywhere;
+  text-align: start;
   color: var(--relay-color-text-muted);
   font-size: var(--relay-font-size-caption);
 }
@@ -163,6 +165,18 @@
   color: var(--relay-color-text-muted);
 }
 
+/* 当前目录的完整路径（2026-10-20 用户要求）：细条只显示目录名，同名目录无法区分，
+   完整路径在这里可核对。Windows 反斜杠没有天然断点，用 anywhere 保证长路径换行而不是溢出；
+   它是可核对的事实，不是第二颗按钮，因此不上色、不描边、不加图标。 */
+.folder-scope-path {
+  margin: 0;
+  padding: var(--relay-space-1) var(--relay-space-2) 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-heading);
+  overflow-wrap: anywhere;
+}
+
 /* 原 .folder-scope-bar（消息区上方的可折叠大块）已由 FolderScopeBar 的常驻细条取代，
    这里不再保留它的样式；本文件只管浮层内的目录控件本身。 */
 
@@ -175,10 +189,54 @@
      反过来把转录区压没。min-height:0 让它先让出高度，且不新增滚动容器。 */
   flex: 0 1 auto;
   min-height: 0;
+  /* 2026-10-20 用户截图：让出高度之后，边框盒会比内容矮，而 flex 子项默认
+     overflow:visible —— 于是「新建 · aa.md」「不需要再确认一次…」这些行直接画到
+     边框外面，卡片只剩一条绿线，正文还断在半行。边框盒必须自己承担溢出：
+     内容在盒内滚动，永远不越出 border 与圆角。 */
+  overflow: auto;
+  overscroll-behavior: contain;
   margin: var(--relay-space-2) 0;
   padding: var(--relay-space-3);
   border: 1px solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-panel);
+}
+
+/* 调用统计标签（§37.1）：一类一枚，等宽数字、caption 档字号、细线徽牌。
+   与「预览」标签同一档观感，因此不引入第二套标签样式。 */
+.execution-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--relay-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.execution-count {
+  padding: 0 var(--relay-space-2);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-badge);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-heading);
+  font-variant-numeric: tabular-nums;
+}
+
+/* attention 档只给「等待你批准」：琥珀细线 + 琥珀文字，是摘要里唯一要求用户动手的类别。
+   与任务提案 PENDING 态（task-proposal-state[data-status]）同一个状态色来源。 */
+.execution-count[data-tone="attention"] {
+  border-color: var(--relay-color-status-warning-text);
+  color: var(--relay-color-status-warning-text);
+}
+
+/* 审批入口行动行：紧跟 attention 标签的同一块琥珀语言，可点击区域整行成块，
+   与其余说明文字（灰、无框）拉开层级。 */
+.execution-waiting {
+  display: flex;
+  margin: 0;
+  padding: var(--relay-space-1) var(--relay-space-2);
+  border: var(--relay-border-width) solid var(--relay-color-palette-amber);
+  border-radius: var(--relay-radius-control);
 }
 
 .execution-summary--prepare {
@@ -204,7 +262,8 @@
 }
 
 /* 原会话里的本次读取结果：逐字节取自同一份工具 result_ref，不加工、不二次读取。
-   折叠区默认收起，展开后按条目给出工具名、目标与正文，正文用等宽块保留原格式。 */
+   折叠区默认收起，展开后每个回执是一个可复制文本块（顶行「工具 · 目标」+ 复制键，
+   见 MessageCodeBlock 与工作台 §37.1）；正文超限只在块内滚动，并另行说明还有多少行。 */
 .execution-read-results {
   display: flex;
   flex-direction: column;
@@ -215,12 +274,7 @@
 
 .execution-read-results > li {
   min-height: 0;
-}
-
-.execution-read-results .trajectory-preview {
-  max-height: 16rem;
-  overflow: auto;
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-1);
 }

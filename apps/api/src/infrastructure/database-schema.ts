@@ -96,6 +96,14 @@ export interface WorkspaceRow {
   readonly updated_at: Date;
 }
 
+export interface WorkspaceDefaultDirectoryRow {
+  readonly workspace_id: string;
+  readonly resource_id: string | null;
+  readonly revision: bigint;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
+
 export interface WorkspaceExecutionAuthorityRow {
   readonly workspace_id: string;
   readonly revision: bigint;
@@ -403,6 +411,8 @@ export interface LocalDirectoryAccessRow {
   readonly write_tier: LocalDirectoryWriteTier;
   readonly read_connection_id: string;
   readonly write_connection_id: string | null;
+  /** 应用为 Git 仓库根自动建立的 GIT_READ 连接（0124）；仅作复用与停用核对指针。 */
+  readonly git_connection_id: string | null;
   readonly policy_ids: JsonObject;
   readonly revision: bigint;
   readonly updated_at: Date;
@@ -428,9 +438,11 @@ export interface ImportJobRow {
  * 但必须绑定受管资源与能力；词表只放行 GIT_READ，写入与 CLI 仍只有 RUN。 */
 /** 0060 追加 ASSISTANT_READ：人设会话的只读动作，与 RUN / USER_IMPORT / USER_ACTION 并列。
  *  0087 追加 AGENT_SESSION_READ：普通 Agent 主流程的只读动作。与 ASSISTANT_READ 同形但
- *  必须可分辨——运行架构 §2.6.3 要求两种执行身份不得互相冒充。 */
+ *  必须可分辨——运行架构 §2.6.3 要求两种执行身份不得互相冒充。
+ *  0126 追加 AGENT_SESSION_WRITE：会话内直接写文件。与读身份同形，但能力词表互不相交，
+ *  可分辨是「这条会话动作是读还是写」的前提。 */
 export type GatewayOriginKey = 'RUN' | 'USER_IMPORT' | 'USER_ACTION' | 'ASSISTANT_READ'
-  | 'AGENT_SESSION_READ';
+  | 'AGENT_SESSION_READ' | 'AGENT_SESSION_WRITE';
 
 export interface LogicalOperationRow {
   readonly id: string; readonly workspace_id: string; readonly project_id: string;
@@ -917,7 +929,40 @@ export interface KnowledgeVersionRow {
   readonly source_refs: JsonObject;
   readonly created_at: Date;
 }
-export type MemoryItemRow = InformationRootRow;
+/**
+ * DEV-0042：记忆条目的来源类别。
+ *
+ * `origin` 回答「谁写的」；它回答「内容来自谁的哪一段」——
+ * 只有逐字引用用户原话的记忆才算 USER_STATEMENT，引用助手叙述（含工具结果、网页正文）
+ * 的算 MODEL_OBSERVATION：后者可以存在，但不得被当成用户的偏好或授权。
+ */
+export type MemorySourceKind = 'MANUAL' | 'USER_STATEMENT' | 'MODEL_OBSERVATION' | 'UNKNOWN';
+
+export interface MemoryRootRow extends InformationRootRow {
+  readonly origin: 'HUMAN_CONFIRMED' | 'AUTO_CAPTURE';
+  readonly source_kind: MemorySourceKind;
+}
+
+export type MemoryItemRow = MemoryRootRow;
+export interface MemorySettingsRow {
+  readonly workspace_id: string;
+  readonly recall_enabled: boolean;
+  readonly automatic_compaction: boolean;
+  /** 0125：结算后是否自动提取长期记忆（ADR-030）。默认开启。 */
+  readonly auto_capture: boolean;
+  readonly revision: bigint;
+  readonly updated_at: Date;
+}
+
+export interface MemoryMessageSourceRow {
+  readonly memory_id: string;
+  readonly memory_version: bigint;
+  readonly session_id: string;
+  readonly message_id: string;
+  readonly content_sha256: string;
+  readonly created_at: Date;
+}
+
 export interface MemoryVersionRow {
   readonly id: string;
   readonly memory_id: string;
@@ -1205,6 +1250,129 @@ export interface LearningRoundRow {
 /** 0059：会话建立时冻结的一种身份。既有会话按 'AGENT' 读出，不虚构 助手 关系。 */
 export type ConversationMode = 'AGENT' | 'ASSISTANT' | 'LEARNING';
 
+/**
+ * 0127：会话的**行为模式**（总纲 §0.15、工作台 §44）。
+ *
+ * 与 `ConversationMode` 严格分开：后者是会话身份（建会话时冻结，决定人设/学习记录等
+ * 权限形状），前者只是这一段对话接下来怎么处理——普通讨论、只读规划、持续目标。
+ * 它不授予任何能力，也不改写已排队消息的处理方式（消息行上有自己的快照）。
+ */
+export type ChatMode = 'CHAT' | 'PLAN' | 'GOAL';
+
+/** 0127：目标状态。终结态只有三个，其余都还占着会话的唯一目标槽位。 */
+export type AssistGoalStatus = 'ACTIVE' | 'PAUSING' | 'PAUSED' | 'CANCELLING' | 'CANCELLED'
+  | 'WAITING_USER' | 'BLOCKED' | 'BUDGET_EXHAUSTED' | 'AWAITING_ACCEPTANCE' | 'COMPLETED' | 'FAILED';
+
+/** 0127：一条计划版本的现状。CURRENT = 该会话最新一版；SUPERSEDED = 已被新版本取代。 */
+export type AssistPlanStatus = 'CURRENT' | 'SUPERSEDED';
+
+export interface AssistPlanRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly session_id: string;
+  readonly version: number;
+  readonly status: AssistPlanStatus;
+  readonly goal: string;
+  readonly scope: JsonObject;
+  readonly steps: JsonObject;
+  readonly verification: JsonObject;
+  readonly open_questions: JsonObject;
+  /** 产出这一版的会话消息；与 (session_id, version) 一同构成恢复身份。 */
+  readonly source_message_id: string;
+  readonly created_at: Date;
+}
+
+export interface AssistGoalRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly session_id: string;
+  readonly plan_version_id: string | null;
+  readonly objective: string;
+  readonly criteria: JsonObject;
+  readonly steps: JsonObject;
+  readonly status: AssistGoalStatus;
+  readonly current_step: string | null;
+  readonly progress: string | null;
+  readonly stop_reason: JsonObject | null;
+  readonly round_count: number;
+  readonly no_progress_rounds: number;
+  readonly lease_owner: string | null;
+  readonly lease_expires_at: Date | null;
+  readonly next_round_at: Date | null;
+  readonly last_round_message_id: string | null;
+  readonly revision: bigint;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+  readonly closed_at: Date | null;
+}
+
+export interface AssistGoalRoundRow {
+  readonly id: string;
+  readonly goal_id: string;
+  readonly message_id: string;
+  readonly round_index: number;
+  readonly outcome: string;
+  readonly note: string | null;
+  readonly criteria_snapshot: JsonObject;
+  readonly created_at: Date;
+}
+
+export interface AssistGoalBudgetGrantRow {
+  readonly id: string;
+  readonly goal_id: string;
+  readonly command_id: string;
+  readonly granted_calls: number;
+  readonly granted_tokens: bigint;
+  readonly created_at: Date;
+}
+
+/** 0128：有界多 Agent 的委派账本（一次委派一行；ADR-017、运行架构 §2.5）。 */
+export interface AssistDelegationRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  /** 发起委派的根会话（主 Agent 所在）。 */
+  readonly parent_session_id: string;
+  /** 本次委派建立的子会话；创建后回填，读时不为 NULL。 */
+  readonly child_session_id: string | null;
+  /** 冻结的只读角色：INVESTIGATE 调查 / REVIEW 独立审查。 */
+  readonly role: 'INVESTIGATE' | 'REVIEW';
+  readonly objective: string;
+  readonly scope: JsonObject;
+  readonly baseline: JsonObject | null;
+  readonly output_requirements: string;
+  /** 必要审查标记：冻结后不得由模型或主 Agent 改为可选。 */
+  readonly required: boolean;
+  readonly status: 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+  readonly attempt_count: number;
+  readonly max_attempts: number;
+  /** 发起这次委派的主会话消息与父侧工具账本行（配对身份）。 */
+  readonly parent_message_id: string;
+  readonly parent_tool_call_id: string | null;
+  /** 子结论的有界摘要；完整结论在子会话消息里。 */
+  readonly result_summary: string | null;
+  readonly stop_reason: JsonObject | null;
+  readonly revision: bigint;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+  readonly closed_at: Date | null;
+}
+
+/** 0128：一次委派下的子尝试（初次 + 至多一次修正重试）。 */
+export interface AssistDelegationAttemptRow {
+  readonly id: string;
+  readonly delegation_id: string;
+  readonly attempt_index: number;
+  /** 领取代次：迟到结果必须带同一 epoch 才能落定。 */
+  readonly claim_epoch: bigint;
+  readonly worker_id: string | null;
+  readonly status: 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+  /** 本次尝试的子会话结论消息。 */
+  readonly result_message_id: string | null;
+  readonly error_code: string | null;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
+
 /** 0059：助手配置。配置文本存在这里，能力不在这里——能力来自连接与 Gateway 准入。 */
 export interface AssistantProfileRow {
   readonly id: string;
@@ -1228,6 +1396,12 @@ export interface AssistSessionRow {
   readonly status: AssistSessionStatus;
   /** 冻结：会话建立后不改写。切模式等于换会话。 */
   readonly conversation_mode: ConversationMode;
+  /**
+   * 0127：行为模式（CHAT/PLAN/GOAL）。可随命令切换，不改会话身份与权限。
+   *
+   * 新会话默认 CHAT；旧会话按本列恢复。切换是持久事实，不靠前端本地状态。
+   */
+  readonly chat_mode: ChatMode;
   readonly assistant_profile_id: string | null;
   /** 建会话时 助手的修订。助手之后被改写不影响既有会话的冻结快照。 */
   readonly assistant_profile_revision: bigint | null;
@@ -1243,6 +1417,7 @@ export interface AssistSessionRow {
    * Project 仍由应用层按调用时的当前状态判定，不写进数据库 CHECK。
    */
   readonly working_resource_id: string | null;
+  readonly working_directory_source: 'USER_PICKED' | 'WORKSPACE_DEFAULT' | null;
   /**
    * 0090：置顶时刻。NULL = 未置顶；有值即这条会话排在列表最前，取消置顶写回 NULL。
    *
@@ -1275,6 +1450,22 @@ export interface AssistSessionRow {
    * 子会话此后独立生长。写入口只有分叉命令，且只在插入时写一次。
    */
   readonly forked_from_session_id: string | null;
+  /**
+   * 0128：主子会话关联（ADR-017、运行架构 §2.5）。
+   *
+   * NULL = 根会话（主 Agent 所在）；非 NULL = 由某次委派创建的子会话。
+   * 仅一层：子会话的 `parent_session_id` 指向的必是根会话，由应用层在建会话时校验。
+   * 子会话不取得写权限，也不能再委派——它的工具词表里没有委派工具。
+   */
+  readonly parent_session_id: string | null;
+  /**
+   * 0128：子会话的模型预算作用域根。
+   *
+   * 根会话为 NULL（作用域是自己）；子会话指向发起委派的根会话。子 Agent 的模型调用
+   * 因此计入**原主执行**的共享预算（§2.5.3），不为每个子会话另开满额预算。
+   * 与 `parent_session_id` 同生同灭：迁移 0128 的 CHECK 保证两列一致地为 NULL/非 NULL。
+   */
+  readonly budget_scope_session_id: string | null;
   readonly revision: bigint;
   readonly created_at: Date;
   readonly updated_at: Date;
@@ -1309,8 +1500,30 @@ export interface AssistMessageRow {
   readonly usage_cache_creation_tokens: number | null;
   readonly worker_id: string | null;
   readonly cancel_requested: boolean;
+  /**
+   * 0122：排队消息的插话意图。`true` = 用户要求把这条并入正在生成的那一轮，
+   * 生成方在下一次模型请求前消费（收口为 CANCELLED + STEERED，用户原文进当前轮）。
+   * 领取时清零：一行自己开始生成后就不再是别人的插话对象。
+   */
+  readonly steer_requested: boolean;
   /** 0072：本轮不记录学习状态。随发送命令持久，不由模型提示决定。 */
   readonly learning_record_disabled: boolean;
+  /**
+   * 0127：这条消息**被受理时**的会话行为模式快照。
+   *
+   * 与 `intent`、`method_snapshot` 同一性质：之后切换模式不改写已排队消息的处理方式，
+   * 否则一条已经排队的计划轮次会因为用户随后切到普通模式而变成可写轮次。
+   */
+  readonly chat_mode: ChatMode;
+  /**
+   * 0127：这条消息属于哪个目标轮次。NULL = 普通消息。
+   *
+   * 非 NULL 只由服务端目标推进器写入（用户消息不会带这个字段）；它是「这一轮属于
+   * 哪个目标的第几轮」的唯一关联，目标进度结算也按它找待结算轮次。
+   */
+  readonly goal_id: string | null;
+  /** 0127：目标轮次的结构化结论；非目标轮次为 null。 */
+  readonly goal_outcome: JsonObject | null;
   readonly created_at: Date;
   readonly updated_at: Date;
 }
@@ -1485,6 +1698,19 @@ export interface ModelCatalogEntryRow {
 }
 
 /**
+ * 模型能力声明（迁移 0121）：人对某个模型能力的主张，按 `(provider, source_model_id)` 存档。
+ * 目录里有条目时目录仍是准绳，声明只补「目录里没有这个模型」这一处空白。
+ */
+export interface ModelCapabilityDeclarationRow {
+  readonly provider: string;
+  readonly source_model_id: string;
+  readonly image_input: boolean;
+  readonly note: string | null;
+  readonly declared_at: Date;
+  readonly updated_at: Date;
+}
+
+/**
  * 会话作用域的模型选择（迁移 0089，专项阶段 C）。是「该会话后续新请求用哪个模型」的事实记录，
  * 随会话留存、可核对失效原因；从不写回进程默认，也不写 model_calls / runs。revision 供 CAS 幂等。
  */
@@ -1508,9 +1734,16 @@ export interface RelayDatabaseSchema {
   model_provider_cooldowns: ModelProviderCooldownRow;
   model_catalog_sync_state: ModelCatalogSyncStateRow;
   model_catalog_entries: ModelCatalogEntryRow;
+  model_capability_declarations: ModelCapabilityDeclarationRow;
   session_model_selection: SessionModelSelectionRow;
   assist_sessions: AssistSessionRow;
   assist_messages: AssistMessageRow;
+  assist_plans: AssistPlanRow;
+  assist_goals: AssistGoalRow;
+  assist_goal_rounds: AssistGoalRoundRow;
+  assist_goal_budget_grants: AssistGoalBudgetGrantRow;
+  assist_delegations: AssistDelegationRow;
+  assist_delegation_attempts: AssistDelegationAttemptRow;
   assist_message_attachments: AssistMessageAttachmentRow;
   assist_message_previews: AssistMessagePreviewRow;
   run_draft_previews: RunDraftPreviewRow;
@@ -1519,6 +1752,8 @@ export interface RelayDatabaseSchema {
   knowledge_items: KnowledgeItemRow;
   knowledge_versions: KnowledgeVersionRow;
   memory_items: MemoryItemRow;
+  workspace_memory_settings: MemorySettingsRow;
+  memory_message_sources: MemoryMessageSourceRow;
   memory_versions: MemoryVersionRow;
   decisions: DecisionRow;
   decision_versions: DecisionVersionRow;
@@ -1546,6 +1781,7 @@ export interface RelayDatabaseSchema {
   run_scope_grants: RunScopeGrantRow;
   change_set_files: ChangeSetFileRow;
   workspaces: WorkspaceRow;
+  workspace_default_directories: WorkspaceDefaultDirectoryRow;
   workspace_execution_authority: WorkspaceExecutionAuthorityRow;
   projects: ProjectRow;
   project_view_configurations: ProjectViewConfigurationRow;

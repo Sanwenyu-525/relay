@@ -469,6 +469,83 @@ test('桥接文件晚于 Provider 构造落盘时仍能连上：不缓存「没�
   }
 });
 
+test('扩展断开后下一次探测立即降级，不沿用缓存的 READY', async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), 'relay-browser-health-cache-'));
+  let reachable = true;
+  const provider = new ExtensionBridgeProvider({ dataRoot, fetchImpl: async () => reachable
+    ? new Response(JSON.stringify({ ok: true, result: { pages: [] }, extensionVersion: 'test' }),
+      { status: 200, headers: { 'content-type': 'application/json' } })
+    : new Response(JSON.stringify({ code: 'BROWSER_EXTENSION_MISSING',
+      detail: '浏览器扩展未连接。' }),
+    { status: 503, headers: { 'content-type': 'application/json' } }) });
+  try {
+    await mkdir(join(dataRoot, 'browser'), { recursive: true });
+    await writeFile(join(dataRoot, 'browser', 'bridge.json'),
+      JSON.stringify({ port: 65500, token: 'b'.repeat(64) }));
+    assert.equal((await provider.ensureStarted()).status, 'READY');
+    reachable = false;
+    assert.equal((await provider.ensureStarted()).status, 'DISCONNECTED',
+      '扩展断开后不能继续沿用上一次的 READY');
+    reachable = true;
+    assert.equal((await provider.ensureStarted()).status, 'READY');
+  } finally {
+    await provider.dispose();
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test('桥接单帧上限按 UTF-8 字节而非 JS 码元：多字节参数超限即拒绝', async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), 'relay-bridge-frame-limit-'));
+  const api = Fastify({ logger: false, bodyLimit: 8 * 1024 * 1024 });
+  const token = 'e'.repeat(64);
+  const sockets: WebSocket[] = [];
+  try {
+    registerBridgeUpgrade(api.server, { dataRoot, token });
+    api.register(async (scope) => {
+      registerBrowserBridgeCommandRoutes(scope, { database: {} as never, bridgeToken: token });
+    }, { prefix: '/api/v1' });
+    await withTimeout(api.listen({ host: '127.0.0.1', port: 0 }), 3_000, 'Fastify listen');
+    const address = api.server.address();
+    assert.ok(address !== null && typeof address === 'object');
+    const port = address.port;
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/api/v1/browser-bridge`);
+    sockets.push(socket);
+    await withTimeout(new Promise<void>((resolve, reject) => {
+      socket.addEventListener('open', () => resolve(), { once: true });
+      socket.addEventListener('error', () => reject(new Error('WebSocket failed before open')),
+        { once: true });
+    }), 2_000, 'WebSocket open');
+    const ready = new Promise<void>((resolve) => {
+      socket.addEventListener('message', (event) => {
+        const frame = JSON.parse(String(event.data)) as { type?: unknown };
+        if (frame.type === 'ready') resolve();
+      });
+    });
+    socket.send(JSON.stringify({ type: 'hello', protocol: PROTOCOL, token,
+      extensionVersion: 'frame-limit-test' }));
+    await withTimeout(ready, 2_000, 'bridge ready');
+    let commands = 0;
+    socket.addEventListener('message', (event) => {
+      const frame = JSON.parse(String(event.data)) as { type?: unknown };
+      if (frame.type === 'cmd') commands += 1;
+    });
+    // 1.4M 个中文字符 = 1.4M 码元（低于 4MiB 上限）但 UTF-8 为 4.2MB（超过上限）。
+    const response = await fetch(
+      `http://127.0.0.1:${port}/api/v1/browser-bridge/commands`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-bridge-token': token },
+        body: JSON.stringify({ op: 'fill', params: { text: '中'.repeat(1_400_000) } }),
+      });
+    assert.equal(response.status, 502);
+    assert.equal((await response.json() as { code?: string }).code, 'BROWSER_INVALID_REQUEST');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(commands, 0, '超限帧不应发给扩展');
+  } finally {
+    for (const socket of sockets) socket.close();
+    await api.close().catch(() => undefined);
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
 test('桥接文件写实际绑定端口，且重写不换令牌', async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), 'relay-bridge-port-'));
   const file = join(dataRoot, 'browser', 'bridge.json');

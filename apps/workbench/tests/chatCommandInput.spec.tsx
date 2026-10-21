@@ -109,14 +109,28 @@ describe("聊天命令输入", () => {
     } finally { view.unmount(); }
   });
 
-  it.each(["ASSISTANT", "LEARNING"] as const)("%s 隐藏方法，真实显示未接入与需会话状态", async (mode) => {
+  it.each(["ASSISTANT", "LEARNING"] as const)("%s 隐藏方法，需已有会话的命令如实标注", async (mode) => {
     stubCatalog(); const view = await mountReact(<Composer mode={mode} hasSession={false} />);
     try {
       await focus(view); await view.wrapper.get('[data-testid="input"]').setValue("/"); await flush();
       expect(view.wrapper.find('[data-testid="chat-command-review"]').exists()).toBe(false);
-      expect(view.wrapper.get('[data-testid="chat-command-clear"]').text()).toContain("需已有会话");
-      expect(view.wrapper.get('[data-testid="chat-command-model"]').text()).toContain("需已有会话");
-      expect(view.wrapper.get('[data-testid="chat-command-compact"]').text()).toContain("待接入");
+      // `/compact` 2026-10-20 接通后不再有「待接入」例外，与 `/clear`、`/new` 同读作「需已有会话」。
+      for (const id of ["clear", "model", "compact"]) {
+        expect(view.wrapper.get(`[data-testid="chat-command-${id}"]`).text()).toContain("需已有会话");
+      }
+    } finally { view.unmount(); }
+  });
+
+  it("会话已有时可用命令不写状态标签", async () => {
+    stubCatalog(); const view = await mountReact(<Composer hasSession />);
+    try {
+      await focus(view); await view.wrapper.get('[data-testid="input"]').setValue("/"); await flush();
+      // 每行都挂一句「可用」只是噪音，需要读的只有例外（2026-10-19 用户指认）。
+      for (const id of ["clear", "model", "compact"]) {
+        const text = view.wrapper.get(`[data-testid="chat-command-${id}"]`).text();
+        expect(text).not.toContain("需已有会话");
+        expect(text).not.toContain("待接入");
+      }
     } finally { view.unmount(); }
   });
 

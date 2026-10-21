@@ -31,5 +31,6 @@ export function requireNormalAdmission(gate: RuntimeAdmissionGateRow): void {
 /** Fixed internal command types; no HTTP input can add an admission bypass. */
 export function isDrainControlCommand(commandType: string): boolean {
   return commandType === 'RequestRunControl' || commandType === 'CancelTask' ||
-    commandType === 'CancelAssistMessage' || commandType === 'ClosePartialFileWrite' || commandType === 'StopTaskChain';
+    commandType === 'CancelAssistMessage' || commandType === 'CancelMemoryCompaction' ||
+    commandType === 'ClosePartialFileWrite' || commandType === 'StopTaskChain';
 }

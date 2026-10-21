@@ -8,7 +8,14 @@ param(
   [int]$FrontendPort = 5173,
   [switch]$SkipBuild,
   [ValidateRange(0, 600)][int]$SmokeSeconds = 0,
-  [switch]$SkipDesktop
+  [switch]$SkipDesktop,
+  # DesktopDev 由 dev-desktop.ps1 的源码/暂存时间判据决定是否刷新 apps/api 暂存资源：
+  # 改了 API 源码却跑上一版构建，曾把一次已修好的真实修复藏成一整天。本开关显式跳过该判据，
+  # 只在确认 src-tauri\resources\api 已是最新时使用。
+  [switch]$SkipApiRefresh,
+  # 同上，作用于 computer-runtime / file-io-helper 两个本机 Rust 产物：dev-desktop.ps1 默认按源码
+  # 写入时间自动 cargo build --release，本开关显式关掉（确认 target\release 已是最新时使用）。
+  [switch]$SkipNativeBuild
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -31,7 +38,7 @@ if ($interactive) {
 do {
 # 交互模式每轮都重新显示菜单：不能用 $Action 判断，它仍是上一次选中的动作。
 if ($interactive) {
-  Write-Host "Relay 桌面测试版`n1. 启动测试版`n2. 打包最新测试版`n3. 停止测试环境（保留数据）`n4. 查看状态和目录`n5. 浏览器开发预览`n6. 桌面开发窗口（热更新，无需重新打包）`n0. 退出"
+  Write-Host "Relay 桌面测试版`n1. 启动测试版`n2. 打包最新测试版`n3. 停止测试环境（保留数据）`n4. 查看状态和目录`n5. 浏览器开发预览`n6. 桌面开发窗口（热更新，改了 API 会自动刷新暂存）`n0. 退出"
   switch (Read-Host '请选择') {
     '1' { $Action = 'Start' }
     '2' { $Action = 'Build' }
@@ -106,6 +113,7 @@ function Get-PgStatus {
 # 迁移集、readiness 又要求清单完全相等，于是窗口以 SCHEMA_UNAVAILABLE 启动失败。
 # 这里按同一规则（文件名 + 内容 SHA-256）给暂存迁移集算一个摘要，与 session.json 中记录的
 # 值比较；变化即与包清单变化同等对待，从暂存产物补迁移。
+# 刷新已先于本判据执行（见下方 stage-api.ps1 调用），因此摘要与窗口实际运行的清单一致。
 function Get-MigrationSetHash {
   param([string]$Directory)
   if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { return $null }
@@ -186,6 +194,13 @@ try {
     $state = [pscustomobject]@{ schema_version = 1; cluster_path = $cluster; port = $port; workspace_id = [guid]::NewGuid().ToString(); command_id = [guid]::NewGuid().ToString(); ready = $false; manifest_hash = ''; dev_schema_hash = '' }
     Save-State
   }
+  # 刷新暂存必须发生在补迁移判据之前：dev-desktop.ps1 开窗前会按源码时间重建 resources\api，
+  # 若它在迁移决策之后才把迁移集推前，窗口内 API 的 readiness 会以 SCHEMA_UNAVAILABLE 退出
+  # （2026-10-20：0125 在补迁移之后才被暂存进来）。这里先刷新，再按刷新后的暂存集算摘要、
+  # 补迁移；随后的 dev-desktop.ps1 用 -SkipApiRefresh，不再重复判断。
+  if ($Action -eq 'DesktopDev' -and -not $SkipApiRefresh) {
+    & (Join-Path $root 'apps\desktop\scripts\stage-api.ps1') -RepoRoot $root
+  }
   # 暂存产物可用且本次是 DesktopDev 时，把暂存迁移集摘要纳入补迁移判据。
   $recordedDevSchemaHash = ''
   if ($state.PSObject.Properties.Name -contains 'dev_schema_hash' -and $state.dev_schema_hash) { $recordedDevSchemaHash = $state.dev_schema_hash }
@@ -258,7 +273,11 @@ try {
   New-Item -ItemType Directory -Path $env:RELAY_DESKTOP_DATA_ROOT -Force | Out-Null
   if ($Action -eq 'DesktopDev') {
     Write-Host '正在打开桌面开发窗口（Ctrl+C 停止）…'
-    & (Join-Path $root 'apps\desktop\scripts\dev-desktop.ps1') -ConfigPath $config -FrontendPort $FrontendPort
+    # 暂存刷新已在本脚本补迁移之前完成（或按 -SkipApiRefresh 显式跳过）；
+    # dev-desktop.ps1 不再自行判断，避免它在迁移之后又把迁移集推前。
+    $devArgs = @{ ConfigPath = $config; FrontendPort = $FrontendPort; SkipApiRefresh = $true }
+    if ($SkipNativeBuild) { $devArgs['SkipNativeBuild'] = $true }
+    & (Join-Path $root 'apps\desktop\scripts\dev-desktop.ps1') @devArgs
   } elseif (-not $SkipDesktop) {
     $desktop = Start-Process -FilePath $exe -PassThru
     Start-Sleep -Seconds 3

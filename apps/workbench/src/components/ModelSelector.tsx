@@ -62,6 +62,18 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
   // 打开别的浮层（「+」菜单、档位菜单）时收起本下拉：输入器工具行上的多个 chip 弹层
   // 不允许同时打开互相压。自身的外部按下与 Esc 由下面那个 effect 负责。
   useMenuExclusive(open, () => { if (!refreshingRef.current) onOpenChange(false); });
+  // 挂载即读应用默认（2026-10-21 用户指令「记住上一次选择的模型，不要每个会话都先显示
+  // 『模型』两个字」）：没有显式选择的会话（服务端 model-selection 为空）与新对话（本机
+  // 偏好为空）都沿用应用默认，芯片要显示这个具体型号而不是占位文案。打开下拉时下面的
+  // effect 会再读一次并覆盖同一个 state；读取失败保持 null，芯片退回占位但不谎报型号。
+  useEffect(() => {
+    if (client === null) return;
+    let active = true;
+    void client.getModelPortStatus().then((status) => {
+      if (active) setDefaultModel(status.configured ? status.model : null);
+    }).catch(() => { /* 读取失败不占地：保持 null，打开下拉时再读一次。 */ });
+    return () => { active = false; };
+  }, [client]);
   useEffect(() => {
     if (!open) return;
     let active = true;
@@ -161,7 +173,10 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
    * 首选以父层命令 Owner 的状态为准：点条目应用后父层就是新事实，这里缓存的 currentModel
    * 只是打开时读到的旧值，不能盖在它前面（否则刚应用的名字要等下次打开才显示）。
    */
-  const selectedId = selectedModel ?? currentModel;
+  // 显示链：会话显式选择 → 打开下拉时读到的当前值 → 挂载读到的应用默认。
+  // 三级都空才退回「模型」占位（服务端没配默认、本机没选过，此刻确实没有可显示的型号）。
+  // 应用默认只来自服务端 model-port，不是本地推断，因此不冒充会话事实。
+  const selectedId = selectedModel ?? currentModel ?? defaultModel;
   const selectedName = catalog?.models.find((model) => model.id === selectedId)?.name ?? selectedId;
   const selectedDetail = selectedId === null ? null
     : selectedName === selectedId ? selectedId : `${selectedName} · ${selectedId}`;
@@ -197,12 +212,12 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
       {!loading && catalog !== null && catalog.models.length > 0 && visibleModels.length === 0 &&
         <p className="model-selector-note">没有匹配的免费模型，请修改搜索。</p>}
       {!loading && <p className="model-selector-foot">
-        <span className="model-selector-note">最近成功同步：{catalog?.lastSuccessAt ?? "尚无成功目录"}
-          {catalog !== null && (catalog.cacheStale || !catalog.configured || !catalog.chatConfigured || catalog.lastFailureReason !== null) && " · "}{catalog?.cacheStale ? "目录已过期，仅供浏览" : ""}{catalog !== null && !catalog.configured ? "免费目录未启用" : ""}{catalog !== null && !catalog.chatConfigured ? "OpenRouter 调用凭据未配置，免费模型暂不可调用" : ""}{catalog?.lastFailureReason ? `最近同步失败：${catalog.lastFailureReason}，保留上次成功结果` : ""}</span>
+        <span className="model-selector-note"><span className="model-selector-foot-time">最近成功同步：{catalog?.lastSuccessAt ?? "尚无成功目录"}</span>
+          {catalog !== null && (catalog.cacheStale || !catalog.configured || !catalog.chatConfigured || catalog.lastFailureReason !== null) && " · "}{catalog?.cacheStale ? "目录已过期，仅供浏览" : ""}{catalog !== null && !catalog.configured ? "免费目录未启用" : ""}{catalog !== null && !catalog.chatConfigured ? "调用凭据未配置，免费模型暂不可调用" : ""}{catalog?.lastFailureReason ? `最近同步失败：${catalog.lastFailureReason}，保留上次成功结果` : ""}</span>
         <button type="button" className="model-selector-action" data-testid="model-selector-refresh"
           disabled={refreshing || !catalog?.configured} onClick={() => void refresh()}>{refreshing ? "正在刷新…" : "立即刷新"}</button>
       </p>}
-      <p className="model-selector-note">免费分组默认启用有界接续：当前模型额度或上游限流且账户额度仍可用时，最多尝试 3 个合格型号；绝不转收费。账户共享额度耗尽会停止。</p>
+      <p className="model-selector-note model-selector-footnote">免费分组默认有界接续：额度或限流且账户额度可用时最多再试 3 个合格型号；绝不转收费，共享额度耗尽即停。</p>
     </div>}
   </div>;
 }

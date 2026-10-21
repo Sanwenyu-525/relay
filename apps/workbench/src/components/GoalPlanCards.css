@@ -1,0 +1,198 @@
+/*
+ * 0127：计划卡与目标卡的版式。
+ *
+ * 两张卡共用一套外观：它们是同一条会话里的两种「结构化事实」，不该长得像两个产品。
+ * 只新增这一个文件、只消费既有 token——没有新色值，也没有第二套圆角/间距。
+ *
+ * 尺寸与压缩权沿 `.execution-summary` 那一课：卡片与消息区同在协作页中列，
+ * `min-height: 0` 让它先让出高度，而不是把转录区压没。
+ */
+
+.goal-plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-2);
+  min-height: 0;
+  max-height: 42vh;
+  overflow: auto;
+  padding: var(--relay-space-3);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  background: var(--relay-color-bg-surface);
+  font-size: var(--relay-font-size-meta);
+}
+
+.goal-card {
+  border-color: var(--relay-color-palette-forest);
+}
+
+.goal-plan-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--relay-space-2);
+  flex-wrap: wrap;
+}
+
+.goal-plan-card-title {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  flex-wrap: wrap;
+  margin: 0;
+  font-weight: var(--relay-font-weight-medium);
+}
+
+.goal-plan-badge {
+  padding: 0 var(--relay-space-2);
+  border-radius: var(--relay-radius-badge);
+  background: var(--relay-color-status-neutral-bg);
+  color: var(--relay-color-status-neutral-text);
+  font-size: var(--relay-font-size-caption);
+  font-weight: var(--relay-font-weight-medium);
+}
+
+.goal-plan-badge--busy {
+  background: var(--relay-color-selection-bg);
+  color: var(--relay-color-selection-text);
+}
+
+.goal-plan-badge--warning {
+  background: var(--relay-color-status-warning-bg);
+  color: var(--relay-color-status-warning-text);
+}
+
+.goal-plan-badge--danger {
+  background: var(--relay-color-status-danger-bg);
+  color: var(--relay-color-status-danger-text);
+}
+
+.goal-plan-badge--success {
+  background: var(--relay-color-status-success-bg);
+  color: var(--relay-color-status-success-text);
+}
+
+.goal-plan-objective {
+  margin: 0;
+  color: var(--relay-color-text-primary);
+  line-height: var(--relay-font-line);
+}
+
+.goal-card-step {
+  margin: 0;
+  color: var(--relay-color-text-secondary);
+}
+
+.goal-plan-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-1);
+}
+
+.goal-plan-label {
+  margin: 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  font-weight: var(--relay-font-weight-medium);
+}
+
+.goal-plan-list {
+  margin: 0;
+  padding-left: var(--relay-space-4);
+  color: var(--relay-color-text-secondary);
+  line-height: var(--relay-font-line);
+}
+
+.goal-plan-detail {
+  color: var(--relay-color-text-muted);
+}
+
+.goal-plan-history,
+.goal-card-details {
+  color: var(--relay-color-text-secondary);
+}
+
+.goal-plan-history > summary,
+.goal-card-details > summary {
+  cursor: pointer;
+  color: var(--relay-color-text-muted);
+}
+
+.goal-card-criterion-status {
+  margin-right: var(--relay-space-1);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+
+/* 条件状态用字重与色阶区分，不加新色值：达成=次级文字，未达成=警告文字。 */
+.goal-plan-list > li[data-status="MET"] .goal-card-criterion-status {
+  color: var(--relay-color-status-success-text);
+}
+
+.goal-plan-list > li[data-status="UNMET"] .goal-card-criterion-status {
+  color: var(--relay-color-status-warning-text);
+}
+
+.goal-card-reason {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-1);
+  padding: var(--relay-space-2);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+}
+
+.goal-card-reason > p {
+  margin: 0;
+}
+
+.goal-card-reason > ul {
+  margin: 0;
+  padding-left: var(--relay-space-4);
+}
+
+.goal-card-reason--warning {
+  background: var(--relay-color-status-warning-bg);
+  color: var(--relay-color-status-warning-text);
+}
+
+.goal-card-reason--danger {
+  background: var(--relay-color-status-danger-bg);
+  color: var(--relay-color-status-danger-text);
+}
+
+.goal-plan-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  flex-wrap: wrap;
+}
+
+.goal-plan-actions > .helper-text {
+  margin: 0;
+}
+
+/* 模式 chip 与档位 chip 同高同中线：两枚原生 select 并排时不能一高一低。 */
+.agent-chat-chat-mode {
+  flex: 0 0 auto;
+}
+
+/* 计划卡收在 details 里：summary 与会话其他折叠控件同一行高，展开后卡片宽度同列。 */
+.goal-plan-details {
+  margin: 0 0 var(--space-3, 12px);
+}
+
+.goal-plan-details > summary {
+  cursor: pointer;
+  color: var(--relay-color-text-secondary, #5a6b5a);
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.goal-plan-details > summary:hover {
+  color: var(--relay-color-text, #1a2b1a);
+}
+
+.goal-plan-details[open] > summary {
+  margin-bottom: var(--space-2, 8px);
+}

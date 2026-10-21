@@ -1,0 +1,75 @@
+/* 历史消息里的可复制文本块（工作台 §37.1）：代码 fence、命令输出、工具回执共用一档。
+   底色取 bg.subtle、细线取 border-separator、圆角取 radius.control，零新增色值与圆角档；
+   等宽字体取 font-family.code，行高取 lineHeight.code，与编辑器和右栏轨迹同一档。 */
+
+.msg-code {
+  display: grid;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+  /* 圆角画在边框外框上，滚动条贴齐内缘：overflow 必须落在圆角盒自己的层上。 */
+  overflow: hidden;
+}
+
+/* 顶行只回答「这是什么」：左侧等宽标签（语言或工具 · 目标），右侧复制键。
+   行高贴 compact 控件档，按键与文字同一基线，不额外撑高正文。 */
+.msg-code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-2);
+  min-height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-1) 0 var(--relay-space-3);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-heading);
+}
+
+/* 标签过长时只省略它自己：复制键与整块宽度都不被文字推走。 */
+.msg-code-label {
+  min-width: 0;
+  font-family: var(--relay-font-family-code);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.msg-code-copy {
+  flex: none;
+  width: var(--relay-control-height-compact);
+  min-width: var(--relay-control-height-compact);
+  min-height: var(--relay-control-height-compact);
+  color: var(--relay-color-text-muted);
+  opacity: 0.75;
+  transition: opacity var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.msg-code-copy:hover:not(:disabled),
+.msg-code-copy:focus-visible { opacity: 1; }
+/* 复制成功只换图标与主色一瞬，不做放大/弹跳动效：消息流里任何位移都会推走下面的正文。 */
+.msg-code[data-copy-state="done"] .msg-code-copy {
+  color: var(--relay-color-action-primary);
+  opacity: 1;
+}
+
+.msg-code-body {
+  margin: 0;
+  padding: var(--relay-space-2) var(--relay-space-3);
+  max-height: 18rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  color: var(--relay-color-text-primary);
+  font-family: var(--relay-font-family-code);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-code);
+  /* 输出可以没有空格的长串（哈希、压缩 JSON）：保留换行格式的同时允许任意折行。 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msg-code-copy { transition: none; }
+}

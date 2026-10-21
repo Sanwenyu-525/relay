@@ -1,0 +1,37 @@
+-- 排队消息的「插话」意图（工作台 §35、HTTP §10.101、运行时上下文 §2.8）。
+-- 2026-10-19，源码实现。纯追加一列，不改写既有迁移、不回填、不动消息状态枚举。
+--
+-- 语义：普通 Agent 会话里一条消息正在生成（RUNNING）时，用户新发的消息照旧落库为
+-- PENDING（排队等这一轮结束）。本列把其中若干条标记为「插话」：生成方在下一次模型
+-- 请求之前把它们消费掉，把对应的**用户原文**作为同一条原消息的下一轮输入，
+-- 而不是等这一轮结束后另起一轮。
+--
+-- 上游对照（2026-10-19 核验 `.research/upstream/deepseek-harness`）：
+--   * `packages/core/agent-loop/src/agent.ts:167-173`：`steer()` 插入 `next-step`
+--     inbox，`followup()` 插入 `next-turn`；
+--   * 同文件 `:359-364`：一步结束时若 `nextStep` 非空，**不结束这一轮**，再跑一步；
+--   * `packages/client/ui-conversation/src/client/skeleton/InputBar.tsx:155`：
+--     `canSteerQueue` = 输入框为空 + 正在运行 + 队列非空 → 空草稿的 Enter 手势
+--     把整队插话消息送进当前轮。
+-- 本列承担同一职责：`true` = 已请求插话、尚未被生成方消费。
+--
+-- 与 `cancel_requested`（0054）同一性质：都是「先持久化控制意图，由生成方在安全点观察」。
+-- 区别是取消让这一轮停下，插话让这一轮多跑一步。
+--
+-- 消费方唯一：`assist-runner` 的主流程在每次模型请求前调用
+-- `drainSteerRequests`，把命中的行在**同一事务**里收口为
+-- `CANCELLED` + `error_code = 'STEERED'`（这一行不再自己生成回复），
+-- 并把用户原文交给当前轮。领取路径（`claimNextPendingMessage`）在把
+-- PENDING 改成 RUNNING 的同一句里清掉本列：一旦这一行自己开始生成，
+-- 它就不再是别人的插话对象。
+--
+-- 权限：0015 已对 assist_messages 授表级 SELECT/INSERT/UPDATE，新列自动在既有授权范围内。
+--
+-- 索引：不加。插话读取按 `session_id + seq` 走既有的 (session_id, seq) 唯一索引，
+-- 单用户本机库在途队列长度是个位数，部分索引收益为零。
+--
+-- 兼容与回滚：纯追加一列且默认 false，旧行取 false，旧客户端忽略即可，
+-- Breaking Change: No。回退可保留该列（旧代码不读，行为退回「只排队不插话」）；
+-- 删除该列只丢失未消费的插话意图，不丢失任何消息、回执或状态事实。
+
+ALTER TABLE assist_messages ADD COLUMN steer_requested boolean NOT NULL DEFAULT false;

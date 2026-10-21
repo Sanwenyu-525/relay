@@ -16,6 +16,9 @@ import { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
 import { assertRestoreNotIsolated, RestoreIsolationError } from '../runtime/restore-isolation.js';
 import { ManagedContentStore } from '../storage/managed-content-store.js';
 import { runAssistGenerationTick } from '../application/assist-runner.js';
+import { runConversationExecutionAutoStartTick }
+  from '../application/conversation-execution-autostart.js';
+import { runAssistGoalTick } from '../application/goal-advance.js';
 import { runWebImportTick } from '../application/web-import-runner.js';
 import { runOneCommand } from './run-command.js';
 import { startBackgroundModelCatalogSync } from '../application/model-catalog-background-sync.js';
@@ -172,6 +175,30 @@ async function main(): Promise<void> {
           if (webImport.prepared + webImport.dispatched > 0) {
             process.stdout.write(`${JSON.stringify({ type: 'worker_web_import_tick',
               ...webImport })}\n`);
+          }
+          // 2026-10-20：已就绪的会话执行候选由服务端推进，不再等前端页面来喊这一声。
+          // 页面关闭、刷新错过时机或另一台设备发起的请求都能继续；重复或迟到扫描只重放
+          // 原请求行上固定的阶段命令身份，不产生第二个 Task/Run。
+          const autoStart = await runConversationExecutionAutoStartTick(database.executor);
+          if (autoStart.applied.length > 0 || autoStart.failed.length > 0) {
+            process.stdout.write(`${JSON.stringify({ type: 'worker_conversation_autostart',
+              applied: autoStart.applied.map((item) => item.requestId),
+              failed: autoStart.failed })}\n`);
+          }
+          /*
+           * 0127：`/goal` 的唯一推进 Owner。
+           *
+           * 每个 tick 做一次有界的工作单元：落定暂停/取消意图、结算已结束的轮次、
+           * 在目标可推进时投递下一轮。它不依赖任何页面请求——关掉窗口、刷新、
+           * 换设备都不影响；重启后按目标行上的状态与租约继续，重复扫描只重放同一轮次。
+           */
+          const goalTick = await runAssistGoalTick(database.executor, {
+            workerId, leaseMs });
+          if (goalTick.advanced.length > 0 || goalTick.settled.length > 0 ||
+              goalTick.controls.length > 0) {
+            process.stdout.write(`${JSON.stringify({ type: 'worker_goal_tick',
+              advanced: goalTick.advanced, settled: goalTick.settled,
+              controls: goalTick.controls })}\n`);
           }
         }
       }

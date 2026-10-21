@@ -34,6 +34,13 @@ function primaryRef(item: RelayActivityItem): { readonly target: string; readonl
 
 export function RecentActivitySummary({ client }: { client: RelayApiClient }) {
   // 只取 4 条：两列排布正好 2×2，把纵向空间还给欢迎页的 logo 与快捷语；其余走「查看全部」。
+  /**
+   * 高度恒定（2026-10-20 用户截图指认「新建会话按钮页面也会抖一下」）：这个区块在新对话
+   * 欢迎屏里位于输入卡正上方，旧实现加载中只有一行「加载中…」，4 条动态到达后长成两列列表，
+   * 把细条与输入卡推着下移——用户读成页面抖一下。现在加载中即渲染与真实行同构的 2×2 骨架，
+   * 数据到达原位替换、行数不足补等格占位，空态与错误态用居中覆层盖住骨架只换文案：
+   * 三种状态同高，输入卡不再移动。
+   */
   const { items, loading, error, stale, refresh } = useActivities(client, {}, 4);
   const hasItems = items.length > 0;
 
@@ -47,45 +54,67 @@ export function RecentActivitySummary({ client }: { client: RelayApiClient }) {
           : hasItems ? <Link className="recent-activity-all" to="/activities">查看全部 ›</Link> : null}
       </header>
 
-      {loading && !hasItems && <p className="recent-activity-note">加载中…</p>}
+      <div className="recent-activity-body">
+        {hasItems && (
+          <ul className="recent-activity-list" data-testid="recent-activity-list">
+            {items.map((item) => {
+              const meta = activityCategoryMeta[activityEventCategory(item.eventType)];
+              const ref = primaryRef(item);
+              const body = (
+                <>
+                  <span className="recent-activity-dot" aria-hidden="true" />
+                  <span className="recent-activity-kind">{meta.chipShort}</span>
+                  <span className="recent-activity-copy">
+                    <span className="recent-activity-label">{activityEventSummary(item)}</span>
+                    <span className="recent-activity-time">
+                      {activityActorLabels[item.actorKind]} · {relativeTime(item.createdAt)}
+                    </span>
+                  </span>
+                </>
+              );
+              return (
+                <li key={item.id} className="recent-activity-row" data-testid="recent-activity-row" data-tone={meta.tone}>
+                  {ref
+                    ? <Link className="recent-activity-link" to={ref.target}
+                        aria-label={`${activityEventSummary(item)}（${ref.label}）`}>{body}</Link>
+                    : <span className="recent-activity-link recent-activity-link--static">{body}</span>}
+                </li>
+              );
+            })}
+            {/* 行数不足 4 时补等格占位：见组件头部注释——这个区块在输入卡正上方，
+                加载中（2×2 骨架）→ 就绪之间的高度变化会把细条与输入卡推着走。 */}
+            {Array.from({ length: Math.max(0, 4 - items.length) }, (_, index) => (
+              <li key={`filler-${index}`} className="recent-activity-row" data-testid="recent-activity-filler" aria-hidden="true" />
+            ))}
+          </ul>
+        )}
 
-      {error !== null && !hasItems && (
-        <p className="recent-activity-note">
-          最近动态读不到。
-          <button type="button" className="recent-activity-retry" onClick={refresh}>重试</button>
-        </p>
-      )}
-
-      {!loading && error === null && !hasItems && <p className="recent-activity-note">还没有动态。</p>}
-
-      {hasItems && (
-        <ul className="recent-activity-list" data-testid="recent-activity-list">
-          {items.map((item) => {
-            const meta = activityCategoryMeta[activityEventCategory(item.eventType)];
-            const ref = primaryRef(item);
-            const body = (
-              <>
-                <span className="recent-activity-dot" aria-hidden="true" />
-                <span className="recent-activity-kind">{meta.chipShort}</span>
-                <span className="recent-activity-copy">
-                  <span className="recent-activity-label">{activityEventSummary(item)}</span>
-                  <span className="recent-activity-time">
-                    {activityActorLabels[item.actorKind]} · {relativeTime(item.createdAt)}
+        {!hasItems && (
+          <ul className="recent-activity-list recent-activity-list--skeleton" aria-hidden="true">
+            {Array.from({ length: 4 }, (_, index) => (
+              <li key={`skeleton-${index}`} className="recent-activity-row" data-testid="recent-activity-skeleton">
+                <span className="recent-activity-link recent-activity-link--static">
+                  <span className="recent-activity-dot recent-activity-dot--skeleton" />
+                  <span className="recent-activity-kind recent-activity-kind--skeleton" />
+                  <span className="recent-activity-copy">
+                    <span className="recent-activity-label recent-activity-label--skeleton">占位</span>
+                    <span className="recent-activity-time recent-activity-time--skeleton">占位</span>
                   </span>
                 </span>
-              </>
-            );
-            return (
-              <li key={item.id} className="recent-activity-row" data-tone={meta.tone}>
-                {ref
-                  ? <Link className="recent-activity-link" to={ref.target}
-                      aria-label={`${activityEventSummary(item)}（${ref.label}）`}>{body}</Link>
-                  : <span className="recent-activity-link recent-activity-link--static">{body}</span>}
               </li>
-            );
-          })}
-        </ul>
-      )}
+            ))}
+          </ul>
+        )}
+
+        {!hasItems && !loading && (
+          <p className="recent-activity-note recent-activity-note--overlay">
+            {error !== null ? <>
+              最近动态读不到。
+              <button type="button" className="recent-activity-retry" onClick={refresh}>重试</button>
+            </> : "还没有动态。"}
+          </p>
+        )}
+      </div>
     </section>
   );
 }

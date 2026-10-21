@@ -51,7 +51,10 @@ test('真实 Provider 配置经 HTTP 只读可见且不含密钥', async () => {
     assert.equal(response.status, 200);
     assert.deepEqual(response.body, { provider: 'openai-compatible', configured: true,
       model: 'gpt-integration', base_url: 'https://api.example.com/v1',
-      max_call_tokens: 65_536 });
+      max_call_tokens: 65_536,
+      // 2026-10-19：图片输入能力的只读投影。`gpt-integration` 不在模型目录里、也没声明，
+      // 因此与发送闸门同一结论——不能发图，且来源为空。
+      image_input: 'MODEL_NOT_IN_CATALOG', image_input_source: 'NONE' });
     assert.equal(JSON.stringify(response.body).includes(apiKey), false);
 
     const malformed = await api.request('GET', '/api/v1/workspaces/not-a-uuid/model-port');
@@ -66,7 +69,8 @@ test('未配置模型环境时报告 Mock 端口', async () => {
     const response = await api.get(workspacePath(workspaceId, '/model-port'));
     assert.equal(response.status, 200);
     assert.deepEqual(response.body, { provider: 'fake', configured: false,
-      model: null, base_url: null, max_call_tokens: null });
+      model: null, base_url: null, max_call_tokens: null,
+      image_input: 'NOT_CONFIGURED', image_input_source: 'NONE' });
   } finally { await api.stop(); }
 });
 

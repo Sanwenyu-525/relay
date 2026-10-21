@@ -186,6 +186,8 @@ export async function captureBaseline(rootPath: string,
 
     const sizeBytes = Number(entryStat.size);
     if (sizeBytes > limits.maxFileBytes) {
+      // 空串是「没读到内容」的标记，**不是**「文件不存在」：存在性由清单决定，
+      // 分类侧（diff-engine 的 classifyAction）会把空串与 null 一并当「无摘要」。
       files.push({ path: rel, sha256: '', text: null, lineCount: null, sizeBytes,
         unavailableReason: 'TEXT_TOO_LARGE' });
       continue;

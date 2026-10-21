@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, Folder, Plus, Search, Target } from "lucide-react";
+import { ChevronDown, Folder, Search, SquarePen, Target } from "lucide-react";
 import { createCommandId, RelayApiError, type RelayApiClient, type RelayAssistSession, type RelayProjectListItem, type RelayTaskSummary } from "../api/relayClient";
 import { useActiveConversation } from "../lib/activeConversation";
 import { describeLiveError } from "../lib/liveErrors";
@@ -105,6 +105,19 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
   const [ranked, setRanked] = useState<readonly string[]>(readRailSessionOrder);
   /** 正在拖的那一行与落位横线的位置；null 表示没有拖拽在进行。 */
   const [drag, setDrag] = useState<Drag | null>(null);
+  /**
+   * 批量删除的选择集（2026-10-20 用户指令「给会话 item 加一个复选框，方便删除记录」）。
+   *
+   * 存的是**会话 id** 而不是行 key：同一段讨论可能同时出现在「目标」与「工作区（目录）」
+   * 两段里，勾一处两处一起勾上，删除也只发一条命令。任务行没有删除命令，不参与选择。
+   */
+  const [selected, setSelected] = useState<readonly string[]>([]);
+  /** `confirm` 是就地确认（与 ⋯ 面板里的删除确认同一读法），`busy` 是命令在途。 */
+  const [batch, setBatch] = useState<"idle" | "confirm" | "busy">("idle");
+  /** 批量删除的结果说明：部分成功、被引用阻止、结果不明都写在这里，不吞成一句「删除失败」。 */
+  const [batchError, setBatchError] = useState<string | null>(null);
+  /** 有哪一条的删除回执对不上：结果未定，确认键锁死，只能由「取消」退出。 */
+  const [batchUncertain, setBatchUncertain] = useState(false);
   const request = useRef(0);
   const archivedRequest = useRef(0);
   /** 拖拽松手那一拍：浏览器补发的 click 不当作「打开会话」。 */
@@ -151,6 +164,13 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
         nextCursor: page.nextCursor, loadedAt: new Date().toISOString()
       }));
       if (cursor === null) setSessionsError(sessionResult.error);
+      // 选择集跟随这一列的事实收敛：整列重读之后，已不在活跃列表里的 id（被别处删掉、
+      // 被归档出活跃区）不再计入「已选」。只按读成功的那一趟收敛——一次读取失败不能
+      // 反过来把人的勾选清空。删掉的那几条在各自的命令回执里已即时摘除，这里只兜底。
+      if (cursor === null && sessionResult.error === null) {
+        setSelected((current) => current.length === 0 ? current
+          : current.filter((sessionId) => workspaceSessions.some((item) => item.id === sessionId)));
+      }
     } catch (caught) {
       if (version !== request.current) return;
       const described = describeLiveError(caught);
@@ -222,6 +242,93 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
     if (archived === null) void loadArchived();
   }
 
+  /** 勾选/取消一条会话。同一会话的两处副本共用这一个状态，因此两处永远同步。 */
+  function toggleSelected(sessionId: string, next: boolean) {
+    setBatch((current) => current === "busy" ? current : "idle");
+    setSelected((current) => next
+      ? (current.includes(sessionId) ? current : [...current, sessionId])
+      : current.filter((item) => item !== sessionId));
+  }
+
+  function clearSelection() {
+    setSelected([]); setBatch("idle"); setBatchError(null); setBatchUncertain(false);
+  }
+
+  /**
+   * 批量删除：一段讨论一条命令，各自取新的 `command_id`、各自带**读回来的**修订。
+   *
+   * 四条口径：
+   * 1. **不合并成一次请求。** 服务端只有逐条删除命令（ADR-027），客户端也不假装原子：
+   *    每一条的结果单独核对，成功几条、失败几条分别如实报告。
+   * 2. **串行发、逐条等回执。** 并发只会让「哪条成了、哪条没成」更难读；一条失败也不影响
+   *    其余几条的判断。
+   * 3. **结果不明不重发。** 响应丢失（`RelayTransportError`）意味着这一条是否已删尚未确定，
+   *    按契约不得换 `command_id` 重试：勾选保留、确认键锁死，说明未定并让人自己核对列表
+   *    （与 ⋯ 面板里那条单条删除同一读法：不替用户猜，也不替他重发）。
+   * 4. **被引用阻止不是失败。** `SESSION_DELETE_BLOCKED` 是业务拒绝（行还在），说明里给出
+   *    阻止项并指向归档；这一条留在选择集里，用户可以回去归档后再删。
+   * 5. **同一原因只说一次。** 被阻止的讨论按阻断原因聚合：原因写一次、标题并列（同名去重后
+   *    仍读得出几条），「先改为归档…」那句建议也只出现一次——三行同因各写一遍整句，会把
+   *    这块窄卡片铺满红字（2026-10-20 用户截图指认）。
+   */
+  async function deleteSelected() {
+    const targets = selectedSessions;
+    if (targets.length === 0) { clearSelection(); return; }
+    setBatch("busy"); setBatchError(null); setBatchUncertain(false);
+    const removed: string[] = [];
+    /** 阻断原因 → 被它挡住的标题（按发送顺序累积）。 */
+    const blockedByReason = new Map<string, string[]>();
+    /** 不属阻断的失败（冲突、校验等）：各有自己的说明，逐条列出。 */
+    const failed: string[] = [];
+    const uncertain: string[] = [];
+    for (const session of targets) {
+      try {
+        await client.deleteAssistSession({ sessionId: session.id, commandId: createCommandId(),
+          expectedRevision: session.revision });
+        removed.push(session.id);
+      } catch (caught) {
+        const described = describeLiveError(caught);
+        if (described.kind === "transport") { uncertain.push(`「${session.title}」`); continue; }
+        if (described.blockedReasons !== undefined && described.blockedReasons.length > 0) {
+          const key = described.blockedReasons.join("、");
+          blockedByReason.set(key, [...(blockedByReason.get(key) ?? []), session.title]);
+          continue;
+        }
+        failed.push(`「${session.title}」${described.kind === "conflict"
+          ? "刚被别处改过，已重新读取，请核对后再删。" : described.message}`);
+        if (described.kind === "conflict") void refreshSession(session.id);
+      }
+    }
+    if (removed.length > 0) {
+      const gone = new Set(removed);
+      setLoaded((previous) => previous === null ? previous : { ...previous,
+        sessions: previous.sessions.filter((item) => !gone.has(item.id)) });
+      setArchived((previous) => previous === null ? previous
+        : previous.filter((item) => !gone.has(item.id)));
+      setSelected((current) => current.filter((sessionId) => !gone.has(sessionId)));
+    }
+    setBatch("idle");
+    setBatchUncertain(uncertain.length > 0);
+    const sentences: string[] = [...failed];
+    if (blockedByReason.size > 0) {
+      const blockedNotes = [...blockedByReason].map(([reason, titles]) => {
+        // 同名会话不重复念标题：三条「关于Relay-Agent」写成「「关于Relay-Agent」等 3 段」。
+        const unique = [...new Set(titles)];
+        const who = unique.length === 1
+          ? `「${unique[0]}」${titles.length > 1 ? `等 ${titles.length} 段` : "这条讨论"}`
+          : `${unique.map((title) => `「${title}」`).join("")}这 ${titles.length} 段`;
+        return `${who}还不能删除（${reason}）。`;
+      });
+      sentences.push(`${blockedNotes.join("")}先改为归档，或在原对象解除引用后再删除。`);
+    }
+    if (uncertain.length > 0) {
+      sentences.push(`${uncertain.join("、")}的删除结果不明（响应丢失），本次是否已删除尚未确定；请核对列表后再决定，不要重复删除。`);
+    }
+    // 全部成功时不留提示：行当场消失就是回执，删除不可撤销、也不需要撤销条。
+    setBatchError(sentences.length === 0 ? null
+      : `已删除 ${removed.length} 段讨论；${sentences.join(" ")}`);
+  }
+
   // 会话创建/切换由协作页发布确切身份；只读回这一条，不重置已经加载的任务分页。
   // `contextEpoch` 是同一会话换了目录或归属时的第二道触发：身份没变，只看身份就永远留在旧分组。
   useEffect(() => {
@@ -265,6 +372,49 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
   // 不在 Row 上复制第二套会话状态——修订一旦对不上，CAS 就会拿错期望值。
   const sessionById = new Map<string, RelayAssistSession>(
     [...sessions, ...(archived ?? [])].map((session) => [session.id, session]));
+  // 选择集按 id 回查这一条：勾选后行被重读、被移段都不影响身份；已不在列表里的 id
+  // （例如别处删掉了）直接不计入，不用一份可能过期的本地副本去发删除命令。
+  const selectedSessions = selected.map((sessionId) => sessionById.get(sessionId))
+    .filter((session): session is RelayAssistSession => session !== undefined);
+  /** 是否存在有效勾选：批量操作栏与「不许收起工作区（目录）」都由它驱动。 */
+  const selecting = selectedSessions.length > 0;
+  /**
+   * 批量操作栏（2026-10-20 第五轮重构）：从左栏外、主内容区上方居中的浮层挪回**这一列内部**，
+   * 紧跟「工作区（目录）」标题下方。勾选框就在条目行里，操作入口与它同一列，视线不再横跨
+   * 整个主工作区；靠 sticky 在这一段里滚动时停在列顶，不跟着滚走。无勾选时整块不渲染，
+   * 这一列逐像素回到原样——不无条件占高度，也不遮挡目录条目。
+   *
+   * 内容与状态机和旧浮层完全一致（就地确认、逐段发命令、部分成功如实报、结果不明锁死），
+   * 只换了落点。只有「已归档」里还有会话可勾、而上面三段都没渲染时（loadedCount === 0），
+   * 才落到列表上方那个兜底位置——否则勾了东西却看不到操作栏。
+   */
+  const batchBar = selecting ? <div className="recent-work-selection" role="group"
+    aria-label="批量删除会话" data-testid="recent-work-selection">
+    <p className="recent-work-selection-count" data-testid="recent-work-selection-count">
+      {batch === "idle" ? `已选 ${selectedSessions.length} 段讨论` : `删除这 ${selectedSessions.length} 段讨论？`}</p>
+    {batch !== "idle" && <p className="recent-work-selection-note">
+      消息、附件与工具调用记录将永久移除，无法恢复。</p>}
+    {batchError !== null && <p className="recent-work-row-error" role="alert"
+      data-testid="recent-work-batch-error">{batchError}</p>}
+    <div className="recent-work-confirm-actions">
+      {batch === "idle"
+        ? <>
+          <button type="button" className="text-button recent-work-selection-danger"
+            data-testid="recent-work-batch-delete"
+            onClick={() => { setBatchError(null); setBatch("confirm"); }}>删除</button>
+          <button type="button" className="text-button" data-testid="recent-work-selection-clear"
+            onClick={clearSelection}>取消</button>
+        </>
+        : <>
+          <button type="button" className="danger-button" disabled={batch === "busy" || batchUncertain}
+            data-testid="recent-work-batch-delete-confirm"
+            onClick={() => void deleteSelected()}>{batch === "busy" ? "正在删除…" : "删除"}</button>
+          <button type="button" className="secondary-button" disabled={batch === "busy"}
+            data-testid="recent-work-batch-delete-cancel"
+            onClick={() => setBatch("idle")}>取消</button>
+        </>}
+    </div>
+  </div> : null;
   // 归档区也吃同一个搜索词：一列里两套筛选规则会让人以为搜到的和看到的是两件事。
   const archivedRows = (archived ?? []).filter((session) => hit(`${session.title} ${loaded?.projectTitles.get(session.projectId ?? "") ?? ""}`));
   const groups = new Map<string | null, Row[]>();
@@ -297,14 +447,15 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
    * 三条口径决定了这里的写法：
    * 1. **只有未归档的会话行可拖。** 任务行没有可改的位置事实，归档区也不参与手动排序，
    *    二者所在的那一列不带 `data-reorder-list`，起手直接落空。
-   * 2. **⋯ 与它的浮层归菜单。** 面板里的改名输入要能正常选字，起手必须让开这两块。
+   * 2. **⋯ 与它的浮层归菜单，复选框归选择。** 面板里的改名输入要能正常选字，
+   *    复选框的点击不能变成「抓着这一行走」，起手必须让开这两块。
    * 3. **落点由这一列的实测几何算。** 拖拽期间布局不动（横线是绝对定位、不占网格轨道，被抓那一行
    *    只吃 `transform`），所以行高在起手时量一次就够，指针位置每个事件换算一次。
    */
   function beginDrag(event: ReactPointerEvent<HTMLElement>) {
     if (event.button !== 0) return;
     const origin = event.target as HTMLElement;
-    if (origin.closest(".recent-work-row-trigger, .recent-work-row-panel") !== null) return;
+    if (origin.closest(".recent-work-row-trigger, .recent-work-row-panel, .recent-work-select") !== null) return;
     const row = origin.closest<HTMLElement>("[data-recent-row]");
     const ul = row?.closest<HTMLElement>("ul[data-reorder-list]") ?? null;
     if (row === null || ul === null) return;
@@ -466,7 +617,10 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
           scopeName={session === undefined ? projectName(row.projectId) : directoryLabel(session)}
           session={session} client={client} onOpen={() => openRow(row, goalId)}
           onChanged={(patch) => onRowChanged(row.id, patch)}
-          onStale={() => { void refreshSession(row.id); }} />;
+          onStale={() => { void refreshSession(row.id); }}
+          selected={session !== undefined && selected.includes(row.id)}
+          selectionBusy={batch === "busy"}
+          onSelectedChange={(next) => toggleSelected(row.id, next)} />;
       })}</ul>;
   }
 
@@ -535,6 +689,8 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
     <div className="recent-work-scroll" role="region" aria-label="近期工作列表" tabIndex={0}>
       {loading && <p className="helper-text" role="status">正在读取…</p>}
       {error && <p className="action-error" role="alert" data-testid="recent-work-error">{error}</p>}
+      {/* 兜底：只有已归档会话可勾（上面三段都没渲染）时，操作栏仍要出现在能看见的地方。 */}
+      {loadedCount === 0 && batchBar}
       {/* 首装与搜索无匹配是两件事：前者说明工作空间还没有任何未归档的任务或会话，后者只说明已加载范围内没有命中。
           这里用紧凑空态、不放主操作——侧栏只是定位入口，新建任务的主决策区在任务页。
           措辞必须限定「未归档」：把唯一一条讨论归档后这一段也会出现，说「还没有任何会话」就是假话。 */}
@@ -566,9 +722,12 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
           </details>)}
         </details>
         <details className="recent-work-section" data-testid="recent-work-directories"
-          open={!collapsed.includes("directories")}
-          onToggle={(event) => groupToggle(event.currentTarget, "directories")}>
+          // 有勾选时这一段不许收起：勾选项与批量操作栏都在它内部，收起之后「选了什么、
+          // 能对谁操作」一起消失，只剩一份看不见的选择状态（2026-10-20 用户指令）。
+          open={!collapsed.includes("directories") || selecting}
+          onToggle={(event) => { if (!selecting) groupToggle(event.currentTarget, "directories"); }}>
           <summary><ChevronDown aria-hidden="true" /><span className="recent-work-group-title">工作区（目录）</span></summary>
+          {batchBar}
           {directoryGroups.size === 0 && <p className="helper-text recent-work-scope-note">{needle ? "已加载范围内没有匹配会话" : sessionsError ? "会话暂不可读取" : "暂无会话"}</p>}
           {[...directoryGroups].map(([directoryId, group]) => <details className="recent-work-group" key={directoryId}
             open={!collapsed.includes(`directory:${directoryId}`)}
@@ -582,7 +741,7 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
             {group.path !== null && <button type="button" className="recent-work-group-new"
               title="在这个目录新建会话" aria-label={`在目录「${group.title}」新建会话`}
               data-testid={`recent-work-new-in-${directoryId}`}
-              onClick={() => newSessionInDirectory(group.path!)}><Plus aria-hidden="true" /></button>}
+              onClick={() => newSessionInDirectory(group.path!)}><SquarePen aria-hidden="true" /></button>}
             {renderRows(group.rows, `directory:${directoryId}`, { reorderable: true })}
           </details>)}
         </details>

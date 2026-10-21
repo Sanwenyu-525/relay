@@ -43,6 +43,8 @@ export function selectRuntimeSystemPrompt(route: RuntimeSystemRoute): RuntimeSys
 
 export function selectRuntimePrompt(route: RuntimePromptRoute): RuntimePromptSelection {
   switch (route.kind) {
+    case 'ASSIST_MEMORY_COMPACT':
+      return systemSelection('ASSIST_MEMORY_COMPACT', conversationPrompts.assistMemoryCompactSystemPrompt());
     /* ------------------------------ 会话档 ------------------------------ */
     case 'ASSIST_DISCUSS':
       return systemSelection('ASSIST_DISCUSS',
@@ -65,7 +67,15 @@ export function selectRuntimePrompt(route: RuntimePromptRoute): RuntimePromptSel
           route.readScopeRoots));
     case 'AGENT_MAIN_LOOP':
       return systemSelection('AGENT_MAIN_LOOP',
-        conversationPrompts.agentMainLoopSystemPrompt());
+        conversationPrompts.agentMainLoopSystemPrompt(route.writeEnabled === true));
+    case 'AGENT_PLAN_MODE':
+      return systemSelection('AGENT_PLAN_MODE', conversationPrompts.planModeSystemPrompt());
+    case 'AGENT_GOAL_ROUND':
+      return systemSelection('AGENT_GOAL_ROUND',
+        conversationPrompts.goalRoundSystemPrompt(route.state, route.writeEnabled ?? false));
+    case 'AGENT_SUBAGENT':
+      return systemSelection('AGENT_SUBAGENT',
+        conversationPrompts.subagentSystemPrompt(route.state));
     case 'LEARNING_PARTNER':
       return systemSelection('LEARNING_PARTNER',
         conversationPrompts.learningPartnerSystemPrompt(route.state, route.material));
@@ -73,7 +83,8 @@ export function selectRuntimePrompt(route: RuntimePromptRoute): RuntimePromptSel
       return systemSelection('SKILL', conversationPrompts.skillSystemPrompt(route.skill));
     case 'METHOD':
       return systemSelection('METHOD',
-        conversationPrompts.methodSystemPrompt(route.method, route.action, route.readTools));
+        conversationPrompts.methodSystemPrompt(route.method, route.action, route.readTools,
+          route.writeEnabled ?? false));
     /* ---------------------------- 解释（端口） ---------------------------- */
     case 'INTERPRETATION_EXECUTION':
       return systemSelection('INTERPRETATION_EXECUTION',

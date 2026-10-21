@@ -7,7 +7,7 @@
 | 入口 | 命令 | 说明 |
 |---|---|---|
 | 桌面测试包（日常使用） | `dev-stack.bat Build` → `dev-stack.bat Start` | 真实窗口 + 随包 API/Worker + 专用测试库；本轮重建的包包含全部前端、API 与 Rust 改动 |
-| 桌面开发窗口（改前端代码时） | `powershell -NoProfile -ExecutionPolicy Bypass -File apps\desktop\scripts\dev-desktop.ps1` | 真实 Tauri 窗口加载 Vite 开发服务器：前端改动经 HMR 数秒内生效，Rust 改动由 `tauri dev` 自动重编译并重启窗口；不生成安装包 |
+| 桌面开发窗口（改前端代码时） | `powershell -NoProfile -ExecutionPolicy Bypass -File apps\desktop\scripts\dev-desktop.ps1` | 真实 Tauri 窗口加载 Vite 开发服务器：前端改动经 HMR 数秒内生效，Rust 改动由 `tauri dev` 自动重编译并重启窗口；不生成安装包。**API 改动必须让暂存资源跟上**：菜单 6 / `dev-stack.bat DesktopDev` 自 2026-10-19 起按源码与暂存的时间差自动刷新，单独跑该脚本时可用 `-RefreshApi` 强制刷新 |
 | 浏览器预览 | `dev-stack.bat Preview` | 需修复后的 `scripts/dev-stack.ps1`；默认示例数据，连接对话框填 API 地址 + Workspace + Bearer 后进入 live，刷新即回示例（凭据只存内存，属设计约束） |
 
 `dev-desktop.ps1` 说明：资源从 `src-tauri\resources\`（由 `dev-stack.bat Build` 维护）暂存到 dev Resource 目录；配置默认优先 `.relay-test\desktop.env`，可用 `-ConfigPath` 指定；与打包版共用单实例互斥，二者不可同时运行；`-RefreshApi` 重建并重新暂存 apps/api。`tauri dev` 会监听 `src-tauri` 源码变化自动重启应用。

@@ -834,7 +834,7 @@ Project 拥有接续点身份与说明；其他对象只保存捕获时的确切
 
 | 端点 | 行为 |
 |---|---|
-| POST /api/v1/workspaces/{workspace_id}/working-directories/open | 200。需要 `command_id`、`root_path`（1–1024），可选 `project_id`。`status` 为 `READY` / `AMBIGUOUS` / `NOT_READY`；`AMBIGUOUS` 表示同一实际目录关联了多个项目，需再带 `project_id` 选一次；`NOT_READY` 带稳定 `reason`（`MULTIPLE_PROJECTS` / `PROJECT_ARCHIVED` / `RESOURCE_DISABLED` / `OVERLAPPING_OTHER_PROJECT`）。成功处理用户主动选择的目录时，Application 建立/复用本地只读基础读取配置；`write_readiness` 是原 Gateway 投影，不代表批准。回执含策略字段 `policy_decision` / `policy_id` / `policy_revision` / `policy_target_prefix`，并新增可选 `write_tier` / `access_revision`；旧命令回执重放可能缺后两字段，客户端按未核对处理。已有重叠受管根时不会新开项目造出第二个写 Owner。不存在或不是目录 422。 |
+| POST /api/v1/workspaces/{workspace_id}/working-directories/open | 200。需要 `command_id`、`root_path`（1–1024），可选 `project_id`。`status` 为 `READY` / `AMBIGUOUS` / `NOT_READY`；`AMBIGUOUS` 表示同一实际目录关联了多个项目，需再带 `project_id` 选一次；`NOT_READY` 带稳定 `reason`（`MULTIPLE_PROJECTS` / `PROJECT_ARCHIVED` / `RESOURCE_DISABLED` / `OVERLAPPING_OTHER_PROJECT`）。成功处理用户主动选择的目录时，Application 建立/复用本地只读基础读取配置；若工作区**尚无**默认工作目录且本次 `READY`，同一事务内顺手把它登记为默认目录（已有默认不覆盖，2026-10-19）；`write_readiness` 是原 Gateway 投影，不代表批准。回执含策略字段 `policy_decision` / `policy_id` / `policy_revision` / `policy_target_prefix`，并新增可选 `write_tier` / `access_revision`；旧命令回执重放可能缺后两字段，客户端按未核对处理。已有重叠受管根时不会新开项目造出第二个写 Owner。不存在或不是目录 422。 |
 | POST /api/v1/workspaces/{workspace_id}/assist-sessions/{session_id}/execution-requests | 202。需要 `command_id`、`source_message_id`（该会话内一条已完成的 USER 消息）、`resource_id`（同项目 ACTIVE 受管资源）。返回 `decision`、`status`、`candidate_status`、`questions` 与候选摘要。原消息不属于该会话、非 USER 消息、未完成、会话未绑定 Project 或资源不可用时 409。同一原消息或同一 `command_id` 重放返回同一条请求，不重付模型整理成本。 |
 | POST /api/v1/workspaces/{workspace_id}/conversation-execution-requests/{request_id}/applications | 200。按固定的阶段命令身份建立真实 Task → READY → Delegate。候选不是 `READY`、受管资源不可用、或项目缺少绑定该目录的 `FILE_QUERY` / `FILE_READ` / `FILE_WRITE` / `CLI_RUN` 连接时 409 并给出**第一项缺失能力**的具体原因；本端点**不创建连接、不放宽权限**。重复调用返回同一个 `task_id` 与 `run_id`。 |
 | GET /api/v1/workspaces/{workspace_id}/conversation-execution-requests?session_id= | `{ items: 会话内最近的执行请求摘要[] }`，只读，不创建对象、不外呼。2026-10-16 增加持久化 `resource_id` 与 `candidate`（对象或 null），用于主流程后恢复原候选的标题、目标与检查；单条 GET 同步。Breaking Change: No，旧客户端忽略增量字段，新客户端兼容旧响应缺少字段。 |
@@ -1433,7 +1433,7 @@ Breaking Change：**No**——全新端点与表 + 消息命令新增可选字�
 
 **证据（如实分层）。** 2026-10-16（后端首版）：`apps/api` 全量 `tsc --noEmit` 通过；受影响单测 `model-catalog-pricing` / `openai-compatible-model-port` / `model-catalog-config` / `openai-compatible-free-guard` 合计 **58/58**。当时**未运行/未编写**真实 PG 集成测试与前端规格（前端未接线）。
 
-2026-10-18（本轮回合）：真实 PostgreSQL `assist-message-attachments.integration.test.ts` **5/5**（`run-integration.ps1 -TestFile assist-message-attachments -UseCLocale` 整体 PASSED，临时集群已清理）——覆盖绑定与投影元数据、单张内容读回、跨会话/跨 Workspace 404、空正文例外（无附件/Skill/提案三种拒绝）、能力声明（未声明拒绝且错误里点名 `RELAY_MODEL_IMAGE_INPUT`，声明后通过）、类型/单张/数量/重复引用四类上限、被拒绝的命令不绑定任何行；另有一条 HTTP 面用例核对三个端点的响应形状（上传 201、能力未声明时 422 且错误点名变量、消息列表的 `attachments` 元数据、内容端点的字段名与字节）——它当场抓到了「用例层 camelCase 与响应 schema 的 snake_case 对不上、序列化后字段被丢掉」的投影遗漏。工作台 `tests/composerImageAttachments.spec.tsx` **6/6**。**该轮真实 PG 用例暴露并修掉一个后端缺陷**：`bindAttachments` 的 `UPDATE` 缺 `RETURNING`，驱动只回「命令完成」、`rows` 恒为空，绑定数被读成 0，任何带图消息都会以「附件在作用域内不可见」被拒——这是 0093 落地时没有集成测试的直接后果。**未验**：真实 Provider 的多模态语义质量、真实 Windows 窗口的粘贴/拖拽与 DPI。
+2026-10-18（本轮回合）：真实 PostgreSQL `assist-message-attachments.integration.test.ts` **5/5**（`run-integration.ps1 -TestFile assist-message-attachments -UseCLocale` 整体 PASSED，临时集群已清理）——覆盖绑定与投影元数据、单张内容读回、跨会话/跨 Workspace 404、空正文例外（无附件/Skill/提案三种拒绝）、能力声明（未声明拒绝且错误里点名 `RELAY_MODEL_IMAGE_INPUT`，声明后通过）、类型/单张/数量/重复引用四类上限、被拒绝的命令不绑定任何行；另有一条 HTTP 面用例核对三个端点的响应形状（上传 201、能力未声明时 422 且错误点名变量、消息列表的 `attachments` 元数据、内容端点的字段名与字节）——它当场抓到了「用例层 camelCase 与响应 schema 的 snake_case 对不上、序列化后字段被丢掉」的投影遗漏。工作台 `tests/composerImageAttachments.spec.tsx` **6/6**（2026-10-19 增补「上传成功但命令被拒时图片留在输入框」用例，现 7/7）。**该轮真实 PG 用例暴露并修掉一个后端缺陷**：`bindAttachments` 的 `UPDATE` 缺 `RETURNING`，驱动只回「命令完成」、`rows` 恒为空，绑定数被读成 0，任何带图消息都会以「附件在作用域内不可见」被拒——这是 0093 落地时没有集成测试的直接后果。**未验**：真实 Provider 的多模态语义质量、真实 Windows 窗口的粘贴/拖拽与 DPI。
 
 ### 10.86 目录写入档位投影与只读查询（2026-10-17 源码实现）
 
@@ -1696,3 +1696,299 @@ F26 浏览器自动化 M3 的任务状态面。物理边界归[数据库 §96](.
 **界面。** 项目详情的归档按钮单击即发（撤销条替代确认框，工作台 §13.2）：成功后浮层给「已归档这个项目 · 撤销」；撤销用**新的** `command_id` 与归档回执推进后的修订，成功后把项目读回进行中范围并撤掉就地回执。撤销失败升级为停留到关闭的 Notice，并指向「已归档」范围。**Breaking Change: No**。
 
 **证据（如实分层）。** 真实临时 PostgreSQL：`project-archive.integration.test.ts` **14/14**（新增两条：撤销写回 NULL、推进修订、同命令重放、已 ACTIVE 不推进、陈旧基线零写入、活动范围重新放行、两条审计并存；跨 Workspace 404 且仍保持归档）；工作台 `projectArchiveLive.spec.ts` **4/4**（归档单击即发＋撤销发出第二发且修订取回执）与 `listViewCopy.spec.ts` 归档回执用例。真实 Windows 窗口未验。
+
+### 10.96 Workspace 默认工作目录（2026-10-19 后端实现）
+
+下列路径均位于 `/workspaces/{workspace_id}` 下，**Breaking Change: No**。
+
+| 端点 | 命令 / 结果 |
+|---|---|
+| `GET /default-working-directory` | 只读 `{resource_id, canonical_root, display_name, write_tier, status, reason, revision}`；`status` 为 `UNSET / READY / UNAVAILABLE` |
+| `POST /default-working-directory` | `SetWorkspaceDefaultDirectory`，请求 `{command_id, expected_revision, resource_id}`，200 回执 `{workspace_id, resource_id, revision}` |
+| `POST /default-working-directory/clear` | `ClearWorkspaceDefaultDirectory`，请求 `{command_id, expected_revision}`，200 回执同上，`resource_id=null` |
+
+未设置时修订为 `0`，其余投影字段为 null；首次设置或清除后修订递增，清除不删除配置行、不重置修订。设置只引用已经登记的受管资源，不调用 Open、不建立项目/连接/策略、不扩大权限。资源跨 Workspace 返回 404；停用、项目归档、活动重叠根、真实目录不可访问或路径身份变化返回 409，保留旧设置。陈旧修订返回 `409 REVISION_CONFLICT`；**例外**：请求值已等于当前值（同一 `resource_id`，或两者都为 `null`）时按已达成处理，返回当前事实且不改修订——打开目录可能已顺手登记同一个值，重复声明同一件事不算冲突（2026-10-19）。同命令同载荷返回原回执，即使后来已清除或目录已失效；同命令异载荷返回 `409 COMMAND_ID_REUSED`。并发首次请求复用原回执，并发不同命令以配置修订收敛。丢响应时按原 command_id 核对，不换 ID 重发。
+
+`GET` 不修复配置；失效时返回 `UNAVAILABLE` 与原因 `RESOURCE_UNAVAILABLE / RESOURCE_DISABLED / PROJECT_ARCHIVED / RESOURCE_OVERLAP / DIRECTORY_UNAVAILABLE / DIRECTORY_IDENTITY_CHANGED`。可见资源仍返回原目录与档位；缺本目录档位记录时投影为 `READ_ONLY`，不因此创建任何权限事实，实际动作仍经原 Gateway 准入。
+
+`POST /working-directories/open` 在 `READY` 且工作区**尚无**默认目录时，于同一事务内把该资源登记为默认（修订从 `0` 起递增），因此「打开过一次目录」即完成配置，不必再去设置页操作；已有默认目录时打开别的目录不覆盖它，`AMBIGUOUS` / `NOT_READY` 一律不登记（2026-10-19 用户要求「基础能力不该让开发者自己配置」）。
+
+`CreateAssistSession` 仅对无 Project/Task 的普通 AGENT 在同一创建事务内继承有效默认目录，并保存资源所属 Project 与来源；显式 Project/Task、ASSISTANT、LEARNING 不继承。失效默认不阻断普通会话创建，也不猜其他根。创建命令回执保持既有形状；`GET /assist-sessions/{id}?include_context=true` 的 `context.working_directory` 增加可空 `source`：`USER_PICKED / WORKSPACE_DEFAULT / null`（历史未知）。显式绑定改为 USER_PICKED，分叉保留原来源，重设或清除默认不改历史会话。
+
+前端设置入口（设置 › 基本设置）、建会话后的上下文读回与来源标签已接入；该增量不代表日常桌面配置流程整体交付，安装态、真实 Windows/WebView2 与真实 Provider 仍未验。相关运行结果只归统一功能验收表。
+
+### 10.97 资料归档与记忆规则停用的反向命令（2026-10-19 后端实现）
+
+均在 `/workspaces/{workspace_id}` 下，请求 `{command_id, expected_revision}`，返回 200 命令信封。**Breaking Change: No**；无数据库迁移。
+
+| 端点 | 命令 | result |
+|---|---|---|
+| `POST /knowledge/{id}/unarchive` | `UnarchiveKnowledge` | `{knowledge_id, revision, status: "ACTIVE"}` |
+| `POST /memories/{id}/reactivate` | `ReactivateMemory` | `{memory_id, revision, status: "ACTIVE"}` |
+| `POST /rules/{id}/reactivate` | `ReactivateRule` | `{rule_id, revision, status: "ACTIVE"}` |
+
+这些是[工作台 §13.2](../frontend/workbench-design.md#132-危险操作的两条通道2026-10-18)的前向补偿命令：调用者使用新 command_id 与正向回执的 revision，不能重用归档/停用命令 ID。命令只将 ARCHIVED/RETIRED 恢复为 ACTIVE，递增根 revision 与 updated_at，不改正文、当前版本指针、确认主体或记忆有效期；不删除原命令回执和已有待核对候选，也不修改 Decision 或恢复任何外部权限。Memory 即使恢复 ACTIVE，已过期版本仍按原过滤规则排除；不可用来源也不会因恢复状态变得可读。
+
+共用 Information 写入口，先取 Workspace authority UPDATE、按原根与 Project 归档栅栏核对。跨 Workspace 404，Project 已归档 409，陈旧 expected_revision 为 `409 REVISION_CONFLICT`。同命令同载荷及并发首次请求返回原回执，即使随后又被停用；同命令异载荷返回 `409 COMMAND_ID_REUSED`。已 ACTIVE 且修订匹配则返回当前事实，不递增任何修订、不重复审计。
+
+成功变更与命令回执、审计同一事务提交。Knowledge/Memory 恢复递增 context_revision；Rule 恢复同时递增 rule_revision/context_revision，既有 Run 下一动作仍按原栅栏核对，不回退已发生效果。审计事件为 `KNOWLEDGE_UNARCHIVED / MEMORY_REACTIVATED / RULE_REACTIVATED`，只记录身份、版本、状态和前后修订。
+
+本节最初仅交付后端，撤销条与永久恢复入口随后于同日接续（见下）；连接/资源停用的反向命令、权限撤销及 Decision 替代不在本片范围。运行成绩归统一功能验收表。
+
+**2026-10-19 前端接续**：`KnowledgeView` 已接三条命令——正向归档/停用成功且回执核对通过后给「已归档资料 / 已停用记忆 / 已停用规则 · 撤销」，撤销用新 `command_id` 与正向回执的 `revision`；同一批反向命令也作为永久恢复入口，在对象详情里用**当次读回**的 `revision` 提交。客户端对回执核对 `command_id`、目标 ID、`status:"ACTIVE"` 与 `revision ≥ expected_revision` 四项，任一项不成立按「结果不明」处理，不承诺成功。
+
+### 10.98 长期记忆有效状态与筛选（2026-10-19 后端接续）
+
+`GET /workspaces/{workspace_id}/memories` 新增可选查询参数 `effective_status=ALL|ACTIVE|EXPIRED|RETIRED`，缺省 ALL。可与既有 `project_id` 组合：项目范围仍包含 Workspace 全局记忆与指定 Project，不含同 Workspace 的其他 Project；跨 Workspace 的 Project 参数返回 404。非法枚举值返回 422，其余信息类型不接该参数。响应继续为原数组，不引入新分页/信封形状。
+
+列表和 `GET /memories/{id}` 的对象增加只读 `effective_status`，原持久 `status` 仍为 ACTIVE/RETIRED：
+
+| effective_status | 数据库读取时的判定 |
+|---|---|
+| RETIRED | 根状态 RETIRED，优先于有效期 |
+| EXPIRED | 根未停用，当前版本 expires_at 非空且小于或等于数据库 now() |
+| ACTIVE | 根未停用，当前版本无到期时间或 expires_at 大于数据库 now() |
+
+根状态、当前版本正文/确认/到期字段、有效状态与筛选在同一 SQL 快照读取，时间口径与既有搜索和 Context 的过期排除一致。时间流逝只影响投影，不写根状态、不递增任何 revision、不产生版本或审计；默认全部列表仍可用于管理和永久恢复。历史 revisions 不增加动态状态，保留不可变内容。
+
+恢复过期 Memory 只恢复持久状态，effective_status 仍为 EXPIRED；续期或取消到期必须通过既有 AddMemoryRevision，明确确认并产生新版本。ACTIVE 只表示当前生命周期与有效期符合，不保证项目/权限可用或必定进入模型 Context；读取与选取仍按原作用域和权限核对。
+
+**Breaking Change: No**。新增可选参数和响应字段，旧列表默认行为与原字段保持；无 migration。前端状态呈现与筛选已接线（[工作台 §13.3](../frontend/workbench-design.md#133-长期记忆状态与筛选2026-10-19已确认前端已接)），真实浏览器与 Windows 未验，运行结果只归统一验收表。
+
+### 10.99 长短期记忆接口（2026-10-19）
+均位于 `/workspaces/{workspace_id}`，**Breaking Change: No**。新增端点；原消息、Memory CRUD 与历史接口保留。命令遵循原 command_id 回执与同 ID 异载荷 409 协议。
+
+| 端点 | 请求与结果 |
+|---|---|
+| `GET /memory-settings` | `{workspace_id, revision, recall_enabled, automatic_compaction}`；缺配置为修订0、两个开关 true，GET 零写入 |
+| `POST /memory-settings` | `{command_id, expected_revision, recall_enabled, automatic_compaction}` → 200 同形结果；修订 CAS |
+| `POST /assist-sessions/{session_id}/messages/{message_id}/memories` | `{command_id, expected_session_revision, content_sha256, project_id, title, text, confirmed:true, expires_at?}` → 201 原 CreateMemory 结果；原消息须 completed、正文 hash 匹配；范围为全局 null 或原会话 Project，跨范围404 |
+| `GET /memories/{id}/provenance` | `{memory_id,sources:[{memory_version,session_id,message_id,content_sha256}]}`；明确保存的不可变来源，手工创建可为空 |
+| `GET /assist-sessions/{id}/memory` | `{session_id,session_revision,revision,remember,cleared_through_seq,checkpoint,requests}`，no-store；checkpoint 含 id/available/through_seq/summary/model_call_id/created_at/source_message_ids/sources，失效时 summary=null、足迹为空；requests 最近20条，仅公开状态/错误/控制/覆盖边界/调用身份/时刻 |
+| `POST /assist-sessions/{id}/memory/compact` | `{command_id,expected_revision}`（会话修订）→ 202 `{session_id,request_id,status:"PENDING"}`；回执只表示受理，完成看 GET；有活动整理时复用请求，不产生平行调用 |
+| `POST /assist-sessions/{id}/memory/requests/{request_id}/cancel` | `{command_id}` → 200 `{session_id,request_id,status,cancel_requested}`；PENDING 直接 CANCELLED，RUNNING 仅持久取消意图，安全结算前仍在运行 |
+| `POST /assist-sessions/{id}/memory/clear` | `{command_id,expected_revision,expected_session_revision}` → 200 `{session_id,revision,session_revision,remember,cleared_through_seq}`；expected_revision 是工作窗口修订 |
+| `POST /assist-sessions/{id}/memory/remember` | 同 clear 加 `remember:boolean`；每次控制都建立新窗口边界，实际切换时会话修订也递增；false 只发送当轮用户消息，不召回长期记忆；重新开启不吸收关闭期间轮次 |
+| `GET /assist-sessions/{id}/messages/{message_id}/memory` | `{session_id,message_id,recorded,available,checkpoint_id,sources}`；读取本轮直接与传递使用足迹，重检后只返回安全来源身份，失效内容不回显 |
+
+原 `POST /assist-sessions/{session_id}/chat-commands` 现接 `/compact` 与 `/压缩`，202 信封 result 为 `{kind:"MEMORY_COMPACTION",system:"compact",session_id,request_id,status:"PENDING"}`，沿同一 RequestMemoryCompaction Owner 与回执；无 expected_revision 的文本命令在会话锁内决定当前基线，重放不重新猜基线。原 /clear 与 /new 继续表示新建会话，不改成清除工作窗口。菜单选择/解析本身仍不执行动作，前端需接线后发送才生效。
+
+短期写控制只支持有效 AGENT 会话，归档 Project/会话、跨 Workspace、旧修订或在途消息/整理分别按原404/409栅栏处理；手动整理需先等待或停止在途消息，过短历史409。清除只改变模型后续工作窗口，不删聊天/工具历史，不删除长期事实。长期来源引用阻止物理删除源会话；活动整理同样阻止删除，完成后的短期子记录可随会话清理。
+
+已受理但尚未领取的整理，如果会话/Project 随后归档，Worker 以 `FAILED/MEMORY_SCOPE_CHANGED` 收敛且不调用模型，不让无效范围的 PENDING 请求永久挡住管理；该整理仍可通过取消命令提前收敛。
+
+普通聊天自动召回最多3条、合计8000字符，与手工资料合计最多20来源；仅同 Workspace 全局与当前 Project、当前有效已确认版本。按有界字面匹配排序，零匹配时近期回退，消息 sources 附 `selection=AUTO_MEMORY`、`selection_basis=LITERAL_MATCH|RECENT_CONFIRMED`，不是语义向量召回。关闭或来源失效时，历史自动来源与依赖该来源的旧摘要/答复不能匿名回流。
+
+普通聊天自动整理在已结算增量达到32条消息或48000 UTF-8字节时申请，保留最近8条原文；此为应用工程阈值，不是模型物理窗口。整理和普通生成均有128000字节工作输入上限，实际端口另查 token/预算。失败保留旧检查点和原文，同一覆盖边界自动失败不立即反复重试，可显式重新整理。typed errors 包括 `MEMORY_CONTEXT_TOO_LARGE / MEMORY_HISTORY_LIMIT / MEMORY_SUMMARY_INVALID / MEMORY_PUBLICATION_REJECTED / MEMORY_SOURCE_CHANGED / MEMORY_UNRESOLVED_TOOL_STATE / MEMORY_WORKER_LOST`，不可作为成功或自动换模型依据。
+
+整理请求冻结工作模型身份，使用既有 model_calls 与会话预算；call 以最后一条被覆盖的真实 assistant 消息作 ASSIST 计量锚点，整理请求的 model_call_id 区分用途，不修改原消息 usage。摘要严格 JSON `{summary}`，成功提交后才更换窗口；租约、取消、来源、权限/上下文/配置及窗口修订变化拒收迟到结果。未结算工具链不整理、不重放工具。真实 Provider 摘要质量、模型窗口与缓存效果须单独验证。
+
+### 10.100 模型端口的图片输入能力投影（2026-10-19）
+
+**Breaking Change: No（`GET /model-port` 响应新增字段）。** 响应新增 `image_input`，取值 `SUPPORTED | DECLARED | MODEL_LACKS_IMAGE_INPUT | MODEL_NOT_IN_CATALOG | NOT_CONFIGURED | UNKNOWN`，以及 `image_input_source`（`CATALOG | DECLARED | ENV | NONE`）说明这次结论来自哪一层：
+
+| `image_input` | 含义 | 发送图片命令的结果 |
+|---|---|---|
+| `SUPPORTED` | 模型目录条目明确 `image_input=true`（source `CATALOG`） | 放行 |
+| `DECLARED` | 目录无条目，声明表（source `DECLARED`）或 `RELAY_MODEL_IMAGE_INPUT=true`（source `ENV`）声明支持 | 放行 |
+| `MODEL_LACKS_IMAGE_INPUT` | 目录条目存在但 `image_input` 非 true（source `CATALOG`），或声明表明确声明不支持（source `DECLARED`） | 422 `VALIDATION_FAILED`，`field=attachment_ids` |
+| `MODEL_NOT_IN_CATALOG` | 目录无条目且无任何声明（source `NONE`） | 同上 |
+| `NOT_CONFIGURED` | 实例未配置真实模型端口（`provider=fake`） | 同上 |
+| `UNKNOWN` | 本次读不到模型目录（数据库不可用） | 未知；闸门届时仍按实际目录裁决 |
+
+**判定四层，顺序不可换**：目录条目 → 声明表 → `RELAY_MODEL_IMAGE_INPUT`（兼容期）→ 拒绝。目录是唯一准绳，人的声明不能把目录判定为不支持的模型改成支持；声明只补「目录里没有这个自建模型」这一处空白。判定实现在 `apps/api/src/application/chat-image-input.ts`，闸门与投影共用同一函数。
+
+**声明端点**（实例级配置，不是业务命令）：
+
+| 端点 | 语义 |
+|---|---|
+| `GET …/model-capabilities` | `{items:[{provider, source_model_id, image_input, note, declared_at, updated_at}]}` |
+| `PUT …/model-capabilities/{provider}/{source_model_id}` | `{image_input, note?}` → 200 同形行。`provider` 仅接受 `openai-compatible`；`note ≤ 500` 字符，超长 422 不截断。同键再写是覆盖（last-writer-wins） |
+| `DELETE …/model-capabilities/{provider}/{source_model_id}` | → `{removed: boolean}`。撤销声明回到「未声明」，不是记成「不支持」 |
+
+**为什么没有命令回执**：一次声明没有状态机、没有修订，重发同体必然得到同一状态；回执要保护的是「同一命令是否已生效」的歧义，这里由 GET 直接回答。沿用 `/model-catalog/refresh` 的实例级先例。声明写入后**下一次读取立即生效**，不需要重启进程——这是它相对环境变量的全部价值。
+
+旧服务端不返回 `image_input`/`image_input_source` 时，本仓客户端按 `UNKNOWN`/`NONE` 处理（不提前提示，也不冒充可用）。
+
+验证：纯判定单测 `chat-image-input.test.ts` 5/5（四层优先级、声明压过环境变量、目录压过声明）；真实 PG/HTTP 集成 `model-capabilities.integration.test.ts`（声明前拒绝 → 声明后 `DECLARED` → 撤销回拒绝；声明为不支持压过环境变量；`fake` 与超长 note 422）；`model-port.integration.test.ts` 已同步新字段断言；工作台侧见[工作台 §33.2](../frontend/workbench-design.md)与 `tests/composerImageAttachments.spec.tsx`、`tests/browser/attachmentHoverPreview.spec.ts`。
+
+### 10.101 连接与权限沿用复制（2026-10-19 后端实现）
+
+**Breaking Change: No（新增端点）。** `POST /projects/:project_id/gateway-settings/copy`，命令 `CopyGatewaySettings`，HTTP 201。
+
+- **Body**：`{ command_id, source_project_id }`（均为 UUID，`additionalProperties: false`）；路径参数 `project_id` 是**目标**项目。
+- **行为**：把来源项目登记的受管资源（ACTIVE）、连接（ACTIVE，含 `config` 边界与能力集合）与 ACTIVE 权限策略（**当前生效版本**的 capability/action_type/target_prefix/decision/max_payload_bytes）复制进目标项目，一个命令事务内完成，回执与业务事实同事务提交。文件族策略的 `target_prefix`（canonical_root）依赖同事务里先复制的资源行。
+- **判重（跳过并计入 `skipped`）**：资源按 `identity_key`；策略按 capability+action_type+target_prefix；连接按「ACTIVE 且 config 与能力集合都相同」。判重只防用户连点类重复，语义幂等仍由 command_id 回执承担。
+- **不复制**：DISABLED/REVOKED 行、策略历史版本；来源项目只读，目标项目已有其它配置不动。
+- **Result**（全字符串）：`project_id` / `source_project_id` / `resources_created` / `connections_copied` / `policies_copied` / `skipped`。
+- **错误**：`source_project_id === project_id` → 422 `VALIDATION_FAILED`（field=`source_project_id`）；来源项目不存在或不属于同一 Workspace → 404 `RESOURCE_NOT_FOUND`；任一项目已归档 → 既有归档守卫拒绝。资源登记走与 `CreateManagedResource` 同一把 advisory 事务锁（7162,9）串行。
+- **动机与边界**：连接/策略按项目登记（`project_id NOT NULL`）是 authority 链与审计的基础，本命令只消掉「每项目重配一遍」的重复劳动，**不**把 `project_id` 改为可空。前端入口归[工作台 §32.10](../frontend/workbench-design.md)。
+
+验证：真实临时 PG 集成 `test/integration/gateway-settings-copy.integration.test.ts`（复制落库、判重、同 command_id 重放、只复制 ACTIVE、来源=目标与跨 Workspace 拒绝）。前端入口与验证要求见专用提示词（交付时给出）。
+
+### 10.102 排队消息的插话（2026-10-19 源码实现）
+
+2026-10-20 接续，**Breaking Change: No**，路径、请求、回执与 DTO 不变。生成方增加工具派发边界检查：新插话可阻止旧批次尚未执行的工具，模型收到明确的未执行结果后重新判断方向；已执行结果保留。连续插话的时序和理解规则归[运行架构 §2.9](../architecture/runtime-context.md#29-排队消息的插话进入上下文的方式2026-10-19已实施)，当前验证成绩归统一验收表，下文验证段保留初版范围。
+
+**Breaking Change: No（新增命令与只读字段）。** `POST /assist-messages/:message_id/steer`，命令 `SteerAssistMessage`，HTTP 200，与 `/cancel` 同形（`{ command_id }` → `{ command_id, committed_at, result: { message_id, status } }`，`status = "STEER_REQUESTED"`）。
+
+- **语义**：把一条**排队中**（`PENDING`）的回复并入当前正在生成的那一轮，而不是等这一轮结束后另起一轮。命令只持久化意图（`assist_messages.steer_requested = true`）；真正消费由生成方在下一次模型请求前完成（`drainSteerRequests`），并把该行收口为 `CANCELLED` + `error_code = 'STEERED'`。上下文位置与上游对照见[运行时上下文 §2.9](../architecture/runtime-context.md#29-排队消息的插话进入上下文的方式2026-10-19已实施)。
+- **受理条件**（任一不满足即拒绝，且**不改**任何状态）：消息存在且属于本 Workspace（否则 404 `RESOURCE_NOT_FOUND`）；会话是普通 `AGENT`（助手档/学习档不排队）；消息 `role=ASSISTANT` 且 `status=PENDING`（`RUNNING` 与终态都拒绝）；会话里确实存在 `RUNNING` 的回复（否则「插话」等于把一条还没开始的消息取消掉）；这条排队消息对应的用户原文没有图片附件（插话通道只送原文）。
+- **幂等**：同一 `command_id` 重放拿回原回执；不同 `command_id` 对同一条已置位的行再请求仍返回 `STEER_REQUESTED`（置位本身是幂等的）。
+- **迟到窗口**：意图已落库、那一轮恰好结算 → 意图留在行上，这一行随后按普通排队被领取（`claimNextPendingMessage` 在同一句里清零该列），消息照常得到自己的回复，不丢不重复。
+- **只读投影**：消息 DTO 新增 `steer_requested: boolean`（`AssistMessageDto`，`strict`）。被消费的 `CANCELLED/STEERED` 行**不出现**在 `GET /assist-sessions/:id/messages` 的结果里，也不进入 `history()`：它不是一轮回复，只是一条没有答案的占位行；用户原文仍作为真实 USER 消息返回。
+- **取消仍优先**：`cancel_requested = true` 的行不会被插话消费。
+- **与「排队」的关系**：不插话时行为逐字不变——发送仍返回 202，回复按提交顺序逐条生成。
+
+验证：真实临时 PG 集成 `agent-conversation-main-loop.integration.test.ts`（插话在下一轮模型请求前进入上下文、工具结果保留、只多跑一步不另起一轮、排队行收口为 `CANCELLED/STEERED` 且不出现在消息列表、没有在途回复时明确拒绝）；模型消息顺序单测 `assist-steer-context.test.ts` 3/3；工作台侧 `tests/assistQueueSteer.spec.ts` 3/3，交互规则见[工作台 §39](../frontend/workbench-design.md#39-排队消息的插话手势2026-10-19-已实施)。
+
+### 10.103 目录打开结果中的 Git 只读投影（2026-10-20 源码实现，迁移 0124）
+
+**Breaking Change: No（结果新增可选字段）。** `POST /working-directories/open` 的 `result` 增加 `git_read: { state, repo_root, detail }`。
+
+- **为什么放在打开目录这一步**：显式选择目录已经表达了对「这个目录」的读取授权（§10.86 的本地读取配置），Git 的 status/diff/log 读的是同一份工作区事实。此前 `planToolLoop` 只在项目里已存在 `GIT_READ` 连接时才给出 Git 工具，等于要求用户为同一个目录再手工登记一次连接与三条策略。
+- **自动配置的范围**：只有被打开的目录**就是 Git 仓库根**时，才建立一条 `GIT_READ` 连接（`root_path` = 该根）与 `GIT_STATUS` / `GIT_DIFF` / `GIT_LOG` 三条 `AUTO` 策略，并把这些指针记进 `local_directory_access`（`git_connection_id` 与 `policy_ids` 的 `GIT_*` 键）。stage/commit/push 属于 `GIT_WRITE`，**不**随目录选择开放。
+- **子目录不授权**：被打开的目录若是仓库子目录，`state = REPO_ROOT_REQUIRED`，`repo_root` 给出仓库根，**不**建连接也不建策略。理由是可证明的越界：`git log` 在子目录里仍返回整个仓库的历史与分支，按子目录授权等于把父目录的信息一并放出去。界面在原地提供「在仓库根打开」，由用户自己决定是否扩大作用域。
+- **不自动恢复**：连接被停用 → `DISABLED`；策略被撤销或改成 `DENY`、或历史上明确设置/撤销过同一根 → `REVIEW_REQUIRED`。这两种都只报告，不新建一条连接绕过。
+- **其他状态**：不是仓库（或本机没有可用 git）→ `NOT_A_REPOSITORY`；目录未就绪（归档、停用、歧义）→ `NOT_CHECKED`（「还没看」不能写成「不是仓库」）。
+- **工具侧的双根隔离**：`GIT_READ` 的连接匹配改为**精确根**（`connectionRootCovers(..., exactRoot=true)`），文件能力仍按前缀。否则仓库根的连接会覆盖同项目下的子目录资源，而 Git 的输出并不受该子目录限制。
+- **回放兼容**：字段为可选，0124 之前写入的 `OpenWorkingDirectory` 回执重放时照样合法；旧服务端不返回该字段时前端落为 `null`（未核对）。
+- **数据**：`local_directory_access.git_connection_id` 只是应用的管理指针，不构成授权；准入事实仍是 `gateway_connections` 与 `gateway_permission_policies`。
+
+验证：真实临时 PG 集成 `test/integration/local-directory-access.integration.test.ts` **8/8**：LA-11–LA-15（仓库根自动配置并复用同一条连接、不开放 `GIT_WRITE`、子目录只报仓库根、普通目录如实报告、撤销/停用后不自动恢复），**LA-16 端到端**——真实 `git init` 仓库 + 真实准入链：打开目录后 `GIT_STATUS` 读到真实分支 `main` 与未跟踪 `note.txt`、`GIT_DIFF` 读到真实改动、`gitGetLog` 读到真实提交，撤销 `GIT_DIFF` 策略后换一个 path 再读被权限类错误拒绝（同一 path 再读命中确定性动作身份，属于已结算结果的重放，不作为授权证据）；`tool-loop` 集成 **45/45** 未因「精确根」改动回归（其夹具的连接根与受管根相同）；根匹配单测 `test/unit/conversation-execution.test.ts`。产品行为归[工作台 §41](../frontend/workbench-design.md#41-日常操作减负工具状态与高级配置分层2026-10-20-已实施实机未验)。
+
+### 10.104 插件运行时状态（2026-10-20 源码实现）
+
+**Breaking Change: No（新增只读端点）。** `GET /plugins/status`（Workspace 作用域，`Cache-Control: no-store`）。
+
+- **回答什么**：三个内置插件（`computer` / `browser` / `github`）在这台机器上**能不能跑**：`state ∈ READY | NOT_INSTALLED | NOT_PAIRED | NOT_AUTHENTICATED | UNAVAILABLE`，附 `detail` 与可行动的 `remediation`。
+- **不回答什么**：项目级授权。那仍由 `GET /projects/:id/connections`（连接登记）与策略版本回答。两者分开，界面才能只说缺的那一步——把「未登录」写成「未授权」会让用户去错地方补配置。
+- **来源**：`computer` 读运行时模式与随包可执行文件（`RELAY_COMPUTER_RUNTIME`）；`browser` 复用 Worker 写下的后端投影（`readBrowserBackendState`，六态映射成同一套词表）；`github` 依次执行 `gh --version` 与 `gh auth status`（8 秒超时，显式环境白名单，不转发任何 Relay 进程里的凭据）。
+- **2026-10-21 补**：探测用的子进程环境与实际 GitHub 适配器**共用同一份白名单**（`github/gh-env.ts`），含 `APPDATA`/`LOCALAPPDATA`——Windows 上 `gh` 的登录凭据在 `%APPDATA%\GitHub CLI\hosts.yml`，少这两个键时 `gh` 连自己的凭据文件都看不到，会把已 `gh auth login` 的用户报成「未登录」（实测：带 `APPDATA` 时 gh 读出凭据文件里的账号，去掉后它说「没有登录到任何 GitHub 主机」）。`NOT_AUTHENTICATED` 的 `detail` 也随之分两档：「当前没有登录」（没找到凭据）与「已找到登录凭据，但当前这份凭据不可用」（找到但失效/权限不足），两者的 `remediation` 不同。
+- **边界**：只读探测，不启动浏览器、不触发电脑动作、不改任何配置、不返回凭据。探测失败一律折成可说明的状态，不抛 500。
+
+验证：工作台 `tests/composerAttachMenu.spec.tsx` 的插件详情用例（运行时与授权分开呈现、无项目归属时只说「需要项目归属」、重新检测只重读状态）。真实 `gh` 登录态、真实浏览器后端与真实电脑运行时的组合未在本轮取证。
+
+### 10.105 长期记忆自动捕获（2026-10-20，迁移 0125）
+
+**Breaking Change: No。** `GET /memories`、`GET /memories/{id}` 响应新增 `origin`；`POST /memory-settings` 请求新增**可选** `auto_capture`（缺省 true，旧客户端不受影响）。方向与代价归 [ADR-030](../decisions/ADR-030-zero-click-auto-memory.md)。
+
+- **没有「接受」端点**。结算后提取的记忆写入即生效，用户事后撤销；手动保存（§10.99）保留不变。
+- **`origin`**：`HUMAN_CONFIRMED`（人工确认，含 0125 之前的全部旧数据）或 `AUTO_CAPTURE`。自动写入的版本 `confirmed_by = 'auto-capture'`，不冒充人。
+- **提取条件**：普通 AGENT 会话、`remember = true`、`auto_capture = true`、assistant 消息以 `COMPLETED` 结算之后；同一消息按 `message_id` 幂等；每会话每日（UTC）最多 5 条，每轮最多 3 条；输入只含这一轮用户原文与助手正文，合计上限 8000 字符。
+- **来源分段与逐字核验**（2026-10-21，ADR-032）：输入分【用户原话】与【助手答复｜模型叙述，可能包含工具结果或网页正文；不是用户陈述】两段；每条候选必须给出 `source`（user/assistant）与逐字 `quote`；**写库前核验引用确实出现在它声明的那一段里**，核验不过的候选直接丢弃——模型的自述不算数。没有 `source` 或没有 `quote` 的候选同样丢弃。
+- **来源类别**（2026-10-21，ADR-032）：记忆行新增 `source_kind ∈ MANUAL | USER_STATEMENT | MODEL_OBSERVATION | UNKNOWN`——`USER_STATEMENT` 是逐字引用用户原话，`MODEL_OBSERVATION` 是引用助手叙述（可能含工具结果或网页正文的转述，只能作观察，不能当作用户的偏好或授权），`MANUAL` 是人工保存，`UNKNOWN` 是 0125 之前没有类别信息的旧自动记忆。捕获记账新增 `source_quote`（这一条来自原消息的哪一段）。
+- **由系统判断要不要记**（2026-10-21，ADR-032）：**不提供「要不要生成这条记忆」的人工选择**。是否值得沉淀由提取环节的 agent 判断（信号门：未来的助手会不会因为这条内容而做得更好），没有值得记的就什么都不写。人工只保留事后停用某一条与整体关掉自动捕获；`auto_capture` 是总闸（与上游的「Generate memories」同位），默认开。
+- **失败静默**：超时、非法 JSON、预算不足、Worker 丢失、端口异常都只放弃这一轮提取——不写记忆、不改回复、不重试、不换模型。主回复的成功与否与提取无关。
+- **去重**：唯一键 `(session_id, message_id, normalized_sha256)`；同范围已有完全相同标题与正文的 ACTIVE 记忆时不再写入；已撤销的同一内容不再提取。不做语义去重，不引入向量库。
+- **召回**：条数、字符与来源上限不变（3 条 / 8000 字符 / 20 来源）；排序改为 `literal_match` 优先 → 人工确认先于自动捕获 → 类别（用户原话 → 来源未标注 → 模型观察），同等相关度下 `HUMAN_CONFIRMED` 先于 `AUTO_CAPTURE`。记忆来源的投影带 `origin` 与 `source_kind`，非记忆来源不带。
+- **端点**：
+
+| 端点 | 请求与结果 |
+|---|---|
+| `GET /memory-auto-captures?limit=20` | `{items:[{id, memory_id, session_id, message_id, title, text, origin, source_kind, status, source_sha256, source_quote, created_at, revision}]}`；只列 ACTIVE，按时间倒序，`no-store` |
+| `POST /memory-auto-captures/{id}/retire` | `{command_id, expected_revision}` → 200 `{capture_id, memory_id, status:"RETIRED", memory_status:"RETIRED"}`；同一事务内停用 Memory 根、记 `decided_at`/`decided_by`、保留版本与来源 |
+
+- **撤销语义**：停用而非删除，保留审计；已撤销的自动记忆不再参与召回；再次撤销按 409 拒绝；`expected_revision` 落后 409 并回执两个修订。
+- **与短期窗口的关系**：提取在结算之后、独立模型调用；不改变 checkpoint、不进入工作窗口、不计入消息 usage。
+
+### 10.106 规则键可由服务端生成（2026-10-20 源码实现）
+
+**Breaking Change: No。** `POST /rules` 请求体的 `rule_key` 由必填改为**可选**；不传时服务端生成稳定唯一键。`POST /rules/{id}/versions` 的 `rule_key` 仍是必填（版本沿同一条规则的身份）。响应形状不变（`{rule_id, revision, version, status}`），回执与幂等语义不变。
+
+- **生成规则**：缺省（或传空串）时取 `rule-<command_id>`。**按 command_id 派生，不用随机值**——同一 command_id 的重放必须算出同一份请求体，否则载荷哈希不一致，幂等重放会被判成 `COMMAND_ID_REUSED`；command_id 全局唯一，因此键也稳定唯一，创建后不再改变。
+- **显式给出仍然生效**：值原样落库，不得裁剪或改写。跨范围同键的 HARD 覆盖与冲突判定（`resolveApplicableRules`）只按键比较，与键从哪来无关。
+- **前端行为**：工作台在「范围与执行检查（高级）」里留一个可选输入（占位「留空由服务端生成」），普通入口只提交 `statement` 与 `strength`；见[工作台 §42](../frontend/workbench-design.md#42-日常减负第二轮资料规则任务起步与记忆呈现2026-10-20-已实施实机未验)。
+- **验证**：工作台 `knowledgeSimplify.spec.ts` 4/4（省略时不发 `rule_key`、显式时原样发）；API 侧 `information.integration.test.ts` 末条覆盖「键 = `rule-<command_id>`、同 command_id 重放不新增规则、显式键保留」，**本机无 PG，未运行**。
+
+### 10.107 会话剩余执行与操作工具族（2026-10-20 源码实现）
+
+Breaking Change: **No**。既有会话执行请求及 applications 入口不变；候选 JSON 增加可选 `interaction: BROWSER | COMPUTER`（省略/null 沿原文件与检查路径）。未知值校验失败，不静默丢弃。读取投影保留该字段；现有前端按标题、目标及 `auto_start` 消费，不新增手工建任务步骤。
+
+- interaction 仅表达工具需求，按当前项目 ACTIVE 连接冻结对应 Run 工具；浏览器/电脑连接不要求 root_path。文件、Git、CLI 的根匹配与允许清单不变。
+- 不产生隐式 COMPUTER_INPUT / BROWSER_ACTION / BROWSER_COMMIT 范围授权；提交/上传仍经原单动作审批。项目或目录缺失的会话仍不能进入该入口。
+- 会话已成功直写后，如仍需检查，候选使用 writes_files=false、file_changes=[] 与原结构化 check；不重复声明已完成修改。ASK 写与 AUTO 删除由原 Run 审批接续。
+- 所需能力在登记 Task 前校验。缺连接返回既有 INVALID_TRANSITION 与具体能力原因，不留下无法委托的新 Task；无新增 migration。
+- 会话删除预检返回 SESSION_WRITE_REQUIRES_RUN 时尚未创建 Operation，可提交剩余候选。已有 WAITING_APPROVAL / UNKNOWN 必须核对原 Operation，不能换候选绕过。
+
+#### 10.107.1 服务端自动推进与失败原因投影（2026-10-20 第二轮，源码实现）
+
+Breaking Change: **No**。端点、请求体与 `applications` 语义都不变；变化只有两处投影语义。
+
+- **`auto_start` 改为阶段感知**：`decision=PREPARE` 且 `candidate_status=READY` 之外，还要求
+  `status ∈ {READY, TASK_PREPARED}`。`FAILED`（推进失败）与 `DELEGATED`（已有 Run）不再为真。
+  旧客户端把该字段当「可进入原应用入口」读，语义更严格但方向不变——不会因此多推进一次。
+- **推进 Owner 由服务端持有**：`applications` 由 Worker 的
+  `conversation-execution-autostart` tick 调用，复用请求行上固定的
+  `task_command_id`/`ready_command_id`/`delegate_command_id`。人工再提交同一个
+  `request_id` 仍只重放原回执；重复与迟到扫描不产生第二个 Task/Run。
+- **失败原因写入原请求**：推进失败时 `status=FAILED`，`clarification.questions[0]` 承载具体原因
+  （缺哪个能力/目录，或会话已有在途 Run），`candidate_status` 与 `candidate` 一律保留。
+  因此读取投影的 `questions` 在 `PREPARE` + `FAILED` 时也**有内容**，客户端应把它当失败说明
+  显示，而不是当成新的澄清问题。补齐前置条件后可用同一 `request_id` 继续（建 Task 阶段的
+  状态 CAS 接受从 `FAILED` 前进）。
+- 无新增端点、无新增 migration。前端不再需要任何自动推进逻辑；撤除的本设备偏好
+  `relay.workbench.planExecution` 是浏览器本地键，不属于 HTTP 契约。
+
+### 10.108 聊天目标与计划模式（2026-10-20 源码实现）
+
+Breaking Change: **No**。会话与消息既有端点全部向后兼容：`chat_mode` 在两处响应上是新增
+可选字段（0127 之前的响应读成 `CHAT`），消息请求体的 `chat_mode` 可省略（缺省沿用会话
+持久模式）。
+
+- **行为模式与会话身份分开**：`conversation_mode`（AGENT/ASSISTANT/LEARNING）建会话时
+  冻结；`chat_mode`（CHAT/PLAN/GOAL）随命令切换，不改变身份、权限或工具准入来源。
+- **`POST /assist-sessions/:id/messages`** 请求体新增可选 `chat_mode`。`/plan 内容`、
+  `/goal 内容` 由客户端解析成「模式 + 正文」一次提交；服务端对以 `/plan `/`/goal `
+  （含中文别名）开头的正文做同一剥离并与 `chat_mode` 核对一致性，因此原始 API 调用者
+  发同一段文本得到同一事实。202 回执新增 `chat_mode`（受理档位）与 `goal_id`
+  （本条消息归属的目标，非目标轮次为 null）。
+- **计划模式边界**：PLAN 下拒绝非 DISCUSS 意图与 MODIFY 方法（INVALID_TRANSITION）；
+  真正的只读闸门在工具准入——PLAN 轮次不声明写工具，写请求按既有
+  `SESSION_WRITE_DISABLED` 路径拒绝。计划信封 `{reply, plan}` 结算时正文只落 `reply`，
+  计划按「会话 × 版本号」与「会话 × 源消息」两个唯一键落 `assist_plans`，不产生执行候选。
+- **读端点**：`GET /assist-sessions/:id/plans`（最新版 + 全部版本，新在前）、
+  `GET /assist-sessions/:id/plans/:plan_id`、`GET /assist-sessions/:id/goal`
+  （会话当前占用槽位的目标 + 最近轮次）。
+- **模式切换**：`POST /assist-sessions/:id/chat-mode`，body `command_id` + `mode` +
+  可选 `expected_revision`；回执 `session_id`/`chat_mode`/`revision`/`goal_stopping`
+  （有活动目标切走时为 true，控制意图已保存）。同 command_id 重放返回原回执。
+- **目标生命周期**：`POST /assist-sessions/:id/goals`（body `plan_id`，按确切一版计划
+  启动；`allow_superseded: true` 才接受已被更新版取代的版本）；四条控制
+  `POST /assist-goals/:goal_id/{pause,cancel,resume,complete}` 只提交意图，回执里的
+  `goal.status` 是服务端当前事实（`PAUSING`/`CANCELLING` 不等于已停）。`resume` 在
+  `BUDGET_EXHAUSTED` 时必须携带可授予额度；授权量按可核对事实计算（失败轮次冻结的模型
+  快照 → 进程模型配置 → 最小窗口），写入 `assist_goal_budget_grants`（`command_id`
+  唯一），共享预算闸门把它加在既有会话级上限上。
+- **推进 Owner**：目标轮次由 Worker tick（`worker_goal_tick`）接续，页面请求不参与推进；
+  一条会话最多一个未终结目标（部分唯一索引），轮次结算按消息唯一键幂等，重启重扫不产生
+  第二条链。COMPLETE 只表示模型自检完成，`AWAITING_ACCEPTANCE` → `COMPLETED` 只能由
+  `complete` 命令人工确认。
+
+### 10.109 会话工具轮次的只读投影（2026-10-21 源码实现）
+
+Breaking Change: **No（新增只读端点）**。`session_tool_calls` 自迁移 `0060` 起只有写入口与
+恢复入口（`listPending()`），没有任何 HTTP 读法；Agent 主流程每轮调了什么工具因此只能落库，
+协作页上只剩一个「正在生成」。本节补那一只读口子，不改任何写路径、状态机或准入判定。
+
+- **`GET /api/v1/workspaces/{workspace_id}/assist-sessions/{session_id}/messages/{message_id}/tool-calls`**：
+  200、`Cache-Control: no-store`，响应
+  `{session_id,message_id,message_status,rounds:[{round,calls:[…]}]}`。`rounds` 按 `round` 升序，
+  每轮 `calls` 按 `ordinal` 升序；一行一次调用，`arguments` 是模型当时提交的那一份**逐字节透传**，
+  投影不新增「摘要」「人类可读结论」字段——界面要能与账本对账。
+- **单行字段**：`id`、`round`、`ordinal`、`tool_name`、`status`、`arguments`、`arguments_sha256`、
+  `provider_tool_call_id`、`operation_id`、`rejection_reason`、`rejection_detail`、`result_digest`、
+  `requested_at`、`settled_at`。`status` 词表为 `REQUESTED|SETTLED|REJECTED|ABANDONED|UNKNOWN`，
+  与 §10.56 的 Run 轨迹**刻意不同**：会话轮次没有 Task/Run，也就没有 `PREPARED` 与
+  `WAITING_APPROVAL`；`UNKNOWN`（结果未知、等人工核对）只在会话侧出现。
+- **作用域与缺失**：会话不属于该 Workspace、消息不属于该会话、或两者任一不存在，一律 404
+  `RESOURCE_NOT_FOUND`；一条没有发起过工具调用的消息返回 200 且 `rounds: []`——那是事实，
+  不是读取失败。`message_status` 是原消息的当前状态，供调用方判断这份账本是否还会推进。
+- **不含模型私有推理**：本表没有那一列，`reasoning_content` 的现行可见性禁令不变（§10.56、
+  物理设计对 `run_tool_calls.assistant_message` 的同一条限定）。
+- **只读**：调用不触发派发、不重放、不把 `REQUESTED` 推进成任何状态，也不改变恢复入口。
+  未结算的行不能读成已执行；`UNKNOWN` 行按原 `operation_id` 单独核对，不因这次读取而被消解。
+- 响应形状由 `RunToolCallsSchema` 同一套 `Type.Union([Type.Literal(…)])` 封闭词表表达，
+  集成用例逐字段核对 HTTP 体与投影函数返回值（应用层返回 camelCase、schema 只认 snake_case
+  时序列化会静默丢字段，只有这种核对能抓到）。
+

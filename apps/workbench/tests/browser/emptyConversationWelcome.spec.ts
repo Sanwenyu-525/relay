@@ -196,11 +196,15 @@ test.describe("新建会话空态一致", () => {
     expect(pendingLabel).not.toBeNull();
     const center = (box: { y: number; height: number }): number => box.y + box.height / 2;
     expect(Math.abs(center(nameLabel!) - center(pendingLabel!))).toBeLessThan(1);
-    // 待处理紧跟细条内容右端，不顶到行的右缘（用户指令「不要放在最右边」）。
+    // 左右分居两端（2026-10-20 第五轮「左侧工作目录信息 / 右侧待处理事项」）：细条按内容收在
+    // 左端，「待你处理」用 auto 外边距推到剩余空间的右端，两类语义各占一端、中间留一档间隔。
+    // 上一版「紧跟细条内容右端」在目录名后连缀归属、Git 标记与执行约束之后，会把待处理挤到
+    // 细条中间或折行，读成目录信息的一部分（用户截图指认「信息拥挤、语义混杂」）。
     const pendingBox = await pending.boundingBox();
     expect(pendingBox).not.toBeNull();
     expect(pendingBox!.x).toBeGreaterThanOrEqual(bar!.x + bar!.width);
-    expect(pendingBox!.x + pendingBox!.width).toBeLessThan(row!.x + row!.width);
+    expect(pendingBox!.x + pendingBox!.width).toBeCloseTo(row!.x + row!.width, 1);
+    expect(pendingBox!.x - (bar!.x + bar!.width)).toBeGreaterThan(8);
     // 合并后输入卡上方只剩这一行：不再渲染第二行状态摘要。
     await expect(page.getByTestId("composer-status")).toHaveCount(0);
     await page.locator(".agent-chat-prereq-row").screenshot({ path: "results/prereq-row-aligned.png" });
@@ -227,9 +231,9 @@ test.describe("新建会话空态一致", () => {
       .toHaveText("围绕当前任务直接讨论，或描述新的目标与要求。");
     await expect(page.getByTestId("assist-transcript")).not.toContainText("还没有消息");
     await expectCenteredInTranscript(page, welcome);
-    // 快捷卡把脚手架预填进面板输入框，两个入口只差一个已存在的会话身份。
+    // 快捷卡把完整提示词预填进面板输入框，两个入口只差一个已存在的会话身份。
     await page.getByTestId("assist-empty-suggest-requirement").click();
-    await expect(page.getByTestId("assist-draft")).toHaveValue(/帮我梳理这个需求：/u);
+    await expect(page.getByTestId("assist-draft")).toHaveValue(/没有具体需求时先问我，不自行挑选。/u);
     await page.screenshot({ path: "results/empty-welcome-task-session.png" });
   });
 
@@ -272,7 +276,9 @@ test.describe("新建会话空态一致", () => {
     await page.goto(`/agent?work=${taskId}`); await connect(page);
     await page.getByTestId("assist-draft").fill("读取目录");
     await page.getByTestId("assist-send").click();
-    await expect(page.getByTestId("assist-transcript")).toContainText("等待生成");
+    // 「等待生成」字样已删除（2026-10-21 用户指令）：已提交、Worker 尚未领取由正文前的三点表达。
+    await expect(page.getByTestId("assist-transcript")).not.toContainText("等待生成");
+    await expect(page.getByTestId("assist-inflight-msg-assistant")).toBeVisible();
     completed = true;
     await expect(page.getByTestId("assist-transcript")).toContainText("实际读取结果：README.md");
     expect(posts).toEqual([`${prefix}/assist-sessions/${sessionId}/messages`]);
@@ -286,6 +292,10 @@ test.describe("新建会话空态一致", () => {
     await expect(page.getByTestId("folder-scope-strip")).toBeVisible();
     await page.getByTestId("collab-conversation-inspector-toggle").click();
     await expect(page.getByTestId("collab-conversation-inspector")).toHaveClass("task-inspector");
-    await expect(page.getByRole("tablist", { name: "工作详情分类" }).getByRole("tab")).toHaveText(["进展", "成果", "记录"]);
+    // 会话工作详情比任务多一页「变更」（2026-10-20）：那里统计整段目录净变化。
+    await expect(page.getByRole("tablist", { name: "工作详情分类" }).getByRole("tab"))
+      .toHaveText(["进展", "成果", "变更", "记录"]);
+    await page.getByTestId("collab-conversation-inspector-tab-CHANGES").click();
+    await expect(page.getByTestId("collab-conversation-inspector")).toContainText("本次对话期间该目录的变化");
   });
 });

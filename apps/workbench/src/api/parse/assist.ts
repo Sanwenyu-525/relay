@@ -1,5 +1,5 @@
 import { array, boolean, decimal, integer, isRecord, nullableInteger, nullableOptionalInteger, nullableString, object, optionalString, string, stringArray, stringList } from "../core/primitives";
-import type { RelayAssistMessage, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayConversationCandidateFileChange, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySkillDefinition, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate } from "../dtos/assist";
+import type { RelayAssistMessage, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayChatMode, RelayConversationCandidateFileChange, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayWorkspaceDefaultDirectory } from "../dtos/assist";
 import type { DecimalRevision } from "../../types";
 import type { RelayGatewayDecision, RelayWriteTier } from "../dtos/gateway";
 
@@ -140,6 +140,15 @@ export function assistSessionFrom(value: unknown): RelayAssistSession {
     throw new Error(SESSION_FORMAT_ERROR);
   }
   // 三个助手列同理：0059 之前没有这些列，缺失等同 null；显式的 null 也是 null。
+  /*
+   * 0127：行为模式。缺失只来自 0127 之前的响应（那时只有普通讨论），读成 CHAT；
+   * 值不在词表内则报错——猜一个模式会让用户以为自己在另一个模式里操作。
+   */
+  const chatModeRaw = row.chat_mode === undefined ? "CHAT"
+    : string(row, "chat_mode", "assist session");
+  if (chatModeRaw !== "CHAT" && chatModeRaw !== "PLAN" && chatModeRaw !== "GOAL") {
+    throw new Error(SESSION_FORMAT_ERROR);
+  }
   const assistantProfileId = optionalNullable(row, "assistant_profile_id", "assist session");
   const assistantProfileRevision = optionalNullable(row, "assistant_profile_revision", "assist session");
   const roleValue = row.assistant_role;
@@ -167,7 +176,7 @@ export function assistSessionFrom(value: unknown): RelayAssistSession {
     // 退到 updated_at——同样是 0015 就有的时刻列，最多让位置略偏，不会把行丢掉。
     createdAt: optionalString(row, "created_at") ?? string(row, "updated_at", "assist session"),
     updatedAt: string(row, "updated_at", "assist session"),
-    conversationMode, assistantProfileId, assistantProfileRevision,
+    conversationMode, chatMode: chatModeRaw as RelayChatMode, assistantProfileId, assistantProfileRevision,
     personaLabel: personaLabel(role, assistantProfileRevision),
     // 同理：remember 缺失只来自 0059 之前的响应，那时的会话默认可读。
     remember: row.remember === undefined ? true : boolean(row, "remember", "assist session"),
@@ -183,8 +192,22 @@ export function assistSessionFrom(value: unknown): RelayAssistSession {
         return { goalId: string(goal, "goal_id", "assist session goal"), title: string(goal, "title", "assist session goal") };
       }), workingDirectory: directory === null ? null : {
         resourceId: string(directory, "resource_id", "assist session directory"),
-        canonicalRoot: nullableString(directory, "canonical_root", "assist session directory") } };
+        canonicalRoot: nullableString(directory, "canonical_root", "assist session directory"),
+        source: workingDirectorySourceOf(directory) } };
     })() }) };
+}
+
+/**
+ * 作用域来源只认两个词。缺字段（0117 之前的服务端）读成 null＝历史未知；
+ * 读不懂的值显式失败——猜一个来源会把默认作用域的会话显示成用户自己选的。
+ */
+function workingDirectorySourceOf(directory: Record<string, unknown>): RelayWorkingDirectorySource | null {
+  const value = directory.source;
+  if (value === undefined || value === null) return null;
+  if (value !== "USER_PICKED" && value !== "WORKSPACE_DEFAULT") {
+    throw new Error("assist session directory.source 响应格式无效。");
+  }
+  return value;
 }
 
 export function assistMessageFrom(value: unknown): RelayAssistMessage {
@@ -238,7 +261,11 @@ export function assistMessageFrom(value: unknown): RelayAssistMessage {
         kind: optionalString(source, "kind"), rootId: optionalString(source, "root_id"),
         version: optionalString(source, "version"),
         status: string(source, "status", "assist source"),
-        reason: optionalString(source, "reason") };
+        reason: optionalString(source, "reason"),
+        // 0125：只有记忆来源带 origin；缺字段按人工确认读，非记忆来源保持 null。
+        origin: source.kind === "MEMORY"
+          ? (source.origin === "AUTO_CAPTURE" ? "AUTO_CAPTURE" as const : "HUMAN_CONFIRMED" as const)
+          : null };
     }),
     skill, skillInput: row.skill_input === null || row.skill_input === undefined
       ? null : object(row.skill_input, "assist skill input"),
@@ -251,6 +278,8 @@ export function assistMessageFrom(value: unknown): RelayAssistMessage {
       cacheReadTokens: nullableOptionalInteger(usage, "cache_read_tokens", "assist usage"),
       cacheCreationTokens: nullableOptionalInteger(usage, "cache_creation_tokens", "assist usage") },
     cancelRequested: row.cancel_requested === true,
+    // 0122：旧服务端没有这个字段，按「没有插话请求」读。
+    steerRequested: row.steer_requested === true,
     // 0093：旧服务端没有这个字段，按「没有附件」读；新服务端每条消息都带数组。
     attachments: row.attachments === undefined || row.attachments === null ? []
       : array(row, "attachments", "assist message").map((value) => {
@@ -348,12 +377,18 @@ export function workingDirectoryFrom(value: unknown): RelayWorkingDirectory {
   const readiness = object(row.write_readiness, "working directory write readiness");
   const association = row.association === null || row.association === undefined
     ? null : workingDirectoryCandidateFrom(row.association);
+  const gitReadRow = row.git_read === null || row.git_read === undefined
+    ? null : object(row.git_read, "working directory git read");
   return { canonicalRoot: string(row, "canonical_root", "working directory"),
     displayName: string(row, "display_name", "working directory"), status,
     reason: nullableString(row, "reason", "working directory"), association,
     createdProject: boolean(row, "created_project", "working directory"),
     createdResource: boolean(row, "created_resource", "working directory"),
     candidates: array(row, "candidates", "working directory").map(workingDirectoryCandidateFrom),
+    gitRead: gitReadRow === null ? null : {
+      state: string(gitReadRow, "state", "working directory git read"),
+      repoRoot: nullableString(gitReadRow, "repo_root", "working directory git read"),
+      detail: string(gitReadRow, "detail", "working directory git read") },
     writeReadiness: { status: string(readiness, "status", "working directory write readiness"),
       detail: string(readiness, "detail", "working directory write readiness"),
       policyDecision: policyDecisionOf(readiness),
@@ -371,6 +406,39 @@ function localWriteTierOf(readiness: Record<string, unknown>): RelayWriteTier | 
     throw new Error("working directory write readiness.write_tier 无法识别");
   }
   return value;
+}
+
+/**
+ * Workspace 默认工作目录投影（HTTP §10.96）。
+ *
+ * 三种状态互斥：`UNSET` 必须没有资源，`READY` 必须有资源与目录；`UNAVAILABLE`
+ * 两种形状都合法（资源整个不可见时服务端只回状态与原因）。形状不符就报错，
+ * 不把残缺投影读成「未设置」——那会让界面把一次失效显示成从未配置过。
+ */
+export function workspaceDefaultDirectoryFrom(value: unknown): RelayWorkspaceDefaultDirectory {
+  const row = object(value, "workspace default directory");
+  const status = string(row, "status", "workspace default directory");
+  if (status !== "UNSET" && status !== "READY" && status !== "UNAVAILABLE") {
+    throw new Error("workspace default directory.status 无法识别");
+  }
+  const resourceId = nullableString(row, "resource_id", "workspace default directory");
+  const canonicalRoot = nullableString(row, "canonical_root", "workspace default directory");
+  if ((status === "READY" || status === "UNAVAILABLE") && resourceId !== null && canonicalRoot === null) {
+    throw new Error("workspace default directory.canonical_root 响应格式无效。");
+  }
+  if (status === "UNSET" && resourceId !== null) {
+    throw new Error("workspace default directory.resource_id 与 status 不一致。");
+  }
+  const writeTier = row.write_tier;
+  if (writeTier !== null && writeTier !== "READ_ONLY" && writeTier !== "ASK" &&
+      writeTier !== "AUTO" && writeTier !== "FULL") {
+    throw new Error("workspace default directory.write_tier 无法识别");
+  }
+  return { status, resourceId, canonicalRoot,
+    displayName: nullableString(row, "display_name", "workspace default directory"),
+    writeTier: writeTier === null ? null : writeTier,
+    reason: nullableString(row, "reason", "workspace default directory"),
+    revision: decimal(row, "revision", "workspace default directory") };
 }
 
 /** 缺键（旧回执）当作未核对；出现无法识别的档位不当作空值蒙混，显式失败。 */
@@ -534,6 +602,44 @@ export function runToolCallsFrom(value: unknown): RelayRunToolCalls {
     }) };
 }
 
+export const RELAY_SESSION_TOOL_CALL_STATUSES = ["REQUESTED", "SETTLED", "REJECTED",
+  "ABANDONED", "UNKNOWN"] as const;
+
+/**
+ * 会话工具轮次（工作台 §18.10）。与 Run 轨迹分成两套解析，理由与 dtos 里那条一致：
+ * 两张表、两套状态词表，混用会把 `UNKNOWN` 判成非法状态而整个折叠面板消失。
+ */
+export function sessionToolCallFrom(value: unknown): RelaySessionToolCall {
+  const row = object(value, "Session tool call");
+  const status = string(row, "status", "Session tool call");
+  if (!(RELAY_SESSION_TOOL_CALL_STATUSES as readonly string[]).includes(status)) {
+    throw new Error("会话工具轮次的状态无法识别。");
+  }
+  return { id: string(row, "id", "Session tool call"),
+    round: integer(row, "round", "Session tool call"),
+    ordinal: integer(row, "ordinal", "Session tool call"),
+    toolName: string(row, "tool_name", "Session tool call"),
+    status: status as RelaySessionToolCallStatus,
+    args: object(row.arguments, "Session tool call arguments"),
+    rejectionReason: nullableString(row, "rejection_reason", "Session tool call"),
+    rejectionDetail: nullableString(row, "rejection_detail", "Session tool call"),
+    requestedAt: string(row, "requested_at", "Session tool call"),
+    settledAt: nullableString(row, "settled_at", "Session tool call") };
+}
+
+export function sessionToolCallsFrom(value: unknown): RelaySessionToolCalls {
+  const row = object(value, "Session tool calls");
+  return { sessionId: string(row, "session_id", "Session tool calls"),
+    messageId: string(row, "message_id", "Session tool calls"),
+    messageStatus: string(row, "message_status", "Session tool calls"),
+    // 顺序直接信任服务端：客户端重排会掩盖服务端顺序错误（与 Run 轨迹同一条理由）。
+    rounds: array(row, "rounds", "Session tool calls").map((entry) => {
+      const round = object(entry, "Session tool call round");
+      return { round: integer(round, "round", "Session tool call round"),
+        calls: array(round, "calls", "Session tool call round").map(sessionToolCallFrom) };
+    }) };
+}
+
 /**
  * 读出候选声明的那一次检查。
  *
@@ -665,7 +771,16 @@ function diffCoverageFrom(value: unknown): RelayConversationDiffCoverage | null 
     current,
     uncheckedFiles: nullableOptionalInteger(value, "unchecked_files", "conversation diff coverage") ?? 0,
     unverifiedFiles: nullableOptionalInteger(value, "unverified_files", "conversation diff coverage") ?? 0,
+    unverifiableFiles: nullableOptionalInteger(value, "unverifiable_files", "conversation diff coverage") ?? 0,
+    unscannedFiles: nullableOptionalInteger(value, "unscanned_files", "conversation diff coverage") ?? 0,
   };
+}
+
+/** 统计范围：旧服务端不带这个字段，按目录口径解析（那一档就是它的实际行为）。 */
+function diffScopeFrom(value: unknown): RelayConversationDiffScope {
+  if (value === undefined || value === null) return "DIRECTORY";
+  if (value === "SESSION" || value === "DIRECTORY") return value;
+  throw new Error("conversation diff.scope 不是已知的统计范围。");
 }
 
 /** 会话总 diff 的只读投影：基线到当前已落盘内容的净变化（CD-02/03/16/17）。 */
@@ -675,6 +790,7 @@ export function conversationDiffFrom(value: unknown): RelayConversationDiff {
   if (available === true) {
     return {
       available: true,
+      scope: diffScopeFrom(row.scope),
       baselineCapturedAt: string(row, "baseline_captured_at", "conversation diff"),
       baselineRevision: decimal(row, "baseline_revision", "conversation diff"),
       rootPath: string(row, "root_path", "conversation diff"),

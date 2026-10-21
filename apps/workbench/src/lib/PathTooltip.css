@@ -1,0 +1,18 @@
+/* 目录名悬停提示（2026-10-20）：只承载完整路径这一条事实，因此不加箭头、不做标题行，
+   也不接收指针事件——它不能挡住底下的目录名按钮。 */
+.path-tooltip {
+  position: fixed;
+  z-index: var(--relay-zIndex-popover);
+  max-width: min(28rem, calc(100vw - 16px));
+  padding: var(--relay-space-1) var(--relay-space-2);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  box-shadow: var(--relay-shadow-floating);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-heading);
+  /* Windows 反斜杠没有天然断点：长路径必须能折行，否则提示会撑出视口。 */
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}

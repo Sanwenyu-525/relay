@@ -11,6 +11,8 @@ import type { JsonObject } from '../infrastructure/json.js';
  * 「在途消息」不在这张表里：它由 `hasInflightMessages` 单独判定，与归档共用同一道栅栏。
  */
 export type SessionDeleteBlockerReason =
+  | 'MEMORY_SOURCES'
+  | 'MEMORY_COMPACTION_ACTIVE'
   | 'FORK_CHILDREN'
   | 'TASK_ACCEPTANCE_CITED'
   | 'HYPOTHESIS_CITED'
@@ -25,7 +27,8 @@ export interface AssistSessionContext {
   readonly session_id: string;
   readonly session_revision: bigint;
   readonly project_goals: readonly { readonly goal_id: string; readonly title: string }[];
-  readonly working_directory: { readonly resource_id: string; readonly canonical_root: string | null } | null;
+  readonly working_directory: { readonly resource_id: string; readonly canonical_root: string | null;
+    readonly source: AssistSessionRow['working_directory_source'] } | null;
 }
 
 /**
@@ -44,18 +47,34 @@ export class AssistRepository {
   async insertSession(input: { id: string; workspaceId: string; projectId: string | null;
     taskId: string | null; title: string;
     conversationMode?: ConversationMode | undefined;
+    workingResourceId?: string;
+    workingDirectorySource?: 'USER_PICKED' | 'WORKSPACE_DEFAULT';
     assistantProfileId?: string | null | undefined;
     assistantProfileRevision?: bigint | null | undefined;
-    assistantRoleSnapshot?: JsonObject | null | undefined }): Promise<void> {
+    assistantRoleSnapshot?: JsonObject | null | undefined;
+    /** 0127：新会话的行为模式，缺省 CHAT（既有调用方与旧客户端行为不变）。 */
+    chatMode?: 'CHAT' | 'PLAN' | 'GOAL' | undefined;
+    /** 0128：主子关联。子会话两列都必须给；根会话两列都不给。 */
+    parentSessionId?: string | null | undefined;
+    budgetScopeSessionId?: string | null | undefined }): Promise<void> {
     const mode = input.conversationMode ?? 'AGENT';
+    const parentSessionId = input.parentSessionId ?? null;
+    const budgetScopeSessionId = input.budgetScopeSessionId ?? null;
+    if ((parentSessionId === null) !== (budgetScopeSessionId === null)) {
+      throw new Error('assist session parent and budget scope must be set together');
+    }
     await sql`insert into assist_sessions (id, workspace_id, project_id, task_id, title,
-      conversation_mode, assistant_profile_id, assistant_profile_revision, assistant_role_snapshot)
+      conversation_mode, chat_mode, working_resource_id, working_directory_source,
+      assistant_profile_id, assistant_profile_revision, assistant_role_snapshot,
+      parent_session_id, budget_scope_session_id)
       values (${input.id}, ${input.workspaceId}, ${input.projectId}, ${input.taskId},
-      ${input.title}, ${mode},
+      ${input.title}, ${mode}, ${input.chatMode ?? 'CHAT'},
+      ${input.workingResourceId ?? null}, ${input.workingDirectorySource ?? null},
       ${mode === 'ASSISTANT' ? input.assistantProfileId ?? null : null},
       ${mode === 'ASSISTANT' ? input.assistantProfileRevision ?? null : null},
       ${mode === 'ASSISTANT' && input.assistantRoleSnapshot !== undefined && input.assistantRoleSnapshot !== null
-        ? JSON.stringify(input.assistantRoleSnapshot) : null}::jsonb)`.execute(this.db);
+        ? JSON.stringify(input.assistantRoleSnapshot) : null}::jsonb,
+      ${parentSessionId}, ${budgetScopeSessionId})`.execute(this.db);
   }
 
   async readSession(id: string, lock = false): Promise<AssistSessionRow | undefined> {
@@ -136,11 +155,11 @@ export class AssistRepository {
     const inserted = await sql<AssistSessionRow>`insert into assist_sessions (
         id, workspace_id, project_id, task_id, title, conversation_mode,
         assistant_profile_id, assistant_profile_revision, assistant_role_snapshot,
-        remember, working_resource_id, status, pinned_at, unread_at, last_message_at,
+        remember, working_resource_id, working_directory_source, status, pinned_at, unread_at, last_message_at,
         forked_from_session_id)
       select ${input.id}, s.workspace_id, s.project_id, s.task_id, ${input.title},
         s.conversation_mode, s.assistant_profile_id, s.assistant_profile_revision,
-        s.assistant_role_snapshot, s.remember, s.working_resource_id, s.status,
+        s.assistant_role_snapshot, s.remember, s.working_resource_id, s.working_directory_source, s.status,
         null, null, null, s.id
       from assist_sessions s where s.id = ${input.fromSessionId}
       returning *`.execute(this.db);
@@ -181,12 +200,27 @@ export class AssistRepository {
         method_argument, learning_record_disabled,
         created_at, updated_at)
       select ${input.childMessageId}, ${input.childSessionId}, ${input.seq}, m.role, m.status,
-        m.intent, m.content, m.sources, m.skill_snapshot, m.skill_input, m.skill_output,
+        m.intent, case when m.role = 'ASSISTANT' and not exists
+          (select 1 from assist_memory_uses u where u.message_id = m.id) and exists
+          (select 1 from session_tool_calls t where t.message_id = m.id)
+          then '（历史工具答复的来源无法核对，正文未复制。）' else m.content end,
+        m.sources, m.skill_snapshot, m.skill_input, m.skill_output,
         m.method_snapshot, m.method_action, m.method_argument, m.learning_record_disabled,
         m.created_at, now()
       from assist_messages m
       where m.id = ${input.sourceMessageId} and m.session_id = ${input.parentSessionId}
       returning id`.execute(this.db);
+    if (inserted.rows.length === 1) {
+      // Copy only revocation provenance, never the parent's call, checkpoint ownership or usage.
+      await sql`insert into assist_memory_uses (message_id, session_id, authority_revision,
+        context_revision, memory_revision, checkpoint_id, sources, has_tool_context, session_scope)
+        select ${input.childMessageId}, ${input.childSessionId}, u.authority_revision,
+          u.context_revision, 0, null, u.sources || coalesce(c.sources, '[]'::jsonb),
+          u.has_tool_context or u.checkpoint_id is not null or exists
+            (select 1 from session_tool_calls t where t.message_id = ${input.sourceMessageId}), u.session_scope
+        from assist_memory_uses u left join assist_memory_checkpoints c on c.id = u.checkpoint_id
+        where u.message_id = ${input.sourceMessageId}`.execute(this.db);
+    }
     return inserted.rows.length === 1;
   }
 
@@ -226,7 +260,8 @@ export class AssistRepository {
         from project_goals pg join goals g on g.id = pg.goal_id and g.workspace_id = pg.workspace_id
         where pg.workspace_id = s.workspace_id and pg.project_id = s.project_id), '[]'::jsonb) as project_goals,
       case when s.working_resource_id is null then null else
-        jsonb_build_object('resource_id', s.working_resource_id, 'canonical_root', r.canonical_root)
+        jsonb_build_object('resource_id', s.working_resource_id, 'canonical_root', r.canonical_root,
+          'source', s.working_directory_source)
       end as working_directory
       from assist_sessions s left join managed_resources r
         on r.id = s.working_resource_id and r.workspace_id = s.workspace_id
@@ -242,6 +277,22 @@ export class AssistRepository {
       select 1 from assist_messages where session_id = ${sessionId}
       and status in ('PENDING', 'RUNNING')) as present`.execute(this.db);
     return rows.rows[0]?.present === true;
+  }
+
+  /** 0122：会话里是否有正在生成的那一轮——插话只能并入它，没有它就只是普通排队。 */
+  async hasRunningMessage(sessionId: string): Promise<boolean> {
+    const rows = await sql<{ present: boolean }>`select exists(
+      select 1 from assist_messages where session_id = ${sessionId}
+      and role = 'ASSISTANT' and status = 'RUNNING') as present`.execute(this.db);
+    return rows.rows[0]?.present === true;
+  }
+
+  /** 0122：某条消息紧邻的前一条用户消息（插话带进来的原文就是它）。 */
+  async readPrecedingUserMessage(sessionId: string, seq: bigint):
+  Promise<AssistMessageRow | undefined> {
+    return (await sql<AssistMessageRow>`select * from assist_messages
+      where session_id = ${sessionId} and seq < ${seq} and role = 'USER'
+      order by seq desc limit 1`.execute(this.db)).rows[0];
   }
 
   /**
@@ -304,6 +355,12 @@ export class AssistRepository {
       union all
       select 11, 'LEARNING_RECORDS' where exists (
         select 1 from learning_session_controls where session_id = ${sessionId})
+      union all
+      select 12, 'MEMORY_SOURCES' where exists (
+        select 1 from memory_message_sources where session_id = ${sessionId})
+      union all
+      select 13, 'MEMORY_COMPACTION_ACTIVE' where exists (
+        select 1 from assist_memory_requests where session_id = ${sessionId} and status in ('PENDING', 'RUNNING'))
       ) blockers order by ordinal`.execute(this.db);
     return [...new Set(result.rows.map((row) => row.reason))];
   }
@@ -322,6 +379,10 @@ export class AssistRepository {
    */
   async deleteSession(sessionId: string, expectedRevision: bigint):
   Promise<{ readonly messages: number; readonly attachments: number } | undefined> {
+    await sql`delete from assist_memory_uses where session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from assist_memory_state where session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from assist_memory_requests where session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from assist_memory_checkpoints where session_id = ${sessionId}`.execute(this.db);
     const attachments = await sql<{ id: string }>`delete from assist_message_attachments
       where session_id = ${sessionId} returning id`.execute(this.db);
     await sql`delete from assist_message_previews where message_id in (
@@ -369,6 +430,7 @@ export class AssistRepository {
    */
   async bindSessionDirectory(id: string, resourceId: string | null): Promise<void> {
     await sql`update assist_sessions set working_resource_id = ${resourceId},
+      working_directory_source = ${resourceId === null ? null : 'USER_PICKED'},
       revision = revision + 1, updated_at = now() where id = ${id}`.execute(this.db);
   }
 
@@ -388,10 +450,18 @@ export class AssistRepository {
     modelSelectionSnapshot?: JsonObject | null;
     modelAttemptState?: JsonObject | null;
     /** 0072：本轮不记录学习状态。随命令体持久，不由模型提示决定。 */
-    learningRecordDisabled?: boolean | undefined }): Promise<void> {
+    learningRecordDisabled?: boolean | undefined;
+    /**
+     * 0127：这条消息受理时的行为模式快照；缺省 CHAT，既有调用方行为不变。
+     * 目标是执行模式，不是身份——它不改变会话的 `conversation_mode`。
+     */
+    chatMode?: 'CHAT' | 'PLAN' | 'GOAL' | undefined;
+    /** 0127：目标轮次消息所属的目标；只由服务端推进器写入。 */
+    goalId?: string | null | undefined }): Promise<void> {
     await sql`insert into assist_messages (id, session_id, seq, role, status, intent,
       content, sources, skill_snapshot, skill_input, method_snapshot, method_action,
-      method_argument, learning_record_disabled, model_selection_snapshot, model_attempt_state)
+      method_argument, learning_record_disabled, model_selection_snapshot, model_attempt_state,
+      chat_mode, goal_id)
       values (${input.id}, ${input.sessionId},
       ${input.seq}, ${input.role},
       ${input.status}, ${input.intent}, ${input.content},
@@ -408,9 +478,21 @@ export class AssistRepository {
       ${input.modelSelectionSnapshot === undefined || input.modelSelectionSnapshot === null ? null :
         JSON.stringify(input.modelSelectionSnapshot)}::jsonb,
       ${input.modelAttemptState === undefined || input.modelAttemptState === null ? null :
-        JSON.stringify(input.modelAttemptState)}::jsonb)`.execute(this.db);
+        JSON.stringify(input.modelAttemptState)}::jsonb,
+      ${input.chatMode ?? 'CHAT'}, ${input.goalId ?? null})`.execute(this.db);
     // 0111：消息落库即活动，用户消息与预插的 ASSISTANT 行都推进同一个排序键。
     await this.touchLastMessage(input.sessionId);
+  }
+
+  /**
+   * 0127：写入目标轮次的结构化结论。
+   *
+   * 只写这一列、不动正文与状态：正文由结算按 Worker CAS 写，结论是同一轮的另一份事实。
+   * 两处分开写但同属一次结算事务，因此读到的永远是「这一轮的正文 + 这一轮的结论」。
+   */
+  async setGoalOutcome(messageId: string, outcome: JsonObject): Promise<void> {
+    await sql`update assist_messages set goal_outcome = ${JSON.stringify(outcome)}::jsonb,
+      updated_at = now() where id = ${messageId}`.execute(this.db);
   }
 
   async readMessage(id: string, lock: boolean | 'share' = false): Promise<AssistMessageRow | undefined> {
@@ -519,6 +601,15 @@ export class AssistRepository {
       where message_id = ${messageId} order by created_at, id`.execute(this.db)).rows;
   }
 
+  /** 0122：这条消息是否带图片附件。插话通道只送原文，因此带图的消息不能插话；
+   *  只查存在性，不读 bytea。 */
+  async messageHasAttachments(messageId: string): Promise<boolean> {
+    const rows = await sql<{ present: boolean }>`select exists(
+      select 1 from assist_message_attachments where message_id = ${messageId}) as present`
+      .execute(this.db);
+    return rows.rows[0]?.present === true;
+  }
+
   /** 0093：历史轮次的附件占位读取；空入参直接返回，不产生 `in ()` 空列表查询。 */
   async listAttachmentsByMessages(
     messageIds: readonly string[]): Promise<readonly AssistMessageAttachmentRow[]> {
@@ -576,8 +667,12 @@ export class AssistRepository {
 
   async listMessages(sessionId: string, limit?: number): Promise<readonly AssistMessageRow[]> {
     const bounded = limit === undefined ? sql`` : sql`limit ${limit}`;
+    // 0122：插话被消费的那一行是「没有回复」的占位行（CANCELLED + STEERED），
+    // 它的用户原文与答案都在原在途回复里；列出来只会多一条读起来像「已取消」的回复。
     return (await sql<AssistMessageRow>`select * from assist_messages
-      where session_id = ${sessionId} order by seq ${bounded}`.execute(this.db)).rows;
+      where session_id = ${sessionId}
+        and not (role = 'ASSISTANT' and status = 'CANCELLED' and error_code = 'STEERED')
+      order by seq ${bounded}`.execute(this.db)).rows;
   }
 
   async listCompletedHistory(sessionId: string, throughSeq: bigint,
@@ -588,6 +683,14 @@ export class AssistRepository {
     return rows.reverse();
   }
 
+  async recordGenerationSources(messageId: string, workerId: string,
+    sources: readonly JsonObject[]): Promise<boolean> {
+    return (await sql<{ id: string }>`update assist_messages
+      set sources = ${JSON.stringify(sources)}::jsonb
+      where id = ${messageId} and status = 'RUNNING' and worker_id = ${workerId}
+        and cancel_requested = false returning id`.execute(this.db)).rows.length === 1;
+  }
+
   /** 监督器只为可领取消息或待清扫的失联领取启动子 Worker。 */
   async hasRunnableGeneration(olderThan: Date): Promise<boolean> {
     const result = await sql<{ id: string }>`select m.id from assist_messages m
@@ -595,20 +698,47 @@ export class AssistRepository {
       left join projects p on p.id = s.project_id
       where (m.status = 'PENDING' and (s.project_id is null or p.archived_at is null))
         or (m.status = 'RUNNING' and m.updated_at < ${olderThan})
+      union all
+      select j.anchor_message_id as id from assist_memory_requests j
+      where j.status = 'PENDING'
+        or (j.status = 'RUNNING' and j.lease_until < now())
       limit 1`.execute(this.db);
     return result.rows.length > 0;
   }
 
-  /** 原子领取：for update skip locked 保证多 Worker/多 tick 恰好一个领取者。 */
+  /** 原子领取：for update skip locked 保证多 Worker/多 tick 恰好一个领取者。
+   *  0122：同一句里清掉插话意图——这一行开始自己生成后，就不再是别人的插话对象。 */
   async claimNextPendingMessage(workerId: string): Promise<AssistMessageRow | undefined> {
     return (await sql<AssistMessageRow>`update assist_messages set status = 'RUNNING',
-      worker_id = ${workerId}, updated_at = now()
+      worker_id = ${workerId}, steer_requested = false, updated_at = now()
       where id = (select m.id from assist_messages m
         join assist_sessions s on s.id = m.session_id
         left join projects p on p.id = s.project_id
         where m.status = 'PENDING' and (s.project_id is null or p.archived_at is null)
-        order by m.session_id, m.created_at, m.id limit 1 for update of m skip locked)
+            and not exists (select 1 from assist_memory_requests j where j.session_id = s.id
+              and j.status in ('PENDING', 'RUNNING'))
+          order by m.session_id, m.created_at, m.id limit 1 for update of m, s skip locked)
       returning *`.execute(this.db)).rows[0];
+  }
+
+  async requeueForMemory(messageId: string, workerId: string): Promise<boolean> {
+    return (await sql<{ id: string }>`update assist_messages set status = 'PENDING', worker_id = null,
+      updated_at = now() where id = ${messageId} and status = 'RUNNING'
+        and worker_id = ${workerId} and cancel_requested = false returning id`.execute(this.db)).rows.length === 1;
+  }
+
+  /**
+   * 0128：按 id 领取一条已存在的 PENDING 消息（子 Agent 执行用）。
+   *
+   * 与 `claimNextPendingMessage` 同一纪律（RUNNING + worker_id 一次性落定），但目标行由
+   * 调用方给出：子会话消息在委派创建时就已插入，执行时按原身份领取，不重新选行。
+   * 已有人领取或状态已变时返回 false，调用方不得重试执行。
+   */
+  async claimPendingMessage(messageId: string, workerId: string): Promise<boolean> {
+    return (await sql<{ id: string }>`update assist_messages set status = 'RUNNING',
+      worker_id = ${workerId}, steer_requested = false, updated_at = now()
+      where id = ${messageId} and status = 'PENDING' and role = 'ASSISTANT'
+      returning id`.execute(this.db)).rows.length === 1;
   }
 
   /** 取消意图先持久化（红线 7）：PENDING 直接收敛，RUNNING 只记录意图由生成方结算。 */
@@ -622,6 +752,53 @@ export class AssistRepository {
       returning status
     `.execute(this.db)).rows[0]?.status === 'CANCELLED' ? 'CANCELLED' :
       ((await this.readMessage(id))?.cancel_requested === true ? 'REQUESTED' : 'UNSETTLED');
+  }
+
+  /**
+   * 0122：请求把一条排队消息并入正在生成的那一轮。
+   *
+   * 只接受 `PENDING`：`RUNNING` 的那条正在被消费，`COMPLETED`/`FAILED`/`CANCELLED`
+   * 已经结束——三者都不该再改投递方式。幂等：已置位的行再请求一次仍返回 `REQUESTED`。
+   */
+  async setSteerRequested(id: string): Promise<'REQUESTED' | 'UNSETTLED'> {
+    const updated = (await sql<{ id: string }>`update assist_messages
+      set steer_requested = true, updated_at = now()
+      where id = ${id} and role = 'ASSISTANT' and status = 'PENDING'
+      returning id`.execute(this.db)).rows.length === 1;
+    if (updated) return 'REQUESTED';
+    return (await this.readMessage(id))?.steer_requested === true ? 'REQUESTED' : 'UNSETTLED';
+  }
+
+  /**
+   * 0122：消费插话请求（生成方在下一次模型请求前调用）。
+   *
+   * 一条语句完成三件事，避免「先读后写」留下重复消费的窗口：
+   *   * 选中本条消息之后、仍 `PENDING`、已置 `steer_requested` 的行；
+   *   * 把它们收口为 `CANCELLED` + `error_code = 'STEERED'`——这一行不再自己生成回复；
+   *   * 带回各自紧邻的用户原文（同一会话里 seq 小于该行、最近的一条 USER）。
+   *
+   * 返回按 `seq` 升序，与用户发送顺序一致。同一行不会被第二次消费：状态已离开 PENDING。
+   */
+  async drainSteerRequests(sessionId: string, afterSeq: bigint):
+  Promise<readonly { messageId: string; content: string }[]> {
+    const rows = (await sql<{ id: string; content: string | null }>`
+      with steered as (
+        update assist_messages set status = 'CANCELLED', error_code = 'STEERED',
+          worker_id = null, updated_at = now()
+        where session_id = ${sessionId} and seq > ${afterSeq}
+          and role = 'ASSISTANT' and status = 'PENDING' and steer_requested = true
+          and cancel_requested = false
+        returning id, seq
+      )
+      select steered.id, source.content
+      from steered
+      join lateral (
+        select m.content from assist_messages m
+        where m.session_id = ${sessionId} and m.seq < steered.seq and m.role = 'USER'
+        order by m.seq desc limit 1
+      ) source on true
+      order by steered.seq`.execute(this.db)).rows;
+    return rows.map((row) => ({ messageId: row.id, content: row.content ?? '' }));
   }
 
   /** 生成完成按领取身份 CAS 结算：迟到的旧 Worker 不能覆盖新状态。 */

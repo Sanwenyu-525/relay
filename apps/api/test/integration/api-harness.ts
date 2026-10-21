@@ -118,7 +118,7 @@ export interface SendOptions {
 
 export function sendRequest(
   port: number,
-  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'OPTIONS',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS',
   path: string,
   options: SendOptions = {},
 ): Promise<HttpResponse> {
@@ -337,11 +337,13 @@ export function baseEnvironment(input: {
   allowedOrigin: string;
   bearerToken: string;
   dataRoot: string;
-  databaseUrl?: string;
-  databasePoolMax?: number;
+  databaseUrl?: string | undefined;
+  databasePoolMax?: number | undefined;
+  env?: Record<string, string | undefined> | undefined;
 }): Record<string, string | undefined> {
   return {
     ...process.env,
+    ...input.env,
     RELAY_API_BIND_HOST: '127.0.0.1',
     RELAY_API_PORT: String(input.port),
     RELAY_API_ALLOWED_ORIGINS: input.allowedOrigin,
@@ -416,7 +418,7 @@ export interface TestApi {
   readonly dataRoot: string;
   readonly running: RunningApi;
   request(
-    method: 'GET' | 'POST' | 'PUT' | 'PATCH',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string,
     options?: SendOptions,
   ): Promise<HttpResponse>;
@@ -424,18 +426,23 @@ export interface TestApi {
   post(path: string, body: unknown, options?: SendOptions): Promise<HttpResponse>;
   put(path: string, body: unknown, options?: SendOptions): Promise<HttpResponse>;
   patch(path: string, body: unknown, options?: SendOptions): Promise<HttpResponse>;
+  /** 2026-10-19：撤销类端点（`DELETE /model-capabilities/...`）需要它。 */
+  del(path: string, options?: SendOptions): Promise<HttpResponse>;
   stop(): Promise<number | null>;
 }
 
 /** 启动一个真实 API 进程（真实监听端口 + 真实 PostgreSQL），并返回带默认 Host/Bearer 的客户端。 */
 export async function startTestApi(options: { databaseUrl?: string;
-  databasePoolMax?: number; dataRoot?: string } = {}): Promise<TestApi> {
+  databasePoolMax?: number; dataRoot?: string;
+  env?: Record<string, string | undefined> } = {}): Promise<TestApi> {
   const port = await pickFreePort();
   const allowedOrigin = `http://127.0.0.1:${await pickFreePort()}`;
   const bearerToken = randomBytes(32).toString('hex');
   const dataRoot = options.dataRoot ?? await createDataRoot();
   const running = startApi(baseEnvironment({
-    port, allowedOrigin, bearerToken, dataRoot, ...options,
+    port, allowedOrigin, bearerToken, dataRoot,
+    databaseUrl: options.databaseUrl, databasePoolMax: options.databasePoolMax,
+    env: options.env,
   }));
   const authorization = { authorization: `Bearer ${bearerToken}` };
 
@@ -465,6 +472,7 @@ export async function startTestApi(options: { databaseUrl?: string;
     post: (path, body, options) => request('POST', path, { ...options, body }),
     put: (path, body, options) => request('PUT', path, { ...options, body }),
     patch: (path, body, options) => request('PATCH', path, { ...options, body }),
+    del: (path, options) => request('DELETE', path, options),
     stop: async () => {
       const exitCode = await stopApi(running);
 

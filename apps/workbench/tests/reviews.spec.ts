@@ -163,6 +163,64 @@ describe("P07 Review Inbox", () => {
     mounted.unmount(); unmount = null;
   });
 
+  it("单列长正文下首屏给出「查看判断条件 / 前往决定」定位，焦点落在目标块", async () => {
+    activate();
+    const item = review();
+    const methods: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      methods.push(init?.method ?? "GET");
+      const url = String(input);
+      if (url === `${reviewUrl}?status=OPEN`) return response(200, { items: [item] });
+      if (url === `${reviewUrl}/${reviewId}`) return response(200, item);
+      if (url.endsWith("/artifacts")) return response(200, { items: [], next_cursor: null });
+      return response(200, { items: [], next_cursor: null });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const scrolled: string[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push((this as HTMLElement).dataset.testid ?? "other");
+    };
+    const mounted = await mountWorkbench(`/reviews?id=${reviewId}`); unmount = mounted.unmount; await flush();
+
+    // 2026-10-21 第三轮 R3-04：约 1162×782 窗口是单列（列表 → 正文 → 判断），完整正文之后才出现
+    // 「作出决定」，首屏没有任何通往决定区的入口。定位键因此必须挂在第一列，而不是判断列内部。
+    const nav = mounted.wrapper.get('.review-primary [data-testid="review-jump-decision"]');
+    expect(nav.exists()).toBe(true);
+    expect(mounted.wrapper.get('.review-primary [data-testid="review-jump-conditions"]').text()).toBe("查看判断条件");
+
+    await nav.trigger("click");
+    expect(scrolled).toContain("review-decision-actions");
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("review-decision-actions");
+    await mounted.wrapper.get('[data-testid="review-jump-conditions"]').trigger("click");
+    expect(scrolled).toContain("review-bound-summary");
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("review-bound-summary");
+    // 定位只是移动视图：不因此开放或提交任何决定。
+    expect(methods.every((method) => method === "GET")).toBe(true);
+  });
+
+  it("判断依据与可能影响写用户语言，原始键名与 JSON 只留在技术详情", async () => {
+    activate();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `${reviewUrl}?status=OPEN`) return response(200, { items: [review()] });
+      if (url === `${reviewUrl}/${reviewId}`) return response(200, review());
+      return response(200, { items: [], next_cursor: null });
+    }));
+    const mounted = await mountWorkbench(`/reviews?id=${reviewId}`); unmount = mounted.unmount; await flush();
+    const panel = mounted.wrapper.get('[data-testid="review-decision"]');
+    const clone = (panel.element as HTMLElement).cloneNode(true) as HTMLElement;
+    clone.querySelectorAll("details").forEach((node) => node.remove());
+    const visible = clone.textContent ?? "";
+    expect(visible).toContain("自动检查结果");
+    expect(visible).toContain("接受后");
+    expect(visible).not.toContain("check result");
+    expect(visible).not.toContain("on accept");
+    expect(visible).not.toContain("check_result");
+    // 原始数据没有消失，只是不再摆在正文里。
+    expect(panel.text()).toContain("check_result");
+    expect(panel.text()).toContain("on_accept");
+  });
+
   it("待审响应丢失后切换查询被拦截，确认原回执前保留原命令 ID", async () => {
     activate(); let commandId = ""; let posts = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

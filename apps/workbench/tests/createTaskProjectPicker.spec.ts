@@ -63,13 +63,10 @@ describe("live 创建任务的真实项目选择", () => {
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/tasks?view=create"); unmount = mounted.unmount;
-    // 全局近期工作已读取，但项目选择器仍须由用户打开后独立查询。
-    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?include_context=true`]);
-    expect(mounted.wrapper.find('[data-testid="task-project-list-count"]').exists()).toBe(false);
-    expect((mounted.wrapper.get('input[name="task-project-id"]').element as HTMLInputElement).value).toBe("");
-    await mounted.wrapper.get('[data-testid="task-project-list-open"]').trigger("click");
     await flush(30);
-    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?include_context=true`, `${root}/projects?status=active`]);
+    // 打开表单即加载首屏：用户不需要先点一次「读取进行中项目」（工作台 §18.8）。
+    // 只多一次分页 GET，不预取整个项目库。
+    expect(urls.filter((url) => url === `${root}/projects?status=active`)).toHaveLength(2);
     expect(mounted.wrapper.get('[data-testid="task-project-list-count"]').text())
       .toContain("已加载 1 项 · 当前搜索显示 1 项 · 仍有后续页");
     expect((mounted.wrapper.get('input[name="task-project-id"]').element as HTMLInputElement).value).toBe("");
@@ -107,7 +104,7 @@ describe("live 创建任务的真实项目选择", () => {
         : response(403, { code: "FORBIDDEN", detail: "项目列表失权" });
     }));
     const mounted = await mountWorkbench("/tasks?view=create"); unmount = mounted.unmount;
-    await mounted.wrapper.get('[data-testid="task-project-list-open"]').trigger("click"); await flush(30);
+    await flush(30);
     expect(mounted.wrapper.find(`[data-testid="task-project-choice-${projectA}"]`).exists()).toBe(true);
     authorized = false;
     await mounted.wrapper.get('[data-testid="task-project-list-refresh"]').trigger("click"); await flush(30);
@@ -135,11 +132,10 @@ describe("live 创建任务的真实项目选择", () => {
     }));
     const mounted = await mountWorkbench(`/tasks?view=create&project=${projectA}`); unmount = mounted.unmount;
     expect((mounted.wrapper.get('input[name="task-project-id"]').element as HTMLInputElement).value).toBe(projectA);
-    await mounted.wrapper.get('[data-testid="task-project-list-open"]').trigger("click");
     await act(async () => { connect(otherWorkspaceId); }); await flush(30);
     expect((mounted.wrapper.get('input[name="task-project-id"]').element as HTMLInputElement).value).toBe("");
     expect(mounted.wrapper.find(`[data-testid="task-project-choice-${projectA}"]`).exists()).toBe(false);
-    await mounted.wrapper.get('[data-testid="task-project-list-open"]').trigger("click"); await flush(30);
+    await flush(30);
     finishOld!(response(200, { items: [project(projectA, "迟到旧空间项目")], next_cursor: null }));
     await flush(30);
     expect(mounted.wrapper.get(`[data-testid="task-project-choice-${projectC}"]`).text()).toContain("新空间项目");
@@ -171,7 +167,7 @@ describe("live 创建任务的真实项目选择", () => {
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/tasks?view=create"); unmount = mounted.unmount;
-    await mounted.wrapper.get('[data-testid="task-project-list-open"]').trigger("click"); await flush(30);
+    await flush(30);
     await mounted.wrapper.get(`[data-testid="task-project-choice-${projectA}"]`).trigger("click"); await flush(30);
     await mounted.wrapper.get('input[name="task-title"]').setValue("冻结标题");
     await mounted.wrapper.get('input[name="task-expected-result"]').setValue("冻结目标");
@@ -225,6 +221,7 @@ describe("live 创建任务的真实项目选择", () => {
     expect((mounted.wrapper.get('input[name="task-title"]').element as HTMLInputElement).value).toBe("保留的标题");
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
     expect(fetchMock.mock.calls.filter(([input]) => String(input) === `${root}/tasks?scope=all`)).toHaveLength(1);
-    expect(fetchMock.mock.calls.filter(([input]) => String(input) === `${root}/projects?status=active`)).toHaveLength(1);
+    // 两份都在页面上：一份是左栏近期工作范围的项目列表，一份是创建表单的项目选择器首屏。
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === `${root}/projects?status=active`)).toHaveLength(2);
   });
 });

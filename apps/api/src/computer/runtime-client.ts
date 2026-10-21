@@ -4,8 +4,12 @@
  * 生命周期契约（docs/architecture/computer-plugin-v1.md §运行时）：
  *   * 懒启动——第一次工具请求才 spawn，不随 API 启动常驻；
  *   * 会话内保持——请求之间不退出， idle 超过 idleReapMs 才回收；
- *   * 崩溃即断开——进程退出立即让所有在途请求以 RUNTIME_UNAVAILABLE 失败，
- *     下一次请求重新 spawn（运行时每请求无状态，重连不继承任何半应用动作）；
+ *   * 崩溃即断开——进程退出立即让在途请求失败：已写入请求的外部效果可能已发生，
+ *     按「效果未知」结算；未写入的按 RUNTIME_UNAVAILABLE 安全失败。下一次请求
+ *     重新 spawn（运行时每请求无状态，重连不继承任何半应用动作）；
+ *   * 启动失败即未派发——进程根本没起来（可执行文件不存在等）时，在途请求一律
+ *     RUNTIME_UNAVAILABLE：没有派发就没有外部副作用，不该让用户去核对一次
+ *     没发生过的桌面动作；
  *   * 超时即杀掉——单请求超时后整个进程终止并由下一个请求重建，绝不留着
  *     一个可能已卡死的进程继续派发；
  *   * 取消不杀进程——abort 只解除本次等待；进行中的输入动作可能已产生外部
@@ -16,13 +20,13 @@
 
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { TextDecoder } from 'node:util';
 
 import {
   COMPUTER_PROTOCOL_VERSION,
   isComputerErrorCode,
   type ComputerEnvironment,
   type ComputerMethod,
-  type ComputerReply,
 } from './protocol.js';
 import { computerRuntimeExecutable, computerRuntimeMode, computerRuntimeUnavailableReason }
   from './config.js';
@@ -59,6 +63,8 @@ export interface ComputerRuntimeProcessLike {
   stdin: { write(data: string): unknown; end(): void } | null;
   stdout: { on(event: 'data', listener: (chunk: Buffer) => void): unknown } | null;
   stderr: { on(event: 'data', listener: (chunk: Buffer) => void): unknown } | null;
+  /** 进程确实起来了：Node 只在 spawn 成功时发这个事件，失败时只有 'error'。 */
+  on(event: 'spawn', listener: () => void): unknown;
   on(event: 'error', listener: (error: Error) => void): unknown;
   on(event: 'exit' | 'close', listener: (code: number | null) => void): unknown;
   kill(): boolean;
@@ -92,6 +98,12 @@ const DEFAULT_IDLE_REAP_MS = 60_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_LINE_BYTES = 32 * 1024 * 1024;
 const MAX_STDERR_CHARS = 4096;
+/** 严格解码：坏字节不能被替换成 U+FFFD 后当作合法回复交给调用方。 */
+const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true });
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 /** 默认 spawn：把 node 的 ChildProcess 收敛到最小进程形状。 */
 const defaultSpawn: SpawnProcess = (executable, env) => {
@@ -125,9 +137,16 @@ export class ComputerRuntimeClient {
   private readonly maxLineBytes: number;
 
   private process: ComputerRuntimeProcessLike | null = null;
+  /**
+   * 确实起来过的进程（Node 只在 spawn 成功时发 'spawn'）。
+   *
+   * 它区分两件事：**进程死了**（可能已产生外部副作用）与**进程从没起来**
+   * （可执行文件不存在等，请求从未派发）。后者不该按「效果未知」要求人工核对。
+   */
+  private readonly spawnedChildren = new WeakSet<ComputerRuntimeProcessLike>();
   private starting: Promise<ComputerRuntimeProcessLike> | null = null;
   private readonly pending = new Map<string, PendingRequest>();
-  private stdoutBuffer = '';
+  private stdoutBuffer: Buffer = Buffer.alloc(0);
   private idleTimer: NodeJS.Timeout | null = null;
   private stderrTail = '';
   private writeChain: Promise<void> = Promise.resolve();
@@ -282,8 +301,10 @@ export class ComputerRuntimeClient {
   private attach(child: ComputerRuntimeProcessLike): void {
     this.process = child;
     this.starting = null;
-    this.stdoutBuffer = '';
+    this.stdoutBuffer = Buffer.alloc(0);
     this.stderrTail = '';
+    // spawn 成功才有 'spawn'：可执行文件不存在等启动失败只会来 'error'。
+    child.on('spawn', () => { this.spawnedChildren.add(child); });
     child.stdout?.on('data', (chunk: Buffer) => this.onStdout(chunk));
     child.stderr?.on('data', (chunk: Buffer) => {
       if (this.stderrTail.length < MAX_STDERR_CHARS) {
@@ -292,75 +313,142 @@ export class ComputerRuntimeClient {
     });
     child.on('error', (error: Error) => {
       // spawn 失败（ENOENT 等）与运行中崩溃同 path：进程没了，在途请求全部失败。
-      this.onProcessGone(error instanceof Error ? error.message : String(error));
+      this.onProcessGone(child, error instanceof Error ? error.message : String(error));
     });
-    child.on('exit', () => this.onProcessGone('process exited'));
-    child.on('close', () => this.onProcessGone('process closed'));
+    child.on('exit', () => this.onProcessGone(child, 'process exited'));
+    child.on('close', () => this.onProcessGone(child, 'process closed'));
   }
 
   private onStdout(chunk: Buffer): void {
-    this.stdoutBuffer += chunk.toString('utf8');
+    // 按字节缓冲到完整行再解码：管道分块可能落在多字节字符内部，
+    // 逐 chunk toString 会把合法中文/emoji 变成 U+FFFD。
+    this.stdoutBuffer = this.stdoutBuffer.length === 0
+      ? chunk
+      : Buffer.concat([this.stdoutBuffer, chunk]);
+    let index = this.stdoutBuffer.indexOf(0x0a);
+    while (index >= 0) {
+      if (index > this.maxLineBytes) {
+        this.killProcess('oversized output line');
+        return;
+      }
+      const lineBytes = this.stdoutBuffer.subarray(0, index);
+      this.stdoutBuffer = this.stdoutBuffer.subarray(index + 1);
+      if (lineBytes.length > 0) {
+        let line: string;
+        try {
+          line = STRICT_UTF8.decode(lineBytes).trim();
+        } catch {
+          // 非法 UTF-8 与坏 JSON 同等处理：协议已不可信，杀掉进程，
+          // 在途请求按既有失联/UNKNOWN 路径结算。
+          this.killProcess('reply line is not valid UTF-8');
+          return;
+        }
+        if (line !== '') this.onLine(line);
+      }
+      index = this.stdoutBuffer.indexOf(0x0a);
+    }
+    // 没有换行的尾段也受同一字节上限约束；完整行已逐行检查并移出缓冲，
+    // 不能把同一 chunk 里多条合法行的总字节数误判为单行超限。
     if (this.stdoutBuffer.length > this.maxLineBytes) {
       this.killProcess('oversized output line');
-      return;
-    }
-    let index = this.stdoutBuffer.indexOf('\n');
-    while (index >= 0) {
-      const line = this.stdoutBuffer.slice(0, index).trim();
-      this.stdoutBuffer = this.stdoutBuffer.slice(index + 1);
-      if (line !== '') this.onLine(line);
-      index = this.stdoutBuffer.indexOf('\n');
     }
   }
 
   private onLine(line: string): void {
-    let reply: ComputerReply;
+    let parsed: unknown;
     try {
-      reply = JSON.parse(line) as ComputerReply;
+      parsed = JSON.parse(line);
     } catch {
       // 一行无法解析的 JSON 说明协议已漂移：杀掉进程，不猜后续行的形状。
       this.killProcess('unparseable reply line');
       return;
     }
-    if (reply.version !== COMPUTER_PROTOCOL_VERSION) {
-      this.killProcess(`unexpected protocol version ${String(reply.version)}`);
+    if (!isPlainRecord(parsed)) {
+      this.killProcess('reply line is not a JSON object');
       return;
     }
-    const entry = this.pending.get(reply.request_id);
+    const version = parsed.version;
+    if (typeof version !== 'string' || version !== COMPUTER_PROTOCOL_VERSION) {
+      this.killProcess(`unexpected protocol version ${String(version)}`);
+      return;
+    }
+    const requestId = parsed.request_id;
+    if (typeof requestId !== 'string' || requestId.length === 0) {
+      this.killProcess('reply is missing a string request_id');
+      return;
+    }
+    const success = parsed.success;
+    if (typeof success !== 'boolean') {
+      this.killProcess('reply success flag is not a boolean');
+      return;
+    }
+    let body:
+      | { ok: true; result: Record<string, unknown> }
+      | { ok: false; error: { code: string; message: string; retryable: boolean } };
+    if (success) {
+      if (!isPlainRecord(parsed.result)) {
+        this.killProcess('successful reply has a non-object result');
+        return;
+      }
+      body = { ok: true, result: parsed.result };
+    } else {
+      const errorBody = parsed.error;
+      if (
+        !isPlainRecord(errorBody) ||
+        typeof errorBody.code !== 'string' ||
+        typeof errorBody.message !== 'string' ||
+        typeof errorBody.retryable !== 'boolean'
+      ) {
+        this.killProcess('error reply has an incomplete error body');
+        return;
+      }
+      body = { ok: false, error: {
+        code: errorBody.code, message: errorBody.message, retryable: errorBody.retryable,
+      } };
+    }
+
+    const entry = this.pending.get(requestId);
     if (entry === undefined) return; // 迟到或重复的回复：没有等待者，静默丢弃。
-    this.pending.delete(reply.request_id);
+    this.pending.delete(requestId);
     clearTimeout(entry.timer);
     this.scheduleIdleReap();
-    if (reply.success) {
-      entry.resolve(reply.result ?? {});
+    if (body.ok) {
+      entry.resolve(body.result);
       return;
     }
-    const code = reply.error?.code ?? 'UNKNOWN';
-    const message = reply.error?.message ?? 'Computer Runtime 未给出错误详情';
+    const error = body.error;
+    const code = error.code;
     entry.reject(new ComputerRuntimeError(
       isComputerErrorCode(code) ? code as ComputerClientCode : 'RUNTIME_UNAVAILABLE',
-      `${code}: ${message}`,
-      reply.error?.retryable ?? false));
+      `${code}: ${error.message}`,
+      error.retryable));
   }
 
-  private onProcessGone(reason: string): void {
-    if (this.process === null && this.pending.size === 0) return;
+  private onProcessGone(child: ComputerRuntimeProcessLike, reason: string): void {
+    // 旧进程的 error/exit/close 可能晚于新进程启动：只结算事件对应的当前进程，
+    // 否则迟到的 close 会清掉新进程和在途请求。
+    if (this.process !== child) return;
     const detail = this.stderrTail === '' ? reason : `${reason}: ${this.stderrTail}`;
     this.process = null;
     this.starting = null;
-    this.stdoutBuffer = '';
+    this.stdoutBuffer = Buffer.alloc(0);
     // 进程换了，环境事实必须重新探测（DPI/子会话/显示器都可能已变）。
     this.environmentCache = null;
     for (const [id, entry] of this.pending) {
       clearTimeout(entry.timer);
-      // 已写入的请求：外部效果可能已发生，按「效果未知」交给调用方核对；
-      // 未写入的请求：确实没有派发，可以安全失败。
-      const uncertain = entry.written;
+      // 进程从没起来（可执行文件不存在、启动即失败）：请求确实没有派发，
+      // 不能按「效果未知」要求用户去核对一次没发生过的桌面副作用。
+      const neverSpawned = !this.spawnedChildren.has(child);
+      // 已写入且进程确实起来过：外部效果可能已发生，按「效果未知」交给调用方核对；
+      // 未写入或进程从未起来：确实没有派发，可以安全失败。
+      const uncertain = entry.written && !neverSpawned;
       entry.reject(uncertain
         ? new ComputerRuntimeError('IPC_DISCONNECTED',
           `Computer Runtime 已断开（${detail}）；本次请求的效果未知，需人工核对`, true, true)
         : new ComputerRuntimeError('RUNTIME_UNAVAILABLE',
-          `Computer Runtime 已断开（${detail}）；下一次请求将重新启动`, true));
+          neverSpawned
+            ? `Computer Runtime 未能启动（${detail}）；本次请求未派发`
+            : `Computer Runtime 已断开（${detail}）；下一次请求将重新启动`, true));
       this.pending.delete(id);
     }
   }
@@ -373,7 +461,7 @@ export class ComputerRuntimeClient {
     } catch {
       // kill 失败不改变「进程已不可信」的结论，在途请求照样失败。
     }
-    this.onProcessGone(`killed (${reason})`);
+    this.onProcessGone(child, `killed (${reason})`);
   }
 
   private scheduleIdleReap(): void {

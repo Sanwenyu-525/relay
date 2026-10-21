@@ -70,8 +70,8 @@ export default function TasksView() {
   const projectTitle = (projectId: string | null) => projectId === null ? "未归属项目" : projects.find((project) => project.id === projectId)?.title ?? projectId;
   const openCreate = () => navigate(`/tasks?view=create${scope === "inbox" ? "&tab=inbox" : ""}`);
   /**
-   * 轻量起步与完整表单是两个并列入口，不互相替代：轻量只要求先表达要完成什么，
-   * 完整表单保留为详细编辑入口（工作台 §18.7）。
+   * 「新建任务」默认走一句话登记（工作台 §18.7）：先记下要完成什么，验收标准、项目与委托
+   * 之后再补；完整定义仍在，只是不再作为默认入口挡在第一步。
    */
   const openLightweight = () => navigate(`/tasks?view=create&light=1${scope === "inbox" ? "&tab=inbox" : ""}`);
   const closeCreate = () => navigate(scope === "inbox" ? "/tasks?tab=inbox" : "/tasks");
@@ -87,8 +87,8 @@ export default function TasksView() {
   return <section className="skill-page task-list-page"><div className="page-layout"><div className="page-primary">
     <PageHeader testId="tasks-page-head" title="任务"
       lede="把目标拆成可执行的任务；完成依据是产物与验收。"
-      actions={<><button className="secondary-button" type="button" data-testid="task-create-light-open" onClick={openLightweight}><Plus aria-hidden="true" />轻量起步</button>
-        <button className="primary-button" type="button" data-testid="task-create-open" onClick={openCreate}><Plus aria-hidden="true" />新建任务</button></>} />
+      actions={<><button className="primary-button" type="button" data-testid="task-create-open" onClick={openLightweight}><Plus aria-hidden="true" />新建任务</button>
+        <button className="secondary-button" type="button" data-testid="task-create-full" onClick={openCreate}>填写完整定义</button></>} />
     <nav className="subnav" aria-label="任务范围"><Link className="subnav-item subnav-item--active" to="/tasks" data-testid="tasks-tab-all" aria-current="page">全部</Link><Link className="subnav-item" to="/tasks?tab=inbox" data-testid="tasks-tab-inbox">收件箱</Link><Link className="subnav-item" to="/tasks?tab=attention">人工待处理</Link></nav>
     <div className="list-toolbar list-toolbar--compact"><label className="filter-field">项目<select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)} name="task-filter-project"><option value="all">全部</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}<option value="inbox">未归属项目</option></select></label><label className="filter-field">状态<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as TaskStatus | "all")} name="task-filter-status"><option value="all">全部</option>{statusOptions.map((status) => <option key={status} value={status}>{taskStatusLabels[status]}</option>)}</select></label><label className="filter-field">执行模式<select value={modeFilter} onChange={(event) => setModeFilter(event.target.value as InteractionMode | "all")} name="task-filter-mode"><option value="all">全部</option>{modeOptions.map((item) => <option key={item} value={item}>{interactionModeLabels[item]}</option>)}</select></label><label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">按任务名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="task-search" placeholder="搜索任务" /></label></div>
     {refreshing && <p className="helper-text" role="status" data-testid="tasks-refreshing">正在按当前筛选更新列表，已显示的内容保持可见。</p>}
@@ -102,7 +102,7 @@ export default function TasksView() {
         : <EmptyState icon={ListTodo} as="h2" title="还没有任务"
           description="任务是一次可验收的工作：写清验收条件后即可开始，完成时留下确切产物版本。可以直接新建一条，也可以先建项目再在项目内拆任务。"
           testId="tasks-empty"
-          actions={<><button className="primary-button" type="button" onClick={openCreate}><Plus aria-hidden="true" />新建任务</button>
+          actions={<><button className="primary-button" type="button" onClick={openLightweight}><Plus aria-hidden="true" />新建任务</button>
             <Link className="secondary-button" to="/projects">打开项目</Link></>} />
       : <div className="table-scroll"><div className="data-table"><div className="data-row data-row--head data-row--tasks" aria-hidden="true"><span className="data-cell">任务</span><span className="data-cell">项目</span><span className="data-cell">工作状态</span><span className="data-cell">执行模式</span><span className="data-cell">当前执行者</span></div><ul className="data-list">{tasks.map((task) => <li key={task.id}><Link className="data-row data-row--tasks data-row--interactive" to={`/tasks/${task.id}`} data-testid={`task-row-${task.id}`} style={rowLinkStyle}><span className="data-cell"><strong title={task.title}>{task.title}</strong><small>任务修订 v{task.revision}</small></span><span className="data-cell data-cell--meta">{projectTitle(task.projectId)}</span><span className="data-cell"><StatusChip status={task.status} />{(task.waitingReason ?? task.blockedReason) && <small>{task.waitingReason ?? task.blockedReason}</small>}</span><span className="data-cell data-cell--meta">{interactionModeLabels[task.mode]}</span><span className="data-cell data-cell--meta">{executorLabels[task.executor]}</span></Link></li>)}</ul></div></div>}
     <p className="list-footer-note"><Info aria-hidden="true" />完成依据来自产物、验收与提交；工作状态、执行模式与当前执行者是三个独立事实，不能用一枚标签合并。</p>
@@ -182,8 +182,8 @@ function LiveTaskListView({ client, onCreate, onCreateLightweight }: {
     <div className="page-primary">
       <PageHeader testId="tasks-page-head" title="任务"
         lede="整个工作空间的任务；筛选只作用于已加载的页。"
-        actions={<><button className="secondary-button" type="button" data-testid="task-create-light-open" onClick={onCreateLightweight}><Plus aria-hidden="true" />轻量起步</button>
-          <button className="primary-button" type="button" data-testid="task-create-open" onClick={onCreate}><Plus aria-hidden="true" />新建任务</button></>} />
+        actions={<><button className="primary-button" type="button" data-testid="task-create-open" onClick={onCreateLightweight}><Plus aria-hidden="true" />新建任务</button>
+          <button className="secondary-button" type="button" data-testid="task-create-full" onClick={onCreate}>填写完整定义</button></>} />
       <nav className="subnav" aria-label="任务范围"><Link className="subnav-item subnav-item--active" to="/tasks"
         data-testid="tasks-tab-all" aria-current="page">全部</Link>
         <Link className="subnav-item" to="/tasks?tab=inbox"
@@ -217,7 +217,7 @@ function LiveTaskListView({ client, onCreate, onCreateLightweight }: {
               ? <EmptyState icon={ListTodo} as="h2" title="还没有任务"
                 description="任务是一次可验收的工作：写清验收条件后即可开始，完成时留下确切产物版本。可以直接新建一条，也可以先建项目再在项目内拆任务。"
                 testId="tasks-empty"
-                actions={<><button className="primary-button" type="button" onClick={onCreate}><Plus aria-hidden="true" />新建任务</button>
+                actions={<><button className="primary-button" type="button" onClick={onCreateLightweight}><Plus aria-hidden="true" />新建任务</button>
                   <Link className="secondary-button" to="/projects">打开项目</Link></>} />
               // 筛选无匹配与工作空间为空不同：只能说已加载范围内没有命中。
               : <EmptyState size="compact" icon={SearchX} title="已加载任务里没有匹配项"

@@ -54,7 +54,7 @@ it("失效原首选只标注不可调用，目录不自动改选；点合格条�
   const stale = document.querySelector<HTMLButtonElement>('[data-testid="model-selector-option-removed:free"]')!;
   expect(stale.disabled).toBe(true);
   expect(stale.getAttribute("aria-label")).toContain("已不在目录中");
-  expect(document.body.textContent).toContain("最多尝试 3 个");
+  expect(document.body.textContent).toContain("最多再试 3 个合格型号");
   expect(choose).not.toHaveBeenCalled();
   await clickItem("免费 A");
   // 2026-10-17 指令：点条目就是答案，不再经过「应用到后续消息」第二步。
@@ -138,4 +138,49 @@ it("首条消息场景：点击清单条目直接写入本地选择并关闭", a
   await clickItem("免费 A");
   expect(choose).toHaveBeenCalledWith("v/a:free");
   expect(document.querySelector(".model-selector-menu")).toBeNull();
+});
+
+/** 挂载不打开下拉的渲染：芯片文本与 title 就是用户在这一行看到的全部。 */
+function triggerName(): string | null {
+  return document.querySelector(".model-selector-trigger-name")?.textContent ?? null;
+}
+
+it("没有显式选择时芯片显示应用默认型号，不是「模型」占位（2026-10-21）", async () => {
+  const client = { getModelCatalog: async () => directory, refreshModelCatalog: async () => ({ status: "PUBLISHED", reason: null }),
+    getModelPortStatus: async () => ({ configured: true, model: "default-model" }),
+    getSessionModelSelection: async () => null } as unknown as RelayApiClient;
+  function Harness() {
+    const [open, setOpen] = useState(false);
+    return <ModelSelector client={client} sessionId="s1" open={open} onOpenChange={setOpen}
+      selectedModel={null} onChoose={vi.fn()} />;
+  }
+  const view = await mountReact(<Harness />); dispose = view.unmount; await flush();
+  expect(triggerName()).toBe("default-model");
+  expect(document.querySelector('[data-testid="model-selector-open"]')?.getAttribute("title")).toContain("default-model");
+});
+
+it("服务端没有应用默认时才退回「模型」占位，不谎报型号", async () => {
+  const client = { getModelCatalog: async () => directory, refreshModelCatalog: async () => ({ status: "PUBLISHED", reason: null }),
+    getModelPortStatus: async () => ({ configured: false, model: null }),
+    getSessionModelSelection: async () => null } as unknown as RelayApiClient;
+  function Harness() {
+    const [open, setOpen] = useState(false);
+    return <ModelSelector client={client} sessionId="s1" open={open} onOpenChange={setOpen}
+      selectedModel={null} onChoose={vi.fn()} />;
+  }
+  const view = await mountReact(<Harness />); dispose = view.unmount; await flush();
+  expect(triggerName()).toBe("模型");
+});
+
+it("会话显式选择优先于应用默认，本机记忆不冒充会话事实", async () => {
+  const client = { getModelCatalog: async () => directory, refreshModelCatalog: async () => ({ status: "PUBLISHED", reason: null }),
+    getModelPortStatus: async () => ({ configured: true, model: "default-model" }),
+    getSessionModelSelection: async () => ({ model: "v/a:free" }) } as unknown as RelayApiClient;
+  function Harness() {
+    const [open, setOpen] = useState(false);
+    return <ModelSelector client={client} sessionId="s1" open={open} onOpenChange={setOpen}
+      selectedModel={"v/a:free"} onChoose={vi.fn()} />;
+  }
+  const view = await mountReact(<Harness />); dispose = view.unmount; await flush();
+  expect(triggerName()).toBe("v/a:free");
 });

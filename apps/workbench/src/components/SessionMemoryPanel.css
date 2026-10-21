@@ -1,0 +1,125 @@
+/* 会话记忆面板（工作台 §40）：一条可折叠的控制带，位置在队列之后、输入卡之前。
+   默认收起时只占一行摘要，不抢转录区高度；展开后才出现窗口事实与动作。
+   宽度与输入卡同轴（--chat-measure），与队列、目录细条同一列。 */
+
+.session-memory {
+  flex: none;
+  width: 100%;
+  max-width: var(--chat-measure, var(--relay-layout-reading-maxWidth));
+  margin-inline: auto;
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-md, 10px);
+  background: var(--relay-color-bg-surface);
+  font-family: var(--relay-font-family-ui);
+}
+
+.session-memory > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  padding: var(--relay-space-2) var(--relay-space-3);
+  cursor: pointer;
+  list-style: none;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+}
+
+.session-memory > summary::-webkit-details-marker { display: none; }
+.session-memory > summary:focus-visible { outline: var(--relay-focus-width) solid var(--relay-color-focus-ring); outline-offset: 2px; }
+
+.session-memory-title {
+  color: var(--relay-color-text-primary);
+  font-weight: 600;
+}
+
+.session-memory-state,
+.session-memory-pending {
+  padding: 0 var(--relay-space-2);
+  border-radius: 999px;
+  background: var(--relay-color-status-neutral-bg);
+  color: var(--relay-color-status-neutral-text);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-line);
+}
+
+/* 四态各自可辨：有摘要=正常中性、失效=警告、一次性=中性但带说明、读取失败=危险。
+   颜色只做辅助，文字本身已经说清是哪一种。 */
+.session-memory-state[data-state="UNAVAILABLE"] { color: var(--relay-color-status-warning-text); }
+.session-memory-state[data-state="ONE_SHOT"] { color: var(--relay-color-status-neutral-text); }
+
+.session-memory-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-2);
+  padding: 0 var(--relay-space-3) var(--relay-space-3);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+  padding-top: var(--relay-space-3);
+}
+
+.session-memory-body h4 {
+  margin: 0;
+  font-size: var(--relay-font-size-caption);
+  font-weight: 600;
+  color: var(--relay-color-text-primary);
+}
+
+.session-memory-scope { margin: 0; }
+
+.session-memory-summary-text {
+  margin: 0;
+  padding: var(--relay-space-2) var(--relay-space-3);
+  border-radius: var(--relay-radius-sm, 6px);
+  background: var(--relay-color-bg-subtle);
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-body);
+  line-height: var(--relay-font-line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.session-memory-request-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-memory-request-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+}
+
+.session-memory-request-state { color: var(--relay-color-text-primary); }
+
+.session-memory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+}
+
+.session-memory-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-2);
+  padding: var(--relay-space-3);
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-sm, 6px);
+  background: var(--relay-color-bg-subtle);
+}
+
+.session-memory-confirm p { margin: 0; }
+
+/* 诊断信息（双修订、清除序号）：默认收起，展开后与正文同宽换行，不新增色值。 */
+.session-memory-diagnostics { margin-top: var(--relay-space-2); }
+
+.session-memory-diagnostics > summary {
+  color: var(--relay-color-text-secondary);
+  cursor: pointer;
+}
+
+.session-memory-diagnostics > summary::marker { color: var(--relay-color-action-primary); }

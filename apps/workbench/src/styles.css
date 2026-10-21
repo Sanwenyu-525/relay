@@ -49,9 +49,13 @@ body {
    非 auto 的 scrollbar-width 就改画原生滚动条，并忽略下面整组前缀规则——于是 thumb 是
    control 档的深绿灰，轨道两端还各带一枚跳转箭头，正是用户要求去掉的两处。
    需要整条隐藏滚动条的容器仍用标准属性 scrollbar-width: none（它同样屏蔽前缀规则）。 */
+/* 自绘滚动条的厚度只能写字面值，CSS 与 JS 都读不到「这条滚动条实际占了多宽」，
+   所以这里把它同时记成一个变量：任何要按滚动条让位的布局（聊天列的阅读列中线）
+   都必须引用这个变量，改宽度只改这两行。 */
+:root { --chat-scrollbar-width: 12px; }
 ::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
+  width: var(--chat-scrollbar-width, 12px);
+  height: var(--chat-scrollbar-width, 12px);
 }
 
 ::-webkit-scrollbar-track {
@@ -745,10 +749,13 @@ svg {
    2026-10-16 第七轮按用户「item 的间距再减小，而且要统一」撤掉分组覆盖里的 space.1——
    此前分组内 4px、已归档区 2px，同一列出现两档行距。 */
 .recent-work-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--relay-space-0-5); position: relative; }
-/* 分组相对段标题的上下留白：上 4px 段标题→分组、下 8px 分组之间与「末组→下一根区」同档。
+/* 分组相对段标题的上下留白：上 4px 段标题→分组、下 2px 只为「末组→下一根区」让出塌穿源。
    2026-10-16 第八轮按用户「间距还是太大」由 space.3(12) 收到 space.2(8)——
-   分组下外边距原为 12px，会塌穿包装层把根区间距顶回 12px，必须与根区 margin 同步收。 */
-.recent-work-group { position: relative; margin-block: var(--relay-space-1) var(--relay-space-2); margin-inline-start: var(--relay-space-2); }
+   分组下外边距原为 12px，会塌穿包装层把根区间距顶回 12px，必须与根区 margin 同步收。
+   2026-10-20 第九轮随根区 margin 收到 space.1(4)；同日第十轮按用户「减小到2px」再收到
+   space.0.5(2)——分组下外边距只服务「末组→下一根区」，分组↔分组间距由上外边距 4px 主导，
+   不随之下探。 */
+.recent-work-group { position: relative; margin-block: var(--relay-space-1) var(--relay-space-0-5); margin-inline-start: var(--relay-space-2); }
 /* 2026-10-16 第三轮截图反馈：根区之间不再画分隔线。目标／工作区（目录）／任务入口连排时，
    这三条横线把一列切成几段，层级改由字号档、字重、缩进与留白表达（见设计系统 §9.11）。
    同日第五轮按用户截图再收：margin 与 padding 原本各留一档（12 + 8 = 20px），分隔线撤掉后
@@ -758,8 +765,14 @@ svg {
    用户截图指认「四个根区间距没有统一」。
    第八轮（同日）：用户再看实机「间距还是太大」——条目行距已触紧凑 token 下限（32px 行高
    ＋2px），块间距再收一档到 space.2（8px），与分组下外边距同档；层级留白成为
-   8px（根区／分组）→ 4px（段标题→分组）→ 2px（条目）的整档缩放，不新增数值。 */
-.recent-work-section + .recent-work-section { margin-top: var(--relay-space-2); }
+   8px（根区／分组）→ 4px（段标题→分组）→ 2px（条目）的整档缩放，不新增数值。
+   第九轮（2026-10-20）：用户截图「这四个的间距再减小一点」——再收一档到 space.1（4px），
+   分组下外边距同步收（同第八轮的理由，塌穿会把间隙顶回 8px）；层级留白成为
+   4px（根区↔根区、分组↔分组、段标题→分组）→ 2px（条目），仍不新增数值。
+   第十轮（同日）：用户「减小到2px」——按指定值收到 space.0.5（2px，与条目行距同档），
+   分组下外边距同步收到 space.0.5；分组↔分组与段标题→分组仍是 4px（分组上外边距主导塌穿），
+   根区↔根区与条目行距同为 2px。 */
+.recent-work-section + .recent-work-section { margin-top: var(--relay-space-0-5); }
 /* 空态也属于辅助信息；双类限定避免靠后的全局 helper-text 把它放回正文档。
    水平居中：这一段没有可点对象，左对齐会读成「还有一列没显示出来的内容」。 */
 .recent-work .helper-text.recent-work-scope-note { margin: var(--relay-space-2); font-size: var(--relay-font-size-caption); line-height: var(--relay-font-lineHeight-ui); color: var(--relay-color-text-muted); text-align: center; }
@@ -925,14 +938,122 @@ svg {
 }
 .recent-work-pin > svg { width: var(--relay-font-size-caption); height: var(--relay-font-size-caption); }
 /* 未读标记：一枚圆点，画在类型图标与标题之间；状态同时写进行的可访问名称。
-   用 action.primary——置顶借用的是 selection 前景色，两者不是一回事，不为圆点另开新色。 */
+   用 action.primary——置顶借用的是 selection 前景色，两者不是一回事，不为圆点另开新色。
+   2026-10-19 用户指认「标记为未读之后这一行没有变化、不够明显」：圆点由 space.1(4px)
+   提到 space.1 + space.0.5(6px)，并让标题同时加粗（见下方 --unread 规则）——只放大一枚
+   4px 的点，在 12px 的 meta 标题旁边仍容易被读成图标的一部分；字重是第二道、也是不靠颜色的那道。 */
 .recent-work-unread {
   flex: none;
-  width: var(--relay-space-1);
-  height: var(--relay-space-1);
+  width: calc(var(--relay-space-1) + var(--relay-space-0-5));
+  height: calc(var(--relay-space-1) + var(--relay-space-0-5));
   border-radius: var(--relay-radius-round);
   background: var(--relay-color-action-primary);
 }
+/* 未读行的标题加粗：读/未读的差别不靠底色（底色已被选中态占用），只靠字重与那枚圆点。
+   当前行本来就是 medium，未读再加一层 semibold——同一行既选中又未读时仍然读得出未读。 */
+.recent-work-item--unread .recent-work-title { font-weight: var(--relay-font-weight-semibold); }
+.recent-work-item--unread .recent-work-kind { color: var(--relay-color-text-secondary); }
+
+/* 会话行的批量选择复选框（2026-10-20 用户指令「给会话 item 加一个复选框，方便删除记录」）。
+   与类型图标同一格：绝对定位压在 .recent-work-kind 上，行内布局一像素不动——160px 列宽下限下
+   标题可用宽、行高与行距因此都不变（recentWorkRailDensity.spec.ts 仍在守）。
+   显形规则与 ⋯ 完全一致，只有三种时机：本行悬停、本行键盘聚焦、本行已勾选。
+   **不做「一列常显」**（2026-10-20 用户指令「复选框不要常显」）：勾了第一条就让整列都冒出方框，
+   这一栏会被读成一排勾选框而不是会话列表，也把 12px 的类型图标整列换掉了。
+   静止态 display: none，既不占位也不进 Tab 序（行按钮获得焦点后本行才进入 focus-within，
+   复选框随即可达）。尺寸取 font.size.meta(14px)：比 12px 图标大一号才压得住，且不新增数值；
+   复选框不走控件基类，宽高在这里显式给。 */
+.recent-work-select {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: var(--relay-space-2);
+  transform: translateY(-50%);
+  z-index: 1;
+  display: none;
+  width: var(--relay-font-size-meta);
+  height: var(--relay-font-size-meta);
+  margin: 0;
+  cursor: pointer;
+}
+.recent-work-row:hover .recent-work-select,
+.recent-work-row:focus-within .recent-work-select,
+.recent-work-row[data-selected="true"] .recent-work-select { display: block; }
+/* 复选框显形时让出图标：两者同一格，12px 图形从 14px 方框边缘漏出来会读成一枚残缺图标。
+   用 visibility 而不是 display——图标那一格的位置与宽度保持不变。 */
+.recent-work-row:hover .recent-work-kind,
+.recent-work-row:focus-within .recent-work-kind,
+.recent-work-row[data-selected="true"] .recent-work-kind { visibility: hidden; }
+.recent-work-select:disabled { cursor: default; }
+/* 已勾选的行铺一档 selection.hover。画在 <li> 上而不是行按钮上：激活行自己那档
+   selection.bg 压在它之上，两者不抢同一条声明，选中与激活可以同时成立。 */
+.recent-work-row[data-selected="true"] {
+  background: var(--relay-color-selection-hover);
+  border-radius: var(--relay-radius-control);
+}
+
+/* 批量操作栏（2026-10-20 第五轮重构）：从主内容区上方居中的浮层挪回**左栏内部**，
+   落在「工作区（目录）」标题正下方。前两版分别试过常驻左栏顶部与 fixed 浮层：前者把
+   一整条常驻高度压在列表上（用户指认「整体下移、可视区域变小」），后者离勾选框太远、
+   还横跨整个主工作区（用户指认「打断视觉层级」）。现在只在有勾选时出现，不选时逐像素
+   回到原样。
+   `sticky` 而不是常驻或浮层：这一列是可滚的（.recent-work-scroll），勾选框散落在各目录组里，
+   操作栏跟着内容滚上滚下又会拉开距离；sticky 让它在「工作区（目录）」这一段里始终停在
+   列顶，滚出这一段才跟着走。底色必须不透明，否则滚过的条目会从它下面透出来。
+   视觉取轻量扁平：bg.subtle 中性底 + separator 细边 + radius.control，不用 shadow.floating、
+   不用 radius.panel——它不是浮层，是列表里的一块上下文工具条，不做成独立模态窗口。 */
+.recent-work-selection {
+  position: sticky;
+  top: 0;
+  z-index: var(--relay-zIndex-sticky);
+  display: grid;
+  gap: var(--relay-space-1);
+  margin: var(--relay-space-1) var(--relay-space-2) var(--relay-space-2);
+  padding: var(--relay-space-2);
+  background: var(--relay-color-bg-subtle);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  /* 红字多到能占满这一列时，工具条自己滚，不越出滚动容器。 */
+  max-height: 100%;
+  overflow-y: auto;
+  /* 出现/消失只做一次轻量淡入（150–200ms 档取 motion.panel 时长）：不整块侧栏跳动，
+     不做反复缩放。勾选本身不重播这段动画——元素只在有勾选时挂载、取消选择时卸载。 */
+  animation: recent-work-selection-in var(--relay-motion-duration-panel) var(--relay-motion-easing-standard);
+}
+@keyframes recent-work-selection-in {
+  from { opacity: 0; transform: translateY(calc(var(--relay-space-1) * -1)); }
+  to { opacity: 1; transform: translateY(0); }
+}
+html[data-motion="off"] .recent-work-selection { animation: none; }
+.recent-work-selection-count {
+  margin: 0;
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+  color: var(--relay-color-text-primary);
+  /* 计数是这块区域的主要信息：靠左与段标题、条目同一对齐轴；不再居中——这一列只有
+     160px 内容盒，居中会让它和下面两个左对齐的按钮读出两条轴线（2026-10-20 第五轮）。 */
+  text-align: start;
+}
+.recent-work-selection-note {
+  margin: 0;
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-ui);
+  color: var(--relay-color-text-muted);
+  text-align: start;
+}
+.recent-work-selection .recent-work-row-error { max-width: none; }
+/* 两键与 ⋯ 面板里的删除确认共用 `.recent-work-confirm-actions` 的高度、字号与键间一档
+   space.2；但批量条里两键按内容宽收窄、成对排在右端，计数留在左侧同一行轴。
+   `min-width` 让「删除」与「取消」等宽，也兜住「正在删除…」那几帧不把两键拉成左右不均。
+   这一列内容盒只有 160px：两颗 compact 键加一档 gap 恰好放得下，不再各占一半铺满。 */
+.recent-work-selection .recent-work-confirm-actions {
+  margin-block-start: 0;
+  justify-content: flex-end;
+}
+.recent-work-selection .recent-work-confirm-actions > button {
+  flex: 0 1 auto;
+  min-width: 3.5rem;
+}
+.text-button.recent-work-selection-danger { color: var(--relay-color-status-danger-text); }
 
 /* 会话行拖拽改序（2026-10-17，工作台 §28.1）：只有「目标」「工作区（目录）」里未归档的会话行可拖。
    落位横线绝对定位在这一列的 padding box 上（.recent-work-list 因此是它的定位上下文），
@@ -1134,6 +1255,71 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
 /* 失败说明按同一档宽换行，同样不参与面板定宽：一句 26 字的中文说明能把这层浮层撑到上限，
    而冲突说明本来就该留在原处读，不该靠把菜单拉宽来放下。 */
 .recent-work-row-error { max-width: var(--recent-work-panel-content); font-size: var(--relay-font-size-caption); color: var(--relay-color-status-danger-text); margin: 0; }
+
+/* 删除确认（2026-10-19，用户指令「这个弹窗改成这样的简单弹窗」）：不再是带遮罩、长正文与
+   关闭叉的 AppDialog，而是贴着 ⋯ 的一张窄卡——标题、一句后果、取消／删除两键。
+   外壳沿用 .recent-work-row-panel 的 fixed 摆位与向上翻折规则（同一个触发器、同一套几何），
+   只把宽度、内边距与条目间距换成对话框那一档；零新增 token、零新增色值。 */
+.recent-work-row-panel--confirm {
+  width: min(16rem, calc(100vw - var(--relay-space-4)));
+  /* 基座那条 max-width 15rem 是给「跟条目同宽」的菜单兜底的；确认卡要按上面的 min() 定宽，
+     不放开这一条会被悄悄压回 15rem。 */
+  max-width: none;
+  gap: var(--relay-space-2);
+  padding: var(--relay-space-3);
+}
+/* 小尖角指向 ⋯：8px 见方的方块绕自身中心转 45°，两条上边借 border 画出轮廓，
+   其余两边用底色盖住面板的细边。默认贴在卡片上沿、距右缘半个控件框处——此时卡片
+   开在触发器左下方，触发器中心正好落在那里。 */
+.recent-work-row-panel--confirm::before {
+  content: "";
+  position: absolute;
+  inset-block-start: calc(-1 * var(--relay-space-1));
+  inset-inline-end: calc(var(--relay-control-height-compact) / 2 - var(--relay-space-1));
+  width: calc(var(--relay-space-1) * 2);
+  height: calc(var(--relay-space-1) * 2);
+  background: var(--relay-color-bg-surface);
+  border-block-start: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-inline-start: var(--relay-border-width) solid var(--relay-color-border-separator);
+  transform: rotate(45deg);
+}
+/* 卡片开在触发器右侧时（常态：它比左栏宽），尖角换到左缘、竖直居中，转 -45° 指向左。
+   同一个角从「朝上」转到「朝左」正好是 -90°，边框仍是那两条上边，不需要另画一套轮廓。 */
+.recent-work-row-panel--confirm.recent-work-row-panel--arrow-start::before {
+  inset-block-start: calc(50% - var(--relay-space-1));
+  inset-inline-start: calc(-1 * var(--relay-space-1));
+  inset-inline-end: auto;
+  transform: rotate(-45deg);
+}
+.recent-work-confirm-title {
+  margin: 0;
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-semibold);
+  color: var(--relay-color-text-primary);
+}
+.recent-work-confirm-text {
+  margin: 0;
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-snug);
+  color: var(--relay-color-text-secondary);
+}
+/* 失败说明在这一层不吃动作面板那条 10rem 的窄档：卡片本身已有 16rem，再压窄会折成碎行。 */
+.recent-work-row-panel--confirm .recent-work-row-error { max-width: none; }
+.recent-work-confirm-actions {
+  display: flex;
+  gap: var(--relay-space-2);
+  margin-block-start: var(--relay-space-1);
+}
+/* 两键各占一半、合计铺满卡片内容宽（2026-10-19 用户指令「删除和取消的宽度加起来要和菜单一致」）：
+   菜单条目本来就是满行宽，两键沿用同一条左右边界，卡片左右各一档 space.3 的内边距就是外间距，
+   两键之间留一档 space.2。用 flex-basis: 0 而不是 auto，两键才按等分算宽，不被「正在删除…」
+   这种临时文案或按钮自身的内边距拉开长短。 */
+.recent-work-confirm-actions > button {
+  flex: 1 1 0;
+  min-height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-2);
+  font-size: var(--relay-font-size-meta);
+}
 
 .mobile-navigation { display: grid; gap: var(--relay-space-4); min-height: 0; }
 .mobile-navigation .recent-work { flex: none; overflow: visible; }
@@ -1437,6 +1623,12 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
   font-size: var(--relay-font-size-meta); overflow-wrap: anywhere;
 }
 .intervention-notifications-panel p { margin: 0; }
+/* 逐条事项（2026-10-21 第三轮 R3-03）：面板原本只有一句聚合计数，打开后仍不知道哪件事在等什么。
+   条目按「标题 / 原因 / 直达入口」三行成组，细边分行；面板自身的滚动与宽度不变。 */
+.intervention-notifications-list { display: grid; gap: var(--relay-space-2); margin: 0; padding: 0; list-style: none; }
+.intervention-notifications-list > li { display: grid; gap: var(--relay-space-1); padding-top: var(--relay-space-2);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.intervention-notifications-list strong { font-weight: var(--relay-font-weight-medium); }
 .intervention-notifications-permission { display: flex; align-items: center; gap: var(--relay-space-2); }
 .intervention-notifications-permission p { flex: 1; min-width: 0; }
 .intervention-notifications-permission .icon-button { flex: none; }
@@ -1613,6 +1805,15 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
 .markdown-preview__list {
   margin: 0 0 var(--relay-space-2);
   padding-left: var(--relay-space-4);
+}
+
+/* 引用块（2026-10-20）：模型常把前提或用户原话写成 `> …`，此前不支持会连同 `>` 原样显示成
+   正文，读起来像排版坏了。一条竖线 + 次要文字色，不加底色，避免与代码块抢同一档「块」。 */
+.markdown-preview__quote {
+  margin: 0 0 var(--relay-space-2);
+  padding-left: var(--relay-space-3);
+  border-left: calc(var(--relay-border-width) * 2) solid var(--relay-color-border-control);
+  color: var(--relay-color-text-secondary);
 }
 
 .markdown-preview__code {
@@ -1907,6 +2108,22 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-panel);
   box-shadow: var(--relay-shadow-card);
+}
+
+/* 面板内重复卡片的技术细节（2026-10-21 第三轮 R3-03）：编码、UUID、版本收进这里，
+   卡片正文只留「哪一个对象、要做什么、从哪进」。待处理队列一屏可能有十几张卡，
+   每张都套一个页脚级附注盒子会把状态读成脚手架，所以只留一行安静的摘要与缩进内容。 */
+.surface-panel .attention-identity {
+  margin-top: var(--relay-space-1);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+}
+
+.surface-panel .attention-identity > summary { cursor: pointer; }
+
+.surface-panel .attention-identity > p {
+  margin: var(--relay-space-1) 0 0;
+  overflow-wrap: anywhere;
 }
 
 /* 页脚解释/诊断折叠块（.page-explanation）：跨多个视图共用的辅助说明与调试入口。

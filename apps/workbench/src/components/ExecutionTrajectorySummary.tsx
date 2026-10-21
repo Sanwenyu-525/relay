@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import ChatLocalFileDiff from "./ChatLocalFileDiff";
+import MessageCodeBlock from "./MessageCodeBlock";
 import { useRunToolCalls } from "../lib/useRunToolCalls";
 import { useRunToolCallPreviews } from "../lib/useRunToolCallPreviews";
 import { localFileDiffRows } from "../lib/localFileDiffRows";
@@ -158,23 +159,29 @@ export default function ExecutionTrajectorySummary({ client, runId, revision = n
     </p>;
   }
   const counts = count(projection);
-  const parts: string[] = [];
-  if (counts.reads > 0) parts.push(`读取/检索 ${counts.reads} 次`);
-  if (counts.writes > 0) parts.push(`写入 ${counts.writes} 次`);
-  if (counts.checks > 0) parts.push(`检查 ${counts.checks} 次`);
-  if (counts.failed > 0) parts.push(`${counts.failed} 项失败或未执行`);
-  if (counts.waiting > 0) parts.push(`${counts.waiting} 项等待你批准`);
-  if (counts.running > 0) parts.push(`${counts.running} 项进行中或结果未决`);
-  if (counts.unavailable > 0) parts.push(`${counts.unavailable} 项结果未提供`);
-  if (parts.length === 0) parts.push("这次执行没有调用工具");
+  // 统计标签按类别一枚一枚排；「等待你批准」是唯一需要用户动手的一类，
+  // 单独标 attention 档（琥珀细线），不与普通计数混在同一个视觉层。
+  const parts: { readonly text: string; readonly attention?: boolean }[] = [];
+  if (counts.reads > 0) parts.push({ text: `读取/检索 ${counts.reads} 次` });
+  if (counts.writes > 0) parts.push({ text: `写入 ${counts.writes} 次` });
+  if (counts.checks > 0) parts.push({ text: `检查 ${counts.checks} 次` });
+  if (counts.failed > 0) parts.push({ text: `${counts.failed} 项失败或未执行` });
+  if (counts.waiting > 0) parts.push({ text: `${counts.waiting} 项等待你批准`, attention: true });
+  if (counts.running > 0) parts.push({ text: `${counts.running} 项进行中或结果未决` });
+  if (counts.unavailable > 0) parts.push({ text: `${counts.unavailable} 项结果未提供` });
+  if (parts.length === 0) parts.push({ text: "这次执行没有调用工具" });
   const reads = settledReads(projection);
 
   return <div className="execution-summary" data-testid="execution-summary">
-    <p className="helper-text">
-      <span>{parts.join(" · ")}</span>
-      {projection.waitReason !== null && <span className="helper-text"> · Run 等待原因 {waitReasonText(projection.waitReason)}</span>}
-    </p>
-    {counts.waiting > 0 && <p className="helper-text" data-testid="execution-waiting-approval">
+    {/* 调用统计按类别各占一枚标签（§37.1）：一类一件事，扫读时不用在一串「·」里数项；
+        等待原因跟在标签行下方，不与计数抢同一行。 */}
+    <ul className="execution-counts" aria-label="本次执行的调用统计">
+      {parts.map((part, index) => <li key={index} className="execution-count"
+        data-tone={part.attention ? "attention" : undefined}>{part.text}</li>)}
+    </ul>
+    {projection.waitReason !== null &&
+      <p className="helper-text">Run 等待原因 {waitReasonText(projection.waitReason)}</p>}
+    {counts.waiting > 0 && <p className="execution-waiting" data-testid="execution-waiting-approval">
       <a className="inline-link" data-testid="execution-waiting-approval-link"
         href={approvalHref ?? APPROVAL_FALLBACK_HREF}>打开审批入口批准或拒绝这次动作</a>
     </p>}
@@ -191,8 +198,10 @@ export default function ExecutionTrajectorySummary({ client, runId, revision = n
           const lines = resultText(call).split("\n");
           const shown = lines.slice(0, INLINE_MAX_LINES);
           return <li key={call.id} data-testid={`execution-read-${call.id}`}>
-            <p className="helper-text">{call.toolName} · {callTarget(call)}</p>
-            <pre className="trajectory-preview">{shown.join("\n")}</pre>
+            {/* 工具回执与消息里的代码 fence 同一档可复制文本块（§37.1）：顶行是「工具 · 目标」，
+                正文逐字来自 result_ref，超限只在块内滚动并另行说明，不截断后冒充完整。 */}
+            <MessageCodeBlock label={`${call.toolName} · ${callTarget(call)}`} text={shown.join("\n")}
+              copyLabel="复制这段工具回执" />
             {lines.length > shown.length &&
               <p className="helper-text">还有 {lines.length - shown.length} 行未在此展开；完整内容见工具轨迹。</p>}
           </li>;

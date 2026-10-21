@@ -29,7 +29,8 @@ async function locked(r: Repositories, input: Mutation) {
   const located = await r.workSegments.read(input.segmentId);
   if (located?.workspace_id !== input.workspaceId) throw resourceNotFound('WorkSegment');
   await authority(r, input.workspaceId, located.project_id);
-  const row = (await r.workSegments.read(located.id, true))!;
+  const row = await r.workSegments.read(located.id, true);
+  if (row === undefined) throw resourceNotFound('WorkSegment');
   if (row.revision !== requireRevision(input.expectedRevision, 'expected_revision')) throw revisionConflict({
     entityType: 'WORK_SEGMENT', expectedRevision: input.expectedRevision, actualRevision: row.revision.toString() });
   return row;
@@ -170,8 +171,10 @@ export async function resolveWorkSegmentEvent(db: DbExecutor, input: Scope & {
       const segment = located === undefined ? undefined : await r.workSegments.read(located.segment_id);
       if (segment?.workspace_id !== input.workspaceId) throw resourceNotFound('WorkSegmentEvent');
       await authority(r, input.workspaceId, segment.project_id);
-      const row = (await r.workSegments.read(segment.id, true))!;
-      const event = (await r.workSegments.readEvent(input.eventId, true))!;
+      const row = await r.workSegments.read(segment.id, true);
+      if (row === undefined) throw resourceNotFound('WorkSegment');
+      const event = await r.workSegments.readEvent(input.eventId, true);
+      if (event === undefined) throw resourceNotFound('WorkSegmentEvent');
       if (event.revision !== requireRevision(input.expectedRevision, 'expected_revision')) throw revisionConflict({
         entityType: 'WORK_SEGMENT_EVENT', expectedRevision: input.expectedRevision, actualRevision: event.revision.toString() });
       if (event.status === 'WITHDRAWN' || input.action === 'CONFIRM' && event.status !== 'CANDIDATE') throw invalidTransition('当前事件状态不支持该处理。');

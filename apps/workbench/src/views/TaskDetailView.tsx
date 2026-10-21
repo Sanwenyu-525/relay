@@ -105,7 +105,8 @@ export default function TaskDetailView() {
   const projectWriteBlockedReason = result?.source !== "live" ? null :
     refreshing || loading || error !== null ? "任务事实正在核对或读取失败，不能提交新的任务命令。" :
     result.task.projectId === null ? null : result.projectArchivedAt === undefined ?
-      `Project 事实正在核对或读取失败，不能提交新的任务命令。${result.projectReadError ?? ""}` :
+      // `undefined` 是「项目事实还没读到」：不写成读取失败，避免任务详情先闪一句红字再消失。
+      result.projectReadError === null ? null : `Project 事实读取失败，不能提交新的任务命令。${result.projectReadError}` :
       result.projectArchivedAt !== null ? "项目已归档，不能提交新的任务命令。" : null;
   // UI-10：AI 持有执行权时，人工不能直接编辑产物或验收；页头主操作改为“请求接手”，接手在运行页生效后再编辑。
   const aiHolds = result?.source === "live" && result.task.executor === "AI";

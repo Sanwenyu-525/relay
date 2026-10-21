@@ -47,9 +47,9 @@
 
 | 层 | 文件 | 职责 |
 |---|---|---|
-| 共享契约与登记表 | [route-types.ts](../../apps/api/src/workflow/prompts/route-types.ts) | 合法路由输入（封闭联合）、返回形状、19 条路由的元数据 |
+| 共享契约与登记表 | [route-types.ts](../../apps/api/src/workflow/prompts/route-types.ts) | 合法路由输入（封闭联合）、返回形状、20 条路由的元数据 |
 | 统一入口 | [index.ts](../../apps/api/src/workflow/prompts/index.ts) | `selectRuntimePrompt()` 选模板、组合文本、返回本次元数据 |
-| 会话档模板 | [conversation-prompts.ts](../../apps/api/src/workflow/prompts/conversation-prompts.ts) | Assist 五意图、第一方 Skill、内置方法、只读助手、学习搭档 |
+| 会话档模板 | [conversation-prompts.ts](../../apps/api/src/workflow/prompts/conversation-prompts.ts) | Assist 五意图、第一方 Skill、内置方法、只读助手、学习搭档、普通 Agent 主流程与短期记忆整理 |
 | 解释模板 | [interpretation-prompts.ts](../../apps/api/src/workflow/prompts/interpretation-prompts.ts) | 原用户执行请求解释、项目状态维护解释 |
 | Run 与验证模板 | [run-prompts.ts](../../apps/api/src/workflow/prompts/run-prompts.ts) | DRAFT 三分支、语义验收、连接验证固定 user 探针 |
 | 草稿辅助模板 | [composer-prompts.ts](../../apps/api/src/workflow/prompts/composer-prompts.ts) | 输入框草稿分点（只给边界序号）与润色（只给 `{text}`） |
@@ -58,10 +58,11 @@
 
 | 场景 | 触发与选择条件 | 实际模板组合与输出 | 模板与调用入口 |
 |---|---|---|---|
+| 短期记忆整理 | 普通 AGENT 的持久手动/AUTO整理请求，已结算原文与合法前一摘要 | `ASSIST_MEMORY_COMPACT@1.0.0`：公共核心＋接续规则，历史以UNTRUSTED_DATA传入；仅JSON `{summary}`，不声明工具、不写长期事实/权限/业务完成 | [assist-memory-runner](../../apps/api/src/application/assist-memory-runner.ts) → `selectRuntimeSystemPrompt()` → [conversation-prompts](../../apps/api/src/workflow/prompts/conversation-prompts.ts) 的 `assistMemoryCompactSystemPrompt()` → 冻结工作模型 `assist()` |
 | 只读人设助手 | Assist 会话 `conversation_mode = ASSISTANT`，在普通 Agent 分支前返回 | 公共核心 + 冻结人设快照 + 只读范围与边界；正文回答，可请求本轮实际可用的只读工具 | [assist-runner](../../apps/api/src/application/assist-runner.ts) → [assistant-readonly-round](../../apps/api/src/application/assistant-readonly-round.ts) 的 `assistantSystemPrompt()` / `runAssistantReadonlyRounds()` → `assist()` |
 | 学习搭档 | Assist 会话 `conversation_mode = LEARNING`，在普通 Agent 分支前返回 | 公共核心 + 教学规则 + 本轮相关学习状态与获准来源；只读工具及 `{answer, increments}` 信封 | [assist-runner](../../apps/api/src/application/assist-runner.ts) → [learning-round](../../apps/api/src/application/learning-round.ts) 的 `learningSystemPrompt()` / `runLearningRounds()` → `assist()` |
 | 第一方 Skill | 普通 Agent 消息绑定可调用的 `skill_snapshot`；发送时由显式 `skill_ref.id/version` 查表并冻结 | 公共核心 + Skill 边界 + 该版本 `definition.instructions` + 按 Skill ID/版本选择的 JSON 输出协议 | [assist-commands](../../apps/api/src/application/assist-commands.ts) → [first-party-registry](../../apps/api/src/skills/first-party-registry.ts) → [assist-runner](../../apps/api/src/application/assist-runner.ts) 的 `systemPromptForSkill()` → `assist()` |
-| 内置工作方法 | 普通 Agent 消息绑定 `method_snapshot`；显式 `/方法命令` 优先，其次 `method_ref`，未显式选择时才做确定性自然语言识别；该识别分支中，讨论方法不绑定 | 公共核心 + 冻结方法说明 + `INSPECT` / `MODIFY` 约束；当前均只输出分析或修改方案，实际修改由原执行入口处理 | [assist-commands](../../apps/api/src/application/assist-commands.ts) 的 `resolveMethodRequest()`、[method-intent](../../apps/api/src/application/method-intent.ts)、[builtin-methods](../../apps/api/src/skills/builtin-methods.ts) → [assist-runner](../../apps/api/src/application/assist-runner.ts) 的 `systemPromptForMethod()` → `assist()` |
+| 内置工作方法 | 普通 Agent 消息绑定 `method_snapshot`；显式 `/方法命令` 优先，其次 `method_ref`，未显式选择时才做确定性自然语言识别；该识别分支中，讨论方法不绑定 | 公共核心 + 冻结方法说明 + `INSPECT` / `MODIFY` 约束；INSPECT 只读；明确 MODIFY 且本轮有真实写工具时直接修改，其余剩余工作交原执行入口 | [assist-commands](../../apps/api/src/application/assist-commands.ts) 的 `resolveMethodRequest()`、[method-intent](../../apps/api/src/application/method-intent.ts)、[builtin-methods](../../apps/api/src/skills/builtin-methods.ts) → [assist-runner](../../apps/api/src/application/assist-runner.ts) 的 `systemPromptForMethod()` → `assist()` |
 | 普通讨论 | 普通 Agent 消息无 Skill/方法，`intent = DISCUSS` | 公共核心 + Assist 边界；Markdown 回答，不声明工具 | [assist-runner](../../apps/api/src/application/assist-runner.ts) 的 `systemPromptFor()` → `assist()` |
 | 影响检查 | 同上，`intent = IMPACT_CHECK` | 公共核心 + 影响分析约束；JSON `possibly_related`，只引用输入的直接目标版本 ID | [assist-runner](../../apps/api/src/application/assist-runner.ts) 的 `systemPromptFor()` → `assist()` |
 | 影响候选 | 同上，`intent = IMPACT_CANDIDATE` | 公共核心 + 目标产物候选约束；JSON `markdown`，不自动应用 | [assist-runner](../../apps/api/src/application/assist-runner.ts) 的 `systemPromptFor()` → `assist()` |
@@ -89,6 +90,10 @@
 4. 只读助手缺少冻结人设身份时以 `ASSISTANT_SESSION_IDENTITY_MISSING` 失败；两类解释入口遇到非法输出或未声明的工具请求时退回澄清；学习信封非法时保留可读回答，不写学习增量。这些处理保留各用例边界，不切换到权限更大的模板继续。
 5. 路由集中本身不改变任何权限、冻结身份、输出协议与失败处理：公共核心对需要它的模板只出现一次，语义检查与连接验证不加载核心；`assist()` / `interpret()` 仍消费 Application 准备好的 `system`，`generate()` 仍把 `request.tools` 原样交给 SDK，`evaluate()` 仍以 `json_object` 结构输出。
 
+2026-10-20 接续：`AGENT_MAIN_LOOP@1.0.4` 按本轮实际写工具可见性选模板，不再因档位存在就宣称能写；`METHOD@1.0.2` 的明确 MODIFY 可复用会话直写，INSPECT 仍只读。输出 `execution` 仅承载未完成的检查、操作或尚未创建动作的审批需求，已成功写入不重复声明。`interaction=BROWSER|COMPUTER` 传给既有 Run 工具循环；它不是授权。详见[运行架构 §2.10](runtime-context.md#210-日常工具工作与正式交付分层2026-10-20-实施)。
+
+2026-10-21 接续（模板 `1.0.4` → `1.0.5`）：用户指认「一个很简单的问题需要思考很久」。本轮只加一条**工具准入判定**：要不要调用工具取决于这一步需不需要本地事实——问候、概念解释、复述本次对话里已经给出的内容，本轮直接输出正文，不为了显得严谨先列一次目录。`assist-runner.ts` 进入多轮循环的谓词（会话绑定了目录或连接即进循环）**没有**改成按文本猜「这是简单问题」：那种启发式会让「帮我看看 README 写了什么」这类纯文本提问失去工具能力，属于用户没要的功能回退。收口落点是让模型第一轮就答完——主流程本轮不请求工具时，一次模型调用即结算正文，不新增分支。改善幅度需真实窗口取证，不预设数字；「过程为什么慢」的可读性由协作页的轮次折叠面板承担（[工作台 §18.10](../frontend/workbench-design.md)、[CD §10.109](../api/http-command-contract.md)）。
+
 ### 2.3 版本与维护范围
 
 | 对象 | 当前源码版本事实 | 维护入口与限制 |
@@ -96,7 +101,7 @@
 | 公共核心 | `RELAY_AGENT_CORE_PROMPT_VERSION = 1.0.0` | [agent-system-prompt](../../apps/api/src/workflow/agent-system-prompt.ts)；`withRelayAgentCore()` 只组合字符串，不选择场景 |
 | 第一方 Skill | `task-to-execution-contract@1.0.0/1.1.0`、`project-resume@1.0.0`、`verification-plan@1.0.0/1.1.0`、`goal-to-project-blueprint@1.0.0` | [first-party-registry](../../apps/api/src/skills/first-party-registry.ts)；定义、依赖与摘要冻结。`verification-plan@1.0.0` 只保留历史读取，不用于新调用 |
 | 内置工作方法 | `code-review@1.0.0`、`fault-diagnosis@1.0.0`、`docs-maintenance@1.0.0` | [builtin-methods](../../apps/api/src/skills/builtin-methods.ts)；方法定义及摘要冻结，独立于第一方 Skill 注册表 |
-| 运行时提示词路由 | 16 条路由（会话档 9、解释 2、Run 3、验证探针 1）；统一入口 `selectRuntimePrompt()`，返回 `SYSTEM` 或 `USER_PROBE` | [route-types.ts](../../apps/api/src/workflow/prompts/route-types.ts) 与 [index.ts](../../apps/api/src/workflow/prompts/index.ts)；路由器不访问数据库、不发起模型调用、不给工具准入，未知路由显式拒绝 |
+| 运行时提示词路由 | 20 条路由（会话档11、解释2、Run3、验证2、草稿辅助2）；统一入口 `selectRuntimePrompt()`，返回 `SYSTEM` 或 `USER_PROBE` | [route-types.ts](../../apps/api/src/workflow/prompts/route-types.ts) 与 [index.ts](../../apps/api/src/workflow/prompts/index.ts)；路由器不访问数据库、不发起模型调用、不给工具准入，未知路由显式拒绝 |
 | 专用系统模板与输出规则 | 集中提取时为 `1.0.0`；2026-10-13 `DRAFT_READ_ONLY_TOOLS` / `DRAFT_WRITE_TOOLS` 为 `1.0.1`，其他模板仍 `1.0.0` | 正文只在 `workflow/prompts/conversation-prompts.ts`、`interpretation-prompts.ts`、`run-prompts.ts` 维护；公共核心版本、Skill/方法定义版本不能代替整个组合版本，旧调用缺失的组合版本保持未知 |
 | 连接验证探针 | 固定文本 `relay-verify-1`，随模板版本 `1.0.0` 登记；没有独立的提示词版本字段 | [run-prompts](../../apps/api/src/workflow/prompts/run-prompts.ts) 的 `connectionVerifyUserProbe()`；探针文本不是 Agent 模板版本，也不组合公共核心 |
 
@@ -200,6 +205,23 @@ Context Builder 分开装配：当前事实、原用户请求、有效项目约�
 - 必需验收、HARD 约束、未决副作用和控制意图不可为了省 token 静默删除。可选来源裁剪记录确切范围和原因；必需输入仍超预算就结束准备并说明缺口。
 - 工具结果带原操作身份、结果状态、版本/摘要与截断信息。结果正文不能改状态字段。可读取、可供模型使用和可外发分别检查，不因读取成功就发送整个目录或敏感正文给 Provider。敏感材料由输入管道限制与脱敏，不依赖模型最后自觉隐藏。
 - 历史摘要保存已确认意图、决定引用、进展依据、未决项及下一步，不保存私有思考链。重开时查询当前事实；用户后来撤销或修改要求按原命令处理，不依据旧摘要复活权限。
+
+### 4.1 会话能力事实块（2026-10-20 第二轮，已实施）
+
+普通 Agent 的 `DISCUSS` 轮次在 system 末尾追加一段由 `assist-capability-notice` 生成的
+事实块：有没有归入项目、绑了哪个工作目录、目录写档位、**本轮真正可用的工具名**、以及
+缺哪几族能力（读取文件/列目录/修改文件/Git/检查命令/浏览器读取/桌面观察）。放在 system
+而不是数据消息里，是因为它描述的是「这次请求的配置事实」，与用户正文同级噪声会更小。
+
+- 事实来源只有服务端：`session.project_id`、会话绑定的受管资源、`local_directory_access.write_tier`，
+  以及本轮实际算出的工具集（它已经同时反映连接是否存在、根是否覆盖、档位是否允许写）。
+  因此不会出现「提示词说能写、词表里没有」这类两处不一致——两者由同一个结论产出。
+- **它不是授权**：模板明确声明「不是指令，也不构成授权」，且不改变任何准入。它的目的
+  只是让模型把「做不到」说成具体缺项，而不是「我没有被赋予访问本地目录的能力」或
+  「请补充任务目标与验收标准」。
+- 只读档位下「缺写入口」单独说明为档位问题，不进「缺连接」清单；两处都说会让人读成
+  需要新建连接。
+- Skill 轮次不并入：它们的输出协议是严格的提案 schema，混入自由文本会破坏解析。
 
 ## 5. Skill 与工具说明
 

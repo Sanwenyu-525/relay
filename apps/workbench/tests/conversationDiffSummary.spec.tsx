@@ -10,7 +10,7 @@ import { flush, mountReact } from "./mountApp";
 // 展开阅读与总数同修订、迟到响应不覆盖新值，以及「从现在开始统计」由用户主动触发。
 
 const changed: Extract<RelayConversationDiff, { available: true }> = {
-  available: true, baselineCapturedAt: "2026-10-16T09:00:00Z", baselineRevision: "3",
+  available: true, scope: "SESSION", baselineCapturedAt: "2026-10-16T09:00:00Z", baselineRevision: "3",
   rootPath: "D:\\Work\\Demo", resourceId: "res-1", incomplete: false, coverage: null,
   totalFiles: 3, totalAdded: 145, totalRemoved: 8,
   files: [
@@ -62,7 +62,8 @@ describe("会话总 diff 入口", () => {
       await toggle(view).trigger("click");
       const panel = view.wrapper.get('[data-testid="conversation-diff-panel"]');
       expect(panel.text()).toContain("本次对话的文件变化");
-      expect(panel.text()).toContain("包含该目录自基线起的同期修改，不代表全部由 Agent 产生");
+      // 会话口径：只算本会话写入的文件，同目录其他程序/其他会话的同期修改不计入。
+      expect(panel.text()).toContain("只统计本会话写入的文件");
       expect(panel.get('[data-testid="conversation-diff-files"]').findAll(".conversation-diff-file")).toHaveLength(3);
       expect(toggle(view).attributes("aria-expanded")).toBe("true");
       // 展开正文按同一路径读取，并显示同一修订下的行。
@@ -70,6 +71,34 @@ describe("会话总 diff 入口", () => {
       await flush(60);
       expect(view.wrapper.get('[data-testid="conversation-diff-file-src/a.ts"]')
         .find('[role="table"]').text()).toContain("added line");
+    } finally { view.unmount(); }
+  });
+
+  it("对话入口按会话口径请求：只算本会话落盘的路径", async () => {
+    const client = clientOf();
+    const view = await mount(client);
+    try {
+      await flush(40);
+      expect(client.getConversationDiff).toHaveBeenCalledWith("s-1", "SESSION");
+    } finally { view.unmount(); }
+  });
+
+  it("内联形态（工作详情「变更」页签）：直接摊开清单、按目录口径请求，未绑定目录也照常读", async () => {
+    const client = clientOf({ getConversationDiff: vi.fn(async (): Promise<RelayConversationDiff> => ({
+      ...changed, scope: "DIRECTORY" })) });
+    const view = await mountReact(createElement(ConversationDiffSummary, {
+      client, sessionId: "s-1", enabled: true, directoryBound: false,
+      scope: "DIRECTORY", inline: true }));
+    try {
+      await flush(40);
+      // 目录口径是另一条读法：同一个会话、同一份基线，范围不同。
+      expect(client.getConversationDiff).toHaveBeenCalledWith("s-1", "DIRECTORY");
+      // 页签里没有「展开／收起」这一层，清单直接摊开。
+      expect(view.wrapper.find('[data-testid="conversation-diff-toggle"]').exists()).toBe(false);
+      const panel = view.wrapper.get('[data-testid="conversation-diff-panel"]');
+      expect(panel.text()).toContain("本次对话期间该目录的变化");
+      expect(panel.text()).toContain("包含该目录自基线起的同期修改，不代表全部由 Agent 产生");
+      expect(panel.text()).toContain("src/a.ts");
     } finally { view.unmount(); }
   });
 
@@ -155,12 +184,51 @@ describe("会话总 diff 入口", () => {
     } finally { view.unmount(); }
   });
 
-  it("扫描覆盖不完整：入口行当场给出成因，展开面板逐条说明范围与条数", async () => {
+  it("目录口径（scope=DIRECTORY）仍按整段目录说明成因与同期修改", async () => {
+    // 目录口径留给「工作详情」那类视图；这条用例锁住它没被会话口径的措辞顶掉。
+    const view = await mount(clientOf({ getConversationDiff: vi.fn(async (): Promise<RelayConversationDiff> => ({
+      ...changed, scope: "DIRECTORY", incomplete: true,
+      coverage: { baseline: { complete: false, reason: "FILE_COUNT_LIMIT", files: 2000, listed: null },
+        current: { complete: true, reason: null, files: 12, listed: 12 },
+        uncheckedFiles: 0, unverifiedFiles: 0, unverifiableFiles: 0, unscannedFiles: 0 },
+    })) }));
+    try {
+      await flush(40);
+      expect(view.wrapper.get('[data-testid="conversation-diff-flag"]').text())
+        .toContain("目录只扫描了部分文件");
+      await toggle(view).trigger("click");
+      expect(view.wrapper.get('[data-testid="conversation-diff-panel"]').text())
+        .toContain("包含该目录自基线起的同期修改，不代表全部由 Agent 产生");
+    } finally { view.unmount(); }
+  });
+
+  it("会话口径下不拿「整目录没扫全」当缺口，改说写入路径未核对", async () => {
     const view = await mount(clientOf({ getConversationDiff: vi.fn(async (): Promise<RelayConversationDiff> => ({
       ...changed, incomplete: true,
       coverage: { baseline: { complete: false, reason: "FILE_COUNT_LIMIT", files: 2000, listed: null },
+        current: { complete: false, reason: "FILE_COUNT_LIMIT", files: 2000, listed: 3141 },
+        uncheckedFiles: 2, unverifiedFiles: 0, unverifiableFiles: 0, unscannedFiles: 1 },
+    })) }));
+    try {
+      await flush(40);
+      const flag = view.wrapper.get('[data-testid="conversation-diff-flag"]').text();
+      expect(flag).not.toContain("目录只扫描了部分文件");
+      expect(flag).toContain("部分写入路径未核对");
+      expect(flag).toContain("1 个写入路径不在扫描范围");
+      await toggle(view).trigger("click");
+      const box = view.wrapper.get('[data-testid="conversation-diff-incomplete"]').text();
+      expect(box).not.toContain("会话起点扫描不完整");
+      expect(box).toContain("2 个本会话写入的路径本轮没核对到");
+      expect(box).toContain("1 个本会话写过的路径在起点与本轮扫描里都没出现");
+    } finally { view.unmount(); }
+  });
+
+  it("扫描覆盖不完整：入口行当场给出成因，展开面板逐条说明范围与条数", async () => {
+    const view = await mount(clientOf({ getConversationDiff: vi.fn(async (): Promise<RelayConversationDiff> => ({
+      ...changed, scope: "DIRECTORY", incomplete: true,
+      coverage: { baseline: { complete: false, reason: "FILE_COUNT_LIMIT", files: 2000, listed: null },
         current: { complete: true, reason: null, files: 12, listed: 12 },
-        uncheckedFiles: 3, unverifiedFiles: 1 },
+        uncheckedFiles: 3, unverifiedFiles: 1, unverifiableFiles: 0, unscannedFiles: 0 },
     })) }));
     try {
       await flush(40);
@@ -179,12 +247,36 @@ describe("会话总 diff 入口", () => {
     } finally { view.unmount(); }
   });
 
+  it("内容读不到且字节数没变的文件：入口报条数，展开说清它们既不进列表也不算未变", async () => {
+    const view = await mount(clientOf({ getConversationDiff: vi.fn(async (): Promise<RelayConversationDiff> => ({
+      ...changed, incomplete: true, files: [], totalFiles: 0, totalAdded: 0, totalRemoved: 0,
+      coverage: { baseline: { complete: false, reason: "FILE_COUNT_LIMIT", files: 2000, listed: null },
+        current: { complete: true, reason: null, files: 2000, listed: 3139 },
+        uncheckedFiles: 0, unverifiedFiles: 0, unverifiableFiles: 147, unscannedFiles: 0 },
+    })) }));
+    try {
+      await flush(40);
+      const flag = view.wrapper.get('[data-testid="conversation-diff-flag"]').text();
+      expect(flag).toContain("147 个文件内容未核对");
+      // 「无法核对」与「已发现但读不出行数」是两类事实，不能混成一句。
+      expect(flag).not.toContain("个文件行数不可统计");
+      await toggle(view).trigger("click");
+      const box = view.wrapper.get('[data-testid="conversation-diff-incomplete"]').text();
+      expect(box).toContain("147 个文件起点与本轮都在、但内容读不到");
+      expect(box).toContain("既不算修改，也不算没变");
+      // 总数不可统计时不能直接宣称「暂无文件变化」。
+      expect(view.wrapper.get('[data-testid="conversation-diff-empty"]').text())
+        .toContain("本次统计不完整");
+      expect(view.wrapper.find('[data-testid="conversation-diff-files"]').exists()).toBe(false);
+    } finally { view.unmount(); }
+  });
+
   it("单文件行数不可统计：说清条数与类别，不冒充扫描覆盖问题", async () => {
     const view = await mount(clientOf({ getConversationDiff: vi.fn(async (): Promise<RelayConversationDiff> => ({
       ...changed, incomplete: true,
       coverage: { baseline: { complete: true, reason: null, files: 5, listed: null },
         current: { complete: true, reason: null, files: 5, listed: 5 },
-        uncheckedFiles: 0, unverifiedFiles: 0 },
+        uncheckedFiles: 0, unverifiedFiles: 0, unverifiableFiles: 0, unscannedFiles: 0 },
       files: [{ path: "big.bin", action: "MODIFY", added: -1, removed: -1, unavailableReason: "BINARY" }],
     })) }));
     try {

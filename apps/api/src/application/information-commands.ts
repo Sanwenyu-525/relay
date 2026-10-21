@@ -14,6 +14,9 @@ import { requireRevision } from './revisions.js';
 import type { Repositories } from './unit-of-work.js';
 import { lockWritableProjectInWorkspace } from './guards.js';
 import { prepareDecisionReviews } from './decision-reviews.js';
+import type { ManagedContentStore } from '../storage/managed-content-store.js';
+import { recheckAssistSources } from './assist-source-content.js';
+import { historicalReplyAvailable } from './assist-memory.js';
 
 type ScopeInput = { workspaceId: string; commandId: string };
 type Result = { readonly knowledge_id?: string; readonly memory_id?: string;
@@ -281,6 +284,60 @@ export async function createMemory(db: DbExecutor, input: ScopeInput & {
     } });
 }
 
+export async function createMemoryFromMessage(db: DbExecutor, input: ScopeInput & {
+  sessionId: string; messageId: string; expectedSessionRevision: string;
+  expectedContentSha256: string; projectId: string | null; title: string;
+  text: string; confirmed: boolean; expiresAt?: string | null;
+}, storage: ManagedContentStore) {
+  const title = textValue(input.title, 'title');
+  const body = contentValue(input.text, 'text');
+  const expected = requireRevision(input.expectedSessionRevision, 'expected_session_revision');
+  if (input.confirmed !== true || !/^[0-9a-f]{64}$/u.test(input.expectedContentSha256)) {
+    throw validationFailed([{ field: 'confirmed', message: 'explicit confirmation and exact source hash required' }]);
+  }
+  const expiresAt = parseExpiry(input.expiresAt);
+  return runIdempotentCommand<Result>(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
+    commandId: input.commandId, commandType: 'CreateMemoryFromMessage',
+    target: { session_id: input.sessionId, message_id: input.messageId },
+    body: { project_id: input.projectId, title, text: body, confirmed: true,
+      expected_session_revision: expected.toString(), content_sha256: input.expectedContentSha256,
+      expires_at: expiresAt?.toISOString() ?? null }, execute: async (r) => {
+      await ruleAuthority(r, input.workspaceId);
+      const prior = await r.receipts.findReceipt({ scopeKey: httpCommandScopeKey(input.workspaceId), commandId: input.commandId });
+      if (prior !== undefined) return prior.result_ref as Result;
+      const session = await r.assist.readSession(input.sessionId, true);
+      if (session?.workspace_id !== input.workspaceId) throw resourceNotFound('Assist session');
+      sameRevision('assist_session', session.revision, expected);
+      if (session.status !== 'ACTIVE') throw invalidTransition('归档会话不能创建新的长期记忆。');
+      if (input.projectId !== null && input.projectId !== session.project_id) throw resourceNotFound('Memory scope');
+      await projectScope(r, input.workspaceId, session.project_id);
+      const source = await r.assist.readMessage(input.messageId);
+      if (source?.session_id !== session.id) throw resourceNotFound('Assist message');
+      if (source.status !== 'COMPLETED' || source.content === null || !source.content.trim()) {
+        throw invalidTransition('只能从已完成且有正文的消息明确保存记忆。');
+      }
+      if (sha256(source.content).toString('hex') !== input.expectedContentSha256) {
+        throw invalidTransition('消息正文与确认时的来源不一致，请重新读取。');
+      }
+      if (source.role === 'ASSISTANT' && (!(await recheckAssistSources(r, storage, session, source.sources)).available ||
+          !await historicalReplyAvailable(r, storage, session, source.id))) {
+        throw invalidTransition('来源已失效，不能沿旧答复建立长期记忆。');
+      }
+      const id = randomUUID();
+      await r.information.insertMemoryRoot(id, input.workspaceId, input.projectId, title);
+      await r.information.insertMemoryVersion({ id: randomUUID(), memoryId: id, version: 1n,
+        title, text: body, confirmedBy: LOCAL_ACTOR_REF, expiresAt });
+      await r.information.insertMemoryMessageSource({ memoryId: id, sessionId: session.id,
+        messageId: source.id, contentSha256: input.expectedContentSha256 });
+      await r.workspaces.bumpContextRevision(input.workspaceId);
+      await r.activities.insertActivityRecord({ id: randomUUID(), workspaceId: input.workspaceId,
+        actorKind: 'HUMAN', actorRef: LOCAL_ACTOR_REF, commandId: input.commandId,
+        projectId: input.projectId, taskId: null, eventType: 'MEMORY_SAVED_FROM_MESSAGE',
+        factRefs: { memory_id: id, session_id: session.id, message_id: source.id, version: '1' } });
+      return { memory_id: id, revision: '0', version: '1', status: 'ACTIVE' };
+    } });
+}
+
 export async function addMemoryRevision(db: DbExecutor, input: ScopeInput & {
   memoryId: string; expectedRevision: string; title: string; text: string;
   confirmed: boolean; expiresAt?: string | null;
@@ -402,12 +459,12 @@ export function ruleConflict(detail: string): DomainError {
     retryable: false, retryAction: 'REFRESH_AND_REDECIDE' });
 }
 
-export async function createRule(db: DbExecutor, input: ScopeInput & RuleBody & {
-  scope: RuleRow['scope']; scopeId: string;
+export async function createRule(db: DbExecutor, input: ScopeInput & Omit<RuleBody, 'ruleKey'> & {
+  ruleKey?: string; scope: RuleRow['scope']; scopeId: string;
   /** 仅用于真实 PG barrier 测试。 */
   hooks?: { readonly afterAuthorityLock?: () => Promise<void> };
 }) {
-  const body = normalizedRule(input);
+  const body = normalizedRule({ ...input, ruleKey: ruleKeyFor(input.commandId, input.ruleKey) });
   return runIdempotentCommand<Result>(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
     commandId: input.commandId, commandType: 'CreateRule',
     target: { scope: input.scope, scope_id: input.scopeId }, body: { ...body, applicability: 'AI_RUN' },
@@ -422,6 +479,18 @@ export async function createRule(db: DbExecutor, input: ScopeInput & RuleBody & 
       await r.workspaces.bumpRuleRevision(input.workspaceId);
       return { rule_id: id, revision: '0', version: '1', status: 'ACTIVE' };
     } });
+}
+
+/**
+ * 规则键是服务端身份，不是用户输入项（工作台 §42.3）。
+ *
+ * 缺省时按 `command_id` 派生，而不是取随机值：同一个 command_id 的重试必须算出同一个键，
+ * 否则回执的载荷哈希对不上，幂等重放会被误判成「command_id 被复用于不同载荷」。
+ * 键仍然稳定唯一（command_id 全局唯一），创建后不再改变。
+ */
+function ruleKeyFor(commandId: string, submitted?: string): string {
+  const trimmed = submitted?.trim() ?? '';
+  return trimmed === '' ? `rule-${commandId}` : trimmed;
 }
 
 async function ruleScope(r: Repositories, workspaceId: string, scope: RuleRow['scope'], scopeId: string) {
@@ -483,6 +552,44 @@ export async function retireInformation(db: DbExecutor, input: ScopeInput & {
       return { [`${input.kind}_id`]: item.id, revision: toDecimalString(item.revision + 1n), status,
         ...(reviewCount === undefined || reviewCount === '0' ? {} : { decision_review_count: reviewCount }),
         ...(reviewCount === undefined || reviewCount === '0' || item.project_id === null ? {} : { decision_review_candidates_ref: `projects/${item.project_id}/decision-reviews` }) };
+    } });
+}
+
+/** Forward compensation only: versions, review candidates and prior receipts remain historical facts. */
+export async function restoreInformation(db: DbExecutor, input: ScopeInput & {
+  kind: 'knowledge' | 'memory' | 'rule'; id: string; expectedRevision: string;
+}) {
+  const expected = requireRevision(input.expectedRevision, 'expected_revision');
+  const commandType = input.kind === 'knowledge' ? 'UnarchiveKnowledge'
+    : input.kind === 'memory' ? 'ReactivateMemory' : 'ReactivateRule';
+  return runIdempotentCommand<Result>(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
+    commandId: input.commandId, commandType, target: { [`${input.kind}_id`]: input.id },
+    body: { expected_revision: input.expectedRevision }, execute: async (r) => {
+      await ruleAuthority(r, input.workspaceId);
+      // A concurrent first request can commit while authority is locked. Returning its
+      // result lets receipt uniqueness resolve the replay and compare the original payload.
+      const prior = await r.receipts.findReceipt({ scopeKey: httpCommandScopeKey(input.workspaceId),
+        commandId: input.commandId });
+      if (prior !== undefined) return prior.result_ref as Result;
+      const item = await root<InformationRootRow | RuleRow>(r, input.kind, input.workspaceId, input.id);
+      sameRevision(input.kind, item.revision, expected);
+      if (item.status === 'ACTIVE') return { [`${input.kind}_id`]: item.id,
+        revision: toDecimalString(item.revision), status: 'ACTIVE' };
+      const retiredStatus = input.kind === 'knowledge' ? 'ARCHIVED' : 'RETIRED';
+      if (item.status !== retiredStatus) throw invalidTransition(`${input.kind} 当前状态不能恢复。`);
+      await r.information.setRootStatus(input.kind, item.id, 'ACTIVE');
+      if (input.kind === 'rule') await r.workspaces.bumpRuleRevision(input.workspaceId);
+      else await r.workspaces.bumpContextRevision(input.workspaceId);
+      const revision = toDecimalString(item.revision + 1n);
+      await r.activities.insertActivityRecord({ id: randomUUID(), workspaceId: input.workspaceId,
+        actorKind: 'HUMAN', actorRef: LOCAL_ACTOR_REF, commandId: input.commandId,
+        projectId: item.project_id, taskId: input.kind === 'rule' ? (item as RuleRow).task_id : null,
+        eventType: input.kind === 'knowledge' ? 'KNOWLEDGE_UNARCHIVED'
+          : input.kind === 'memory' ? 'MEMORY_REACTIVATED' : 'RULE_REACTIVATED',
+        factRefs: { [`${input.kind}_id`]: item.id, previous_status: item.status, status: 'ACTIVE',
+          previous_revision: toDecimalString(item.revision), revision,
+          current_version: toDecimalString(item.current_version) } });
+      return { [`${input.kind}_id`]: item.id, revision, status: 'ACTIVE' };
     } });
 }
 

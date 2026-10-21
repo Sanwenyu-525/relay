@@ -57,6 +57,8 @@ async function newSession(workspaceId: string, projectId: string): Promise<strin
 }
 
 const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01, 0x02]);
+/** 目录里不存在的模型名：应用层用显式参数，HTTP 子进程注入同名环境变量；都不依赖本机 .env。 */
+const TEST_MODEL = 'not-in-catalog-model';
 
 async function uploadPng(sessionId: string, workspaceId: string, name = '截图.png'):
 Promise<string> {
@@ -84,7 +86,7 @@ test('图片随消息绑定：元数据进投影，内容按单张读取，跨�
   // 只有图片、没有正文：2026-10-18 起这是合法的讨论轮（content 落空串，不是 NULL）。
   const requested = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
     sessionId, commandId: randomUUID(), content: ' ', intent: 'DISCUSS',
-    attachmentIds: [attachmentId], chatModelName: undefined, declaredImageInput: true });
+    attachmentIds: [attachmentId], chatModelName: TEST_MODEL, declaredImageInput: true });
   const userMessageId = requested.result.user_message_id;
   assert.equal((await readUserMessage(userMessageId)).content, '');
 
@@ -100,7 +102,7 @@ test('图片随消息绑定：元数据进投影，内容按单张读取，跨�
   // 同一张图不能再被第二条消息绑定：绑定入口只接受 message_id IS NULL。
   const reused = domainError(await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
     sessionId, commandId: randomUUID(), content: '再来一次', attachmentIds: [attachmentId],
-    declaredImageInput: true }).catch((error) => error));
+    chatModelName: TEST_MODEL, declaredImageInput: true }).catch((error) => error));
   assert.equal(reused.code, 'RESOURCE_NOT_FOUND');
 
   // 另一个会话（同 Workspace、同附件 id）看不到这张图。
@@ -127,13 +129,13 @@ test('空正文的例外只给带图片的讨论轮：无附件、Skill 与提�
   const withSkill = domainError(await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
     sessionId, commandId: randomUUID(), content: '', attachmentIds: [attachmentId],
     skillRef: { id: 'task-to-execution-contract', version: '1.1.0' }, skillInput: {},
-    declaredImageInput: true }).catch((error) => error));
+    chatModelName: TEST_MODEL, declaredImageInput: true }).catch((error) => error));
   assert.equal(withSkill.code, 'VALIDATION_FAILED');
 
   const propose = domainError(await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
     sessionId, commandId: randomUUID(), content: '',
     attachmentIds: [attachmentId], intent: 'PROPOSE_CANDIDATE',
-    declaredImageInput: true }).catch((error) => error));
+    chatModelName: TEST_MODEL, declaredImageInput: true }).catch((error) => error));
   assert.equal(propose.code, 'VALIDATION_FAILED');
 });
 
@@ -145,14 +147,14 @@ test('能力闸门：目录无条目时只有显式声明放行，未声明一�
   // 本机默认模型（例如自建 Provider）通常不在 OpenRouter 目录里：未声明就是未知，按拒绝处理。
   const rejected = domainError(await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
     sessionId, commandId: randomUUID(), content: '看这张图',
-    attachmentIds: [attachmentId], chatModelName: 'not-in-catalog-model' }).catch((error) => error));
+    attachmentIds: [attachmentId], chatModelName: TEST_MODEL }).catch((error) => error));
   assert.equal(rejected.code, 'VALIDATION_FAILED');
   assert.match(String(rejected.fieldErrors[0]?.message ?? ''), /RELAY_MODEL_IMAGE_INPUT/u);
 
   // 声明之后放行；声明只补「目录里没有条目」这处空白，不放宽目录里明确说不支持的模型。
   const accepted = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
     sessionId, commandId: randomUUID(), content: '看这张图',
-    attachmentIds: [attachmentId], chatModelName: 'not-in-catalog-model',
+    attachmentIds: [attachmentId], chatModelName: TEST_MODEL,
     declaredImageInput: true });
   assert.equal(typeof accepted.result.assistant_message_id, 'string');
 });
@@ -178,18 +180,18 @@ test('上传裁决：类型白名单、单张上限、每消息数量与总量�
   }
   const tooMany = domainError(await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
     sessionId, commandId: randomUUID(), content: '五张图', attachmentIds: ids,
-    declaredImageInput: true }).catch((error) => error));
+    chatModelName: TEST_MODEL, declaredImageInput: true }).catch((error) => error));
   assert.equal(tooMany.code, 'VALIDATION_FAILED');
 
   const duplicate = domainError(await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
     sessionId, commandId: randomUUID(), content: '重复引用', attachmentIds: [ids[0]!, ids[0]!],
-    declaredImageInput: true }).catch((error) => error));
+    chatModelName: TEST_MODEL, declaredImageInput: true }).catch((error) => error));
   assert.equal(duplicate.code, 'VALIDATION_FAILED');
 
   // 已被拒绝的命令没有绑定任何一行：四张以内仍可正常绑定。
   const accepted = await requestAssistMessage(app.db, { workspaceId: f.workspaceId, sessionId,
     commandId: randomUUID(), content: '', attachmentIds: ids.slice(0, 2),
-    declaredImageInput: true });
+    chatModelName: TEST_MODEL, declaredImageInput: true });
   const bound = await withTransaction(app.db, async (r) =>
     r.assist.listAttachmentsByMessage(accepted.result.user_message_id));
   assert.equal(bound.length, 2);
@@ -210,7 +212,8 @@ test('上传裁决：类型白名单、单张上限、每消息数量与总量�
  * 这类缺陷完全看不出来（本轮就是这样发现 GET 投影被漏掉的）。
  */
 test('HTTP：上传返回身份、消息列表带附件元数据、内容端点按契约形状读回', async () => {
-  const api = await startTestApi();
+  const api = await startTestApi({ env: { RELAY_MODEL_NAME: TEST_MODEL,
+    RELAY_MODEL_IMAGE_INPUT: 'false' } });
   try {
     const f = await workspaceFixture();
     const sessionId = await newSession(f.workspaceId, f.projectId);
@@ -231,7 +234,7 @@ test('HTTP：上传返回身份、消息列表带附件元数据、内容端点�
 
     const direct = await requestAssistMessage(app.db, { workspaceId: f.workspaceId, sessionId,
       commandId: randomUUID(), content: '', attachmentIds: [attachmentId],
-      declaredImageInput: true });
+      chatModelName: TEST_MODEL, declaredImageInput: true });
 
     const messages = await api.get(`${base}/assist-sessions/${sessionId}/messages`);
     assert.equal(messages.status, 200);

@@ -18,6 +18,11 @@ export type LiveErrorKind =
 export interface LiveActionError {
   readonly kind: LiveErrorKind;
   readonly message: string;
+  /**
+   * 409 `SESSION_DELETE_BLOCKED` 的中文阻断原因（ADR-027）。单条删除只读 `message`；
+   * 批量删除按它聚合——同一原因写一次、标题并列，不把「这条讨论还不能删除…」重复成 N 段。
+   */
+  readonly blockedReasons?: readonly string[];
   /** 422 的字段定位，供表单放回输入项；其他错误为空。 */
   readonly fieldErrors: readonly RelayFieldError[];
 }
@@ -106,20 +111,37 @@ export function describeLiveError(caught: unknown): LiveActionError {
           kind: "reused",
           message: "同一个 command ID 被用于不同内容：请先查询原回执，不要复用 ID 提交新内容。"
         };
-      case "VALIDATION_FAILED":
+      case "VALIDATION_FAILED": {
+        // 服务端每条字段错误都带一句可执行说明（例如「当前聊天模型不支持图片输入」或
+        // 「目录中没有当前聊天模型的条目…请声明 RELAY_MODEL_IMAGE_INPUT=true」）。
+        // 只报字段名会把原因吞掉：用户看到「attachment_ids 不符合契约」也无从下手。
+        const fields = [...new Set(problem.fieldErrors.map((item) => item.field))].join("、");
+        const details = [...new Set(problem.fieldErrors
+          .map((item) => item.message.trim()).filter((message) => message !== ""))];
         return {
           ...base,
           kind: "validation",
           message:
             problem.fieldErrors.length === 0
               ? "请求未通过服务端校验：请核对字段取值后重试。"
-              : `请求未通过服务端校验：${problem.fieldErrors.map((item) => item.field).join("、")} 不符合契约。`
+              : `请求未通过服务端校验（${fields}）：${details.length > 0
+                ? details.join("；") : "请核对字段取值后重试。"}`
         };
+      }
       case "INVALID_TRANSITION":
         return { ...base, kind: "transition", message: `当前状态不允许这个操作：${problem.detail}` };
-      case "SESSION_DELETE_BLOCKED":
-        return { ...base, kind: "transition", message: `这条讨论还不能删除：${(problem.blockingReasons ?? [])
-          .map((reason) => sessionDeleteBlockerLabels[reason] ?? reason).join("、") || "仍被其它对象引用"}。先改为归档，或在原对象解除引用后再删除。` };
+      case "SESSION_DELETE_BLOCKED": {
+        // 阻断项单独留成结构化标签：单条删除读整句，批量删除按原因聚合，不必把同一句
+        // 「这条讨论还不能删除…先改为归档…」按条数重复（2026-10-20 用户截图指认）。
+        const blockedReasons = (problem.blockingReasons ?? [])
+          .map((reason) => sessionDeleteBlockerLabels[reason] ?? reason);
+        return {
+          ...base,
+          kind: "transition",
+          blockedReasons,
+          message: `这条讨论还不能删除：${blockedReasons.join("、") || "仍被其它对象引用"}。先改为归档，或在原对象解除引用后再删除。`
+        };
+      }
       case "ACCEPTANCE_STALE":
         return { ...base, kind: "transition", message: "这次提交依据的验收版本已经失效：请重新读取任务后再操作。" };
       case "EVIDENCE_UNAVAILABLE":

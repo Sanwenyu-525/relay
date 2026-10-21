@@ -1,0 +1,33 @@
+/* 记忆设置卡（工作台 §40）：两个独立开关 + 保存/冲突/未知结果三态。 */
+
+.memory-settings-switches {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-3);
+  margin: var(--relay-space-3) 0;
+}
+
+.memory-settings-switch {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--relay-space-2);
+}
+
+.memory-settings-switch > span {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-1);
+}
+
+.memory-settings-switch strong {
+  color: var(--relay-color-text-primary);
+  font-weight: 600;
+}
+
+.memory-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+  margin-top: var(--relay-space-2);
+}

@@ -330,6 +330,43 @@ export function readInternalTool(name: string): InternalToolDefinition | undefin
   return BY_NAME.get(name);
 }
 
+/**
+ * 0128：有界多 Agent 的委派工具（ADR-017、运行架构 §2.5）。
+ *
+ * 它是**应用内动作**，不对应任何 Gateway 逻辑动作，因此不在 `INTERNAL_TOOL_DEFINITIONS`
+ * 里（那张表的每一项都会经 Gateway 准入与连接能力匹配）。声明与结算由会话轮次特判：
+ *   * 只有根会话（`parent_session_id IS NULL`）的普通 Agent 主流程会拿到它——子会话
+ *     只读且仅一层，拿不到这个词表项；
+ *   * 服务端校验角色、范围与并发槽（最多两个未终结委派）后才建立子会话；
+ *   * 子执行永远只读：委派本身不授予任何写权限，也不创建 Task/Run。
+ *
+ * 参数全部由服务端校验后冻结进委派行；模型声明不是执行授权。
+ */
+export const DELEGATE_SUBAGENT_TOOL_NAME = 'delegate_subagent';
+
+export const DELEGATE_SUBAGENT_SPEC: ModelToolSpec = {
+  name: DELEGATE_SUBAGENT_TOOL_NAME,
+  description:
+    '把一个只读调查或独立审查任务交给子 Agent，并等待它的结论。' +
+    '子 Agent 在独立上下文里工作，只读当前受管目录，不能修改文件、不能执行命令、不能再委派。' +
+    '同一时间最多两个进行中的委派。调查用于「先弄清事实再动手」；' +
+    '审查用于对已形成的改动做独立核对，必须给出所针对的基线。',
+  parameters: { type: 'object', additionalProperties: false,
+    properties: {
+      role: { type: 'string', enum: ['INVESTIGATE', 'REVIEW'],
+        description: 'INVESTIGATE 只读调查；REVIEW 对已形成改动的独立审查。' },
+      objective: { type: 'string',
+        description: '要查清或要核对的具体问题，一句到几句；子 Agent 只看到这段说明与范围。' },
+      scope: { type: 'array', description: '建议子 Agent 查看的受管根内相对路径（提示，不授权）。',
+        items: { type: 'string' } },
+      baseline: { type: 'string',
+        description: 'REVIEW 必填：被审查改动所对应的基线标识（如 git HEAD 摘要）；结论只对该基线成立。' },
+      output_requirements: { type: 'string',
+        description: '希望子 Agent 回答什么、以什么形式给出（发现、证据位置、结论）。' },
+    },
+    required: ['role', 'objective'] },
+};
+
 /** 本次 DRAFT 向模型声明的工具集合，按词表顺序固定，保证请求可复现。 */
 export function declaredToolSpecs(
   allowed: readonly string[] | undefined,

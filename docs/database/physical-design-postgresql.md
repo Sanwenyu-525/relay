@@ -453,8 +453,9 @@ V001 不引用尚未存在的表，以下全部留待 V002/V003/D 阶段的新 m
 - `run_control_requests` 保存 PAUSE/CANCEL/HANDOFF/CANCEL_TASK、状态 PENDING/APPLIED/REJECTED/SUPERSEDED、revision、决定时间和 `result_ref`；`uq_run_control_pending` 保证每个 Run 最多一个待处理意图。请求提交与安全点应用是不同短事务；冲突拒绝或显式 supersede，不能从 202 推断已暂停。HANDOFF 的 `result_ref.handoff` 保存步骤位置与可用候选/验证事实 ID；未写入数据库的发布文件不伪装为候选版本。
 - `run_effect_actions` 以 `operation_id=step_attempts.id` 保存不可变的目标相对路径、SHA-256 参数摘要、PREPARED/DISPATCHING/SUCCEEDED/FAILED/UNKNOWN、派发次数与结果。`(run_id,step_id)` 与 `(attempt_id,step_id)` 复合外键把 Run→Step→Attempt 绑定，避免跨 Run 拼错动作身份。受管 Fake 发布到 `artifacts/<run_id>/<attempt_id>/content.md`（修正轮沿用原 Artifact ID），DB 只保存受管相对路径；新文件不会覆盖旧版本。
 - 领取、效果派发与步骤提交分别使用短事务；Fake 模型生成和受管文件读取/发布在事务外。派发前控制先提交则不发布；派发先提交则控制保持 PENDING，待目标核对/提交或显式处理后才 APPLIED。成功步骤不重放。成功发布但步骤事务尚未提交时仍视为未决；若内容丢失/损坏，动作降为 UNKNOWN，不放行控制。若已核对成功且控制在等待，未提交的尝试标记为被控制抢占，发布文件保留为可追溯孤儿，控制才可应用。
-- 内部 `scanRecoveryCandidates` 只报告租约到期或有持久 fence 记录的未决动作，当前没有生产调度器自动调用它。内部 `recoverStoppedWorker` 要求调用方提供旧 Worker 已停止的依据；用例提升 Run epoch，并把旧 Worker ID、该依据、新 epoch 追加到 `activity_records`，再次重启可用该记录、Attempt worker ID 与当前 epoch 复核。生产进程管理器自动确认退出尚未实现。只有同一目标确实不存在、当前无新 claim 且有持久 fence 证据，才将原动作重置为 PREPARED，下一次仍使用原 `operation_id`。`UNKNOWN` 或成功日志与目标文件不符不能仅凭租约重发；租约到期本身不等于进程已停。
+- 内部 `scanRecoveryCandidates` 只报告租约到期或有持久 fence 记录的未决动作，当前没有生产调度器自动调用它。内部 `recoverStoppedWorker` 要求调用方提供旧 Worker 已停止的依据；用例提升 Run epoch，并写入 `run_worker_fences`（旧 Worker ID、该依据、新 epoch 的结构化事实，0129 起；同时保留 `activity_records` 追溯记录），再次重启可用该表、Attempt worker ID 与当前 epoch 复核。生产进程管理器自动确认退出尚未实现。只有同一目标确实不存在、当前无新 claim 且有持久 fence 证据，才将原动作重置为 PREPARED，下一次仍使用原 `operation_id`。`UNKNOWN` 或成功日志与目标文件不符不能仅凭租约重发；租约到期本身不等于进程已停。
 - **兼容与回滚**：旧 HUMAN Task 的状态与既有 Run 行满足新 CHECK，新增 Worker 列有默认/NULL，旧数据可升级；旧应用版本不理解新增控制状态与 WAITING，部署需与 API 同步升级。迁移只追加/替换约束，已应用文件不能改写；没有 down migration，回退依赖备份及相容版本。P08 只覆盖同机受管 Fake 文件动作，尚无跨 Task 工作目录资源 claim、实际工具准入、通用操作核对报告/孤儿清理和断电持久性证明；这些是后续独立边界。
+- **0129 结构化 fence 事实（2026-10-21）**：追加 [0129_run_worker_fences.sql](../../apps/api/migrations/0129_run_worker_fences.sql)。`run_worker_fences` 以 `(run_id, worker_epoch)` 为主键，保存 `stopped_worker_id`、`stopped_evidence` 与 `created_at`；CHECK 拒绝空 Worker ID 和非正 epoch，索引支持按 run 与旧 Worker 查询；`relay_app` 只有 `SELECT/INSERT`，审计记录仍只增不减。恢复扫描与重入改为按表匹配 run/epoch/worker，不再依赖 `activity_records.fact_refs` 的 JSON 文本：审计被裁剪、字段改名或写入格式变化都不影响 fence 判定。迁移从既有 `RUN_WORKER_FENCED` 审计回填格式合法（UUID 与正整数 epoch）的记录并 `ON CONFLICT DO NOTHING`；已被裁剪或格式损坏的历史 fence 无法还原，只能人工核对。没有 down migration；回退需备份和能理解新表的应用版本，旧版本忽略该表时仍可按原审计路径工作但会失去结构化保障。
 
 ## 19. 0008 Fake Gateway 与权限准入（2026-09-23 P09）
 
@@ -1306,3 +1307,116 @@ Migration：`0115_scheduled_tasks.sql`，新增 `scheduled_tasks` 与 `scheduled
 **兼容与回滚。** 纯新增两张表，不改任何既有表或列，**Breaking Change: No**。回退应用代码时旧代码不读这两张表，定时任务停止调度但已产生的 Task/Run 事实不受影响；迁移不回撤。删除这两张表只丢失「哪些时段被排定过」的记录，不删除已经建出的 Task、Run、回执或审计。
 
 **验证（如实分层）。** 单元：`zoned-time.test.ts` **10/10**（上海/纽约春跳秋回/伦敦/Kolkata/Chatham/Kiritimati、跨 DST 的每日 09:00、关机三天只推进一次、严格晚于 now）、`scheduled-tasks.test.ts` **4/4**（规则/上限/到期/时刻/日期/时区/文本口径）。真实 PostgreSQL：`scheduled-tasks.integration.test.ts` 见[测试计划 §37](../testing/verification-plan.md#37-周期定时启动任务验收规格2026-10-18)与统一验收表。真实 Windows 窗口与安装态未验。
+
+## 104. 0117 Workspace 默认目录（2026-10-19）
+
+Migration：`0117_workspace_default_directory.sql`。原方案编号 `0111` 已被活动排序键占用，使用当前空闲号；不修改任何已应用迁移。
+
+`workspace_default_directories` 每 Workspace 一行，`workspace_id` 主键引用 workspaces，`resource_id` 可空引用 managed_resources，`revision bigint >= 0`，以及 `created_at / updated_at`。WorkspaceRepository 是存储入口，应用命令负责跨 Workspace、资源状态与路径核对；不复制目录或权限事实。`resource_id=NULL` 表示清除，保留修订以防旧请求覆盖清除后的选择。缺行的外部修订为 0，首次写入为 1；更新持有 Workspace authority 排他锁，配置 revision 为独立 CAS，不推进 Workspace 业务修订。只授 relay_app SELECT/INSERT/UPDATE，不授 DELETE。
+
+`assist_sessions.working_directory_source text NULL` 与资源在创建/显式绑定事务内一起写入，取值 USER_PICKED 或 WORKSPACE_DEFAULT；CHECK 禁止无资源时带来源。历史绑定不回填，来源 NULL 表示未知；分叉复制源来源。已有会话不随默认设置变化，ASSISTANT/LEARNING 与显式 Project/Task 不继承。配置及继承按 authority→资源登记锁→Project 归档栅栏→资源锁核对，读取工具本身不查默认配置。
+
+**Breaking Change: No**。纯新增表与可空列，兼容旧数据。回退应用后新表和列保留；直接删除列会丢失来源与配置追溯，不提供自动 down migration。没有回填或用户数据迁移，本轮仅在一次性临时库应用，用户库迁移和安装包升级另验。API 协议见 [HTTP §10.96](../api/http-command-contract.md#1096-workspace-默认工作目录2026-10-19-后端实现)。
+
+## 105. 0118–0119 长短期记忆（2026-10-19）
+
+Migration：`0118_long_term_memory.sql`、`0119_short_term_memory.sql`、`0120_memory_usage_sources.sql`、`0123_memory_usage_scope.sql`；**Breaking Change: No**，新增表与使用足迹列，无历史正文回填，不更改原消息或 Memory 版本。0121/0122 归并行模型能力/插话功能，不属于记忆模块。Information 拥有长期事实与配置，Assist 拥有短期工作窗口。
+
+- `workspace_memory_settings`：每 Workspace 一行，recall_enabled/automatic_compaction 默认 true，revision 用 CAS；应用仅 SELECT/INSERT/UPDATE。
+- `memory_message_sources`：主键 memory_id/memory_version，引用确切 Memory 版本和原会话/消息，冻结 SHA256；仅 SELECT/INSERT。停用不删除来源，跨对象引用阻止源会话物理删除。
+- `assist_memory_state`：每会话当前检查点指针、revision 与 cleared_through_seq；成功 CAS 后才更换，不改原聊天。
+- `assist_memory_requests`：手动/自动请求、原文覆盖 IDs/hash、冻结模型、会话/权限/上下文/设置/窗口修订、PENDING/RUNNING/COMPLETED/FAILED/CANCELLED、worker/epoch/lease/cancel 与结果引用；每会话至多一条活动请求的部分唯一索引。租约丢失收敛失败，不自动重复网络调用。
+- `assist_memory_checkpoints`：不可变摘要与确切覆盖边界/来源足迹、model_call_id 和作用域修订；提交新行再 CAS 指针，原行保留。
+- `assist_memory_uses`：每条真实生成消息采用的检查点、窗口/权限/上下文修订；0120 增加直接及传递来源 sources、has_tool_context，0123 增加 project/task/working_resource 的 session_scope 快照，支持多轮派生答复和换目录后的隔离。旧使用行 scope=NULL 表示无法核对，不能给旧工具文本补当前授权。分叉仅继承来源/工具作用域足迹，不继承父 checkpoint 所有权和计量；无使用账本的旧工具答复不复制正文，改用明确不可用文本占位，父原文仍保留；不放宽原 COMPLETED 消息非空正文约束。
+
+短期表仅请求/state 可更新，checkpoint/uses 不可更新；四表授 DELETE 仅供既有会话物理删除用例按 uses→state→requests→checkpoints 清理，再删原 model_calls/消息。活动整理、长期跨对象引用仍走原删除栅栏。摘要调用复用 ASSIST model_calls，锚点为真实已覆盖消息，独立请求保存实际 call_id，原回复 usage 不被覆盖。
+
+兼容回退：旧应用不读取新表，但回退版本的旧物理删除代码不了解新 FK，不应执行带新记忆记录的删除。回退不删表、不抹新事实；直接 DROP 会丢失来源/窗口/调用关联并存在 FK 风险，无自动 down migration。用户库升级、真实安装态另验。协议归 [HTTP §10.99](../api/http-command-contract.md#1099-长短期记忆接口2026-10-19)。
+
+## 106. 0122 排队消息的插话意图（2026-10-19 源码实现）
+
+`ALTER TABLE assist_messages ADD COLUMN steer_requested boolean NOT NULL DEFAULT false;`——纯追加一列，不改状态枚举、不回填、不动既有索引与授权（0015 的表级 SELECT/INSERT/UPDATE 覆盖新列）。
+
+**语义**：普通 Agent 会话里一条回复 `RUNNING` 时，用户新发的消息仍落库为 `PENDING`（排队）。`steer_requested = true` 表示「已请求把这一条并入正在生成的那一轮」。它与 `cancel_requested`（0054）同一性质——先持久化控制意图，由生成方在安全点观察；区别是取消让这一轮停下，插话让这一轮多跑一步。
+
+**写入方**（两处，互不覆盖）：
+
+1. `SteerAssistMessage` 命令 → `setSteerRequested()`：只对 `role='ASSISTANT' AND status='PENDING'` 置位；`RUNNING` 与终态不改。
+2. `claimNextPendingMessage()`：在把 `PENDING` 改成 `RUNNING` 的同一句里清零——一行自己开始生成后就不再是别人的插话对象。这是迟到意图的收尾路径：那一轮先结算、意图没被消费，这一行随后按普通排队被领取，消息照常得到自己的回复。
+
+**消费方**：`drainSteerRequests(session_id, after_seq)`，唯一调用点是普通 Agent 主流程 `runSessionReadonlyRounds()` 每次模型请求之前。一条语句完成三件事：选中 `seq > after_seq AND role='ASSISTANT' AND status='PENDING' AND steer_requested` 的行；把它们收口为 `status='CANCELLED', error_code='STEERED', worker_id=NULL`；用 `LATERAL` 取各自紧邻的用户原文返回。收口后状态已离开 `PENDING`，同一行不会被第二次消费。
+
+**读取排除**：`listMessages()` 与 `assistMemory.history()` 都排除 `role='ASSISTANT' AND status='CANCELLED' AND error_code='STEERED'` 的行——它不是一轮回复（没有答案），只是一条占位行；用户原文仍是真实 `USER` 消息，照常出现在转录区与后续上下文里。
+
+**为什么不用新状态值**：`assist_messages.status` 的 CHECK 是既有枚举，加值要重建约束并波及所有按状态分支的读方；`CANCELLED` + 类型化 `error_code` 已是本仓表达「这一轮没产生正文」的既有形状（`error_code` 无约束，0046 也把 Provider 分类另立一列而不并进来）。
+
+**索引**：不加。读取走既有 `UNIQUE (session_id, seq)`，单用户在途队列是个位数。
+
+**兼容与回滚**：默认 false，旧行取 false；旧应用不读该列，行为退回「只排队不插话」。回退可保留列；删除列只丢失未消费的插话意图，不丢失消息、回执或状态事实。**Breaking Change: No。** 协议归 [HTTP §10.102](../api/http-command-contract.md#10102-排队消息的插话2026-10-19-源码实现)，上下文位置归[运行时上下文 §2.9](../architecture/runtime-context.md#29-排队消息的插话进入上下文的方式2026-10-19已实施)。
+
+## 107. 0125 长期记忆自动捕获（2026-10-20，ADR-030）
+
+三处纯追加：`memory_items` 加 `origin`、`workspace_memory_settings` 加 `auto_capture`、新表 `memory_auto_captures`。不改 0009 的 `memory_items` 状态约束与 0118 的设置表结构。
+
+- **`memory_items.origin`**：`text NOT NULL DEFAULT 'HUMAN_CONFIRMED'`，CHECK 只允许 `HUMAN_CONFIRMED` / `AUTO_CAPTURE`。旧行全部落为人工确认——0125 之前不存在自动写入，回填值就是事实。索引 `(workspace_id, origin, status)` 供召回排序与后续筛选。
+- **`workspace_memory_settings.auto_capture`**：`boolean NOT NULL DEFAULT true`，与既有两个开关并列。缺配置时应用层仍按「修订 0、三项 true」返回。
+- **`memory_auto_captures`**：一次提取一行。
+  - `source_sha256` 是**原消息正文**的 UTF-8 摘要（与 §10.99 手动保存同口径）；`normalized_sha256` 是 title+text 归一化后的指纹。
+  - 唯一键 `(session_id, message_id, normalized_sha256)`：同一消息同一内容只写一次，重复触发是空操作（`on conflict do nothing`）。
+  - `memory_id` 指向写入的 Memory 根，不复制正文——正文与版本仍在 `memory_versions`，来源仍在 `memory_message_sources`。
+  - `status` 只有 `ACTIVE` / `RETIRED`，并用 CHECK 绑定「RETIRED 必须同时有 `decided_at` 与 `decided_by`」——撤销不能没有责任人。
+  - 索引 `(workspace_id, status, created_at desc)` 供列表，`(session_id, created_at desc)` 供每日限频计数（UTC 日界）。
+- **授权**：`GRANT SELECT, INSERT, UPDATE ON memory_auto_captures TO relay_app`。`memory_items` 的新列由 0009 的表级授权覆盖，不需要额外 GRANT。
+- **为什么不用「候选表 + 接受」**：ADR-029 的候选方案被用户否决（确认成本只是换了个地方）；0125 因此没有 `PENDING` 态，写入即生效，撤销即停用。
+
+## 108. 0126 会话内直接写文件来源（2026-10-20，ADR-031）
+
+只改三条既有 CHECK，不新增表、不加列、不回填。三条均按**最新正文**逐条重述后追加新支：`ck_logical_operation_origin` 与 `ck_invocation_run_identity` 以 0087 为准，`ck_logical_operation_resource` 以 0105 为准（含 COMPUTER / GITHUB / BROWSER 分支）。
+
+- **`ck_logical_operation_origin`**：追加 `AGENT_SESSION_WRITE`，四个执行身份列全 `NULL`。与 `AGENT_SESSION_READ` 同形——会话写没有 Run/Task/Step/ImportJob，防止「会话写动作挂到某个 Run 上」这种既冒充执行权、又让 Run 未决列表漏掉它的形态。
+- **`ck_logical_operation_resource`**：追加 `(capability_key = 'FILE_WRITE' AND origin = 'AGENT_SESSION_WRITE' AND resource_id IS NOT NULL)`。`GIT_WRITE` / `CLI_RUN` / `WEB_FETCH` 不放开：会话写只改本会话绑定目录内的文件，不改仓库状态、不跑命令、不联网。
+- **`ck_invocation_run_identity`**：追加一支，绑定受管资源但没有 Worker、`ownership_epoch`、资源 claim 与 claim token。排他不靠 claim（`resource_claims` 强制绑定 task/run/worker，会话两者都没有），靠 prepare 与 admit 各自按 `listOccupiedResources()` 拒绝在途目录——与 0058 的 `USER_ACTION` 同一口径。
+- **能力与动作是两层判定**：CHECK 只钉到 `FILE_WRITE` 能力，应用层 `originAllows()` 再收窄到 `APPLY_CHANGESET` / `READ_CHANGE_SET`。同名能力下的 `WRITE_FILE`（全文覆盖、无基线）因此不可达——两个会话并发写同一文件时，唯一可靠的闸门是 SHA-256 基线。
+- **为什么重述而不就地追加**：0060 的注释记录过 0054 重述 `ck_logical_operation_resource` 时漏掉 `WEB_FETCH` 与 `FILE_WRITE`，造成 9 例既有动作在下一次写入时违反约束。本次把三个分支逐条抄全再追加，不用「在上次版本上加一行」的写法。
+
+## 109. 0127 聊天目标与计划模式（2026-10-20 源码实现）
+
+三张业务表 + 两张账本表，全部挂在既有 `assist_sessions` / `assist_messages` 上：
+
+- **`assist_sessions.chat_mode` / `assist_messages.chat_mode`**：行为模式（CHAT/PLAN/GOAL），
+  与会话身份 `conversation_mode` 分开。会话列是「当前模式」，消息列是**发送时的模式快照**——
+  之后切换模式不改写已排队消息的处理方式（与 `intent`、`method_snapshot` 的冻结语义一致）。
+  两列都带 CHECK，缺省 `CHAT`，旧数据零迁移。
+- **`assist_messages.goal_outcome`（jsonb）**：目标轮次的结构化结论（成功条件状态、步骤、
+  下一步）。正文仍落 `content`（只落信封的 `reply`），推进器读这一列而不是重新解析正文：
+  「模型说了什么」与「用户看到什么」各自可核对，压缩/截断也不会改变结算依据。
+- **`assist_plans`**：计划版本行，**不可变**。`uq_assist_plan_version (session_id, version)`
+  从 1 起严格递增；`uq_assist_plan_source (session_id, source_message_id)` 保证同一条消息
+  只落一版，重放与恢复都按这条身份核对。修改＝插入新版本并把旧版本标 `SUPERSEDED`。
+- **`assist_goals`**：会话内持久目标。状态机十一态；`uq_assist_goal_open_per_session`
+  是**部分唯一索引**（`status NOT IN (COMPLETED, CANCELLED, FAILED)`）——一条会话最多一个
+  未终结目标，`BUDGET_EXHAUSTED` 仍占位，额度耗尽后不会因为再发一条消息就悄悄长出第二个
+  目标。`criteria`/`steps` 在执行开始时冻结；推进租约（`lease_owner`/`lease_expires_at`）
+  保证同一目标同一时刻只有一个 Worker 组织下一轮；`ck_assist_goal_closed` 把终结态与
+  `closed_at` 绑在一起。
+- **`assist_goal_rounds`**：轮次结算回执。`uq_assist_goal_round_message (message_id)` 唯一
+  ——一条目标轮次消息只结算一次，重启重扫按这条键幂等；`uq_assist_goal_round_index
+  (goal_id, round_index)` 保证轮次连续不重号。
+- **`assist_goal_budget_grants`**：额度耗尽后用户点「继续」的显式授权账本。
+  `uq_assist_goal_grant_command (command_id)` 保证同一命令重放只加一次额度；应用层把它
+  加在共享预算闸门的会话级上限上，因此每一次扩额都有账可查。
+
+外键：`assist_messages.goal_id → assist_goals(id)`，索引 `(goal_id, seq)` 供推进器按序
+读取轮次；`assist_goals.plan_version_id → assist_plans(id)` 记录「按哪一版计划执行」。
+权限：`relay_app` 对两张业务表 SELECT/INSERT/UPDATE，两张账本表只 SELECT/INSERT——
+轮次与授权一经写入不改写，修正只能通过新的行表达。
+
+## 110. 0130 记忆来源类别与自动捕获写入修正（2026-10-21，ADR-032）
+
+在 §107 之上纯追加两列，并修掉两处实现缺口。
+
+- **`memory_items.source_kind`**：`text NOT NULL DEFAULT 'MANUAL'`，CHECK 只允许 `MANUAL` / `USER_STATEMENT` / `MODEL_OBSERVATION` / `UNKNOWN`。它回答「内容来自谁的哪一段」，`origin` 回答「谁写的」——两维不同：自动捕获的条目既可能只引用用户原话（`USER_STATEMENT`），也可能只引用助手叙述（`MODEL_OBSERVATION`）。回填：0125 之后写下的自动记忆（`origin = 'AUTO_CAPTURE'`）落 `UNKNOWN`——它们没有经过来源核验，不能假定是用户原话；其余行落 `MANUAL`。索引 `(workspace_id, origin, source_kind, status)` 供召回排序与后续筛选。
+- **`memory_auto_captures.source_quote`**：`text NOT NULL DEFAULT ''`，记这一条来自原消息的**哪一段**（逐字片段）。来源类别由它核验而来，留在这里是为了事后能复核「这条记忆说的是哪一段」。
+- **修正一：`ck_memory_version_values` 放宽**。0009 的 CHECK 要求 `confirmed_by = 'user:local'`，而 §107 的自动捕获写的是 `'auto-capture'`：真实 PostgreSQL 上每一次自动捕获写入都被这条约束拒绝，又被写入路径的失败静默吞掉——「自动记住」从未真正落库（此前只有不碰库的单测，没有暴露）。本迁移把取值放宽为 `in ('user:local', 'auto-capture')`，不新增第三个来源。
+- **修正二：自动捕获显式写 `origin`**。写入路径此前没写这一列，落到了列默认值 `HUMAN_CONFIRMED`，自动记住的条目在召回排序与界面标注上冒充人工确认。改为显式写 `AUTO_CAPTURE`。
+- **授权**：`memory_items` 与 `memory_auto_captures` 的新列由既有表级授权覆盖，不需要额外 GRANT。

@@ -604,6 +604,9 @@
 .collab-toolbar-directory--placeholder { color: var(--relay-color-text-muted); }
 .collab-toolbar-directory > svg { width: 0.875rem; height: 0.875rem; flex: none; }
 .collab-toolbar-directory-name { overflow: hidden; text-overflow: ellipsis; }
+/* 绑定状态标记（2026-10-21，R3-02）：只补一句「这条目录还没绑到会话上」，
+   用次级色、不加底不描边，避免把一行普通事实读成告警；文案本身由 TSX 给出。 */
+.collab-toolbar-directory-state { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-caption); flex: none; }
 /* 右翼动作区：图标键同高同密度、按 space.2 成组；「工作详情」固定在最后。
    图标键本身的基底与展开色见本文件上方的 `.collab-toolbar-icon-button`，这里只摆位置。 */
 .collab-toolbar-right { display: flex; align-items: center; gap: var(--relay-space-2); }
@@ -658,3 +661,6 @@
 
 
 .collab-goal[hidden] { display: none; }
+
+/* 2026-10-20：顶栏目录来源标记（.collab-toolbar-directory-source）按用户指令
+   「只显示目录名」移除，对应规则一并删除。 */

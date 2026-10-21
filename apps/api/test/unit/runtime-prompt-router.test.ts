@@ -36,6 +36,7 @@ const assistantSnapshot = { name: '审读', role_description: '只读复核这�
 const learningState = { goal: '理解架构', topics: [], open_items: [], recent: [] };
 
 const SYSTEM_ROUTES: readonly RuntimeSystemRoute[] = [
+  { kind: 'ASSIST_MEMORY_COMPACT' },
   { kind: 'ASSIST_DISCUSS' }, { kind: 'ASSIST_IMPACT_CHECK' },
   { kind: 'ASSIST_IMPACT_CANDIDATE' }, { kind: 'ASSIST_PROPOSE_CANDIDATE' },
   { kind: 'ASSIST_PROPOSE_TASK' },
@@ -43,6 +44,14 @@ const SYSTEM_ROUTES: readonly RuntimeSystemRoute[] = [
   // 0087：普通 Agent 连续主流程的读取轮次。登记在案就必须能被选中并与登记表互锁——
   // 漏掉它会让「每条已登记路由都可解析」这条保证对新增路由失效。
   { kind: 'AGENT_MAIN_LOOP' },
+  // 0127：聊天 /plan 与 /goal 的两条会话模板。登记在案就必须能被选中并与登记表互锁。
+  { kind: 'AGENT_PLAN_MODE' },
+  { kind: 'AGENT_GOAL_ROUND', state: { objective: '把文档整理完' } },
+  // 0128：有界子 Agent 的一次只读执行。同一条互锁——登记在案就必须能被选中，
+  // 否则「每条已登记路由都可解析」对新增路由失效，而委派创建时正好会踩到它。
+  { kind: 'AGENT_SUBAGENT', state: { role: 'INVESTIGATE', objective: '核对 src 下的改动',
+    scope: [], baseline: null, output_requirements: '给出发现、证据位置与直接结论',
+    required: false } },
   { kind: 'LEARNING_PARTNER', state: learningState, material: [] },
   { kind: 'SKILL', skill: fixtureSkill },
   { kind: 'METHOD', method: fixtureMethod, action: null, readTools: false },
@@ -90,13 +99,15 @@ test('every registered route resolves and its metadata matches the registry', ()
     seen.add(selection.route.routeId);
     const descriptor = RUNTIME_ROUTES[selection.route.routeId];
     assert.equal(selection.route, descriptor);
-    // 每条路由的模板版本各自独立：AGENT_MAIN_LOOP 随本次信封扩展升到 1.0.2，
+    // 每条路由的模板版本各自独立：AGENT_MAIN_LOOP 随直写后的检查接续升到 1.0.4，
+    // 2026-10-21 随「工具准入由这一步需不需要本地事实决定」这条判定升到 1.0.5
+    // （用户指认一个很简单的问题也要想很久；收口在提示词，不在按文本猜的路由谓词）；
     // DRAFT 只读/含写工具集的 1.0.1 是它们自己的版本，不能顺手一起抬；
-    // METHOD 因新增「有读取工具的 MODIFY」分支升到 1.0.1，DRAFT 写分支因放开删除升到 1.0.2。
+    // METHOD 随明确 MODIFY 复用直写升到 1.0.2，DRAFT 写分支因放开删除升到 1.0.2。
     const expectedVersion =
-      descriptor.routeId === 'AGENT_MAIN_LOOP' ? '1.0.2' :
-      descriptor.routeId === 'DRAFT_WRITE_TOOLS' ? '1.0.2' :
-      descriptor.routeId === 'DRAFT_READ_ONLY_TOOLS' || descriptor.routeId === 'METHOD'
+      descriptor.routeId === 'AGENT_MAIN_LOOP' ? '1.0.5' :
+      descriptor.routeId === 'DRAFT_WRITE_TOOLS' || descriptor.routeId === 'METHOD' ? '1.0.2' :
+      descriptor.routeId === 'DRAFT_READ_ONLY_TOOLS'
         ? '1.0.1' : '1.0.0';
     assert.equal(descriptor.templateVersion, expectedVersion);
     // 元数据声称包含核心，模板里就必须恰好出现一次；声称不含就必须为零。

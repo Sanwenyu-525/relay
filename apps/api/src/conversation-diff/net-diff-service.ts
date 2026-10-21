@@ -15,6 +15,7 @@ import { resourceNotFound } from '../application/domain-error.js';
 import {
   captureBaseline,
   captureCurrentState,
+  findGitTopLevel,
   type CurrentScan,
   NotAGitRepositoryError,
 } from './baseline-capture.js';
@@ -49,6 +50,13 @@ export interface EstablishBaselineResult {
 export interface ReadDiffInput {
   readonly workspaceId: string;
   readonly sessionId: string;
+  /**
+   * 统计范围（2026-10-20）：
+   *   * `SESSION`（默认）只统计本会话实际落盘的路径——对话输入框上方那一行；
+   *   * `DIRECTORY` 统计整段目录净变化（含同期外部修改）——工作详情的「变更」页签。
+   * 两者共用同一份基线、同一套行规则，只有范围不同。
+   */
+  readonly scope?: 'SESSION' | 'DIRECTORY';
 }
 
 export type ReadDiffResult =
@@ -116,7 +124,15 @@ export async function establishConversationDiffBaseline(repositories: Repositori
   return { established: true, reason: 'CREATED', baseline, reused: false };
 }
 
-/** 读取会话净 diff：基线快照 → 当前已落盘内容。 */
+/**
+ * 读取会话净 diff：基线快照 → 当前已落盘内容，**只统计本会话自己写过的路径**（2026-10-20 用户指令）。
+ *
+ * 会话口径与目录口径的分工：这里只回答「这次对话改了什么」，同一目录里其他程序、其他会话的
+ * 同期修改一律不计入；目录级总变化是另一件事，不在这条入口上。归因只用来圈定**候选路径**，
+ * 行数仍由「基线 → 当前内容」算出，所以声明了但实际没改的路径会因摘要相同自然消失。
+ *
+ * 本会话一个路径都没写过时不做整目录扫描（多数纯聊天会话每 4 秒轮询一次，扫描成本不该付）。
+ */
 export async function readConversationDiff(repositories: Repositories,
   input: ReadDiffInput): Promise<ReadDiffResult> {
   const session = await repositories.assist.readSession(input.sessionId, true);
@@ -137,6 +153,22 @@ export async function readConversationDiff(repositories: Repositories,
     input.workspaceId, input.sessionId, resourceId, rootPath);
   if (baseline === undefined) {
     return { available: false, reason: 'NO_BASELINE' };
+  }
+
+  const sessionScope = (input.scope ?? 'SESSION') === 'SESSION';
+  const written = sessionScope
+    ? await repositories.conversationDiff.listWrittenPaths(input.workspaceId, input.sessionId, rootPath)
+    : [];
+  if (sessionScope && written.length === 0) {
+    // 没有候选路径就不用扫 2000 个文件；但根是否仍是 Git 仓库仍要如实回答，
+    // 不能因为「本来就没改」把「目录已经不是 Git 根」这条事实吞掉。
+    try {
+      await findGitTopLevel(rootPath);
+    } catch (error) {
+      if (error instanceof NotAGitRepositoryError) return { available: false, reason: 'ROOT_NOT_GIT' };
+      throw error;
+    }
+    return { available: true, diff: emptySessionDiff(rootPath, resourceId, baseline) };
   }
 
   let current: CurrentScan;
@@ -162,12 +194,35 @@ export async function readConversationDiff(repositories: Repositories,
     baselineRevision: baseline.revision,
     incomplete: baseline.incomplete,
     coverage,
+    ...(sessionScope ? { scope: new Set(written) } : {}),
     currentUnswept: current.unswept,
     tracked: current.tracked,
     baseline: baselineMap,
     current: current.files,
   });
   return { available: true, diff };
+}
+
+/** 本会话一个路径都没写过：不做扫描，直接给「没有文件变化」。 */
+function emptySessionDiff(rootPath: string, resourceId: string,
+  baseline: StoredBaseline): ConversationDiff {
+  return {
+    rootPath,
+    resourceId,
+    scope: 'SESSION',
+    baselineCapturedAt: baseline.capturedAt.toISOString(),
+    baselineRevision: baseline.revision,
+    incomplete: false,
+    coverage: {
+      baseline: { complete: !baseline.incomplete,
+        reason: baseline.captureReason === '' ? null : baseline.captureReason,
+        files: baseline.files.length, listed: null },
+      // 没有候选路径就没有扫描，`files: 0` 是「没扫」而不是「扫了 0 个」。
+      current: { complete: true, reason: null, files: 0, listed: 0 },
+      uncheckedFiles: 0, unverifiedFiles: 0, unverifiableFiles: 0, unscannedFiles: 0,
+    },
+    totalFiles: 0, totalAdded: 0, totalRemoved: 0, files: [],
+  };
 }
 
 function storedToBaselineFile(file: StoredBaselineFile): BaselineFile {
@@ -186,7 +241,7 @@ function storedToBaselineFile(file: StoredBaselineFile): BaselineFile {
  * 缺口条数（未核对／无法确认新增）由 `computeSnapshotDiff` 汇总，不在这里猜。
  */
 function snapshotCoverage(baseline: StoredBaseline, current: CurrentScan):
-  Omit<DiffCoverage, 'uncheckedFiles' | 'unverifiedFiles'> {
+  Omit<DiffCoverage, 'uncheckedFiles' | 'unverifiedFiles' | 'unverifiableFiles' | 'unscannedFiles'> {
   return {
     baseline: { complete: !baseline.incomplete,
       reason: baseline.captureReason === '' ? null : baseline.captureReason,
@@ -211,6 +266,8 @@ export interface ReadDiffFileInput {
   readonly sessionId: string;
   /** 根内相对路径；越界/不存在一律不可用，不构成读取越权。 */
   readonly path: string;
+  /** 与列表同一范围：`SESSION` 只放行本会话写过的路径，`DIRECTORY` 按目录口径放行。 */
+  readonly scope?: 'SESSION' | 'DIRECTORY';
 }
 
 export type DiffFileUnavailableReason = 'NO_RESOURCE' | 'NO_BASELINE' | 'ROOT_NOT_GIT' |
@@ -257,6 +314,21 @@ export async function readConversationDiffFile(repositories: Repositories,
     input.workspaceId, input.sessionId, resourceId, rootPath);
   if (baseline === undefined) return { available: false, reason: 'NO_BASELINE' };
 
+  // 会话口径：只有本会话写过的路径才有正文。别的会话/外部程序改的文件不属于这条入口，
+  // 直接按「不在本次统计范围内」拒绝，而不是借展开正文把它读出来。
+  let canonical: string;
+  try {
+    canonical = canonicalRelativePath(rootPath, input.path);
+  } catch {
+    return { available: false, reason: 'PATH_NOT_FOUND' };
+  }
+  const sessionScope = (input.scope ?? 'SESSION') === 'SESSION';
+  if (sessionScope) {
+    const written = await repositories.conversationDiff.listWrittenPaths(
+      input.workspaceId, input.sessionId, rootPath);
+    if (!written.includes(canonical)) return { available: false, reason: 'PATH_NOT_FOUND' };
+  }
+
   let current: CurrentScan;
   try {
     current = await captureCurrentState(rootPath);
@@ -265,12 +337,6 @@ export async function readConversationDiffFile(repositories: Repositories,
     throw error;
   }
 
-  let canonical: string;
-  try {
-    canonical = canonicalRelativePath(rootPath, input.path);
-  } catch {
-    return { available: false, reason: 'PATH_NOT_FOUND' };
-  }
   const baselineFile = baseline.files.find((file) => file.path === canonical);
   const currentFile = current.files.get(canonical);
   if (baselineFile === undefined && currentFile === undefined && !current.unswept.has(canonical)) {
@@ -285,6 +351,15 @@ export async function readConversationDiffFile(repositories: Repositories,
       current.tracked.has(canonical)) {
     return sweepIncompleteDetail(canonical, 'CREATE', 'BASELINE_SWEEP_INCOMPLETE');
   }
+  // 两侧都在、内容却读不到（超过单文件上限/采集时读失败）且字节数相同：不能答「没有变化」。
+  const baselineHash = baselineFile === undefined ? null : (baselineFile.sha256 === '' ? null : baselineFile.sha256);
+  const currentHash = currentFile === undefined ? null : currentFile.sha256;
+  if (baselineFile !== undefined && currentFile !== undefined &&
+      (baselineHash === null || currentHash === null) &&
+      baselineFile.size_bytes === currentFile.sizeBytes) {
+    return sweepIncompleteDetail(canonical, 'SAME',
+      currentFile.unavailableReason ?? baselineFile.unavailable_reason ?? 'TEXT_TOO_LARGE');
+  }
 
   // 行数与总数走同一个纯函数：只喂该路径的两端，口径不会再分叉。
   const single = computeSnapshotDiff({
@@ -294,6 +369,7 @@ export async function readConversationDiffFile(repositories: Repositories,
     baselineRevision: baseline.revision,
     incomplete: baseline.incomplete,
     coverage: snapshotCoverage(baseline, current),
+    ...(sessionScope ? { scope: new Set([canonical]) } : {}),
     currentUnswept: current.unswept,
     tracked: current.tracked,
     baseline: baselineFile === undefined ? new Map()

@@ -7,13 +7,14 @@ import {
   MAX_ASSIST_ATTACHMENT_TOTAL_BYTES, attachmentProblem, formatAttachmentBytes,
 } from "../src/components/composerAttachments";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { flush, mountWorkbench } from "./mountApp";
+import { flush, mountWorkbench, pageText } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const projectId = "22222222-2222-4222-8222-222222222222";
 const sessionId = "33333333-3333-4333-8333-333333333333";
 const attachmentId = "44444444-4444-4444-8444-444444444444";
+const brokenAttachmentId = "77777777-7777-4777-8777-777777777777";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
 
 function response(body: unknown, status = 200): Response {
@@ -158,6 +159,128 @@ describe("输入框图片附件（工作台 §33）", () => {
     view.unmount();
   });
 
+  it("上传成功但消息命令被拒时，图片留在输入框里可重试", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === `${prefix}/projects/${projectId}`) return response({ id: projectId, title: "测试项目",
+        project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
+      if (path === `${prefix}/assist-sessions`) return response({ items: [session()] });
+      if (path === `${prefix}/assist-sessions/${sessionId}` && init?.method !== "POST")
+        return response(session());
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages` && init?.method !== "POST")
+        return response({ items: [] });
+      if (path === `${prefix}/assist-sessions/${sessionId}/message-attachments`)
+        return response({ attachment_id: attachmentId, byte_length: 3, content_hash: "hash" }, 201);
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages`)
+        // 模拟能力闸门：上传成功、命令被 422 明确拒绝。服务端把真实原因放在
+        // field_errors[].message 里（detail 恒为「请求结构不符合端点契约。」），
+        // 客户端必须把它显示出来，否则用户只看到「attachment_ids 不符合契约」。
+        return response({ code: "VALIDATION_FAILED", detail: "请求结构不符合端点契约。",
+          field_errors: [{ field: "attachment_ids",
+            message: "当前聊天模型不支持图片输入，不能发送图片附件。" }] }, 422);
+      if (path === `${prefix}/assist-proposals`) return response({ items: [] });
+      if (path === `${prefix}/skill-definitions`) return response({ items: [] });
+      if (init?.method !== "POST") return response({ items: [] });
+      throw new Error(`unexpected POST ${path}`);
+    }));
+    const view = await mountWorkbench(`/projects/${projectId}?skill=assist`);
+    await flush();
+    const draft = view.wrapper.get('[data-testid="assist-draft"]').element!;
+    await pasteFile(draft, new File([new Uint8Array([1, 2, 3])], "截图.png", { type: "image/png" }));
+    await view.wrapper.get('[data-testid="assist-send"]').trigger("click");
+    await flush();
+    // 命令没有发出：附件不能随 clear() 一起消失，否则用户要重新找图。
+    expect(view.wrapper.get('[data-testid="composer-attachments"]').text()).toContain("截图.png");
+    // 拒绝原因必须可读：只说「attachment_ids 不符合契约」等于让用户去猜。
+    expect(pageText(view.wrapper)).toContain("当前聊天模型不支持图片输入，不能发送图片附件。");
+    view.unmount();
+  });
+
+  it("模型不接受图片时，粘进来就在芯片行里说明，并能原地为它声明能力", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    let declared = false;
+    let declaredBody: Record<string, unknown> | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === `${prefix}/projects/${projectId}`) return response({ id: projectId, title: "测试项目",
+        project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
+      // 原地声明：写的是「当前 provider + 当前模型名」，写完立即重读同一份判定。
+      if (path === `${prefix}/model-capabilities/openai-compatible/agnes-3.0-flash` &&
+          init?.method === "PUT") {
+        declaredBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        declared = true;
+        return response({ provider: "openai-compatible", source_model_id: "agnes-3.0-flash",
+          image_input: true, note: null, declared_at: "2026-10-20T00:00:00Z",
+          updated_at: "2026-10-20T00:00:00Z" });
+      }
+      // 与发送闸门同一份判定：目录里没有这个自建模型，也没声明。
+      if (path === `${prefix}/model-port`) return response({ provider: "openai-compatible",
+        configured: true, model: "agnes-3.0-flash", base_url: "https://api.example.com/v1",
+        max_call_tokens: 65536, image_input: declared ? "DECLARED" : "MODEL_NOT_IN_CATALOG",
+        image_input_source: declared ? "DECLARED" : "NONE" });
+      if (path === `${prefix}/assist-sessions`) return response({ items: [session()] });
+      if (path === `${prefix}/assist-sessions/${sessionId}` && init?.method !== "POST")
+        return response(session());
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return response({ items: [] });
+      if (path === `${prefix}/assist-proposals`) return response({ items: [] });
+      if (path === `${prefix}/skill-definitions`) return response({ items: [] });
+      if (init?.method !== "POST") return response({ items: [] });
+      throw new Error(`unexpected POST ${path}`);
+    }));
+    const view = await mountWorkbench(`/projects/${projectId}?skill=assist`);
+    await flush();
+    const draft = view.wrapper.get('[data-testid="assist-draft"]').element!;
+    // 还没粘图：不提前吓人。
+    expect(view.wrapper.find('[data-testid="composer-attachment-notice"]').exists()).toBe(false);
+    await pasteFile(draft, new File([new Uint8Array([1, 2, 3])], "截图.png", { type: "image/png" }));
+    const notice = view.wrapper.get('[data-testid="composer-attachment-notice"]').text();
+    expect(notice).toContain("agnes-3.0-flash");
+    expect(notice).toContain("会被拒绝");
+    // 2026-10-20（P1-5）：不再让用户去改服务端环境变量；目录里没有这个模型时，
+    // 声明就是唯一能让带图消息通过的入口，所以入口就在这里。
+    expect(notice).not.toContain("RELAY_MODEL_IMAGE_INPUT");
+    expect(view.wrapper.find('[data-testid="composer-image-declare"]').exists()).toBe(true);
+    // 只说明、不拦发送：服务端闸门才是准绳，禁用发送键会把「只发这段文字」也卡住。
+    expect(view.wrapper.get('[data-testid="assist-send"]').attributes("disabled")).toBeUndefined();
+    await view.wrapper.get('[data-testid="composer-image-declare-support"]').trigger("click");
+    await flush();
+    expect(declaredBody).toMatchObject({ image_input: true });
+    // 写完重读：判定变成 DECLARED，提示与入口一起消失（不在界面上宣布「已生效」以外的状态）。
+    expect(view.wrapper.find('[data-testid="composer-attachment-notice"]').exists()).toBe(false);
+    expect(view.wrapper.find('[data-testid="composer-image-declare"]').exists()).toBe(false);
+    view.unmount();
+  });
+
+  it("目录明确说不支持图片时不给声明入口：那一档声明不生效", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === `${prefix}/projects/${projectId}`) return response({ id: projectId, title: "测试项目",
+        project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
+      if (path === `${prefix}/model-port`) return response({ provider: "openai-compatible",
+        configured: true, model: "text-only-model", base_url: "https://api.example.com/v1",
+        max_call_tokens: 65536, image_input: "MODEL_LACKS_IMAGE_INPUT",
+        image_input_source: "CATALOG" });
+      if (path === `${prefix}/assist-sessions`) return response({ items: [session()] });
+      if (path === `${prefix}/assist-sessions/${sessionId}` && init?.method !== "POST")
+        return response(session());
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return response({ items: [] });
+      if (path === `${prefix}/assist-proposals`) return response({ items: [] });
+      if (path === `${prefix}/skill-definitions`) return response({ items: [] });
+      if (init?.method !== "POST") return response({ items: [] });
+      throw new Error(`unexpected POST ${path}`);
+    }));
+    const view = await mountWorkbench(`/projects/${projectId}?skill=assist`);
+    await flush();
+    await pasteFile(view.wrapper.get('[data-testid="assist-draft"]').element!,
+      new File([new Uint8Array([1, 2, 3])], "截图.png", { type: "image/png" }));
+    expect(view.wrapper.get('[data-testid="composer-attachment-notice"]').text()).toContain("不支持图片输入");
+    // 目录判定优先于声明：这里给按钮等于承诺一件做不到的事。
+    expect(view.wrapper.find('[data-testid="composer-image-declare"]').exists()).toBe(false);
+    view.unmount();
+  });
+
   it("首条消息也能只发图片：先建会话、再上传、最后按同一组 id 发首条", async () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
     let uploadBody: Record<string, unknown> | null = null;
@@ -211,6 +334,63 @@ describe("输入框图片附件（工作台 §33）", () => {
     view.unmount();
   });
 
+  it("悬停芯片浮出原图，离开或按 Esc 收回；预览挂在 body 上，不受输入卡裁剪", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    // jsdom 没有 createObjectURL，芯片拿不到预览 URL；这里补上，让悬停预览这条分支真跑。
+    const objectUrl = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+    const revokeUrl = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: () => "blob:preview-1" });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: () => {} });
+    try {
+      vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname;
+        if (path === `${prefix}/projects/${projectId}`) return response({ id: projectId, title: "测试项目",
+          project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
+        if (path === `${prefix}/assist-sessions`) return response({ items: [session()] });
+        if (path === `${prefix}/assist-sessions/${sessionId}` && init?.method !== "POST")
+          return response(session());
+        if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return response({ items: [] });
+        if (path === `${prefix}/assist-proposals`) return response({ items: [] });
+        if (path === `${prefix}/skill-definitions`) return response({ items: [] });
+        if (init?.method !== "POST") return response({ items: [] });
+        throw new Error(`unexpected POST ${path}`);
+      }));
+      const view = await mountWorkbench(`/projects/${projectId}?skill=assist`);
+      const draft = view.wrapper.get('[data-testid="assist-draft"]').element!;
+      await pasteFile(draft, new File([new Uint8Array([1, 2, 3])], "截图.png", { type: "image/png" }));
+      const chip = view.wrapper.get(".composer-attachment");
+      expect(chip.attributes("data-previewable")).toBe("true");
+      // 未悬停时没有浮层：预览不是常驻装饰。
+      expect(document.querySelector('[data-testid="attachment-preview"]')).toBeNull();
+      await chip.trigger("mouseover");
+      const preview = document.querySelector('[data-testid="attachment-preview"]');
+      expect(preview).not.toBeNull();
+      expect(preview!.querySelector("img")!.getAttribute("src")).toBe("blob:preview-1");
+      // 浮层在 document.body 上：输入卡发送中 overflow:hidden、对话列本身也是滚动容器，
+      // 留在芯片子树里会被裁掉，所以这里同时断言「容器里查不到、body 上查得到」。
+      expect(view.wrapper.find('[data-testid="attachment-preview"]').exists()).toBe(false);
+      // 在芯片内部移动（缩略图 → 名称）不收回。
+      await act(async () => { chip.element!.dispatchEvent(new MouseEvent("mouseout",
+        { bubbles: true, relatedTarget: chip.element!.querySelector(".composer-attachment-name") })); });
+      expect(document.querySelector('[data-testid="attachment-preview"]')).not.toBeNull();
+      // 真正离开芯片即收回。
+      await act(async () => { chip.element!.dispatchEvent(new MouseEvent("mouseout",
+        { bubbles: true, relatedTarget: document.body })); });
+      expect(document.querySelector('[data-testid="attachment-preview"]')).toBeNull();
+      // 键盘可达：聚焦芯片（Tab 到移除键）同样浮出，Esc 收回。
+      await act(async () => { chip.element!.querySelector("button")!.focus(); });
+      expect(document.querySelector('[data-testid="attachment-preview"]')).not.toBeNull();
+      await chip.trigger("keydown", { key: "Escape" });
+      expect(document.querySelector('[data-testid="attachment-preview"]')).toBeNull();
+      view.unmount();
+    } finally {
+      if (objectUrl === undefined) delete (URL as unknown as Record<string, unknown>).createObjectURL;
+      else Object.defineProperty(URL, "createObjectURL", objectUrl);
+      if (revokeUrl === undefined) delete (URL as unknown as Record<string, unknown>).revokeObjectURL;
+      else Object.defineProperty(URL, "revokeObjectURL", revokeUrl);
+    }
+  });
+
   it("历史消息里的附件按需读取并渲染缩略图，读取失败就地说明", async () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
     let reads = 0;
@@ -223,12 +403,15 @@ describe("输入框图片附件（工作台 §33）", () => {
         return response(session());
       if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return response({ items: [
         message("66666666-6666-4666-8666-666666666666", "1", "",
-          [{ id: attachmentId, name: "截图.png", media_type: "image/png", byte_length: 3 }])] });
+          [{ id: attachmentId, name: "截图.png", media_type: "image/png", byte_length: 3 },
+            { id: brokenAttachmentId, name: "坏图.png", media_type: "image/png", byte_length: 3 }])] });
       if (path === `${prefix}/assist-sessions/${sessionId}/message-attachments/${attachmentId}`) {
         reads += 1;
         return response({ attachment_id: attachmentId, name: "截图.png", media_type: "image/png",
           byte_length: 3, data_base64: "AQID" });
       }
+      if (path === `${prefix}/assist-sessions/${sessionId}/message-attachments/${brokenAttachmentId}`)
+        return response({ code: "RESOURCE_NOT_FOUND", detail: "附件在当前作用域中不可见或不存在。" }, 404);
       if (path === `${prefix}/assist-proposals`) return response({ items: [] });
       if (path === `${prefix}/skill-definitions`) return response({ items: [] });
       if (init?.method !== "POST") return response({ items: [] });
@@ -241,6 +424,22 @@ describe("输入框图片附件（工作台 §33）", () => {
     expect(view.wrapper.get(".message-attachment-image").attributes("src"))
       .toBe("data:image/png;base64,AQID");
     expect(reads).toBe(1);
+    // 读取失败不冒充「没有图片」：同名条目仍在，就地写明并提供重试。
+    expect(gallery.text()).toContain("坏图.png");
+    expect(gallery.text()).toContain("图片读取失败");
+    expect(gallery.find("button").text()).toContain("重新读取");
+    // 悬停预览与输入框芯片共用一份实现：读到的图能放大，读失败的条目没有内容可放大，
+    // 不浮空框（否则会挡住「重新读取」这个唯一的补救入口）。
+    const figures = view.wrapper.findAll(".message-attachment");
+    expect(figures[0].attributes("data-previewable")).toBe("true");
+    expect(figures[1].attributes("data-previewable")).toBe("false");
+    await figures[0].trigger("mouseover");
+    expect(document.querySelector('[data-testid="attachment-preview"] img')?.getAttribute("src"))
+      .toBe("data:image/png;base64,AQID");
+    await figures[1].trigger("mouseover");
+    expect(document.querySelector('[data-testid="attachment-preview"] img')?.getAttribute("src"))
+      .toBe("data:image/png;base64,AQID");
     view.unmount();
+    expect(document.querySelector('[data-testid="attachment-preview"]')).toBeNull();
   });
 });

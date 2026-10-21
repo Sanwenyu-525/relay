@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { FilePen } from "lucide-react";
 import FileWriteFrozenDiffPanel from "./FileWriteFrozenDiffPanel";
 import type { RelayApiClient } from "../api/relayClient";
 import type { RelayFileWriteChangeSet, RelayFileWriteFrozenDiff } from "../api/relayClient";
@@ -117,7 +118,9 @@ export default function ChatLocalFileDiff({ client, rows }: {
     aria-label="本次编辑的逐文件增删行">
     {rows.map((row) => <li key={row.key} className="local-file-diff" data-phase={row.phase}
       data-preview={row.preview} data-testid={`local-file-diff-${row.key}`}>
-      <span className="local-file-diff-glyph" aria-hidden="true">✎</span>
+      {/* 图标与状态词都不靠颜色单独表意：形状（笔）+ 文字（已修改/正在生成/…）同时在场，
+          metrics 另有 visually-hidden 可访问名（§9.15）。 */}
+      <span className="local-file-diff-glyph" aria-hidden="true"><FilePen /></span>
       <span className="local-file-diff-state">{stateText(row)}</span>
       {/* 路径可截断，数字不跟着被截断（设计系统 §9.15）：省略只作用在文件名这一项。 */}
       <span className="local-file-diff-path" title={row.path}>{row.fileName}</span>

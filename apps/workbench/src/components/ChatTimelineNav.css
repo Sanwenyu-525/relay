@@ -8,11 +8,16 @@
 /* 常驻轨占用的左缘留白：轨道宽 + 一档间距。空会话没有 .agent-chat-timeline，自然不留。 */
 .agent-chat-transcript-shell { --chat-timeline-gutter: calc(var(--relay-control-target-minimum) + var(--relay-space-2)); }
 
-/* 选择器比 AssistView.css 里的基础规则多一级，避免依赖两份样式的加载顺序。
-   两侧等量留白，不是只让左边：阅读列与输入器共用同一条中线（uiOption2FirstSession
-   的「消息列与输入器同宽」钉住这一点），只加左 padding 会把消息列整体推右半个 gutter。 */
+/* 阅读列中线与输入器对齐（2026-10-19 用户指认「左边跟输入框的左边对齐就好了」）。
+   轨道留白仍然两侧等量，但**右侧还要多让出一条自绘滚动条**：滚动条占的是 padding box 的
+   inline-end（.agent-chat-transcript 的 scrollbar-gutter: stable），content box 因此在右少
+   12px，消息列在其中居中时就整体左偏 6px——输入器不在滚动容器里，没有这 12px，于是两列
+   差半个滚动条。起边补回一整个滚动条宽度，content box 才重新对称、中线才回到列中心。
+   （旧注释说「只加左 padding 会把消息列推右半个 gutter」——那句只算了 gutter、漏了滚动条；
+   两侧等量只保证 padding 对称，保证不了 content box 对称。）
+   选择器比 AssistView.css 里的基础规则多一级，避免依赖两份样式的加载顺序。 */
 .agent-chat-transcript-shell:has(.agent-chat-timeline) .agent-chat-transcript {
-  padding-inline: var(--chat-timeline-gutter);
+  padding-inline: calc(var(--chat-timeline-gutter) + var(--chat-scrollbar-width, 12px)) var(--chat-timeline-gutter);
 }
 
 .agent-chat-timeline {

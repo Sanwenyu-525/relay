@@ -11,6 +11,9 @@ export interface RelayAssistSourceRef {
 /** 会话身份在建立时冻结；切换模式等于换会话，不在会话中途改写。 */
 export type RelayConversationMode = "AGENT" | "ASSISTANT" | "LEARNING";
 
+/** 0127：会话行为模式（不改变身份与权限）。 */
+export type RelayChatMode = "CHAT" | "PLAN" | "GOAL";
+
 /**
  * 人设助手配置（ADR-018、命令契约 §10.60）。
  *
@@ -59,6 +62,13 @@ export interface RelayAssistSession {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly conversationMode: RelayConversationMode;
+  /**
+   * 行为模式（0127）：普通讨论 / 只读规划 / 持续目标。
+   *
+   * 与会话身份分开：身份在建会话时冻结，模式可随命令切换。界面只读这一个字段决定
+   * 显示哪种模式，不在本地保存运行状态——刷新与会话重开都按服务端读回。
+   */
+  readonly chatMode: RelayChatMode;
   readonly assistantProfileId: string | null;
   /** 建会话时冻结的助手修订；普通会话恒为 null。 */
   readonly assistantProfileRevision: DecimalRevision | null;
@@ -77,8 +87,45 @@ export interface RelayAssistSession {
   /** 只读导航依据；Goal 经项目关联，不代表会话直接绑定或获得目录权限。 */
   readonly context?: {
     readonly projectGoals: readonly { readonly goalId: string; readonly title: string }[];
-    readonly workingDirectory: { readonly resourceId: string; readonly canonicalRoot: string | null } | null;
+    readonly workingDirectory: { readonly resourceId: string; readonly canonicalRoot: string | null;
+      /** 作用域来源（运行架构 §2.8）。null＝历史未知，不得据此编造来源。 */
+      readonly source: RelayWorkingDirectorySource | null } | null;
   };
+}
+
+/**
+ * 会话工作目录的来源（0117 / 运行架构 §2.8）。
+ *
+ * `USER_PICKED`＝用户在这段会话里当场选过目录；`WORKSPACE_DEFAULT`＝创建时由服务端
+ * 继承设置里的默认目录。它是**作用域**的来源说明，不是权限：两种来源的读写准入
+ * 仍由连接、策略与目录档位判定。
+ */
+export type RelayWorkingDirectorySource = "USER_PICKED" | "WORKSPACE_DEFAULT";
+
+export type RelayWorkspaceDefaultDirectoryStatus = "UNSET" | "READY" | "UNAVAILABLE";
+
+/**
+ * Workspace 默认工作目录的只读投影（HTTP §10.96）。
+ *
+ * 无配置时 `revision` 为 "0"，其余字段为 null；`UNAVAILABLE` 是「配置存在但当前
+ * 不可用」，与 `UNSET` 不是同一件事——界面必须分开显示，不能把它读成「没设置」。
+ * `write_tier` 只是该目录现状，配置默认目录不授予任何写能力。
+ */
+export interface RelayWorkspaceDefaultDirectory {
+  readonly resourceId: string | null;
+  readonly canonicalRoot: string | null;
+  readonly displayName: string | null;
+  readonly writeTier: RelayWriteTier | null;
+  readonly status: RelayWorkspaceDefaultDirectoryStatus;
+  readonly reason: string | null;
+  readonly revision: DecimalRevision;
+}
+
+/** 设置/清除默认目录的回执结果：只改这一条 Workspace 配置事实。 */
+export interface RelayWorkspaceDefaultDirectoryResult {
+  readonly workspaceId: string;
+  readonly resourceId: string | null;
+  readonly revision: DecimalRevision;
 }
 
 /**
@@ -190,6 +237,12 @@ export interface RelayWorkingDirectory {
   readonly createdResource: boolean;
   readonly candidates: readonly RelayWorkingDirectoryCandidate[];
   /**
+   * Git 只读投影（2026-10-20，P1-3）。缺字段（旧服务端/旧回执）落为 null，表示「未核对」，
+   * 不能当成「不是仓库」——两者的下一步完全不同。
+   */
+  readonly gitRead: { readonly state: string; readonly repoRoot: string | null;
+    readonly detail: string } | null;
+  /**
    * 写档位以服务端投影为准：policyDecision 是该目录上 APPLY_CHANGESET 的生效策略档位
    * （排序已在准入同一处完成，界面不再自己判定）；policyId / policyRevision 是改档位
    * 需要的乐观锁坐标。旧回执里没有这组字段，一律为 null，表示「未核对」而不是「未授权」。
@@ -249,6 +302,39 @@ export interface RelayRunToolCalls {
     readonly round: number;
     readonly modelCallId: string;
     readonly calls: readonly RelayRunToolCall[];
+  }[];
+}
+
+/**
+ * 会话工具轮次（GET /assist-sessions/{id}/messages/{message_id}/tool-calls，工作台 §18.10）。
+ *
+ * 与 Run 轨迹刻意分成两套类型：两张表、两种身份，会话轮次没有 Task 也没有 Run，
+ * 而且词表不同——会话侧会给出 `UNKNOWN`（结果未知、等人工核对），不会给出 Run 侧的
+ * `PREPARED` / `WAITING_APPROVAL`。`args` 是服务端原样透出的那一份，界面自己算一行摘要。
+ */
+export type RelaySessionToolCallStatus = "REQUESTED" | "SETTLED" | "REJECTED" | "ABANDONED" | "UNKNOWN";
+
+export interface RelaySessionToolCall {
+  readonly id: string;
+  readonly round: number;
+  readonly ordinal: number;
+  readonly toolName: string;
+  readonly status: RelaySessionToolCallStatus;
+  readonly args: Readonly<Record<string, unknown>>;
+  /** 派发前被拒或被放弃时的确切原因；其余状态为 null。 */
+  readonly rejectionReason: string | null;
+  readonly rejectionDetail: string | null;
+  readonly requestedAt: string;
+  readonly settledAt: string | null;
+}
+
+export interface RelaySessionToolCalls {
+  readonly sessionId: string;
+  readonly messageId: string;
+  readonly messageStatus: string;
+  readonly rounds: readonly {
+    readonly round: number;
+    readonly calls: readonly RelaySessionToolCall[];
   }[];
 }
 
@@ -399,7 +485,9 @@ export interface RelayAssistMessage {
   readonly providerErrorKind: RelayModelVerifyErrorCategory | null;
   readonly sources: readonly { readonly sourceRef: string | null; readonly kind: string | null;
     readonly rootId: string | null; readonly version: string | null;
-    readonly status: string; readonly reason: string | null }[];
+    readonly status: string; readonly reason: string | null;
+    /** 0125：记忆来源是人工确认还是自动记住；非记忆来源为 null。 */
+    readonly origin: "HUMAN_CONFIRMED" | "AUTO_CAPTURE" | null }[];
   readonly skill: ({ readonly id: string; readonly version: string; readonly sha256: string | null;
     readonly definitionAvailability: "AVAILABLE" | "HISTORICAL_ONLY" | "UNAVAILABLE";
     readonly outputAvailability: "PENDING" | "HISTORICAL_SNAPSHOT" | "NO_OUTPUT" | "UNAVAILABLE";
@@ -411,6 +499,11 @@ export interface RelayAssistMessage {
   readonly usage: { readonly inputTokens: number | null; readonly outputTokens: number | null;
     readonly cacheReadTokens: number | null; readonly cacheCreationTokens: number | null };
   readonly cancelRequested: boolean;
+  /**
+   * 0122：这条排队消息已被请求「插话」到正在生成的那一轮。缺字段（旧服务端）
+   * 读成 false——旧服务端没有这个动作，队列照旧按顺序回复。
+   */
+  readonly steerRequested: boolean;
   /**
    * 0093：随这条消息发送的图片附件元数据。缺字段（旧服务端）读成空数组——
    * 没有附件与「服务端不报附件」在展示上是同一件事，不能因此判整条响应非法。
@@ -519,21 +612,33 @@ export interface RelayConversationDiffScanSide {
 }
 
 /**
+ * 统计范围：`SESSION` 只算本会话写过的路径（对话入口用的就是这一档），
+ * `DIRECTORY` 是整段目录净变化（含同期外部修改）。旧服务端不带这个字段时按 `DIRECTORY` 解析。
+ */
+export type RelayConversationDiffScope = "SESSION" | "DIRECTORY";
+
+/**
  * 「不完整」的具体成因与条数。
  *
  * `uncheckedFiles` 是起点有、本轮没核对到的文件（不能算删除）；`unverifiedFiles` 是本轮有、
- * 起点没覆盖到且已被 Git 跟踪的文件（不能证明是本会话新增）。null 表示服务端未提供该投影。
+ * 起点没覆盖到且已被 Git 跟踪的文件（不能证明是本会话新增）；`unverifiableFiles` 是两侧都在、
+ * 内容摘要读不到（超过单文件上限或采集时读失败）且字节数相同的文件（无法核对，不计变化）；
+ * `unscannedFiles` 是会话口径下「本会话写过的路径两端都没扫到」的条数。
+ * null 表示服务端未提供该投影。
  */
 export interface RelayConversationDiffCoverage {
   readonly baseline: RelayConversationDiffScanSide;
   readonly current: RelayConversationDiffScanSide;
   readonly uncheckedFiles: number;
   readonly unverifiedFiles: number;
+  readonly unverifiableFiles: number;
+  readonly unscannedFiles: number;
 }
 
 export type RelayConversationDiff =
   | {
       readonly available: true;
+      readonly scope: RelayConversationDiffScope;
       readonly baselineCapturedAt: string;
       readonly baselineRevision: DecimalRevision;
       readonly rootPath: string;

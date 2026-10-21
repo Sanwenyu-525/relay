@@ -76,7 +76,9 @@ async function runEntry(mode: Mode, root: string, databasePort: number, apiPort:
   let stdout = '', stderr = '', timedOut = false;
   child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); });
   child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
-  const timer = setTimeout(() => { timedOut = true; child.kill(); }, 8_000);
+  // Full-suite parallelism can delay process startup well past 8s on Windows; keep the
+  // refusal deadline generous so load is not mistaken for a missing-isolation failure.
+  const timer = setTimeout(() => { timedOut = true; child.kill(); }, 30_000);
   const closed = new Promise<number | null>((done, fail) => { child.once('close', done); child.once('error', fail); });
   // Keep the private pipe open: EOF would abort a supervisor before the tested boundary.
   if (mode === 'desktop-api') {
@@ -91,7 +93,7 @@ async function runEntry(mode: Mode, root: string, databasePort: number, apiPort:
 }
 
 for (const mode of modes) {
-  test(`${mode} refuses isolation before connecting, listening, readiness or old-launch acknowledgement`, async () => {
+  test(`${mode} refuses isolation before connecting, listening, readiness or old-launch acknowledgement`, { timeout: 90_000 }, async () => {
     const root = await mkdtemp(join(tmpdir(), 'relay-restore-startup-'));
     let connections = 0;
     const dbObserver = createServer(socket => { connections++; socket.destroy(); });

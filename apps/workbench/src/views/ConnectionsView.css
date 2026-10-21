@@ -15,14 +15,32 @@
 .connections-page .connections-list details li { margin-top: var(--relay-space-2); overflow-wrap: anywhere; }
 .connections-page .connections-form { margin-top: var(--relay-space-6); padding-top: var(--relay-space-4); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .connections-page .connections-form h3 { margin: 0; }
-.connections-page .connections-form > button, .connections-page .connections-entry > button { margin-top: var(--relay-space-6); }
-.connections-page .connections-entry input { max-width: min(100%, var(--relay-layout-dialog-maxWidth)); }
+.connections-page .connections-form > button { margin-top: var(--relay-space-6); }
 .connections-page > .inline-link { display: inline-block; margin-top: var(--relay-space-4); }
-.connections-known-project, .connections-identity, .connections-create { margin-top: var(--relay-space-4); }
-.connections-known-project > summary, .connections-identity > summary, .connections-create > summary { color: var(--relay-color-text-secondary); cursor: pointer; }
+.connections-identity, .connections-create { margin-top: var(--relay-space-4); }
+.connections-identity > summary, .connections-create > summary { color: var(--relay-color-text-secondary); cursor: pointer; }
 .connections-project-picker .connections-list > li { align-items: center; }
 .connections-create .connections-form { margin-top: var(--relay-space-3); }
 .connections-page .connections-actions { display: flex; align-items: flex-start; flex-wrap: wrap; gap: var(--relay-space-3); }
 .connections-page .success-callout { color: var(--relay-color-status-success-text); background: var(--relay-color-status-success-bg); padding: var(--relay-space-4); }
 .connections-page .connections-list small.connection-health { color: var(--relay-color-status-success-text); margin-top: var(--relay-space-2); }
 .connections-page .warning-callout button { margin: var(--relay-space-3) var(--relay-space-3) 0 0; }
+/* 高级区（2026-10-20 减负）：默认收起，summary 就是入口；展开后内部仍是原来的三个面板，
+   因此「检查实际配置与撤销状态」的能力没有搬走，只是不再挡在日常操作前面。 */
+.connections-page .connections-advanced > summary {
+  color: var(--relay-color-text-secondary);
+  cursor: pointer;
+  font-weight: var(--relay-font-weight-semibold);
+}
+.connections-page .connections-advanced > summary::marker { color: var(--relay-color-action-primary); }
+.connections-page .connections-advanced[open] > summary { margin-bottom: var(--relay-space-2); }
+.connections-page .connections-advanced > .surface-panel {
+  margin-top: var(--relay-space-6);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+/* 日常区一行一个工具：状态芯片与说明同排，窄窗口下换行而不是挤成两列。 */
+.connections-page .connections-tool-list > li { align-items: center; }
+.connections-page .connections-tool-list > li:last-child { border-bottom: 0; }

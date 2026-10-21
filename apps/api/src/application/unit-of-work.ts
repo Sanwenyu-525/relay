@@ -1,9 +1,12 @@
 import type { DbExecutor } from '../infrastructure/database.js';
 import { ActivityRecordRepository } from '../audit/activity-record-repository.js';
 import { AssistRepository } from '../assist/assist-repository.js';
+import { AssistMemoryRepository } from '../assist/assist-memory-repository.js';
 import { AssistantProfileRepository } from '../assist/assistant-profile-repository.js';
 import { ConversationExecutionRepository } from '../assist/conversation-execution-repository.js';
 import { ConversationStateRepository } from '../assist/conversation-state-repository.js';
+import { PlanGoalRepository } from '../assist/plan-goal-repository.js';
+import { SubagentRepository } from '../assist/subagent-repository.js';
 import { LearningRepository } from '../learning/learning-repository.js';
 import { ArtifactRepository } from '../artifact/artifact-repository.js';
 import { ImpactRepository } from '../artifact/impact-repository.js';
@@ -35,6 +38,7 @@ import { VerificationRepository } from '../verification/verification-repository.
 import { WorkspaceRepository } from '../workspace/workspace-repository.js';
 import { GatewayRepository } from '../gateway/gateway-repository.js';
 import { InformationRepository } from '../information/information-repository.js';
+import { MemoryCaptureRepository } from '../information/memory-capture-repository.js';
 import { ChangeSetRepository } from '../files/change-set-repository.js';
 import { FileWriteStopProofRepository } from '../files/file-write-stop-proof-repository.js';
 import { FileWriteDispositionRepository } from '../files/file-write-disposition-repository.js';
@@ -46,6 +50,7 @@ import { BlueprintRepository } from '../blueprint/blueprint-repository.js';
 import { RuntimeAdmissionRepository } from '../runtime/runtime-admission-repository.js';
 import { RunScopeGrantRepository } from './run-scope-grant.js';
 import { ModelCatalogRepository } from '../model/model-catalog-repository.js';
+import { ModelCapabilityRepository } from '../model/model-capability-repository.js';
 import { ComputerControlStateRepository } from '../computer/control-state.js';
 import { ComputerDesktopLeaseRepository } from '../computer/desktop-lease-repository.js';
 import { SessionModelSelectionRepository } from '../model/session-model-selection-repository.js';
@@ -59,9 +64,18 @@ export interface Repositories {
   readonly admission: RuntimeAdmissionRepository;
   readonly activities: ActivityRecordRepository;
   readonly assist: AssistRepository;
+  readonly assistMemory: AssistMemoryRepository;
   /** 人设 助手配置的独占写入口。配置文本在这里，能力不在这里。 */
   readonly assistantProfiles: AssistantProfileRepository;
   readonly conversationExecutions: ConversationExecutionRepository;
+  /** 0127：聊天 `/plan` 与 `/goal` 的计划版本、活动目标、轮次账本与额度授权。 */
+  readonly planGoals: PlanGoalRepository;
+  /**
+   * 0128：有界多 Agent 的委派账本与子尝试（ADR-017、运行架构 §2.5）的独占写入口。
+   *
+   * 并发槽计数与 revision / claim_epoch 的 CAS 都在这里，子执行不另开第二套事务机制。
+   */
+  readonly subagents: SubagentRepository;
   /** 自然语言状态维护（0062）：请求与类型化变更行的独占写入口。 */
   readonly conversationState: ConversationStateRepository;
   /** 学习模式（0072）：知识点、证据、清除代次、会话控制与轮次依据的独占写入口。 */
@@ -105,11 +119,15 @@ export interface Repositories {
   readonly fileWriteDiffs: FileWriteDiffRepository;
   readonly fileWritePaths: FileWritePathRepository;
   readonly information: InformationRepository;
+  /** 自动捕获的记账（ADR-030）：只管提取批次与撤销，Memory 正文仍归 information。 */
+  readonly memoryCaptures: MemoryCaptureRepository;
   readonly today: TodayRepository;
   readonly views: ViewRepository;
   readonly blueprints: BlueprintRepository;
   /** 免费模型目录快照与同步租约/退避的独占写入口（迁移 0088，专项阶段 B）。 */
   readonly modelCatalog: ModelCatalogRepository;
+  /** 模型能力声明（迁移 0121）：按 (provider, model) 存档的人对能力的明确主张。 */
+  readonly modelCapabilities: ModelCapabilityRepository;
   /** 会话模型选择的独占写入口（迁移 0089，阶段 C）：会话作用域选择记录，从不写回进程默认。 */
   readonly modelSelection: SessionModelSelectionRepository;
   /** 电脑操控展示状态（迁移 0096）：「Relay 是否正在操控电脑」的唯一持久事实。 */
@@ -127,8 +145,11 @@ export function createRepositories(db: DbExecutor): Repositories {
     admission: new RuntimeAdmissionRepository(db),
     activities: new ActivityRecordRepository(db),
     assist: new AssistRepository(db),
+    assistMemory: new AssistMemoryRepository(db),
     assistantProfiles: new AssistantProfileRepository(db),
     conversationExecutions: new ConversationExecutionRepository(db),
+    planGoals: new PlanGoalRepository(db),
+    subagents: new SubagentRepository(db),
     conversationState: new ConversationStateRepository(db),
     learning: new LearningRepository(db),
     artifacts: new ArtifactRepository(db),
@@ -167,10 +188,12 @@ export function createRepositories(db: DbExecutor): Repositories {
     fileWriteDiffs: new FileWriteDiffRepository(db),
     fileWritePaths: new FileWritePathRepository(db),
     information: new InformationRepository(db),
+    memoryCaptures: new MemoryCaptureRepository(db),
     today: new TodayRepository(db),
     views: new ViewRepository(db),
     blueprints: new BlueprintRepository(db),
     modelCatalog: new ModelCatalogRepository(db),
+    modelCapabilities: new ModelCapabilityRepository(db),
     modelSelection: new SessionModelSelectionRepository(db),
     computerControl: new ComputerControlStateRepository(db),
     computerDesktopLease: new ComputerDesktopLeaseRepository(db),

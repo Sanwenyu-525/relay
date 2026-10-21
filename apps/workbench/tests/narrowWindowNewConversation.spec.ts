@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { dialogLabels, dialogText, DomWrapper, flush, folderStripName, mountWorkbench, openWorkingDirectory, pressEscape, toolbarSessionTitle } from "./mountApp";
+import { dialogText, DomWrapper, flush, folderStripName, mountWorkbench, openWorkingDirectory, pressEscape, toolbarSessionTitle } from "./mountApp";
 
 // 2026-10-08 窄窗/短窗「新对话」入口可发现性。
 // 抽屉入口与近期工作栏入口必须共用同一条 /agent?new=… 语义：进入空白讨论，
-// 不继承目录、任务或旧会话；草稿守卫沿用 App 的既有 useBlocker，不另建第二套会话状态。
-// 本文件只断言行为（进入哪个上下文、草稿两个分支）；真实可见性、几何与键盘路径由
-// tests/browser/narrowWindowNewConversation.spec.ts 在 Chromium 里核对。
+// 不继承目录、任务或旧会话。2026-10-19 用户指令：未发送草稿不再弹确认框，
+// 换工作区直接切、草稿按会话留在本机（见 src/lib/composerDrafts.ts）。
+// 本文件只断言行为（进入哪个上下文、草稿留在原会话并在回去时恢复）；真实可见性、
+// 几何与键盘路径由 tests/browser/narrowWindowNewConversation.spec.ts 在 Chromium 里核对。
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const projectId = "22222222-2222-4222-8222-222222222222";
@@ -159,7 +160,7 @@ describe("窄窗抽屉里的新对话入口", () => {
     expect(view.posts.filter((post) => post.path === `${root}/working-directories/open`)).toHaveLength(1);
   });
 
-  it("有未发送草稿时抽屉入口被守卫拦住；留在当前工作区保留正文与会话", async () => {
+  it("有未发送草稿时抽屉入口直接进入新对话；草稿留在原会话，回去时原样恢复", async () => {
     const view = await mount("/agent");
     // 普通 /agent 会续上最近会话，因此草稿落在已有会话的输入器上。
     await view.wrapper.get('[data-testid="assist-draft"]').setValue("还没发送的想法");
@@ -167,106 +168,40 @@ describe("窄窗抽屉里的新对话入口", () => {
 
     await openNavigation(view);
     await navigationAction().trigger("click");
-    await flush();
-    expect(dialogText()).toContain("未保存");
-    expect(dialogLabels()).toContain("保留未保存的修改");
-    // 抽屉让位给草稿守卫，不叠加成两层浮层。
-    expect(document.querySelector('[data-testid="mobile-new-conversation"]')).toBeNull();
-
-    clickButtonByText("保留并继续编辑");
     await flush(120);
+    // 不再弹「未保存」确认：抽屉直接让位给新讨论。
     expect(document.querySelector('[role="dialog"]')).toBeNull();
-    expect(view.router.currentRoute.value.query.new).toBeUndefined();
-    expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
-      .toBe("还没发送的想法");
-    expect(view.wrapper.find('[data-testid="assist-session"]').exists()).toBe(true);
-    expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(false);
-    expect(view.posts).toHaveLength(0);
-  });
-
-  it("确认丢弃后才切到新讨论，切换本身不发任何命令", async () => {
-    const view = await mount("/agent");
-    await view.wrapper.get('[data-testid="assist-draft"]').setValue("准备丢弃的想法");
-
-    await openNavigation(view);
-    await navigationAction().trigger("click");
-    await flush();
-    clickButtonByText("丢弃草稿并离开");
-    await flush(120);
-
     expect(view.router.currentRoute.value.query.new).toBeTruthy();
     expect(view.wrapper.find('[data-testid="assist-session"]').exists()).toBe(false);
     expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(true);
+    // 草稿属于原会话，不跟着带进新讨论。
+    expect((view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement).value).toBe("");
+
+    // 回到原会话：草稿按会话留在本机，原样恢复。
+    await view.router.push("/agent");
+    await flush(120);
+    expect(view.wrapper.find('[data-testid="assist-session"]').exists()).toBe(true);
+    expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
+      .toBe("还没发送的想法");
     expect(view.posts).toHaveLength(0);
   });
 });
 
 /**
- * 「保留并继续编辑」后的编辑焦点恢复（2026-10-08 缺陷回归）。
- * 用户明确选择继续编辑时，焦点必须回到触发保护的草稿编辑器并保留原光标/选区，
- * 且必须发生在守卫弹层完成关闭与默认回焦之后——否则会被默认回焦覆盖回「打开导航」。
- * 丢弃分支、抽屉 Escape 与其他弹层的回焦行为保持不变。
- * 焦点断言针对 document.activeElement 与 selection，不只看 ref 是否存在。
+ * 命令结果待核对时的焦点回退（2026-10-19 调整）。
+ * 未发送草稿不再弹确认框，「保留并继续编辑」只剩「留在当前工作区」一个出口；
+ * 没有可续写的编辑器时，焦点必须停在打开导航按钮上，不得被塞进输入器。
+ * 焦点断言针对 document.activeElement，不只看 ref 是否存在。
  */
-describe("保留并继续编辑后的编辑焦点恢复", () => {
-  /** 真实点击「打开导航」会把焦点带到按钮上：抽屉与守卫弹层的默认回焦都落在它，恢复不能被它盖掉。 */
+describe("命令结果待核对时的焦点回退", () => {
+  /** 真实点击「打开导航」会把焦点带到按钮上：抽屉与守卫弹层的默认回焦都落在它。 */
   function focusMenuButton(view: { wrapper: DomWrapper }): HTMLButtonElement {
     const menuButton = view.wrapper.get('button[aria-label="打开导航"]').element as HTMLButtonElement;
     menuButton.focus();
     return menuButton;
   }
 
-  it("已有会话输入器：保留并继续编辑后焦点与光标回到原位，可直接续写", async () => {
-    const view = await mount("/agent");
-    const draft = view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement;
-    draft.focus();
-    await view.wrapper.get('[data-testid="assist-draft"]').setValue("还没发送的想法");
-    draft.setSelectionRange(3, 3);
-    const menuButton = focusMenuButton(view);
-
-    await openNavigation(view);
-    await navigationAction().trigger("click");
-    await flush();
-    expect(dialogText()).toContain("未保存");
-    clickButtonByText("保留并继续编辑");
-    await flush(120);
-
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
-    const restored = view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement;
-    // 焦点在编辑器上，而不是被默认回焦带回「打开导航」按钮。
-    expect(document.activeElement).toBe(restored);
-    expect(document.activeElement).not.toBe(menuButton);
-    // 光标停在正文中间的原位置，用户可以直接续写。
-    expect(restored.value).toBe("还没发送的想法");
-    expect(restored.selectionStart).toBe(3);
-    expect(restored.selectionEnd).toBe(3);
-  });
-
-  it("首条输入器：保留并继续编辑后焦点与选区回到原位，可直接续写", async () => {
-    const view = await mount("/agent?new=seed", { sessions: false });
-    expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(true);
-    const draft = view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement;
-    draft.focus();
-    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("还没有发出的首条草稿");
-    draft.setSelectionRange(2, 5);
-    focusMenuButton(view);
-
-    await openNavigation(view);
-    await navigationAction().trigger("click");
-    await flush();
-    expect(dialogText()).toContain("未保存");
-    clickButtonByText("保留并继续编辑");
-    await flush(120);
-
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
-    const restored = view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement;
-    expect(document.activeElement).toBe(restored);
-    // 有选区时按原选区恢复，不强制跳到开头/末尾。
-    expect(restored.selectionStart).toBe(2);
-    expect(restored.selectionEnd).toBe(5);
-  });
-
-  it("命令结果待核对时，「保留并继续编辑」维持默认回焦，不把焦点塞进输入器", async () => {
+  it("命令结果待核对时，弹层只有「留在当前工作区」，焦点停在打开导航按钮", async () => {
     const view = await mount("/agent", { sessions: false });
     const draft = view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement;
     draft.focus();

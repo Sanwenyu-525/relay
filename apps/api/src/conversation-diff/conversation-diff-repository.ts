@@ -63,6 +63,21 @@ export interface ConversationDiffRepository {
   saveBaseline(input: SaveBaselineInput): Promise<StoredBaseline>;
   /** 读当前根路径下最新的基线（用于「会话起点」）；按 (workspace,session,resource,root) 全键过滤，避免跨资源段串读。 */
   readLatestBaseline(workspaceId: string, sessionId: string, resourceId: string, rootPath: string): Promise<StoredBaseline | undefined>;
+  /**
+   * 本会话**实际落盘**的相对路径（会话口径的唯一归因来源，2026-10-20）。
+   *
+   * 只认冻结的变更集：会话的执行请求 → Run → `change_sets` → `change_set_files`。
+   * **模型声明过但没落盘的路径不算**（用户 2026-10-20 明确「完全不出现」）：声明只代表打算改，
+   * 若把它也算进来，别人恰好在同一个窗口里改了那个文件时，就会把别人的改动记到本会话头上。
+   * 写工具直连 Gateway 的路径理论上也走 `change_sets`，因此不再单列 `session_tool_calls`。
+   *
+   * 按 `rootPath` 过滤：换过目录的会话，旧根写过的相对路径不能算进新根这一段（否则会在新段里
+   * 变成「扫描没覆盖到」的假缺口）。
+   *
+   * 这里只回答「哪些路径属于这个会话」，不回答「改了多少行」：行数仍由基线→当前内容算出，
+   * 所以写了又改回原样的路径会因摘要相同而自然消失。
+   */
+  listWrittenPaths(workspaceId: string, sessionId: string, rootPath: string): Promise<readonly string[]>;
 }
 
 export class KyselyConversationDiffRepository implements ConversationDiffRepository {
@@ -99,6 +114,21 @@ export class KyselyConversationDiffRepository implements ConversationDiffReposit
     `.execute(this.db);
     const found = row.rows[0];
     return found === undefined ? undefined : mapRow(found);
+  }
+
+  async listWrittenPaths(workspaceId: string, sessionId: string,
+    rootPath: string): Promise<readonly string[]> {
+    const rows = (await sql<{ path: string }>`
+      select distinct f.relative_path as path
+        from conversation_execution_requests q
+        join change_sets cs on cs.run_id = q.run_id and cs.workspace_id = q.workspace_id
+        join change_set_files f on f.change_set_id = cs.id and f.invocation_id = cs.invocation_id
+       where q.workspace_id = ${workspaceId} and q.session_id = ${sessionId}
+         and cs.status in ('SUCCEEDED', 'PARTIAL', 'UNKNOWN')
+         and cs.canonical_root = ${rootPath}
+         and f.relative_path <> ''
+    `.execute(this.db)).rows;
+    return rows.map((row) => row.path).sort();
   }
 }
 

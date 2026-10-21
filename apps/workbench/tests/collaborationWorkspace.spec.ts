@@ -90,7 +90,7 @@ interface Routes {
   executions?: () => Response | Promise<Response>;
   sessions?: () => Response;
   proposals?: () => Response;
-  activities?: () => Response;
+  activities?: () => Response | Promise<Response>;
   goals?: () => Response;
   modelPort?: () => Response;
   modelVerification?: () => Response;
@@ -149,7 +149,7 @@ function router(routes: Routes) {
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return routes.messages?.() ?? json({ items: [] });
     if (path === `${prefix}/conversation-execution-requests`) return routes.executions?.() ?? json({ items: [] });
     if (path === `${prefix}/assist-proposals`) return routes.proposals?.() ?? json({ items: [] });
-    if (path === `${prefix}/activities`) return routes.activities?.() ?? json({ items: [], next_cursor: null });
+    if (path === `${prefix}/activities`) return await routes.activities?.() ?? json({ items: [], next_cursor: null });
     if (path === `${prefix}/skill-definitions`) return json({ items: [] });
     if (path === `${prefix}/projects/${projectId}/managed-resources`) return json([{ id: "res-1", project_id: projectId,
       canonical_root: "D:\\repo", status: "ACTIVE", revision: "1", resource_epoch: "0", file_write_identity_bound: true }]);
@@ -212,7 +212,7 @@ describe("协作工作区主路径", () => {
         .toBe("围绕当前任务直接讨论，或描述新的目标与要求。");
       await view.wrapper.get('[data-testid="assist-empty-suggest-requirement"]').trigger("click");
       expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
-        .toContain("帮我梳理这个需求：");
+        .toContain("没有具体需求时先问我，不自行挑选。");
     } finally { view.unmount(); }
   });
 
@@ -220,23 +220,33 @@ describe("协作工作区主路径", () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
 
     // 有数据：渲染列表行、事件摘要与「查看全部动态」入口。
-    vi.stubGlobal("fetch", router({ activities: () => response({ items: [
+    // 加载中先扣住活动响应：此刻必须渲染与终态同高的 2×2 骨架，而不是一行「加载中…」——
+    // 后者会在 4 条动态到达时长成两列列表，把细条与输入卡推着下移，用户读成「页面抖一下」
+    // （2026-10-20 用户截图指认「新建会话按钮页面也会抖一下」）。
+    let releaseActivities!: () => void;
+    const activitiesGate = new Promise<void>((resolve) => { releaseActivities = resolve; });
+    vi.stubGlobal("fetch", router({ activities: () => activitiesGate.then(() => response({ items: [
       activity({ id: "a1", event_type: "TASK_COMPLETED" }),
       activity({ id: "a2", event_type: "PROJECT_CREATED", entity_refs: [{ kind: "PROJECT", id: projectId }] })
-    ], next_cursor: null }) }));
+    ], next_cursor: null })) }));
     const withData = await mountWorkbench(`/agent?new=1`);
     try {
+      expect(withData.wrapper.findAll('[data-testid="recent-activity-skeleton"]').length).toBe(4);
+      expect(withData.wrapper.get('[data-testid="recent-activity"]').text()).not.toContain("加载中");
+      releaseActivities();
       await flush();
       const section = withData.wrapper.get('[data-testid="recent-activity"]');
       const list = withData.wrapper.get('[data-testid="recent-activity-list"]');
       expect(list.exists()).toBe(true);
-      expect(list.findAll("li").length).toBe(2);
+      // 真实行按数据渲染，行数不足 4 时补等格占位（占位与骨架同构，锁住加载中→就绪的高度恒定）。
+      expect(list.findAll('[data-testid="recent-activity-row"]').length).toBe(2);
+      expect(list.findAll('[data-testid="recent-activity-filler"]').length).toBe(2);
       expect(section.text()).toContain("完成任务");
       expect(section.text()).toContain("创建项目");
       expect(section.text()).toContain("查看全部");
       // 2026-10-18 用户指令：类别标签排在文字之前。跟在长短不一的摘要后面时，两列里每行的标签
       // 起点各不相同，读成没对齐；放到行首才由同一列的左缘决定。这里锁 DOM 先后，不锁像素。
-      for (const row of list.findAll("li")) {
+      for (const row of list.findAll('[data-testid="recent-activity-row"]')) {
         const kind = row.get(".recent-activity-kind").element!;
         const label = row.get(".recent-activity-label").element!;
         expect(kind.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -368,7 +378,7 @@ describe("协作工作区主路径", () => {
     } finally { view.unmount(); }
   });
 
-  it("同Task两个会话可返回原记录，草稿切换必须经原离开保护", async () => {
+  it("同Task两个会话可返回原记录；未发送草稿按会话留在本机，切回时原样恢复", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const secondSessionId = "99999999-9999-4999-8999-999999999999";
     const sessions = [sessionId, secondSessionId].map((id, index) => ({ id, workspace_id: workspaceId,
@@ -392,20 +402,21 @@ describe("协作工作区主路径", () => {
       expect(await openSessionSwitcher()).toHaveLength(2);
       expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("原讨论的指标来源");
       await view.wrapper.get('[data-testid="assist-draft"]').setValue("尚未发送的计算要求");
-      await switchToolbarSession(secondSessionId);
-      expect(dialogText()).toContain("未发送的内容");
-      expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("原讨论的指标来源");
-      expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value).toBe("尚未发送的计算要求");
-      await new DomWrapper(document.querySelector('[data-testid="collab-discard-draft"]')).trigger("click");
-      await flush();
+      await switchToolbarSession(secondSessionId); await flush(120);
+      // 不再弹「未发送的内容」：直接切到第二讨论，草稿留在原会话，不跟过去。
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
       expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("第二讨论的方法对照");
-      await switchToolbarSession(sessionId); await flush();
+      expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value).toBe("");
+      await switchToolbarSession(sessionId); await flush(120);
       expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("原讨论的指标来源");
+      // 回到原会话时草稿原样恢复：切换本身没有丢内容，也就不需要确认框。
+      expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
+        .toBe("尚未发送的计算要求");
       expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
     } finally { view.unmount(); }
   });
 
-  it.each([false, true])("恢复旧回执时当前讨论仍有保护（未决命令=%s），先保护会话再切路由", async (pending) => {
+  it.each([false, true])("恢复旧回执时未决命令仍拦住切换，草稿本身不再拦（未决命令=%s）", async (pending) => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const oldSessionId = "99999999-9999-4999-8999-999999999999";
     const oldCommandId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -435,15 +446,15 @@ describe("协作工作区主路径", () => {
     }));
     const view = await mountWorkbench(`/agent?work=${taskId}`);
     try {
-      const originalInput = view.wrapper.get('[data-testid="assist-draft"]').element;
       await view.wrapper.get('[data-testid="assist-draft"]').setValue("当前会话需要保留的讨论");
       if (pending) { await view.wrapper.get('[data-testid="assist-send"]').trigger("click"); await flush(); }
       await view.wrapper.get(`[data-testid="collab-recovery-${oldCommandId}"]`).trigger("click"); await flush();
-      expect(view.wrapper.get('[data-testid="assist-draft"]').element).toBe(originalInput);
-      expect((originalInput as HTMLTextAreaElement).value).toBe("当前会话需要保留的讨论");
-      expect(toolbarSessionTitle()).toBe("讨论1");
       expect(view.router.currentRoute.value.query.work).toBe(taskId);
       if (pending) {
+        // 未决命令仍在：留在原会话，草稿与输入器都不动。
+        const originalInput = view.wrapper.get('[data-testid="assist-draft"]').element;
+        expect((originalInput as HTMLTextAreaElement).value).toBe("当前会话需要保留的讨论");
+        expect(toolbarSessionTitle()).toBe("讨论1");
         expect(dialogText()).toContain(currentCommandId);
         expect(document.querySelector('[data-testid="collab-discard-draft"]')).toBeNull();
         await new DomWrapper(document.querySelector('[role="dialog"] button')).trigger("click");
@@ -451,8 +462,9 @@ describe("协作工作区主路径", () => {
         expect(receiptPaths).toEqual([`${prefix}/commands/${oldCommandId}`, `${prefix}/commands/${currentCommandId}`]);
         expect(posts).toHaveLength(1);
       } else {
-        expect(dialogText()).toContain("未发送的内容");
-        expect(document.querySelector('[data-testid="collab-discard-draft"]')).not.toBeNull();
+        // 没有未决命令：草稿不再拦路，直接切到恢复出的那条会话，也不发任何写命令。
+        expect(document.querySelector('[role="dialog"]')).toBeNull();
+        expect(toolbarSessionTitle()).toBe("讨论2");
         expect(posts).toHaveLength(0);
       }
     } finally {
@@ -705,7 +717,9 @@ describe("协作工作区主路径", () => {
       const draft = view.wrapper.get('[data-testid="assist-draft"]');
       await draft.setValue("保留未发送的消息");
       await view.wrapper.get('[data-testid="assist-open-sources"]').trigger("click"); await flush();
-      const options = view.wrapper.get(".agent-chat-options");
+      // 底栏现在有两枚同类抽屉（资料面板与发送选项），裸 `.agent-chat-options` 会先命中后者；
+      // 本用例操作的是资料面板，因此按它自己的限定类取节点，不改任何断言。
+      const options = view.wrapper.get(".agent-chat-options.agent-chat-source-options");
       const query = options.get("#assist-source-query");
       await query.setValue("保留检索词");
       const queryOwner = query.element as HTMLInputElement;
@@ -1098,7 +1112,7 @@ describe("协作工作区主路径", () => {
     } finally { view.unmount(); }
   });
 
-  it("Review 判定：本地换请求先保护说明，确认丢弃时同步清空组合草稿", async () => {
+  it("Review 判定：本地换请求直接生效，不再弹丢弃确认；讨论草稿保留", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const secondReviewId = "99999999-9999-4999-8999-999999999999";
     const fetchMock = router({ reviews: () => response({ items: [openReview(), { ...openReview(), id: secondReviewId, reason: "第二项判断" }] }) });
@@ -1107,14 +1121,12 @@ describe("协作工作区主路径", () => {
       await view.wrapper.get(`#review-feedback-${reviewId}`).setValue("不应带到第二条请求");
       await view.wrapper.get('[data-testid="assist-draft"]').setValue("尚未发送的讨论");
       await view.wrapper.get('[data-testid="collab-review-select"]').setValue("1"); await flush();
-      expect(dialogText()).toContain("判断说明");
-      expect(view.wrapper.find(`#review-feedback-${reviewId}`).exists()).toBe(true);
-      await new DomWrapper(document.querySelector('[role="dialog"] button')).trigger("click");
-      expect((view.wrapper.get(`#review-feedback-${reviewId}`).element as HTMLTextAreaElement).value).toBe("不应带到第二条请求");
-      await view.wrapper.get('[data-testid="collab-review-select"]').setValue("1"); await flush();
-      await new DomWrapper(document.querySelector('[data-testid="collab-discard-draft"]')).trigger("click"); await flush();
+      // 换请求不再询问是否丢弃：判断说明按请求各自持有，切过去就是第二条的空说明。
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
       expect((view.wrapper.get(`#review-feedback-${secondReviewId}`).element as HTMLTextAreaElement).value).toBe("");
-      expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value).toBe("");
+      // 讨论草稿属于讨论本身，不随 review 切换被清空。
+      expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
+        .toBe("尚未发送的讨论");
       expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
     } finally { view.unmount(); }
   });
@@ -1746,11 +1758,10 @@ describe("协作工作区主路径", () => {
     expect(releaseOld).not.toBeUndefined();
 
     await view.wrapper.get(`[data-testid="recent-work-${otherTaskId}"]`).trigger("click");
-    await flush();
-    // 左栏切换工作走全局未提交修改保护；对话未发送内容不会静默丢失。
-    expect(dialogText()).toContain("保留未保存的修改");
-    await new DomWrapper(document.querySelector('[data-testid="discard-draft-leave"]')).trigger("click");
     await flush(80);
+    // 左栏切换工作不再弹「保留未保存的修改」：直接切到另一项工作；
+    // 草稿按会话留在本机，不静默丢失也不阻塞切换。
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(view.wrapper.get('[data-testid="collab-goal"]').text()).toContain("另一项工作");
     releaseOld?.(response({ items: [{
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", session_id: sessionId, seq: "1", role: "USER", status: "COMPLETED",
@@ -1769,7 +1780,7 @@ describe("协作工作区主路径", () => {
         calls: [{ id: "66666666-6666-4666-8666-666666666666", round: 0, ordinal: 0, tool_name: "read_file",
           status: "SETTLED", arguments: { relative_path: "src/工具.ts" }, arguments_sha256: "a".repeat(64),
           provider_tool_call_id: "call-0", operation_id: "77777777-7777-4777-8777-777777777777",
-          result_ref: { content: longContent }, adaptation_of: null, adapted_path: null,
+          result_ref: { content: longContent }, adaptation_of: null, adapted_path: null, file_changes: [],
           created_at: "2026-10-04T01:00:00Z", updated_at: "2026-10-04T01:00:01Z" }] }] }) });
     vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench(`/agent?work=${taskId}`);
@@ -1802,7 +1813,7 @@ describe("协作工作区主路径", () => {
     const call = (over: Record<string, unknown>) => ({ id: "88888888-8888-4888-8888-888888888888", round: 0,
       ordinal: 0, tool_name: "read_file", status: "SETTLED", arguments: { relative_path: "a.ts" },
       arguments_sha256: "a".repeat(64), provider_tool_call_id: "p", operation_id: null,
-      result_ref: { content: "x" }, adaptation_of: null, adapted_path: null,
+      result_ref: { content: "x" }, adaptation_of: null, adapted_path: null, file_changes: [],
       created_at: "2026-10-04T01:00:00Z", updated_at: "2026-10-04T01:00:01Z", ...over });
     const fetchMock = router({ toolCalls: () => response({ run_id: runId, run_status: "WAITING_APPROVAL",
       wait_reason: "HUMAN_TOOL", rounds: [
@@ -1846,7 +1857,7 @@ describe("协作工作区主路径", () => {
           status: "SETTLED", arguments: {}, arguments_sha256: "b".repeat(64), provider_tool_call_id: "p",
           operation_id: "77777777-7777-4777-8777-777777777777",
           result_ref: { status: { staged: [], unstaged: ["src/index.ts"], untracked: [] } },
-          adaptation_of: null, adapted_path: null, created_at: "2026-10-04T01:00:00Z",
+          adaptation_of: null, adapted_path: null, file_changes: [], created_at: "2026-10-04T01:00:00Z",
           updated_at: "2026-10-04T01:00:01Z" }] }] }) });
     vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench(`/agent?work=${taskId}`);
@@ -1892,21 +1903,21 @@ describe("协作工作区主路径", () => {
           { id: "90000000-0000-4000-8000-0000000000a1", round: 0, ordinal: 0, tool_name: "read_file",
             status: "REQUESTED", arguments: { relative_path: "a.ts" }, arguments_sha256: "a".repeat(64),
             provider_tool_call_id: "p", operation_id: null, result_ref: null, adaptation_of: null,
-            adapted_path: null, created_at: "2026-10-05T01:00:00Z", updated_at: "2026-10-05T01:00:00Z" },
+            adapted_path: null, file_changes: [], created_at: "2026-10-05T01:00:00Z", updated_at: "2026-10-05T01:00:00Z" },
           { id: "90000000-0000-4000-8000-0000000000a2", round: 0, ordinal: 1, tool_name: "read_file",
             status: "SETTLED", arguments: { relative_path: "a.ts" }, arguments_sha256: "a".repeat(64),
             provider_tool_call_id: "p", operation_id: "77777777-7777-4777-8777-777777777777",
-            result_ref: { content: "before" }, adaptation_of: null, adapted_path: null,
+            result_ref: { content: "before" }, adaptation_of: null, adapted_path: null, file_changes: [],
             created_at: "2026-10-05T01:00:00Z", updated_at: "2026-10-05T01:00:01Z" },
           { id: "90000000-0000-4000-8000-0000000000a3", round: 1, ordinal: 0, tool_name: "apply_changeset",
             status: "SETTLED", arguments: { changes: [] }, arguments_sha256: "b".repeat(64),
             provider_tool_call_id: "p", operation_id: "77777777-7777-4777-8777-777777777778",
             result_ref: { reason: "BASELINE_CONFLICT", detail: "文件已被改动" }, adaptation_of: null,
-            adapted_path: null, created_at: "2026-10-05T01:00:02Z", updated_at: "2026-10-05T01:00:03Z" },
+            adapted_path: null, file_changes: [], created_at: "2026-10-05T01:00:02Z", updated_at: "2026-10-05T01:00:03Z" },
           { id: "90000000-0000-4000-8000-0000000000a4", round: 2, ordinal: 0, tool_name: "run_check",
             status: "REJECTED", arguments: { check_id: "check-1" }, arguments_sha256: "c".repeat(64),
             provider_tool_call_id: "p", operation_id: null, adaptation_of: null, adapted_path: null,
-            result_ref: { reason: "TOOL_CHECK_NOT_CONFIGURED", detail: "check-1 未配置" },
+            result_ref: { reason: "TOOL_CHECK_NOT_CONFIGURED", detail: "check-1 未配置" }, file_changes: [],
             created_at: "2026-10-05T01:00:04Z", updated_at: "2026-10-05T01:00:04Z" }] }] })
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1915,14 +1926,17 @@ describe("协作工作区主路径", () => {
       await flush(80);
       const summary = view.wrapper.get('[data-testid="execution-summary"]');
       // 两次 read_file 里只有一次已结算，因此只算 1；REQUESTED 的那次不算「读过」。
-      expect(summary.text()).toContain("读了 1 个文件");
-      expect(summary.text()).toContain("改了 1 处");
-      expect(summary.text()).toContain("2 项失败");
+      // 口径与 `executionTrajectorySummary.spec.ts` 同一套标签文案（§37.1，2026-10-15 起）。
+      expect(summary.text()).toContain("读取/检索 1 次");
+      // 唯一一次写入的回执是 BASELINE_CONFLICT：失败写入不计为改动，不出现「写入 N 次」标签。
+      expect(summary.text()).not.toContain("写入 1 次");
+      expect(summary.text()).toContain("2 项失败或未执行");
       expect(summary.text()).toContain("Run 等待原因 有一个动作在等你批准");
       // 内部枚举不直接进界面。
       expect(summary.text()).not.toContain("HUMAN_TOOL");
-      // 被拒的调用不是「还在跑」。
-      expect(summary.text()).not.toContain("进行中");
+      // 被拒的调用进失败计数、不占在途名额：在途只有那一次 REQUESTED。
+      expect(summary.text()).toContain("1 项进行中或结果未决");
+      expect(summary.text()).not.toContain("2 项进行中或结果未决");
       // 挂在产生执行请求的 user 消息上，不是 assistant 消息。
       const slot = summary.element?.closest("li");
       expect(slot?.textContent).toContain("帮我把这个文件改成 after");
@@ -1979,7 +1993,7 @@ describe("协作工作区主路径", () => {
           calls: [{ id: "90000000-0000-4000-8000-0000000000b1", round: 0, ordinal: 0, tool_name: "read_file",
             status: "SETTLED", arguments: { relative_path: "a.ts" }, arguments_sha256: "a".repeat(64),
             provider_tool_call_id: "p", operation_id: "77777777-7777-4777-8777-777777777777",
-            result_ref: { content: "before" }, adaptation_of: null, adapted_path: null,
+            result_ref: { content: "before" }, adaptation_of: null, adapted_path: null, file_changes: [],
             created_at: "2026-10-05T01:00:00Z", updated_at: "2026-10-05T01:00:01Z" }] }] }); }
     });
     const cursors: (string | null)[] = [];

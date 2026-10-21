@@ -140,14 +140,23 @@ export class RecoveryRepository {
     return result.rows[0];
   }
 
+  /** 与 fenceWorker 同一事务写入的结构化事实；审计记录只作追溯，不参与判定。 */
+  async insertWorkerFence(input: {
+    readonly runId: string; readonly stoppedWorkerId: string; readonly workerEpoch: bigint;
+    readonly stoppedEvidence: string;
+  }): Promise<void> {
+    await sql`
+      insert into run_worker_fences (run_id, stopped_worker_id, worker_epoch, stopped_evidence)
+      values (${input.runId}, ${input.stoppedWorkerId}, ${input.workerEpoch}, ${input.stoppedEvidence})
+    `.execute(this.db);
+  }
+
   async hasWorkerFence(runId: string, workerId: string, workerEpoch: bigint): Promise<boolean> {
     const result = await sql<{ present: boolean }>`
       select exists (
-        select 1 from activity_records
-        where event_type = 'RUN_WORKER_FENCED'
-          and fact_refs ->> 'run_id' = ${runId}
-          and fact_refs ->> 'stopped_worker_id' = ${workerId}
-          and fact_refs ->> 'worker_epoch' = ${workerEpoch.toString()}
+        select 1 from run_worker_fences
+        where run_id = ${runId} and stopped_worker_id = ${workerId}
+          and worker_epoch = ${workerEpoch}
       ) as present
     `.execute(this.db);
     return result.rows[0]?.present ?? false;
@@ -162,15 +171,10 @@ export class RecoveryRepository {
         select r.id, a.worker_id from runs r
         join run_effect_actions e on e.run_id = r.id
         join step_attempts a on a.id = e.attempt_id
+        join run_worker_fences f on f.run_id = r.id and f.worker_epoch = r.worker_epoch
+          and f.stopped_worker_id = a.worker_id
         where r.worker_id is null and a.worker_id is not null
           and (e.status in ('DISPATCHING', 'UNKNOWN') or (e.status = 'SUCCEEDED' and a.status = 'RUNNING'))
-          and exists (
-            select 1 from activity_records event
-            where event.event_type = 'RUN_WORKER_FENCED'
-              and event.fact_refs ->> 'run_id' = r.id::text
-              and event.fact_refs ->> 'stopped_worker_id' = a.worker_id
-              and event.fact_refs ->> 'worker_epoch' = r.worker_epoch::text
-          )
       ) candidates order by id limit ${limit}
     `.execute(this.db);
     return result.rows;

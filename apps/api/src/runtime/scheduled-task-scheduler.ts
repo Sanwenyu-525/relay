@@ -21,7 +21,7 @@ export function registerScheduledTaskScheduler(
   let timer: NodeJS.Timeout | undefined;
   let openedAt: Date | undefined;
   let inFlight: Promise<void> = Promise.resolve();
-  let failed = false;
+  let lastFailure = '';
 
   const tick = async () => {
     try {
@@ -29,10 +29,21 @@ export function registerScheduledTaskScheduler(
       if (readiness.database !== 'up' || readiness.schema !== 'up' || !active) return;
       openedAt ??= await createRepositories(d.database.executor).scheduledTasks.now();
       await runScheduledTaskTick(d.database.executor, openedAt);
-      failed = false;
-    } catch {
-      if (!failed) app.log.warn({ code: 'SCHEDULED_TASK_SCAN_FAILED' }, 'scheduled_task_scan_failed');
-      failed = true;
+      lastFailure = '';
+    } catch (error) {
+      const name = error instanceof Error ? error.name : typeof error;
+      const message = error instanceof Error ? error.message : String(error);
+      const code = typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code: unknown }).code) : null;
+      // 同一失败只记一次，避免每秒刷屏；失败类型/消息变化时重新记录，便于定位。
+      const signature = `${name}:${code ?? ''}:${message}`;
+      if (signature !== lastFailure) {
+        app.log.warn({ code: 'SCHEDULED_TASK_SCAN_FAILED',
+          error_name: name, error_message: message,
+          ...(code === null ? {} : { error_code: code }) },
+        'scheduled_task_scan_failed');
+      }
+      lastFailure = signature;
     } finally {
       if (active) { timer = setTimeout(() => { inFlight = tick(); }, 1000); timer.unref(); }
     }

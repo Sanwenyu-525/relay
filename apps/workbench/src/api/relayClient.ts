@@ -4,13 +4,27 @@ import * as tasksApi from "./resources/tasks";
 import * as artifactsApi from "./resources/artifacts";
 import * as impactGroupSelectionsApi from "./resources/impactGroupSelections";
 import * as informationApi from "./resources/information";
+import * as memoryApi from "./resources/memory";
+export type { RelayCompactAccepted, RelayMemoryCompactionRequest, RelayMemoryCompactionStatus,
+  RelayMemoryCreatedFromMessage, RelayMemoryProvenance, RelayMemoryProvenanceSource, RelayMemorySettings,
+  RelayMemorySourceRef, RelayMessageMemoryUse, RelaySessionMemory, RelaySessionMemoryCheckpoint,
+  RelaySessionMemoryResetResult } from "./dtos/memory";
 import * as assistApi from "./resources/assist";
+import * as planGoalApi from "./resources/planGoal";
+import type { RelayAssistGoal, RelayChatModeTransition, RelayGoalView, RelayPlanView }
+  from "./resources/planGoal";
 import * as conversationDiffApi from "./resources/conversationDiff";
 import * as chatControlsApi from "./resources/chatControls";
 import * as modelSelectionApi from "./resources/modelSelection";
 import * as modelRuntimeApi from "./resources/modelRuntime";
 export type { RelayAssistModelRuntime } from "./resources/modelRuntime";
+/** 0127：聊天 /plan 与 /goal 的投影与命令结果。 */
+export type { RelayAssistGoal, RelayAssistPlan, RelayChatModeTransition, RelayGoalCriterion,
+  RelayGoalRound, RelayGoalStep, RelayGoalStopReason, RelayGoalView, RelayPlanStep,
+  RelayPlanVerification, RelayPlanView, RelayGoalStatus } from "./resources/planGoal";
 export type { RelayModelCatalog, RelayCatalogModel, RelaySessionModelSelection } from "./resources/modelSelection";
+import * as pluginsApi from "./resources/plugins";
+export type { RelayPluginRuntimeStatus, RelayPluginRuntimeState } from "./resources/plugins";
 import * as composerDraftAssistApi from "./resources/composerDraftAssist";
 import type { ComposerDraftOperation, RelayComposerDraftAssist } from "./resources/composerDraftAssist";
 import * as learningApi from "./resources/learning";
@@ -62,12 +76,12 @@ import type { RelayWriteReadiness, RelayWriteTier } from "./dtos/gateway";
 import type { DecimalRevision, InteractionMode } from "../types";
 import type { RelayBlueprintDraft, RelayBlueprintProposal, RelayGoal, RelayProjectGoal } from "./blueprintDtos";
 import type { RelayArtifact, RelayArtifactDirectUses, RelayArtifactImpactCandidate, RelayArtifactImpactCheck, RelayArtifactLineage, RelayArtifactTextLock, RelayArtifactVersionResult, RelayClosePartialFileWriteInput, RelayCombinationCheck, RelayFileWriteChangeSet, RelayFileWriteDispositionPreview, RelayFileWriteFrozenDiff, RelayImpactCandidateGroup, RelayTaskArtifacts } from "./dtos/artifacts";
-import type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistProposal, RelayAssistSession, RelayAssistSourceRef, RelayAssistantProfile, RelayConversationDiff, RelayConversationDiffFile, RelayConversationExecution, RelayConversationExecutionStage, RelayConversationMode, RelayPackDefinition, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory } from "./dtos/assist";
+import type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistProposal, RelayAssistSession, RelayAssistSourceRef, RelayAssistantProfile, RelayConversationDiff, RelayConversationDiffFile, RelayConversationDiffScope, RelayChatMode, RelayConversationExecution, RelayConversationExecutionStage, RelayConversationMode, RelayPackDefinition, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult } from "./dtos/assist";
 import type { RelayStateMaintenanceApplyResult, RelayStateMaintenanceRequest,
   RelayUndoPlan } from "./dtos/stateMaintenance";
 import type { RelayDailyContinuation, RelayDailyViewConfirmationInput, RelayReturnReview } from "./dtos/projectDailyContinuation";
 import type { RelayFileReadAction, RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayManagedGitReadInput, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayAction, RelayMockGatewayConnection, RelayMockManagedResource, RelayWebFetchAction, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "./dtos/gateway";
-import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryRevision, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "./dtos/information";
+import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryEffectiveStatus, RelayMemoryRevision, RelayModelCapabilityDeclaration, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "./dtos/information";
 import type { RelayActivityFilter, RelayActivityPage, RelayCommandEnvelope, RelayCommandReceipt, RelayContinuationComparison, RelayContinuationPointSummary, RelayGoalCreation, RelayProject, RelayProjectCreation, RelayProjectGoalLink, RelayProjectPage, RelayProjectState, RelayStateMutation, RelayViewConfiguration, RelayViewKind } from "./dtos/projects";
 import type { RelayReadiness } from "./dtos/readiness";
 import type { RelayContextManifestDetail, RelayContextManifestList, RelayControlRequest, RelayControlSubmission, RelayControlType, RelayDelegateSubmission, RelayResumeSubmission, RelayReview, RelayReviewDecision, RelayRun, RelayRunDraftPreview, RelayRunGatewayOperation, RelayRunTrace } from "./dtos/run";
@@ -81,11 +95,11 @@ export type { RelayFieldError, RelayProblem } from "./core/errors";
 export { RelayApiError, RelayRunEventHttpError, RelayTransportError } from "./core/errors";
 export type { RelayApiConnection } from "./core/http";
 export type { RelayArtifact, RelayArtifactDirectUses, RelayArtifactImpactCandidate, RelayArtifactImpactCheck, RelayArtifactLineage, RelayArtifactTextLock, RelayArtifactVersionResult, RelayArtifactVersionSummary, RelayClosePartialFileWriteInput, RelayCombinationCheck, RelayFileWriteChangeSet, RelayFileWriteDispositionPreview, RelayFileWriteFrozenDiff, RelayFileWriteResidualCandidate, RelayImpactCandidateGroup, RelayImpactCandidateGroupItem, RelayLineageParentKind, RelayLineageRelation, RelayTaskArtifacts } from "./dtos/artifacts";
-export type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachment, RelayAssistProposal, RelayAssistSession, RelayAssistSkillOutput, RelayAssistSourceRef, RelayAssistantProfile, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffFileRow, RelayConversationDiffScanSide, RelayConversationExecution, RelayConversationExecutionStage, RelayConversationFileDiff, RelayConversationMode, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallFileChange, RelayRunToolCallPreview, RelayRunToolCallPreviewFile, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySkillDefinition, RelaySkillInput, RelayTaskSkillProposal, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate } from "./dtos/assist";
+export type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachment, RelayAssistProposal, RelayAssistSession, RelayAssistSkillOutput, RelayAssistSourceRef, RelayAssistantProfile, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffFileRow, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationExecution, RelayConversationExecutionStage, RelayChatMode, RelayConversationFileDiff, RelayConversationMode, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallFileChange, RelayRunToolCallPreview, RelayRunToolCallPreviewFile, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelaySkillInput, RelayTaskSkillProposal, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult } from "./dtos/assist";
 export type { RelayStateMaintenanceApplyResult, RelayStateMaintenanceChange, RelayStateMaintenanceDecisionRequired, RelayStateMaintenanceRequest, RelayUndoPlan, RelayUndoPlanItem } from "./dtos/stateMaintenance";
 export type { RelayDailyContinuation, RelayDailyContinuationBaseline, RelayDailyContinuationCurrent, RelayDailyContinuationDelta, RelayDailyViewConfirmationInput, RelayReturnReview } from "./dtos/projectDailyContinuation";
 export type { RelayFileReadAction, RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayGitDiffResult, RelayGitReadAction, RelayGitStatusResult, RelayManagedGitReadInput, RelayManagedGitReadOutcome, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayAction, RelayMockGatewayConnection, RelayMockManagedResource, RelayWebFetchAction, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "./dtos/gateway";
-export type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntry, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryRevision, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyErrorCategory, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchItem, RelaySearchPage } from "./dtos/information";
+export type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntry, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryEffectiveStatus, RelayMemoryRevision, RelayModelCapabilityDeclaration, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyErrorCategory, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchItem, RelaySearchPage } from "./dtos/information";
 export type { RelayActivityFilter, RelayActivityItem, RelayActivityPage, RelayActivityRefKind, RelayCommandEnvelope, RelayCommandReceipt, RelayContinuationComparison, RelayContinuationPointSummary, RelayContinuationRef, RelayContinuationRefChange, RelayContinuationRefKind, RelayGoalCreation, RelayProject, RelayProjectArchiveResult, RelayProjectCreation, RelayProjectGoalLink, RelayProjectListItem, RelayProjectPage, RelayProjectState, RelayStateArtifactRef, RelayStateMutation, RelayViewConfiguration, RelayViewKind } from "./dtos/projects";
 export type { RelayReadiness } from "./dtos/readiness";
 export type { RelayCommandOutput, RelayContextBuild, RelayContextManifestDetail, RelayContextManifestList, RelayContextManifestSummary, RelayControlRequest, RelayControlSubmission, RelayControlType, RelayDelegateSubmission, RelayGatewayInvocationResult, RelayResumeSubmission, RelayReview, RelayReviewDecision, RelayReviewKind, RelayRun, RelayRunDraftPreview, RelayRunGatewayOperation, RelayRunTrace } from "./dtos/run";
@@ -211,6 +225,41 @@ export class RelayApiClient {
   }
   restartAssistSession(input: { sessionId: string; commandId: string; text: string; system: "clear" | "new" }) {
     return chatControlsApi.restartAssistSession(this.#http, input);
+  }
+  /** `/compact` 与 `/压缩`：与 `/clear`、`/new` 共用 chat-commands 通道，但只申请整理工作窗口。 */
+  compactAssistSession(input: { sessionId: string; commandId: string; text: string }) {
+    return chatControlsApi.compactAssistSession(this.#http, input);
+  }
+  /* ---- 长短期记忆（HTTP §10.99）---- */
+  getMemorySettings() { return memoryApi.getMemorySettings(this.#http); }
+  saveMemorySettings(input: { commandId: string; expectedRevision: DecimalRevision;
+    recallEnabled: boolean; automaticCompaction: boolean; autoCapture: boolean }) {
+    return memoryApi.saveMemorySettings(this.#http, input);
+  }
+  createMemoryFromMessage(input: { sessionId: string; messageId: string; commandId: string;
+    expectedSessionRevision: DecimalRevision; contentSha256: string; projectId: string | null;
+    title: string; text: string; expiresAt?: string | null }) {
+    return memoryApi.createMemoryFromMessage(this.#http, input);
+  }
+  getMemoryProvenance(memoryId: string) { return memoryApi.getMemoryProvenance(this.#http, memoryId); }
+  getSessionMemory(sessionId: string) { return memoryApi.getSessionMemory(this.#http, sessionId); }
+  requestSessionMemoryCompaction(input: { sessionId: string; commandId: string;
+    expectedRevision: DecimalRevision }) {
+    return memoryApi.requestSessionMemoryCompaction(this.#http, input);
+  }
+  cancelMemoryCompaction(input: { sessionId: string; requestId: string; commandId: string }) {
+    return memoryApi.cancelMemoryCompaction(this.#http, input);
+  }
+  clearSessionMemory(input: { sessionId: string; commandId: string; expectedRevision: DecimalRevision;
+    expectedSessionRevision: DecimalRevision }) {
+    return memoryApi.clearSessionMemory(this.#http, input);
+  }
+  setSessionMemoryRemember(input: { sessionId: string; commandId: string;
+    expectedRevision: DecimalRevision; expectedSessionRevision: DecimalRevision; remember: boolean }) {
+    return memoryApi.setSessionMemoryRemember(this.#http, input);
+  }
+  getMessageMemoryUse(sessionId: string, messageId: string) {
+    return memoryApi.getMessageMemoryUse(this.#http, sessionId, messageId);
   }
   getLearningRecords() { return learningApi.getLearningRecords(this.#http); }
   getLearningState(sessionId: string) { return learningApi.getLearningState(this.#http, sessionId); }
@@ -412,8 +461,13 @@ export class RelayApiClient {
     return informationApi.archiveKnowledge(this.#http, id, commandId, expectedRevision);
   }
 
-  async getMemories(projectId: string | null = null): Promise<readonly RelayMemory[]> {
-    return informationApi.getMemories(this.#http, projectId);
+  async unarchiveKnowledge(id: string, commandId: string, expectedRevision: DecimalRevision): Promise<RelayCommandEnvelope> {
+    return informationApi.unarchiveKnowledge(this.#http, id, commandId, expectedRevision);
+  }
+
+  async getMemories(projectId: string | null = null,
+    effectiveStatus: RelayMemoryEffectiveStatus | "ALL" = "ALL"): Promise<readonly RelayMemory[]> {
+    return informationApi.getMemories(this.#http, projectId, effectiveStatus);
   }
 
   async getMemory(id: string): Promise<RelayMemory> {
@@ -434,6 +488,10 @@ export class RelayApiClient {
 
   async retireMemory(id: string, commandId: string, expectedRevision: DecimalRevision): Promise<RelayCommandEnvelope> {
     return informationApi.retireMemory(this.#http, id, commandId, expectedRevision);
+  }
+
+  async reactivateMemory(id: string, commandId: string, expectedRevision: DecimalRevision): Promise<RelayCommandEnvelope> {
+    return informationApi.reactivateMemory(this.#http, id, commandId, expectedRevision);
   }
 
   async getDecisions(projectId: string | null = null): Promise<readonly RelayDecision[]> {
@@ -464,7 +522,7 @@ export class RelayApiClient {
     return informationApi.getRuleVersions(this.#http, id);
   }
 
-  async createRule(input: { commandId: string; scope: "WORKSPACE" | "PROJECT" | "TASK"; scopeId: string; ruleKey: string; statement: string; strength: RelayRuleStrength; enforcement: RelayRuleEnforcement; method?: string; targetSpec?: Readonly<Record<string, unknown>> }): Promise<RelayCommandEnvelope> {
+  async createRule(input: { commandId: string; scope: "WORKSPACE" | "PROJECT" | "TASK"; scopeId: string; ruleKey?: string; statement: string; strength: RelayRuleStrength; enforcement: RelayRuleEnforcement; method?: string; targetSpec?: Readonly<Record<string, unknown>> }): Promise<RelayCommandEnvelope> {
     return informationApi.createRule(this.#http, input);
   }
 
@@ -474,6 +532,10 @@ export class RelayApiClient {
 
   async retireRule(id: string, commandId: string, expectedRevision: DecimalRevision): Promise<RelayCommandEnvelope> {
     return informationApi.retireRule(this.#http, id, commandId, expectedRevision);
+  }
+
+  async reactivateRule(id: string, commandId: string, expectedRevision: DecimalRevision): Promise<RelayCommandEnvelope> {
+    return informationApi.reactivateRule(this.#http, id, commandId, expectedRevision);
   }
 
   async searchInformation(input: { q: string; projectId: string | null; types: readonly RelayInformationKind[]; limit?: number; cursor?: string }): Promise<RelaySearchPage> {
@@ -496,7 +558,7 @@ export class RelayApiClient {
     return assistApi.getFirstPartyPacks(this.#http);
   }
 
-  async createAssistSession(input: { commandId: string; projectId: string | null; taskId: string | null; title: string; conversationMode?: RelayConversationMode; assistantProfileId?: string | null }): Promise<RelayAssistSession> {
+  async createAssistSession(input: { commandId: string; projectId: string | null; taskId: string | null; title: string; conversationMode?: RelayConversationMode; chatMode?: RelayChatMode; assistantProfileId?: string | null }): Promise<RelayAssistSession> {
     return assistApi.createAssistSession(this.#http, input);
   }
 
@@ -575,6 +637,11 @@ export class RelayApiClient {
     return assistApi.getAssistLivePreview(this.#http, sessionId, messageId);
   }
 
+  /** 会话工具轮次（工作台 §18.10）：只读，消息在途时可反复拉取。 */
+  async getAssistSessionToolCalls(sessionId: string, messageId: string): ReturnType<typeof assistApi.getAssistSessionToolCalls> {
+    return assistApi.getAssistSessionToolCalls(this.#http, sessionId, messageId);
+  }
+
   /** 0093：上传一张图片附件（暂存行，随消息命令的 attachment_ids 绑定）。 */
   async uploadAssistMessageAttachment(input: { readonly sessionId: string; readonly name: string;
     readonly mediaType: string; readonly dataBase64: string }): ReturnType<typeof assistApi.uploadAssistMessageAttachment> {
@@ -587,12 +654,52 @@ export class RelayApiClient {
     return assistApi.getAssistMessageAttachment(this.#http, input);
   }
 
-  async requestAssistMessage(input: { sessionId: string; commandId: string; content: string; sourceRefs: readonly RelayAssistSourceRef[]; recordLearning?: boolean; expectedModelSelectionRevision?: string; attachmentIds?: readonly string[] } & ( { intent: "DISCUSS" | "PROPOSE_CANDIDATE" | "PROPOSE_TASK"; skillRef?: never; skillInput?: never } | { intent?: never; skillRef: { id: string; version: string }; skillInput: RelaySkillInput } | { intent?: never; skillRef?: never; skillInput?: never } )): Promise<{ userMessageId: string; assistantMessageId: string }> {
+  async requestAssistMessage(input: { sessionId: string; commandId: string; content: string; sourceRefs: readonly RelayAssistSourceRef[]; recordLearning?: boolean; expectedModelSelectionRevision?: string; attachmentIds?: readonly string[]; chatMode?: RelayChatMode } & ( { intent: "DISCUSS" | "PROPOSE_CANDIDATE" | "PROPOSE_TASK"; skillRef?: never; skillInput?: never } | { intent?: never; skillRef: { id: string; version: string }; skillInput: RelaySkillInput } | { intent?: never; skillRef?: never; skillInput?: never } )): Promise<{ userMessageId: string; assistantMessageId: string; chatMode: RelayChatMode | null; goalId: string | null }> {
     return assistApi.requestAssistMessage(this.#http, input);
   }
 
   async cancelAssistMessage(messageId: string, commandId: string): Promise<string> {
     return assistApi.cancelAssistMessage(this.#http, messageId, commandId);
+  }
+
+  /** 0122：把一条排队消息并入正在生成的那一轮；回执只表示意图已受理。 */
+  async steerAssistMessage(messageId: string, commandId: string): Promise<string> {
+    return assistApi.steerAssistMessage(this.#http, messageId, commandId);
+  }
+
+  /* ---------------------- 0127：聊天 /plan 与 /goal ---------------------- */
+
+  /** 会话的计划版本（最新在前）。读接口无副作用；重开会话从这里恢复。 */
+  async getSessionPlans(sessionId: string): Promise<RelayPlanView> {
+    return planGoalApi.getSessionPlans(this.#http, sessionId);
+  }
+
+  /** 会话当前占用槽位的目标与最近轮次。 */
+  async getSessionGoal(sessionId: string): Promise<RelayGoalView> {
+    return planGoalApi.getSessionGoal(this.#http, sessionId);
+  }
+
+  /** 切换行为模式；不启动任何执行。 */
+  async setChatMode(input: { sessionId: string; commandId: string; mode: RelayChatMode;
+    expectedRevision?: string }): Promise<RelayChatModeTransition> {
+    return planGoalApi.setChatMode(this.#http, input);
+  }
+
+  /** 「按此计划执行」：绑定确切的一版计划启动目标。 */
+  async startGoalFromPlan(input: { sessionId: string; commandId: string; planId: string;
+    allowSuperseded?: boolean }): Promise<RelayAssistGoal | null> {
+    return planGoalApi.startGoalFromPlan(this.#http, input);
+  }
+
+  /** 暂停/取消/继续/确认完成：只提交意图，返回服务端当前状态。 */
+  async controlGoal(input: { goalId: string; commandId: string;
+    action: "pause" | "cancel" | "resume" | "complete" }): Promise<RelayAssistGoal | null> {
+    return planGoalApi.controlGoal(this.#http, input);
+  }
+
+  /** 插件运行时状态（安装级）：只回答「能不能跑」，不回答「这个项目允不允许」。 */
+  async getPluginStatus(): Promise<readonly pluginsApi.RelayPluginRuntimeStatus[]> {
+    return pluginsApi.getPluginStatus(this.#http);
   }
 
   async getAssistProposals(sessionId: string): Promise<readonly RelayAssistProposal[]> {
@@ -602,6 +709,26 @@ export class RelayApiClient {
   /** 文件夹入口：可能建立最小 Project 与受管资源，因此是写命令；页面读取不得调用它。 */
   async openWorkingDirectory(input: { commandId: string; rootPath: string; projectId?: string | null }): Promise<RelayWorkingDirectory> {
     return assistApi.openWorkingDirectory(this.#http, input);
+  }
+
+  /**
+   * Workspace 默认工作目录（0117 / HTTP §10.96）。
+   *
+   * 读是只读投影；设置/清除只引用已登记的受管资源，带 `expected_revision` 的 CAS，
+   * 且不扩大任何权限。调用方必须核对回执身份，并在传输失败时按原 command_id 核实。
+   */
+  async getWorkspaceDefaultDirectory(): Promise<RelayWorkspaceDefaultDirectory> {
+    return assistApi.getWorkspaceDefaultDirectory(this.#http);
+  }
+
+  async setWorkspaceDefaultDirectory(input: { commandId: string; expectedRevision: DecimalRevision;
+    resourceId: string }): Promise<RelayWorkspaceDefaultDirectoryResult> {
+    return assistApi.setWorkspaceDefaultDirectory(this.#http, input);
+  }
+
+  async clearWorkspaceDefaultDirectory(input: { commandId: string;
+    expectedRevision: DecimalRevision }): Promise<RelayWorkspaceDefaultDirectoryResult> {
+    return assistApi.clearWorkspaceDefaultDirectory(this.#http, input);
   }
 
   /** 明确执行请求：原消息 → 已保存候选。模型调用在服务端事务外，命令本身可安全重放。 */
@@ -618,14 +745,16 @@ export class RelayApiClient {
     return assistApi.getConversationExecutionRequests(this.#http, sessionId);
   }
 
-  /** 会话总 diff：基线到当前已落盘内容的净变化（工作台 §34）。 */
-  async getConversationDiff(sessionId: string): Promise<RelayConversationDiff> {
-    return conversationDiffApi.getConversationDiff(this.#http, sessionId);
+  /** 会话 diff：基线到当前已落盘内容的净变化（工作台 §34）。`scope` 省略＝只算本会话落盘的路径。 */
+  async getConversationDiff(sessionId: string,
+    scope?: RelayConversationDiffScope): Promise<RelayConversationDiff> {
+    return conversationDiffApi.getConversationDiff(this.#http, sessionId, scope);
   }
 
-  /** 展开阅读单个文件的完整正文（CD-18）：与总数同一份基线修订与当前快照。 */
-  async getConversationDiffFile(sessionId: string, path: string): Promise<RelayConversationDiffFile> {
-    return conversationDiffApi.getConversationDiffFileDetail(this.#http, sessionId, path);
+  /** 展开阅读单个文件的完整正文（CD-18）：与总数同一份基线修订与当前快照、同一范围。 */
+  async getConversationDiffFile(sessionId: string, path: string,
+    scope?: RelayConversationDiffScope): Promise<RelayConversationDiffFile> {
+    return conversationDiffApi.getConversationDiffFileDetail(this.#http, sessionId, path, scope);
   }
 
   /** CD-05：主动「从现在开始统计」——为当前目录新建一段基线（幂等）。 */
@@ -991,6 +1120,22 @@ export class RelayApiClient {
   /** 模型端口只读状态：服务端保证不含密钥。 */
   async getModelPortStatus(): Promise<RelayModelPortStatus> {
     return informationApi.getModelPortStatus(this.#http);
+  }
+
+  /** 模型能力声明（2026-10-19）：实例级配置，覆盖写与撤销都没有命令回执。 */
+  async getModelCapabilities(): Promise<readonly RelayModelCapabilityDeclaration[]> {
+    return informationApi.getModelCapabilities(this.#http);
+  }
+
+  async putModelCapability(input: { readonly provider: string; readonly model: string;
+    readonly imageInput: boolean; readonly note?: string | null;
+  }): Promise<RelayModelCapabilityDeclaration> {
+    return informationApi.putModelCapability(this.#http, input);
+  }
+
+  async deleteModelCapability(input: { readonly provider: string; readonly model: string;
+  }): Promise<boolean> {
+    return informationApi.deleteModelCapability(this.#http, input);
   }
 
   /** 最近一次模型验证与当前配置指纹匹配情况。 */

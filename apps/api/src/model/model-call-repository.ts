@@ -69,12 +69,13 @@ export class ModelCallRepository {
           where a.id = ${origin.stepAttemptId} and r.workspace_id = ${origin.workspaceId}`
           .execute(trx)).rows[0];
       const assistScope = origin.assistMessageId === undefined ? undefined
-        : (await sql<{ id: string; project_id: string | null }>`select s.id,
-            coalesce(s.project_id, t.project_id) as project_id
-          from assist_messages m join assist_sessions s on s.id = m.session_id
-          left join tasks t on t.id = s.task_id
-          where m.id = ${origin.assistMessageId} and s.workspace_id = ${origin.workspaceId}`
-          .execute(trx)).rows[0];
+        : (await sql<{ id: string; project_id: string | null; budget_session_id: string }>`
+            select s.id, coalesce(s.project_id, t.project_id) as project_id,
+              coalesce(s.budget_scope_session_id, s.id) as budget_session_id
+            from assist_messages m join assist_sessions s on s.id = m.session_id
+            left join tasks t on t.id = s.task_id
+            where m.id = ${origin.assistMessageId} and s.workspace_id = ${origin.workspaceId}`
+            .execute(trx)).rows[0];
       if ((runScope === undefined) === (assistScope === undefined)) {
         throw new Error('model call scope is missing or ambiguous');
       }
@@ -94,7 +95,9 @@ export class ModelCallRepository {
         if (runScope !== undefined) {
           await sql`select id from runs where id = ${runScope.id} for update`.execute(trx);
         } else {
-          await sql`select id from assist_sessions where id = ${assistScope!.id}
+          // 0128：子会话的调用锁**根会话**行——共享预算的争夺点在那里，
+          // 锁子会话行会让两个子调用互相看不到对方的预留。
+          await sql`select id from assist_sessions where id = ${assistScope!.budget_session_id}
             for update`.execute(trx);
         }
         const totals = runScope === undefined
@@ -102,10 +105,13 @@ export class ModelCallRepository {
               coalesce(sum(case when c.usage_input_tokens is not null and
                 c.usage_output_tokens is not null then
                 c.usage_input_tokens + c.usage_output_tokens
-                else coalesce(c.budget_reserved_tokens,
-                  ${budget.scopeTokenLimit}) end), 0)::text as tokens
+              else coalesce(c.budget_reserved_tokens,
+                ${budget.scopeTokenLimit}) end), 0)::text as tokens
               from model_calls c join assist_messages m on m.id = c.assist_message_id
-              where m.session_id = ${assistScope!.id} and c.workspace_id = ${origin.workspaceId}`
+              where m.session_id in (select id from assist_sessions
+                  where id = ${assistScope!.budget_session_id}
+                    or budget_scope_session_id = ${assistScope!.budget_session_id})
+                and c.workspace_id = ${origin.workspaceId}`
             .execute(trx)
           : await sql<{ calls: string; tokens: string }>`select count(*)::text as calls,
               coalesce(sum(case when c.usage_input_tokens is not null and
@@ -118,9 +124,34 @@ export class ModelCallRepository {
               where s.run_id = ${runScope.id} and c.workspace_id = ${origin.workspaceId}`
             .execute(trx);
         const used = totals.rows[0]!;
-        if (Number(used.calls) >= budget.scopeCallLimit ||
+        /*
+         * 0127：`/goal` 的额度耗尽与「继续」。
+         *
+         * 会话级用量上限是**既有**的失控保护，本轮没有删除它，也没有把它藏到界面上：
+         * 目标碰到它时明确落到「额度耗尽」并保存进度。用户在卡片上点一次「继续」，
+         * 应用层写入一行 `assist_goal_budget_grants`（授予量取自失败轮次冻结的模型快照），
+         * 这里把它加到上限上——因此每一次扩额都有账可查，且只对**当前活动目标**生效。
+         *
+         * 没有目标、或目标已结束时，这段查询返回 0，行为与 0126 逐字相同。
+         *
+         * 0128：授予量按**预算作用域根**解析，与上面的用量同一个口径。子会话的调用既
+         * 计入根会话的用量，就必须共用根会话的扩额；按子会话自己查会永远得 0，
+         * 现象是「根明明点过继续，子调用却把预算判爆」。
+         * Run 作用域没有会话目标，因此不查这段（旧实现无条件读 assistScope.id，
+         * 在 Run 侧带 budget 的调用上会直接抛 undefined）。
+         */
+        const grant = assistScope === undefined ? undefined
+          : (await sql<{ calls: string; tokens: string }>`select
+            coalesce(sum(g.granted_calls), 0)::text as calls,
+            coalesce(sum(g.granted_tokens), 0)::text as tokens
+            from assist_goal_budget_grants g join assist_goals gg on gg.id = g.goal_id
+            where gg.session_id = ${assistScope.budget_session_id} and gg.status = 'ACTIVE'`
+            .execute(trx)).rows[0];
+        const grantedCalls = Number(grant?.calls ?? '0');
+        const grantedTokens = Number(grant?.tokens ?? '0');
+        if (Number(used.calls) >= budget.scopeCallLimit + grantedCalls ||
             Number(used.tokens) + budget.callReservationTokens >
-              budget.scopeTokenLimit) throw new ModelScopeBudgetError();
+              budget.scopeTokenLimit + grantedTokens) throw new ModelScopeBudgetError();
       }
       await this.insert(trx, id, origin, identity);
     });

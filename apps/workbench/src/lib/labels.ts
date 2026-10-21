@@ -1,4 +1,4 @@
-import type { RelayActivityItem, RelayActivityRefKind, RelayAssistSourceRef, RelayReview } from "../api/relayClient";
+import type { RelayActivityItem, RelayActivityRefKind, RelayAssistSourceRef, RelayInterventionItem, RelayReview } from "../api/relayClient";
 import type { ExecutorKind, InteractionMode, ProjectType, TaskStatus } from "../types";
 
 /**
@@ -47,6 +47,34 @@ export const reviewKindLabels: Record<RelayReview["kind"], string> = {
   ACTION_APPROVAL: "动作批准",
   STATE_PROPOSAL: "项目状态提案"
 };
+
+/**
+ * Review 的「为什么」。服务端开放扩展原因键，认不出的键原样显示，不编一句中文盖过去。
+ * 定义原先在 ReviewDecisionPanel 里，2026-10-21 第三轮 R3-03 移到这里：待处理队列与顶栏
+ * 通知弹层也要同一份读法，展示文案继续只在一处维护。
+ */
+const reviewReasonLabels: Record<string, string> = {
+  CORRECTION_BUDGET_EXHAUSTED: "修正预算已用尽，需要你决定是否增加上限。",
+  CHECKER_UNAVAILABLE: "检查器持续不可用，需要你决定是否重新运行检查。",
+  AWAITING_HUMAN_EVIDENCE: "必需验收条件需要你的判断。",
+  UNCERTAIN_REQUIRES_HUMAN: "检查结果不确定，需要你判断这项验收条件。"
+};
+
+export function reviewReasonText(reason: string): string { return reviewReasonLabels[reason] ?? reason; }
+
+/**
+ * 「必须介入」事项的原因行。服务端对 Review 类事项把它拼成 `类型：原因` 两个枚举，
+ * 直接显示等于让用户读代码。两端都认得才翻译；任一端认不出就原样保留，不猜一个说法。
+ */
+export function interventionReasonText(item: RelayInterventionItem): string {
+  if (item.kind !== "REVIEW") return item.reason;
+  const separator = item.reason.indexOf("：");
+  if (separator < 0) return item.reason;
+  const kind = item.reason.slice(0, separator);
+  const reason = item.reason.slice(separator + 1);
+  if (!Object.hasOwn(reviewKindLabels, kind) || !Object.hasOwn(reviewReasonLabels, reason)) return item.reason;
+  return `${reviewKindLabels[kind as RelayReview["kind"]]} · ${reviewReasonLabels[reason]}`;
+}
 
 export const projectTypeLabels: Record<ProjectType, string> = {
   GENERAL: "通用",
@@ -230,25 +258,56 @@ export function taskStatusTone(status: TaskStatus): StatusTone {
 /** 单用户本机应用：人工动作以「我」呈现，与服务端 actor_kind=HUMAN 对应；不显示原始 actor_ref。 */
 export const activityActorLabels: Record<RelayActivityItem["actorKind"], string> = { HUMAN: "我", AI: "AI", SYSTEM: "系统" };
 
+/**
+ * 事件类型 → 前端自己的读法。只在服务端摘要为哨兵「业务事件」时启用（见 activity-queries 的
+ * SUMMARY：服务端没写过的类型才返回它）。
+ *
+ * 2026-10-20 第五轮：这张表和服务端 SUMMARY 各覆盖一半，重叠处还各写一套中文，任何一边没
+ * 收的类型都会掉到「未识别的事件」——真实发生的动作读成界面错误，多条同类在「最近动态」里
+ * 排成一模一样的占位行（用户截图指认）。现在按服务端同一份 literal 集补满，两边措辞一致；
+ * 仍然不认识时不编造动作名，如实降级（见 activityEventLabel）。
+ */
 const activityEventTypeLabels: Record<string, string> = {
+  WORKSPACE_INITIALIZED: "创建工作区", GOAL_CREATED: "创建目标", GOAL_UPDATED: "修改目标", GOAL_ARCHIVED: "归档目标",
   PROJECT_CREATED: "创建项目", PROJECT_STATE_UPDATED: "更新项目状态", PROJECT_ARCHIVED: "归档项目",
-  TASK_CREATED: "创建任务", TASK_UPDATED: "更新任务", TASK_STARTED: "开始任务", TASK_CANCELLED: "取消任务",
-  TASK_COMPLETED: "完成任务", TASK_REOPENED: "重开任务", TASK_READY: "任务进入可执行",
-  ARTIFACT_VERSION_SAVED: "保存产物版本", ARTIFACT_VERSION_SELECTED: "选用产物版本",
-  DELEGATION_CREATED: "委托 AI 执行", RUN_CREATED: "创建 Run", RUN_FINISHED: "Run 结束",
-  REVIEW_DECIDED: "作出审批决定", VERIFICATION_COMPLETED: "验证完成",
-  WORKSPACE_INITIALIZED: "创建工作区", GOAL_CREATED: "创建目标",
+  PROJECT_UNARCHIVED: "取消归档项目", PROJECT_PRESENTATION_UPDATED: "修改项目名称",
+  PROJECT_GOAL_LINKED: "项目关联目标", PROJECT_GOAL_UNLINKED: "项目解除目标关联",
   PROJECT_RETURN_REVIEWED: "查看项目接续变化", PROJECT_DAILY_VIEW_CONFIRMED: "确认项目当日进展",
-  TASK_PRESENTATION_UPDATED: "修改任务", TASK_ACCEPTANCE_CHANGED: "修改验收条件", TASK_PLANNING_UPDATED: "修改任务计划",
-  TASK_READIED: "任务进入可执行", TASK_DELEGATED: "委托任务", RUN_FAILED: "运行失败",
+  PROJECT_DAILY_VIEW_BASELINE_REPAIRED: "重算项目当日基线", PROJECT_CONTINUATION_POINT_CAPTURED: "记录项目接续点",
+  PROJECT_REMINDER_TRIGGERED: "触发项目提醒", PROJECT_REMINDER_RESOLVED: "处理项目提醒",
+  PROJECT_BLUEPRINT_PROPOSED: "提出项目蓝图", PROJECT_BLUEPRINT_APPLIED: "应用项目蓝图", PROJECT_BLUEPRINT_REJECTED: "拒绝项目蓝图",
+  TASK_CREATED: "创建任务", TASK_UPDATED: "更新任务", TASK_PRESENTATION_UPDATED: "修改任务", TASK_PROJECT_ASSIGNED: "归入项目",
+  TASK_ACCEPTANCE_CHANGED: "修改验收条件", TASK_PLANNING_UPDATED: "修改任务计划",
+  TASK_ACCEPTANCE_MATERIAL_ATTACHED: "附上验收材料", TASK_ACCEPTANCE_MATERIAL_WITHDRAWN: "撤回验收材料",
+  TASK_GOAL_ALIGNMENT_CHANGED: "修改任务目标对齐", TASK_DEPENDENCY_ADDED: "添加任务依赖", TASK_DEPENDENCY_REMOVED: "移除任务依赖",
+  TASK_STARTED: "开始任务", TASK_DELEGATED: "委托任务", TASK_READY: "任务进入可执行", TASK_READIED: "任务进入可执行",
+  TASK_CANCELLED: "取消任务", TASK_COMPLETED: "完成任务", TASK_REOPENED: "重开任务",
+  SCHEDULED_TASK_OCCURRENCE_RESOLVED: "处理定时任务这一次执行",
+  DELEGATION_CREATED: "委托 AI 执行", RUN_CREATED: "创建 Run", RUN_FINISHED: "Run 结束", RUN_FAILED: "运行失败",
+  RUN_WAITING_TOOL_LOOP: "Run 等待工具结果", RUN_WORKER_FENCED: "Run 被 fencing 拦下", RUN_OWNERSHIP_MISMATCH: "Run 归属不符",
+  RUN_GRAPH_LAYOUT_REBUILT: "重排 Run 图", STEP_ATTEMPT_RESULT_REJECTED_STALE: "丢弃过期的步骤结果",
+  ARTIFACT_VERSION_SAVED: "保存产物版本", ARTIFACT_VERSION_SELECTED: "选用产物版本",
+  ACCEPTANCE_COMPARISON_FROZEN: "冻结验收比对", FILE_WRITE_MANUALLY_CLOSED: "手动结束文件写入",
+  REVIEW_REQUESTED: "请求人工判断", REVIEW_DECIDED: "作出审批决定",
+  VERIFICATION_COMPLETED: "验证完成", VERIFICATION_FINALIZED: "检查已结算",
+  DECISION_REVIEW_PREPARED: "准备决策审阅", DECISION_PREMISE_REGISTERED: "登记决策前提", DECISION_REVIEW_RESOLVED: "了结决策审阅",
   RUN_CONTROL_REQUESTED: "请求运行控制", RUN_CONTROL_APPLIED: "运行控制已应用",
-  REVIEW_REQUESTED: "请求人工判断", VERIFICATION_FINALIZED: "检查已结算",
-  CONVERSATION_STATE_REQUESTED: "提交状态维护请求", CONVERSATION_EXECUTION_REQUESTED: "提交执行请求",
-  TODAY_TASK_SELECTION_CHANGED: "修改任务选择", TODAY_FOCUS_CHANGED: "修改当日焦点"
+  CONVERSATION_STATE_REQUESTED: "提交状态维护请求", CONVERSATION_STATE_APPLIED: "应用状态维护",
+  CONVERSATION_STATE_DECISION_ANSWERED: "回答状态维护提问", CONVERSATION_STATE_WITHDRAWN: "撤回状态维护请求",
+  CONVERSATION_EXECUTION_REQUESTED: "提交执行请求", CONVERSATION_EXTERNAL_CHECKED: "核对讨论依赖的外部事实",
+  ASSIST_SESSION_DELETED: "删除讨论", MEMORY_SAVED_FROM_MESSAGE: "从消息保存记忆",
+  MEMORY_AUTO_CAPTURED: "自动记下记忆", MEMORY_AUTO_CAPTURE_ROUND: "自动记忆这一轮", MEMORY_AUTO_CAPTURE_RETIRED: "停用自动记忆",
+  TODAY_TASK_SELECTION_CHANGED: "修改任务选择", TODAY_FOCUS_CHANGED: "修改当日焦点", VIEW_CONFIGURATION_CHANGED: "修改视图配置"
 };
 
+/**
+ * 不认识的事件类型：不编造一个动作名。带上原始类型（display: 数据本身就是依据），
+ * 让人知道「这一条服务端记过、只是界面对不上」，而不是读成一次界面错误（2026-10-20
+ * 第五轮：上一版写「未识别的事件」，四条同类排成一模一样的占位行）。
+ */
 export function activityEventLabel(eventType: string): string {
-  return Object.hasOwn(activityEventTypeLabels, eventType) ? activityEventTypeLabels[eventType]! : "未识别的事件";
+  return Object.hasOwn(activityEventTypeLabels, eventType) ? activityEventTypeLabels[eventType]!
+    : `其他事件（${eventType}）`;
 }
 
 export function activityEventSummary(item: RelayActivityItem): string {

@@ -25,6 +25,8 @@
   background: var(--relay-color-bg-subtle);
   object-fit: contain;
 }
+/* 气泡里的图被 20rem × 12rem 压着，竖屏截图读不出内容：悬停可放大（§33.3）。 */
+.message-attachment[data-previewable="true"] .message-attachment-image { cursor: zoom-in; }
 .message-attachment-placeholder {
   display: inline-flex;
   align-items: center;

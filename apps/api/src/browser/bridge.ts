@@ -217,7 +217,7 @@ export async function dispatchBridgeCommand(op: string, params: Record<string, u
   }
   const id = randomId();
   const payload = JSON.stringify({ type: 'cmd', id, op, params });
-  if (payload.length > MAX_FRAME_BYTES) {
+  if (Buffer.byteLength(payload, 'utf8') > MAX_FRAME_BYTES) {
     throw new BrowserBackendError('BROWSER_INVALID_REQUEST', '命令超过桥接单帧上限。');
   }
   return new Promise<BridgeCommandResult>((resolve, reject) => {
@@ -261,7 +261,7 @@ export async function dispatchBridgeCommand(op: string, params: Record<string, u
     signal?.addEventListener('abort', onAbort, { once: true });
     connection.socket.on('message', onMessage as never);
     connection.socket.on('close', onClose as never);
-    if (!connection.socket.sendText(JSON.stringify({ type: 'cmd', id, op, params }))) {
+    if (!connection.socket.sendText(payload)) {
       cleanup();
       reject(new BrowserBackendError('BROWSER_BACKEND_DISCONNECTED',
         '浏览器扩展连接不可写。', true, false));

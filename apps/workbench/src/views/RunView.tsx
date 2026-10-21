@@ -103,9 +103,12 @@ export default function RunView() {
     draftStep?.kind === "DRAFT" && draftStep.status === "RUNNING" &&
     run.pendingControlRequest === null && error === null && eventStatus !== "unauthorized";
   const projectWriteBlockedReason = !task || task.projectId === null ? null
-    : projectArchivedAt === undefined || refreshing || loading || error !== null
-      ? `Project 事实正在核对或读取失败，不能提交新的 Run 控制命令。${projectReadError ?? ""}`
-      : projectArchivedAt !== null ? "项目已归档，不能提交新的 Run 控制命令。" : null;
+    : projectArchivedAt === undefined
+      // `undefined` 是「项目事实还没读到」，不是读取失败：不写成阻塞原因，避免切页时闪一句红字。
+      ? projectReadError === null ? null : `Project 事实读取失败，不能提交新的 Run 控制命令。${projectReadError}`
+      : refreshing || loading || error !== null
+        ? `Project 事实正在核对或读取失败，不能提交新的 Run 控制命令。${projectReadError ?? ""}`
+        : projectArchivedAt !== null ? "项目已归档，不能提交新的 Run 控制命令。" : null;
   const draftPreview = useRunDraftPreview({ client: connection.client, runId: id, revision: run?.revision ?? "",
     currentStepId: run?.currentStepId ?? null, enabled: canReadDraft, onSettled: () => { void load(false); } });
   const openReviews = reviews.filter((review) => review.status === "OPEN");

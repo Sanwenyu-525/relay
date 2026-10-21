@@ -1,11 +1,16 @@
-/* 只占自己那一块：与目录细条同一行、紧跟其内容右端，行布局见 AssistView.css 的
-   `.agent-chat-prereq-row`。 */
+/* 与目录细条同一行，位于行的右端（2026-10-20 第五轮重排：原「紧跟细条内容右端」在
+   目录名后连缀归属、Git 标记与执行约束后，会把「待你处理」挤到细条中间或折行，
+   读成目录信息的一部分——用户截图指认「信息拥挤、语义混杂」）。
+   现在细条自己按内容收在左端，「待你处理」用 auto 外边距推到剩余空间右端，
+   两类语义（工作目录 / 待处理）各占一端，不再互相穿插。
+   行布局见 AssistView.css 的 `.agent-chat-prereq-row`；内容仍按 key 顺序排。 */
 .pending-work {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-start;
   gap: var(--relay-space-2);
+  margin-inline-start: auto;
 }
 
 .pending-work-label {

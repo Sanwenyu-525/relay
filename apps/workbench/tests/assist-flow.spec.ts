@@ -183,7 +183,9 @@ describe("M04 Assist 真实路由与命令", () => {
     await flush();
     expect(sentBody).toMatchObject({ intent: "PROPOSE_TASK", content: "请列出计划",
       source_refs: [{ kind: "KNOWLEDGE", root_id: sourceId, version: "2" }] });
-    expect(view.wrapper.get('[data-testid="assist-session"]').text()).toContain("等待生成");
+    // 「等待生成」字样已删除（2026-10-21 用户指令），在途由正文前的三点承担。
+    expect(view.wrapper.get('[data-testid="assist-session"]').text()).not.toContain("等待生成");
+    expect(view.wrapper.find('[data-testid="assist-inflight-77777777-7777-4777-8777-777777777777"]').exists()).toBe(true);
     messages = [message("66666666-6666-4666-8666-666666666666", "1", "USER", "COMPLETED", "请列出计划"),
       message("77777777-7777-4777-8777-777777777777", "2", "ASSISTANT", "COMPLETED", "已生成计划",
         [{ source_ref: `knowledge:${sourceId}:v2`, status: "SENT" }])];
@@ -359,8 +361,8 @@ describe("M04 Assist 真实路由与命令", () => {
     expect(view.wrapper.get(".assist-queue").attributes("aria-hidden")).toBe("true");
     expect(view.wrapper.text()).not.toContain("按提交先后依次回复");
     expect(view.wrapper.text()).not.toContain("第 1 项");
-    // 但它确实在途：状态标签说明在等什么，三点提示占位，输入栏给出停止入口。
-    expect(view.wrapper.text()).toContain("等待生成");
+    // 但它确实在途：正文前的三点占位，输入栏给出停止入口；「等待生成」字样已删除（2026-10-21 用户指令）。
+    expect(view.wrapper.text()).not.toContain("等待生成");
     expect(view.wrapper.find(".assist-inflight-dots").exists()).toBe(true);
     const stop = view.wrapper.get('[data-testid="assist-stop"]');
     expect(stop.attributes("aria-label")).toBe("停止生成");
@@ -369,6 +371,9 @@ describe("M04 Assist 真实路由与命令", () => {
     await stop.trigger("click");
     await flush();
     expect(cancels).toEqual([idleId]);
+    // PENDING 不标状态词，但取消意图要在行内一直可读；三点随之让位。
+    expect(view.wrapper.text()).toContain("正在取消");
+    expect(view.wrapper.find(".assist-inflight-dots").exists()).toBe(false);
     view.unmount();
   });
 

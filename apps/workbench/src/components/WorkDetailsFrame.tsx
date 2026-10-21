@@ -1,14 +1,19 @@
 import { useRef, type KeyboardEvent, type ReactNode } from "react";
 import { X } from "lucide-react";
 
-export type WorkDetailsTab = "PROGRESS" | "RESULTS" | "RECORDS";
-const tabs = [{ id: "PROGRESS", label: "进展" }, { id: "RESULTS", label: "成果" },
-  { id: "RECORDS", label: "记录" }] as const;
+export type WorkDetailsTab = "PROGRESS" | "RESULTS" | "RECORDS" | "CHANGES";
+export interface WorkDetailsTabItem { readonly id: WorkDetailsTab; readonly label: string }
+/** 任务详情用三页；会话详情的「变更」页签由调用方按需加进第四页（2026-10-20）。 */
+const DEFAULT_TABS: readonly WorkDetailsTabItem[] = [{ id: "PROGRESS", label: "进展" },
+  { id: "RESULTS", label: "成果" }, { id: "RECORDS", label: "记录" }];
 
 /** 会话和任务共用的工作详情外壳；内容仍由各自事实 Owner 提供。 */
-export default function WorkDetailsFrame({ id, testId, className, tab, onTabChange, onClose, children }: {
+export default function WorkDetailsFrame({ id, testId, className, tab, onTabChange, onClose, children,
+  tabs = DEFAULT_TABS }: {
   id: string; testId: string; className: string; tab: WorkDetailsTab;
   onTabChange: (tab: WorkDetailsTab) => void; onClose: () => void; children: ReactNode;
+  /** 页签清单：省略＝进展／成果／记录三页。 */
+  tabs?: readonly WorkDetailsTabItem[];
 }) {
   const refs = useRef<Partial<Record<WorkDetailsTab, HTMLButtonElement>>>({});
   function handleKey(event: KeyboardEvent, current: WorkDetailsTab) {

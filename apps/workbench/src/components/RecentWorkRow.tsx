@@ -23,6 +23,11 @@ import SessionRowMenu, { type SessionRowMenuHandle, type SessionRowPatch } from 
  *    关掉，摘要卡在整个拖拽期间 `display: none`，所以没有东西会被这个 transform 带偏。
  * 4. **整行右键与点 ⋯ 打开同一个面板（2026-10-18 用户指令）。** 面板仍锚在 ⋯、不跟指针落点走：
  *    这一行只有一套摆位几何，右键不必再养第二条坐标逻辑；任务行没有可改的会话事实，右键不接管。
+ * 5. **复选框叠在类型图标那一格，不占第二列（2026-10-20 用户指令）。** 行按钮是 `<button>`，
+ *    复选框只能做它的兄弟节点、按绝对定位压在 `.recent-work-kind` 上方：同一块 12px 图形位置，
+ *    悬停/聚焦/已勾选时换成 14px 复选框，标题可用宽一像素都不减——这一列的下限只有 160px，
+ *    常驻让出一列会直接吃掉两个汉字。显形规则与 ⋯ 完全一致（`display` 切换，静止态不占位），
+ *    因此行高、行距与密度基线都不变（`recentWorkRailDensity.spec.ts` 仍在守）。
  */
 
 /** 浮层与锚点之间的间距、以及离视口边缘的留边；都取 space.2（8px）。 */
@@ -38,7 +43,10 @@ export interface RecentWorkRowProps {
   readonly label: string;
   readonly active: boolean;
   readonly pinned: boolean;
-  /** 未读标记（0104）：只画一枚圆点，状态同时写进行的可访问名称。 */
+  /**
+   * 未读标记（0104）：圆点 + 标题加粗两处同时成立（2026-10-19 用户指认「不够明显」）。
+   * 状态同时写进行的可访问名称，不只靠颜色。
+   */
   readonly unread: boolean;
   /** 已按本地日期简写的更新时刻；没有更新时间时为 null，不编一个。 */
   readonly timeLabel: string | null;
@@ -59,6 +67,14 @@ export interface RecentWorkRowProps {
   readonly onOpen: () => void;
   readonly onChanged: (patch: SessionRowPatch) => void;
   readonly onStale: () => void;
+  /**
+   * 批量选择的勾选状态（2026-10-20 用户指令「给会话 item 加一个复选框，方便删除记录」）。
+   * 只有会话行有：任务行没有删除命令，勾了也无事可做。
+   */
+  readonly selected: boolean;
+  readonly onSelectedChange: (selected: boolean) => void;
+  /** 批量删除在途：勾选禁用，选择集在命令跑完之前不再变化。 */
+  readonly selectionBusy: boolean;
 }
 
 /** 悬停/聚焦摘要卡：标题 + 更新时刻 + 归属。纯展示，不接收指针。 */
@@ -108,7 +124,8 @@ function RowSummary({ anchor, cardId, title, timeLabel, timeValue, timeTitle, sc
 }
 
 export default function RecentWorkRow({ kind, title, testId, label, active, pinned, unread, timeLabel,
-  timeValue, timeTitle, scopeName, rowKey, dragging, carryY, session, client, onOpen, onChanged, onStale }: RecentWorkRowProps) {
+  timeValue, timeTitle, scopeName, rowKey, dragging, carryY, session, client, onOpen, onChanged, onStale,
+  selected, onSelectedChange, selectionBusy }: RecentWorkRowProps) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<SessionRowMenuHandle>(null);
@@ -122,10 +139,17 @@ export default function RecentWorkRow({ kind, title, testId, label, active, pinn
   const carry: CSSProperties | undefined = carryY === null ? undefined
     : { transform: `translateY(${carryY}px)` };
   return <li className={`recent-work-row${dragging ? " recent-work-row--dragging" : ""}`}
-    data-recent-row={rowKey} style={carry}>
+    data-recent-row={rowKey} data-selected={selected ? "true" : undefined} style={carry}>
     <div className="recent-work-row-head" onContextMenu={session === undefined ? undefined
       : (event) => { event.preventDefault(); menuRef.current?.open(); }}>
-      <button type="button" className={`recent-work-item${active ? " recent-work-item--active" : ""}`}
+      {/* 复选框压在类型图标那一格（见文件头第 5 条）：与行按钮平级，不嵌进 <button>；
+          悬停/聚焦/已勾选时才显形，静止态与改造前逐像素相同。 */}
+      {session !== undefined && <input type="checkbox" className="recent-work-select"
+        checked={selected} disabled={selectionBusy}
+        aria-label={`选择「${title}」${scopeName === "" ? "" : ` · ${scopeName}`}`}
+        data-testid={`recent-work-select-${session.id}`}
+        onChange={(event) => onSelectedChange(event.target.checked)} />}
+      <button type="button" className={`recent-work-item${active ? " recent-work-item--active" : ""}${unread ? " recent-work-item--unread" : ""}`}
         aria-label={label} data-testid={testId} aria-current={active ? "true" : undefined}
         aria-describedby={anchor !== null ? cardId : undefined}
         onPointerEnter={(event) => show(event.currentTarget)}

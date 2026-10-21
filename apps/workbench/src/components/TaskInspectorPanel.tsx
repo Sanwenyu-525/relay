@@ -2,11 +2,12 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { AlertTriangle, ArrowLeft, CheckCircle2, ChevronRight, Circle, Clock, FileText, Folder, Link2, Loader, Shield, Sparkles, X } from "lucide-react";
 import type { RelayApiClient, RelayArtifact, RelayArtifactVersionSummary, RelayRun, RelayTaskArtifacts, RelayTaskDetail, RelayWorkingDirectory } from "../api/relayClient";
 import { RelayApiError } from "../api/relayClient";
-import WorkDetailsFrame from "./WorkDetailsFrame";
+import WorkDetailsFrame, { type WorkDetailsTab } from "./WorkDetailsFrame";
 import SafeMarkdown from "./SafeMarkdown";
 import { runLabels, stepLabels, stepStatusLabels } from "./RunControlPanel";
 import { executorLabels, taskStatusLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
+import { useDelayedVisible } from "../lib/useDelayedVisible";
 import "./TaskInspectorPanel.css";
 
 export interface TaskInspectorPanelProps {
@@ -33,7 +34,8 @@ export interface TaskInspectorPanelProps {
   readonly isChatView?: boolean;
 }
 
-type InspectorTab = "PROGRESS" | "RESULTS" | "RECORDS";
+/* 与外壳共用同一套页签名；「变更」只出现在会话详情里，任务详情不提供这一页。 */
+type InspectorTab = WorkDetailsTab;
 /** 步骤符号的五态：与 V4.2 原型的 step-symbol 一一对应（warn＝当前步骤挂起等待人工/暂停/结果核对）。 */
 type StepState = "done" | "active" | "warn" | "failed" | "waiting";
 
@@ -95,6 +97,8 @@ export default function TaskInspectorPanel({
   const currentArtifactRead = artifactRead.taskId === task.id && artifactRead.revision === task.revision
     ? artifactRead : { taskId: task.id, revision: task.revision, status: "loading" as const };
   const artifacts = currentArtifactRead.status === "ready" ? currentArtifactRead.value : null;
+  /** 换任务时成果读取通常几十毫秒完成，加载提示延迟出现，避免「闪一下」（见 lib/useDelayedVisible）。 */
+  const artifactsLoadingVisible = useDelayedVisible(currentArtifactRead.status === "loading");
   const preview = selectedArtifact?.artifact.taskId === task.id
     && selectedArtifact.artifact.versions.some((version) => version.artifactVersionId === selectedArtifact.version.artifactVersionId)
     ? selectedArtifact : null;
@@ -312,7 +316,7 @@ export default function TaskInspectorPanel({
       <p className="inspector-sub">请选择已保存的成果，阅读对应的确切版本正文。</p>
       <p className="inspector-section-head">成果条目 <span className="inspector-section-count">{currentArtifactRead.status === "ready" ? `${items.length} 项` : ""}</span></p>
       {currentArtifactRead.status === "loading"
-        ? <p className="inspector-note" role="status">正在读取已保存成果…</p>
+        ? (artifactsLoadingVisible ? <p className="inspector-note" role="status">正在读取已保存成果…</p> : null)
         : currentArtifactRead.status === "error"
           ? <div className="inspector-artifact-error" role="alert" data-testid="collab-inspector-artifacts-error">
             <p>成果读取失败：{currentArtifactRead.error}</p>
@@ -477,6 +481,7 @@ export default function TaskInspectorPanel({
 
   return <WorkDetailsFrame className="task-inspector" id={`collab-inspector-${task.id}`} testId="collab-inspector"
     tab={tab} onTabChange={selectTab} onClose={onClose}>
-    {tab === "PROGRESS" ? renderProgress() : tab === "RESULTS" ? renderResults() : renderRecords()}
+    {tab === "PROGRESS" ? renderProgress() : tab === "RESULTS" ? renderResults()
+      : tab === "RECORDS" ? renderRecords() : null}
   </WorkDetailsFrame>;
 }

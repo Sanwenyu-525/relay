@@ -9,6 +9,8 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:window:allow-is-focused",
+    "core:window:allow-set-overlay-icon",
+    "core:image:allow-new",
     "core:window:allow-show",
     "core:window:allow-unminimize",
     "core:window:allow-set-focus",

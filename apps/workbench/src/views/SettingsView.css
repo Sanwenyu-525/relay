@@ -57,3 +57,42 @@
   .settings-page { padding: var(--relay-layout-main-smallPadding); }
   .settings-definition-list > div { grid-template-columns: 1fr; gap: var(--relay-space-1); }
 }
+
+/* 设置 › 基本设置 › 默认工作目录（工作台 §18.1.5 / HTTP §10.96）。
+   它是服务端 Workspace 配置，因此与上面的本设备偏好表单分开：同一 section 里一个配置行，
+   不参与「保存设置」的提交。宽视口沿用 .settings-field 的两列标签网格；
+   窄窗由同一断点落回单列——本行不另写一套断点。 */
+/* 同特异度靠声明顺序取胜太脆（基座 .settings-field 在宽视口把 align-items 设成 center），
+   这里用双类抬到 (0,2,0)：这一行的右边是一块多行说明，不能垂直居中。 */
+.settings-field.settings-default-directory { align-items: start; }
+.settings-default-directory-body { display: grid; gap: var(--relay-space-2); min-width: 0; }
+.settings-default-directory-value {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--relay-space-2);
+  margin: 0; font-size: var(--relay-font-size-body); line-height: var(--relay-font-lineHeight-reading);
+  overflow-wrap: anywhere;
+}
+.settings-default-directory-value .hash-code { margin-inline-start: var(--relay-space-1); }
+.settings-default-directory-reason { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+.settings-default-directory-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-2); }
+.settings-default-directory-pending { display: grid; gap: var(--relay-space-2); justify-items: start; }
+.settings-default-directory-pending .helper-text { margin: 0; }
+.settings-default-directory-manual { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-2); }
+.settings-default-directory-manual input {
+  flex: 1 1 16rem; min-width: 0; min-height: var(--relay-control-height);
+  padding: 0 var(--relay-space-4);
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-surface); color: var(--relay-color-text-primary); font: inherit;
+}
+.settings-default-directory-manual input:disabled { color: var(--relay-color-disabled-text); background: var(--relay-color-disabled-bg); }
+
+/* 图片输入能力声明（2026-10-19）：与模型端口事实分开一段，但不另起一张卡——
+   它解释的正是上面那行「图片输入」的结论从哪来。 */
+.settings-image-input {
+  display: grid; gap: var(--relay-space-2);
+  margin-top: var(--relay-space-4); padding-top: var(--relay-space-4);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-control);
+}
+.settings-image-input h3 { margin: 0; font-size: var(--relay-font-size-body); }
+.settings-image-input .field { display: grid; gap: var(--relay-space-1); }
+.settings-image-input .settings-save-actions { margin-top: 0; }

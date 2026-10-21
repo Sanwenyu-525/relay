@@ -2,7 +2,7 @@ import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 
 import {
-  addGatewayPolicyVersionCommand, createGatewayConnectionCommand,
+  addGatewayPolicyVersionCommand, copyGatewaySettingsCommand, createGatewayConnectionCommand,
   createGatewayPolicyCommand, createManagedResourceCommand,
   disableGatewayConnectionCommand, disableManagedResourceCommand,
   revokeGatewayPolicyCommand,
@@ -84,6 +84,8 @@ const versionPolicyBody = Type.Object({ command_id: uuid, expected_revision: rev
 const revokeBody = Type.Object({ command_id: uuid, expected_revision: revision }, strict);
 const createResourceBody = Type.Object({ command_id: uuid, root_path: Type.String({ minLength: 1 }) }, strict);
 const disableResourceBody = Type.Object({ command_id: uuid, expected_revision: revision }, strict);
+/** 把来源项目的连接、受管资源与 ACTIVE 策略复制到当前项目（2026-10-19，沿用上次配置）。 */
+const copySettingsBody = Type.Object({ command_id: uuid, source_project_id: uuid }, strict);
 const localDirectoryAccessBody = Type.Object({ command_id: uuid, expected_revision: revision,
   write_tier: Type.Union([Type.Literal('READ_ONLY'), Type.Literal('ASK'), Type.Literal('AUTO'),
     Type.Literal('FULL')]) }, strict);
@@ -198,6 +200,17 @@ export function registerGatewayRoutes(app: FastifyInstance, dependencies: RouteD
       return await listManagedResources(dependencies.database.executor, p.workspace_id, p.project_id);
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
+  /** 沿用来源项目的连接、受管资源与 ACTIVE 策略；判重与回执规则见 CopyGatewaySettings 用例。 */
+  app.post('/projects/:project_id/gateway-settings/copy', {
+    schema: { params: projectParams, body: copySettingsBody,
+      response: { 201: commandEnvelopeSchema(commandResult) } },
+  }, createCommandHandler(dependencies, { commandType: 'CopyGatewaySettings', bodySchema: copySettingsBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await copyGatewaySettingsCommand(executor, { workspaceId: params.workspace_id ?? '',
+        targetProjectId: params.project_id ?? '', commandId: body.command_id,
+        sourceProjectId: body.source_project_id });
+      return { outcome, result: outcome.result };
+    } }));
   app.get('/projects/:project_id/managed-resources/:resource_id', { schema: { params: resourceParams } }, async (request, reply) => {
     try { const p = request.params as { workspace_id: string; project_id: string; resource_id: string };
       return await readManagedResource(dependencies.database.executor, p.workspace_id, p.project_id, p.resource_id);

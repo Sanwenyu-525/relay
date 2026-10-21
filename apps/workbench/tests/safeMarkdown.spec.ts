@@ -90,3 +90,78 @@ describe("安全 Markdown 表格", () => {
     expect(region.find("table > tbody > tr > td").exists()).toBe(true);
   });
 });
+
+describe("段落与列表的边界", () => {
+  /* 2026-10-20 用户截图：AI 回复里「当前状态：」下面跟的是一行行 `- 分支：main`，
+     实机却渲染成「当前状态： - 分支：main - HEAD：…」一整段。根因是段落收集循环
+     只在空行/标题/fence/表格处断开，遇到列表行继续 join(" ")，把列表吞进段落。 */
+  it("段落下一行紧跟无序列表（没有空行）时列表另起一块，不被 join 成一行", async () => {
+    const wrapper = await render("**当前状态：**\n- 分支：main\n- HEAD：119f51dc\n- 未暂存改动文件很多");
+    expect(wrapper.findAll(".markdown-preview__paragraph").map((paragraph) => paragraph.text()))
+      .toEqual(["当前状态："]);
+    expect(wrapper.findAll("ul.markdown-preview__list")).toHaveLength(1);
+    expect(wrapper.findAll("ul.markdown-preview__list li").map((item) => item.text()))
+      .toEqual(["分支：main", "HEAD：119f51dc", "未暂存改动文件很多"]);
+    expect(wrapper.text()).not.toContain("- 分支");
+  });
+
+  it("有序列表同样能打断段落，序号从原文保留", async () => {
+    const wrapper = await render("步骤如下：\n1. 读文件\n2. 改内容\n3. 复跑");
+    expect(wrapper.findAll(".markdown-preview__paragraph").map((paragraph) => paragraph.text()))
+      .toEqual(["步骤如下："]);
+    expect(wrapper.findAll("ol.markdown-preview__list li").map((item) => item.text()))
+      .toEqual(["读文件", "改内容", "复跑"]);
+  });
+
+  it("段落中间不带列表标记的行仍然续成同一段（不误断行）", async () => {
+    const wrapper = await render("第一句。\n第二句仍属同一段。\n\n另一段。");
+    expect(wrapper.findAll(".markdown-preview__paragraph").map((paragraph) => paragraph.text()))
+      .toEqual(["第一句。 第二句仍属同一段。", "另一段。"]);
+  });
+});
+
+describe("引用块", () => {
+  /* 2026-10-20：模型常把前提或用户原话写成 `> …`。此前不支持，那一行会连同 `>` 原样显示成
+     正文（「> 引用块在回复里也会出现」），读起来像排版坏了。 */
+  it("连续的引用行并成一个引用块，`>` 不再出现在正文里", async () => {
+    const wrapper = await render("> 用户原话：先别动执行策略\n> 这句是同一段引用");
+    expect(wrapper.findAll("blockquote.markdown-preview__quote")).toHaveLength(1);
+    expect(wrapper.get("blockquote.markdown-preview__quote").text())
+      .toBe("用户原话：先别动执行策略 这句是同一段引用");
+    expect(wrapper.text()).not.toContain(">");
+  });
+
+  it("段落下一行紧跟引用（没有空行）时引用另起一块，不被吞进段落", async () => {
+    const wrapper = await render("前提是这样的：\n> 只改样式，不动行为");
+    expect(wrapper.findAll(".markdown-preview__paragraph").map((paragraph) => paragraph.text()))
+      .toEqual(["前提是这样的："]);
+    expect(wrapper.get("blockquote.markdown-preview__quote").text()).toBe("只改样式，不动行为");
+  });
+});
+
+describe("代码 fence 的可复制形态", () => {
+  it("默认仍是朴素 pre：文档预览等阅读面不多出交互键", async () => {
+    const wrapper = await render("```bash\npnpm build\n```");
+    expect(wrapper.find(".msg-code").exists()).toBe(false);
+    expect(wrapper.get("pre.markdown-preview__code code").text()).toBe("pnpm build");
+  });
+
+  it("codeCopy 时 fence 升级为可复制文本块：顶行是语言，正文逐字保留", async () => {
+    const mounted = await mountReact(createElement(SafeMarkdown, {
+      source: "```TypeScript\nconst a: number = 1;\n\nconst b = a + 1;\n```", codeCopy: true }));
+    unmount = mounted.unmount;
+    const block = mounted.wrapper.get(".msg-code");
+    expect(block.find(".msg-code-label").text()).toBe("typescript");
+    // 逐字断言走 textContent：wrapper.text() 会把换行折叠成空格。
+    expect((block.get("pre code").element as HTMLElement).textContent)
+      .toBe("const a: number = 1;\n\nconst b = a + 1;");
+    expect(block.find(".msg-code-copy").exists()).toBe(true);
+  });
+
+  it("没有语言标注的 fence 顶行只说「代码」，仍可复制", async () => {
+    const mounted = await mountReact(createElement(SafeMarkdown, { source: "```\nplain\n```", codeCopy: true }));
+    unmount = mounted.unmount;
+    expect(mounted.wrapper.get(".msg-code-label").text()).toBe("代码");
+    expect(mounted.wrapper.get("pre code").text()).toBe("plain");
+  });
+});

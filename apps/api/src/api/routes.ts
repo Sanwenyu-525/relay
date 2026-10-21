@@ -6,6 +6,8 @@ import { ManagedContentStore } from '../storage/managed-content-store.js';
 import { registerArtifactRoutes } from './artifact-api.js';
 import { registerAttentionRoutes } from './attention-api.js';
 import { registerAssistRoutes } from './assist-api.js';
+import { registerAssistMemoryRoutes } from './assist-memory-api.js';
+import { registerMemoryCaptureRoutes } from './memory-capture-api.js';
 import { registerAssistModelRuntimeRoutes } from './assist-model-runtime-api.js';
 import { registerChatCommandRoutes } from './chat-command-api.js';
 import { createBearerGuard, type BoundaryConfig } from './boundary.js';
@@ -34,6 +36,7 @@ import { registerFirstPartySkillRoutes } from './first-party-skills-api.js';
 import { registerViewConfigurationRoutes } from './view-configuration-api.js';
 import { registerWorkingDirectoryRoutes } from './working-directory-api.js';
 import { registerConversationExecutionRoutes } from './conversation-execution-api.js';
+import { registerPlanGoalRoutes } from './plan-goal-api.js';
 import { registerStateMaintenanceRoutes } from './state-maintenance-api.js';
 import { registerProjectDailyContinuationRoutes } from './project-daily-continuation-api.js';
 import { registerLearningRoutes } from './learning-api.js';
@@ -56,6 +59,7 @@ import { registerModelRoutes } from './model-api.js';
 import { registerComposerRoutes } from './composer-api.js';
 import { registerComputerRoutes } from './computer-api.js';
 import { registerBrowserBridgeCommandRoutes, registerBrowserRoutes } from './browser-api.js';
+import { registerPluginRoutes } from './plugins-api.js';
 import { ensureBridgeRegistration } from '../browser/bridge.js';
 
 export type { RouteDependencies };
@@ -195,11 +199,15 @@ registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
       registerInformationRoutes(scope, apiDependencies);
       registerReviewRoutes(scope, apiDependencies);
       registerAssistRoutes(scope, apiDependencies);
+      registerAssistMemoryRoutes(scope, apiDependencies);
+      registerMemoryCaptureRoutes(scope, apiDependencies);
       registerAssistModelRuntimeRoutes(scope, apiDependencies);
       registerChatCommandRoutes(scope, apiDependencies);
       registerAssistantProfileRoutes(scope, apiDependencies);
       registerWorkingDirectoryRoutes(scope, apiDependencies);
       registerConversationExecutionRoutes(scope, apiDependencies);
+      // 0127：聊天 /plan 与 /goal 的计划版本、活动目标与控制（HTTP §10.108）。
+      registerPlanGoalRoutes(scope, apiDependencies);
       registerStateMaintenanceRoutes(scope, apiDependencies);
       registerProjectDailyContinuationRoutes(scope, apiDependencies);
       // 0072：学习记录（ADR-020）。读路径只读应用保存的同一记录，不调模型总结。
@@ -209,6 +217,7 @@ registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
       registerComputerRoutes(scope, apiDependencies);
       // 浏览器后端状态（migration 0106）：Worker 写入的健康投影，只读。
       registerBrowserRoutes(scope, apiDependencies);
+      registerPluginRoutes(scope, apiDependencies);
     },
     { prefix: API_PREFIX },
   );

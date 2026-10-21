@@ -35,6 +35,7 @@ export default function ReviewsView() {
   const [projectArchivedAt, setProjectArchivedAt] = useState<string | null | undefined>(undefined);
   const [projectReadError, setProjectReadError] = useState<string | null>(null);
   const requestVersion = useRef(0);
+  const pageRef = useRef<HTMLElement>(null);
 
   async function load() {
     const version = ++requestVersion.current;
@@ -85,6 +86,20 @@ export default function ReviewsView() {
     navigate(`/reviews?${selection}`);
   }
 
+  /**
+   * 页内定位只移动视图与焦点：不打开提交、不改变这条请求绑定的对象与版本。
+   * 依次找候选目标（决定区在等待回执时换成核对回执那组键），都没有就什么都不做。
+   */
+  function jumpTo(...targets: string[]) {
+    for (const target of targets) {
+      const element = pageRef.current?.querySelector<HTMLElement>(`[data-testid="${target}"]`);
+      if (element === null || element === undefined) continue;
+      element.scrollIntoView({ block: "start" });
+      element.focus({ preventScroll: true });
+      return;
+    }
+  }
+
   const projectWriteBlockedReason = loading || refreshing || error !== null || selectedId !== null && selected?.id !== selectedId
     ? "请求正在核对或读取失败，不能提交新的 Review 决定。"
     : !selected?.projectId ? null : projectArchivedAt === undefined
@@ -100,12 +115,23 @@ export default function ReviewsView() {
     ? new Intl.DateTimeFormat("zh-CN", { timeZone, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value))
     : "时间不可读取";
 
-  return <section className="review-page" data-testid="review-inbox"><div className="review-columns">
+  return <section className="review-page" data-testid="review-inbox" ref={pageRef}><div className="review-columns">
     <div className="review-primary">
       <PageHeader title="等待你的判断" testId="review-page-head"
         meta={loading ? "正在核对请求" : `${reviews.length} 项请求 · 查看对象与依据后逐项处理`}
         actions={<button className="secondary-button" type="button" data-testid="review-refresh" disabled={loading || refreshing}
           onClick={() => void load()}><RotateCcw aria-hidden="true" />{refreshing ? "正在更新" : "刷新"}</button>} />
+      {/* 单列时正文接在列表下方、决定区在正文之后（约 1162×782 窗口，2026-10-21 第三轮 R3-04）：
+          读完长正文才知道决定区在哪，首屏又没有通往它的入口。这两个键挂在第一列，
+          只负责滚动与移动焦点，不代替阅读，也不代替逐项判断。 */}
+      {selected !== null && selected.status === "OPEN" && (selectedId === null || selected.id === selectedId) &&
+        <nav className="review-jump" aria-label="页内定位">
+          <button type="button" className="text-link" data-testid="review-jump-conditions"
+            onClick={() => jumpTo("review-bound-summary")}>查看判断条件</button>
+          <button type="button" className="text-link" data-testid="review-jump-decision"
+            title="移动到决定区；这里不会替你提交任何决定"
+            onClick={() => jumpTo("review-decision-actions", "review-decision")}>前往决定</button>
+        </nav>}
       {!live && <p className="warning-callout">当前为只读示例。连接本机 API 后可处理真实 Review 请求。</p>}
       {error && <p className="action-error" role="alert" data-testid="review-read-error">{error}</p>}
       <section className="review-list" aria-label="待审请求">

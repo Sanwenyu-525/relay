@@ -2,11 +2,13 @@ import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 
 import { addKnowledgeVersion, addMemoryRevision, addRuleVersion, createDecision,
-  createKnowledge, createMemory, createRule, retireInformation, supersedeDecision,
+  createKnowledge, createMemory, createMemoryFromMessage, createRule, retireInformation, restoreInformation, supersedeDecision,
   type KnowledgeSource } from '../application/information-commands.js';
 import { listInformation, listInformationVersions, readInformation, readKnowledgeVersionContent, searchInformation }
   from '../application/information-queries.js';
 import { validationFailed } from '../application/domain-error.js';
+import { readMemorySettings, setMemorySettings } from '../application/memory-settings.js';
+import { createRepositories } from '../application/unit-of-work.js';
 import { commandEnvelopeSchema } from './domain-schemas.js';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
 
@@ -17,6 +19,9 @@ const text = Type.String({ minLength: 1, maxLength: 262144 });
 const base = Type.Object({ workspace_id: uuid }, strict);
 const item = Type.Object({ workspace_id: uuid, id: uuid }, strict);
 const listQuery = Type.Object({ project_id: Type.Optional(uuid) }, strict);
+const memoryListQuery = Type.Object({ project_id: Type.Optional(uuid),
+  effective_status: Type.Optional(Type.Union([Type.Literal('ALL'), Type.Literal('ACTIVE'),
+    Type.Literal('EXPIRED'), Type.Literal('RETIRED')])) }, strict);
 const knowledgeContentParams = Type.Object({ workspace_id: uuid, id: uuid,
   version: Type.String({ pattern: '^[1-9][0-9]{0,18}$' }) }, strict);
 const knowledgeContent = Type.Object({ knowledge_id: uuid, title: Type.String(),
@@ -50,7 +55,8 @@ const createDecisionBody = Type.Object({ command_id: uuid,
   alternatives: Type.Array(text), costs: Type.Array(text) }, strict);
 const supersedeBody = Type.Object({ command_id: uuid, expected_revision: rev,
   replacement_decision_id: uuid }, strict);
-const ruleFields = { rule_key: text, statement: text,
+// rule_key 不在此表：CreateRule 允许缺省（服务端生成），AddRuleVersion 仍必须给出。
+const ruleFields = { statement: text,
   strength: Type.Union([Type.Literal('HARD'), Type.Literal('PREFERENCE')]),
   applicability: Type.Literal('AI_RUN'),
   enforcement: Type.Union([Type.Literal('PRE_ACTION'), Type.Literal('POST_CHECK'),
@@ -59,10 +65,12 @@ const ruleFields = { rule_key: text, statement: text,
     Type.Literal('CITATION_EXISTS'), Type.Literal('SEMANTIC'), Type.Null()])),
   target_spec: Type.Optional(Type.Object({}, { additionalProperties: true })),
 };
+// 规则键可由服务端生成：普通入口只让用户陈述规则（工作台 §42.3）。旧客户端仍可显式提交。
 const createRuleBody = Type.Object({ command_id: uuid,
   scope: Type.Union([Type.Literal('WORKSPACE'), Type.Literal('PROJECT'), Type.Literal('TASK')]),
-  scope_id: uuid, ...ruleFields }, strict);
-const versionRuleBody = Type.Object({ command_id: uuid, expected_revision: rev, ...ruleFields }, strict);
+  scope_id: uuid, rule_key: Type.Optional(text), ...ruleFields }, strict);
+const versionRuleBody = Type.Object({ command_id: uuid, expected_revision: rev,
+  rule_key: text, ...ruleFields }, strict);
 const retireBody = Type.Object({ command_id: uuid, expected_revision: rev }, strict);
 const searchQuery = Type.Object({ q: Type.String({ minLength: 1, maxLength: 200 }),
   project_id: Type.Optional(uuid), types: Type.Optional(Type.String()),
@@ -85,6 +93,50 @@ function parsedSource(body: { source_kind: KnowledgeSource['sourceKind']; text?:
 }
 
 export function registerInformationRoutes(app: FastifyInstance, dependencies: RouteDependencies): void {
+  const settingsBody = Type.Object({ command_id: uuid, expected_revision: rev,
+    recall_enabled: Type.Boolean(), automatic_compaction: Type.Boolean(),
+    // 0125 新增：缺省视为 true，旧客户端（只发两个开关）不会被 422 打断。
+    auto_capture: Type.Optional(Type.Boolean()) }, strict);
+  app.get('/memories/:id/provenance', { schema: { params: item } }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string; id: string };
+      await readInformation(dependencies.database.executor, 'memory', p.workspace_id, p.id);
+      const sources = await createRepositories(dependencies.database.executor).information.readMemoryMessageSources(p.id);
+      return { memory_id: p.id, sources: sources.map((source) => ({ ...source,
+        memory_version: source.memory_version.toString() })) };
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+  app.get('/memory-settings', { schema: { params: base } }, async (request, reply) => {
+    try { return await readMemorySettings(dependencies.database.executor,
+      (request.params as { workspace_id: string }).workspace_id); }
+    catch (error) { return sendReadError(reply, error, request.id); }
+  });
+  app.post('/memory-settings', { schema: { params: base, body: settingsBody,
+    response: { 200: commandEnvelopeSchema(Type.Object({ workspace_id: uuid, revision: rev,
+      recall_enabled: Type.Boolean(), automatic_compaction: Type.Boolean(),
+      auto_capture: Type.Boolean() }, strict)) } } }, createCommandHandler(dependencies, {
+    commandType: 'SetMemorySettings', bodySchema: settingsBody, execute: async ({ executor, params, body }) => {
+      const outcome = await setMemorySettings(executor, { workspaceId: params.workspace_id ?? '',
+        commandId: body.command_id, expectedRevision: body.expected_revision,
+        recallEnabled: body.recall_enabled, automaticCompaction: body.automatic_compaction,
+        autoCapture: body.auto_capture ?? true });
+      return { outcome, result: outcome.result };
+    } }));
+  const saveMemoryBody = Type.Object({ command_id: uuid, expected_session_revision: rev,
+    content_sha256: Type.String({ pattern: '^[0-9a-f]{64}$' }),
+    project_id: Type.Union([uuid, Type.Null()]), ...memoryFields }, strict);
+  app.post('/assist-sessions/:session_id/messages/:message_id/memories', {
+    schema: { params: Type.Object({ workspace_id: uuid, session_id: uuid, message_id: uuid }, strict),
+      body: saveMemoryBody, response: { 201: commandEnvelopeSchema(commandResult) } },
+  }, createCommandHandler(dependencies, { commandType: 'CreateMemoryFromMessage', bodySchema: saveMemoryBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await createMemoryFromMessage(executor, { workspaceId: params.workspace_id ?? '',
+        sessionId: params.session_id ?? '', messageId: params.message_id ?? '', commandId: body.command_id,
+        expectedSessionRevision: body.expected_session_revision, expectedContentSha256: body.content_sha256,
+        projectId: body.project_id, title: body.title, text: body.text, confirmed: body.confirmed,
+        ...(body.expires_at === undefined ? {} : { expiresAt: body.expires_at }) }, dependencies.storage);
+      return { outcome, result: outcome.result };
+    } }));
   app.get('/knowledge/:id/versions/:version/content', {
     schema: { params: knowledgeContentParams, response: { 200: knowledgeContent } },
   }, async (request, reply) => {
@@ -97,11 +149,13 @@ export function registerInformationRoutes(app: FastifyInstance, dependencies: Ro
   });
   for (const [path, kind] of [['knowledge', 'knowledge'], ['memories', 'memory'],
     ['decisions', 'decision'], ['rules', 'rule']] as const) {
-    app.get(`/${path}`, { schema: { params: base, querystring: listQuery } }, async (request, reply) => {
+    app.get(`/${path}`, { schema: { params: base,
+      querystring: kind === 'memory' ? memoryListQuery : listQuery } }, async (request, reply) => {
       try {
         const p = request.params as { workspace_id: string };
-        const q = request.query as { project_id?: string };
-        return await listInformation(dependencies.database.executor, kind, p.workspace_id, q.project_id);
+        const q = request.query as { project_id?: string; effective_status?: 'ALL' | 'ACTIVE' | 'EXPIRED' | 'RETIRED' };
+        return await listInformation(dependencies.database.executor, kind, p.workspace_id, q.project_id,
+          q.effective_status ?? 'ALL');
       } catch (error) { return sendReadError(reply, error, request.id); }
     });
     app.get(`/${path}/:id`, { schema: { params: item } }, async (request, reply) => {
@@ -205,7 +259,8 @@ export function registerInformationRoutes(app: FastifyInstance, dependencies: Ro
     execute: async ({ executor, params, body }) => {
       const outcome = await createRule(executor, { workspaceId: params.workspace_id ?? '',
         commandId: body.command_id, scope: body.scope, scopeId: body.scope_id,
-        ruleKey: body.rule_key, statement: body.statement, strength: body.strength,
+        ...(body.rule_key === undefined ? {} : { ruleKey: body.rule_key }),
+        statement: body.statement, strength: body.strength,
         applicability: body.applicability, enforcement: body.enforcement,
         ...(body.method === undefined ? {} : { method: body.method }),
         ...(body.target_spec === undefined ? {} : { targetSpec: body.target_spec }) });
@@ -233,6 +288,22 @@ export function registerInformationRoutes(app: FastifyInstance, dependencies: Ro
         expectedRevision: body.expected_revision });
       return { outcome, result: outcome.result };
     } }));
+
+  for (const route of [
+    { kind: 'knowledge', path: '/knowledge/:id/unarchive', command: 'UnarchiveKnowledge' },
+    { kind: 'memory', path: '/memories/:id/reactivate', command: 'ReactivateMemory' },
+    { kind: 'rule', path: '/rules/:id/reactivate', command: 'ReactivateRule' },
+  ] as const) {
+    app.post(route.path, { schema: { params: item, body: retireBody,
+      response: { 200: commandEnvelopeSchema(commandResult) } } },
+    createCommandHandler(dependencies, { commandType: route.command, bodySchema: retireBody,
+      execute: async ({ executor, params, body }) => {
+        const outcome = await restoreInformation(executor, { kind: route.kind, id: params.id ?? '',
+          workspaceId: params.workspace_id ?? '', commandId: body.command_id,
+          expectedRevision: body.expected_revision });
+        return { outcome, result: outcome.result };
+      } }));
+  }
 
   app.get('/search', { schema: { params: base, querystring: searchQuery } }, async (request, reply) => {
     try {

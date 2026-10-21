@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import * as conversationExecution from '../../src/application/conversation-execution.js';
@@ -31,6 +32,15 @@ const validTask: JsonObject = {
   file_changes: [{ path: 'src/parse.ts', action: 'MODIFY' }],
   check: { executable: 'node', args: ['--version'] },
 };
+
+test('浏览器与电脑执行意图必须保留，未知工具族不能静默退成普通任务', () => {
+  for (const interaction of ['BROWSER', 'COMPUTER']) {
+    const result = validateConversationCandidate({ task: { ...validTask, interaction } });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal((result.candidate as unknown as JsonObject).interaction, interaction);
+  }
+  assert.equal(validateConversationCandidate({ task: { ...validTask, interaction: 'SHELL' } }).ok, false);
+});
 
 test('一个明确的执行请求通过确定性校验并保留范围、验收与检查命令', () => {
   const validated = validateConversationCandidate({ task: validTask });
@@ -138,6 +148,16 @@ test('auto_start 对就绪的明确执行候选成立；讨论与未就绪候选
     { decision: 'PREPARE', candidate_status: 'INVALID', candidate },
     { decision: 'PREPARE', candidate_status: 'READY', candidate: null },
   ]) assert.equal(autoStart(row), false, JSON.stringify(row.decision));
+  // 2026-10-20 第二轮：阶段也参与判定。自动推进失败（原因已写回原请求）与已经进入执行
+  // 的行都不再是「可自动推进」，否则服务端 tick 会反复重试同一个已知失败。
+  for (const status of ['FAILED', 'DELEGATED', 'CLARIFY', 'DISCUSSED']) {
+    assert.equal(autoStart({ decision: 'PREPARE', candidate_status: 'READY', candidate, status }),
+      false, status);
+  }
+  for (const status of ['READY', 'TASK_PREPARED']) {
+    assert.equal(autoStart({ decision: 'PREPARE', candidate_status: 'READY', candidate, status }),
+      true, status);
+  }
 });
 
 test('不可判断的验收条件被拒绝，而不是用占位措辞凑齐任务', () => {
@@ -164,6 +184,22 @@ test('目录外路径、非受支持输出与超量文件变更都被拒绝', ()
   }
   assert.equal(validateConversationCandidate({ task: { ...validTask,
     expected_outputs: { kind: 'ANYTHING' } } }).ok, false);
+});
+
+test('模型把交付种类写成代码文件时归一为可审查说明，而不是丢掉整条改文件请求', () => {
+  // 真实 Provider 面对「把 greet 改成 X」会把产出理解成代码文件并写 CODE_FILE；
+  // 只认 MARKDOWN_DOCUMENT 的硬校验曾让整条执行请求变成澄清，文件修改到不了 Run。
+  for (const kind of ['CODE_FILE', 'code', 'MARKDOWN', 'DIFF']) {
+    const validated = validateConversationCandidate({ task: { ...validTask,
+      expected_outputs: { kind } } });
+    assert.equal(validated.ok, true, `${kind} 必须被接受`);
+    assert.equal(validated.ok && validated.candidate.expected_outputs.kind, 'MARKDOWN_DOCUMENT',
+      `${kind} 必须归一为当前工作流唯一可判定的种类`);
+  }
+  // 归一不放宽权限：写意图仍然只由 writes_files / file_changes 决定。
+  const validated = validateConversationCandidate({ task: { ...validTask,
+    expected_outputs: { kind: 'CODE_FILE' }, writes_files: false, file_changes: [] } });
+  assert.equal(validated.ok && validated.candidate.writes_files, false);
 });
 
 test('模型输出按 decision 分流；解析失败与非法字段都退回一个聚焦澄清', () => {
@@ -266,4 +302,25 @@ test('冻结的检查命令必须是可执行文件加参数数组，不能是 s
   assert.throws(() => readFrozenRunActions({ cli_run_action: { operation_id: 'k1',
     intent_key: 'cli-run-v1', connection_id: 'c', resource_id: 'r',
     executable: 'node && rm -rf /', args: [] } }), /invalid/);
+});
+
+/**
+ * 双根隔离（2026-10-20，P1-3）：Git 只读连接必须与受管根精确相同。
+ *
+ * 文件动作的路径会被 `canonicalRelativePath` 限定在受管根内，所以父目录的连接可以覆盖
+ * 子目录；Git 没有这条性质——`git log` 在子目录里照样返回整个仓库的历史。把「精确根」
+ * 这条判据单独锁在这里，是因为它一旦退回前缀匹配，子目录会话就能读到仓库其余部分，
+ * 而这种越界在界面上完全看不出来。
+ */
+test('Git 只读按精确根匹配：父目录连接不覆盖子目录，文件读取仍按前缀', () => {
+  // 用 join 生成平台原生路径：这条判据依赖真实分隔符，手写反斜杠容易在转义里失真。
+  const parent = join(process.platform === 'win32' ? 'D:' : '/', 'Develop', 'Repo');
+  const child = join(parent, 'packages', 'app');
+  assert.equal(conversationExecution.connectionRootCovers(parent, child, 'GIT_READ', true), false);
+  assert.equal(conversationExecution.connectionRootCovers(parent, child, 'FILE_READ', false), true);
+  assert.equal(conversationExecution.connectionRootCovers(parent, parent, 'GIT_READ', true), true);
+  // 大小写不算不同根（Windows 上同一目录的两种写法）。
+  if (process.platform === 'win32') {
+    assert.equal(conversationExecution.connectionRootCovers(parent.toUpperCase(), parent, 'GIT_READ', true), true);
+  }
 });

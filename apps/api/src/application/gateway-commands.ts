@@ -444,3 +444,122 @@ export async function disableManagedResourceCommand(db: DbExecutor, input: {
         revision: toDecimalString(disabled.revision), status: disabled.status };
     } });
 }
+
+/**
+ * 把「来源项目」已登记的连接、受管资源与 ACTIVE 权限策略复制到「目标项目」（2026-10-19）。
+ *
+ * 动机：连接与权限策略在数据模型上按项目登记（`gateway_connections.project_id` 等均为
+ * `NOT NULL`），每开一个项目都要重配一遍。作用域本身是可审计性的收益，重复劳动不是——
+ * 本命令把「沿用上次配置」变成一次可回执、可重放的操作，而不是把 `project_id` 改成可空
+ * 去模糊化「这次动作是谁授权的」（那会破坏 authority 链与审计，见验收表 2026-10-19 行）。
+ *
+ * 复制规则（全部在同一个命令事务里完成，回执与业务事实同事务提交）：
+ * - **受管资源**：按 `identity_key` 判重——目标项目已有同 identity 的 ACTIVE 资源则跳过，
+ *   否则插入（`canonical_root` / `identity_key` / `file_write_root_id` 均取自来源行，
+ *   不重新走文件系统探测：来源登记时已验证过目录存在）。
+ * - **连接**：整行复制（`config` 含 root_path / allowed_host / allowed_executables 等，
+ *   来源登记时已校验过边界存在）；目标项目已有 ACTIVE 且 config 与能力集合都相同的连接
+ *   则跳过（连接没有自然键，这条判重只防「用户连点两次」类重复，不承诺语义幂等——
+ *   真正的幂等由 command_id 回执承担）。
+ * - **权限策略**：只复制 ACTIVE 策略的**当前生效版本**（capability / action_type /
+ *   target_prefix / decision / max_payload_bytes 原样），目标项目已有同 capability +
+ *   action_type + target_prefix 的 ACTIVE 策略则跳过。文件族策略的 target_prefix 是
+ *   canonical_root，依赖上一步资源已就位；历史版本不复制——授权以当前生效版本为准。
+ * - 只复制不删改：目标项目里已有的其它配置不受影响；来源项目只读。
+ */
+type CopyGatewaySettingsResult = {
+  readonly project_id: string;
+  readonly source_project_id: string;
+  readonly resources_created: string;
+  readonly connections_copied: string;
+  readonly policies_copied: string;
+  readonly skipped: string;
+};
+
+export async function copyGatewaySettingsCommand(db: DbExecutor, input: {
+  workspaceId: string; sourceProjectId: string; targetProjectId: string; commandId: string;
+}): Promise<CommandOutcome<CopyGatewaySettingsResult>> {
+  if (input.sourceProjectId === input.targetProjectId) {
+    throw validationFailed([{ field: 'source_project_id', message: 'source and target must differ' }]);
+  }
+  return runIdempotentCommand(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
+    commandId: input.commandId, commandType: 'CopyGatewaySettings',
+    target: { project_id: input.targetProjectId },
+    body: { source_project_id: input.sourceProjectId },
+    execute: async (repositories) => {
+      await authorityWrite(repositories, input.workspaceId);
+      await projectVisible(repositories, input.workspaceId, input.targetProjectId);
+      await projectVisible(repositories, input.workspaceId, input.sourceProjectId);
+      // 资源登记由同一把 advisory 事务锁串行（与 createManagedResourceCommand 相同），
+      // 必须在读判重之前拿锁，否则两个并发复制可能同时通过判重。
+      await repositories.gateway.lockResourceRegistry();
+
+      let resourcesCreated = 0;
+      let connectionsCopied = 0;
+      let policiesCopied = 0;
+      let skipped = 0;
+
+      // 1) 受管资源：identity 判重后整行复制。
+      const targetResources = await repositories.gateway.listProjectResources(input.workspaceId, input.targetProjectId);
+      const sourceResources = (await repositories.gateway.listProjectResources(input.workspaceId, input.sourceProjectId))
+        .filter((row) => row.status === 'ACTIVE');
+      for (const source of sourceResources) {
+        const existing = targetResources.some((row) => row.identity_key === source.identity_key && row.status === 'ACTIVE');
+        if (existing) { skipped += 1; continue; }
+        await repositories.gateway.insertResource({ id: randomUUID(),
+          workspaceId: input.workspaceId, projectId: input.targetProjectId,
+          canonicalRoot: source.canonical_root, identityKey: source.identity_key,
+          fileWriteRootId: source.file_write_root_id });
+        resourcesCreated += 1;
+      }
+
+      // 2) 连接：config 与能力集合都相同的 ACTIVE 连接视为已存在。
+      const targetConnections = await repositories.gateway.listConnections(input.workspaceId, input.targetProjectId);
+      const targetConnectionShapes = await Promise.all(targetConnections
+        .filter((row) => row.status === 'ACTIVE')
+        .map(async (row) => ({ config: JSON.stringify(row.config),
+          capabilities: (await repositories.gateway.listConnectionCapabilities(row.id)).slice().sort() })));
+      const sourceConnections = (await repositories.gateway.listConnections(input.workspaceId, input.sourceProjectId))
+        .filter((row) => row.status === 'ACTIVE');
+      for (const source of sourceConnections) {
+        const capabilities = (await repositories.gateway.listConnectionCapabilities(source.id)).slice().sort();
+        const duplicated = targetConnectionShapes.some((row) => row.config === JSON.stringify(source.config) &&
+          row.capabilities.length === capabilities.length &&
+          row.capabilities.every((capability, index) => capability === capabilities[index]));
+        if (duplicated) { skipped += 1; continue; }
+        const connection = await repositories.gateway.insertConnection({ id: randomUUID(),
+          workspaceId: input.workspaceId, projectId: input.targetProjectId, config: source.config });
+        for (const capability of capabilities) {
+          await repositories.gateway.addConnectionCapability(connection.id, capability);
+        }
+        targetConnectionShapes.push({ config: JSON.stringify(source.config), capabilities });
+        connectionsCopied += 1;
+      }
+
+      // 3) 权限策略：只复制 ACTIVE 策略的当前生效版本；同 capability+action+target 视为已存在。
+      const sourcePolicies = (await repositories.gateway.listPolicies(input.workspaceId, input.sourceProjectId))
+        .filter((row) => row.status === 'ACTIVE' && row.active_version !== null);
+      for (const source of sourcePolicies) {
+        const versions = await repositories.gateway.listPolicyVersions(source.id);
+        const active = versions.find((version) => version.version === source.active_version);
+        if (active === undefined) { skipped += 1; continue; }
+        const existing = (await repositories.gateway.listActivePolicies(input.workspaceId, input.targetProjectId,
+          active.capability_key, active.action_type))
+          .some((row) => row.target_prefix === active.target_prefix);
+        if (existing) { skipped += 1; continue; }
+        await repositories.gateway.insertPolicy({ id: randomUUID(),
+          workspaceId: input.workspaceId, projectId: input.targetProjectId,
+          capability: active.capability_key, actionType: active.action_type,
+          targetPrefix: active.target_prefix, decision: active.decision,
+          maxPayloadBytes: Number(active.max_payload_bytes) });
+        policiesCopied += 1;
+      }
+
+      if (resourcesCreated + connectionsCopied + policiesCopied > 0) {
+        await repositories.workspaces.bumpAuthority(input.workspaceId);
+      }
+      return { project_id: input.targetProjectId, source_project_id: input.sourceProjectId,
+        resources_created: String(resourcesCreated), connections_copied: String(connectionsCopied),
+        policies_copied: String(policiesCopied), skipped: String(skipped) };
+    } });
+}

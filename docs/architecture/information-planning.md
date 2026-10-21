@@ -29,6 +29,28 @@ KnowledgeVersion 记录来源 URI（可空）、检索时间、媒体类型、�
 
 实现前核对确切版本的全文读取、来源身份、引用导航与现有 DTO/命令；缺失能力先列出所需契约，不因界面需要虚构接口。项目导读的维护入口、原件接入方式及确认信息的保存方式仍待设计。交互归[工作台第 12 节](../frontend/workbench-design.md#12-人和-ai-共用的知识库体验)，验证归[测试计划第 12 节](../testing/verification-plan.md#12-共享知识库的阅读与来源验证)。
 
+### 1.2 生命周期恢复（2026-10-19 后端实现）
+
+资料归档、记忆与规则停用的反向命令由 Information 应用入口 `restoreInformation` 协调，继续复用原 Repository 的状态写入、根 revision CAS、Workspace authority 与 Project 归档栅栏；无新增表或第二个写入 Owner。接口归 [HTTP §10.97](../api/http-command-contract.md#1097-资料归档与记忆规则停用的反向命令2026-10-19-后端实现)，交互归[工作台 §13.2](../frontend/workbench-design.md#132-危险操作的两条通道2026-10-18)。
+
+恢复是新的用户命令，只改变根状态与修订，不制造正文版本、不延长 Memory 有效期、不自动确认新内容；历史版本与停用/归档回执保留。资料归档产生的决定复审候选保持原状，其当前适用性仍由原复审入口判定，不能用「撤销」静默删除或代替人工判断。状态恢复不保证来源可用，读取仍核对真实版本与原权限。
+
+Knowledge/Memory 推进 context_revision，Rule 按 ADR-009 推进 rule_revision 与 context_revision；只增不减，既有执行契约与已发生效果均不改写。恢复状态、关键审计与回执在同一短事务提交；已 ACTIVE 的匹配修订请求不再次推进修订。前端撤销条与永久恢复入口已于同日接入 `KnowledgeView`（见[工作台 §13.2](../frontend/workbench-design.md#132-危险操作的两条通道2026-10-18)），组件与类型检查通过，真实 API 浏览器链路与 Windows 窗口仍未验收。
+
+### 1.3 长期记忆的有效状态（2026-10-19）
+
+Memory 根的 ACTIVE/RETIRED 是用户维护的持久生命周期，过期由当前不可变版本的 expires_at 与数据库读取时间决定，不引入定时任务把 ACTIVE 改成过期。管理列表/详情新增 effective_status（ACTIVE/EXPIRED/RETIRED），停用优先于过期，筛选默认 ALL，协议归 [HTTP §10.98](../api/http-command-contract.md#1098-长期记忆有效状态与筛选2026-10-19-后端接续)。
+
+InformationRepository 用一次根/当前版本联查完成投影与筛选，避免先取根、再取新版本产生混合修订；详情复用同一读取。查询不更新记忆或 Workspace 修订，不重标历史版本；搜索和 Context 继续使用既有 ACTIVE 且未过期条件。恢复状态不续期；明确确认的新修订才改变有效期。此状态是生命周期视图，不是授权或模型选取承诺，不新增学习/自动记忆能力。
+
+前端只消费该投影：DTO 缺字段按未知处理（显示「状态待核对」），不按浏览器时钟或持久 status 推断有效；筛选参数原样交给服务端，命令成功后按当前筛选重读，不再匹配的对象从列表移除。呈现规则归[工作台 §13.3](../frontend/workbench-design.md#133-长期记忆状态与筛选2026-10-19已确认前端已接)。
+
+### 1.4 已确认记忆的会话使用（2026-10-20）
+
+用户确认普通 AGENT 自动召回已确认长期记忆，并可关闭；Information 的人工确认与不可变版本 Owner 不变。从会话保存时引用确切消息/hash，正文可由用户编辑确认，全局或原项目范围显式选择；拒绝已失效的直接/传递来源，不从模型摘要自动建立长期事实。来源记录独立于根停用，不能借删源会话破坏追溯。
+
+召回以同 Workspace 全局与当前 Project 为边界，有界字面匹配/近期回退，不声称语义检索或自动偏好学习。消息记录确切版本与自动选取依据；短期摘要和后续答复继承实际使用足迹，关闭召回、到期/停用或作用域变化后重检，不从旧匿名答复重新引入。工作窗口与检查点仍归 Assist，不能替代 Information 正文、权限或 Task 状态。协议/限额归 [HTTP §10.99](../api/http-command-contract.md#1099-长短期记忆接口2026-10-19)，分层取舍归 [ADR-028](../decisions/ADR-028-memory-layers.md)。
+
 ## 2. 规则解析
 
 Rule scope 为 Workspace、Project 或 Task；Project Type 和工作配置的默认规则在创建配置时形成显式引用，不因切换 Workbench 更改。HARD 适用集合求交；无法兼容时返回冲突及源规则，不选择“更具体的覆盖”。PREFERENCE 按 Task > Project > Workspace，同层冲突需显式选择或保留冲突提示。

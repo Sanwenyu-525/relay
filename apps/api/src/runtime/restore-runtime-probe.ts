@@ -7,7 +7,7 @@ import { assertBackupWindowsPaths } from './backup-paths.js';
 
 const NAMES = ['@langchain/core', '@langchain/langgraph', '@langchain/langgraph-checkpoint',
   '@langchain/langgraph-checkpoint-postgres', '@langchain/openai', '@sinclair/typebox',
-  'fastify', 'kysely', 'pg', 'pg-connection-string'] as const;
+  'fastify', 'kysely', 'pg', 'pg-connection-string', 'ws'] as const;
 const CODES = ['RESTORE_PROBE_INVALID_INPUT', 'RESTORE_PROBE_PATH_UNAVAILABLE', 'RESTORE_PROBE_HASH_MISMATCH',
   'RESTORE_PROBE_DEPENDENCY_INVALID', 'RESTORE_PROBE_RESOLUTION_REJECTED', 'RESTORE_PROBE_LOAD_REJECTED',
   'RESTORE_PROBE_OFFLINE_CHECK_FAILED', 'RESTORE_PROBE_OUTPUT_LIMIT', 'RESTORE_PROBE_ABORTED',

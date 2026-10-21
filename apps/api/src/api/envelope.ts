@@ -32,7 +32,9 @@ export interface CommandBody {
 /** 除 Create* 之外，契约第 3 节显式要求 201 的命令（新版本是新建资源）。 */
 const CREATED_COMMAND_TYPES: readonly string[] = ['SubmitHumanArtifactVersion',
   // 分叉新建一条子会话（0113），不是对源会话的一次改写，因此与新建会话同一状态码。
-  'ForkAssistSession'];
+  'ForkAssistSession',
+  // 复制连接/资源/策略到目标项目（2026-10-19）：一次命令新建多行业务事实，与新建同类。
+  'CopyGatewaySettings'];
 
 export function successStatusOf(commandType: string): 200 | 201 | 202 {
   // Delegate 已原子获得执行权，但工作尚未完成：按契约第 4 节返回 202（已接受）。
@@ -41,7 +43,7 @@ export function successStatusOf(commandType: string): 200 | 201 | 202 {
       commandType === 'StartArtifactImpactCandidate' ||
       commandType === 'DelegateTask' || commandType === 'RequestRunControl' ||
       commandType === 'ResumeRun' || commandType === 'RequestAssistMessage' ||
-      commandType === 'InterpretConversationMessage') {
+      commandType === 'InterpretConversationMessage' || commandType === 'RequestMemoryCompaction') {
     return 202;
   }
 
@@ -53,6 +55,14 @@ export function successStatusOf(commandType: string): 200 | 201 | 202 {
 /** 命令回执的资源链接目标（由 command_type 与结果推导，GET 回执与首次响应一致）。 */
 export function resourcePathOf(commandType: string, result: JsonObject): string | undefined {
   switch (commandType) {
+    case 'RequestMemoryCompaction':
+    case 'CancelMemoryCompaction':
+    case 'ClearSessionMemory':
+    case 'SetSessionMemory':
+      return typeof result.session_id === 'string' ? `assist-sessions/${result.session_id}/memory` : undefined;
+    case 'SetWorkspaceDefaultDirectory':
+    case 'ClearWorkspaceDefaultDirectory':
+      return 'default-working-directory';
     case 'CreateTaskChain':
     case 'AuthorizeTaskChain':
     case 'StopTaskChain':
@@ -139,10 +149,13 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
     case 'CreateKnowledge':
     case 'AddKnowledgeVersion':
     case 'ArchiveKnowledge':
+    case 'UnarchiveKnowledge':
       return typeof result.knowledge_id === 'string' ? `knowledge/${result.knowledge_id}` : undefined;
     case 'CreateMemory':
+    case 'CreateMemoryFromMessage':
     case 'AddMemoryRevision':
     case 'RetireMemory':
+    case 'ReactivateMemory':
       return typeof result.memory_id === 'string' ? `memories/${result.memory_id}` : undefined;
     case 'CreateDecision':
     case 'SupersedeDecision':
@@ -150,6 +163,7 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
     case 'CreateRule':
     case 'AddRuleVersion':
     case 'RetireRule':
+    case 'ReactivateRule':
       return typeof result.rule_id === 'string' ? `rules/${result.rule_id}` : undefined;
     case 'CreateTask':
     case 'AssignInboxTaskToProject':

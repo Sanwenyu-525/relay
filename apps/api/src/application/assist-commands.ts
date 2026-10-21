@@ -14,6 +14,8 @@ import { BUILTIN_METHOD_REGISTRY, currentBuiltinMethod, frozenMethodSnapshot,
 import { resolveChatCommand } from './chat-commands.js';
 import { MAX_ASSIST_ATTACHMENTS_PER_MESSAGE, MAX_ASSIST_ATTACHMENT_TOTAL_BYTES }
   from './assist-attachments.js';
+import { chatImageInputAccepted, chatImageInputRejection, decideChatImageInput }
+  from './chat-image-input.js';
 import { detectMethodIntent } from './method-intent.js';
 import { checkAssistContent, checkRequiredText, normalizeText } from '../shared/text.js';
 import type { ContextSourceRef } from '../workflow/execution-contract.js';
@@ -38,7 +40,10 @@ import { skillOutputHash } from '../skills/skill-proposal.js';
 import { requireRevision } from './revisions.js';
 import { readAdmission, requireNormalAdmission } from './maintenance-admission.js';
 import { freezeAssistModelSnapshot } from './assist-model-snapshot.js';
+import { createGoalForMessage } from './assist-goals.js';
+import { parseChatModePrefix } from './chat-mode.js';
 import { resolveSessionReadTools } from './assist-read-tools.js';
+import { inheritWorkspaceDefaultDirectory } from './workspace-default-directory.js';
 
 /**
  * Assist 命令（M04/P12，runtime-context.md 第 5 节）：
@@ -76,6 +81,13 @@ export interface CreateAssistSessionInput {
   readonly conversationMode?: ConversationMode | undefined;
   /** conversationMode='ASSISTANT' 时必填。归档或跨 workspace 的 助手 建不出会话。 */
   readonly assistantProfileId?: string | undefined;
+  /**
+   * 0127：新会话一开始的行为模式。缺省 CHAT。
+   *
+   * 「新会话默认普通模式」由缺省值保证；带模式建会话只用于一条真实路径——
+   * 用户在空会话里直接发 `/plan 内容`（客户端解析后一次提交），不必先建会话再切换。
+   */
+  readonly chatMode?: 'CHAT' | 'PLAN' | 'GOAL' | undefined;
 }
 
 export async function createAssistSession(
@@ -86,6 +98,7 @@ export async function createAssistSession(
   if (titleProblem !== undefined) throw validationFailed([titleProblem]);
   const title = normalizeText(input.title);
   const conversationMode: ConversationMode = input.conversationMode ?? 'AGENT';
+  const chatMode = input.chatMode ?? 'CHAT';
 
   return runIdempotentCommand<CreateAssistSessionResult>(db, {
     scopeKey: httpCommandScopeKey(input.workspaceId),
@@ -95,10 +108,14 @@ export async function createAssistSession(
     // 模式进命令体：同一个 command_id 换模式重放必须被当成异载荷拒绝，
     // 否则「先按普通会话建、再按人设建」会拿到同一条会话。
     body: { project_id: input.projectId ?? null, task_id: input.taskId ?? null, title,
-      conversation_mode: conversationMode, assistant_profile_id: input.assistantProfileId ?? null },
+      conversation_mode: conversationMode, assistant_profile_id: input.assistantProfileId ?? null,
+      ...(input.chatMode === undefined ? {} : { chat_mode: chatMode }) },
     execute: async (repositories) => {
       let projectId = input.projectId ?? null;
       const taskId = input.taskId ?? null;
+      const defaultDirectory = conversationMode === 'AGENT' && projectId === null && taskId === null
+        ? await inheritWorkspaceDefaultDirectory(repositories, input.workspaceId) : undefined;
+      if (defaultDirectory !== undefined) projectId = defaultDirectory.project_id;
       if (taskId !== null) {
         const task = await repositories.tasks.readTaskForShare(taskId);
         if (task === undefined || task.workspace_id !== input.workspaceId) throw resourceNotFound('Task');
@@ -118,7 +135,9 @@ export async function createAssistSession(
       const sessionId = randomUUID();
       await repositories.assist.insertSession({
         id: sessionId, workspaceId: input.workspaceId, projectId, taskId, title,
-        conversationMode,
+        conversationMode, chatMode,
+        ...(defaultDirectory === undefined ? {} : { workingResourceId: defaultDirectory.id,
+          workingDirectorySource: 'WORKSPACE_DEFAULT' as const }),
         ...(profile === null ? {} : { assistantProfileId: profile.id,
           assistantProfileRevision: profile.revision, assistantRoleSnapshot: frozenRoleSnapshot(profile) }),
       });
@@ -173,6 +192,10 @@ export type RequestAssistMessageResult = {
   readonly session_id: string;
   readonly user_message_id: string;
   readonly assistant_message_id: string;
+  /** 0127：这条消息实际按哪种模式受理（旧客户端也会拿到这个字段）。 */
+  readonly chat_mode: 'CHAT' | 'PLAN' | 'GOAL';
+  /** 0127：这条消息属于哪个目标；不属于任何目标时为 null。 */
+  readonly goal_id: string | null;
 };
 
 export interface AssistSourceRefInput {
@@ -365,8 +388,21 @@ export interface RequestAssistMessageInput {
    * 它接受图片输入。目录有该模型时以目录为准，此声明不生效。
    */
   readonly declaredImageInput?: boolean | undefined;
+  /**
+   * 0121：当前连接的服务商标识，用于在声明表里按 `(provider, model)` 查人的能力主张。
+   * 缺省按 `openai-compatible`（目前唯一会真正发图的一类连接）。
+   */
+  readonly modelProvider?: string | undefined;
   /** 0098: guards the create-session → select-model → first-message sequence. */
   readonly expectedModelSelectionRevision?: string | undefined;
+  /**
+   * 0127：这条消息按哪种行为模式处理。
+   *
+   * 缺省沿用会话持久模式——「发送后生效」因此不需要客户端与后端两次真相：
+   * `/plan 内容`、`/goal 内容` 由客户端解析成「模式 + 正文」一次提交，模式与消息
+   * 在同一个事务里生效；选择器改模式走独立命令，两者都落同一列。
+   */
+  readonly chatMode?: 'CHAT' | 'PLAN' | 'GOAL' | undefined;
 }
 
 const ASSIST_INTENTS: readonly string[] = ['DISCUSS', 'PROPOSE_CANDIDATE', 'PROPOSE_TASK'];
@@ -402,6 +438,17 @@ export async function requestAssistMessage(
     if (contentProblem !== undefined) throw validationFailed([contentProblem]);
   }
   const content = normalizeText(input.content);
+  // 0127：`/plan 内容`、`/goal 内容` 是行为模式前缀。UI 客户端已经剥过一层；
+  // 这里再剥一层并核对一致性，让原始 API 调用者发同一段文本得到同一事实。
+  const modePrefix = parseChatModePrefix(content);
+  if (input.chatMode !== undefined && modePrefix !== null && modePrefix.mode !== input.chatMode) {
+    throw validationFailed([{ field: 'chat_mode',
+      message: `正文里的 /${modePrefix.mode.toLowerCase()} 前缀与 chat_mode 不一致；请二选一。` }]);
+  }
+  const effectiveContent = modePrefix === null ? content : modePrefix.rest;
+  if (modePrefix !== null && effectiveContent === '') {
+    throw validationFailed([{ field: 'content', message: '模式命令后面要跟内容；只切模式请用模式选择器。' }]);
+  }
   const intent = input.intent ?? 'DISCUSS';
   if (!ASSIST_INTENTS.includes(intent)) {
     throw validationFailed([{ field: 'intent', message: `intent 必须是 ${ASSIST_INTENTS.join('/')}` }]);
@@ -421,8 +468,8 @@ export async function requestAssistMessage(
   // `/命令` 解析仍然生效（未知/系统/菜单命令照旧类型化拒绝），正文里的 `/方法`
   // 命令与 skill_ref 同样按「一条消息一种身份」拒绝，而不是写成双快照。
   const methodRequest = input.skillRef === undefined
-    ? resolveMethodRequest(content, input.methodRef)
-    : resolveMethodFreeRequest(content);
+    ? resolveMethodRequest(effectiveContent, input.methodRef)
+    : resolveMethodFreeRequest(effectiveContent);
 
   return runIdempotentCommand<RequestAssistMessageResult>(db, {
     scopeKey: httpCommandScopeKey(input.workspaceId),
@@ -447,6 +494,8 @@ export async function requestAssistMessage(
       ...(input.expectedModelSelectionRevision === undefined ? {} : {
         expected_model_selection_revision: input.expectedModelSelectionRevision,
       }),
+      // 0127：只有显式给出模式时才进载荷。旧客户端发出的同一 command_id 载荷逐字不变。
+      ...(input.chatMode === undefined ? {} : { chat_mode: input.chatMode }),
     },
     execute: async (repositories) => {
       const session = await repositories.assist.readSession(input.sessionId, true);
@@ -513,6 +562,51 @@ export async function requestAssistMessage(
             { sessionId: session.id });
         }
       }
+      /*
+       * 0127：行为模式。
+       *
+       * 三件事在这里一次做完，且都在消息落库之前：
+       *   1. 计划模式**不接受**会产生产物的意图与修改类方法——只读边界先在应用层挡住；
+       *      （真正的写入闸门仍在工具准入，两处独立成立）
+       *   2. 模式变化在同一个事务里落库，因此「这条消息按新模式处理」与「会话模式已变」
+       *      不会出现一个成立一个不成立；
+       *   3. 切走活动目标时先持久化暂停意图，界面随后按目标的真实状态显示。
+       */
+      const requestedMode = input.chatMode ?? modePrefix?.mode ?? session.chat_mode;
+      if (requestedMode === 'PLAN') {
+        if (intent !== 'DISCUSS') {
+          throw invalidTransition('计划模式只做只读规划，不生成提案或执行对象；请切回普通模式。',
+            { sessionId: session.id });
+        }
+        if (methodRequest.kind === 'BOUND' && methodRequest.action === 'MODIFY') {
+          throw invalidTransition('计划模式不修改项目；需要写入时请先切回普通模式。',
+            { sessionId: session.id });
+        }
+      }
+      if (requestedMode !== session.chat_mode) {
+        if (requestedMode !== 'GOAL') {
+          const switchingGoal = await repositories.planGoals.readOpenGoal(session.id, true);
+          // 切走时只记暂停意图；在途轮次由推进器安全停下后才显示已暂停。
+          if (switchingGoal !== undefined && switchingGoal.status === 'ACTIVE') {
+            await repositories.planGoals.updateGoal(switchingGoal.id, switchingGoal.revision,
+              { status: 'PAUSING' });
+          }
+        }
+        await repositories.planGoals.setSessionChatMode({ sessionId: session.id,
+          mode: requestedMode });
+      }
+      // 目标模式的绑定规则：新建目标，或把补充要求并进正在推进的目标。
+      // 暂停中/额度耗尽的目标不绑定——那条消息只是讨论，不会偷偷恢复推进。
+      let goalBinding: string | null = null;
+      let goalCreated: string | null = null;
+      if (requestedMode === 'GOAL') {
+        const opened = await repositories.planGoals.readOpenGoal(session.id, true);
+        const goal = opened ?? await createGoalForMessage(repositories, {
+          workspaceId: input.workspaceId, sessionId: session.id,
+          objective: effectiveContent === '' ? content : effectiveContent });
+        if (opened === undefined) goalCreated = goal.id;
+        if (goal.status === 'ACTIVE') goalBinding = goal.id;
+      }
       // 提案意图绑定对应作用域：候选 Markdown 需要明确目标 Task；任务定义需要明确 Project。
       if (intent === 'PROPOSE_CANDIDATE' && session.task_id === null) {
         throw invalidTransition('生成候选 Markdown 提案要求会话绑定一个 Task。', { sessionId: session.id });
@@ -578,11 +672,11 @@ export async function requestAssistMessage(
       }
       if (messageAttachments.length > 0) {
         await assertChatModelAcceptsImages(repositories, input.chatModelName,
-          input.declaredImageInput === true);
+          input.declaredImageInput === true, input.modelProvider);
       }
       await repositories.assist.insertMessage({
         id: userMessageId, sessionId: session.id, seq: userSeq, role: 'USER',
-        status: 'COMPLETED', intent: 'DISCUSS', content, sources: [],
+        status: 'COMPLETED', intent: 'DISCUSS', content: effectiveContent, sources: [],
       });
       if (messageAttachments.length > 0) {
         const bound = await repositories.assist.bindAttachments(session.id, userMessageId,
@@ -594,6 +688,7 @@ export async function requestAssistMessage(
       await repositories.assist.insertMessage({
         id: assistantMessageId, sessionId: session.id, seq: userSeq + 1n, role: 'ASSISTANT',
         status: 'PENDING', intent: intent as 'DISCUSS', content: null, sources,
+        chatMode: requestedMode, goalId: goalBinding,
         ...(session.conversation_mode === 'LEARNING' && input.recordLearning === false
           ? { learningRecordDisabled: true } : {}),
         ...(skill === null || skill === undefined ? {} : {
@@ -609,7 +704,8 @@ export async function requestAssistMessage(
         }),
       });
       return { session_id: session.id, user_message_id: userMessageId,
-        assistant_message_id: assistantMessageId };
+        assistant_message_id: assistantMessageId,
+        chat_mode: requestedMode, goal_id: goalBinding ?? goalCreated };
     },
   });
 }
@@ -623,23 +719,26 @@ export async function requestAssistMessage(
  * 2026-10-18：目录里**没有**该模型条目时，允许运维用 `RELAY_MODEL_IMAGE_INPUT=true`
  * 显式声明（自建 Provider 不在 OpenRouter 目录里，这是唯一可核对的事实来源）。
  * 目录里有条目时目录仍是准绳，声明不能把目录判定为「不支持」改成支持。
+ *
+ * 2026-10-19：判定本身移到 `chat-image-input.ts`，与 `/model-port` 的只读投影共用；
+ * 声明来源扩为「声明表（按 provider+模型）→ 环境变量（兼容期）」，所以这里先读声明表。
+ * 本函数只负责按判定拒绝，不解释来源。
  */
 async function assertChatModelAcceptsImages(
   repositories: Repositories, chatModelName: string | undefined,
-  declaredImageInput = false): Promise<void> {
+  declaredImageInput = false, provider = 'openai-compatible'): Promise<void> {
   const model = chatModelName?.trim() ?? '';
   const entry = model === '' ? undefined
     : await repositories.modelCatalog.readEntryBySourceModelId(model);
-  if (entry === undefined) {
-    if (declaredImageInput) return;
-    throw validationFailed([{ field: 'attachment_ids',
-      message: '目录中没有当前聊天模型的条目，无法确认图片输入能力；请先同步模型目录、'
-        + '或在服务端显式声明 RELAY_MODEL_IMAGE_INPUT=true，或改发纯文本。' }]);
-  }
-  if (entry.capabilities.image_input !== true) {
-    throw validationFailed([{ field: 'attachment_ids',
-      message: '当前聊天模型不支持图片输入，不能发送图片附件。' }]);
-  }
+  // 目录有条目时不必读声明表：目录是准绳，声明不能覆盖它（见 chat-image-input 规则 1）。
+  const declaration = model === '' || entry !== undefined ? undefined
+    : (await repositories.modelCapabilities.readDeclaration(provider, model))?.image_input;
+  const decision = decideChatImageInput({ configured: model !== '',
+    catalogEntry: entry === undefined ? undefined : { imageInput: entry.capabilities.image_input },
+    declaration, declared: declaredImageInput });
+  if (chatImageInputAccepted(decision.state)) return;
+  const message = chatImageInputRejection(decision.state);
+  throw validationFailed([{ field: 'attachment_ids', message: message ?? '不能发送图片附件。' }]);
 }
 
 /**
@@ -846,6 +945,85 @@ export async function cancelAssistMessage(
       }
       throw invalidTransition(`消息已${message.status === 'COMPLETED' ? '完成' : '失败'}，不能取消。`,
         { messageId: input.messageId });
+    },
+  });
+}
+
+export type SteerAssistMessageResult = {
+  readonly message_id: string;
+  readonly status: 'STEER_REQUESTED';
+};
+
+export interface SteerAssistMessageInput {
+  readonly workspaceId: string;
+  readonly messageId: string;
+  readonly commandId: string;
+}
+
+/**
+ * 0122：把一条**排队中**的消息并入正在生成的那一轮（工作台 §35、运行时上下文 §2.8）。
+ *
+ * 上游对照（`.research/upstream/deepseek-harness`，2026-10-19 核验）：
+ *   * `core/agent-loop/src/agent.ts:167-173` 的 `steer()` 插入 `next-step` inbox，
+ *     `followup()` 插入 `next-turn`；
+ *   * 同文件 `:359-364`：一步结束时 `nextStep` 非空就**不结束这一轮**，再跑一步。
+ * 本命令只持久化意图（`steer_requested = true`），消费与收口都在生成方：
+ * 主流程在下一次模型请求前调用 `drainSteerRequests`，把用户原文接进当前轮，
+ * 并把这一行收口为 CANCELLED + STEERED（它不再自己生成回复）。
+ *
+ * 三道栅栏都不是形式：
+ *   * 只有 `PENDING` 能改投递方式——`RUNNING` 正在被消费，终态已经结束；
+ *   * 会话里必须真有 `RUNNING` 的那一轮——没有它，「插话」等于把一条还没开始的消息
+ *     直接取消，用户会丢消息；
+ *   * 只有普通 Agent 会话支持排队（助手档与学习档的在途栅栏直接拒绝发送）。
+ *
+ * 迟到窗口（插话意图已落库、那一轮恰好结算）不是错误：意图留在行上，这一行随后
+ * 按普通排队被领取（领取时清零），消息照常得到自己的回复，不丢、不重复。
+ */
+export async function steerAssistMessage(
+  db: DbExecutor,
+  input: SteerAssistMessageInput,
+): Promise<CommandOutcome<SteerAssistMessageResult>> {
+  return runIdempotentCommand<SteerAssistMessageResult>(db, {
+    scopeKey: httpCommandScopeKey(input.workspaceId),
+    commandId: input.commandId,
+    commandType: 'SteerAssistMessage',
+    target: { message_id: input.messageId },
+    body: {},
+    execute: async (repositories) => {
+      const message = await repositories.assist.readMessage(input.messageId, true);
+      if (message === undefined) throw resourceNotFound('Assist message');
+      const session = await repositories.assist.readSession(message.session_id);
+      if (session === undefined || session.workspace_id !== input.workspaceId) {
+        throw resourceNotFound('Assist message');
+      }
+      if (session.project_id !== null) {
+        await lockWritableProjectInWorkspace(repositories, input.workspaceId, session.project_id);
+      }
+      if (session.conversation_mode !== 'AGENT') {
+        throw invalidTransition('这段会话不排队，也没有可插话的在途回复。', { sessionId: session.id });
+      }
+      if (message.role !== 'ASSISTANT' || message.status !== 'PENDING') {
+        throw invalidTransition(message.status === 'RUNNING'
+          ? '这条消息正在生成，不能插话到它自己。'
+          : '这条消息已经结束，不能再改为插话发送。', { messageId: input.messageId });
+      }
+      if (!await repositories.assist.hasRunningMessage(session.id)) {
+        throw invalidTransition('当前没有正在生成的回复；这条消息会按正常顺序发送。',
+          { sessionId: session.id });
+      }
+      // 插话只带用户原文：图片字节不在模型请求的插话通道里。带附件的排队消息按普通
+      // 顺序发送，不把图片悄悄丢掉。
+      const source = await repositories.assist.readPrecedingUserMessage(session.id, message.seq);
+      if (source !== undefined &&
+          await repositories.assist.messageHasAttachments(source.id)) {
+        throw invalidTransition('这条消息带图片，不能插话；它会按正常顺序发送。',
+          { messageId: input.messageId });
+      }
+      if (await repositories.assist.setSteerRequested(input.messageId) !== 'REQUESTED') {
+        throw invalidTransition('消息状态已变化，插话未生效。', { messageId: input.messageId });
+      }
+      return { message_id: input.messageId, status: 'STEER_REQUESTED' };
     },
   });
 }

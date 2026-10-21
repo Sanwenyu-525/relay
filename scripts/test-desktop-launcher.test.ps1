@@ -72,7 +72,7 @@ fs.appendFileSync(process.env.RELAY_LAUNCHER_TEST_EVENTS, JSON.stringify({
     Write-Text (Join-Path $package "api\dist\src\cli\$name.js") $cliStub
   }
   Write-Text (Join-Path $fixture 'apps\desktop\scripts\dev-desktop.ps1') @'
-param([string]$ConfigPath, [int]$FrontendPort)
+param([string]$ConfigPath, [int]$FrontendPort, [switch]$SkipApiRefresh)
 $ErrorActionPreference = 'Stop'
 try {
   $handle = [IO.File]::Open((Join-Path (Split-Path $ConfigPath) 'launcher.lock'), 'Open', 'ReadWrite', 'None')
@@ -80,6 +80,14 @@ try {
   throw 'Launcher lock was not held during desktop development.'
 } catch [IO.IOException] { }
 Add-Content -LiteralPath $env:RELAY_LAUNCHER_TEST_EVENTS -Value '{"event":"dev"}'
+'@
+  # 暂存刷新必须发生在补迁移之前；这个桩同时守住参数契约（RepoRoot 必填、-Skip 只在显式跳过时出现）。
+  Write-Text (Join-Path $fixture 'apps\desktop\scripts\stage-api.ps1') @'
+param([string]$RepoRoot, [switch]$Force, [switch]$Skip)
+$ErrorActionPreference = 'Stop'
+if (-not $RepoRoot -or -not (Test-Path -LiteralPath $RepoRoot)) { throw 'stage-api.ps1 did not receive a valid RepoRoot.' }
+if ($Skip) { throw 'test-desktop.ps1 skipped staging without -SkipApiRefresh.' }
+Add-Content -LiteralPath $env:RELAY_LAUNCHER_TEST_EVENTS -Value '{"event":"stage"}'
 '@
   Write-Text (Join-Path $package 'relay-desktop.exe') 'fixture desktop'
   Write-Text (Join-Path $package 'relay-file-io-helper.exe') 'fixture helper'
@@ -94,14 +102,14 @@ Add-Content -LiteralPath $env:RELAY_LAUNCHER_TEST_EVENTS -Value '{"event":"dev"}
   Run-OK 'DesktopDev'
   $first = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json
   Assert ($first.ready -and $first.cluster_path -eq $cluster -and $first.schema_version -eq 1) 'Initialization marker is not ready.'
-  Assert (((Events).event -join ',') -eq 'verify,migrate,install-graph,init-workspace,dev') 'First startup did not perform the required preparation.'
+  Assert (((Events).event -join ',') -eq 'verify,stage,migrate,install-graph,init-workspace,dev') 'First startup did not perform the required preparation.'
   $probe = 'launcher-' + [guid]::NewGuid().ToString('N')
   $dbUrl = "postgresql://relay_api_admin@127.0.0.1:$($first.port)/relay_trial"
   & (Join-Path $pgSource 'bin\psql.exe') $dbUrl -w -v ON_ERROR_STOP=1 -c "CREATE TABLE launcher_probe (value text); INSERT INTO launcher_probe VALUES ('$probe')" | Out-Null
   Assert ($LASTEXITCODE -eq 0) 'Could not write the database persistence probe.'
   Add-Content -LiteralPath (Join-Path $trial 'desktop.env') -Value "# user setting`nRELAY_MODEL_PROVIDER=fixture-preserved"
   Run-OK 'DesktopDev'
-  Assert (((Events).event -join ',') -eq 'verify,migrate,install-graph,init-workspace,dev,dev') 'Daily reuse ran verification or migration.'
+  Assert (((Events).event -join ',') -eq 'verify,stage,migrate,install-graph,init-workspace,dev,stage,dev') 'Daily reuse ran verification or migration.'
   # A matching ready marker must avoid parsing/hashing package resources on the fast path.
   Write-Text $manifestPath 'invalid JSON is deliberately cached by this fixture'
   $first.manifest_hash = (Get-FileHash -LiteralPath $manifestPath).Hash

@@ -1,6 +1,11 @@
 /* 输入器工具行上的「本目录写入档位」芯片与弹层（工作台 §18.1、§25.1）。
    芯片沿用 .agent-chat-tool 的紧凑键形态，弹层外壳与「+」菜单同一套语言：
-   panel 圆角 + separator 细边 + floating 阴影，宽度收缩到内容。只使用既有 token。 */
+   panel 圆角 + separator 细边 + floating 阴影。
+   2026-10-19 用户两轮截图指认：菜单宽度改成一档定值（不再 `max-content` 跟着最长的一行走）、
+   每档只留一行短说明（§18.1.3 本来的要求）、菜单里除四档之外不再有任何整行文字，
+   所以菜单头、提示行与重新核对按钮的样式一起删掉，宽度由 19rem 再降到 18rem——18rem 的正文列宽
+   226px 刚好容得下最长一行（15 个汉字 = 210px），17rem 是零余量、换字体或 DPI 就折行。
+   只使用既有 token。 */
 .agent-chat-permission { position: relative; display: inline-flex; }
 .agent-chat-permission-chip { list-style: none; }
 .agent-chat-permission-chip::-webkit-details-marker { display: none; }
@@ -21,36 +26,20 @@
   display: flex;
   flex-direction: column;
   gap: var(--relay-space-1);
-  width: max-content;
-  max-width: min(22rem, calc(100vw - var(--relay-space-6)));
+  width: min(18rem, calc(100vw - var(--relay-space-6)));
   padding: var(--relay-space-2);
   background: var(--relay-color-bg-surface);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-panel);
   box-shadow: var(--relay-shadow-floating);
 }
-.agent-chat-permission-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--relay-space-1);
-}
-.agent-chat-permission-target,
-.agent-chat-permission-footnote,
-.agent-chat-permission-hint,
 .agent-chat-permission-error {
   margin: 0;
   font-family: var(--relay-font-family-ui);
   font-size: var(--relay-font-size-meta);
   line-height: var(--relay-font-lineHeight-ui);
-  color: var(--relay-color-text-secondary);
+  color: var(--relay-color-status-danger-text);
 }
-.agent-chat-permission-target {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agent-chat-permission-error { color: var(--relay-color-status-danger-text); }
 .agent-chat-permission-row {
   display: grid;
   grid-template-columns: var(--relay-control-icon-size) minmax(0, 1fr);
@@ -93,35 +82,36 @@
   line-height: var(--relay-font-lineHeight-ui);
   color: var(--relay-color-text-secondary);
 }
-.agent-chat-permission-hint { color: var(--relay-color-status-warning-text); }
 .agent-chat-permission-pending {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--relay-space-1);
 }
-.agent-chat-permission-footnote { color: var(--relay-color-text-muted); }
-.agent-chat-permission-recheck {
-  display: inline-flex;
+
+/* 2026-10-21（用户指认「下拉框选项是禁用状态」）：四行灰掉时菜单里必须读出一句原因＋下一步。
+   这一行只在禁用态出现，所以 2026-10-19「可选态除四档外不占整行文字」仍然成立。
+   顶部细边把它与档位行分开——它是解释，不是第五档。 */
+.agent-chat-permission-reason {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
-  flex: none;
-  width: var(--relay-control-height-compact);
-  height: var(--relay-control-height-compact);
-  padding: 0;
-  background: transparent;
-  border: 0;
-  border-radius: var(--relay-radius-control);
-  color: var(--relay-color-text-secondary);
-  cursor: pointer;
+  gap: var(--relay-space-2);
+  margin-top: var(--relay-space-1);
+  padding-top: var(--relay-space-1);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
 }
-.agent-chat-permission-recheck:hover:not(:disabled) { background: var(--relay-color-selection-hover); color: var(--relay-color-text-primary); }
-.agent-chat-permission-recheck:disabled { color: var(--relay-color-text-muted); cursor: not-allowed; }
-.agent-chat-permission-recheck svg {
-  width: var(--relay-control-icon-size);
-  height: var(--relay-control-icon-size);
-  flex: none;
+.agent-chat-permission-reason > p { flex: 1 1 100%; margin: 0; }
+
+/* 2026-10-20（P1-4）：待核对区块先给结论，两个动作并排，协议细节收进诊断。
+   `flex-basis: 100%` 让诊断占满一行，不与两颗键挤在同一条基线上。 */
+.agent-chat-permission-pending-text { flex: 1 1 100%; margin: 0; }
+.agent-chat-permission-pending-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--relay-space-2);
 }
+.agent-chat-permission-pending > details { flex: 1 1 100%; margin-top: var(--relay-space-1); }
 
 /* 完全访问是菜单里唯一免掉删除确认的一档，因此整行取 danger 前景色。
    边框沿用 .danger-button 的画法（danger-text 直接当 border-color），不新增 token。 */

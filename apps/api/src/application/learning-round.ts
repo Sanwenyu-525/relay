@@ -151,8 +151,11 @@ Promise<LearningRoundOutcome> {
     for (const [ordinal, call] of response.calls.entries()) {
       const settled = await settleSessionReadonlyToolCall(db, { session, message,
         availableTools: input.availableTools, repository, round, ordinal, call,
-        usedCalls, maxToolCalls, maxRounds,
+        usedCalls, maxToolCalls, maxRounds, signal: input.signal,
         // 学习搭档与人设助手共用同一条只读来源解析（ADR-020 §5：学习不获得额外写能力）。
+        // 0126：会话写是普通 Agent 主流程的能力，学习档恒为 false。
+        // 0128：委派同样只属于普通 Agent 根会话；学习档恒为 false。
+        allowWrite: false, allowDelegate: false,
         resolveOrigin: () => assistantReadOrigin(db, session, message.id) });
       usedCalls += 1;
       results.push(settled);

@@ -116,8 +116,10 @@ describe("项目 ViewConfiguration 前端", () => {
     await flush();
     expect(posts).toHaveLength(1);
     expect(receipts).toEqual([posts[0].command_id]);
-    expect(mounted.wrapper.get('[data-testid="view-pending"]').text()).toContain(`原 command_id：${posts[0].command_id}`);
-    expect(mounted.wrapper.get('[data-testid="view-pending"]').text()).toContain("原修订 v1 · 目标：开发");
+    // 2026-10-20（P1-4）：主行只说结果，标识与修订收进诊断。
+    expect(mounted.wrapper.get('[data-testid="view-pending"]').text()).toContain("默认视图已被别处改过");
+    expect(mounted.wrapper.get('[data-testid="view-diagnostics"]').text()).toContain(posts[0].command_id);
+    expect(mounted.wrapper.get('[data-testid="view-diagnostics"]').text()).toContain("原修订 v1 · 目标：开发");
     expect(mounted.wrapper.text()).toContain("当前默认：论文 · 配置修订 v2");
     await mounted.wrapper.findAll("button").find((button) => button.text() === "按当前修订重新确认")!.trigger("click");
     await mounted.wrapper.get('[data-testid="view-save-default"]').trigger("click");
@@ -158,7 +160,7 @@ describe("项目 ViewConfiguration 前端", () => {
     await flush();
     expect(posts).toHaveLength(1);
     expect(receipts).toEqual([posts[0].command_id]);
-    expect(mounted.wrapper.get('[data-testid="view-pending"]').text()).toContain("用原 ID 和内容重试");
+    expect(mounted.wrapper.get('[data-testid="view-pending"]').text()).toContain("重试保存");
     mounted.unmount(); unmount = null;
     mounted = await mountReact(createElement(ViewConfigurationPanel, { client: activeClient, projectId,
       projectArchivedAt: created }));
@@ -167,8 +169,8 @@ describe("项目 ViewConfiguration 前端", () => {
     expect(mounted.wrapper.get('[data-testid="view-archive-reason"]').text()).toContain("已归档");
     expect(mounted.wrapper.get('[data-testid="view-save-default"]').attributes("disabled")).toBeDefined();
     expect(receipts).toEqual([posts[0].command_id, posts[0].command_id]);
-    expect(mounted.wrapper.get('[data-testid="view-pending"]').text()).toContain(`原 command_id：${posts[0].command_id}`);
-    await mounted.wrapper.findAll("button").find((button) => button.text() === "用原 ID 和内容重试")!.trigger("click");
+    expect(mounted.wrapper.get('[data-testid="view-diagnostics"]').text()).toContain(posts[0].command_id);
+    await mounted.wrapper.get('[data-testid="view-retry"]').trigger("click");
     await flush();
     expect(posts).toHaveLength(2);
     expect(posts[1]).toEqual(posts[0]);
@@ -241,7 +243,7 @@ describe("项目 ViewConfiguration 前端", () => {
     await disclosure.get("summary").trigger("click");
     expect(disclosure.get(".view-configuration-panel").element).toBe(panel);
     expect(disclosure.get('[data-testid="view-pending"]').element).toBe(pending);
-    expect(disclosure.get('[data-testid="view-pending"]').text()).toContain(`原 command_id：${posts[0].command_id}`);
+    expect(disclosure.get('[data-testid="view-diagnostics"]').text()).toContain(posts[0].command_id);
     expect(disclosure.get('[data-testid="view-save-default"]').attributes("disabled")).toBeDefined();
     expect(posts).toHaveLength(1);
   });

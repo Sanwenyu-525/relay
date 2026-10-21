@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { createCommandId, RelayApiError, RelayTransportError,
   type RelayReview, type RelayReviewDecision } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import { checkResultLabel, reviewReasonText } from "../lib/labels";
 import { liveClient } from "../lib/relayConnection";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 
@@ -10,12 +11,9 @@ export const reviewDecisionLabels: Record<RelayReviewDecision, string> = {
   ACCEPT: "接受这项判断", REQUEST_CHANGES: "请求修改", SET_RETRY_BUDGET: "设置修正预算",
   RETRY_CHECKS: "重新运行检查", APPROVE: "批准这项动作", DENY: "拒绝这项请求"
 };
-const reasonLabels: Record<string, string> = {
-  CORRECTION_BUDGET_EXHAUSTED: "修正预算已用尽，需要你决定是否增加上限。",
-  CHECKER_UNAVAILABLE: "检查器持续不可用，需要你决定是否重新运行检查。",
-  AWAITING_HUMAN_EVIDENCE: "必需验收条件需要你的判断。",
-  UNCERTAIN_REQUIRES_HUMAN: "检查结果不确定，需要你判断这项验收条件。"
-};
+// 原因文案的唯一出处在 lib/labels（待处理队列与通知弹层共用同一份读法）；这里保留原导出名，
+// 已有的十几个调用方不必跟着改导入。
+export { reviewReasonText };
 const fieldLabels: Record<string, string> = {
   artifact_version_id: "产物版本 ID", content_hash: "内容摘要", acceptance_revision: "验收版本",
   criterion_id: "验收条件 ID", session_id: "验证会话 ID", operation_id: "动作 ID", action_type: "动作类型",
@@ -23,10 +21,18 @@ const fieldLabels: Record<string, string> = {
   typed_changes: "建议修改", check_plan_hash: "检查计划摘要", permission_version: "权限版本",
   permission_revision: "权限修订", gateway_connection_id: "连接 ID", resource_id: "受管资源 ID",
   changeset_id: "变化集 ID", changeset_version: "变化集版本", changeset_hash: "变化集摘要",
-  diff_hash: "差异摘要", repository: "仓库", branch: "分支", commit_message: "提交信息", current_revision: "当前版本"
+  diff_hash: "差异摘要", repository: "仓库", branch: "分支", commit_message: "提交信息", current_revision: "当前版本",
+  // 判断依据与可能影响里的服务端键（2026-10-21 第三轮 R3-04）：正文摆中文，原始键名与 JSON
+  // 留在「原始依据数据」里核对。认不出的新键仍显示原键名，不猜一个说法。
+  result: "自动检查结果", check_result: "自动检查结果", checker_id: "检查器", checker_version: "检查器版本",
+  severity: "严重程度", required: "是否必需", evidence_refs: "证据引用",
+  summary: "影响说明", external_effect_executed: "外部效果是否已执行", action: "动作", step_id: "步骤 ID",
+  source_command_id: "来源命令 ID", on_accept: "接受后", on_request_changes: "请求修改后",
+  max_budget: "新的修正上限", used: "已用修正次数", limit: "修正次数上限",
+  correction_budget_used: "已用修正次数", correction_budget_limit: "修正次数上限",
+  failing_criterion_ids: "未通过的验收条件", checker_error_criterion_ids: "检查出错的验收条件"
 };
 
-export function reviewReasonText(reason: string): string { return reasonLabels[reason] ?? reason; }
 export function reviewSummary(review: RelayReview): string {
   const version = review.target.artifact_version_id;
   if (typeof version === "string") return `产物版本 ${version}`;
@@ -45,12 +51,16 @@ export function reviewStaleDecisionReason(code: string): string | null {
   if (code === "REVISION_CONFLICT") return "这条请求的版本已经变化（可能已被其他入口处理）。本次决定未提交，已重新读取最新状态。";
   return null;
 }
-function displayValue(value: unknown): string {
-  return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : JSON.stringify(value);
+/** 值也走用户语言：布尔不写 true/false，数组不用 JSON 括号，检查结果是枚举时按同一份中文读法。 */
+function displayValue(key: string, value: unknown): string {
+  if (typeof value === "boolean") return value ? "是" : "否";
+  if (Array.isArray(value)) return value.map((entry) => displayValue(key, entry)).join("、");
+  if (typeof value === "string" && (key === "result" || key === "check_result")) return checkResultLabel(value);
+  return typeof value === "string" || typeof value === "number" ? String(value) : JSON.stringify(value);
 }
 function fieldLabel(key: string): string { return fieldLabels[key] ?? key.replaceAll("_", " "); }
 function factRows(value: Record<string, unknown>) {
-  return Object.entries(value).map(([key, item]) => <div key={key}><dt>{fieldLabel(key)}</dt><dd>{displayValue(item)}</dd></div>);
+  return Object.entries(value).map(([key, item]) => <div key={key}><dt>{fieldLabel(key)}</dt><dd>{displayValue(key, item)}</dd></div>);
 }
 
 export interface ReviewNavigationState {
@@ -181,6 +191,10 @@ export default function ReviewDecisionPanel({ live, review, writeBlockedReason, 
   const facts = <>
     <section className="review-fact-section"><h3>判断依据</h3><dl className="review-facts">{factRows(review.evidence)}</dl></section>
     <section className="review-fact-section"><h3>可能影响</h3>{Object.keys(review.effect).length ? <dl className="review-facts">{factRows(review.effect)}</dl> : <p className="helper-text">服务端没有提供这项决定的影响说明；未知影响不做推测。有依据的延后影响只在这里如实列出，不作为催促，也不代表可以延后必需项。</p>}</section>
+    {/* 正文摆中文，原始 JSON 收到这一层（2026-10-21 第三轮 R3-04）：要逐字核对键名或未映射的新键时，
+        数据仍在这里，不靠删字段取得干净观感。 */}
+    <details className="review-raw-data"><summary>原始依据数据</summary>
+      <pre className="review-raw-json" data-testid="review-raw-json">{JSON.stringify({ evidence: review.evidence, effect: review.effect }, null, 2)}</pre></details>
     {compact && showRejectNote && <p className="helper-text">拒绝或请求修改只记录判断，不等于执行失败，也不会自动结束执行或转移执行权。</p>}
   </>;
   const targetConditions = Object.fromEntries(Object.entries(review.target).filter(([key]) =>
@@ -197,7 +211,7 @@ export default function ReviewDecisionPanel({ live, review, writeBlockedReason, 
   </div>;
 
   return <div className={`review-decision${compact ? " review-decision--compact" : ""}`} data-testid="review-decision" data-review-kind={review.kind}>
-    <div className="review-bound-summary" data-testid="review-bound-summary"><h3>判断对象与条件</h3>
+    <div className="review-bound-summary" data-testid="review-bound-summary" tabIndex={-1}><h3>判断对象与条件</h3>
       {/* 紧凑形态不把截断的产物版本 ID 摆在首屏；确切身份进「查看依据与绑定对象」，深链一并保留。 */}
       {!compact && <p>{typeof review.target.artifact_version_id === "string"
         ? "所引用的确切产物版本" : reviewSummary(review)}</p>}
@@ -227,7 +241,7 @@ export default function ReviewDecisionPanel({ live, review, writeBlockedReason, 
     {actionError && <p className="action-error" role="alert">{actionError}</p>}
     {receiptMessage && <p className="receipt-message" role="status">{receiptMessage}</p>}
     {pendingCommand ? <button className="secondary-button" type="button" data-testid="review-check-receipt" disabled={submitting} onClick={() => void checkReceipt()}>核对原命令回执</button>
-      : <div className="review-actions">{review.allowedDecisions.map((decision) => <button key={decision}
+      : <div className="review-actions" data-testid="review-decision-actions" tabIndex={-1}>{review.allowedDecisions.map((decision) => <button key={decision}
         className={decision === "DENY" || decision === "REQUEST_CHANGES" ? "secondary-button" : "primary-button"} type="button"
         data-testid={`review-decision-${decision}`} disabled={!live || submitting || decisionBlockedReason !== null}
         onClick={() => void decide(decision)}>{submitting ? "正在保存" : reviewDecisionLabels[decision]}</button>)}</div>}

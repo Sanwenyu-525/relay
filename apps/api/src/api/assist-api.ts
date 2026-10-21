@@ -3,7 +3,8 @@ import type { FastifyInstance } from 'fastify';
 
 import { acceptAssistProposal, bindAssistSessionDirectory, bindAssistSessionProject,
   cancelAssistMessage, createAssistSession,
-  rejectAssistProposal, requestAssistMessage } from '../application/assist-commands.js';
+  rejectAssistProposal, requestAssistMessage, steerAssistMessage }
+  from '../application/assist-commands.js';
 import { createRepositories } from '../application/unit-of-work.js';
 import { establishConversationDiffBaseline, readConversationDiff, readConversationDiffFile }
   from '../conversation-diff/net-diff-service.js';
@@ -17,6 +18,7 @@ import { listAssistMessages, listAssistProposals, listAssistSessions, readAssist
   listAssistMessageAttachmentMeta, readAssistMessageAttachment,
   type AssistMessageAttachmentMeta }
   from '../application/assist-queries.js';
+import { readSessionToolCalls } from '../application/session-tool-call-projection.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import type { AssistSessionStatus, ConversationMode } from '../infrastructure/database-schema.js';
 import { MODEL_ERROR_CATEGORIES, type ModelErrorCategory }
@@ -39,6 +41,10 @@ const text = Type.String({ minLength: 1, maxLength: 32_768 });
 const assistMessageContent = Type.String({ maxLength: 32_768 });
 const base = Type.Object({ workspace_id: uuid }, strict);
 const sessionItem = Type.Object({ workspace_id: uuid, id: uuid }, strict);
+/** 会话 diff 的范围参数：省略＝会话口径（只算本会话落盘的路径）。 */
+const conversationDiffScopeQuery = Type.Object({
+  scope: Type.Optional(Type.Union([Type.Literal('SESSION'), Type.Literal('DIRECTORY')])),
+}, strict);
 const proposalItem = Type.Object({ workspace_id: uuid, id: uuid }, strict);
 const messageItem = Type.Object({ workspace_id: uuid, id: uuid }, strict);
 const attachmentItem = Type.Object({ workspace_id: uuid, id: uuid, attachment_id: uuid }, strict);
@@ -56,6 +62,13 @@ const AssistSessionDto = Type.Object({
   last_message_at: Type.Union([Type.String(), Type.Null()]),
   /** 冻结的会话身份：'AGENT' 普通会话，'ASSISTANT' 人设 助手会话，'LEARNING' 学习会话。 */
   conversation_mode: Type.Union([Type.Literal('AGENT'), Type.Literal('ASSISTANT'), Type.Literal('LEARNING')]),
+  /**
+   * 0127：行为模式（普通讨论 / 只读规划 / 持续目标）。
+   *
+   * 与会话身份分开：它可随命令切换，不改变身份、权限或工具准入来源。
+   * 客户端只读这个字段决定显示哪个模式，不保存自己的运行状态。
+   */
+  chat_mode: Type.Union([Type.Literal('CHAT'), Type.Literal('PLAN'), Type.Literal('GOAL')]),
   assistant_profile_id: Type.Union([uuid, Type.Null()]),
   /** 建会话时冻结的 助手 修订；AGENT 会话恒为 null。 */
   assistant_profile_revision: Type.Union([rev, Type.Null()]),
@@ -69,7 +82,8 @@ const AssistSessionDto = Type.Object({
   context: Type.Optional(Type.Object({
     project_goals: Type.Array(Type.Object({ goal_id: uuid, title: Type.String() }, strict)),
     working_directory: Type.Union([Type.Null(), Type.Object({ resource_id: uuid,
-      canonical_root: Type.Union([Type.String(), Type.Null()]) }, strict)]),
+      canonical_root: Type.Union([Type.String(), Type.Null()]),
+      source: Type.Union([Type.Literal('USER_PICKED'), Type.Literal('WORKSPACE_DEFAULT'), Type.Null()]) }, strict)]),
   }, strict)),
   created_at: Type.String(), updated_at: Type.String(),
 }, strict);
@@ -106,6 +120,8 @@ const AssistMessageDto = Type.Object({
     cache_read_tokens: Type.Union([Type.Integer(), Type.Null()]),
     cache_creation_tokens: Type.Union([Type.Integer(), Type.Null()]) }, strict),
   cancel_requested: Type.Boolean(),
+  /** 0122：这条排队消息已被请求「插话」到正在生成的那一轮；生成方消费前为 true。 */
+  steer_requested: Type.Boolean(),
   /** 0093：随这条消息发送的图片附件元数据（内容按单张另行读取）。 */
   attachments: Type.Array(Type.Object({
     id: uuid, name: Type.String(), media_type: Type.String(),
@@ -119,6 +135,31 @@ const AssistLivePreviewDto = Type.Object({
     Type.Literal('COMPLETED'), Type.Literal('FAILED'), Type.Literal('CANCELLED')]),
   preview_revision: rev, preview_text: Type.Union([Type.String(), Type.Null()]),
   preview_truncated: Type.Boolean(), preview_available: Type.Boolean(),
+}, strict);
+/**
+ * 会话工具轮次（工作台 §18.10「原消息下展示实际阶段」）。`arguments` 是开放对象，内容由
+ * 具体工具决定，投影不新增解释字段；一行摘要由前端现算。与 Run 的工具轨迹刻意不同形——
+ * 两张表、两种身份。这里没有模型推理文本：那张表不存它，现行禁令也不因此改变。
+ */
+const AssistSessionToolCallsDto = Type.Object({
+  session_id: uuid, message_id: uuid, message_status: Type.String(),
+  rounds: Type.Array(Type.Object({
+    round: Type.Integer({ minimum: 0 }),
+    calls: Type.Array(Type.Object({
+      id: uuid, round: Type.Integer({ minimum: 0 }), ordinal: Type.Integer({ minimum: 0 }),
+      tool_name: Type.String(),
+      status: Type.Union([Type.Literal('REQUESTED'), Type.Literal('SETTLED'),
+        Type.Literal('REJECTED'), Type.Literal('ABANDONED'), Type.Literal('UNKNOWN')]),
+      arguments: Type.Object({}, { additionalProperties: true }),
+      arguments_sha256: Type.String({ pattern: '^[0-9a-f]{64}$' }),
+      provider_tool_call_id: Type.Union([Type.String(), Type.Null()]),
+      operation_id: Type.Union([uuid, Type.Null()]),
+      rejection_reason: Type.Union([Type.String(), Type.Null()]),
+      rejection_detail: Type.Union([Type.String(), Type.Null()]),
+      result_digest: Type.Union([Type.String(), Type.Null()]),
+      requested_at: Type.String(), settled_at: Type.Union([Type.String(), Type.Null()]),
+    }, strict)),
+  }, strict)),
 }, strict);
 const AssistProposalDto = Type.Object({
   id: uuid, workspace_id: uuid, session_id: uuid, message_id: uuid,
@@ -146,6 +187,12 @@ const createSessionBody = Type.Object({
    * Breaking Change：Yes（语义）——同一 command_id 换模式重放按异载荷拒绝。
    */
   conversation_mode: Type.Optional(Type.Union([Type.Literal('AGENT'), Type.Literal('ASSISTANT'), Type.Literal('LEARNING')])),
+  /**
+   * 0127：新会话的行为模式；缺省 CHAT（旧客户端不受影响）。
+   * 只用于「空会话里直接发 `/plan 内容`」这条路径，不改变会话身份。
+   */
+  chat_mode: Type.Optional(Type.Union([Type.Literal('CHAT'), Type.Literal('PLAN'),
+    Type.Literal('GOAL')])),
   assistant_profile_id: Type.Optional(uuid),
 }, strict);
 const sessionsQuery = Type.Object({
@@ -220,6 +267,14 @@ const sourceRef = Type.Object({
   root_id: uuid, version: Type.String({ pattern: '^[1-9][0-9]*$' }),
 }, strict);
 const requestMessageBody = Type.Object({
+  /**
+   * 0127：这条消息按哪种行为模式受理。缺省沿用会话已保存的模式。
+   *
+   * `/plan 内容`、`/goal 内容` 发送时由客户端解析成「模式 + 正文」一次提交，
+   * 因此「命令发送后生效」和「模式与消息同一次事务」同时成立。
+   */
+  chat_mode: Type.Optional(Type.Union([Type.Literal('CHAT'), Type.Literal('PLAN'),
+    Type.Literal('GOAL')])),
   command_id: uuid, content: assistMessageContent,
   intent: Type.Optional(Type.Union([Type.Literal('DISCUSS'), Type.Literal('PROPOSE_CANDIDATE'),
     Type.Literal('PROPOSE_TASK')])),
@@ -277,7 +332,8 @@ function sessionDto(row: { id: string; workspace_id: string; project_id: string 
   pinned_at: Date | null;
   unread_at: Date | null;
   last_message_at: Date | null;
-  conversation_mode: ConversationMode; assistant_profile_id: string | null;
+  conversation_mode: ConversationMode; chat_mode: 'CHAT' | 'PLAN' | 'GOAL';
+  assistant_profile_id: string | null;
   assistant_profile_revision: bigint | null; assistant_role_snapshot: JsonObject | null;
   remember: boolean; working_resource_id: string | null;
   forked_from_session_id: string | null; created_at: Date; updated_at: Date }) {
@@ -292,6 +348,7 @@ function sessionDto(row: { id: string; workspace_id: string; project_id: string 
     // 0111：活动排序键逐字返回。NULL 只表示这段会话还没有消息，顺序仍由服务端决定。
     last_message_at: row.last_message_at === null ? null : row.last_message_at.toISOString(),
     conversation_mode: row.conversation_mode,
+    chat_mode: row.chat_mode,
     assistant_profile_id: row.assistant_profile_id,
     assistant_profile_revision: row.assistant_profile_revision === null ? null
       : toDecimalString(row.assistant_profile_revision),
@@ -313,6 +370,7 @@ function messageDto(row: { id: string; session_id: string; seq: bigint; role: st
   sources: unknown; provider_request_id: string | null; usage_input_tokens: number | null;
   usage_output_tokens: number | null; usage_cache_read_tokens: number | null;
   usage_cache_creation_tokens: number | null; cancel_requested: boolean;
+  steer_requested: boolean;
   created_at: Date; updated_at: Date },
   projection: { skill: JsonObject | null; skill_input: JsonObject | null;
     skill_output: JsonObject | null; content: string | null; sources: unknown;
@@ -331,6 +389,7 @@ function messageDto(row: { id: string; session_id: string; seq: bigint; role: st
       cache_read_tokens: row.usage_cache_read_tokens,
       cache_creation_tokens: row.usage_cache_creation_tokens },
     cancel_requested: row.cancel_requested,
+    steer_requested: row.steer_requested,
     attachments: attachments.map((item) => ({ id: item.id, name: item.name,
       media_type: item.mediaType, byte_length: item.byteLength })),
     created_at: row.created_at.toISOString(), updated_at: row.updated_at.toISOString(),
@@ -570,6 +629,10 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
   app.post('/assist-sessions/:id/messages', { schema: { params: sessionItem,    body: requestMessageBody,
     response: { 202: commandEnvelopeSchema(Type.Object({
       session_id: uuid, user_message_id: uuid, assistant_message_id: uuid,
+      /** 0127：受理时的行为模式与目标归属；旧客户端忽略这两个字段即可。 */
+      chat_mode: Type.Optional(Type.Union([Type.Literal('CHAT'), Type.Literal('PLAN'),
+        Type.Literal('GOAL')])),
+      goal_id: Type.Optional(Type.Union([uuid, Type.Null()])),
     }, strict)) } } },
   createCommandHandler(dependencies, { commandType: 'RequestAssistMessage',
     bodySchema: requestMessageBody,
@@ -587,9 +650,11 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
         ...(body.expected_model_selection_revision === undefined ? {} : {
           expectedModelSelectionRevision: body.expected_model_selection_revision,
         }),
+        ...(body.chat_mode === undefined ? {} : { chatMode: body.chat_mode }),
         // 0093：能力闸门的裁决输入——当前聊天恒由进程默认连接服务（见闸门注释）。
-        // 目录无条目时 `RELAY_MODEL_IMAGE_INPUT=true` 是运维对该自建模型的显式声明。
+        // 0121：声明来源按 (provider, model) 查声明表；目录无条目时才看声明与环境变量。
         chatModelName: process.env.RELAY_MODEL_NAME,
+        modelProvider: process.env.RELAY_MODEL_PROVIDER ?? 'openai-compatible',
         declaredImageInput: readDeclaredImageInput(process.env),
       });
       return { outcome, result: outcome.result };
@@ -633,6 +698,20 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
 
+  // 会话工具轮次只读投影（工作台 §18.10）：这条回复实际请求过哪些工具、各自结算没有。
+  // 只读、不派发、不改任何一行状态；账本此前只有写入口，界面上因此只剩一个「正在生成」。
+  app.get('/assist-sessions/:id/messages/:message_id/tool-calls', {
+    schema: { params: livePreviewItem, response: { 200: AssistSessionToolCallsDto } },
+  }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string; id: string;
+        message_id: string };
+      reply.header('Cache-Control', 'no-store');
+      return await readSessionToolCalls(dependencies.database.executor,
+        { workspaceId: p.workspace_id, sessionId: p.id, messageId: p.message_id });
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
   // 生成中预览 SSE（§10.59）：帧体与 GET live-preview 同形；每次推送前重新授权。
   app.get('/assist-sessions/:id/messages/:message_id/live-preview/events', {
     schema: { params: livePreviewItem },
@@ -651,6 +730,21 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
     bodySchema: cancelBody,
     execute: async ({ executor, params, body }) => {
       const outcome = await cancelAssistMessage(executor, {
+        workspaceId: params.workspace_id ?? '', messageId: params.id ?? '',
+        commandId: body.command_id });
+      return { outcome, result: outcome.result };
+    } }));
+
+  /* 0122：排队消息的「插话」。与取消同一形状（同一条消息、同一个 command_id 幂等），
+     语义相反：取消让这一行结束，插话让正在生成的那一轮多跑一步并带上它的原文。 */
+  app.post('/assist-messages/:id/steer', { schema: { params: messageItem, body: cancelBody,
+    response: { 200: commandEnvelopeSchema(Type.Object({
+      message_id: uuid, status: Type.String(),
+    }, strict)) } } },
+  createCommandHandler(dependencies, { commandType: 'SteerAssistMessage',
+    bodySchema: cancelBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await steerAssistMessage(executor, {
         workspaceId: params.workspace_id ?? '', messageId: params.id ?? '',
         commandId: body.command_id });
       return { outcome, result: outcome.result };
@@ -721,6 +815,7 @@ function conversationDiffDto(result: Awaited<ReturnType<typeof readConversationD
   const diff = result.diff;
   return {
     available: true,
+    scope: diff.scope,
     baseline_captured_at: diff.baselineCapturedAt,
     baseline_revision: diff.baselineRevision.toString(),
     root_path: diff.rootPath,
@@ -735,6 +830,8 @@ function conversationDiffDto(result: Awaited<ReturnType<typeof readConversationD
         listed: diff.coverage.current.listed },
       unchecked_files: diff.coverage.uncheckedFiles,
       unverified_files: diff.coverage.unverifiedFiles,
+      unverifiable_files: diff.coverage.unverifiableFiles,
+      unscanned_files: diff.coverage.unscannedFiles,
     },
     total_files: diff.totalFiles,
     total_added: diff.totalAdded,
@@ -750,13 +847,16 @@ function conversationDiffDto(result: Awaited<ReturnType<typeof readConversationD
 }
 
 app.get('/assist-sessions/:id/conversation-diff', {
-  schema: { params: sessionItem, response: { 200: ConversationDiffSchema } },
+  schema: { params: sessionItem, querystring: conversationDiffScopeQuery,
+    response: { 200: ConversationDiffSchema } },
 }, async (request, reply) => {
   try {
     const p = request.params as { workspace_id: string; id: string };
+    const query = request.query as { scope?: 'SESSION' | 'DIRECTORY' };
     reply.header('Cache-Control', 'no-store');
     const result = await readConversationDiff(createRepositories(dependencies.database.executor), {
       workspaceId: p.workspace_id, sessionId: p.id,
+      ...(query.scope === undefined ? {} : { scope: query.scope }),
     });
     return conversationDiffDto(result);
   } catch (error) { return sendReadError(reply, error, request.id); }
@@ -765,15 +865,17 @@ app.get('/assist-sessions/:id/conversation-diff', {
 // CD-18：展开阅读——单文件的逐行完整 diff（与总数同一份基线修订 + 同一份当前快照）。
 app.get('/assist-sessions/:id/conversation-diff/file', {
   schema: { params: sessionItem,
-    querystring: Type.Object({ path: Type.String({ minLength: 1 }) }, strict),
+    querystring: Type.Object({ path: Type.String({ minLength: 1 }),
+      scope: Type.Optional(Type.Union([Type.Literal('SESSION'), Type.Literal('DIRECTORY')])) }, strict),
     response: { 200: ConversationDiffFileSchema } },
 }, async (request, reply) => {
   try {
     const p = request.params as { workspace_id: string; id: string };
-    const query = request.query as { path: string };
+    const query = request.query as { path: string; scope?: 'SESSION' | 'DIRECTORY' };
     reply.header('Cache-Control', 'no-store');
     const result = await readConversationDiffFile(createRepositories(dependencies.database.executor), {
       workspaceId: p.workspace_id, sessionId: p.id, path: query.path,
+      ...(query.scope === undefined ? {} : { scope: query.scope }),
     });
     if (!result.available) return { available: false as const, reason: result.reason };
     return {

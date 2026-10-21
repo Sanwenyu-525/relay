@@ -1,11 +1,16 @@
 import { sql } from 'kysely';
 
 import type { DbExecutor } from '../infrastructure/database.js';
-import type { InformationRootRow, KnowledgeVersionRow, RuleRow, RuleVersionRow }
-  from '../infrastructure/database-schema.js';
+import type { InformationRootRow, KnowledgeVersionRow, MemoryRootRow, MemorySettingsRow,
+  MemorySourceKind, MemoryVersionRow, RuleRow, RuleVersionRow } from '../infrastructure/database-schema.js';
 import type { JsonObject } from '../infrastructure/json.js';
 
 type Kind = 'knowledge' | 'memory' | 'decision' | 'rule';
+export type MemoryEffectiveStatus = 'ACTIVE' | 'EXPIRED' | 'RETIRED';
+export type MemoryStateRow = MemoryRootRow &
+  Pick<MemoryVersionRow, 'body_text' | 'confirmed_by' | 'confirmed_at' | 'expires_at'> & {
+    readonly effective_status: MemoryEffectiveStatus;
+  };
 const ROOTS = {
   knowledge: 'knowledge_items', memory: 'memory_items', decision: 'decisions', rule: 'rules',
 } as const;
@@ -17,6 +22,70 @@ const VERSIONS = {
 /** Information 模块独占四类事实的写入口；表名只来自内部枚举。 */
 export class InformationRepository {
   constructor(private readonly db: DbExecutor) {}
+
+  async readMemorySettings(workspaceId: string): Promise<MemorySettingsRow | undefined> {
+    return (await sql<MemorySettingsRow>`select * from workspace_memory_settings
+      where workspace_id = ${workspaceId}`.execute(this.db)).rows[0];
+  }
+
+  /**
+   * 整行写入三个开关（0125 起含 `auto_capture`）。
+   *
+   * `autoCapture` 缺省视为开启：这是 0125 之前旧调用方的语义；生产入口一律显式传值，
+   * 避免「只改一个开关把另一个写成默认」。
+   */
+  async setMemorySettings(workspaceId: string, recallEnabled: boolean,
+    automaticCompaction: boolean, autoCapture = true): Promise<MemorySettingsRow> {
+    return (await sql<MemorySettingsRow>`insert into workspace_memory_settings
+      (workspace_id, recall_enabled, automatic_compaction, auto_capture, revision)
+      values (${workspaceId}, ${recallEnabled}, ${automaticCompaction}, ${autoCapture}, 1)
+      on conflict (workspace_id) do update set recall_enabled = excluded.recall_enabled,
+        automatic_compaction = excluded.automatic_compaction,
+        auto_capture = excluded.auto_capture,
+        revision = workspace_memory_settings.revision + 1, updated_at = now()
+      returning *`.execute(this.db)).rows[0]!;
+  }
+
+  async insertMemoryMessageSource(input: { memoryId: string; sessionId: string;
+    messageId: string; contentSha256: string }): Promise<void> {
+    await sql`insert into memory_message_sources
+      (memory_id, memory_version, session_id, message_id, content_sha256)
+      values (${input.memoryId}, 1, ${input.sessionId}, ${input.messageId},
+        ${input.contentSha256})`.execute(this.db);
+  }
+
+  async readMemoryMessageSources(memoryId: string): Promise<readonly {
+    memory_version: bigint; session_id: string; message_id: string; content_sha256: string;
+  }[]> {
+    return (await sql<{ memory_version: bigint; session_id: string; message_id: string;
+      content_sha256: string }>`select memory_version, session_id, message_id, content_sha256
+      from memory_message_sources where memory_id = ${memoryId}
+      order by memory_version`.execute(this.db)).rows;
+  }
+
+  /**
+   * 召回排序（DEV-0042）：先人工确认，再来源类别。
+   *
+   * 人工确认的在前（用户自己选的）；同为自动捕获时，引用用户原话的
+   * （USER_STATEMENT）先于来源未标注的（UNKNOWN），再后于引用助手叙述的
+   * （MODEL_OBSERVATION）——后者可能是工具结果或网页正文的转述，最不能当依据。
+   */
+  async recallMemories(workspaceId: string, projectId: string | null, terms: readonly string[],
+    limit: number): Promise<readonly (MemoryStateRow & { literal_match: boolean })[]> {
+    return (await sql<MemoryStateRow & { literal_match: boolean }>`select m.*, v.body_text,
+      v.confirmed_by, v.confirmed_at, v.expires_at, 'ACTIVE'::text as effective_status,
+      exists (select 1 from unnest(${[...terms]}::text[]) term
+        where position(lower(term) in lower(m.title || ' ' || v.body_text)) > 0) as literal_match
+      from memory_items m join memory_versions v
+        on v.memory_id = m.id and v.version = m.current_version
+      where m.workspace_id = ${workspaceId} and m.status = 'ACTIVE'
+        and (m.project_id is null or m.project_id = ${projectId})
+        and (v.expires_at is null or v.expires_at > now())
+      order by literal_match desc,
+        case when m.origin = 'HUMAN_CONFIRMED' then 0 else 1 end,
+        case m.source_kind when 'USER_STATEMENT' then 0 when 'UNKNOWN' then 1 else 2 end,
+        m.updated_at desc, m.id desc limit ${limit}`.execute(this.db)).rows;
+  }
 
   async readRoot<T extends InformationRootRow | RuleRow>(kind: Kind, id: string,
     lock = false): Promise<T | undefined> {
@@ -37,6 +106,24 @@ export class InformationRepository {
     const key = `${kind}_id`;
     return (await sql<T>`select * from ${sql.table(VERSIONS[kind])}
       where ${sql.ref(key)} = ${rootId} order by version desc`.execute(this.db)).rows;
+  }
+
+  /** One snapshot for lifecycle, current revision and expiry; reading never retires a memory. */
+  async listMemoryStates(workspaceId: string, input: { projectId?: string | undefined;
+    id?: string; effectiveStatus?: MemoryEffectiveStatus | 'ALL' }): Promise<readonly MemoryStateRow[]> {
+    const project = input.projectId === undefined ? sql``
+      : sql`and (m.project_id is null or m.project_id = ${input.projectId})`;
+    const identity = input.id === undefined ? sql`` : sql`and m.id = ${input.id}`;
+    const status = input.effectiveStatus === undefined || input.effectiveStatus === 'ALL' ? sql``
+      : sql`where effective_status = ${input.effectiveStatus}`;
+    return (await sql<MemoryStateRow>`with memories as (
+      select m.*, v.body_text, v.confirmed_by, v.confirmed_at, v.expires_at,
+        case when m.status = 'RETIRED' then 'RETIRED'
+          when v.expires_at <= now() then 'EXPIRED' else 'ACTIVE' end as effective_status
+      from memory_items m join memory_versions v
+        on v.memory_id = m.id and v.version = m.current_version
+      where m.workspace_id = ${workspaceId} ${project} ${identity}
+    ) select * from memories ${status} order by created_at desc, id desc`.execute(this.db)).rows;
   }
 
   async readCurrentVersion<T>(kind: Kind, rootId: string): Promise<T | undefined> {
@@ -102,10 +189,18 @@ export class InformationRepository {
       .execute(this.db)).rows[0];
   }
 
+  /**
+   * 写入记忆根。`sourceKind` 记「内容来自谁的哪一段」（DEV-0042）：
+   * 人工保存是 MANUAL，自动捕获按核验结果写 USER_STATEMENT / MODEL_OBSERVATION。
+   * `origin` 记「谁写的」（ADR-030）：自动捕获必须显式写 AUTO_CAPTURE——留默认会
+   * 让自动记住的条目在召回排序与界面标注上冒充人工确认。
+   */
   async insertMemoryRoot(id: string, workspaceId: string, projectId: string | null,
-    title: string): Promise<void> {
-    await sql`insert into memory_items (id, workspace_id, project_id, title)
-      values (${id}, ${workspaceId}, ${projectId}, ${title})`.execute(this.db);
+    title: string, sourceKind: MemorySourceKind = 'MANUAL',
+    origin: 'HUMAN_CONFIRMED' | 'AUTO_CAPTURE' = 'HUMAN_CONFIRMED'): Promise<void> {
+    await sql`insert into memory_items (id, workspace_id, project_id, title, source_kind, origin)
+      values (${id}, ${workspaceId}, ${projectId}, ${title}, ${sourceKind}, ${origin})`
+      .execute(this.db);
   }
 
   async insertMemoryVersion(input: { id: string; memoryId: string; version: bigint;

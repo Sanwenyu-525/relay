@@ -247,7 +247,10 @@ describe("会话工作目录绑定（0087）", () => {
       expect(h.scopeReads.lastIndexOf("READ")).toBeGreaterThan(h.scopeReads.indexOf("BIND"));
 
       await flush(); await flush();
-      expect(document.querySelector('[data-testid="collab-current-directory"]')?.getAttribute("title"))
+      // 绝对路径的承载面从原生 title 换成悬停/聚焦浮层（2026-10-20 用户要求：WebView2 的 title
+      // 延迟约 1 秒且只在带 title 的元素上出现）。这句话本身没有变，仍由可访问名称承担，
+      // 所以这条「顶栏按服务端重读更新」的事实改读 aria-label，期望值一字未动。
+      expect(document.querySelector('[data-testid="collab-current-directory"]')?.getAttribute("aria-label"))
         .toBe(`会话目录：${root}`);
       const rail = document.querySelector('[data-testid="recent-work-directories"]')?.textContent ?? "";
       expect(rail).toContain("MyProject");

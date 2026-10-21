@@ -73,7 +73,7 @@ export class SessionToolCallRepository {
    * 而不是等读取投影时才发现。
    */
   async attachOperation(id: string, operationId: string,
-    origin: 'ASSISTANT_READ' | 'AGENT_SESSION_READ'): Promise<boolean> {
+    origin: 'ASSISTANT_READ' | 'AGENT_SESSION_READ' | 'AGENT_SESSION_WRITE'): Promise<boolean> {
     return (await sql<{ id: string }>`update session_tool_calls set operation_id = ${operationId}
       where id = ${id} and operation_id is null
         and exists (select 1 from logical_operations o where o.id = ${operationId}
@@ -92,6 +92,21 @@ export class SessionToolCallRepository {
     return (await sql<{ id: string }>`update session_tool_calls set status = 'SETTLED',
       result_digest = ${resultDigest}, settled_at = now()
       where id = ${id} and status = 'REQUESTED' and operation_id is not null
+      returning id`.execute(this.db)).rows.length === 1;
+  }
+
+  /**
+   * 0128：应用内工具（委派）的结算——没有 Gateway Operation。
+   *
+   * 它的执行证据在 `assist_delegation_attempts`（子尝试状态、领取代次与结果消息），
+   * 因此 0128 只对 `delegate_subagent` 放开了「SETTLED 必须有 Operation」这条 CHECK。
+   * 其它工具仍走 `settle()`，那条不变量对它们继续成立。
+   */
+  async settleApplicationTool(id: string, resultDigest: string): Promise<boolean> {
+    return (await sql<{ id: string }>`update session_tool_calls set status = 'SETTLED',
+      result_digest = ${resultDigest}, settled_at = now()
+      where id = ${id} and status = 'REQUESTED' and operation_id is null
+        and tool_name = 'delegate_subagent'
       returning id`.execute(this.db)).rows.length === 1;
   }
 

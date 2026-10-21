@@ -3,7 +3,9 @@ import { isTauri } from "@tauri-apps/api/core";
 import { useNavigate } from "react-router-dom";
 import { Bell, BellRing } from "lucide-react";
 import { type RelayApiClient, type RelayInterventionItem } from "../api/relayClient";
+import { interventionReasonText } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
+import { syncTaskbarBadge } from "../lib/taskbarBadge";
 import { deliverProjectReminderNotifications } from "../lib/projectReminderNotifications";
 import { useDetailsMenu } from "../lib/popoverMenu";
 
@@ -33,6 +35,7 @@ export default function InterventionNotifications({ client }:
         const latest = await client.getInterventions();
         if (!active) return;
         setItems(latest); setError(null);
+        void syncTaskbarBadge(latest.length);
         if (latest.length === 0) {
           try { await deliverProjectReminderNotifications(client, navigate, () => active); }
           catch { console.warn("project_reminder_notification_failed"); }
@@ -77,7 +80,9 @@ export default function InterventionNotifications({ client }:
     }
     void refresh();
     const interval = window.setInterval(() => { void refresh(); }, POLL_MS);
-    return () => { active = false; window.clearInterval(interval); if (timer !== null) window.clearTimeout(timer); };
+    return () => { active = false; window.clearInterval(interval); if (timer !== null) window.clearTimeout(timer);
+      // 轮询停了就没有可信数量来源，撤掉角标而不是留一个过期数字。
+      void syncTaskbarBadge(0); };
   }, [client, navigate]);
 
   async function enableNotifications() {
@@ -101,11 +106,23 @@ export default function InterventionNotifications({ client }:
       <Bell aria-hidden="true" />
       {items.length > 0 && <span className="intervention-notifications-count" aria-hidden="true">{items.length}</span>}
     </summary>
-    <div className="intervention-notifications-panel">
+    <div className="intervention-notifications-panel" data-testid="intervention-notifications-panel">
       <a className="text-link" href="/tasks?tab=attention" onClick={(event) => {
         event.preventDefault(); if (disclosure.current) disclosure.current.open = false;
         navigate("/tasks?tab=attention");
       }}>{items.length > 0 ? `需人工介入 ${items.length} 项` : "打开人工待处理列表"}</a>
+      {/* 聚合入口之上先给逐条事实（2026-10-21 第三轮 R3-03）：原先这一层只有一句「N 项」，
+          用户必须整队打开才知道到底哪一件事在等什么。逐条只列已读到的服务端事实并直达原请求，
+          不在此处作任何决定；整体清单仍是另一条入口。 */}
+      {items.length > 0 && <ul className="intervention-notifications-list">{items.map((item) => <li key={`${item.itemKey}:${item.changeKey}`}
+        data-testid="intervention-item">
+        <strong>{item.title}</strong>
+        <p>{interventionReasonText(item)}</p>
+        <a className="text-link" data-testid="intervention-item-link" href={item.targetUrl} onClick={(event) => {
+          event.preventDefault(); if (disclosure.current) disclosure.current.open = false;
+          navigate(item.targetUrl);
+        }}>打开原处理入口</a>
+      </li>)}</ul>}
       {isTauri() && <div className="intervention-notifications-permission">
         <p>{permissionLabel}</p>
         {permission === "default" && <button type="button" className="icon-button"

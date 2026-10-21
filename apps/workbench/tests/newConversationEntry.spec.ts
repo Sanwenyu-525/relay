@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
+import { readLastModel, writeLastModel } from "../src/lib/modelPreferences";
 import { DomWrapper, flush, folderStripName, mountWorkbench } from "./mountApp";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -125,6 +126,77 @@ describe("新对话直接起步", () => {
     expect(view.wrapper.text()).not.toContain("无项目任务的专属会话");
     expect(view.posts).toHaveLength(0);
   });
+  // 2026-10-20 用户指令「模型的话要持久化，要记住上一次选择的模型而不是每一个会话都先显示
+  // 模型这两个字」：新对话的芯片初始就是上次选的型号，首条发送时按原命令绑定给新会话。
+  it("新对话记住上一次选择的模型：芯片初始就是上次型号，首条发送按原命令绑定", async () => {
+    writeLastModel(workspaceId, "v/a:free");
+    const view = await mount("/agent?new=entry");
+    const triggerName = view.wrapper.get('[data-testid="model-selector-open"] .model-selector-trigger-name');
+    expect(triggerName.text()).toBe("v/a:free");
+    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("沿用上次选择的模型发送");
+    await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit"); await flush();
+    // 先建会话，再把上次选择按 SelectSessionModel 原命令落到这个会话，消息带期望修订。
+    expect(view.posts.filter((post) => post.path === `${root}/assist-sessions`)).toHaveLength(1);
+    const selections = view.posts.filter((post) => post.path.endsWith("/chat-commands"));
+    expect(selections).toHaveLength(1);
+    expect(selections[0]?.body).toMatchObject({ text: "/model v/a:free" });
+    expect(view.posts.find((post) => post.path.endsWith("/messages"))?.body)
+      .toMatchObject({ expected_model_selection_revision: "7" });
+  });
+  it("首条选择模型即写本机偏好；下一条新对话（重新挂载）从它开始", async () => {
+    const first = await mount("/agent?new=entry");
+    await first.wrapper.get('[data-testid="model-selector-open"]').trigger("click"); await flush();
+    const option = [...document.querySelectorAll<HTMLButtonElement>('.model-selector-menu [role="option"]')]
+      .find((item) => item.querySelector(".model-selector-option-name")?.textContent === "免费 A")!;
+    await act(async () => option.click()); await flush();
+    expect(readLastModel(workspaceId)).toBe("v/a:free");
+    first.unmount();
+    // 下一条新对话：路由按 ?new= 重新挂载，种子从本机偏好读回，不再是「模型」两个字。
+    // 断言只锁芯片可见文字（用户指令原话是「不要每个新会话都先显示模型两个字」）：
+    // 整页文字里本来就允许出现「模型」（如计量行的「尚无模型调用」），扫全页会假红。
+    const second = await mount("/agent?new=second");
+    const secondChip = () => second.wrapper
+      .get('[data-testid="model-selector-open"] .model-selector-trigger-name').text();
+    expect(secondChip()).toBe("v/a:free");
+    expect(secondChip()).not.toBe("模型");
+    second.unmount();
+  });
+  // 2026-10-21 接续：上一条用例覆盖「重新挂载那一拍的 useState 种子」，这一条覆盖挂在它
+  // 后面的那次重置——协作页的新对话 effect 会把首条输入器清成空白，模型偏好不能跟着一起被抹。
+  // 用户实机指认「每次点新建会话，模型芯片又变回『模型』两个字」。
+  it("同页再点「新对话」：清空草稿但不退回「模型」占位，芯片仍按本机偏好起步", async () => {
+    writeLastModel(workspaceId, "v/a:free");
+    const view = await mount("/agent?new=entry");
+    const chip = () => document
+      .querySelector('[data-testid="model-selector-open"] .model-selector-trigger-name')?.textContent ?? "";
+    expect(chip()).toBe("v/a:free");
+    // 先在首条输入器里写字，再开一次新对话：草稿要清空，型号要留下。
+    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("这段不该带进下一条"); await flush();
+    await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click"); await flush(120);
+    expect((document.querySelector('[data-testid="assist-first-draft"]') as HTMLTextAreaElement | null)?.value)
+      .toBe("");
+    expect(chip(), "新对话重置把模型偏好一起抹掉了，芯片退回「模型」占位").toBe("v/a:free");
+  });
+  it("回到同一个新对话地址恢复未发送草稿；换新键保持空白且不串写", async () => {
+    const firstDraft = () => document
+      .querySelector<HTMLTextAreaElement>('[data-testid="assist-first-draft"]')?.value ?? null;
+    const view = await mount("/agent?new=draft-a", true);
+    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("保留的草稿 A，请勿发送"); await flush();
+    expect(firstDraft()).toBe("保留的草稿 A，请勿发送");
+    // A → 已有会话 → 后退回同一个 ?new= 键：正文逐字恢复。
+    await view.router.push(`/agent?session=${sessionId}`); await flush(120);
+    await view.router.back(); await flush(120);
+    expect(firstDraft()).toBe("保留的草稿 A，请勿发送");
+    // A → 新的 ?new= 键：空白；返回 A 仍恢复，不能把 A 的正文先写进 B。
+    await view.router.push("/agent?new=draft-b"); await flush(120);
+    expect(firstDraft()).toBe("");
+    await view.router.back(); await flush(120);
+    expect(firstDraft()).toBe("保留的草稿 A，请勿发送");
+    // 重新挂载同一键：从本机草稿恢复，而不是被新对话初始化清空。
+    view.unmount(); unmount = null;
+    const remount = await mount("/agent?new=draft-a"); unmount = remount.unmount;
+    expect(firstDraft()).toBe("保留的草稿 A，请勿发送");
+  });
   it("明确新对话不恢复旧会话；空白页只有输入主区，目录与已有任务按需展开", async () => {
     const view = await mount("/agent?new=entry", true);
     expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists(), view.wrapper.text()).toBe(true);
@@ -134,9 +206,10 @@ describe("新对话直接起步", () => {
     // 入口已按用户决定删除（2026-10-16 第四轮），左栏行是任务与会话的唯一导航入口。
     expect(view.wrapper.get('[data-testid="folder-scope-strip"]').exists()).toBe(true);
     expect(folderStripName()).toBe("选择工作目录");
-    // 写入档位入口不因未选目录而消失（用户实机截图回归）：显示「未开放写入」这一档
-    // 而不是整颗芯片隐藏；目录状态由上方细条承担（2026-10-18 用户指认芯片只读权限）。
-    expect(view.wrapper.get('[data-testid="write-permission-chip"]').text()).toContain("未开放写入");
+    // 写入档位入口不因未选目录而消失（用户实机截图回归）：芯片读作「不可写入」这句权限结论，
+    // 而不是整颗隐藏；目录状态由上方细条承担（2026-10-18 用户指认芯片只读权限；
+    // 2026-10-21 措辞修正：原「未开放写入」会被读成一个没开发的档位）。
+    expect(view.wrapper.get('[data-testid="write-permission-chip"]').text()).toContain("不可写入");
     expect(view.wrapper.find('[data-testid="recent-work-find-more"]').exists()).toBe(false);
     expect(view.posts).toHaveLength(0);
   });
@@ -225,14 +298,14 @@ describe("新对话直接起步", () => {
     expect(view.posts).toHaveLength(2);
   });
 
-  it("新对话不丢未发送输入；取消离开后仍可继续原草稿", async () => {
+  it("新对话不丢未发送输入：直接进入空白新对话，不继承上一处正文", async () => {
     const view = await mount("/agent?new=entry");
     await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("还没有发送的想法");
-    await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click"); await flush();
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("未保存");
-    const keep = Array.from(document.querySelectorAll("button")).find(b => b.textContent === "保留并继续编辑");
-    expect(keep).toBeDefined(); keep!.click(); await flush();
-    expect((view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement).value).toBe("还没有发送的想法");
+    await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click"); await flush(80);
+    // 不再弹确认：直接进入新对话，新对话是空白输入，不继承上一处的正文；
+    // 原作用域的草稿留在本机（跨路由恢复由 folderFirstConversation 的「反例 P2」覆盖）。
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect((view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement).value).toBe("");
     expect(view.posts).toHaveLength(0);
   });
 

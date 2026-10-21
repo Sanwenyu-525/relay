@@ -147,13 +147,7 @@ ${input.content}`),
   /** Assist 对话：system 边界由应用层固定，历史轮次按顺序原样传递；
    * 提案 JSON 的校验在应用层（解析失败不产生提案）。取消语义与 generate 相同。 */
   async assist(request: AssistRequest): Promise<AssistResult> {
-    const messages: BaseMessage[] = [
-      new SystemMessage(request.system),
-      ...request.turns.map((turn) => turn.role === 'user'
-        ? new HumanMessage(assistMessageContent(turn))
-        : new AIMessage(turn.content)),
-      ...renderToolTurns(request.toolTurns ?? []),
-    ];
+    const messages = assistMessages(request);
     const tools = request.tools ?? [];
     // 学习轮次改用结构化信封：一次调用同时得到正文与有限增量，不额外发起评分调用，
     // 也不暴露未提交的流式文本（正文要等整封 JSON 解析完成才算数）。
@@ -381,6 +375,7 @@ function assistMessageContent(turn: AssistTurn): string | ContentBlock[] {
 export function renderToolTurns(turns: readonly ModelToolTurn[]): BaseMessage[] {
   const messages: BaseMessage[] = [];
   for (const turn of turns) {
+    messages.push(...(turn.steersBefore ?? []).map((text) => new HumanMessage(text)));
     messages.push(new AIMessage({ content: turn.preamble ?? '',
       ...(turn.reasoningContent === undefined ? {}
         : { additional_kwargs: { reasoning_content: turn.reasoningContent } }),
@@ -393,6 +388,25 @@ export function renderToolTurns(turns: readonly ModelToolTurn[]): BaseMessage[] 
     }
   }
   return messages;
+}
+
+/**
+ * 0122：Assist 请求的模型消息序列。
+ *
+ * 新插话位于已发生的工具结果之后；已引发后续工具的插话由 steersBefore 留在对应工具
+ * 之前，避免多轮请求把旧插话重新挪到末尾。插话逐字使用用户原文，不加资料前缀。
+ *
+ * 单独导出是为了让单元测试能锁住这个位置，而不必起真实 Provider。
+ */
+export function assistMessages(request: AssistRequest): BaseMessage[] {
+  return [
+    new SystemMessage(request.system),
+    ...request.turns.map((turn) => turn.role === 'user'
+      ? new HumanMessage(assistMessageContent(turn))
+      : new AIMessage(turn.content)),
+    ...renderToolTurns(request.toolTurns ?? []),
+    ...(request.steers ?? []).map((text) => new HumanMessage(text)),
+  ];
 }
 
 /** 本端口只构造一对一的文本消息；沿相同位置补回实际 Provider 续轮字段。 */

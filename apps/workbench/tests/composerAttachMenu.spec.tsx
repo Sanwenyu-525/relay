@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { type ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { ComposerAttach } from "../src/views/AssistView";
 import type { RelayApiClient, RelayAssistSourceRef, RelayKnowledge, RelaySkillDefinition } from "../src/api/relayClient";
 import { flush, mountReact } from "./mountApp";
@@ -22,10 +24,6 @@ const refs: readonly RelayAssistSourceRef[] = [
 const conversationRefs: readonly RelayAssistSourceRef[] = [
   { kind: "KNOWLEDGE", rootId: "k-9", version: "2" }
 ];
-const recentFolders = [
-  { canonicalRoot: "D:/Develop/project-a", displayName: "project-a", openedAt: "2026-10-16T00:00:00Z" },
-  { canonicalRoot: "D:/Develop/Relay-Agent", displayName: "Relay-Agent", openedAt: "2026-10-15T00:00:00Z" }
-] as const;
 const catalog = [
   { kind: "METHOD", name: "review", aliases: [], title: "代码审查", summary: "只读检查改动。",
     usage: "/review [目标]", methodId: "code-review", systemId: null },
@@ -61,16 +59,11 @@ function stubClient(getChatCommands = vi.fn(async () => catalog),
 type HarnessProps = {
   readonly initialRefs?: readonly RelayAssistSourceRef[];
   readonly onToggleSourceRef?: (ref: RelayAssistSourceRef) => void;
-  readonly onOpenRecentFolder?: (canonicalRoot: string) => void;
-  readonly onFolder?: () => void;
   readonly onSources?: () => void;
   readonly onSkill?: () => void;
   readonly mode?: "AGENT" | "ASSISTANT" | "LEARNING";
   readonly conversation?: readonly RelayAssistSourceRef[];
   readonly recent?: readonly RelayAssistSourceRef[];
-  readonly recentFolders?: readonly (typeof recentFolders)[number][];
-  readonly folderPath?: string | null;
-  readonly folderBound?: boolean;
   readonly skillSelected?: boolean;
   readonly notes?: { text: string; keys: string[] }[];
   readonly projectId?: string | null;
@@ -79,33 +72,48 @@ type HarnessProps = {
   readonly onPickSkill?: (key: string) => void;
   readonly skillContext?: { readonly projectId: string | null; readonly taskId: string | null;
     readonly resolveInPlace: boolean } | null;
+  /** 需要额外端点（如插件运行时）时替换默认夹具客户端。 */
+  readonly client?: RelayApiClient;
+  /** 菜单所在的站内位置：「管理连接与权限」要带着它作为返回路径。 */
+  readonly path?: string;
 };
+
+/** 路由落点探针：只读当前位置，不渲染可见内容。 */
+function PathProbe() {
+  const location = useLocation();
+  return <span data-testid="harness-path">{`${location.pathname}${location.search}`}</span>;
+}
 
 function Harness(props: HarnessProps) {
   const [draft, setDraft] = useState("");
   const [selected, setSelected] = useState<readonly RelayAssistSourceRef[]>(props.initialRefs ?? []);
-  return <div className="agent-chat-composer-actions">
-    <ComposerAttach client={stubClient()} mode={props.mode ?? "AGENT"} hasSession
-      selectedRefs={selected} conversationRefs={props.conversation ?? []} recentRefs={props.recent ?? []}
-      onToggleSourceRef={props.onToggleSourceRef ?? ((ref) => setSelected((current) => {
-        const key = (item: RelayAssistSourceRef) => `${item.kind}:${item.rootId}:${item.version}`;
-        return current.some((item) => key(item) === key(ref))
-          ? current.filter((item) => key(item) !== key(ref)) : [...current, ref];
-      }))}
-      recentFolders={props.recentFolders ?? recentFolders}
-      folderPath={props.folderPath ?? null} folderBound={props.folderBound ?? false}
-      skillSelected={props.skillSelected ?? false}
-      onOpenRecentFolder={props.onOpenRecentFolder ?? (() => {})}
-      onFolder={props.onFolder ?? (() => {})} onSources={props.onSources ?? (() => {})}
-      onSkill={props.onSkill ?? (() => {})}
-      projectId={props.projectId ?? null}
-      skills={props.skills} selectedSkillKey={props.selectedSkillKey ?? null}
-      onPickSkill={props.onPickSkill} skillContext={props.skillContext ?? null}
-      onCommand={() => setDraft((value) => value.startsWith("/") ? value : `/${value}`)}
-      onPickCommand={(name) => setDraft((value) => `${value.match(/^\s*/u)?.[0] ?? ""}/${name} `)}
-      notes={props.notes} />
-    <textarea data-testid="draft" aria-label="本次消息" value={draft} readOnly />
-  </div>;
+  return <MemoryRouter initialEntries={[props.path ?? "/agent"]}>
+    <div className="agent-chat-composer-actions">
+      <ComposerAttach client={props.client ?? stubClient()} mode={props.mode ?? "AGENT"} hasSession
+        selectedRefs={selected} conversationRefs={props.conversation ?? []} recentRefs={props.recent ?? []}
+        onToggleSourceRef={props.onToggleSourceRef ?? ((ref) => setSelected((current) => {
+          const key = (item: RelayAssistSourceRef) => `${item.kind}:${item.rootId}:${item.version}`;
+          return current.some((item) => key(item) === key(ref))
+            ? current.filter((item) => key(item) !== key(ref)) : [...current, ref];
+        }))}
+        skillSelected={props.skillSelected ?? false}
+        onSources={props.onSources ?? (() => {})}
+        onSkill={props.onSkill ?? (() => {})}
+        projectId={props.projectId ?? null}
+        skills={props.skills} selectedSkillKey={props.selectedSkillKey ?? null}
+        onPickSkill={props.onPickSkill} skillContext={props.skillContext ?? null}
+        onCommand={() => setDraft((value) => value.startsWith("/") ? value : `/${value}`)}
+        onPickCommand={(name) => setDraft((value) => `${value.match(/^\s*/u)?.[0] ?? ""}/${name} `)}
+        notes={props.notes} />
+      <textarea data-testid="draft" aria-label="本次消息" value={draft} readOnly />
+    </div>
+    <PathProbe />
+  </MemoryRouter>;
+}
+
+/** 不走 Harness 的那些用例：单独挂菜单时也要有路由上下文（「管理连接与权限」用站内导航）。 */
+async function mountAttach(element: ReactElement, path = "/agent") {
+  return mountReact(<MemoryRouter initialEntries={[path]}>{element}<PathProbe /></MemoryRouter>);
 }
 
 const attach = () => document.querySelector<HTMLDetailsElement>(".agent-chat-attach");
@@ -150,20 +158,21 @@ async function pointerOut(element: Element | null, relatedTarget: Element): Prom
 afterEach(() => { window.localStorage.clear(); vi.unstubAllGlobals(); });
 
 describe("「+」两级菜单", () => {
-  it("点击「+」打开一级：五项保留，状态提示来自真实事实", async () => {
-    const view = await mountReact(<Harness initialRefs={refs} folderBound skillSelected />);
+  it("点击「+」打开一级：四项保留，状态提示来自真实事实", async () => {
+    const view = await mountReact(<Harness initialRefs={refs} skillSelected />);
     try {
       expect(attach()?.open).toBe(false);
       await openMenu();
       expect(attach()?.open).toBe(true);
       expect(row("assist-attach-sources")).not.toBeNull();
-      expect(row("assist-attach-folder")).not.toBeNull();
       expect(row("assist-attach-skill")).not.toBeNull();
       expect(row("assist-attach-command")).not.toBeNull();
       expect(row("assist-attach-connectors")).not.toBeNull();
-      // 已选资料数、已绑目录、已选 Skill 都是真实事实的轻量提示，不是装饰。
+      // 目录入口已从「+」撤出（2026-10-19）：它有常驻 Owner（协作页目录细条），
+      // 在这里既重复、又读成「用之前必须先选目录」。
+      expect(row("assist-attach-folder")).toBeNull();
+      // 已选资料数、已选 Skill 都是真实事实的轻量提示，不是装饰。
       expect(row("assist-attach-sources")?.querySelector(".agent-chat-attach-item-hint")?.textContent).toBe("2");
-      expect(row("assist-attach-folder")?.querySelector(".agent-chat-attach-item-check")).not.toBeNull();
       expect(row("assist-attach-skill")?.querySelector(".agent-chat-attach-item-check")).not.toBeNull();
       // 允许展开的行才有 chevron 与 aria-expanded。
       expect(row("assist-attach-command")?.getAttribute("aria-expanded")).toBe("false");
@@ -210,15 +219,15 @@ describe("「+」两级菜单", () => {
       await openMenu();
       await hover(row("assist-attach-sources"));
       expect(submenu()?.getAttribute("data-section")).toBe("sources");
-      await hover(row("assist-attach-folder"));
-      expect(submenu()?.getAttribute("data-section")).toBe("folder");
-      expect(row("assist-attach-folder")?.getAttribute("aria-expanded")).toBe("true");
+      await hover(row("assist-attach-skill"));
+      expect(submenu()?.getAttribute("data-section")).toBe("skill");
+      expect(row("assist-attach-skill")?.getAttribute("aria-expanded")).toBe("true");
       expect(row("assist-attach-sources")?.getAttribute("aria-expanded")).toBe("false");
       // 指针移到二级上不收起（延时被取消）。
       await pointerOut(document.querySelector(".agent-chat-attach-menu"), submenu() as Element);
       await hover(submenu());
       await flush(260);
-      expect(submenu()?.getAttribute("data-section")).toBe("folder");
+      expect(submenu()?.getAttribute("data-section")).toBe("skill");
       // 真正离开两级之后才收起二级；一级仍是用户点开的，不跟着关。
       await pointerOut(submenu(), document.body);
       await flush(260);
@@ -228,7 +237,7 @@ describe("「+」两级菜单", () => {
   });
 
   it("禁用的行 hover 不展开二级（首条消息前的资料）", async () => {
-    const view = await mountReact(<div>
+    const view = await mountAttach(<div>
       <ComposerAttach client={stubClient()} mode="AGENT" hasSession={false} onCommand={() => {}} />
     </div>);
     try {
@@ -239,16 +248,16 @@ describe("「+」两级菜单", () => {
   });
 
 
-  it("资料二级：检索入口、对话真实引用、最近引用与本地文件未接入说明同时可见", async () => {
+  it("资料二级：检索入口、对话真实引用与最近引用可见，未接入的本地文件不再占一行", async () => {
     const onSources = vi.fn();
     const view = await mountReact(<Harness onSources={onSources} conversation={conversationRefs}
       recent={[{ kind: "MEMORY", rootId: "m-9", version: "4" }]} />);
     try {
       await openSub("assist-attach-sources");
-      // 尚未接入的能力如实禁用，并在面板脚注写明原因与当前可用的替代路径。
-      expect(row("assist-attach-local-file")?.disabled).toBe(true);
-      expect(row("assist-attach-local-file")?.textContent).toContain("暂未接入");
-      expect(submenu()?.querySelector(".agent-chat-attach-subnote")?.textContent).toContain("本地文件选择尚未接入");
+      // 2026-10-20（P2）：「选择本地文件」没有真实去向，已从日常动作面移除；
+      // 需要本机文件时走目录与检索，待实现的附件能力记录在文档里而不是靠禁用行承载。
+      expect(row("assist-attach-local-file")).toBeNull();
+      expect(submenu()?.querySelector(".agent-chat-attach-subnote")).toBeNull();
       expect(row("assist-attach-search")?.disabled).toBe(false);
       // 「对话中的资料」来自消息来源，不是推断；「最近引用」来自本机偏好。
       const labels = Array.from(submenu()?.querySelectorAll(".agent-chat-attach-item-label") ?? [])
@@ -281,7 +290,7 @@ describe("「+」两级菜单", () => {
   it("资料二级：项目资料读取失败时如实说明，其余入口不受影响", async () => {
     const failing = { getChatCommands: vi.fn(async () => catalog),
       getKnowledge: vi.fn(async () => { throw new Error("boom"); }) } as unknown as RelayApiClient;
-    const view = await mountReact(<div>
+    const view = await mountAttach(<div>
       <ComposerAttach client={failing} mode="AGENT" hasSession projectId="p-1"
         conversationRefs={conversationRefs} onSources={() => {}} onSkill={() => {}}
         onToggleSourceRef={() => {}} onCommand={() => {}} />
@@ -384,30 +393,19 @@ describe("「+」两级菜单", () => {
     } finally { view.unmount(); }
   });
 
-  it("目录二级：最近目录来自真实近期列表，点击走既有目录入口，当前目录带对勾", async () => {
-    const onOpenRecentFolder = vi.fn();
-    const view = await mountReact(<Harness onOpenRecentFolder={onOpenRecentFolder}
-      folderPath="D:/Develop/project-a" />);
+  it("目录入口不在「+」里：一级没有文件夹行，也没有可展开的目录二级", async () => {
+    /* 2026-10-19 用户指认「好像很多东西都需要授权或者什么选择目录之类的，这些都是过度设计」。
+       目录的常驻 Owner 是协作页目录细条（`folder-scope-strip`）：「+」里再放一个「选择工作
+       文件夹」既重复，又把目录读成「用之前必须先选」。近期目录与手动输入都在细条的弹层里。 */
+    const view = await mountReact(<Harness />);
     try {
-      await openSub("assist-attach-folder");
-      expect(row("assist-attach-folder-pick")?.disabled).toBe(false);
-      expect(row("assist-attach-recent-folder-0")?.textContent).toContain("project-a");
-      expect(row("assist-attach-recent-folder-0")?.querySelector(".agent-chat-attach-item-check")).not.toBeNull();
-      expect(row("assist-attach-recent-folder-1")?.querySelector(".agent-chat-attach-item-check")).toBeNull();
-      expect(row("assist-attach-workspace-manage")?.disabled).toBe(true);
-      expect(submenu()?.querySelector(".agent-chat-attach-subnote")?.textContent).toContain("工作区管理尚未接入");
-      await click(row("assist-attach-recent-folder-1"));
-      expect(onOpenRecentFolder).toHaveBeenCalledWith("D:/Develop/Relay-Agent");
-      expect(attach()?.open).toBe(false);
-    } finally { view.unmount(); }
-  });
-
-  it("目录二级：没有最近目录时给出空态，不编造条目", async () => {
-    const view = await mountReact(<Harness recentFolders={[]} />);
-    try {
-      await openSub("assist-attach-folder");
-      expect(submenu()?.querySelector(".agent-chat-attach-empty")?.textContent).toBe("本机还没有最近目录");
+      await openMenu();
+      expect(row("assist-attach-folder")).toBeNull();
+      await click(row("assist-attach-skill"));
+      expect(submenu()?.getAttribute("data-section")).toBe("skill");
+      expect(row("assist-attach-folder-pick")).toBeNull();
       expect(row("assist-attach-recent-folder-0")).toBeNull();
+      expect(row("assist-attach-workspace-manage")).toBeNull();
     } finally { view.unmount(); }
   });
 
@@ -418,7 +416,7 @@ describe("「+」两级菜单", () => {
       await openSub("assist-attach-skill");
       expect(row("assist-attach-skill-describe")?.disabled).toBe(true);
       expect(row("assist-attach-skill-file")?.disabled).toBe(true);
-      expect(submenu()?.querySelector(".agent-chat-attach-subnote")?.textContent).toContain("Skill 生成与管理尚未接入");
+      expect(row("assist-attach-skill-describe")?.getAttribute("title")).toContain("Skill 生成尚未接入");
       await click(row("assist-attach-skill-existing"));
       expect(onSkill).toHaveBeenCalledTimes(1);
     } finally { view.unmount(); }
@@ -426,12 +424,14 @@ describe("「+」两级菜单", () => {
 
   it("连接器二级：清单动态读取项目连接（GitHub / 浏览器 / 电脑等能力族），按能力逐行展示", async () => {
     /* 无项目归属（首条消息）时入口仍可点开（2026-10-18 用户指认「连接器与插件点击不了」）：
-       面板第一句说明连接按项目登记，管理入口照常可走，不是一行点了没反应。 */
+       面板顶部说明连接随项目配置，且不再列一个必然为空的「已连接能力」分组。 */
     const noProject = await mountReact(<Harness />);
     try {
       expect(row("assist-attach-connectors")?.disabled).toBe(false);
       await openSub("assist-attach-connectors");
-      expect(submenu()?.querySelector(".agent-chat-attach-empty")?.textContent).toContain("连接器按项目登记");
+      expect(submenu()?.querySelector(".agent-chat-attach-empty")?.textContent)
+        .toBe("连接器随项目配置");
+      expect(row("assist-attach-connector-0")).toBeNull();
       expect(row("assist-attach-connectors-manage")).not.toBeNull();
     } finally { noProject.unmount(); }
     const view = await mountReact(<Harness projectId="p-1" />);
@@ -449,12 +449,86 @@ describe("「+」两级菜单", () => {
     } finally { view.unmount(); }
   });
 
+  it("连接器二级：三个内置插件恒可见，状态只取自连接登记", async () => {
+    /* 2026-10-19 用户指认「加号的菜单看不到这三个插件」：没有项目归属、或项目还没登记连接时，
+       旧实现整块是空的。现在插件行恒在，只有状态随连接登记变化。 */
+    const hintOf = (testId: string) => row(testId)
+      ?.querySelector(".agent-chat-attach-item-hint")?.textContent;
+    const noProject = await mountReact(<Harness />);
+    try {
+      await openSub("assist-attach-connectors");
+      expect(row("assist-attach-plugin-computer")?.textContent).toContain("电脑操控");
+      expect(row("assist-attach-plugin-browser")?.textContent).toContain("浏览器操控");
+      expect(row("assist-attach-plugin-github")?.textContent).toContain("GitHub");
+      /* 没有项目时**不写状态**：读不到登记就是无从判断，不是「未授权」；原因只说一次
+         （2026-10-19 用户指认「为什么这里需要项目中授权」——三行各写一遍是同一句话的复读）。 */
+      expect(hintOf("assist-attach-plugin-computer")).toBeUndefined();
+      expect(hintOf("assist-attach-plugin-github")).toBeUndefined();
+      expect(submenu()?.querySelectorAll(".agent-chat-attach-empty")).toHaveLength(1);
+      expect(submenu()?.querySelector(".agent-chat-attach-empty")?.textContent)
+        .toBe("连接器随项目配置");
+      // 去向仍在行的 title 里，不靠状态位表达。
+      expect(row("assist-attach-plugin-github")?.getAttribute("title")).toContain("按项目登记");
+    } finally { noProject.unmount(); }
+
+    const view = await mountReact(<Harness projectId="p-1" />);
+    try {
+      await openSub("assist-attach-connectors");
+      /* 夹具里 GitHub 只有 GITHUB_READ 且 ACTIVE；浏览器三个能力全 ACTIVE；
+         电脑只有 COMPUTER_READ 且 DISABLED——状态逐项来自登记，不按「有这个插件」推断。 */
+      expect(hintOf("assist-attach-plugin-github")).toBe("已连接");
+      expect(hintOf("assist-attach-plugin-browser")).toBe("已连接");
+      expect(hintOf("assist-attach-plugin-computer")).toBe("已停用");
+    } finally { view.unmount(); }
+  });
+
+  it("插件详情：运行时状态与项目授权分开回答，无项目也能看到运行时", async () => {
+    /* 2026-10-20（P0-2）：点插件不再跳通用配置页。运行时是安装级事实，授权是项目级事实；
+       把「未登录」写成「未授权」会让用户去错地方补配置。 */
+    const runtime = [
+      { plugin: "github", state: "NOT_AUTHENTICATED", detail: "GitHub CLI 已安装，但当前没有登录。",
+        remediation: "在终端执行 gh auth login 完成登录" },
+      { plugin: "computer", state: "READY", detail: "电脑运行时已就位", remediation: null },
+      { plugin: "browser", state: "NOT_PAIRED", detail: "浏览器后端尚未连接", remediation: null }
+    ] as const;
+    const withProject = {
+      ...stubClient(), getPluginStatus: vi.fn(async () => runtime)
+    } as unknown as RelayApiClient;
+    const view = await mountReact(<Harness projectId="p-1" client={withProject} />);
+    try {
+      await openSub("assist-attach-connectors");
+      await click(row("assist-attach-plugin-github"));
+      const runtimeRow = document.querySelector('[data-testid="assist-plugin-runtime"]');
+      const authRow = document.querySelector('[data-testid="assist-plugin-authorization"]');
+      expect(runtimeRow?.textContent).toContain("未登录");
+      expect(authRow?.textContent).toContain("已连接");
+      expect(submenu()?.textContent).toContain("gh auth login");
+      // 重新检测只重读一次运行时状态，不产生任何授权。
+      await click(row("assist-plugin-recheck"));
+      expect(vi.mocked(withProject.getPluginStatus)).toHaveBeenCalledTimes(2);
+      await click(row("assist-plugin-back"));
+      expect(row("assist-attach-plugin-github")).not.toBeNull();
+    } finally { view.unmount(); }
+
+    const noProjectClient = { ...stubClient(), getPluginStatus: vi.fn(async () => runtime) } as unknown as RelayApiClient;
+    const noProject = await mountReact(<Harness client={noProjectClient} />);
+    try {
+      await openSub("assist-attach-connectors");
+      await click(row("assist-attach-plugin-browser"));
+      expect(document.querySelector('[data-testid="assist-plugin-runtime"]')?.textContent)
+        .toContain("未就绪");
+      // 没有项目归属时如实说「无法核对授权」，不编一个「未授权」。
+      expect(document.querySelector('[data-testid="assist-plugin-authorization"]')?.textContent)
+        .toContain("需要项目归属");
+    } finally { noProject.unmount(); }
+  });
+
   it("连接器二级：空清单与读取失败各有如实文案，不编造插件", async () => {
     const empty = { getChatCommands: vi.fn(async () => catalog),
       getGatewayConnections: vi.fn(async () => []) } as unknown as RelayApiClient;
     const failing = { getChatCommands: vi.fn(async () => catalog),
       getGatewayConnections: vi.fn(async () => { throw new Error("boom"); }) } as unknown as RelayApiClient;
-    const first = await mountReact(<div>
+    const first = await mountAttach(<div>
       <ComposerAttach client={empty} mode="AGENT" hasSession projectId="p-1"
         onSources={() => {}} onSkill={() => {}} onCommand={() => {}} />
     </div>);
@@ -462,7 +536,7 @@ describe("「+」两级菜单", () => {
       await openSub("assist-attach-connectors");
       expect(submenu()?.querySelector(".agent-chat-attach-empty")?.textContent).toContain("还没有已连接的插件");
     } finally { first.unmount(); }
-    const second = await mountReact(<div>
+    const second = await mountAttach(<div>
       <ComposerAttach client={failing} mode="AGENT" hasSession projectId="p-1"
         onSources={() => {}} onSkill={() => {}} onCommand={() => {}} />
     </div>);
@@ -480,9 +554,9 @@ describe("「+」两级菜单", () => {
       await openSub("assist-attach-command");
       expect(row("assist-attach-command-review")).not.toBeNull();
       expect(row("assist-attach-command-review")?.textContent).toContain("/review · 代码审查");
-      // /model 已接入；菜单仍只编辑草稿，执行须由发送触发。
+      // /model 已接入；菜单仍只编辑草稿，执行须由发送触发。可用的命令不再挂「可用」标签。
       const model = row("assist-attach-command-model");
-      expect(model?.querySelector(".agent-chat-attach-item-hint")?.textContent).toBe("可用");
+      expect(model?.querySelector(".agent-chat-attach-item-hint")).toBeNull();
       await click(row("assist-attach-command-review"));
       // 只编辑草稿：不发送、不新建会话，用户仍可继续补充自然语言。
       expect((document.querySelector('[data-testid="draft"]') as HTMLTextAreaElement).value).toBe("/review ");
@@ -505,7 +579,7 @@ describe("「+」两级菜单", () => {
 
   it("命令二级：非普通档不列方法命令，读取失败与无命令各有如实文案", async () => {
     const failing = { getChatCommands: vi.fn(async () => { throw new Error("boom"); }) } as unknown as RelayApiClient;
-    const view = await mountReact(<div>
+    const view = await mountAttach(<div>
       <ComposerAttach client={failing} mode="AGENT" hasSession onCommand={() => {}} />
     </div>);
     try {
@@ -518,7 +592,7 @@ describe("「+」两级菜单", () => {
     /* jsdom 不量几何，这里锁的是产生对称的那两条结构前提（真实几何在 Chromium 量过，
        见设计系统 §9.14）：①尾组是行的最后一个子项，状态位与 chevron 都在它里面；
        ②面板宽度收缩到内容（没有 min-width 下限），否则短行右侧会重新出现空白带。 */
-    const view = await mountReact(<Harness initialRefs={refs} folderBound />);
+    const view = await mountReact(<Harness initialRefs={refs} skillSelected />);
     try {
       await openMenu();
       const sources = row("assist-attach-sources");
@@ -528,7 +602,7 @@ describe("「+」两级菜单", () => {
       // 计数与 chevron 同组；对勾也进尾组。
       expect(tail?.querySelector(".agent-chat-attach-item-hint")).not.toBeNull();
       expect(tail?.querySelector(".agent-chat-attach-item-chevron")).not.toBeNull();
-      expect(row("assist-attach-folder")?.querySelector(".agent-chat-attach-item-tail .agent-chat-attach-item-check"))
+      expect(row("assist-attach-skill")?.querySelector(".agent-chat-attach-item-tail .agent-chat-attach-item-check"))
         .not.toBeNull();
       // 没有状态位的行只有尾组里的 chevron，不产生空的第三段。
       expect(row("assist-attach-command")?.querySelector(".agent-chat-attach-item-tail")?.children).toHaveLength(1);
@@ -563,8 +637,8 @@ describe("「+」两级菜单", () => {
     try {
       await openMenu();
       await key(row("assist-attach-sources"), "ArrowDown");
-      expect(document.activeElement).toBe(row("assist-attach-folder"));
-      await key(row("assist-attach-folder"), "ArrowUp");
+      expect(document.activeElement).toBe(row("assist-attach-skill"));
+      await key(row("assist-attach-skill"), "ArrowUp");
       expect(document.activeElement).toBe(row("assist-attach-sources"));
       await key(row("assist-attach-sources"), "ArrowRight");
       expect(submenu()?.getAttribute("data-section")).toBe("sources");
@@ -579,7 +653,7 @@ describe("「+」两级菜单", () => {
   });
 
   it("禁用的一级行不展开二级，也不显示 chevron（首条消息前的资料）", async () => {
-    const view = await mountReact(<div>
+    const view = await mountAttach(<div>
       <ComposerAttach client={stubClient()} mode="AGENT" hasSession={false}
         onCommand={() => {}} notes={[{ text: "首条消息后可选资料与 Skill", keys: ["sources", "skill"] }]} />
     </div>);
@@ -596,9 +670,10 @@ describe("「+」两级菜单", () => {
       await click(row("assist-attach-skill"));
       expect(submenu()?.querySelector(".agent-chat-attach-empty")?.textContent).toBe("首条消息后可选资料与 Skill");
       expect(row("assist-attach-connectors")?.disabled).toBe(false);
-      expect(row("assist-attach-connectors")?.getAttribute("title")).toContain("连接器按项目登记");
+      expect(row("assist-attach-connectors")?.getAttribute("title")).toContain("连接器随项目配置");
       expect(row("assist-attach-command")?.getAttribute("aria-describedby")).toBeNull();
-      expect(document.querySelector(".agent-chat-attach-note")?.textContent).toBe("首条消息后可选资料与 Skill");
+      // 原因只在悬停 title 里：菜单底部不再有整段脚注（2026-10-19 用户指认「很影响体验」）。
+      expect(document.querySelector(".agent-chat-attach-note")).toBeNull();
     } finally { view.unmount(); }
   });
 
@@ -611,7 +686,7 @@ describe("「+」两级菜单", () => {
       return { ...rect, left: 900, right: 1100, top: 700, bottom: 900, width: 200, height: 200 } as DOMRect;
     };
     try {
-      await openSub("assist-attach-folder");
+      await openSub("assist-attach-sources");
       expect(submenu()?.getAttribute("data-flip")).toBe("left");
     } finally {
       Element.prototype.getBoundingClientRect = original;
@@ -619,3 +694,70 @@ describe("「+」两级菜单", () => {
     }
   });
 });
+
+/**
+ * R3-01（2026-10-21 走查）：从已绑定项目的会话进「连接器与插件 → 某插件 → 管理连接与权限」，
+ * 落地页必须是**这个项目**的连接与权限区，而不是要求重选项目的全局页；跳转本身是站内导航，
+ * 不整页重载，并留下回到原会话的位置。这里锁的是跳转语义：导航与看状态不授予任何权限，
+ * 授权仍只在连接页上由用户显式提交连接与策略命令产生。
+ */
+describe("「管理连接与权限」保留当前范围", () => {
+  const runtime = [
+    { plugin: "computer", state: "READY", detail: "电脑运行时已就位", remediation: null },
+    { plugin: "browser", state: "NOT_PAIRED", detail: "浏览器后端尚未连接", remediation: null },
+    { plugin: "github", state: "NOT_AUTHENTICATED", detail: "GitHub CLI 已安装，但当前没有登录。",
+      remediation: "在终端执行 gh auth login 完成登录" }
+  ] as const;
+  const pluginClient = () => ({ ...stubClient(), getPluginStatus: vi.fn(async () => runtime) }) as unknown as RelayApiClient;
+  /** 落点按站内路由读回：路径 + 查询参数，不依赖序列化时的编码细节。 */
+  function landed() {
+    const url = new URL(document.querySelector('[data-testid="harness-path"]')?.textContent ?? "", "http://workbench.local");
+    return { pathname: url.pathname, params: url.searchParams };
+  }
+
+  it("插件详情里点「管理连接与权限」：站内直达本项目的连接页并定位这个插件", async () => {
+    const view = await mountReact(<Harness path="/agent?session=abc" projectId="p-1" client={pluginClient()} />);
+    try {
+      await openSub("assist-attach-connectors");
+      await click(row("assist-attach-plugin-computer"));
+      await click(row("assist-plugin-manage"));
+      expect(landed().pathname).toBe("/projects/p-1/connections");
+      expect(landed().params.get("tool")).toBe("computer");
+      // 返回路径是点击时所在位置：往返后仍回得到同一条会话。
+      expect(landed().params.get("from")).toBe("/agent?session=abc");
+    } finally { view.unmount(); }
+  });
+
+  it("三个插件各自带上自己的键，连接器面板底部那一条只到项目范围", async () => {
+    for (const plugin of ["computer", "browser", "github"] as const) {
+      const view = await mountReact(<Harness projectId="p-1" client={pluginClient()} />);
+      try {
+        await openSub("assist-attach-connectors");
+        await click(row(`assist-attach-plugin-${plugin}`));
+        await click(row("assist-plugin-manage"));
+        expect(landed().pathname).toBe("/projects/p-1/connections");
+        expect(landed().params.get("tool")).toBe(plugin);
+      } finally { view.unmount(); }
+    }
+    const general = await mountReact(<Harness projectId="p-1" client={pluginClient()} />);
+    try {
+      await openSub("assist-attach-connectors");
+      await click(row("assist-attach-connectors-manage"));
+      expect(landed().pathname).toBe("/projects/p-1/connections");
+      // 没有指定插件时不猜一个键。
+      expect(landed().params.get("tool")).toBeNull();
+    } finally { general.unmount(); }
+  });
+
+  it("没有项目归属时到真实的项目选择页，不替用户猜一个项目", async () => {
+    const view = await mountReact(<Harness client={pluginClient()} projectId={null} />);
+    try {
+      await openSub("assist-attach-connectors");
+      await click(row("assist-attach-plugin-github"));
+      await click(row("assist-plugin-manage"));
+      expect(landed().pathname).toBe("/settings/connections");
+      expect(landed().params.get("from")).toBe("/agent");
+    } finally { view.unmount(); }
+  });
+});
+

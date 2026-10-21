@@ -4,6 +4,7 @@ import FolderScope from "./FolderScope";
 import type { RelayWorkingDirectory } from "../api/relayClient";
 import type { RecentWorkingDirectory } from "../lib/recentWorkingDirectories";
 import { useMenuDismiss } from "../lib/popoverMenu";
+import { usePathTooltip } from "../lib/pathTooltip";
 import "./FolderScopeBar.css";
 
 /**
@@ -30,7 +31,8 @@ import "./FolderScopeBar.css";
  * 内容与命令一概未动。
  */
 export default function FolderScopeBar({ directory, recents, busy, error,
-  associationLabel, warning, boundDirectoryPath = null, onOpen, onNewConversation }: {
+  associationLabel, warning, boundDirectoryPath = null,
+  onOpen, onNewConversation }: {
   readonly directory: RelayWorkingDirectory | null;
   readonly boundDirectoryPath?: string | null;
   readonly recents: readonly RecentWorkingDirectory[];
@@ -51,6 +53,9 @@ export default function FolderScopeBar({ directory, recents, busy, error,
   // 读起来像提示不像入口。因此只有「还没有目录」这一档改成动作文案＋常驻虚线下划线（见 CSS）；
   // 已有目录名时它是事实主角，回到纯文本＋悬停下划线，不给真实目录名加装饰。
   const unnamed = directory === null && boundDirectoryPath === null;
+  // 细条只写目录名，绝对路径在悬停/聚焦时浮出（2026-10-20 用户要求）。
+  const currentPath = directory?.canonicalRoot ?? boundDirectoryPath;
+  const { tooltipHandlers, tooltipNode } = usePathTooltip(() => currentPath);
   const stripRef = useRef<HTMLElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   // 浮层的关闭语义（点外面、Esc、打开别的浮层时独占）收口在 lib/popoverMenu，
@@ -82,7 +87,7 @@ export default function FolderScopeBar({ directory, recents, busy, error,
   }, [directory]);
 
   return <section className="folder-strip" data-testid="folder-scope-strip" ref={stripRef}
-    data-state={warning === null ? "normal" : "warning"}>
+    data-state={warning === null ? "normal" : notReady ? "warning" : "advisory"}>
     <p className="folder-strip-line">
       <FolderOpen aria-hidden="true" className="folder-strip-icon" />
       {/* 目录名过长时按本档省略，完整路径挂在 title 上：只有名字时无法核对是哪一个目录。
@@ -91,15 +96,25 @@ export default function FolderScopeBar({ directory, recents, busy, error,
       <button className={`folder-strip-name${unnamed ? " folder-strip-name--action" : ""}`}
         type="button" data-testid="folder-scope-change"
         aria-haspopup="dialog" aria-expanded={changing} disabled={busy}
-        title={directory?.canonicalRoot ?? boundDirectoryPath ?? "选择工作目录"}
+        {...tooltipHandlers}
         onClick={() => setChanging((open) => !open)}>{directory?.displayName ?? boundDirectoryPath?.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) ?? "选择工作目录"}</button>
+      {tooltipNode}
       <span className="folder-strip-meta" data-testid="folder-scope-association">{associationLabel}</span>
+      {/* 只有「Git 需要到仓库根才能授权」这一档在细条上露一个标记：它是可行动的信息，
+          其余 Git 状态（已就绪／非仓库／停用／撤销）留在更换目录浮层里，不占这一行。 */}
+      {directory !== null && directory.gitRead?.state === "REPO_ROOT_REQUIRED" &&
+        <span className="folder-strip-git" data-testid="folder-strip-git"
+          title={directory.gitRead.detail}>Git 只在仓库根授权</span>}
       {/* 完整告警给读屏与 title；可见区只留「这件事的后果」，不复述归属那一句，
-          避免同一事实在一行里说两遍。 */}
+          避免同一事实在一行里说两遍。
+          2026-10-20 第五轮：未归入项目这一档降为 advisory——它是常态而非紧急故障，
+          整条铺琥珀色、目录名跟着换色，会把普通状态长期读成高优先级告警（用户截图指认
+          「信息拥挤、语义混杂」）。现在只有「目录未就绪」这一档（写操作真的被挡住）保留
+          警示色；advisory 用中性前景，完整原因与去向仍在 visually-hidden 与 title 里。 */}
       {warning !== null && <span className="folder-strip-warning" role="status" title={warning}
         data-testid={notReady ? "folder-scope-not-ready" : "collab-unassigned-execution-hint"}>
         <span className="visually-hidden">{warning}</span>
-        <span aria-hidden="true">{notReady ? "目录未就绪，暂不能执行写操作" : "不影响讨论，执行前需先归入项目"}</span>
+        <span aria-hidden="true">{notReady ? "目录未就绪，暂不能执行写操作" : "执行前需归入项目"}</span>
       </span>}
     </p>
     {error !== null && <p className="action-error" role="alert" data-testid="folder-error">{error}</p>}
@@ -109,7 +124,8 @@ export default function FolderScopeBar({ directory, recents, busy, error,
         「这是换目录」。可见标题省掉，身份挂在 aria-label 上，与触发键的 aria-haspopup 对上。 */}
     {changing && <div className="folder-scope-pop" ref={panelRef} role="dialog" tabIndex={-1}
       aria-label="更换工作目录">
-      <FolderScope state={{ directory, recents, busy }} onOpen={submit}
+      <FolderScope state={{ directory, recents, busy,
+        currentPath: directory?.canonicalRoot ?? boundDirectoryPath }} onOpen={submit}
         onNewConversation={() => { setChanging(false); onNewConversation(); }} />
     </div>}
   </section>;

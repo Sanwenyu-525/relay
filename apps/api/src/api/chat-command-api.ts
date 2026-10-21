@@ -17,8 +17,10 @@ import { problemFromError, sendProblem, sendReadError, type RouteDependencies } 
  *
  * 之所以用 POST 而不是 GET：输入文本可能较长且含换行，放进 query 既难编码也容易截断；
  * resolve 不携带 command_id，也不产生命令回执，语义上仍是只读查询。
- * POST 会话 chat-commands 才执行 /clear、/new、/undo 与 /model，并沿各自应用 Owner 返回持久回执；
- * /model 落到会话模型选择的独占 Owner，只改本会话后续新请求所用模型，不动应用默认。
+ * POST 会话 chat-commands 执行 /clear、/new、/undo、/model 与不带正文的 /plan、/goal，
+ * 并沿各自应用 Owner 返回持久回执；/model 落到会话模型选择的独占 Owner，只改本会话后续
+ * 新请求所用模型，不动应用默认。带正文的 `/plan 内容`、`/goal 内容` 不走这里：模式随消息
+ * 进同一命令，由消息 Owner 在同一事务里生效（见 assist-api 的 202 回执）。
  * GET 会话 model-selection 只读回显当前选择（无覆盖即 null），不发起调用、不写存储。
  */
 
@@ -48,6 +50,8 @@ const selectionFields = {
 const modelSelectionDto = Type.Object(selectionFields, strict);
 
 const executeResult = Type.Union([
+  Type.Object({ kind: Type.Literal('MEMORY_COMPACTION'), system: Type.Literal('compact'),
+    session_id: Type.String({ format: 'uuid' }), request_id: Type.String({ format: 'uuid' }), status: Type.Literal('PENDING') }, strict),
   Type.Object({ kind: Type.Literal('NEW_SESSION'),
     system: Type.Union([Type.Literal('clear'), Type.Literal('new')]),
     source_session_id: Type.String({ format: 'uuid' }), session_id: Type.String({ format: 'uuid' }),
@@ -59,6 +63,16 @@ const executeResult = Type.Union([
     session_id: Type.String({ format: 'uuid' }), request_id: Type.String({ format: 'uuid' }),
     status: Type.String(), revision, undo_command_id: Type.String({ format: 'uuid' }) }, strict),
   Type.Object({ kind: Type.Literal('MODEL_SELECTION'), ...selectionFields }, strict),
+  /*
+   * 0127：`/plan`、`/goal` 不带正文的形式——只切模式。带正文的形式由消息命令受理
+   * （模式随消息进同一命令），不到这个入口；因此这里的结果只回答「模式切到哪了、
+   * 有没有活动目标正在安全停止」。
+   */
+  Type.Object({ kind: Type.Literal('CHAT_MODE'),
+    system: Type.Union([Type.Literal('plan'), Type.Literal('goal')]),
+    session_id: Type.String({ format: 'uuid' }),
+    chat_mode: Type.Union([Type.Literal('CHAT'), Type.Literal('PLAN'), Type.Literal('GOAL')]),
+    goal_stopping: Type.Boolean() }, strict),
 ]);
 
 const menuEntry = Type.Object({
@@ -93,19 +107,19 @@ export function registerChatCommandRoutes(app: FastifyInstance,
   dependencies: RouteDependencies): void {
   app.post('/assist-sessions/:session_id/chat-commands', {
     schema: { params: executeParams, body: executeBody,
-      response: { 200: commandEnvelopeSchema(executeResult) } },
+      response: { 200: commandEnvelopeSchema(executeResult), 202: commandEnvelopeSchema(executeResult) } },
   }, async (request, reply) => {
     const params = request.params as { workspace_id: string; session_id: string };
     const body = request.body as { command_id: string; text: string };
     try {
       const outcome = await executeChatCommand(dependencies.database.executor, {
         workspaceId: params.workspace_id, sessionId: params.session_id,
-        commandId: body.command_id, text: body.text });
+        commandId: body.command_id, text: body.text }, dependencies.storage);
       if (outcome.replayed) reply.header('command-replayed', 'true');
       const resource = outcome.result.kind === 'STATE_WITHDRAWAL'
         ? `conversation-state-requests/${outcome.result.request_id}`
         : `assist-sessions/${outcome.result.session_id}`;
-      return reply.code(200).send({ command_id: body.command_id,
+      return reply.code(outcome.result.kind === 'MEMORY_COMPACTION' ? 202 : 200).send({ command_id: body.command_id,
         committed_at: outcome.committedAt.toISOString(), result: outcome.result,
         links: { resource: `/api/v1/workspaces/${params.workspace_id}/${resource}` } });
     } catch (error) {

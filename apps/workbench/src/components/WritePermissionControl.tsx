@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Ban, ChevronDown, CircleAlert, Flame, Hand, Lock, RefreshCw, ShieldX, Zap } from "lucide-react";
+import { Ban, ChevronDown, CircleAlert, CircleCheck, Eye, Hand, ShieldX, TriangleAlert } from "lucide-react";
 import { createCommandId, RelayApiError, type RelayApiClient, type RelayWriteReadiness, type RelayWriteTier } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { useDetailsMenu } from "../lib/popoverMenu";
@@ -13,6 +13,14 @@ import "./WritePermissionControl.css";
  * 只读 → 请求批准 → 自动批准 → 完全访问；完全访问（红色）只放宽本目录内的文件写入，
  * 含删除，Git、CLI、浏览器与目录外动作仍按各自策略逐次确认。
  * 界面只显示服务端投影出的档位，不自己排序策略。
+ *
+ * **芯片文字里哪些是档位、哪些不是**（2026-10-21 用户指认「未开放写入这个权限是从哪来的」）：
+ * 服务端可存的档位只有四档——`RelayWriteTier = READ_ONLY | ASK | AUTO | FULL`（`api/dtos/gateway.ts`），
+ * 菜单里可选的也正是这四行。芯片还可能读出另外三个词，它们都不是档位、也不会被写进任何请求：
+ * `写入档位待核对`＝本机还没读到服务端投影，`已拒绝写入`＝另有 DENY 策略行压着档位，
+ * `不可写入`＝这一处作用域此刻写不了（`blocked`：读到的前置条件不满足；`unbound`：还没有
+ * 目录／项目可查，因此根本不发起查询）。两者按 2026-10-18 指令仍读作一句权限结论，差别只写在
+ * 悬停说明与输入卡上方摘要里（`未就绪` / `未就绪（未绑定目录）`）。
  */
 
 export type Tier = "full" | "auto" | "ask" | "none" | "denied" | "blocked" | "unknown" | "unbound";
@@ -30,14 +38,18 @@ type PendingTier = {
 
 export const tierLabels: Record<Tier, string> = {
   full: "完全访问", auto: "自动批准", ask: "请求批准", none: "只读", denied: "已拒绝写入",
-  blocked: "未开放写入", unknown: "写入档位待核对",
+  // 「不可写入」不是第五档权限：服务端只有 READ_ONLY/ASK/AUTO/FULL 四档（`RelayWriteTier`），
+  // 芯片上的这两个状态是「此刻写不了」的投影，档位菜单里也没有这一行可选（2026-10-21 措辞修正，
+  // 见本文件顶部说明）。原先写作「未开放写入」，用户实机读成了「未开发写入」＝功能没做。
+  blocked: "不可写入", unknown: "写入档位待核对",
   /**
    * 2026-10-18 用户指认「这个下拉框功能是调整权限，所以默认状态不应该显示未选择目录而
    * 应该显示哪个权限」：未绑定目录时的真实权限就是「什么都写不了」，因此这里也读作一个
-   * 档位，而不是复述目录状态。缺的是目录还是项目归属，由菜单头与下一句说明承担——
-   * 芯片只回答「权限是什么」这一件事。
+   * 档位，而不是复述目录状态。2026-10-19 用户指令删掉菜单首行与提示行后，芯片只回答
+   * 「权限是什么」这一件事；2026-10-21 用户指认四行全灰却无解释，菜单在**禁用态**补回
+   * 一行原因＋下一步（见 `write-permission-reason`），可选态仍只由悬停承载。
    */
-  unbound: "未开放写入",
+  unbound: "不可写入",
 };
 
 const choiceTiers: Record<Choice, Tier> = { ASK: "ask", AUTO: "auto", FULL: "full", NONE: "none" };
@@ -56,10 +68,14 @@ function tierOf(readiness: RelayWriteReadiness | null): Tier {
   return "blocked";
 }
 
-/** 四档取轮廓互异的一组图标（闪电／手掌／火焰／锁），盾牌族彼此太像，扫一眼分不出来。 */
-const tierIcons: Record<Tier, typeof Lock> = {
-  full: Flame, auto: Zap, ask: Hand, none: Lock, denied: ShieldX, blocked: Ban, unknown: CircleAlert,
-  unbound: Ban,
+/**
+ * 图标按「这一档允许我做什么」选：只读＝只能看（眼睛），请求批准＝每次伸手问（手掌），
+ * 自动批准＝普通编辑自动放行（圆勾），完全访问＝这一档免掉删除确认，用危险三角（红色）。
+ * 2026-10-19 用户实机指认「完全访问应该是代表危险的图标」，开锁改回危险符号。
+ */
+const tierIcons: Record<Tier, typeof Hand> = {
+  full: TriangleAlert, auto: CircleCheck, ask: Hand, none: Eye, denied: ShieldX, blocked: Ban,
+  unknown: CircleAlert, unbound: Ban,
 };
 
 export default function WritePermissionControl({ client, projectId, resourceId, canonicalRoot, disabled = false, onTier }: {
@@ -78,6 +94,7 @@ export default function WritePermissionControl({ client, projectId, resourceId, 
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingTier | null>(null);
+  const [mayRetry, setMayRetry] = useState(false);
   const scope = useRef(0);
   const currentScope = useRef({ client, projectId, resourceId, canonicalRoot });
   currentScope.current = { client, projectId, resourceId, canonicalRoot };
@@ -85,14 +102,14 @@ export default function WritePermissionControl({ client, projectId, resourceId, 
   // 否则多个绝对定位菜单会叠在一起（2026-10-17 用户指认）。语义收口在 popoverMenu。
   const detailsRef = useRef<HTMLDetailsElement>(null);
   useDetailsMenu(detailsRef);
-  // 入口在两处输入器常驻：没有绑定目录或项目时不隐藏，而是显示「未开放写入」这一档，
+  // 入口在两处输入器常驻：没有绑定目录或项目时不隐藏，而是读作「不可写入」这一句权限结论
+  // （它不是第五档档位，菜单里也没有这一行），入口不消失——隐藏会被读成功能不存在。
   // 缺什么写在菜单里（2026-10-18 用户指认：芯片属于权限控件，就读权限，不复述目录状态）。
   const scopeMissing = projectId === null || resourceId === null;
   const readinessTier = tierOf(readiness);
   const tier: Tier = scopeMissing ? "unbound" : readinessTier;
   const label = tierLabels[tier];
   const TierIcon = tierIcons[tier];
-  const directoryName = (canonicalRoot ?? "").replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) ?? "";
   const onTierRef = useRef(onTier);
   onTierRef.current = onTier;
   useEffect(() => { onTierRef.current?.(tier); }, [tier]);
@@ -141,7 +158,7 @@ export default function WritePermissionControl({ client, projectId, resourceId, 
       setActionError("目录或连接已更换；请返回原目录核对该命令。");
       return;
     }
-    setSubmitting(true); setActionError(null); setConfirmed(null); setPending(command);
+    setSubmitting(true); setActionError(null); setConfirmed(null); setPending(command); setMayRetry(false);
     try {
       const result = await command.client.setLocalDirectoryWriteTier(command.request);
       if (!matchesCurrentScope(command)) return;
@@ -158,11 +175,54 @@ export default function WritePermissionControl({ client, projectId, resourceId, 
         setActionError(describeLiveError(caught).message);
         if (caught.problem.status === 409) void load();
       } else {
-        setActionError("提交结果尚不明确。先用原 command_id 查询回执；查不到时只能原样重试，不换命令 ID。");
+        // 结果不明时不再把「原 command_id / 查询回执」摆给用户（2026-10-20，P1-4）：
+        // 先由程序做一次有界核对——查询同一条命令的回执。查到就是已保存，查不到才请用户
+        // 决定重新核对还是重试；原 ID 与原载荷在此期间保持冻结。
+        await verify(command);
       }
     } finally {
       setSubmitting(false);
     }
+  }
+
+  /**
+   * 核对一次保存结果。只查这一条命令的回执，不重发、不改载荷、不换 ID。
+   * 返回结论供调用方决定是否继续（自动核对只用一次，不做轮询）。
+   */
+  async function verify(command: PendingTier): Promise<"CONFIRMED" | "NOT_FOUND" | "FAILED"> {
+    if (!matchesCurrentScope(command)) {
+      setActionError("目录或连接已更换；请返回原目录核对该命令。");
+      return "FAILED";
+    }
+    setSubmitting(true); setActionError(null);
+    try {
+      const receipt = await command.client.getCommandReceipt(command.request.commandId);
+      if (!matchesCurrentScope(command)) return "FAILED";
+      if (receipt.commandType !== command.type || receipt.commandId !== command.request.commandId) {
+        throw new Error("查到的回执与这次保存对不上，请重新核对。");
+      }
+      const next = await load();
+      if (!matchesCurrentScope(command)) return "FAILED";
+      setPending(null); setMayRetry(false);
+      setConfirmed(confirmationForCommand(command, next, receipt.result));
+      return "CONFIRMED";
+    } catch (caught) {
+      if (!matchesCurrentScope(command)) return "FAILED";
+      if (caught instanceof RelayApiError && caught.problem.code === "COMMAND_NOT_FOUND") {
+        setMayRetry(true);
+        setActionError("还没查到这次保存的结果。可以重新核对；确认没有保存时再重试。");
+        return "NOT_FOUND";
+      }
+      setActionError(describeLiveError(caught).message);
+      return "FAILED";
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function checkPending() {
+    if (pending === null || submitting) return;
+    await verify(pending);
   }
 
   function buildCommand(choice: Choice): PendingTier | null {
@@ -175,41 +235,18 @@ export default function WritePermissionControl({ client, projectId, resourceId, 
         tier: choice === "NONE" ? "READ_ONLY" : choice } };
   }
 
-  async function checkPending() {
-    if (pending === null || submitting) return;
-    const command = pending;
-    if (!matchesCurrentScope(command)) {
-      setActionError("目录或连接已更换；请返回原目录核对该命令。");
-      return;
-    }
-    setSubmitting(true); setActionError(null);
-    try {
-      const receipt = await command.client.getCommandReceipt(command.request.commandId);
-      if (!matchesCurrentScope(command)) return;
-      if (receipt.commandType !== command.type) throw new Error("原命令回执的类型与本次操作不符，请核对后再处理。");
-      const next = await load();
-      if (!matchesCurrentScope(command)) return;
-      setPending(null);
-      setConfirmed(confirmationForCommand(command, next, receipt.result));
-    } catch (caught) {
-      if (!matchesCurrentScope(command)) return;
-      if (caught instanceof RelayApiError && caught.problem.code === "COMMAND_NOT_FOUND") {
-        setActionError("原命令回执暂未找到；仍用原 command_id 重试，或稍后再查。");
-      } else setActionError(describeLiveError(caught).message);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   const rows: readonly { readonly choice: Choice; readonly body: string }[] = [
     { choice: "ASK", body: "每次写入单独批准" },
-    { choice: "AUTO", body: "本次任务范围内普通编辑自动，删除仍逐次确认" },
-    { choice: "FULL", body: "本目录内新建、修改与删除不再逐次确认" },
+    { choice: "AUTO", body: "任务内普通编辑自动，删除仍确认" },
+    { choice: "FULL", body: "本目录内新建、修改与删除免确认" },
     { choice: "NONE", body: "本目录只读" },
   ];
   const currentChoice: Choice | null = tier === "full" ? "FULL" : tier === "auto" ? "AUTO"
     : tier === "ask" ? "ASK" : tier === "none" ? "NONE" : null;
-  const description = readiness?.detail ?? actionError ?? hint ?? "正在核对服务端档位";
+  // 菜单首行与提示行按 2026-10-19 用户指令删除后，「这条档位属于哪个目录」与「缺了哪一步」
+  // 只剩悬停说明这一个载体，因此把目录与说明都收在这里，不再出现在可见文字里。
+  const description = [canonicalRoot, readiness?.detail ?? actionError ?? hint ?? "正在核对服务端档位"]
+    .filter((part): part is string => part !== null).join("｜");
 
   return <details className="agent-chat-permission" data-testid="write-permission" ref={detailsRef}>
     <summary className="agent-chat-tool agent-chat-permission-chip" data-testid="write-permission-chip"
@@ -219,16 +256,6 @@ export default function WritePermissionControl({ client, projectId, resourceId, 
       <TierIcon aria-hidden="true" />{checking && readiness === null && !scopeMissing ? "正在核对档位" : label}
       <ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" /></summary>
     <div className="agent-chat-permission-menu" role="group" aria-label="本目录写入档位">
-      <div className="agent-chat-permission-head">
-        <p className="agent-chat-permission-target" title={canonicalRoot ?? undefined}>{scopeMissing
-          ? (canonicalRoot === null ? "尚未选择工作目录"
-            : projectId === null ? "这个目录还没有归入项目" : "这个目录还没有绑定受管资源")
-          : `本目录${directoryName === "" ? "" : `：${directoryName}`}`}</p>
-        <button className="agent-chat-permission-recheck" type="button" data-testid="write-permission-recheck"
-          disabled={submitting || checking} aria-label="重新核对写入档位" title="重新核对写入档位"
-          onClick={() => void load()}>
-          <RefreshCw aria-hidden="true" /></button>
-      </div>
       {rows.map((row) => { const RowIcon = tierIcons[choiceTiers[row.choice]];
         return <button key={row.choice} className="agent-chat-permission-row" type="button"
           data-testid={`write-permission-${row.choice.toLowerCase()}`} data-tier={choiceTiers[row.choice]}
@@ -242,19 +269,38 @@ export default function WritePermissionControl({ client, projectId, resourceId, 
             <span className="agent-chat-permission-row-body">{row.body}</span>
           </span>
         </button>; })}
-      {hint !== null && <p className="agent-chat-permission-hint" role="status"
-        data-testid="write-permission-hint">{hint}</p>}
+      {/* 2026-10-21 用户指认「权限选择下拉框选项是禁用状态」：四行一起变灰却什么都不说，
+          是一条没有出口的死路。闸门本身一行没改（用户口径：不放宽，只说清为什么＋下一步），
+          只在禁用态补这一行——可选态仍只由悬停承载（2026-10-19 指令不变）。
+          错误态不在此列：它已有 `write-permission-error` 那一条可见说明，不重复挂第二行。 */}
+      {!canChoose && actionError === null && hint !== null && <div className="agent-chat-permission-reason"
+        data-testid="write-permission-reason">
+        <p className="helper-text">{hint}</p>
+        {/* 服务端答了、但当前状态不属于可调整那一类：唯一能做的事就是再看一次。 */}
+        {readiness !== null && !prereqOk && <button className="secondary-button" type="button"
+          data-testid="write-permission-recheck-tier" disabled={checking}
+          onClick={() => void load()}>{checking ? "正在核对" : "重新核对"}</button>}
+      </div>}
       {pending !== null && <div className="agent-chat-permission-pending" data-testid="write-permission-pending">
-        <p className="helper-text">结果待核对 · 原 command_id：{pending.request.commandId}</p>
-        <button className="secondary-button" type="button" data-testid="write-permission-receipt" disabled={submitting}
-          onClick={() => void checkPending()}>{submitting ? "正在查询" : "查询原回执"}</button>
-        <button className="secondary-button" type="button" data-testid="write-permission-retry" disabled={submitting}
-          onClick={() => void send(pending)}>{submitting ? "正在重试" : "按原命令重试"}</button>
+        {/* 2026-10-20（P1-4）：用户看到的是「保存有没有成功」，不是命令协议。
+            核对由程序先做一次；这里的两个键只在没查到时才需要人决定。 */}
+        <p className="helper-text" data-testid="write-permission-pending-text">
+          {submitting ? "正在核对是否保存成功…" : "保存结果还没确认"}</p>
+        <div className="agent-chat-permission-pending-actions">
+          <button className="secondary-button" type="button" data-testid="write-permission-receipt" disabled={submitting}
+            onClick={() => void checkPending()}>{submitting ? "正在核对" : "重新核对"}</button>
+          {mayRetry && <button className="secondary-button" type="button" data-testid="write-permission-retry" disabled={submitting}
+            onClick={() => void send(pending)}>{submitting ? "正在重试" : "重试保存"}</button>}
+        </div>
+        <details className="tech-details" data-testid="write-permission-diagnostics">
+          <summary>诊断信息</summary>
+          <p className="helper-text">命令：{pending.type} · 标识：<code className="hash-code">{pending.request.commandId}</code></p>
+          <p className="helper-text">原档位修订：{pending.request.expectedRevision} · 目标档位：{tierLabels[pending.intended]}</p>
+        </details>
       </div>}
       {actionError !== null && <p className="agent-chat-permission-error" role="alert"
         data-testid="write-permission-error">{actionError}</p>}
       {confirmed !== null && <p className="helper-text" data-testid="write-permission-confirmed">{confirmed}</p>}
-      <p className="agent-chat-permission-footnote">完全访问仅本目录文件写入 · Git 与 CLI 仍逐次确认</p>
     </div>
   </details>;
 }

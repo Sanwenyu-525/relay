@@ -5,6 +5,10 @@
 .review-primary, .review-page .review-detail { min-width: 0; padding: var(--relay-layout-main-padding); }
 .review-page .review-detail { border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .review-page .review-primary > .page-head { margin-bottom: var(--relay-space-2); }
+/* 单列窗口里判断详情排在正文之后，首屏读不到「决定」在哪，也没有通往它的入口（第三轮 R3-04）。
+   这两个键只滚动与移动焦点：不代替阅读，不开放提交，因此沿用 .text-link 的安静文字观感，
+   仅在本页补容器排版；上分隔线把它与页头 meta 分开，避免读成页头说明的一部分。 */
+.review-jump { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-2) var(--relay-space-6); padding-top: var(--relay-space-2); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); margin-bottom: var(--relay-space-4); }
 .review-page .review-list { padding: 0; border: 0; margin-top: var(--relay-layout-section-gap); }
 .review-filters { display: flex; flex-wrap: wrap; gap: var(--relay-space-6); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); margin-bottom: var(--relay-space-6); padding-top: var(--relay-space-4); }
 .review-filters > button { display: flex; align-items: center; gap: var(--relay-space-2); min-height: var(--relay-control-height); border: 0; border-bottom: var(--relay-border-width) solid transparent; background: transparent; padding: 0; color: var(--relay-color-text-secondary); cursor: pointer; }
@@ -26,6 +30,13 @@
 .review-request-facts dt { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .review-request-facts dd { margin: var(--relay-space-2) 0 0; overflow-wrap: anywhere; }
 .review-page .review-bound-summary > p { font-size: var(--relay-font-size-meta); overflow-wrap: anywhere; }
+/* 页内定位的落点要看得见：jumpTo 用 focus({ preventScroll }) 把焦点移到容器，
+   而 tabIndex=-1 的容器在鼠标点击后不满足全局 :focus-visible 的启发式，键盘与鼠标都会落到这里，
+   所以按 :focus 画同一圈焦点色（沿用全局的宽度与颜色 token，不新增色值）。 */
+.review-page .review-bound-summary:focus, .review-page .review-actions:focus {
+  outline: var(--relay-focus-width) solid var(--relay-color-focus-ring);
+  outline-offset: calc(-1 * var(--relay-focus-width));
+}
 .review-page .review-actions { flex-direction: column; }
 .review-page .review-actions > button { width: 100%; }
 /* 决定分层：接受/批准是主要决定，保持主按钮观感；重试检查与设置修正预算是派生动作，

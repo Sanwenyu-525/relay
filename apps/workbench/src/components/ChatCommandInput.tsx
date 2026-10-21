@@ -12,11 +12,16 @@ export function chatCommandScope(entry: RelayChatCommand): string {
   return entry.systemId === "undo" ? "具体业务调整" : "当前会话";
 }
 
-export function chatCommandStatus(entry: RelayChatCommand, hasSession: boolean): string {
-  if (entry.systemId === "compact") return "待接入";
+/**
+ * 只在「现在点了没用」时给一句状态：可用的命令不写标签。
+ * 上游同类菜单不逐行标注「可用」——每行都挂一句同样的话只是噪音，真正需要读的是例外
+ * （会话还没有、能力还没接）。2026-10-19 用户指认「这个文字很影响体验」。
+ */
+export function chatCommandStatus(entry: RelayChatCommand, hasSession: boolean): string | null {
+  // `/compact` 已在 2026-10-20 接通（走 chat-commands 的 MEMORY_COMPACTION 分支），
+  // 它和 `/clear`、`/new` 一样需要已有会话；不再有「待接入」的例外。
   if (entry.kind === "SYSTEM" && !hasSession) return "需已有会话";
-  if (entry.systemId === "undo") return "查看具体调整的撤回入口";
-  return "可用";
+  return null;
 }
 
 /** 菜单仅消费服务端登记并编辑草稿；发送、身份与动作准入由原会话 Owner 处理。 */
@@ -105,7 +110,7 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
     inputRef.current?.focus();
   }
   function scope(entry: RelayChatCommand): string { return chatCommandScope(entry); }
-  function status(entry: RelayChatCommand): string { return chatCommandStatus(entry, hasSession); }
+  function status(entry: RelayChatCommand): string | null { return chatCommandStatus(entry, hasSession); }
   /** 剪贴板里的文件项（截图/复制的图片）。文本项一律不管，纯文本粘贴逐字不变。 */
   function clipboardFiles(event: ClipboardEvent<HTMLTextAreaElement>): readonly File[] {
     const files: File[] = [];
@@ -160,7 +165,7 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
             id={`${menuId}-${entry.name}`} aria-selected={selected === entry} tabIndex={-1}
             data-testid={`chat-command-${entry.name}`}
             onMouseDown={(event) => event.preventDefault()} onClick={() => insert(entry)}>
-            <span><strong>/{entry.name} · {entry.title}</strong><small>{status(entry)}</small></span>
+            <span><strong>/{entry.name} · {entry.title}</strong>{status(entry) !== null && <small>{status(entry)}</small>}</span>
             <span>{entry.summary}</span>
             <small>范围：{scope(entry)} · 用法：{entry.usage}</small>
           </button></li>)}

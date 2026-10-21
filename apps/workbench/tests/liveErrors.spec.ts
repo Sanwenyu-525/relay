@@ -20,3 +20,34 @@ it("响应丢失仍要求核对原回执，不归因为维护拒绝", () => {
   expect(described.kind).toBe("transport");
   expect(described.message).toContain("同一个 command ID 查询回执");
 });
+
+it("校验失败保留服务端给出的原因，不只报字段名", () => {
+  // 图片附件的模型能力闸门就是这条：只显示「attachment_ids 不符合契约」时，
+  // 用户既看不出是模型不支持图片，也不知道该去声明 RELAY_MODEL_IMAGE_INPUT。
+  const withReason = describeLiveError(new RelayApiError({
+    status: 422, code: "VALIDATION_FAILED", detail: "validation failed", retryable: false,
+    retryAction: "NONE",
+    fieldErrors: [{ field: "attachment_ids",
+      message: "当前聊天模型不支持图片输入，不能发送图片附件。" }],
+    expectedRevision: null, actualRevision: null
+  }));
+  expect(withReason.kind).toBe("validation");
+  expect(withReason.message).toContain("attachment_ids");
+  expect(withReason.message).toContain("当前聊天模型不支持图片输入，不能发送图片附件。");
+  // 同字段多条、重复说明只留一份，避免把同一句话连读三遍。
+  const deduped = describeLiveError(new RelayApiError({
+    status: 422, code: "VALIDATION_FAILED", detail: "validation failed", retryable: false,
+    retryAction: "NONE",
+    fieldErrors: [{ field: "title", message: "不能为空" }, { field: "title", message: "不能为空" },
+      { field: "goal", message: "过长" }],
+    expectedRevision: null, actualRevision: null
+  }));
+  expect(deduped.message).toBe("请求未通过服务端校验（title、goal）：不能为空；过长");
+  // 服务端没给说明时退回字段名，不拼出一个空括号。
+  const bare = describeLiveError(new RelayApiError({
+    status: 422, code: "VALIDATION_FAILED", detail: "validation failed", retryable: false,
+    retryAction: "NONE", fieldErrors: [{ field: "attachment_ids", message: "" }],
+    expectedRevision: null, actualRevision: null
+  }));
+  expect(bare.message).toBe("请求未通过服务端校验（attachment_ids）：请核对字段取值后重试。");
+});

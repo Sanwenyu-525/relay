@@ -123,9 +123,9 @@ export default function ViewConfigurationPanel({ client, projectId, browseKind, 
       if (caught instanceof RelayApiError && caught.problem.code === "COMMAND_NOT_FOUND") {
         setMayRetry(!command.conflict);
         setError(command.conflict
-          ? "原命令无回执且修订已冲突。先核对服务端当前配置，再明确重新提交。"
-          : "原命令回执暂未找到；可继续查询，或用原 ID、原修订和原 kind 重试。");
-      } else setError("原命令回执仍无法核对，请保留 command_id 和原载荷继续查询。");
+          ? "这个视图在别处已被改过，而且没查到这次保存的结果。先核对最新配置，再明确重新提交。"
+          : "还没查到这次保存的结果。可以重新核对；确认没有保存时再重试。");
+      } else setError("还无法核对这次保存的结果，请稍后重新核对。");
     } finally { if (request === scope.current) setBusy(false); }
   }
 
@@ -159,7 +159,7 @@ export default function ViewConfigurationPanel({ client, projectId, browseKind, 
       if (caught instanceof RelayApiError && caught.problem.code === "REVISION_CONFLICT") {
         const conflicted = { ...command, conflict: true };
         freeze(conflicted);
-        setError(`${describeLiveError(caught).message} 原 command_id：${command.id}。`);
+        setError(`${describeLiveError(caught).message} 这次没有覆盖任何内容；请核对最新配置后再决定。`);
         await refresh(client, request);
         if (request === scope.current) await checkReceipt(conflicted, client, request);
       } else if (caught instanceof RelayApiError && caught.problem.status < 500 &&
@@ -167,7 +167,8 @@ export default function ViewConfigurationPanel({ client, projectId, browseKind, 
         freeze(null);
         setError(describeLiveError(caught).message);
       } else {
-        setError("提交结果尚不明确。正在查询原 command_id 回执；查询不到时仅能原样重试。");
+        // 结果未知：先由程序核对一次回执（有界），查不到才把「重新核对/重试保存」交给用户。
+        setError("保存结果还没确认，正在核对…");
         await checkReceipt(command, client, request);
       }
     } finally { if (request === scope.current) setBusy(false); }
@@ -205,16 +206,26 @@ export default function ViewConfigurationPanel({ client, projectId, browseKind, 
       {error && <p className="action-error" role="alert">{error}</p>}
       {message && <p className="success-callout" role="status">{message}</p>}
       {pending && <div className="warning-callout" data-testid="view-pending">
-        <strong>{pending.conflict ? "版本冲突待核对" : "提交结果待核对"}</strong>
-        <p>原 command_id：{pending.id} · 原修订 v{pending.expectedRevision} · 目标：{kindLabel(pending.kind)}。核对前不会生成新命令。</p>
-        <button className="secondary-button" type="button" disabled={busy}
-          onClick={() => client && void checkReceipt(pending, client, scope.current)}>查询原命令回执</button>
+        {/* 2026-10-20（P1-4）：这里先说「保存有没有成功」，命令标识、修订与目标只进诊断。
+            结果未知时 send() 已经自动核对过一次回执，用户只在没查到时才需要决定。 */}
+        <strong>{pending.conflict ? "默认视图已被别处改过" : "保存结果还没确认"}</strong>
+        <p>{busy ? "正在核对是否保存成功…" : pending.conflict
+          ? "这个视图在别处已经被改过；先核对最新修订，再决定是否按它重新保存。"
+          : "还没查到这次保存的结果；核对之前不会生成新的保存。"}</p>
+        <button className="secondary-button" type="button" disabled={busy} data-testid="view-recheck"
+          onClick={() => client && void checkReceipt(pending, client, scope.current)}>重新核对</button>
         {mayRetry && !pending.conflict && <button className="secondary-button" type="button" disabled={busy}
-          onClick={() => void send(pending, true)}>用原 ID 和内容重试</button>}
+          data-testid="view-retry" onClick={() => void send(pending, true)}>重试保存</button>}
         {pending.conflict && current && BigInt(current.revision) > BigInt(pending.expectedRevision) &&
           <button className="secondary-button" type="button" disabled={busy || loading}
+          data-testid="view-reconfirm"
           onClick={() => { freeze(null); setError(null); setMessage("已保留目标选择；请按当前修订明确重新提交。"); }}>
           按当前修订重新确认</button>}
+        <details className="tech-details" data-testid="view-diagnostics">
+          <summary>诊断信息</summary>
+          <p className="helper-text">命令：SetViewConfiguration · 标识：<code className="hash-code">{pending.id}</code></p>
+          <p className="helper-text">原修订 v{pending.expectedRevision} · 目标：{kindLabel(pending.kind)}</p>
+        </details>
       </div>}
       <button className="secondary-button" type="button" disabled={loading || busy}
         onClick={() => client && void refresh(client, scope.current)}>刷新当前配置</button>

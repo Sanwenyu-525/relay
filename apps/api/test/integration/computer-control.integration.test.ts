@@ -61,9 +61,16 @@ class SuccessfulComputerProcess implements ComputerRuntimeProcessLike {
   } };
   readonly stderr = { on: () => this.stderr };
 
+  on(event: 'spawn', listener: () => void): this;
   on(event: 'error', listener: (error: Error) => void): this;
   on(event: 'exit' | 'close', listener: (code: number | null) => void): this;
-  on(event: 'error' | 'exit' | 'close', listener: ((error: Error) => void) | ((code: number | null) => void)): this {
+  on(event: 'spawn' | 'error' | 'exit' | 'close',
+    listener: (() => void) | ((error: Error) => void) | ((code: number | null) => void)): this {
+    if (event === 'spawn') {
+      // 真实 Node 在进程确实起来后才发 'spawn'；假进程在登记监听后的微任务里发一次。
+      queueMicrotask(() => { (listener as () => void)(); });
+      return this;
+    }
     if (event !== 'error') this.exitListeners.add(listener as (code: number | null) => void);
     return this;
   }

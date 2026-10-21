@@ -299,7 +299,7 @@ test.describe("窄窗与短窗的新对话入口", () => {
     expect(ctx.posts).toHaveLength(0);
   });
 
-  test("短窗里有草稿时：留在当前工作区保留正文与目录，确认丢弃才切到新讨论", async ({ page }) => {
+  test("短窗里有草稿时直接切到新讨论，草稿留在原会话（不再弹确认框）", async ({ page }) => {
     const ctx: Ctx = { posts: [], withSession: false };
     await installRoutes(page, ctx);
     await page.setViewportSize(viewports[1]!);
@@ -309,136 +309,23 @@ test.describe("窄窗与短窗的新对话入口", () => {
     await expect(page.getByTestId("assist-first-draft")).toBeVisible({ timeout: 20_000 });
 
     await page.getByTestId("assist-first-draft").fill("短窗里还没发送的草稿");
-    const before = page.url();
 
-    // 第一次：守卫拦住，留在当前工作区。
+    // 抽屉入口直接切到新讨论：没有「保留未保存的修改」这一层。
     await menuButton(page).click();
     await action(page).click();
-    const guard = page.getByRole("dialog", { name: "保留未保存的修改" });
-    await expect(guard).toBeVisible();
-    // 抽屉让位给守卫，不叠成两层浮层。
-    await expect(page.getByRole("dialog")).toHaveCount(1);
-    await guard.getByRole("button", { name: "保留并继续编辑" }).click();
-    await expect(page.getByRole("dialog")).toHaveCount(0);
-    await expect(page.getByTestId("assist-first-draft")).toHaveValue("短窗里还没发送的草稿");
-    await expect(page.getByTestId("folder-scope-change")).toContainText("NarrowWindowProject");
-    expect(page.url()).toBe(before);
-    // 留在原工作区不产生任何写命令。
-    expect(ctx.posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(0);
-    expect(ctx.posts.filter((post) => post.path.endsWith("/messages"))).toHaveLength(0);
-
-    // 第二次：明确丢弃才切。
-    await menuButton(page).click();
-    await action(page).click();
-    await page.getByRole("dialog", { name: "保留未保存的修改" })
-      .getByRole("button", { name: "丢弃草稿并离开" }).click();
     await expect(page).toHaveURL(/\/agent\?new=(?!seed$)/u);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByTestId("assist-first-draft")).toBeVisible();
     await expect(page.getByTestId("folder-scope-change")).toContainText("选择工作目录");
     await expect(page.getByTestId("assist-session")).toHaveCount(0);
+    // 切换本身不产生任何写命令。
     expect(ctx.posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(0);
     expect(ctx.posts.filter((post) => post.path.endsWith("/messages"))).toHaveLength(0);
   });
 
-  // 2026-10-08「保留并继续编辑」的编辑焦点恢复：焦点必须回到触发保护的草稿编辑器并
-  // 保留原光标位置，弹层关闭后的默认回焦（「打开导航」按钮）不得覆盖它。真实 Chromium
-  // 里核对 document.activeElement 与 selectionStart，组件级时序由 vitest 侧保证。
-  test("窄窗首条输入器：保留并继续编辑后焦点与光标回到原位，Tab 从编辑区继续", async ({ page }) => {
-    const ctx: Ctx = { posts: [], withSession: false };
-    await installRoutes(page, ctx);
-    await page.setViewportSize(viewports[0]!);
-    await page.goto("/agent?new=seed");
-    await connect(page);
-    await expect(page.getByTestId("assist-first-draft")).toBeVisible({ timeout: 20_000 });
-
-    const draft = page.getByTestId("assist-first-draft");
-    await draft.click();
-    await draft.fill("窄窗里还没发送的草稿");
-    // 光标放在正文中间：Home 后右移两格。
-    await draft.press("Home");
-    await draft.press("ArrowRight");
-    await draft.press("ArrowRight");
-    const caret = await draft.evaluate((node) => (node as HTMLTextAreaElement).selectionStart);
-    expect(caret).toBe(2);
-
-    await menuButton(page).click();
-    await action(page).click();
-    const guard = page.getByRole("dialog", { name: "保留未保存的修改" });
-    await expect(guard).toBeVisible();
-    await guard.getByRole("button", { name: "保留并继续编辑" }).click();
-    await expect(page.getByRole("dialog")).toHaveCount(0);
-    // 焦点直接回到输入器：用户不用重新点击定位就能续写，没有被默认回焦带回「打开导航」。
-    await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute("data-testid") ?? null))
-      .toBe("assist-first-draft");
-    expect(await draft.evaluate((node) => (node as HTMLTextAreaElement).selectionStart)).toBe(caret);
-    // 从编辑区继续 Tab 的下一站仍在输入器所在区域，不跳回顶栏或抽屉按钮。
-    await page.keyboard.press("Tab");
-    expect(await page.evaluate(() =>
-      document.activeElement?.closest('[data-testid="assist-first-message"]') !== null)).toBe(true);
-  });
-
-  test("窄窗已有会话输入器：保留并继续编辑后焦点与光标回到输入器", async ({ page }) => {
-    const ctx: Ctx = { posts: [], withSession: true };
-    await installRoutes(page, ctx);
-    await page.setViewportSize(viewports[0]!);
-    await page.goto("/agent");
-    await connect(page);
-    await expect(page.getByTestId("assist-session")).toBeVisible({ timeout: 20_000 });
-
-    const draft = page.getByTestId("assist-draft");
-    await draft.click();
-    await draft.fill("会话里还没发送的草稿");
-    await draft.press("Home");
-    await draft.press("ArrowRight");
-    await draft.press("ArrowRight");
-    await draft.press("ArrowRight");
-    await draft.press("ArrowRight");
-    const caret = await draft.evaluate((node) => (node as HTMLTextAreaElement).selectionStart);
-    expect(caret).toBe(4);
-
-    await menuButton(page).click();
-    await action(page).click();
-    const guard = page.getByRole("dialog", { name: "保留未保存的修改" });
-    await expect(guard).toBeVisible();
-    await guard.getByRole("button", { name: "保留并继续编辑" }).click();
-    await expect(page.getByRole("dialog")).toHaveCount(0);
-    await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute("data-testid") ?? null))
-      .toBe("assist-draft");
-    expect(await draft.evaluate((node) => (node as HTMLTextAreaElement).value)).toBe("会话里还没发送的草稿");
-    expect(await draft.evaluate((node) => (node as HTMLTextAreaElement).selectionStart)).toBe(caret);
-    // 会话输入器的 Tab 下一站同样留在会话区域内。
-    await page.keyboard.press("Tab");
-    expect(await page.evaluate(() =>
-      document.activeElement?.closest('[data-testid="assist-session"]') !== null)).toBe(true);
-  });
-
-  test("宽窗从近期工作栏入口被拦后，保留并继续编辑同样回到首条输入器", async ({ page }) => {
-    const ctx: Ctx = { posts: [], withSession: false };
-    await installRoutes(page, ctx);
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto("/agent?new=seed");
-    await connect(page);
-    await expect(page.getByTestId("assist-first-draft")).toBeVisible({ timeout: 20_000 });
-
-    const draft = page.getByTestId("assist-first-draft");
-    await draft.click();
-    await draft.fill("宽窗里还没发送的草稿");
-    await draft.press("Home");
-    await draft.press("ArrowRight");
-    await draft.press("ArrowRight");
-    const caret = await draft.evaluate((node) => (node as HTMLTextAreaElement).selectionStart);
-
-    // 宽窗没有抽屉：入口是近期工作栏头部的「新对话」，走同一条守卫。
-    await page.getByTestId("context-new-conversation").click();
-    const guard = page.getByRole("dialog", { name: "保留未保存的修改" });
-    await expect(guard).toBeVisible();
-    await guard.getByRole("button", { name: "保留并继续编辑" }).click();
-    await expect(page.getByRole("dialog")).toHaveCount(0);
-    // 宽窗与窄窗语义一致：焦点与光标回到输入器。
-    await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute("data-testid") ?? null))
-      .toBe("assist-first-draft");
-    expect(await draft.evaluate((node) => (node as HTMLTextAreaElement).selectionStart)).toBe(caret);
-  });
+  // 2026-10-19 用户指令：未发送草稿不再弹「保留未保存的修改」。
+  // 草稿按会话留在本机（src/lib/composerDrafts.ts），换工作区直接切、回来原样恢复，
+  // 因此原先围绕该弹层的三条焦点恢复用例随行为一起移除；真正需要拦的只剩「命令结果待核对」。
 
   // 2026-10-15 折叠点下移到 48rem：折叠档之上外壳仍是三列，「新对话」留在栏内，
   // ☰ 不再出现——点开只会重复屏幕上已经有的东西。这条断言守住新契约，不是把红改成绿。

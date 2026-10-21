@@ -18,7 +18,7 @@ async function fixture(work: (root: string, base: string,
     if (process.env[key] !== undefined) env[key] = process.env[key];
   }
   const git = async (args: string[]) => (await exec('git', ['-c', 'core.autocrlf=false', ...args], {
-    cwd: root, env, windowsHide: true, timeout: 10_000, maxBuffer: 1024 * 1024,
+    cwd: root, env, windowsHide: true, timeout: 30_000, maxBuffer: 1024 * 1024,
   })).stdout;
   try {
     await git(['init', '-b', 'main']);

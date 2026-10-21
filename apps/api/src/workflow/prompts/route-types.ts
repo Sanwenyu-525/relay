@@ -43,6 +43,7 @@ export type RuntimeDraftCapabilityInput = {
 export type RuntimePromptRoute =
   /* ---------------------------- 会话档 ---------------------------- */
   | { readonly kind: 'ASSIST_DISCUSS' }
+  | { readonly kind: 'ASSIST_MEMORY_COMPACT' }
   | { readonly kind: 'ASSIST_IMPACT_CHECK' }
   | { readonly kind: 'ASSIST_IMPACT_CANDIDATE' }
   | { readonly kind: 'ASSIST_PROPOSE_CANDIDATE' }
@@ -56,8 +57,26 @@ export type RuntimePromptRoute =
    * **不能**共用同一段边界——旧 DISCUSS 模板写着「本轮你只生成对话回复，不自己调用工具」
    * 并要求「如实说明这次请求会由会话内的执行入口处理」，那正是把「没有文件读取能力」
    * 写进模型输入的那句话。工具可见性变了，模板就必须跟着变，否则模板变成一句谎话。
+   * 0126：写工具可见性同样是模板必须跟随的事实。`writeEnabled` 为真时模板要声明
+   * 「你可以直接改文件」并给出基线纪律；为假时保持只读表述与执行候选协议。
    */
-  | { readonly kind: 'AGENT_MAIN_LOOP' }
+  | { readonly kind: 'AGENT_MAIN_LOOP'; readonly writeEnabled?: boolean }
+  /**
+   * 0127：`/plan` 规划模式。只读模板——写工具根本不在词表里，因此这段文本不需要
+   * 「用户要求修改时声明执行候选」那套协议；它要求的是形成结构化计划。
+   */
+  | { readonly kind: 'AGENT_PLAN_MODE' }
+  /**
+   * 0127：`/goal` 的一次推进轮。`state` 是服务端保存的目标状态（成功条件、步骤、进展），
+   * 由调用方读出后原样交给模板；模板不查数据库，也不判断条件是否达成。
+   */
+  | { readonly kind: 'AGENT_GOAL_ROUND'; readonly state: JsonObject;
+      readonly writeEnabled?: boolean }
+  /**
+   * 0128：有界子 Agent 的一次只读执行。`state` 是服务端冻结的委派事实
+   * （角色、任务说明、范围、基线、输出要求），由调用方读出后原样交给模板。
+   */
+  | { readonly kind: 'AGENT_SUBAGENT'; readonly state: JsonObject }
   | { readonly kind: 'LEARNING_PARTNER'; readonly state: JsonObject;
       readonly material: readonly JsonObject[] }
   | { readonly kind: 'SKILL'; readonly skill: FrozenSkill }
@@ -69,7 +88,7 @@ export type RuntimePromptRoute =
        * 有工具时 MODIFY 可以按主流程信封声明执行候选；无工具轮只能给修改方案。
        * INSPECT / null 不受此位影响，始终只读。
        */
-      readonly readTools: boolean }
+      readonly readTools: boolean; readonly writeEnabled?: boolean }
   /* -------------------------- 解释（模型端口） -------------------------- */
   | { readonly kind: 'INTERPRETATION_EXECUTION' }
   | { readonly kind: 'INTERPRETATION_STATE_MAINTENANCE' }
@@ -100,12 +119,16 @@ export type RuntimeSystemRoute = Exclude<RuntimePromptRoute,
 /** 路由标识：每个标识对应一句可核对的「本次用了哪条路由」。 */
 export type RuntimeRouteId =
   | 'ASSIST_DISCUSS'
+  | 'ASSIST_MEMORY_COMPACT'
   | 'ASSIST_IMPACT_CHECK'
   | 'ASSIST_IMPACT_CANDIDATE'
   | 'ASSIST_PROPOSE_CANDIDATE'
   | 'ASSIST_PROPOSE_TASK'
   | 'ASSISTANT_READONLY'
   | 'AGENT_MAIN_LOOP'
+  | 'AGENT_PLAN_MODE'
+  | 'AGENT_GOAL_ROUND'
+  | 'AGENT_SUBAGENT'
   | 'LEARNING_PARTNER'
   | 'SKILL'
   | 'METHOD'
@@ -146,6 +169,10 @@ const CORE = RELAY_AGENT_CORE_PROMPT_VERSION;
 
 /** 路由登记表：与 `RuntimePromptRoute` 一一对应，改路由先改这里。 */
 export const RUNTIME_ROUTES: Readonly<Record<RuntimeRouteId, RuntimeRouteDescriptor>> = {
+  ASSIST_MEMORY_COMPACT: { routeId: 'ASSIST_MEMORY_COMPACT', group: 'CONVERSATION',
+    templateVersion: '1.0.0', coreVersion: CORE,
+    templateSource: 'src/workflow/prompts/conversation-prompts.ts',
+    summary: '短期记忆：已结算轮次的接续摘要，不执行工具或改变业务事实' },
   ASSIST_DISCUSS: { routeId: 'ASSIST_DISCUSS', group: 'CONVERSATION',
     templateVersion: '1.0.0', coreVersion: CORE,
     templateSource: 'src/workflow/prompts/conversation-prompts.ts',
@@ -171,9 +198,21 @@ export const RUNTIME_ROUTES: Readonly<Record<RuntimeRouteId, RuntimeRouteDescrip
     templateSource: 'src/workflow/prompts/conversation-prompts.ts',
     summary: 'B 档人设助手：冻结人设 + 只读范围与边界' },
   AGENT_MAIN_LOOP: { routeId: 'AGENT_MAIN_LOOP', group: 'CONVERSATION',
-    templateVersion: '1.0.2', coreVersion: CORE,
+    templateVersion: '1.0.5', coreVersion: CORE,
     templateSource: 'src/workflow/prompts/conversation-prompts.ts',
-    summary: '普通 Agent 连续主流程：已声明只读工具；收尾输出 {reply, execution} 信封，用真实回执回答' },
+    summary: '普通 Agent 连续主流程：已声明只读工具，写档位允许时另声明写工具；收尾输出 {reply, execution} 信封' },
+  AGENT_PLAN_MODE: { routeId: 'AGENT_PLAN_MODE', group: 'CONVERSATION',
+    templateVersion: '1.0.0', coreVersion: CORE,
+    templateSource: 'src/workflow/prompts/conversation-prompts.ts',
+    summary: '聊天 /plan 规划模式：只读工具，收尾输出 {reply, plan} 计划信封' },
+  AGENT_GOAL_ROUND: { routeId: 'AGENT_GOAL_ROUND', group: 'CONVERSATION',
+    templateVersion: '1.0.0', coreVersion: CORE,
+    templateSource: 'src/workflow/prompts/conversation-prompts.ts',
+    summary: '聊天 /goal 单轮推进：目标状态 + 工具纪律，收尾输出 {reply, goal} 进展信封' },
+  AGENT_SUBAGENT: { routeId: 'AGENT_SUBAGENT', group: 'CONVERSATION',
+    templateVersion: '1.0.0', coreVersion: CORE,
+    templateSource: 'src/workflow/prompts/conversation-prompts.ts',
+    summary: '有界子 Agent 一次只读执行：冻结委派事实 + 只读边界，收尾输出 {reply, findings, conclusion}' },
   LEARNING_PARTNER: { routeId: 'LEARNING_PARTNER', group: 'CONVERSATION',
     templateVersion: '1.0.0', coreVersion: CORE,
     templateSource: 'src/workflow/prompts/conversation-prompts.ts',
@@ -183,9 +222,9 @@ export const RUNTIME_ROUTES: Readonly<Record<RuntimeRouteId, RuntimeRouteDescrip
     templateSource: 'src/workflow/prompts/conversation-prompts.ts',
     summary: '第一方 Skill：Skill 边界 + 该版本 definition.instructions + 输出协议' },
   METHOD: { routeId: 'METHOD', group: 'CONVERSATION',
-    templateVersion: '1.0.1', coreVersion: CORE,
+    templateVersion: '1.0.2', coreVersion: CORE,
     templateSource: 'src/workflow/prompts/conversation-prompts.ts',
-    summary: '内置工作方法：冻结方法说明 + INSPECT/MODIFY 约束；MODIFY 有读取工具时可产出执行候选' },
+    summary: '内置工作方法：INSPECT 只读；明确 MODIFY 按本轮实际工具直写或提交剩余执行候选' },
   INTERPRETATION_EXECUTION: { routeId: 'INTERPRETATION_EXECUTION', group: 'INTERPRETATION',
     templateVersion: '1.0.0', coreVersion: CORE,
     templateSource: 'src/workflow/prompts/interpretation-prompts.ts',

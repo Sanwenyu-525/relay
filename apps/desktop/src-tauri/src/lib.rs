@@ -41,7 +41,8 @@ use windows::{
     Win32::{
         Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE},
         System::Threading::CreateMutexW,
-        UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow, MessageBoxW, MB_ICONERROR, MB_OK},
+        UI::WindowsAndMessaging::{FindWindowW, MessageBoxW, MB_ICONERROR, MB_ICONINFORMATION, MB_OK,
+            SetForegroundWindow, ShowWindow, SW_RESTORE},
     },
     core::{HSTRING, Interface, PWSTR},
 };
@@ -299,9 +300,20 @@ fn acquire_single_instance_named(name: &str, foreground: bool)
             .map_err(|_| SingleInstanceError::Unavailable)?;
         if GetLastError() == ERROR_ALREADY_EXISTS {
             if foreground {
+                // 最小化的窗口必须显式还原，否则双击图标看起来毫无反应（DEV-0078）。
                 let title = HSTRING::from(WINDOW_TITLE);
-                if let Ok(window) = FindWindowW(None, &title) {
-                    let _ = SetForegroundWindow(window);
+                match FindWindowW(None, &title) {
+                    Ok(window) => {
+                        let _ = ShowWindow(window, SW_RESTORE);
+                        let _ = SetForegroundWindow(window);
+                    }
+                    Err(_) => {
+                        // 已有实例还在启动、主窗口尚未创建：给一次可见说明，而不是静默退出。
+                        let title = HSTRING::from("Relay Agent");
+                        let body = HSTRING::from(
+                            "Relay Agent is already running. Its window is not ready yet; check the taskbar.");
+                        let _ = MessageBoxW(None, &body, &title, MB_OK | MB_ICONINFORMATION);
+                    }
                 }
             }
             let _ = CloseHandle(handle);
@@ -338,10 +350,16 @@ fn validate_desktop_config_keys(config: &str) -> Result<(), String> {
         let Some((key, _)) = line.split_once('=') else { return Err("desktop.env contains an invalid setting".into()); };
         if !matches!(key.trim(), "RELAY_DB_URL" | "RELAY_DB_POOL_MAX" |
             "RELAY_DB_CONNECT_TIMEOUT_MS" | "RELAY_DESKTOP_WORKSPACE_ID" |
+            // 随包运行时默认在 node.exe 同目录；需要换路径时由 desktop.env 显式覆盖。
+            "RELAY_COMPUTER_RUNTIME" |
             "RELAY_MODEL_PROVIDER" | "RELAY_MODEL_NAME" | "RELAY_MODEL_API_KEY" |
             "RELAY_MODEL_BASE_URL" | "RELAY_MODEL_TIMEOUT_MS" |
             "RELAY_MODEL_MAX_OUTPUT_TOKENS" | "RELAY_MODEL_MAX_CALL_TOKENS" |
-            "RELAY_MODEL_MAX_SCOPE_CALLS" | "RELAY_MODEL_MAX_SCOPE_TOKENS") {
+            "RELAY_MODEL_MAX_SCOPE_CALLS" | "RELAY_MODEL_MAX_SCOPE_TOKENS" |
+            // 2026-10-19: 目录里没有该模型时，运维用它显式声明「该模型接受图片输入」。
+            // 不放进白名单的话，桌面版用户既无法发送图片、也拿不到「加上这一行」的出路：
+            // 宿主会先以 unsupported setting 拒绝启动。
+            "RELAY_MODEL_IMAGE_INPUT") {
             return Err("desktop.env contains an unsupported setting".into());
         }
     }
@@ -660,6 +678,20 @@ struct SupervisorSpawnContext {
     api_launch_id: String,
 }
 
+/// 已收敛启动记录的清理属于卫生工作而非可用性：删除失败只记日志，保留已经
+/// 就绪的 supervisor/API；残留记录会在下次启动协调中再次被收敛。
+///
+/// 首次启动与重启共用这一条路径，两处强度一致：既不因为删除失败中断已就绪的
+/// 启动，也不放宽 supervisor 就绪与残留进程的安全检查。
+#[cfg(windows)]
+fn cleanup_reconciled_launches(data_root: &std::path::Path, reconciled: &[String],
+    worker_log: &std::path::Path) {
+    if let Err(error) = remove_reconciled_launches(data_root, reconciled) {
+        append_worker_log(worker_log,
+            &format!("host: reconciled launch record cleanup failed: {error}"));
+    }
+}
+
 /// 以新的 launch（新 Job、新 ARMED 记录）重启 supervisor：恢复既有 launch
 /// 记录、两段式握手、清理已收敛记录。失败时丢弃半武装记录；任何已派生的
 /// 进程树随 ManagedProcess 丢弃由 Job kill-on-close 终止。
@@ -695,10 +727,7 @@ fn spawn_supervisor(context: &SupervisorSpawnContext)
         Ok((supervisor, failure, reconciled)) => {
             // 已收敛记录的清理属于卫生工作而非可用性：即使删除失败也保留
             // 已就绪的 supervisor，残留记录会在下次启动协调中再次被收敛。
-            if let Err(error) = job_sidecar::remove_reconciled_launches(&context.data_root, &reconciled) {
-                append_worker_log(&context.worker_log,
-                    &format!("host: reconciled launch record cleanup failed: {error}"));
-            }
+            cleanup_reconciled_launches(&context.data_root, &reconciled, &context.worker_log);
             Ok((supervisor, failure))
         }
         Err(error) => {
@@ -859,7 +888,8 @@ fn start_api(app: &tauri::AppHandle, single_instance: SingleInstanceGuard) -> Re
     if supervisor_failed.load(Ordering::SeqCst) || !matches!(supervisor.try_wait(), Ok(None)) {
         return Err("supervisor private output or process failed after readiness".into());
     }
-    remove_reconciled_launches(&data_root, &reconciled)?;
+    // 已收敛记录的清理失败只记日志：它不该让已经就绪的启动失败。
+    cleanup_reconciled_launches(&data_root, &reconciled, &worker_log);
     append_worker_log(&worker_log, &format!("host: supervisor ready (launch {launch_id})"));
     let supervisor = Arc::new(Mutex::new(Some(supervisor)));
     let stopping = Arc::new(AtomicBool::new(false));
@@ -1074,6 +1104,8 @@ mod tests {
         validate_desktop_config_keys};
     #[cfg(windows)]
     use super::trusted_notification_uri;
+    #[cfg(windows)]
+    use super::cleanup_reconciled_launches;
     use std::{io::{Cursor, Read}, thread, time::Duration};
     #[cfg(windows)]
     use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}, mpsc};
@@ -1084,6 +1116,44 @@ mod tests {
             thread::sleep(Duration::from_millis(50));
             Ok(0)
         }
+    }
+
+    /// 已收敛启动记录的清理失败只记日志，不得让已就绪的启动失败。
+    #[cfg(windows)]
+    #[test]
+    fn reconciled_launch_cleanup_failure_is_logged_not_fatal() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "relay-desktop-cleanup-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let launch = super::job_sidecar::arm_launch(&root).expect("arm launch record");
+        let launch_id = launch.id.clone();
+        drop(launch);
+        let record = root
+            .join("runtime-launches")
+            .join(format!("{launch_id}.json"));
+        // 允许读取但禁止删除，模拟临时文件仍被占用。
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x0000_0001)
+            .open(&record)
+            .expect("lock launch record against deletion");
+        let log = root.join("logs").join("worker-supervisor.log");
+        cleanup_reconciled_launches(&root, &[launch_id], &log);
+        let text = std::fs::read_to_string(&log).expect("cleanup failure must be logged");
+        assert!(text.contains("reconciled launch record cleanup failed"));
+        assert!(text.contains("cannot remove reconciled desktop launch record"));
+        assert!(record.exists());
+        drop(lock);
+        let root_prefix = std::env::temp_dir().canonicalize().expect("temp root");
+        assert!(
+            root.canonicalize()
+                .expect("test root")
+                .starts_with(&root_prefix)
+        );
+        std::fs::remove_dir_all(&root).expect("remove isolated test root");
     }
 
     #[test]
@@ -1110,7 +1180,8 @@ mod tests {
             "# comment\n\nRELAY_DB_URL=postgresql://x\nRELAY_DB_POOL_MAX=4\n\
              RELAY_DB_CONNECT_TIMEOUT_MS=3000\nRELAY_DESKTOP_WORKSPACE_ID=00000000-0000-4000-8000-000000000000\n\
              RELAY_MODEL_PROVIDER=openai-compatible\nRELAY_MODEL_NAME=test-model\n\
-             RELAY_MODEL_API_KEY=sk-local-only\nRELAY_MODEL_BASE_URL=https://api.example.cn/v1\n").is_ok());
+             RELAY_MODEL_API_KEY=sk-local-only\nRELAY_MODEL_BASE_URL=https://api.example.cn/v1\n\
+             RELAY_MODEL_IMAGE_INPUT=true\nRELAY_COMPUTER_RUNTIME=C:\\\\Relay\\\\runtime.exe\n").is_ok());
         for text in ["RELAY_DB_URL=x\nNODE_OPTIONS=--import=evil\n",
             "RELAY_DB_URL=x\nRELAY_MODEL_PROVIDER=openai-compatible\nRELAY_SOMETHING=1\n",
             "RELAY_DB_URL=x\nmalformed"] {

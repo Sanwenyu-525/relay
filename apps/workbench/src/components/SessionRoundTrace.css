@@ -1,0 +1,32 @@
+/* 这一轮做了什么（工作台 §18.10）。开合、缩进与列表间距都沿用 .tech-details 既有规则，
+   这里只补轮次行本身的排布与状态色——不新造一套视觉语义。 */
+.session-round-trace-round-title {
+  margin: 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+}
+.session-round-trace-calls li {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: var(--relay-space-2);
+}
+.session-round-trace-tool { font-weight: var(--relay-font-weight-semibold); }
+.session-round-trace-status {
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+}
+/* 未结算与结果未知都不是「已执行」，用警示色把它们与已结算分开。 */
+.session-round-trace-status[data-status="REQUESTED"],
+.session-round-trace-status[data-status="REJECTED"],
+.session-round-trace-status[data-status="ABANDONED"],
+.session-round-trace-status[data-status="UNKNOWN"] { color: var(--relay-color-status-warning-text); }
+.session-round-trace-elapsed {
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+}
+.session-round-trace-reason {
+  flex: 1 1 100%;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  overflow-wrap: anywhere;
+}
+.session-round-trace-live { color: var(--relay-color-status-warning-text); }

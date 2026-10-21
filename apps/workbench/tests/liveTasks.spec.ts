@@ -102,8 +102,9 @@ describe("live 任务入口", () => {
     vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountWorkbench("/tasks?view=create");
     unmount = mounted.unmount;
+    // 第四项来自创建表单的项目选择器：打开表单即加载首屏，不需要先点「读取进行中项目」。
     expect(fetchMock.mock.calls.map(([input]) => String(input)).filter((url) => !url.endsWith("/attention/interventions")))
-      .toEqual([`${tasksUrl}?scope=all`, projectsUrl, sessionsUrl]);
+      .toEqual([`${tasksUrl}?scope=all`, projectsUrl, sessionsUrl, projectsUrl]);
 
     await mounted.wrapper.get('input[name="task-title"]').setValue("本次真实任务");
     await mounted.wrapper.get('input[name="task-expected-result"]').setValue("真实结果");
@@ -124,7 +125,7 @@ describe("live 任务入口", () => {
     expect(fixtureAdapter.getCallCount("loadTaskOptions")).toBe(0);
     expect(fixtureAdapter.getCallCount("createTask")).toBe(0);
     expect(fetchMock.mock.calls.map(([input]) => String(input)).filter((url) => !url.endsWith("/attention/interventions")))
-      .toEqual([`${tasksUrl}?scope=all`, projectsUrl, sessionsUrl, tasksUrl, `${tasksUrl}?scope=all`]);
+      .toEqual([`${tasksUrl}?scope=all`, projectsUrl, sessionsUrl, projectsUrl, tasksUrl, `${tasksUrl}?scope=all`]);
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 });

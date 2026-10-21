@@ -18,6 +18,7 @@ import { readModelPortConfig } from '../workflow/model-port-config.js';
 import { OpenAiCompatibleModelPort } from '../workflow/openai-compatible-model-port.js';
 import { interpretationExecutionSystemPrompt }
   from '../workflow/prompts/interpretation-prompts.js';
+import { INTERNAL_TOOL_DEFINITIONS } from '../workflow/tool-catalog.js';
 import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
 import { runIdempotentCommand, type CommandOutcome } from './command.js';
 import { DomainError, executorConflict, invalidTransition, resourceNotFound } from './domain-error.js';
@@ -28,6 +29,7 @@ import { markTaskReady } from './task-commands.js';
 import { readAdmission, requireNormalAdmission } from './maintenance-admission.js';
 import type { FrozenCheck } from './run-scope-grant.js';
 import { targetMatches } from './gateway-actions.js';
+import { canonicalResourceIdentity } from './gateway-configuration.js';
 import { createRepositories, withTransaction } from './unit-of-work.js';
 
 /**
@@ -84,6 +86,8 @@ export interface ConversationTaskCandidate {
    * true 只表示授权范围内的编辑；改什么、改成什么仍由 Run 内模型读过真实文件后决定。
    */
   readonly writes_files?: boolean | undefined;
+  /** 工具需求，不是权限；操作仍经 Run/Gateway 逐次准入与审批。 */
+  readonly interaction?: 'BROWSER' | 'COMPUTER' | undefined;
   readonly check?: { readonly executable: string; readonly args: readonly string[] } | undefined;
 }
 
@@ -112,14 +116,19 @@ export function wantsConversationFileWrite(candidate: ConversationTaskCandidate)
  *
  * 文件副作用仍只由 Run 内 Gateway 准入，DELETE 仍要求确切动作 Review；自动启动不会
  * 把候选本身变成写权限，也不会绕过连接、策略、范围授权或人工决定。
+ *
+ * 2026-10-20 第二轮：判定加上了阶段。`FAILED` 表示自动推进已经给出过具体原因并停下，
+ * `DELEGATED` 表示已经有 Run，两种都不该再被当成「可自动推进」。这个布尔是投影里
+ * 唯一的可推进信号，前端与服务端扫描共用它，两处不会对同一行给出不同结论。
  */
 export function isAutoStartConversationExecution(row: {
   readonly decision: string; readonly candidate_status: string; readonly candidate: JsonObject | null;
+  readonly status?: string | undefined;
 }): boolean {
   if (row.decision !== 'PREPARE' || row.candidate_status !== 'READY' || row.candidate === null) {
     return false;
   }
-  return true;
+  return row.status === undefined || row.status === 'READY' || row.status === 'TASK_PREPARED';
 }
 
 export type InterpretConversationMessageResult = {
@@ -181,6 +190,25 @@ function text(value: JsonValue | undefined, max: number): string | undefined {
 }
 
 /**
+ * `expected_outputs.kind` 描述的是本次**可审查的交付说明**，不是被改动的文件本身。
+ *
+ * 模型面对「把 greet 改成 X」这类请求时会合理地把产出理解成代码文件，直接写
+ * `CODE_FILE`；如果这里只认唯一值，整条执行请求会被判成澄清，用户明确要求的文件
+ * 修改永远进不了执行入口——真实 Provider 首次跑通普通会话链路时正是停在这一步。
+ * 因此同义写法归一到当前工作流唯一可判定的种类；未知值仍然拒绝，不把拼错的种类
+ * 当成合法候选，也不因此多给任何一种能力。
+ */
+const DELIVERY_KIND_ALIASES: ReadonlySet<string> = new Set([
+  'MARKDOWN_DOCUMENT', 'MARKDOWN', 'DOCUMENT',
+  'CODE_FILE', 'CODE', 'SOURCE_CODE', 'PATCH', 'DIFF',
+]);
+
+function deliveryKindOf(value: JsonValue | undefined): string | undefined {
+  const kind = typeof value === 'string' ? value.trim().toUpperCase() : undefined;
+  return kind !== undefined && DELIVERY_KIND_ALIASES.has(kind) ? 'MARKDOWN_DOCUMENT' : undefined;
+}
+
+/**
  * 确定性校验：模型输出只是候选。任何不可判断、越界或用「已完成」凑数的字段在这里被拒绝，
  * 校验失败退回一个聚焦澄清，而不是造出一个假验收条件。
  */
@@ -218,9 +246,10 @@ export function validateConversationCandidate(raw: JsonObject):
   if (!criteria.some((criterion) => criterion.required)) {
     return { ok: false, reason: '至少需要一条必需的可判断验收条件。' };
   }
-  if (typeof body.expected_outputs !== 'object' || body.expected_outputs === null ||
-      Array.isArray(body.expected_outputs) ||
-      (body.expected_outputs as JsonObject).kind !== 'MARKDOWN_DOCUMENT') {
+  const rawOutputs = body.expected_outputs;
+  const deliveryKind = typeof rawOutputs === 'object' && rawOutputs !== null &&
+    !Array.isArray(rawOutputs) ? deliveryKindOf((rawOutputs as JsonObject).kind) : undefined;
+  if (deliveryKind === undefined) {
     return { ok: false, reason: '当前固定工作流只支持 Markdown 交付说明作为输出要求。' };
   }
   const changes: ConversationFileChange[] = [];
@@ -283,9 +312,16 @@ export function validateConversationCandidate(raw: JsonObject):
   if (typeof writesFiles !== 'boolean') {
     return { ok: false, reason: 'writes_files 需要明确是 true 还是 false。' };
   }
+  const interaction = body.interaction ?? undefined;
+  if (interaction !== undefined && interaction !== 'BROWSER' && interaction !== 'COMPUTER') {
+    return { ok: false, reason: 'interaction 只支持 BROWSER 或 COMPUTER。' };
+  }
   return { ok: true, candidate: { title, objective, criteria,
-    expected_outputs: body.expected_outputs as JsonObject,
-    file_changes: changes, writes_files: writesFiles, check } };
+    // 落库的是归一后的种类：下游 Workflow 只有一种可判定产物，保留模型原文会让
+    // 冻结的 required_output_spec 与候选交付对不上。
+    expected_outputs: { ...(rawOutputs as JsonObject), kind: deliveryKind },
+    file_changes: changes, writes_files: writesFiles, check,
+    ...(interaction === undefined ? {} : { interaction }) } };
 }
 
 function parseInterpretation(raw: string): JsonObject | undefined {
@@ -778,6 +814,8 @@ export async function applyConversationExecution(db: DbExecutor, input: {
   if (resource === undefined || resource.status !== 'ACTIVE') {
     throw invalidTransition('该实际工作目录的受管资源已不可用。');
   }
+  // 工具缺失先报具体原因，避免先登记一条永远无法委托的 Task。
+  const plan = await planToolLoop(db, { row, candidate, canonicalRoot: resource.canonical_root });
   if (row.task_id === null) {
     const prepared = prepareTaskCreation({ workspaceId: row.workspace_id,
       commandId: taskCommandId, projectId: row.project_id,
@@ -793,8 +831,13 @@ export async function applyConversationExecution(db: DbExecutor, input: {
         expected_outputs: prepared.expectedOutputs, mode: prepared.mode },
       execute: async (repositories) => {
         const created = await applyTaskCreation(repositories, prepared);
+        // 2026-10-20 第二轮：`FAILED` 也在可推进阶段里。服务端自动推进失败时会把阶段记成
+        // FAILED 并把**具体原因**留在原请求上（`markAutoStartFailed`），候选与阶段命令身份
+        // 一律保留；用户补齐缺的连接后再点一次「继续原请求」，走的正是这条建 Task 分支。
+        // 不接受 FAILED 就等于「一次前置条件缺失让候选永远无法接续」，那与「保留原请求」
+        // 的设计相反。状态 CAS 仍然是单向的：只有这三种阶段能进入 TASK_PREPARED。
         const advanced = await repositories.conversationExecutions.advanceStage(row.id, {
-          from: ['READY'], status: 'TASK_PREPARED', taskId: created.task_id,
+          from: ['READY', 'FAILED'], status: 'TASK_PREPARED', taskId: created.task_id,
           taskCommandId: prepared.commandId, readyCommandId });
         if (advanced === undefined) {
           throw invalidTransition('执行请求已被其他推进结算，请按原命令核对。');
@@ -820,7 +863,6 @@ export async function applyConversationExecution(db: DbExecutor, input: {
   // 文件变更与命令。解释阶段没有目录访问，给不出可信正文；正文由 Run 内的模型在真正
   // 读过文件之后决定。授权与审批栅栏不变：范围授权只放行本次目录内的普通编辑与那份
   // 已配置检查，删除永远不在其中，每次动作仍走既有 Gateway 准入。
-  const plan = await planToolLoop(db, { row, candidate, canonicalRoot: resource.canonical_root });
   const delegated = await delegateTask(db, {
     workspaceId: row.workspace_id, taskId,
     modelSessionId: row.session_id,
@@ -921,6 +963,25 @@ async function planToolLoop(db: DbExecutor, input: {
   const allowedActions: string[] = [];
   const checks: FrozenCheck[] = [];
 
+  // 会话意图传到现有 Run 工具循环；不因暴露工具就授予操作范围或免除审批。
+  if (candidate.interaction !== undefined) {
+    const capabilities: readonly GatewayCapability[] = candidate.interaction === 'BROWSER'
+      ? ['BROWSER_READ', 'BROWSER_ACTION'] : ['COMPUTER_READ', 'COMPUTER_INPUT'];
+    for (const capability of capabilities) {
+      connections[capability] = await requireConnection(db, row, capability);
+      allowedTools.push(...INTERNAL_TOOL_DEFINITIONS
+        .filter((tool) => tool.capability === capability).map((tool) => tool.name));
+    }
+    if (candidate.interaction === 'BROWSER') {
+      const commit = await findConnection(db, row, 'BROWSER_COMMIT');
+      if (commit !== undefined) {
+        connections.BROWSER_COMMIT = commit.connectionId;
+        allowedTools.push(...INTERNAL_TOOL_DEFINITIONS
+          .filter((tool) => tool.capability === 'BROWSER_COMMIT').map((tool) => tool.name));
+      }
+    }
+  }
+
   // 写能力由「本次是否明确要改文件」决定，不取决于解释模型是否猜得出文件名。
   const wantsWrite = wantsConversationFileWrite(candidate);
   if (wantsWrite) {
@@ -938,7 +999,7 @@ async function planToolLoop(db: DbExecutor, input: {
     checks.push(await freezeConversationCheck(input.canonicalRoot, candidate.check,
       cliRun.allowedExecutables));
   }
-  const gitRead = await findConnection(db, row, 'GIT_READ');
+  const gitRead = await findConnection(db, row, 'GIT_READ', { exactRoot: true });
   if (gitRead !== undefined) {
     connections.GIT_READ = gitRead.connectionId;
     allowedTools.push('git_status', 'git_diff', 'git_log');
@@ -1031,9 +1092,29 @@ function readAllowedExecutables(config: JsonObject): readonly string[] | undefin
   return entries.length === raw.length && entries.length > 0 ? entries : undefined;
 }
 
-/** 可选能力：没有配置就不冻结对应工具，而不是伪造一个连接或放宽权限。 */
+/**
+ * 连接根是否覆盖受管根。
+ *
+ * 文件动作的路径会被限定在受管根内，所以父目录的连接可以覆盖子目录；Git 不是这样——
+ * `git log` 在子目录里照样返回整个仓库的历史与分支，所以 Git 只读要求精确相同。
+ * 这个判断单独成函数，是因为它是「双根隔离」的唯一落点，必须能被单测直接锁住。
+ */
+export function connectionRootCovers(connectionRoot: string, canonicalRoot: string,
+  capability: GatewayCapability, exactRoot: boolean): boolean {
+  return exactRoot
+    ? canonicalResourceIdentity(connectionRoot) === canonicalResourceIdentity(canonicalRoot)
+    : targetMatches(connectionRoot, canonicalRoot, capability);
+}
+
+/**
+ * 可选能力：没有配置就不冻结对应工具，而不是伪造一个连接或放宽权限。
+ *
+ * `exactRoot` 只给 Git 用（2026-10-20）：文件动作的路径会被限定在受管根内，所以父目录的
+ * 连接可以覆盖子目录；Git 不是这样——`git log` 在子目录里照样返回整个仓库的历史与分支。
+ * 因此 Git 只读连接必须与受管根精确相同，父目录的授权不能延伸到子目录。
+ */
 async function findConnection(db: DbExecutor, row: ConversationExecutionRequestRow,
-  capability: GatewayCapability): Promise<{ readonly connectionId: string;
+  capability: GatewayCapability, options?: { readonly exactRoot?: boolean }): Promise<{ readonly connectionId: string;
     readonly config: JsonObject } | undefined> {
   const repositories = createRepositories(db);
   const resource = await repositories.gateway.readResource(row.resource_id);
@@ -1042,9 +1123,14 @@ async function findConnection(db: DbExecutor, row: ConversationExecutionRequestR
   const connections = await repositories.gateway.listConnections(row.workspace_id, row.project_id);
   for (const connection of connections) {
     if (connection.status !== 'ACTIVE') continue;
-    if ((await repositories.gateway.listConnectionCapabilities(connection.id)).includes(capability) &&
-        typeof connection.config.root_path === 'string' &&
-        targetMatches(connection.config.root_path, resource.canonical_root, capability)) {
+    if (!(await repositories.gateway.listConnectionCapabilities(connection.id)).includes(capability)) continue;
+    if (capability === 'COMPUTER_READ' || capability === 'COMPUTER_INPUT' ||
+        capability === 'BROWSER_READ' || capability === 'BROWSER_ACTION' || capability === 'BROWSER_COMMIT') {
+      return { connectionId: connection.id, config: connection.config };
+    }
+    if (typeof connection.config.root_path !== 'string') continue;
+    if (connectionRootCovers(connection.config.root_path, resource.canonical_root,
+      capability, options?.exactRoot === true)) {
       return { connectionId: connection.id, config: connection.config };
     }
   }

@@ -63,7 +63,8 @@ export class ExtensionBridgeProvider implements BrowserProvider {
 
   async ensureStarted(options: BrowserCallOptions = {}): Promise<BrowserHealth> {
     void options;
-    if (this.lastHealth?.status === 'READY') return this.lastHealth;
+    // READY 不做长期缓存：扩展断开不会通知本进程，缓存住上一次 READY 会让界面一直显示
+    // 「就绪」，直到用户点了操作才发现连不上。每次启动检查都重新探测真实连接。
     const registration = await this.registration();
     if (registration === null) {
       return this.remember({ status: 'BACKEND_MISSING', backendVersion: null,

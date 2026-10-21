@@ -210,6 +210,20 @@ function frozen(candidates: readonly AssistModelCandidateSnapshot[],
     last_failure: null, status: 'READY' } };
 }
 
+/**
+ * 0128：一份「还没开始」的模型尝试状态。
+ *
+ * 子会话消息沿用主会话冻结的模型选择快照（同一个模型、同一份预算事实），但尝试状态
+ * 必须从头开始——把主消息在途的 `active_call_id` 带过去，会让子执行的第一轮就撞上
+ * 「这一轮已有调用在进行中」而永远无法开始。
+ */
+export function freshAssistModelAttemptState(): JsonObject {
+  return { revision: '1', current_candidate_index: 0,
+    switch_count: 0, switches: [], active_call_id: null, active_candidate_index: null,
+    active_turn_id: null, completed_turn_id: null, completed_call_id: null,
+    last_failure: null, status: 'READY' };
+}
+
 function candidateSnapshot(connection: AssistModelCandidateSnapshot['connection'], freeOnly: boolean,
   catalogBasis: AssistModelCandidateSnapshot['catalogBasis']): AssistModelCandidateSnapshot {
   return { connection, freeOnly, catalogBasis };

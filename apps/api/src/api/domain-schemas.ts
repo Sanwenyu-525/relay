@@ -1210,6 +1210,8 @@ const DiffScanSideSchema = Type.Object({
 
 export const AvailableConversationDiffSchema = Type.Object({
   available: Type.Literal(true),
+  /** `SESSION` = 只统计本会话写过的路径；`DIRECTORY` = 整段目录净变化（含同期外部修改）。 */
+  scope: Type.Union([Type.Literal('SESSION'), Type.Literal('DIRECTORY')]),
   baseline_captured_at: Type.String(),
   baseline_revision: DecimalSchema,
   root_path: Type.String(),
@@ -1221,6 +1223,10 @@ export const AvailableConversationDiffSchema = Type.Object({
     current: DiffScanSideSchema,
     unchecked_files: Type.Integer(),
     unverified_files: Type.Integer(),
+    /** 两侧都在、内容摘要读不到且字节数相同的文件数：无法核对，不计变化也不计未变。 */
+    unverifiable_files: Type.Integer(),
+    /** 会话口径下：本会话写过的路径在基线与当前扫描里都没出现的条数。 */
+    unscanned_files: Type.Integer(),
   }, strict),
   total_files: Type.Integer(),
   total_added: Type.Integer(),

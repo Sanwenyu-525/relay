@@ -59,6 +59,7 @@ function buildInput(parts: {
   coverage?: SnapshotDiffInput['coverage'];
   currentUnswept?: ReadonlySet<string>;
   tracked?: ReadonlySet<string>;
+  scope?: ReadonlySet<string>;
 }): SnapshotDiffInput {
   const baselineMap = new Map<string, BaselineFile>();
   for (const file of parts.baseline) baselineMap.set(file.path, file);
@@ -73,6 +74,7 @@ function buildInput(parts: {
     ...(parts.coverage === undefined ? {} : { coverage: parts.coverage }),
     ...(parts.currentUnswept === undefined ? {} : { currentUnswept: parts.currentUnswept }),
     ...(parts.tracked === undefined ? {} : { tracked: parts.tracked }),
+    ...(parts.scope === undefined ? {} : { scope: parts.scope }),
     baseline: baselineMap,
     current: currentMap,
   };
@@ -126,14 +128,19 @@ test('isBinaryContent detects NUL bytes; isBinaryText detects NUL char', () => {
   assert.equal(isBinaryText(`a${NUL}b`), true);
 });
 
-test('classifyAction derives file action from baseline/current hashes', () => {
-  assert.equal(classifyAction('h1', 'h1'), 'SAME');
-  assert.equal(classifyAction('h1', 'h2'), 'MODIFY');
-  assert.equal(classifyAction(null, 'h2'), 'CREATE');
-  assert.equal(classifyAction(undefined, 'h2'), 'CREATE');
-  assert.equal(classifyAction('h1', null), 'DELETE');
-  assert.equal(classifyAction(null, null), 'SAME');
-  assert.equal(classifyAction(undefined, undefined), 'SAME');
+test('classifyAction derives file action from presence and hashes', () => {
+  const both = (baselineSha: string | null, currentSha: string | null) =>
+    classifyAction({ present: true, sha256: baselineSha }, { present: true, sha256: currentSha });
+  assert.equal(both('h1', 'h1'), 'SAME');
+  assert.equal(both('h1', 'H1'), 'SAME');
+  assert.equal(both('h1', 'h2'), 'MODIFY');
+  assert.equal(classifyAction({ present: false, sha256: null }, { present: true, sha256: 'h2' }), 'CREATE');
+  assert.equal(classifyAction({ present: true, sha256: 'h1' }, { present: false, sha256: null }), 'DELETE');
+  assert.equal(classifyAction({ present: false, sha256: null }, { present: false, sha256: null }), 'SAME');
+  // 存在性只看目录清单：两侧都在但摘要读不到时不能判成删除，也不能判成没变。
+  assert.equal(both('', null), 'UNVERIFIED');
+  assert.equal(both(null, 'h2'), 'UNVERIFIED');
+  assert.equal(both('', ''), 'UNVERIFIED');
 });
 
 test('computeSnapshotDiff: modify, create, delete, same with net totals', () => {
@@ -211,6 +218,89 @@ test('computeSnapshotDiff: binary/unavailable files are not counted in totals', 
   assert.equal(diff.totalFiles, 1);
   assert.equal(diff.totalAdded, 1);
   assert.equal(diff.totalRemoved, 0);
+});
+
+test('computeSnapshotDiff: 两侧都在但内容读不到的文件不得判成删除', () => {
+  // 复现线上缺陷（2026-10-19 用户截图）：11 MB 字体、3 MB 截图这类超过单文件读取上限的
+  // 已跟踪文件，基线摘要是空串、当前摘要是 null。旧实现把「摘要缺失」当成「当前不存在」，
+  // 于是一次报出 147 个 DELETE，界面显示「本会话删了 147 个文件」。
+  const bigBaseline: BaselineFile = { path: 'font.woff2', sha256: '', text: null, lineCount: null,
+    sizeBytes: 11_022_468, unavailableReason: 'TEXT_TOO_LARGE' };
+  const bigCurrent: CurrentFile = { path: 'font.woff2', sha256: null, text: null, lineCount: null,
+    sizeBytes: 11_022_468, unavailableReason: 'TEXT_TOO_LARGE' };
+  const input = buildInput({
+    baseline: [baseline('a.txt', 'one'), bigBaseline],
+    current: [current('a.txt', 'one'), bigCurrent],
+  });
+  const diff = computeSnapshotDiff(input);
+  assert.deepEqual(diff.files, []);
+  assert.equal(diff.totalFiles, 0);
+  assert.equal(diff.totalRemoved, 0);
+  assert.equal(diff.coverage.unverifiableFiles, 1);
+  assert.equal(diff.incomplete, true);
+});
+
+test('computeSnapshotDiff: 内容读不到但字节数变了，仍作为不可统计的修改列出', () => {
+  const bigBaseline: BaselineFile = { path: 'font.woff2', sha256: '', text: null, lineCount: null,
+    sizeBytes: 11_022_468, unavailableReason: 'TEXT_TOO_LARGE' };
+  const bigCurrent: CurrentFile = { path: 'font.woff2', sha256: null, text: null, lineCount: null,
+    sizeBytes: 11_500_000, unavailableReason: 'TEXT_TOO_LARGE' };
+  const input = buildInput({ baseline: [bigBaseline], current: [bigCurrent] });
+  const diff = computeSnapshotDiff(input);
+  const entry = diff.files.find((file) => file.path === 'font.woff2');
+  assert.equal(entry?.action, 'MODIFY');
+  assert.equal(entry?.unavailableReason, 'TEXT_TOO_LARGE');
+  assert.equal(entry?.added, 0);
+  assert.equal(entry?.removed, 0);
+  // 不可统计项不进总数；它是一条「确认变了、行数不编造」的条目，不是覆盖缺口。
+  assert.equal(diff.totalFiles, 0);
+  assert.equal(diff.coverage.unverifiableFiles, 0);
+  assert.equal(diff.coverage.uncheckedFiles, 0);
+});
+
+test('computeSnapshotDiff: 会话口径只统计范围内的路径，同期外部修改不计入', () => {
+  // 2026-10-20 用户指令「这里就只统计当前会话的 git diff」：同一个目录里别的会话改了 2 个文件，
+  // 本会话只写过 mine.ts，总数必须只反映 mine.ts。
+  const input = buildInput({
+    baseline: [baseline('mine.ts', 'a'), baseline('other.ts', 'x')],
+    current: [current('mine.ts', `a${LF}b`), current('other.ts', `x${LF}y${LF}z`)],
+    scope: new Set(['mine.ts']),
+  });
+  const diff = computeSnapshotDiff(input);
+  assert.equal(diff.scope, 'SESSION');
+  assert.deepEqual(diff.files.map((file) => file.path), ['mine.ts']);
+  assert.equal(diff.totalFiles, 1);
+  assert.equal(diff.totalAdded, 1);
+  assert.equal(diff.totalRemoved, 0);
+  assert.equal(diff.incomplete, false);
+});
+
+test('computeSnapshotDiff: 会话口径下范围内路径两端都没扫到要计入 unscannedFiles', () => {
+  // 目录扫描到 2000 条就停了，本会话写过的深层文件两端都没出现：既不能算删除，也不能算零变化。
+  const input = buildInput({
+    baseline: [baseline('a.txt', 'one')],
+    current: [current('a.txt', 'one')],
+    scope: new Set(['a.txt', 'docs/deep/notes.md']),
+  });
+  const diff = computeSnapshotDiff(input);
+  assert.deepEqual(diff.files, []);
+  assert.equal(diff.coverage.unscannedFiles, 1);
+  assert.equal(diff.incomplete, true);
+});
+
+test('computeSnapshotDiff: 会话口径下「整个目录没扫全」不算这条统计的缺口', () => {
+  // 目录口径下 baseline 不完整会让整份统计标记不完整；会话口径只关心自己写过的路径，
+  // 这些路径都核对到了就不该继续挂着「统计不完整」。
+  const input = buildInput({
+    baseline: [baseline('mine.ts', 'a')],
+    current: [current('mine.ts', `a${LF}b`)],
+    scope: new Set(['mine.ts']),
+    incomplete: true,
+    coverage: { baseline: side(false, 2000, 'FILE_COUNT_LIMIT'), current: side(false, 2000, 'FILE_COUNT_LIMIT', 3141) },
+  });
+  const diff = computeSnapshotDiff(input);
+  assert.equal(diff.incomplete, false);
+  assert.equal(diff.totalAdded, 1);
 });
 
 test('computeSnapshotDiff: create counts added lines, delete counts removed lines', () => {

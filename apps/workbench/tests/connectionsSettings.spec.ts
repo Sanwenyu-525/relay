@@ -48,6 +48,28 @@ function state() { return { connections: [] as Record<string, unknown>[], polici
   archivedAt: null as string | null }; }
 
 describe("项目连接与 Permission 设置", () => {
+  it("日常区按工具给出真实状态，逐动作表单默认收在高级区", async () => {
+    connect(); const data = state();
+    data.connections = [{ id: connectionId, project_id: projectId, status: "ACTIVE", version: "1",
+      capabilities: ["FILE_READ", "FILE_QUERY"], allowed_host: null, created_at: created }];
+    data.policies = [{ id: policyId, project_id: projectId, status: "ACTIVE", active_version: "1",
+      revision: "1", created_at: created }];
+    data.versions = [{ version: "1", capability: "FILE_READ", action_type: "READ_FILE",
+      target_prefix: "D:\\Workspace\\query", decision: "AUTO", max_payload_bytes: 2, created_at: created }];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
+      baseGet(String(input).slice(root.length), data) ?? response(404, {}));
+    vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+    // 「已连接」与「已授权」分开：有 ACTIVE 连接 + 非拒绝策略才算可用。
+    expect(mounted.wrapper.get('[data-testid="connections-tool-files"]').text()).toContain("可用");
+    expect(mounted.wrapper.get('[data-testid="connections-tool-github"]').text()).toContain("未配置");
+    expect(mounted.wrapper.get('[data-testid="connections-tool-git"]').text()).toContain("打开 Git 仓库根目录");
+    // 逐动作配置仍在页面上（可检查配置与撤销状态），但默认收起。
+    expect(mounted.wrapper.find('[data-testid="connections-advanced"]').exists()).toBe(true);
+    expect(mounted.wrapper.get('[data-testid="connections-advanced"]').attributes("open")).toBeUndefined();
+    expect(mounted.wrapper.find('[data-testid="policy-form"]').exists()).toBe(true);
+  });
+
   it("目录检索连接可从页面配置且仍不自动授权", async () => {
     connect(); const data = state(); const rootPath = "D:\\Workspace\\query";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -357,18 +379,15 @@ describe("项目连接与 Permission 设置", () => {
     await mounted.wrapper.get(".connections-form").trigger("submit");
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
   });
-  it("示例入口可达但不查询、不写入真实配置", async () => {
+  it("示例模式可达但不查询、不写入真实配置，也不给手输 UUID 的入口", async () => {
     const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountWorkbench("/connections"); unmount = mounted.unmount;
     expect(mounted.wrapper.text()).toContain("示例数据");
-    // 按已知项目 ID 打开是备用入口，按钮不用主色与主流程抢层级。
-    const openButtonClass = mounted.wrapper.get(".connections-entry button").attributes("class") ?? "";
-    expect(openButtonClass).not.toContain("primary-button");
-    expect(openButtonClass).toContain("secondary-button");
-    await mounted.wrapper.get('[data-testid="connections-project-id"]').setValue(projectId);
-    await mounted.wrapper.get(".connections-entry").trigger("submit"); await flush();
-    expect(mounted.router.currentRoute.value.path).toBe(`/projects/${projectId}/connections`);
-    expect(mounted.wrapper.text()).toContain("没有真实连接或权限配置");
+    /* 2026-10-19 删掉「按已知项目 ID 打开」的手输 UUID 表单（用户指认「这些都是过度设计」）：
+       连接设置只能从项目列表进；示例模式只说明为什么要先连 API，不给一个假入口。 */
+    expect(mounted.wrapper.find('[data-testid="connections-project-id"]').exists()).toBe(false);
+    expect(mounted.wrapper.text()).not.toContain("按已知项目 ID");
+    expect(mounted.wrapper.text()).toContain("返回项目入口");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -530,7 +549,7 @@ describe("项目连接与 Permission 设置", () => {
     const connectionOptions = mounted.wrapper.get('[data-testid="connection-capability"]')
       .findAll("option").map((option) => option.attributes("value"));
     expect(connectionOptions).toEqual(["WEB_FETCH", "FILE_READ", "FILE_QUERY", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN",
-      "COMPUTER_READ", "COMPUTER_INPUT", "GITHUB_READ", "BROWSER_READ", "BROWSER_ACTION", "BROWSER_COMMIT", "FAKE_WRITE", "FAKE_PUBLIC_READ"]);
+      "COMPUTER_READ", "COMPUTER_INPUT", "GITHUB_READ", "BROWSER_READ", "BROWSER_ACTION", "BROWSER_COMMIT"]);
     await mounted.wrapper.get('[data-testid="connection-capability"]').setValue("CLI_RUN");
     await mounted.wrapper.get(".connections-form").trigger("submit"); await flush();
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
@@ -545,7 +564,7 @@ describe("项目连接与 Permission 设置", () => {
     expect(mounted.wrapper.text()).toContain("命令行执行 · 每次请求审批");
   });
 
-  it("FAKE 能力不绑定任何边界：连接与策略都不出现目录或主机输入", async () => {
+  it("FAKE 能力只在显式开发入口出现，且不绑定任何边界", async () => {
     connect(); const data = state();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input).slice(root.length);
@@ -553,12 +572,25 @@ describe("项目连接与 Permission 设置", () => {
       throw new Error(`Unexpected write ${path}`);
     }); vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
-    await mounted.wrapper.get('[data-testid="connection-capability"]').setValue("FAKE_PUBLIC_READ");
-    expect(mounted.wrapper.find('[data-testid="connection-root"]').exists()).toBe(false);
-    expect(mounted.wrapper.find('[data-testid="connection-host"]').exists()).toBe(false);
-    await mounted.wrapper.get('[data-testid="policy-capability"]').setValue("FAKE_PUBLIC_READ");
-    expect(mounted.wrapper.find('[data-testid="policy-host"]').exists()).toBe(false);
-    expect(mounted.wrapper.find('[data-testid="policy-resource"]').exists()).toBe(false);
+    const normal = mounted.wrapper.get('[data-testid="connection-capability"]')
+      .findAll("option").map((option) => option.attributes("value"));
+    expect(normal).not.toContain("FAKE_WRITE");
+    expect(normal).not.toContain("FAKE_PUBLIC_READ");
+    unmount(); unmount = () => {};
+
+    // 显式开发入口：地址声明 ?dev-capabilities=1 才把测试能力放回下拉。
+    window.history.replaceState({}, "", "/?dev-capabilities=1");
+    try {
+      const dev = await mountWorkbench(`/projects/${projectId}/connections`); unmount = dev.unmount;
+      await dev.wrapper.get('[data-testid="connection-capability"]').setValue("FAKE_PUBLIC_READ");
+      expect(dev.wrapper.find('[data-testid="connection-root"]').exists()).toBe(false);
+      expect(dev.wrapper.find('[data-testid="connection-host"]').exists()).toBe(false);
+      await dev.wrapper.get('[data-testid="policy-capability"]').setValue("FAKE_PUBLIC_READ");
+      expect(dev.wrapper.find('[data-testid="policy-host"]').exists()).toBe(false);
+      expect(dev.wrapper.find('[data-testid="policy-resource"]').exists()).toBe(false);
+    } finally {
+      window.history.replaceState({}, "", "/");
+    }
   });
 
   it("WEB_FETCH 策略主机与连接主机不同时只陈列事实，不宣称已获准入", async () => {
@@ -649,5 +681,88 @@ describe("项目连接与 Permission 设置", () => {
     await mounted.wrapper.findAll("button").find((button) => button.text() === "用原 ID 和内容重试")!.trigger("click"); await flush();
     expect(posts).toBe(2);
     expect(mounted.wrapper.text()).toContain("连接创建已由服务端回执和最新项目查询确认");
+  });
+});
+
+/**
+ * R3-01（2026-10-21 走查）落地侧：从会话「+」的插件面板进来时，这一页要落在**本项目**、
+ * 定位到**这个插件**那一行，给出本页能做的下一步，并留一条回到原会话的路。
+ * 导航与定位只读服务端已有事实，不创建连接、不写策略，因此不授予任何权限。
+ */
+describe("从会话插件面板跳进来的定位与返回", () => {
+  function locate(stateOverride: Record<string, unknown> = {}) {
+    connect();
+    const data = state();
+    Object.assign(data, stateOverride);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      baseGet(String(input).slice(root.length), data) ?? response(404, {}));
+    vi.stubGlobal("fetch", fetchMock);
+    return data;
+  }
+
+  it("带 tool 进来时定位到那一行，并把焦点交给它", async () => {
+    Element.prototype.scrollIntoView = () => {};
+    locate();
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections?tool=computer&from=%2Fagent%3Fsession%3Dabc`);
+    unmount = mounted.unmount;
+    const row = mounted.wrapper.get('[data-testid="connections-tool-computer"]');
+    expect(row.attributes("data-located")).toBe("true");
+    expect(mounted.wrapper.get('[data-testid="connections-tool-browser"]').attributes("data-located")).toBeUndefined();
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("connections-tool-computer");
+    // 返回路径原样带回会话深链接：往返后仍回得到那一条讨论。
+    expect(mounted.wrapper.get('[data-testid="connections-return"]').attributes("href")).toBe("/agent?session=abc");
+  });
+
+  it("未知 tool 键不猜某一行的定位", async () => {
+    Element.prototype.scrollIntoView = () => {};
+    locate();
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections?tool=whatever`);
+    unmount = mounted.unmount;
+    expect(mounted.wrapper.find('[data-located="true"]').exists()).toBe(false);
+  });
+
+  it("插件行的下一步落在本页，不再只把用户指回会话面板", async () => {
+    locate();
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections?tool=computer`);
+    unmount = mounted.unmount;
+    const detail = mounted.wrapper.get('[data-testid="connections-tool-state-computer"]').text();
+    expect(detail).toContain("登记");
+    expect(detail).toContain("高级");
+  });
+
+  it("没有 from 时不挂一条无目的的返回键；带恶意 from 时不渲染站内跳转", async () => {
+    locate();
+    const plain = await mountWorkbench(`/projects/${projectId}/connections`);
+    unmount = plain.unmount;
+    expect(plain.wrapper.find('[data-testid="connections-return"]').exists()).toBe(false);
+    plain.unmount();
+    locate();
+    const hostile = await mountWorkbench(`/projects/${projectId}/connections?from=%2F%2Fevil.example%2Fx`);
+    unmount = hostile.unmount;
+    expect(hostile.wrapper.find('[data-testid="connections-return"]').exists()).toBe(false);
+  });
+
+  it("全局页保留真实范围选择，并把返回路径带到项目链接上", async () => {
+    connect();
+    const data = state();
+    data.connections = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if ((init?.method ?? "GET") === "GET" && path === "/projects?status=active") {
+        return response(200, { items: [{ id: projectId, title: "真实项目", project_type: "GENERAL",
+          revision: "1", state_revision: "1", archived_at: null, archive_status: "ACTIVE",
+          phase_key: "M01", next_action_task_id: null, created_at: created, updated_at: created }],
+        next_cursor: null });
+      }
+      return baseGet(path, data) ?? response(404, {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/settings/connections?from=%2Fagent`);
+    unmount = mounted.unmount;
+    const link = mounted.wrapper.find('[data-testid="connections-picker-project"]');
+    expect(link.exists()).toBe(true);
+    // 选完项目仍回得到原会话：返回路径随这一跳继续传下去。
+    expect(link.attributes("href")).toContain("from=%2Fagent");
+    expect(mounted.wrapper.get('[data-testid="connections-return"]').attributes("href")).toBe("/agent");
   });
 });
