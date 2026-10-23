@@ -3,7 +3,7 @@ import { type ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { ComposerAttach } from "../src/views/AssistView";
+import { ComposerAttach, insertPluginMention } from "../src/views/AssistView";
 import type { RelayApiClient, RelayAssistSourceRef, RelayKnowledge, RelaySkillDefinition } from "../src/api/relayClient";
 import { flush, mountReact } from "./mountApp";
 
@@ -60,6 +60,8 @@ type HarnessProps = {
   readonly initialRefs?: readonly RelayAssistSourceRef[];
   readonly onToggleSourceRef?: (ref: RelayAssistSourceRef) => void;
   readonly onSources?: () => void;
+  /** 首条消息没有会话级资料浮层：只给勾选入口，不给「检索项目资料」动作。 */
+  readonly noSourcesPanel?: boolean;
   readonly onSkill?: () => void;
   readonly mode?: "AGENT" | "ASSISTANT" | "LEARNING";
   readonly conversation?: readonly RelayAssistSourceRef[];
@@ -72,7 +74,7 @@ type HarnessProps = {
   readonly onPickSkill?: (key: string) => void;
   readonly skillContext?: { readonly projectId: string | null; readonly taskId: string | null;
     readonly resolveInPlace: boolean } | null;
-  /** 需要额外端点（如插件运行时）时替换默认夹具客户端。 */
+  /** 额外端点需要替换默认夹具客户端。 */
   readonly client?: RelayApiClient;
   /** 菜单所在的站内位置：「管理连接与权限」要带着它作为返回路径。 */
   readonly path?: string;
@@ -97,13 +99,14 @@ function Harness(props: HarnessProps) {
             ? current.filter((item) => key(item) !== key(ref)) : [...current, ref];
         }))}
         skillSelected={props.skillSelected ?? false}
-        onSources={props.onSources ?? (() => {})}
+        onSources={props.noSourcesPanel ? undefined : props.onSources ?? (() => {})}
         onSkill={props.onSkill ?? (() => {})}
         projectId={props.projectId ?? null}
         skills={props.skills} selectedSkillKey={props.selectedSkillKey ?? null}
         onPickSkill={props.onPickSkill} skillContext={props.skillContext ?? null}
         onCommand={() => setDraft((value) => value.startsWith("/") ? value : `/${value}`)}
         onPickCommand={(name) => setDraft((value) => `${value.match(/^\s*/u)?.[0] ?? ""}/${name} `)}
+        onPickPlugin={(label) => setDraft((value) => insertPluginMention(value, label, null))}
         notes={props.notes} />
       <textarea data-testid="draft" aria-label="本次消息" value={draft} readOnly />
     </div>
@@ -236,7 +239,7 @@ describe("「+」两级菜单", () => {
     } finally { view.unmount(); }
   });
 
-  it("禁用的行 hover 不展开二级（首条消息前的资料）", async () => {
+  it("禁用的行 hover 不展开二级（没有资料入口的档位）", async () => {
     const view = await mountAttach(<div>
       <ComposerAttach client={stubClient()} mode="AGENT" hasSession={false} onCommand={() => {}} />
     </div>);
@@ -247,6 +250,20 @@ describe("「+」两级菜单", () => {
     } finally { view.unmount(); }
   });
 
+
+  it("首条消息只有勾选入口：资料一级可展开并直接勾选，检索动作不冒充可用", async () => {
+    const view = await mountReact(<Harness projectId="p-1" noSourcesPanel />);
+    try {
+      await openSub("assist-attach-sources");
+      // 没有会话级浮层也仍然能选：一级行可展开，二级直接平铺可勾选的项目资料。
+      expect(row("assist-attach-sources")?.disabled).toBe(false);
+      expect(row("assist-attach-sources")?.getAttribute("aria-expanded")).toBe("true");
+      expect(row("assist-attach-search")).toBeNull();
+      await click(row("assist-attach-project-0"));
+      expect(row("assist-attach-project-0")?.querySelector(".agent-chat-attach-item-check")).not.toBeNull();
+      expect(row("assist-attach-sources")?.querySelector(".agent-chat-attach-item-hint")?.textContent).toBe("1");
+    } finally { view.unmount(); }
+  });
 
   it("资料二级：检索入口、对话真实引用与最近引用可见，未接入的本地文件不再占一行", async () => {
     const onSources = vi.fn();
@@ -482,45 +499,29 @@ describe("「+」两级菜单", () => {
     } finally { view.unmount(); }
   });
 
-  it("插件详情：运行时状态与项目授权分开回答，无项目也能看到运行时", async () => {
-    /* 2026-10-20（P0-2）：点插件不再跳通用配置页。运行时是安装级事实，授权是项目级事实；
-       把「未登录」写成「未授权」会让用户去错地方补配置。 */
-    const runtime = [
-      { plugin: "github", state: "NOT_AUTHENTICATED", detail: "GitHub CLI 已安装，但当前没有登录。",
-        remediation: "在终端执行 gh auth login 完成登录" },
-      { plugin: "computer", state: "READY", detail: "电脑运行时已就位", remediation: null },
-      { plugin: "browser", state: "NOT_PAIRED", detail: "浏览器后端尚未连接", remediation: null }
-    ] as const;
-    const withProject = {
-      ...stubClient(), getPluginStatus: vi.fn(async () => runtime)
-    } as unknown as RelayApiClient;
-    const view = await mountReact(<Harness projectId="p-1" client={withProject} />);
+  it("插件行：点击把 @插件标签 插进草稿，不弹详情、不发送（DEV-0099）", async () => {
+    /* 2026-10-21（DEV-0099）：插件行是插入入口。运行时诊断与授权归「管理连接与权限」页，
+       行上只保留连接状态；点击只编辑草稿，既不发消息也不授予任何能力。 */
+    const view = await mountReact(<Harness projectId="p-1" />);
     try {
       await openSub("assist-attach-connectors");
+      expect(row("assist-attach-plugin-github")?.getAttribute("title"))
+        .toContain("点击把 @GitHub 插入输入框");
       await click(row("assist-attach-plugin-github"));
-      const runtimeRow = document.querySelector('[data-testid="assist-plugin-runtime"]');
-      const authRow = document.querySelector('[data-testid="assist-plugin-authorization"]');
-      expect(runtimeRow?.textContent).toContain("未登录");
-      expect(authRow?.textContent).toContain("已连接");
-      expect(submenu()?.textContent).toContain("gh auth login");
-      // 重新检测只重读一次运行时状态，不产生任何授权。
-      await click(row("assist-plugin-recheck"));
-      expect(vi.mocked(withProject.getPluginStatus)).toHaveBeenCalledTimes(2);
-      await click(row("assist-plugin-back"));
-      expect(row("assist-attach-plugin-github")).not.toBeNull();
+      expect(attach()?.open).toBe(false);
+      expect(document.querySelector<HTMLTextAreaElement>('[data-testid="draft"]')?.value).toBe("@GitHub ");
+      expect(document.querySelector('[data-testid="assist-plugin-runtime"]')).toBeNull();
     } finally { view.unmount(); }
 
-    const noProjectClient = { ...stubClient(), getPluginStatus: vi.fn(async () => runtime) } as unknown as RelayApiClient;
-    const noProject = await mountReact(<Harness client={noProjectClient} />);
+    /* 没有插入回调时（菜单只用于查看与导航）插件行保持禁用，不显示一个点了没反应的行。 */
+    const bare = await mountAttach(<div>
+      <ComposerAttach client={stubClient()} mode="AGENT" hasSession projectId="p-1"
+        onSources={() => {}} onSkill={() => {}} onCommand={() => {}} />
+    </div>);
     try {
       await openSub("assist-attach-connectors");
-      await click(row("assist-attach-plugin-browser"));
-      expect(document.querySelector('[data-testid="assist-plugin-runtime"]')?.textContent)
-        .toContain("未就绪");
-      // 没有项目归属时如实说「无法核对授权」，不编一个「未授权」。
-      expect(document.querySelector('[data-testid="assist-plugin-authorization"]')?.textContent)
-        .toContain("需要项目归属");
-    } finally { noProject.unmount(); }
+      expect(row("assist-attach-plugin-computer")?.disabled).toBe(true);
+    } finally { bare.unmount(); }
   });
 
   it("连接器二级：空清单与读取失败各有如实文案，不编造插件", async () => {
@@ -696,68 +697,55 @@ describe("「+」两级菜单", () => {
 });
 
 /**
- * R3-01（2026-10-21 走查）：从已绑定项目的会话进「连接器与插件 → 某插件 → 管理连接与权限」，
- * 落地页必须是**这个项目**的连接与权限区，而不是要求重选项目的全局页；跳转本身是站内导航，
- * 不整页重载，并留下回到原会话的位置。这里锁的是跳转语义：导航与看状态不授予任何权限，
+ * R3-01（2026-10-21 走查）：连接器面板底部的「管理连接与权限」要落到**当前项目**的
+ * 连接与权限区，而不是要求重选项目的全局页；跳转本身是站内导航，不整页重载，
+ * 并留下回到原会话的位置。这里锁的是跳转语义：导航与看状态不授予任何权限，
  * 授权仍只在连接页上由用户显式提交连接与策略命令产生。
+ * 插件行改为插入 mention（DEV-0099），不再逐插件带 `tool` 参数跳转。
  */
 describe("「管理连接与权限」保留当前范围", () => {
-  const runtime = [
-    { plugin: "computer", state: "READY", detail: "电脑运行时已就位", remediation: null },
-    { plugin: "browser", state: "NOT_PAIRED", detail: "浏览器后端尚未连接", remediation: null },
-    { plugin: "github", state: "NOT_AUTHENTICATED", detail: "GitHub CLI 已安装，但当前没有登录。",
-      remediation: "在终端执行 gh auth login 完成登录" }
-  ] as const;
-  const pluginClient = () => ({ ...stubClient(), getPluginStatus: vi.fn(async () => runtime) }) as unknown as RelayApiClient;
   /** 落点按站内路由读回：路径 + 查询参数，不依赖序列化时的编码细节。 */
   function landed() {
     const url = new URL(document.querySelector('[data-testid="harness-path"]')?.textContent ?? "", "http://workbench.local");
     return { pathname: url.pathname, params: url.searchParams };
   }
 
-  it("插件详情里点「管理连接与权限」：站内直达本项目的连接页并定位这个插件", async () => {
-    const view = await mountReact(<Harness path="/agent?session=abc" projectId="p-1" client={pluginClient()} />);
+  it("项目会话里点「管理连接与权限」：站内直达本项目的连接页并留下返回路径", async () => {
+    const view = await mountReact(<Harness path="/agent?session=abc" projectId="p-1" />);
     try {
       await openSub("assist-attach-connectors");
-      await click(row("assist-attach-plugin-computer"));
-      await click(row("assist-plugin-manage"));
+      await click(row("assist-attach-connectors-manage"));
       expect(landed().pathname).toBe("/projects/p-1/connections");
-      expect(landed().params.get("tool")).toBe("computer");
+      // 不再按插件猜一个键：插件行自己只负责插入 mention。
+      expect(landed().params.get("tool")).toBeNull();
       // 返回路径是点击时所在位置：往返后仍回得到同一条会话。
       expect(landed().params.get("from")).toBe("/agent?session=abc");
     } finally { view.unmount(); }
   });
 
-  it("三个插件各自带上自己的键，连接器面板底部那一条只到项目范围", async () => {
-    for (const plugin of ["computer", "browser", "github"] as const) {
-      const view = await mountReact(<Harness projectId="p-1" client={pluginClient()} />);
-      try {
-        await openSub("assist-attach-connectors");
-        await click(row(`assist-attach-plugin-${plugin}`));
-        await click(row("assist-plugin-manage"));
-        expect(landed().pathname).toBe("/projects/p-1/connections");
-        expect(landed().params.get("tool")).toBe(plugin);
-      } finally { view.unmount(); }
-    }
-    const general = await mountReact(<Harness projectId="p-1" client={pluginClient()} />);
+  it("没有项目归属时到真实的项目选择页，不替用户猜一个项目", async () => {
+    const view = await mountReact(<Harness projectId={null} />);
     try {
       await openSub("assist-attach-connectors");
       await click(row("assist-attach-connectors-manage"));
-      expect(landed().pathname).toBe("/projects/p-1/connections");
-      // 没有指定插件时不猜一个键。
-      expect(landed().params.get("tool")).toBeNull();
-    } finally { general.unmount(); }
-  });
-
-  it("没有项目归属时到真实的项目选择页，不替用户猜一个项目", async () => {
-    const view = await mountReact(<Harness client={pluginClient()} projectId={null} />);
-    try {
-      await openSub("assist-attach-connectors");
-      await click(row("assist-attach-plugin-github"));
-      await click(row("assist-plugin-manage"));
       expect(landed().pathname).toBe("/settings/connections");
       expect(landed().params.get("from")).toBe("/agent");
     } finally { view.unmount(); }
+  });
+});
+
+/** 插入规则单独锁：光标处插入、选区替换、前后不叠空格。 */
+describe("insertPluginMention", () => {
+  const at = (start: number, end = start) => ({ selectionStart: start, selectionEnd: end });
+
+  it("在光标处插入并保留光标后的文本", () => {
+    expect(insertPluginMention("AB", "GitHub", at(1))).toBe("A @GitHub B");
+  });
+
+  it("选区被整段替换；句首不补前导空格，已空白处不叠空格", () => {
+    expect(insertPluginMention("AB", "GitHub", at(0, 2))).toBe("@GitHub ");
+    expect(insertPluginMention("看 ", "GitHub", at(2))).toBe("看 @GitHub ");
+    expect(insertPluginMention("", "GitHub", null)).toBe("@GitHub ");
   });
 });
 

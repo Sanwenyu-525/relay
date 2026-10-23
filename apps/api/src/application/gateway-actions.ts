@@ -2381,7 +2381,11 @@ async function fileWriteExecute(db: DbExecutor, op: LogicalOperationRow, invocat
   };
 }
 
-async function gitExecute(op: LogicalOperationRow, invocation: InvocationAttemptRow,
+/**
+ * 只读执行函数导出（DEV-0054）：手动核对入口与恢复路径必须复用同一批执行/重读函数，
+ * 否则「核对时的期望」会和「执行时的期望」漂移。导出不改变任何行为。
+ */
+export async function gitExecute(op: LogicalOperationRow, invocation: InvocationAttemptRow,
   signal?: AbortSignal): Promise<{ outcome: 'SUCCEEDED' | 'FAILED'; result: JsonObject }> {
   if (signal?.aborted) throw new Error('Gateway dispatch aborted before git execution');
   const options = { cwd: op.normalized_target, signal };
@@ -2485,7 +2489,7 @@ const FILE_READ_MAX_BYTES = 128 * 1024;
 
 /** Reads are idempotent and side-effect free: a typed failure settles FAILED
  * (nothing happened) instead of UNKNOWN, and reconcile can safely re-read. */
-async function fileReadExecute(op: LogicalOperationRow, invocation: InvocationAttemptRow,
+export async function fileReadExecute(op: LogicalOperationRow, invocation: InvocationAttemptRow,
   signal?: AbortSignal, deadline?: Date | null): Promise<{
   outcome: 'SUCCEEDED' | 'FAILED'; result: JsonObject;
 }> {

@@ -178,6 +178,74 @@ describe("工作空间级会话", () => {
     wrapper.unmount();
   });
 
+  it("首条消息先选项目资料：点击即成为本次候选，发送时随首条消息冻结", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: Record<string, unknown> }[] = [];
+    const pathPrefix = `/api/v1/workspaces/${workspaceId}`;
+    let created = false;
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      const path = new URL(url).pathname;
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+        posts.push({ path, body });
+        if (path.endsWith("/assist-sessions")) {
+          created = true;
+          return { ok: true, status: 201, json: async () => ({ command_id: body.command_id,
+            committed_at: "2026-10-05T00:00:00Z",
+            result: { session_id: sessionId, workspace_id: workspaceId, project_id: projectId,
+              task_id: taskId, title: "关于新任务目标", status: "ACTIVE", revision: "1",
+              created_at: "2026-10-05T00:00:00Z", updated_at: "2026-10-05T00:00:00Z" } }) } as Response;
+        }
+        if (path.endsWith("/messages")) {
+          return { ok: true, status: 202, json: async () => ({ command_id: body.command_id,
+            committed_at: "2026-10-05T00:00:00Z",
+            result: { session_id: sessionId, user_message_id: "u-1", assistant_message_id: "a-1" } }) } as Response;
+        }
+        throw new Error(`unexpected POST ${url}`);
+      }
+      if (path === `${pathPrefix}/tasks/${taskId}`) { return response(task()); }
+      if (path === `${pathPrefix}/projects/${projectId}`) return response({ id: projectId,
+        title: "当前项目", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
+      if (path === `${pathPrefix}/knowledge`
+        && new URL(url).searchParams.get("project_id") === projectId) return response([{ id: "k-1",
+        project_id: projectId, title: "需求说明", status: "ACTIVE", revision: "1",
+        current_version: "3", created_at: "2026-10-01T00:00:00Z",
+        updated_at: "2026-10-01T00:00:00Z" }]);
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return response({ items: [] });
+      if (path === `${pathPrefix}/assist-sessions/${sessionId}`) return response({ id: sessionId,
+        workspace_id: workspaceId, project_id: projectId, task_id: taskId,
+        title: "关于新任务目标", status: "ACTIVE", revision: "1",
+        created_at: "2026-10-05T00:00:00Z", updated_at: "2026-10-05T00:00:00Z" });
+      if (path.startsWith(`${pathPrefix}/assist-sessions`)) return response({ items: created
+        ? [{ id: sessionId, workspace_id: workspaceId, project_id: projectId, task_id: taskId,
+          title: "关于新任务目标", status: "ACTIVE", revision: "1",
+          created_at: "2026-10-05T00:00:00Z", updated_at: "2026-10-05T00:00:00Z" }] : [] });
+      if (path.endsWith("/model-port")) return response({ provider: "fake", configured: false,
+        model: null, base_url: null, max_call_tokens: null });
+      if (path.includes("/model-port/")) return response({ current_config_fingerprint: null,
+        last: null, matches_current_config: false, worker_startup_validation: "NOT_CONFIGURED" });
+      if (path.endsWith("/chat-commands")) return response({ items: [] });
+      return response({ items: [] });
+    }));
+    const { wrapper } = await mountedTaskAssist();
+    try {
+      await flush(80);
+      // 首条消息没有会话级资料浮层，但「+」里的资料一级不再禁用。
+      expect(wrapper.get('[data-testid="assist-attach-sources"]').attributes("disabled")).toBeUndefined();
+      await wrapper.get('[data-testid="assist-attach"]').trigger("click"); await flush();
+      await wrapper.get('[data-testid="assist-attach-sources"]').trigger("click"); await flush(20);
+      await wrapper.get('[data-testid="assist-attach-project-0"]').trigger("click"); await flush();
+      await wrapper.get('[data-testid="assist-first-draft"]').setValue("把这份资料带上");
+      await flush();
+      await wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+      await flush(80);
+      const sent = posts.find((post) => post.path.endsWith("/messages"));
+      expect(sent?.body).toMatchObject({ source_refs: [
+        { kind: "KNOWLEDGE", root_id: "k-1", version: "3" }] });
+    } finally { wrapper.unmount(); window.localStorage.clear(); }
+  });
+
   // V43-06 反例：无会话的既有任务切到聊天视图，过去停在「开始讨论/选择会话/新建会话」
   // 的三选一停顿页，没有输入卡。空态必须直接给出首条输入路径，发送时才建会话；
   // 打开页面（只读）不得创建任何会话。

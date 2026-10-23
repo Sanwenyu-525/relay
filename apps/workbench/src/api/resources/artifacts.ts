@@ -4,7 +4,7 @@ import { RelayHttp } from "../core/http";
 import { array, boolean, decimal, nullableString, object, string, stringArray } from "../core/primitives";
 import { artifactDirectUsesFrom, artifactFrom, artifactLineageFrom, artifactTextLockFrom, artifactVersionResultFrom, combinationCheckFrom, impactCandidateFrom, impactCandidateGroupFrom, impactCheckFrom } from "../parse/artifacts";
 import { commandEnvelopeFrom, stateMutationFrom } from "../parse/projects";
-import type { RelayArtifact, RelayArtifactDirectUses, RelayArtifactImpactCandidate, RelayArtifactImpactCheck, RelayArtifactLineage, RelayArtifactTextLock, RelayArtifactVersionResult, RelayClosePartialFileWriteInput, RelayCombinationCheck, RelayFileWriteChangeSet, RelayFileWriteDispositionPreview, RelayFileWriteFrozenDiff, RelayImpactCandidateGroup, RelayTaskArtifacts } from "../dtos/artifacts";
+import type { RelayArtifact, RelayArtifactDirectUses, RelayArtifactImpactCandidate, RelayArtifactImpactCheck, RelayArtifactLineage, RelayArtifactTextLock, RelayArtifactVersionResult, RelayClosePartialFileWriteInput, RelayCombinationCheck, RelayGatewayReconcileResult, RelayFileWriteChangeSet, RelayFileWriteDispositionPreview, RelayFileWriteFrozenDiff, RelayImpactCandidateGroup, RelayTaskArtifacts } from "../dtos/artifacts";
 import type { RelayStateMutation } from "../dtos/projects";
 
 export async function getFileWriteChangeSets(http: RelayHttp, operationId: string): Promise<readonly RelayFileWriteChangeSet[]> {
@@ -147,6 +147,31 @@ export async function closePartialFileWrite(http: RelayHttp, input: RelayClosePa
       throw new Error("处置回执与原动作不匹配。");
     }
   } catch { throw new RelayTransportError("处置回执无法核对，请查询原 command_id。"); }
+}
+
+/**
+ * DEV-0054：未决只读动作的手动核对（安全重读）。回执逐字段核对——结论以服务端
+ * 重读为准，前端不本地推断成功或失败。
+ */
+export async function reconcileGatewayOperation(http: RelayHttp, input: {
+  readonly operationId: string; readonly commandId: string;
+}): Promise<RelayGatewayReconcileResult> {
+  const body = await http.request(http.workspacePath(`/operations/${encodeURIComponent(input.operationId)}/reconcile`), {
+    method: "POST", body: JSON.stringify({ command_id: input.commandId })
+  }, 200);
+  try {
+    const receipt = commandEnvelopeFrom(body);
+    const status = string(receipt.result, "status", "Gateway reconcile result");
+    if (receipt.commandId !== input.commandId ||
+        string(receipt.result, "operation_id", "Gateway reconcile result") !== input.operationId ||
+        !["SUCCEEDED", "NOT_EXECUTED", "FAILED"].includes(status)) {
+      throw new Error("核对回执与原动作不匹配。");
+    }
+    return { operationId: input.operationId,
+      status: status as RelayGatewayReconcileResult["status"],
+      reconciliation: string(receipt.result, "reconciliation", "Gateway reconcile result"),
+      capabilityKey: string(receipt.result, "capability_key", "Gateway reconcile result") };
+  } catch { throw new RelayTransportError("核对回执无法核对，请查询原 command_id。"); }
 }
 
 export async function createArtifactWithVersion(http: RelayHttp, input: { readonly taskId: string; readonly commandId: string; readonly expectedTaskRevision: DecimalRevision; readonly title: string; readonly mediaType: string; readonly content: string; }): Promise<RelayArtifactVersionResult> {

@@ -53,6 +53,8 @@ export default function FolderScopeBar({ directory, recents, busy, error,
   // 读起来像提示不像入口。因此只有「还没有目录」这一档改成动作文案＋常驻虚线下划线（见 CSS）；
   // 已有目录名时它是事实主角，回到纯文本＋悬停下划线，不给真实目录名加装饰。
   const unnamed = directory === null && boundDirectoryPath === null;
+  // 首帧还没有目录事实但打开命令在途：这一格必须说「正在打开」，不能把在途读成「未选择」。
+  const opening = unnamed && busy;
   // 细条只写目录名，绝对路径在悬停/聚焦时浮出（2026-10-20 用户要求）。
   const currentPath = directory?.canonicalRoot ?? boundDirectoryPath;
   const { tooltipHandlers, tooltipNode } = usePathTooltip(() => currentPath);
@@ -97,7 +99,8 @@ export default function FolderScopeBar({ directory, recents, busy, error,
         type="button" data-testid="folder-scope-change"
         aria-haspopup="dialog" aria-expanded={changing} disabled={busy}
         {...tooltipHandlers}
-        onClick={() => setChanging((open) => !open)}>{directory?.displayName ?? boundDirectoryPath?.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) ?? "选择工作目录"}</button>
+        onClick={() => setChanging((open) => !open)}>{opening ? "正在打开目录…"
+          : directory?.displayName ?? boundDirectoryPath?.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) ?? "选择工作目录"}</button>
       {tooltipNode}
       <span className="folder-strip-meta" data-testid="folder-scope-association">{associationLabel}</span>
       {/* 只有「Git 需要到仓库根才能授权」这一档在细条上露一个标记：它是可行动的信息，

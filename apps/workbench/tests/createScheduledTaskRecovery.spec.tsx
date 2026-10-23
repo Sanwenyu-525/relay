@@ -137,6 +137,79 @@ describe("新建定时任务的草稿与结果核对", () => {
     expect(posts).toHaveLength(1);
   });
 
+  it("HTTP 500 可能已提交，同样按结果未知冻结原 command_id；回执命中即进详情", async () => {
+    connect();
+    const posts: Record<string, unknown>[] = [];
+    let receiptChecks = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const commonResponse = common(url);
+      if (commonResponse) return commonResponse;
+      if (url === `${root}/projects/${projectId}/scheduled-tasks` && init?.method === "POST") {
+        posts.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return response(500, { code: "INTERNAL_ERROR", detail: "服务端已处理，但响应链失败" });
+      }
+      if (url.startsWith(`${root}/commands/`)) {
+        receiptChecks += 1;
+        const commandId = decodeURIComponent(url.slice(`${root}/commands/`.length));
+        return response(200, { ...envelope(commandId, created(taskId)), command_type: "CreateScheduledTask" });
+      }
+      throw new Error(`unexpected ${url}`);
+    }));
+    const mounted = await mountWorkbench("/scheduled-tasks?view=create"); unmount = mounted.unmount;
+    await flush(30);
+    await fill(mounted);
+    await submit(mounted);
+
+    expect(posts).toHaveLength(1);
+    const commandId = String(posts[0]!.command_id);
+    expect(mounted.wrapper.get('[data-testid="scheduled-task-pending"]').text()).toContain(commandId);
+    // 500 不是明确拒绝：再点提交不能替用户生成第二个创建意图。
+    await submit(mounted);
+    expect(posts).toHaveLength(1);
+    expect(mounted.wrapper.get('[data-testid="scheduled-task-submit"]').attributes("disabled")).toBeDefined();
+
+    await mounted.wrapper.get('[data-testid="scheduled-task-check-receipt"]').trigger("click");
+    await flush(30);
+    expect(receiptChecks).toBe(1);
+    expect(mounted.router.currentRoute.value.path).toBe(`/scheduled-tasks/${taskId}`);
+    expect(posts).toHaveLength(1);
+  });
+
+  it("HTTP 500 后回执未找到：只按原 ID 与原载荷重试，不生成新命令", async () => {
+    connect();
+    const posts: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const commonResponse = common(url);
+      if (commonResponse) return commonResponse;
+      if (url === `${root}/projects/${projectId}/scheduled-tasks` && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        posts.push(body);
+        if (posts.length === 1) return response(500, { code: "INTERNAL_ERROR", detail: "服务端已处理，但响应链失败" });
+        return response(201, envelope(String(body.command_id), created(taskId)));
+      }
+      if (url.startsWith(`${root}/commands/`)) return response(404, {
+        code: "COMMAND_NOT_FOUND", detail: "command not found" });
+      throw new Error(`unexpected ${url}`);
+    }));
+    const mounted = await mountWorkbench("/scheduled-tasks?view=create"); unmount = mounted.unmount;
+    await flush(30);
+    await fill(mounted);
+    await submit(mounted);
+
+    expect(posts).toHaveLength(1);
+    expect(mounted.wrapper.find('[data-testid="scheduled-task-pending"]').exists()).toBe(true);
+    await mounted.wrapper.get('[data-testid="scheduled-task-check-receipt"]').trigger("click");
+    await flush(30);
+    expect(mounted.wrapper.text()).toContain("原命令暂未查到回执");
+    await mounted.wrapper.get('[data-testid="scheduled-task-retry-original"]').trigger("click");
+    await flush(30);
+    expect(posts).toHaveLength(2);
+    expect(posts[1]).toEqual(posts[0]);
+    expect(mounted.router.currentRoute.value.path).toBe(`/scheduled-tasks/${taskId}`);
+  });
+
   it("回执未找到时只允许按原 ID 与原内容重试；重试成功后离开且载荷不变", async () => {
     connect();
     const posts: Record<string, unknown>[] = [];

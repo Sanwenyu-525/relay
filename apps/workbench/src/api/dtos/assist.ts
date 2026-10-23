@@ -110,12 +110,16 @@ export type RelayWorkspaceDefaultDirectoryStatus = "UNSET" | "READY" | "UNAVAILA
  * 无配置时 `revision` 为 "0"，其余字段为 null；`UNAVAILABLE` 是「配置存在但当前
  * 不可用」，与 `UNSET` 不是同一件事——界面必须分开显示，不能把它读成「没设置」。
  * `write_tier` 只是该目录现状，配置默认目录不授予任何写能力。
+ * `defaultWriteTier` 是工作区给**以后新开的目录**选的起步档位（0131 / DEV-0115）：
+ * 它与 `writeTier` 不是同一件事——前者是一个还没落到任何目录上的选择，后者是某个已绑定
+ * 目录的现状。选默认档位不建连接、不写策略，也不改任何已有目录。
  */
 export interface RelayWorkspaceDefaultDirectory {
   readonly resourceId: string | null;
   readonly canonicalRoot: string | null;
   readonly displayName: string | null;
   readonly writeTier: RelayWriteTier | null;
+  readonly defaultWriteTier: RelayWriteTier | null;
   readonly status: RelayWorkspaceDefaultDirectoryStatus;
   readonly reason: string | null;
   readonly revision: DecimalRevision;
@@ -125,6 +129,13 @@ export interface RelayWorkspaceDefaultDirectory {
 export interface RelayWorkspaceDefaultDirectoryResult {
   readonly workspaceId: string;
   readonly resourceId: string | null;
+  readonly revision: DecimalRevision;
+}
+
+/** 设置默认档位的回执结果：只有工作区、档位与修订，没有任何目录或权限字段。 */
+export interface RelayWorkspaceDefaultWriteTierResult {
+  readonly workspaceId: string;
+  readonly defaultWriteTier: RelayWriteTier | null;
   readonly revision: DecimalRevision;
 }
 

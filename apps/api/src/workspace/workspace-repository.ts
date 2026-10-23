@@ -2,6 +2,7 @@ import { sql } from 'kysely';
 
 import type { DbExecutor } from '../infrastructure/database.js';
 import type {
+  LocalDirectoryWriteTier,
   WorkspaceExecutionAuthorityRow,
   WorkspaceRow,
   WorkspaceDefaultDirectoryRow,
@@ -36,6 +37,19 @@ export class WorkspaceRepository {
       on conflict (workspace_id) do update set resource_id = excluded.resource_id,
         revision = workspace_default_directories.revision + 1, updated_at = now()
       returning *`.execute(this.db)).rows, 'set workspace default directory');
+  }
+
+  /**
+   * 0131（DEV-0115）：默认写档位与默认目录共用同一行、同一个修订号——两处讲的都是「这个工作区的默认」，
+   * 分开计数会让一条 CAS 管不住另一条。只写这一列，`resource_id` 保持原值。
+   */
+  async setDefaultWriteTier(workspaceId: string,
+    tier: LocalDirectoryWriteTier | null): Promise<WorkspaceDefaultDirectoryRow> {
+    return requireRow((await sql<WorkspaceDefaultDirectoryRow>`insert into workspace_default_directories
+      (workspace_id, resource_id, default_write_tier, revision) values (${workspaceId}, null, ${tier}, 1)
+      on conflict (workspace_id) do update set default_write_tier = excluded.default_write_tier,
+        revision = workspace_default_directories.revision + 1, updated_at = now()
+      returning *`.execute(this.db)).rows, 'set workspace default write tier');
   }
 
   async insertWorkspace(workspace: NewWorkspace): Promise<WorkspaceRow> {

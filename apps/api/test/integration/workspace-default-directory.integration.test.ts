@@ -45,7 +45,7 @@ test('DD-02/09: HTTP set/clear preserve revisions, receipts and read-only access
     const empty = await api.get(endpoint);
     assert.equal(empty.status, 200, empty.text);
     assert.deepEqual(empty.body, { resource_id: null, canonical_root: null, display_name: null,
-      write_tier: null, status: 'UNSET', reason: null, revision: '0' });
+      write_tier: null, default_write_tier: null, status: 'UNSET', reason: null, revision: '0' });
     const opened = await api.post(path('/working-directories/open'), {
       command_id: randomUUID(), root_path: f.root, project_id: f.projectId });
     assert.equal(opened.status, 200, opened.text);

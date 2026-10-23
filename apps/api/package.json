@@ -20,6 +20,7 @@
     "worker:supervised": "node --env-file=.env dist/src/worker/supervisor-main.js",
     "migrate": "node --env-file=.env dist/src/cli/migrate.js",
     "migrate:graph": "node --env-file=.env dist/src/cli/install-graph.js",
+    "audit:managed-staging": "node --env-file=.env dist/src/cli/managed-staging-audit.js",
     "init:workspace": "node --env-file=.env dist/src/cli/init-workspace.js",
     "test": "tsc -p tsconfig.json && node --test \"dist/test/unit/**/*.test.js\"",
     "test:integration": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-integration.ps1"

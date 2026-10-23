@@ -185,6 +185,8 @@ V1 不承诺对系统外编辑器的绝对并发隔离。对受管存储可控�
 
 2026-09-26 P17 窄切片已把 URL 导入 Job 接到同一 Gateway（USER_IMPORT）和 Knowledge：创建时冻结规范 URL 与 WEB_FETCH Connection，执行前重核活动 Permission/批准与逐跳 SSRF 边界；成功的抓取证据生成不可变 WEB_PAGE 版本。Job/Operation 使用各自持久身份；RUNNING 且未准备动作、以及 Operation 已终结但 Job 未结算的崩溃窗口可重扫，Knowledge/Job/Context revision 同事务提交。已处于 DISPATCHING 的导入仍须可信停机证明后按原 Invocation 安全重读，后台 tick 不自动推断进程已停。公开路径和未验收边界见 [HTTP 契约](../api/http-command-contract.md#1027-m04p17-url-导入-job-到-knowledge2026-09-26开发自检)。
 
+2026-10-22（DEV-0046 澄清）`allow_private` 的治理链与已接受边界：该开关只存在于 Gateway 连接 config（显式 `true` 才落库，缺省即拒绝），设置者是能在该 Workspace/Project 创建或编辑连接的参与者；连接写命令走命令回执与历史，读取方 DTO 不返回 `allow_private`。它只解除保留地址检查，**不解除**主机绑定、Permission 主机前缀门（默认 DENY）与逐跳 SSRF 校验。已接受风险：单开关整体关掉私网黑名单，意味着持有该连接编辑权的人可让本机服务访问 loopback 与云元数据地址；当前缓解只有连接编辑授权与命令审计，不做逐地址审批。若将来需要按地址粒度控制，应扩展为地址清单而非布尔开关（未做）。
+
 ## 4. Git
 
 只对显式登记仓库/隔离副本使用可信 git executable 和结构化参数。读取 status/diff/log 禁用外部 diff/textconv 等非必要执行路径；受信配置需考虑 hooks、filter、credential helper 等真实可执行因素。Git 只读命令名称不代表任意仓库配置都无副作用。

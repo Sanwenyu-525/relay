@@ -139,9 +139,10 @@ function defaultApi() {
 }
 
 const unsetProjection = { resource_id: null, canonical_root: null, display_name: null,
-  write_tier: null, status: "UNSET", reason: null, revision: "0" };
+  write_tier: null, default_write_tier: null, status: "UNSET", reason: null, revision: "0" };
 const readyProjection = { resource_id: "res-1", canonical_root: "D://Work//Demo",
-  display_name: "Demo", write_tier: "READ_ONLY", status: "READY", reason: null, revision: "3" };
+  display_name: "Demo", write_tier: "READ_ONLY", default_write_tier: null, status: "READY",
+  reason: null, revision: "3" };
 
 describe("Workspace 默认工作目录客户端", () => {
   it("UNSET：revision 读成 0、其余字段为 null，且读取不发写命令", async () => {
@@ -149,7 +150,7 @@ describe("Workspace 默认工作目录客户端", () => {
     vi.stubGlobal("fetch", fetcher);
     const value = await defaultApi().getWorkspaceDefaultDirectory();
     expect(value).toEqual({ resourceId: null, canonicalRoot: null, displayName: null,
-      writeTier: null, status: "UNSET", reason: null, revision: "0" });
+      writeTier: null, defaultWriteTier: null, status: "UNSET", reason: null, revision: "0" });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(fetcher.mock.calls[0]?.[1]?.method).toBeUndefined();
     expect(String(fetcher.mock.calls[0]?.[0])).toBe(`http://127.0.0.1:8787${defaultPrefix}/default-working-directory`);
@@ -220,6 +221,41 @@ describe("Workspace 默认工作目录客户端", () => {
       result: { workspace_id: "w1", resource_id: "res-1", revision: "4" } })));
     await expect(defaultApi().setWorkspaceDefaultDirectory({ commandId: "cmd-4",
       expectedRevision: "3", resourceId: "res-1" })).rejects.toBeInstanceOf(RelayTransportError);
+  });
+
+  it("默认写入档位发一条工作区命令，回执身份与档位都对不上时只报无法核对", async () => {
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      calls.push({ url: String(input), body });
+      return jsonBody({ command_id: body.command_id, committed_at: "2026-10-19T00:00:00Z",
+        result: { workspace_id: "w1", default_write_tier: body.default_write_tier, revision: "4" } });
+    }));
+    const result = await defaultApi().setWorkspaceDefaultWriteTier({ commandId: "cmd-5",
+      expectedRevision: "3", tier: "ASK" });
+    expect(calls[0]?.url).toBe(`http://127.0.0.1:8787${defaultPrefix}/default-write-tier`);
+    expect(calls.map((call) => call.body))
+      .toEqual([{ command_id: "cmd-5", expected_revision: "3", default_write_tier: "ASK" }]);
+    expect(result).toEqual({ workspaceId: "w1", defaultWriteTier: "ASK", revision: "4" });
+    // 回执说回来的档位不是发出去的那一个：不能把它读成刚设置的档位。
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return jsonBody({ command_id: body.command_id, committed_at: "2026-10-19T00:00:00Z",
+        result: { workspace_id: "w1", default_write_tier: "FULL", revision: "5" } });
+    }));
+    await expect(defaultApi().setWorkspaceDefaultWriteTier({ commandId: "cmd-6",
+      expectedRevision: "4", tier: "ASK" })).rejects.toBeInstanceOf(RelayTransportError);
+  });
+
+  it("default_write_tier 缺失或词表外都显式失败，不读成「没有默认」", async () => {
+    const { default_write_tier: _omitted, ...withoutField } = unsetProjection;
+    vi.stubGlobal("fetch", vi.fn(async () => jsonBody(withoutField)));
+    await expect(defaultApi().getWorkspaceDefaultDirectory()).rejects.toThrow(/default_write_tier/u);
+    vi.stubGlobal("fetch", vi.fn(async () => jsonBody({ ...unsetProjection,
+      default_write_tier: "ALWAYS" })));
+    await expect(defaultApi().getWorkspaceDefaultDirectory()).rejects.toThrow(/default_write_tier/u);
+    vi.stubGlobal("fetch", vi.fn(async () => jsonBody({ ...unsetProjection, default_write_tier: "ASK" })));
+    expect((await defaultApi().getWorkspaceDefaultDirectory()).defaultWriteTier).toBe("ASK");
   });
 });
 

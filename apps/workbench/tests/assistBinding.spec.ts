@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { clickPortal, flush, mountWorkbench, openFolderDialog, openWorkingDirectory } from "./mountApp";
+import { clickPortal, flush, folderStripAssociation, folderStripName, mountWorkbench, openFolderDialog, openWorkingDirectory } from "./mountApp";
 
 /**
  * 同会话接续：先做普通讨论（workspace-level 会话，project_id 为空），再选择目录并把它归入项目。
@@ -497,6 +497,82 @@ describe("归属命令的结果未知与迟到响应", () => {
       // 归属后按项目身份重读同一会话，历史仍可读，没有新建第二个会话。
       expect(h.gets).toContain(`${prefix}/assist-sessions/${sessionId}/messages`);
       expect(h.posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(0);
+      // 归属确认后这一句说的是**这条会话**的项目：与会话指向同一个项目时可以直接用目录回执里的标题。
+      await flush();
+      expect(folderStripAssociation()).toBe("已归入项目：MyProject");
+    } finally { view.unmount(); }
+  });
+});
+
+/**
+ * 细条上「已归入项目」与「还没有归入项目」不能并存（2026-10-22，DEV-0117）。
+ *
+ * 用户报的「目录不匹配」在这一行上有两种说法同时成立：输入卡上方写「MyProject 已归入项目：
+ * MyProject」，顶栏与左栏按会话事实写未绑定目录／未归入项目。根因是这一句取自**目录的关联项目**
+ * （本页刚好打开过哪个目录），而不是**这条讨论的归属**。归属是服务端事实，被拒或在途时
+ * 目录仍在、讨论却没归入，两句话就撞在一起。
+ */
+describe("细条的归属文案跟随会话事实（DEV-0117）", () => {
+  it("归属被服务端拒掉后，细条不再替这条会话宣称「已归入项目：目录的那个项目」", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const h = harness();
+    const rejected = () => response({ code: "STATE_CONFLICT", status: 409,
+      detail: "这段讨论还有消息在途，等它结束再换目录。" }, 409);
+    vi.stubGlobal("fetch", router({ binding: rejected, directory: rejected }, h));
+    const view = await mountWorkbench("/agent");
+    try {
+      await startDiscussion(view, "先讨论一下这个目录");
+      await openFolder();
+
+      // 两条命令都被拒：这条会话既没有归属也没有目录，这是服务端事实。
+      expect(view.wrapper.get('[data-testid="collab-binding"]').attributes("data-status")).toBe("FAILED");
+      expect(view.wrapper.get('[data-testid="collab-directory-binding"]').attributes("data-status")).toBe("FAILED");
+      expect(h.bound.value).toBe(false);
+      expect(h.directory.value).toBeNull();
+      // 目录本身仍然打开着（用户选的就是它），但归属那一格说这条讨论：未归入项目。
+      expect(folderStripName()).toBe("MyProject");
+      expect(folderStripAssociation()).toBe("未归入项目");
+      // 同一行紧随其后的告警与这一句是同一件事，不再出现「已归入项目」与「还没有归入项目」并存。
+      expect(document.querySelector('[data-testid="collab-unassigned-execution-hint"]')).not.toBeNull();
+      expect(view.wrapper.get('[data-testid="folder-scope-strip"]').text()).not.toContain("已归入项目");
+    } finally { view.unmount(); }
+  });
+
+  it("归属命令在途期间也不提前宣称已归入项目，确认后跟着会话事实改口", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const h = harness();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.stubGlobal("fetch", router({ bindingGate: gate }, h));
+    const view = await mountWorkbench("/agent");
+    try {
+      await startDiscussion(view, "先讨论一下这个目录");
+      await openFolder();
+      await flush();
+      expect(view.wrapper.get('[data-testid="collab-binding"]').attributes("data-status")).toBe("PENDING");
+      expect(folderStripAssociation()).toBe("未归入项目");
+
+      release();
+      await flush(); await flush();
+      expect(folderStripAssociation()).toBe("已归入项目：MyProject");
+    } finally { release(); view.unmount(); }
+  });
+
+  it("左栏目录「＋」带着既有未归属讨论进来时，细条也不替它宣称已归入项目", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const h = harness();
+    const rejected = () => response({ code: "STATE_CONFLICT", status: 409,
+      detail: "这段讨论还有消息在途，等它结束再换目录。" }, 409);
+    vi.stubGlobal("fetch", router({ binding: rejected, directory: rejected,
+      workspaceSessions: () => response({ items: [session()] }) }, h));
+    const view = await mountWorkbench(`/agent?dir=${encodeURIComponent(root)}`);
+    try {
+      await flush(); await flush(); await flush();
+      // 目录确实打开着，显示名照旧取目录回执。
+      expect(folderStripName()).toBe("MyProject");
+      // 但这条讨论的归属是服务端事实：project_id 仍为 null，投影里那个项目只是换会话时暂借的导航作用域。
+      expect(folderStripAssociation()).toBe("未归入项目");
+      expect(document.querySelector('[data-testid="folder-scope-strip"]')!.textContent).not.toContain("已归入项目");
     } finally { view.unmount(); }
   });
 });

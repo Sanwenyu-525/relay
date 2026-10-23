@@ -120,6 +120,8 @@ export async function getRunGatewayOperations(http: RelayHttp, runId: string): P
     });
     return { id: operationId, status: string(row, "status", "Run operation"),
       actionType: string(row, "action_type", "Run operation"),
+      capabilityKey: row.capability_key === undefined || row.capability_key === null
+        ? null : string(row, "capability_key", "Run operation"),
       normalizedTarget: string(row, "normalized_target", "Run operation"),
       invocationStatuses: invocations.map((invocation) => invocation.status),
       invocations };

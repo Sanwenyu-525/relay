@@ -71,7 +71,8 @@ function stubFetch(harness: Harness) {
     if (path === `${prefix}/model-port/verification`) return response({ current_config_fingerprint: null,
       last: null, matches_current_config: false, worker_startup_validation: "NOT_CONFIGURED" });
     if (path === `${prefix}/default-working-directory`) return response({ resource_id: null,
-      canonical_root: null, display_name: null, write_tier: null, status: "UNSET", reason: null, revision: "0" });
+      canonical_root: null, display_name: null, write_tier: null, default_write_tier: null,
+      status: "UNSET", reason: null, revision: "0" });
     if (path === `${prefix}/assist-sessions`) return response({ items: [session()] });
     if (path === `${prefix}/assist-sessions/${sessionId}`) return response(session());
     if (path === `${prefix}/assist-sessions/${sessionId}/model-selection`) return response({ model: null, revision: "0" });
@@ -136,6 +137,56 @@ describe("发送键提交态（发送消息不闪禁用灰）", () => {
       expect(document.querySelector('[data-testid="assist-stop"]')).not.toBeNull();
       expect(view.wrapper.get('[data-testid="assist-composer"]').attributes("data-inflight")).toBe("true");
       expect(document.querySelector(".assist-pending")).toBeNull();
+    } finally { view.unmount(); }
+  });
+
+  /**
+   * 停止键在提交窗口内接棒时同样不画禁用灰（DEV-0110）：有 RUNNING 回复时发送键的位置
+   * 由停止键承担，点发送后 busy/pending 把它 disabled；若它退回全局禁用色，用户看到的是
+   * 「发送时那个键又变灰，回执后才变绿」。契约与发送键一致：data-busy 保持主色，
+   * 输入卡边框在提交窗口内也保持主色（data-busy），回执后焦点接回正文。
+   */
+  it("在途回复下的提交窗口：停止键保持主色、输入卡边框不变、回执后焦点回到正文", async () => {
+    const harness: Harness = { release: () => undefined, setAssistantStatus: () => undefined };
+    vi.stubGlobal("fetch", stubFetch(harness));
+    harness.setAssistantStatus("RUNNING");
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const view = await mountWorkbench(`/projects/${projectId}?skill=assist`);
+    try {
+      await flush(200);
+      expect(hasCssRule('.agent-chat-send[data-busy="true"]')).toBe(true);
+      expect(hasCssRule('.agent-chat-composer[data-busy="true"]')).toBe(true);
+
+      const composer = () => view.wrapper.get('[data-testid="assist-composer"]');
+      const stop = () => view.wrapper.get('[data-testid="assist-stop"]');
+      expect(stop().attributes("data-busy")).toBeUndefined();
+      await view.wrapper.get('[data-testid="assist-draft"]').setValue("在途时再发一条");
+      await flush();
+      // 在途回复把发送键位让给停止键；此时 Enter 仍是「排队发送」，走同一条提交通路。
+      await view.wrapper.get('[data-testid="assist-draft"]').trigger("keydown", { key: "Enter" });
+      await flush(0);
+
+      // 提交窗口：停止键仍 disabled（不重复提交/停止），但 data-busy 让它保持主色。
+      expect(stop().attributes("data-busy")).toBe("true");
+      expect(stop().attributes("disabled")).toBeDefined();
+      expect((stop().element as HTMLElement).matches('.agent-chat-composer-actions .agent-chat-send[data-busy="true"]'))
+        .toBe(true);
+      // 正文被禁用不可再输入，但输入卡仍按主色描边，不随焦点掉到 body 而淡回灰边。
+      expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).disabled).toBe(true);
+      expect(composer().attributes("data-busy")).toBe("true");
+      expect((composer().element as HTMLElement).matches('.agent-chat-composer[data-busy="true"]')).toBe(true);
+
+      harness.release({ session_id: sessionId, user_message_id: "88888888-8888-4888-8888-888888888888",
+        assistant_message_id: "99999999-9999-4999-8999-999999999999" });
+      await flush(120);
+
+      // 回执后：键回到可操作档，data-busy 撤销；焦点接回正文，边框继续由焦点维持主色。
+      expect(stop().attributes("data-busy")).toBeUndefined();
+      expect(stop().attributes("disabled")).toBeUndefined();
+      expect(composer().attributes("data-busy")).toBeUndefined();
+      const draft = view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement;
+      expect(draft.disabled).toBe(false);
+      expect(document.activeElement).toBe(draft);
     } finally { view.unmount(); }
   });
 });

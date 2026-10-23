@@ -1,7 +1,8 @@
-import { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { useRef, useState } from "react";
+import { Check, ChevronDown } from "lucide-react";
 
 import type { RelayAssistantProfile, RelayConversationMode } from "../api/relayClient";
+import { useDetailsMenu } from "../lib/popoverMenu";
 import AppDialog from "./AppDialog";
 
 /**
@@ -27,6 +28,15 @@ import AppDialog from "./AppDialog";
  * `ConversationModeHints` 渲染在卡片下方的这一列里。理由是输入卡（`.agent-chat-composer`）
  * 是用户在打字的那个框：它一随状态长高、变矮或换内容，光标位置与工具行就跟着跳。
  * 卡内因此恒定只有三样东西——正文、工具行、发送键；回执与原因都在卡外。
+ *
+ * 2026-10-22（DEV-0116，用户截图「优化一下下拉框ui」并选定「换成应用自绘浮层」）：三档
+ * 选择从原生 `<select>` 换成 `details` + 浮层。原生浮层锚在 select 的**内容盒**上，芯片的
+ * 内边距与箭头先吃掉左缘，实测那条浮层既不与芯片对齐又比芯片宽——就是用户截图里悬在
+ * 芯片右上方、压住上面那行字的那块白卡；`appearance: base-select` 能改颜色与圆角，改不了
+ * 锚定与宽度。换成自绘后浮层左缘贴芯片左缘、宽度不小于芯片，档位说明仍不进芯片（见上）。
+ * 代价是键盘与读屏语义要自己实现，因此本文件明确承担三件事：方向键从芯片进浮层并直接落在
+ * 目标档（与原生 select 同语义：一次按键换一档）、浮层内上下与 Home/End 移动焦点、
+ * Enter/Space 由按钮本身完成。Esc、点外面与「同时只留一个浮层」仍归 popoverMenu，不重写。
  */
 
 export interface AssistantDraft {
@@ -37,6 +47,13 @@ export interface AssistantDraft {
 }
 
 const emptyDraft: AssistantDraft = { name: "", roleDescription: "", tone: "", readRoots: "" };
+
+/** 三档的标签与顺序：只有这一份，浮层与用例都读它。普通档不承诺子 Agent 派发（ADR-017 零代码）。 */
+const MODE_OPTIONS: readonly { readonly value: RelayConversationMode; readonly label: string }[] = [
+  { value: "AGENT", label: "普通 Agent" },
+  { value: "ASSISTANT", label: "人设助手" },
+  { value: "LEARNING", label: "学习" },
+];
 
 /**
  * 档位说明行：渲染在**输入卡之外**（卡下方这一列），由调用方摆位。
@@ -107,6 +124,54 @@ export function ConversationModeSwitch({ mode, assistantProfileId, profiles, pro
   const selected = active.find((profile) => profile.id === assistantProfileId) ?? null;
   /** 一个可用助手都没有（或清单读不到）时，新建是这条档唯一的出路，就别藏进弹窗。 */
   const createIsWayOut = !profilesLoading && active.length === 0;
+  // 模式浮层：开合走原生 `details`（不用 React state——useDetailsMenu 的「点外面／Esc／独占」
+  // 是直接改 DOM 的 `open`，state 会与之漂移），这里只补键盘与选择动作。
+  const modeRef = useRef<HTMLDetailsElement>(null);
+  useDetailsMenu(modeRef);
+
+  /** 先开浮层再聚焦：闭合的 `details` 里的按钮不可聚焦，先 focus 再 open 会落空。 */
+  function openMenuAt(target: number) {
+    const node = modeRef.current;
+    if (node === null) return;
+    node.open = true;
+    const rows = Array.from(node.querySelectorAll<HTMLButtonElement>("[data-mode-row]"));
+    if (rows.length === 0) return;
+    rows[Math.max(0, Math.min(rows.length - 1, target))]?.focus({ preventScroll: true });
+  }
+
+  function focusRow(from: number, step: (index: number, count: number) => number) {
+    const rows = Array.from(modeRef.current?.querySelectorAll<HTMLButtonElement>("[data-mode-row]") ?? []);
+    if (rows.length === 0) return;
+    rows[(step(from, rows.length) + rows.length) % rows.length]?.focus({ preventScroll: true });
+  }
+
+  /** 芯片上的方向键＝原生 select 的「一次按键换一档」：按下即打开浮层并把焦点落在目标档。 */
+  function onTriggerKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    if (disabled) return;
+    const current = MODE_OPTIONS.findIndex((option) => option.value === mode);
+    if (event.key === "ArrowDown") { event.preventDefault(); openMenuAt(current + 1); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); openMenuAt(current - 1); }
+    else if (event.key === "Home") { event.preventDefault(); openMenuAt(0); }
+    else if (event.key === "End") { event.preventDefault(); openMenuAt(MODE_OPTIONS.length - 1); }
+  }
+
+  function onMenuKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    const rows = Array.from(modeRef.current?.querySelectorAll("[data-mode-row]") ?? []);
+    const from = rows.indexOf(document.activeElement as Element);
+    if (from < 0) return;
+    if (event.key === "ArrowDown") { event.preventDefault(); focusRow(from, (index) => index + 1); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); focusRow(from, (index) => index - 1); }
+    else if (event.key === "Home") { event.preventDefault(); focusRow(from, () => 0); }
+    else if (event.key === "End") { event.preventDefault(); focusRow(from, (_index, count) => count - 1); }
+  }
+
+  /** 选定即收起浮层并把焦点还给芯片：与原生 select 选完回到控件同一读法，Tab 序不落在死掉的行上。 */
+  function chooseMode(next: RelayConversationMode) {
+    if (disabled) return;
+    if (modeRef.current !== null) modeRef.current.open = false;
+    modeRef.current?.querySelector<HTMLElement>("summary")?.focus({ preventScroll: true });
+    if (next !== mode) onChangeMode(next);
+  }
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -130,23 +195,33 @@ export function ConversationModeSwitch({ mode, assistantProfileId, profiles, pro
 
   return <>
   <div className="agent-chat-mode" data-testid="conversation-mode" title={lockedReason ?? undefined}>
-    {/* 2026-10-18 用户指令「普通 agent，人设助手，学习合并到一个下拉框中」：
-        三档从三枚 radio 收成**一个原生 select**。理由不只是省宽度——三枚 radio 在窄卡
-        里会换行把工具行撑成两行（「执行中底栏散架」同源问题），而模式只有「当前是哪一档」
-        这一个事实，本来就不需要把三个候选一直摊在脸上。
-        仍是原生控件：方向键、读屏、禁用语义都用平台实现，不另写一套。 */}
-    <label className="agent-chat-mode-select-field">
-      <span className="visually-hidden">会话模式</span>
-      <select className="agent-chat-mode-select" data-testid="conversation-mode-select"
-        value={mode} disabled={disabled}
+    {/* 2026-10-22（DEV-0116）：三档从原生 select 换成自绘浮层，锚定与宽度见文件头。
+        仍是「一个事实一枚控件」：芯片只显示当前档，三档候选打开才看得见；说明一律不进芯片
+        （`.agent-chat-mode` 是自动宽容器，长文本会把同排 chip 挤到别的行上）。 */}
+    <details className="agent-chat-mode-select-field agent-chat-mode-menu" ref={modeRef}
+      data-testid="conversation-mode-menu" data-mode={mode}>
+      <summary className="agent-chat-mode-chip" data-testid="conversation-mode-select" data-mode={mode}
+        aria-disabled={disabled || undefined}
         title={lockedReason ?? "切换会话模式（切档是导航到另一条会话，身份在建会话时冻结）"}
-        onChange={(event) => onChangeMode(event.target.value as RelayConversationMode)}>
-        <option value="AGENT">普通 Agent</option>
-        <option value="ASSISTANT">人设助手</option>
-        <option value="LEARNING">学习</option>
-      </select>
-      <ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" />
-    </label>
+        onKeyDown={onTriggerKeyDown}
+        onClick={(event) => { if (disabled) event.preventDefault(); }}>
+        <span className="visually-hidden">会话模式</span>
+        <span className="agent-chat-mode-chip-value">{MODE_OPTIONS
+          .find((option) => option.value === mode)?.label ?? mode}</span>
+        <ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" />
+      </summary>
+      <div className="agent-chat-mode-options" role="group" aria-label="会话模式" onKeyDown={onMenuKeyDown}>
+        {MODE_OPTIONS.map((option) => <button key={option.value} type="button"
+          className="agent-chat-mode-menu-row" data-mode-row data-testid={`conversation-mode-option-${option.value}`}
+          data-current={option.value === mode ? "true" : "false"}
+          aria-current={option.value === mode ? "true" : undefined}
+          aria-disabled={disabled || undefined} onClick={() => chooseMode(option.value)}>
+          <span className="agent-chat-mode-menu-mark" aria-hidden="true">
+            {option.value === mode && <Check />}</span>
+          <span className="agent-chat-mode-menu-label">{option.label}</span>
+        </button>)}
+      </div>
+    </details>
     {mode === "LEARNING" && onChangeRecordLearning && <label className="agent-chat-mode-option">
       <input type="checkbox" disabled={disabled} checked={!recordLearning} data-testid="learning-message-no-record"
         onChange={(event) => onChangeRecordLearning(!event.target.checked)} /><span>本条消息不记录</span></label>}

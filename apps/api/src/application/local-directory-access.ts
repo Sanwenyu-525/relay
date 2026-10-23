@@ -314,19 +314,58 @@ export async function ensureLocalDirectoryReadAccess(repositories: Repositories,
 
   const writeConnections = await matchingConnections(repositories, workspaceId, projectId,
     resource.canonical_root, 'FILE_WRITE', 'ACTIVE');
-  const writeConnectionId = writeConnections[0]?.connection.id ?? null;
   const writePolicies = (await repositories.gateway.listActivePolicies(workspaceId, projectId,
     'FILE_WRITE', 'APPLY_CHANGESET')).filter((policy) =>
     targetMatches(policy.target_prefix, resource.canonical_root, 'FILE_WRITE'));
   const selectedWrite = rankActivePolicies(writePolicies);
+  // 策略行说的是这个目录本身，优先按它判定；没有策略行时才落到工作区默认档位（0131，DEV-0115）。
+  const configuredDefault = selectedWrite === undefined
+    ? (await repositories.workspaces.readDefaultDirectory(workspaceId))?.default_write_tier ?? null : null;
+  // 默认档位要真的成为那一档，得像显式命令那样建写连接与三条写策略：只写 `write_tier` 一列
+  // 不改变任何一条 Gateway 判定，投影照样读成「不可写入」，用户选的默认就成了假的。
+  // 但只有三种情况一律**跳过**而不是让「打开目录」失败——这条命令的语义是打开，没套上默认
+  // 档位不是打开失败，跳过后投影如实读到只读，缺口摆在界面上：
+  // 目录核对不到 Windows 写身份；写连接被停用（不建新的去绕过停用）；
+  // 写规则曾被明确设置或撤销（预置的默认不复活被人撤掉的权限，与读取那一条同一原则）。
+  let adoptedDefault: LocalDirectoryWriteTier | null = null;
+  if (configuredDefault !== null && configuredDefault !== 'READ_ONLY' &&
+      resource.file_write_root_id !== null) {
+    const disabledWrite = await matchingConnections(repositories, workspaceId, projectId,
+      resource.canonical_root, 'FILE_WRITE', 'DISABLED');
+    const revokedTargets = await Promise.all(WRITE_ACTIONS.map((actionType) =>
+      repositories.gateway.listPolicyTargetHistory(workspaceId, projectId, 'FILE_WRITE', actionType)));
+    if (disabledWrite.length === 0 &&
+        !revokedTargets.some((targets) => targets.some((target) =>
+          targetMatches(target, resource.canonical_root, 'FILE_WRITE')))) {
+      adoptedDefault = configuredDefault;
+    }
+  }
   const writeTier: LocalDirectoryWriteTier = selectedWrite?.decision === 'ASK' ? 'ASK'
-    : selectedWrite?.decision === 'AUTO' ? 'AUTO' : 'READ_ONLY';
+    : selectedWrite?.decision === 'AUTO' ? 'AUTO' : adoptedDefault ?? 'READ_ONLY';
+  let writeConnectionId = writeConnections[0]?.connection.id ?? null;
+  const managedWritePolicyIds: Record<string, string> = {};
+  if (adoptedDefault !== null) {
+    // 完全访问与自动批准在策略行上同为 AUTO，差别只在 write_tier 这一列——与显式命令同一画法。
+    const decision: GatewayDecision = adoptedDefault === 'ASK' ? 'ASK' : 'AUTO';
+    if (writeConnectionId === null) {
+      writeConnectionId = await createFileConnection(repositories, workspaceId, projectId,
+        resource.canonical_root, ['FILE_WRITE']);
+    }
+    for (const actionType of WRITE_ACTIONS) {
+      const active = (await repositories.gateway.listActivePolicies(workspaceId, projectId,
+        'FILE_WRITE', actionType)).filter((policy) =>
+        targetMatches(policy.target_prefix, resource.canonical_root, 'FILE_WRITE'));
+      if (rankActivePolicies(active) !== undefined) continue;
+      managedWritePolicyIds[actionType] = await createPolicy(repositories, { workspaceId, projectId,
+        canonicalRoot: resource.canonical_root, capability: 'FILE_WRITE', actionType, decision });
+    }
+  }
 
   const git = await ensureGitReadAccess(repositories, { workspaceId, projectId, resource,
     access: undefined });
   const access = await repositories.gateway.insertLocalDirectoryAccess({ resourceId: resource.id, writeTier,
     readConnectionId, writeConnectionId, gitConnectionId: git.connectionId,
-    policyIds: { ...managedPolicyIds, ...git.policyIds } });
+    policyIds: { ...managedPolicyIds, ...managedWritePolicyIds, ...git.policyIds } });
   return { access, git: git.git, changed: true };
 }
 

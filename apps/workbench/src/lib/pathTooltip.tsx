@@ -11,17 +11,17 @@ export interface PathTooltipHandlers {
 }
 
 /**
- * 目录名的完整路径提示（2026-10-20 用户要求「鼠标悬停的时候显示 tooltip 来显示绝对路径」）。
+ * 应用内的悬停短提示（2026-10-20 为目录名的完整路径而建，2026-10-22 起上下文用量圆环共用同一套）。
  *
  * 为什么不用原生 `title`：WebView2 与 Chromium 的 title 提示延迟约 1 秒、样式不可控，
  * 而且只在指针停在**带 title 的那个元素**上才出现——细条里目录名是按钮、整行是命中区，
- * 用户扫过去时什么也看不到。这里改成悬停/聚焦即浮出，与 `RecentWorkRow` 的摘要卡同一套
- * 定位口径（fixed + portal，避免被细条与滚动容器裁掉）。
+ * 用户扫过去时什么也看不到；圆环只有 24px，同一个问题。这里改成悬停/聚焦即浮出，与
+ * `RecentWorkRow` 的摘要卡同一套定位口径（fixed + portal，避免被细条、输入卡与滚动容器裁掉）。
  *
  * 入参是**取值函数**而不是值：AssistView 里目录路径要到组件体中后段才算出，而 hooks 必须
- * 在任何提前 return 之前调用。函数在悬停那一刻才读，既保住 hooks 顺序，也不把路径冻结在
+ * 在任何提前 return 之前调用。函数在悬停那一刻才读，既保住 hooks 顺序，也不把文本冻结在
  * 首次渲染上。返回值分成 handlers 与 node：handlers 挂到**原本那个元素**上，不新增包裹层，
- * 因此不改动细条/顶栏的 flex 布局；node 由 portal 挂到 body，不参与任何祖先的 overflow。
+ * 因此不改动细条/顶栏/工具行的 flex 布局；node 由 portal 挂到 body，不参与任何祖先的 overflow。
  */
 export function usePathTooltip(getPath: () => string | null, testId = "path-tooltip"): {
   readonly tooltipHandlers: PathTooltipHandlers;

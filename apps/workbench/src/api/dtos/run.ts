@@ -204,6 +204,8 @@ export interface RelayRunGatewayOperation {
   readonly id: string;
   readonly status: string;
   readonly actionType: string;
+  /** 能力族（DEV-0054）。旧服务端未回传时为 null：界面按「不可手动核对」处理，不猜。 */
+  readonly capabilityKey: string | null;
   readonly normalizedTarget: string;
   readonly invocationStatuses: readonly string[];
   /** 服务端已保存的原 Invocation 结果；stdout/stderr 只在这里出现，不由客户端推断。 */

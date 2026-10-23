@@ -2,7 +2,7 @@ import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 
 import { openWorkingDirectory } from '../application/open-working-directory.js';
-import { readWorkspaceDefaultDirectory, setWorkspaceDefaultDirectory }
+import { readWorkspaceDefaultDirectory, setWorkspaceDefaultDirectory, setWorkspaceDefaultWriteTier }
   from '../application/workspace-default-directory.js';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
 import { commandEnvelopeSchema } from './domain-schemas.js';
@@ -65,11 +65,19 @@ export function registerWorkingDirectoryRoutes(app: FastifyInstance, dependencie
   const result = Type.Object({ workspace_id: uuid, resource_id: Type.Union([uuid, Type.Null()]), revision: rev }, strict);
   const setBody = Type.Object({ command_id: uuid, expected_revision: rev, resource_id: uuid }, strict);
   const clearBody = Type.Object({ command_id: uuid, expected_revision: rev }, strict);
+  const tierEnum = Type.Union([Type.Literal('READ_ONLY'), Type.Literal('ASK'), Type.Literal('AUTO'),
+    Type.Literal('FULL')]);
+  // 0131（DEV-0115）：默认档位与默认目录共用同一行与同一个修订号，因此 CAS 用同一把尺子。
+  const tierBody = Type.Object({ command_id: uuid, expected_revision: rev,
+    default_write_tier: Type.Union([tierEnum, Type.Null()]) }, strict);
+  const tierResult = Type.Object({ workspace_id: uuid, default_write_tier: Type.Union([tierEnum, Type.Null()]),
+    revision: rev }, strict);
   const projection = Type.Object({ resource_id: Type.Union([uuid, Type.Null()]),
     canonical_root: Type.Union([Type.String(), Type.Null()]),
     display_name: Type.Union([Type.String(), Type.Null()]),
     write_tier: Type.Union([Type.Literal('READ_ONLY'), Type.Literal('ASK'), Type.Literal('AUTO'),
       Type.Literal('FULL'), Type.Null()]),
+    default_write_tier: Type.Union([tierEnum, Type.Null()]),
     status: Type.Union([Type.Literal('UNSET'), Type.Literal('READY'), Type.Literal('UNAVAILABLE')]),
     reason: Type.Union([Type.String(), Type.Null()]), revision: rev }, strict);
   app.get('/default-working-directory', { schema: { params, response: { 200: projection } } }, async (request, reply) => {
@@ -92,6 +100,15 @@ export function registerWorkingDirectoryRoutes(app: FastifyInstance, dependencie
     execute: async ({ executor, params: p, body }) => {
       const outcome = await setWorkspaceDefaultDirectory(executor, { workspaceId: p.workspace_id ?? '',
         commandId: body.command_id, expectedRevision: body.expected_revision, resourceId: null });
+      return { outcome, result: outcome.result };
+    } }));
+  app.post('/default-write-tier', {
+    schema: { params, body: tierBody, response: { 200: commandEnvelopeSchema(tierResult) } },
+  }, createCommandHandler(dependencies, { commandType: 'SetWorkspaceDefaultWriteTier', bodySchema: tierBody,
+    execute: async ({ executor, params: p, body }) => {
+      const outcome = await setWorkspaceDefaultWriteTier(executor, { workspaceId: p.workspace_id ?? '',
+        commandId: body.command_id, expectedRevision: body.expected_revision,
+        tier: body.default_write_tier });
       return { outcome, result: outcome.result };
     } }));
   app.post('/working-directories/open', {

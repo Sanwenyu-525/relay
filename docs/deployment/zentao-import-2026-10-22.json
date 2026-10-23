@@ -1,0 +1,1012 @@
+{
+  "DEV-0104": {
+    "kind": "bug",
+    "zentaoID": "2",
+    "status": "done",
+    "title": "[Relay] 新建会话/新对话触发聊天区抖动与闪烁",
+    "finalized": true
+  },
+  "DEV-0052": {
+    "kind": "bug",
+    "zentaoID": "3",
+    "status": "cancelled",
+    "title": "[Relay] 浏览器会话功能进度口径存疑",
+    "finalized": true
+  },
+  "DEV-0122": {
+    "kind": "story",
+    "zentaoID": "2",
+    "status": "needs_clarification",
+    "ledgerType": "feature",
+    "title": "[Relay] 功能候选：动态按执行方与类别进行服务端分页筛选",
+    "finalized": true
+  },
+  "DEV-0116": {
+    "kind": "story",
+    "zentaoID": "3",
+    "status": "in_review",
+    "ledgerType": "optimization",
+    "title": "优化一下下拉框ui",
+    "finalized": true
+  },
+  "DEV-0113": {
+    "kind": "story",
+    "zentaoID": "4",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] 七种执行模式：Multi Agent 真实产品链未取证与产品口径待拍板",
+    "finalized": true
+  },
+  "DEV-0117": {
+    "kind": "bug",
+    "zentaoID": "4",
+    "status": "in_progress",
+    "title": "目录不匹配，电脑插件有问题",
+    "finalized": true
+  },
+  "DEV-0110": {
+    "kind": "bug",
+    "zentaoID": "5",
+    "status": "in_progress",
+    "title": "[Relay] 消息发送后输入框与聊天区 UI 异常、发送态变色与排队消息样式",
+    "finalized": true
+  },
+  "DEV-0107": {
+    "kind": "bug",
+    "zentaoID": "6",
+    "status": "in_progress",
+    "title": "这里创建的内容没有gitdiff，可能是没被跟踪的原因，不过我看其他agent写的文件都可以看到文件更改了哪些地方",
+    "finalized": true
+  },
+  "DEV-0105": {
+    "kind": "story",
+    "zentaoID": "5",
+    "status": "in_progress",
+    "ledgerType": "optimization",
+    "title": "这三个不要以下拉框的形式放在输入框里面，现在已经可以在加号里面启动goal和plan模式了，你可以换成其他ui形式来表达现在是什么模式",
+    "finalized": true
+  },
+  "DEV-0103": {
+    "kind": "story",
+    "zentaoID": "6",
+    "status": "in_progress",
+    "ledgerType": "feature",
+    "title": "目标模式ui优化",
+    "finalized": true
+  },
+  "DEV-0096": {
+    "kind": "bug",
+    "zentaoID": "7",
+    "status": "in_progress",
+    "title": "[Relay] 定时创建响应未知后重新生成命令ID，重试可重复启用调度",
+    "finalized": true
+  },
+  "DEV-0092": {
+    "kind": "bug",
+    "zentaoID": "8",
+    "status": "in_progress",
+    "title": "[Relay] 返回原新对话地址时未发送草稿被重置并覆盖本机保存",
+    "finalized": true
+  },
+  "DEV-0090": {
+    "kind": "bug",
+    "zentaoID": "9",
+    "status": "in_progress",
+    "title": "[Relay] 旧电脑运行时的迟到关闭事件清掉新进程与在途请求",
+    "finalized": true
+  },
+  "DEV-0089": {
+    "kind": "bug",
+    "zentaoID": "10",
+    "status": "in_progress",
+    "title": "ai幻觉，红字",
+    "finalized": true
+  },
+  "DEV-0054": {
+    "kind": "bug",
+    "zentaoID": "11",
+    "status": "in_progress",
+    "title": "[Relay] Run页UNKNOWN只能读不能结清",
+    "finalized": true
+  },
+  "DEV-0032": {
+    "kind": "story",
+    "zentaoID": "7",
+    "status": "in_progress",
+    "ledgerType": "feature",
+    "title": "[Relay] 孤儿暂存核对报告缺失",
+    "finalized": true
+  },
+  "DEV-0115": {
+    "kind": "story",
+    "zentaoID": "8",
+    "status": "in_review",
+    "ledgerType": "optimization",
+    "title": "未选择目录时这个权限选择不了，我需要什么时候都能选择",
+    "finalized": true
+  },
+  "DEV-0109": {
+    "kind": "story",
+    "zentaoID": "9",
+    "status": "in_review",
+    "ledgerType": "optimization",
+    "title": "ai回复怎么都是一个颜色？是因为其他情况还没有出现吗？",
+    "finalized": true
+  },
+  "DEV-0047": {
+    "kind": "bug",
+    "zentaoID": "12",
+    "status": "in_review",
+    "title": "[Relay] CLI子进程可读用户凭据目录",
+    "finalized": true
+  },
+  "DEV-0046": {
+    "kind": "bug",
+    "zentaoID": "13",
+    "status": "in_review",
+    "title": "[Relay] allow_private可关掉SSRF黑名单",
+    "finalized": true
+  },
+  "DEV-0146": {
+    "kind": "bug",
+    "zentaoID": "14",
+    "status": "todo",
+    "title": "[Relay] 知识整理把归档同名条目推荐为可接受目标，实际接受必然409",
+    "finalized": true
+  },
+  "DEV-0145": {
+    "kind": "bug",
+    "zentaoID": "15",
+    "status": "todo",
+    "title": "[Relay] 影响候选前置发现目标更新，尚未写入却进入pending并禁用重查",
+    "finalized": true
+  },
+  "DEV-0144": {
+    "kind": "bug",
+    "zentaoID": "16",
+    "status": "todo",
+    "title": "[Relay] 原文锁定结果未知后刷新事实会清原命令并允许新ID重发",
+    "finalized": true
+  },
+  "DEV-0143": {
+    "kind": "bug",
+    "zentaoID": "17",
+    "status": "todo",
+    "title": "[Relay] 产物比较重读当前版本已失权，主阅读区仍保留旧正文",
+    "finalized": true
+  },
+  "DEV-0142": {
+    "kind": "bug",
+    "zentaoID": "18",
+    "status": "todo",
+    "title": "[Relay] 项目创建读取资料中取消，迟到结果又持久化已丢弃正文",
+    "finalized": true
+  },
+  "DEV-0141": {
+    "kind": "bug",
+    "zentaoID": "19",
+    "status": "todo",
+    "title": "[Relay] 目标关联只读项目第一页并丢后续游标，旧项目无法选择",
+    "finalized": true
+  },
+  "DEV-0140": {
+    "kind": "bug",
+    "zentaoID": "20",
+    "status": "todo",
+    "title": "[Relay] 目标创建及项目关联待核对时普通按钮仍可新发命令并覆盖原ID",
+    "finalized": true
+  },
+  "DEV-0139": {
+    "kind": "bug",
+    "zentaoID": "21",
+    "status": "todo",
+    "title": "[Relay] 今日计划刷新只更新revision，保存仍用旧值可回退最新优先级与截止日",
+    "finalized": true
+  },
+  "DEV-0138": {
+    "kind": "bug",
+    "zentaoID": "22",
+    "status": "todo",
+    "title": "[Relay] 今日安排响应未知时可直接切页，返回丢原命令并允许新ID提交",
+    "finalized": true
+  },
+  "DEV-0137": {
+    "kind": "bug",
+    "zentaoID": "23",
+    "status": "todo",
+    "title": "[Relay] 接续点列表重读成功后仍保留上次读取错误并误报未读到",
+    "finalized": true
+  },
+  "DEV-0136": {
+    "kind": "bug",
+    "zentaoID": "24",
+    "status": "todo",
+    "title": "[Relay] 待处理请求跨过有效期后仍可点击并发送过期决定",
+    "finalized": true
+  },
+  "DEV-0135": {
+    "kind": "bug",
+    "zentaoID": "25",
+    "status": "todo",
+    "title": "[Relay] 待处理页刷新读取失权后仍显示旧请求与判断依据",
+    "finalized": true
+  },
+  "DEV-0134": {
+    "kind": "bug",
+    "zentaoID": "26",
+    "status": "todo",
+    "title": "[Relay] 补充验收条件未避让已有ID，合法c2任务新增一条即422冲突",
+    "finalized": true
+  },
+  "DEV-0133": {
+    "kind": "bug",
+    "zentaoID": "27",
+    "status": "todo",
+    "title": "[Relay] 更换本轮接受的产物版本后继承旧人工勾选，仍可直接完成",
+    "finalized": true
+  },
+  "DEV-0132": {
+    "kind": "bug",
+    "zentaoID": "28",
+    "status": "todo",
+    "title": "[Relay] 完成回包及回执未核对确切任务，错配结果仍显示已完成",
+    "finalized": true
+  },
+  "DEV-0131": {
+    "kind": "bug",
+    "zentaoID": "29",
+    "status": "todo",
+    "title": "[Relay] 完成与重开结果未知后仅冻结ID，改说明再点会以旧ID发送新载荷",
+    "finalized": true
+  },
+  "DEV-0130": {
+    "kind": "bug",
+    "zentaoID": "30",
+    "status": "todo",
+    "title": "[Relay] 网页导入结果未知时可直接离页，返回后丢失原命令恢复凭据",
+    "finalized": true
+  },
+  "DEV-0129": {
+    "kind": "bug",
+    "zentaoID": "31",
+    "status": "todo",
+    "title": "[Relay] 资料搜索续页暂时失败会清空已读结果及游标，无法原地重试",
+    "finalized": true
+  },
+  "DEV-0128": {
+    "kind": "bug",
+    "zentaoID": "32",
+    "status": "todo",
+    "title": "[Relay] 资料写入遇503核对型错误即清除pending，重按保存换新命令ID",
+    "finalized": true
+  },
+  "DEV-0127": {
+    "kind": "bug",
+    "zentaoID": "33",
+    "status": "todo",
+    "title": "[Relay] 记忆修订不回填原到期时间，只改正文也会清除有效期",
+    "finalized": true
+  },
+  "DEV-0126": {
+    "kind": "bug",
+    "zentaoID": "34",
+    "status": "todo",
+    "title": "[Relay] 定时详情只读最近20条历史，旧BLOCKED时段丢失处理入口",
+    "finalized": true
+  },
+  "DEV-0125": {
+    "kind": "bug",
+    "zentaoID": "35",
+    "status": "todo",
+    "title": "[Relay] 定时模板创建与触发两道边界静默丢失验收条件ID和target_spec",
+    "finalized": true
+  },
+  "DEV-0124": {
+    "kind": "bug",
+    "zentaoID": "36",
+    "status": "todo",
+    "title": "[Relay] 定时任务详情首次读取失败后没有页内重试入口",
+    "finalized": true
+  },
+  "DEV-0123": {
+    "kind": "bug",
+    "zentaoID": "37",
+    "status": "todo",
+    "title": "[Relay] 定时任务状态与补跑响应未知后丢失原命令ID，仍允许换ID提交",
+    "finalized": true
+  },
+  "DEV-0121": {
+    "kind": "bug",
+    "zentaoID": "38",
+    "status": "todo",
+    "title": "[Relay] 动态窄窗点击查看依据后内容藏在整页列表底部",
+    "finalized": true
+  },
+  "DEV-0120": {
+    "kind": "story",
+    "zentaoID": "10",
+    "status": "todo",
+    "ledgerType": "optimization",
+    "title": "[Relay] 项目总览长标题占屏且类型与阶段重复三次",
+    "finalized": true
+  },
+  "DEV-0119": {
+    "kind": "bug",
+    "zentaoID": "39",
+    "status": "todo",
+    "title": "[Relay] 任务列表将已知等待原因直接显示为英文枚举",
+    "finalized": true
+  },
+  "DEV-0118": {
+    "kind": "bug",
+    "zentaoID": "40",
+    "status": "todo",
+    "title": "[Relay] 轻量新建任务切完整表单被离开拦截，无法携带草稿继续",
+    "finalized": true
+  },
+  "DEV-0112": {
+    "kind": "story",
+    "zentaoID": "11",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] /goal 与 /plan：计划导出、浏览器链、真实 Provider、Windows 与独立验收未闭合",
+    "finalized": true
+  },
+  "DEV-0111": {
+    "kind": "story",
+    "zentaoID": "12",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] 连续插话与方向变化：真实 Provider B/C/D/E 与恢复/独立验收未闭合",
+    "finalized": true
+  },
+  "DEV-0106": {
+    "kind": "story",
+    "zentaoID": "13",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "上下文为什么这么小？无法调整上下文吗？我希望有512和1024k两个档位的上下文",
+    "finalized": true
+  },
+  "DEV-0080": {
+    "kind": "story",
+    "zentaoID": "14",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] 关键进程树测试默认静默跳过",
+    "finalized": true
+  },
+  "DEV-0077": {
+    "kind": "story",
+    "zentaoID": "15",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] release产物落后发布契约",
+    "finalized": true
+  },
+  "DEV-0076": {
+    "kind": "story",
+    "zentaoID": "16",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] 没有真实安装入口",
+    "finalized": true
+  },
+  "DEV-0073": {
+    "kind": "story",
+    "zentaoID": "17",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] dev桌面缺computer运行时副本",
+    "finalized": true
+  },
+  "DEV-0068": {
+    "kind": "story",
+    "zentaoID": "18",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] 正式Run工具链缺审批出口",
+    "finalized": true
+  },
+  "DEV-0067": {
+    "kind": "story",
+    "zentaoID": "19",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] 文件夹入口恢复矩阵未验",
+    "finalized": true
+  },
+  "DEV-0066": {
+    "kind": "story",
+    "zentaoID": "20",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] 委派读投影无生产调用方",
+    "finalized": true
+  },
+  "DEV-0065": {
+    "kind": "story",
+    "zentaoID": "21",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] 记忆自动捕获无落库证据",
+    "finalized": true
+  },
+  "DEV-0064": {
+    "kind": "story",
+    "zentaoID": "22",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] 计划内容缺读回非空守卫",
+    "finalized": true
+  },
+  "DEV-0061": {
+    "kind": "story",
+    "zentaoID": "23",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] M07安装交付与备份红灯未收",
+    "finalized": true
+  },
+  "DEV-0056": {
+    "kind": "story",
+    "zentaoID": "24",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] 运行动效缺用户开关",
+    "finalized": true
+  },
+  "DEV-0055": {
+    "kind": "story",
+    "zentaoID": "25",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] 会话记忆记住与清空无入口",
+    "finalized": true
+  },
+  "DEV-0053": {
+    "kind": "story",
+    "zentaoID": "26",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] 工作台仍称Git未接入",
+    "finalized": true
+  },
+  "DEV-0051": {
+    "kind": "story",
+    "zentaoID": "27",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] 抓取与插件状态缺单测",
+    "finalized": true
+  },
+  "DEV-0045": {
+    "kind": "story",
+    "zentaoID": "28",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] Worker失联无用户接手入口",
+    "finalized": true
+  },
+  "DEV-0043": {
+    "kind": "story",
+    "zentaoID": "29",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] 电脑操作四级降级不可用",
+    "finalized": true
+  },
+  "DEV-0039": {
+    "kind": "story",
+    "zentaoID": "30",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] C03与C08缺等价回归用例",
+    "finalized": true
+  },
+  "DEV-0037": {
+    "kind": "story",
+    "zentaoID": "31",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] 检查器重试上界不跨轮累计",
+    "finalized": true
+  },
+  "DEV-0035": {
+    "kind": "story",
+    "zentaoID": "32",
+    "status": "todo",
+    "ledgerType": "feature",
+    "title": "[Relay] PASS绑定缺两个契约字段",
+    "finalized": true
+  },
+  "DEV-0114": {
+    "kind": "story",
+    "zentaoID": "33",
+    "status": "needs_clarification",
+    "ledgerType": "feature",
+    "title": "[Relay] 未选目录时权限档位不可改：待确认目录绑定语义",
+    "finalized": true
+  },
+  "DEV-0081": {
+    "kind": "story",
+    "zentaoID": "34",
+    "status": "needs_clarification",
+    "ledgerType": "feature",
+    "title": "[Relay] 首启缺配置没有出路",
+    "finalized": true
+  },
+  "DEV-0079": {
+    "kind": "story",
+    "zentaoID": "35",
+    "status": "needs_clarification",
+    "ledgerType": "feature",
+    "title": "[Relay] 受保护路径只校验首段",
+    "finalized": true
+  },
+  "DEV-0071": {
+    "kind": "story",
+    "zentaoID": "36",
+    "status": "needs_clarification",
+    "ledgerType": "feature",
+    "title": "[Relay] 无进展阈值仍是硬编码",
+    "finalized": true
+  },
+  "DEV-0063": {
+    "kind": "story",
+    "zentaoID": "37",
+    "status": "needs_clarification",
+    "ledgerType": "feature",
+    "title": "[Relay] PDF导入无代码缺目标定义",
+    "finalized": true
+  },
+  "DEV-0062": {
+    "kind": "story",
+    "zentaoID": "38",
+    "status": "needs_clarification",
+    "ledgerType": "feature",
+    "title": "[Relay] 交互终端未接入且缺协议",
+    "finalized": true
+  },
+  "DEV-0058": {
+    "kind": "story",
+    "zentaoID": "39",
+    "status": "needs_clarification",
+    "ledgerType": "feature",
+    "title": "[Relay] 浏览器会话端点无前端接线",
+    "finalized": true
+  },
+  "DEV-0057": {
+    "kind": "story",
+    "zentaoID": "40",
+    "status": "needs_clarification",
+    "ledgerType": "feature",
+    "title": "[Relay] 助手角色库无管理入口",
+    "finalized": true
+  },
+  "DEV-0048": {
+    "kind": "story",
+    "zentaoID": "41",
+    "status": "needs_clarification",
+    "ledgerType": "feature",
+    "title": "[Relay] GitHub写动作缺UNKNOWN通道",
+    "finalized": true
+  },
+  "DEV-0040": {
+    "kind": "story",
+    "zentaoID": "42",
+    "status": "needs_clarification",
+    "ledgerType": "feature",
+    "title": "[Relay] 学习模式反例未复验闭合",
+    "finalized": true
+  },
+  "DEV-0038": {
+    "kind": "story",
+    "zentaoID": "43",
+    "status": "needs_clarification",
+    "ledgerType": "feature",
+    "title": "[Relay] 交接未证明旧进程已停",
+    "finalized": true
+  },
+  "DEV-0036": {
+    "kind": "story",
+    "zentaoID": "44",
+    "status": "needs_clarification",
+    "ledgerType": "feature",
+    "title": "[Relay] 契约身份退化为Run身份",
+    "finalized": true
+  },
+  "DEV-0034": {
+    "kind": "story",
+    "zentaoID": "45",
+    "status": "needs_clarification",
+    "ledgerType": "feature",
+    "title": "[Relay] 多产物验证集合不支持",
+    "finalized": true
+  },
+  "DEV-0031": {
+    "kind": "story",
+    "zentaoID": "46",
+    "status": "needs_clarification",
+    "ledgerType": "feature",
+    "title": "[Relay] 跨Project迁移无命令入口",
+    "finalized": true
+  },
+  "DEV-0030": {
+    "kind": "story",
+    "zentaoID": "47",
+    "status": "needs_clarification",
+    "ledgerType": "feature",
+    "title": "[Relay] Run状态迁移缺集中守卫",
+    "finalized": true
+  },
+  "DEV-0108": {
+    "kind": "story",
+    "zentaoID": "48",
+    "status": "done",
+    "ledgerType": "optimization",
+    "title": "这里箭头指向原来是一个复制按钮，点击之后变成√，我希望点击复制按钮的时候弹出一个toast提示复制成功，然后变成√之后过几秒钟变回复制按钮",
+    "finalized": true
+  },
+  "DEV-0102": {
+    "kind": "bug",
+    "zentaoID": "41",
+    "status": "done",
+    "title": "[Relay] 取消目标时 PENDING 轮次被 Worker 领取后异常逃出 tick，Worker 退出",
+    "finalized": true
+  },
+  "DEV-0101": {
+    "kind": "bug",
+    "zentaoID": "42",
+    "status": "done",
+    "title": "权限图标高度要居中，然后菜单宽度再减小一点",
+    "finalized": true
+  },
+  "DEV-0100": {
+    "kind": "bug",
+    "zentaoID": "43",
+    "status": "done",
+    "title": "选择文件与资料是禁用状态",
+    "finalized": true
+  },
+  "DEV-0099": {
+    "kind": "bug",
+    "zentaoID": "44",
+    "status": "done",
+    "title": "点击插件会出现这菜单，对应插件应该直接出现在输入框里面的",
+    "finalized": true
+  },
+  "DEV-0098": {
+    "kind": "bug",
+    "zentaoID": "45",
+    "status": "done",
+    "title": "删除这个弹窗，这个弹窗是用户这个连续动作看到的第三个弹窗，在第二个弹窗就应该删除成功了",
+    "finalized": true
+  },
+  "DEV-0097": {
+    "kind": "bug",
+    "zentaoID": "46",
+    "status": "done",
+    "title": "[Relay] 今日页切换洛杉矶时区后页头错一天，与查询日期不一致",
+    "finalized": true
+  },
+  "DEV-0095": {
+    "kind": "bug",
+    "zentaoID": "47",
+    "status": "done",
+    "title": "[Relay] 定时任务创建未保护未保存表单，切页返回后草稿静默丢失",
+    "finalized": true
+  },
+  "DEV-0094": {
+    "kind": "bug",
+    "zentaoID": "48",
+    "status": "done",
+    "title": "[Relay] 较旧的50个暂停目标占满扫描窗口，后续暂停取消无法收口",
+    "finalized": true
+  },
+  "DEV-0093": {
+    "kind": "bug",
+    "zentaoID": "49",
+    "status": "done",
+    "title": "[Relay] 记忆列表状态筛选文字溢出按钮并挤占新建及说明区域",
+    "finalized": true
+  },
+  "DEV-0091": {
+    "kind": "bug",
+    "zentaoID": "50",
+    "status": "done",
+    "title": "[Relay] 电脑回复缺少结构校验，null 抛异常且字符串 false 被当成功",
+    "finalized": true
+  },
+  "DEV-0088": {
+    "kind": "bug",
+    "zentaoID": "51",
+    "status": "done",
+    "title": "[Relay] 电脑运行时按 chunk 解码损坏中文且字节限额失效",
+    "finalized": true
+  },
+  "DEV-0087": {
+    "kind": "bug",
+    "zentaoID": "52",
+    "status": "done",
+    "title": "[台账] 畸形 URL 片段触发 URIError 并使页面白屏",
+    "finalized": true
+  },
+  "DEV-0086": {
+    "kind": "bug",
+    "zentaoID": "53",
+    "status": "done",
+    "title": "[台账] 搜索旧响应覆盖新条件导致列表显示错误工单",
+    "finalized": true
+  },
+  "DEV-0085": {
+    "kind": "bug",
+    "zentaoID": "54",
+    "status": "done",
+    "title": "[Relay] 全量单测并行时恢复隔离用例超时",
+    "finalized": true
+  },
+  "DEV-0084": {
+    "kind": "bug",
+    "zentaoID": "55",
+    "status": "done",
+    "title": "[Relay] 暂停意图被轮次结算覆盖为等待验收",
+    "finalized": true
+  },
+  "DEV-0083": {
+    "kind": "bug",
+    "zentaoID": "56",
+    "status": "done",
+    "title": "[Relay] 恢复运行时探针写死依赖数，16 例全部失败",
+    "finalized": true
+  },
+  "DEV-0082": {
+    "kind": "bug",
+    "zentaoID": "57",
+    "status": "done",
+    "title": "[Relay] 免费模型守卫对非 JSON 请求抛错，与注释和单测相反",
+    "finalized": true
+  },
+  "DEV-0078": {
+    "kind": "bug",
+    "zentaoID": "58",
+    "status": "done",
+    "title": "[Relay] 重复启动桌面无可感知反馈",
+    "finalized": true
+  },
+  "DEV-0075": {
+    "kind": "bug",
+    "zentaoID": "59",
+    "status": "done",
+    "title": "[Relay] 运行时启动失败错误未捕获",
+    "finalized": true
+  },
+  "DEV-0074": {
+    "kind": "bug",
+    "zentaoID": "60",
+    "status": "done",
+    "title": "[Relay] 运行时环境变量被双重挡死",
+    "finalized": true
+  },
+  "DEV-0072": {
+    "kind": "bug",
+    "zentaoID": "61",
+    "status": "done",
+    "title": "[Relay] 清理失败会杀掉整个应用",
+    "finalized": true
+  },
+  "DEV-0070": {
+    "kind": "bug",
+    "zentaoID": "62",
+    "status": "done",
+    "title": "[Relay] 验收条件入口文档段落过期",
+    "finalized": true
+  },
+  "DEV-0069": {
+    "kind": "bug",
+    "zentaoID": "63",
+    "status": "done",
+    "title": "[Relay] Git只读入口文档口径过期",
+    "finalized": true
+  },
+  "DEV-0060": {
+    "kind": "bug",
+    "zentaoID": "64",
+    "status": "done",
+    "title": "[Relay] 附件集成测试4例活跃红灯",
+    "finalized": true
+  },
+  "DEV-0059": {
+    "kind": "bug",
+    "zentaoID": "65",
+    "status": "done",
+    "title": "[Relay] 兜底页仍是交互预览口径",
+    "finalized": true
+  },
+  "DEV-0050": {
+    "kind": "bug",
+    "zentaoID": "66",
+    "status": "done",
+    "title": "[Relay] 桥接帧上限按码元非字节",
+    "finalized": true
+  },
+  "DEV-0049": {
+    "kind": "bug",
+    "zentaoID": "67",
+    "status": "done",
+    "title": "[Relay] 定时扫描吞异常失败不显",
+    "finalized": true
+  },
+  "DEV-0044": {
+    "kind": "bug",
+    "zentaoID": "68",
+    "status": "done",
+    "title": "[Relay] 浏览器READY缓存不回收",
+    "finalized": true
+  },
+  "DEV-0042": {
+    "kind": "bug",
+    "zentaoID": "69",
+    "status": "done",
+    "title": "[Relay] Memory捕获源未核外部内容",
+    "finalized": true
+  },
+  "DEV-0041": {
+    "kind": "bug",
+    "zentaoID": "70",
+    "status": "done",
+    "title": "[Relay] gh登录探测缺APPDATA误报",
+    "finalized": true
+  },
+  "DEV-0033": {
+    "kind": "bug",
+    "zentaoID": "71",
+    "status": "done",
+    "title": "[Relay] 锁定行用非空断言",
+    "finalized": true
+  },
+  "DEV-0029": {
+    "kind": "bug",
+    "zentaoID": "72",
+    "status": "done",
+    "title": "[Relay] fence事实只靠审计文本判定",
+    "finalized": true
+  },
+  "DEV-0028": {
+    "kind": "bug",
+    "zentaoID": "73",
+    "status": "done",
+    "title": "[Relay] 完成指针写入缺状态守卫",
+    "finalized": true
+  },
+  "DEV-0027": {
+    "kind": "bug",
+    "zentaoID": "74",
+    "status": "done",
+    "title": "测试目录脱离类型检查",
+    "finalized": true
+  },
+  "DEV-0026": {
+    "kind": "bug",
+    "zentaoID": "75",
+    "status": "done",
+    "title": "文档声明与实现不一致",
+    "finalized": true
+  },
+  "DEV-0025": {
+    "kind": "bug",
+    "zentaoID": "76",
+    "status": "done",
+    "title": "同源校验存在未调用死函数",
+    "finalized": true
+  },
+  "DEV-0024": {
+    "kind": "story",
+    "zentaoID": "49",
+    "status": "done",
+    "ledgerType": "feature",
+    "title": "领取UUID暴露在日常表单",
+    "finalized": true
+  },
+  "DEV-0023": {
+    "kind": "bug",
+    "zentaoID": "77",
+    "status": "done",
+    "title": "CLI未知参数静默忽略丢输入",
+    "finalized": true
+  },
+  "DEV-0022": {
+    "kind": "bug",
+    "zentaoID": "78",
+    "status": "done",
+    "title": "筛选无结果仍显示还没有工单",
+    "finalized": true
+  },
+  "DEV-0021": {
+    "kind": "bug",
+    "zentaoID": "79",
+    "status": "done",
+    "title": "搜索关键词%和_被当通配符",
+    "finalized": true
+  },
+  "DEV-0020": {
+    "kind": "story",
+    "zentaoID": "50",
+    "status": "done",
+    "ledgerType": "feature",
+    "title": "删除墓碑没有读取入口",
+    "finalized": true
+  },
+  "DEV-0019": {
+    "kind": "story",
+    "zentaoID": "51",
+    "status": "done",
+    "ledgerType": "feature",
+    "title": "页面缺「只看阻塞」筛选入口",
+    "finalized": true
+  },
+  "DEV-0018": {
+    "kind": "story",
+    "zentaoID": "52",
+    "status": "done",
+    "ledgerType": "feature",
+    "title": "四个动作与交接包缺自动化测试",
+    "finalized": true
+  },
+  "DEV-0017": {
+    "kind": "bug",
+    "zentaoID": "80",
+    "status": "done",
+    "title": "create的--status不接受中文",
+    "finalized": true
+  },
+  "DEV-0016": {
+    "kind": "bug",
+    "zentaoID": "81",
+    "status": "done",
+    "title": "CLI丢失字段级校验原因",
+    "finalized": true
+  },
+  "DEV-0015": {
+    "kind": "bug",
+    "zentaoID": "82",
+    "status": "done",
+    "title": "无效状态筛选被静默忽略",
+    "finalized": true
+  },
+  "DEV-0014": {
+    "kind": "bug",
+    "zentaoID": "83",
+    "status": "done",
+    "title": "空claimId返回英文400提示",
+    "finalized": true
+  },
+  "DEV-0013": {
+    "kind": "bug",
+    "zentaoID": "84",
+    "status": "done",
+    "title": "已完成工单仍显示写评论入口",
+    "finalized": true
+  },
+  "DEV-0012": {
+    "kind": "bug",
+    "zentaoID": "85",
+    "status": "done",
+    "title": "工单列表超200条静默截断",
+    "finalized": true
+  },
+  "DEV-0011": {
+    "kind": "bug",
+    "zentaoID": "86",
+    "status": "done",
+    "title": "释放领取后接受交接绕过领取",
+    "finalized": true
+  },
+  "DEV-0010": {
+    "kind": "bug",
+    "zentaoID": "87",
+    "status": "done",
+    "title": "已取消工单可被接受交接复活",
+    "finalized": true
+  }
+}

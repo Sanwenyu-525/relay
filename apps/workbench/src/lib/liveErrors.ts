@@ -146,6 +146,19 @@ export function describeLiveError(caught: unknown): LiveActionError {
         return { ...base, kind: "transition", message: "这次提交依据的验收版本已经失效：请重新读取任务后再操作。" };
       case "EVIDENCE_UNAVAILABLE":
         return { ...base, kind: "evidence", message: "所需产物内容不可用：完成被拒绝，请核对产物版本后重试。" };
+      case "RESOURCE_NOT_FOUND":
+        // 2026-10-22 DEV-0089：404 的服务端 detail 是「请求的路径在当前服务上不存在。」——
+        // 用户看到的原句是「过程读取失败：请求的路径在当前服务上不存在。」，既不知道
+        // 「路径」指什么，也不知道下一步做什么。404 只有两种常见来处：内容真的不在了，
+        // 或它属于别的项目/目录（切换后旧地址失效）。按这个口径给一句可操作说明。
+        // 只收 404：其它状态带同一个代码时（如失权）服务端 detail 才是有效信息，不能盖掉。
+        if (problem.status !== 404) break;
+        return {
+          ...base,
+          kind: "unknown",
+          message:
+            "要查看的内容不存在：它可能已被删除，也可能已不属于当前项目或目录（切换后旧地址会失效）。请返回列表刷新后重试；持续失败请核对当前项目选择。"
+        };
       case "MODEL_PORT_NOT_CONFIGURED":
         return {
           ...base,
@@ -175,4 +188,17 @@ export function describeLiveError(caught: unknown): LiveActionError {
     message: caught instanceof Error ? caught.message.trim() : "调用本机 API 时发生未知错误。",
     fieldErrors: []
   };
+}
+
+/**
+ * 提交结果是否无法由浏览器判定，需要先按原 command ID 核对回执（工作台 §37）。
+ * 只有服务端明确业务拒绝（422、409 版本冲突等）才说明意图没有落库，可以修正后换新命令重发；
+ * 5xx、`CHECK_RECEIPT_THEN_RETRY`、传输失败与正文不合契约都分不清「没写进去」和
+ * 「写进去但响应失败」。不能改用 `describeLiveError` 的 `kind` 判——5xx 归在 `unknown` 里。
+ */
+export function needsReceiptCheck(caught: unknown): boolean {
+  if (caught instanceof RelayApiError) {
+    return caught.problem.status >= 500 || caught.problem.retryAction === "CHECK_RECEIPT_THEN_RETRY";
+  }
+  return true;
 }

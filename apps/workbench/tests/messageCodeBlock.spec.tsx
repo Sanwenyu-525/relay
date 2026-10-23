@@ -1,14 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createElement } from "react";
+import { act, createElement, Fragment } from "react";
+import { FeedbackHost } from "../src/components/Feedback";
 import MessageCodeBlock from "../src/components/MessageCodeBlock";
 import { mountReact, type DomWrapper } from "./mountApp";
 
-// 可复制文本块的界面口径（工作台 §37.1）：顶行说明这是什么、右上角一键复制、正文逐字保留。
-// 复制是纯客户端动作：不新增命令、不落库；失败与成功都只以按钮可读名表达，不弹额外层。
+// 可复制文本块的界面口径（工作台 §38.1）：顶行说明这是什么、右上角一键复制、正文逐字保留。
+// 复制是纯客户端动作：不新增命令、不落库；成功给一条共享浮层回执，失败只改按钮可读名。
 
 let unmount: (() => void) | null = null;
 afterEach(() => {
   unmount?.(); unmount = null;
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -55,11 +57,36 @@ describe("历史消息里的可复制文本块", () => {
       const wrapper = await render("bash", "pnpm build", "复制这段代码");
       await wrapper.get(".msg-code-copy").trigger("click");
       expect(writeText).toHaveBeenCalledWith("pnpm build");
-      // 反馈只以可读名与图标表达：不新增元素、不位移、不改变正文。
+      // 按钮反馈不新增块内元素、不位移、不改变正文。
       expect(wrapper.get(".msg-code-copy").attributes("aria-label")).toBe("已复制");
       expect(wrapper.get(".msg-code").attributes("data-copy-state")).toBe("done");
       expect(codeText(wrapper)).toBe("pnpm build");
     } finally { restore(); }
+  });
+
+  it("复制成功后弹出「复制成功」回执，按钮几秒后自行还原", async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn(async (_text: string) => undefined);
+    const restore = stubClipboard(writeText);
+    try {
+      const wrapper = await mountReact(createElement(Fragment, null,
+        createElement(MessageCodeBlock, { label: "bash", text: "pnpm build" }),
+        createElement(FeedbackHost)));
+      unmount = wrapper.unmount;
+      await wrapper.wrapper.get(".msg-code-copy").trigger("click");
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      const toast = document.body.querySelector('[data-testid="msg-code-copy-toast"]');
+      expect(toast?.textContent).toContain("复制成功");
+      expect(wrapper.wrapper.get(".msg-code").attributes("data-copy-state")).toBe("done");
+
+      // 2.4s 后 √ 收回复制键；回执不抢正文位置，也不与按钮共用同一个计时器。
+      await act(async () => { await vi.advanceTimersByTimeAsync(2400); });
+      expect(wrapper.wrapper.get(".msg-code").attributes("data-copy-state")).toBe("idle");
+      expect(wrapper.wrapper.get(".msg-code-copy").attributes("aria-label")).toBe("复制这段内容");
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(document.body.querySelector('[data-testid="msg-code-copy-toast"]')).toBeNull();
+    } finally { restore(); vi.useRealTimers(); }
   });
 
   it("写剪贴板失败时按钮说明可重试，不假装复制成功", async () => {

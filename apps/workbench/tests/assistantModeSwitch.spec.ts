@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { DomWrapper, feedbackText, flush, mountWorkbench, openSessionSwitcher, openWorkingDirectory, pressEscape, switcherCurrentSession, toolbarSessionTitle } from "./mountApp";
+import { DomWrapper, feedbackText, flush, mountWorkbench, openSessionSwitcher, openWorkingDirectory, pressEscape, switchToolbarSession, switcherCurrentSession, toolbarSessionTitle } from "./mountApp";
 
 /**
  * 协作页聊天框的会话模式单选框与人设助手（工作台 §25、ADR-018、测试计划 §23.2）。
@@ -241,11 +241,14 @@ async function pickAssistant(view: Awaited<ReturnType<typeof openAgent>>, profil
 
 /** 拨到助手档，等导航与面板挂载完。配置弹窗不随切档自动打开，需要它的用例显式 open。 */
 /**
- * 切档入口（2026-10-18 三档合并为一个下拉框后）：三档是同一个原生 select 的三个选项，
- * 断言因此读它的 value，不再数三枚 radio。
+ * 切档入口（2026-10-22 DEV-0116 起：芯片 + 自绘浮层，不再是原生 select）。
+ * 先把 details 打开再点行——jsdom 没有布局，闭合的 details 里元素也在 DOM 中，
+ * 显式打开是让用例走真实点击路径，而不是依赖「隐藏元素也点得到」这个只有测试里成立的前提。
  */
 async function chooseMode(view: Awaited<ReturnType<typeof openAgent>>, mode: "AGENT" | "ASSISTANT" | "LEARNING") {
-  await view.wrapper.get('[data-testid="conversation-mode-select"]').setValue(mode);
+  const menu = view.wrapper.get('[data-testid="conversation-mode-menu"]').element as HTMLDetailsElement;
+  await act(async () => { menu.open = true; });
+  await view.wrapper.get(`[data-testid="conversation-mode-option-${mode}"]`).trigger("click");
   await flush(80);
 }
 async function flipToAssistant(view: Awaited<ReturnType<typeof openAgent>>) {
@@ -445,26 +448,108 @@ describe("会话模式单选框", () => {
     expect(options.posts.filter((p) => p.path.endsWith("/assist-sessions"))).toHaveLength(1);
     view.unmount();
   });
-  it("三档收在一个下拉框里，普通档标签不承诺尚未实现的子 Agent 派发", async () => {
+  it("三档收在一枚芯片与一个浮层里，普通档标签不承诺尚未实现的子 Agent 派发", async () => {
     const options: Stub = { sessions: [agentSession()], posts: [] };
     const view = await openAgent(options);
-    // 2026-10-18 用户指令「普通 agent，人设助手，学习合并到一个下拉框中」：
-    // 三档不再是三枚常驻 radio，而是同一个 select 的三个选项。
+    // 2026-10-18 用户指令「普通 agent，人设助手，学习合并到一个下拉框中」：三档不再各占一枚 radio；
+    // 2026-10-22 DEV-0116 按用户「优化一下下拉框ui」把浮层改由本应用自绘，候选仍是这三行。
     expect(view.wrapper.findAll('[data-testid="conversation-mode"] input[type="radio"]')).toHaveLength(0);
-    expect(view.wrapper.findAll('[data-testid="conversation-mode"] option')
-      .map((item) => item.attributes("value"))).toEqual(["AGENT", "ASSISTANT", "LEARNING"]);
+    expect(view.wrapper.findAll('[data-testid="conversation-mode"] [data-mode-row]')
+      .map((item) => item.text())).toEqual(["普通 Agent", "人设助手", "学习"]);
     // ADR-017 的子 Agent 至今零代码，标签不能预先承诺。
     expect(view.wrapper.get('[data-testid="conversation-mode"]').text()).not.toContain("子 Agent");
-    expect((view.wrapper.get('[data-testid="conversation-mode-select"]').element as HTMLSelectElement).value)
-      .toBe("AGENT");
+    expect(view.wrapper.get('[data-testid="conversation-mode-select"]').attributes("data-mode")).toBe("AGENT");
+    // 当前档在浮层里只标一行，且勾号只画在这一行上。
+    expect(view.wrapper.findAll("[data-mode-row][data-current=\"true\"]")).toHaveLength(1);
+    expect(view.wrapper.get('[data-testid="conversation-mode-option-AGENT"]').text()).toContain("普通 Agent");
     view.unmount();
+  });
+
+  /**
+   * 自绘浮层的键盘与焦点（DEV-0116）。换成自绘的代价就是这几件事要自己实现，因此逐条钉住：
+   * 芯片上按方向键＝原生 select 的那一次按键（打开浮层并把焦点落在目标档）、浮层内上下与
+   * Home/End 在三行间移动（端点回绕）、Esc 与点当前档都不换档、焦点回到芯片。
+   *
+   * 这里刻意不做「选定另一档后焦点回芯片」这一步：切档是导航到另一条会话，协作页给
+   * AssistView 的 key 带 sessionId，芯片节点会随重挂载换掉，焦点只能落在新芯片上——
+   * 那是导航的结果，不是浮层的行为，硬断言旧节点会拿到 body。换档本身由上面的
+   * chooseMode 用例覆盖，导航后的焦点归 DEV-0110 那组发送态用例。
+   */
+  it("模式浮层：方向键落在目标档，行内移动回绕，Esc 与点当前档都不换档", async () => {
+    const options: Stub = { sessions: [agentSession(), assistantSession()], posts: [] };
+    const view = await openAgent(options);
+    try {
+      const chip = () => view.wrapper.get('[data-testid="conversation-mode-select"]');
+      const row = (mode: string) => view.wrapper.get(`[data-testid="conversation-mode-option-${mode}"]`);
+      const menuOpen = () => (view.wrapper.get('[data-testid="conversation-mode-menu"]')
+        .element as HTMLDetailsElement).open;
+
+      await chip().trigger("keydown", { key: "ArrowDown" });
+      expect(menuOpen()).toBe(true);
+      expect(document.activeElement).toBe(row("ASSISTANT").element);
+      expect(chip().attributes("data-mode")).toBe("AGENT");   // 打开与移动焦点都不改档，只有选定才改
+
+      await row("ASSISTANT").trigger("keydown", { key: "ArrowDown" });
+      expect(document.activeElement).toBe(row("LEARNING").element);
+      await row("LEARNING").trigger("keydown", { key: "ArrowDown" });
+      expect(document.activeElement).toBe(row("AGENT").element);   // 末档向下回绕，不跑出这三行
+      await row("AGENT").trigger("keydown", { key: "ArrowUp" });
+      expect(document.activeElement).toBe(row("LEARNING").element);
+      await row("LEARNING").trigger("keydown", { key: "Home" });
+      expect(document.activeElement).toBe(row("AGENT").element);
+      await row("AGENT").trigger("keydown", { key: "End" });
+      expect(document.activeElement).toBe(row("LEARNING").element);
+
+      // Esc：收起浮层，焦点回芯片，档位不变——收起不是选择。
+      await act(async () => { pressEscape(); });
+      await flush(20);
+      expect(menuOpen()).toBe(false);
+      expect(document.activeElement).toBe(chip().element);
+      expect(chip().attributes("data-mode")).toBe("AGENT");
+
+      // 点当前那一档：收起且不换档（否则一次误点就会把自己导航走）。
+      await chip().trigger("keydown", { key: "ArrowDown" });
+      await row("AGENT").trigger("click");
+      await flush(20);
+      expect(menuOpen()).toBe(false);
+      expect(chip().attributes("data-mode")).toBe("AGENT");
+      expect(view.wrapper.findAll('[data-mode-row][data-current="true"]')
+        .map((item) => item.attributes("data-testid"))).toEqual(["conversation-mode-option-AGENT"]);
+    } finally { view.unmount(); }
+  });
+
+  /**
+   * 在途时浮层打不开、也换不了档（DEV-0116 把这条从「select 被 disabled」改成显式挡住）。
+   * 原先的用例是「先切到助手档再看在途」——原生 select 上 `setValue` 会绕过 disabled 直接发
+   * change，所以那一步在测试里成立、在真实浏览器里不成立。自绘浮层按真实语义挡住之后，
+   * 进入在途会话改走顶栏「切换讨论」，与用户实际怎么到达那条会话一致。
+   */
+  it("在途时浮层打不开、点行也不换档：切档不是停止", async () => {
+    const options: Stub = { sessions: [agentSession(), assistantSession()], posts: [],
+      inflightSessionId: assistantSessionId };
+    const view = await openAgent(options);
+    try {
+      await switchToolbarSession(assistantSessionId);
+      const menu = view.wrapper.get('[data-testid="conversation-mode-menu"]').element as HTMLDetailsElement;
+      const chip = view.wrapper.get('[data-testid="conversation-mode-select"]');
+      expect(chip.attributes("aria-disabled")).toBe("true");
+      await chip.trigger("keydown", { key: "ArrowDown" });
+      expect(menu.open).toBe(false);
+      await chip.trigger("click");
+      expect(menu.open).toBe(false);
+      // 就算浮层是别处打开的（例如在途刚开始时它已开着），点行也不发切档命令。
+      await act(async () => { menu.open = true; });
+      await view.wrapper.get('[data-testid="conversation-mode-option-AGENT"]').trigger("click");
+      await flush(60);
+      expect(view.wrapper.get('[data-testid="conversation-mode-select"]').attributes("data-mode"))
+        .toBe("ASSISTANT");
+    } finally { view.unmount(); }
   });
 
   it("默认按普通档解析，不虚构助手关系", async () => {
     const options: Stub = { sessions: [agentSession()], posts: [] };
     const view = await openAgent(options);
-    expect((view.wrapper.get('[data-testid="conversation-mode-select"]').element as HTMLSelectElement).value)
-      .toBe("AGENT");
+    expect(view.wrapper.get('[data-testid="conversation-mode-select"]').attributes("data-mode")).toBe("AGENT");
     expect(view.wrapper.find('[data-testid="assist-assistant-picker"]').exists()).toBe(false);
     expect(view.wrapper.find('[data-testid="assist-assistant-config-toggle"]').exists()).toBe(false);
     view.unmount();
@@ -892,9 +977,12 @@ describe("会话模式单选框", () => {
     const options: Stub = { sessions: [agentSession(), assistantSession()], posts: [],
       inflightSessionId: assistantSessionId };
     const view = await openAgent(options);
-    await flipToAssistant(view);
-    // 禁用落在唯一的 select 上：在途时这一档不可改，也不靠切档隐式取消。
-    expect(view.wrapper.get('[data-testid="conversation-mode-select"]').attributes("disabled")).toBe("");
+    // 到达那条在途会话走顶栏「切换讨论」，不再靠切档：原生 select 时代 `setValue` 会绕过
+    // disabled 发 change，那一步只在测试里成立；自绘浮层按真实语义挡住后必须先换一种到达方式。
+    await switchToolbarSession(assistantSessionId);
+    // 禁用落在芯片与三行上：原生 details 没有 disabled，因此读作 aria-disabled，点击在组件里挡住。
+    expect(view.wrapper.get('[data-testid="conversation-mode-select"]').attributes("aria-disabled")).toBe("true");
+    expect(view.wrapper.get('[data-testid="conversation-mode-option-AGENT"]').attributes("aria-disabled")).toBe("true");
     expect(view.wrapper.get('[data-testid="conversation-mode-locked"]').text()).toContain("停止后才能切换");
     // 2026-10-17：原因原文同时挂在模式盒的 title 上（悬停可读），可见行已转视觉隐藏。
     expect(view.wrapper.get('[data-testid="conversation-mode"]').attributes("title")).toContain("停止后才能切换");

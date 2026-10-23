@@ -1,10 +1,13 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import fs from "node:fs";
 
 // 2026-10-20 用户「我想做好看的回复」：回复正文的排版锁。
 // 用户在同一张截图里先要求把那条 AI 回复「复现一下」，再要求把回复做好看。这里把改后
 // 的口径按**真实渲染**锁住——正文档位、行高、块间距、列表记号与强调字重都会在样式表
 // 增删时静默漂移，单测（jsdom）量不到计算样式。
 // API 全部由 page.route 伪造，不连数据库、不调 Provider、不写任何真实业务事实。
+// 2026-10-22 接续 DEV-0109（用户「ai回复怎么都是一个颜色？」）：第三条用例钉住行内代码这一处
+// ——它有底色、但文字颜色仍是正文色，且代码块内部不叠第二层底。
 
 const apiBase = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -97,7 +100,8 @@ async function installRoutes(page: Page): Promise<void> {
     if (path === `${prefix}/model-port`) return fulfillJson(route, { provider: "fake",
       configured: false, model: null, base_url: null, max_call_tokens: null });
     if (path === `${prefix}/default-working-directory`) return fulfillJson(route, { resource_id: null,
-      canonical_root: null, display_name: null, write_tier: null, status: "UNSET", reason: null,
+      canonical_root: null, display_name: null, write_tier: null, default_write_tier: null,
+      status: "UNSET", reason: null,
       revision: "0" });
     if (path === `${prefix}/assist-sessions`) return fulfillJson(route, { items: [session] });
     if (path === `${prefix}/assist-sessions/${sessionId}`) return fulfillJson(route, session);
@@ -191,4 +195,51 @@ test("引用块与有序列表：`>` 不再原样显示，序号与文字各归�
   });
   expect(orderedStyle.listStyleType).toBe("decimal");
   expect(orderedStyle.paddingLeft).toBe("24px"); // space.6
+});
+
+/**
+ * DEV-0109（2026-10-22 用户「ai回复怎么都是一个颜色？是因为其他情况还没有出现吗？」）。
+ * 这条不是一套新配色，而是把「回复正文里唯一一处只靠字形区分的东西」钉住：行内代码此前与正文
+ * 同色同底。断言按**计算样式**读，颜色仍等于正文色（层级由底色说出，不新增第五种文字色），
+ * 底色与代码块同一档 token，代码块内部的 `<code>` 不再叠第二层底。
+ */
+test("行内代码有自己的底色，但颜色仍是正文色；代码块内部不叠第二层底", async ({ page }) => {
+  await page.setViewportSize({ width: 1270, height: 900 });
+  await installRoutes(page);
+  await page.goto(`/projects/${projectId}?skill=assist`);
+  await connect(page);
+  await page.locator(`[data-testid="assist-copy-${richMessageId}"]`).waitFor({ timeout: 30_000 });
+
+  const rich = page.locator(`article.agent-message[data-role="ASSISTANT"]`).last();
+  const inline = rich.locator("p.markdown-preview__paragraph code");
+  await expect(inline).toHaveText("aa.md");
+  const read = (locator: typeof inline) => locator.evaluate((node) => {
+    const computed = getComputedStyle(node);
+    return { backgroundColor: computed.backgroundColor, color: computed.color,
+      paddingInline: computed.paddingInlineStart, borderRadius: computed.borderRadius };
+  });
+  const inlineStyle = await read(inline);
+  const paragraph = await rich.locator("p.markdown-preview__paragraph").first()
+    .evaluate((node) => getComputedStyle(node).color);
+  // 参照物取用户气泡：它的底色就是 bg.subtle（本文件第一条用例同档），不用硬编码色值。
+  const userBubble = await page.locator(`article.agent-message[data-role="USER"] .assist-message-content`)
+    .first().evaluate((node) => getComputedStyle(node).backgroundColor);
+
+  // 行内代码：有底、有圆角、左右各 space.1；正文色不变。
+  expect(inlineStyle.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+  expect(inlineStyle.backgroundColor).toBe(userBubble); // 同一档 bg.subtle，不另取一色
+  expect(inlineStyle.color).toBe(paragraph);
+  expect(inlineStyle.paddingInline).toBe("4px");
+  expect(inlineStyle.borderRadius).toBe("8px");
+  // 有序列表里的行内代码同样吃到这一档（`li > code`）。
+  expect(await rich.locator("ol.markdown-preview__list code").first()
+    .evaluate((node) => getComputedStyle(node).backgroundColor)).toBe(userBubble);
+  // 代码块内部的 `<code>` 不叠第二层底：消息里的 fence 是可复制块（.msg-code），
+  // 它的底色由外层说，选择器 `:not(pre) > code` 必须把它排除掉。
+  const codeInBlock = await rich.locator(".msg-code-body code")
+    .evaluate((node) => getComputedStyle(node).backgroundColor);
+  expect(codeInBlock).toBe("rgba(0, 0, 0, 0)");
+  // 留一张整条回复的图，供工单对照（与断言同源，不另开一次会话）。
+  fs.mkdirSync("D:/Develop/Relay-Agent/output/dev-0109-screenshots", { recursive: true });
+  await rich.screenshot({ path: "D:/Develop/Relay-Agent/output/dev-0109-screenshots/assistant-reply.png" });
 });

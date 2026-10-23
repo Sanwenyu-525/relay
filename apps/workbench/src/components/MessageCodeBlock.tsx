@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
+import { Toast } from "./Feedback";
 import "./MessageCodeBlock.css";
 
 /**
@@ -8,7 +9,8 @@ import "./MessageCodeBlock.css";
  * 正文逐字来自来源，不加工、不语法高亮，也不在块内截断后冒充完整——要全量看工具轨迹。
  *
  * 复制是纯客户端剪贴板动作：不新增命令、不落库、不把「已复制」说成已保存的事实。
- * 写剪贴板失败时只把按钮还原成可重试，可读名说明状态，不弹额外层、不中断阅读。
+ * 成功后用共享浮层给一条短回执（不占文档流，不推走正文）；按钮先变√，随后自行还原。
+ * 写剪贴板失败时只把按钮还原成可重试，可读名说明状态，不发成功回执。
  */
 
 type CopyState = "idle" | "done" | "failed";
@@ -62,5 +64,7 @@ export default function MessageCodeBlock({ label, text, testId, maxHeight, copyL
       </button>
     </figcaption>
     <pre className="msg-code-body" style={maxHeight === undefined ? undefined : { maxHeight }}><code>{text}</code></pre>
+    {/* 回执走共享浮层：固定定位，不参与这块的网格布局，因此出现/消失都不会推走正文。 */}
+    {state === "done" && <Toast testId="msg-code-copy-toast">复制成功</Toast>}
   </figure>;
 }

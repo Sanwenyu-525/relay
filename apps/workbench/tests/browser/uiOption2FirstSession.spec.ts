@@ -214,6 +214,16 @@ async function openFolder(page: Page, ctx: Ctx): Promise<void> {
   await page.locator('[data-testid="assist-first-draft"]').waitFor({ timeout: 20_000 });
 }
 
+/**
+ * 切档（2026-10-22 DEV-0116：会话模式从原生 select 换成应用自绘浮层）。
+ * 原先一行 `selectOption(mode)` 就够，因为那是个 `<select>`；现在是「点开芯片 → 点那一行」
+ * 两次点击，与用户在真实窗口里的操作一致。键盘路径另有专门的用例（本文件的重排用例）。
+ */
+async function pickMode(page: Page, mode: "AGENT" | "ASSISTANT" | "LEARNING"): Promise<void> {
+  await page.getByTestId("conversation-mode-select").click();
+  await page.getByTestId(`conversation-mode-option-${mode}`).click();
+}
+
 test.describe("方案 2 独立验收四项整改（真实 Chromium）", () => {
   test("聊天命令菜单在窄窗口可读，选择仅插入；首条发送后已有会话沿用菜单", async ({ page }) => {
     const ctx: Ctx = { posts: [], loseMessageResponse: 0, receipts: new Map(), sessionCreated: false, messages: [], tasks: [] };
@@ -268,7 +278,7 @@ test.describe("方案 2 独立验收四项整改（真实 Chromium）", () => {
     await openFolder(page, ctx);
     const draft = page.getByTestId("assist-first-draft");
     await draft.fill("切换模式仍保留的草稿");
-    await page.getByTestId("conversation-mode-select").selectOption("ASSISTANT");
+    await pickMode(page, "ASSISTANT");
     await expect(page.locator("details.agent-chat-options")).toHaveCount(0);
     await expect(page.getByTestId("assist-first-blocked")).toContainText("当前没有可用助手");
     await expect(page.getByTestId("assist-first-send")).toBeDisabled();
@@ -280,7 +290,7 @@ test.describe("方案 2 独立验收四项整改（真实 Chromium）", () => {
     expect(ctx.posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(0);
     expect(ctx.posts.filter((post) => post.path.endsWith("/messages"))).toHaveLength(0);
 
-    await page.getByTestId("conversation-mode-select").selectOption("AGENT");
+    await pickMode(page, "AGENT");
     await expect(page.locator("details.agent-chat-options")).toBeVisible();
     await expect(draft).toHaveValue("切换模式仍保留的草稿");
     await page.getByTestId("assist-first-send").click();
@@ -334,16 +344,19 @@ test.describe("方案 2 独立验收四项整改（真实 Chromium）", () => {
         tools: document.querySelector<HTMLElement>(".agent-chat-composer-tools")!.getBoundingClientRect().height
       }));
       await modeSelect.focus();
-      // 原生 select 里方向键换的是选中项（不是移到下一个 radio），语义仍是「切到下一档」。
+      // 自绘浮层（DEV-0116）里方向键的语义与原生 select 同一档：一次按键走到目标档，
+      // 但「打开并把焦点落在目标档」与「选定」是两件事——Enter 才提交，Esc 只是收起。
       await page.keyboard.press("ArrowDown");
-      await expect(modeSelect).toHaveValue("ASSISTANT");
+      await expect(page.getByTestId("conversation-mode-option-ASSISTANT")).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId("conversation-mode-select")).toHaveAttribute("data-mode", "ASSISTANT");
       await expect(page.getByTestId("assist-assistant-config-toggle")).toBeVisible();
       // 空清单时「新建助手」就地摆在 chip 旁：模式盒里只有图例、三个模式标签、chip 与该入口，
       // 整段可见文字逐字钉住，多出来的裸字符（例如误留在 JSX 里的分号）会在这里现形。
       await expect(page.getByTestId("assist-assistant-create-entry")).toBeVisible();
-      // 三档收进 select 后不再各占一段可见文字；这里钉住「模式盒里只有这一个下拉 + chip + 入口」。
-      expect(await modeSelect.evaluate((element) =>
-        Array.from((element as HTMLSelectElement).options).map((option) => option.textContent))).toEqual(
+      // 三档收进浮层后不再各占一段常驻可见文字；这里钉住「浮层里就是这三行、按这个顺序」。
+      expect(await page.getByTestId("conversation-mode-menu").evaluate((menu) =>
+        Array.from(menu.querySelectorAll("[data-mode-row]")).map((row) => row.textContent?.trim() ?? ""))).toEqual(
         ["普通 Agent", "人设助手", "学习"]);
       await expect(page.getByTestId("assist-assistant-config-toggle")).toBeVisible();
       await expect(page.getByTestId("assist-assistant-create-entry")).toBeVisible();
@@ -394,7 +407,9 @@ test.describe("方案 2 独立验收四项整改（真实 Chromium）", () => {
 
       await page.getByTestId("conversation-mode-select").focus();
       await page.keyboard.press("ArrowUp");
-      await expect(page.getByTestId("conversation-mode-select")).toHaveValue("AGENT");
+      await expect(page.getByTestId("conversation-mode-option-AGENT")).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId("conversation-mode-select")).toHaveAttribute("data-mode", "AGENT");
       await expect(draft).toHaveValue("跨视口切换时保留的草稿");
       await expect(page.locator("details.agent-chat-options")).toBeVisible();
     }

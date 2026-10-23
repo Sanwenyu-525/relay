@@ -3,8 +3,13 @@
    panel 圆角 + separator 细边 + floating 阴影。
    2026-10-19 用户两轮截图指认：菜单宽度改成一档定值（不再 `max-content` 跟着最长的一行走）、
    每档只留一行短说明（§18.1.3 本来的要求）、菜单里除四档之外不再有任何整行文字，
-   所以菜单头、提示行与重新核对按钮的样式一起删掉，宽度由 19rem 再降到 18rem——18rem 的正文列宽
-   226px 刚好容得下最长一行（15 个汉字 = 210px），17rem 是零余量、换字体或 DPI 就折行。
+   所以菜单头、提示行与重新核对按钮的样式一起删掉。
+   2026-10-21 用户指认「权限图标高度要居中，然后菜单宽度再减小一点」（DEV-0101）：
+   图标原本 `align-items: start` + 顶部微移，是贴着标题行而非整行居中，改为整行居中；
+   宽度 18rem → 17rem，并按文档预告砍掉「普通」「内」这类作用域限定词保住每档一行
+   （14px 下 17rem 的正文列宽 210px，最长一行 14 字 = 196px）。
+   2026-10-22 第三轮：菜单删掉「只读」这一行（服务端返回 READ_ONLY 时芯片仍如实读回）、
+   在途窗口不再把整张菜单压灰（`[data-busy]`）。
    只使用既有 token。 */
 .agent-chat-permission { position: relative; display: inline-flex; }
 .agent-chat-permission-chip { list-style: none; }
@@ -26,7 +31,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--relay-space-1);
-  width: min(18rem, calc(100vw - var(--relay-space-6)));
+  width: min(17rem, calc(100vw - var(--relay-space-6)));
   padding: var(--relay-space-2);
   background: var(--relay-color-bg-surface);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
@@ -44,7 +49,7 @@
   display: grid;
   grid-template-columns: var(--relay-control-icon-size) minmax(0, 1fr);
   column-gap: var(--relay-space-2);
-  align-items: start;
+  align-items: center;
   width: 100%;
   padding: var(--relay-space-1) var(--relay-space-2);
   text-align: left;
@@ -57,7 +62,6 @@
 .agent-chat-permission-row-icon {
   width: var(--relay-control-icon-size);
   height: var(--relay-control-icon-size);
-  margin-top: var(--relay-space-0-5);
 }
 .agent-chat-permission-row-text {
   display: flex;
@@ -70,6 +74,18 @@
   border: var(--relay-border-width) solid var(--relay-color-border-control);
 }
 .agent-chat-permission-row:disabled { color: var(--relay-color-text-muted); cursor: not-allowed; opacity: 0.85; }
+/* 2026-10-22（用户指认「切换权限的时候会闪一下」）：请求还在路上的那几百毫秒不是「结果不明」，
+   也不是「服务端不让改」。整张菜单压灰会被读成出错，所以 `[data-busy]` 期间只让刚点的那一行变淡，
+   其余保持原样。只管在途——服务端状态造成的禁用仍走上面那条灰档（2026-10-21「禁用必须可读」不变）。 */
+.agent-chat-permission-menu[data-busy="true"] .agent-chat-permission-row:disabled {
+  color: var(--relay-color-text-primary);
+  cursor: default;
+  opacity: 1;
+}
+.agent-chat-permission-menu[data-busy="true"] .agent-chat-permission-row:disabled .agent-chat-permission-row-title {
+  color: var(--relay-color-text-primary);
+}
+.agent-chat-permission-menu[data-busy="true"] .agent-chat-permission-row[data-pending="true"] { opacity: 0.55; }
 .agent-chat-permission-row-title {
   font-size: var(--relay-font-size-body);
   font-weight: var(--relay-font-weight-medium);
@@ -89,9 +105,9 @@
   gap: var(--relay-space-1);
 }
 
-/* 2026-10-21（用户指认「下拉框选项是禁用状态」）：四行灰掉时菜单里必须读出一句原因＋下一步。
-   这一行只在禁用态出现，所以 2026-10-19「可选态除四档外不占整行文字」仍然成立。
-   顶部细边把它与档位行分开——它是解释，不是第五档。 */
+/* 2026-10-21（用户指认「下拉框选项是禁用状态」）：三行灰掉时菜单里必须读出一句原因＋下一步。
+   这一行只在禁用态出现，所以 2026-10-19「可选态除档位外不占整行文字」仍然成立。
+   顶部细边把它与档位行分开——它是解释，不是多出来的一档。 */
 .agent-chat-permission-reason {
   display: flex;
   flex-wrap: wrap;
@@ -124,5 +140,11 @@
 }
 /* 放在 [open] 规则之后：同为三条选择器，靠顺序覆盖，展开时芯片仍保持红色。 */
 .agent-chat-permission .agent-chat-permission-chip[data-tier="full"] {
+  color: var(--relay-color-status-danger-text);
+}
+/* 没有目录时芯片读的是工作区默认档位「完全访问」（DEV-0115）：那一档此刻还没落到任何目录上，
+   `data-tier` 仍是 `unbound`（写权限摘要行据此读「未就绪（未绑定目录）」），但danger 前景
+   要跟着档位本身走——默认完全访问意味着以后每个新目录免掉删除确认，这是同一句危险警告。 */
+.agent-chat-permission .agent-chat-permission-chip[data-default-tier="full"] {
   color: var(--relay-color-status-danger-text);
 }

@@ -1,20 +1,23 @@
-import { ChevronDown } from "lucide-react";
+import { Compass, Target } from "lucide-react";
 
 import type { RelayChatMode } from "../api/relayClient";
 
 /**
- * 聊天模式选择（工作台 §44.1、0127）。
+ * 聊天模式状态徽标（工作台 §44.1、0127；2026-10-22 DEV-0105 收口）。
  *
  * 与「会话身份」那个下拉（普通 Agent / 人设助手 / 学习）是两件事：
  *   * 身份在建会话时冻结，切身份等于换一条会话；
  *   * 模式只是这段对话接下来怎么处理，可随时切换，不改变身份与权限。
  *
- * 因此这里只渲染一枚原生 select：模式只有「当前是哪一档」这一个事实，
- * 不需要把三个候选一直摊在脸上；长说明一律不放进来（见 ConversationModeSwitch 文件头
- * 关于 `.agent-chat-mode` 自动宽容器的记录——那一课对这里同样成立）。
+ * 模式不再做成输入器里的下拉框（2026-10-22 用户指认）：`/plan`、`/goal` 已经在「+ → 命令」
+ * 里，命令本身会把模式与正文一次提交；再摆一个三档下拉，等于把同一入口摊成两种控件，
+ * 还把「当前是哪一档」和「可以切成哪几档」混在一起。现在卡里只表达**当前事实**：
+ *   * 普通模式不渲染任何东西——默认态不占位，输入卡保持原样；
+ *   * 计划/目标模式显示一枚只读徽标，右侧「退出」回到普通模式；
+ *   * 进入模式走「+ → 命令」或直接输入 `/plan 内容`、`/goal 内容`。
  *
- * select 只是**提交入口**：值来自服务端读回的 `chat_mode`，用户改选才发命令。
- * 本地不保存运行状态，也不在回执到达前抢先显示新模式。
+ * 退出仍是命令：值只来自服务端读回的 `chat_mode`，回执到达后才重读投影，
+ * 本地不在请求前抢先改显示。在途（生成或命令未结算）时退出键禁用，原因放 `title`。
  */
 const LABELS: Record<RelayChatMode, string> = {
   CHAT: "讨论",
@@ -31,19 +34,25 @@ export default function ChatModeSwitch({ mode, disabled, busy, lockedReason, onC
   lockedReason: string | null;
   onChange: (next: RelayChatMode) => void;
 }) {
-  return <label className="agent-chat-mode-select-field agent-chat-chat-mode">
-    <span className="visually-hidden">聊天模式</span>
-    <select className="agent-chat-mode-select" data-testid="chat-mode-select"
-      value={mode} disabled={disabled || busy}
-      title={lockedReason ?? "聊天模式：讨论 / 计划（只读规划）/ 目标（持续执行）。"
-        + "切换模式本身不会开始执行。"}
-      onChange={(event) => onChange(event.target.value as RelayChatMode)}>
-      <option value="CHAT">{LABELS.CHAT}</option>
-      <option value="PLAN">{LABELS.PLAN}</option>
-      <option value="GOAL">{LABELS.GOAL}</option>
-    </select>
-    <ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" />
-  </label>;
+  if (mode === "CHAT") return null;
+  const label = LABELS[mode];
+  const blocked = disabled || busy;
+  const hint = lockedReason ?? (mode === "GOAL"
+    ? "当前为目标模式；退出会先安全暂停在途目标，回到讨论模式。"
+    : "当前为计划模式；退出后回到讨论模式。");
+  return <div className="agent-chat-mode agent-chat-chat-mode" data-testid="chat-mode-badge"
+    data-mode={mode} title={hint}>
+    <span className="agent-chat-mode-state">
+      {mode === "GOAL"
+        ? <Target aria-hidden="true" />
+        : <Compass aria-hidden="true" />}
+      {label}模式
+    </span>
+    <button className="agent-chat-mode-exit" type="button" data-testid="chat-mode-exit"
+      disabled={blocked} title={blocked ? hint : `退出${label}模式，回到讨论`}
+      aria-label={`退出${label}模式，回到讨论`}
+      onClick={() => onChange("CHAT")}>退出</button>
+  </div>;
 }
 
 export function chatModeLabel(mode: RelayChatMode): string {

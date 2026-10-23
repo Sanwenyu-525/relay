@@ -1,5 +1,7 @@
 # 有界多 Agent 与自动会话：实施提示词
 
+2026-10-23 接续边界：本文仅用于原临时只读子委派。新增项目级长期成员、跨会话私聊/群聊与自主巡检归[路线 §16](../docs/requirements/post-v1-roadmap.md#16-项目级长期-agent-团队与跨会话协作)及 [ADR-034](../docs/decisions/ADR-034-persistent-project-agent-team.md)，不得直接套用本文作为其全量开发任务。开工先核对[运行架构 §10.1](../docs/architecture/runtime-context.md#101-现状分级与证据缺口2026-10-21-差距核对)的已有生产接线及真实缺口，不按下文早期“尚未实现”重做。两子一层、主子预算和一次故障修正只约束原临时委派，不为长期团队新增项目累计额度配额。
+
 更新：2026-10-05；产品选择来源：2026-10-04。用途：待用户明确授权实施后交给执行 Agent 的专项任务。本轮仅编写文档和提示词；文件的创建、链接、转述或被动阅读不构成实施授权，本专项尚未实现或验收。
 
 产品规则归[总纲 §0.9](../Personal_Workflow_OS_Master_Spec.md#09-有界多-agent-与自动会话)与[范围矩阵补充](../docs/requirements/v1-scope.md#有界多-agent-与自动会话补充)，工程归属归[运行架构 §2.5](../docs/architecture/runtime-context.md#25-有界子-agent-的委派与会话关联)，交互归[工作台 §23](../docs/frontend/workbench-design.md#23-主子会话与有界协作)，未运行规格归[测试计划 §21](../docs/testing/verification-plan.md#21-有界多-agent-与自动会话验收规格)，取舍归[ADR-017](../docs/decisions/ADR-017-bounded-multi-agent-conversations.md)。本文只组织实施与交付，不维护第二套需求或成绩。

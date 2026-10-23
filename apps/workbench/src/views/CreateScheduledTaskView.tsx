@@ -5,7 +5,7 @@ import PageHeader from "../components/PageHeader";
 import { createCommandId, RelayApiError, type RelayProjectListItem,
   type RelayScheduledTaskCreate, type RelayScheduledTaskRepeat } from "../api/relayClient";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
-import { describeLiveError } from "../lib/liveErrors";
+import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
 import { liveClient, useRelayConnection } from "../lib/relayConnection";
 import "./ScheduledTasksView.css";
 
@@ -161,7 +161,7 @@ export default function CreateScheduledTaskView() {
     } catch (caught) {
       if (disposed.current) return;
       const described = describeLiveError(caught);
-      if (described.kind === "transport" || !(caught instanceof RelayApiError)) {
+      if (needsReceiptCheck(caught) || !(caught instanceof RelayApiError)) {
         holdPending({ intent, scope }); setMayRetry(false);
         setActionError(`创建结果未确认：${described.message}`);
         return;

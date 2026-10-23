@@ -2,11 +2,23 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Info } from "lucide-react";
 import PageHeader from "../components/PageHeader";
-import { createCommandId, type RelayScheduledTaskDetail, type RelayScheduledTaskOccurrence } from "../api/relayClient";
-import { describeLiveError } from "../lib/liveErrors";
+import { createCommandId, RelayApiError, type RelayScheduledTaskDetail,
+  type RelayScheduledTaskOccurrence, type RelayScheduledTaskOccurrenceResolution,
+  type RelayScheduledTaskStatusInput } from "../api/relayClient";
+import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
+import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
 import { liveClient, useRelayConnection } from "../lib/relayConnection";
 import { describeRepeat, formatInZone } from "./ScheduledTasksView";
 import "./ScheduledTasksView.css";
+
+/** 结果未知时冻结的那一条命令：状态变更与时段处理共用同一个待核对位。 */
+type FrozenCommand = { readonly kind: "status"; readonly input: RelayScheduledTaskStatusInput }
+  | { readonly kind: "resolve"; readonly input: RelayScheduledTaskOccurrenceResolution };
+
+interface PendingCommand {
+  readonly command: FrozenCommand;
+  readonly scope: string;
+}
 
 const occurrenceLabels: Record<RelayScheduledTaskOccurrence["status"], string> = {
   DISPATCHING: "正在启动", DISPATCHED: "已启动", BLOCKED: "待处理", SKIPPED: "已跳过", RESOLVED: "已忽略",
@@ -39,8 +51,27 @@ export default function ScheduledTaskDetailView() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<PendingCommand | null>(null);
+  const [pendingNote, setPendingNote] = useState<string | null>(null);
+  const [mayRetry, setMayRetry] = useState(false);
+  const pendingRef = useRef<PendingCommand | null>(null);
+  const holdPending = (next: PendingCommand | null) => {
+    pendingRef.current = next; setPending(next); setPendingNote(null);
+  };
   const version = useRef(0);
   const disposed = useRef(false);
+  const frozen = busy || pending !== null;
+
+  const guard = useRef<DraftGuard>({
+    // 本页没有可丢弃的草稿：未决命令只能靠核对回执收口，不能靠离页丢掉。
+    hasUnsavedChanges: () => pendingRef.current !== null,
+    discard: () => {},
+    pendingCommandId: () => pendingRef.current?.command.input.commandId ?? null
+  });
+  useEffect(() => {
+    setDraftGuard(guard.current);
+    return () => clearDraftGuard(guard.current);
+  }, []);
 
   const load = useCallback(async () => {
     const client = liveClient();
@@ -65,39 +96,94 @@ export default function ScheduledTaskDetailView() {
     return () => { disposed.current = true; version.current++; };
   }, [load, connection.epoch, connection.mode]);
 
+  /** 发送一份冻结的命令：结果未知就保留原命令与载荷，明确业务拒绝才解锁。 */
+  async function sendCommand(client: NonNullable<ReturnType<typeof liveClient>>, command: FrozenCommand) {
+    setBusy(true); setNotice(null); setError(null);
+    try {
+      if (command.kind === "status") await client.setScheduledTaskStatus(command.input);
+      else await client.resolveScheduledTaskOccurrence(command.input);
+      await load();
+      holdPending(null); setMayRetry(false);
+      setNotice(command.kind === "status" ? "状态已更新。"
+        : command.input.action === "RETRY" ? "已登记补跑：下一次扫描会按当前准入重新尝试。" : "这一次时段已忽略。");
+    } catch (caught) {
+      if (disposed.current) return;
+      const described = describeLiveError(caught);
+      const label = command.kind === "status" ? "状态修改"
+        : command.input.action === "RETRY" ? "补跑" : "忽略";
+      if (needsReceiptCheck(caught)) {
+        holdPending({ command, scope: `${client.baseUrl}\n${client.workspaceId}` }); setMayRetry(false);
+        setError(`${label}结果未确认：${described.message}`);
+        return;
+      }
+      holdPending(null); setMayRetry(false);
+      setError(`${label}失败：${described.message}`);
+    } finally { if (!disposed.current) setBusy(false); }
+  }
+
   async function changeStatus(status: "ENABLED" | "PAUSED" | "DISABLED") {
     const client = liveClient();
-    if (!client || task === null || busy) return;
-    setBusy(true); setNotice(null);
-    try {
-      await client.setScheduledTaskStatus({
-        commandId: createCommandId(), scheduledTaskId: task.scheduledTaskId,
-        expectedRevision: task.revision, status,
-        reason: status === "ENABLED" ? "用户在定时任务详情恢复调度"
-          : status === "PAUSED" ? "用户在定时任务详情暂停调度" : "用户在定时任务详情停用调度",
-      });
-      await load();
-      setNotice("状态已更新。");
-    } catch (caught) {
-      setError(`状态修改失败：${describeLiveError(caught).message}`);
-    } finally { if (!disposed.current) setBusy(false); }
+    if (!client || task === null || frozen) return;
+    await sendCommand(client, { kind: "status", input: {
+      commandId: createCommandId(), scheduledTaskId: task.scheduledTaskId,
+      expectedRevision: task.revision, status,
+      reason: status === "ENABLED" ? "用户在定时任务详情恢复调度"
+        : status === "PAUSED" ? "用户在定时任务详情暂停调度" : "用户在定时任务详情停用调度",
+    } });
   }
 
   async function resolveOccurrence(occurrence: RelayScheduledTaskOccurrence, action: "RETRY" | "DISMISS") {
     const client = liveClient();
-    if (!client || busy) return;
-    setBusy(true); setNotice(null);
+    if (!client || frozen) return;
+    await sendCommand(client, { kind: "resolve", input: {
+      commandId: createCommandId(), occurrenceId: occurrence.occurrenceId,
+      expectedRevision: occurrence.revision, action,
+      reason: action === "RETRY" ? "用户选择补跑这一次时段" : "用户忽略这一次时段",
+    } });
+  }
+
+  /** 回执必须落回发起时的那一条命令与那一个对象；对不上就继续待核对，不放行。 */
+  async function checkReceipt() {
+    const held = pendingRef.current;
+    const client = liveClient();
+    if (client === null || held === null || busy) return;
+    const scope = `${client.baseUrl}\n${client.workspaceId}`;
+    if (held.scope !== scope) {
+      setPendingNote("原命令属于之前的 API 或 Workspace：当前连接不同，请切回原连接后再查询回执，不要在新连接下重新提交。");
+      return;
+    }
+    const command = held.command;
+    const expected = command.kind === "status"
+      ? { commandType: "SetScheduledTaskStatus", field: "scheduled_task_id", objectId: command.input.scheduledTaskId }
+      : { commandType: "ResolveScheduledTaskOccurrence", field: "occurrence_id", objectId: command.input.occurrenceId };
+    setBusy(true);
     try {
-      await client.resolveScheduledTaskOccurrence({
-        commandId: createCommandId(), occurrenceId: occurrence.occurrenceId,
-        expectedRevision: occurrence.revision, action,
-        reason: action === "RETRY" ? "用户选择补跑这一次时段" : "用户忽略这一次时段",
-      });
+      const receipt = await client.getCommandReceipt(command.input.commandId);
+      if (receipt.commandId !== command.input.commandId || receipt.commandType !== expected.commandType
+        || receipt.result[expected.field] !== expected.objectId) {
+        throw new Error("原命令回执的类型或对象不匹配，仍需核对。");
+      }
       await load();
-      setNotice(action === "RETRY" ? "已登记补跑：下一次扫描会按当前准入重新尝试。" : "这一次时段已忽略。");
+      holdPending(null); setMayRetry(false);
+      setNotice("已按原命令回执确认这一次提交。");
     } catch (caught) {
-      setError(`${action === "RETRY" ? "补跑" : "忽略"}失败：${describeLiveError(caught).message}`);
+      if (disposed.current) return;
+      if (caught instanceof RelayApiError && caught.problem.code === "COMMAND_NOT_FOUND") {
+        setMayRetry(true);
+        setPendingNote("原命令暂未查到回执；未确认前不要重复提交，可确认原内容后按同一 ID 重试。");
+      } else setPendingNote(`原命令仍未核对：${describeLiveError(caught).message}`);
     } finally { if (!disposed.current) setBusy(false); }
+  }
+
+  async function retryOriginal() {
+    const held = pendingRef.current;
+    const client = liveClient();
+    if (client === null || held === null || busy) return;
+    if (held.scope !== `${client.baseUrl}\n${client.workspaceId}`) {
+      setPendingNote("原命令属于之前的 API 或 Workspace：当前连接不同，不能在这里重试；请切回原连接。");
+      return;
+    }
+    await sendCommand(client, held.command);
   }
 
   if (loading) return <div className="page-layout scheduled-tasks-page"><div className="page-primary">
@@ -105,7 +191,10 @@ export default function ScheduledTaskDetailView() {
   if (task === null) return <div className="page-layout scheduled-tasks-page"><div className="page-primary">
     <PageHeader testId="scheduled-task-detail-head" title="定时任务" meta="读取失败" lede="这条定时任务当前无法读取。" />
     {error && <p className="action-error" role="alert">{error}</p>}
-    <div className="form-actions"><Link className="secondary-button" to="/scheduled-tasks">返回列表</Link></div>
+    <div className="form-actions">
+      <Link className="secondary-button" to="/scheduled-tasks">返回列表</Link>
+      <button className="secondary-button" type="button" onClick={() => void load()} data-testid="scheduled-task-detail-reread">重新读取</button>
+    </div>
   </div></div>;
 
   const blocked = task.occurrences.filter((occurrence) => occurrence.status === "BLOCKED");
@@ -113,17 +202,31 @@ export default function ScheduledTaskDetailView() {
     <PageHeader testId="scheduled-task-detail-head" title={task.title} meta={`定时任务 · ${describeRepeat(task)}`}
       lede={`每次触发新建一个任务并交给 AI 执行；当前时区 ${task.timezone}，本地时刻 ${task.localTime}。`} />
     <div className="form-actions">
-      <button className="secondary-button" type="button" onClick={() => void load()} disabled={busy}>刷新</button>
-      {task.status === "ENABLED" && <button className="secondary-button" type="button" disabled={busy}
+      <button className="secondary-button" type="button" onClick={() => void load()} disabled={frozen}>刷新</button>
+      {task.status === "ENABLED" && <button className="secondary-button" type="button" disabled={frozen}
         onClick={() => void changeStatus("PAUSED")}>暂停</button>}
-      {task.status === "PAUSED" && <button className="secondary-button" type="button" disabled={busy}
+      {task.status === "PAUSED" && <button className="secondary-button" type="button" disabled={frozen}
         onClick={() => void changeStatus("ENABLED")}>继续</button>}
-      {task.status !== "DISABLED" && task.status !== "EXPIRED" && <button className="secondary-button" type="button" disabled={busy}
+      {task.status !== "DISABLED" && task.status !== "EXPIRED" && <button className="secondary-button" type="button" disabled={frozen}
         onClick={() => void changeStatus("DISABLED")}>停用</button>}
       <button className="text-button" type="button" onClick={() => navigate("/scheduled-tasks")}>返回列表</button>
     </div>
     {error && <p className="action-error" role="alert">{error}</p>}
     {notice && <p className="receipt-message" role="status">{notice}</p>}
+    {pending && <div className="warning-callout" role="alert" data-testid="scheduled-detail-pending">
+      <Info aria-hidden="true" />
+      <div>
+        <p>这一次提交结果未确认，本次提交是否生效尚未确定。原 command_id：<code>{pending.command.input.commandId}</code>。
+          先查询回执；在确认之前不要重复提交，同页其它操作也已禁用。</p>
+        {pendingNote && <p>{pendingNote}</p>}
+        <div className="form-actions">
+          <button className="secondary-button" type="button" disabled={busy}
+            onClick={() => void checkReceipt()}>核对原命令回执</button>
+          {mayRetry && <button className="secondary-button" type="button" disabled={busy}
+            onClick={() => void retryOriginal()}>按原 ID 重试同一命令</button>}
+        </div>
+      </div>
+    </div>}
 
     <section className="surface-panel" aria-label="定时任务设置">
       <h2>设置与授权</h2>
@@ -148,9 +251,9 @@ export default function ScheduledTaskDetailView() {
         <span className="data-cell"><strong>{formatInZone(occurrence.dueAt, occurrence.timezone)}</strong>
           <small>{describeReason(occurrence.reason)}</small></span>
         <span className="scheduled-task-actions">
-          <button className="text-button" type="button" disabled={busy} data-testid={`scheduled-task-retry-${occurrence.occurrenceId}`}
+          <button className="text-button" type="button" disabled={frozen} data-testid={`scheduled-task-retry-${occurrence.occurrenceId}`}
             onClick={() => void resolveOccurrence(occurrence, "RETRY")}>补跑一次</button>
-          <button className="text-button" type="button" disabled={busy} data-testid={`scheduled-task-dismiss-${occurrence.occurrenceId}`}
+          <button className="text-button" type="button" disabled={frozen} data-testid={`scheduled-task-dismiss-${occurrence.occurrenceId}`}
             onClick={() => void resolveOccurrence(occurrence, "DISMISS")}>忽略</button>
         </span>
       </li>)}</ul>

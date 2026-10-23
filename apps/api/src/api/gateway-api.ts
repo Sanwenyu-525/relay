@@ -7,6 +7,7 @@ import {
   disableGatewayConnectionCommand, disableManagedResourceCommand,
   revokeGatewayPolicyCommand,
 } from '../application/gateway-commands.js';
+import { reconcileReadonlyGatewayOperationCommand } from '../application/gateway-reconcile.js';
 import { createWebImportJob } from '../application/web-import-commands.js';
 import { closePartialFileWriteCommand, readFileWriteDispositionPreview } from '../application/file-write-disposition.js';
 import {
@@ -96,6 +97,14 @@ const closePartialFileWriteBody = Type.Object({
   decision: Type.Literal('KEEP_CURRENT_AND_FAIL_RUN'),
   expected_run_revision: revision, expected_task_revision: revision,
   expected_observation_sha256: Type.String({ pattern: '^[0-9a-f]{64}$' }),
+}, strict);
+/** DEV-0054：未决只读动作的手动核对。只带 command_id——目标来自路径，结论由服务端重读算出。 */
+const reconcileOperationBody = Type.Object({ command_id: uuid }, strict);
+const reconcileOperationResult = Type.Object({
+  operation_id: uuid, invocation_id: uuid, capability_key: Type.String(),
+  status: Type.Union([Type.Literal('SUCCEEDED'), Type.Literal('NOT_EXECUTED'),
+    Type.Literal('FAILED')]),
+  reconciliation: Type.String(),
 }, strict);
 
 /** P09 config/history API. Claim, Admit, outcome and reconcile remain internal Worker ports. */
@@ -307,6 +316,17 @@ export function registerGatewayRoutes(app: FastifyInstance, dependencies: RouteD
         expectedTaskRevision: body.expected_task_revision,
         expectedObservationSha256: body.expected_observation_sha256,
       });
+      return { outcome, result: outcome.result };
+    } }));
+  app.post('/operations/:operation_id/reconcile', {
+    schema: { params: operationParams, body: reconcileOperationBody,
+      response: { 200: commandEnvelopeSchema(reconcileOperationResult) } },
+  }, createCommandHandler(dependencies, { commandType: 'ReconcileGatewayOperation',
+    bodySchema: reconcileOperationBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await reconcileReadonlyGatewayOperationCommand(executor, {
+        workspaceId: params.workspace_id ?? '', operationId: params.operation_id ?? '',
+        commandId: body.command_id });
       return { outcome, result: outcome.result };
     } }));
   app.get('/import-jobs/:import_job_id', { schema: { params: importParams } }, async (request, reply) => {

@@ -1,18 +1,20 @@
 import { createElement } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import ChatModeSwitch, { ChatModeHint, chatModeLabel } from "../src/components/ChatModeSwitch";
 import GoalCard from "../src/components/GoalCard";
 import PlanCard from "../src/components/PlanCard";
 import { chatModeCommandFromText } from "../src/lib/chatModeCommand";
+import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import type { RelayGoalView, RelayPlanView } from "../src/api/relayClient";
-import { mountReact } from "./mountApp";
+import { feedbackText, flush, mountReact, mountWorkbench } from "./mountApp";
 
 /**
  * 聊天 /plan 与 /goal 的界面件（0127，工作台 §44）。
  *
  * 锁四件事：
  *   * `/plan 内容`、`/goal 内容` 解析成「模式 + 正文」，只认行首；正文中间的 /plan 不是命令；
- *   * 模式选择是提交入口：值来自服务端读回的模式，改选才发回调，不在本地抢跑；
+ *   * 模式以只读徽标表达当前事实（普通模式不占位），「退出」才是提交入口；
+ *     回执后重读会话投影，徽标不在本地抢跑；
  *   * 目标卡只渲染服务端给的行动入口（actions），空闲态整卡不渲染；
  *   * 计划卡显示确切版本号；SUPERSEDED 也要能被看见，不能被当成最新版。
  */
@@ -38,17 +40,42 @@ describe("/plan 与 /goal 的输入解析", () => {
   });
 });
 
-describe("聊天模式选择", () => {
-  it("select 的值就是服务端读回的模式；改选才回调", async () => {
+describe("聊天模式状态徽标", () => {
+  it("普通模式不渲染任何模式控件，也没有下拉框", async () => {
+    const view = await mountReact(createElement(ChatModeSwitch, {
+      mode: "CHAT", disabled: false, busy: false, lockedReason: null, onChange: vi.fn() }));
+    try {
+      expect(view.wrapper.find('[data-testid="chat-mode-badge"]').exists()).toBe(false);
+      expect(view.wrapper.find("select").exists()).toBe(false);
+    } finally { view.unmount(); }
+  });
+
+  it("计划/目标模式显示静态徽标；「退出」才是提交入口", async () => {
     const onChange = vi.fn();
     const view = await mountReact(createElement(ChatModeSwitch, {
-      mode: "PLAN", disabled: false, busy: false, lockedReason: null, onChange }));
+      mode: "GOAL", disabled: false, busy: false, lockedReason: null, onChange }));
     try {
-      // 受控 select 的值是属性不是 HTML attribute：改选回调即证明值来自 props。
-      await view.wrapper.get('[data-testid="chat-mode-select"]').setValue("CHAT");
+      const badge = view.wrapper.get('[data-testid="chat-mode-badge"]');
+      expect(badge.text()).toContain("目标模式");
+      expect(view.wrapper.find("select").exists()).toBe(false);
+      // 徽标本身不是选择器：点它不发命令。
+      await badge.trigger("click");
+      expect(onChange).not.toHaveBeenCalled();
+      await view.wrapper.get('[data-testid="chat-mode-exit"]').trigger("click");
       expect(onChange).toHaveBeenCalledWith("CHAT");
     } finally { view.unmount(); }
     expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("在途或禁用时退出键不可点，锁定原因写在 title 上", async () => {
+    const view = await mountReact(createElement(ChatModeSwitch, {
+      mode: "PLAN", disabled: false, busy: true,
+      lockedReason: "正在生成，停止后才能切换模式。", onChange: vi.fn() }));
+    try {
+      const exit = view.wrapper.get('[data-testid="chat-mode-exit"]');
+      expect(exit.attributes("disabled")).toBeDefined();
+      expect(exit.attributes("title")).toContain("正在生成");
+    } finally { view.unmount(); }
   });
 
   it("说明行只在非普通模式出现；安全停止时说明停止而不是装作已切换", () => {
@@ -150,6 +177,69 @@ describe("计划卡", () => {
       error: null, onExecute: vi.fn(), onExport: vi.fn(), onDismiss: vi.fn() }));
     try {
       expect(view.wrapper.find('[data-testid="plan-card"]').exists()).toBe(false);
+    } finally { view.unmount(); }
+  });
+});
+
+describe("退出聊天模式（AssistView 接线）", () => {
+  const baseUrl = "http://127.0.0.1:8787";
+  const workspaceId = "11111111-1111-4111-8111-111111111111";
+  const projectId = "22222222-2222-4222-8222-222222222222";
+  const sessionId = "33333333-3333-4333-8333-333333333333";
+  const prefix = `/api/v1/workspaces/${workspaceId}`;
+
+  function response(body: unknown, status = 200): Response {
+    return { ok: status < 400, status, json: async () => body } as Response;
+  }
+
+  afterEach(() => { resetRelayConnectionForTest(); vi.unstubAllGlobals(); });
+
+  it("退出回执后重读会话投影，徽标随服务端模式一起消失", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    // 服务端真值是唯一来源：POST 改状态，后续列表读回 CHAT。
+    let chatMode: "CHAT" | "GOAL" = "GOAL";
+    const modePosts: string[] = [];
+    const session = () => ({ id: sessionId, workspace_id: workspaceId, project_id: projectId,
+      task_id: null, title: "模式徽标接线", status: "ACTIVE", revision: "1",
+      conversation_mode: "AGENT", chat_mode: chatMode,
+      created_at: "2026-10-22T00:00:00Z", updated_at: "2026-10-22T00:00:00Z" });
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === `${prefix}/projects/${projectId}`) return response({ id: projectId,
+        title: "测试项目", project_type: "GENERAL", revision: "1", state_revision: "1",
+        archived_at: null });
+      if (path === `${prefix}/assist-sessions`) return response({ items: [session()] });
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return response({ items: [] });
+      if (path === `${prefix}/assist-sessions/${sessionId}/goal`) return response({ goal: null, rounds: [] });
+      if (path === `${prefix}/assist-sessions/${sessionId}/plans`)
+        return response({ latest: null, versions: [] });
+      if (path === `${prefix}/assist-sessions/${sessionId}/model-selection`)
+        return response({ model: null, revision: "0" });
+      if (path === `${prefix}/assist-sessions/${sessionId}/chat-mode` && init?.method === "POST") {
+        modePosts.push(path);
+        const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+        chatMode = body.mode === "CHAT" ? "CHAT" : "GOAL";
+        return response({ command_id: body.command_id, committed_at: "2026-10-22T00:00:00Z",
+          result: { session_id: sessionId, chat_mode: chatMode, revision: "2",
+            goal_stopping: false } });
+      }
+      if (path === `${prefix}/assist-proposals`) return response({ items: [] });
+      if (path === `${prefix}/skill-definitions`) return response({ items: [] });
+      if (path === `${prefix}/model-port`) return response({ provider: "fake", configured: false,
+        model: null, base_url: null, max_call_tokens: null });
+      throw new Error(`unexpected request ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench(`/projects/${projectId}?skill=assist`);
+    try {
+      expect(view.wrapper.get('[data-testid="chat-mode-badge"]').text()).toContain("目标模式");
+      expect(view.wrapper.find('[data-testid="chat-mode-select"]').exists()).toBe(false);
+      await view.wrapper.get('[data-testid="chat-mode-exit"]').trigger("click");
+      await flush(80);
+      expect(modePosts).toHaveLength(1);
+      expect(feedbackText("assist-receipt-notice")).toContain("已切换回普通模式");
+      // 徽标读的是重读后的会话投影：不重读时它会一直停在目标模式（探针复现过）。
+      expect(view.wrapper.find('[data-testid="chat-mode-badge"]').exists()).toBe(false);
     } finally { view.unmount(); }
   });
 });

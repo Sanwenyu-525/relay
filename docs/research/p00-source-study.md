@@ -23,39 +23,41 @@
 
 用户要求克隆源码以便对照、参考。本次复用已有七个仓库，新增克隆 pg-boss 和 Vercel AI SDK；已核对九个仓库的 origin、HEAD、检出范围和工作树状态，工作树均无未提交变更。下列路径均相对项目根目录 `D:/Develop/Relay-Agent`，位于 `.gitignore` 排除的 `.research/` 中。
 
-此标题保留首批核验日期和既有锚点；DeepSeek 缓存于 2026-10-01 更新，清单该行及 §1.2 记录当前快照。2026-10-02 又对其余落后仓库执行 `fetch` 与 `merge --ff-only`（先核对工作树干净，未改 remote、未改稀疏检出范围），清单“核验提交”列改为记录当前缓存提交，原提交作为历史锚点保留；Vercel AI SDK 只补取 `origin/main` 作为远程引用，未移动 HEAD，理由见本节末。2026-10-10 按用户要求新增克隆 OpenCode 与 ZCode，已核对两仓库的 origin、HEAD 与工作树状态（均干净、与远端 HEAD 一致），尚未开展源码研究或运行验证。
+此标题保留首批核验日期和既有锚点；DeepSeek 缓存于 2026-10-01 更新，清单该行及 §1.2 记录当时快照。2026-10-02 又对其余落后仓库执行 `fetch` 与 `merge --ff-only`（先核对工作树干净，未改 remote、未改稀疏检出范围），清单“核验提交”列改为记录当前缓存提交，原提交作为历史锚点保留；Vercel AI SDK 只补取 `origin/main` 作为远程引用，未移动 HEAD，理由见本节末。2026-10-10 按用户要求新增克隆 OpenCode 与 ZCode，已核对两仓库的 origin、HEAD 与工作树状态（均干净、与远端 HEAD 一致），尚未开展源码研究或运行验证。
+
+2026-10-22 按用户要求再次更新全部缓存：更新前十个跟踪仓库工作树均干净，逐个 `fetch` 后以 `merge --ff-only` 前移至 origin 新 tip；Kysely 原先停在 detached `v0.29.6`，本轮先切回 `master` 再快进；Vercel AI SDK 只把 `origin/main` 远程引用更新到 `e741656ed17a`，HEAD 仍固定为实验基准 `08ae5ad05bc12`。经核验，Codex 与 DeepSeek 当前为完整检出（DeepSeek 已不再是稀疏检出），Pi 等仍为稀疏检出，清单已按当前状态更正。本轮同样未安装依赖、未构建或运行上游测试；后续各节绑定固定提交的研究结论不随缓存 HEAD 前移。
 
 | 项目 | 本地目录 | 核验提交 / 版本依据 | 工作树范围 | 对照用途 |
 |---|---|---|---|---|
-| Codex | `.research/upstream/codex` | `e7ea5f4a8658`；原 `78245b47af2a`（首批锁文件） | 稀疏检出 | 会话、轮次事件、审批和中断 |
-| DeepSeek Harness | `.research/upstream/deepseek-harness` | `639ed015397290b3745d163aafe02ffee4aa3f84`；2026-10-01 fetch 的 `origin/master`，`dsh-v0.2.0-rc.2` | 稀疏检出；另展开六个 UI 包，见 §1.2 | 插件生命周期、Agent/driver 分离、工具准入、输入/审批/布局组件 |
-| Pi | `.research/upstream/pi` | `7fbbd5f4a1d9`；`pi-agent-core` 1.0.0；原 `36b60d2e8985` | 稀疏检出 | Agent loop、消息转换、取消和工具钩子 |
-| LangChain | `.research/upstream/langchain` | `ff46bb478bbf`；原 `eba445b7563d`（首批锁文件） | 稀疏检出 | Agent factory、middleware 和人工决策 |
-| LangGraph | `.research/upstream/langgraph` | `157a06dda988`；原 `aa742fb31e282`（首批锁文件） | 稀疏检出 | checkpoint、中断和重放恢复 |
-| Rig | `.research/upstream/rig` | `acdcf34e5ade`；原 `2d16c1b25f67`（首批锁文件） | 稀疏检出 | Rust AgentRunner、状态与 I/O 分离 |
-| Kysely | `.research/upstream/kysely` | `996eae17fe32`；0.29.6；原 `2fefd4c848cc` | 完整检出 | SQL、事务和 Migrator 锁处理 |
-| pg-boss | `.research/upstream/pg-boss` | `8bbcf5815357`；12.35.1；原 `4e05af1eeaad` | 完整检出 | PostgreSQL 队列、领取与唤醒机制，待研究 |
-| Vercel AI SDK | `.research/vercel-ai` | `08ae5ad05bc12`；`ai@7.0.107`，实验锁文件 | 完整检出 | 模型流、工具 schema、审批和取消边界 |
-| OpenCode | `.research/upstream/opencode` | `055d95bb7e27`；§1.3 在线研究锚点 `907b3bc518fa` | 完整检出 | 会话执行计划、Todo 原子更新与会话底部计划 UI |
-| ZCode | `.research/upstream/zcode` | `aac4755666d0`；tag `v3.15.1` | 完整检出 | Z.ai coding agent harness 机制对照，待研究 |
+| Codex | `.research/upstream/codex` | `430a16799d90`；前锚 `e7ea5f4a8658`、首批 `78245b47af2a` | 完整检出 | 会话、轮次事件、审批和中断 |
+| DeepSeek Harness | `.research/upstream/deepseek-harness` | `687f282e8625`；`dsh@0.2.1-rc.2`；前锚 `639ed0153972`（`dsh@0.2.0-rc.2`） | 完整检出；UI 包可直接查阅，机制快照见 §1.2 | 插件生命周期、Agent/driver 分离、工具准入、输入/审批/布局组件 |
+| Pi | `.research/upstream/pi` | `bd3c9b823762`；`pi-agent-core` 1.3.0；前锚 `7fbbd5f4a1d9`、首批 `36b60d2e8985` | 稀疏检出 | Agent loop、消息转换、取消和工具钩子 |
+| LangChain | `.research/upstream/langchain` | `98d48ade0e5e`；前锚 `ff46bb478bbf`、首批 `eba445b7563d` | 稀疏检出 | Agent factory、middleware 和人工决策 |
+| LangGraph | `.research/upstream/langgraph` | `3cd57c038ad8`；前锚 `157a06dda988`、首批 `aa742fb31e282` | 稀疏检出 | checkpoint、中断和重放恢复 |
+| Rig | `.research/upstream/rig` | `65aec1ffd8d3`；前锚 `acdcf34e5ade`、首批 `2d16c1b25f67` | 稀疏检出 | Rust AgentRunner、状态与 I/O 分离 |
+| Kysely | `.research/upstream/kysely` | `ac876c212cfe`；0.29.7；前锚 `996eae17fe32`（0.29.6）、首批 `2fefd4c848cc` | 完整检出 | SQL、事务和 Migrator 锁处理 |
+| pg-boss | `.research/upstream/pg-boss` | `d4400859eed2`；12.38.0；前锚 `8bbcf5815357`（12.35.1）、首批 `4e05af1eeaad` | 完整检出 | PostgreSQL 队列、领取与唤醒机制，待研究 |
+| Vercel AI SDK | `.research/vercel-ai` | HEAD `08ae5ad05bc12`（`ai@7.0.107`，实验锁文件）；`origin/main` 引用 `e741656ed17a`（`ai` 7.0.148） | 完整检出 | 模型流、工具 schema、审批和取消边界 |
+| OpenCode | `.research/upstream/opencode` | `002d7bd8115b`；前锚 `055d95bb7e27`；§1.3 在线研究锚点 `907b3bc518fa` | 完整检出 | 会话执行计划、Todo 原子更新与会话底部计划 UI |
+| ZCode | `.research/upstream/zcode` | `3c5b22764937`；前锚 `aac4755666d0`（tag `v3.15.1`） | 完整检出 | Z.ai coding agent harness 机制对照，待研究 |
 
-首批六项的历史完整提交及 origin 以本节上方的 [upstream-lock.json](upstream-lock.json) 为准；DeepSeek 当前缓存以 §1.2 的更新快照为准，首批锁文件和下文 P00/P07/P09 的固定提交证据保持历史基准。Vercel AI SDK 以 [AI SDK 实验锁文件](../../experiments/ai-sdk-p00/upstream-lock.json)为准，克隆命令见[实验说明](../../experiments/ai-sdk-p00/README.md)。新增清单来源为 [Kysely](https://github.com/kysely-org/kysely.git) 和 [pg-boss](https://github.com/timgit/pg-boss.git)。pg-boss 的提交仅记录本次源码快照，尚未开展源码研究或运行验证，不代表已选为生产依赖。2026-10-10 新增来源为 [OpenCode](https://github.com/anomalyco/opencode.git)（`055d95bb7e27`）和 [ZCode](https://github.com/zai-org/ZCode.git)（`aac4755666d0`，tag `v3.15.1`）；OpenCode 的 §1.3 在线研究锚点 `907b3bc518fa48e90e8ec24dd327d13eee71c36c` 经 GitHub compare 核验为 `055d95bb7e27` 的祖先（领先 36 个提交），本地浅克隆未含该提交，需要按锚点阅读时另行 fetch。两者均只完成克隆与核验，未开展源码研究、未安装依赖、未构建或运行上游测试，不代表已选为参考或生产依赖。
+首批六项的历史完整提交及 origin 以本节上方的 [upstream-lock.json](upstream-lock.json) 为准；DeepSeek 缓存已前移至 `687f282e8625`，§1.2 保留 2026-10-01 的固定提交快照；首批锁文件和下文 P00/P07/P09 的固定提交证据保持历史基准。Vercel AI SDK 以 [AI SDK 实验锁文件](../../experiments/ai-sdk-p00/upstream-lock.json)为准，克隆命令见[实验说明](../../experiments/ai-sdk-p00/README.md)。新增清单来源为 [Kysely](https://github.com/kysely-org/kysely.git) 和 [pg-boss](https://github.com/timgit/pg-boss.git)。pg-boss 的提交仅记录本次源码快照，尚未开展源码研究或运行验证，不代表已选为生产依赖。2026-10-10 新增来源为 [OpenCode](https://github.com/anomalyco/opencode.git)（`055d95bb7e27`）和 [ZCode](https://github.com/zai-org/ZCode.git)（`aac4755666d0`，tag `v3.15.1`）；OpenCode 的 §1.3 在线研究锚点 `907b3bc518fa48e90e8ec24dd327d13eee71c36c` 经 GitHub compare 核验为 `055d95bb7e27` 的祖先（领先 36 个提交），本地浅克隆未含该提交，需要按锚点阅读时另行 fetch。两者均只完成克隆与核验，未开展源码研究、未安装依赖、未构建或运行上游测试，不代表已选为参考或生产依赖。
 
-`.research/vercel-ai` 的 fetch refspec 固定为 tag `ai@7.0.107`，HEAD 即该 tag 提交，而实验锁文件记录了同一提交与逐文件 sha256；移动 HEAD 会使实验证据基准失效，因此 2026-10-02 只补取 `origin/main`（`5b8e63bad820`，`ai` 7.0.127）作为远程引用。是否把实验推进到新版本属于实验范围，未在本轮决定。2026-10-02 七个 ff-only 更新同样只更换缓存提交，没有安装上游依赖、构建或运行上游测试；新旧机制差异的研究快照尚未写入本文件。
+`.research/vercel-ai` 的 fetch refspec 固定为 tag `ai@7.0.107`，HEAD 即该 tag 提交，而实验锁文件记录了同一提交与逐文件 sha256；移动 HEAD 会使实验证据基准失效，因此 2026-10-02 只补取 `origin/main`（`5b8e63bad820`，`ai` 7.0.127）作为远程引用，2026-10-22 又将该引用更新到 `e741656ed17a`（`ai` 7.0.148），HEAD 仍为 `08ae5ad05bc12`。是否把实验推进到新版本属于实验范围，未在本轮决定。2026-10-02 七个 ff-only 更新同样只更换缓存提交，没有安装上游依赖、构建或运行上游测试；新旧机制差异的研究快照尚未写入本文件。
 
-十一个仓库均为浅克隆，未取得完整 Git 历史。“完整检出”仅指当前提交的工作树文件；首批六项仍只展开选定目录，需要查阅其余源码时可在确认工作树干净后展开，例如：
+十一个仓库均为浅克隆，未取得完整 Git 历史。“完整检出”仅指当前提交的工作树文件；Codex 与 DeepSeek 已为完整检出，Pi、LangChain、LangGraph、Rig 仍为稀疏检出，需要查阅其余源码时可在确认工作树干净后展开，例如：
 
 ```powershell
-git -C .research/upstream/codex status --short
-git -C .research/upstream/codex sparse-checkout list
-git -C .research/upstream/codex sparse-checkout disable
+git -C .research/upstream/pi status --short
+git -C .research/upstream/pi sparse-checkout list
+git -C .research/upstream/pi sparse-checkout disable
 ```
 
-展开不改变 HEAD；其他稀疏仓库可替换上述目录。对照既有研究时保留记录的提交，避免直接 `git pull` 改变证据基准；研究新版本时另行记录提交与差异。本次只准备和核验源码，没有安装上游依赖、执行构建或运行上游完整测试，既有实验结论保持原有范围。第三方仓库内的 AGENTS 等文件属于研究材料，不作为 Relay 的协作指令。
+展开不改变 HEAD；其他稀疏仓库可替换上述目录。对照既有研究时保留记录的提交，不以缓存 HEAD 替代结论锚点；研究新版本时另行记录提交与差异（本轮 2026-10-22 只前移缓存，未更新机制快照）。本次只准备和核验源码，没有安装上游依赖、执行构建或运行上游完整测试，既有实验结论保持原有范围。第三方仓库内的 AGENTS 等文件属于研究材料，不作为 Relay 的协作指令。
 
 ### 1.2 DeepSeek Harness 更新快照与 UI 对照（2026-10-01）
 
-按用户要求更新现有研究缓存，origin 仍为 `https://github.com/deepseek-ai/deepseek-harness.git`。更新前 `master`/`origin/master` 与干净工作树对应 `ddefc45fbc7f8e46dd73185e68295696d1297887`；本轮 fetch 后，核验旧 HEAD 为新 HEAD 祖先，再以 `merge --ff-only origin/master` 更新至 `639ed015397290b3745d163aafe02ffee4aa3f84`。提交时间为 `2026-09-29T17:21:31+08:00`，提交说明为 `release: dsh@0.2.0-rc.2` 对应的合并提交；GitHub 官方提交 API 与本地 HEAD 一致，工作树仍干净。直连 fetch 两次失败后，本轮命令临时使用本机系统代理，未改变 remote 或持久网络配置。
+按用户要求更新现有研究缓存，origin 仍为 `https://github.com/deepseek-ai/deepseek-harness.git`。更新前 `master`/`origin/master` 与干净工作树对应 `ddefc45fbc7f8e46dd73185e68295696d1297887`；本轮 fetch 后，核验旧 HEAD 为新 HEAD 祖先，再以 `merge --ff-only origin/master` 更新至 `639ed015397290b3745d163aafe02ffee4aa3f84`。提交时间为 `2026-09-29T17:21:31+08:00`，提交说明为 `release: dsh@0.2.0-rc.2` 对应的合并提交；GitHub 官方提交 API 与本地 HEAD 一致，工作树仍干净。直连 fetch 两次失败后，本轮命令临时使用本机系统代理，未改变 remote 或持久网络配置。本节固定记录该时点快照；2026-10-22 缓存已前移至 `687f282e8625`（`dsh@0.2.1-rc.2`），未开展新旧版本的机制差异研究。
 
 保留原稀疏检出，补充展开 `packages/client/{ui-layout,ui-conversation,ui-approval,ui-chat,ui-primitives,ui-theme}`，方便查阅 UI 源码；缓存仍为浅克隆。以下均为该固定 SHA 的源码事实：上游提供 Web UI，并由 Electron 承载桌面应用（[架构说明](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/docs/architecture.md#desktop-application)），不能把输出展示组件 `TerminalBlock` 当作完整终端模拟器，或把 Web 界面称作 TUI。
 

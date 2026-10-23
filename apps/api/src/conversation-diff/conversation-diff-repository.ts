@@ -10,6 +10,7 @@ import { sql } from 'kysely';
 
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
+import { canonicalRelativePath, isProtectedPath } from '../files/file-changeset.js';
 import type { BaselineFile } from './diff-engine.js';
 
 /** 落库后的基线文件形态（jsonb 内一条）。 */
@@ -66,13 +67,19 @@ export interface ConversationDiffRepository {
   /**
    * 本会话**实际落盘**的相对路径（会话口径的唯一归因来源，2026-10-20）。
    *
-   * 只认冻结的变更集：会话的执行请求 → Run → `change_sets` → `change_set_files`。
+   * 两处真实写账本的并集：
+   *   ① 委派执行：会话的执行请求 → Run → `change_sets` → `change_set_files`；
+   *   ② 会话直写（0126）：`session_tool_calls` 的 `apply_changeset` → `logical_operations`，
+   *      取 prepare 校验后冻结的 `params.changes`。这条路径不经过 Run，也不会写
+   *      `change_sets`，漏掉它会让聊天里新建的文件在会话 diff 中完全消失（DEV-0107）。
+   *
    * **模型声明过但没落盘的路径不算**（用户 2026-10-20 明确「完全不出现」）：声明只代表打算改，
-   * 若把它也算进来，别人恰好在同一个窗口里改了那个文件时，就会把别人的改动记到本会话头上。
-   * 写工具直连 Gateway 的路径理论上也走 `change_sets`，因此不再单列 `session_tool_calls`。
+   * 若把「候选/被拒请求」也算进来，别人恰好在同一个窗口里改了那个文件时，就会把别人的改动
+   * 记到本会话头上。因此直写只认已结算或结果未知的行，被拒与在途请求不进入归因。
    *
    * 按 `rootPath` 过滤：换过目录的会话，旧根写过的相对路径不能算进新根这一段（否则会在新段里
-   * 变成「扫描没覆盖到」的假缺口）。
+   * 变成「扫描没覆盖到」的假缺口）。直写行没有自己的根列，用 Operation 准备时冻结的
+   * `normalized_target`（APPLY_CHANGESET 恒为受管根）核对。
    *
    * 这里只回答「哪些路径属于这个会话」，不回答「改了多少行」：行数仍由基线→当前内容算出，
    * 所以写了又改回原样的路径会因摘要相同而自然消失。
@@ -119,16 +126,45 @@ export class KyselyConversationDiffRepository implements ConversationDiffReposit
   async listWrittenPaths(workspaceId: string, sessionId: string,
     rootPath: string): Promise<readonly string[]> {
     const rows = (await sql<{ path: string }>`
-      select distinct f.relative_path as path
-        from conversation_execution_requests q
-        join change_sets cs on cs.run_id = q.run_id and cs.workspace_id = q.workspace_id
-        join change_set_files f on f.change_set_id = cs.id and f.invocation_id = cs.invocation_id
-       where q.workspace_id = ${workspaceId} and q.session_id = ${sessionId}
-         and cs.status in ('SUCCEEDED', 'PARTIAL', 'UNKNOWN')
-         and cs.canonical_root = ${rootPath}
-         and f.relative_path <> ''
+      select distinct path from (
+        select f.relative_path as path
+          from conversation_execution_requests q
+          join change_sets cs on cs.run_id = q.run_id and cs.workspace_id = q.workspace_id
+          join change_set_files f on f.change_set_id = cs.id and f.invocation_id = cs.invocation_id
+         where q.workspace_id = ${workspaceId} and q.session_id = ${sessionId}
+           and cs.status in ('SUCCEEDED', 'PARTIAL', 'UNKNOWN')
+           and cs.canonical_root = ${rootPath}
+           and f.relative_path <> ''
+        union all
+        select change->>'path' as path
+          from session_tool_calls stc
+          join logical_operations op on op.id = stc.operation_id
+          cross join lateral jsonb_array_elements(
+            case when jsonb_typeof(op.params->'changes') = 'array'
+              then op.params->'changes' else '[]'::jsonb end) as change
+         where stc.session_id = ${sessionId}
+           and stc.tool_name = 'apply_changeset'
+           and stc.status in ('SETTLED', 'UNKNOWN')
+           and op.workspace_id = ${workspaceId}
+           and op.origin = 'AGENT_SESSION_WRITE'
+           and op.action_type = 'APPLY_CHANGESET'
+           and op.normalized_target = ${rootPath}
+           and change->>'path' <> ''
+      ) written
+      order by path
     `.execute(this.db)).rows;
-    return rows.map((row) => row.path).sort();
+    // prepare 校验过路径安全，但冻结参数保留的是调用方写法（`./a`、反斜杠等）。
+    // 归因要和基线/当前扫描的同一相对形态对齐，否则写过的文件会因字符串不同被漏掉。
+    const paths = new Set<string>();
+    for (const row of rows) {
+      try {
+        const path = canonicalRelativePath(rootPath, row.path);
+        if (path !== '' && !isProtectedPath(path)) paths.add(path);
+      } catch {
+        // 路径已不可能是本次根内的合法目标：不把它变成假缺口。
+      }
+    }
+    return [...paths].sort();
   }
 }
 

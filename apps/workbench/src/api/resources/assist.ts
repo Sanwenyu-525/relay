@@ -1,10 +1,11 @@
 import type { DecimalRevision } from "../../types";
+import type { RelayWriteTier } from "../dtos/gateway";
 import { RelayContractError, RelayTransportError } from "../core/errors";
 import { RelayHttp } from "../core/http";
 import { array, boolean, decimal, integer, nullableString, object, string } from "../core/primitives";
 import { assistMessageFrom, assistantProfileFrom, assistProposalFrom, assistSessionBindingFrom, assistSessionDeleteFrom, assistSessionDirectoryBindingFrom, assistSessionForkFrom, assistSessionFrom, assistSessionPinFrom, assistSessionStateFrom, assistSessionTitleFrom, assistSessionUnreadFrom, assistSourceBody, conversationExecutionFrom, conversationExecutionSummaryFrom, packDefinitionFrom, sessionToolCallsFrom, skillDefinitionFrom, workingDirectoryFrom, workspaceDefaultDirectoryFrom } from "../parse/assist";
 import { commandEnvelopeFrom } from "../parse/projects";
-import type { RelayChatMode, RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachmentContent, RelayAssistMessageAttachmentUpload, RelayAssistProposal, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayConversationMode, RelayAssistSourceRef, RelayConversationExecution, RelayConversationExecutionStage, RelayPackDefinition, RelaySessionToolCalls, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult } from "../dtos/assist";
+import type { RelayChatMode, RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachmentContent, RelayAssistMessageAttachmentUpload, RelayAssistProposal, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayConversationMode, RelayAssistSourceRef, RelayConversationExecution, RelayConversationExecutionStage, RelayPackDefinition, RelaySessionToolCalls, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult, RelayWorkspaceDefaultWriteTierResult } from "../dtos/assist";
 import type { RelayCommandEnvelope } from "../dtos/projects";
 
 export async function getAssistSessions(http: RelayHttp, target: { projectId?: string; taskId?: string; includeContext?: boolean; status?: "ACTIVE" | "ARCHIVED" | "ALL" } = {}): Promise<readonly RelayAssistSession[]> {
@@ -347,6 +348,33 @@ export function clearWorkspaceDefaultDirectory(http: RelayHttp, input: {
   commandId: string; expectedRevision: DecimalRevision;
 }): Promise<RelayWorkspaceDefaultDirectoryResult> {
   return postWorkspaceDefaultDirectory(http, { ...input, resourceId: null });
+}
+
+/**
+ * 工作区默认写档位（0131 / DEV-0115）。
+ *
+ * 这条命令不需要目录：它记的是「以后新开的目录按哪一档起步」。回执仍逐字核对——
+ * 命令身份、Workspace 与档位三者对不上就只报「无法核对」，由调用方按原 command_id 查询，
+ * 绝不换 ID 重发。真正的权限仍在每个目录自己的那一行上（服务端在新建那一行时套用）。
+ */
+export async function setWorkspaceDefaultWriteTier(http: RelayHttp, input: {
+  commandId: string; expectedRevision: DecimalRevision; tier: RelayWriteTier | null;
+}): Promise<RelayWorkspaceDefaultWriteTierResult> {
+  const body = await http.request(http.workspacePath("/default-write-tier"), { method: "POST",
+    body: JSON.stringify({ command_id: input.commandId, expected_revision: input.expectedRevision,
+      default_write_tier: input.tier }) }, 200);
+  try {
+    const envelope = commandEnvelopeFrom(body);
+    if (envelope.commandId !== input.commandId) throw new Error("command mismatch");
+    const workspaceId = string(envelope.result, "workspace_id", "workspace default write tier result");
+    const row = object(envelope.result, "workspace default write tier result");
+    const tier = row.default_write_tier === null ? null : string(row, "default_write_tier",
+      "workspace default write tier result");
+    if (tier !== null && !["READ_ONLY", "ASK", "AUTO", "FULL"].includes(tier)) throw new Error("unknown tier");
+    if (workspaceId !== http.workspaceId || tier !== input.tier) throw new Error("command mismatch");
+    return { workspaceId, defaultWriteTier: tier as RelayWriteTier | null,
+      revision: decimal(envelope.result, "revision", "workspace default write tier result") };
+  } catch { throw new RelayTransportError("默认写入档位回执无法核对，请查询原 command_id。"); }
 }
 
 /** 文件夹入口：可能建立最小 Project 与受管资源，因此是写命令；页面读取不得调用它。 */

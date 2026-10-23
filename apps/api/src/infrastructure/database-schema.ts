@@ -99,6 +99,8 @@ export interface WorkspaceRow {
 export interface WorkspaceDefaultDirectoryRow {
   readonly workspace_id: string;
   readonly resource_id: string | null;
+  /** 0131（DEV-0115）：还没有目录时的默认写档位；只在新建 `local_directory_access` 行时抄进去。 */
+  readonly default_write_tier: LocalDirectoryWriteTier | null;
   readonly revision: bigint;
   readonly created_at: Date;
   readonly updated_at: Date;

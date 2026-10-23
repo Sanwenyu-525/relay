@@ -429,16 +429,25 @@ export function workspaceDefaultDirectoryFrom(value: unknown): RelayWorkspaceDef
   if (status === "UNSET" && resourceId !== null) {
     throw new Error("workspace default directory.resource_id 与 status 不一致。");
   }
-  const writeTier = row.write_tier;
-  if (writeTier !== null && writeTier !== "READ_ONLY" && writeTier !== "ASK" &&
-      writeTier !== "AUTO" && writeTier !== "FULL") {
-    throw new Error("workspace default directory.write_tier 无法识别");
-  }
+  const writeTier = nullableTier(row.write_tier, "workspace default directory.write_tier");
+  // 0131（DEV-0115）：默认档位与目录现状是两个事实，缺键或读出听不懂的值都显式失败，
+  // 不能把「还没读到」补成「没有默认」——那会让界面把一次设置显示成从未做过。
+  const defaultWriteTier = nullableTier(row.default_write_tier,
+    "workspace default directory.default_write_tier");
   return { status, resourceId, canonicalRoot,
     displayName: nullableString(row, "display_name", "workspace default directory"),
-    writeTier: writeTier === null ? null : writeTier,
+    writeTier, defaultWriteTier,
     reason: nullableString(row, "reason", "workspace default directory"),
     revision: decimal(row, "revision", "workspace default directory") };
+}
+
+/** 四档之外的任何值（含 undefined）都不是合法投影；只有显式 null 表示「没有」。 */
+function nullableTier(value: unknown, label: string): RelayWriteTier | null {
+  if (value === null) return null;
+  if (value !== "READ_ONLY" && value !== "ASK" && value !== "AUTO" && value !== "FULL") {
+    throw new Error(`${label} 无法识别`);
+  }
+  return value;
 }
 
 /** 缺键（旧回执）当作未核对；出现无法识别的档位不当作空值蒙混，显式失败。 */

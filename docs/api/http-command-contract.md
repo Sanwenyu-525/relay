@@ -1703,9 +1703,10 @@ F26 浏览器自动化 M3 的任务状态面。物理边界归[数据库 §96](.
 
 | 端点 | 命令 / 结果 |
 |---|---|
-| `GET /default-working-directory` | 只读 `{resource_id, canonical_root, display_name, write_tier, status, reason, revision}`；`status` 为 `UNSET / READY / UNAVAILABLE` |
+| `GET /default-working-directory` | 只读 `{resource_id, canonical_root, display_name, write_tier, default_write_tier, status, reason, revision}`；`status` 为 `UNSET / READY / UNAVAILABLE` |
 | `POST /default-working-directory` | `SetWorkspaceDefaultDirectory`，请求 `{command_id, expected_revision, resource_id}`，200 回执 `{workspace_id, resource_id, revision}` |
 | `POST /default-working-directory/clear` | `ClearWorkspaceDefaultDirectory`，请求 `{command_id, expected_revision}`，200 回执同上，`resource_id=null` |
+| `POST /default-write-tier` | `SetWorkspaceDefaultWriteTier`，请求 `{command_id, expected_revision, default_write_tier}`，200 回执 `{workspace_id, default_write_tier, revision}`；档位语义见 §10.110 |
 
 未设置时修订为 `0`，其余投影字段为 null；首次设置或清除后修订递增，清除不删除配置行、不重置修订。设置只引用已经登记的受管资源，不调用 Open、不建立项目/连接/策略、不扩大权限。资源跨 Workspace 返回 404；停用、项目归档、活动重叠根、真实目录不可访问或路径身份变化返回 409，保留旧设置。陈旧修订返回 `409 REVISION_CONFLICT`；**例外**：请求值已等于当前值（同一 `resource_id`，或两者都为 `null`）时按已达成处理，返回当前事实且不改修订——打开目录可能已顺手登记同一个值，重复声明同一件事不算冲突（2026-10-19）。同命令同载荷返回原回执，即使后来已清除或目录已失效；同命令异载荷返回 `409 COMMAND_ID_REUSED`。并发首次请求复用原回执，并发不同命令以配置修订收敛。丢响应时按原 command_id 核对，不换 ID 重发。
 
@@ -1991,4 +1992,46 @@ Breaking Change: **No（新增只读端点）**。`session_tool_calls` 自迁移
 - 响应形状由 `RunToolCallsSchema` 同一套 `Type.Union([Type.Literal(…)])` 封闭词表表达，
   集成用例逐字段核对 HTTP 体与投影函数返回值（应用层返回 camelCase、schema 只认 snake_case
   时序列化会静默丢字段，只有这种核对能抓到）。
+
+### 10.110 工作区默认写入档位（2026-10-22 实现，迁移 0131）
+
+DEV-0115（2026-10-21 用户指认「未选择目录时这个权限选择不了，我需要什么时候都能选择」）。
+**Breaking Change: No**：`workspace_default_directories` 加一列可空 `default_write_tier`
+（词表 `READ_ONLY / ASK / AUTO / FULL`，与目录档位同一套，不新造第五种判定），`GET /default-working-directory`
+的响应多一个字段，其余端点与判定不变；回滚只需忽略该列，旧行为是「没有默认档位」。
+
+- **`POST /default-write-tier`**：`SetWorkspaceDefaultWriteTier`，请求 `{command_id, expected_revision,
+  default_write_tier}`（`null` 表示取消默认档位），200 回执 `{workspace_id, default_write_tier, revision}`。
+  与 §10.96 同一条幂等与 CAS 规则：锁 authority、同命令同载荷重放原回执、同命令异载荷 `COMMAND_ID_REUSED`、
+  陈旧修订 `409 REVISION_CONFLICT`，**例外**同样是请求值已等于当前值时返回当前事实且不改修订。
+  它只写这一列，不建项目、不建连接、不写策略。
+- **唯一作用点是新建那一行 `local_directory_access`**：`POST /working-directories/open` 首次为一个资源
+  登记管理指针时，若默认档位不是 `READ_ONLY`，就按它写 `write_tier`，并像用户当时显式改档一样建立本目录的
+  `FILE_WRITE` 连接与 `WRITE_FILE / APPLY_CHANGESET / READ_CHANGE_SET` 三条策略——只加一列而不落地，
+  投影会读成「不可写入」，等于把设置变成假象。已有目录的行**一律不因改默认而重写**。
+- **三道跳过闸门，任一命中即按 `READ_ONLY` 起步，但打开目录本身仍然成功**：该根没有可核对的 Windows
+  写身份（`file_write_root_id` 为空）、本目录 `FILE_WRITE` 连接已停用、或该根的写策略曾被明确撤销过
+  （策略目标历史里有记录）。默认档位不能绕过任何一道既有闸门，也不能把被撤销的规则悄悄补回来。
+- **`FULL` 与 `AUTO` 仍只差在目录档位那一列**：两者都落 `AUTO` 策略行，`FULL` 的差别是删除等免确认由
+  `local_directory_access.write_tier` 决定（沿用 §10.95 的既有口径）。因此「默认＝完全访问」这句在设置里
+  是真的：以后新开的目录确实免删除确认，不是只改显示。
+- **界面**：没有目录时权限行仍可选，写的是这条默认档位；芯片只显示档位名（2026-10-22 同日第二轮用户指令去掉「默认 · 」前缀，「说的是以后新开的目录」由悬停说明与行内说明主语承担）并保留
+  `data-tier="unbound"`，所以上方状态行同刻仍如实读「未就绪（未绑定目录）」。绑定目录后菜单回到本目录档位，不再读默认投影。
+  菜单里给的是三行（请求批准／自动批准／完全访问）——同日第三轮用户指令「删除只读权限」，`READ_ONLY` 这一档不再由本入口提供，
+  但命令与词表照旧接受它，服务端返回该档时芯片仍读「只读」；菜单呈现口径归[工作台 §18.1.3](../frontend/workbench-design.md#1813-输入器的本目录写入档位2026-10-17)。
+- **客户端按现行契约严格解析**：`default_write_tier` 缺键或落在四档之外都显式失败，不补成「没有默认」——
+  那会把一次已经做过的设置显示成从未做过。代价是只跑旧服务端（有这条 GET、没有这一列）时整条默认目录
+  投影读失败，权限档位回到禁用并给出可行动说明；升级顺序必须是先迁移再换前端。
+- **上线动作**：在目标库上跑 `apps/api` 的 `npm run migrate`（迁移 `0131`，只加一列可空＋一个 CHECK）。
+  本轮只在一次性临时 PostgreSQL 集群上应用过，未改动任何既有库。
+
+**证据（如实分层）。** 真实临时 PostgreSQL：`workspace-default-write-tier.integration.test.ts` **5/5**
+（HTTP CAS/重放/冲突/词表 422/`null` 取消，默认档位与目录未设置可并存；`ASK` 默认→新目录得到 `ASK` 档位＋
+`FILE_WRITE` 连接＋三条 `ASK` 策略；`FULL` 默认→档位 `FULL` 而策略行仍 `AUTO`；无默认时与改动前逐字一致且
+改默认不重写已有目录；撤销过策略或停用过连接的根重新打开仍不继承，另一个根照旧继承），
+连同既有 `workspace-default-directory` 5 例与 `local-directory-access` 8 例共 **18/18**，
+日志 `output/dev-0115-api-integration-2.log`。工作台 jsdom：`writePermissionTier.spec.tsx` **26/26** 与
+`assistantClient.spec.ts` 默认档位客户端用例。真实 Chromium（API 由 `page.route` 伪造，不落库）：
+`tests/browser/defaultWriteTier.spec.ts` **2/2**（含「在途不弹块」时序断言；同日第三轮一度加上的菜单居中几何断言按用户指令回滚后已撤），截图 `output/dev-0115-screenshots/`。
+Windows 安装应用与真实 Provider 未验。
 

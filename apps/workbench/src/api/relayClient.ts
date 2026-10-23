@@ -75,8 +75,8 @@ import * as gatewayApi from "./resources/gateway";
 import type { RelayWriteReadiness, RelayWriteTier } from "./dtos/gateway";
 import type { DecimalRevision, InteractionMode } from "../types";
 import type { RelayBlueprintDraft, RelayBlueprintProposal, RelayGoal, RelayProjectGoal } from "./blueprintDtos";
-import type { RelayArtifact, RelayArtifactDirectUses, RelayArtifactImpactCandidate, RelayArtifactImpactCheck, RelayArtifactLineage, RelayArtifactTextLock, RelayArtifactVersionResult, RelayClosePartialFileWriteInput, RelayCombinationCheck, RelayFileWriteChangeSet, RelayFileWriteDispositionPreview, RelayFileWriteFrozenDiff, RelayImpactCandidateGroup, RelayTaskArtifacts } from "./dtos/artifacts";
-import type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistProposal, RelayAssistSession, RelayAssistSourceRef, RelayAssistantProfile, RelayConversationDiff, RelayConversationDiffFile, RelayConversationDiffScope, RelayChatMode, RelayConversationExecution, RelayConversationExecutionStage, RelayConversationMode, RelayPackDefinition, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult } from "./dtos/assist";
+import type { RelayArtifact, RelayArtifactDirectUses, RelayArtifactImpactCandidate, RelayArtifactImpactCheck, RelayArtifactLineage, RelayArtifactTextLock, RelayArtifactVersionResult, RelayClosePartialFileWriteInput, RelayCombinationCheck, RelayGatewayReconcileResult, RelayFileWriteChangeSet, RelayFileWriteDispositionPreview, RelayFileWriteFrozenDiff, RelayImpactCandidateGroup, RelayTaskArtifacts } from "./dtos/artifacts";
+import type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistProposal, RelayAssistSession, RelayAssistSourceRef, RelayAssistantProfile, RelayConversationDiff, RelayConversationDiffFile, RelayConversationDiffScope, RelayChatMode, RelayConversationExecution, RelayConversationExecutionStage, RelayConversationMode, RelayPackDefinition, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult, RelayWorkspaceDefaultWriteTierResult } from "./dtos/assist";
 import type { RelayStateMaintenanceApplyResult, RelayStateMaintenanceRequest,
   RelayUndoPlan } from "./dtos/stateMaintenance";
 import type { RelayDailyContinuation, RelayDailyViewConfirmationInput, RelayReturnReview } from "./dtos/projectDailyContinuation";
@@ -94,8 +94,8 @@ export type { ComposerDraftOperation, RelayComposerDraftAssist } from "./resourc
 export type { RelayFieldError, RelayProblem } from "./core/errors";
 export { RelayApiError, RelayRunEventHttpError, RelayTransportError } from "./core/errors";
 export type { RelayApiConnection } from "./core/http";
-export type { RelayArtifact, RelayArtifactDirectUses, RelayArtifactImpactCandidate, RelayArtifactImpactCheck, RelayArtifactLineage, RelayArtifactTextLock, RelayArtifactVersionResult, RelayArtifactVersionSummary, RelayClosePartialFileWriteInput, RelayCombinationCheck, RelayFileWriteChangeSet, RelayFileWriteDispositionPreview, RelayFileWriteFrozenDiff, RelayFileWriteResidualCandidate, RelayImpactCandidateGroup, RelayImpactCandidateGroupItem, RelayLineageParentKind, RelayLineageRelation, RelayTaskArtifacts } from "./dtos/artifacts";
-export type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachment, RelayAssistProposal, RelayAssistSession, RelayAssistSkillOutput, RelayAssistSourceRef, RelayAssistantProfile, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffFileRow, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationExecution, RelayConversationExecutionStage, RelayChatMode, RelayConversationFileDiff, RelayConversationMode, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallFileChange, RelayRunToolCallPreview, RelayRunToolCallPreviewFile, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelaySkillInput, RelayTaskSkillProposal, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult } from "./dtos/assist";
+export type { RelayArtifact, RelayArtifactDirectUses, RelayArtifactImpactCandidate, RelayArtifactImpactCheck, RelayArtifactLineage, RelayArtifactTextLock, RelayArtifactVersionResult, RelayArtifactVersionSummary, RelayClosePartialFileWriteInput, RelayCombinationCheck, RelayGatewayReconcileResult, RelayFileWriteChangeSet, RelayFileWriteDispositionPreview, RelayFileWriteFrozenDiff, RelayFileWriteResidualCandidate, RelayImpactCandidateGroup, RelayImpactCandidateGroupItem, RelayLineageParentKind, RelayLineageRelation, RelayTaskArtifacts } from "./dtos/artifacts";
+export type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachment, RelayAssistProposal, RelayAssistSession, RelayAssistSkillOutput, RelayAssistSourceRef, RelayAssistantProfile, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffFileRow, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationExecution, RelayConversationExecutionStage, RelayChatMode, RelayConversationFileDiff, RelayConversationMode, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallFileChange, RelayRunToolCallPreview, RelayRunToolCallPreviewFile, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelaySkillInput, RelayTaskSkillProposal, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult, RelayWorkspaceDefaultWriteTierResult } from "./dtos/assist";
 export type { RelayStateMaintenanceApplyResult, RelayStateMaintenanceChange, RelayStateMaintenanceDecisionRequired, RelayStateMaintenanceRequest, RelayUndoPlan, RelayUndoPlanItem } from "./dtos/stateMaintenance";
 export type { RelayDailyContinuation, RelayDailyContinuationBaseline, RelayDailyContinuationCurrent, RelayDailyContinuationDelta, RelayDailyViewConfirmationInput, RelayReturnReview } from "./dtos/projectDailyContinuation";
 export type { RelayFileReadAction, RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayGitDiffResult, RelayGitReadAction, RelayGitStatusResult, RelayManagedGitReadInput, RelayManagedGitReadOutcome, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayAction, RelayMockGatewayConnection, RelayMockManagedResource, RelayWebFetchAction, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "./dtos/gateway";
@@ -731,6 +731,17 @@ export class RelayApiClient {
     return assistApi.clearWorkspaceDefaultDirectory(this.#http, input);
   }
 
+  /**
+   * 工作区默认写档位（0131 / DEV-0115）：没有目录时也能选，选的是「以后新开的目录按哪一档起步」。
+   *
+   * 它与 `setLocalDirectoryWriteTier` 不是同一条命令：这条不针对任何目录，因而不需要
+   * 目录／项目身份，也不会改任何一个已绑定目录的现状。回执按原 command_id 可重放核对。
+   */
+  async setWorkspaceDefaultWriteTier(input: { commandId: string; expectedRevision: DecimalRevision;
+    tier: RelayWriteTier | null }): Promise<RelayWorkspaceDefaultWriteTierResult> {
+    return assistApi.setWorkspaceDefaultWriteTier(this.#http, input);
+  }
+
   /** 明确执行请求：原消息 → 已保存候选。模型调用在服务端事务外，命令本身可安全重放。 */
   async interpretConversationMessage(input: { sessionId: string; sourceMessageId: string; resourceId: string; commandId: string }): Promise<RelayConversationExecution> {
     return assistApi.interpretConversationMessage(this.#http, input);
@@ -958,6 +969,10 @@ export class RelayApiClient {
 
   async closePartialFileWrite(input: RelayClosePartialFileWriteInput): Promise<void> {
     return artifactsApi.closePartialFileWrite(this.#http, input);
+  }
+
+  async reconcileGatewayOperation(input: { readonly operationId: string; readonly commandId: string }): Promise<RelayGatewayReconcileResult> {
+    return artifactsApi.reconcileGatewayOperation(this.#http, input);
   }
 
   /** One authenticated SSE connection. The caller owns reconnects and authoritative GET refreshes. */

@@ -22,8 +22,141 @@
   font-size: var(--relay-font-size-meta);
 }
 
+/*
+ * 2026-10-22 DEV-0103：目标卡从「整块同字号」收成三层——
+ * 标题带的标签/状态/轮次、目标正文、可展开事实。字段、actions 与服务端事实都不变；
+ * 计划卡共享的基座不动，避免一张卡的视觉调整波及另一张卡。
+ */
 .goal-card {
+  gap: var(--relay-space-2);
+  padding: var(--relay-space-3) var(--relay-space-4);
   border-color: var(--relay-color-palette-forest);
+}
+
+.goal-card-title {
+  gap: var(--relay-space-2);
+}
+
+.goal-card-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
+.goal-card-eyebrow > svg {
+  flex: none;
+  width: var(--relay-font-size-meta);
+  height: var(--relay-font-size-meta);
+}
+
+/* 状态徽标只给「目标状态」长色点；计划版本徽标仍是一句说明，不冒充状态。 */
+.goal-card-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-0-5);
+  padding: 1px var(--relay-space-2);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.goal-card-status-badge::before {
+  content: "";
+  flex: none;
+  width: var(--relay-space-1);
+  height: var(--relay-space-1);
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* 轮次是辅助事实：右侧一枚轻胶囊，宽窗下不至于飘在离标题很远的一条空带上。 */
+.goal-card-rounds {
+  flex: none;
+  padding: 1px var(--relay-space-2);
+  border-radius: var(--relay-radius-badge);
+  background: var(--relay-color-bg-subtle);
+  color: var(--relay-color-text-secondary);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+/* 目标是这张卡的主信息：正文档 + 中等字重，不再与辅助行同字号。 */
+.goal-card .goal-plan-objective {
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-medium);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.goal-card-step,
+.goal-card-progress {
+  margin: 0;
+  color: var(--relay-color-text-secondary);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.goal-card-step-label {
+  margin-inline-end: var(--relay-space-1);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+
+/* 成功条件的状态「文字 + 色点」并存：颜色不是唯一线索，扫描时也能先看到状态。 */
+.goal-card-criterion-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-0-5);
+  margin-right: var(--relay-space-2);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  font-weight: var(--relay-font-weight-medium);
+}
+
+.goal-card-criterion-status::before {
+  content: "";
+  flex: none;
+  width: var(--relay-space-1);
+  height: var(--relay-space-1);
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.goal-card .goal-plan-list > li[data-status="MET"] .goal-card-criterion-status {
+  color: var(--relay-color-status-success-text);
+}
+
+.goal-card .goal-plan-list > li[data-status="UNMET"] .goal-card-criterion-status {
+  color: var(--relay-color-status-warning-text);
+}
+
+/* 动作行与事实分开；说明推到右端，宽窗下不再缩在按钮后面留下一条空白。
+   卡片内容超过 42vh 时卡内滚动，控制键必须停在底边——暂停/取消不该被证据挤到滚动区外。 */
+.goal-card .goal-plan-actions {
+  position: sticky;
+  inset-block-end: 0;
+  z-index: 1;
+  margin-top: var(--relay-space-1);
+  padding-top: var(--relay-space-2);
+  padding-bottom: var(--relay-space-1);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+  background: var(--relay-color-bg-surface);
+}
+
+/* 共享基座 `.goal-plan-actions > .helper-text` 会把 margin 清零，这里必须用同层更高特异度。 */
+.goal-card .goal-plan-actions > .goal-card-note {
+  margin-inline-start: auto;
+  text-align: end;
+}
+
+@media (max-width: 48rem) {
+  .goal-card {
+    padding: var(--relay-space-3);
+  }
+
+  .goal-card .goal-plan-actions > .goal-card-note {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+    text-align: start;
+  }
 }
 
 .goal-plan-card-head {

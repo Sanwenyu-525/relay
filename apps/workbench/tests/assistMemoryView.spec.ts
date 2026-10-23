@@ -60,8 +60,8 @@ function stubFetch(harness: Harness) {
     if (path === `${prefix}/model-port/verification`) return response({ current_config_fingerprint: null,
       last: null, matches_current_config: false, worker_startup_validation: "NOT_CONFIGURED" });
     if (path === `${prefix}/default-working-directory`) return response({ resource_id: null,
-      canonical_root: null, display_name: null, write_tier: null, status: "UNSET", reason: null,
-      revision: "0" });
+      canonical_root: null, display_name: null, write_tier: null, default_write_tier: null,
+      status: "UNSET", reason: null, revision: "0" });
     if (path === `${prefix}/assist-sessions`) return response({ items: [session()] });
     if (path === `${prefix}/assist-sessions/${sessionId}`) return response(session());
     if (path === `${prefix}/assist-sessions/${newSessionId}`) return response(session(newSessionId));

@@ -165,15 +165,15 @@ async function measure(page: Page) {
           && options !== null
           && node('[data-testid="assist-source-picker"]')!.contains(options) },
       pickerOverflowX: body === null ? null : (body as HTMLElement).scrollWidth - (body as HTMLElement).clientWidth,
-      // 模式 select 与它的 chip 盒（2026-10-20 用户截图「竖直重心没有在一个高度」）：
-      // select 不允许撑满 chip——Chromium 把 select 内部文字按内容盒贴顶排，撑满即文字贴顶。
-      selectChip: (() => {
+      // 模式芯片与它的当前档文字盒（2026-10-20 用户截图「竖直重心没有在一个高度」；
+      // 2026-10-22 DEV-0116 起这一档是自绘浮层，不再是原生 select）：
+      modeChip: (() => {
         const chipNode = node(".agent-chat-mode-select-field");
-        const selectNode = chipNode?.querySelector(".agent-chat-mode-select") ?? null;
-        if (chipNode === null || selectNode === null) return null;
+        const valueNode = chipNode?.querySelector(".agent-chat-mode-chip-value") ?? null;
+        if (chipNode === null || valueNode === null) return null;
         const chipBox = box(chipNode);
-        const selectBox = box(selectNode);
-        return chipBox === null || selectBox === null ? null : { chip: chipBox, select: selectBox };
+        const valueBox = box(valueNode);
+        return chipBox === null || valueBox === null ? null : { chip: chipBox, value: valueBox };
       })(),
       horizontalOverflow: (document.scrollingElement as HTMLElement).scrollWidth - (document.scrollingElement as HTMLElement).clientWidth
     };
@@ -263,13 +263,15 @@ test.describe("CT-02 资料面板的职责、高度与可达性", () => {
       expect(snapshot.toolOrder.indexOf("agent-chat-options agent-chat-send-options"),
         `${where} · 资料入口应在「普通讨论」右侧`).toBeLessThan(
         snapshot.toolOrder.indexOf("agent-chat-options agent-chat-source-options"));
-      // 3d. 模式 select 不撑满 chip（2026-10-20 用户截图「竖直重心没有在一个高度」）：
-      //     Chromium（含 WebView2）把 select 的内部文字按内容盒贴顶排，height 撑满 chip 时
-      //     文字整体上浮 7-8px（像素实测）。select 必须保持内容高，由 chip 的
-      //     align-items:center 把整枚盒子居中到行中线上。
-      if (snapshot.selectChip === null) throw new Error(`${where} · 缺少模式 select 采样`);
-      expect(snapshot.selectChip.select.height, `${where} · select 撑满了 chip，文字会贴顶`)
-        .toBeLessThan(snapshot.selectChip.chip.height - 4);
+      // 3d. 模式芯片里的当前档文字必须与芯片同中线（2026-10-20 用户截图「竖直重心没有在一个高度」）：
+      //     那一轮的成因是 Chromium 把原生 select 的内部文字按内容盒贴顶排，height 撑满 chip 时
+      //     文字整体上浮 7-8px（像素实测）。2026-10-22 DEV-0116 起这一档改成自绘浮层，
+      //     文字盒由 summary 的 flex 居中，但这条不变量仍然要量：换了载体不等于可以不再验。
+      if (snapshot.modeChip === null) throw new Error(`${where} · 缺少模式芯片采样`);
+      const chipCenter = (snapshot.modeChip.chip.top + snapshot.modeChip.chip.bottom) / 2;
+      const valueCenter = (snapshot.modeChip.value.top + snapshot.modeChip.value.bottom) / 2;
+      expect(Math.abs(chipCenter - valueCenter), `${where} · 模式芯片文字竖直重心偏了`)
+        .toBeLessThanOrEqual(1);
       // 检索行本来就在弹层内，这里只核对它没被挤出滚动区（可命中即说明留在视野里）。
       // 4. 输入器不被面板压住：草稿与发送键仍然可命中，页面不横向溢出。
       insideViewport(snapshot, where, "发送键", require(where, "发送键", snapshot.sendBox));

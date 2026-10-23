@@ -1,5 +1,9 @@
 # 文档入口与维护规范
 
+项目级长期 Agent 团队（2026-10-23，已确认、待实现）：[总纲 §0.18](../Personal_Workflow_OS_Master_Spec.md#018-项目级长期-agent-团队与跨会话协作)拥有产品规则，[路线 §16](requirements/post-v1-roadmap.md#16-项目级长期-agent-团队与跨会话协作)拥有范围与工程待核定项，[领域模型 §23](architecture/domain-model.md#23-长期-agent-成员与跨会话协作的应用边界)拥有责任，[ADR-034](decisions/ADR-034-persistent-project-agent-team.md)记录取舍，[工作台 §47](frontend/workbench-design.md#47-长期-agent-团队私聊群聊与工作概览)拥有交互，[测试计划 §44](testing/verification-plan.md#44-长期-agent-团队与跨会话协作的目标验收)为未运行规格。成员身份、会话与运行分离，项目不额外设置额度上限；本轮仅文档，不改变阶段或验收成绩。
+
+差异化体验规划（2026-10-22）：[产品总纲 §0.17](../Personal_Workflow_OS_Master_Spec.md#017-长期项目协作的差异化体验)记录六项方向的产品规则，[后续路线 §14](requirements/post-v1-roadmap.md#14-差异化体验的范围与推荐顺序)记录复用关系、推荐顺序与实施前置，[工作台 §45](frontend/workbench-design.md#45-长期项目协作的差异化体验)拥有推荐交互，[测试计划 §42](testing/verification-plan.md#42-长期项目协作差异化体验的目标验收)拥有未运行场景。仅纳入规划，不改变已有实现成绩、当前开发顺序或执行授权。
+
 Agent 执行模式导航：[产品总纲 §0.16](../Personal_Workflow_OS_Master_Spec.md#016-七种-agent-执行模式与产品能力边界)说明 ReAct、Plan and Execute、Reflexion、Workflow、Multi Agent、Agent and Tool、Code as Action 的产品用途与能力边界；[运行架构 §10](architecture/runtime-context.md#10-七种-agent-模式的实现映射)维护源码入口与责任，[§10.1](architecture/runtime-context.md#101-现状分级与证据缺口2026-10-21-差距核对)维护 A/B/C/D 现状分级、缺的证据类与待产品决定项。七种模式可组合，不代表七套引擎或七个 UI 入口；实际成绩只归统一功能验收表。
 
 长短期记忆导航（2026-10-20）：[工程边界](development/memory-module.md)、[ADR-028](decisions/ADR-028-memory-layers.md) 记录长期人工确认与短期窗口的分层，[ADR-030](decisions/ADR-030-zero-click-auto-memory.md) 记录「零点击自动捕获 + 可撤销」的方向（取代 ADR-029 的确认环节，未实施）；[运行架构 §8](architecture/runtime-context.md#8-会话压缩与消息文件恢复)、[HTTP §10.99](api/http-command-contract.md#1099-长短期记忆接口2026-10-19)、[数据库 §105](database/physical-design-postgresql.md#105-01180119-长短期记忆2026-10-19) 定义恢复与协议；[工作台 §40](frontend/workbench-design.md#40-长短期记忆2026-10-20产品行为已确认前端已接实机未验) 拥有产品交互，[测试计划 §40](testing/verification-plan.md#40-完整长短期记忆后端2026-10-20) 拥有验证规格。实际阶段与成绩仍归 CODEX_NEXT_STEP 和统一验收表，不由导航声明完成。
@@ -60,6 +64,8 @@ Agent 执行模式导航：[产品总纲 §0.16](../Personal_Workflow_OS_Master_
 
 本文定义每类内容的主文档、阅读顺序和变更检查，不复制技术选型、业务状态枚举或项目进度。协作约束见 [AGENTS](../AGENTS.md)，当前阶段、缺口与下一步只在 [CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md)维护。新接手者从这三处进入，不从历史提示词判断当前授权或实现状态。
 
+外部 Agent 共享任务协作（2026-10-23，产品规则已确认、待实现）：[总纲专题](../Personal_Workflow_OS_Master_Spec.md#项目事项与外部-agent-共享任务协作)拥有产品规则，[路线 §15](requirements/post-v1-roadmap.md#15-项目事项与外部-agent-共享任务协作)拥有范围与工程待核定项，[领域模型 §22](architecture/domain-model.md#22-外部-agent-共享任务的应用边界)拥有责任，[ADR-033](decisions/ADR-033-external-agent-shared-tasks.md)记录取舍，[工作台 §46](frontend/workbench-design.md#46-项目事项与外部-agent-共享任务)拥有交互，[测试计划 §43](testing/verification-plan.md#43-外部-agent-共享任务协作的目标验收)为未运行规格。本轮仅文档，不承诺标准 A2A 协议、直接调度、禅道迁移或现有功能已通过。
+
 ## 1. 唯一事实源
 
 2026-09-28 产品决策导航：[锁定与手动影响检查](frontend/workbench-design.md#101-已确认的锁定与影响检查规则)、[人工介入提醒](frontend/workbench-design.md#115-已确认的人工介入提醒规则)记录用户已确认行为及工程待定项；[验收规格](testing/verification-plan.md#13-锁定影响检查与提醒的已确认规则验收)尚未运行，[执行映射](../prompts/README.md#产品补充的执行映射)同步后续分派输入。已确认不等于已实现。
@@ -96,6 +102,7 @@ Agent 执行模式导航：[产品总纲 §0.16](../Personal_Workflow_OS_Master_
 | 前后端独立验收证据 | [2026-09-21 验收](testing/frontend-backend-acceptance-2026-09-21.md) | 当前已实现范围的复跑、补充反例与问题；不替代阶段主文档 |
 | 独立修复与调整任务 | [验收修复提示词](../prompts/remediation/README.md) | 与原开发提示词分开；以各 R 记录的执行与证据边界为准 |
 | 部署、身份与运维 | [本机部署](deployment/本机部署.md) | 当前为设计；实际启动命令在有工程后写根 README |
+| 本机禅道登记与接入 | [禅道接入](deployment/禅道接入.md)、[导入映射清单](deployment/zentao-import-2026-10-22.json) | 第三方本机工具，不属于产品部署拓扑；清单只描述 2026-10-22 那次单向导入，不代表双侧同步 |
 | 维护/备份边界与协议故障根因 | [M07 开发记录](development/m07-backup-recovery.md) | 保存 Owner、重要取舍及可复现故障；实际成绩和模块状态仍归上述唯一入口 |
 | 研究证据 | [P00 研究记录](research/p00-source-study.md) | 固定来源、运行结果、限制；不替代生产能力证明 |
 | 开发/文档变更的原因 | [设计交付审计](development/design-audit.md) | 按时间追加记录，不承担最新状态表 |

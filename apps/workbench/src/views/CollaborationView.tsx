@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { Link, useSearchParams } from "react-router-dom";
 import { ChevronRight, LayoutGrid, MessageSquare, PanelRightClose, PanelRightOpen } from "lucide-react";
 import AppDialog from "../components/AppDialog";
-import AssistView, { type AssistNavigationState, type FirstMessageOwner, type FirstMessageProcess } from "./AssistView";
+import AssistView, { type AssistNavigationState, type AssistTarget, type FirstMessageOwner, type FirstMessageProcess } from "./AssistView";
 import FactBar from "../components/FactBar";
 import ModelConnectionStrip from "../components/ModelConnectionStrip";
 import PageHeader from "../components/PageHeader";
@@ -16,7 +16,7 @@ import ConversationDiffSummary from "../components/ConversationDiffSummary";
 import TaskInspectorPanel from "../components/TaskInspectorPanel";
 import CollaborationSplitter from "../components/CollaborationSplitter";
 import { createCommandId, RelayApiError, type RelayApiClient, type RelayControlRequest, type RelayReview,
-  type RelayArtifact, type RelayArtifactVersionSummary, type RelayConversationMode, type RelayRun, type RelayTaskDetail,
+  type RelayArtifact, type RelayArtifactVersionSummary, type RelayAssistSession, type RelayConversationMode, type RelayRun, type RelayTaskDetail,
   type RelayWorkingDirectory, type RelayWorkingDirectorySource } from "../api/relayClient";
 import { rememberOpened } from "../components/FolderScope";
 import FolderScopeBar from "../components/FolderScopeBar";
@@ -147,6 +147,18 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const directorySeed = search.get("dir");
   const [sessionId, setSessionId] = useState<string | null | undefined>(() =>
     search.has("new") ? null : sessionSeed ?? undefined);
+  /**
+   * 建会话成功后 AssistView 会按新 sessionId 重挂载；把创建时已读回的投影交给新实例做首帧，
+   * 避免「旧实例卸载 → 空一帧 → 列表读回再出现面板」的闪烁（DEV-0110）。
+   * 只在 ID 与当前会话一致时下传；列表读回后仍以服务端事实为准。
+   */
+  const [createdSessionSeed, setCreatedSessionSeed] = useState<RelayAssistSession | null>(null);
+  const adoptCreatedSession = useCallback((created: string, session?: RelayAssistSession) => {
+    setCreatedSessionSeed(session ?? null);
+    setSessionId(created);
+  }, []);
+  const createdSeed = createdSessionSeed !== null && createdSessionSeed.id === sessionId
+    ? createdSessionSeed : undefined;
   const [sessionEntry, setSessionEntry] = useState<{ id: string; projectId: string | null; error: string | null } | null>(null);
   const [sessionEntryReload, setSessionEntryReload] = useState(0);
   // URL 只定位原会话；项目归属必须由服务端核对，不能把目录名或目标入口当成归属。
@@ -632,20 +644,44 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
   const conversationProjectId = entryProjectId ?? boundDirectory?.projectId ?? folderProjectId ?? search.get("project");
   const projectScopeActive = conversationProjectId !== null && !bindingUnconfirmed;
   /**
-   * 左栏目录「＋」的 `?dir=` 在途：openFolder 尚无结果时不挂会话面板。
-   * 这时若先挂工作区级面板，目录一回来 projectScopeActive 翻真，AssistView 按 key
-   * 整块卸载重挂——聊天区在几百毫秒内画两遍，就是用户看到的「跳一下」
-   * （2026-10-20 截图指认；栏头「新对话」不带目录种子，因此只有这个入口能看见）。
-   * 在途态与 AssistView 的目标核对态同构（同为 page-state）；失败时 folderError 落到细条，
-   * 面板退回工作区级。
+   * 新对话首帧的目标种子（2026-10-22，DEV-0104）。
+   *
+   * 目录「＋」与任务聊天在空白新对话上已经有宿主刚读到的目标事实（目录回执里的项目、
+   * 任务列表里的任务）。把它交给 AssistView 先画首条输入器，再让视图照常向服务端核对
+   * 完整目标与会话——中间不再整页换成「正在核对对话目标与会话」。
+   * 只给 `sessionId === null` 的空白起步用：恢复既有会话或默认续写（`undefined`）时
+   * 仍以服务端读回为准，不能用种子抢在会话列表前面渲染首条输入器。
+   */
+  const newConversation = sessionId === null;
+  const folderSeedTarget: AssistTarget | undefined = newConversation && folder !== null &&
+    folder.status === "READY" && folder.association !== null
+    ? { kind: "PROJECT", id: folder.association.projectId, title: folder.association.projectTitle,
+      revision: "0", projectId: folder.association.projectId, executor: null,
+      archivedAt: folder.association.projectArchived ? "archived" : null }
+    : undefined;
+  const taskSeedTarget: AssistTarget | undefined = newConversation && task !== null
+    ? { kind: "TASK", id: task.id, title: task.title, revision: task.revision,
+      projectId: task.projectId, executor: task.executor,
+      archivedAt: task.projectId === null ? null : projectArchivedAt }
+    : undefined;
+  /**
+   * 左栏目录「＋」的 `?dir=` 在途（2026-10-22，DEV-0104 改）。
+   *
+   * 2026-10-20 的做法是「目录在途不挂会话面板」，用一张整页在途态挡住切换；用户复测
+   * 仍点名「正在核对目标与会话」闪一下。根因是「旧会话面板 → 整页在途 → 首条输入器」
+   * 至少两次整块替换，而目录回执与项目事实几乎总是几十毫秒到位，这些中间页只是噪声。
+   * 现在目录在途也直接挂工作区级首条输入器：发送键按 `creationPending` 禁用，目录细条
+   * 自己说「正在打开目录…」；目录回执一到就带着项目种子换成项目作用域，但两拍的正文
+   * 都是同一张首条输入器，不再出现整页核对态。失败时 folderError 落到细条，面板留在
+   * 工作区级，语义与之前一致。
    */
   const directoryPending = directorySeed !== null && folder === null && folderError === null;
   /**
-   * 目录打开的等待上限反馈：`openWorkingDirectory` 是无超时的写命令，请求不返回时在途屏
-   * 就是最终屏——没有细条、没有输入区、没有任何出口（2026-10-20 用户截图第三轮：停在
-   * 「正在打开目录…」）。慢阈值后给一个取消出口：只摘掉 URL 里的 `?dir=` 种子，回到同一条
-   * 新对话，不重发命令、不换 command_id（结果是否落地仍由服务端那条原命令决定），
-   * 目录随后可由细条重新打开。快路径（本机 API 通常一瞬）不显示这个出口，不加视觉噪声。
+   * 目录打开的等待上限反馈：`openWorkingDirectory` 是无超时的写命令，请求不返回时
+   * 只有细条一行「正在打开目录…」和一张不能发送的输入器。慢阈值后在输入卡上方给一个
+   * 取消出口：只摘掉 URL 里的 `?dir=` 种子，回到同一条新对话，不重发命令、不换 command_id
+   * （结果是否落地仍由服务端那条原命令决定），目录随后可由细条重新打开。
+   * 快路径（本机 API 通常一瞬）不显示这个出口，不加视觉噪声。
    */
   const [directorySlow, setDirectorySlow] = useState(false);
   useEffect(() => {
@@ -693,9 +729,23 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
    * 否则用户会以为讨论已随目录一起归入项目。
    * 目录写命令、草稿守卫与归属命令仍只有本页一个 Owner，细条只做呈现与转发。
    */
-  // 「未归入项目」与左栏分组副行同一说法（RecentWorkRail 那条规则：同一列里两种说法会读成
-  // 两个状态）；此前这里是「未归属」，紧跟一句「执行前需归入项目」时看不出讲的是同一件事。
-  const folderAssociationLabel = folder === null || folder.association === null ? (boundDirectory?.projectId || task?.projectId ? `已归入项目：${projectTitle ?? "当前项目"}` : "未归入项目")
+  /**
+   * 「已归入项目」说的是**这段讨论**归到哪个项目，不是这个目录登记在哪个项目下（2026-10-22，DEV-0117）。
+   *
+   * 会话身份一旦确定，这一句就跟着服务端读回的归属走：目录打开成功 ≠ 归属成功，归属在途或被拒时
+   * 细条不能替这条会话宣称已归入项目，否则同一行里「已归入项目：MyProject」与紧随其后的
+   * 「这段讨论还没有归入项目」并存——用户在实机上看到的就是这一对矛盾。
+   * 还没有会话的新对话照旧按本页选定目录的关联项目说：那条讨论的归属与绑定由首条发送决定。
+   * 目录与会话指向同一个项目时才借用目录回执里的项目标题，避免为说一个名字多等一次项目读取。
+   * 「未归入项目」与左栏分组副行同一说法（同一列里两种说法会读成两个状态）。
+   */
+  const sessionScopeKnown = boundDirectory !== null;
+  const sessionProjectId = boundDirectory?.projectId ?? task?.projectId ?? null;
+  const folderProject = folder?.association ?? null;
+  const sessionProjectTitle = projectTitle ?? (boundDirectory !== null && folderProject !== null
+    && folderProject.projectId === boundDirectory.projectId ? folderProject.projectTitle : null);
+  const folderAssociationLabel = (sessionScopeKnown || folder === null || folder.association === null)
+    ? (sessionProjectId ? `已归入项目：${sessionProjectTitle ?? "当前项目"}` : "未归入项目")
     : `已归入项目：${folder.association.projectTitle}${folder.createdProject ? "（本次新建的最小项目）" : ""}`;
   // 告警优先报更具体的那一条：目录没就绪时不再叠一句「先选目录」，两句话讲的是同一件事。
   const folderScopeWarning = folder !== null && folder.status === "NOT_READY"
@@ -705,9 +755,17 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
       : null;
   const composerHeader = <>
     <FolderScopeBar directory={folder} boundDirectoryPath={boundDirectory?.path ?? null}
-      recents={recents} busy={folderBusy} error={folderError}
+      recents={recents} busy={folderBusy || directoryPending} error={folderError}
       associationLabel={folderAssociationLabel} warning={folderScopeWarning}
       onOpen={requestFolderTransition} onNewConversation={startFolderConversation} />
+    {/* 目录种子长时间没有回执：输入器已经在屏上，因此出口贴在输入卡上方而不是整页替换。 */}
+    {directoryPending && directorySlow && <section className="collab-binding collab-directory-slow"
+      data-testid="collab-directory-slow" data-status="PENDING" role="status">
+      <p className="helper-text">目录打开比预期久。可以继续等待；也可以取消，回到这条新对话后再从目录细条重新打开。</p>
+      <div className="form-actions"><button className="secondary-button" type="button"
+        data-testid="collab-directory-slow-cancel"
+        onClick={() => { const next = new URLSearchParams(search); next.delete("dir"); setSearch(next); }}>取消并回到新对话</button></div>
+    </section>}
     {binding !== null && <section className="collab-binding" data-testid="collab-binding"
       data-status={binding.status} data-session={binding.sessionId}
       role={binding.status === "FAILED" || binding.status === "UNKNOWN" ? "alert" : "status"}>
@@ -1231,20 +1289,10 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                   上方的常驻细条（composerHeader），「接续已有任务」迁到左栏就地展开区。 */}
               {/* 归属未确认时继续用工作区级会话面板：原历史与消息身份留在原地，
                   讨论输入不受限，依赖归属的执行入口由细条告警与空 executionScope 关闭。 */}
-              {/* `?dir=` 在途与 entryPending 同读法：目录还没打开就不挂面板，
-                  避免「工作区级 → 项目作用域」两段挂载把聊天区闪一下。
-                  在途态用 AssistView「正在核对对话目标与会话」同款 page-state 容器：
-                  目录一回来面板挂载、目标事实读回前也是这个容器，只翻一行标题，
-                  不再出现第二次整块布局替换（2026-10-20 用户截图第二轮指认）。 */}
-              {directoryPending ? <section className="page-state" aria-live="polite" data-testid="collab-directory-pending">
-                <p className="eyebrow">Assist</p><h1>正在打开目录…</h1>
-                {directorySlow && <>
-                  <p className="helper-text">目录打开比预期久。可以继续等待；也可以取消，回到这条新对话后再从目录细条重新打开。</p>
-                  <button type="button" className="secondary-button" data-testid="collab-directory-pending-cancel"
-                    onClick={() => { const next = new URLSearchParams(search); next.delete("dir"); setSearch(next); }}>取消并回到新对话</button>
-                </>}
-              </section>
-              : entryPending ? <p className="helper-text" role="status">正在核对原会话归属…</p>
+              {/* 目录种子在途也直接挂首条输入器（DEV-0104）：整页在途态会被读成闪一下。
+                  发送键由 `creationPending` 禁用，目录回执一到就带项目种子换作用域；
+                  两拍渲染的都是同一张首条输入器，不再经历「旧会话 → 整页核对 → 输入器」。 */}
+              {entryPending ? <p className="helper-text" role="status">正在核对原会话归属…</p>
                 : entryError ? <div role="alert" className="page-state page-state--error" data-testid="collab-session-entry-error">
                   <p>会话暂不可读取：{entryError}</p><button type="button" className="secondary-button" onClick={() => {
                     setSessionEntry(null); setSessionEntryReload((value) => value + 1);
@@ -1253,7 +1301,10 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                 ? <AssistView key={`unassigned:${newConversationKey ?? ""}:${sessionId === undefined ? "auto" : sessionId}`}
                   sessionContextEpoch={sessionContextEpoch}
                   workspaceLevel deferSessionCreation
-                  preferredSessionId={sessionId} standalone
+                  preferredSessionId={sessionId}
+                  initialSession={createdSeed}
+                  standalone
+                  creationPending={directoryPending}
                   composerHeader={composerHeader}
                   /* 顶栏的目录一项读这一份只读事实：还没建会话时它回答「本次已选目录」，
                      不参与准入（准入仍只看下面那条 executionScope 的 READY 条件）。 */
@@ -1261,7 +1312,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                   onNavigationStateChange={reportNavigation}
                   onRequestNewSession={requestTransition}
                   onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
-                  onSessionCreated={(created) => setSessionId(created)}
+                  onSessionCreated={adoptCreatedSession}
                   onActiveSessionChange={reportActiveSession}
                   onSessionScopeResolved={adoptSessionScope}
                   firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage}
@@ -1272,14 +1323,17 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                 : <AssistView key={`folder:${conversationProjectId}:${folderReloadKey}:${newConversationKey ?? ""}:${sessionId === undefined ? "auto" : sessionId}`}
                   sessionContextEpoch={sessionContextEpoch}
                   targetKind="PROJECT" targetId={conversationProjectId ?? undefined}
-                  preferredSessionId={sessionId} standalone deferSessionCreation
+                  initialTarget={folderSeedTarget}
+                  preferredSessionId={sessionId}
+                  initialSession={createdSeed}
+                  standalone deferSessionCreation
                   executionScope={folderProjectId === conversationProjectId ? folder : null}
                   pendingDirectory={folder}
                   composerHeader={composerHeader}
                   onNavigationStateChange={reportNavigation}
                   onRequestNewSession={requestTransition}
                   onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
-                  onSessionCreated={(created) => setSessionId(created)}
+                  onSessionCreated={adoptCreatedSession}
                   onActiveSessionChange={reportActiveSession}
                   onExecutionPrepared={(taskId) => void openExecutionTask(taskId)}
                   conversationTarget={conversationTarget} onConversationTargetChange={setConversationTarget}
@@ -1319,7 +1373,10 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                 <AssistView key={`${task.id}:${sessionId === undefined ? "auto" : sessionId}`}
                   sessionContextEpoch={sessionContextEpoch}
                   targetKind="TASK" targetId={task.id}
-                  preferredSessionId={sessionId} standalone deferSessionCreation
+                  initialTarget={taskSeedTarget}
+                  preferredSessionId={sessionId}
+                  initialSession={createdSeed}
+                  standalone deferSessionCreation
                   firstMessageOwner={firstMessageOwner} firstMessageProcess={firstMessage}
                   composerHeader={composerHeader}
                   executionScope={folder?.association?.projectId === task.projectId ? folder : null}
@@ -1333,7 +1390,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                   onNavigationStateChange={reportNavigation}
                   onRequestNewSession={requestTransition}
                   onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
-                  onSessionCreated={(created) => setSessionId(created)} />
+                  onSessionCreated={adoptCreatedSession} />
               </div>
             </section>
 

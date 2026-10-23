@@ -128,6 +128,9 @@ export interface GatewayOperationDto {
   readonly id: string; readonly origin: GatewayOriginKey;
   readonly project_id: string; readonly run_id: string | null; readonly step_id: string | null;
   readonly import_job_id: string | null; readonly status: string; readonly action_type: string;
+  /** DEV-0054：能力族。界面据此区分「可手动核对（只读族）」与「须走停机恢复/人工处置」，
+   * 不按 action_type 猜——同一能力族有多个动作，猜错会把写能力放行成手动核对。 */
+  readonly capability_key: string;
   readonly normalized_target: string; readonly params_hash: string;
   readonly connection_id: string; readonly connection_version: string;
   readonly policy_id: string; readonly policy_version: string;
@@ -137,7 +140,8 @@ export interface GatewayOperationDto {
 async function operationDto(repositories: Repositories, row: LogicalOperationRow): Promise<GatewayOperationDto> {
   return { id: row.id, origin: row.origin, project_id: row.project_id,
     run_id: row.run_id, step_id: row.step_id, import_job_id: row.import_job_id,
-    status: row.status, action_type: row.action_type, normalized_target: row.normalized_target,
+    status: row.status, action_type: row.action_type, capability_key: row.capability_key,
+    normalized_target: row.normalized_target,
     params_hash: row.params_hash.toString('hex'), connection_id: row.connection_id,
     connection_version: toDecimalString(row.connection_version), policy_id: row.policy_id,
     policy_version: toDecimalString(row.policy_version), created_at: row.created_at.toISOString(),

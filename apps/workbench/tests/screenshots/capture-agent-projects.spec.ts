@@ -181,12 +181,16 @@ test.describe("ui screenshots agent + projects", () => {
     await safeClick(page, page.getByTestId("assist-refresh").or(page.getByRole("button", { name: /刷新会话/ })));
     await shot(page, "agent-refresh-session");
 
-    // 2026-10-18 三档合并为一个下拉框：截图脚本改用 selectOption。
-    await page.getByTestId("conversation-mode-select").selectOption("AGENT");
+    // 三档合并为一个下拉框（2026-10-18），2026-10-22 DEV-0116 换成自绘浮层后改用「点芯片 → 点那一行」。
+    const pickMode = async (mode: string): Promise<void> => {
+      await page.getByTestId("conversation-mode-select").click();
+      await page.getByTestId(`conversation-mode-option-${mode}`).click();
+    };
+    await pickMode("AGENT");
     await shot(page, "agent-mode-agent");
-    await page.getByTestId("conversation-mode-select").selectOption("ASSISTANT");
+    await pickMode("ASSISTANT");
     await shot(page, "agent-mode-assistant");
-    await page.getByTestId("conversation-mode-select").selectOption("AGENT");
+    await pickMode("AGENT");
 
     const details = page.locator("details").filter({ hasText: /资料|普通讨论|讨论/ });
     const sourceDetails = details.filter({ hasText: /资料/ }).first();

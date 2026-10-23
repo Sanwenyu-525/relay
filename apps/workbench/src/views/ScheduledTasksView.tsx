@@ -2,14 +2,26 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Info } from "lucide-react";
 import PageHeader from "../components/PageHeader";
-import { createCommandId, type RelayScheduledTask, type RelayScheduledTaskStatus } from "../api/relayClient";
-import { describeLiveError } from "../lib/liveErrors";
+import { createCommandId, RelayApiError, type RelayScheduledTask, type RelayScheduledTaskStatus,
+  type RelayScheduledTaskStatusInput } from "../api/relayClient";
+import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
+import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
 import { liveClient, useRelayConnection } from "../lib/relayConnection";
 import "./ScheduledTasksView.css";
 
 const statusLabels: Record<RelayScheduledTaskStatus, string> = {
   ENABLED: "启用中", PAUSED: "已暂停", DISABLED: "已停用", EXPIRED: "已到期",
 };
+
+/** 结果未知时冻结的状态变更：命令 ID、载荷与发起时的 API/Workspace 必须一起保留。 */
+interface PendingStatusChange {
+  readonly input: RelayScheduledTaskStatusInput;
+  readonly scope: string;
+}
+
+function clientScope(client: NonNullable<ReturnType<typeof liveClient>>): string {
+  return `${client.baseUrl}\n${client.workspaceId}`;
+}
 
 export function describeRepeat(task: RelayScheduledTask): string {
   if (task.repeat.kind === "DAILY") return task.repeat.intervalDays === 1 ? "每天" : `每 ${task.repeat.intervalDays} 天`;
@@ -32,8 +44,27 @@ export default function ScheduledTasksView() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingStatusChange | null>(null);
+  const [pendingNote, setPendingNote] = useState<string | null>(null);
+  const [mayRetry, setMayRetry] = useState(false);
+  const pendingRef = useRef<PendingStatusChange | null>(null);
+  const holdPending = (next: PendingStatusChange | null) => {
+    pendingRef.current = next; setPending(next); setPendingNote(null);
+  };
   const version = useRef(0);
   const disposed = useRef(false);
+  const frozen = busyId !== null || pending !== null;
+
+  const guard = useRef<DraftGuard>({
+    // 本页没有可丢弃的草稿：未决命令只能靠核对回执收口，不能靠离页丢掉。
+    hasUnsavedChanges: () => pendingRef.current !== null,
+    discard: () => {},
+    pendingCommandId: () => pendingRef.current?.input.commandId ?? null
+  });
+  useEffect(() => {
+    setDraftGuard(guard.current);
+    return () => clearDraftGuard(guard.current);
+  }, []);
 
   const load = useCallback(async () => {
     const client = liveClient();
@@ -58,24 +89,82 @@ export default function ScheduledTasksView() {
     return () => { disposed.current = true; version.current++; };
   }, [load, connection.epoch, connection.mode]);
 
-  async function changeStatus(task: RelayScheduledTask, status: "ENABLED" | "PAUSED" | "DISABLED") {
-    const client = liveClient();
-    if (!client || busyId !== null) return;
-    const reason = status === "ENABLED" ? "用户在定时任务列表恢复调度"
-      : status === "PAUSED" ? "用户在定时任务列表暂停调度" : "用户在定时任务列表停用调度";
-    setBusyId(task.scheduledTaskId); setNotice(null);
+  const successNotice = (status: RelayScheduledTaskStatusInput["status"]) =>
+    status === "ENABLED" ? "已恢复调度。"
+      : status === "PAUSED" ? "已暂停：不会再产生新的触发。" : "已停用：不会再产生新的触发。";
+
+  /** 发送一份冻结的状态变更：结果未知就保留原命令与载荷，明确业务拒绝才解锁。 */
+  async function sendChange(client: NonNullable<ReturnType<typeof liveClient>>, input: RelayScheduledTaskStatusInput) {
+    setBusyId(input.scheduledTaskId); setNotice(null); setError(null);
     try {
-      await client.setScheduledTaskStatus({
-        commandId: createCommandId(), scheduledTaskId: task.scheduledTaskId,
-        expectedRevision: task.revision, status, reason,
-      });
+      await client.setScheduledTaskStatus(input);
       await load();
-      setNotice(status === "ENABLED" ? "已恢复调度。" : status === "PAUSED" ? "已暂停：不会再产生新的触发。" : "已停用：不会再产生新的触发。");
+      holdPending(null); setMayRetry(false);
+      setNotice(successNotice(input.status));
     } catch (caught) {
-      setError(`状态修改失败：${describeLiveError(caught).message}`);
+      if (disposed.current) return;
+      const described = describeLiveError(caught);
+      if (needsReceiptCheck(caught)) {
+        holdPending({ input, scope: clientScope(client) }); setMayRetry(false);
+        setError(`状态修改结果未确认：${described.message}`);
+        return;
+      }
+      holdPending(null); setMayRetry(false);
+      setError(`状态修改失败：${described.message}`);
     } finally {
       if (!disposed.current) setBusyId(null);
     }
+  }
+
+  async function changeStatus(task: RelayScheduledTask, status: "ENABLED" | "PAUSED" | "DISABLED") {
+    const client = liveClient();
+    if (!client || frozen || pendingRef.current !== null) return;
+    const reason = status === "ENABLED" ? "用户在定时任务列表恢复调度"
+      : status === "PAUSED" ? "用户在定时任务列表暂停调度" : "用户在定时任务列表停用调度";
+    await sendChange(client, {
+      commandId: createCommandId(), scheduledTaskId: task.scheduledTaskId,
+      expectedRevision: task.revision, status, reason,
+    });
+  }
+
+  async function checkReceipt() {
+    const held = pendingRef.current;
+    const client = liveClient();
+    if (client === null || held === null || busyId !== null) return;
+    if (held.scope !== clientScope(client)) {
+      setPendingNote("原命令属于之前的 API 或 Workspace：当前连接不同，请切回原连接后再查询回执，不要在新连接下重新提交。");
+      return;
+    }
+    setBusyId(held.input.scheduledTaskId);
+    try {
+      const receipt = await client.getCommandReceipt(held.input.commandId);
+      if (receipt.commandId !== held.input.commandId || receipt.commandType !== "SetScheduledTaskStatus"
+        || receipt.result.scheduled_task_id !== held.input.scheduledTaskId) {
+        throw new Error("原命令回执的 ID、类型或定时任务不匹配，仍需核对。");
+      }
+      await load();
+      holdPending(null); setMayRetry(false);
+      setNotice(successNotice(held.input.status));
+    } catch (caught) {
+      if (disposed.current) return;
+      if (caught instanceof RelayApiError && caught.problem.code === "COMMAND_NOT_FOUND") {
+        setMayRetry(true);
+        setPendingNote("原命令暂未查到回执；未确认前不要重复提交，可确认原内容后按同一 ID 重试。");
+      } else setPendingNote(`原命令仍未核对：${describeLiveError(caught).message}`);
+    } finally {
+      if (!disposed.current) setBusyId(null);
+    }
+  }
+
+  async function retryOriginal() {
+    const held = pendingRef.current;
+    const client = liveClient();
+    if (client === null || held === null || busyId !== null) return;
+    if (held.scope !== clientScope(client)) {
+      setPendingNote("原命令属于之前的 API 或 Workspace：当前连接不同，不能在这里重试；请切回原连接。");
+      return;
+    }
+    await sendChange(client, held.input);
   }
 
   return <div className="page-layout scheduled-tasks-page">
@@ -91,6 +180,20 @@ export default function ScheduledTasksView() {
       {loading && <p role="status">正在读取定时任务…</p>}
       {error && <p className="action-error" role="alert">{error}</p>}
       {notice && <p className="receipt-message" role="status">{notice}</p>}
+      {pending && <div className="warning-callout" role="alert" data-testid="scheduled-status-pending">
+        <Info aria-hidden="true" />
+        <div>
+          <p>状态修改结果未确认，本次提交是否生效尚未确定。原 command_id：<code>{pending.input.commandId}</code>。
+            先查询回执；在确认之前不要重复提交，其它操作也已禁用。</p>
+          {pendingNote && <p>{pendingNote}</p>}
+          <div className="form-actions">
+            <button className="secondary-button" type="button" disabled={busyId !== null}
+              onClick={() => void checkReceipt()}>核对原命令回执</button>
+            {mayRetry && <button className="secondary-button" type="button" disabled={busyId !== null}
+              onClick={() => void retryOriginal()}>按原 ID 重试同一变更</button>}
+          </div>
+        </div>
+      </div>}
       {!loading && !error && items.length === 0 && <section className="surface-panel" data-testid="scheduled-tasks-empty">
         <h2>还没有定时任务</h2>
         <p>新建一条：选定项目、写下这次要完成什么、设置重复规则与执行次数上限。</p>
@@ -108,11 +211,11 @@ export default function ScheduledTasksView() {
             <td>{task.runsStarted} / {task.maxRuns}</td>
             <td><span className={`status-chip status-chip--${task.status.toLowerCase()}`}>{statusLabels[task.status]}</span></td>
             <td className="scheduled-task-actions">
-              {task.status === "ENABLED" && <button className="text-button" type="button" disabled={busyId !== null}
+              {task.status === "ENABLED" && <button className="text-button" type="button" disabled={frozen}
                 onClick={() => void changeStatus(task, "PAUSED")}>暂停</button>}
-              {task.status === "PAUSED" && <button className="text-button" type="button" disabled={busyId !== null}
+              {task.status === "PAUSED" && <button className="text-button" type="button" disabled={frozen}
                 onClick={() => void changeStatus(task, "ENABLED")}>继续</button>}
-              {task.status !== "DISABLED" && task.status !== "EXPIRED" && <button className="text-button" type="button" disabled={busyId !== null}
+              {task.status !== "DISABLED" && task.status !== "EXPIRED" && <button className="text-button" type="button" disabled={frozen}
                 onClick={() => void changeStatus(task, "DISABLED")}>停用</button>}
             </td>
           </tr>)}</tbody>
@@ -121,3 +224,4 @@ export default function ScheduledTasksView() {
     </div>
   </div>;
 }
+

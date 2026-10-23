@@ -217,3 +217,12 @@ export interface RelayClosePartialFileWriteInput {
   readonly expectedTaskRevision: DecimalRevision;
   readonly expectedObservationSha256: string;
 }
+
+/** DEV-0054：未决只读动作手动核对的回执。status 是服务端重读结论，NOT_EXECUTED
+ * 表示调用未开始（PREPARED），FAILED 是明确的读取失败，都不是「成功」。 */
+export interface RelayGatewayReconcileResult {
+  readonly operationId: string;
+  readonly status: "SUCCEEDED" | "NOT_EXECUTED" | "FAILED";
+  readonly reconciliation: string;
+  readonly capabilityKey: string;
+}

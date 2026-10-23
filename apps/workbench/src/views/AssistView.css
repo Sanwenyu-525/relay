@@ -21,6 +21,7 @@
    原来是「细条内容右端紧跟待处理」，目录名后面连缀归属、Git 标记与执行约束后再接
    「待你处理」，同一行挤成五种语义、互相穿插；现在细条按内容收在左端、待处理推到右端。 */
 .agent-chat-prereq-row {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -30,6 +31,17 @@
   width: 100%;
   max-width: var(--chat-measure, var(--relay-layout-reading-maxWidth));
   margin-inline: auto;
+}
+/* 目录慢提示是浮层而不是新的一行：插入时输入卡不上移，空态标题也不会被挤出可视区。
+   锚在细条上方，背景与阴影沿用浮层 token；取消或目录回执到达后整块消失。 */
+.collab-directory-slow {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + var(--relay-space-2));
+  z-index: 2;
+  margin: 0 auto;
+  box-shadow: var(--relay-shadow-floating);
 }
 .agent-chat-prereq-row:empty { display: none; }
 .agent-chat-prereq-row > .folder-strip,
@@ -137,13 +149,11 @@
    Chromium 153 上还没有 `::selectedcontent`，只能用 `white-space: nowrap` + `overflow: hidden`
    在 select 本身截断，否则长标题换行把顶栏撑高（实测 30px → 36px）。②按钮改为收缩到内容宽，
    「你好」这种短标签只剩 62px、比字段自身 6rem 下限还窄，切换会话时宽度会跳，故补回 `min-width`。
-   2026-10-19 起同一套浮层也管住输入器工具行上的会话模式下拉（`.agent-chat-mode-select`）：
-   它的浮层此前只有 `option { color; background }` 一行定制，实测仍是系统绘制的那条灰带。
-   两条下拉的浮层只在这里定义一次，别在模式档那一段再抄一份。 */
+   2026-10-22（DEV-0116）起这一段只管顶栏那条会话下拉：输入器工具行上的会话模式档已改成
+   自绘浮层（见 `.agent-chat-mode-options`），因为浮层锚定与宽度改不到——base-select 只能
+   换颜色和圆角，锚点仍是 select 的内容盒。 */
 .agent-assist-session-controls > .field select,
-.agent-assist-session-controls > .field select::picker(select),
-.agent-chat-mode-select,
-.agent-chat-mode-select::picker(select) {
+.agent-assist-session-controls > .field select::picker(select) {
   appearance: base-select;
 }
 .agent-assist-session-controls > .field select {
@@ -155,8 +165,7 @@
 .agent-assist-session-controls > .field select::picker-icon {
   margin-inline-start: auto;
 }
-.agent-assist-session-controls > .field select::picker(select),
-.agent-chat-mode-select::picker(select) {
+.agent-assist-session-controls > .field select::picker(select) {
   margin-block: var(--relay-space-1);
   padding: var(--relay-space-1);
   background: var(--relay-color-bg-surface);
@@ -164,22 +173,18 @@
   border-radius: var(--relay-radius-control);
   box-shadow: var(--relay-shadow-floating);
 }
-.agent-assist-session-controls > .field select option,
-.agent-chat-mode-select option {
+.agent-assist-session-controls > .field select option {
   padding: var(--relay-space-1) var(--relay-space-2);
   border-radius: var(--relay-radius-control);
   font-size: var(--relay-font-size-meta);
   color: var(--relay-color-text-secondary);
 }
 .agent-assist-session-controls > .field select option:hover,
-.agent-assist-session-controls > .field select option:focus-visible,
-.agent-chat-mode-select option:hover,
-.agent-chat-mode-select option:focus-visible {
+.agent-assist-session-controls > .field select option:focus-visible {
   background: var(--relay-color-selection-hover);
   color: var(--relay-color-text-primary);
 }
-.agent-assist-session-controls > .field select option:checked,
-.agent-chat-mode-select option:checked {
+.agent-assist-session-controls > .field select option:checked {
   background: var(--relay-color-selection-bg);
   color: var(--relay-color-selection-text);
   font-weight: var(--relay-font-weight-medium);
@@ -453,6 +458,16 @@
 .assist-message-markdown .markdown-preview__list li::marker { color: var(--relay-color-text-muted); }
 /* 强调用 semibold 而不是 UA 的 700：与全仓字重档一致，中文不会糊成一团。 */
 .assist-message-markdown .markdown-preview strong { font-weight: var(--relay-font-weight-semibold); }
+/* 行内代码补一档「行内块」（DEV-0109，2026-10-22 用户「ai回复怎么都是一个颜色？」）。
+   全局 `.markdown-preview code` 只给等宽与字号，文件名、命令、路径这些高频行内代码与正文
+   同色同底，只靠字形区分；这里给回复正文这一处加底色，颜色仍走正文 primary——层级由底色说出，
+   不新增第五种文字色。代码块自己已有底（pre > code 不参与，否则一块套一块）。
+   只作用于消息正文：资料、知识、任务详情那几个阅读面本轮未动，避免一次改动四个阅读面。 */
+.assist-message-markdown .markdown-preview :not(pre) > code {
+  padding: 0 var(--relay-space-1);
+  background: var(--relay-color-bg-subtle);
+  border-radius: var(--relay-radius-control);
+}
 
 /* 用户消息正文：气泡底 bg.subtle + radius.composer，不引入硬编码阴影或非 token 圆角。 */
 .agent-message[data-role="USER"] .assist-message-content {
@@ -610,6 +625,14 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
    :focus-within 出现，读成输入框多了一个阴影——现已去掉。焦点强调只剩边框加深一层，
    卡投影与空闲态完全一致，聚焦前后不再多出任何影子。卡内 textarea 自身仍不画框。 */
 .agent-chat-composer:focus-within {
+  border-color: var(--relay-color-action-primary);
+}
+/* 提交窗口内边框保持主色（DEV-0110）：点发送后 busy/pending 把 textarea disabled，
+   焦点掉到 body，:focus-within 随之失效，120ms 过渡把绿边淡成灰边，回执后又淡回来——
+   用户读成「发送时输入框会变色」。提交期间边框不跟随瞬时焦点：键仍 disabled、不可再提交，
+   data-busy 只负责颜色稳定；用户主动点到别处时提交已结束，边框照常回到未聚焦灰档。
+   与发送键 data-busy 同一约定，不新增色值。 */
+.agent-chat-composer[data-busy="true"] {
   border-color: var(--relay-color-action-primary);
 }
 .agent-chat-message-form { display: contents; }
@@ -1061,12 +1084,13 @@ button.agent-chat-tool:disabled {
 html[data-motion="off"] .agent-chat-attach-menu,
 html[data-motion="off"] .agent-chat-attach-submenu { animation: none; }
 
-/* 会话模式：一个原生 select（工作台 §25；2026-10-18 用户指令「普通 agent，人设助手，
-   学习合并到一个下拉框中」）。原先三枚 radio 在窄卡里会换行把工具行撑成两行，
-   而「当前是哪一档」本来只需一个事实。仍是原生控件：方向键、读屏与禁用语义走平台实现，
-   浮层与顶栏那条会话下拉共用上面同一段可自定义 select（2026-10-19）。
-   chip 的几何与状态画在 label 上，**不**画在 select 自己的盒子上：箭头是 label 的兄弟节点，
-   框在 select 上会把箭头留在框外，读起来像框画歪了（用户 2026-10-19 截图指认的「选中态」即此）。
+/* 会话模式：自绘浮层（工作台 §25；2026-10-22 DEV-0116 取代此前的原生 select）。
+   三档收在**一枚芯片 + 一个浮层**里：芯片只显示当前档，候选打开才看得见（2026-10-18 用户指令
+   「普通 agent，人设助手，学习合并到一个下拉框中」——三枚 radio 在窄卡里会换行撑高工具行）。
+   换掉原生 select 的原因见 ConversationModeSwitch 文件头：select 的浮层锚在**内容盒**上，
+   实测既不跟芯片对齐又比芯片宽，`appearance: base-select` 改得了颜色改不了锚定。
+   chip 的几何与状态画在 details 上，**不**画在 summary 自己的盒子上：箭头是 summary 里的
+   兄弟节点，框画歪了读起来像控件坏了（用户 2026-10-19 截图指认的「选中态」即此）。
    几何、hover 与展开三档对齐同一行里已有的 `.agent-chat-options > summary`，不新增数值、不新增色。 */
 .agent-chat-mode { display: inline-flex; align-items: center; gap: var(--relay-space-1); flex-wrap: wrap; }
 .agent-chat-mode-select-field {
@@ -1083,86 +1107,176 @@ html[data-motion="off"] .agent-chat-attach-submenu { animation: none; }
   transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
     color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
 }
+/* 浮层锚在这枚芯片上：details 是绝对定位的包含块，芯片与浮层因此共享同一条左缘。 */
+.agent-chat-mode-menu { position: relative; }
+/* summary 只负责把芯片内部排成一行；几何、底色与圆角都留在上面的芯片盒子上。
+   原生 marker 与右侧箭头是两枚重复的三角，关掉。 */
+.agent-chat-mode-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  width: 100%;
+  list-style: none;
+  color: inherit;
+  font: inherit;
+  cursor: inherit;
+}
+.agent-chat-mode-chip::-webkit-details-marker { display: none; }
 /* hover 与展开同一底色（照 `.agent-chat-options[open] > summary`：展开的差别由箭头翻向表达，
-   不另开一档颜色）。`:not(:has(:disabled))` 不能省：在途整组禁用时这枚 chip 不再给可点反馈。 */
-.agent-chat-mode-select-field:not(:has(.agent-chat-mode-select:disabled)):hover,
-.agent-chat-mode-select-field:has(.agent-chat-mode-select:open) {
+   不另开一档颜色）。禁用态不给可点反馈——在途时整组禁用。 */
+.agent-chat-mode-select-field:not(:has(.agent-chat-mode-chip[aria-disabled="true"])):hover,
+.agent-chat-mode-select-field[open] {
   background: var(--relay-color-selection-hover);
   color: var(--relay-color-text-primary);
 }
-.agent-chat-mode-select-field:has(.agent-chat-mode-select:open) > .agent-chat-chip-chevron { rotate: 180deg; }
-/* 键盘焦点框改画在整枚 chip 上：`:focus-visible` 的判定不变（鼠标点选仍不出框），
-   只是从「框住文字、把箭头留在外面」变成「框住这一枚控件」。select 自己那条全局 outline 关掉。 */
-.agent-chat-mode-select-field:has(.agent-chat-mode-select:focus-visible) {
+.agent-chat-mode-select-field[open] > .agent-chat-mode-chip > .agent-chat-chip-chevron { rotate: 180deg; }
+/* 键盘焦点框画在整枚芯片上：`:focus-visible` 的判定不变（鼠标点选仍不出框），
+   只是框住这一枚控件而不是框住文字、把箭头留在外面。summary 自己那条全局 outline 关掉。 */
+.agent-chat-mode-select-field:has(.agent-chat-mode-chip:focus-visible) {
   outline: var(--relay-focus-width) solid var(--relay-color-focus-ring);
   outline-offset: calc(-1 * var(--relay-focus-width));
 }
-.agent-chat-mode-select {
-  outline: none;
-  /* 吃掉 chip 的富余宽度：箭头因此始终贴在右缘，短标签（学习）也不会把箭头拖到中间；
-     浮层锚定的也是这条满宽盒子，不会跟着标签缩窄。
-     宽度下限压在**文字盒**上，不压在整枚 chip 上：压在 label 上时箭头与内边距先吃掉 26px，
-     最宽那档只剩 0.14px 余量（2026-10-19 用户截图指认「agent 这个文字被挤了」）。
-     实测「普通 Agent」文字 69.86px，5rem(80px) 留 10px；label 按内容长＝80+8+4+14＝106px，
-     三档同宽，切档仍不推挤同排右侧的 chip。 */
+.agent-chat-mode-chip:focus-visible { outline: none; }
+/* 当前档的文字吃掉芯片的富余宽度：箭头因此始终贴在右缘，短标签（学习）也不会把箭头拖到中间；
+   浮层锚定的也是这条满宽芯片，不会跟着标签缩窄。
+   宽度下限压在**文字盒**上，不压在整枚芯片上：压在芯片上时箭头与内边距先吃掉 26px，
+   最宽那档只剩 0.14px 余量（2026-10-19 用户截图指认「agent 这个文字被挤了」）。
+   实测「普通 Agent」文字 69.86px，5rem(80px) 留 10px；芯片按内容长＝80+8+4+14＝106px，
+   三档同宽，切档仍不推挤同排右侧的 chip。 */
+.agent-chat-mode-chip-value {
   flex: 1 1 auto;
   min-width: 5rem;
-  /* 全局控件基座那条 `min-height: control.height`（40px）此前没人覆写，把只写了 `height: compact`
-     的 select 顶回 40px：整枚 chip 比同一行的邻居高 8px、工具行跟着长高一档
-     （真实 Chromium 实测，见 uiOption2FirstSession 的 chip/发送键等高用例）。必须显式归零。 */
-  min-height: 0;
-  /* 高度不撑满 chip：Chromium 把 select 的内部文字按内容盒**贴顶**排，不随盒子拉高居中
-     （2026-10-20 用户截图「竖直重心没有在一个高度」，像素实测文字比同排 chip 高 7-8px，
-     两枚 select chip——会话模式与聊天模式——一起偏）。select 高度收缩回内容高后，
-     文字贴顶＝贴盒顶＝居中，整枚盒子再由 label 的 align-items:center 居中到 chip 中线上。 */
-  height: auto;
   max-width: 9rem;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
   font-family: var(--relay-font-family-ui);
   font-size: var(--relay-font-size-meta);
   font-weight: var(--relay-font-weight-medium);
   line-height: var(--relay-font-lineHeight-heading);
-  cursor: inherit;
-  /* 可自定义渲染后当前值不再受原生那条截断约束：与顶栏会话下拉同样在 select 自身截断。 */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  /* 与同行 chip（.agent-chat-tool）同一套动效语言：锁定与解锁时字色淡入，不硬切。 */
-  transition: color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
-    opacity var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
 }
-/* 可自定义 select 自带一枚 `::picker-icon`，会与 chip 右侧的箭头打架：关掉它，
-   箭头仍由 `.agent-chat-chip-chevron` 承担（与同行其它 chip 同一字形、同一翻向规则）。 */
-.agent-chat-mode-select::picker-icon { display: none; }
 /* 禁用态说同行 chip 的同一种「暂停」语言（2026-10-19 用户指认「这个禁用态太难看了」）：
    在途时整行 chip 都是 text-muted + 0.85 不透明度 + not-allowed（见 button.agent-chat-tool:disabled），
    模式档此前只有文字降到 disabled-text、chevron 还是 text-secondary 深色——一枚 chip 一半暗
-   一半亮，读起来像坏了一半，且比邻居更重。现在整枚 chip（select 文字 + chevron）一起降。
-   两条覆写都不能省：
-   ① background：全局控件基座 `::is(input, textarea, select):disabled`（styles.css，特异度
-      (0,1,1)）会给所有禁用的 input/select 刷上 disabled-bg（#E9EDE9），它不命中 button，
-      所以只有这个原生 select 会平白多出一块灰底（用户 2026-10-19 截图指认的「阴影」即此，
-      真实 Chromium 复测禁用态 computed background = rgb(233,237,233)）；基座规则压得过
-      `::where` 透明底（(0,0,0)），必须显式写回 transparent——本条 (0,2,0) 必胜。
-   ② -webkit-text-fill-color：基座同时用它刷 disabled-text，而 WebKit 的文字填充优先于
-      color 属性本身，只改 color 不改填充，字色不会变。 */
-.agent-chat-mode-select:disabled {
+   一半亮，读起来像坏了一半。现在整枚芯片（文字 + 箭头）一起降。
+   原生 `<details>` 没有 disabled，所以点击与方向键都在组件里挡住，这里只负责读出来是禁用的。 */
+.agent-chat-mode-chip[aria-disabled="true"] { color: var(--relay-color-text-muted); opacity: 0.85; cursor: not-allowed; }
+.agent-chat-mode-chip[aria-disabled="true"] .agent-chat-chip-chevron { color: var(--relay-color-text-muted); }
+/* 光标也归到芯片这一层：禁用时整枚控件（含文字与箭头两侧的内边距）都是 not-allowed，
+   与 `button.agent-chat-tool:disabled` 同一读法。 */
+.agent-chat-mode-select-field:has(.agent-chat-mode-chip[aria-disabled="true"]) { cursor: not-allowed; }
+
+/* 模式浮层（2026-10-22 DEV-0116）：左缘贴芯片左缘、宽度不小于芯片——用户截图里那条
+   「悬在芯片右上方、比芯片还宽」的白卡就是原生浮层按 select 内容盒锚定造成的，自绘之后
+   这两个数由本条一次定死。底色/描边/圆角/阴影与同排其它浮层同一套（见 .composer-target-menu、
+   .agent-chat-permission-menu），向上弹出因为芯片在底栏；只使用既有 token，不新增数值。 */
+.agent-chat-mode-options {
+  position: absolute;
+  bottom: calc(100% + var(--relay-space-2));
+  left: 0;
+  z-index: var(--relay-zIndex-popover);
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-0-5);
+  width: max-content;
+  min-width: 100%;
+  max-width: min(20rem, calc(100vw - var(--relay-space-6)));
+  padding: var(--relay-space-1);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  box-shadow: var(--relay-shadow-floating);
+}
+.agent-chat-mode-menu-row {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  width: 100%;
+  min-height: var(--relay-control-height-compact);
+  padding: var(--relay-space-1) var(--relay-space-2);
+  text-align: left;
   background: transparent;
+  border: 0;
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-secondary);
+  font-family: var(--relay-font-family-ui);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  cursor: pointer;
+  transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.agent-chat-mode-menu-row:hover { background: var(--relay-color-selection-hover); color: var(--relay-color-text-primary); }
+/* 当前档压在 hover 之后：鼠标扫过不会让「当前」消失（与改前那条下拉浮层同一顺序、同一档色）。 */
+.agent-chat-mode-menu-row[data-current="true"] {
+  background: var(--relay-color-selection-bg);
+  color: var(--relay-color-selection-text);
+  font-weight: var(--relay-font-weight-medium);
+}
+/* 勾号占位固定宽度：三行标签因此左对齐，非当前行不会把文字往左挪一格。
+   lucide 的 width/height 属性会被全局 `svg:not(...)` 压成 20px，这里必须显式写回字号档。 */
+.agent-chat-mode-menu-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--relay-font-size-meta);
+  flex: none;
+}
+.agent-chat-mode-menu-mark svg { width: var(--relay-font-size-meta); height: var(--relay-font-size-meta); }
+/* 在途时整组禁用：浮层里的三行一起降档，点了不生效（组件里也挡了 onClick）。 */
+.agent-chat-mode-menu-row[aria-disabled="true"] { color: var(--relay-color-text-muted); opacity: 0.85; cursor: not-allowed; }
+
+/* 聊天模式状态徽标（DEV-0105，2026-10-22）：模式不再是下拉框，只表达「当前是哪一档」。
+   进入模式走「+ → 命令」或直接输入 `/plan`、`/goal`；徽标只在非普通模式出现，
+   默认态不占位。底色沿用选中态那一档（selection.bg/text），不新增色：
+   计划只读、目标推进的区别由图标与文字表达，不靠第二套颜色。 */
+.agent-chat-mode-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-2);
+  border-radius: var(--relay-radius-badge);
+  background: var(--relay-color-selection-bg);
+  color: var(--relay-color-selection-text);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+  line-height: var(--relay-font-lineHeight-heading);
+  white-space: nowrap;
+}
+.agent-chat-mode-state > svg {
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+  flex: none;
+}
+/* 退出键与同排 chip 同一套几何与动效：透明底、compact 高、hover 起淡底。
+   它是一枚真实命令入口（切回 CHAT），不是关闭提示，所以用文字「退出」而非 ×。 */
+.agent-chat-mode-exit {
+  display: inline-flex;
+  align-items: center;
+  height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-1);
+  border: 0;
+  border-radius: var(--relay-radius-control);
+  background: transparent;
+  color: var(--relay-color-text-secondary);
+  font-family: var(--relay-font-family-ui);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+  line-height: var(--relay-font-lineHeight-heading);
+  cursor: pointer;
+  transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.agent-chat-mode-exit:hover:not(:disabled) {
+  background: var(--relay-color-selection-hover);
+  color: var(--relay-color-text-primary);
+}
+.agent-chat-mode-exit:disabled {
   color: var(--relay-color-text-muted);
-  -webkit-text-fill-color: var(--relay-color-text-muted);
   opacity: 0.85;
   cursor: not-allowed;
 }
-/* chevron 与文字同进同退：它不在 select 里（是 label 的兄弟节点），基座的禁用规则命不中它，
-   必须单独降。字号跟随 meta，禁用后与文字同一档不透明度，整枚 chip 才读作一个整体。 */
-.agent-chat-mode-select:disabled + .agent-chat-chip-chevron { color: var(--relay-color-text-muted); opacity: 0.85; }
-/* 光标也归到 chip 这一层：禁用时整枚控件（含 select 文字与箭头两侧的内边距）都是 not-allowed，
-   与 `button.agent-chat-tool:disabled` 同一读法。浮层与选项的配色见文件头那段共用规则。 */
-.agent-chat-mode-select-field:has(.agent-chat-mode-select:disabled) { cursor: not-allowed; }
 /* 卡外说明区：档位锁定原因与档位常驻说明（学习档「对项目只读」、助手档「只读边界」）。
    2026-10-16 两轮收口后的唯一形态——它们**不在输入卡内，也不在工具行或模式盒里**：
    ① 模式盒是 auto 宽 + flex-wrap 的内联 flex，长文本会让它按可用宽度撑开（实测
@@ -1340,8 +1454,8 @@ html[data-motion="off"] .agent-chat-attach-submenu { animation: none; }
   background: var(--relay-color-selection-hover);
   color: var(--relay-color-text-primary);
 }
-/* chevron 的过渡除了rotate，还带 color 与 opacity：模式档禁用时它与 select 文字同速淡入
-   （见 .agent-chat-mode-select:disabled + 的降档规则），其它 chip 的 chevron 也跟着
+/* chevron 的过渡除了rotate，还带 color 与 opacity：模式档禁用时它与芯片文字同速淡入
+   （见 .agent-chat-mode-chip[aria-disabled] 的降档规则），其它 chip 的 chevron 也跟着
    有了颜色过渡，与 .agent-chat-tool 的 color 过渡同语言。 */
 .agent-chat-chip-chevron { width: var(--relay-font-size-meta); height: var(--relay-font-size-meta); margin-left: var(--relay-space-0-5); flex: none; transition: rotate var(--relay-motion-duration-fast) var(--relay-motion-easing-standard), color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard), opacity var(--relay-motion-duration-fast) var(--relay-motion-easing-standard); }
 .agent-chat-options[open] .agent-chat-chip-chevron { rotate: 180deg; }

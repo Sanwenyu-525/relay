@@ -8,6 +8,7 @@ import RunTracePanel from "../components/RunTracePanel";
 import RunControlPanel, { runLabels, stepLabels, stepStatusLabels } from "../components/RunControlPanel";
 import FileWriteDispositionPanel from "../components/FileWriteDispositionPanel";
 import { RelayApiError, RelayRunEventHttpError, RelayTransportError, type RelayControlRequest, type RelayContextBuild, type RelayContextManifestDetail, type RelayContextManifestSummary, type RelayReview, type RelayRun, type RelayRunGatewayOperation, type RelayTaskDetail } from "../api/relayClient";
+import { createCommandId } from "../api/core/command-id";
 import { describeLiveError } from "../lib/liveErrors";
 import { formatReadableDateTime, useDisplayPreferences } from "../lib/displayPreferences";
 import { executorLabels, taskStatusLabels } from "../lib/labels";
@@ -33,6 +34,15 @@ const gatewayOperationStatusLabels: Record<string, string> = {
 const gatewayInvocationStatusLabels: Record<string, string> = {
   PREPARED: "已准备", DISPATCHING: "派发中", SUCCEEDED: "已成功", FAILED: "已失败",
   UNKNOWN: "结果未知", NOT_EXECUTED: "未执行"
+};
+/** DEV-0054：可手动核对（安全重读）的能力族。与服务端 SAFE_REREAD_CAPABILITIES 同一名单；
+ * 写能力有外部效果，只能走停机恢复路径或可信停机证明下的人工处置。 */
+const READONLY_RECONCILE_CAPABILITIES: readonly string[] =
+  ["FILE_READ", "FILE_QUERY", "WEB_FETCH", "GIT_READ", "GITHUB_READ"];
+const RECONCILE_STATUS_LABELS: Record<string, string> = {
+  SUCCEEDED: "已核对：目标证据与冻结输入一致",
+  NOT_EXECUTED: "已核对：调用未开始（PREPARED）",
+  FAILED: "已核对：读取失败（明确失败，非未知）"
 };
 function gatewayEnumText(labels: Record<string, string>, value: string): ReactNode {
   const label = labels[value] ?? value;
@@ -83,6 +93,10 @@ export default function RunView() {
   const [gatewayOperations, setGatewayOperations] = useState<readonly RelayRunGatewayOperation[]>([]);
   const [gatewayLoading, setGatewayLoading] = useState(false);
   const [gatewayError, setGatewayError] = useState<string | null>(null);
+  // DEV-0054：未决只读动作的手动核对。结论以服务端重读为准，本地只展示与转发错误。
+  const [reconcileBusyId, setReconcileBusyId] = useState<string | null>(null);
+  const [reconcileError, setReconcileError] = useState<string | null>(null);
+  const [reconcileResults, setReconcileResults] = useState<readonly { readonly operationId: string; readonly status: string; readonly reconciliation: string }[]>([]);
   const gatewayRequestVersion = useRef(0);
   const requestVersion = useRef(0);
   const targetVersion = useRef(0);
@@ -153,6 +167,28 @@ export default function RunView() {
     } catch (caught) {
       if (version === gatewayRequestVersion.current && context === targetVersion.current) setGatewayError(describeLiveError(caught).message);
     } finally { if (version === gatewayRequestVersion.current && context === targetVersion.current) setGatewayLoading(false); }
+  }
+  /**
+   * DEV-0054：手动核对一个未决只读动作。服务端按同一冻结输入安全重读并落库，
+   * 结论以回执为准；成功后重读 Run 与动作账本，让「需核对」条目按新事实消失或变化。
+   */
+  async function reconcileOperation(operationId: string) {
+    const client = liveClient(); if (!client) return;
+    const commandId = createCommandId();
+    const context = targetVersion.current;
+    setReconcileBusyId(operationId); setReconcileError(null);
+    try {
+      const result = await client.reconcileGatewayOperation({ operationId, commandId });
+      if (context !== targetVersion.current) return;
+      setReconcileResults((current) => [...current.filter((item) => item.operationId !== operationId),
+        { operationId: result.operationId, status: result.status, reconciliation: result.reconciliation }]);
+      await load(false);
+      await loadGatewayOperations(runRef.current?.id ?? id);
+    } catch (caught) {
+      if (context === targetVersion.current) setReconcileError(describeLiveError(caught).message);
+    } finally {
+      if (context === targetVersion.current) setReconcileBusyId(null);
+    }
   }
   async function load(includeSources = true) {
     const version = ++requestVersion.current;
@@ -266,7 +302,15 @@ export default function RunView() {
     <p className="helper-text">任务状态：{taskStatusLabels[task.status]} · 当前执行者：{executorLabels[task.executor]}</p>
     <Link className="text-link" to={`/tasks/${run.taskId}`}>返回关联任务</Link>
   </PageHeader>{eventStatus === "connecting" && <p className="helper-text" data-testid="run-events-status" role="status">正在连接执行事件；页面仍以服务端查询为准。</p>}{eventStatus === "reconnecting" && <p className="helper-text" data-testid="run-events-status" role="status">事件连接中断，正在补读历史；页面仍定期重新查询。</p>}{eventStatus === "unauthorized" && <p className="action-error" data-testid="run-events-status" role="alert">执行事件订阅无权访问，请检查连接权限；页面将重新查询当前事实。</p>}{refreshing && <p className="helper-text" role="status">正在读取最新执行事实。</p>}{!activeRun && <p className="helper-text">这是历史 Run，任务当前执行权已变化；本页只保留查询。</p>}{run.waitReason && <p className="helper-text">等待原因：{run.waitReason}</p>}
-    {!!run.unresolvedOperationIds.length && <section className="surface-panel" data-testid="run-unknown"><h2>执行结果未知或待核对</h2><p className="warning-callout" role="status"><AlertTriangle aria-hidden="true" />以下动作的结果未知或尚未结清。先按原 operation_id 核对目标状态与效果证据；证据不足时保持待核对，不得盲重试、换 ID 或恢复写入。本页没有直接标记成功的入口。</p><ul className="run-list">{run.unresolvedOperationIds.map((operationId) => <li key={operationId}><strong>需核对</strong> · 原 operation_id：{operationId}</li>)}</ul><p className="helper-text" data-testid="run-unknown-timeline">执行时间线：动作发出并持久化 → 结果回执未保存或无法确定 → 等待核对执行结果。已知：以上原 operation_id 已入库并绑定目标；尚未知：动作是否实际执行、目标当前状态与效果证据。断连或重开本页不会改变这一事实，仍保持待核对。</p><p className="helper-text" data-testid="run-unknown-reconcile">核对与重试不同：核对是对原动作目标与效果的只读查证并保存证据，不换动作 ID、不换 Adapter、不重复执行；只有在证据确定动作未执行后，才以新的动作身份重新执行。自动「核对执行结果」写接口尚未由服务端提供（待接入），本页不自建成功开关，请通过动作历史与 Run Trace 读取证据，结清仍以服务端查询结果为准。</p><p className="helper-text">目标与资源保护：在结果核对完成前，相关资源保持隔离，不发放新的冲突写入（见「资源与租约」面板）。</p><div className="run-actions"><button className="secondary-button" type="button" data-testid="run-unknown-open-gateway" onClick={() => { if (!gatewayOpen) setGatewayOpen(true); }}>打开动作历史（只读）</button><button className="secondary-button" type="button" data-testid="run-unknown-open-trace" onClick={() => setTraceOpen(true)}>查看 Run Trace 证据</button></div></section>}
+    {!!run.unresolvedOperationIds.length && <section className="surface-panel" data-testid="run-unknown"><h2>执行结果未知或待核对</h2><p className="warning-callout" role="status"><AlertTriangle aria-hidden="true" />以下动作的结果未知或尚未结清。先按原 operation_id 核对目标状态与效果证据；证据不足时保持待核对，不得盲重试、换 ID 或恢复写入。本页没有直接标记成功的入口。</p><ul className="run-list">{run.unresolvedOperationIds.map((operationId) => {
+      const operation = gatewayOperations.find((item) => item.id === operationId);
+      const capabilityKey = operation?.capabilityKey ?? null;
+      const readonlyReconcilable = capabilityKey !== null && READONLY_RECONCILE_CAPABILITIES.includes(capabilityKey);
+      const result = reconcileResults.find((item) => item.operationId === operationId);
+      return <li key={operationId} data-testid="run-unknown-item"><strong>需核对</strong> · 原 operation_id：{operationId}{capabilityKey !== null && <> · {capabilityKey}</>}{readonlyReconcilable
+        ? <div className="run-actions"><button className="secondary-button" type="button" data-testid="run-unknown-reconcile-button" disabled={!live || reconcileBusyId === operationId} onClick={() => { void reconcileOperation(operationId); }}>{reconcileBusyId === operationId ? "正在核对" : "核对执行结果（只读重读）"}</button></div>
+        : <p className="helper-text">该动作有外部效果，不能在本页手动结清：请经停机恢复路径核对，或由负责人在可信停机证明下人工处置（见「Gateway 动作历史」中的文件写入处置面板）。</p>}{result !== undefined && <p className="helper-text" data-testid="run-unknown-reconcile-result">本次核对结论：{RECONCILE_STATUS_LABELS[result.status] ?? result.status}（{result.reconciliation}）。结论以服务端回执为准，重读 Run 与动作账本可见最新状态。</p>}</li>;
+    })}</ul>{reconcileError !== null && <p className="action-error" role="alert" data-testid="run-unknown-reconcile-error">{reconcileError}</p>}<p className="helper-text" data-testid="run-unknown-timeline">执行时间线：动作发出并持久化 → 结果回执未保存或无法确定 → 等待核对执行结果。已知：以上原 operation_id 已入库并绑定目标；尚未知：动作是否实际执行、目标当前状态与效果证据。断连或重开本页不会改变这一事实，仍保持待核对。</p><p className="helper-text" data-testid="run-unknown-reconcile">核对与重试不同：核对是对原动作目标与效果的只读查证并保存证据，不换动作 ID、不换 Adapter、不重复执行；只有在证据确定动作未执行后，才以新的动作身份重新执行。只读能力（读取文件、列目录、网页与 Git/GitHub 只读）可在本页直接核对：服务端按同一冻结输入安全重读，落库结论为「一致 / 调用未开始 / 读取失败」三选一，不猜成功；有外部效果的动作（写入、命令、电脑与浏览器操作）只能经停机恢复路径核对。本页不自建成功开关，结清以服务端落账为准。</p><p className="helper-text">目标与资源保护：在结果核对完成前，相关资源保持隔离，不发放新的冲突写入（见「资源与租约」面板）。</p><div className="run-actions"><button className="secondary-button" type="button" data-testid="run-unknown-open-gateway" onClick={() => { if (!gatewayOpen) setGatewayOpen(true); }}>打开动作历史（只读）</button><button className="secondary-button" type="button" data-testid="run-unknown-open-trace" onClick={() => setTraceOpen(true)}>查看 Run Trace 证据</button></div></section>}
     <section className="surface-panel" data-testid="run-gateway-operations"><h2>Gateway 动作历史</h2><p className="helper-text">按当前权限读取本次 Run 的动作历史；批准请求和实际写入状态分别核对。</p><button className="secondary-button" type="button" onClick={() => { if (gatewayOpen) { setGatewayOpen(false); gatewayRequestVersion.current++; } else setGatewayOpen(true); }}>{gatewayOpen ? "收起动作历史" : "查看动作历史"}</button>{gatewayOpen && <><button className="secondary-button" type="button" disabled={gatewayLoading} onClick={() => void loadGatewayOperations(run.id)}>刷新动作历史</button>{gatewayLoading && <p className="helper-text" role="status">正在读取动作历史。</p>}{gatewayError && <p className="action-error" role="alert">{gatewayError}</p>}{!gatewayLoading && !gatewayError && (gatewayOperations.length ? <ul className="run-list">{gatewayOperations.map((operation) => <li key={operation.id}><strong>{gatewayEnumText(gatewayActionLabels, operation.actionType)} · {gatewayEnumText(gatewayOperationStatusLabels, operation.status)}</strong><div>原 operation_id：{operation.id}</div><div>目标：{operation.normalizedTarget}</div><div>调用状态：{operation.invocationStatuses.length ? operation.invocationStatuses.map((invocationStatus, index) => <span key={`${invocationStatus}-${index}`}>{index > 0 ? "、" : ""}{gatewayEnumText(gatewayInvocationStatusLabels, invocationStatus)}</span>) : "尚未调用"}</div></li>)}</ul> : <p className="helper-text">本次 Run 暂无文件动作记录。</p>)}</>}</section>
     {gatewayOpen && connection.client && gatewayOperations.filter((operation) => ["APPLY_CHANGESET", "WRITE_FILE"].includes(operation.actionType)).map((operation) => <section className="surface-panel" key={operation.id} data-testid="run-file-write-operation"><h2>{gatewayEnumText(gatewayActionLabels, operation.actionType)} 原动作 · {gatewayEnumText(gatewayOperationStatusLabels, operation.status)}</h2><p className="helper-text">原 operation_id：{operation.id}。逐文件账本和当前文件状态分别读取；人工处置只结束旧 Run，不确认所有文件均已写入。</p><FileWriteDispositionPanel client={connection.client!} operationId={operation.id} runId={run.id} runRevision={run.revision} onFactsChanged={async () => { await load(); await loadGatewayOperations(run.id); }} /></section>)}
     {run.status === "PAUSED" && <section className="surface-panel" data-testid="run-paused-summary"><h2>已暂停摘要</h2><p className="helper-text">服务端事实：Run 已在安全边界内暂停（PAUSED）{run.waitReason ? ` · 等待原因：${run.waitReason}` : ""}。当前执行者仍为 {executorLabels[task.executor]}；暂停不自动转移执行权，人工确认不等于接手。</p><ul className="run-list"><li><strong>恢复点</strong> · {lastSettledStep ? `最后完成步骤：${stepLabels[lastSettledStep.kind] ?? lastSettledStep.kind}` : "尚无已完成步骤"} · 服务端 current_step_id：{run.currentStepId ?? "无"}。Resume 将重新检查契约、权限与资源后从服务端恢复点继续；恢复时原阻塞 Review 仍未解决会先返回等待判断，不提前继续执行。</li><li><strong>已保存产物</strong> · Run 级产物清单接口待接入；本 Run 已保存的候选产物版本请从 <Link className="text-link" to={`/tasks/${run.taskId}`}>任务详情</Link> 的产物区按确切版本核对，不在此页推断已保存内容。</li><li><strong>资源占用</strong> · 见「资源与租约」面板；已暂停不等于进程已停或资源已释放。</li></ul></section>}

@@ -10,6 +10,8 @@ import test, { after, before } from 'node:test';
 import { sql } from 'kysely';
 
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
+import { resolveSessionReadTools, sessionReadToolsForCurrentConnections, sessionWriteAllowed }
+  from '../../src/application/assist-read-tools.js';
 import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
 import {
   establishConversationDiffBaseline,
@@ -109,9 +111,9 @@ async function sha256Of(path: string): Promise<string> {
   return createHash('sha256').update(await readFile(path)).digest('hex');
 }
 
-/** 打开一个真实目录并切到 AUTO 档（默认打开是 READ_ONLY，写不了）。 */
+/** 打开一个真实目录并切写入档（默认 AUTO；会话直写要免逐次批准时用 FULL）。 */
 async function openAutoWriteDirectory(api: Awaited<ReturnType<typeof startTestApi>>, name: string,
-  files: Readonly<Record<string, string>>) {
+  files: Readonly<Record<string, string>>, tier: 'AUTO' | 'FULL' = 'AUTO') {
   const workspaceId = await workspace(name);
   const root = await tempRoot();
   for (const [relativePath, content] of Object.entries(files)) {
@@ -129,7 +131,7 @@ async function openAutoWriteDirectory(api: Awaited<ReturnType<typeof startTestAp
   const write = await api.post(workspacePath(workspaceId,
     `/projects/${projectId}/managed-resources/${resourceId}/local-access`), {
     command_id: randomUUID(), expected_revision: result.write_readiness.access_revision,
-    write_tier: 'AUTO' });
+    write_tier: tier });
   assert.equal(write.status, 200, write.text);
   return { workspaceId, projectId, resourceId, root };
 }
@@ -151,6 +153,112 @@ async function openSession(api: Awaited<ReturnType<typeof startTestApi>>,
   const ids = (sent.body as { result: { user_message_id: string; assistant_message_id: string } }).result;
   return { sessionId, userMessageId: ids.user_message_id, assistantMessageId: ids.assistant_message_id };
 }
+
+test('会话直写创建的未跟踪文件进入会话 diff，而不是只认 Run 的 change_sets', async () => {
+  const api = await startTestApi();
+  try {
+    // 与 0126 的真实入口一致：HTTP 打开目录并切 FULL 档（AUTO 仍要逐次批准，会话没有审批接续通道）。
+    const env = await openAutoWriteDirectory(api, 'diff-session-write', {
+      'src/a.ts': 'const a = 1;\n',
+    }, 'FULL');
+    const content = '<!doctype html>\n<h1>三层小楼</h1>\n';
+    const script = [[{ name: 'apply_changeset', arguments: { changes: [
+      { path: 'three-house.html', action: 'CREATE', content },
+    ] } }]];
+    const session = await openSession(api, env,
+      `FAKE_ASSIST_TOOLS ${JSON.stringify(script)}`);
+
+    // 统计起点必须早于这条消息的真实写入。
+    const baseline = await establishConversationDiffBaseline(
+      createRepositories(app.db), { workspaceId: env.workspaceId, sessionId: session.sessionId });
+    assert.equal(baseline.established, true, describe(baseline));
+
+    const sessionRow = (await sql<Record<string, unknown>>`
+      select * from assist_sessions where id = ${session.sessionId}`.execute(app.db)).rows[0];
+    assert.ok(sessionRow !== undefined);
+    const tools = await resolveSessionReadTools(createRepositories(app.db), sessionRow as never, true);
+    const writeAllowed = await sessionWriteAllowed(app.db, sessionRow as never);
+    const runnerTools = await sessionReadToolsForCurrentConnections(
+      app.db, sessionRow as never, writeAllowed);
+    const access = (await sql<{ write_tier: string; write_connection_id: string | null }>`
+      select write_tier, write_connection_id from local_directory_access
+       where resource_id = ${env.resourceId}`.execute(app.db)).rows[0];
+    assert.ok(tools.includes('apply_changeset'),
+      `写工具必须在词表内：tier=${access?.write_tier ?? 'MISSING'} `
+      + `connection=${access?.write_connection_id ?? 'MISSING'} tools=${tools.join(',')}`);
+    assert.ok(runnerTools.includes('apply_changeset'),
+      `运行轮次的词表必须含写工具：writeAllowed=${writeAllowed} `
+      + `tier=${access?.write_tier ?? 'MISSING'} tools=${runnerTools.join(',')}`);
+
+    const generated = await runAssistGenerationTick(app.db, {
+      workerId: `diff-session-write-${randomUUID()}`,
+      storage: new ManagedContentStore(api.dataRoot), leaseMs: 60_000, maxMessages: 1,
+      modelPort: new FakeModelPort() });
+    assert.ok(generated, '这条消息必须由普通会话主流程领取');
+    // 先看主流程自己的收口：脚本里的工具没被声明/写被拒时，失败原因在会话工具账本里。
+    const message = await createRepositories(app.db).assist.readMessage(session.assistantMessageId);
+    const diagnostics = (await sql<{ tool_name: string; status: string;
+      rejection_reason: string | null; rejection_detail: string | null }>`
+      select tool_name, status, rejection_reason, rejection_detail
+        from session_tool_calls where session_id = ${session.sessionId}`.execute(app.db)).rows;
+    assert.equal(message?.status, 'COMPLETED',
+      `${message?.status}/${message?.error_code ?? 'no-error'} ${describe(diagnostics)}`);
+    let written: string | null = null;
+    try { written = await readFile(join(env.root, 'three-house.html'), 'utf8'); } catch { written = null; }
+    assert.equal(written, content,
+      `新建文件必须由会话直写真实落盘；账本=${describe(diagnostics)}`);
+
+    // 归因事实：会话直写没有 Run，也不会写 change_sets，只有 session_tool_calls → Operation。
+    const ledger = (await sql<{ status: string; tool_name: string; origin: string;
+      action_type: string; normalized_target: string; changes: unknown }>`
+      select stc.status, stc.tool_name, op.origin, op.action_type, op.normalized_target,
+             op.params->'changes' as changes
+        from session_tool_calls stc
+        join logical_operations op on op.id = stc.operation_id
+       where stc.session_id = ${session.sessionId}`.execute(app.db)).rows;
+    assert.equal(ledger.length, 1, describe(ledger));
+    assert.equal(ledger[0]?.tool_name, 'apply_changeset');
+    assert.equal(ledger[0]?.status, 'SETTLED');
+    assert.equal(ledger[0]?.origin, 'AGENT_SESSION_WRITE');
+    assert.equal(ledger[0]?.action_type, 'APPLY_CHANGESET');
+    const canonicalRoot = (await sql<{ canonical_root: string }>`
+      select canonical_root from managed_resources where id = ${env.resourceId}`
+      .execute(app.db)).rows[0]?.canonical_root;
+    assert.ok(canonicalRoot !== undefined);
+    assert.equal(ledger[0]?.normalized_target, canonicalRoot, describe(ledger[0]?.normalized_target));
+    assert.deepEqual(ledger[0]?.changes, [{ action: 'CREATE', path: 'three-house.html', content }]);
+    const changeSets = await sql<{ count: string }>`select count(*)::text as count
+      from change_sets where workspace_id = ${env.workspaceId}`.execute(app.db);
+    assert.equal(changeSets.rows[0]?.count, '0',
+      '这条链路不产生 change_sets；归因必须直接认会话工具账本');
+
+    // 用户看到的会话口径：新建的未跟踪文件按 CREATE 出现，行数来自真实内容。
+    const sessionDiff = await readConversationDiff(createRepositories(app.db),
+      { workspaceId: env.workspaceId, sessionId: session.sessionId });
+    assert.equal(sessionDiff.available, true, describe(sessionDiff));
+    if (!sessionDiff.available) return;
+    assert.equal(sessionDiff.diff.scope, 'SESSION');
+    assert.deepEqual(sessionDiff.diff.files.map((file) =>
+      [file.path, file.action, file.added, file.removed]),
+    [['three-house.html', 'CREATE', 2, 0]], describe(sessionDiff.diff.files));
+    assert.equal(sessionDiff.diff.totalFiles, 1);
+    assert.equal(sessionDiff.diff.totalAdded, 2);
+
+    const detail = await readConversationDiffFile(createRepositories(app.db),
+      { workspaceId: env.workspaceId, sessionId: session.sessionId, path: 'three-house.html' });
+    assert.equal(detail.available, true, describe(detail));
+    if (detail.available) {
+      assert.equal(detail.file.action, 'CREATE');
+      assert.ok(detail.file.rows?.some((row) => row.kind === 'ADD' && row.text === '<h1>三层小楼</h1>'));
+    }
+    const untouched = await readConversationDiffFile(createRepositories(app.db),
+      { workspaceId: env.workspaceId, sessionId: session.sessionId, path: 'src/a.ts' });
+    assert.deepEqual(untouched, { available: false, reason: 'PATH_NOT_FOUND' },
+      '没有写过的路径不能被会话归因带进来');
+  } finally {
+    await api.stop();
+  }
+});
 
 test('真实写盘后：会话口径认得出本会话改的文件，别人的同期改动只在目录口径里', async () => {
   const api = await startTestApi();

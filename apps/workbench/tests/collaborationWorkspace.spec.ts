@@ -801,6 +801,16 @@ describe("协作工作区主路径", () => {
         const meter = view.wrapper.get('[data-testid="assist-context-meter"]');
         expect(meter.attributes("data-state")).toBe(scenario.state);
         expect(meter.attributes("aria-label")).toContain(scenario.aria);
+        // 悬停效果（2026-10-22 用户指令「上下文圆圈的鼠标悬停效果优化一下」）：这句话改由
+        // 应用内浮层承载，悬停即浮出。原生 title 一并去掉——Chromium/WebView2 要等约一秒，
+        // 圆环只有 18px，两套提示叠着只会读成「没有反应」。
+        expect(meter.attributes("title")).toBeUndefined();
+        await act(async () => {
+          meter.element?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
+        });
+        await flush(0);
+        expect(document.querySelector('[data-testid="context-meter-tooltip"]')?.textContent)
+          .toContain(scenario.aria);
       } finally { view.unmount(); }
     });
   }

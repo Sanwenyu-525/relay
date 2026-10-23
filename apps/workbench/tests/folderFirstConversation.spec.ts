@@ -122,7 +122,8 @@ function router(routes: Routes, posts: { path: string; body: unknown }[]) {
       return routes.receipt?.(receipt[1]!) ?? json({ code: "NOT_FOUND", detail: "命令回执不存在" }, 404);
     }
     if (path === `${prefix}/default-working-directory`) return json({ resource_id: null,
-      canonical_root: null, display_name: null, write_tier: null, status: "UNSET", reason: null,
+      canonical_root: null, display_name: null, write_tier: null, default_write_tier: null,
+      status: "UNSET", reason: null,
       revision: "0" });
     if (path === `${prefix}/projects/${projectId}`) return json(project());
     if (path === `${prefix}/projects/${projectId}/state`) return json({ project_id: projectId, revision: "1",
@@ -308,9 +309,8 @@ describe("文件夹入口与对话直接执行", () => {
   it("?dir= 种子按同一条 openFolder 打开目录、落在空对话上，首条发送才建会话并绑定", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const posts: { path: string; body: unknown }[] = [];
-    // 扣住 open 响应：核对目录在途期间不挂会话面板——若此时先挂工作区级面板，
-    // 目录一回来 projectScopeActive 翻真，AssistView 按 key 整块重挂，聊天区就是
-    // 用户截图指认的那一下跳动（2026-10-20）。面板只允许在目录结果之后挂载一次。
+    // 扣住 open 响应：目录在途期间首条输入器已经在屏上，发送键按 `creationPending` 禁用；
+    // 目录一回来换成项目作用域，但两拍都是同一张输入器，不再整页换成「正在打开目录…」。
     let releaseOpen!: () => void;
     const openGate = new Promise<void>((resolve) => { releaseOpen = resolve; });
     const base = router({}, posts);
@@ -322,12 +322,16 @@ describe("文件夹入口与对话直接执行", () => {
     // 左栏目录行「＋」带进来的种子：new 是一次性的空白对话意图，dir 是那条分组里的目录路径。
     const view = await mountWorkbench(`/agent?new=seed&dir=${encodeURIComponent(root)}`);
     try {
-      // 目录在途：page-state 核对态（与 AssistView「正在核对对话目标与会话」同构，
-      // 面板挂载后只翻一行标题，不再出现第二次整块布局替换），且没有会话面板与输入区。
-      const pendingState = document.querySelector('[data-testid="collab-directory-pending"]');
-      expect(pendingState?.querySelector(".eyebrow")?.textContent).toBe("Assist");
-      expect(pendingState?.querySelector("h1")?.textContent).toContain("正在打开目录");
-      expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(false);
+      // 目录在途：首条输入器直接在屏上，不再整页换成「正在打开目录…」；
+      // 细条如实说正在打开，发送键等作用域落定，正文可以先写。
+      expect(document.querySelector('[data-testid="collab-directory-pending"]')).toBeNull();
+      expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(true);
+      expect(folderStripName()).toContain("正在打开目录");
+      const pendingSend = view.wrapper.get('[data-testid="assist-first-send"]');
+      expect(pendingSend.attributes("disabled")).toBeDefined();
+      expect(pendingSend.attributes("title")).toContain("正在打开目录");
+      // 在途期间写的草稿属于同一条首条过程，换作用域重挂载后必须原样保留。
+      await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("从这个目录开始");
       releaseOpen();
       await flush(); await flush();
       // 挂载那一拍只发这一条目录命令，载荷就是种子路径；页面不自己登记第二份作用域。
@@ -335,13 +339,15 @@ describe("文件夹入口与对话直接执行", () => {
       expect(opens).toHaveLength(1);
       expect((opens[0]?.body as { root_path?: string }).root_path).toBe(root);
       expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(true);
+      expect((view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement).value)
+        .toBe("从这个目录开始");
+      expect(view.wrapper.get('[data-testid="assist-first-send"]').attributes("disabled")).toBeUndefined();
       expect(document.querySelector('[data-testid="collab-directory-pending"]')).toBeNull();
       expect(posts.some((post) => post.path === `${prefix}/assist-sessions`)).toBe(false);
       expect(folderStripName()).toBe("MyProject");
       expect(folderStripAssociation()).toContain("已归入项目：MyProject");
 
       // 目录打开后仍是既有链路：首条发送时建会话 → 先绑目录 → 再发消息。
-      await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("从这个目录开始");
       await flush();
       await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
       await flush();
@@ -354,6 +360,38 @@ describe("文件夹入口与对话直接执行", () => {
         { project_id?: string };
       expect(create.project_id).toBe(projectId);
     } finally { releaseOpen(); view.unmount(); }
+  });
+
+  it("目录已打开、项目事实仍在读时不退回整页核对态，首条照常可写可发", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    let releaseProject!: () => void;
+    const projectGate = new Promise<void>((resolve) => { releaseProject = resolve; });
+    const base = router({}, posts);
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if ((init?.method ?? "GET") === "GET" && path === `${prefix}/projects/${projectId}`) await projectGate;
+      return base(input, init);
+    }));
+    const view = await mountWorkbench(`/agent?new=seed&dir=${encodeURIComponent(root)}`);
+    try {
+      await flush();
+      // 目录回执已到、项目详情与目标核对还没回来：首条输入器保持原样，不换整页核对态。
+      expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(true);
+      expect(folderStripName()).toBe("MyProject");
+      expect(document.body.textContent).not.toContain("正在核对对话目标与会话");
+      expect(document.body.textContent).not.toContain("正在刷新目标与会话");
+      expect(document.body.textContent).not.toContain("正在打开目录…");
+      // 目录回执里的项目事实足够建会话：不因项目详情在途按住发送键，也不丢草稿。
+      await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("项目事实稍后读回");
+      await flush();
+      expect(view.wrapper.get('[data-testid="assist-first-send"]').attributes("disabled")).toBeUndefined();
+      releaseProject();
+      await flush(); await flush();
+      expect(document.body.textContent).not.toContain("正在核对对话目标与会话");
+      expect((view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement).value)
+        .toBe("项目事实稍后读回");
+    } finally { releaseProject(); view.unmount(); }
   });
 
   it("目录打开无响应时不把用户困在途屏：慢阈值后给取消出口，取消只摘种子且不重发命令", async () => {
@@ -370,11 +408,12 @@ describe("文件夹入口与对话直接执行", () => {
     }));
     const view = await mountWorkbench(`/agent?new=seed&dir=${encodeURIComponent(root)}`);
     try {
-      // 快路径不加出口：阈值前只有核对态，没有取消键（本机 API 通常一瞬，不添视觉噪声）。
-      expect(view.wrapper.find('[data-testid="collab-directory-pending-cancel"]').exists()).toBe(false);
+      // 输入器不因目录在途消失；快路径不加出口（本机 API 通常一瞬，不添视觉噪声）。
+      expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(true);
+      expect(view.wrapper.find('[data-testid="collab-directory-slow-cancel"]').exists()).toBe(false);
       await flush(4200);
-      expect(view.wrapper.find('[data-testid="collab-directory-pending-cancel"]').exists()).toBe(true);
-      await view.wrapper.get('[data-testid="collab-directory-pending-cancel"]').trigger("click");
+      expect(view.wrapper.find('[data-testid="collab-directory-slow"]').exists()).toBe(true);
+      await view.wrapper.get('[data-testid="collab-directory-slow-cancel"]').trigger("click");
       await flush(); await flush();
       // 取消只摘 `?dir=` 种子：回到同一条新对话，面板就绪、输入区可见；不重发 open 命令。
       expect(view.router.currentRoute.value.query.dir).toBeUndefined();
@@ -1214,7 +1253,8 @@ describe("默认工作目录继承与目录名呈现", () => {
   const inheritedSessionId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   const defaultRoot = "D://Develop//DefaultWork";
   const defaultProjection = { resource_id: "res-default", canonical_root: defaultRoot,
-    display_name: "DefaultWork", write_tier: "READ_ONLY", status: "READY", reason: null, revision: "2" };
+    display_name: "DefaultWork", write_tier: "READ_ONLY", default_write_tier: null,
+    status: "READY", reason: null, revision: "2" };
 
   function sessionRow(source?: "WORKSPACE_DEFAULT" | "USER_PICKED" | null) {
     return { id: inheritedSessionId, workspace_id: workspaceId, project_id: inheritedProjectId,

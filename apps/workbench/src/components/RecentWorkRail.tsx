@@ -112,8 +112,14 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
    * 两段里，勾一处两处一起勾上，删除也只发一条命令。任务行没有删除命令，不参与选择。
    */
   const [selected, setSelected] = useState<readonly string[]>([]);
-  /** `confirm` 是就地确认（与 ⋯ 面板里的删除确认同一读法），`busy` 是命令在途。 */
-  const [batch, setBatch] = useState<"idle" | "confirm" | "busy">("idle");
+  /**
+   * `confirm` 是就地确认（与 ⋯ 面板里的删除确认同一读法），`busy` 是命令在途，
+   * `result` 是**终态**：确认之后在同一张卡片里给出结果，只留「关闭」。
+   *
+   * 失败后不再退回 `idle` —— 退回会让同一张卡片第三次变成「已选 N 段讨论 + 删除」，
+   * 像在要求用户再确认一遍一件刚被拒绝的事（DEV-0098，2026-10-21 用户截图指认）。
+   */
+  const [batch, setBatch] = useState<"idle" | "confirm" | "busy" | "result">("idle");
   /** 批量删除的结果说明：部分成功、被引用阻止、结果不明都写在这里，不吞成一句「删除失败」。 */
   const [batchError, setBatchError] = useState<string | null>(null);
   /** 有哪一条的删除回执对不上：结果未定，确认键锁死，只能由「取消」退出。 */
@@ -266,7 +272,8 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
    *    按契约不得换 `command_id` 重试：勾选保留、确认键锁死，说明未定并让人自己核对列表
    *    （与 ⋯ 面板里那条单条删除同一读法：不替用户猜，也不替他重发）。
    * 4. **被引用阻止不是失败。** `SESSION_DELETE_BLOCKED` 是业务拒绝（行还在），说明里给出
-   *    阻止项并指向归档；这一条留在选择集里，用户可以回去归档后再删。
+   *    阻止项并指向归档；结果停在结果态，读完原因点「关闭」即结束这一轮。要再试时重新勾选，
+   *    不在同一张卡片里反复 offer 同一个必然被拒绝的删除（DEV-0098）。
    * 5. **同一原因只说一次。** 被阻止的讨论按阻断原因聚合：原因写一次、标题并列（同名去重后
    *    仍读得出几条），「先改为归档…」那句建议也只出现一次——三行同因各写一遍整句，会把
    *    这块窄卡片铺满红字（2026-10-20 用户截图指认）。
@@ -307,8 +314,6 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
         : previous.filter((item) => !gone.has(item.id)));
       setSelected((current) => current.filter((sessionId) => !gone.has(sessionId)));
     }
-    setBatch("idle");
-    setBatchUncertain(uncertain.length > 0);
     const sentences: string[] = [...failed];
     if (blockedByReason.size > 0) {
       const blockedNotes = [...blockedByReason].map(([reason, titles]) => {
@@ -325,8 +330,16 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
       sentences.push(`${uncertain.join("、")}的删除结果不明（响应丢失），本次是否已删除尚未确定；请核对列表后再决定，不要重复删除。`);
     }
     // 全部成功时不留提示：行当场消失就是回执，删除不可撤销、也不需要撤销条。
-    setBatchError(sentences.length === 0 ? null
-      : `已删除 ${removed.length} 段讨论；${sentences.join(" ")}`);
+    setBatchUncertain(uncertain.length > 0);
+    if (sentences.length === 0) {
+      setBatch("idle");
+      setBatchError(null);
+      return;
+    }
+    // 有失败就停在结果态（DEV-0098）：同一张确认卡片里读完原因后「关闭」，
+    // 不退回带「删除」按钮的第三次确认。
+    setBatch("result");
+    setBatchError(`已删除 ${removed.length} 段讨论；${sentences.join(" ")}`);
   }
 
   // 会话创建/切换由协作页发布确切身份；只读回这一条，不重置已经加载的任务分页。
@@ -384,35 +397,39 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
    * 整个主工作区；靠 sticky 在这一段里滚动时停在列顶，不跟着滚走。无勾选时整块不渲染，
    * 这一列逐像素回到原样——不无条件占高度，也不遮挡目录条目。
    *
-   * 内容与状态机和旧浮层完全一致（就地确认、逐段发命令、部分成功如实报、结果不明锁死），
-   * 只换了落点。只有「已归档」里还有会话可勾、而上面三段都没渲染时（loadedCount === 0），
+   * 内容与状态机和旧浮层一致（就地确认、逐段发命令、部分成功如实报），结果停在终态：
+   * 失败后只留「关闭」，不再退回带「删除」按钮的第三次确认（DEV-0098）。
+   * 落点仍是原处。只有「已归档」里还有会话可勾、而上面三段都没渲染时（loadedCount === 0），
    * 才落到列表上方那个兜底位置——否则勾了东西却看不到操作栏。
    */
   const batchBar = selecting ? <div className="recent-work-selection" role="group"
     aria-label="批量删除会话" data-testid="recent-work-selection">
     <p className="recent-work-selection-count" data-testid="recent-work-selection-count">
-      {batch === "idle" ? `已选 ${selectedSessions.length} 段讨论` : `删除这 ${selectedSessions.length} 段讨论？`}</p>
-    {batch !== "idle" && <p className="recent-work-selection-note">
+      {batch === "idle" ? `已选 ${selectedSessions.length} 段讨论`
+        : batch === "result" ? "删除结果" : `删除这 ${selectedSessions.length} 段讨论？`}</p>
+    {(batch === "confirm" || batch === "busy") && <p className="recent-work-selection-note">
       消息、附件与工具调用记录将永久移除，无法恢复。</p>}
     {batchError !== null && <p className="recent-work-row-error" role="alert"
       data-testid="recent-work-batch-error">{batchError}</p>}
     <div className="recent-work-confirm-actions">
-      {batch === "idle"
-        ? <>
-          <button type="button" className="text-button recent-work-selection-danger"
-            data-testid="recent-work-batch-delete"
-            onClick={() => { setBatchError(null); setBatch("confirm"); }}>删除</button>
-          <button type="button" className="text-button" data-testid="recent-work-selection-clear"
-            onClick={clearSelection}>取消</button>
-        </>
-        : <>
-          <button type="button" className="danger-button" disabled={batch === "busy" || batchUncertain}
-            data-testid="recent-work-batch-delete-confirm"
-            onClick={() => void deleteSelected()}>{batch === "busy" ? "正在删除…" : "删除"}</button>
-          <button type="button" className="secondary-button" disabled={batch === "busy"}
-            data-testid="recent-work-batch-delete-cancel"
-            onClick={() => setBatch("idle")}>取消</button>
-        </>}
+      {batch === "idle" ? <>
+        <button type="button" className="text-button recent-work-selection-danger"
+          data-testid="recent-work-batch-delete"
+          onClick={() => { setBatchError(null); setBatch("confirm"); }}>删除</button>
+        <button type="button" className="text-button" data-testid="recent-work-selection-clear"
+          onClick={clearSelection}>取消</button>
+      </> : batch === "result" ? <>
+        {/* 结果态只留关闭：业务拒绝（被引用/有执行请求）不让删除，再摆一颗「删除」只会重演同一次拒绝。 */}
+        <button type="button" className="secondary-button" data-testid="recent-work-batch-result-close"
+          onClick={clearSelection}>关闭</button>
+      </> : <>
+        <button type="button" className="danger-button" disabled={batch === "busy" || batchUncertain}
+          data-testid="recent-work-batch-delete-confirm"
+          onClick={() => void deleteSelected()}>{batch === "busy" ? "正在删除…" : "删除"}</button>
+        <button type="button" className="secondary-button" disabled={batch === "busy"}
+          data-testid="recent-work-batch-delete-cancel"
+          onClick={() => setBatch("idle")}>取消</button>
+      </>}
     </div>
   </div> : null;
   // 归档区也吃同一个搜索词：一列里两套筛选规则会让人以为搜到的和看到的是两件事。

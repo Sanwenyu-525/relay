@@ -36,16 +36,17 @@ function response(body: unknown, status = 200): Response {
 }
 
 type Projection = { resource_id: string | null; canonical_root: string | null; display_name: string | null;
-  write_tier: string | null; status: "UNSET" | "READY" | "UNAVAILABLE"; reason: string | null; revision: string };
+  write_tier: string | null; default_write_tier: string | null;
+  status: "UNSET" | "READY" | "UNAVAILABLE"; reason: string | null; revision: string };
 
 function unset(revision = "0"): Projection {
   return { resource_id: null, canonical_root: null, display_name: null, write_tier: null,
-    status: "UNSET", reason: null, revision };
+    default_write_tier: null, status: "UNSET", reason: null, revision };
 }
 
 function ready(revision = "1"): Projection {
   return { resource_id: "res-1", canonical_root: root, display_name: "Demo", write_tier: "READ_ONLY",
-    status: "READY", reason: null, revision };
+    default_write_tier: null, status: "READY", reason: null, revision };
 }
 
 function openResult(over: Record<string, unknown> = {}) {

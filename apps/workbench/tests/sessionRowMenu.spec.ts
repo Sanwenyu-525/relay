@@ -760,7 +760,8 @@ it("归档态的会话也能删除：只剩「重开」与「删除」两条，�
  * 1. **选择只是选择。** 勾选不发命令、不动行；只有确认那一下才发删除。
  * 2. **一段一条命令。** 批量不是新端点：每段各取 command_id、各带读回来的修订，不假装原子。
  * 3. **部分成功要如实报。** 被引用阻止的那条留在列表里并留在选择集里，同一原因只写一次。
- * 4. **结果不明不重发。** 回执对不上就锁死确认键，勾选保留，只能由「取消」退出。
+ * 4. **结果只给一次。** 失败后停在结果态（DEV-0098），同一张确认卡片里读完原因就关闭，
+ *    不退回带「删除」按钮的第三次确认；结果不明也不重发。
  * ------------------------------------------------------------------------------------------- */
 
 const selectOf = (container: HTMLElement, sessionId: string) =>
@@ -848,10 +849,15 @@ it("被引用阻止的那段留在列表与选择集里，其余照删，说明�
   expect(alert?.textContent).toContain("已删除 1 段讨论");
   expect(alert?.textContent).toContain("被任务验收观察引用");
   expect(alert?.textContent).toContain("归档");
-  // 失败的那段仍勾着（用户可以回去归档后再删）；业务拒绝不是结果不明，确认键不锁死。
+  // 失败的那段仍勾着（用户可以回去归档后再删）；结果态不再提供第二次删除确认。
   expect(selectOf(container, id(1))?.checked).toBe(true);
-  expect(barText(container)).toContain("已选 1 段讨论");
-  expect(barButton(container, "recent-work-batch-delete")?.disabled).toBe(false);
+  expect(barText(container)).toContain("删除结果");
+  expect(barButton(container, "recent-work-batch-delete")).toBeNull();
+  expect(barButton(container, "recent-work-batch-delete-confirm")).toBeNull();
+  // 关闭即结束这一轮：勾选清空，卡片收起，不会再出现第三次确认。
+  await clickBar(container, "recent-work-batch-result-close");
+  expect(barOf(container)).toBeNull();
+  expect(selectOf(container, id(1))?.checked).toBe(false);
 });
 
 it("同因被阻止的多段合并成一句：原因只出现一次，同名标题按段数报", async () => {
@@ -872,9 +878,14 @@ it("同因被阻止的多段合并成一句：原因只出现一次，同名标�
   expect(text.split("还不能删除").length - 1).toBe(1);
   expect(text.split("先改为归档").length - 1).toBe(1);
   expect(selectOf(container, id(1))?.checked).toBe(true);
+  // 结果态是本轮唯一终态：不会退回「已选 3 段讨论 + 删除」的第三次确认。
+  expect(barText(container)).toContain("删除结果");
+  expect(barButton(container, "recent-work-batch-delete")).toBeNull();
+  await clickBar(container, "recent-work-batch-result-close");
+  expect(barOf(container)).toBeNull();
 });
 
-it("批量删除的回执对不上时锁死确认键：不换 command_id 重发，勾选保留", async () => {
+it("批量删除的回执对不上时停在结果态：不换 command_id 重发，关闭后才清选择", async () => {
   const fake = fakeServer([row(1, "回执不明", "01")], { deleteReceiptCarriesForeignCommandId: true });
   const { container } = await mount(fake);
   await toggleRow(container, id(1));
@@ -886,12 +897,10 @@ it("批量删除的回执对不上时锁死确认键：不换 command_id 重发�
   expect(alert?.textContent).toContain("是否已删除尚未确定");
   // 行与勾选都留着：本次是否删掉未定，界面不替用户猜。
   expect(selectOf(container, id(1))?.checked).toBe(true);
-
-  // 再点一次「删除」只进确认态；确认键已锁死，点下去也不会多发一条命令。
-  await clickBar(container, "recent-work-batch-delete");
-  const confirm = barButton(container, "recent-work-batch-delete-confirm");
-  expect(confirm?.disabled).toBe(true);
-  await act(async () => { confirm?.click(); });
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  // 结果态没有再次删除的入口；关闭只退出本轮，不会再发命令。
+  expect(barButton(container, "recent-work-batch-delete")).toBeNull();
+  expect(barButton(container, "recent-work-batch-delete-confirm")).toBeNull();
+  await clickBar(container, "recent-work-batch-result-close");
+  expect(barOf(container)).toBeNull();
   expect(fake.posts).toHaveLength(1);
 });
