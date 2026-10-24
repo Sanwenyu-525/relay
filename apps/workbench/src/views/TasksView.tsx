@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Info, ListTodo, Plus, RotateCcw, Search, SearchX } from "lucide-react";
-import type { RelayApiClient, RelayTaskSummary } from "../api/relayClient";
+import { RelayApiError, type RelayApiClient, type RelayTaskSummary } from "../api/relayClient";
 import EmptyState from "../components/EmptyState";
 import ResponsiveRail from "../components/ResponsiveRail";
 import AttentionQueue from "../components/AttentionQueue";
@@ -24,6 +24,18 @@ const modeOptions = Object.keys(interactionModeLabels) as InteractionMode[];
 // 任务整行是链接：行的可点性由 hover 背景与独立动作表达，去掉链接默认下划线，
 // 与按钮行（.data-row）及 .dependency-card 的既有观感保持一致。
 const rowLinkStyle = { textDecoration: "none" } as const;
+
+/**
+ * 失权或作用域失效：这类错误说明已经读到的内容不再属于可见范围，不能按「暂时不可用」保留。
+ * 401/403/404 与 AUTH_REQUIRED／RESOURCE_NOT_FOUND 都按此判定，口径与项目列表页（#110）
+ * 和 ActivityView 的续页处理一致：暂时不可用保留前页，已失权清空并报无权。
+ */
+function isAccessLost(caught: unknown): boolean {
+  if (!(caught instanceof RelayApiError)) return false;
+  const { status, code } = caught.problem;
+  return status === 401 || status === 403 || status === 404
+    || code === "AUTH_REQUIRED" || code === "RESOURCE_NOT_FOUND";
+}
 
 export default function TasksView() {
   const navigate = useNavigate();
@@ -120,6 +132,8 @@ function LiveTaskListView({ client, onCreate, onCreateLightweight }: {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 续页失败是局部状态：已读任务与原游标都要留着，按原游标重试（禅道 #101）。
+  const [moreError, setMoreError] = useState<string | null>(null);
   const [projectFilter, setProjectFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
   const [modeFilter, setModeFilter] = useState<InteractionMode | "all">("all");
@@ -134,19 +148,29 @@ function LiveTaskListView({ client, onCreate, onCreateLightweight }: {
     busy.current = true;
     const request = ++requestVersion.current;
     if (cursor === null) {
-      setItems([]); setNextCursor(null); setLoading(true);
-    } else setLoadingMore(true);
-    setError(null);
+      // 首读：从头开始，失败时走全页错误态。
+      setItems([]); setNextCursor(null); setLoading(true); setError(null); setMoreError(null);
+    } else {
+      // 续页：已读任务与原游标都留着，失败只就地提示（禅道 #101）。
+      setLoadingMore(true); setMoreError(null);
+    }
     try {
       const page = await client.getWorkspaceTasksPage(cursor);
       if (request !== requestVersion.current) return;
-      setItems((current) => cursor === null ? page.items : [...current, ...page.items]);
+      // 续页按 ID 去重：同一游标重试成功也不会重复追加首屏已有项。
+      setItems((current) => cursor === null ? page.items
+        : [...current, ...page.items.filter((item) => !current.some((seen) => seen.id === item.id))]);
       setNextCursor(page.nextCursor);
     } catch (caught) {
-      if (request === requestVersion.current) {
-        setItems([]); setNextCursor(null);
-        setError(describeLiveError(caught).message);
+      if (request !== requestVersion.current) return;
+      if (cursor !== null && !isAccessLost(caught)) {
+        // 暂时不可用：保留已读任务与原游标，按原游标重试即可，不清空列表。
+        setMoreError(describeLiveError(caught).message);
+        return;
       }
+      // 首读失败，或续页时失权／作用域失效：不得保留已失权数据，回到全页错误态。
+      setItems([]); setNextCursor(null);
+      setError(describeLiveError(caught).message);
     } finally {
       if (request === requestVersion.current) {
         busy.current = false; setLoading(false); setLoadingMore(false);
@@ -234,8 +258,9 @@ function LiveTaskListView({ client, onCreate, onCreateLightweight }: {
                   : projectTitles[task.projectId] ?? `项目 ${task.projectId}`}</span><span className="data-cell"><StatusChip status={task.status} />
                   {task.waitingReason && <small>{task.waitingReason}</small>}</span><span className="data-cell data-cell--meta">{interactionModeLabels[task.mode]}</span>
                 <span className="data-cell data-cell--meta">{executorLabels[task.executor]}</span></Link></li>)}</ul></div></div>}
+          {moreError && <p className="action-error" role="alert" data-testid="tasks-live-more-error">续页失败：{moreError}；已保留前面加载的结果，可按原游标重试。</p>}
           {nextCursor && <button className="secondary-button" type="button" data-testid="tasks-live-load-more"
-            disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>{loadingMore ? "正在加载" : "加载更多"}</button>}
+            disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>{loadingMore ? "正在加载" : moreError ? "重试加载后续页" : "加载更多"}</button>}
         </>}
     </div><ResponsiveRail label="查看任务范围" title="已加载范围"><div className="rail-content"><h2>全工作空间范围</h2>
       <p className="rail-intro">服务端返回当前工作空间的项目内与未归属任务。每页最多 50 项；状态、模式和标题筛选只处理已加载的页，不代表全量任务总数。</p>

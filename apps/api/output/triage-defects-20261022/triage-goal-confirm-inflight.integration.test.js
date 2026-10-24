@@ -1,0 +1,42 @@
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import test,{before,after} from 'node:test';
+import fs from 'node:fs';
+import {runMigrations} from '../../dist/src/infrastructure/migration-runner.js';
+import {APP_DATABASE_URL,MIGRATION_DATABASE_URL,MIGRATIONS_DIRECTORY,openDatabase} from '../../dist/test/integration/integration-support.js';
+import {createWorkspace,startTestApi,workspacePath} from '../../dist/test/integration/api-harness.js';
+import {createAssistSession,requestAssistMessage} from '../../dist/src/application/assist-commands.js';
+import {runAssistGenerationTick} from '../../dist/src/application/assist-runner.js';
+import {runAssistGoalTick} from '../../dist/src/application/goal-advance.js';
+import {createRepositories} from '../../dist/src/application/unit-of-work.js';
+import {ManagedContentStore} from '../../dist/src/storage/managed-content-store.js';
+import {FakeModelPort} from '../../dist/src/workflow/fake-model-port.js';
+const app=openDatabase(APP_DATABASE_URL,'triage-goal-confirm-inflight');let api,wid;
+before(async()=>{await runMigrations({connectionString:MIGRATION_DATABASE_URL,directory:MIGRATIONS_DIRECTORY});api=await startTestApi();wid=await createWorkspace(app.db);});
+after(async()=>{await api?.stop();await app.close();});
+test('goal completion must not be accepted while its supplemental message is still pending',async()=>{
+ const repos=createRepositories(app.db);const samples=[];
+ for(const supplemental of [false,true]){
+  const sid=(await createAssistSession(app.db,{workspaceId:wid,commandId:randomUUID(),projectId:null,title:`confirm pending ${supplemental}`})).result.session_id;
+  const first=await requestAssistMessage(app.db,{workspaceId:wid,sessionId:sid,commandId:randomUUID(),chatMode:'GOAL',content:'完成检查'});
+  const gid=first.result.goal_id;
+  const second=supplemental?await requestAssistMessage(app.db,{workspaceId:wid,sessionId:sid,commandId:randomUUID(),chatMode:'GOAL',content:'补充：还需要核对安装步骤'}):null;
+  if(second)assert.equal(second.result.goal_id,gid);
+  let calls=0;
+  const port={identity:new FakeModelPort().identity,assist:async()=>{calls++;return {kind:'CONTENT',content:JSON.stringify({reply:'已检查。',goal:{state:'COMPLETE',success_criteria:[{key:'c1',statement:'检查通过',required:true}],criteria_status:[{key:'c1',status:'MET',evidence:'受控检查返回通过'}],steps:[],current_step:null,progress:'检查完成',questions:[],blocked_reason:null,adjustment:null}}),providerRequestId:`triage-${calls}`,usage:{inputTokens:1,outputTokens:1,cacheReadTokens:null,cacheCreationTokens:null}};}};
+  const generation=async(target)=>{for(let i=0;i<12;i++){const r=await runAssistGenerationTick(app.db,{workerId:`generate-${randomUUID()}`,storage:new ManagedContentStore(api.dataRoot),modelPort:port,leaseMs:60000,maxMessages:1});if(r?.messageId===target&&r.status!=='DISCARDED')return r;}assert.fail('target generation did not settle');};
+  assert.equal((await generation(first.result.assistant_message_id)).status,'COMPLETED');
+  await runAssistGoalTick(app.db,{workerId:`settle-${randomUUID()}`});
+  const before=await api.get(workspacePath(wid,`/assist-sessions/${sid}/goal`));assert.equal(before.status,200,before.text);
+  const inflight=await repos.planGoals.readInflightRoundMessage(gid);
+  const confirm=await api.post(workspacePath(wid,`/assist-goals/${gid}/complete`),{command_id:randomUUID()});
+  const afterConfirm=(await repos.planGoals.readGoal(gid)).status;
+  const callsBefore=calls;
+  const after=second?await generation(second.result.assistant_message_id):null;
+  const finalTick=await runAssistGoalTick(app.db,{workerId:`after-${randomUUID()}`});
+  samples.push({supplemental,beforeGoalStatus:before.body.goal?.status,confirmAction:before.body.goal?.actions.confirm_completion,inflight:inflight?{id:inflight.id,status:inflight.status}:null,confirmHttp:confirm.status,confirmBody:confirm.body,goalAfterConfirm:afterConfirm,callsAfterConfirm:calls-callsBefore,laterGeneration:after,finalGoalStatus:(await repos.planGoals.readGoal(gid)).status,laterRoundRecorded:second?(await repos.planGoals.readRoundByMessage(second.result.assistant_message_id))!==undefined:null,finalTick});
+ }
+ assert.equal(samples[0].confirmHttp,200,'control: no pending message may be confirmed');
+ fs.writeFileSync('output/triage-defects-20261022/goal-confirm-inflight.json',JSON.stringify(samples,null,2));console.log('TRIAGE_GOAL_CONFIRM_INFLIGHT',JSON.stringify(samples));
+ assert.notEqual(samples[1].confirmHttp,200,'pending supplemental work must prevent completion acceptance');
+});

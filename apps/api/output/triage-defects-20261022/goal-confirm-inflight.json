@@ -1,0 +1,141 @@
+[
+  {
+    "supplemental": false,
+    "beforeGoalStatus": "AWAITING_ACCEPTANCE",
+    "confirmAction": true,
+    "inflight": null,
+    "confirmHttp": 200,
+    "confirmBody": {
+      "command_id": "27bbede4-4ebb-4197-a372-9b39dfe7161a",
+      "committed_at": "2026-10-23T11:05:56.096Z",
+      "result": {
+        "goal": {
+          "goal_id": "895eb74d-b62f-45f7-8098-ad5c876579d4",
+          "session_id": "1dac0b84-6523-4dd3-9adb-df520025a7e5",
+          "objective": "完成检查",
+          "status": "COMPLETED",
+          "current_step": null,
+          "progress": "检查完成",
+          "stop_reason": {
+            "code": "AWAITING_ACCEPTANCE",
+            "detail": "目标已按成功条件完成自检，需要你确认后才会记作完成。",
+            "questions": [],
+            "resumable": false
+          },
+          "criteria": [
+            {
+              "key": "c1",
+              "statement": "检查通过",
+              "status": "MET",
+              "evidence": "受控检查返回通过",
+              "required": true
+            }
+          ],
+          "steps": [],
+          "round_count": 1,
+          "no_progress_rounds": 0,
+          "plan_version_id": null,
+          "plan_version": null,
+          "last_round_at": "2026-10-23T11:05:56.046Z",
+          "actions": {
+            "pause": false,
+            "cancel": false,
+            "resume": false,
+            "confirm_completion": false
+          },
+          "revision": "3",
+          "created_at": "2026-10-23T11:05:55.989Z",
+          "updated_at": "2026-10-23T11:05:56.096Z"
+        }
+      },
+      "links": {
+        "resource": "/api/v1/workspaces/1ac0a91e-cb33-4ea6-a565-65c80b5df017/"
+      }
+    },
+    "goalAfterConfirm": "COMPLETED",
+    "callsAfterConfirm": 0,
+    "laterGeneration": null,
+    "finalGoalStatus": "COMPLETED",
+    "laterRoundRecorded": null,
+    "finalTick": {
+      "advanced": [],
+      "settled": [],
+      "controls": [],
+      "skipped": []
+    }
+  },
+  {
+    "supplemental": true,
+    "beforeGoalStatus": "AWAITING_ACCEPTANCE",
+    "confirmAction": true,
+    "inflight": {
+      "id": "f403ca65-620a-47b4-aa69-db102f46bda6",
+      "status": "PENDING"
+    },
+    "confirmHttp": 200,
+    "confirmBody": {
+      "command_id": "3ee5dbba-9f36-4457-87d9-0c6d91fdd0b7",
+      "committed_at": "2026-10-23T11:05:56.149Z",
+      "result": {
+        "goal": {
+          "goal_id": "e2735ef1-d7e1-45ef-9aa9-a5be7a32166b",
+          "session_id": "9f988e07-4c9f-4d4a-986c-cb9f068176e9",
+          "objective": "完成检查",
+          "status": "COMPLETED",
+          "current_step": null,
+          "progress": "检查完成",
+          "stop_reason": {
+            "code": "AWAITING_ACCEPTANCE",
+            "detail": "目标已按成功条件完成自检，需要你确认后才会记作完成。",
+            "questions": [],
+            "resumable": false
+          },
+          "criteria": [
+            {
+              "key": "c1",
+              "statement": "检查通过",
+              "status": "MET",
+              "evidence": "受控检查返回通过",
+              "required": true
+            }
+          ],
+          "steps": [],
+          "round_count": 1,
+          "no_progress_rounds": 0,
+          "plan_version_id": null,
+          "plan_version": null,
+          "last_round_at": "2026-10-23T11:05:56.138Z",
+          "actions": {
+            "pause": false,
+            "cancel": false,
+            "resume": false,
+            "confirm_completion": false
+          },
+          "revision": "3",
+          "created_at": "2026-10-23T11:05:56.113Z",
+          "updated_at": "2026-10-23T11:05:56.149Z"
+        }
+      },
+      "links": {
+        "resource": "/api/v1/workspaces/1ac0a91e-cb33-4ea6-a565-65c80b5df017/"
+      }
+    },
+    "goalAfterConfirm": "COMPLETED",
+    "callsAfterConfirm": 1,
+    "laterGeneration": {
+      "messageId": "f403ca65-620a-47b4-aa69-db102f46bda6",
+      "sessionId": "9f988e07-4c9f-4d4a-986c-cb9f068176e9",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "proposalIds": []
+    },
+    "finalGoalStatus": "COMPLETED",
+    "laterRoundRecorded": false,
+    "finalTick": {
+      "advanced": [],
+      "settled": [],
+      "controls": [],
+      "skipped": []
+    }
+  }
+]

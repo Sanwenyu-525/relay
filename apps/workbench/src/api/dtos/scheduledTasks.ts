@@ -57,6 +57,8 @@ export interface RelayScheduledTaskOccurrence {
 export interface RelayScheduledTaskDetail extends RelayScheduledTask {
   project: { title: string; revision: string; archived: boolean };
   occurrences: readonly RelayScheduledTaskOccurrence[];
+  /** 最近 20 条窗口之外仍未处理（BLOCKED）的时段；待处理触发以它为准，避免旧阻塞丢入口。 */
+  pendingOccurrences: readonly RelayScheduledTaskOccurrence[];
 }
 
 export interface RelayScheduledTaskCreate {

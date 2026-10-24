@@ -1,0 +1,42 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import test, { before, after } from 'node:test';
+import fs from 'node:fs';
+import { runMigrations } from '../../dist/src/infrastructure/migration-runner.js';
+import { APP_DATABASE_URL, MIGRATION_DATABASE_URL, MIGRATIONS_DIRECTORY, openDatabase } from '../../dist/test/integration/integration-support.js';
+import { createWorkspace, expectCommandAccepted, startTestApi, workspacePath } from '../../dist/test/integration/api-harness.js';
+const app = openDatabase(APP_DATABASE_URL, 'triage-acceptance-artifact-current');
+let api;
+let wid;
+before(async () => { await runMigrations({ connectionString: MIGRATION_DATABASE_URL, directory: MIGRATIONS_DIRECTORY }); api = await startTestApi(); wid = await createWorkspace(app.db); });
+after(async () => { await api?.stop(); await app.close(); });
+async function post(suffix, body, status = 200) { const id = randomUUID(); return expectCommandAccepted(await api.post(workspacePath(wid, suffix), { command_id: id, ...body }), status, id); }
+async function get(suffix) { const res = await api.get(workspacePath(wid, suffix)); assert.equal(res.status, 200, res.text); return res.body; }
+test('latest artifact v2 must be current and old v1 stale in both material flags and trial comparison scope', async () => {
+  const project = await post('/projects', { title: 'current version ordering probe', project_type: 'GENERAL' }, 201);
+  const task = await post('/tasks', { project_id: project.project_id, title: 'version scope probe', objective: 'compare exact versions', criteria: [{ criterion_id: 'c1', statement: 'human check' }] }, 201);
+  const ready = await post(`/tasks/${task.task_id}/ready`, { expected_revision: task.revision });
+  const started = await post(`/tasks/${task.task_id}/start`, { expected_revision: ready.revision });
+  const v1 = await post(`/tasks/${task.task_id}/artifacts`, { expected_task_revision: started.revision, title: 'two version artifact', media_type: 'text/markdown', content: '# version 1' }, 201);
+  const knowledge = await post('/knowledge', { project_id: project.project_id, title: 'human notes', source_kind: 'NOTE', text: 'version-bound observations' }, 201);
+  const materialPath = `/tasks/${task.task_id}/acceptance-materials`;
+  const attach = versionId => post(materialPath, { expected_acceptance_revision: task.acceptance_revision, knowledge_id: knowledge.knowledge_id, knowledge_version: knowledge.version, criterion_id: 'c1', tested_artifact_version_id: versionId });
+  const m1 = await attach(v1.version_id);
+  assert.equal((await get(materialPath)).items[0].tested_artifact_is_current, true);
+  const trialPath = `/tasks/${task.task_id}/acceptance-trials`;
+  const original = await post(trialPath, { expected_acceptance_revision: task.acceptance_revision, mode: 'ORIGINAL', sample_label: 'baseline' });
+  const ended = await post(`${trialPath}/${original.trial_id}/transitions`, { expected_revision: original.revision, action: 'FINISH' });
+  const comparisonPath = `/projects/${project.project_id}/acceptance-comparisons`;
+  const comparison = await post(comparisonPath, { baseline_trial_id: original.trial_id, expected_baseline_revision: ended.revision, target_reduction_percent: 10, sample_scope: 'same task same criterion exact artifact versions' });
+  const oldTrial = await post(trialPath, { expected_acceptance_revision: task.acceptance_revision, mode: 'EVIDENCE_VIEW', sample_label: 'v1 before revision', material_ids: [m1.material_id], comparison_id: comparison.comparison_id });
+  const v2 = await post(`/artifacts/${v1.artifact_id}/versions`, { expected_artifact_revision: v1.artifact_revision, expected_task_revision: v1.task_revision, media_type: 'text/markdown', content: '# version 2' }, 201);
+  const m2 = await attach(v2.version_id);
+  const newTrial = await post(trialPath, { expected_acceptance_revision: task.acceptance_revision, mode: 'EVIDENCE_VIEW', sample_label: 'v2 after revision', material_ids: [m2.material_id], comparison_id: comparison.comparison_id });
+  const materials = await get(materialPath);
+  const comparisons = await get(comparisonPath);
+  const sample = id => comparisons.items.find(c => c.comparison_id === comparison.comparison_id).samples.find(s => s.trial_id === id);
+  const actual = { oldMaterialCurrent: materials.items.find(m => m.material_id === m1.material_id).tested_artifact_is_current, newMaterialCurrent: materials.items.find(m => m.material_id === m2.material_id).tested_artifact_is_current, oldTrialMaterialStatus: sample(oldTrial.trial_id).material_status, newTrialMaterialStatus: sample(newTrial.trial_id).material_status };
+  fs.writeFileSync('D:/Develop/Relay-Agent/apps/api/output/triage-defects-20261022/acceptance-artifact-current-evidence.json', JSON.stringify({ v1, v2, materials, comparisons, actual }, null, 2));
+  console.log('TRIAGE_ACCEPTANCE_ARTIFACT_CURRENT', JSON.stringify(actual));
+  assert.deepEqual(actual, { oldMaterialCurrent: false, newMaterialCurrent: true, oldTrialMaterialStatus: 'STALE', newTrialMaterialStatus: 'CURRENT' });
+});

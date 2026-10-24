@@ -1,0 +1,209 @@
+{
+  "ready": {
+    "sessionId": "93dcb585-ffec-480c-8739-bc5908d117ba",
+    "goalId": "fc99679f-7ddc-4849-affb-a5f98b1a3eda",
+    "messageId": "841581ae-2102-42c9-b3ea-f5284518545f"
+  },
+  "inflightGoalCount": 10,
+  "ticks": [
+    {
+      "advanced": [],
+      "settled": [
+        {
+          "goalId": "fc99679f-7ddc-4849-affb-a5f98b1a3eda",
+          "messageId": "841581ae-2102-42c9-b3ea-f5284518545f",
+          "outcome": "CONTINUE",
+          "status": "ACTIVE"
+        }
+      ],
+      "controls": [],
+      "skipped": [
+        {
+          "goalId": "c58aec97-a3c5-45ad-a418-7261b47b792a",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "4e2454ac-d2d9-4693-9ab2-c2ff2dff6a54",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "894cb132-bcbd-4323-9588-ff78ed1c946e",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "0ecd5df0-d4ea-4a77-9460-e3663b7b1870",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "9180d19c-edac-489b-865c-8c28fc308d8a",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "c31bab6c-7049-4491-a42a-ee276d84cd73",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "68cd0b4c-1d37-4807-96b7-cd45af491688",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "6f19ee18-411a-4505-8fde-f4fe003b334b",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "bd88c341-c40a-4dda-9e7a-ba5719fa985e",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "8009ade6-7364-4471-ae93-556989469b0b",
+          "reason": "INFLIGHT_ROUND"
+        }
+      ]
+    },
+    {
+      "advanced": [],
+      "settled": [],
+      "controls": [],
+      "skipped": [
+        {
+          "goalId": "c58aec97-a3c5-45ad-a418-7261b47b792a",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "4e2454ac-d2d9-4693-9ab2-c2ff2dff6a54",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "894cb132-bcbd-4323-9588-ff78ed1c946e",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "0ecd5df0-d4ea-4a77-9460-e3663b7b1870",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "9180d19c-edac-489b-865c-8c28fc308d8a",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "c31bab6c-7049-4491-a42a-ee276d84cd73",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "68cd0b4c-1d37-4807-96b7-cd45af491688",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "6f19ee18-411a-4505-8fde-f4fe003b334b",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "bd88c341-c40a-4dda-9e7a-ba5719fa985e",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "8009ade6-7364-4471-ae93-556989469b0b",
+          "reason": "INFLIGHT_ROUND"
+        }
+      ]
+    },
+    {
+      "advanced": [],
+      "settled": [],
+      "controls": [],
+      "skipped": [
+        {
+          "goalId": "c58aec97-a3c5-45ad-a418-7261b47b792a",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "4e2454ac-d2d9-4693-9ab2-c2ff2dff6a54",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "894cb132-bcbd-4323-9588-ff78ed1c946e",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "0ecd5df0-d4ea-4a77-9460-e3663b7b1870",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "9180d19c-edac-489b-865c-8c28fc308d8a",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "c31bab6c-7049-4491-a42a-ee276d84cd73",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "68cd0b4c-1d37-4807-96b7-cd45af491688",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "6f19ee18-411a-4505-8fde-f4fe003b334b",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "bd88c341-c40a-4dda-9e7a-ba5719fa985e",
+          "reason": "INFLIGHT_ROUND"
+        },
+        {
+          "goalId": "8009ade6-7364-4471-ae93-556989469b0b",
+          "reason": "INFLIGHT_ROUND"
+        }
+      ]
+    }
+  ],
+  "readyStatusBeforeControl": "ACTIVE",
+  "readyRoundCount": 1,
+  "controlAfterPausingOneInflightGoal": {
+    "advanced": [
+      {
+        "goalId": "fc99679f-7ddc-4849-affb-a5f98b1a3eda",
+        "messageId": "0dab0f85-0604-4f49-90b0-f86fe8f59831",
+        "roundIndex": 2
+      }
+    ],
+    "settled": [],
+    "controls": [],
+    "skipped": [
+      {
+        "goalId": "4e2454ac-d2d9-4693-9ab2-c2ff2dff6a54",
+        "reason": "INFLIGHT_ROUND"
+      },
+      {
+        "goalId": "894cb132-bcbd-4323-9588-ff78ed1c946e",
+        "reason": "INFLIGHT_ROUND"
+      },
+      {
+        "goalId": "0ecd5df0-d4ea-4a77-9460-e3663b7b1870",
+        "reason": "INFLIGHT_ROUND"
+      },
+      {
+        "goalId": "9180d19c-edac-489b-865c-8c28fc308d8a",
+        "reason": "INFLIGHT_ROUND"
+      },
+      {
+        "goalId": "c31bab6c-7049-4491-a42a-ee276d84cd73",
+        "reason": "INFLIGHT_ROUND"
+      },
+      {
+        "goalId": "68cd0b4c-1d37-4807-96b7-cd45af491688",
+        "reason": "INFLIGHT_ROUND"
+      },
+      {
+        "goalId": "6f19ee18-411a-4505-8fde-f4fe003b334b",
+        "reason": "INFLIGHT_ROUND"
+      },
+      {
+        "goalId": "bd88c341-c40a-4dda-9e7a-ba5719fa985e",
+        "reason": "INFLIGHT_ROUND"
+      },
+      {
+        "goalId": "8009ade6-7364-4471-ae93-556989469b0b",
+        "reason": "INFLIGHT_ROUND"
+      }
+    ]
+  }
+}

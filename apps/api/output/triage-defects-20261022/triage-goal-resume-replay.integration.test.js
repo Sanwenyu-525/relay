@@ -1,0 +1,46 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import test, { before, after } from 'node:test';
+import fs from 'node:fs';
+import { runMigrations } from '../../dist/src/infrastructure/migration-runner.js';
+import { APP_DATABASE_URL, MIGRATION_DATABASE_URL, MIGRATIONS_DIRECTORY, openDatabase } from '../../dist/test/integration/integration-support.js';
+import { createWorkspace, startTestApi, workspacePath } from '../../dist/test/integration/api-harness.js';
+import { createAssistSession, requestAssistMessage } from '../../dist/src/application/assist-commands.js';
+import { runAssistGenerationTick } from '../../dist/src/application/assist-runner.js';
+import { runAssistGoalTick } from '../../dist/src/application/goal-advance.js';
+import { createRepositories } from '../../dist/src/application/unit-of-work.js';
+import { ManagedContentStore } from '../../dist/src/storage/managed-content-store.js';
+import { FakeModelPort } from '../../dist/src/workflow/fake-model-port.js';
+import { ModelCallBudgetError } from '../../dist/src/workflow/openai-compatible-model-port.js';
+const app = openDatabase(APP_DATABASE_URL, 'triage-goal-resume-replay');
+let api, wid;
+before(async () => { await runMigrations({ connectionString: MIGRATION_DATABASE_URL, directory: MIGRATIONS_DIRECTORY }); api = await startTestApi(); wid = await createWorkspace(app.db); });
+after(async () => { await api?.stop(); await app.close(); });
+test('resuming a budget-exhausted goal must replay the same command after it becomes ACTIVE', async () => {
+  const repos = createRepositories(app.db);
+  const sid = (await createAssistSession(app.db, {workspaceId: wid, commandId: randomUUID(), projectId: null, title: 'budget resume replay'})).result.session_id;
+  const sent = await requestAssistMessage(app.db, {workspaceId: wid, sessionId: sid, commandId: randomUUID(), content: '完成说明', chatMode: 'GOAL'});
+  const gid = sent.result.goal_id;
+  const port = {identity: new FakeModelPort().identity, assist: async () => {throw new ModelCallBudgetError();}};
+  for (let i=0;i<12;i++) {
+    const outcome = await runAssistGenerationTick(app.db, {workerId: `triage-${randomUUID()}`, storage: new ManagedContentStore(api.dataRoot), modelPort: port, leaseMs: 60000, maxMessages: 1});
+    if (outcome?.messageId === sent.result.assistant_message_id && outcome.status !== 'DISCARDED') break;
+  }
+  const failed = await repos.assist.readMessage(sent.result.assistant_message_id);
+  assert.equal(failed.error_code, 'MODEL_BUDGET_EXHAUSTED');
+  await runAssistGoalTick(app.db, {workerId:`triage-${randomUUID()}`});
+  assert.equal((await repos.planGoals.readGoal(gid)).status, 'BUDGET_EXHAUSTED');
+  const commandId = randomUUID();
+  const route = workspacePath(wid, `/assist-goals/${gid}/resume`);
+  const first = await api.post(route,{command_id: commandId});
+  assert.equal(first.status,200,first.text);
+  assert.equal((await repos.planGoals.readGoal(gid)).status,'ACTIVE');
+  const grantBefore = await repos.planGoals.sumGrants(gid);
+  const replay = await api.post(route,{command_id: commandId});
+  const grantAfter = await repos.planGoals.sumGrants(gid);
+  assert.deepEqual(grantAfter,grantBefore);
+  const evidence={failedMessageCode:failed.error_code,firstStatus:first.status,firstBody:first.body,replayStatus:replay.status,replayBody:replay.body,grantBefore,grantAfter};
+  fs.writeFileSync('output/triage-defects-20261022/goal-resume-replay-evidence.json',JSON.stringify(evidence,null,2));
+  console.log('TRIAGE_GOAL_RESUME_REPLAY',JSON.stringify(evidence));
+  assert.equal(replay.status,200,`identical HTTP body and command_id must replay original receipt: ${replay.text}`);
+});

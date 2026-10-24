@@ -1,0 +1,52 @@
+{
+  "artifact": {
+    "task_id": "d3566151-38b3-441a-83bc-f70e3cdf4513",
+    "artifact_id": "3f1eda3c-76b6-4dc1-a6a6-ed58cbe39c61",
+    "artifact_revision": "0",
+    "version_id": "803bcc05-cd3d-4da1-a952-24165c771a58",
+    "version_number": "1",
+    "media_type": "text/markdown",
+    "sha256": "13fb61e9e7b990360e27840ba25a404664b2067304ede15285c6e1f83d59cfd9",
+    "size": "71",
+    "task_revision": "3"
+  },
+  "knowledge": {
+    "knowledge_id": "b643a72b-21ec-493e-92a8-60f5cd8a7479",
+    "revision": "0",
+    "version": "1",
+    "status": "ACTIVE"
+  },
+  "material": {
+    "material_id": "5f6d4237-c1d5-40e8-81c8-130b3dec31e8",
+    "task_id": "d3566151-38b3-441a-83bc-f70e3cdf4513",
+    "status": "ACTIVE",
+    "revision": "1"
+  },
+  "trial": {
+    "trial_id": "ae9cded1-3da9-4716-86a4-54bd9d09f1b5",
+    "task_id": "d3566151-38b3-441a-83bc-f70e3cdf4513",
+    "status": "RUNNING",
+    "revision": "1"
+  },
+  "beforeDamage": {
+    "contentStatus": "FULL",
+    "content": "# Durable source material\n\nOriginal content for the selected reference.",
+    "materialAvailability": "AVAILABLE",
+    "materialStatus": "CURRENT",
+    "assessment": "TARGET_MET"
+  },
+  "corrupt": {
+    "contentStatus": "READ_FAILED",
+    "content": null,
+    "materialAvailability": "AVAILABLE",
+    "materialStatus": "CURRENT",
+    "assessment": "TARGET_MET"
+  },
+  "missing": {
+    "contentStatus": "UNAVAILABLE",
+    "content": null,
+    "materialAvailability": "AVAILABLE",
+    "materialStatus": "CURRENT",
+    "assessment": "TARGET_MET"
+  }
+}

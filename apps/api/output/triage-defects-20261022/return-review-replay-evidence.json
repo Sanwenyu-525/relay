@@ -1,0 +1,72 @@
+{
+  "first": {
+    "review_id": "85d08a57-7f4a-412d-84ce-5887255a3efc",
+    "project_id": "67fc170a-7a39-4eb3-8011-0257f36d7bac",
+    "status": "CHANGED",
+    "fingerprint": "164f65118adea8e7f2367228c7c47f8ae7ed71ea952a90097b38fb97763964f1",
+    "reused": false,
+    "changed_dimensions": [
+      "baseline_missing"
+    ],
+    "delta": null,
+    "evidence": [],
+    "created_at": "2026-10-22T23:42:48.286Z"
+  },
+  "unchanged": {
+    "review_id": "85d08a57-7f4a-412d-84ce-5887255a3efc",
+    "project_id": "67fc170a-7a39-4eb3-8011-0257f36d7bac",
+    "status": "CHANGED",
+    "fingerprint": "164f65118adea8e7f2367228c7c47f8ae7ed71ea952a90097b38fb97763964f1",
+    "reused": true,
+    "changed_dimensions": [
+      "baseline_missing"
+    ],
+    "delta": null,
+    "evidence": [],
+    "created_at": "2026-10-22T23:42:48.286Z"
+  },
+  "replayStatus": 409,
+  "replayBody": {
+    "type": "/problems/command-id-reused",
+    "title": "command_id 已被不同内容使用",
+    "status": 409,
+    "detail": "同一 command_id 在同一作用域下已提交过不同内容；修正内容必须换 command_id。",
+    "instance": "/requests/req-c54cb9de-7abf-4c93-ab57-1ff7fb0b62b3",
+    "code": "COMMAND_ID_REUSED",
+    "request_id": "req-c54cb9de-7abf-4c93-ab57-1ff7fb0b62b3",
+    "retryable": false,
+    "retry_action": "NONE",
+    "field_errors": [
+      {
+        "field": "command_id",
+        "message": "已被使用，必须为修正后的内容换新 ID"
+      }
+    ],
+    "command_id": "c2d7cb9e-132c-4133-bf3a-0ef8135fdd25"
+  },
+  "fresh": {
+    "review_id": "2505e40d-6710-477b-a0e1-584fd2e5ffd4",
+    "project_id": "67fc170a-7a39-4eb3-8011-0257f36d7bac",
+    "status": "CHANGED",
+    "fingerprint": "fa16f4e588baec26797db6523d942303f0624025238fb11a4fe793e2b17c1e2e",
+    "reused": false,
+    "changed_dimensions": [
+      "baseline_missing"
+    ],
+    "delta": null,
+    "evidence": [],
+    "created_at": "2026-10-22T23:42:48.325Z"
+  },
+  "receipt": {
+    "command_id": "c2d7cb9e-132c-4133-bf3a-0ef8135fdd25",
+    "command_type": "ReviewProjectReturn",
+    "committed_at": "2026-10-22T23:42:48.286Z",
+    "result": {
+      "reused": false,
+      "review_id": "85d08a57-7f4a-412d-84ce-5887255a3efc"
+    },
+    "links": {
+      "resource": "/api/v1/workspaces/b118c0ce-ac8c-448a-ac8f-2b1525f9e4e4/"
+    }
+  }
+}

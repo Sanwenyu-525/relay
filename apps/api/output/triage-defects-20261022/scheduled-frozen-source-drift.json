@@ -1,0 +1,90 @@
+[
+  {
+    "drift": false,
+    "originalCheck": "CURRENT",
+    "frozenBefore": {
+      "context_sources": [
+        {
+          "kind": "KNOWLEDGE",
+          "root_id": "a9537d8a-2f90-4c09-9152-840294091bc7",
+          "version": "1"
+        }
+      ],
+      "source_refs": [
+        {
+          "kind": "KNOWLEDGE",
+          "root_id": "a9537d8a-2f90-4c09-9152-840294091bc7",
+          "revision": "0",
+          "current_version": "1"
+        }
+      ]
+    },
+    "frozenAfter": {
+      "source_refs": [
+        {
+          "kind": "KNOWLEDGE",
+          "root_id": "a9537d8a-2f90-4c09-9152-840294091bc7",
+          "revision": "0",
+          "current_version": "1"
+        }
+      ],
+      "context_sources": [
+        {
+          "kind": "KNOWLEDGE",
+          "root_id": "a9537d8a-2f90-4c09-9152-840294091bc7",
+          "version": "1"
+        }
+      ]
+    },
+    "occurrenceStatus": "DISPATCHED",
+    "reason": null,
+    "runId": "4df132b2-8639-411f-8769-8bf945c825ba",
+    "taskStatus": "IN_PROGRESS",
+    "pinnedContextVersionBefore": "1",
+    "pinnedContextVersionAfter": "1"
+  },
+  {
+    "drift": true,
+    "originalCheck": "INVALID_TRANSITION",
+    "frozenBefore": {
+      "context_sources": [
+        {
+          "kind": "KNOWLEDGE",
+          "root_id": "d0272d68-7851-4f81-becb-ac7ad302d3ae",
+          "version": "1"
+        }
+      ],
+      "source_refs": [
+        {
+          "kind": "KNOWLEDGE",
+          "root_id": "d0272d68-7851-4f81-becb-ac7ad302d3ae",
+          "revision": "0",
+          "current_version": "1"
+        }
+      ]
+    },
+    "frozenAfter": {
+      "source_refs": [
+        {
+          "kind": "KNOWLEDGE",
+          "root_id": "d0272d68-7851-4f81-becb-ac7ad302d3ae",
+          "revision": "1",
+          "current_version": "2"
+        }
+      ],
+      "context_sources": [
+        {
+          "kind": "KNOWLEDGE",
+          "root_id": "d0272d68-7851-4f81-becb-ac7ad302d3ae",
+          "version": "1"
+        }
+      ]
+    },
+    "occurrenceStatus": "DISPATCHED",
+    "reason": null,
+    "runId": "2a8529de-aac7-4b06-bd34-b8250225e13c",
+    "taskStatus": "IN_PROGRESS",
+    "pinnedContextVersionBefore": "1",
+    "pinnedContextVersionAfter": "1"
+  }
+]

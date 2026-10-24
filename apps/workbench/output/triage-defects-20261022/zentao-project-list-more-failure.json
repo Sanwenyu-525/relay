@@ -1,0 +1,10 @@
+{
+  "steps": "<pre>【问题】\n项目列表加载后续页遇到暂时503时，清空已成功读取的项目、续页游标和选中详情，只能从头刷新。与此同时推进摘要从错误后的空数组推导为“0 个项目正在推进”“所有项目的下一步都已明确”，掩盖已确认存在的未定下一步项目。\n\n【当前真实路由复现】\n1. /projects，首批返回ACTIVE项目P，next_action_task_id=null，next_cursor=projects+page2。\n2. 首批可见P，摘要为“1 个项目尚未明确下一步”，提供加载更多。\n3. 点击加载更多；仅该cursor请求返回503 DATABASE_UNAVAILABLE。\n4. 实际：P卡片消失，加载更多按钮消失，摘要变“0 个项目正在推进…所有项目的下一步都已明确”。页面虽同时有数据库不可达错误，摘要仍作出肯定结论。\n预期：续页失败保留已读P与原cursor，明确后续页未读完并允许同cursor重试；保留未定下一步事实。首次读取失败也不能把未知当全量0/全部明确。\n\n【根因与关联】\napps/workbench/src/views/ProjectsView.tsx 的 LiveProjectsList/loadPage catch 不区分 cursor===null 和续页，一律 setItems([]);setNextCursor(null);setDetailId(null)。\nloadedActive/missingNext随后由空items计算，ProjectsSummary missingCount===0固定输出“所有项目的下一步都已明确”，未检查读取失败/未完成覆盖。\n与#101工作空间任务列表、#31资料搜索属于同类分页失败恢复缺陷，但本单是独立ProjectsView项目Owner，单改TasksView或KnowledgeView不能修复。#102是项目内任务只读首50项，不是项目列表续页故障。已检索现有禅道标题未发现对应项目列表登记。\n\n【证据】\nD:/Develop/Relay-Agent/apps/workbench/output/triage-defects-20261022/projectListMoreFailure.spec.tsx\nD:/Develop/Relay-Agent/apps/workbench/output/triage-defects-20261022/project-list-more-failure.log\n真实React路由+RelayApiClient，模拟HTTP续页503，1条红复现。\nTRIAGE_PROJECT_LIST_MORE_FAILURE：cursors含null及projects+page2，rowSurvives=false，cursorRetrySurvives=false，hasReadError=true；summary为“0 个项目正在推进…所有项目的下一步都已明确”。\n本次仅验证前端状态和模拟HTTP，未验证真实服务故障或Windows实窗。未改业务代码、未commit/push。\n\n【可执行修复提示词】\n先读ProjectsView当前分页、范围页签、归档恢复与详情抽屉规则，并检查目标diff。最小区分首次/刷新读取失败与续页失败：后者保留已读items、游标和仍可定位的详情，不把临时503解释为删除/归档；重试沿原cursor，成功后合并且不重复。摘要的已知范围、加载中和读取失败必须显式表达；有后页或失败时不声称“所有项目”下一步已明确，不用错误后空数组宣称全量0。\n保留范围隔离、归档回执、请求版本防迟到写入、项目身份检查，不通过默认空结果吞异常。若403/连接切换须隐藏不可再读数据，按既有失权规则处理，不能为了保留503前页而保留失权正文。\n验收：首批成功-&gt;续页503前页/原cursor仍在-&gt;同cursor重试成功无重复；连续多页后失败保留全部已读；全读完与尚有后页摘要分别正确；首次读取503不声称全量0/全部明确；切active/archived范围后旧续页迟到不混入；详情抽屉、搜索和归档入口不被续页错误误清或误授权。正式路由回归应先红后绿。\n同步受影响既有工作台列表状态/摘要说明和统一验收表；文档修改运行 node scripts/check-docs.mjs，不新建重复ADR/过程报告。分别报告模拟HTTP、真实HTTP/PG、Windows未验范围。</pre>",
+  "openedBuild": [
+    "trunk"
+  ],
+  "title": "[Relay] 项目列表续页503清空前页和游标，并误报所有项目下一步已明确",
+  "severity": 3,
+  "type": "codeerror",
+  "pri": 2
+}

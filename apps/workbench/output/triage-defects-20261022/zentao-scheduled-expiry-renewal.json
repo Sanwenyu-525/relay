@@ -1,0 +1,10 @@
+{
+  "title": "[Relay] 到期计划续期编辑被直接拒绝，与先延长授权再启用的契约冲突",
+  "pri": 2,
+  "steps": "<pre>【现象与契约】HTTP契约10.94“到期与预算耗尽”明确：EXPIRED不能直接ENABLED，须先通过编辑延长授权。但editScheduledTask无条件拒绝EXPIRED，并提示“请新建，或先延长授权有效期”；延长授权本身正是正在提交的编辑。setStatus ENABLED也提示先延长，形成直接恢复入口矛盾。\n\n【真实PG/HTTP复现】apps/api/output/triage-defects-20261022/triage-scheduled-expiry-renewal.integration.test.js（同名.ts仅枚举），证据scheduled-expiry-renewal.json。真实隔离PG18.6+131迁移+graph；正常HTTP建项目和2份计划，不手改授权到期或业务状态。\n- ENABLED对照：正常编辑把7天有效期延为14天，200，数据库到期时刻更新。\n- 到期样本：创建时authorization_expires_at为约1.2秒后，HTTP201；等待真实时间过去，仅把临时库该计划next_due_at置为clock_timestamp缩短排期等待，调用正常runScheduledTaskTick，使计划真实落EXPIRED。\n- 携最新revision、confirmed=true、有效的未来14天新授权、同一合法模板提交edits，409 INVALID_TRANSITION，detail“已到期的定时任务请新建，或先延长授权有效期。”；数据库有效期不变。再请求ENABLED也409“需要先延长授权有效期”。\n- 可达性反查：另用正常API将EXPIRED改PAUSED返回200，再携新revision提交同样编辑200。说明存在未说明的状态绕行，不应声称完全无任何恢复路径、数据损坏或越权启动。\n- 当前ScheduledTaskDetailView只对ENABLED显示暂停、PAUSED显示恢复，EXPIRED不提供这个PAUSED绕行；本轮仅核对源码，不冒称Windows点击验收。\n红断言：EXPIRED显式续期预期200实际409；非前置、时钟或模板校验失败。scheduled-tasks源码与dist在同批前一探针逐字转译核对，本轮未变化；SkipBuild不等于全构建通过。无Task/Run/模型执行，没有真实Provider或外部写入。清理见runner。\n\n【根因】editScheduledTask在校验新expiry之前直接if(row.status===&#39;EXPIRED&#39;) throw，挡掉契约要求的续期；setScheduledTaskStatus却允许EXPIRED→PAUSED/DISABLED，造成通过改状态规避该前置的非一致行为。不能仅修改错误文案假装续期已实现。\n\n【可直接执行修复提示词】\n先读CODEX_NEXT_STEP、ADR-026、HTTP定时契约、编辑/状态命令和详情入口，保护共享工作。先复现，按既有授权恢复契约让EXPIRED能显式更新有效授权与必要次数预算，仍保持未启用或清晰需要再次启用的状态；或若产品明确选择EXPIRED不可续期，先列出现行契约差异与影响，不静默改文档追认。不能通过强制用户新建丢掉原发生历史、自动恢复调度或去掉Delegate有效期/次数闸门解决。到期原因（时间、次数）分别处理，续期不重放错过时段、不重置已启动次数、不抹审计。\n验收：时间到期显式延长；预算耗尽扩额；无效/过期新授权仍拒绝；续期后人工启用、错过时段不自动补跑；EXPIRED/PAUSED/DISABLED状态路径一致，最新revision/CAS及命令重放；历史BLOCKED保留并可核对。补前端可达入口或正确说明，真实PG/HTTP红到绿，Windows/Provider未验说明。\n只同步受影响已有恢复/状态契约与统一验收表；文档改动跑node scripts/check-docs.mjs。不commit/push、不改生产数据、不拓展新调度能力。</pre>",
+  "severity": 3,
+  "openedBuild": [
+    "trunk"
+  ],
+  "type": "codeerror"
+}

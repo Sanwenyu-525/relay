@@ -1,0 +1,34 @@
+import { act, createElement } from "react";
+import { afterEach, expect, it, vi } from "vitest";
+import { RelayApiClient, type RelayAssistMessage } from "../../src/api/relayClient";
+import { SessionRoundTrace } from "../../src/components/SessionRoundTrace";
+import { mountReact } from "../../tests/mountApp";
+let unmount: (() => void) | null = null;
+afterEach(() => { unmount?.(); unmount = null; vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+it("默认2秒轮询遇到3秒成功读取不能把所有成功回包饿死至终态", async () => {
+  vi.useFakeTimers();
+  const sid = "33333333-3333-4333-8333-333333333333";
+  const mid = "44444444-4444-4444-8444-444444444444";
+  let settledReads = 0;
+  const reads = vi.fn(async () => {
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    settledReads++;
+    return new Response(JSON.stringify({ session_id: sid, message_id: mid, message_status: "RUNNING", rounds: [{ round: 0, calls: [{ id: "55555555-5555-4555-8555-555555555555", round: 0, ordinal: 0, tool_name: "read_file", status: "SETTLED", arguments: { relative_path: "SLOW_SUCCESS_EVIDENCE.md" }, arguments_sha256: "a".repeat(64), provider_tool_call_id: "call-1", operation_id: null, rejection_reason: null, rejection_detail: null, result_digest: null, requested_at: "2026-10-23T00:00:00Z", settled_at: "2026-10-23T00:00:01Z" }] }] }), { status: 200, headers: { "content-type": "application/json" } });
+  });
+  vi.stubGlobal("fetch", reads);
+  const client = new RelayApiClient({ baseUrl: "http://127.0.0.1:8787", workspaceId: "11111111-1111-4111-8111-111111111111", bearerToken: "test-token" });
+  const message = { id: mid, sessionId: sid, status: "RUNNING", role: "ASSISTANT" } as RelayAssistMessage;
+  const mounted = await mountReact(createElement(SessionRoundTrace, { client, message })); unmount = mounted.unmount;
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+  const visibleWhileActive = mounted.wrapper.text().includes("SLOW_SUCCESS_EVIDENCE.md");
+  const loadingWhileActive = mounted.wrapper.find('[data-testid="session-round-trace-loading"]').exists();
+  const activeFacts = { requests: reads.mock.calls.length, settledReads, visibleWhileActive, loadingWhileActive };
+  expect(settledReads).toBeGreaterThanOrEqual(4);
+  await mounted.rerender(createElement(SessionRoundTrace, { client, message: { ...message, status: "COMPLETED" } }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+  const terminalReadVisible = mounted.wrapper.text().includes("SLOW_SUCCESS_EVIDENCE.md");
+  console.log("TRIAGE_SESSION_TRACE_SLOW_POLL", JSON.stringify({ ...activeFacts, terminalReadVisible, finalSettledReads: settledReads }));
+  expect(terminalReadVisible, "same valid response is accepted once the polling interval stops").toBe(true);
+  expect(visibleWhileActive, "four successful reads must make progress while the reply is active").toBe(true);
+  expect(loadingWhileActive).toBe(false);
+});

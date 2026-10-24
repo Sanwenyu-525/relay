@@ -1,0 +1,10 @@
+{
+  "steps": "<pre>现象\n左栏近期工作“已归档”首次展开读取失败时，错误被静默遮住；请求已经503结束，界面仍显示“展开时读取归档列表”，仿佛用户还未展开、尚未发起读取。用户看不到归档读取失败原因，也没有明确的错误/重试提示。\n服务恢复后收起再展开能够重新读取，因此不描述为永久无法恢复、没有归档记录或数据丢失。\n\n真实组件/Client受控HTTP复现\n挂载RecentWorkRail，活跃任务/项目/会话列表健康返回空。展开已归档区，GET assist-sessions?status=ARCHIVED返回typed503 DATABASE_UNAVAILABLE。\n实际archive请求确已发生；recent-work-archived-error不存在，区内仍含“展开时读取归档列表”。随后恢复200，收起再展开返回合法空列表，页面显示“暂无归档会话”（健康对照通过）。\n测试显式dispatch toggle控制披露事件，原生事件也可能合并触发，故不以请求次数作为性能结论；断言仅确认请求发生、错误未呈现、重开健康可恢复。\n\n根因\napps/workbench/src/components/RecentWorkRail.tsx loadArchived catch只setArchivedError，archived初值仍null。渲染三元先判断archived===null展示初始占位，再判断archivedError，导致首次失败的error分支永远到不了。正常空列表与未读/读取中/失败没有按状态优先级正确表达。\n活跃列表本次正常，不应因为归档失败清空活跃会话或任务。\n\n证据\napps/workbench/output/triage-defects-20261022/recentArchiveReadError.spec.tsx\napps/workbench/output/triage-defects-20261022/recent-archive-read-error.log\n在apps/workbench运行：node node_modules/vitest/vitest.mjs run output/triage-defects-20261022/recentArchiveReadError.spec.tsx --config output/triage-defects-20261022/vitest.config.ts --reporter verbose\n1项红：失败后应显示已记录错误，实际false；请求发生和服务恢复后重开正常空态对照通过。真实组件/生产RelayClient/受控fetch与jsdom；未做真实PG、服务故障、Windows/浏览器点击验收。\n\n可直接执行的修复提示词\n先读AGENTS、CODEX_NEXT_STEP、近期工作归档披露/错误规则、RecentWorkRail与sessionRowMenu/recentWorkDrag现有测试，检查git status和目标diff，保护共享修改。以本单初次503复现建立正式回归，最小调整归档读取状态与渲染优先级，明确初始未读、读取中、失败与成功空/非空状态。失败显示具体原因和明确只读重试入口（或清晰说明收起再展开），不得把失败设[]伪装“暂无归档”。\n不新增通用缓存/状态框架，不改归档/重开写命令、排序或用户已指定布局。保持披露仅展开才读取、错误仅影响归档段，避免toggle重入导致无限请求；迟到旧client/旧scope回包不能污染新列表。\n验收：首次503/网络失败、403/404按语义说明、失败后重试成功/再次失败、合法空与非空、重复toggle、读取中关闭、client切换、归档/重开行内命令后列表更新；活跃列表不被归档错误清空。现有菜单/分叉/批量删除/布局相关定向检查按实际改动选择。\n只同步确实受影响的既有交互/测试主文档和统一验收表，文档变化运行node scripts/check-docs.mjs。不commit/push、不操作生产会话，本轮只诊断登记，未改业务代码；报告受控测试与真实环境边界。</pre>",
+  "severity": 3,
+  "type": "codeerror",
+  "title": "[Relay] 左栏归档列表首次读取失败被未读占位遮住，503错误不显示",
+  "openedBuild": [
+    "trunk"
+  ],
+  "pri": 3
+}

@@ -1,0 +1,147 @@
+[
+  {
+    "beforeComplete": {
+      "goal": {
+        "goal_id": "896b1e29-1ab5-4137-b678-b72c5d966720",
+        "session_id": "6cccd71c-6c94-4b33-9420-158334047ddc",
+        "objective": "补齐说明并验证",
+        "status": "AWAITING_ACCEPTANCE",
+        "current_step": null,
+        "progress": "完成",
+        "stop_reason": {
+          "code": "AWAITING_ACCEPTANCE",
+          "detail": "目标已按成功条件完成自检，需要你确认后才会记作完成。",
+          "questions": [],
+          "resumable": false
+        },
+        "criteria": [
+          {
+            "key": "c1",
+            "statement": "定向测试通过",
+            "status": "MET",
+            "evidence": "已运行定向测试，结果通过",
+            "required": true
+          }
+        ],
+        "steps": [],
+        "round_count": 1,
+        "no_progress_rounds": 0,
+        "plan_version_id": null,
+        "plan_version": null,
+        "last_round_at": "2026-10-23T05:57:37.952Z",
+        "actions": {
+          "pause": false,
+          "cancel": true,
+          "resume": false,
+          "confirm_completion": true
+        },
+        "revision": "2",
+        "created_at": "2026-10-23T05:57:37.902Z",
+        "updated_at": "2026-10-23T05:57:37.960Z"
+      },
+      "rounds": [
+        {
+          "round_index": 1,
+          "outcome": "AWAITING_ACCEPTANCE",
+          "note": "成功条件都已有证据；等待你确认完成。",
+          "created_at": "2026-10-23T05:57:37.960Z"
+        }
+      ]
+    },
+    "completeResult": {
+      "command_id": "27a4bb86-31c2-4013-9693-238f02b70fab",
+      "committed_at": "2026-10-23T05:57:38.000Z",
+      "result": {
+        "goal": {
+          "goal_id": "896b1e29-1ab5-4137-b678-b72c5d966720",
+          "session_id": "6cccd71c-6c94-4b33-9420-158334047ddc",
+          "objective": "补齐说明并验证",
+          "status": "COMPLETED",
+          "current_step": null,
+          "progress": "完成",
+          "stop_reason": {
+            "code": "AWAITING_ACCEPTANCE",
+            "detail": "目标已按成功条件完成自检，需要你确认后才会记作完成。",
+            "questions": [],
+            "resumable": false
+          },
+          "criteria": [
+            {
+              "key": "c1",
+              "statement": "定向测试通过",
+              "status": "MET",
+              "evidence": "已运行定向测试，结果通过",
+              "required": true
+            }
+          ],
+          "steps": [],
+          "round_count": 1,
+          "no_progress_rounds": 0,
+          "plan_version_id": null,
+          "plan_version": null,
+          "last_round_at": "2026-10-23T05:57:37.952Z",
+          "actions": {
+            "pause": false,
+            "cancel": false,
+            "resume": false,
+            "confirm_completion": false
+          },
+          "revision": "3",
+          "created_at": "2026-10-23T05:57:37.902Z",
+          "updated_at": "2026-10-23T05:57:38.000Z"
+        }
+      },
+      "links": {
+        "resource": "/api/v1/workspaces/65a11194-37fb-468c-8f09-c3e954525050/"
+      }
+    },
+    "afterComplete": {
+      "goal": null,
+      "rounds": []
+    },
+    "afterNew": {
+      "goal": {
+        "goal_id": "320a7245-d56c-477a-95e6-52f007f764f8",
+        "session_id": "6cccd71c-6c94-4b33-9420-158334047ddc",
+        "objective": "新目标",
+        "status": "ACTIVE",
+        "current_step": null,
+        "progress": null,
+        "stop_reason": null,
+        "criteria": [],
+        "steps": [],
+        "round_count": 0,
+        "no_progress_rounds": 0,
+        "plan_version_id": null,
+        "plan_version": null,
+        "last_round_at": null,
+        "actions": {
+          "pause": true,
+          "cancel": true,
+          "resume": false,
+          "confirm_completion": false
+        },
+        "revision": "1",
+        "created_at": "2026-10-23T05:57:38.015Z",
+        "updated_at": "2026-10-23T05:57:38.015Z"
+      },
+      "rounds": []
+    },
+    "storedCompleted": {
+      "id": "896b1e29-1ab5-4137-b678-b72c5d966720",
+      "status": "COMPLETED",
+      "criteria": [
+        {
+          "key": "c1",
+          "method": "HUMAN",
+          "status": "MET",
+          "evidence": "已运行定向测试，结果通过",
+          "required": true,
+          "statement": "定向测试通过"
+        }
+      ]
+    },
+    "storedRoundCount": 1,
+    "storedGoalCount": 2
+  }
+]

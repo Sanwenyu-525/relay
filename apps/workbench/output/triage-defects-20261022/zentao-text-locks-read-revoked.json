@@ -1,0 +1,10 @@
+{
+  "title": "[Relay] 原文锁定刷新403仍显示旧原文，解除锁定仍可按旧事实发请求",
+  "openedBuild": [
+    "trunk"
+  ],
+  "type": "codeerror",
+  "pri": 2,
+  "severity": 3,
+  "steps": "<pre>【问题】\n成果版本谱系页的原文锁定面板，在重新读取产物/锁定/正文均返回403后，仍回显此前读取的锁定原文和正文选项，且解除锁定按钮继续可点并发出请求。页面已知道事实无法读取，却继续把旧快照作为当前操作依据。\n\n【复现】\n1. ArtifactTextLocksPanel初读成功：产物revision7、当前版本version、已有锁定包含LOCK_SECRET_BEFORE_REVOKE，正文含BODY_SECRET_BEFORE_REVOKE。\n2. 令三个读取端点之后都返回403，点击刷新锁定事实。\n3. 页面显示错误，但旧锁定片段、正文选择器仍在；解除这一处锁定按钮enabled。\n4. 点击解除，实际调用unlockArtifactText一次，模拟服务端403拒绝。\n预期：刷新/失权时旧读取依据失效，撤下无权/不可读取的原文及其操作入口；清楚说明需重新核对。已保留的原未决写命令应单独保存，不能为了清展示而丢失恢复身份。\n\n【根因】\napps/workbench/src/components/ArtifactTextLocksPanel.tsx：refresh仅在Promise.all成功后setArtifact/setLocks/setContent；retryRead只清error/pending，失败后仅设置error，不清旧artifact/locks/content，也无事实有效/读取状态门。current仍由旧artifact.latestVersionId计算，解锁/锁定disabled仅busy和pending，handler同样不检查读取失败。\n\n【关联与去重】\n禅道#17是ArtifactVersionCompare/主阅读区的失权旧正文问题，并非本组件；#16是原文锁定未知写后刷新丢原command_id，本单无需任何先前写入就可由GET403触发。两者应协调修复，不能只加一个按钮disabled就忽略旧原文仍回显或未知命令保留。\n\n【证据与边界】\n已核对ArtifactLineageView当前实际渲染ArtifactTextLocksPanel，手动刷新按钮可达。\nD:/Develop/Relay-Agent/apps/workbench/output/triage-defects-20261022/textLocksReadRevoked.spec.tsx\nD:/Develop/Relay-Agent/apps/workbench/output/triage-defects-20261022/text-locks-read-revoked.log\n真实组件+可控RelayApiClient，1条红复现：secretStillVisible=true、unlockEnabled=true、unlockCalls=1。模拟写端明确拒绝，不宣称后端绕过授权或成功解除锁定；未做真实HTTP权限撤销或Windows实窗验证。\n未修改业务代码、未commit/push。\n\n【可执行修复提示词】\n先读组件、实际父级调用点与当前git diff，保护共享工作区。最小把“旧展示快照”“当前已核对事实”“原未决写命令”分开管理：重读期间不得以旧内容继续操作，403/404撤下旧原文和身份；临时读取失败也明确失效/待核对，不作为当前事实继续写。UI与handler都需检查准入，服务端原revision/权限守卫不放宽。\n验收：初读成功→刷新403，旧片段/原文选项撤下且不能发新锁定/解锁；刷新404、503、恢复成功分别处理；读请求迟到不覆盖新范围；原未知写command_id不因清显示丢失或换ID（回归#16）；现有锁定/解锁正常路径继续成立。不得用删除报错、只禁一个按钮或全局清空未决命令掩盖问题。\n只同步受影响的既有交互和统一验收行，必要时注明本组件与主阅读区各自覆盖；不新增重复ADR/日志。文档修改运行node scripts/check-docs.mjs；组件、真实HTTP、Windows证据分别报告。</pre>"
+}

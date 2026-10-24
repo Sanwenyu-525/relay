@@ -1,0 +1,31 @@
+{
+  "control": "pause",
+  "pauseStatus": 200,
+  "pausedBeforeInsert": "PAUSING",
+  "noInflightAtPause": true,
+  "tick": {
+    "advanced": [
+      {
+        "goalId": "84f0511f-48c1-44b9-99d0-ca793c9d90e9",
+        "messageId": "a6ca68ee-15d6-46f7-8167-fe2af3abbb97",
+        "roundIndex": 1
+      }
+    ],
+    "settled": [],
+    "controls": [],
+    "skipped": []
+  },
+  "enqueuedAfterPause": {
+    "id": "a6ca68ee-15d6-46f7-8167-fe2af3abbb97",
+    "status": "PENDING"
+  },
+  "modelCallsAfterPause": 1,
+  "generationAfterPause": {
+    "messageId": "a6ca68ee-15d6-46f7-8167-fe2af3abbb97",
+    "sessionId": "0f577ce3-2af8-4af3-a1e3-4d6342d134a8",
+    "status": "COMPLETED",
+    "errorCode": null,
+    "proposalIds": []
+  },
+  "goalAfter": "PAUSING"
+}

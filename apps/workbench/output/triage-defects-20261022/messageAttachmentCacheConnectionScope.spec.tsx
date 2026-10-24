@@ -1,0 +1,35 @@
+import {createElement} from "react";
+import {MemoryRouter} from "react-router-dom";
+import {afterEach,expect,it,vi} from "vitest";
+import MessageAttachments from "../../src/components/MessageAttachments";
+import {RelayApiClient} from "../../src/api/relayClient";
+import {flush,mountReact} from "../../tests/mountApp";
+let unmount:(()=>void)|null=null;
+afterEach(()=>{unmount?.();unmount=null;vi.unstubAllGlobals();});
+const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json'}});
+it('历史图片跨连接重挂载不能复用另一个API工作空间的全局图片缓存',async()=>{
+ const sid='33333333-3333-4333-8333-333333333336',aid='44444444-4444-4444-8444-444444444446';
+ const a=new RelayApiClient({baseUrl:'http://127.0.0.1:8787',workspaceId:'11111111-1111-4111-8111-111111111111',bearerToken:'test-a'});
+ const b=new RelayApiClient({baseUrl:'http://127.0.0.1:8788',workspaceId:'22222222-2222-4222-8222-222222222222',bearerToken:'test-b'});
+ const requests:string[]=[];
+ vi.stubGlobal('fetch',vi.fn(async(input:RequestInfo|URL)=>{
+  const url=new URL(String(input));requests.push(`${url.origin}${url.pathname}`);
+  if(url.port==='8788')return json({status:403,code:'FORBIDDEN',title:'此连接无权读取图片',detail:'new connection rejects image read',retryable:false,retry_action:'NONE'},403);
+  return json({attachment_id:aid,name:'private-a.png',media_type:'image/png',byte_length:3,data_base64:'QUFB'});
+ }));
+ const attachments=[{id:aid,name:'image.png',mediaType:'image/png',byteLength:3}];
+ const render=async(client:RelayApiClient)=>{const mounted=await mountReact(createElement(MemoryRouter,null,createElement(MessageAttachments,{client,sessionId:sid,attachments})));unmount=mounted.unmount;await flush();return mounted;};
+ const first=await render(a);
+ expect(first.wrapper.get('.message-attachment-image').attributes('src')).toBe('data:image/png;base64,QUFB');
+ first.unmount();unmount=null;
+ const same=await render(a);
+ const sameConnectionCacheReused=requests.length===1&&same.wrapper.find('.message-attachment-image').exists();
+ same.unmount();unmount=null;
+ const other=await render(b);
+ const bRequests=requests.filter(p=>p.includes(':8788/')).length;
+ const aBodyInB=other.wrapper.find('.message-attachment-image').attributes('src')==='data:image/png;base64,QUFB';
+ const failureShown=other.wrapper.text().includes('图片读取失败');
+ console.log('TRIAGE_ATTACHMENT_CACHE_CONNECTION_SCOPE',JSON.stringify({sameConnectionCacheReused,bRequests,aBodyInB,failureShown,requests}));
+ expect(sameConnectionCacheReused).toBe(true);
+ expect(aBodyInB,'a global cache keyed only by session and attachment ID must not cross API/workspace boundaries').toBe(false);
+});

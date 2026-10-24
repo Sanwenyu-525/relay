@@ -14,6 +14,7 @@ import {
 
 const daily = (intervalDays: number) => ({ kind: 'DAILY' as const, interval_days: intervalDays });
 const weekly = (weekdays: readonly number[]) => ({ kind: 'WEEKLY' as const, weekdays });
+const MS_PER_DAY = 86_400_000;
 
 test('本地时刻按墙钟解释：上海每日 09:00 恒定 +08:00', () => {
   const anchor = resolveLocalDateTime({ year: 2026, month: 10, day: 18 }, { hour: 9, minute: 0 }, 'Asia/Shanghai');
@@ -43,6 +44,29 @@ test('春跳不存在的墙钟时刻顺延一小时（纽约 2026-03-08 02:30 �
 test('秋回重复的墙钟时刻取较早一次（纽约 2026-11-01 01:30 出现两次）', () => {
   const resolved = resolveLocalDateTime({ year: 2026, month: 11, day: 1 }, { hour: 1, minute: 30 }, 'America/New_York');
   assert.equal(resolved.toISOString(), '2026-11-01T05:30:00.000Z');
+});
+
+test('正偏移时区秋回同样取较早一次（柏林 2026-10-25 02:30 出现两次）', () => {
+  const resolved = resolveLocalDateTime({ year: 2026, month: 10, day: 25 }, { hour: 2, minute: 30 }, 'Europe/Berlin');
+  assert.equal(resolved.toISOString(), '2026-10-25T00:30:00.000Z');
+});
+
+test('柏林秋回重叠段之外的相邻时刻解析不受影响', () => {
+  // 回拨前：本地 01:30 仍属 CEST（+02:00）。
+  const before = resolveLocalDateTime({ year: 2026, month: 10, day: 25 }, { hour: 1, minute: 30 }, 'Europe/Berlin');
+  assert.equal(before.toISOString(), '2026-10-24T23:30:00.000Z');
+  // 重叠段之后：本地 03:30 只出现一次，属 CET（+01:00）。
+  const after = resolveLocalDateTime({ year: 2026, month: 10, day: 25 }, { hour: 3, minute: 30 }, 'Europe/Berlin');
+  assert.equal(after.toISOString(), '2026-10-25T02:30:00.000Z');
+});
+
+test('柏林秋回当日每日任务按较早一次推导下次触发', () => {
+  const timezone = 'Europe/Berlin';
+  const anchor = resolveLocalDateTime({ year: 2026, month: 10, day: 25 }, { hour: 2, minute: 30 }, timezone);
+  assert.equal(anchor.toISOString(), '2026-10-25T00:30:00.000Z');
+  const from = new Date(anchor.getTime() - MS_PER_DAY);
+  const next = nextDueAt({ rule: daily(1), timezone, localTime: '02:30', from, anchor });
+  assert.equal(next.toISOString(), '2026-10-25T00:30:00.000Z');
 });
 
 test('半小时与四十五分钟偏移时区按本地墙钟解析', () => {

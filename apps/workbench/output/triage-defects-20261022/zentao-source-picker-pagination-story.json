@@ -1,0 +1,9 @@
+{
+  "spec": "<pre>【类型】优化候选/待用户评审，不是既定需求已批准，也不宣称当前行为违反已经确认的全量选择承诺。\n\n【当前事实】\n当前聊天资料选择器AssistSourcePicker实际由AssistView首条消息和已有会话资料入口调用。它调用searchInformation(q,projectId,types=[KNOWLEDGE,MEMORY,DECISION],limit=20)，只使用page.items，丢弃page.nextCursor；没有加载更多、下一页或覆盖范围提示。服务端和真实API客户端已经支持cursor参数。\n\n【证据】\nD:/Develop/Relay-Agent/apps/workbench/output/triage-defects-20261022/sourcePickerPaginationGap.spec.tsx\nD:/Develop/Relay-Agent/apps/workbench/output/triage-defects-20261022/source-picker-pagination-gap.log\n真实组件+真实RelayApiClient+可控fetch：项目内相同关键词21条来源，首读返回20条和非空游标，reads=[null]、visibleCount=20、offersMore=false、item21Visible=false。\n1条现状表征通过：只说明当前能力边界，不是新能力实现通过。未做真实PG/HTTP搜索或Windows实窗验收。\n\n【建议行为，待确认】\n复用现有searchInformation cursor，在当前资料面板支持按原关键词、项目与类型继续读取。显示已加载范围和是否仍有后续页；允许在当前查询下浏览后续匹配来源，不要求用户反复改词来碰到目标。保留每次消息最多10个显式资料版本、规则排除和当前权限范围，不因为加载更多提升授权或自动选中资料。\n\n【非目标】\n不建设全量语义检索、向量库、自动推荐、自动注入或新搜索服务；不合并不同词/项目结果；不把搜索显示总数冒充全量可读事实；不修改资料版本Owner、消息发送或服务端权限规则。\n\n【可执行实施提示词，需需求通过后执行】\n先读AssistSourcePicker、searchInformation资源函数、AssistView实际调用点及目标diff，保护并行工作。按原分页API保留cursor和查询身份，新增最小继续读取交互与局部续页失败状态；成功按确切来源身份去重，原selectedRefs保留，关键词/项目/连接变化后清旧结果并隔离迟到响应。只读搜索不发POST，勾选仍仅编辑候选输入。\n验收至少覆盖：21条/多页能选择后续项、游标原样传递、已选跨页保留、10项上限不绕过、续页503保留前页和原cursor可重试、同项跨页不重复、切词/项目/连接不串页、无后续页/空查询/读取失败分别表达。正常首屏选择与确切kind/rootId/version发送冻结保持不变。\n\n【文档与出口】\n实施后只更新现有工作台资料面板交互、对应统一验收行，若无API变化不虚构Breaking Change；文档修改运行node scripts/check-docs.mjs。区分组件/真实HTTP/Windows验证。当前仅登记建议，不开发、不代替用户评审通过、不修改业务代码或commit/push。</pre>",
+  "category": "experience",
+  "pri": 3,
+  "title": "[Relay] 优化候选：聊天资料检索支持原查询续页并保留已选版本",
+  "reviewer": [
+    "admin"
+  ]
+}

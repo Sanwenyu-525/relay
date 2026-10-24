@@ -4,7 +4,7 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import RecentWorkRail from "../src/components/RecentWorkRail";
 import { RelayApiClient } from "../src/api/relayClient";
-import { clearActiveConversation, publishActiveConversation } from "../src/lib/activeConversation";
+import { clearActiveConversation, bumpActiveConversationActivity, publishActiveConversation } from "../src/lib/activeConversation";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const projectId = "22222222-2222-4222-8222-222222222222";
@@ -14,6 +14,16 @@ const task = (n: number) => ({ id: id(n), title: `研究任务 ${n}`, project_id
   current_completion_id: null, waiting_reason: null, blocking_task_ids: [], unresolved_blocker_ids: [], allowed_actions: [],
   updated_at: `2026-10-01T00:${String(20 - n).padStart(2, "0")}:00Z` });
 const json = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body }) as Response;
+/** 带目录与最后消息时间的自由会话；`at` 即服务端 last_message_at，是这一列的排序键。 */
+const directoryRow = (n: number, at: string, resource: number, root: string) => ({ id: id(n),
+  workspace_id: workspaceId, project_id: null, task_id: null, title: `目录 ${root} 的讨论`,
+  status: "ACTIVE", revision: "1", conversation_mode: "AGENT", assistant_profile_id: null,
+  assistant_profile_revision: null, assistant_role: null, remember: true,
+  created_at: "2026-10-01T00:00:00Z", last_message_at: at, updated_at: at,
+  context: { project_goals: [], working_directory: { resource_id: id(resource), canonical_root: root } } });
+/** 「工作区（目录）」段的组标题顺序：分组只是全局列序的子序列，组序即列序的投影。 */
+const directoryGroupTitles = (container: HTMLElement) =>
+  [...container.querySelectorAll('[data-testid="recent-work-directories"] .recent-work-group > summary .recent-work-group-title')].map((node) => node.textContent);
 let cleanup: (() => void) | undefined;
 afterEach(() => { cleanup?.(); cleanup = undefined; clearActiveConversation(); vi.unstubAllGlobals(); vi.useRealTimers(); window.localStorage.clear(); });
 
@@ -207,6 +217,40 @@ it("真实空关联、目录未绑定与目录依据缺失分别显示", async (
   expect(container.querySelector('[data-testid="recent-work-directories"]')?.textContent).toContain("目录待核对");
 });
 
+it("切换会话不重排工作区分组：列序由服务端口径决定，不随当前选中项乱跳（2026-10-23 用户截图指认）", async () => {
+  // 两个目录各一段讨论：beta 的最后消息更新，按服务端口径 beta 组排在 alpha 组之前。
+  const alpha = directoryRow(30, "2026-10-10T00:00:00Z", 41, "D:/work/alpha");
+  const beta = directoryRow(31, "2026-10-16T00:00:00Z", 42, "D:/work/beta");
+  const { container } = await mount(200, [beta, alpha], alpha);
+  expect(directoryGroupTitles(container)).toEqual(["beta", "alpha"]);
+  // 切到较早的那段（alpha）：定向重读只为核对当前会话事实，旧实现把当前会话插到列首，
+  // alpha 组于是跳到最前——分组位置随选中项乱换。列序只由服务端口径决定，切会话不改序。
+  await act(async () => { publishActiveConversation({ taskId: null, sessionId: id(30) }); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  expect(directoryGroupTitles(container)).toEqual(["beta", "alpha"]);
+  // 当前会话仍高亮、仍能在左栏找到（重读的本来目的不受影响）。
+  expect(container.querySelector(`[data-testid="recent-work-${id(30)}"]`)?.getAttribute("aria-current")).toBe("true");
+});
+
+it("消息落地即收敛：当前会话递活动计数后立即上浮，不等整列重读（2026-10-23 用户选定「立即发生」）", async () => {
+  const alpha = directoryRow(30, "2026-10-10T00:00:00Z", 41, "D:/work/alpha");
+  const beta = directoryRow(31, "2026-10-16T00:00:00Z", 42, "D:/work/beta");
+  // 服务端单会话详情可变：消息落地后 last_message_at 前进（insertMessage／settleGeneration）。
+  const detail = { ...alpha };
+  const { container } = await mount(200, [beta, alpha], detail);
+  await act(async () => { publishActiveConversation({ taskId: null, sessionId: id(30) }); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  expect(directoryGroupTitles(container)).toEqual(["beta", "alpha"]);
+  // 在 alpha 里落地一条消息：服务端推进 last_message_at，会话视图观察到权威投影落地，
+  // 递一个活动计数。左栏只定向重读这一行就地上浮——没有重挂载、没有重读整列。
+  detail.last_message_at = "2026-10-20T00:00:00Z";
+  detail.updated_at = "2026-10-20T00:00:00Z";
+  await act(async () => { bumpActiveConversationActivity(id(30)); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  expect(directoryGroupTitles(container)).toEqual(["alpha", "beta"]);
+  expect(container.querySelector(`[data-testid="recent-work-${id(30)}"]`)?.getAttribute("aria-current")).toBe("true");
+});
+
 it("分组折叠状态记在本地偏好：收起后重挂载仍保持收起", async () => {
   const { container, router } = await mount();
   const group = container.querySelector<HTMLDetailsElement>(".recent-work-group")!;
@@ -246,4 +290,52 @@ it("当前会话所在的工作区段仍可手动收起，换会话时才由定�
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
   expect(section.open).toBe(true);
   expect(window.localStorage.getItem("relay.workbench.recentWorkCollapsedGroups")).not.toContain("directories");
+});
+
+it("近期工作栏支持方向键漫游：跨分组移动焦点，折叠段里的行被跳过", async () => {
+  const sessionId = "77777777-7777-4777-8777-777777777777";
+  const otherId = "77777777-7777-4777-8777-777777777778";
+  const row = (idValue: string, directory: string) => ({ id: idValue, workspace_id: workspaceId,
+    project_id: null, task_id: null, title: "当前讨论", status: "ACTIVE", revision: "1",
+    conversation_mode: "AGENT", assistant_profile_id: null, assistant_profile_revision: null,
+    assistant_role: null, remember: true, created_at: "2026-10-01T00:00:00Z",
+    updated_at: "2026-10-01T00:30:00Z",
+    context: { project_goals: [], working_directory: { resource_id: directory, canonical_root: `D:/work/${directory}` } } });
+  // 两个不同目录的会话（两个分组）+ 首屏 8 条任务，段与组默认全部展开。
+  const { container } = await mount(200, [row(sessionId, "alpha"), row(otherId, "beta")], row(sessionId, "alpha"));
+  const rows = () => [...container.querySelectorAll<HTMLElement>(".recent-work-item")];
+  const visibleRows = () => rows().filter((item) => item.closest("details:not([open])") === null);
+  expect(rows()).toHaveLength(10);
+
+  await act(async () => { rows()[0]!.focus(); });
+  await act(async () => {
+    rows()[0]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+  });
+  // 跨分组也按可见顺序移动：落到第二条目录行（另一个目录分组）。
+  expect(document.activeElement).toBe(rows()[1]);
+  await act(async () => {
+    rows()[1]!.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true }));
+  });
+  expect(document.activeElement).toBe(rows().at(-1));
+  // 末条向下回绕到首条：行序跨「目录 → 任务」两段，两端循环照旧成立。
+  await act(async () => {
+    rows().at(-1)!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+  });
+  expect(document.activeElement).toBe(rows()[0]);
+
+  // 收起「工作区（目录）」段：其中两行不可聚焦，不再参与漫游。
+  const section = container.querySelector<HTMLDetailsElement>('[data-testid="recent-work-directories"]')!;
+  await act(async () => { section.open = false; section.dispatchEvent(new Event("toggle", { bubbles: true })); });
+  expect(visibleRows()).toHaveLength(8);
+  await act(async () => { visibleRows()[0]!.focus(); });
+  await act(async () => {
+    visibleRows()[0]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+  });
+  expect(document.activeElement).toBe(visibleRows()[1]);
+  // 回绕也只落在可见行里，不会钻进收起的目录段。
+  await act(async () => { visibleRows().at(-1)!.focus(); });
+  await act(async () => {
+    visibleRows().at(-1)!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+  });
+  expect(document.activeElement).toBe(visibleRows()[0]);
 });

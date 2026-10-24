@@ -1,0 +1,75 @@
+[
+  {
+    "mode": "CHAT",
+    "wireCalls": 1,
+    "outcomes": [
+      {
+        "messageId": "46fa7230-92f0-499d-8fe8-e8f5a0780eb0",
+        "sessionId": "d46639ca-c7d8-4eb2-ace6-c8c8523e219d",
+        "status": "COMPLETED",
+        "errorCode": null,
+        "proposalIds": []
+      },
+      {
+        "messageId": "633cae31-a288-46f6-948b-be3801783aeb",
+        "sessionId": "d46639ca-c7d8-4eb2-ace6-c8c8523e219d",
+        "status": "FAILED",
+        "errorCode": "MODEL_BUDGET_EXHAUSTED",
+        "proposalIds": []
+      }
+    ],
+    "ledgerRows": 1,
+    "ledger": [
+      {
+        "id": "2a47292a-2a47-467f-8132-b2354799d571",
+        "status": "COMPLETED",
+        "usage_input_tokens": 17,
+        "usage_output_tokens": 3
+      }
+    ]
+  },
+  {
+    "mode": "PLAN",
+    "wireCalls": 2,
+    "outcomes": [
+      {
+        "messageId": "7ce7a8dd-1aa1-488d-81d2-bd1e12aeebcd",
+        "sessionId": "19fb8556-da63-42fe-9544-097f51965906",
+        "status": "COMPLETED",
+        "errorCode": null,
+        "proposalIds": []
+      },
+      {
+        "messageId": "b87149b8-8011-4ad4-b6a1-9558e2527f9d",
+        "sessionId": "19fb8556-da63-42fe-9544-097f51965906",
+        "status": "COMPLETED",
+        "errorCode": null,
+        "proposalIds": []
+      }
+    ],
+    "ledgerRows": 0,
+    "ledger": []
+  },
+  {
+    "mode": "GOAL",
+    "wireCalls": 2,
+    "outcomes": [
+      {
+        "messageId": "a956dad3-c37e-4916-a7ec-577006405eff",
+        "sessionId": "05894033-6e88-4c7e-943a-09391f918e56",
+        "status": "COMPLETED",
+        "errorCode": null,
+        "proposalIds": []
+      },
+      {
+        "messageId": "10d1e8b2-7d59-46d2-950f-0fa05f45e7c6",
+        "sessionId": "05894033-6e88-4c7e-943a-09391f918e56",
+        "status": "COMPLETED",
+        "errorCode": null,
+        "proposalIds": []
+      }
+    ],
+    "ledgerRows": 0,
+    "ledger": []
+  }
+]

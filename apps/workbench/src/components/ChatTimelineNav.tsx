@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { ListTree } from "lucide-react";
 import type { RelayAssistMessage } from "../api/relayClient";
 import { resolveMotionPreference } from "../lib/motionPreference";
+import { handleRosterKeyDown } from "../lib/tabNavigation";
 import { resolvedTokenValue } from "../lib/tokens";
 import "./ChatTimelineNav.css";
 
@@ -274,6 +275,7 @@ export default function ChatTimelineNav({ sessionId, messages, getScrollOwner }:
       onClick={() => setExpanded((value) => !value)}><ListTree aria-hidden="true" /></button>
     <nav id={railId} className="agent-chat-timeline-rail" aria-label="消息时间线" ref={railRef}
       data-expanded={expanded ? "true" : undefined} data-testid="chat-timeline-rail"
+      onKeyDown={(event) => handleRosterKeyDown(event, ".agent-chat-timeline-node")}
       onPointerMove={(event) => {
         // 触屏点按没有悬停语义，不写长度，避免抬起后残留一帧波形；鼠标与笔按指针高度实时联动。
         if (event.pointerType === "touch") return;

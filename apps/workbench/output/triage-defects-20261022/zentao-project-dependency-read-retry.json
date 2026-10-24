@@ -1,0 +1,10 @@
+{
+  "pri": 3,
+  "type": "codeerror",
+  "severity": 3,
+  "openedBuild": [
+    "trunk"
+  ],
+  "title": "[Relay] 项目任务前置详情503被静默吞掉，同项重选不重读且没有局部重试入口",
+  "steps": "<pre>【问题】\n项目任务页读前置任务详情暂时失败时静默丢弃异常，仅把liveDependencies设为空。列表已明确有blocking_task_ids，右侧却缺前置任务名称/直达入口，既不说明读取失败，也不给重读。网络恢复后点同一个已选任务不会重跑effect；单任务项目没有其他行可用于切换再读，只能离开重进/整页刷新，或绕到任务详情。\n\n【当前真实路由复现】\n1. /projects/{P}/tasks，项目和任务列表成功，只有任务T。列表明确T有一个未完成前置D，allowed_actions不含START。\n2. 选择T触发GET /tasks/T（获取dependencies详情），该次503 DATABASE_UNAVAILABLE。\n3. 实际：只显示通用“前置任务尚未完成”和“1个前置任务”，没有读取失败提示；D的标题和直达卡片缺失。\n4. 模拟服务恢复，GET /tasks/T现可正常返回D名称。再次点同一T，detailReads仍1，页面无重试按钮，D仍不可见。\n5. 卸载后重新挂载同一路由，detailReads=2，D名称出现（健康对照，证明返回体与正常链有效）。\n预期：局部详情读取区显示错误/未读完状态，保留已知前置数量，不将失败等价为空依赖；提供针对同一T的有界显式重试，重读成功后显示原D，不能要求反复切页。\n\n【根因】\napps/workbench/src/views/ProjectTasksView.tsx：依赖effect catch(() =&gt; setLiveDependencies([]))丢弃错误，没有dependencyLoading/dependencyError/重试触发身份；依赖仅client/scopeKey/selectedTaskId，同项再次setSelectedTaskId不产生变化。展示selectedDependencies又只从成功的liveDependencies筛选，所以局部失败后没有可恢复状态。\n本单独立于#102首50任务无分页，本例仅1个任务，列表读取完整。也不同于#103聊天Skill项目清单错误缓存，入口和Owner不同。\n\n【证据与范围】\nD:/Develop/Relay-Agent/apps/workbench/output/triage-defects-20261022/projectDependencyReadRetry.spec.tsx\nD:/Develop/Relay-Agent/apps/workbench/output/triage-defects-20261022/project-dependency-read-retry.log\n真实React路由+RelayApiClient，模拟HTTP：detailReads=1,hasReadError=false,retryOffered=false,dependencyRestored=false；重新挂载健康对照后reads=2且原D名称可见，1条红复现。\n开始按钮一直disabled，服务端allowed_actions未被绕过；仍保留打开T任务详情的备用链接，不宣称用户完全无路可走。未做真实PG/HTTP故障或Windows验收；未改业务代码、未commit/push。\n\n【可执行修复提示词】\n先读项目任务页依赖effect、选择范围/request token和现有前置展示，检查共享diff。最小独立表达依赖读取中/失败/真实空结果，增加显式原任务重试，不因依赖局部失败清空已读项目任务清单，不编造前置标题/状态。不把依赖数组为空当作可开始；START仍只按服务端allowed_actions和既有可写门槛。\n验收：首次503可见局部失败、原T重试成功恢复D；再点同项或显式重试能重新请求而不需切页；同一Task有已知前置ID但未读详情时清楚说明读取未完成；确实无依赖和读取失败文案不同；T1迟到响应不得污染已选T2；项目/工作空间切换隔离；403时按既有失权策略撤下不可再读详情；重试不产生POST或开始任务。\n将红探针转正式路由回归，保留健康对照。同步受影响既有工作台错误/依赖展示说明与统一验收表；文档修改运行node scripts/check-docs.mjs，不新建重复ADR/过程报告，分别报告模拟HTTP与真实环境未验边界。</pre>"
+}

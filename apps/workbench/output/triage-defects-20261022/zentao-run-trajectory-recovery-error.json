@@ -1,0 +1,10 @@
+{
+  "pri": 3,
+  "openedBuild": [
+    "trunk"
+  ],
+  "type": "codeerror",
+  "severity": 3,
+  "steps": "<pre>【问题】\n同一Run工具轨迹第一次读取失败后，无论手动刷新还是后续成功重读，hook成功分支只保存snapshot，不清failure。结果页面已显示新快照，却仍宣称数据库不可达、工具轨迹当前不可读，用户无法从页面判断服务已恢复。\n\n【复现】\n真实RunToolTrajectoryPanel和useRunToolCalls，模拟client读取：\n1. getRunToolCalls首次503 DATABASE_UNAVAILABLE -&gt; 正确显示轨迹错误和当前不可读说明。\n2. 同一Run、同一revision，点“刷新”。第二次返回合法且runId匹配的RUNNING投影，rounds=[]。\n3. 实际：reads=2，成功快照已渲染“本次Run没有工具请求”，但trajectory-error仍存在、trajectory-source-unavailable仍存在，继续要求启动PostgreSQL。\n预期：在当前请求版本/Run身份匹配的成功读取后，清掉该Run上次failure，显示本次readAt/投影；正在重试时可以保留旧错误，但成功后不能继续冒充当前失败。\n\n【根因与可达性】\napps/workbench/src/lib/useRunToolCalls.ts：read开始setFailure(previous同run则保留)，catch会setFailure；成功分支只setSnapshot，没有setFailure(null)。failure只在没有Run或换Run时清，故同Run刷新成功无法消除错误。\nRunToolTrajectoryPanel既按error显示不可读警告，又独立按projection显示新轨迹，于是自相矛盾。\nCollaborationView当前挂载TaskViewDashboard，后者和WorkspaceSidePanel/DevToolsPanel都使用该组件；不是无调用保留组件。\n与#23接续点列表旧error不同，独立工具轨迹hook/Owner，修接续点不能影响此处。现有禅道标题检索未发现同入口工单。\n\n【证据与边界】\nD:/Develop/Relay-Agent/apps/workbench/output/triage-defects-20261022/runTrajectoryRecoveryError.spec.tsx\nD:/Develop/Relay-Agent/apps/workbench/output/triage-defects-20261022/run-trajectory-recovery-error.log\n真实React组件+hook，模拟client错误/成功，1条红复现：reads=2,errorVisible=true,unavailableVisible=true,successfulProjectionVisible=true。\n未做真实HTTP服务停启、PG、SSE端到端或Windows实窗；未证明轨迹数据丢失或工具被重复执行。未改业务代码、未commit/push。\n\n【可执行修复提示词】\n先读useRunToolCalls的请求版本、Run身份、事件流刷新和错误路径，检查共享diff。最小在匹配当前读取身份的成功分支结清旧failure，不移除现有403/404等失败撤下参数/输出的保护，不吞异常或把失败当空轨迹。错误与快照应属于同一次有效读取事实，旧成功不能复活到已失权的新状态。\n验收：同Run503-&gt;手动刷新成功清错误/不可读声明并显示新readAt；后续SSE提示或revision变化触发成功也恢复；503-&gt;持续503仍错误且不展示旧敏感快照；成功-&gt;403清快照；A失败后切B，A迟到回包不清B错误/写入B；run=null清loading；重复hint不重复行；不产生业务POST或重放工具。\n将红探针转正式组件/hook回归。同步受影响既有工作台轨迹读取状态说明与统一验收表；文档修改运行node scripts/check-docs.mjs，不新增重复ADR/过程报告，分别报告模拟client、真实HTTP/SSE与Windows未验边界。</pre>",
+  "title": "[Relay] Run工具轨迹重读成功后不清旧错误，新快照与当前不可读警告同时显示"
+}

@@ -15,6 +15,10 @@ import "./SessionRoundTrace.css";
  *     控制仍走输入栏与 Run 控制的既有入口。
  *   * 读取分两段：在途立即读并轮询（那时它是唯一的活体过程信号），终态等首次展开再读一次
  *     （刷新后一整段历史不该为每条消息各发一次请求）。代价是刷新后的终态轮次要点开才有数字。
+ *
+ * 2026-10-23 用户截图指令：删掉空轮次时的解释段与列表下方脚注（「没有调用任何工具…」、
+ * 「以上是已落账的工具轮次…」）。没有轮次就什么都不说——摘要行与在途三点已经足够，
+ * 解释段读起来像免责声明。删除只动呈现，不改变上面四条口径。
  */
 
 const POLL_MS = 2_000;
@@ -123,9 +127,6 @@ export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS }:
       <button className="secondary-button" type="button" data-testid={`session-round-trace-retry-${message.id}`}
         disabled={loading} onClick={() => void read()}>重新读取</button>
     </div>}
-    {trace !== null && trace.rounds.length === 0 && !loading && error === null &&
-      <p className="helper-text" data-testid={`session-round-trace-empty-${message.id}`}>
-        这条回复没有调用任何工具，正文由模型直接生成。没有轮次不等于没有读取会话里已有的上下文。</p>}
     {trace !== null && trace.rounds.length > 0 && <ol className="session-round-trace-rounds"
       data-testid={`session-round-trace-list-${message.id}`}>
       {trace.rounds.map((round) => <li key={round.round} data-testid={`session-round-${round.round}`}>
@@ -148,7 +149,5 @@ export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS }:
         </ul>
       </li>)}
     </ol>}
-    <p className="helper-text">以上是已落账的工具轮次，只说明「点了什么、有没有结算」；
-      未结算的行不能算已执行，读到的内容也不代表已被确认。</p>
   </details>;
 }

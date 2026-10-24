@@ -1,0 +1,15 @@
+【补证：聊天主消息列表也会丢弃全部慢成功回包】
+TRIAGE-ASSIST-MESSAGE-SLOW-POLL-20261023
+
+本单范围扩大至AssistView的AssistSessionPanel.refresh，不只SessionRoundTrace。该主消息读取默认1.5秒setInterval，每次refresh递增requestVersion，成功提交要求版本等于最新请求；未等待前次完成。若稳定响应3秒，就像工具轨迹一样每份成功完成态都会被下一读取作废。
+
+真实AssistView+MemoryRouter+RelayApiClient（无源码提取/复制函数）：先正常读到ASSISTANT/RUNNING及INITIAL_RUNNING_RESPONSE_PROBE；随后模拟后端已经COMPLETED，每次消息GET在3000毫秒成功返回FINAL_COMPLETED_RESPONSE_PROBE。按生产1.5秒间隔推进10秒，slowRequests=7,slowCompletedReads=5，但finalVisible=false,oldStillVisible=true；卸载重新进入，正常响应延迟下finalVisibleAfterRemount=true。所有模拟慢回包都200，没有503，服务端完成体合法。
+
+证据：D:/Develop/Relay-Agent/apps/workbench/output/triage-defects-20261022/assistMessageSlowPolling.spec.tsx
+日志：D:/Develop/Relay-Agent/apps/workbench/output/triage-defects-20261022/assist-message-slow-polling.log
+1条红复现，健康重进对照通过。当前AssistView源码对应refresh及活动messages轮询未改；共享工作区已有他人暂存改动，本Agent未编辑该文件。
+
+影响：不只是看不到工具阶段，主消息状态也可能长期停在旧RUNNING，无法通过这条轮询看到已完成正文。未额外验证停止键、发送队列是否受影响，不把它们当既定后果；未声称真实API当前有3秒延迟。
+
+修复/验收补充：必须覆盖两个Owner：SessionRoundTrace与AssistSessionPanel主消息/提案读取。主读取采用有界不重叠或合适顺序策略，同时保护消息发送后刷新、手动刷新、会话切换和卸载的身份；不能仅增大固定周期或删除跨会话防迟到守卫。
+新增回归：先RUNNING->后端COMPLETED，响应持续长于1.5秒时最终可见已完成正文和状态并停止无必要轮询；提案慢/消息快的Promise.all组合也能收敛；新消息发送触发的刷新不被轮询永久作废；切会话A到B后迟到A不污染B；持续错误和恢复成功的呈现分别正确。普通读取不能触发重复发消息或模型调用。保留原工具轨迹慢轮询全部验收。

@@ -1,0 +1,10 @@
+{
+  "pri": 2,
+  "openedBuild": [
+    "trunk"
+  ],
+  "type": "codeerror",
+  "severity": 3,
+  "title": "[Relay] 目标投影短暂读取失败后卡片消失并停止轮询，页内刷新也无法恢复",
+  "steps": "<pre>现象与用户影响\n计划/目标投影读取遇到短暂503后，当前会话把目标卡清空，暂停/取消入口消失，并停止自动读取。服务恢复后，页面现有“刷新”按钮只刷新消息，无法恢复目标卡；离开并重新进入会话后才恢复。后端可能仍在持续推进，前端却没有可见目标状态与控制入口。\n\n已验证范围\n真实AssistView + MemoryRouter +生产RelayClient，受控fetch、jsdom与假时钟；未冒称真实数据库/Provider/Windows界面故障。\n初始目标为ACTIVE、卡片正常；15秒轮询时令目标GET临时503，持续到由goalStatus变null触发的紧邻重读也失败；随后恢复健康HTTP200。\n结果：hiddenAfterFailure=true；失败结束goalReads=4；恢复后推进60秒goalReads仍4；点击assist-refresh确实重读了messages，但goalReads仍4、目标卡仍消失。重新挂载同一真实视图后卡片恢复（健康对照true）。目标响应在服务侧始终保留ACTIVE，未模拟目标取消/删除。\n\n根因\napps/workbench/src/views/AssistView.tsx：计划/目标useEffect的load用Promise.all读取两投影，catch直接setPlanView(null),setGoalView(null)，不显示读取失败；轮询仅在goalStatus为ACTIVE/PAUSING/CANCELLING时存在。失败把goalStatus变null后仅立即再读一次，若仍失败则无timer、无重试入口。\n同页面assist-refresh调用refresh()，没有调用refreshGoalPlan或增加projectionReload，因此用户点击刷新也无法恢复这块投影。空投影同时表示“没有目标”和“读取失败”，丢失状态语义。\n\n证据\napps/workbench/output/triage-defects-20261022/goalProjectionReadRecovery.spec.tsx\napps/workbench/output/triage-defects-20261022/goal-projection-read-recovery.log\n在apps/workbench执行：node node_modules/vitest/vitest.mjs run output/triage-defects-20261022/goalProjectionReadRecovery.spec.tsx --config output/triage-defects-20261022/vitest.config.ts --reporter verbose\n1项红：预期页内刷新恢复卡片，实际false；初始正常、刷新消息确有请求、重进恢复等前置/对照均通过。\n与#116慢请求持续被过期序号丢弃不同，本单是明确503导致投影清空和重读停止；与#113项目任务前置详情读取属于不同页面/Owner。\n\n可直接执行的修复提示词\n先读AGENTS、CODEX_NEXT_STEP、工作台&#167;44与现有目标/计划测试，检查git status及目标diff，保留共享修改。用本单真实视图复现建立正式回归，再做最小修复：区分初次加载、确实无目标、已有投影但重读失败，不把503当“无目标”；明确显示读取错误及页内重试，并让现有刷新入口覆盖该投影或提供清晰局部重试。旧投影若保留须标记陈旧，不能冒充当前事实；目标动作是否可用遵循既有控制/失权边界，不能为了保留按钮绕过服务端准入。读失败后不得永久失去恢复机会，也不要增加无界快速自动重试。\n分别覆盖目标GET失败、计划GET失败对另一块投影的影响；ACTIVE/PAUSING/CANCELLING轮询失败后恢复；首次失败后健康重试；确实goal=null；403/404与503区分；切换会话与连接时迟到响应不串号；页内刷新后错误清除且显示当前状态。复用现有Client与投影Owner，不新增第二套运行状态缓存/业务状态机。\n同步确实受影响的既有交互主文档/统一验收表，文档变更运行node scripts/check-docs.mjs。报告组件/真实浏览器/Windows/Provider分别证据，不用假时钟红灯声称全部真实环境验收。不commit/push，不更改生产用户目标，本轮只登记诊断不代修代码。</pre>"
+}

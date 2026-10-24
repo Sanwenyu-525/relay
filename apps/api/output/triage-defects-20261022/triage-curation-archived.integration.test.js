@@ -1,0 +1,33 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import test, { before, after } from 'node:test';
+import { runMigrations } from '../../dist/src/infrastructure/migration-runner.js';
+import { APP_DATABASE_URL, MIGRATION_DATABASE_URL, MIGRATIONS_DIRECTORY, openDatabase } from '../../dist/test/integration/integration-support.js';
+import { createWorkspace, expectCommandAccepted, startTestApi, workspacePath } from '../../dist/test/integration/api-harness.js';
+const app = openDatabase(APP_DATABASE_URL, 'triage-curation-archived');
+let api;
+before(async () => { await runMigrations({ connectionString: MIGRATION_DATABASE_URL, directory: MIGRATIONS_DIRECTORY }); api = await startTestApi(); });
+after(async () => { await api?.stop(); await app.close(); });
+test('archived exact-title knowledge cannot remain an actionable PROPOSED curation target', async () => {
+  const workspaceId = await createWorkspace(app.db);
+  const command = async (path, body, status = 201) => {
+    const id = randomUUID();
+    return expectCommandAccepted(await api.post(workspacePath(workspaceId, path), { command_id: id, ...body }), status, id);
+  };
+  const projectId = (await command('/projects', { title: 'isolated curation probe', project_type: 'GENERAL' })).project_id;
+  const task = await command('/tasks', { project_id: projectId, title: 'source', objective: 'source', criteria: [{ criterion_id: 'c1', statement: 'check' }] });
+  const ready = await command(`/tasks/${task.task_id}/ready`, { expected_revision: task.revision }, 200);
+  const started = await command(`/tasks/${task.task_id}/start`, { expected_revision: ready.revision }, 200);
+  const artifact = await command(`/tasks/${task.task_id}/artifacts`, { expected_task_revision: started.revision, title: 'same-title', media_type: 'text/markdown', content: '# source\ncontent' });
+  const knowledge = await command('/knowledge', { project_id: projectId, title: 'same-title', source_kind: 'NOTE', text: 'archived content' });
+  await command(`/knowledge/${knowledge.knowledge_id}/archive`, { expected_revision: knowledge.revision }, 200);
+  const base = `/projects/${projectId}/knowledge-curation-candidates`;
+  const created = await command(base, { sources: [{ artifact_version_id: artifact.version_id }] });
+  const listed = await api.get(workspacePath(workspaceId, base));
+  assert.equal(listed.status, 200, listed.text);
+  const candidate = listed.body.items.find(item => item.id === created.candidate_ids[0]);
+  const accepted = await api.post(workspacePath(workspaceId, `${base}/${candidate.id}/accept`), { command_id: randomUUID() });
+  console.log('TRIAGE_CURATION_ARCHIVED', JSON.stringify({ status: candidate.status, suggestedKnowledgeId: candidate.suggested_knowledge_id, archivedKnowledgeId: knowledge.knowledge_id, similar: candidate.similar, acceptStatus: accepted.status, acceptBody: accepted.body }));
+  assert.equal(accepted.status, 409, accepted.text);
+  assert.ok(candidate.suggested_knowledge_id !== knowledge.knowledge_id || candidate.status !== 'PROPOSED', 'an archived-only target must not be presented as an actionable curation suggestion');
+});

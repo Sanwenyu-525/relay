@@ -70,18 +70,25 @@
    字体度量稍有出入就会掉回 5+5+1，故取当前这档。窗口窄于聊天列时按 100% 收缩、自动多行。
    2026-10-18 按 V5.11 原型补前缀图标：11 个图标按各卡功能单独选型不重样，16px 取 font.size.body
    而非 control.icon.size（与 chip 的 chevron、栏头「新对话」同档）；卡片自身改 inline-flex 承图标与
-   文字的 8px 间距。图标按功能族分色（data-tone，均为既有 token，不建第二套色系）：
-   plan=构思与规划取 status.warning.text（琥珀）、build=实施与质量取 action.primary（墨绿）、
-   fix=问题排查取 status.danger.text（砖红）、doc=文档与接续取 text.muted（灰绿）。
-   原型只给三枚卡上紫色强调、其余全绿，用户反馈「一眼看上去没区别度」；这里按功能族整族上色，
-   扫描时能按颜色分簇。hover 仍只改文字与边框，图标颜色不随 hover 变。 */
-.agent-chat-suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--relay-space-2); margin-inline: auto; margin-top: var(--relay-space-4); max-width: var(--chat-measure, min(46.5rem, 100%)); }
+   文字的 8px 间距。图标按功能族分色（data-tone）：plan=构思与规划取 status.warning.text（琥珀）、
+   build=实施质量与接续取 action.primary（墨绿）。
+   2026-10-23 用户指令「加入紫色」：实现功能/补充测试单独带紫调强调，新增本地 accent-violet。
+   同日二轮（用户指令「三种颜色，调整位置与色值」）：配色从五档收敛为三族——排查、文档接续
+   并入墨绿 build，紫调降饱和（#7C5CFF→#5F3DC4）与琥珀/墨绿同一档柔和度；三色块在两行里
+   成整段（琥珀×4 → 紫×2 → 墨绿×5），小尺寸图标不再五色并置发花。hover 仍只改文字与边框。 */
+/* 快捷入口与「最近动态」之间的空白（2026-10-20 第五轮）：欢迎块自身是 flex:1 垂直居中的，
+   旧实现给 suggestions 一个 space-4 的上外边距、再靠 activity 自己的 space-4 上外边距，
+   两者叠加后在 900px 窗口里量出 65px 空档——快捷语与最近动态读成两块不相干的内容，
+   欢迎区的视觉节奏在这里断掉。现在把这一段收成一档 space-3：仍是明确的「两组」，
+   但不再是一片需要滚过的空白。两行快捷语本身的行距（gap space-2）不动。 */
+.agent-chat-suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--relay-space-2); margin-inline: auto; margin-top: var(--relay-space-3); max-width: var(--chat-measure, min(46.5rem, 100%)); }
 .agent-chat-suggestion { display: inline-flex; align-items: center; gap: var(--relay-space-2); padding: var(--relay-space-2); font-size: var(--relay-font-size-body); color: var(--relay-color-text-secondary); background: var(--relay-color-bg-surface); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-control); cursor: pointer; }
 .agent-chat-suggestion > svg { flex: none; width: var(--relay-font-size-body); height: var(--relay-font-size-body); color: var(--relay-color-action-primary); }
 .agent-chat-suggestion[data-tone="plan"] > svg { color: var(--relay-color-status-warning-text); }
 .agent-chat-suggestion[data-tone="build"] > svg { color: var(--relay-color-action-primary); }
-.agent-chat-suggestion[data-tone="fix"] > svg { color: var(--relay-color-status-danger-text); }
-.agent-chat-suggestion[data-tone="doc"] > svg { color: var(--relay-color-text-muted); }
+/* 2026-10-23 二轮：紫调降饱和至 #5F3DC4，与琥珀/墨绿同档柔和；仍只用于实现功能/补充测试两张。 */
+:root { --relay-color-accent-violet: #5F3DC4; }
+.agent-chat-suggestion[data-tone="purple"] > svg { color: var(--relay-color-accent-violet); }
 .agent-chat-suggestion:hover { color: var(--relay-color-action-primary); border-color: var(--relay-color-action-primary); }
 /* 功能族分隔板：2px 竖线落在卡缝正中（2026-10-18 用户指令「加粗 1px」，1px 档读着偏细）。
    负 margin 把竖线收回卡片原有的 8px 缝里——它作为 flex 子项会多占一道 gap，

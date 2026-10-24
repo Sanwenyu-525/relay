@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import { createHash, randomUUID } from 'node:crypto';
+import test, { before, after } from 'node:test';
+import fs from 'node:fs';
+import { runMigrations } from '../../dist/src/infrastructure/migration-runner.js';
+import { APP_DATABASE_URL, MIGRATION_DATABASE_URL, MIGRATIONS_DIRECTORY, openDatabase } from '../../dist/test/integration/integration-support.js';
+import { createWorkspace, expectCommandAccepted, startTestApi, workspacePath } from '../../dist/test/integration/api-harness.js';
+import { withTransaction } from '../../dist/src/application/unit-of-work.js';
+const app = openDatabase(APP_DATABASE_URL, 'triage-memory-source-repeat');
+let api;
+before(async () => { await runMigrations({ connectionString: MIGRATION_DATABASE_URL, directory: MIGRATIONS_DIRECTORY }); api = await startTestApi(); });
+after(async () => { await api?.stop(); await app.close(); });
+test('different commands saving the same source create separate memories: readback retry must not create again', async () => {
+  const workspaceId = await createWorkspace(app.db);
+  const sessionId = randomUUID(), messageId = randomUUID();
+  const content = 'retain the verification evidence';
+  await withTransaction(app.db, async r => {
+    await r.assist.insertSession({ id: sessionId, workspaceId, projectId: null, taskId: null, title: 'memory readback probe' });
+    await r.assist.insertMessage({ id: messageId, sessionId, seq: 1n, role: 'USER', status: 'COMPLETED', intent: 'DISCUSS', content, sources: [] });
+  });
+  const path = workspacePath(workspaceId, `/assist-sessions/${sessionId}/messages/${messageId}/memories`);
+  const payload = { expected_session_revision: '0', content_sha256: createHash('sha256').update(content).digest('hex'), project_id: null, title: 'evidence preference', text: content, confirmed: true };
+  const ids = [randomUUID(), randomUUID()];
+  const firstResponse = await api.post(path, { ...payload, command_id: ids[0] });
+  const first = expectCommandAccepted(firstResponse, 201, ids[0]);
+  const secondResponse = await api.post(path, { ...payload, command_id: ids[1] });
+  const second = expectCommandAccepted(secondResponse, 201, ids[1]);
+  const list = await api.get(workspacePath(workspaceId, '/memories'));
+  assert.equal(list.status, 200, list.text);
+  const matching = list.body.filter(m => m.title === payload.title && m.text === payload.text);
+  assert.notEqual(first.memory_id, second.memory_id);
+  assert.equal(matching.length, 2);
+  const evidence = { fixture: 'isolated completed USER message, no model request', ids, firstStatus: firstResponse.status, secondStatus: secondResponse.status, first, second, matching };
+  fs.writeFileSync('D:/Develop/relay-dev-ledger/output/triage-20261022/memory-source-repeat-evidence.json', JSON.stringify(evidence, null, 2));
+  console.log('TRIAGE_MEMORY_SOURCE_REPEAT', JSON.stringify({ statuses: [firstResponse.status, secondResponse.status], memoryIds: [first.memory_id, second.memory_id], count: matching.length }));
+});

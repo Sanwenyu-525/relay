@@ -236,9 +236,14 @@ function expectLayoutContract(snapshot: Snapshot, label: string): void {
     if (name.startsWith("inspector")) continue;
     expect(area, `${where} · ${name} 交叠 ${area}px²`).toBeLessThanOrEqual(0.5);
   }
-  // 2. 工具栏按钮落在主区内、不掉到视口外。
+  // 2. 工具栏按钮落在主区内、不掉到视口外。「工作详情」开关在面板弹出后整颗不渲染
+  //    （2026-10-23 用户截图指令：收起入口只剩面板头部那颗同图标键），因此只有关闭态核对它。
   for (const [name, box] of [["任务视图", snapshot.taskView],
     ["工作详情", snapshot.inspectorToggle]] as const) {
+    if (name === "工作详情" && box === null) {
+      expect(snapshot.inspector, `${where} · 开关缺席但面板也未打开`).not.toBeNull();
+      continue;
+    }
     const placed = bounds(snapshot, where, name, box);
     expect(placed.left, `${where} · ${name} 越出主区右缘`).toBeLessThanOrEqual(columns.right + 0.5);
   }
@@ -369,12 +374,18 @@ test.describe("CT-01 详情与预览的容器布局", () => {
     await toggle.click();
     await expect(page.getByTestId("collab-inspector")).toBeVisible();
     await expect(page.getByTestId("collab-inspector-scrim")).toBeHidden();
-    // 非模态分栏不抢焦点：焦点留在触发键上。
-    await expect(toggle).toBeFocused();
+    // 打开即收走触发键（2026-10-23 用户截图指令）：非模态分栏仍不抢焦点——焦点落回文档，
+    // 不被面板里的任何控件接走。
+    await expect(toggle).toHaveCount(0);
+    const focusStolen = await page.evaluate(() => {
+      const panelNode = document.querySelector('[data-testid="collab-inspector"]');
+      return panelNode?.contains(document.activeElement) ?? false;
+    });
+    expect(focusStolen, "分栏打开时焦点被面板抢走").toBe(false);
     const split = await measure(page, "work-details/split");
     expect(split.inspector?.position).toBe("static");
     await page.keyboard.press("Escape");
-    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    // 分栏是常驻内容：Esc 不是它的关闭路径，面板保持原样。
     await expect(page.getByTestId("collab-inspector")).toBeVisible();
     // 深预览在 900px 容器里收成抽屉（56.5rem 阈值），Esc 第一下退回工作详情。
     await openFilePreview(page);

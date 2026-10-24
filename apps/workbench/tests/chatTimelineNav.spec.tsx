@@ -262,6 +262,42 @@ describe("预览与键盘", () => {
     owner.remove();
   });
 
+  it("方向键与 Home/End 在刻度间移动焦点：只带上预览，不代劳跳转", async () => {
+    const owner = makeOwner(slots);
+    await open(owner);
+    const first = nodeButton("chat-timeline-node-m-1");
+    await act(async () => { first.focus(); });
+    await act(async () => {
+      first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    });
+    // 焦点落到下一条，其 focus 行为自带预览：与悬停、Tab 聚焦同一份呈现
+    expect(document.activeElement).toBe(nodeButton("chat-timeline-node-m-2"));
+    expect(document.querySelector('[data-testid="chat-timeline-preview-title"]')?.textContent)
+      .toContain("第二段讨论");
+    expect(owner.scrollTop).toBe(0); // 漫移只预览，不跳转
+    // Home/End 直达两端；末条再向下回绕到首条，与横向页签的两端循环一致
+    await act(async () => {
+      nodeButton("chat-timeline-node-m-2").dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true }));
+    });
+    expect(document.activeElement).toBe(nodeButton("chat-timeline-node-m-3"));
+    await act(async () => {
+      nodeButton("chat-timeline-node-m-3").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    });
+    expect(document.activeElement).toBe(first);
+    await act(async () => {
+      first.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true }));
+    });
+    expect(document.activeElement).toBe(first);
+    // 焦点不在任何刻度上时方向键静默不动：Tab 进入列表的既有语义不变
+    await act(async () => { first.blur(); });
+    await act(async () => {
+      document.querySelector('[data-testid="chat-timeline-rail"]')!
+        .dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    });
+    expect(document.activeElement).toBe(document.body);
+    owner.remove();
+  });
+
   it("焦点离开或指针移出轨道后预览关闭", async () => {
     const owner = makeOwner(slots);
     await open(owner);

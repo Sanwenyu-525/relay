@@ -1,0 +1,133 @@
+[
+  {
+    "name": "different-roots",
+    "submitted": [
+      {
+        "kind": "KNOWLEDGE",
+        "root_id": "bfdba08c-0600-4f77-9d41-6403a5222dfb",
+        "version": "1"
+      },
+      {
+        "kind": "KNOWLEDGE",
+        "root_id": "4c4af2de-e618-4cab-adb3-5d0063fc01d8",
+        "version": "1"
+      }
+    ],
+    "frozen": [
+      {
+        "kind": "KNOWLEDGE",
+        "root_id": "bfdba08c-0600-4f77-9d41-6403a5222dfb",
+        "version": "1"
+      },
+      {
+        "kind": "KNOWLEDGE",
+        "root_id": "4c4af2de-e618-4cab-adb3-5d0063fc01d8",
+        "version": "1"
+      }
+    ],
+    "explicitSources": [
+      {
+        "ref": "knowledge:bfdba08c-0600-4f77-9d41-6403a5222dfb:v1",
+        "version": "1",
+        "content": "V1_MARKER_original_fact"
+      },
+      {
+        "ref": "knowledge:4c4af2de-e618-4cab-adb3-5d0063fc01d8:v1",
+        "version": "1",
+        "content": "OTHER_MARKER_control_fact"
+      }
+    ],
+    "exclusions": [],
+    "budget": {
+      "limit_tokens": 100000,
+      "reserved_tokens": 1536,
+      "required_tokens": 1371,
+      "selected_tokens": 1656,
+      "estimation": "ESTIMATED_UTF8_BYTES_DIV_3"
+    }
+  },
+  {
+    "name": "same-root-v1-v2",
+    "submitted": [
+      {
+        "kind": "KNOWLEDGE",
+        "root_id": "bfdba08c-0600-4f77-9d41-6403a5222dfb",
+        "version": "1"
+      },
+      {
+        "kind": "KNOWLEDGE",
+        "root_id": "bfdba08c-0600-4f77-9d41-6403a5222dfb",
+        "version": "2"
+      }
+    ],
+    "frozen": [
+      {
+        "kind": "KNOWLEDGE",
+        "root_id": "bfdba08c-0600-4f77-9d41-6403a5222dfb",
+        "version": "1"
+      },
+      {
+        "kind": "KNOWLEDGE",
+        "root_id": "bfdba08c-0600-4f77-9d41-6403a5222dfb",
+        "version": "2"
+      }
+    ],
+    "explicitSources": [
+      {
+        "ref": "knowledge:bfdba08c-0600-4f77-9d41-6403a5222dfb:v1",
+        "version": "1",
+        "content": "V1_MARKER_original_fact"
+      }
+    ],
+    "exclusions": [],
+    "budget": {
+      "limit_tokens": 100000,
+      "reserved_tokens": 1536,
+      "required_tokens": 1371,
+      "selected_tokens": 1513,
+      "estimation": "ESTIMATED_UTF8_BYTES_DIV_3"
+    }
+  },
+  {
+    "name": "same-root-v2-v1",
+    "submitted": [
+      {
+        "kind": "KNOWLEDGE",
+        "root_id": "bfdba08c-0600-4f77-9d41-6403a5222dfb",
+        "version": "2"
+      },
+      {
+        "kind": "KNOWLEDGE",
+        "root_id": "bfdba08c-0600-4f77-9d41-6403a5222dfb",
+        "version": "1"
+      }
+    ],
+    "frozen": [
+      {
+        "kind": "KNOWLEDGE",
+        "root_id": "bfdba08c-0600-4f77-9d41-6403a5222dfb",
+        "version": "2"
+      },
+      {
+        "kind": "KNOWLEDGE",
+        "root_id": "bfdba08c-0600-4f77-9d41-6403a5222dfb",
+        "version": "1"
+      }
+    ],
+    "explicitSources": [
+      {
+        "ref": "knowledge:bfdba08c-0600-4f77-9d41-6403a5222dfb:v2",
+        "version": "2",
+        "content": "V2_MARKER_revised_fact"
+      }
+    ],
+    "exclusions": [],
+    "budget": {
+      "limit_tokens": 100000,
+      "reserved_tokens": 1536,
+      "required_tokens": 1371,
+      "selected_tokens": 1513,
+      "estimation": "ESTIMATED_UTF8_BYTES_DIV_3"
+    }
+  }
+]

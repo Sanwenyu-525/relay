@@ -265,7 +265,10 @@ describe("新对话直接起步", () => {
     const view = await mount("/agent?new=entry", false, undefined, false, gate);
     await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("稍后送达的首条消息");
     await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click"); await flush();
-    expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("还没有消息");
+    // 首条在途：事实由发送状态行独自承担，对话区不摆「还没有消息。」那行空态——
+    // 2026-10-23 用户截图指认它把在途读成空会话（先显示空页、之后才是对话）。
+    expect(view.wrapper.get('[data-testid="assist-first-pending"]').attributes("data-state")).toBe("sending");
+    expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).not.toContain("还没有消息");
     release(); await flush(); await flush();
     expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("稍后送达的首条消息");
     expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("第 1 条回复");

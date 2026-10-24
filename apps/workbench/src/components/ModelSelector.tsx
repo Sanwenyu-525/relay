@@ -201,7 +201,7 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
       {!loading && <ul className="model-selector-list" id="model-selector-list" role="listbox" aria-label="可选模型">
         {groups.map((group) => <li key={group} role="group" aria-label={group}><p className="model-selector-group">{group}</p>
           {entries.filter((entry) => entry.group === group).map((entry) => <button key={entry.id} type="button" role="option"
-            className="model-selector-option" data-testid={`model-selector-option-${entry.id}`}
+            className="model-selector-option" data-testid={`model-selector-option-${entry.id}`} data-model-id={entry.id}
             aria-selected={entry.id === choice} disabled={!entry.selectable}
             title={entryTitle(entry)} aria-label={`${entry.name} · ${entry.id}${entry.note === null ? "" : `（${entry.note}）`}`}
             onClick={() => chooseEntry(entry)}>

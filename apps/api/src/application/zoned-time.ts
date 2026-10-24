@@ -122,20 +122,18 @@ export function isoWeekday(date: LocalDate): number {
 /**
  * 把「本地日期 + 本地时刻」解析成绝对时刻。
  *
- * 两遍 offset 修正处理 DST：先用 guess 处的偏移试算，再用试算结果的偏移复算。
- * 两个候选都可能有效（秋回重叠），取较早的一次；都无效说明落在 gap，按 +1 小时顺延。
+ * 围绕首遍偏移向两侧扩展候选偏移（DST 调整幅度现实时区不超过 2 小时，±3 小时留余量），
+ * 每个候选偏移换算出一个候选 instant，再用墙钟回读过滤。不能只从 guess 处的偏移做
+ * 不动点迭代：对正 UTC 偏移时区（如柏林），guess 在秋回后段，迭代会收敛到较晚的一次。
+ * 秋回重叠会得到两个有效候选，取较早的一次；都无效说明落在 gap，按 +1 小时顺延。
  */
 export function resolveLocalDateTime(date: LocalDate, time: { hour: number; minute: number }, timezone: string): Date {
   const guess = Date.UTC(date.year, date.month - 1, date.day, time.hour, time.minute);
-  const candidates = new Set<number>();
-  const firstOffset = offsetAt(guess, timezone);
-  candidates.add(guess - firstOffset);
-  candidates.add(guess - offsetAt(guess - firstOffset, timezone));
-
-  const valid = [...candidates].filter((instant) => sameWallClock(instant, date, time, timezone));
+  const valid = collectValidInstants(date, time, timezone);
   if (valid.length > 0) return new Date(Math.min(...valid));
 
   // gap：该墙钟时刻不存在。顺延一小时后重新解析；若仍不存在，按首遍偏移直接推进一小时。
+  const firstOffset = offsetAt(guess, timezone);
   const shifted = time.hour + 1 >= 24
     ? { date: addDays(date, 1), time: { hour: time.hour + 1 - 24, minute: time.minute } }
     : { date, time: { hour: time.hour + 1, minute: time.minute } };
@@ -145,13 +143,22 @@ export function resolveLocalDateTime(date: LocalDate, time: { hour: number; minu
 }
 
 function resolveLocalDateTimeWithoutGap(date: LocalDate, time: { hour: number; minute: number }, timezone: string): Date | undefined {
-  const guess = Date.UTC(date.year, date.month - 1, date.day, time.hour, time.minute);
-  const candidates = new Set<number>();
-  const firstOffset = offsetAt(guess, timezone);
-  candidates.add(guess - firstOffset);
-  candidates.add(guess - offsetAt(guess - firstOffset, timezone));
-  const valid = [...candidates].filter((instant) => sameWallClock(instant, date, time, timezone));
+  const valid = collectValidInstants(date, time, timezone);
   return valid.length === 0 ? undefined : new Date(Math.min(...valid));
+}
+
+/** DST 调整幅度的扫描余量：现实时区单次调整不超过 2 小时，±3 小时足够覆盖。 */
+const OFFSET_SCAN_DELTAS = [-3, -2, -1, 0, 1, 2, 3].map((hours) => hours * MS_PER_HOUR);
+
+function collectValidInstants(date: LocalDate, time: { hour: number; minute: number }, timezone: string): number[] {
+  const guess = Date.UTC(date.year, date.month - 1, date.day, time.hour, time.minute);
+  const firstOffset = offsetAt(guess, timezone);
+  const candidates = new Set<number>();
+  for (const delta of OFFSET_SCAN_DELTAS) {
+    const instant = guess - (firstOffset + delta);
+    if (sameWallClock(instant, date, time, timezone)) candidates.add(instant);
+  }
+  return [...candidates];
 }
 
 function sameWallClock(instantMs: number, date: LocalDate, time: { hour: number; minute: number }, timezone: string): boolean {

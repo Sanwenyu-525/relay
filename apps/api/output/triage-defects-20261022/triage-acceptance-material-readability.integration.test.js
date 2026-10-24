@@ -1,0 +1,60 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import test, { before, after } from 'node:test';
+import fs from 'node:fs';
+import path from 'node:path';
+import { runMigrations } from '../../dist/src/infrastructure/migration-runner.js';
+import { createRepositories } from '../../dist/src/application/unit-of-work.js';
+import { resolveStoredContentPath } from '../../dist/src/storage/managed-content-store.js';
+import { APP_DATABASE_URL, MIGRATION_DATABASE_URL, MIGRATIONS_DIRECTORY, openDatabase } from '../../dist/test/integration/integration-support.js';
+import { createWorkspace, expectCommandAccepted, startTestApi, workspacePath } from '../../dist/test/integration/api-harness.js';
+const app = openDatabase(APP_DATABASE_URL, 'triage-acceptance-material-readability');
+let api;
+let wid;
+before(async () => { await runMigrations({ connectionString: MIGRATION_DATABASE_URL, directory: MIGRATIONS_DIRECTORY }); api = await startTestApi(); wid = await createWorkspace(app.db); });
+after(async () => { await api?.stop(); await app.close(); });
+async function post(suffix, body, status = 200) { const id = randomUUID(); return expectCommandAccepted(await api.post(workspacePath(wid, suffix), { command_id: id, ...body }), status, id); }
+async function get(suffix) { const res = await api.get(workspacePath(wid, suffix)); assert.equal(res.status, 200, res.text); return res.body; }
+test('missing or corrupt selected material content must not remain AVAILABLE and TARGET_MET', async () => {
+  const project = await post('/projects', { title: 'readability probe', project_type: 'GENERAL' }, 201);
+  const task = await post('/tasks', { project_id: project.project_id, title: 'material content sample', objective: 'check material readability', criteria: [{ criterion_id: 'c1', statement: 'human check' }] }, 201);
+  const ready = await post(`/tasks/${task.task_id}/ready`, { expected_revision: task.revision });
+  const started = await post(`/tasks/${task.task_id}/start`, { expected_revision: ready.revision });
+  const artifact = await post(`/tasks/${task.task_id}/artifacts`, { expected_task_revision: started.revision, title: 'source material', media_type: 'text/markdown', content: '# Durable source material\n\nOriginal content for the selected reference.' }, 201);
+  const knowledge = await post('/knowledge', { project_id: project.project_id, title: 'artifact reference material', source_kind: 'ARTIFACT_VERSION', artifact_version_id: artifact.version_id }, 201);
+  const materialPath = `/tasks/${task.task_id}/acceptance-materials`;
+  const material = await post(materialPath, { expected_acceptance_revision: task.acceptance_revision, knowledge_id: knowledge.knowledge_id, knowledge_version: knowledge.version, criterion_id: 'c1', tested_artifact_version_id: artifact.version_id });
+  const trials = `/tasks/${task.task_id}/acceptance-trials`;
+  const baseline = await post(trials, { expected_acceptance_revision: task.acceptance_revision, mode: 'ORIGINAL', sample_label: 'declared baseline' });
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  const baselineEnd = await post(`${trials}/${baseline.trial_id}/transitions`, { expected_revision: baseline.revision, action: 'FINISH' });
+  const baselineObs = await post(`${trials}/${baseline.trial_id}/observations`, { expected_revision: baselineEnd.revision, preparation_ms: 10000, total_acceptance_ms: 120000, source_note: 'declared baseline total includes preparation', correctness_outcome: 'NO_ISSUE_REPORTED' });
+  const comparisons = `/projects/${project.project_id}/acceptance-comparisons`;
+  const comparison = await post(comparisons, { baseline_trial_id: baseline.trial_id, expected_baseline_revision: baselineObs.revision, target_reduction_percent: 1, sample_scope: 'same task selected material, diagnostic sample only' });
+  const trial = await post(trials, { expected_acceptance_revision: task.acceptance_revision, mode: 'EVIDENCE_VIEW', sample_label: 'completed while readable', material_ids: [material.material_id], comparison_id: comparison.comparison_id });
+  const end = await post(`${trials}/${trial.trial_id}/transitions`, { expected_revision: trial.revision, action: 'FINISH' });
+  await post(`${trials}/${trial.trial_id}/observations`, { expected_revision: end.revision, preparation_ms: 1000, total_acceptance_ms: 90000, source_note: 'declared new sample includes preparation', correctness_outcome: 'NO_ISSUE_REPORTED' });
+  async function snapshot() {
+    const content = await get(`/knowledge/${knowledge.knowledge_id}/versions/1/content`);
+    const materials = await get(materialPath);
+    const comparisonList = await get(comparisons);
+    const sample = comparisonList.items.find(c => c.comparison_id === comparison.comparison_id).samples.find(s => s.trial_id === trial.trial_id);
+    return { contentStatus: content.content_status, content: content.content, materialAvailability: materials.items[0].material_availability, materialStatus: sample.material_status, assessment: sample.assessment };
+  }
+  const beforeDamage = await snapshot();
+  assert.equal(beforeDamage.contentStatus, 'FULL'); assert.equal(beforeDamage.assessment, 'TARGET_MET');
+  const stored = await createRepositories(app.db).artifacts.readArtifactVersion(artifact.version_id);
+  const storedPath = resolveStoredContentPath(api.dataRoot, stored.storage_ref);
+  const relative = path.relative(api.dataRoot, storedPath);
+  assert.ok(relative && !relative.startsWith('..') && !path.isAbsolute(relative), 'fault injection stays in isolated API test storage');
+  fs.writeFileSync(storedPath, 'tampered test content');
+  const corrupt = await snapshot();
+  assert.equal(corrupt.contentStatus, 'READ_FAILED'); assert.equal(corrupt.content, null);
+  fs.unlinkSync(storedPath);
+  const missing = await snapshot();
+  assert.equal(missing.contentStatus, 'UNAVAILABLE'); assert.equal(missing.content, null);
+  fs.writeFileSync('D:/Develop/Relay-Agent/apps/api/output/triage-defects-20261022/acceptance-material-readability-evidence.json', JSON.stringify({ artifact, knowledge, material, trial, beforeDamage, corrupt, missing }, null, 2));
+  console.log('TRIAGE_ACCEPTANCE_MATERIAL_READABILITY', JSON.stringify({ beforeDamage, corrupt, missing }));
+  assert.notEqual(missing.materialAvailability, 'AVAILABLE', 'actual unreadable selected material cannot be reported as available');
+  assert.notEqual(missing.assessment, 'TARGET_MET');
+});

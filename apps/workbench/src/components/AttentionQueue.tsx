@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import type { RelayApiClient, RelayInterventionItem, RelayReview, RelayRun, RelayTaskSummary } from "../api/relayClient";
+import { RelayApiError, type RelayApiClient, type RelayInterventionItem, type RelayReview, type RelayRun, type RelayTaskSummary } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { interventionReasonText, reviewKindLabels, reviewReasonText, taskStatusLabels } from "../lib/labels";
 import { controlLabels, runLabels } from "./RunControlPanel";
@@ -19,6 +19,11 @@ interface AttentionSnapshot {
   readonly taskPagesComplete: boolean;
   readonly nextCursor: string | null;
   readonly seenCursors: ReadonlySet<string>;
+  /**
+   * 续页失败时保留失败页身份：原游标与失败说明。
+   * 服务恢复后按这个游标重试这一页即可，不必把前面读过的页重读一遍（禅道 #131）。
+   */
+  readonly taskPageFailure: { readonly cursor: string; readonly message: string } | null;
 }
 
 function needsTaskAttention(task: RelayTaskSummary, reviewTaskIds: ReadonlySet<string>): boolean {
@@ -34,6 +39,18 @@ function targetKey(url: string): string {
   const [path, query = ""] = url.split("?");
   const id = new URLSearchParams(query).get("id");
   return id === null ? path : `${path}?id=${id}`;
+}
+
+/**
+ * 续页失败的说法要分清两种情形：「暂时不可用」按原游标重试这一页即可，
+ * 「已失权／不可见」重试同一页不会自己变好，得先核对作用域与权限。
+ * 两者混同会让人把权限问题当成临时故障反复重试（禅道 #131）。
+ */
+function taskPageFailureText(caught: unknown): string {
+  if (caught instanceof RelayApiError && (caught.problem.status === 403 || caught.problem.status === 404)) {
+    return "这一页当前不可见或已无权读取：请先核对作用域与权限，恢复访问后再按原游标重试这一页。";
+  }
+  return describeLiveError(caught).message;
 }
 
 async function readAttention(client: RelayApiClient, active: () => boolean,
@@ -57,6 +74,7 @@ async function readAttention(client: RelayApiClient, active: () => boolean,
   let cursor: string | null = previous?.nextCursor ?? null;
   let taskPagesComplete = false;
   let nextCursor: string | null = null;
+  let taskPageFailure: { readonly cursor: string; readonly message: string } | null = null;
   try {
     for (let pageNumber = 0; pageNumber < 10 && active(); pageNumber++) {
       const page = await client.getWorkspaceTasksPage(cursor);
@@ -68,7 +86,18 @@ async function readAttention(client: RelayApiClient, active: () => boolean,
       if (cursors.has(page.nextCursor)) throw new Error("任务游标重复，无法确认列表完整性。");
       cursors.add(page.nextCursor); cursor = page.nextCursor; nextCursor = cursor;
     }
-  } catch (caught) { nextCursor = null; failures.push(`Task 列表未读完：${describeLiveError(caught).message}`); }
+  } catch (caught) {
+    // 续页失败要保住失败页的身份：抛出时 cursor 仍是这一页的请求游标，
+    // 恢复后按它重试这一页即可，不必把前面读过的页重读一遍（禅道 #131）。
+    // 首读失败没有可保留的游标，仍按整块错误态呈现。
+    if (previous !== null && cursor !== null) {
+      nextCursor = cursor;
+      taskPageFailure = { cursor, message: taskPageFailureText(caught) };
+    } else {
+      nextCursor = null;
+      failures.push(`Task 列表未读完：${describeLiveError(caught).message}`);
+    }
+  }
 
   const runs: { task: RelayTaskSummary; run: RelayRun }[] = [];
   const runTasks = tasks.filter((task) => task.executorRunId !== null);
@@ -94,7 +123,7 @@ async function readAttention(client: RelayApiClient, active: () => boolean,
   } catch { /* 名称缺失按「暂不可读取」呈现。 */ }
 
   return { queriedAt: new Date().toISOString(), reviews, interventions, tasks, runs,
-    projectTitles, failures, taskPagesComplete, nextCursor, seenCursors: cursors };
+    projectTitles, failures, taskPagesComplete, nextCursor, seenCursors: cursors, taskPageFailure };
 }
 
 export default function AttentionQueue({ client }: { readonly client: RelayApiClient }) {
@@ -145,8 +174,9 @@ export default function AttentionQueue({ client }: { readonly client: RelayApiCl
       <p className="helper-text">本次读取完成于 <time dateTime={snapshot.queriedAt}>{new Date(snapshot.queriedAt).toLocaleString("zh-CN")}</time>；各项可能在读取后继续变化，处理前请到原入口核对。</p>
       {!complete && <div className="warning-callout" role="alert" data-testid="attention-incomplete"><strong>待处理范围未核对完整</strong>
         <p>已读取的事项仍可打开；不能据此判断其他项目或 Run 没有待办。</p>
-        <ul>{snapshot.failures.map((failure) => <li key={failure}>{failure}</li>)}</ul>
-        {snapshot.nextCursor && <p>Task 分页每次最多读取 10 页，尚有后续页。<button className="secondary-button" type="button" disabled={loading} onClick={() => void load(true)}>继续读取后续页</button></p>}</div>}
+        {snapshot.failures.length > 0 && <ul>{snapshot.failures.map((failure) => <li key={failure}>{failure}</li>)}</ul>}
+        {snapshot.taskPageFailure && <p className="action-error" data-testid="attention-continuation-error">续页失败：{snapshot.taskPageFailure.message}；已保留前面加载的结果，可按同一游标重试这一页。</p>}
+        {snapshot.nextCursor && <p>Task 分页每次最多读取 10 页，尚有后续页。<button className="secondary-button" type="button" data-testid="attention-continue-pages" disabled={loading} onClick={() => void load(true)}>继续读取后续页</button></p>}</div>}
       <section className="surface-panel" data-testid="required-interventions"><h2>必须介入 · {snapshot.interventions.length}</h2>
         <p className="helper-text">来自当前服务端事实；普通收件箱与 READY 任务不会因此主动通知。进入原入口后重新核对是否仍待处理。</p>
         {snapshot.interventions.length ? <ul>{snapshot.interventions.map((item) => <li key={`${item.itemKey}:${item.changeKey}`}

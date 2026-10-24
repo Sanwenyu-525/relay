@@ -378,6 +378,55 @@ describe("协作工作区主路径", () => {
     } finally { view.unmount(); }
   });
 
+  it("切换讨论浮层支持方向键漫游：只移焦点，禁用的当前项被跳过，不代劳切换", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const secondSessionId = "99999999-9999-4999-8999-999999999999";
+    const thirdSessionId = "88888888-8888-4888-8888-888888888888";
+    const sessions = [sessionId, secondSessionId, thirdSessionId].map((id, index) => ({ id,
+      workspace_id: workspaceId, project_id: projectId, task_id: taskId,
+      title: ["指标原讨论", "评价方法第二讨论", "口径第三讨论"][index]!,
+      status: "ACTIVE", revision: "1", updated_at: "2026-10-01T02:00:00Z" }));
+    const read = router({ sessions: () => response({ items: sessions }) });
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      for (const id of [sessionId, secondSessionId, thirdSessionId]) {
+        if (path === `${prefix}/assist-sessions/${id}/messages`) return response({ items: [{
+          id: `message-${id}`, session_id: id, seq: "1", role: "USER", status: "COMPLETED", intent: "DISCUSS",
+          content: id === sessionId ? "原讨论的指标来源" : "第二讨论的方法对照", error_code: null,
+          sources: [], usage: { input_tokens: null, output_tokens: null }, cancel_requested: false }] });
+      }
+      return read(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      expect(await openSessionSwitcher()).toHaveLength(3);
+      const current = document.querySelector<HTMLButtonElement>(`[data-testid="collab-session-option-${sessionId}"]`)!;
+      const second = document.querySelector<HTMLButtonElement>(`[data-testid="collab-session-option-${secondSessionId}"]`)!;
+      const third = document.querySelector<HTMLButtonElement>(`[data-testid="collab-session-option-${thirdSessionId}"]`)!;
+      // 当前会话项禁用：不可切换，漫游时被跳过
+      expect(current.disabled).toBe(true);
+      await act(async () => { second.focus(); });
+      await act(async () => {
+        second.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+      });
+      expect(document.activeElement).toBe(third);
+      // 末条再向下回绕，跳过禁用的当前项，落到可用的第一条
+      await act(async () => {
+        third.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+      });
+      expect(document.activeElement).toBe(second);
+      await act(async () => {
+        second.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }));
+      });
+      expect(document.activeElement).toBe(third);
+      // 漫游只移焦点：浮层还开着、正文没换、没有发出任何切换请求
+      expect(document.querySelector('[data-testid="collab-session-switcher-panel"]')).not.toBeNull();
+      expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("原讨论的指标来源");
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    } finally { view.unmount(); }
+  });
+
   it("同Task两个会话可返回原记录；未发送草稿按会话留在本机，切回时原样恢复", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const secondSessionId = "99999999-9999-4999-8999-999999999999";

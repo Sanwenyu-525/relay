@@ -1,0 +1,25 @@
+import {createElement} from "react";
+import {MemoryRouter} from "react-router-dom";
+import {afterEach,expect,it,vi} from "vitest";
+import ArtifactReaderPanel from "../../src/components/ArtifactReaderPanel";
+import {RelayApiError,type RelayApiClient} from "../../src/api/relayClient";
+import {flush,mountReact} from "../../tests/mountApp";
+let unmount:(()=>void)|null=null;
+afterEach(()=>{unmount?.();unmount=null;});
+it.each([403,404])("产物阅读区比较重读当前正文%s后应撤下该版本先前正文",async(status)=>{
+ let rejected=false;
+ const reads:string[]=[];
+ const versions=["v1","v2"].map((id,index)=>({artifactVersionId:id,versionNumber:String(index+1),mediaType:"text/markdown",sha256:"a".repeat(64),size:"20",sourceKind:"HUMAN",createdAt:"2026-10-23T00:00:00Z"}));
+ const client={getTaskArtifacts:vi.fn(async()=>({items:[{id:"artifact",taskId:"task",title:"saved artifact",latestVersionId:"v2",versions}],currentAcceptedVersionIds:[]})),getProjectState:vi.fn(async()=>({selectedArtifactVersionRefs:[]})),getArtifactVersionContent:vi.fn(async(id:string)=>{reads.push(id);if(rejected&&id==="v2")throw new RelayApiError({status,code:status===403?"PERMISSION_DENIED":"RESOURCE_NOT_FOUND",detail:"current version access denied",retryable:false,retryAction:null,fieldErrors:[],expectedRevision:null,actualRevision:null});return id==="v2"?"CURRENT_VERSION_BODY_MUST_HIDE_AFTER_REJECTION":"BASE_VERSION_BODY";})} as unknown as RelayApiClient;
+ const mounted=await mountReact(createElement(MemoryRouter,null,createElement(ArtifactReaderPanel,{client,taskId:"task",projectId:"project",selectedVersionId:"v2",draft:null})));unmount=mounted.unmount;await flush();
+ expect(mounted.wrapper.text()).toContain("CURRENT_VERSION_BODY_MUST_HIDE_AFTER_REJECTION");
+ rejected=true;
+ await mounted.wrapper.get('[data-testid="collab-compare-base"]').setValue("v1");
+ await mounted.wrapper.get('[data-testid="collab-compare-open"]').trigger("click");await flush();
+ const previousBodyVisible=mounted.wrapper.text().includes("CURRENT_VERSION_BODY_MUST_HIDE_AFTER_REJECTION");
+ const refusalVisible=mounted.wrapper.find('[role="alert"]').exists();
+ const compareVisible=mounted.wrapper.find('[data-testid="collab-compare"]').exists();
+ console.log("TRIAGE_ARTIFACT_READER_DENIED_COMPARE",JSON.stringify({status,reads,previousBodyVisible,refusalVisible,compareVisible}));
+ expect(refusalVisible).toBe(true);expect(compareVisible).toBe(false);
+ expect(previousBodyVisible,"a definitive refusal for the same immutable version must invalidate its earlier main-reader body").toBe(false);
+});

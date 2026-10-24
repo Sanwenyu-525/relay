@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { ArrowDown, ArrowUp, BookOpen, Bug, Check, ChevronDown, ChevronRight, Code, Compass, Copy, FileSearch, FileText, FlaskConical, Folder, GitBranch, Globe, History, Lightbulb, ListChecks, ListTree, MessageSquareText, Monitor, NotebookPen, Plug, Plus, RotateCcw, Search, Settings, Sparkles, Terminal, Wrench } from "lucide-react";
+import { ArrowDown, ArrowUp, BookOpen, Bug, Check, ChevronDown, ChevronRight, CircleCheck, Compass, Copy, FileCode, FileSearch, FileText, Folder, GitBranch, Globe, History, Lightbulb, ListChecks, ListTree, MessageSquareText, Monitor, NotebookPen, Plug, Plus, RotateCcw, Search, Settings, Sparkles, Terminal, Wrench } from "lucide-react";
 import { createCommandId, RelayApiError, type RelayApiClient, type RelayAssistLivePreview,
   type RelayAssistMessage, type RelayAssistProposal,
   type RelayAssistSession, type RelayAssistSourceRef, type RelayAssistantProfile,
@@ -43,12 +43,15 @@ import TaskContractProposalPreview from "../components/TaskContractProposalPrevi
 import { ConversationModeSwitch, ConversationModeHints, type AssistantDraft } from "../components/ConversationModeSwitch";
 import { Notice, Toast } from "../components/Feedback";
 import { describeLiveError } from "../lib/liveErrors";
+import { bumpActiveConversationActivity } from "../lib/activeConversation";
+import { assistActivityLanded } from "../lib/sessionActivity";
 import { useDetailsMenu, useMenuDismiss } from "../lib/popoverMenu";
 import { usePathTooltip } from "../lib/pathTooltip";
 import { modelErrorGuides } from "../lib/modelErrorGuides";
 import { criterionMethodLabel, stateMaintenanceChangeKindLabel, stateMaintenanceChangeStatusLabel,
   stateMaintenanceStatusLabel, assistSourceKindLabels, gatewayCapabilityLabel } from "../lib/labels";
 import { liveClient, useRelayConnection } from "../lib/relayConnection";
+import { handleRosterKeyDown } from "../lib/tabNavigation";
 import { waitForEventRetry } from "../lib/eventRetry";
 import type { PendingContext } from "../lib/usePendingWork";
 import { rememberSourceRefs, readRecentSourceRefs } from "../lib/recentSourceRefs";
@@ -115,20 +118,24 @@ const supportedSkillOutput: Readonly<Record<string, RelaySkillDefinition["output
    2026-10-18：提示词改为「即拿即用」——不再留「现象：」「总目标：」这类要用户自己填的空，
    2026-10-19：优先围绕用户指定目标，缺少目标时先澄清；测试与重构仅从相关改动收敛范围。
    前缀图标按每个快捷语的功能单独选型（11 个不重样），并按功能族分色（见 AssistView.css 的 tone 规则）：
-   plan=构思与规划、build=实施与质量、fix=问题排查、doc=文档与接续。图标纯装饰，
-   不承担语义，可访问名仍由卡片文字提供。 */
+   plan=构思与规划、purple=核心交付强调（实现/测试）、build=实施质量与接续。图标纯装饰，
+   不承担语义，可访问名仍由卡片文字提供。
+   2026-10-23 二轮：实现功能图标对齐原型 file-code（文件+代码括号）；配色从五档（plan/build/
+   fix/doc/purple）收敛为三族——排查、文档接续并入墨绿 build，紫调降饱和（#7C5CFF→#5F3DC4）
+   与琥珀/墨绿同一档柔和度，三色块在两行里成整段（琥珀×4 → 紫×2 → 墨绿×5），避免小尺寸图标
+   处五色并置发花。 */
 const emptyWorkSuggestions = [
   { key: "idea", icon: Lightbulb, tone: "plan", label: "讨论一个想法", text: "帮我把一个想法讨论清楚。先问我想解决什么问题，再结合我的回答逐步明确使用场景、价值和边界。每次只问最关键的一个问题，信息足够后给出建议。" },
   { key: "requirement", icon: ListChecks, tone: "plan", label: "梳理需求", text: "根据我提供的描述和当前项目资料，梳理使用者、场景、核心需求、非目标与验收标准。先复用已有决定，区分已确认和待确认内容；没有具体需求时先问我，不自行挑选。" },
   { key: "design", icon: Compass, tone: "plan", label: "设计方案", text: "针对我提出的问题，先核对现有实现与约束，再比较有实际意义的方案，给出推荐、理由、影响范围和验证方式。优先复用现有机制；本轮先讨论方案。" },
   { key: "task", icon: ListTree, tone: "plan", label: "拆解任务", text: "将当前明确的目标拆成可逐项验收的任务，说明范围、依赖、产物和验收方式，并推荐第一步。先核对已有进度，避免重复安排；目标不明确时先问我。" },
-  { key: "implement", icon: Code, tone: "build", label: "实现功能", text: "围绕我指定的功能，先核对需求、相关代码和未提交改动，再完成最小实现、必要验证与相关文档同步。缺少具体目标或存在关键业务歧义时先澄清，保留他人改动。" },
-  { key: "test", icon: FlaskConical, tone: "build", label: "补充测试", text: "优先针对我指定的模块；未指定时，检查当前改动涉及的关键路径。识别有实际风险的测试缺口，补充必要测试并运行，说明覆盖范围与未验证项。" },
+  { key: "implement", icon: FileCode, tone: "purple", label: "实现功能", text: "围绕我指定的功能，先核对需求、相关代码和未提交改动，再完成最小实现、必要验证与相关文档同步。缺少具体目标或存在关键业务歧义时先澄清，保留他人改动。" },
+  { key: "test", icon: CircleCheck, tone: "purple", label: "补充测试", text: "优先针对我指定的模块；未指定时，检查当前改动涉及的关键路径。识别有实际风险的测试缺口，补充必要测试并运行，说明覆盖范围与未验证项。" },
   { key: "review", icon: FileSearch, tone: "build", label: "代码审查", text: "审查当前未提交改动，重点检查正确性、边界、安全和回归风险。只报告有依据、可处理的问题，标明位置、触发条件和影响，按严重程度排序；没有发现也直接说明。" },
   { key: "refactor", icon: Wrench, tone: "build", label: "重构优化", text: "检查我指定的模块；未指定时，先从当前改动涉及的代码中推荐一处值得简化的问题。说明收益、最小修改范围和行为保持方式，确认范围后再实施。" },
-  { key: "debug", icon: Bug, tone: "fix", label: "排查问题", text: "帮我定位并修复问题。先确认现象、预期和复现条件，再结合日志、代码与最近改动验证原因，完成最小修复和回归检查。缺少关键现象时先问我，推测要明确标注。" },
-  { key: "docs", icon: NotebookPen, tone: "doc", label: "写技术文档", text: "根据当前目标和实际实现，优先补充或修正已有技术文档。先确定读者和用途，只记录有依据的内容，标明限制和待确认项，避免创建重复文档。" },
-  { key: "resume", icon: History, tone: "doc", label: "接续上次工作", text: "读取当前项目的进度入口、相关任务记录和最近改动，说明已完成什么、停在哪里、还有哪些阻塞，并推荐一个最小接续任务。无法读取历史时明确说明，不猜测上次经过。" }
+  { key: "debug", icon: Bug, tone: "build", label: "排查问题", text: "帮我定位并修复问题。先确认现象、预期和复现条件，再结合日志、代码与最近改动验证原因，完成最小修复和回归检查。缺少关键现象时先问我，推测要明确标注。" },
+  { key: "docs", icon: NotebookPen, tone: "build", label: "写技术文档", text: "根据当前目标和实际实现，优先补充或修正已有技术文档。先确定读者和用途，只记录有依据的内容，标明限制和待确认项，避免创建重复文档。" },
+  { key: "resume", icon: History, tone: "build", label: "接续上次工作", text: "读取当前项目的进度入口、相关任务记录和最近改动，说明已完成什么、停在哪里、还有哪些阻塞，并推荐一个最小接续任务。无法读取历史时明确说明，不猜测上次经过。" }
 ] as const;
 function EmptyWorkWelcome({ testId, suggestTestIdPrefix, lede, onSuggest }: {
   testId: string; suggestTestIdPrefix: string; lede: string; onSuggest: (text: string) => void;
@@ -1526,7 +1533,8 @@ async function sendFirstMessage(pending: PendingFirstMessage) {
         </button>
         {sessionSwitcherOpen && <div className="collab-session-switcher-panel" id="collab-session-switcher-panel"
           data-testid="collab-session-switcher-panel"
-          role="menu" aria-label="当前作用域的讨论">
+          role="menu" aria-label="当前作用域的讨论"
+          onKeyDown={(event) => handleRosterKeyDown(event, ".collab-session-switcher-option")}>
           {sessions.map((item) => <button key={item.id} type="button" role="menuitem"
             className="collab-session-switcher-option" data-testid={`collab-session-option-${item.id}`}
             title={item.title} aria-current={item.id === sessionId ? "true" : undefined}
@@ -3067,7 +3075,9 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   onToggleSourceRef?: (ref: RelayAssistSourceRef) => void;
   onLearningTransfer?: (instruction: string, background: string, sourceRefs: readonly RelayAssistSourceRef[]) => void;
   recordLearning?: boolean;
-  /** 首条消息在建/在途/待核对：此间空会话不渲染欢迎空态，保留原「还没有消息」避免与在途回执同屏。 */
+  /** 首条消息在建/在途/待核对：此间空会话不渲染欢迎空态，也不摆「还没有消息。」——
+      在途事实由输入卡上方的发送状态行独自承担，空态行会把在途读成空会话
+      （2026-10-23 用户截图指认「先显示空页之后才是对话」）。 */
   firstMessageInflight?: boolean;
   /**
    * 在途状态上报。切档不是停止，禁用判定必须在真正看得见在途的那一层做，
@@ -3156,6 +3166,9 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   const composerFormId = useId();
   const requestVersion = useRef(0);
   const disposed = useRef(false);
+  /* 末条消息的上一次权威读数：只在它换 id 或转终态时递活动计数（lib/sessionActivity）。
+     切会话与首条消息确认时随重读基线一起清零，不跨会话残留。 */
+  const activityLast = useRef<RelayAssistMessage | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   /* 目标状态字符串进依赖：状态不变不重读，状态变化（含 PAUSING→PAUSED）才重读。 */
   const goalStatus = goalView?.goal?.status ?? null;
@@ -3314,12 +3327,19 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       // 那正是「结果待核对」，不是「已结束」。
       setAwaitingAssistantId((waiting) => waiting !== null &&
         nextMessages.some((item) => item.id === waiting) ? null : waiting);
+      // 消息落地即排序收敛（2026-10-23 用户选定「立即发生」）：左栏按最后消息时间
+      // 排序，服务端在 insertMessage／settleGeneration 推进 last_message_at。这里观察
+      // 权威投影的末条消息，落地就递一个活动计数，左栏据此定向重读这一行——不轮询、
+      // 不在本地猜时刻；首读基线跟在途心跳都不递（判定见 lib/sessionActivity）。
+      const lastMessage = nextMessages.length > 0 ? nextMessages[nextMessages.length - 1] : null;
+      if (assistActivityLanded(activityLast.current, lastMessage)) bumpActiveConversationActivity(session.id);
+      activityLast.current = lastMessage;
     } catch (caught) { if (!disposed.current && version === requestVersion.current) {
       setMessages(null); setProposals([]); setPreviews({}); setPreviewErrors({}); setError(describeLiveError(caught).message);
     } }
   }
   useEffect(() => {
-    disposed.current = false; void refresh();
+    disposed.current = false; activityLast.current = null; void refresh();
     return () => { disposed.current = true; requestVersion.current++; };
   }, [client, session.id, confirmedFirstMessageCommandId]);
   async function loadSkills() {
@@ -4133,7 +4153,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     {error && <p className="action-error" role="alert">{error} <button type="button" className="text-link" onClick={() => void refresh()}>重读</button></p>}
     {/* 协作页空会话与全局新对话同一欢迎空态：不同入口新建会话首屏一致。说明句按目标
         归属收敛——任务/项目作用域已有所属，不再宣称「不需要先创建项目、任务」。
-        首条消息在途/待核对时不渲染欢迎，保留原空态文本，避免与回执核对区同屏打架。 */}
+        首条消息在途/待核对时两种空态都不摆：欢迎不出现（DEV-0110 起就不闪回），
+        「还没有消息。」也删掉——那一行把在途读成空会话，而发送状态行已经说明事实。 */}
     {messages?.length === 0 && (standalone && !firstMessageInflight && !firstMessageAwaitingProjection
       ? <EmptyWorkWelcome testId="assist-empty-welcome" suggestTestIdPrefix="assist-empty-suggest"
           lede={sessionDirectorySource === "WORKSPACE_DEFAULT"
@@ -4143,7 +4164,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
               : target.kind === "TASK" ? "围绕当前任务直接讨论，或描述新的目标与要求。"
                 : "围绕当前项目直接讨论，或描述新的目标与要求。"}
           onSuggest={(text) => { setDraft(text); draftRef.current?.focus(); }} />
-      : <p className="helper-text">还没有消息。</p>)}
+      : firstMessageInflight || firstMessageAwaitingProjection ? null
+        : <p className="helper-text">还没有消息。</p>)}
     {!!messages?.length && <ol className="agent-message-list">{messages.map((message, index) => {
       const previous = index > 0 ? messages[index - 1] : undefined;
       const day = messageDay(message.createdAt);

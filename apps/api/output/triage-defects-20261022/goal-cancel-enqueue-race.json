@@ -1,0 +1,43 @@
+{
+  "control": "cancel",
+  "pauseStatus": 200,
+  "pausedBeforeInsert": "CANCELLED",
+  "noInflightAtPause": true,
+  "tick": {
+    "advanced": [
+      {
+        "goalId": "33909105-ea67-481b-8763-3252d950100b",
+        "messageId": "38d54111-a7dc-4b45-99fd-1b877231fd07",
+        "roundIndex": 1
+      }
+    ],
+    "settled": [
+      {
+        "goalId": "84f0511f-48c1-44b9-99d0-ca793c9d90e9",
+        "messageId": "a6ca68ee-15d6-46f7-8167-fe2af3abbb97",
+        "outcome": "CONTINUE",
+        "status": "PAUSED"
+      }
+    ],
+    "controls": [
+      {
+        "goalId": "84f0511f-48c1-44b9-99d0-ca793c9d90e9",
+        "status": "PAUSED"
+      }
+    ],
+    "skipped": []
+  },
+  "enqueuedAfterPause": {
+    "id": "38d54111-a7dc-4b45-99fd-1b877231fd07",
+    "status": "PENDING"
+  },
+  "modelCallsAfterPause": 1,
+  "generationAfterPause": {
+    "messageId": "38d54111-a7dc-4b45-99fd-1b877231fd07",
+    "sessionId": "da411459-a46f-46f0-a045-b7783cd21354",
+    "status": "COMPLETED",
+    "errorCode": null,
+    "proposalIds": []
+  },
+  "goalAfter": "CANCELLED"
+}

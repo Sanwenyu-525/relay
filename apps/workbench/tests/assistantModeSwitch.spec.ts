@@ -279,6 +279,7 @@ describe("会话模式单选框", () => {
    * 首条输入器的底栏顺序（2026-10-20 用户指令「上下文和模型下拉按钮整体移动到发送按钮的左边」）。
    * jsdom 看不见 CSS，但文档序就是渲染序；真实 Chromium 侧的同一条锁在 `composerSourcePanel.spec.ts` 3c。
    */
+
   it("首条输入器：计量环与模型在发送键左边成组，其余邻接关系不变", async () => {
     const options: Stub = { sessions: [], posts: [] };
     const view = await openAgent(options);
@@ -296,10 +297,19 @@ describe("会话模式单选框", () => {
         .toEqual(["agent-chat-usage", "model-selector"]);
       const tools = actions.querySelector(".agent-chat-composer-tools");
       if (tools === null) throw new Error("首条输入器没有工具行");
-      const toolOrder = Array.from(tools.children).map((element) => element.className);
-      // 这次只搬两枚：「+」与写档位仍相邻，禁用资料说明芯片仍紧跟「普通讨论」浮层。
-      expect(toolOrder.indexOf("agent-chat-permission")).toBe(toolOrder.indexOf("agent-chat-attach") + 1);
-      expect(toolOrder.indexOf("agent-chat-tool")).toBe(toolOrder.indexOf("agent-chat-options") + 1);
+      const toolClasses = Array.from(tools.children).map((element) => element.className.split(" "));
+      /** 按类名**包含**匹配而不是全等：类列表会随功能增长（如润色键是
+          `agent-chat-tool composer-draft-polish`），全等匹配会把合法演进读成回归。 */
+      const toolIndexOf = (token: string) => toolClasses.findIndex((classes) => classes.includes(token));
+      // 这次只搬两枚：「+」与写档位仍相邻；资料入口仍紧跟「普通讨论」浮层之后。
+      expect(toolIndexOf("agent-chat-permission")).toBe(toolIndexOf("agent-chat-attach") + 1);
+      // 资料入口（DEV-0100）有两种形态且都在同一格：能看到项目资料时是真实选择入口
+      // `agent-chat-source-options`，没有项目归属或非普通档时是禁用说明芯片 `agent-chat-tool`。
+      // 只认「紧跟 options 之后的那一个」，不写死是哪一种——本 fixture 打开了工作目录、
+      // 有项目归属，因此渲染的是前一种。
+      const afterOptions = toolClasses[toolIndexOf("agent-chat-options") + 1] ?? [];
+      expect(afterOptions.includes("agent-chat-source-options") || afterOptions.includes("agent-chat-tool"))
+        .toBe(true);
     } finally { view.unmount(); }
   });
 
@@ -659,9 +669,11 @@ describe("会话模式单选框", () => {
       expect(document.querySelectorAll(".agent-chat-attach-note")).toHaveLength(0);
       expect(document.querySelector(".agent-chat-attach-item-reason")).toBeNull();
       // 资料在首条消息仍是禁用，原因只在悬停里；Skill 与连接器可点开。
+      // 文案（DEV-0100）：资料按项目版本解析，没有项目归属就没有可核对的候选，
+      // 所以说的是前置条件「选择项目或指定目录后可选资料」，不是指路「资料在会话中选择」。
       const sources = document.querySelector('[data-testid="assist-attach-sources"]');
       expect(sources?.hasAttribute("disabled")).toBe(true);
-      expect(sources?.getAttribute("title")).toBe("资料在会话中选择");
+      expect(sources?.getAttribute("title")).toBe("选择项目或指定目录后可选资料");
       // 一行都没挂 aria-describedby：原来指向的脚注已经不存在，留着就是悬空引用。
       for (const key of ["sources", "skill", "command", "connectors"]) {
         expect(document.querySelector(`[data-testid="assist-attach-${key}"]`)?.getAttribute("aria-describedby"))

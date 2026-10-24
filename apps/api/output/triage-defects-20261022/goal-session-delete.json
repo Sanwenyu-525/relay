@@ -1,0 +1,51 @@
+{
+  "controlHttp": 200,
+  "samples": [
+    {
+      "action": "cancel",
+      "status": "CANCELLED",
+      "planCount": 0,
+      "blockers": [],
+      "beforeRoundCount": 1,
+      "deleteHttp": 500,
+      "deleteBody": {
+        "type": "/problems/internal-error",
+        "title": "服务内部错误",
+        "status": 500,
+        "detail": "请求未能完成，请通过 request_id 在本机日志中核对。",
+        "instance": "/requests/req-06827331-e592-4d85-b55c-c081d00917fa",
+        "code": "INTERNAL_ERROR",
+        "request_id": "req-06827331-e592-4d85-b55c-c081d00917fa",
+        "retryable": false,
+        "retry_action": "CHECK_RECEIPT_THEN_RETRY"
+      },
+      "sessionPreserved": true,
+      "messagePreserved": true,
+      "goalPreserved": true,
+      "roundsPreserved": 1
+    },
+    {
+      "action": "complete",
+      "status": "COMPLETED",
+      "planCount": 0,
+      "blockers": [],
+      "beforeRoundCount": 1,
+      "deleteHttp": 500,
+      "deleteBody": {
+        "type": "/problems/internal-error",
+        "title": "服务内部错误",
+        "status": 500,
+        "detail": "请求未能完成，请通过 request_id 在本机日志中核对。",
+        "instance": "/requests/req-75fb430e-db16-4e92-8561-50983f4f4be4",
+        "code": "INTERNAL_ERROR",
+        "request_id": "req-75fb430e-db16-4e92-8561-50983f4f4be4",
+        "retryable": false,
+        "retry_action": "CHECK_RECEIPT_THEN_RETRY"
+      },
+      "sessionPreserved": true,
+      "messagePreserved": true,
+      "goalPreserved": true,
+      "roundsPreserved": 1
+    }
+  ]
+}

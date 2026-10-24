@@ -1,0 +1,51 @@
+{
+  "scheduleId": "59ddc3fc-f18a-4f76-a60e-60ad9986a98e",
+  "firstHttp": 200,
+  "exactReplayHttp": 200,
+  "changedTemplateHttp": 200,
+  "changedTemplateResponse": {
+    "command_id": "11f14e0a-190b-4f4d-96d8-82324f548050",
+    "committed_at": "2026-10-23T11:31:09.718Z",
+    "result": {
+      "scheduled_task_id": "59ddc3fc-f18a-4f76-a60e-60ad9986a98e",
+      "project_id": "0fdebec4-aa5f-4cc7-be74-2e3697a542b6",
+      "status": "ENABLED",
+      "revision": "2",
+      "schedule_generation": "1",
+      "next_due_at": "2026-10-25T01:00:00.000Z"
+    },
+    "links": {
+      "resource": "/api/v1/workspaces/d5689c40-007b-4547-acbe-d86f1bf558aa/"
+    }
+  },
+  "changedTemplateReplayEqualsFirst": true,
+  "titleControlHttp": 409,
+  "titleControlCode": "COMMAND_ID_REUSED",
+  "submittedTemplateB": {
+    "task_title": "任务B",
+    "objective": "改为核对B样例",
+    "mode": "AI_ASSIST",
+    "criteria": [
+      {
+        "statement": "B样例通过"
+      }
+    ]
+  },
+  "storedTemplate": {
+    "mode": "AI_ASSIST",
+    "criteria": [
+      {
+        "method": "HUMAN",
+        "required": true,
+        "statement": "A样例通过",
+        "target_spec": {},
+        "criterion_id": "c1"
+      }
+    ],
+    "objective": "只核对A样例",
+    "task_title": "任务A",
+    "expected_outputs": {}
+  },
+  "revision": "2",
+  "historyLength": 2
+}

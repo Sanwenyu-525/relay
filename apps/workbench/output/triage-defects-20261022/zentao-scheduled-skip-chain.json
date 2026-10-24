@@ -1,0 +1,10 @@
+{
+  "type": "codeerror",
+  "pri": 1,
+  "openedBuild": [
+    "trunk"
+  ],
+  "title": "[Relay] 定时任务跳过一轮后遗忘上一未结束任务，第三时段再次创建并委托",
+  "steps": "<pre>【现象与依据】ADR-026明确：上一轮Task不在DONE/CANCELLED时，本轮应SKIPPED/PREVIOUS_TASK_NOT_ACCEPTED，不能堆出待验收任务；Delegate原事务要复核上一任务终态。实际第二个时段跳过后，第三个时段把这条无task_id的SKIPPED当作“没有上一任务”，创建/委托第二个任务，而第一任务仍IN_PROGRESS。\n\n【有效复现】apps/api/output/triage-defects-20261022/triage-scheduled-skip-chain.integration.test.js（同名.ts仅枚举入口），结构化证据scheduled-skip-chain.json。真实临时PG18.6，131迁移/graph成功；真实HTTP建项目、定时计划与读取详情；生产runScheduledTaskTick调度，真实CreateTask/MarkTaskReady/DelegateTask链。\n1. 正常新建DAILY定时计划，max_runs=5、有效授权，模板为AI_ASSIST只读检查。\n2. 为缩短等待，仅在本次隔离数据库中将该计划next_due_at调为clock_timestamp，运行生产tick；其他Task/Run/occurrence状态全部由生产流程产生。第1时段DISPATCHED，生成TaskA/RunA，TaskA=IN_PROGRESS。\n3. 不完成/取消A，再将next_due_at到期，运行tick。第2时段正确SKIPPED、reason=PREVIOUS_TASK_NOT_ACCEPTED，task_id/run_id=null；这是同一探针内的正常拒绝对照。\n4. 再次到期并tick。第3时段却DISPATCHED，TaskB/RunB均新建，TaskA前后仍IN_PROGRESS；TaskA/B同时IN_PROGRESS，taskCount=2、runs_started=2。真实HTTP详情也投影第3时段DISPATCHED。\n5. 预期第3时段继续SKIPPED，实际DISPATCHED，断言红。不是第一轮未正确启动、假造任务或预算耗尽。不等待真实日历间隔，不能说已运行3天。没有生成Worker执行这些Run、没有真实Provider/文件写入或费用。调度/准入/仓储三个源码与dist同选项转译逐字一致；SkipBuild不冒称全量构建通过。\nPG清理见runner，测试数据只在临时库。\n\n【根因】scanScheduledTasks调用latestOccurrence按created_at/id只取一条，只有previous.task_id非null才核对Task终态；第二时段SKIPPED无task_id，遮住第一时段未结束的Task。scheduled-task-admission.requireScheduledTaskAdmission虽核对发生、代次、状态、有效期、次数，但没有ADR要求的上一Task终态复核，因而错误扫描结果实际拿到了执行权。\n\n【可直接执行修复提示词】\n先读CODEX_NEXT_STEP、ADR-026、scheduled-tasks扫描/分发、scheduled-task-repository、scheduled-task-admission和Delegate事务；保护共享修改，先复现再修。以真正的既有Task/待分发事实作为串行准入依据，无Task的SKIPPED/BLOCKED/RESOLVED记录不能遮挡仍未验收任务；规则代次、旧记录范围按现行契约确定。扫描层给清晰跳过原因，最终授予执行权的原事务再次核对，不能只靠前置扫描或UI禁用。保留Task与Run区别、DONE/CANCELLED终态口径、事务锁/幂等和次数预算，不删历史、不把Run完成当人工验收。\n验收：首轮运行→连续2次以上跳过仍不新建任务；首轮WAITING/待验收与Run已结束仍阻止；首轮DONE或CANCELLED后下一时段可正常启动；SKIPPED/BLOCKED/RESOLVED穿插；补跑/重启恢复、两个调度实例并发、扫描与Delegate间Task状态改变；代次变更既有未结Task按契约处理；错误准入零新执行权、不重复扣次数。正向解除门禁和负向多轮均用真实PG/HTTP验证，不只断言第二时段。\n同步受影响已有调度准入契约与统一验收表，文档改动跑node scripts/check-docs.mjs；不commit/push、不改生产数据。真实Provider/Windows未验单独说明。</pre>",
+  "severity": 2
+}

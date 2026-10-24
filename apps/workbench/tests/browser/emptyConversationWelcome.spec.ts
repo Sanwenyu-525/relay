@@ -120,8 +120,8 @@ test.describe("新建会话空态一致", () => {
       return counts;
     });
     expect(rows).toEqual([6, 5]);
-    // 分隔板只有功能族边界那 3 道（规划→实施→排查→文档接续），逐卡加箭头会读成强制顺序。
-    await expect(welcome.locator(".agent-chat-suggestion-sep")).toHaveCount(3);
+    // 分隔板只有功能族边界那 2 道（规划→核心交付→实施质量接续，2026-10-23 收敛为三族），逐卡加箭头会读成强制顺序。
+    await expect(welcome.locator(".agent-chat-suggestion-sep")).toHaveCount(2);
     await page.screenshot({ path: "results/empty-welcome-first-composer.png" });
   });
 

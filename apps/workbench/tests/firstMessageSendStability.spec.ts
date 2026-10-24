@@ -9,8 +9,9 @@ import { flush, mountWorkbench } from "./mountApp";
  *      它出现/消失时会把输入卡抬高又放下，正是首条发送的闪源；
  *   2. 建会话成功后的重挂载首帧由创建投影种子直接渲染会话面板，列表还没读回时
  *      不得退回空白首条输入器或「当前目标还没有会话」这类未核实的结论；
- *   3. 202 回执确认了首条消息、但消息投影还没读回时，空态停在「还没有消息」，
- *      不闪回欢迎空态；真正没有消息的会话仍显示欢迎（命令 id 按会话归属过滤）。
+ *   3. 202 回执确认了首条消息、但消息投影还没读回时，对话区不摆任何空态：不闪回欢迎，
+ *      也不摆「还没有消息。」（2026-10-23 用户截图指认那行把在途读成空会话）；
+ *      真正没有消息的会话仍显示欢迎（命令 id 按会话归属过滤）。
  * 真实几何与配色由 Chromium 探针取证；这里只锁客户端行为与两条 CSS 契约。
  */
 
@@ -171,12 +172,12 @@ describe("首条消息提交相位（不闪、不异常变色）", () => {
       await flush(80);
       expect(view.wrapper.get('[data-testid="assist-composer"]').exists()).toBe(true);
 
-      // 202 回执确认了首条消息，但消息投影还没读回：停在「还没有消息」，不闪回欢迎。
+      // 202 回执确认了首条消息，但消息投影还没读回：对话区不摆空态，也不闪回欢迎。
       state.messageGate.release();
       await flush(120); await flush();
       expect(view.wrapper.find('[data-testid="assist-first-pending"]').exists()).toBe(false);
       expect(document.querySelector('[data-testid="assist-empty-welcome"]')).toBeNull();
-      expect(view.wrapper.text()).toContain("还没有消息");
+      expect(view.wrapper.text()).not.toContain("还没有消息");
     } finally { view.unmount(); }
   });
 

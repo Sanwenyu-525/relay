@@ -312,8 +312,10 @@
 
 /* 2026-10-17 用户指令：工作详情收成纯图标开关键（Codex 参考图的图标密度），
    右翼相邻的「切换讨论／新建会话／任务视图」随后并成同一档图标键。
-   可见文字删掉，键收成 compact 档的方形命中区，图标 18px；静止透明、悬停 selection.hover、
-   展开 selection.bg + selection.text。展开态不再补 action 描边——顶栏与页头同一档轻量键。 */
+   可见文字删掉，键收成 compact 档的方形命中区，图标 18px；静止透明、悬停 selection.hover。
+   2026-10-23 起「工作详情」只在面板收起时出现（打开时整颗不渲染，收起入口只剩面板头部
+   那颗同图标键），因此展开态色族不再属于它——selection.bg + selection.text 只服务常驻的
+   切换讨论键；展开态不补 action 描边这一档对整组轻量键继续成立。 */
 .secondary-button.collab-inspector-toggle-btn,
 .secondary-button.collab-toolbar-icon-button {
   display: inline-flex;
@@ -338,10 +340,6 @@
   border-color: transparent;
   color: var(--relay-color-text-primary);
 }
-.secondary-button.collab-inspector-toggle-btn.active,
-.secondary-button.collab-inspector-toggle-btn.active:hover:not(:disabled),
-.secondary-button.collab-toolbar-icon-button.active,
-.secondary-button.collab-toolbar-icon-button.active:hover:not(:disabled),
 /* 点完浮层键指针仍停在键上：hover 一档要一起收进展开态，否则读回淡底。 */
 .secondary-button.collab-toolbar-icon-button[aria-expanded="true"],
 .secondary-button.collab-toolbar-icon-button[aria-expanded="true"]:hover:not(:disabled) {

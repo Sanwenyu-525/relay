@@ -197,7 +197,15 @@ export default function ScheduledTaskDetailView() {
     </div>
   </div></div>;
 
-  const blocked = task.occurrences.filter((occurrence) => occurrence.status === "BLOCKED");
+  // 待处理触发以服务端 pending_occurrences（不受最近 20 条窗口限制）为准，
+  // 再并入窗口内仍为 BLOCKED 的时段；按 occurrence_id 去重，避免同一时段出现两次。
+  const blocked = (() => {
+    const merged = new Map<string, RelayScheduledTaskOccurrence>();
+    for (const occurrence of [...task.pendingOccurrences, ...task.occurrences]) {
+      if (occurrence.status === "BLOCKED") merged.set(occurrence.occurrenceId, occurrence);
+    }
+    return [...merged.values()];
+  })();
   return <div className="page-layout scheduled-tasks-page"><div className="page-primary">
     <PageHeader testId="scheduled-task-detail-head" title={task.title} meta={`定时任务 · ${describeRepeat(task)}`}
       lede={`每次触发新建一个任务并交给 AI 执行；当前时区 ${task.timezone}，本地时刻 ${task.localTime}。`} />

@@ -1,0 +1,60 @@
+[
+  {
+    "expired": false,
+    "beforeStatus": "ENABLED",
+    "editHttp": 200,
+    "editBody": {
+      "command_id": "6c42d653-02aa-45d3-8738-81dced709c99",
+      "committed_at": "2026-10-23T11:33:38.774Z",
+      "result": {
+        "scheduled_task_id": "eacb7d39-1ef8-4606-8f63-f52e1d79e2bc",
+        "project_id": "919b0537-6ce4-4119-85c4-a977643c6bc8",
+        "status": "ENABLED",
+        "revision": "2",
+        "schedule_generation": "1",
+        "next_due_at": "2026-10-25T01:00:00.000Z"
+      },
+      "links": {
+        "resource": "/api/v1/workspaces/524515ca-3252-475e-a0bd-023ead034070/"
+      }
+    },
+    "expiryBefore": "2026-10-30T11:33:38.737Z",
+    "expiryAfterDirectEdit": "2026-11-06T11:33:38.768Z"
+  },
+  {
+    "expired": true,
+    "beforeStatus": "EXPIRED",
+    "editHttp": 409,
+    "editBody": {
+      "type": "/problems/invalid-transition",
+      "title": "当前事实不满足该操作",
+      "status": 409,
+      "detail": "已到期的定时任务请新建，或先延长授权有效期。",
+      "instance": "/requests/req-2b26982a-328d-4d23-badd-f178619e1858",
+      "code": "INVALID_TRANSITION",
+      "request_id": "req-2b26982a-328d-4d23-badd-f178619e1858",
+      "retryable": false,
+      "retry_action": "REFRESH_AND_REDECIDE",
+      "command_id": "ed22d016-221a-48cf-9dcb-ea141b1e4754"
+    },
+    "expiryBefore": "2026-10-23T11:33:39.981Z",
+    "expiryAfterDirectEdit": "2026-10-23T11:33:39.981Z",
+    "enableHttp": 409,
+    "enableBody": {
+      "type": "/problems/invalid-transition",
+      "title": "当前事实不满足该操作",
+      "status": 409,
+      "detail": "已到期的定时任务需要先延长授权有效期，不能直接重新启用。",
+      "instance": "/requests/req-463ada8d-3596-463d-a81a-a9e77fc1c0d2",
+      "code": "INVALID_TRANSITION",
+      "request_id": "req-463ada8d-3596-463d-a81a-a9e77fc1c0d2",
+      "retryable": false,
+      "retry_action": "REFRESH_AND_REDECIDE",
+      "command_id": "e3b2b2c8-ad40-4c18-aea2-431af3f855a8"
+    },
+    "detour": {
+      "pauseHttp": 200,
+      "editAfterPauseHttp": 200
+    }
+  }
+]

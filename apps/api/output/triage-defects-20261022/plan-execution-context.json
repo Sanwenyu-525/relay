@@ -1,0 +1,52 @@
+{
+  "planId": "4a089dad-6052-4cb1-9160-1b3ee96d9689",
+  "storedPlan": {
+    "plan_id": "4a089dad-6052-4cb1-9160-1b3ee96d9689",
+    "session_id": "627f01ed-a80e-41e7-8dbc-dcaadbc4301e",
+    "version": 1,
+    "status": "CURRENT",
+    "goal": "GOAL_MARKER_470A",
+    "scope": [
+      "SCOPE_MARKER_913B 只检查样例目录，禁止触及发布目录"
+    ],
+    "steps": [
+      {
+        "title": "TITLE_MARKER_382C 检查说明",
+        "detail": "DETAIL_MARKER_874D 必须先备份样例再比较行数"
+      }
+    ],
+    "verification": [
+      {
+        "statement": "CHECK_MARKER_738E 样例检查完成",
+        "method": "METHOD_MARKER_227F"
+      }
+    ],
+    "open_questions": [
+      "QUESTION_MARKER_654G 需要确认样例目录位置"
+    ],
+    "source_message_id": "ab33962d-d12b-427c-b6e6-5ea67c883e83",
+    "created_at": "2026-10-23T11:10:56.185Z"
+  },
+  "selectedGoalPlanId": "4a089dad-6052-4cb1-9160-1b3ee96d9689",
+  "storedGoalCriteria": [
+    {
+      "key": "c1",
+      "method": "METHOD_MARKER_227F",
+      "status": "PENDING",
+      "evidence": null,
+      "required": true,
+      "statement": "CHECK_MARKER_738E 样例检查完成"
+    }
+  ],
+  "includedInFirstExecutionRequest": {
+    "goal": true,
+    "scope": false,
+    "title": true,
+    "detail": false,
+    "verification": true,
+    "method": false,
+    "question": false
+  },
+  "scopeAvailableInPlan": true,
+  "planReply": "已形成计划，细节请查看计划卡。"
+}

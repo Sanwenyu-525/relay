@@ -186,5 +186,8 @@ export async function getScheduledTask(http: RelayHttp, id: string): Promise<Rel
     ...base,
     project: projectFrom(row.project),
     occurrences: array(row, 'occurrences', 'scheduled task').map(occurrenceFrom),
+    // 旧服务端可能不带该字段；缺失按空处理，不阻塞详情读取。
+    ...(row.pending_occurrences === undefined ? { pendingOccurrences: [] as RelayScheduledTaskOccurrence[] }
+      : { pendingOccurrences: array(row, 'pending_occurrences', 'scheduled task').map(occurrenceFrom) }),
   };
 }

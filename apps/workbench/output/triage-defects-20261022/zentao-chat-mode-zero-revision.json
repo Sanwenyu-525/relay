@@ -1,0 +1,10 @@
+{
+  "steps": "<pre>现象与范围\n新建会话实际revision=0，但模式切换接口的expected_revision只接受正整数，客户端无法携带真实初始基线完成首次模式切换。省略此参数可以成功，但失去该请求的乐观并发保护。\n当前AssistView调用setChatMode时省略expectedRevision，所以本单不是“当前页面第一次切换完全不可用”；定位为API/支持基线参数的客户端边界缺陷。未声称实际发生覆盖他人修改。\n\n真实PG/HTTP复现与对照\n1. createAssistSession正常新建会话，仓储读回revision=&#39;0&#39;/chat_mode=CHAT。\n2. POST /assist-sessions/{sid}/chat-mode，body={command_id:新ID,mode:PLAN,expected_revision:&#39;0&#39;}，实际422 VALIDATION_FAILED，field_errors指出pattern ^[1-9][0-9]*$；会话仍CHAT/revision0。\n3. 同会话新命令省略expected_revision切PLAN，返回200/revision1。\n4. 新命令携带expected_revision=&#39;1&#39;切CHAT，返回200/revision2。\n5. 再用陈旧基线1切GOAL，正常409，证明该CAS能力存在，只有合法0被入口拒绝。\n\n根因\napps/api/src/api/plan-goal-api.ts chatModeBody expected_revision采用^[1-9][0-9]*$。\napps/api/src/application/chat-mode.ts setChatMode也同样拒绝0并称必须正整数；仅修改路由schema仍会被应用层422挡住。\n会话修订从0起步是当前实际事实，分叉会话也从0起步；未动态复现分叉模式切换，本单以正常新建为证。通用requireRevision支持0，不应为适配模式接口把会话全局初始revision改成1。\n\n证据\napps/api/output/triage-defects-20261022/triage-chat-mode-zero-revision.integration.test.js（同名.ts为枚举入口）\napps/api/output/triage-defects-20261022/chat-mode-zero-revision.json\n在apps/api运行：powershell -NoProfile -ExecutionPolicy Bypass -File output/triage-defects-20261022/run-isolated-probe.ps1 -SkipBuild -UseCLocale -TestFile triage-chat-mode-zero-revision\n1项红，0基线预期200实422；无基线、正数基线成功及陈旧基线409对照通过。PG18.6、131migration/graph成功，停止0、临时cluster删除；相关3处源码transpile与dist一致，未全量build。无Provider/Windows验收。\n\n可直接执行的修复提示词\n先读AGENTS、CODEX_NEXT_STEP、会话revision与模式切换CAS契约、chat-mode/plan-goal-api及现有测试，检查git status和目标diff，保护共享修改。用本单建立正式真实PG/HTTP边界回归，最小统一路由与应用的非负修订校验，支持合法0、保持十进制字符串与bigint，不把初始revision改1，不用忽略0基线替代真实CAS。\n保留无基线兼容行为；过期0或其他过期基线应按当前事实409，不变成不受保护写入；同ID同请求正常重放，异载荷身份冲突仍成立。是否让当前UI常规携带revision属于另一个交互/并发范围，不因修本单擅自扩大。\n验收：普通新建和分叉revision0首次切换、同档noop和异档切换、过期0/1、缺省基线、负数/小数/非法字符串/大数边界，模式切走活动目标的暂停意图与revision竞争仍正确。检查schema与应用双层一致，失败不推进会话或目标状态。\n同步确实受影响的既有API契约/统一验收表，说明Breaking Change与兼容（预期为放宽合法输入、兼容原接口），文档变化运行node scripts/check-docs.mjs。不commit/push、不改生产会话，报告实际证据与未验边界。本轮仅复现登记，未修业务代码。</pre>",
+  "title": "[Relay] 模式切换接口拒绝合法初始revision 0，新会话无法带基线首次切换",
+  "openedBuild": [
+    "trunk"
+  ],
+  "severity": 3,
+  "pri": 3,
+  "type": "codeerror"
+}

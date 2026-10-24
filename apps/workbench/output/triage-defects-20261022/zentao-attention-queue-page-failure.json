@@ -1,0 +1,10 @@
+{
+  "severity": 3,
+  "pri": 3,
+  "openedBuild": [
+    "trunk"
+  ],
+  "type": "codeerror",
+  "steps": "<pre>现象\n待处理AttentionQueue分批读取Task，每批最多10页。后续页暂时503后，已有任务和“待处理范围未核对完整”警告保留，但nextCursor被清空，“继续读取后续页”按钮消失。服务恢复后只能顶部刷新从第一页重新遍历，无法用失败页原游标重试。不是任务数据丢失，也不是永久无法读取；问题是分页恢复退回从头重读。\n\n受控组件复现与恢复对照\n真实AttentionQueue +MemoryRouter，typed客户端替身模拟分页，每页用1项减少DOM体积（非真实数据库分页规模）。初批10页请求游标[null,c1..c9]，保留c10且显示继续读取。\n点击继续时c10抛typed503；实际首批任务仍显示、incomplete警告存在，但continuationAvailable=false。服务恢复后没有原位继续入口。\n正向对照：顶部attention-refresh重新请求[null,c1..c9]，再点继续请求c10成功，最后任务可见(recoveredAfterRestart=true)。完整请求历史记录了前10页重复读取，证实是丢恢复游标，而非服务一直坏。\n\n根因\napps/workbench/src/components/AttentionQueue.tsx readAttention catch将nextCursor=null；失败发生时cursor仍是当前待取页，现有tasks与seenCursors被保留但失败页身份丢失。\n渲染只在snapshot.nextCursor非空时显示继续按钮，load(false)则主动丢snapshot从头读取。与#101工作空间任务列表不同：本单AttentionQueue独立加载Owner，未清空已读任务，不误报核对完成；应避免照搬#101的全部表现。\n\n证据\napps/workbench/output/triage-defects-20261022/attentionQueuePageFailure.spec.tsx\napps/workbench/output/triage-defects-20261022/attention-queue-page-failure.log\n在apps/workbench运行：node node_modules/vitest/vitest.mjs run output/triage-defects-20261022/attentionQueuePageFailure.spec.tsx --config output/triage-defects-20261022/vitest.config.ts --reporter verbose\n1项红，失败页应可原位重试断言失败；初批10页、有继续入口、已有任务保留/incomplete警告、整体刷新后恢复对照通过。仅组件+typed客户端替身，未做真实PG/HTTP/Windows/Provider证据，不把1项/页fixture当真实页面规模。\n\n可直接执行的修复提示词\n先读AGENTS、CODEX_NEXT_STEP、待处理队列范围/分页约束、AttentionQueue与已有readability测试，检查git status和目标diff，保护共享修改。将本单10页后续页失败/整体刷新恢复对照变成正式回归，最小保留最后成功页和当前失败游标，明确“重试后续页”入口，不需要从第一页重读即可继续。\n保持每次最多10页的有界行为，数据去重、游标循环保护和范围未核对完整语义；注意seenCursors记录“已发现”与“已成功取回”不同，不可把原失败游标的合法重试误判成循环。不要只提高页数上限或忽略503，不应把failed后next_cursor=null当列表完整。\n验收首批中途失败、下一批首/中页失败、重试成功与再次失败、重复/循环游标、页内重复任务、刷新从头与续读两入口、请求迟到和client切换；失败保留原任务及原游标，成功后继续去重并准确清除本次分页错误；Review/Run读取失败不得因Task重试被假装已核对。真实大列表另作有界验证，不必为本单制造海量生产数据。\n只同步确实受影响的既有交互/测试主文档和统一验收表，文档变化运行node scripts/check-docs.mjs。不commit/push、不改生产任务，报告组件与真实环境证据边界。本轮仅复现登记，未改业务代码。</pre>",
+  "title": "[Relay] 待处理队列后续页失败清空继续游标，只能从第一页重新读取"
+}

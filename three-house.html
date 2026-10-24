@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Three.js 房子</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #87ceeb; }
+    canvas { display: block; }
+    #hud {
+      position: fixed; left: 12px; top: 12px; color: #fff; z-index: 10;
+      font: 14px/1.5 system-ui, sans-serif;
+      text-shadow: 0 1px 2px rgba(0,0,0,.5);
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">\拖拽旋转 · 滚轮缩放 · 右键平移<br>Three.js 房子演示</div>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // 场景与相机
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87ceeb);
+    scene.fog = new THREE.Fog(0x87ceeb, 40, 90);
+
+    const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 200);\n    camera.position.set(10, 8, 12);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setPixelRatio(devicePixelRatio);
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.target.set(0, 2, 0);
+
+    // 灯光
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+    sun.position.set(15, 25, 10);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -15; sun.shadow.camera.right = 15;
+    sun.shadow.camera.top = 15; sun.shadow.camera.bottom = -15;
+    scene.add(sun);
+
+    // 地面
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(60, 60),
+      new THREE.MeshStandardMaterial({ color: 0x66bb66, roughness: 1 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    const house = new THREE.Group();
+
+    // 墙体
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0xf5f0e1, roughness: 0.9 });
+    const walls = new THREE.Mesh(new THREE.BoxGeometry(6, 4, 5), wallMat);
+    walls.position.y = 2;
+    walls.castShadow = walls.receiveShadow = true;
+    house.add(walls);
+
+    // 屋顶
+    const roofMat = new THREE.MeshStandardMaterial({ color: 0xa63c2e, roughness: 0.8 });
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(4.6, 2.6, 4), roofMat);
+    roof.position.y = 5.3;
+    roof.rotation.y = Math.PI / 4;
+    roof.scale.set(1.5, 1, 1.2); // 做成四坡屋面比例
+    roof.castShadow = roof.receiveShadow = true;
+    house.add(roof);
+
+    // 门
+    const door = new THREE.Mesh(
+      new THREE.BoxGeometry(1.2, 2.2, 0.1),
+      new THREE.MeshStandardMaterial({ color: 0x5b3a1e, roughness: 0.6 })
+    );
+    door.position.set(0, 1.1, 2.55);
+    house.add(door);
+
+    // 窗户
+    const winMat = new THREE.MeshStandardMaterial({
+      color: 0x9fd8ff, roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.85
+    });
+    function makeWindow(x, y, z, ry = 0) {
+      const w = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 0.1), winMat);
+      w.position.set(x, y, z);
+      w.rotation.y = ry;
+      house.add(w);
+    }
+    makeWindow(-1.8, 2.3, 2.55);   // 前左
+    makeWindow(1.8, 2.3, 2.55);    // 前右
+    makeWindow(3.05, 2.3, 0, Math.PI / 2); // 右侧
+
+    // 烟囱
+    const chimney = new THREE.Mesh(
+      new THREE.BoxGeometry(0.6, 1.8, 0.6),
+      new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 1 })
+    );
+    chimney.position.set(1.5, 5.8, -1.2);
+    chimney.castShadow = true;
+    house.add(chimney);
+
+    // 台阶
+    const step = new THREE.Mesh(
+      new THREE.BoxGeometry(2.2, 0.3, 1),
+      new THREE.MeshStandardMaterial({ color: 0xbbbbbb, roughness: 1 })
+    );
+    step.position.set(0, 0.15, 3.1);
+    step.receiveShadow = true;
+    house.add(step);
+
+    scene.add(house);
+
+    // 树（环境装饰）
+    function addTree(x, z) {
+      const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.25, 0.35, 1.5, 8),
+        new THREE.MeshStandardMaterial({ color: 0x7a4a21 })
+      );
+      trunk.position.set(x, 0.75, z);
+      trunk.castShadow = true;
+      const leaf = new THREE.Mesh(
+        new THREE.ConeGeometry(1.2, 2.4, 10),
+        new THREE.MeshStandardMaterial({ color: 0x2e7d32 })
+      );
+      leaf.position.set(x, 2.6, z);
+      leaf.castShadow = true;
+      house.add(trunk, leaf);
+    }
+    addTree(-8, 4);
+    addTree(9, -5);
+
+    // 动画循环
+    addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+
+    renderer.setAnimationLoop(() => {
+      controls.update();
+      renderer.render(scene, camera);
+    });
+  </script>
+</body>
+</html>

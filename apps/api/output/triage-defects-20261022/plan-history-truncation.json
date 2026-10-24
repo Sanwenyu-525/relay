@@ -1,0 +1,539 @@
+{
+  "storedVersions": [
+    21,
+    20,
+    19,
+    18,
+    17,
+    16,
+    15,
+    14,
+    13,
+    12,
+    11,
+    10,
+    9,
+    8,
+    7,
+    6,
+    5,
+    4,
+    3,
+    2,
+    1
+  ],
+  "read": {
+    "latest": {
+      "plan_id": "e5d669fd-9905-484e-88ad-331cc2a42b36",
+      "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+      "version": 21,
+      "status": "CURRENT",
+      "goal": "版本21",
+      "scope": [],
+      "steps": [
+        {
+          "title": "读现状",
+          "detail": null
+        }
+      ],
+      "verification": [
+        {
+          "statement": "人工核对",
+          "method": "HUMAN"
+        }
+      ],
+      "open_questions": [],
+      "source_message_id": "a883ae63-74be-45b7-bbb4-dbc06ba94d82",
+      "created_at": "2026-10-23T06:04:44.668Z"
+    },
+    "versions": [
+      {
+        "plan_id": "e5d669fd-9905-484e-88ad-331cc2a42b36",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 21,
+        "status": "CURRENT",
+        "goal": "版本21",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "a883ae63-74be-45b7-bbb4-dbc06ba94d82",
+        "created_at": "2026-10-23T06:04:44.668Z"
+      },
+      {
+        "plan_id": "4951a566-24a0-4de9-aa28-e1aca7d20d1d",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 20,
+        "status": "SUPERSEDED",
+        "goal": "版本20",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "e9cdfc4c-57a1-4166-adab-c17c8ccb1728",
+        "created_at": "2026-10-23T06:04:44.610Z"
+      },
+      {
+        "plan_id": "133e298c-d3ed-4a29-ac4f-10488d7e3231",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 19,
+        "status": "SUPERSEDED",
+        "goal": "版本19",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "94209a3d-1e49-4ceb-9fa9-37fc5d51f67e",
+        "created_at": "2026-10-23T06:04:44.553Z"
+      },
+      {
+        "plan_id": "b18b9e0d-9297-4b38-a389-79b5561cb174",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 18,
+        "status": "SUPERSEDED",
+        "goal": "版本18",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "51040a82-b112-4c26-8ae4-8c1f92f1f51c",
+        "created_at": "2026-10-23T06:04:44.492Z"
+      },
+      {
+        "plan_id": "2edd9611-2593-4554-89ab-042365fb9d58",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 17,
+        "status": "SUPERSEDED",
+        "goal": "版本17",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "70250b0a-8b76-4116-a95a-eb3b0d969a31",
+        "created_at": "2026-10-23T06:04:44.401Z"
+      },
+      {
+        "plan_id": "baa3f450-db08-40d7-87d2-ab0c2c139653",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 16,
+        "status": "SUPERSEDED",
+        "goal": "版本16",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "e13c286e-b0ad-4c8b-823d-f149de4a40c0",
+        "created_at": "2026-10-23T06:04:44.328Z"
+      },
+      {
+        "plan_id": "1e74d14b-e0d9-48f9-8bcc-b21580856fa3",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 15,
+        "status": "SUPERSEDED",
+        "goal": "版本15",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "243fd984-d50f-4a74-93a9-cbbd2583bbdd",
+        "created_at": "2026-10-23T06:04:44.299Z"
+      },
+      {
+        "plan_id": "15f60805-e161-4c48-afe6-15f3a88833e8",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 14,
+        "status": "SUPERSEDED",
+        "goal": "版本14",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "bb53717e-c720-4ac9-b1ef-57d37b56f404",
+        "created_at": "2026-10-23T06:04:44.274Z"
+      },
+      {
+        "plan_id": "fe3932fa-af03-46d0-8140-00051db8afd2",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 13,
+        "status": "SUPERSEDED",
+        "goal": "版本13",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "424af067-3f76-4c50-a9ab-3d1eee721862",
+        "created_at": "2026-10-23T06:04:44.246Z"
+      },
+      {
+        "plan_id": "a8ef7a1d-ab00-492d-af55-e87301319d0b",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 12,
+        "status": "SUPERSEDED",
+        "goal": "版本12",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "2e60127f-7ec5-4dda-85bf-9920fbfe1b7c",
+        "created_at": "2026-10-23T06:04:44.216Z"
+      },
+      {
+        "plan_id": "e9bff627-33d5-45c0-8ac9-76d54062034a",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 11,
+        "status": "SUPERSEDED",
+        "goal": "版本11",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "a16e66e5-2f90-4c9d-9536-d4c9e3f920b8",
+        "created_at": "2026-10-23T06:04:44.189Z"
+      },
+      {
+        "plan_id": "56f272c8-97c3-469b-a632-43b281d71193",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 10,
+        "status": "SUPERSEDED",
+        "goal": "版本10",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "73f2fa78-b675-4470-a44c-8e738fbadf98",
+        "created_at": "2026-10-23T06:04:44.160Z"
+      },
+      {
+        "plan_id": "dbac4daf-370b-4788-b558-13517efc0ff5",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 9,
+        "status": "SUPERSEDED",
+        "goal": "版本9",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "45c87989-9418-4af7-88cc-1046deb7be54",
+        "created_at": "2026-10-23T06:04:44.134Z"
+      },
+      {
+        "plan_id": "26a128e8-b858-4908-b6ee-7ff8024d1315",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 8,
+        "status": "SUPERSEDED",
+        "goal": "版本8",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "2e3ed48b-577e-41be-b22b-27917504d13d",
+        "created_at": "2026-10-23T06:04:44.109Z"
+      },
+      {
+        "plan_id": "731b5b8b-1002-41b2-8583-635b07c3292e",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 7,
+        "status": "SUPERSEDED",
+        "goal": "版本7",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "81c9a460-0320-45ac-8f10-dcd8737cd900",
+        "created_at": "2026-10-23T06:04:44.079Z"
+      },
+      {
+        "plan_id": "80722ac1-3896-4701-9038-ffc978e69c48",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 6,
+        "status": "SUPERSEDED",
+        "goal": "版本6",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "15efb57a-ca4a-4f85-9a12-a95099d76931",
+        "created_at": "2026-10-23T06:04:44.054Z"
+      },
+      {
+        "plan_id": "12f58822-3df8-46ee-b185-c7df524f6eff",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 5,
+        "status": "SUPERSEDED",
+        "goal": "版本5",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "7ebfd775-a2bc-48af-8d7e-5da96d4ae06c",
+        "created_at": "2026-10-23T06:04:44.026Z"
+      },
+      {
+        "plan_id": "7dd6a989-a2dc-4030-b4a3-6e962f30bf55",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 4,
+        "status": "SUPERSEDED",
+        "goal": "版本4",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "8f2d96e3-424c-4064-bb92-1670f3f31eac",
+        "created_at": "2026-10-23T06:04:44.001Z"
+      },
+      {
+        "plan_id": "d12e2a6c-b0c1-4dbb-8a10-6ec02b9e1c09",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 3,
+        "status": "SUPERSEDED",
+        "goal": "版本3",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "6b257ca6-cc89-4e80-bbc0-14bd17b9b5db",
+        "created_at": "2026-10-23T06:04:43.976Z"
+      },
+      {
+        "plan_id": "e9fad099-cdf0-40ce-b676-f065d943ca20",
+        "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+        "version": 2,
+        "status": "SUPERSEDED",
+        "goal": "版本2",
+        "scope": [],
+        "steps": [
+          {
+            "title": "读现状",
+            "detail": null
+          }
+        ],
+        "verification": [
+          {
+            "statement": "人工核对",
+            "method": "HUMAN"
+          }
+        ],
+        "open_questions": [],
+        "source_message_id": "94e99988-866f-493c-9c24-8fc9ee0bf264",
+        "created_at": "2026-10-23T06:04:43.950Z"
+      }
+    ]
+  },
+  "oldVersionByKnownId": {
+    "plan_id": "4b6433a3-5e1e-46ff-b9a1-74bd73d6df52",
+    "session_id": "92bda25d-79a8-4dd6-8237-4c4d16ef73c1",
+    "version": 1,
+    "status": "SUPERSEDED",
+    "goal": "版本1",
+    "scope": [],
+    "steps": [
+      {
+        "title": "读现状",
+        "detail": null
+      }
+    ],
+    "verification": [
+      {
+        "statement": "人工核对",
+        "method": "HUMAN"
+      }
+    ],
+    "open_questions": [],
+    "source_message_id": "122f4d88-4811-4996-8263-7d86dcf0d97f",
+    "created_at": "2026-10-23T06:04:43.919Z"
+  },
+  "responseKeys": [
+    "latest",
+    "versions"
+  ]
+}

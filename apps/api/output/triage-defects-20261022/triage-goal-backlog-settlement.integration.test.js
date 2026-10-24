@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import test,{before,after} from 'node:test';
+import fs from 'node:fs';
+import {runMigrations} from '../../dist/src/infrastructure/migration-runner.js';
+import {APP_DATABASE_URL,MIGRATION_DATABASE_URL,MIGRATIONS_DIRECTORY,openDatabase} from '../../dist/test/integration/integration-support.js';
+import {createWorkspace,startTestApi,workspacePath} from '../../dist/test/integration/api-harness.js';
+import {createAssistSession,requestAssistMessage} from '../../dist/src/application/assist-commands.js';
+import {runAssistGenerationTick} from '../../dist/src/application/assist-runner.js';
+import {runAssistGoalTick} from '../../dist/src/application/goal-advance.js';
+import {createRepositories} from '../../dist/src/application/unit-of-work.js';
+import {ManagedContentStore} from '../../dist/src/storage/managed-content-store.js';
+import {FakeModelPort} from '../../dist/src/workflow/fake-model-port.js';
+const app=openDatabase(APP_DATABASE_URL,'triage-goal-backlog');let api,wid;
+before(async()=>{await runMigrations({connectionString:MIGRATION_DATABASE_URL,directory:MIGRATIONS_DIRECTORY});api=await startTestApi();wid=await createWorkspace(app.db);});
+after(async()=>{await api?.stop();await app.close();});
+test('goal recovery must settle every completed message in order rather than skip to the latest',async()=>{
+ const repos=createRepositories(app.db);const samples=[];
+ for(const delayed of [false,true]){
+  const sid=(await createAssistSession(app.db,{workspaceId:wid,commandId:randomUUID(),projectId:null,title:`backlog ${delayed}`})).result.session_id;
+  const first=await requestAssistMessage(app.db,{workspaceId:wid,sessionId:sid,commandId:randomUUID(),chatMode:'GOAL',content:'完成代码检查及安装验证'});
+  const second=await requestAssistMessage(app.db,{workspaceId:wid,sessionId:sid,commandId:randomUUID(),chatMode:'GOAL',content:'补充说明'});
+  const gid=first.result.goal_id;assert.equal(second.result.goal_id,gid);
+  let calls=0;
+  const port={identity:new FakeModelPort().identity,assist:async()=>{calls++;const key=calls===1?'original':'replacement';return {kind:'CONTENT',content:JSON.stringify({reply:`完成第${calls}次读取。`,goal:{state:'CONTINUE',success_criteria:[{key,statement:calls===1?'代码与安装都通过':'仅代码检查通过',required:true}],criteria_status:[{key,status:'UNMET',evidence:'仍需验证'}],steps:[],current_step:null,progress:`第${calls}次读取`,questions:[],blocked_reason:null,adjustment:null}}),providerRequestId:`triage-${calls}`,usage:{inputTokens:1,outputTokens:1,cacheReadTokens:null,cacheCreationTokens:null}};}};
+  const generate=async(target)=>{for(let i=0;i<12;i++){const r=await runAssistGenerationTick(app.db,{workerId:`generate-${randomUUID()}`,storage:new ManagedContentStore(api.dataRoot),modelPort:port,leaseMs:60000,maxMessages:1});if(r?.messageId===target&&r.status!=='DISCARDED')return r;}assert.fail('target did not settle');};
+  const tick=()=>runAssistGoalTick(app.db,{workerId:`tick-${randomUUID()}`});
+  assert.equal((await generate(first.result.assistant_message_id)).status,'COMPLETED');
+  if(!delayed)await tick();
+  assert.equal((await generate(second.result.assistant_message_id)).status,'COMPLETED');assert.equal(calls,2);
+  const pause=await api.post(workspacePath(wid,`/assist-goals/${gid}/pause`),{command_id:randomUUID()});assert.equal(pause.status,200,pause.text);
+  const ticks=[];for(let i=0;i<3;i++)ticks.push(await tick());
+  const row=await repos.planGoals.readGoal(gid);const rounds=await repos.planGoals.listRounds(gid);
+  const projection=await api.get(workspacePath(wid,`/assist-sessions/${sid}/goal`));assert.equal(projection.status,200,projection.text);
+  samples.push({delayed,calls,status:row.status,roundCount:row.round_count,criteria:row.criteria,firstMessage:first.result.assistant_message_id,secondMessage:second.result.assistant_message_id,recordedMessageIds:rounds.map(r=>r.message_id),firstRecorded:(await repos.planGoals.readRoundByMessage(first.result.assistant_message_id))!==undefined,secondRecorded:(await repos.planGoals.readRoundByMessage(second.result.assistant_message_id))!==undefined,remainingCandidates:(await repos.planGoals.listGoalsWithUnsettledRounds()).some(g=>g.id===gid),ticks,projected:projection.body});
+ }
+ assert.equal(samples[0].roundCount,2);assert.equal(samples[0].criteria[0].key,'original');
+ fs.writeFileSync('output/triage-defects-20261022/goal-backlog-settlement.json',JSON.stringify(samples,null,2));console.log('TRIAGE_GOAL_BACKLOG',JSON.stringify(samples));
+ assert.equal(samples[1].roundCount,2,'both completed messages must receive durable round records even after delayed goal ticks');
+ assert.equal(samples[1].criteria[0].key,'original','first settled message must define the frozen criteria');
+});

@@ -1,0 +1,22 @@
+{
+  "controlStatus": 200,
+  "planMessageStatus": "COMPLETED",
+  "planCount": 1,
+  "blockers": [],
+  "deleteStatus": 500,
+  "deleteBody": {
+    "type": "/problems/internal-error",
+    "title": "服务内部错误",
+    "status": 500,
+    "detail": "请求未能完成，请通过 request_id 在本机日志中核对。",
+    "instance": "/requests/req-81c99e89-c1f8-430b-9074-9c71fcc7f1fe",
+    "code": "INTERNAL_ERROR",
+    "request_id": "req-81c99e89-c1f8-430b-9074-9c71fcc7f1fe",
+    "retryable": false,
+    "retry_action": "CHECK_RECEIPT_THEN_RETRY"
+  },
+  "deleteText": "{\"type\":\"/problems/internal-error\",\"title\":\"服务内部错误\",\"status\":500,\"detail\":\"请求未能完成，请通过 request_id 在本机日志中核对。\",\"instance\":\"/requests/req-81c99e89-c1f8-430b-9074-9c71fcc7f1fe\",\"code\":\"INTERNAL_ERROR\",\"request_id\":\"req-81c99e89-c1f8-430b-9074-9c71fcc7f1fe\",\"retryable\":false,\"retry_action\":\"CHECK_RECEIPT_THEN_RETRY\"}",
+  "sessionPreserved": true,
+  "messagePreserved": true,
+  "plansPreserved": 1
+}

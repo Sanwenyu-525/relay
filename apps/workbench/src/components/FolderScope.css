@@ -147,23 +147,8 @@
   margin: 0;
 }
 
-/* 底部权限脚注：读取授权的告知留在面板内，不折进 title——这段话必须被看见。 */
-.folder-scope-footnote {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--relay-space-2);
-  margin: var(--relay-space-1) 0 0;
-  padding-top: var(--relay-space-1);
-  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
-  color: var(--relay-color-text-muted);
-  font-size: var(--relay-font-size-meta);
-  line-height: var(--relay-font-lineHeight-ui);
-}
-
-.folder-scope-footnote-icon {
-  flex: none;
-  color: var(--relay-color-text-muted);
-}
+/* 底部权限脚注已按 2026-10-23 用户截图指令删除（「新目录打开后可读取本目录文件…」）：
+   读取授权的事实由各目录行自身的就绪状态与写档位说明，面板底部不再常驻一段告知。 */
 
 /* 当前目录的完整路径（2026-10-20 用户要求）：细条只显示目录名，同名目录无法区分，
    完整路径在这里可核对。Windows 反斜杠没有天然断点，用 anywhere 保证长路径换行而不是溢出；

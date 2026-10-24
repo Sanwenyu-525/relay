@@ -1,0 +1,13 @@
+【追加范围补证：新建任务依赖候选】
+TRIAGE-CREATE-TASK-DEPENDENCY-PAGINATION-20261023
+
+当前 /tasks?view=create&project=P 完整新建页也使用 getProjectTasks，仅消费首批items，丢next_cursor。
+真实React路由+RelayApiClient、受控HTTP：项目有51个既有任务，首50项返回next_cursor=dependency+page51；第二页能返回第51项。页面只发一次cursor=null请求，依赖选择框候选50个，没有加载更多，也没有第51项的搜索/手动依赖ID入口，因此用户不能在当前创建流程选择该实际前置任务。
+本轮没有提交创建POST，不声称系统自动绕过了依赖或已写入错误任务。若用户不登记实际前置而继续创建，依赖关系不会凭空产生，属于明确应修复的候选发现缺口。
+
+补证：D:/Develop/Relay-Agent/apps/workbench/output/triage-defects-20261022/createTaskDependencyPagination.spec.tsx
+日志：D:/Develop/Relay-Agent/apps/workbench/output/triage-defects-20261022/create-task-dependency-pagination.log
+1条红复现：cursors=[null],candidateCount=50,targetVisible=false,loadMoreOffered=false。
+源码：apps/workbench/src/views/CreateTaskView.tsx refreshLiveCandidates；客户端getProjectTasks把分页结果缩为items。未改业务代码、未commit/push；未做真实PG/HTTP或Windows验收。
+
+修复范围补充：不能只修ProjectTasksView列表展示。新建页依赖候选须按当前项目支持有界续页/准确搜索或现有同义入口，显示未读完状态；明确已选依赖应在续页/重读中保留，失败不能静默把已选依赖改成“无”。跨项目切换后旧cursor和迟到候选不得混入，不自动选第一项、不自动去掉依赖来继续准备任务。增加第51项可选择、续页失败保留原选中、项目切换和无重复合并回归。原工单项目列表验收仍须全部完成。

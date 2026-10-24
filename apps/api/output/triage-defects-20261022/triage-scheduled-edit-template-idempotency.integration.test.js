@@ -1,0 +1,28 @@
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import test,{before,after} from 'node:test';
+import fs from 'node:fs';
+import {runMigrations} from '../../dist/src/infrastructure/migration-runner.js';
+import {APP_DATABASE_URL,MIGRATION_DATABASE_URL,MIGRATIONS_DIRECTORY,openDatabase} from '../../dist/test/integration/integration-support.js';
+import {createWorkspace,startTestApi,workspacePath} from '../../dist/test/integration/api-harness.js';
+import {createRepositories} from '../../dist/src/application/unit-of-work.js';
+const app=openDatabase(APP_DATABASE_URL,'triage-scheduled-template-idem');let api,wid,pid;
+before(async()=>{await runMigrations({connectionString:MIGRATION_DATABASE_URL,directory:MIGRATIONS_DIRECTORY});api=await startTestApi();wid=await createWorkspace(app.db);const p=await api.post(workspacePath(wid,'/projects'),{command_id:randomUUID(),title:'edit template idempotency',project_type:'GENERAL'});assert.equal(p.status,201,p.text);pid=p.body.result.project_id;});
+after(async()=>{await api?.stop();await app.close();});
+test('same edit command with a different template must be rejected as a changed payload',async()=>{
+ const repos=createRepositories(app.db);
+ const body={command_id:randomUUID(),confirmed:true,title:'daily checks',template:{task_title:'初始任务',objective:'初始检查',mode:'AI_ASSIST',criteria:[{statement:'初始完成条件'}]},repeat_rule:{kind:'DAILY',interval_days:1},timezone:'Asia/Shanghai',local_time:'09:00',first_local_date:new Date(Date.now()+2*86400000).toISOString().slice(0,10),max_runs:5,authorization_expires_at:new Date(Date.now()+7*86400000).toISOString()};
+ const created=await api.post(workspacePath(wid,`/projects/${pid}/scheduled-tasks`),body);assert.equal(created.status,201,created.text);const id=created.body.result.scheduled_task_id;
+ const edit={...body,command_id:randomUUID(),expected_revision:created.body.result.revision,reason:'更新检查说明',template:{task_title:'任务A',objective:'只核对A样例',mode:'AI_ASSIST',criteria:[{statement:'A样例通过'}]}};
+ const url=workspacePath(wid,`/scheduled-tasks/${id}/edits`);
+ const first=await api.post(url,edit);assert.equal(first.status,200,first.text);
+ const exact=await api.post(url,edit);assert.equal(exact.status,200,exact.text);assert.deepEqual(exact.body,first.body);
+ const changedTemplate={...edit,template:{...edit.template,task_title:'任务B',objective:'改为核对B样例',criteria:[{statement:'B样例通过'}]}};
+ const changed=await api.post(url,changedTemplate);
+ const titleControl=await api.post(url,{...edit,title:'different schedule title'});assert.equal(titleControl.status,409,titleControl.text);assert.equal(titleControl.body.code,'COMMAND_ID_REUSED');
+ const stored=await repos.scheduledTasks.read(id);const read=await api.get(workspacePath(wid,`/scheduled-tasks/${id}`));assert.equal(read.status,200,read.text);
+ const evidence={scheduleId:id,firstHttp:first.status,exactReplayHttp:exact.status,changedTemplateHttp:changed.status,changedTemplateResponse:changed.body,changedTemplateReplayEqualsFirst:JSON.stringify(changed.body)===JSON.stringify(first.body),titleControlHttp:titleControl.status,titleControlCode:titleControl.body.code,submittedTemplateB:changedTemplate.template,storedTemplate:stored.template,revision:String(stored.revision),historyLength:stored.history.length};
+ fs.writeFileSync('output/triage-defects-20261022/scheduled-edit-template-idempotency.json',JSON.stringify(evidence,null,2));console.log('TRIAGE_SCHEDULED_TEMPLATE_IDEMPOTENCY',JSON.stringify(evidence));
+ assert.equal(changed.status,409,'same command id must not silently acknowledge a different task template');
+ assert.equal(changed.body.code,'COMMAND_ID_REUSED');
+});

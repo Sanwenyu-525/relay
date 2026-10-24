@@ -1,0 +1,10 @@
+{
+  "title": "[Relay] 权限档位首次读取失败后所有选项禁用，菜单没有重新核对入口",
+  "type": "codeerror",
+  "steps": "<pre>现象\nWritePermissionControl首次读取权限投影遇503后，三档全部禁用并显示错误，但当前菜单没有重新读取入口。服务恢复后反复开合菜单也不发新请求，只能离开/重挂组件才能恢复。覆盖已绑定目录档位和未绑定目录的工作区默认档位两条作用域。\n\n可复现证据\n真实WritePermissionControl +生产RelayApiClient，受控fetch返回首次503，随后恢复合法200。两条样本分别绑定project/resource/root和无目录默认作用域。\n初始错误可见、ASK/AUTO/FULL禁用；服务恢复后开合芯片、假时钟推进60秒，readsAfterReopen=1、hasRecheck=false、stillDisabled=true。重挂同一组件、同一client、同一作用域后健康读取，enabledAfterRemount=true。\n所有操作仅GET；未发送改档命令，不声称绕过权限、服务端故障或真实PG/Windows验收。\n\n根因\napps/workbench/src/components/WritePermissionControl.tsx：load/loadDefault catch设actionError，但投影仍null；canChoose要求对应投影非null。\n重新核对按钮write-permission-recheck-tier只位于!canChoose &amp;&amp; actionError===null &amp;&amp; hint!==null块内，还要求readiness!==null &amp;&amp; !prereqOk。首次失败后两条件均不满足，错误段只输出&lt;p&gt;，工作区默认作用域亦无读取重试。load仅effect依赖变化时执行，开合菜单不触发。\n现有“核对原命令回执/重试保存”只处理写命令pending，不适用于首次只读失败；不可混用两类操作。\n\n证据文件\napps/workbench/output/triage-defects-20261022/writePermissionInitialReadRecovery.spec.tsx\napps/workbench/output/triage-defects-20261022/write-permission-initial-read-recovery.log\n在apps/workbench运行：node node_modules/vitest/vitest.mjs run output/triage-defects-20261022/writePermissionInitialReadRecovery.spec.tsx --config output/triage-defects-20261022/vitest.config.ts --reporter verbose\n2项红：需要页内重读出口，实际不存在。两样本初始错误与重挂健康对照通过。组件+真实Client/受控HTTP+假时钟，不冒称真实浏览器、Provider或Windows点击证据。\n\n可直接执行的修复提示词\n先读AGENTS、CODEX_NEXT_STEP、工作台权限控件约束和WritePermissionControl及writePermissionTier测试，检查git status与目标diff，保护共享修改。将本单绑定/默认两条首次失败复现转为正式组件回归，最小提供明确只读“重新核对”入口，调用当前作用域load或loadDefault；成功时清除旧读取错误，失败保留可再次重试与具体原因。请求中有明确checking且防重复，不为只读重试创建command_id或误调写命令/回执接口。\n保持当前三档菜单、已授权视觉布局与默认档位/目录档位语义，不擅自恢复被用户移除的只读选项，不放宽禁写闸门。投影未成功读取前仍禁改；403/404和503分别说明，不把普通读失败当待核对写入，不自动无限轮询。绑定或连接切换时迟到读取不得污染新scope。\n验收包括两作用域初次503/网络失败→健康重试、连续失败可再次重试、初次404/403、读取中重复点击、scope切换迟到回包、成功后错误清除与档位正确启用，以及现有写入pending/同身份回执恢复与布局不闪烁回归；确认只读恢复不发POST/不更改权限。\n只同步确实受影响的既有交互文档/统一验收表，文档变化运行node scripts/check-docs.mjs。不commit/push，不改生产目录或策略，报告各证据边界。本轮仅复现登记，未修改业务实现。</pre>",
+  "openedBuild": [
+    "trunk"
+  ],
+  "pri": 3,
+  "severity": 3
+}

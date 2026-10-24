@@ -1,0 +1,45 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import test, { before, after } from 'node:test';
+import fs from 'node:fs';
+import { runMigrations } from '../../dist/src/infrastructure/migration-runner.js';
+import { APP_DATABASE_URL, MIGRATION_DATABASE_URL, MIGRATIONS_DIRECTORY, openDatabase } from '../../dist/test/integration/integration-support.js';
+import { createWorkspace, expectCommandAccepted, startTestApi, workspacePath } from '../../dist/test/integration/api-harness.js';
+const app = openDatabase(APP_DATABASE_URL, 'triage-decision-review-unarchive-gap');
+let api;
+let wid;
+before(async () => { await runMigrations({ connectionString: MIGRATION_DATABASE_URL, directory: MIGRATIONS_DIRECTORY }); api = await startTestApi(); wid = await createWorkspace(app.db); });
+after(async () => { await api?.stop(); await app.close(); });
+async function post(suffix, body, status = 200) { const id = randomUUID(); return expectCommandAccepted(await api.post(workspacePath(wid, suffix), { command_id: id, ...body }), status, id); }
+async function get(suffix) { const res = await api.get(workspacePath(wid, suffix)); assert.equal(res.status, 200, res.text); return res.body; }
+test('characterize unarchive source change omitted from decision-review preparation after keeping the archived baseline', async () => {
+  const project = await post('/projects', { title: 'unarchive review gap', project_type: 'GENERAL' }, 201);
+  const knowledge = await post('/knowledge', { project_id: project.project_id, title: 'premise source', source_kind: 'NOTE', text: 'declared source for decision' }, 201);
+  const content = await get(`/knowledge/${knowledge.knowledge_id}/versions/1/content`);
+  const decision = await post('/decisions', { project_id: project.project_id, title: 'continue approach', choice: 'keep approach A', rationale: 'based on declared source', alternatives: [], costs: [] }, 201);
+  const premisesPath = `/decisions/${decision.decision_id}/premises`;
+  await post(premisesPath, { expected_decision_revision: decision.revision, confirmed: true, statement: 'source availability is a premise', knowledge_version_id: content.id });
+  const reviewsPath = `/projects/${project.project_id}/decision-reviews`;
+  const archived = await post(`/knowledge/${knowledge.knowledge_id}/archive`, { expected_revision: knowledge.revision });
+  const afterArchive = await get(reviewsPath);
+  assert.equal(afterArchive.pending_count, 1);
+  const candidate = afterArchive.items[0];
+  await post(`/decision-reviews/${candidate.id}/resolutions`, { expected_revision: candidate.revision, action: 'KEEP_DECISION', reason: 'keep decision after consciously reviewing the archived source' });
+  const afterKeepPremise = await get(premisesPath);
+  assert.equal(afterKeepPremise.items[0].baseline_ref.status, 'ARCHIVED');
+  const restored = await post(`/knowledge/${knowledge.knowledge_id}/unarchive`, { expected_revision: archived.revision });
+  const afterUnarchive = await get(reviewsPath);
+  const currentSource = await get(`/knowledge/${knowledge.knowledge_id}`);
+  const afterUnarchivePremise = await get(premisesPath);
+  assert.equal(currentSource.status, 'ACTIVE');
+  assert.equal(afterUnarchivePremise.items[0].baseline_ref.status, 'ARCHIVED');
+  assert.equal(afterUnarchive.pending_count, 0);
+  assert.equal(afterUnarchive.items.length, 1);
+  assert.equal(afterUnarchive.items[0].status, 'KEPT');
+  const updated = await post(`/knowledge/${knowledge.knowledge_id}/versions`, { expected_revision: restored.revision, source_kind: 'NOTE', text: 'next source revision as positive trigger control' });
+  const afterVersion = await get(reviewsPath);
+  assert.equal(updated.decision_review_count, '1');
+  assert.equal(afterVersion.pending_count, 1);
+  fs.writeFileSync('D:/Develop/Relay-Agent/apps/api/output/triage-defects-20261022/decision-review-unarchive-gap-evidence.json', JSON.stringify({ archived, afterArchive, afterKeepPremise, restored, currentSource, afterUnarchivePremise, afterUnarchive, updated, afterVersion }, null, 2));
+  console.log('TRIAGE_DECISION_REVIEW_UNARCHIVE_GAP', JSON.stringify({ archivedPending: afterArchive.pending_count, restoredSourceStatus: currentSource.status, keptBaselineStatus: afterUnarchivePremise.items[0].baseline_ref.status, unarchivePending: afterUnarchive.pending_count, newVersionPending: afterVersion.pending_count }));
+});

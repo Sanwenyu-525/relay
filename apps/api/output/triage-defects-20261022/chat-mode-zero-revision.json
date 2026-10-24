@@ -1,0 +1,24 @@
+{
+  "initialRevision": "0",
+  "zeroStatus": 422,
+  "zeroBody": {
+    "type": "/problems/validation-failed",
+    "title": "请求未通过校验",
+    "status": 422,
+    "detail": "请求结构不符合端点契约。",
+    "instance": "/requests/req-e8c0a5f8-d9fe-4355-b631-a476a2d1b4f1",
+    "code": "VALIDATION_FAILED",
+    "request_id": "req-e8c0a5f8-d9fe-4355-b631-a476a2d1b4f1",
+    "retryable": false,
+    "retry_action": "NONE",
+    "field_errors": [
+      {
+        "field": "/expected_revision",
+        "message": "must match pattern \"^[1-9][0-9]*$\""
+      }
+    ]
+  },
+  "withoutRevisionStatus": 200,
+  "positiveRevisionStatus": 200,
+  "staleRevisionStatus": 409
+}

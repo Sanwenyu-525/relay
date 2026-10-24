@@ -1,0 +1,217 @@
+[
+  {
+    "delayed": false,
+    "calls": 2,
+    "status": "PAUSED",
+    "roundCount": 2,
+    "criteria": [
+      {
+        "key": "original",
+        "method": "HUMAN",
+        "status": "UNMET",
+        "evidence": "仍需验证",
+        "required": true,
+        "statement": "代码与安装都通过"
+      }
+    ],
+    "firstMessage": "9ad044c0-e3b6-4ef9-b492-0e5bba91c9de",
+    "secondMessage": "b69381f0-3f18-45b6-8626-7854e0343f4d",
+    "recordedMessageIds": [
+      "b69381f0-3f18-45b6-8626-7854e0343f4d",
+      "9ad044c0-e3b6-4ef9-b492-0e5bba91c9de"
+    ],
+    "firstRecorded": true,
+    "secondRecorded": true,
+    "remainingCandidates": false,
+    "ticks": [
+      {
+        "advanced": [],
+        "settled": [
+          {
+            "goalId": "23699b5b-3176-4b9e-b8e8-d789ac4ad3fc",
+            "messageId": "b69381f0-3f18-45b6-8626-7854e0343f4d",
+            "outcome": "CONTINUE",
+            "status": "PAUSED"
+          }
+        ],
+        "controls": [
+          {
+            "goalId": "23699b5b-3176-4b9e-b8e8-d789ac4ad3fc",
+            "status": "PAUSED"
+          }
+        ],
+        "skipped": []
+      },
+      {
+        "advanced": [],
+        "settled": [],
+        "controls": [],
+        "skipped": []
+      },
+      {
+        "advanced": [],
+        "settled": [],
+        "controls": [],
+        "skipped": []
+      }
+    ],
+    "projected": {
+      "goal": {
+        "goal_id": "23699b5b-3176-4b9e-b8e8-d789ac4ad3fc",
+        "session_id": "bdeb22fe-913c-4aed-8a9a-caeaf2fab640",
+        "objective": "完成代码检查及安装验证",
+        "status": "PAUSED",
+        "current_step": null,
+        "progress": "第2次读取",
+        "stop_reason": {
+          "code": "PAUSED_BY_USER",
+          "detail": "你暂停了目标；点「继续」会沿原目标接续。",
+          "questions": [],
+          "resumable": true
+        },
+        "criteria": [
+          {
+            "key": "original",
+            "statement": "代码与安装都通过",
+            "status": "UNMET",
+            "evidence": "仍需验证",
+            "required": true
+          }
+        ],
+        "steps": [],
+        "round_count": 2,
+        "no_progress_rounds": 1,
+        "plan_version_id": null,
+        "plan_version": null,
+        "last_round_at": "2026-10-23T11:08:11.347Z",
+        "actions": {
+          "pause": false,
+          "cancel": true,
+          "resume": true,
+          "confirm_completion": false
+        },
+        "revision": "5",
+        "created_at": "2026-10-23T11:08:11.252Z",
+        "updated_at": "2026-10-23T11:08:11.373Z"
+      },
+      "rounds": [
+        {
+          "round_index": 2,
+          "outcome": "CONTINUE",
+          "note": "本轮没有可核对的进展。",
+          "created_at": "2026-10-23T11:08:11.373Z"
+        },
+        {
+          "round_index": 1,
+          "outcome": "CONTINUE",
+          "note": "本轮有进展。",
+          "created_at": "2026-10-23T11:08:11.326Z"
+        }
+      ]
+    }
+  },
+  {
+    "delayed": true,
+    "calls": 2,
+    "status": "PAUSED",
+    "roundCount": 1,
+    "criteria": [
+      {
+        "key": "replacement",
+        "method": "HUMAN",
+        "status": "UNMET",
+        "evidence": "仍需验证",
+        "required": true,
+        "statement": "仅代码检查通过"
+      }
+    ],
+    "firstMessage": "d0e6e528-f793-4d93-92a5-b81e4b3d2684",
+    "secondMessage": "8b81a714-85d5-40d3-9cd6-6840c4b5c2d5",
+    "recordedMessageIds": [
+      "8b81a714-85d5-40d3-9cd6-6840c4b5c2d5"
+    ],
+    "firstRecorded": false,
+    "secondRecorded": true,
+    "remainingCandidates": false,
+    "ticks": [
+      {
+        "advanced": [],
+        "settled": [
+          {
+            "goalId": "331356a6-43b1-4839-aa93-ec81b71ffbf3",
+            "messageId": "8b81a714-85d5-40d3-9cd6-6840c4b5c2d5",
+            "outcome": "CONTINUE",
+            "status": "PAUSED"
+          }
+        ],
+        "controls": [
+          {
+            "goalId": "331356a6-43b1-4839-aa93-ec81b71ffbf3",
+            "status": "PAUSED"
+          }
+        ],
+        "skipped": []
+      },
+      {
+        "advanced": [],
+        "settled": [],
+        "controls": [],
+        "skipped": []
+      },
+      {
+        "advanced": [],
+        "settled": [],
+        "controls": [],
+        "skipped": []
+      }
+    ],
+    "projected": {
+      "goal": {
+        "goal_id": "331356a6-43b1-4839-aa93-ec81b71ffbf3",
+        "session_id": "7f793069-92f1-4f0e-a025-17445449a84f",
+        "objective": "完成代码检查及安装验证",
+        "status": "PAUSED",
+        "current_step": null,
+        "progress": "第2次读取",
+        "stop_reason": {
+          "code": "PAUSED_BY_USER",
+          "detail": "你暂停了目标；点「继续」会沿原目标接续。",
+          "questions": [],
+          "resumable": true
+        },
+        "criteria": [
+          {
+            "key": "replacement",
+            "statement": "仅代码检查通过",
+            "status": "UNMET",
+            "evidence": "仍需验证",
+            "required": true
+          }
+        ],
+        "steps": [],
+        "round_count": 1,
+        "no_progress_rounds": 0,
+        "plan_version_id": null,
+        "plan_version": null,
+        "last_round_at": "2026-10-23T11:08:11.452Z",
+        "actions": {
+          "pause": false,
+          "cancel": true,
+          "resume": true,
+          "confirm_completion": false
+        },
+        "revision": "4",
+        "created_at": "2026-10-23T11:08:11.412Z",
+        "updated_at": "2026-10-23T11:08:11.462Z"
+      },
+      "rounds": [
+        {
+          "round_index": 1,
+          "outcome": "CONTINUE",
+          "note": "本轮有进展。",
+          "created_at": "2026-10-23T11:08:11.462Z"
+        }
+      ]
+    }
+  }
+]

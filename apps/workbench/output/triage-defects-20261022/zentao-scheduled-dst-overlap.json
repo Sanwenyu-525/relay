@@ -1,0 +1,10 @@
+{
+  "severity": 3,
+  "steps": "<pre>【现象与契约】HTTP契约&#167;定时任务明确“秋回重复的时刻取较早一次”；zoned-time.ts也声明此硬要求。Europe/Berlin回拨重复时刻却被算成较晚一次，首次、下次触发和周期计算均晚1小时。现有纽约重叠测试通过不能证明正UTC偏移时区正确。\n\n【有效真实PG/HTTP证据】apps/api/output/triage-defects-20261022/triage-scheduled-dst-overlap.integration.test.js（同名.ts仅枚举入口），结构化证据scheduled-dst-overlap.json。真实临时PG18.6、131迁移+graph成功，真实HTTP正常新建Project和ScheduledTask，不改数据库时钟/业务状态。\n1. 使用Node Intl.DateTimeFormat同一运行时分别格式化2026-10-25T00:30Z、01:30Z，Europe/Berlin两者都回读“2026-10-25 02:30”，证明两候选真实有效，较早者为00:30Z。\n2. resolveLocalDateTime({2026,10,25},{02,30},Europe/Berlin)实际01:30Z；nextDueAt DAILY interval1也实际01:30Z。\n3. POST /projects/{id}/scheduled-tasks，timezone=Europe/Berlin、first_local_date=2026-10-25、local_time=02:30，confirmed=true/max_runs1/有效授权，HTTP201。数据库first_run_at和next_due_at均01:30Z，比契约较早时刻晚3600000ms。\n4. 正对照America/New_York 2026-11-01 01:30，05:30Z与06:30Z都回读同一墙钟；函数、nextDueAt、HTTP落库均选较早05:30Z，delay0。\n最终红断言针对Berlin持久化时刻01:30Z!==00:30Z。不是时区名称无效、日期前置或HTTP创建失败。没有真实等到触发日期，没有执行Task/Run/模型或外部写入，不能称已观察真实任务迟到。应用zoned-time与scheduled-tasks源码/dist同选项转译逐字一致；SkipBuild不是全量构建通过。PG停止exit0，临时目录已清理。\n\n【根因】resolveLocalDateTime和WithoutGap用guess=Date.UTC(墙钟字段)取偏移，再用guess-firstOffset取第二偏移。Berlin该guess已在转换后，两次偏移都为标准时+1，因此Set仅得到01:30Z，从未枚举转换前+2的00:30Z。Math.min只在不完整候选中取值，不能兑现“较早”。WithoutGap同算法也应统一修，不能只特判Berlin或固定减1小时。现有unit/zoned-time主要覆盖New_York，东西UTC偏移下的候选分布不同。\n\n【可直接执行修复提示词】\n先读CODEX_NEXT_STEP、ADR-026、HTTP定时契约、zoned-time与已有时区单测，保护共享改动。先复现再最小修复：使用可靠的时区转换方法，在合理邻域取得所有可能偏移并按真实墙钟回读过滤，重叠明确取最早；或复用经过维护与兼容核对的成熟机制。不能通过改变契约为“较晚”、硬编码地区/年份、简单固定减一小时或扩大扫描次数掩盖候选缺失。保留原有春跳顺延规则、DAILY锚点和WEEKLY本地日历语义；非1小时切换和跨日边界按现行契约明确处理。\n验收：Berlin/New_York重叠正负UTC偏移对照、普通日、春跳、非整小时偏移/转换时区、跨本地午夜；resolve/nextDueAt/首次HTTP创建及配置更新落库一致；进程时区变化不影响结果；原调度准入/授权/幂等回归。真实PG/HTTP验证确切时刻，未实际等待触发和Windows实机的边界单列。不以纯函数通过替代落库验收。\n只同步受影响已有时间规则/测试计划及统一验收表，如需修正既有未来计划数据先列迁移策略与人工核对，不直接批量改生产。文档改动跑node scripts/check-docs.mjs。不commit/push、不扩展其他调度功能。</pre>",
+  "openedBuild": [
+    "trunk"
+  ],
+  "pri": 2,
+  "type": "codeerror",
+  "title": "[Relay] 柏林夏令时回拨重复时刻误取较晚一次，定时任务落库晚一小时"
+}

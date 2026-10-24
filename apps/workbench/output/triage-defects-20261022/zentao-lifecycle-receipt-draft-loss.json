@@ -1,0 +1,10 @@
+{
+  "title": "[Relay] 停用记忆恢复经原回执确认成功时误清无关新建草稿，直接成功却保留",
+  "type": "codeerror",
+  "steps": "<pre>【问题】\n资料页对已停用记忆执行恢复时，正常成功路径明确保留当前新建草稿；但响应丢失后通过“核对原命令回执”恢复为成功，checkReceipt 无条件关闭表单并 clearDraft，误删没有参与本次恢复命令的新建标题、正文。用户未选择放弃输入。不是仅把表单折叠：再次点新建，两字段均为空。\n\n【真实路由对照复现】\n当前 /knowledge?kind=MEMORY&amp;item=&lt;停用记忆ID&gt;，真实 RelayApiClient+React路由，模拟HTTP响应。\n1. 已选停用旧记忆，点“新建”，输入独立新记忆标题和正文，不提交该新建命令。\n2. 保持表单，点击旧记忆“恢复”入口；POST /memories/{旧ID}/reactivate，服务端状态模拟为ACTIVE，仅这一条写命令。\n3. A对照：正常200回包 -&gt; 新建表单保持展开，标题正文完整（通过）。\n4. B故障：相同POST已成功但回包抛网络错误 -&gt; 页面显示原命令待核对 -&gt; GET原命令回执返回ReactivateMemory、旧memory_id、ACTIVE、revision1。\n5. B实际：原回执核对后表单消失。再次点“新建”，标题=&quot;&quot;、正文=&quot;&quot;（红断言）。\n预期：仅确认旧对象恢复结果，刷新对应事实；像A路径一样保留无关新草稿、确认/到期等输入，不能把生命周期命令当新建草稿提交。\n\n【根因】\napps/workbench/src/views/KnowledgeView.tsx：restoreRetired 调 submit(..., null, false)，resetComposer=false 已表达“生命周期按钮不碰用户的草稿”。普通成功路径遵守该参数。\n但 PendingCommand 只记录id/type/resultKey/targetId/replacementId，没有保留本次成功后是否清草稿的语义；checkReceipt 对所有类型一律 setFormOpen(false); clearDraft()。导致仅因网络回包是否可见，同一恢复命令产生不同本地草稿结果。\n本单已复现 ReactivateMemory；UnarchiveKnowledge/ReactivateRule共享入口需修复时定向覆盖，不标成全部实测。与#91导读冲突丢稿不同，亦与#32资料503清pending不同；本例恢复命令成功且原回执核验通过，丢的是未提交的另一份本地草稿。\n\n【证据与边界】\nD:/Develop/Relay-Agent/apps/workbench/output/triage-defects-20261022/lifecycleReceiptDraftLoss.spec.tsx\nD:/Develop/Relay-Agent/apps/workbench/output/triage-defects-20261022/lifecycle-receipt-draft-loss.log\n2个真实路由组件样本：1通过（直接成功保稿），1红（回执成功丢稿）。两者writes=1, active=true；B formPresentAfterRecovery=false，重开标题/正文为空。\n未做真实PG/HTTP、真实断网或Windows实窗，不宣称服务端数据丢失。没有修改业务代码，未commit/push。\n\n【可执行修复提示词】\n先读取KnowledgeView submit/restoreRetired/checkReceipt与草稿导航守卫，检查共享diff。最小保存并复用命令对应的成功收尾语义，使直接成功和回执补查成功一致：恢复命令只收口原pending和对象状态，保留无关未提交表单及草稿基线；真正新建/追加版本命令的确认成功仍可清掉本次已提交草稿。不要为了避免丢稿而不核对回执、保留永久pending、禁用所有生命周期功能或移除既有草稿保护。\n验收：A/B对照都保留草稿完整字段与dirty导航保护；已有恢复成功提示和ACTIVE读回仍正确；真实新建/追加版本回执成功仍按原语义清已提交稿；错误类型/目标/ID回执不得清pending或草稿；404/503时保留原身份；重复查询不重复写；规则/资料恢复共享路径定向回归；如归档/停用会触及草稿，按既定交互说明明确处理，不能静默弃稿。\n将红探针转为正式有意义路由回归。同步受影响既有工作台说明与统一验收表；文档修改运行 node scripts/check-docs.mjs，不新建重复ADR/逐轮报告。分别说明模拟HTTP、真实HTTP/PG与Windows未验范围。</pre>",
+  "openedBuild": [
+    "trunk"
+  ],
+  "pri": 2,
+  "severity": 3
+}

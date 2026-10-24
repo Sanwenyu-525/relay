@@ -1,5 +1,5 @@
 import { useRef, type KeyboardEvent, type ReactNode } from "react";
-import { X } from "lucide-react";
+import { PanelRightClose } from "lucide-react";
 
 export type WorkDetailsTab = "PROGRESS" | "RESULTS" | "RECORDS" | "CHANGES";
 export interface WorkDetailsTabItem { readonly id: WorkDetailsTab; readonly label: string }
@@ -31,8 +31,9 @@ export default function WorkDetailsFrame({ id, testId, className, tab, onTabChan
   return <aside className={className} id={id} data-testid={testId} aria-label="工作详情">
     <div className="inspector-head">
       <div className="inspector-head-copy"><strong>工作详情</strong><small>按需查看，不影响协作</small></div>
+      {/* 收起键与顶栏「工作详情」开关同图标（PanelRightClose）：同一个面板的两个入口读作同一个动作。 */}
       <button type="button" className="inspector-close" title="收起工作详情" data-testid={`${testId}-close`} onClick={onClose}>
-        <X size={15} aria-hidden="true" /></button>
+        <PanelRightClose size={15} aria-hidden="true" /></button>
     </div>
     <div className="inspector-tabs" role="tablist" aria-label="工作详情分类">
       {tabs.map((item) => <button key={item.id} type="button" role="tab"

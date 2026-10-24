@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ChevronRight, LayoutGrid, MessageSquare, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { ChevronRight, LayoutGrid, MessageSquare, PanelRightOpen } from "lucide-react";
 import AppDialog from "../components/AppDialog";
 import AssistView, { type AssistNavigationState, type AssistTarget, type FirstMessageOwner, type FirstMessageProcess } from "./AssistView";
 import FactBar from "../components/FactBar";
@@ -823,6 +823,12 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     sessionContextRequest.current++;
     activeSessionRef.current = id;
     publishActiveConversation({ taskId: workIdRef.current, sessionId: id });
+    // 同一条会话被再次上报，意味着它的作用域事实可能刚被服务端确认——首条消息的目录
+    // 绑定就走这条：绑定命令由 AssistView 直接发（sendFirstMessage），不经过本页的
+    // confirmSessionContext。发布只按身份去重，不递计数，左栏会永远停在绑定前那份
+    // 分组：细条已写出目录名与「已归入项目」，左栏仍把这条会话列在「未绑定目录」下，
+    // 同一段讨论两个结论（2026-10-23 用户截图指认）。顶栏的会话目录读同一份计数重读。
+    if (id !== null && previous === id) bumpActiveConversationContext();
     // 同一项目内的新会话仍保留用户选定的目录；全局新对话由路由重新挂载清空。
     if (id === null) return;
     // 换会话先清除旧目录展示，但保留导航所属项目，避免退回工作区空会话并卸载原 Owner。
@@ -1075,14 +1081,18 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
   const conversationToolbarRight = <>{task !== null && <button type="button"
     className="secondary-button secondary-button--compact collab-toolbar-icon-button"
     data-testid="collab-open-task-view" title="任务视图" aria-label="任务视图"
-    onClick={() => setWorkbenchView("task")}><LayoutGrid size={18} aria-hidden="true" /></button>}<button type="button"
-    className={`secondary-button secondary-button--compact collab-inspector-toggle-btn collab-toolbar-icon-button${conversationInspectorVisible ? " active" : ""}`}
+    onClick={() => setWorkbenchView("task")}><LayoutGrid size={18} aria-hidden="true" /></button>}{
+    /* 面板弹出后，收起入口只剩面板头部那颗同图标键（2026-10-23 用户截图指令「抽屉弹出的
+       时候这里的按钮可以删除了」）：顶栏这颗与它重复，打开时整颗不渲染；收起后由
+       close*Inspector 的 rAF 把焦点交还本键，键盘路径不变。 */
+    !conversationInspectorVisible && <button type="button"
+    className="secondary-button secondary-button--compact collab-inspector-toggle-btn collab-toolbar-icon-button"
     data-testid="collab-conversation-inspector-toggle" ref={conversationInspectorToggleRef}
     title={conversationInspectorLabel} aria-label={conversationInspectorLabel}
     aria-expanded={conversationInspectorVisible} aria-controls={task === null ? "collab-conversation-inspector" : `collab-inspector-${task.id}`}
     onClick={() => { if (task === null) setConversationInspectorOpen((open) => !open); else setInspectorOpen((open) => !open); }}>
-    {conversationInspectorVisible ? <PanelRightClose size={18} aria-hidden="true" /> : <PanelRightOpen size={18} aria-hidden="true" />}
-  </button></>;
+    <PanelRightOpen size={18} aria-hidden="true" />
+  </button>}</>;
   /**
    * 「+」里的目录入口已撤出（2026-10-19 用户指认「选择目录之类的都是过度设计」）：
    * 目录的常驻 Owner 就是本页目录细条，滚入视野并触发细条自带的「更换目录」弹层
@@ -1156,9 +1166,11 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                 setDevToolsOpen(false); revealSidePanel("DOCUMENT");
                 window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-testid="collab-judgment"]')?.focus());
               }}>查看待处理 {reviews.length}</button>}
-            <button
+            {/* 与会话顶栏同一颗开关（2026-10-23 用户截图指令）：面板弹出后收起入口只剩面板
+                头部那颗同图标键，页头这颗打开时不渲染；收起后由 closeInspector 的 rAF 交还焦点。 */}
+            {!inspectorOpen && <button
               type="button"
-              className={`secondary-button secondary-button--compact collab-inspector-toggle-btn ${inspectorOpen ? "active" : ""}`}
+              className="secondary-button secondary-button--compact collab-inspector-toggle-btn"
               data-testid="collab-inspector-toggle"
               ref={inspectorToggleRef}
               title={inspectorToggleLabel(inspectorOpen)}
@@ -1166,12 +1178,12 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
               aria-expanded={inspectorOpen}
               aria-controls={`collab-inspector-${task.id}`}
               onClick={() => {
-                if (!inspectorOpen) setSidePanelRevealed(false);
-                setInspectorOpen((open) => !open);
+                setSidePanelRevealed(false);
+                setInspectorOpen(true);
               }}
             >
-              {inspectorOpen ? <PanelRightClose size={18} aria-hidden="true" /> : <PanelRightOpen size={18} aria-hidden="true" />}
-            </button>
+              <PanelRightOpen size={18} aria-hidden="true" />
+            </button>}
           </>}
           more={<>
             {delegateTarget !== null && <TaskDelegatePanel compact client={client} task={delegateTarget}

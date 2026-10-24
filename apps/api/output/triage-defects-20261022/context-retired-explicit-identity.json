@@ -1,0 +1,42 @@
+[
+  {
+    "explicit": false,
+    "knowledgeId": "7b6c777a-20b9-4f71-bdde-d9a8feb43037",
+    "knowledgeRowsBefore": 1,
+    "knowledgeRowsAfter": 0,
+    "bodyStillVisible": false,
+    "identityStillVisible": false,
+    "identityLocations": [],
+    "budget": {
+      "estimation": "ESTIMATED_UTF8_BYTES_DIV_3",
+      "limit_tokens": 8192,
+      "required_tokens": null,
+      "reserved_tokens": 1536,
+      "selected_tokens": null
+    },
+    "exclusions": []
+  },
+  {
+    "explicit": true,
+    "knowledgeId": "f958b19d-c7cd-475f-b6ae-2b97f24f8898",
+    "knowledgeRowsBefore": 1,
+    "knowledgeRowsAfter": 0,
+    "bodyStillVisible": false,
+    "identityStillVisible": true,
+    "identityLocations": [
+      {
+        "kind": "CONTRACT",
+        "source_ref": "run:ef0eea73-5d11-4b4e-8190-311a419b0c71:contract",
+        "content": "{\"acceptance_revision\":\"1\",\"context_sources\":[{\"kind\":\"KNOWLEDGE\",\"root_id\":\"f958b19d-c7cd-475f-b6ae-2b97f24f8898\",\"version\":\"1\"}],\"criteria\":[{\"criterion_id\":\"c1\",\"method\":\"HUMAN\",\"required\":true,\"statement\":\"检查通过\",\"target_spec\":{}}],\"execution_config_version\":\"default-execution-config-v1\",\"expected_outputs\":{},\"objective\":\"检查选定资料\",\"rule_refs\":[],\"rule_revision\":\"0\",\"source\":\"DELEGATE\",\"task_id\":\"1f94d13f-2617-4bc2-9d7d-26ef014fc707\",\"workflow\":{\"key\":\"markdown-deliverable-v1\",\"version\":\"1\"}}"
+      }
+    ],
+    "budget": {
+      "estimation": "ESTIMATED_UTF8_BYTES_DIV_3",
+      "limit_tokens": 8192,
+      "required_tokens": null,
+      "reserved_tokens": 1536,
+      "selected_tokens": null
+    },
+    "exclusions": []
+  }
+]

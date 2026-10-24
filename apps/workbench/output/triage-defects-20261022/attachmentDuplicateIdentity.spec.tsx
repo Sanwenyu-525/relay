@@ -1,0 +1,35 @@
+import {act} from "react";
+import {afterEach,expect,it,vi} from "vitest";
+import {activateRelayConnection,resetRelayConnectionForTest} from "../../src/lib/relayConnection";
+import {flush,mountWorkbench} from "../../tests/mountApp";
+let unmount:(()=>void)|null=null;
+const createDescriptor=Object.getOwnPropertyDescriptor(URL,'createObjectURL'),revokeDescriptor=Object.getOwnPropertyDescriptor(URL,'revokeObjectURL');
+afterEach(()=>{unmount?.();unmount=null;resetRelayConnectionForTest();vi.unstubAllGlobals();for(const [name,descriptor] of [['createObjectURL',createDescriptor],['revokeObjectURL',revokeDescriptor]] as const){if(descriptor)Object.defineProperty(URL,name,descriptor);else Reflect.deleteProperty(URL,name);}});
+const wid='11111111-1111-4111-8111-111111111111',pid='22222222-2222-4222-8222-222222222222',sid='33333333-3333-4333-8333-333333333333';
+const json=(body:unknown)=>new Response(JSON.stringify(body),{status:200,headers:{'content-type':'application/json'}});
+async function paste(target:Element,file:File){const event=new Event('paste',{bubbles:true,cancelable:true});Object.defineProperty(event,'clipboardData',{value:{items:[{kind:'file',type:file.type,getAsFile:()=>file}],files:[file],types:['Files']}});await act(async()=>{target.dispatchEvent(event);});await flush();}
+it.each([true,false])('两批图片元数据碰撞=%s时移除一项只能移除该项',async(collision)=>{
+ let previews=0;const revoked:string[]=[];
+ Object.defineProperty(URL,'createObjectURL',{configurable:true,value:vi.fn(()=>`blob:probe-${++previews}`)});
+ Object.defineProperty(URL,'revokeObjectURL',{configurable:true,value:vi.fn((url:string)=>revoked.push(url))});
+ const session={id:sid,workspace_id:wid,project_id:pid,task_id:null,title:'attachment probe',status:'ACTIVE',revision:'1',created_at:'2026-10-23T00:00:00Z',updated_at:'2026-10-23T00:00:00Z'};
+ vi.stubGlobal('fetch',vi.fn(async(input:RequestInfo|URL)=>{const p=new URL(String(input)).pathname;
+  if(p.endsWith(`/projects/${pid}`))return json({id:pid,title:'attachment project',project_type:'GENERAL',revision:'1',state_revision:'1',archived_at:null});
+  if(p.endsWith('/assist-sessions'))return json({items:[session]});
+  if(p.endsWith(`/assist-sessions/${sid}`))return json(session);
+  return json({items:[],next_cursor:null});
+ }));
+ activateRelayConnection({baseUrl:'http://127.0.0.1:8787',workspaceId:wid,bearerToken:'test-token'});
+ const mounted=await mountWorkbench(`/projects/${pid}?skill=assist`);unmount=mounted.unmount;
+ const draft=mounted.wrapper.get('[data-testid="assist-draft"]').element!;
+ await paste(draft,new File([new Uint8Array([1,2,3])],'image.png',{type:'image/png',lastModified:123456}));
+ await paste(draft,new File([new Uint8Array([4,5,6])],collision?'image.png':'other.png',{type:'image/png',lastModified:123456}));
+ const before=mounted.wrapper.findAll('.composer-attachment').length;
+ expect(before).toBe(2);
+ const buttons=mounted.wrapper.findAll('.composer-attachment-remove');
+ const keys=buttons.map(b=>b.attributes('data-testid'));
+ await buttons[0]!.trigger('click');await flush();
+ const after=mounted.wrapper.findAll('.composer-attachment').length;
+ console.log('TRIAGE_ATTACHMENT_DUPLICATE_IDENTITY',JSON.stringify({collision,before,after,keys,previews,revoked:[...revoked]}));
+ expect(after,'different staged attachment instances must not share a removal identity based only on file metadata').toBe(1);
+});

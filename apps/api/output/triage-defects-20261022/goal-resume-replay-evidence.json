@@ -1,0 +1,65 @@
+{
+  "failedMessageCode": "MODEL_BUDGET_EXHAUSTED",
+  "firstStatus": 200,
+  "firstBody": {
+    "command_id": "0f707133-787e-45e3-9c88-f18223e00079",
+    "committed_at": "2026-10-23T05:46:11.755Z",
+    "result": {
+      "goal": {
+        "goal_id": "e6591f36-e3ec-483b-849c-49fcc86e964c",
+        "session_id": "551e6586-9a25-4660-a210-01165804f449",
+        "objective": "完成说明",
+        "status": "ACTIVE",
+        "current_step": null,
+        "progress": null,
+        "stop_reason": null,
+        "criteria": [],
+        "steps": [],
+        "round_count": 1,
+        "no_progress_rounds": 0,
+        "plan_version_id": null,
+        "plan_version": null,
+        "last_round_at": "2026-10-23T05:46:11.735Z",
+        "actions": {
+          "pause": true,
+          "cancel": true,
+          "resume": false,
+          "confirm_completion": false
+        },
+        "revision": "3",
+        "created_at": "2026-10-23T05:46:11.670Z",
+        "updated_at": "2026-10-23T05:46:11.755Z"
+      }
+    },
+    "links": {
+      "resource": "/api/v1/workspaces/fa916cb0-a58a-4d14-a143-e44e59798c03/"
+    }
+  },
+  "replayStatus": 409,
+  "replayBody": {
+    "type": "/problems/command-id-reused",
+    "title": "command_id 已被不同内容使用",
+    "status": 409,
+    "detail": "同一 command_id 在同一作用域下已提交过不同内容；修正内容必须换 command_id。",
+    "instance": "/requests/req-220686b4-0e7c-47bd-9026-7b004c3a9e0b",
+    "code": "COMMAND_ID_REUSED",
+    "request_id": "req-220686b4-0e7c-47bd-9026-7b004c3a9e0b",
+    "retryable": false,
+    "retry_action": "NONE",
+    "field_errors": [
+      {
+        "field": "command_id",
+        "message": "已被使用，必须为修正后的内容换新 ID"
+      }
+    ],
+    "command_id": "0f707133-787e-45e3-9c88-f18223e00079"
+  },
+  "grantBefore": {
+    "calls": 1,
+    "tokens": 1
+  },
+  "grantAfter": {
+    "calls": 1,
+    "tokens": 1
+  }
+}

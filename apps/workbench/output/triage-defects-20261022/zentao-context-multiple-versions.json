@@ -1,0 +1,10 @@
+{
+  "pri": 2,
+  "title": "[Relay] 同一资料两版均被执行契约接受，Context构建却按根去重静默丢掉后一版",
+  "type": "codeerror",
+  "severity": 3,
+  "steps": "<pre>【现象】Delegate接受同一Knowledge根的两个不同确切版本并完整冻结到execution_contracts.context_sources，但Context Builder按kind+root_id去重，静默丢弃第二版，exclusions也为空。输入顺序v1/v2只提供v1正文，v2/v1只提供v2正文。并非预算不足或来源不可读，比较两版的输入意图被丢失。\n\n【有效真实PG复现】apps/api/output/triage-defects-20261022/triage-context-multiple-versions.integration.test.js（同名.ts仅枚举），证据context-multiple-versions.json。真实隔离PG18.6+131迁移+graph；正常HTTP新建Project、Knowledge v1和追加v2、另一个资料根。正常生产createTask/markTaskReady/delegateTask和buildRunContext，不手插业务状态。\n3组对照：\n- 不同根A v1、B v1：contract冻结2条，实际EXPLICIT_SELECTION正文2条，exclusions=[]。\n- 同根A v1、A v2：contract冻结2条，实际只有A v1正文，A v2无正文也无排除记录。\n- 同根A v2、A v1：contract冻结2条，实际只有A v2正文，A v1无正文也无排除记录。\n构建均READY；budget limit100000、reserved1536、selected约1513至1656，远未触预算边界。原文为不同独立标记，验证是真实内容选择而不只ID计数。红断言实际来源1条而预期2条。三个Owner源码与dist同选项转译逐字一致；SkipBuild不是全量构建通过。PG停止exit0、临时目录已清理。\n此证据覆盖真实数据库应用链与实际Context Builder产物，未运行生成Worker/模型请求/Windows界面；不声称模型实际作出了错误比较。Context contract仍含两条引用，遗漏的是其中一份可读正文，不能说整个版本身份丢失。\n\n【根因与契约】delegate-task.resolveExplicitContextSources按kind:root_id:version判重，允许两个不同不可变版本；workflow.readContextSources保留它们。context-builder显式循环却按kind:root_id判断seen并continue，排在后的不同版本甚至没调用loadRelevant或写exclusions。根级去重适用于防自动召回重复根，不应与显式确切版本的准入语义混用。现有context.integration P12只测同根一个固定版本，未覆盖两版并选。\n\n【可直接执行修复提示词】\n先读CODEX_NEXT_STEP、Context与显式来源契约、Delegate/执行契约解析、context-builder及P12测试，保护共享改动。先复现再最小修复：显式来源身份按确切kind/root/version核对，已受理不同版本应分别进入预算选择与正文加载；相同版本真正重复仍可去重。自动检索根级防重复与显式版本级去重职责清晰，不能因用户选旧版又自动插当前版。若产品明确只允许每根一个版本，应在受理前类型化拒绝且说明限制，不能接受冻结2条再静默漏正文，不擅自增加比较产品功能。\n验收：同根v1/v2及反序、完全重复同版、不同kind相同根值、多个根、10条边界；不可读/超预算分别有确切版本排除说明；固定旧版不自动换新；自动召回不重复显式版本且保留原最小必要原则；两版正文各自hash/range/版本正确，manifest可追溯。真实PG与必要HTTP/生成输入证据分层，不把Builder探针当真实Provider验收。\n只同步受影响已有显式来源契约、测试计划与统一验收表，文档改动跑node scripts/check-docs.mjs。不commit/push、不改生产数据，不新增无关上下文框架。</pre>",
+  "openedBuild": [
+    "trunk"
+  ]
+}

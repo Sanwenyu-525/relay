@@ -1,0 +1,31 @@
+{
+  "firstReviewId": "ff163226-cd87-4fcd-a381-d22226557c2d",
+  "afterReviewId": "ff163226-cd87-4fcd-a381-d22226557c2d",
+  "afterStatus": "APPLICABLE",
+  "reused": true,
+  "evidenceCount": 100,
+  "latestTaskId": "b7390cbb-abc9-4de9-911c-d081381e5268",
+  "latestIncluded": false,
+  "latestCompletion": {
+    "taskId": "b7390cbb-abc9-4de9-911c-d081381e5268",
+    "task_id": "b7390cbb-abc9-4de9-911c-d081381e5268",
+    "status": "DONE",
+    "revision": "3",
+    "acceptance_revision": "1",
+    "completion_id": "febfe6db-c449-4343-b7ec-1544eb8d70c6",
+    "human_acceptance_id": "af79371e-7a8d-4878-8872-3825338fe54a",
+    "artifact_version_ids": [],
+    "state_revision": "101"
+  },
+  "responseKeys": [
+    "review_id",
+    "project_id",
+    "status",
+    "fingerprint",
+    "reused",
+    "changed_dimensions",
+    "delta",
+    "evidence",
+    "created_at"
+  ]
+}

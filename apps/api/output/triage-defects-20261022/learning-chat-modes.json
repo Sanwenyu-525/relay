@@ -1,0 +1,173 @@
+[
+  {
+    "conversationMode": "AGENT",
+    "chatMode": "PLAN",
+    "switchHttp": 200,
+    "acceptedMessageMode": "PLAN",
+    "goalId": null,
+    "calls": 1,
+    "learningRequests": 0,
+    "planCount": 1,
+    "goal": null,
+    "rounds": [],
+    "firstMessageGoalOutcome": null
+  },
+  {
+    "conversationMode": "LEARNING",
+    "chatMode": "PLAN",
+    "switchHttp": 200,
+    "acceptedMessageMode": "PLAN",
+    "goalId": null,
+    "calls": 1,
+    "learningRequests": 1,
+    "planCount": 0,
+    "goal": null,
+    "rounds": [],
+    "firstMessageGoalOutcome": null
+  },
+  {
+    "conversationMode": "AGENT",
+    "chatMode": "GOAL",
+    "switchHttp": 200,
+    "acceptedMessageMode": "GOAL",
+    "goalId": "82ee3dd4-7a4d-47f9-903d-7b2ff33cbfc9",
+    "calls": 1,
+    "learningRequests": 0,
+    "planCount": 0,
+    "goal": {
+      "goal_id": "82ee3dd4-7a4d-47f9-903d-7b2ff33cbfc9",
+      "session_id": "845c3021-82d2-4ed4-a873-ac75712ac777",
+      "objective": "完成这次学习检查",
+      "status": "AWAITING_ACCEPTANCE",
+      "current_step": null,
+      "progress": "完成检查",
+      "stop_reason": {
+        "code": "AWAITING_ACCEPTANCE",
+        "detail": "目标已按成功条件完成自检，需要你确认后才会记作完成。",
+        "questions": [],
+        "resumable": false
+      },
+      "criteria": [
+        {
+          "key": "c1",
+          "statement": "检查完成",
+          "status": "MET",
+          "evidence": "受控检查通过",
+          "required": true
+        }
+      ],
+      "steps": [],
+      "round_count": 1,
+      "no_progress_rounds": 0,
+      "plan_version_id": null,
+      "plan_version": null,
+      "last_round_at": "2026-10-23T11:15:39.190Z",
+      "actions": {
+        "pause": false,
+        "cancel": true,
+        "resume": false,
+        "confirm_completion": true
+      },
+      "revision": "2",
+      "created_at": "2026-10-23T11:15:39.167Z",
+      "updated_at": "2026-10-23T11:15:39.198Z"
+    },
+    "rounds": [
+      {
+        "round_index": 1,
+        "outcome": "AWAITING_ACCEPTANCE",
+        "note": "成功条件都已有证据；等待你确认完成。",
+        "created_at": "2026-10-23T11:15:39.198Z"
+      }
+    ],
+    "firstMessageGoalOutcome": {
+      "goal": {
+        "state": "COMPLETE",
+        "steps": [],
+        "progress": "完成检查",
+        "questions": [],
+        "adjustment": null,
+        "current_step": null,
+        "blocked_reason": null,
+        "criteria_status": [
+          {
+            "key": "c1",
+            "status": "MET",
+            "evidence": "受控检查通过"
+          }
+        ],
+        "success_criteria": [
+          {
+            "key": "c1",
+            "required": true,
+            "statement": "检查完成"
+          }
+        ]
+      },
+      "reply": "已完成检查。"
+    }
+  },
+  {
+    "conversationMode": "LEARNING",
+    "chatMode": "GOAL",
+    "switchHttp": 200,
+    "acceptedMessageMode": "GOAL",
+    "goalId": "87c0e43e-133f-4838-8dd7-7ea332c56d04",
+    "calls": 3,
+    "learningRequests": 3,
+    "planCount": 0,
+    "goal": {
+      "goal_id": "87c0e43e-133f-4838-8dd7-7ea332c56d04",
+      "session_id": "e38950d2-eb98-4e82-95b3-07b7530a66eb",
+      "objective": "完成这次学习检查",
+      "status": "WAITING_USER",
+      "current_step": null,
+      "progress": "",
+      "stop_reason": {
+        "code": "NO_PROGRESS",
+        "detail": "连续 3 轮没有可核对的进展，先停下来等你决定。",
+        "questions": [
+          "接下来希望它先做哪一步？或需要改变成功条件吗？"
+        ],
+        "resumable": true
+      },
+      "criteria": [],
+      "steps": [],
+      "round_count": 3,
+      "no_progress_rounds": 3,
+      "plan_version_id": null,
+      "plan_version": null,
+      "last_round_at": "2026-10-23T11:15:39.289Z",
+      "actions": {
+        "pause": true,
+        "cancel": true,
+        "resume": true,
+        "confirm_completion": false
+      },
+      "revision": "8",
+      "created_at": "2026-10-23T11:15:39.230Z",
+      "updated_at": "2026-10-23T11:15:39.293Z"
+    },
+    "rounds": [
+      {
+        "round_index": 3,
+        "outcome": "NO_STRUCTURE",
+        "note": "这一轮没有给出结构化进展，按正文继续下一轮。",
+        "created_at": "2026-10-23T11:15:39.293Z"
+      },
+      {
+        "round_index": 2,
+        "outcome": "NO_STRUCTURE",
+        "note": "这一轮没有给出结构化进展，按正文继续下一轮。",
+        "created_at": "2026-10-23T11:15:39.272Z"
+      },
+      {
+        "round_index": 1,
+        "outcome": "NO_STRUCTURE",
+        "note": "这一轮没有给出结构化进展，按正文继续下一轮。",
+        "created_at": "2026-10-23T11:15:39.252Z"
+      }
+    ],
+    "firstMessageGoalOutcome": null
+  }
+]

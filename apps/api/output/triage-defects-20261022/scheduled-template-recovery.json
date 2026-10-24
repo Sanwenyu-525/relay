@@ -1,0 +1,33 @@
+[
+  {
+    "changed": false,
+    "generationBefore": "1",
+    "generationAfter": "1",
+    "createCommandId": "90d8e278-79d1-4ca5-9c20-2ed635aa6739",
+    "taskId": "0dde1d24-2475-4cc8-a791-1bae7d60ec65",
+    "taskStatus": "IN_PROGRESS",
+    "occurrenceStatus": "DISPATCHED",
+    "reason": null,
+    "runId": "a12a156d-3a64-4e1d-9eb3-3106a60a1363",
+    "originalTaskStillExists": true,
+    "runsStarted": 1
+  },
+  {
+    "changed": true,
+    "editRevision": "2",
+    "generationBefore": "1",
+    "generationAfter": "1",
+    "createCommandId": "ae961d8f-cb9c-41a2-8867-dddb96635b9e",
+    "taskId": "72acb2b5-530b-4b04-b3e1-0471af71c7ba",
+    "taskStatus": "INBOX",
+    "occurrenceStatus": "BLOCKED",
+    "reason": "CommandIdReusedError",
+    "runId": null,
+    "retry": {
+      "status": "BLOCKED",
+      "reason": "CommandIdReusedError"
+    },
+    "originalTaskStillExists": true,
+    "runsStarted": 0
+  }
+]

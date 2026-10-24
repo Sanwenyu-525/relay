@@ -194,6 +194,44 @@ function confirmedResult(result: Readonly<Record<string, unknown>>, pending: Pen
   return { id, revision: result.revision };
 }
 
+/**
+ * 搜索结果的唯一键：类型 + ID + 版本。
+ *
+ * 续页重试与服务端重叠返回都不能把同一条结果排两次；首屏已有的项也按这把键去重。
+ */
+function searchItemKey(item: RelaySearchItem): string {
+  return `${item.type}-${item.id}-${item.version}`;
+}
+
+/** 按唯一键去重后追加：同一条结果在已加载项里或在同一页里都只排一次。 */
+function appendSearchItems(current: readonly RelaySearchItem[], incoming: readonly RelaySearchItem[]): readonly RelaySearchItem[] {
+  const seen = new Set(current.map(searchItemKey));
+  const fresh = incoming.filter((item) => {
+    const key = searchItemKey(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return [...current, ...fresh];
+}
+
+/**
+ * 失权（401/403）与暂时不可用（5xx）是两种事实。
+ *
+ * 暂时失败保留已核实的结果与游标；失权不能保留——继续把无权查看的资料摆在界面上，
+ * 等于用缓存冒充当前仍然成立的读取结果。
+ */
+function isAccessRevoked(caught: unknown): boolean {
+  return caught instanceof RelayApiError && (caught.problem.status === 401 || caught.problem.status === 403);
+}
+
+/** 搜索失败的说法：失权说清「已清空」，其它失败按可操作原因说明，不写成「没有匹配」。 */
+function searchFailureMessage(caught: unknown): string {
+  return isAccessRevoked(caught)
+    ? "当前范围的资料已无权读取；已清空搜索结果，请核对权限后重新搜索。"
+    : describeLiveError(caught).message;
+}
+
 export default function KnowledgeView() {
   const { id } = useParams();
   const [routeQuery, setRouteQuery] = useSearchParams();
@@ -238,8 +276,21 @@ export default function KnowledgeView() {
   const [searchItems, setSearchItems] = useState<readonly RelaySearchItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
+  /** 首屏失败：整页错误态，不冒充「没有匹配」。 */
   const [searchError, setSearchError] = useState<string | null>(null);
+  /**
+   * 续页失败：只降级为局部错误。
+   *
+   * 已核实的第一页与原游标必须留着，用户才能按同一游标原地重试；
+   * 只有失权才清空（那时保留的是无权查看的资料）。
+   */
+  const [moreError, setMoreError] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const searchVersion = useRef(0);
+  /** 续页在途标记：用 ref 挡住连点，state 只负责渲染「正在加载下一页」。 */
+  const moreBusy = useRef(false);
+  /** 续页必须用与首屏相同的搜索词：游标只对那一次搜索有效。 */
+  const searchTerm = useRef("");
 
   const [formOpen, setFormOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
@@ -457,27 +508,68 @@ export default function KnowledgeView() {
     return () => { contextVersion.current++; readVersion.current++; };
   }, [client, connection.mode, projectId, routeKind, routeItem, routeSearch]);
 
-  async function runSearch(version: number, searchQuery: string, cursor?: string) {
+  /**
+   * 首屏搜索：失败就是首屏失败，走整页错误态。
+   *
+   * 首屏读不出来与「没有匹配」是两种事实：前者不能渲染成空态，后者才可以。
+   */
+  async function runSearch(version: number, searchQuery: string) {
     if (client === null || !live) return;
     setSearching(true);
     try {
       const page = await client.searchInformation({
-        q: searchQuery, projectId, types: ["KNOWLEDGE", "MEMORY", "DECISION", "RULE"], limit: 20, cursor
+        q: searchQuery, projectId, types: ["KNOWLEDGE", "MEMORY", "DECISION", "RULE"], limit: 20
       });
       if (version !== searchVersion.current) return;
-      setSearchItems((current) => cursor === undefined ? page.items : [...current, ...page.items]);
+      setSearchItems(appendSearchItems([], page.items));
       setNextCursor(page.nextCursor);
     } catch (caught) {
-      if (version === searchVersion.current) { setSearchItems([]); setNextCursor(null); setSearchError(describeLiveError(caught).message); }
+      if (version === searchVersion.current) {
+        setSearchItems([]); setNextCursor(null); setSearchError(searchFailureMessage(caught));
+      }
     } finally {
       if (version === searchVersion.current) setSearching(false);
     }
   }
 
+  /**
+   * 续页：按当前游标单独发一次请求。
+   *
+   * 失败只降级为局部错误——已核实的第一页与原游标留着，用户按同一游标重试即可；
+   * 失权才清空全部结果。迟到的响应按版本隔离丢弃，不写回当前查询。
+   */
+  async function loadMore() {
+    if (client === null || !live || nextCursor === null || searching || moreBusy.current) return;
+    const version = searchVersion.current;
+    const cursor = nextCursor;
+    moreBusy.current = true;
+    setLoadingMore(true); setMoreError(null);
+    try {
+      const page = await client.searchInformation({
+        q: searchTerm.current, projectId, types: ["KNOWLEDGE", "MEMORY", "DECISION", "RULE"], limit: 20, cursor
+      });
+      if (version !== searchVersion.current) return;
+      setSearchItems((current) => appendSearchItems(current, page.items));
+      setNextCursor(page.nextCursor);
+    } catch (caught) {
+      if (version !== searchVersion.current) return;
+      if (isAccessRevoked(caught)) {
+        setSearchItems([]); setNextCursor(null); setMoreError(null); setSearchError(searchFailureMessage(caught));
+        return;
+      }
+      setMoreError(describeLiveError(caught).message);
+    } finally {
+      if (version === searchVersion.current) { moreBusy.current = false; setLoadingMore(false); }
+    }
+  }
+
   useEffect(() => {
     const version = ++searchVersion.current;
-    setSearchItems([]); setNextCursor(null); setSearchError(null);
+    // 换关键词 / 换项目 / 换连接都从这里重置：旧结果不留、旧游标不留，旧请求的迟到响应也不写回。
+    setSearchItems([]); setNextCursor(null); setSearchError(null); setMoreError(null);
+    moreBusy.current = false; setLoadingMore(false);
     const trimmed = query.trim();
+    searchTerm.current = trimmed;
     if (!live || trimmed === "") { setSearching(false); return; }
     if (trimmed.length > 200) { setSearchError("搜索词不能超过 200 个字符。"); setSearching(false); return; }
     setSearching(true);
@@ -1071,14 +1163,16 @@ export default function KnowledgeView() {
           <input id="knowledge-search" value={query} onChange={(event) => setQuery(event.target.value)} data-testid="knowledge-search" type="search" maxLength={200} autoComplete="off" />
         </label>
         {searching && <p role="status">正在搜索…</p>}
-        {searchError && <p className="action-error" role="alert">{searchError}</p>}
+        {searchError && <p className="action-error" role="alert" data-testid="knowledge-search-error">{searchError}</p>}
+        {/* 续页失败与「没有匹配」是两种状态：局部错误贴着已有结果说，不改写已核实的第一页。 */}
+        {moreError && <p className="action-error" role="alert" data-testid="knowledge-search-more-error">续页失败：{moreError}；已保留前面加载的结果，可按同一游标重试。</p>}
         {searchItems.length > 0 ? <ul className="knowledge-search-list">{searchItems.map((item) =>
           <li key={`${item.type}-${item.id}-${item.version}`}><button type="button" className="knowledge-result" disabled={pendingCommand !== null} onClick={() => openSearchItem(item)}>
             <strong>{item.title}</strong> · {kinds.find((k) => k.kind === item.type)?.noun ?? item.type} v{item.version} · {statusLabel(item.status)}
             <span>{item.snippet}</span><small>匹配：{item.matchedFields.join("、")} · 来源 <code className="hash-code">{item.sourceRef}</code></small>
           </button></li>)}</ul> : query.trim() && !searching && !searchError && <p className="helper-text" data-testid="knowledge-search-empty">没有匹配「{query.trim()}」的当前有效资料。试试更短的关键词或切换资料类型；这只说明搜索没有结果，不代表当前范围没有{currentNoun}。</p>}
-        {nextCursor && <button type="button" className="secondary-button" data-testid="knowledge-more" disabled={searching}
-          onClick={() => { void runSearch(searchVersion.current, query.trim(), nextCursor); }}>加载下一页</button>}
+        {nextCursor && <button type="button" className="secondary-button" data-testid="knowledge-more" disabled={searching || loadingMore}
+          onClick={() => { void loadMore(); }}>{loadingMore ? "正在加载下一页" : moreError ? "重试加载下一页" : "加载下一页"}</button>}
       </section>
       </details>
 

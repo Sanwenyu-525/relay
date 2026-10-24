@@ -1007,8 +1007,11 @@ svg {
   z-index: var(--relay-zIndex-sticky);
   display: grid;
   gap: var(--relay-space-1);
-  margin: var(--relay-space-1) var(--relay-space-2) var(--relay-space-2);
+  /* 上下留白走内边距而不是外边距：sticky 的 `top: 0` 以 border-box 顶边对齐滚动容器顶边，
+     若用 margin-top，那一档会被 sticky 位移吃进去，操作栏会向上盖住「工作区（目录）」段标题
+     （实测 border-box 落在容器顶边上方 4px）。用 padding 时间距留在盒内，贴顶位置才精确。 */
   padding: var(--relay-space-2);
+  margin-inline: var(--relay-space-2);
   background: var(--relay-color-bg-subtle);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-control);

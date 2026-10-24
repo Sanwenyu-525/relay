@@ -306,6 +306,36 @@ test.describe("聊天消息时间线导航", () => {
     expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid"))).toBe("chat-timeline-node-u-3");
   });
 
+  test("方向键在刻度间移动焦点并带上预览，末条回绕且导航轨真实滚动到位", async ({ page }) => {
+    // 30 轮：常驻轨自身有滚动，才能核对焦点落点被真实滚进可视区（jsdom 不验证这一层）。
+    await openChat(page, { rounds: 30 });
+    const bodyTop = await transcript(page).evaluate((element) => element.scrollTop);
+    await node(page, "u-3").focus();
+    await expect(page.getByTestId("chat-timeline-preview")).toBeVisible();
+    // 向下：焦点落到下一条，其 focus 行为自带预览；正文不被动
+    await page.keyboard.press("ArrowDown");
+    expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid")))
+      .toBe("chat-timeline-node-u-4");
+    await expect(page.getByTestId("chat-timeline-preview-title"))
+      .toHaveText("第 4 个问题：请说明这一轮的验收依据与基线口径。");
+    expect(await transcript(page).evaluate((element) => element.scrollTop)).toBe(bodyTop);
+    // 向上回到上一条
+    await page.keyboard.press("ArrowUp");
+    expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid")))
+      .toBe("chat-timeline-node-u-3");
+    // End 直达末条：导航轨自己滚动把焦点项带进可视区，与横向页签的两端循环一致
+    await page.keyboard.press("End");
+    expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid")))
+      .toBe("chat-timeline-node-u-30");
+    await expect(node(page, "u-30")).toBeInViewport();
+    expect(await rail(page).evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    expect(await transcript(page).evaluate((element) => element.scrollTop)).toBe(bodyTop);
+    // 末条再向下回绕到首条
+    await page.keyboard.press("ArrowDown");
+    expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid")))
+      .toBe("chat-timeline-node-u-1");
+  });
+
   test("导航与预览零业务写入、零模型调用，未发送草稿保留", async ({ page }) => {
     await openChat(page);
     const draft = page.getByTestId("assist-draft");

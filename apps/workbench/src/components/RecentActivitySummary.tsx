@@ -33,13 +33,17 @@ function primaryRef(item: RelayActivityItem): { readonly target: string; readonl
 }
 
 export function RecentActivitySummary({ client }: { client: RelayApiClient }) {
-  // 只取 4 条：两列排布正好 2×2，把纵向空间还给欢迎页的 logo 与快捷语；其余走「查看全部」。
   /**
    * 高度恒定（2026-10-20 用户截图指认「新建会话按钮页面也会抖一下」）：这个区块在新对话
-   * 欢迎屏里位于输入卡正上方，旧实现加载中只有一行「加载中…」，4 条动态到达后长成两列列表，
-   * 把细条与输入卡推着下移——用户读成页面抖一下。现在加载中即渲染与真实行同构的 2×2 骨架，
+   * 欢迎屏里位于输入卡正上方，旧实现加载中只有一行「加载中…」，4 条动态到达后长成列表，
+   * 把细条与输入卡推着下移——用户读成页面抖一下。现在加载中即渲染与真实行同构的骨架，
    * 数据到达原位替换、行数不足补等格占位，空态与错误态用居中覆层盖住骨架只换文案：
    * 三种状态同高，输入卡不再移动。
+   *
+   * 2026-10-20 第五轮：改单列（见 CSS）后 filler 从「补齐 2×2 网格」变成「补齐到同一行数」，
+   * 语义不变——仍是等格占位，不是动态内容。它没有文字、没有事件类型、aria-hidden，
+   * 读屏与视觉都读不出「又一条动态」；真实动态重复的问题在数据与标签两侧修
+   * （activity 标签映射补满 + 列表按 id 去重），不靠藏 filler 掩盖。
    */
   const { items, loading, error, stale, refresh } = useActivities(client, {}, 4);
   const hasItems = items.length > 0;

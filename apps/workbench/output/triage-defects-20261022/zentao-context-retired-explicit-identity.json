@@ -1,0 +1,10 @@
+{
+  "severity": 3,
+  "steps": "<pre>【现象与契约】HTTP10.13明确历史Context读取每次复核归档Knowledge等来源，受限来源从sources/exclusions移除，不暴露其ID、名称、正文或数量。实际归档的显式来源虽然独立条目和正文已过滤，其root_id/version仍在返回的CONTRACT.content内。不是整个过滤失效，也未发现正文残留。\n\n【真实PG/HTTP证据】apps/api/output/triage-defects-20261022/triage-context-retired-explicit-identity.integration.test.js（同名.ts仅枚举），结构化证据context-retired-explicit-identity.json。真实临时PG18.6、131迁移、graph成功；正常HTTP建Project/Knowledge、归档Knowledge及查询Run Context Manifest；生产createTask/Ready/Delegate和advanceRunStep只执行BUILD_CONTEXT，保存真实manifest，不手写快照。\n- 自动召回对照：构建前Knowledge有效且标题匹配。历史HTTP读取归档前含正文/身份，归档后KNOWLEDGE行0、正文标记不再出现、JSON中也不再有root_id。预算required_tokens/selected_tokens均null。\n- 显式来源样本：Delegate contextSources=[{kind:KNOWLEDGE,root_id:K,version:1}]，其余同流程。归档后KNOWLEDGE行0、正文标记不可见、exclusions为空、预算敏感计数置null，但整个HTTP返回JSON仍含K；定位在sources[kind=CONTRACT].content内的context_sources数组，保留kind/root_id/version。\n最终红断言是归档身份不应继续出现在HTTP结果，实际true。普通过滤正对照均通过，非前置/构建失败。context-queries/context-builder源码与dist同选项转译逐字一致；SkipBuild不是全量构建通过。未运行DRAFT、Provider/工具或Windows；本单不声称正文泄漏、跨工作区突破或真实多用户攻击。清理见runner。\n\n【根因】readRunContextManifest逐条sourceVisible过滤；KNOWLEDGE/MEMORY/DECISION走当前可见性检查，CONTRACT仅ruleRefsVisible。构建时CONTRACT.content=整个冻结execution contract的canonical JSON，其中含显式context_sources。过滤顶层来源后没有覆盖嵌套引用，因此显式来源新增的身份绕过早期P11按自动召回编写的脱敏测试。与#152“构建时丢掉某版正文”不同，本单是历史读取脱敏路径。\n\n【可直接执行修复提示词】\n先读CODEX_NEXT_STEP、HTTP10.13、Context读取/构建、执行契约和已有P11归档/过期测试，保护共享改动。先复现再最小修复：历史读取的可见性需覆盖CONTRACT内嵌显式来源及其它相关引用。维护不可变原manifest、hash、source fragment hash/range语义；不能直接删改存储快照，也不能改了返回content却仍声称原sha256/range完全对应。可按既有不可见Rule策略整体隐藏受限CONTRACT，或采用明确可追溯的脱敏投影，选择最小符合现行契约方案。不能关闭全部历史读取、删审计或仅做UI文本替换。\n验收：显式Knowledge归档、Memory自然到期/停用、Decision被替代；自动召回对照；可见来源正常；source/exclusion/CONTRACT.content以及嵌套对象遍历均无失效ID/正文，预算与计数不暴露；清洗后hash/range/manifest身份语义一致；跨workspace404保持。真实PG/HTTP原始响应断言，前端与Windows如未跑单列。别把单用户归档过滤缺陷扩大成未经验证的鉴权攻击。\n仅同步受影响已有只读脱敏契约、测试计划与统一验收表；文档修改跑node scripts/check-docs.mjs。不commit/push、不改生产历史数据或权限。</pre>",
+  "openedBuild": [
+    "trunk"
+  ],
+  "pri": 2,
+  "type": "codeerror",
+  "title": "[Relay] 历史Context已隐藏归档来源正文，CONTRACT内仍暴露显式来源身份"
+}

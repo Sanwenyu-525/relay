@@ -10,7 +10,8 @@ import { flush, mountReact } from "./mountApp";
  * 没有 HTTP 读入口，界面上因此只剩三点动画。这里验的是这个入口能否把已落账的轮次如实摆出来，
  * 以及四种不能含糊的口径：
  *   * 在途才轮询，终态不预取（一整段历史不该为每条消息各发一次请求）。
- *   * 没有轮次要说成「这条回复没调用工具」，不能显示成读取失败，也不能显示成空壳。
+ *   * 没有轮次就什么都不摆（2026-10-23 用户截图指令删掉解释段与脚注）：不显示成读取失败，
+ *     也不补一句「没有调用工具」的说明——摘要行与在途三点已经足够。
  *   * 未结算／未知不写成已执行；被拒的那一行要带服务端的原因。
  *   * 用户消息没有这个入口。
  */
@@ -125,14 +126,18 @@ describe("终态与缺口", () => {
     expect(details.text()).toContain("OUTSIDE_SCOPE · 目标不在本次绑定的目录内。");
   });
 
-  it("没有轮次说明这条没调用工具，不显示失败也不留空壳", async () => {
+  it("没有轮次就什么都不摆：不显示失败，也不补解释段", async () => {
     stub(() => json(trace([], "COMPLETED")));
     const { wrapper } = await mount(message({ status: "COMPLETED" }), 2_000);
     await wrapper.get("summary").trigger("click");
     await flush(20);
-    expect(wrapper.get(`[data-testid^="session-round-trace-empty-"]`).text())
-      .toContain("没有调用任何工具");
+    const details = wrapper.get(`[data-testid="session-round-trace-${messageId}"]`);
+    // 解释段与脚注已按用户指令删除：没有轮次时面板里不该出现任何说明文字。
+    expect(details.text()).not.toContain("没有调用任何工具");
+    expect(details.text()).not.toContain("已落账");
+    expect(details.text()).not.toContain("read_file");
     expect(wrapper.find('[data-testid^="session-round-trace-error-"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid^="session-round-trace-list-"]').exists()).toBe(false);
   });
 
   it("读取失败说明确切原因并给重新读取，点一次再读一次", async () => {

@@ -64,6 +64,10 @@ interface Routes {
   open?: (body: Record<string, unknown>) => Response;
   messages?: () => Response;
   sessions?: () => Response;
+  /** GET 单条会话（`?include_context=true`）：只在用例显式提供时命中，缺省维持原「未预期请求」行为。 */
+  sessionRead?: () => Response;
+  /** 目录绑定命令落账时调用：用例据此让随后的会话读回带上绑定事实（绑定前／后两种投影）。 */
+  onDirectoryBound?: () => void;
   /** 受控故障：POST 消息在服务端已提交后丢响应。传数字则只丢前 n 次。 */
   loseMessageResponse?: boolean | number;
   /** GET /commands/:id —— 只按原 command_id 返回回执。 */
@@ -82,6 +86,7 @@ function router(routes: Routes, posts: { path: string; body: unknown }[]) {
       posts.push({ path, body });
       if (path === `${prefix}/assist-sessions/${sessionId}/working-directory`) {
         if (routes.loseDirectoryResponse && directoryAttempts++ === 0) throw new TypeError("directory response lost");
+        routes.onDirectoryBound?.();
         return json({
         command_id: body.command_id, committed_at: "2026-10-16T00:00:00Z",
         result: { session_id: sessionId, working_resource_id: body.resource_id, revision: "2" },
@@ -132,6 +137,7 @@ function router(routes: Routes, posts: { path: string; body: unknown }[]) {
       phase_key: "GENERAL", next_action_task_id: null, created_at: "2026-10-02T00:00:00Z",
       updated_at: "2026-10-02T00:00:00Z" }], next_cursor: null });
     if (path === `${prefix}/assist-sessions`) return routes.sessions?.() ?? json({ items: [] });
+    if (path === `${prefix}/assist-sessions/${sessionId}` && routes.sessionRead) return routes.sessionRead();
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return routes.messages?.() ?? json({ items: [{
       id: "msg-1", session_id: sessionId, seq: "1", role: "USER", status: "COMPLETED", intent: "DISCUSS",
       content: "帮我把这个文件的内容改成 after", sources: [], cancel_requested: false,
@@ -231,6 +237,54 @@ describe("文件夹入口与对话直接执行", () => {
       expect(chip.attributes("aria-label")).toContain(root);
       // 措辞修好靠的是呈现同一份事实，不是提前建会话：这一条链路仍没有建会话的 POST。
       expect(posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(0);
+    } finally { view.unmount(); }
+  });
+
+  /*
+   * 2026-10-23 用户截图「目录不匹配」：左栏把当前会话列在「未绑定目录」组下，输入卡上方
+   * 的细条却写着目录名与「已归入项目」——同一段讨论两个结论。核对服务端事实后确认
+   * working_resource_id 早已落账（USER_PICKED），错在左栏的读数停在「建会话后、绑定前」
+   * 那一瞬：绑定命令由 AssistView 直接发，成功后同一会话身份的再次上报被发布去重，
+   * 再没人叫左栏重读。这里锁两件事：绑定确认后左栏按服务端事实重新分组；顶栏的会话
+   * 目录也不再说「未绑定目录」。修法不提前建会话、不动服务端契约。
+   */
+  it("首条消息绑定目录后，左栏与顶栏按服务端事实重分组", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    // 绑定前／后两种会话投影：绑定前上下文里没有目录（working_directory 为 null），
+    // 这正是左栏当年卡住的那一份读数——与服务端 listSessionContexts 的形状一致。
+    let directoryBound = false;
+    const sessionProjection = () => ({ id: sessionId, workspace_id: workspaceId, project_id: projectId,
+      task_id: null, title: "关于MyProject", status: "ACTIVE", revision: directoryBound ? "2" : "1",
+      working_resource_id: directoryBound ? "res-1" : null,
+      context: { project_goals: [], working_directory: directoryBound
+        ? { resource_id: "res-1", canonical_root: root, source: "USER_PICKED" } : null },
+      created_at: "2026-10-02T00:00:00Z", updated_at: "2026-10-02T00:00:00Z" });
+    vi.stubGlobal("fetch",router({
+      onDirectoryBound: () => { directoryBound = true; },
+      sessions: () => response({ items: [sessionProjection()] }),
+      sessionRead: () => response(sessionProjection())
+    }, posts));
+    const view = await mountWorkbench(`/agent?new=rail-scope&dir=${encodeURIComponent(root)}`);
+    try {
+      await flush(); await flush();
+      await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("读取这个目录");
+      await flush();
+      await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+      await flush(80); await flush(); await flush(80); await flush();
+      // 目录绑定随首条消息按原 command_id 落账；之后左栏必须重读这条会话。
+      expect(posts.some((post) => post.path === `${prefix}/assist-sessions/${sessionId}/working-directory`)).toBe(true);
+      expect(directoryBound).toBe(true);
+      const row = document.querySelector(`[data-testid="recent-work-${sessionId}"]`);
+      expect(row).not.toBeNull();
+      const group = Array.from(
+        document.querySelectorAll('[data-testid="recent-work-directories"] .recent-work-group'))
+        .find((element) => element.contains(row));
+      expect(group?.querySelector(".recent-work-group-title")?.textContent?.trim()).toBe("MyProject");
+      // 顶栏的会话目录读同一份事实：不再停在「未绑定目录」。
+      const chip = document.querySelector('[data-testid="collab-current-directory"]');
+      expect(chip?.textContent).toContain("MyProject");
+      expect(chip?.textContent).not.toContain("未绑定目录");
     } finally { view.unmount(); }
   });
 

@@ -313,28 +313,29 @@ test.describe("会话顶栏单行密度", () => {
     expect(look.directoryPlaceholder).toBe(false);
     expect(look.goalColor).toBe(look.muted);
     expect(look.directoryColor).toBe(look.secondary);
-    // 会话目录可见的是目录名，完整路径仍在 title 与可访问名称里（图标单独说不出是哪一个目录）。
+    // 会话目录可见的是目录名（图标单独说不出是哪一个目录）；完整路径自 2026-10-22 起由
+    // lib/pathTooltip 的悬停/聚焦浮层承担，不再挂原生 title（WebView2 的 title 提示延迟约
+    // 1 秒且样式不可控，指针扫过这一行时什么也看不到）。这里锁三件事：可见文本只有目录名、
+    // 原生 title 已不复用、可访问名称仍带完整路径；浮层本体由 pathTooltip 自己的用例负责。
     expect(look.directoryText).toBe("Relay-Agent");
-    expect(look.directoryTitle).toBe("会话目录：D:\\Develop\\Relay-Agent");
+    expect(look.directoryTitle).toBeNull();
     expect(look.directoryLabel).toBe("会话目录：D:\\Develop\\Relay-Agent");
     // 「工作详情」静止时没有底色也没有描边：顶栏不再套一圈卡片边框。
     expect(look.toggleBackground).toBe("rgba(0, 0, 0, 0)");
     expect(look.toggleBorder).toBe("rgba(0, 0, 0, 0)");
     // 键形仍停在 control 圆角这一档（shape lock：本页控件只用一套圆角尺度）。
     expect(look.toggleRadius).toBeCloseTo(look.controlRadius, 0);
-    // 展开态：底色与文字走选中色族，不再补一条 action 描边（描边留在透明档才是 chrome）。
-    // selection.text 与 action.primary 是同一个 token，所以这里锁的是「无边框」而不是「颜色必须不同」。
-    // 底色与文字都带 transition，立刻读会拿到插值中间态，因此轮询到落定值，不靠固定等待猜时长。
+    // 面板弹出即收走顶栏这颗开关（2026-10-23 用户截图指令「抽屉弹出的时候这里的按钮可以删除了」）：
+    // 收起入口只剩面板头部那颗同图标键，展开态色族因此不再属于它（selection 档只留常驻的切换讨论键）。
+    // 本用例夹具是工作区级会话（task 为 null），打开的是会话工作详情。
     await page.getByTestId("collab-conversation-inspector-toggle").click();
-    await expect(page.getByTestId("collab-conversation-inspector-toggle")).toHaveAttribute("aria-expanded", "true");
-    // 展开后提示与可访问名称翻到「收起」，图标同态换成 PanelRightClose。
-    await expect(page.getByTestId("collab-conversation-inspector-toggle")).toHaveAttribute("title", "收起工作详情");
-    await expect(page.getByTestId("collab-conversation-inspector-toggle")).toHaveAttribute("aria-label", "收起工作详情");
-    await expect.poll(() => page.evaluate(() => {
-      const toggle = document.querySelector<HTMLElement>('[data-testid="collab-conversation-inspector-toggle"]')!;
-      const style = getComputedStyle(toggle);
-      return { background: style.backgroundColor, color: style.color, border: style.borderLeftColor };
-    }), { timeout: 5_000 }).toEqual({ background: look.selectionBg, color: look.selectionText, border: "rgba(0, 0, 0, 0)" });
+    await expect(page.getByTestId("collab-conversation-inspector")).toBeVisible();
+    await expect(page.getByTestId("collab-conversation-inspector-toggle")).toHaveCount(0);
+    // 从面板头部收起后开关回来，名称翻回「展开」。
+    await page.getByTestId("collab-conversation-inspector-close").click();
+    await expect(page.getByTestId("collab-conversation-inspector")).toHaveCount(0);
+    await expect(page.getByTestId("collab-conversation-inspector-toggle")).toHaveAttribute("title", "展开工作详情");
+    await expect(page.getByTestId("collab-conversation-inspector-toggle")).toHaveAttribute("aria-label", "展开工作详情");
   });
 
   // 2026-10-17 用户指令「文字被顶栏遮盖的时候要有渐变效果」+ 接续「被未选择目录这一行遮盖时也要有」：
@@ -487,7 +488,8 @@ test.describe("会话顶栏单行密度", () => {
     expect(focus.outlineStyle).not.toBe("none");
     await page.locator(".collab-center").screenshot({ path: "results/conversation-toolbar-icons-wide.png" });
 
-    // 同一用途的开关在任务视图页头保持同形：纯图标、32×32、18px，名称按展开态切换。
+    // 同一用途的开关在任务视图页头保持同形：纯图标、32×32、18px。它只在面板收起时出现
+    // （2026-10-23 起与会话顶栏同规则），名称恒为「展开工作详情」。
     await page.getByTestId("collab-open-task-view").click();
     const headerToggle = page.getByTestId("collab-inspector-toggle");
     await expect(headerToggle).toBeVisible();
@@ -496,19 +498,24 @@ test.describe("会话顶栏单行密度", () => {
       const icon = node.querySelector("svg")?.getBoundingClientRect();
       return { text: (node as HTMLElement).innerText.trim(), width: box.width, height: box.height,
         iconWidth: icon?.width ?? null, title: node.getAttribute("title"), label: node.getAttribute("aria-label"),
-        expanded: node.getAttribute("aria-expanded") === "true" };
+        expanded: node.getAttribute("aria-expanded") };
     });
     expect(header.text).toBe("");
     expect(header.width).toBeCloseTo(look.compact, 0);
     expect(header.height).toBeCloseTo(look.compact, 0);
     expect(header.iconWidth).toBeCloseTo(18, 0);
-    expect(header.title).toBe(header.expanded ? "收起工作详情" : "展开工作详情");
+    expect(header.title).toBe("展开工作详情");
     expect(header.label).toBe(header.title);
+    expect(header.expanded).toBe("false");
+    // 打开面板后页头这颗整颗不渲染：收起入口只剩面板头部那颗同图标键。
     await headerToggle.click();
-    await expect(headerToggle).toHaveAttribute("aria-expanded", String(!header.expanded));
-    await expect(headerToggle).toHaveAttribute("title",
-      header.expanded ? "展开工作详情" : "收起工作详情");
+    await expect(page.getByTestId("collab-inspector")).toBeVisible();
+    await expect(headerToggle).toHaveCount(0);
     await page.locator(".page-head").screenshot({ path: "results/work-details-icon-task-header.png" });
+    // 从面板头部收起后它回来。
+    await page.getByTestId("collab-inspector-close").click();
+    await expect(page.getByTestId("collab-inspector")).toHaveCount(0);
+    await expect(headerToggle).toBeVisible();
   });
 
   // 用户要求宽、窄窗都检查实际渲染：窄窗里右翼图标键同排且不互相交叠、不越出顶栏，

@@ -1,0 +1,236 @@
+{
+  "archived": {
+    "knowledge_id": "ccfcdaab-7e3e-48b5-b514-3b7ec602553f",
+    "revision": "1",
+    "status": "ARCHIVED",
+    "decision_review_count": "1",
+    "decision_review_candidates_ref": "projects/1fda2fd2-7225-4608-8cc6-4f737ff89dd9/decision-reviews"
+  },
+  "afterArchive": {
+    "project_id": "1fda2fd2-7225-4608-8cc6-4f737ff89dd9",
+    "pending_count": 1,
+    "items": [
+      {
+        "id": "1362770a-ade0-4b9f-8af1-6ec55d9c8bbd",
+        "premise_id": "8009f25f-b85a-4d21-9c8e-308d5839667b",
+        "decision_revision": "0",
+        "premise_revision": "1",
+        "fingerprint": "0147b2f3b52958c961af44d0c99c607e9bb55b959ca24d5bba33a3b9d7b83fab",
+        "before_ref": {
+          "kind": "KNOWLEDGE",
+          "status": "ACTIVE",
+          "version": "1",
+          "version_id": "2f04d48b-ed9c-4832-adbe-d55c540bc54f",
+          "availability": "AVAILABLE",
+          "knowledge_id": "ccfcdaab-7e3e-48b5-b514-3b7ec602553f"
+        },
+        "after_ref": {
+          "kind": "KNOWLEDGE",
+          "status": "ARCHIVED",
+          "version": "1",
+          "version_id": "2f04d48b-ed9c-4832-adbe-d55c540bc54f",
+          "availability": "AVAILABLE",
+          "knowledge_id": "ccfcdaab-7e3e-48b5-b514-3b7ec602553f"
+        },
+        "cause_command_id": "9d5e0758-c2ce-47b2-8efb-6a84afe0e057",
+        "status": "PENDING",
+        "revision": "1",
+        "reason": null,
+        "created_at": "2026-10-23T05:24:45.162Z",
+        "resolved_at": null,
+        "decision_id": "6a561909-95d4-4c1a-b568-e60fb7d9ed32",
+        "decision_title": "continue approach",
+        "statement": "source availability is a premise",
+        "applicable": true,
+        "question": "请重新判断原决定是否仍成立。"
+      }
+    ]
+  },
+  "afterKeepPremise": {
+    "decision_id": "6a561909-95d4-4c1a-b568-e60fb7d9ed32",
+    "items": [
+      {
+        "id": "8009f25f-b85a-4d21-9c8e-308d5839667b",
+        "workspace_id": "573431f3-47c3-4aba-b69d-bc382a031a00",
+        "project_id": "1fda2fd2-7225-4608-8cc6-4f737ff89dd9",
+        "decision_id": "6a561909-95d4-4c1a-b568-e60fb7d9ed32",
+        "decision_revision": "0",
+        "statement": "source availability is a premise",
+        "knowledge_id": "ccfcdaab-7e3e-48b5-b514-3b7ec602553f",
+        "hypothesis_id": null,
+        "baseline_ref": {
+          "kind": "KNOWLEDGE",
+          "status": "ARCHIVED",
+          "version": "1",
+          "version_id": "2f04d48b-ed9c-4832-adbe-d55c540bc54f",
+          "availability": "AVAILABLE",
+          "knowledge_id": "ccfcdaab-7e3e-48b5-b514-3b7ec602553f"
+        },
+        "revision": "2",
+        "created_at": "2026-10-23T05:24:45.152Z"
+      }
+    ]
+  },
+  "restored": {
+    "knowledge_id": "ccfcdaab-7e3e-48b5-b514-3b7ec602553f",
+    "revision": "2",
+    "status": "ACTIVE"
+  },
+  "currentSource": {
+    "id": "ccfcdaab-7e3e-48b5-b514-3b7ec602553f",
+    "project_id": "1fda2fd2-7225-4608-8cc6-4f737ff89dd9",
+    "status": "ACTIVE",
+    "revision": "2",
+    "current_version": "1",
+    "created_at": "2026-10-23T05:24:45.116Z",
+    "updated_at": "2026-10-23T05:24:45.191Z",
+    "title": "premise source"
+  },
+  "afterUnarchivePremise": {
+    "decision_id": "6a561909-95d4-4c1a-b568-e60fb7d9ed32",
+    "items": [
+      {
+        "id": "8009f25f-b85a-4d21-9c8e-308d5839667b",
+        "workspace_id": "573431f3-47c3-4aba-b69d-bc382a031a00",
+        "project_id": "1fda2fd2-7225-4608-8cc6-4f737ff89dd9",
+        "decision_id": "6a561909-95d4-4c1a-b568-e60fb7d9ed32",
+        "decision_revision": "0",
+        "statement": "source availability is a premise",
+        "knowledge_id": "ccfcdaab-7e3e-48b5-b514-3b7ec602553f",
+        "hypothesis_id": null,
+        "baseline_ref": {
+          "kind": "KNOWLEDGE",
+          "status": "ARCHIVED",
+          "version": "1",
+          "version_id": "2f04d48b-ed9c-4832-adbe-d55c540bc54f",
+          "availability": "AVAILABLE",
+          "knowledge_id": "ccfcdaab-7e3e-48b5-b514-3b7ec602553f"
+        },
+        "revision": "2",
+        "created_at": "2026-10-23T05:24:45.152Z"
+      }
+    ]
+  },
+  "afterUnarchive": {
+    "project_id": "1fda2fd2-7225-4608-8cc6-4f737ff89dd9",
+    "pending_count": 0,
+    "items": [
+      {
+        "id": "1362770a-ade0-4b9f-8af1-6ec55d9c8bbd",
+        "premise_id": "8009f25f-b85a-4d21-9c8e-308d5839667b",
+        "decision_revision": "0",
+        "premise_revision": "1",
+        "fingerprint": "0147b2f3b52958c961af44d0c99c607e9bb55b959ca24d5bba33a3b9d7b83fab",
+        "before_ref": {
+          "kind": "KNOWLEDGE",
+          "status": "ACTIVE",
+          "version": "1",
+          "version_id": "2f04d48b-ed9c-4832-adbe-d55c540bc54f",
+          "availability": "AVAILABLE",
+          "knowledge_id": "ccfcdaab-7e3e-48b5-b514-3b7ec602553f"
+        },
+        "after_ref": {
+          "kind": "KNOWLEDGE",
+          "status": "ARCHIVED",
+          "version": "1",
+          "version_id": "2f04d48b-ed9c-4832-adbe-d55c540bc54f",
+          "availability": "AVAILABLE",
+          "knowledge_id": "ccfcdaab-7e3e-48b5-b514-3b7ec602553f"
+        },
+        "cause_command_id": "9d5e0758-c2ce-47b2-8efb-6a84afe0e057",
+        "status": "KEPT",
+        "revision": "2",
+        "reason": "keep decision after consciously reviewing the archived source",
+        "created_at": "2026-10-23T05:24:45.162Z",
+        "resolved_at": "2026-10-23T05:24:45.181Z",
+        "decision_id": "6a561909-95d4-4c1a-b568-e60fb7d9ed32",
+        "decision_title": "continue approach",
+        "statement": "source availability is a premise",
+        "applicable": false,
+        "question": "请重新判断原决定是否仍成立。"
+      }
+    ]
+  },
+  "updated": {
+    "knowledge_id": "ccfcdaab-7e3e-48b5-b514-3b7ec602553f",
+    "revision": "3",
+    "version": "2",
+    "status": "ACTIVE",
+    "decision_review_count": "1",
+    "decision_review_candidates_ref": "projects/1fda2fd2-7225-4608-8cc6-4f737ff89dd9/decision-reviews"
+  },
+  "afterVersion": {
+    "project_id": "1fda2fd2-7225-4608-8cc6-4f737ff89dd9",
+    "pending_count": 1,
+    "items": [
+      {
+        "id": "e7637437-133a-4368-80bf-969e524d4d8e",
+        "premise_id": "8009f25f-b85a-4d21-9c8e-308d5839667b",
+        "decision_revision": "0",
+        "premise_revision": "2",
+        "fingerprint": "299740c5dba99f531c12775d3d4dd46d0dd80448aa7d46495339fa6ba6a491b3",
+        "before_ref": {
+          "kind": "KNOWLEDGE",
+          "status": "ARCHIVED",
+          "version": "1",
+          "version_id": "2f04d48b-ed9c-4832-adbe-d55c540bc54f",
+          "availability": "AVAILABLE",
+          "knowledge_id": "ccfcdaab-7e3e-48b5-b514-3b7ec602553f"
+        },
+        "after_ref": {
+          "kind": "KNOWLEDGE",
+          "status": "ACTIVE",
+          "version": "2",
+          "version_id": "2ec2f341-ca96-4cd8-aad3-a802efe8f755",
+          "availability": "AVAILABLE",
+          "knowledge_id": "ccfcdaab-7e3e-48b5-b514-3b7ec602553f"
+        },
+        "cause_command_id": "fe42457d-5e6c-42ac-9300-39dab4a3d466",
+        "status": "PENDING",
+        "revision": "1",
+        "reason": null,
+        "created_at": "2026-10-23T05:24:45.205Z",
+        "resolved_at": null,
+        "decision_id": "6a561909-95d4-4c1a-b568-e60fb7d9ed32",
+        "decision_title": "continue approach",
+        "statement": "source availability is a premise",
+        "applicable": true,
+        "question": "请重新判断原决定是否仍成立。"
+      },
+      {
+        "id": "1362770a-ade0-4b9f-8af1-6ec55d9c8bbd",
+        "premise_id": "8009f25f-b85a-4d21-9c8e-308d5839667b",
+        "decision_revision": "0",
+        "premise_revision": "1",
+        "fingerprint": "0147b2f3b52958c961af44d0c99c607e9bb55b959ca24d5bba33a3b9d7b83fab",
+        "before_ref": {
+          "kind": "KNOWLEDGE",
+          "status": "ACTIVE",
+          "version": "1",
+          "version_id": "2f04d48b-ed9c-4832-adbe-d55c540bc54f",
+          "availability": "AVAILABLE",
+          "knowledge_id": "ccfcdaab-7e3e-48b5-b514-3b7ec602553f"
+        },
+        "after_ref": {
+          "kind": "KNOWLEDGE",
+          "status": "ARCHIVED",
+          "version": "1",
+          "version_id": "2f04d48b-ed9c-4832-adbe-d55c540bc54f",
+          "availability": "AVAILABLE",
+          "knowledge_id": "ccfcdaab-7e3e-48b5-b514-3b7ec602553f"
+        },
+        "cause_command_id": "9d5e0758-c2ce-47b2-8efb-6a84afe0e057",
+        "status": "KEPT",
+        "revision": "2",
+        "reason": "keep decision after consciously reviewing the archived source",
+        "created_at": "2026-10-23T05:24:45.162Z",
+        "resolved_at": "2026-10-23T05:24:45.181Z",
+        "decision_id": "6a561909-95d4-4c1a-b568-e60fb7d9ed32",
+        "decision_title": "continue approach",
+        "statement": "source availability is a premise",
+        "applicable": false,
+        "question": "请重新判断原决定是否仍成立。"
+      }
+    ]
+  }
+}

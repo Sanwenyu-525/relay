@@ -1,0 +1,167 @@
+[
+  {
+    "inputEvidence": null,
+    "goal": {
+      "goal_id": "6c821531-7226-478d-b8ef-c3202e25beee",
+      "session_id": "d79cb9e5-9ac5-4ae9-9587-5371abe19d90",
+      "objective": "补齐说明并验证",
+      "status": "AWAITING_ACCEPTANCE",
+      "current_step": null,
+      "progress": "完成",
+      "stop_reason": {
+        "code": "AWAITING_ACCEPTANCE",
+        "detail": "目标已按成功条件完成自检，需要你确认后才会记作完成。",
+        "questions": [],
+        "resumable": false
+      },
+      "criteria": [
+        {
+          "key": "c1",
+          "statement": "定向测试通过",
+          "status": "MET",
+          "evidence": null,
+          "required": true
+        }
+      ],
+      "steps": [],
+      "round_count": 1,
+      "no_progress_rounds": 0,
+      "plan_version_id": null,
+      "plan_version": null,
+      "last_round_at": "2026-10-23T05:53:43.614Z",
+      "actions": {
+        "pause": false,
+        "cancel": true,
+        "resume": false,
+        "confirm_completion": true
+      },
+      "revision": "2",
+      "created_at": "2026-10-23T05:53:43.555Z",
+      "updated_at": "2026-10-23T05:53:43.624Z"
+    },
+    "rounds": [
+      {
+        "round_index": 1,
+        "outcome": "AWAITING_ACCEPTANCE",
+        "note": "成功条件都已有证据；等待你确认完成。",
+        "created_at": "2026-10-23T05:53:43.624Z"
+      }
+    ],
+    "settled": {
+      "goalId": "6c821531-7226-478d-b8ef-c3202e25beee",
+      "messageId": "c06c08ce-6dab-4847-bf3f-74aba396a07f",
+      "outcome": "AWAITING_ACCEPTANCE",
+      "status": "AWAITING_ACCEPTANCE"
+    }
+  },
+  {
+    "inputEvidence": "   ",
+    "goal": {
+      "goal_id": "b83e0513-74d0-41b5-ab6e-ed42314a884d",
+      "session_id": "a4ccb980-e235-4b87-ab09-bd4637fc03b1",
+      "objective": "补齐说明并验证",
+      "status": "AWAITING_ACCEPTANCE",
+      "current_step": null,
+      "progress": "完成",
+      "stop_reason": {
+        "code": "AWAITING_ACCEPTANCE",
+        "detail": "目标已按成功条件完成自检，需要你确认后才会记作完成。",
+        "questions": [],
+        "resumable": false
+      },
+      "criteria": [
+        {
+          "key": "c1",
+          "statement": "定向测试通过",
+          "status": "MET",
+          "evidence": null,
+          "required": true
+        }
+      ],
+      "steps": [],
+      "round_count": 1,
+      "no_progress_rounds": 0,
+      "plan_version_id": null,
+      "plan_version": null,
+      "last_round_at": "2026-10-23T05:53:43.692Z",
+      "actions": {
+        "pause": false,
+        "cancel": true,
+        "resume": false,
+        "confirm_completion": true
+      },
+      "revision": "2",
+      "created_at": "2026-10-23T05:53:43.670Z",
+      "updated_at": "2026-10-23T05:53:43.696Z"
+    },
+    "rounds": [
+      {
+        "round_index": 1,
+        "outcome": "AWAITING_ACCEPTANCE",
+        "note": "成功条件都已有证据；等待你确认完成。",
+        "created_at": "2026-10-23T05:53:43.696Z"
+      }
+    ],
+    "settled": {
+      "goalId": "b83e0513-74d0-41b5-ab6e-ed42314a884d",
+      "messageId": "e7ab22c3-ec7c-4698-ae60-394285da749c",
+      "outcome": "AWAITING_ACCEPTANCE",
+      "status": "AWAITING_ACCEPTANCE"
+    }
+  },
+  {
+    "inputEvidence": "已运行定向测试，结果通过",
+    "goal": {
+      "goal_id": "ef164dea-4b96-4ea3-8a69-f73de836e2dc",
+      "session_id": "10c4b3cf-36b5-4648-9091-63a5035e6556",
+      "objective": "补齐说明并验证",
+      "status": "AWAITING_ACCEPTANCE",
+      "current_step": null,
+      "progress": "完成",
+      "stop_reason": {
+        "code": "AWAITING_ACCEPTANCE",
+        "detail": "目标已按成功条件完成自检，需要你确认后才会记作完成。",
+        "questions": [],
+        "resumable": false
+      },
+      "criteria": [
+        {
+          "key": "c1",
+          "statement": "定向测试通过",
+          "status": "MET",
+          "evidence": "已运行定向测试，结果通过",
+          "required": true
+        }
+      ],
+      "steps": [],
+      "round_count": 1,
+      "no_progress_rounds": 0,
+      "plan_version_id": null,
+      "plan_version": null,
+      "last_round_at": "2026-10-23T05:53:43.724Z",
+      "actions": {
+        "pause": false,
+        "cancel": true,
+        "resume": false,
+        "confirm_completion": true
+      },
+      "revision": "2",
+      "created_at": "2026-10-23T05:53:43.705Z",
+      "updated_at": "2026-10-23T05:53:43.729Z"
+    },
+    "rounds": [
+      {
+        "round_index": 1,
+        "outcome": "AWAITING_ACCEPTANCE",
+        "note": "成功条件都已有证据；等待你确认完成。",
+        "created_at": "2026-10-23T05:53:43.729Z"
+      }
+    ],
+    "settled": {
+      "goalId": "ef164dea-4b96-4ea3-8a69-f73de836e2dc",
+      "messageId": "9295f651-8a80-4e62-9e86-3c5adcb3ffa4",
+      "outcome": "AWAITING_ACCEPTANCE",
+      "status": "AWAITING_ACCEPTANCE"
+    }
+  }
+]

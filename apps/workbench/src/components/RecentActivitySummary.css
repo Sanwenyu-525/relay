@@ -1,10 +1,12 @@
+/* 与快捷入口之间的空白由 AssistView.css 的 .agent-chat-suggestions 上外边距承担（一档
+   space-3）；这里只保留区块自身的内边距，不再叠第二档上外边距——两者叠加曾在 900px
+   窗口里量出 65px 空档，欢迎区的节奏在这里断掉（2026-10-20 用户截图指认）。 */
 .recent-activity {
-  margin-top: var(--relay-space-4);
   width: 100%;
   max-width: var(--chat-measure, min(46.5rem, 100%));
   margin-inline: auto;
   box-sizing: border-box;
-  padding: var(--relay-space-4) var(--relay-space-4) var(--relay-space-3);
+  padding: var(--relay-space-3) var(--relay-space-4) var(--relay-space-3);
   background: var(--relay-color-bg-surface);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-panel);
@@ -67,9 +69,11 @@
   gap: var(--relay-space-1);
 }
 
-/* 骨架与占位（2026-10-20）：加载中/行数不足/空态错误态共用同一 2×2 网格几何，
+/* 骨架与占位（2026-10-20）：加载中/行数不足/空态错误态共用同一单列几何，
    行与真实行同构同高——数据到达时原位替换，输入卡不移动。不写死行高：
-   骨架行复用真实行的字号与行盒，跨 DPI 自然相等。 */
+   骨架行复用真实行的字号与行盒，跨 DPI 自然相等。
+   2026-10-20 第五轮：由 2×2 网格改单列后这条只改列数，行数仍是 4——三种状态
+   （骨架 4 行 / 真实 N 行 + 占位补到 4 行 / 空态覆层盖住 4 行）同高不变。 */
 .recent-activity-body { position: relative; }
 
 .recent-activity-dot--skeleton { background: var(--relay-color-border-control); }

@@ -3,16 +3,16 @@ import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import type { ScheduledTaskOccurrenceRow, ScheduledTaskRow, ScheduledTaskStatus } from '../planning/scheduled-task-repository.js';
 import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
-import { runIdempotentCommand } from './command.js';
+import { runIdempotentCommand, type CommandOutcome } from './command.js';
 import { DomainError, invalidTransition, resourceNotFound, revisionConflict, validationFailed } from './domain-error.js';
 import { checkDeclaredOutputs } from './declared-output-requirements.js';
 import { lockWritableProjectInWorkspace, readProjectInWorkspace, requireWorkspace } from './guards.js';
 import { readAdmission } from './maintenance-admission.js';
-import { prepareTaskCreation, createTask, type CreateTaskCriterionInput } from './create-task.js';
+import { prepareTaskCreation, createTask, type CreateTaskCriterionInput, type CreateTaskResult } from './create-task.js';
 import { delegateTask } from './delegate-task.js';
 import { requireRevision } from './revisions.js';
 import { markTaskReady } from './task-commands.js';
-import { freezeTaskChainExecution, taskChainDelegateExecution, type TaskChainExecutionInput } from './task-chain-execution.js';
+import { freezeTaskChainExecution, taskChainDelegateExecution, type TaskChainExecutionInput, type TaskChainExecutionSpec } from './task-chain-execution.js';
 import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
 import { advanceDueAt, isValidTimezone, localDateAt, parseLocalDate, parseLocalTime, resolveLocalDateTime, type RepeatRule } from './zoned-time.js';
 
@@ -94,12 +94,16 @@ export function requireExpiry(value: string): Date {
   return new Date(value);
 }
 
-/** 模板在创建时就按 CreateTask 的口径校验，避免等到首次触发才 422。 */
-function requireTemplate(input: ScheduledTaskTemplateInput, workspaceId: string, projectId: string, commandId: string): JsonObject {
+/**
+ * 模板在创建时就按 CreateTask 的口径校验，避免等到首次触发才 422。
+ * 规范化是确定性的（criterion_id 缺省按序号生成，不引入随机量），所以创建与编辑
+ * 都在命令入口先算一次：同一结果既是落库模板，也是进入 payload_hash 的 body 字段。
+ */
+function requireTemplate(input: ScheduledTaskTemplateInput, workspaceId: string, commandId: string): JsonObject {
   const prepared = prepareTaskCreation({
     workspaceId,
     commandId,
-    projectId,
+    projectId: null,
     title: input.task_title,
     objective: input.objective,
     criteria: input.criteria,
@@ -167,7 +171,7 @@ export async function createScheduledTask(db: DbExecutor, input: Scope & CreateS
   const firstLocalDate = requireLocalDate(input.firstLocalDate);
   const maxRuns = requireMaxRuns(input.maxRuns);
   const expiresAt = requireExpiry(input.authorizationExpiresAt);
-  const template = requireTemplate(input.template, input.workspaceId, input.projectId, input.commandId);
+  const template = requireTemplate(input.template, input.workspaceId, input.commandId);
 
   return runIdempotentCommand(db, {
     scopeKey: httpCommandScopeKey(input.workspaceId), commandId: input.commandId, commandType: 'CreateScheduledTask',
@@ -232,12 +236,14 @@ export async function editScheduledTask(db: DbExecutor, input: Scope & EditSched
   const maxRuns = requireMaxRuns(input.maxRuns);
   const expiresAt = requireExpiry(input.authorizationExpiresAt);
   const reason = requireText(input.reason, 'reason', 4000);
+  // 模板整体进入命令摘要（#148）：同一 command_id 换模板必须判成 ID 复用，不能返回旧回执。
+  const template = requireTemplate(input.template, input.workspaceId, input.commandId);
 
   return runIdempotentCommand(db, {
     scopeKey: httpCommandScopeKey(input.workspaceId), commandId: input.commandId, commandType: 'EditScheduledTask',
     target: { scheduled_task_id: input.scheduledTaskId },
     body: {
-      expected_revision: input.expectedRevision, title, repeat_rule: repeat as unknown as JsonObject, timezone,
+      expected_revision: input.expectedRevision, title, template, repeat_rule: repeat as unknown as JsonObject, timezone,
       local_time: localTime, first_local_date: input.firstLocalDate, max_runs: maxRuns,
       authorization_expires_at: expiresAt.toISOString(), confirmed: input.confirmed, reason,
       execution: input.execution === undefined ? null : JSON.parse(JSON.stringify(input.execution)) as JsonObject,
@@ -250,7 +256,8 @@ export async function editScheduledTask(db: DbExecutor, input: Scope & EditSched
       if (row.revision !== requireRevision(input.expectedRevision, 'expected_revision')) {
         throw revisionConflict({ entityType: 'SCHEDULED_TASK', expectedRevision: input.expectedRevision, actualRevision: row.revision.toString() });
       }
-      if (row.status === 'EXPIRED') throw invalidTransition('已到期的定时任务请新建，或先延长授权有效期。');
+      // EXPIRED 允许编辑（#149）：HTTP 契约 10.94「到期与预算耗尽」要求先通过编辑延长授权，
+      // 编辑本身就是那个入口；编辑后状态保持 EXPIRED，是否恢复启用由用户显式决定。
 
       const now = await r.scheduledTasks.now();
       const horizon = now.getTime() + MAX_AUTHORIZATION_DAYS * 86_400_000;
@@ -258,7 +265,6 @@ export async function editScheduledTask(db: DbExecutor, input: Scope & EditSched
         throw validationFailed([{ field: 'authorization_expires_at', message: `授权到期需在未来 ${MAX_AUTHORIZATION_DAYS} 天内。` }]);
       }
       const firstRunAt = resolveLocalDateTime(firstLocalDate, parseLocalTime(localTime), timezone);
-      const template = requireTemplate(input.template, input.workspaceId, row.project_id, input.commandId);
 
       // 只有影响排期的字段变化才提升代次：改标题或模板不该让已排定的发生作废。
       const scheduleChanged = row.timezone !== timezone || row.local_time !== localTime
@@ -306,14 +312,18 @@ export async function setScheduledTaskStatus(db: DbExecutor, input: Scope & SetS
       if (row.revision !== requireRevision(input.expectedRevision, 'expected_revision')) {
         throw revisionConflict({ entityType: 'SCHEDULED_TASK', expectedRevision: input.expectedRevision, actualRevision: row.revision.toString() });
       }
-      if (row.status === 'EXPIRED' && input.status === 'ENABLED') {
-        throw invalidTransition('已到期的定时任务需要先延长授权有效期，不能直接重新启用。');
+      // EXPIRED 不能直接改回 ENABLED（契约 10.94：须先通过编辑延长授权）。到期或预算耗尽的
+      // 原因在编辑解除前会一直成立，所以这里按「原因是否已由编辑解除」判定，而不是无条件拒绝。
+      const now = await r.scheduledTasks.now();
+      if (row.status === 'EXPIRED' && input.status === 'ENABLED'
+        && (row.authorization_expires_at <= now || row.runs_started >= row.max_runs)) {
+        throw invalidTransition('已到期的定时任务需要先通过编辑延长授权有效期（或恢复执行次数预算），不能直接重新启用。');
       }
       if (row.status === input.status) throw invalidTransition('状态没有变化，请读回当前结果。');
 
       // 重新启用时把已过去的时刻推到下一个未来时段，避免一开启就补跑关闭期间的多次。
       const nextDueAt = input.status === 'ENABLED'
-        ? advanceDueAt({ rule: row.repeat_rule as unknown as RepeatRule, timezone: row.timezone, localTime: row.local_time, now: await r.scheduledTasks.now(), anchor: row.first_run_at })
+        ? advanceDueAt({ rule: row.repeat_rule as unknown as RepeatRule, timezone: row.timezone, localTime: row.local_time, now, anchor: row.first_run_at })
         : row.next_due_at;
       const updated = await r.scheduledTasks.setStatus(row.id, input.status, nextDueAt, {
         status: input.status, revision: (row.revision + 1n).toString(), next_due_at: nextDueAt.toISOString(),
@@ -386,6 +396,8 @@ export async function readScheduledTask(db: DbExecutor, workspaceId: string, id:
       ...taskView(row),
       project: { title: project.title, revision: project.revision.toString(), archived: project.archived_at !== null },
       occurrences: (await r.scheduledTasks.occurrences(id)).map(occurrenceView),
+      // 最近 20 条窗口之外可能还有未处理的 BLOCKED；不单独返回就会丢失补跑/忽略入口。
+      pending_occurrences: (await r.scheduledTasks.blockedOccurrences(id)).map(occurrenceView),
     };
   });
 }
@@ -490,6 +502,11 @@ function reasonOf(error: unknown): string {
  * 三步命令的身份都在 occurrence 落库时预生成，所以中途崩溃后重跑靠回执重放，
  * 不会重复建 Task；`expected_task_revision` 只能取自前一步回执，读库重算会让
  * payload_hash 变化并被判成 CommandIdReused。
+ *
+ * 重跑的载荷一律来自已持久化的原事实，不从当前可变配置重算（#150）：
+ *   * CreateTask 已提交过就取原回执结果——分发中断后用户编辑模板，重跑不得把
+ *     当前模板与原 create_command_id 拼在一起（那会被判 ID 复用并反复阻塞）；
+ *   * 执行范围复用 occurrence 上已冻结的 frozen_execution，只有首次才按当时状态冻结。
  */
 export async function dispatchScheduledOccurrence(db: DbExecutor, occurrenceId: string): Promise<void> {
   const occurrence = await withTransaction(db, async (r) => r.scheduledTasks.readOccurrence(occurrenceId));
@@ -502,25 +519,37 @@ export async function dispatchScheduledOccurrence(db: DbExecutor, occurrenceId: 
 
   try {
     const template = schedule.template;
-    const created = await createTask(db, {
-      workspaceId: occurrence.workspace_id,
-      commandId: occurrence.create_command_id,
-      projectId: occurrence.project_id,
-      title: String(template.task_title),
-      objective: String(template.objective),
-      criteria: (template.criteria ?? []) as unknown as readonly CreateTaskCriterionInput[],
-      expectedOutputs: (template.expected_outputs ?? {}) as JsonObject,
-      mode: String(template.mode),
-    });
+    // 已提交过的 CreateTask 以原回执为准：重放原结果，与模板是否被编辑无关。
+    const priorCreate = await withTransaction(db, async (r) => r.receipts.findReceipt({
+      scopeKey: httpCommandScopeKey(occurrence.workspace_id), commandId: occurrence.create_command_id,
+    }));
+    const created: CommandOutcome<CreateTaskResult> = priorCreate === undefined
+      ? await createTask(db, {
+          workspaceId: occurrence.workspace_id,
+          commandId: occurrence.create_command_id,
+          projectId: occurrence.project_id,
+          title: String(template.task_title),
+          objective: String(template.objective),
+          criteria: (template.criteria ?? []) as unknown as readonly CreateTaskCriterionInput[],
+          expectedOutputs: (template.expected_outputs ?? {}) as JsonObject,
+          mode: String(template.mode),
+        })
+      : { result: priorCreate.result_ref as CreateTaskResult, replayed: true, committedAt: priorCreate.created_at };
     const taskId = created.result.task_id;
     await withTransaction(db, async (r) => { await r.scheduledTasks.bindTask(occurrenceId, taskId); });
 
     // 执行范围按触发当时的状态冻结：连接/资料/资源漂移就让这一次失败，不静默降级。
-    const frozen = await withTransaction(db, async (r) => freezeTaskChainExecution(
-      r, occurrence.workspace_id, occurrence.project_id, taskId,
-      Object.keys(schedule.execution_input).length === 0 ? undefined : schedule.execution_input as unknown as TaskChainExecutionInput,
-    ));
-    await withTransaction(db, async (r) => { await r.scheduledTasks.freezeExecution(occurrenceId, frozen); });
+    // 已冻结的依据直接复用，重算会改变 Delegate 载荷并破坏 ready/delegate 的回执重放。
+    const frozen: TaskChainExecutionSpec = Object.keys(occurrence.frozen_execution).length === 0
+      ? await withTransaction(db, async (r) => {
+          const spec = await freezeTaskChainExecution(
+            r, occurrence.workspace_id, occurrence.project_id, taskId,
+            Object.keys(schedule.execution_input).length === 0 ? undefined : schedule.execution_input as unknown as TaskChainExecutionInput,
+          );
+          await r.scheduledTasks.freezeExecution(occurrenceId, spec);
+          return spec;
+        })
+      : occurrence.frozen_execution as unknown as TaskChainExecutionSpec;
 
     const ready = await markTaskReady(db, {
       workspaceId: occurrence.workspace_id, taskId,

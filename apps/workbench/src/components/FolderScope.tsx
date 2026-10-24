@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FolderOpen, MessageSquarePlus, Info } from "lucide-react";
+import { FolderOpen, MessageSquarePlus } from "lucide-react";
 import type { RelayWorkingDirectory } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { nativeFolderPickerAvailable, selectWorkingDirectory } from "../lib/desktopHost";
@@ -16,6 +16,8 @@ import "./FolderScope.css";
  * 上半是最近使用（点一行直接切换），下半是动作行（打开文件夹／新对话），中间一条分隔线。
  * 原先的两枚并排按钮、分区右侧的「点击直接切换」提示与候选行的第二行说明都收掉了，
  * 但每项的实际内容与可达性未减：完整路径挂 title，候选状态并进同一行的次要事实。
+ * 2026-10-23 用户截图指令再删底部权限脚注（「新目录打开后可读取本目录文件…」）：
+ * 就绪状态、写档位与 Git 只读在各目录自己那一行已经说清，底部不再常驻一段告知。
  */
 export default function FolderScope({ state, onOpen, onNewConversation }: {
   state: { readonly directory: RelayWorkingDirectory | null;
@@ -122,10 +124,6 @@ const needsScopeChoice = directory !== null && directory.candidates.length > 0 &
               在仓库根打开</button></>
           : directory.gitRead.detail}
       </p>}
-    <p className="folder-scope-footnote">
-      <Info aria-hidden="true" className="folder-scope-footnote-icon" />
-      新目录打开后可读取本目录文件，默认只读；已配置目录恢复原档位。不会自动读取整棵树或外发内容。
-    </p>
   </div>;
 }
 

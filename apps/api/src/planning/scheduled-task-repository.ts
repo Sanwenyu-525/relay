@@ -193,6 +193,12 @@ export class ScheduledTaskRepository {
       where workspace_id = ${workspaceId} and status = 'BLOCKED' order by created_at, id limit ${limit}`.execute(this.db)).rows;
   }
 
+  /** 详情用：不受最近 N 条窗口限制的待处理（BLOCKED）时段，窗口外的旧阻塞不能丢处理入口。 */
+  async blockedOccurrences(scheduledTaskId: string): Promise<ScheduledTaskOccurrenceRow[]> {
+    return (await sql<ScheduledTaskOccurrenceRow>`select * from scheduled_task_occurrences
+      where scheduled_task_id = ${scheduledTaskId} and status = 'BLOCKED' order by created_at, id`.execute(this.db)).rows;
+  }
+
   /** 新建 Task 之后立刻绑定：让 Delegate 事务内能核对「这次触发确实对应这个 Task」。 */
   async bindTask(id: string, taskId: string): Promise<void> {
     await sql`update scheduled_task_occurrences set task_id = ${taskId}, revision = revision + 1

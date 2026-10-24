@@ -25,6 +25,19 @@ function message(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message.trim() : fallback;
 }
 
+/**
+ * 读取失败是否意味着「这些数据已经不能再展示」。
+ *
+ * 临时故障（503、传输失败）只是没读到下一页，已读的前页仍然是有效事实；
+ * 失权或作用域失效（403、404、RESOURCE_NOT_FOUND）则说明前页也不再属于当前作用域，
+ * 这种失败不能按「保留前页」处理，否则等于把已失权的数据留在屏幕上（禅道 #110 验收口径）。
+ */
+function isScopeLost(caught: unknown): boolean {
+  if (!(caught instanceof RelayApiError)) return false;
+  const { status, code } = caught.problem;
+  return status === 403 || status === 404 || code === "RESOURCE_NOT_FOUND";
+}
+
 // 全局控件规则会给所有文本输入统一底色与边框；搜索框的外观由外层 .search-field 提供，
 // 这里在行内归零内层输入，避免出现双层边框与高度溢出（共享层修复前先由页面自行约束）。
 const searchInputStyle = { appearance: "none", background: "transparent", border: "none",
@@ -123,31 +136,55 @@ interface ProjectCardModel {
 }
 
 /**
+ * 摘要计数的覆盖范围。
+ *
+ * - full：已经读完全部页，可以给全量结论；
+ * - partial：只读到一部分（例如还有后续页，或续页失败），只能说「已加载范围内」；
+ * - unknown：连首屏都没读到，数量与「是否都已明确」都是未知，不给任何数量结论。
+ */
+type SummaryCoverage = "full" | "partial" | "unknown";
+
+/**
  * 推进摘要条：正在推进数 + 尚未明确下一步数。
  * 计数口径随数据来源不同——fixture 为全量精确值，live 只覆盖已加载项，
- * 后者由 `note` 显式限定，不把部分计数冒充全量。
+ * 后者由 `coverage` 与 `note` 显式限定，不把部分计数冒充全量
+ * （禅道 #110：续页 503 清空列表后曾误报「0 个项目正在推进」「所有项目的下一步都已明确」）。
  */
-function ProjectsSummary({ activeCount, missingCount, note, onFix }: {
+function ProjectsSummary({ activeCount, missingCount, coverage = "full", note, onFix }: {
   readonly activeCount: number;
   readonly missingCount: number;
+  readonly coverage?: SummaryCoverage;
   readonly note?: string | null;
   readonly onFix?: () => void;
 }) {
+  const partial = coverage === "partial";
+  const unknown = coverage === "unknown";
+  const main = unknown ? "项目列表尚未确认"
+    : partial ? `已加载范围内 ${activeCount} 个项目正在推进`
+    : `${activeCount} 个项目正在推进`;
   return <section className="projects-summary" data-testid="projects-summary" aria-label="推进摘要">
     <div className="projects-summary__left">
       <span className="projects-summary__symbol" aria-hidden="true"><Sparkles /></span>
       <div className="projects-summary__text">
-        <p className="projects-summary__main">{activeCount} 个项目正在推进</p>
-        <p className="projects-summary__desc">{note ?? "聚焦下一步，把计划变成可执行的行动。"}</p>
+        <p className="projects-summary__main">{main}</p>
+        <p className="projects-summary__desc">{note ?? (unknown
+          ? "尚未读到项目列表，数量与下一步状态都还不能确认。"
+          : "聚焦下一步，把计划变成可执行的行动。")}</p>
       </div>
     </div>
     <div className="projects-summary__right">
-      {missingCount > 0
+      {unknown
         ? <><TriangleAlert className="projects-summary__alert" aria-hidden="true" />
-          <span className="projects-summary__hint">{missingCount} 个项目尚未明确下一步</span>
-          {onFix && <button className="projects-summary__link" type="button" data-testid="projects-summary-fix" onClick={onFix}>去完善 <span aria-hidden="true">→</span></button>}</>
-        : <><Check className="projects-summary__ok" aria-hidden="true" />
-          <span className="projects-summary__hint">所有项目的下一步都已明确</span></>}
+          <span className="projects-summary__hint">尚未读到项目列表，不能断定下一步是否都已明确</span></>
+        : missingCount > 0
+          ? <><TriangleAlert className="projects-summary__alert" aria-hidden="true" />
+            <span className="projects-summary__hint">{partial ? `已加载范围内 ${missingCount} 个项目尚未明确下一步` : `${missingCount} 个项目尚未明确下一步`}</span>
+            {onFix && <button className="projects-summary__link" type="button" data-testid="projects-summary-fix" onClick={onFix}>去完善 <span aria-hidden="true">→</span></button>}</>
+          : partial
+            ? <><Info aria-hidden="true" />
+              <span className="projects-summary__hint">已加载范围内没有尚未明确下一步的项目，后续页尚未读完</span></>
+            : <><Check className="projects-summary__ok" aria-hidden="true" />
+              <span className="projects-summary__hint">所有项目的下一步都已明确</span></>}
     </div>
   </section>;
 }
@@ -461,6 +498,8 @@ function LiveProjectsListView({ client, scope, onCreate }: {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** 续页失败单独成态：首屏错误走全页错误态，续页错误只就地提示，已读内容保留（禅道 #110）。 */
+  const [moreError, setMoreError] = useState<string | null>(null);
   const [checkingArchive, setCheckingArchive] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [pendingArchive, setPendingArchive] = useState<PendingArchive | null>(() => readPendingArchive(archiveKey(client)));
@@ -490,7 +529,12 @@ function LiveProjectsListView({ client, scope, onCreate }: {
       // 抽屉内容在数据回来后按 id 重新对齐；确实已不在范围内才在下方收口。
       invalidateTaskTitles();
       setItems([]); setNextCursor(null); setLoading(true);
-    } else setLoadingMore(true);
+      setMoreError(null);
+    } else {
+      setLoadingMore(true);
+      // 续页重试沿用同一个游标；重试前先撤掉上一轮的续页失败提示。
+      setMoreError(null);
+    }
     setError(null);
     try {
       const page = await client.getProjectsPage(scope, cursor);
@@ -501,7 +545,9 @@ function LiveProjectsListView({ client, scope, onCreate }: {
         page.items.some((project) => project.archiveStatus !== expected)) {
         throw new Error("项目列表响应与当前归档范围不匹配，已停止显示。");
       }
-      setItems((current) => cursor === null ? page.items : [...current, ...page.items]);
+      // 续页按分页语义追加：同一条项目只保留一份，重试成功不会重复已读行。
+      setItems((current) => cursor === null ? page.items
+        : [...current, ...page.items.filter((item) => !current.some((seen) => seen.id === item.id))]);
       setNextCursor(page.nextCursor);
       // 只有在列表已到末页时才能断言「这个项目不在了」；仍有后续页时保持抽屉不动。
       if (cursor === null && page.nextCursor === null) {
@@ -510,8 +556,20 @@ function LiveProjectsListView({ client, scope, onCreate }: {
       }
     } catch (caught) {
       if (!disposed.current && request === requestVersion.current) {
-        setItems([]); setNextCursor(null); setDetailId(null);
-        setError(describeLiveError(caught).message);
+        const described = describeLiveError(caught);
+        if (cursor === null) {
+          // 首读失败：整页错误态。此时没有任何已确认事实，不能拿空列表当全量 0。
+          setItems([]); setNextCursor(null); setDetailId(null);
+          setError(described.message);
+        } else if (isScopeLost(caught)) {
+          // 失权或作用域失效：已读内容已经不可再读，不能为了留住前页而继续展示它。
+          setItems([]); setNextCursor(null); setDetailId(null);
+          setError("项目列表当前不可读：权限或作用域已失效，已清除之前读到的项目。请核对当前工作空间与访问权限后重新读取。");
+        } else {
+          // 续页失败保留已读项目、原游标与当前详情，只就地提示并允许按同一游标重试
+          // （对齐 ActivityView 的续页恢复口径；禅道 #110）。
+          setMoreError(described.message);
+        }
       }
     } finally {
       if (!disposed.current && request === requestVersion.current) {
@@ -695,8 +753,15 @@ function LiveProjectsListView({ client, scope, onCreate }: {
   // 摘要条只统计已加载项；有后续页时用 note 限定，不把部分计数冒充全量。
   const loadedActive = items.filter((project) => project.archiveStatus === "ACTIVE");
   const missingNext = loadedActive.filter((project) => project.nextActionTaskId === null);
-  const summaryNote = nextCursor !== null
-    ? "按已加载项目统计，仍有后续页。" : undefined;
+  // 摘要的覆盖范围：只有读完全部页才给全量结论；还有后续页（含续页失败）时只说已加载范围，
+  // 首屏就没读到时数量与「是否都已明确」都未知，不给任何数量结论（禅道 #110）。
+  const coverage: SummaryCoverage = error !== null || loading ? "unknown"
+    : nextCursor !== null ? "partial" : "full";
+  const summaryNote = coverage === "unknown"
+    ? (loading ? "正在读取项目列表，尚未确认项目数量与下一步状态。" : "项目列表读取失败，数量与下一步状态都还不能确认。")
+    : nextCursor !== null
+      ? "按已加载项目统计；后续页尚未读完，不能当作全部项目。"
+      : undefined;
   const openFirstMissing = () => {
     const target = missingNext[0];
     if (target) setDetailId(target.id);
@@ -708,7 +773,7 @@ function LiveProjectsListView({ client, scope, onCreate }: {
         actions={<><Link className="secondary-button" data-testid="goal-create-open" to="/projects?view=goal"><Target aria-hidden="true" />记录目标</Link>
           <button className="primary-button" type="button" data-testid="project-create-open" onClick={onCreate}><Plus aria-hidden="true" />新建项目</button></>} />
       <ProjectsSummary activeCount={loadedActive.length} missingCount={missingNext.length}
-        note={summaryNote} onFix={missingNext.length > 0 ? openFirstMissing : undefined} />
+        coverage={coverage} note={summaryNote} onFix={missingNext.length > 0 ? openFirstMissing : undefined} />
       <ProjectsToolbar scope={scope} counts={counts} search={search} onSearch={setSearch} view={view} onView={setView}
         searchName="live-project-search"
         tools={<button className="secondary-button secondary-button--compact" type="button" data-testid="projects-live-refresh"
@@ -722,6 +787,11 @@ function LiveProjectsListView({ client, scope, onCreate }: {
           <button className="secondary-button" type="button" onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />重新读取</button></div> : <>
           <p className="list-footer-note" data-testid="projects-live-count">已加载 {items.length} 项 · 当前搜索显示 {visible.length} 项
             {nextCursor ? " · 仍有后续页" : " · 已到列表末页"}。名称搜索只作用于已加载项目。</p>
+          {/* 续页失败只就地提示：已读项目、原游标与当前详情都保留，可按同一游标重试。 */}
+          {moreError && <p className="action-error" role="alert" data-testid="projects-live-more-error">
+            续页失败：{moreError}；已保留前面加载的结果。
+            {nextCursor && <button className="text-button" type="button" data-testid="projects-live-more-retry"
+              disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>按原游标重试</button>}</p>}
           {visible.length === 0
             ? items.length === 0
               ? archivedScope
@@ -743,20 +813,19 @@ function LiveProjectsListView({ client, scope, onCreate }: {
                 description={`已加载 ${items.length} 项，当前搜索显示 0 项。名称搜索只作用于已加载范围，后续页可能仍有匹配项目。`}
                 testId="projects-live-no-match"
                 actions={<button className="secondary-button" type="button" onClick={() => setSearch("")}>清除搜索</button>} />
-            : <>
-              <ProjectsGrid view={view}>
-                {visible.map((project) => <ProjectCard key={project.id} onOpen={() => setDetailId(project.id)}
-                  onNavigate={() => navigate(`/projects/${project.id}`)}
-                  project={{ id: project.id, title: project.title,
-                    typeLabel: projectTypeLabels[project.projectType as ProjectType] ?? project.projectType,
-                    phase: phaseLabel(project.phaseKey),
-                    nextAction: project.nextActionTaskId === null ? null : nextLabel(project),
-                    archived: project.archiveStatus === "ARCHIVED" }} />)}
-                {!needle && !archivedScope && <NewProjectCard onCreate={onCreate} />}
-              </ProjectsGrid>
-              {nextCursor && <button className="secondary-button" type="button" data-testid="projects-live-load-more"
-                disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>{loadingMore ? "正在加载" : "加载更多"}</button>}
-            </>}
+            : <ProjectsGrid view={view}>
+              {visible.map((project) => <ProjectCard key={project.id} onOpen={() => setDetailId(project.id)}
+                onNavigate={() => navigate(`/projects/${project.id}`)}
+                project={{ id: project.id, title: project.title,
+                  typeLabel: projectTypeLabels[project.projectType as ProjectType] ?? project.projectType,
+                  phase: phaseLabel(project.phaseKey),
+                  nextAction: project.nextActionTaskId === null ? null : nextLabel(project),
+                  archived: project.archiveStatus === "ARCHIVED" }} />)}
+              {!needle && !archivedScope && <NewProjectCard onCreate={onCreate} />}
+            </ProjectsGrid>}
+          {/* 加载更多是续页入口：续页失败后原游标仍在，这颗键就是按同一游标重试的入口。 */}
+          {nextCursor && <button className="secondary-button" type="button" data-testid="projects-live-load-more"
+            disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>{loadingMore ? "正在加载" : "加载更多"}</button>}
         </>}
       <footer className="projects-footnote">
         <p className="projects-footnote__note">下一步来自项目状态，显示对应任务的标题；任务的确切 ID、修订与打开入口在选中项目后的详情抽屉中。归档前会单读当前 Project；服务端会检查未结清任务、运行与外部效果。</p>

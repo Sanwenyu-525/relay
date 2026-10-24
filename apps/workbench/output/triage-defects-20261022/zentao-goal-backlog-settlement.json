@@ -1,0 +1,10 @@
+{
+  "severity": 2,
+  "pri": 1,
+  "title": "[Relay] 目标积压恢复仅结算最新消息，早期轮次永久漏账且首次成功条件被跳过",
+  "steps": "<pre>【现象】多条绑定同一目标的消息在目标推进tick之前已生成完成时，恢复只补记最新一条，较早消息永久缺轮次账；若这是目标最初两条回复，成功条件也从较晚回复首次冻结，跳过先前回复提出的更完整条件。无需完成目标或触发终态。\n\n【真实隔离PG复现】apps/api/output/triage-defects-20261022/triage-goal-backlog-settlement.integration.test.js（同名.ts仅枚举入口），结构化证据 goal-backlog-settlement.json。PG18.6、131迁移、graph成功。正常域命令创建会话和GOAL消息A，再发送补充消息B；两条助手消息绑定同目标。受控ModelPort依次回复：A CONTINUE，成功条件original=“代码与安装都通过”；B CONTINUE，success_criteria改成replacement=“仅代码检查通过”，两次均正常COMPLETED。没有手插表或改状态。\nA/B调度对照：\n- 及时结算：生成A → goal tick（此时B仍PENDING，不会额外投递）→ 生成B → 正常HTTP pause → 3次goal tick。结果PAUSED、round_count=2、A/B都有轮次记录；冻结条件仍original，B不能替换。\n- 延迟结算：生成A → 生成B → 同样HTTP pause → 3次goal tick。结果PAUSED、round_count=1、只B有轮次记录；A无记录；listGoalsWithUnsettledRounds不再包含该目标；冻结条件变replacement。GET会话goal也只呈现一轮与较窄条件。\n最终断言预期2条轮次，实际1条，1!==2。首轮生成、暂停与读取均成功，非前置失败。前后均只有2次受控调用。PG停止exit0且临时目录已清理。相关Owner源码与dist在前一同源探针中逐字转译核对，当前目标文件无修改；本轮SkipBuild不是完整构建验收。\n\n【可达性与边界】本探针通过依次运行两个生产生成入口、延后目标tick，验证积压恢复调度；未实际杀进程或运行多Worker进程。生产worker支持--assist-once只生成不跑goal tick，持续Worker的生成与目标tick也分阶段运行，不能依赖永远一条生成紧跟一次目标结算。本单未用真实Provider、真实写工具或Windows；不声称已发生错误人工完成。条件差异是受控响应，用于证明同样输入结果会随调度改变。\n\n【根因】plan-goal-repository.listGoalsWithUnsettledRounds仅检查MAX(seq)已结算消息是否缺账；goal-advance.settleRounds又只读readLatestSettledRoundMessage。一旦最新B记账，较早A虽仍缺账也永远不再成为候选。成功条件首次冻结在该批的最后一条，而非按原消息顺序重放。和#142不同：本单目标始终非终态，没有确认完成动作，无法仅修complete的在途检查解决。\n\n【可直接执行修复提示词】\n读取CODEX_NEXT_STEP、目标轮次恢复/条件冻结契约、goal-advance、plan-goal-repository与相关恢复测试，保护共享工作。先复现，再用既有Owner有界地按目标消息原始顺序结算所有未记账的终结消息；候选不能因最新消息已记账而排除更早缺账，不能只把读取改成最早但仍保留MAX候选。新轮次的身份/round_index、最后消息、条件冻结与控制意图必须保持一致；存在更早积压时不要基于不完整状态投递下一轮。保留暂停/取消优先、目标排他、事务CAS与消息唯一键，重复tick/并发恢复不得双记或丢记，不删除已有账本/消息。\n验收：逐条与批量完成2/3条时最终同样账本与条件；第一轮条件不被较晚模型清单替换；FAILED/CANCELLED混排；PAUSED/PAUSING/CANCELLING积压；部分已记账、崩溃窗口、重复/并发tick；控制落定不能先终结而漏掉早期事实；自动轮次派生身份与索引连续性；50条候选边界不饥饿。真实PG/HTTP红到绿及必要回归，Provider/Windows未跑单独报告。\n仅同步受影响已有恢复/目标契约、统一验收表；如改API/数据库注明兼容与迁移；文档修改跑node scripts/check-docs.mjs。不commit/push、不改生产数据、不新增第二套Owner。</pre>",
+  "openedBuild": [
+    "trunk"
+  ],
+  "type": "codeerror"
+}

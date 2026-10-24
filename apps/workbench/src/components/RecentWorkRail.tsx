@@ -7,6 +7,7 @@ import { describeLiveError } from "../lib/liveErrors";
 import { resolveMotionPreference } from "../lib/motionPreference";
 import { railGroupKey, readCollapsedRailGroups, writeCollapsedRailGroups } from "../lib/railGroupPreferences";
 import { readRailSessionOrder, writeRailSessionOrder } from "../lib/railSessionOrder";
+import { handleRosterKeyDown } from "../lib/tabNavigation";
 import { resolvedTokenValue } from "../lib/tokens";
 import EmptyState from "./EmptyState";
 import RecentWorkRow from "./RecentWorkRow";
@@ -342,21 +343,36 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
     setBatchError(`已删除 ${removed.length} 段讨论；${sentences.join(" ")}`);
   }
 
-  // 会话创建/切换由协作页发布确切身份；只读回这一条，不重置已经加载的任务分页。
-  // `contextEpoch` 是同一会话换了目录或归属时的第二道触发：身份没变，只看身份就永远留在旧分组。
+  /**
+   * 会话创建/切换由协作页发布确切身份；只读回这一条，不重置已经加载的任务分页。
+   * `contextEpoch` 是同一会话换了目录或归属时的第二道触发：身份没变，只看身份就永远留在旧分组。
+   * `activityEpoch` 是消息落地的触发（用户消息入库、生成结算各 +1）：左栏按最后消息时间
+   * 排序，服务端在那两个时刻推进 `last_message_at`，递一次计数就让这一行当场收敛，
+   * 不等整列重读——计数由会话视图观察到权威投影落地时发出，本地不猜时刻。
+   *
+   * 读回的这条**按同一档自动序插回，不插到列首**：目标/目录分组只是全局列序的子序列，
+   * 列首一换分组就整体换位——切换会话于是变成「工作区分组乱跳」（2026-10-23 用户截图指认）。
+   * 列序只由服务端口径（置顶优先、最后消息时间倒序）决定，当前选中项不参与排序；
+   * 已在列里的会话原位替换，没读到的才追加后入序（深链接到更早的会话也落在它的时刻位上）。
+   */
   useEffect(() => {
     if (active.taskId !== null || active.sessionId === null) return;
     const sessionId = active.sessionId;
     let current = true;
     void client.getAssistSession(sessionId, true).then((session) => {
       if (!current || session.id !== sessionId || session.taskId !== null) return;
-      setLoaded((previous) => previous === null ? previous : { ...previous,
-        sessions: [session, ...previous.sessions.filter((item) => item.id !== session.id)] });
+      setLoaded((previous) => {
+        if (previous === null) return previous;
+        const replaced = previous.sessions.some((item) => item.id === session.id)
+          ? previous.sessions.map((item) => item.id === session.id ? session : item)
+          : [...previous.sessions, session];
+        return { ...previous, sessions: sortSessions(replaced) };
+      });
     }).catch(() => {
       if (current) setSessionsError("当前会话暂未能在近期工作中核对，请刷新重试。");
     });
     return () => { current = false; };
-  }, [client, active.taskId, active.sessionId, active.contextEpoch]);
+  }, [client, active.taskId, active.sessionId, active.contextEpoch, active.activityEpoch]);
 
   const tasks = loaded?.tasks ?? [];
   const loadedSessions = loaded?.sessions ?? [];
@@ -703,7 +719,8 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
       <input type="search" value={query} placeholder="搜索已加载项"
         data-testid="recent-work-search" onChange={(event) => setQuery(event.target.value)} />
     </label>
-    <div className="recent-work-scroll" role="region" aria-label="近期工作列表" tabIndex={0}>
+    <div className="recent-work-scroll" role="region" aria-label="近期工作列表" tabIndex={0}
+      onKeyDown={(event) => handleRosterKeyDown(event, ".recent-work-item")}>
       {loading && <p className="helper-text" role="status">正在读取…</p>}
       {error && <p className="action-error" role="alert" data-testid="recent-work-error">{error}</p>}
       {/* 兜底：只有已归档会话可勾（上面三段都没渲染）时，操作栏仍要出现在能看见的地方。 */}

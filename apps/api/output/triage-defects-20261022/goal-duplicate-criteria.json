@@ -1,0 +1,121 @@
+[
+  {
+    "duplicate": true,
+    "goal": {
+      "goal_id": "dae7dc1e-5ad0-40d6-a53c-1be54c002946",
+      "session_id": "17175e18-25e2-49b0-93f1-d38746e4105e",
+      "objective": "补齐说明并验证",
+      "status": "AWAITING_ACCEPTANCE",
+      "current_step": null,
+      "progress": "只完成第一项验证",
+      "stop_reason": {
+        "code": "AWAITING_ACCEPTANCE",
+        "detail": "目标已按成功条件完成自检，需要你确认后才会记作完成。",
+        "questions": [],
+        "resumable": false
+      },
+      "criteria": [
+        {
+          "key": "c1",
+          "statement": "单元测试通过",
+          "status": "MET",
+          "evidence": "仅单元测试已通过；没有运行安装包",
+          "required": true
+        },
+        {
+          "key": "c1",
+          "statement": "安装包启动验证通过",
+          "status": "MET",
+          "evidence": "仅单元测试已通过；没有运行安装包",
+          "required": true
+        }
+      ],
+      "steps": [],
+      "round_count": 1,
+      "no_progress_rounds": 0,
+      "plan_version_id": null,
+      "plan_version": null,
+      "last_round_at": "2026-10-23T05:55:32.893Z",
+      "actions": {
+        "pause": false,
+        "cancel": true,
+        "resume": false,
+        "confirm_completion": true
+      },
+      "revision": "2",
+      "created_at": "2026-10-23T05:55:32.833Z",
+      "updated_at": "2026-10-23T05:55:32.903Z"
+    },
+    "rounds": [
+      {
+        "round_index": 1,
+        "outcome": "AWAITING_ACCEPTANCE",
+        "note": "成功条件都已有证据；等待你确认完成。",
+        "created_at": "2026-10-23T05:55:32.903Z"
+      }
+    ],
+    "settled": {
+      "goalId": "dae7dc1e-5ad0-40d6-a53c-1be54c002946",
+      "messageId": "979367aa-d762-46fb-bc91-6db10a08c673",
+      "outcome": "AWAITING_ACCEPTANCE",
+      "status": "AWAITING_ACCEPTANCE"
+    }
+  },
+  {
+    "duplicate": false,
+    "goal": {
+      "goal_id": "108414f4-b086-41fb-a5ef-038aa9442b1c",
+      "session_id": "f2ec3f10-f043-4f54-acb5-ed5f32a27c14",
+      "objective": "补齐说明并验证",
+      "status": "ACTIVE",
+      "current_step": null,
+      "progress": "只完成第一项验证",
+      "stop_reason": null,
+      "criteria": [
+        {
+          "key": "c1",
+          "statement": "单元测试通过",
+          "status": "MET",
+          "evidence": "仅单元测试已通过；没有运行安装包",
+          "required": true
+        },
+        {
+          "key": "c2",
+          "statement": "安装包启动验证通过",
+          "status": "PENDING",
+          "evidence": null,
+          "required": true
+        }
+      ],
+      "steps": [],
+      "round_count": 1,
+      "no_progress_rounds": 0,
+      "plan_version_id": null,
+      "plan_version": null,
+      "last_round_at": "2026-10-23T05:55:32.973Z",
+      "actions": {
+        "pause": true,
+        "cancel": true,
+        "resume": false,
+        "confirm_completion": false
+      },
+      "revision": "4",
+      "created_at": "2026-10-23T05:55:32.952Z",
+      "updated_at": "2026-10-23T05:55:32.984Z"
+    },
+    "rounds": [
+      {
+        "round_index": 1,
+        "outcome": "COMPLETE_UNVERIFIED",
+        "note": "模型声称完成，但这些必需条件还没有证据：安装包启动验证通过",
+        "created_at": "2026-10-23T05:55:32.978Z"
+      }
+    ],
+    "settled": {
+      "goalId": "108414f4-b086-41fb-a5ef-038aa9442b1c",
+      "messageId": "ddbaa7b4-95a8-4f0a-81e3-b1507064b52f",
+      "outcome": "COMPLETE_UNVERIFIED",
+      "status": "ACTIVE"
+    }
+  }
+]

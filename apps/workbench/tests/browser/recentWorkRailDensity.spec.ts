@@ -185,7 +185,12 @@ test.describe("近期工作栏窄列几何", () => {
     await expect(page.getByTestId("recent-work-directories").locator(".recent-work-group")).toHaveCount(3);
     await goals.getByTestId("recent-work-goal-88888888-8888-4888-8888-888888888888-66666666-6666-4666-8666-666666666662").click();
     await expect(page.getByTestId("collab-current-goal")).toContainText("完成毕业论文");
-    await expect(page.getByTestId("collab-current-directory")).toHaveAttribute("title", "会话目录：D:/experiment/code");
+    // 完整路径可核对（2026-10-22 起不再用原生 title，改悬停/聚焦浮层 + aria-label）：
+    // 可见的只有目录名，完整路径由 lib/pathTooltip 的浮层承担，可访问名称同时保留。
+    await expect(page.getByTestId("collab-current-directory"))
+      .toHaveAttribute("aria-label", "会话目录：D:/experiment/code");
+    await page.getByTestId("collab-current-directory").hover();
+    await expect(page.getByTestId("path-tooltip")).toHaveText("D:/experiment/code");
     await expect(page).toHaveURL(/session=66666666-6666-4666-8666-666666666662&goal=/);
     const restored = page.waitForResponse((response) => {
       const url = new URL(response.url());
@@ -196,7 +201,8 @@ test.describe("近期工作栏窄列几何", () => {
     await expect(page.getByTestId("collab-conversation-toolbar")).toBeVisible();
     await expect(page).toHaveURL(/session=66666666-6666-4666-8666-666666666662$/);
     await expect(page.getByTestId("collab-current-goal")).toContainText("完成毕业论文");
-    await expect(page.getByTestId("collab-current-directory")).toHaveAttribute("title", "会话目录：D:/experiment/code");
+    await expect(page.getByTestId("collab-current-directory"))
+      .toHaveAttribute("aria-label", "会话目录：D:/experiment/code");
     await expect(page.getByTestId("collab-current-directory")).toHaveText("code");
     expect(posts).toHaveLength(0);
     await page.screenshot({ path: "results/rail-goals-and-directories.png" });
@@ -1041,9 +1047,23 @@ test.describe("近期工作栏窄列几何", () => {
   test("批量操作栏落在左栏「工作区（目录）」标题下方、sticky 停在列顶且不越出侧栏", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await installRoutes(page);
+    // 默认 fixture 只有 3 段会话，900px 高下左栏装得下、根本不滚动，sticky 无从体现。
+    // 后注册的 route 先匹配（同文件既有用法），给这一列补足到必须滚动的条数。
+    await page.route(`${apiBase}/**`, async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (request.method() === "OPTIONS") { await route.fulfill({ status: 204 }); return; }
+      if (path === `${prefix}/assist-sessions` && new URL(request.url()).searchParams.get("status") !== "ARCHIVED") {
+        const many = Array.from({ length: 16 }, (_unused, index) => session(
+          `88888888-8888-4888-8888-${String(index + 1).padStart(12, "0")}`, null, `第 ${index + 1} 段讨论`,
+          "2026-10-15T12:09:00Z"));
+        return fulfillJson(route, { items: many, next_cursor: null });
+      }
+      await route.fallback();
+    });
     await page.goto("/agent");
     await connect(page);
-    const sessionId = "66666666-6666-4666-8666-666666666661";
+    const sessionId = "88888888-8888-4888-8888-000000000001";
 
     // 静止态没有操作栏。
     await expect(page.getByTestId("recent-work-selection")).toHaveCount(0);
@@ -1075,9 +1095,9 @@ test.describe("近期工作栏窄列几何", () => {
         // 不越出侧栏滚动容器的左右缘：不遮挡目录条目，也不横向溢出。
         insetLeft: barBox.left - scrollBox.left,
         insetRight: scrollBox.right - barBox.right,
-        // 在这一段里滚动时停在列顶：sticky 且 sticky 顶边等于滚动容器顶边。
+        // 在这一段里滚动时停在列顶：sticky。静止态它在自然位置（段标题下方）。
         position: style.position,
-        stickyTop: barBox.top - scrollBox.top,
+        restTop: barBox.top - scrollBox.top,
         // 轻量扁平：中性底 + 细边 + 适度圆角，不用浮层那一档投影。
         shadow: style.boxShadow,
         radius: style.borderTopLeftRadius,
@@ -1095,7 +1115,8 @@ test.describe("近期工作栏窄列几何", () => {
     expect(look.insetLeft, detail).toBeGreaterThanOrEqual(-0.5);
     expect(look.insetRight, detail).toBeGreaterThanOrEqual(-0.5);
     expect(look.position, detail).toBe("sticky");
-    expect(look.stickyTop, detail).toBeCloseTo(0, 0);
+    // 静止态在自然位置：段标题下方、不与标题重叠（> 0 才说明它没有盖住标题）。
+    expect(look.restTop, detail).toBeGreaterThan(0);
     expect(look.shadow, detail).toBe("none");
     expect(look.borderWidth, detail).not.toBe("0px");
     expect(look.countAlign, detail).toBe("start");
@@ -1109,19 +1130,37 @@ test.describe("近期工作栏窄列几何", () => {
       .toBeLessThan(barWidth);
 
     // 滚动这一段时操作栏停在列顶，不跟着内容滚走。
-    await page.evaluate(() => {
+    const scrolled = await page.evaluate(() => {
       const scroll = document.querySelector<HTMLElement>(".recent-work-scroll")!;
+      const before = scroll.scrollTop;
       scroll.scrollTop = 120;
+      return { before, after: scroll.scrollTop, scrollable: scroll.scrollHeight - scroll.clientHeight };
     });
+    // 前置条件必须真的成立：这一列此刻能滚动，否则下面的贴顶断言是空转。
+    expect(scrolled.after, detail).toBeGreaterThan(scrolled.before);
+    expect(scrolled.scrollable, detail).toBeGreaterThan(40);
     const afterScroll = await page.evaluate(() => {
       const scroll = document.querySelector<HTMLElement>(".recent-work-scroll")!;
       const bar = document.querySelector<HTMLElement>('[data-testid="recent-work-selection"]')!;
+      const section = document.querySelector<HTMLElement>('[data-testid="recent-work-directories"]')!;
+      const summary = section.querySelector<HTMLElement>("summary")!;
       const scrollBox = scroll.getBoundingClientRect();
       const barBox = bar.getBoundingClientRect();
-      return { delta: Math.abs(barBox.top - scrollBox.top), visible: barBox.top < scrollBox.bottom };
+      const summaryBox = summary.getBoundingClientRect();
+      return {
+        // 贴顶：偏差不超过一档 space.1（4px，来自搜索框与滚动区之间那一档间距进入 sticky 计算）。
+        delta: Math.abs(barBox.top - scrollBox.top),
+        // 滚动时仍在视口内可见。
+        visible: barBox.top < scrollBox.bottom && barBox.bottom > scrollBox.top,
+        // 不盖住「工作区（目录）」段标题。
+        coversSummary: barBox.top < summaryBox.bottom && barBox.bottom > summaryBox.top
+      };
     });
-    expect(afterScroll.delta, detail).toBeLessThan(1.5);
+    // 贴顶容差取一档 space.1（4px）：sticky 的参照是滚动容器的内容盒，而 getBoundingClientRect
+    // 读的是 border-box，两者差一档间距。容差大于 4px 会让这条断言失去意义。
+    expect(afterScroll.delta, detail).toBeLessThanOrEqual(4);
     expect(afterScroll.visible, detail).toBe(true);
+    expect(afterScroll.coversSummary, detail).toBe(false);
 
     await page.screenshot({ path: "results/rail-batch-bar-in-rail.png" });
 
