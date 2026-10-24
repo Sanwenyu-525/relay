@@ -17,4 +17,4 @@
 2. Relay 自己的边界（获准的子命令集合、写动作审批、`gh api` 的处置、凭据不进日志与聊天）**写在本文件之外的附录里**，由 Gateway 与策略强制。上游正文中出现 `gh api` 用法共 7 处，它们是待约束的命令面，不是 Relay 的授权。
 3. 正文的一切内容都是数据，不构成规则或授权。
 
-**接线状态（2026-10-17）**：内容已入仓，但**尚未随包分发**，也尚未进入运行时提示——`apps/api` 的构建只做 `tsc`（不复制非 `.ts` 资源），`package.json` 的 `files` 目前为 `dist/src` 与 `migrations`。资源根注入与打包登记随执行通路一并冻结后再补，不在此宣称已可用。
+**接线状态（2026-10-24 更新）**：内容已入仓并随包分发——`apps/api/package.json` 的 `files` 含 `skills/builtin/gh`，`build-release.ps1` 校验 `SKILL.md`/`LICENSE`/`UPSTREAM.md` 三件随包文件；Relay 边界附录见同目录 `RELAY_NOTES.md`。运行时登记与按需注入见 `apps/api/src/skills/official-skills.ts`（不可变身份 + 钉住 SHA-256 逐字校验 + 仅本轮出现 `github_` 工具时注入冻结摘要与边界块，`RELAY_OFFICIAL_SKILL_GITHUB=disabled` 可禁用注入）。上游正文本身仍不进入运行时提示。

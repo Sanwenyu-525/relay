@@ -632,8 +632,10 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
       {drop !== null && <li className="recent-work-drop-line" data-testid="recent-work-drop-line"
         style={{ insetBlockStart: `${drop.lineTop}px` }} aria-hidden="true" />}
       {groupRows.map((row) => {
-        const label = `${row.kind === "session" ? "会话 · " : ""}${row.title} · ${projectName(row.projectId)}${row.unread ? " · 未读" : ""}`;
         const session = row.kind === "session" ? sessionById.get(row.id) : undefined;
+        // 「未开始」进可访问名称：标记是视觉上的，读屏与键盘用户同样要能分辨这条还没说过话。
+        const notStarted = session !== undefined && session.lastMessageAt === null;
+        const label = `${row.kind === "session" ? "会话 · " : ""}${row.title} · ${projectName(row.projectId)}${notStarted ? " · 未开始" : ""}${row.unread ? " · 未读" : ""}`;
         // 同一组里出现同名行时，时刻要带上时分才分得清是哪一条；完整时间留在摘要卡的 time 上。
         const sameTitle = groupRows.some((other) => other.key !== row.key && other.title === row.title);
         return <RecentWorkRow key={row.key} kind={row.kind} title={row.title}

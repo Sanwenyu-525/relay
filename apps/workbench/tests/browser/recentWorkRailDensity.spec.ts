@@ -32,9 +32,13 @@ function task(id: string, projectId: string, title: string, updatedAt: string): 
 }
 
 function session(id: string, projectId: string | null, title: string, updatedAt: string,
-  unreadAt: string | null = null): unknown {
+  unreadAt: string | null = null, lastMessageAt: string | null = updatedAt): unknown {
   return { id, workspace_id: workspaceId, project_id: projectId, task_id: null, title,
     status: "ACTIVE", revision: "1", created_at: updatedAt, updated_at: updatedAt,
+    // 这些行都是有内容的讨论：活动键与更新时间同值，行上因此不出现「未开始」，
+    // 菜单里的「分叉」也照常出现（2026-10-24 起空会话不给分叉）。
+    // 传 null 的那一条是「还没说过话」的空会话，专门用来验标记。
+    last_message_at: lastMessageAt,
     pinned_at: null, unread_at: unreadAt,
     working_resource_id: projectId,
     context: { project_goals: projectId === null ? [] : [{ goal_id: "88888888-8888-4888-8888-888888888888", title: "完成毕业论文" }],
@@ -1168,5 +1172,174 @@ test.describe("近期工作栏窄列几何", () => {
     await page.getByTestId("recent-work-selection-clear").click();
     await expect(page.getByTestId("recent-work-selection")).toHaveCount(0);
     await expect(row.getByTestId(`recent-work-select-${sessionId}`)).not.toBeChecked();
+  });
+
+  // 2026-10-24 用户两张截图，同一处 ⋯ 的两面：
+  // ① 宽栏（17rem 档）「会话名称过长时，悬停的更多菜单按钮会和名称重合」——标题盒的右缘就落在
+  //    行右缘内 space.2，而 ⋯ 是 32px 见方的绝对定位控件，覆盖的正是标题盒最后 32px；标题一长，
+  //    尾字就压在它下面，图标与字挤在一起读不清。
+  // ② 窄栏「这种宽度就看不到更多菜单按钮了」——行是 grid 项，`min-width: auto` 让它的最小宽
+  //    等于整段标题的自然宽（`.recent-work-title` 的 `min-width: 0` 只管 flex 收缩），于是长标题
+  //    把行撑得比栏还宽：标题被栏的 overflow 齐头切掉，⋯ 直接被推到栏外。
+  // 两处修法都不动行高与标题字号：
+  // ② 给 `.recent-work-row` 补 `min-width: 0`，轨道按栏宽定尺，标题回到「单行 + 省略号」，⋯ 留在栏内；
+  // ① 给触发器背后加一层虚化底（backdrop-filter 把压过来的标题糊掉 + 一层栏纸面同色、左端透明的
+  //    渐变，共用同一条 mask 让边界淡出）——不能改成「悬停时收窄标题可用宽」，那样长标题会在指针
+  //    落下的那一刻重新截断、整列文字跟着跳。
+  // 本用例分两段守：宽栏段守虚化底（⋯ 自身仍不带底色、虚化底真的存在且盖到标题尾字之前、纵向
+  // 不越出行盒、以及像素层面标题尾部的对比度确实被压低）；窄栏段守行宽与 ⋯ 的可达（行不越出
+  // 滚动内容盒、标题真的收成省略号、⋯ 整个落在栏内且省略号仍在它底下）。
+  test("长标题压在 ⋯ 下面时虚化底盖住尾字，栏收窄后 ⋯ 仍留在栏内", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await installRoutes(page);
+    const sessionId = "99999999-9999-4999-8999-999999999991";
+    // 标题长度是照用户第一张截图那一档挑的：14px meta 档下这段字自然宽约 206px，栏拖到上限
+    // 17rem=272px 时（内容盒 254px）行不越界，而文字右端正好落进 ⋯ 覆盖的最后 32px。
+    const longTitle = "关于Relay-Agent（1）关于Relay";
+    // 只放一条长标题会话，并且不给它关联目标：目标区会再复制一份同样的行（那份触发器恒
+    // display:none），两条同 testid 的行走位容易读错，这里刻意只留一份。
+    const longSession = { ...(session(sessionId, projectB, longTitle, "2026-10-24T11:00:00Z") as Record<string, unknown>),
+      context: { project_goals: [],
+        working_directory: { resource_id: projectB, canonical_root: "D:/experiment/code" } } };
+    // 后注册的 route 先匹配（同文件既有用法）：只换这一条的清单，其余仍走上面的夹具。
+    await page.route(`${apiBase}/**`, async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("status") === "ARCHIVED") return route.fallback();
+      if (url.pathname === `${prefix}/assist-sessions`) return fulfillJson(route, { items: [longSession] });
+      if (url.pathname === `${prefix}/assist-sessions/${sessionId}`) return fulfillJson(route, longSession);
+      return route.fallback();
+    });
+    await page.goto("/agent");
+    await connect(page);
+    // 栏拖到 token 上限（用户第一张截图里那一档）。拖拽宽度写在 .app-frame 的
+    // --relay-sidebar-user-width 上，与手柄同源。
+    const setRailWidth = (width: string) => page.evaluate((value) => {
+      document.querySelector<HTMLElement>(".app-frame")!.style.setProperty("--relay-sidebar-user-width", value);
+    }, width);
+    await setRailWidth("272px");
+    await page.waitForTimeout(200);
+
+    const row = page.locator(`.recent-work-row:has([data-testid="recent-work-${sessionId}"])`);
+    await expect(row).toHaveCount(1);
+    await row.getByTestId(`recent-work-${sessionId}`).hover();
+    await page.waitForTimeout(260);
+
+    const read = () => page.evaluate((target) => {
+      const item = document.querySelector<HTMLElement>(`[data-testid="recent-work-${target}"]`)!;
+      const rowElement = item.closest("li")!;
+      const scroll = document.querySelector<HTMLElement>(".recent-work-scroll")!;
+      const rail = document.querySelector<HTMLElement>(".app-context-rail")!;
+      const trigger = rowElement.querySelector<HTMLElement>(".recent-work-row-trigger")!;
+      const title = item.querySelector<HTMLElement>(".recent-work-title")!;
+      const veil = getComputedStyle(trigger, "::before");
+      const root = getComputedStyle(document.documentElement);
+      const rem = (name: string) => Number.parseFloat(root.getPropertyValue(name)) * Number.parseFloat(root.fontSize);
+      const rowBox = rowElement.getBoundingClientRect();
+      const triggerBox = trigger.getBoundingClientRect();
+      const titleBox = title.getBoundingClientRect();
+      const scrollBox = scroll.getBoundingClientRect();
+      // 文字的**实际绘制右缘**：Range 量文字而不是量盒。注意 Range 不受 overflow 裁剪，
+      // 被省略号截断时它读到的仍是整段文字的自然右缘，所以「看得见的右缘」要再和盒右缘取小。
+      const textRange = document.createRange();
+      textRange.selectNodeContents(title);
+      const textRight = textRange.getBoundingClientRect().right;
+      const space1 = rem("--relay-space-1");
+      const space2 = rem("--relay-space-2");
+      // ::before 没有自己的盒模型读数：按触发器盒与规则里的 inset 换算（横向左端 −space.2、
+      // 纵向上下各内缩 space.1），断言的正是这两条 inset 有没有把边界放对。
+      return {
+        triggerBackground: getComputedStyle(trigger).backgroundColor,
+        veilBackdrop: veil.backdropFilter,
+        veilMask: veil.maskImage,
+        veilBackground: veil.backgroundImage,
+        veilTop: triggerBox.top + space1,
+        veilBottom: triggerBox.bottom - space1,
+        veilLeft: triggerBox.left - space2,
+        veilRight: triggerBox.right,
+        rowTop: rowBox.top, rowBottom: rowBox.bottom, rowRight: rowBox.right,
+        titleLeft: titleBox.left, titleRight: titleBox.right, textRight,
+        // 看得见的文字右缘：截断时就是盒右缘（省略号画在那里），未截断时就是文字自己的右缘。
+        visibleTextRight: Math.min(textRight, titleBox.right),
+        triggerLeft: triggerBox.left, triggerRight: triggerBox.right,
+        railRight: rail.getBoundingClientRect().right,
+        contentRight: scrollBox.left + scroll.clientWidth,
+        scrollLeft: scroll.scrollLeft,
+        // 标题此刻是否真的收成省略号（被撑宽的行不会截断，这一条是窄栏修法的直接判据）。
+        truncated: title.scrollWidth > title.clientWidth + 0.5,
+        space2
+      };
+    }, sessionId);
+
+    const look = await read();
+    const detail = JSON.stringify(look);
+    // 前置条件必须成立：看得见的标题真的伸到了 ⋯ 底下（否则「重合」无从谈起，虚化也无事可做），
+    // 而且 ⋯ 本身还在栏内（行没被标题撑出栏外——那一档在下面第二段守）。
+    expect(look.truncated || look.visibleTextRight >= look.triggerLeft + look.space2, detail).toBe(true);
+    expect(look.triggerRight, detail).toBeLessThanOrEqual(look.railRight + 0.5);
+    // 栏不该被这一行横向滚走：位置读数得是静止态。
+    expect(look.scrollLeft, detail).toBeLessThan(look.space2);
+    // 2026-10-16 的既有约定不改：⋯ 自己仍是透明的，虚化底画在它的 ::before 上。
+    expect(look.triggerBackground, detail).toBe("rgba(0, 0, 0, 0)");
+    expect(look.veilBackdrop, detail).toContain("blur(4px)");
+    // 渐变与遮罩共用同一条从左透明的斜坡：模糊边界跟着淡出，不在标题中间留硬边。
+    expect(look.veilMask, detail).not.toBe("none");
+    expect(look.veilMask, detail).toContain("linear-gradient");
+    expect(look.veilBackground, detail).toContain("linear-gradient");
+    // 虚化底向左多铺一档：起点落在标题尾字之前，尾字是「淡出」而不是被图标齐头切断。
+    expect(look.visibleTextRight - look.veilLeft, detail).toBeGreaterThanOrEqual(look.space2 - 0.5);
+    // 纵向不越出行：触发器 32px 高而行只有 24px，虚化底必须内缩到行内，否则相邻行也被糊一道。
+    expect(look.veilTop, detail).toBeGreaterThanOrEqual(look.rowTop - 0.5);
+    expect(look.veilBottom, detail).toBeLessThanOrEqual(look.rowBottom + 0.5);
+
+    // 像素证据：同一块触发器区域，去掉虚化底前后各拍一张，标题尾部（深字压在白底上）的
+    // 亮度标准差应明显下降——这正是「字被糊掉、图标读得清」的可测形态。
+    const menu = row.getByTestId(`recent-work-menu-${sessionId}`);
+    const withVeil = await menu.screenshot();
+    const veilOff = await page.addStyleTag({ content: ".recent-work-row-trigger::before{content:none !important}" });
+    await page.waitForTimeout(120);
+    const withoutVeil = await menu.screenshot();
+    await veilOff.evaluate((element: Element) => element.remove());
+    const spread = await page.evaluate(async (shots: { withVeil: string; withoutVeil: string }) => {
+      const load = async (dataUrl: string) => {
+        const image = new Image();
+        await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; image.src = dataUrl; });
+        const canvas = document.createElement("canvas");
+        canvas.width = image.width; canvas.height = image.height;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(image, 0, 0);
+        const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const luminance: number[] = [];
+        for (let index = 0; index < data.length; index += 4) {
+          luminance.push(0.2126 * data[index]! + 0.7152 * data[index + 1]! + 0.0722 * data[index + 2]!);
+        }
+        const mean = luminance.reduce((sum, value) => sum + value, 0) / luminance.length;
+        const variance = luminance.reduce((sum, value) => sum + (value - mean) ** 2, 0) / luminance.length;
+        return Number(Math.sqrt(variance).toFixed(2));
+      };
+      return { withVeil: await load(shots.withVeil), withoutVeil: await load(shots.withoutVeil) };
+    }, { withVeil: `data:image/png;base64,${withVeil.toString("base64")}`,
+      withoutVeil: `data:image/png;base64,${withoutVeil.toString("base64")}` });
+    expect(spread.withVeil, JSON.stringify(spread)).toBeLessThan(spread.withoutVeil);
+
+    // 左栏整体留一张，供人工核对观感（虚化底只在悬停时出现，静止态逐像素不变）。
+    await page.locator(".app-context-rail").screenshot({ path: "results/rail-title-veil.png" });
+
+    // 第二段：栏收窄到 11rem 下限（用户第二张截图那一档）。此前长标题会把行撑得比栏还宽，
+    // 标题被栏右缘齐头切掉、⋯ 被推到栏外，悬停根本看不见按钮。补 `.recent-work-row{min-width:0}`
+    // 之后：行不越出滚动内容盒、标题收成省略号、⋯ 整个落在栏内，而省略号仍在它底下（虚化底
+    // 在这一档同样生效——两件事一起守，免得只修好一头）。
+    await setRailWidth("176px");
+    await page.waitForTimeout(200);
+    await row.getByTestId(`recent-work-${sessionId}`).hover();
+    await page.waitForTimeout(260);
+    const narrow = await read();
+    const narrowDetail = JSON.stringify(narrow);
+    expect(narrow.rowRight, narrowDetail).toBeLessThanOrEqual(narrow.contentRight + 0.5);
+    expect(narrow.scrollLeft, narrowDetail).toBe(0);
+    expect(narrow.truncated, narrowDetail).toBe(true);
+    expect(narrow.triggerRight, narrowDetail).toBeLessThanOrEqual(narrow.railRight + 0.5);
+    expect(narrow.visibleTextRight, narrowDetail).toBeGreaterThan(narrow.triggerLeft + narrow.space2);
+    expect(narrow.veilBackdrop, narrowDetail).toContain("blur(4px)");
+    await page.locator(".app-context-rail").screenshot({ path: "results/rail-title-veil-narrow.png" });
   });
 });

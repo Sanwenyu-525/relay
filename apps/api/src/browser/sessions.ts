@@ -17,7 +17,7 @@ import { sql } from 'kysely';
 
 import type { DbExecutor } from '../infrastructure/database.js';
 import { DomainError, invalidTransition } from '../application/domain-error.js';
-import { requestComputerControlStop } from '../application/control-requests.js';
+import { requestBrowserRunStop } from '../application/control-requests.js';
 import type { BrowserSessionOwnerKind } from './owner.js';
 
 /** 浏览器任务空闲阈值：超过该时长没有新动作即视为已停止。 */
@@ -180,7 +180,7 @@ export async function requestBrowserSessionStop(db: DbExecutor, input: {
     return { state: 'STOP_REQUESTED', control_request_id: null };
   }
   try {
-    const control = await requestComputerControlStop(db, {
+    const control = await requestBrowserRunStop(db, {
       workspaceId: input.workspaceId, runId: input.ownerId });
     return { state: 'STOP_REQUESTED', control_request_id: control.id };
   } catch (error) {

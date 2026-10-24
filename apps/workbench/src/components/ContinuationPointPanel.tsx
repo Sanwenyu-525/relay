@@ -68,6 +68,9 @@ export default function ContinuationPointPanel({ client, projectId, captureBlock
   const [busy, setBusy] = useState(false);
   const [comparisonBusy, setComparisonBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 列表读取错误单独放：成功重读要能撤下它（禅道 #23），又不能误清 capture/回执/对比
+  // 错误——error 继续承载写入与核对那一路，两类事实不互相覆盖。
+  const [listError, setListError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const scope = useRef(0);
   const factReadVersion = useRef(0);
@@ -84,9 +87,11 @@ export default function ContinuationPointPanel({ client, projectId, captureBlock
       const next = await activeClient.getContinuationPoints(projectId);
       if (request !== scope.current || factRequest !== factReadVersion.current || !readable.current) return;
       setPoints(next);
-      setError((current) => current ?? (next.length ? null : null));
+      // 成功读取撤下本轮/此前列表读取错误（含上次失败、本轮成功重读的场景）；
+      // capture/回执错误在 error 里，不受影响。
+      setListError(null);
     } catch (caught) {
-      if (request === scope.current && factRequest === factReadVersion.current && readable.current) setError(describeLiveError(caught).message);
+      if (request === scope.current && factRequest === factReadVersion.current && readable.current) setListError(describeLiveError(caught).message);
     } finally { if (request === scope.current && factRequest === factReadVersion.current) setLoading(false); }
   }
 
@@ -151,7 +156,7 @@ export default function ContinuationPointPanel({ client, projectId, captureBlock
   useEffect(() => {
     scope.current++;
     setPoints([]); setComparison(null);
-    setError(null); setMessage(null);
+    setError(null); setListError(null); setMessage(null);
     const restored = readPending(key);
     setPending(restored);
     if (restored) void checkReceipt(restored);
@@ -178,10 +183,10 @@ export default function ContinuationPointPanel({ client, projectId, captureBlock
     {loading && <p role="status">正在读取已保存的接续点…</p>}
     {!factsReadable && <p className="helper-text">项目事实尚未读取确认，已隐藏接续点及对比。草稿与原命令回执仍保留。</p>}
     {/* 读取失败不是「还没有保存过」：接续点为空既可能真的没保存过，也可能是这次没读到。
-        缺 error 判定会把读取失败说成没有保存过，而 :179 已有正确的 factsReadable 分支。 */}
-    {factsReadable && !loading && error === null && points.length === 0 && pending === null &&
+        列表读取错误单独判定（listError），成功重读即撤下；error 承载写入/回执那一路。 */}
+    {factsReadable && !loading && error === null && listError === null && points.length === 0 && pending === null &&
       <p className="helper-text">还没有保存过接续点；本页不会用“当前事实”冒充“上次看到的样子”。</p>}
-    {factsReadable && !loading && error !== null && points.length === 0 && pending === null &&
+    {factsReadable && !loading && listError !== null && points.length === 0 && pending === null &&
       <p className="helper-text" role="status">接续点没有读到，请查看错误并重试；这不代表当前确实没有保存过接续点。</p>}
     {factsReadable && points.length > 0 && <ul className="run-list">{points.map((point) => <li key={point.id}>
       <button className="inline-link" type="button" data-testid="continuation-open"
@@ -231,7 +236,7 @@ export default function ContinuationPointPanel({ client, projectId, captureBlock
       {busy ? "正在核对" : "保存当前接续点"}</button>
     {blockedReason && <p className="disabled-reason">{blockedReason}</p>}
     </details>
-    {error && <p className="action-error" role="alert">{error}</p>}
+    {(error ?? listError) && <p className="action-error" role="alert">{error ?? listError}</p>}
     {message && <p className="success-callout" role="status">{message}</p>}
     {pending && <div className="warning-callout" data-testid="continuation-pending">
       <strong>保存结果待核对</strong>

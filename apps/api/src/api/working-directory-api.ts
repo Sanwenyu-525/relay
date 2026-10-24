@@ -2,8 +2,8 @@ import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 
 import { openWorkingDirectory } from '../application/open-working-directory.js';
-import { readWorkspaceDefaultDirectory, setWorkspaceDefaultDirectory, setWorkspaceDefaultWriteTier }
-  from '../application/workspace-default-directory.js';
+import { readWorkspaceDefaultDirectory, setWorkspaceContextBudget, setWorkspaceDefaultDirectory,
+  setWorkspaceDefaultWriteTier } from '../application/workspace-default-directory.js';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
 import { commandEnvelopeSchema } from './domain-schemas.js';
 
@@ -78,6 +78,8 @@ export function registerWorkingDirectoryRoutes(app: FastifyInstance, dependencie
     write_tier: Type.Union([Type.Literal('READ_ONLY'), Type.Literal('ASK'), Type.Literal('AUTO'),
       Type.Literal('FULL'), Type.Null()]),
     default_write_tier: Type.Union([tierEnum, Type.Null()]),
+    /** 0135（2026-10-24）：上下文长度档位；null＝还没选过，由客户端按进程默认值展示。 */
+    context_budget_tokens: Type.Union([Type.Integer(), Type.Null()]),
     status: Type.Union([Type.Literal('UNSET'), Type.Literal('READY'), Type.Literal('UNAVAILABLE')]),
     reason: Type.Union([Type.String(), Type.Null()]), revision: rev }, strict);
   app.get('/default-working-directory', { schema: { params, response: { 200: projection } } }, async (request, reply) => {
@@ -109,6 +111,23 @@ export function registerWorkingDirectoryRoutes(app: FastifyInstance, dependencie
       const outcome = await setWorkspaceDefaultWriteTier(executor, { workspaceId: p.workspace_id ?? '',
         commandId: body.command_id, expectedRevision: body.expected_revision,
         tier: body.default_write_tier });
+      return { outcome, result: outcome.result };
+    } }));
+
+  /* 0135（2026-10-24）：上下文长度三档。与默认写档位共用同一行与同一个修订号，
+     所以 CAS 用同一把尺子；`context_budget_tokens` 为 null 表示清除选择（回到进程默认）。 */
+  const budgetBody = Type.Object({ command_id: uuid, expected_revision: rev,
+    context_budget_tokens: Type.Union([Type.Literal(262_144), Type.Literal(524_288),
+      Type.Literal(1_048_576), Type.Null()]) }, strict);
+  const budgetResult = Type.Object({ workspace_id: uuid,
+    context_budget_tokens: Type.Union([Type.Integer(), Type.Null()]), revision: rev }, strict);
+  app.post('/context-budget', {
+    schema: { params, body: budgetBody, response: { 200: commandEnvelopeSchema(budgetResult) } },
+  }, createCommandHandler(dependencies, { commandType: 'SetWorkspaceContextBudget', bodySchema: budgetBody,
+    execute: async ({ executor, params: p, body }) => {
+      const outcome = await setWorkspaceContextBudget(executor, { workspaceId: p.workspace_id ?? '',
+        commandId: body.command_id, expectedRevision: body.expected_revision,
+        budgetTokens: body.context_budget_tokens });
       return { outcome, result: outcome.result };
     } }));
   app.post('/working-directories/open', {

@@ -217,11 +217,30 @@ F25 首片按 [ADR-023](../decisions/ADR-023-builtin-github-skill.md) 新增 `GI
 
 **按需激活。** 四个工具只在当轮存在 `GITHUB_READ` 的 ACTIVE 连接时进入词表；停用连接后下一轮立即消失。本片不注入上游 `SKILL.md` 正文，工具描述自带用途与「失败≠空结果」的约束。
 
+2026-10-24 官方 Skill 登记与按需注入落地：`src/skills/official-skills.ts` 固化不可变身份（`github-gh@4537a92f…`、MIT、来源 `cli/cli`）并对随包 `SKILL.md`/`RELAY_NOTES.md`/`LICENSE` 三份文件按钉住 SHA-256 逐字校验（`apps/api/skills/builtin/gh/`，Relay 边界附录 `RELAY_NOTES.md` 为新增的 Relay 自有文件，上游正文未改一字）；仅当本轮词表真实出现 `github_` 工具时，才在会话主流程 system 的能力事实块之后附加约 1 KiB 的冻结摘要与边界块，上游 20 KB 正文从不进入上下文；`RELAY_OFFICIAL_SKILL_GITHUB=disabled` 设备级禁用注入（能力与账本不受影响）。单测 `official-skills.test.ts` 13/13（身份冻结、三文件逐字校验、缺失/篡改失败关闭、无工具不注入、禁用生效、注入块与附录同源防漂移）。人设档/子代理/学习档轮次与 Run 内工具循环暂不注入此块，属已记边界。
+
 2026-10-18 修复网络环境边界：原白名单漏掉代理变量，导致用户终端可以经代理登录、Relay 子进程却直连失败。现在显式保留 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 及对应小写变量，仍排除调用方的 `GH_TOKEN`、Provider 密钥及其他非必要环境。凭据来自用户在 Relay 外完成认证后的 CLI 存储，不自动登录、不输出 token。真实已认证四动作的结果与限制归统一验收表，不再以「本机未安装 gh」作为当前阻塞。
 
 2026-10-18 补第五个只读动作 `GITHUB_ISSUE_VIEW`（`gh issue view <n> --json ...`）：此前只有 `issue list`，能列出编号却读不到正文与评论，模型要判断「这个 issue 到底说什么」没有任何合法入口。动作仍属 `GITHUB_READ`，没有新增能力、迁移或权限分支；`--json` 一次取 `number,title,body,state,author,url,labels,createdAt,updatedAt,comments`（评论走 `--json ...,comments` 而不是 `--comments`——后者只配人类可读输出，上游 `gh` Skill 原文明确区分）。投影沿用有界口径：正文 8 KiB、评论最多 10 条且单条 2 KiB，`comments_total`／`comments_truncated`／`body_truncated` 三个字段把「被剪掉」显式说出来，结果同样带 `untrusted_external_content`。写动作（开 PR、评论、合并）仍不在词表里。
 
 **证据与未闭合。** 单测 `github-read.test.ts` **16/16**（词表封闭、来源拒绝、参数收窄、真实临时 git 仓库的 remote 解析、环境白名单、失败归类、缺失 `gh` 的真实探测、投影上限）；集成 `github-read.integration.test.ts` 在真实 PostgreSQL 上 **8/8**（`0103` 分支完整性、原始 INSERT 反例、连接启停、`GH_REPO_UNIDENTIFIED`、身份闸门后真实 `gh` 探测、`repo` 参数到不了适配器、逐动作 Permission、与 `FILE_READ` 共存）。未闭合：本机没有安装 `gh`，**无法验证已认证的真实 GitHub 读取**；GitHub 侧写动作不存在；官方 Skill 原文尚未接入打包与运行时提示；未跑真实 Windows 窗口与安装包验收，未 commit。
+
+### 4.2 GitHub 写动作最小工程协议（2026-10-24 冻结，未实施）
+
+长期目标（ADR-023）：「提交当前修改并创建 PR」一句话完成。GitHub 侧写动作（创建 PR/Issue、评论）在**核对协议冻结之前不进入 Gateway 词表**——本节就是那份协议，作为后续切片的工程前置；实施仍需用户对该切片单独授权，本文不构成放行。
+
+**对象与身份。** 新动作属新能力 `GITHUB_WRITE`（`REAL`/`WRITE`），照 0103 先例出迁移并重述 `ck_logical_operation_resource`；**只放行 `RUN` 来源**（外部副作用不在会话轮次内发生，与 BROWSER_ACTION/COMPUTER_INPUT 同界）。目标仓库沿用只读片同一闸门：受管根真实 Git remote 本地解析，模型不提供 `repo`；`head` 分支必须取自该受管根的当前分支或显式给出且存在于本仓库，`base` 分支必须经只读查询证实存在。argv 仍由适配器逐字段构造，`gh api`、`--jq`、任意 flag 永不进入。
+
+**批准与撤销。** `adapter-metadata` 声明 `approval_passthrough:false`（AUTO 一律降 ASK）、`resumable` 按各动作核对能力分别声明；范围授权不覆盖写动作（不入 `SCOPE_GRANT_ACTIONS`）。逐动作 Permission 撤销后，在途未结算动作仍按原准入完成结算，但不得启动新动作——撤销语义与既有 Gateway 一致，不另设第二套。
+
+**幂等与回执。** 每个动作带**客户端幂等键**：创建类用 `CreateOperation` 时已冻结的 `operation_id` 派生（如 PR 的 `Relay-Operation: <operation_id>` 头或标题内嵌标记），重放同一动作不得产生第二个对象。回执绑定确切对象（PR/Issue 编号与 URL），写回 Operation result。
+
+**结果丢失后的只读核对（每动作一个核对函数，核对不到即 UNKNOWN）。** 创建 PR 丢失：按 `head`+`base`+幂等标记 `gh pr list --json number,url,headRefName` 查回；命中唯一对象即 SUCCEEDED，查不到保持 UNKNOWN（可能尚未建出，禁止盲重试）。创建 Issue 丢失：按幂等标记搜索本仓库 Issue。评论丢失：按评论正文内嵌幂等标记在该对象评论列表中查回。合并/关闭等高危动作另需先冻结核对语义再议，首片不含。
+
+**UNKNOWN 与恢复。** 派发后断连/超时/响应丢失一律 UNKNOWN + 隔离（`listUnresolvedRunOperations` 阻断该 Run 再领取），由人工或恢复流程执行上述只读核对后结算；禁止自动重放，禁止换 Adapter 或动作 ID 绕过。失败原因分类复用只读片词表并补 `GH_ALREADY_EXISTS`（幂等冲突）。
+
+**首片边界。** 不做：Issue/PR 正文模板引擎、批量动作、跨仓库动作、PR review 评论。需要的新基建只有：`GITHUB_WRITE` 能力迁移、写 adapter 与三到四个动作的核对函数、会话侧「创建 PR」执行候选的落点（复用既有执行请求链，不新增账本）。
+
 
 ## 5. 受控 CLI
 

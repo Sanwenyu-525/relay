@@ -14,6 +14,7 @@ import { useDelayedVisible } from "../lib/useDelayedVisible";
 import { describeLiveError } from "../lib/liveErrors";
 import { reviewKindLabels } from "../lib/labels";
 import { handleTabListKeyDown } from "../lib/tabNavigation";
+import type { PreviewBridge } from "../lib/previewBridge";
 import type { RelayApiClient, RelayArtifactLineage, RelayReview, RelayRun, RelayRunDraftPreview, RelayTaskDetail } from "../api/relayClient";
 import "./WorkspaceReading.css";
 
@@ -29,7 +30,7 @@ const tabs: readonly (readonly [WorkspaceSideTab, string])[] = [
  * 这里不拥有业务状态，所有写入仍走既有命令路径。
  */
 export default function WorkspaceSidePanel({ client, task, run, draft, tab, onTabChange,
-  devToolsOpen, onCloseDevTools,
+  devToolsOpen, onCloseDevTools, previewBridge, previewScope,
   reviews, reviewIndex, onReviewIndexChange, openReview, reviewError,
   reviewWriteBlockedReason, projectWriteBlockedReason, onReviewNavigationStateChange, onRefresh }: {
   client: RelayApiClient;
@@ -40,6 +41,10 @@ export default function WorkspaceSidePanel({ client, task, run, draft, tab, onTa
   onTabChange: (next: WorkspaceSideTab) => void;
   devToolsOpen: boolean;
   onCloseDevTools: () => void;
+  /** 内置网页预览的宿主桥；null＝非桌面宿主，网页页签如实说明不可用。 */
+  previewBridge: PreviewBridge | null;
+  /** 网页关联作用域（workspace + conversation），与当前任务的 Project 无关。 */
+  previewScope: string;
   reviews: readonly RelayReview[];
   reviewIndex: number;
   onReviewIndexChange: (next: number) => void;
@@ -52,7 +57,8 @@ export default function WorkspaceSidePanel({ client, task, run, draft, tab, onTa
 }) {
 const tabId = useId();
   // 文档子树保持挂载，切换视图不能丢失判断草稿或待核对的原命令。
-  const toolsVisible = devToolsOpen && task.projectId !== null;
+  // 工具面板不再要求项目：网页预览在无项目时也可用，文件/变更由面板自己按资格说明。
+  const toolsVisible = devToolsOpen;
   // 父级已核对验收版本与条件 ID 后才显示条件正文；版本对不上就退回请求原因，不展示可能过期的文字。
   const criterionStatement = openReview !== null && openReview.target.acceptance_revision === task.acceptance.acceptanceRevision
     ? task.acceptance.criteria.find((criterion) => criterion.criterionId === openReview.target.criterion_id)?.statement ?? null
@@ -81,7 +87,8 @@ const judgment = openReview === null
               onRefresh={onRefresh} />
           </JudgmentBar>;
   return <aside className="collab-side" aria-label={toolsVisible ? "文件与运行工具" : "产物与判断"} data-testid="collab-side" data-pane={toolsVisible ? "DEVTOOLS" : tab}>
-    {toolsVisible && <DevToolsPanel client={client} projectId={task.projectId!} taskId={task.id} run={run} onClose={onCloseDevTools} />}
+    {toolsVisible && <DevToolsPanel client={client} projectId={task.projectId} taskId={task.id} run={run}
+      previewBridge={previewBridge} previewScope={previewScope} onClose={onCloseDevTools} />}
     <div className="collab-side-tabs" role="tablist" aria-label="成果、检查与历史" data-testid="collab-side-tabs" hidden={toolsVisible}
       onKeyDown={handleTabListKeyDown}>
       {tabs.map(([key, label]) => <button key={key} type="button"

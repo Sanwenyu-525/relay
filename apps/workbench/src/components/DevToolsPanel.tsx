@@ -1,25 +1,40 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { FileText, GitBranch, ListTree, Play, SquareTerminal, Terminal, X } from "lucide-react";
+import { FileText, GitBranch, Globe, ListTree, Play, SquareTerminal, Terminal, X } from "lucide-react";
 import RunToolTrajectoryPanel from "./RunToolTrajectoryPanel";
 import GitReadPanel from "./GitReadPanel";
+import BrowserPreviewPanel from "./BrowserPreviewPanel";
 import type { RelayApiClient, RelayManagedResource, RelayRun, RelayRunGatewayOperation } from "../api/relayClient";
+import type { PreviewBridge } from "../lib/previewBridge";
 import { describeLiveError } from "../lib/liveErrors";
 import { handleTabListKeyDown } from "../lib/tabNavigation";
 import "./DevToolsPanel.css";
 
-type Tab = "FILES" | "GIT" | "TERMINAL" | "RUNS" | "TRACE";
+type Tab = "FILES" | "GIT" | "WEB" | "TERMINAL" | "RUNS" | "TRACE";
+
+const TAB_ITEMS = [
+  ["FILES", "文件", FileText], ["GIT", "变更", GitBranch], ["WEB", "网页", Globe],
+  ["TERMINAL", "终端", SquareTerminal], ["RUNS", "运行记录", Play], ["TRACE", "轨迹", ListTree]
+] as const;
 
 /**
- * 开发工具面板：只承载当前项目/任务的只读事实，不拥有业务状态。
+ * 右侧工具面板：只承载当前项目/任务的只读事实与人工网页预览，不拥有业务状态。
  * 面板打开不执行命令，Git 读取由明确点击触发；关闭只隐藏，旧请求不会重绑到新目录。
  * 右栏页签只列只读工具，命令输出来自底部抽屉，两处互不冒充。
+ *
+ * 文件与变更需要 Project 资格；网页预览不需要——普通会话里没有项目也能手动看页面，
+ * 但不会为此创建占位 Task，也不伪造 ID。终端仍如实显示「未接入」。
  */
-export default function DevToolsPanel({ client, projectId, taskId, run, onClose }: {
+export default function DevToolsPanel({ client, projectId, taskId, run, previewBridge, previewScope, onClose }: {
   client: RelayApiClient;
-  projectId: string;
-  taskId: string;
+  /** null＝当前会话没有关联项目：文件与变更按资格显示为不可用，不推断任意路径可读。 */
+  projectId: string | null;
+  taskId: string | null;
   run: RelayRun | null;
+  /** null＝非桌面宿主，网页页签如实说明原生容器不可用。 */
+  previewBridge: PreviewBridge | null;
+  /** 网页关联作用域（workspace + conversation）；切作用域会释放旧实例。 */
+  previewScope: string;
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("FILES");
@@ -32,9 +47,11 @@ export default function DevToolsPanel({ client, projectId, taskId, run, onClose 
   const [loading, setLoading] = useState(false);
   const resourceRequest = useRef(0);
   const operationRequest = useRef(0);
-  const scope = `${projectId}:${taskId}`;
+  const scope = `${projectId ?? "no-project"}:${taskId ?? "no-task"}`;
+  const hasProject = projectId !== null;
 
   const loadResources = useCallback(async () => {
+    if (projectId === null) { setResources([]); setResourceError(null); setLoading(false); return; }
     const version = ++resourceRequest.current;
     setLoading(true); setResourceError(null);
     try {
@@ -73,41 +90,67 @@ export default function DevToolsPanel({ client, projectId, taskId, run, onClose 
 
   const hasOutput = operations.some((operation) => operation.invocations.some((item) => item.commandOutput !== null));
 
-  return <section className="devtools" data-testid="devtools-panel" aria-label="文件与运行工具">
+  return <section className="devtools" data-testid="devtools-panel" data-tab={tab} aria-label="文件、网页与运行工具">
     <div className="devtools-pane">
       <header className="devtools-header">
         <nav className="devtools-tabs" role="tablist" aria-label="工具面板" onKeyDown={handleTabListKeyDown}>
-          {([["FILES", "文件", FileText], ["GIT", "变更", GitBranch], ["TERMINAL", "终端", SquareTerminal], ["RUNS", "运行记录", Play], ["TRACE", "轨迹", ListTree]] as const)
-            .map(([key, label, Icon]) => <button key={key} type="button" data-testid={`devtools-tab-${key}`}
-              className={`devtools-tab${tab === key ? " devtools-tab--active" : ""}`}
-              role="tab" id={`${tabId}-tab-${key}`} aria-controls={`${tabId}-panel`} aria-selected={tab === key}
-              tabIndex={tab === key ? 0 : -1}
-              onClick={() => setTab(key)}><Icon aria-hidden="true" />{label}</button>)}
+          {TAB_ITEMS.map(([key, label, Icon]) => <button key={key} type="button" data-testid={`devtools-tab-${key}`}
+            className={`devtools-tab${tab === key ? " devtools-tab--active" : ""}`}
+            role="tab" id={`${tabId}-tab-${key}`} aria-controls={`${tabId}-panel`} aria-selected={tab === key}
+            tabIndex={tab === key ? 0 : -1}
+            title={!hasProject && (key === "FILES" || key === "GIT") ? "需要先关联项目" : undefined}
+            onClick={() => setTab(key)}><Icon aria-hidden="true" />{label}</button>)}
         </nav>
+        {/* 收起入口只留这一颗，放在页签条右端：与底部「执行输出」抽屉无关，避免两颗同义键。 */}
+        <button className="icon-button devtools-close" type="button" aria-label="收起工具面板"
+          title="收起工具面板" data-testid="devtools-close" onClick={onClose}><X aria-hidden="true" /></button>
       </header>
 
-      <div className="devtools-body" role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-tab-${tab}`} tabIndex={0}>
+      <div className="devtools-body" role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-tab-${tab}`}
+        tabIndex={0} data-tab={tab}>
         {tab === "FILES" && <section data-testid="devtools-files">
-          <h3>受管目录</h3>
-          <p className="helper-text">这里只列出该 Project 已登记的受管目录。目录浏览接口尚未接入（待接入），因此不推断本机任意路径可读。</p>
-          <p className="helper-text">下面是一次读取时的快照，不是实时监视：目录在窗口打开前后被停用、归档或以同一路径重新登记，
-            都要重新读取才知道；Git 读取也会把服务端的拒绝原样呈现。</p>
-          {loading && <p className="helper-text" role="status">正在读取受管目录…</p>}
-          {resourceError && <p className="action-error" role="alert" data-testid="devtools-resource-error">{resourceError}</p>}
-          {!loading && !resourceError && resources.length === 0 && <p className="helper-text">当前项目没有登记受管目录；这不是“工作目录干净”的结论。</p>}
-          {resources.length > 0 && <ul className="devtools-list">{resources.map((resource) => <li key={resource.id}>
-            <span><code className="hash-code">{resource.canonicalRoot}</code>
-              <small>状态 {resource.status} · 资源修订 v{resource.revision} · 写身份已绑定：{resource.fileWriteIdentityBound ? "是" : "否"}</small></span>
-          </li>)}</ul>}
-          <button className="secondary-button" type="button" data-testid="devtools-reload-resources"
-            disabled={loading} onClick={() => void loadResources()}>重新读取受管目录</button>
-          <h3>本任务的受管产物</h3>
-          <p className="helper-text">受管产物是任务产物版本，工作目录文件是受管目录下的普通文件；两者来源不同，不混成同一版本。产物正文在右侧产物区按确切版本阅读。</p>
-          <Link className="text-link" to={`/tasks/${taskId}?tab=artifacts`}>打开任务产物版本</Link>
+          {!hasProject
+            ? <div data-testid="devtools-files-unavailable">
+              <h3>文件与产物 · 需要项目</h3>
+              <p className="helper-text">这段会话还没有关联项目，因此没有可登记的受管目录，也不推断本机任意路径可读。
+                网页预览不受此限制，可以在「网页」页签直接使用。</p>
+            </div>
+            : <>
+              <h3>受管目录</h3>
+              <p className="helper-text">这里只列出该 Project 已登记的受管目录。目录浏览接口尚未接入（待接入），因此不推断本机任意路径可读。</p>
+              <p className="helper-text">下面是一次读取时的快照，不是实时监视：目录在窗口打开前后被停用、归档或以同一路径重新登记，
+                都要重新读取才知道；Git 读取也会把服务端的拒绝原样呈现。</p>
+              {loading && <p className="helper-text" role="status">正在读取受管目录…</p>}
+              {resourceError && <p className="action-error" role="alert" data-testid="devtools-resource-error">{resourceError}</p>}
+              {!loading && !resourceError && resources.length === 0 && <p className="helper-text">当前项目没有登记受管目录；这不是“工作目录干净”的结论。</p>}
+              {resources.length > 0 && <ul className="devtools-list">{resources.map((resource) => <li key={resource.id}>
+                <span><code className="hash-code">{resource.canonicalRoot}</code>
+                  <small>状态 {resource.status} · 资源修订 v{resource.revision} · 写身份已绑定：{resource.fileWriteIdentityBound ? "是" : "否"}</small></span>
+              </li>)}</ul>}
+              <button className="secondary-button" type="button" data-testid="devtools-reload-resources"
+                disabled={loading} onClick={() => void loadResources()}>重新读取受管目录</button>
+              <h3>本任务的受管产物</h3>
+              <p className="helper-text">受管产物是任务产物版本，工作目录文件是受管目录下的普通文件；两者来源不同，不混成同一版本。产物正文在右侧产物区按确切版本阅读。</p>
+              {taskId === null
+                ? <p className="helper-text">当前没有关联任务，因此没有任务产物版本可读。</p>
+                : <Link className="text-link" to={`/tasks/${taskId}?tab=artifacts`}>打开任务产物版本</Link>}
+            </>}
         </section>}
 
-        <div hidden={tab !== "GIT"}><GitReadPanel key={`${scope}:${client.baseUrl}:${client.workspaceId}`} client={client}
-          projectId={projectId} resources={resources} resourceLoading={loading} resourceError={resourceError} /></div>
+        {/* 变更面板保持挂载：切走再切回不丢已读到的目录与拒绝原因。 */}
+        <div hidden={tab !== "GIT"}>{hasProject
+          ? <GitReadPanel key={`${scope}:${client.baseUrl}:${client.workspaceId}`} client={client}
+            projectId={projectId} resources={resources} resourceLoading={loading} resourceError={resourceError} />
+          : <section data-testid="devtools-git-unavailable">
+            <h3>变更 · 需要项目</h3>
+            <p className="helper-text">变更读取绑定项目的受管目录；当前会话没有关联项目，因此没有可核对的目录基线。
+              这不是「工作目录干净」的结论。</p>
+          </section>}</div>
+
+        {/* 网页页签常驻挂载：切走再切回不重建标签，也不重新加载页面。 */}
+        <div hidden={tab !== "WEB"}>
+          <BrowserPreviewPanel bridge={previewBridge} scope={previewScope} active={tab === "WEB"} />
+        </div>
 
         {tab === "TERMINAL" && <section data-testid="devtools-terminal">
           <h3>交互终端 · 未接入</h3>
@@ -138,7 +181,6 @@ export default function DevToolsPanel({ client, projectId, taskId, run, onClose 
             onClick={() => setDrawerTab((current) => current === "OUTPUT" ? null : "OUTPUT")}><Terminal aria-hidden="true" />执行输出</button>
           <span className="devtools-drawer-pending" aria-disabled="true"><SquareTerminal aria-hidden="true" />交互终端 · 待设计</span>
         </nav>
-        <button className="icon-button" type="button" aria-label="收起工具面板" data-testid="devtools-close" onClick={onClose}><X aria-hidden="true" /></button>
       </header>
 
       <div className="devtools-drawer-body" id={`${tabId}-output`} role="region" aria-labelledby={`${tabId}-output-toggle`} hidden={drawerTab !== "OUTPUT"}>

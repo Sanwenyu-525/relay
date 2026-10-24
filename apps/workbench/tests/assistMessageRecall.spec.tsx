@@ -143,7 +143,8 @@ describe("消息撤回（文件回退）", () => {
       } });
 
     const action = wrapper.get(`[data-testid="assist-recall-action-${userMessageId}"]`);
-    expect(action.text()).toContain("回退文件");
+    // 2026-10-24 用户指令：回退键改成与复制键同档的纯图标按钮，入口名由 aria-label 承载。
+    expect(action.attributes("aria-label")).toBe("回退文件");
     await action.trigger("click");
     await flush();
 

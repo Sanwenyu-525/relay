@@ -37,7 +37,8 @@ function setup() {
   });
   const check = vi.spyOn(client, "getCommandReceipt").mockRejectedValue(problem("RESOURCE_NOT_FOUND", 404));
   const element = (projectId = "project-1", taskId = "task-1") => createElement(MemoryRouter, {},
-    createElement(DevToolsPanel, { client, projectId, taskId, run: null, onClose: () => undefined }));
+    createElement(DevToolsPanel, { client, projectId, taskId, run: null,
+      previewBridge: null, previewScope: "workspace:conversation", onClose: () => undefined }));
   return { client, loadResources, loadConnections, read, check, element };
 }
 
@@ -255,7 +256,8 @@ it("执行输出的并行读取不会丢弃尚在途的受管目录配置", asyn
   context.loadResources.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
   vi.spyOn(context.client, "getRunGatewayOperations").mockResolvedValue([]);
   const view = await mountReact(createElement(MemoryRouter, {}, createElement(DevToolsPanel, { client: context.client,
-    projectId: "project-1", taskId: "task-1", run: { id: "run-1" } as RelayRun, onClose: () => undefined })));
+    projectId: "project-1", taskId: "task-1", run: { id: "run-1" } as RelayRun,
+    previewBridge: null, previewScope: "workspace:conversation", onClose: () => undefined })));
   try {
     await view.wrapper.get('[data-testid="devtools-tab-OUTPUT"]').trigger("click"); await flush();
     await act(async () => finish(resources));

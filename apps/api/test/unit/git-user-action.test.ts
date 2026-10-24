@@ -16,27 +16,32 @@ const base: UserGitReadRequest = {
   actionType: 'GIT_STATUS',
 };
 
-test('USER_ACTION 只放行 GIT_STATUS / GIT_DIFF，不放行任何写或 CLI 动作', () => {
+test('USER_ACTION 放行 Git 只读与 0134 文件只读，不放行查找/搜索、写入或 CLI 动作', () => {
   const origin = { kind: 'USER_ACTION', projectId: 'proj-1', resourceId: 'res-1' } as const;
   const allowed: [GatewayActionType, GatewayCapability][] = [
     ['GIT_STATUS', 'GIT_READ'],
     ['GIT_DIFF', 'GIT_READ'],
+    // 0134：工具面板「文件」页签的人工只读——目录浏览与文件正文读取。
+    ['LIST_DIRECTORY', 'FILE_QUERY'],
+    ['READ_FILE', 'FILE_READ'],
   ];
   for (const [action, capability] of allowed) {
     assert.equal(originAllows(origin, action, capability), true, `${action} 应放行`);
   }
-  // 人工只读不能被拿来触发写入、暂存、提交、推送、受控 CLI、文件读写或目录查询。
+  // 人工只读不能被拿来触发写入、暂存、提交、推送、受控 CLI、Git 日志或文件查找/搜索。
   const denied: [GatewayActionType, GatewayCapability][] = [
     ['GIT_STAGE', 'GIT_WRITE'], ['GIT_COMMIT', 'GIT_WRITE'], ['GIT_PUSH', 'GIT_WRITE'],
     ['GIT_LOG', 'GIT_READ'],
     ['CLI_RUN', 'CLI_RUN'], ['RUN_BUILD', 'CLI_RUN'], ['RUN_TEST', 'CLI_RUN'],
     ['WRITE_FILE', 'FILE_WRITE'], ['APPLY_CHANGESET', 'FILE_WRITE'],
-    ['LIST_DIRECTORY', 'FILE_QUERY'], ['FIND_PATHS', 'FILE_QUERY'], ['SEARCH_TEXT', 'FILE_QUERY'],
-    ['READ_FILE', 'FILE_READ'], ['READ_PUBLIC', 'FAKE_PUBLIC_READ'], ['WEB_FETCH', 'WEB_FETCH'],
+    ['FIND_PATHS', 'FILE_QUERY'], ['SEARCH_TEXT', 'FILE_QUERY'],
+    // 能力与动作错位同样不放行：借 FILE_QUERY 能力读文件或借 FILE_READ 列目录都不行。
+    ['READ_FILE', 'FILE_QUERY'], ['LIST_DIRECTORY', 'FILE_READ'],
+    ['READ_PUBLIC', 'FAKE_PUBLIC_READ'], ['WEB_FETCH', 'WEB_FETCH'],
     ['WRITE_MARKER', 'FAKE_WRITE'],
   ];
   for (const [action, capability] of denied) {
-    assert.equal(originAllows(origin, action, capability), false, `${action} 不应放行`);
+    assert.equal(originAllows(origin, action, capability), false, `${action}×${capability} 不应放行`);
   }
 });
 

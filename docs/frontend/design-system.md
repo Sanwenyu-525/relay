@@ -937,3 +937,30 @@ hover/focus 的颜色过渡用 motion.duration.fast；抽屉/面板用 panel；�
 `prefers-reduced-motion: reduce` 下不变量：仅有的过渡（复制键不透明度）置 `transition: none`，状态与图标照常切换。
 
 **第二轮（同日深夜）新增的同族件**：来源条状态徽牌 `.assist-source-state`、候选卡状态徽牌 `.assist-candidate-state` 与调用统计徽牌 `.execution-count` 同一档（细线 + `radius.badge` + caption 档），其中「等待你批准」与候选卡 PENDING 用 `--relay-color-status-warning-text` 琥珀档——这是消息流里仅有的两处状态强调，其余一律中性。来源条展开区改为行式排版（引用主文字、reason muted），「生成中草稿」收进 `.assist-draft` 浅底块（`bg.subtle` + `radius.control`，caption 说明行置顶，正文仍纯文本）；取值见[工作台 §38 第二轮](workbench-design.md#38-历史消息内容块的呈现2026-10-19)。
+
+### 9.21 左栏会话行的 ⋯ 虚化底与行宽收口（2026-10-24）
+
+用户两张截图，同一处 ⋯ 的两面：宽栏「会话名称过长时，鼠标悬停的更多菜单按钮会和名称重合」；窄栏「这种宽度就看不到更多菜单按钮了」。两处都是几何本身的结果，不是浮层错位。交互契约不变（仍是[工作台 §28.1](workbench-design.md#281-左栏recentworkrail)里那一个触发器与同一个面板）。
+
+**① 重合**：行按钮的左右内边距与 ⋯ 的 `inset-inline-end` 同为 `space.2`，而 ⋯ 是 32px 见方的绝对定位控件——标题盒的右缘就落在行右缘内 8px，⋯ 覆盖的正是标题盒最后 32px；标题一长，尾字必然压在这块区域下面。
+
+**② ⋯ 跑出栏外**：行是 grid 项，`min-width: auto` 让它的最小宽等于整段标题的自然宽（`.recent-work-title` 上的 `min-width: 0` 只管 flex 收缩，拦不住 grid 的自动最小尺寸），于是长标题把行撑得比栏还宽——标题被栏的 overflow 齐头切掉（不出现省略号），⋯ 被推到栏外、悬停也看不见。1280px 视口、栏 205px 下实测一条 40 字标题把整列行宽撑到 566px。修法是给 `.recent-work-row` 补 `min-width: 0`：轨道按栏宽定尺，标题回到设计里的「单行 + 省略号」，⋯ 留在栏内。**不改行高、不改标题字号**；窄档标题可用宽本来就是这个值（栏 176px 下约 110px），因此 160px 拖拽档的可读基线不受影响。
+
+**①的修法：不动几何，只加一层"虚化底"。** 悬停时若收窄标题可用宽，长标题会在指针落下的那一刻重新截断、整列文字跟着跳，所以行宽与行高都不变；改画在触发器的 `::before` 上，两层共用同一条从左透明的渐变：
+
+| 件 | 取值 | 理由 |
+|---|---|---|
+| `backdrop-filter` | `blur(4px)` | 把压过来的标题糊掉，图标落在柔和的灰雾上而不是字上 |
+| 底色 | `linear-gradient(to right, transparent, color-mix(in srgb, color.bg.subtle 78%, transparent) 62%)` | 右半段再压一档对比度；左端全透明，读起来只是「标题在右端淡出」 |
+| `mask-image` | 与底色同一条斜坡（`transparent → #000 62%`） | 让 blur 的边界跟着淡出，不在标题中间留「清晰／糊掉」的硬边 |
+| 横向范围 | `inset-inline: -space.2 0` | 向左多铺一档，渐变才有地方淡出（覆盖范围 40px） |
+| 纵向范围 | `inset-block: space.1` | 触发器 32px 高而行只有 `control.target.minimum`(24px)，不内缩会上下各溢出 4px、糊到相邻行 |
+
+**⋯ 自己仍是透明的**（2026-10-16 用户否掉的是「⋯ 自带色块」）。这层画在「背后」：底色是渐变的、左端透明，不是又一块实心底；`trigger` 的 `background-color` 仍是 `transparent`，浏览器用例逐字守着。图标压在 `::before` 之上靠的是给 `.recent-work-row-trigger > svg` 补的 `position: relative`——非定位的行内内容会被绝对定位的 `::before` 盖住（第一版就这样把 ⋯ 糊没了）。
+
+**数值来源与待验证**：`blur(4px)`、78%、62% 三档不是 token（token 里没有模糊半径与混色比例这一族），按「够糊掉 14px 标题、又不读成一块浅色方片」现场定档；真实 Windows 窗口与多 DPI 下的观感待复核，若后续要做成全站一致的浮层语言，应升级为 `blur.*` 与 `overlay.*` 两个 token 族而不是继续散写。
+
+**两档已知的观感代价**（都来自「不预留 ⋯ 的位置」这个选择，留位会让窄档标题再少 3 个字）：截断的省略号会被虚化底淡掉，读起来是「文字在右端淡出」而不是一个清晰的「…」；标题长度刚好停在 ⋯ 覆盖区时（例如栏 205px 下 14 字标题），最后一个字会被图标压住一部分，只是被虚化压低了对比度、不再抢读。
+
+**验证出口**：`apps/workbench/tests/browser/recentWorkRailDensity.spec.ts` 的「长标题压在 ⋯ 下面时虚化底盖住尾字，栏收窄后 ⋯ 仍留在栏内」一条，在真实 Chromium 里分两段——宽栏段（17rem）量虚化底的 `blur`／渐变／遮罩三条计算值、横向覆盖余量与纵向不越出行盒，并用同一块触发器区域「有／无虚化底」两张截图的亮度标准差下降证明字确实被糊掉；窄栏段（11rem）量行不越出滚动内容盒、`scrollLeft` 为 0、标题真的收成省略号、⋯ 整个落在栏内且看得见的文字右缘仍在它底下。截图 `apps/workbench/results/rail-title-veil.png`（17rem）与 `rail-title-veil-narrow.png`（11rem）。
+

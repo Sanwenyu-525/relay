@@ -120,8 +120,20 @@ export interface RelayWorkspaceDefaultDirectory {
   readonly displayName: string | null;
   readonly writeTier: RelayWriteTier | null;
   readonly defaultWriteTier: RelayWriteTier | null;
+  /** 0135（2026-10-24）：工作区上下文长度档位（单次调用预算）；null＝还没选过。 */
+  readonly contextBudgetTokens: RelayContextBudgetTokens | null;
   readonly status: RelayWorkspaceDefaultDirectoryStatus;
   readonly reason: string | null;
+  readonly revision: DecimalRevision;
+}
+
+/** 三档上下文长度：值就是单次调用预算（max_call_tokens）。 */
+export type RelayContextBudgetTokens = 262144 | 524288 | 1048576;
+
+/** 设置上下文长度档位的回执：只有工作区、档位与修订，没有任何目录或权限字段。 */
+export interface RelayWorkspaceContextBudgetResult {
+  readonly workspaceId: string;
+  readonly contextBudgetTokens: RelayContextBudgetTokens | null;
   readonly revision: DecimalRevision;
 }
 
@@ -218,7 +230,8 @@ export interface RelayAssistSessionDelete {
  *
  * 与上面几条不同：`sessionId` 是**新建的子会话**，不是命令目标那条源会话——源会话一行都没改。
  * 界面据此把左栏刷新后定位到新会话，标题里的「（1）」由服务端决定，客户端不自己拼编号。
- * `copiedMessages` 为 0 只说明这段讨论还没有可搬的历史，不是失败。
+ * `copiedMessages` 是搬进历史的已完成轮数；2026-10-24 起没有可搬历史的讨论由服务端按
+ * `INVALID_TRANSITION` 拒绝（界面也不再给出分叉入口），因此成功回执里它至少是 1。
  */
 export interface RelayAssistSessionFork {
   readonly sessionId: string;

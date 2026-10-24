@@ -4372,6 +4372,209 @@
           "intent": "research"
         }
       ]
+    },
+    {
+      "id": "project-collaboration-design-increments",
+      "name": "项目协作设计增量与专项入口",
+      "description": "补齐近期产品设计的任务书导航；规划与实现、目标规格与验收成绩分别成立。",
+      "stageIds": [],
+      "features": [
+        {
+          "id": "result-validity-guard",
+          "name": "成果有效性守护",
+          "description": "变化归并、补验方案、授权修复与按确切基线收尾。",
+          "code": [],
+          "docs": [
+            "Personal_Workflow_OS_Master_Spec.md",
+            "docs/requirements/post-v1-roadmap.md",
+            "docs/frontend/workbench-design.md",
+            "docs/testing/verification-plan.md"
+          ],
+          "prompts": [
+            "prompts/differentiated-project-experience.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "planned",
+          "note": "已有基础能力应先核对复用；本条新增体验仍为设计，任务书交付不代表开发或验收。"
+        },
+        {
+          "id": "project-handoff-rehearsal",
+          "name": "项目接手演练",
+          "description": "当前主线只读推演、资料补齐与新上下文复查一次。",
+          "code": [],
+          "docs": [
+            "Personal_Workflow_OS_Master_Spec.md",
+            "docs/requirements/post-v1-roadmap.md",
+            "docs/frontend/workbench-design.md",
+            "docs/testing/verification-plan.md"
+          ],
+          "prompts": [
+            "prompts/differentiated-project-experience.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "planned",
+          "note": "已有基础能力应先核对复用；本条新增体验仍为设计，任务书交付不代表开发或验收。"
+        },
+        {
+          "id": "decision-reconsideration-experience",
+          "name": "决策重审提醒",
+          "description": "沿已有决定前提复审补充提醒与可追溯处理入口。",
+          "code": [],
+          "docs": [
+            "Personal_Workflow_OS_Master_Spec.md",
+            "docs/requirements/post-v1-roadmap.md",
+            "docs/frontend/workbench-design.md",
+            "docs/testing/verification-plan.md"
+          ],
+          "prompts": [
+            "prompts/differentiated-project-experience.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "planned",
+          "note": "已有基础能力应先核对复用；本条新增体验仍为设计，任务书交付不代表开发或验收。"
+        },
+        {
+          "id": "pre-change-impact-preview",
+          "name": "修改前的影响预演",
+          "description": "变更草案的登记关系、推测、未核对范围与在途影响。",
+          "code": [],
+          "docs": [
+            "Personal_Workflow_OS_Master_Spec.md",
+            "docs/requirements/post-v1-roadmap.md",
+            "docs/frontend/workbench-design.md",
+            "docs/testing/verification-plan.md"
+          ],
+          "prompts": [
+            "prompts/differentiated-project-experience.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "planned",
+          "note": "已有基础能力应先核对复用；本条新增体验仍为设计，任务书交付不代表开发或验收。"
+        },
+        {
+          "id": "user-outcome-acceptance",
+          "name": "面向用户的成果验收",
+          "description": "确切版本自由试用、反馈、部分认可与必要检查。",
+          "code": [],
+          "docs": [
+            "Personal_Workflow_OS_Master_Spec.md",
+            "docs/requirements/post-v1-roadmap.md",
+            "docs/frontend/workbench-design.md",
+            "docs/testing/verification-plan.md"
+          ],
+          "prompts": [
+            "prompts/differentiated-project-experience.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "planned",
+          "note": "已有基础能力应先核对复用；本条新增体验仍为设计，任务书交付不代表开发或验收。"
+        },
+        {
+          "id": "decision-centered-workbench",
+          "name": "围绕待决定事项组织工作",
+          "description": "合并真实决定引用，呈现阻塞、依据与可继续条件。",
+          "code": [],
+          "docs": [
+            "Personal_Workflow_OS_Master_Spec.md",
+            "docs/requirements/post-v1-roadmap.md",
+            "docs/frontend/workbench-design.md",
+            "docs/testing/verification-plan.md"
+          ],
+          "prompts": [
+            "prompts/differentiated-project-experience.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "planned",
+          "note": "已有基础能力应先核对复用；本条新增体验仍为设计，任务书交付不代表开发或验收。"
+        },
+        {
+          "id": "software-outcome-workbench",
+          "name": "软件成果专用工作台",
+          "description": "Relay 软件功能的稳定试用、返工版本切换与试用数据保护。",
+          "code": [],
+          "docs": [
+            "Personal_Workflow_OS_Master_Spec.md",
+            "docs/requirements/post-v1-roadmap.md",
+            "docs/frontend/workbench-design.md",
+            "docs/testing/verification-plan.md"
+          ],
+          "prompts": [
+            "prompts/differentiated-project-experience.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "planned",
+          "note": "已有基础能力应先核对复用；本条新增体验仍为设计，任务书交付不代表开发或验收。"
+        },
+        {
+          "id": "external-agent-shared-tasks",
+          "name": "项目事项与外部 Agent 共享任务",
+          "description": "本机主动领取、独立验收、返工、批准集成与业务完成。",
+          "code": [],
+          "docs": [
+            "Personal_Workflow_OS_Master_Spec.md",
+            "docs/requirements/post-v1-roadmap.md",
+            "docs/frontend/workbench-design.md",
+            "docs/testing/verification-plan.md",
+            "docs/decisions/ADR-033-external-agent-shared-tasks.md"
+          ],
+          "prompts": [
+            "prompts/external-agent-shared-tasks.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "planned",
+          "note": "已有基础能力应先核对复用；本条新增体验仍为设计，任务书交付不代表开发或验收。"
+        },
+        {
+          "id": "persistent-project-agent-team",
+          "name": "项目级长期 Agent 团队",
+          "description": "稳定成员、跨会话协作、事件巡检与真实生命周期恢复。",
+          "code": [],
+          "docs": [
+            "Personal_Workflow_OS_Master_Spec.md",
+            "docs/requirements/post-v1-roadmap.md",
+            "docs/frontend/workbench-design.md",
+            "docs/testing/verification-plan.md",
+            "docs/decisions/ADR-034-persistent-project-agent-team.md"
+          ],
+          "prompts": [
+            "prompts/persistent-project-agent-team.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "planned",
+          "note": "已有基础能力应先核对复用；本条新增体验仍为设计，任务书交付不代表开发或验收。"
+        },
+        {
+          "id": "scheduled-task-autostart",
+          "name": "周期定时启动任务 N08",
+          "description": "接续已有定时任务实现，核对授权、上一任务终态、冻结依据与恢复。",
+          "code": [
+            "apps/api/src/application/scheduled-tasks.ts",
+            "apps/api/src/application/scheduled-task-admission.ts"
+          ],
+          "docs": [
+            "Personal_Workflow_OS_Master_Spec.md",
+            "docs/requirements/post-v1-roadmap.md",
+            "docs/frontend/workbench-design.md",
+            "docs/testing/verification-plan.md"
+          ],
+          "prompts": [
+            "prompts/post-v1-collaboration.md"
+          ],
+          "tests": [],
+          "acceptance": [],
+          "intent": "current",
+          "note": "已有实现与后续修复先核对统一验收表；任务书补齐不表示完整出口通过。"
+        }
+      ]
     }
   ]
 }

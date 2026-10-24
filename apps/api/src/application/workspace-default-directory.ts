@@ -40,8 +40,10 @@ export async function readWorkspaceDefaultDirectory(db: DbExecutor, workspaceId:
   const configured = await repositories.workspaces.readDefaultDirectory(workspaceId);
   const revision = toDecimalString(configured?.revision ?? 0n);
   const defaultWriteTier = configured?.default_write_tier ?? null;
+  const contextBudget = configured?.context_budget_tokens ?? null;
   const empty = { resource_id: null, canonical_root: null, display_name: null, write_tier: null,
-    default_write_tier: defaultWriteTier, status: 'UNSET', reason: null, revision };
+    default_write_tier: defaultWriteTier, context_budget_tokens: contextBudget,
+    status: 'UNSET', reason: null, revision };
   if (configured?.resource_id == null) return empty;
   const resource = await repositories.gateway.readResource(configured.resource_id);
   if (resource?.workspace_id !== workspaceId) {
@@ -52,6 +54,7 @@ export async function readWorkspaceDefaultDirectory(db: DbExecutor, workspaceId:
   return { resource_id: resource.id, canonical_root: resource.canonical_root,
     display_name: basename(resource.canonical_root) || resource.canonical_root,
     write_tier: access?.write_tier ?? 'READ_ONLY', default_write_tier: defaultWriteTier,
+    context_budget_tokens: contextBudget,
     status: reason === null ? 'READY' : 'UNAVAILABLE',
     reason, revision };
 }
@@ -145,6 +148,57 @@ export async function setWorkspaceDefaultWriteTier(db: DbExecutor, input: {
       }
       const saved = await repositories.workspaces.setDefaultWriteTier(input.workspaceId, input.tier);
       return { workspace_id: input.workspaceId, default_write_tier: saved.default_write_tier,
+        revision: toDecimalString(saved.revision) };
+    } });
+}
+
+/** 0135（2026-10-24）：允许的三档上下文长度。值即单次调用预算（max_call_tokens）。 */
+export const CONTEXT_BUDGET_TIERS = [262_144, 524_288, 1_048_576] as const;
+export type ContextBudgetTokens = (typeof CONTEXT_BUDGET_TIERS)[number];
+
+/**
+ * 工作区级上下文长度档位（2026-10-24 用户指令「上下文需要三档 256/512/1024，设置页与输入框圆环
+ * 都能调」）。
+ *
+ * 三档就是单次调用预算的取值，不新增第二种预算口径：它和 `default_write_tier` 共用同一行与同一个
+ * 修订号——两处讲的都是「这个工作区的默认」，分开计数会让一条 CAS 管不住另一处选择。列可空＝还没
+ * 选过，读取方按进程默认值解释；这里允许写回 null（清除选择）而不是把空写成 0。
+ * 预算只决定「申请多大」，不授予任何写权限、不绕过 Gateway 与批准闸门。
+ */
+export async function setWorkspaceContextBudget(db: DbExecutor, input: {
+  workspaceId: string; commandId: string; expectedRevision: string; budgetTokens: ContextBudgetTokens | null;
+}): Promise<CommandOutcome<JsonObject>> {
+  const revision = requireRevision(input.expectedRevision, 'expected_revision');
+  if (input.budgetTokens !== null &&
+      !CONTEXT_BUDGET_TIERS.includes(input.budgetTokens as ContextBudgetTokens)) {
+    throw invalidTransition('上下文长度只有 256K／512K／1M 三档。');
+  }
+  return runIdempotentCommand(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
+    commandId: input.commandId,
+    commandType: 'SetWorkspaceContextBudget',
+    target: { workspace_id: input.workspaceId },
+    body: { expected_revision: toDecimalString(revision), context_budget_tokens: input.budgetTokens },
+    execute: async (repositories) => {
+      if (await repositories.workspaces.lockAuthority(input.workspaceId, 'update') === undefined) {
+        throw resourceNotFound('Workspace');
+      }
+      const committed = await repositories.receipts.findReceipt({
+        scopeKey: httpCommandScopeKey(input.workspaceId), commandId: input.commandId });
+      if (committed !== undefined) return committed.result_ref;
+      const current = await repositories.workspaces.readDefaultDirectory(input.workspaceId);
+      if ((current?.revision ?? 0n) !== revision) {
+        // 目标已达成的重放不是冲突：防的是覆盖别人不同的选择，不是重复声明同一件事。
+        if ((current?.context_budget_tokens ?? null) === input.budgetTokens) {
+          return { workspace_id: input.workspaceId,
+            context_budget_tokens: current?.context_budget_tokens ?? null,
+            revision: toDecimalString(current?.revision ?? 0n) };
+        }
+        throw revisionConflict({
+          entityType: 'WORKSPACE_DEFAULT_DIRECTORY', expectedRevision: toDecimalString(revision),
+          actualRevision: toDecimalString(current?.revision ?? 0n) });
+      }
+      const saved = await repositories.workspaces.setContextBudget(input.workspaceId, input.budgetTokens);
+      return { workspace_id: input.workspaceId, context_budget_tokens: saved.context_budget_tokens,
         revision: toDecimalString(saved.revision) };
     } });
 }

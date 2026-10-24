@@ -287,10 +287,12 @@ async function openChat(page: Page, over: Partial<State> = {},
   if (viewport !== null) await page.setViewportSize(viewport);
   await connect(page);
   await expect(page.getByTestId("assist-composer")).toBeVisible({ timeout: 20_000 });
-  // 未绑定目录时这一行整块不出现（2026-10-17 用户指令「不要有这个提示」）：入口等它等于永远等不到，
+  // 未绑定目录时这一行整块不出现（2026-10-17 用户指令「不要有这个提示」），完整且空时同样不出现
+  // （2026-10-24 用户指令「没有 git diff 的时候不显示这个红框部分」）：入口等它等于永远等不到，
   // 因此按状态分岔。输入卡已经出现＝会话渲染完，此时断「没有这一行」才是有内容的断言。
-  if (state.unbound) await expect(page.getByTestId("conversation-diff-toggle")).toHaveCount(0);
-  else await expect(page.getByTestId("conversation-diff-toggle")).toBeVisible({ timeout: 20_000 });
+  if (state.unbound || state.diffMode === "empty") {
+    await expect(page.getByTestId("conversation-diff-toggle")).toHaveCount(0);
+  } else await expect(page.getByTestId("conversation-diff-toggle")).toBeVisible({ timeout: 20_000 });
 }
 
 function diffEntry(page: Page): Locator { return page.getByTestId("conversation-diff-toggle"); }
@@ -538,19 +540,24 @@ test.describe("会话局部与总 diff 的真实布局", () => {
     expect(state.writes).toEqual([`${prefix}/assist-sessions/${sessionId}/conversation-diff/baseline`]);
   });
 
-  test("状态彼此可辨：非 Git 根 / 空净变化 / 目录不可读都不画成 +0 −0", async ({ page }) => {
+  test("状态彼此可辨：非 Git 根 / 目录不可读都不画成 +0 −0", async ({ page }) => {
     await openChat(page, { diffMode: "notGit" });
     await expect(page.getByTestId("conversation-diff-toggle"))
       .toContainText("该目录不是 Git 根，首版不统计");
     expect(await page.getByTestId("conversation-diff-toggle").innerText()).not.toMatch(/[+−]\s*0/u);
   });
 
-  test("空净变化与非 Git 根文案不同，也不同于统计中", async ({ page }) => {
+  test("空净变化不占位：入口整行不出现，也不画成 +0 −0", async ({ page }) => {
     await openChat(page, { diffMode: "empty" });
-    await expect(page.getByTestId("conversation-diff-toggle")).toContainText("本次对话 · 暂无文件变化");
-    await page.getByTestId("conversation-diff-toggle").click();
-    await expect(page.getByTestId("conversation-diff-empty")).toBeVisible();
-    expect(await diffPanel(page).innerText()).not.toMatch(/[+−]\s*0/u);
+    // 2026-10-24 用户指令「没有 git diff 的时候不显示这个红框部分」：完整且空的结果不再占位，
+    // 输入卡上方既没有「本次对话 · 暂无文件变化」也没有展开入口。
+    await expect(page.getByTestId("conversation-diff-toggle")).toHaveCount(0);
+    await expect(page.locator('[data-region="conversation-diff"]')).toHaveCount(0);
+    // 不出现不等于不查：统计照旧读，写入之后同一入口会自己长出来。
+    expect(state.diffReads).toBeGreaterThan(0);
+    // 这一行消失不影响同屏的输入卡与目录细条。
+    await expect(composer(page)).toBeVisible();
+    await page.locator(".collab-center").screenshot({ path: "results/conversation-diff-empty.png" });
   });
 
   test("目录不可读时正文与历史一并隐藏，只说明原因", async ({ page }) => {

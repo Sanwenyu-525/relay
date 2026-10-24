@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import type { AssistGoalRow, AssistMessageRow } from '../infrastructure/database-schema.js';
+import type { AssistGoalRow, AssistMessageRow, AssistPlanRow } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import { PlanGoalRepository } from '../assist/plan-goal-repository.js';
@@ -464,7 +464,8 @@ export async function runAssistGoalTick(db: DbExecutor, options: {
   return result;
 }
 
-/** 目标轮次提示词需要的那段状态（纯数据，不含能力）。 */
-export function goalRoundState(goal: AssistGoalRow, planVersion: number | null): JsonObject {
-  return goalStateForPrompt(goal, planVersion);
+/** 目标轮次提示词需要的那段状态（纯数据，不含能力）。`plan` 必须是目标绑定的那一版。 */
+export function goalRoundState(goal: AssistGoalRow,
+  plan: AssistPlanRow | null | undefined): JsonObject {
+  return goalStateForPrompt(goal, plan);
 }

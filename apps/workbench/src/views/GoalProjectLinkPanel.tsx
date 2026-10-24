@@ -59,6 +59,10 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
   /** 关联成功后把新的 Project 修订与 Goal 集合交回调用方。 */
   onLinked?: (link: RelayProjectGoalLink) => void }) {
   const [projects, setProjects] = useState<readonly RelayProjectListItem[] | null>(null);
+  /** 下一页游标（禅道 #19，DEV-0141）：来自最近一次成功读取；null 表示已读到最后。 */
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreError, setMoreError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [link, setLink] = useState<RelayProjectGoalLink | null>(null);
   const [pending, setPending] = useState<PendingLink | null>(null);
@@ -73,6 +77,9 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
   const busyRef = useRef(false);
   const disposed = useRef(false);
   const scope = useRef(0);
+  /** 读取代次：刷新与续页互相使对方的在途响应失效，迟到页不得串入新范围。 */
+  const readToken = useRef(0);
+  const moreBusyRef = useRef(false);
 
   useEffect(() => () => { disposed.current = true; scope.current++; }, []);
 
@@ -99,24 +106,62 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
   }, [client, goalId]);
 
   /**
-   * 重新读取项目列表。默认会清空既有错误；冲突路径要在读取后继续显示
-   * 「修订已变化」的原因，因此提供 keepError，避免刚写好的原因被自己抹掉。
+   * 重新读取项目列表（首分页）。刷新会清空已加载范围与剩余游标，重读第一页；
+   * 在途续页响应因读取代次变化被隔离，不得串入刷新后的列表。
+   * 冲突路径要在读取后继续显示「修订已变化」的原因，因此提供 keepError。
    */
   const load = useCallback(async (keepError = false) => {
-    const request = scope.current;
+    const request = ++readToken.current;
+    const scopeId = scope.current;
     if (!keepError) setError(null);
+    setMoreError(null);
     try {
       const page = await client.getProjectsPage("active", null);
-      if (disposed.current || request !== scope.current) return;
+      if (disposed.current || scopeId !== scope.current || request !== readToken.current) return;
       setProjects(page.items);
+      setNextCursor(page.nextCursor);
+      moreBusyRef.current = false;
+      setLoadingMore(false);
     } catch (caught) {
-      if (disposed.current || request !== scope.current) return;
+      if (disposed.current || scopeId !== scope.current || request !== readToken.current) return;
       setProjects(null);
+      setNextCursor(null);
+      moreBusyRef.current = false;
+      setLoadingMore(false);
       setError(`项目列表本次读取失败，不能据此关联：${describeLiveError(caught).message}`);
     }
   }, [client]);
 
   useEffect(() => { void load(); }, [load]);
+
+  /**
+   * 读取后续分页（#19）：复用 getProjectsPage 既有 cursor/nextCursor，不自动循环拉全量。
+   * 合并去重（按 Project id）；暂态失败保留已读列表与原游标，可在原游标重试；
+   * 只读不改关联事实，待核对关联门槛不受影响；归档项目仍不在 active 列表里。
+   */
+  const loadMore = useCallback(async () => {
+    if (projects === null || nextCursor === null || moreBusyRef.current) return;
+    moreBusyRef.current = true;
+    const request = ++readToken.current;
+    const scopeId = scope.current;
+    setLoadingMore(true); setMoreError(null);
+    try {
+      const page = await client.getProjectsPage("active", nextCursor);
+      if (disposed.current || scopeId !== scope.current || request !== readToken.current) return;
+      setProjects((current) => {
+        if (current === null) return page.items;
+        const seen = new Set(current.map((item) => item.id));
+        return [...current, ...page.items.filter((item) => !seen.has(item.id))];
+      });
+      setNextCursor(page.nextCursor);
+    } catch (caught) {
+      if (disposed.current || scopeId !== scope.current || request !== readToken.current) return;
+      setMoreError(`后续项目读取失败：${describeLiveError(caught).message}；已读项目与原游标保留，可重试。`);
+    } finally {
+      moreBusyRef.current = false;
+      if (!disposed.current) setLoadingMore(false);
+    }
+  }, [client, nextCursor, projects]);
 
   /** 回执核对：只按原 command_id 读，不猜结果。 */
   const checkReceipt = useCallback(async (record: PendingLink, request: number) => {
@@ -233,6 +278,18 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
         <button className="secondary-button" type="button" data-testid="goal-link-refresh"
           disabled={busy} onClick={() => void load()}>刷新项目列表</button>
       </div>
+      {nextCursor !== null && <div className="form-actions">
+        <button className="secondary-button" type="button" data-testid="goal-link-more" disabled={loadingMore}
+          onClick={() => void loadMore()}>{loadingMore ? "正在读取后续项目" : "加载更多项目"}</button>
+        <small className="helper-text">还有未读的进行中项目；逐页读取，不自动拉全量。</small>
+      </div>}
+      {moreError && <p className="action-error" role="alert" data-testid="goal-link-more-error">{moreError}</p>}
+      <p className="helper-text" data-testid="goal-link-page-state">
+        {nextCursor !== null
+          ? `已列出前 ${projects.length} 个进行中的项目，仍有后续页未读。`
+          : `已列出全部 ${projects.length} 个进行中的项目。`}
+        只列进行中的项目；已归档项目不在这里关联。
+      </p>
     </>}
     {error && <p className="action-error" role="alert" data-testid="goal-link-error">{error}</p>}
     {pending !== null && <div className="warning-callout" data-testid="goal-link-pending">

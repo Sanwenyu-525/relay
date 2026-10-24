@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test, { after, before } from 'node:test';
 
 import { startTestApi, workspacePath } from './api-harness.js';
+import { sql } from 'kysely';
 import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
 import { bindAssistSessionDirectory, createAssistSession } from '../../src/application/assist-commands.js';
 import { openWorkingDirectory } from '../../src/application/open-working-directory.js';
@@ -115,6 +116,10 @@ test('DD-01/03/04: only unscoped AGENT creation inherits; explicit project and o
   const learning = await createAssistSession(app.db, { workspaceId: f.workspaceId,
     conversationMode: 'LEARNING', commandId: randomUUID(), title: 'learn' });
   assert.equal(learning.result.project_id, null);
+  // 分叉要求可搬历史（2026-10-24）：先给这条会话落一轮已完成的消息。
+  await sql`insert into assist_messages (id, session_id, seq, role, status, intent, content)
+    values (${randomUUID()}, ${fresh.result.session_id}, 1, 'USER', 'COMPLETED', 'DISCUSS', '说过一句话')`
+    .execute(app.db);
   const fork = await forkAssistSession(app.db, { workspaceId: f.workspaceId,
     sessionId: row!.id, commandId: randomUUID(), expectedRevision: '0' });
   assert.equal((await r.assist.readSession(fork.result.session_id))?.working_directory_source, 'WORKSPACE_DEFAULT');

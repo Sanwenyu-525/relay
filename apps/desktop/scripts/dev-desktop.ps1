@@ -276,6 +276,63 @@ if (-not $env:RELAY_DESKTOP_DATA_ROOT -and
   Write-Host "dev 桌面数据目录：$env:RELAY_DESKTOP_DATA_ROOT"
 }
 
+# 与菜单 DesktopDev 对齐：试用库未运行时自动启动，否则窗口 setup 钩子才报
+# PostgreSQL is unavailable 并 panic（exit 101），用户看到的是「启动不了」。
+# 同一分支内再按暂存迁移集补库（先 stage-api 刷新暂存、后迁移，与菜单路径同序），
+# 否则并行任务新增迁移后窗口报 PostgreSQL schema is incompatible。哈希算法与
+# test-desktop.ps1 的 Get-MigrationSetHash 逐字一致，两处需同步维护。
+if ([IO.Path]::GetFullPath($ConfigPath) -eq [IO.Path]::GetFullPath($trialConfig)) {
+  $trialStatePath = Join-Path $repoRoot '.relay-test\session.json'
+  if (-not (Test-Path -LiteralPath $trialStatePath -PathType Leaf)) {
+    throw '试用测试环境尚未初始化（.relay-test\session.json 不存在）；请先运行 dev-stack.bat Start 准备测试环境。'
+  }
+  $trialState = Get-Content -LiteralPath $trialStatePath -Raw | ConvertFrom-Json
+  if (-not $trialState.PSObject.Properties['port']) { throw 'session.json 缺少 port 字段，无法启动试用数据库；请重新运行 dev-stack.bat Start。' }
+  $trialCluster = Join-Path $repoRoot '.relay-test\cluster'
+  $trialPgCtl = Join-Path $repoRoot '.research\runtime-cache\postgresql-18.6-2\pgsql\bin\pg_ctl.exe'
+  $dbBusy = @(Get-NetTCPConnection -State Listen -LocalPort $trialState.port -ErrorAction SilentlyContinue)
+  if (-not $dbBusy.Count) {
+    if (-not (Test-Path -LiteralPath (Join-Path $trialCluster 'PG_VERSION') -PathType Leaf)) {
+      throw "试用数据库目录缺失（$trialCluster）；请先运行 dev-stack.bat Start 初始化测试环境。"
+    }
+    if (-not (Test-Path -LiteralPath $trialPgCtl -PathType Leaf)) {
+      throw "未找到便携 PostgreSQL（$trialPgCtl）；请按部署文档准备 .research\runtime-cache 运行时缓存。"
+    }
+    Write-Host "试用数据库未运行，正在启动（127.0.0.1:$($trialState.port)）…"
+    & $trialPgCtl start -D $trialCluster -l (Join-Path $repoRoot '.relay-test\postgres.log') -o "-h 127.0.0.1 -p $($trialState.port)" -w -t 30
+    if ($LASTEXITCODE -ne 0) { throw "试用数据库启动失败（exit $LASTEXITCODE）；日志见 .relay-test\postgres.log" }
+  }
+  $trialMigrations = Join-Path $resourceRoot 'api\migrations'
+  $migrationLines = @(Get-ChildItem -LiteralPath $trialMigrations -File -Filter '*.sql' | Sort-Object Name | ForEach-Object {
+    $_.Name + ':' + (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+  })
+  if ($migrationLines.Count) {
+    $hashBytes = [Text.Encoding]::UTF8.GetBytes(($migrationLines -join "`n") + "`n")
+    $hashSha = [Security.Cryptography.SHA256]::Create()
+    try { $devSchemaHash = ([BitConverter]::ToString($hashSha.ComputeHash($hashBytes))).Replace('-', '') } finally { $hashSha.Dispose() }
+    $recordedHash = if ($trialState.PSObject.Properties['dev_schema_hash']) { $trialState.dev_schema_hash } else { $null }
+    $stateReady = if ($trialState.PSObject.Properties['ready']) { [bool]$trialState.ready } else { $false }
+    if ($devSchemaHash -ne $recordedHash) {
+      Write-Host '数据库结构落后于暂存迁移集，正在补迁移…'
+      if ($stateReady) {
+        $backup = Join-Path $repoRoot ('.relay-test\before-upgrade-' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '.dump')
+        & (Join-Path (Split-Path -Parent $trialPgCtl) 'pg_dump.exe') "postgresql://relay_api_admin@127.0.0.1:$($trialState.port)/relay_trial" -w -Fc -f $backup
+        if ($LASTEXITCODE -ne 0) { throw "迁移前备份数据库失败（exit $LASTEXITCODE）" }
+        Write-Host "已备份试用库：$backup"
+      }
+      $env:RELAY_MIGRATION_DB_URL = "postgresql://relay_migrator@127.0.0.1:$($trialState.port)/relay_trial"
+      & $node (Join-Path $resourceRoot 'api\dist\src\cli\migrate.js')
+      if ($LASTEXITCODE -ne 0) { Remove-Item Env:RELAY_MIGRATION_DB_URL -ErrorAction SilentlyContinue; throw "migrate 失败（exit $LASTEXITCODE）" }
+      & $node (Join-Path $resourceRoot 'api\dist\src\cli\install-graph.js')
+      if ($LASTEXITCODE -ne 0) { Remove-Item Env:RELAY_MIGRATION_DB_URL -ErrorAction SilentlyContinue; throw "install-graph 失败（exit $LASTEXITCODE）" }
+      Remove-Item Env:RELAY_MIGRATION_DB_URL -ErrorAction SilentlyContinue
+      $trialState.dev_schema_hash = $devSchemaHash
+      [IO.File]::WriteAllText($trialStatePath, ($trialState | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+      Write-Host '数据库结构已升级。'
+    }
+  }
+}
+
 # 3) 前端 Vite：tauri dev 依赖 devUrl 可达；已监听则复用。
 $portBusy = Get-NetTCPConnection -State Listen -LocalPort $FrontendPort -ErrorAction SilentlyContinue
 $viteProcess = $null

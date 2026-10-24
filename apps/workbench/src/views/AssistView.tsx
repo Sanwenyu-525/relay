@@ -277,6 +277,13 @@ const emptyFirstProcess: FirstMessageProcess = { draft: "", pending: null, busy:
 export type { PendingFirstMessage };
 export type AssistNavigationState = {
   readonly dirty: boolean;
+  /**
+   * 不可恢复的未保存事实（2026-10-24 P0-2）：暂存/上传中的附件、首条草稿、技能输入、
+   * 来源选择等**不在本机草稿持久化里**、离页即丢的输入。`dirty` 仍表示「有任何输入」
+   * （含可按会话恢复的正文草稿），两者语义分开：离页守卫只拦 `unsaved`，
+   * 可恢复的正文不重复弹确认（2026-10-19 用户指令）。
+   */
+  readonly unsaved: boolean;
   readonly discard?: () => void;
   readonly pending: { readonly commandId: string; readonly commandType: string;
     readonly sessionId: string | null } | null;
@@ -286,7 +293,7 @@ export type AssistNavigationState = {
    */
   readonly restoreFocus?: () => void;
 };
-const cleanNavigationState: AssistNavigationState = { dirty: false, pending: null };
+const cleanNavigationState: AssistNavigationState = { dirty: false, unsaved: false, pending: null };
 
 /**
  * 「保留并继续编辑」的编辑焦点恢复：光标/选区来自用户原来的编辑位置——
@@ -751,14 +758,20 @@ onExecutionPrepared?: (taskId: string) => void;
     composing: firstComposing, onRequestFocus: restoreFirstDraftFocus,
   });
 
-useEffect(() => {
+  useEffect(() => {
     if (!standalone && !embedded) return;
-    // 首条草稿与已选资料是同一份未保存保护：未发送的首条输入离页同样要经过守卫，
-    // 否则普通 Link 导航会静默丢掉它。存在未决命令时上层守卫会先拒绝 discard，这里照常投影即可。
+    /**
+     * 首条草稿已按作用域留在本机（`firstDraftScope`，CollaborationView 写入
+     * composerDrafts，离开再回来原文仍在），与正文草稿同一待遇：进 `dirty` 不进
+     * `unsaved`。来源选择、技能选择与暂存附件没有持久化，离页即丢，必须保护。
+     * 未决命令在途时上层守卫先拒绝 discard，这里照常投影。
+     */
     onNavigationStateChange?.({
       dirty: sessionNavigation.dirty || selectedRefs.length > 0 || first.draft.trim() !== "" || firstSkillKey !== ""
         // 未发送的图片同样算未保存内容（§33.2）：它们不在草稿持久化里，离页即丢。
         || stagedFirst.items.length > 0,
+      unsaved: sessionNavigation.unsaved || firstSkillKey !== ""
+        || selectedRefs.length > 0 || stagedFirst.items.length > 0,
       discard: () => { sessionNavigation.discard?.(); setSelectedRefs([]); setFirstSkillKey("");
         stagedFirst.clear(); updateFirst({ draft: "" }); },
       pending: pendingFirst ? { commandId: pendingFirst.modelSelection && !pendingFirst.modelSelectionConfirmed
@@ -2672,6 +2685,12 @@ function AssistMessageRow({ client, target, message, preview, previewError, onRe
   const [copyDone, setCopyDone] = useState<string | null>(null);
   const withdrawn = message.withdrawnAt !== null;
   const canRecall = user && message.status === "COMPLETED" && !withdrawn && message.recall === null;
+  /* 0132 悬停提示：动作说明与禁用原因共用这一处出口（2026-10-24 用户指令：说明句改成 tooltip）。
+     提示挂在外层 span 上而不是按钮上——disabled 的 <button> 不派发鼠标事件，挂在按钮身上时
+     「为什么现在点不了」恰好会在最需要的时候看不到。 */
+  const recallHint = recallDisabledReason ?? "这会将改动回滚到这条消息之前";
+  const { tooltipHandlers: recallTooltipHandlers, tooltipNode: recallTooltipNode } =
+    usePathTooltip(() => (canRecall ? recallHint : null), "assist-recall-tooltip", { arrow: true });
   /* 取消意图要在行内一直可读：PENDING 已不标状态词，三点又在取消中隐藏，
      不补这一句就变成整行没有任何状态。RUNNING 的呈现逐字沿用原「正在生成（正在取消）」。 */
   const inFlight = message.status === "PENDING" || message.status === "RUNNING";
@@ -2714,29 +2733,31 @@ function AssistMessageRow({ client, target, message, preview, previewError, onRe
           : <div className="assist-message-content assist-message-markdown">
             <SafeMarkdown source={message.content} codeCopy /></div>}
       </details>}
-    {!withdrawn && user && message.content !== null && message.content !== "" && <div className="agent-message-footer">
-      {/* 用户消息没有用量行可与复制键常驻同排：平时收起、悬停或聚焦才出现（页面原型 V5.0 的悬停操作）。
-          纯客户端剪贴板动作，与助手回复的复制同一语义；失败只还原按钮，不发成功回执。 */}
-      <button className="icon-button agent-message-copy" type="button"
-        data-testid={`assist-copy-user-${message.id}`}
-        aria-label={copyDone === message.id ? "已复制这条消息" : "复制这条消息"}
-        title={copyDone === message.id ? "已复制" : "复制这条消息"}
-        onClick={() => void navigator.clipboard?.writeText(message.content ?? "").then(
-          () => setCopyDone(message.id), () => setCopyDone(null))}>
-        <Copy aria-hidden="true" />
-      </button>
-    </div>}
-    {/* 0132：入口叫「回退文件」而不是「撤回」，避免被读成删除消息（工作台 §27.3.1）。 */}
-    {canRecall && <div className="assist-recall-action">
-      <button className="text-link" type="button"
-        data-testid={`assist-recall-action-${message.id}`}
-        disabled={recallBusy || recallDisabledReason !== null}
-        title={recallDisabledReason ?? "将这条消息之后的文件修改恢复到发送前"}
-        onClick={onRecall}>
-        <RotateCcw aria-hidden="true" />{recallBusy ? "正在回退…" : "回退文件"}
-      </button>
-      <span className="helper-text">{recallDisabledReason
-        ?? "恢复这条消息发送之前的相关文件；不会删除聊天或业务记录。"}</span>
+    {!withdrawn && user && ((message.content !== null && message.content !== "") || canRecall) &&
+      <div className="agent-message-footer">
+      {/* 0132：回退键与复制键同排，回退在左（2026-10-24 用户指令）。两枚都是纯图标键，
+          随页脚收起，悬停或聚焦才出现（页面原型 V5.0 的悬停操作）。
+          复制是纯客户端剪贴板动作，与助手回复的复制同一语义；失败只还原按钮，不发成功回执。 */}
+      {canRecall && <span className="assist-recall-button-wrap" {...recallTooltipHandlers}>
+        <button className="icon-button" type="button"
+          data-testid={`assist-recall-action-${message.id}`}
+          aria-label={recallBusy ? "正在回退文件" : "回退文件"}
+          aria-busy={recallBusy || undefined}
+          disabled={recallBusy || recallDisabledReason !== null}
+          onClick={onRecall}>
+          <RotateCcw aria-hidden="true" />
+        </button>
+      </span>}
+      {message.content !== null && message.content !== "" &&
+        <button className="icon-button agent-message-copy" type="button"
+          data-testid={`assist-copy-user-${message.id}`}
+          aria-label={copyDone === message.id ? "已复制这条消息" : "复制这条消息"}
+          title={copyDone === message.id ? "已复制" : "复制这条消息"}
+          onClick={() => void navigator.clipboard?.writeText(message.content ?? "").then(
+            () => setCopyDone(message.id), () => setCopyDone(null))}>
+          <Copy aria-hidden="true" />
+        </button>}
+      {recallTooltipNode}
     </div>}
     {recallError !== null && <p className="action-error" role="alert"
       data-testid={`assist-recall-error-${message.id}`}>{recallError}</p>}
@@ -3466,17 +3487,22 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   }, [standalone, externalReadBlockedReason]);
   useEffect(() => {
     if (!standalone && !embedded) return;
+    // `dirty` 与 `unsaved` 分开（2026-10-24 P0-2）：正文草稿已按会话留在本机、可恢复，
+    // 不进 `unsaved`；暂存/上传中的附件、技能输入与意图没有持久化，离页即丢，必须保护。
     onNavigationStateChange({ dirty: learningNavigation.dirty || stagedSession.items.length > 0 ||
         Boolean(draft.trim() || skillInputText.trim() || (standalone && (selectedSkillKey || intent !== "DISCUSS"))),
+      unsaved: learningNavigation.unsaved || uploadingAttachments || stagedSession.items.length > 0 ||
+        Boolean(skillInputText.trim() || (standalone && (selectedSkillKey || intent !== "DISCUSS"))),
       discard: () => { discardDraft(); learningNavigation.discard?.(); },
       pending: pending ? { commandId: pending.commandId,
         commandType: pending.kind === "send" ? "RequestAssistMessage" : pending.kind === "cancel"
           ? "CancelAssistMessage" : pending.kind === "restart" ? "ExecuteChatCommand"
-            : pending.kind === "model" ? "SelectSessionModel"
-            : "AcceptAssistProposal", sessionId: session.id } : learningNavigation.pending,
+          : pending.kind === "model" ? "SelectSessionModel"
+          : "AcceptAssistProposal", sessionId: session.id } : learningNavigation.pending,
       restoreFocus: restoreDraftFocus });
   }, [standalone, embedded, draft, skillInputText, selectedSkillKey, intent, pending, session.id,
-    stagedSession.items.length, onNavigationStateChange, discardDraft, restoreDraftFocus, learningNavigation]);
+    stagedSession.items.length, uploadingAttachments, onNavigationStateChange, discardDraft,
+    restoreDraftFocus, learningNavigation]);
 
   /* 查询到终态就撤销本地在途标记：此时服务端消息已能说明真实状态，
      继续显示装饰等于用本地推断冒充事实。传输失败保留标记，
@@ -5049,9 +5075,12 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
         模型调用信息移入最近一条 AI 回复的消息行。执行时输入卡与它下方的列形状恒定。 */}
     {session.status === "ACTIVE" && <>
       {modeHints}
-      {/* 0127：模式说明只在非普通模式出现一行（CHAT 返回 null），不常驻占高。 */}
+      {/* 0127：模式说明只在非普通模式出现一行（CHAT 返回 null），不常驻占高。
+          停止中的目标按服务端目标状态投影（DEV-0105 退回项修复）：PAUSING/CANCELLING
+          说明安全停止，不按会话模式宣称停下后进入哪一档——切走 GOAL 时会话模式已先落定。 */}
       <ChatModeHint mode={session.chatMode}
-        goalStopping={goalView?.goal?.status === "PAUSING" || goalView?.goal?.status === "CANCELLING"} />
+        goalStatus={goalView?.goal?.status === "PAUSING" || goalView?.goal?.status === "CANCELLING"
+          ? goalView.goal.status : null} />
       {notice && <Toast testId="assist-receipt-notice">{notice}</Toast>}
     </>}
     {actionError && !pendingUnresolved && <Notice testId="assist-action-error">{actionError}</Notice>}

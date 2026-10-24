@@ -11,7 +11,6 @@ import {runAssistGoalTick} from '../../dist/src/application/goal-advance.js';
 import {createRepositories} from '../../dist/src/application/unit-of-work.js';
 import {ManagedContentStore} from '../../dist/src/storage/managed-content-store.js';
 import {FakeModelPort} from '../../dist/src/workflow/fake-model-port.js';
-import {recordModelInvocation} from '../../dist/src/application/model-call-recorder.js';
 const app=openDatabase(APP_DATABASE_URL,'triage-goal-budget-history');let api,wid;
 before(async()=>{await runMigrations({connectionString:MIGRATION_DATABASE_URL,directory:MIGRATIONS_DIRECTORY});api=await startTestApi();wid=await createWorkspace(app.db);});
 after(async()=>{await api?.stop();await app.close();});
@@ -19,13 +18,9 @@ test('one new grant window must enable one more call without repaying the previo
  const repos=createRepositories(app.db);let modelCalls=0;
  const sid=(await createAssistSession(app.db,{workspaceId:wid,commandId:randomUUID(),projectId:null,title:'sequential goal budgets'})).result.session_id;
  const port={identity:{...new FakeModelPort().identity,budget:{callReservationTokens:1,scopeCallLimit:1,scopeTokenLimit:100000}},assist:async()=>{modelCalls++;return {kind:'CONTENT',content:JSON.stringify({reply:'完成了一项检查，继续。',goal:{state:'CONTINUE',success_criteria:[{key:'c1',statement:'全部检查通过',required:true}],criteria_status:[{key:'c1',status:'UNMET',evidence:'仍有检查'}],steps:[],current_step:null,progress:`已做${modelCalls}步`,questions:[],blocked_reason:null,adjustment:null}}),providerRequestId:`triage-${modelCalls}`,usage:{inputTokens:1,outputTokens:1,cacheReadTokens:null,cacheCreationTokens:null}};}};
- // Diagnostic decorator isolates the real budget Owner from the separately filed
- // default main-loop ledger bypass (#140). It records against the real RUNNING message.
- const rawAssist=port.assist;
- port.assist=async(request)=>{
-  const m=await app.db.selectFrom('assist_messages').select('id').where('session_id','=',sid).where('role','=','ASSISTANT').where('status','=','RUNNING').executeTakeFirstOrThrow();
-  return (await recordModelInvocation(app.db,{origin:{workspaceId:wid,kind:'ASSIST',assistMessageId:m.id},identity:port.identity,signal:request.signal,invoke:()=>rawAssist(request),settle:r=>({status:'COMPLETED',usage:r.usage,providerRequestId:r.providerRequestId})})).result;
- };
+ // No extra recorder decorator here: since #140 was fixed the AGENT main loop meters every
+ // real model request itself through the production ModelCallRepository (admission + ledger),
+ // using this port's budgeted identity. A second decorator would double-count each round.
  const tick=()=>runAssistGoalTick(app.db,{workerId:`tick-${randomUUID()}`});
  const generation=async()=>{let out;for(let i=0;i<12;i++){out=await runAssistGenerationTick(app.db,{workerId:`generate-${randomUUID()}`,storage:new ManagedContentStore(api.dataRoot),modelPort:port,leaseMs:60000,maxMessages:1});if(out&&out.status!=='DISCARDED')break;}assert.ok(out);await tick();return out;};
  const resume=async(gid)=>{const r=await api.post(workspacePath(wid,`/assist-goals/${gid}/resume`),{command_id:randomUUID()});assert.equal(r.status,200,r.text);await tick();return r;};
@@ -52,7 +47,7 @@ test('one new grant window must enable one more call without repaying the previo
   await resume(second);const outcome=await generation();
   recovery.push({grant:await repos.planGoals.sumGrants(second),outcome,modelCalls});
  }
- const evidence={diagnosticBoundary:'normal domain commands and HTTP resume; test-only model-port recorder decorator isolates budget Owner from #140; no real Provider',oldGoal:first,oldGrant,oldGoalStatus:(await repos.planGoals.readGoal(first)).status,newGoal:second,newGrant,modelCallsBefore:callsBefore,modelCallsAfterFirstResume:firstResumeCalls,afterGrant,recovery,newGoalStatus:(await repos.planGoals.readGoal(second)).status};
+ const evidence={diagnosticBoundary:'normal domain commands and HTTP resume; the AGENT main loop meters every real request itself through the production ModelCallRepository since #140 was fixed, so the controlled port carries no extra recorder decorator; no real Provider',oldGoal:first,oldGrant,oldGoalStatus:(await repos.planGoals.readGoal(first)).status,newGoal:second,newGrant,modelCallsBefore:callsBefore,modelCallsAfterFirstResume:firstResumeCalls,afterGrant,recovery,newGoalStatus:(await repos.planGoals.readGoal(second)).status};
  fs.writeFileSync('output/triage-defects-20261022/goal-budget-history.json',JSON.stringify(evidence,null,2));console.log('TRIAGE_GOAL_BUDGET_HISTORY',JSON.stringify(evidence));
  assert.equal(modelCalls,callsBefore+1,'control: enough repeated grants eventually permit a real controlled call');
  assert.equal(firstResumeCalls,callsBefore+1,'a newly granted one-call window must allow the next actual model call, not only offset revoked historical grants');

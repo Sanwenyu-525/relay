@@ -25,6 +25,7 @@ import { runAgentSessionReadonlyRounds, runAssistantReadonlyRounds }
 import { sessionReadToolsForCurrentConnections, sessionWriteAllowed } from './assist-read-tools.js';
 import { describeLiveRunExecution } from './assist-execution-notice.js';
 import { describeSessionCapabilities } from './assist-capability-notice.js';
+import { officialGithubSkillGuidanceForTools } from '../skills/official-skills.js';
 import { mainLoopEnvelope, mainLoopMaintenanceField, readMainLoopOutcome,
   recordConversationExecutionCandidate } from './conversation-execution.js';
 import { freezeStateInterpretationBaseline, readMainLoopStateCandidate,
@@ -258,6 +259,9 @@ export async function runAssistGenerationTick(db: DbExecutor,
       // 访问能力）或把缺口说成「请补充任务目标与验收标准」。事实块不授予任何能力。
       const capabilityNotice = await describeSessionCapabilities(db, session,
         { tools: availableTools, allowWrite });
+      // 官方 GitHub Skill（§10）按需激活：本轮词表里真实出现 github_ 工具时，才把
+      // 冻结的摘要与边界块附在能力事实块之后；无工具、被禁用或内容校验失败都不注入。
+      const officialSkillNotice = officialGithubSkillGuidanceForTools(availableTools);
       // 计划/目标轮次即使没有可用工具也走主流程：它们的输出协议是信封，单次生成路径
       // 没有解析与落库入口，走那条路等于把结构化结果丢掉。
       if (availableTools.length > 0 || planMode || goalRound) {
@@ -269,7 +273,10 @@ export async function runAssistGenerationTick(db: DbExecutor,
               action: message.method_action, readTools: true, writeEnabled: allowWrite }).system
             : selectRuntimeSystemPrompt({ kind: 'AGENT_MAIN_LOOP', writeEnabled: allowWrite }).system;
         return runAgentMainLoopGeneration(db, { message, session, options, controller,
-          availableTools, system: `${system}\n\n${capabilityNotice}`, allowWrite,
+          availableTools,
+          system: `${system}\n\n${capabilityNotice}` +
+            (officialSkillNotice === null ? '' : `\n\n${officialSkillNotice}`),
+          allowWrite,
           chatMode: planMode ? 'PLAN' : goalRound ? 'GOAL_ROUND' : 'CHAT',
           ...(modelRoute.invokeAssist === undefined ? {} : { invokeAssist: modelRoute.invokeAssist }) });
       }
@@ -825,10 +832,12 @@ async function goalRoundSystem(db: DbExecutor, session: AssistSessionRow,
   message: AssistMessageRow, writeEnabled: boolean): Promise<string> {
   const goal = message.goal_id === null ? undefined
     : await createRepositories(db).planGoals.readGoal(message.goal_id);
-  const planVersion = goal?.plan_version_id == null ? null
-    : (await createRepositories(db).planGoals.readPlan(goal.plan_version_id))?.version ?? null;
+  // #144：按目标绑定的确切版本读取不可变计划（不是「最新计划」），把 scope、
+  // 步骤 detail、验证 method 与待定问题作为冻结执行契约带进目标轮次。
+  const plan = goal?.plan_version_id == null ? undefined
+    : await createRepositories(db).planGoals.readPlan(goal.plan_version_id);
   const state = goal === undefined ? { objective: session.title, missing: true }
-    : goalStateForPrompt(goal, planVersion);
+    : goalStateForPrompt(goal, plan);
   return selectRuntimeSystemPrompt({ kind: 'AGENT_GOAL_ROUND', state, writeEnabled }).system;
 }
 

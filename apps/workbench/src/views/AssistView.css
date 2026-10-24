@@ -329,7 +329,10 @@
 .agent-chat-composer { width: 100%; min-width: 0; max-width: var(--chat-measure); margin-inline: auto; box-shadow: none; }
 /* 复制是纯客户端动作，图标按钮贴左对齐正文，不占满整列。 */
 .agent-message-copy { justify-self: start; }
-.agent-message-copy svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+/* 2026-10-24 用户指令：消息行的图标键要小于正文（body 1rem）——图标降到 meta 档，
+   热区留在 control.target.minimum（24px），可点面积不再缩水。回退键同档，
+   两条规则刻意分开写：一处是助手/用户共用的页脚复制键，一处是回退键的容器。 */
+.agent-message-copy svg { width: var(--relay-font-size-meta); height: var(--relay-font-size-meta); }
 
 .agent-message-list { list-style: none; margin: auto auto 0; padding: 0; display: grid; gap: var(--relay-space-2); width: 100%; max-width: var(--chat-measure); }
 .agent-message-slot { display: grid; gap: var(--relay-space-1); }
@@ -525,9 +528,10 @@
 }
 .agent-message-footer .agent-message-copy {
   flex: none;
-  width: var(--relay-control-height-compact);
-  min-width: var(--relay-control-height-compact);
-  min-height: var(--relay-control-height-compact);
+  width: var(--relay-control-target-minimum);
+  height: var(--relay-control-target-minimum);
+  min-width: var(--relay-control-target-minimum);
+  min-height: var(--relay-control-target-minimum);
   color: var(--relay-color-text-muted);
 }
 /* 用户消息的复制键沿用助手页脚同一构件，但没有用量行与它常驻同排：平时收起、
@@ -1708,15 +1712,33 @@ button.agent-chat-latest svg { width: var(--relay-control-icon-size); height: va
   color: var(--relay-color-palette-red);
 }
 
-.assist-recall-action {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--relay-space-2);
-  margin: var(--relay-space-1) 0 0;
+/* 2026-10-24 用户指令：回退键与复制键同排（回退在左），两枚都是纯图标键，
+   尺寸与正文的关系由 `.agent-message-copy` 与下面的规则共同保证。
+   包裹层只做两件事：撑出 flex 项、承接悬停——disabled 的按钮不派发鼠标事件，
+   提示挂在按钮身上时「为什么现在点不了」恰好会在最需要的时候看不到。 */
+.assist-recall-button-wrap { display: inline-flex; flex: none; }
+
+/* 纯图标按钮，尺寸与页脚复制键同档（24px 热区 + meta 图标，都小于正文 1rem）。
+   带容器前缀是必须的：styles.css 在组件 CSS 之后注入，同权重时 .icon-button 会赢。 */
+.assist-recall-button-wrap .icon-button {
+  width: var(--relay-control-target-minimum);
+  height: var(--relay-control-target-minimum);
+  min-width: var(--relay-control-target-minimum);
+  min-height: var(--relay-control-target-minimum);
+  color: var(--relay-color-text-muted);
 }
 
-.assist-recall-action .helper-text { margin: 0; }
+.assist-recall-button-wrap .icon-button svg {
+  width: var(--relay-font-size-meta);
+  height: var(--relay-font-size-meta);
+}
+
+/* 禁用时全局 .icon-button:disabled 会补一块灰底，在消息流里显成一个方块，
+   与「纯图标」观感冲突：这里只留降饱和的图标，原因由悬停提示说明。 */
+.assist-recall-button-wrap .icon-button:disabled {
+  background: transparent;
+  color: var(--relay-color-disabled-text);
+}
 
 .assist-withdrawn-note {
   margin: var(--relay-space-1) 0 0;

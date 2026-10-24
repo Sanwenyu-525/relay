@@ -22,6 +22,7 @@ mod maintenance_session;
 mod control_overlay;
 mod esc_hook;
 mod http_loopback;
+mod preview_webview;
 mod restore_isolation;
 #[cfg(windows)]
 use job_sidecar::{ManagedProcess, StoppedLaunch, arm_launch, recover_old_launches,
@@ -171,6 +172,8 @@ struct RuntimeState {
     workspace_id: String,
     bearer_token: String,
     frame_created: Arc<AtomicBool>,
+    /// 桌面数据根。内置网页预览的独立 WebView2 目录挂在它下面。
+    data_root: PathBuf,
     #[cfg(windows)]
     _single_instance: SingleInstanceGuard,
     api: Mutex<Option<ManagedApi>>,
@@ -896,7 +899,7 @@ fn start_api(app: &tauri::AppHandle, single_instance: SingleInstanceGuard) -> Re
     // D1：supervisor 与 API 进程解耦——API 存活期间 supervisor 意外退出由
     // watcher 按有界预算重启，不再把桌面 bootstrap 拖入永久失败。
     spawn_supervisor_watcher(SupervisorSpawnContext {
-        node, supervisor_entry, env_file, data_root,
+        node, supervisor_entry, env_file, data_root: data_root.clone(),
         file_io_helper: file_io_helper.as_os_str().to_os_string(),
         worker_log, api_launch_id: launch_id,
     }, Arc::clone(&supervisor), supervisor_failed, Arc::clone(&stopping),
@@ -904,6 +907,7 @@ fn start_api(app: &tauri::AppHandle, single_instance: SingleInstanceGuard) -> Re
     Ok(RuntimeState {
         base_url: format!("http://127.0.0.1:{port}"), workspace_id,
         bearer_token: token, frame_created: Arc::new(AtomicBool::new(false)),
+        data_root,
         _single_instance: single_instance,
         api: Mutex::new(Some(api)), supervisor, stopping,
     })
@@ -933,6 +937,7 @@ fn start_api(app: &tauri::AppHandle) -> Result<RuntimeState, String> {
     let (port, workspace_id) = read_startup(stdout, &nonce)?;
     Ok(RuntimeState { base_url: format!("http://127.0.0.1:{port}"), workspace_id,
         bearer_token: token, frame_created: Arc::new(AtomicBool::new(false)),
+        data_root,
         api: Mutex::new(Some(ManagedApi { child, stdin })),
         stopping: Arc::new(AtomicBool::new(false)) })
 }
@@ -1075,6 +1080,11 @@ pub fn run() {
             app.manage(state);
             let handle = app.handle().clone();
             let state = app.state::<RuntimeState>();
+            // 内置网页预览宿主：地址策略需要本机 API 端口。必须在建窗**之前**托管——
+            // 窗口一旦 show()，页面就可能立刻调用命令，晚托管会让首次调用报「状态未托管」。
+            let api_port = state.base_url.rsplit(':').next().and_then(|value| value.parse::<u16>().ok())
+                .ok_or_else(|| "invalid API port".to_owned())?;
+            app.manage(preview_webview::PreviewHost::new(api_port, state.data_root.clone()));
             create_window(&handle, &state)?;
             // 电脑操控 Overlay（migration 0096）：轮询 API 的操控状态并驱动透明
             // 置顶穿透窗口与全局 Esc。轮询失败只降级为不显示，不影响主窗口。
@@ -1082,7 +1092,12 @@ pub fn run() {
                 state.workspace_id.clone(), state.bearer_token.clone());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_bootstrap, select_working_directory])
+        .invoke_handler(tauri::generate_handler![desktop_bootstrap, select_working_directory,
+            preview_webview::preview_open, preview_webview::preview_navigate,
+            preview_webview::preview_set_bounds, preview_webview::preview_set_visible,
+            preview_webview::preview_nav, preview_webview::preview_state,
+            preview_webview::preview_close, preview_webview::preview_release_scope,
+            preview_webview::preview_open_external])
         .on_window_event(|window, event| {
             if window.label() == "main" && matches!(event, WindowEvent::Destroyed) {
                 window.state::<RuntimeState>().stop();

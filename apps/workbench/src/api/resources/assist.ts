@@ -5,7 +5,7 @@ import { RelayHttp } from "../core/http";
 import { array, boolean, decimal, integer, nullableString, object, string } from "../core/primitives";
 import { assistMessageFrom, assistMessageRecallFrom, assistantProfileFrom, assistProposalFrom, assistSessionBindingFrom, assistSessionDeleteFrom, assistSessionDirectoryBindingFrom, assistSessionForkFrom, assistSessionFrom, assistSessionPinFrom, assistSessionStateFrom, assistSessionTitleFrom, assistSessionUnreadFrom, assistSourceBody, conversationExecutionFrom, conversationExecutionSummaryFrom, packDefinitionFrom, sessionToolCallsFrom, skillDefinitionFrom, workingDirectoryFrom, workspaceDefaultDirectoryFrom } from "../parse/assist";
 import { commandEnvelopeFrom } from "../parse/projects";
-import type { RelayChatMode, RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachmentContent, RelayAssistMessageAttachmentUpload, RelayAssistMessageRecall, RelayAssistProposal, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayConversationMode, RelayAssistSourceRef, RelayConversationExecution, RelayConversationExecutionStage, RelayPackDefinition, RelaySessionToolCalls, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult, RelayWorkspaceDefaultWriteTierResult } from "../dtos/assist";
+import type { RelayChatMode, RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachmentContent, RelayAssistMessageAttachmentUpload, RelayAssistMessageRecall, RelayAssistProposal, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayContextBudgetTokens, RelayConversationMode, RelayAssistSourceRef, RelayConversationExecution, RelayConversationExecutionStage, RelayPackDefinition, RelaySessionToolCalls, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory, RelayWorkspaceContextBudgetResult, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult, RelayWorkspaceDefaultWriteTierResult } from "../dtos/assist";
 import type { RelayCommandEnvelope } from "../dtos/projects";
 
 export async function getAssistSessions(http: RelayHttp, target: { projectId?: string; taskId?: string; includeContext?: boolean; status?: "ACTIVE" | "ARCHIVED" | "ALL" } = {}): Promise<readonly RelayAssistSession[]> {
@@ -403,6 +403,36 @@ export async function setWorkspaceDefaultWriteTier(http: RelayHttp, input: {
     return { workspaceId, defaultWriteTier: tier as RelayWriteTier | null,
       revision: decimal(envelope.result, "revision", "workspace default write tier result") };
   } catch { throw new RelayTransportError("默认写入档位回执无法核对，请查询原 command_id。"); }
+}
+
+/**
+ * 工作区上下文长度档位（0135 / 2026-10-24）。
+ *
+ * 三档就是单次调用预算：256K／512K／1M。与默认写档位共用同一行与同一个修订号，
+ * 所以 `expected_revision` 拿的是同一个读数；回执逐字核对（命令身份、工作区、档位），
+ * 对不上只报「无法核对」，绝不换 command_id 重发。
+ */
+export async function setWorkspaceContextBudget(http: RelayHttp, input: {
+  commandId: string; expectedRevision: DecimalRevision; budgetTokens: RelayContextBudgetTokens | null;
+}): Promise<RelayWorkspaceContextBudgetResult> {
+  const body = await http.request(http.workspacePath("/context-budget"), { method: "POST",
+    body: JSON.stringify({ command_id: input.commandId, expected_revision: input.expectedRevision,
+      context_budget_tokens: input.budgetTokens }) }, 200);
+  try {
+    const envelope = commandEnvelopeFrom(body);
+    if (envelope.commandId !== input.commandId) throw new Error("command mismatch");
+    const row = object(envelope.result, "workspace context budget result");
+    const workspaceId = string(row, "workspace_id", "workspace context budget result");
+    const raw = row.context_budget_tokens;
+    const budgetTokens = raw === null ? null
+      : raw === 262144 || raw === 524288 || raw === 1048576 ? raw : (() => {
+        throw new Error("unknown budget"); })();
+    if (workspaceId !== http.workspaceId || budgetTokens !== input.budgetTokens) {
+      throw new Error("command mismatch");
+    }
+    return { workspaceId, contextBudgetTokens: budgetTokens as RelayContextBudgetTokens | null,
+      revision: decimal(row, "revision", "workspace context budget result") };
+  } catch { throw new RelayTransportError("上下文长度回执无法核对，请查询原 command_id。"); }
 }
 
 /** 文件夹入口：可能建立最小 Project 与受管资源，因此是写命令；页面读取不得调用它。 */

@@ -480,9 +480,15 @@ export function workspaceDefaultDirectoryFrom(value: unknown): RelayWorkspaceDef
   // 不能把「还没读到」补成「没有默认」——那会让界面把一次设置显示成从未做过。
   const defaultWriteTier = nullableTier(row.default_write_tier,
     "workspace default directory.default_write_tier");
+  /* 0135（2026-10-24）：上下文长度档位。旧服务端没有这个键 → null（还没选过），
+     出现三档之外的值显式失败：不能把听不懂的预算当成「没选过」，那会显示成默认档。 */
+  const budgetRaw = row.context_budget_tokens;
+  const contextBudgetTokens = budgetRaw === undefined || budgetRaw === null ? null
+    : budgetRaw === 262144 || budgetRaw === 524288 || budgetRaw === 1048576 ? budgetRaw
+      : (() => { throw new Error("workspace default directory.context_budget_tokens 无法识别"); })();
   return { status, resourceId, canonicalRoot,
     displayName: nullableString(row, "display_name", "workspace default directory"),
-    writeTier, defaultWriteTier,
+    writeTier, defaultWriteTier, contextBudgetTokens,
     reason: nullableString(row, "reason", "workspace default directory"),
     revision: decimal(row, "revision", "workspace default directory") };
 }

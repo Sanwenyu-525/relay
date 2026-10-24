@@ -1,4 +1,4 @@
-import type { AssistGoalRow, ChatMode } from '../infrastructure/database-schema.js';
+import type { AssistGoalRow, ChatMode, ConversationMode } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import { toDecimalString } from '../shared/decimal.js';
@@ -21,6 +21,62 @@ import { goalProjection } from './assist-goals.js';
  * 从活动目标切走时先持久化暂停意图：这一步必须落在同一次命令里，否则「界面已经显示
  * 计划模式、后端还在推进目标」就成了第二个真相。
  */
+
+/**
+ * #145：会话身份 × 行为模式的支持矩阵。
+ *
+ * 模式是会话行为约束，不改变身份（总纲 §0.15）；反过来，身份决定哪些模式真正有
+ * 处理入口：
+ *   * `AGENT`——三种模式都支持：PLAN/GOAL 信封只在普通 AGENT 主流程里解析与结算；
+ *   * `ASSISTANT` / `LEARNING`——只支持 CHAT。这两个身份的生成入口在
+ *     `assist-runner.ts` 里**先于** AGENT 的 planMode/goalRound 处理提前路由
+ *     （人设只读轮次 / 教学轮次），从不解析计划或目标信封；历史上放行
+ *     LEARNING×GOAL 的结果是「受理成功、建了目标，教学轮次永远不写 goal_outcome，
+ *     三轮 NO_STRUCTURE 后必然 WAITING_USER/NO_PROGRESS」。
+ * 未实现的组合在**受理前**按类型化准入拒绝（建会话、切模式、发消息、按计划启动目标
+ * 四个写入口共用这里），不留下表面成功的模式/目标/消息；拒绝是能力边界说明，
+ * 不改变身份本身的既有只读与学习记录边界。
+ */
+const CHAT_MODES_SUPPORTED_BY_IDENTITY:
+  Readonly<Record<ConversationMode, readonly ChatMode[]>> = {
+  AGENT: ['CHAT', 'PLAN', 'GOAL'],
+  ASSISTANT: ['CHAT'],
+  LEARNING: ['CHAT'],
+};
+
+const IDENTITY_LABEL: Readonly<Record<ConversationMode, string>> = {
+  AGENT: '普通 Agent', ASSISTANT: '人设助手', LEARNING: '学习',
+};
+
+/** 该身份是否支持该行为模式（建会话、切模式、发消息与按计划执行共用同一张表）。 */
+export function chatModeSupportedForIdentity(conversationMode: ConversationMode,
+  mode: ChatMode): boolean {
+  return CHAT_MODES_SUPPORTED_BY_IDENTITY[conversationMode]?.includes(mode) === true;
+}
+
+/** 未实现组合的类型化准入拒绝：给可执行的出路（换普通 Agent 会话），不冒充成功。 */
+export function chatModeUnsupportedForIdentity(conversationMode: ConversationMode,
+  mode: ChatMode, sessionId?: string | undefined): DomainError {
+  const modeLabel = mode === 'PLAN' ? '计划（/plan）' : mode === 'GOAL' ? '目标（/goal）' : mode;
+  return new DomainError({
+    code: 'CHAT_MODE_UNSUPPORTED_FOR_IDENTITY', status: 409,
+    type: '/problems/chat-mode-unsupported-for-identity',
+    title: '这个会话身份不支持该行为模式',
+    detail: `${IDENTITY_LABEL[conversationMode]}会话不支持${modeLabel}模式：`
+      + '该身份的生成入口不解析计划/目标协议，受理后目标也无法正常推进。'
+      + `请使用普通 Agent 会话执行${modeLabel}模式；本会话继续用普通对话即可。`,
+    retryable: false, retryAction: 'NONE',
+    ...(sessionId === undefined ? {} : { conflict: { sessionId, field: 'chat_mode' } }),
+  });
+}
+
+/** 身份 × 模式准入：不支持就抛类型化拒绝（调用方全部在事务内，异常即整体回滚）。 */
+export function assertChatModeSupportedForIdentity(conversationMode: ConversationMode,
+  mode: ChatMode, sessionId?: string | undefined): void {
+  if (!chatModeSupportedForIdentity(conversationMode, mode)) {
+    throw chatModeUnsupportedForIdentity(conversationMode, mode, sessionId);
+  }
+}
 
 export type ChatModeTransition = {
   readonly session_id: string;
@@ -108,6 +164,9 @@ export async function setChatMode(db: DbExecutor, input: {
           detail: '会话已归档，不能再切换模式。', retryable: false,
           retryAction: 'REFRESH_AND_REDECIDE', conflict: { sessionId: session.id } });
       }
+      // #145：身份 × 模式支持矩阵。拒绝发生在任何写入之前（本命令事务内抛出即整体回滚），
+      // 不留下「模式已切换」的表面成功，也不改写活动目标的控制状态。
+      assertChatModeSupportedForIdentity(session.conversation_mode, input.mode, session.id);
       const openGoal = await repositories.planGoals.readOpenGoal(session.id, true);
       // 切走时先记暂停意图（切到 GOAL 不需要：目标本来就要继续推进）。
       const stopping = openGoal !== undefined && input.mode !== 'GOAL'

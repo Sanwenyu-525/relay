@@ -22,6 +22,7 @@ import { registerProjectKnowledgeGuideRoutes } from './project-knowledge-guide-a
 import { registerRunRoutes } from './run-api.js';
 import { registerGatewayRoutes } from './gateway-api.js';
 import { registerGitUserActionRoutes } from './git-user-action-api.js';
+import { registerFileUserActionRoutes } from './file-user-action-api.js';
 import { registerAssistantProfileRoutes } from './assistant-profile-api.js';
 import { registerInformationRoutes } from './information-api.js';
 import { registerReviewRoutes } from './review-api.js';
@@ -196,6 +197,8 @@ registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
       registerContextRoutes(scope, apiDependencies);
       registerGatewayRoutes(scope, apiDependencies);
       registerGitUserActionRoutes(scope, apiDependencies);
+      // 0134：人工受管目录浏览与文件读取（工具面板「文件」页签后端，只读）。
+      registerFileUserActionRoutes(scope, apiDependencies);
       registerInformationRoutes(scope, apiDependencies);
       registerReviewRoutes(scope, apiDependencies);
       registerAssistRoutes(scope, apiDependencies);

@@ -8,6 +8,7 @@ import { httpCommandScopeKey } from './actor.js';
 import { runIdempotentCommand, type CommandOutcome } from './command.js';
 import { DomainError, invalidTransition, resourceNotFound } from './domain-error.js';
 import { readModelPortConfig } from '../workflow/model-port-config.js';
+import { assertChatModeSupportedForIdentity } from './chat-mode.js';
 import { createRepositories, type Repositories } from './unit-of-work.js';
 
 /**
@@ -31,6 +32,12 @@ export interface GoalCriterion {
   readonly status: 'MET' | 'UNMET' | 'PENDING';
   readonly evidence: string | null;
   readonly required: boolean;
+  /**
+   * #144：计划「验证方式」里的 method（HUMAN/COMMAND/READ/TEST）。
+   * 它随 criteriaFromPlan 冻结进目标行；投影到 HTTP 的 goalProjection 不带它
+   * （HTTP schema 是 strict 的五字段），只进目标轮次的提示词状态。
+   */
+  readonly method: string | null;
 }
 
 export interface GoalStep {
@@ -64,7 +71,8 @@ export interface GoalProjection {
   readonly current_step: string | null;
   readonly progress: string | null;
   readonly stop_reason: GoalStopReason | null;
-  readonly criteria: readonly GoalCriterion[];
+  /** HTTP 投影的五字段形状（strict schema）；method 只进目标轮次提示词状态。 */
+  readonly criteria: readonly Omit<GoalCriterion, 'method'>[];
   readonly steps: readonly GoalStep[];
   readonly round_count: number;
   readonly no_progress_rounds: number;
@@ -101,12 +109,26 @@ function objectItems(value: JsonObject): JsonObject[] {
       typeof item === 'object' && item !== null && !Array.isArray(item));
 }
 
+/** scope / open_questions 落库为 `[{ text }]`（assist-plans.recordPlanFromMessage）；同时接受纯字符串元素。 */
+function stringItems(value: JsonObject): string[] {
+  return (Array.isArray(value) ? value as unknown as readonly unknown[] : [])
+    .flatMap((item): string[] => {
+      if (typeof item === 'string') return [item];
+      if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+        const text = (item as JsonObject).text;
+        return typeof text === 'string' ? [text] : [];
+      }
+      return [];
+    });
+}
+
 function criteriaOf(row: AssistGoalRow): GoalCriterion[] {
   return objectItems(row.criteria).map((item) => ({
     key: String(item.key ?? ''), statement: String(item.statement ?? ''),
     status: item.status === 'MET' || item.status === 'UNMET' ? item.status : 'PENDING',
     evidence: typeof item.evidence === 'string' ? item.evidence : null,
     required: item.required !== false,
+    method: typeof item.method === 'string' && item.method.trim() !== '' ? item.method : null,
   }));
 }
 
@@ -133,7 +155,12 @@ export function goalProjection(row: AssistGoalRow, planVersion: number | null,
   return {
     goal_id: row.id, session_id: row.session_id, objective: row.objective,
     status: row.status, current_step: row.current_step, progress: row.progress,
-    stop_reason: stopReasonOf(row), criteria: criteriaOf(row), steps: stepsOf(row),
+    // HTTP 投影保持五字段 strict 形状；method 只进目标轮次提示词（见 goalStateForPrompt）。
+    stop_reason: stopReasonOf(row),
+    criteria: criteriaOf(row).map((criterion) => ({ key: criterion.key,
+      statement: criterion.statement, status: criterion.status, evidence: criterion.evidence,
+      required: criterion.required })),
+    steps: stepsOf(row),
     round_count: row.round_count, no_progress_rounds: row.no_progress_rounds,
     plan_version_id: row.plan_version_id, plan_version: planVersion,
     last_round_at: lastRoundAt === null ? null : lastRoundAt.toISOString(),
@@ -389,6 +416,9 @@ export async function startGoalFromPlan(db: DbExecutor, input: {
       if (session.status !== 'ACTIVE') {
         throw invalidTransition('会话已归档，不能从这里开始执行。', { sessionId: session.id });
       }
+      // #145：「按此计划执行」也是目标模式的写入口，与建会话/切模式/发消息共用同一张
+      // 身份×模式支持矩阵；拒绝发生在创建目标与切换会话模式之前，事务内整体回滚。
+      assertChatModeSupportedForIdentity(session.conversation_mode, 'GOAL', session.id);
       const plan = await repositories.planGoals.readPlan(input.planId);
       if (plan === undefined || plan.session_id !== session.id) throw resourceNotFound('Assist plan');
       const latest = await repositories.planGoals.readLatestPlan(session.id);
@@ -416,17 +446,38 @@ export async function startGoalFromPlan(db: DbExecutor, input: {
   });
 }
 
-/** 目标轮次消息应带上的目标状态（供提示词使用；不含任何能力声明）。 */
-export function goalStateForPrompt(row: AssistGoalRow, planVersion: number | null): JsonObject {
+/**
+ * 目标轮次消息应带上的目标状态（供提示词使用；不含任何能力声明）。
+ *
+ * #144：`plan` 必须是**目标绑定的那一版**（调用方按 `goal.plan_version_id` 读取），
+ * 不能用「最新计划」替代——执行开始后新增的计划版本不得改写这次执行的冻结契约。
+ * 计划里的 scope、步骤 detail 与待定问题只存在不可变计划行上（startGoalFromPlan
+ * 只把 goal / verification / step title 冻结进目标行），因此这里沿同一 Owner 把
+ * 它们作为可追溯的冻结计划数据一并交给模型；待定问题只是「需要用户决定」的事实，
+ * 不构成任何授权。
+ */
+export function goalStateForPrompt(row: AssistGoalRow,
+  plan: AssistPlanRow | null | undefined): JsonObject {
   return {
     objective: row.objective,
-    plan_version: planVersion,
+    plan_version: plan?.version ?? null,
     round: row.round_count,
     current_step: row.current_step,
     progress: row.progress,
+    ...(plan === null || plan === undefined ? {} : {
+      plan: {
+        version: plan.version,
+        scope: stringItems(plan.scope),
+        steps: objectItems(plan.steps).map((step): JsonObject => ({
+          title: String(step.title ?? ''),
+          detail: typeof step.detail === 'string' ? step.detail : null })),
+        open_questions: stringItems(plan.open_questions),
+      },
+    }),
     criteria: criteriaOf(row).map((criterion): JsonObject => ({
       key: criterion.key, statement: criterion.statement, status: criterion.status,
-      evidence: criterion.evidence, required: criterion.required })),
+      evidence: criterion.evidence, required: criterion.required,
+      ...(criterion.method === null ? {} : { method: criterion.method }) })),
     steps: stepsOf(row).map((step): JsonObject => ({ title: step.title, status: step.status })),
   };
 }

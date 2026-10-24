@@ -42,7 +42,7 @@ function fullAccess(over: Partial<RelayWriteReadiness> = {}): RelayWriteReadines
 /** 工作区默认投影：没有目录时 `resourceId`/`canonicalRoot` 都是 null，档位也可以还没选。 */
 function workspaceDefault(over: Partial<RelayWorkspaceDefaultDirectory> = {}): RelayWorkspaceDefaultDirectory {
   return { resourceId: null, canonicalRoot: null, displayName: null, writeTier: null,
-    defaultWriteTier: null, status: "UNSET", reason: null, revision: "0", ...over };
+    defaultWriteTier: null, contextBudgetTokens: null, status: "UNSET", reason: null, revision: "0", ...over };
 }
 
 function stub(getWriteReadiness: () => Promise<RelayWriteReadiness>, over: Partial<RelayApiClient> = {}) {

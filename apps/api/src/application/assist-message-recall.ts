@@ -14,9 +14,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { lstat, readFile } from 'node:fs/promises';
 
 import type {
-  AssistMessageRecallFileRow, AssistMessageRecallFileStatus, AssistMessageRecallRow,
-  AssistMessageRecallStatus, AssistMessageRecallProtectionRow, AssistMessageRecallUndoRow,
-  AssistMessageRow, AssistSessionRow,
+  AssistMessageBaselineFileRow, AssistMessageRecallFileRow, AssistMessageRecallFileStatus,
+  AssistMessageRecallRow, AssistMessageRecallStatus, AssistMessageRecallProtectionRow,
+  AssistMessageRecallUndoRow, AssistMessageRow, AssistSessionRow,
 } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
@@ -25,9 +25,8 @@ import {
   canonicalRelativePath, executeFileChangeset, isFrozenBaseline, isProtectedPath,
   validateSafeRelativePath, type FileChange,
 } from '../files/file-changeset.js';
-import type { DirectWriteOperationRow, MessageFilePreimageRow }
-  from '../assist/message-recall-repository.js';
-import { MAX_MESSAGE_PREIMAGE_BYTES, readMessageSnapshotLimits } from '../files/message-file-preimage.js';
+import type { DirectWriteOperationRow } from '../assist/message-recall-repository.js';
+import { readMessageSnapshotLimits } from './assist-file-baseline.js';
 import { reopenTask } from './completion-commands.js';
 import { DomainError, invalidTransition, resourceNotFound } from './domain-error.js';
 import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
@@ -36,8 +35,8 @@ import { createRepositories, withTransaction, type Repositories } from './unit-o
 const MAX_CURRENT_HASH_BYTES = 64 * 1024 * 1024;
 /** RUNNING 回执超过该时长视为崩溃遗留，可按同一回执继续，不新建第二次撤回。 */
 export const RECALL_STALE_RUNNING_MS = 60_000;
-/** 保护副本的单文件上限；与前像上限同值，超过只让该路径不可撤销（§27.3.3）。 */
-const MAX_PROTECTION_BYTES = 8 * 1024 * 1024;
+/** 保护副本的单文件上限；与基线上限同值（§27.3.3/§27.3.4，待校准推荐值）。 */
+const MAX_PROTECTION_BYTES = 50 * 1024 * 1024;
 
 export interface RecallAssistMessageInput {
   readonly workspaceId: string;
@@ -182,7 +181,7 @@ export async function recallAssistMessage(db: DbExecutor,
       conflict: { sessionId: session.id, messageId: message.id } });
   }
   const rootPath = await resolveRecallRoot(r, session, message, events.events);
-  const plan = await buildRecallPlan(r, session.id, message.seq, rootPath, events.events);
+  const plan = await buildRecallPlan(r, message.id, rootPath, events.events);
   const blocked = plan.filter(isBlocked);
   if (blocked.length > 0) {
     throw new DomainError({ code: 'RECALL_PREFLIGHT_BLOCKED', status: 409,
@@ -396,7 +395,7 @@ export async function readMessageRecallSettings(db: DbExecutor,
   const limits = readMessageSnapshotLimits();
   const usage = await r.messageRecall.snapshotUsage(workspaceId);
   return { retention_days: limits.retentionDays, capacity_bytes: limits.budgetBytes,
-    per_file_cap_bytes: MAX_MESSAGE_PREIMAGE_BYTES,
+    per_file_cap_bytes: limits.maxFileBytes,
     usage_bytes: usage.bytes.toString(), snapshot_count: usage.count,
     oldest_snapshot_at: usage.oldestAt?.toISOString() ?? null };
 }
@@ -660,11 +659,8 @@ async function assertRecallEligible(r: Repositories, session: AssistSessionRow,
     throw invalidTransition('该会话仍有在途执行；先安全停止并结算再撤回。',
       { sessionId: session.id, messageId: message.id });
   }
-  const maxWithdrawn = await r.messageRecall.maxWithdrawnUserSeq(session.id);
-  if (maxWithdrawn !== null && message.seq <= maxWithdrawn) {
-    throw invalidTransition('已经有更晚的消息被撤回；首版只支持沿对话向后逐条撤回，不能嵌套回退。',
-      { sessionId: session.id, messageId: message.id });
-  }
+  // §27.3.5 方向规则已放开（2026-10-24 用户拍板）：完成一次撤回后再选更早消息是允许的，
+  // 其「当前仍生效的文件效果」由 collectWriteEvents 把已结算撤回的效果折入重算。
 }
 
 async function resolveRecallRoot(r: Repositories, session: AssistSessionRow,
@@ -729,6 +725,16 @@ async function collectWriteEvents(r: Repositories, session: AssistSessionRow,
     for (const event of directEvents(row)) events.push(event);
   }
 
+  // §27.3.5：已结算撤回也是「当前仍生效状态」的一部分——更早消息的再撤回必须把
+  // 这些恢复效果按结算时序折进期望态，否则会把已被撤回的写入当作当前内容判冲突。
+  for (const effect of await r.messageRecall.listRecallEffectsForFold(session.id, minSeq)) {
+    events.push({ messageId: effect.messageId, messageSeq: effect.messageSeq,
+      relativePath: effect.relativePath,
+      action: effect.exists ? 'MODIFY' : 'DELETE',
+      expectedSha256: effect.sha256, expectedKnown: true,
+      rootPath: effect.rootPath, observedAt: effect.settledAt });
+  }
+
   for (const row of await r.messageRecall.listDelegatedWriteFiles(
     session.workspace_id, session.id, minSeq)) {
     if (row.change_set_status === 'UNKNOWN') uncertain = true;
@@ -771,14 +777,14 @@ function directEvents(row: DirectWriteOperationRow): readonly WriteEvent[] {
   return events;
 }
 
-async function buildRecallPlan(r: Repositories, sessionId: string, minSeq: bigint,
+async function buildRecallPlan(r: Repositories, targetMessageId: string,
   rootPath: string | null, events: readonly WriteEvent[]): Promise<RecallPlanFile[]> {
-  const preimages = await r.messageRecall.listPreimages(sessionId, minSeq);
-  const preimageByKey = new Map<string, MessageFilePreimageRow>();
-  for (const preimage of preimages) {
-    const key = `${preimage.message_id}\u0000${preimage.relative_path}`;
-    if (!preimageByKey.has(key)) preimageByKey.set(key, preimage);
-  }
+  // 恢复目标读**发送前基线**（2026-10-24 用户拍板）：目标用户消息在准入时对受管根
+  // 建立的字节基线；没有基线（早于本增量的消息/采集失败未留行）按不可恢复处理。
+  const baseline = await r.messageRecall.findBaselineByMessage(targetMessageId);
+  const baselineFiles = baseline === undefined ? new Map<string, AssistMessageBaselineFileRow>()
+    : new Map((await r.messageRecall.listBaselineFiles(baseline.id))
+      .map((file) => [file.relative_path, file]));
 
   const grouped = new Map<string, WriteEvent[]>();
   for (const event of events) {
@@ -791,14 +797,18 @@ async function buildRecallPlan(r: Repositories, sessionId: string, minSeq: bigin
 
   const plan: RecallPlanFile[] = [];
   for (const key of [...grouped.keys()].sort()) {
+    // 按时间折叠（§27.3.5）：撤回效果（completed_at）必然晚于它撤销的写入，时间序
+    // 才是「当前仍生效状态」的正确顺序——消息 seq 不能用：写事件归属助手消息
+    // （seq=用户 seq+1），而撤回效果挂在其目标用户消息 seq 上，按 seq 排会把
+    // 撤回效果排到被撤销写入之前，令更早消息的再撤回永远判冲突。
     const pathEvents = grouped.get(key)!.slice().sort((left, right) =>
-      left.messageSeq === right.messageSeq
-        ? left.observedAt.getTime() - right.observedAt.getTime()
-        : left.messageSeq < right.messageSeq ? -1 : 1);
+      left.observedAt.getTime() - right.observedAt.getTime()
+        || (left.messageSeq < right.messageSeq ? -1 : 1));
     const earliest = pathEvents[0]!;
     const latest = pathEvents[pathEvents.length - 1]!;
-    const preimage = preimageByKey.get(`${earliest.messageId}\u0000${earliest.relativePath}`);
-    const facts = baselineFacts(earliest, latest, preimage);
+    const entry = baselineFiles.get(earliest.relativePath);
+    const facts = await baselineFacts(r, targetMessageId, baseline?.status ?? null,
+      earliest.relativePath, entry, latest);
     const current = rootPath === null
       ? { exists: false, sha256: null, reason: 'ROOT_UNAVAILABLE' }
       : await readCurrentState(rootPath, earliest.relativePath);
@@ -808,34 +818,30 @@ async function buildRecallPlan(r: Repositories, sessionId: string, minSeq: bigin
   return plan;
 }
 
-function baselineFacts(earliest: WriteEvent, latest: WriteEvent,
-  preimage: MessageFilePreimageRow | undefined): BaselineFacts {
+async function baselineFacts(r: Repositories, targetMessageId: string,
+  baselineStatus: 'COMPLETE' | 'INCOMPLETE' | null, relativePath: string,
+  entry: AssistMessageBaselineFileRow | undefined, latest: WriteEvent): Promise<BaselineFacts> {
   const expected = { expectedSha256: latest.expectedSha256, expectedKnown: latest.expectedKnown };
-  if (preimage === undefined) {
-    if (earliest.action !== 'CREATE') {
-      return { baselineExisted: false, baselineSha256: null, baselineMessageId: null,
-        baselineContent: null, ...expected, unavailableReason: 'BASELINE_MISSING' };
-    }
-    // CREATE 只有在路径当时不存在时才可能 APPLIED；这条事实本身足以作缺失前像。
-    return { baselineExisted: false, baselineSha256: null, baselineMessageId: null,
-      baselineContent: null, ...expected, unavailableReason: null };
+  const missing = (reason: string): BaselineFacts => ({
+    baselineExisted: false, baselineSha256: null, baselineMessageId: null,
+    baselineContent: null, ...expected, unavailableReason: reason });
+  if (baselineStatus === null) return missing('BASELINE_MISSING');
+  if (entry === undefined) {
+    // COMPLETE 基线下无条目＝发送前不存在（整份覆盖已核对）；INCOMPLETE 下
+    // 无条目分不清「不存在」与「没扫到」，如实按不可恢复。
+    return baselineStatus === 'COMPLETE'
+      ? { baselineExisted: false, baselineSha256: null, baselineMessageId: null,
+        baselineContent: null, ...expected, unavailableReason: null }
+      : missing('BASELINE_UNKNOWN');
   }
-  const facts: BaselineFacts = {
-    baselineExisted: preimage.existed,
-    baselineSha256: preimage.sha256,
-    baselineMessageId: preimage.existed ? preimage.message_id : null,
-    baselineContent: preimage.content,
-    ...expected,
-    unavailableReason: preimage.unavailable_reason,
-  };
-  if (facts.unavailableReason !== null) return facts;
-  if ((earliest.action === 'CREATE') !== !preimage.existed) {
-    return { ...facts, unavailableReason: 'BASELINE_INCONSISTENT' };
+  if (entry.unavailable_reason !== null || !isFrozenBaseline(entry.blob_sha256)) {
+    return missing(entry.unavailable_reason ?? 'BASELINE_MISSING');
   }
-  if (preimage.existed && (!isFrozenBaseline(preimage.sha256) || preimage.content === null)) {
-    return { ...facts, unavailableReason: 'BASELINE_MISSING' };
-  }
-  return facts;
+  const content = await r.messageRecall.readBaselineBlob(entry.blob_sha256!);
+  if (content === undefined) return missing('BASELINE_BLOB_MISSING');
+  return { baselineExisted: true, baselineSha256: entry.blob_sha256,
+    baselineMessageId: targetMessageId, baselineContent: content, ...expected,
+    unavailableReason: null };
 }
 
 function preflight(facts: BaselineFacts, current: CurrentFileState): {
@@ -1031,24 +1037,25 @@ async function resumeRecall(db: DbExecutor, r: Repositories,
   if (pendingRows.length === 0) return finalizeRecallRun(db, r, row.id);
 
   if (row.root_path === null) {
-    const pending = pendingRows.map((file) => ({
-      ...storedFacts(file, undefined), relativePath: file.relative_path,
-      observedSha256: file.observed_sha256, status: 'UNAVAILABLE' as const,
-      reason: 'ROOT_UNAVAILABLE',
-    }));
+    const pending: RecallPlanFile[] = [];
+    for (const file of pendingRows) {
+      const facts = await storedFacts(r, file, undefined);
+      pending.push({ relativePath: file.relative_path, ...facts,
+        observedSha256: file.observed_sha256, status: 'UNAVAILABLE' as const,
+        reason: 'ROOT_UNAVAILABLE' });
+    }
     return executeRecallPlan(db, r, row.id, null, pending);
   }
 
-  const preimages = new Map<string, MessageFilePreimageRow>();
-  for (const preimage of await r.messageRecall.listPreimages(row.session_id, 0n)) {
-    const key = `${preimage.message_id}\u0000${preimage.relative_path}`;
-    if (!preimages.has(key)) preimages.set(key, preimage);
-  }
+  // 接续复用目标消息的发送前基线（同一身份、同一目标；基线被清理则如实不可恢复）。
+  const resumeBaseline = await r.messageRecall.findBaselineByMessage(row.message_id);
+  const resumeFiles = resumeBaseline === undefined
+    ? new Map<string, AssistMessageBaselineFileRow>()
+    : new Map((await r.messageRecall.listBaselineFiles(resumeBaseline.id))
+      .map((file) => [file.relative_path, file]));
   const pending: RecallPlanFile[] = [];
   for (const file of pendingRows) {
-    const preimage = file.baseline_message_id === null ? undefined
-      : preimages.get(`${file.baseline_message_id}\u0000${file.relative_path}`);
-    const facts = storedFacts(file, preimage);
+    const facts = await storedFacts(r, file, resumeFiles.get(file.relative_path));
     const current = await readCurrentState(row.root_path, file.relative_path);
     pending.push({ relativePath: file.relative_path, ...facts,
       observedSha256: current.sha256, ...preflight(facts, current) });
@@ -1056,27 +1063,26 @@ async function resumeRecall(db: DbExecutor, r: Repositories,
   return executeRecallPlan(db, r, row.id, row.root_path, pending);
 }
 
-function storedFacts(file: AssistMessageRecallFileRow,
-  preimage: MessageFilePreimageRow | undefined): BaselineFacts {
+async function storedFacts(r: Repositories, file: AssistMessageRecallFileRow,
+  entry: AssistMessageBaselineFileRow | undefined): Promise<BaselineFacts> {
   const base = {
     baselineExisted: file.baseline_existed,
     baselineSha256: file.baseline_sha256,
-    baselineMessageId: file.baseline_existed ? file.baseline_message_id : null,
-    baselineContent: file.baseline_existed ? preimage?.content ?? null : null,
+    baselineMessageId: file.baseline_message_id,
+    baselineContent: null as Buffer | null,
     expectedSha256: file.expected_current_sha256,
     // 落库前预检已确认过期望摘要；null 只表示「最后写入是删除」。
     expectedKnown: true,
     unavailableReason: null as string | null,
   };
   if (!file.baseline_existed) return base;
-  if (preimage === undefined) return { ...base, unavailableReason: 'BASELINE_MISSING' };
-  if (preimage.unavailable_reason !== null) {
-    return { ...base, unavailableReason: preimage.unavailable_reason };
-  }
-  if (preimage.sha256 !== file.baseline_sha256 || preimage.content === null) {
+  if (entry === undefined || entry.unavailable_reason !== null
+      || entry.blob_sha256 !== file.baseline_sha256) {
     return { ...base, unavailableReason: 'BASELINE_MISSING' };
   }
-  return base;
+  const content = await r.messageRecall.readBaselineBlob(entry.blob_sha256!);
+  if (content === undefined) return { ...base, unavailableReason: 'BASELINE_BLOB_MISSING' };
+  return { ...base, baselineContent: content };
 }
 
 async function finalizeRecallRun(db: DbExecutor, r: Repositories,

@@ -304,7 +304,8 @@ const SessionDeleteResult = Type.Object({
 }, strict);
 /**
  * 0113 分叉结果：`session_id` 是**新建的子会话**（命令目标才是源会话）。
- * `copied_messages` 为 0 不是失败——空讨论分叉就是一条新的空讨论。
+ * `copied_messages` 是搬进历史的已完成轮数；2026-10-24 起空讨论直接按 `INVALID_TRANSITION` 拒绝，
+ * 因此成功回执里它至少是 1，字段仍保留 `minimum: 0` 以兼容历史回执。
  */
 const SessionForkResult = Type.Object({
   session_id: uuid, title: Type.String(), revision: rev, updated_at: Type.String(),

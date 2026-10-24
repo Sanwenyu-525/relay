@@ -6,7 +6,8 @@ import {
   type RelayKnowledgeVersion, type RelayReview, type RelayWebImportJob,
   type RelayWebImportOperation
 } from "../api/relayClient";
-import { describeLiveError } from "../lib/liveErrors";
+import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
+import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 
 interface PendingImport {
   readonly commandId: string;
@@ -70,6 +71,21 @@ export default function WebImportPanel({ client, projectId, onOpenKnowledge }: {
   const projectReadVersion = useRef(0);
   const readVersion = useRef(0);
   const readingId = useRef<string | null>(null);
+  /** 供守卫读当前未决导入：state 驱动渲染，ref 让注册表在任何时刻都能读到最新事实。 */
+  const pendingRef = useRef<PendingImport | null>(null);
+  pendingRef.current = pending;
+  /**
+   * 未决导入并入页面级草稿守卫（禅道 #30，DEV-0130）：创建响应丢失时原 command_id 与
+   * 原载荷只存在于本组件，App 的路由阻断与关闭确认都按守卫注册表工作；没有这里的一票，
+   * Outlet 随路径卸载会静默丢掉恢复凭据。独立注册，不覆盖资料编辑等其他 Owner 的守卫。
+   * 不提供丢弃：离开不等于取消，未决命令只能核对回执或按原 ID 原载荷重试收口。
+   */
+  const importGuard = useRef<DraftGuard>({
+    hasUnsavedChanges: () => pendingRef.current !== null,
+    pendingCommandId: () => pendingRef.current?.commandId ?? null,
+    discard: () => { /* 未决导入不可丢弃：结果未知时丢弃等于放弃核对原命令。 */ }
+  });
+  useEffect(() => { setDraftGuard(importGuard.current); return () => clearDraftGuard(importGuard.current); }, []);
 
   useEffect(() => {
     active.current = true;
@@ -158,19 +174,21 @@ export default function WebImportPanel({ client, projectId, onOpenKnowledge }: {
     try {
       const submission = await client.createWebImportJob(command);
       if (!active.current) return;
+      // 创建回执已确认：命令结果不再未知，离开页面可按 Job ID 恢复，不再拦导航。
+      setPending(null); setMayRetry(false);
       setCurrentJobId(null); setJobIdInput(submission.importJobId);
       setJob(null); setOperations([]); setReview(null); setResult(null);
       await readJob(submission.importJobId, command);
     } catch (caught) {
       if (!active.current) return;
-      if (caught instanceof RelayTransportError) {
-        setActionError("响应丢失或回执无法核对。请查询原 command_id，或只用相同 ID 和载荷重试。");
-      } else if (caught instanceof RelayApiError && caught.problem.status === 409) {
-        setActionError(describeLiveError(caught).message);
-      } else {
+      // 结果是否落库不能由浏览器判定的（传输失败、5xx、核对型拒绝）一律保留未决，
+      // 只按原 command_id 核对回执；409（如 COMMAND_ID_REUSED）同样要按原 ID 核对。
+      // 只有服务端明确业务拒绝（422/403/404 等）才释放——503 被当拒绝清掉未决是
+      // 禅道 #32（DEV-0128）同族根因（KnowledgeView 已修，此处同形态）。
+      if (!needsReceiptCheck(caught) && !(caught instanceof RelayApiError && caught.problem.status === 409)) {
         setPending(null);
-        setActionError(describeLiveError(caught).message);
       }
+      setActionError(describeLiveError(caught).message);
     } finally { if (active.current) setSubmitting(false); }
   }
 
@@ -210,7 +228,8 @@ export default function WebImportPanel({ client, projectId, onOpenKnowledge }: {
       }
       const id = result.import_job_id;
       if (!active.current) return;
-      setMayRetry(false);
+      // 原回执已核对：命令结果不再未知，先解除未决再读 Job；readJob 仍按 expected 核对 Job 身份。
+      setPending(null); setMayRetry(false);
       setCurrentJobId(null); setJobIdInput(id); setJob(null);
       setOperations([]); setReview(null); setResult(null);
       await readJob(id, pending);

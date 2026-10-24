@@ -41,11 +41,19 @@ function baseGet(path: string, state: {
   if (path === `/projects/${projectId}/permission-policies`) return response(200, state.policies);
   if (path === `/projects/${projectId}/managed-resources`) return response(200, state.resources);
   if (path === `/projects/${projectId}/permission-policies/${policyId}/versions`) return response(200, state.versions);
+  if (path === "/plugins/status") return response(200, {
+    items: state.pluginStatus.length > 0 ? state.pluginStatus : [
+      { plugin: "computer", state: "READY", detail: "电脑运行时已就位，可执行截图与输入。", remediation: null },
+      { plugin: "browser", state: "READY", detail: "浏览器桥接扩展已配对。", remediation: null },
+      { plugin: "github", state: "NOT_AUTHENTICATED", detail: "GitHub CLI 已安装，但当前没有登录。",
+        remediation: "在终端执行 gh auth login 完成登录；凭据由 gh 自己保管，不经过 Relay。" }
+    ] });
   return null;
 }
 function state() { return { connections: [] as Record<string, unknown>[], policies: [] as Record<string, unknown>[],
   resources: [] as Record<string, unknown>[], versions: [] as Record<string, unknown>[],
-  archivedAt: null as string | null }; }
+  archivedAt: null as string | null,
+  pluginStatus: [] as Record<string, unknown>[] }; }
 
 describe("项目连接与 Permission 设置", () => {
   it("日常区按工具给出真实状态，逐动作表单默认收在高级区", async () => {
@@ -728,6 +736,30 @@ describe("从会话插件面板跳进来的定位与返回", () => {
     const detail = mounted.wrapper.get('[data-testid="connections-tool-state-computer"]').text();
     expect(detail).toContain("登记");
     expect(detail).toContain("高级");
+  });
+
+  it("三个插件行展示安装级运行时状态，与项目授权分开呈现", async () => {
+    locate();
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`);
+    unmount = mounted.unmount;
+    // 默认夹具：电脑/浏览器就绪，GitHub 已装未登录——「未登录」不能被读成「未授权」。
+    expect(mounted.wrapper.get('[data-testid="connections-tool-runtime-computer"]').text()).toContain("本机：就绪");
+    expect(mounted.wrapper.get('[data-testid="connections-tool-runtime-browser"]').text()).toContain("本机：就绪");
+    expect(mounted.wrapper.get('[data-testid="connections-tool-runtime-github"]').text()).toContain("本机：未登录");
+    // 授权状态仍是连接语义：GitHub 行不因「未登录」而变成「已连接」。
+    expect(mounted.wrapper.get('[data-testid="connections-tool-github"]').text()).toContain("未配置");
+  });
+
+  it("插件行运行时状态按服务端事实变化，未安装给出可行动的区别", async () => {
+    Element.prototype.scrollIntoView = () => {};
+    const data = locate();
+    data.pluginStatus = [{ plugin: "computer", state: "NOT_PAIRED",
+      detail: "没有找到电脑运行时：C:\\app\\relay-computer-runtime.exe",
+      remediation: "通过桌面版打开应用会带上随包运行时。" }];
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`);
+    unmount = mounted.unmount;
+    expect(mounted.wrapper.get('[data-testid="connections-tool-runtime-computer"]').text()).toContain("本机：未配对");
+    expect(mounted.wrapper.find('[data-testid="connections-tool-runtime-github"]').exists()).toBe(false);
   });
 
   it("没有 from 时不挂一条无目的的返回键；带恶意 from 时不渲染站内跳转", async () => {

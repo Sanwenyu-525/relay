@@ -62,7 +62,9 @@ export default function LearningRecordsPanel({ client, sessionId, refreshKey, bl
     return () => window.clearTimeout(timer);
   }, [state, inflight, blocked]);
   useEffect(() => {
+    // 学习表单没有本机草稿存储：这些输入离页即丢，`unsaved` 与 `dirty` 同真（2026-10-24 P0-2）。
     onNavigationChange({ dirty: Boolean(detail.trim() || scenario.trim() || instruction.trim() || background.trim()),
+      unsaved: Boolean(detail.trim() || scenario.trim() || instruction.trim() || background.trim()),
       pending: pending ? { commandId: pending.commandId, commandType: learningCommandType(pending), sessionId } : null,
       discard: () => { setCorrecting(null); setDetail(""); setScenario(""); setInstruction(""); setBackground(""); } });
   }, [detail, scenario, instruction, background, pending, sessionId, onNavigationChange]);

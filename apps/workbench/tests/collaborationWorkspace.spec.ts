@@ -1561,7 +1561,8 @@ describe("协作工作区主路径", () => {
       }
       // 末位页签现在是「轨迹」（本轮新增），因此首尾循环的落点随之改变；
 // 断言强度不变，只是跟着真实页签顺序走。
-      for (const [key, expected] of [["ArrowLeft", "TRACE"], ["ArrowRight", "FILES"], ["End", "TRACE"], ["Home", "FILES"], ["ArrowRight", "GIT"], ["ArrowRight", "TERMINAL"], ["ArrowRight", "RUNS"], ["ArrowRight", "TRACE"]]) {
+      // 页签真实顺序：文件 / 变更 / 网页 / 终端 / 运行记录 / 轨迹（「网页」为 2026-10-24 新增，排在「变更」之后）。
+      for (const [key, expected] of [["ArrowLeft", "TRACE"], ["ArrowRight", "FILES"], ["End", "TRACE"], ["Home", "FILES"], ["ArrowRight", "GIT"], ["ArrowRight", "WEB"], ["ArrowRight", "TERMINAL"], ["ArrowRight", "RUNS"], ["ArrowRight", "TRACE"]]) {
         await press(key!);
         const current = selected();
         expect(current.attributes("data-testid")).toBe(`devtools-tab-${expected}`);
@@ -2185,4 +2186,165 @@ describe("协作工作区主路径", () => {
     expect(view.wrapper.get('[data-testid="collab-facts"]').text()).toContain("失败原因：MODEL_BUDGET_EXHAUSTED");
     view.unmount();
   });
+});
+
+/**
+ * 不可恢复输入的离页保护（2026-10-24 P0-2）。
+ *
+ * 协作页守卫此前恒为 false：暂存/上传中的附件、首条草稿等没有本机持久化的输入
+ * 离页即丢却无人拦。现在 AssistView 把不可恢复事实投影进 `unsaved`，
+ * 守卫照实上报；正文草稿仍按会话留在本机（composerDrafts），不因此弹确认
+ * （2026-10-19 用户指令，由上方「切换工作保护未提交输入」一条继续锁住）。
+ */
+describe("不可恢复输入的离页保护", () => {
+  /** jsdom 没有剪贴板实现，自己造一个带 clipboardData 的 paste 事件（与 composerImageAttachments 同法）。 */
+  async function pasteFile(target: Element, file: File): Promise<void> {
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: {
+      items: [{ kind: "file", type: file.type, getAsFile: () => file }],
+      files: [file], types: ["Files"] } });
+    await act(async () => { target.dispatchEvent(event); });
+  }
+
+  function openDirectoryEnvelope(body: Record<string, unknown>): Response {
+    return response({ command_id: body.command_id, committed_at: "2026-10-24T00:00:00Z",
+      links: { resource: "" }, result: { canonical_root: body.root_path ?? "D:/repo-other",
+        display_name: "repo-other", status: "READY", reason: null,
+        association: { project_id: projectId, project_title: "人机协作工作流研究",
+          project_archived: false, resource_id: "aaaaaaa1-1111-4111-8111-111111111111",
+          resource_status: "ACTIVE", file_write_identity_bound: true },
+        created_project: false, created_resource: false, candidates: [],
+        write_readiness: { status: "NEEDS_CONNECTION", detail: "本项目还没有绑定该目录的文件写入连接。" } } }, 200);
+  }
+
+  it("暂存附件在页内切目录前先确认：保留留在原作用域，丢弃后清空芯片并完成切换", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const mocked = router({});
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      const method = init?.method ?? "GET";
+      if (path === `${prefix}/working-directories/open` && method === "POST")
+        return openDirectoryEnvelope(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      if (path.endsWith("/working-directory") && method === "POST") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        return response({ command_id: body.command_id, committed_at: "2026-10-24T00:00:00Z",
+          result: { session_id: path.split("/").at(-2), working_resource_id: body.resource_id,
+            revision: "2" } }, 200);
+      }
+      return mocked(input, init);
+    }));
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      await pasteFile(view.wrapper.get('[data-testid="assist-draft"]').element,
+        new File([new Uint8Array([1, 2, 3])], "截图.png", { type: "image/png" }));
+      await flush();
+      expect(view.wrapper.get('[data-testid="composer-attachments"]').attributes("data-count")).toBe("1");
+
+      // 切目录先被守卫拦下：确认弹层出现，目录还没切换。
+      await openWorkingDirectoryViaManual("D:/repo-other");
+      expect(dialogText()).toContain("无法恢复");
+      expect(folderStripName()).not.toBe("repo-other");
+      // 保留并继续编辑：留在原作用域，附件仍在。
+      await clickPortal("collab-unsaved-keep");
+      await flush();
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(view.wrapper.get('[data-testid="composer-attachments"]').attributes("data-count")).toBe("1");
+      expect(folderStripName()).not.toBe("repo-other");
+
+      // 丢弃并继续：附件被清（不再渲染芯片行），目录切换完成。
+      await openWorkingDirectoryViaManual("D:/repo-other");
+      expect(dialogText()).toContain("无法恢复");
+      await clickPortal("collab-unsaved-discard");
+      await flush(120);
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(view.wrapper.find('[data-testid="composer-attachments"]').exists()).toBe(false);
+      expect(folderStripName()).toBe("repo-other");
+    } finally { view.unmount(); }
+  });
+
+  it("跨页导航前拦暂存附件：保留留在本页，丢弃后才真正离开", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    vi.stubGlobal("fetch", router({}));
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      await pasteFile(view.wrapper.get('[data-testid="assist-draft"]').element,
+        new File([new Uint8Array([1, 2, 3])], "截图.png", { type: "image/png" }));
+      await flush();
+      expect(view.wrapper.get('[data-testid="composer-attachments"]').attributes("data-count")).toBe("1");
+
+      await view.router.push("/tasks");
+      await flush();
+      // App 级路由阻断弹出：附件没有本机持久化，离开即丢。
+      expect(dialogText()).toContain("保留未保存的修改");
+      expect(view.router.currentRoute.value.path).toBe("/agent");
+      // 保留并继续编辑：回到本页，附件仍在。
+      const keep = Array.from(document.querySelectorAll('[role="dialog"] button'))
+        .find((button) => button.textContent === "保留并继续编辑");
+      if (keep === null) throw new Error("App 守卫弹层没有「保留并继续编辑」按钮");
+      await act(async () => { keep.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+      await flush();
+      expect(view.router.currentRoute.value.path).toBe("/agent");
+      expect(view.wrapper.get('[data-testid="composer-attachments"]').attributes("data-count")).toBe("1");
+
+      // 丢弃草稿并离开：导航完成。
+      await view.router.push("/tasks");
+      await flush();
+      await clickPortal("discard-draft-leave");
+      await flush(80);
+      expect(view.router.currentRoute.value.path).toBe("/tasks");
+    } finally { view.unmount(); }
+  });
+
+  it("首条输入器的暂存附件同样拦跨页导航；只有可恢复的首条正文草稿时不拦", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    vi.stubGlobal("fetch", router({}));
+    const view = await mountWorkbench("/agent");
+    try {
+      await pasteFile(view.wrapper.get('[data-testid="assist-first-draft"]').element,
+        new File([new Uint8Array([1, 2, 3])], "首条.png", { type: "image/png" }));
+      await flush();
+      expect(view.wrapper.get('[data-testid="composer-attachments"]').attributes("data-count")).toBe("1");
+
+      await view.router.push("/projects");
+      await flush();
+      // 附件没有本机持久化：App 级守卫先拦下，正文草稿的「不拦」契约不受影响。
+      expect(dialogText()).toContain("保留未保存的修改");
+      expect(view.router.currentRoute.value.path).toBe("/agent");
+      const keep = Array.from(document.querySelectorAll('[role="dialog"] button'))
+        .find((button) => button.textContent === "保留并继续编辑");
+      if (keep === null) throw new Error("App 守卫弹层没有「保留并继续编辑」按钮");
+      await act(async () => { keep.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+      await flush();
+
+      // 对照：删掉附件芯片后只剩（可恢复的）正文草稿，直接导航不弹。
+      const remove = view.wrapper.findAll('[data-testid="composer-attachments"] li button')[0];
+      if (remove === undefined) throw new Error("附件芯片没有移除键");
+      await remove.trigger("click");
+      await flush();
+      expect(view.wrapper.find('[data-testid="composer-attachments"]').exists()).toBe(false);
+      await view.router.push("/projects");
+      await flush(80);
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(view.router.currentRoute.value.path).toBe("/projects");
+    } finally { view.unmount(); }
+  });
+
+  /** mountApp 的 openWorkingDirectory 直接点提交；这里需要先断言守卫弹层，走同一浮层手填路径。 */
+  async function openWorkingDirectoryViaManual(root: string): Promise<void> {
+    const trigger = document.querySelector<HTMLElement>('[data-testid="folder-scope-change"]');
+    if (trigger === null) throw new Error('DOM test selector not found: [data-testid="folder-scope-change"]');
+    await act(async () => { trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+    await flush();
+    const input = document.querySelector<HTMLInputElement>('[data-testid="folder-manual-root"]');
+    if (input === null) throw new Error('DOM test selector not found: [data-testid="folder-manual-root"]');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, root);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    const submit = document.querySelector<HTMLElement>('[data-testid="folder-open-manual"]');
+    if (submit === null) throw new Error('DOM test selector not found: [data-testid="folder-open-manual"]');
+    await act(async () => { submit.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+    await flush(80);
+  }
 });

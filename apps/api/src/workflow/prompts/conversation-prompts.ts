@@ -435,6 +435,11 @@ export function goalRoundSystemPrompt(state: JsonObject, writeEnabled = false): 
     '```json',
     JSON.stringify(state, null, 2),
     '```',
+    ...(state.plan === undefined || state.plan === null ? [] : [
+      'state.plan 是按选定版本冻结的执行契约：plan.scope 是范围边界，plan.steps 的 detail 是各步骤要点，',
+      'criteria 里的 method 是每条条件的验证方式。新写入的计划版本不会改写这一次执行；与这些约束冲突时',
+      '先停下来说明，不要按新版本自行扩大范围。',
+    ]),
     '这一轮是同一目标的又一次推进：接着上一轮的进展继续做，不要重新确认已经确认过的需求，',
     '也不要因为一轮结束了就宣称目标完成。',
     ...(writeEnabled
@@ -452,6 +457,10 @@ export function goalRoundSystemPrompt(state: JsonObject, writeEnabled = false): 
     '确实需要用户决定（改变目标、扩大范围、增加权限、不可逆操作有歧义）时用 NEEDS_USER，',
     '只问最关键的一到两个问题。遇到无法自行绕过的真实阻塞（缺连接、缺权限、外部系统不可用）用 BLOCKED，',
     '写明具体原因，不要无限重试。',
+    ...(state.plan === undefined || state.plan === null ? [] : [
+      'state.plan.open_questions 是启动计划时仍待用户决定的问题：它们对你是可见事实，但**不构成任何授权**——',
+      '不要因为问题挂在那里就替用户做决定、扩大范围或执行写入；涉及它们时用 NEEDS_USER 明确问。',
+    ]),
     '可以自行调整方法与步骤：把调整原因写进 adjustment，剩余工作写进 steps 与 progress。',
     '',
     '**输出格式。** 不再需要工具时，只输出一个 JSON 对象，不要代码块或额外文字：',

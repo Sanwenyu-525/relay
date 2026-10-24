@@ -12,18 +12,11 @@ import { sql } from 'kysely';
 
 import type { DbExecutor } from '../infrastructure/database.js';
 import type {
-  AssistMessageRecallFileRow, AssistMessageRecallFileStatus, AssistMessageRecallRow,
-  AssistMessageRecallStatus, AssistMessageRecallProtectionRow, AssistMessageRecallUndoRow,
+  AssistMessageBaselineFileRow, AssistMessageBaselineRow, AssistMessageRecallFileRow,
+  AssistMessageRecallFileStatus, AssistMessageRecallRow, AssistMessageRecallStatus,
+  AssistMessageRecallProtectionRow, AssistMessageRecallUndoRow,
 } from '../infrastructure/database-schema.js';
 import type { JsonObject } from '../infrastructure/json.js';
-
-export interface MessageFilePreimageRow {
-  readonly message_id: string; readonly workspace_id: string; readonly session_id: string;
-  readonly relative_path: string; readonly existed: boolean;
-  readonly content: Buffer | null; readonly sha256: string | null;
-  readonly size_bytes: bigint | null; readonly unavailable_reason: string | null;
-  readonly source: 'SESSION_WRITE' | 'RUN_WRITE'; readonly created_at: Date;
-}
 
 export interface DirectWriteOperationRow {
   readonly message_id: string; readonly message_seq: bigint;
@@ -47,14 +40,6 @@ export interface DelegatedWriteFileRow {
   readonly observed_at: Date;
 }
 
-export interface InsertPreimageInput {
-  readonly messageId: string; readonly workspaceId: string; readonly sessionId: string;
-  readonly relativePath: string; readonly existed: boolean;
-  readonly content: Buffer | null; readonly sha256: string | null;
-  readonly sizeBytes: bigint | null; readonly unavailableReason: string | null;
-  readonly source: 'SESSION_WRITE' | 'RUN_WRITE';
-}
-
 export interface RecallFileInput {
   readonly relativePath: string; readonly baselineExisted: boolean;
   readonly baselineSha256: string | null; readonly baselineMessageId: string | null;
@@ -66,40 +51,112 @@ export interface RecallFileInput {
 export class MessageRecallRepository {
   constructor(private readonly db: DbExecutor) {}
 
-  /** 写入前像：首写优先。重放/重试不覆盖已记录的真实前像。 */
-  async insertPreimage(input: InsertPreimageInput): Promise<void> {
-    await sql`insert into assist_message_file_preimages (message_id, workspace_id, session_id,
-      relative_path, existed, content, sha256, size_bytes, unavailable_reason, source)
-      values (${input.messageId}, ${input.workspaceId}, ${input.sessionId},
-        ${input.relativePath}, ${input.existed}, ${input.content}, ${input.sha256},
-        ${input.sizeBytes}, ${input.unavailableReason}, ${input.source})
-      on conflict (message_id, relative_path) do nothing`.execute(this.db);
+  /**
+   * 在 SQL SAVEPOINT 内运行采集的数据库阶段：语句失败只回滚保存点，不把外层消息
+   * 准入事务置为 aborted（采集失败不得阻塞消息，§8.5/§27.3.4 的降级语义）。
+   * 注意不能用 Kysely 的 transaction()：在裸 Kysely 实例上它会从连接池另开一条
+   * 新连接，看不到外层事务里已插入、未提交的消息行（实测 FK 23503 的根因）；
+   * 同一连接上的 SAVEPOINT/ROLLBACK TO 才是正确原语。
+   */
+  async inSavepoint<T>(work: (sp: MessageRecallRepository) => Promise<T>): Promise<T | undefined> {
+    const name = `sp_baseline_${Date.now().toString(36)}`;
+    const id = sql.raw(`"${name}"`);
+    try {
+      await sql`savepoint ${id}`.execute(this.db);
+      try {
+        return await work(this);
+      } catch {
+        await sql`rollback to savepoint ${id}`.execute(this.db);
+        return undefined;
+      } finally {
+        await sql`release savepoint ${id}`.execute(this.db);
+      }
+    } catch {
+      // 连接不在事务中或保存点机制不可用：外层调用方按 CAPTURE_FAILED 降级处理。
+      return undefined;
+    }
   }
 
-  async listPreimages(sessionId: string, minSeq: bigint): Promise<readonly MessageFilePreimageRow[]> {
-    return (await sql<MessageFilePreimageRow>`select p.* from assist_message_file_preimages p
-      join assist_messages m on m.id = p.message_id
-      where p.session_id = ${sessionId} and m.seq >= ${minSeq}
-      order by m.seq, p.created_at, p.relative_path`.execute(this.db)).rows;
+  // ---- 发送前基线（2026-10-24 用户拍板口径，取代首写前像）----
+
+  async findBaselineByMessage(messageId: string): Promise<AssistMessageBaselineRow | undefined> {
+    return (await sql<AssistMessageBaselineRow>`select * from assist_message_baselines
+      where message_id = ${messageId}`.execute(this.db)).rows[0];
   }
 
-  async findSessionToolCallByOperation(operationId: string): Promise<{
-    session_id: string; message_id: string; workspace_id: string;
-  } | undefined> {
-    return (await sql<{ session_id: string; message_id: string; workspace_id: string }>`
-      select stc.session_id, stc.message_id, s.workspace_id
-      from session_tool_calls stc
-      join assist_sessions s on s.id = stc.session_id
-      where stc.operation_id = ${operationId}`.execute(this.db)).rows[0];
+  async insertBaseline(input: { id: string; workspaceId: string; sessionId: string;
+    messageId: string; resourceId: string; rootPath: string;
+    status: 'COMPLETE' | 'INCOMPLETE'; reason: string; fileCount: number;
+    totalBytes: bigint;
+  }): Promise<AssistMessageBaselineRow> {
+    const result = await sql<AssistMessageBaselineRow>`
+      insert into assist_message_baselines (id, workspace_id, session_id, message_id,
+        resource_id, root_path, status, reason, file_count, total_bytes)
+      values (${input.id}, ${input.workspaceId}, ${input.sessionId}, ${input.messageId},
+        ${input.resourceId}, ${input.rootPath}, ${input.status}, ${input.reason},
+        ${input.fileCount}, ${input.totalBytes})
+      returning *`.execute(this.db);
+    return result.rows[0]!;
   }
 
-  async findConversationRequestByRun(workspaceId: string, runId: string): Promise<{
-    session_id: string; source_message_id: string;
-  } | undefined> {
-    return (await sql<{ session_id: string; source_message_id: string }>`
-      select session_id, source_message_id from conversation_execution_requests
-      where workspace_id = ${workspaceId} and run_id = ${runId}
-      order by created_at desc limit 1`.execute(this.db)).rows[0];
+  async insertBaselineFiles(baselineId: string, files: readonly {
+    relativePath: string; blobSha256: string | null;
+    sizeBytes: bigint | null; unavailableReason: string | null;
+  }[]): Promise<void> {
+    if (files.length === 0) return;
+    await sql`insert into assist_message_baseline_files (baseline_id, relative_path,
+        existed, blob_sha256, size_bytes, unavailable_reason)
+      select ${baselineId}, t.path, true, t.sha, t.size, t.reason
+      from unnest(${files.map((f) => f.relativePath)}::text[], ${files.map((f) => f.blobSha256)}::text[],
+        ${files.map((f) => f.sizeBytes)}::bigint[], ${files.map((f) => f.unavailableReason)}::text[])
+        as t(path, sha, size, reason)`.execute(this.db);
+  }
+
+  async listBaselineFiles(baselineId: string):
+  Promise<readonly AssistMessageBaselineFileRow[]> {
+    return (await sql<AssistMessageBaselineFileRow>`
+      select * from assist_message_baseline_files where baseline_id = ${baselineId}
+      order by relative_path`.execute(this.db)).rows;
+  }
+
+  async readBaselineBlob(blobSha256: string): Promise<Buffer | undefined> {
+    return (await sql<{ content: Buffer }>`select content from assist_message_snapshot_blobs
+      where blob_sha256 = ${blobSha256}`.execute(this.db)).rows[0]?.content;
+  }
+
+  /** 哪些摘要已在字节库中（去重判定；只读）。 */
+  async filterExistingBlobShas(shas: readonly string[]): Promise<Set<string>> {
+    if (shas.length === 0) return new Set();
+    const rows = (await sql<{ blob_sha256: string }>`
+      select blob_sha256 from assist_message_snapshot_blobs
+      where blob_sha256 = any(${[...shas]}::text[])`.execute(this.db)).rows;
+    return new Set(rows.map((row) => row.blob_sha256));
+  }
+
+  /**
+   * 新增字节入内容寻址库：批内同内容按出现次数计引用；既有行只累加计数。
+   * 单条 upsert 原子完成，无并发双插。调用方只传「确认新增」的文件（内容已重读核对）。
+   */
+  async registerBaselineBlobs(files: readonly { sha256: string; sizeBytes: bigint;
+    content: Buffer }[]): Promise<void> {
+    if (files.length === 0) return;
+    const bySha = new Map<string, { sizeBytes: bigint; count: number; content: Buffer }>();
+    for (const file of files) {
+      const current = bySha.get(file.sha256);
+      if (current === undefined) {
+        bySha.set(file.sha256, { sizeBytes: file.sizeBytes, count: 1, content: file.content });
+      } else {
+        current.count += 1;
+      }
+    }
+    for (const [sha, info] of bySha) {
+      await sql`insert into assist_message_snapshot_blobs (blob_sha256, size_bytes, content,
+          refcount)
+        values (${sha}, ${info.sizeBytes}, ${info.content}, ${info.count})
+        on conflict (blob_sha256) do update
+          set refcount = assist_message_snapshot_blobs.refcount + excluded.refcount`
+        .execute(this.db);
+    }
   }
 
   async listDirectWriteOperations(sessionId: string, minSeq: bigint):
@@ -153,15 +210,6 @@ export class MessageRecallRepository {
       where stc.session_id = ${sessionId} and m.seq >= ${minSeq}
         and stc.status = 'REQUESTED'
       order by stc.id`.execute(this.db)).rows.map((row) => row.id);
-  }
-
-  /** 已撤回用户消息的最大 seq：首版只允许沿对话向后逐条撤回，禁止嵌套/倒序。 */
-  async maxWithdrawnUserSeq(sessionId: string): Promise<bigint | null> {
-    return (await sql<{ seq: bigint | null }>`select max(m.seq) as seq
-      from assist_messages m
-      join assist_message_recalls r on r.message_id = m.id
-      where m.session_id = ${sessionId} and m.role = 'USER'
-        and m.withdrawn_at is not null`.execute(this.db)).rows[0]?.seq ?? null;
   }
 
   async findRecallByMessage(messageId: string): Promise<AssistMessageRecallRow | undefined> {
@@ -348,6 +396,31 @@ export class MessageRecallRepository {
     return (result.numAffectedRows ?? 0n) > 0n;
   }
 
+  /**
+   * §27.3.5 方向放开后的「当前仍生效状态」折叠材料：本会话已结算撤回实际恢复
+   * （RESTORED）的路径及其恢复后状态，按结算时间参与期望态计算。
+   */
+  async listRecallEffectsForFold(sessionId: string, minSeq: bigint): Promise<readonly {
+    messageId: string; messageSeq: bigint; relativePath: string;
+    exists: boolean; sha256: string | null; rootPath: string; settledAt: Date;
+  }[]> {
+    const rows = (await sql<{ message_id: string; message_seq: string; relative_path: string;
+      baseline_existed: boolean; baseline_sha256: string | null; root_path: string;
+      settled_at: Date }>`
+      select r.message_id, m.seq::text as message_seq, f.relative_path,
+        f.baseline_existed, f.baseline_sha256, r.root_path, r.completed_at as settled_at
+      from assist_message_recalls r
+      join assist_messages m on m.id = r.message_id
+      join assist_message_recall_files f on f.recall_id = r.id
+      where r.session_id = ${sessionId} and r.status = 'COMPLETED'
+        and f.status = 'RESTORED' and m.seq >= ${minSeq}
+      order by m.seq, r.completed_at, f.relative_path`.execute(this.db)).rows;
+    return rows.map((row) => ({ messageId: row.message_id, messageSeq: BigInt(row.message_seq),
+      relativePath: row.relative_path, exists: row.baseline_existed,
+      sha256: row.baseline_sha256 === null ? null : row.baseline_sha256.toLowerCase(),
+      rootPath: row.root_path ?? '', settledAt: row.settled_at }));
+  }
+
   /** 把补充事实（如任务重开结果）合并进撤回 detail；只做 jsonb 合并，不改写既有键以外的内容。 */
   async mergeRecallDetail(recallId: string, patch: JsonObject): Promise<void> {
     await sql`update assist_message_recalls
@@ -358,16 +431,21 @@ export class MessageRecallRepository {
   // ---- §27.3.4 容量预算与保留清理 ----
 
   /**
-   * 工作区快照占用（前像＋保护副本的累计字节）与最旧快照时间。
-   * 前像有 workspace_id 列；保护副本经撤回行取工作区。
+   * 工作区快照占用（基线字节库＋保护副本的累计字节）与最旧快照时间。
+   * 基线字节按去重后的 blob 行计（§27.3.4 的「实际快照存储」口径）。
    */
   async snapshotUsage(workspaceId: string): Promise<{
     bytes: bigint; count: number; oldestAt: Date | null;
   }> {
     const result = await sql<{ bytes: string; count: string; oldest: Date | null }>`
       with usage as (
-        select coalesce(sum(size_bytes), 0) as bytes, count(*) as count, min(created_at) as oldest
-        from assist_message_file_preimages where workspace_id = ${workspaceId}
+        select coalesce(sum(b.size_bytes), 0) as bytes, count(*) as count,
+          min(b.created_at) as oldest
+        from assist_message_snapshot_blobs b
+        where exists (select 1 from assist_message_baselines lb
+          where lb.workspace_id = ${workspaceId}
+            and exists (select 1 from assist_message_baseline_files f
+              where f.baseline_id = lb.id and f.blob_sha256 = b.blob_sha256))
         union all
         select coalesce(sum(p.size_bytes), 0), count(*), min(p.created_at)
         from assist_message_recall_protections p
@@ -389,22 +467,31 @@ export class MessageRecallRepository {
    */
   async sweepExpiredSnapshots(retentionDays: number): Promise<number> {
     const seconds = Math.max(0, Math.round(retentionDays * 86400));
-    const preimages = await sql`
-      delete from assist_message_file_preimages p
-      where p.created_at < now() - make_interval(secs => ${seconds})
+    const expiredAt = sql`now() - make_interval(secs => ${seconds})`;
+    // 过期基线：不被在途撤回/撤销所在会话引用的整份删除（条目级联）。
+    const baselines = await sql`
+      delete from assist_message_baselines b
+      where b.captured_at < ${expiredAt}
         and not exists (select 1 from assist_message_recalls r
-          where r.session_id = p.session_id and r.status = 'RUNNING')
+          where r.session_id = b.session_id and r.status = 'RUNNING')
         and not exists (select 1 from assist_message_recall_undos u
-          where u.session_id = p.session_id and u.status = 'RUNNING')`.execute(this.db);
+          where u.session_id = b.session_id and u.status = 'RUNNING')`.execute(this.db);
+    // 字节库引用回收：删掉不再被任何条目引用的 blob（refcount 不再维护精确值，
+    // 以「有无引用行」为准——同一事实只有条目一处，不冒充第二套计数）。
+    const blobs = await sql`
+      delete from assist_message_snapshot_blobs b
+      where not exists (select 1 from assist_message_baseline_files f
+        where f.blob_sha256 = b.blob_sha256)`.execute(this.db);
     const protections = await sql`
       delete from assist_message_recall_protections p
       using assist_message_recalls r
       where p.recall_id = r.id
-        and p.created_at < now() - make_interval(secs => ${seconds})
+        and p.created_at < ${expiredAt}
         and r.status <> 'RUNNING'
         and not exists (select 1 from assist_message_recall_undos u
           where u.source_recall_id = r.id and u.status = 'RUNNING')`.execute(this.db);
-    return Number((preimages.numAffectedRows ?? 0n) + (protections.numAffectedRows ?? 0n));
+    return Number((baselines.numAffectedRows ?? 0n) + (blobs.numAffectedRows ?? 0n)
+      + (protections.numAffectedRows ?? 0n));
   }
 
   async finalizeUndo(id: string, status: AssistMessageRecallStatus,

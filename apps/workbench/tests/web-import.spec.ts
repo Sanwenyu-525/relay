@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { flush, mountWorkbench } from "./mountApp";
+import { flush, mountWorkbench, dialogText } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -164,6 +164,65 @@ describe("P17 project Knowledge web import", () => {
     expect(mounted.wrapper.get('[data-testid="web-import-status"]').text()).toContain(jobId);
   });
 
+  // 禅道 #32 同族相邻点（KnowledgeView 同形态）：结果能否落库不能由浏览器判定的失败
+  // （typed 503、传输失败、核对型拒绝）必须保留未决命令，只按原 command_id 核对回执；
+  // 服务端明确业务拒绝（422 等）才说明意图未落库，可释放未决、修正后换新命令重发。
+  it("typed 503 保留未决命令：不换 ID 重发，只能按原 command_id 核对回执", async () => {
+    activate();
+    const submittedIds: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = String(input);
+      if (path === `${base}/projects/${projectId}`) return response(200, project());
+      if (path === `${base}/knowledge?project_id=${projectId}`) return response(200, []);
+      if (path === `${base}/projects/${projectId}/connections`) return response(200,
+        [{ id: connectionId, status: "ACTIVE", capabilities: ["WEB_FETCH"], allowed_host: null }]);
+      if (path === `${base}/projects/${projectId}/import-jobs` && init?.method === "POST") {
+        submittedIds.push(String((JSON.parse(String(init.body)) as Record<string, unknown>).command_id));
+        return response(503, { code: "DATABASE_UNAVAILABLE", detail: "temporary failure",
+          retryable: true, retry_action: "CHECK_RECEIPT_THEN_RETRY" });
+      }
+      throw new Error(`unexpected request ${path}`);
+    }));
+    const mounted = await mountWorkbench(`/projects/${projectId}/knowledge`);
+    unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="web-import-url"]').setValue(url);
+    await mounted.wrapper.get('[data-testid="web-import-form"]').trigger("submit");
+    await flush();
+    // 503 不再被当成明确拒绝清掉未决：原 command_id 保留，提交入口被未决门槛挡住。
+    expect(mounted.wrapper.get('[data-testid="web-import-pending"]').text()).toContain(submittedIds[0]!);
+    expect(mounted.wrapper.get('[data-testid="web-import-submit"]').attributes("disabled")).toBeDefined();
+    expect(mounted.wrapper.get('[data-testid="web-import-retry"]').attributes("disabled")).toBeDefined();
+    expect(submittedIds).toHaveLength(1);
+  });
+
+  it("明确业务拒绝（422）释放未决：输入保留，可修正后换新命令重发", async () => {
+    activate();
+    const submittedIds: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = String(input);
+      if (path === `${base}/projects/${projectId}`) return response(200, project());
+      if (path === `${base}/knowledge?project_id=${projectId}`) return response(200, []);
+      if (path === `${base}/projects/${projectId}/connections`) return response(200,
+        [{ id: connectionId, status: "ACTIVE", capabilities: ["WEB_FETCH"], allowed_host: null }]);
+      if (path === `${base}/projects/${projectId}/import-jobs` && init?.method === "POST") {
+        submittedIds.push(String((JSON.parse(String(init.body)) as Record<string, unknown>).command_id));
+        return response(422, { code: "VALIDATION_FAILED", detail: "validation failed",
+          field_errors: [{ field: "url", message: "host not allowed" }] });
+      }
+      throw new Error(`unexpected request ${path}`);
+    }));
+    const mounted = await mountWorkbench(`/projects/${projectId}/knowledge`);
+    unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="web-import-url"]').setValue(url);
+    await mounted.wrapper.get('[data-testid="web-import-form"]').trigger("submit");
+    await flush();
+    // 服务端明确拒绝：未决解除、提交入口恢复，原输入保留便于修正后重发。
+    expect(mounted.wrapper.find('[data-testid="web-import-pending"]').exists()).toBe(false);
+    expect(mounted.wrapper.get('[data-testid="web-import-submit"]').attributes("disabled")).toBeUndefined();
+    expect((mounted.wrapper.get('[data-testid="web-import-url"]').element as HTMLInputElement).value).toBe(url);
+    expect(mounted.wrapper.text()).toContain("host not allowed");
+  });
+
   it("提交前重读发现归档时零导入命令，历史 Job 仍可按 ID 查询", async () => {
     activate();
     let projectReads = 0;
@@ -268,5 +327,75 @@ describe("P17 project Knowledge web import", () => {
     await flush();
     expect(mounted.wrapper.text()).not.toContain(jobId);
     expect(mounted.wrapper.text()).toContain("没有可用的 ACTIVE WEB_FETCH 连接");
+  });
+
+  // 禅道 #30（DEV-0130）：导入结果未知时原 command_id 只存在于组件内，此前不注册任何
+  // 路由守卫，App Outlet 随路径卸载即丢。回执确认（创建 201 或回执核对通过）即解除未决；
+  // 未知窗口内导航被阻断、不提供丢弃，离开不等于取消。
+  it("结果未知时阻止站内离开并保留原命令，不提供丢弃草稿离开", async () => {
+    activate();
+    let submittedId = "";
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = String(input);
+      if (path === `${base}/projects/${projectId}`) return response(200, project());
+      if (path === `${base}/knowledge?project_id=${projectId}`) return response(200, []);
+      if (path === `${base}/projects/${projectId}/connections`) return response(200, [{ id: connectionId, status: "ACTIVE", capabilities: ["WEB_FETCH"], allowed_host: "public.example" }]);
+      if (path === `${base}/projects/${projectId}/import-jobs` && init?.method === "POST") {
+        submittedId = String((JSON.parse(String(init.body)) as Record<string, unknown>).command_id);
+        throw new TypeError("connection lost");
+      }
+      throw new Error(`unexpected request ${path}`);
+    }));
+    const mounted = await mountWorkbench(`/projects/${projectId}/knowledge`);
+    unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="web-import-url"]').setValue(url);
+    await mounted.wrapper.get('[data-testid="web-import-form"]').trigger("submit");
+    await flush();
+    expect(mounted.wrapper.get('[data-testid="web-import-pending"]').text()).toContain(submittedId);
+
+    await mounted.router.push("/tasks");
+    await flush();
+    expect(mounted.router.currentRoute.value.path).toBe(`/projects/${projectId}/knowledge`);
+    expect(dialogText()).toContain("命令结果待核对");
+    expect(dialogText()).toContain(submittedId);
+    expect(document.querySelector('[data-testid="discard-draft-leave"]')).toBeNull();
+    expect(mounted.wrapper.get('[data-testid="web-import-pending"]').text()).toContain(submittedId);
+  });
+
+  it("结果未知时核对原回执成功后可正常离开", async () => {
+    activate();
+    let submittedId = "";
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = String(input);
+      if (path === `${base}/projects/${projectId}`) return response(200, project());
+      if (path === `${base}/knowledge?project_id=${projectId}`) return response(200, []);
+      if (path === `${base}/projects/${projectId}/connections`) return response(200, [{ id: connectionId, status: "ACTIVE", capabilities: ["WEB_FETCH"], allowed_host: "public.example" }]);
+      if (path === `${base}/projects/${projectId}/import-jobs` && init?.method === "POST") {
+        submittedId = String((JSON.parse(String(init.body)) as Record<string, unknown>).command_id);
+        throw new TypeError("connection lost");
+      }
+      if (path === `${base}/commands/${submittedId}`) return response(200, {
+        command_id: submittedId, command_type: "CreateWebImportJob", committed_at: "2026-09-26T00:00:00.000Z",
+        result: { import_job_id: jobId, project_id: projectId, connection_id: connectionId, status: "QUEUED" }
+      });
+      if (path === `${base}/import-jobs/${jobId}`) return response(200, job("QUEUED", submittedId));
+      if (path === `${base}/import-jobs/${jobId}/operations`) return response(200, []);
+      throw new Error(`unexpected request ${path}`);
+    }));
+    const mounted = await mountWorkbench(`/projects/${projectId}/knowledge`);
+    unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="web-import-url"]').setValue(url);
+    await mounted.wrapper.get('[data-testid="web-import-form"]').trigger("submit");
+    await flush();
+    expect(mounted.wrapper.get('[data-testid="web-import-pending"]').exists()).toBe(true);
+
+    await mounted.wrapper.get('[data-testid="web-import-check-receipt"]').trigger("click");
+    await flush();
+    expect(mounted.wrapper.find('[data-testid="web-import-pending"]').exists()).toBe(false);
+    expect(mounted.wrapper.get('[data-testid="web-import-status"]').text()).toContain(jobId);
+
+    await mounted.router.push("/tasks");
+    await flush();
+    expect(mounted.router.currentRoute.value.path).toBe("/tasks");
   });
 });

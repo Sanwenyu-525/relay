@@ -1,52 +1,79 @@
 -- 0132：用户消息撤回（工作台 §27.3、运行架构 §8.5）。
 --
--- 语义：撤回一条用户消息＝把该消息及其后本会话关联的文件写入回退到该消息发送前的
--- 内容/存在性；原消息、工具记录和原回复保留，只标记撤回。文件前像在**每次写入真正落盘前**
--- 按消息记录（首写优先），不靠 Git HEAD 或事后补拍：发送前的状态只能从当时的真实字节得到。
+-- 语义：撤回一条用户消息＝把该消息及其后本会话关联的文件写入回退到该消息**发送前**的
+-- 内容/存在性；原消息、工具记录和原回复保留，只标记撤回。恢复目标读**发送前基线**——
+-- 每条用户消息在准入事务内对受管根建字节基线（2026-10-24 用户拍板按产品文档口径，
+-- 取代此前的「首写前像」实现）；不靠 Git HEAD 或事后补拍。
 --
--- 三张表：
---   * assist_message_file_preimages —— 逐消息、逐路径的写入前像（首写者胜出，不可改写）
---   * assist_message_recalls        —— 一次撤回请求的持久身份与结果摘要
---   * assist_message_recall_files   —— 该次撤回的逐文件预检/恢复结果
+-- 五张表：
+--   * assist_message_baselines       —— 每条用户消息一份发送前基线（状态/原因/计数）
+--   * assist_message_baseline_files  —— 基线内逐文件条目（存在性+摘要；字节在内容寻址库）
+--   * assist_message_snapshot_blobs  —— 内容寻址字节库（同内容跨消息去重，供容量计量与保留清理）
+--   * assist_message_recalls         —— 一次撤回请求的持久身份与结果摘要
+--   * assist_message_recall_files    —— 该次撤回的逐文件预检/恢复结果
 --
 -- 撤回回执先写 RUNNING，文件恢复完成后才落终态；崩溃后按同一行重读，不重复发起另一组写入。
 
-CREATE TABLE assist_message_file_preimages (
-  message_id uuid NOT NULL REFERENCES assist_messages (id),
+CREATE TABLE assist_message_baselines (
+  id uuid PRIMARY KEY,
   workspace_id uuid NOT NULL REFERENCES workspaces (id),
   session_id uuid NOT NULL REFERENCES assist_sessions (id),
+  -- 基线绑定哪一条用户消息的「发送前」；同一消息只允许一份基线（准入重放复用它）。
+  message_id uuid NOT NULL REFERENCES assist_messages (id),
+  resource_id uuid NOT NULL,
+  root_path text NOT NULL,
+  -- COMPLETE = 覆盖范围内全部路径都已核对（无条目即「发送前不存在」）。
+  -- INCOMPLETE = 采集到一半停止（文件数/总量/单文件超限、预算占满、读取失败等），
+  -- 缺条目的路径不能区分「不存在」与「没扫到」，撤回时如实按不可恢复处理。
+  status text NOT NULL,
+  reason text NOT NULL DEFAULT '',
+  file_count integer NOT NULL DEFAULT 0,
+  total_bytes bigint NOT NULL DEFAULT 0,
+  captured_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_assist_baseline_status CHECK (status IN ('COMPLETE', 'INCOMPLETE')),
+  CONSTRAINT uq_assist_baseline_message UNIQUE (message_id)
+);
+CREATE INDEX ix_assist_baselines_session ON assist_message_baselines (session_id, message_id);
+
+CREATE TABLE assist_message_baseline_files (
+  baseline_id uuid NOT NULL REFERENCES assist_message_baselines (id) ON DELETE CASCADE,
+  -- 受管根内的规范相对路径（POSIX 分隔），与 change_set_files / 会话写口径一致。
   relative_path text NOT NULL,
+  -- 发送前内容摘要与字节库引用；「发送前不存在」的路径没有条目（COMPLETE 基线下）。
+  -- 列名用 existed：exists 是 SQL 保留字，裸列名会被解析成 EXISTS 函数（实测 NULL 违例）。
   existed boolean NOT NULL,
-  content bytea,
-  sha256 text,
+  blob_sha256 text,
   size_bytes bigint CHECK (size_bytes IS NULL OR size_bytes >= 0),
   unavailable_reason text,
-  source text NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (message_id, relative_path),
-  CONSTRAINT ck_assist_preimage_path CHECK (
+  PRIMARY KEY (baseline_id, relative_path),
+  CONSTRAINT ck_assist_baseline_path CHECK (
     relative_path <> '' AND octet_length(relative_path) <= 1024
     AND left(relative_path, 1) <> '/'
     AND relative_path !~ '^[A-Za-z]:'
     AND position(chr(92) in relative_path) = 0
     AND relative_path !~ '(^|/)(\.\.?)(/|$)'
   ),
-  CONSTRAINT ck_assist_preimage_hash CHECK (sha256 IS NULL OR sha256 ~ '^[0-9a-f]{64}$'),
-  CONSTRAINT ck_assist_preimage_source CHECK (source IN ('SESSION_WRITE', 'RUN_WRITE')),
-  CONSTRAINT ck_assist_preimage_reason CHECK (
+  CONSTRAINT ck_assist_baseline_hash CHECK (blob_sha256 IS NULL OR blob_sha256 ~ '^[0-9a-f]{64}$'),
+  CONSTRAINT ck_assist_baseline_reason CHECK (
     unavailable_reason IS NULL OR
-    unavailable_reason IN ('CONTENT_TOO_LARGE', 'READ_FAILED', 'TARGET_NOT_REGULAR', 'PATH_UNSAFE', 'CAPACITY_FULL')
+    unavailable_reason IN ('CONTENT_TOO_LARGE', 'READ_FAILED', 'TARGET_NOT_REGULAR', 'CAPACITY_FULL')
   ),
-  CONSTRAINT ck_assist_preimage_shape CHECK (
-    (existed = false AND content IS NULL AND sha256 IS NULL AND size_bytes IS NULL
-      AND unavailable_reason IS NULL)
-    OR (existed = true AND
-      ((sha256 IS NOT NULL AND content IS NOT NULL AND unavailable_reason IS NULL
-          AND octet_length(content) = size_bytes)
-        OR (content IS NULL AND unavailable_reason IS NOT NULL)))
+  -- 条目要么「发送前存在且有可用字节引用」，要么「存在但该路径不可恢复（记原因）」。
+  CONSTRAINT ck_assist_baseline_shape CHECK (
+    (existed = true AND blob_sha256 IS NOT NULL AND unavailable_reason IS NULL)
+    OR (existed = true AND blob_sha256 IS NULL AND unavailable_reason IS NOT NULL)
   )
 );
-CREATE INDEX ix_assist_preimages_session ON assist_message_file_preimages (session_id, message_id);
+
+-- 内容寻址字节库：同一份字节跨消息/跨基线只存一行（§27.3.4 去重），事务内插入无孤儿
+-- 中间态；事务回滚留下的无引用行只浪费磁盘、不冒充事实。容量与保留按本表计量。
+CREATE TABLE assist_message_snapshot_blobs (
+  blob_sha256 text PRIMARY KEY,
+  size_bytes bigint NOT NULL CHECK (size_bytes >= 0),
+  content bytea NOT NULL,
+  refcount integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 
 CREATE TABLE assist_message_recalls (
   id uuid PRIMARY KEY,
@@ -119,7 +146,9 @@ CREATE INDEX ix_assist_messages_withdrawn ON assist_messages (session_id, seq)
   WHERE withdrawn_at IS NOT NULL;
 
 -- DELETE 仅用于 §27.3.4 过期快照清理；前像内容本身仍不可改写。
-GRANT SELECT, INSERT, DELETE ON assist_message_file_preimages TO relay_app;
+GRANT SELECT, INSERT, DELETE ON assist_message_baselines TO relay_app;
+GRANT SELECT, INSERT ON assist_message_baseline_files TO relay_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON assist_message_snapshot_blobs TO relay_app;
 GRANT SELECT, INSERT, UPDATE ON assist_message_recalls TO relay_app;
 GRANT SELECT, INSERT, UPDATE ON assist_message_recall_files TO relay_app;
 

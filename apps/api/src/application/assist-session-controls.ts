@@ -331,6 +331,12 @@ export async function deleteAssistSession(db: DbExecutor,
  *
  * 在途消息挡住分叉：正在生成的那一轮既不该进历史，也不该让子会话从半截开始。理由与归档同一句
  * ——控制意图必须持久化，在途动作未安全处理前不宣称「这一段已经定稿」。
+ *
+ * **没有可搬历史的讨论同样挡住分叉**（2026-10-24 用户截图指认「已有会话打开是新建会话欢迎页」）：
+ * 分叉的语义是「连历史复制一份」，历史为空时它唯一的结果就是多出一条同样空的会话，而空会话在
+ * 左栏与有内容的会话同形同标题（标题只由 `关于<目标>` 生成），点进去只剩欢迎空态。那两条空会话
+ * 都是「首条消息没落地」留下的残迹，不该再被复制一份。判据与搬运用同一份 `listForkableMessageIds`，
+ * 且**在插子会话之前**读——被拒的分叉连一行都不留下。
  */
 export async function forkAssistSession(db: DbExecutor,
   input: ForkAssistSessionInput): Promise<CommandOutcome<AssistSessionForkResult>> {
@@ -347,10 +353,14 @@ export async function forkAssistSession(db: DbExecutor,
       if (await repositories.assist.hasInflightMessages(source.id)) {
         throw invalidTransition('这段讨论还有消息在途，等它结束再分叉。', { sessionId: source.id });
       }
+      // 先读历史再插子会话：空讨论被拒时不能留下一条没有来源意义的子会话行。
+      const history = await repositories.assist.listForkableMessageIds(source.id);
+      if (history.length === 0) {
+        throw invalidTransition('这段讨论还没有可搬的历史，不能分叉。', { sessionId: source.id });
+      }
       const child = await repositories.assist.insertForkedSession({ id: randomUUID(),
         fromSessionId: source.id, title: nextForkTitle(source.title) });
       if (child === undefined) throw resourceNotFound('Assist session');
-      const history = await repositories.assist.listForkableMessageIds(source.id);
       for (const [index, message] of history.entries()) {
         const childMessageId = randomUUID();
         const copied = await repositories.assist.copyMessageInto({ sourceMessageId: message.id,
@@ -365,8 +375,9 @@ export async function forkAssistSession(db: DbExecutor,
         }
       }
       // 子会话的这些行确实刚落库，活动排序键按「消息落库即活动」这一条口径推进一次；
-      // 父会话的 last_message_at 不受影响——分叉不是一次活动。空会话不分叉出「说过话」的假事实。
-      if (history.length > 0) await repositories.assist.touchLastMessage(child.id);
+      // 父会话的 last_message_at 不受影响——分叉不是一次活动。历史已在上方核对为非空，
+      // 因此子会话不存在「没有消息却推进活动键」的分支。
+      await repositories.assist.touchLastMessage(child.id);
       return forkResult(child, history.length);
     },
   });

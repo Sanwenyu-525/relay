@@ -1,8 +1,8 @@
 {
-  "planId": "4a089dad-6052-4cb1-9160-1b3ee96d9689",
+  "planId": "88e91117-b81d-47fc-bfa5-992f76b75abb",
   "storedPlan": {
-    "plan_id": "4a089dad-6052-4cb1-9160-1b3ee96d9689",
-    "session_id": "627f01ed-a80e-41e7-8dbc-dcaadbc4301e",
+    "plan_id": "88e91117-b81d-47fc-bfa5-992f76b75abb",
+    "session_id": "f89eaa4c-af35-4f62-9369-3d0182cb4d6d",
     "version": 1,
     "status": "CURRENT",
     "goal": "GOAL_MARKER_470A",
@@ -24,10 +24,10 @@
     "open_questions": [
       "QUESTION_MARKER_654G 需要确认样例目录位置"
     ],
-    "source_message_id": "ab33962d-d12b-427c-b6e6-5ea67c883e83",
-    "created_at": "2026-10-23T11:10:56.185Z"
+    "source_message_id": "f3b5c917-a8e1-492c-b0e4-f2aef8133c5e",
+    "created_at": "2026-10-24T08:01:09.164Z"
   },
-  "selectedGoalPlanId": "4a089dad-6052-4cb1-9160-1b3ee96d9689",
+  "selectedGoalPlanId": "88e91117-b81d-47fc-bfa5-992f76b75abb",
   "storedGoalCriteria": [
     {
       "key": "c1",
@@ -40,12 +40,12 @@
   ],
   "includedInFirstExecutionRequest": {
     "goal": true,
-    "scope": false,
+    "scope": true,
     "title": true,
-    "detail": false,
+    "detail": true,
     "verification": true,
-    "method": false,
-    "question": false
+    "method": true,
+    "question": true
   },
   "scopeAvailableInPlan": true,
   "planReply": "已形成计划，细节请查看计划卡。"

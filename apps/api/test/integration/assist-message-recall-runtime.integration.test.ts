@@ -215,12 +215,18 @@ test('RR-02 过期 RUNNING 按原回执接续恢复；未过期时拒绝并发�
     await assertRoundSettled(round.assistant_message_id, 'RR-02 第一轮');
     assert.equal(await readOrNull(env.root, 'r.md'), 'r1\n');
 
-    const preimage = (await sql<{ message_id: string; existed: boolean; sha256: string;
-      content: Buffer }>`select message_id, existed, sha256, content
-      from assist_message_file_preimages where relative_path = 'r.md'`.execute(app.db)).rows[0];
-    assert.ok(preimage !== undefined, '真实写入必须在落盘前留下前像');
-    assert.equal(preimage.existed, true);
-    assert.equal(preimage.sha256, await sha256OfContent('r0\n'));
+    // 0132 改为发送前基线后，前像断言改为基线条目断言：目标消息的发送前字节
+    // 必须在准入时入库（内容寻址），恢复接续按同一基线工作。
+    const baseline = (await sql<{ message_id: string; id: string; status: string }>`
+      select message_id, id, status from assist_message_baselines
+      where message_id = ${round.user_message_id}`.execute(app.db)).rows[0];
+    assert.ok(baseline !== undefined, '发送前基线必须在消息准入时建立');
+    assert.equal(baseline.status, 'COMPLETE');
+    const baselineEntry = (await sql<{ blob_sha256: string }>`
+      select blob_sha256 from assist_message_baseline_files
+      where baseline_id = ${baseline.id} and relative_path = 'r.md'`.execute(app.db)).rows[0];
+    assert.ok(baselineEntry !== undefined, 'r.md 的发送前字节必须在基线里');
+    assert.equal(baselineEntry.blob_sha256, await sha256OfContent('r0\n'));
 
     // 按一次「已预检、尚未恢复任何文件」的崩溃现场摆放回执。
     const recallId = await insertRunningRecall({ workspaceId: env.workspaceId,
@@ -230,7 +236,7 @@ test('RR-02 过期 RUNNING 按原回执接续恢复；未过期时拒绝并发�
     await sql`insert into assist_message_recall_files (recall_id, relative_path,
       baseline_existed, baseline_sha256, baseline_message_id, expected_current_sha256,
       observed_sha256, status)
-      values (${recallId}, 'r.md', true, ${preimage.sha256}, ${preimage.message_id},
+      values (${recallId}, 'r.md', true, ${baselineEntry.blob_sha256}, ${round.user_message_id},
         ${expectedCurrent}, ${expectedCurrent}, 'PLANNED')`.execute(app.db);
 
     const recallPath = workspacePath(env.workspaceId,

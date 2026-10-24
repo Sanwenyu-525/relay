@@ -17,7 +17,7 @@ import {
   type RelayMemory, type RelayMemoryEffectiveStatus, type RelayMemoryRevision, type RelayRule, type RelayRuleEnforcement,
   type RelayRuleStrength, type RelayRuleVersion, type RelaySearchItem
 } from "../api/relayClient";
-import { describeLiveError } from "../lib/liveErrors";
+import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { handleTabListKeyDown } from "../lib/tabNavigation";
@@ -821,8 +821,13 @@ export default function KnowledgeView() {
         setGateReload((value) => value + 1);
         return { kind: "REJECTED", error: caught };
       }
-      if (caught instanceof RelayTransportError) {
-        setActionError("响应丢失或无法核对。请只查询原 command_id 回执，不要换 ID 再提交。");
+      // 结果不能由浏览器判定时（传输失败、5xx、retry_action 要求核对回执，契约 §7 错误表）
+      // 保留原命令与草稿，只按原 command_id 核对回执；服务端明确业务拒绝（422、409 等）才释放，
+      // 允许修正后换新命令。503 被当成拒绝换新 ID 是禅道 #32（DEV-0128）的根因。
+      if (needsReceiptCheck(caught)) {
+        setActionError(caught instanceof RelayTransportError
+          ? "响应丢失或无法核对。请只查询原 command_id 回执，不要换 ID 再提交。"
+          : `服务端暂时无法确认本次提交结果：${describeLiveError(caught).message}原命令与草稿已保留；请查询原 command_id 回执，不要换 ID 再提交。`);
         return { kind: "UNCERTAIN" };
       }
       pendingRef.current = null; setPendingCommand(null);

@@ -3,20 +3,23 @@
   "planMessageStatus": "COMPLETED",
   "planCount": 1,
   "blockers": [],
-  "deleteStatus": 500,
+  "deleteStatus": 200,
   "deleteBody": {
-    "type": "/problems/internal-error",
-    "title": "服务内部错误",
-    "status": 500,
-    "detail": "请求未能完成，请通过 request_id 在本机日志中核对。",
-    "instance": "/requests/req-81c99e89-c1f8-430b-9074-9c71fcc7f1fe",
-    "code": "INTERNAL_ERROR",
-    "request_id": "req-81c99e89-c1f8-430b-9074-9c71fcc7f1fe",
-    "retryable": false,
-    "retry_action": "CHECK_RECEIPT_THEN_RETRY"
+    "command_id": "6a054edd-7e7f-47e4-bf4c-0e538c78880e",
+    "committed_at": "2026-10-24T12:13:08.495Z",
+    "result": {
+      "session_id": "b237b56b-315a-4c20-92be-78071c450f74",
+      "revision": "1",
+      "deleted_messages": 2,
+      "deleted_attachments": 0,
+      "deleted_at": "2026-10-24T12:13:08.525Z"
+    },
+    "links": {
+      "resource": "/api/v1/workspaces/e4b6c1fd-3064-4d71-9ab7-036b50c8e955/"
+    }
   },
-  "deleteText": "{\"type\":\"/problems/internal-error\",\"title\":\"服务内部错误\",\"status\":500,\"detail\":\"请求未能完成，请通过 request_id 在本机日志中核对。\",\"instance\":\"/requests/req-81c99e89-c1f8-430b-9074-9c71fcc7f1fe\",\"code\":\"INTERNAL_ERROR\",\"request_id\":\"req-81c99e89-c1f8-430b-9074-9c71fcc7f1fe\",\"retryable\":false,\"retry_action\":\"CHECK_RECEIPT_THEN_RETRY\"}",
-  "sessionPreserved": true,
-  "messagePreserved": true,
-  "plansPreserved": 1
+  "deleteText": "{\"command_id\":\"6a054edd-7e7f-47e4-bf4c-0e538c78880e\",\"committed_at\":\"2026-10-24T12:13:08.495Z\",\"result\":{\"session_id\":\"b237b56b-315a-4c20-92be-78071c450f74\",\"revision\":\"1\",\"deleted_messages\":2,\"deleted_attachments\":0,\"deleted_at\":\"2026-10-24T12:13:08.525Z\"},\"links\":{\"resource\":\"/api/v1/workspaces/e4b6c1fd-3064-4d71-9ab7-036b50c8e955/\"}}",
+  "sessionPreserved": false,
+  "messagePreserved": false,
+  "plansPreserved": 0
 }

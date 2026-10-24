@@ -11,6 +11,7 @@ import PageHeader from "../components/PageHeader";
 import ViewConfigurationPanel from "../components/ViewConfigurationPanel";
 import { describeLiveError } from "../lib/liveErrors";
 import { gatewayCapabilityLabel } from "../lib/labels";
+import { type RelayPluginRuntimeStatus } from "../api/resources/plugins";
 import { useRelayConnection } from "../lib/relayConnection";
 import "./ConnectionsView.css";
 
@@ -92,6 +93,8 @@ interface ToolRowSpec {
   readonly capabilities: readonly RelayGatewayCapability[];
   /** 缺口时唯一需要读的一句：去哪儿补，而不是「请配置」。 */
   readonly next: string;
+  /** 三个内置插件额外带安装级运行时状态（`/plugins/status`，HTTP §10.104）。 */
+  readonly plugin?: "computer" | "browser" | "github";
 }
 
 const toolRows: readonly ToolRowSpec[] = [
@@ -105,15 +108,20 @@ const toolRows: readonly ToolRowSpec[] = [
   { key: "cli", label: "命令行", purpose: "运行目录内脚本，或连接上点名的可执行文件",
     capabilities: ["CLI_RUN"], next: "需要时在下方高级配置里登记目录与允许的可执行文件。" },
   { key: "computer", label: "电脑操控", purpose: "截图 · 窗口 · 鼠标键盘",
-    capabilities: ["COMPUTER_READ", "COMPUTER_INPUT"],
-    next: "在下方高级区登记这项能力的连接并给出策略；本机运行时是否就绪回到会话的插件面板核对。" },
+    capabilities: ["COMPUTER_READ", "COMPUTER_INPUT"], plugin: "computer",
+    next: "授权在下方高级区登记连接与策略；本机运行时是否就绪看本行「本机」状态。" },
   { key: "browser", label: "浏览器操控", purpose: "页面读取 · 点击 · 填表",
-    capabilities: ["BROWSER_READ", "BROWSER_ACTION", "BROWSER_COMMIT"],
-    next: "在下方高级区登记这项能力的连接并给出策略；后端是否连上回到会话的插件面板核对。" },
+    capabilities: ["BROWSER_READ", "BROWSER_ACTION", "BROWSER_COMMIT"], plugin: "browser",
+    next: "授权在下方高级区登记连接与策略；扩展配对与本机状态看本行「本机」说明。" },
   { key: "github", label: "GitHub", purpose: "仓库 · PR · Issue 只读",
-    capabilities: ["GITHUB_READ"],
-    next: "在下方高级区登记这项能力的连接并给出策略；CLI 登录状态回到会话的插件面板核对。" },
+    capabilities: ["GITHUB_READ"], plugin: "github",
+    next: "授权在下方高级区登记连接与策略；gh 是否安装与登录看本行「本机」状态。" },
 ];
+
+/** 安装级状态的中文短名；detail 与 remediation 进悬停提示，不在行内铺开。 */
+const runtimeStateLabels: Record<string, string> = {
+  READY: "就绪", NOT_INSTALLED: "未安装", NOT_PAIRED: "未配对",
+  NOT_AUTHENTICATED: "未登录", UNAVAILABLE: "不可用" };
 
 /**
  * 返回位置（2026-10-21，R3-01）：`?from=` 由会话里的「管理连接与权限」写入，
@@ -291,6 +299,9 @@ export function ProjectConnectionsView() {
   const [policyResourceId, setPolicyResourceId] = useState("");
   const [maxPayloadBytes, setMaxPayloadBytes] = useState("2");
   const [health, setHealth] = useState<Record<string, { checking: boolean; result: string | null; error: string | null }>>({});
+  /** 安装级插件运行时状态：装没装、登录没登录、运行时在不在；与项目授权分开呈现。 */
+  const [pluginRuntime, setPluginRuntime] = useState<Record<string, RelayPluginRuntimeStatus> | null>(null);
+  const [pluginRuntimeError, setPluginRuntimeError] = useState<string | null>(null);
 
   async function checkConnectionHealth(connectionId: string) {
     if (client === null || health[connectionId]?.checking) return;
@@ -318,6 +329,15 @@ export function ProjectConnectionsView() {
       const next = await readSnapshot(activeClient, projectId);
       if (request !== scope.current) return null;
       setSnapshot(next);
+      // 插件运行时状态是安装级只读探测，读失败不遮挡项目授权信息，只在本行如实说明。
+      try {
+        const status = await activeClient.getPluginStatus();
+        if (request !== scope.current) return next;
+        setPluginRuntime(Object.fromEntries(status.map((row) => [row.plugin, row])));
+        setPluginRuntimeError(null);
+      } catch (caught) {
+        if (request === scope.current) setPluginRuntimeError(describeLiveError(caught).message);
+      }
       return next;
     } catch (caught) {
       if (request === scope.current) setError(describeLiveError(caught).message);
@@ -331,6 +351,7 @@ export function ProjectConnectionsView() {
     const request = ++scope.current;
     pendingRef.current = null; setPending(null); setMayRetry(false); setSnapshot(null);
     setActionError(null); setFailedCommandId(null); setMessage(null); setPolicyId(""); setPolicyActionType(""); setHealth({});
+    setPluginRuntime(null); setPluginRuntimeError(null);
     if (client !== null) void refresh(client, request);
     return () => { scope.current++; pendingRef.current = null; };
   }, [client, projectId, connection.epoch]);
@@ -513,12 +534,22 @@ export function ProjectConnectionsView() {
           <p className="helper-text">日常使用不需要在这里逐项配置：在对话里选择目录、或直接说出要做的事即可。下面每行是服务端记录的真实状态。</p>
           <ul className="connections-list connections-tool-list">{toolRows.map((row) => {
             const state = toolStatus(snapshot, row);
+            const runtime = row.plugin === undefined ? null
+              : pluginRuntimeError !== null ? { error: pluginRuntimeError as string }
+              : pluginRuntime === null ? null
+              : pluginRuntime[row.plugin] ?? null;
             return <li key={row.key} data-testid={`connections-tool-${row.key}`}
               ref={row.key === locatedTool ? locatedRef : undefined}
               data-located={row.key === locatedTool ? "true" : undefined}
               tabIndex={row.key === locatedTool ? -1 : undefined}>
               <div><strong>{row.label}</strong><small>{row.purpose}</small>
-                <small data-testid={`connections-tool-state-${row.key}`}>{state.detail}</small></div>
+                <small data-testid={`connections-tool-state-${row.key}`}>{state.detail}</small>
+                {runtime !== null && ("error" in runtime
+                  ? <small className="action-error" role="status"
+                    data-testid={`connections-tool-runtime-${row.key}`}>本机状态读取失败：{runtime.error}</small>
+                  : <small data-testid={`connections-tool-runtime-${row.key}`}
+                    title={`${runtime.detail}${runtime.remediation === null ? "" : ` 建议：${runtime.remediation}`}`}>
+                    本机：{runtimeStateLabels[runtime.state] ?? runtime.state}</small>)}</div>
               <div className="connections-actions">
                 <span className={`status-chip status-chip--${state.tone}`}>{state.text}</span>
               </div>

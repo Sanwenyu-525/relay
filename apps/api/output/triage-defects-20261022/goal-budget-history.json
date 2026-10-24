@@ -1,54 +1,25 @@
 {
-  "diagnosticBoundary": "normal domain commands and HTTP resume; test-only model-port recorder decorator isolates budget Owner from #140; no real Provider",
-  "oldGoal": "14385d93-1d10-4070-a4b7-8b1f7346244a",
+  "diagnosticBoundary": "normal domain commands and HTTP resume; the AGENT main loop meters every real request itself through the production ModelCallRepository since #140 was fixed, so the controlled port carries no extra recorder decorator; no real Provider",
+  "oldGoal": "a61edabe-d8f9-4506-889d-152207c5d70c",
   "oldGrant": {
     "calls": 2,
     "tokens": 2
   },
   "oldGoalStatus": "CANCELLED",
-  "newGoal": "11a847cd-efd6-4fae-b214-919a5bd6090e",
+  "newGoal": "b6f1d75d-4529-432d-81f9-54e45b8ce966",
   "newGrant": {
     "calls": 1,
     "tokens": 1
   },
   "modelCallsBefore": 3,
-  "modelCallsAfterFirstResume": 3,
+  "modelCallsAfterFirstResume": 4,
   "afterGrant": {
-    "messageId": "ff39350b-da60-4442-8d0b-1dc26dcd1aa5",
-    "sessionId": "6c539e21-15f5-4c05-98d7-1e674b0c1592",
-    "status": "FAILED",
-    "errorCode": "MODEL_BUDGET_EXHAUSTED",
+    "messageId": "069f7d3f-3d24-447f-ac98-85ac6b54b5ba",
+    "sessionId": "8bbed633-d493-4b6d-a899-1b67dfdc14c2",
+    "status": "COMPLETED",
+    "errorCode": null,
     "proposalIds": []
   },
-  "recovery": [
-    {
-      "grant": {
-        "calls": 2,
-        "tokens": 2
-      },
-      "outcome": {
-        "messageId": "a9e4c5e3-d162-407a-a42c-51111a14a2df",
-        "sessionId": "6c539e21-15f5-4c05-98d7-1e674b0c1592",
-        "status": "FAILED",
-        "errorCode": "MODEL_BUDGET_EXHAUSTED",
-        "proposalIds": []
-      },
-      "modelCalls": 3
-    },
-    {
-      "grant": {
-        "calls": 3,
-        "tokens": 3
-      },
-      "outcome": {
-        "messageId": "d9255e99-ca46-42dd-af62-f32288c214ff",
-        "sessionId": "6c539e21-15f5-4c05-98d7-1e674b0c1592",
-        "status": "COMPLETED",
-        "errorCode": null,
-        "proposalIds": []
-      },
-      "modelCalls": 4
-    }
-  ],
+  "recovery": [],
   "newGoalStatus": "ACTIVE"
 }

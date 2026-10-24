@@ -1572,7 +1572,7 @@ F26 浏览器自动化 M3 的任务状态面。物理边界归[数据库 §96](.
 
 | 端点 | 变化 | 说明 |
 |---|---|---|
-| `GET /assist-sessions`、`GET /assist-sessions/{session_id}` | 投影新增只读字段 `last_message_at` | 逐字回显活动时刻（ISO 8601）或 `null`；`null` 只表示这段会话还没有消息。缺字段只来自 0111 之前的响应，客户端同样回落 `created_at` |
+| `GET /assist-sessions`、`GET /assist-sessions/{session_id}` | 投影新增只读字段 `last_message_at` | 逐字回显活动时刻（ISO 8601）或 `null`；`null` 只表示这段会话还没有消息。缺字段只来自 0111 之前的响应，客户端同样回落 `created_at`。**`null ⇔ 没有消息` 这个语义 2026-10-24 才真正成立**：0111 不回填，0111 之前就已有消息的旧行原本也是 `null`，由迁移 0135 按消息真实时刻补齐（见[数据库 §112](../database/physical-design-postgresql.md#112-0135-会话活动键回填2026-10-24缺陷修复)）；左栏「未开始」标记正是按这个语义读的 |
 | `GET /assist-sessions` | 列表顺序 | `order by pinned_at desc nulls last, coalesce(last_message_at, created_at) desc, id desc` |
 | `POST .../title`、`/pin`、`/archive`、`/reopen`、`/unread` | 无 | 命令体与回执字段都不变，回执里**不**带 `last_message_at` |
 
@@ -1592,11 +1592,11 @@ F26 浏览器自动化 M3 的任务状态面。物理边界归[数据库 §96](.
 |---|---|---|---|---|
 | `POST /assist-sessions/{session_id}/fork` | `ForkAssistSession` | `201` | `{command_id, expected_revision}` | `{session_id, title, revision, updated_at, copied_messages}` |
 
-`session_id` 是**新建的子会话**，不是被分叉的那一条；`links.resource` 指向它。`revision` 恒为 `"0"`（新资源），`copied_messages` 是搬进历史的已完成轮数（可以为 `0`，不是失败）。分叉是唯一新建会话行的行内命令，因此与 `Create*` 同为 `201`，不是对源会话的改写。
+`session_id` 是**新建的子会话**，不是被分叉的那一条；`links.resource` 指向它。`revision` 恒为 `"0"`（新资源），`copied_messages` 是搬进历史的已完成轮数。**2026-10-24 起没有可搬历史的讨论按 `409 INVALID_TRANSITION` 拒绝**（见下段），因此成功回执里 `copied_messages ≥ 1`；字段仍保留 `minimum: 0` 只为兼容历史回执。分叉是唯一新建会话行的行内命令，因此与 `Create*` 同为 `201`，不是对源会话的改写。
 
-**源会话一行都不改。** `expected_revision` 仍然核对（陈旧基线返回 `409 REVISION_CONFLICT` 并带出 `actual_revision`，界面只重读、不自动重发），但它只用于挡住「界面看的是旧事实就按下分叉」；成功分叉**不推进**源会话的 `revision` 与 `updated_at`。源会话必须对当前 Workspace 可见（跨 Workspace 按 `404 RESOURCE_NOT_FOUND`）、状态为 `ACTIVE`（归档态 `409 INVALID_TRANSITION`，先重开），且没有 `PENDING`/`RUNNING` 消息（在途 `409 INVALID_TRANSITION`；正在生成的那一轮既不该进历史，也不该让子会话从半截开始）。
+**源会话一行都不改。** `expected_revision` 仍然核对（陈旧基线返回 `409 REVISION_CONFLICT` 并带出 `actual_revision`，界面只重读、不自动重发），但它只用于挡住「界面看的是旧事实就按下分叉」；成功分叉**不推进**源会话的 `revision` 与 `updated_at`。源会话必须对当前 Workspace 可见（跨 Workspace 按 `404 RESOURCE_NOT_FOUND`）、状态为 `ACTIVE`（归档态 `409 INVALID_TRANSITION`，先重开），且没有 `PENDING`/`RUNNING` 消息（在途 `409 INVALID_TRANSITION`；正在生成的那一轮既不该进历史，也不该让子会话从半截开始）。**还必须至少有一轮可搬历史**：可搬历史为空（`status='COMPLETED' AND content IS NOT NULL` 一条都没有）时 `409 INVALID_TRANSITION`「这段讨论还没有可搬的历史，不能分叉。」——判据在插子会话之前读，被拒的分叉不落子会话行、不留回执（2026-10-24，用户截图：空会话被分叉成第二条空会话，点开只剩欢迎空态）。
 
-**子会话的行形状。** 会话身份整行搬运：`workspace_id`、`project_id`、`task_id`、`conversation_mode`、`assistant_profile_id/revision/role_snapshot`、`remember`、`working_resource_id` 与源行一致；`status='ACTIVE'`、`revision=0`、`pinned_at`/`unread_at`/`last_message_at` 一律 `NULL`（导航偏好不继承，新讨论按活动序落在顶部），`forked_from_session_id` 写入源会话 ID。来源是**一次性写入的历史元数据**：改名、置顶、未读、归档、重开都不会改写它，它也不参与任何准入判定。
+**子会话的行形状。** 会话身份整行搬运：`workspace_id`、`project_id`、`task_id`、`conversation_mode`、`assistant_profile_id/revision/role_snapshot`、`remember`、`working_resource_id` 与源行一致；`status='ACTIVE'`、`revision=0`、`pinned_at`/`unread_at` 一律 `NULL`（导航偏好不继承）；`last_message_at` 按「消息落库即活动」这一口径推进到复制完成时刻——子会话确实刚写进历史，`2026-10-24` 起历史必非空，因此它不再存在「为 NULL」的分支（此前文档写的「一律 NULL」与实现不符，已更正）；`forked_from_session_id` 写入源会话 ID。来源是**一次性写入的历史元数据**：改名、置顶、未读、归档、重开都不会改写它，它也不参与任何准入判定。
 
 **复制的是历史输入。** 只搬 `status='COMPLETED' AND content IS NOT NULL` 的消息，按子会话从 `seq=1` 重新编号（`UNIQUE (session_id, seq)`）；正文、`sources`、`skill_snapshot/skill_input/skill_output`、`method_*`、`learning_record_disabled` 与 `created_at` 原样保留，行 ID 全部新生成。图片附件逐张复制成新行（同一 `message_id` 绑定、内容与哈希字节不变，`bytea` 在库内搬运）。以下**不搬**：`assist_proposals`（接受一次会写业务事实，同一条提案不能在两条会话里各接受一次）；`provider_request_id`、usage 四列、`worker_id`、`cancel_requested`、`error_code`、`provider_error_kind`、`model_attempt_state`（子会话没有发生过那次外呼，留着就是伪造）；`model_selection_snapshot` 随尝试状态一起去掉——0098 要求两列成对非空，而复制后的历史一律 `COMPLETED`、不会再进生成路径，排队期的模型身份对子会话没有读方。
 
@@ -2048,13 +2048,13 @@ Windows 安装应用与真实 Provider 未验。
 | `GET /message-recall/settings` | 200 `{retention_days, capacity_bytes, per_file_cap_bytes, usage_bytes, snapshot_count, oldest_snapshot_at}`；只读 |
 
 - **撤回范围**：目标用户消息及其后本会话关联、已确认 APPLIED 的文件效果，按路径归并到各自**最早写入前像**；直接会话写（`session_tool_calls` → `logical_operations`）与委派执行（`conversation_execution_requests` → Run → `change_set_files`）都计入。目标消息与其直接助手回复在终态同时写 `withdrawn_at`；原文、工具记录与原回复仍可读取。
-- **只允许完成态**：消息须为 USER、`COMPLETED`、未撤回，会话 `ACTIVE`，存在直接助手回复，目标 seq 之后没有非终态消息/未结算工具调用/在途 Run。否则 409 `INVALID_TRANSITION`。首版方向为**沿对话向后**：目标 seq 必须大于所有已撤回用户消息的 seq，否则拒绝。
+- **只允许完成态**：消息须为 USER、`COMPLETED`、未撤回，会话 `ACTIVE`，存在直接助手回复，目标 seq 之后没有非终态消息/未结算工具调用/在途 Run。否则 409 `INVALID_TRANSITION`。方向规则已按 2026-10-24 用户拍板**放开**（§27.3.5）：完成一次撤回后可再撤更早消息，预检把已结算撤回的恢复效果按结算时序折入「当前仍生效状态」重算（`conflict.recallPaths` 仍逐路径给出冲突原因）。
 - **前像与预检**：前像在每次写入真正落盘前按消息采集、首写优先；`CREATE` 且此前不存在时可用「不存在」事实作基线。预检对每个路径比较当前态、最近一次已确认写入的期望态与基线态；任一 `CONFLICT`/`UNAVAILABLE`/`UNCERTAIN` 时整组不写，返回 409 `RECALL_PREFLIGHT_BLOCKED`，`conflict.recallPaths` 逐路径给出 `path｜status｜reason`。单文件前像上限 8 MiB（`MAX_MESSAGE_PREIMAGE_BYTES`），超限/读取失败/非普通文件只把该路径标为不可恢复，不改变原写入准入。
 - **执行与终态**：首个恢复写入前按路径保存当前字节作为保护副本；保护副本不可用（含工作区快照预算占满）则整次撤回不执行并逐文件标 `SKIPPED`，不写半个回退。恢复经既有 `executeFileChangeset`（`contentBytes` 支持二进制），逐文件状态为 `RESTORED / ALREADY_RESTORED / CONFLICT / UNAVAILABLE / FAILED / SKIPPED`；回执状态为 `RUNNING / COMPLETED / PARTIAL / FAILED`。执行中首个失败后剩余路径标 `SKIPPED`，不继续写。
 - **幂等与接续**：同一 `workspace_id + command_id` 重放原回执（`replayed=true`）；同一消息已有撤回时返回该回执；并发 RUNNING 返回 409 `RECALL_IN_PROGRESS`；RUNNING 心跳超过 60 秒（`RECALL_STALE_RUNNING_MS`）可按同一回执认领接续，不新建第二次撤回。过期 RUNNING 也挡新消息，按原回执重发即可续接。
 - **单层撤销**：只接受 `COMPLETED` 且仍有保护副本的最近一次成功撤回；范围仅限该次实际 `RESTORED` 的文件。预检按「目标态＝保护副本态 / 期望态＝撤回结果态 / 其余＝冲突」三分，任一冲突或副本缺失即 409 `RECALL_UNDO_PREFLIGHT_BLOCKED` 且不写文件；并发 409 `RECALL_UNDO_IN_PROGRESS`；同一命令/同一撤回重放原回执。撤销是新的受控动作，不复活旧 Run、DONE、批准或 PASS，也不提供对撤销的再撤销。
 - **快照设置**：`retention_days` 与 `capacity_bytes` 读取进程环境 `RELAY_MESSAGE_SNAPSHOT_RETENTION_DAYS` / `RELAY_MESSAGE_SNAPSHOT_BUDGET_BYTES`（默认 30 天 / 5 GiB）；`per_file_cap_bytes` 为 8 MiB；`usage_bytes` 统计该工作区前像＋保护副本的实际字节，`oldest_snapshot_at` 是可恢复时段的当前最旧快照。撤回/撤销入口会先触发**全局**过期清理（超过保留期且不被在途撤回/撤销引用）；容量占满时停止新增快照并如实降级，不删既有快照腾空间。数值仍是推荐默认，未经真实 Windows 项目测量校准。
-- **已知语义偏差**：前像取「消息发送后该路径首次写入前」，不是「消息发送前」。发送后、首写前的外部修改会被当作基线恢复；这与工作台 §27.3.4 与运行架构 §8.5 的发送前基线规则冲突，口径待产品拍板。另：一次撤回只接受单一受管根（跨根 409 `RECALL_MULTIPLE_ROOTS`，会话根不可用/变化分别为 `RECALL_ROOT_UNAVAILABLE` / `RECALL_ROOT_CHANGED`）；目标 seq 之前已写入、之后未再次写入的路径不在本次范围；受影响 DONE 任务重开（BC-16）服务侧已接线（撤回结算后按「实际恢复路径 ∩ 委派写入」判定、仅 DONE 沿既有 `reopenTask` 入口进新验收周期、失败逐项写 `detail.task_reopens`），e2e 因委派执行链的存量回归（#140 计量包裹，`conversation-diff-attribution` 同红）暂以带因 skip 跟踪；工作台撤销按钮尚未接线。
+- **基线语义（2026-10-24 用户拍板后已返工）**：恢复目标读**发送前基线**——目标用户消息在准入事务内对受管根建立的字节基线（`assist_message_baselines`，条目在 `assist_message_baseline_files`，字节在内容寻址库 `assist_message_snapshot_blobs`，同内容跨消息去重）；COMPLETE 基线下无条目＝发送前不存在，INCOMPLETE（采集超限/预算占满/存储失败）下缺条目按 `BASELINE_UNKNOWN`/不可恢复如实处理。发送后、首写前的外部修改不再被当作发送前状态（RA-10 判定性场景通过）。前像表已移除。另：一次撤回只接受单一受管根（跨根 409 `RECALL_MULTIPLE_ROOTS`，会话根不可用/变化分别为 `RECALL_ROOT_UNAVAILABLE` / `RECALL_ROOT_CHANGED`）；目标 seq 之前已写入、之后未再次写入的路径不在本次范围；受影响 DONE 任务重开（BC-16）服务侧已接线（撤回结算后按「实际恢复路径 ∩ 委派写入」判定、仅 DONE 沿既有 `reopenTask` 入口进新验收周期、失败逐项写 `detail.task_reopens`），e2e 因委派执行链的存量回归（#140 计量包裹，`conversation-diff-attribution` 同红）暂以带因 skip 跟踪；工作台撤销按钮尚未接线。
 - **消息投影**：会话消息 DTO 增加 `withdrawn_at`（ISO 或 null）与 `recall` 摘要（`id/message_id/assistant_message_id/status/planned_files/restored_files/skipped_files/completed_at`，无撤回为 null）。原文和附件仍返回，客户端按 `withdrawn_at` 显示撤回占位。
 - **模型上下文**：撤回终态后，下一轮输入把被撤回的用户/助手消息替换为成对占位，并追加撤回回执事实行（实际恢复结果、未决项）；旧回复与旧摘要只作为历史来源，不再作为当前文件事实。恢复期间新消息被原命令入口的同一道闸拒绝（返回 409 `RECALL_IN_PROGRESS`）。
 

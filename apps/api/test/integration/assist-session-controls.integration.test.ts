@@ -45,7 +45,8 @@ import {
  *   * 搬过去的是输入快照（正文、来源、各类选择快照、历史时刻、图片字节）与按新序号重排的顺序；
  *   * 过程与结局一律不搬（服务商请求号、token 用量、领取 worker、错误码），失败的那一轮不进历史；
  *   * 提案不搬：同一条提案不能在两条会话里各接受一次，接受会写业务事实；
- *   * 重放同一 `command_id` 返回同一个子会话身份，不会再分出一条。
+ *   * 重放同一 `command_id` 返回同一个子会话身份，不会再分出一条；
+ *   * 没有可搬历史的讨论按 `INVALID_TRANSITION` 拒绝，且连子会话行都不留下（2026-10-24）。
  * 真实模型、浏览器与 Windows 安装态不在本文件的取证范围内。
  */
 
@@ -756,9 +757,17 @@ test('分叉：201 建一条子会话，历史与图片按新序号搬过去，�
   expectProblem(reused, 409, 'COMMAND_ID_REUSED');
 });
 
-test('分叉的栅栏：在途消息与归档态都拒绝，陈旧基线 409 带出实际修订，跨 Workspace 不可见', async () => {
+test('分叉的栅栏：空讨论、在途消息与归档态都拒绝，陈旧基线 409 带出实际修订，跨 Workspace 不可见', async () => {
   const workspaceId = await newWorkspace('fork-gates');
   const sessionId = await newSession(workspaceId, '不能分叉的讨论');
+
+  // 还没说过话的讨论：分叉的语义是「连历史复制一份」，历史为空时它只会多出一条同样空的会话
+  // （2026-10-24 用户截图：空会话被分叉成第二条空会话，点开只剩欢迎空态）。
+  const emptyFork = randomUUID();
+  await expectDomainCode(() => forkAssistSession(app.db, { workspaceId, sessionId,
+    commandId: emptyFork, expectedRevision: '0' }), 'INVALID_TRANSITION');
+  assert.equal(await receiptsFor(emptyFork), 0, '被拒的分叉不该留下回执');
+  assert.equal(await forkCount(sessionId), 0, '被拒的分叉连子会话行都不该留下');
 
   // 还在生成的那一轮：既不该进历史，也不该让子会话从半截开始。
   await seedMessage(sessionId, 'ASSISTANT');
@@ -804,6 +813,9 @@ test('分叉的栅栏：在途消息与归档态都拒绝，陈旧基线 409 带
 test('分叉标题由服务端排号：编号跟着被分叉那一条的标题走，上限守住编号', async () => {
   const workspaceId = await newWorkspace('fork-title');
   const sessionId = await newSession(workspaceId, '同一段讨论');
+  // 每条源会话先「说过一句话」：分叉要求有可搬历史（空讨论按 INVALID_TRANSITION 拒绝），
+  // 本用例只关心编号，历史内容不参与断言。
+  await seedCompletedAnswer(sessionId, '说过一句话', 'worker-title');
 
   const first = await forkAssistSession(app.db, { workspaceId, sessionId,
     commandId: randomUUID(), expectedRevision: '0' });
@@ -824,11 +836,13 @@ test('分叉标题由服务端排号：编号跟着被分叉那一条的标题�
 
   // 半角括号同样认：别的工具生成的标题不该被当成「没编过号」。
   const halfWidth = await newSession(workspaceId, '来自别处的讨论(3)');
+  await seedCompletedAnswer(halfWidth, '说过一句话', 'worker-title-half');
   assert.equal((await forkAssistSession(app.db, { workspaceId, sessionId: halfWidth,
     commandId: randomUUID(), expectedRevision: '0' })).result.title, '来自别处的讨论（4）');
 
   // 200 上限守的是整串：超长时截正文前缀，编号永远完整留在末尾。
   const longId = await newSession(workspaceId, '标'.repeat(200));
+  await seedCompletedAnswer(longId, '说过一句话', 'worker-title-long');
   const longTitle = (await forkAssistSession(app.db, { workspaceId, sessionId: longId,
     commandId: randomUUID(), expectedRevision: '0' })).result.title;
   assert.equal(longTitle.length, 200);
@@ -836,6 +850,7 @@ test('分叉标题由服务端排号：编号跟着被分叉那一条的标题�
   assert.equal(longTitle, `${'标'.repeat(197)}（1）`);
   // 按完整码点退让：代理对不被切成半个（这里是 99 枚 emoji，每枚占两个 UTF-16 单位）。
   const emojiId = await newSession(workspaceId, '🐧'.repeat(99));
+  await seedCompletedAnswer(emojiId, '说过一句话', 'worker-title-emoji');
   const emojiTitle = (await forkAssistSession(app.db, { workspaceId, sessionId: emojiId,
     commandId: randomUUID(), expectedRevision: '0' })).result.title;
   assert.equal(emojiTitle, `${'🐧'.repeat(98)}（1）`, '退让只能整枚退，否则标题里会留下孤立代理项');
@@ -861,12 +876,14 @@ test('迁移 0113 只是一枚可空自引用列，会话读取与列表都逐�
   // 0113 之前的行不回填即可读：新列对旧代码不可见。
   assert.equal((await readRow(sessionId)).forked_from_session_id, null);
 
+  // 分叉要求可搬历史：先让这条讨论说过一句话，子会话才有历史可搬。
+  await seedCompletedAnswer(sessionId, '说过一句话', 'worker-fork-column');
   const forked = await forkAssistSession(app.db, { workspaceId, sessionId,
     commandId: randomUUID(), expectedRevision: '0' });
   const childId = forked.result.session_id;
-  assert.equal(forked.result.copied_messages, 0, '还没说过话的讨论照样能分叉');
-  assert.equal((await readRow(childId)).last_message_at, null,
-    '空讨论分叉不得捏造「说过话」：活动键只在真有消息搬过去时推进');
+  assert.equal(forked.result.copied_messages, 1, '已完成且有正文的那一轮进历史');
+  assert.ok((await readRow(childId)).last_message_at instanceof Date,
+    '搬进历史即活动：子会话的活动键按「消息落库」推进，不捏造也不留空');
 
   type Listed = { id: string; title: string; forked_from_session_id: string | null };
   const listed = ((await api.get(workspacePath(workspaceId, '/assist-sessions')))

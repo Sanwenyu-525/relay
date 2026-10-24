@@ -1,8 +1,13 @@
 # 文档入口与维护规范
 
+右侧工具面板与内置网页预览（2026-10-24，已授权规划，推荐方案未实施）：[工作台 §50](frontend/workbench-design.md#50-右侧工具面板与内置网页预览)拥有交互，[路线 §17](requirements/post-v1-roadmap.md#17-右侧工具面板与内置网页预览)拥有范围与分包，[浏览器架构 §15](architecture/browser-automation-v1.md#15-右侧内置网页预览的规划边界)拥有宿主隔离与选型门槛，[测试计划 §45](testing/verification-plan.md#45-右侧工具面板与内置网页预览的目标验收)为未运行规格；沿用现有 Chrome 扩展自动化，不改变当前开发排期。
+
+
 项目级长期 Agent 团队（2026-10-23，已确认、待实现）：[总纲 §0.18](../Personal_Workflow_OS_Master_Spec.md#018-项目级长期-agent-团队与跨会话协作)拥有产品规则，[路线 §16](requirements/post-v1-roadmap.md#16-项目级长期-agent-团队与跨会话协作)拥有范围与工程待核定项，[领域模型 §23](architecture/domain-model.md#23-长期-agent-成员与跨会话协作的应用边界)拥有责任，[ADR-034](decisions/ADR-034-persistent-project-agent-team.md)记录取舍，[工作台 §47](frontend/workbench-design.md#47-长期-agent-团队私聊群聊与工作概览)拥有交互，[测试计划 §44](testing/verification-plan.md#44-长期-agent-团队与跨会话协作的目标验收)为未运行规格。成员身份、会话与运行分离，项目不额外设置额度上限；本轮仅文档，不改变阶段或验收成绩。
 
 差异化体验规划（2026-10-24 接续）：[产品总纲 §0.17](../Personal_Workflow_OS_Master_Spec.md#017-长期项目协作的差异化体验)记录原六项方向与本轮五个推荐方向的确认和映射，新增围绕成果工作的专用工作台；[后续路线 §14](requirements/post-v1-roadmap.md#14-差异化体验的范围与推荐顺序)记录复用关系、推荐顺序与实施前置，[工作台 §45](frontend/workbench-design.md#45-长期项目协作的差异化体验)拥有推荐交互，[测试计划 §42](testing/verification-plan.md#42-长期项目协作差异化体验的目标验收)拥有未运行场景。仅纳入规划，不改变已有实现成绩、当前开发顺序或执行授权。
+
+2026-10-24 右侧工具面板与内置网页预览导航：用户任务书 [workbench-browser-preview](../prompts/workbench-browser-preview.md) 已执行，[工作台 §50](frontend/workbench-design.md#50-右侧工具面板与内置网页预览)（含 §50.5 实现现状）拥有产品交互，[浏览器架构 §15](architecture/browser-automation-v1.md#15-右侧内置网页预览的规划边界)（含 §15.1 P0 核对结果）拥有宿主与隔离边界，[ADR-035](decisions/ADR-035-in-app-webview-preview.md) 记录容器选型与取舍（不取代 ADR-025 的外部 Chrome 路线），[路线 §17](requirements/post-v1-roadmap.md#17-右侧工具面板与内置网页预览) 拥有范围与顺序，[测试计划 §45](testing/verification-plan.md#45-右侧工具面板与内置网页预览的目标验收) 拥有验证规格。实际成绩与未验边界只归统一验收表，不由导航声明完成。
 
 Agent 执行模式导航：[产品总纲 §0.16](../Personal_Workflow_OS_Master_Spec.md#016-七种-agent-执行模式与产品能力边界)说明 ReAct、Plan and Execute、Reflexion、Workflow、Multi Agent、Agent and Tool、Code as Action 的产品用途与能力边界；[运行架构 §10](architecture/runtime-context.md#10-七种-agent-模式的实现映射)维护源码入口与责任，[§10.1](architecture/runtime-context.md#101-现状分级与证据缺口2026-10-21-差距核对)维护 A/B/C/D 现状分级、缺的证据类与待产品决定项。七种模式可组合，不代表七套引擎或七个 UI 入口；实际成绩只归统一功能验收表。
 
@@ -67,6 +72,8 @@ Agent 执行模式导航：[产品总纲 §0.16](../Personal_Workflow_OS_Master_
 外部 Agent 共享任务协作（2026-10-23，产品规则已确认、待实现）：[总纲专题](../Personal_Workflow_OS_Master_Spec.md#项目事项与外部-agent-共享任务协作)拥有产品规则，[路线 §15](requirements/post-v1-roadmap.md#15-项目事项与外部-agent-共享任务协作)拥有范围与工程待核定项，[领域模型 §22](architecture/domain-model.md#22-外部-agent-共享任务的应用边界)拥有责任，[ADR-033](decisions/ADR-033-external-agent-shared-tasks.md)记录取舍，[工作台 §46](frontend/workbench-design.md#46-项目事项与外部-agent-共享任务)拥有交互，[测试计划 §43](testing/verification-plan.md#43-外部-agent-共享任务协作的目标验收)为未运行规格。本轮仅文档，不承诺标准 A2A 协议、直接调度、禅道迁移或现有功能已通过。
 
 ## 1. 唯一事实源
+
+2026-10-24 提示词覆盖接续：[差异化体验任务书](../prompts/differentiated-project-experience.md)、[外部共享任务任务书](../prompts/external-agent-shared-tasks.md)、[长期团队任务书](../prompts/persistent-project-agent-team.md)及[原 N 工作包的 N08 接续](../prompts/post-v1-collaboration.md#n08-周期定时启动任务接续)已补齐，逐项范围见[提示词覆盖表](../prompts/README.md#2026-10-24-产品设计与提示词覆盖核对)。任务书引用所属主文档，不新增产品事实源，也不表示开发已下发或功能已实现。
 
 2026-09-28 产品决策导航：[锁定与手动影响检查](frontend/workbench-design.md#101-已确认的锁定与影响检查规则)、[人工介入提醒](frontend/workbench-design.md#115-已确认的人工介入提醒规则)记录用户已确认行为及工程待定项；[验收规格](testing/verification-plan.md#13-锁定影响检查与提醒的已确认规则验收)尚未运行，[执行映射](../prompts/README.md#产品补充的执行映射)同步后续分派输入。已确认不等于已实现。
 

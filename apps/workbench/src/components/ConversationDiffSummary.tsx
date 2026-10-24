@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useConversationDiff } from "../lib/useConversationDiff";
 import { localDiffReasonText } from "./ChatLocalFileDiff";
-import type { RelayApiClient, RelayConversationDiff, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffScope } from "../api/relayClient";
+import { RelayApiError, type RelayApiClient, type RelayConversationDiff, type RelayConversationDiffFile, type RelayConversationDiffScanSide, type RelayConversationDiffScope } from "../api/relayClient";
 
 /**
  * 与目录细条同处输入卡**外**上方那一行的会话总 diff（工作台 §34.2 / §34.4，CD-01、CD-12、CD-17、CD-18）。
@@ -13,9 +13,13 @@ import type { RelayApiClient, RelayConversationDiff, RelayConversationDiffFile, 
  *
  * 状态必须彼此可辨（CD-17）：统计中 / 空净变化 / 非 Git 根 / 缺基线 / 目录不可读（失权）/
  * 部分不可统计 / 刷新失败。刷新失败保留上次可信值并标「截至…」，未知一律不显示成 `+0 −0`。
+ * 「完整且空」与「读取中」不再占位：入口整行不出现（2026-10-24 用户指令「没有 git diff 的时候
+ * 不显示这个红框部分」），其余状态照旧可见——不可用与失败本身就是要说的事，不能靠消失交代。
  * 「部分不可统计」必须当场说清是哪一类不完整（扫描覆盖不足 vs 已发现文件读不出行数）以及条数，
  * 入口行给成因短语、展开面板逐条解释，不靠隐藏提示交代（2026-10-18 用户指令）。
- * 展开的列表与正文都取自同一份修订（CD-15/CD-18）：基线修订变了就重读，不把旧正文配新统计。
+ * 展开的列表与正文都取自同一份可信读取（CD-15/CD-18）：统计每次成功刷新都让已展开
+ * 正文按新读取代次重新核对（DTO 无当前侧快照字段，起点修订不变不代表当前文件未变），
+ * 不把旧正文配新统计；拒读（401/403/404）撤下旧值，临时失败保留可信值标「截至…」。
  */
 
 const UNAVAILABLE_TEXT: Record<string, string> = {
@@ -139,9 +143,13 @@ function ConversationDiffFileBody({ client, sessionId, path, revisionKey, scope 
     void client.getConversationDiffFile(sessionId, path, scope).then((next) => {
       if (current !== request.current) return; // 迟到响应不覆盖新修订（CD-13/CD-15）。
       setDetail(next);
-    }).catch(() => {
+    }).catch((caught) => {
       if (current !== request.current) return;
-      setFailure("该文件的正文当前读不到；总数与磁盘实际改动不受影响。权限变化时不显示正文。");
+      // 明确拒读（无权/对象不存在/凭据失效）与临时读不到分开说：拒读时旧正文已撤下，
+      // 恢复后重新展开才重新读取，不把权限拒绝说成普通网络抖动（禅道 #118）。
+      setFailure(caught instanceof RelayApiError && [401, 403, 404].includes(caught.problem.status)
+        ? `该文件的正文读取被拒绝（HTTP ${caught.problem.status} ${caught.problem.code}）：旧正文已撤下，权限或对象恢复后重新展开读取。`
+        : "该文件的正文当前读不到；总数与磁盘实际改动不受影响。权限变化时不显示正文。");
     });
     return () => { request.current++; };
   }, [client, sessionId, path, revisionKey, scope]);
@@ -191,7 +199,7 @@ export default function ConversationDiffSummary({ client, sessionId, enabled, di
   const reading = enabled && (directoryBound || inline);
   /* 目录口径每次读取都要重扫受管根（本机 2000 条约 3 秒），页签里没必要 4 秒一次：
      拉到 20 秒，配合面板底部的「重新读取」仍能手动取最新。会话口径零写入时服务端直接短路。 */
-  const { diff, loading, error, stale, readAt, refresh } = useConversationDiff(
+  const { diff, loading, error, stale, readAt, successSeq, refresh } = useConversationDiff(
     client, sessionId, reading, inline ? 20000 : 4000, scope);
   const [open, setOpen] = useState(false);
   const [openFile, setOpenFile] = useState<string | null>(null);
@@ -214,18 +222,29 @@ export default function ConversationDiffSummary({ client, sessionId, enabled, di
   const changed = diff !== null && diff.available === true ? diff : null;
   const files = changed?.files ?? [];
   const incomplete = changed?.incomplete ?? false;
+  // 正文身份 = 资源/起点/目录 + 当前侧可信读取代次（禅道 #117）：DTO 没有当前侧快照
+  // 代次字段，起点修订不变不代表当前文件未变（同样行数的内容替换也不改统计对象），
+  // 所以每次统计成功刷新都让已展开正文重新核对；失败读取不递增，正文身份不漂移。
   const revisionKey = changed !== null
-    ? `${changed.resourceId}:${changed.baselineRevision}:${changed.rootPath}` : "none";
+    ? `${changed.resourceId}:${changed.baselineRevision}:${changed.rootPath}:${successSeq}` : "none";
+
+  /* 没有 git diff 时这一行整块不出现（2026-10-24 用户指令「没有 git diff 的时候不显示这个红框部分」）：
+     完整且空的净变化没有内容可说，展开也只有一句「暂无文件变化」，留着只是输入卡上方的占位噪声。
+     读取中也先不占位——否则每打开一次会话都会先闪一句「正在统计…」再消失，输入卡跟着上下跳一次。
+     有变化、有不可用成因（缺起点／非 Git 根／失权）、读取失败仍然出现：那些状态本身就是信息，
+     不能靠「消失」交代（CD-17）。内联形态（工作详情「变更」页签）是专门来看统计的地方，不适用。 */
+  const nothingToReport = !inline && (diff === null
+    ? error === null
+    : changed !== null && changed.totalFiles === 0 && !incomplete);
+  if (nothingToReport) return null;
 
   let line: string;
   let totals: { readonly added: number; readonly removed: number } | null = null;
   if (diff === null) {
-    line = error !== null ? "本次对话 · 文件变化统计不可用"
-      : loading ? "本次对话 · 正在统计文件变化…" : "本次对话 · 文件变化待读取";
+    // 只有读取失败会走到这里：读取中与「完整且空」都在上面早退了。
+    line = "本次对话 · 文件变化统计不可用";
   } else if (!diff.available) {
     line = UNAVAILABLE_TEXT[diff.reason] ?? "本次对话 · 文件变化不可统计";
-  } else if (diff.totalFiles === 0 && !incomplete) {
-    line = "本次对话 · 暂无文件变化";
   } else {
     line = `本次对话 · ${diff.totalFiles} 个文件`;
     totals = { added: diff.totalAdded, removed: diff.totalRemoved };

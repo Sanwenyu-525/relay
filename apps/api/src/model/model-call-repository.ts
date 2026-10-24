@@ -130,9 +130,21 @@ export class ModelCallRepository {
          * 会话级用量上限是**既有**的失控保护，本轮没有删除它，也没有把它藏到界面上：
          * 目标碰到它时明确落到「额度耗尽」并保存进度。用户在卡片上点一次「继续」，
          * 应用层写入一行 `assist_goal_budget_grants`（授予量取自失败轮次冻结的模型快照），
-         * 这里把它加到上限上——因此每一次扩额都有账可查，且只对**当前活动目标**生效。
+         * 这里把它加到上限上——每一次扩额都有账可查。
          *
-         * 没有目标、或目标已结束时，这段查询返回 0，行为与 0126 逐字相同。
+         * 授权上限的口径（#141）：
+         *   * **预算作用域**＝根会话及子会话的全部历史 model_calls（上面的 `used`，不变）；
+         *   * **当前活动目标**（status='ACTIVE'）的授予全额计入——「继续」刚授予的窗口
+         *     必须立即可用，这是原有行为；
+         *   * **已终结目标**（COMPLETED/CANCELLED/FAILED）的授予只计入**已消费**的部分：
+         *     该目标存续窗口（created_at..closed_at）内的作用域用量，扣除它开始时剩余的
+         *     基线窗口，再封顶于它的授予量。理由：旧目标终结后其用量仍永久留在 `used`
+         *     里，若授予随终结整体消失，新目标的每次授予都要先补偿这段已消费历史
+         *     （禅道 #141 的「反复额度耗尽、无实际调用」）；反过来，未消费的授予若整体
+         *     留在上限里，就等于把旧目标没用完的窗口无条件转送给新目标——两者都不成立，
+         *     所以按「已消费才保留、未消费不转送」取最小算法。用量与授予账本原样保留，
+         *     不删行、不清零、不双计量。
+         *   * 其余非终态目标（PAUSED/WAITING_USER/…）与旧口径一致不计入。
          *
          * 0128：授予量按**预算作用域根**解析，与上面的用量同一个口径。子会话的调用既
          * 计入根会话的用量，就必须共用根会话的扩额；按子会话自己查会永远得 0，
@@ -149,9 +161,58 @@ export class ModelCallRepository {
             .execute(trx)).rows[0];
         const grantedCalls = Number(grant?.calls ?? '0');
         const grantedTokens = Number(grant?.tokens ?? '0');
-        if (Number(used.calls) >= budget.scopeCallLimit + grantedCalls ||
+        const terminated = assistScope === undefined ? { rows: [] as readonly {
+          granted_calls: string; granted_tokens: string; calls_before: string;
+          tokens_before: string; calls_in: string; tokens_in: string }[] }
+          : await sql<{ granted_calls: string; granted_tokens: string; calls_before: string;
+            tokens_before: string; calls_in: string; tokens_in: string }>`
+            with scope_usage as materialized (
+              select c.started_at,
+                case when c.usage_input_tokens is not null and c.usage_output_tokens is not null
+                  then c.usage_input_tokens + c.usage_output_tokens
+                  else coalesce(c.budget_reserved_tokens, ${budget.scopeTokenLimit}) end as tokens
+              from model_calls c
+              join assist_messages m on m.id = c.assist_message_id
+              join assist_sessions s on s.id = m.session_id
+              where c.workspace_id = ${origin.workspaceId}
+                and (s.id = ${assistScope.budget_session_id}
+                  or s.budget_scope_session_id = ${assistScope.budget_session_id})
+            )
+            select coalesce(sum(g.granted_calls), 0)::text as granted_calls,
+              coalesce(sum(g.granted_tokens), 0)::text as granted_tokens,
+              (select count(*) from scope_usage u where u.started_at < gg.created_at)::text
+                as calls_before,
+              (select coalesce(sum(u.tokens), 0) from scope_usage u
+                where u.started_at < gg.created_at)::text as tokens_before,
+              (select count(*) from scope_usage u
+                where u.started_at >= gg.created_at and gg.closed_at is not null
+                  and u.started_at < gg.closed_at)::text as calls_in,
+              (select coalesce(sum(u.tokens), 0) from scope_usage u
+                where u.started_at >= gg.created_at and gg.closed_at is not null
+                  and u.started_at < gg.closed_at)::text as tokens_in
+            from assist_goals gg
+            join assist_goal_budget_grants g on g.goal_id = gg.id
+            where gg.session_id = ${assistScope.budget_session_id}
+              and gg.status in ('COMPLETED', 'CANCELLED', 'FAILED')
+            group by gg.id, gg.created_at, gg.closed_at`.execute(trx);
+        let terminatedGrantCalls = 0;
+        let terminatedGrantTokens = 0;
+        for (const row of terminated.rows) {
+          // 该目标开始时基线窗口的剩余额：这部分用量不需要任何授予支撑。
+          const baselineCallsLeft = Math.max(0, budget.scopeCallLimit - Number(row.calls_before));
+          const baselineTokensLeft =
+            Math.max(0, budget.scopeTokenLimit - Number(row.tokens_before));
+          // 存续窗口内真正由授予支撑的用量；封顶于授予量（未消费部分不转送）。
+          terminatedGrantCalls += Math.min(Number(row.granted_calls),
+            Math.max(0, Number(row.calls_in) - baselineCallsLeft));
+          terminatedGrantTokens += Math.min(Number(row.granted_tokens),
+            Math.max(0, Number(row.tokens_in) - baselineTokensLeft));
+        }
+        if (Number(used.calls) >= budget.scopeCallLimit + grantedCalls + terminatedGrantCalls ||
             Number(used.tokens) + budget.callReservationTokens >
-              budget.scopeTokenLimit + grantedTokens) throw new ModelScopeBudgetError();
+              budget.scopeTokenLimit + grantedTokens + terminatedGrantTokens) {
+          throw new ModelScopeBudgetError();
+        }
       }
       await this.insert(trx, id, origin, identity);
     });

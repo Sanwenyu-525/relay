@@ -1,6 +1,6 @@
 import { Compass, Target } from "lucide-react";
 
-import type { RelayChatMode } from "../api/relayClient";
+import type { RelayChatMode, RelayGoalStatus } from "../api/relayClient";
 
 /**
  * 聊天模式状态徽标（工作台 §44.1、0127；2026-10-22 DEV-0105 收口）。
@@ -64,13 +64,23 @@ export function chatModeLabel(mode: RelayChatMode): string {
  *
  * 只说「这个模式会怎样」，不重复权限：计划模式的只读由工具准入保证，
  * 这里写一句是让人知道为什么模型不动文件。
+ *
+ * 停止中的目标按服务端目标状态投影（DEV-0105 退回项修复，2026-10-24）：`goalStatus`
+ * 是 `PAUSING`/`CANCELLING` 时说明「正在安全停止」，不按会话模式宣称停下后进入哪一档——
+ * 服务端切走 GOAL 时会话模式立即落 CHAT/PLAN、目标才慢慢停下，此前按模式写
+ * 「停下后才会进入计划模式」在退出到普通模式时是错的。文案只说目标事实
+ * （暂停可恢复／取消不推进），当前在哪一档由徽标承担。
  */
-export function ChatModeHint({ mode, goalStopping }: {
-  mode: RelayChatMode; goalStopping: boolean;
+export function ChatModeHint({ mode, goalStatus }: {
+  mode: RelayChatMode; goalStatus: RelayGoalStatus | null;
 }) {
-  if (goalStopping) {
+  if (goalStatus === "PAUSING") {
     return <p className="helper-text" data-testid="chat-mode-hint">
-      正在安全停止在途行动，停下后才会进入计划模式。</p>;
+      目标正在安全停止在途行动，停下后目标进入暂停，可从目标卡恢复。</p>;
+  }
+  if (goalStatus === "CANCELLING") {
+    return <p className="helper-text" data-testid="chat-mode-hint">
+      目标正在取消，等在途行动安全停下后目标终止，不再推进。</p>;
   }
   if (mode === "PLAN") {
     return <p className="helper-text" data-testid="chat-mode-hint">

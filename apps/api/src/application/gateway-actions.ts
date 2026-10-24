@@ -27,9 +27,6 @@ import {
   type FileChange, type FileChangeOutcome, type FileReconciliationCheck,
 } from '../files/file-changeset.js';
 import type { ChangeSetLedgerFile, ChangeSetLedgerHeader } from '../files/change-set-repository.js';
-import { captureMessageFilePreimages, readMessageSnapshotLimits,
-  type CapturedMessagePreimage }
-  from '../files/message-file-preimage.js';
 import { executeFileQuery, reconcileFileQuery } from '../files/file-query.js';
 import type { ChangeSetFileStatus, ChangeSetStatus } from '../infrastructure/database-schema.js';
 import {
@@ -195,10 +192,16 @@ const TERMINAL_RUN_STATUSES: readonly string[] = ['COMPLETED', 'FAILED', 'CANCEL
 /**
  * 0058: USER_ACTION 只放行受管资源上的 Git 只读。
  *
- * 写类能力（GIT_WRITE / CLI_RUN / FILE_WRITE / FILE_QUERY）不在此词表内：人工触发的暂存、提交、
- * 推送、受控 CLI 与目录浏览仍无公开入口，这一事实不因本轮放宽 origin 而改变。
+ * 0134: 人工只读词表扩展到文件侧——FILE_QUERY×LIST_DIRECTORY（目录浏览）与
+ * FILE_READ×READ_FILE（文件正文读取），服务右侧工具面板「文件」页签；适配器与
+ * 权限裁决复用模型侧既有实现，这里只补来源许可。
+ *
+ * 写类能力（GIT_WRITE / CLI_RUN / FILE_WRITE）仍不在此词表内：人工触发的暂存、提交、
+ * 推送与受控 CLI 依旧没有公开入口。判定精确到「能力×动作」而不是只列动作：
+ * FILE_QUERY 下的 FIND_PATHS / SEARCH_TEXT 不随 LIST_DIRECTORY 放行，能力与动作
+ * 错位（借 FILE_QUERY 读文件、借 FILE_READ 列目录）同样不放行。
  */
-const USER_ACTION_ALLOWED_ACTIONS: readonly GatewayActionType[] = ['GIT_STATUS', 'GIT_DIFF'];
+const USER_ACTION_GIT_READ_ACTIONS: readonly GatewayActionType[] = ['GIT_STATUS', 'GIT_DIFF'];
 
 /**
  * 0060: ASSISTANT_READ 只放行只读能力。
@@ -276,12 +279,17 @@ export function originAllows(
   if (isSessionWriteOrigin(origin)) {
     return capability === 'FILE_WRITE' && SESSION_WRITE_ALLOWED_ACTIONS.includes(actionType);
   }
-  return capability === 'GIT_READ' && USER_ACTION_ALLOWED_ACTIONS.includes(actionType);
+  // 0134：人工来源按「能力×动作」双维放行——Git 只读沿用 0058 词表，文件侧只开
+  // LIST_DIRECTORY / READ_FILE 两个动作；FIND_PATHS / SEARCH_TEXT、能力与动作错位、
+  // 以及全部写动作都不放行。
+  if (capability === 'GIT_READ') return USER_ACTION_GIT_READ_ACTIONS.includes(actionType);
+  if (capability === 'FILE_QUERY') return actionType === 'LIST_DIRECTORY';
+  return capability === 'FILE_READ' && actionType === 'READ_FILE';
 }
 
 function originDenialDetail(kind: GatewayOrigin['kind']): string {
   if (kind === 'USER_ACTION') {
-    return 'USER_ACTION 仅允许受管资源上的 Git 只读查询。';
+    return 'USER_ACTION 仅允许受管资源上的只读查询（Git 状态/差异、目录浏览、文件读取）。';
   }
   if (kind === 'ASSISTANT_READ') {
     return 'ASSISTANT_READ 仅允许受管资源上的只读查询：人设会话不改文件、不建任务、不派子 Agent。';
@@ -1056,7 +1064,15 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
     // 0058: 目标是已登记受管根本身——不是用户给的任意路径。realpath 在此再取一次，使
     // 「登记之后被替换成链接的根」在准备期就失败，而不是把 Git 读到另一个目录里。
     target = await normalizedGitManagedRoot(resourceBefore!.canonical_root);
-    if (input.actionType === 'GIT_DIFF') {
+    if (input.actionType === 'LIST_DIRECTORY') {
+      // 0134: 人工目录浏览的目标是根内真实子目录（缺省即根本身）。normalizedQueryDirectory
+      // 负责存在性、真实目录、链接逃逸与受保护路径判定；调用方（file-user-action）已把
+      // relative_path 拼进 target，params 里那份只是冻结的事实记录。
+      target = await normalizedQueryDirectory(input.target, resourceBefore!.canonical_root);
+    } else if (input.actionType === 'READ_FILE') {
+      // 0134: 人工文件读取的目标是根内真实普通文件；realpath 冻结确切路径并拒绝链接。
+      target = await normalizedReadTarget(input.target, resourceBefore!.canonical_root);
+    } else if (input.actionType === 'GIT_DIFF') {
       const relativePath = input.params.path;
       if (relativePath !== undefined) {
         if (typeof relativePath !== 'string' || relativePath === '') {
@@ -1700,10 +1716,18 @@ async function admitGatewayInvocation(db: DbExecutor, input: DispatchGatewayInpu
       await lockWritableProjectInWorkspace(repositories, input.workspaceId, input.origin.projectId);
       resource = await repositories.gateway.lockResource(input.origin.resourceId);
       if (resource?.workspace_id !== input.workspaceId || resource.project_id !== located.project_id ||
-          resource.project_id !== input.origin.projectId || resource.status !== 'ACTIVE' ||
-          resource.canonical_root !== located.normalized_target) {
+          resource.project_id !== input.origin.projectId || resource.status !== 'ACTIVE') {
         throw resourceNotFound('Managed resource');
       }
+      // 0134: 人工文件读取的目标在受管根内而不必等于根本身——与上面会话读取分支同一
+      // 口径：FILE_QUERY 的查询目录按 containsDirectory 判定，FILE_READ 的文件按
+      // containsPath 判定；Git 只读与会话写（APPLY_CHANGESET 等目标即根）仍要求恰等。
+      const insideRoot = located.capability_key === 'FILE_QUERY'
+        ? containsDirectory(resource.canonical_root, located.normalized_target)
+        : located.capability_key === 'FILE_READ'
+          ? containsPath(resource.canonical_root, located.normalized_target)
+          : located.normalized_target === resource.canonical_root;
+      if (!insideRoot) throw resourceNotFound('Managed resource');
       await assertResourceNotOccupied(repositories, resource);
     }
     const reviewLocated = await repositories.reviews.readByOperationId(located.id);
@@ -2178,7 +2202,9 @@ export async function dispatchGatewayAction(db: DbExecutor, input: DispatchGatew
   if (admitted.operation.capability_key === 'FILE_QUERY') {
     // 根边界必须来自已登记的受管资源，而不是查询目录自身：否则一个被替换成链接的
     // 查询目录会把「根」一起挪走，等于没有边界。资源缺失时退回查询目录本身并保持失败关闭。
-    const managedRoot = input.origin.kind === 'RUN' && input.origin.resourceId !== undefined
+    // 0134：人工来源同样绑定受管资源，根边界按同一来源取，不退化为查询目录自身。
+    const managedRoot = (input.origin.kind === 'RUN' || input.origin.kind === 'USER_ACTION') &&
+        input.origin.resourceId !== undefined
       ? (await createRepositories(db).gateway.readResource(input.origin.resourceId))?.canonical_root
       : undefined;
     const query = await fileQueryExecute(admitted.operation, admitted.invocation, input.signal,
@@ -2293,81 +2319,6 @@ export async function dispatchGatewayAction(db: DbExecutor, input: DispatchGatew
   return settleGatewayInvocation(db, admitted, 'SUCCEEDED', result, input.origin);
 }
 
-interface FileWritePreimageAttribution {
-  readonly messageId: string; readonly workspaceId: string; readonly sessionId: string;
-  readonly source: 'SESSION_WRITE' | 'RUN_WRITE';
-}
-
-/** 会话直写按 tool call 归因；委派执行按 source_message 归因；其他 Run 不参与消息撤回。 */
-async function resolvePreimageAttribution(db: DbExecutor,
-  op: LogicalOperationRow): Promise<FileWritePreimageAttribution | null> {
-  try {
-    const repositories = createRepositories(db);
-    if (op.origin === 'AGENT_SESSION_WRITE') {
-      const call = await repositories.messageRecall.findSessionToolCallByOperation(op.id);
-      return call === undefined ? null : {
-        messageId: call.message_id, workspaceId: call.workspace_id,
-        sessionId: call.session_id, source: 'SESSION_WRITE',
-      };
-    }
-    if (op.origin === 'RUN' && op.run_id !== null) {
-      const request = await repositories.messageRecall.findConversationRequestByRun(
-        op.workspace_id, op.run_id);
-      return request === undefined ? null : {
-        messageId: request.source_message_id, workspaceId: op.workspace_id,
-        sessionId: request.session_id, source: 'RUN_WRITE',
-      };
-    }
-  } catch {
-    // 归因是尽力而为的撤回证据，不能让原本合法的写入依赖它。
-  }
-  return null;
-}
-
-async function recordFileWritePreimages(db: DbExecutor,
-  attribution: FileWritePreimageAttribution | null, rootPath: string,
-  changes: readonly FileChange[]): Promise<void> {
-  if (attribution === null || changes.length === 0) return;
-  let captured: readonly (CapturedMessagePreimage | null)[];
-  try {
-    captured = await captureMessageFilePreimages(rootPath, changes);
-  } catch {
-    return;
-  }
-  const repositories = createRepositories(db);
-  // §27.3.4 容量预算：占满时停止新增快照并如实降级（该路径此后不可恢复），
-  // 不删既有数据腾空间、不悄悄绕过预算。同批内多个前像按顺序共享同一份余量。
-  const limits = readMessageSnapshotLimits();
-  let remaining = limits.budgetBytes;
-  try {
-    remaining -= Number((await repositories.messageRecall.snapshotUsage(
-      attribution.workspaceId)).bytes);
-  } catch {
-    remaining = 0;
-  }
-  for (const preimage of captured) {
-    if (preimage === null) continue;
-    let entry: CapturedMessagePreimage = preimage;
-    if (preimage.content !== null && preimage.sizeBytes !== null &&
-        Number(preimage.sizeBytes) > remaining) {
-      entry = { ...preimage, content: null, sha256: null, unavailableReason: 'CAPACITY_FULL' };
-    } else if (preimage.content !== null && preimage.sizeBytes !== null) {
-      remaining -= Number(preimage.sizeBytes);
-    }
-    try {
-      await repositories.messageRecall.insertPreimage({
-        messageId: attribution.messageId, workspaceId: attribution.workspaceId,
-        sessionId: attribution.sessionId, relativePath: entry.relativePath,
-        existed: entry.existed, content: entry.content, sha256: entry.sha256,
-        sizeBytes: entry.sizeBytes, unavailableReason: entry.unavailableReason,
-        source: attribution.source,
-      });
-    } catch {
-      // 单条前像写不进去时，撤回会按「缺少基线」如实报告，而不是阻断写文件。
-    }
-  }
-}
-
 async function fileWriteExecute(db: DbExecutor, op: LogicalOperationRow, invocation: InvocationAttemptRow,
   signal?: AbortSignal): Promise<{ outcome: 'SUCCEEDED' | 'FAILED'; result: JsonObject }> {
   if (signal?.aborted) throw new Error('Gateway dispatch aborted before file write');
@@ -2375,7 +2326,6 @@ async function fileWriteExecute(db: DbExecutor, op: LogicalOperationRow, invocat
    * 0132：消息撤回的发送前文件前像。只在真正落盘前读取当前字节，首写优先；
    * 采集失败不阻断原写入——那条路径之后会如实显示为「缺少基线、不可恢复」。
    */
-  const preimageAttribution = await resolvePreimageAttribution(db, op);
   // 0126：会话写不走 Windows 原生路径身份冻结。`file_write_path_identity` 的复合外键
   // 强制绑定 (operation, run, resource, action_type)，会话写没有 run_id，插不进去；
   // 强行放开要改那张表的主键语义，代价远大于收益。
@@ -2391,7 +2341,6 @@ async function fileWriteExecute(db: DbExecutor, op: LogicalOperationRow, invocat
       ...change, path: canonicalRelativePath(pathRow.root_path, change.path),
     }));
     const capturedRows = pathRow.captures as unknown as WindowsFilePathEvidence['captures'];
-    await recordFileWritePreimages(db, preimageAttribution, pathRow.root_path, nativeChanges);
     let result: Awaited<ReturnType<typeof executeWindowsFileChangeset>>;
     try {
       result = await executeWindowsFileChangeset({ root_path: pathRow.root_path,
@@ -2431,7 +2380,6 @@ async function fileWriteExecute(db: DbExecutor, op: LogicalOperationRow, invocat
   }
   if (op.action_type === 'APPLY_CHANGESET') {
     const changes = (op.params.changes as any[]) as FileChange[];
-    await recordFileWritePreimages(db, preimageAttribution, op.normalized_target, changes);
     const res = await executeFileChangeset(op.normalized_target, changes, signal);
     return {
       outcome: res.outcome,
@@ -2454,7 +2402,6 @@ async function fileWriteExecute(db: DbExecutor, op: LogicalOperationRow, invocat
     targetSha256: createHash('sha256').update(content).digest('hex'),
   }];
   const parent = dirname(op.normalized_target);
-  await recordFileWritePreimages(db, preimageAttribution, parent, changes);
   const res = await executeFileChangeset(parent, changes, signal);
   return {
     outcome: res.outcome,

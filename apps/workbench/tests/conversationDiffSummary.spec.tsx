@@ -1,13 +1,16 @@
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import ConversationDiffSummary from "../src/components/ConversationDiffSummary";
-import type { RelayApiClient, RelayConversationDiff, RelayConversationDiffFile } from "../src/api/relayClient";
+import { RelayApiClient, RelayApiError, RelayTransportError,
+  type RelayConversationDiff, type RelayConversationDiffFile, type RelayConversationDiffFileRow } from "../src/api/relayClient";
 import { flush, mountReact } from "./mountApp";
 
 // 会话总 diff 的界面口径（工作台 §34.2 / §34.4，CD-01、CD-12、CD-17、CD-18）。
 // 口径固定为 B「本轮对话开始以来的净变化」：数字只来自服务端的基线→当前已落盘投影。
 // 这里锁状态可辨（统计中 / 空 / 无目录 / 非 Git 根 / 缺基线 / 失权 / 部分不可统计 / 刷新失败）、
 // 展开阅读与总数同修订、迟到响应不覆盖新值，以及「从现在开始统计」由用户主动触发。
+// 2026-10-24 用户指令「没有 git diff 的时候不显示这个红框部分」：完整且空与读取中都不占位，
+// 其余状态（不可用成因、失败）仍必须可见。
 
 const changed: Extract<RelayConversationDiff, { available: true }> = {
   available: true, scope: "SESSION", baselineCapturedAt: "2026-10-16T09:00:00Z", baselineRevision: "3",
@@ -102,13 +105,18 @@ describe("会话总 diff 入口", () => {
     } finally { view.unmount(); }
   });
 
-  it("完整且空的结果显示「暂无文件变化」，未知不显示为 +0 −0", async () => {
-    const empty = await mount(clientOf({ getConversationDiff: vi.fn(async (): Promise<RelayConversationDiff> => ({
-      ...changed, totalFiles: 0, totalAdded: 0, totalRemoved: 0, files: [] })) }));
+  it("完整且空的结果不占位：入口整行不出现，未知仍不显示为 +0 −0", async () => {
+    const client = clientOf({ getConversationDiff: vi.fn(async (): Promise<RelayConversationDiff> => ({
+      ...changed, totalFiles: 0, totalAdded: 0, totalRemoved: 0, files: [] })) });
+    const empty = await mount(client);
     try {
       await flush(40);
-      expect(toggle(empty).text()).toContain("本次对话 · 暂无文件变化");
-      expect(toggle(empty).attributes("data-state")).toBe("empty");
+      // 2026-10-24 用户指令「没有 git diff 的时候不显示这个红框部分」：空净变化连展开入口都不给，
+      // 输入卡上方不再出现「本次对话 · 暂无文件变化」这一行占位。
+      expect(empty.wrapper.find('[data-testid="conversation-diff-toggle"]').exists()).toBe(false);
+      expect(empty.wrapper.find('[data-testid="conversation-diff-panel"]').exists()).toBe(false);
+      // 不出现不等于不查：统计照旧读，写入之后同一入口会自己长出来。
+      expect(client.getConversationDiff).toHaveBeenCalledWith("s-1", "SESSION");
     } finally { empty.unmount(); }
 
     const unknown = await mount(clientOf({ getConversationDiff: vi.fn(async (): Promise<RelayConversationDiff> => ({
@@ -120,6 +128,34 @@ describe("会话总 diff 入口", () => {
       expect(text).not.toContain("+0");
       expect(unknown.wrapper.find('[data-testid="conversation-diff-files"]').exists()).toBe(false);
     } finally { unknown.unmount(); }
+  });
+
+  it("读取中不占位：读到真实变化后入口才出现，不先闪一句「正在统计」", async () => {
+    // 装进对象再赋值：TS 会把「回调里才赋值」的局部量按初始值 null 收窄，调用点就成了 never。
+    const pending = { resolve: null as ((value: RelayConversationDiff) => void) | null };
+    const client = clientOf({ getConversationDiff: vi.fn(() => new Promise<RelayConversationDiff>(
+      (resolve) => { pending.resolve = resolve; })) });
+    const view = await mount(client);
+    try {
+      await flush(30);
+      // 首次读取还没回来：先不占位，避免「先出现再消失」把输入卡推上推下。
+      expect(view.wrapper.find('[data-testid="conversation-diff-toggle"]').exists()).toBe(false);
+      pending.resolve?.(changed);
+      await flush(40);
+      expect(toggle(view).text()).toMatch(/本次对话 · 3 个文件/);
+    } finally { view.unmount(); }
+  });
+
+  it("内联形态（变更页签）空态照旧说「暂无文件变化」：那里就是专门来看统计的", async () => {
+    const view = await mountReact(createElement(ConversationDiffSummary, {
+      client: clientOf({ getConversationDiff: vi.fn(async (): Promise<RelayConversationDiff> => ({
+        ...changed, scope: "DIRECTORY", totalFiles: 0, totalAdded: 0, totalRemoved: 0, files: [] })) }),
+      sessionId: "s-1", enabled: true, directoryBound: true, scope: "DIRECTORY", inline: true }));
+    try {
+      await flush(40);
+      const panel = view.wrapper.get('[data-testid="conversation-diff-panel"]');
+      expect(panel.get('[data-testid="conversation-diff-empty"]').text()).toContain("本次对话暂无文件变化");
+    } finally { view.unmount(); }
   });
 
   it("缺基线不给行数；「从现在开始统计」由用户触发并显示新起点", async () => {
@@ -367,5 +403,262 @@ describe("会话总 diff 入口", () => {
       expect(view.wrapper.element?.ownerDocument.activeElement?.getAttribute("data-testid"))
         .toBe("conversation-diff-toggle");
     } finally { view.unmount(); }
+  });
+
+  // 禅道 #117：DTO 没有当前侧快照代次字段，起点修订不变不代表当前文件未变——同样行数的
+  // 内容替换也不改统计对象。所以每次统计成功刷新都让已展开正文按新读取代次重新核对。
+  const addRow = (newLine: number, text: string): RelayConversationDiffFileRow =>
+    ({ kind: "ADD", oldLine: null, newLine, text });
+  it.each([
+    { label: "新增行数变化（+1→+2）", firstAdded: 1, secondAdded: 2, replaced: false },
+    { label: "行数相同的内容替换（+2→+2）", firstAdded: 2, secondAdded: 2, replaced: true },
+  ])("统计成功刷新后已展开正文按新读取重新核对：$label", async ({ firstAdded, secondAdded, replaced }) => {
+    let round = 1;
+    const addedNow = () => (round === 1 ? firstAdded : secondAdded);
+    const stats = vi.fn(async (): Promise<RelayConversationDiff> => ({
+      available: true, scope: "SESSION", baselineCapturedAt: "2026-10-16T09:00:00Z",
+      baselineRevision: "3", rootPath: "D:\\Work\\Demo", resourceId: "res-1",
+      incomplete: false, coverage: null, totalFiles: 1, totalAdded: addedNow(), totalRemoved: 0,
+      files: [{ path: "src/a.ts", action: "MODIFY", added: addedNow(), removed: 0, unavailableReason: null }],
+    }));
+    const body = vi.fn(async (): Promise<RelayConversationDiffFile> => ({
+      available: true, path: "src/a.ts", action: "MODIFY", added: addedNow(), removed: 0, unavailableReason: null,
+      rows: round === 1
+        ? Array.from({ length: firstAdded }, (_, index) => addRow(index + 1, "CURRENT_BODY_V1_ONLY"))
+        : Array.from({ length: secondAdded }, (_, index) =>
+          addRow(index + 1, replaced ? "REPLACED_BODY_SAME_LINE_COUNT" : "CURRENT_BODY_V2_ONLY")),
+      rowsTruncated: false, rowsUnavailableReason: null,
+    }));
+    const client = { getConversationDiff: stats, getConversationDiffFile: body } as unknown as RelayApiClient;
+    const view = await mountReact(createElement(ConversationDiffSummary,
+      { client, sessionId: "s-1", enabled: true, directoryBound: true }));
+    try {
+      await flush(40);
+      await toggle(view).trigger("click");
+      await view.wrapper.get('[data-testid="conversation-diff-file-toggle-src/a.ts"]').trigger("click");
+      await flush(40);
+      expect(view.wrapper.text()).toContain("CURRENT_BODY_V1_ONLY");
+      expect(body).toHaveBeenCalledTimes(1);
+      round = 2;
+      await view.wrapper.get('[data-testid="conversation-diff-refresh"]').trigger("click");
+      await flush(60);
+      // 统计与正文都跟上当前侧：不是只按行数变化判断，旧正文不能配新统计。
+      expect(stats).toHaveBeenCalledTimes(2);
+      expect(body).toHaveBeenCalledTimes(2);
+      expect(view.wrapper.text()).not.toContain("CURRENT_BODY_V1_ONLY");
+      expect(view.wrapper.text())
+        .toContain(replaced ? "REPLACED_BODY_SAME_LINE_COUNT" : "CURRENT_BODY_V2_ONLY");
+    } finally { view.unmount(); }
+  });
+
+  it("统计成功刷新只核对仍展开的正文，收起的文件不读正文", async () => {
+    let round = 1;
+    const body = vi.fn(async (): Promise<RelayConversationDiffFile> => ({
+      available: true, path: "src/a.ts", action: "MODIFY", added: 1, removed: 0, unavailableReason: null,
+      rows: [addRow(1, round === 1 ? "BODY_ROUND_1" : "BODY_ROUND_2")],
+      rowsTruncated: false, rowsUnavailableReason: null,
+    }));
+    const client = { getConversationDiff: vi.fn(async (): Promise<RelayConversationDiff> => changed),
+      getConversationDiffFile: body } as unknown as RelayApiClient;
+    const view = await mount(client);
+    try {
+      await flush(40);
+      await toggle(view).trigger("click");
+      await view.wrapper.get('[data-testid="conversation-diff-file-toggle-src/a.ts"]').trigger("click");
+      await flush(40);
+      expect(body).toHaveBeenCalledTimes(1);
+      // 收起正文：此后统计刷新不再读这份正文。
+      await view.wrapper.get('[data-testid="conversation-diff-file-toggle-src/a.ts"]').trigger("click");
+      await flush(40);
+      round = 2;
+      await view.wrapper.get('[data-testid="conversation-diff-refresh"]').trigger("click");
+      await flush(60);
+      expect(body).toHaveBeenCalledTimes(1);
+      // 重新展开按当前读取重读，不拿收起前的旧正文续用。
+      await view.wrapper.get('[data-testid="conversation-diff-file-toggle-src/a.ts"]').trigger("click");
+      await flush(40);
+      expect(body).toHaveBeenCalledTimes(2);
+      expect(view.wrapper.text()).toContain("BODY_ROUND_2");
+      expect(view.wrapper.text()).not.toContain("BODY_ROUND_1");
+    } finally { view.unmount(); }
+  });
+
+  it("切换会话后已展开正文不复用，重新展开按新会话读取", async () => {
+    const body = vi.fn(async (sessionId: string): Promise<RelayConversationDiffFile> => ({
+      available: true, path: "src/a.ts", action: "MODIFY", added: 1, removed: 0, unavailableReason: null,
+      rows: [addRow(1, sessionId === "s-1" ? "BODY_SESSION_1" : "BODY_SESSION_2")],
+      rowsTruncated: false, rowsUnavailableReason: null,
+    }));
+    const client = { getConversationDiff: vi.fn(async (): Promise<RelayConversationDiff> => changed),
+      getConversationDiffFile: body } as unknown as RelayApiClient;
+    const view = await mountReact(createElement(ConversationDiffSummary,
+      { client, sessionId: "s-1", enabled: true, directoryBound: true }));
+    try {
+      await flush(40);
+      await toggle(view).trigger("click");
+      await view.wrapper.get('[data-testid="conversation-diff-file-toggle-src/a.ts"]').trigger("click");
+      await flush(40);
+      expect(view.wrapper.text()).toContain("BODY_SESSION_1");
+      await view.rerender(createElement(ConversationDiffSummary,
+        { client, sessionId: "s-2", enabled: true, directoryBound: true }));
+      await flush(40);
+      // 会话切换把已展开文件收起：旧正文一律不可取用，正文区域不再出现。
+      expect(view.wrapper.text()).not.toContain("BODY_SESSION_1");
+      expect(view.wrapper.find('[role="table"]').exists()).toBe(false);
+      await view.wrapper.get('[data-testid="conversation-diff-file-toggle-src/a.ts"]').trigger("click");
+      await flush(40);
+      expect(view.wrapper.text()).toContain("BODY_SESSION_2");
+    } finally { view.unmount(); }
+  });
+
+  // 禅道 #118：明确拒读（401/403/404）撤下旧目录与已展开正文并报拒读状态；
+  // 200 RESOURCE_UNAVAILABLE 既有对照必须继续通过；临时故障才按 CD-17 保留标过期。
+  const sid = "33333333-3333-4333-8333-333333333333";
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  // 拒读总量 fixture 与具体状态码无关（状态码只在 HTTP 层断言），不收参数避免未用形参。
+  const rejectedStats = () => ({
+    available: true, scope: "SESSION", baseline_captured_at: "2026-10-23T00:00:00Z",
+    baseline_revision: "3", root_path: "D:\\PRIVATE_ROOT_PROBE", resource_id: "resource-probe",
+    incomplete: false, coverage: null, total_files: 1, total_added: 1, total_removed: 0,
+    files: [{ path: "confidential.txt", action: "MODIFY", added: 1, removed: 0, unavailable_reason: null }],
+  });
+  it.each([401, 403, 404])("明确拒读 HTTP %s 后撤下旧目录与已展开正文，并报拒读状态", async (status) => {
+    let phase: "readable" | "rejected" | "unavailable" = "readable";
+    const code = status === 401 ? "AUTH_REQUIRED" : status === 403 ? "PERMISSION_DENIED" : "RESOURCE_NOT_FOUND";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (phase === "rejected") return json({ code, detail: "current source access rejected" }, status);
+      if (phase === "unavailable") return json({ available: false, reason: "RESOURCE_UNAVAILABLE" });
+      if (new URL(String(input)).pathname.endsWith("/file")) return json({
+        available: true, path: "confidential.txt", action: "MODIFY", added: 1, removed: 0,
+        unavailable_reason: null,
+        rows: [{ kind: "ADD", old_line: null, new_line: 1, text: "PREVIOUSLY_READ_BODY" }],
+        rows_truncated: false, rows_unavailable_reason: null });
+      return json(rejectedStats());
+    }));
+    const client = new RelayApiClient({ baseUrl: "http://127.0.0.1:8787",
+      workspaceId: "11111111-1111-4111-8111-111111111111", bearerToken: "test-token" });
+    const view = await mountReact(createElement(ConversationDiffSummary,
+      { client, sessionId: sid, enabled: true, directoryBound: true }));
+    try {
+      await flush(40);
+      await toggle(view).trigger("click");
+      await view.wrapper.get('[data-testid="conversation-diff-file-toggle-confidential.txt"]').trigger("click");
+      await flush(40);
+      expect(view.wrapper.text()).toContain("PREVIOUSLY_READ_BODY");
+      phase = "rejected";
+      await view.wrapper.get('[data-testid="conversation-diff-refresh"]').trigger("click");
+      await flush(60);
+      // 旧 root/path/正文一并撤下：拒读不是临时断网，不能继续展示旧快照。
+      expect(view.wrapper.text()).not.toContain("PRIVATE_ROOT_PROBE");
+      expect(view.wrapper.text()).not.toContain("PREVIOUSLY_READ_BODY");
+      expect(view.wrapper.text()).toContain(`HTTP ${status} ${code}`);
+      expect(view.wrapper.find('[data-testid="conversation-diff-stale"]').exists()).toBe(false);
+      // 200 RESOURCE_UNAVAILABLE 既有对照：不可用 DTO 同样撤下旧值（原契约不回退）。
+      phase = "unavailable";
+      await view.wrapper.get('[data-testid="conversation-diff-refresh"]').trigger("click");
+      await flush(60);
+      expect(view.wrapper.get('[data-testid="conversation-diff-hidden-by-permission"]').text())
+        .toContain("正文与历史内容一并隐藏");
+      expect(view.wrapper.text()).not.toContain("PREVIOUSLY_READ_BODY");
+    } finally { view.unmount(); vi.unstubAllGlobals(); }
+  });
+
+  it("503 与传输失败按 CD-17 保留可信值标过期；恢复 200 后只显示新数据", async () => {
+    let mode: "ok1" | "http503" | "transport" | "ok2" = "ok1";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (mode === "http503") return json({ code: "DATABASE_UNAVAILABLE", detail: "temporary failure" }, 503);
+      if (mode === "transport") throw new TypeError("connection lost");
+      if (new URL(String(input)).pathname.endsWith("/file")) return json({
+        available: true, path: "src/a.ts", action: "MODIFY",
+        added: mode === "ok1" ? 1 : 3, removed: 0, unavailable_reason: null,
+        rows: [{ kind: "ADD", old_line: null, new_line: 1, text: mode === "ok1" ? "BODY_ROUND_1" : "BODY_ROUND_2" }],
+        rows_truncated: false, rows_unavailable_reason: null });
+      return json({ available: true, scope: "SESSION", baseline_captured_at: "2026-10-23T00:00:00Z",
+        baseline_revision: "3", root_path: "D:\\Work\\Demo", resource_id: "res-1", incomplete: false,
+        coverage: null, total_files: 1, total_added: mode === "ok1" ? 1 : 3, total_removed: 0,
+        files: [{ path: "src/a.ts", action: "MODIFY", added: mode === "ok1" ? 1 : 3, removed: 0, unavailable_reason: null }] });
+    }));
+    const client = new RelayApiClient({ baseUrl: "http://127.0.0.1:8787",
+      workspaceId: "11111111-1111-4111-8111-111111111111", bearerToken: "test-token" });
+    const view = await mountReact(createElement(ConversationDiffSummary,
+      { client, sessionId: sid, enabled: true, directoryBound: true }));
+    try {
+      await flush(40);
+      await toggle(view).trigger("click");
+      await view.wrapper.get('[data-testid="conversation-diff-file-toggle-src/a.ts"]').trigger("click");
+      await flush(40);
+      expect(view.wrapper.text()).toContain("BODY_ROUND_1");
+      mode = "http503";
+      await view.wrapper.get('[data-testid="conversation-diff-refresh"]').trigger("click");
+      await flush(60);
+      // 临时故障保留上次可信值（含同一份正文），入口标「更新失败 · 截至…」，不称当前。
+      expect(view.wrapper.text()).toContain("+1");
+      expect(view.wrapper.text()).toContain("BODY_ROUND_1");
+      expect(view.wrapper.get('[data-testid="conversation-diff-stale"]').text()).toContain("更新失败 · 截至");
+      mode = "transport";
+      await view.wrapper.get('[data-testid="conversation-diff-refresh"]').trigger("click");
+      await flush(60);
+      expect(view.wrapper.get('[data-testid="conversation-diff-stale"]').exists()).toBe(true);
+      mode = "ok2";
+      await view.wrapper.get('[data-testid="conversation-diff-refresh"]').trigger("click");
+      await flush(60);
+      // 恢复 200 只显示新数据：过期标记消失，正文按新读取重读。
+      expect(view.wrapper.find('[data-testid="conversation-diff-stale"]').exists()).toBe(false);
+      expect(view.wrapper.text()).toContain("+3");
+      expect(view.wrapper.text()).toContain("BODY_ROUND_2");
+      expect(view.wrapper.text()).not.toContain("BODY_ROUND_1");
+    } finally { view.unmount(); vi.unstubAllGlobals(); }
+  });
+
+  it("单文件正文明确拒读时不残留旧正文并报拒读状态", async () => {
+    let fileFails = false;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (new URL(String(input)).pathname.endsWith("/file")) {
+        if (fileFails) return json({ code: "RESOURCE_NOT_FOUND", detail: "path gone" }, 404);
+        return json({ available: true, path: "src/a.ts", action: "MODIFY", added: 1, removed: 0,
+          unavailable_reason: null,
+          rows: [{ kind: "ADD", old_line: null, new_line: 1, text: "BODY_BEFORE_REJECTION" }],
+          rows_truncated: false, rows_unavailable_reason: null });
+      }
+      // 统计 fixture 的文件列表必须与正文用例一致（src/a.ts）：
+      // rejectedStats() 是拒读总量的对照 fixture，文件是 confidential.txt，不能混用。
+      return json({ ...rejectedStats(),
+        files: [{ path: "src/a.ts", action: "MODIFY", added: 1, removed: 0, unavailable_reason: null }] });
+    }));
+    const client = new RelayApiClient({ baseUrl: "http://127.0.0.1:8787",
+      workspaceId: "11111111-1111-4111-8111-111111111111", bearerToken: "test-token" });
+    const view = await mountReact(createElement(ConversationDiffSummary,
+      { client, sessionId: sid, enabled: true, directoryBound: true }));
+    try {
+      await flush(40);
+      await toggle(view).trigger("click");
+      await view.wrapper.get('[data-testid="conversation-diff-file-toggle-src/a.ts"]').trigger("click");
+      await flush(40);
+      expect(view.wrapper.text()).toContain("BODY_BEFORE_REJECTION");
+      fileFails = true;
+      await view.wrapper.get('[data-testid="conversation-diff-refresh"]').trigger("click");
+      await flush(60);
+      expect(view.wrapper.text()).not.toContain("BODY_BEFORE_REJECTION");
+      expect(view.wrapper.text()).toContain("正文读取被拒绝（HTTP 404 RESOURCE_NOT_FOUND）");
+    } finally { view.unmount(); vi.unstubAllGlobals(); }
+  });
+
+  it("API client 保留明确拒绝类型，不把 HTTP 错误抹平成传输失败", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ code: "PERMISSION_DENIED", detail: "denied" }, 403)));
+    const client = new RelayApiClient({ baseUrl: "http://127.0.0.1:8787",
+      workspaceId: "11111111-1111-4111-8111-111111111111", bearerToken: "test-token" });
+    try {
+      const rejected = await client.getConversationDiff(sid).then(() => null, (caught: unknown) => caught);
+      expect(rejected).toBeInstanceOf(RelayApiError);
+      expect((rejected as RelayApiError).problem.status).toBe(403);
+      expect((rejected as RelayApiError).problem.code).toBe("PERMISSION_DENIED");
+      const fileRejected = await client.getConversationDiffFile(sid, "src/a.ts")
+        .then(() => null, (caught: unknown) => caught);
+      expect(fileRejected).toBeInstanceOf(RelayApiError);
+      vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("connection lost"); }));
+      const transport = await client.getConversationDiff(sid).then(() => null, (caught: unknown) => caught);
+      expect(transport).toBeInstanceOf(RelayTransportError);
+    } finally { vi.unstubAllGlobals(); }
   });
 });

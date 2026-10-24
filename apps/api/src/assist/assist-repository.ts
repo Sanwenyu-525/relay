@@ -14,6 +14,8 @@ export type SessionDeleteBlockerReason =
   | 'MEMORY_SOURCES'
   | 'MEMORY_COMPACTION_ACTIVE'
   | 'FORK_CHILDREN'
+  | 'SUBAGENT_CHILDREN'
+  | 'DELEGATION_LEDGER_REFERENCED'
   | 'TASK_ACCEPTANCE_CITED'
   | 'HYPOTHESIS_CITED'
   | 'WORK_SEGMENT_CITED'
@@ -305,6 +307,11 @@ export class AssistRepository {
    *
    * 分叉子会话单独算一类：外键是 NO ACTION，父行删掉后子会话的 `forked_from_session_id`
    * 会永久悬空；不把来源说明改成 NULL，因为那等于替子会话改历史。
+   *
+   * 0128 的主子代理关系同样按跨对象事实阻断：主会话下还有子代理会话时不能删主会话
+   * （子会话是独立会话，各有自己的生命周期，不随父级联消失）；反过来，子会话被父会话的
+   * 委派账本引用（`child_session_id` 或尝试的结论消息）时也不能删——委派账本是父会话
+   * 的执行史，清掉它等于替父会话抹掉一次委派发生过的事实。
    */
   async listDeleteBlockers(sessionId: string): Promise<readonly SessionDeleteBlockerReason[]> {
     const result = await sql<{ reason: SessionDeleteBlockerReason }>`
@@ -361,6 +368,18 @@ export class AssistRepository {
       union all
       select 13, 'MEMORY_COMPACTION_ACTIVE' where exists (
         select 1 from assist_memory_requests where session_id = ${sessionId} and status in ('PENDING', 'RUNNING'))
+      union all
+      select 14, 'SUBAGENT_CHILDREN' where exists (
+        select 1 from assist_sessions where parent_session_id = ${sessionId})
+      union all
+      select 15, 'DELEGATION_LEDGER_REFERENCED' where exists (
+        select 1 from assist_delegations where child_session_id = ${sessionId})
+      union all
+      select 16, 'DELEGATION_LEDGER_REFERENCED' where exists (
+        select 1 from assist_delegation_attempts a
+        join assist_delegations d on d.id = a.delegation_id
+        join assist_messages m on m.id = a.result_message_id
+        where m.session_id = ${sessionId})
       ) blockers order by ordinal`.execute(this.db);
     return [...new Set(result.rows.map((row) => row.reason))];
   }
@@ -374,8 +393,16 @@ export class AssistRepository {
    * 是普通列（0097 没有外键），必须单独删，否则留下悬空账本。
    *
    * 删的是**会话自有**的账本：消息、提案、附件、预览、工具调用、模型选择、状态维护请求、
-   * 未进入组合检查的影响检查、辅助模型调用计量、已到期冷却与 diff 基线。学习记录、
-   * 执行请求与跨对象来源在阻断层就已拒绝，不会走到这里。
+   * 未进入组合检查的影响检查、辅助模型调用计量、已到期冷却、diff 基线、0127 的计划与目标
+   * 账本、0128 的委派账本。学习记录、执行请求与跨对象来源在阻断层就已拒绝，不会走到这里。
+   *
+   * 0127 的清理顺序由一组 NO ACTION 互指决定：计划引用来源消息、消息引用目标快照、
+   * 目标引用计划版本——三方成环，必须先删额度授予与轮次这两张纯子表，再解除消息侧的
+   * 目标快照引用（消息随后整批删除，快照列不承载独立事实），然后按目标 → 计划删除，
+   * 每一层父行删除时子表都已无引用。目标无论是否从计划启动、无论终结在哪一态，都随
+   * 会话消失：目标与计划是这条会话的执行账本，不是被别的对象引用的外部事实。
+   * 0128 的委派账本与尝试是主会话自己的执行史，随主会话清理；存在子会话或账本被
+   * 反向引用时，删除在阻断层已整条拒绝，走不到这里。
    */
   async deleteSession(sessionId: string, expectedRevision: bigint):
   Promise<{ readonly messages: number; readonly attachments: number } | undefined> {
@@ -407,6 +434,17 @@ export class AssistRepository {
       select id from assist_messages where session_id = ${sessionId})`.execute(this.db);
     await sql`delete from conversation_diff_baselines where session_id = ${sessionId}`.execute(this.db);
     await sql`delete from session_model_selection where session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from assist_goal_budget_grants where goal_id in (
+      select id from assist_goals where session_id = ${sessionId})`.execute(this.db);
+    await sql`delete from assist_goal_rounds where goal_id in (
+      select id from assist_goals where session_id = ${sessionId})`.execute(this.db);
+    await sql`update assist_messages set goal_id = null
+      where session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from assist_goals where session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from assist_plans where session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from assist_delegation_attempts where delegation_id in (
+      select id from assist_delegations where parent_session_id = ${sessionId})`.execute(this.db);
+    await sql`delete from assist_delegations where parent_session_id = ${sessionId}`.execute(this.db);
     const messages = await sql<{ id: string }>`delete from assist_messages
       where session_id = ${sessionId} returning id`.execute(this.db);
     const session = await sql<{ id: string }>`delete from assist_sessions

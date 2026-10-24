@@ -78,12 +78,26 @@ describe("聊天模式状态徽标", () => {
     } finally { view.unmount(); }
   });
 
-  it("说明行只在非普通模式出现；安全停止时说明停止而不是装作已切换", () => {
-    expect(ChatModeHint({ mode: "CHAT", goalStopping: false })).toBeNull();
-    const planHint = ChatModeHint({ mode: "PLAN", goalStopping: false });
+  it("说明行只在非普通模式出现；停止中的目标按目标状态投影，不宣称停下后进入哪一档（DEV-0105 退回项）", () => {
+    expect(ChatModeHint({ mode: "CHAT", goalStatus: null })).toBeNull();
+    const planHint = ChatModeHint({ mode: "PLAN", goalStatus: null });
     expect(planHint?.props["data-testid"]).toBe("chat-mode-hint");
-    const stopping = ChatModeHint({ mode: "GOAL", goalStopping: true });
-    expect(stopping?.props.children).toContain("安全停止");
+    // 目标模式内暂停：说明正在安全停止，不装作已经暂停。
+    const pausingInGoal = ChatModeHint({ mode: "GOAL", goalStatus: "PAUSING" });
+    expect(pausingInGoal?.props.children).toContain("安全停止");
+    expect(pausingInGoal?.props.children).toContain("暂停");
+    // 退出 GOAL→CHAT：会话已回普通模式、目标还在停下。文案只说目标事实，
+    // 不再按会话模式写「停下后才会进入计划模式」（该句只在真切到 PLAN 时才成立）。
+    const pausingAfterExit = ChatModeHint({ mode: "CHAT", goalStatus: "PAUSING" });
+    expect(pausingAfterExit?.props.children).toContain("安全停止");
+    expect(pausingAfterExit?.props.children).not.toContain("计划模式");
+    const pausingToPlan = ChatModeHint({ mode: "PLAN", goalStatus: "PAUSING" });
+    expect(pausingToPlan?.props.children).not.toContain("进入计划模式");
+    // 取消中的目标：说明终止且不再推进，不承诺可恢复。
+    const cancelling = ChatModeHint({ mode: "CHAT", goalStatus: "CANCELLING" });
+    expect(cancelling?.props.children).toContain("取消");
+    expect(cancelling?.props.children).toContain("不再推进");
+    expect(cancelling?.props.children).not.toContain("恢复");
   });
 
   it("标签覆盖三档", () => {
@@ -241,5 +255,73 @@ describe("退出聊天模式（AssistView 接线）", () => {
       // 徽标读的是重读后的会话投影：不重读时它会一直停在目标模式（探针复现过）。
       expect(view.wrapper.find('[data-testid="chat-mode-badge"]').exists()).toBe(false);
     } finally { view.unmount(); }
+  });
+
+  /** goalFrom 需要的原始服务端行：只给接线测试用，字段集与投影函数一一对应。 */
+  function rawGoal(status: string): Record<string, unknown> {
+    return { goal_id: "goal-1", session_id: sessionId, objective: "持续把文档整理完",
+      status, current_step: null, progress: null, stop_reason: null,
+      criteria: [], steps: [], round_count: 1, no_progress_rounds: 0,
+      plan_version_id: null, plan_version: null, last_round_at: null,
+      actions: { pause: false, cancel: false, resume: status === "PAUSED",
+        confirm_completion: false },
+      revision: "1", created_at: "2026-10-24T00:00:00Z", updated_at: "2026-10-24T00:00:00Z" };
+  }
+
+  it("活动目标在途时退出 GOAL：说明行报安全停止，不误报计划模式；目标停下后说明行随服务端状态消失", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    let chatMode: "CHAT" | "GOAL" = "GOAL";
+    let goalStatus: string = "ACTIVE";
+    const session = () => ({ id: sessionId, workspace_id: workspaceId, project_id: projectId,
+      task_id: null, title: "活动目标退出", status: "ACTIVE", revision: "1",
+      conversation_mode: "AGENT", chat_mode: chatMode,
+      created_at: "2026-10-24T00:00:00Z", updated_at: "2026-10-24T00:00:00Z" });
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === `${prefix}/projects/${projectId}`) return response({ id: projectId,
+        title: "测试项目", project_type: "GENERAL", revision: "1", state_revision: "1",
+        archived_at: null });
+      if (path === `${prefix}/assist-sessions`) return response({ items: [session()] });
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return response({ items: [] });
+      if (path === `${prefix}/assist-sessions/${sessionId}/goal`) {
+        return response({ goal: goalStatus === "NONE" ? null : rawGoal(goalStatus), rounds: [] });
+      }
+      if (path === `${prefix}/assist-sessions/${sessionId}/plans`)
+        return response({ latest: null, versions: [] });
+      if (path === `${prefix}/assist-sessions/${sessionId}/model-selection`)
+        return response({ model: null, revision: "0" });
+      if (path === `${prefix}/assist-sessions/${sessionId}/chat-mode` && init?.method === "POST") {
+        const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+        // 服务端语义：切走时模式立即落定，目标才进入 PAUSING 慢慢停（chat-mode.ts 的投影）。
+        chatMode = body.mode === "CHAT" ? "CHAT" : "GOAL";
+        if (chatMode === "CHAT") goalStatus = "PAUSING";
+        return response({ command_id: body.command_id, committed_at: "2026-10-24T00:00:00Z",
+          result: { session_id: sessionId, chat_mode: chatMode, revision: "2",
+            goal_stopping: chatMode === "CHAT" } });
+      }
+      if (path === `${prefix}/assist-proposals`) return response({ items: [] });
+      if (path === `${prefix}/skill-definitions`) return response({ items: [] });
+      if (path === `${prefix}/model-port`) return response({ provider: "fake", configured: false,
+        model: null, base_url: null, max_call_tokens: null });
+      throw new Error(`unexpected request ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench(`/projects/${projectId}?skill=assist`);
+    try {
+      // 活动目标 + 目标模式：说明行是目标模式描述。
+      expect(view.wrapper.get('[data-testid="chat-mode-hint"]').text()).toContain("目标模式");
+      await view.wrapper.get('[data-testid="chat-mode-exit"]').trigger("click");
+      await flush(80);
+      // 回执后目标仍在安全停止：说明行只报停止事实，不按普通模式误报「进入计划模式」。
+      const hint = view.wrapper.get('[data-testid="chat-mode-hint"]').text();
+      expect(hint).toContain("安全停止");
+      expect(hint).not.toContain("计划模式");
+    } finally { view.unmount(); }
+    // 重载恢复：目标是 PAUSED、会话是普通模式时（刷新后读到的服务端事实），说明行不出现。
+    chatMode = "CHAT"; goalStatus = "PAUSED";
+    const reloaded = await mountWorkbench(`/projects/${projectId}?skill=assist`);
+    try {
+      expect(reloaded.wrapper.find('[data-testid="chat-mode-hint"]').exists()).toBe(false);
+    } finally { reloaded.unmount(); }
   });
 });

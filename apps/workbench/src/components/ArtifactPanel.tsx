@@ -117,6 +117,11 @@ export default function ArtifactPanel(props: Props) {
   }))) ?? [];
   const selectedVersion = !versionsLoading && !versionsFailure
     ? versions.find((version) => version.versionId === selectedVersionId) ?? null : null;
+  // 完成目标用的“本轮接受版本”：从最近一次成功读取的版本事实解析当前选择。
+  // 不能挂 !versionsLoading——完成成功后的 onRefresh 会重读版本列表，加载窗口里若把
+  // 接受版本翻成 null，TaskCompletionPanel 会当成 A→null 而误清人工勾选（taskDetail UI-11）。
+  const acceptedSelection = selectedVersionId === null ? null
+    : versions.find((version) => version.versionId === selectedVersionId) ?? null;
   const selectedByProject = sourceUnavailable ? [] : state?.selectedArtifactVersionRefs ?? [];
   const contentBytes = new TextEncoder().encode(sourceUnavailable && content === savedContentSnapshot.current ? "" : content).length;
   const contentTooLarge = contentBytes > CONTENT_LIMIT_BYTES;
@@ -455,8 +460,8 @@ export default function ArtifactPanel(props: Props) {
         {selectReceipt && <p className="receipt-message" role="status">{selectReceipt}</p>}{selectFailure && <p className="action-error" role="alert">{selectFailure.message}</p>}{selectFailure?.kind === "transport" && <button className="secondary-button" type="button" disabled={selecting} onClick={() => void lookupSelectReceipt()}>查询本次选择回执</button>}
       </section>
       <TaskCompletionPanel live={live} target={{ taskId, taskStatus, taskRevision, acceptanceRevision,
-        allowedActions: sourceUnavailable ? [] : allowedActions, criteria: sourceUnavailable ? [] : criteria, acceptedVersion: selectedVersion ? { artifactVersionId: selectedVersion.versionId,
-          versionNumber: selectedVersion.versionNumber } : null,
+        allowedActions: sourceUnavailable ? [] : allowedActions, criteria: sourceUnavailable ? [] : criteria, acceptedVersion: acceptedSelection ? { artifactVersionId: acceptedSelection.versionId,
+          versionNumber: acceptedSelection.versionNumber } : null,
         writeBlockedReason: writeBlockedReason ?? (!versionsReady ? "产物列表尚未核实，暂不能完成。请重新读取产物后继续。" : null) }} onRefresh={onRefresh} />
     </aside>
   </div>;

@@ -565,3 +565,47 @@ Provider 对已派发后的网络断开、取消、超时及响应截断使用�
 **第 2 层（2026-10-18 用户选定）**：桌面模式改用**固定端口 43117**（`DESKTOP_DEFAULT_API_PORT`），被占用时回退临时端口（`main.ts` 捕获 `EADDRINUSE` 后以 0 重试，桥接文件随后写实际端口）。桌面宿主的环境模板抽成 `desktopChildEnvironment`，因此「端口是固定值」可被单测锁定。代价写在明处：固定端口可能被别的程序占，占不到就退回临时端口，此时扩展需重新配对；ADR-025 的「单端口 + 手动配对」前提不变，只是端口从「每次随机」变成「默认稳定」。
 
 **配对操作（一次即可）**：扩展选项页填 `http://127.0.0.1:43117` 与数据根 `browser/bridge.json` 里的令牌。开发态若用 `apps/api/.env` 的 8787，则填 8787。
+
+
+## 15. 右侧内置网页预览的规划边界
+
+2026-10-24，**已按 ADR-035 落地 Windows 原生子 WebView（实施者自检通过；真实 Windows 窗口与打包态未验）**。§1–13 的早期审查与实施记录保留其历史时点，现有外部浏览器默认路线以 §14 和 [ADR-025](../decisions/ADR-025-extension-bridge.md) 为准。此次增加的是应用内人工浏览容器，不替换 Chrome 扩展，也不恢复自有 Chrome 为默认自动化后端。产品交互归[工作台 §50](../frontend/workbench-design.md#50-右侧工具面板与内置网页预览)。
+
+源码核对：DevToolsPanel 已有文件、Git、终端占位、运行与轨迹；CollaborationView 和布局偏好已有面板及调宽逻辑。桌面固定 Tauri 2.11.6，Cargo 当前未启用 unstable；主窗口有 on_navigation、frame guard、拒绝新窗口及仅主窗口 capability。已有主窗口 WebView 不等于已经具备安全的内置浏览器。
+
+容器选型与取舍见 [ADR-035](../decisions/ADR-035-in-app-webview-preview.md)：采用主窗口内的原生子 WebView，不直接改主窗口 URL，不以任意站点 iframe 作为通用替代。Tauri 官方 Webview 文档注明创建相关 API 涉及 unstable feature；本仓按锁定版本启用（`tauri = 2.11.6` + `features = ["unstable"]`，`tauri-runtime-wry` 的同名 feature 为空列表，锁文件不变），未升级任何依赖。参考：[Webview API](https://v2.tauri.app/reference/javascript/api/namespacewebview/)、[Capabilities](https://v2.tauri.app/security/capabilities/)。
+
+| Owner | 推荐责任与边界 |
+|---|---|
+| Workbench | 标签/地址/加载状态、当前作用域与面板几何、用户手势；不持有网页 Cookie，不自行声明导航成功 |
+| Desktop host | 网页实例及标签代次、导航事件、实际 URL、实例隐藏/销毁、原生权限/新窗口/下载策略；只有可信工作台可请求控制自己作用域内的实例 |
+| Application/Domain | 现有 Task/Run/Review/Artifact/Verification 仍为唯一业务 Owner；面板不新增完成或批准入口 |
+| BrowserProvider/Gateway | 现有外部 Chrome 自动化及准入不变；首版不向模型暴露内置实例，未来接入再设计复用与扩展 |
+
+P0 必须核验：子 WebView 不因隶属 main 窗口继承工作台 capability，必要时按 webview 标签限定并回归主窗口权限；外页无桌面命令权限、API token、私有 bootstrap 或工作台存储；网页 profile/数据目录与工作台隔离（Cookie、LocalStorage、Service Worker 均覆盖），仅独立 WebView 标签不足以证明隔离。不得向外页注入授权桥或打开任意 eval 通道。用户浏览公网与访问自己输入的本地 http/https 服务可用，但不得把 Relay 的 API、bootstrap、维护端口或应用私有协议作为预览地址；需核对别名、IPv6、重定向和弹窗后的目标，不能只比较初始 URL 字符串。
+
+推荐首版只接 http/https 与受控空白页，拒绝从地址栏直达 file、javascript、data、应用私有协议和可执行外部协议；HTML 产物若需要运行，只能走验证后的隔离承载路径。新窗口请求阻止并给明确打开入口；下载、上传文件选择、摄像头/麦克风/定位/通知、证书错误及登录弹窗策略在 P0 冻结，默认不静默授权、不静默保存下载、不忽略证书错误。无法支持的站点可显式在外部浏览器打开，不用扩大主窗口权限解决兼容问题。
+
+布局验证覆盖原生子窗口裁切、遮挡工作台弹窗、系统缩放、焦点与键盘、切页隐藏、进程异常和退出清理。普通浏览器 fixture 不证明上述原生行为。首版保留最小本机展示恢复数据，不新建业务表；URL 保留规则归工作台 §50.3。历史、Cookie、下载清理方式与退出后登录态保留周期属于实施前待定，必须提供用户可见清理入口并先决定，再承诺“独立持久登录”。
+
+本轮不新建 ADR：仅记录候选与硬门槛；P0 后选定容器、profile 隔离及 IPC 方式时新增 ADR，保留 ADR-025 外部自动化决策。若隔离或原生嵌入不可行，汇报具体差异及可评审方案，不静默降级为外部窗口并称内置功能完成。
+
+### 15.1 首版宿主实现与 P0 核对结果（2026-10-24）
+
+实现落在 `apps/desktop/src-tauri/src/preview_webview.rs`（宿主）与 `apps/workbench/src/components/BrowserPreviewPanel.tsx`、`src/lib/previewBridge.ts`、`src/lib/previewUrl.ts`、`src/lib/previewRestore.ts`（工作台）。命令面：`preview_open` / `preview_navigate` / `preview_set_bounds` / `preview_set_visible` / `preview_nav` / `preview_state` / `preview_close` / `preview_release_scope` / `preview_open_external`，事件面只有一条 `relay-preview-event`（只发给 `main`）。
+
+**P0 核对结果（读源码＋本机编译/单测；窗口与打包态未验）**：
+
+| 核对项 | 结论 |
+|---|---|
+| 原生容器可用性 | `Window::add_child` + `WebviewBuilder` 在锁定版本可用，需 `tauri` 的 `unstable` feature；`cargo check`/`cargo test` 通过 |
+| 子 WebView 是否继承 main 的 capability | **会命中窗口级 capability**：`RuntimeAuthority::resolve_access` 的匹配条件是 `webviews.any(...) \|\| windows.any(...)`，而 `main-window` 只按窗口标签 `main` 约束。**因此「另起一个 webview 标签」本身不构成隔离** |
+| 真正的来源闸 | capability 的 `remote.urls` 白名单（本仓只有 `http://127.0.0.1:5173`）。所以地址策略必须无条件拒绝该来源，dev 与 packaged 一致 |
+| profile 隔离 | 独立 `data_directory`（`<data-root>/preview-webview`）→ 独立 `ICoreWebView2Environment`（Cookie / LocalStorage / Service Worker 分家），再叠 `incognito(true)` 使登录态不落盘 |
+| IPC 面 | 命令入口先校验调用方必须是 `main` webview；页面侧即使拿到 `__TAURI_INTERNALS__`，其来源也不匹配 `remote.urls`，命令一律被拒。攻击夹具待真机 |
+| 新窗口 / 下载 / 权限 | `on_new_window → Deny`、`on_download → false`；`PermissionRequested` 只对打包主窗口放行通知，子 WebView 不授予摄像头/麦克风/定位/通知 |
+| 崩溃 | `add_ProcessFailed` 单独订阅并上报 `CRASHED`，与慢加载区分（WebView2 的 `on_page_load` 只有 Started/Finished，不能用来判失败） |
+| 几何与遮挡 | 原生子窗口不参与 DOM 合成：几何由工作台量 `getBoundingClientRect()` 后 `set_bounds`；检测到 `[role="dialog"]` 时先 `hide()` |
+| 非 Windows | 命令返回明确错误，不降级为外部窗口或 iframe |
+
+**已知实现陷阱**（留给后续维护者）：①不能在 `on_page_load` 回调里调用 `with_webview`——它会把任务投回主线程并同步等待，而回调本身就在主线程，会自锁；前进/后退可用性因此改由工作台在 `LOAD_FINISHED` 后调 `preview_state` 取。②实例 id 永不复用 + `generation` 递增，迟到请求既不会打到新实例，也会被工作台按句柄丢弃。

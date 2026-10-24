@@ -166,7 +166,18 @@ export async function completeHumanTask(http: RelayHttp, input: { readonly taskI
       }
     })
   });
-  return completionFrom(commandEnvelopeFrom(body).result);
+  // 禅道 #28（DEV-0132）：解析成功不等于关联正确。回包只核对原 command_id 与确切 Task；
+  // 身份对不上时不能把结果当作本次提交的完成事实（原始命令是否落库仍未知，恢复凭据由
+  // 调用方 PendingCompletion 保留）。验收版本、完成状态与产物集合由组件按原请求核对。
+  const envelope = commandEnvelopeFrom(body);
+  if (envelope.commandId !== input.commandId) {
+    throw new Error(`完成响应的 command_id（${envelope.commandId}）与本次提交的 ${input.commandId} 不符；请按原 command ID 查询回执，不能据此宣告完成。`);
+  }
+  const result = completionFrom(envelope.result);
+  if (result.taskId !== input.taskId) {
+    throw new Error(`完成响应的结果属于任务 ${result.taskId}，不是本次任务 ${input.taskId}；请按原 command ID 查询回执，不能据此宣告完成。`);
+  }
+  return result;
 }
 
 export async function reopenTask(http: RelayHttp, input: { readonly taskId: string; readonly commandId: string; readonly expectedRevision: DecimalRevision; readonly reason: string; }): Promise<RelayReopen> {

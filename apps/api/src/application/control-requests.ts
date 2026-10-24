@@ -119,6 +119,33 @@ export async function requestComputerControlStop(db: DbExecutor, input: {
   });
 }
 
+/**
+ * 浏览器任务（`browser_sessions` 的 RUN 归属）的停止通道。
+ *
+ * 与上面 Esc 通道的差异：浏览器停止的权威来源是 browser_sessions 行本身绑定的
+ * Run，不依赖 `computer_control_state` 单行是否还在展示这个 Run——浏览器-only 的
+ * Run 根本没有那一行，把它当 CAS 门槛会让 CANCEL 入队随事务整体回滚、任务
+ * 永远停不下来（2026-10-24 `browser-actions` 集成实测暴露：stop 返回 200 却没有
+ * 任何控制意图入队）。电脑操控展示位在这里只做尽力刷新：同一 Run 真在操控桌面
+ * 时让 Overlay 立即进入「退出中」；行不存在或属于别的 Run 就是空操作，不失败。
+ */
+export async function requestBrowserRunStop(db: DbExecutor, input: {
+  readonly workspaceId: string; readonly runId: string;
+}): Promise<ControlRequestDto> {
+  return withTransaction(db, async (repositories) => {
+    const { task, run } = await lockTaskAndRun(repositories, input.runId, input.workspaceId);
+    if (isTerminal(run.status)) throw runTerminal();
+    if (task.executor_run_id !== run.id || task.ownership_epoch !== run.ownership_epoch) {
+      throw invalidTransition('Run 未持有该 Task 的执行权，无法停止。');
+    }
+    const pending = await repositories.recovery.lockPendingControl(run.id);
+    const control = pending?.type === 'CANCEL' ? pending
+      : await enqueueControlLocked(repositories, { task, run, type: 'CANCEL' });
+    await repositories.computerControl.markStopRequested(run.id);
+    return controlDto(control);
+  });
+}
+
 /** Task cancel 的 AI 分支复用同一个锁内入队，不开启嵌套事务。 */export async function enqueueControlLocked(repositories: Repositories, input: {
   readonly task: TaskRow; readonly run: RunRow; readonly type: RunControlType;
   readonly supersedesRequestId?: string | null;

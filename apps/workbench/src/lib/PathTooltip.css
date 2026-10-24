@@ -16,3 +16,57 @@
   overflow-wrap: anywhere;
   pointer-events: none;
 }
+
+/* 气泡尾巴（2026-10-24 用户给的形状规格）：两条对称的二次贝塞尔弧，根部与气泡底边
+   接近水平相切，向内收拢在底边中点交汇成一个尖。
+   只在传 arrow 时渲染——目录名与用量圆环那两处是纯读数提示，加尖反而多一层噪声。
+   水平位置取 --path-tooltip-arrow-left，由 JS 按**锚点中心**算出来
+   （气泡贴到视口边被夹住时，气泡中心并不等于锚点中心）。
+   上移 1px 让填充压住气泡底边那一小段，尾巴与气泡连成一体而不是贴在外面。 */
+.path-tooltip-arrow {
+  position: absolute;
+  left: var(--path-tooltip-arrow-left, 50%);
+  /* 尺寸必须显式写：styles.css 的全局 `svg { width/height: control.icon.size }` 会盖掉
+     <svg> 上的 width/height 属性，把尾巴撑成 20×20 并按比例居中——表现为气泡底边
+     被白块糊住一段、弧线跑到气泡里面。宽高由 JS 用变量给，与 path 的 viewBox 同源。 */
+  width: var(--path-tooltip-arrow-width, 22px);
+  height: var(--path-tooltip-arrow-height, 14px);
+  transform: translateX(-50%);
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* 尾巴盒子高 = 尾巴 12px + 覆盖底边框的 2px，所以 bottom 取 -13：
+   SVG 底边落在 border-box 底边下方 12px（尾巴伸出的高度），
+   SVG 顶边落在 border-box 底边上方 2px，填充正好把底边框整段盖掉，
+   而描边起点（viewBox y=-0.5）压在边框中心线上——弧线是边框的连续转折，不是贴上去的接缝。 */
+.path-tooltip[data-side="above"] .path-tooltip-arrow {
+  bottom: calc(-1 * var(--path-tooltip-arrow-height, 14px) + 1px);
+}
+
+.path-tooltip[data-side="below"] .path-tooltip-arrow {
+  top: calc(-1 * var(--path-tooltip-arrow-height, 14px) + 1px);
+  transform: translateX(-50%) rotate(180deg);
+}
+
+.path-tooltip-arrow-fill { fill: var(--relay-color-bg-surface); }
+
+.path-tooltip-arrow-line {
+  fill: none;
+  stroke: var(--relay-color-border-control);
+  stroke-width: var(--relay-border-width);
+  stroke-linecap: butt;
+}
+
+/* 带尾巴时改用 filter 投影，而不是气泡自己的 box-shadow：
+   box-shadow 只沿矩形绘制，尾巴在矩形之外，于是尾巴看起来是「贴上去的」、阴影在中途断掉。
+   drop-shadow 沿「气泡 + 尾巴」的合成轮廓画，接缝消失。
+   值取用户给的规格 0 2px 6px / 12%：偏移小、模糊紧，尾巴根部两侧不会积出一圈「腋下暗角」；
+   原先沿用 shadow.floating 的 0 14px 44px 会在大范围里晕开，反而让尾巴看着像另贴的一块。
+   边框同时升到 control 档（#849185）：separator 是 #E8EEE8，1px 弧线在那个灰度上
+   正常缩放下几乎看不见。这两条都只落在带尾巴的这一枚，目录名与用量圆环保持原样。 */
+.path-tooltip[data-arrow="true"] {
+  box-shadow: none;
+  border-color: var(--relay-color-border-control);
+  filter: drop-shadow(0 2px 6px rgb(31 45 61 / 0.12));
+}

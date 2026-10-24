@@ -41,13 +41,23 @@ interface Row {
   unread_at: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * 0111 的活动键：为 null 就是「这段讨论还没有消息」。行上的「未开始」标记与菜单里
+   * 有没有「分叉」都只认这一个字段（2026-10-24）。
+   */
+  last_message_at: string | null;
 }
 
 const row = (n: number, title: string, at: string): Row => ({
   id: id(n), project_id: null, task_id: null, title, status: "ACTIVE", revision: "1",
   pinned_at: null, unread_at: null,
-  created_at: `2026-10-0${n}T${at}:00Z`, updated_at: `2026-10-0${n}T${at}:00Z`
+  created_at: `2026-10-0${n}T${at}:00Z`, updated_at: `2026-10-0${n}T${at}:00Z`,
+  last_message_at: `2026-10-0${n}T${at}:00Z`
 });
+
+/** 还没有落过一条消息的会话：除活动键外与普通行同形（这正是它难分辨的地方）。 */
+const emptyRow = (n: number, title: string, at: string): Row =>
+  ({ ...row(n, title, at), last_message_at: null });
 
 const json = (body: unknown, status = 200) =>
   ({ ok: status < 400, status, json: async () => body }) as Response;
@@ -377,6 +387,32 @@ it("分叉：一次命令、读回的是新建的子会话，源行一行都没�
   expect(fake.posts[1]).toMatchObject({ action: "fork", expected_revision: "0" });
   expect(fake.rows[1]?.title).toBe("要分叉的讨论（1）");
   expect(fake.rows[2]?.title).toBe("要分叉的讨论（2）");
+});
+
+it("还没有消息的会话：行上标「未开始」，菜单里没有分叉（2026-10-24）", async () => {
+  // 两条同标题的空会话正是用户截图里的形态：11:39 建会话、首条消息没落地，12:30 又分叉出（1）。
+  const fake = fakeServer([emptyRow(1, "关于Relay-Agent", "01"), row(2, "说过话的讨论", "02")]);
+  const { container } = await mount(fake);
+
+  // 标记只出现在空会话那一行：说过话的行不受影响，标题可用宽与改造前一致。
+  expect(rowOf(container, id(1))?.querySelector('[data-testid="recent-work-not-started"]')?.textContent)
+    .toBe("未开始");
+  expect(rowOf(container, id(2))?.querySelector('[data-testid="recent-work-not-started"]')).toBeNull();
+  // 状态同时进可访问名称：不靠颜色、也不只靠视觉标记。
+  expect(container.querySelector(`[data-testid="recent-work-${id(1)}"]`)?.getAttribute("aria-label"))
+    .toContain("未开始");
+
+  // 没有可搬的历史，服务端只会拒绝：这一项干脆不出现，与归档态只留「重开」同一先例。
+  await openMenu(container, id(1));
+  const actions = [...panelOf(container, id(1))!.querySelectorAll(".recent-work-row-action")]
+    .map((button) => (button.textContent ?? "").trim());
+  expect(actions).not.toContain("分叉这段讨论");
+  expect(actions).toContain("重命名");
+
+  // 说过话的那一条照旧能分叉：判据是活动键，不是「这一列里有没有空会话」。
+  await openMenu(container, id(2));
+  expect([...panelOf(container, id(2))!.querySelectorAll(".recent-work-row-action")]
+    .map((button) => (button.textContent ?? "").trim())).toContain("分叉这段讨论");
 });
 
 it("归档即隐藏：行移出默认列表，「已归档」那一段按需才读，重开回到原处", async () => {

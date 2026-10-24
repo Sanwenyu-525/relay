@@ -14,32 +14,29 @@ function scopeQuery(scope: RelayConversationDiffScope | undefined, prefix: strin
  *
  * `scope` 决定范围：`SESSION`（默认）只算本会话落盘的路径——对话入口用这一档；
  * `DIRECTORY` 算整段目录净变化（含同期外部修改）——工作详情的「变更」页签用这一档。
+ *
+ * 错误按 `RelayHttp.request` 的原始类型传播（禅道 #118）：非 2xx 是 `RelayApiError`
+ * （401/403/404 拒读、5xx 临时故障各自可辨），fetch 失败/超时才是 `RelayTransportError`；
+ * 不再把明确拒绝抹平成传输失败——调用方按错误性质决定撤下快照还是标过期。
  */
 export async function getConversationDiff(http: RelayHttp, sessionId: string,
   scope?: RelayConversationDiffScope): Promise<RelayConversationDiff> {
-  try {
-    const body = await http.request(http.workspacePath(scopeQuery(scope,
-      `/assist-sessions/${encodeURIComponent(sessionId)}/conversation-diff`)));
-    return conversationDiffFrom(body);
-  } catch (error) {
-    throw new RelayTransportError("会话 diff 当前读不到；这与磁盘上的实际改动无关。");
-  }
+  const body = await http.request(http.workspacePath(scopeQuery(scope,
+    `/assist-sessions/${encodeURIComponent(sessionId)}/conversation-diff`)));
+  return conversationDiffFrom(body);
 }
 
 /**
  * 展开阅读：读单个文件的完整 diff 正文（工作台 §34.2 / CD-18）。
  * 与总数同一份基线修订与同一份当前快照；行数不可统计时正文也不编造。
+ * 错误同样按原始类型传播，不在客户端抹平 status/code（禅道 #118）。
  */
 export async function getConversationDiffFileDetail(http: RelayHttp, sessionId: string,
   path: string, scope?: RelayConversationDiffScope): Promise<RelayConversationDiffFile> {
-  try {
-    const body = await http.request(http.workspacePath(scopeQuery(scope,
-      `/assist-sessions/${encodeURIComponent(sessionId)}/conversation-diff/file` +
-      `?path=${encodeURIComponent(path)}`)));
-    return conversationDiffFileDetailFrom(body);
-  } catch {
-    throw new RelayTransportError("该文件的 diff 正文当前读不到；总数与磁盘实际改动不受影响。");
-  }
+  const body = await http.request(http.workspacePath(scopeQuery(scope,
+    `/assist-sessions/${encodeURIComponent(sessionId)}/conversation-diff/file` +
+    `?path=${encodeURIComponent(path)}`)));
+  return conversationDiffFileDetailFrom(body);
 }
 
 /**

@@ -52,6 +52,19 @@ export class WorkspaceRepository {
       returning *`.execute(this.db)).rows, 'set workspace default write tier');
   }
 
+  /**
+   * 0135（2026-10-24）：上下文长度档位。与默认目录／默认写档位共用同一行与同一个修订号，
+   * 只写这一列，`resource_id` 与 `default_write_tier` 保持原值。
+   */
+  async setContextBudget(workspaceId: string,
+    tokens: number | null): Promise<WorkspaceDefaultDirectoryRow> {
+    return requireRow((await sql<WorkspaceDefaultDirectoryRow>`insert into workspace_default_directories
+      (workspace_id, resource_id, context_budget_tokens, revision) values (${workspaceId}, null, ${tokens}, 1)
+      on conflict (workspace_id) do update set context_budget_tokens = excluded.context_budget_tokens,
+        revision = workspace_default_directories.revision + 1, updated_at = now()
+      returning *`.execute(this.db)).rows, 'set workspace context budget');
+  }
+
   async insertWorkspace(workspace: NewWorkspace): Promise<WorkspaceRow> {
     const result = await sql<WorkspaceRow>`
       insert into workspaces (id, name)

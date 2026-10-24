@@ -273,7 +273,10 @@ try {
   $runtimeOwnedKeys = @('RELAY_DB_URL', 'RELAY_DB_POOL_MAX', 'RELAY_DB_CONNECT_TIMEOUT_MS', 'RELAY_DESKTOP_WORKSPACE_ID')
   $userLines = @()
   if (Test-Path -LiteralPath $config) {
-    $userLines = @(Get-Content -LiteralPath $config | Where-Object {
+    # 必须显式按 UTF-8 读：文件由下面的 WriteAllText 以 UTF-8 写入，而 PowerShell 5.1 的
+    # Get-Content 默认按系统 ANSI 码页解码。含中文注释时每过一次读写往返就乱码并膨胀一轮
+    # （2026-10-24 实测累积到 108 KB，触发 Rust 侧 64 KiB 上限，窗口 setup 钩子 panic）。
+    $userLines = @(Get-Content -LiteralPath $config -Encoding UTF8 | Where-Object {
       $line = $_
       if ($line -match '^\s*([A-Za-z0-9_]+)\s*=') { -not ($runtimeOwnedKeys -contains $Matches[1]) }
       elseif ($line -match '^\s*#') { $true }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ChevronRight, LayoutGrid, MessageSquare, PanelRightOpen } from "lucide-react";
+import { ChevronRight, LayoutGrid, MessageSquare, PanelRightOpen, Wrench } from "lucide-react";
 import AppDialog from "../components/AppDialog";
 import AssistView, { type AssistNavigationState, type AssistTarget, type FirstMessageOwner, type FirstMessageProcess } from "./AssistView";
 import FactBar from "../components/FactBar";
@@ -16,6 +16,7 @@ import ConversationDiffSummary from "../components/ConversationDiffSummary";
 import TaskInspectorPanel from "../components/TaskInspectorPanel";
 import CollaborationSplitter from "../components/CollaborationSplitter";
 import InspectorResizeHandle from "../components/InspectorResizeHandle";
+import DevToolsPanel from "../components/DevToolsPanel";
 import { createCommandId, RelayApiError, type RelayApiClient, type RelayControlRequest, type RelayReview,
   type RelayArtifact, type RelayArtifactVersionSummary, type RelayAssistSession, type RelayConversationMode, type RelayRun, type RelayTaskDetail,
   type RelayWorkingDirectory, type RelayWorkingDirectorySource } from "../api/relayClient";
@@ -34,9 +35,10 @@ import { useRunDraftPreview } from "../lib/useRunDraftPreview";
 import { readCollaborationLayoutPreferences, saveCollaborationLayoutPreferences,
   type CollaborationLayoutMode } from "../lib/collaborationLayoutPreferences";
 import { readStoredInspectorWidth, saveInspectorWidth } from "../lib/inspectorWidthPreferences";
+import { desktopPreviewBridge, type PreviewBridge } from "../lib/previewBridge";
 import "./CollaborationView.css";
 
-const cleanNavigation: AssistNavigationState = { dirty: false, pending: null };
+const cleanNavigation: AssistNavigationState = { dirty: false, unsaved: false, pending: null };
 
 /** 工作详情是纯图标开关键：可访问名称与悬停提示都按展开态说清下一次点击做什么。 */
 function inspectorToggleLabel(open: boolean): string {
@@ -244,12 +246,20 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
     if (commit) saveInspectorWidth(next);
   }, []);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
+  /**
+   * 会话视图（未关联任务）的工具面板。与「工作详情」互斥地占用同一右栏：
+   * 网页预览在无项目时也能用，但两者同时展开会叠出第二层遮挡。
+   */
+  const [conversationToolsOpen, setConversationToolsOpen] = useState(false);
+  const conversationToolsToggleRef = useRef<HTMLButtonElement | null>(null);
   const [narrowSideOpen, setNarrowSideOpen] = useState(false);
   /**
    * 唯一还会拦住切换的事实：原命令结果待核对。未发送草稿不再进入这里——
    * 它按会话留在本机，切走不丢，回来原样恢复（2026-10-19 用户指令）。
    */
   const [transition, setTransition] = useState<{ commandId: string } | null>(null);
+  /** 页内切换的丢弃确认（P0-2）：不可恢复输入在场时切换先过这里。 */
+  const [unsavedTransition, setUnsavedTransition] = useState<{ proceed: () => void } | null>(null);
   const [recoveries, setRecoveries] = useState<readonly RecoveryRecord[]>(() => readRecovery(client));
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [checkingId, setCheckingId] = useState<string | null>(null);
@@ -336,11 +346,13 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   useEffect(() => {
     const guard: DraftGuard = {
       /**
-       * 讨论草稿不再算「未保存」（2026-10-19 用户指令）：正文已按会话留在本机
+       * 讨论正文草稿不算「未保存」（2026-10-19 用户指令）：正文已按会话留在本机
        * （`lib/composerDrafts.ts`），换工作区或离开页面都能原样恢复，因此不弹确认框。
-       * 其他页面（任务创建、蓝图、产物编辑）没有本机草稿存储，仍各自登记未保存事实。
+       * 但暂存/上传中的附件、首条草稿、技能输入与来源选择没有持久化、离页即丢
+       * （2026-10-24 P0-2），AssistView 把它们投影进 `unsaved`，这里照实上报——
+       * App 的路由阻断、关闭确认与本页的切换出口都读这一份事实。
        */
-      hasUnsavedChanges: () => false,
+      hasUnsavedChanges: () => navigationRef.current.unsaved,
       pendingCommandId: () => navigationRef.current.pending?.commandId ?? null,
       discard: () => { navigationRef.current.discard?.(); navigationRef.current = cleanNavigation; },
       // 「保留并继续编辑」的焦点恢复交给编辑器登记的存活恢复目标（AssistView 上报）；
@@ -560,6 +572,15 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     setConversationInspectorOpen(false);
     window.requestAnimationFrame(() => conversationInspectorToggleRef.current?.focus());
   }
+  /** 工具面板与工作详情互斥：同一右栏只留一层，避免叠出第二个遮挡。 */
+  function openConversationTools() {
+    setConversationInspectorOpen(false);
+    setConversationToolsOpen(true);
+  }
+  function closeConversationTools() {
+    setConversationToolsOpen(false);
+    window.requestAnimationFrame(() => conversationToolsToggleRef.current?.focus());
+  }
   /**
    * 2026-10-17 点击验收整改 CT-01：工作详情在宽容器里是常驻分栏，在容器放不下时是覆盖抽屉。
    * 两种形态由 CollaborationView.css 的容器查询决定，这里不复制阈值——打开后读一次计算样式
@@ -606,6 +627,28 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [inspectorOpenForView, inspectorPanelTestId, selectedPreviewArtifact, task]);
+  /**
+   * 工具面板的 Esc：与工作详情同一条规则——只有抽屉形态（绝对定位）才响应，
+   * 顶层弹窗自己消费 Esc。分栏形态是常驻内容，收起入口只有面板头部那颗键。
+   */
+  useEffect(() => {
+    if (!conversationToolsOpen) return;
+    const frame = window.requestAnimationFrame(() => {
+      const panel = document.querySelector<HTMLElement>('[data-testid="collab-conversation-tools"]');
+      if (panel === null || getComputedStyle(panel).position !== "absolute") return;
+      panel.querySelector<HTMLElement>('[data-testid="devtools-close"]')?.focus();
+    });
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]') !== null) return;
+      const panel = document.querySelector<HTMLElement>('[data-testid="collab-conversation-tools"]');
+      if (panel === null || getComputedStyle(panel).position !== "absolute") return;
+      event.preventDefault();
+      closeConversationTools();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => { window.cancelAnimationFrame(frame); document.removeEventListener("keydown", onKeyDown); };
+  }, [conversationToolsOpen]);
   const refreshFacts = useCallback(() => { setReloadKey((value) => value + 1); void reloadAll(); void reloadRun(); void reloadReviews(); },
     [reloadAll, reloadRun, reloadReviews]);
   const runControl = run !== null && task !== null
@@ -717,15 +760,34 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     });
   }
   /**
-   * 换目录、选会话、切任务共用同一条出口：只有「原命令结果待核对」会拦下，
-   * 其余直接切换。未发送草稿按会话留在本机（composerDrafts），不需要先确认丢弃。
+   * 换目录、选会话、切任务共用同一条出口：未决消息在核对前不得切换；
+   * 正文草稿按会话留在本机（composerDrafts），不需要先确认；
+   * 但暂存/上传中的附件、首条草稿等不可恢复输入在场时，切换前先问一次
+   * （2026-10-24 P0-2）——它们不在本机草稿持久化里，直接切走就是静默丢失。
+   * 守卫必须先于 OpenWorkingDirectory，不能先登记新作用域再询问。
    */
   function requestTransition(proceed: () => void) {
     const state = navigationRef.current;
     const guard = currentDraftGuard();
     const commandId = guard?.pendingCommandId?.() ?? state.pending?.commandId ?? null;
-    if (commandId) setTransition({ commandId });
-    else proceed();
+    if (commandId) { setTransition({ commandId }); return; }
+    if (state.unsaved) { setUnsavedTransition({ proceed }); return; }
+    proceed();
+  }
+
+  /**
+   * 「丢弃并继续」只清本页输入器登记的未保存事实（AssistView 的 discard 会清暂存附件、
+   * 首条草稿与技能输入），不走全局合并守卫——产物编辑等其他面板的未保存内容
+   * 不因这次页内切换被连带清掉。
+   */
+  function discardUnsavedAndProceed() {
+    const target = unsavedTransition;
+    setUnsavedTransition(null);
+    if (navigationRef.current.pending === null) {
+      navigationRef.current.discard?.();
+      navigationRef.current = cleanNavigation;
+    }
+    target?.proceed();
   }
 
   /**
@@ -1085,6 +1147,16 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
 
   // 会话视图顶栏右区与「工作详情」抽屉（均只在 task===null 时出现）。
   const conversationInspectorVisible = task === null ? conversationInspectorOpen : inspectorOpen;
+  /**
+   * 内置网页预览的宿主桥：只有桌面宿主才有原生容器；浏览器预览模式下为 null，
+   * 网页页签会如实说明不可用，不退化成 iframe。
+   */
+  const previewBridge = useMemo<PreviewBridge | null>(() => desktopPreviewBridge(), []);
+  /** 页面按 workspace + conversation 隔离；Project/Task 只是来源，不参与作用域。 */
+  const previewScope = `${client.workspaceId}:${sessionId ?? "no-session"}`;
+  /** 右栏当前是否被任一面板占用（工作详情或工具面板）：拖宽手柄的显示条件。 */
+  const conversationPanelVisible = task === null
+    ? conversationInspectorOpen || conversationToolsOpen : inspectorOpen;
   const conversationInspectorLabel = inspectorToggleLabel(conversationInspectorVisible);
   const conversationToolbarRight = <>{task !== null && <button type="button"
     className="secondary-button secondary-button--compact collab-toolbar-icon-button"
@@ -1100,7 +1172,15 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     aria-expanded={conversationInspectorVisible} aria-controls={task === null ? "collab-conversation-inspector" : `collab-inspector-${task.id}`}
     onClick={() => { if (task === null) setConversationInspectorOpen((open) => !open); else setInspectorOpen((open) => !open); }}>
     <PanelRightOpen size={18} aria-hidden="true" />
-  </button>}</>;
+  </button>}{
+    /* 普通会话也能打开工具面板：网页预览不需要项目或任务，文件/变更由面板按资格说明。
+       面板展开后收起入口只剩面板头部那颗键，收起时焦点回到本键。 */
+    task === null && !conversationToolsOpen && <button type="button"
+    className="secondary-button secondary-button--compact collab-toolbar-icon-button"
+    data-testid="collab-conversation-tools-toggle" ref={conversationToolsToggleRef}
+    title="工具面板（文件、变更与网页）" aria-label="工具面板（文件、变更与网页）"
+    aria-expanded={conversationToolsOpen} aria-controls="collab-conversation-tools"
+    onClick={openConversationTools}><Wrench size={18} aria-hidden="true" /></button>}</>;
   /**
    * 「+」里的目录入口已撤出（2026-10-19 用户指认「选择目录之类的都是过度设计」）：
    * 目录的常驻 Owner 就是本页目录细条，滚入视野并触发细条自带的「更换目录」弹层
@@ -1213,13 +1293,14 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
               <FactBar label="任务与执行事实" testId="collab-facts" cells={factCells} />
               <p className="helper-text">控制提交回执表示 PENDING；等待安全点期间，Run 与任务执行者仍以重新查询的事实为准。</p>
             </details>}
-            {task.projectId !== null && <button className="secondary-button secondary-button--compact collab-tools-toggle" type="button"
+            {/* 工具面板不再要求项目：网页预览在无项目任务里也能用，文件/变更由面板按资格说明。 */}
+            <button className="secondary-button secondary-button--compact collab-tools-toggle" type="button"
               data-testid="collab-devtools-toggle" aria-expanded={devToolsOpen}
               onClick={() => {
                 setDevToolsOpen((open) => !open);
                 if (!devToolsOpen) revealSidePanel(sideTab);
               }}>
-              {devToolsOpen ? "收起工具面板" : "文件与运行工具"}</button>}
+              {devToolsOpen ? "收起工具面板" : "文件与运行工具"}</button>
             <ModelConnectionStrip client={client} compact />
           </>}
         >
@@ -1369,6 +1450,16 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                 aria-hidden="true" onMouseDown={closeConversationInspector} />
               {conversationInspector}
             </>}
+            {conversationToolsOpen && <>
+              <div className="collab-inspector-scrim" data-testid="collab-conversation-tools-scrim"
+                aria-hidden="true" onMouseDown={closeConversationTools} />
+              {/* 普通会话的工具面板：无 Project/Task 时文件与变更按资格说明，网页预览照常可用。 */}
+              <aside className="task-inspector collab-conversation-tools" id="collab-conversation-tools"
+                data-testid="collab-conversation-tools" aria-label="工具面板">
+                <DevToolsPanel client={client} projectId={null} taskId={null} run={null}
+                  previewBridge={previewBridge} previewScope={previewScope} onClose={closeConversationTools} />
+              </aside>
+            </>}
           </>
           : <>
             <section className="collab-center" aria-label="工作主区" data-testid="collab-center" hidden={renderedLayoutMode === "result"}>
@@ -1424,6 +1515,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
             <WorkspaceSidePanel client={client} task={task} run={run} draft={draft}
               tab={sideTab} onTabChange={setSideTab}
               devToolsOpen={devToolsOpen} onCloseDevTools={() => setDevToolsOpen(false)}
+              previewBridge={previewBridge} previewScope={previewScope}
               reviews={visibleReviews} reviewIndex={reviewIndex} onReviewIndexChange={(next) => {
                 const selected = visibleReviews[next];
                 if (selected && selected.id !== selectedReviewId) requestTransition(() => {
@@ -1469,7 +1561,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
             </>}
           </>}
         {/* 左边界拖拽：与近期工作栏同一套手柄交互；成果深预览按 wideWidth 排版，不参与拖拽。 */}
-        {conversationInspectorVisible && !(task !== null && selectedPreviewArtifact !== null)
+        {conversationPanelVisible && !(task !== null && selectedPreviewArtifact !== null)
           && <InspectorResizeHandle width={inspectorWidth} onWidthChange={changeInspectorWidth} />}
       </div>
     </div>
@@ -1479,6 +1571,18 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
       <p>{`原命令 ${transition?.commandId ?? ""} 的结果仍待核对。请留在当前工作区查询回执；不会以新命令重试。`}</p>
       <div className="form-actions">
         <button className="secondary-button" type="button" onClick={() => setTransition(null)}>留在当前工作区</button>
+      </div>
+    </AppDialog>
+
+    {/* 页内切换的丢弃确认（P0-2）：只有不可恢复的输入（暂存附件、首条草稿等）才会到这；
+        正文草稿可按会话恢复，不在这里重复打扰。 */}
+    <AppDialog open={unsavedTransition !== null} title="有内容离开后无法恢复" onClose={() => setUnsavedTransition(null)}>
+      <p>输入器里还有离页不会保留的内容（如未发送的附件或首条草稿）。可以丢弃后继续切换，或留下继续编辑。</p>
+      <div className="form-actions">
+        <button className="secondary-button" type="button" data-testid="collab-unsaved-keep"
+          onClick={() => setUnsavedTransition(null)}>保留并继续编辑</button>
+        <button className="danger-button" type="button" data-testid="collab-unsaved-discard"
+          onClick={discardUnsavedAndProceed}>丢弃并继续</button>
       </div>
     </AppDialog>
   </section>;

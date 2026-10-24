@@ -10,6 +10,7 @@ import { ensureBridgeRegistration, registerBridgeUpgrade, syncBridgePort }
 import { registerRoutes } from './api/routes.js';
 import { createServer } from './api/server.js';
 import { ConfigError, findRepositoryRoot, loadConfig, type ApiConfig } from './config/config.js';
+import { shutdownComputerRuntimeClient } from './computer/client-holder.js';
 import { RelayDatabase } from './infrastructure/database.js';
 import { SchemaReadinessChecker } from './infrastructure/schema-readiness.js';
 import { assertRestoreNotIsolated, RestoreIsolationError } from './runtime/restore-isolation.js';
@@ -70,6 +71,9 @@ function installShutdownHandlers(
 
     void (async () => {
       await settle(app.close(), CLEANUP_TIMEOUT_MS);
+      // 电脑运行时是本进程懒拉起的子进程：停机时显式回收，不留孤儿输入通道
+      // （没有在跑就是无害空操作）。
+      shutdownComputerRuntimeClient();
       await settle(database.close(), CLEANUP_TIMEOUT_MS);
       process.exit(process.exitCode ?? 0);
     })();

@@ -51,8 +51,10 @@ after(async () => {
   for (const root of roots) await rm(root, { recursive: true, force: true });
 });
 
-const GITHUB_ACTIONS = ['GITHUB_REPO_VIEW', 'GITHUB_PR_LIST', 'GITHUB_PR_VIEW', 'GITHUB_ISSUE_LIST'];
-const GITHUB_TOOLS = ['github_repo_view', 'github_pr_list', 'github_pr_view', 'github_issue_list'];
+const GITHUB_ACTIONS = ['GITHUB_REPO_VIEW', 'GITHUB_PR_LIST', 'GITHUB_PR_VIEW',
+  'GITHUB_ISSUE_LIST', 'GITHUB_ISSUE_VIEW'];
+const GITHUB_TOOLS = ['github_repo_view', 'github_pr_list', 'github_pr_view',
+  'github_issue_list', 'github_issue_view'];
 
 interface GithubFixture {
   readonly workspaceId: string;
@@ -282,7 +284,7 @@ test('GitHub 动作只能绑定受管资源、只能来自会话读取：越界�
 
 /* —— 按需激活 —— ———————————————————————————————— */
 
-test('有 GITHUB_READ 连接时四个工具才进词表，停用连接当轮立刻消失', async () => {
+test('有 GITHUB_READ 连接时五个工具才进词表，停用连接当轮立刻消失', async () => {
   const fx = await fixture();
   // 连接本身不绑目录：GitHub 查询的边界来自受管资源 + 权限前缀，不是连接配置。
   const connectionConfig = await sql<{ config: JsonObject }>`
@@ -293,7 +295,7 @@ test('有 GITHUB_READ 连接时四个工具才进词表，停用连接当轮立�
   const first = await askWithScript(fx, [[{ name: 'github_repo_view', arguments: {} }]]);
   assert.equal(first.status, 'COMPLETED', JSON.stringify(first));
   assert.deepEqual(first.declaredTools.slice().sort(), [...GITHUB_TOOLS].sort(),
-    '声明给模型的工具应当恰好是四个 GitHub 只读工具');
+    '声明给模型的工具应当恰好是五个 GitHub 只读工具');
 
   // 停用连接：连接上的能力就是词表的上界，旧会话不靠任何冻结快照续命。
   await createRepositories(app.db).gateway.setConnection({ id: fx.connectionId, status: 'DISABLED',
@@ -357,7 +359,7 @@ test('受管根真的有 GitHub remote 时身份闸门放行，派发走到真�
   `派发结果要么带不可信标记，要么是类型化失败：${fedBack.content.slice(0, 200)}`);
 });
 
-test('已认证真实 GitHub：四个只读工具经会话与 Gateway 成功并保存回执', {
+test('已认证真实 GitHub：五个只读工具经会话与 Gateway 成功并保存回执', {
   skip: process.env.RELAY_TEST_AUTH_GITHUB !== '1',
 }, async () => {
   execFileSync(process.env.RELAY_GH_PATH ?? 'gh', ['auth', 'status'], { stdio: 'pipe' });
@@ -377,14 +379,20 @@ test('已认证真实 GitHub：四个只读工具经会话与 Gateway 成功并�
   const first = (list.items as { number: number }[])[0];
   assert.ok(first && Number.isInteger(first.number), 'public fixture must provide a real PR');
   await query('github_pr_view', { number: first.number });
-  await query('github_issue_list', { state: 'all', limit: 1 });
+  const issues = await query('github_issue_list', { state: 'all', limit: 1 });
+  const firstIssue = (issues.items as { number: number }[])[0];
+  assert.ok(firstIssue && Number.isInteger(firstIssue.number),
+    'public fixture must provide a real issue');
+  const issueView = await query('github_issue_view', { number: firstIssue.number });
+  assert.ok(typeof issueView.body === 'string', 'issue view must carry the bounded body');
+  assert.ok(Array.isArray(issueView.comments), 'issue view must carry comments');
   const rows = await new SessionToolCallRepository(app.db).listBySession(fx.sessionId);
-  assert.equal(rows.length, 4);
-  assert.ok(rows.every((row) => row.status === 'SETTLED'), 'all four receipts must settle');
+  assert.equal(rows.length, 5);
+  assert.ok(rows.every((row) => row.status === 'SETTLED'), 'all five receipts must settle');
   const operations = await sql<{ count: string }>`select count(*)::text as count
     from logical_operations where project_id = ${fx.projectId} and status = 'SUCCEEDED'`
     .execute(app.db);
-  assert.equal(operations.rows[0]!.count, '4', 'all four Gateway operations must succeed');
+  assert.equal(operations.rows[0]!.count, '5', 'all five Gateway operations must succeed');
 });
 
 test('模型带进来的仓库名到不了适配器，词表外的 gh api 入口直接拒掉', async () => {

@@ -10,10 +10,13 @@ tauri-build = { version = "=2.6.3", features = [] }
 [dependencies]
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
-tauri = { version = "=2.11.6", features = [] }
+# `unstable` 只解锁 `Window::add_child` / `WebviewBuilder`（Tauri 官方标注的实验 API），
+# 不引入新 crate：tauri-runtime-wry 的同名 feature 是空列表，锁文件不变。
+# 内置网页预览依赖它创建原生子 WebView，见 src/preview_webview.rs。
+tauri = { version = "=2.11.6", features = ["unstable"] }
 tauri-plugin-dialog = "=2.7.2"
 uuid = { version = "=1.20.0", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "=0.38.2"
-windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_LibraryLoader", "Win32_System_Pipes", "Win32_System_Threading", "Win32_System_SystemServices", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_LibraryLoader", "Win32_System_Pipes", "Win32_System_Threading", "Win32_System_SystemServices", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

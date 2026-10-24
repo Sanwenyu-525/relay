@@ -101,6 +101,8 @@ export interface WorkspaceDefaultDirectoryRow {
   readonly resource_id: string | null;
   /** 0131（DEV-0115）：还没有目录时的默认写档位；只在新建 `local_directory_access` 行时抄进去。 */
   readonly default_write_tier: LocalDirectoryWriteTier | null;
+  /** 0135（2026-10-24）：工作区级上下文长度档位（单次调用预算），空＝还没选过。 */
+  readonly context_budget_tokens: number | null;
   readonly revision: bigint;
   readonly created_at: Date;
   readonly updated_at: Date;
@@ -1538,17 +1540,37 @@ export interface AssistMessageRow {
 }
 
 /** 0132：一次写入落盘前按消息记录的路径前像。首写优先，不可改写。 */
-export interface AssistMessageFilePreimageRow {
-  readonly message_id: string;
+/** 0132：一条用户消息「发送前」的受管根字节基线（迁移 0132，2026-10-24 按用户拍板口径）。 */
+export interface AssistMessageBaselineRow {
+  readonly id: string;
   readonly workspace_id: string;
   readonly session_id: string;
+  readonly message_id: string;
+  readonly resource_id: string;
+  readonly root_path: string;
+  readonly status: 'COMPLETE' | 'INCOMPLETE';
+  readonly reason: string;
+  readonly file_count: number;
+  readonly total_bytes: bigint;
+  readonly captured_at: Date;
+}
+
+/** 基线内单文件条目：发送前存在性 + 内容寻址字节引用（或不可恢复原因）。 */
+export interface AssistMessageBaselineFileRow {
+  readonly baseline_id: string;
   readonly relative_path: string;
-  readonly existed: boolean;
-  readonly content: Buffer | null;
-  readonly sha256: string | null;
+  readonly exists: boolean;
+  readonly blob_sha256: string | null;
   readonly size_bytes: bigint | null;
   readonly unavailable_reason: string | null;
-  readonly source: 'SESSION_WRITE' | 'RUN_WRITE';
+}
+
+/** 内容寻址字节库：同内容跨消息去重；容量与保留按本表计量。 */
+export interface AssistMessageSnapshotBlobRow {
+  readonly blob_sha256: string;
+  readonly size_bytes: bigint;
+  readonly content: Buffer;
+  readonly refcount: number;
   readonly created_at: Date;
 }
 
@@ -1838,7 +1860,9 @@ export interface RelayDatabaseSchema {
   assist_delegation_attempts: AssistDelegationAttemptRow;
   assist_message_attachments: AssistMessageAttachmentRow;
   assist_message_previews: AssistMessagePreviewRow;
-  assist_message_file_preimages: AssistMessageFilePreimageRow;
+  assist_message_baselines: AssistMessageBaselineRow;
+  assist_message_baseline_files: AssistMessageBaselineFileRow;
+  assist_message_snapshot_blobs: AssistMessageSnapshotBlobRow;
   assist_message_recalls: AssistMessageRecallRow;
   assist_message_recall_files: AssistMessageRecallFileRow;
   assist_message_recall_protections: AssistMessageRecallProtectionRow;

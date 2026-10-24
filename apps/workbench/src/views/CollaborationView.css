@@ -689,3 +689,13 @@
 
 /* 2026-10-20：顶栏目录来源标记（.collab-toolbar-directory-source）按用户指令
    「只显示目录名」移除，对应规则一并删除。 */
+
+/* 普通会话的工具面板：复用工作详情面板的右栏几何（宽度、贴右、抽屉/分栏切换），
+   内容由 DevToolsPanel 自己撑满；这里只把内边距与边框归零，避免两层容器叠加留白。 */
+.collab-conversation-tools { overflow: hidden; }
+.collab-conversation-tools .devtools {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 0;
+  border-top: 0;
+}

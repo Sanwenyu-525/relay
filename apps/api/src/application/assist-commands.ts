@@ -21,6 +21,7 @@ import { checkAssistContent, checkRequiredText, normalizeText } from '../shared/
 import type { ContextSourceRef } from '../workflow/execution-contract.js';
 import { httpCommandScopeKey } from './actor.js';
 import { establishConversationDiffBaseline } from '../conversation-diff/net-diff-service.js';
+import { captureMessageBaseline } from './assist-file-baseline.js';
 import { frozenRoleSnapshot, requireActiveAssistantProfile } from './assistant-profile-commands.js';
 import { applyArtifactCreation, prepareArtifactCreation } from './artifact-commands.js';
 import { runIdempotentCommand, CommandIdReusedError, resolveExistingReceipt,
@@ -41,7 +42,7 @@ import { requireRevision } from './revisions.js';
 import { readAdmission, requireNormalAdmission } from './maintenance-admission.js';
 import { freezeAssistModelSnapshot } from './assist-model-snapshot.js';
 import { createGoalForMessage } from './assist-goals.js';
-import { parseChatModePrefix } from './chat-mode.js';
+import { assertChatModeSupportedForIdentity, parseChatModePrefix } from './chat-mode.js';
 
 import { resolveSessionReadTools } from './assist-read-tools.js';
 import { inheritWorkspaceDefaultDirectory } from './workspace-default-directory.js';
@@ -100,6 +101,9 @@ export async function createAssistSession(
   const title = normalizeText(input.title);
   const conversationMode: ConversationMode = input.conversationMode ?? 'AGENT';
   const chatMode = input.chatMode ?? 'CHAT';
+  // #145：带模式建会话与切换/发消息共用同一张身份×模式支持矩阵；不支持的身份
+  // 在建会话前就被拒，不会先建出一条注定无法推进目标的会话。
+  assertChatModeSupportedForIdentity(conversationMode, chatMode);
 
   return runIdempotentCommand<CreateAssistSessionResult>(db, {
     scopeKey: httpCommandScopeKey(input.workspaceId),
@@ -583,6 +587,11 @@ export async function requestAssistMessage(
        *   3. 切走活动目标时先持久化暂停意图，界面随后按目标的真实状态显示。
        */
       const requestedMode = input.chatMode ?? modePrefix?.mode ?? session.chat_mode;
+      // #145：身份 × 模式支持矩阵。显式 chatMode、/plan //goal 前缀和继承的持久模式
+      // 都走同一个准入；拒绝发生在模式落库、目标创建/绑定与消息写入之前，本命令事务
+      // 内抛出即整体回滚，不留下表面成功的对象。继承了不支持模式的旧会话会一直被拒，
+      // 直到用户先切回普通对话（切回 CHAT 不受本矩阵限制）。
+      assertChatModeSupportedForIdentity(session.conversation_mode, requestedMode, session.id);
       if (requestedMode === 'PLAN') {
         if (intent !== 'DISCUSS') {
           throw invalidTransition('计划模式只做只读规划，不生成提案或执行对象；请切回普通模式。',
@@ -674,6 +683,7 @@ export async function requestAssistMessage(
       const userSeq = await repositories.assist.nextMessageSeq(session.id);
       const userMessageId = randomUUID();
       const assistantMessageId = randomUUID();
+
       // 0093：先裁决附件（归属/数量/总量），再写消息——全部在同一事务，任何拒绝整体回滚。
       const messageAttachments = await resolveMessageAttachments(repositories, session,
         input.attachmentIds);
@@ -688,6 +698,26 @@ export async function requestAssistMessage(
         id: userMessageId, sessionId: session.id, seq: userSeq, role: 'USER',
         status: 'COMPLETED', intent: 'DISCUSS', content: effectiveContent, sources: [],
       });
+      // 0132（§8.5，2026-10-24 拍板口径）：发送前文件基线在消息准入事务内建立——
+      // 提交后助手轮次才可能写文件，这里读到的就是「发送前」状态；采集失败/超限/预算
+      // 占满不阻塞消息，按 INCOMPLETE 基线如实降级（撤回时按不可恢复处理）。
+      if (session.conversation_mode === 'AGENT' && session.working_resource_id !== null
+          && session.status === 'ACTIVE') {
+        const snapshotResource = await repositories.gateway.readResource(
+          session.working_resource_id);
+        if (snapshotResource !== undefined
+            && snapshotResource.workspace_id === input.workspaceId
+            && snapshotResource.status === 'ACTIVE') {
+          try {
+            await captureMessageBaseline(repositories, {
+              workspaceId: input.workspaceId, session, messageId: userMessageId,
+              resourceId: snapshotResource.id,
+              rootPath: snapshotResource.canonical_root });
+          } catch {
+
+          }
+        }
+      }
       if (messageAttachments.length > 0) {
         const bound = await repositories.assist.bindAttachments(session.id, userMessageId,
           messageAttachments.map((row) => row.id));

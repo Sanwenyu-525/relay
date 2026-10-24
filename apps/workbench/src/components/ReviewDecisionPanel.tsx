@@ -121,6 +121,25 @@ export default function ReviewDecisionPanel({ live, review, writeBlockedReason, 
       dirty: guard.current.hasUnsavedChanges() });
   }, [review.id, pendingCommand, submitting, feedback, live, onNavigationStateChange]);
 
+  /**
+   * 到期触发器（禅道 #24）：只在到点或前后台恢复时强制重渲染，是否真的过期仍由
+   * isReviewExpired 在渲染时按当前时间判定。定时器按 Review 与到期时刻登记、随切换清理，
+   * 旧请求的计时不会作用到新 Review；提交路径另有 submit 前复核兜底，不依赖渲染刷新。
+   */
+  const [, setExpiryTick] = useState(0);
+  const expiresAtMs = review.status === "OPEN" && review.expiresAt !== null ? Date.parse(review.expiresAt) : null;
+  useEffect(() => {
+    if (expiresAtMs === null || !Number.isFinite(expiresAtMs)) return;
+    const margin = expiresAtMs - Date.now();
+    const timer = margin > 0 ? window.setTimeout(() => setExpiryTick((value) => value + 1), margin + 25) : null;
+    const recheck = () => { if (document.visibilityState === "visible") setExpiryTick((value) => value + 1); };
+    document.addEventListener("visibilitychange", recheck);
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", recheck);
+    };
+  }, [review.id, expiresAtMs]);
+
   const expired = isReviewExpired(review);
   const expiredReason = expired ? "这项请求已超过有效期。为避免按列表缓存继续批准，决定按钮已停用；请刷新核对最新状态，再对仍然有效的请求重新判断。" : null;
   const decisionBlockedReason = writeBlockedReason ?? expiredReason;
@@ -128,7 +147,10 @@ export default function ReviewDecisionPanel({ live, review, writeBlockedReason, 
 
   async function decide(decision: RelayReviewDecision) {
     const client = liveClient();
-    if (!client || !live || writeBlockedReason !== null || expired || !review.allowedDecisions.includes(decision) || pendingCommand || submitting) return;
+    // 提交前按当前时间再核对一次有效期（禅道 #24）：render 的 expired 可能停留在旧时钟上，
+    // 页面跨过有效期后不能靠旧渲染把过期决定发出去。命中时强制重渲染，让标准过期提示接管。
+    if (!expired && isReviewExpired(review)) setExpiryTick((value) => value + 1);
+    if (!client || !live || writeBlockedReason !== null || isReviewExpired(review) || !review.allowedDecisions.includes(decision) || pendingCommand || submitting) return;
     const note = feedback.trim();
     if (decision === "REQUEST_CHANGES" && !note) { setFeedbackOpen(true); setActionError("请求修改时请说明需要调整的内容。"); return; }
     if (decision === "SET_RETRY_BUDGET" && (!Number.isInteger(retryBudget) || retryBudget < 1 || retryBudget > 6)) {

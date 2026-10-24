@@ -22,7 +22,7 @@ export default function LiveTaskSkillFactsView({ client, kind }: {
   const [projectArchivedAt, setProjectArchivedAt] = useState<string | null | undefined>(undefined);
   const [projectReadError, setProjectReadError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
-  const [assistNavigation, setAssistNavigation] = useState<AssistNavigationState>({ dirty: false, pending: null });
+  const [assistNavigation, setAssistNavigation] = useState<AssistNavigationState>({ dirty: false, unsaved: false, pending: null });
   const [proposalActionHost, setProposalActionHost] = useState<HTMLDivElement | null>(null);
   const requestVersion = useRef(0);
   const factsRefreshVersion = useRef(0);
@@ -32,7 +32,7 @@ export default function LiveTaskSkillFactsView({ client, kind }: {
   useEffect(() => {
     const guard: DraftGuard = { hasUnsavedChanges: () => navigationRef.current.dirty || navigationRef.current.pending !== null,
       pendingCommandId: () => navigationRef.current.pending?.commandId ?? null,
-      discard: () => { navigationRef.current = { dirty: false, pending: null }; } };
+      discard: () => { navigationRef.current = { dirty: false, unsaved: false, pending: null }; } };
     setDraftGuard(guard);
     return () => clearDraftGuard(guard);
   }, []);

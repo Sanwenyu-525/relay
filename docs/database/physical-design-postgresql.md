@@ -1423,6 +1423,8 @@ Migration：`0118_long_term_memory.sql`、`0119_short_term_memory.sql`、`0120_m
 
 ## 111. 0132 消息文件撤回、前像、保护副本与单层撤销（2026-10-24）
 
+> **2026-10-24 返工（用户拍板发送前基线口径）**：本节此前描述的 `assist_message_file_preimages`（首写前像）已由 `assist_message_baselines`＋`assist_message_baseline_files`＋`assist_message_snapshot_blobs`（内容寻址字节库，同内容跨消息去重；容量与保留按此计量）替代；前像表与 Gateway 写路径钩子移除。逐行字段描述中「前像」读作「基线条目」，`existed/sha256/content/source` 对应 `existed/blob_sha256/（字节库引用）/（已无）`；基线新增 `status(COMPLETE/INCOMPLETE)/reason/file_count/total_bytes` 与 `uq_assist_baseline_message`。下文按当时快照保留，不逐行改写。
+
 新增五张表并给 `assist_messages` 加两列；对既有消息/会话只追加可空字段。**Breaking Change: No**。
 
 - **`assist_message_file_preimages`**：逐消息、逐路径的**写入前像**。`PRIMARY KEY (message_id, relative_path)`＋写入端 `ON CONFLICT DO NOTHING` 实现首写优先，后续同消息同路径覆写不改写首份。`existed=false` 时内容全空；`existed=true` 时要么 `sha256/content/size_bytes` 齐备（`octet_length(content) = size_bytes`），要么只有 `unavailable_reason`（`CONTENT_TOO_LARGE / READ_FAILED / TARGET_NOT_REGULAR / PATH_UNSAFE / CAPACITY_FULL`）。`source` 只允许 `SESSION_WRITE / RUN_WRITE`。路径 CHECK 禁止绝对路径、盘符、反斜杠与 `..`。索引 `(session_id, message_id)` 供撤回按会话读取。
@@ -1433,3 +1435,13 @@ Migration：`0118_long_term_memory.sql`、`0119_short_term_memory.sql`、`0120_m
 - **`assist_messages.withdrawn_at / withdrawn_by_recall_id`**：可空标记，终态撤回时同时写目标用户消息与其直接助手回复；部分索引 `ix_assist_messages_withdrawn (session_id, seq) WHERE withdrawn_at IS NOT NULL` 供方向规则与上下文占位读取。原文、附件、工具记录不删除。
 - **保留与容量**：`created_at`＋`size_bytes` 支撑保留期清理与工作区占用投影；清理删除超过保留期且不被在途撤回/撤销引用的前像与保护副本（`sweepExpiredSnapshots`）。**授权必须含 DELETE**：前像与保护副本授 `SELECT, INSERT, DELETE`（内容本身不可改写，DELETE 仅供过期清理）；撤回/撤销回执授 `SELECT, INSERT, UPDATE`。缺 DELETE 会让清理被静默拒绝，RA-08 已锁住该形态。
 - **回滚**：仅本功能未投入使用时可直接删表并移除两列；已产生撤回记录后回滚会丢失回执与撤回标记，需先导出。前像/保护副本字节直存 PG，未做内容寻址去重，容量按实际字节计。
+
+## 112. 0135 会话活动键回填（2026-10-24，缺陷修复）
+
+Migration：`0135_assist_session_last_message_backfill.sql`。**单条 `UPDATE`**，不建表、不加列/索引/授权、不改写既有迁移。**Breaking Change: No**。
+
+- **缺陷**：0111 刻意不回填（兼容段写「旧行取 NULL（无消息）」），那个括号里的前提不成立——0111 应用**之前就已经有消息**的会话同样落在 NULL 上。当时只影响排序（回落 `created_at`），所以没人发现；2026-10-24 左栏把 `lastMessageAt === null` 读成「这段讨论还没有消息」之后，这些老会话被标成「未开始」，点进去却有完整正文。本机实例实测 5 条：2026-10-16 15:35 建的 6 消息会话（含一次 `MODEL_FAILED`）、2026-10-16 15:29 的 2 消息会话、2026-10-18 的「你好」、2026-10-15 的 4 消息与 6 消息（后者已归档）。
+- **修复**：按 `assist_messages.created_at` 的真实最大值回填，只填 `last_message_at IS NULL` 的行，因此可重复执行（本机复跑 `UPDATE 0`）。用消息时刻而不是 `now()`：活动键说的是「最后一条消息是什么时候」，回填不该把 10-16 的会话记成今天。
+- **不动 `updated_at` / `revision`**：本列自 0111 起就是导航排序键，回填属数据校准而不是人工控制命令；推进 `revision` 会打翻改名／置顶／未读那一组命令的 CAS 基线。
+- **写入 Owner 不变**：仍只有 `insertMessage` 与 `settleGeneration`（0111 口径，`greatest(last_message_at, now())` 单调推进），本迁移不新增写入方。回填完成后 `NULL ⇔ 这条会话没有任何消息` 才真正成立——这是左栏「未开始」标记唯一依赖的前提。
+- **回滚**：不提供反向语句。把已填行改回 NULL 只会重新引入本缺陷；旧代码读到更精确的活动时刻只影响排序，属改善。

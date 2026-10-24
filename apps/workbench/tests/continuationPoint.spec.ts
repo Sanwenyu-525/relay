@@ -142,4 +142,114 @@ describe("N01 接续点面板", () => {
     expect(posts).toHaveLength(1);
     expect(receipts).toEqual([posts[0].command_id, posts[0].command_id]);
   });
+
+  // 禅道 #23（DEV-0137）：列表读取失败后父页重读成功，旧读取错误必须撤下——空列表
+  // 显示真实空态、有记录显示记录；capture/回执错误在另一路（error），不受影响。
+  it.each([false, true])("列表读取失败，父页重读成功%s后撤下旧读取错误", async (populated) => {
+    let reads = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input).slice(root.length);
+      if (path === collectionPath) {
+        reads++;
+        if (reads === 1) return response(503, { code: "DATABASE_UNAVAILABLE", detail: "temporary failure" });
+        return response(200, { items: populated ? [summary(0)] : [] });
+      }
+      throw new Error(`Unexpected ${path}`);
+    }));
+    const relay = client();
+    const mounted = await mountReact(createElement(ContinuationPointPanel,
+      { client: relay, projectId }));
+    unmount = mounted.unmount;
+    await flush();
+    expect(mounted.wrapper.text()).toContain("接续点没有读到");
+    expect(mounted.wrapper.find('[role="alert"]').exists()).toBe(true);
+    // 模拟 ProjectResumeView 的重读生命周期：事实不可读 → 重新可读并成功。
+    await mounted.rerender(createElement(ContinuationPointPanel,
+      { client: relay, projectId, factsReadable: false, captureBlockedReason: "正在重读项目事实" }));
+    await mounted.rerender(createElement(ContinuationPointPanel,
+      { client: relay, projectId, factsReadable: true }));
+    await flush();
+    expect(reads).toBe(2);
+    if (populated) expect(mounted.wrapper.text()).toContain("收工前");
+    else expect(mounted.wrapper.text()).toContain("还没有保存过接续点");
+    expect(mounted.wrapper.text()).not.toContain("接续点没有读到");
+    expect(mounted.wrapper.find('[role="alert"]').exists()).toBe(false);
+  });
+
+  it("列表读取失败与未决保存命令并存，重读成功后未决、门槛与回执错误保留", async () => {
+    let posts = 0;
+    let reads = 0;
+    let submittedId = "";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if (path === collectionPath && (init?.method ?? "GET") === "GET") {
+        reads++;
+        if (reads === 1) return response(503, { code: "DATABASE_UNAVAILABLE", detail: "temporary failure" });
+        return response(200, { items: [summary(1)] });
+      }
+      if (path === collectionPath && init?.method === "POST") {
+        posts++;
+        submittedId = String((JSON.parse(String(init.body)) as Record<string, unknown>).command_id);
+        throw new TypeError("connection closed");
+      }
+      if (path.startsWith("/commands/")) {
+        return response(404, { code: "COMMAND_NOT_FOUND", detail: "not found" });
+      }
+      throw new Error(`Unexpected ${path}`);
+    }));
+    const relay = client();
+    const mounted = await mountReact(createElement(ContinuationPointPanel,
+      { client: relay, projectId }));
+    unmount = mounted.unmount;
+    await flush();
+    expect(mounted.wrapper.text()).toContain("接续点没有读到");
+    await mounted.wrapper.get('[data-testid="continuation-name"]').setValue("收工前");
+    await mounted.wrapper.get('[data-testid="continuation-capture"]').trigger("click");
+    await flush();
+    expect(posts).toBe(1);
+    // 列表读取失败与未决命令可以并存：待核对面板与写入门槛不受读取错误影响。
+    expect(mounted.wrapper.get('[data-testid="continuation-pending"]').text()).toContain(submittedId);
+    expect(mounted.wrapper.get('[data-testid="continuation-capture"]').attributes("disabled"))
+      .toBeDefined();
+    // 父页重读成功：旧读取错误撤下、列表显示；未决命令、写入门槛与回执未知错误原样保留。
+    await mounted.rerender(createElement(ContinuationPointPanel, { client: relay, projectId, factsReadable: false }));
+    await mounted.rerender(createElement(ContinuationPointPanel, { client: relay, projectId, factsReadable: true }));
+    await flush();
+    expect(reads).toBe(2);
+    expect(mounted.wrapper.text()).toContain("收工前");
+    expect(mounted.wrapper.text()).not.toContain("接续点没有读到");
+    expect(mounted.wrapper.get('[data-testid="continuation-pending"]').text()).toContain(submittedId);
+    expect(mounted.wrapper.get('[data-testid="continuation-capture"]').attributes("disabled"))
+      .toBeDefined();
+    expect(mounted.wrapper.text()).toContain("原命令回执暂未找到");
+  });
+
+  it("列表读取的迟到失败响应不覆盖重读成功的结果", async () => {
+    // 装进对象再赋值：TS 会把「回调里才赋值」的局部量按初始值 null 收窄，调用点就成了 never。
+    const pending = { resolve: null as ((value: Response) => void) | null };
+    let reads = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input).slice(root.length);
+      if (path !== collectionPath) throw new Error(`Unexpected ${path}`);
+      reads++;
+      if (reads === 1) return new Promise<Response>((resolve) => { pending.resolve = resolve; });
+      return response(200, { items: [summary(1)] });
+    }));
+    const relay = client();
+    const mounted = await mountReact(createElement(ContinuationPointPanel,
+      { client: relay, projectId }));
+    unmount = mounted.unmount;
+    await flush();
+    expect(reads).toBe(1);
+    await mounted.rerender(createElement(ContinuationPointPanel, { client: relay, projectId, factsReadable: false }));
+    await mounted.rerender(createElement(ContinuationPointPanel, { client: relay, projectId, factsReadable: true }));
+    await flush();
+    expect(reads).toBe(2);
+    expect(mounted.wrapper.text()).toContain("收工前");
+    // 第一轮读取迟到落地：按事实读取序号丢弃，不把旧失败挂回成功后的列表。
+    pending.resolve?.(response(503, { code: "DATABASE_UNAVAILABLE", detail: "late failure" }));
+    await flush();
+    expect(mounted.wrapper.text()).toContain("收工前");
+    expect(mounted.wrapper.find('[role="alert"]').exists()).toBe(false);
+  });
 });

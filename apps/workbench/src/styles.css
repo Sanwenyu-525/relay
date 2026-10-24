@@ -969,6 +969,17 @@ svg {
 .recent-work-item--unread .recent-work-title { font-weight: var(--relay-font-weight-semibold); }
 .recent-work-item--unread .recent-work-kind { color: var(--relay-color-text-secondary); }
 
+/* 「未开始」标记（2026-10-24 用户截图指令）：还没有消息的会话在左栏与说过话的会话同形同标题，
+   点进去只剩欢迎空态。与置顶徽标同一形制（caption 文字、同一格间距），不新开颜色、不加第二行——
+   它说的是「这一行还没有内容」这一事实，不是导航强调，因此用 muted 前景而不是 selection。
+   代价是标题可用宽少三字：空会话是少数行，这一档只在它们身上生效。 */
+.recent-work-not-started {
+  flex: none;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  white-space: nowrap;
+}
+
 /* 会话行的批量选择复选框（2026-10-20 用户指令「给会话 item 加一个复选框，方便删除记录」）。
    与类型图标同一格：绝对定位压在 .recent-work-kind 上，行内布局一像素不动——160px 列宽下限下
    标题可用宽、行高与行距因此都不变（recentWorkRailDensity.spec.ts 仍在守）。
@@ -1117,6 +1128,13 @@ ul[data-reorder-list] > .recent-work-row > .recent-work-row-head > .recent-work-
 }
 html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-work-row-head > .recent-work-item { transition: none; }
 
+/* 行不许被标题撑得比栏还宽（2026-10-24 第二张用户截图：栏窄一点时整列文字被栏右缘齐头切掉，
+   ⋯ 也被推到栏外、悬停根本看不见）。这一行是 grid 项，`min-width: auto` 让它的最小宽等于
+   整段标题的自然宽——`.recent-work-title` 上的 `min-width: 0` 只管 flex 收缩，拦不住 grid 的
+   自动最小尺寸。补上 `min-width: 0` 后轨道按栏宽定尺，标题回到设计里的「单行 + 省略号」，
+   ⋯ 也就留在栏内（它压在省略号上那一档由下面触发器背后的虚化底处理）。 */
+.recent-work-row { min-width: 0; }
+
 /* 会话行内操作（0090）：行头单独一层，⋯ 与行按钮平级，不是行内按钮里的按钮——
    行本体已经是 <button>，HTML 不允许嵌套可交互控件，套进去会让整行点击与 ⋯ 点击互相吞。
    2026-10-16 第五轮把两者一起收进 .recent-work-row-head：⋯ 的 `inset-block-start: 50%`
@@ -1145,11 +1163,41 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
   color: var(--relay-color-text-secondary);
   cursor: pointer;
 }
-.recent-work-row-trigger > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+.recent-work-row-trigger > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); position: relative; }
 .recent-work-row:hover .recent-work-row-trigger,
 .recent-work-row:focus-within .recent-work-row-trigger,
 .recent-work-row-trigger[aria-expanded="true"] { display: flex; }
 .recent-work-row-trigger:hover:not(:disabled) { color: var(--relay-color-text-primary); }
+/* ⋯ 背后的虚化底（2026-10-24 用户截图指认「会话名称过长时，悬停的更多菜单按钮会和名称重合」）。
+   根因是几何本身：行按钮的内边距与 ⋯ 的 `inset-inline-end` 同为 space.2，而 ⋯ 是 32px 见方的
+   绝对定位控件——标题的可用宽一直顶到行右缘内 8px，长标题的最后两三个字与那枚省略号正好压在
+   ⋯ 下面，图标与字挤在一起读不清。修法**不动几何**（行宽、标题可用宽、行高都不许变，否则
+   长标题会在悬停那一刻重新截断、整列文字跟着跳）：给触发器背后加一层"虚化底"。
+   两层画在同一个 ::before 上，共用一条从左透明的渐变：
+   - `backdrop-filter` 把压过来的标题糊掉，图标因此落在柔和的灰雾上而不是字上；
+   - 一层栏纸面同色的渐变（`color.bg.subtle`，78%）把右半段再压一档对比度，
+     左端仍是全透明，读起来只是「标题在右端淡出」，不是又铺一块实心色块
+     （2026-10-16 用户已否掉 ⋯ 自带实心底，那条否的是色块，不是可读性处理）。
+   渐变同时用作 `mask`：blur 的边界跟着一起淡出，不会在标题中间留下一条「清晰／糊掉」的硬边。
+   纵向各内缩 space.1：触发器高 control.height.compact(32px) 而行只有 control.target.minimum(24px)，
+   不内缩的话这层会上下各溢出 4px，把相邻行的字也糊掉一道。
+   图标压在 ::before 之上，始终保持锐利——靠的是上面那条规则给 svg 的 `position: relative`：
+   非定位的行内内容会被绝对定位的 ::before 盖住（第一版就是这样把 ⋯ 糊没了）。 */
+.recent-work-row-trigger::before {
+  content: "";
+  position: absolute;
+  inset-block: var(--relay-space-1);
+  /* 向左多铺一档 space.2：虚化的起点落在标题倒数几个字之前，渐变才有地方淡出。 */
+  inset-inline: calc(-1 * var(--relay-space-2)) 0;
+  border-radius: inherit;
+  background: linear-gradient(to right, transparent,
+    color-mix(in srgb, var(--relay-color-bg-subtle) 78%, transparent) 62%);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  mask-image: linear-gradient(to right, transparent, #000 62%);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 62%);
+  pointer-events: none;
+}
 /* 展开面板是浮层（工作台 §28.9、设计系统 §9.14）：这一列在滚动容器（.recent-work-scroll，
    overflow-y: auto）里，绝对定位会被裁掉；而祖先链上没有 transform / filter / contain，
    position: fixed 不会退化成相对某个祖先定位，所以不需要 portal、DOM 仍留在这一行内。
@@ -2473,6 +2521,29 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
   min-height: var(--relay-control-target-minimum);
   color: var(--relay-color-action-text);
   font-size: var(--relay-font-size-meta);
+}
+
+/* 2026-10-24 用户截图指认：「回退文件」显示成一枚带深灰实边的方框按钮。
+   根因是这个基座只按 <a> 写的——锚点本无边框与底色，所以仓内绝大多数
+   <a class="text-link"> 一直正常；换成 <button> 复用时就落回 UA 原生外观
+   （ButtonFace 底 + 1px 实边 + 6px 内边距）。这里只补按钮侧的三个重置，
+   不动 <a> 的静止下划线（那是链接的既有语义）。禁用态同时补色：回退进行中
+   按钮仍显示「正在回退…」，没有色差会被读成「点了没反应」。 */
+button.text-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+/* 锚点的静止下划线来自 UA，按钮没有：给按钮补 hover 一道线说出「可点」，
+   与 1654 行密集列表的处理同源（action 色常驻，线只在悬停出现）。 */
+button.text-link:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+button.text-link:disabled {
+  color: var(--relay-color-disabled-text);
 }
 
 .icon-button {
